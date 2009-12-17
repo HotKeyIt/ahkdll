@@ -1,0 +1,9 @@
+- Changed to "Portable Mode"
+	- Instead looking for %My_Documents%\AutoHotkey.ahk, the exe checks for %ExeDir%\ExeName.ahk. 
+	- So you can copy AutoHotkey.exe and Script to separate folder then rename the exe to ScriptName.exe and start by double clicking the exe. 
+	- You can also start new scripts using your exe that way. 
+	  e.g. Run YourExe.exe "%filepath%"
+
+- Changed ahkgetvar to support alias and build in variables. 
+- Removed ebiv.cpp because ahkgetvar can be used to get any variable beside clipboard and clipboardall 
+- Changed ahkFunction to support up to 10 parameters + return values
