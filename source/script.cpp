@@ -1366,6 +1366,7 @@ ResultType Script::LoadFromText(char *aBuf)
 	if (!aBuf || !*aBuf) return FAIL;
 	if (   !(g_ErrorLevel = FindOrAddVar("ErrorLevel"))   )
 		return FAIL; // Error.  Above already displayed it for us.
+#ifndef AUTOHOTKEYSC
 	if (Line::sSourceFileCount >= Line::sMaxSourceFiles)
 	{
 		if (Line::sSourceFileCount >= ABSOLUTE_MAX_SOURCE_FILES)
@@ -1387,9 +1388,7 @@ ResultType Script::LoadFromText(char *aBuf)
 		Line::sSourceFile = realloc_temp;
 		Line::sMaxSourceFiles = new_max;
 	}
-
-	char full_path[MAX_PATH];
-
+#endif
 	// Keep this var on the stack due to recursion, which allows newly created lines to be given the
 	// correct file number even when some #include's have been encountered in the middle of the script:
 	int source_file_index = Line::sSourceFileCount;
@@ -1402,11 +1401,6 @@ ResultType Script::LoadFromText(char *aBuf)
 	char *buf = buf1, *next_buf = buf2; // Oscillate between bufs to improve performance (avoids memcpy from buf2 to buf1).
 	size_t buf_length, next_buf_length, suffix_length, char_pos = 0, aBuf_length;
 	bool pending_function_has_brace;
-
-	// This is done only after the file has been successfully opened in case aIgnoreLoadFailure==true:
-	if (source_file_index > 0)
-		Line::sSourceFile[source_file_index] = SimpleHeap::Malloc(full_path);
-	//else the first file was already taken care of by another means.
 
 	++Line::sSourceFileCount;
 
