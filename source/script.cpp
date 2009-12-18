@@ -214,6 +214,68 @@ Script::~Script() // Destructor.
 	DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
 }
 
+ResultType Script::InitDll(global_struct &g)
+// Returns OK or FAIL.
+// Caller has provided an empty string for aScriptFilename if this is a compiled script.
+// Otherwise, aScriptFilename can be NULL if caller hasn't determined the filename of the script yet.
+{
+	char buf[2048]; // Just to make sure we have plenty of room to do things with.
+	GetModuleFileName(NULL, buf, sizeof(buf));
+	// Using the correct case not only makes it look better in title bar & tray tool tip,
+	// it also helps with the detection of "this script already running" since otherwise
+	// it might not find the dupe if the same script name is launched with different
+	// lowercase/uppercase letters:
+	ConvertFilespecToCorrectCase(buf); // This might change the length, e.g. due to expansion of 8.3 filename.
+	char *filename_marker;
+	if (   !(filename_marker = strrchr(buf, '\\'))   )
+		filename_marker = buf;
+	else
+		++filename_marker;
+	if (   !(mFileSpec = SimpleHeap::Malloc(buf))   )  // The full spec is stored for convenience, and it's relied upon by mIncludeLibraryFunctionsThenExit.
+		return FAIL;  // It already displayed the error for us.
+	filename_marker[-1] = '\0'; // Terminate buf in this position to divide the string.
+	size_t filename_length = strlen(filename_marker);
+	if (   !(mFileDir = SimpleHeap::Malloc(buf))   )
+		return FAIL;  // It already displayed the error for us.
+	if (   !(mFileName = SimpleHeap::Malloc(filename_marker))   )
+		return FAIL;  // It already displayed the error for us.
+#ifdef AUTOHOTKEYSC
+	// Omit AutoHotkey from the window title, like AutoIt3 does for its compiled scripts.
+	// One reason for this is to reduce backlash if evil-doers create viruses and such
+	// with the program:
+	snprintf(buf, sizeof(buf), "%s\\%s", mFileDir, mFileName);
+#else
+	snprintf(buf, sizeof(buf), "%s\\%s - %s", mFileDir, mFileName, NAME_PV);
+#endif
+	if (   !(mMainWindowTitle = SimpleHeap::Malloc(buf))   )
+		return FAIL;  // It already displayed the error for us.
+
+	// It may be better to get the module name this way rather than reading it from the registry
+	// (though it might be more proper to parse it out of the command line args or something),
+	// in case the user has moved it to a folder other than the install folder, hasn't installed it,
+	// or has renamed the EXE file itself.  Also, enclose the full filespec of the module in double
+	// quotes since that's how callers usually want it because ActionExec() currently needs it that way:
+	*buf = '"';
+	if (GetModuleFileName(NULL, buf + 1, sizeof(buf) - 2)) // -2 to leave room for the enclosing double quotes.
+	{
+		size_t buf_length = strlen(buf);
+		buf[buf_length++] = '"';
+		buf[buf_length] = '\0';
+		if (   !(mOurEXE = SimpleHeap::Malloc(buf))   )
+			return FAIL;  // It already displayed the error for us.
+		else
+		{
+			char *last_backslash = strrchr(buf, '\\');
+			if (!last_backslash) // probably can't happen due to the nature of GetModuleFileName().
+				mOurEXEDir = "";
+			last_backslash[1] = '\0'; // i.e. keep the trailing backslash for convenience.
+			if (   !(mOurEXEDir = SimpleHeap::Malloc(buf + 1))   ) // +1 to omit the leading double-quote.
+				return FAIL;  // It already displayed the error for us.
+		}
+	}
+	return OK;
+}
+
 
 
 ResultType Script::Init(global_struct &g, char *aScriptFilename, bool aIsRestart)
@@ -598,7 +660,6 @@ ResultType Script::AutoExecSection()
 		return FAIL; // Due to rarity, just abort. It wouldn't be safe to run ExitApp() due to possibility of an OnExit routine.
 	CopyMemory(g_array, g, sizeof(global_struct)); // Copy the temporary/startup "g" into array[0] to preserve historical behaviors that may rely on the idle thread starting with that "g".
 	g = g_array; // Must be done after above.
-
 	// v1.0.48: Due to switching from SET_UNINTERRUPTIBLE_TIMER to IsInterruptible():
 	// In spite of the comments in IsInterruptible(), periodically have a timer call IsInterruptible() due to
 	// the following scenario:
@@ -704,9 +765,10 @@ ResultType Script::AutoExecSection()
 	// If no hotkeys are in effect, the user hasn't requested a hook to be activated, and the script
 	// doesn't contain the #Persistent directive we're done unless there is an OnExit subroutine and it
 	// doesn't do "ExitApp":
+#ifndef DLLN
 	if (!IS_PERSISTENT) // Resolve macro again in case any of its components changed since the last time.
 		g_script.ExitApp(ExecUntil_result == FAIL ? EXIT_ERROR : EXIT_EXIT);
-
+#endif
 	return OK;
 }
 
@@ -919,6 +981,127 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 	}
 	Hotkey::AllDestructAndExit(aExitCode);
 }
+
+LineNumberType Script::LoadText(char *aScript)
+// HotKeyIt LoadText() for text instead LoadFromFile()
+// Returns the number of non-comment lines that were loaded, or LOADING_FAILED on error.
+{
+	mNoHotkeyLabels = true;  // Indicate that there are no hotkey labels, since we're (re)loading the entire file.
+	mIsReadyToExecute = mAutoExecSectionIsRunning = false;
+
+	// v1.0.42: Placeholder to use in place of a NULL label to simplify code in some places.
+	// This must be created before loading the script because it's relied upon when creating
+	// hotkeys to provide an alternative to having a NULL label. It will be given a non-NULL
+	// mJumpToLine further down.
+	if (   !(mPlaceholderLabel = new Label(""))   ) // Not added to linked list since it's never looked up.
+		return LOADING_FAILED;
+
+	// L4: Changed this next section to support lines added for #if (expression).
+	// Each #if (expression) is pre-parsed *before* the main script in order for
+	// function library auto-inclusions to be processed correctly.
+
+	// Load the main script file.  This will also load any files it includes with #Include.
+	if (   LoadFromText(aScript) != OK
+		|| !AddLine(ACT_EXIT)) // Fix for v1.0.47.04: Add an Exit because otherwise, a script that ends in an IF-statement will crash in PreparseBlocks() because PreparseBlocks() expects every IF-statements mNextLine to be non-NULL (helps loading performance too).
+		return LOADING_FAILED;
+
+	// L31: Resolve ObjGet/Set/Call early so we don't need to check for them in ExpressionToPostfix.
+	// This is the latest possible time it can be done: immediately before PreparseBlocks.
+	if (   !(g_ObjGet  = FindFunc("ObjGet"))
+		|| !(g_ObjSet  = FindFunc("ObjSet"))
+		|| !(g_ObjCall = FindFunc("ObjCall"))   )
+	{
+#ifdef _DEBUG
+		// Should never happen.
+		ScriptError("Missing internal function.", g_ObjGet ? g_ObjSet ? "ObjCall" : "ObjSet" : "ObjGet");
+#endif
+		return LOADING_FAILED;
+	}
+
+	if (g_HotExprLineCount)
+	{	// Resolve function references on #if (expression) lines.
+		for (int expr_line_index = 0; expr_line_index < g_HotExprLineCount; ++expr_line_index)
+		{
+			Line *was_last_line = mLastLine;
+			Line *line = g_HotExprLines[expr_line_index];
+			// Since PreparseBlocks assumes mNextLine!=NULL for ACT_IFEXPR, temporarily change mActionType to something else.
+			line->mActionType = ACT_INVALID;
+			PreparseBlocks(line);
+			line->mActionType = ACT_IFEXPR;
+
+			// The above may have auto-included a file from the userlib/stdlib,
+			// in which case function references in the newly added code will be
+			// resolved with the rest of the script, below.
+		}
+	}
+
+	if (!PreparseBlocks(mFirstLine))
+		return LOADING_FAILED; // Error was already displayed by the above calls.
+	// ABOVE: In v1.0.47, the above may have auto-included additional files from the userlib/stdlib.
+	// That's why the above is done prior to adding the EXIT lines and other things below.
+
+#ifndef AUTOHOTKEYSC
+	if (mIncludeLibraryFunctionsThenExit)
+	{
+		fclose(mIncludeLibraryFunctionsThenExit);
+		return 0; // Tell our caller to do a normal exit.
+	}
+#endif
+
+	// v1.0.35.11: Restore original working directory so that changes made to it by the above (via
+	// "#Include C:\Scripts" or "#Include %A_ScriptDir%" or even stdlib/userlib) do not affect the
+	// script's runtime working directory.  This preserves the flexibility of having a startup-determined
+	// working directory for the script's runtime (i.e. it seems best that the mere presence of
+	// "#Include NewDir" should not entirely eliminate this flexibility).
+	SetCurrentDirectory(g_WorkingDirOrig); // g_WorkingDirOrig previously set by WinMain().
+
+	// Rather than do this, which seems kinda nasty if ever someday support same-line
+	// else actions such as "else return", just add two EXITs to the end of every script.
+	// That way, if the first EXIT added accidentally "corrects" an actionless ELSE
+	// or IF, the second one will serve as the anchoring end-point (mRelatedLine) for that
+	// IF or ELSE.  In other words, since we never want mRelatedLine to be NULL, this should
+	// make absolutely sure of that:
+	//if (mLastLine->mActionType == ACT_ELSE ||
+	//	ACT_IS_IF(mLastLine->mActionType)
+	//	...
+	// Second ACT_EXIT: even if the last line of the script is already "exit", always add
+	// another one in case the script ends in a label.  That way, every label will have
+	// a non-NULL target, which simplifies other aspects of script execution.
+	// Making sure that all scripts end with an EXIT ensures that if the script
+	// file ends with ELSEless IF or an ELSE, that IF's or ELSE's mRelatedLine
+	// will be non-NULL, which further simplifies script execution.
+	// Not done since it's number doesn't much matter: ++mCombinedLineNumber;
+	++mCombinedLineNumber;  // So that the EXITs will both show up in ListLines as the line # after the last physical one in the script.
+	if (!(AddLine(ACT_EXIT) && AddLine(ACT_EXIT))) // Second exit guaranties non-NULL mRelatedLine(s).
+		return LOADING_FAILED;
+	mPlaceholderLabel->mJumpToLine = mLastLine; // To follow the rule "all labels should have a non-NULL line before the script starts running".
+
+	if (!PreparseIfElse(mFirstLine))
+		return LOADING_FAILED; // Error was already displayed by the above calls.
+
+	// Use FindOrAdd, not Add, because the user may already have added it simply by
+	// referring to it in the script:
+	if (   !(g_ErrorLevel = FindOrAddVar("ErrorLevel"))   )
+		return LOADING_FAILED; // Error.  Above already displayed it for us.
+	// Initialize the var state to zero right before running anything in the script:
+	g_ErrorLevel->Assign(ERRORLEVEL_NONE);
+
+	// Initialize the random number generator:
+	// Note: On 32-bit hardware, the generator module uses only 2506 bytes of static
+	// data, so it doesn't seem worthwhile to put it in a class (so that the mem is
+	// only allocated on first use of the generator).  For v1.0.24, _ftime() is not
+	// used since it could be as large as 0.5 KB of non-compressed code.  A simple call to
+	// GetSystemTimeAsFileTime() seems just as good or better, since it produces
+	// a FILETIME, which is "the number of 100-nanosecond intervals since January 1, 1601."
+	// Use the low-order DWORD since the high-order one rarely changes.  If my calculations are correct,
+	// the low-order 32-bits traverses its full 32-bit range every 7.2 minutes, which seems to make
+	// using it as a seed superior to GetTickCount for most purposes.
+	RESEED_RANDOM_GENERATOR;
+
+	return mLineCount; // The count of runnable lines that were loaded, which might be zero.
+}
+
+
 
 
 
@@ -1169,6 +1352,1246 @@ bool IsFunction(char *aBuf, bool *aPendingFunctionHasBrace = NULL)
 	// could never be called as ACT_EXPRESSION since it would be seen as an IF-stmt instead.
 }
 
+ResultType Script::LoadFromText(char *aBuf)
+// HotKeyIt LoadFromText
+// Returns OK or FAIL.
+// Below: Use double-colon as delimiter to set these apart from normal labels.
+// The main reason for this is that otherwise the user would have to worry
+// about a normal label being unintentionally valid as a hotkey, e.g.
+// "Shift:" might be a legitimate label that the user forgot is also
+// a valid hotkey:
+#define HOTKEY_FLAG "::"
+#define HOTKEY_FLAG_LENGTH 2
+{
+	if (!aBuf || !*aBuf) return FAIL;
+	if (   !(g_ErrorLevel = FindOrAddVar("ErrorLevel"))   )
+		return FAIL; // Error.  Above already displayed it for us.
+	if (Line::sSourceFileCount >= Line::sMaxSourceFiles)
+	{
+		if (Line::sSourceFileCount >= ABSOLUTE_MAX_SOURCE_FILES)
+			return ScriptError("Too many includes."); // Short msg since so rare.
+		int new_max;
+		if (Line::sMaxSourceFiles)
+		{
+			new_max = 2*Line::sMaxSourceFiles;
+			if (new_max > ABSOLUTE_MAX_SOURCE_FILES)
+				new_max = ABSOLUTE_MAX_SOURCE_FILES;
+		}
+		else
+			new_max = 100;
+		// For simplicity and due to rarity of every needing to, expand by reallocating the array.
+		// Use a temp var. because realloc() returns NULL on failure but leaves original block allocated.
+		char **realloc_temp = (char **)realloc(Line::sSourceFile, new_max*sizeof(char *)); // If passed NULL, realloc() will do a malloc().
+		if (!realloc_temp)
+			return ScriptError(ERR_OUTOFMEM); // Short msg since so rare.
+		Line::sSourceFile = realloc_temp;
+		Line::sMaxSourceFiles = new_max;
+	}
+
+	char full_path[MAX_PATH];
+
+	// Keep this var on the stack due to recursion, which allows newly created lines to be given the
+	// correct file number even when some #include's have been encountered in the middle of the script:
+	int source_file_index = Line::sSourceFileCount;
+
+	UCHAR *script_buf = NULL;  // Init for the case when the buffer isn't used (non-standalone mode).
+	ULONG nDataSize = 0;
+
+	// <buf> should be no larger than LINE_SIZE because some later functions rely upon that:
+	char msg_text[MAX_PATH + 256], buf1[LINE_SIZE], buf2[LINE_SIZE], suffix[16], pending_function[LINE_SIZE] = "";
+	char *buf = buf1, *next_buf = buf2; // Oscillate between bufs to improve performance (avoids memcpy from buf2 to buf1).
+	size_t buf_length, next_buf_length, suffix_length, char_pos = 0, aBuf_length;
+	bool pending_function_has_brace;
+
+	// This is done only after the file has been successfully opened in case aIgnoreLoadFailure==true:
+	if (source_file_index > 0)
+		Line::sSourceFile[source_file_index] = SimpleHeap::Malloc(full_path);
+	//else the first file was already taken care of by another means.
+
+	++Line::sSourceFileCount;
+
+	char *hotkey_flag, *cp, *cp1, *action_end, *hotstring_start, *hotstring_options;
+	Hotkey *hk;
+	LineNumberType pending_function_line_number, saved_line_number;
+	HookActionType hook_action;
+	bool is_label, suffix_has_tilde, in_comment_section, hotstring_options_all_valid;
+
+	// For the remap mechanism, e.g. a::b
+	int remap_stage;
+	vk_type remap_source_vk, remap_dest_vk = 0; // Only dest is initialized to enforce the fact that it is the flag/signal to indicate whether remapping is in progress.
+	char remap_source[32], remap_dest[32], remap_dest_modifiers[8]; // Must fit the longest key name (currently Browser_Favorites [17]), but buffer overflow is checked just in case.
+	char *extra_event;
+	bool remap_source_is_mouse, remap_dest_is_mouse, remap_keybd_to_mouse;
+
+	// For the line continuation mechanism:
+	bool do_ltrim, do_rtrim, literal_escapes, literal_derefs, literal_delimiters
+		, has_continuation_section, is_continuation_line;
+	#define CONTINUATION_SECTION_WITHOUT_COMMENTS 1 // MUST BE 1 because it's the default set by anything that's boolean-true.
+	#define CONTINUATION_SECTION_WITH_COMMENTS    2 // Zero means "not in a continuation section".
+	int in_continuation_section;
+
+	char *next_option, *option_end, orig_char, one_char_string[2], two_char_string[3]; // Line continuation mechanism's option parsing.
+	one_char_string[1] = '\0';  // Pre-terminate these to simplify code later below.
+	two_char_string[2] = '\0';  //
+	int continuation_line_count;
+
+	#define MAX_FUNC_VAR_EXCEPTIONS 2000
+	Var *func_exception_var[MAX_FUNC_VAR_EXCEPTIONS];
+
+	// Init both for main file and any included files loaded by this function:
+	mCurrFileIndex = source_file_index;  // source_file_index is kept on the stack due to recursion (from #include).
+
+	LineNumberType phys_line_number = 0;
+	//buf=strstr(aBuf,"\r\n");
+	//if (!*buf)
+	//	buf=aBuf;
+	//else
+	//	rtrim(buf,2);
+	aBuf_length = strlen(aBuf);
+	
+	if (!strcspn(aBuf, "\n"))
+	{
+		if (aBuf_length > 1)
+		{
+			for(int i=0;aBuf[i]=='\n';i++)
+			{
+				char_pos++;
+			}
+			buf_length = strcspn(aBuf+char_pos, "\n");
+			strncpy(buf,aBuf+char_pos,buf_length);
+			char_pos = buf_length + 1;
+		}
+		else
+			buf=aBuf;
+	}
+	else
+	{
+		buf_length = strcspn(aBuf, "\n");
+		char_pos = buf_length + 1;
+		strncpy(buf,aBuf,buf_length);
+	}
+	//buf_length = strlen(buf);
+	*(buf + buf_length) = '\0';
+	//ltrim(aBuf,buf_length+2);
+	//buf_length = GetLine(buf, LINE_SIZE - 1, 0, fp);
+
+	if (in_comment_section = !strncmp(buf, "/*", 2))
+	{
+		// Fixed for v1.0.35.08. Must reset buffer to allow a script's first line to be "/*".
+		*buf = '\0';
+		buf_length = 0;
+	}
+
+	while (buf_length != -1)  // Compare directly to -1 since length is unsigned.
+	{
+		// For each whole line (a line with continuation section is counted as only a single line
+		// for the purpose of this outer loop).
+
+		// Keep track of this line's *physical* line number within its file for A_LineNumber and
+		// error reporting purposes.  This must be done only in the outer loop so that it tracks
+		// the topmost line of any set of lines merged due to continuation section/line(s)..
+		mCombinedLineNumber = phys_line_number + 1;
+
+		// This must be reset for each iteration because a prior iteration may have changed it, even
+		// indirectly by calling something that changed it:
+		mCurrLine = NULL;  // To signify that we're in transition, trying to load a new one.
+
+		// v1.0.44.13: An additional call to IsDirective() is now made up here so that #CommentFlag affects
+		// the line beneath it the same way as other lines (#EscapeChar et. al. didn't have this bug).
+		// It's best not to process ALL directives up here because then they would no longer support a
+		// continuation section beneath them (and possibly other drawbacks because it was never thoroughly
+		// tested).
+		if (!strnicmp(buf, "#CommentFlag", 12)) // Have IsDirective() process this now (it will also process it again later, which is harmless).
+			if (IsDirective(buf) == FAIL) // IsDirective() already displayed the error.
+				return FAIL;
+
+		// Read in the next line (if that next line is the start of a continuation secttion, append
+		// it to the line currently being processed:
+		for (has_continuation_section = false, in_continuation_section = 0;;)
+		{
+			// This increment relies on the fact that this loop always has at least one iteration:
+			++phys_line_number; // Tracks phys. line number in *this* file (independent of any recursion caused by #Include).
+			//next_buf = strstr(aBuf,"\r\n");
+			//rtrim(next_buf,2);
+			//next_buf_length = strlen(next_buf);
+			//ltrim(aBuf,buf_length+2);
+			//*next_buf = *(aBuf + buf_length+2);
+			if (!aBuf_length || aBuf_length == buf_length)
+				next_buf_length = -1;
+			else
+			{
+				next_buf_length =strcspn(aBuf+char_pos, "\n");
+				if (char_pos+next_buf_length == aBuf_length)
+				{
+					next_buf_length = aBuf_length-char_pos;
+					strncpy(next_buf,aBuf+char_pos,next_buf_length);
+					*(next_buf+next_buf_length) = '\0';
+					aBuf_length = 0;
+				}
+				else
+				{
+					strncpy(next_buf,aBuf+char_pos,next_buf_length);
+					*(next_buf+next_buf_length) = '\0';
+					char_pos += next_buf_length+1;
+				}
+			}
+			//next_buf_length=(size_t)(int) *strrstr(aBuf, "\r\n",SCS_SENSITIVE, buf_length+2);
+			//next_buf_length = GetLine(next_buf, LINE_SIZE - 1, in_continuation_section, fp);
+			if (next_buf_length && next_buf_length != -1) // Prevents infinite loop when file ends with an unclosed "/*" section.  Compare directly to -1 since length is unsigned.
+			{
+				if (in_comment_section) // Look for the uncomment-flag.
+				{
+					if (!strncmp(next_buf, "*/", 2))
+					{
+						in_comment_section = false;
+						next_buf_length -= 2; // Adjust for removal of /* from the beginning of the string.
+						memmove(next_buf, next_buf + 2, next_buf_length + 1);  // +1 to include the string terminator.
+						next_buf_length = ltrim(next_buf, next_buf_length); // Get rid of any whitespace that was between the comment-end and remaining text.
+						if (!*next_buf) // The rest of the line is empty, so it was just a naked comment-end.
+							continue;
+					}
+					else
+						continue;
+				}
+				else if (!in_continuation_section && !strncmp(next_buf, "/*", 2))
+				{
+					in_comment_section = true;
+					continue; // It's now commented out, so the rest of this line is ignored.
+				}
+			}
+
+			if (in_comment_section) // Above has incremented and read the next line, which is everything needed while inside /* .. */
+			{
+				if (next_buf_length == -1) // Compare directly to -1 since length is unsigned.
+					break; // By design, it's not an error.  This allows "/*" to be used to comment out the bottommost portion of the script without needing a matching "*/".
+				// Otherwise, continue reading lines so that they can be merged with the line above them
+				// if they qualify as continuation lines.
+				continue;
+			}
+
+			if (!in_continuation_section) // This is either the first iteration or the line after the end of a previous continuation section.
+			{
+				// v1.0.38.06: The following has been fixed to exclude "(:" and "(::".  These should be
+				// labels/hotkeys, not the start of a contination section.  In addition, a line that starts
+				// with '(' but that ends with ':' should be treated as a label because labels such as
+				// "(label):" are far more common than something obscure like a continuation section whose
+				// join character is colon, namely "(Join:".
+				if (   !(in_continuation_section = (next_buf_length != -1 && *next_buf == '(' // Compare directly to -1 since length is unsigned.
+					&& next_buf[1] != ':' && next_buf[next_buf_length - 1] != ':'))   ) // Relies on short-circuit boolean order.
+				{
+					if (next_buf_length == -1)  // Compare directly to -1 since length is unsigned.
+						break;
+					if (!next_buf_length)
+						// It is permitted to have blank lines and comment lines in between the line above
+						// and any continuation section/line that might come after the end of the
+						// comment/blank lines:
+						continue;
+					// SINCE ABOVE DIDN'T BREAK/CONTINUE, NEXT_BUF IS NON-BLANK.
+					if (next_buf[next_buf_length - 1] == ':' && *next_buf != ',')
+						// With the exception of lines starting with a comma, the last character of any
+						// legitimate continuation line can't be a colon because expressions can't end
+						// in a colon. The only exception is the ternary operator's colon, but that is
+						// very rare because it requires the line after it also be a continuation line
+						// or section, which is unusual to say the least -- so much so that it might be
+						// too obscure to even document as a known limitation.  Anyway, by excluding lines
+						// that end with a colon from consideration ambiguity with normal labels
+						// and non-single-line hotkeys and hotstrings is eliminated.
+						break;
+
+					is_continuation_line = false; // Set default.
+					switch(toupper(*next_buf)) // Above has ensured *next_buf != '\0' (toupper might have problems with '\0').
+					{
+					case 'A': // "AND".
+						// See comments in the default section further below.
+						if (!strnicmp(next_buf, "and", 3) && IS_SPACE_OR_TAB_OR_NBSP(next_buf[3])) // Relies on short-circuit boolean order.
+						{
+							cp = omit_leading_whitespace(next_buf + 3);
+							// v1.0.38.06: The following was fixed to use EXPR_CORE vs. EXPR_OPERAND_TERMINATORS
+							// to properly detect a continuation line whose first char after AND/OR is "!~*&-+()":
+							if (!strchr(EXPR_CORE, *cp))
+								// This check recognizes the following examples as NON-continuation lines by checking
+								// that AND/OR aren't followed immediately by something that's obviously an operator:
+								//    and := x, and = 2 (but not and += 2 since the an operand can have a unary plus/minus).
+								// This is done for backward compatibility.  Also, it's documented that
+								// AND/OR/NOT aren't supported as variable names inside expressions.
+								is_continuation_line = true; // Override the default set earlier.
+						}
+						break;
+					case 'O': // "OR".
+						// See comments in the default section further below.
+						if (toupper(next_buf[1]) == 'R' && IS_SPACE_OR_TAB_OR_NBSP(next_buf[2])) // Relies on short-circuit boolean order.
+						{
+							cp = omit_leading_whitespace(next_buf + 2);
+							// v1.0.38.06: The following was fixed to use EXPR_CORE vs. EXPR_OPERAND_TERMINATORS
+							// to properly detect a continuation line whose first char after AND/OR is "!~*&-+()":
+							if (!strchr(EXPR_CORE, *cp)) // See comment in the "AND" case above.
+								is_continuation_line = true; // Override the default set earlier.
+						}
+						break;
+					default:
+						// Desired line continuation operators:
+						// Pretty much everything, namely:
+						// +, -, *, /, //, **, <<, >>, &, |, ^, <, >, <=, >=, =, ==, <>, !=, :=, +=, -=, /=, *=, ?, :
+						// And also the following remaining unaries (i.e. those that aren't also binaries): !, ~
+						// The first line below checks for ::, ++, and --.  Those can't be continuation lines because:
+						// "::" isn't a valid operator (this also helps performance if there are many hotstrings).
+						// ++ and -- are ambiguous with an isolated line containing ++Var or --Var (and besides,
+						// wanting to use ++ to continue an expression seems extremely rare, though if there's ever
+						// demand for it, might be able to look at what lies to the right of the operator's operand
+						// -- though that would produce inconsisent continuation behavior since ++Var itself still
+						// could never be a continuation line due to ambiguity).
+						//
+						// The logic here isn't smart enough to differentiate between a leading ! or - that's
+						// meant as a continuation character and one that isn't. Even if it were, it would
+						// still be ambiguous in some cases because the author's intent isn't known; for example,
+						// the leading minus sign on the second line below is ambiguous, so will probably remain
+						// a continuation character in both v1 and v2:
+						//    x := y 
+						//    -z ? a:=1 : func() 
+						if ((*next_buf == ':' || *next_buf == '+' || *next_buf == '-') && next_buf[1] == *next_buf // See above.
+							// L31: '.' and '?' no longer require spaces; '.' without space is member-access (object) operator.
+							//|| (*next_buf == '.' || *next_buf == '?') && !IS_SPACE_OR_TAB_OR_NBSP(next_buf[1]) // The "." and "?" operators require a space or tab after them to be legitimate.  For ".", this is done in case period is ever a legal character in var names, such as struct support.  For "?", it's done for backward compatibility since variable names can contain question marks (though "?" by itself is not considered a variable in v1.0.46).
+								//&& next_buf[1] != '=' // But allow ".=" (and "?=" too for code simplicity), since ".=" is the concat-assign operator.
+							|| !strchr(CONTINUATION_LINE_SYMBOLS, *next_buf)) // Line doesn't start with a continuation char.
+							break; // Leave is_continuation_line set to its default of false.
+						// Some of the above checks must be done before the next ones.
+						if (   !(hotkey_flag = strstr(next_buf, HOTKEY_FLAG))   ) // Without any "::", it can't be a hotkey or hotstring.
+						{
+							is_continuation_line = true; // Override the default set earlier.
+							break;
+						}
+						if (*next_buf == ':') // First char is ':', so it's more likely a hotstring than a hotkey.
+						{
+							// Remember that hotstrings can contain what *appear* to be quoted literal strings,
+							// so detecting whether a "::" is in a quoted/literal string in this case would
+							// be more complicated.  That's one reason this other method is used.
+							for (hotstring_options_all_valid = true, cp = next_buf + 1; *cp && *cp != ':'; ++cp)
+								if (!IS_HOTSTRING_OPTION(*cp)) // Not a perfect test, but eliminates most of what little remaining ambiguity exists between ':' as a continuation character vs. ':' as the start of a hotstring.  It especially eliminates the ":=" operator.
+								{
+									hotstring_options_all_valid = false;
+									break;
+								}
+							if (hotstring_options_all_valid && *cp == ':') // It's almost certainly a hotstring.
+								break; // So don't treat it as a continuation line.
+							//else it's not a hotstring but it might still be a hotkey such as ": & x::".
+							// So continue checking below.
+						}
+						// Since above didn't "break", this line isn't a hotstring but it is probably a hotkey
+						// because above already discovered that it contains "::" somewhere. So try to find out
+						// if there's anything that disqualifies this from being a hotkey, such as some
+						// expression line that contains a quoted/literal "::" (or a line starting with
+						// a comma that contains an unquoted-but-literal "::" such as for FileAppend).
+						if (*next_buf == ',')
+						{
+							cp = omit_leading_whitespace(next_buf + 1);
+							// The above has set cp to the position of the non-whitespace item to the right of
+							// this comma.  Normal (single-colon) labels can't contain commas, so only hotkey
+							// labels are sources of ambiguity.  In addition, normal labels and hotstrings have
+							// already been checked for, higher above.
+							if (   strncmp(cp, HOTKEY_FLAG, HOTKEY_FLAG_LENGTH) // It's not a hotkey such as ",::action".
+								&& strncmp(cp - 1, COMPOSITE_DELIMITER, COMPOSITE_DELIMITER_LENGTH)   ) // ...and it's not a hotkey such as ", & y::action".
+								is_continuation_line = true; // Override the default set earlier.
+						}
+						else // First symbol in line isn't a comma but some other operator symbol.
+						{
+							// Check if the "::" found earlier appears to be inside a quoted/literal string.
+							// This check is NOT done for a line beginning with a comma since such lines
+							// can contain an unquoted-but-literal "::".  In addition, this check is done this
+							// way to detect hotkeys such as the following:
+							//   +keyname:: (and other hotkey modifier symbols such as ! and ^)
+							//   +keyname1 & keyname2::
+							//   +^:: (i.e. a modifier symbol followed by something that is a hotkey modifer and/or a hotkey suffix and/or an expression operator).
+							//   <:: and &:: (i.e. hotkeys that are also expression-continuation symbols)
+							// By contrast, expressions that qualify as continuation lines can look like:
+							//   . "xxx::yyy"
+							//   + x . "xxx::yyy"
+							// In addition, hotkeys like the following should continue to be supported regardless
+							// of how things are done here:
+							//   ^"::
+							//   . & "::
+							// Finally, keep in mind that an expression-continuation line can start with two
+							// consecutive unary operators like !! or !*. It can also start with a double-symbol
+							// operator such as <=, <>, !=, &&, ||, //, **.
+							for (cp = next_buf; cp < hotkey_flag && *cp != '"'; ++cp);
+							if (cp == hotkey_flag) // No '"' found to left of "::", so this "::" appears to be a real hotkey flag rather than part of a literal string.
+								break; // Treat this line as a normal line vs. continuation line.
+							for (cp = hotkey_flag + HOTKEY_FLAG_LENGTH; *cp && *cp != '"'; ++cp);
+							if (*cp)
+							{
+								// Closing quote was found so "::" is probably inside a literal string of an
+								// expression (further checking seems unnecessary given the fairly extreme
+								// rarity of using '"' as a key in a hotkey definition).
+								is_continuation_line = true; // Override the default set earlier.
+							}
+							//else no closing '"' found, so this "::" probably belongs to something like +":: or
+							// . & "::.  Treat this line as a normal line vs. continuation line.
+						}
+					} // switch(toupper(*next_buf))
+
+					if (is_continuation_line)
+					{
+						if (buf_length + next_buf_length >= LINE_SIZE - 1) // -1 to account for the extra space added below.
+						{
+							ScriptError(ERR_CONTINUATION_SECTION_TOO_LONG, next_buf);
+							return FAIL;
+						}
+						if (*next_buf != ',') // Insert space before expression operators so that built/combined expression works correctly (some operators like 'and', 'or', '.', and '?' currently require spaces on either side) and also for readability of ListLines.
+							buf[buf_length++] = ' ';
+						memcpy(buf + buf_length, next_buf, next_buf_length + 1); // Append this line to prev. and include the zero terminator.
+						buf_length += next_buf_length;
+						continue; // Check for yet more continuation lines after this one.
+					}
+					// Since above didn't continue, there is no continuation line or section.  In addition,
+					// since this line isn't blank, no further searching is needed.
+					break;
+				} // if (!in_continuation_section)
+
+				// OTHERWISE in_continuation_section != 0, so the above has found the first line of a new
+				// continuation section.
+				// "has_continuation_section" indicates whether the line we're about to construct is partially
+				// composed of continuation lines beneath it.  It's separate from continuation_line_count
+				// in case there is another continuation section immediately after/adjacent to the first one,
+				// but the second one doesn't have any lines in it:
+				has_continuation_section = true;
+				continuation_line_count = 0; // Reset for this new section.
+				// Otherwise, parse options.  First set the defaults, which can be individually overridden
+				// by any options actually present.  RTrim defaults to ON for two reasons:
+				// 1) Whitespace often winds up at the end of a lines in a text editor by accident.  In addition,
+				//    whitespace at the end of any consolidated/merged line will be rtrim'd anyway, since that's
+				//    how command parsing works.
+				// 2) Copy & paste from the forum and perhaps other web sites leaves a space at the end of each
+				//    line.  Although this behavior is probably site/browser-specific, it's a consideration.
+				do_ltrim = g_ContinuationLTrim; // Start off at global default.
+				do_rtrim = true; // Seems best to rtrim even if this line is a hotstring, since it is very rare that trailing spaces and tabs would ever be desirable.
+				// For hotstrings (which could be detected via *buf==':'), it seems best not to default the
+				// escape character (`) to be literal because the ability to have `t `r and `n inside the
+				// hotstring continuation section seems more useful/common than the ability to use the
+				// accent character by itself literally (which seems quite rare in most languages).
+				literal_escapes = false;
+				literal_derefs = false;
+				literal_delimiters = true; // This is the default even for hotstrings because although using (*buf != ':') would improve loading performance, it's not a 100% reliable way to detect hotstrings.
+				// The default is linefeed because:
+				// 1) It's the best choice for hotstrings, for which the line continuation mechanism is well suited.
+				// 2) It's good for FileAppend.
+				// 3) Minor: Saves memory in large sections by being only one character instead of two.
+				suffix[0] = '\n';
+				suffix[1] = '\0';
+				suffix_length = 1;
+				for (next_option = omit_leading_whitespace(next_buf + 1); *next_option; next_option = omit_leading_whitespace(option_end))
+				{
+					// Find the end of this option item:
+					if (   !(option_end = StrChrAny(next_option, " \t"))   )  // Space or tab.
+						option_end = next_option + strlen(next_option); // Set to position of zero terminator instead.
+
+					// Temporarily terminate to help eliminate ambiguity for words contained inside other words,
+					// such as hypothetical "Checked" inside of "CheckedGray":
+					orig_char = *option_end;
+					*option_end = '\0';
+
+					if (!strnicmp(next_option, "Join", 4))
+					{
+						next_option += 4;
+						strlcpy(suffix, next_option, sizeof(suffix)); // The word "Join" by itself will product an empty string, as documented.
+						// Passing true for the last parameter supports `s as the special escape character,
+						// which allows space to be used by itself and also at the beginning or end of a string
+						// containing other chars.
+						ConvertEscapeSequences(suffix, g_EscapeChar, true);
+						suffix_length = strlen(suffix);
+					}
+					else if (!strnicmp(next_option, "LTrim", 5))
+						do_ltrim = (next_option[5] != '0');  // i.e. Only an explicit zero will turn it off.
+					else if (!strnicmp(next_option, "RTrim", 5))
+						do_rtrim = (next_option[5] != '0');
+					else
+					{
+						// Fix for v1.0.36.01: Missing "else" above, because otherwise, the option Join`r`n
+						// would be processed above but also be processed again below, this time seeing the
+						// accent and thinking it's the signal to treat accents literally for the entire
+						// continuation section rather than as escape characters.
+						// Within this terminated option substring, allow the characters to be adjacent to
+						// improve usability:
+						for (; *next_option; ++next_option)
+						{
+							switch (*next_option)
+							{
+							case '`': // Although not using g_EscapeChar (reduces code size/complexity), #EscapeChar is still supported by continuation sections; it's just that enabling the option uses '`' rather than the custom escape-char (one reason is that that custom escape-char might be ambiguous with future/past options if it's somehing weird like an alphabetic character).
+								literal_escapes = true;
+								break;
+							case '%': // Same comment as above.
+								literal_derefs = true;
+								break;
+							case ',': // Same comment as above.
+								literal_delimiters = false;
+								break;
+							case 'C': // v1.0.45.03: For simplicity, anything that begins with "C" is enough to
+							case 'c': // identify it as the option to allow comments in the section.
+								in_continuation_section = CONTINUATION_SECTION_WITH_COMMENTS; // Override the default, which is boolean true (i.e. 1).
+								break;
+							}
+						}
+					}
+
+					// If the item was not handled by the above, ignore it because it is unknown.
+
+					*option_end = orig_char; // Undo the temporary termination.
+
+				} // for() each item in option list
+
+				continue; // Now that the open-parenthesis of this continuation section has been processed, proceed to the next line.
+			} // if (!in_continuation_section)
+
+			// Since above didn't "continue", we're in the continuation section and thus next_buf contains
+			// either a line to be appended onto buf or the closing parenthesis of this continuation section.
+			if (next_buf_length == -1) // Compare directly to -1 since length is unsigned.
+			{
+				ScriptError(ERR_MISSING_CLOSE_PAREN, buf);
+				return FAIL;
+			}
+			if (next_buf_length == -2) // v1.0.45.03: Special flag that means "this is a commented-out line to be
+				continue;              // entirely omitted from the continuation section." Compare directly to -2 since length is unsigned.
+
+			if (*next_buf == ')')
+			{
+				in_continuation_section = 0; // Facilitates back-to-back continuation sections and proper incrementing of phys_line_number.
+				next_buf_length = rtrim(next_buf); // Done because GetLine() wouldn't have done it due to have told it we're in a continuation section.
+				// Anything that lies to the right of the close-parenthesis gets appended verbatim, with
+				// no trimming (for flexibility) and no options-driven translation:
+				cp = next_buf + 1;  // Use temp var cp to avoid altering next_buf (for maintainability).
+				--next_buf_length;  // This is now the length of cp, not next_buf.
+			}
+			else
+			{
+				cp = next_buf;
+				// The following are done in this block only because anything that comes after the closing
+				// parenthesis (i.e. the block above) is exempt from translations and custom trimming.
+				// This means that commas are always delimiters and percent signs are always deref symbols
+				// in the previous block.
+				if (do_rtrim)
+					next_buf_length = rtrim(next_buf, next_buf_length);
+				if (do_ltrim)
+					next_buf_length = ltrim(next_buf, next_buf_length);
+				// Escape each comma and percent sign in the body of the continuation section so that
+				// the later parsing stages will see them as literals.  Although, it's not always
+				// necessary to do this (e.g. commas in the last parameter of a command don't need to
+				// be escaped, nor do percent signs in hotstrings' auto-replace text), the settings
+				// are applied unconditionally because:
+				// 1) Determining when its safe to omit the translation would add a lot of code size and complexity.
+				// 2) The translation doesn't affect the functionality of the script since escaped literals
+				//    are always de-escaped at a later stage, at least for everything that's likely to matter
+				//    or that's reasonable to put into a continuation section (e.g. a hotstring's replacement text).
+				// UPDATE for v1.0.44.11: #EscapeChar, #DerefChar, #Delimiter are now supported by continuation
+				// sections because there were some requests for that in forum.
+				int replacement_count = 0;
+				if (literal_escapes) // literal_escapes must be done FIRST because otherwise it would also replace any accents added for literal_delimiters or literal_derefs.
+				{
+					one_char_string[0] = g_EscapeChar; // These strings were terminated earlier, so no need to
+					two_char_string[0] = g_EscapeChar; // do it here.  In addition, these strings must be set by
+					two_char_string[1] = g_EscapeChar; // each iteration because the #EscapeChar (and similar directives) can occur multiple times, anywhere in the script.
+					replacement_count += StrReplace(next_buf, one_char_string, two_char_string, SCS_SENSITIVE, UINT_MAX, LINE_SIZE);
+				}
+				if (literal_derefs)
+				{
+					one_char_string[0] = g_DerefChar;
+					two_char_string[0] = g_EscapeChar;
+					two_char_string[1] = g_DerefChar;
+					replacement_count += StrReplace(next_buf, one_char_string, two_char_string, SCS_SENSITIVE, UINT_MAX, LINE_SIZE);
+				}
+				if (literal_delimiters)
+				{
+					one_char_string[0] = g_delimiter;
+					two_char_string[0] = g_EscapeChar;
+					two_char_string[1] = g_delimiter;
+					replacement_count += StrReplace(next_buf, one_char_string, two_char_string, SCS_SENSITIVE, UINT_MAX, LINE_SIZE);
+				}
+
+				if (replacement_count) // Update the length if any actual replacements were done.
+					next_buf_length = strlen(next_buf);
+			} // Handling of a normal line within a continuation section.
+
+			// Must check the combined length only after anything that might have expanded the string above.
+			if (buf_length + next_buf_length + suffix_length >= LINE_SIZE)
+			{
+				ScriptError(ERR_CONTINUATION_SECTION_TOO_LONG, cp);
+				return FAIL;
+			}
+
+			++continuation_line_count;
+			// Append this continuation line onto the primary line.
+			// The suffix for the previous line gets written immediately prior writing this next line,
+			// which allows the suffix to be omitted for the final line.  But if this is the first line,
+			// No suffix is written because there is no previous line in the continuation section.
+			// In addition, cp!=next_buf, this is the special line whose text occurs to the right of the
+			// continuation section's closing parenthesis. In this case too, the previous line doesn't
+			// get a suffix.
+			if (continuation_line_count > 1 && suffix_length && cp == next_buf)
+			{
+				memcpy(buf + buf_length, suffix, suffix_length + 1); // Append and include the zero terminator.
+				buf_length += suffix_length; // Must be done only after the old value of buf_length was used above.
+			}
+			if (next_buf_length)
+			{
+				memcpy(buf + buf_length, cp, next_buf_length + 1); // Append this line to prev. and include the zero terminator.
+				buf_length += next_buf_length; // Must be done only after the old value of buf_length was used above.
+			}
+		} // for() each sub-line (continued line) that composes this line.
+
+		// buf_length can't be -1 (though next_buf_length can) because outer loop's condition prevents it:
+		if (!buf_length) // Done only after the line number increments above so that the physical line number is properly tracked.
+			goto continue_main_loop; // In lieu of "continue", for performance.
+
+		// Since neither of the above executed, or they did but didn't "continue",
+		// buf now contains a non-commented line, either by itself or built from
+		// any continuation sections/lines that might have been present.  Also note that
+		// by design, phys_line_number will be greater than mCombinedLineNumber whenever
+		// a continuation section/lines were used to build this combined line.
+
+		// If there's a previous line waiting to be processed, its fate can now be determined based on the
+		// nature of *this* line:
+		if (*pending_function)
+		{
+			// Somewhat messy to decrement then increment later, but it's probably easier than the
+			// alternatives due to the use of "continue" in some places above.  NOTE: phys_line_number
+			// would not need to be decremented+incremented even if the below resulted in a recursive
+			// call to us (though it doesn't currently) because line_number's only purpose is to
+			// remember where this layer left off when the recursion collapses back to us.
+			// Fix for v1.0.31.05: It's not enough just to decrement mCombinedLineNumber because there
+			// might be some blank lines or commented-out lines between this function call/definition
+			// and the line that follows it, each of which will have previously incremented mCombinedLineNumber.
+			saved_line_number = mCombinedLineNumber;
+			mCombinedLineNumber = pending_function_line_number;  // Done so that any syntax errors that occur during the calls below will report the correct line number.
+			// Open brace means this is a function definition. NOTE: buf was already ltrimmed by GetLine().
+			// Could use *g_act[ACT_BLOCK_BEGIN].Name instead of '{', but it seems too elaborate to be worth it.
+			if (*buf == '{' || pending_function_has_brace) // v1.0.41: Support one-true-brace, e.g. fn(...) {
+			{
+				// Note that two consecutive function definitions aren't possible:
+				// fn1()
+				// fn2()
+				// {
+				//  ...
+				// }
+				// In the above, the first would automatically be deemed a function call by means of
+				// the check higher above (by virtue of the fact that the line after it isn't an open-brace).
+				if (g->CurrentFunc)
+				{
+					// Though it might be allowed in the future -- perhaps to have nested functions have
+					// access to their parent functions' local variables, or perhaps just to improve
+					// script readability and maintainability -- it's currently not allowed because of
+					// the practice of maintaining the func_exception_var list on our stack:
+					ScriptError("Functions cannot contain functions.", pending_function);
+					return FAIL;
+				}
+				if (!DefineFunc(pending_function, func_exception_var))
+					return FAIL;
+				if (pending_function_has_brace) // v1.0.41: Support one-true-brace for function def, e.g. fn() {
+				{
+					if (!AddLine(ACT_BLOCK_BEGIN))
+						return FAIL;
+					mCurrLine = NULL; // L30: Prevents showing misleading vicinity lines if the line after a OTB function def is a syntax error.
+				}
+			}
+			else // It's a function call on a line by itself, such as fn(x). It can't be if(..) because another section checked that.
+			{
+				if (!ParseAndAddLine(pending_function, ACT_EXPRESSION))
+					return FAIL;
+				mCurrLine = NULL; // Prevents showing misleading vicinity lines if the line after a function call is a syntax error.
+			}
+			mCombinedLineNumber = saved_line_number;
+			*pending_function = '\0'; // Reset now that it's been fully handled, as an indicator for subsequent iterations.
+			// Now fall through to the below so that *this* line (the one after it) will be processed.
+			// Note that this line might be a pre-processor directive, label, etc. that won't actually
+			// become a runtime line per se.
+		} // if (*pending_function)
+
+		// By doing the following section prior to checking for hotkey and hotstring labels, double colons do
+		// not need to be escaped inside naked function calls and function definitions such as the following:
+		// fn("::")      ; Function call.
+		// fn(Str="::")  ; Function definition with default value for its parameter.
+		if (IsFunction(buf, &pending_function_has_brace)) // If true, it's either a function definition or a function call (to be distinguished later).
+		{
+			// Defer this line until the next line comes in, which helps determine whether this line is
+			// a function call vs. definition:
+			strcpy(pending_function, buf);
+			pending_function_line_number = mCombinedLineNumber;
+			goto continue_main_loop; // In lieu of "continue", for performance.
+		}
+
+		// The following "examine_line" label skips the following parts above:
+		// 1) IsFunction() because that's only for a function call or definition alone on a line
+		//    e.g. not "if fn()" or x := fn().  Those who goto this label don't need that processing.
+		// 2) The "if (*pending_function)" block: Doesn't seem applicable for the callers of this label.
+		// 3) The inner loop that handles continuation sections: Not needed by the callers of this label.
+		// 4) Things like the following should be skipped because callers of this label don't want the
+		//    physical line number changed (which would throw off the count of lines that lie beneath a remap):
+		//    mCombinedLineNumber = phys_line_number + 1;
+		//    ++phys_line_number;
+		// 5) "mCurrLine = NULL": Probably not necessary since it's only for error reporting.  Worst thing
+		//    that could happen is that syntax errors would be thrown off, which testing shows isn't the case.
+examine_line:
+		// "::" alone isn't a hotstring, it's a label whose name is colon.
+		// Below relies on the fact that no valid hotkey can start with a colon, since
+		// ": & somekey" is not valid (since colon is a shifted key) and colon itself
+		// should instead be defined as "+;::".  It also relies on short-circuit boolean:
+		hotstring_start = NULL;
+		hotstring_options = NULL; // Set default as "no options were specified for this hotstring".
+		hotkey_flag = NULL;
+		if (buf[0] == ':' && buf[1])
+		{
+			if (buf[1] != ':')
+			{
+				hotstring_options = buf + 1; // Point it to the hotstring's option letters.
+				// The following relies on the fact that options should never contain a literal colon.
+				// ALSO, the following doesn't use IS_HOTSTRING_OPTION() for backward compatibility,
+				// performance, and because it seems seldom if ever necessary at this late a stage.
+				if (   !(hotstring_start = strchr(hotstring_options, ':'))   )
+					hotstring_start = NULL; // Indicate that this isn't a hotstring after all.
+				else
+					++hotstring_start; // Points to the hotstring itself.
+			}
+			else // Double-colon, so it's a hotstring if there's more after this (but this means no options are present).
+				if (buf[2])
+					hotstring_start = buf + 2; // And leave hotstring_options at its default of NULL to indicate no options.
+				//else it's just a naked "::", which is considered to be an ordinary label whose name is colon.
+		}
+		if (hotstring_start)
+		{
+			// Find the hotstring's final double-colon by considering escape sequences from left to right.
+			// This is necessary for to handles cases such as the following:
+			// ::abc```::::Replacement String
+			// The above hotstring translates literally into "abc`::".
+			char *escaped_double_colon = NULL;
+			for (cp = hotstring_start; ; ++cp)  // Increment to skip over the symbol just found by the inner for().
+			{
+				for (; *cp && *cp != g_EscapeChar && *cp != ':'; ++cp);  // Find the next escape char or colon.
+				if (!*cp) // end of string.
+					break;
+				cp1 = cp + 1;
+				if (*cp == ':')
+				{
+					if (*cp1 == ':') // Found a non-escaped double-colon, so this is the right one.
+					{
+						hotkey_flag = cp++;  // Increment to have loop skip over both colons.
+						// and the continue with the loop so that escape sequences in the replacement
+						// text (if there is replacement text) are also translated.
+					}
+					// else just a single colon, or the second colon of an escaped pair (`::), so continue.
+					continue;
+				}
+				switch (*cp1)
+				{
+					// Only lowercase is recognized for these:
+					case 'a': *cp1 = '\a'; break;  // alert (bell) character
+					case 'b': *cp1 = '\b'; break;  // backspace
+					case 'f': *cp1 = '\f'; break;  // formfeed
+					case 'n': *cp1 = '\n'; break;  // newline
+					case 'r': *cp1 = '\r'; break;  // carriage return
+					case 't': *cp1 = '\t'; break;  // horizontal tab
+					case 'v': *cp1 = '\v'; break;  // vertical tab
+					// Otherwise, if it's not one of the above, the escape-char is considered to
+					// mark the next character as literal, regardless of what it is. Examples:
+					// `` -> `
+					// `:: -> :: (effectively)
+					// `; -> ;
+					// `c -> c (i.e. unknown escape sequences resolve to the char after the `)
+				}
+				// Below has a final +1 to include the terminator:
+				MoveMemory(cp, cp1, strlen(cp1) + 1);
+				// Since single colons normally do not need to be escaped, this increments one extra
+				// for double-colons to skip over the entire pair so that its second colon
+				// is not seen as part of the hotstring's final double-colon.  Example:
+				// ::ahc```::::Replacement String
+				if (*cp == ':' && *cp1 == ':')
+					++cp;
+			} // for()
+			if (!hotkey_flag)
+				hotstring_start = NULL;  // Indicate that this isn't a hotstring after all.
+		}
+		if (!hotstring_start) // Not a hotstring (hotstring_start is checked *again* in case above block changed it; otherwise hotkeys like ": & x" aren't recognized).
+		{
+			// Note that there may be an action following the HOTKEY_FLAG (on the same line).
+			if (hotkey_flag = strstr(buf, HOTKEY_FLAG)) // Find the first one from the left, in case there's more than 1.
+			{
+				if (hotkey_flag == buf && hotkey_flag[2] == ':') // v1.0.46: Support ":::" to mean "colon is a hotkey".
+					++hotkey_flag;
+				// v1.0.40: It appears to be a hotkey, but validate it as such before committing to processing
+				// it as a hotkey.  If it fails validation as a hotkey, treat it as a command that just happens
+				// to contain a double-colon somewhere.  This avoids the need to escape double colons in scripts.
+				// Note: Hotstrings can't suffer from this type of ambiguity because a leading colon or pair of
+				// colons makes them easier to detect.
+				cp = omit_trailing_whitespace(buf, hotkey_flag); // For maintainability.
+				orig_char = *cp;
+				*cp = '\0'; // Temporarily terminate.
+				if (!Hotkey::TextInterpret(omit_leading_whitespace(buf), NULL, false)) // Passing NULL calls it in validate-only mode.
+					hotkey_flag = NULL; // It's not a valid hotkey, so indicate that it's a command (i.e. one that contains a literal double-colon, which avoids the need to escape the double-colon).
+				*cp = orig_char; // Undo the temp. termination above.
+			}
+		}
+
+		// Treat a naked "::" as a normal label whose label name is colon:
+		if (is_label = (hotkey_flag && hotkey_flag > buf)) // It's a hotkey/hotstring label.
+		{
+			if (g->CurrentFunc)
+			{
+				// Even if it weren't for the reasons below, the first hotkey/hotstring label in a script
+				// will end the auto-execute section with a "return".  Therefore, if this restriction here
+				// is ever removed, be sure that that extra return doesn't get put inside the function.
+				//
+				// The reason for not allowing hotkeys and hotstrings inside a function's body is that
+				// when the subroutine is launched, the hotstring/hotkey would be using the function's
+				// local variables.  But that is not appropriate and it's likely to cause problems even
+				// if it were.  It doesn't seem useful in any case.  By contrast, normal labels can
+				// safely exist inside a function body and since the body is a block, other validation
+				// ensures that a Gosub or Goto can't jump to it from outside the function.
+				ScriptError("Hotkeys/hotstrings are not allowed inside functions.", buf);
+				return FAIL;
+			}
+			if (mLastLine && mLastLine->mActionType == ACT_IFWINACTIVE)
+			{
+				mCurrLine = mLastLine; // To show vicinity lines.
+				ScriptError("IfWin should be #IfWin.", buf);
+				return FAIL;
+			}
+			*hotkey_flag = '\0'; // Terminate so that buf is now the label itself.
+			hotkey_flag += HOTKEY_FLAG_LENGTH;  // Now hotkey_flag is the hotkey's action, if any.
+			if (!hotstring_start)
+			{
+				ltrim(hotkey_flag); // Has already been rtrimmed by GetLine().
+				rtrim(buf); // Trim the new substring inside of buf (due to temp termination). It has already been ltrimmed.
+				cp = hotkey_flag; // Set default, conditionally overridden below (v1.0.44.07).
+				// v1.0.40: Check if this is a remap rather than hotkey:
+				if (   *hotkey_flag // This hotkey's action is on the same line as its label.
+					&& (remap_source_vk = TextToVK(cp1 = Hotkey::TextToModifiers(buf, NULL)))
+					&& (remap_dest_vk = hotkey_flag[1] ? TextToVK(cp = Hotkey::TextToModifiers(hotkey_flag, NULL)) : 0xFF)   ) // And the action appears to be a remap destination rather than a command.
+					// For above:
+					// Fix for v1.0.44.07: Set remap_dest_vk to 0xFF if hotkey_flag's length is only 1 because:
+					// 1) It allows a destination key that doesn't exist in the keyboard layout (such as 6::ð in
+					//    English).
+					// 2) It improves performance a little by not calling TextToVK except when the destination key
+					//    might be a mouse button or some longer key name whose actual/correct VK value is relied
+					//    upon by other places below.
+					// Fix for v1.0.40.01: Since remap_dest_vk is also used as the flag to indicate whether
+					// this line qualifies as a remap, must do it last in the statement above.  Otherwise,
+					// the statement might short-circuit and leave remap_dest_vk as non-zero even though
+					// the line shouldn't be a remap.  For example, I think a hotkey such as "x & y::return"
+					// would trigger such a bug.
+				{
+					// These will be ignored in other stages if it turns out not to be a remap later below:
+					remap_source_is_mouse = IsMouseVK(remap_source_vk);
+					remap_dest_is_mouse = IsMouseVK(remap_dest_vk);
+					remap_keybd_to_mouse = !remap_source_is_mouse && remap_dest_is_mouse;
+					snprintf(remap_source, sizeof(remap_source), "%s%s"
+						, strlen(cp1) == 1 && IsCharUpper(*cp1) ? "+" : ""  // Allow A::b to be different than a::b.
+						, buf); // Include any modifiers too, e.g. ^b::c.
+					strlcpy(remap_dest, cp, sizeof(remap_dest));      // But exclude modifiers here; they're wanted separately.
+					strlcpy(remap_dest_modifiers, hotkey_flag, sizeof(remap_dest_modifiers));
+					if (cp - hotkey_flag < sizeof(remap_dest_modifiers)) // Avoid reading beyond the end.
+						remap_dest_modifiers[cp - hotkey_flag] = '\0';   // Terminate at the proper end of the modifier string.
+					remap_stage = 0; // Init for use in the next stage.
+					// In the unlikely event that the dest key has the same name as a command, disqualify it
+					// from being a remap (as documented).  v1.0.40.05: If the destination key has any modifiers,
+					// it is unambiguously a key name rather than a command, so the switch() isn't necessary.
+					if (*remap_dest_modifiers)
+						goto continue_main_loop; // It will see that remap_dest_vk is non-zero and act accordingly.
+					switch (remap_dest_vk)
+					{
+					case VK_CONTROL: // Checked in case it was specified as "Control" rather than "Ctrl".
+					case VK_SLEEP:
+						if (StrChrAny(hotkey_flag, " \t,")) // Not using g_delimiter (reduces code size/complexity).
+							break; // Any space, tab, or enter means this is a command rather than a remap destination.
+						goto continue_main_loop; // It will see that remap_dest_vk is non-zero and act accordingly.
+					// "Return" and "Pause" as destination keys are always considered commands instead.
+					// This is documented and is done to preserve backward compatibility.
+					case VK_RETURN:
+						// v1.0.40.05: Although "Return" can't be a destination, "Enter" can be.  Must compare
+						// to "Return" not "Enter" so that things like "vk0d" (the VK of "Enter") can also be a
+						// destination key:
+						if (!stricmp(remap_dest, "Return"))
+							break;
+						goto continue_main_loop; // It will see that remap_dest_vk is non-zero and act accordingly.
+					case VK_PAUSE:  // Used for both "Pause" and "Break"
+						break;
+					default: // All other VKs are valid destinations and thus the remap is valid.
+						goto continue_main_loop; // It will see that remap_dest_vk is non-zero and act accordingly.
+					}
+					// Since above didn't goto, indicate that this is not a remap after all:
+					remap_dest_vk = 0;
+				}
+			}
+			// else don't trim hotstrings since literal spaces in both substrings are significant.
+
+			// If this is the first hotkey label encountered, Add a return before
+			// adding the label, so that the auto-exectute section is terminated.
+			// Only do this if the label is a hotkey because, for example,
+			// the user may want to fully execute a normal script that contains
+			// no hotkeys but does contain normal labels to which the execution
+			// should fall through, if specified, rather than returning.
+			// But this might result in weirdness?  Example:
+			//testlabel:
+			// Sleep, 1
+			// return
+			// ^a::
+			// return
+			// It would put the hard return in between, which is wrong.  But in the case above,
+			// the first sub shouldn't have a return unless there's a part up top that ends in Exit.
+			// So if Exit is encountered before the first hotkey, don't add the return?
+			// Even though wrong, the return is harmless because it's never executed?  Except when
+			// falling through from above into a hotkey (which probably isn't very valid anyway)?
+			// Update: Below must check if there are any true hotkey labels, not just regular labels.
+			// Otherwise, a normal (non-hotkey) label in the autoexecute section would count and
+			// thus the RETURN would never be added here, even though it should be:
+			
+			// Notes about the below macro:
+			// Fix for v1.0.34: Don't point labels to this particular RETURN so that labels
+			// can point to the very first hotkey or hotstring in a script.  For example:
+			// Goto Test
+			// Test:
+			// ^!z::ToolTip Without the fix`, this is never displayed by "Goto Test".
+			// UCHAR_MAX signals it not to point any pending labels to this RETURN.
+			// mCurrLine = NULL -> signifies that we're in transition, trying to load a new one.
+			#define CHECK_mNoHotkeyLabels \
+			if (mNoHotkeyLabels)\
+			{\
+				mNoHotkeyLabels = false;\
+				if (!AddLine(ACT_RETURN, NULL, UCHAR_MAX))\
+					return FAIL;\
+				mCurrLine = NULL;\
+			}
+			CHECK_mNoHotkeyLabels
+			// For hotstrings, the below makes the label include leading colon(s) and the full option
+			// string (if any) so that the uniqueness of labels is preserved.  For example, we want
+			// the following two hotstring labels to be unique rather than considered duplicates:
+			// ::abc::
+			// :c:abc::
+			if (!AddLabel(buf, true)) // Always add a label before adding the first line of its section.
+				return FAIL;
+			hook_action = 0; // Set default.
+			if (*hotkey_flag) // This hotkey's action is on the same line as its label.
+			{
+				if (!hotstring_start)
+					// Don't add the alt-tabs as a line, since it has no meaning as a script command.
+					// But do put in the Return regardless, in case this label is ever jumped to
+					// via Goto/Gosub:
+					if (   !(hook_action = Hotkey::ConvertAltTab(hotkey_flag, false))   )
+						if (!ParseAndAddLine(hotkey_flag, IsFunction(hotkey_flag) ? ACT_EXPRESSION : ACT_INVALID)) // It can't be a function definition vs. call since it's a single-line hotkey.
+							return FAIL;
+				// Also add a Return that's implicit for a single-line hotkey.  This is also
+				// done for auto-replace hotstrings in case gosub/goto is ever used to jump
+				// to their labels:
+				if (!AddLine(ACT_RETURN))
+					return FAIL;
+			}
+
+			if (hotstring_start)
+			{
+				if (!*hotstring_start)
+				{
+					// The following error message won't indicate the correct line number because
+					// the hotstring (as a label) does not actually exist as a line.  But it seems
+					// best to report it this way in case the hotstring is inside a #Include file,
+					// so that the correct file name and approximate line number are shown:
+					ScriptError("This hotstring is missing its abbreviation.", buf); // Display buf vs. hotkey_flag in case the line is simply "::::".
+					return FAIL;
+				}
+				// In the case of hotstrings, hotstring_start is the beginning of the hotstring itself,
+				// i.e. the character after the second colon.  hotstring_options is NULL if no options,
+				// otherwise it's the first character in the options list (option string is not terminated,
+				// but instead ends in a colon).  hotkey_flag is blank if it's not an auto-replace
+				// hotstring, otherwise it contains the auto-replace text.
+				// v1.0.42: Unlike hotkeys, duplicate hotstrings are not detected.  This is because
+				// hotstrings are less commonly used and also because it requires more code to find
+				// hotstring duplicates (and performs a lot worse if a script has thousands of
+				// hotstrings) because of all the hotstring options.
+				if (!Hotstring::AddHotstring(mLastLabel, hotstring_options ? hotstring_options : ""
+					, hotstring_start, hotkey_flag, has_continuation_section))
+					return FAIL;
+			}
+			else // It's a hotkey vs. hotstring.
+			{
+				if (hk = Hotkey::FindHotkeyByTrueNature(buf, suffix_has_tilde)) // Parent hotkey found.  Add a child/variant hotkey for it.
+				{
+					if (hook_action) // suffix_has_tilde has always been ignored for these types (alt-tab hotkeys).
+					{
+						// Hotkey::Dynamic() contains logic and comments similar to this, so maintain them together.
+						// An attempt to add an alt-tab variant to an existing hotkey.  This might have
+						// merit if the intention is to make it alt-tab now but to later disable that alt-tab
+						// aspect via the Hotkey cmd to let the context-sensitive variants shine through
+						// (take effect).
+						hk->mHookAction = hook_action;
+					}
+					else
+					{
+						// Detect duplicate hotkey variants to help spot bugs in scripts.
+						if (hk->FindVariant()) // See if there's already a variant matching the current criteria (suffix_has_tilde does not make variants distinct form each other because it would require firing two hotkey IDs in response to pressing one hotkey, which currently isn't in the design).
+						{
+							mCurrLine = NULL;  // Prevents showing unhelpful vicinity lines.
+							ScriptError("Duplicate hotkey.", buf);
+							return FAIL;
+						}
+						if (!hk->AddVariant(mLastLabel, suffix_has_tilde))
+						{
+							ScriptError(ERR_OUTOFMEM, buf);
+							return FAIL;
+						}
+					}
+				}
+				else // No parent hotkey yet, so create it.
+					if (   !(hk = Hotkey::AddHotkey(mLastLabel, hook_action, NULL, suffix_has_tilde, false))   )
+						return FAIL; // It already displayed the error.
+			}
+			goto continue_main_loop; // In lieu of "continue", for performance.
+		} // if (is_label = ...)
+
+		// Otherwise, not a hotkey or hotstring.  Check if it's a generic, non-hotkey label:
+		if (buf[buf_length - 1] == ':') // Labels must end in a colon (buf was previously rtrimmed).
+		{
+			if (buf_length == 1) // v1.0.41.01: Properly handle the fact that this line consists of only a colon.
+			{
+				ScriptError(ERR_UNRECOGNIZED_ACTION, buf);
+				return FAIL;
+			}
+			// Labels (except hotkeys) must contain no whitespace, delimiters, or escape-chars.
+			// This is to avoid problems where a legitimate action-line ends in a colon,
+			// such as "WinActivate SomeTitle" and "#Include c:".
+			// We allow hotkeys to violate this since they may contain commas, and since a normal
+			// script line (i.e. just a plain command) is unlikely to ever end in a double-colon:
+			for (cp = buf, is_label = true; *cp; ++cp)
+				if (IS_SPACE_OR_TAB(*cp) || *cp == g_delimiter || *cp == g_EscapeChar)
+				{
+					is_label = false;
+					break;
+				}
+			if (is_label) // It's a generic, non-hotkey/non-hotstring label.
+			{
+				// v1.0.44.04: Fixed this check by moving it after the above loop.
+				// Above has ensured buf_length>1, so it's safe to check for double-colon:
+				// v1.0.44.03: Don't allow anything that ends in "::" (other than a line consisting only
+				// of "::") to be a normal label.  Assume it's a command instead (if it actually isn't, a
+				// later stage will report it as "invalid hotkey"). This change avoids the situation in
+				// which a hotkey like ^!ä:: is seen as invalid because the current keyboard layout doesn't
+				// have a "ä" key. Without this change, if such a hotkey appears at the top of the script,
+				// its subroutine would execute immediately as a normal label, which would be especially
+				// bad if the hotkey were something like the "Shutdown" command.
+				if (buf[buf_length - 2] == ':' && buf_length > 2) // i.e. allow "::" as a normal label, but consider anything else with double-colon to be a failed-hotkey label that terminates the auto-exec section.
+				{
+					CHECK_mNoHotkeyLabels // Terminate the auto-execute section since this is a failed hotkey vs. a mere normal label.
+					snprintf(msg_text, sizeof(msg_text), "Note: The hotkey %s will not be active because it does not exist in the current keyboard layout.", buf);
+					MsgBox(msg_text);
+				}
+				buf[--buf_length] = '\0';  // Remove the trailing colon.
+				rtrim(buf, buf_length); // Has already been ltrimmed.
+				if (!AddLabel(buf, false))
+					return FAIL;
+				goto continue_main_loop; // In lieu of "continue", for performance.
+			}
+		}
+		// Since above didn't "goto", it's not a label.
+		if (*buf == '#')
+		{
+			saved_line_number = mCombinedLineNumber; // Backup in case IsDirective() processes an include file, which would change mCombinedLineNumber's value.
+			switch(IsDirective(buf)) // Note that it may alter the contents of buf, at least in the case of #IfWin.
+			{
+			case CONDITION_TRUE:
+				// Since the directive may have been a #include which called us recursively,
+				// restore the class's values for these two, which are maintained separately
+				// like this to avoid having to specify them in various calls, especially the
+				// hundreds of calls to ScriptError() and LineError():
+				mCurrFileIndex = source_file_index;
+				mCombinedLineNumber = saved_line_number;
+				goto continue_main_loop; // In lieu of "continue", for performance.
+			case FAIL: // IsDirective() already displayed the error.
+				return FAIL;
+			//case CONDITION_FALSE: Do nothing; let processing below handle it.
+			}
+		}
+		// Otherwise, treat it as a normal script line.
+
+		// v1.0.41: Support the "} else {" style in one-true-brace (OTB).  As a side-effect,
+		// any command, not just an else, is probably supported to the right of '}', not just "else".
+		// This is undocumented because it would make for less readable scripts, and doesn't seem
+		// to have much value.
+		if (*buf == '}')
+		{
+			if (!AddLine(ACT_BLOCK_END))
+				return FAIL;
+			// The following allows the next stage to see "else" or "else {" if it's present:
+			if (   !*(buf = omit_leading_whitespace(buf + 1))   )
+				goto continue_main_loop; // It's just a naked "}", so no more processing needed for this line.
+			buf_length = strlen(buf); // Update for possible use below.
+		}
+		// First do a little special handling to support actions on the same line as their
+		// ELSE, e.g.:
+		// else if x = 1
+		// This is done here rather than in ParseAndAddLine() because it's fairly
+		// complicated to do there (already tried it) mostly due to the fact that
+		// literal_map has to be properly passed in a recursive call to itself, as well
+		// as properly detecting special commands that don't have keywords such as
+		// IF comparisons, ACT_ASSIGN, +=, -=, etc.
+		// v1.0.41: '{' was added to the line below to support no spaces inside "}else{".
+		if (!(action_end = StrChrAny(buf, "\t ,{"))) // Position of first tab/space/comma/open-brace.  For simplicitly, a non-standard g_delimiter is not supported.
+			action_end = buf + buf_length; // It's done this way so that ELSE can be fully handled here; i.e. that ELSE does not have to be in the list of commands recognizable by ParseAndAddLine().
+		// The following method ensures that words or variables that start with "Else", e.g. ElseAction, are not
+		// incorrectly detected as an Else command:
+		if (strlicmp(buf, "Else", (UINT)(action_end - buf))) // It's not an ELSE. ("Else" is used vs. g_act[ACT_ELSE].Name for performance).
+		{
+			// It's not an ELSE.  Also, at this stage it can't be ACT_EXPRESSION (such as an isolated function call)
+			// because it would have been already handled higher above.
+			// v1.0.41.01: Check if there is a command/action on the same line as the '{'.  This is apparently
+			// a style that some people use, and it also supports "{}" as a shorthand way of writing an empty block.
+			if (*buf == '{')
+			{
+				if (!AddLine(ACT_BLOCK_BEGIN))
+					return FAIL;
+				if (   *(action_end = omit_leading_whitespace(buf + 1))   )  // There is an action to the right of the '{'.
+				{
+					mCurrLine = NULL;  // To signify that we're in transition, trying to load a new one.
+					if (!ParseAndAddLine(action_end, IsFunction(action_end) ? ACT_EXPRESSION : ACT_INVALID)) // If it's a function, it must be a call vs. a definition because a function can't be defined on the same line as an open-brace.
+						return FAIL;
+				}
+				// Otherwise, there was either no same-line action or the same-line action was successfully added,
+				// so do nothing.
+			}
+			else
+				if (!ParseAndAddLine(buf))
+					return FAIL;
+		}
+		else // This line is an ELSE, possibly with another command immediately after it (on the same line).
+		{
+			// Add the ELSE directly rather than calling ParseAndAddLine() because that function
+			// would resolve escape sequences throughout the entire length of <buf>, which we
+			// don't want because we wouldn't have access to the corresponding literal-map to
+			// figure out the proper use of escaped characters:
+			if (!AddLine(ACT_ELSE))
+				return FAIL;
+			mCurrLine = NULL;  // To signify that we're in transition, trying to load a new one.
+			action_end = omit_leading_whitespace(action_end); // Now action_end is the word after the ELSE.
+			if (*action_end == g_delimiter) // Allow "else, action"
+				action_end = omit_leading_whitespace(action_end + 1);
+			if (*action_end && !ParseAndAddLine(action_end, IsFunction(action_end) ? ACT_EXPRESSION : ACT_INVALID)) // If it's a function, it must be a call vs. a definition because a function can't be defined on the same line as an Else.
+				return FAIL;
+			// Otherwise, there was either no same-line action or the same-line action was successfully added,
+			// so do nothing.
+		}
+
+continue_main_loop: // This method is used in lieu of "continue" for performance and code size reduction.
+		if (remap_dest_vk)
+		{
+			// For remapping, decided to use a "macro expansion" approach because I think it's considerably
+			// smaller in code size and complexity than other approaches would be.  I originally wanted to
+			// do it with the hook by changing the incoming event prior to passing it back out again (for
+			// example, a::b would transform an incoming 'a' keystroke into 'b' directly without having
+			// to suppress the original keystroke and simulate a new one).  Unfortunately, the low-level
+			// hooks apparently do not allow this.  Here is the test that confirmed it:
+			// if (event.vkCode == 'A')
+			// {
+			//	event.vkCode = 'B';
+			//	event.scanCode = 0x30; // Or use vk_to_sc(event.vkCode).
+			//	return CallNextHookEx(g_KeybdHook, aCode, wParam, lParam);
+			// }
+			switch (++remap_stage)
+			{
+			case 1: // Stage 1: Add key-down hotkey label, e.g. *LButton::
+				buf_length = sprintf(buf, "*%s::", remap_source); // Should be no risk of buffer overflow due to prior validation.
+				goto examine_line; // Have the main loop process the contents of "buf" as though it came in from the script.
+			case 2: // Stage 2.
+				// Copied into a writable buffer for maintainability: AddLine() might rely on this.
+				// Also, it seems unnecessary to set press-duration to -1 even though the auto-exec section might
+				// have set it to something higher than -1 because:
+				// 1) Press-duration doesn't apply to normal remappings since they use down-only and up-only events.
+				// 2) Although it does apply to remappings such as a::B and a::^b (due to press-duration being
+				//    applied after a change to modifier state), those remappings are fairly rare and supporting
+				//    a non-negative-one press-duration (almost always 0) probably adds a degree of flexibility
+				//    that may be desirable to keep.
+				// 3) SendInput may become the predominant SendMode, so press-duration won't often be in effect anyway.
+				// 4) It has been documented that remappings use the auto-execute section's press-duration.
+				strcpy(buf, "-1"); // Does NOT need to be "-1, -1" for SetKeyDelay (see above).
+				// The primary reason for adding Key/MouseDelay -1 is to minimize the chance that a one of
+				// these hotkey threads will get buried under some other thread such as a timer, which
+				// would disrupt the remapping if #MaxThreadsPerHotkey is at its default of 1.
+				AddLine(remap_dest_is_mouse ? ACT_SETMOUSEDELAY : ACT_SETKEYDELAY, &buf, 1, NULL); // PressDuration doesn't need to be specified because it doesn't affect down-only and up-only events.
+				if (remap_keybd_to_mouse)
+				{
+					// Since source is keybd and dest is mouse, prevent keyboard auto-repeat from auto-repeating
+					// the mouse button (since that would be undesirable 90% of the time).  This is done
+					// by inserting a single extra IF-statement above the Send that produces the down-event:
+					buf_length = sprintf(buf, "if not GetKeyState(\"%s\")", remap_dest); // Should be no risk of buffer overflow due to prior validation.
+					remap_stage = 9; // Have it hit special stage 9+1 next time for code reduction purposes.
+					goto examine_line; // Have the main loop process the contents of "buf" as though it came in from the script.
+				}
+				// Otherwise, remap_keybd_to_mouse==false, so fall through to next case.
+			case 10:
+				extra_event = ""; // Set default.
+				switch (remap_dest_vk)
+				{
+				case VK_LMENU:
+				case VK_RMENU:
+				case VK_MENU:
+					switch (remap_source_vk)
+					{
+					case VK_LCONTROL:
+					case VK_CONTROL:
+						extra_event = "{LCtrl up}"; // Somewhat surprisingly, this is enough to make "Ctrl::Alt" properly remap both right and left control.
+						break;
+					case VK_RCONTROL:
+						extra_event = "{RCtrl up}";
+						break;
+					// Below is commented out because its only purpose was to allow a shift key remapped to alt
+					// to be able to alt-tab.  But that wouldn't work correctly due to the need for the following
+					// hotkey, which does more harm than good by impacting the normal Alt key's ability to alt-tab
+					// (if the normal Alt key isn't remapped): *Tab::Send {Blind}{Tab}
+					//case VK_LSHIFT:
+					//case VK_SHIFT:
+					//	extra_event = "{LShift up}";
+					//	break;
+					//case VK_RSHIFT:
+					//	extra_event = "{RShift up}";
+					//	break;
+					}
+					break;
+				}
+				mCurrLine = NULL; // v1.0.40.04: Prevents showing misleading vicinity lines for a syntax-error such as %::%
+				sprintf(buf, "{Blind}%s%s{%s DownTemp}", extra_event, remap_dest_modifiers, remap_dest); // v1.0.44.05: DownTemp vs. Down. See Send's DownTemp handler for details.
+				if (!AddLine(ACT_SEND, &buf, 1, NULL)) // v1.0.40.04: Check for failure due to bad remaps such as %::%.
+					return FAIL;
+				AddLine(ACT_RETURN);
+				// Add key-up hotkey label, e.g. *LButton up::
+				buf_length = sprintf(buf, "*%s up::", remap_source); // Should be no risk of buffer overflow due to prior validation.
+				remap_stage = 2; // Adjust to hit stage 3 next time (in case this is stage 10).
+				goto examine_line; // Have the main loop process the contents of "buf" as though it came in from the script.
+			case 3: // Stage 3.
+				strcpy(buf, "-1");
+				AddLine(remap_dest_is_mouse ? ACT_SETMOUSEDELAY : ACT_SETKEYDELAY, &buf, 1, NULL);
+				sprintf(buf, "{Blind}{%s Up}", remap_dest); // Unlike the down-event above, remap_dest_modifiers is not included for the up-event; e.g. ^{b up} is inappropriate.
+				AddLine(ACT_SEND, &buf, 1, NULL);
+				AddLine(ACT_RETURN);
+				remap_dest_vk = 0; // Reset to signal that the remapping expansion is now complete.
+				break; // Fall through to the next section so that script loading can resume at the next line.
+			}
+		} // if (remap_dest_vk)
+		// Since above didn't "continue", resume loading script line by line:
+		buf = next_buf;
+		buf_length = next_buf_length;
+		next_buf = (buf == buf1) ? buf2 : buf1;
+		// The line above alternates buffers (toggles next_buf to be the unused buffer), which helps
+		// performance because it avoids memcpy from buf2 to buf1.
+	} // for each whole/constructed line.
+
+	if (*pending_function) // Since this is the last non-comment line, the pending function must be a function call, not a function definition.
+	{
+		// Somewhat messy to decrement then increment later, but it's probably easier than the
+		// alternatives due to the use of "continue" in some places above.
+		saved_line_number = mCombinedLineNumber;
+		mCombinedLineNumber = pending_function_line_number; // Done so that any syntax errors that occur during the calls below will report the correct line number.
+		if (!ParseAndAddLine(pending_function, ACT_EXPRESSION)) // Must be function call vs. definition since otherwise the above would have detected the opening brace beneath it and already cleared pending_function.
+			return FAIL;
+		mCombinedLineNumber = saved_line_number;
+	}
+
+	++mCombinedLineNumber; // L40: Put the implicit ACT_EXIT on the line after the last physical line (for the debugger).
+
+	return OK;
+}
+
+
+
 
 
 ResultType Script::LoadIncludedFile(char *aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure)
@@ -1182,7 +2605,7 @@ ResultType Script::LoadIncludedFile(char *aFileSpec, bool aAllowDuplicateInclude
 #define HOTKEY_FLAG_LENGTH 2
 {
 	if (!aFileSpec || !*aFileSpec) return FAIL;
-
+	
 #ifndef AUTOHOTKEYSC
 	if (Line::sSourceFileCount >= Line::sMaxSourceFiles)
 	{
@@ -2108,23 +3531,6 @@ examine_line:
 			// Otherwise, a normal (non-hotkey) label in the autoexecute section would count and
 			// thus the RETURN would never be added here, even though it should be:
 			
-			// Notes about the below macro:
-			// Fix for v1.0.34: Don't point labels to this particular RETURN so that labels
-			// can point to the very first hotkey or hotstring in a script.  For example:
-			// Goto Test
-			// Test:
-			// ^!z::ToolTip Without the fix`, this is never displayed by "Goto Test".
-			// UCHAR_MAX signals it not to point any pending labels to this RETURN.
-			// mCurrLine = NULL -> signifies that we're in transition, trying to load a new one.
-			#define CHECK_mNoHotkeyLabels \
-			if (mNoHotkeyLabels)\
-			{\
-				mNoHotkeyLabels = false;\
-				if (!AddLine(ACT_RETURN, NULL, UCHAR_MAX))\
-					return CloseAndReturnFail(fp, script_buf);\
-				mCurrLine = NULL;\
-			}
-			CHECK_mNoHotkeyLabels
 			// For hotstrings, the below makes the label include leading colon(s) and the full option
 			// string (if any) so that the uniqueness of labels is preserved.  For example, we want
 			// the following two hotstring labels to be unique rather than considered duplicates:

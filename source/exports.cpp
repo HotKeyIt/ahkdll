@@ -128,7 +128,6 @@ EXPORT unsigned int addFile(char *fileName, bool aAllowDuplicateInclude, int aIg
  g_script.mLazyVarCount = 0 ; 
 */
 		}
-
 	g_script.LoadIncludedFile(fileName, aAllowDuplicateInclude, (bool) aIgnoreLoadFailure);
 	g_script.PreparseBlocks(g_script.mFirstLine); 
 	PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)g_script.mFirstLine, (LPARAM)g_script.mFirstLine);
@@ -163,7 +162,101 @@ EXPORT unsigned int addFile(char *fileName, bool aAllowDuplicateInclude, int aIg
 	}
 	else 
 	{
-	g_script.LoadIncludedFile(fileName, aAllowDuplicateInclude, (bool) aIgnoreLoadFailure);
+		g_script.LoadIncludedFile(fileName, aAllowDuplicateInclude, (bool) aIgnoreLoadFailure);
+	}
+	
+	g_script.PreparseBlocks(oldLastLine->mNextLine); // 
+	return (unsigned int) oldLastLine->mNextLine;  // 
+}
+
+
+#endif
+
+#ifdef DLLN
+// HotKeyIt: addScript()
+// Todo: support for #Directives, and proper treatment of mIsReadytoExecute
+EXPORT unsigned int addScript(char *script, int aReplace)
+{   // dynamically include a file into a script !!
+	// labels, hotkeys, functions.   
+	static int filesAdded = 0  ; 
+	
+	Line *oldLastLine = g_script.mLastLine;
+	
+	if (aReplace)  // if third param is > 1, reset all functions, labels, remove hotkeys
+	{
+		g_script.mFuncCount = 0;   
+		g_script.mFirstLabel = NULL ; 
+		g_script.mLastLabel = NULL ; 
+		g_script.mLastFunc = NULL ; 
+	    g_script.mFirstLine = NULL ; 
+		g_script.mLastLine = NULL ;
+		g_script.mCurrLine = NULL ; 
+
+		if (filesAdded == 0)
+			{
+			SimpleHeap::sBlockCount = 0 ;
+			SimpleHeap::sFirst = NULL;
+			SimpleHeap::sLast  = NULL;
+			SimpleHeap::sMostRecentlyAllocated = NULL;
+			}
+		if (filesAdded > 0)
+			{
+			// Naveen v9 free simpleheap memory for late include files
+			SimpleHeap *next, *curr;
+			for (curr = SimpleHeap::sFirst; curr != NULL;)
+				{
+				next = curr->mNextBlock;  // Save this member's value prior to deleting the object.
+				curr->~SimpleHeap() ;
+				curr = next;
+				}
+			SimpleHeap::sBlockCount = 0 ;
+			SimpleHeap::sFirst = NULL;
+			SimpleHeap::sLast  = NULL;
+			SimpleHeap::sMostRecentlyAllocated = NULL;
+/*  Naveen: the following is causing a memory leak in the exe version of clearing the simple heap v10
+ g_script.mVar = NULL ; 
+ g_script.mVarCount = 0 ; 
+ g_script.mVarCountMax = 0 ; 
+ g_script.mLazyVar = NULL ; 
+
+ g_script.mLazyVarCount = 0 ; 
+*/
+		}
+	g_script.LoadFromText(script);
+	g_script.PreparseBlocks(g_script.mFirstLine); 
+	PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)g_script.mFirstLine, (LPARAM)g_script.mFirstLine);
+	filesAdded += 1;
+	return (unsigned int) g_script.mFirstLine;
+	}
+	else
+	{
+	g_script.LoadFromText(script);
+	g_script.PreparseBlocks(oldLastLine->mNextLine); // 
+	return (unsigned int) oldLastLine->mNextLine;  // 
+	}
+return 0;  // never reached
+}
+
+#else
+// HotKeyIt: addScript()
+// Todo: support for #Directives, and proper treatment of mIsReadytoExecute
+EXPORT unsigned int addScript(char *script, int aReplace)
+{   // dynamically include a script from text!!
+	// labels, hotkeys, functions.   
+	
+	Line *oldLastLine = g_script.mLastLine;
+	
+	if (aReplace)  // if third param is > 1, reset all functions, labels, remove hotkeys
+	{
+		g_script.mFuncCount = 0;   
+		g_script.mFirstLabel = NULL ; 
+		g_script.mLastLabel = NULL ; 
+		g_script.mLastFunc = NULL ; 
+		g_script.LoadFromText(script);
+	}
+	else 
+	{
+		g_script.LoadFromText(script);
 	}
 	
 	g_script.PreparseBlocks(oldLastLine->mNextLine); // 

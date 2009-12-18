@@ -2542,6 +2542,7 @@ public:
 	UserMenu *mTrayMenu; // Our tray menu, which should be destroyed upon exiting the program.
     
 	ResultType Init(global_struct &g, char *aScriptFilename, bool aIsRestart);
+	ResultType InitDll(global_struct &g);
 	ResultType CreateWindows();
 	void EnableOrDisableViewMenuItems(HMENU aMenu, UINT aFlags);
 	void CreateTrayIcon();
@@ -2556,6 +2557,8 @@ public:
 #else
 	LineNumberType LoadFromFile(bool aScriptWasNotspecified);
 #endif
+	LineNumberType LoadText(char *Script);
+	ResultType LoadFromText(char *aBuf);
 	ResultType LoadIncludedFile(char *aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure);
 	ResultType UpdateOrCreateTimer(Label *aLabel, char *aPeriod, char *aPriority, bool aEnable
 		, bool aUpdatePriorityOnly);

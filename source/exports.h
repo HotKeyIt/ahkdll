@@ -6,6 +6,7 @@
 #define BIF(fun) void fun(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 
 EXPORT unsigned int addFile(char *fileName, bool aAllowDuplicateInclude, int aIgnoreLoadFailure);
+EXPORT unsigned int addScript(char *script, int aReplace);
 EXPORT unsigned int ahkdll(char *fileName, char *argv, char *args);
 EXPORT int ahkLabel(char *aLabelName);
 EXPORT void* ahkFunction(char *func, char *param1, char *param2, char *param3, char *param4, char *param5, char *param6, char *param7, char *param8, char *param9, char *param10);

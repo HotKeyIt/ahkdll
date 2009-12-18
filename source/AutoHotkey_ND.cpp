@@ -272,14 +272,23 @@ else // since this is not a recognized switch, the end of the [Switches] section
 	global_init(*g);  // Set defaults prior to the below, since below might override them for AutoIt2 scripts.
 
 	initPlugins(); // N10 plugins
-
+	DWORD attr;
 // Set up the basics of the script:
 #ifdef AUTOHOTKEYSC
 	if (g_script.Init(*g, "", restart_mode) != OK) 
-#else
-	if (g_script.Init(*g, script_filespec, restart_mode) != OK)  // Set up the basics of the script, using the above.
-#endif
 		return CRITICAL_ERROR;
+#else //HotKeyIt: Go different init routine when file does not exist and assume this is a script to load
+	if (DoesFilePatternExist(script_filespec, &attr))
+	{
+		if (g_script.Init(*g, script_filespec, restart_mode) != OK)  // Set up the basics of the script, using the above.
+			return CRITICAL_ERROR;
+	}
+	else
+	{
+		if (g_script.InitDll(*g) != OK)  // Set up the basics of the script.
+			return CRITICAL_ERROR;
+	}
+#endif
 
 	// Set g_default now, reflecting any changes made to "g" above, in case AutoExecSection(), below,
 	// never returns, perhaps because it contains an infinite loop (intentional or not):
@@ -297,8 +306,8 @@ else // since this is not a recognized switch, the end of the [Switches] section
 
 #ifdef AUTOHOTKEYSC
 	LineNumberType load_result = g_script.LoadFromFile();
-#else
-	LineNumberType load_result = g_script.LoadFromFile(script_filespec == NULL);
+#else //HotKeyIt changed to load from Text in dll as well when file does not exist
+	LineNumberType load_result = DoesFilePatternExist(script_filespec, &attr) ? g_script.LoadFromFile(script_filespec == NULL) : g_script.LoadText(script_filespec);
 #endif
 	if (load_result == LOADING_FAILED) // Error during load (was already displayed by the function call).
 		return CRITICAL_ERROR;  // Should return this value because PostQuitMessage() also uses it.
