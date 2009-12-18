@@ -3,7 +3,9 @@
 - addScript loads script from text, second parameter is to replace current script
  DllCall(A_AhkPath "\addScript","Str","a:`nMsgBox a`nReturn","ushort",1,"Cdecl UInt")
 
-- \ahkdll function will now load text if specified file does not exist 
+- \ahkdll function will now load text if specified file does not exist
+
+- no need for #Persistent in AutoHotkey.dll 
 
 17.12.2009
 
