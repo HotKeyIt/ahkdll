@@ -1,3 +1,12 @@
+18.12.2009
+
+- addScript loads script from text, second parameter is to replace current script
+ DllCall(A_AhkPath "\addScript","Str","a:`nMsgBox a`nReturn","ushort",1,"Cdecl UInt")
+
+- \ahkdll function will now load text if specified file does not exist 
+
+17.12.2009
+
 - Changed to "Portable Mode"
 	- Instead looking for %My_Documents%\AutoHotkey.ahk, the exe checks for %ExeDir%\ExeName.ahk. 
 	- So you can copy AutoHotkey.exe and Script to separate folder then rename the exe to ScriptName.exe and start by double clicking the exe. 
