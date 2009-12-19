@@ -176,13 +176,13 @@ EXPORT unsigned int addFile(char *fileName, bool aAllowDuplicateInclude, int aIg
 // HotKeyIt: addScript()
 // Todo: support for #Directives, and proper treatment of mIsReadytoExecute
 EXPORT unsigned int addScript(char *script, int aReplace)
-{   // dynamically include a file into a script !!
+{   // dynamically include a script into a script !!
 	// labels, hotkeys, functions.   
 	static int filesAdded = 0  ; 
 	
 	Line *oldLastLine = g_script.mLastLine;
 	
-	if (aReplace)  // if third param is > 1, reset all functions, labels, remove hotkeys
+	if (aReplace > 0)  // if second param is > 1, reset all functions, labels, remove hotkeys
 	{
 		g_script.mFuncCount = 0;   
 		g_script.mFirstLabel = NULL ; 
@@ -246,7 +246,7 @@ EXPORT unsigned int addScript(char *script, int aReplace)
 	
 	Line *oldLastLine = g_script.mLastLine;
 	
-	if (aReplace)  // if third param is > 1, reset all functions, labels, remove hotkeys
+	if (aReplace > 0)  // if third param is > 1, reset all functions, labels, remove hotkeys
 	{
 		g_script.mFuncCount = 0;   
 		g_script.mFirstLabel = NULL ; 
@@ -326,9 +326,11 @@ if (aFunc)
 
 	// See MsgSleep() for comments about the following section.
 	char ErrorLevel_saved[ERRORLEVEL_SAVED_SIZE];
-	strlcpy(ErrorLevel_saved, g_ErrorLevel->Contents(), sizeof(ErrorLevel_saved));
-	InitNewThread(0, false, true, func.mJumpToLine->mActionType);
 
+	strlcpy(ErrorLevel_saved, g_ErrorLevel->Contents(), sizeof(ErrorLevel_saved));
+	
+	InitNewThread(0, false, true, func.mJumpToLine->mActionType);
+	++g_script.mTimerEnabledCount;
 	
 	// See ExpandExpression() for detailed comments about the following section.
 	if (func.mParamCount > 0)
@@ -386,9 +388,10 @@ if (aFunc)
 		DEBUGGER_STACK_PUSH(SE_Thread, func.mJumpToLine, desc, func.mName)
 
 	ExprTokenType return_value;
-	
-	func.Call(&return_value); // Call the UDF.
-	
+	ResultType result;
+	g_DeferMessagesForUnderlyingPump = true;
+	result = func.Call(&return_value); // Call the UDF.
+	--g_script.mTimerEnabledCount;
 		DEBUGGER_STACK_POP()
 	if (return_value.symbol == PURE_INTEGER)
 	{
