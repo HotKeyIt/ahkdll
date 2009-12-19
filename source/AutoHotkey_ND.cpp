@@ -36,9 +36,10 @@ GNU General Public License for more details.
 static struct nameHinstance
      {
        HINSTANCE hInstanceP;
-       char name[1000];
+       char *name;
 	   char argv[1000];
 	   char args[1000];
+	   int istext;
      } nameHinstanceP ;
 
 // Naveen v1. HANDLE hThread
@@ -272,13 +273,12 @@ else // since this is not a recognized switch, the end of the [Switches] section
 	global_init(*g);  // Set defaults prior to the below, since below might override them for AutoIt2 scripts.
 
 	initPlugins(); // N10 plugins
-	DWORD attr;
 // Set up the basics of the script:
 #ifdef AUTOHOTKEYSC
 	if (g_script.Init(*g, "", restart_mode) != OK) 
 		return CRITICAL_ERROR;
 #else //HotKeyIt: Go different init routine when file does not exist and assume this is a script to load
-	if (DoesFilePatternExist(script_filespec, &attr))
+	if (!nameHinstanceP.istext)
 	{
 		if (g_script.Init(*g, script_filespec, restart_mode) != OK)  // Set up the basics of the script, using the above.
 			return CRITICAL_ERROR;
@@ -307,7 +307,7 @@ else // since this is not a recognized switch, the end of the [Switches] section
 #ifdef AUTOHOTKEYSC
 	LineNumberType load_result = g_script.LoadFromFile();
 #else //HotKeyIt changed to load from Text in dll as well when file does not exist
-	LineNumberType load_result = DoesFilePatternExist(script_filespec, &attr) ? g_script.LoadFromFile(script_filespec == NULL) : g_script.LoadText(script_filespec);
+	LineNumberType load_result = !nameHinstanceP.istext ? g_script.LoadFromFile(script_filespec == NULL) : g_script.LoadText(script_filespec);
 #endif
 	if (load_result == LOADING_FAILED) // Error during load (was already displayed by the function call).
 		return CRITICAL_ERROR;  // Should return this value because PostQuitMessage() also uses it.
@@ -458,7 +458,7 @@ unsigned __stdcall runScript( void* pArguments )
 	OldWinMain(hInstance, 0, fileName, 0);	
 	_endthreadex( 0 );  
     return 0;
-} 
+}
 
 
 // Naveen: v1. ahkdll() - load AutoHotkey script into dll
@@ -471,9 +471,28 @@ EXPORT unsigned int ahkdll(char *fileName, char *argv, char *args)
  // nameHinstanceP.argv = argv ;
  // nameHinstanceP.args = args ;
 
- strncpy(nameHinstanceP.name, fileName, strlen(fileName));
+ //strncpy(nameHinstanceP.name, fileName, strlen(fileName));
+ nameHinstanceP.name = (char *)SimpleHeap::Malloc(fileName);
  strncpy(nameHinstanceP.argv, argv, strlen(argv));
  strncpy(nameHinstanceP.args, args, strlen(args));
+
+ hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, &threadID );
+ //WaitForSingleObject( hThread, 500 );
+ return (unsigned int)hThread;
+}
+
+// HotKeyIt ahktextdll
+EXPORT unsigned int ahktextdll(char *fileName, char *argv, char *args)
+{
+ unsigned threadID;
+ // nameHinstanceP.name = fileName ;
+ // nameHinstanceP.argv = argv ;
+ // nameHinstanceP.args = args ;
+ //strncpy(nameHinstanceP.name, fileName, strlen(fileName));
+ nameHinstanceP.name = (char *)SimpleHeap::Malloc((char *)fileName);
+ strncpy(nameHinstanceP.argv, argv, strlen(argv));
+ strncpy(nameHinstanceP.args, args, strlen(args));
+ nameHinstanceP.istext = 1;
 
  hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, &threadID );
  //WaitForSingleObject( hThread, 500 );

@@ -222,7 +222,7 @@ EXPORT unsigned int addScript(char *script, int aReplace)
  g_script.mLazyVarCount = 0 ; 
 */
 		}
-	g_script.LoadFromText(script);
+	g_script.LoadFromScript(script);
 	g_script.PreparseBlocks(g_script.mFirstLine); 
 	PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)g_script.mFirstLine, (LPARAM)g_script.mFirstLine);
 	filesAdded += 1;
@@ -230,7 +230,7 @@ EXPORT unsigned int addScript(char *script, int aReplace)
 	}
 	else
 	{
-	g_script.LoadFromText(script);
+	g_script.LoadFromScript(script);
 	g_script.PreparseBlocks(oldLastLine->mNextLine); // 
 	return (unsigned int) oldLastLine->mNextLine;  // 
 	}
@@ -252,11 +252,11 @@ EXPORT unsigned int addScript(char *script, int aReplace)
 		g_script.mFirstLabel = NULL ; 
 		g_script.mLastLabel = NULL ; 
 		g_script.mLastFunc = NULL ; 
-		g_script.LoadFromText(script);
+		g_script.LoadFromScript(script);
 	}
 	else 
 	{
-		g_script.LoadFromText(script);
+		g_script.LoadFromScript(script);
 	}
 	
 	g_script.PreparseBlocks(oldLastLine->mNextLine); // 

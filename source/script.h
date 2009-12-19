@@ -2450,6 +2450,7 @@ public:
 	ResultType CloseAndReturnFailFunc(FILE *fp);
 	size_t GetLine(char *aBuf, int aMaxCharsToRead, int aInContinuationSection, FILE *fp);
 #endif
+	size_t GetLineFromText(char *aBuf, int aMaxCharsToRead, int aInContinuationSection, UCHAR *&sBuf);
 	ResultType IsDirective(char *aBuf);
 
 	ResultType ParseAndAddLine(char *aLineText, ActionTypeType aActionType = ACT_INVALID
@@ -2558,7 +2559,7 @@ public:
 	LineNumberType LoadFromFile(bool aScriptWasNotspecified);
 #endif
 	LineNumberType LoadText(char *Script);
-	ResultType LoadFromText(char *aBuf);
+	ResultType LoadFromScript(char *aBuf);
 	ResultType LoadIncludedFile(char *aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure);
 	ResultType UpdateOrCreateTimer(Label *aLabel, char *aPeriod, char *aPriority, bool aEnable
 		, bool aUpdatePriorityOnly);

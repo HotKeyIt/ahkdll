@@ -1001,7 +1001,7 @@ LineNumberType Script::LoadText(char *aScript)
 	// function library auto-inclusions to be processed correctly.
 
 	// Load the main script file.  This will also load any files it includes with #Include.
-	if (   LoadFromText(aScript) != OK
+	if (   LoadFromScript(aScript) != OK
 		|| !AddLine(ACT_EXIT)) // Fix for v1.0.47.04: Add an Exit because otherwise, a script that ends in an IF-statement will crash in PreparseBlocks() because PreparseBlocks() expects every IF-statements mNextLine to be non-NULL (helps loading performance too).
 		return LOADING_FAILED;
 
@@ -1352,8 +1352,7 @@ bool IsFunction(char *aBuf, bool *aPendingFunctionHasBrace = NULL)
 	// could never be called as ACT_EXPRESSION since it would be seen as an IF-stmt instead.
 }
 
-ResultType Script::LoadFromText(char *aBuf)
-// HotKeyIt LoadFromText
+ResultType Script::LoadFromScript(char *aBuf)
 // Returns OK or FAIL.
 // Below: Use double-colon as delimiter to set these apart from normal labels.
 // The main reason for this is that otherwise the user would have to worry
@@ -1363,32 +1362,6 @@ ResultType Script::LoadFromText(char *aBuf)
 #define HOTKEY_FLAG "::"
 #define HOTKEY_FLAG_LENGTH 2
 {
-	if (!aBuf || !*aBuf) return FAIL;
-	if (   !(g_ErrorLevel = FindOrAddVar("ErrorLevel"))   )
-		return FAIL; // Error.  Above already displayed it for us.
-#ifndef AUTOHOTKEYSC
-	if (Line::sSourceFileCount >= Line::sMaxSourceFiles)
-	{
-		if (Line::sSourceFileCount >= ABSOLUTE_MAX_SOURCE_FILES)
-			return ScriptError("Too many includes."); // Short msg since so rare.
-		int new_max;
-		if (Line::sMaxSourceFiles)
-		{
-			new_max = 2*Line::sMaxSourceFiles;
-			if (new_max > ABSOLUTE_MAX_SOURCE_FILES)
-				new_max = ABSOLUTE_MAX_SOURCE_FILES;
-		}
-		else
-			new_max = 100;
-		// For simplicity and due to rarity of every needing to, expand by reallocating the array.
-		// Use a temp var. because realloc() returns NULL on failure but leaves original block allocated.
-		char **realloc_temp = (char **)realloc(Line::sSourceFile, new_max*sizeof(char *)); // If passed NULL, realloc() will do a malloc().
-		if (!realloc_temp)
-			return ScriptError(ERR_OUTOFMEM); // Short msg since so rare.
-		Line::sSourceFile = realloc_temp;
-		Line::sMaxSourceFiles = new_max;
-	}
-#endif
 	// Keep this var on the stack due to recursion, which allows newly created lines to be given the
 	// correct file number even when some #include's have been encountered in the middle of the script:
 	int source_file_index = Line::sSourceFileCount;
@@ -1399,10 +1372,30 @@ ResultType Script::LoadFromText(char *aBuf)
 	// <buf> should be no larger than LINE_SIZE because some later functions rely upon that:
 	char msg_text[MAX_PATH + 256], buf1[LINE_SIZE], buf2[LINE_SIZE], suffix[16], pending_function[LINE_SIZE] = "";
 	char *buf = buf1, *next_buf = buf2; // Oscillate between bufs to improve performance (avoids memcpy from buf2 to buf1).
-	size_t buf_length, next_buf_length, suffix_length, char_pos = 0, aBuf_length;
+	size_t buf_length, next_buf_length, suffix_length;
 	bool pending_function_has_brace;
+	
+	UCHAR *script_buf_marker = script_buf;  // "marker" will track where we are in the mem. file as we read from it.
+	
+	nDataSize = strlen(aBuf);
+	script_buf = (UCHAR *)*&aBuf;
+	// Must cast to int to avoid loss of negative values:
+	#define SCRIPT_BUF_SPACE_REMAINING ((int)(nDataSize - (script_buf_marker - script_buf)))
+	int script_buf_space_remaining, max_chars_to_read; // script_buf_space_remaining must be an int to detect negatives.
+
+	script_buf_space_remaining = SCRIPT_BUF_SPACE_REMAINING;  // Resolve macro only once, for performance.
+	max_chars_to_read = (LINE_SIZE - 1 < script_buf_space_remaining) ? LINE_SIZE - 1
+		: script_buf_space_remaining;
+
+	// AutoIt3: We have the data in RAW BINARY FORM, the script is a text file, so
+	// this means that instead of a newline character, there may also be carridge
+	// returns 0x0d 0x0a (\r\n)
+	//HS_EXEArc_Read *fp = &oRead;  // To help consolidate the code below.
+	script_buf_marker = *&script_buf;
 
 	++Line::sSourceFileCount;
+
+	// File is now open, read lines from it.
 
 	char *hotkey_flag, *cp, *cp1, *action_end, *hotstring_start, *hotstring_options;
 	Hotkey *hk;
@@ -1435,39 +1428,15 @@ ResultType Script::LoadFromText(char *aBuf)
 	// Init both for main file and any included files loaded by this function:
 	mCurrFileIndex = source_file_index;  // source_file_index is kept on the stack due to recursion (from #include).
 
-	LineNumberType phys_line_number = 0;
-	//buf=strstr(aBuf,"\r\n");
-	//if (!*buf)
-	//	buf=aBuf;
-	//else
-	//	rtrim(buf,2);
-	aBuf_length = strlen(aBuf);
-	
-	if (!strcspn(aBuf, "\n"))
-	{
-		if (aBuf_length > 1)
-		{
-			for(int i=0;aBuf[i]=='\n';i++)
-			{
-				char_pos++;
-			}
-			buf_length = strcspn(aBuf+char_pos, "\n");
-			strncpy(buf,aBuf+char_pos,buf_length);
-			char_pos = buf_length + 1;
-		}
-		else
-			buf=aBuf;
-	}
-	else
-	{
-		buf_length = strcspn(aBuf, "\n");
-		char_pos = buf_length + 1;
-		strncpy(buf,aBuf,buf_length);
-	}
-	//buf_length = strlen(buf);
-	*(buf + buf_length) = '\0';
-	//ltrim(aBuf,buf_length+2);
-	//buf_length = GetLine(buf, LINE_SIZE - 1, 0, fp);
+	// -1 (MAX_UINT in this case) to compensate for the fact that there is a comment containing
+	// the version number added to the top of each compiled script:
+	LineNumberType phys_line_number = -1;
+	// For compiled scripts, limit the number of characters to read to however many remain in the memory
+	// file or the size of the buffer, whichever is less.
+	script_buf_space_remaining = SCRIPT_BUF_SPACE_REMAINING;  // Resolve macro only once, for performance.
+	max_chars_to_read = (LINE_SIZE - 1 < script_buf_space_remaining) ? LINE_SIZE - 1
+		: script_buf_space_remaining;
+	buf_length = GetLineFromText(buf, max_chars_to_read, 0, script_buf_marker);
 
 	if (in_comment_section = !strncmp(buf, "/*", 2))
 	{
@@ -1505,32 +1474,11 @@ ResultType Script::LoadFromText(char *aBuf)
 		{
 			// This increment relies on the fact that this loop always has at least one iteration:
 			++phys_line_number; // Tracks phys. line number in *this* file (independent of any recursion caused by #Include).
-			//next_buf = strstr(aBuf,"\r\n");
-			//rtrim(next_buf,2);
-			//next_buf_length = strlen(next_buf);
-			//ltrim(aBuf,buf_length+2);
-			//*next_buf = *(aBuf + buf_length+2);
-			if (!aBuf_length || aBuf_length == buf_length)
-				next_buf_length = -1;
-			else
-			{
-				next_buf_length =strcspn(aBuf+char_pos, "\n");
-				if (char_pos+next_buf_length == aBuf_length)
-				{
-					next_buf_length = aBuf_length-char_pos;
-					strncpy(next_buf,aBuf+char_pos,next_buf_length);
-					*(next_buf+next_buf_length) = '\0';
-					aBuf_length = 0;
-				}
-				else
-				{
-					strncpy(next_buf,aBuf+char_pos,next_buf_length);
-					*(next_buf+next_buf_length) = '\0';
-					char_pos += next_buf_length+1;
-				}
-			}
-			//next_buf_length=(size_t)(int) *strrstr(aBuf, "\r\n",SCS_SENSITIVE, buf_length+2);
-			//next_buf_length = GetLine(next_buf, LINE_SIZE - 1, in_continuation_section, fp);
+			// See similar section above for comments about the following:
+			script_buf_space_remaining = SCRIPT_BUF_SPACE_REMAINING;  // Resolve macro only once, for performance.
+			max_chars_to_read = (LINE_SIZE - 1 < script_buf_space_remaining) ? LINE_SIZE - 1
+				: script_buf_space_remaining;
+			next_buf_length = GetLineFromText(next_buf, max_chars_to_read, in_continuation_section, script_buf_marker);
 			if (next_buf_length && next_buf_length != -1) // Prevents infinite loop when file ends with an unclosed "/*" section.  Compare directly to -1 since length is unsigned.
 			{
 				if (in_comment_section) // Look for the uncomment-flag.
@@ -2233,23 +2181,6 @@ examine_line:
 			// Otherwise, a normal (non-hotkey) label in the autoexecute section would count and
 			// thus the RETURN would never be added here, even though it should be:
 			
-			// Notes about the below macro:
-			// Fix for v1.0.34: Don't point labels to this particular RETURN so that labels
-			// can point to the very first hotkey or hotstring in a script.  For example:
-			// Goto Test
-			// Test:
-			// ^!z::ToolTip Without the fix`, this is never displayed by "Goto Test".
-			// UCHAR_MAX signals it not to point any pending labels to this RETURN.
-			// mCurrLine = NULL -> signifies that we're in transition, trying to load a new one.
-			#define CHECK_mNoHotkeyLabels \
-			if (mNoHotkeyLabels)\
-			{\
-				mNoHotkeyLabels = false;\
-				if (!AddLine(ACT_RETURN, NULL, UCHAR_MAX))\
-					return FAIL;\
-				mCurrLine = NULL;\
-			}
-			CHECK_mNoHotkeyLabels
 			// For hotstrings, the below makes the label include leading colon(s) and the full option
 			// string (if any) so that the uniqueness of labels is preserved.  For example, we want
 			// the following two hotstring labels to be unique rather than considered duplicates:
@@ -2366,6 +2297,14 @@ examine_line:
 				// bad if the hotkey were something like the "Shutdown" command.
 				if (buf[buf_length - 2] == ':' && buf_length > 2) // i.e. allow "::" as a normal label, but consider anything else with double-colon to be a failed-hotkey label that terminates the auto-exec section.
 				{
+					#define CHECK_mNoHotkeyLabels \
+					if (mNoHotkeyLabels)\
+					{\
+						mNoHotkeyLabels = false;\
+						if (!AddLine(ACT_RETURN, NULL, UCHAR_MAX))\
+							return FAIL;\
+						mCurrLine = NULL;\
+					}
 					CHECK_mNoHotkeyLabels // Terminate the auto-execute section since this is a failed hotkey vs. a mere normal label.
 					snprintf(msg_text, sizeof(msg_text), "Note: The hotkey %s will not be active because it does not exist in the current keyboard layout.", buf);
 					MsgBox(msg_text);
@@ -2583,9 +2522,6 @@ continue_main_loop: // This method is used in lieu of "continue" for performance
 
 	return OK;
 }
-
-
-
 
 
 ResultType Script::LoadIncludedFile(char *aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure)
@@ -8483,6 +8419,139 @@ Func *Script::FindFuncInLibrary(char *aFuncName, size_t aFuncNameLength, bool &a
 	return NULL;
 }
 #endif
+
+size_t Script::GetLineFromText(char *aBuf, int aMaxCharsToRead, int aInContinuationSection, UCHAR *&sBuf)
+{
+	size_t aBuf_length = 0;
+	if (!aBuf || !sBuf) return -1;
+	if (aMaxCharsToRead < 1) return -1; // We're signaling to caller that the end of the memory file has been reached.
+	// Otherwise, continue reading characters from the memory file until either a newline is
+	// reached or aMaxCharsToRead have been read:
+	// Track "i" separately from aBuf_length because we want to read beyond the bounds of the memory file.
+	int i;
+	for (i = 0; i < aMaxCharsToRead; ++i)
+	{
+		if (sBuf[i] == '\n')
+		{
+			// The end of this line has been reached.  Don't copy this char into the target buffer.
+			// In addition, if the previous char was '\r', remove it from the target buffer:
+			if (aBuf_length > 0 && aBuf[aBuf_length - 1] == '\r')
+				aBuf[--aBuf_length] = '\0';
+			++i; // i.e. so that aMemFile will be adjusted to omit this newline char.
+			break;
+		}
+		else
+			aBuf[aBuf_length++] = sBuf[i];
+	}
+	// We either read aMaxCharsToRead or reached the end of the line (as indicated by the newline char).
+	// In the former case, aMemFile might now be changed to be a position outside the bounds of the
+	// memory area, which the caller will reflect back to us during the next call as a 0 value for
+	// aMaxCharsToRead, which we then signal to the caller (above) as the end of the file):
+	sBuf += i; // Update this value for use by the caller.
+	// Terminate the buffer (the caller has already ensured that there's room for the terminator
+	// via its value of aMaxCharsToRead):
+	aBuf[aBuf_length] = '\0';
+
+
+	if (aInContinuationSection)
+	{
+		char *cp = omit_leading_whitespace(aBuf);
+		if (aInContinuationSection == CONTINUATION_SECTION_WITHOUT_COMMENTS) // By default, continuation sections don't allow comments (lines beginning with a semicolon are treated as literal text).
+		{
+			// Caller relies on us to detect the end of the continuation section so that trimming
+			// will be done on the final line of the section and so that a comment can immediately
+			// follow the closing parenthesis (on the same line).  Example:
+			// (
+			//	Text
+			// ) ; Same line comment.
+			if (*cp != ')') // This isn't the last line of the continuation section, so leave the line untrimmed (caller will apply the ltrim setting on its own).
+				return aBuf_length; // Earlier sections are responsible for keeping aBufLength up-to-date with any changes to aBuf.
+			//else this line starts with ')', so continue on to later section that checks for a same-line comment on its right side.
+		}
+		else // aInContinuationSection == CONTINUATION_SECTION_WITH_COMMENTS (i.e. comments are allowed in this continuation section).
+		{
+			// Fix for v1.0.46.09+: The "com" option shouldn't put "ltrim" into effect.
+			if (!strncmp(cp, g_CommentFlag, g_CommentFlagLength)) // Case sensitive.
+			{
+				*aBuf = '\0'; // Since this line is a comment, have the caller ignore it.
+				return -2; // Callers tolerate -2 only when in a continuation section.  -2 indicates, "don't include this line at all, not even as a blank line to which the JOIN string (default "\n") will apply.
+			}
+			if (*cp == ')') // This isn't the last line of the continuation section, so leave the line untrimmed (caller will apply the ltrim setting on its own).
+			{
+				ltrim(aBuf); // Ltrim this line unconditionally so that caller will see that it starts with ')' without having to do extra steps.
+				aBuf_length = strlen(aBuf); // ltrim() doesn't always return an accurate length, so do it this way.
+			}
+		}
+	}
+	// Since above didn't return, either:
+	// 1) We're not in a continuation section at all, so apply ltrim() to support semicolons after tabs or
+	//    other whitespace.  Seems best to rtrim also.
+	// 2) CONTINUATION_SECTION_WITHOUT_COMMENTS but this line is the final line of the section.  Apply
+	//    trim() and other logic further below because caller might rely on it.
+	// 3) CONTINUATION_SECTION_WITH_COMMENTS (i.e. comments allowed), but this line isn't a comment (though
+	//    it may start with ')' and thus be the final line of this section). In either case, need to check
+	//    for same-line comments further below.
+	if (aInContinuationSection != CONTINUATION_SECTION_WITH_COMMENTS) // Case #1 & #2 above.
+	{
+		aBuf_length = trim(aBuf);
+		if (!strncmp(aBuf, g_CommentFlag, g_CommentFlagLength)) // Case sensitive.
+		{
+			// Due to other checks, aInContinuationSection==false whenever the above condition is true.
+			*aBuf = '\0';
+			return 0;
+		}
+	}
+	//else CONTINUATION_SECTION_WITH_COMMENTS (case #3 above), which due to other checking also means that
+	// this line isn't a comment (though it might have a comment on its right side, which is checked below).
+	// CONTINUATION_SECTION_WITHOUT_COMMENTS would already have returned higher above if this line isn't
+	// the last line of the continuation section.
+	if (g_AllowSameLineComments)
+	{
+		// Handle comment-flags that appear to the right of a valid line.  But don't
+		// allow these types of comments if the script is considers to be the AutoIt2
+		// style, to improve compatibility with old scripts that may use non-escaped
+		// comment-flags as literal characters rather than comments:
+		char *cp, *prevp;
+		for (cp = strstr(aBuf, g_CommentFlag); cp; cp = strstr(cp + g_CommentFlagLength, g_CommentFlag))
+		{
+			// If no whitespace to its left, it's not a valid comment.
+			// We insist on this so that a semi-colon (for example) immediately after
+			// a word (as semi-colons are often used) will not be considered a comment.
+			prevp = cp - 1;
+			if (prevp < aBuf) // should never happen because we already checked above.
+			{
+				*aBuf = '\0';
+				return 0;
+			}
+			if (IS_SPACE_OR_TAB_OR_NBSP(*prevp)) // consider it to be a valid comment flag
+			{
+				*prevp = '\0';
+				aBuf_length = rtrim_with_nbsp(aBuf, prevp - aBuf); // Since it's our responsibility to return a fully trimmed string.
+				break; // Once the first valid comment-flag is found, nothing after it can matter.
+			}
+			else // No whitespace to the left.
+				if (*prevp == g_EscapeChar) // Remove the escape char.
+				{
+					// The following isn't exactly correct because it prevents an include filename from ever
+					// containing the literal string "`;".  This is because attempts to escape the accent via
+					// "``;" are not supported.  This is documented here as a known limitation because fixing
+					// it would probably break existing scripts that rely on the fact that accents do not need
+					// to be escaped inside #Include.  Also, the likelihood of "`;" appearing literally in a
+					// legitimate #Include file seems vanishingly small.
+					memmove(prevp, prevp + 1, strlen(prevp + 1) + 1);  // +1 for the terminator.
+					--aBuf_length;
+					// Then continue looking for others.
+				}
+				// else there wasn't any whitespace to its left, so keep looking in case there's
+				// another further on in the line.
+		} // for()
+	} // if (g_AllowSameLineComments)
+
+	return aBuf_length; // The above is responsible for keeping aBufLength up-to-date with any changes to aBuf.
+}
+
+
+
 
 
 int Script::AddBIF(char *aFuncName, BuiltInFunctionType bif, size_t min_params, size_t max_params) // N10: added for plugin BIFs
