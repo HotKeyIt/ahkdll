@@ -1,3 +1,6 @@
+19.12.2009
+- fixed addScript bugs
+- created ahktextdll
 18.12.2009
 
 - addScript loads script from text, second parameter is to replace current script
