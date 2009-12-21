@@ -1,4 +1,3 @@
-
 // Naveen v1. #define EXPORT __declspec(dllexport) 
 #ifndef exports_h
 #define exports_h
