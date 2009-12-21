@@ -2542,8 +2542,9 @@ public:
 
 	UserMenu *mTrayMenu; // Our tray menu, which should be destroyed upon exiting the program.
     
+	void Destroy();
 	ResultType Init(global_struct &g, char *aScriptFilename, bool aIsRestart);
-	ResultType InitDll(global_struct &g);
+	ResultType InitDll(global_struct &g,HINSTANCE hInstance);
 	ResultType CreateWindows();
 	void EnableOrDisableViewMenuItems(HMENU aMenu, UINT aFlags);
 	void CreateTrayIcon();

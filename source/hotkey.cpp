@@ -483,6 +483,41 @@ void Hotkey::AllDestructAndExit(int aExitCode)
 	// calls any functions registered via atexit or _onexit.
 }
 
+void Hotkey::AllDestruct()
+{
+	AddRemoveHooks(0); // Remove all hooks. By contrast, registered hotkeys are unregistered below.
+	if (g_PlaybackHook) // Would be unusual for this to be installed during exit, but should be checked for completeness.
+		UnhookWindowsHookEx(g_PlaybackHook);
+	for (int i = 0; i < sHotkeyCount; ++i)
+	{
+		Hotkey &hk = *shk[i];
+		delete shk[i]; // Unregisters before destroying.
+		hk.sJoyHotkeyCount = NULL;
+		hk.mFirstVariant = NULL;
+		hk.mAllowExtraModifiers = NULL;
+		hk.mConstructedOK = NULL;
+		hk.mHookAction = NULL;
+		hk.mID = NULL;
+		hk.mIsRegistered = false;
+		hk.mKeybdHookMandatory = false;
+		hk.mKeyUp = false;
+		hk.mLastVariant = NULL;
+		hk.mModifiers = NULL;
+		hk.mModifierSC = NULL;
+		hk.mModifiersConsolidatedLR = NULL;
+		hk.mModifiersLR = NULL;
+		hk.mModifierVK = NULL;
+		hk.mName = "";
+		hk.mNoSuppress = NULL;
+		hk.mParentEnabled = false;
+		hk.mSC = NULL;
+		hk.mType = NULL;
+		hk.mUnregisterDuringThread = false;
+		hk.mVK = NULL;
+		hk.mVK_WasSpecifiedByNumber = false;
+	}
+}
+
 
 
 bool Hotkey::PrefixHasNoEnabledSuffixes(int aVKorSC, bool aIsSC)

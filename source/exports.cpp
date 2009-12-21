@@ -298,6 +298,7 @@ EXPORT void* ahkFunction(char *func, char *param1, char *param2, char *param3, c
 	Func *aFunc = g_script.FindFunc(func) ;
 if (aFunc)
 {	
+	static char *result_to_return;
 	Func &func = *(Func *)aFunc;//g_script.mTempFunc ;   
 	if (!INTERRUPTIBLE_IN_EMERGENCY)
 		return false;
@@ -391,24 +392,24 @@ if (aFunc)
 	ResultType result;
 	g_DeferMessagesForUnderlyingPump = true;
 	result = func.Call(&return_value); // Call the UDF.
+	g_DeferMessagesForUnderlyingPump = false;
 	--g_script.mTimerEnabledCount;
 		DEBUGGER_STACK_POP()
 	if (return_value.symbol == PURE_INTEGER)
 	{
-		char buf[256]; // = SimpleHeap::Malloc(256);
-		char *result_to_return = buf;
+		char buf[256];
+		result_to_return = buf;
 		ITOA64(return_value.value_int64,result_to_return);
  		Var::FreeAndRestoreFunctionVars(func, var_backup, var_backup_count);
 		ResumeUnderlyingThread(ErrorLevel_saved);
-		//SimpleHeap::Delete(result_to_return);
 		return result_to_return;
 	}
 	else //if (return_value.symbol)
 	{
-		char *result_to_return = SimpleHeap::Malloc(TokenToString(return_value));
+		result_to_return = (char *)realloc(result_to_return,strlen(TokenToString(return_value))+1);
+		strncpy(result_to_return,TokenToString(return_value),strlen(TokenToString(return_value))+1);
  		Var::FreeAndRestoreFunctionVars(func, var_backup, var_backup_count);
 		ResumeUnderlyingThread(ErrorLevel_saved);
-		SimpleHeap::Delete(result_to_return);
 		return result_to_return;
 	}
 }

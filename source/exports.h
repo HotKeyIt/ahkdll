@@ -21,8 +21,8 @@ BIF(BIF_CacheEnable) ;
 BIF(BIF_GetTokenValue) ;
 int initPlugins();
 
-/*  ahkdll v10: disabling these as they aren't working
 EXPORT int ahkTerminate();
+/*  ahkdll v10: disabling these as they aren't working
 EXPORT int ahkContinue();
 */
 #endif

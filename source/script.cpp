@@ -214,13 +214,64 @@ Script::~Script() // Destructor.
 	DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
 }
 
-ResultType Script::InitDll(global_struct &g)
+void Script::Destroy()
+// Destroy script for ahkTerminate
+{
+	// L31: Release objects stored in variables, where possible.
+	int v, i;
+	for (v = 0; v < mVarCount; ++v)
+		if (mVar[v]->IsObject())
+			mVar[v]->ReleaseObject();
+	for (v = 0; v < mLazyVarCount; ++v)
+		if (mLazyVar[v]->IsObject())
+			mLazyVar[v]->ReleaseObject();
+	for (i = 0; i < mFuncCount; ++i)
+	{
+		Func &f = *mFunc[i];
+		if (f.mIsBuiltIn)
+			continue;
+		// Since it doesn't seem feasible to release all var backups created by recursive function
+		// calls and all tokens in the 'stack' of each currently executing expression, currently
+		// only static and global variables are released.  It seems best for consistency to also
+		// avoid releasing top-level non-static local variables (i.e. which aren't in var backups).
+		for (v = 0; v < f.mVarCount; ++v)
+			if (f.mVar[v]->IsStatic() && f.mVar[v]->IsObject()) // For consistency, only free static vars (see above).
+				f.mVar[v]->ReleaseObject();
+		for (v = 0; v < f.mLazyVarCount; ++v)
+			if (f.mLazyVar[v]->IsStatic() && f.mLazyVar[v]->IsObject())
+				f.mLazyVar[v]->ReleaseObject();
+		//mFunc[i]->mName=(char *)malloc(sizeof(mFunc[i]->mName));
+		delete mFunc[i];
+	}
+	//mFunc = (Func **)malloc(sizeof(mFunc));
+	mFirstFunc = NULL;
+	mFuncCount = 0; 
+	mFirstLabel = NULL ; 
+	mLastLabel = NULL ; 
+	mLastFunc = NULL ; 
+    mFirstLine = NULL ; 
+	mLastLine = NULL ;
+	mCurrLine = NULL ;
+	mCurrFileIndex = 0 ;
+	// We call DestroyWindow() because MainWindowProc() has left that up to us.
+	// DestroyWindow() will cause MainWindowProc() to immediately receive and process the
+	// WM_DESTROY msg, which should in turn result in any child windows being destroyed
+	// and other cleanup being done:
+	if (IsWindow(g_hWnd)) // Adds peace of mind in case WM_DESTROY was already received in some unusual way.
+	{
+		g_DestroyWindowCalled = true;
+		DestroyWindow(g_hWnd);
+	}
+	Hotkey::AllDestruct();
+}
+
+ResultType Script::InitDll(global_struct &g,HINSTANCE hInstance)
 // Returns OK or FAIL.
 // Caller has provided an empty string for aScriptFilename if this is a compiled script.
 // Otherwise, aScriptFilename can be NULL if caller hasn't determined the filename of the script yet.
 {
 	char buf[2048]; // Just to make sure we have plenty of room to do things with.
-	GetModuleFileName(NULL, buf, sizeof(buf));
+	GetModuleFileName(hInstance, buf, sizeof(buf));
 	// Using the correct case not only makes it look better in title bar & tray tool tip,
 	// it also helps with the detection of "this script already running" since otherwise
 	// it might not find the dupe if the same script name is launched with different
@@ -445,6 +496,7 @@ ResultType Script::CreateWindows()
 	wc.hCursor = LoadCursor((HINSTANCE) NULL, IDC_ARROW);
 	wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);  // Needed for ProgressBar. Old: (HBRUSH)GetStockObject(WHITE_BRUSH);
 	wc.lpszMenuName = MAKEINTRESOURCE(IDR_MENU_MAIN); // NULL; // "MainMenu";
+	UnregisterClass((LPCSTR)&WINDOW_CLASS_MAIN,g_hInstance);
 	if (!RegisterClassEx(&wc))
 	{
 		MsgBox("RegClass"); // Short/generic msg since so rare.
@@ -455,6 +507,7 @@ ResultType Script::CreateWindows()
 	// it doesn't have the menu bar:
 	wc.lpszClassName = WINDOW_CLASS_SPLASH;
 	wc.lpszMenuName = NULL; // Override the non-NULL value set higher above.
+	UnregisterClass((LPCSTR)&WINDOW_CLASS_SPLASH,g_hInstance);
 	if (!RegisterClassEx(&wc))
 	{
 		MsgBox("RegClass"); // Short/generic msg since so rare.

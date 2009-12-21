@@ -99,7 +99,7 @@ switch(fwdReason)
 int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
 	setvbuf(stdout, NULL, _IONBF, 0); // L17: Disable stdout buffering to make it a more effective debugging tool.
-
+	
 	// Init any globals not in "struct g" that need it:
 	g_hInstance = hInstance;
 	InitializeCriticalSection(&g_CriticalRegExCache); // v1.0.45.04: Must be done early so that it's unconditional, so that DeleteCriticalSection() in the script destructor can also be unconditional (deleting when never initialized can crash, at least on Win 9x).
@@ -112,13 +112,9 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmd
 	
 	// Set defaults, to be overridden by command line args we receive:
 	bool restart_mode = false;
-
+	
 #ifndef AUTOHOTKEYSC
-	#ifdef _DEBUG
-		char *script_filespec = lpCmdLine ; // Naveen v6.1 changed from "Test\\Test.ahk";
-	#else
-		char *script_filespec = lpCmdLine ; // Naveen changed from NULL;
-	#endif
+	char *script_filespec = lpCmdLine ; // Naveen changed from NULL;
 #endif
 
 
@@ -285,7 +281,7 @@ else // since this is not a recognized switch, the end of the [Switches] section
 	}
 	else
 	{
-		if (g_script.InitDll(*g) != OK)  // Set up the basics of the script.
+		if (g_script.InitDll(*g,hInstance) != OK)  // Set up the basics of the script.
 			return CRITICAL_ERROR;
 	}
 #endif
@@ -425,6 +421,8 @@ else // since this is not a recognized switch, the end of the [Switches] section
 	// top part is something that's very involved and requires user interaction:
 	Hotkey::ManifestAllHotkeysHotstringsHooks(); // We want these active now in case auto-execute never returns (e.g. loop)
 	g_script.mIsReadyToExecute = true; // This is done only after the above to support error reporting in Hotkey.cpp.
+	
+	free(nameHinstanceP.name);
 
 	Var *clipboard_var = g_script.FindOrAddVar("Clipboard"); // Add it if it doesn't exist, in case the script accesses "Clipboard" via a dynamic variable.
 	if (clipboard_var)
@@ -471,8 +469,8 @@ EXPORT unsigned int ahkdll(char *fileName, char *argv, char *args)
  // nameHinstanceP.argv = argv ;
  // nameHinstanceP.args = args ;
 
- //strncpy(nameHinstanceP.name, fileName, strlen(fileName));
- nameHinstanceP.name = (char *)SimpleHeap::Malloc(fileName);
+ nameHinstanceP.name = (char *)malloc(strlen(fileName)+1);
+ strncpy(nameHinstanceP.name, fileName, strlen(fileName)+1);
  strncpy(nameHinstanceP.argv, argv, strlen(argv));
  strncpy(nameHinstanceP.args, args, strlen(args));
 
@@ -485,11 +483,8 @@ EXPORT unsigned int ahkdll(char *fileName, char *argv, char *args)
 EXPORT unsigned int ahktextdll(char *fileName, char *argv, char *args)
 {
  unsigned threadID;
- // nameHinstanceP.name = fileName ;
- // nameHinstanceP.argv = argv ;
- // nameHinstanceP.args = args ;
- //strncpy(nameHinstanceP.name, fileName, strlen(fileName));
- nameHinstanceP.name = (char *)SimpleHeap::Malloc((char *)fileName);
+ nameHinstanceP.name = (char *)malloc(strlen(fileName)+1);
+ strncpy(nameHinstanceP.name, fileName, strlen(fileName)+1);
  strncpy(nameHinstanceP.argv, argv, strlen(argv));
  strncpy(nameHinstanceP.args, args, strlen(args));
  nameHinstanceP.istext = 1;
@@ -499,13 +494,26 @@ EXPORT unsigned int ahktextdll(char *fileName, char *argv, char *args)
  return (unsigned int)hThread;
 }
 
-/*
 
+
+EXPORT int ahkTerminate()
+{
+	TerminateThread(hThread, (DWORD)EARLY_RETURN);
+	
+	//unsigned threadID;
+	//nameHinstanceP.name = (char *)malloc(strlen(fileName)+1);
+
+	Line::sSourceFileCount = 0;
+	g_script.Destroy();
+	Line::sSourceFile = &nameHinstanceP.name;
+	return 0;
+}
+
+/*
 EXPORT int ahkTerminate()
 {
 return (int) TerminateThread(hThread, (DWORD)EARLY_RETURN);
 }
-
 
 unsigned __stdcall ContinueScript( void* pArguments )
 {
@@ -517,7 +525,6 @@ EXPORT int ahkContinue()
 {
 	 unsigned threadID;
 	hThread = (HANDLE)_beginthreadex( NULL, 0, &ContinueScript, &nameHinstanceP, 0, &threadID );
- WaitForSingleObject( hThread, 500 );
  return (int)hThread;
 }
 

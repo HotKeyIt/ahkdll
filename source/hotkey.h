@@ -194,6 +194,7 @@ public:
 	static void Hotkey::UnHook();  // used in Import(file) Nv8
 	static void Hotkey::HookUp();  // not really helping, will remove.
 	static void AllDestructAndExit(int exit_code);
+	static void AllDestruct();
 
 	#define HOTKEY_EL_BADLABEL           "1" // Set as strings so that SetFormat doesn't affect their appearance (for use with "If ErrorLevel in 5,6").
 	#define HOTKEY_EL_INVALID_KEYNAME    "2"
