@@ -1,6 +1,12 @@
+21.12.2009
+- ahkTerminate, after terminating your script you can reload it using ahkdll or ahktextdll.
+- script, incl. labels and functions, and hotkey destruction and reload now possible.
+- a bug in ahkFunction was fixed.
+
 19.12.2009
 - fixed addScript bugs
 - created ahktextdll
+
 18.12.2009
 
 - addScript loads script from text, second parameter is to replace current script
