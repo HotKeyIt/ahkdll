@@ -498,11 +498,7 @@ EXPORT unsigned int ahktextdll(char *fileName, char *argv, char *args)
 
 EXPORT int ahkTerminate()
 {
-	TerminateThread(hThread, (DWORD)EARLY_RETURN);
-	
-	//unsigned threadID;
-	//nameHinstanceP.name = (char *)malloc(strlen(fileName)+1);
-
+	TerminateThread(hThread, (DWORD)EXIT_EXIT);
 	Line::sSourceFileCount = 0;
 	g_script.Destroy();
 	Line::sSourceFile = &nameHinstanceP.name;
