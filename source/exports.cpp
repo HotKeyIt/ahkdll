@@ -1,3 +1,4 @@
+
 #include "stdafx.h" // pre-compiled headers
 #include "globaldata.h" // for access to many global vars
 #include "application.h" // for MsgSleep()
