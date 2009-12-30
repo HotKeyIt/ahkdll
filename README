@@ -1,3 +1,14 @@
+30.12.2009
+- ahkReload will reload a script, this can be also done by the script as well as ExitApp.
+- ahkPause, get and set Pause state of current thread in dll script (dll only)
+- ahkExecuteLine, execute a line by passing its pointer, a pointer is returned by addFile and addScript as well as by this function.
+- - when no pointer is given, FirstLine pointer is returned, else pointer to next line is returned.
+- changed ahkgetvar to return a value rather than passing a variable, so no need to VarSetCapacity anymore.
+- fixed ahkFunction ( now using callFuncDll() ) to continue main script after function call.
+- fixed to wait for thread to initialize and return then, as well as when script crashes while initializing.
+- addScript will not reset previous script anymore.
+- removed const for HotkeyIDType Hotkey so sHotkeyCount can be reset for ahkTerminate.
+
 21.12.2009
 - ahkTerminate, after terminating your script you can reload it using ahkdll or ahktextdll.
 - script, incl. labels and functions, and hotkey destruction and reload now possible.
