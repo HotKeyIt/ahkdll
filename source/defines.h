@@ -37,12 +37,12 @@ GNU General Public License for more details.
 #ifdef AHKX
 #define NAME_L_REVISION "X11" 
 #else
-#define NAME_L_REVISION ".dllN12" 
+#define NAME_L_REVISION ".dllH2" 
 #endif // ahkx
 #endif // dlln
 
 #ifndef DLLN
-#define NAME_L_REVISION ".L35N11" // L14: Added .Ln for AutoHotkey_L revision n.
+#define NAME_L_REVISION ".L41H2" // L14: Added .Ln for AutoHotkey_L revision n.
 #endif  //dlln
 
 #endif // name l revision

@@ -5306,7 +5306,12 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 
 	case AHK_EXECUTE:   // sent from dll host # Naveen N9 
 		 g_script.mTempLine = (Line *)wParam ;
-		 g_script.mTempLine->ExecUntil(UNTIL_RETURN); 
+		 if (lParam == ONLY_ONE_LINE)
+			g_script.mTempLine->ExecUntil(ONLY_ONE_LINE); //HotKeyIt H2 for ahkExecuteLine
+		 else if (lParam == UNTIL_BLOCK_END)
+			g_script.mTempLine->ExecUntil(UNTIL_BLOCK_END);  //HotKeyIt H2 for ahkExecuteLine
+		 else
+			g_script.mTempLine->ExecUntil(UNTIL_RETURN); 
 		 return 0;
 	case AHK_EXECUTE_LABEL: 
 		g_script.mTempLabel = (Label *)wParam ;
@@ -5314,6 +5319,9 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 		return 0;
 	case AHK_EXECUTE_FUNCTION: 
 		callFunc(wParam, lParam);
+		return 0;
+	case AHK_EXECUTE_FUNCTION_DLL: 
+		callFuncDll();
 		return 0;
 
 	case WM_MEASUREITEM: // L17: Measure menu icon. Not used on Windows Vista or later.
@@ -10537,7 +10545,14 @@ VarSizeType BIV_AhkPath(char *aBuf, char *aVarName) // v1.0.41.
 #endif
 }
 
-
+VarSizeType BIV_DllPath(char *aBuf, char *aVarName) // HotKeyIt H1 path of loaded dll
+{
+	char buf[MAX_PATH];
+	VarSizeType length = (VarSizeType)GetModuleFileName(g_hInstance, buf, MAX_PATH);
+	if (aBuf)
+		strcpy(aBuf, buf); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string). This is true for ReadRegString()'s API call and may be true for other API calls like this one.
+	return length;
+}
 
 VarSizeType BIV_TickCount(char *aBuf, char *aVarName)
 {

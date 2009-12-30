@@ -215,16 +215,20 @@ Script::~Script() // Destructor.
 }
 
 void Script::Destroy()
-// Destroy script for ahkTerminate
+// HotKeyIt H1 destroy script for ahkTerminate and ahkReload and ExitApp for dll
 {
 	// L31: Release objects stored in variables, where possible.
 	int v, i;
 	for (v = 0; v < mVarCount; ++v)
 		if (mVar[v]->IsObject())
 			mVar[v]->ReleaseObject();
+		else
+			mVar[v]->Free();
 	for (v = 0; v < mLazyVarCount; ++v)
 		if (mLazyVar[v]->IsObject())
 			mLazyVar[v]->ReleaseObject();
+		else
+			mLazyVar[v]->Free();
 	for (i = 0; i < mFuncCount; ++i)
 	{
 		Func &f = *mFunc[i];
@@ -237,22 +241,50 @@ void Script::Destroy()
 		for (v = 0; v < f.mVarCount; ++v)
 			if (f.mVar[v]->IsStatic() && f.mVar[v]->IsObject()) // For consistency, only free static vars (see above).
 				f.mVar[v]->ReleaseObject();
+			else
+				f.mVar[v]->Free();
 		for (v = 0; v < f.mLazyVarCount; ++v)
 			if (f.mLazyVar[v]->IsStatic() && f.mLazyVar[v]->IsObject())
 				f.mLazyVar[v]->ReleaseObject();
-		//mFunc[i]->mName=(char *)malloc(sizeof(mFunc[i]->mName));
+			else
+				f.mLazyVar[v]->Free();
 		delete mFunc[i];
 	}
-	//mFunc = (Func **)malloc(sizeof(mFunc));
+	
+	// Destroy Labels
+	for (Label *label = mFirstLabel; label != NULL;label = label->mNextLabel)
+	{
+		Label *nextLabel = label->mNextLabel;
+		label->mJumpToLine = NULL;
+		label->mName = "";
+		label->mPrevLabel = NULL;
+	}
+	/*
+	for (Line *line = g_script.mFirstLine; line != NULL;)
+	{
+		Line *nextLine = line->mNextLine;
+		delete line;
+		line = nextLine;
+	}
+	*/
 	mFirstFunc = NULL;
 	mFuncCount = 0; 
 	mFirstLabel = NULL ; 
-	mLastLabel = NULL ; 
-	mLastFunc = NULL ; 
+	mLastLabel = NULL ;
+	mLastFunc = NULL ;
+	mLineCount = 0;  
     mFirstLine = NULL ; 
 	mLastLine = NULL ;
 	mCurrLine = NULL ;
 	mCurrFileIndex = 0 ;
+	mFirstMenu = NULL;
+	mFirstTimer = NULL;
+	mIsReadyToExecute = false;
+	mOnExitLabel = NULL;
+	mOnClipboardChangeLabel = NULL;
+	mTempFunc = NULL;
+	mTempLabel = NULL;
+	mTempLine = NULL;
 	// We call DestroyWindow() because MainWindowProc() has left that up to us.
 	// DestroyWindow() will cause MainWindowProc() to immediately receive and process the
 	// WM_DESTROY msg, which should in turn result in any child windows being destroyed
@@ -263,6 +295,7 @@ void Script::Destroy()
 		DestroyWindow(g_hWnd);
 	}
 	Hotkey::AllDestruct();
+	Hotstring::AllDestruct();
 }
 
 ResultType Script::InitDll(global_struct &g,HINSTANCE hInstance)
@@ -713,6 +746,7 @@ ResultType Script::AutoExecSection()
 		return FAIL; // Due to rarity, just abort. It wouldn't be safe to run ExitApp() due to possibility of an OnExit routine.
 	CopyMemory(g_array, g, sizeof(global_struct)); // Copy the temporary/startup "g" into array[0] to preserve historical behaviors that may rely on the idle thread starting with that "g".
 	g = g_array; // Must be done after above.
+
 	// v1.0.48: Due to switching from SET_UNINTERRUPTIBLE_TIMER to IsInterruptible():
 	// In spite of the comments in IsInterruptible(), periodically have a timer call IsInterruptible() due to
 	// the following scenario:
@@ -818,7 +852,7 @@ ResultType Script::AutoExecSection()
 	// If no hotkeys are in effect, the user hasn't requested a hook to be activated, and the script
 	// doesn't contain the #Persistent directive we're done unless there is an OnExit subroutine and it
 	// doesn't do "ExitApp":
-#ifndef DLLN
+#ifndef DLLN // HotKeyIt no check for IS_PERSISTENT in DLL
 	if (!IS_PERSISTENT) // Resolve macro again in case any of its components changed since the last time.
 		g_script.ExitApp(ExecUntil_result == FAIL ? EXIT_ERROR : EXIT_EXIT);
 #endif
@@ -880,6 +914,9 @@ ResultType Script::Reload(bool aDisplayErrors)
 {
 	// The new instance we're about to start will tell our process to stop, or it will display
 	// a syntax error or some other error, in which case our process will still be running:
+#ifdef DLLN
+	return (ResultType) ahkReload();
+#else
 #ifdef AUTOHOTKEYSC
 	// This is here in case a compiled script ever uses the Reload command.  Since the "Reload This
 	// Script" menu item is not available for compiled scripts, it can't be called from there.
@@ -888,7 +925,8 @@ ResultType Script::Reload(bool aDisplayErrors)
 	char arg_string[MAX_PATH + 512];
 	snprintf(arg_string, sizeof(arg_string), "/restart \"%s\"", mFileSpec);
 	return g_script.ActionExec(mOurEXE, arg_string, g_WorkingDirOrig, aDisplayErrors);
-#endif
+#endif // AUTOHOTKEYSC
+#endif // DLLN
 }
 
 
@@ -1036,7 +1074,7 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 }
 
 LineNumberType Script::LoadText(char *aScript)
-// HotKeyIt LoadText() for text instead LoadFromFile()
+// HotKeyIt H1 LoadText() for text instead LoadFromFile()
 // Returns the number of non-comment lines that were loaded, or LOADING_FAILED on error.
 {
 	mNoHotkeyLabels = true;  // Indicate that there are no hotkey labels, since we're (re)loading the entire file.
@@ -1406,6 +1444,7 @@ bool IsFunction(char *aBuf, bool *aPendingFunctionHasBrace = NULL)
 }
 
 ResultType Script::LoadFromScript(char *aBuf)
+// HotKeyIt H1
 // Returns OK or FAIL.
 // Below: Use double-colon as delimiter to set these apart from normal labels.
 // The main reason for this is that otherwise the user would have to worry
@@ -1446,8 +1485,15 @@ ResultType Script::LoadFromScript(char *aBuf)
 	//HS_EXEArc_Read *fp = &oRead;  // To help consolidate the code below.
 	script_buf_marker = *&script_buf;
 
+	char **realloc_temp = (char **)realloc(Line::sSourceFile, (source_file_index<100 ? 100 : (source_file_index+1))*sizeof(char *)); // If passed NULL, realloc() will do a malloc().
+	if (!realloc_temp)
+		return ScriptError(ERR_OUTOFMEM); // Short msg since so rare.
+#ifndef AUTOHOTKEYSC
+	Line::sSourceFile = realloc_temp;
+	Line::sSourceFile[source_file_index] = aBuf;
+#endif
 	++Line::sSourceFileCount;
-
+	
 	// File is now open, read lines from it.
 
 	char *hotkey_flag, *cp, *cp1, *action_end, *hotstring_start, *hotstring_options;
@@ -1477,7 +1523,8 @@ ResultType Script::LoadFromScript(char *aBuf)
 
 	#define MAX_FUNC_VAR_EXCEPTIONS 2000
 	Var *func_exception_var[MAX_FUNC_VAR_EXCEPTIONS];
-
+	
+	
 	// Init both for main file and any included files loaded by this function:
 	mCurrFileIndex = source_file_index;  // source_file_index is kept on the stack due to recursion (from #include).
 
@@ -2588,7 +2635,7 @@ ResultType Script::LoadIncludedFile(char *aFileSpec, bool aAllowDuplicateInclude
 #define HOTKEY_FLAG_LENGTH 2
 {
 	if (!aFileSpec || !*aFileSpec) return FAIL;
-	
+
 #ifndef AUTOHOTKEYSC
 	if (Line::sSourceFileCount >= Line::sMaxSourceFiles)
 	{
@@ -3514,6 +3561,18 @@ examine_line:
 			// Otherwise, a normal (non-hotkey) label in the autoexecute section would count and
 			// thus the RETURN would never be added here, even though it should be:
 			
+			// Notes about the below macro:
+			// Fix for v1.0.34: Don't point labels to this particular RETURN so that labels
+			// can point to the very first hotkey or hotstring in a script.  For example:
+			// Goto Test
+			// Test:
+			// ^!z::ToolTip Without the fix`, this is never displayed by "Goto Test".
+			// UCHAR_MAX signals it not to point any pending labels to this RETURN.
+			// mCurrLine = NULL -> signifies that we're in transition, trying to load a new one.
+			
+			// HotKeyIt removed makro redefinition
+
+			CHECK_mNoHotkeyLabels
 			// For hotstrings, the below makes the label include leading colon(s) and the full option
 			// string (if any) so that the uniqueness of labels is preserved.  For example, we want
 			// the following two hotstring labels to be unique rather than considered duplicates:
@@ -8474,6 +8533,7 @@ Func *Script::FindFuncInLibrary(char *aFuncName, size_t aFuncNameLength, bool &a
 #endif
 
 size_t Script::GetLineFromText(char *aBuf, int aMaxCharsToRead, int aInContinuationSection, UCHAR *&sBuf)
+// HotKeyIt H1 to parse trough text instead of file for LoadFromScript
 {
 	size_t aBuf_length = 0;
 	if (!aBuf || !sBuf) return -1;
@@ -10061,6 +10121,7 @@ void *Script::GetVarType(char *aVarName)
 		|| !strcmp(lower, "tab")) return BIV_Space_Tab;
 	if (!strcmp(lower, "ahkversion")) return BIV_AhkVersion;
 	if (!strcmp(lower, "ahkpath")) return BIV_AhkPath;
+	if (!strcmp(lower, "dllpath")) return BIV_DllPath;
 
 	// Since above didn't return:
 	return (void *)VAR_NORMAL;
@@ -12656,17 +12717,17 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 			if (IS_PERSISTENT)
 				return EARLY_EXIT;  // It's "early" because only the very end of the script is the "normal" exit.
 				// EARLY_EXIT needs to be distinct from FAIL for ExitApp() and AutoExecSection().
-#ifndef DLLN
+#ifndef DLLN // HotKeyIt H1 no ExitApp in dll so continue below
 			else
 				// This has been tested and it does yield to the OS the error code indicated in ARG1,
 				// if present (otherwise it returns 0, naturally) as expected:
 				return g_script.ExitApp(EXIT_EXIT, NULL, (int)line->ArgIndexToInt64(0));
 #endif
 		case ACT_EXITAPP: // Unconditional exit.
-#ifdef DLLN
+#ifdef DLLN // HotKeyIt end dll thread and stop
 			Line::sSourceFileCount = 0;
 			g_script.Destroy();
-			return EARLY_EXIT;
+			return EARLY_RETURN;
 #else
 			return g_script.ExitApp(EXIT_EXIT, NULL, (int)line->ArgIndexToInt64(0));
 #endif

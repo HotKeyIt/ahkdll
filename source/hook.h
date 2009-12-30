@@ -42,6 +42,7 @@ enum UserMessages {AHK_HOOK_HOTKEY = WM_USER, AHK_HOTSTRING, AHK_USER_MENU, AHK_
 	, AHK_EXECUTE  // Naveen N9: enable running ahk code from another os thread 
 	, AHK_EXECUTE_FUNCTION
 	, AHK_EXECUTE_LABEL
+	, AHK_EXECUTE_FUNCTION_DLL // HotkeyIt for ahkFunction
 };
 // NOTE: TRY NEVER TO CHANGE the specific numbers of the above messages, since some users might be
 // using the Post/SendMessage commands to automate AutoHotkey itself.  Here is the original order
@@ -275,4 +276,3 @@ void ResetKeyTypeState(key_type &key);
 void GetHookStatus(char *aBuf, int aBufSize);
 
 #endif
-

@@ -4,13 +4,26 @@
 #include "exports.h"
 #include "script.h"
 
-// HotKeyIt check if dll is ready to execute
-#ifdef DLLN
-EXPORT BOOL EAhkReady()
+static char* result_to_return_dll; //HotKeyIt H2 for ahkgetvar and ahkFunction return.
+
+EXPORT int ahkPause(char *aChangeTo) //Change pause state of a running script
 {
-	return g_script.mIsReadyToExecute;
+	if ( ( (*aChangeTo == 'O' || *aChangeTo == 'o') && ( *(aChangeTo+1) == 'N' || *(aChangeTo+1) == 'n' ) ) || *aChangeTo == '1')
+	{
+		Hotkey::ResetRunAgainAfterFinished();
+		g->IsPaused = true;
+		++g_nPausedThreads; // For this purpose the idle thread is counted as a paused thread.
+		g_script.UpdateTrayIcon();
+	}
+	else if (*aChangeTo != '\0')
+	{
+		g->IsPaused = false;
+		--g_nPausedThreads; // For this purpose the idle thread is counted as a paused thread.
+		g_script.UpdateTrayIcon();
+	}
+	return (int)g->IsPaused;
 }
-#endif
+
 // Naveen: v1. ahkgetvar()
 EXPORT unsigned int ahkFindFunc(char *funcname)
 {
@@ -38,16 +51,32 @@ void BIF_FindFunc(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 	return;
 }
 
-EXPORT VarSizeType ahkgetvar(char *name, char *output)
+EXPORT char* ahkgetvar(char *name)
 {
 	Var *ahkvar = g_script.FindOrAddVar(name);
-	if ( ahkvar->mType == VAR_ALIAS )
-		return ahkvar->mAliasFor->Get(output); //Hotkeyit removed ebiv.cpp and made ahkgetvar return all vars
- 	else if ( ahkvar->mType == VAR_NORMAL )
-		return ahkvar->Get(output);  // var.getText() added in V1.
-	else if ( ahkvar->mType == 4 )
-		return ahkvar->mBIV(output,name); //Hotkeyit
-	return NULL;
+	if (!ahkvar->HasContents() && ahkvar->mType != VAR_BUILTIN )
+		return "";
+	if (*ahkvar->mContents == '\0')
+	{
+		result_to_return_dll = (char *)realloc((char *)result_to_return_dll,(ahkvar->mCapacity ? ahkvar->mCapacity : ahkvar->mLength) + MAX_NUMBER_LENGTH + 1);
+		if ( ahkvar->mType == VAR_BUILTIN )
+			ahkvar->mBIV(result_to_return_dll,name); //Hotkeyit 
+		else if ( ahkvar->mType == VAR_ALIAS )
+			ITOA64(ahkvar->mAliasFor->mContentsInt64,result_to_return_dll);
+		else if ( ahkvar->mType == VAR_NORMAL )
+			ITOA64(ahkvar->mContentsInt64,result_to_return_dll);//Hotkeyit
+	}
+	else
+	{
+		result_to_return_dll = (char *)realloc((char *)result_to_return_dll,ahkvar->mLength+1);
+		if ( ahkvar->mType == VAR_ALIAS )
+			ahkvar->mAliasFor->Get(result_to_return_dll); //Hotkeyit removed ebiv.cpp and made ahkgetvar return all vars
+ 		else if ( ahkvar->mType == VAR_NORMAL )
+			ahkvar->Get(result_to_return_dll);  // var.getText() added in V1.
+		else if ( ahkvar->mType == VAR_BUILTIN )
+			ahkvar->mBIV(result_to_return_dll,name); //Hotkeyit 
+	}
+	return result_to_return_dll;
 }	
 
 EXPORT int ahkassign(char *name, char *value) // ahkwine 0.1
@@ -57,6 +86,16 @@ if (   !(var = g_script.FindOrAddVar(name, strlen(name)))   )
 				return -1;  // Realistically should never happen.
 			var->Assign(value); 
 			return 0; // success
+}
+//HotKeyIt ahkExecuteLine()
+EXPORT unsigned int ahkExecuteLine(unsigned int line,int aMode)
+{
+	Line *templine = (Line *)line;
+	if (templine == NULL)
+		return (unsigned int)g_script.mFirstLine;
+	else if (aMode)
+		PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)templine, (LPARAM)aMode);
+	return (unsigned int) templine->mNextLine;
 }
 
 EXPORT int ahkLabel(char *aLabelName)
@@ -175,91 +214,32 @@ EXPORT unsigned int addFile(char *fileName, bool aAllowDuplicateInclude, int aIg
 #ifdef DLLN
 // HotKeyIt: addScript()
 // Todo: support for #Directives, and proper treatment of mIsReadytoExecute
-EXPORT unsigned int addScript(char *script, int aReplace)
+EXPORT unsigned int addScript(char *script, int aExecute)
 {   // dynamically include a script into a script !!
 	// labels, hotkeys, functions.   
-	static int filesAdded = 0  ; 
-	
+
 	Line *oldLastLine = g_script.mLastLine;
 	
-	if (aReplace > 0)  // if second param is > 1, reset all functions, labels, remove hotkeys
-	{
-		g_script.mFuncCount = 0;   
-		g_script.mFirstLabel = NULL ; 
-		g_script.mLastLabel = NULL ; 
-		g_script.mLastFunc = NULL ; 
-	    g_script.mFirstLine = NULL ; 
-		g_script.mLastLine = NULL ;
-		g_script.mCurrLine = NULL ; 
-
-		if (filesAdded == 0)
-			{
-			SimpleHeap::sBlockCount = 0 ;
-			SimpleHeap::sFirst = NULL;
-			SimpleHeap::sLast  = NULL;
-			SimpleHeap::sMostRecentlyAllocated = NULL;
-			}
-		if (filesAdded > 0)
-			{
-			// Naveen v9 free simpleheap memory for late include files
-			SimpleHeap *next, *curr;
-			for (curr = SimpleHeap::sFirst; curr != NULL;)
-				{
-				next = curr->mNextBlock;  // Save this member's value prior to deleting the object.
-				curr->~SimpleHeap() ;
-				curr = next;
-				}
-			SimpleHeap::sBlockCount = 0 ;
-			SimpleHeap::sFirst = NULL;
-			SimpleHeap::sLast  = NULL;
-			SimpleHeap::sMostRecentlyAllocated = NULL;
-/*  Naveen: the following is causing a memory leak in the exe version of clearing the simple heap v10
- g_script.mVar = NULL ; 
- g_script.mVarCount = 0 ; 
- g_script.mVarCountMax = 0 ; 
- g_script.mLazyVar = NULL ; 
-
- g_script.mLazyVarCount = 0 ; 
-*/
-		}
-	g_script.LoadFromScript(script);
-	g_script.PreparseBlocks(g_script.mFirstLine); 
-	PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)g_script.mFirstLine, (LPARAM)g_script.mFirstLine);
-	filesAdded += 1;
-	return (unsigned int) g_script.mFirstLine;
-	}
-	else
-	{
 	g_script.LoadFromScript(script);
 	g_script.PreparseBlocks(oldLastLine->mNextLine); // 
+	if (aExecute > 0)
+		PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)oldLastLine->mNextLine, (LPARAM)oldLastLine->mNextLine);
 	return (unsigned int) oldLastLine->mNextLine;  // 
-	}
-return 0;  // never reached
 }
 
 #else
 // HotKeyIt: addScript()
 // Todo: support for #Directives, and proper treatment of mIsReadytoExecute
-EXPORT unsigned int addScript(char *script, int aReplace)
+EXPORT unsigned int addScript(char *script, int aExecute)
 {   // dynamically include a script from text!!
 	// labels, hotkeys, functions.   
 	
 	Line *oldLastLine = g_script.mLastLine;
 	
-	if (aReplace > 0)  // if third param is > 1, reset all functions, labels, remove hotkeys
-	{
-		g_script.mFuncCount = 0;   
-		g_script.mFirstLabel = NULL ; 
-		g_script.mLastLabel = NULL ; 
-		g_script.mLastFunc = NULL ; 
-		g_script.LoadFromScript(script);
-	}
-	else 
-	{
-		g_script.LoadFromScript(script);
-	}
-	
+	g_script.LoadFromScript(script);
 	g_script.PreparseBlocks(oldLastLine->mNextLine); // 
+	if (aExecute > 0)
+		PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)oldLastLine->mNextLine, (LPARAM)oldLastLine->mNextLine);
 	return (unsigned int) oldLastLine->mNextLine;  // 
 }
 
@@ -293,13 +273,68 @@ void BIF_Import(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParam
 }
 
 // HotKeyIt  -  ahkFunction can return a value now
-EXPORT void* ahkFunction(char *func, char *param1, char *param2, char *param3, char *param4, char *param5, char *param6, char *param7, char *param8, char *param9, char *param10)
+EXPORT char* ahkFunction(char *func, char *param1, char *param2, char *param3, char *param4, char *param5, char *param6, char *param7, char *param8, char *param9, char *param10)
 {
 	Func *aFunc = g_script.FindFunc(func) ;
 if (aFunc)
 {	
-	static char *result_to_return;
-	Func &func = *(Func *)aFunc;//g_script.mTempFunc ;   
+	g_script.mTempFunc = aFunc ;
+	ExprTokenType return_value;
+	if (aFunc->mParamCount > 0)
+	{
+		// Copy the appropriate values into each of the function's formal parameters.
+		aFunc->mParam[0].var->Assign((char *)param1); // Assign parameter #1
+		if (aFunc->mParamCount > 1) // Assign parameter #2
+		{
+			// v1.0.38.01: LPARAM is now written out as a DWORD because the majority of system messages
+			// use LPARAM as a pointer or other unsigned value.  This shouldn't affect most scripts because
+			// of the way ATOI64() and ATOU() wrap a negative number back into the unsigned domain for
+			// commands such as PostMessage/SendMessage.
+			aFunc->mParam[1].var->Assign((char *)param2);
+			if (aFunc->mParamCount > 2) // Assign parameter #3
+			{
+				aFunc->mParam[2].var->Assign((char *)param3);
+				if (aFunc->mParamCount > 3) // Assign parameter #4
+				{
+					aFunc->mParam[3].var->Assign((char *)param4);
+					if (aFunc->mParamCount > 4) // Assign parameter #5
+					{
+						aFunc->mParam[4].var->Assign((char *)param5);
+						if (aFunc->mParamCount > 5) // Assign parameter #6
+						{
+							aFunc->mParam[5].var->Assign((char *)param6);
+							if (aFunc->mParamCount > 6) // Assign parameter #7
+							{
+								aFunc->mParam[6].var->Assign((char *)param7);
+							if (aFunc->mParamCount > 7) // Assign parameter #8
+							{
+								aFunc->mParam[7].var->Assign((char *)param8);
+								if (aFunc->mParamCount > 8) // Assign parameter #9
+								{
+									aFunc->mParam[8].var->Assign((char *)param9);
+									if (aFunc->mParamCount > 9) // Assign parameter #10
+									{
+										aFunc->mParam[9].var->Assign((char *)param10);
+									}
+								}
+							}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	SendMessage(g_hWnd, AHK_EXECUTE_FUNCTION_DLL, (WPARAM)&return_value,NULL);
+	
+	return result_to_return_dll;
+}
+else
+	return "-1"; 
+}
+bool callFuncDll()
+{
+	Func &func = *(Func *)g_script.mTempFunc ;
 	if (!INTERRUPTIBLE_IN_EMERGENCY)
 		return false;
 
@@ -327,58 +362,9 @@ if (aFunc)
 
 	// See MsgSleep() for comments about the following section.
 	char ErrorLevel_saved[ERRORLEVEL_SAVED_SIZE];
-
 	strlcpy(ErrorLevel_saved, g_ErrorLevel->Contents(), sizeof(ErrorLevel_saved));
-	
 	InitNewThread(0, false, true, func.mJumpToLine->mActionType);
-	++g_script.mTimerEnabledCount;
-	
-	// See ExpandExpression() for detailed comments about the following section.
-	if (func.mParamCount > 0)
-	{
-		// Copy the appropriate values into each of the function's formal parameters.
-		func.mParam[0].var->Assign((char *)param1); // Assign parameter #1
-		if (func.mParamCount > 1) // Assign parameter #2
-		{
-			// v1.0.38.01: LPARAM is now written out as a DWORD because the majority of system messages
-			// use LPARAM as a pointer or other unsigned value.  This shouldn't affect most scripts because
-			// of the way ATOI64() and ATOU() wrap a negative number back into the unsigned domain for
-			// commands such as PostMessage/SendMessage.
-			func.mParam[1].var->Assign((char *)param2);
-			if (func.mParamCount > 2) // Assign parameter #3
-			{
-				func.mParam[2].var->Assign((char *)param3);
-				if (func.mParamCount > 3) // Assign parameter #4
-				{
-					func.mParam[3].var->Assign((char *)param4);
-					if (func.mParamCount > 4) // Assign parameter #5
-					{
-						func.mParam[4].var->Assign((char *)param5);
-						if (func.mParamCount > 5) // Assign parameter #6
-						{
-							func.mParam[5].var->Assign((char *)param6);
-							if (func.mParamCount > 6) // Assign parameter #7
-							{
-								func.mParam[6].var->Assign((char *)param7);
-							if (func.mParamCount > 7) // Assign parameter #8
-							{
-								func.mParam[7].var->Assign((char *)param8);
-								if (func.mParamCount > 8) // Assign parameter #9
-								{
-									func.mParam[8].var->Assign((char *)param9);
-									if (func.mParamCount > 9) // Assign parameter #10
-									{
-										func.mParam[9].var->Assign((char *)param10);
-									}
-								}
-							}
-							}
-						}
-					}
-				}
-			}
-		}
-	}
+
 
 	// v1.0.38.04: Below was added to maximize responsiveness to incoming messages.  The reasoning
 	// is similar to why the same thing is done in MsgSleep() prior to its launch of a thread, so see
@@ -387,35 +373,40 @@ if (aFunc)
 
 
 		DEBUGGER_STACK_PUSH(SE_Thread, func.mJumpToLine, desc, func.mName)
-
-	ExprTokenType return_value;
-	ResultType result;
-	g_DeferMessagesForUnderlyingPump = true;
-	result = func.Call(&return_value); // Call the UDF.
-	g_DeferMessagesForUnderlyingPump = false;
-	--g_script.mTimerEnabledCount;
+	ExprTokenType aResultToken;
+	func.Call(&aResultToken); // Call the UDF.
+	
 		DEBUGGER_STACK_POP()
-	if (return_value.symbol == PURE_INTEGER)
+
+	// Fix for v1.0.47: Must handle return_value BEFORE calling FreeAndRestoreFunctionVars() because return_value
+	// might be the contents of one of the function's local variables (which are about to be free'd).
+/*	bool block_further_processing = *return_value; // No need to check the following because they're implied for *return_value!=0: result != EARLY_EXIT && result != FAIL;
+	if (block_further_processing)
+		aMsgReply = (LPARAM)ATOI64(return_value); // Use 64-bit in case it's an unsigned number greater than 0x7FFFFFFF, in which case this allows it to wrap around to a negative.
+	//else leave aMsgReply uninitialized because we'll be returning false later below, which tells our caller
+	// to ignore aMsgReply.
+*/
+	if (aResultToken.symbol == PURE_INTEGER)
 	{
-		char buf[256];
-		result_to_return = buf;
-		ITOA64(return_value.value_int64,result_to_return);
- 		Var::FreeAndRestoreFunctionVars(func, var_backup, var_backup_count);
-		ResumeUnderlyingThread(ErrorLevel_saved);
-		return result_to_return;
+		result_to_return_dll = (char *)realloc(result_to_return_dll,256);
+		ITOA64(aResultToken.value_int64,result_to_return_dll);
 	}
 	else //if (return_value.symbol)
 	{
-		result_to_return = (char *)realloc(result_to_return,strlen(TokenToString(return_value))+1);
-		strncpy(result_to_return,TokenToString(return_value),strlen(TokenToString(return_value))+1);
- 		Var::FreeAndRestoreFunctionVars(func, var_backup, var_backup_count);
-		ResumeUnderlyingThread(ErrorLevel_saved);
-		return result_to_return;
+		result_to_return_dll = (char *)realloc(result_to_return_dll,strlen(TokenToString(aResultToken))+1);
+		strncpy(result_to_return_dll,TokenToString(aResultToken),strlen(TokenToString(aResultToken))+1);
 	}
+	Var::FreeAndRestoreFunctionVars(func, var_backup, var_backup_count);
+	ResumeUnderlyingThread(ErrorLevel_saved);
+	
+	return 0 ; // block_further_processing; // If false, the caller will ignore aMsgReply and process this message normally. If true, aMsgReply contains the reply the caller should immediately send for this message.
 }
-else
-	return "-1"; 
-}
+
+
+
+
+
+
 
 bool callFunc(WPARAM awParam, LPARAM alParam)
 {

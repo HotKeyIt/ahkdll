@@ -32,13 +32,13 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	// Init any globals not in "struct g" that need it:
 	g_hInstance = hInstance;
 	InitializeCriticalSection(&g_CriticalRegExCache); // v1.0.45.04: Must be done early so that it's unconditional, so that DeleteCriticalSection() in the script destructor can also be unconditional (deleting when never initialized can crash, at least on Win 9x).
-	
+
 	if (!GetCurrentDirectory(sizeof(g_WorkingDir), g_WorkingDir)) // Needed for the FileSelectFile() workaround.
 		*g_WorkingDir = '\0';
 	// Unlike the below, the above must not be Malloc'd because the contents can later change to something
 	// as large as MAX_PATH by means of the SetWorkingDir command.
 	g_WorkingDirOrig = SimpleHeap::Malloc(g_WorkingDir); // Needed by the Reload command.
-	
+
 	// Set defaults, to be overridden by command line args we receive:
 	bool restart_mode = false;
 

@@ -328,7 +328,7 @@ vk_type TextToVK(char *aText, modLR_type *pModifiersLR = NULL, bool aExcludeThos
 	, bool aAllowExplicitVK = true, HKL aKeybdLayout = g_HKL); // ahkmingw
 #else
 vk_type TextToVK(char *aText, modLR_type *pModifiersLR = NULL, bool aExcludeThoseHandledByScanCode = false
-	, bool aAllowExplicitVK = true, HKL aKeybdLayout = GetKeyboardLayout(0)); 
+	, bool aAllowExplicitVK = true, HKL aKeybdLayout = GetKeyboardLayout(0));
 #endif
 vk_type CharToVKAndModifiers(char aChar, modLR_type *pModifiersLR, HKL aKeybdLayout);
 vk_type TextToSpecial(char *aText, UINT aTextLength, KeyEventTypes &aEventTypem, modLR_type &aModifiersLR
@@ -350,4 +350,3 @@ inline bool IsMouseVK(vk_type aVK)
 }
 
 #endif
-

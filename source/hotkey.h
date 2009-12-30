@@ -188,13 +188,13 @@ public:
 	HotkeyVariant *mFirstVariant, *mLastVariant; // v1.0.42: Linked list of variant hotkeys created via #IfWin directives.
 
 	// Make sHotkeyCount an alias for sNextID.  Make it const to enforce modifying the value in only one way:
-	static const HotkeyIDType &sHotkeyCount;
+	static /*const*/ HotkeyIDType &sHotkeyCount; //HotKeyIt removed const so possible to set to 0 when hotkeys are deleted.
 	static bool sJoystickHasHotkeys[MAX_JOYSTICKS];
 	static DWORD sJoyHotkeyCount;
 	static void Hotkey::UnHook();  // used in Import(file) Nv8
 	static void Hotkey::HookUp();  // not really helping, will remove.
 	static void AllDestructAndExit(int exit_code);
-	static void AllDestruct();
+	static void AllDestruct(); // HotKeyIt H1 Destroy all Hotkeys
 
 	#define HOTKEY_EL_BADLABEL           "1" // Set as strings so that SetFormat doesn't affect their appearance (for use with "If ErrorLevel in 5,6").
 	#define HOTKEY_EL_INVALID_KEYNAME    "2"
@@ -350,6 +350,7 @@ public:
 		, mDetectWhenInsideWord, mDoReset, mConstructedOK;
 
 	static void SuspendAll(bool aSuspend);
+	static void AllDestruct(); // HotKeyIt H1 destroy all HotStrings
 	ResultType PerformInNewThreadMadeByCaller();
 	void DoReplace(LPARAM alParam);
 	static ResultType AddHotstring(Label *aJumpToLabel, char *aOptions, char *aHotstring, char *aReplacement

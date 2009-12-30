@@ -2450,7 +2450,7 @@ public:
 	ResultType CloseAndReturnFailFunc(FILE *fp);
 	size_t GetLine(char *aBuf, int aMaxCharsToRead, int aInContinuationSection, FILE *fp);
 #endif
-	size_t GetLineFromText(char *aBuf, int aMaxCharsToRead, int aInContinuationSection, UCHAR *&sBuf);
+	size_t GetLineFromText(char *aBuf, int aMaxCharsToRead, int aInContinuationSection, UCHAR *&sBuf); // HotKeyIt H1 for LoadFromScript
 	ResultType IsDirective(char *aBuf);
 
 	ResultType ParseAndAddLine(char *aLineText, ActionTypeType aActionType = ACT_INVALID
@@ -2542,9 +2542,9 @@ public:
 
 	UserMenu *mTrayMenu; // Our tray menu, which should be destroyed upon exiting the program.
     
-	void Destroy();
+	void Destroy(); // HotKeyIt H1 destroy script
 	ResultType Init(global_struct &g, char *aScriptFilename, bool aIsRestart);
-	ResultType InitDll(global_struct &g,HINSTANCE hInstance);
+	ResultType InitDll(global_struct &g,HINSTANCE hInstance); // HotKeyIt init dll from text
 	ResultType CreateWindows();
 	void EnableOrDisableViewMenuItems(HMENU aMenu, UINT aFlags);
 	void CreateTrayIcon();
@@ -2559,8 +2559,8 @@ public:
 #else
 	LineNumberType LoadFromFile(bool aScriptWasNotspecified);
 #endif
-	LineNumberType LoadText(char *Script);
-	ResultType LoadFromScript(char *aBuf);
+	LineNumberType LoadText(char *Script); // HotKeyIt H1 load text instead file ahktextdll
+	ResultType LoadFromScript(char *aBuf); // HotKeyIt H1 load text instead file ahktextdll
 	ResultType LoadIncludedFile(char *aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure);
 	ResultType UpdateOrCreateTimer(Label *aLabel, char *aPeriod, char *aPriority, bool aEnable
 		, bool aUpdatePriorityOnly);
@@ -2673,6 +2673,7 @@ VarSizeType BIV_ExitReason(char *aBuf, char *aVarName);
 VarSizeType BIV_Space_Tab(char *aBuf, char *aVarName);
 VarSizeType BIV_AhkVersion(char *aBuf, char *aVarName);
 VarSizeType BIV_AhkPath(char *aBuf, char *aVarName);
+VarSizeType BIV_DllPath(char *aBuf, char *aVarName); // HotKeyIt H1 path of loaded dll
 VarSizeType BIV_TickCount(char *aBuf, char *aVarName);
 VarSizeType BIV_Now(char *aBuf, char *aVarName);
 VarSizeType BIV_OSType(char *aBuf, char *aVarName);

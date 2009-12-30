@@ -27,7 +27,7 @@ DWORD Hotkey::sTimePrev = {0};
 DWORD Hotkey::sTimeNow = {0};
 Hotkey *Hotkey::shk[MAX_HOTKEYS] = {NULL};
 HotkeyIDType Hotkey::sNextID = 0;
-const HotkeyIDType &Hotkey::sHotkeyCount = Hotkey::sNextID;
+/*const */HotkeyIDType &Hotkey::sHotkeyCount = Hotkey::sNextID; // HotKeyIt H1 changed from const as otherwise not possible to change
 bool Hotkey::sJoystickHasHotkeys[MAX_JOYSTICKS] = {false};
 DWORD Hotkey::sJoyHotkeyCount = 0;
 
@@ -484,6 +484,7 @@ void Hotkey::AllDestructAndExit(int aExitCode)
 }
 
 void Hotkey::AllDestruct()
+// HotKeyIt added Hotkey destruction H1
 {
 	AddRemoveHooks(0); // Remove all hooks. By contrast, registered hotkeys are unregistered below.
 	if (g_PlaybackHook) // Would be unusual for this to be installed during exit, but should be checked for completeness.
@@ -516,6 +517,7 @@ void Hotkey::AllDestruct()
 		hk.mVK = NULL;
 		hk.mVK_WasSpecifiedByNumber = false;
 	}
+	sHotkeyCount = 0;
 }
 
 
@@ -2201,7 +2203,7 @@ char *Hotkey::ToText(char *aBuf, int aBufSize, bool aAppendNewline)
 	HotkeyVariant *vp;
 	int existing_threads;
 	for (existing_threads = 0, vp = mFirstVariant; vp; vp = vp->mNextVariant)
- 		existing_threads += vp->mExistingThreads;
+		existing_threads += vp->mExistingThreads;
 
 	char existing_threads_str[128];
 	if (existing_threads)
@@ -2260,6 +2262,22 @@ Hotstring **Hotstring::shs = NULL;
 HotstringIDType Hotstring::sHotstringCount = 0;
 HotstringIDType Hotstring::sHotstringCountMax = 0;
 bool Hotstring::mAtLeastOneEnabled = false;
+
+
+void Hotstring::AllDestruct()
+// HotKeyIt destroy all HotStrings H1
+{
+	if (sHotstringCount < 1) // At least one part below relies on this check.
+		return;
+
+	UINT u;
+	for (mAtLeastOneEnabled = false, u = 0; u < sHotstringCount; ++u)
+		delete shs[u];
+	sHotstringCount = 0;
+	sHotstringCountMax = 0;
+}
+
+
 
 
 void Hotstring::SuspendAll(bool aSuspend)
