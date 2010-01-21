@@ -969,7 +969,7 @@
 			/>
 			<Tool
 				Name="VCResourceCompilerTool"
-				ResourceOutputFileName="$(IntDir)/$(InputName)Mini.res"
+				ResourceOutputFileName="$(IntDir)/$(InputName).res"
 			/>
 			<Tool
 				Name="VCPreLinkEventTool"

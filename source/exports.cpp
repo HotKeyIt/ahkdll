@@ -60,12 +60,12 @@ void BIF_FindFunc(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 EXPORT char* ahkgetvar(char *name,unsigned int getVar)
 {
 	Var *ahkvar = g_script.FindOrAddVar(name);
-	if (getVar != 0)
+	if (getVar != NULL)
 	{
 		if (ahkvar->mType == VAR_BUILTIN)
 			return "0";
-		char buf[sizeof(__int64)];
-		return ITOA64((int)ahkvar,buf);
+		result_to_return_dll = (char *)realloc((char *)result_to_return_dll,MAX_INTEGER_LENGTH);
+		return ITOA64((int)ahkvar,result_to_return_dll);;
 	}
 	if (!ahkvar->HasContents() && ahkvar->mType != VAR_BUILTIN )
 		return "";
