@@ -13,11 +13,13 @@ Global
 		Debug|Win32 = Debug|Win32
 		DebugAhkxDLL|Win32 = DebugAhkxDLL|Win32
 		DebugDll|Win32 = DebugDll|Win32
+		DebugMiniDll|Win32 = DebugMiniDll|Win32
 		RAUTODLL|Win32 = RAUTODLL|Win32
 		RDLL|Win32 = RDLL|Win32
 		Release|Win32 = Release|Win32
 		ReleaseAhkxDLL|Win32 = ReleaseAhkxDLL|Win32
 		ReleaseDLL|Win32 = ReleaseDLL|Win32
+		ReleaseMiniDll|Win32 = ReleaseMiniDll|Win32
 		SC (minimum size)|Win32 = SC (minimum size)|Win32
 		SC (self-contained)|Win32 = SC (self-contained)|Win32
 	EndGlobalSection
@@ -30,6 +32,8 @@ Global
 		{39037993-9571-4DF2-8E39-CD2909043574}.DebugAhkxDLL|Win32.Build.0 = DebugDll|Win32
 		{39037993-9571-4DF2-8E39-CD2909043574}.DebugDll|Win32.ActiveCfg = DebugDll|Win32
 		{39037993-9571-4DF2-8E39-CD2909043574}.DebugDll|Win32.Build.0 = DebugDll|Win32
+		{39037993-9571-4DF2-8E39-CD2909043574}.DebugMiniDll|Win32.ActiveCfg = DebugMiniDll|Win32
+		{39037993-9571-4DF2-8E39-CD2909043574}.DebugMiniDll|Win32.Build.0 = DebugMiniDll|Win32
 		{39037993-9571-4DF2-8E39-CD2909043574}.RAUTODLL|Win32.ActiveCfg = RAUTODLL|Win32
 		{39037993-9571-4DF2-8E39-CD2909043574}.RAUTODLL|Win32.Build.0 = RAUTODLL|Win32
 		{39037993-9571-4DF2-8E39-CD2909043574}.RDLL|Win32.ActiveCfg = RDLL|Win32
@@ -40,6 +44,8 @@ Global
 		{39037993-9571-4DF2-8E39-CD2909043574}.ReleaseAhkxDLL|Win32.Build.0 = ReleaseDll|Win32
 		{39037993-9571-4DF2-8E39-CD2909043574}.ReleaseDLL|Win32.ActiveCfg = RDLL|Win32
 		{39037993-9571-4DF2-8E39-CD2909043574}.ReleaseDLL|Win32.Build.0 = RDLL|Win32
+		{39037993-9571-4DF2-8E39-CD2909043574}.ReleaseMiniDll|Win32.ActiveCfg = ReleaseMiniDll|Win32
+		{39037993-9571-4DF2-8E39-CD2909043574}.ReleaseMiniDll|Win32.Build.0 = ReleaseMiniDll|Win32
 		{39037993-9571-4DF2-8E39-CD2909043574}.SC (minimum size)|Win32.ActiveCfg = Release|Win32
 		{39037993-9571-4DF2-8E39-CD2909043574}.SC (minimum size)|Win32.Build.0 = Release|Win32
 		{39037993-9571-4DF2-8E39-CD2909043574}.SC (self-contained)|Win32.ActiveCfg = Release|Win32
@@ -52,6 +58,8 @@ Global
 		{76EFDEE3-81CF-4ADA-94DC-EA5509FF6FFC}.DebugAhkxDLL|Win32.Build.0 = DebugDll|Win32
 		{76EFDEE3-81CF-4ADA-94DC-EA5509FF6FFC}.DebugDll|Win32.ActiveCfg = DebugDll|Win32
 		{76EFDEE3-81CF-4ADA-94DC-EA5509FF6FFC}.DebugDll|Win32.Build.0 = DebugDll|Win32
+		{76EFDEE3-81CF-4ADA-94DC-EA5509FF6FFC}.DebugMiniDll|Win32.ActiveCfg = DebugMiniDll|Win32
+		{76EFDEE3-81CF-4ADA-94DC-EA5509FF6FFC}.DebugMiniDll|Win32.Build.0 = DebugMiniDll|Win32
 		{76EFDEE3-81CF-4ADA-94DC-EA5509FF6FFC}.RAUTODLL|Win32.ActiveCfg = RAUTODLL|Win32
 		{76EFDEE3-81CF-4ADA-94DC-EA5509FF6FFC}.RAUTODLL|Win32.Build.0 = RAUTODLL|Win32
 		{76EFDEE3-81CF-4ADA-94DC-EA5509FF6FFC}.RDLL|Win32.ActiveCfg = RDLL|Win32
@@ -62,6 +70,8 @@ Global
 		{76EFDEE3-81CF-4ADA-94DC-EA5509FF6FFC}.ReleaseAhkxDLL|Win32.Build.0 = ReleaseDll|Win32
 		{76EFDEE3-81CF-4ADA-94DC-EA5509FF6FFC}.ReleaseDLL|Win32.ActiveCfg = RDLL|Win32
 		{76EFDEE3-81CF-4ADA-94DC-EA5509FF6FFC}.ReleaseDLL|Win32.Build.0 = RDLL|Win32
+		{76EFDEE3-81CF-4ADA-94DC-EA5509FF6FFC}.ReleaseMiniDll|Win32.ActiveCfg = ReleaseMiniDll|Win32
+		{76EFDEE3-81CF-4ADA-94DC-EA5509FF6FFC}.ReleaseMiniDll|Win32.Build.0 = ReleaseMiniDll|Win32
 		{76EFDEE3-81CF-4ADA-94DC-EA5509FF6FFC}.SC (minimum size)|Win32.ActiveCfg = SC (minimum size)|Win32
 		{76EFDEE3-81CF-4ADA-94DC-EA5509FF6FFC}.SC (minimum size)|Win32.Build.0 = SC (minimum size)|Win32
 		{76EFDEE3-81CF-4ADA-94DC-EA5509FF6FFC}.SC (self-contained)|Win32.ActiveCfg = SC (self-contained)|Win32
