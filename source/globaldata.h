@@ -16,7 +16,6 @@ GNU General Public License for more details.
 
 #ifndef globaldata_h
 #define globaldata_h
-
 #include "hook.h" // For KeyHistoryItem and probably other things.
 #include "clipboard.h"  // For the global clipboard object
 #include "script.h" // For the global script object and g_ErrorLevel
@@ -29,18 +28,19 @@ extern HINSTANCE g_hInstance;
 extern DWORD g_MainThreadID;
 extern DWORD g_HookThreadID;
 extern CRITICAL_SECTION g_CriticalRegExCache;
-
 extern bool g_DestroyWindowCalled;
 extern HWND g_hWnd;  // The main window
 extern HWND g_hWndEdit;  // The edit window, child of main.
+#ifndef MINIDLL
 extern HWND g_hWndSplash;  // The SplashText window.
 extern HFONT g_hFontSplash;
+#endif
 extern HACCEL g_hAccelTable; // Accelerator table for main menu shortcut keys.
+
 
 typedef int (WINAPI *StrCmpLogicalW_type)(LPCWSTR, LPCWSTR);
 extern StrCmpLogicalW_type g_StrCmpLogicalW;
 extern WNDPROC g_TabClassProc;
-
 extern modLR_type g_modifiersLR_logical;   // Tracked by hook (if hook is active).
 extern modLR_type g_modifiersLR_logical_non_ignored;
 extern modLR_type g_modifiersLR_physical;  // Same as above except it's which modifiers are PHYSICALLY down.
@@ -48,7 +48,6 @@ extern modLR_type g_modifiersLR_physical;  // Same as above except it's which mo
 #ifdef FUTURE_USE_MOUSE_BUTTONS_LOGICAL
 extern WORD g_mouse_buttons_logical; // A bitwise combination of MK_LBUTTON, etc.
 #endif
-
 #define STATE_DOWN 0x80
 #define STATE_ON 0x01
 extern BYTE g_PhysicalKeyState[VK_ARRAY_COUNT];
@@ -61,16 +60,20 @@ extern BYTE g_MenuMaskKey; // L38: See #MenuMaskKey.
 
 // If a SendKeys() operation takes longer than this, hotkey's modifiers won't be pressed back down:
 extern int g_HotkeyModifierTimeout;
-extern int g_ClipboardTimeout;
 
+extern int g_ClipboardTimeout;
 extern HHOOK g_KeybdHook;
 extern HHOOK g_MouseHook;
 extern HHOOK g_PlaybackHook;
 extern bool g_ForceLaunch;
 extern bool g_WinActivateForce;
+#ifndef MINIDLL
 extern SingleInstanceType g_AllowOnlyOneInstance;
+#endif
 extern bool g_persistent;
+#ifndef MINIDLL
 extern bool g_NoTrayIcon;
+#endif
 #ifdef AUTOHOTKEYSC
 	extern bool g_AllowMainWindow;
 #endif
@@ -78,10 +81,14 @@ extern bool g_AllowSameLineComments;
 extern bool g_DeferMessagesForUnderlyingPump;
 extern bool g_MainTimerExists;
 extern bool g_AutoExecTimerExists;
+#ifndef MINIDLL
 extern bool g_InputTimerExists;
+#endif
 extern bool g_DerefTimerExists;
 extern bool g_SoundWasPlayed;
+#ifndef MINIDLL
 extern bool g_IsSuspended;
+#endif
 extern BOOL g_WriteCacheDisabledInt64;
 extern BOOL g_WriteCacheDisabledDouble;
 extern BOOL g_NoEnv;
@@ -89,14 +96,21 @@ extern BOOL g_AllowInterruption;
 extern int g_nLayersNeedingTimer;
 extern int g_nThreads;
 extern int g_nPausedThreads;
+#ifndef MINIDLL
 extern int g_MaxHistoryKeys;
+#endif
 
 extern VarSizeType g_MaxVarCapacity;
+#ifndef MINIDLL
 extern UCHAR g_MaxThreadsPerHotkey;
+#endif
 extern int g_MaxThreadsTotal;
+#ifndef MINIDLL
 extern int g_MaxHotkeysPerInterval;
 extern int g_HotkeyThrottleInterval;
+#endif
 extern bool g_MaxThreadsBuffer;
+#ifndef MINIDLL
 extern HotCriterionType g_HotCriterion;
 extern char *g_HotWinTitle;
 extern char *g_HotWinText;
@@ -110,7 +124,9 @@ extern int g_HotExprLineCountMax;
 extern UINT g_HotExprTimeout;
 
 extern MenuTypeType g_MenuIsVisible;
+#endif
 extern int g_nMessageBoxes;
+#ifndef MINIDLL
 extern int g_nInputBoxes;
 extern int g_nFileDialogs;
 extern int g_nFolderDialogs;
@@ -118,6 +134,7 @@ extern InputBoxType g_InputBox[MAX_INPUTBOXES];
 extern SplashType g_Progress[MAX_PROGRESS_WINDOWS];
 extern SplashType g_SplashImage[MAX_SPLASHIMAGE_WINDOWS];
 EXTERN_GUI;
+#endif
 extern HWND g_hWndToolTip[MAX_TOOLTIPS];
 extern MsgMonitorStruct *g_MsgMonitor; // An array to be allocated upon first use (if any).
 extern int g_MsgMonitorCount;
@@ -131,7 +148,7 @@ extern Func *g_SortFunc;
 extern char g_delimiter;
 extern char g_DerefChar;
 extern char g_EscapeChar;
-
+#ifndef MINIDLL
 // Hot-string vars:
 extern char g_HSBuf[HS_BUF_SIZE];
 extern int g_HSBufLength;
@@ -151,17 +168,19 @@ extern bool g_HSDetectWhenInsideWord;
 extern bool g_HSDoReset;
 extern bool g_HSResetUponMouseClick;
 extern char g_EndChars[HS_MAX_END_CHARS + 1];
-
+#endif
 // Global objects:
 extern Var *g_ErrorLevel;
+#ifndef MINIDLL
 extern input_type g_input;
+#endif
 EXTERN_SCRIPT;
 EXTERN_CLIPBOARD;
 EXTERN_OSVER;
-
+#ifndef MINIDLL
 extern int g_IconTray;
 extern int g_IconTraySuspend;
-
+#endif
 extern DWORD g_OriginalTimeout;
 
 EXTERN_G;
@@ -171,6 +190,7 @@ extern char g_WorkingDir[MAX_PATH];  // Explicit size needed here in .h file for
 extern char *g_WorkingDirOrig;
 
 extern bool g_ContinuationLTrim;
+
 extern bool g_ForceKeybdHook;
 extern ToggleValueType g_ForceNumLock;
 extern ToggleValueType g_ForceCapsLock;
@@ -190,17 +210,19 @@ extern key_to_sc_type g_key_to_sc[];
 extern int g_key_to_vk_count;
 extern int g_key_to_sc_count;
 
+#ifndef MINIDLL
 extern KeyHistoryItem *g_KeyHistory;
 extern int g_KeyHistoryNext;
 extern DWORD g_HistoryTickNow;
 extern DWORD g_HistoryTickPrev;
 extern HWND g_HistoryHwndPrev;
+#endif
 extern DWORD g_TimeLastInputPhysical;
-
+#ifndef MINIDLL
 #ifdef ENABLE_KEY_HISTORY_FILE
 extern bool g_KeyHistoryToFile;
 #endif
-
+#endif // MINIDLL
 
 // 9 might be better than 10 because if the granularity/timer is a little
 // off on certain systems, a Sleep(10) might really result in a Sleep(20),
@@ -279,11 +301,11 @@ if (!g_MainTimerExists)\
 	if (!g_AutoExecTimerExists)\
 		g_AutoExecTimerExists = SetTimer(g_hWnd, TIMER_ID_AUTOEXEC, aTimeoutValue, AutoExecSectionTimeout);\
 } // v1.0.39 for above: Removed the call to ExitApp() upon failure.  See SET_MAIN_TIMER for details.
-
+#ifndef MINIDLL
 #define SET_INPUT_TIMER(aTimeoutValue) \
 if (!g_InputTimerExists)\
 	g_InputTimerExists = SetTimer(g_hWnd, TIMER_ID_INPUT, aTimeoutValue, InputTimeout);
-
+#endif
 // For this one, SetTimer() is called unconditionally because our caller wants the timer reset
 // (as though it were killed and recreated) uncondtionally.  MSDN's comments are a little vague
 // about this, but testing shows that calling SetTimer() against an existing timer does completely
@@ -302,11 +324,11 @@ if (g_MainTimerExists && KillTimer(g_hWnd, TIMER_ID_MAIN))\
 	if (g_AutoExecTimerExists && KillTimer(g_hWnd, TIMER_ID_AUTOEXEC))\
 		g_AutoExecTimerExists = false;\
 }
-
+#ifndef MINIDLL
 #define KILL_INPUT_TIMER \
 if (g_InputTimerExists && KillTimer(g_hWnd, TIMER_ID_INPUT))\
 	g_InputTimerExists = false;
-
+#endif
 #define KILL_DEREF_TIMER \
 if (g_DerefTimerExists && KillTimer(g_hWnd, TIMER_ID_DEREF))\
 	g_DerefTimerExists = false;

@@ -10,21 +10,27 @@ EXPORT int ahkPause(char *aChangeTo) //Change pause state of a running script
 {
 	if ( ( (*aChangeTo == 'O' || *aChangeTo == 'o') && ( *(aChangeTo+1) == 'N' || *(aChangeTo+1) == 'n' ) ) || *aChangeTo == '1')
 	{
+#ifndef MINIDLL
 		Hotkey::ResetRunAgainAfterFinished();
+#endif
 		g->IsPaused = true;
 		++g_nPausedThreads; // For this purpose the idle thread is counted as a paused thread.
+#ifndef MINIDLL
 		g_script.UpdateTrayIcon();
+#endif
 	}
 	else if (*aChangeTo != '\0')
 	{
 		g->IsPaused = false;
 		--g_nPausedThreads; // For this purpose the idle thread is counted as a paused thread.
+#ifndef MINIDLL
 		g_script.UpdateTrayIcon();
+#endif
 	}
 	return (int)g->IsPaused;
 }
 
-// Naveen: v1. ahkgetvar()
+
 EXPORT unsigned int ahkFindFunc(char *funcname)
 {
 return (unsigned int)g_script.FindFunc(funcname);
@@ -50,10 +56,17 @@ void BIF_FindFunc(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 	aResultToken.value_int64 = (__int64)ahkFindFunc(funcname);
 	return;
 }
-
-EXPORT char* ahkgetvar(char *name)
+// Naveen: v1. ahkgetvar()
+EXPORT char* ahkgetvar(char *name,unsigned int getVar)
 {
 	Var *ahkvar = g_script.FindOrAddVar(name);
+	if (getVar != 0)
+	{
+		if (ahkvar->mType == VAR_BUILTIN)
+			return "0";
+		char buf[sizeof(__int64)];
+		return ITOA64((int)ahkvar,buf);
+	}
 	if (!ahkvar->HasContents() && ahkvar->mType != VAR_BUILTIN )
 		return "";
 	if (*ahkvar->mContents == '\0')
@@ -88,23 +101,28 @@ if (   !(var = g_script.FindOrAddVar(name, strlen(name)))   )
 			return 0; // success
 }
 //HotKeyIt ahkExecuteLine()
-EXPORT unsigned int ahkExecuteLine(unsigned int line,int aMode)
+EXPORT unsigned int ahkExecuteLine(unsigned int line,unsigned int aMode,unsigned int wait)
 {
 	Line *templine = (Line *)line;
 	if (templine == NULL)
 		return (unsigned int)g_script.mFirstLine;
-	else if (aMode)
-		PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)templine, (LPARAM)aMode);
+	else if (aMode && templine->mNextLine != NULL)
+	{
+		if (wait)
+			SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)templine, (LPARAM)aMode);
+		else
+			PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)templine, (LPARAM)aMode);
+	}
 	return (unsigned int) templine->mNextLine;
 }
 
-EXPORT int ahkLabel(char *aLabelName)
+EXPORT unsigned int ahkLabel(char *aLabelName)
 {
 	Label *aLabel = g_script.FindLabel(aLabelName) ;
 	if (aLabel)
 	{
 		PostMessage(g_hWnd, AHK_EXECUTE_LABEL, (LPARAM)aLabel, (LPARAM)aLabel);
-		return 0;
+		return (unsigned int) aLabel->mJumpToLine;
 	}
 	else
 		return -1;
@@ -115,7 +133,6 @@ EXPORT int ahkKey(char *keys)
 SendKeys(keys, false, SM_EVENT, 0, 1); // N11 sendahk
 return 0;
 }
-
 
 #ifdef DLLN
 // Naveen: v6 addFile()
@@ -209,7 +226,8 @@ EXPORT unsigned int addFile(char *fileName, bool aAllowDuplicateInclude, int aIg
 }
 
 
-#endif
+#endif // DllN
+
 
 #ifdef DLLN
 // HotKeyIt: addScript()
@@ -223,7 +241,14 @@ EXPORT unsigned int addScript(char *script, int aExecute)
 	g_script.LoadFromScript(script);
 	g_script.PreparseBlocks(oldLastLine->mNextLine); // 
 	if (aExecute > 0)
-		PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)oldLastLine->mNextLine, (LPARAM)oldLastLine->mNextLine);
+	{
+		if (aExecute > 1)
+		{
+			SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)oldLastLine->mNextLine, (LPARAM)oldLastLine->mNextLine);
+		}
+		else
+			PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)oldLastLine->mNextLine, (LPARAM)oldLastLine->mNextLine);
+	}
 	return (unsigned int) oldLastLine->mNextLine;  // 
 }
 
@@ -235,42 +260,19 @@ EXPORT unsigned int addScript(char *script, int aExecute)
 	// labels, hotkeys, functions.   
 	
 	Line *oldLastLine = g_script.mLastLine;
-	
+
 	g_script.LoadFromScript(script);
 	g_script.PreparseBlocks(oldLastLine->mNextLine); // 
 	if (aExecute > 0)
-		PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)oldLastLine->mNextLine, (LPARAM)oldLastLine->mNextLine);
+	{
+		if (aExecute > 1)
+			SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)oldLastLine->mNextLine, (LPARAM)oldLastLine->mNextLine);
+		else
+			PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)oldLastLine->mNextLine, (LPARAM)oldLastLine->mNextLine);
+	}
 	return (unsigned int) oldLastLine->mNextLine;  // 
 }
-
-
 #endif
-void BIF_Import(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount) // Added in Nv8.
-{
-	// Set default return value in case of early return.
-	aResultToken.symbol = SYM_INTEGER ;
-	aResultToken.marker = "";
-	bool aIgnoreLoadFailure = false ;
-	bool aAllowDuplicateInclude = false ;
-	// Get the first arg, which is the string used as the source of the extraction. Call it "haystack" for clarity.
-	char haystack_buf[MAX_NUMBER_SIZE]; // A separate buf because aResultToken.buf is sometimes used to store the result.
-	char *haystack = TokenToString(*aParam[0], haystack_buf); // Remember that aResultToken.buf is part of a union, though in this case there's no danger of overwriting it since our result will always be of STRING type (not int or float).
-	int haystack_length = (int)EXPR_TOKEN_LENGTH(aParam[0], haystack);
-
-	if (aParamCount < 2)// Load-time validation has ensured that at least the first parameter is present:
-	{
-		aResultToken.value_int64 = (__int64)addFile(haystack, false, 0);
-		//  Hotkey::HookUp() ; didn't work: see if we can remove dependence on having to suspend * 2 to enable hotkeys Nv8.
-		return;
-	}
-	else	
-		aAllowDuplicateInclude = (bool)TokenToInt64(*aParam[1]); // The one-based starting position in haystack (if any).  Convert it to zero-based.
-		__int64 clear = TokenToInt64(*aParam[2]) ;
-#ifndef AUTOHOTKEYSC		
-	aResultToken.value_int64 = (__int64)addFile(haystack, aAllowDuplicateInclude, (int)clear);
-#endif
-	return;
-}
 
 // HotKeyIt  -  ahkFunction can return a value now
 EXPORT char* ahkFunction(char *func, char *param1, char *param2, char *param3, char *param4, char *param5, char *param6, char *param7, char *param8, char *param9, char *param10)
@@ -330,7 +332,7 @@ if (aFunc)
 	return result_to_return_dll;
 }
 else
-	return "-1"; 
+	return ""; 
 }
 bool callFuncDll()
 {
@@ -482,25 +484,4 @@ bool callFunc(WPARAM awParam, LPARAM alParam)
 	ResumeUnderlyingThread(ErrorLevel_saved);
 	
 	return 0 ; // block_further_processing; // If false, the caller will ignore aMsgReply and process this message normally. If true, aMsgReply contains the reply the caller should immediately send for this message.
-}
-
-
-
-
-
-
-int initPlugins() // N10 plugins
-{
-	g_script.AddBIF("Import", BIF_Import, 1, 3) ;
-
-	g_script.xifwinactive = NULL ;
-    g_script.xwingetid = NULL ;
-    g_script.xsend = NULL ;
-	
-	return 0 ;
-}
-
-EXPORT int ImportBIF(char *name, BuiltInFunctionType bif, size_t min, size_t max) //N10 plugins
-{
-return g_script.AddBIF(name, bif, min, max);
 }

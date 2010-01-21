@@ -37,13 +37,16 @@ CRITICAL_SECTION g_CriticalRegExCache;
 bool g_DestroyWindowCalled = false;
 HWND g_hWnd = NULL;
 HWND g_hWndEdit = NULL;
+#ifndef MINIDLL
 HWND g_hWndSplash = NULL;
 HFONT g_hFontSplash = NULL;  // So that font can be deleted on program close.
+#endif
 HACCEL g_hAccelTable = NULL;
 
 typedef int (WINAPI *StrCmpLogicalW_type)(LPCWSTR, LPCWSTR);
 StrCmpLogicalW_type g_StrCmpLogicalW = NULL;
 WNDPROC g_TabClassProc = NULL;
+
 
 modLR_type g_modifiersLR_logical = 0;
 modLR_type g_modifiersLR_logical_non_ignored = 0;
@@ -65,26 +68,34 @@ DWORD g_IgnoreNextLControlUp = 0;            //
 BYTE g_MenuMaskKey = VK_CONTROL; // L38: See #MenuMaskKey.
 
 int g_HotkeyModifierTimeout = 50;  // Reduced from 100, which was a little too large for fast typists.
-int g_ClipboardTimeout = 1000; // v1.0.31
 
+int g_ClipboardTimeout = 1000; // v1.0.31
 HHOOK g_KeybdHook = NULL;
 HHOOK g_MouseHook = NULL;
 HHOOK g_PlaybackHook = NULL;
 bool g_ForceLaunch = false;
 bool g_WinActivateForce = false;
+#ifndef MINIDLL
 SingleInstanceType g_AllowOnlyOneInstance = ALLOW_MULTI_INSTANCE;
+#endif
 bool g_persistent = false;  // Whether the script should stay running even after the auto-exec section finishes.
+#ifndef MINIDLL
 bool g_NoTrayIcon = false;
+#endif
 #ifdef AUTOHOTKEYSC
 	bool g_AllowMainWindow = false;
 #endif
 bool g_AllowSameLineComments = true;
 bool g_MainTimerExists = false;
 bool g_AutoExecTimerExists = false;
+#ifndef MINIDLL
 bool g_InputTimerExists = false;
+#endif
 bool g_DerefTimerExists = false;
 bool g_SoundWasPlayed = false;
+#ifndef MINIDLL
 bool g_IsSuspended = false;  // Make this separate from g_AllowInterruption since that is frequently turned off & on.
+#endif
 bool g_DeferMessagesForUnderlyingPump = false;
 BOOL g_WriteCacheDisabledInt64 = FALSE;  // BOOL vs. bool might improve performance a little for
 BOOL g_WriteCacheDisabledDouble = FALSE; // frequently-accessed variables (it has helped performance in
@@ -93,8 +104,9 @@ BOOL g_AllowInterruption = TRUE;         //
 int g_nLayersNeedingTimer = 0;
 int g_nThreads = 0;
 int g_nPausedThreads = 0;
+#ifndef MINIDLL
 int g_MaxHistoryKeys = 40;
-
+#endif
 // g_MaxVarCapacity is used to prevent a buggy script from consuming all available system RAM. It is defined
 // as the maximum memory size of a variable, including the string's zero terminator.
 // The chosen default seems big enough to be flexible, yet small enough to not be a problem on 99% of systems:
@@ -106,9 +118,12 @@ int g_MaxThreadsTotal = MAX_THREADS_DEFAULT;
 // key auto-repeat feature to work on most systems without triggering the warning dialog.
 // In any case, using auto-repeat with a hotkey is pretty rare for most people, so it's best
 // to keep these values conservative:
+#ifndef MINIDLL
 int g_MaxHotkeysPerInterval = 70; // Increased to 70 because 60 was still causing the warning dialog for repeating keys sometimes.  Increased from 50 to 60 for v1.0.31.02 since 50 would be triggered by keyboard auto-repeat when it is set to its fastest.
 int g_HotkeyThrottleInterval = 2000; // Milliseconds.
+#endif
 bool g_MaxThreadsBuffer = false;  // This feature usually does more harm than good, so it defaults to OFF.
+#ifndef MINIDLL
 HotCriterionType g_HotCriterion = HOT_NO_CRITERION;
 char *g_HotWinTitle = ""; // In spite of the above being the primary indicator,
 char *g_HotWinText = "";  // these are initialized for maintainability.
@@ -122,7 +137,9 @@ int g_HotExprLineCountMax = 0; // Current capacity of g_HotExprLines.
 UINT g_HotExprTimeout = 1000; // Timeout for #if (expression) evaluation, in milliseconds.
 
 MenuTypeType g_MenuIsVisible = MENU_TYPE_NONE;
+#endif
 int g_nMessageBoxes = 0;
+#ifndef MINIDLL
 int g_nInputBoxes = 0;
 int g_nFileDialogs = 0;
 int g_nFolderDialogs = 0;
@@ -130,6 +147,7 @@ InputBoxType g_InputBox[MAX_INPUTBOXES];
 SplashType g_Progress[MAX_PROGRESS_WINDOWS] = {{0}};
 SplashType g_SplashImage[MAX_SPLASHIMAGE_WINDOWS] = {{0}};
 GuiType *g_gui[MAX_GUI_WINDOWS] = {NULL};
+#endif
 HWND g_hWndToolTip[MAX_TOOLTIPS] = {NULL};
 MsgMonitorStruct *g_MsgMonitor = NULL; // An array to be allocated upon first use (if any).
 int g_MsgMonitorCount = 0;
@@ -145,6 +163,7 @@ char g_delimiter = ',';
 char g_DerefChar = '%';
 char g_EscapeChar = '`';
 
+#ifndef MINIDLL
 // Hot-string vars (initialized when ResetHook() is first called):
 char g_HSBuf[HS_BUF_SIZE];
 int g_HSBufLength;
@@ -169,10 +188,12 @@ char g_EndChars[HS_MAX_END_CHARS + 1] = "-()[]{}:;'\"/\\,.?!\n \t";  // Hotstrin
 // Although dash/hyphen is used for multiple purposes, it seems to me that it is best (on average) to include it.
 // Jay D. Novak suggested ([{/ for things such as fl/nj or fl(nj) which might resolve to USA state names.
 // i.e. word(synonym) and/or word/synonym
-
+#endif
 // Global objects:
 Var *g_ErrorLevel = NULL; // Allows us (in addition to the user) to set this var to indicate success/failure.
+#ifndef MINIDLL
 input_type g_input;
+#endif
 Script g_script;
 // This made global for performance reasons (determining size of clipboard data then
 // copying contents in or out without having to close & reopen the clipboard in between):
@@ -186,9 +207,10 @@ OS_Version g_os;  // OS version object, courtesy of AutoIt3.
 // in places other than the tray.  Also note that the red icons look okay, at least on Win98,
 // because they are "red enough" not to suffer the graying effect from the palette shifting done
 // by the OS:
+#ifndef MINIDLL
 int g_IconTray = (g_os.IsWinXPorLater() || g_os.IsWinMeorLater()) ? IDI_TRAY : IDI_TRAY_WIN9X;
 int g_IconTraySuspend = (g_IconTray == IDI_TRAY) ? IDI_SUSPEND : IDI_TRAY_WIN9X_SUSPEND;
-
+#endif
 DWORD g_OriginalTimeout;
 
 global_struct g_default, g_startup, *g_array;
@@ -203,7 +225,9 @@ char g_WorkingDir[MAX_PATH] = "";
 char *g_WorkingDirOrig = NULL;  // Assigned a value in WinMain().
 
 bool g_ContinuationLTrim = false;
+#ifndef MINIDLL
 bool g_ForceKeybdHook = false;
+#endif
 ToggleValueType g_ForceNumLock = NEUTRAL;
 ToggleValueType g_ForceCapsLock = NEUTRAL;
 ToggleValueType g_ForceScrollLock = NEUTRAL;
@@ -760,7 +784,7 @@ key_to_sc_type g_key_to_sc[] =
 // Can calc the counts only after the arrays are initialized above:
 int g_key_to_vk_count = sizeof(g_key_to_vk) / sizeof(key_to_vk_type);
 int g_key_to_sc_count = sizeof(g_key_to_sc) / sizeof(key_to_sc_type);
-
+#ifndef MINIDLL
 KeyHistoryItem *g_KeyHistory = NULL; // Array is allocated during startup.
 int g_KeyHistoryNext = 0;
 
@@ -775,6 +799,6 @@ bool g_KeyHistoryToFile = false;
 DWORD g_HistoryTickNow = 0;
 DWORD g_HistoryTickPrev = GetTickCount();  // So that the first logged key doesn't have a huge elapsed time.
 HWND g_HistoryHwndPrev = NULL;
-
+#endif
 // Also hook related:
 DWORD g_TimeLastInputPhysical = GetTickCount();

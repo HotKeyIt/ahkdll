@@ -170,7 +170,7 @@ VarSizeType BIV_IsAdmin(char *aBuf, char *aVarName)
 }
 
 
-
+#ifndef MINIDLL
 ResultType Line::PixelGetColor(int aX, int aY, char *aOptions)
 {
 	if (strcasestr(aOptions, "Slow")) // New mode for v1.0.43.10.  Takes precedence over Alt mode.
@@ -283,8 +283,7 @@ ResultType Line::SplashTextOn(int aWidth, int aHeight, char *aTitle, char *aText
 	// the above because it ensures that our message queue is empty prior to returning to our caller.
 	return OK;
 }
-
-
+#endif
 
 ResultType Line::WinMenuSelectItem(char *aTitle, char *aText, char *aMenu1, char *aMenu2
 	, char *aMenu3, char *aMenu4, char *aMenu5, char *aMenu6, char *aMenu7
@@ -1097,7 +1096,7 @@ ResultType Line::URLDownloadToFile(char *aURL, char *aFilespec)
 }
 
 
-
+#ifndef MINIDLL
 int CALLBACK FileSelectFolderCallback(HWND hwnd, UINT uMsg, LPARAM lParam, LPARAM lpData)
 {
 	if (uMsg == BFFM_INITIALIZED) // Caller has ensured that lpData isn't NULL by having set a valid lParam value.
@@ -1221,9 +1220,7 @@ ResultType Line::FileSelectFolder(char *aRootDir, char *aOptions, char *aGreetin
 	g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
 	return output_var.Assign(Result);
 }
-
-
-
+#endif
 ResultType Line::FileGetShortcut(char *aShortcutFile) // Credited to Holger <Holger.Kotsch at GMX de>.
 {
 	Var *output_var_target = ARGVAR2; // These might be omitted in the parameter list, so it's okay if 
@@ -2021,9 +2018,10 @@ flags can be a combination of:
 BOOL Util_ShutdownHandler(HWND hwnd, DWORD lParam)
 {
 	// if the window is me, don't terminate!
+#ifndef MINIDLL
 	if (hwnd != g_hWnd && hwnd != g_hWndSplash)
 		Util_WinKill(hwnd);
-
+#endif
 	// Continue the enumeration.
 	return TRUE;
 
@@ -2048,7 +2046,6 @@ void Util_WinKill(HWND hWnd)
 		}
 	}
 }
-
 
 
 void DoIncrementalMouseMove(int aX1, int aY1, int aX2, int aY2, int aSpeed)

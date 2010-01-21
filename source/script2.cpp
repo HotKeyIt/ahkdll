@@ -23,7 +23,6 @@ GNU General Public License for more details.
 #include "window.h" // for IF_USE_FOREGROUND_WINDOW
 #include "application.h" // for MsgSleep()
 #include "resources\resource.h"  // For InputBox.
-
 #define PCRE_STATIC             // For RegEx. PCRE_STATIC tells PCRE to declare its functions for normal, static
 #include "lib_pcre/pcre/pcre.h" // linkage rather than as functions inside an external DLL.
 #include "exports.h" // for callFunc # Naveen N10
@@ -31,7 +30,7 @@ GNU General Public License for more details.
 ////////////////////
 // Window related //
 ////////////////////
-
+#ifndef MINIDLL
 ResultType Line::Splash(char *aOptions, char *aSubText, char *aMainText, char *aTitle, char *aFontName
 	, char *aImageFile, bool aSplashImage)
 {
@@ -695,6 +694,8 @@ ResultType Line::Splash(char *aOptions, char *aSubText, char *aMainText, char *a
 }
 
 
+#endif
+
 
 ResultType Line::ToolTip(char *aText, char *aX, char *aY, char *aID)
 {
@@ -861,7 +862,7 @@ ResultType Line::ToolTip(char *aText, char *aX, char *aY, char *aID)
 }
 
 
-
+#ifndef MINIDLL
 ResultType Line::TrayTip(char *aTitle, char *aText, char *aTimeout, char *aOptions)
 {
 	if (!g_os.IsWin2000orLater()) // Older OSes do not support it, so do nothing.
@@ -878,8 +879,7 @@ ResultType Line::TrayTip(char *aTitle, char *aText, char *aTimeout, char *aOptio
 	Shell_NotifyIcon(NIM_MODIFY, &nic);
 	return OK; // i.e. never a critical error if it fails.
 }
-
-
+#endif
 
 ResultType Line::Transform(char *aCmd, char *aValue1, char *aValue2)
 {
@@ -1249,6 +1249,7 @@ ResultType Line::Transform(char *aCmd, char *aValue1, char *aValue2)
 
 
 
+#ifndef MINIDLL
 ResultType Line::Input()
 // OVERVIEW:
 // Although a script can have many concurrent quasi-threads, there can only be one input
@@ -1623,7 +1624,7 @@ ResultType Line::Input()
 	// results in a new thread being created that starts a new Input:
 	return output_var->Assign(input_buf);
 }
-
+#endif
 
 
 ResultType Line::PerformShowWindow(ActionTypeType aActionType, char *aTitle, char *aText
@@ -1702,8 +1703,6 @@ ResultType Line::PerformShowWindow(ActionTypeType aActionType, char *aTitle, cha
 	}
 	return OK;  // Return success for all the above cases.
 }
-
-
 
 ResultType Line::PerformWait()
 // Since other script threads can interrupt these commands while they're running, it's important that
@@ -2399,7 +2398,6 @@ ResultType Line::ControlGetFocus(char *aTitle, char *aText, char *aExcludeTitle,
 }
 
 
-
 BOOL CALLBACK EnumChildFindSeqNum(HWND aWnd, LPARAM lParam)
 {
 	class_and_hwnd_type &cah = *(class_and_hwnd_type *)lParam;  // For performance and convenience.
@@ -2876,6 +2874,7 @@ ResultType Line::ScriptPostSendMessage(bool aUseSend)
 
 
 
+
 ResultType Line::ScriptProcess(char *aCmd, char *aProcess, char *aParam3)
 {
 	ProcessCmds process_cmd = ConvertProcessCmd(aCmd);
@@ -2979,6 +2978,7 @@ ResultType Line::ScriptProcess(char *aCmd, char *aProcess, char *aParam3)
 
 	return FAIL;  // Should never be executed; just here to catch bugs.
 }
+
 
 
 
@@ -3147,7 +3147,6 @@ ResultType WinSetRegion(HWND aWnd, char *aPoints)
 }
 
 
-						
 ResultType Line::WinSet(char *aAttrib, char *aValue, char *aTitle, char *aText
 	, char *aExcludeTitle, char *aExcludeText)
 {
@@ -4067,6 +4066,8 @@ BOOL CALLBACK EnumMonitorProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMoni
 
 
 
+
+#ifndef MINIDLL
 LPCOLORREF getbits(HBITMAP ahImage, HDC hdc, LONG &aWidth, LONG &aHeight, bool &aIs16Bit, int aMinColorDepth = 8)
 // Helper function used by PixelSearch below.
 // Returns an array of pixels to the caller, which it must free when done.  Returns NULL on failure,
@@ -4851,10 +4852,12 @@ end:
 /////////////////
 // Main Window //
 /////////////////
-
+#endif
 LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lParam)
 {
+#ifndef MINIDLL
 	int i;
+#endif
 	DWORD dwTemp;
 
 	// Detect Explorer crashes so that tray icon can be recreated.  I think this only works on Win98
@@ -4873,6 +4876,7 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 	
 	switch (iMsg)
 	{
+#ifndef MINIDLL
 	case WM_COMMAND:
 		if (HandleMenuItem(hWnd, LOWORD(wParam), -1)) // It was handled fully. -1 flags it as a non-GUI menu item such as a tray menu or popup menu.
 			return 0; // If an application processes this message, it should return zero.
@@ -4918,7 +4922,7 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 		} // Inner switch()
 		break;
 	} // case AHK_NOTIFYICON
-
+#endif
 	case AHK_DIALOG:  // User defined msg sent from our functions MsgBox() or FileSelectFile().
 	{
 		// Always call this to close the clipboard if it was open (e.g. due to a script
@@ -4965,7 +4969,7 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 		// else: if !top_box: no error reporting currently.
 		return 0;
 	}
-
+#ifndef MINIDLL
 	case AHK_USER_MENU:
 		// Search for AHK_USER_MENU in GuiWindowProc() for comments about why this is done:
 		PostMessage(hWnd, iMsg, wParam, lParam);
@@ -4975,6 +4979,7 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 	case WM_HOTKEY: // As a result of this app having previously called RegisterHotkey().
 	case AHK_HOOK_HOTKEY:  // Sent from this app's keyboard or mouse hook.
 	case AHK_HOTSTRING: // Added for v1.0.36.02 so that hotstrings work even while an InputBox or other non-standard msg pump is running.
+#endif
 	case AHK_CLIPBOARD_CHANGE: // Added for v1.0.44 so that clipboard notifications aren't lost while the script is displaying a MsgBox or other dialog.
 		// If the following facts are ever confirmed, there would be no need to post the message in cases where
 		// the MsgSleep() won't be done:
@@ -5047,7 +5052,9 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 		// that took a long time to run might keep us away from the "menu loop", which would result
 		// in the menu becoming temporarily unresponsive while the user is in it (and probably other
 		// undesired effects).
+#ifndef MINIDLL
 		if (!g_MenuIsVisible)
+#endif
 			MsgSleep(-1, RETURN_AFTER_MESSAGES_SPECIAL_FILTER);
 		return 0;
 
@@ -5097,11 +5104,11 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 	case AHK_EXIT_BY_RELOAD:
 		g_script.ExitApp(EXIT_RELOAD);
 		return 0; // Whether ExitApp() terminates depends on whether there's an OnExit subroutine and what it does.
-
+#ifndef MINIDLL
 	case AHK_EXIT_BY_SINGLEINSTANCE:
 		g_script.ExitApp(EXIT_SINGLEINSTANCE);
 		return 0; // Whether ExitApp() terminates depends on whether there's an OnExit subroutine and what it does.
-
+#endif
 	case WM_DESTROY:
 		if (hWnd == g_hWnd) // i.e. not the SplashText window or anything other than the main.
 		{
@@ -5148,13 +5155,22 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 					MoveWindow(g_hWndEdit, 0, 0, LOWORD(lParam), HIWORD(lParam), TRUE);
 				return 0; // The correct return value for this msg.
 			}
+#ifndef MINIDLL
 			if (hWnd == g_hWndSplash || wParam == SIZE_MINIMIZED)
 				break;  // Let DefWindowProc() handle it for splash window and Progress windows.
 		}
 		else
 			if (hWnd == g_hWnd || hWnd == g_hWndSplash)
 				break; // Let DWP handle it.
-
+#else
+			if (wParam == SIZE_MINIMIZED)
+				break;  // Let DefWindowProc() handle it for splash window and Progress windows.
+		}
+		else
+			if (hWnd == g_hWnd)
+				break; // Let DWP handle it.
+#endif
+#ifndef MINIDLL
 		for (i = 0; i < MAX_SPLASHIMAGE_WINDOWS; ++i)
 			if (g_SplashImage[i].hwnd == hWnd)
 				break;
@@ -5247,9 +5263,10 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 			return 1; // "An application should return nonzero if it erases the background."
 		}
 		} // switch()
+#endif
 		break; // Let DWP handle it.
 	}
-		
+	
 	case WM_SETFOCUS:
 		if (hWnd == g_hWnd)
 		{
@@ -5273,7 +5290,7 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 		else if (g_script.mNextClipboardViewer)
 			SendMessageTimeout(g_script.mNextClipboardViewer, iMsg, wParam, lParam, SMTO_ABORTIFHUNG, 2000, &dwTemp);
 		return 0;
-
+#ifndef MINIDLL
 	case AHK_GETWINDOWTEXT:
 		// It's best to handle this msg here rather than in the main event loop in case a non-standard message
 		// pump is running (such as MsgBox's), in which case this msg would be dispatched directly here.
@@ -5287,7 +5304,7 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 		// such as when/if it yields our timeslice upon returning FALSE (uncertain/unlikely, but in any case
 		// it might do more harm than good).
 		return 0;
-
+#endif
 	case AHK_RETURN_PID:
 		// This is obsolete in light of WinGet's support for fetching the PID of any window.
 		// But since it's simple, it is retained for backward compatibility.
@@ -5298,12 +5315,12 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 		// SendMessage, 0x44, 1029,,, %A_ScriptFullPath% - AutoHotkey
 		// SendMessage, 1029,,,, %A_ScriptFullPath% - AutoHotkey  ; Same as above but not sent via TRANSLATE.
 		return GetCurrentProcessId(); // Don't use ReplyMessage because then our thread can't reply to itself with this answer.
-
+#ifndef MINIDLL
 	case AHK_HOT_IF_EXPR: // L4: HotCriterionAllowsFiring uses this to ensure expressions are evaluated only on the main thread.
 		if ((int)wParam > -1 && (int)wParam < g_HotExprLineCount)
 			return g_HotExprLines[(int)wParam]->EvaluateHotCriterionExpression();
 		return 0;
-
+#endif
 	case AHK_EXECUTE:   // sent from dll host # Naveen N9 
 		 g_script.mTempLine = (Line *)wParam ;
 		 if (lParam == ONLY_ONE_LINE)
@@ -5323,7 +5340,7 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 	case AHK_EXECUTE_FUNCTION_DLL: 
 		callFuncDll();
 		return 0;
-
+#ifndef MINIDLL
 	case WM_MEASUREITEM: // L17: Measure menu icon. Not used on Windows Vista or later.
 		if (hWnd == g_hWnd && wParam == 0 && !g_os.IsWinVistaOrLater())
 		{
@@ -5382,7 +5399,6 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 	case WM_EXITMENULOOP:
 		g_MenuIsVisible = MENU_TYPE_NONE; // See comments in similar code in GuiWindowProc().
 		break;
-
 	default:
 		// The following iMsg can't be in the switch() since it's not constant:
 		if (iMsg == WM_TASKBARCREATED && !g_NoTrayIcon) // !g_NoTrayIcon --> the tray icon should be always visible.
@@ -5392,13 +5408,14 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 			// And now pass this iMsg on to DefWindowProc() in case it does anything with it.
 		}
 
+#endif
 	} // switch()
 
 	return DefWindowProc(hWnd, iMsg, wParam, lParam);
 }
 
 
-
+#ifndef MINIDLL
 bool HandleMenuItem(HWND aHwnd, WORD aMenuItemID, WPARAM aGuiIndex)
 // See if an item was selected from the tray menu or main menu.  Note that it is possible
 // for one of the standard menu items to be triggered from a GUI menu if the menu or one of
@@ -5667,7 +5684,6 @@ DWORD GetAHKInstallDir(char *aBuf)
 //////////////
 // InputBox //
 //////////////
-
 ResultType InputBox(Var *aOutputVar, char *aTitle, char *aText, bool aHideInput, int aWidth, int aHeight
 	, int aX, int aY, double aTimeout, char *aDefault)
 {
@@ -6093,10 +6109,12 @@ VOID CALLBACK InputBoxTimeout(HWND hWnd, UINT uMsg, UINT idEvent, DWORD dwTime)
 
 
 
+#endif
 VOID CALLBACK DerefTimeout(HWND hWnd, UINT uMsg, UINT idEvent, DWORD dwTime)
 {
 	Line::FreeDerefBufIfLarge(); // It will also kill the timer, if appropriate.
 }
+
 
 
 
@@ -6781,6 +6799,7 @@ ResultType Line::PerformAssign()
 	output_var.Length() = (VarSizeType)(g->AutoTrim ? trim(contents, length) : length);
 	return output_var.Close(); // Must be called after Assign(NULL, ...) or when Contents() has been altered because it updates the variable's attributes and properly handles VAR_CLIPBOARD.
 }
+
 
 
 
@@ -8358,7 +8377,6 @@ ResultType Line::SoundPlay(char *aFilespec, bool aSleepUntilDone)
 }
 
 
-
 void SetWorkingDir(char *aNewDir)
 // Sets ErrorLevel to indicate success/failure, but only if the script has begun runtime execution (callers
 // want that).
@@ -8421,7 +8439,7 @@ void SetWorkingDir(char *aNewDir)
 }
 
 
-
+#ifndef MINIDLL
 ResultType Line::FileSelectFile(char *aOptions, char *aWorkingDir, char *aGreeting, char *aFilter)
 // Since other script threads can interrupt this command while it's running, it's important that
 // this command not refer to sArgDeref[] and sArgVar[] anytime after an interruption becomes possible.
@@ -8696,7 +8714,7 @@ ResultType Line::FileSelectFile(char *aOptions, char *aWorkingDir, char *aGreeti
 	return output_var.Assign(file_buf);
 }
 
-
+#endif
 
 ResultType Line::FileCreateDir(char *aDirSpec)
 {
@@ -9287,7 +9305,7 @@ ResultType Line::FileDelete()
 }
 
 
-
+#ifndef MINIDLL
 ResultType Line::FileInstall(char *aSource, char *aDest, char *aFlag)
 {
 	g_ErrorLevel->Assign(ERRORLEVEL_ERROR); // Set default ErrorLevel.
@@ -9338,7 +9356,7 @@ ResultType Line::FileInstall(char *aSource, char *aDest, char *aFlag)
 #endif
 	return OK;
 }
-
+#endif
 
 
 ResultType Line::FileGetAttrib(char *aFilespec)
@@ -9859,6 +9877,7 @@ ResultType Line::FileGetSize(char *aFilespec, char *aGranularity)
 
 
 
+
 ResultType Line::SetToggleState(vk_type aVK, ToggleValueType &ForceLock, char *aToggleText)
 // Caller must have already validated that the args are correct.
 // Always returns OK, for use as caller's return value.
@@ -9875,6 +9894,7 @@ ResultType Line::SetToggleState(vk_type aVK, ToggleValueType &ForceLock, char *a
 		ForceLock = NEUTRAL;
 		ToggleKeyState(aVK, toggle);
 		break;
+#ifndef MINIDLL
 	case ALWAYS_ON:
 	case ALWAYS_OFF:
 		ForceLock = (toggle == ALWAYS_ON) ? TOGGLED_ON : TOGGLED_OFF; // Must do this first.
@@ -9884,6 +9904,7 @@ ResultType Line::SetToggleState(vk_type aVK, ToggleValueType &ForceLock, char *a
 		// that may introduce quite a bit of complexity):
 		Hotkey::InstallKeybdHook();
 		break;
+#endif
 	case NEUTRAL:
 		// Note: No attempt is made to detect whether the keybd hook should be deinstalled
 		// because it's no longer needed due to this change.  That would require some 
@@ -9900,7 +9921,6 @@ ResultType Line::SetToggleState(vk_type aVK, ToggleValueType &ForceLock, char *a
 ////////////////////////////////
 // Misc lower level functions //
 ////////////////////////////////
-
 HWND Line::DetermineTargetWindow(char *aTitle, char *aText, char *aExcludeTitle, char *aExcludeText)
 {
 	HWND target_window; // A variable of this name is used by the macros below.
@@ -9911,6 +9931,7 @@ HWND Line::DetermineTargetWindow(char *aTitle, char *aText, char *aExcludeTitle,
 		target_window = GetValidLastUsedWindow(*g);
 	return target_window;
 }
+
 
 
 
@@ -10237,6 +10258,7 @@ VarSizeType BIV_BatchLines(char *aBuf, char *aVarName)
 	return (VarSizeType)strlen(target_buf);
 }
 
+
 VarSizeType BIV_TitleMatchMode(char *aBuf, char *aVarName)
 {
 	if (g->TitleMatchMode == FIND_REGEX) // v1.0.45.
@@ -10388,6 +10410,7 @@ VarSizeType BIV_IsCritical(char *aBuf, char *aVarName) // v1.0.48: Lexikos: Adde
 	return 1; // Caller might rely on receiving actual length when aBuf!=NULL.
 }
 
+#ifndef MINIDLL
 VarSizeType BIV_IsSuspended(char *aBuf, char *aVarName)
 {
 	if (aBuf)
@@ -10398,6 +10421,7 @@ VarSizeType BIV_IsSuspended(char *aBuf, char *aVarName)
 	return 1;
 }
 
+#endif
 #ifdef AUTOHOTKEYSC  // A_IsCompiled is left blank/undefined in uncompiled scripts.
 VarSizeType BIV_IsCompiled(char *aBuf, char *aVarName)
 {
@@ -10420,6 +10444,7 @@ VarSizeType BIV_LastError(char *aBuf, char *aVarName)
 
 
 
+#ifndef MINIDLL
 VarSizeType BIV_IconHidden(char *aBuf, char *aVarName)
 {
 	if (aBuf)
@@ -10470,6 +10495,7 @@ VarSizeType BIV_IconNumber(char *aBuf, char *aVarName)
 
 
 
+#endif
 VarSizeType BIV_ExitReason(char *aBuf, char *aVarName)
 {
 	char *str;
@@ -10552,6 +10578,17 @@ VarSizeType BIV_DllPath(char *aBuf, char *aVarName) // HotKeyIt H1 path of loade
 	if (aBuf)
 		strcpy(aBuf, buf); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string). This is true for ReadRegString()'s API call and may be true for other API calls like this one.
 	return length;
+}
+
+VarSizeType BIV_AhkHwnd(char *aBuf, char *aVarName) // HotKeyIt MINIDLL A_AhkHwnd
+{
+	char buf[MAX_INTEGER_LENGTH+2];
+	buf[0] = '0';
+	buf[1] = 'x';
+	_ultoa((UINT)(size_t)g_hWnd, buf + 2, 16);
+	if (aBuf)
+		strcpy(aBuf,buf); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string). This is true for ReadRegString()'s API call and may be true for other API calls like this one.
+	return (VarSizeType)strlen(buf);
 }
 
 VarSizeType BIV_TickCount(char *aBuf, char *aVarName)
@@ -10813,6 +10850,7 @@ VarSizeType BIV_MyDocuments(char *aBuf, char *aVarName) // Called by multiple ca
 		strcpy(aBuf, buf); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string).
 	return length;
 }
+
 
 
 
@@ -11300,6 +11338,7 @@ VarSizeType BIV_ThisLabel(char *aBuf, char *aVarName)
 	return (VarSizeType)strlen(name);
 }
 
+#ifndef MINIDLL
 VarSizeType BIV_ThisMenuItem(char *aBuf, char *aVarName)
 {
 	if (aBuf)
@@ -11400,7 +11439,6 @@ VarSizeType BIV_EndChar(char *aBuf, char *aVarName)
 	}
 	return g_script.mEndChar ? 1 : 0; // v1.0.48.04: Fixed to support a NULL char, which happens when the hotstring has the "no ending character required" option.
 }
-
 
 
 VarSizeType BIV_Gui(char *aBuf, char *aVarName)
@@ -11524,7 +11562,7 @@ VarSizeType BIV_GuiEvent(char *aBuf, char *aVarName)
 	}
 }
 
-
+#endif
 
 VarSizeType BIV_EventInfo(char *aBuf, char *aVarName)
 // We're returning the length of the var's contents, not the size.
@@ -11566,11 +11604,16 @@ VarSizeType BIV_TimeIdlePhysical(char *aBuf, char *aVarName)
 // mutual dependency issues.
 {
 	// If neither hook is active, default this to the same as the regular idle time:
+#ifndef MINIDLL
 	if (!(g_KeybdHook || g_MouseHook))
 		return BIV_TimeIdle(aBuf, "");
+
 	if (!aBuf)
 		return MAX_INTEGER_LENGTH; // IMPORTANT: Conservative estimate because tick might change between 1st & 2nd calls.
 	return (VarSizeType)strlen(ITOA64(GetTickCount() - g_TimeLastInputPhysical, aBuf)); // Switching keyboard layouts/languages sometimes sees to throw off the timestamps of the incoming events in the hook.
+#else
+	return BIV_TimeIdle(aBuf, "");
+#endif
 }
 
 
@@ -11941,6 +11984,446 @@ void *GetDllProcAddress(char *aDllFileFunc, HMODULE *hmodule_to_free) // L31: Co
 		}
 	}
 	return function;
+}
+
+
+
+void BIF_Dll(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+// Stores a number or a SYM_STRING result in aResultToken.
+// Sets ErrorLevel to the error code appropriate to any problem that occurred.
+// Caller has set up aParam to be viewable as a left-to-right array of params rather than a stack.
+// It has also ensured that the array has exactly aParamCount items in it.
+// Author: Marcus Sonntag (Ultra)
+{
+	// Set default result in case of early return; a blank value:
+	aResultToken.symbol = SYM_STRING;
+	aResultToken.marker = "";
+	HMODULE hmodule_to_free = NULL; // Set default in case of early goto; mostly for maintainability.
+	void *function; // Will hold the address of the function to be called.
+
+	// Check that the mandatory first parameter (DLL+Function) is valid.
+	// (load-time validation has ensured at least one parameter is present).
+	switch(aParam[0]->symbol)
+	{
+		case SYM_STRING: // By far the most common, so it's listed first for performance. Also for performance, don't even consider the possibility that a quoted literal string like "33" is a function-address.
+			function = NULL; // Indicate that no function has been specified yet.
+			break;
+		case SYM_VAR:
+			// v1.0.46.08: Allow script to specify the address of a function, which might be useful for
+			// calling functions that the script discovers through unusual means such as C++ member functions.
+			function = (aParam[0]->var->IsNonBlankIntegerOrFloat() == PURE_INTEGER)
+				? (void *)aParam[0]->var->ToInt64(TRUE) // For simplicity and due to rarity, this doesn't check for zero or negative numbers.
+				: NULL; // Not a pure integer, so fall back to normal method of considering it to be path+name.
+			// A check like the following is not present due to rarity of need and because if the address
+			// is zero or negative, the same result will occur as for any other invalid address:
+			// an ErrorLevel of 0xc0000005.
+			//if (temp64 <= 0)
+			//{
+			//	g_ErrorLevel->Assign("-1"); // Stage 1 error: Invalid first param.
+			//	return;
+			//}
+			//// Otherwise, assume it's a valid address:
+			//	function = (void *)temp64;
+			break;
+		case SYM_INTEGER:
+			function = (void *)aParam[0]->value_int64; // For simplicity and due to rarity, this doesn't check for zero or negative numbers.
+			break;
+		case SYM_FLOAT:
+			g_ErrorLevel->Assign("-1"); // Stage 1 error: Invalid first param.
+			return;
+		default: // SYM_OPERAND (SYM_OPERAND is typically a numeric literal).
+			function = (TokenIsPureNumeric(*aParam[0]) == PURE_INTEGER)
+				? (void *)TokenToInt64(*aParam[0], TRUE) // For simplicity and due to rarity, this doesn't check for zero or negative numbers.
+				: NULL; // Not a pure integer, so fall back to normal method of considering it to be path+name.
+	}
+
+	// Determine the type of return value.
+	DYNAPARM return_attrib = {0}; // Init all to default in case ConvertDllArgType() isn't called below. This struct holds the type and other attributes of the function's return value.
+	int dll_call_mode = DC_CALL_STD; // Set default.  Can be overridden to DC_CALL_CDECL and flags can be OR'd into it.
+	if (aParamCount % 2) // Odd number of parameters indicates the return type has been omitted, so assume BOOL/INT.
+		return_attrib.type = DLL_ARG_INT;
+	else
+	{
+		// Check validity of this arg's return type:
+		ExprTokenType &token = *aParam[aParamCount - 1];
+		if (IS_NUMERIC(token.symbol) || token.symbol == SYM_OBJECT) // The return type should be a string, not something purely numeric.
+		{
+			g_ErrorLevel->Assign("-2"); // Stage 2 error: Invalid return type or arg type.
+			return;
+		}
+		char *return_type_string[2];
+		if (token.symbol == SYM_VAR) // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
+		{
+			return_type_string[0] = token.var->Contents();
+			return_type_string[1] = token.var->mName; // v1.0.33.01: Improve convenience by falling back to the variable's name if the contents are not appropriate.
+		}
+		else
+		{
+			return_type_string[0] = token.marker;
+			return_type_string[1] = NULL; // Added in 1.0.48.
+		}
+
+		if (!strnicmp(return_type_string[0], "CDecl", 5)) // Alternate calling convention.
+		{
+			dll_call_mode = DC_CALL_CDECL;
+			return_type_string[0] = omit_leading_whitespace(return_type_string[0] + 5);
+		}
+		// This next part is a little iffy because if a legitimate return type is contained in a variable
+		// that happens to be named Cdecl, Cdecl will be put into effect regardless of what's in the variable.
+		// But the convenience of being able to omit the quotes around Cdecl seems to outweigh the extreme
+		// rarity of such a thing happening.
+		else if (return_type_string[1] && !strnicmp(return_type_string[1], "CDecl", 5)) // Alternate calling convention.
+		{
+			dll_call_mode = DC_CALL_CDECL;
+			return_type_string[1] = NULL; // Must be NULL since return_type_string[1] is the variable's name, by definition, so it can't have any spaces in it, and thus no space delimited items after "Cdecl".
+		}
+
+		ConvertDllArgType(return_type_string, return_attrib);
+		if (return_attrib.type == DLL_ARG_INVALID)
+		{
+			g_ErrorLevel->Assign("-2"); // Stage 2 error: Invalid return type or arg type.
+			return;
+		}
+		--aParamCount;  // Remove the last parameter from further consideration.
+		if (!return_attrib.passed_by_address) // i.e. the special return flags below are not needed when an address is being returned.
+		{
+			if (return_attrib.type == DLL_ARG_DOUBLE)
+				dll_call_mode |= DC_RETVAL_MATH8;
+			else if (return_attrib.type == DLL_ARG_FLOAT)
+				dll_call_mode |= DC_RETVAL_MATH4;
+		}
+	}
+
+	// Using stack memory, create an array of dll args large enough to hold the actual number of args present.
+	int arg_count = aParamCount/2; // Might provide one extra due to first/last params, which is inconsequential.
+	DYNAPARM *dyna_param = arg_count ? (DYNAPARM *)_alloca(arg_count * sizeof(DYNAPARM)) : NULL;
+	// Above: _alloca() has been checked for code-bloat and it doesn't appear to be an issue.
+	// Above: Fix for v1.0.36.07: According to MSDN, on failure, this implementation of _alloca() generates a
+	// stack overflow exception rather than returning a NULL value.  Therefore, NULL is no longer checked,
+	// nor is an exception block used since stack overflow in this case should be exceptionally rare (if it
+	// does happen, it would probably mean the script or the program has a design flaw somewhere, such as
+	// infinite recursion).
+
+	char *arg_type_string[2];
+	int i;
+
+	// Above has already ensured that after the first parameter, there are either zero additional parameters
+	// or an even number of them.  In other words, each arg type will have an arg value to go with it.
+	// It has also verified that the dyna_param array is large enough to hold all of the args.
+	for (arg_count = 0, i = 1; i < aParamCount; ++arg_count, i += 2)  // Same loop as used later below, so maintain them together.
+	{
+		// Check validity of this arg's type and contents:
+		if (IS_NUMERIC(aParam[i]->symbol)) // The arg type should be a string, not something purely numeric.
+		{
+			g_ErrorLevel->Assign("-2"); // Stage 2 error: Invalid return type or arg type.
+			return;
+		}
+		// Otherwise, this arg's type-name is a string as it should be, so retrieve it:
+		if (aParam[i]->symbol == SYM_VAR) // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
+		{
+			arg_type_string[0] = aParam[i]->var->Contents();
+			arg_type_string[1] = aParam[i]->var->mName;
+			// v1.0.33.01: arg_type_string[1] improves convenience by falling back to the variable's name
+			// if the contents are not appropriate.  In other words, both Int and "Int" are treated the same.
+			// It's done this way to allow the variable named "Int" to actually contain some other legitimate
+			// type-name such as "Str" (in case anyone ever happens to do that).
+		}
+		else
+		{
+			arg_type_string[0] = aParam[i]->marker;
+			arg_type_string[1] = NULL;
+		}
+
+		ExprTokenType &this_param = *aParam[i + 1];         // Resolved for performance and convenience.
+		DYNAPARM &this_dyna_param = dyna_param[arg_count];  //
+
+		// Store the each arg into a dyna_param struct, using its arg type to determine how.
+		ConvertDllArgType(arg_type_string, this_dyna_param);
+		switch (this_dyna_param.type)
+		{
+		case DLL_ARG_STR:
+			if (IS_NUMERIC(this_param.symbol))
+			{
+				// For now, string args must be real strings rather than floats or ints.  An alternative
+				// to this would be to convert it to number using persistent memory from the caller (which
+				// is necessary because our own stack memory should not be passed to any function since
+				// that might cause it to return a pointer to stack memory, or update an output-parameter
+				// to be stack memory, which would be invalid memory upon return to the caller).
+				// The complexity of this doesn't seem worth the rarity of the need, so this will be
+				// documented in the help file.
+				g_ErrorLevel->Assign("-2"); // Stage 2 error: Invalid return type or arg type.
+				return;
+			}
+			// Otherwise, it's a supported type of string.
+			this_dyna_param.str = TokenToString(this_param); // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
+			// NOTES ABOUT THE ABOVE:
+			// UPDATE: The v1.0.44.14 item below doesn't work in release mode, only debug mode (turning off
+			// "string pooling" doesn't help either).  So it's commented out until a way is found
+			// to pass the address of a read-only empty string (if such a thing is possible in
+			// release mode).  Such a string should have the following properties:
+			// 1) The first byte at its address should be '\0' so that functions can read it
+			//    and recognize it as a valid empty string.
+			// 2) The memory address should be readable but not writable: it should throw an
+			//    access violation if the function tries to write to it (like "" does in debug mode).
+			// SO INSTEAD of the following, DllCall() now checks further below for whether sEmptyString
+			// has been overwritten/trashed by the call, and if so displays a warning dialog.
+			// See note above about this: v1.0.44.14: If a variable is being passed that has no capacity, pass a
+			// read-only memory area instead of a writable empty string. There are two big benefits to this:
+			// 1) It forces an immediate exception (catchable by DllCall's exception handler) so
+			//    that the program doesn't crash from memory corruption later on.
+			// 2) It avoids corrupting the program's static memory area (because sEmptyString
+			//    resides there), which can save many hours of debugging for users when the program
+			//    crashes on some seemingly unrelated line.
+			// Of course, it's not a complete solution because it doesn't stop a script from
+			// passing a variable whose capacity is non-zero yet too small to handle what the
+			// function will write to it.  But it's a far cry better than nothing because it's
+			// common for a script to forget to call VarSetCapacity before psssing a buffer to some
+			// function that writes a string to it.
+			//if (this_dyna_param.str == Var::sEmptyString) // To improve performance, compare directly to Var::sEmptyString rather than calling Capacity().
+			//	this_dyna_param.str = ""; // Make it read-only to force an exception.  See comments above.
+			break;
+
+		case DLL_ARG_DOUBLE:
+		case DLL_ARG_FLOAT:
+			// This currently doesn't validate that this_dyna_param.is_unsigned==false, since it seems
+			// too rare and mostly harmless to worry about something like "Ufloat" having been specified.
+			this_dyna_param.value_double = TokenToDouble(this_param);
+			if (this_dyna_param.type == DLL_ARG_FLOAT)
+				this_dyna_param.value_float = (float)this_dyna_param.value_double;
+			break;
+
+		case DLL_ARG_INVALID:
+			g_ErrorLevel->Assign("-2"); // Stage 2 error: Invalid return type or arg type.
+			return;
+
+		default: // Namely:
+		//case DLL_ARG_INT:
+		//case DLL_ARG_SHORT:
+		//case DLL_ARG_CHAR:
+		//case DLL_ARG_INT64:
+			if (this_dyna_param.is_unsigned && this_dyna_param.type == DLL_ARG_INT64 && !IS_NUMERIC(this_param.symbol))
+				// The above and below also apply to BIF_NumPut(), so maintain them together.
+				// !IS_NUMERIC() is checked because such tokens are already signed values, so should be
+				// written out as signed so that whoever uses them can interpret negatives as large
+				// unsigned values.
+				// Support for unsigned values that are 32 bits wide or less is done via ATOI64() since
+				// it should be able to handle both signed and unsigned values.  However, unsigned 64-bit
+				// values probably require ATOU64(), which will prevent something like -1 from being seen
+				// as the largest unsigned 64-bit int; but more importantly there are some other issues
+				// with unsigned 64-bit numbers: The script internals use 64-bit signed values everywhere,
+				// so unsigned values can only be partially supported for incoming parameters, but probably
+				// not for outgoing parameters (values the function changed) or the return value.  Those
+				// should probably be written back out to the script as negatives so that other parts of
+				// the script, such as expressions, can see them as signed values.  In other words, if the
+				// script somehow gets a 64-bit unsigned value into a variable, and that value is larger
+				// that LLONG_MAX (i.e. too large for ATOI64 to handle), ATOU64() will be able to resolve
+				// it, but any output parameter should be written back out as a negative if it exceeds
+				// LLONG_MAX (return values can be written out as unsigned since the script can specify
+				// signed to avoid this, since they don't need the incoming detection for ATOU()).
+				this_dyna_param.value_int64 = (__int64)ATOU64(TokenToString(this_param)); // Cast should not prevent called function from seeing it as an undamaged unsigned number.
+			else
+				this_dyna_param.value_int64 = TokenToInt64(this_param);
+
+			// Values less than or equal to 32-bits wide always get copied into a single 32-bit value
+			// because they should be right justified within it for insertion onto the call stack.
+			if (this_dyna_param.type != DLL_ARG_INT64) // Shift the 32-bit value into the high-order DWORD of the 64-bit value for later use by DynaCall().
+				this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
+		} // switch (this_dyna_param.type)
+	} // for() each arg.
+    
+	if (!function) // The function's address hasn't yet been determined.
+	{
+		function = GetDllProcAddress(aParam[0]->symbol == SYM_VAR ? aParam[0]->var->Contents() : aParam[0]->marker, &hmodule_to_free);
+		if (!function)
+		{
+			g_ErrorLevel->Assign("-4"); // Stage 4 error: Function could not be found in the DLL(s).
+			goto end;
+		}
+	}
+
+	////////////////////////
+	// Call the DLL function
+	////////////////////////
+	DWORD exception_occurred; // Must not be named "exception_code" to avoid interfering with MSVC macros.
+	DYNARESULT return_value;  // Doing assignment (below) as separate step avoids compiler warning about "goto end" skipping it.
+	return_value = DynaCall(dll_call_mode, function, dyna_param, arg_count, exception_occurred, NULL, 0);
+	// The above has also set g_ErrorLevel appropriately.
+
+	if (*Var::sEmptyString)
+	{
+		// v1.0.45.01 Above has detected that a variable of zero capacity was passed to the called function
+		// and the function wrote to it (assuming sEmptyString wasn't already trashed some other way even
+		// before the call).  So patch up the empty string to stabilize a little; but it's too late to
+		// salvage this instance of the program because there's no knowing how much static data adjacent to
+		// sEmptyString has been overwritten and corrupted.
+		*Var::sEmptyString = '\0';
+		// Don't bother with freeing hmodule_to_free since a critical error like this calls for minimal cleanup.
+		// The OS almost certainly frees it upon termination anyway.
+		// Call ScriptErrror() so that the user knows *which* DllCall is at fault:
+		g_script.ScriptError("This DllCall requires a prior VarSetCapacity. The program is now unstable and will exit.");
+		g_script.ExitApp(EXIT_CRITICAL); // Called this way, it will run the OnExit routine, which is debatable because it could cause more good than harm, but might avoid loss of data if the OnExit routine does something important.
+	}
+
+	// It seems best to have the above take precedence over "exception_occurred" below.
+	if (exception_occurred)
+	{
+		// If the called function generated an exception, I think it's impossible for the return value
+		// to be valid/meaningful since it the function never returned properly.  Confirmation of this
+		// would be good, but in the meantime it seems best to make the return value an empty string as
+		// an indicator that the call failed (in addition to ErrorLevel).
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = "";
+		// But continue on to write out any output parameters because the called function might have
+		// had a chance to update them before aborting.
+	}
+	else // The call was successful.  Interpret and store the return value.
+	{
+		// If the return value is passed by address, dereference it here.
+		if (return_attrib.passed_by_address)
+		{
+			return_attrib.passed_by_address = false; // Because the address is about to be dereferenced/resolved.
+
+			switch(return_attrib.type)
+			{
+			case DLL_ARG_INT64:
+			case DLL_ARG_DOUBLE:
+				// Same as next section but for eight bytes:
+				return_value.Int64 = *(__int64 *)return_value.Pointer;
+				break;
+			default: // Namely:
+			//case DLL_ARG_STR:  // Even strings can be passed by address, which is equivalent to "char **".
+			//case DLL_ARG_INT:
+			//case DLL_ARG_SHORT:
+			//case DLL_ARG_CHAR:
+			//case DLL_ARG_FLOAT:
+				// All the above are stored in four bytes, so a straight dereference will copy the value
+				// over unchanged, even if it's a float.
+				return_value.Int = *(int *)return_value.Pointer;
+			}
+		}
+
+		switch(return_attrib.type)
+		{
+		case DLL_ARG_INT: // Listed first for performance. If the function has a void return value (formerly DLL_ARG_NONE), the value assigned here is undefined and inconsequential since the script should be designed to ignore it.
+			aResultToken.symbol = SYM_INTEGER;
+			if (return_attrib.is_unsigned)
+				aResultToken.value_int64 = (UINT)return_value.Int; // Preserve unsigned nature upon promotion to signed 64-bit.
+			else // Signed.
+				aResultToken.value_int64 = return_value.Int;
+			break;
+		case DLL_ARG_STR:
+			// The contents of the string returned from the function must not reside in our stack memory since
+			// that will vanish when we return to our caller.  As long as every string that went into the
+			// function isn't on our stack (which is the case), there should be no way for what comes out to be
+			// on the stack either.
+			aResultToken.symbol = SYM_STRING;
+			aResultToken.marker = (char *)(return_value.Pointer ? return_value.Pointer : "");
+			// Above: Fix for v1.0.33.01: Don't allow marker to be set to NULL, which prevents crash
+			// with something like the following, which in this case probably happens because the inner
+			// call produces a non-numeric string, which "int" then sees as zero, which CharLower() then
+			// sees as NULL, which causes CharLower to return NULL rather than a real string:
+			//result := DllCall("CharLower", "int", DllCall("CharUpper", "str", MyVar, "str"), "str")
+			break;
+		case DLL_ARG_SHORT:
+			aResultToken.symbol = SYM_INTEGER;
+			if (return_attrib.is_unsigned)
+				aResultToken.value_int64 = return_value.Int & 0x0000FFFF; // This also forces the value into the unsigned domain of a signed int.
+			else // Signed.
+				aResultToken.value_int64 = (SHORT)(WORD)return_value.Int; // These casts properly preserve negatives.
+			break;
+		case DLL_ARG_CHAR:
+			aResultToken.symbol = SYM_INTEGER;
+			if (return_attrib.is_unsigned)
+				aResultToken.value_int64 = return_value.Int & 0x000000FF; // This also forces the value into the unsigned domain of a signed int.
+			else // Signed.
+				aResultToken.value_int64 = (char)(BYTE)return_value.Int; // These casts properly preserve negatives.
+			break;
+		case DLL_ARG_INT64:
+			// Even for unsigned 64-bit values, it seems best both for simplicity and consistency to write
+			// them back out to the script as signed values because script internals are not currently
+			// equipped to handle unsigned 64-bit values.  This has been documented.
+			aResultToken.symbol = SYM_INTEGER;
+			aResultToken.value_int64 = return_value.Int64;
+			break;
+		case DLL_ARG_FLOAT:
+			aResultToken.symbol = SYM_FLOAT;
+			aResultToken.value_double = return_value.Float;
+			break;
+		case DLL_ARG_DOUBLE:
+			aResultToken.symbol = SYM_FLOAT; // There is no SYM_DOUBLE since all floats are stored as doubles.
+			aResultToken.value_double = return_value.Double;
+			break;
+		//default: // Should never be reached unless there's a bug.
+		//	aResultToken.symbol = SYM_STRING;
+		//	aResultToken.marker = "";
+		} // switch(return_attrib.type)
+	} // Storing the return value when no exception occurred.
+
+	// Store any output parameters back into the input variables.  This allows a function to change the
+	// contents of a variable for the following arg types: String and Pointer to <various number types>.
+	for (arg_count = 0, i = 1; i < aParamCount; ++arg_count, i += 2) // Same loop as used above, so maintain them together.
+	{
+		ExprTokenType &this_param = *aParam[i + 1];  // Resolved for performance and convenience.
+		if (this_param.symbol != SYM_VAR) // Output parameters are copied back only if its counterpart parameter is a naked variable.
+			continue;
+		DYNAPARM &this_dyna_param = dyna_param[arg_count]; // Resolved for performance and convenience.
+		Var &output_var = *this_param.var;                 //
+		if (this_dyna_param.type == DLL_ARG_STR) // The function might have altered Contents(), so update Length().
+		{
+			char *contents = output_var.Contents(); // Contents() shouldn't update mContents in this case because Contents() was already called for each "str" parameter prior to calling the Dll function.
+			VarSizeType capacity = output_var.Capacity();
+			// Since the performance cost is low, ensure the string is terminated at the limit of its
+			// capacity (helps prevent crashes if DLL function didn't do its job and terminate the string,
+			// or when a function is called that deliberately doesn't terminate the string, such as
+			// RtlMoveMemory()).
+			if (capacity)
+				contents[capacity - 1] = '\0';
+			output_var.Length() = (VarSizeType)strlen(contents);
+			output_var.Close(); // Clear the attributes of the variable to reflect the fact that the contents may have changed.
+			continue;
+		}
+
+		// Since above didn't "continue", this arg wasn't passed as a string.  Of the remaining types, only
+		// those passed by address can possibly be output parameters, so skip the rest:
+		if (!this_dyna_param.passed_by_address)
+			continue;
+
+		switch (this_dyna_param.type)
+		{
+		// case DLL_ARG_STR:  Already handled above.
+		case DLL_ARG_INT:
+			if (this_dyna_param.is_unsigned)
+				output_var.Assign((DWORD)this_dyna_param.value_int);
+			else // Signed.
+				output_var.Assign(this_dyna_param.value_int);
+			break;
+		case DLL_ARG_SHORT:
+			if (this_dyna_param.is_unsigned) // Force omission of the high-order word in case it is non-zero from a parameter that was originally and erroneously larger than a short.
+				output_var.Assign(this_dyna_param.value_int & 0x0000FFFF); // This also forces the value into the unsigned domain of a signed int.
+			else // Signed.
+				output_var.Assign((int)(SHORT)(WORD)this_dyna_param.value_int); // These casts properly preserve negatives.
+			break;
+		case DLL_ARG_CHAR:
+			if (this_dyna_param.is_unsigned) // Force omission of the high-order bits in case it is non-zero from a parameter that was originally and erroneously larger than a char.
+				output_var.Assign(this_dyna_param.value_int & 0x000000FF); // This also forces the value into the unsigned domain of a signed int.
+			else // Signed.
+				output_var.Assign((int)(char)(BYTE)this_dyna_param.value_int); // These casts properly preserve negatives.
+			break;
+		case DLL_ARG_INT64: // Unsigned and signed are both written as signed for the reasons described elsewhere above.
+			output_var.Assign(this_dyna_param.value_int64);
+			break;
+		case DLL_ARG_FLOAT:
+			output_var.Assign(this_dyna_param.value_float);
+			break;
+		case DLL_ARG_DOUBLE:
+			output_var.Assign(this_dyna_param.value_double);
+			break;
+		}
+	}
+
+end:
+	if (hmodule_to_free)
+		FreeLibrary(hmodule_to_free);
 }
 
 
@@ -12756,10 +13239,8 @@ int RegExCallout(pcre_callout_block *cb)
 	if (func.mInstances > 0) // Backup is needed.
 		if (!Var::BackupFunctionVars(func, var_backup, var_backup_count)) // Out of memory.
 			return 0;
-
 	DWORD EventInfo_saved = g->EventInfo;
 	g->EventInfo = (DWORD)cb;
-
 	/*
 	callout_number:		should be available since callout number can be specified within (?C...).
 	subject:			useful when behaviour might depend on text surrounding a capture.
@@ -12846,7 +13327,6 @@ int RegExCallout(pcre_callout_block *cb)
 	Var::FreeAndRestoreFunctionVars(func, var_backup, var_backup_count);
 
 	g->EventInfo = EventInfo_saved;
-
 
 	// Behaviour of return values is defined by PCRE.
 	return number_to_return;
@@ -13962,7 +14442,6 @@ void BIF_IsFunc(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParam
 	aResultToken.value_int64 = func ? (__int64)func->mMinParams+1 : 0;
 }
 
-
 void BIF_GetKeyState(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
 	char key_name_buf[MAX_NUMBER_SIZE]; // Because aResultToken.buf is used for something else below.
@@ -14582,9 +15061,7 @@ UINT __stdcall RegisterCallbackCStub(UINT *params, char *address) // Used by BIF
 		// except when pause_after_execute==true, in which case it seems best not to change the icon
 		// because it's likely to hurt any callback that's performance-sensitive.
 	}
-
 	g->EventInfo = cb.event_info; // This is the means to identify which caller called the callback (if the script assigned more than one caller to this callback).
-
 	// Need to check if backup of function's variables is needed in case:
 	// 1) The UDF is assigned to more than one callback, in which case the UDF could be running more than once
 	//    simultaneously.
@@ -14746,7 +15223,7 @@ void BIF_RegisterCallback(ExprTokenType &aResultToken, ExprTokenType *aParam[], 
 }
 
 
-
+#ifndef MINIDLL
 void BIF_StatusBar(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
 	char mode = toupper(aResultToken.marker[6]); // Union's marker initially contains the function name. SB_Set[T]ext.
@@ -14837,7 +15314,6 @@ void BIF_StatusBar(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 	//	break;
 	} // switch(mode)
 }
-
 
 
 void BIF_LV_GetNextOrCount(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
@@ -16212,6 +16688,7 @@ void BIF_IL_Add(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParam
 
 
 
+#endif
 void BIF_Trim(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount) // L31
 {
 	char trim_type = toupper(*aResultToken.marker); // aResultToken.marker points to the name of the Func which was called.
@@ -16604,13 +17081,16 @@ bool ScriptGetKeyState(vk_type aVK, KeyStateTypes aKeyStateType)
 	case KEYSTATE_PHYSICAL: // Physical state of key.
 		if (IsMouseVK(aVK)) // mouse button
 		{
+#ifndef MINIDLL
 			if (g_MouseHook) // mouse hook is installed, so use it's tracking of physical state.
 				return g_PhysicalKeyState[aVK] & STATE_DOWN;
 			else // Even for Win9x/NT, it seems slightly better to call this rather than IsKeyDown9xNT():
+#endif
 				return IsKeyDownAsync(aVK);
 		}
 		else // keyboard
 		{
+#ifndef MINIDLL
 			if (g_KeybdHook)
 			{
 				// Since the hook is installed, use its value rather than that from
@@ -16622,6 +17102,7 @@ bool ScriptGetKeyState(vk_type aVK, KeyStateTypes aKeyStateType)
 				return g_PhysicalKeyState[aVK] & STATE_DOWN;
 			}
 			else // Even for Win9x/NT, it seems slightly better to call this rather than IsKeyDown9xNT():
+#endif
 				return IsKeyDownAsync(aVK);
 		}
 	} // switch()

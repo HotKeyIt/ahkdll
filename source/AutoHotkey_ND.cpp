@@ -102,7 +102,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmd
 	
 	// Init any globals not in "struct g" that need it:
 	g_hInstance = hInstance;
-	g_persistent = true;
+
 	InitializeCriticalSection(&g_CriticalRegExCache); // v1.0.45.04: Must be done early so that it's unconditional, so that DeleteCriticalSection() in the script destructor can also be unconditional (deleting when never initialized can crash, at least on Win 9x).
 
 	if (!GetCurrentDirectory(sizeof(g_WorkingDir), g_WorkingDir)) // Needed for the FileSelectFile() workaround.
@@ -269,7 +269,6 @@ else // since this is not a recognized switch, the end of the [Switches] section
 // Naveen Todo: change 'g' to a more descriptive and easily searchable name such as threadStruct
 	global_init(*g);  // Set defaults prior to the below, since below might override them for AutoIt2 scripts.
 
-	initPlugins(); // N10 plugins
 // Set up the basics of the script:
 #ifdef AUTOHOTKEYSC
 	if (g_script.Init(*g, "", restart_mode) != OK) 
@@ -285,7 +284,7 @@ else // since this is not a recognized switch, the end of the [Switches] section
 		if (g_script.InitDll(*g,hInstance) != OK)  // Set up the basics of the script.
 			return CRITICAL_ERROR;
 	}
-#endif
+#endif // AUTOHOTKEYSC
 
 	// Set g_default now, reflecting any changes made to "g" above, in case AutoExecSection(), below,
 	// never returns, perhaps because it contains an infinite loop (intentional or not):
@@ -314,6 +313,7 @@ else // since this is not a recognized switch, the end of the [Switches] section
 	// Unless explicitly set to be non-SingleInstance via SINGLE_INSTANCE_OFF or a special kind of
 	// SingleInstance such as SINGLE_INSTANCE_REPLACE and SINGLE_INSTANCE_IGNORE, persistent scripts
 	// and those that contain hotkeys/hotstrings are automatically SINGLE_INSTANCE_PROMPT as of v1.0.16:
+#ifndef MINIDLL
 	if (g_AllowOnlyOneInstance == ALLOW_MULTI_INSTANCE && IS_PERSISTENT)
 		g_AllowOnlyOneInstance = SINGLE_INSTANCE_PROMPT;
 
@@ -371,10 +371,11 @@ else // since this is not a recognized switch, the end of the [Switches] section
 		// its main window has already been destroyed:
 		Sleep(100);
 	}
-
 	// Call this only after closing any existing instance of the program,
 	// because otherwise the change to the "focus stealing" setting would never be undone:
 	SetForegroundLockTimeout();
+
+#endif
 
 	// Create all our windows and the tray icon.  This is done after all other chances
 	// to return early due to an error have passed, above.
@@ -382,11 +383,11 @@ else // since this is not a recognized switch, the end of the [Switches] section
 		return CRITICAL_ERROR;
 
 	// At this point, it is nearly certain that the script will be executed.
-
+#ifndef MINIDLL
 	if (g_MaxHistoryKeys && (g_KeyHistory = (KeyHistoryItem *)malloc(g_MaxHistoryKeys * sizeof(KeyHistoryItem))))
 		ZeroMemory(g_KeyHistory, g_MaxHistoryKeys * sizeof(KeyHistoryItem)); // Must be zeroed.
 	//else leave it NULL as it was initialized in globaldata.
-
+#endif
 	// MSDN: "Windows XP: If a manifest is used, InitCommonControlsEx is not required."
 	// Therefore, in case it's a high overhead call, it's not done on XP or later:
 	if (!g_os.IsWinXPorLater())
@@ -420,12 +421,14 @@ else // since this is not a recognized switch, the end of the [Switches] section
 	// Activate the hotkeys, hotstrings, and any hooks that are required prior to executing the
 	// top part (the auto-execute part) of the script so that they will be in effect even if the
 	// top part is something that's very involved and requires user interaction:
+#ifndef MINIDLL
 	Hotkey::ManifestAllHotkeysHotstringsHooks(); // We want these active now in case auto-execute never returns (e.g. loop)
 	Hotkey::InstallKeybdHook();
 	if (Hotkey::sHotkeyCount > 0 || Hotstring::sHotstringCount > 0)
 		AddRemoveHooks(3);
+#endif
 	g_script.mIsReadyToExecute = true; // This is done only after the above to support error reporting in Hotkey.cpp.
-	
+	Sleep(20);
 	//free(nameHinstanceP.name);
 
 	Var *clipboard_var = g_script.FindOrAddVar("Clipboard"); // Add it if it doesn't exist, in case the script accesses "Clipboard" via a dynamic variable.
@@ -458,10 +461,33 @@ unsigned __stdcall runScript( void* pArguments )
 	HINSTANCE hInstance = a.hInstanceP;
 	char *fileName = a.name;
 	OldWinMain(hInstance, 0, fileName, 0);	
-	_endthreadex( 0 );  
+	_endthreadex( (DWORD)EARLY_RETURN );  
     return 0;
 }
 
+EXPORT int ahkTerminate()
+{
+	int lpExitCode = 0;
+	GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
+	if (lpExitCode != 0 && lpExitCode != 259)
+		return 0;
+	Line::sSourceFileCount = 0;
+	global_clear_state(*g);
+	g_script.Destroy();
+	TerminateThread(hThread, (DWORD)EARLY_RETURN);
+	g_script.mIsReadyToExecute = false;
+	return 0;
+}
+
+void WaitIsReadyToExecute()
+{
+	 int lpExitCode = 0;
+	 while (!g_script.mIsReadyToExecute && (lpExitCode == 0 || lpExitCode == 259))
+	 {
+		 Sleep(10);
+		 GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
+	 }
+}
 
 // Naveen: v1. ahkdll() - load AutoHotkey script into dll
 // Naveen: v3. ahkdll(script, single command line option, script parameters)
@@ -474,17 +500,15 @@ EXPORT unsigned int ahkdll(char *fileName, char *argv, char *args)
  // nameHinstanceP.args = args ;
 
  nameHinstanceP.name = (char *)realloc(nameHinstanceP.name,strlen(fileName)+1);
- strncpy(nameHinstanceP.name, fileName, strlen(fileName)+1);
+ strncpy(nameHinstanceP.name, fileName, strlen(fileName));
+ *(nameHinstanceP.name + strlen(fileName)) = '\0';
  strncpy(nameHinstanceP.argv, argv, strlen(argv));
  strncpy(nameHinstanceP.args, args, strlen(args));
-
+ nameHinstanceP.istext = 0;
+ if (hThread)
+ 	ahkTerminate();
  hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, &threadID );
- DWORD lpExitCode = 0;
- while (!g_script.mIsReadyToExecute && (lpExitCode == 0 || lpExitCode == 259))
- {
-	 Sleep(50);
-	 GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
- }
+ WaitIsReadyToExecute();
  return (unsigned int)hThread;
 }
 
@@ -494,40 +518,46 @@ EXPORT unsigned int ahktextdll(char *fileName, char *argv, char *args)
  unsigned threadID;
  nameHinstanceP.name = (char *)realloc(nameHinstanceP.name,strlen(fileName)+1);
  strncpy(nameHinstanceP.name, fileName, strlen(fileName)+1);
+ *(nameHinstanceP.name + strlen(fileName)) = '\0';
  strncpy(nameHinstanceP.argv, argv, strlen(argv));
  strncpy(nameHinstanceP.args, args, strlen(args));
  nameHinstanceP.istext = 1;
-
+ if (hThread)
+ 	ahkTerminate();
+ 
  hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, &threadID );
- int lpExitCode = 0;
- while (!g_script.mIsReadyToExecute && (lpExitCode == 0 || lpExitCode == 259))
- {
-	 Sleep(50);
-	 GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
- }
+ WaitIsReadyToExecute();
  return (unsigned int)hThread;
 }
 
 
-
-EXPORT int ahkTerminate()
-{
-	TerminateThread(hThread, (DWORD)EARLY_RETURN);
-	Line::sSourceFileCount = 0;
-	g_script.Destroy();
-	Line::sSourceFile = &nameHinstanceP.name;
-	return 0;
-}
-
-EXPORT unsigned int ahkReload()
+void reloadDll()
 {
 	unsigned threadID;
 	Line::sSourceFileCount = 0;
 	g_script.Destroy();
-	HANDLE oldThread = hThread;
 	hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, &threadID );
-	TerminateThread(oldThread, (DWORD)EARLY_RETURN);
-	return EARLY_RETURN;
+	_endthreadex( (DWORD)EARLY_RETURN ); 
+}
+
+ResultType terminateDll()
+{
+	Line::sSourceFileCount = 0;
+	g_script.Destroy();
+	_endthreadex( (DWORD)EARLY_EXIT );
+	return EARLY_EXIT;
+}
+
+
+EXPORT int ahkReload()
+{
+	unsigned threadID;
+	Line::sSourceFileCount = 0;
+	g_script.Destroy();
+	g_script.mIsReadyToExecute = false;
+	TerminateThread(hThread, (DWORD)EARLY_EXIT);
+	hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, &threadID );
+	return 0;
 }
 
 EXPORT BOOL ahkReady() // HotKeyIt check if dll is ready to execute

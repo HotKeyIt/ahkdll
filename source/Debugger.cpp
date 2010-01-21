@@ -90,11 +90,11 @@ int Debugger::StackPop()
 int Debugger::ProcessCommands()
 {
 	int err;
-
+#ifndef MINIDLL
 	HookType active_hooks = GetActiveHooks();
 	if (active_hooks)
 		AddRemoveHooks(0, true);
-	
+#endif
 	if (mInternalState != DIS_Starting)
 	{
 		// Send response for the previous continuation command.
@@ -247,8 +247,10 @@ int Debugger::ProcessCommands()
 	err = DEBUGGER_E_OK;
 
 ProcessCommands_err_return:
+#ifndef MINIDLL
 	if (active_hooks)
 		AddRemoveHooks(active_hooks, true);
+#endif
 	return err;
 }
 

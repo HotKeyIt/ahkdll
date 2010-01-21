@@ -13,7 +13,7 @@ but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 */
-
+#ifndef MINIDLL
 #include "stdafx.h" // pre-compiled headers
 #include "script.h"
 #include "globaldata.h" // for a lot of things
@@ -9500,3 +9500,4 @@ DWORD GuiType::ControlGetListViewMode(HWND aWnd)
 	// LVS_SMALLICON==LV_VIEW_SMALLICON, and LVS_LIST==LV_VIEW_LIST.
 	return g_os.IsWinXPorLater() ? ListView_GetView(aWnd) : (GetWindowLong(aWnd, GWL_STYLE) & LVS_TYPEMASK);
 }
+#endif // MINIDLL

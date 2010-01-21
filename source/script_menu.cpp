@@ -13,7 +13,7 @@ but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 */
-
+#ifndef MINIDLL
 #include "stdafx.h" // pre-compiled headers
 #include "script.h"
 #include "globaldata.h" // for a lot of things
@@ -1526,3 +1526,4 @@ ResultType UserMenu::RemoveItemIcon(UserMenuItem *aMenuItem)
 	}
 	return OK;
 }
+#endif // MINIDLL

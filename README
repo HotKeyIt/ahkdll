@@ -1,3 +1,31 @@
+18.01.2010
+- fixed MsgSleep to work after termination and reload.
+- enabled #Persistent so a script that does not use #Persistent will terminate (use ahkdll ahktextdll or ahkReload to run it again).
+- Send commands support inline sleep now when pure digits are specified, like Send a{30}{Tab}b{100}{Enter}. Send {9} will not sleep but send 9.
+- Reload, Exit and ExitApp works like they should now for the dll.
+- Added 2 new stdlib folder, which is the parent folder of A_AhkPath + Lib.lnk in same folder if it links to a directory.
+- - - Directory of A_AhkPath, so now stdlib functions can be placed in same folder for simplicity.
+- - - Additionally you can specify a link file in same  (Lib.lnk) to your stdlib instead of copying the files for a portable project (e.g. on a ram drive!).
+- ahktextdll and addScript support loading functions from all 4 libraries now as well.
+- AutoHotkey.exe started without parameters checks for following files:
+- - 1 %A_AhkPath%\..\[Name of executable].ahk 
+- - 2 %A_AhkPath%\..\[Name of executable].ini
+- - 3 %A_MyDocuments%\AutoHotkey.ahk
+- - - REMINDER: portable mode = copy + rename AutoHotkey.exe to e.g. MyScript.exe and put it together with MyScript.ahk or .ini in same folder.
+- No need to call ahkTerminate before calling ahkdll or ahktextdll, it will terminate automatically if a script is running.
+- New AhkDll function - AhkDll(dllfile,function,p1,p2...), using static pointers to functions, executes around 5 times faster. 
+- - Loads dll library automatically so no need to call DllCall("LoadLibrary"...)
+- - Dllfile must contain only characters valid for a variable in ahk [a-zA-Z0-9_#$@]!
+- - Functions are all case sensitive!
+- ahkgetvar has now a further parameter (UInt), when this parameter is not 0, the pointer of the variable will be returned to use with Alias(), else value is returned
+
+- New AutoHotkeyMini.dll uses a preprocessor and excludes many commands to support much faster load/reload and less memory usage. 
+- Following commands are disabled/removed:
+- - Hotkey (as well as Hotkey + Hotstring functionality), Gui…, GuiControl[Get], Menu…, TrayIcon, FileInstall, ListVars, ListLines, ListHotkeys, 
+- - KeyHistory, SplashImage, SplashText…, Progress, PixelSearch, PixelGetColor, InputBox,
+- - FileSelect and FolderSelect dialogs, Input, BlockInput MouseMove[Off], 
+- - Build in variables related to Hotkeys and Icons as well as Gui, A_ThisHotkey…, A_IsSuspended, A_Icon….
+
 30.12.2009
 - ahkReload will reload a script, this can be also done by the script as well as ExitApp.
 - ahkPause, get and set Pause state of current thread in dll script (dll only)

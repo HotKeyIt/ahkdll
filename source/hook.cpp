@@ -20,13 +20,13 @@ GNU General Public License for more details.
 #include "util.h" // for snprintfcat()
 #include "window.h" // for MsgBox()
 #include "application.h" // For MsgSleep().
-
 // Declare static variables (global to only this file/module, i.e. no external linkage):
 static HANDLE sKeybdMutex = NULL;
 static HANDLE sMouseMutex = NULL;
 #define KEYBD_MUTEX_NAME "AHK Keybd"
 #define MOUSE_MUTEX_NAME "AHK Mouse"
 
+#ifndef MINIDLL
 // Whether to disguise the next up-event for lwin/rwin to suppress Start Menu.
 // These are made global, rather than static inside the hook function, so that
 // we can ensure they are initialized by the keyboard init function every
@@ -4234,7 +4234,7 @@ void AddRemoveHooks(HookType aHooksToBeActive, bool aChangeIsTemporary)
 		g_AllowInterruption = TRUE;
 	}
 }
-
+#endif
 
 
 bool SystemHasAnotherKeybdHook()
@@ -4270,7 +4270,7 @@ bool SystemHasAnotherMouseHook()
 }
 
 
-
+#ifndef MINIDLL
 DWORD WINAPI HookThreadProc(LPVOID aUnused)
 // The creator of this thread relies on the fact that this function always exits its thread
 // when both hooks are deactivated.
@@ -4565,3 +4565,4 @@ void GetHookStatus(char *aBuf, int aBufSize)
 		}
 	}
 }
+#endif // MINIDLL

@@ -13,7 +13,7 @@ but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 */
-
+#ifndef MINIDLL
 #include "stdafx.h" // pre-compiled headers
 #include "hotkey.h"
 #include "globaldata.h"  // For g_os and other global vars.
@@ -2595,3 +2595,4 @@ void Hotstring::ParseOptions(char *aOptions, int &aPriority, int &aKeyDelay, Sen
 		}
 	}
 }
+#endif // MINIDLL

@@ -99,9 +99,11 @@ enum VariableTypeType {VAR_TYPE_INVALID, VAR_TYPE_NUMBER, VAR_TYPE_INTEGER, VAR_
 	GetSystemTimeAsFileTime(&ft);\
 	init_genrand(ft.dwLowDateTime);\
 }
-
+#ifndef MINIDLL
 #define IS_PERSISTENT (Hotkey::sHotkeyCount || Hotstring::sHotstringCount || g_KeybdHook || g_MouseHook || g_persistent)
-
+#else
+#define IS_PERSISTENT (g_persistent)
+#endif
 // Since WM_COMMAND IDs must be shared among all menus and controls, they are carefully conserved,
 // especially since there are only 65,535 possible IDs.  In addition, they are assigned to ranges
 // to minimize the need that they will need to be changed in the future (changing the ID of a main
@@ -123,10 +125,11 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 	, ID_TRAY_EDITSCRIPT, ID_TRAY_SUSPEND, ID_TRAY_PAUSE, ID_TRAY_EXIT
 	, ID_TRAY_LAST = ID_TRAY_EXIT // But this value should never hit the below. There is debug code to enforce.
 	, ID_MAIN_FIRST = 65400, ID_MAIN_LAST = 65534}; // These should match the range used by resource.h
-
+#ifndef MINIDLL
 #define GUI_INDEX_TO_ID(index) (index + CONTROL_ID_FIRST)
 #define GUI_ID_TO_INDEX(id) (id - CONTROL_ID_FIRST) // Returns a small negative if "id" is invalid, such as 0.
 #define GUI_HWND_TO_INDEX(hwnd) GUI_ID_TO_INDEX(GetDlgCtrlID(hwnd)) // Returns a small negative on failure (e.g. HWND not found).
+#endif
 // Notes about above:
 // 1) Callers should call GuiType::FindControl() instead of GUI_HWND_TO_INDEX() if the hwnd might be a combobox's
 //    edit control.
@@ -200,7 +203,6 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_INVALID_DOT "Unsupported use of \".\"" // L31
 
 //----------------------------------------------------------------------------------
-
 void DoIncrementalMouseMove(int aX1, int aY1, int aX2, int aY2, int aSpeed);
 DWORD ProcessExist9x2000(char *aProcess, char *aProcessName);
 DWORD ProcessExistNT4(char *aProcess, char *aProcessName);
@@ -220,7 +222,7 @@ enum MainWindowModes {MAIN_MODE_NO_CHANGE, MAIN_MODE_LINES, MAIN_MODE_VARS
 ResultType ShowMainWindow(MainWindowModes aMode = MAIN_MODE_NO_CHANGE, bool aRestricted = true);
 DWORD GetAHKInstallDir(char *aBuf);
 
-
+#ifndef MINIDLL
 struct InputBoxType
 {
 	char *title;
@@ -280,6 +282,7 @@ ResultType InputBox(Var *aOutputVar, char *aTitle, char *aText, bool aHideInput
 	, int aWidth, int aHeight, int aX, int aY, double aTimeout, char *aDefault);
 BOOL CALLBACK InputBoxProc(HWND hWndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam);
 VOID CALLBACK InputBoxTimeout(HWND hWnd, UINT uMsg, UINT idEvent, DWORD dwTime);
+#endif
 VOID CALLBACK DerefTimeout(HWND hWnd, UINT uMsg, UINT idEvent, DWORD dwTime);
 BOOL CALLBACK EnumChildFindSeqNum(HWND aWnd, LPARAM lParam);
 BOOL CALLBACK EnumChildFindPoint(HWND aWnd, LPARAM lParam);
@@ -436,7 +439,7 @@ enum TransformCmds {TRANS_CMD_INVALID, TRANS_CMD_ASC, TRANS_CMD_CHR, TRANS_CMD_D
 	, TRANS_CMD_BITAND, TRANS_CMD_BITOR, TRANS_CMD_BITXOR, TRANS_CMD_BITNOT
 	, TRANS_CMD_BITSHIFTLEFT, TRANS_CMD_BITSHIFTRIGHT
 };
-
+#ifndef MINIDLL
 enum MenuCommands {MENU_CMD_INVALID, MENU_CMD_SHOW, MENU_CMD_USEERRORLEVEL
 	, MENU_CMD_ADD, MENU_CMD_RENAME, MENU_CMD_CHECK, MENU_CMD_UNCHECK, MENU_CMD_TOGGLECHECK
 	, MENU_CMD_ENABLE, MENU_CMD_DISABLE, MENU_CMD_TOGGLEENABLE
@@ -485,7 +488,7 @@ enum GuiControlTypes {GUI_CONTROL_INVALID // GUI_CONTROL_INVALID must be zero du
 	, GUI_CONTROL_EDIT, GUI_CONTROL_DATETIME, GUI_CONTROL_MONTHCAL, GUI_CONTROL_HOTKEY
 	, GUI_CONTROL_UPDOWN, GUI_CONTROL_SLIDER, GUI_CONTROL_PROGRESS, GUI_CONTROL_TAB, GUI_CONTROL_TAB2
 	, GUI_CONTROL_STATUSBAR}; // Kept last to reflect it being bottommost in switch()s (for perf), since not too often used.
-
+#endif // MINIDLL
 enum ThreadCommands {THREAD_CMD_INVALID, THREAD_CMD_PRIORITY, THREAD_CMD_INTERRUPT, THREAD_CMD_NOTIMERS};
 
 #define PROCESS_PRIORITY_LETTERS "LBNAHR"
@@ -533,7 +536,6 @@ private:
 	ResultType PerformLoopReadFile(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, FILE *aReadFile, char *aWriteFileName);
 	ResultType PerformLoopWhile(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine); // Lexikos: ACT_WHILE.
 	ResultType Perform();
-
 	ResultType MouseGetPos(DWORD aOptions);
 	ResultType FormatTime(char *aYYYYMMDD, char *aFormat);
 	ResultType PerformAssign();
@@ -554,12 +556,12 @@ private:
 	ResultType URLDownloadToFile(char *aURL, char *aFilespec);
 	ResultType FileSelectFile(char *aOptions, char *aWorkingDir, char *aGreeting, char *aFilter);
 
+
 	// Bitwise flags:
 	#define FSF_ALLOW_CREATE 0x01
 	#define FSF_EDITBOX      0x02
 	#define FSF_NONEWDIALOG  0x04
 	ResultType FileSelectFolder(char *aRootDir, char *aOptions, char *aGreeting);
-
 	ResultType FileGetShortcut(char *aShortcutFile);
 	ResultType FileCreateShortcut(char *aTargetFile, char *aShortcutFile, char *aWorkingDir, char *aArgs
 		, char *aDescription, char *aIconFile, char *aHotkey, char *aIconNumber, char *aRunState);
@@ -583,6 +585,7 @@ private:
 	ResultType FileGetSize(char *aFilespec, char *aGranularity);
 	ResultType FileGetVersion(char *aFilespec);
 
+
 	ResultType IniRead(char *aFilespec, char *aSection, char *aKey, char *aDefault);
 	ResultType IniWrite(char *aValue, char *aFilespec, char *aSection, char *aKey);
 	ResultType IniDelete(char *aFilespec, char *aSection, char *aKey);
@@ -590,7 +593,7 @@ private:
 	ResultType RegWrite(DWORD aValueType, HKEY aRootKey, char *aRegSubkey, char *aValueName, char *aValue);
 	ResultType RegDelete(HKEY aRootKey, char *aRegSubkey, char *aValueName);
 	static bool RegRemoveSubkeys(HKEY hRegKey);
-
+#ifndef MINIDLL
 	#define DESTROY_SPLASH \
 	{\
 		if (g_hWndSplash && IsWindow(g_hWndSplash))\
@@ -600,17 +603,19 @@ private:
 	ResultType SplashTextOn(int aWidth, int aHeight, char *aTitle, char *aText);
 	ResultType Splash(char *aOptions, char *aSubText, char *aMainText, char *aTitle, char *aFontName
 		, char *aImageFile, bool aSplashImage);
-
+#endif
 	ResultType ToolTip(char *aText, char *aX, char *aY, char *aID);
+#ifndef MINIDLL
 	ResultType TrayTip(char *aTitle, char *aText, char *aTimeout, char *aOptions);
+#endif
 	ResultType Transform(char *aCmd, char *aValue1, char *aValue2);
+#ifndef MINIDLL
 	ResultType Input(); // The Input command.
-
+#endif
 	#define SW_NONE -1
 	ResultType PerformShowWindow(ActionTypeType aActionType, char *aTitle = "", char *aText = ""
 		, char *aExcludeTitle = "", char *aExcludeText = "");
 	ResultType PerformWait();
-
 	ResultType WinMove(char *aTitle, char *aText, char *aX, char *aY
 		, char *aWidth = "", char *aHeight = "", char *aExcludeTitle = "", char *aExcludeText = "");
 	ResultType WinMenuSelectItem(char *aTitle, char *aText, char *aMenu1, char *aMenu2
@@ -635,13 +640,16 @@ private:
 		, char *aExcludeTitle, char *aExcludeText);
 	ResultType ControlGet(char *aCommand, char *aValue, char *aControl, char *aTitle, char *aText
 		, char *aExcludeTitle, char *aExcludeText);
+#ifndef MINIDLL
 	ResultType GuiControl(char *aCommand, char *aControlID, char *aParam3);
 	ResultType GuiControlGet(char *aCommand, char *aControlID, char *aParam3);
+#endif
 	ResultType StatusBarGetText(char *aPart, char *aTitle, char *aText
 		, char *aExcludeTitle, char *aExcludeText);
 	ResultType StatusBarWait(char *aTextToWaitFor, char *aSeconds, char *aPart, char *aTitle, char *aText
 		, char *aInterval, char *aExcludeTitle, char *aExcludeText);
 	ResultType ScriptPostSendMessage(bool aUseSend);
+
 	ResultType ScriptProcess(char *aCmd, char *aProcess, char *aParam3);
 	ResultType WinSet(char *aAttrib, char *aValue, char *aTitle, char *aText
 		, char *aExcludeTitle, char *aExcludeText);
@@ -655,13 +663,13 @@ private:
 	ResultType WinGetPos(char *aTitle, char *aText, char *aExcludeTitle, char *aExcludeText);
 	ResultType EnvGet(char *aEnvVarName);
 	ResultType SysGet(char *aCmd, char *aValue);
+#ifndef MINIDLL
 	ResultType PixelSearch(int aLeft, int aTop, int aRight, int aBottom, COLORREF aColorBGR, int aVariation
 		, char *aOptions, bool aIsPixelGetColor);
 	ResultType ImageSearch(int aLeft, int aTop, int aRight, int aBottom, char *aImageFile);
 	ResultType PixelGetColor(int aX, int aY, char *aOptions);
-
+#endif
 	static ResultType SetToggleState(vk_type aVK, ToggleValueType &ForceLock, char *aToggleText);
-
 public:
 	#define SET_S_DEREF_BUF(ptr, size) Line::sDerefBuf = ptr, Line::sDerefBufSize = size
 
@@ -929,7 +937,9 @@ public:
 			case ACT_CONTROLGET:
 			case ACT_GUICONTROLGET:
 			case ACT_STATUSBARGETTEXT:
+#ifndef MINIDLL
 			case ACT_INPUTBOX:
+#endif			
 			case ACT_RANDOM:
 			case ACT_INIREAD:
 			case ACT_REGREAD:
@@ -954,10 +964,12 @@ public:
 			case ACT_SYSGET:
 			case ACT_ENVGET:
 			case ACT_CONTROLGETPOS:
+#ifndef MINIDLL
 			case ACT_PIXELGETCOLOR:
 			case ACT_PIXELSEARCH:
 			case ACT_IMAGESEARCH:
 			case ACT_INPUT:
+#endif
 			case ACT_FORMATTIME:
 				return ARG_TYPE_OUTPUT_VAR;
 
@@ -986,6 +998,7 @@ public:
 		case 1:  // Arg #2
 			switch(aActionType)
 			{
+
 			case ACT_STRINGLEFT:
 			case ACT_STRINGRIGHT:
 			case ACT_STRINGMID:
@@ -998,17 +1011,19 @@ public:
 			case ACT_STRINGGETPOS:
 			case ACT_STRINGSPLIT:
 				return ARG_TYPE_INPUT_VAR;
-
 			case ACT_MOUSEGETPOS:
 			case ACT_WINGETPOS:
 			case ACT_CONTROLGETPOS:
+#ifndef MINIDLL
 			case ACT_PIXELSEARCH:
 			case ACT_IMAGESEARCH:
+#endif
 			case ACT_SPLITPATH:
 			case ACT_FILEGETSHORTCUT:
 				return ARG_TYPE_OUTPUT_VAR;
 			}
 			break;
+
 
 		case 2:  // Arg #3
 			switch(aActionType)
@@ -1281,7 +1296,7 @@ public:
 		if (!stricmp(aBuf, "BitShiftRight")) return TRANS_CMD_BITSHIFTRIGHT;
 		return TRANS_CMD_INVALID;
 	}
-
+#ifndef MINIDLL
 	static MenuCommands ConvertMenuCommand(char *aBuf)
 	{
 		if (!aBuf || !*aBuf) return MENU_CMD_INVALID;
@@ -1432,7 +1447,7 @@ public:
 		if (!stricmp(aBuf, "StatusBar")) return GUI_CONTROL_STATUSBAR;
 		return GUI_CONTROL_INVALID;
 	}
-
+#endif
 	static ThreadCommands ConvertThreadCommand(char *aBuf)
 	{
 		if (!aBuf || !*aBuf) return THREAD_CMD_INVALID;
@@ -1713,11 +1728,15 @@ public:
 	static CoordModeAttribType ConvertCoordModeAttrib(char *aBuf)
 	{
 		if (!aBuf || !*aBuf) return 0;
+#ifndef MINIDLL
 		if (!stricmp(aBuf, "Pixel")) return COORD_MODE_PIXEL;
+#endif
 		if (!stricmp(aBuf, "Mouse")) return COORD_MODE_MOUSE;
 		if (!stricmp(aBuf, "ToolTip")) return COORD_MODE_TOOLTIP;
 		if (!stricmp(aBuf, "Caret")) return COORD_MODE_CARET;
+#ifndef MINIDLL
 		if (!stricmp(aBuf, "Menu")) return COORD_MODE_MENU;
+#endif
 		return 0;
 	}
 
@@ -1753,6 +1772,7 @@ public:
 	char *ToText(char *aBuf, int aBufSize, bool aCRLF, DWORD aElapsed = 0, bool aLineWasResumed = false);
 
 	static void ToggleSuspendState();
+
 	static void PauseUnderlyingThread(bool aTrueForPauseFalseForUnpause);
 	ResultType ChangePauseState(ToggleValueType aChangeTo, bool aAlwaysOperateOnUnderlyingThread);
 	static ResultType ScriptBlockInput(bool aEnable);
@@ -1797,7 +1817,7 @@ public:
 	char *mName;
 	Line *mJumpToLine;
 	Label *mPrevLabel, *mNextLabel;  // Prev & Next items in linked list.
-
+#ifndef MINIDLL
 	bool IsExemptFromSuspend()
 	{
 		// Hotkey and Hotstring subroutines whose first line is the Suspend command are exempt from
@@ -1806,7 +1826,7 @@ public:
 		return mJumpToLine->mActionType == ACT_SUSPEND && (!mJumpToLine->mArgc || mJumpToLine->ArgHasDeref(1)
 			|| stricmp(mJumpToLine->mArg[0].text, "On"));
 	}
-
+#endif
 	ResultType Execute()
 	// This function was added in v1.0.46.16 to support A_ThisLabel.
 	{
@@ -1993,7 +2013,7 @@ struct MsgMonitorStruct
 };
 
 
-
+#ifndef MINIDLL
 #define MAX_MENU_NAME_LENGTH MAX_PATH // For both menu and menu item names.
 class UserMenuItem;  // Forward declaration since classes use each other (i.e. a menu *item* can have a submenu).
 class UserMenu
@@ -2113,8 +2133,12 @@ struct FontType
 	HFONT hfont;
 };
 
+#endif
+
 #define	LV_REMOTE_BUF_SIZE 1024  // 8192 (below) seems too large in hindsight, given that an LV can only display the first 260 chars in a field.
 #define LV_TEXT_BUF_SIZE 8192  // Max amount of text in a ListView sub-item.  Somewhat arbitrary: not sure what the real limit is, if any.
+
+#ifndef MINIDLL
 enum LVColTypes {LV_COL_TEXT, LV_COL_INTEGER, LV_COL_FLOAT}; // LV_COL_TEXT must be zero so that it's the default with ZeroMemory.
 struct lv_col_type
 {
@@ -2404,7 +2428,7 @@ public:
 	static void LV_Sort(GuiControlType &aControl, int aColumnIndex, bool aSortOnlyIfEnabled, char aForceDirection = '\0');
 	static DWORD ControlGetListViewMode(HWND aWnd);
 };
-
+#endif // MINIDLL
 
 typedef int (* ahkx_int_str)(char *ahkx_str); // ahkx N11
 typedef int (* ahkx_int_str_str)(char *ahkx_str, char *ahkx_str2); // ahkx N11
@@ -2413,7 +2437,9 @@ typedef int (* ahkx_int_str_str)(char *ahkx_str, char *ahkx_str2); // ahkx N11
 class Script
 {
 private:
+#ifndef MINIDLL
 	friend class Hotkey;
+#endif
 #ifdef SCRIPT_DEBUG
 	friend class Debugger;
 #endif
@@ -2422,6 +2448,7 @@ public:
 	Var **mVar, **mLazyVar; // Array of pointers-to-variable, allocated upon first use and later expanded as needed.
 	int mVarCount, mVarCountMax, mLazyVarCount; // Count of items in the above array as well as the maximum capacity.
 	WinGroup *mFirstGroup, *mLastGroup;  // The first and last variables in the linked list.
+
 	int mCurrentFuncOpenBlockCount; // While loading the script, this is how many blocks are currently open in the current function's body.
 	bool mNextLineIsFunctionBody; // Whether the very next line to be added will be the first one of the body.
 	Var **mFuncExceptionVar;   // A list of variables declared explicitly local or global.
@@ -2433,10 +2460,10 @@ public:
 	// only mCurrLine is kept up-to-date:
 	int mCurrFileIndex;
 	LineNumberType mCombinedLineNumber; // In the case of a continuation section/line(s), this is always the top line.
-
 	bool mNoHotkeyLabels;
+#ifndef MINIDLL
 	bool mMenuUseErrorLevel;  // Whether runtime errors should be displayed by the Menu command, vs. ErrorLevel.
-
+#endif
 	#define UPDATE_TIP_FIELD strlcpy(mNIC.szTip, (mTrayIconTip && *mTrayIconTip) ? mTrayIconTip \
 		: (mFileName ? mFileName : NAME_P), sizeof(mNIC.szTip));
 	NOTIFYICONDATA mNIC; // For ease of adding and deleting our tray icon.
@@ -2491,9 +2518,11 @@ public:
 	// Naveen moved above from private
 	Line *mCurrLine;     // Seems better to make this public than make Line our friend.
 	Label *mPlaceholderLabel; // Used in place of a NULL label to simplify code.
+#ifndef MINIDLL
 	char mThisMenuItemName[MAX_MENU_NAME_LENGTH + 1];
 	char mThisMenuName[MAX_MENU_NAME_LENGTH + 1];
 	char *mThisHotkeyName, *mPriorHotkeyName;
+#endif
 	HWND mNextClipboardViewer;
 	bool mOnClipboardChangeIsRunning;
 	Label *mOnClipboardChangeLabel, *mOnExitLabel;  // The label to run when the script terminates (NULL if none).
@@ -2501,13 +2530,16 @@ public:
 
 	ScriptTimer *mFirstTimer, *mLastTimer;  // The first and last script timers in the linked list.
 	UINT mTimerCount, mTimerEnabledCount;
-
+#ifndef MINIDLL
 	UserMenu *mFirstMenu, *mLastMenu;
 	UINT mMenuCount;
-
+#endif
 	DWORD mThisHotkeyStartTime, mPriorHotkeyStartTime;  // Tickcount timestamp of when its subroutine began.
+#ifndef MINIDLL
 	char mEndChar;  // The ending character pressed to trigger the most recent non-auto-replace hotstring.
+#endif
 	modLR_type mThisHotkeyModifiersLR;
+
 	char *mFileSpec; // Will hold the full filespec, for convenience.
 	char *mFileDir;  // Will hold the directory containing the script file.
 	char *mFileName; // Will hold the script's naked file name.
@@ -2532,25 +2564,28 @@ public:
 	#define RUNAS_SIZE_IN_WCHARS 257  // Includes the terminator.
 	#define RUNAS_SIZE_IN_BYTES (RUNAS_SIZE_IN_WCHARS * sizeof(WCHAR))
 	WCHAR *mRunAsUser, *mRunAsPass, *mRunAsDomain; // Memory is allocated at runtime, upon first use.
-
+#ifndef MINIDLL
 	HICON mCustomIcon;  // NULL unless the script has loaded a custom icon during its runtime.
 	HICON mCustomIconSmall; // L17: Use separate big/small icons for best results.
 	char *mCustomIconFile; // Filename of icon.  Allocated on first use.
 	bool mIconFrozen; // If true, the icon does not change state when the state of pause or suspend changes.
 	char *mTrayIconTip;  // Custom tip text for tray icon.  Allocated on first use.
 	UINT mCustomIconNumber; // The number of the icon inside the above file.
-
 	UserMenu *mTrayMenu; // Our tray menu, which should be destroyed upon exiting the program.
-    
+#endif
 	void Destroy(); // HotKeyIt H1 destroy script
 	ResultType Init(global_struct &g, char *aScriptFilename, bool aIsRestart);
 	ResultType InitDll(global_struct &g,HINSTANCE hInstance); // HotKeyIt init dll from text
 	ResultType CreateWindows();
+#ifndef MINIDLL
 	void EnableOrDisableViewMenuItems(HMENU aMenu, UINT aFlags);
 	void CreateTrayIcon();
 	void UpdateTrayIcon(bool aForceUpdate = false);
+#endif
 	ResultType AutoExecSection();
+#ifndef MINIDLL
 	ResultType Edit();
+#endif
 	ResultType Reload(bool aDisplayErrors);
 	ResultType ExitApp(ExitReasons aExitReason, char *aBuf = NULL, int ExitCode = 0);
 	void TerminateApp(ExitReasons aExitReason, int aExitCode); // L31: Added aExitReason. See script.cpp.
@@ -2558,7 +2593,7 @@ public:
 	LineNumberType LoadFromFile();
 #else
 	LineNumberType LoadFromFile(bool aScriptWasNotspecified);
-#endif
+#endif // AUTOHOTKEYSC
 	LineNumberType LoadText(char *Script); // HotKeyIt H1 load text instead file ahktextdll
 	ResultType LoadFromScript(char *aBuf); // HotKeyIt H1 load text instead file ahktextdll
 	ResultType LoadIncludedFile(char *aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure);
@@ -2583,9 +2618,9 @@ public:
 		, bool *apIsLocal = NULL);
 	Var *AddVar(char *aVarName, size_t aVarNameLength, int aInsertPos, int aIsLocal);
 	static void *GetVarType(char *aVarName);
-
 	WinGroup *FindGroup(char *aGroupName, bool aCreateIfNotFound = false);
 	ResultType AddGroup(char *aGroupName);
+
 	Label *FindLabel(char *aLabelName);
 
 	ResultType DoRunAs(char *aCommandLine, char *aWorkingDir, bool aDisplayErrors, bool aUpdateLastError, WORD aShowWindow
@@ -2593,7 +2628,7 @@ public:
 	ResultType ActionExec(char *aAction, char *aParams = NULL, char *aWorkingDir = NULL
 		, bool aDisplayErrors = true, char *aRunShowMode = NULL, HANDLE *aProcess = NULL
 		, bool aUpdateLastError = false, bool aUseRunAs = false, Var *aOutputVar = NULL);
-
+#ifndef MINIDLL
 	char *ListVars(char *aBuf, int aBufSize);
 	char *ListKeyHistory(char *aBuf, int aBufSize);
 
@@ -2621,12 +2656,10 @@ public:
 	}
 
 	ResultType PerformGui(char *aCommand, char *aControlType, char *aOptions, char *aParam4);
-
+#endif
 	// Call this SciptError to avoid confusion with Line's error-displaying functions:
 	ResultType ScriptError(char *aErrorText, char *aExtraInfo = ""); // , ResultType aErrorType = FAIL);
-
 	#define SOUNDPLAY_ALIAS "AHK_PlayMe"  // Used by destructor and SoundPlay().
-
 	Script();
 	~Script();
 	// Note that the anchors to any linked lists will be lost when this
@@ -2660,20 +2693,25 @@ VarSizeType BIV_MouseDelay(char *aBuf, char *aVarName);
 VarSizeType BIV_DefaultMouseSpeed(char *aBuf, char *aVarName);
 VarSizeType BIV_IsPaused(char *aBuf, char *aVarName);
 VarSizeType BIV_IsCritical(char *aBuf, char *aVarName);
+#ifndef MINIDLL
 VarSizeType BIV_IsSuspended(char *aBuf, char *aVarName);
+#endif
 #ifdef AUTOHOTKEYSC  // A_IsCompiled is left blank/undefined in uncompiled scripts.
 VarSizeType BIV_IsCompiled(char *aBuf, char *aVarName);
 #endif
 VarSizeType BIV_LastError(char *aBuf, char *aVarName);
+#ifndef MINIDLL
 VarSizeType BIV_IconHidden(char *aBuf, char *aVarName);
 VarSizeType BIV_IconTip(char *aBuf, char *aVarName);
 VarSizeType BIV_IconFile(char *aBuf, char *aVarName);
 VarSizeType BIV_IconNumber(char *aBuf, char *aVarName);
+#endif
 VarSizeType BIV_ExitReason(char *aBuf, char *aVarName);
 VarSizeType BIV_Space_Tab(char *aBuf, char *aVarName);
 VarSizeType BIV_AhkVersion(char *aBuf, char *aVarName);
 VarSizeType BIV_AhkPath(char *aBuf, char *aVarName);
 VarSizeType BIV_DllPath(char *aBuf, char *aVarName); // HotKeyIt H1 path of loaded dll
+VarSizeType BIV_AhkHwnd(char *aBuf, char *aVarName); // HotKeyIt MINIDLL hwnd of main window
 VarSizeType BIV_TickCount(char *aBuf, char *aVarName);
 VarSizeType BIV_Now(char *aBuf, char *aVarName);
 VarSizeType BIV_OSType(char *aBuf, char *aVarName);
@@ -2719,6 +2757,7 @@ VarSizeType BIV_LoopField(char *aBuf, char *aVarName);
 VarSizeType BIV_LoopIndex(char *aBuf, char *aVarName);
 VarSizeType BIV_ThisFunc(char *aBuf, char *aVarName);
 VarSizeType BIV_ThisLabel(char *aBuf, char *aVarName);
+#ifndef MINIDLL
 VarSizeType BIV_ThisMenuItem(char *aBuf, char *aVarName);
 VarSizeType BIV_ThisMenuItemPos(char *aBuf, char *aVarName);
 VarSizeType BIV_ThisMenu(char *aBuf, char *aVarName);
@@ -2730,6 +2769,7 @@ VarSizeType BIV_EndChar(char *aBuf, char *aVarName);
 VarSizeType BIV_Gui(char *aBuf, char *aVarName);
 VarSizeType BIV_GuiControl(char *aBuf, char *aVarName);
 VarSizeType BIV_GuiEvent(char *aBuf, char *aVarName);
+#endif
 VarSizeType BIV_EventInfo(char *aBuf, char *aVarName);
 VarSizeType BIV_TimeIdle(char *aBuf, char *aVarName);
 VarSizeType BIV_TimeIdlePhysical(char *aBuf, char *aVarName);
@@ -2750,6 +2790,7 @@ VarSizeType BIV_IsAdmin(char *aBuf, char *aVarName);
 
 void *GetDllProcAddress(char *aDllFileFunc, HMODULE *hmodule_to_free = NULL); // L31: Contains code extracted from BIF_DllCall for reuse in ExpressionToPostfix.
 void BIF_DllCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_Dll(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_StrLen(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_SubStr(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_InStr(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
@@ -2778,9 +2819,8 @@ void BIF_SqrtLogLn(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 
 void BIF_OnMessage(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_RegisterCallback(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
-
+#ifndef MINIDLL
 void BIF_StatusBar(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
-
 void BIF_LV_GetNextOrCount(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_LV_GetText(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_LV_AddInsertModify(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
@@ -2795,7 +2835,7 @@ void BIF_TV_Get(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParam
 void BIF_IL_Create(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_IL_Destroy(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_IL_Add(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
-
+#endif
 void BIF_Trim(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount); // L31: Also handles LTrim and RTrim.
 
 
@@ -2816,11 +2856,9 @@ double TokenToDouble(ExprTokenType &aToken, BOOL aCheckForHex = TRUE, BOOL aIsPu
 char *TokenToString(ExprTokenType &aToken, char *aBuf = NULL);
 ResultType TokenToDoubleOrInt64(ExprTokenType &aToken);
 IObject *TokenToObject(ExprTokenType &aToken); // L31
-
 char *RegExMatch(char *aHaystack, char *aNeedleRegEx);
 void SetWorkingDir(char *aNewDir);
 int ConvertJoy(char *aBuf, int *aJoystickID = NULL, bool aAllowOnlyButtons = false);
 bool ScriptGetKeyState(vk_type aVK, KeyStateTypes aKeyStateType);
 double ScriptGetJoyState(JoyControls aJoy, int aJoystickID, ExprTokenType &aToken, bool aUseBoolForUpDown);
-
 #endif
