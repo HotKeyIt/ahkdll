@@ -5,7 +5,7 @@
 - Reload, Exit and ExitApp works like they should now for the dll.
 - Added 2 new stdlib folder, which is the parent folder of A_AhkPath + Lib.lnk in same folder if it links to a directory.
 - - - Directory of A_AhkPath, so now stdlib functions can be placed in same folder for simplicity.
-- - - Additionally you can specify a link file in same  (Lib.lnk) to your stdlib instead of copying the files for a portable project (e.g. on a ram drive!).
+- - - Additionally you can specify a link file in same folder (Lib.lnk) to your stdlib instead of copying the files for a portable project (e.g. on a ram drive!).
 - ahktextdll and addScript support loading functions from all 4 libraries now as well.
 - AutoHotkey.exe started without parameters checks for following files:
 - - 1 %A_AhkPath%\..\[Name of executable].ahk 
