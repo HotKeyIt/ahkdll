@@ -43,7 +43,7 @@ BIF(BIF_Alias)
 			len = (UINT)aParam1.var;
 		}
 		var.mType = len ? VAR_ALIAS : VAR_NORMAL;
-		var.mLength = len;
+		var.mByteLength = len;
 	}
 }
 
@@ -71,7 +71,7 @@ BIF(BIF_GetTokenValue)
 #endif
 		{
 			aResultToken.symbol = SYM_OPERAND;
-			aResultToken.marker = var.mContents;
+			aResultToken.marker = var.mCharContents;
 		}
     }
     else
