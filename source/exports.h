@@ -4,11 +4,11 @@
 
 #define EXPORT extern "C" __declspec(dllexport)
 #define BIF(fun) void fun(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
-EXPORT unsigned int addFile(char *fileName, bool aAllowDuplicateInclude, int aIgnoreLoadFailure);
-EXPORT unsigned int addScript(char *script, int aReplace);
-// EXPORT unsigned int ahkdll(char *fileName, char *argv, char *args);
-EXPORT unsigned int ahkLabel(char *aLabelName);
-EXPORT char* ahkFunction(char *func, char *param1, char *param2, char *param3, char *param4, char *param5, char *param6, char *param7, char *param8, char *param9, char *param10);
+EXPORT unsigned int addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aIgnoreLoadFailure);
+EXPORT unsigned int addScript(LPTSTR script, int aReplace);
+// EXPORT unsigned int ahkdll(LPTSTR fileName, LPTSTR argv, LPTSTR args);
+EXPORT unsigned int ahkLabel(LPTSTR aLabelName);
+EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10);
 bool callFunc(WPARAM awParam, LPARAM alParam); 
 bool callFuncDll(); 
 // do not export callFunc, it must be called within script thread
@@ -22,7 +22,7 @@ int initPlugins();
 
 // EXPORT int ahkTerminate();
 EXPORT int ahkReload();
-EXPORT int ahkPause(char *aChangeTo);
+EXPORT int ahkPause(LPTSTR aChangeTo);
 void reloadDll();
 ResultType terminateDll();
 /*  ahkdll v10: disabling these as they aren't working

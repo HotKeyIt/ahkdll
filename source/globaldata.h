@@ -23,14 +23,19 @@ GNU General Public License for more details.
 
 #include "Debugger.h"
 
-extern HKL g_HKL;  // ahkx
 extern HINSTANCE g_hInstance;
 extern DWORD g_MainThreadID;
 extern DWORD g_HookThreadID;
 extern CRITICAL_SECTION g_CriticalRegExCache;
+
+#ifdef UNICODE
+extern bool g_DefaultUTF8;
+#endif
+
 extern bool g_DestroyWindowCalled;
 extern HWND g_hWnd;  // The main window
 extern HWND g_hWndEdit;  // The edit window, child of main.
+extern HFONT g_hFontEdit;
 #ifndef MINIDLL
 extern HWND g_hWndSplash;  // The SplashText window.
 extern HFONT g_hFontSplash;
@@ -112,8 +117,8 @@ extern int g_HotkeyThrottleInterval;
 extern bool g_MaxThreadsBuffer;
 #ifndef MINIDLL
 extern HotCriterionType g_HotCriterion;
-extern char *g_HotWinTitle;
-extern char *g_HotWinText;
+extern LPTSTR g_HotWinTitle;
+extern LPTSTR g_HotWinText;
 extern HotkeyCriterion *g_FirstHotCriterion, *g_LastHotCriterion;
 
 // L4: Added global variables for #if (expression). See globaldata.cpp for comments.
@@ -145,12 +150,12 @@ extern bool g_SortReverse;
 extern int g_SortColumnOffset;
 extern Func *g_SortFunc;
 
-extern char g_delimiter;
-extern char g_DerefChar;
-extern char g_EscapeChar;
+extern TCHAR g_delimiter;
+extern TCHAR g_DerefChar;
+extern TCHAR g_EscapeChar;
 #ifndef MINIDLL
 // Hot-string vars:
-extern char g_HSBuf[HS_BUF_SIZE];
+extern TCHAR g_HSBuf[HS_BUF_SIZE];
 extern int g_HSBufLength;
 extern HWND g_HShwnd;
 
@@ -167,7 +172,7 @@ extern bool g_HSEndCharRequired;
 extern bool g_HSDetectWhenInsideWord;
 extern bool g_HSDoReset;
 extern bool g_HSResetUponMouseClick;
-extern char g_EndChars[HS_MAX_END_CHARS + 1];
+extern TCHAR g_EndChars[HS_MAX_END_CHARS + 1];
 #endif
 // Global objects:
 extern Var *g_ErrorLevel;
@@ -186,8 +191,8 @@ extern DWORD g_OriginalTimeout;
 EXTERN_G;
 extern global_struct g_default, *g_array;
 
-extern char g_WorkingDir[MAX_PATH];  // Explicit size needed here in .h file for use with sizeof().
-extern char *g_WorkingDirOrig;
+extern TCHAR g_WorkingDir[MAX_PATH];  // Explicit size needed here in .h file for use with sizeof().
+extern LPTSTR g_WorkingDirOrig;
 
 extern bool g_ContinuationLTrim;
 
