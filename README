@@ -1,3 +1,5 @@
+03.02.2010
+- Unicode
 18.01.2010
 - fixed MsgSleep to work after termination and reload.
 - enabled #Persistent so a script that does not use #Persistent will terminate (use ahkdll ahktextdll or ahkReload to run it again).
