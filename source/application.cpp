@@ -19,8 +19,8 @@ GNU General Public License for more details.
 #include "globaldata.h" // for access to g_clip, the "g" global struct, etc.
 #include "window.h" // for serveral MsgBox and window functions
 #include "util.h" // for strlcpy()
-#include "resources\resource.h"  // For ID_TRAY_OPEN.
-#include "exports.h" // for callFunc # Naveen N10
+#include "resources/resource.h"  // For ID_TRAY_OPEN.
+
 
 bool MsgSleep(int aSleepDuration, MessageMode aMode)
 // Returns true if it launched at least one thread, and false otherwise.
@@ -100,7 +100,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 	// a hotkey that has already been interrupted) and each recursion layer should
 	// have it's own value for this:
 #ifndef MINIDLL
-	char ErrorLevel_saved[ERRORLEVEL_SAVED_SIZE];
+	TCHAR ErrorLevel_saved[ERRORLEVEL_SAVED_SIZE];
 #endif
 	// Decided to support a true Sleep(0) for aSleepDuration == 0, as well
 	// as no delay at all if aSleepDuration < 0.  This is needed to implement
@@ -214,9 +214,9 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 	HWND fore_window, focused_control;
 #endif
 #ifndef MINIDLL
-	char wnd_class_name[32], gui_action_errorlevel[16], *walk;
+	TCHAR wnd_class_name[32], gui_action_errorlevel[16], *walk;
 #else
-	char wnd_class_name[32];
+	TCHAR wnd_class_name[32];
 #endif
 #ifndef MINIDLL
 	UserMenuItem *menu_item;
@@ -283,15 +283,15 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 #ifndef MINIDLL
 				if (g_nFileDialogs) // v1.0.44.12: Also do the special Peek/msg filter below for FileSelectFile because testing shows that frequently-running timers disrupt the ability to double-click.
 				{
-					GetClassName(fore_window, wnd_class_name, sizeof(wnd_class_name));
-					do_special_msg_filter = !strcmp(wnd_class_name, "#32770");  // Due to checking g_nFileDialogs above, this means that this dialog is probably FileSelectFile rather than MsgBox/InputBox/FileSelectFolder (even if this guess is wrong, it seems fairly inconsequential to filter the messages since other pump beneath us on the call-stack will handle them ok).
+					GetClassName(fore_window, wnd_class_name, _countof(wnd_class_name));
+					do_special_msg_filter = !_tcscmp(wnd_class_name, _T("#32770"));  // Due to checking g_nFileDialogs above, this means that this dialog is probably FileSelectFile rather than MsgBox/InputBox/FileSelectFolder (even if this guess is wrong, it seems fairly inconsequential to filter the messages since other pump beneath us on the call-stack will handle them ok).
 				}
 #endif
 				if (!do_special_msg_filter && (focused_control = GetFocus()))
 				{
-					GetClassName(focused_control, wnd_class_name, sizeof(wnd_class_name));
-					do_special_msg_filter = !stricmp(wnd_class_name, "SysTreeView32") // A TreeView owned by our thread has focus (includes FileSelectFolder's TreeView).
-						|| !stricmp(wnd_class_name, "SysListView32");
+					GetClassName(focused_control, wnd_class_name, _countof(wnd_class_name));
+					do_special_msg_filter = !_tcsicmp(wnd_class_name, _T("SysTreeView32")) // A TreeView owned by our thread has focus (includes FileSelectFolder's TreeView).
+						|| !_tcsicmp(wnd_class_name, _T("SysListView32"));
 				}
 				if (do_special_msg_filter)
 				{
@@ -1016,8 +1016,8 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 
 			case AHK_USER_MENU: // user-defined menu item
 				// Safer to make a full copies than point to something potentially volatile.
-				strlcpy(g_script.mThisMenuItemName, menu_item->mName, sizeof(g_script.mThisMenuItemName));
-				strlcpy(g_script.mThisMenuName, menu_item->mMenu->mName, sizeof(g_script.mThisMenuName));
+				tcslcpy(g_script.mThisMenuItemName, menu_item->mName, _countof(g_script.mThisMenuItemName));
+				tcslcpy(g_script.mThisMenuName, menu_item->mMenu->mName, _countof(g_script.mThisMenuName));
 				break;
 			default: // hotkey or hotstring
 				// Just prior to launching the hotkey, update these values to support built-in
@@ -1035,7 +1035,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 			// Current limitation: If the user put something big in ErrorLevel (very unlikely
 			// given its nature, but allowed) it will be truncated by this, if too large.
 			// Also: Don't use var->Get() because need better control over the size:
-			strlcpy(ErrorLevel_saved, g_ErrorLevel->Contents(), sizeof(ErrorLevel_saved));
+			tcslcpy(ErrorLevel_saved, g_ErrorLevel->Contents(), _countof(ErrorLevel_saved));
 			// Make every newly launched subroutine start off with the global default values that
 			// the user set up in the auto-execute part of the script (e.g. KeyDelay, WinDelay, etc.).
 			// However, we do not set ErrorLevel to anything special here (except for GUI threads, later
@@ -1294,7 +1294,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 				break;
 
 			case AHK_CLIPBOARD_CHANGE:
-				g.EventInfo = CountClipboardFormats() ? (IsClipboardFormatAvailable(CF_TEXT) || IsClipboardFormatAvailable(CF_HDROP) ? 1 : 2) : 0;
+				g.EventInfo = CountClipboardFormats() ? (IsClipboardFormatAvailable(CF_NATIVETEXT) || IsClipboardFormatAvailable(CF_HDROP) ? 1 : 2) : 0;
 				g_ErrorLevel->Assign(g.EventInfo); // For backward compatibility.
 				// ACT_IS_ALWAYS_ALLOWED() was already checked above.
 				// The message poster has ensured that g_script.mOnClipboardChangeLabel is non-NULL and valid.
@@ -1453,8 +1453,8 @@ break_out_of_main_switch:
 		if ((fore_window = GetForegroundWindow()) != NULL  // There is a foreground window.
 			&& GetWindowThreadProcessId(fore_window, NULL) == g_MainThreadID) // And it belongs to our main thread (the main thread is the only one that owns any windows).
 		{
-			GetClassName(fore_window, wnd_class_name, sizeof(wnd_class_name));
-			if (!strcmp(wnd_class_name, "#32770"))  // MsgBox, InputBox, FileSelectFile/Folder dialog.
+			GetClassName(fore_window, wnd_class_name, _countof(wnd_class_name));
+			if (!_tcscmp(wnd_class_name, _T("#32770")))  // MsgBox, InputBox, FileSelectFile/Folder dialog.
 			{
 				g->CalledByIsDialogMessageOrDispatch = true; // In case there is any way IsDialogMessage() can call one of our own window proc's rather than that of a MsgBox, etc.
 				g->CalledByIsDialogMessageOrDispatchMsg = msg.message; // Added in v1.0.44.11 because it's known that IsDialogMessage can change the message number (e.g. WM_KEYDOWN->WM_NOTIFY for UpDowns)
@@ -1590,7 +1590,7 @@ bool CheckScriptTimers()
 	ScriptTimer *ptimer;
 	BOOL at_least_one_timer_launched;
 	DWORD tick_start;
-	char ErrorLevel_saved[ERRORLEVEL_SAVED_SIZE];
+	TCHAR ErrorLevel_saved[ERRORLEVEL_SAVED_SIZE];
 
 	// Note: It seems inconsequential if a subroutine that the below loop executes causes a
 	// new timer to be added to the linked list while the loop is still enumerating the timers.
@@ -1628,7 +1628,7 @@ bool CheckScriptTimers()
 			// seems best since some timed subroutines might take a long time to run:
 			++g_nThreads; // These are the counterparts the decrements that will be done further
 			++g;          // below by ResumeUnderlyingThread().
-			strlcpy(ErrorLevel_saved, g_ErrorLevel->Contents(), sizeof(ErrorLevel_saved)); // Back up the current ErrorLevel for later restoration.
+			tcslcpy(ErrorLevel_saved, g_ErrorLevel->Contents(), _countof(ErrorLevel_saved)); // Back up the current ErrorLevel for later restoration.
 			// But never kill the main timer, since the mere fact that we're here means that
 			// there's at least one enabled timed subroutine.  Though later, performance can
 			// be optimized by killing it if there's exactly one enabled subroutine, or if
@@ -1815,8 +1815,8 @@ bool MsgMonitor(HWND aWnd, UINT aMsg, WPARAM awParam, LPARAM alParam, MSG *apMsg
 	// Since above didn't return, the launch of the new thread is now considered unavoidable.
 
 	// See MsgSleep() for comments about the following section.
-	char ErrorLevel_saved[ERRORLEVEL_SAVED_SIZE];
-	strlcpy(ErrorLevel_saved, g_ErrorLevel->Contents(), sizeof(ErrorLevel_saved));
+	TCHAR ErrorLevel_saved[ERRORLEVEL_SAVED_SIZE];
+	tcslcpy(ErrorLevel_saved, g_ErrorLevel->Contents(), _countof(ErrorLevel_saved));
 	InitNewThread(0, false, true, func.mJumpToLine->mActionType);
 
 	#ifndef MINIDLL
@@ -2044,7 +2044,7 @@ void InitNewThread(int aPriority, bool aSkipUninterruptible, bool aIncrementThre
 
 
 
-void ResumeUnderlyingThread(char *aSavedErrorLevel)
+void ResumeUnderlyingThread(LPTSTR aSavedErrorLevel)
 {
 	// The following section handles the switch-over to the former/underlying "g" item:
 	--g_nThreads; // Other sections below might rely on this having been done early.
