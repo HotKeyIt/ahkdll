@@ -27,6 +27,7 @@ extern HINSTANCE g_hInstance;
 extern DWORD g_MainThreadID;
 extern DWORD g_HookThreadID;
 extern CRITICAL_SECTION g_CriticalRegExCache;
+extern CRITICAL_SECTION g_CriticalDllCache;
 
 #ifdef UNICODE
 extern bool g_DefaultUTF8;

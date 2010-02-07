@@ -33,7 +33,13 @@ EXPORT int ahkPause(LPTSTR aChangeTo) //Change pause state of a running script
 
 EXPORT unsigned int ahkFindFunc(LPTSTR funcname)
 {
-return (unsigned int)g_script.FindFunc(funcname);
+	return (unsigned int)g_script.FindFunc(funcname);
+}
+
+EXPORT unsigned int ahkFindLabel(LPTSTR aLabelName)
+{
+	Label *aLabel = g_script.FindLabel(aLabelName) ;
+	return (unsigned int)aLabel->mJumpToLine;
 }
 
 EXPORT int ximportfunc(ahkx_int_str func1, ahkx_int_str func2, ahkx_int_str_str func3) // Naveen ahkx N11
@@ -95,10 +101,10 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 EXPORT int ahkassign(LPTSTR name, LPTSTR value) // ahkwine 0.1
 {
 	Var *var;
-if (   !(var = g_script.FindOrAddVar(name, _tcslen(name)))   )
-				return -1;  // Realistically should never happen.
-			var->Assign(value); 
-			return 0; // success
+	if (   !(var = g_script.FindOrAddVar(name, _tcslen(name)))   )
+		return -1;  // Realistically should never happen.
+	var->Assign(value); 
+	return 0; // success
 }
 //HotKeyIt ahkExecuteLine()
 EXPORT unsigned int ahkExecuteLine(unsigned int line,unsigned int aMode,unsigned int wait)
@@ -106,7 +112,7 @@ EXPORT unsigned int ahkExecuteLine(unsigned int line,unsigned int aMode,unsigned
 	Line *templine = (Line *)line;
 	if (templine == NULL)
 		return (unsigned int)g_script.mFirstLine;
-	else if (aMode && templine->mNextLine != NULL)
+	else if (aMode && templine->mPrevLine != NULL)
 	{
 		if (wait)
 			SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)templine, (LPARAM)aMode);
@@ -122,11 +128,70 @@ EXPORT unsigned int ahkLabel(LPTSTR aLabelName)
 	if (aLabel)
 	{
 		PostMessage(g_hWnd, AHK_EXECUTE_LABEL, (LPARAM)aLabel, (LPARAM)aLabel);
-		return (unsigned int) aLabel->mJumpToLine;
+		return 0;
 	}
 	else
 		return -1;
 }
+
+EXPORT unsigned int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10)
+{
+	Func *aFunc = g_script.FindFunc(func) ;
+	if (aFunc)
+	{	
+		g_script.mTempFunc = aFunc ;
+		ExprTokenType return_value;
+		if (aFunc->mParamCount > 0 && param1 != NULL)
+		{
+			// Copy the appropriate values into each of the function's formal parameters.
+			aFunc->mParam[0].var->Assign((LPTSTR )param1); // Assign parameter #1
+			if (aFunc->mParamCount > 1  && param2 != NULL) // Assign parameter #2
+			{
+				// v1.0.38.01: LPARAM is now written out as a DWORD because the majority of system messages
+				// use LPARAM as a pointer or other unsigned value.  This shouldn't affect most scripts because
+				// of the way ATOI64() and ATOU() wrap a negative number back into the unsigned domain for
+				// commands such as PostMessage/SendMessage.
+				aFunc->mParam[1].var->Assign((LPTSTR )param2);
+				if (aFunc->mParamCount > 2 && param3 != NULL) // Assign parameter #3
+				{
+					aFunc->mParam[2].var->Assign((LPTSTR )param3);
+					if (aFunc->mParamCount > 3 && param4 != NULL) // Assign parameter #4
+					{
+						aFunc->mParam[3].var->Assign((LPTSTR )param4);
+						if (aFunc->mParamCount > 4 && param5 != NULL) // Assign parameter #5
+						{
+							aFunc->mParam[4].var->Assign((LPTSTR )param5);
+							if (aFunc->mParamCount > 5 && param6 != NULL) // Assign parameter #6
+							{
+								aFunc->mParam[5].var->Assign((LPTSTR )param6);
+								if (aFunc->mParamCount > 6 && param7 != NULL) // Assign parameter #7
+								{
+									aFunc->mParam[6].var->Assign((LPTSTR )param7);
+									if (aFunc->mParamCount > 7 && param8 != NULL) // Assign parameter #8
+									{
+										aFunc->mParam[7].var->Assign((LPTSTR )param8);
+										if (aFunc->mParamCount > 8 && param9 != NULL) // Assign parameter #9
+										{
+											aFunc->mParam[8].var->Assign((LPTSTR )param9);
+											if (aFunc->mParamCount > 9 && param10 != NULL) // Assign parameter #10
+											{
+												aFunc->mParam[9].var->Assign((LPTSTR )param10);
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		PostMessage(g_hWnd, AHK_EXECUTE_FUNCTION_DLL, (WPARAM)&return_value,NULL);
+		return 0;
+	}
+	return -1;
+}
+
 
 EXPORT int ahkKey(LPTSTR keys) 
 {
@@ -278,68 +343,67 @@ EXPORT unsigned int addScript(LPTSTR script, int aExecute)
 EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10)
 {
 	Func *aFunc = g_script.FindFunc(func) ;
-if (aFunc)
-{	
-	g_script.mTempFunc = aFunc ;
-	ExprTokenType return_value;
-	if (aFunc->mParamCount > 0)
-	{
-		// Copy the appropriate values into each of the function's formal parameters.
-		aFunc->mParam[0].var->Assign((LPTSTR )param1); // Assign parameter #1
-		if (aFunc->mParamCount > 1) // Assign parameter #2
+	if (aFunc)
+	{	
+		g_script.mTempFunc = aFunc ;
+		ExprTokenType return_value;
+		if (aFunc->mParamCount > 0 && param1 != NULL)
 		{
-			// v1.0.38.01: LPARAM is now written out as a DWORD because the majority of system messages
-			// use LPARAM as a pointer or other unsigned value.  This shouldn't affect most scripts because
-			// of the way ATOI64() and ATOU() wrap a negative number back into the unsigned domain for
-			// commands such as PostMessage/SendMessage.
-			aFunc->mParam[1].var->Assign((LPTSTR )param2);
-			if (aFunc->mParamCount > 2) // Assign parameter #3
+			// Copy the appropriate values into each of the function's formal parameters.
+			aFunc->mParam[0].var->Assign((LPTSTR )param1); // Assign parameter #1
+			if (aFunc->mParamCount > 1  && param2 != NULL) // Assign parameter #2
 			{
-				aFunc->mParam[2].var->Assign((LPTSTR )param3);
-				if (aFunc->mParamCount > 3) // Assign parameter #4
+				// v1.0.38.01: LPARAM is now written out as a DWORD because the majority of system messages
+				// use LPARAM as a pointer or other unsigned value.  This shouldn't affect most scripts because
+				// of the way ATOI64() and ATOU() wrap a negative number back into the unsigned domain for
+				// commands such as PostMessage/SendMessage.
+				aFunc->mParam[1].var->Assign((LPTSTR )param2);
+				if (aFunc->mParamCount > 2 && param3 != NULL) // Assign parameter #3
 				{
-					aFunc->mParam[3].var->Assign((LPTSTR )param4);
-					if (aFunc->mParamCount > 4) // Assign parameter #5
+					aFunc->mParam[2].var->Assign((LPTSTR )param3);
+					if (aFunc->mParamCount > 3 && param4 != NULL) // Assign parameter #4
 					{
-						aFunc->mParam[4].var->Assign((LPTSTR )param5);
-						if (aFunc->mParamCount > 5) // Assign parameter #6
+						aFunc->mParam[3].var->Assign((LPTSTR )param4);
+						if (aFunc->mParamCount > 4 && param5 != NULL) // Assign parameter #5
 						{
-							aFunc->mParam[5].var->Assign((LPTSTR )param6);
-							if (aFunc->mParamCount > 6) // Assign parameter #7
+							aFunc->mParam[4].var->Assign((LPTSTR )param5);
+							if (aFunc->mParamCount > 5 && param6 != NULL) // Assign parameter #6
 							{
-								aFunc->mParam[6].var->Assign((LPTSTR )param7);
-							if (aFunc->mParamCount > 7) // Assign parameter #8
-							{
-								aFunc->mParam[7].var->Assign((LPTSTR )param8);
-								if (aFunc->mParamCount > 8) // Assign parameter #9
+								aFunc->mParam[5].var->Assign((LPTSTR )param6);
+								if (aFunc->mParamCount > 6 && param7 != NULL) // Assign parameter #7
 								{
-									aFunc->mParam[8].var->Assign((LPTSTR )param9);
-									if (aFunc->mParamCount > 9) // Assign parameter #10
+									aFunc->mParam[6].var->Assign((LPTSTR )param7);
+									if (aFunc->mParamCount > 7 && param8 != NULL) // Assign parameter #8
 									{
-										aFunc->mParam[9].var->Assign((LPTSTR )param10);
+										aFunc->mParam[7].var->Assign((LPTSTR )param8);
+										if (aFunc->mParamCount > 8 && param9 != NULL) // Assign parameter #9
+										{
+											aFunc->mParam[8].var->Assign((LPTSTR )param9);
+											if (aFunc->mParamCount > 9 && param10 != NULL) // Assign parameter #10
+											{
+												aFunc->mParam[9].var->Assign((LPTSTR )param10);
+											}
+										}
 									}
 								}
-							}
 							}
 						}
 					}
 				}
 			}
 		}
+		SendMessage(g_hWnd, AHK_EXECUTE_FUNCTION_DLL, (WPARAM)&return_value,NULL);
+		return result_to_return_dll;
 	}
-	SendMessage(g_hWnd, AHK_EXECUTE_FUNCTION_DLL, (WPARAM)&return_value,NULL);
-	
-	return result_to_return_dll;
+	else
+		return _T(""); 
 }
-else
-	return _T(""); 
-}
+
 bool callFuncDll()
 {
 	Func &func = *(Func *)g_script.mTempFunc ;
 	if (!INTERRUPTIBLE_IN_EMERGENCY)
 		return false;
-
 	if (g_nThreads >= g_MaxThreadsTotal)
 		// Below: Only a subset of ACT_IS_ALWAYS_ALLOWED is done here because:
 		// 1) The omitted action types seem too obscure to grant always-run permission for msg-monitor events.
@@ -364,7 +428,7 @@ bool callFuncDll()
 
 	// See MsgSleep() for comments about the following section.
 	TCHAR ErrorLevel_saved[ERRORLEVEL_SAVED_SIZE];
-	tcslcpy(ErrorLevel_saved, g_ErrorLevel->Contents(), sizeof(ErrorLevel_saved));
+	tcslcpy(ErrorLevel_saved, g_ErrorLevel->Contents(), _countof(ErrorLevel_saved));
 	InitNewThread(0, false, true, func.mJumpToLine->mActionType);
 
 
@@ -382,12 +446,7 @@ bool callFuncDll()
 
 	// Fix for v1.0.47: Must handle return_value BEFORE calling FreeAndRestoreFunctionVars() because return_value
 	// might be the contents of one of the function's local variables (which are about to be free'd).
-/*	bool block_further_processing = *return_value; // No need to check the following because they're implied for *return_value!=0: result != EARLY_EXIT && result != FAIL;
-	if (block_further_processing)
-		aMsgReply = (LPARAM)ATOI64(return_value); // Use 64-bit in case it's an unsigned number greater than 0x7FFFFFFF, in which case this allows it to wrap around to a negative.
-	//else leave aMsgReply uninitialized because we'll be returning false later below, which tells our caller
-	// to ignore aMsgReply.
-*/
+	EnterCriticalSection(&g_CriticalDllCache);
 	if (aResultToken.symbol == PURE_INTEGER)
 	{
 		result_to_return_dll = (LPTSTR )realloc(result_to_return_dll,256);
@@ -400,8 +459,8 @@ bool callFuncDll()
 	}
 	Var::FreeAndRestoreFunctionVars(func, var_backup, var_backup_count);
 	ResumeUnderlyingThread(ErrorLevel_saved);
-	
-	return 0 ; // block_further_processing; // If false, the caller will ignore aMsgReply and process this message normally. If true, aMsgReply contains the reply the caller should immediately send for this message.
+	LeaveCriticalSection(&g_CriticalDllCache);
+	return 0 ;
 }
 
 
@@ -440,7 +499,7 @@ bool callFunc(WPARAM awParam, LPARAM alParam)
 
 	// See MsgSleep() for comments about the following section.
 	TCHAR ErrorLevel_saved[ERRORLEVEL_SAVED_SIZE];
-	tcslcpy(ErrorLevel_saved, g_ErrorLevel->Contents(), sizeof(ErrorLevel_saved));
+	tcslcpy(ErrorLevel_saved, g_ErrorLevel->Contents(), _countof(ErrorLevel_saved));
 	InitNewThread(0, false, true, func.mJumpToLine->mActionType);
 
 	

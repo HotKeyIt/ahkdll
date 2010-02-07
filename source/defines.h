@@ -32,18 +32,19 @@ GNU General Public License for more details.
 #endif
 
 #ifndef NAME_L_REVISION
-#ifdef USRDLL
-#ifdef AHKX
-#define NAME_L_REVISION "X11" 
-#else
-#define NAME_L_REVISION ".dllH3" 
-#endif // ahkx
-#endif // USRDLL
-
-#ifndef USRDLL
-#define NAME_L_REVISION ".L43H3" // L14: Added .Ln for AutoHotkey_L revision n.
-#endif  //USRDLL
-
+	#ifndef AHKX
+		#ifdef USRDLL
+			#ifdef MINIDLL
+				#define NAME_L_REVISION ".L43minidllH4"
+			#else
+				#define NAME_L_REVISION ".L43dllH4"
+			#endif
+		#else
+			#define NAME_L_REVISION ".L43H4" // L14: Added .Ln for AutoHotkey_L revision n.
+		#endif
+	#else
+		#define NAME_L_REVISION "X11"
+	#endif
 #endif // name l revision
 
 #define LANG_D "AutoHotkey"
@@ -705,7 +706,7 @@ inline void global_init(global_struct &g)
 	// subroutine's values for these are restored prior to resuming execution:
 	global_clear_state(g);
 
-	g.SendMode = SM_EVENT;  // v1.0.43: Default to SM_EVENT for backward compatibility.
+	g.SendMode = SM_INPUT; // HotKeyIt new default SM_EVENT;  // v1.0.43: Default to SM_EVENT for backward compatibility.
 	g.TitleMatchMode = FIND_IN_LEADING_PART; // Standard default for AutoIt2 and 3.
 	g.TitleFindFast = true; // Since it's so much faster in many cases.
 	g.DetectHiddenWindows = false;  // Same as AutoIt2 but unlike AutoIt3; seems like a more intuitive default.

@@ -32,6 +32,7 @@ HINSTANCE g_hInstance = NULL; // Set by WinMain().
 DWORD g_MainThreadID = GetCurrentThreadId();
 DWORD g_HookThreadID; // Not initialized by design because 0 itself might be a valid thread ID.
 CRITICAL_SECTION g_CriticalRegExCache;
+CRITICAL_SECTION g_CriticalDllCache;
 
 #ifdef UNICODE
 bool g_DefaultUTF8 = false;
@@ -103,7 +104,7 @@ bool g_IsSuspended = false;  // Make this separate from g_AllowInterruption sinc
 bool g_DeferMessagesForUnderlyingPump = false;
 BOOL g_WriteCacheDisabledInt64 = FALSE;  // BOOL vs. bool might improve performance a little for
 BOOL g_WriteCacheDisabledDouble = FALSE; // frequently-accessed variables (it has helped performance in
-BOOL g_NoEnv = FALSE;                    // ExpandExpression(), but didn't seem to help performance in g_NoEnv.
+BOOL g_NoEnv = TRUE;                    // ExpandExpression(), but didn't seem to help performance in g_NoEnv.
 BOOL g_AllowInterruption = TRUE;         //
 int g_nLayersNeedingTimer = 0;
 int g_nThreads = 0;

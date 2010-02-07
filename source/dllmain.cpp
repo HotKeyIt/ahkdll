@@ -68,7 +68,7 @@ switch(fwdReason)
  {
  case DLL_PROCESS_ATTACH:
 	 {
-		 nameHinstanceP.hInstanceP = (HINSTANCE)hInstance;
+		nameHinstanceP.hInstanceP = (HINSTANCE)hInstance;
 #ifdef AUTODLL
 	ahkdll("autoload.ahk", "", "");	  // used for remoteinjection of dll 
 #endif
@@ -96,6 +96,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	// Init any globals not in "struct g" that need it:
 	g_hInstance = hInstance;
 	InitializeCriticalSection(&g_CriticalRegExCache); // v1.0.45.04: Must be done early so that it's unconditional, so that DeleteCriticalSection() in the script destructor can also be unconditional (deleting when never initialized can crash, at least on Win 9x).
+	InitializeCriticalSection(&g_CriticalDllCache);
 
 	if (!GetCurrentDirectory(_countof(g_WorkingDir), g_WorkingDir)) // Needed for the FileSelectFile() workaround.
 		*g_WorkingDir = '\0';
@@ -239,7 +240,9 @@ param = nameHinstanceP.argv ; //
 		g_AllowOnlyOneInstance = SINGLE_INSTANCE_PROMPT;
 #endif
 #endif
+
 #ifndef MINIDLL
+/*
 	HWND w_existing = NULL;
 	UserMessages reason_to_close_prior = (UserMessages)0;
 	if (g_AllowOnlyOneInstance && g_AllowOnlyOneInstance != SINGLE_INSTANCE_OFF && !restart_mode && !g_ForceLaunch)
@@ -298,7 +301,7 @@ param = nameHinstanceP.argv ; //
 	// Call this only after closing any existing instance of the program,
 	// because otherwise the change to the "focus stealing" setting would never be undone:
 	SetForegroundLockTimeout();
-
+*/
 #endif
 
 	// Create all our windows and the tray icon.  This is done after all other chances
@@ -347,6 +350,7 @@ param = nameHinstanceP.argv ; //
 #ifndef MINIDLL
 	Hotkey::ManifestAllHotkeysHotstringsHooks(); // We want these active now in case auto-execute never returns (e.g. loop)
 	//Hotkey::InstallKeybdHook();
+	//Hotkey::InstallMouseHook();
 	//if (Hotkey::sHotkeyCount > 0 || Hotstring::sHotstringCount > 0)
 	//	AddRemoveHooks(3);
 #endif
@@ -474,12 +478,8 @@ ResultType terminateDll()
 
 EXPORT int ahkReload()
 {
-	unsigned threadID;
-	Line::sSourceFileCount = 0;
-	g_script.Destroy();
-	g_script.mIsReadyToExecute = false;
-	TerminateThread(hThread, (DWORD)EARLY_EXIT);
-	hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, &threadID );
+	ahkTerminate(0);
+	hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, 0 );
 	return 0;
 }
 

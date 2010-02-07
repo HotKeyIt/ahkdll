@@ -8,7 +8,8 @@ EXPORT unsigned int addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aI
 EXPORT unsigned int addScript(LPTSTR script, int aReplace);
 // EXPORT unsigned int ahkdll(LPTSTR fileName, LPTSTR argv, LPTSTR args);
 EXPORT unsigned int ahkLabel(LPTSTR aLabelName);
-EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10);
+EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1 = _T(""), LPTSTR param2 = _T(""), LPTSTR param3 = _T(""), LPTSTR param4 = _T(""), LPTSTR param5 = _T(""), LPTSTR param6 = _T(""), LPTSTR param7 = _T(""), LPTSTR param8 = _T(""), LPTSTR param9 = _T(""), LPTSTR param10 = _T(""));
+EXPORT unsigned int ahkPostFunction(LPTSTR func, LPTSTR param1 = _T(""), LPTSTR param2 = _T(""), LPTSTR param3 = _T(""), LPTSTR param4 = _T(""), LPTSTR param5 = _T(""), LPTSTR param6 = _T(""), LPTSTR param7 = _T(""), LPTSTR param8 = _T(""), LPTSTR param9 = _T(""), LPTSTR param10 = _T(""));
 bool callFunc(WPARAM awParam, LPARAM alParam); 
 bool callFuncDll(); 
 // do not export callFunc, it must be called within script thread
