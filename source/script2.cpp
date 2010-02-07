@@ -13,6 +13,7 @@ but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 */
+#pragma warning( disable : 4311 4312 )
 
 #include "stdafx.h" // pre-compiled headers
 #include <olectl.h> // for OleLoadPicture()
@@ -28,7 +29,7 @@ GNU General Public License for more details.
 #define PCRE_STATIC             // For RegEx. PCRE_STATIC tells PCRE to declare its functions for normal, static
 #include "lib_pcre/pcre/pcre.h" // linkage rather than as functions inside an external DLL.
 #include "exports.h" // for callFunc # Naveen N10
-
+#include "MemoryModule.h"
 
 ////////////////////
 // Window related //
@@ -10868,7 +10869,9 @@ VarSizeType BIV_AhkPath(LPTSTR aBuf, LPTSTR aVarName) // v1.0.41.
 VarSizeType BIV_DllPath(LPTSTR aBuf, LPTSTR aVarName) // HotKeyIt H1 path of loaded dll
 {
 	TCHAR buf[MAX_PATH];
-	VarSizeType length = (VarSizeType)GetModuleFileName(g_hInstance, buf, MAX_PATH);
+	VarSizeType length = (VarSizeType)GetModuleFileName(g_hInstance, buf, _countof(buf));
+	if (_tcsicmp(buf,_T("")))
+		VarSizeType length = (VarSizeType)GetModuleFileName(NULL, buf, _countof(buf));
 	if (aBuf)
 		_tcscpy(aBuf, buf); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string). This is true for ReadRegString()'s API call and may be true for other API calls like this one.
 	return length;
@@ -11972,8 +11975,6 @@ struct DYNATOKEN
 	DYNAPARM return_attrib;
 };
 
-std::map<const void*, DYNATOKEN*> DynaParam;
-
 DYNARESULT DynaCall(int aFlags, void *aFunction, DYNAPARM aParam[], int aParamCount, DWORD &aException
 	, void *aRet, int aRetSize)
 // Based on the code by Ton Plooy <tonp@xs4all.nl>.
@@ -12337,6 +12338,7 @@ void BIF_DynaCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 // Author: Marcus Sonntag (Ultra) // Modified from BIF_DllCall by HotKeyIt
 {
 	// Set default result in case of early return; a blank value:
+	static std::map<const void*, DYNATOKEN*> DynaParam;
 	aResultToken.symbol = SYM_STRING;
 	aResultToken.marker = _T("");
 
@@ -14960,8 +14962,6 @@ void BIF_Chr(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCou
 	aResultToken.marker = cp;
 }
 
-
-
 void BIF_NumGet(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
 	size_t right_side_bound, target; // Don't make target a pointer-type because the integer offset might not be a multiple of 4 (i.e. the below increments "target" directly by "offset" and we don't want that to use pointer math).
@@ -15395,7 +15395,53 @@ void BIF_WinExistActive(ExprTokenType &aResultToken, ExprTokenType *aParam[], in
 	// OLD/WRONG: _ui64toa((unsigned __int64)found_hwnd, aResultToken.marker + 2, 16);
 }
 
+void BIF_MemoryLoadLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+{
+	aResultToken.symbol = PURE_INTEGER;
+	FILE *fp;
+	unsigned char *data=NULL;
+	size_t size;
+	HMEMORYMODULE module;
+	
+	fp = _tfopen(aParam[0]->symbol == SYM_VAR ? aParam[0]->var->mCharContents : aParam[0]->marker, _T("rb"));
+	if (fp == NULL)
+	{
+		return;
+	}
 
+	fseek(fp, 0, SEEK_END);
+	size = ftell(fp);
+	data = (unsigned char *)malloc(size);
+	fseek(fp, 0, SEEK_SET);
+	fread(data, 1, size, fp);
+	fclose(fp);
+
+	module = MemoryLoadLibrary(data);
+	if (module == NULL)
+	{
+		return;
+	}
+	aResultToken.value_int64 = (unsigned)module;
+}
+void BIF_MemoryGetProcAddress(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+{
+	aResultToken.symbol = SYM_INTEGER;
+#ifdef UNICODE
+	char *buf = (char*)malloc(_tcslen(aParam[1]->marker)+sizeof(char*));
+	wcstombs(buf,aParam[1]->marker,_tcslen(aParam[1]->marker));
+	buf[_tcslen(aParam[1]->marker)] = '\0';
+ 	aResultToken.value_int64 =  (__int64)MemoryGetProcAddress((HMEMORYMODULE)aParam[0]->deref->marker,buf);
+	free(buf);
+#else
+	aResultToken.value_int64 =  (__int64)MemoryGetProcAddress((HMEMORYMODULE)aParam[0]->deref->marker,aParam[1]->marker);
+#endif
+}
+void BIF_MemoryFreeLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+{
+	MemoryFreeLibrary((HMEMORYMODULE)aParam[0]->deref->marker);
+	aResultToken.symbol = SYM_STRING;
+	aResultToken.marker =_T("");
+}
 
 void BIF_Round(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 // For simplicity and backward compatibility, this always yields something numeric (or a string that's numeric).

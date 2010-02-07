@@ -1,3 +1,18 @@
+07.02.2010
+- fixed ahkFunction
+- added ahkPostFunction same syntax as ahkFunction but returns unsigned int 0 if func found, else -1
+- ahkPostFunction and ahkFunction parameters are all optional now.
+- ahkFunction and ahkPostFunction use now a CRITICAL_SECTION to avoid collision
+- SendMode Input is default now.
+- #NoEnv is default now, use '#NoEnv, Off' to turn off
+- fixed ahkExecuteLine to run when lastline is given
+- ahkLabel returns 0 if Label found else -1
+- added ahkFindLabel
+- ahkTerminate will now try (for 200ms) to stop the thread via PostMessage before running TerminateThread.
+- EXPERIMENTAL New build in functions: MemoryLoadLibrary - MemoryGetProcAddress - MemoryFreeLibrary
+- - Based on http://www.joachim-bauch.de/tutorials/load_dll_memory.html
+- - So now multithreading is even easier as only 1 dll is needed.
+- - Hook does not work currently.
 03.02.2010
 - Unicode
 18.01.2010

@@ -2830,6 +2830,9 @@ VarSizeType BIV_PtrSize(LPTSTR aBuf, LPTSTR aVarName);
 	: _tcslen(token_as_string)
 
 void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free = NULL); // L31: Contains code extracted from BIF_DllCall for reuse in ExpressionToPostfix.
+void BIF_MemoryLoadLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_MemoryGetProcAddress(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_MemoryFreeLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_DynaCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_DllCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_StrLen(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);

@@ -177,12 +177,20 @@ BEGIN
             VALUE "ProductName", ""
             VALUE "ProductVersion", "1, 0, 48, 05"
 #else
-            VALUE "FileDescription", "AutoHotkey_L"
+            VALUE "FileDescription", "AutoHotkey_H"
             VALUE "FileVersion", "1, 0, 48, 05"
-            VALUE "InternalName", "AutoHotkey_L"
+            VALUE "InternalName", "AutoHotkey_H"
             VALUE "LegalCopyright", "Copyright (C) 2009"
+#ifdef USRDLL
+	#ifdef MINIDLL
+			VALUE "OriginalFilename", "AutoHotkeyMini.dll"
+	#else
+			VALUE "OriginalFilename", "AutoHotkey.dll"
+	#endif
+#else
             VALUE "OriginalFilename", "AutoHotkey.exe"
-            VALUE "ProductName", "AutoHotkey_L"
+#endif
+            VALUE "ProductName", "AutoHotkey_H"
             VALUE "ProductVersion", "1, 0, 48, 05"
 #endif
         END

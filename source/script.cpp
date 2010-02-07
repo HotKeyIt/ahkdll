@@ -24,6 +24,8 @@ GNU General Public License for more details.
 #include "exports.h" // Naveen v8
 #include "TextIO.h"
 
+#include "MemoryModule.h"
+
 // Globals that are for only this module:
 #define MAX_COMMENT_FLAG_LENGTH 15
 static TCHAR g_CommentFlag[MAX_COMMENT_FLAG_LENGTH + 1] = _T(";"); // Adjust the below for any changes.
@@ -226,6 +228,7 @@ Script::~Script() // Destructor.
 #endif
 #endif // MINIDLL
 	DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
+	DeleteCriticalSection(&g_CriticalDllCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
 }
 #ifdef USRDLL 
 void Script::Destroy()
@@ -393,6 +396,9 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 	// it also helps with the detection of "this script already running" since otherwise
 	// it might not find the dupe if the same script name is launched with different
 	// lowercase/uppercase letters:
+
+	if (hInstance != NULL && _tcsicmp(buf,_T("")))
+		GetModuleFileName(NULL, buf, _countof(buf));
 	ConvertFilespecToCorrectCase(buf); // This might change the length, e.g. due to expansion of 8.3 filename.
 	LPTSTR filename_marker;
 	if (   !(filename_marker = _tcsrchr(buf, '\\'))   )
@@ -4332,6 +4338,11 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 	if (IS_DIRECTIVE_MATCH(_T("#NoEnv")))
 	{
 		g_NoEnv = TRUE;
+		if (parameter)
+		{
+			if (!_tcsicmp(parameter, _T("Off")))
+				g_NoEnv = FALSE;
+		}
 		return CONDITION_TRUE;
 	}
 	if (IS_DIRECTIVE_MATCH(_T("#NoTrayIcon")))
@@ -9098,6 +9109,24 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		bif = BIF_DllCall;
 		max_params = 10000; // An arbitrarily high limit that will never realistically be reached.
 	}
+	else if (!_tcsicmp(func_name, _T("MemoryLoadLibrary")))
+	{
+		bif = BIF_MemoryLoadLibrary;
+		min_params = 1;
+		max_params = 1;
+	}
+	else if (!_tcsicmp(func_name, _T("MemoryGetProcAddress")))
+	{
+		bif = BIF_MemoryGetProcAddress;
+		min_params = 2;
+		max_params = 2;
+	}
+	else if (!_tcsicmp(func_name, _T("MemoryFreeLibrary")))
+	{
+		bif = BIF_MemoryFreeLibrary;
+		min_params = 1;
+		max_params = 1;
+	}
 	else if (!_tcsicmp(func_name, _T("DynaCall")))
 	{
 		bif = BIF_DynaCall;
@@ -9174,7 +9203,7 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		if (!_tcsicmp(suffix, _T("Get")) || !_tcsicmp(suffix, _T("Set")) || !_tcsicmp(suffix, _T("Call")))
 		{
 			bif = BIF_ObjInvoke;
-			min_params = *suffix == 'S' ? 3 : 1;
+			min_params = *suffix == 'S' ? 2 : 1; // ObjSet: name may be omitted but not value.  Note the limit set here isn't applied to bracket[] syntax.
 			max_params = 10000;
 		}
 		else if (!_tcsicmp(suffix, _T("ect"))) // i.e. "Object"
