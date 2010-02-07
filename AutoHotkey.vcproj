@@ -521,6 +521,7 @@
 				StackReserveSize="4194304"
 				StackCommitSize="0"
 				TerminalServerAware="1"
+				EntryPointSymbol=""
 				RandomizedBaseAddress="1"
 				DataExecutionPrevention="0"
 				TargetMachine="1"
@@ -786,6 +787,50 @@
 				>
 			</File>
 			<File
+				RelativePath=".\source\MemoryModule.c"
+				>
+				<FileConfiguration
+					Name="Debug|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						UsePrecompiledHeader="0"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Release|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						UsePrecompiledHeader="0"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="DebugDll|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						UsePrecompiledHeader="0"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Release_DLL|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						UsePrecompiledHeader="0"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Release_DLLMINI|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						UsePrecompiledHeader="0"
+					/>
+				</FileConfiguration>
+			</File>
+			<File
 				RelativePath=".\source\mt19937ar-cok.cpp"
 				>
 			</File>
@@ -1028,6 +1073,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\source\MemoryModule.h"
+				>
+			</File>
+			<File
 				RelativePath=".\source\mt19937ar-cok.h"
 				>
 			</File>
@@ -1104,6 +1153,14 @@
 			<File
 				RelativePath=".\source\resources\AutoHotkey.rc"
 				>
+				<FileConfiguration
+					Name="DebugDll|Win32"
+					>
+					<Tool
+						Name="VCResourceCompilerTool"
+						PreprocessorDefinitions="USRDLL"
+					/>
+				</FileConfiguration>
 			</File>
 			<File
 				RelativePath=".\source\resources\icon_filetype.ico"
