@@ -80,7 +80,10 @@ switch(fwdReason)
 	 }
  case DLL_PROCESS_DETACH:
 	 {
-		 CloseHandle( hThread ); // need better cleanup: windows, variables, no exit from script
+		 int lpExitCode = 0;
+		 GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
+		 if ( lpExitCode == 259 )
+			CloseHandle( hThread ); // need better cleanup: windows, variables, no exit from script
 		 break;
 	 }
  case DLL_THREAD_DETACH:

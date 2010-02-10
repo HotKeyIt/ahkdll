@@ -1,3 +1,6 @@
+10.02.2010
+- fix for A_DllPath
+- fix on DLL_PROCESS_DETACH invalid hThread (MemoryFreeLibrary works fine now)
 07.02.2010
 - fixed ahkFunction
 - added ahkPostFunction same syntax as ahkFunction but returns unsigned int 0 if func found, else -1

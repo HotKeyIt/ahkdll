@@ -13,7 +13,6 @@ but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 */
-#pragma warning( disable : 4311 4312 )
 
 #include "stdafx.h" // pre-compiled headers
 #include <olectl.h> // for OleLoadPicture()
@@ -1008,8 +1007,8 @@ ResultType Line::Transform(LPTSTR aCmd, LPTSTR aValue1, LPTSTR aValue2)
 		output_var.Close(); // Length() was already set properly by Assign() above. Currently it can't be VAR_CLIPBOARD since that would auto-detect as the reverse direction.
 		if (!char_count)
 			return output_var.Assign(); // Make non-clipboard output_var blank to indicate failure.
-#endif
 		return OK;
+#endif
 
 	case TRANS_CMD_HTML:
 	{
@@ -10870,7 +10869,7 @@ VarSizeType BIV_DllPath(LPTSTR aBuf, LPTSTR aVarName) // HotKeyIt H1 path of loa
 {
 	TCHAR buf[MAX_PATH];
 	VarSizeType length = (VarSizeType)GetModuleFileName(g_hInstance, buf, _countof(buf));
-	if (_tcsicmp(buf,_T("")))
+	if (_tcscmp(buf,_T("")) == 0)
 		VarSizeType length = (VarSizeType)GetModuleFileName(NULL, buf, _countof(buf));
 	if (aBuf)
 		_tcscpy(aBuf, buf); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string). This is true for ReadRegString()'s API call and may be true for other API calls like this one.
@@ -11927,6 +11926,7 @@ VarSizeType BIV_TimeIdlePhysical(LPTSTR aBuf, LPTSTR aVarName)
 ////////////////////////
 // BUILT-IN FUNCTIONS //
 ////////////////////////
+
 // Interface for DynaCall():
 #define  DC_MICROSOFT           0x0000      // Default
 #define  DC_BORLAND             0x0001      // Borland compat
