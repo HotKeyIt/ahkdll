@@ -24,11 +24,11 @@ GNU General Public License for more details.
 #include "application.h" // for MsgSleep()
 #include "resources/resource.h"  // For InputBox.
 #include "TextIO.h"
-#include <map>
 #define PCRE_STATIC             // For RegEx. PCRE_STATIC tells PCRE to declare its functions for normal, static
 #include "lib_pcre/pcre/pcre.h" // linkage rather than as functions inside an external DLL.
 #include "exports.h" // for callFunc # Naveen N10
 #include "MemoryModule.h"
+#include <map>
 
 ////////////////////
 // Window related //
@@ -10904,7 +10904,7 @@ VarSizeType BIV_DllPath(LPTSTR aBuf, LPTSTR aVarName) // HotKeyIt H1 path of loa
 {
 	TCHAR buf[MAX_PATH];
 	VarSizeType length = (VarSizeType)GetModuleFileName(g_hInstance, buf, _countof(buf));
-	if (_tcscmp(buf,_T("")) == 0)
+	if (length == 0)
 		VarSizeType length = (VarSizeType)GetModuleFileName(NULL, buf, _countof(buf));
 	if (aBuf)
 		_tcscpy(aBuf, buf); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string). This is true for ReadRegString()'s API call and may be true for other API calls like this one.
@@ -15683,13 +15683,14 @@ void BIF_ResourceLoadLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[
 #endif
 void BIF_MemoryLoadLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
-	aResultToken.symbol = PURE_INTEGER;
+	aResultToken.symbol = SYM_INTEGER;
+	aResultToken.value_int64 = 0;
 	FILE *fp;
 	unsigned char *data=NULL;
 	size_t size;
 	HMEMORYMODULE module;
 	
-	fp = _tfopen(aParam[0]->symbol == SYM_VAR ? aParam[0]->var->mCharContents : aParam[0]->marker, _T("rb"));
+	fp = _tfopen(aParam[0]->symbol == SYM_VAR ? aParam[0]->var->Contents() : aParam[0]->marker, _T("rb"));
 	if (fp == NULL)
 	{
 		return;
@@ -15710,14 +15711,16 @@ void BIF_MemoryLoadLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[],
 void BIF_MemoryGetProcAddress(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
 	aResultToken.symbol = SYM_INTEGER;
+	aResultToken.value_int64 = 0;
+	TCHAR *FuncName = aParam[1]->symbol == SYM_VAR ? aParam[1]->var->Contents() : aParam[1]->marker;
 #ifdef UNICODE
-	char *buf = (char*)malloc(_tcslen(aParam[1]->marker)+sizeof(char*));
-	wcstombs(buf,aParam[1]->marker,_tcslen(aParam[1]->marker));
-	buf[_tcslen(aParam[1]->marker)] = '\0';
+	char *buf = (char*)malloc(_tcslen(FuncName)+sizeof(char*));
+	wcstombs(buf,FuncName,_tcslen(FuncName));
+	buf[_tcslen(FuncName)] = '\0';
  	aResultToken.value_int64 =  (__int64)MemoryGetProcAddress((HMEMORYMODULE)aParam[0]->deref->marker,buf);
 	free(buf);
 #else
-	aResultToken.value_int64 =  (__int64)MemoryGetProcAddress((HMEMORYMODULE)aParam[0]->deref->marker,aParam[1]->marker);
+	aResultToken.value_int64 =  (__int64)MemoryGetProcAddress((HMEMORYMODULE)aParam[0]->deref->marker,FuncName);
 #endif
 }
 void BIF_MemoryFreeLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
