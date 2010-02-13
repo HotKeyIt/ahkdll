@@ -21,7 +21,6 @@ GNU General Public License for more details.
 #include "window.h" // For MsgBox() & SetForegroundLockTimeout()
 #include "TextIO.h"
 
-
 // General note:
 // The use of Sleep() should be avoided *anywhere* in the code.  Instead, call MsgSleep().
 // The reason for this is that if the keyboard or mouse hook is installed, a straight call

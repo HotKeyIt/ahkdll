@@ -35,12 +35,12 @@ GNU General Public License for more details.
 	#ifndef AHKX
 		#ifdef USRDLL
 			#ifdef MINIDLL
-				#define NAME_L_REVISION ".L43minidllH4"
+				#define NAME_L_REVISION ".L46minidllH5"
 			#else
-				#define NAME_L_REVISION ".L43dllH4"
+				#define NAME_L_REVISION ".L46dllH5"
 			#endif
 		#else
-			#define NAME_L_REVISION ".L43H4" // L14: Added .Ln for AutoHotkey_L revision n.
+			#define NAME_L_REVISION ".L46H5" // L14: Added .Ln for AutoHotkey_L revision n.
 		#endif
 	#else
 		#define NAME_L_REVISION "X11"
@@ -90,7 +90,6 @@ GNU General Public License for more details.
 	#define SPI_GETFOREGROUNDLOCKTIMEOUT        0x2000
 	#define SPI_SETFOREGROUNDLOCKTIMEOUT        0x2001
 #endif
-
 #ifndef VK_XBUTTON1
 	#define VK_XBUTTON1       0x05    /* NOT contiguous with L & RBUTTON */
 	#define VK_XBUTTON2       0x06    /* NOT contiguous with L & RBUTTON */
@@ -107,7 +106,7 @@ GNU General Public License for more details.
 	/* XButton values are WORD flags */
 	#define XBUTTON1      0x0001
 	#define XBUTTON2      0x0002
-#endif // VK_XBUTTON1
+#endif
 #ifndef HIMETRIC_INCH
 	#define HIMETRIC_INCH 2540
 #endif
@@ -124,6 +123,7 @@ enum ResultType {FAIL = 0, OK, WARN = OK, CRITICAL_ERROR  // Some things might r
 	, CONDITION_TRUE, CONDITION_FALSE
 	, LOOP_BREAK, LOOP_CONTINUE
 	, EARLY_RETURN, EARLY_EXIT}; // EARLY_EXIT needs to be distinct from FAIL for ExitApp() and AutoExecSection().
+
 enum SendModes {SM_EVENT, SM_INPUT, SM_PLAY, SM_INPUT_FALLBACK_TO_PLAY, SM_INVALID}; // SM_EVENT must be zero.
 // In above, SM_INPUT falls back to SM_EVENT when the SendInput mode would be defeated by the presence
 // of a keyboard/mouse hooks in another script (it does this because SendEvent is superior to a
@@ -131,6 +131,7 @@ enum SendModes {SM_EVENT, SM_INPUT, SM_PLAY, SM_INPUT_FALLBACK_TO_PLAY, SM_INVAL
 // conditions [such as the user releasing a modifier key during the Send]).  By contrast,
 // SM_INPUT_FALLBACK_TO_PLAY falls back to the SendPlay mode.  SendInput has this extra fallback behavior
 // because it's likely to become the most popular sending method.
+
 enum ExitReasons {EXIT_NONE, EXIT_CRITICAL, EXIT_ERROR, EXIT_DESTROY, EXIT_LOGOFF, EXIT_SHUTDOWN
 	, EXIT_WM_QUIT, EXIT_WM_CLOSE, EXIT_MENU, EXIT_EXIT, EXIT_RELOAD, EXIT_SINGLEINSTANCE};
 
@@ -146,7 +147,6 @@ enum MenuTypeType {MENU_TYPE_NONE, MENU_TYPE_POPUP, MENU_TYPE_BAR}; // NONE must
 enum ToggleValueType {TOGGLE_INVALID = 0, TOGGLED_ON, TOGGLED_OFF, ALWAYS_ON, ALWAYS_OFF, TOGGLE
 	, TOGGLE_PERMIT, NEUTRAL, TOGGLE_SEND, TOGGLE_MOUSE, TOGGLE_SENDANDMOUSE, TOGGLE_DEFAULT
 	, TOGGLE_MOUSEMOVE, TOGGLE_MOUSEMOVEOFF};
-
 
 // Some things (such as ListView sorting) rely on SCS_INSENSITIVE being zero.
 // In addition, BIF_InStr relies on SCS_SENSITIVE being 1:
@@ -706,12 +706,11 @@ inline void global_init(global_struct &g)
 	// subroutine's values for these are restored prior to resuming execution:
 	global_clear_state(g);
 
-	g.SendMode = SM_INPUT; // HotKeyIt new default SM_EVENT;  // v1.0.43: Default to SM_EVENT for backward compatibility.
+	g.SendMode = SM_INPUT; // HotKeyIt new default instead SM_EVENT;  // v1.0.43: Default to SM_EVENT for backward compatibility.
 	g.TitleMatchMode = FIND_IN_LEADING_PART; // Standard default for AutoIt2 and 3.
 	g.TitleFindFast = true; // Since it's so much faster in many cases.
 	g.DetectHiddenWindows = false;  // Same as AutoIt2 but unlike AutoIt3; seems like a more intuitive default.
 	g.DetectHiddenText = true;  // Unlike AutoIt, which defaults to false.  This setting performs better.
-
 	// Not sure what the optimal default is.  1 seems too low (scripts would be very slow by default):
 	g.LinesPerCycle = -1;
 	g.IntervalBeforeRest = 10;  // sleep for 10ms every 10ms

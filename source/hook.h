@@ -247,7 +247,6 @@ struct KeyHistoryItem
 
 LRESULT CALLBACK LowLevelKeybdProc(int aCode, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK LowLevelMouseProc(int aCode, WPARAM wParam, LPARAM lParam);
-
 LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lParam, const vk_type aVK
 	, sc_type aSC, bool aKeyUp, ULONG_PTR aExtraInfo, DWORD aEventFlags);
 

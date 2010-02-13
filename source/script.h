@@ -1290,7 +1290,10 @@ public:
 		if (!_tcsicmp(aBuf, _T("Asc"))) return TRANS_CMD_ASC;
 		if (!_tcsicmp(aBuf, _T("Chr"))) return TRANS_CMD_CHR;
 		if (!_tcsicmp(aBuf, _T("Deref"))) return TRANS_CMD_DEREF;
-#ifndef UNICODE
+#ifdef UNICODE
+		if (!_tcsicmp(aBuf, _T("ToCodePage"))) return TRANS_CMD_TOCODEPAGE;
+		if (!_tcsicmp(aBuf, _T("FromCodePage"))) return TRANS_CMD_FROMCODEPAGE;
+#else
 		if (!_tcsicmp(aBuf, _T("Unicode"))) return TRANS_CMD_UNICODE;
 #endif
 		if (!_tcsicmp(aBuf, _T("HTML"))) return TRANS_CMD_HTML;
@@ -1316,8 +1319,6 @@ public:
 		if (!_tcsicmp(aBuf, _T("BitNot"))) return TRANS_CMD_BITNOT;
 		if (!_tcsicmp(aBuf, _T("BitShiftLeft"))) return TRANS_CMD_BITSHIFTLEFT;
 		if (!_tcsicmp(aBuf, _T("BitShiftRight"))) return TRANS_CMD_BITSHIFTRIGHT;
-		if (!_tcsicmp(aBuf, _T("ToCodePage"))) return TRANS_CMD_TOCODEPAGE;
-		if (!_tcsicmp(aBuf, _T("FromCodePage"))) return TRANS_CMD_FROMCODEPAGE;
 		return TRANS_CMD_INVALID;
 	}
 #ifndef MINIDLL
@@ -2628,9 +2629,11 @@ public:
 #else
 	LineNumberType LoadFromFile(bool aScriptWasNotspecified);
 #endif
-	LineNumberType LoadText(LPTSTR aScript); // HotKeyIt H1 load text instead file ahktextdll
-	ResultType LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure);
+#ifndef AUTOHOTKEYSC
+	LineNumberType LoadFromText(LPTSTR aScript); // HotKeyIt H1 load text instead file ahktextdll
 	ResultType LoadIncludedText(LPTSTR aFileSpec); //New read text
+#endif
+	ResultType LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure);
 	ResultType UpdateOrCreateTimer(Label *aLabel, LPTSTR aPeriod, LPTSTR aPriority, bool aEnable
 		, bool aUpdatePriorityOnly);
 
@@ -2739,6 +2742,7 @@ VarSizeType BIV_IsCompiled(LPTSTR aBuf, LPTSTR aVarName);
 #ifdef UNICODE  // A_IsUnicode is left blank/undefined in the ANSI version.
 VarSizeType BIV_IsUnicode(LPTSTR aBuf, LPTSTR aVarName);
 #endif
+VarSizeType BIV_FileEncoding(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_LastError(LPTSTR aBuf, LPTSTR aVarName);
 #ifndef MINIDLL
 VarSizeType BIV_IconHidden(LPTSTR aBuf, LPTSTR aVarName);
@@ -2830,6 +2834,9 @@ VarSizeType BIV_PtrSize(LPTSTR aBuf, LPTSTR aVarName);
 	: _tcslen(token_as_string)
 
 void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free = NULL); // L31: Contains code extracted from BIF_DllCall for reuse in ExpressionToPostfix.
+#ifdef AUTOHOTKEYSC
+void BIF_ResourceLoadLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+#endif
 void BIF_MemoryLoadLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_MemoryGetProcAddress(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_MemoryFreeLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
@@ -2843,7 +2850,7 @@ void BIF_Asc(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCou
 void BIF_Chr(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_NumGet(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_NumPut(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
-void BIF_StrGet(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_StrGetPut(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_IsLabel(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_IsFunc(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_GetKeyState(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
@@ -2866,6 +2873,7 @@ void BIF_OnMessage(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 void BIF_RegisterCallback(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 #ifndef MINIDLL
 void BIF_StatusBar(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+
 void BIF_LV_GetNextOrCount(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_LV_GetText(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_LV_AddInsertModify(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);

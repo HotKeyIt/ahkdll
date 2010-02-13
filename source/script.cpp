@@ -40,6 +40,7 @@ static TextMem::Buffer includedtextbuf; //HotKeyIt for dll to read script from m
 // except for the most recent one, are suspended.  So keep this in mind when
 // using things such as static data members or static local variables.
 
+
 Script::Script()
 	: mFirstLine(NULL), mLastLine(NULL), mCurrLine(NULL), mPlaceholderLabel(NULL), mLineCount(0)
 #ifndef MINIDLL
@@ -502,6 +503,8 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 	return OK;
 }
 
+	
+
 ResultType Script::CreateWindows()
 // Returns OK or FAIL.
 {
@@ -686,6 +689,8 @@ void Script::EnableOrDisableViewMenuItems(HMENU aMenu, UINT aFlags)
 	EnableMenuItem(aMenu, ID_VIEW_VARIABLES, aFlags);
 	EnableMenuItem(aMenu, ID_VIEW_HOTKEYS, aFlags);
 }
+
+
 
 void Script::CreateTrayIcon()
 // It is the caller's responsibility to ensure that the previous icon is first freed/destroyed
@@ -1094,8 +1099,9 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 #endif
 }
 
-LineNumberType Script::LoadText(LPTSTR aScript)
-// HotKeyIt H1 LoadText() for text instead LoadFromFile()
+#ifndef AUTOHOTKEYSC
+LineNumberType Script::LoadFromText(LPTSTR aScript)
+// HotKeyIt H1 LoadFromText() for text instead LoadFromFile()
 // Returns the number of non-comment lines that were loaded, or LOADING_FAILED on error.
 {
 	mNoHotkeyLabels = true;  // Indicate that there are no hotkey labels, since we're (re)loading the entire file.
@@ -1219,6 +1225,7 @@ LineNumberType Script::LoadText(LPTSTR aScript)
 
 
 
+#endif
 #ifdef AUTOHOTKEYSC
 LineNumberType Script::LoadFromFile()
 #else
@@ -1467,7 +1474,7 @@ bool IsFunction(LPTSTR aBuf, bool *aPendingFunctionHasBrace = NULL)
 	// In addition, it seems best not to allow if(...) to ever be a function definition since such a function
 	// could never be called as ACT_EXPRESSION since it would be seen as an IF-stmt instead.
 }
-
+#ifndef AUTOHOTKEYSC
 ResultType Script::LoadIncludedText(LPTSTR aFileSpec)
 // Returns OK or FAIL.
 // Below: Use double-colon as delimiter to set these apart from normal labels.
@@ -2689,6 +2696,7 @@ continue_main_loop: // This method is used in lieu of "continue" for performance
 
 
 
+#endif
 ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure)
 // Returns OK or FAIL.
 // Below: Use double-colon as delimiter to set these apart from normal labels.
@@ -3977,6 +3985,7 @@ inline ResultType Script::CloseAndReturnFail(TextStream *ts)
 	return FAIL;
 }
 
+#ifndef AUTOHOTKEYSC
 size_t Script::GetLineFromText(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSection, TCHAR *&sBuf)
 // HotKeyIt H1 to parse trough text instead of file for LoadFromScript
 {
@@ -4114,6 +4123,7 @@ size_t Script::GetLineFromText(LPTSTR aBuf, int aMaxCharsToRead, int aInContinua
 
 
 
+#endif
 size_t Script::GetLine(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSection, TextStream *ts)
 {
 	size_t aBuf_length = 0;
@@ -8589,7 +8599,7 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	LPTSTR char_after_last_backslash, terminate_here;
 	TCHAR buf[MAX_PATH+1];
 	DWORD attr;
-	
+
 	#define FUNC_LIB_EXT _T(".ahk")
 	#define FUNC_LIB_EXT_LENGTH (_countof(FUNC_LIB_EXT) - 1)
 	#define FUNC_LOCAL_LIB _T("\\Lib\\") // Needs leading and trailing backslash.
@@ -9086,8 +9096,13 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		bif = BIF_Chr;
 	else if (!_tcsicmp(func_name, _T("StrGet")))
 	{
-		bif = BIF_StrGet;
-		max_params = 1;
+		bif = BIF_StrGetPut;
+		max_params = 3;
+	}
+	else if (!_tcsicmp(func_name, _T("StrPut")))
+	{
+		bif = BIF_StrGetPut;
+		max_params = 4;
 	}
 	else if (!_tcsicmp(func_name, _T("NumGet")))
 	{
@@ -9109,6 +9124,14 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		bif = BIF_DllCall;
 		max_params = 10000; // An arbitrarily high limit that will never realistically be reached.
 	}
+#ifdef AUTOHOTKEYSC
+	else if (!_tcsicmp(func_name, _T("ResourceLoadLibrary")))
+	{
+		bif = BIF_ResourceLoadLibrary;
+		min_params = 1;
+		max_params = 1;
+	}
+#endif
 	else if (!_tcsicmp(func_name, _T("MemoryLoadLibrary")))
 	{
 		bif = BIF_MemoryLoadLibrary;
@@ -11354,9 +11377,8 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 								return LineError(_T("Invalid character in dotted identifier."), FAIL, op_end);
 
 							// Rather than trying to predict how something like "obj.-1" will be handled, treat it as a syntax error.
-							// This also prevents "obj.(expression)" from acting like "obj[expression]", but that seems OK for now as
-							// it may conflict with method-call syntax; it may be used in future for calling obj's default method.
-							if (op_end == cp)
+							// "obj.()" is allowed; it should mean "call the default method of obj" or "call the function object obj".
+							if (op_end == cp && *op_end != '(')
 								// Error message is intentionally vague since user may have intended the dot to be concatenation rather than member-access.
 								return LineError(ERR_INVALID_DOT, FAIL, cp-1);
 
@@ -15082,7 +15104,6 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 #endif
 	case ACT_FILEGETSHORTCUT:
 		return FileGetShortcut(ARG1);
-
 	case ACT_FILECREATESHORTCUT:
 		return FileCreateShortcut(NINE_ARGS);
 #ifndef MINIDLL
@@ -15273,6 +15294,7 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 	case ACT_SETCONTROLDELAY:
 		g.ControlDelay = ArgToInt(1);
 		return OK;
+
 	case ACT_SETBATCHLINES:
 		// This below ensures that IntervalBeforeRest and LinesPerCycle aren't both in effect simultaneously
 		// (i.e. that both aren't greater than -1), even though ExecUntil() has code to prevent a double-sleep

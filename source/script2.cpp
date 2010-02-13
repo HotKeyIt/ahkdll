@@ -2827,7 +2827,7 @@ ResultType Line::ControlGetListView(Var &aOutputVar, HWND aHwnd, LPTSTR aOptions
 	// If the aOutputVar is of type VAR_CLIPBOARD, this call will set up the clipboard for writing:
 	aOutputVar.AssignString(NULL, (VarSizeType)total_length, true, false); // Since failure is extremely rare, continue onward using the available capacity.
 	LPTSTR contents = aOutputVar.Contents();
-	LRESULT capacity = (int)aOutputVar.Capacity(); // LRESULT avoids signed vs. unsigned compiler warnings.
+	LRESULT capacity = (int)aOutputVar.CharCapacity(); // LRESULT avoids signed vs. unsigned compiler warnings.
 	if (capacity > 0) // For maintainability, avoid going negative.
 		--capacity; // Adjust to exclude the zero terminator, which simplifies things below.
 
@@ -2890,7 +2890,7 @@ ResultType Line::ControlGetListView(Var &aOutputVar, HWND aHwnd, LPTSTR aOptions
 				}
 				else
 				{
-					if (ReadProcessMemory(handle, local_lvi.pszText, contents, length, NULL)) // local_lvi.pszText == p_remote_lvi->pszText
+					if (ReadProcessMemory(handle, local_lvi.pszText, contents, length * sizeof(TCHAR), NULL)) // local_lvi.pszText == p_remote_lvi->pszText
 					{
 						contents += length; // Point it to the position where the next char will be written.
 						total_length += length; // Recalculate length in case its different than the estimate (for any reason).
@@ -5261,6 +5261,7 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 	case AHK_EXIT_BY_RELOAD:
 		g_script.ExitApp(EXIT_RELOAD);
 		return 0; // Whether ExitApp() terminates depends on whether there's an OnExit subroutine and what it does.
+
 	case AHK_EXIT_BY_SINGLEINSTANCE:
 #ifndef USRDLL
 		g_script.ExitApp(EXIT_SINGLEINSTANCE);
@@ -5268,6 +5269,7 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 		terminateDll();
 #endif
 		return 0; // Whether ExitApp() terminates depends on whether there's an OnExit subroutine and what it does.
+
 	case WM_DESTROY:
 		if (hWnd == g_hWnd) // i.e. not the SplashText window or anything other than the main.
 		{
@@ -10710,6 +10712,39 @@ VarSizeType BIV_IsUnicode(LPTSTR aBuf, LPTSTR aVarName)
 
 
 
+VarSizeType BIV_FileEncoding(LPTSTR aBuf, LPTSTR aVarName)
+{
+	switch (g->Encoding)
+	{
+	case CP_ACP:
+		if (aBuf)
+			*aBuf = '\0';
+		return 0;
+#define FILEENCODING_CASE(n, s) \
+	case n: \
+		if (aBuf) \
+			_tcscpy(aBuf, _T(s)); \
+		return _countof(_T(s)) - 1;
+	// Returning readable strings for these seems more useful than returning their numeric values, especially with CP_AHKNOBOM:
+	FILEENCODING_CASE(CP_UTF8, "UTF-8")
+	FILEENCODING_CASE(CP_UTF8 | CP_AHKNOBOM, "UTF-8-RAW")
+	FILEENCODING_CASE(CP_UTF16, "UTF-16")
+	FILEENCODING_CASE(CP_UTF16 | CP_AHKNOBOM, "UTF-16-RAW")
+#undef FILEENCODING_CASE
+	default:
+	  {
+		TCHAR buf[MAX_INTEGER_SIZE + 2]; // + 2 for "CP"
+		LPTSTR target_buf = aBuf ? aBuf : buf;
+		target_buf[0] = _T('C');
+		target_buf[1] = _T('P');
+		_itot(g->Encoding, target_buf + 2, 10);  // Always output as decimal since we aren't exactly returning a number.
+		return (VarSizeType)_tcslen(target_buf);
+	  }
+	}
+}
+
+
+
 VarSizeType BIV_LastError(LPTSTR aBuf, LPTSTR aVarName)
 {
 	TCHAR buf[MAX_INTEGER_SIZE];
@@ -14962,6 +14997,8 @@ void BIF_Chr(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCou
 	aResultToken.marker = cp;
 }
 
+
+
 void BIF_NumGet(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
 	size_t right_side_bound, target; // Don't make target a pointer-type because the integer offset might not be a multiple of 4 (i.e. the below increments "target" directly by "offset" and we don't want that to use pointer math).
@@ -15168,21 +15205,240 @@ void BIF_NumPut(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParam
 
 
 
-void BIF_StrGet(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
-// L: Removed undocumented iMode param as it was unintuitive and did not correctly return
-// allocated memory via circuit_token.  A replacement for it could use Line::ConvertFileEncoding.
+void BIF_StrGetPut(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
-	aResultToken.symbol = SYM_STRING;
+	// To simplify flexible handling of parameters:
+	ExprTokenType **aParam_end = aParam + aParamCount;
 
-	void* pAddress = (void*) TokenToInt64(*aParam[0]);
-
-	if(pAddress < (void*) 1024) // sanity check
+	LPCVOID source_string; // This may hold an intermediate UTF-16 string in ANSI builds.
+	size_t source_length;
+	if (ctoupper(aResultToken.marker[3]) == 'P')
 	{
-		aResultToken.marker = _T("");
-		return;
+		// StrPut(String, Address[, Length][, Encoding])
+		ExprTokenType &source_token = *aParam[0];
+		source_string = (LPCVOID)TokenToString(source_token, aResultToken.buf); // Safe to use aResultToken.buf since StrPut won't use TokenSetResult.
+		source_length = (source_token.symbol == SYM_VAR) ? (size_t)source_token.var->CharLength() : _tcslen((LPCTSTR)source_string);
+		++aParam; // Remove the String param from further consideration.
+	}
+	else
+	{
+		// StrGet(Address[, Length][, Encoding])
+		source_string = NULL;
+		source_length = 0;
 	}
 
-	aResultToken.marker = (LPTSTR) pAddress;
+	aResultToken.symbol = SYM_STRING;
+	aResultToken.marker = _T(""); // Set default in case of early return.
+
+	LPVOID 	address;
+	int 	length = -1; // actual length
+	UINT 	encoding = UorA(CP_UTF16, CP_ACP); // native encoding
+
+	// Parameters are interpreted according to the following rules (highest to lowest precedence):
+	// Legend:  StrPut(String[, X, Y, Z])  or  StrGet(Address[, Y, Z])
+	// - If X is non-numeric, it is Encoding.  Calculates required buffer size but does nothing else.  Y and Z must be omitted.
+	// - If X is numeric, it is Address.  (For StrGet, non-numeric Address is treated as an error.)
+	// - If Y is numeric, it is Length.  Otherwise "Actual length" is assumed.
+	// - If a parameter remains, it is Encoding.
+	// Encoding may therefore only be purely numeric if Address(X) and Length(Y) are specified.
+
+	if (aParam < aParam_end && TokenIsPureNumeric(**aParam))
+	{
+		address = (LPVOID)TokenToInt64(**aParam);
+		++aParam;
+	}
+	else
+	{
+		if (!source_string || aParamCount > 2)
+			// This is StrGet or there are too many parameters; see below.
+			return;
+		// else this is the special measuring mode of StrPut, where Address and Length are omitted.
+		// A length of 0 when passed to the Win API conversion functions (or the code below) means
+		// "calculate the required buffer size, but don't do anything else."
+		length = 0;
+		address = (LPVOID)1024; // Skip validation below; address should never be used when length == 0.
+	}
+
+	if (aParam < aParam_end)
+	{
+		if (length == -1) // i.e. not StrPut(String, Encoding)
+		{
+			if (TokenIsPureNumeric(**aParam))
+			{
+				length = (int)TokenToInt64(**aParam);
+				if (length < -1 || !length)
+					return; // Invalid length; or caller of StrGet asked for 0 chars.
+				++aParam; // Let encoding be the next param, if present.
+			}
+			// aParam now points to aParam_end or the Encoding param.
+		}
+		if (aParam < aParam_end)
+		{
+			if (!TokenIsPureNumeric(**aParam))
+			{
+				encoding = Line::ConvertFileEncoding(TokenToString(**aParam));
+				if (encoding == -1)
+					return; // Invalid param.
+			}
+			else encoding = (UINT)TokenToInt64(**aParam);
+		}
+	}
+	// Note: CP_AHKNOBOM is not supported; "-RAW" must be omitted.
+
+	// Check for obvious errors to prevent an Access Violation.
+	// Address can be zero for StrPut if length is also zero (see below).
+	if ( address < (LPVOID)1024
+		// Also check for overlap, in case memcpy is used instead of MultiByteToWideChar/WideCharToMultiByte.
+		// (Behaviour for memcpy would be "undefined", whereas MBTWC/WCTBM would fail.)  Overlap in the
+		// other direction (source_string beginning inside address..length) should not be possible.
+		|| (address >= source_string && address <= ((LPTSTR)source_string + source_length)) )
+		return;
+
+	if (source_string) // StrPut
+	{
+		int char_count; // Either bytes or characters, depending on the target encoding.
+		aResultToken.symbol = SYM_INTEGER; // All paths below return an integer.
+
+		if (!source_length)
+		{	// Take a shortcut when source_string is empty, since some paths below might not handle it correctly.
+			if (encoding == CP_UTF16)
+				*(LPWSTR)address = '\0';
+			else
+				*(LPSTR)address = '\0';
+			aResultToken.value_int64 = 1;
+			return;
+		}
+
+		if (encoding == UorA(CP_UTF16, CP_ACP))
+		{
+			// No conversion required: target encoding is the same as the native encoding of this build.
+			char_count = source_length + 1; // + 1 because generally a null-terminator is wanted.
+			if (length)
+			{
+				// Check for sufficient buffer space.  Cast to size_t and compare unsigned values: if length is
+				// -1 it should be interpreted as a very large unsigned value, in effect bypassing this check.
+				if (source_length <= (size_t)length)
+				{
+					if (source_length == length)
+						// Exceptional case: caller doesn't want a null-terminator (or passed this length in error).
+						--char_count;
+					// Copy the string, including null-terminator if requested.
+					tmemcpy((LPTSTR)address, (LPCTSTR)source_string, char_count);
+				}
+				else
+					// For consistency with the sections below, don't truncate the string.
+					char_count = 0;
+			}
+			//else: Caller just wants the the required buffer size (char_count), which will be returned below.
+			//	Note that although this seems equivalent to StrLen(), the caller might have explicitly
+			//	passed an Encoding; in that case, the result of StrLen() might be different on the
+			//	opposite build (ANSI vs Unicode) as the section below would be executed instead of this one.
+		}
+		else
+		{
+			// Conversion is required. For Unicode builds, this means encoding != CP_UTF16;
+#ifndef UNICODE // therefore, this section is relevant only to ANSI builds:
+			if (encoding == CP_UTF16)
+			{
+				// See similar section below for comments.
+				if (length <= 0)
+				{
+					char_count = MultiByteToWideChar(CP_ACP, 0, (LPCSTR)source_string, source_length, NULL, 0) + 1;
+					if (length == 0)
+					{
+						aResultToken.value_int64 = char_count;
+						return;
+					}
+					length = char_count;
+				}
+				char_count = MultiByteToWideChar(CP_ACP, 0, (LPCSTR)source_string, source_length, (LPWSTR)address, length);
+				if (char_count && char_count < length)
+					((LPWSTR)address)[char_count++] = '\0';
+			}
+			else // encoding != CP_UTF16
+			{
+				// Convert native ANSI string to UTF-16 first.
+				CStringWCharFromChar wide_buf((LPCSTR)source_string, source_length, CP_ACP);				
+				source_string = wide_buf.GetString();
+				source_length = wide_buf.GetLength();
+#endif
+				DWORD flags = (encoding == CP_UTF8) ? 0 : WC_NO_BEST_FIT_CHARS;
+				if (length <= 0) // -1 or 0
+				{
+					// Determine required buffer size.
+					char_count = WideCharToMultiByte(encoding, flags, (LPCWSTR)source_string, source_length, NULL, 0, NULL, NULL) + 1; // + 1 for null-terminator (source_length causes it to be excluded from char_count).
+					if (length == 0) // Caller just wants the required buffer size.
+					{
+						aResultToken.symbol = SYM_INTEGER;
+						aResultToken.value_int64 = char_count;
+						return;
+					}
+					// Assume there is sufficient buffer space and hope for the best:
+					length = char_count;
+				}
+				// Convert to target encoding.
+				char_count = WideCharToMultiByte(encoding, flags, (LPCWSTR)source_string, source_length, (LPSTR)address, length, NULL, NULL);
+				// Since above did not null-terminate, check for buffer space and null-terminate if there's room.
+				// It is tempting to always null-terminate (potentially replacing the last byte of data),
+				// but that would exclude this function as a means to copy a string into a fixed-length array.
+				if (char_count && char_count < length)
+					((LPSTR)address)[char_count++] = '\0';
+				// else no space to null-terminate; or conversion failed.
+#ifndef UNICODE
+			}
+#endif
+		}
+		// Return the number of characters copied.
+		aResultToken.value_int64 = char_count;
+	}
+	else // StrGet
+	{
+		if (encoding != UorA(CP_UTF16, CP_ACP))
+		{
+			// Conversion is required.
+			int conv_length;
+#ifdef UNICODE
+			// Convert multi-byte encoded string to UTF-16.
+			conv_length = MultiByteToWideChar(encoding, 0, (LPCSTR)address, length, NULL, 0);
+			if (!TokenSetResult(aResultToken, NULL, conv_length)) // DO NOT SUBTRACT 1, conv_length might not include a null-terminator.
+				return; // Out of memory.
+			conv_length = MultiByteToWideChar(encoding, 0, (LPCSTR)address, length, aResultToken.marker, conv_length);
+#else
+			CStringW wide_buf;
+			// If the target string is not UTF-16, convert it to that first.
+			if (encoding != CP_UTF16)
+			{
+				StringCharToWChar((LPCSTR)address, wide_buf, length, encoding);
+				address = (void *)wide_buf.GetString();
+				length = wide_buf.GetLength();
+			}
+
+			// Now convert UTF-16 to ACP.
+			conv_length = WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, (LPCWSTR)address, length, NULL, 0, NULL, NULL);
+			if (!TokenSetResult(aResultToken, NULL, conv_length)) // DO NOT SUBTRACT 1, conv_length might not include a null-terminator.
+				return; // Out of memory.
+			conv_length = WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, (LPCWSTR)address, length, aResultToken.marker, conv_length, NULL, NULL);
+#endif
+			if (conv_length && !aResultToken.marker[conv_length - 1])
+				--conv_length; // Exclude null-terminator.
+			else
+				aResultToken.marker[conv_length] = '\0';
+			aResultToken.buf = (LPTSTR)(size_t)conv_length; // Update this in case TokenSetResult used circuit_token.
+			return;
+		}
+		else if (length > -1)
+		{
+			// No conversion necessary, but we might not want the whole string.
+			if (length == 0)
+				return;	// Already set marker = "" above.
+			// Copy and null-terminate at the specified length.
+			TokenSetResult(aResultToken, (LPCTSTR)address, length);
+			return;
+		}
+
+		// Return this null-terminated string, no conversion necessary.
+		aResultToken.marker = (LPTSTR) address;
+	}
 }
 
 
@@ -15394,7 +15650,37 @@ void BIF_WinExistActive(ExprTokenType &aResultToken, ExprTokenType *aParam[], in
 	// are only 32-bit, so use _ultot() for performance.
 	// OLD/WRONG: _ui64toa((unsigned __int64)found_hwnd, aResultToken.marker + 2, 16);
 }
+#ifdef AUTOHOTKEYSC
+void BIF_ResourceLoadLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+{
+	aResultToken.symbol = PURE_INTEGER;
+	aResultToken.value_int64 = 0;
+	HMEMORYMODULE module = NULL;
+	HS_EXEArc_Read oRead;
+	TextMem::Buffer textbuf;
 
+	// AutoIt3: Open the archive in this compiled exe.
+	// Jon gave me some details about why a password isn't needed: "The code in those libararies will
+	// only allow files to be extracted from the exe is is bound to (i.e the script that it was
+	// compiled with).  There are various checks and CRCs to make sure that it can't be used to read
+	// the files from any other exe that is passed."
+	if (oRead.Open(CStringCharFromTCharIfNeeded(g_script.mFileSpec), "") != HS_EXEARC_E_OK)
+	{
+		MsgBox(ERR_EXE_CORRUPTED, 0, g_script.mFileSpec); // Usually caused by virus corruption.
+		return;
+	}
+	// AutoIt3: Read resource (the func allocates the memory for the buffer :) )
+	if (!oRead.FileExtractToMem(CStringCharFromTCharIfNeeded(aParam[0]->symbol == SYM_VAR ? aParam[0]->var->Contents() : aParam[0]->marker), (UCHAR **) &textbuf.mBuffer, &textbuf.mLength) == HS_EXEARC_E_OK)
+	{
+		oRead.Close();							// Close the archive
+		MsgBox(_T("Could not extract script from EXE."), 0, g_script.mFileSpec);
+		return;
+	}
+	oRead.Close(); // no longer used
+	module = MemoryLoadLibrary( textbuf.mBuffer );
+	aResultToken.value_int64 = (unsigned)module;
+}
+#endif
 void BIF_MemoryLoadLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
 	aResultToken.symbol = PURE_INTEGER;
@@ -15415,12 +15701,10 @@ void BIF_MemoryLoadLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[],
 	fseek(fp, 0, SEEK_SET);
 	fread(data, 1, size, fp);
 	fclose(fp);
-
-	module = MemoryLoadLibrary(data);
+	if (data)
+		module = MemoryLoadLibrary(data);
 	if (module == NULL)
-	{
 		return;
-	}
 	aResultToken.value_int64 = (unsigned)module;
 }
 void BIF_MemoryGetProcAddress(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
@@ -17831,7 +18115,7 @@ ResultType TokenSetResult(ExprTokenType &aResultToken, LPCTSTR aResult, size_t a
 // Returns FAIL if malloc failed, in which case our caller is responsible for returning a sensible default value.
 {
 	if (aResultLength == -1)
-		aResultLength = _tcslen(aResult);
+		aResultLength = _tcslen(aResult); // Caller must not pass NULL for aResult in this case.
 	if (aResultLength <= MAX_NUMBER_LENGTH) // v1.0.46.01: Avoid malloc() for small strings.  However, this improves speed by only 10% in a test where random 25-byte strings were extracted from a 700 KB string (probably because VC++'s malloc()/free() are very fast for small allocations).
 		aResultToken.marker = aResultToken.buf; // Store the address of the result for the caller.
 	else
@@ -17841,9 +18125,10 @@ ResultType TokenSetResult(ExprTokenType &aResultToken, LPCTSTR aResult, size_t a
 		if (   !(aResultToken.circuit_token = (ExprTokenType *)tmalloc(aResultLength + 1))   ) // Out of memory. Due to rarity, don't display an error dialog (there's currently no way for a built-in function to abort the current thread anyway?)
 			return FAIL;
 		aResultToken.marker = (LPTSTR)aResultToken.circuit_token; // Store the address of the result for the caller.
-		aResultToken.buf = (LPTSTR)(size_t)aResultLength; // MANDATORY FOR USERS OF CIRCUIT_TOKEN: "buf" is being overloaded to store the length for our caller.
+		aResultToken.buf = (LPTSTR)aResultLength; // MANDATORY FOR USERS OF CIRCUIT_TOKEN: "buf" is being overloaded to store the length for our caller.
 	}
-	tmemcpy(aResultToken.marker, aResult, aResultLength);
+	if (aResult) // Caller may pass NULL to retrieve a buffer of sufficient size.
+		tmemcpy(aResultToken.marker, aResult, aResultLength);
 	aResultToken.marker[aResultLength] = '\0'; // Must be done separately from the memcpy() because the memcpy() might just be taking a substring (i.e. long before result's terminator).
 	return OK;
 }

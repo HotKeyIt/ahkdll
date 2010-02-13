@@ -4,8 +4,10 @@
 
 #define EXPORT extern "C" __declspec(dllexport)
 #define BIF(fun) void fun(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+#ifndef AUTOHOTKEYSC
 EXPORT unsigned int addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aIgnoreLoadFailure);
 EXPORT unsigned int addScript(LPTSTR script, int aReplace);
+#endif
 // EXPORT unsigned int ahkdll(LPTSTR fileName, LPTSTR argv, LPTSTR args);
 EXPORT unsigned int ahkLabel(LPTSTR aLabelName);
 EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1 = _T(""), LPTSTR param2 = _T(""), LPTSTR param3 = _T(""), LPTSTR param4 = _T(""), LPTSTR param5 = _T(""), LPTSTR param6 = _T(""), LPTSTR param7 = _T(""), LPTSTR param8 = _T(""), LPTSTR param9 = _T(""), LPTSTR param10 = _T(""));
@@ -20,13 +22,10 @@ BIF(BIF_Alias) ;
 BIF(BIF_CacheEnable) ;
 BIF(BIF_GetTokenValue) ;
 int initPlugins();
-
-// EXPORT int ahkTerminate();
+#ifdef USRDLL
 EXPORT int ahkReload();
-EXPORT int ahkPause(LPTSTR aChangeTo);
 void reloadDll();
 ResultType terminateDll();
-/*  ahkdll v10: disabling these as they aren't working
-EXPORT int ahkContinue();
-*/
+#endif
+
 #endif

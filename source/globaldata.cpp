@@ -73,8 +73,8 @@ DWORD g_IgnoreNextLControlUp = 0;            //
 BYTE g_MenuMaskKey = VK_CONTROL; // L38: See #MenuMaskKey.
 
 int g_HotkeyModifierTimeout = 50;  // Reduced from 100, which was a little too large for fast typists.
-
 int g_ClipboardTimeout = 1000; // v1.0.31
+
 HHOOK g_KeybdHook = NULL;
 HHOOK g_MouseHook = NULL;
 HHOOK g_PlaybackHook = NULL;
@@ -104,7 +104,7 @@ bool g_IsSuspended = false;  // Make this separate from g_AllowInterruption sinc
 bool g_DeferMessagesForUnderlyingPump = false;
 BOOL g_WriteCacheDisabledInt64 = FALSE;  // BOOL vs. bool might improve performance a little for
 BOOL g_WriteCacheDisabledDouble = FALSE; // frequently-accessed variables (it has helped performance in
-BOOL g_NoEnv = TRUE;                    // ExpandExpression(), but didn't seem to help performance in g_NoEnv.
+BOOL g_NoEnv = TRUE;                    // HotKeyIt H5 new default
 BOOL g_AllowInterruption = TRUE;         //
 int g_nLayersNeedingTimer = 0;
 int g_nThreads = 0;

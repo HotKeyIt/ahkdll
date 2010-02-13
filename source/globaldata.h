@@ -16,6 +16,7 @@ GNU General Public License for more details.
 
 #ifndef globaldata_h
 #define globaldata_h
+
 #include "hook.h" // For KeyHistoryItem and probably other things.
 #include "clipboard.h"  // For the global clipboard object
 #include "script.h" // For the global script object and g_ErrorLevel
@@ -43,10 +44,10 @@ extern HFONT g_hFontSplash;
 #endif
 extern HACCEL g_hAccelTable; // Accelerator table for main menu shortcut keys.
 
-
 typedef int (WINAPI *StrCmpLogicalW_type)(LPCWSTR, LPCWSTR);
 extern StrCmpLogicalW_type g_StrCmpLogicalW;
 extern WNDPROC g_TabClassProc;
+
 extern modLR_type g_modifiersLR_logical;   // Tracked by hook (if hook is active).
 extern modLR_type g_modifiersLR_logical_non_ignored;
 extern modLR_type g_modifiersLR_physical;  // Same as above except it's which modifiers are PHYSICALLY down.
@@ -54,6 +55,7 @@ extern modLR_type g_modifiersLR_physical;  // Same as above except it's which mo
 #ifdef FUTURE_USE_MOUSE_BUTTONS_LOGICAL
 extern WORD g_mouse_buttons_logical; // A bitwise combination of MK_LBUTTON, etc.
 #endif
+
 #define STATE_DOWN 0x80
 #define STATE_ON 0x01
 extern BYTE g_PhysicalKeyState[VK_ARRAY_COUNT];
@@ -66,8 +68,8 @@ extern BYTE g_MenuMaskKey; // L38: See #MenuMaskKey.
 
 // If a SendKeys() operation takes longer than this, hotkey's modifiers won't be pressed back down:
 extern int g_HotkeyModifierTimeout;
-
 extern int g_ClipboardTimeout;
+
 extern HHOOK g_KeybdHook;
 extern HHOOK g_MouseHook;
 extern HHOOK g_PlaybackHook;
@@ -196,7 +198,6 @@ extern TCHAR g_WorkingDir[MAX_PATH];  // Explicit size needed here in .h file fo
 extern LPTSTR g_WorkingDirOrig;
 
 extern bool g_ContinuationLTrim;
-
 extern bool g_ForceKeybdHook;
 extern ToggleValueType g_ForceNumLock;
 extern ToggleValueType g_ForceCapsLock;

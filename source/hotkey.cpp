@@ -13,6 +13,7 @@ but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 */
+
 #include "stdafx.h" // pre-compiled headers
 #ifndef MINIDLL
 #include "hotkey.h"
@@ -2205,9 +2206,9 @@ LPTSTR Hotkey::ToText(LPTSTR aBuf, int aBufSize, bool aAppendNewline)
 	for (existing_threads = 0, vp = mFirstVariant; vp; vp = vp->mNextVariant)
 		existing_threads += vp->mExistingThreads;
 
-	char existing_threads_str[128];
+	TCHAR existing_threads_str[128];
 	if (existing_threads)
-		_itoa(existing_threads, existing_threads_str, 10);
+		_itot(existing_threads, existing_threads_str, 10);
 	else
 		*existing_threads_str = '\0'; // Make it blank to avoid clutter in the hotkey display.
 

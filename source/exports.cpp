@@ -199,6 +199,7 @@ SendKeys(keys, false, SM_EVENT, 0, 1); // N11 sendahk
 return 0;
 }
 
+#ifndef AUTOHOTKEYSC
 #ifdef USRDLL
 // Naveen: v6 addFile()
 // Todo: support for #Directives, and proper treatment of mIsReadytoExecute
@@ -292,8 +293,9 @@ EXPORT unsigned int addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aI
 
 
 #endif // USRDLL
+#endif // AUTOHOTKEYSC
 
-
+#ifndef AUTOHOTKEYSC
 #ifdef USRDLL
 // HotKeyIt: addScript()
 // Todo: support for #Directives, and proper treatment of mIsReadytoExecute
@@ -337,8 +339,8 @@ EXPORT unsigned int addScript(LPTSTR script, int aExecute)
 	}
 	return (unsigned int) oldLastLine->mNextLine;  // 
 }
-#endif
-
+#endif // USRDLL
+#endif // AUTOHOTKEYSC
 // HotKeyIt  -  ahkFunction can return a value now
 EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10)
 {
