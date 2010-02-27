@@ -24,11 +24,12 @@ GNU General Public License for more details.
 #include "application.h" // for MsgSleep()
 #include "resources/resource.h"  // For InputBox.
 #include "TextIO.h"
+
 #define PCRE_STATIC             // For RegEx. PCRE_STATIC tells PCRE to declare its functions for normal, static
 #include "lib_pcre/pcre/pcre.h" // linkage rather than as functions inside an external DLL.
 #include "exports.h" // for callFunc # Naveen N10
 #include "MemoryModule.h"
-#include <map>
+#include "script_object.h"
 
 ////////////////////
 // Window related //
@@ -12008,6 +12009,7 @@ struct DYNATOKEN
 	int dll_call_mode;
 	DYNAPARM *dyna_param;
 	DYNAPARM return_attrib;
+	IObject *dllobject;
 };
 
 DYNARESULT DynaCall(int aFlags, void *aFunction, DYNAPARM aParam[], int aParamCount, DWORD &aException
@@ -12256,6 +12258,20 @@ void ConvertDllArgType(LPTSTR aBuf[], DYNAPARM &aDynaParam)
 		TEST_TYPE("Double",	DLL_ARG_DOUBLE)
 		TEST_TYPE("AStr",	DLL_ARG_ASTR)
 		TEST_TYPE("WStr",	DLL_ARG_WSTR)
+		TEST_TYPE("I",	DLL_ARG_INT) // The few most common types are kept up top for performance.
+		TEST_TYPE("S",	DLL_ARG_STR)
+#ifdef _WIN64
+		TEST_TYPE("T",	DLL_ARG_INT64) // Ptr vs IntPtr to simplify recognition of the pointer suffix, to avoid any possible confusion with IntP, and because it is easier to type.
+#else
+		TEST_TYPE("T",	DLL_ARG_INT)
+#endif
+		TEST_TYPE("H",	DLL_ARG_SHORT)
+		TEST_TYPE("C",	DLL_ARG_CHAR)
+		TEST_TYPE("6",	DLL_ARG_INT64)
+		TEST_TYPE("F",	DLL_ARG_FLOAT)
+		TEST_TYPE("D",	DLL_ARG_DOUBLE)
+		TEST_TYPE("A",	DLL_ARG_ASTR)
+		TEST_TYPE("W",	DLL_ARG_WSTR)
 #undef TEST_TYPE
 		else // It's non-blank but an unknown type.
 		{
@@ -12277,6 +12293,73 @@ void ConvertDllArgType(LPTSTR aBuf[], DYNAPARM &aDynaParam)
 		// the second iteration doesn't run (in case this is the first iteration):
 		return;
 	}
+}
+
+
+
+int ConvertDllArgTypes(LPTSTR aBuf, DYNAPARM *aDynaParam)
+// Helper function for DllCall().  Updates aDynaParam's type and other attributes.
+// Caller has ensured that aBuf contains exactly two strings (though the second can be NULL).
+{
+	LPTSTR type_string;
+	TCHAR buf[1024];
+	int i;
+	int arg_count = 0;
+
+	// Up to two iterations are done to cover the following cases:
+	// No second type because there was no SYM_VAR to get it from:
+	//	blank means int
+	//	invalid is err
+	// (for the below, note that 2nd can't be blank because var name can't be blank, and the first case above would have caught it if 2nd is NULL)
+	// 1Blank, 2Invalid: blank (but ensure is_unsigned and passed_by_address get reset)
+	// 1Blank, 2Valid: 2
+	// 1Valid, 2Invalid: 1 (second iteration would never have run, so no danger of it having erroneously reset is_unsigned/passed_by_address)
+	// 1Valid, 2Valid: 1 (same comment)
+	// 1Invalid, 2Invalid: invalid
+	// 1Invalid, 2Valid: 2
+
+	for (i = 0, type_string = aBuf; *type_string; type_string = (aBuf + (++i)))
+	{
+		if (_tcschr(type_string,'=') || ctoupper(*type_string) == 'U' || (*type_string == '*') )// Unsigned
+			continue;
+		if (i>0 && ctoupper(*(aBuf + i - 1)) == 'U') // Unsigned
+			aDynaParam[arg_count].is_unsigned = true;
+		else
+			aDynaParam[arg_count].is_unsigned = false;
+		
+		// Check for empty string before checking for pointer suffix, so that we can skip the first character.  This is needed to simplify "Ptr" type-name support.
+		if (!*type_string)
+			break;
+
+		tcslcpy(buf, type_string, sizeof(TCHAR)); // Make a modifiable copy for easier parsing below.
+
+		if (StrChrAny(type_string + 1, _T("*pP"))) // Additional validation: ensure nothing following the suffix.
+			aDynaParam[arg_count].passed_by_address = true;
+		else
+			aDynaParam[arg_count].passed_by_address = false;
+
+		if (false) {} // To simplify the macro below.  It should have no effect on the compiled code.
+#define TEST_TYPE(t, n)  else if (!_tcsnicmp(buf, _T(t), 1))  aDynaParam[arg_count].type = (n);
+		TEST_TYPE("I",	DLL_ARG_INT) // The few most common types are kept up top for performance.
+		TEST_TYPE("S",	DLL_ARG_STR)
+#ifdef _WIN64
+		TEST_TYPE("T",	DLL_ARG_INT64) // Ptr vs IntPtr to simplify recognition of the pointer suffix, to avoid any possible confusion with IntP, and because it is easier to type.
+#else
+		TEST_TYPE("T",	DLL_ARG_INT)
+#endif
+		TEST_TYPE("H",	DLL_ARG_SHORT)
+		TEST_TYPE("C",	DLL_ARG_CHAR)
+		TEST_TYPE("6",	DLL_ARG_INT64)
+		TEST_TYPE("F",	DLL_ARG_FLOAT)
+		TEST_TYPE("D",	DLL_ARG_DOUBLE)
+		TEST_TYPE("A",	DLL_ARG_ASTR)
+		TEST_TYPE("W",	DLL_ARG_WSTR)
+#undef TEST_TYPE
+		else // It's non-blank but an unknown type.
+			break;
+		arg_count++;
+	}
+	return arg_count;
 }
 
 
@@ -12373,12 +12456,28 @@ void BIF_DynaCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 // Author: Marcus Sonntag (Ultra) // Modified from BIF_DllCall by HotKeyIt
 {
 	// Set default result in case of early return; a blank value:
-	static std::map<const void*, DYNATOKEN*> DynaParam;
+
 	aResultToken.symbol = SYM_STRING;
 	aResultToken.marker = _T("");
 
-	void *function; // Will hold the address of the function to be called.
+	static ExprTokenType **aTempParam = (ExprTokenType **)SimpleHeap::Malloc(sizeof(__int64)*512);
+	static ExprTokenType aTempParam1;
+	static ExprTokenType aTempParam2;
+	static ExprTokenType aTempParam3;
+	static ExprTokenType aTempParam4;
+	static ExprTokenType aTempParam5;
+	static ExprTokenType aTempParam6;
+	static IObject *funcobj = Object::Create(0,0);	// the keys for function and token in object returned by DynaCall are objects
+	static IObject *tokenobj = Object::Create(0,0);	// this is necessary to support any value for example dll.ahkgetvar.a or dll.ahkassign.var := value
+	static IObject *obj = NULL;
 
+	int isobject = NULL;
+	int dll_call_mode;
+	int arg_count;
+	int i;
+	void *function; // Will hold the address of the function to be called.
+	DYNATOKEN *function_token = {0};
+	DYNAPARM return_attrib = {0};
 	// Check that the mandatory first parameter (DLL+Function) is valid.
 	// (load-time validation has ensured at least one parameter is present).
 	switch(aParam[0]->symbol)
@@ -12386,12 +12485,40 @@ void BIF_DynaCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 		case SYM_STRING: // By far the most common, so it's listed first for performance. Also for performance, don't even consider the possibility that a quoted literal string like "33" is a function-address.
 			function = NULL; // Indicate that no function has been specified yet.
 			break;
+		case SYM_OBJECT:
+			aTempParam[0]->object = aParam[0]->object;
+			aTempParam[0]->symbol = SYM_OBJECT;
+			aTempParam[1]->symbol = SYM_OBJECT;
+			aTempParam[1]->object = funcobj;
+			aTempParam[0]->object->Invoke(aResultToken,*aTempParam[0],IT_GET,aTempParam+1,1);
+			if (aResultToken.symbol == PURE_INTEGER)
+				function = (void*)aResultToken.value_int64;
+			aTempParam[1]->object = tokenobj;
+			aTempParam[0]->object->Invoke(aResultToken,*aTempParam[0],IT_GET,aTempParam+1,1);
+			if (aResultToken.symbol == PURE_INTEGER)
+				function_token = (DYNATOKEN *)aResultToken.value_int64;
+			break;
 		case SYM_VAR:
 			// v1.0.46.08: Allow script to specify the address of a function, which might be useful for
 			// calling functions that the script discovers through unusual means such as C++ member functions.
-			function = (aParam[0]->var->IsNonBlankIntegerOrFloat() == PURE_INTEGER)
-				? (void *)aParam[0]->var->ToInt64(TRUE) // For simplicity and due to rarity, this doesn't check for zero or negative numbers.
-				: NULL; // Not a pure integer, so fall back to normal method of considering it to be path+name.
+			//ExprTokenType oResultToken;
+			if (aParam[0]->var->IsObject())
+			{
+				aTempParam[0]->object = aParam[0]->var->Object();
+				aTempParam[0]->symbol = SYM_OBJECT;
+				aTempParam[1]->symbol = SYM_OBJECT;
+				aTempParam[1]->object = funcobj;
+				aTempParam[0]->object->Invoke(aResultToken,*aTempParam[0],IT_GET,aTempParam+1,1);
+				if (aResultToken.symbol == PURE_INTEGER)
+					function = (void*)aResultToken.value_int64;
+				aTempParam[1]->object = tokenobj;
+				aTempParam[0]->object->Invoke(aResultToken,*aTempParam[0],IT_GET,aTempParam+1,1);
+				if (aResultToken.symbol == PURE_INTEGER)
+					function_token = (DYNATOKEN *)aResultToken.value_int64;
+			} else
+				function = (aParam[0]->var->IsNonBlankIntegerOrFloat() == PURE_INTEGER)
+					? (void *)aParam[0]->var->ToInt64(TRUE) // For simplicity and due to rarity, this doesn't check for zero or negative numbers.
+					: NULL; // Not a pure integer, so fall back to normal method of considering it to be path+name.
 			// A check like the following is not present due to rarity of need and because if the address
 			// is zero or negative, the same result will occur as for any other invalid address:
 			// an ErrorLevel of 0xc0000005.
@@ -12415,19 +12542,17 @@ void BIF_DynaCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 				: NULL; // Not a pure integer, so fall back to normal method of considering it to be path+name.
 	}
 
-	if (!function || !DynaParam[function]) // The function's address hasn't yet been given or set up yet so try to create struct.
+	if (!function || !function_token) // The function's address hasn't yet been given or set up yet so try to create struct and object.
 	{
 		if (aParamCount == 0 && aResultToken.marker == aParam[0]->marker)
 		{
-			DynaParam.clear();
+			g_ErrorLevel->Assign(_T("-2")); // Stage 2 error: Invalid return type or arg type.
 			return;
 		}
 		// Determine the type of return value.
 		DYNAPARM return_attrib = {0}; // Init all to default in case ConvertDllArgType() isn't called below. This struct holds the type and other attributes of the function's return value.
-		int dll_call_mode = DC_CALL_STD; // Set default.  Can be overridden to DC_CALL_CDECL and flags can be OR'd into it.
-		if (aParamCount % 2) // Odd number of parameters indicates the return type has been omitted, so assume BOOL/INT.
-			return_attrib.type = DLL_ARG_INT;
-		else
+		dll_call_mode = DC_CALL_STD; // Set default.  Can be overridden to DC_CALL_CDECL and flags can be OR'd into it.
+		if (aParamCount = 2) // Setting up a function does not allow more than 2 arguments.
 		{
 			// Check validity of this arg's return type:
 			ExprTokenType &token = *aParam[aParamCount - 1];
@@ -12448,258 +12573,219 @@ void BIF_DynaCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 				return_type_string[1] = NULL; // Added in 1.0.48.
 			}
 
-			if (!_tcsnicmp(return_type_string[0], _T("CDecl"), 5)) // Alternate calling convention.
+			return_type_string[0] = (token.symbol != SYM_VAR || 0 != _tcsicmp(token.var->Contents(),_T(""))) ? return_type_string[0] : return_type_string[1];
+			int arg_count = 0;
+			int i = 0;
+			for (;return_type_string[0][i];i++)
 			{
-				dll_call_mode = DC_CALL_CDECL;
-				return_type_string[0] = omit_leading_whitespace(return_type_string[0] + 5);
-				if (!*return_type_string[0])
-				{	// Take a shortcut since we know this empty string will be used as "Int":
-					return_attrib.type = DLL_ARG_INT;
-					goto has_valid_return_type;
-				}
+				if ( !(_tcschr(return_type_string[0]+i,'=') || ctoupper(return_type_string[0][i]) == 'U' || ctoupper(return_type_string[0][i]) == 'P' || (return_type_string[0][i] == '*')) )// Unsigned
+					arg_count++;
 			}
-			// This next part is a little iffy because if a legitimate return type is contained in a variable
-			// that happens to be named Cdecl, Cdecl will be put into effect regardless of what's in the variable.
-			// But the convenience of being able to omit the quotes around Cdecl seems to outweigh the extreme
-			// rarity of such a thing happening.
-			else if (return_type_string[1] && !_tcsnicmp(return_type_string[1], _T("CDecl"), 5)) // Alternate calling convention.
-			{
-				dll_call_mode = DC_CALL_CDECL;
-				return_type_string[1] += 5; // Support return type immediately following CDecl (this was previously supported _with_ quotes, though not documented).  OBSOLETE COMMENT: Must be NULL since return_type_string[1] is the variable's name, by definition, so it can't have any spaces in it, and thus no space delimited items after "Cdecl".
-				if (!*return_type_string[1])
-					// Pass default return type.  Don't take shortcut approach used above as return_type_string[0] should take precedence if valid.
-					return_type_string[1] = _T("Int");
-			}
-
-			ConvertDllArgType(return_type_string, return_attrib);
-			if (return_attrib.type == DLL_ARG_INVALID)
+			DYNAPARM *dyna_param = (DYNAPARM *)_alloca(arg_count * sizeof(DYNAPARM));
+			if (arg_count != ConvertDllArgTypes(return_type_string[0],dyna_param))
 			{
 				g_ErrorLevel->Assign(_T("-2")); // Stage 2 error: Invalid return type or arg type.
 				return;
 			}
-has_valid_return_type:
-			--aParamCount;  // Remove the last parameter from further consideration.
-			if (!return_attrib.passed_by_address) // i.e. the special return flags below are not needed when an address is being returned.
+			if (_tcschr(return_type_string[0],'='))
 			{
-				if (return_attrib.type == DLL_ARG_DOUBLE)
-					dll_call_mode |= DC_RETVAL_MATH8;
-				else if (return_attrib.type == DLL_ARG_FLOAT)
-					dll_call_mode |= DC_RETVAL_MATH4;
-			}
-		}
-
-		// Using stack memory, create an array of dll args large enough to hold the actual number of args present.
-		int arg_count = aParamCount/2; // Might provide one extra due to first/last params, which is inconsequential.
-		DYNAPARM *dyna_param = arg_count ? (DYNAPARM *)_alloca(arg_count * sizeof(DYNAPARM)) : NULL;
-		// Above: _alloca() has been checked for code-bloat and it doesn't appear to be an issue.
-		// Above: Fix for v1.0.36.07: According to MSDN, on failure, this implementation of _alloca() generates a
-		// stack overflow exception rather than returning a NULL value.  Therefore, NULL is no longer checked,
-		// nor is an exception block used since stack overflow in this case should be exceptionally rare (if it
-		// does happen, it would probably mean the script or the program has a design flaw somewhere, such as
-		// infinite recursion).
-
-		LPTSTR arg_type_string[2];
-		int i = arg_count * sizeof(void *);
-		// for Unicode <-> ANSI charset conversion
-#ifdef UNICODE
-		CStringA **pStr = (CStringA **)
-#else
-		CStringW **pStr = (CStringW **)
-#endif
-				_alloca(i); // _alloca vs malloc can make a significant difference to performance in some cases.
-		memset(pStr, 0, i);
-
-
-		// Above has already ensured that after the first parameter, there are either zero additional parameters
-		// or an even number of them.  In other words, each arg type will have an arg value to go with it.
-		// It has also verified that the dyna_param array is large enough to hold all of the args.
-		for (arg_count = 0, i = 1; i < aParamCount; ++arg_count, i += 2)  // Same loop as used later below, so maintain them together.
-		{
-			// Check validity of this arg's type and contents:
-			if (IS_NUMERIC(aParam[i]->symbol)) // The arg type should be a string, not something purely numeric.
+				dll_call_mode = DC_CALL_CDECL;
+				return_attrib.type = DLL_ARG_INT;
+			} 
+			for (;_tcschr(return_type_string[0],'=');)
+				return_type_string[0][_tcslen(return_type_string[0])-1] = _T('\0');
+			if (StrChrAny(return_type_string[0], _T("uU")))
 			{
-				g_ErrorLevel->Assign(_T("-2")); // Stage 2 error: Invalid return type or arg type.
-				return;
-			}
-			// Otherwise, this arg's type-name is a string as it should be, so retrieve it:
-			if (aParam[i]->symbol == SYM_VAR) // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
-			{
-				arg_type_string[0] = aParam[i]->var->Contents();
-				arg_type_string[1] = aParam[i]->var->mName;
-				// v1.0.33.01: arg_type_string[1] improves convenience by falling back to the variable's name
-				// if the contents are not appropriate.  In other words, both Int and "Int" are treated the same.
-				// It's done this way to allow the variable named "Int" to actually contain some other legitimate
-				// type-name such as "Str" (in case anyone ever happens to do that).
+				return_type_string[0] += 1;
+				return_attrib.is_unsigned = true;
 			}
 			else
-			{
-				arg_type_string[0] = aParam[i]->marker;
-				arg_type_string[1] = NULL;
-			}
-
-			ExprTokenType &this_param = *aParam[i + 1];         // Resolved for performance and convenience.
-			DYNAPARM &this_dyna_param = dyna_param[arg_count];  //
-
-			// Store the each arg into a dyna_param struct, using its arg type to determine how.
-			ConvertDllArgType(arg_type_string, this_dyna_param);
-			switch (this_dyna_param.type)
-			{
-			case DLL_ARG_ASTR:
-				if (IS_NUMERIC(this_param.symbol))
-				{
-					// For now, string args must be real strings rather than floats or ints.  An alternative
-					// to this would be to convert it to number using persistent memory from the caller (which
-					// is necessary because our own stack memory should not be passed to any function since
-					// that might cause it to return a pointer to stack memory, or update an output-parameter
-					// to be stack memory, which would be invalid memory upon return to the caller).
-					// The complexity of this doesn't seem worth the rarity of the need, so this will be
-					// documented in the help file.
-					g_ErrorLevel->Assign(_T("-2")); // Stage 2 error: Invalid return type or arg type.
-					return;
-				}
-				// Otherwise, it's a supported type of string.
-#ifdef UNICODE
-				pStr[arg_count] = new CStringCharFromWChar(TokenToString(this_param));
-				this_dyna_param.astr = pStr[arg_count]->GetBuffer();
+				return_attrib.is_unsigned = false;
+			if (StrChrAny(return_type_string[0] + 1, _T("*pP")))
+				return_attrib.passed_by_address = true;
+			else
+				return_attrib.passed_by_address = false;
+			if (false) {} // To simplify the macro below.  It should have no effect on the compiled code.
+#define TEST_TYPE(t, n)  else if (!_tcsnicmp(return_type_string[0], _T(t), 1))  return_attrib.type = (n);
+	TEST_TYPE("I",	DLL_ARG_INT) // The few most common types are kept up top for performance.
+	TEST_TYPE("S",	DLL_ARG_STR)
+#ifdef _WIN64
+	TEST_TYPE("T",	DLL_ARG_INT64) // Ptr vs IntPtr to simplify recognition of the pointer suffix, to avoid any possible confusion with IntP, and because it is easier to type.
 #else
-				this_dyna_param.astr = TokenToString(this_param); // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
+	TEST_TYPE("T",	DLL_ARG_INT)
 #endif
-				// NOTES ABOUT THE ABOVE:
-				// UPDATE: The v1.0.44.14 item below doesn't work in release mode, only debug mode (turning off
-				// "string pooling" doesn't help either).  So it's commented out until a way is found
-				// to pass the address of a read-only empty string (if such a thing is possible in
-				// release mode).  Such a string should have the following properties:
-				// 1) The first byte at its address should be '\0' so that functions can read it
-				//    and recognize it as a valid empty string.
-				// 2) The memory address should be readable but not writable: it should throw an
-				//    access violation if the function tries to write to it (like "" does in debug mode).
-				// SO INSTEAD of the following, DllCall() now checks further below for whether sEmptyString
-				// has been overwritten/trashed by the call, and if so displays a warning dialog.
-				// See note above about this: v1.0.44.14: If a variable is being passed that has no capacity, pass a
-				// read-only memory area instead of a writable empty string. There are two big benefits to this:
-				// 1) It forces an immediate exception (catchable by DllCall's exception handler) so
-				//    that the program doesn't crash from memory corruption later on.
-				// 2) It avoids corrupting the program's static memory area (because sEmptyString
-				//    resides there), which can save many hours of debugging for users when the program
-				//    crashes on some seemingly unrelated line.
-				// Of course, it's not a complete solution because it doesn't stop a script from
-				// passing a variable whose capacity is non-zero yet too small to handle what the
-				// function will write to it.  But it's a far cry better than nothing because it's
-				// common for a script to forget to call VarSetCapacity before psssing a buffer to some
-				// function that writes a string to it.
-				//if (this_dyna_param.str == Var::sEmptyString) // To improve performance, compare directly to Var::sEmptyString rather than calling Capacity().
-				//	this_dyna_param.str = ""; // Make it read-only to force an exception.  See comments above.
-				break;
-		case DLL_ARG_WSTR:
-			if (IS_NUMERIC(this_param.symbol))
+	TEST_TYPE("H",	DLL_ARG_SHORT)
+	TEST_TYPE("C",	DLL_ARG_CHAR)
+	TEST_TYPE("6",	DLL_ARG_INT64)
+	TEST_TYPE("F",	DLL_ARG_FLOAT)
+	TEST_TYPE("D",	DLL_ARG_DOUBLE)
+	TEST_TYPE("A",	DLL_ARG_ASTR)
+	TEST_TYPE("W",	DLL_ARG_WSTR)
+#undef TEST_TYPE
+			else
 			{
-				g_ErrorLevel->Assign(_T("-2"));
-				return;
-			}
-			// Otherwise, it's a supported type of string.
-#ifdef UNICODE
-			this_dyna_param.wstr = TokenToString(this_param);
-#else
-			pStr[arg_count] = new CStringWCharFromChar(TokenToString(this_param));
-			this_dyna_param.wstr = pStr[arg_count]->GetBuffer();
-#endif
-
-				break;
-
-			case DLL_ARG_DOUBLE:
-			case DLL_ARG_FLOAT:
-				// This currently doesn't validate that this_dyna_param.is_unsigned==false, since it seems
-				// too rare and mostly harmless to worry about something like "Ufloat" having been specified.
-				this_dyna_param.value_double = TokenToDouble(this_param);
-				if (this_dyna_param.type == DLL_ARG_FLOAT)
-					this_dyna_param.value_float = (float)this_dyna_param.value_double;
-				break;
-
-			case DLL_ARG_INVALID:
 				g_ErrorLevel->Assign(_T("-2")); // Stage 2 error: Invalid return type or arg type.
 				return;
-
-			default: // Namely:
-			//case DLL_ARG_INT:
-			//case DLL_ARG_SHORT:
-			//case DLL_ARG_CHAR:
-			//case DLL_ARG_INT64:
-				if (this_dyna_param.is_unsigned && this_dyna_param.type == DLL_ARG_INT64 && !IS_NUMERIC(this_param.symbol))
-					// The above and below also apply to BIF_NumPut(), so maintain them together.
-					// !IS_NUMERIC() is checked because such tokens are already signed values, so should be
-					// written out as signed so that whoever uses them can interpret negatives as large
-					// unsigned values.
-					// Support for unsigned values that are 32 bits wide or less is done via ATOI64() since
-					// it should be able to handle both signed and unsigned values.  However, unsigned 64-bit
-					// values probably require ATOU64(), which will prevent something like -1 from being seen
-					// as the largest unsigned 64-bit int; but more importantly there are some other issues
-					// with unsigned 64-bit numbers: The script internals use 64-bit signed values everywhere,
-					// so unsigned values can only be partially supported for incoming parameters, but probably
-					// not for outgoing parameters (values the function changed) or the return value.  Those
-					// should probably be written back out to the script as negatives so that other parts of
-					// the script, such as expressions, can see them as signed values.  In other words, if the
-					// script somehow gets a 64-bit unsigned value into a variable, and that value is larger
-					// that LLONG_MAX (i.e. too large for ATOI64 to handle), ATOU64() will be able to resolve
-					// it, but any output parameter should be written back out as a negative if it exceeds
-					// LLONG_MAX (return values can be written out as unsigned since the script can specify
-					// signed to avoid this, since they don't need the incoming detection for ATOU()).
-					this_dyna_param.value_int64 = (__int64)ATOU64(TokenToString(this_param)); // Cast should not prevent called function from seeing it as an undamaged unsigned number.
-				else
-					this_dyna_param.value_int64 = TokenToInt64(this_param);
-
-				// Values less than or equal to 32-bits wide always get copied into a single 32-bit value
-				// because they should be right justified within it for insertion onto the call stack.
-				if (this_dyna_param.type != DLL_ARG_INT64) // Shift the 32-bit value into the high-order DWORD of the 64-bit value for later use by DynaCall().
-					this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
-			} // switch (this_dyna_param.type)
-		} // for() each arg.
-	    
-		if (!function) // The function's address hasn't yet been determined.
-		{
-			function = GetDllProcAddress(aParam[0]->symbol == SYM_VAR ? aParam[0]->var->Contents() : aParam[0]->marker, NULL);
-			if (!function)
-			{
-				g_ErrorLevel->Assign(_T("-4")); // Stage 4 error: Function could not be found in the DLL(s).
-				return;
 			}
-		}
+			
+			if (!function) // The function's address hasn't yet been determined.
+			{
+				function = GetDllProcAddress(aParam[0]->symbol == SYM_VAR ? aParam[0]->var->Contents() : aParam[0]->marker, NULL);
+				if (!function)
+				{
+					g_ErrorLevel->Assign(_T("-4")); // Stage 4 error: Function could not be found in the DLL(s).
+					return;
+				}
+			}
 
-		if ( !DynaParam[function] )
-		{
+			if (!obj)
+			{
+				aTempParam[0] = &aTempParam1;
+				aTempParam[1] = &aTempParam2;
+				aTempParam[2] = &aTempParam3;
+				aTempParam[3] = &aTempParam4;
+				aTempParam[4] = &aTempParam5;
+				aTempParam[5] = &aTempParam6;
+				aTempParam[0]->symbol = SYM_STRING;
+				aTempParam[0]->marker = _T("__Call");
+				aTempParam[1]->symbol = SYM_STRING;
+				aTempParam[1]->marker = _T("DynaCall");
+				aTempParam[2]->symbol = SYM_STRING;
+				aTempParam[2]->marker = _T("__Get");
+				aTempParam[3]->symbol = SYM_STRING;
+				aTempParam[3]->marker = _T("DynaCall");
+				aTempParam[4]->symbol = SYM_STRING;
+				aTempParam[4]->marker = _T("__Set");
+				aTempParam[5]->symbol = SYM_STRING;
+				aTempParam[5]->marker = _T("DynaCall");
+				obj = Object::Create(aTempParam,6);
+			}
 			DYNATOKEN *thisDllCallToken = (DYNATOKEN *)malloc(sizeof(DYNATOKEN));
 			thisDllCallToken->arg_count = arg_count;
+			
 			DYNAPARM *this_dyna_param = (DYNAPARM *)malloc(arg_count * sizeof(DYNAPARM));
+			i = arg_count * sizeof(void *);
+// for Unicode <-> ANSI charset conversion
+#ifdef UNICODE
+CStringA **pStr = (CStringA **)
+#else
+CStringW **pStr = (CStringW **)
+#endif
+			_alloca(i); // _alloca vs malloc can make a significant difference to performance in some cases.
+			memset(pStr, 0, i);
+
+			for (i=0; i < arg_count; i++)  // Same loop as used later below, so maintain them together.
+			{
+				switch (dyna_param[i].type)
+				{
+				case DLL_ARG_ASTR:
+#ifdef UNICODE
+					pStr[arg_count] = new CStringCharFromWChar(_T(""));
+					dyna_param[i].astr = pStr[arg_count]->GetBuffer();
+#else
+					dyna_param[i].astr = ""; // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
+#endif
+					// NOTES ABOUT THE ABOVE:
+					// UPDATE: The v1.0.44.14 item below doesn't work in release mode, only debug mode (turning off
+					// "string pooling" doesn't help either).  So it's commented out until a way is found
+					// to pass the address of a read-only empty string (if such a thing is possible in
+					// release mode).  Such a string should have the following properties:
+					// 1) The first byte at its address should be '\0' so that functions can read it
+					//    and recognize it as a valid empty string.
+					// 2) The memory address should be readable but not writable: it should throw an
+					//    access violation if the function tries to write to it (like "" does in debug mode).
+					// SO INSTEAD of the following, DllCall() now checks further below for whether sEmptyString
+					// has been overwritten/trashed by the call, and if so displays a warning dialog.
+					// See note above about this: v1.0.44.14: If a variable is being passed that has no capacity, pass a
+					// read-only memory area instead of a writable empty string. There are two big benefits to this:
+					// 1) It forces an immediate exception (catchable by DllCall's exception handler) so
+					//    that the program doesn't crash from memory corruption later on.
+					// 2) It avoids corrupting the program's static memory area (because sEmptyString
+					//    resides there), which can save many hours of debugging for users when the program
+					//    crashes on some seemingly unrelated line.
+					// Of course, it's not a complete solution because it doesn't stop a script from
+					// passing a variable whose capacity is non-zero yet too small to handle what the
+					// function will write to it.  But it's a far cry better than nothing because it's
+					// common for a script to forget to call VarSetCapacity before psssing a buffer to some
+					// function that writes a string to it.
+					//if (this_dyna_param.str == Var::sEmptyString) // To improve performance, compare directly to Var::sEmptyString rather than calling Capacity().
+					//	this_dyna_param.str = ""; // Make it read-only to force an exception.  See comments above.
+					break;
+			case DLL_ARG_WSTR:
+				// Otherwise, it's a supported type of string.
+#ifdef UNICODE
+				dyna_param[i].wstr = _T("");
+#else
+				pStr[arg_count] = new CStringWCharFromChar(_T(""));
+				dyna_param[i].wstr = pStr[arg_count]->GetBuffer();
+#endif
+					break;
+
+				case DLL_ARG_DOUBLE:
+				case DLL_ARG_FLOAT:
+					// This currently doesn't validate that this_dyna_param.is_unsigned==false, since it seems
+					// too rare and mostly harmless to worry about something like "Ufloat" having been specified.
+					dyna_param[i].value_double = 0;
+					if (dyna_param[i].type == DLL_ARG_FLOAT)
+						dyna_param[i].value_float = (float)dyna_param[i].value_double;
+					break;
+
+				case DLL_ARG_INVALID:
+					g_ErrorLevel->Assign(_T("-2")); // Stage 2 error: Invalid return type or arg type.
+					return;
+
+				default: // Namely:
+				//case DLL_ARG_INT:
+				//case DLL_ARG_SHORT:
+				//case DLL_ARG_CHAR:
+				//case DLL_ARG_INT64:
+				dyna_param[i].value_int64 = 0;
+				} // switch (this_dyna_param.type)
+			} // for() each arg.
+		    
+
+
 			for (i=0;i < arg_count;i++)
 				this_dyna_param[i] = dyna_param[i];
 			thisDllCallToken->dyna_param = this_dyna_param;
 			thisDllCallToken->return_attrib = return_attrib;
 			thisDllCallToken->dll_call_mode = dll_call_mode;
-			DynaParam[function] = thisDllCallToken;
-		}
-		else if (aParamCount > 1)
-		{
-			DynaParam[function]->arg_count = arg_count;
-			DynaParam[function]->dll_call_mode = dll_call_mode;
-			for (i=0;i < arg_count;i++)
-				DynaParam[function]->dyna_param[i] = dyna_param[i];
+
+			aTempParam[0]->symbol = SYM_OBJECT;
+			aTempParam[0]->object = funcobj;
+			aTempParam[1]->symbol = PURE_INTEGER;
+			aTempParam[1]->value_int64 = (__int64)function;
+			aTempParam[2]->symbol = SYM_OBJECT;
+			aTempParam[2]->object = tokenobj;
+			aTempParam[3]->symbol = PURE_INTEGER;
+			aTempParam[3]->value_int64 = (__int64)thisDllCallToken;
+			aTempParam[4]->symbol = SYM_STRING;
+			aTempParam[4]->marker = _T("base");
+			aTempParam[5]->symbol = SYM_OBJECT;
+			aTempParam[5]->object = obj;
+			thisDllCallToken->dllobject = Object::Create(aTempParam,6);
+			thisDllCallToken->dllobject->AddRef();
+			
+			aResultToken.symbol = SYM_OBJECT;
+			aResultToken.object = thisDllCallToken->dllobject;
+			return;
 		}
 		else
 		{
-			free((DYNAPARM*) DynaParam[function]->dyna_param);
-			free((DYNATOKEN*) DynaParam[function]);
-			DynaParam.erase(DynaParam.find(function));
+			g_ErrorLevel->Assign(_T("-2")); // Stage 2 error: Invalid return type or arg type.
 			return;
 		}
-		aResultToken.symbol = SYM_INTEGER;
-		aResultToken.value_int64 = (__int64)function;
-		return;
 	}
-	
+	/*
 	int arg_count = DynaParam[function]->arg_count;
 	int i = arg_count * sizeof(void *);
 	int dll_call_mode = DynaParam[function]->dll_call_mode;
 	DYNAPARM return_attrib = DynaParam[function]->return_attrib;
-	
+	*/
+	arg_count = function_token->arg_count;
+	i = arg_count * sizeof(void *);
+	dll_call_mode = function_token->dll_call_mode;
+	return_attrib = function_token->return_attrib;
 	// for Unicode <-> ANSI charset conversion
 #ifdef UNICODE
 	CStringA **pStr = (CStringA **)
@@ -12712,10 +12798,11 @@ has_valid_return_type:
 	// Above has already ensured that after the first parameter, there are either zero additional parameters
 	// or an even number of them.  In other words, each arg type will have an arg value to go with it.
 	// It has also verified that the dyna_param array is large enough to hold all of the args.
-	for (i = 0; i < aParamCount - 1; i++)  // Same loop as used later below, so maintain them together.
+	isobject = ((( (aParam[0]->symbol == SYM_VAR && aParam[0]->var->IsObject()) || aParam[0]->symbol == SYM_OBJECT) && ((aParam[1]->symbol == SYM_VAR && aParam[1]->var->IsObject()) || (aParam[1]->symbol == SYM_OPERAND && _tcscmp(aParam[1]->marker, _T(""))== 0)) ) ? 2 : 1);
+ 	for (i = 0; i < aParamCount - isobject; i++)  // Same loop as used later below, so maintain them together.
 	{
-		ExprTokenType &this_param = *aParam[i+1];
-		DYNAPARM &this_dyna_param = DynaParam[function]->dyna_param[i];
+		ExprTokenType &this_param = *aParam[i + isobject];
+		DYNAPARM &this_dyna_param = function_token->dyna_param[i];
 
 		switch (this_dyna_param.type)
 		{
@@ -12834,7 +12921,7 @@ has_valid_return_type:
 	////////////////////////
 	DWORD exception_occurred; // Must not be named "exception_code" to avoid interfering with MSVC macros.
 	DYNARESULT return_value;  // Doing assignment (below) as separate step avoids compiler warning about "goto end" skipping it.
-	return_value = DynaCall(dll_call_mode, function, DynaParam[function]->dyna_param, arg_count, exception_occurred, NULL, 0);
+	return_value = DynaCall(dll_call_mode, function, function_token->dyna_param, arg_count, exception_occurred, NULL, 0);
 	// The above has also set g_ErrorLevel appropriately.
 
 	if (*Var::sEmptyString)
@@ -12886,6 +12973,7 @@ has_valid_return_type:
 			//case DLL_ARG_FLOAT:
 				// All the above are stored in four bytes, so a straight dereference will copy the value
 				// over unchanged, even if it's a float.
+
 				return_value.Int = *(int *)return_value.Pointer;
 			}
 		}
@@ -12973,7 +13061,8 @@ has_valid_return_type:
 
 	// Store any output parameters back into the input variables.  This allows a function to change the
 	// contents of a variable for the following arg types: String and Pointer to <various number types>.
-	for (arg_count = 0, i = 1; i < aParamCount; ++arg_count, i += 1) // Same loop as used above, so maintain them together.
+	//(aParam[0]->symbol == SYM_VAR && aParam[0]->var->IsObject()) || aParam[0]->symbol == SYM_OBJECT ? 2 : 1
+	for (arg_count = 0, i = isobject; i < aParamCount; ++arg_count, i += 1) // Same loop as used above, so maintain them together.
 	{
 		ExprTokenType &this_param = *aParam[i];  // Resolved for performance and convenience.
 		if (this_param.symbol != SYM_VAR) // Output parameters are copied back only if its counterpart parameter is a naked variable.
@@ -12982,7 +13071,7 @@ has_valid_return_type:
 				delete pStr[arg_count];
 			continue;
 		}
-		DYNAPARM &this_dyna_param = DynaParam[function]->dyna_param[arg_count]; // Resolved for performance and convenience.
+		DYNAPARM &this_dyna_param = function_token->dyna_param[arg_count]; // Resolved for performance and convenience.
 		Var &output_var = *this_param.var;                 //
 		if (this_dyna_param.type == DLL_ARG_STR) // Native string type for current build config.
 		{
@@ -13570,7 +13659,19 @@ end:
 		FreeLibrary(hmodule_to_free);
 }
 
+void BIF_Lock(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+{
+	aResultToken.symbol = SYM_STRING;
+	aResultToken.marker = _T("");
+	EnterCriticalSection((LPCRITICAL_SECTION) TokenToInt64(*aParam[0]));
+}
 
+void BIF_UnLock(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+{
+	aResultToken.symbol = SYM_STRING;
+	aResultToken.marker = _T("");
+	LeaveCriticalSection((LPCRITICAL_SECTION) TokenToInt64(*aParam[0]));
+}
 
 void BIF_StrLen(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 // Caller has ensured that SYM_VAR's Type() is VAR_NORMAL and that it's either not an environment
@@ -15698,14 +15799,12 @@ void BIF_MemoryLoadLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[],
 
 	fseek(fp, 0, SEEK_END);
 	size = ftell(fp);
-	data = (unsigned char *)malloc(size);
+	data = (unsigned char *)_alloca(size);
 	fseek(fp, 0, SEEK_SET);
 	fread(data, 1, size, fp);
 	fclose(fp);
 	if (data)
 		module = MemoryLoadLibrary(data);
-	if (module == NULL)
-		return;
 	aResultToken.value_int64 = (unsigned)module;
 }
 void BIF_MemoryGetProcAddress(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)

@@ -159,6 +159,8 @@ _atoi64
 ?BIF_DynaCall@@YAXAAUExprTokenType@@QAPAU1@H@Z
 ?BIF_NumGet@@YAXAAUExprTokenType@@QAPAU1@H@Z
 ?BIF_NumPut@@YAXAAUExprTokenType@@QAPAU1@H@Z
+?BIF_Lock@@YAXAAUExprTokenType@@QAPAU1@H@Z
+?BIF_UnLock@@YAXAAUExprTokenType@@QAPAU1@H@Z
 
 
 ;;;;;;;;;;;;;;;;;;
@@ -572,6 +574,11 @@ EnterCriticalSection@4
 ;;;;;;;;;;;;;;;;;;;;
 ; BUILT-IN FUNCTIONS (and related)
 ;;;;;;;;;;;;;;;;;;;;
+?BIF_BIF_ResourceLoadLibrary@@YAXAAUExprTokenType@@QAPAU1@H@Z
+?BIF_BIF_MemoryGetProcAddr@@YAXAAUExprTokenType@@QAPAU1@H@Z
+?BIF_BIF_MemoryLoadLibrary@@YAXAAUExprTokenType@@QAPAU1@H@Z
+?BIF_BIF_MemoryFreeLibrary@@YAXAAUExprTokenType@@QAPAU1@H@Z
+
 ?BIF_LV_AddInsertModify@@YAXAAUExprTokenType@@QAPAU1@H@Z
 ?BIF_LV_Delete@@YAXAAUExprTokenType@@QAPAU1@H@Z
 ?BIF_LV_GetNextOrCount@@YAXAAUExprTokenType@@QAPAU1@H@Z

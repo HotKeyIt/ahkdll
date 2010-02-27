@@ -229,12 +229,12 @@ Script::~Script() // Destructor.
 #endif
 #endif // MINIDLL
 	DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
-	DeleteCriticalSection(&g_CriticalDllCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
 }
 #ifdef USRDLL 
 void Script::Destroy()
 // HotKeyIt H1 destroy script for ahkTerminate and ahkReload and ExitApp for dll
 {
+	/*
 	//ExprTokenType aResultToken;
 	static ExprTokenType **aParam = (ExprTokenType **)SimpleHeap::Malloc(sizeof(__int64));;
 	ExprTokenType aThisParam[1];
@@ -243,6 +243,7 @@ void Script::Destroy()
 	aParam[0] = aThisParam;
 	int aParamCount = 0;
 	BIF_DynaCall(aThisParam[0], aParam, aParamCount);
+	*/
 	g_script.mIsReadyToExecute = false;
 	// L31: Release objects stored in variables, where possible.
 	int v, i;
@@ -3978,7 +3979,6 @@ continue_main_loop: // This method is used in lieu of "continue" for performance
 
 
 
-
 inline ResultType Script::CloseAndReturnFail(TextStream *ts)
 {
 	ts->Close();
@@ -5620,14 +5620,14 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType,
 					for (;;) // L35: Loop to fix x.y.z() and similar.
 					{
 						for (cp = id_begin; cisalnum(*cp) || *cp == '_'; ++cp); // Find end of identifier.
-						if (cp == id_begin)
-							// No valid identifier, doesn't look like a valid expression.
-							break;
 						if (*cp == '(')
 						{	// Allow function/method Call as standalone expression.
 							aActionType = ACT_EXPRESSION;
 							break;
 						}
+						if (cp == id_begin)
+							// No valid identifier, doesn't look like a valid expression.
+							break;
 						cp = omit_leading_whitespace(cp);
 						if (*cp == '[' || *cp == ':' && cp[1] == '=')
 						{	// Allow Set and bracketed Get as standalone expression.
@@ -9017,6 +9017,18 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		min_params = 2;
 		max_params = 3;
 	}
+	else if (!_tcsicmp(func_name, _T("Lock")))
+	{
+		bif = BIF_Lock;	
+		min_params = 1;
+		max_params = 1;
+	}
+	else if (!_tcsicmp(func_name, _T("UnLock")))
+	{
+		bif = BIF_UnLock;	
+		min_params = 1;
+		max_params = 1;
+	}
 	else if (!_tcsicmp(func_name, _T("FindFunc")))  // addFile() Naveen v8.
 	{
 		bif = BIF_FindFunc;
@@ -10140,6 +10152,7 @@ void *Script::GetVarType(LPTSTR aVarName)
 	if (!_tcscmp(lower, _T("defaultmousespeed"))) return BIV_DefaultMouseSpeed;
 	if (!_tcscmp(lower, _T("ispaused"))) return BIV_IsPaused;
 	if (!_tcscmp(lower, _T("iscritical"))) return BIV_IsCritical;
+	if (!_tcscmp(lower, _T("fileencoding"))) return BIV_FileEncoding;
 #ifndef MINIDLL
 	if (!_tcscmp(lower, _T("issuspended"))) return BIV_IsSuspended;
 
