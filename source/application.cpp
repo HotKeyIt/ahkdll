@@ -21,7 +21,6 @@ GNU General Public License for more details.
 #include "util.h" // for strlcpy()
 #include "resources/resource.h"  // For ID_TRAY_OPEN.
 
-
 bool MsgSleep(int aSleepDuration, MessageMode aMode)
 // Returns true if it launched at least one thread, and false otherwise.
 // aSleepDuration can be be zero to do a true Sleep(0), or less than 0 to avoid sleeping or

@@ -32,7 +32,6 @@ HINSTANCE g_hInstance = NULL; // Set by WinMain().
 DWORD g_MainThreadID = GetCurrentThreadId();
 DWORD g_HookThreadID; // Not initialized by design because 0 itself might be a valid thread ID.
 CRITICAL_SECTION g_CriticalRegExCache;
-CRITICAL_SECTION g_CriticalDllCache;
 
 #ifdef UNICODE
 bool g_DefaultUTF8 = false;

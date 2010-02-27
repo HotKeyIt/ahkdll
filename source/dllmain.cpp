@@ -24,7 +24,7 @@ GNU General Public License for more details.
 #include "windows.h"  // N11
 #include "exports.h"  // N11
 #include <process.h>  // N11
-#include <string>
+//#include <string>
 
 // General note:
 // The use of Sleep() should be avoided *anywhere* in the code.  Instead, call MsgSleep().
@@ -55,7 +55,7 @@ static 	HANDLE hThread;
 //       with multiple loading of the dll under separate names.
 static int threadCount = 1 ; 
 static 	HANDLE hThread2;
-
+unsigned __stdcall runScript( void* pArguments );
 // Naveen v1. DllMain() - puts hInstance into struct nameHinstanceP 
 //                        so it can be passed to OldWinMain()
 // hInstance is required for script initialization 
@@ -99,7 +99,6 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	// Init any globals not in "struct g" that need it:
 	g_hInstance = hInstance;
 	InitializeCriticalSection(&g_CriticalRegExCache); // v1.0.45.04: Must be done early so that it's unconditional, so that DeleteCriticalSection() in the script destructor can also be unconditional (deleting when never initialized can crash, at least on Win 9x).
-	InitializeCriticalSection(&g_CriticalDllCache);
 
 	if (!GetCurrentDirectory(_countof(g_WorkingDir), g_WorkingDir)) // Needed for the FileSelectFile() workaround.
 		*g_WorkingDir = '\0';

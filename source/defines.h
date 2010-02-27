@@ -35,12 +35,12 @@ GNU General Public License for more details.
 	#ifndef AHKX
 		#ifdef USRDLL
 			#ifdef MINIDLL
-				#define NAME_L_REVISION ".L46minidllH5"
+				#define NAME_L_REVISION ".L48minidllH6"
 			#else
-				#define NAME_L_REVISION ".L46dllH5"
+				#define NAME_L_REVISION ".L48dllH6"
 			#endif
 		#else
-			#define NAME_L_REVISION ".L46H5" // L14: Added .Ln for AutoHotkey_L revision n.
+			#define NAME_L_REVISION ".L48H6" // L14: Added .Ln for AutoHotkey_L revision n.
 		#endif
 	#else
 		#define NAME_L_REVISION "X11"
@@ -409,6 +409,7 @@ enum enum_act_old {
 #define NO_CONTROL_INDEX MAX_CONTROLS_PER_GUI // Must be 0xFFFF or less.
 #endif
 #define NO_EVENT_INFO 0 // For backward compatibility with documented contents of A_EventInfo, this should be kept as 0 vs. something more special like UINT_MAX.
+
 #define MAX_TOOLTIPS 20
 #define MAX_TOOLTIPS_STR _T("20")   // Keep this in sync with above.
 #ifndef MINIDLL
@@ -591,6 +592,7 @@ struct global_struct
 	LPTSTR mLoopField;  // The field of the current string-parsing loop.
 	// v1.0.44.14: The above mLoop attributes were moved into this structure from the script class
 	// because they're more approriate as thread-attributes rather than being global to the entire script.
+
 	TitleMatchModes TitleMatchMode;
 	int IntervalBeforeRest;
 	int UninterruptedLineCount; // Stored as a g-struct attribute in case OnExit sub interrupts it while uninterruptible.
@@ -605,10 +607,8 @@ struct global_struct
 	GuiIndexType GuiWindowIndex, GuiControlIndex; // The GUI window index and control index that launched this thread.
 	GuiIndexType GuiDefaultWindowIndex; // This thread's default GUI window, used except when specified "Gui, 2:Add, ..."
 	GuiIndexType DialogOwnerIndex; // This thread's GUI owner, if any. Stored as Index vs. HWND to insulate against the case where a GUI window has been destroyed and recreated with a new HWND.
-	
 	#define THREAD_DIALOG_OWNER ((::g->DialogOwnerIndex < MAX_GUI_WINDOWS && g_gui[::g->DialogOwnerIndex]) \
 	? g_gui[::g->DialogOwnerIndex]->mHwnd : NULL) // Above line relies on short-circuit eval. oder.
-
 #endif
 	int WinDelay;  // negative values may be used as special flags.
 	int ControlDelay; // negative values may be used as special flags.
@@ -640,13 +640,10 @@ struct global_struct
 	bool AllowThreadToBeInterrupted;  // Whether this thread can be interrupted by custom menu items, hotkeys, or timers.
 	bool AllowTimers; // v1.0.40.01 Whether new timer threads are allowed to start during this thread.
 	bool ThreadIsCritical; // Whether this thread has been marked (un)interruptible by the "Critical" command.
-
 	UCHAR DefaultMouseSpeed;
 	UCHAR CoordMode; // Bitwise collection of flags.
-
 	UCHAR StringCaseSense; // On/Off/Locale
 	bool StoreCapslockMode;
-
 	bool AutoTrim;
 	char FormatInt;
 	bool MsgBoxTimedOut; // Doesn't require initialization.
@@ -705,8 +702,7 @@ inline void global_init(global_struct &g)
 	// deeper recursion.  When the interrupting subroutine returns, the former
 	// subroutine's values for these are restored prior to resuming execution:
 	global_clear_state(g);
-
-	g.SendMode = SM_INPUT; // HotKeyIt new default instead SM_EVENT;  // v1.0.43: Default to SM_EVENT for backward compatibility.
+	g.SendMode = SM_EVENT;  // v1.0.43: Default to SM_EVENT for backward compatibility.
 	g.TitleMatchMode = FIND_IN_LEADING_PART; // Standard default for AutoIt2 and 3.
 	g.TitleFindFast = true; // Since it's so much faster in many cases.
 	g.DetectHiddenWindows = false;  // Same as AutoIt2 but unlike AutoIt3; seems like a more intuitive default.

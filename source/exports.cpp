@@ -448,7 +448,6 @@ bool callFuncDll()
 
 	// Fix for v1.0.47: Must handle return_value BEFORE calling FreeAndRestoreFunctionVars() because return_value
 	// might be the contents of one of the function's local variables (which are about to be free'd).
-	EnterCriticalSection(&g_CriticalDllCache);
 	if (aResultToken.symbol == PURE_INTEGER)
 	{
 		result_to_return_dll = (LPTSTR )realloc(result_to_return_dll,256);
@@ -456,12 +455,11 @@ bool callFuncDll()
 	}
 	else //if (return_value.symbol)
 	{
-		result_to_return_dll = (LPTSTR )realloc(result_to_return_dll,_tcslen(TokenToString(aResultToken))+1);
+		result_to_return_dll = (LPTSTR )realloc(result_to_return_dll,_tcslen(TokenToString(aResultToken))*2);
 		_tcsncpy(result_to_return_dll,TokenToString(aResultToken),_tcslen(TokenToString(aResultToken))+1);
 	}
 	Var::FreeAndRestoreFunctionVars(func, var_backup, var_backup_count);
 	ResumeUnderlyingThread(ErrorLevel_saved);
-	LeaveCriticalSection(&g_CriticalDllCache);
 	return 0 ;
 }
 
