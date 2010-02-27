@@ -57,7 +57,7 @@ END
 
 #endif    // APSTUDIO_INVOKED
 
-
+#ifndef MINIDLL
 /////////////////////////////////////////////////////////////////////////////
 //
 // Menu
@@ -144,7 +144,7 @@ BEGIN
     "E",            ID_FILE_EDITSCRIPT,     VIRTKEY, CONTROL, NOINVERT
     "R",            ID_FILE_RELOADSCRIPT,   VIRTKEY, CONTROL, NOINVERT
 END
-
+#endif
 
 /////////////////////////////////////////////////////////////////////////////
 //
