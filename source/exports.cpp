@@ -122,16 +122,19 @@ EXPORT unsigned int ahkExecuteLine(unsigned int line,unsigned int aMode,unsigned
 	return (unsigned int) templine->mNextLine;
 }
 
-EXPORT unsigned int ahkLabel(LPTSTR aLabelName)
+EXPORT unsigned int ahkLabel(LPTSTR aLabelName, unsigned int wait)
 {
 	Label *aLabel = g_script.FindLabel(aLabelName) ;
 	if (aLabel)
 	{
-		PostMessage(g_hWnd, AHK_EXECUTE_LABEL, (LPARAM)aLabel, (LPARAM)aLabel);
-		return 0;
+		if (wait)
+			SendMessage(g_hWnd, AHK_EXECUTE_LABEL, (LPARAM)aLabel, (LPARAM)aLabel);
+		else
+			PostMessage(g_hWnd, AHK_EXECUTE_LABEL, (LPARAM)aLabel, (LPARAM)aLabel);
+		return 1;
 	}
 	else
-		return -1;
+		return 0;
 }
 
 EXPORT unsigned int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10)

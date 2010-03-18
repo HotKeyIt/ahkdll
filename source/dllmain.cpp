@@ -190,21 +190,8 @@ param = nameHinstanceP.argv ; //
 	global_init(*g);  // Set defaults prior to the below, since below might override them for AutoIt2 scripts.
 
 // Set up the basics of the script:
-#ifdef AUTOHOTKEYSC
-	if (g_script.Init(*g, "", restart_mode) != OK) 
+	if (g_script.Init(*g, script_filespec, restart_mode,hInstance) != OK)  // Set up the basics of the script, using the above.
 		return CRITICAL_ERROR;
-#else //HotKeyIt: Go different init routine when file does not exist and assume this is a script to load
-	if (!nameHinstanceP.istext)
-	{
-		if (g_script.Init(*g, script_filespec, restart_mode,0) != OK)  // Set up the basics of the script, using the above.
-			return CRITICAL_ERROR;
-	}
-	else
-	{
-		if (g_script.Init(*g,_T(""),restart_mode,hInstance) != OK)  // Set up the basics of the script.
-			return CRITICAL_ERROR;
-	}
-#endif // AUTOHOTKEYSC
 
 	// Set g_default now, reflecting any changes made to "g" above, in case AutoExecSection(), below,
 	// never returns, perhaps because it contains an infinite loop (intentional or not):

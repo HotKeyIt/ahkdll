@@ -30,8 +30,9 @@ GNU General Public License for more details.
 #define MAX_COMMENT_FLAG_LENGTH 15
 static TCHAR g_CommentFlag[MAX_COMMENT_FLAG_LENGTH + 1] = _T(";"); // Adjust the below for any changes.
 static size_t g_CommentFlagLength = 1; // pre-calculated for performance
-static Func *g_ObjGet, *g_ObjSet, *g_ObjCall; // L31: Funcs resolved in advance for array/member-access syntax.
+static ExprOpFunc g_ObjGet(BIF_ObjInvoke, IT_GET), g_ObjSet(BIF_ObjInvoke, IT_SET), g_ObjCall(BIF_ObjInvoke, IT_CALL);
 static TextMem::Buffer includedtextbuf; //HotKeyIt for dll to read script from memory
+
 // General note about the methods in here:
 // Want to be able to support multiple simultaneous points of execution
 // because more than one subroutine can be executing simultaneously
@@ -351,9 +352,6 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 {
 	TCHAR buf[4096]; // Just to make sure we have plenty of room to do things with.
 	mIsRestart = aIsRestart;
-#ifdef USRDLL
-	GetModuleFileName(hInstance, buf, _countof(buf));
-#else
 #ifdef AUTOHOTKEYSC
 	// Fix for v1.0.29: Override the caller's use of __argv[0] by using GetModuleFileName(),
 	// so that when the script is started from the command line but the user didn't type the
@@ -393,13 +391,14 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 	if (!GetFullPathName(aScriptFilename, _countof(buf), buf, NULL)) // This is also relied upon by mIncludeLibraryFunctionsThenExit.  Succeeds even on nonexistent files.
 		return FAIL; // Due to rarity, no error msg, just abort.
 #endif
-#endif
 	// Using the correct case not only makes it look better in title bar & tray tool tip,
 	// it also helps with the detection of "this script already running" since otherwise
 	// it might not find the dupe if the same script name is launched with different
 	// lowercase/uppercase letters:
 
-	if (hInstance != NULL && _tcsicmp(buf,_T("")))
+	if (hInstance != NULL && _tcschr(buf,'\n')) // HotKeyIt check if it is a dll and text rather than a file and use its name (like for compiled scripts)
+		GetModuleFileName(hInstance, buf, _countof(buf));
+	if (hInstance != NULL && _tcschr(buf,'\n')) // If above failed due to MemoryLoadLibrary use exe name instead
 		GetModuleFileName(NULL, buf, _countof(buf));
 	ConvertFilespecToCorrectCase(buf); // This might change the length, e.g. due to expansion of 8.3 filename.
 	LPTSTR filename_marker;
@@ -1124,18 +1123,6 @@ LineNumberType Script::LoadFromText(LPTSTR aScript)
 		|| !AddLine(ACT_EXIT)) // Fix for v1.0.47.04: Add an Exit because otherwise, a script that ends in an IF-statement will crash in PreparseBlocks() because PreparseBlocks() expects every IF-statements mNextLine to be non-NULL (helps loading performance too).
 		return LOADING_FAILED;
 
-	// L31: Resolve ObjGet/Set/Call early so we don't need to check for them in ExpressionToPostfix.
-	// This is the latest possible time it can be done: immediately before PreparseBlocks.
-	if (   !(g_ObjGet  = FindFunc(_T("ObjGet")))
-		|| !(g_ObjSet  = FindFunc(_T("ObjSet")))
-		|| !(g_ObjCall = FindFunc(_T("ObjCall")))   )
-	{
-#ifdef _DEBUG
-		// Should never happen.
-		ScriptError(_T("Missing internal function."), g_ObjGet ? g_ObjSet ? _T("ObjCall") : _T("ObjSet") : _T("ObjGet"));
-#endif
-		return LOADING_FAILED;
-	}
 #ifndef MINIDLL
 	if (g_HotExprLineCount)
 	{	// Resolve function references on #if (expression) lines.
@@ -1331,19 +1318,6 @@ _T("; keystrokes and mouse clicks.  It also explains more about hotkeys.\n")
 	if (   LoadIncludedFile(mFileSpec, false, false) != OK
 		|| !AddLine(ACT_EXIT)) // Fix for v1.0.47.04: Add an Exit because otherwise, a script that ends in an IF-statement will crash in PreparseBlocks() because PreparseBlocks() expects every IF-statements mNextLine to be non-NULL (helps loading performance too).
 		return LOADING_FAILED;
-
-	// L31: Resolve ObjGet/Set/Call early so we don't need to check for them in ExpressionToPostfix.
-	// This is the latest possible time it can be done: immediately before PreparseBlocks.
-	if (   !(g_ObjGet  = FindFunc(_T("ObjGet")))
-		|| !(g_ObjSet  = FindFunc(_T("ObjSet")))
-		|| !(g_ObjCall = FindFunc(_T("ObjCall")))   )
-	{
-#ifdef _DEBUG
-		// Should never happen.
-		ScriptError(_T("Missing internal function."), g_ObjGet ? g_ObjSet ? _T("ObjCall") : _T("ObjSet") : _T("ObjGet"));
-#endif
-		return LOADING_FAILED;
-	}
 #ifndef MINIDLL
 	if (g_HotExprLineCount)
 	{	// Resolve function references on #if (expression) lines.
@@ -9235,20 +9209,31 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		suffix = func_name + 3;
 		max_params = -1;
 
-		if (!_tcsicmp(suffix, _T("Get")) || !_tcsicmp(suffix, _T("Set")) || !_tcsicmp(suffix, _T("Call")))
-		{
-			bif = BIF_ObjInvoke;
-			min_params = *suffix == 'S' ? 2 : 1; // ObjSet: name may be omitted but not value.  Note the limit set here isn't applied to bracket[] syntax.
-			max_params = 10000;
-		}
-		else if (!_tcsicmp(suffix, _T("ect"))) // i.e. "Object"
+		if (!_tcsicmp(suffix, _T("ect"))) // i.e. "Object"
 		{
 			bif = BIF_ObjCreate;
 			min_params = 0;
 			max_params = 10000;
 		}
-		else
-			return NULL;
+#define BIF_OBJ_CASE(aCaseSuffix, aMinParams, aMaxParams) \
+		else if (!_tcsicmp(suffix, _T(#aCaseSuffix))) \
+		{ \
+			bif = BIF_Obj##aCaseSuffix; \
+			min_params = (1 + aMinParams); \
+			max_params = (1 + aMaxParams); \
+		}
+		// All of these functions require the "object" parameter,
+		// but it is excluded from the counts below for clarity:
+		BIF_OBJ_CASE(Insert, 		2, 2) // key, value
+		BIF_OBJ_CASE(Remove, 		1, 2) // min_key [, max_key]
+		BIF_OBJ_CASE(MinIndex, 		0, 0)
+		BIF_OBJ_CASE(MaxIndex, 		0, 0)
+		BIF_OBJ_CASE(GetCapacity,	0, 1) // [key]
+		BIF_OBJ_CASE(SetCapacity,	1, 2) // [key,] new_capacity
+		BIF_OBJ_CASE(GetAddress,	1, 1) // key
+		BIF_OBJ_CASE(NewEnum,		0, 0)
+#undef BIF_OBJ_CASE
+		else return NULL;
 	}
 #ifdef CONFIG_EXPERIMENTAL
 	else if (!_tcsicmp(func_name, _T("FileOpen")))
@@ -11413,7 +11398,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 							if (*op_end == '(')
 							{
 								new_symbol = SYM_FUNC;
-								new_deref->func = g_ObjCall;
+								new_deref->func = &g_ObjCall;
 								// DON'T DO THE FOLLOWING - must let next iteration handle '(' so it outputs a SYM_OPAREN:
 								//++op_end;
 							}
@@ -11426,13 +11411,13 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 								{
 									op_end += 2; // No need for further processing of this ":=".
 									new_symbol = SYM_SET;
-									new_deref->func = g_ObjSet;
+									new_deref->func = &g_ObjSet;
 									new_deref->param_count++; // Account for R-value of ":=".
 								}
 								else
 								{
 									new_symbol = SYM_GET; // Becomes SYM_FUNC, must be SYM_GET at this point because SYM_FUNC is assumed to have parentheses.
-									new_deref->func = g_ObjGet;
+									new_deref->func = &g_ObjGet;
 								}
 							}
 
@@ -11838,11 +11823,11 @@ double_deref: // Caller has set cp to be start and op_end to be the character af
 				if (stack_token.symbol == SYM_FUNC) // i.e. topmost item on stack is SYM_FUNC.
 				{
 					// L36: Support obj.x(y):=v as equivalent to obj.x[y]:=v, primarily for users of COM_L.
-					if (stack_token.deref->func == g_ObjCall && this_infix->symbol == SYM_ASSIGN)
+					if (stack_token.deref->func == &g_ObjCall && this_infix->symbol == SYM_ASSIGN)
 					{
 						++this_infix; // Discard this SYM_ASSIGN.
 						stack_token.symbol = SYM_SET; // To support correct operator precedence.
-						stack_token.deref->func = g_ObjSet;
+						stack_token.deref->func = &g_ObjSet;
 						stack_token.deref->param_count++; // For final parameter: r-value of assignment.
 						// SYM_FUNC has become SYM_SET, which should remain on the stack until its r-value is complete.
 					}
@@ -11897,8 +11882,8 @@ double_deref: // Caller has set cp to be start and op_end to be the character af
 					// Treat this as a continuation of the parameter list for this operation, which is now known to be ObjCall.
 					// in_param_list must remain pointing to the same deref, which we will continue to use to count parameters.
 					this_obracket.symbol = SYM_FUNC;
-					this_obracket.deref->func = g_ObjCall;
-					// Leave this_obracket on the stack, but also push an open-parenthesis over it:
+					this_obracket.deref->func = &g_ObjCall;
+					// Leave this_obracket (now SYM_FUNC) on the stack, but also push an open-parenthesis over it:
 					this_infix->buf = this_obracket.buf; // Points to the underlying/outer parameter list, which will be restored into in_param_list when this open-parenthesis is popped off the stack.
 					STACK_PUSH(this_infix++);
 					break;
@@ -11910,7 +11895,7 @@ double_deref: // Caller has set cp to be start and op_end to be the character af
 				{
 					this_infix += 2; // Done with SYM_CBRACKET and SYM_ASSIGN.
 					this_obracket.symbol = SYM_SET; // To support correct operator precedence, it must remain as SYM_SET until it is popped off the stack.
-					this_obracket.deref->func = g_ObjSet;
+					this_obracket.deref->func = &g_ObjSet;
 					this_obracket.deref->param_count++;
 					// this_obracket is already on the stack, so let it be processed as normal.
 				}
@@ -11918,7 +11903,7 @@ double_deref: // Caller has set cp to be start and op_end to be the character af
 				{
 					++this_infix; // Done with SYM_CBRACKET.
 					this_obracket.symbol = SYM_FUNC;
-					this_obracket.deref->func = g_ObjGet;
+					this_obracket.deref->func = &g_ObjGet;
 					// this_obracket is still on the stack, but we need it in the postfix array immediately following its params.
 					goto standard_pop_into_postfix;
 				}

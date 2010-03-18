@@ -1,14 +1,5 @@
 #pragma once
 
-#define IT_GET				0
-#define IT_SET				1
-#define IT_CALL				2 // L40: MetaObject::Invoke relies on these being mutually-exclusive bits.
-#define IT_BITMASK			3 // bit-mask for the above.
-
-#define IF_METAOBJ			0x10000 // Indicates 'this' is a meta-object/base of aThisToken. Restricts some functionality and causes aThisToken to be inserted into the param list of called functions.
-#define IF_METAFUNC			0x20000 // Indicates Invoke should call a meta-function before checking the object's fields.
-#define IF_META				(IF_METAOBJ | IF_METAFUNC)	// Flags for regular recursion into base object.
-
 #define INVOKE_TYPE			(aFlags & IT_BITMASK)
 #define IS_INVOKE_SET		(aFlags & IT_SET)
 #define IS_INVOKE_GET		(INVOKE_TYPE == IT_GET)
@@ -73,10 +64,11 @@ public:
 class Object : public ObjectBase
 {
 protected:
+	typedef INT_PTR IntKeyType;
 	union KeyType // Which of its members is used depends on the field's position in the mFields array.
 	{
 		LPTSTR s;
-		int i;
+		IntKeyType i;
 		IObject *p;
 	};
 	struct FieldType
@@ -94,13 +86,23 @@ protected:
 		KeyType key;
 		SymbolType symbol;
 		
-		inline int CompareKey(int val) { return val - key.i; }  // Used by both int and object since they are stored separately.  Will needs review for 64-bit compatibility.
+		inline int CompareKey(IntKeyType val) { return val - key.i; }  // Used by both int and object since they are stored separately.
 		inline int CompareKey(LPTSTR val) { return _tcsicmp(val, key.s); }
 		
 		bool Assign(LPTSTR str, size_t len = -1, bool exact_size = false);
 		bool Assign(ExprTokenType &val);
 		void Get(ExprTokenType &result);
 		void Free();
+	};
+
+	class Enumerator : public ObjectBase
+	{
+		Object *mObject;
+		int mOffset;
+	public:
+		Enumerator(Object *aObject) : mObject(aObject), mOffset(-1) { mObject->AddRef(); }
+		~Enumerator() { mObject->Release(); }
+		ResultType STDMETHODCALLTYPE Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	};
 	
 	IObject *mBase;
@@ -140,19 +142,21 @@ protected:
 		return SetInternalCapacity(mFieldCountMax ? mFieldCountMax * 2 : 4);
 	}
 	
-	inline ResultType _Insert(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
-	inline ResultType _Remove(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
-	inline ResultType _GetCapacity(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
-	inline ResultType _SetCapacity(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
-	inline ResultType _GetAddress(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
-	inline ResultType _MaxIndex(ExprTokenType &aResultToken);
-	inline ResultType _MinIndex(ExprTokenType &aResultToken);
-
 	ResultType CallField(FieldType *aField, ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	
 public:
-	ResultType STDMETHODCALLTYPE Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	static IObject *Create(ExprTokenType *aParam[], int aParamCount);
+
+	ResultType STDMETHODCALLTYPE Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	
+	ResultType _Insert(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+	ResultType _Remove(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+	ResultType _GetCapacity(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+	ResultType _SetCapacity(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+	ResultType _GetAddress(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+	ResultType _MaxIndex(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+	ResultType _MinIndex(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+	ResultType _NewEnum(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 
 	static LPTSTR sMetaFuncName[];
 };

@@ -62,14 +62,9 @@ void BIF_ObjInvoke(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
     IObject *obj;
     ExprTokenType *obj_param;
 
-	// Since ObjGet/ObjSet/ObjCall are "pre-loaded" before the script begins executing,
-	// marker always contains the correct case (vs. whatever the first call in script used).
-	switch (aResultToken.marker[3])
-	{
-	case 'G': invoke_type = IT_GET; break;
-	case 'S': invoke_type = IT_SET; break;
-	default: invoke_type = IT_CALL;
-	}
+	// Since ObjGet/ObjSet/ObjCall are not publicly accessible as functions, Func::mName
+	// (passed via aResultToken.marker) contains the actual flag rather than a name.
+	invoke_type = (int)(INT_PTR)aResultToken.marker;
 
 	// Set default return value; ONLY AFTER THE ABOVE.
 	aResultToken.symbol = SYM_STRING;
@@ -114,3 +109,28 @@ void BIF_ObjInvoke(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 		}
 	}
 }
+
+
+//
+// Functions for accessing built-in methods (even if obscured by a user-defined method).
+//
+
+#define BIF_METHOD(name) \
+void BIF_Obj##name(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount) \
+{ \
+	aResultToken.symbol = SYM_STRING; \
+	aResultToken.marker = _T(""); \
+	\
+	Object *obj = dynamic_cast<Object*>(TokenToObject(*aParam[0])); \
+	if (obj) \
+		obj->_##name(aResultToken, aParam + 1, aParamCount - 1); \
+}
+
+BIF_METHOD(Insert)
+BIF_METHOD(Remove)
+BIF_METHOD(GetCapacity)
+BIF_METHOD(SetCapacity)
+BIF_METHOD(GetAddress)
+BIF_METHOD(MaxIndex)
+BIF_METHOD(MinIndex)
+BIF_METHOD(NewEnum)

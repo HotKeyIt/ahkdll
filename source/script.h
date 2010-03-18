@@ -2017,6 +2017,21 @@ public:
 };
 
 
+class ExprOpFunc : public Func
+{	// ExprOpFunc: Used in combination with SYM_FUNC to implement certain operations in expressions.
+	// These are not inserted into the script's function list, so mName is used only to pass a simple
+	// identifier to mBIF (currently only BIF_ObjInvoke).
+public:
+	ExprOpFunc(BuiltInFunctionType aBIF, INT_PTR aID, int aMinParams = 1, int aParamCount = 1000)
+		: Func((LPTSTR)aID, true)
+	{
+		mBIF = aBIF;
+		mMinParams = aMinParams;	// These are only enforced in some cases.
+		mParamCount = aParamCount;	//
+	}
+};
+
+
 
 class ScriptTimer
 {
@@ -2644,6 +2659,7 @@ public:
 	Func *FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength = 0, int *apInsertPos = NULL); // L27: Added apInsertPos for binary-search.
 	Func *AddFunc(LPCTSTR aFuncName, size_t aFuncNameLength, bool aIsBuiltIn, int aInsertPos); // L27: Added aInsertPos for binary-search.
 	
+
 	int AddBIF(LPTSTR aFuncName, BuiltInFunctionType bif, size_t minparams, size_t maxparams); // N10 added for dynamic BIFs
 	#define ALWAYS_USE_DEFAULT  0
 	#define ALWAYS_USE_GLOBAL   1
@@ -2895,10 +2911,17 @@ void BIF_Trim(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCo
 
 
 void BIF_IsObject(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
-void BIF_ObjCreate(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount); // L31
-
-// L31: See script_object.cpp for comments.
-void BIF_ObjInvoke(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_ObjCreate(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_ObjInvoke(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount); // See script_object.cpp for comments.
+// Built-ins also available as methods -- these are available as functions for use primarily by overridden methods (i.e. where using the built-in methods isn't possible as they're no longer accessible).
+void BIF_ObjInsert(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_ObjRemove(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_ObjGetCapacity(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_ObjSetCapacity(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_ObjGetAddress(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_ObjMaxIndex(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_ObjMinIndex(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_ObjNewEnum(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 
 
 #ifdef CONFIG_EXPERIMENTAL

@@ -12467,10 +12467,31 @@ void BIF_DynaCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 	static ExprTokenType aTempParam4;
 	static ExprTokenType aTempParam5;
 	static ExprTokenType aTempParam6;
-	static IObject *funcobj = Object::Create(0,0);	// the keys for function and token in object returned by DynaCall are objects
+	//static IObject *funcobj = Object::Create(0,0);	// the keys for function and token in object returned by DynaCall are objects
 	static IObject *tokenobj = Object::Create(0,0);	// this is necessary to support any value for example dll.ahkgetvar.a or dll.ahkassign.var := value
 	static IObject *obj = NULL;
-
+	if (!obj)
+	{
+		aTempParam[0] = &aTempParam1;
+		aTempParam[1] = &aTempParam2;
+		aTempParam[2] = &aTempParam3;
+		aTempParam[3] = &aTempParam4;
+		aTempParam[4] = &aTempParam5;
+		aTempParam[5] = &aTempParam6;
+		aTempParam[0]->symbol = SYM_STRING;
+		aTempParam[0]->marker = _T("__Call");
+		aTempParam[1]->symbol = SYM_STRING;
+		aTempParam[1]->marker = _T("DynaCall");
+		aTempParam[2]->symbol = SYM_STRING;
+		aTempParam[2]->marker = _T("__Get");
+		aTempParam[3]->symbol = SYM_STRING;
+		aTempParam[3]->marker = _T("DynaCall");
+		aTempParam[4]->symbol = SYM_STRING;
+		aTempParam[4]->marker = _T("__Set");
+		aTempParam[5]->symbol = SYM_STRING;
+		aTempParam[5]->marker = _T("DynaCall");
+		obj = Object::Create(aTempParam,6);
+	}
 	int isobject = NULL;
 	int dll_call_mode;
 	int arg_count;
@@ -12489,14 +12510,17 @@ void BIF_DynaCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 			aTempParam[0]->object = aParam[0]->object;
 			aTempParam[0]->symbol = SYM_OBJECT;
 			aTempParam[1]->symbol = SYM_OBJECT;
-			aTempParam[1]->object = funcobj;
-			aTempParam[0]->object->Invoke(aResultToken,*aTempParam[0],IT_GET,aTempParam+1,1);
-			if (aResultToken.symbol == PURE_INTEGER)
-				function = (void*)aResultToken.value_int64;
 			aTempParam[1]->object = tokenobj;
 			aTempParam[0]->object->Invoke(aResultToken,*aTempParam[0],IT_GET,aTempParam+1,1);
 			if (aResultToken.symbol == PURE_INTEGER)
+				function = (void*)aResultToken.value_int64;
+			aTempParam[0]->object = tokenobj;
+			aTempParam[1]->symbol = PURE_INTEGER;
+			aTempParam[1]->value_int64 = (__int64)function;
+			tokenobj->Invoke(aResultToken,*aTempParam[0],IT_GET,aTempParam+1,1);
+			if (aResultToken.symbol == PURE_INTEGER)
 				function_token = (DYNATOKEN *)aResultToken.value_int64;
+
 			break;
 		case SYM_VAR:
 			// v1.0.46.08: Allow script to specify the address of a function, which might be useful for
@@ -12507,18 +12531,33 @@ void BIF_DynaCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 				aTempParam[0]->object = aParam[0]->var->Object();
 				aTempParam[0]->symbol = SYM_OBJECT;
 				aTempParam[1]->symbol = SYM_OBJECT;
-				aTempParam[1]->object = funcobj;
-				aTempParam[0]->object->Invoke(aResultToken,*aTempParam[0],IT_GET,aTempParam+1,1);
-				if (aResultToken.symbol == PURE_INTEGER)
-					function = (void*)aResultToken.value_int64;
 				aTempParam[1]->object = tokenobj;
 				aTempParam[0]->object->Invoke(aResultToken,*aTempParam[0],IT_GET,aTempParam+1,1);
 				if (aResultToken.symbol == PURE_INTEGER)
+					function = (void*)aResultToken.value_int64;
+				aTempParam[0]->object = tokenobj;
+				aTempParam[1]->symbol = PURE_INTEGER;
+				aTempParam[1]->value_int64 = (__int64)function;
+				tokenobj->Invoke(aResultToken,*aTempParam[0],IT_GET,aTempParam+1,1);
+				if (aResultToken.symbol == PURE_INTEGER)
 					function_token = (DYNATOKEN *)aResultToken.value_int64;
-			} else
-				function = (aParam[0]->var->IsNonBlankIntegerOrFloat() == PURE_INTEGER)
-					? (void *)aParam[0]->var->ToInt64(TRUE) // For simplicity and due to rarity, this doesn't check for zero or negative numbers.
-					: NULL; // Not a pure integer, so fall back to normal method of considering it to be path+name.
+			} 
+			else
+			{
+				if (aParam[0]->var->IsNonBlankIntegerOrFloat() == PURE_INTEGER)
+				{
+					function = (void *)aParam[0]->var->ToInt64(TRUE); // For simplicity and due to rarity, this doesn't check for zero or negative numbers.
+					aTempParam[0]->symbol = SYM_OBJECT;
+					aTempParam[0]->object = tokenobj;
+					aTempParam[1]->symbol = PURE_INTEGER;
+					aTempParam[1]->value_int64 = (__int64)function;
+					tokenobj->Invoke(aResultToken,*aTempParam[0],IT_GET,aTempParam+1,1);
+					if (aResultToken.symbol == PURE_INTEGER)
+						function_token = (DYNATOKEN *)aResultToken.value_int64;
+				}
+				else // Not a pure integer, so fall back to normal method of considering it to be path+name.
+					function = NULL;
+			}
 			// A check like the following is not present due to rarity of need and because if the address
 			// is zero or negative, the same result will occur as for any other invalid address:
 			// an ErrorLevel of 0xc0000005.
@@ -12532,6 +12571,13 @@ void BIF_DynaCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 			break;
 		case SYM_INTEGER:
 			function = (void *)aParam[0]->value_int64; // For simplicity and due to rarity, this doesn't check for zero or negative numbers.
+			aTempParam[0]->symbol = SYM_OBJECT;
+			aTempParam[0]->object = tokenobj;
+			aTempParam[1]->symbol = PURE_INTEGER;
+			aTempParam[1]->value_int64 = (__int64)function;
+			tokenobj->Invoke(aResultToken,*aTempParam[0],IT_GET,aTempParam+1,1);
+			if (aResultToken.symbol == PURE_INTEGER)
+				function_token = (DYNATOKEN *)aResultToken.value_int64;
 			break;
 		case SYM_FLOAT:
 			g_ErrorLevel->Assign(_T("-1")); // Stage 1 error: Invalid first param.
@@ -12540,6 +12586,16 @@ void BIF_DynaCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 			function = (TokenIsPureNumeric(*aParam[0]) == PURE_INTEGER)
 				? (void *)TokenToInt64(*aParam[0], TRUE) // For simplicity and due to rarity, this doesn't check for zero or negative numbers.
 				: NULL; // Not a pure integer, so fall back to normal method of considering it to be path+name.
+			if (function)
+			{
+				aTempParam[0]->symbol = SYM_OBJECT;
+				aTempParam[0]->object = tokenobj;
+				aTempParam[1]->symbol = PURE_INTEGER;
+				aTempParam[1]->value_int64 = (__int64)function;
+				tokenobj->Invoke(aResultToken,*aTempParam[0],IT_GET,aTempParam+1,1);
+				if (aResultToken.symbol == PURE_INTEGER)
+					function_token = (DYNATOKEN *)aResultToken.value_int64;
+			}
 	}
 
 	if (!function || !function_token) // The function's address hasn't yet been given or set up yet so try to create struct and object.
@@ -12552,28 +12608,29 @@ void BIF_DynaCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 		// Determine the type of return value.
 		DYNAPARM return_attrib = {0}; // Init all to default in case ConvertDllArgType() isn't called below. This struct holds the type and other attributes of the function's return value.
 		dll_call_mode = DC_CALL_STD; // Set default.  Can be overridden to DC_CALL_CDECL and flags can be OR'd into it.
-		if (aParamCount = 2) // Setting up a function does not allow more than 2 arguments.
+		return_attrib.type = DLL_ARG_INT;
+		if (aParamCount < 3) // Setting up a function does not allow more than 2 arguments.
 		{
 			// Check validity of this arg's return type:
-			ExprTokenType &token = *aParam[aParamCount - 1];
+			ExprTokenType &token = *aParam[1];
 			if (IS_NUMERIC(token.symbol) || token.symbol == SYM_OBJECT) // The return type should be a string, not something purely numeric.
 			{
 				g_ErrorLevel->Assign(_T("-2")); // Stage 2 error: Invalid return type or arg type.
 				return;
 			}
-			LPTSTR return_type_string[2];
+			LPTSTR return_type_string[1];
 			if (token.symbol == SYM_VAR) // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
 			{
 				return_type_string[0] = token.var->Contents();
-				return_type_string[1] = token.var->mName; // v1.0.33.01: Improve convenience by falling back to the variable's name if the contents are not appropriate.
+				//return_type_string[1] = token.var->mName; // v1.0.33.01: Improve convenience by falling back to the variable's name if the contents are not appropriate.
 			}
 			else
 			{
 				return_type_string[0] = token.marker;
-				return_type_string[1] = NULL; // Added in 1.0.48.
+				//return_type_string[1] = NULL; // Added in 1.0.48.
 			}
 
-			return_type_string[0] = (token.symbol != SYM_VAR || 0 != _tcsicmp(token.var->Contents(),_T(""))) ? return_type_string[0] : return_type_string[1];
+			//return_type_string[0] = (token.symbol != SYM_VAR || 0 != _tcsicmp(token.var->Contents(),_T(""))) ? return_type_string[0] : return_type_string[1];
 			int arg_count = 0;
 			int i = 0;
 			for (;return_type_string[0][i];i++)
@@ -12591,22 +12648,25 @@ void BIF_DynaCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 			{
 				dll_call_mode = DC_CALL_CDECL;
 				return_attrib.type = DLL_ARG_INT;
-			} 
-			for (;_tcschr(return_type_string[0],'=');)
-				return_type_string[0][_tcslen(return_type_string[0])-1] = _T('\0');
-			if (StrChrAny(return_type_string[0], _T("uU")))
-			{
-				return_type_string[0] += 1;
-				return_attrib.is_unsigned = true;
-			}
-			else
-				return_attrib.is_unsigned = false;
-			if (StrChrAny(return_type_string[0] + 1, _T("*pP")))
-				return_attrib.passed_by_address = true;
-			else
-				return_attrib.passed_by_address = false;
-			if (false) {} // To simplify the macro below.  It should have no effect on the compiled code.
-#define TEST_TYPE(t, n)  else if (!_tcsnicmp(return_type_string[0], _T(t), 1))  return_attrib.type = (n);
+				TCHAR retrurn_type_arg[3]; // maximal length of return type
+				for (i=0;_tcschr(return_type_string[0] + i + 1,'=');i++)
+					retrurn_type_arg[i] = return_type_string[0][i];
+				retrurn_type_arg[i] = '\0';
+				if (StrChrAny(retrurn_type_arg, _T("uU")))
+				{
+					_tcsncpy(retrurn_type_arg,retrurn_type_arg + 1,sizeof(TCHAR));
+					_tcsncpy(retrurn_type_arg + 1,retrurn_type_arg + 2,sizeof(TCHAR));
+					//*(retrurn_type_arg + 2) = '\0';
+					return_attrib.is_unsigned = true;
+				}
+				else
+					return_attrib.is_unsigned = false;
+				if (StrChrAny(retrurn_type_arg + 1, _T("*pP")))
+					return_attrib.passed_by_address = true;
+				else
+					return_attrib.passed_by_address = false;
+				if (false) {} // To simplify the macro below.  It should have no effect on the compiled code.
+#define TEST_TYPE(t, n)  else if (!_tcsnicmp(retrurn_type_arg, _T(t), 1))  return_attrib.type = (n);
 	TEST_TYPE("I",	DLL_ARG_INT) // The few most common types are kept up top for performance.
 	TEST_TYPE("S",	DLL_ARG_STR)
 #ifdef _WIN64
@@ -12622,12 +12682,13 @@ void BIF_DynaCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 	TEST_TYPE("A",	DLL_ARG_ASTR)
 	TEST_TYPE("W",	DLL_ARG_WSTR)
 #undef TEST_TYPE
-			else
-			{
-				g_ErrorLevel->Assign(_T("-2")); // Stage 2 error: Invalid return type or arg type.
-				return;
+				else
+				{
+					g_ErrorLevel->Assign(_T("-2")); // Stage 2 error: Invalid return type or arg type.
+					return;
+				}
 			}
-			
+
 			if (!function) // The function's address hasn't yet been determined.
 			{
 				function = GetDllProcAddress(aParam[0]->symbol == SYM_VAR ? aParam[0]->var->Contents() : aParam[0]->marker, NULL);
@@ -12638,28 +12699,6 @@ void BIF_DynaCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 				}
 			}
 
-			if (!obj)
-			{
-				aTempParam[0] = &aTempParam1;
-				aTempParam[1] = &aTempParam2;
-				aTempParam[2] = &aTempParam3;
-				aTempParam[3] = &aTempParam4;
-				aTempParam[4] = &aTempParam5;
-				aTempParam[5] = &aTempParam6;
-				aTempParam[0]->symbol = SYM_STRING;
-				aTempParam[0]->marker = _T("__Call");
-				aTempParam[1]->symbol = SYM_STRING;
-				aTempParam[1]->marker = _T("DynaCall");
-				aTempParam[2]->symbol = SYM_STRING;
-				aTempParam[2]->marker = _T("__Get");
-				aTempParam[3]->symbol = SYM_STRING;
-				aTempParam[3]->marker = _T("DynaCall");
-				aTempParam[4]->symbol = SYM_STRING;
-				aTempParam[4]->marker = _T("__Set");
-				aTempParam[5]->symbol = SYM_STRING;
-				aTempParam[5]->marker = _T("DynaCall");
-				obj = Object::Create(aTempParam,6);
-			}
 			DYNATOKEN *thisDllCallToken = (DYNATOKEN *)malloc(sizeof(DYNATOKEN));
 			thisDllCallToken->arg_count = arg_count;
 			
@@ -12680,8 +12719,8 @@ CStringW **pStr = (CStringW **)
 				{
 				case DLL_ARG_ASTR:
 #ifdef UNICODE
-					pStr[arg_count] = new CStringCharFromWChar(_T(""));
-					dyna_param[i].astr = pStr[arg_count]->GetBuffer();
+					pStr[i] = new CStringCharFromWChar(_T(""));
+					dyna_param[i].astr = pStr[i]->GetBuffer();
 #else
 					dyna_param[i].astr = ""; // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
 #endif
@@ -12716,8 +12755,8 @@ CStringW **pStr = (CStringW **)
 #ifdef UNICODE
 				dyna_param[i].wstr = _T("");
 #else
-				pStr[arg_count] = new CStringWCharFromChar(_T(""));
-				dyna_param[i].wstr = pStr[arg_count]->GetBuffer();
+				pStr[i] = new CStringWCharFromChar(_T(""));
+				dyna_param[i].wstr = pStr[i]->GetBuffer();
 #endif
 					break;
 
@@ -12752,22 +12791,26 @@ CStringW **pStr = (CStringW **)
 			thisDllCallToken->dll_call_mode = dll_call_mode;
 
 			aTempParam[0]->symbol = SYM_OBJECT;
-			aTempParam[0]->object = funcobj;
+			aTempParam[0]->object = tokenobj;
 			aTempParam[1]->symbol = PURE_INTEGER;
 			aTempParam[1]->value_int64 = (__int64)function;
-			aTempParam[2]->symbol = SYM_OBJECT;
-			aTempParam[2]->object = tokenobj;
-			aTempParam[3]->symbol = PURE_INTEGER;
-			aTempParam[3]->value_int64 = (__int64)thisDllCallToken;
-			aTempParam[4]->symbol = SYM_STRING;
-			aTempParam[4]->marker = _T("base");
-			aTempParam[5]->symbol = SYM_OBJECT;
-			aTempParam[5]->object = obj;
-			thisDllCallToken->dllobject = Object::Create(aTempParam,6);
+			aTempParam[2]->symbol = SYM_STRING;
+			aTempParam[2]->marker = _T("base");
+			aTempParam[3]->symbol = SYM_OBJECT;
+			aTempParam[3]->object = obj;
+
+			thisDllCallToken->dllobject = Object::Create(aTempParam,4);
 			thisDllCallToken->dllobject->AddRef();
-			
+
+			aTempParam[1]->symbol = PURE_INTEGER;
+			aTempParam[1]->value_int64 = (__int64)function;
+			aTempParam[2]->symbol = PURE_INTEGER;
+			aTempParam[2]->value_int64 = (__int64)thisDllCallToken;
+			tokenobj->Invoke(aResultToken,*aTempParam[0],IT_SET,aTempParam+1,2);
+
 			aResultToken.symbol = SYM_OBJECT;
 			aResultToken.object = thisDllCallToken->dllobject;
+			g_ErrorLevel->Assign(_T("0"));
 			return;
 		}
 		else
@@ -12821,8 +12864,8 @@ CStringW **pStr = (CStringW **)
 			}
 			// Otherwise, it's a supported type of string.
 #ifdef UNICODE
-			pStr[arg_count] = new CStringCharFromWChar(TokenToString(this_param));
-			this_dyna_param.astr = pStr[arg_count]->GetBuffer();
+			pStr[i] = new CStringCharFromWChar(TokenToString(this_param));
+			this_dyna_param.astr = pStr[i]->GetBuffer();
 #else
 			this_dyna_param.astr = TokenToString(this_param); // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
 #endif
@@ -12862,8 +12905,8 @@ CStringW **pStr = (CStringW **)
 #ifdef UNICODE
 			this_dyna_param.wstr = TokenToString(this_param);
 #else
-			pStr[arg_count] = new CStringWCharFromChar(TokenToString(this_param));
-			this_dyna_param.wstr = pStr[arg_count]->GetBuffer();
+			pStr[i] = new CStringWCharFromChar(TokenToString(this_param));
+			this_dyna_param.wstr = pStr[i]->GetBuffer();
 #endif
 			break;
 
@@ -15811,6 +15854,8 @@ void BIF_MemoryGetProcAddress(ExprTokenType &aResultToken, ExprTokenType *aParam
 {
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = 0;
+	if (!aParam[0]->deref->marker)
+		return;
 	TCHAR *FuncName = aParam[1]->symbol == SYM_VAR ? aParam[1]->var->Contents() : aParam[1]->marker;
 #ifdef UNICODE
 	char *buf = (char*)malloc(_tcslen(FuncName)+sizeof(char*));
