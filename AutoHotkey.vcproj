@@ -378,8 +378,8 @@
 		</Configuration>
 		<Configuration
 			Name="DebugDll|Win32"
-			OutputDirectory="$(ConfigurationName)"
-			IntermediateDirectory="$(ConfigurationName)"
+			OutputDirectory="bin\DebugDll"
+			IntermediateDirectory="temp\$(ConfigurationName)"
 			ConfigurationType="2"
 			CharacterSet="0"
 			>
@@ -524,7 +524,7 @@
 				StackReserveSize="4194304"
 				StackCommitSize="0"
 				LargeAddressAware="1"
-				TerminalServerAware="1"
+				TerminalServerAware="0"
 				OptimizeReferences="2"
 				EnableCOMDATFolding="2"
 				FunctionOrder="@source\misc\function_order_for_linker_optimization.txt"
@@ -617,7 +617,7 @@
 				StackReserveSize="4194304"
 				StackCommitSize="0"
 				LargeAddressAware="1"
-				TerminalServerAware="1"
+				TerminalServerAware="0"
 				OptimizeReferences="2"
 				EnableCOMDATFolding="2"
 				FunctionOrder="@source\misc\function_order_for_linker_optimization.txt"
