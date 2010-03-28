@@ -1,3 +1,6 @@
+28.03.2010
+- Merge AutoHotkey_L Revision 50
+- DynaCall fix, *pP parameter was not initialized correctly
 28.02.2010
 - DynaCall returns Objects now.
 - You can use object features like dll.ahkgetvar.var or dll.ahkFunction["func"] or dll.ahkassign.var := value

@@ -12331,12 +12331,14 @@ int ConvertDllArgTypes(LPTSTR aBuf, DYNAPARM *aDynaParam)
 		if (!*type_string)
 			break;
 
-		tcslcpy(buf, type_string, sizeof(TCHAR)); // Make a modifiable copy for easier parsing below.
+		tcslcpy(buf, type_string+1, sizeof(TCHAR)); // Make a modifiable copy for easier parsing below.
 
-		if (StrChrAny(type_string + 1, _T("*pP"))) // Additional validation: ensure nothing following the suffix.
+		if (StrChrAny(buf, _T("*pP"))) // Additional validation: ensure nothing following the suffix.
 			aDynaParam[arg_count].passed_by_address = true;
 		else
 			aDynaParam[arg_count].passed_by_address = false;
+		
+		tcslcpy(buf, type_string, sizeof(TCHAR)); // Make a modifiable copy for easier parsing below.
 
 		if (false) {} // To simplify the macro below.  It should have no effect on the compiled code.
 #define TEST_TYPE(t, n)  else if (!_tcsnicmp(buf, _T(t), 1))  aDynaParam[arg_count].type = (n);
@@ -13907,8 +13909,14 @@ void RegExSetSubpatternVars(LPCTSTR haystack, pcre *re, pcre_extra *extra, bool 
 			}
 			else // NOTE: The formulas below work even for a capturing subpattern that wasn't actually matched, such as one of the following: (abc)|(123)
 			{
-				subpat_pos = this_offset[0];
-				subpat_len = this_offset[1] - this_offset[0]; // It seemed more convenient for scripts to store Length instead of an ending offset.
+				// Notes about Unicode: Since characters in utf8Haystack might not directly correspond to
+				// characters in the original UTF-16 string, some conversion needs to be done.  It is done here
+				// so that 0 is returned for unmatched subpatterns without checking subpat_not_matched again.
+				// Since UTF8PosToTPos resolves to a MultiByteToWideChar call and this_offset[0] might be 0,
+				// the call might actually fail; but in that case it would return 0 anyway, which is correct.
+				// Finally, the macros below skip these conversions in ANSI builds as they aren't needed.
+				subpat_pos = UTF8PosToTPos(utf8Haystack, this_offset[0]) + 1; // One-based (i.e. position zero means "not found").
+				subpat_len = UTF8LenToTLen(utf8Haystack, this_offset[0], this_offset[1] - this_offset[0]); // It seemed more convenient for scripts to store Length instead of an ending offset.
 			}
 
 			if (subpat_name && subpat_name[p]) // This subpattern number has a name, so store it under that name.
@@ -13923,10 +13931,10 @@ void RegExSetSubpatternVars(LPCTSTR haystack, pcre *re, pcre_extra *extra, bool 
 #endif
 					suffix_length = _stprintf(var_name_suffix, _T("Pos%s"), the_subpat_name); // Append the subpattern to the array's base name.
 					if (array_item = g_script.FindOrAddVar(var_name, prefix_length + suffix_length, always_use))
-						array_item->Assign(UTF8PosToTPos(utf8Haystack, subpat_pos) + 1); // One-based (i.e. position zero means "not found").
+						array_item->Assign(subpat_pos);
 					suffix_length = _stprintf(var_name_suffix, _T("Len%s"), the_subpat_name); // Append the subpattern name to the array's base name.
 					if (array_item = g_script.FindOrAddVar(var_name, prefix_length + suffix_length, always_use))
-						array_item->Assign(UTF8LenToTLen(utf8Haystack, subpat_pos, subpat_len));
+						array_item->Assign(subpat_len);
 					// Fix for v1.0.45.01: Section below added.  See similar section further below for comments.
 					if (!subpat_not_matched && allow_dupe_subpat_names) // Explicitly check subpat_not_matched not pos/len so that behavior is consistent with the default mode (non-position).
 						for (n = p + 1; n < pattern_count; ++n) // Search to the right of this subpat to find others with the same name.
@@ -13940,11 +13948,11 @@ void RegExSetSubpatternVars(LPCTSTR haystack, pcre *re, pcre_extra *extra, bool 
 				// For comments about this section, see the similar for-loop later below.
 				suffix_length = _stprintf(var_name_suffix, _T("Pos%d"), p); // Append the element number to the array's base name.
 				if (array_item = g_script.FindOrAddVar(var_name, prefix_length + suffix_length, always_use))
-					array_item->Assign(UTF8PosToTPos(utf8Haystack, subpat_pos) + 1); // One-based (i.e. position zero means "not found").
+					array_item->Assign(subpat_pos);
 				//else var couldn't be created: no error reporting currently, since it basically should never happen.
 				suffix_length = _stprintf(var_name_suffix, _T("Len%d"), p); // Append the element number to the array's base name.
 				if (array_item = g_script.FindOrAddVar(var_name, prefix_length + suffix_length, always_use))
-					array_item->Assign(UTF8LenToTLen(utf8Haystack, subpat_pos, subpat_len));
+					array_item->Assign(subpat_len);
 			}
 		}
 		//goto free_and_return;

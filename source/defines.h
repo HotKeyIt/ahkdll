@@ -35,12 +35,12 @@ GNU General Public License for more details.
 	#ifndef AHKX
 		#ifdef USRDLL
 			#ifdef MINIDLL
-				#define NAME_L_REVISION ".L49minidllH8"
+				#define NAME_L_REVISION ".L50minidllH9"
 			#else
-				#define NAME_L_REVISION ".L49dllH8"
+				#define NAME_L_REVISION ".L50dllH9"
 			#endif
 		#else
-			#define NAME_L_REVISION ".L49H8" // L14: Added .Ln for AutoHotkey_L revision n.
+			#define NAME_L_REVISION ".L50H9" // L14: Added .Ln for AutoHotkey_L revision n.
 		#endif
 	#else
 		#define NAME_L_REVISION "X11"
