@@ -245,25 +245,18 @@ void Script::Destroy()
 	int aParamCount = 0;
 	BIF_DynaCall(aThisParam[0], aParam, aParamCount);
 	*/
-	g_script.mIsReadyToExecute = false;
 	// L31: Release objects stored in variables, where possible.
 	int v, i;
 	for (v = 0; v < mVarCount; ++v)
-		if (mVar[v]->IsObject())
-			mVar[v]->ReleaseObject();
-		else if (mVar[v]->mType != VAR_BUILTIN)
-		{
-			mVar[v]->ConvertToNonAliasIfNecessary();
-			mVar[v]->Free();
-		}
+	{
+		mVar[v]->ConvertToNonAliasIfNecessary();
+		mVar[v]->Free();
+	}
 	for (v = 0; v < mLazyVarCount; ++v)
-		if (mLazyVar[v]->IsObject())
-			mLazyVar[v]->ReleaseObject();
-		else if (mVar[v]->mType != VAR_BUILTIN)
-		{
-			mLazyVar[v]->ConvertToNonAliasIfNecessary();
-			mLazyVar[v]->Free();
-		}
+	{
+		mLazyVar[v]->ConvertToNonAliasIfNecessary();
+		mLazyVar[v]->Free();
+	}
 	for (i = 0; i < mFuncCount; ++i)
 	{
 		Func &f = *mFunc[i];
@@ -274,15 +267,11 @@ void Script::Destroy()
 		// only static and global variables are released.  It seems best for consistency to also
 		// avoid releasing top-level non-static local variables (i.e. which aren't in var backups).
 		for (v = 0; v < f.mVarCount; ++v)
-			if (f.mVar[v]->IsStatic() && f.mVar[v]->IsObject()) // For consistency, only free static vars (see above).
-				f.mVar[v]->ReleaseObject();
-			else
-				f.mVar[v]->Free();
+			f.mVar[v]->Free();
 		for (v = 0; v < f.mLazyVarCount; ++v)
-			if (f.mLazyVar[v]->IsStatic() && f.mLazyVar[v]->IsObject())
-				f.mLazyVar[v]->ReleaseObject();
-			else
-				f.mLazyVar[v]->Free();
+			f.mLazyVar[v]->Free();
+		for (v = 0; v < f.mLazyVarCount; ++v)
+			f.mLazyVar[v]->Free();
 		delete mFunc[i];
 	}
 	// Destroy Labels
@@ -301,6 +290,7 @@ void Script::Destroy()
 		line = nextLine;
 	}
 	*/
+
 	mFirstFunc = NULL;
 	mFuncCount = 0; 
 	mFirstLabel = NULL ; 
@@ -339,13 +329,14 @@ void Script::Destroy()
 	Hotstring::AllDestruct();
 #endif
 	Script::~Script();
+	g_script.mIsReadyToExecute = false;
 }
 #endif
 #ifdef ENABLE_KEY_HISTORY_FILE
 	KeyHistoryToFile();  // Close the KeyHistory file if it's open.
 #endif
 
-ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestart, HINSTANCE hInstance)
+ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestart, HINSTANCE hInstance, bool aIsText)
 // Returns OK or FAIL.
 // Caller has provided an empty string for aScriptFilename if this is a compiled script.
 // Otherwise, aScriptFilename can be NULL if caller hasn't determined the filename of the script yet.
@@ -387,19 +378,20 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 		}
 		//else since the .ahk file exists, everything is now set up right. (The file might be a directory, but that isn't checked due to rarity.)
 	}
+
 	// In case the script is a relative filespec (relative to current working dir):
-	if (!GetFullPathName(aScriptFilename, _countof(buf), buf, NULL)) // This is also relied upon by mIncludeLibraryFunctionsThenExit.  Succeeds even on nonexistent files.
+	if (hInstance != NULL && aIsText) //It is a dll and script was given as text rather than file
+	{
+		if (!GetModuleFileName(hInstance, buf, _countof(buf))) //Get dll path
+			GetModuleFileName(NULL, buf, _countof(buf)); //due to MemoryLoadLibrary dll path might be empty
+	}
+	else if (!GetFullPathName(aScriptFilename, _countof(buf), buf, NULL)) // This is also relied upon by mIncludeLibraryFunctionsThenExit.  Succeeds even on nonexistent files.
 		return FAIL; // Due to rarity, no error msg, just abort.
 #endif
 	// Using the correct case not only makes it look better in title bar & tray tool tip,
 	// it also helps with the detection of "this script already running" since otherwise
 	// it might not find the dupe if the same script name is launched with different
 	// lowercase/uppercase letters:
-
-	if (hInstance != NULL && _tcschr(buf,'\n')) // HotKeyIt check if it is a dll and text rather than a file and use its name (like for compiled scripts)
-		GetModuleFileName(hInstance, buf, _countof(buf));
-	if (hInstance != NULL && _tcschr(buf,'\n')) // If above failed due to MemoryLoadLibrary use exe name instead
-		GetModuleFileName(NULL, buf, _countof(buf));
 	ConvertFilespecToCorrectCase(buf); // This might change the length, e.g. due to expansion of 8.3 filename.
 	LPTSTR filename_marker;
 	if (   !(filename_marker = _tcsrchr(buf, '\\'))   )
@@ -985,6 +977,8 @@ ResultType Script::ExitApp(ExitReasons aExitReason, LPTSTR aBuf, int aExitCode)
 		// MUST NOT create a new thread when sExitLabelIsRunning because g_array allows only one
 		// extra thread for ExitApp() (which allows it to run even when MAX_THREADS_EMERGENCY has
 		// been reached).  See TOTAL_ADDITIONAL_THREADS.
+		g_AllowInterruption = FALSE; // In case TerminateApp releases objects and indirectly causes
+ 	    g->IsPaused = false;     // more script to be executed.
 		TerminateApp(aExitReason, aExitCode);
 	}
 
@@ -2744,11 +2738,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 
 #ifndef AUTOHOTKEYSC
 	TextFile tfile, *fp = &tfile;
-	if (!tfile.Open(aFileSpec, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR
-#ifdef UNICODE
-		, g_DefaultUTF8 ? CP_UTF8 : CP_ACP
-#endif
-	))
+	if (!tfile.Open(aFileSpec, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR, g_DefaultScriptCodepage))
 	{
 		if (aIgnoreLoadFailure)
 			return OK;

@@ -100,6 +100,11 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 			if (!g_script.mIncludeLibraryFunctionsThenExit->Open(__targv[i], TextStream::WRITE | TextStream::EOL_CRLF | TextStream::BOM_UTF8, CP_UTF8)) // Can't open the temp file.
 				return CRITICAL_ERROR;
 		}
+		else if (!_tcsnicmp(param, _T("/CP"), 3)) // /CPnnn
+	    {
+	      // Default codepage for the script file, NOT the default for commands used by it.
+ 	      g_DefaultScriptCodepage = ATOU(param + 3);
+ 	    }
 #endif
 #ifdef CONFIG_DEBUGGER
 		// Allow a debug session to be initiated by command-line.
@@ -164,9 +169,9 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 
 // Set up the basics of the script:
 #ifdef AUTOHOTKEYSC
-	if (g_script.Init(*g, _T(""), restart_mode,0) != OK) 
+	if (g_script.Init(*g, _T(""), restart_mode,0,false) != OK) 
 #else
-	if (g_script.Init(*g, script_filespec, restart_mode,0) != OK)  // Set up the basics of the script, using the above.
+	if (g_script.Init(*g, script_filespec, restart_mode,0,false) != OK)  // Set up the basics of the script, using the above.
 #endif
 		return CRITICAL_ERROR;
 

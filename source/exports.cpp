@@ -71,7 +71,7 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 		if (ahkvar->mType == VAR_BUILTIN)
 			return _T("");
 		result_to_return_dll = (LPTSTR )realloc((LPTSTR )result_to_return_dll,MAX_INTEGER_LENGTH);
-		return ITOA64((int)ahkvar,result_to_return_dll);;
+		return ITOA64((int)ahkvar,result_to_return_dll);
 	}
 	if (!ahkvar->HasContents() && ahkvar->mType != VAR_BUILTIN )
 		return _T("");

@@ -190,13 +190,14 @@ param = nameHinstanceP.argv ; //
 	global_init(*g);  // Set defaults prior to the below, since below might override them for AutoIt2 scripts.
 
 // Set up the basics of the script:
-	if (g_script.Init(*g, script_filespec, restart_mode,hInstance) != OK)  // Set up the basics of the script, using the above.
+	if (g_script.Init(*g, script_filespec, restart_mode,hInstance,(bool)nameHinstanceP.istext) != OK)  // Set up the basics of the script, using the above.
 		return CRITICAL_ERROR;
-
 	// Set g_default now, reflecting any changes made to "g" above, in case AutoExecSection(), below,
 	// never returns, perhaps because it contains an infinite loop (intentional or not):
 	CopyMemory(&g_default, g, sizeof(global_struct));
 
+	if (nameHinstanceP.istext)
+		GetCurrentDirectory(MAX_PATH, g_script.mFileDir);
 	// Could use CreateMutex() but that seems pointless because we have to discover the
 	// hWnd of the existing process so that we can close or restart it, so we would have
 	// to do this check anyway, which serves both purposes.  Alt method is this:

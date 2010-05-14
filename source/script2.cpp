@@ -1737,6 +1737,8 @@ ResultType Line::Input()
 		// Rather than monitoring the timeout here, just wait for the incoming WM_TIMER message
 		// to take effect as a TimerProc() call during the MsgSleep():
 		MsgSleep();
+		// HotKeyIt H15 added for multithreading support so variable can be read from other threads while input is in progress
+		output_var->Assign(input_buf); 
 		if (g_input.status != INPUT_IN_PROGRESS)
 			break;
 	}
@@ -12331,14 +12333,14 @@ int ConvertDllArgTypes(LPTSTR aBuf, DYNAPARM *aDynaParam)
 		if (!*type_string)
 			break;
 
-		tcslcpy(buf, type_string+1, sizeof(TCHAR)); // Make a modifiable copy for easier parsing below.
+		tcslcpy(buf, type_string+1, 2); // Make a modifiable copy for easier parsing below.
 
 		if (StrChrAny(buf, _T("*pP"))) // Additional validation: ensure nothing following the suffix.
 			aDynaParam[arg_count].passed_by_address = true;
 		else
 			aDynaParam[arg_count].passed_by_address = false;
 		
-		tcslcpy(buf, type_string, sizeof(TCHAR)); // Make a modifiable copy for easier parsing below.
+		tcslcpy(buf, type_string, 2); // Make a modifiable copy for easier parsing below.
 
 		if (false) {} // To simplify the macro below.  It should have no effect on the compiled code.
 #define TEST_TYPE(t, n)  else if (!_tcsnicmp(buf, _T(t), 1))  aDynaParam[arg_count].type = (n);
