@@ -41,6 +41,10 @@ BIF(BIF_Alias)
 		case SYM_VAR:
 		case SYM_INTEGER:
 			len = (UINT)aParam1.var;
+		break;
+		// HotKeyIt H10 added to accept dynamic text and also when value is returned by ahkgetvar in AutoHotkey.dll
+		case SYM_OPERAND:
+			len = (UINT)ATOI64(aParam1.marker);
 		}
 		var.mType = len ? VAR_ALIAS : VAR_NORMAL;
 		var.mByteLength = len;

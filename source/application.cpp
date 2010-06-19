@@ -345,7 +345,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 			// Since Win95/NT4 aren't supported, use the PM_QS_* flags to exclude INPUT and PAINT messages.
 			// This solves an infinite WM_PAINT loop issue which often crops up when script subclasses a window,
 			// and removes the need for do_special_msg_filter in the section above.
-			peek_result = PeekMessage(&msg, NULL, 0, MSG_FILTER_MAX, PM_REMOVE | PM_QS_SENDMESSAGE | PM_QS_POSTMESSAGE);
+			peek_result = PeekMessage(&msg, NULL, 0, MSG_FILTER_MAX, PM_REMOVE); //HotKeyIt removed | PM_QS_SENDMESSAGE | PM_QS_POSTMESSAGE (Problem MsgBox + WinWaitClose + Timer)
 #endif
 			if (!peek_result) // No more messages
 			{
