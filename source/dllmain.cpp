@@ -34,7 +34,7 @@ GNU General Public License for more details.
 // hook functions.
 
 
-
+static LPTSTR scriptstring;
 static struct nameHinstance
      {
        HINSTANCE hInstanceP;
@@ -428,11 +428,31 @@ unsigned runThread()
 	return (unsigned int)hThread;
 }
 
+int setscriptstrings(LPTSTR fileName, LPTSTR argv, LPTSTR args)
+{
+	LPTSTR newstring = (LPTSTR)realloc(scriptstring,(_tcslen(fileName)+_tcslen(argv)+_tcslen(args)+3)*sizeof(TCHAR));
+	if (!newstring)
+		return 1;
+	scriptstring = newstring;
+	_tcscpy(scriptstring,fileName);
+	_tcscpy(scriptstring + _tcslen(fileName) + 1,argv);
+	_tcscpy(scriptstring + _tcslen(fileName) + _tcslen(argv) + 2,args);
+	nameHinstanceP.name = scriptstring;
+	nameHinstanceP.argv = scriptstring + _tcslen(fileName) + 1 ;
+	nameHinstanceP.args = scriptstring + _tcslen(fileName) + _tcslen(argv) + 2 ;
+	
+	/*
+	nameHinstanceP.name = fileName;
+	nameHinstanceP.argv = argv;
+	nameHinstanceP.args = args;
+	*/
+	return 0;
+}
+
 EXPORT unsigned int ahkdll(LPTSTR fileName, LPTSTR argv, LPTSTR args)
 {
-	nameHinstanceP.name = fileName ;
-	nameHinstanceP.argv = argv ;
-	nameHinstanceP.args = args ;
+	if (setscriptstrings(fileName, argv, args))
+		return 0;
 	nameHinstanceP.istext = 0;
 	return runThread();
 }
@@ -440,9 +460,8 @@ EXPORT unsigned int ahkdll(LPTSTR fileName, LPTSTR argv, LPTSTR args)
 // HotKeyIt ahktextdll
 EXPORT unsigned int ahktextdll(LPTSTR fileName, LPTSTR argv, LPTSTR args)
 {
-	nameHinstanceP.name = fileName ;
-	nameHinstanceP.argv = argv ;
-	nameHinstanceP.args = args ;
+	if (setscriptstrings(fileName, argv, args))
+		return 0;
 	nameHinstanceP.istext = 1;
 	return runThread();
 }

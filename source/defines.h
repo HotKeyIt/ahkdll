@@ -35,12 +35,12 @@ GNU General Public License for more details.
 	#ifndef AHKX
 		#ifdef USRDLL
 			#ifdef MINIDLL
-				#define NAME_L_REVISION ".L51minidllH15"
+				#define NAME_L_REVISION ".L52minidllH17"
 			#else
-				#define NAME_L_REVISION ".L51dllH15"
+				#define NAME_L_REVISION ".L52dllH17"
 			#endif
 		#else
-			#define NAME_L_REVISION ".L51H15" // L14: Added .Ln for AutoHotkey_L revision n.
+			#define NAME_L_REVISION ".L52H17" // L14: Added .Ln for AutoHotkey_L revision n.
 		#endif
 	#else
 		#define NAME_L_REVISION "X11"
@@ -758,7 +758,7 @@ inline void global_init(global_struct &g)
 	g.StoreCapslockMode = true;  // AutoIt2 (and probably 3's) default, and it makes a lot of sense.
 	g.AutoTrim = true;  // AutoIt2's default, and overall the best default in most cases.
 	_tcscpy(g.FormatFloat, _T("%0.6f"));
-	g.FormatInt = 'd';
+	g.FormatInt = 'D';
 	g.ListLinesIsEnabled = true;
 	g.Encoding = CP_ACP;
 	// For FormatFloat:

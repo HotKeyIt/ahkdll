@@ -249,6 +249,8 @@ void Script::Destroy()
 	int v, i;
 	for (v = 0; v < mVarCount; ++v)
 	{
+		if (mVar[v]->mType == VAR_BUILTIN)
+			continue;
 		mVar[v]->ConvertToNonAliasIfNecessary();
 		mVar[v]->Free();
 	}
@@ -2738,7 +2740,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 
 #ifndef AUTOHOTKEYSC
 	TextFile tfile, *fp = &tfile;
-	if (!tfile.Open(aFileSpec, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR, g_DefaultScriptCodepage))
+	if (!tfile.Open(aFileSpec, DEFAULT_READ_FLAGS, g_DefaultScriptCodepage))
 	{
 		if (aIgnoreLoadFailure)
 			return OK;
@@ -9215,7 +9217,7 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		// All of these functions require the "object" parameter,
 		// but it is excluded from the counts below for clarity:
 		BIF_OBJ_CASE(Insert, 		1, 10000) // [key,] value [, value2, ...]
-		BIF_OBJ_CASE(Remove, 		1, 2) // min_key [, max_key]
+		BIF_OBJ_CASE(Remove, 		0, 2) // [min_key, max_key]
 		BIF_OBJ_CASE(MinIndex, 		0, 0)
 		BIF_OBJ_CASE(MaxIndex, 		0, 0)
 		BIF_OBJ_CASE(GetCapacity,	0, 1) // [key]
@@ -10441,6 +10443,7 @@ Line *Script::PreparseBlocks(Line *aStartingLine, bool aFindBlockEnd, Line *aPar
 			// line in the script.  So it's up to the called function
 			// to report an error if it never finds a BLOCK_END for us.
 			// UPDATE: The design requires that we do it here instead:
+
 			++nest_level;
 			if (NULL == (line->mRelatedLine = PreparseBlocks(line->mNextLine, 1, line)))
 				if (abort) // the above call already reported the error.
@@ -12732,7 +12735,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 			case ATTR_LOOP_READ_FILE:
 				{
 					TextFile tfile;
-					if (*ARG2 && tfile.Open(ARG2, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR, g.Encoding & CP_AHKCP)) // v1.0.47: Added check for "" to avoid debug-assertion failure while in debug mode (maybe it's bad to to open file "" in release mode too).
+					if (*ARG2 && tfile.Open(ARG2, DEFAULT_READ_FLAGS, g.Encoding & CP_AHKCP)) // v1.0.47: Added check for "" to avoid debug-assertion failure while in debug mode (maybe it's bad to to open file "" in release mode too).
 					{
 						result = line->PerformLoopReadFile(aResultToken, continue_main_loop, jump_to_line, &tfile, ARG3);
 						tfile.Close();
@@ -12950,6 +12953,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 		//case ACT_ELSE:
 		//	// Shouldn't happen if the pre-parser and this function are designed properly?
 		//	return line->LineError("Unexpected ELSE." ERR_ABORT);
+
 
 		default:
 			++g_script.mLinesExecutedThisCycle;
@@ -14537,8 +14541,8 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 
 	case ACT_SORT:
 		return PerformSort(ARG1, ARG2);
-#ifndef MINIDLL
 	case ACT_PIXELSEARCH:
+#ifndef MINIDLL
 		// ArgToInt() works on ARG7 (the color) because any valid BGR or RGB color has 0x00 in the high order byte:
 		return PixelSearch(ArgToInt(3), ArgToInt(4), ArgToInt(5), ArgToInt(6), ArgToInt(7), ArgToInt(8), ARG9, false);
 	case ACT_IMAGESEARCH:
@@ -15562,7 +15566,35 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 
 	case ACT_SHUTDOWN:
 		return Util_Shutdown(ArgToInt(1)) ? OK : FAIL; // Range of ARG1 is not validated in case other values are supported in the future.
-
+#ifdef MINIDLL
+	case ACT_IMAGESEARCH:	
+	case ACT_PIXELGETCOLOR:
+	case ACT_HOTKEY:
+	case ACT_FILEINSTALL:
+	case ACT_FILESELECTFILE:
+	case ACT_FILESELECTFOLDER:
+	case ACT_KEYHISTORY:
+	case ACT_LISTLINES:
+	case ACT_LISTVARS:
+	case ACT_LISTHOTKEYS:
+	case ACT_INPUTBOX:
+	case ACT_SPLASHTEXTON:
+	case ACT_SPLASHTEXTOFF:
+	case ACT_PROGRESS:
+	case ACT_SPLASHIMAGE:
+	case ACT_TRAYTIP:
+	case ACT_INPUT:
+	case ACT_MENU:
+	case ACT_GUI:
+	case ACT_GUICONTROL:
+	case ACT_GUICONTROLGET:
+	case ACT_SUSPEND:
+	case TOGGLE_MOUSEMOVE:
+	case TOGGLE_MOUSEMOVEOFF:
+	case ACT_EDIT:
+		return LineError(_T("Command is not supported by AutoHotkeyMini.dll\n\nThe current Thread will exit."));
+		//return OK; //do not show error for not supported commands
+#endif
 	case ACT_FILEENCODING:
 		UINT new_encoding = ConvertFileEncoding(ARG1);
 		if (new_encoding == -1)

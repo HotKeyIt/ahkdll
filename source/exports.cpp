@@ -254,7 +254,8 @@ EXPORT unsigned int addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aI
 */
 		}
 	g_script.LoadIncludedFile(fileName, aAllowDuplicateInclude, (bool) aIgnoreLoadFailure);
-	g_script.PreparseBlocks(g_script.mFirstLine); 
+	if (!g_script.PreparseBlocks(oldLastLine->mNextLine) || !g_script.PreparseIfElse(oldLastLine->mNextLine))
+		return LOADING_FAILED;
 	PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)g_script.mFirstLine, (LPARAM)g_script.mFirstLine);
 	filesAdded += 1;
 	return (unsigned int) g_script.mFirstLine;
@@ -262,7 +263,8 @@ EXPORT unsigned int addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aI
 	else
 	{
 	g_script.LoadIncludedFile(fileName, aAllowDuplicateInclude, (bool) aIgnoreLoadFailure);
-	g_script.PreparseBlocks(oldLastLine->mNextLine); // 
+	if (!g_script.PreparseBlocks(oldLastLine->mNextLine) || !g_script.PreparseIfElse(oldLastLine->mNextLine))
+		return LOADING_FAILED;
 	return (unsigned int) oldLastLine->mNextLine;  // 
 	}
 return 0;  // never reached
@@ -290,7 +292,8 @@ EXPORT unsigned int addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aI
 		g_script.LoadIncludedFile(fileName, aAllowDuplicateInclude, (bool) aIgnoreLoadFailure);
 	}
 	
-	g_script.PreparseBlocks(oldLastLine->mNextLine); // 
+	if (!g_script.PreparseBlocks(oldLastLine->mNextLine) || !g_script.PreparseIfElse(oldLastLine->mNextLine))
+		return LOADING_FAILED;
 	return (unsigned int) oldLastLine->mNextLine;  // 
 }
 
@@ -308,8 +311,11 @@ EXPORT unsigned int addScript(LPTSTR script, int aExecute)
 
 	Line *oldLastLine = g_script.mLastLine;
 	
-	g_script.LoadIncludedText(script);
-	g_script.PreparseBlocks(oldLastLine->mNextLine); // 
+	if (g_script.LoadIncludedText(script) != OK)
+		return LOADING_FAILED;
+	if (!g_script.PreparseBlocks(oldLastLine->mNextLine) || !g_script.PreparseIfElse(oldLastLine->mNextLine))
+		return LOADING_FAILED;
+	// g_script.PreparseBlocks(oldLastLine->mNextLine); // 
 	if (aExecute > 0)
 	{
 		if (aExecute > 1)
@@ -331,8 +337,10 @@ EXPORT unsigned int addScript(LPTSTR script, int aExecute)
 	
 	Line *oldLastLine = g_script.mLastLine;
 
-	g_script.LoadIncludedText(script);
-	g_script.PreparseBlocks(oldLastLine->mNextLine); // 
+	if (g_script.LoadIncludedText(script) != OK)
+		return LOADING_FAILED;
+	if (!g_script.PreparseBlocks(oldLastLine->mNextLine) || !g_script.PreparseIfElse(oldLastLine->mNextLine))
+		return LOADING_FAILED;
 	if (aExecute > 0)
 	{
 		if (aExecute > 1)
@@ -453,13 +461,18 @@ bool callFuncDll()
 	// might be the contents of one of the function's local variables (which are about to be free'd).
 	if (aResultToken.symbol == PURE_INTEGER)
 	{
-		result_to_return_dll = (LPTSTR )realloc(result_to_return_dll,256);
+		result_to_return_dll = (LPTSTR)realloc((LPTSTR)result_to_return_dll,MAX_INTEGER_LENGTH);
 		ITOA64(aResultToken.value_int64,result_to_return_dll);
 	}
 	else //if (return_value.symbol)
 	{
-		result_to_return_dll = (LPTSTR )realloc(result_to_return_dll,_tcslen(TokenToString(aResultToken))*2);
-		_tcsncpy(result_to_return_dll,TokenToString(aResultToken),_tcslen(TokenToString(aResultToken))+1);
+		if (*TokenToString(aResultToken) != '\0')
+		{
+			result_to_return_dll = (LPTSTR)realloc((LPTSTR)result_to_return_dll,_tcslen(TokenToString(aResultToken))*sizeof(TCHAR));
+			_tcscpy(result_to_return_dll,TokenToString(aResultToken));
+		}
+		else
+			result_to_return_dll = _T("");
 	}
 	Var::FreeAndRestoreFunctionVars(func, var_backup, var_backup_count);
 	ResumeUnderlyingThread(ErrorLevel_saved);

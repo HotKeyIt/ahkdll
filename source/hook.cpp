@@ -2819,7 +2819,7 @@ bool CollectInput(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type aSC,
 							}
 							++case_capable_characters;
 						}
-					if (!case_capable_characters) // All characters in the abbreviation are caseless.
+					if (!case_capable_characters) // Alld characters in the abbreviation are caseless.
 						case_conform_mode = CASE_CONFORM_NONE;
 					else if (case_capable_characters == 1)
 						// Since there is only a single character with case potential, it seems best as

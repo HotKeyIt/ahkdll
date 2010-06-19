@@ -1674,6 +1674,10 @@ ResultType Line::Input()
 	{
 		switch(ctoupper(*cp))
 		{
+		case 'A':
+			_tcscpy(g_input.buffer,output_var->Contents());
+			g_input.BufferLength = _tcslen(g_input.buffer);
+			break;
 		case 'B':
 			g_input.BackspaceIsUndo = false;
 			break;
@@ -1738,9 +1742,9 @@ ResultType Line::Input()
 		// to take effect as a TimerProc() call during the MsgSleep():
 		MsgSleep();
 		// HotKeyIt H15 added for multithreading support so variable can be read from other threads while input is in progress
-		output_var->Assign(input_buf); 
+		output_var->Assign(input_buf);
 		if (g_input.status != INPUT_IN_PROGRESS)
-			break;
+			break; 
 	}
 
 	switch(g_input.status)
@@ -9178,7 +9182,7 @@ ResultType Line::FileReadLine(LPTSTR aFilespec, LPTSTR aLineNumber)
 	if (line_number < 1)
 		return OK;  // Return OK because g_ErrorLevel tells the story.
 	TextFile tfile;
-	if (!tfile.Open(aFilespec, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR, g->Encoding & CP_AHKCP))
+	if (!tfile.Open(aFilespec, DEFAULT_READ_FLAGS, g->Encoding & CP_AHKCP))
 		return OK;  // Return OK because g_ErrorLevel tells the story.
 
 	// Remember that once the first call to MsgSleep() is done, a new hotkey subroutine
@@ -13983,14 +13987,14 @@ void RegExSetSubpatternVars(LPCTSTR haystack, pcre *re, pcre_extra *extra, bool 
 				_tcscpy(var_name_suffix, UorA(CStringTCharFromUTF8(subpat_name[p]), subpat_name[p])); // Append the subpat name to the array's base name.  _tcscpy() seems safe because PCRE almost certainly enforces the 32-char limit on subpattern names.
 				if (array_item = g_script.FindOrAddVar(var_name, 0, always_use))
 				{
+					if (p < pattern_count-1 // i.e. there's at least one more subpattern after this one (if there weren't, making a copy of haystack wouldn't be necessary because overlap can't harm this final assignment).
+						&& haystack == array_item->Contents(FALSE)) // For more comments, see similar section in BIF_RegEx.
+						if (mem_to_free = _tcsdup(haystack))
+							haystack = mem_to_free;
 					if (subpat_not_matched)
 						array_item->Assign(); // Omit all parameters to make the var empty without freeing its memory (for performance, in case this RegEx is being used many times in a loop).
 					else
 					{
-						if (p < pattern_count-1 // i.e. there's at least one more subpattern after this one (if there weren't, making a copy of haystack wouldn't be necessary because overlap can't harm this final assignment).
-							&& haystack == array_item->Contents(FALSE)) // For more comments, see similar section higher above.
-							if (mem_to_free = _tcsdup(haystack))
-								haystack = mem_to_free;
 						array_item->Assign(haystack + UTF8PosToTPos(utf8Haystack, this_offset[0])
 							, UTF8LenToTLen(utf8Haystack, this_offset[0], this_offset[1] - this_offset[0]));
 						// Fix for v1.0.45.01: When the J option (allow duplicate named subpatterns) is in effect,
@@ -14017,17 +14021,15 @@ void RegExSetSubpatternVars(LPCTSTR haystack, pcre *re, pcre_extra *extra, bool 
 			// numerical ordering:
 			if (array_item = g_script.FindOrAddVar(var_name, 0, always_use))
 			{
+				if (p < pattern_count-1 // i.e. there's at least one more subpattern after this one (if there weren't, making a copy of haystack wouldn't be necessary because overlap can't harm this final assignment).
+					&& haystack == array_item->Contents(FALSE)) // For more comments, see similar section in BIF_RegEx.
+					if (mem_to_free = _tcsdup(haystack))
+						haystack = mem_to_free;
 				if (subpat_not_matched)
 					array_item->Assign(); // Omit all parameters to make the var empty without freeing its memory (for performance, in case this RegEx is being used many times in a loop).
 				else
-				{
-					if (p < pattern_count-1 // i.e. there's at least one more subpattern after this one (if there weren't, making a copy of haystack wouldn't be necessary because overlap can't harm this final assignment).
-						&& haystack == array_item->Contents(FALSE)) // For more comments, see similar section higher above.
-						if (mem_to_free = _tcsdup(haystack))
-							haystack = mem_to_free;
 					array_item->Assign(haystack + UTF8PosToTPos(utf8Haystack, this_offset[0])
 						, UTF8LenToTLen(utf8Haystack, this_offset[0], this_offset[1] - this_offset[0]));
-				}
 			}
 			//else var couldn't be created: no error reporting currently, since it basically should never happen.
 		}

@@ -2,6 +2,7 @@
 #include "TextIO.h"
 #include "script.h"
 #include "script_object.h"
+#include <mbctype.h> // For _ismbblead_l.
 
 UINT g_ACP = GetACP(); // Requires a reboot to change.
 #define INVALID_CHAR UorA(0xFFFD, '?')
@@ -107,8 +108,8 @@ TCHAR TextStream::ReadChar()
 				return INVALID_CHAR;
 			}
 		}
-		else if (mCodePageIsDBCS)
-			iBytes = IsDBCSLeadByteEx(mCodePage, *mPos) ? 2 : 1;
+		else if (_ismbblead_l(*mPos, mLocale))
+			iBytes = 2;
 		else
 			iBytes = 1;
 
@@ -228,25 +229,22 @@ bool TextFile::_Open(LPCTSTR aFileSpec, DWORD aFlags)
 	switch (aFlags & 3) {
 		case TextStream::READ:
 			dwDesiredAccess = GENERIC_READ;
-			dwShareMode = FILE_SHARE_READ;
 			dwCreationDisposition = OPEN_EXISTING;
 			break;
 		case TextStream::WRITE:
 			dwDesiredAccess = GENERIC_WRITE;
-			dwShareMode = 0;
 			dwCreationDisposition = CREATE_ALWAYS;
 			break;
 		case TextStream::APPEND:
 			dwDesiredAccess = GENERIC_WRITE | GENERIC_READ;
-			dwShareMode = 0;
 			dwCreationDisposition = OPEN_ALWAYS;
 			break;
 		case TextStream::UPDATE:
 			dwDesiredAccess = GENERIC_WRITE | GENERIC_READ;
-			dwShareMode = 0;
 			dwCreationDisposition = OPEN_EXISTING;
 			break;
 	}
+	dwShareMode = ((aFlags >> 8) & (FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE));
 
 	// FILE_FLAG_SEQUENTIAL_SCAN is set, as sequential accesses are quite common for text files handling.
 	mFile = CreateFile(aFileSpec, dwDesiredAccess, dwShareMode, NULL, dwCreationDisposition,
