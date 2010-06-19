@@ -1,3 +1,11 @@
+19.06.2010 - H17
+- Merged with AHK_L52
+10.06.2010
+- Fixed addScript and addFile loop bug
+- Fixed ahkFunction bug when returning empty parameters and strings
+27.05.2010
+- Fixed when terminating dll not to destroy Build in variables
+- Fixed problem when dll reloads, now parameter strings given to ahkdll and ahktextdll are copied and not used.
 14.05.2010
 - Fix for Alias BIF
 - Multithread support for Input command, see other changes in docs.
