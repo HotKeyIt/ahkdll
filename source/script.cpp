@@ -4255,61 +4255,74 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 
 	bool is_include_again = false; // Set default in case of short-circuit boolean.
 	if (IS_DIRECTIVE_MATCH(_T("#Include")) || (is_include_again = IS_DIRECTIVE_MATCH(_T("#IncludeAgain"))))
-	{
-		// Standalone EXEs ignore this directive since the included files were already merged in
-		// with the main file when the script was compiled.  These should have been removed
-		// or commented out by Ahk2Exe, but just in case, it's safest to ignore them:
+   {
+      // Standalone EXEs ignore this directive since the included files were already merged in
+      // with the main file when the script was compiled.  These should have been removed
+      // or commented out by Ahk2Exe, but just in case, it's safest to ignore them:
 #ifdef AUTOHOTKEYSC
-		return CONDITION_TRUE;
+      return CONDITION_TRUE;
 #else
-		// If the below decision is ever changed, be sure to update ahk2exe with the same change:
-		// "parameter" is checked rather than parameter_raw for backward compatibility with earlier versions,
-		// in which a leading comma is not considered part of the filename.  Although this behavior is incorrect
-		// because it prevents files whose names start with a comma from being included without the first
-		// delim-comma being there too, it is kept because filesnames that start with a comma seem
-		// exceedingly rare.  As a workaround, the script can do #Include ,,FilenameWithLeadingComma.ahk
-		if (!parameter)
-			return ScriptError(ERR_PARAM1_REQUIRED, aBuf);
-		// v1.0.32:
-		bool ignore_load_failure = (parameter[0] == '*' && ctoupper(parameter[1]) == 'I'); // Relies on short-circuit boolean order.
-		if (ignore_load_failure)
-		{
-			parameter += 2;
-			if (IS_SPACE_OR_TAB(*parameter)) // Skip over at most one space or tab, since others might be a literal part of the filename.
-				++parameter;
-		}
+      // If the below decision is ever changed, be sure to update ahk2exe with the same change:
+      // "parameter" is checked rather than parameter_raw for backward compatibility with earlier versions,
+      // in which a leading comma is not considered part of the filename.  Although this behavior is incorrect
+      // because it prevents files whose names start with a comma from being included without the first
+      // delim-comma being there too, it is kept because filesnames that start with a comma seem
+      // exceedingly rare.  As a workaround, the script can do #Include ,,FilenameWithLeadingComma.ahk
+      if (!parameter)
+         return ScriptError(ERR_PARAM1_REQUIRED, aBuf);
+      // v1.0.32:
+      // bool ignore_load_failure = (parameter[0] == '*' && ctoupper(parameter[1]) == 'I'); // Relies on short-circuit boolean order.
+      bool ignore_load_failure = false ;
+      FileLoopModeType loopmode = FILE_LOOP_FILES_ONLY ;
+      bool recurse = false ;
+      
+      if (parameter[0] == '*')
+      {
+         parameter += 1;   
 
-		size_t space_remaining = LINE_SIZE - (parameter-aBuf);
-		TCHAR buf[MAX_PATH];
-		StrReplace(parameter, _T("%A_ScriptDir%"), mFileDir, SCS_INSENSITIVE, 1, space_remaining); // v1.0.35.11.  Caller has ensured string is writable.
-		if (tcscasestr(parameter, _T("%A_AppData%"))) // v1.0.45.04: This and the next were requested by Tekl to make it easier to customize scripts on a per-user basis.
-		{
-			BIV_AppData(buf, _T("A_AppData"));
-			StrReplace(parameter, _T("%A_AppData%"), buf, SCS_INSENSITIVE, 1, space_remaining);
-		}
-		if (tcscasestr(parameter, _T("%A_AppDataCommon%"))) // v1.0.45.04.
-		{
-			BIV_AppData(buf, _T("A_AppDataCommon"));
-			StrReplace(parameter, _T("%A_AppDataCommon%"), buf, SCS_INSENSITIVE, 1, space_remaining);
-		}
+         ignore_load_failure = (ctoupper(parameter[0]) == 'I');
+           if (ignore_load_failure)
+            parameter += 1;   
+         recurse = (ctoupper(parameter[0]) == 'R');
+          if (recurse)      // recurse ?                
+            parameter += 1;   
+               
+         if (IS_SPACE_OR_TAB(*parameter)) // Skip over at most one space or tab, since others might be a literal part of the filename.
+            ++parameter;
 
-		DWORD attr = GetFileAttributes(parameter);
-		if (attr != 0xFFFFFFFF && (attr & FILE_ATTRIBUTE_DIRECTORY)) // File exists and its a directory (possibly A_ScriptDir or A_AppData set above).
-		{
-			// v1.0.35.11 allow changing of load-time directory to increase flexibility.  This feature has
-			// been asked for directly or indirectly several times.
-			// If a script ever wants to use a string like "%A_ScriptDir%" literally in an include's filename,
-			// that would not work.  But that seems too rare to worry about.
-			// v1.0.45.01: Call SetWorkingDir() vs. SetCurrentDirectory() so that it succeeds even for a root
-			// drive like C: that lacks a backslash (see SetWorkingDir() for details).
-			SetWorkingDir(parameter);
-			return CONDITION_TRUE;
-		}
-		// Since above didn't return, it's a file (or non-existent file, in which case the below will display
-		// the error).  This will also display any other errors that occur:
-		return LoadIncludedFile(parameter, is_include_again, ignore_load_failure) ? CONDITION_TRUE : FAIL;
+      }
+      size_t space_remaining = LINE_SIZE - (parameter-aBuf);
+      TCHAR buf[MAX_PATH];
+      StrReplace(parameter, _T("%A_ScriptDir%"), mFileDir, SCS_INSENSITIVE, 1, space_remaining); // v1.0.35.11.  Caller has ensured string is writable.
+      if (tcscasestr(parameter, _T("%A_AppData%"))) // v1.0.45.04: This and the next were requested by Tekl to make it easier to customize scripts on a per-user basis.
+      {
+         BIV_AppData(buf, _T("A_AppData"));
+         StrReplace(parameter, _T("%A_AppData%"), buf, SCS_INSENSITIVE, 1, space_remaining);
+      }
+      if (tcscasestr(parameter, _T("%A_AppDataCommon%"))) // v1.0.45.04.
+      {
+         BIV_AppData(buf, _T("A_AppDataCommon"));
+         StrReplace(parameter, _T("%A_AppDataCommon%"), buf, SCS_INSENSITIVE, 1, space_remaining);
+      }
+
+      DWORD attr = GetFileAttributes(parameter);
+      if (attr != 0xFFFFFFFF && (attr & FILE_ATTRIBUTE_DIRECTORY)) // File exists and its a directory (possibly A_ScriptDir or A_AppData set above).
+      {
+         // v1.0.35.11 allow changing of load-time directory to increase flexibility.  This feature has
+         // been asked for directly or indirectly several times.
+         // If a script ever wants to use a string like "%A_ScriptDir%" literally in an include's filename,
+         // that would not work.  But that seems too rare to worry about.
+         // v1.0.45.01: Call SetWorkingDir() vs. SetCurrentDirectory() so that it succeeds even for a root
+         // drive like C: that lacks a backslash (see SetWorkingDir() for details).
+         SetWorkingDir(parameter);
+         return CONDITION_TRUE;
+      }
+      // Since above didn't return, it's a file (or non-existent file, in which case the below will display
+      // the error).  This will also display any other errors that occur:
+	  return Line::IncludeFiles(is_include_again, ignore_load_failure, loopmode, recurse, parameter) ? CONDITION_TRUE : FAIL;
+      //   return LoadIncludedFile(parameter, is_include_again, ignore_load_failure) ? CONDITION_TRUE : FAIL;
 #endif
-	}
+   }
 
 	if (IS_DIRECTIVE_MATCH(_T("#NoEnv")))
 	{
@@ -9001,14 +9014,7 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		min_params = 1;
 		max_params = 1;
 	}
-/*
-	else if (!_tcsicmp(func_name, _T("Import")))  // addFile() Naveen v8.
-	{
-		bif = BIF_Import;
-		min_params = 1;
-		max_params = 3;
-	}
-*/
+
 	else if (!_tcsicmp(func_name, _T("Static")))  // lowlevel() Naveen v9.
 	{
 		bif = BIF_Static;
@@ -9021,9 +9027,9 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		min_params = 1;
 		max_params = 2;
 	}
-	else if (!_tcsicmp(func_name, _T("GetTokenValue")))  // lowlevel() Naveen v9.
+	else if (!_tcsicmp(func_name, _T("getTokenValue")))  // lowlevel() Naveen v9.
 	{
-		bif = BIF_GetTokenValue;
+		bif = BIF_getTokenValue;
 		min_params = 1;
 		max_params = 1;
 	}
@@ -11426,16 +11432,23 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 
 					// Find the end of this operand or keyword, even if that end extended into the next deref.
 					// StrChrAny() is not used because if *op_end is '\0', the strchr() below will find it too:
-					for (op_end = cp + 1; !_tcschr(EXPR_OPERAND_TERMINATORS_EX_DOT, *op_end); ++op_end);
+					for (op_end = cp + 1; !_tcschr(EXPR_OPERAND_TERMINATORS, *op_end); ++op_end);
 					// Now op_end marks the end of this operand or keyword.  That end might be the zero terminator
 					// or the next operator in the expression, or just a whitespace.
 					if (this_deref && op_end >= this_deref->marker)
 						goto double_deref; // This also serves to break out of the inner for(), equivalent to a break.
+					if (*op_end == '.')
+					{
+						// Since this isn't a double deref, it can probably only be a numeric literal with decimal portion.
+						// Update op_end to include the decimal portion of the operand:
+						for (++op_end; !_tcschr(EXPR_OPERAND_TERMINATORS, *op_end); ++op_end);
+					}
+
 					// Otherwise, this operand is a normal raw numeric-literal or a word-operator (and/or/not).
 					// The section below is very similar to the one used at load-time to recognize and/or/not,
 					// so it should be maintained with that section.  UPDATE for v1.0.45: The load-time parser
 					// now resolves "OR" to || and "AND" to && to improve runtime performance and reduce code size here.
-					// However, "NOT" but still be parsed here at runtime because it's not quite the same as the "!"
+					// However, "NOT" must still be parsed here at runtime because it's not quite the same as the "!"
 					// operator (different precedence), and it seemed too much trouble to invent some special
 					// operator symbol for load-time to insert as a placeholder/substitute (especially since that
 					// symbol would appear in ListLines).
@@ -13510,6 +13523,133 @@ ResultType Line::PerformLoopWhile(ExprTokenType *aResultToken, bool &aContinueMa
 }
 
 
+ResultType Line::IncludeFiles(bool aAllowDuplicateInclude, bool aIgnoreLoadFailure, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, LPTSTR aFilePattern)
+// Note: Even if aFilePattern is just a directory (i.e. with not wildcard pattern), it seems best
+// not to append "\\*.*" to it because the pattern might be a script variable that the user wants
+// to conditionally resolve to various things at runtime.  In other words, it's valid to have
+// only a single directory be the target of the loop.
+{
+   // Make a local copy of the path given in aFilePattern because as the lines of
+   // the loop are executed, the deref buffer (which is what aFilePattern might
+   // point to if we were called from ExecUntil()) may be overwritten --
+   // and we will need the path string for every loop iteration.  We also need
+   // to determine naked_filename_or_pattern:
+   TCHAR file_path[MAX_PATH], naked_filename_or_pattern[MAX_PATH]; // Giving +3 extra for "*.*" seems fairly pointless because any files that actually need that extra room would fail to be retrieved by FindFirst/Next due to their inability to support paths much over 256.
+   size_t file_path_length;
+   tcslcpy(file_path, aFilePattern, _countof(file_path));
+   LPTSTR last_backslash = _tcsrchr(file_path, '\\');
+   if (last_backslash)
+   {
+      _tcscpy(naked_filename_or_pattern, last_backslash + 1); // Naked filename.  No danger of overflow due size of src vs. dest.
+      *(last_backslash + 1) = '\0';  // Convert file_path to be the file's path, but use +1 to retain the final backslash on the string.
+      file_path_length = _tcslen(file_path);
+   }
+   else
+   {
+      _tcscpy(naked_filename_or_pattern, file_path); // No danger of overflow due size of src vs. dest.
+      *file_path = '\0'; // There is no path, so make it empty to use current working directory.
+      file_path_length = 0;
+   }
+
+   // g->mLoopFile is the current file of the file-loop that encloses this file-loop, if any.
+   // The below is our own current_file, which will take precedence over g->mLoopFile if this
+   // loop is a file-loop:
+   BOOL file_found;
+   WIN32_FIND_DATA new_current_file;
+   HANDLE file_search = FindFirstFile(aFilePattern, &new_current_file);
+   for ( file_found = (file_search != INVALID_HANDLE_VALUE) // Convert FindFirst's return value into a boolean so that it's compatible with with FindNext's.
+      ; file_found && FileIsFilteredOut(new_current_file, aFileLoopMode, file_path, file_path_length)
+      ; file_found = FindNextFile(file_search, &new_current_file));
+   // file_found and new_current_file have now been set for use below.
+   // Above is responsible for having properly set file_found and file_search.
+
+   ResultType result;
+   
+   global_struct &g = *::g; // Primarily for performance in this case.
+
+   for (; file_found; ++g.mLoopIteration)
+   {
+      g.mLoopFile = &new_current_file; // inner file-loop's file takes precedence over any outer file-loop's.
+      // Other types of loops leave g.mLoopFile unchanged so that a file-loop can enclose some other type of
+      // inner loop, and that inner loop will still have access to the outer loop's current file.
+      // MessageBox(NULL, file_path, g.mLoopFile->cFileName, 0); 
+      if (!g_script.LoadIncludedFile(g.mLoopFile->cFileName, false, false)) // Fix for v1.0.47.05: Pass false for allow-dupe because otherwise, it's possible for a stdlib file to attempt to include itself (especially via the LibNamePrefix_ method) and thus give a misleading "duplicate function" vs. "func does not exist" error message.  Obsolete: For performance, pass true for allow-dupe so that it doesn't have to check for a duplicate file (seems too rare to worry about duplicates since by definition, the function doesn't yet exist so it's file shouldn't yet be included).
+         {
+         //   aErrorWasShown = true; // Above has just displayed its error (e.g. syntax error in a line, failed to open the include file, etc).  So override the default set earlier.
+            return FAIL;
+         }
+      // Execute once the body of the loop (either just one statement or a block of statements).
+      // Preparser has ensured that every LOOP has a non-NULL next line.
+      
+      // Otherwise, the result of executing the body of the loop, above, was either OK
+      // (the current iteration completed normally) or LOOP_CONTINUE (the current loop
+      // iteration was cut short).  In both cases, just continue on through the loop.
+      // But first do end-of-iteration steps:
+      while ((file_found = FindNextFile(file_search, &new_current_file))
+         && FileIsFilteredOut(new_current_file, aFileLoopMode, file_path, file_path_length)); // Relies on short-circuit boolean order.
+         // Above is a self-contained loop that keeps fetching files until there's no more files, or a file
+         // is found that isn't filtered out.  It also sets file_found and new_current_file for use by the
+         // outer loop.
+   } // for()
+
+   // The script's loop is now over.
+   if (file_search != INVALID_HANDLE_VALUE)
+      FindClose(file_search);
+
+   // If aRecurseSubfolders is true, we now need to perform the loop's body for every subfolder to
+   // search for more files and folders inside that match aFilePattern.  We can't do this in the
+   // first loop, above, because it may have a restricted file-pattern such as *.txt and we want to
+   // find and recurse into ALL folders:
+   if (!aRecurseSubfolders) // No need to continue into the "recurse" section.
+      return OK;
+
+   // Since above didn't return, this is a file-loop and recursion into sub-folders has been requested.
+   // Append *.* to file_path so that we can retrieve all files and folders in the aFilePattern
+   // main folder.  We're only interested in the folders, but we have to use *.* to ensure
+   // that the search will find all folder names:
+   if (file_path_length > _countof(file_path) - 4) // v1.0.45.03: No room to append "*.*", so for simplicity, skip this folder (don't recurse into it).
+      return OK; // This situation might be impossible except for 32000-capable paths because the OS seems to reserve room inside every directory for at least the maximum length of a short filename.
+   LPTSTR append_pos = file_path + file_path_length;
+   _tcscpy(append_pos, _T("*.*")); // Above has already verified that no overflow is possible.
+
+   file_search = FindFirstFile(file_path, &new_current_file);
+   if (file_search == INVALID_HANDLE_VALUE)
+      return OK; // Nothing more to do.
+   // Otherwise, recurse into any subdirectories found inside this parent directory.
+
+   size_t path_and_pattern_length = file_path_length + _tcslen(naked_filename_or_pattern); // Calculated only once for performance.
+   do
+   {
+      if (!(new_current_file.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) // We only want directories (except "." and "..").
+         || new_current_file.cFileName[0] == '.' && (!new_current_file.cFileName[1]      // Relies on short-circuit boolean order.
+            || new_current_file.cFileName[1] == '.' && !new_current_file.cFileName[2])  //
+         // v1.0.45.03: Skip over folders whose full-path-names are too long to be supported by the ANSI
+         // versions of FindFirst/FindNext.  Without this fix, the section below formerly called PerformLoop()
+         // with a truncated full-path-name, which caused the last_backslash-finding logic to find the wrong
+         // backslash, which in turn caused infinite recursion and a stack overflow (i.e. caused by the
+         // full-path-name getting truncated in the same spot every time, endlessly).
+         || path_and_pattern_length + _tcslen(new_current_file.cFileName) > _countof(file_path) - 2) // -2 to reflect: 1) the backslash to be added between cFileName and naked_filename_or_pattern; 2) the zero terminator.
+         continue;
+      // Build the new search pattern, which consists of the original file_path + the subfolder name
+      // we just discovered + the original pattern:
+      _stprintf(append_pos, _T("%s\\%s"), new_current_file.cFileName, naked_filename_or_pattern); // Indirectly set file_path to the new search pattern.  This won't overflow due to the check above.
+      // Pass NULL for the 2nd param because it will determine its own current-file when it does
+      // its first loop iteration.  This is because this directory is being recursed into, not
+      // processed itself as a file-loop item (since this was already done in the first loop,
+      // above, if its name matches the original search pattern):
+	  result = IncludeFiles(aAllowDuplicateInclude, aIgnoreLoadFailure, aFileLoopMode, aRecurseSubfolders, file_path);
+      // result should never be LOOP_CONTINUE because the above call to PerformLoop() should have
+      // handled that case.  However, it can be LOOP_BREAK if it encoutered the break command.
+      if (result != OK && result != LOOP_CONTINUE) // i.e. result == LOOP_BREAK || result == EARLY_RETURN || result == EARLY_EXIT || result == FAIL)
+      {
+         FindClose(file_search);
+         return result;  // Return even LOOP_BREAK, since our caller can be either ExecUntil() or ourself.
+      }
+   
+   } while (FindNextFile(file_search, &new_current_file));
+   FindClose(file_search);
+   return OK;
+}
 
 ResultType Line::PerformLoopFilePattern(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine
 	, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, LPTSTR aFilePattern)

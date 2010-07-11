@@ -4,7 +4,11 @@
 #include "exports.h"
 #include "script.h"
 
-static LPTSTR result_to_return_dll; //HotKeyIt H2 for ahkgetvar and ahkFunction return.
+LPTSTR result_to_return_dll; //HotKeyIt H2 for ahkgetvar and ahkFunction return.
+// ExprTokenType aResultToken_to_return ;  // for ahkPostFunction
+FuncAndToken aFuncAndTokenToReturn[10] ;    // for ahkPostFunction
+int returnCount = 0 ;
+
 
 EXPORT int ahkPause(LPTSTR aChangeTo) //Change pause state of a running script
 {
@@ -50,52 +54,16 @@ EXPORT int ximportfunc(ahkx_int_str func1, ahkx_int_str func2, ahkx_int_str_str 
     return 0;
 }
 
-void BIF_FindFunc(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount) // Added in Nv8.
-{
-	// Set default return value in case of early return.
-	aResultToken.symbol = SYM_INTEGER ;
-	aResultToken.marker = _T("");
-	// Get the first arg, which is the string used as the source of the extraction. Call it "findfunc" for clarity.
-	TCHAR funcname_buf[MAX_NUMBER_SIZE]; // A separate buf because aResultToken.buf is sometimes used to store the result.
-	LPTSTR funcname = TokenToString(*aParam[0], funcname_buf); // Remember that aResultToken.buf is part of a union, though in this case there's no danger of overwriting it since our result will always be of STRING type (not int or float).
-	int funcname_length = (int)EXPR_TOKEN_LENGTH(aParam[0], funcname);
-	aResultToken.value_int64 = (__int64)ahkFindFunc(funcname);
-	return;
-}
+
 // Naveen: v1. ahkgetvar()
 EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 {
 	Var *ahkvar = g_script.FindOrAddVar(name);
-	if (getVar != NULL)
-	{
-		if (ahkvar->mType == VAR_BUILTIN)
-			return _T("");
-		result_to_return_dll = (LPTSTR )realloc((LPTSTR )result_to_return_dll,MAX_INTEGER_LENGTH);
-		return ITOA64((int)ahkvar,result_to_return_dll);
-	}
-	if (!ahkvar->HasContents() && ahkvar->mType != VAR_BUILTIN )
-		return _T("");
-	if (*ahkvar->mCharContents == '\0')
-	{
-		result_to_return_dll = (LPTSTR )realloc((LPTSTR )result_to_return_dll,(ahkvar->mByteCapacity ? ahkvar->mByteCapacity : ahkvar->mByteLength) + MAX_NUMBER_LENGTH + 1);
-		if ( ahkvar->mType == VAR_BUILTIN )
-			ahkvar->mBIV(result_to_return_dll,name); //Hotkeyit 
-		else if ( ahkvar->mType == VAR_ALIAS )
-			ITOA64(ahkvar->mAliasFor->mContentsInt64,result_to_return_dll);
-		else if ( ahkvar->mType == VAR_NORMAL )
-			ITOA64(ahkvar->mContentsInt64,result_to_return_dll);//Hotkeyit
-	}
-	else
-	{
-		result_to_return_dll = (LPTSTR )realloc((LPTSTR )result_to_return_dll,ahkvar->mByteLength+1);
-		if ( ahkvar->mType == VAR_ALIAS )
-			ahkvar->mAliasFor->Get(result_to_return_dll); //Hotkeyit removed ebiv.cpp and made ahkgetvar return all vars
- 		else if ( ahkvar->mType == VAR_NORMAL )
-			ahkvar->Get(result_to_return_dll);  // var.getText() added in V1.
-		else if ( ahkvar->mType == VAR_BUILTIN )
-			ahkvar->mBIV(result_to_return_dll,name); //Hotkeyit 
-	}
+	int result_size = ahkvar->Get() + 2 ;
+    result_to_return_dll = (LPTSTR )realloc((LPTSTR )result_to_return_dll, result_size);
+	ahkvar->Get(result_to_return_dll) ;
 	return result_to_return_dll;
+	// return _T(result_to_return_dll);
 }	
 
 EXPORT int ahkassign(LPTSTR name, LPTSTR value) // ahkwine 0.1
@@ -142,8 +110,8 @@ EXPORT unsigned int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, L
 	Func *aFunc = g_script.FindFunc(func) ;
 	if (aFunc)
 	{	
-		g_script.mTempFunc = aFunc ;
-		ExprTokenType return_value;
+		// g_script.mTempFunc = aFunc ;
+		// ExprTokenType return_value;
 		if (aFunc->mParamCount > 0 && param1 != NULL)
 		{
 			// Copy the appropriate values into each of the function's formal parameters.
@@ -189,7 +157,13 @@ EXPORT unsigned int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, L
 				}
 			}
 		}
-		PostMessage(g_hWnd, AHK_EXECUTE_FUNCTION_DLL, (WPARAM)&return_value,NULL);
+		
+		FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
+		aFuncAndToken.mFunc = aFunc ;
+	returnCount++ ;
+		if (returnCount > 9)
+			returnCount = 0 ;
+		PostMessage(g_hWnd, AHK_EXECUTE_FUNCTION_DLL, (WPARAM)&aFuncAndToken,NULL);
 		return 0;
 	}
 	return -1;
@@ -276,7 +250,14 @@ return 0;  // never reached
 EXPORT unsigned int addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aIgnoreLoadFailure)
 {   // dynamically include a file into a script !!
 	// labels, hotkeys, functions.   
-	
+	Func * aFunc = NULL ; 
+	int inFunc = 0 ;
+	if (g->CurrentFunc)  // normally functions definitions are not allowed within functions.  But we're in a function call, not a function definition right now.
+	{
+		aFunc = g->CurrentFunc; 
+		g->CurrentFunc = NULL ; 
+		inFunc = 1 ;
+	}
 	Line *oldLastLine = g_script.mLastLine;
 	
 	if (aIgnoreLoadFailure > 1)  // if third param is > 1, reset all functions, labels, remove hotkeys
@@ -292,6 +273,9 @@ EXPORT unsigned int addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aI
 		g_script.LoadIncludedFile(fileName, aAllowDuplicateInclude, (bool) aIgnoreLoadFailure);
 	}
 	
+	if (inFunc == 1 )
+		g->CurrentFunc = aFunc ;
+
 	if (!g_script.PreparseBlocks(oldLastLine->mNextLine) || !g_script.PreparseIfElse(oldLastLine->mNextLine))
 		return LOADING_FAILED;
 	return (unsigned int) oldLastLine->mNextLine;  // 
@@ -309,7 +293,7 @@ EXPORT unsigned int addScript(LPTSTR script, int aExecute)
 {   // dynamically include a script into a script !!
 	// labels, hotkeys, functions.   
 
-	Line *oldLastLine = g_script.mLastLine;
+ 	Line *oldLastLine = g_script.mLastLine;
 	
 	if (g_script.LoadIncludedText(script) != OK)
 		return LOADING_FAILED;
@@ -334,20 +318,35 @@ EXPORT unsigned int addScript(LPTSTR script, int aExecute)
 EXPORT unsigned int addScript(LPTSTR script, int aExecute)
 {   // dynamically include a script from text!!
 	// labels, hotkeys, functions.   
-	
+	Func * aFunc = NULL ; 
+	int inFunc = 0 ;
+	if (g->CurrentFunc)  // normally functions definitions are not allowed within functions.  But we're in a function call, not a function definition right now.
+	{
+		aFunc = g->CurrentFunc; 
+		g->CurrentFunc = NULL ; 
+		inFunc = 1 ;
+	}
 	Line *oldLastLine = g_script.mLastLine;
 
-	if (g_script.LoadIncludedText(script) != OK)
+	if ((g_script.LoadIncludedText(script) != OK) || !g_script.PreparseBlocks(oldLastLine->mNextLine) || !g_script.PreparseIfElse(oldLastLine->mNextLine))
+	{
+	if (inFunc == 1 )
+		g->CurrentFunc = aFunc ; 
+
 		return LOADING_FAILED;
-	if (!g_script.PreparseBlocks(oldLastLine->mNextLine) || !g_script.PreparseIfElse(oldLastLine->mNextLine))
-		return LOADING_FAILED;
-	if (aExecute > 0)
+	}	
+		if (aExecute > 0)
 	{
 		if (aExecute > 1)
 			SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)oldLastLine->mNextLine, (LPARAM)oldLastLine->mNextLine);
 		else
 			PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)oldLastLine->mNextLine, (LPARAM)oldLastLine->mNextLine);
 	}
+
+    
+	if (inFunc == 1 )
+		g->CurrentFunc = aFunc ;
+
 	return (unsigned int) oldLastLine->mNextLine;  // 
 }
 #endif // USRDLL
@@ -358,8 +357,8 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 	Func *aFunc = g_script.FindFunc(func) ;
 	if (aFunc)
 	{	
-		g_script.mTempFunc = aFunc ;
-		ExprTokenType return_value;
+		// g_script.mTempFunc = aFunc ;
+		// ExprTokenType return_value;
 		if (aFunc->mParamCount > 0 && param1 != NULL)
 		{
 			// Copy the appropriate values into each of the function's formal parameters.
@@ -405,16 +404,27 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 				}
 			}
 		}
-		SendMessage(g_hWnd, AHK_EXECUTE_FUNCTION_DLL, (WPARAM)&return_value,NULL);
-		return result_to_return_dll;
+		
+		FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
+		aFuncAndToken.mFunc = aFunc ;
+		returnCount++ ;
+		if (returnCount > 9)
+			returnCount = 0 ;
+
+		SendMessage(g_hWnd, AHK_EXECUTE_FUNCTION_DLL, (WPARAM)&aFuncAndToken,NULL);
+		TCHAR abuf[MAX_NUMBER_SIZE]; // A separate buf because aResultToken.buf is sometimes used to store the result.
+		result_to_return_dll = TokenToString(aFuncAndToken.mToken, abuf);
+		return result_to_return_dll ;
 	}
 	else
 		return _T(""); 
 }
 
-bool callFuncDll()
+bool callFuncDll(FuncAndToken *aFuncAndToken)
 {
-	Func &func = *(Func *)g_script.mTempFunc ;
+ 	Func &func =  *(aFuncAndToken->mFunc); 
+	ExprTokenType & aResultToken = aFuncAndToken->mToken ;
+	// Func &func = *(Func *)g_script.mTempFunc ;
 	if (!INTERRUPTIBLE_IN_EMERGENCY)
 		return false;
 	if (g_nThreads >= g_MaxThreadsTotal)
@@ -452,29 +462,13 @@ bool callFuncDll()
 
 
 		DEBUGGER_STACK_PUSH(SE_Thread, func.mJumpToLine, desc, func.mName)
-	ExprTokenType aResultToken;
+	// ExprTokenType aResultToken;
+	// ExprTokenType &aResultToken = aResultToken_to_return ;
 	func.Call(&aResultToken); // Call the UDF.
-	
+
 		DEBUGGER_STACK_POP()
 
-	// Fix for v1.0.47: Must handle return_value BEFORE calling FreeAndRestoreFunctionVars() because return_value
-	// might be the contents of one of the function's local variables (which are about to be free'd).
-	if (aResultToken.symbol == PURE_INTEGER)
-	{
-		result_to_return_dll = (LPTSTR)realloc((LPTSTR)result_to_return_dll,MAX_INTEGER_LENGTH);
-		ITOA64(aResultToken.value_int64,result_to_return_dll);
-	}
-	else //if (return_value.symbol)
-	{
-		if (*TokenToString(aResultToken) != '\0')
-		{
-			result_to_return_dll = (LPTSTR)realloc((LPTSTR)result_to_return_dll,_tcslen(TokenToString(aResultToken))*sizeof(TCHAR));
-			_tcscpy(result_to_return_dll,TokenToString(aResultToken));
-		}
-		else
-			result_to_return_dll = _T("");
-	}
-	Var::FreeAndRestoreFunctionVars(func, var_backup, var_backup_count);
+	// Var::FreeAndRestoreFunctionVars(func, var_backup, var_backup_count);
 	ResumeUnderlyingThread(ErrorLevel_saved);
 	return 0 ;
 }

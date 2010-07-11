@@ -35,12 +35,12 @@ GNU General Public License for more details.
 	#ifndef AHKX
 		#ifdef USRDLL
 			#ifdef MINIDLL
-				#define NAME_L_REVISION ".L52minidllH17"
+				#define NAME_L_REVISION ".L52minidllH18"
 			#else
-				#define NAME_L_REVISION ".L52dllH17"
+				#define NAME_L_REVISION ".L52dllH18"
 			#endif
 		#else
-			#define NAME_L_REVISION ".L52H17" // L14: Added .Ln for AutoHotkey_L revision n.
+			#define NAME_L_REVISION ".L52H18" // L14: Added .Ln for AutoHotkey_L revision n.
 		#endif
 	#else
 		#define NAME_L_REVISION "X11"
@@ -588,6 +588,13 @@ typedef UINT_PTR EventInfoType;
 // a new thread typically saves the old thread's struct values on its stack so that they can later
 // be copied back into the g struct when the thread is resumed:
 class Func;                 // Forward declarations
+
+struct FuncAndToken {
+	ExprTokenType mToken ;
+	LPTSTR result_to_return_dll;
+	Func * mFunc ;
+};
+
 class Label;                //
 struct RegItemStruct;       //
 struct LoopReadFileStruct;  //

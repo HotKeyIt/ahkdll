@@ -330,30 +330,26 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 			if (IS_INVOKE_CALL)
 			{
 				// Since above has not handled this call and no field exists, check for built-in methods.
-				// TODO: Move these predefined methods to built-in functions (which can be reimplemented as methods via a base object).
-				if (aParamCount < 4 && *key.s == '_')
+				if (*key.s == '_')
 				{
 					LPTSTR name = key.s + 1; // + 1 to exclude '_' from further consideration.
 					++aParam; --aParamCount; // Exclude the method identifier.  A prior check ensures there was at least one param in this case.
-					if (aParamCount) {
-						if (!_tcsicmp(name, _T("Insert")))
-							return _Insert(aResultToken, aParam, aParamCount);
-						if (!_tcsicmp(name, _T("Remove")))
-							return _Remove(aResultToken, aParam, aParamCount);
-						if (!_tcsicmp(name, _T("GetAddress")))
-							return _GetAddress(aResultToken, aParam, aParamCount);
-						if (!_tcsicmp(name, _T("SetCapacity")))
-							return _SetCapacity(aResultToken, aParam, aParamCount);
-					} else { // aParamCount == 0
-						if (!_tcsicmp(name, _T("MaxIndex")))
-							return _MaxIndex(aResultToken, aParam, aParamCount);
-						if (!_tcsicmp(name, _T("MinIndex")))
-							return _MinIndex(aResultToken, aParam, aParamCount);
-						if (!_tcsicmp(name, _T("NewEnum")))
-							return _NewEnum(aResultToken, aParam, aParamCount);
-					} // aParamCount may be 0 or 1:
+					if (!_tcsicmp(name, _T("Insert")))
+						return _Insert(aResultToken, aParam, aParamCount);
+					if (!_tcsicmp(name, _T("Remove")))
+						return _Remove(aResultToken, aParam, aParamCount);
+					if (!_tcsicmp(name, _T("MaxIndex")))
+						return _MaxIndex(aResultToken, aParam, aParamCount);
+					if (!_tcsicmp(name, _T("NewEnum")))
+						return _NewEnum(aResultToken, aParam, aParamCount);
+					if (!_tcsicmp(name, _T("GetAddress")))
+						return _GetAddress(aResultToken, aParam, aParamCount);
+					if (!_tcsicmp(name, _T("SetCapacity")))
+						return _SetCapacity(aResultToken, aParam, aParamCount);
 					if (!_tcsicmp(name, _T("GetCapacity")))
 						return _GetCapacity(aResultToken, aParam, aParamCount);
+					if (!_tcsicmp(name, _T("MinIndex")))
+						return _MinIndex(aResultToken, aParam, aParamCount);
 					// For maintability: explicitly return since above has done ++aParam, --aParamCount.
 					return INVOKE_NOT_HANDLED;
 				}
@@ -570,27 +566,77 @@ ResultType Object::CallField(FieldType *aField, ExprTokenType &aResultToken, Exp
 ResultType Object::_Insert(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 // _Insert( key, value )
 {
-	if (aParamCount != 2)
-		return OK;
+	if (!aParamCount)
+		return OK; // Error.
 
 	SymbolType key_type;
 	KeyType key;
 	int insert_pos, pos;
-	FieldType *field;
+	FieldType *field = NULL;
 
-	if ( (field = FindField(*aParam[0], aResultToken.buf, key_type, key, insert_pos)) && key_type == SYM_INTEGER )
+	if (aParamCount == 1)
 	{
-		// Since we were given a numeric key, we want to insert a new field here and increment this and any subsequent keys.
-		insert_pos = field - mFields;
-		// Signal below to insert a new field:
-		field = NULL;
+		// Insert at the end when no key is supplied, since that is typically most useful
+		// and is also most efficient (because no int-keyed fields are moved or adjusted).
+		insert_pos = mKeyOffsetObject; // int keys end here.
+		key.i = insert_pos ? mFields[insert_pos - 1].key.i + 1 : 1;
+		key_type = SYM_INTEGER;
 	}
-	//else: specified field doesn't exist or has a non-numeric key; in the latter case we will simply overwrite it.
+	else
+	{
+		field = FindField(**aParam, aResultToken.buf, /*out*/ key_type, /*out*/ key, /*out*/ insert_pos);
+		if (key_type == SYM_INTEGER)
+		{
+			if (field)
+			{	// Don't overwrite this key's value; instead insert a new field.
+				insert_pos = field - mFields; // insert_pos wasn't set in this case.
+				field = NULL;
+			}
 
+			if (aParamCount > 2) // Multiple value params.  Could also handle aParamCount == 2, but the simpler method is faster.
+			{
+				int value_count = aParamCount - 1;
+				int need_capacity = mFieldCount + value_count;
+				if (need_capacity <= mFieldCountMax || SetInternalCapacity(need_capacity))
+				{
+					field = mFields + insert_pos;
+					if (insert_pos < mFieldCount)
+						memmove(field + value_count, field, (mFieldCount - insert_pos) * sizeof(FieldType));
+					mFieldCount += value_count;
+					mKeyOffsetObject += value_count; // ints before objects
+					mKeyOffsetString += value_count; // and strings
+					FieldType *field_end;
+					// Set keys and copy value params into the fields.
+					for (field_end = field + value_count; field < field_end; ++field)
+					{
+						field->key.i = key.i++;
+						field->symbol = SYM_INTEGER; // Must be init'd for Assign().
+						field->Assign(**(++aParam));
+					}
+					// Adjust keys of fields which have been moved.
+					for (field_end = mFields + mKeyOffsetObject; field < field_end; ++field)
+					{
+						field->key.i += value_count; // NOT =++key.i since keys might not be contiguous.
+					}
+					aResultToken.symbol = SYM_INTEGER;
+					aResultToken.value_int64 = 1;
+				}
+				return OK;
+			}
+		}
+		else
+			if (aParamCount > 2)
+				// Error: multiple values but not an integer key.
+				return OK;
+		++aParam; // See below.
+	}
+	// If we were passed only one parameter, aParam points to it.  Otherwise it
+	// was interpreted as the key and aParam now points to the next parameter.
+	
 	if ( field || (field = Insert(key_type, key, insert_pos)) )
 	{
 		// Assign this field its new value:
-		field->Assign(*aParam[1]);
+		field->Assign(**aParam);
 		// Increment any numeric keys following this one.  At this point, insert_pos always indicates the position of a field just inserted.
 		if (key_type == SYM_INTEGER)
 			for (pos = insert_pos + 1; pos < mKeyOffsetObject; ++pos)
@@ -604,9 +650,9 @@ ResultType Object::_Insert(ExprTokenType &aResultToken, ExprTokenType *aParam[],
 }
 
 ResultType Object::_Remove(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
-// _Remove( min_key [, max_key ] )
+// _Remove( [ min_key, max_key ] )
 {
-	if (aParamCount < 1 || aParamCount > 2)
+	if (aParamCount > 2)
 		return OK;
 
 	FieldType *min_field, *max_field;
@@ -615,8 +661,20 @@ ResultType Object::_Remove(ExprTokenType &aResultToken, ExprTokenType *aParam[],
 	KeyType min_key, max_key;
 
 	// Find the position of "min".
-	if (min_field = FindField(*aParam[0], aResultToken.buf, min_key_type, min_key, min_pos))
-		min_pos = min_field - mFields;
+	if (!aParamCount)
+	{
+		if (mKeyOffsetObject) // i.e. at least one int field; use _MaxIndex()
+		{
+			min_field = &mFields[min_pos = mKeyOffsetObject - 1];
+			min_key = min_field->key;
+			min_key_type = SYM_INTEGER;
+		}
+		else // No appropriate field to remove, just return "".
+			return OK;
+	}
+	else
+		if (min_field = FindField(*aParam[0], aResultToken.buf, min_key_type, min_key, min_pos))
+			min_pos = min_field - mFields; // else min_pos was already set by FindField.
 	
 	if (aParamCount > 1)
 	{
@@ -643,8 +701,30 @@ ResultType Object::_Remove(ExprTokenType &aResultToken, ExprTokenType *aParam[],
 			aResultToken.value_int64 = 0;
 			return OK;
 		}
+		// Since only one field (at maximum) can be removed in this mode, it
+		// seems more useful to return the field being removed than a count.
+		switch (aResultToken.symbol = min_field->symbol)
+		{
+		case SYM_OPERAND:
+			if (min_field->size)
+			{
+				// Detach the memory allocated for this field's string and pass it back to caller.
+				aResultToken.circuit_token = (ExprTokenType *)(aResultToken.marker = min_field->marker);
+				aResultToken.buf = (LPTSTR)_tcslen(aResultToken.marker); // NOT min_field->size, which is the allocation size.
+				min_field->size = 0; // Prevent Free() from freeing min_field->marker.
+			}
+			//else aResultToken already contains an empty string.
+			break;
+		case SYM_OBJECT:
+			aResultToken.object = min_field->object;
+			min_field->symbol = SYM_INTEGER; // Prevent Free() from calling object->Release(), instead of calling AddRef().
+			break;
+		default:
+			aResultToken.value_int64 = min_field->n_int64; // Effectively also value_double = n_double.
+		}
+		// Set these up as if caller did _Remove(min_key, min_key):
 		max_pos = min_pos + 1;
-		max_key.i = min_key.i; // Used only if min_key_type == SYM_INTEGER; safe even in other cases.
+		max_key.i = min_key.i; // Used only if min_key_type == SYM_INTEGER; has no effect in other cases.
 	}
 
 	for (pos = min_pos; pos < max_pos; ++pos)
@@ -673,9 +753,13 @@ ResultType Object::_Remove(ExprTokenType &aResultToken, ExprTokenType *aParam[],
 					mFields[pos].key.i -= logical_count_removed;
 		}
 	}
-	// Return actual number of fields removed:
-	aResultToken.symbol = SYM_INTEGER;
-	aResultToken.value_int64 = actual_count_removed;
+	if (aParamCount > 1)
+	{
+		// Return actual number of fields removed:
+		aResultToken.symbol = SYM_INTEGER;
+		aResultToken.value_int64 = actual_count_removed;
+	}
+	//else result was set above.
 	return OK;
 }
 
@@ -775,8 +859,7 @@ ResultType Object::_SetCapacity(ExprTokenType &aResultToken, ExprTokenType *aPar
 			// size is checked because if it is 0, marker is Var::sEmptyString which we can't pass to realloc.
 			if (buf = trealloc(field->size ? field->marker : NULL, desired_size))
 			{
-				if (desired_size < field->size)
-					buf[desired_size - 1] = '\0'; // Terminate at the end of the newly truncated data.
+				buf[desired_size - 1] = '\0'; // Terminate at the new end of data.
 				field->marker = buf;
 				field->size = desired_size;
 				// Return new size, minus one char reserved for null-terminator.
@@ -1119,25 +1202,24 @@ Object::FieldType *Object::Insert(SymbolType key_type, KeyType key, int at)
 	}
 	// There is now definitely room in mFields for a new field.
 
-	if (key_type == SYM_OBJECT)
-		// Keep key object alive:
-		key.p->AddRef();
-
 	FieldType &field = mFields[at];
 	if (at < mFieldCount)
 		// Move existing fields to make room.
 		memmove(&field + 1, &field, (mFieldCount - at) * sizeof(FieldType));
+	++mFieldCount; // Only after memmove above.
 	
-	// Since we just inserted a field, we must update the key type offsets:
+	// Update key-type offsets based on where and what was inserted; also update this key's ref count:
 	if (key_type != SYM_STRING)
 	{
 		// Must be either SYM_INTEGER or SYM_OBJECT, which both precede SYM_STRING.
 		++mKeyOffsetString;
+
 		if (key_type != SYM_OBJECT)
 			// Must be SYM_INTEGER, which precedes SYM_OBJECT.
 			++mKeyOffsetObject;
+		else
+			key.p->AddRef();
 	}
-	++mFieldCount; // Only after memmove above.
 	
 	field.marker = _T(""); // Init for maintainability.
 	field.size = 0; // Init to ensure safe behaviour in Assign().

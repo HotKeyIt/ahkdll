@@ -3,8 +3,21 @@
 #include "application.h" // for MsgSleep()
 #include "exports.h"
 #include "script.h"
-#define BETA
+
 #define BIF(fun) void fun(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+
+BIF(BIF_FindFunc) // Added in Nv8.
+{
+	// Set default return value in case of early return.
+	aResultToken.symbol = SYM_INTEGER ;
+	aResultToken.marker = _T("");
+	// Get the first arg, which is the string used as the source of the extraction. Call it "findfunc" for clarity.
+	TCHAR funcname_buf[MAX_NUMBER_SIZE]; // A separate buf because aResultToken.buf is sometimes used to store the result.
+	LPTSTR funcname = TokenToString(*aParam[0], funcname_buf); // Remember that aResultToken.buf is part of a union, though in this case there's no danger of overwriting it since our result will always be of STRING type (not int or float).
+	int funcname_length = (int)EXPR_TOKEN_LENGTH(aParam[0], funcname);
+	aResultToken.value_int64 = (__int64)ahkFindFunc(funcname);
+	return;
+}
 
 
 BIF(BIF_Getvar)
@@ -50,41 +63,6 @@ BIF(BIF_Alias)
 		var.mByteLength = len;
 	}
 }
-
-BIF(BIF_GetTokenValue)
-{
-	ExprTokenType *token = aParam[0];
-	
-	if (token->symbol != SYM_INTEGER)
-		return;
-	
-	token = (ExprTokenType*) token->value_int64;
-
-    if (token->symbol == SYM_VAR)
-    {
-		Var &var = *token->var;
-
-#ifdef BETA
-		VarAttribType cache_attrib = var.mAttrib & (VAR_ATTRIB_HAS_VALID_INT64 | VAR_ATTRIB_HAS_VALID_DOUBLE);
-		if (cache_attrib)
-		{
-			aResultToken.symbol = (SymbolType) (cache_attrib >> 4);
-			aResultToken.value_int64 = var.mContentsInt64;
-		}
-		else
-#endif
-		{
-			aResultToken.symbol = SYM_OPERAND;
-			aResultToken.marker = var.mCharContents;
-		}
-    }
-    else
-    {
-        aResultToken.symbol = token->symbol;
-        aResultToken.value_int64 = token->value_int64;
-    }
-}
-
 BIF(BIF_CacheEnable)
 {
 	if (aParam[0]->symbol == SYM_VAR)
@@ -94,3 +72,42 @@ BIF(BIF_CacheEnable)
 	}
 }
 
+BIF(BIF_getTokenValue)
+{
+   ExprTokenType *token = aParam[0];
+   
+   if (token->symbol != SYM_INTEGER)
+      return;
+   
+   token = (ExprTokenType*) token->value_int64;
+
+    if (token->symbol == SYM_VAR)
+    {
+      Var &var = *token->var;
+
+      VarAttribType cache_attrib = var.mAttrib & (VAR_ATTRIB_HAS_VALID_INT64 | VAR_ATTRIB_HAS_VALID_DOUBLE);
+      if (cache_attrib)
+      {
+         aResultToken.symbol = (SymbolType) (cache_attrib >> 4);
+         aResultToken.value_int64 = var.mContentsInt64;
+      }
+
+      else if (var.mAttrib & VAR_ATTRIB_OBJECT)
+      {
+         aResultToken.symbol = SYM_OBJECT;
+         aResultToken.object = var.mObject;
+      }
+      else
+      {
+         aResultToken.symbol = SYM_OPERAND;
+         aResultToken.marker = var.mCharContents;
+      }
+    }
+    else
+    {
+        aResultToken.symbol = token->symbol;
+        aResultToken.value_int64 = token->value_int64;
+    }
+    if (aResultToken.symbol == SYM_OBJECT)
+        aResultToken.object->AddRef();
+}
