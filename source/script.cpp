@@ -249,7 +249,8 @@ void Script::Destroy()
 	int v, i;
 	for (v = 0; v < mVarCount; ++v)
 	{
-		if (mVar[v]->mType == VAR_BUILTIN)
+		// H19 fix not to delete Clipboard wars
+		if (mVar[v]->mType == VAR_BUILTIN ||mVar[v]->mType == VAR_CLIPBOARD ||mVar[v]->mType == VAR_CLIPBOARDALL)
 			continue;
 		mVar[v]->ConvertToNonAliasIfNecessary();
 		mVar[v]->Free();
