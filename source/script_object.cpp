@@ -32,8 +32,6 @@ ResultType CallFunc(Func &aFunc, ExprTokenType &aResultToken, ExprTokenType *aPa
 
 		// CALL THE BUILT-IN FUNCTION:
 		aFunc.mBIF(aResultToken, aParam, aParamCount);
-		if (_tcscmp(aFunc.mName,_T("DynaCall"))==0)
-			result = EARLY_RETURN;
 	}
 	else // It's not a built-in function.
 	{
