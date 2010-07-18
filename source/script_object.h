@@ -161,7 +161,28 @@ public:
 	static LPTSTR sMetaFuncName[];
 };
 
+// DynaCall Object
+class DynaToken : public ObjectBase
+{
+protected:
+	int marg_count, mdll_call_mode;
+	void *mfunction;
+	DYNAPARM *mdyna_param;
+	DYNAPARM mreturn_attrib;
 
+	DynaToken()
+		: marg_count(0)
+		, mdll_call_mode(0), mfunction(NULL), mdyna_param(NULL)
+		, mreturn_attrib()
+	{}
+
+	bool Delete();
+	~DynaToken();
+
+public:
+	static IObject *Create(ExprTokenType *aParam[], int aParamCount);
+	ResultType STDMETHODCALLTYPE Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
+};
 //
 // MetaObject:	Used only by g_MetaObject (not every meta-object); see comments below.
 //

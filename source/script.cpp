@@ -9138,6 +9138,7 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 	else if (!_tcsicmp(func_name, _T("DynaCall")))
 	{
 		bif = BIF_DynaCall;
+		min_params = 0;
 		max_params = 10000; // An arbitrarily high limit that will never realistically be reached.
 	}
 	else if (!_tcsicmp(func_name, _T("VarSetCapacity")))

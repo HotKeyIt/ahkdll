@@ -196,8 +196,8 @@ param = nameHinstanceP.argv ; //
 	// never returns, perhaps because it contains an infinite loop (intentional or not):
 	CopyMemory(&g_default, g, sizeof(global_struct));
 
-	if (nameHinstanceP.istext)
-		GetCurrentDirectory(MAX_PATH, g_script.mFileDir);
+	//if (nameHinstanceP.istext)
+	//	GetCurrentDirectory(MAX_PATH, g_script.mFileDir);
 	// Could use CreateMutex() but that seems pointless because we have to discover the
 	// hWnd of the existing process so that we can close or restart it, so we would have
 	// to do this check anyway, which serves both purposes.  Alt method is this:
