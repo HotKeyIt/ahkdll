@@ -12442,7 +12442,7 @@ void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free) // L31: 
 void BIF_DynaCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
 	IObject *obj = NULL;
-	if (aParam[0]->symbol == SYM_VAR && aParam[0]->var->IsObject())
+	if (aParam[0]->symbol == SYM_OBJECT)
 	{
 		aParam[0]->object->Invoke(aResultToken,*aParam[0],IT_SET,aParam+1,aParamCount-1);
 	}
