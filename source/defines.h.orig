@@ -35,12 +35,12 @@ GNU General Public License for more details.
 	#ifndef AHKX
 		#ifdef USRDLL
 			#ifdef MINIDLL
-				#define NAME_L_REVISION ".L53minidllH22"
+				#define NAME_L_REVISION ".L50minidllH9"
 			#else
-				#define NAME_L_REVISION ".L53dllH22"
+				#define NAME_L_REVISION ".L50dllH9"
 			#endif
 		#else
-			#define NAME_L_REVISION ".L53H22" // L14: Added .Ln for AutoHotkey_L revision n.
+			#define NAME_L_REVISION ".L50H9" // L14: Added .Ln for AutoHotkey_L revision n.
 		#endif
 	#else
 		#define NAME_L_REVISION "X11"
@@ -210,7 +210,6 @@ struct DECLSPEC_NOVTABLE IObject // L31: Abstract interface for "objects".
 	virtual ResultType STDMETHODCALLTYPE Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount) = 0;
 	
 	// Simple reference-counting mechanism.  Usage should be similar to IUnknown (COM).
-	// Some scripts may rely on these being at the same offset as IUnknown::AddRef/Release.
 	virtual ULONG STDMETHODCALLTYPE AddRef(void) = 0;
     virtual ULONG STDMETHODCALLTYPE Release(void) = 0;
 };
@@ -589,13 +588,6 @@ typedef UINT_PTR EventInfoType;
 // a new thread typically saves the old thread's struct values on its stack so that they can later
 // be copied back into the g struct when the thread is resumed:
 class Func;                 // Forward declarations
-
-struct FuncAndToken {
-	ExprTokenType mToken ;
-	LPTSTR result_to_return_dll;
-	Func * mFunc ;
-};
-
 class Label;                //
 struct RegItemStruct;       //
 struct LoopReadFileStruct;  //
@@ -766,7 +758,7 @@ inline void global_init(global_struct &g)
 	g.StoreCapslockMode = true;  // AutoIt2 (and probably 3's) default, and it makes a lot of sense.
 	g.AutoTrim = true;  // AutoIt2's default, and overall the best default in most cases.
 	_tcscpy(g.FormatFloat, _T("%0.6f"));
-	g.FormatInt = 'D';
+	g.FormatInt = 'd';
 	g.ListLinesIsEnabled = true;
 	g.Encoding = CP_ACP;
 	// For FormatFloat:

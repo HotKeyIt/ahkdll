@@ -21,6 +21,7 @@ GNU General Public License for more details.
 #include "util.h" // for strlcpy()
 #include "resources/resource.h"  // For ID_TRAY_OPEN.
 
+
 bool MsgSleep(int aSleepDuration, MessageMode aMode)
 // Returns true if it launched at least one thread, and false otherwise.
 // aSleepDuration can be be zero to do a true Sleep(0), or less than 0 to avoid sleeping or
@@ -345,7 +346,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 			// Since Win95/NT4 aren't supported, use the PM_QS_* flags to exclude INPUT and PAINT messages.
 			// This solves an infinite WM_PAINT loop issue which often crops up when script subclasses a window,
 			// and removes the need for do_special_msg_filter in the section above.
-			peek_result = PeekMessage(&msg, NULL, 0, MSG_FILTER_MAX, PM_REMOVE); //HotKeyIt removed | PM_QS_SENDMESSAGE | PM_QS_POSTMESSAGE (Problem MsgBox + WinWaitClose + Timer)
+			peek_result = PeekMessage(&msg, NULL, 0, MSG_FILTER_MAX, PM_REMOVE | PM_QS_SENDMESSAGE | PM_QS_POSTMESSAGE);
 #endif
 			if (!peek_result) // No more messages
 			{
@@ -797,7 +798,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 				{
 					// For details, see comments in the hotkey section of this switch().
 					// L4: Added hs->mHotExprIndex for #if (expression).
-					if (   !(criterion_found_hwnd = HotCriterionAllowsFiring(hs->mHotCriterion, hs->mHotWinTitle, hs->mHotWinText, hs->mHotExprIndex))   )
+					if (   !(criterion_found_hwnd = HotCriterionAllowsFiring(hs->mHotCriterion, hs->mHotWinTitle, hs->mHotWinText, hs->mHotExprIndex, hs->mJumpToLabel ? hs->mJumpToLabel->mName : _T("")))   )
 						// Hotstring is no longer eligible to fire even though it was when the hook sent us
 						// the message.  Abort the firing even though the hook may have already started
 						// executing the hotstring by suppressing the final end-character or other actions.
@@ -828,7 +829,6 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 				// Caller has ensured that mOnClipboardChangeLabel is a non-NULL, valid pointer.
 				type_of_first_line = g_script.mOnClipboardChangeLabel->mJumpToLine->mActionType;
 				break;
-
 
 			default: // hotkey
 				if (msg.wParam >= Hotkey::sHotkeyCount) // Invalid hotkey ID.
@@ -889,6 +889,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 					criterion_found_hwnd = NULL; // For "NONE" and "NOT", there is no last found window.
 				type_of_first_line = variant->mJumpToLabel->mJumpToLine->mActionType;
 			} // switch(msg.message)
+
 			if (g_nThreads >= g_MaxThreadsTotal)
 			{
 				// The below allows 1 thread beyond the limit in case the script's configured
@@ -951,13 +952,11 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 			case AHK_HOTSTRING:
 				priority = hs->mPriority;
 				break;
-
 			case AHK_CLIPBOARD_CHANGE: // Due to the presence of an OnClipboardChange label in the script.
 				if (g_script.mOnClipboardChangeIsRunning)
 					continue;
 				priority = 0;  // Always use default for now.
 				break;
-
 			default: // hotkey
 				// Due to the key-repeat feature and the fact that most scripts use a value of 1
 				// for their #MaxThreadsPerHotkey, this check will often help average performance
@@ -1016,7 +1015,6 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 			case AHK_GUI_ACTION: // Listed first for performance.
 			case AHK_CLIPBOARD_CHANGE:
 				break; // Do nothing at this stage.
-
 			case AHK_USER_MENU: // user-defined menu item
 				// Safer to make a full copies than point to something potentially volatile.
 				tcslcpy(g_script.mThisMenuItemName, menu_item->mName, _countof(g_script.mThisMenuItemName));
@@ -1309,13 +1307,11 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 				break;
 
 			default: // hotkey
-				// Lexikos: Added checks for VK_WHEEL_LEFT and VK_WHEEL_RIGHT to support horizontal scrolling on Vista.
 				if (IS_WHEEL_VK(hk->mVK)) // If this is true then also: msg.message==AHK_HOOK_HOTKEY
 					g.EventInfo = (DWORD)msg.lParam; // v1.0.43.03: Override the thread default of 0 with the number of notches by which the wheel was turned.
 					// Above also works for RunAgainAfterFinished since that feature reuses the same thread attributes set above.
 				g.hWndLastUsed = criterion_found_hwnd; // v1.0.42. Even if the window is invalid for some reason, IsWindow() and such are called whenever the script accesses it (GetValidLastUsedWindow()).
 				hk->PerformInNewThreadMadeByCaller(*variant);
-
 			}
 
 			// v1.0.37.06: Call ResumeUnderlyingThread() even if aMode==WAIT_FOR_MESSAGES; this is for
@@ -2137,7 +2133,7 @@ BOOL IsInterruptible()
 
 
 
-VOID CALLBACK MsgBoxTimeout(HWND hWnd, UINT uMsg, UINT idEvent, DWORD dwTime)
+VOID CALLBACK MsgBoxTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime)
 {
 	// Unfortunately, it appears that MessageBox() will return zero rather
 	// than AHK_TIMEOUT, specified below -- at least under WinXP.  This
@@ -2169,7 +2165,7 @@ VOID CALLBACK MsgBoxTimeout(HWND hWnd, UINT uMsg, UINT idEvent, DWORD dwTime)
 
 
 
-VOID CALLBACK AutoExecSectionTimeout(HWND hWnd, UINT uMsg, UINT idEvent, DWORD dwTime)
+VOID CALLBACK AutoExecSectionTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime)
 // See the comments in AutoHotkey.cpp for an explanation of this function.
 {
 	// Since this was called, it means the AutoExec section hasn't yet finished (otherwise
@@ -2208,7 +2204,7 @@ VOID CALLBACK AutoExecSectionTimeout(HWND hWnd, UINT uMsg, UINT idEvent, DWORD d
 
 
 #ifndef MINIDLL
-VOID CALLBACK InputTimeout(HWND hWnd, UINT uMsg, UINT idEvent, DWORD dwTime)
+VOID CALLBACK InputTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime)
 {
 	KILL_INPUT_TIMER
 	g_input.status = INPUT_TIMED_OUT;
@@ -2217,7 +2213,7 @@ VOID CALLBACK InputTimeout(HWND hWnd, UINT uMsg, UINT idEvent, DWORD dwTime)
 
 
 #endif
-VOID CALLBACK RefreshInterruptibility(HWND hWnd, UINT uMsg, UINT idEvent, DWORD dwTime)
+VOID CALLBACK RefreshInterruptibility(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime)
 {
 	IsInterruptible(); // Search on RefreshInterruptibility for comments.
 }

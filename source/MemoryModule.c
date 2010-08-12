@@ -227,7 +227,7 @@ BuildImportTable(PMEMORYMODULE module)
 		for (; !IsBadReadPtr(importDesc, sizeof(IMAGE_IMPORT_DESCRIPTOR)) && importDesc->Name; importDesc++)
 		{
 			DWORD *thunkRef, *funcRef;
-			HMODULE handle = LoadLibrary((LPCSTR)(codeBase + importDesc->Name));
+			HMODULE handle = LoadLibraryA((LPCSTR)(codeBase + importDesc->Name));
 			if (handle == INVALID_HANDLE_VALUE)
 			{
 #if DEBUG_OUTPUT

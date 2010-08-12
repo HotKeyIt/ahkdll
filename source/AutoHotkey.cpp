@@ -101,10 +101,10 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 				return CRITICAL_ERROR;
 		}
 		else if (!_tcsnicmp(param, _T("/CP"), 3)) // /CPnnn
-	    {
-	      // Default codepage for the script file, NOT the default for commands used by it.
- 	      g_DefaultScriptCodepage = ATOU(param + 3);
- 	    }
+		{
+			// Default codepage for the script file, NOT the default for commands used by it.
+			g_DefaultScriptCodepage = ATOU(param + 3);
+		}
 #endif
 #ifdef CONFIG_DEBUGGER
 		// Allow a debug session to be initiated by command-line.
@@ -118,7 +118,7 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 
 				if (c)
 				{
-					StringTCharToChar(param, g_DebuggerHost, c-param);
+					StringTCharToChar(param, g_DebuggerHost, (int)(c-param));
 					StringTCharToChar(c + 1, g_DebuggerPort);
 				}
 				else
@@ -188,7 +188,23 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	// instance terminates, so it should work ok:
 	//CreateMutex(NULL, FALSE, script_filespec); // script_filespec seems a good choice for uniqueness.
 	//if (!g_ForceLaunch && !restart_mode && GetLastError() == ERROR_ALREADY_EXISTS)
-
+/*
+LPTSTR INTERNAL_SCRIPT;
+INTERNAL_SCRIPT = 
+_T("MsgBox\n")
+_T("MsgBox\n")
+_T("MsgBox\n")
+_T("MsgBox\n")
+_T("MsgBox\n")
+_T("MsgBox\n")
+_T("MsgBox\n")
+_T("MsgBox\n")
+_T("MsgBox\n")
+_T("MsgBox\n")
+_T("MsgBox\n");
+//Uncomment and comment below
+LineNumberType load_result = g_script.LoadFromText(INTERNAL_SCRIPT);
+*/
 #ifdef AUTOHOTKEYSC
 	LineNumberType load_result = g_script.LoadFromFile();
 #else

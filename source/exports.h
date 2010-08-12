@@ -7,6 +7,7 @@
 #ifndef AUTOHOTKEYSC
 EXPORT unsigned int addFile(LPTSTR fileName, bool aAllowDuplicateInclude = false, int aIgnoreLoadFailure = 0);
 EXPORT unsigned int addScript(LPTSTR script, int aReplace = 0);
+EXPORT unsigned int ahkExec(LPTSTR script);
 #endif
 // EXPORT unsigned int ahkdll(LPTSTR fileName, LPTSTR argv, LPTSTR args);
 EXPORT unsigned int ahkLabel(LPTSTR aLabelName, unsigned int wait = 0);

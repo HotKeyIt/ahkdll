@@ -287,10 +287,10 @@ inline void swap(T &v1, T &v2) {
 #define INPUTBOX_DEFAULT INT_MIN
 ResultType InputBox(Var *aOutputVar, LPTSTR aTitle, LPTSTR aText, bool aHideInput
 	, int aWidth, int aHeight, int aX, int aY, double aTimeout, LPTSTR aDefault);
-BOOL CALLBACK InputBoxProc(HWND hWndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam);
-VOID CALLBACK InputBoxTimeout(HWND hWnd, UINT uMsg, UINT idEvent, DWORD dwTime);
+INT_PTR CALLBACK InputBoxProc(HWND hWndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam);
+VOID CALLBACK InputBoxTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime);
 #endif
-VOID CALLBACK DerefTimeout(HWND hWnd, UINT uMsg, UINT idEvent, DWORD dwTime);
+VOID CALLBACK DerefTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime);
 BOOL CALLBACK EnumChildFindSeqNum(HWND aWnd, LPARAM lParam);
 BOOL CALLBACK EnumChildFindPoint(HWND aWnd, LPARAM lParam);
 BOOL CALLBACK EnumChildGetControlList(HWND aWnd, LPARAM lParam);
@@ -435,9 +435,11 @@ struct DYNAPARM
 		int value_int; // Args whose width is less than 32-bit are also put in here because they are right justified within a 32-bit block on the stack.
 		float value_float;
 		__int64 value_int64;
+		UINT_PTR value_uintptr;
 		double value_double;
 		char *astr;
 		wchar_t *wstr;
+		void *ptr;
     };
 	// Might help reduce struct size to keep other members last and adjacent to each other (due to
 	// 8-byte alignment caused by the presence of double and __int64 members in the union above).
@@ -569,7 +571,6 @@ private:
 	ResultType EvaluateCondition();
 	ResultType Line::PerformLoop(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine
 		, __int64 aIterationLimit, bool aIsInfinite);
-	
 	ResultType Line::PerformLoopFilePattern(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine
 		, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, LPTSTR aFilePattern);
 	ResultType PerformLoopReg(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine
@@ -716,7 +717,7 @@ private:
 
 public:
     static ResultType Line::IncludeFiles(bool aAllowDuplicateInclude, bool aIgnoreLoadFailure, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, LPTSTR aFilePattern);
-#define SET_S_DEREF_BUF(ptr, size) Line::sDerefBuf = ptr, Line::sDerefBufSize = size
+	#define SET_S_DEREF_BUF(ptr, size) Line::sDerefBuf = ptr, Line::sDerefBufSize = size
 
 	#define NULLIFY_S_DEREF_BUF \
 	{\
@@ -758,9 +759,9 @@ public:
 	ActionTypeType mActionType; // What type of line this is.
 	ArgCountType mArgc; // How many arguments exist in mArg[].
 	FileIndexType mFileIndex; // Which file the line came from.  0 is the first, and it's the main script file.
+	LineNumberType mLineNumber;  // The line number in the file from which the script was loaded, for debugging.
 
 	ArgStruct *mArg; // Will be used to hold a dynamic array of dynamic Args.
-	LineNumberType mLineNumber;  // The line number in the file from which the script was loaded, for debugging.
 	AttributeType mAttribute;
 	Line *mPrevLine, *mNextLine; // The prev & next lines adjacent to this one in the linked list; NULL if none.
 	Line *mRelatedLine;  // e.g. the "else" that belongs to this "if"
@@ -929,7 +930,7 @@ public:
 	LPTSTR ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType *aResultToken
 		, LPTSTR &aTarget, LPTSTR &aDerefBuf, size_t &aDerefBufSize, LPTSTR aArgDeref[], size_t aExtraSize);
 	ResultType ExpressionToPostfix(ArgStruct &aArg);
-	ResultType EvaluateHotCriterionExpression(); // L4: Called by MainWindowProc to handle an AHK_HOT_IF_EXPR message.
+	ResultType EvaluateHotCriterionExpression(LPTSTR aHotkeyName); // L4: Called by MainWindowProc to handle an AHK_HOT_IF_EXPR message.
 
 	ResultType Deref(Var *aOutputVar, LPTSTR aBuf);
 
@@ -1227,7 +1228,7 @@ public:
 	static DWORD SoundConvertComponentType(LPTSTR aBuf, int *aInstanceNumber = NULL)
 	{
 		LPTSTR colon_pos = _tcschr(aBuf, ':');
-		UINT length_to_check = (UINT)(colon_pos ? colon_pos - aBuf : _tcslen(aBuf));
+		size_t length_to_check = colon_pos ? colon_pos - aBuf : _tcslen(aBuf);
 		if (aInstanceNumber) // Caller wanted the below put into the output parameter.
 		{
 			if (colon_pos)
@@ -2085,8 +2086,8 @@ public:
 
 struct MsgMonitorStruct
 {
-	UINT msg;
 	Func *func;
+	UINT msg;
 	// Keep any members smaller than 4 bytes adjacent to save memory:
 	short instance_count;  // Distinct from func.mInstances because the script might have called the function explicitly.
 	short max_instances; // v1.0.47: Support more than one thread.
@@ -2682,7 +2683,7 @@ public:
 #endif
 	Func *FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength = 0, int *apInsertPos = NULL); // L27: Added apInsertPos for binary-search.
 	Func *AddFunc(LPCTSTR aFuncName, size_t aFuncNameLength, bool aIsBuiltIn, int aInsertPos); // L27: Added aInsertPos for binary-search.
-	
+
 
 	int AddBIF(LPTSTR aFuncName, BuiltInFunctionType bif, size_t minparams, size_t maxparams); // N10 added for dynamic BIFs
 	#define ALWAYS_USE_DEFAULT  0
@@ -2869,19 +2870,22 @@ VarSizeType BIV_PtrSize(LPTSTR aBuf, LPTSTR aVarName);
 // Caller has ensured that SYM_VAR's Type() is VAR_NORMAL and that it's either not an environment
 // variable or the caller wants environment varibles treated as having zero length.
 #define EXPR_TOKEN_LENGTH(token_raw, token_as_string) \
-(token_raw->symbol == SYM_VAR && !token_raw->var->IsBinaryClip()) \
+( (token_raw->symbol == SYM_VAR && !token_raw->var->IsBinaryClip()) \
 	? token_raw->var->Length()\
-	: _tcslen(token_as_string)
+	: _tcslen(token_as_string) )
 
+#ifdef ENABLE_DLLCALL
 void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free = NULL); // L31: Contains code extracted from BIF_DllCall for reuse in ExpressionToPostfix.
+void BIF_DllCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_DynaCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+#endif
+
 #ifdef AUTOHOTKEYSC
 void BIF_ResourceLoadLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 #endif
 void BIF_MemoryLoadLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_MemoryGetProcAddress(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_MemoryFreeLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
-//void BIF_DynaCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
-void BIF_DllCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_Lock(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_UnLock(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_StrLen(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
@@ -2912,7 +2916,10 @@ void BIF_Exp(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCou
 void BIF_SqrtLogLn(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 
 void BIF_OnMessage(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+#ifdef ENABLE_REGISTERCALLBACK
 void BIF_RegisterCallback(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+#endif
+
 #ifndef MINIDLL
 void BIF_StatusBar(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 
@@ -2933,10 +2940,10 @@ void BIF_IL_Add(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParam
 #endif
 void BIF_Trim(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount); // L31: Also handles LTrim and RTrim.
 
-void BIF_DynaCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_IsObject(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_ObjCreate(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_ObjInvoke(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount); // See script_object.cpp for comments.
+void BIF_ObjAddRefRelease(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 // Built-ins also available as methods -- these are available as functions for use primarily by overridden methods (i.e. where using the built-in methods isn't possible as they're no longer accessible).
 void BIF_ObjInsert(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_ObjRemove(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
@@ -2946,11 +2953,16 @@ void BIF_ObjGetAddress(ExprTokenType &aResultToken, ExprTokenType *aParam[], int
 void BIF_ObjMaxIndex(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_ObjMinIndex(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_ObjNewEnum(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_ObjHasKey(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 
 
 #ifdef CONFIG_EXPERIMENTAL
 // Advanced file IO interfaces
 void BIF_FileOpen(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_ComObjActive(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_ComObjCreate(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_ComObjGet(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_ComObjConnect(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 #endif
 
 

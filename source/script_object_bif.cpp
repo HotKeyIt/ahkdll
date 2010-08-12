@@ -16,6 +16,12 @@ void BIF_ObjCreate(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 
 	if (aParamCount == 1) // L33: POTENTIALLY UNSAFE - Cast IObject address to object reference.
 	{
+		if (obj = TokenToObject(*aParam[0]))
+		{	// Allow &obj == Object(obj), but AddRef() for equivalence with ComObjActive(comobj).
+			obj->AddRef();
+			aResultToken.value_int64 = (__int64)obj;
+			return; // symbol is already SYM_INTEGER.
+		}
 		obj = (IObject *)TokenToInt64(*aParam[0]);
 		if (obj < (IObject *)1024) // Prevent some obvious errors.
 			obj = NULL;
@@ -134,3 +140,24 @@ BIF_METHOD(GetAddress)
 BIF_METHOD(MaxIndex)
 BIF_METHOD(MinIndex)
 BIF_METHOD(NewEnum)
+BIF_METHOD(HasKey)
+
+
+//
+// ObjAddRef/ObjRelease - used with pointers rather than object references.
+//
+
+void BIF_ObjAddRefRelease(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+{
+	IObject *obj = (IObject *)TokenToInt64(*aParam[0]);
+	if (obj < (IObject *)4096) // Rule out some obvious errors.
+	{
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = _T("");
+		return;
+	}
+	if (aResultToken.marker[3] == 'A')
+		aResultToken.value_int64 = obj->AddRef();
+	else
+		aResultToken.value_int64 = obj->Release();
+}

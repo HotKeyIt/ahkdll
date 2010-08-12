@@ -182,7 +182,6 @@ LRESULT CALLBACK LowLevelKeybdProc(int aCode, WPARAM wParam, LPARAM lParam)
 	bool key_up = (wParam == WM_KEYUP || wParam == WM_SYSKEYUP);
 	vk_type vk = (vk_type)event.vkCode;
 	sc_type sc = (sc_type)event.scanCode;
-	if (vk != VK_PACKET) { // Win2k/XP: VK_PACKET is used to send Unicode characters as if they were keystrokes.  sc is a 16-bit character code in that case.
 	if (vk && !sc) // Might happen if another app calls keybd_event with a zero scan code.
 		sc = vk_to_sc(vk);
 	// MapVirtualKey() does *not* include 0xE0 in HIBYTE if key is extended.  In case it ever
@@ -199,7 +198,6 @@ LRESULT CALLBACK LowLevelKeybdProc(int aCode, WPARAM wParam, LPARAM lParam)
 	// scan code is sent with VK_RSHIFT key-up event:
 	if ((event.flags & LLKHF_EXTENDED)) // && vk != VK_RSHIFT)
 		sc |= 0x100;
-	}
 
 	// The below must be done prior to any returns that indirectly call UpdateKeybdState() to update
 	// modifier state.
@@ -471,7 +469,7 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 	//else: Use usual modified value.
 	pKeyHistoryCurr->sc = aSC; // Will be zero if our caller is the mouse hook (except for wheel notch count).
 	// After logging the wheel notch count (above), purify aSC for readability and maintainability.
-	if (IS_WHEEL_VK(aVK)) // Lexikos: Added checks for VK_WHEEL_LEFT and VK_WHEEL_RIGHT to support horizontal scrolling on Vista.
+	if (IS_WHEEL_VK(aVK))
 		aSC = 0; // Also relied upon by by sc_takes_precedence below.
 
 	bool is_artificial;
@@ -2773,7 +2771,7 @@ bool CollectInput(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type aSC,
 					// In that case, continue searching for other matches in case the script contains
 					// hotstrings that would trigger simultaneously were it not for the "only one" rule.
 					// L4: Added hs.mHotExprLine for #if (expression).
-					|| !HotCriterionAllowsFiring(hs.mHotCriterion, hs.mHotWinTitle, hs.mHotWinText, hs.mHotExprIndex)   )
+					|| !HotCriterionAllowsFiring(hs.mHotCriterion, hs.mHotWinTitle, hs.mHotWinText, hs.mHotExprIndex, hs.mJumpToLabel ? hs.mJumpToLabel->mName : _T(""))   )
 					continue; // No match or not eligible to fire.
 					// v1.0.42: The following scenario defeats the ability to give criterion hotstrings
 					// precedence over non-criterion:
@@ -2819,7 +2817,7 @@ bool CollectInput(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type aSC,
 							}
 							++case_capable_characters;
 						}
-					if (!case_capable_characters) // Alld characters in the abbreviation are caseless.
+					if (!case_capable_characters) // All characters in the abbreviation are caseless.
 						case_conform_mode = CASE_CONFORM_NONE;
 					else if (case_capable_characters == 1)
 						// Since there is only a single character with case potential, it seems best as

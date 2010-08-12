@@ -1,7 +1,11 @@
+12.08.2010
+- Merged AutoHotkey_L Revision 53
+- new exported function ahkExec used to temporarily run some script, accepts also several lines of code
+- ahktextdll will add #Pesistent when launched without parameters
 18.07.2010
 - Fixed a bug for dll when it was in root folder
-- DynaCall is now managed trough internal DynaToken, similar to objects but less functional and can be used with DynaCall only (thanks Lexikos)
-- DynaCall can preset functions parameters now, so you can call the function later witout parameters: func.() or func[]
+- DynaCall is now managed trough internal DynaToken, similar to objects but without object features and much faster but can be used with DynaCall only (thanks Lexikos)
+- DynaCall can set default parameters now, so you can call the function later with less or even witout parameters: func.()
 16.07.2010
 - Fixed not to delete ClipBoard vars when ahkdll is reloaded
 11.07.2010

@@ -460,7 +460,7 @@ EXPORT unsigned int ahkdll(LPTSTR fileName, LPTSTR argv, LPTSTR args)
 // HotKeyIt ahktextdll
 EXPORT unsigned int ahktextdll(LPTSTR fileName, LPTSTR argv, LPTSTR args)
 {
-	if (setscriptstrings(fileName, argv, args))
+	if (setscriptstrings(fileName ? fileName : _T("#Persistent"), argv, args))
 		return 0;
 	nameHinstanceP.istext = 1;
 	return runThread();

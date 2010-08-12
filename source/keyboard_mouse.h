@@ -333,7 +333,7 @@ vk_type TextToVK(LPTSTR aText, modLR_type *pModifiersLR = NULL, bool aExcludeTho
 	, bool aAllowExplicitVK = true, HKL aKeybdLayout = GetKeyboardLayout(0));
 #endif
 vk_type CharToVKAndModifiers(TCHAR aChar, modLR_type *pModifiersLR, HKL aKeybdLayout);
-vk_type TextToSpecial(LPTSTR aText, UINT aTextLength, KeyEventTypes &aEventTypem, modLR_type &aModifiersLR
+vk_type TextToSpecial(LPTSTR aText, size_t aTextLength, KeyEventTypes &aEventTypem, modLR_type &aModifiersLR
 	, bool aUpdatePersistent);
 
 #ifdef ENABLE_KEY_HISTORY_FILE

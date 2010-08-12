@@ -59,7 +59,14 @@ EXPORT int ximportfunc(ahkx_int_str func1, ahkx_int_str func2, ahkx_int_str_str 
 EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 {
 	Var *ahkvar = g_script.FindOrAddVar(name);
-	int result_size = ahkvar->Get() + 2 ;
+	if (getVar != NULL)
+	{
+		if (ahkvar->mType == VAR_BUILTIN)
+			return _T("");
+		result_to_return_dll = (LPTSTR )realloc((LPTSTR )result_to_return_dll,MAX_INTEGER_LENGTH);
+		return ITOA64((int)ahkvar,result_to_return_dll);
+	}
+	VarSizeType result_size = ahkvar->Get() + 2 ;
     result_to_return_dll = (LPTSTR )realloc((LPTSTR )result_to_return_dll, result_size);
 	ahkvar->Get(result_to_return_dll) ;
 	return result_to_return_dll;
@@ -286,33 +293,6 @@ EXPORT unsigned int addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aI
 #endif // AUTOHOTKEYSC
 
 #ifndef AUTOHOTKEYSC
-#ifdef USRDLL
-// HotKeyIt: addScript()
-// Todo: support for #Directives, and proper treatment of mIsReadytoExecute
-EXPORT unsigned int addScript(LPTSTR script, int aExecute)
-{   // dynamically include a script into a script !!
-	// labels, hotkeys, functions.   
-
- 	Line *oldLastLine = g_script.mLastLine;
-	
-	if (g_script.LoadIncludedText(script) != OK)
-		return LOADING_FAILED;
-	if (!g_script.PreparseBlocks(oldLastLine->mNextLine) || !g_script.PreparseIfElse(oldLastLine->mNextLine))
-		return LOADING_FAILED;
-	// g_script.PreparseBlocks(oldLastLine->mNextLine); // 
-	if (aExecute > 0)
-	{
-		if (aExecute > 1)
-		{
-			SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)oldLastLine->mNextLine, (LPARAM)oldLastLine->mNextLine);
-		}
-		else
-			PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)oldLastLine->mNextLine, (LPARAM)oldLastLine->mNextLine);
-	}
-	return (unsigned int) oldLastLine->mNextLine;  // 
-}
-
-#else
 // HotKeyIt: addScript()
 // Todo: support for #Directives, and proper treatment of mIsReadytoExecute
 EXPORT unsigned int addScript(LPTSTR script, int aExecute)
@@ -349,9 +329,45 @@ EXPORT unsigned int addScript(LPTSTR script, int aExecute)
 
 	return (unsigned int) oldLastLine->mNextLine;  // 
 }
-#endif // USRDLL
 #endif // AUTOHOTKEYSC
-// HotKeyIt  -  ahkFunction can return a value now
+
+#ifndef AUTOHOTKEYSC
+// Todo: support for #Directives, and proper treatment of mIsReadytoExecute
+EXPORT unsigned int ahkExec(LPTSTR script)
+{   // dynamically include a script from text!!
+	// labels, hotkeys, functions.   
+	Func * aFunc = NULL ; 
+	int inFunc = 0 ;
+	if (g->CurrentFunc)  // normally functions definitions are not allowed within functions.  But we're in a function call, not a function definition right now.
+	{
+		aFunc = g->CurrentFunc; 
+		g->CurrentFunc = NULL ; 
+		inFunc = 1 ;
+	}
+	Line *oldLastLine = g_script.mLastLine;
+
+	if ((g_script.LoadIncludedText(script) != OK) || !g_script.PreparseBlocks(oldLastLine->mNextLine))
+	{
+		if (inFunc == 1 )
+			g->CurrentFunc = aFunc;
+		return LOADING_FAILED;
+	}
+	g_script.PreparseIfElse(oldLastLine->mNextLine);
+	SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)oldLastLine->mNextLine, (LPARAM)oldLastLine->mNextLine);
+
+    
+	if (inFunc == 1 )
+		g->CurrentFunc = aFunc ;
+	Line *prevLine = g_script.mLastLine->mPrevLine;
+	for(; prevLine != oldLastLine; prevLine = prevLine->mPrevLine)
+	{
+		delete prevLine->mNextLine;
+	}
+	oldLastLine->mNextLine = NULL;  // 
+	return OK;
+}
+#endif // AUTOHOTKEYSC
+
 EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10)
 {
 	Func *aFunc = g_script.FindFunc(func) ;

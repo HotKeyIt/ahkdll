@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "KuString.h"
 #include "StringConv.h"
+#include "util.h"
 
 #ifdef _WIN32
 LPCWSTR StringUTF8ToWChar(LPCSTR sUTF8, CStringW &sWChar, int iChars/* = -1*/)
@@ -83,7 +84,7 @@ LPCSTR StringUTF8ToChar(LPCSTR sUTF8, CStringA &sChar, int iChars/* = -1*/, char
 #endif
 
 template <typename SRC_T, typename DEST_T>
-SRC_T _StringDummyConv(SRC_T sSrc, DEST_T sDest, int iChars = -1)
+SRC_T _StringDummyConv(SRC_T sSrc, DEST_T &sDest, int iChars = -1)
 {
 	if (!sSrc)
 		return NULL;
