@@ -97,15 +97,15 @@ EXPORT unsigned int ahkExecuteLine(unsigned int line,unsigned int aMode,unsigned
 	return (unsigned int) templine->mNextLine;
 }
 
-EXPORT unsigned int ahkLabel(LPTSTR aLabelName, unsigned int wait)
+EXPORT unsigned int ahkLabel(LPTSTR aLabelName, unsigned int nowait) // 0 = wait = default
 {
 	Label *aLabel = g_script.FindLabel(aLabelName) ;
 	if (aLabel)
 	{
-		if (wait)
-			SendMessage(g_hWnd, AHK_EXECUTE_LABEL, (LPARAM)aLabel, (LPARAM)aLabel);
-		else
+		if (nowait)
 			PostMessage(g_hWnd, AHK_EXECUTE_LABEL, (LPARAM)aLabel, (LPARAM)aLabel);
+		else
+			SendMessage(g_hWnd, AHK_EXECUTE_LABEL, (LPARAM)aLabel, (LPARAM)aLabel);
 		return 1;
 	}
 	else

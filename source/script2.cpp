@@ -12439,7 +12439,7 @@ void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free) // L31: 
 		dll_name = NULL;
 #ifdef UNICODE
 		WideCharToMultiByte(CP_ACP, 0, param1_buf, -1, function_name, _countof(function_name), NULL, NULL);
-		WideCharToMultiByte(CP_ACP, 0, param1_buf, -1, function_name_suffix, _countof(function_name), NULL, NULL);
+		WideCharToMultiByte(CP_ACP, 0, param1_buf, -1, function_name_suffix, _countof(function_name_suffix), NULL, NULL);
 		// Since some function do not have A suffix but do have W suffix so try W first
 #else
 		strcpy(function_name,param1_buf);
@@ -12460,10 +12460,11 @@ void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free) // L31: 
 		++_tfunction_name; // Set it to the character after the last backslash.
 #ifdef UNICODE
 		WideCharToMultiByte(CP_ACP, 0, _tfunction_name, -1, function_name, _countof(function_name), NULL, NULL);
+		WideCharToMultiByte(CP_ACP, 0, _tfunction_name, -1, function_name_suffix, _countof(function_name_suffix), NULL, NULL);
 #else
 		strcpy(function_name,_tfunction_name);
 #endif
-
+		strcat(function_name_suffix, WINAPI_SUFFIX);
 		// Get module handle. This will work when DLL is already loaded and might improve performance if
 		// LoadLibrary is a high-overhead call even when the library already being loaded.  If
 		// GetModuleHandle() fails, fall back to LoadLibrary().
@@ -12475,7 +12476,7 @@ void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free) // L31: 
 					g_ErrorLevel->Assign(_T("-3")); // Stage 3 error: DLL couldn't be loaded.
 				return NULL;
 			}
-		if (   !(function = (void *)GetProcAddress(hmodule, function_name))   )
+		if (   !(function = (void *)GetProcAddress(hmodule, function_name_suffix))   )
 		{
 			// v1.0.34: If it's one of the standard libraries, try the "A" suffix.
 			// jackieku: Try it anyway, there are many other DLLs that use this naming scheme, and it doesn't seem expensive.
@@ -12483,7 +12484,6 @@ void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free) // L31: 
 			//for (i = 0; i < sStdModule_count; ++i)
 			//	if (hmodule == sStdModule[i]) // Match found.
 			//	{
-					strcat(function_name, WINAPI_SUFFIX); // 1 byte of memory was already reserved above for the 'A'.
 					function = (void *)GetProcAddress(hmodule, function_name);
 			//		break;
 			//	}

@@ -440,20 +440,14 @@ int setscriptstrings(LPTSTR fileName, LPTSTR argv, LPTSTR args)
 	nameHinstanceP.name = scriptstring;
 	nameHinstanceP.argv = scriptstring + _tcslen(fileName) + 1 ;
 	nameHinstanceP.args = scriptstring + _tcslen(fileName) + _tcslen(argv) + 2 ;
-	
-	/*
-	nameHinstanceP.name = fileName;
-	nameHinstanceP.argv = argv;
-	nameHinstanceP.args = args;
-	*/
 	return 0;
 }
 
 EXPORT unsigned int ahkdll(LPTSTR fileName, LPTSTR argv, LPTSTR args)
 {
-	if (setscriptstrings(fileName, argv, args))
+	if (setscriptstrings(*fileName ? fileName : _T("#Persistent"), argv, args))
 		return 0;
-	nameHinstanceP.istext = 0;
+	nameHinstanceP.istext = *fileName ? 0 : 1;
 	return runThread();
 }
 

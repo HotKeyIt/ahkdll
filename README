@@ -1,7 +1,11 @@
+15.08.2010
+- DllCall will now always search for W and A functions first, this is due to some functions do not have A suffix e.g. Process32First and Process32FirstW
+- when empty string is passed to ahkdll function, it will run in text mode same as ahktextdll so it will run "#Persistent".
+- ahkLabel second parameter is called nowait now so when 0 (default) AutoHotkey will wait for code to finish execution, because using PostMessage times out often when CPU is under load.
 12.08.2010
 - Merged AutoHotkey_L Revision 53
 - new exported function ahkExec used to temporarily run some script, accepts also several lines of code
-- ahktextdll will add #Pesistent when launched without parameters
+- when empty string is passed in first parameter, AutoHotkey will run "#Pesistent" as script.
 18.07.2010
 - Fixed a bug for dll when it was in root folder
 - DynaCall is now managed trough internal DynaToken, similar to objects but without object features and much faster but can be used with DynaCall only (thanks Lexikos)
