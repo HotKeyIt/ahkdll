@@ -1,4 +1,5 @@
 15.08.2010
+- Merged AutoHotkey_L54
 - DllCall will now always search for W and A functions first, this is due to some functions do not have A suffix e.g. Process32First and Process32FirstW
 - when empty string is passed to ahkdll function, it will run in text mode same as ahktextdll so it will run "#Persistent".
 - ahkLabel second parameter is called nowait now so when 0 (default) AutoHotkey will wait for code to finish execution, because using PostMessage times out often when CPU is under load.

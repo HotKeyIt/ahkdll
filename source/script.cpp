@@ -2883,21 +2883,19 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			next_buf_length = GetLine(next_buf, LINE_SIZE - 1, in_continuation_section, fp);
 			if (next_buf_length && next_buf_length != -1) // Prevents infinite loop when file ends with an unclosed "/*" section.  Compare directly to -1 since length is unsigned.
 			{
-				if (in_comment_section) // Look for the uncomment-flag.
+				if (!_tcsncmp(next_buf, _T("*/"), 2)) // Check this even if !in_comment_section so it can be ignored (for convenience) and not treated as a line-continuation operator.
 				{
-					if (!_tcsncmp(next_buf, _T("*/"), 2))
-					{
-						in_comment_section = false;
-						next_buf_length -= 2; // Adjust for removal of /* from the beginning of the string.
-						tmemmove(next_buf, next_buf + 2, next_buf_length + 1);  // +1 to include the string terminator.
-						next_buf_length = ltrim(next_buf, next_buf_length); // Get rid of any whitespace that was between the comment-end and remaining text.
-						if (!*next_buf) // The rest of the line is empty, so it was just a naked comment-end.
-							continue;
-					}
-					else
+					in_comment_section = false;
+					next_buf_length -= 2; // Adjust for removal of /* from the beginning of the string.
+					tmemmove(next_buf, next_buf + 2, next_buf_length + 1);  // +1 to include the string terminator.
+					next_buf_length = ltrim(next_buf, next_buf_length); // Get rid of any whitespace that was between the comment-end and remaining text.
+					if (!*next_buf) // The rest of the line is empty, so it was just a naked comment-end.
 						continue;
 				}
-				else if (!in_continuation_section && !_tcsncmp(next_buf, _T("/*"), 2))
+				else if (in_comment_section)
+					continue;
+
+				if (!in_continuation_section && !_tcsncmp(next_buf, _T("/*"), 2))
 				{
 					in_comment_section = true;
 					continue; // It's now commented out, so the rest of this line is ignored.
@@ -12573,10 +12571,11 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 			if (   !(group = (WinGroup *)mAttribute)   )
 				group = g_script.FindGroup(ARG1);
 			result = OK; // Set default.
+			ResultType activate_result = FAIL;
 			if (group)
 			{
 				// Note: This will take care of DoWinDelay if needed:
-				group->Activate(*ARG2 && !_tcsicmp(ARG2, _T("R")), NULL, &jump_to_label);
+				activate_result = group->Activate(*ARG2 && !_tcsicmp(ARG2, _T("R")), NULL, &jump_to_label);
 				if (jump_to_label)
 				{
 					if (!line->IsJumpValid(*jump_to_label)) // Should be checked here rather than at the time that GroupAdd specified the label because it's from HERE that the jump will actually be done.
@@ -12600,6 +12599,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 				}
 			}
 			//else no such group, so just proceed.
+			g_ErrorLevel->Assign(activate_result ? ERRORLEVEL_NONE : ERRORLEVEL_ERROR);
 			if (aMode == ONLY_ONE_LINE)  // v1.0.45: These two lines were moved here from above to provide proper handling for GroupActivate that lacks a jump/gosub and that lies directly beneath an IF or ELSE.
 				return (result == EARLY_RETURN) ? OK : result;
 			line = line->mNextLine;
@@ -15072,8 +15072,9 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 			// GroupAdd, so it will be checked by the GroupActivate or not at all (since it's
 			// not that important in the case of a Gosub -- it's mostly for Goto's):
 			//return IsJumpValid(label->mJumpToLine);
+			group->mJumpToLabel = target_label;
 		}
-		return group->AddWindow(ARG2, ARG3, target_label, ARG5, ARG6);
+		return group->AddWindow(ARG2, ARG3, ARG5, ARG6);
 	}
 
 	// Note ACT_GROUPACTIVATE is handled by ExecUntil(), since it's better suited to do the Gosub.
