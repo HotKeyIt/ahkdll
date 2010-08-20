@@ -31,6 +31,12 @@ GNU General Public License for more details.
 #include "MemoryModule.h"
 #include "script_object.h"
 
+ResultType AssignErrorLevels(BOOL aSetError, DWORD aLastErrorOverride = -1)
+{
+	g->LastError = aLastErrorOverride == -1 ? GetLastError() : aLastErrorOverride;
+	return g_ErrorLevel->Assign(aSetError ? ERRORLEVEL_ERROR : ERRORLEVEL_NONE);
+}
+
 ////////////////////
 // Window related //
 ////////////////////
@@ -1405,13 +1411,6 @@ end_set_entity:
 
 	case TRANS_CMD_BITSHIFTRIGHT:  // Equivalent to dividing (integer) by 2^value2
 		return output_var.Assign(ATOI64(aValue1) >> ATOI(aValue2));
-
-#ifdef UNICODE
-	case TRANS_CMD_TOCODEPAGE:
-		return output_var.AssignStringToCodePage((LPCWSTR) aValue2, -1, ATOI(aValue1));
-	case TRANS_CMD_FROMCODEPAGE:
-		return output_var.AssignStringFromCodePage((LPCSTR) aValue2, -1, ATOI(aValue1));
-#endif
 	}
 
 	return FAIL;  // Never executed (increases maintainability and avoids compiler warning).
@@ -9047,7 +9046,10 @@ ResultType Line::FileRead(LPTSTR aFilespec)
 	HANDLE hfile = CreateFile(aFilespec, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING
 		, FILE_FLAG_SEQUENTIAL_SCAN, NULL); // MSDN says that FILE_FLAG_SEQUENTIAL_SCAN will often improve performance
 	if (hfile == INVALID_HANDLE_VALUE)      // in cases like these (and it seems best even if max_bytes_to_load was specified).
+	{
+		g->LastError = GetLastError();
 		return OK; // Let ErrorLevel tell the story.
+	}
 
 	if (is_binary_clipboard && output_var.Type() == VAR_CLIPBOARD)
 		return ReadClipboardFromFile(hfile);
@@ -9058,6 +9060,7 @@ ResultType Line::FileRead(LPTSTR aFilespec)
 	if (bytes_to_read == ULLONG_MAX // GetFileSize64() failed...
 		|| max_bytes_to_load == ULLONG_MAX && bytes_to_read > FILEREAD_MAX) // ...or the file is too large to be completely read (and the script wanted it completely read).
 	{
+		g->LastError = GetLastError();
 		CloseHandle(hfile);
 		return OK; // Let ErrorLevel tell the story.
 	}
@@ -9068,6 +9071,7 @@ ResultType Line::FileRead(LPTSTR aFilespec)
 
 	if (!bytes_to_read)
 	{
+		g->LastError = 0;
 		CloseHandle(hfile);
 		return OK; // And ErrorLevel will indicate success (a zero-length file results in empty output_var).
 	}
@@ -9084,6 +9088,7 @@ ResultType Line::FileRead(LPTSTR aFilespec)
 
 	DWORD bytes_actually_read;
 	BOOL result = ReadFile(hfile, output_buf, (DWORD)bytes_to_read, &bytes_actually_read, NULL);
+	g->LastError = GetLastError();
 	CloseHandle(hfile);
 
 	// Upon result==success, bytes_actually_read is not checked against bytes_to_read because it
@@ -9173,10 +9178,16 @@ ResultType Line::FileReadLine(LPTSTR aFilespec, LPTSTR aLineNumber)
 	g_ErrorLevel->Assign(ERRORLEVEL_ERROR); // Set default ErrorLevel.
 	__int64 line_number = ATOI64(aLineNumber);
 	if (line_number < 1)
+	{
+		g->LastError = ERROR_INVALID_PARAMETER;
 		return OK;  // Return OK because g_ErrorLevel tells the story.
+	}
 	TextFile tfile;
 	if (!tfile.Open(aFilespec, DEFAULT_READ_FLAGS, g->Encoding & CP_AHKCP))
+	{
+		g->LastError = GetLastError();
 		return OK;  // Return OK because g_ErrorLevel tells the story.
+	}
 
 	// Remember that once the first call to MsgSleep() is done, a new hotkey subroutine
 	// may fire and suspend what we're doing here.  Such a subroutine might also overwrite
@@ -9191,6 +9202,7 @@ ResultType Line::FileReadLine(LPTSTR aFilespec, LPTSTR aLineNumber)
 	{
 		if (!tfile.ReadLine(buf, _countof(buf) - 1)) // end-of-file or error
 		{
+			g->LastError = GetLastError();
 			tfile.Close();
 			return OK;  // Return OK because g_ErrorLevel tells the story.
 		}
@@ -9209,7 +9221,7 @@ ResultType Line::FileReadLine(LPTSTR aFilespec, LPTSTR aLineNumber)
 	else
 		if (!output_var.Assign(buf, (VarSizeType)buf_length))
 			return FAIL;
-	return g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
+	return AssignErrorLevels(FALSE, 0); // Indicate success.
 }
 
 
@@ -9224,7 +9236,7 @@ ResultType Line::FileAppend(LPTSTR aFilespec, LPTSTR aBuf, LoopReadFileStruct *a
 	if (aCurrentReadFile) // It always takes precedence over aFilespec.
 		aFilespec = aCurrentReadFile->mWriteFileName;
 	if (!*aFilespec) // Nothing to write to (caller relies on this check).
-		return g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
+		return AssignErrorLevels(TRUE, ERROR_INVALID_PARAMETER);
 
 	TextStream *ts = aCurrentReadFile ? aCurrentReadFile->mWriteFile : NULL;
 	bool file_was_already_open = ts;
@@ -9241,15 +9253,15 @@ ResultType Line::FileAppend(LPTSTR aFilespec, LPTSTR aBuf, LoopReadFileStruct *a
 #ifndef CONFIG_DEBUGGER
 			// Avoid puts() in case it bloats the code in some compilers. i.e. _fputts() is already used,
 			// so using it again here shouldn't bloat it:
-			return g_ErrorLevel->Assign(_fputts(aBuf, stdout) ? ERRORLEVEL_ERROR : ERRORLEVEL_NONE); // _fputts() returns 0 on success.
+			return AssignErrorLevels(_fputts(aBuf, stdout) == TEOF); // "returns a nonnegative value if it is successful. On an error, fputs returns EOF, and fputws returns WEOF."
 #else
-			return g_ErrorLevel->Assign(g_Debugger.FileAppendStdOut(aBuf) ? ERRORLEVEL_NONE : ERRORLEVEL_ERROR);
+			return AssignErrorLevels(!g_Debugger.FileAppendStdOut(aBuf));
 #endif
 	}
 	else if (!file_was_already_open) // As of 1.0.25, auto-detect binary if that mode wasn't explicitly specified.
 	{
 		// sArgVar is used for two reasons:
-		// 1) It properly resolves dynamic variables, such as "FileAppend, %VarContainingTheStringClipboardAll%, File".
+		// 1) It properly resolves dynamic variables, such as "FileAppend, % %VarContainingTheStringClipboardAll%, File".
 		// 2) It resolves them only once at a prior stage, rather than having to do them again here
 		//    (which helps performance).
 		if (ARGVAR1)
@@ -9269,9 +9281,8 @@ ResultType Line::FileAppend(LPTSTR aFilespec, LPTSTR aBuf, LoopReadFileStruct *a
 				HANDLE hFile;
 				DWORD dwWritten;
 				if (   (hFile = CreateFile(aFilespec, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL)) == INVALID_HANDLE_VALUE   ) // Overwrite.
-					return g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
-				g_ErrorLevel->Assign(WriteFile(hFile, ARGVAR1->Contents(), (DWORD)ARGVAR1->ByteLength(), &dwWritten, NULL)
-					? ERRORLEVEL_NONE : ERRORLEVEL_ERROR); // In this case, WriteFile() will return non-zero on success, 0 on failure.
+					return AssignErrorLevels(TRUE);
+				AssignErrorLevels(!WriteFile(hFile, ARGVAR1->Contents(), (DWORD)ARGVAR1->ByteLength(), &dwWritten, NULL)); // In this case, WriteFile() will return non-zero on success, 0 on failure.
 				CloseHandle(hFile);
 				return OK;
 			}
@@ -9301,7 +9312,7 @@ ResultType Line::FileAppend(LPTSTR aFilespec, LPTSTR aBuf, LoopReadFileStruct *a
 		
 		UINT codepage = mArgc > 2 ? ConvertFileEncoding(ARG3) : g->Encoding;
 		if (codepage == -1) // ARG3 was invalid.
-			return g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
+			return AssignErrorLevels(TRUE, ERROR_INVALID_PARAMETER);
 		
 		ASSERT( (~CP_AHKNOBOM) == CP_AHKCP );
 		// codepage may include CP_AHKNOBOM, in which case below will not add BOM_UTFxx flag.
@@ -9313,16 +9324,16 @@ ResultType Line::FileAppend(LPTSTR aFilespec, LPTSTR aBuf, LoopReadFileStruct *a
 		// Open the output file (if one was specified).  Unlike the input file, this is not
 		// a critical error if it fails.  We want it to be non-critical so that FileAppend
 		// commands in the body of the loop will set ErrorLevel to indicate the problem:
-		if (!ts)
-			ts = new TextFile;
-		if (   !ts->Open(aFilespec, flags, codepage & CP_AHKCP)    )
-			return g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
+		if ( !ts && !(ts = new TextFile) )
+			return LineError(ERR_OUTOFMEM);
+		if ( !ts->Open(aFilespec, flags, codepage & CP_AHKCP) )
+			return AssignErrorLevels(TRUE);
 		if (aCurrentReadFile)
 			aCurrentReadFile->mWriteFile = ts;
 	}
 
 	// Write to the file:
-	g_ErrorLevel->Assign(ts->Write(aBuf, (DWORD)_tcslen(aBuf)) == 0 ? ERRORLEVEL_ERROR : ERRORLEVEL_NONE);
+	AssignErrorLevels(ts->Write(aBuf, (DWORD)_tcslen(aBuf)) == 0);
 
 	if (!aCurrentReadFile)
 		delete ts;
@@ -9347,8 +9358,11 @@ ResultType Line::WriteClipboardToFile(LPTSTR aFilespec)
 
 	HANDLE hfile = CreateFile(aFilespec, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL); // Overwrite. Unsharable (since reading the file while it is being written would probably produce bad data in this case).
 	if (hfile == INVALID_HANDLE_VALUE)
+	{
+		g->LastError = GetLastError();
 		return g_clip.Close(); // Let ErrorLevel tell the story.
-
+	}
+	
 	UINT format;
 	HGLOBAL hglobal;
 	LPVOID hglobal_locked;
@@ -9357,6 +9371,8 @@ ResultType Line::WriteClipboardToFile(LPTSTR aFilespec)
 	BOOL result;
 	bool format_is_text, format_is_dib, format_is_meta;
 	bool text_was_already_written = false, dib_was_already_written = false, meta_was_already_written = false;
+
+	g->LastError = 0; // Set default.
 
 	for (format = 0; format = EnumClipboardFormats(format);)
 	{
@@ -9384,6 +9400,7 @@ ResultType Line::WriteClipboardToFile(LPTSTR aFilespec)
 			if (!WriteFile(hfile, &format, sizeof(format), &bytes_written, NULL)
 				|| !WriteFile(hfile, &size, sizeof(size), &bytes_written, NULL))
 			{
+				g->LastError = GetLastError();
 				if (size)
 					GlobalUnlock(hglobal); // hglobal not hglobal_locked.
 				break; // File might be in an incomplete state now, but that's okay because the reading process checks for that.
@@ -9392,6 +9409,7 @@ ResultType Line::WriteClipboardToFile(LPTSTR aFilespec)
 			if (size)
 			{
 				result = WriteFile(hfile, hglobal_locked, (DWORD)size, &bytes_written, NULL);
+				g->LastError = GetLastError();
 				GlobalUnlock(hglobal); // hglobal not hglobal_locked.
 				if (!result)
 					break; // File might be in an incomplete state now, but that's okay because the reading process checks for that.
@@ -9403,8 +9421,12 @@ ResultType Line::WriteClipboardToFile(LPTSTR aFilespec)
 	g_clip.Close();
 
 	if (!format) // Since the loop was not terminated as a result of a failed WriteFile(), write the 4-byte terminator (otherwise, omit it to avoid further corrupting the file).
-		if (WriteFile(hfile, &format, sizeof(format), &bytes_written, NULL))
+	{
+		result = WriteFile(hfile, &format, sizeof(format), &bytes_written, NULL);
+		g->LastError = GetLastError();
+		if (result)
 			g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success (otherwise, leave it set to failure).
+	}
 
 	CloseHandle(hfile);
 	return OK; // Let ErrorLevel, set above, tell the story.
@@ -9420,6 +9442,7 @@ ResultType Line::ReadClipboardFromFile(HANDLE hfile)
 {
 	if (!g_clip.Open())
 	{
+		g->LastError = GetLastError(); // Probably the error set by OpenClipboard().
 		CloseHandle(hfile);
 		return LineError(CANT_OPEN_CLIPBOARD_WRITE); // Make this a critical/stop error since it's unusual and something the user would probably want to know about.
 	}
@@ -9433,15 +9456,21 @@ ResultType Line::ReadClipboardFromFile(HANDLE hfile)
 
     if (!ReadFile(hfile, &format, sizeof(format), &bytes_read, NULL) || bytes_read < sizeof(format))
 	{
+		g->LastError = GetLastError();
 		g_clip.Close();
 		CloseHandle(hfile);
 		return OK; // Let ErrorLevel, set by the caller, tell the story.
 	}
 
+	g->LastError = 0; // Set default.
+
 	while (format)
 	{
 		if (!ReadFile(hfile, &size, sizeof(size), &bytes_read, NULL) || bytes_read < sizeof(size))
+		{
+			g->LastError = GetLastError();
 			break; // Leave what's already on the clipboard intact since it might be better than nothing.
+		}
 
 		if (   !(hglobal = GlobalAlloc(GMEM_MOVEABLE, size))   ) // size==0 is okay.
 		{
@@ -9461,6 +9490,7 @@ ResultType Line::ReadClipboardFromFile(HANDLE hfile)
 			}
 			if (!ReadFile(hfile, hglobal_locked, (DWORD)size, &bytes_read, NULL) || bytes_read < size)
 			{
+				g->LastError = GetLastError();
 				GlobalUnlock(hglobal);
 				GlobalFree(hglobal); // Seems best not to do SetClipboardData for incomplete format (especially without zeroing the unused portion of global_locked).
 				break; // Leave what's already on the clipboard intact since it might be better than nothing.
@@ -9472,7 +9502,10 @@ ResultType Line::ReadClipboardFromFile(HANDLE hfile)
 		SetClipboardData(format, hglobal); // The system now owns hglobal.
 
 		if (!ReadFile(hfile, &format, sizeof(format), &bytes_read, NULL) || bytes_read < sizeof(format))
+		{
+			g->LastError = GetLastError();
 			break;
+		}
 	}
 
 	g_clip.Close();
@@ -9493,14 +9526,17 @@ ResultType Line::FileDelete()
 	// It also may also slightly improve performance and reduce code size.
 	LPTSTR aFilePattern = ARG1;
 
-	g_ErrorLevel->Assign(ERRORLEVEL_ERROR); // Set default ErrorLevel, namely that "one file couldn't be deleted".
+	//g_ErrorLevel->Assign(ERRORLEVEL_ERROR); // Set default ErrorLevel, namely that "one file couldn't be deleted".
 	if (!*aFilePattern)
+	{
+		AssignErrorLevels(TRUE, ERROR_INVALID_PARAMETER);
 		return OK;  // Let ErrorLevel indicate an error, since this is probably not what the user intended.
+	}
 
 	if (!StrChrAny(aFilePattern, _T("?*")))
 	{
-		if (DeleteFile(aFilePattern))
-			g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
+		SetLastError(0); // For sanity: DeleteFile appears to set it only on failure.
+		AssignErrorLevels(!DeleteFile(aFilePattern));
 		return OK; // ErrorLevel will indicate failure if the above didn't succeed.
 	}
 
@@ -9511,7 +9547,10 @@ ResultType Line::FileDelete()
 	// MSDN confirms this in a vague way: "In the ANSI version of FindFirstFile(), [plpFileName] is
 	// limited to MAX_PATH characters."
 	if (ArgLength(1) >= MAX_PATH) // Checked early to simplify things later below.
+	{
+		AssignErrorLevels(TRUE, ERROR_BUFFER_OVERFLOW);
 		return OK; // Return OK because this is non-critical.  Due to rarity (and backward compatibility), it seems best leave ErrorLevel at 1 to indicate the problem
+	}
 
 	LONG_OPERATION_INIT
 	int failure_count = 0; // Set default.
@@ -9519,7 +9558,10 @@ ResultType Line::FileDelete()
 	WIN32_FIND_DATA current_file;
 	HANDLE file_search = FindFirstFile(aFilePattern, &current_file);
 	if (file_search == INVALID_HANDLE_VALUE) // No matching files found.
+	{
+		g->LastError = GetLastError(); // Probably (but not necessarily) ERROR_FILE_NOT_FOUND.
 		return g_ErrorLevel->Assign(0); // Deleting a wildcard pattern that matches zero files is a success.
+	}
 
 	// Otherwise:
 	TCHAR file_path[MAX_PATH];
@@ -9543,6 +9585,8 @@ ResultType Line::FileDelete()
 	LPTSTR append_pos = file_path + file_path_length; // For performance, copy in the unchanging part only once.  This is where the changing part gets appended.
 	size_t space_remaining = _countof(file_path) - file_path_length - 1; // Space left in file_path for the changing part.
 
+	g->LastError = 0; // Set default. Overridden only when a failure occurs.
+
 	do
 	{
 		// Since other script threads can interrupt during LONG_OPERATION_UPDATE, it's important that
@@ -9556,13 +9600,17 @@ ResultType Line::FileDelete()
 		{
 			// v1.0.45.03: Don't even try to operate upon truncated filenames in case they accidentally
 			// match the name of a real/existing file.
+			g->LastError = ERROR_BUFFER_OVERFLOW;
 			++failure_count;
 		}
 		else
 		{
 			_tcscpy(append_pos, current_file.cFileName); // Above has ensured this won't overflow.
 			if (!DeleteFile(file_path))
+			{
+				g->LastError = GetLastError();
 				++failure_count;
+			}
 		}
 	} while (FindNextFile(file_search, &current_file));
 	FindClose(file_search);
@@ -9632,12 +9680,19 @@ ResultType Line::FileGetAttrib(LPTSTR aFilespec)
 	OUTPUT_VAR->Assign(); // Init to be blank, in case of failure.
 
 	if (!aFilespec || !*aFilespec)
+	{
+		g->LastError = ERROR_INVALID_PARAMETER;
 		return OK;  // Let ErrorLevel indicate an error, since this is probably not what the user intended.
+	}
 
 	DWORD attr = GetFileAttributes(aFilespec);
 	if (attr == 0xFFFFFFFF)  // Failure, probably because file doesn't exist.
+	{
+		g->LastError = GetLastError();
 		return OK;  // Let ErrorLevel tell the story.
+	}
 
+	g->LastError = 0;
 	g_ErrorLevel->Assign(ERRORLEVEL_NONE);
 	TCHAR attr_string[128];
 	return OUTPUT_VAR->Assign(FileAttribToStr(attr_string, attr));
@@ -9653,13 +9708,20 @@ int Line::FileSetAttrib(LPTSTR aAttributes, LPTSTR aFilePattern, FileLoopModeTyp
 	{
 		g_ErrorLevel->Assign(ERRORLEVEL_ERROR); // Set default
 		if (!*aFilePattern)
+		{
+			g->LastError = ERROR_INVALID_PARAMETER;
 			return 0;  // Let ErrorLevel indicate an error, since this is probably not what the user intended.
+		}
 		if (aOperateOnFolders == FILE_LOOP_INVALID) // In case runtime dereference of a var was an invalid value.
 			aOperateOnFolders = FILE_LOOP_FILES_ONLY;  // Set default.
+		g->LastError = 0; // Set default. Overridden only when a failure occurs.
 	}
 
 	if (_tcslen(aFilePattern) >= MAX_PATH) // Checked early to simplify other things below.
+	{
+		g->LastError = ERROR_BUFFER_OVERFLOW;
 		return 0; // Let the above ErrorLevel indicate the problem.
+	}
 
 	// Related to the comment at the top: Since the script subroutine that resulted in the call to
 	// this function can be interrupted during our MsgSleep(), make a copy of any params that might
@@ -9741,6 +9803,7 @@ int Line::FileSetAttrib(LPTSTR aAttributes, LPTSTR aFilePattern, FileLoopModeTyp
 			{
 				// v1.0.45.03: Don't even try to operate upon truncated filenames in case they accidentally
 				// match the name of a real/existing file.
+				g->LastError = ERROR_BUFFER_OVERFLOW;
 				++failure_count;
 				continue;
 			}
@@ -9815,7 +9878,10 @@ int Line::FileSetAttrib(LPTSTR aAttributes, LPTSTR aFilePattern, FileLoopModeTyp
 			}
 
 			if (!SetFileAttributes(file_path, current_file.dwFileAttributes))
+			{
+				g->LastError = GetLastError();
 				++failure_count;
+			}
 		} while (FindNextFile(file_search, &current_file));
 
 		FindClose(file_search);
@@ -9872,14 +9938,20 @@ ResultType Line::FileGetTime(LPTSTR aFilespec, TCHAR aWhichTime)
 	OUTPUT_VAR->Assign(); // Init to be blank, in case of failure.
 
 	if (!aFilespec || !*aFilespec)
+	{
+		g->LastError = ERROR_INVALID_PARAMETER;
 		return OK;  // Let ErrorLevel indicate an error, since this is probably not what the user intended.
+	}
 
 	// Don't use CreateFile() & FileGetSize() size they will fail to work on a file that's in use.
 	// Research indicates that this method has no disadvantages compared to the other method.
 	WIN32_FIND_DATA found_file;
 	HANDLE file_search = FindFirstFile(aFilespec, &found_file);
 	if (file_search == INVALID_HANDLE_VALUE)
+	{
+		g->LastError = GetLastError();
 		return OK;  // Let ErrorLevel tell the story.
+	}
 	FindClose(file_search);
 
 	FILETIME local_file_time;
@@ -9895,7 +9967,7 @@ ResultType Line::FileGetTime(LPTSTR aFilespec, TCHAR aWhichTime)
 		FileTimeToLocalFileTime(&found_file.ftLastWriteTime, &local_file_time);
 	}
 
-    g_ErrorLevel->Assign(ERRORLEVEL_NONE);  // Indicate success.
+	AssignErrorLevels(FALSE, 0); // Indicate success.
 	TCHAR local_file_time_string[128];
 	return OUTPUT_VAR->Assign(FileTimeToYYYYMMDD(local_file_time_string, local_file_time));
 }
@@ -9912,13 +9984,20 @@ int Line::FileSetTime(LPTSTR aYYYYMMDD, LPTSTR aFilePattern, TCHAR aWhichTime
 	{
 		g_ErrorLevel->Assign(ERRORLEVEL_ERROR); // Set default
 		if (!*aFilePattern)
+		{
+			g->LastError = ERROR_INVALID_PARAMETER;
 			return 0;  // Let ErrorLevel indicate an error, since this is probably not what the user intended.
+		}
 		if (aOperateOnFolders == FILE_LOOP_INVALID) // In case runtime dereference of a var was an invalid value.
 			aOperateOnFolders = FILE_LOOP_FILES_ONLY;  // Set default.
+		g->LastError = 0; // Set default. Overridden only when a failure occurs.
 	}
 
 	if (_tcslen(aFilePattern) >= MAX_PATH) // Checked early to simplify other things below.
+	{
+		g->LastError = ERROR_BUFFER_OVERFLOW;
 		return 0; // Let the above ErrorLevel indicate the problem.
+	}
 
 	// Related to the comment at the top: Since the script subroutine that resulted in the call to
 	// this function can be interrupted during our MsgSleep(), make a copy of any params that might
@@ -9934,10 +10013,16 @@ int Line::FileSetTime(LPTSTR aYYYYMMDD, LPTSTR aFilePattern, TCHAR aWhichTime
 	{
 		// Convert the arg into the time struct as local (non-UTC) time:
 		if (!YYYYMMDDToFileTime(yyyymmdd, ft))
+		{
+			g->LastError = GetLastError();
 			return 0;  // Let ErrorLevel tell the story.
+		}
 		// Convert from local to UTC:
 		if (!LocalFileTimeToFileTime(&ft, &ftUTC))
+		{
+			g->LastError = GetLastError();
 			return 0;  // Let ErrorLevel tell the story.
+		}
 	}
 	else // User wants to use the current time (i.e. now) as the new timestamp.
 		GetSystemTimeAsFileTime(&ftUTC);
@@ -10007,6 +10092,7 @@ int Line::FileSetTime(LPTSTR aYYYYMMDD, LPTSTR aFilePattern, TCHAR aWhichTime
 			{
 				// v1.0.45.03: Don't even try to operate upon truncated filenames in case they accidentally
 				// match the name of a real/existing file.
+				g->LastError = ERROR_BUFFER_OVERFLOW;
 				++failure_count;
 				continue;
 			}
@@ -10025,6 +10111,7 @@ int Line::FileSetTime(LPTSTR aYYYYMMDD, LPTSTR aFilePattern, TCHAR aWhichTime
 				, FILE_FLAG_NO_BUFFERING | FILE_FLAG_BACKUP_SEMANTICS, NULL);
 			if (hFile == INVALID_HANDLE_VALUE)
 			{
+				g->LastError = GetLastError();
 				++failure_count;
 				continue;
 			}
@@ -10033,15 +10120,24 @@ int Line::FileSetTime(LPTSTR aYYYYMMDD, LPTSTR aFilePattern, TCHAR aWhichTime
 			{
 			case 'C': // File's creation time.
 				if (!SetFileTime(hFile, &ftUTC, NULL, NULL))
+				{
+					g->LastError = GetLastError();
 					++failure_count;
+				}
 				break;
 			case 'A': // File's last access time.
 				if (!SetFileTime(hFile, NULL, &ftUTC, NULL))
+				{
+					g->LastError = GetLastError();
 					++failure_count;
+				}
 				break;
 			default:  // 'M', unspecified, or some other value.  Use the file's modification time.
 				if (!SetFileTime(hFile, NULL, NULL, &ftUTC))
+				{
+					g->LastError = GetLastError();
 					++failure_count;
+				}
 			}
 
 			CloseHandle(hFile);
@@ -10096,14 +10192,14 @@ ResultType Line::FileGetSize(LPTSTR aFilespec, LPTSTR aGranularity)
 	OUTPUT_VAR->Assign(); // Init to be blank, in case of failure.
 
 	if (!aFilespec || !*aFilespec)
-		return g_ErrorLevel->Assign(ERRORLEVEL_ERROR);  // Let ErrorLevel indicate an error, since this is probably not what the user intended.
+		return AssignErrorLevels(TRUE, ERROR_INVALID_PARAMETER); // Let ErrorLevel indicate an error, since this is probably not what the user intended.
 
 	// Don't use CreateFile() & FileGetSize() because they will fail to work on a file that's in use.
 	// Research indicates that this method has no disadvantages compared to the other method.
 	WIN32_FIND_DATA found_file;
 	HANDLE file_search = FindFirstFile(aFilespec, &found_file);
 	if (file_search == INVALID_HANDLE_VALUE)
-		return g_ErrorLevel->Assign(ERRORLEVEL_ERROR);  // Let ErrorLevel tell the story.
+		return AssignErrorLevels(TRUE); // Let ErrorLevel tell the story.
 	FindClose(file_search);
 
 	unsigned __int64 size = (found_file.nFileSizeHigh * (unsigned __int64)MAXDWORD) + found_file.nFileSizeLow;
@@ -10120,6 +10216,7 @@ ResultType Line::FileGetSize(LPTSTR aFilespec, LPTSTR aGranularity)
 		// do nothing
 	}
 
+	g->LastError = 0;
     g_ErrorLevel->Assign(ERRORLEVEL_NONE);  // Indicate success.
 	return OUTPUT_VAR->Assign((__int64)(size > ULLONG_MAX ? -1 : size)); // i.e. don't allow it to wrap around.
 	// The below comment is obsolete in light of the switch to 64-bit integers.  But it might
@@ -15471,7 +15568,7 @@ void BIF_StrGetPut(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 			char_count = source_length + 1; // + 1 because generally a null-terminator is wanted.
 			if (length)
 			{
-				// Check for sufficient buffer space.  Cast to size_t and compare unsigned values: if length is
+				// Check for sufficient buffer space.  Cast to UINT and compare unsigned values: if length is
 				// -1 it should be interpreted as a very large unsigned value, in effect bypassing this check.
 				if (source_length <= length)
 				{

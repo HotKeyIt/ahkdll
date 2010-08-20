@@ -15210,7 +15210,7 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 #endif
 	case ACT_FILECOPY:
 	{
-		int error_count = Util_CopyFile(ARG1, ARG2, ArgToInt(3) == 1, false);
+		int error_count = Util_CopyFile(ARG1, ARG2, ArgToInt(3) == 1, false, g.LastError);
 		if (!error_count)
 			return g_ErrorLevel->Assign(ERRORLEVEL_NONE);
 		if (g_script.mIsAutoIt2)
@@ -15218,7 +15218,7 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 		return g_ErrorLevel->Assign(error_count);
 	}
 	case ACT_FILEMOVE:
-		return g_ErrorLevel->Assign(Util_CopyFile(ARG1, ARG2, ArgToInt(3) == 1, true));
+		return g_ErrorLevel->Assign(Util_CopyFile(ARG1, ARG2, ArgToInt(3) == 1, true, g.LastError));
 	case ACT_FILECOPYDIR:
 		return g_ErrorLevel->Assign(Util_CopyDir(ARG1, ARG2, ArgToInt(3) == 1) ? ERRORLEVEL_NONE : ERRORLEVEL_ERROR);
 	case ACT_FILEMOVEDIR:
