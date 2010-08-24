@@ -1448,7 +1448,6 @@ ResultType Line::Input()
 		return g_ErrorLevel->Assign(prior_input_is_being_terminated ? ERRORLEVEL_NONE : ERRORLEVEL_ERROR);
 		// Above: It's considered an "error" of sorts when there is no prior input to terminate.
 	}
-
 	// Below are done directly this way rather than passed in as args mainly to emphasize that
 	// ArgLength() can safely be called in Line methods like this one (which is done further below).
 	// It also may also slightly improve performance and reduce code size.
@@ -1735,13 +1734,30 @@ ResultType Line::Input()
 	// 2) A thread that interrupts us with a new Input of its own;
 	// 3) The timer we put in effect for our timeout (if we have one).
 	//////////////////////////////////////////////////////////////////
+	// HotKeyIt H24 check for vars contents and updatebuffer
+	TCHAR prev_buf[INPUT_BUFFER_SIZE];
+	if ((int)output_var->Length() <= INPUT_BUFFER_SIZE)
+		_tcscpy(prev_buf,output_var->Contents());
 	for (;;)
 	{
 		// Rather than monitoring the timeout here, just wait for the incoming WM_TIMER message
 		// to take effect as a TimerProc() call during the MsgSleep():
 		MsgSleep();
 		// HotKeyIt H15 added for multithreading support so variable can be read from other threads while input is in progress
-		output_var->Assign(input_buf);
+		if (_tcscmp(prev_buf,output_var->Contents())) // HotKeyIt H24 check for vars contents and updatebuffer
+		{
+			if ((int)output_var->Length() <= INPUT_BUFFER_SIZE)
+			{
+				g_input.BufferLength = (int)output_var->Length();
+				_tcscpy(g_input.buffer,output_var->Contents());
+				_tcscpy(prev_buf,output_var->Contents());
+			}
+		}
+		else if (_tcscmp(prev_buf,input_buf))
+		{
+			output_var->Assign(input_buf);
+			_tcscpy(prev_buf,output_var->Contents());
+		}
 		if (g_input.status != INPUT_IN_PROGRESS)
 			break;
 	}
