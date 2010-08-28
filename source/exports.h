@@ -26,6 +26,7 @@ int initPlugins();
 EXPORT unsigned int ahkFindFunc(LPTSTR funcname) ;
 #ifdef USRDLL
 EXPORT int ahkReload();
+EXPORT int ahkTerminate(bool kill=0);
 void reloadDll();
 ResultType terminateDll();
 #endif

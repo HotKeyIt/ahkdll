@@ -983,7 +983,7 @@ ResultType Script::ExitApp(ExitReasons aExitReason, LPTSTR aBuf, int aExitCode)
 		// extra thread for ExitApp() (which allows it to run even when MAX_THREADS_EMERGENCY has
 		// been reached).  See TOTAL_ADDITIONAL_THREADS.
 		g_AllowInterruption = FALSE; // In case TerminateApp releases objects and indirectly causes
- 	    g->IsPaused = false;     // more script to be executed.
+		g->IsPaused = false;		 // more script to be executed.
 		TerminateApp(aExitReason, aExitCode);
 	}
 
@@ -1606,7 +1606,7 @@ ResultType Script::LoadIncludedText(LPTSTR aFileSpec)
 			{
 				if (in_comment_section) // Look for the uncomment-flag.
 				{
-					if (!_tcsncmp(next_buf, _T("*/"), 2))
+					if (!_tcsncmp(next_buf, _T("*/"), 2) && !in_continuation_section)
 					{
 						in_comment_section = false;
 						next_buf_length -= 2; // Adjust for removal of /* from the beginning of the string.
@@ -1615,7 +1615,7 @@ ResultType Script::LoadIncludedText(LPTSTR aFileSpec)
 						if (!*next_buf) // The rest of the line is empty, so it was just a naked comment-end.
 							continue;
 					}
-					else
+					else if (in_comment_section)
 						continue;
 				}
 				else if (!in_continuation_section && !_tcsncmp(next_buf, _T("/*"), 2))
@@ -2883,7 +2883,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			next_buf_length = GetLine(next_buf, LINE_SIZE - 1, in_continuation_section, fp);
 			if (next_buf_length && next_buf_length != -1) // Prevents infinite loop when file ends with an unclosed "/*" section.  Compare directly to -1 since length is unsigned.
 			{
-				if (!_tcsncmp(next_buf, _T("*/"), 2)) // Check this even if !in_comment_section so it can be ignored (for convenience) and not treated as a line-continuation operator.
+				if (!_tcsncmp(next_buf, _T("*/"), 2) && !in_continuation_section) // Check this even if !in_comment_section so it can be ignored (for convenience) and not treated as a line-continuation operator.
 				{
 					in_comment_section = false;
 					next_buf_length -= 2; // Adjust for removal of /* from the beginning of the string.
@@ -4449,7 +4449,7 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		if (g_HotExprLineCount + 1 > g_HotExprLineCountMax)
 		{	// Allocate or reallocate g_HotExprLines.
 			g_HotExprLineCountMax += 100;
-			g_HotExprLines = (Line**)realloc(g_HotExprLines, g_HotExprLineCountMax * 4);
+			g_HotExprLines = (Line**)realloc(g_HotExprLines, g_HotExprLineCountMax * sizeof(Line**));
 		}
 		g_HotExprIndex = g_HotExprLineCount++;
 		g_HotExprLines[g_HotExprIndex] = hot_expr_line;
@@ -9101,11 +9101,13 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		bif = BIF_IsLabel;
 	else if (!_tcsicmp(func_name, _T("IsFunc")))
 		bif = BIF_IsFunc;
+#ifdef ENABLE_DLLCALL
 	else if (!_tcsicmp(func_name, _T("DllCall")))
 	{
 		bif = BIF_DllCall;
 		max_params = 10000; // An arbitrarily high limit that will never realistically be reached.
 	}
+#endif	
 #ifdef AUTOHOTKEYSC
 	else if (!_tcsicmp(func_name, _T("ResourceLoadLibrary")))
 	{
@@ -9191,11 +9193,13 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		// override the default set here.
 		g_persistent = true;
 	}
+#ifdef ENABLE_REGISTERCALLBACK
 	else if (!_tcsicmp(func_name, _T("RegisterCallback")))
 	{
 		bif = BIF_RegisterCallback;
 		max_params = 4; // Leave min_params at 1.
 	}
+#endif
 	else if (!_tcsicmp(func_name, _T("IsObject"))) // L31
 	{
 		bif = BIF_IsObject;
@@ -11066,7 +11070,6 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 					break;
 				case ',':
 					this_infix_item.symbol = SYM_COMMA; // Used to separate sub-statements and function parameters.
-					this_infix_item.marker = cp; // L31: For error-reporting.
 					break;
 				case '/':
 					if (cp1 == '=')
@@ -11139,7 +11142,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 						++infix_count;
 					}
 					infix[infix_count].symbol = SYM_OPAREN; // MUST NOT REFER TO this_infix_item IN CASE ABOVE DID ++infix_count.
-					infix[infix_count].marker = cp; // L31: For error-reporting.  L37: Also used to implement the requirement that there be no space between ']' and '(' in this: obj[method_name](params).
+					infix[infix_count].buf = cp; // Used to differentiate "obj[method_name](param)" from "obj[name] (string_to_concat)".
 					break;
 				case ')':
 					this_infix_item.symbol = SYM_CPAREN;
@@ -11173,7 +11176,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 					break;
 				case ']': // L31
 					this_infix_item.symbol = SYM_CBRACKET;
-					this_infix_item.marker = cp; // L37: Used to implement the requirement that there be no space between ']' and '(' in this: obj[method_name](params).
+					this_infix_item.buf = cp; // Used to differentiate "obj[method_name](param)" from "obj[name] (string_to_concat)".
 					break;
 				case '=':
 					if (cp1 == '=')
@@ -11796,8 +11799,8 @@ double_deref: // Caller has set cp to be start and op_end to be the character af
 					{
 						// Ensure the last postfix token is a var or something which can yield a var.
 						// This method should be very accurate unless a multi-statement is used; for example,
-						// the following is treated as an error since '+' can't yield a var: Func((var,not+var))
-						// Since multi-statements weren't previously allowed in parameter lists, this is acceptable.
+						// Func((var,not+var)) is difficult to validate since we don't know where the end of the
+						// first statement is; currently this use of multi-statement bypasses ByRef validation.
 						bool is_byref_compatible = false;
 						if (postfix_count)
 						{
@@ -11807,6 +11810,7 @@ double_deref: // Caller has set cp to be start and op_end to be the character af
 							{
 							case SYM_VAR:
 							case SYM_DYNAMIC:		// Cannot be the SYM_DYNAMIC of a dynamic function call since there would be a SYM_FUNC following it.  Must be allowed for ByRef to work with %double_derefs% OR without #NoEnv.
+								// TODO: Determine if built-in vars can be excluded here (show an error message).
 							case SYM_PRE_INCREMENT:
 							case SYM_PRE_DECREMENT:
 							case SYM_IFF_ELSE:		// Difficult to validate, maybe OK.
@@ -11901,10 +11905,10 @@ double_deref: // Caller has set cp to be start and op_end to be the character af
 				//--stack_count; // DON'T remove this SYM_OBRACKET from the stack.  It is left on the stack for reuse below.
 
 				// L37: Detect obj[method_name](params):
-				if (this_infix[1].symbol == SYM_CONCAT && this_infix[2].symbol == SYM_OPAREN && this_infix[2].marker == this_infix->marker + 1)
+				if (this_infix[1].symbol == SYM_CONCAT && this_infix[2].symbol == SYM_OPAREN && this_infix[2].buf == this_infix->buf + 1)
 				{	// The final check above ensures this is "](" and not "] (" or "] . (".
 					if (in_param_list->param_count != 2) // Require exactly one [parameter], excluding the target object.
-						return LineError(_T("Exactly one [name_parameter] must precede the (parameter list)."), FAIL, this_obracket.deref->marker);
+						return LineError(_T("Exactly one [ parameter ] required in this case"), FAIL, this_obracket.deref->marker);
 					this_infix += 2; // Skip the SYM_CONCAT and SYM_CBRACKET.
 					// Treat this as a continuation of the parameter list for this operation, which is now known to be ObjCall.
 					// in_param_list must remain pointing to the same deref, which we will continue to use to count parameters.
@@ -12117,10 +12121,13 @@ double_deref: // Caller has set cp to be start and op_end to be the character af
 standard_pop_into_postfix: // Use of a goto slightly reduces code size.
 		this_postfix = STACK_POP;
 		this_postfix->circuit_token = NULL; // Set default. It's only ever overridden after it's in the postfix array.
-		if (this_postfix->symbol == SYM_SET) // L31: Convert SYM_SET to SYM_FUNC so SYM_SET doesn't need to be handled at run-time.  SYM_SET is required at load-time for precedence rules to apply correctly to ObjSet (obj["name"]:=value or obj.name:=value).
+		switch (this_postfix->symbol)
+		{
+		case SYM_SET: // L31: Convert SYM_SET to SYM_FUNC so SYM_SET doesn't need to be handled at run-time.  SYM_SET is required at load-time for precedence rules to apply correctly to ObjSet (obj["name"]:=value or obj.name:=value).
+		case SYM_REGEXMATCH: // a ~= b  ->  RegExMatch(a, b)
 			this_postfix->symbol = SYM_FUNC;
-		else if (this_postfix->symbol == SYM_REGEXMATCH) // L31: Similar to above.
-			this_postfix->symbol = SYM_FUNC;
+			break;
+ 		}
 		++postfix_count;
 	} // End of loop that builds postfix array from the infix array.
 end_of_infix_to_postfix:
