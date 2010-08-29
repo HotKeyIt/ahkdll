@@ -269,8 +269,6 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 		}
 		else // aSleepDuration < 1 || empty_the_queue_via_peek || g_DeferMessagesForUnderlyingPump
 		{
-#if defined(CONFIG_WIN9X) || defined(CONFIG_WINNT4)
-#pragma message("MsgSleep should be modified to use PM_QS_SENDMESSAGE|PM_QS_POSTMESSAGE where available.")
 			bool do_special_msg_filter, peek_was_done = false; // Set default.
 			// Check the active window in each iteration in case a signficant amount of time has passed since
 			// the previous iteration (due to launching threads, etc.)
@@ -284,13 +282,13 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 					GetClassName(fore_window, wnd_class_name, _countof(wnd_class_name));
 					do_special_msg_filter = !_tcscmp(wnd_class_name, _T("#32770"));  // Due to checking g_nFileDialogs above, this means that this dialog is probably FileSelectFile rather than MsgBox/InputBox/FileSelectFolder (even if this guess is wrong, it seems fairly inconsequential to filter the messages since other pump beneath us on the call-stack will handle them ok).
 				}
-#endif
 				if (!do_special_msg_filter && (focused_control = GetFocus()))
 				{
 					GetClassName(focused_control, wnd_class_name, _countof(wnd_class_name));
 					do_special_msg_filter = !_tcsicmp(wnd_class_name, _T("SysTreeView32")) // A TreeView owned by our thread has focus (includes FileSelectFolder's TreeView).
 						|| !_tcsicmp(wnd_class_name, _T("SysListView32"));
 				}
+#endif
 				if (do_special_msg_filter)
 				{
 					// v1.0.48.03: Below now applies to SysListView32 because otherwise a timer that runs
@@ -342,12 +340,6 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 			}
 			if (!peek_was_done) // Since above didn't Peek(), fall back to doing the Peek with the standard filter.
 				peek_result = PeekMessage(&msg, NULL, 0, MSG_FILTER_MAX, PM_REMOVE);
-#else
-			// Since Win95/NT4 aren't supported, use the PM_QS_* flags to exclude INPUT and PAINT messages.
-			// This solves an infinite WM_PAINT loop issue which often crops up when script subclasses a window,
-			// and removes the need for do_special_msg_filter in the section above.
-			peek_result = PeekMessage(&msg, NULL, 0, MSG_FILTER_MAX, PM_REMOVE | PM_QS_SENDMESSAGE | PM_QS_POSTMESSAGE);
-#endif
 			if (!peek_result) // No more messages
 			{
 				// Since the Peek() didn't find any messages, our timeslice may have just been

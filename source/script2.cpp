@@ -9643,6 +9643,8 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 #ifdef AUTOHOTKEYSC
 	if (!allow_overwrite && Util_DoesFileExist(aDest))
 		return OK; // Let ErrorLevel tell the story.
+#ifdef ENABLE_EXEARC
+
 	HS_EXEArc_Read oRead;
 	// AutoIt3: Open the archive in this compiled exe.
 	// Jon gave me some details about why a password isn't needed: "The code in those libararies will
@@ -9675,7 +9677,44 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 		return OK; // Let ErrorLevel tell the story.
 	}
 	g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
-#else
+
+#else // ENABLE_EXEARC not defined:
+
+	// Open the file first since it's the most likely to fail:
+	HANDLE hfile = CreateFile(aDest, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+	if (hfile == INVALID_HANDLE_VALUE)
+		return OK;
+
+	// Create a temporary copy of aSource to ensure it is the correct case (upper-case).
+	// Ahk2Exe converts it to upper-case before adding the resource. My testing showed that
+	// using lower or mixed case in some instances prevented the resource from being found.
+	// Since file paths are case-insensitive, it certainly doesn't seem harmful to do this:
+	TCHAR source[MAX_PATH];
+	size_t source_length = _tcslen(aSource);
+	if (source_length >= _countof(source))
+		// Probably can't happen; for simplicity, truncate it.
+		source_length = _countof(source) - 1;
+	tmemcpy(source, aSource, source_length + 1);
+	_tcsupr(source);
+
+	// Find and load the resource.
+	HRSRC res;
+	HGLOBAL res_load;
+	LPVOID res_lock;
+	if ( (res = FindResource(NULL, source, MAKEINTRESOURCE(RT_RCDATA)))
+	  && (res_load = LoadResource(NULL, res))
+	  && (res_lock = LockResource(res_load))  )
+	{
+		DWORD num_bytes_written;
+		// Write the resource data to file.
+		if (WriteFile(hfile, res_lock, SizeofResource(NULL, res), &num_bytes_written, NULL))
+			g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
+	}
+	CloseHandle(hfile);
+
+#endif
+#else // AUTOHOTKEYSC not defined:
+
 	// v1.0.35.11: Must search in A_ScriptDir by default because that's where ahk2exe will search by default.
 	// The old behavior was to search in A_WorkingDir, which seems pointless because ahk2exe would never
 	// be able to use that value if the script changes it while running.
@@ -15942,8 +15981,9 @@ void BIF_ResourceLoadLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[
 	aResultToken.symbol = PURE_INTEGER;
 	aResultToken.value_int64 = 0;
 	HMEMORYMODULE module = NULL;
-	HS_EXEArc_Read oRead;
 	TextMem::Buffer textbuf;
+#ifdef ENABLE_EXEARC
+	HS_EXEArc_Read oRead;
 
 	// AutoIt3: Open the archive in this compiled exe.
 	// Jon gave me some details about why a password isn't needed: "The code in those libararies will
@@ -15963,10 +16003,30 @@ void BIF_ResourceLoadLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[
 		return;
 	}
 	oRead.Close(); // no longer used
+#else
+	HRSRC hRes;
+	HGLOBAL hResData;
+
+#ifdef _DEBUG
+	if (hRes = FindResource(NULL, aParam[0]->symbol == SYM_VAR ? aParam[0]->var->Contents() : aParam[0]->marker, MAKEINTRESOURCE(RT_RCDATA)))
+#else
+	if (hRes = FindResource(NULL, aParam[0]->symbol == SYM_VAR ? aParam[0]->var->Contents() : aParam[0]->marker, MAKEINTRESOURCE(RT_RCDATA)))
+#endif
+	
+	if ( !( hRes 
+			&& (textbuf.mLength = SizeofResource(NULL, hRes))
+			&& (hResData = LoadResource(NULL, hRes))
+			&& (textbuf.mBuffer = LockResource(hResData)) ) )
+	{
+		MsgBox(_T("Could not extract script from EXE."), 0, aParam[0]->symbol == SYM_VAR ? aParam[0]->var->Contents() : aParam[0]->marker);
+		return;
+	}
+#endif
 	module = MemoryLoadLibrary( textbuf.mBuffer );
 	aResultToken.value_int64 = (unsigned)module;
 }
 #endif
+
 void BIF_MemoryLoadLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
 	aResultToken.symbol = SYM_INTEGER;

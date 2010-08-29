@@ -2756,8 +2756,10 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 	//else the first file was already taken care of by another means.
 
 #else // Stand-alone mode (there are no include files in this mode since all of them were merged into the main script at the time of compiling).
+	TextMem::Buffer textbuf(NULL, 0, false);
+
+#ifdef ENABLE_EXEARC
 	HS_EXEArc_Read oRead;
-	TextMem::Buffer textbuf;
 
 	// AutoIt3: Open the archive in this compiled exe.
 	// Jon gave me some details about why a password isn't needed: "The code in those libararies will
@@ -2785,6 +2787,29 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 	// this means that instead of a newline character, there may also be carriage
 	// returns 0x0d 0x0a (\r\n)
 	oRead.Close(); // no longer used
+#else
+	HRSRC hRes;
+	HGLOBAL hResData;
+
+#ifdef _DEBUG
+	if (hRes = FindResource(NULL, _T("AHK"), MAKEINTRESOURCE(RT_RCDATA)))
+#else
+	if (hRes = FindResource(NULL, _T(">AUTOHOTKEY SCRIPT<"), MAKEINTRESOURCE(RT_RCDATA)))
+#endif
+		mCompiledHasCustomIcon = false;
+	else if (hRes = FindResource(NULL, _T(">AHK WITH ICON<"), MAKEINTRESOURCE(RT_RCDATA)))
+		mCompiledHasCustomIcon = true;
+	
+	if ( !( hRes 
+			&& (textbuf.mLength = SizeofResource(NULL, hRes))
+			&& (hResData = LoadResource(NULL, hRes))
+			&& (textbuf.mBuffer = LockResource(hResData)) ) )
+	{
+		MsgBox(_T("Could not extract script from EXE."), 0, aFileSpec);
+		return FAIL;
+	}
+#endif
+
 	TextMem tmem, *fp = &tmem;
 	// NOTE: Ahk2Exe strips off the UTF-8 BOM.
 	tmem.Open(textbuf, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR, CP_UTF8);
@@ -2881,9 +2906,10 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			// This increment relies on the fact that this loop always has at least one iteration:
 			++phys_line_number; // Tracks phys. line number in *this* file (independent of any recursion caused by #Include).
 			next_buf_length = GetLine(next_buf, LINE_SIZE - 1, in_continuation_section, fp);
-			if (next_buf_length && next_buf_length != -1) // Prevents infinite loop when file ends with an unclosed "/*" section.  Compare directly to -1 since length is unsigned.
+			if (next_buf_length && next_buf_length != -1 // Prevents infinite loop when file ends with an unclosed "/*" section.  Compare directly to -1 since length is unsigned.
+				&& !in_continuation_section) // Multi-line comments can't be used in continuation sections. This line fixes '*/' being discarded in continuation sections (broken by L54).
 			{
-				if (!_tcsncmp(next_buf, _T("*/"), 2) && !in_continuation_section) // Check this even if !in_comment_section so it can be ignored (for convenience) and not treated as a line-continuation operator.
+				if (!_tcsncmp(next_buf, _T("*/"), 2)) // Check this even if !in_comment_section so it can be ignored (for convenience) and not treated as a line-continuation operator.
 				{
 					in_comment_section = false;
 					next_buf_length -= 2; // Adjust for removal of /* from the beginning of the string.
@@ -2895,7 +2921,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 				else if (in_comment_section)
 					continue;
 
-				if (!in_continuation_section && !_tcsncmp(next_buf, _T("/*"), 2))
+				if (!_tcsncmp(next_buf, _T("/*"), 2))
 				{
 					in_comment_section = true;
 					continue; // It's now commented out, so the rest of this line is ignored.
