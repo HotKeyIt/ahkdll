@@ -43,7 +43,7 @@ static TextMem::Buffer includedtextbuf; //HotKeyIt for dll to read script from m
 
 
 Script::Script()
-	: mFirstLine(NULL), mLastLine(NULL), mCurrLine(NULL), mPlaceholderLabel(NULL), mLineCount(0)
+	: mFirstLine(NULL), mLastLine(NULL), mCurrLine(NULL), mPlaceholderLabel(NULL), mFirstStaticLine(NULL), mLastStaticLine(NULL)
 #ifndef MINIDLL
 	, mThisHotkeyName(_T("")), mPriorHotkeyName(_T("")), mThisHotkeyStartTime(0), mPriorHotkeyStartTime(0)
 	, mEndChar(0), mThisHotkeyModifiersLR(0)
@@ -301,7 +301,8 @@ void Script::Destroy()
 	mFirstLabel = NULL ; 
 	mLastLabel = NULL ;
 	mLastFunc = NULL ;
-	mLineCount = 0;  
+	mFirstStaticLine = 0; 
+	mLastStaticLine = 0;  
     mFirstLine = NULL ; 
 	mLastLine = NULL ;
 	mCurrLine = NULL ;
@@ -1122,28 +1123,57 @@ LineNumberType Script::LoadFromText(LPTSTR aScript)
 		|| !AddLine(ACT_EXIT)) // Fix for v1.0.47.04: Add an Exit because otherwise, a script that ends in an IF-statement will crash in PreparseBlocks() because PreparseBlocks() expects every IF-statements mNextLine to be non-NULL (helps loading performance too).
 		return LOADING_FAILED;
 
+	// BELOW: Aside from setting up {} blocks, PreparseBlocks() resolves function references in expressions.
+	// Originally PreparseBlocks() resolved all function references in one sweep. Since func lib auto-inclusions
+	// are appended to the main script, they were automatically handled by a later iteration of the loop inside
+	// PreparseBlocks(). However, the introduction of #If and Static initializers bring some complications:
+	//   (a) Function-calls in the main script, #If expressions or Static initializers can cause auto-inclusions.
+	//   (b) Auto-inclusions can introduce more function-calls.
+	//   (c) Auto-inclusions can introduce more #If expressions or Static initializers.
+	// The loop below handles these potentially "recursive" cases.
+	Line *last_line_processed = NULL, *last_static_processed = NULL;
+	int expr_line_index = 0;
+	for (;;)
+	{
 #ifndef MINIDLL
-	if (g_HotExprLineCount)
-	{	// Resolve function references on #if (expression) lines.
-		for (int expr_line_index = 0; expr_line_index < g_HotExprLineCount; ++expr_line_index)
+		// Check for any unprocessed #if expressions:
+		for ( ; expr_line_index < g_HotExprLineCount; ++expr_line_index)
 		{
-			Line *was_last_line = mLastLine;
 			Line *line = g_HotExprLines[expr_line_index];
-			// Since PreparseBlocks assumes mNextLine!=NULL for ACT_IFEXPR, temporarily change mActionType to something else.
-			line->mActionType = ACT_INVALID;
-			PreparseBlocks(line);
+			if (!PreparseBlocks(line))
+				return LOADING_FAILED;
+			// Search for "ACT_EXPRESSION will be changed to ACT_IFEXPR" for comments about the following line:
 			line->mActionType = ACT_IFEXPR;
-
-			// The above may have auto-included a file from the userlib/stdlib,
-			// in which case function references in the newly added code will be
-			// resolved with the rest of the script, below.
 		}
-	}
 #endif
-	if (!PreparseBlocks(mFirstLine))
-		return LOADING_FAILED; // Error was already displayed by the above calls.
+		// Check for any unprocessed static initializers:
+		if (last_static_processed != mLastStaticLine)
+		{
+			if (!PreparseBlocks(last_static_processed ? last_static_processed->mNextLine : mFirstStaticLine))
+				return LOADING_FAILED;
+			last_static_processed = mLastStaticLine;
+		}
+		// Check for any unprocessed lines in the main script:
+		if (last_line_processed != mLastLine)
+		{
+			if (!PreparseBlocks(last_line_processed ? last_line_processed->mNextLine : mFirstLine))
+				return LOADING_FAILED; // Error was already displayed by the above call.
+			last_line_processed = mLastLine;
+		}
+		// Since #If expressions and Static initializers can't directly bring about more #If expressions or Static
+		// initializers, the fact that no new lines have been added to the script since the last iteration means
+		// all lines in the main script, all #If expressions and all Static initializers have been processed.
+		else break;
+	}
 	// ABOVE: In v1.0.47, the above may have auto-included additional files from the userlib/stdlib.
 	// That's why the above is done prior to adding the EXIT lines and other things below.
+	if (mFirstStaticLine)
+	{
+		// Prepend all Static initializers to the beginning of the auto-execute section.
+		mLastStaticLine->mNextLine = mFirstLine;
+		mFirstLine->mPrevLine = mLastStaticLine;
+		mFirstLine = mFirstStaticLine;
+	}
 
 #ifndef AUTOHOTKEYSC
 	if (mIncludeLibraryFunctionsThenExit)
@@ -1203,9 +1233,10 @@ LineNumberType Script::LoadFromText(LPTSTR aScript)
 	// using it as a seed superior to GetTickCount for most purposes.
 	RESEED_RANDOM_GENERATOR;
 
-	return mLineCount; // The count of runnable lines that were loaded, which might be zero.
+	return TRUE; // Must be non-zero.
+	// OBSOLETE: mLineCount was always non-zero at this point since above did AddLine().
+	//return mLineCount; // The count of runnable lines that were loaded, which might be zero.
 }
-
 
 
 
@@ -1214,9 +1245,9 @@ LineNumberType Script::LoadFromText(LPTSTR aScript)
 
 #endif
 #ifdef AUTOHOTKEYSC
-LineNumberType Script::LoadFromFile()
+UINT Script::LoadFromFile()
 #else
-LineNumberType Script::LoadFromFile(bool aScriptWasNotspecified)
+UINT Script::LoadFromFile(bool aScriptWasNotspecified)
 #endif
 // Returns the number of non-comment lines that were loaded, or LOADING_FAILED on error.
 {
@@ -1317,28 +1348,58 @@ _T("; keystrokes and mouse clicks.  It also explains more about hotkeys.\n")
 	if (   LoadIncludedFile(mFileSpec, false, false) != OK
 		|| !AddLine(ACT_EXIT)) // Fix for v1.0.47.04: Add an Exit because otherwise, a script that ends in an IF-statement will crash in PreparseBlocks() because PreparseBlocks() expects every IF-statements mNextLine to be non-NULL (helps loading performance too).
 		return LOADING_FAILED;
-#ifndef MINIDLL
-	if (g_HotExprLineCount)
-	{	// Resolve function references on #if (expression) lines.
-		for (int expr_line_index = 0; expr_line_index < g_HotExprLineCount; ++expr_line_index)
-		{
-			Line *was_last_line = mLastLine;
-			Line *line = g_HotExprLines[expr_line_index];
-			// Since PreparseBlocks assumes mNextLine!=NULL for ACT_IFEXPR, temporarily change mActionType to something else.
-			line->mActionType = ACT_INVALID;
-			PreparseBlocks(line);
-			line->mActionType = ACT_IFEXPR;
 
-			// The above may have auto-included a file from the userlib/stdlib,
-			// in which case function references in the newly added code will be
-			// resolved with the rest of the script, below.
+	// BELOW: Aside from setting up {} blocks, PreparseBlocks() resolves function references in expressions.
+	// Originally PreparseBlocks() resolved all function references in one sweep. Since func lib auto-inclusions
+	// are appended to the main script, they were automatically handled by a later iteration of the loop inside
+	// PreparseBlocks(). However, the introduction of #If and Static initializers bring some complications:
+	//   (a) Function-calls in the main script, #If expressions or Static initializers can cause auto-inclusions.
+	//   (b) Auto-inclusions can introduce more function-calls.
+	//   (c) Auto-inclusions can introduce more #If expressions or Static initializers.
+	// The loop below handles these potentially "recursive" cases.
+	Line *last_line_processed = NULL, *last_static_processed = NULL;
+	int expr_line_index = 0;
+	for (;;)
+	{
+		// Check for any unprocessed #if expressions:
+#ifndef MINIDLL
+		for ( ; expr_line_index < g_HotExprLineCount; ++expr_line_index)
+		{
+			Line *line = g_HotExprLines[expr_line_index];
+			if (!PreparseBlocks(line))
+				return LOADING_FAILED;
+			// Search for "ACT_EXPRESSION will be changed to ACT_IFEXPR" for comments about the following line:
+			line->mActionType = ACT_IFEXPR;
 		}
-	}
 #endif
-	if (!PreparseBlocks(mFirstLine))
-		return LOADING_FAILED; // Error was already displayed by the above calls.
+		// Check for any unprocessed static initializers:
+		if (last_static_processed != mLastStaticLine)
+		{
+			if (!PreparseBlocks(last_static_processed ? last_static_processed->mNextLine : mFirstStaticLine))
+				return LOADING_FAILED;
+			last_static_processed = mLastStaticLine;
+		}
+		// Check for any unprocessed lines in the main script:
+		if (last_line_processed != mLastLine)
+		{
+			if (!PreparseBlocks(last_line_processed ? last_line_processed->mNextLine : mFirstLine))
+				return LOADING_FAILED; // Error was already displayed by the above call.
+			last_line_processed = mLastLine;
+		}
+		// Since #If expressions and Static initializers can't directly bring about more #If expressions or Static
+		// initializers, the fact that no new lines have been added to the script since the last iteration means
+		// all lines in the main script, all #If expressions and all Static initializers have been processed.
+		else break;
+	}
 	// ABOVE: In v1.0.47, the above may have auto-included additional files from the userlib/stdlib.
 	// That's why the above is done prior to adding the EXIT lines and other things below.
+	if (mFirstStaticLine)
+	{
+		// Prepend all Static initializers to the beginning of the auto-execute section.
+		mLastStaticLine->mNextLine = mFirstLine;
+		mFirstLine->mPrevLine = mLastStaticLine;
+		mFirstLine = mFirstStaticLine;
+	}
 
 #ifndef AUTOHOTKEYSC
 	if (mIncludeLibraryFunctionsThenExit)
@@ -1398,7 +1459,9 @@ _T("; keystrokes and mouse clicks.  It also explains more about hotkeys.\n")
 	// using it as a seed superior to GetTickCount for most purposes.
 	RESEED_RANDOM_GENERATOR;
 
-	return mLineCount; // The count of runnable lines that were loaded, which might be zero.
+	return TRUE; // Must be non-zero.
+	// OBSOLETE: mLineCount was always non-zero at this point since above did AddLine().
+	//return mLineCount; // The count of runnable lines that were loaded, which might be zero.
 }
 
 
@@ -4279,83 +4342,84 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 
 	bool is_include_again = false; // Set default in case of short-circuit boolean.
 	if (IS_DIRECTIVE_MATCH(_T("#Include")) || (is_include_again = IS_DIRECTIVE_MATCH(_T("#IncludeAgain"))))
-   {
-      // Standalone EXEs ignore this directive since the included files were already merged in
-      // with the main file when the script was compiled.  These should have been removed
-      // or commented out by Ahk2Exe, but just in case, it's safest to ignore them:
+	{
+		// Standalone EXEs ignore this directive since the included files were already merged in
+		// with the main file when the script was compiled.  These should have been removed
+		// or commented out by Ahk2Exe, but just in case, it's safest to ignore them:
 #ifdef AUTOHOTKEYSC
-      return CONDITION_TRUE;
+		return CONDITION_TRUE;
 #else
-      // If the below decision is ever changed, be sure to update ahk2exe with the same change:
-      // "parameter" is checked rather than parameter_raw for backward compatibility with earlier versions,
-      // in which a leading comma is not considered part of the filename.  Although this behavior is incorrect
-      // because it prevents files whose names start with a comma from being included without the first
-      // delim-comma being there too, it is kept because filesnames that start with a comma seem
-      // exceedingly rare.  As a workaround, the script can do #Include ,,FilenameWithLeadingComma.ahk
-      if (!parameter)
-         return ScriptError(ERR_PARAM1_REQUIRED, aBuf);
-      // v1.0.32:
-      // bool ignore_load_failure = (parameter[0] == '*' && ctoupper(parameter[1]) == 'I'); // Relies on short-circuit boolean order.
-      bool ignore_load_failure = false ;
-      FileLoopModeType loopmode = FILE_LOOP_FILES_ONLY ;
-      bool recurse = false ;
-      
-      if (parameter[0] == '*')
-      {
-         parameter += 1;   
+		// If the below decision is ever changed, be sure to update ahk2exe with the same change:
+		// "parameter" is checked rather than parameter_raw for backward compatibility with earlier versions,
+		// in which a leading comma is not considered part of the filename.  Although this behavior is incorrect
+		// because it prevents files whose names start with a comma from being included without the first
+		// delim-comma being there too, it is kept because filesnames that start with a comma seem
+		// exceedingly rare.  As a workaround, the script can do #Include ,,FilenameWithLeadingComma.ahk
+		if (!parameter)
+			return ScriptError(ERR_PARAM1_REQUIRED, aBuf);
+		// v1.0.32:
+		bool ignore_load_failure = (parameter[0] == '*' && ctoupper(parameter[1]) == 'I'); // Relies on short-circuit boolean order.
+		if (ignore_load_failure)
+		{
+			parameter += 2;
+			if (IS_SPACE_OR_TAB(*parameter)) // Skip over at most one space or tab, since others might be a literal part of the filename.
+				++parameter;
+		}
 
-         ignore_load_failure = (ctoupper(parameter[0]) == 'I');
-           if (ignore_load_failure)
-            parameter += 1;   
-         recurse = (ctoupper(parameter[0]) == 'R');
-          if (recurse)      // recurse ?                
-            parameter += 1;   
-               
-         if (IS_SPACE_OR_TAB(*parameter)) // Skip over at most one space or tab, since others might be a literal part of the filename.
-            ++parameter;
+		if (*parameter == '<') // Support explicitly-specified <standard_lib_name>.
+		{
+			LPTSTR parameter_end = _tcschr(parameter, '>');
+			if (parameter_end && !parameter_end[1])
+			{
+				++parameter; // Remove '<'.
+				*parameter_end = '\0'; // Remove '>'.
+				bool error_was_shown, file_was_found;
+				// Attempt to include a script file based on the same rules as func() auto-include:
+				FindFuncInLibrary(parameter, parameter_end - parameter, error_was_shown, file_was_found);
+				// If any file was included, consider it a success; i.e. allow #include <lib> and #include <lib_func>.
+				if (!error_was_shown && file_was_found || ignore_load_failure)
+					return CONDITION_TRUE;
+				*parameter_end = '>'; // Restore '>' for display to the user.
+				return error_was_shown ? FAIL : ScriptError(_T("Function library not found."), aBuf);
+			}
+			//else invalid syntax; treat it as a regular #include which will almost certainly fail.
+		}
 
-      }
-      size_t space_remaining = LINE_SIZE - (parameter-aBuf);
-      TCHAR buf[MAX_PATH];
-      StrReplace(parameter, _T("%A_ScriptDir%"), mFileDir, SCS_INSENSITIVE, 1, space_remaining); // v1.0.35.11.  Caller has ensured string is writable.
-      if (tcscasestr(parameter, _T("%A_AppData%"))) // v1.0.45.04: This and the next were requested by Tekl to make it easier to customize scripts on a per-user basis.
-      {
-         BIV_AppData(buf, _T("A_AppData"));
-         StrReplace(parameter, _T("%A_AppData%"), buf, SCS_INSENSITIVE, 1, space_remaining);
-      }
-      if (tcscasestr(parameter, _T("%A_AppDataCommon%"))) // v1.0.45.04.
-      {
-         BIV_AppData(buf, _T("A_AppDataCommon"));
-         StrReplace(parameter, _T("%A_AppDataCommon%"), buf, SCS_INSENSITIVE, 1, space_remaining);
-      }
+		size_t space_remaining = LINE_SIZE - (parameter-aBuf);
+		TCHAR buf[MAX_PATH];
+		StrReplace(parameter, _T("%A_ScriptDir%"), mFileDir, SCS_INSENSITIVE, 1, space_remaining); // v1.0.35.11.  Caller has ensured string is writable.
+		if (tcscasestr(parameter, _T("%A_AppData%"))) // v1.0.45.04: This and the next were requested by Tekl to make it easier to customize scripts on a per-user basis.
+		{
+			BIV_AppData(buf, _T("A_AppData"));
+			StrReplace(parameter, _T("%A_AppData%"), buf, SCS_INSENSITIVE, 1, space_remaining);
+		}
+		if (tcscasestr(parameter, _T("%A_AppDataCommon%"))) // v1.0.45.04.
+		{
+			BIV_AppData(buf, _T("A_AppDataCommon"));
+			StrReplace(parameter, _T("%A_AppDataCommon%"), buf, SCS_INSENSITIVE, 1, space_remaining);
+		}
 
-      DWORD attr = GetFileAttributes(parameter);
-      if (attr != 0xFFFFFFFF && (attr & FILE_ATTRIBUTE_DIRECTORY)) // File exists and its a directory (possibly A_ScriptDir or A_AppData set above).
-      {
-         // v1.0.35.11 allow changing of load-time directory to increase flexibility.  This feature has
-         // been asked for directly or indirectly several times.
-         // If a script ever wants to use a string like "%A_ScriptDir%" literally in an include's filename,
-         // that would not work.  But that seems too rare to worry about.
-         // v1.0.45.01: Call SetWorkingDir() vs. SetCurrentDirectory() so that it succeeds even for a root
-         // drive like C: that lacks a backslash (see SetWorkingDir() for details).
-         SetWorkingDir(parameter);
-         return CONDITION_TRUE;
-      }
-      // Since above didn't return, it's a file (or non-existent file, in which case the below will display
-      // the error).  This will also display any other errors that occur:
-	  return Line::IncludeFiles(is_include_again, ignore_load_failure, loopmode, recurse, parameter) ? CONDITION_TRUE : FAIL;
-      //   return LoadIncludedFile(parameter, is_include_again, ignore_load_failure) ? CONDITION_TRUE : FAIL;
+		DWORD attr = GetFileAttributes(parameter);
+		if (attr != 0xFFFFFFFF && (attr & FILE_ATTRIBUTE_DIRECTORY)) // File exists and its a directory (possibly A_ScriptDir or A_AppData set above).
+		{
+			// v1.0.35.11 allow changing of load-time directory to increase flexibility.  This feature has
+			// been asked for directly or indirectly several times.
+			// If a script ever wants to use a string like "%A_ScriptDir%" literally in an include's filename,
+			// that would not work.  But that seems too rare to worry about.
+			// v1.0.45.01: Call SetWorkingDir() vs. SetCurrentDirectory() so that it succeeds even for a root
+			// drive like C: that lacks a backslash (see SetWorkingDir() for details).
+			SetWorkingDir(parameter);
+			return CONDITION_TRUE;
+		}
+		// Since above didn't return, it's a file (or non-existent file, in which case the below will display
+		// the error).  This will also display any other errors that occur:
+		return LoadIncludedFile(parameter, is_include_again, ignore_load_failure) ? CONDITION_TRUE : FAIL;
 #endif
-   }
+	}
 
 	if (IS_DIRECTIVE_MATCH(_T("#NoEnv")))
 	{
 		g_NoEnv = TRUE;
-		if (parameter)
-		{
-			if (!_tcsicmp(parameter, _T("Off")))
-				g_NoEnv = FALSE;
-		}
 		return CONDITION_TRUE;
 	}
 	if (IS_DIRECTIVE_MATCH(_T("#NoTrayIcon")))
@@ -4423,33 +4487,19 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 			return CONDITION_TRUE;
 		}
 
-		ResultType res;
-
 		Func *currentFunc = g->CurrentFunc;
-		bool nextLineIsFunctionBody = mNextLineIsFunctionBody;
 		Var **funcExceptionVar = mFuncExceptionVar;
-		Func *lastFunc = mLastFunc;
-		
-		// Set things up so:
-		//  a) Variable references are always global.
-		//  b) AddLine doesn't make our dummy line the body of a function in cases such as this:
-		//		function() {
-		//		#if expression
+
+		// Ensure variable references are global:
 		g->CurrentFunc = NULL;
-		mNextLineIsFunctionBody = false;
 		mFuncExceptionVar = NULL;
-		mLastFunc = NULL;
 
-		// ACT_IFEXPR vs ACT_EXPRESSION so EvaluateCondition() can be used. Also, ACT_EXPRESSION is designed to discard the result of the expression, since it normally would not be used.
-		if ((res = AddLine(ACT_IFEXPR, &parameter, 1)) != OK)
-			return res;
+		// ACT_EXPRESSION will be changed to ACT_IFEXPR after PreparseBlocks() is called so that EvaluateCondition()
+		// can be used and because ACT_EXPRESSION is designed to discard its result (since it normally would not be
+		// used). This can't be done before PreparseBlocks() is called since this isn't really an IF (it has no body).
+		if (!AddLine(ACT_EXPRESSION, &parameter, UCHAR_MAX + 1)) // UCHAR_MAX signals AddLine to avoid pointing any pending labels or functions at the new line.
+			return FAIL; // Above already displayed the error message.
 		Line *hot_expr_line = mLastLine;
-
-		// Now undo the unwanted effects of AddLine:
-
-		// Ensure no labels were pointed to the newly added line.
-		for (Label *label = mLastLabel; label != NULL && label->mJumpToLine == mLastLine; label = label->mPrevLabel)
-			label->mJumpToLine = NULL;
 
 		// Remove the newly added line from the actual script.
 		if (mFirstLine == mLastLine)
@@ -4458,13 +4508,10 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		if (mLastLine) // Will be NULL if no actual code precedes the #if.
 			mLastLine->mNextLine = NULL;
 		mCurrLine = mLastLine;
-		--mLineCount;
 
 		// Restore the properties we overrode earlier.
 		g->CurrentFunc = currentFunc;
-		mNextLineIsFunctionBody = nextLineIsFunctionBody;
 		mFuncExceptionVar = funcExceptionVar;
-		mLastFunc = lastFunc;
 
 		// Set the new criterion.
 		g_HotCriterion = HOT_IF_EXPR;
@@ -4714,6 +4761,7 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		return CONDITION_TRUE;
 	}
 #endif
+
 	// For the below series, it seems okay to allow the comment flag to contain other reserved chars,
 	// such as DerefChar, since comments are evaluated, and then taken out of the game at an earlier
 	// stage than DerefChar and the other special chars.
@@ -5206,8 +5254,28 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType,
 				TCHAR orig_char = *terminate_here;
 				*terminate_here = '\0'; // Temporarily terminate (it might already be the terminator, but that's harmless).
 
-				if (declare_type == VAR_DECLARE_STATIC) // v1.0.46: Support simple initializers for static variables.
+				if (declare_type == VAR_DECLARE_STATIC)
 				{
+					LPTSTR args[] = {var->mName, omit_leading_whitespace(right_side_of_operator)};
+					// UCHAR_MAX signals AddLine to avoid pointing any pending labels or functions at the new line.
+					// Otherwise, ParseAndAddLine could be used like in the section below to optimize simple
+					// assignments, but that would be nearly pointless for static initializers anyway:
+					if (!AddLine(ACT_ASSIGNEXPR, args, UCHAR_MAX + 2)) 
+						return FAIL; // Above already displayed the error.
+					mLastLine = mLastLine->mPrevLine; // Restore mLastLine to the last non-'static' line, but leave mCurrLine set to the new line.
+					mLastLine->mNextLine = NULL; // Remove the new line from the main script's linked list of lines. For maintainability: AddLine() unconditionally overwrites mLastLine->mNextLine anyway.
+					if (mLastStaticLine)
+						mLastStaticLine->mNextLine = mCurrLine;
+					else
+						mFirstStaticLine = mCurrLine;
+					mCurrLine->mPrevLine = mLastStaticLine; // Even if NULL. Must be set otherwise VicinityToText() will show the wrong line if this one or one "near" it has an error.
+					mLastStaticLine = mCurrLine;
+
+					// Some of the checks below could be used to "optimize" static initializers, but since they
+					// will only be executed once each anyway, it doesn't seem useful.  Making them expressions
+					// should be overall more consistent and saves worrying about cases like the following,
+					// which previously gave unexpected results:  static var := "literal" . "literal"
+					/*
 					// The following is similar to the code used to support default values for function parameters.
 					// So maybe maintain them together.
 					right_side_of_operator = omit_leading_whitespace(right_side_of_operator);
@@ -5241,6 +5309,7 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType,
 						if (*right_side_of_operator) // It can be "" in cases such as "" being specified literally in the script, in which case nothing needs to be done because all variables start off as "".
 							var->Assign(right_side_of_operator);
 					}
+					*/
 				}
 				else // A non-static initializer, so a line of code must be produced that will be executed at runtime every time the function is called.
 				{
@@ -6145,8 +6214,7 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType,
 						{
 						// See comment above for why TRANS_CMD_INVALID isn't yet reported as an error:
 #ifdef UNICODE
-						#define TRANS_CMD_UNICODE_CASES \
-						case TRANS_CMD_TOCODEPAGE:
+						#define TRANS_CMD_UNICODE_CASES
 #else
 						#define TRANS_CMD_UNICODE_CASES \
 						case TRANS_CMD_UNICODE:
@@ -6515,7 +6583,7 @@ bool LegacyArgIsExpression(LPTSTR aArgText, LPTSTR aArgMap)
 
 
 
-ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], ArgCountType aArgc, LPTSTR aArgMap[])
+ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc, LPTSTR aArgMap[])
 // aArg must be a collection of pointers to memory areas that are modifiable, and there
 // must be at least aArgc number of pointers in the aArg array.  In v1.0.40, a caller (namely
 // the "macro expansion" for remappings such as "a::b") is allowed to pass a non-NULL value for
@@ -6528,9 +6596,9 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], ArgCountTy
 #endif
 
 	bool do_update_labels;
-	if (!aArg && aArgc == UCHAR_MAX) // Special signal from caller to avoid pointing any pending labels to this particular line.
+	if (aArgc >= UCHAR_MAX) // Special signal from caller to avoid pointing any pending labels to this particular line.
 	{
-		aArgc = 0;
+		aArgc -= UCHAR_MAX;
 		do_update_labels = false;
 	}
 	else
@@ -7783,8 +7851,6 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], ArgCountTy
 				case TRANS_CMD_SQRT:
 				case TRANS_CMD_LOG:
 				case TRANS_CMD_LN:
-				case TRANS_CMD_TOCODEPAGE:
-				case TRANS_CMD_FROMCODEPAGE:
 					if (!IsPureNumeric(new_raw_arg3, false, false, true))
 						return ScriptError(_T("Parameter #3 must be a positive integer in this case."), new_raw_arg3);
 					break;
@@ -7850,11 +7916,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], ArgCountTy
 				if (!line.ArgHasDeref(4) && !IsPureNumeric(new_raw_arg4, true, false, true))
 					return ScriptError(_T("Parameter #4 must be a number in this case."), new_raw_arg4);
 				break;
-			case TRANS_CMD_TOCODEPAGE:
-			case TRANS_CMD_FROMCODEPAGE:
-				if (!*new_raw_arg4)
-					return ScriptError(_T("Parameter #4 must be a string in this case."));
-				break;
+
 #ifdef _DEBUG
 			default:
 				return ScriptError(_T("DEBUG: Unhandled"), new_raw_arg2);  // To improve maintainability.
@@ -8254,7 +8316,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], ArgCountTy
 #endif  // The above section is in place only if when not AUTOHOTKEYSC.
 	}
 
-	if (mNextLineIsFunctionBody)
+	if (mNextLineIsFunctionBody && do_update_labels) // do_update_labels: false for '#if expr' and 'static var:=expr', neither of which should be treated as part of the function's body.
 	{
 		mLastFunc->mJumpToLine = the_new_line;
 		mNextLineIsFunctionBody = false;
@@ -8320,6 +8382,9 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], ArgCountTy
 				return ScriptError(_T("A label must not point to a function."));
 			if (line.mActionType == ACT_ELSE)
 				return ScriptError(_T("A label must not point to an ELSE."));
+			// The following is inaccurate; each block-end is in fact owned by its block-begin
+			// and not the block that encloses them both, so this restriction is unnecessary.
+			// THE COMMENT BELOW IS OBSOLETE:
 			// Don't allow this because it may cause problems in a case such as this because
 			// label1 points to the end-block which is at the same level (and thus normally
 			// an allowable jumppoint) as the goto.  But we don't want to allow jumping into
@@ -8337,13 +8402,12 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], ArgCountTy
 			//
 			// An alternate way to deal with the above would be to make each block-end be owned
 			// by its block-begin rather than the block that encloses them both.
-			if (line.mActionType == ACT_BLOCK_END)
-				return ScriptError(_T("A label must not point to the end of a block. For loops, use Continue vs. Goto."));
+			//if (line.mActionType == ACT_BLOCK_END)
+			//	return ScriptError(_T("A label must not point to the end of a block. For loops, use Continue vs. Goto."));
 			label->mJumpToLine = the_new_line;
 		}
 	}
 
-	++mLineCount;  // Right before returning "success", increment our count.
 	return OK;
 }
 
@@ -8592,11 +8656,12 @@ struct FuncLibrary
 	DWORD_PTR length;
 };
 
-Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &aErrorWasShown)
+Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &aErrorWasShown, bool &aFileWasFound)
 // Caller must ensure that aFuncName doesn't already exist as a defined function.
 // If aFuncNameLength is 0, the entire length of aFuncName is used.
 {
 	aErrorWasShown = false; // Set default for this output parameter.
+	aFileWasFound = false;
 
 	int i;
 	LPTSTR char_after_last_backslash, terminate_here;
@@ -8742,6 +8807,8 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 			attr = GetFileAttributes(sLib[i].path); // Testing confirms that GetFileAttributes() doesn't support wildcards; which is good because we want filenames containing question marks to be "not found" rather than being treated as a match-pattern.
 			if (attr == 0xFFFFFFFF || (attr & FILE_ATTRIBUTE_DIRECTORY)) // File doesn't exist or it's a directory. Relies on short-circuit boolean order.
 				continue;
+
+			aFileWasFound = true; // Indicate success for #include <lib>, which doesn't necessarily expect a function to be found.
 
 			// Since above didn't "continue", a file exists whose name matches that of the requested function.
 			// Before loading/including that file, set the working directory to its folder so that if it uses
@@ -9079,7 +9146,7 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 	{
 		bif = BIF_InStr;
 		min_params = 2;
-		max_params = 4;
+		max_params = 5;
 	}
 	else if (!_tcsicmp(func_name, _T("RegExMatch")))
 	{
@@ -10414,8 +10481,8 @@ Line *Script::PreparseBlocks(Line *aStartingLine, bool aFindBlockEnd, Line *aPar
 				if (   !(deref->func = FindFunc(deref->marker, deref->length))   )
 				{
 #ifndef AUTOHOTKEYSC
-					bool error_was_shown;
-					if (   !(deref->func = FindFuncInLibrary(deref->marker, deref->length, error_was_shown))   )
+					bool error_was_shown, file_was_found;
+					if (   !(deref->func = FindFuncInLibrary(deref->marker, deref->length, error_was_shown, file_was_found))   )
 					{
 						abort = true; // So that the caller doesn't also report an error.
 						// When above already displayed the proximate cause of the error, it's usually
@@ -14693,23 +14760,14 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 				int offset = ArgToInt(5); // v1.0.30.03
 				if (offset < 0)
 					offset = 0;
-				size_t haystack_length = offset ? ArgLength(2) : 1; // Avoids calling ArgLength() if no offset, in which case length isn't needed here.
+				size_t haystack_length = ArgLength(2);
 				if (offset < (int)haystack_length)
 				{
 					if (*arg4 == '1' || ctoupper(*arg4) == 'R') // Conduct the search starting at the right side, moving leftward.
 					{
-						TCHAR prev_char, *terminate_here;
-						if (offset)
-						{
-							terminate_here = haystack + haystack_length - offset;
-							prev_char = *terminate_here;
-							*terminate_here = '\0';  // Temporarily terminate for the duration of the search.
-						}
 						// Want it to behave like in this example: If searching for the 2nd occurrence of
 						// FF in the string FFFF, it should find the first two F's, not the middle two:
-						found = tcsrstr(haystack, needle, (StringCaseSenseType)g.StringCaseSense, occurrence_number);
-						if (offset)
-							*terminate_here = prev_char;
+						found = tcsrstr(haystack, haystack_length - offset, needle, (StringCaseSenseType)g.StringCaseSense, occurrence_number);
 					}
 					else
 					{
@@ -16595,10 +16653,24 @@ ResultType Script::ActionExec(LPTSTR aAction, LPTSTR aParams, LPTSTR aWorkingDir
 			// Split into two phrases:
 			*first_phrase_end = '\0';
 			second_phrase = first_phrase_end + 1;
+			if (*parse_buf == '"' && *second_phrase)
+				++second_phrase; // Skip the space between "first_phrase" and "second_phrase".
+
+			// Check if first_phrase should be considered a system verb:
+			if (*first_phrase == '*')
+			{
+				// Explicitly a system verb, perhaps a custom one such as "compile".
+				++first_phrase; // Exclude the leading '*' from the verb.
+				shell_action_is_system_verb = true;
+			}
+			else
+				// Is it a more common verb with no explicit prefix?
+				shell_action_is_system_verb = IS_VERB(first_phrase);
 		}
 		else // the entire string is considered to be the first_phrase, and there's no second:
 			second_phrase = NULL;
-		if (shell_action_is_system_verb = IS_VERB(first_phrase))
+		// If caller passed a quoted phrase, they most likely intended for it to be the action:
+		if (shell_action_is_system_verb || second_phrase && *parse_buf == '"')
 		{
 			shell_action = first_phrase;
 			shell_params = second_phrase ? second_phrase : _T("");
@@ -16719,7 +16791,7 @@ ResultType Script::ActionExec(LPTSTR aAction, LPTSTR aParams, LPTSTR aWorkingDir
 		}
 		else
 		{
-			if (!aParams)
+			if (shell_action == aAction) // i.e. above hasn't determined the params yet.
 			{
 // Rather than just consider the first phrase to be the executable and the rest to be the param, we check it
 // for a proper extension so that the user can launch a document name containing spaces, without having to
@@ -16727,47 +16799,49 @@ ResultType Script::ActionExec(LPTSTR aAction, LPTSTR aParams, LPTSTR aWorkingDir
 // to be enclosed in double quotes.  Therefore, search the entire string, rather than just first_phrase, for
 // the left-most occurrence of a valid executable extension.  This should be fine since the user can still
 // pass in EXEs and such as params as long as the first executable is fully qualified with its real extension
-// so that we can tell that it's the action and not one of the params.
-
-// This method is rather crude because is doesn't handle an extensionless executable such as "notepad test.txt"
-// It's important that it finds the first occurrence of an executable extension in case there are other
-// occurrences in the parameters.  Also, .pif and .lnk are currently not considered executables for this purpose
-// since they probably don't accept parameters:
+// so that we can tell that it's the action and not one of the params.  UPDATE: Since any file type may
+// potentially accept parameters (.lnk or .ahk files for instance), the first space-terminated substring which
+// is either an existing file or ends in one of .exe,.bat,.com,.cmd,.hta is considered the executable and the
+// rest is considered the param.  Remaining shortcomings of this method include:
+//   -  It doesn't handle an extensionless executable such as "notepad test.txt"
+//   -  It doesn't handle custom file types (scripts etc.) which don't exist in the working directory but can
+//      still be executed due to %PATH% and %PATHEXT% even when our caller doesn't supply an absolute path.
+// These limitations seem acceptable since the caller can allow even those cases to work by simply wrapping
+// the action in quote marks; if that is done, this section is not executed.
 				_tcscpy(parse_buf, aAction);  // Restore the original value in case it was changed. parse_buf is already known to be large enough.
-				LPTSTR action_extension;
-				if (   !(action_extension = tcscasestr(parse_buf, _T(".exe ")))   )
-					if (   !(action_extension = tcscasestr(parse_buf, _T(".exe\"")))   )
-						if (   !(action_extension = tcscasestr(parse_buf, _T(".bat ")))   )
-							if (   !(action_extension = tcscasestr(parse_buf, _T(".bat\"")))   )
-								if (   !(action_extension = tcscasestr(parse_buf, _T(".com ")))   )
-									if (   !(action_extension = tcscasestr(parse_buf, _T(".com\"")))   )
-										// Not 100% sure that .cmd and .hta are genuine executables in every sense:
-										if (   !(action_extension = tcscasestr(parse_buf, _T(".cmd ")))   )
-											if (   !(action_extension = tcscasestr(parse_buf, _T(".cmd\"")))   )
-												if (   !(action_extension = tcscasestr(parse_buf, _T(".hta ")))   )
-													action_extension = tcscasestr(parse_buf, _T(".hta\""));
-
-				if (action_extension)
+				LPTSTR action_extension, action_end;
+				if (aWorkingDir) // Set current directory temporarily in case the action is a relative path:
+					SetCurrentDirectory(aWorkingDir);
+				// For each space which possibly delimits the action and params:
+				for (action_end = parse_buf + 1; action_end = _tcschr(action_end, ' '); ++action_end)
 				{
-					shell_action = parse_buf;
-					// +4 for the 3-char extension with the period:
-					shell_params = action_extension + 4;  // exec_params is now the start of params, or empty-string.
-					if (*shell_params == '"')
-						// Exclude from shell_params since it's probably belongs to the action, not the params
-						// (i.e. it's paired with another double-quote at the start):
-						++shell_params;
-					if (*shell_params)
+					// Find the beginning of the substring or file extension; if \ is encountered, this might be
+					// an extensionless filename, but it probably wouldn't be meaningful to pass params to such a
+					// file since it can't be associated with anything, so skip to the next space in that case.
+					for ( action_extension = action_end - 1;
+						  action_extension > parse_buf && !_tcschr(_T("\\/."), *action_extension);
+						  --action_extension );
+					if (*action_extension == '.') // Potential file extension; even if action_extension == parse_buf since ".ext" on its own is a valid filename.
 					{
-						// Terminate the <aAction> string in the right place.  For this to work correctly,
-						// at least one space must exist between action & params (shortcoming?):
-						*shell_params = '\0';
-						++shell_params;
-						ltrim(shell_params); // Might be empty string after this, which is ok.
+						*action_end = '\0'; // Temporarily terminate.
+						// If action_extension is a common executable extension, don't call GetFileAttributes() since
+						// the file might actually be in a location listed in %PATH% or the App Paths registry key:
+						if ( (action_end-action_extension == 4 && tcscasestr(_T(".exe.bat.com.cmd.hta"), action_extension))
+						// Otherwise the file might still be something capable of accepting params, like a script,
+						// so check if what we have is the name of an existing file:
+						  || !(GetFileAttributes(parse_buf) & FILE_ATTRIBUTE_DIRECTORY) ) // i.e. THE FILE EXISTS and is not a directory. This works because (INVALID_FILE_ATTRIBUTES & FILE_ATTRIBUTE_DIRECTORY) is non-zero.
+						{	
+							shell_action = parse_buf;
+							shell_params = action_end + 1;
+							break;
+						}
+						// What we have so far isn't an obvious executable file type or the path of an existing
+						// file, so assume it isn't a valid action.  Unterminate and continue the loop:
+						*action_end = ' ';
 					}
-					// else there doesn't appear to be any params, so just leave shell_params set to empty string.
 				}
-				// else there's no extension: so assume the whole <aAction> is a document name to be opened by
-				// the shell.  So leave shell_action and shell_params set their original defaults.
+				if (aWorkingDir)
+					SetCurrentDirectory(g_WorkingDir); // Restore to proper value.
 			}
 			//else aParams!=NULL, so the extra parsing in the block above isn't necessary.
 

@@ -481,7 +481,6 @@ enum TransformCmds {TRANS_CMD_INVALID, TRANS_CMD_ASC, TRANS_CMD_CHR, TRANS_CMD_D
 	, TRANS_CMD_SIN, TRANS_CMD_COS, TRANS_CMD_TAN, TRANS_CMD_ASIN, TRANS_CMD_ACOS, TRANS_CMD_ATAN
 	, TRANS_CMD_BITAND, TRANS_CMD_BITOR, TRANS_CMD_BITXOR, TRANS_CMD_BITNOT
 	, TRANS_CMD_BITSHIFTLEFT, TRANS_CMD_BITSHIFTRIGHT
-	, TRANS_CMD_TOCODEPAGE, TRANS_CMD_FROMCODEPAGE
 };
 #ifndef MINIDLL
 enum MenuCommands {MENU_CMD_INVALID, MENU_CMD_SHOW, MENU_CMD_USEERRORLEVEL
@@ -1315,10 +1314,7 @@ public:
 		if (!_tcsicmp(aBuf, _T("Asc"))) return TRANS_CMD_ASC;
 		if (!_tcsicmp(aBuf, _T("Chr"))) return TRANS_CMD_CHR;
 		if (!_tcsicmp(aBuf, _T("Deref"))) return TRANS_CMD_DEREF;
-#ifdef UNICODE
-		if (!_tcsicmp(aBuf, _T("ToCodePage"))) return TRANS_CMD_TOCODEPAGE;
-		if (!_tcsicmp(aBuf, _T("FromCodePage"))) return TRANS_CMD_FROMCODEPAGE;
-#else
+#ifndef UNICODE
 		if (!_tcsicmp(aBuf, _T("Unicode"))) return TRANS_CMD_UNICODE;
 #endif
 		if (!_tcsicmp(aBuf, _T("HTML"))) return TRANS_CMD_HTML;
@@ -2562,7 +2558,7 @@ public:
 	static ActionTypeType ConvertActionType(LPTSTR aActionTypeString);
 	static ActionTypeType ConvertOldActionType(LPTSTR aActionTypeString);
 	ResultType AddLabel(LPTSTR aLabelName, bool aAllowDupe);
-	ResultType AddLine(ActionTypeType aActionType, LPTSTR aArg[] = NULL, ArgCountType aArgc = 0, LPTSTR aArgMap[] = NULL);
+	ResultType AddLine(ActionTypeType aActionType, LPTSTR aArg[] = NULL, int aArgc = 0, LPTSTR aArgMap[] = NULL);
 
 	// These aren't in the Line class because I think they're easier to implement
 	// if aStartingLine is allowed to be NULL (for recursive calls).  If they
@@ -2575,7 +2571,7 @@ public:
 
 
 	Line *mFirstLine, *mLastLine;     // The first and last lines in the linked list.
-	UINT mLineCount;                  // The number of lines.
+	Line *mFirstStaticLine, *mLastStaticLine; // The first and last static var initializer.
 	Label *mFirstLabel, *mLastLabel;  // The first and last labels in the linked list.
 	Func *mFirstFunc, *mLastFunc;     // The first and last functions in the linked list.
 	Func **mFunc; // L27: Use a binary-searchable array to speed up function searches (especially beneficial for dynamic function calls).
@@ -2679,7 +2675,7 @@ public:
 
 	ResultType DefineFunc(LPTSTR aBuf, Var *aFuncExceptionVar[]);
 #ifndef AUTOHOTKEYSC
-	Func *FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &aErrorWasShown);
+	Func *FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &aErrorWasShown, bool &aFileWasFound);
 #endif
 	Func *FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength = 0, int *apInsertPos = NULL); // L27: Added apInsertPos for binary-search.
 	Func *AddFunc(LPCTSTR aFuncName, size_t aFuncNameLength, bool aIsBuiltIn, int aInsertPos); // L27: Added aInsertPos for binary-search.
