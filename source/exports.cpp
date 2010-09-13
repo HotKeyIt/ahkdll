@@ -87,7 +87,15 @@ EXPORT unsigned int ahkExecuteLine(unsigned int line,unsigned int aMode,unsigned
 	Line *templine = (Line *)line;
 	if (templine == NULL)
 		return (unsigned int)g_script.mFirstLine;
-	else if (aMode && templine->mPrevLine != NULL)
+	if (templine->mActionType = ACT_BLOCK_BEGIN && templine->mAttribute)
+	{
+		for(;!(templine->mActionType == ACT_BLOCK_END && templine->mAttribute);templine = templine->mNextLine)
+			continue;
+		templine = templine->mNextLine;
+	} 
+	else if (templine->mActionType == ACT_BLOCK_BEGIN || templine->mActionType == ACT_BLOCK_END)
+		ahkExecuteLine((unsigned int) templine->mNextLine,aMode,wait);
+	if (aMode)
 	{
 		if (wait)
 			SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)templine, (LPARAM)aMode);
@@ -315,7 +323,7 @@ EXPORT unsigned int addScript(LPTSTR script, int aExecute)
 
 		return LOADING_FAILED;
 	}	
-		if (aExecute > 0)
+	if (aExecute > 0)
 	{
 		if (aExecute > 1)
 			SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)oldLastLine->mNextLine, (LPARAM)oldLastLine->mNextLine);
@@ -477,7 +485,7 @@ bool callFuncDll(FuncAndToken *aFuncAndToken)
 	g_script.mLastScriptRest = g_script.mLastPeekTime = GetTickCount();
 
 
-		DEBUGGER_STACK_PUSH(SE_Thread, func.mJumpToLine, desc, func.mName)
+		DEBUGGER_STACK_PUSH(func.mJumpToLine, func.mName)
 	// ExprTokenType aResultToken;
 	// ExprTokenType &aResultToken = aResultToken_to_return ;
 	func.Call(&aResultToken); // Call the UDF.
@@ -550,7 +558,7 @@ bool callFunc(WPARAM awParam, LPARAM alParam)
 	g_script.mLastScriptRest = g_script.mLastPeekTime = GetTickCount();
 
 
-		DEBUGGER_STACK_PUSH(SE_Thread, func.mJumpToLine, desc, func.mName)
+		DEBUGGER_STACK_PUSH(func.mJumpToLine, func.mName)
 
 	ExprTokenType return_value;
 	func.Call(&return_value); // Call the UDF.

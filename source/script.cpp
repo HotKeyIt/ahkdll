@@ -157,8 +157,13 @@ Script::~Script() // Destructor.
 	}
 	for (i = 0; i < MAX_SPLASHIMAGE_WINDOWS; ++i)
 	{
-		if (g_SplashImage[i].pic)
-			g_SplashImage[i].pic->Release();
+		if (g_SplashImage[i].pic_bmp)
+		{
+			if (g_SplashImage[i].pic_type == IMAGE_BITMAP)
+				DeleteObject(g_SplashImage[i].pic_bmp);
+			else
+				DestroyIcon(g_SplashImage[i].pic_icon);
+		}
 		if (g_SplashImage[i].hwnd && IsWindow(g_SplashImage[i].hwnd))
 			DestroyWindow(g_SplashImage[i].hwnd);
 		if (g_SplashImage[i].hfont1) // Destroy font only after destroying the window that uses it.
@@ -820,9 +825,9 @@ ResultType Script::AutoExecSection()
 		mLastScriptRest = mLastPeekTime = GetTickCount();
 
 		++g_nThreads;
-			DEBUGGER_STACK_PUSH(SE_Thread, mFirstLine, desc, _T("auto-execute"))
+		DEBUGGER_STACK_PUSH(mFirstLine, _T("auto-execute"))
 		ExecUntil_result = mFirstLine->ExecUntil(UNTIL_RETURN); // Might never return (e.g. infinite loop or ExitApp).
-			DEBUGGER_STACK_POP()
+		DEBUGGER_STACK_POP()
 		--g_nThreads;
 		// Our caller will take care of setting g_default properly.
 
@@ -1028,7 +1033,7 @@ ResultType Script::ExitApp(ExitReasons aExitReason, LPTSTR aBuf, int aExitCode)
 	g_AllowInterruption = FALSE; // Mark the thread just created above as permanently uninterruptible (i.e. until it finishes and is destroyed).
 
 	sExitLabelIsRunning = true;
-	DEBUGGER_STACK_PUSH(SE_Thread, mOnExitLabel->mJumpToLine, desc, mOnExitLabel->mName)
+	DEBUGGER_STACK_PUSH(mOnExitLabel->mJumpToLine, mOnExitLabel->mName)
 	if (mOnExitLabel->Execute() == FAIL)
 	{
 		// If the subroutine encounters a failure condition such as a runtime error, exit immediately.
@@ -6109,6 +6114,34 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType,
 		}
 	} // end of special handling for MsgBox.
 
+	else if (aActionType == ACT_FOR)
+	{
+		// Validate "For" syntax and translate to conventional command syntax.
+		// "For x,y in z" -> "For x,y, z"
+		// "For x in y"   -> "For x,, y"
+		LPTSTR in;
+		for (in = action_args; *in; ++in)
+			if (IS_SPACE_OR_TAB(*in)
+				&& tolower(in[1]) == 'i'
+				&& tolower(in[2]) == 'n'
+				&& IS_SPACE_OR_TAB(in[3])) // Relies on short-circuit boolean evaluation.
+				break;
+		if (!*in)
+			return ScriptError(_T("This \"For\" is missing its \"in\"."), aLineText);
+		int vars = 1;
+		for (mark = in - action_args; mark > 0; --mark)
+			if (action_args[mark] == g_delimiter)
+				++vars;
+		in[1] = g_delimiter; // Replace "in" with a conventional delimiter.
+		if (vars > 1)
+		{	// Something like "For x,y in z".
+			if (vars > 2)
+				return ScriptError(_T("Syntax error or too many variables in \"For\" statement."), aLineText);
+			in[2] = ' ';
+		}
+		else
+			in[2] = g_delimiter; // Insert another delimiter so the expression is always arg 3.
+	}
 
 	/////////////////////////////////////////////////////////////
 	// Parse the parameter string into a list of separate params.
@@ -6434,10 +6467,10 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType,
 	// Loop {   ; Known limitation: Overlaps with file-pattern loop that retrieves single file of name "{".
 	// Loop 5 { ; Also overlaps, this time with file-pattern loop that retrieves numeric filename ending in '{'.
 	// Loop %Var% {  ; Similar, but like the above seems acceptable given extreme rarity of user intending a file pattern.
-	if ((aActionType == ACT_LOOP || aActionType == ACT_WHILE)
-		&& nArgs == 1 && arg[0][0])  // A loop with exactly one, non-blank arg.
+	if ((aActionType == ACT_LOOP || aActionType == ACT_WHILE) && nArgs == 1 && arg[0][0] // A loop with exactly one, non-blank arg.
+		|| (aActionType == ACT_FOR && nArgs))
 	{
-		LPTSTR arg1 = arg[0]; // For readability and possibly performance.
+		LPTSTR arg1 = arg[nArgs - 1]; // For readability and possibly performance.
 		// A loop with the above criteria (exactly one arg) can only validly be a normal/counting loop or
 		// a file-pattern loop if its parameter's last character is '{'.  For the following reasons, any
 		// single-parameter loop that ends in '{' is considered to be one-true brace:
@@ -6463,7 +6496,7 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType,
 			if (!rtrim(arg1)) // Trimmed down to nothing, so only a brace was present: remove the arg completely.
 				if (aActionType == ACT_LOOP)
 					nArgs = 0;    // This makes later stages recognize it as an infinite loop rather than a zero-iteration loop.
-				else // ACT_WHILE
+				else // ACT_WHILE or ACT_FOR
 					return ScriptError(ERR_PARAM1_REQUIRED, aLineText);
 		}
 	}
@@ -6791,7 +6824,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 						}
 						// Otherwise, it might be an expression so do the final checks.
 						// Override the original false default of is_expression unless an exception applies.
-						// Since ACT_ASSIGNEXPR and ACT_WHILE aren't legacy commands, don't call
+						// Since ACT_ASSIGNEXPR, WHILE, FOR and UNTIL aren't legacy commands, don't call
 						// LegacyArgIsExpression() for them because that would cause things like x:=%y% and
 						// "while %x%" to behave the same as x:=y and "while x:, which would be inconsistent
 						// with how expressions are supposed to work. ACT_RETURN should have been excluded
@@ -6800,7 +6833,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 						// For other commands, if any telltale character is present it's definitely an
 						// expression because this is an arg that's marked as a number-or-expression.
 						// So telltales avoid the need for the complex check further below.
-						if (aActionType == ACT_ASSIGNEXPR || aActionType == ACT_WHILE // See above.
+						if (aActionType == ACT_ASSIGNEXPR || aActionType >= ACT_FOR && aActionType <= ACT_UNTIL // i.e. FOR, WHILE or UNTIL
 							|| StrChrAny(this_new_arg.text, EXPR_TELLTALES)) // See above.
 							this_new_arg.is_expression = true;
 						else
@@ -6814,7 +6847,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 			// perhaps others in the future, to become non-expressions if they contain only a single
 			// numeric literal (or are entirely blank). At runtime, such args are expanded normally
 			// rather than having to run them through the expression evaluator:
-			if (this_new_arg.is_expression && IsPureNumeric(this_new_arg.text, true, true, true))
+			if (this_new_arg.is_expression && IsPureNumeric(this_new_arg.text, true, true, true) && aActionType != ACT_FOR) // The last check is necessary to ensure "For x in 0" fails *gracefully*. Although it will hopefully never happen, a user might conceivably try (and fail) to use 0 as a *variable*.
 				this_new_arg.is_expression = false;
 
 			if (this_new_arg.is_expression)
@@ -7078,7 +7111,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 					// ACT_WHILE performs less than 4% faster as a non-expression in these cases, and keeping
 					// it as an expression avoids an extra check in a performance-sensitive spot of ExpandArgs
 					// (near mActionType <= ACT_LAST_OPTIMIZED_IF).
-					if (aActionType != ACT_WHILE) // If it is ACT_WHILE, it would be something like "while x" in this case. Keep those as expressions for the reason above.
+					if (aActionType < ACT_FOR || aActionType > ACT_UNTIL) // If it is FOR, WHILE or UNTIL, it would be something like "while x" in this case. Keep those as expressions for the reason above. PerformLoopFor() requires FOR's expression arg to remain an expression.
 						this_new_arg.is_expression = false; // In addition to being an optimization, doing this might also be necessary for things like "Var := ClipboardAll" to work properly.
 					// But if aActionType is ACT_ASSIGNEXPR, it's left as ACT_ASSIGNEXPR vs. ACT_ASSIGN
 					// because it might be necessary to avoid having AutoTrim take effect for := (which
@@ -7113,7 +7146,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 					// there should not be any way for non-percent derefs to get mixed in with cases
 					// 2 or 3.
 					if (!deref[0].is_function && *deref[0].marker == g_DerefChar // This appears to be case #2 or #3.
-						&& aActionType != ACT_WHILE) // Nearly doubles the speed of "while %x%" and "while Array%i%" to leave WHILE as an expression.  But y:=%x% and y:=Array%i% are about the same speed either way, and "if %x%" never reaches this point because for compatibility(?), it's the same as "if x".
+						&& (aActionType < ACT_FOR || aActionType > ACT_UNTIL)) // Nearly doubles the speed of "while %x%" and "while Array%i%" to leave WHILE as an expression.  But y:=%x% and y:=Array%i% are about the same speed either way, and "if %x%" never reaches this point because for compatibility(?), it's the same as "if x". Additionally, PerformLoopFor() requires its only expression arg to remain an expression.
 					{
 						// The comment below is probably obsolete -- and perhaps so is this entire optimization
 						// because expressions are faster now.  But in case it's necessary for anything related
@@ -7312,6 +7345,10 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 
 	case ACT_WHILE: // Lexikos: ATTR_LOOP_WHILE is used to differentiate ACT_WHILE from ACT_LOOP, allowing code to be shared.
 		line.mAttribute = ATTR_LOOP_WHILE;
+		break;
+
+	case ACT_FOR:
+		line.mAttribute = ATTR_LOOP_FOR;
 		break;
 
 	// This one alters g_persistent so is present in its entirety (for simplicity) in both SC an non-SC version.
@@ -8380,8 +8417,8 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 		{
 			if (line.mActionType == ACT_BLOCK_BEGIN && line.mAttribute == ATTR_TRUE) // Non-zero mAttribute signfies the open-brace of a function body.
 				return ScriptError(_T("A label must not point to a function."));
-			if (line.mActionType == ACT_ELSE)
-				return ScriptError(_T("A label must not point to an ELSE."));
+			if (line.mActionType == ACT_ELSE || line.mActionType == ACT_UNTIL)
+				return ScriptError(_T("A label must not point to an ELSE or UNTIL."));
 			// The following is inaccurate; each block-end is in fact owned by its block-begin
 			// and not the block that encloses them both, so this restriction is unnecessary.
 			// THE COMMENT BELOW IS OBSOLETE:
@@ -10518,6 +10555,16 @@ Line *Script::PreparseBlocks(Line *aStartingLine, bool aFindBlockEnd, Line *aPar
 				return line->PreparseError(_T("Improper line below this.")); // Short message since so rare. A function must not be defined directly below an IF/ELSE/LOOP because runtime evaluation won't handle it properly.
 			}
 
+			if (line->mActionType == ACT_FOR)
+			{
+				ASSERT(line->mArgc == 3);
+				// Now that this FOR's expression has been pre-parsed, exclude it from mArgc so that ExpandArgs()
+				// won't evaluate it -- PerformLoopFor() needs to call ExpandExpression() directly in order to
+				// receive the object reference which is the result of the expression.
+				line->mArgc--;
+			}
+
+
 			// Make the line immediately following each ELSE, IF or LOOP be enclosed by that stmt.
 			// This is done to make it illegal for a Goto or Gosub to jump into a deeper layer,
 			// such as in this example:
@@ -10614,8 +10661,7 @@ Line *Script::PreparseBlocks(Line *aStartingLine, bool aFindBlockEnd, Line *aPar
 
 
 
-Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, AttributeType aLoopTypeFile
-	, AttributeType aLoopTypeReg, AttributeType aLoopTypeRead, AttributeType aLoopTypeParse)
+Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, AttributeType aLoopType)
 // Zero is the default for aMode, otherwise:
 // Will return NULL to the top-level caller if there's an error, or if
 // mLastLine is NULL (i.e. the script is empty).
@@ -10627,15 +10673,14 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 	// Don't check aStartingLine here at top: only do it at the bottom
 	// for it's differing return values.
 	Line *line_temp;
-	// Although rare, a statement can be enclosed in more than one type of special loop,
-	// e.g. both a file-loop and a reg-loop:
-	AttributeType loop_type_file, loop_type_reg, loop_type_read, loop_type_parse;
+	AttributeType loop_type = aLoopType;
 
 	for (Line *line = aStartingLine; line != NULL;)
 	{
 		if (   ACT_IS_IF(line->mActionType)
 			|| line->mActionType == ACT_LOOP
-			|| line->mActionType == ACT_WHILE // Lexikos: Added check for ACT_WHILE.
+			|| line->mActionType == ACT_WHILE
+			|| line->mActionType == ACT_FOR
 			|| line->mActionType == ACT_REPEAT   )
 		{
 			// ActionType is an IF or a LOOP.
@@ -10648,56 +10693,24 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 			if (line_temp->mActionType == ACT_ELSE || line_temp->mActionType == ACT_BLOCK_END)
 				return line->PreparseError(_T("Inappropriate line beneath IF or LOOP."));
 
-			// We're checking for ATTR_LOOP_FILEPATTERN here to detect whether qualified commands enclosed
-			// in a true file loop are allowed to omit their filename parameter:
-			loop_type_file = ATTR_NONE;
-			if (aLoopTypeFile == ATTR_LOOP_FILEPATTERN || line->mAttribute == ATTR_LOOP_FILEPATTERN)
-				// i.e. if either one is a file-loop, that's enough to establish
-				// the fact that we're in a file loop.
-				loop_type_file = ATTR_LOOP_FILEPATTERN;
-			else if (aLoopTypeFile == ATTR_LOOP_UNKNOWN || line->mAttribute == ATTR_LOOP_UNKNOWN)
-				// ATTR_LOOP_UNKNOWN takes precedence over ATTR_LOOP_NORMAL because
-				// we can't be sure if we're in a file loop, but it's correct to
-				// assume that we are (otherwise, unwarranted syntax errors may be reported
-				// later on in here).
-				loop_type_file = ATTR_LOOP_UNKNOWN;
-			else if (aLoopTypeFile == ATTR_LOOP_NORMAL || line->mAttribute == ATTR_LOOP_NORMAL)
-				loop_type_file = ATTR_LOOP_NORMAL;
-			else if (aLoopTypeFile == ATTR_LOOP_WHILE || line->mAttribute == ATTR_LOOP_WHILE) // Lexikos: ACT_WHILE
-				loop_type_file = ATTR_LOOP_WHILE;
-
-			// The section is the same as above except for registry vs. file loops:
-			loop_type_reg = ATTR_NONE;
-			if (aLoopTypeReg == ATTR_LOOP_REG || line->mAttribute == ATTR_LOOP_REG)
-				loop_type_reg = ATTR_LOOP_REG;
-			else if (aLoopTypeReg == ATTR_LOOP_UNKNOWN || line->mAttribute == ATTR_LOOP_UNKNOWN)
-				loop_type_reg = ATTR_LOOP_UNKNOWN;
-			else if (aLoopTypeReg == ATTR_LOOP_NORMAL || line->mAttribute == ATTR_LOOP_NORMAL)
-				loop_type_reg = ATTR_LOOP_NORMAL;
-			else if (aLoopTypeReg == ATTR_LOOP_WHILE || line->mAttribute == ATTR_LOOP_WHILE) // Lexikos: ACT_WHILE
-				loop_type_reg = ATTR_LOOP_WHILE;
-
-			// Same as above except for READ-FILE loops:
-			loop_type_read = ATTR_NONE;
-			if (aLoopTypeRead == ATTR_LOOP_READ_FILE || line->mAttribute == ATTR_LOOP_READ_FILE)
-				loop_type_read = ATTR_LOOP_READ_FILE;
-			else if (aLoopTypeRead == ATTR_LOOP_UNKNOWN || line->mAttribute == ATTR_LOOP_UNKNOWN)
-				loop_type_read = ATTR_LOOP_UNKNOWN;
-			else if (aLoopTypeRead == ATTR_LOOP_NORMAL || line->mAttribute == ATTR_LOOP_NORMAL)
-				loop_type_read = ATTR_LOOP_NORMAL;
-			else if (aLoopTypeRead == ATTR_LOOP_WHILE || line->mAttribute == ATTR_LOOP_WHILE) // Lexikos: ACT_WHILE
-				loop_type_read = ATTR_LOOP_WHILE;
-
-			// Same as above except for PARSING loops:
-			loop_type_parse = ATTR_NONE;
-			if (aLoopTypeParse == ATTR_LOOP_PARSE || line->mAttribute == ATTR_LOOP_PARSE)
-				loop_type_parse = ATTR_LOOP_PARSE;
-			else if (aLoopTypeParse == ATTR_LOOP_UNKNOWN || line->mAttribute == ATTR_LOOP_UNKNOWN)
-				loop_type_parse = ATTR_LOOP_UNKNOWN;
-			else if (aLoopTypeParse == ATTR_LOOP_NORMAL || line->mAttribute == ATTR_LOOP_NORMAL)
-				loop_type_parse = ATTR_LOOP_NORMAL;
-			else if (aLoopTypeParse == ATTR_LOOP_WHILE || line->mAttribute == ATTR_LOOP_WHILE) // Lexikos: ACT_WHILE
-				loop_type_parse = ATTR_LOOP_WHILE;
+			// Lexikos: This section once maintained separate variables for file-pattern, registry, file-reading
+			// and parsing loops. The intention seemed to be to validate certain commands such as FileAppend
+			// differently depending on whether they're contained within a qualifying type of loop (even if some
+			// other type of loop lies in between). However, that validation apparently wasn't implemented,
+			// and implementing it now seems unnecessary. Doing so would also remove a useful capability:
+			//
+			//	Loop, Read, %InputFile%, %OutputFile%
+			//	{
+			//		MyFunc(A_LoopReadLine)
+			//	}
+			//	MyFunc(line) {
+			//		... do some processing on %line% ...
+			//		FileAppend, %line%	; This line could be considered an error, though it works in practice.
+			//	}
+			//
+			if (line->mAttribute)
+				// Keep track of whether we're in a loop so Break/Continue can be validated:
+				loop_type = line->mAttribute;
 
 			// Check if the IF's action-line is something we want to recurse.  UPDATE: Always
 			// recurse because other line types, such as Goto and Gosub, need to be preparsed
@@ -10705,8 +10718,7 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 			// Recurse this line rather than the next because we want
 			// the called function to recurse again if this line is a ACT_BLOCK_BEGIN
 			// or is itself an IF:
-			line_temp = PreparseIfElse(line_temp, ONLY_ONE_LINE, loop_type_file, loop_type_reg, loop_type_read
-				, loop_type_parse);
+			line_temp = PreparseIfElse(line_temp, ONLY_ONE_LINE, loop_type);
 			// If not end-of-script or error, line_temp is now either:
 			// 1) If this if's/loop's action was a BEGIN_BLOCK: The line after the end of the block.
 			// 2) If this if's/loop's action was another IF or LOOP:
@@ -10751,7 +10763,7 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 			// so always continue on to evaluate the IF's ELSE, if present:
 			if (line_temp->mActionType == ACT_ELSE)
 			{
-				if (line->mActionType == ACT_LOOP || line->mActionType == ACT_WHILE || line->mActionType == ACT_REPEAT) // Lexikos: Added check for ACT_WHILE.
+				if (line->mActionType == ACT_LOOP || line->mActionType == ACT_WHILE || line->mActionType == ACT_FOR || line->mActionType == ACT_REPEAT)
 				{
 					 // this can't be our else, so let the caller handle it.
 					if (aMode != ONLY_ONE_LINE)
@@ -10774,13 +10786,24 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 				if (line->mActionType == ACT_ELSE || line->mActionType == ACT_BLOCK_END)
 					return line_temp->PreparseError(_T("Inappropriate line beneath ELSE."));
 				// Assign to line rather than line_temp:
-				line = PreparseIfElse(line, ONLY_ONE_LINE, aLoopTypeFile, aLoopTypeReg, aLoopTypeRead
-					, aLoopTypeParse);
+				line = PreparseIfElse(line, ONLY_ONE_LINE, aLoopType);
 				if (line == NULL)
 					return NULL; // Error or end-of-script.
 				// Set this ELSE's jumppoint.  This is similar to the jumppoint set for
 				// an ELSEless IF, so see related comments above:
 				line_temp->mRelatedLine = line;
+			}
+			else if (line_temp->mActionType == ACT_UNTIL)
+			{
+				if (line->mActionType != ACT_LOOP && line->mActionType != ACT_FOR) // Doesn't seem useful to allow it with WHILE?
+				{
+					// This is similar to the section above, so see there for comments.
+					if (aMode != ONLY_ONE_LINE)
+						return line_temp->PreparseError(ERR_UNTIL_WITH_NO_LOOP);
+					return line_temp;
+				}
+				// Continue processing *after* UNTIL.
+				line = line_temp->mNextLine;
 			}
 			else // line doesn't have an else, so just continue processing from line_temp's position
 				line = line_temp;
@@ -10803,8 +10826,7 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 		case ACT_BLOCK_BEGIN:
 			if (line->mAttribute == ATTR_TRUE) // This is the opening brace of a function definition.
 				sInFunctionBody = TRUE; // Must be set only for the above condition because functions can of course contain types of blocks other than the function's own block.
-			line = PreparseIfElse(line->mNextLine, UNTIL_BLOCK_END, aLoopTypeFile, aLoopTypeReg, aLoopTypeRead
-				, aLoopTypeParse);
+			line = PreparseIfElse(line->mNextLine, UNTIL_BLOCK_END, aLoopType);
 			// "line" is now either NULL due to an error, or the location of the END_BLOCK itself.
 			if (line == NULL)
 				return NULL; // Error.
@@ -10828,8 +10850,52 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 			return line->PreparseError(_T("Q")); // Placeholder (see above). Formerly "Unexpected end-of-block (multi)."
 		case ACT_BREAK:
 		case ACT_CONTINUE:
-			if (!aLoopTypeFile && !aLoopTypeReg && !aLoopTypeRead && !aLoopTypeParse)
+			if (!aLoopType)
 				return line->PreparseError(_T("Break/Continue must be enclosed by a Loop."));
+			if (line->mArgc)
+			{
+				if (line->ArgHasDeref(1) || line->mArg->is_expression)
+					// It seems unlikely that computing the target loop at runtime would be useful.
+					// For simplicity, rule out things like "break %var%" and "break % func()":
+					return line->PreparseError(ERR_PARAM1_INVALID); //_T("Target label of Break/Continue cannot be dynamic."));
+				LPTSTR loop_name = line->mArg[0].text;
+				Label *loop_label;
+				Line *loop_line;
+				if (IsPureNumeric(loop_name))
+				{
+					int n = _ttoi(loop_name);
+					// Find the nth innermost loop which encloses this line:
+					for (loop_line = line->mParentLine; loop_line; loop_line = loop_line->mParentLine)
+						if (loop_line->mActionType >= ACT_LOOP && loop_line->mActionType <= ACT_WHILE) // i.e. LOOP, FOR or WHILE.
+							if (--n < 1)
+								break;
+					if (!loop_line || n != 0)
+						return line->PreparseError(ERR_PARAM1_INVALID);
+				}
+				else
+				{
+					// Target is a named loop.
+					if ( !(loop_label = FindLabel(loop_name)) )
+						return line->PreparseError(ERR_NO_LABEL, loop_name);
+					loop_line = loop_label->mJumpToLine;
+					// Ensure the label points to a Loop, For-loop or While-loop ...
+					if (   !(loop_line->mActionType >= ACT_LOOP && loop_line->mActionType <= ACT_WHILE)
+						// ... which encloses this line.  Use line->mParentLine as the starting-point of
+						// the "jump" to ensure the target isn't at the same nesting level as this line:
+						|| !line->mParentLine->IsJumpValid(*loop_label, true)   )
+						return line->PreparseError(ERR_PARAM1_INVALID); //_T("Target label does not point to an appropriate Loop."));
+					// Although we've validated that it points to a loop, we can't resolve the line
+					// after the loop's body as that (mRelatedLine) hasn't been determined yet.
+					if (loop_line == line->mParentLine
+						// line->mParentLine must be non-NULL because above verified this line is enclosed by a Loop:
+						|| line->mParentLine->mActionType == ACT_BLOCK_BEGIN && loop_line == line->mParentLine->mParentLine)
+					{
+						// Set mRelatedLine to NULL since the target loop directly encloses this line.
+						loop_line = NULL;
+					}
+				}
+				line->mRelatedLine = loop_line;
+			}
 			break;
 
 		case ACT_GOSUB: // These two must be done here (i.e. *after* all the script lines have been added),
@@ -10858,7 +10924,7 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 				if (   !(line->mAttribute = FindLabel(line_raw_arg1))   )
 					return line->PreparseError(ERR_NO_LABEL);
 			break;
-#ifndef MINIDLL
+
 		case ACT_HOTKEY:
 			if (   *line_raw_arg2 && !line->ArgHasDeref(2)
 				&& !line->ArgHasDeref(1) && _tcsnicmp(line_raw_arg1, _T("IfWin"), 5) // v1.0.42: Omit IfWinXX from validation.
@@ -10867,7 +10933,7 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 					if (!Hotkey::ConvertAltTab(line_raw_arg2, true))
 						return line->PreparseError(ERR_NO_LABEL);
 			break;
-#endif
+
 		case ACT_SETTIMER:
 			if (!line->ArgHasDeref(1))
 				if (   !(line->mAttribute = FindLabel(line_raw_arg1))   )
@@ -10901,6 +10967,10 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 			// all the elses and handle them.  UPDATE: This happens if there's
 			// an extra ELSE in this scope level that has no IF:
 			return line->PreparseError(ERR_ELSE_WITH_NO_IF);
+
+		case ACT_UNTIL:
+			// Similar to above.
+			return line->PreparseError(ERR_UNTIL_WITH_NO_LOOP);
 		} // switch()
 
 		line = line->mNextLine; // If NULL due to physical end-of-script, the for-loop's condition will catch it.
@@ -12492,33 +12562,38 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 					// else
 					//   ...
 					continue;
-				if (aMode == ONLY_ONE_LINE)
+				if (aMode == ONLY_ONE_LINE // See below.
+					|| result != OK) // i.e. FAIL, EARLY_RETURN, EARLY_EXIT, LOOP_BREAK, or LOOP_CONTINUE.
 				{
 					// When jump_to_line!=NULL, the above call to ExecUntil() told us to jump somewhere.
-					// But since we're in ONLY_ONE_LINE mode, our caller must handle it because only it knows how
-					// to extricate itself from whatever it's doing:
+					// But if we're in ONLY_ONE_LINE mode, our caller must handle it because only it knows how
+					// to extricate itself from whatever it's doing.  Additionally, if result is LOOP_CONTINUE
+					// or LOOP_BREAK and jump_to_line is not NULL, each ExecUntil() or PerformLoop() recursion
+					// layer must pass jump_to_line to its caller, all the way up to the target loop which
+					// will then know it should either BREAK or CONTINUE.
+					//
+					// EARLY_RETURN can occur if this if's action was a block and that block contained a RETURN,
+					// or if this if's only action is RETURN.  It can't occur if we just executed a Gosub,
+					// because that Gosub would have been done from a deeper recursion layer (and executing
+					// a Gosub in ONLY_ONE_LINE mode can never return EARLY_RETURN).
+					//
 					caller_jump_to_line = jump_to_line; // Tell the caller to handle this jump (if applicable). jump_to_line==NULL is ok.
 					return result;
 				}
-				if (result != OK) // i.e. FAIL, EARLY_RETURN, EARLY_EXIT, LOOP_BREAK, or LOOP_CONTINUE.
-					// EARLY_RETURN can occur if this if's action was a block, and that block
-					// contained a RETURN, or if this if's only action is RETURN.  It can't
-					// occur if we just executed a Gosub, because that Gosub would have been
-					// done from a deeper recursion layer (and executing a Gosub in
-					// ONLY_ONE_LINE mode can never return EARLY_RETURN).
-					return result;
 				// Now this if-statement, including any nested if's and their else's,
 				// has been fully evaluated by the recusion above.  We must jump to
 				// the end of this if-statement to get to the right place for
 				// execution to resume.  UPDATE: Or jump to the goto target if the
 				// call to ExecUntil told us to do that instead:
-				if (jump_to_line != NULL && jump_to_line->mParentLine != line->mParentLine)
+				if (jump_to_line != NULL)
 				{
-					caller_jump_to_line = jump_to_line; // Tell the caller to handle this jump.
-					return OK;
-				}
-				if (jump_to_line != NULL) // jump to where the caller told us to go, rather than the end of IF.
+					if (jump_to_line->mParentLine != line->mParentLine)
+					{
+						caller_jump_to_line = jump_to_line; // Tell the caller to handle this jump.
+						return OK;
+					}
 					line = jump_to_line;
+				}
 				else // Do the normal clean-up for an IF statement:
 				{
 					line = line->mRelatedLine; // The preparser has ensured that this is always non-NULL.
@@ -12534,11 +12609,6 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 			else // if_condition == CONDITION_FALSE
 			{
 				line = line->mRelatedLine; // The preparser has ensured that this is always non-NULL.
-				if (line->mActionType != ACT_ELSE && aMode == ONLY_ONE_LINE)
-					// Since this IF statement has no ELSE, and since it was executed
-					// in ONLY_ONE_LINE mode, the IF-ELSE statement, which counts as
-					// one line for the purpose of ONLY_ONE_LINE mode, has finished:
-					return OK;
 				if (line->mActionType == ACT_ELSE) // This IF has an else.
 				{
 					if (line->mNextLine->mActionType == ACT_BLOCK_BEGIN)
@@ -12552,33 +12622,34 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 						// Preparser has ensured that every ELSE has a non-NULL next line:
 						result = line->mNextLine->ExecUntil(ONLY_ONE_LINE, aResultToken, &jump_to_line);
 
-					if (aMode == ONLY_ONE_LINE)
+					if (aMode == ONLY_ONE_LINE || result != OK) // See the similar section above for comments.
 					{
-						// When jump_to_line!=NULL, the above call to ExecUntil() told us to jump somewhere.
-						// But since we're in ONLY_ONE_LINE mode, our caller must handle it because only it knows how
-						// to extricate itself from whatever it's doing:
-						caller_jump_to_line = jump_to_line; // Tell the caller to handle this jump (if applicable). jump_to_line==NULL is ok.
+						caller_jump_to_line = jump_to_line;
 						return result;
-					}
-					if (result != OK) // i.e. FAIL, EARLY_RETURN, EARLY_EXIT, LOOP_BREAK, or LOOP_CONTINUE.
-						return result;
-					if (jump_to_line != NULL && jump_to_line->mParentLine != line->mParentLine)
-					{
-						caller_jump_to_line = jump_to_line; // Tell the caller to handle this jump.
-						return OK;
 					}
 					if (jump_to_line != NULL)
+					{
+						if (jump_to_line->mParentLine != line->mParentLine)
+						{
+							caller_jump_to_line = jump_to_line; // Tell the caller to handle this jump.
+							return OK;
+						}
 						// jump to where the called function told us to go, rather than the end of our ELSE.
 						line = jump_to_line;
+					}
 					else // Do the normal clean-up for an ELSE statement.
 						line = line->mRelatedLine;
 						// Now line is the ELSE's "I'm finished" jump-point, which is where
 						// we want to be.  If line is now NULL, it will be caught when this
 						// loop iteration is ended by the "continue" stmt below.  UPDATE:
 						// it can't be NULL since all scripts now end in ACT_EXIT.
-					// else the IF had NO else, so we're already at the IF's "I'm finished" jump-point.
 				}
-				// else the IF had NO else, so we're already at the IF's "I'm finished" jump-point.
+				else if (aMode == ONLY_ONE_LINE)
+					// Since this IF statement has no ELSE, and since it was executed
+					// in ONLY_ONE_LINE mode, the IF-ELSE statement, which counts as
+					// one line for the purpose of ONLY_ONE_LINE mode, has finished:
+					return OK;
+				// else we're already at the IF's "I'm finished" jump-point.
 			} // if_condition == CONDITION_FALSE
 			continue; // Let the for-loop process the new location specified by <line>.
 		} // if (ACT_IS_IF)
@@ -12741,14 +12812,26 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 			return OK;
 
 		case ACT_BREAK:
+			if (line->mRelatedLine)
+			{
+				// Rather than having PerformLoop() handle LOOP_BREAK specifically, tell our caller to jump to
+				// the line *after* the loop's body. This is always a jump our caller must handle, unlike GOTO:
+				caller_jump_to_line = line->mRelatedLine->mRelatedLine;
+			}
 			return LOOP_BREAK;
 
 		case ACT_CONTINUE:
+			if (line->mRelatedLine)
+			{
+				// Signal any loops nested between this line and the target loop to return LOOP_CONTINUE:
+				caller_jump_to_line = line->mRelatedLine; // Okay even if NULL.
+			}
 			return LOOP_CONTINUE;
 
 		case ACT_LOOP:
-		case ACT_REPEAT:
 		case ACT_WHILE: // Lexikos: mAttribute should be ATTR_LOOP_WHILE.
+		case ACT_FOR: // Lexikos: mAttribute should be ATTR_LOOP_FOR.
+		case ACT_REPEAT:
 		{
 			HKEY root_key_type; // For registry loops, this holds the type of root key, independent of whether it is local or remote.
 			AttributeType attr = line->mAttribute;
@@ -12821,6 +12904,17 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 			bool continue_main_loop = false; // Init these output parameters prior to starting each type of loop.
 			jump_to_line = NULL;             //
 
+			Line *finished_line = line->mRelatedLine;
+			Line *until;
+			if (finished_line->mActionType == ACT_UNTIL)
+			{	// This loop has an additional post-condition.
+				until = finished_line;
+				// When finished, we'll jump to the line after UNTIL:
+				finished_line = finished_line->mNextLine;
+			}
+			else
+				until = NULL;
+
 			// IN CASE THERE'S AN OUTER LOOP ENCLOSING THIS ONE, BACK UP THE A_LOOPXXX VARIABLES.
 			// (See the "restore" section further below for comments.)
 			loop_iteration = g.mLoopIteration;
@@ -12854,26 +12948,30 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 					iteration_limit = 0; // Avoids debug-mode's "used without having been defined" (though it's merely passed as a parameter, not ever used in this case).
 					is_infinite = true;  // Override the default set earlier.
 				}
-				result = line->PerformLoop(aResultToken, continue_main_loop, jump_to_line
+				result = line->PerformLoop(aResultToken, continue_main_loop, jump_to_line, until
 					, iteration_limit, is_infinite);
 				break;
 			case ATTR_LOOP_WHILE: // Lexikos: ATTR_LOOP_WHILE is used to differentiate ACT_WHILE from ACT_LOOP, allowing code to be shared.
 				result = line->PerformLoopWhile(aResultToken, continue_main_loop, jump_to_line);
 				break;
+			case ATTR_LOOP_FOR:
+				result = line->PerformLoopFor(aResultToken, continue_main_loop, jump_to_line, until);
+				break;
 			case ATTR_LOOP_PARSE:
 				// The phrase "csv" is unique enough since user can always rearrange the letters
 				// to do a literal parse using C, S, and V as delimiters:
 				if (_tcsicmp(ARG3, _T("CSV")))
-					result = line->PerformLoopParse(aResultToken, continue_main_loop, jump_to_line);
+					result = line->PerformLoopParse(aResultToken, continue_main_loop, jump_to_line, until);
 				else
-					result = line->PerformLoopParseCSV(aResultToken, continue_main_loop, jump_to_line);
+					result = line->PerformLoopParseCSV(aResultToken, continue_main_loop, jump_to_line, until);
 				break;
 			case ATTR_LOOP_READ_FILE:
 				{
 					TextFile tfile;
 					if (*ARG2 && tfile.Open(ARG2, DEFAULT_READ_FLAGS, g.Encoding & CP_AHKCP)) // v1.0.47: Added check for "" to avoid debug-assertion failure while in debug mode (maybe it's bad to to open file "" in release mode too).
 					{
-						result = line->PerformLoopReadFile(aResultToken, continue_main_loop, jump_to_line, &tfile, ARG3);
+						result = line->PerformLoopReadFile(aResultToken, continue_main_loop, jump_to_line, until
+							, &tfile, ARG3);
 						tfile.Close();
 					}
 					else
@@ -12885,8 +12983,8 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 				}
 				break;
 			case ATTR_LOOP_FILEPATTERN:
-				result = line->PerformLoopFilePattern(aResultToken, continue_main_loop, jump_to_line, file_loop_mode
-					, recurse_subfolders, ARG1);
+				result = line->PerformLoopFilePattern(aResultToken, continue_main_loop, jump_to_line, until
+					, file_loop_mode, recurse_subfolders, ARG1);
 				break;
 			case ATTR_LOOP_REG:
 				// This isn't the most efficient way to do things (e.g. the repeated calls to
@@ -12897,8 +12995,8 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 				if (root_key = RegConvertRootKey(ARG1, &is_remote_registry)) // This will open the key if it's remote.
 				{
 					// root_key_type needs to be passed in order to support GetLoopRegKey():
-					result = line->PerformLoopReg(aResultToken, continue_main_loop, jump_to_line, file_loop_mode
-						, recurse_subfolders, root_key_type, root_key, ARG2);
+					result = line->PerformLoopReg(aResultToken, continue_main_loop, jump_to_line, until
+						, file_loop_mode, recurse_subfolders, root_key_type, root_key, ARG2);
 					if (is_remote_registry)
 						RegCloseKey(root_key);
 				}
@@ -12943,7 +13041,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 
 			if (result == FAIL || result == EARLY_RETURN || result == EARLY_EXIT)
 				return result;
-			// else result can be LOOP_BREAK or OK, but not LOOP_CONTINUE.
+			// else result can be LOOP_BREAK or OK or LOOP_CONTINUE (but only if a loop-label was given).
 			if (continue_main_loop) // It signaled us to do this:
 				continue;
 
@@ -12964,7 +13062,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 					// current line (i.e. it's not at the same nesting level) because that means
 					// the jump target is at a more shallow nesting level than where we are now:
 					caller_jump_to_line = jump_to_line; // Tell the caller to handle this jump (if applicable).
-					return OK;
+					return result; // If LOOP_CONTINUE, must be passed along so the target loop knows what to do.
 				}
 				// Since above didn't return, we're supposed to handle this jump.  So jump and then
 				// continue execution from there:
@@ -12974,7 +13072,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 			// Since the above didn't return or break, either the loop has completed the specified
 			// number of iterations or it was broken via the break command.  In either case, we jump
 			// to the line after our loop's structure and continue there:
-			line = line->mRelatedLine;
+			line = finished_line;
 			continue;  // Resume looping starting at the above line.  "continue" is actually slightly faster than "break" in these cases.
 		} // case ACT_LOOP.
 
@@ -13034,21 +13132,18 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 				// else
 				//   ...
 				continue;
-			if (aMode == ONLY_ONE_LINE)
+			if (aMode == ONLY_ONE_LINE
+				|| result != OK) // i.e. FAIL, EARLY_RETURN, EARLY_EXIT, LOOP_BREAK, or LOOP_CONTINUE.
 			{
-				// When jump_to_line!=NULL, the above call to ExecUntil() told us to jump somewhere.
-				// But since we're in ONLY_ONE_LINE mode, our caller must handle it because only it knows how
-				// to extricate itself from whatever it's doing:
+				// For more detailed comments, see the section (above this switch structure) which handles IF.
 				caller_jump_to_line = jump_to_line; // Tell the caller to handle this jump (if applicable).  jump_to_line==NULL is ok.
 				return result;
 			}
 			// Currently, all blocks are normally executed in ONLY_ONE_LINE mode because
 			// they are the direct actions of an IF, an ELSE, or a LOOP.  So the
 			// above will already have returned except when the user has created a
-			// generic, standalone block with no assciated control statement.
+			// generic, standalone block with no associated control statement.
 			// Check to see if we need to jump somewhere:
-			if (result != OK) // i.e. FAIL, EARLY_RETURN, EARLY_EXIT, LOOP_BREAK, or LOOP_CONTINUE.
-				return result;
 			if (jump_to_line != NULL)
 			{
 				if (line->mParentLine != jump_to_line->mParentLine)
@@ -13504,7 +13599,9 @@ ResultType Line::EvaluateHotCriterionExpression(LPTSTR aHotkeyName)
 	tcslcpy(ErrorLevel_saved, g_ErrorLevel->Contents(), _countof(ErrorLevel_saved));
 	// Critical seems to improve reliability, either because the thread completes faster (i.e. before the timeout) or because we check for messages less often.
 	InitNewThread(0, false, true, ACT_CRITICAL);
-	DEBUGGER_STACK_PUSH(SE_Thread, this, desc, _T("#If"))
+	ResultType result;
+	DEBUGGER_STACK_PUSH(this, _T("#If"))
+
 #ifndef MINIDLL
 	// Update A_ThisHotkey, useful if #If calls a function to do its dirty work.
 	LPTSTR prior_hotkey_name = g_script.mThisHotkeyName;
@@ -13514,7 +13611,7 @@ ResultType Line::EvaluateHotCriterionExpression(LPTSTR aHotkeyName)
 	g_script.mLastScriptRest = g_script.mLastPeekTime = GetTickCount();
 #endif
 	// EVALUATE THE EXPRESSION
-	ResultType result = ExpandArgs();
+	result = ExpandArgs();
 	if (result == OK)
 		result = EvaluateCondition();
 
@@ -13530,7 +13627,7 @@ ResultType Line::EvaluateHotCriterionExpression(LPTSTR aHotkeyName)
 }
 
 
-ResultType Line::PerformLoop(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine
+ResultType Line::PerformLoop(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
 	, __int64 aIterationLimit, bool aIsInfinite) // bool performs better than BOOL in current benchmarks for this.
 // This performs much better (by at least 7%) as a function than as inline code, probably because
 // it's only called to set up the loop, not each time through the loop.
@@ -13569,9 +13666,7 @@ ResultType Line::PerformLoop(ExprTokenType *aResultToken, bool &aContinueMainLoo
 		}
 		else
 			result = mNextLine->ExecUntil(ONLY_ONE_LINE, aResultToken, &jump_to_line);
-		if (result != OK && result != LOOP_CONTINUE) // i.e. result == LOOP_BREAK || result == EARLY_RETURN || result == EARLY_EXIT || result == FAIL)
-			return result;
-		if (jump_to_line)
+		if (jump_to_line && !(result == LOOP_CONTINUE && jump_to_line == this)) // i.e. "goto somewhere" or "continue a_loop_which_encloses_this_one".
 		{
 			if (jump_to_line == this) 
 				// Since this LOOP's ExecUntil() encountered a Goto whose target is the LOOP
@@ -13591,8 +13686,12 @@ ResultType Line::PerformLoop(ExprTokenType *aResultToken, bool &aContinueMainLoo
 				aContinueMainLoop = true;
 			else // jump_to_line must be a line that's at the same level or higher as our Exec_Until's LOOP statement itself.
 				aJumpToLine = jump_to_line; // Signal the caller to handle this jump.
-			break;
+			return result;
 		}
+		if (result != OK && result != LOOP_CONTINUE) // i.e. result == LOOP_BREAK || result == EARLY_RETURN || result == EARLY_EXIT || result == FAIL)
+			return result;
+		if (aUntil && aUntil->EvaluateLoopUntil(result))
+			return result;
 		// Otherwise, the result of executing the body of the loop, above, was either OK
 		// (the current iteration completed normally) or LOOP_CONTINUE (the current loop
 		// iteration was cut short).  In both cases, just continue on through the loop.
@@ -13640,16 +13739,16 @@ ResultType Line::PerformLoopWhile(ExprTokenType *aResultToken, bool &aContinueMa
 			while (jump_to_line == mNextLine);
 		else
 			result = mNextLine->ExecUntil(ONLY_ONE_LINE, aResultToken, &jump_to_line);
-		if (result != OK && result != LOOP_CONTINUE) // i.e. result == LOOP_BREAK || result == EARLY_RETURN || result == EARLY_EXIT || result == FAIL)
-			return result;
-		if (jump_to_line)
+		if (jump_to_line && !(result == LOOP_CONTINUE && jump_to_line == this))
 		{
 			if (jump_to_line == this)
 				aContinueMainLoop = true;
 			else
 				aJumpToLine = jump_to_line;
-			break;
+			return result;
 		}
+		if (result != OK && result != LOOP_CONTINUE)
+			return result;
 	} // for()
 	return OK; // The script's loop is now over.
 }
@@ -13783,7 +13882,152 @@ ResultType Line::IncludeFiles(bool aAllowDuplicateInclude, bool aIgnoreLoadFailu
    return OK;
 }
 
-ResultType Line::PerformLoopFilePattern(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine
+inline bool Line::EvaluateLoopUntil(ResultType &aResult)
+{
+#ifdef CONFIG_DEBUGGER
+	// Let the debugger break at or step onto UNTIL.
+	if (g_Debugger.IsConnected())
+		g_Debugger.PreExecLine(this);
+#endif
+	return (aResult = ExpandArgs()) != OK // i.e. if it fails, shortcircuit and break the loop.
+			|| LegacyResultToBOOL(ARG1); // See PerformLoopWhile() above for comments about this line.
+}
+
+
+
+ResultType Line::PerformLoopFor(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil)
+{
+	ResultType result;
+	Line *jump_to_line;
+	global_struct &g = *::g; // Might slightly speed up the loop below.
+
+	// Save these pointers since they will be overwritten during the loop:
+	Var *var[] = { ARGVARRAW1, ARGVARRAW2 };
+	
+	if (!sDerefBuf)
+	{
+		// This must be done in case ExpandExpression() needs the deref buf for temporary storage.
+		sDerefBufSize = (mArg[2].length < MAX_NUMBER_LENGTH ? MAX_NUMBER_LENGTH : mArg[2].length) + 1; // See EXPR_BUF_SIZE macro in script_expression.cpp.
+		if ( !(sDerefBuf = tmalloc(sDerefBufSize)) )
+		{
+			sDerefBufSize = 0;
+			return LineError(ERR_OUTOFMEM);
+		}
+	}
+
+	LPTSTR our_buf_marker = sDerefBuf;
+	LPTSTR arg_deref[] = {0, 0}; // ExpandExpression checks these if it needs to expand the deref buffer.
+	ExprTokenType object_token;
+	object_token.symbol = SYM_INVALID; // Init in case ExpandExpression() resolves to a string, in which case it won't use enum_token.
+
+	// Since expressions aren't normally capable of resolving to an object (except for RETURN), we need to
+	// call ExpandExpression() directly and pass in a "result token" which will be used if the result is an
+	// object or number. Load-time pre-parsing has ensured there are really three args, but mArgc == 2 so
+	// this one hasn't been evaluated yet:
+	if (!ExpandExpression(2, result, &object_token, our_buf_marker, sDerefBuf, sDerefBufSize, arg_deref, 0))
+		// A script-function-call inside the expression returned EARLY_EXIT or FAIL.
+		return result;
+
+	if (object_token.symbol != SYM_OBJECT)
+		// The expression didn't resolve to an object, so no enumerator is available.
+		return OK;
+	
+	TCHAR buf[MAX_NUMBER_SIZE]; // Small buffer which may be used by object->Invoke().
+	
+	ExprTokenType enum_token;
+	ExprTokenType param_tokens[3];
+	ExprTokenType *params[] = { param_tokens, param_tokens+1, param_tokens+2 };
+	int param_count;
+
+	// Set up enum_token the way Invoke expects:
+	enum_token.symbol = SYM_STRING;
+	enum_token.marker = _T("");
+	enum_token.mem_to_free = NULL;
+	enum_token.buf = buf;
+
+	// Prepare to call object._NewEnum():
+	param_tokens[0].symbol = SYM_STRING;
+	param_tokens[0].marker = _T("_NewEnum");
+
+	object_token.object->Invoke(enum_token, object_token, IT_CALL, params, 1);
+	object_token.object->Release(); // This object reference is no longer needed.
+
+	if (enum_token.mem_to_free)
+		// Invoke returned memory for us to free.
+		free(enum_token.mem_to_free);
+
+	if (enum_token.symbol != SYM_OBJECT)
+		// The object didn't return an enumerator, so nothing more we can do.
+		return OK;
+
+	// Prepare parameters for the loop below: enum.Next(var1 [, var2])
+	param_tokens[0].marker = _T("Next");
+	param_tokens[1].symbol = SYM_VAR;
+	param_tokens[1].var = var[0];
+	if (var[1])
+	{
+		// for x,y in z  ->  enum.Next(x,y)
+		param_tokens[2].symbol = SYM_VAR;
+		param_tokens[2].var = var[1];
+		param_count = 3;
+	}
+	else
+		// for x in z  ->  enum.Next(x)
+		param_count = 2;
+
+	IObject &enumerator = *enum_token.object; // Might perform better as a reference?
+
+	ExprTokenType result_token;
+
+	for (;; ++g.mLoopIteration)
+	{
+		// Set up result_token the way Invoke expects; each Invoke() will change some or all of these:
+		result_token.symbol = SYM_STRING;
+		result_token.marker = _T("");
+		result_token.mem_to_free = NULL;
+		result_token.buf = buf;
+
+		// Call enumerator.Next(var1, var2)
+		enumerator.Invoke(result_token, enum_token, IT_CALL, params, param_count);
+
+		// Free any memory or object which may have been returned by Invoke:
+		if (result_token.mem_to_free)
+			free(result_token.mem_to_free);
+		if (result_token.symbol == SYM_OBJECT)
+			result_token.object->Release(); // Relies on the fact that TokenToBool() doesn't access the object.
+
+		if (!TokenToBOOL(result_token, TokenIsPureNumeric(result_token)))
+		{	// The enumerator returned false, which means there are no more items.
+			result = OK;
+			break;
+		}
+		// Otherwise the enumerator already stored the next value(s) in the variable(s) we passed it via params.
+
+		// CONCERNING ALL THE REST OF THIS FUNCTION: See comments in PerformLoop() for details.
+		if (mNextLine->mActionType == ACT_BLOCK_BEGIN)
+			do
+				result = mNextLine->mNextLine->ExecUntil(UNTIL_BLOCK_END, aResultToken, &jump_to_line);
+			while (jump_to_line == mNextLine);
+		else
+			result = mNextLine->ExecUntil(ONLY_ONE_LINE, aResultToken, &jump_to_line);
+		if (jump_to_line && !(result == LOOP_CONTINUE && jump_to_line == this))
+		{
+			if (jump_to_line == this)
+				aContinueMainLoop = true;
+			else
+				aJumpToLine = jump_to_line;
+			break;
+		}
+		if (result != OK && result != LOOP_CONTINUE)
+			break;
+		if (aUntil && aUntil->EvaluateLoopUntil(result))
+			return result;
+	} // for()
+	enumerator.Release();
+	return result; // The script's loop is now over.
+}
+
+ResultType Line::PerformLoopFilePattern(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
 	, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, LPTSTR aFilePattern)
 // Note: Even if aFilePattern is just a directory (i.e. with not wildcard pattern), it seems best
 // not to append "\\*.*" to it because the pattern might be a script variable that the user wants
@@ -13842,21 +14086,23 @@ ResultType Line::PerformLoopFilePattern(ExprTokenType *aResultToken, bool &aCont
 			while (jump_to_line == mNextLine);
 		else
 			result = mNextLine->ExecUntil(ONLY_ONE_LINE, aResultToken, &jump_to_line);
-		if (result != OK && result != LOOP_CONTINUE) // i.e. result == LOOP_BREAK || result == EARLY_RETURN || result == EARLY_EXIT || result == FAIL)
+		if (jump_to_line && !(result == LOOP_CONTINUE && jump_to_line == this)) // See comments in PerformLoop() about this section.
+		{
+			if (jump_to_line == this)
+				aContinueMainLoop = true;
+			else
+				aJumpToLine = jump_to_line; // Signal our caller to handle this jump.
+			FindClose(file_search);
+			return result;
+		}
+		if ( result != OK && result != LOOP_CONTINUE // i.e. result == LOOP_BREAK || result == EARLY_RETURN || result == EARLY_EXIT || result == FAIL)
+			|| (aUntil && aUntil->EvaluateLoopUntil(result)) )
 		{
 			FindClose(file_search);
 			// Although ExecUntil() will treat the LOOP_BREAK result identically to OK, we
 			// need to return LOOP_BREAK in case our caller is another instance of this
 			// same function (i.e. due to recursing into subfolders):
 			return result;
-		}
-		if (jump_to_line) // See comments in PerformLoop() about this section.
-		{
-			if (jump_to_line == this)
-				aContinueMainLoop = true;
-			else
-				aJumpToLine = jump_to_line; // Signal our caller to handle this jump.
-			break;
 		}
 		// Otherwise, the result of executing the body of the loop, above, was either OK
 		// (the current iteration completed normally) or LOOP_CONTINUE (the current loop
@@ -13914,10 +14160,10 @@ ResultType Line::PerformLoopFilePattern(ExprTokenType *aResultToken, bool &aCont
 		// its first loop iteration.  This is because this directory is being recursed into, not
 		// processed itself as a file-loop item (since this was already done in the first loop,
 		// above, if its name matches the original search pattern):
-		result = PerformLoopFilePattern(aResultToken, aContinueMainLoop, aJumpToLine, aFileLoopMode, aRecurseSubfolders, file_path);
-		// result should never be LOOP_CONTINUE because the above call to PerformLoop() should have
-		// handled that case.  However, it can be LOOP_BREAK if it encoutered the break command.
-		if (result != OK && result != LOOP_CONTINUE) // i.e. result == LOOP_BREAK || result == EARLY_RETURN || result == EARLY_EXIT || result == FAIL)
+		result = PerformLoopFilePattern(aResultToken, aContinueMainLoop, aJumpToLine, aUntil, aFileLoopMode, aRecurseSubfolders, file_path);
+		// Above returns LOOP_CONTINUE for cases like "continue 2" or "continue outer_loop", where the
+		// target is not this Loop but a Loop which encloses it. In those cases we want below to return:
+		if (result != OK) // i.e. result == LOOP_BREAK || result == EARLY_RETURN || result == EARLY_EXIT || result == FAIL)
 		{
 			FindClose(file_search);
 			return result;  // Return even LOOP_BREAK, since our caller can be either ExecUntil() or ourself.
@@ -13936,8 +14182,8 @@ ResultType Line::PerformLoopFilePattern(ExprTokenType *aResultToken, bool &aCont
 
 
 
-ResultType Line::PerformLoopReg(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, FileLoopModeType aFileLoopMode
-	, bool aRecurseSubfolders, HKEY aRootKeyType, HKEY aRootKey, LPTSTR aRegSubkey)
+ResultType Line::PerformLoopReg(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
+	, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, HKEY aRootKeyType, HKEY aRootKey, LPTSTR aRegSubkey)
 // aRootKeyType is the type of root key, independent of whether it's local or remote.
 // This is used because there's no easy way to determine which root key a remote HKEY
 // refers to.
@@ -13977,20 +14223,22 @@ ResultType Line::PerformLoopReg(ExprTokenType *aResultToken, bool &aContinueMain
 			while (jump_to_line == mNextLine);\
 		else\
 			result = mNextLine->ExecUntil(ONLY_ONE_LINE, aResultToken, &jump_to_line);\
-		++g.mLoopIteration;\
-		if (result != OK && result != LOOP_CONTINUE)\
-		{\
-			RegCloseKey(hRegKey);\
-			return result;\
-		}\
-		if (jump_to_line)\
+		if (jump_to_line && !(result == LOOP_CONTINUE && jump_to_line == this))\
 		{\
 			if (jump_to_line == this)\
 				aContinueMainLoop = true;\
 			else\
 				aJumpToLine = jump_to_line;\
-			break;\
+			RegCloseKey(hRegKey);\
+			return result;\
 		}\
+		if ( result != OK && result != LOOP_CONTINUE \
+			|| (aUntil && aUntil->EvaluateLoopUntil(result)) ) \
+		{\
+			RegCloseKey(hRegKey);\
+			return result;\
+		}\
+		++g.mLoopIteration;\
 	}
 
 	DWORD name_size;
@@ -14046,10 +14294,10 @@ ResultType Line::PerformLoopReg(ExprTokenType *aResultToken, bool &aContinueMain
 				// (fixed for v1.0.17):
 				sntprintf(subkey_full_path, _countof(subkey_full_path), _T("%s%s%s"), reg_item.subkey
 					, *reg_item.subkey ? _T("\\") : _T(""), reg_item.name);
-				// This section is very similar to the one in PerformLoop(), so see it for comments:
-				result = PerformLoopReg(aResultToken, aContinueMainLoop, aJumpToLine, aFileLoopMode
-					, aRecurseSubfolders, aRootKeyType, aRootKey, subkey_full_path);
-				if (result != OK && result != LOOP_CONTINUE) // i.e. result == LOOP_BREAK || result == EARLY_RETURN || result == EARLY_EXIT || result == FAIL)
+				// This section is very similar to the one in PerformLoopFilePattern(), so see it for comments:
+				result = PerformLoopReg(aResultToken, aContinueMainLoop, aJumpToLine, aUntil
+					, aFileLoopMode , aRecurseSubfolders, aRootKeyType, aRootKey, subkey_full_path);
+				if (result != OK)
 				{
 					RegCloseKey(hRegKey);
 					return result;
@@ -14068,7 +14316,7 @@ ResultType Line::PerformLoopReg(ExprTokenType *aResultToken, bool &aContinueMain
 
 
 
-ResultType Line::PerformLoopParse(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine)
+ResultType Line::PerformLoopParse(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil)
 {
 	if (!*ARG2) // Since the input variable's contents are blank, the loop will execute zero times.
 		return OK;
@@ -14162,25 +14410,27 @@ ResultType Line::PerformLoopParse(ExprTokenType *aResultToken, bool &aContinueMa
 		else
 			result = mNextLine->ExecUntil(ONLY_ONE_LINE, aResultToken, &jump_to_line);
 
-		++g.mLoopIteration;
-
-		if (result != OK && result != LOOP_CONTINUE) // i.e. result == LOOP_BREAK || result == EARLY_RETURN || result == EARLY_EXIT || result == FAIL)
-		{
-			FREE_PARSE_MEMORY;
-			return result;
-		}
-		if (jump_to_line) // See comments in PerformLoop() about this section.
+		if (jump_to_line && !(result == LOOP_CONTINUE && jump_to_line == this)) // See comments in PerformLoop() about this section.
 		{
 			if (jump_to_line == this)
 				aContinueMainLoop = true;
 			else
 				aJumpToLine = jump_to_line; // Signal our caller to handle this jump.
-			break;
+			FREE_PARSE_MEMORY;
+			return result;
 		}
+		if ( result != OK && result != LOOP_CONTINUE // i.e. result == LOOP_BREAK || result == EARLY_RETURN || result == EARLY_EXIT || result == FAIL)
+			|| (aUntil && aUntil->EvaluateLoopUntil(result)) )
+		{
+			FREE_PARSE_MEMORY;
+			return result;
+		}
+
 		if (!saved_char) // The last item in the list has just been processed, so the loop is done.
 			break;
 		*field_end = saved_char;  // Undo the temporary termination, in case the list of delimiters is blank.
 		field = *delimiters ? field_end + 1 : field_end;  // Move on to the next field.
+		++g.mLoopIteration;
 	}
 	FREE_PARSE_MEMORY;
 	return OK;
@@ -14188,7 +14438,7 @@ ResultType Line::PerformLoopParse(ExprTokenType *aResultToken, bool &aContinueMa
 
 
 
-ResultType Line::PerformLoopParseCSV(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine)
+ResultType Line::PerformLoopParseCSV(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil)
 // This function is similar to PerformLoopParse() so the two should be maintained together.
 // See PerformLoopParse() for comments about the below (comments have been mostly stripped
 // from this function).
@@ -14286,20 +14536,20 @@ ResultType Line::PerformLoopParseCSV(ExprTokenType *aResultToken, bool &aContinu
 		else
 			result = mNextLine->ExecUntil(ONLY_ONE_LINE, aResultToken, &jump_to_line);
 
-		++g.mLoopIteration;
-
-		if (result != OK && result != LOOP_CONTINUE) // i.e. result == LOOP_BREAK || result == EARLY_RETURN || result == EARLY_EXIT || result == FAIL)
-		{
-			FREE_PARSE_MEMORY;
-			return result;
-		}
-		if (jump_to_line) // See comments in PerformLoop() about this section.
+		if (jump_to_line && !(result == LOOP_CONTINUE && jump_to_line == this)) // See comments in PerformLoop() about this section.
 		{
 			if (jump_to_line == this)
 				aContinueMainLoop = true;
 			else
 				aJumpToLine = jump_to_line; // Signal our caller to handle this jump.
-			break;
+			FREE_PARSE_MEMORY;
+			return result;
+		}
+		if ( result != OK && result != LOOP_CONTINUE // i.e. result == LOOP_BREAK || result == EARLY_RETURN || result == EARLY_EXIT || result == FAIL)
+			|| (aUntil && aUntil->EvaluateLoopUntil(result)) )
+		{
+			FREE_PARSE_MEMORY;
+			return result;
 		}
 
 		if (!saved_char) // The last item in the list has just been processed, so the loop is done.
@@ -14318,6 +14568,7 @@ ResultType Line::PerformLoopParseCSV(ExprTokenType *aResultToken, bool &aContinu
 			// or another comma (if the field is empty).
 			++field;
 		}
+		++g.mLoopIteration;
 	}
 	FREE_PARSE_MEMORY;
 	return OK;
@@ -14325,7 +14576,8 @@ ResultType Line::PerformLoopParseCSV(ExprTokenType *aResultToken, bool &aContinu
 
 
 
-ResultType Line::PerformLoopReadFile(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, TextStream *aReadFile, LPTSTR aWriteFileName)
+ResultType Line::PerformLoopReadFile(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
+	, TextStream *aReadFile, LPTSTR aWriteFileName)
 {
 	LoopReadFileStruct loop_info(aReadFile, aWriteFileName);
 	size_t line_length;
@@ -14333,8 +14585,14 @@ ResultType Line::PerformLoopReadFile(ExprTokenType *aResultToken, bool &aContinu
 	Line *jump_to_line;
 	global_struct &g = *::g; // Primarily for performance in this case.
 
-	for (; loop_info.mReadFile->ReadLine(loop_info.mCurrentLine, _countof(loop_info.mCurrentLine)) ;)
+	for (;; ++g.mLoopIteration)
 	{ 
+		if (!loop_info.mReadFile->ReadLine(loop_info.mCurrentLine, _countof(loop_info.mCurrentLine)))
+		{
+			// We want to return OK except in some specific cases handled below (see "break").
+			result = OK;
+			break;
+		}
 		line_length = _tcslen(loop_info.mCurrentLine);
 		if (line_length && loop_info.mCurrentLine[line_length - 1] == '\n') // Remove newlines like FileReadLine does.
 			loop_info.mCurrentLine[--line_length] = '\0';
@@ -14345,14 +14603,7 @@ ResultType Line::PerformLoopReadFile(ExprTokenType *aResultToken, bool &aContinu
 			while (jump_to_line == mNextLine);
 		else
 			result = mNextLine->ExecUntil(ONLY_ONE_LINE, aResultToken, &jump_to_line);
-		++g.mLoopIteration;
-		if (result != OK && result != LOOP_CONTINUE) // i.e. result == LOOP_BREAK || result == EARLY_RETURN || result == EARLY_EXIT || result == FAIL)
-		{
-			if (loop_info.mWriteFile)
-				delete loop_info.mWriteFile;
-			return result;
-		}
-		if (jump_to_line) // See comments in PerformLoop() about this section.
+		if (jump_to_line && !(result == LOOP_CONTINUE && jump_to_line == this)) // See comments in PerformLoop() about this section.
 		{
 			if (jump_to_line == this)
 				aContinueMainLoop = true;
@@ -14360,15 +14611,16 @@ ResultType Line::PerformLoopReadFile(ExprTokenType *aResultToken, bool &aContinu
 				aJumpToLine = jump_to_line; // Signal our caller to handle this jump.
 			break;
 		}
+		if (result != OK && result != LOOP_CONTINUE) // i.e. result == LOOP_BREAK || result == EARLY_RETURN || result == EARLY_EXIT || result == FAIL)
+			break;
+		if (aUntil && aUntil->EvaluateLoopUntil(result))
+			break;
 	}
 
 	if (loop_info.mWriteFile)
 		delete loop_info.mWriteFile;
 
-	// Don't return result because we want to always return OK unless it was one of the values
-	// already explicitly checked and returned above.  In other words, there might be values other
-	// than OK that aren't explicitly checked for, above.
-	return OK;
+	return result;
 }
 
 
@@ -14813,6 +15065,7 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 		return ImageSearch(ArgToInt(3), ArgToInt(4), ArgToInt(5), ArgToInt(6), ARG7);
 	case ACT_PIXELGETCOLOR:
 		return PixelGetColor(ArgToInt(2), ArgToInt(3), ARG4);
+
 #endif
 	case ACT_SEND:
 	case ACT_SENDRAW:
@@ -16168,11 +16421,15 @@ LPTSTR Line::ToText(LPTSTR aBuf, int aBufSize, bool aCRLF, DWORD aElapsed, bool 
 			, *mArg[0].text ? mArg[0].text : VAR(mArg[0])->mName  // i.e. don't resolve dynamic variable names.
 			, g_act[mActionType].Name, RAW_ARG2, RAW_ARG3);
 	else if (ACT_IS_ASSIGN(mActionType) || (ACT_IS_IF(mActionType) && mActionType < ACT_FIRST_COMMAND))
-		// Only these other commands need custom conversion.
 		aBuf += sntprintf(aBuf, BUF_SPACE_REMAINING, _T("%s%s %s %s")
 			, ACT_IS_IF(mActionType) ? _T("if ") : _T("")
 			, *mArg[0].text ? mArg[0].text : VAR(mArg[0])->mName  // i.e. don't resolve dynamic variable names.
 			, g_act[mActionType].Name, RAW_ARG2);
+	else if (mActionType == ACT_FOR)
+		aBuf += sntprintf(aBuf, BUF_SPACE_REMAINING, _T("For %s,%s in %s")
+			, *mArg[0].text ? mArg[0].text : VAR(mArg[0])->mName	  // i.e. don't resolve dynamic variable names.
+			, *mArg[1].text || !VAR(mArg[1]) ? mArg[1].text : VAR(mArg[1])->mName  // can be omitted.
+			, mArg[2].text);
 	else
 	{
 		aBuf += sntprintf(aBuf, BUF_SPACE_REMAINING, _T("%s"), g_act[mActionType].Name);

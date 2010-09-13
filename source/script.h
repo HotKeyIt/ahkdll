@@ -65,6 +65,7 @@ enum ExecUntilMode {NORMAL_MODE, UNTIL_RETURN, UNTIL_BLOCK_END, ONLY_ONE_LINE};
 #define ATTR_LOOP_READ_FILE (void *)5
 #define ATTR_LOOP_PARSE (void *)6
 #define ATTR_LOOP_WHILE (void *)7 // Lexikos: This is used to differentiate ACT_WHILE from ACT_LOOP, allowing code to be shared.
+#define ATTR_LOOP_FOR (void *)8
 typedef void *AttributeType;
 
 enum FileLoopModeType {FILE_LOOP_INVALID, FILE_LOOP_FILES_ONLY, FILE_LOOP_FILES_AND_FOLDERS, FILE_LOOP_FOLDERS_ONLY};
@@ -178,6 +179,7 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_TOO_MANY_PARAMS _T("Too many parameters passed to function.") // L31
 #define ERR_TOO_FEW_PARAMS _T("Too few parameters passed to function.") // L31
 #define ERR_ELSE_WITH_NO_IF _T("ELSE with no matching IF")
+#define ERR_UNTIL_WITH_NO_LOOP _T("UNTIL with no matching LOOP")
 #define ERR_OUTOFMEM _T("Out of memory.")  // Used by RegEx too, so don't change it without also changing RegEx to keep the former string.
 #define ERR_EXPR_TOO_LONG _T("Expression too long")
 #define ERR_MEM_LIMIT_REACHED _T("Memory limit reached (see #MaxMem in the help file).") ERR_ABORT
@@ -256,7 +258,12 @@ struct SplashType
 	int object_width;   // Width of image.
 	int object_height;  // Height of the progress bar or image.
 	HWND hwnd;
-	LPPICTURE pic; // For SplashImage.
+	int pic_type;
+	union
+	{
+		HBITMAP pic_bmp; // For SplashImage.
+		HICON pic_icon;
+	};
 	HWND hwnd_bar;
 	HWND hwnd_text1;  // MainText
 	HWND hwnd_text2;  // SubText
@@ -568,16 +575,18 @@ class Line
 {
 private:
 	ResultType EvaluateCondition();
-	ResultType Line::PerformLoop(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine
+	bool EvaluateLoopUntil(ResultType &aResult);
+	ResultType Line::PerformLoop(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
 		, __int64 aIterationLimit, bool aIsInfinite);
-	ResultType Line::PerformLoopFilePattern(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine
+	ResultType Line::PerformLoopFilePattern(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
 		, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, LPTSTR aFilePattern);
-	ResultType PerformLoopReg(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine
+	ResultType PerformLoopReg(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
 		, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, HKEY aRootKeyType, HKEY aRootKey, LPTSTR aRegSubkey);
-	ResultType PerformLoopParse(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine);
-	ResultType Line::PerformLoopParseCSV(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine);
-	ResultType PerformLoopReadFile(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, TextStream *aReadFile, LPTSTR aWriteFileName);
+	ResultType PerformLoopParse(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil);
+	ResultType Line::PerformLoopParseCSV(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil);
+	ResultType PerformLoopReadFile(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil, TextStream *aReadFile, LPTSTR aWriteFileName);
 	ResultType PerformLoopWhile(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine); // Lexikos: ACT_WHILE.
+	ResultType PerformLoopFor(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil); // Lexikos: ACT_FOR.
 	ResultType Perform();
 
 	ResultType MouseGetPos(DWORD aOptions);
@@ -715,7 +724,7 @@ private:
 	static ResultType SetToggleState(vk_type aVK, ToggleValueType &ForceLock, LPTSTR aToggleText);
 
 public:
-    static ResultType Line::IncludeFiles(bool aAllowDuplicateInclude, bool aIgnoreLoadFailure, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, LPTSTR aFilePattern);
+	static ResultType Line::IncludeFiles(bool aAllowDuplicateInclude, bool aIgnoreLoadFailure, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, LPTSTR aFilePattern);
 	#define SET_S_DEREF_BUF(ptr, size) Line::sDerefBuf = ptr, Line::sDerefBufSize = size
 
 	#define NULLIFY_S_DEREF_BUF \
@@ -937,7 +946,7 @@ public:
 		, LPTSTR aFilePath, size_t aFilePathLength);
 
 	Label *GetJumpTarget(bool aIsDereferenced);
-	Label *IsJumpValid(Label &aTargetLabel);
+	Label *IsJumpValid(Label &aTargetLabel, bool aSilent = false);
 	BOOL IsOutsideAnyFunctionBody();
 
 	HWND DetermineTargetWindow(LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LPTSTR aExcludeText);
@@ -1016,6 +1025,7 @@ public:
 			case ACT_INPUT:
 #endif
 			case ACT_FORMATTIME:
+			case ACT_FOR:
 				return ARG_TYPE_OUTPUT_VAR;
 
 			case ACT_SORT:
@@ -1065,6 +1075,7 @@ public:
 #endif
 			case ACT_SPLITPATH:
 			case ACT_FILEGETSHORTCUT:
+			case ACT_FOR:
 				return ARG_TYPE_OUTPUT_VAR;
 			}
 			break;
@@ -1894,12 +1905,13 @@ public:
 	{
 		Label *prev_label =g->CurrentLabel; // This will be non-NULL when a subroutine is called from inside another subroutine.
 		g->CurrentLabel = this;
-			DEBUGGER_STACK_PUSH(SE_Sub, mJumpToLine, sub, this)
+		ResultType result;
+		DEBUGGER_STACK_PUSH(mJumpToLine, this)
 		// I'm pretty sure it's not valid for the following call to ExecUntil() to tell us to jump
 		// somewhere, because the called function, or a layer even deeper, should handle the goto
 		// prior to returning to us?  So the last parameter is omitted:
-		ResultType result = mJumpToLine->ExecUntil(UNTIL_RETURN); // The script loader has ensured that Label::mJumpToLine can't be NULL.
-			DEBUGGER_STACK_POP()
+		result = mJumpToLine->ExecUntil(UNTIL_RETURN); // The script loader has ensured that Label::mJumpToLine can't be NULL.
+		DEBUGGER_STACK_POP()
 		g->CurrentLabel = prev_label;
 		return result;
 	}
@@ -1992,10 +2004,9 @@ public:
 		// ToolTip, O, ((cos(A_Index) * 500) + 500), A_Index
 		++mInstances;
 
-		DEBUGGER_STACK_PUSH(SE_Func, mJumpToLine, func, this)
-
-		ResultType result = mJumpToLine->ExecUntil(UNTIL_BLOCK_END, aResultToken);
-
+		ResultType result;
+		DEBUGGER_STACK_PUSH(mJumpToLine, this)
+		result = mJumpToLine->ExecUntil(UNTIL_BLOCK_END, aResultToken);
 #ifdef CONFIG_DEBUGGER
 		if (g_Debugger.IsConnected())
 		{
@@ -2008,11 +2019,9 @@ public:
 				if (line)
 					g_Debugger.PreExecLine(line);
 			}
-			g_Debugger.StackPop();
 		}
-		// Not used because function calls require extra work to allow the user to inspect variables before returning:
-		//DEBUGGER_STACK_POP()
 #endif
+		DEBUGGER_STACK_POP()
 
 		--mInstances;
 		// Restore the original value in case this function is called from inside another function.
@@ -2565,11 +2574,8 @@ public:
 	// were member functions of class Line, a check for NULL would have to
 	// be done before dereferencing any line's mNextLine, for example:
 	Line *PreparseBlocks(Line *aStartingLine, bool aFindBlockEnd = false, Line *aParentLine = NULL);
-	Line *PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode = NORMAL_MODE, AttributeType aLoopTypeFile = ATTR_NONE
-		, AttributeType aLoopTypeReg = ATTR_NONE, AttributeType aLoopTypeRead = ATTR_NONE
-		, AttributeType aLoopTypeParse = ATTR_NONE);
-
-
+	Line *PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode = NORMAL_MODE, AttributeType aLoopType = ATTR_NONE);
+	
 	Line *mFirstLine, *mLastLine;     // The first and last lines in the linked list.
 	Line *mFirstStaticLine, *mLastStaticLine; // The first and last static var initializer.
 	Label *mFirstLabel, *mLastLabel;  // The first and last labels in the linked list.
@@ -2584,7 +2590,6 @@ public:
     ahkx_int_str xwingetid ;    // 
     ahkx_int_str_str xsend ;    // ahksend
 
-	
 	// Naveen moved above from private
 	Line *mCurrLine;     // Seems better to make this public than make Line our friend.
 	Label *mPlaceholderLabel; // Used in place of a NULL label to simplify code.
