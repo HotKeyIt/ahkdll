@@ -40,7 +40,7 @@ int Debugger::PreExecLine(Line *aLine)
 {
 	Breakpoint *&bp = aLine->mBreakpoint;
 
-	mStackTop->line = aLine;
+	mStack.mTop->line = aLine;
 
 	if (bp && bp->state == BS_Enabled)
 	{
@@ -51,9 +51,10 @@ int Debugger::PreExecLine(Line *aLine)
 		}
 		return ProcessCommands();
 	}
-	else if ((mInternalState == DIS_StepInto
-			|| mInternalState == DIS_StepOut && mStackDepth < mContinuationDepth
-			|| mInternalState == DIS_StepOver && mStackDepth <= mContinuationDepth)
+	int stack_depth = mStack.Depth();
+	if ((mInternalState == DIS_StepInto
+			|| mInternalState == DIS_StepOut && stack_depth < mContinuationDepth
+			|| mInternalState == DIS_StepOver && stack_depth <= mContinuationDepth)
 			// L31: The following check is no longer done because a) ACT_BLOCK_BEGIN belonging to an IF/ELSE/LOOP is now skipped; and b) allowing step to break at ACT_BLOCK_END makes program flow a little easier to follow in some cases.
 			// L40: Stepping on braces seems more bothersome than helpful. Although IF/ELSE/LOOP skips its block-begin, standalone/function-body block-begin still gets here.
 			&& aLine->mActionType != ACT_BLOCK_BEGIN && (aLine->mActionType != ACT_BLOCK_END || aLine->mAttribute) // For now, ignore { and }, except for function-end.
@@ -64,33 +65,6 @@ int Debugger::PreExecLine(Line *aLine)
 	
 	return DEBUGGER_E_OK;
 }
-
-int Debugger::StackPush(StackEntry *aEntry)
-{
-	mStackTop->upper = aEntry;
-	aEntry->lower = mStackTop;
-	mStackTop = aEntry;
-	++mStackDepth;
-	return DEBUGGER_E_OK;
-}
-
-int Debugger::StackPop()
-{
-	if (mStackTop != mStack)
-	{
-		mStackTop = mStackTop->lower;
-		mStackTop->upper = NULL;
-		--mStackDepth;
-		// Stepping out or over from the auto-execute section requires the script to reach
-		// a depth of < or <= 1 to break. This will never happen, since new threads start
-		// at depth 2 - 1 for the thread, 1 for the sub or function it executes.
-		// As a workaround, if all threads finished, step_out/over will act like step_into.
-		if (mStackDepth == 0)
-			mContinuationDepth = INT_MAX;
-	}
-	return DEBUGGER_E_OK;
-}
-
 
 
 int Debugger::ProcessCommands()
@@ -192,6 +166,11 @@ int Debugger::ProcessCommands()
 				err = redirect_stdout(args);
 			else if (!strcmp(command, "stderr"))
 				err = redirect_stderr(args);
+			else if (!strcmp(command, "detach"))
+			{	// User wants to stop the debugger but let the script keep running.
+				Exit(EXIT_NONE); // Anything but EXIT_ERROR.  Sends "stopped" response, then disconnects.
+				return DEBUGGER_E_OK;
+			}
 			else if (!strcmp(command, "stop"))
 			{
 				err = stop(args);
@@ -226,7 +205,7 @@ int Debugger::ProcessCommands()
 			{
 				if (*transaction_id)
 				{
-					mContinuationDepth = mStackDepth;
+					mContinuationDepth = mStack.Depth();
 					mContinuationTransactionId = transaction_id;
 					break;
 				}
@@ -379,6 +358,7 @@ DEBUGGER_COMMAND(Debugger::feature_get)
 				 || !strcmp(feature_name + 9, "value"))
 			|| !strcmp(feature_name, "status")
 			|| !strcmp(feature_name, "source")
+			|| !strcmp(feature_name, "detach")
 			|| !strcmp(feature_name, "stop");
 	}
 
@@ -766,7 +746,7 @@ DEBUGGER_COMMAND(Debugger::stack_depth)
 	DEBUGGER_COMMAND_INIT_TRANSACTION_ID;
 
 	mResponseBuf.WriteF("<response command=\"stack_depth\" depth=\"%i\" transaction_id=\"%e\"/>"
-						, mStackDepth, transaction_id);
+						, mStack.Depth(), transaction_id);
 
 	return SendResponse();
 }
@@ -793,7 +773,7 @@ DEBUGGER_COMMAND(Debugger::stack_get)
 
 		case 'd':
 			depth = atoi(value);
-			if (depth < 0 || depth >= mStackDepth)
+			if (depth < 0 || depth >= mStack.Depth())
 				return DEBUGGER_E_INVALID_STACK_DEPTH;
 			break;
 
@@ -808,7 +788,8 @@ DEBUGGER_COMMAND(Debugger::stack_get)
 	mResponseBuf.WriteF("<response command=\"stack_get\" transaction_id=\"%e\">", transaction_id);
 	
 	int level = 0;
-	for (StackEntry *se = mStackTop; se != mStack; se = se->lower)
+	DbgStack::Entry *se;
+	for (se = mStack.mTop; se >= mStack.mBottom; --se)
 	{
 		if (depth == -1 || depth == level)
 		{
@@ -817,13 +798,13 @@ DEBUGGER_COMMAND(Debugger::stack_get)
 			mResponseBuf.WriteF("\" lineno=\"%u\" where=\"", se->line->mLineNumber);
 			switch (se->type)
 			{
-			case SE_Thread:
+			case DbgStack::SE_Thread:
 				mResponseBuf.WriteF("%e (thread)", U4T(se->desc)); // %e to escape characters which desc may contain (e.g. "a & b" in hotkey name).
 				break;
-			case SE_Func:
+			case DbgStack::SE_Func:
 				mResponseBuf.WriteF("%s()", U4T(se->func->mName)); // %s because function names should never contain characters which need escaping.
 				break;
-			case SE_Sub:
+			case DbgStack::SE_Sub:
 				mResponseBuf.WriteF("%e:", U4T(se->sub->mName)); // %e because label/hotkey names may contain almost anything.
 				break;
 			}
@@ -1452,7 +1433,8 @@ DEBUGGER_COMMAND(Debugger::redirect_stderr)
 int Debugger::WriteStreamPacket(LPCTSTR aText, LPCSTR aType)
 {
 	mResponseBuf.WriteF("<stream type=\"%s\">", aType);
-	mResponseBuf.WriteEncodeBase64((char*)aText, (_tcslen(aText) + 1) * sizeof(TCHAR)); // Includes the null-terminator.
+	CStringUTF8FromTChar packet(aText);
+	mResponseBuf.WriteEncodeBase64(packet, packet.GetLength() + 1); // Includes the null-terminator.
 	mResponseBuf.Write("</stream>");
 	return SendResponse();
 }
@@ -1621,7 +1603,21 @@ int Debugger::Connect(const char *aAddress, const char *aPort)
 		
 		if (err == 0)
 		{
-			err = connect(s, res->ai_addr, (int)res->ai_addrlen);
+			for (;;)
+			{
+				err = connect(s, res->ai_addr, (int)res->ai_addrlen);
+				if (err == 0)
+					break;
+				switch (MessageBox(g_hWnd, DEBUGGER_ERR_FAILEDTOCONNECT, g_script.mFileSpec, MB_ABORTRETRYIGNORE | MB_ICONSTOP | MB_SETFOREGROUND | MB_APPLMODAL))
+				{
+				case IDABORT:
+					g_script.ExitApp(EXIT_ERROR, _T(""));
+					// Above should always exit, but if it doesn't, fall through to the next case:
+				case IDIGNORE:
+					closesocket(s);
+					return DEBUGGER_E_INTERNAL_ERROR;
+				}
+			}
 			
 			freeaddrinfo(res);
 			
@@ -1642,6 +1638,8 @@ int Debugger::Connect(const char *aAddress, const char *aPort)
 				{
 					return DEBUGGER_E_OK;
 				}
+
+				mSocket = INVALID_SOCKET; // Don't want FatalError() to attempt a second closesocket().
 			}
 		}
 
@@ -1654,28 +1652,28 @@ int Debugger::Connect(const char *aAddress, const char *aPort)
 
 // Debugger::Disconnect
 //
-// Disconnect the debugger UI. Returns a Winsock error code on failure, otherwise 0.
+// Disconnect the debugger UI.
 //
 int Debugger::Disconnect()
 {
 	if (mSocket != INVALID_SOCKET)
 	{
 		closesocket(mSocket);
-		//if (closesocket(mSocket) == SOCKET_ERROR)
-		//{
-		//	return DEBUGGER_E_INTERNAL_ERROR;
-		//}
 		mSocket = INVALID_SOCKET;
 		WSACleanup();
 	}
+	// These are reset in case we re-attach to the debugger client later:
 	mCommandBuf.mDataUsed = 0;
 	mResponseBuf.mDataUsed = 0;
+	mStdOutMode = SR_Disabled;
+	mStdErrMode = SR_Disabled;
+	mInternalState = DIS_Starting;
 	return DEBUGGER_E_OK;
 }
 
 // Debugger::Exit
 //
-// Call when exiting to gracefully end debug session.
+// Gracefully end debug session.  Called on script exit.  Also called by "detach" DBGp command.
 //
 void Debugger::Exit(ExitReasons aExitReason)
 {
