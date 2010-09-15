@@ -362,16 +362,19 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 	// It also provides more consistency.
 	GetModuleFileName(NULL, buf, _countof(buf));
 #else
-	TCHAR ahkinibuf[MAX_PATH+1];
 	if (!aScriptFilename) // v1.0.46.08: Change in policy: store the default script in the My Documents directory rather than in Program Files.  It's more correct and solves issues that occur due to Vista's file-protection scheme.
 	{
+		TCHAR ahkinibuf[MAX_PATH+1];
+		// HotKeyIt changed to load ahk file having same name as AutoHotkey.exe from same directory instead AutoHotkey.ahk from My_Documents
+		aScriptFilename = ahkinibuf;
+		BIV_AhkPath(aScriptFilename,_T(""));
+#ifdef STANDALONE
+		BIV_AhkPath(aScriptFilename,_T(""));
+#else
 		// Since no script-file was specified on the command line, use the default name.
 		// For backward compatibility, FIRST check if there's an AutoHotkey.ini file in the current
 		// directory.  If there is, that needs to be used to retain compatibility.
 
-		// HotKeyIt changed to load ahk file having same name as AutoHotkey.exe from same directory instead AutoHotkey.ahk from My_Documents
-		aScriptFilename = ahkinibuf;
-		BIV_AhkPath(aScriptFilename,_T(""));
 		_tcsncpy(aScriptFilename + _tcslen(aScriptFilename) - 3,_T("ahk"),3);
 		if (GetFileAttributes(aScriptFilename) == 0xFFFFFFFF) // File doesn't exist, so fall back to new method.
 		{
@@ -388,6 +391,7 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 			} //else since the legacy .ini file exists, everything is now set up right. (The file might be a directory, but that isn't checked due to rarity.)
 		}
 		//else since the .ahk file exists, everything is now set up right. (The file might be a directory, but that isn't checked due to rarity.)
+#endif
 	}
 
 	// In case the script is a relative filespec (relative to current working dir):
@@ -6129,7 +6133,7 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType,
 		if (!*in)
 			return ScriptError(_T("This \"For\" is missing its \"in\"."), aLineText);
 		int vars = 1;
-		for (mark = in - action_args; mark > 0; --mark)
+		for (mark = (int)(in - action_args); mark > 0; --mark)
 			if (action_args[mark] == g_delimiter)
 				++vars;
 		in[1] = g_delimiter; // Replace "in" with a conventional delimiter.
@@ -10926,12 +10930,14 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 			break;
 
 		case ACT_HOTKEY:
+#ifndef MINIDLL
 			if (   *line_raw_arg2 && !line->ArgHasDeref(2)
 				&& !line->ArgHasDeref(1) && _tcsnicmp(line_raw_arg1, _T("IfWin"), 5) // v1.0.42: Omit IfWinXX from validation.
 				&& _tcsnicmp(line_raw_arg1, _T("If"), 2)	)	// L4: Also omit If from validation - for #if (expression).
 				if (   !(line->mAttribute = FindLabel(line_raw_arg2))   )
 					if (!Hotkey::ConvertAltTab(line_raw_arg2, true))
 						return line->PreparseError(ERR_NO_LABEL);
+#endif
 			break;
 
 		case ACT_SETTIMER:
@@ -13990,13 +13996,24 @@ ResultType Line::PerformLoopFor(ExprTokenType *aResultToken, bool &aContinueMain
 		// Call enumerator.Next(var1, var2)
 		enumerator.Invoke(result_token, enum_token, IT_CALL, params, param_count);
 
+		// Since any non-empty SYM_STRING is always considered "true", we need to change it to SYM_OPERAND
+		// before calling TokenToBOOL; otherwise "return false" and "return 0" will both evaluate to true
+		// since they are optimized to not be expressions (and only expressions return pure numeric values).
+		if (result_token.symbol == SYM_STRING)
+		{
+			result_token.symbol = SYM_OPERAND;
+			result_token.buf = NULL; // Indicate that this SYM_OPERAND token LACKS a pre-converted binary integer.
+		}
+
+		bool next_returned_true = TokenToBOOL(result_token, TokenIsPureNumeric(result_token));
+		
 		// Free any memory or object which may have been returned by Invoke:
 		if (result_token.mem_to_free)
 			free(result_token.mem_to_free);
 		if (result_token.symbol == SYM_OBJECT)
 			result_token.object->Release(); // Relies on the fact that TokenToBool() doesn't access the object.
 
-		if (!TokenToBOOL(result_token, TokenIsPureNumeric(result_token)))
+		if (!next_returned_true)
 		{	// The enumerator returned false, which means there are no more items.
 			result = OK;
 			break;
