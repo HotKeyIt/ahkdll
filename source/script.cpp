@@ -8541,7 +8541,7 @@ ResultType Script::DefineFunc(LPTSTR aBuf, Var *aFuncExceptionVar[])
 			break;
 
 		// Must start the search at param_start, not param_start+1, so that something like fn(, x) will be properly handled:
-		if (   !*param_start || !(param_end = StrChrAny(param_start, _T(", \t=)")))   ) // Look for first comma, space, tab, =, or close-paren.
+		if (   !*param_start || !(param_end = StrChrAny(param_start, _T(", \t=*)")))   ) // Look for first comma, space, tab, =, or close-paren.
 			return ScriptError(ERR_MISSING_CLOSE_PAREN, aBuf);
 
 		if (param_count >= MAX_FUNCTION_PARAMS)
@@ -8554,7 +8554,7 @@ ResultType Script::DefineFunc(LPTSTR aBuf, Var *aFuncExceptionVar[])
 		{
 			// Omit the ByRef keyword from further consideration:
 			param_start = omit_leading_whitespace(param_end);
-			if (   !*param_start || !(param_end = StrChrAny(param_start, _T(", \t=)")))   ) // Look for first comma, space, tab, =, or close-paren.
+			if (   !*param_start || !(param_end = StrChrAny(param_start, _T(", \t=*)")))   ) // Look for first comma, space, tab, =, or close-paren.
 				return ScriptError(ERR_MISSING_CLOSE_PAREN, aBuf);
 		}
 
@@ -8567,12 +8567,25 @@ ResultType Script::DefineFunc(LPTSTR aBuf, Var *aFuncExceptionVar[])
 			return ScriptError(_T("Duplicate parameter."), param_start);
 		if (   !(this_param.var = AddVar(param_start, param_length, insert_pos, 2))   ) // Pass 2 as last parameter to mean "it's a local but more specifically a function's parameter".
 			return FAIL; // It already displayed the error, including attempts to have reserved names as parameter names.
+		
+		this_param.default_type = PARAM_DEFAULT_NONE;  // Set default.
+		param_start = omit_leading_whitespace(param_end);
+
+		if (func.mIsVariadic = (*param_start == '*'))
+		{
+			param_start = omit_leading_whitespace(param_start + 1);
+			if (*param_start != ')')
+				// Give vague error message since the user's intent isn't clear.
+				return ScriptError(ERR_MISSING_CLOSE_PAREN, param_start);
+			// Although this param must be counted since it needs a FuncParam in the array,
+			// it doesn't count toward func.mMinParams or func.mParamCount.
+			++param_count;
+			break;
+		}
 
 		// v1.0.35: Check if a default value is specified for this parameter and set up for the next iteration.
 		// The following section is similar to that used to support initializers for static variables.
 		// So maybe maintain them together.
-		this_param.default_type = PARAM_DEFAULT_NONE;  // Set default.
-		param_start = omit_leading_whitespace(param_end);
 		if (*param_start == '=') // This is the default value of the param just added.
 		{
 			param_start = omit_leading_whitespace(param_start + 1); // Start of the default value.
@@ -8677,7 +8690,7 @@ ResultType Script::DefineFunc(LPTSTR aBuf, Var *aFuncExceptionVar[])
 		size_t size = param_count * sizeof(param[0]);
 		if (   !(func.mParam = (FuncParam *)SimpleHeap::Malloc(size))   )
 			return ScriptError(ERR_OUTOFMEM);
-		func.mParamCount = param_count;
+		func.mParamCount = param_count - func.mIsVariadic; // i.e. don't count the final "param*" of a variadic function.
 		memcpy(func.mParam, param, size);
 	}
 	//else leave func.mParam/mParamCount set to their NULL/0 defaults.
@@ -11888,7 +11901,11 @@ double_deref: // Caller has set cp to be start and op_end to be the character af
 			{
 				// Ensure the function can accept this many parameters.
 				if ( func && in_param_list->param_count >= func->mParamCount )
-					return LineError(ERR_TOO_MANY_PARAMS, FAIL, in_param_list->marker);
+				{
+					if (!func->mIsVariadic)
+						return LineError(ERR_TOO_MANY_PARAMS, FAIL, in_param_list->marker);
+					func = NULL; // Indicate that no validation can be done for this parameter.
+				}
 
 				// Accessing this_infix[-1] here is necessarily safe since in_param_list is
 				// non-NULL, and that can only be the result of a previous SYM_OPAREN/BRACKET.
@@ -11927,11 +11944,11 @@ double_deref: // Caller has set cp to be start and op_end to be the character af
 						return LineError(ERR_BLANK_PARAM, FAIL, in_param_list->marker);
 				}
 
-				if (func) // i.e. something we can validate, not a dynamic function call.
+#ifdef ENABLE_DLLCALL
+				if (func) // i.e. not a dynamic function call.
 				{
 					if ( func->mIsBuiltIn )
 					{
-#ifdef ENABLE_DLLCALL
 						if ( func->mBIF == &BIF_DllCall && in_param_list->param_count == 0 )
 						{
 							// Optimise DllCall by resolving function addresses at load-time where possible.
@@ -11961,39 +11978,9 @@ double_deref: // Caller has set cp to be start and op_end to be the character af
 								}
 							}
 						}
-#endif
-					}
-					// Below relies on the above param_count check to prevent access violation.
-					else if ( func->mParam[in_param_list->param_count].is_byref )
-					{
-						// Ensure the last postfix token is a var or something which can yield a var.
-						// This method should be very accurate unless a multi-statement is used; for example,
-						// Func((var,not+var)) is difficult to validate since we don't know where the end of the
-						// first statement is; currently this use of multi-statement bypasses ByRef validation.
-						bool is_byref_compatible = false;
-						if (postfix_count)
-						{
-							ExprTokenType &last_param = *postfix[postfix_count - 1];
-							SymbolType last_symbol = last_param.symbol;
-							switch (last_symbol)
-							{
-							case SYM_VAR:
-							case SYM_DYNAMIC:		// Cannot be the SYM_DYNAMIC of a dynamic function call since there would be a SYM_FUNC following it.  Must be allowed for ByRef to work with %double_derefs% OR without #NoEnv.
-								// TODO: Determine if built-in vars can be excluded here (show an error message).
-							case SYM_PRE_INCREMENT:
-							case SYM_PRE_DECREMENT:
-							case SYM_IFF_ELSE:		// Difficult to validate, maybe OK.
-							case SYM_COMMA:			// As above.
-								is_byref_compatible = true;
-								break;
-							default:				// Done as range-check for performance; successful assignments are always OK.
-								is_byref_compatible = IS_ASSIGNMENT_EXCEPT_POST_AND_PRE(last_symbol);
-							}
-						}
-						if (!is_byref_compatible)
-							return LineError(ERR_BYREF, FAIL, func->mParam[in_param_list->param_count].var->mName);
 					}
 				}
+#endif
 				// This is a SYM_COMMA or SYM_CPAREN at the end of a parameter.
 				++in_param_list->param_count;
 			}
@@ -12002,7 +11989,8 @@ double_deref: // Caller has set cp to be start and op_end to be the character af
 			//	return LineError(ERR_TOO_FEW_PARAMS, FAIL, in_param_list->marker);
 
 			// Enforce mMinParams:
-			if (func && infix_symbol == SYM_CPAREN && in_param_list->param_count < func->mMinParams)
+			if (func && infix_symbol == SYM_CPAREN && in_param_list->param_count < func->mMinParams
+				&& in_param_list->is_function != DEREF_VARIADIC) // Check this last since it will probably be rare.
 				return LineError(ERR_TOO_FEW_PARAMS, FAIL, in_param_list->marker);
 		}
 
@@ -12159,6 +12147,15 @@ double_deref: // Caller has set cp to be start and op_end to be the character af
 			else // Pop item off the stack, AND CONTINUE ITERATING, which will hit this line until stack is empty.
 				goto standard_pop_into_postfix;
 			// ALL PATHS ABOVE must continue or goto.
+			
+		case SYM_MULTIPLY:
+			if (in_param_list && (this_infix[1].symbol == SYM_CPAREN || this_infix[1].symbol == SYM_CBRACKET)) // Func(params*) or obj.foo[params*]
+			{
+				in_param_list->is_function = DEREF_VARIADIC;
+				++this_infix;
+				continue;
+			}
+			// DO NOT BREAK: FALL THROUGH TO BELOW
 
 		default: // This infix symbol is an operator, so act according to its precedence.
 			// If the symbol waiting on the stack has a lower precedence than the current symbol, push the
@@ -15074,8 +15071,8 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 	case ACT_SORT:
 		return PerformSort(ARG1, ARG2);
 
-	case ACT_PIXELSEARCH:
 #ifndef MINIDLL
+	case ACT_PIXELSEARCH:
 		// ArgToInt() works on ARG7 (the color) because any valid BGR or RGB color has 0x00 in the high order byte:
 		return PixelSearch(ArgToInt(3), ArgToInt(4), ArgToInt(5), ArgToInt(6), ArgToInt(7), ArgToInt(8), ARG9, false);
 	case ACT_IMAGESEARCH:

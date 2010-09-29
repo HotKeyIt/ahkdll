@@ -37,6 +37,7 @@ ResultType AssignErrorLevels(BOOL aSetError, DWORD aLastErrorOverride = -1)
 	return g_ErrorLevel->Assign(aSetError ? ERRORLEVEL_ERROR : ERRORLEVEL_NONE);
 }
 
+
 ////////////////////
 // Window related //
 ////////////////////
@@ -9714,7 +9715,9 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 	if (CopyFile(aSource, aDest, !allow_overwrite))
 		g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
 	SetCurrentDirectory(g_WorkingDir); // Restore to proper value.
+
 #endif
+
 	return OK;
 }
 #endif
@@ -10858,6 +10861,7 @@ VarSizeType BIV_IsUnicode(LPTSTR aBuf, LPTSTR aVarName)
 
 VarSizeType BIV_FileEncoding(LPTSTR aBuf, LPTSTR aVarName)
 {
+	// A similar section may be found under "case Encoding:" in FileObject::Invoke.  Maintain that with this:
 	switch (g->Encoding)
 	{
 	case CP_ACP:
@@ -10996,8 +11000,8 @@ VarSizeType BIV_Space_Tab(LPTSTR aBuf, LPTSTR aVarName)
 {
 	// Really old comment:
 	// A_Space is a built-in variable rather than using an escape sequence such as `s, because the escape
-	// sequence method doesn't work (probably because `s resolves to a space and is that trimmed at
-	// some point in process prior to when it can be used):
+	// sequence method doesn't work (probably because `s resolves to a space and is trimmed at some point
+	// prior to when it can be used):
 	if (aBuf)
 	{
 		*aBuf++ = aVarName[5] ? ' ' : '\t'; // A_Tab[]
@@ -11908,7 +11912,9 @@ VarSizeType BIV_EndChar(LPTSTR aBuf, LPTSTR aVarName)
 {
 	if (aBuf)
 	{
-		*aBuf++ = g_script.mEndChar;
+		if (g_script.mEndChar)
+			*aBuf++ = g_script.mEndChar;
+		//else we returned 0 previously, so MUST WRITE ONLY ONE NULL-TERMINATOR.
 		*aBuf = '\0';
 	}
 	return g_script.mEndChar ? 1 : 0; // v1.0.48.04: Fixed to support a NULL char, which happens when the hotstring has the "no ending character required" option.
@@ -12122,7 +12128,6 @@ union DYNARESULT                // Various result types
     __int64 Int64;              // big int (64-bit)
 	UINT_PTR UIntPtr;
 };
-/*
 struct DYNAPARM
 {
     union
@@ -12142,7 +12147,36 @@ struct DYNAPARM
 	bool passed_by_address;
 	bool is_unsigned; // Allows return value and output parameters to be interpreted as unsigned vs. signed.
 };
-*/
+
+// DynaCall Object
+class DynaToken : public ObjectBase
+{
+protected:
+	int marg_count;
+#ifdef WIN32_PLATFORM
+	int mdll_call_mode;
+#endif
+	void *mfunction;
+	DYNAPARM *mdyna_param;
+	DYNAPARM mreturn_attrib;
+
+	DynaToken()
+		: marg_count(0)
+#ifdef WIN32_PLATFORM
+		, mdll_call_mode(0)
+#endif
+		, mfunction(NULL), mdyna_param(NULL)
+		, mreturn_attrib()
+	{}
+
+	bool Delete();
+	~DynaToken();
+
+public:
+	static IObject *Create(ExprTokenType *aParam[], int aParamCount);
+	ResultType STDMETHODCALLTYPE Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
+};
+
 #ifdef _WIN64
 // This function was borrowed from http://dyncall.org/
 extern "C" UINT_PTR PerformDynaCall(size_t stackArgsSize, DWORD_PTR* stackArgs, DWORD_PTR* regArgs, void* aFunction);
@@ -16383,11 +16417,19 @@ void BIF_OnMessage(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 			// This helps catch bugs in scripts that are assigning the wrong function to a monitor.
 			// It also preserves additional parameters for possible future use (i.e. avoids breaking
 			// existing scripts if more formal parameters are supported in a future version).
-			if (func->mIsBuiltIn || func->mParamCount > 4 || func->mMinParams < func->mParamCount) // Too many params, or some are optional.
+			// Lexikos: The flexibility of allowing ByRef and optional parameters seems to outweigh
+			// the small chance that these checks will actually catch an error and the even smaller
+			// chance that any parameters will be added in future.  For instance, a function may be
+			// called directly by the script to set or retrieve static vars which are used when the
+			// message monitor calls the function.  For these checks to actually catch an error, the
+			// author must have typed the name of the wrong function (i.e. probably not a typo), and
+			// that function must accept more than four parameters or have optional/ByRef parameters:
+			//if (func->mIsBuiltIn || func->mParamCount > 4 || func->mMinParams < func->mParamCount) // Too many params, or some are optional.
+			if (func->mIsBuiltIn || func->mMinParams > 4) // Requires too many params.
 				return; // Yield the default return value set earlier.
-			for (int i = 0; i < func->mParamCount; ++i) // Check if any formal parameters are ByRef.
-				if (func->mParam[i].is_byref)
-					return; // Yield the default return value set earlier.
+			//for (int i = 0; i < func->mParamCount; ++i) // Check if any formal parameters are ByRef.
+			//	if (func->mParam[i].is_byref)
+			//		return; // Yield the default return value set earlier.
 		}
 		else // Explicitly blank function name ("") means delete this item.  By contrast, an omitted second parameter means "give me current function of this message".
 			mode_is_delete = true;
@@ -16564,6 +16606,10 @@ UINT_PTR CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address) // Used
 
 	g->EventInfo = cb.event_info; // This is the means to identify which caller called the callback (if the script assigned more than one caller to this callback).
 
+	// For performance and to preserve stack space, the indirect method of calling a function via the new
+	// Func::Call overload is not used here.  Using it would only be necessary to support variadic functions,
+	// which have very limited use as callbacks; instead, we pass such functions a pointer to surplus params.
+
 	// Need to check if backup of function's variables is needed in case:
 	// 1) The UDF is assigned to more than one callback, in which case the UDF could be running more than once
 	//    simultaneously.
@@ -16578,9 +16624,13 @@ UINT_PTR CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address) // Used
 			return DEFAULT_CB_RETURN_VALUE; // Since out-of-memory is so rare, it seems justifiable not to have any error reporting and instead just avoid calling the function.
 
 	// The following section is similar to the one in ExpandExpression().  See it for detailed comments.
-	int i;
-	for (i = 0; i < cb.actual_param_count; ++i)  // For each formal parameter that has a matching actual (an earlier stage already verified that there are enough formals to cover the actuals).
+	int i, j = cb.actual_param_count < func.mParamCount ? cb.actual_param_count : func.mParamCount;
+	for (i = 0; i < j; ++i)  // For each formal parameter that has a matching actual.
 		func.mParam[i].var->Assign((UINT_PTR)params[i]); // All parameters are passed "by value" because an earlier stage ensured there are no ByRef parameters.
+	if (func.mIsVariadic)
+		// See the performance note further above.  Rather than having the "variadic" param remain empty,
+		// pass it a pointer to the first actual parameter which wasn't assigned to a formal parameter:
+		func.mParam[func.mParamCount].var->Assign((UINT_PTR)(params + i));
 	for (; i < func.mParamCount; ++i) // For each remaining formal (i.e. those that lack actuals), apply a default value (an earlier stage verified that all such parameters have a default-value available).
 	{
 		FuncParam &this_formal_param = func.mParam[i]; // For performance and convenience.
@@ -16658,14 +16708,14 @@ void BIF_RegisterCallback(ExprTokenType &aResultToken, ExprTokenType *aParam[], 
 		|| func->mIsBuiltIn   )  // ...the function is built-in.
 		return; // Indicate failure by yielding the default result set earlier.
 
-	TCHAR options_buf[MAX_NUMBER_SIZE];
-	LPTSTR options = (aParamCount < 2) ? _T("") : TokenToString(*aParam[1], options_buf);
+	LPTSTR options = (aParamCount < 2) ? _T("") : TokenToString(*aParam[1]);
 
 	int actual_param_count;
-	if (aParamCount > 2) // A parameter count was specified.
+	if (aParamCount > 2 && !TokenIsEmptyString(*aParam[2])) // A parameter count was specified.
 	{
 		actual_param_count = (int)TokenToInt64(*aParam[2]);
 		if (   actual_param_count > func->mParamCount    // The function doesn't have enough formals to cover the specified number of actuals.
+				&& !func->mIsVariadic					 // ...and the function isn't designed to accept parameters via an array (or in this case, a pointer).
 			|| actual_param_count < func->mMinParams   ) // ...or the function has too many mandatory formals (caller specified insufficient actuals to cover them all).
 			return; // Indicate failure by yielding the default result set earlier.
 	}
@@ -16673,7 +16723,8 @@ void BIF_RegisterCallback(ExprTokenType &aResultToken, ExprTokenType *aParam[], 
 		actual_param_count = func->mMinParams;
 
 #ifdef WIN32_PLATFORM
-	if (actual_param_count > 31) // The ASM instruction currently used limits parameters to 31 (which should be plenty for any realistic use).
+	bool use_cdecl = StrChrAny(options, _T("Cc")); // Recognize "C" as the "CDecl" option.
+	if (!use_cdecl && actual_param_count > 31) // The ASM instruction currently used limits parameters to 31 (which should be plenty for any realistic use).
 		return; // Indicate failure by yielding the default result set earlier.
 #endif
 
@@ -16691,6 +16742,10 @@ void BIF_RegisterCallback(ExprTokenType &aResultToken, ExprTokenType *aParam[], 
 	// much more efficient. MSDN says about GlobalAlloc: "All memory is created with execute access; no
 	// special function is required to execute dynamically generated code. Memory allocated with this function
 	// is guaranteed to be aligned on an 8-byte boundary." 
+	// ABOVE IS OBSOLETE/INACCURATE: Systems with DEP enabled (and some without) require a VirtualProtect call
+	// to allow the callback to execute.  MSDN currently says only this about the topic in the documentation
+	// for GlobalAlloc:  "To execute dynamically generated code, use the VirtualAlloc function to allocate
+	//						memory and the VirtualProtect function to grant PAGE_EXECUTE access."
 	RCCallbackFunc *callbackfunc=(RCCallbackFunc*) GlobalAlloc(GMEM_FIXED,sizeof(RCCallbackFunc));	//allocate structure off process heap, automatically RWE and fixed.
 	if(!callbackfunc) return;
 	RCCallbackFunc &cb = *callbackfunc; // For convenience and possible code-size reduction.
@@ -16715,7 +16770,7 @@ void BIF_RegisterCallback(ExprTokenType &aResultToken, ExprTokenType *aParam[], 
 	cb.callfuncptr = &funcaddrptr; // xxxx: Address of C stub.
 
 	cb.data4=0xC48359 // pop ecx -- 59 ;return address... add esp, xx -- 83 C4 xx ;stack correct (add argument to add esp, nn for stack correction).
-		+ (StrChrAny(options, _T("Cc")) ? 0 : actual_param_count<<26);  // Recognize "C" as the "CDecl" option.
+		+ (use_cdecl ? 0 : actual_param_count<<26);
 
 	cb.data5=0xE1FF; // jmp ecx -- FF E1 ;return
 #endif
@@ -16739,11 +16794,10 @@ void BIF_RegisterCallback(ExprTokenType &aResultToken, ExprTokenType *aParam[], 
 	cb.actual_param_count = actual_param_count;
 	cb.create_new_thread = !StrChrAny(options, _T("Ff")); // Recognize "F" as the "fast" mode that avoids creating a new thread.
 
-#ifdef _WIN64
-	// We must set execute permissions for the callback stub function.
+	// If DEP is enabled (and sometimes when DEP is apparently "disabled"), we must change the
+	// protection of the page of memory in which the callback resides to allow it to execute:
 	DWORD dwOldProtect;
 	VirtualProtect(callbackfunc, sizeof(RCCallbackFunc), PAGE_EXECUTE_READWRITE, &dwOldProtect);
-#endif
 
 	aResultToken.symbol = SYM_INTEGER; // Override the default set earlier.
 	aResultToken.value_int64 = (__int64)callbackfunc; // Yield the callable address as the result.

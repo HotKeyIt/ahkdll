@@ -25,6 +25,7 @@ freely, without restriction.
 #define Debugger_h
 
 #include <winsock2.h>
+#include "script_object.h"
 
 
 #define DEBUGGER_INITIAL_BUFFER_SIZE 2048
@@ -205,11 +206,25 @@ public:
 	inline bool IsStepping() { return mInternalState >= DIS_StepInto; }
 	inline bool HasStdErrHook() { return mStdErrMode != SR_Disabled; }
 	inline bool HasStdOutHook() { return mStdOutMode != SR_Disabled; }
-	inline bool ShouldBreakAfterFunctionCall()
+
+	inline void PostExecFunctionCall(Line *aExpressionLine)
 	{
-		return mInternalState == DIS_StepInto
-			|| (mInternalState == DIS_StepOut || mInternalState == DIS_StepOver)
-				&& mStack.Depth() < mContinuationDepth;
+		// If the debugger is stepping into/over/out from a function call, we want to
+		// break at the line which called that function, since the next line to execute
+		// might be a line in some other function (i.e. because the line which called
+		// the function is "return func()" or calls another function after this one).
+		if ((mInternalState == DIS_StepInto
+			|| ((mInternalState == DIS_StepOut || mInternalState == DIS_StepOver)
+				// Always '<' since '<=' (for StepOver) shouldn't be possible,
+				// since we just returned from a function call:
+				&& mStack.Depth() < mContinuationDepth))
+			// The final check ensures we don't repeatedly break at a line containing
+			// multiple built-in function calls; i.e. don't break unless some script
+			// has been executed since we began evaluating aExpressionLine.  Something
+			// like "return recursivefunc()" should work if this is StepInto or StepOver
+			// since mCurrLine would probably be the '}' of that function:
+			&& mCurrLine != aExpressionLine)
+			PreExecLine(aExpressionLine);
 	}
 
 	// Code flow notification functions:
@@ -263,6 +278,7 @@ public:
 
 	Debugger() : mSocket(INVALID_SOCKET), mInternalState(DIS_Starting)
 		, mMaxPropertyData(1024), mContinuationTransactionId(""), mStdErrMode(SR_Disabled), mStdOutMode(SR_Disabled)
+		, mMaxChildren(20), mMaxDepth(2)
 	{
 	}
 
@@ -272,6 +288,7 @@ public:
 
 private:
 	SOCKET mSocket;
+	Line *mCurrLine; // Similar to g_script.mCurrLine, but may be different when breaking post-function-call, before continuing expression evaluation.
 
 	class Buffer
 	{
@@ -314,7 +331,7 @@ private:
 	int mContinuationDepth; // Stack depth at last continuation command, for step_into/step_over.
 	char *mContinuationTransactionId; // transaction_id of last continuation command.
 
-	VarSizeType mMaxPropertyData;
+	int mMaxPropertyData, mMaxChildren, mMaxDepth;
 
 
 	// Receive next command from debugger UI:
@@ -327,9 +344,14 @@ private:
 	int SendContinuationResponse(char *aStatus="break", char *aReason="ok");
 
 	int WriteBreakpointXml(Breakpoint *aBreakpoint, Line *aLine);
-	int WritePropertyXml(Var *aVar, VarSizeType aMaxData=VARSIZE_MAX);
-	int WriteVarSizeAndData(Var *aVar, VarSizeType aMaxData=VARSIZE_MAX);
+	int WritePropertyXml(Var &aVar, int aMaxEncodedSize, int aPage = 0);
+	int WritePropertyXml(IObject *aObject, const char *aName, CStringA &aNameBuf, int aPage, int aPageSize, int aDepthRemaining, int aMaxEncodedSize, char *aFacet = "");
+	int WritePropertyXml(Object::FieldType &aField, const char *aName, CStringA &aNameBuf, int aPageSize, int aDepthRemaining, int aMaxEncodedSize);
+	int WritePropertyData(LPCTSTR aData, int aDataSize, int aMaxEncodedSize);
+	int WritePropertyData(Var &aVar, int aMaxEncodedSize);
+	int WritePropertyData(Object::FieldType &aField, int aMaxEncodedSize);
 
+	int ParsePropertyName(const char *aFullName, int aVarScope, bool aVarMustExist, Var *&aVar, Object::FieldType *&aField);
 	int property_get_or_value(char *aArgs, bool aIsPropertyGet);
 	int redirect_std(char *aArgs, char *aCommandName);
 

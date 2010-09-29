@@ -649,7 +649,7 @@ void SendKeys(LPTSTR aKeys, bool aSendRaw, SendModes aSendModeOrig, HWND aTarget
 
 				// See comment "else must never change sModifiersLR_persistent" above about why
 				// !aTargetWindow is used below:
-				else if (vk = TextToSpecial(aKeys, (UINT)key_text_length, event_type
+				else if (vk = TextToSpecial(aKeys, key_text_length, event_type
 					, persistent_modifiers_for_this_SendKeys, !aTargetWindow)) // Assign.
 				{
 					if (!aTargetWindow)

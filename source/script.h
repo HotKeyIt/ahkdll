@@ -175,7 +175,6 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_MISSING_CLOSE_QUOTE _T("Missing close-quote") // No period after short phrases.
 #define ERR_MISSING_COMMA _T("Missing comma")             //
 #define ERR_BLANK_PARAM _T("Blank parameter")             //
-#define ERR_BYREF _T("Caller must pass a variable to this ByRef parameter.")
 #define ERR_TOO_MANY_PARAMS _T("Too many parameters passed to function.") // L31
 #define ERR_TOO_FEW_PARAMS _T("Too few parameters passed to function.") // L31
 #define ERR_ELSE_WITH_NO_IF _T("ELSE with no matching IF")
@@ -332,7 +331,8 @@ struct DerefType
 	};
 	// Keep any fields that aren't an even multiple of 4 adjacent to each other.  This conserves memory
 	// due to byte-alignment:
-	bool is_function; // This should be kept pure bool to allow easy determination of what's in the union, above.
+	BYTE is_function;
+#define DEREF_VARIADIC 2
 	DerefParamCountType param_count; // The actual number of parameters present in this function *call*.  Left uninitialized except for functions.
 	DerefLengthType length; // Listed only after byte-sized fields, due to it being a WORD.
 };
@@ -434,27 +434,6 @@ enum DllArgTypes {
 	, DLL_ARG_STR  = UorA(DLL_ARG_WSTR, DLL_ARG_ASTR)
 	, DLL_ARG_xSTR = UorA(DLL_ARG_ASTR, DLL_ARG_WSTR) // To simplify some sections.
 };  // Some sections might rely on DLL_ARG_INVALID being 0.
-
-struct DYNAPARM
-{
-    union
-	{
-		int value_int; // Args whose width is less than 32-bit are also put in here because they are right justified within a 32-bit block on the stack.
-		float value_float;
-		__int64 value_int64;
-		UINT_PTR value_uintptr;
-		double value_double;
-		char *astr;
-		wchar_t *wstr;
-		void *ptr;
-    };
-	// Might help reduce struct size to keep other members last and adjacent to each other (due to
-	// 8-byte alignment caused by the presence of double and __int64 members in the union above).
-	DllArgTypes type;
-	bool passed_by_address;
-	bool is_unsigned; // Allows return value and output parameters to be interpreted as unsigned vs. signed.
-};
-
 
 // Note that currently this value must fit into a sc_type variable because that is how TextToKey()
 // stores it in the hotkey class.  sc_type is currently a UINT, and will always be at least a
@@ -1938,6 +1917,15 @@ struct FuncParam
 	union {LPTSTR default_str; __int64 default_int64; double default_double;};
 };
 
+struct FuncCallData
+{
+	Func *mFunc; // If non-NULL, indicates this is a UDF whose vars will need to be freed/restored later.
+	VarBkp *mBackup; // For UDFs.
+	int mBackupCount;
+	FuncCallData() : mFunc(NULL), mBackup(NULL), mBackupCount(0) { }
+	~FuncCallData();
+};
+
 typedef void (* BuiltInFunctionType)(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 
 class Func
@@ -1965,6 +1953,9 @@ public:
 	// Note that it's possible for a built-in function such as WinExist() to become a normal/UDF via
 	// override in the script.  So mIsBuiltIn should always be used to determine whether the function
 	// is truly built-in, not its name.
+	bool mIsVariadic;
+
+	bool Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount, bool aIsVariadic = false);
 
 	ResultType Call(ExprTokenType *aResultToken) // Making this a function vs. inline doesn't measurably impact performance.
 	{
@@ -2039,6 +2030,7 @@ public:
 		, mInstances(0) /*, mNextFunc(NULL)*/
 		, mDefaultVarType(VAR_DECLARE_NONE)
 		, mIsBuiltIn(aIsBuiltIn)
+		, mIsVariadic(false)
 	{}
 	void *operator new(size_t aBytes) {return SimpleHeap::Malloc(aBytes);}
 	void *operator new[](size_t aBytes) {return SimpleHeap::Malloc(aBytes);}
@@ -2618,7 +2610,7 @@ public:
 	LPTSTR mFileDir;  // Will hold the directory containing the script file.
 	LPTSTR mFileName; // Will hold the script's naked file name.
 	LPTSTR mOurEXE; // Will hold this app's module name (e.g. C:\Program Files\AutoHotkey\AutoHotkey.exe).
-	LPTSTR mOurEXEDir;  // Same as above but just the containing diretory (for convenience).
+	LPTSTR mOurEXEDir;  // Same as above but just the containing directory (for convenience).
 	LPTSTR mMainWindowTitle; // Will hold our main window's title, for consistency & convenience.
 	bool mIsReadyToExecute;
 	bool mAutoExecSectionIsRunning;
@@ -2941,6 +2933,7 @@ void BIF_IL_Add(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParam
 #endif
 void BIF_Trim(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount); // L31: Also handles LTrim and RTrim.
 
+
 void BIF_IsObject(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_ObjCreate(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_ObjInvoke(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount); // See script_object.cpp for comments.
@@ -2986,3 +2979,4 @@ bool ScriptGetKeyState(vk_type aVK, KeyStateTypes aKeyStateType);
 double ScriptGetJoyState(JoyControls aJoy, int aJoystickID, ExprTokenType &aToken, bool aUseBoolForUpDown);
 
 #endif
+
