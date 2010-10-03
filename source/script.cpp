@@ -6847,11 +6847,22 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 				} // for each mandatory-numeric arg of this command, see if this arg matches its number.
 			} // this command has a list of mandatory numeric-args.
 
-			// To help runtime performance, the below changes an ACT_ASSIGNEXPR, ACT_TRANSFORM, and
-			// perhaps others in the future, to become non-expressions if they contain only a single
-			// numeric literal (or are entirely blank). At runtime, such args are expanded normally
-			// rather than having to run them through the expression evaluator:
-			if (this_new_arg.is_expression && IsPureNumeric(this_new_arg.text, true, true, true) && aActionType != ACT_FOR) // The last check is necessary to ensure "For x in 0" fails *gracefully*. Although it will hopefully never happen, a user might conceivably try (and fail) to use 0 as a *variable*.
+			// To help runtime performance, the below changes args to non-expressions if they contain
+			// only a single numeric literal (or are entirely blank). At runtime, such args are expanded
+			// normally rather than having to run them through the expression evaluator. Exceptions:
+			//
+			//	a)	ACT_FOR requires an expression; it is incapable of accepting a non-expression.
+			//		Although we could treat things like "For x in 0" as load-time errors, it wouldn't
+			//		be consistent with "For x in var_containing_num" and the rarity mightn't be worth
+			//		the added code.
+			//
+			//	b)	ACT_ASSIGNEXPR should assign a cached binary integer in addition to the numeric literal.
+			//		This might perform just as well overall but is more important for consistency, especially
+			//		with COM objects which would otherwise treat the number as a string, potentially causing
+			//		a type mismatch error.
+			//
+			if (this_new_arg.is_expression && IsPureNumeric(this_new_arg.text, true, true, true)
+				&& aActionType != ACT_ASSIGNEXPR && aActionType != ACT_FOR)
 				this_new_arg.is_expression = false;
 
 			if (this_new_arg.is_expression)
@@ -9380,6 +9391,7 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		BIF_OBJ_CASE(SetCapacity,	1, 2) // [key,] new_capacity
 		BIF_OBJ_CASE(GetAddress,	1, 1) // key
 		BIF_OBJ_CASE(NewEnum,		0, 0)
+		BIF_OBJ_CASE(Clone,			0, 0)
 #undef BIF_OBJ_CASE
 		else if (!_tcsicmp(suffix, _T("AddRef")) || !_tcsicmp(suffix, _T("Release")))
 			bif = BIF_ObjAddRefRelease;
@@ -9874,7 +9886,8 @@ Var *Script::FindVar(LPTSTR aVarName, size_t aVarNameLength, int *apInsertPos, i
 			// no way to dynamically reference the local variables of an assume-global function.
 			if (g.CurrentFunc->mDefaultVarType == VAR_DECLARE_GLOBAL && !is_local) // g.CurrentFunc is also known to be non-NULL in this case.
 			{
-				for (i = 0; i < g.CurrentFunc->mParamCount; ++i)
+				int j = g.CurrentFunc->mParamCount + g.CurrentFunc->mIsVariadic; // i.e. must also check the "variadic" param, which isn't included in mParamCount.
+				for (i = 0; i < j; ++i)
 					if (!_tcsicmp(var_name, g.CurrentFunc->mParam[i].var->mName)) // lstrcmpi() is not used: 1) avoids breaking exisitng scripts; 2) provides consistent behavior across multiple locales; 3) performance.
 					{
 						is_local = true;

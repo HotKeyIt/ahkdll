@@ -57,7 +57,6 @@ public:
 };	
 
 
-
 //
 // EnumBase - Base class for enumerator objects following standard syntax.
 //
@@ -237,3 +236,4 @@ public:
 };
 
 extern MetaObject g_MetaObject;		// Defines "object" behaviour for non-object values.
+
