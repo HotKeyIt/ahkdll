@@ -15,7 +15,7 @@ GNU General Public License for more details.
 */
 
 #include "stdafx.h" // pre-compiled headers
-#ifdef USRDLL
+#ifdef _USRDLL
 #include "globaldata.h" // for access to many global vars
 #include "application.h" // for MsgSleep()
 #include "window.h" // For MsgBox() & SetForegroundLockTimeout()
@@ -24,6 +24,15 @@ GNU General Public License for more details.
 #include "windows.h"  // N11
 #include "exports.h"  // N11
 #include <process.h>  // N11
+
+
+#include <objbase.h> // COM
+#include "ComServer_i.h"
+#include "ComServer_i.c"
+#include <atlbase.h> // CComBSTR
+#include "Registry.h"
+#include "ComServerImpl.h"
+
 //#include <string>
 
 // General note:
@@ -35,6 +44,9 @@ GNU General Public License for more details.
 
 
 static LPTSTR scriptstring;
+// Naveen v1. HANDLE hThread
+// Todo: move this to struct nameHinstance
+static 	HANDLE hThread;
 static struct nameHinstance
      {
        HINSTANCE hInstanceP;
@@ -45,17 +57,13 @@ static struct nameHinstance
 	 //  TCHAR args[1000];
 	   int istext;
      } nameHinstanceP ;
-
-// Naveen v1. HANDLE hThread
-// Todo: move this to struct nameHinstance
-static 	HANDLE hThread;
-
 // Naveen v1. hThread2 and threadCount
 // Todo: remove these as multithreading was implemented 
 //       with multiple loading of the dll under separate names.
 static int threadCount = 1 ; 
 static 	HANDLE hThread2;
 unsigned __stdcall runScript( void* pArguments );
+
 // Naveen v1. DllMain() - puts hInstance into struct nameHinstanceP 
 //                        so it can be passed to OldWinMain()
 // hInstance is required for script initialization 
@@ -69,6 +77,7 @@ switch(fwdReason)
  case DLL_PROCESS_ATTACH:
 	 {
 		nameHinstanceP.hInstanceP = (HINSTANCE)hInstance;
+		g_hInstance = (HINSTANCE)hInstance;
 #ifdef AUTODLL
 	ahkdll("autoload.ahk", "", "");	  // used for remoteinjection of dll 
 #endif
@@ -92,8 +101,7 @@ switch(fwdReason)
 
  return(TRUE); // a FALSE will abort the DLL attach
  }
-
-
+ 
 int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdLine, int nCmdShow)
 {
 	// Init any globals not in "struct g" that need it:
@@ -223,7 +231,7 @@ param = nameHinstanceP.argv ; //
 	// Unless explicitly set to be non-SingleInstance via SINGLE_INSTANCE_OFF or a special kind of
 	// SingleInstance such as SINGLE_INSTANCE_REPLACE and SINGLE_INSTANCE_IGNORE, persistent scripts
 	// and those that contain hotkeys/hotstrings are automatically SINGLE_INSTANCE_PROMPT as of v1.0.16:
-#ifndef USRDLL	
+#ifndef _USRDLL	
 	if (g_AllowOnlyOneInstance == ALLOW_MULTI_INSTANCE && IS_PERSISTENT)
 		g_AllowOnlyOneInstance = SINGLE_INSTANCE_PROMPT;
 #else
@@ -386,7 +394,7 @@ unsigned __stdcall runScript( void* pArguments )
 }
 
 
-EXPORT int ahkTerminate(bool kill)
+EXPORT BOOL ahkTerminate(bool kill)
 {
 	int lpExitCode = 0;
 	GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
@@ -462,7 +470,6 @@ EXPORT unsigned int ahktextdll(LPTSTR fileName, LPTSTR argv, LPTSTR args)
 	return runThread();
 }
 
-
 void reloadDll()
 {
 	unsigned threadID;
@@ -480,8 +487,7 @@ ResultType terminateDll()
 	return EARLY_EXIT;
 }
 
-
-EXPORT int ahkReload()
+EXPORT BOOL ahkReload()
 {
 	ahkTerminate(0);
 	hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, 0 );
@@ -492,8 +498,428 @@ EXPORT BOOL ahkReady() // HotKeyIt check if dll is ready to execute
 {
 	return g_script.mIsReadyToExecute;
 }
+
+#ifndef MINIDLL
+
+// COM Implementation //
+static long g_cComponents = 0 ;     // Count of active components
+static long g_cServerLocks = 0 ;    // Count of locks
+
+// Friendly name of component
+const char g_szFriendlyName[] = "AutoHotkey Script" ;
+
+// Version-independent ProgID
+const char g_szVerIndProgID[] = "AutoHotkey.Script" ;
+
+// ProgID
+const char g_szProgID[] = "AutoHotkey.Script.1" ;
+
+//
+// Constructor
+//
+CoCOMServer::CoCOMServer() : m_cRef(1)
+
+{ 
+	InterlockedIncrement(&g_cComponents) ; 
+
+	m_ptinfo = NULL;
+	LoadTypeInfo(&m_ptinfo, LIBID_LibCOMServer, IID_ICOMServer, 0);
+}
+
+//
+// Destructor
+//
+CoCOMServer::~CoCOMServer() 
+{ 
+	InterlockedDecrement(&g_cComponents) ; 
+}
+
+//
+// IUnknown implementation
+//
+HRESULT __stdcall CoCOMServer::QueryInterface(const IID& iid, void** ppv)
+{    
+	if (iid == IID_IUnknown || iid == IID_ICOMServer || iid == IID_IDispatch)
+	{
+		*ppv = static_cast<ICOMServer*>(this) ; 
+	}
+	else
+	{
+		*ppv = NULL ;
+		return E_NOINTERFACE ;
+	}
+	reinterpret_cast<IUnknown*>(*ppv)->AddRef() ;
+	return S_OK ;
+}
+
+ULONG __stdcall CoCOMServer::AddRef()
+{
+	return InterlockedIncrement(&m_cRef) ;
+}
+
+ULONG __stdcall CoCOMServer::Release() 
+{
+	if (InterlockedDecrement(&m_cRef) == 0)
+	{
+		delete this ;
+		return 0 ;
+	}
+	return m_cRef ;
+}
+
+
+//
+// ICOMServer implementation
+//
+HRESULT __stdcall CoCOMServer::Name(/*out*/BSTR* objectname)
+{
+	if (objectname==NULL)
+		return ERROR_INVALID_PARAMETER;
+
+	CComBSTR dummy;
+	//ahktextdll(_T("MsgBox hello"),_T(""),_T(""));
+	dummy.Append("hello world!");
+	*objectname = dummy.Detach(); // Detach() returns an allocated BSTR string
+
+	return S_OK;
+}
+
+
+HRESULT __stdcall CoCOMServer::ahktextdll(/*in,optional*/VARIANT script,/*in,optional*/VARIANT options,/*in,optional*/VARIANT params,/*out*/unsigned int* hThread)
+{
+	USES_CONVERSION;
+	if (hThread==NULL)
+		return ERROR_INVALID_PARAMETER;
+	*hThread = com_ahktextdll(script.vt == VT_ERROR ? _T("") : OLE2T(script.bstrVal),options.vt == VT_ERROR ? _T("") : OLE2T(options.bstrVal),params.vt == VT_ERROR ? _T("") : OLE2T(params.bstrVal)); //	(LPTSTR)params.bstrVal);
+	return S_OK;
+}
+
+HRESULT __stdcall CoCOMServer::ahkdll(/*in,optional*/VARIANT filepath,/*in,optional*/VARIANT options,/*in,optional*/VARIANT params,/*out*/unsigned int* hThread)
+{
+	if (hThread==NULL)
+		return ERROR_INVALID_PARAMETER;
+	USES_CONVERSION;
+	*hThread = com_ahkdll(filepath.vt == VT_ERROR ? _T("") : OLE2T(filepath.bstrVal),OLE2T(options.bstrVal),OLE2T(params.bstrVal)); //	(LPTSTR)params.bstrVal);
+	return S_OK;
+}
+HRESULT __stdcall CoCOMServer::ahkPause(/*in,optional*/VARIANT aChangeTo,/*out*/BOOL* paused)
+{
+	if (paused==NULL)
+		return ERROR_INVALID_PARAMETER;
+	USES_CONVERSION;
+	*paused = com_ahkPause(aChangeTo.vt == VT_ERROR ? _T("") : OLE2T(aChangeTo.bstrVal));
+	return S_OK;
+}
+HRESULT __stdcall CoCOMServer::ahkReady(/*out*/BOOL* ready)
+{
+	if (ready==NULL)
+		return ERROR_INVALID_PARAMETER;
+
+	*ready = com_ahkReady();
+	return S_OK;
+}
+HRESULT __stdcall CoCOMServer::ahkFindLabel(/*in*/VARIANT aLabelName,/*out*/unsigned int* aLabelPointer)
+{
+	USES_CONVERSION;
+	*aLabelPointer = com_ahkFindLabel(OLE2T(aLabelName.bstrVal));
+	return S_OK;
+}
+HRESULT __stdcall CoCOMServer::ahkgetvar(/*in*/VARIANT name,/*[in,optional]*/ VARIANT getVar,/*out*/BSTR* result)
+{
+	USES_CONVERSION;
+	*result = T2BSTR(com_ahkgetvar(OLE2T(name.bstrVal),getVar.vt == VT_ERROR ? 0 : getVar.uintVal));
+	return S_OK;
+}
+HRESULT __stdcall CoCOMServer::ahkassign(/*in*/VARIANT name, /*in*/VARIANT value,/*out*/unsigned int* success)
+{
+	USES_CONVERSION;
+	*success = com_ahkassign(OLE2T(name.bstrVal),value.vt == VT_ERROR ? _T("") : OLE2T(value.bstrVal));
+	return S_OK;
+}
+HRESULT __stdcall CoCOMServer::ahkExecuteLine(/*[in,optional]*/ VARIANT line,/*[in,optional]*/ VARIANT aMode,/*[in,optional]*/ VARIANT wait,/*[out, retval]*/ unsigned int* pLine)
+{
+	*pLine = com_ahkExecuteLine(line.vt == VT_ERROR ? 0 : line.uintVal,aMode.vt == VT_ERROR ? 0 : aMode.uintVal,wait.vt == VT_ERROR ? 0 : wait.uintVal);
+	return S_OK;
+}
+HRESULT __stdcall CoCOMServer::ahkLabel(/*[in]*/ VARIANT aLabelName,/*[in,optional]*/ VARIANT nowait,/*[out, retval]*/ BOOL* success)
+{
+	USES_CONVERSION;
+	*success = com_ahkLabel(OLE2T(aLabelName.bstrVal),nowait.vt == VT_ERROR ? 0 : nowait.uintVal);
+	return S_OK;
+}
+HRESULT __stdcall CoCOMServer::ahkFindFunc(/*[in]*/ VARIANT FuncName,/*[out, retval]*/ unsigned int* pFunc)
+{
+	USES_CONVERSION;
+	*pFunc = com_ahkFindFunc(OLE2T(FuncName.bstrVal));
+	return S_OK;
+}
+HRESULT __stdcall CoCOMServer::ahkFunction(/*[in]*/ VARIANT FuncName,/*[in,optional]*/ VARIANT param1,/*[in,optional]*/ VARIANT param2,/*[in,optional]*/ VARIANT param3,/*[in,optional]*/ VARIANT param4,/*[in,optional]*/ VARIANT param5,/*[in,optional]*/ VARIANT param6,/*[in,optional]*/ VARIANT param7,/*[in,optional]*/ VARIANT param8,/*[in,optional]*/ VARIANT param9,/*[in,optional]*/ VARIANT param10,/*[out, retval]*/ BSTR* returnVal)
+{
+	USES_CONVERSION;
+	*returnVal = T2BSTR(com_ahkFunction(OLE2T(FuncName.bstrVal),param1.vt == VT_ERROR ? _T("") : OLE2T(param1.bstrVal),param2.vt == VT_ERROR ? _T("") : OLE2T(param2.bstrVal),param3.vt == VT_ERROR ? _T("") : OLE2T(param3.bstrVal),param4.vt == VT_ERROR ? _T("") : OLE2T(param4.bstrVal),param5.vt == VT_ERROR ? _T("") : OLE2T(param5.bstrVal),param6.vt == VT_ERROR ? _T("") : OLE2T(param6.bstrVal),param7.vt == VT_ERROR ? _T("") : OLE2T(param7.bstrVal),param8.vt == VT_ERROR ? _T("") : OLE2T(param8.bstrVal),param9.vt == VT_ERROR ? _T("") : OLE2T(param9.bstrVal),param10.vt == VT_ERROR ? _T("") : OLE2T(param10.bstrVal)));
+	return S_OK;
+}
+HRESULT __stdcall CoCOMServer::ahkPostFunction(/*[in]*/ VARIANT FuncName,VARIANT param1,/*[in,optional]*/ VARIANT param2,/*[in,optional]*/ VARIANT param3,/*[in,optional]*/ VARIANT param4,/*[in,optional]*/ VARIANT param5,/*[in,optional]*/ VARIANT param6,/*[in,optional]*/ VARIANT param7,/*[in,optional]*/ VARIANT param8,/*[in,optional]*/ VARIANT param9,/*[in,optional]*/ VARIANT param10,/*[out, retval]*/ unsigned int* returnVal)
+{
+	USES_CONVERSION;
+	*returnVal = com_ahkPostFunction(OLE2T(FuncName.bstrVal),param1.vt == VT_ERROR ? _T("") : OLE2T(param1.bstrVal),param2.vt == VT_ERROR ? _T("") : OLE2T(param2.bstrVal),param3.vt == VT_ERROR ? _T("") : OLE2T(param3.bstrVal),param4.vt == VT_ERROR ? _T("") : OLE2T(param4.bstrVal),param5.vt == VT_ERROR ? _T("") : OLE2T(param5.bstrVal),param6.vt == VT_ERROR ? _T("") : OLE2T(param6.bstrVal),param7.vt == VT_ERROR ? _T("") : OLE2T(param7.bstrVal),param8.vt == VT_ERROR ? _T("") : OLE2T(param8.bstrVal),param9.vt == VT_ERROR ? _T("") : OLE2T(param9.bstrVal),param10.vt == VT_ERROR ? _T("") : OLE2T(param10.bstrVal));
+	return S_OK;
+}
+HRESULT __stdcall CoCOMServer::ahkKey(/*[in]*/ VARIANT name,/*[out, retval]*/ BOOL* success)
+{
+	USES_CONVERSION;
+	*success = com_ahkKey(OLE2T(name.bstrVal));
+	return S_OK;
+}
+HRESULT __stdcall CoCOMServer::addScript(/*[in]*/ VARIANT script,/*[in,optional]*/ VARIANT replace,/*[out, retval]*/ unsigned int* success)
+{
+	USES_CONVERSION;
+	*success = com_addScript(OLE2T(script.bstrVal),replace.vt == VT_ERROR ? 0 : replace.boolVal);
+	return S_OK;
+}
+HRESULT __stdcall CoCOMServer::addFile(/*[in]*/ VARIANT filepath,/*[in,optional]*/ VARIANT aAllowDuplicateInclude,/*[in,optional]*/ VARIANT aIgnoreLoadFailure,/*[out, retval]*/ unsigned int* success)
+{
+	USES_CONVERSION;
+	*success = com_addFile(OLE2T(filepath.bstrVal),aAllowDuplicateInclude.vt == VT_ERROR ? 0 : aAllowDuplicateInclude.intVal,aIgnoreLoadFailure.vt == VT_ERROR ? 0 : aIgnoreLoadFailure.intVal);
+	return S_OK;
+}
+HRESULT __stdcall CoCOMServer::ahkExec(/*[in]*/ VARIANT script,/*[out, retval]*/ BOOL* success)
+{
+	USES_CONVERSION;
+	*success = com_ahkExec(OLE2T(script.bstrVal));
+	return S_OK;
+}
+HRESULT __stdcall CoCOMServer::ahkTerminate(/*[in,optional]*/ VARIANT kill,/*[out, retval]*/ BOOL* success)
+{
+	*success = com_ahkTerminate(kill.vt = VT_ERROR ? 0 : kill.boolVal);
+	return S_OK;
+}
+
+HRESULT CoCOMServer::LoadTypeInfo(ITypeInfo ** pptinfo, const CLSID &libid, const CLSID &iid, LCID lcid)
+{
+   HRESULT hr;
+   LPTYPELIB ptlib = NULL;
+   LPTYPEINFO ptinfo = NULL;
+
+   *pptinfo = NULL;
+
+   // Load type library.
+   hr = LoadRegTypeLib(libid, 1, 0, lcid, &ptlib);
+   if (FAILED(hr))
+      return hr;
+
+   // Get type information for interface of the object.
+   hr = ptlib->GetTypeInfoOfGuid(iid, &ptinfo);
+   if (FAILED(hr))
+   {
+      ptlib->Release();
+      return hr;
+   }
+
+   ptlib->Release();
+   *pptinfo = ptinfo;
+   return NOERROR;
+}
+
+
+HRESULT __stdcall CoCOMServer::GetTypeInfoCount(UINT* pctinfo)
+{
+	*pctinfo = 1;
+	return S_OK;
+}
+HRESULT __stdcall CoCOMServer::GetTypeInfo(UINT itinfo, LCID lcid, ITypeInfo** pptinfo)
+{
+	*pptinfo = NULL;
+
+	if(itinfo != 0)
+		return ResultFromScode(DISP_E_BADINDEX);
+
+	m_ptinfo->AddRef();      // AddRef and return pointer to cached
+                           // typeinfo for this object.
+	*pptinfo = m_ptinfo;
+
+	return NOERROR;
+}
+HRESULT __stdcall CoCOMServer::GetIDsOfNames(REFIID riid, LPOLESTR* rgszNames, UINT cNames,
+		LCID lcid, DISPID* rgdispid)
+{
+	return DispGetIDsOfNames(m_ptinfo, rgszNames, cNames, rgdispid);
+}
+HRESULT __stdcall CoCOMServer::Invoke(DISPID dispidMember, REFIID riid,
+		LCID lcid, WORD wFlags, DISPPARAMS* pdispparams, VARIANT* pvarResult,
+		EXCEPINFO* pexcepinfo, UINT* puArgErr)
+{
+	return DispInvoke(
+				this, m_ptinfo,
+				dispidMember, wFlags, pdispparams,
+				pvarResult, pexcepinfo, puArgErr); 
+}
+
+
+//
+// Class factory IUnknown implementation
+//
+HRESULT __stdcall CFactory::QueryInterface(const IID& iid, void** ppv)
+{    
+	if ((iid == IID_IUnknown) || (iid == IID_IClassFactory))
+	{
+		*ppv = static_cast<IClassFactory*>(this) ; 
+	}
+	else
+	{
+		*ppv = NULL ;
+		return E_NOINTERFACE ;
+	}
+	reinterpret_cast<IUnknown*>(*ppv)->AddRef() ;
+	return S_OK ;
+}
+
+ULONG __stdcall CFactory::AddRef()
+{
+	return InterlockedIncrement(&m_cRef) ;
+}
+
+ULONG __stdcall CFactory::Release() 
+{
+	if (InterlockedDecrement(&m_cRef) == 0)
+	{
+		delete this ;
+		return 0 ;
+	}
+	return m_cRef ;
+}
+
+//
+// IClassFactory implementation
+//
+HRESULT __stdcall CFactory::CreateInstance(IUnknown* pUnknownOuter,
+                                           const IID& iid,
+                                           void** ppv) 
+{
+	// Cannot aggregate.
+	if (pUnknownOuter != NULL)
+	{
+		return CLASS_E_NOAGGREGATION ;
+	}
+
+	// Create component.
+	CoCOMServer* pA = new CoCOMServer ;
+	if (pA == NULL)
+	{
+		return E_OUTOFMEMORY ;
+	}
+
+	// Get the requested interface.
+	HRESULT hr = pA->QueryInterface(iid, ppv) ;
+
+	// Release the IUnknown pointer.
+	// (If QueryInterface failed, component will delete itself.)
+	pA->Release() ;
+	return hr ;
+}
+
+// LockServer
+HRESULT __stdcall CFactory::LockServer(BOOL bLock) 
+{
+	if (bLock)
+	{
+		InterlockedIncrement(&g_cServerLocks) ; 
+	}
+	else
+	{
+		InterlockedDecrement(&g_cServerLocks) ;
+	}
+	return S_OK ;
+}
+
+
+
+
+
+
+
+///////////////////////////////////////////////////////////
+//
+// Exported functions
+//
+
+//
+// Can DLL unload now?
+//
+STDAPI DllCanUnloadNow()
+{
+	if ((g_cComponents == 0) && (g_cServerLocks == 0))
+	{
+		return S_OK ;
+	}
+	else
+	{
+		return S_FALSE ;
+	}
+}
+
+//
+// Get class factory
+//
+STDAPI DllGetClassObject(const CLSID& clsid,
+                         const IID& iid,
+                         void** ppv)
+{
+	// Can we create this component?
+	if (clsid != CLSID_CoCOMServer)
+	{
+		return CLASS_E_CLASSNOTAVAILABLE ;
+	}
+
+	// Create class factory.
+	CFactory* pFactory = new CFactory ;  // Reference count set to 1
+	                                     // in constructor
+	if (pFactory == NULL)
+	{
+		return E_OUTOFMEMORY ;
+	}
+
+	// Get requested interface.
+	HRESULT hr = pFactory->QueryInterface(iid, ppv) ;
+	pFactory->Release() ;
+
+	return hr ;
+}
+
+//
+// Server registration
+//
+STDAPI DllRegisterServer()
+{
+
+	HRESULT hr= RegisterServer(g_hInstance, 
+	                      CLSID_CoCOMServer,
+	                      g_szFriendlyName,
+	                      g_szVerIndProgID,
+	                      g_szProgID,
+						  LIBID_LibCOMServer) ;
+	if (SUCCEEDED(hr))
+	{
+		RegisterTypeLib( g_hInstance, NULL);
+	}
+	return hr;
+}
+
+
+//
+// Server unregistration
+//
+STDAPI DllUnregisterServer()
+{
+	HRESULT hr= UnregisterServer(CLSID_CoCOMServer,
+	                        g_szVerIndProgID,
+	                        g_szProgID,
+							LIBID_LibCOMServer) ;
+	if (SUCCEEDED(hr))
+	{
+		UnRegisterTypeLib( g_hInstance, NULL);
+	}
+	return hr;
+}
 #endif
-
-
-
-
+#endif

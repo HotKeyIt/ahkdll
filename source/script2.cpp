@@ -5276,7 +5276,7 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 		return 0; // Whether ExitApp() terminates depends on whether there's an OnExit subroutine and what it does.
 
 	case AHK_EXIT_BY_SINGLEINSTANCE:
-#ifndef USRDLL
+#ifndef _USRDLL
 		g_script.ExitApp(EXIT_SINGLEINSTANCE);
 #else
 		terminateDll();

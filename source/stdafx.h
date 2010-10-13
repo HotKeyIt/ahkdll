@@ -15,28 +15,21 @@ GNU General Public License for more details.
 */
 
 // stdafx.h : include file for standard system include files,
-// or project specific include files that are used frequently, but
-// are changed infrequently
+//  or project specific include files that are used frequently, but
+//      are changed infrequently
 //
+
+#if !defined(AFX_STDAFX_H__35DF5079_0252_4D5A_98BD_71AEE0407B97__INCLUDED_)
+#define AFX_STDAFX_H__35DF5079_0252_4D5A_98BD_71AEE0407B97__INCLUDED_
 
 #pragma once
 
+// Insert your headers here
 #define _CRT_SECURE_NO_DEPRECATE // Avoid compiler warnings in VC++ 8.x/2005 that urge the use of lower-performing C library functions that protect against buffer overruns.
 #define _CRT_NON_CONFORMING_SWPRINTFS // We don't want ISO version of swprintf, which has similar interface with snwprintf (different from sprintf)
-#define WIN32_LEAN_AND_MEAN		 // Exclude rarely-used stuff from Windows headers
-
-// Windows Header Files:
-// Necessary to do this prior to including windows.h so that NT functions are unlocked:
-// UPDATE: Using 0x0500 now so that VK_XBUTTON1 and 2 can be supported:
-// UPDATE v1.0.36.03: Using 0x0501 now so that various ListView constants and other things can be used.
-// UPDATE v1.0.36.05: 0x0501 broke the Tooltip cmd on on Win9x/NT4/2000 by increasing the size of the TOOLINFO
-// struct by 4 bytes.  However, rather than forever go without 0x501 and the many upgrades and constants
-// it makes available in the code, it seems best to stick with it and instead patch anything that needs it
-// (such as ToolTip).  Hopefully, ToolTip is the only thing in the current code base that needs patching
-// (perhaps the only reason it was broken in the first place was a bug or oversight by MS).
+#define WIN32_LEAN_AND_MEAN		// Exclude rarely-used stuff from Windows headers
 #define _WIN32_WINNT 0x0501
 #define _WIN32_IE 0x0501  // Added for v1.0.35 to have MCS_NOTODAY resolve as expected, and possibly solve other problems on newer systems.
-
 #ifdef _MSC_VER
 	#include "config.h" // compile-time configrations
 	#include "debug.h"
@@ -72,10 +65,14 @@ GNU General Public License for more details.
 	//#include "util.h"
 	//#include "SimpleHeap.h"
 #endif
-
 // Lexikos: Defining _WIN32_WINNT 0x0600 seems to break TrayTip in non-English Windows, and possibly other things.
 //			Instead, define only the necessary constants for horizontal wheel support in Windows Vista and later.
 #if (_WIN32_WINNT < 0x0600)
 #define WM_MOUSEHWHEEL      0x020E
 #define MOUSEEVENTF_HWHEEL  0x01000 /* hwheel button rolled */
 #endif
+
+//{{AFX_INSERT_LOCATION}}
+// Microsoft Visual C++ will insert additional declarations immediately before the previous line.
+
+#endif // !defined(AFX_STDAFX_H__35DF5079_0252_4D5A_98BD_71AEE0407B97__INCLUDED_)

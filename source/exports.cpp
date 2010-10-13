@@ -9,16 +9,52 @@ LPTSTR result_to_return_dll; //HotKeyIt H2 for ahkgetvar and ahkFunction return.
 FuncAndToken aFuncAndTokenToReturn[10] ;    // for ahkPostFunction
 int returnCount = 0 ;
 
+#ifdef _USRDLL
+#ifndef MINIDLL
+//COM virtual functions
+EXPORT BOOL com_ahkPause(LPTSTR aChangeTo){return ahkPause(aChangeTo);}
+EXPORT unsigned int com_ahkFindLabel(LPTSTR aLabelName){return ahkFindLabel(aLabelName);}
+EXPORT LPTSTR com_ahkgetvar(LPTSTR name,unsigned int getVar){return ahkgetvar(name,getVar);}
+EXPORT unsigned int com_ahkassign(LPTSTR name, LPTSTR value){return ahkassign(name,value);}
+EXPORT unsigned int com_ahkExecuteLine(unsigned int line,unsigned int aMode,unsigned int wait){return ahkExecuteLine(line,aMode,wait);}
+EXPORT BOOL com_ahkLabel(LPTSTR aLabelName, unsigned int nowait){return ahkLabel(aLabelName,nowait);}
+EXPORT unsigned int com_ahkFindFunc(LPTSTR funcname){return ahkFindFunc(funcname);}
+EXPORT LPTSTR com_ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10){return ahkFunction(param1,param2,param3,param4,param5,param6,param7,param8,param9,param10);}
+EXPORT unsigned int com_ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10){return ahkPostFunction(param1,param2,param3,param4,param5,param6,param7,param8,param9,param10);}
+EXPORT BOOL com_ahkKey(LPTSTR keys){return ahkKey(keys);}
+#ifndef AUTOHOTKEYSC
+EXPORT unsigned int com_addScript(LPTSTR script, int aExecute){return addScript(script,aExecute);}
+EXPORT BOOL com_ahkExec(LPTSTR script){return ahkExec(script);}
+EXPORT unsigned int com_addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aIgnoreLoadFailure){return addFile(fileName,aAllowDuplicateInclude,aIgnoreLoadFailure);}
+#endif
+#ifdef _USRDLL
+EXPORT unsigned int com_ahkdll(LPTSTR fileName,LPTSTR argv,LPTSTR args){return ahkdll(fileName,argv,args);}
+EXPORT unsigned int com_ahktextdll(LPTSTR fileName,LPTSTR argv,LPTSTR args){return ahktextdll(fileName,argv,args);}
+EXPORT BOOL com_ahkTerminate(bool kill){return ahkTerminate(kill);}
+EXPORT BOOL com_ahkReady(){return ahkReady();}
+EXPORT BOOL com_ahkReload(){return ahkReload();}
+#endif
+#endif
+#endif
 
-EXPORT int ahkPause(LPTSTR aChangeTo) //Change pause state of a running script
+EXPORT BOOL ahkPause(LPTSTR aChangeTo) //Change pause state of a running script
 {
-	if ( ( (*aChangeTo == 'O' || *aChangeTo == 'o') && ( *(aChangeTo+1) == 'N' || *(aChangeTo+1) == 'n' ) ) || *aChangeTo == '1')
+
+	if ( (((int)aChangeTo == 1 || (int)aChangeTo == 0) || (*aChangeTo == 'O' || *aChangeTo == 'o') && ( *(aChangeTo+1) == 'N' || *(aChangeTo+1) == 'n' ) ) || *aChangeTo == '1')
 	{
 #ifndef MINIDLL
 		Hotkey::ResetRunAgainAfterFinished();
 #endif
-		g->IsPaused = true;
-		++g_nPausedThreads; // For this purpose the idle thread is counted as a paused thread.
+		if ((int)aChangeTo == 0)
+		{
+			g->IsPaused = false;
+			--g_nPausedThreads; // For this purpose the idle thread is counted as a paused thread.
+		}
+		else
+		{
+			g->IsPaused = true;
+			++g_nPausedThreads; // For this purpose the idle thread is counted as a paused thread.
+		}
 #ifndef MINIDLL
 		g_script.UpdateTrayIcon();
 #endif
@@ -73,7 +109,7 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 	// return _T(result_to_return_dll);
 }	
 
-EXPORT int ahkassign(LPTSTR name, LPTSTR value) // ahkwine 0.1
+EXPORT unsigned int ahkassign(LPTSTR name, LPTSTR value) // ahkwine 0.1
 {
 	Var *var;
 	if (   !(var = g_script.FindOrAddVar(name, _tcslen(name)))   )
@@ -105,7 +141,7 @@ EXPORT unsigned int ahkExecuteLine(unsigned int line,unsigned int aMode,unsigned
 	return (unsigned int) templine->mNextLine;
 }
 
-EXPORT unsigned int ahkLabel(LPTSTR aLabelName, unsigned int nowait) // 0 = wait = default
+EXPORT BOOL ahkLabel(LPTSTR aLabelName, unsigned int nowait) // 0 = wait = default
 {
 	Label *aLabel = g_script.FindLabel(aLabelName) ;
 	if (aLabel)
@@ -185,14 +221,14 @@ EXPORT unsigned int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, L
 }
 
 
-EXPORT int ahkKey(LPTSTR keys) 
+EXPORT BOOL ahkKey(LPTSTR keys) 
 {
-SendKeys(keys, false, SM_EVENT, 0, 1); // N11 sendahk
-return 0;
+	SendKeys(keys, false, SM_EVENT, 0, 1); // N11 sendahk
+	return 0;
 }
 
 #ifndef AUTOHOTKEYSC
-#ifdef USRDLL
+#ifdef _USRDLL
 // Naveen: v6 addFile()
 // Todo: support for #Directives, and proper treatment of mIsReadytoExecute
 EXPORT unsigned int addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aIgnoreLoadFailure)
@@ -297,7 +333,7 @@ EXPORT unsigned int addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aI
 }
 
 
-#endif // USRDLL
+#endif // _USRDLL
 #endif // AUTOHOTKEYSC
 
 #ifndef AUTOHOTKEYSC
@@ -341,7 +377,7 @@ EXPORT unsigned int addScript(LPTSTR script, int aExecute)
 
 #ifndef AUTOHOTKEYSC
 // Todo: support for #Directives, and proper treatment of mIsReadytoExecute
-EXPORT unsigned int ahkExec(LPTSTR script)
+EXPORT BOOL ahkExec(LPTSTR script)
 {   // dynamically include a script from text!!
 	// labels, hotkeys, functions.   
 	Func * aFunc = NULL ; 

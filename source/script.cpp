@@ -238,7 +238,7 @@ Script::~Script() // Destructor.
 	DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
 	OleUninitialize();
 }
-#ifdef USRDLL 
+#ifdef _USRDLL 
 void Script::Destroy()
 // HotKeyIt H1 destroy script for ahkTerminate and ahkReload and ExitApp for dll
 {
@@ -417,7 +417,7 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 		return FAIL;  // It already displayed the error for us.
 	filename_marker[-1] = '\0'; // Terminate buf in this position to divide the string.
 	size_t filename_length = _tcslen(filename_marker);
-#ifndef USRDLL
+#ifndef _USRDLL
 	if (   mIsAutoIt2 = (filename_length >= 4 && !_tcsicmp(filename_marker + filename_length - 4, EXT_AUTOIT2))   )
 	{
 		// Set the old/AutoIt2 defaults for maximum safety and compatibilility.
@@ -881,7 +881,7 @@ ResultType Script::AutoExecSection()
 	// doesn't contain the #Persistent directive we're done unless there is an OnExit subroutine and it
 	// doesn't do "ExitApp":
 	if (!IS_PERSISTENT) // Resolve macro again in case any of its components changed since the last time.
-#ifndef USRDLL // HotKeyIt no check for IS_PERSISTENT in DLL
+#ifndef _USRDLL // HotKeyIt no check for IS_PERSISTENT in DLL
 		g_script.ExitApp(ExecUntil_result == FAIL ? EXIT_ERROR : EXIT_EXIT);
 #else
 		terminateDll();
@@ -944,7 +944,7 @@ ResultType Script::Reload(bool aDisplayErrors)
 {
 	// The new instance we're about to start will tell our process to stop, or it will display
 	// a syntax error or some other error, in which case our process will still be running:
-#ifdef USRDLL
+#ifdef _USRDLL
 	reloadDll();
 	return EARLY_RETURN;
 #else
@@ -957,7 +957,7 @@ ResultType Script::Reload(bool aDisplayErrors)
 	sntprintf(arg_string, _countof(arg_string), _T("/restart \"%s\""), mFileSpec);
 	return g_script.ActionExec(mOurEXE, arg_string, g_WorkingDirOrig, aDisplayErrors);
 #endif // AUTOHOTKEYSC
-#endif // USRDLL
+#endif // _USRDLL
 }
 
 
@@ -13097,7 +13097,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 			// the program itself to terminate.  Otherwise, it causes us to return from all blocks
 			// and Gosubs (i.e. all the way out of the current subroutine, which was usually triggered
 			// by a hotkey):
-#ifndef USRDLL
+#ifndef _USRDLL
 			if (IS_PERSISTENT)
 				return EARLY_EXIT;  // It's "early" because only the very end of the script is the "normal" exit.
 				// EARLY_EXIT needs to be distinct from FAIL for ExitApp() and AutoExecSection().
@@ -13109,7 +13109,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 			return EARLY_RETURN;
 #endif
 		case ACT_EXITAPP: // Unconditional exit.
-#ifdef USRDLL // HotKeyIt end dll thread and stop
+#ifdef _USRDLL // HotKeyIt end dll thread and stop
 			return terminateDll();
 #else
 			return g_script.ExitApp(EXIT_EXIT, NULL, (int)line->ArgIndexToInt64(0));
