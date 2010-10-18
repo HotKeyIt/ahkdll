@@ -18,10 +18,10 @@ GNU General Public License for more details.
 //  or project specific include files that are used frequently, but
 //      are changed infrequently
 //
-
 #if !defined(AFX_STDAFX_H__35DF5079_0252_4D5A_98BD_71AEE0407B97__INCLUDED_)
+#if defined(_USRDLL) && !defined(MINIDLL)
 #define AFX_STDAFX_H__35DF5079_0252_4D5A_98BD_71AEE0407B97__INCLUDED_
-
+#endif
 #pragma once
 
 // Insert your headers here
@@ -71,7 +71,6 @@ GNU General Public License for more details.
 #define WM_MOUSEHWHEEL      0x020E
 #define MOUSEEVENTF_HWHEEL  0x01000 /* hwheel button rolled */
 #endif
-
 //{{AFX_INSERT_LOCATION}}
 // Microsoft Visual C++ will insert additional declarations immediately before the previous line.
 

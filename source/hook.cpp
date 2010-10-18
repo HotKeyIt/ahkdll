@@ -156,7 +156,7 @@ inline bool IsIgnored(ULONG_PTR aExtraInfo)
 
 
 
-LRESULT CALLBACK LowLevelKeybdProc(int aCode, WPARAM wParam, LPARAM lParam)
+LRESULT CALLBACK __stdcall LowLevelKeybdProc(int aCode, WPARAM wParam, LPARAM lParam)
 {
 	if (aCode != HC_ACTION)  // MSDN docs specify that both LL keybd & mouse hook should return in this case.
 		return CallNextHookEx(g_KeybdHook, aCode, wParam, lParam);
