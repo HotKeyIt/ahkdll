@@ -2868,10 +2868,10 @@ void SendEventArray(int &aFinalKeyDelay, modLR_type aModsDuringSend)
 // - Press Ctrl+Break, Ctrl-Esc, or Ctrl-Alt-Del to stop recording (which should then hit breakpoint below).
 // - Study contents of the sEventPB array, which contains the keystrokes just recorded.
 	sEventCount = 0; // Used by RecordProc().
-	if (   !(g_PlaybackHook = SetWindowsHookEx(WH_JOURNALRECORD, RecordProc, g_hInstance, 0))   )
+	if (   !(g_PlaybackHook = SetWindowsHookEx(WH_JOURNALRECORD, RecordProc, GetModuleHandle(NULL), NULL))   )
 		return;
 #else
-	if (   !(g_PlaybackHook = SetWindowsHookEx(WH_JOURNALPLAYBACK, PlaybackProc, g_hInstance, 0))   )
+	if (   !(g_PlaybackHook = SetWindowsHookEx(WH_JOURNALPLAYBACK, PlaybackProc, GetModuleHandle(NULL), NULL))   )
 		return;
 	// During playback, have the keybd hook (if it's installed) block presses of the Windows key.
 	// This is done because the Windows key is about the only key (other than Ctrl-Esc or Ctrl-Alt-Del)

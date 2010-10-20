@@ -156,7 +156,7 @@ inline bool IsIgnored(ULONG_PTR aExtraInfo)
 
 
 
-LRESULT CALLBACK __stdcall LowLevelKeybdProc(int aCode, WPARAM wParam, LPARAM lParam)
+LRESULT CALLBACK LowLevelKeybdProc(int aCode, WPARAM wParam, LPARAM lParam)
 {
 	if (aCode != HC_ACTION)  // MSDN docs specify that both LL keybd & mouse hook should return in this case.
 		return CallNextHookEx(g_KeybdHook, aCode, wParam, lParam);
@@ -4328,7 +4328,7 @@ DWORD WINAPI HookThreadProc(LPVOID aUnused)
 					// flow into the hook prior to the reset:
 					if (msg.lParam) // Sender of msg. is signaling that reset should be done.
 						ResetHook(false, HOOK_KEYBD, true);
-					if (   !(g_KeybdHook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeybdProc, g_hInstance, 0))   )
+					if (   !(g_KeybdHook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeybdProc, GetModuleHandle(NULL), NULL))   )
 						problem_activating_hooks = true;
 				}
 			}
@@ -4343,7 +4343,7 @@ DWORD WINAPI HookThreadProc(LPVOID aUnused)
 				{
 					if (msg.lParam) // Sender of msg. is signaling that reset should be done.
 						ResetHook(false, HOOK_MOUSE, true);
-					if (   !(g_MouseHook = SetWindowsHookEx(WH_MOUSE_LL, LowLevelMouseProc, g_hInstance, 0))   )
+					if (   !(g_MouseHook = SetWindowsHookEx(WH_MOUSE_LL, LowLevelMouseProc, GetModuleHandle(NULL), NULL))   )
 						problem_activating_hooks = true;
 				}
 			}

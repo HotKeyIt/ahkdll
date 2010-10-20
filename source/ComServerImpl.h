@@ -33,7 +33,6 @@ public:
 
 	// ICOMServer implementation
 	//
-	virtual HRESULT __stdcall Name(/*out*/BSTR* objectname);
 	virtual HRESULT __stdcall ahktextdll(/*in,optional*/VARIANT script,/*in,optional*/VARIANT options,/*in,optional*/VARIANT params, /*out*/unsigned int* hThread);
 	virtual HRESULT __stdcall ahkdll(/*in,optional*/VARIANT filepath,/*in,optional*/VARIANT options,/*in,optional*/VARIANT params, /*out*/unsigned int* hThread);
 	virtual HRESULT __stdcall ahkPause(/*in,optional*/VARIANT aChangeTo, /*out*/BOOL* paused);

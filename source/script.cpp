@@ -336,6 +336,7 @@ void Script::Destroy()
 		DestroyWindow(g_hWnd);
 	}
 #ifndef MINIDLL
+	AddRemoveHooks(0);
 	Hotkey::AllDestruct();
 	Hotstring::AllDestruct();
 #endif

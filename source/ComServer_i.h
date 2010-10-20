@@ -93,10 +93,6 @@ DEFINE_GUID(IID_ICOMServer,0x4ffe41b, 0x8fe9, 0x4479, 0x99, 0xa, 0xb1, 0x86, 0xe
     ICOMServer : public IDispatch
     {
     public:
-        virtual /* [id] */ HRESULT STDMETHODCALLTYPE Name( 
-            /* [retval][out] */ BSTR *objectname) = 0;
-        
-    public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahktextdll( 
            /*in,optional*/VARIANT script,/*in,optional*/VARIANT options,/*in,optional*/VARIANT params, /* [retval][out] */unsigned int* hThread) = 0;
         
