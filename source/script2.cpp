@@ -12596,13 +12596,15 @@ int ConvertDllArgTypes(LPTSTR aBuf, DYNAPARM *aDynaParam)
 
 
 
+
 void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free) // L31: Contains code extracted from BIF_DllCall for reuse in ExpressionToPostfix.
 {
 	int i;
 	void *function = NULL;
 	TCHAR param1_buf[MAX_PATH*2], *_tfunction_name, *dll_name; // Must use MAX_PATH*2 because the function name is INSIDE the Dll file, and thus MAX_PATH can be exceeded.
-	char function_name[MAX_PATH];
-	char function_name_suffix[MAX_PATH];
+#ifndef UNICODE
+	char *function_name;
+#endif
 
 	// Define the standard libraries here. If they reside in %SYSTEMROOT%\system32 it is not
 	// necessary to specify the full path (it wouldn't make sense anyway).
@@ -12616,20 +12618,27 @@ void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free) // L31: 
 	{
 		dll_name = NULL;
 #ifdef UNICODE
+		char function_name[MAX_PATH];
 		WideCharToMultiByte(CP_ACP, 0, param1_buf, -1, function_name, _countof(function_name), NULL, NULL);
-		WideCharToMultiByte(CP_ACP, 0, param1_buf, -1, function_name_suffix, _countof(function_name_suffix), NULL, NULL);
-		// Since some function do not have A suffix but do have W suffix so try W first
 #else
-		strcpy(function_name,param1_buf);
-		strcpy(function_name_suffix,param1_buf);
+		function_name = param1_buf;
 #endif
-		strcat(function_name_suffix, WINAPI_SUFFIX); // 1 byte of memory was already reserved above for the 'A'.
+
 		// Since no DLL was specified, search for the specified function among the standard modules.
 		for (i = 0; i < sStdModule_count; ++i)
-			if (   sStdModule[i] 
-				&& ( (function = (void *)GetProcAddress(sStdModule[i], function_name_suffix))
-				|| (function = (void *)GetProcAddress(sStdModule[i], function_name)) )   )
+			if (   sStdModule[i] && (function = (void *)GetProcAddress(sStdModule[i], function_name))   )
 				break;
+		if (!function)
+		{
+			// Since the absence of the "A" suffix (e.g. MessageBoxA) is so common, try it that way
+			// but only here with the standard libraries since the risk of ambiguity (calling the wrong
+			// function) seems unacceptably high in a custom DLL.  For example, a custom DLL might have
+			// function called "AA" but not one called "A".
+			strcat(function_name, WINAPI_SUFFIX); // 1 byte of memory was already reserved above for the 'A'.
+			for (i = 0; i < sStdModule_count; ++i)
+				if (   sStdModule[i] && (function = (void *)GetProcAddress(sStdModule[i], function_name))   )
+					break;
+		}
 	}
 	else // DLL file name is explicitly present.
 	{
@@ -12637,12 +12646,12 @@ void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free) // L31: 
 		*_tfunction_name = '\0';  // Terminate dll_name to split it off from function_name.
 		++_tfunction_name; // Set it to the character after the last backslash.
 #ifdef UNICODE
+		char function_name[MAX_PATH];
 		WideCharToMultiByte(CP_ACP, 0, _tfunction_name, -1, function_name, _countof(function_name), NULL, NULL);
-		WideCharToMultiByte(CP_ACP, 0, _tfunction_name, -1, function_name_suffix, _countof(function_name_suffix), NULL, NULL);
 #else
-		strcpy(function_name,_tfunction_name);
+		function_name = _tfunction_name;
 #endif
-		strcat(function_name_suffix, WINAPI_SUFFIX);
+
 		// Get module handle. This will work when DLL is already loaded and might improve performance if
 		// LoadLibrary is a high-overhead call even when the library already being loaded.  If
 		// GetModuleHandle() fails, fall back to LoadLibrary().
@@ -12654,7 +12663,7 @@ void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free) // L31: 
 					g_ErrorLevel->Assign(_T("-3")); // Stage 3 error: DLL couldn't be loaded.
 				return NULL;
 			}
-		if (   !(function = (void *)GetProcAddress(hmodule, function_name_suffix))   )
+		if (   !(function = (void *)GetProcAddress(hmodule, function_name))   )
 		{
 			// v1.0.34: If it's one of the standard libraries, try the "A" suffix.
 			// jackieku: Try it anyway, there are many other DLLs that use this naming scheme, and it doesn't seem expensive.
@@ -12662,6 +12671,7 @@ void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free) // L31: 
 			//for (i = 0; i < sStdModule_count; ++i)
 			//	if (hmodule == sStdModule[i]) // Match found.
 			//	{
+					strcat(function_name, WINAPI_SUFFIX); // 1 byte of memory was already reserved above for the 'A'.
 					function = (void *)GetProcAddress(hmodule, function_name);
 			//		break;
 			//	}
@@ -12670,6 +12680,7 @@ void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free) // L31: 
 
 	return function;
 }
+
 
 
 void BIF_DynaCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
