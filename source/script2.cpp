@@ -16106,19 +16106,36 @@ void BIF_MemoryGetProcAddress(ExprTokenType &aResultToken, ExprTokenType *aParam
 	if (!aParam[0]->deref->marker)
 		return;
 	TCHAR *FuncName = aParam[1]->symbol == SYM_VAR ? aParam[1]->var->Contents() : aParam[1]->marker;
-#ifdef UNICODE
+#ifdef _UNICODE
 	char *buf = (char*)malloc(_tcslen(FuncName)+sizeof(char*));
 	wcstombs(buf,FuncName,_tcslen(FuncName));
 	buf[_tcslen(FuncName)] = '\0';
- 	aResultToken.value_int64 =  (__int64)MemoryGetProcAddress((HMEMORYMODULE)aParam[0]->deref->marker,buf);
+#endif
+
+	aResultToken.value_int64 =  (__int64)MemoryGetProcAddress((aParam[0]->symbol == SYM_VAR ? (HMEMORYMODULE)aParam[0]->var->mContentsInt64 : (aParam[0]->symbol != PURE_INTEGER
+#ifdef _WIN64
+								? (HMEMORYMODULE)ATOI64(aParam[0]->marker) 
+#else
+								? (HMEMORYMODULE)ATOI(aParam[0]->marker) 
+#endif
+								: (HMEMORYMODULE)aParam[0]->marker))
+#ifdef _UNICODE
+								,buf);
 	free(buf);
 #else
-	aResultToken.value_int64 =  (__int64)MemoryGetProcAddress((HMEMORYMODULE)aParam[0]->deref->marker,FuncName);
+								,FuncName);
 #endif
 }
+
 void BIF_MemoryFreeLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
-	MemoryFreeLibrary((HMEMORYMODULE)aParam[0]->deref->marker);
+	MemoryFreeLibrary(aParam[0]->symbol == SYM_VAR ? (HMEMORYMODULE)aParam[0]->var->mContentsInt64 : (aParam[0]->symbol != PURE_INTEGER
+#ifdef _WIN64
+								? (HMEMORYMODULE)ATOI64(aParam[0]->marker) 
+#else
+								? (HMEMORYMODULE)ATOI(aParam[0]->marker) 
+#endif
+								: (HMEMORYMODULE)aParam[0]->marker));
 	aResultToken.symbol = SYM_STRING;
 	aResultToken.marker =_T("");
 }

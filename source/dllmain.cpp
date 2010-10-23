@@ -32,7 +32,7 @@ GNU General Public License for more details.
 #include <atlbase.h> // CComBSTR
 #include "Registry.h"
 #include "ComServerImpl.h"
-
+#include "MemoryModule.h"
 //#include <string>
 
 // General note:
@@ -933,7 +933,33 @@ STDAPI DllGetClassObject(const CLSID& clsid,
 	{
 		return CLASS_E_CLASSNOTAVAILABLE ;
 	}
+	TCHAR buf[MAX_PATH];
+	if (GetModuleFileName(g_hInstance, buf, MAX_PATH))
+	{
+		FILE *fp;
+		unsigned char *data=NULL;
+		size_t size;
+		HMEMORYMODULE module;
+	
+		fp = _tfopen(buf, _T("rb"));
+		if (fp == NULL)
+		{
+			return E_ACCESSDENIED;
+		}
 
+		fseek(fp, 0, SEEK_END);
+		size = ftell(fp);
+		data = (unsigned char *)_alloca(size);
+		fseek(fp, 0, SEEK_SET);
+		fread(data, 1, size, fp);
+		fclose(fp);
+		if (data)
+			module = MemoryLoadLibrary(data);
+		typedef HRESULT (__stdcall *pDllGetClassObject)(IN REFCLSID clsid,IN REFIID iid,OUT LPVOID FAR* ppv);
+		pDllGetClassObject GetClassObject = (pDllGetClassObject)::MemoryGetProcAddress(module,"DllGetClassObject");
+		return GetClassObject(clsid,iid,ppv);
+		
+	}
 	// Create class factory.
 	CFactory* pFactory = new CFactory ;  // Reference count set to 1
 	                                     // in constructor
