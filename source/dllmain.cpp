@@ -454,7 +454,7 @@ int setscriptstrings(LPTSTR fileName, LPTSTR argv, LPTSTR args)
 
 EXPORT unsigned int ahkdll(LPTSTR fileName, LPTSTR argv, LPTSTR args)
 {
-	if (setscriptstrings(*fileName ? fileName : _T("#Persistent"), argv, args))
+	if (setscriptstrings(*fileName ? fileName : _T("#Persistent\n#NoTrayIcon"), argv, args))
 		return 0;
 	nameHinstanceP.istext = *fileName ? 0 : 1;
 	return runThread();
@@ -463,7 +463,7 @@ EXPORT unsigned int ahkdll(LPTSTR fileName, LPTSTR argv, LPTSTR args)
 // HotKeyIt ahktextdll
 EXPORT unsigned int ahktextdll(LPTSTR fileName, LPTSTR argv, LPTSTR args)
 {
-	if (setscriptstrings(*fileName ? fileName : _T("#Persistent"), argv, args))
+	if (setscriptstrings(*fileName ? fileName : _T("#Persistent\n#NoTrayIcon"), argv, args))
 		return 0;
 	nameHinstanceP.istext = 1;
 	return runThread();

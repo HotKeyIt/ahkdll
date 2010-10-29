@@ -4,6 +4,7 @@
 
 #define EXPORT extern "C" __declspec(dllexport)
 #define BIF(fun) void fun(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+
 EXPORT BOOL ahkPause(LPTSTR aChangeTo);
 EXPORT unsigned int ahkFindLabel(LPTSTR aLabelName);
 EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar);
@@ -22,7 +23,7 @@ EXPORT BOOL ahkExec(LPTSTR script);
 #endif
 
 bool callFunc(WPARAM awParam, LPARAM alParam); 
-bool callFuncDll(FuncAndToken *aFuncAndToken); 
+void callFuncDll(FuncAndToken *aFuncAndToken); 
 // do not export callFunc, it must be called within script thread
 BIF(BIF_FindFunc);
 BIF(BIF_Getvar);
@@ -49,26 +50,26 @@ ResultType terminateDll();
 
 #ifndef MINIDLL
 //COM virtual functions declaration
-EXPORT BOOL com_ahkPause(LPTSTR aChangeTo);
-EXPORT unsigned int com_ahkFindLabel(LPTSTR aLabelName);
-EXPORT LPTSTR com_ahkgetvar(LPTSTR name,unsigned int getVar);
-EXPORT unsigned int com_ahkassign(LPTSTR name, LPTSTR value);
-EXPORT unsigned int com_ahkExecuteLine(unsigned int line,unsigned int aMode,unsigned int wait);
-EXPORT BOOL com_ahkLabel(LPTSTR aLabelName, unsigned int nowait);
-EXPORT unsigned int com_ahkFindFunc(LPTSTR funcname);
-EXPORT LPTSTR com_ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10);
-EXPORT unsigned int com_ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10);
-EXPORT BOOL com_ahkKey(LPTSTR keys);
+BOOL com_ahkPause(LPTSTR aChangeTo);
+unsigned int com_ahkFindLabel(LPTSTR aLabelName);
+LPTSTR com_ahkgetvar(LPTSTR name,unsigned int getVar);
+unsigned int com_ahkassign(LPTSTR name, LPTSTR value);
+unsigned int com_ahkExecuteLine(unsigned int line,unsigned int aMode,unsigned int wait);
+BOOL com_ahkLabel(LPTSTR aLabelName, unsigned int nowait);
+unsigned int com_ahkFindFunc(LPTSTR funcname);
+LPTSTR com_ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10);
+unsigned int com_ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10);
+BOOL com_ahkKey(LPTSTR keys);
 #ifndef AUTOHOTKEYSC
-EXPORT unsigned int com_addScript(LPTSTR script, int aExecute);
-EXPORT BOOL com_ahkExec(LPTSTR script);
-EXPORT unsigned int com_addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aIgnoreLoadFailure);
+unsigned int com_addScript(LPTSTR script, int aExecute);
+BOOL com_ahkExec(LPTSTR script);
+unsigned int com_addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aIgnoreLoadFailure);
 #endif
 #ifdef _USRDLL
-EXPORT unsigned int com_ahkdll(LPTSTR fileName,LPTSTR argv,LPTSTR args);
-EXPORT unsigned int com_ahktextdll(LPTSTR fileName,LPTSTR argv,LPTSTR args);
-EXPORT BOOL com_ahkTerminate(bool kill);
-EXPORT BOOL com_ahkReady();
-EXPORT BOOL com_ahkReload();
+unsigned int com_ahkdll(LPTSTR fileName,LPTSTR argv,LPTSTR args);
+unsigned int com_ahktextdll(LPTSTR fileName,LPTSTR argv,LPTSTR args);
+BOOL com_ahkTerminate(bool kill);
+BOOL com_ahkReady();
+BOOL com_ahkReload();
 #endif
 #endif

@@ -102,11 +102,29 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 		result_to_return_dll = (LPTSTR )realloc((LPTSTR )result_to_return_dll,MAX_INTEGER_LENGTH);
 		return ITOA64((int)ahkvar,result_to_return_dll);
 	}
-	VarSizeType result_size = ahkvar->Get() + 2 ;
-    result_to_return_dll = (LPTSTR )realloc((LPTSTR )result_to_return_dll, result_size);
-	ahkvar->Get(result_to_return_dll) ;
+	if (!ahkvar->HasContents() && ahkvar->mType != VAR_BUILTIN )
+		return _T("");
+	if (*ahkvar->mCharContents == '\0')
+	{
+		result_to_return_dll = (LPTSTR )realloc((LPTSTR )result_to_return_dll,(ahkvar->mByteCapacity ? ahkvar->mByteCapacity : ahkvar->mByteLength) + MAX_NUMBER_LENGTH + 1);
+		if ( ahkvar->mType == VAR_BUILTIN )
+			ahkvar->mBIV(result_to_return_dll,name); //Hotkeyit 
+		else if ( ahkvar->mType == VAR_ALIAS )
+			ITOA64(ahkvar->mAliasFor->mContentsInt64,result_to_return_dll);
+		else if ( ahkvar->mType == VAR_NORMAL )
+			ITOA64(ahkvar->mContentsInt64,result_to_return_dll);//Hotkeyit
+	}
+	else
+	{
+		result_to_return_dll = (LPTSTR )realloc((LPTSTR )result_to_return_dll,ahkvar->mByteLength+1);
+		if ( ahkvar->mType == VAR_ALIAS )
+			ahkvar->mAliasFor->Get(result_to_return_dll); //Hotkeyit removed ebiv.cpp and made ahkgetvar return all vars
+ 		else if ( ahkvar->mType == VAR_NORMAL )
+			ahkvar->Get(result_to_return_dll);  // var.getText() added in V1.
+		else if ( ahkvar->mType == VAR_BUILTIN )
+			ahkvar->mBIV(result_to_return_dll,name); //Hotkeyit 
+	}
 	return result_to_return_dll;
-	// return _T(result_to_return_dll);
 }	
 
 EXPORT unsigned int ahkassign(LPTSTR name, LPTSTR value) // ahkwine 0.1
@@ -211,7 +229,7 @@ EXPORT unsigned int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, L
 		
 		FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
 		aFuncAndToken.mFunc = aFunc ;
-	returnCount++ ;
+		returnCount++ ;
 		if (returnCount > 9)
 			returnCount = 0 ;
 		PostMessage(g_hWnd, AHK_EXECUTE_FUNCTION_DLL, (WPARAM)&aFuncAndToken,NULL);
@@ -396,10 +414,11 @@ EXPORT BOOL ahkExec(LPTSTR script)
 			g->CurrentFunc = aFunc;
 		return LOADING_FAILED;
 	}
+	if (!oldLastLine->mNextLine) //H30 - if no line was added, return
+		return OK;
 	g_script.PreparseIfElse(oldLastLine->mNextLine);
 	SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)oldLastLine->mNextLine, (LPARAM)oldLastLine->mNextLine);
-
-    
+	
 	if (inFunc == 1 )
 		g->CurrentFunc = aFunc ;
 	Line *prevLine = g_script.mLastLine->mPrevLine;
@@ -411,6 +430,38 @@ EXPORT BOOL ahkExec(LPTSTR script)
 	return OK;
 }
 #endif // AUTOHOTKEYSC
+LPTSTR FuncTokenToString(ExprTokenType &aToken, LPTSTR aBuf)
+// Supports Type() VAR_NORMAL and VAR-CLIPBOARD.
+// Returns "" on failure to simplify logic in callers.  Otherwise, it returns either aBuf (if aBuf was needed
+// for the conversion) or the token's own string.  aBuf may be NULL, in which case the caller presumably knows
+// that this token is SYM_STRING or SYM_OPERAND (or caller wants "" back for anything other than those).
+// If aBuf is not NULL, caller has ensured that aBuf is at least MAX_NUMBER_SIZE in size.
+{
+	switch (aToken.symbol)
+	{
+	case SYM_VAR: // Caller has ensured that any SYM_VAR's Type() is VAR_NORMAL.
+		return aToken.var->Contents(); // Contents() vs. mContents to support VAR_CLIPBOARD, and in case mContents needs to be updated by Contents().
+	case SYM_STRING:
+	case SYM_OPERAND:
+		return aToken.marker;
+	case SYM_INTEGER:
+		if (aBuf)
+			return ITOA64(aToken.value_int64, aBuf);
+		//else continue on to return the default at the bottom.
+		break;
+	case SYM_FLOAT:
+		if (aBuf)
+		{
+			sntprintf(aBuf, MAX_NUMBER_SIZE, g->FormatFloat, aToken.value_double);
+			return aBuf;
+		}
+		//else continue on to return the default at the bottom.
+		break;
+	//case SYM_OBJECT: // L31: Treat objects as empty strings (or TRUE where appropriate).
+	//default: // Not an operand: continue on to return the default at the bottom.
+	}
+	return _T("");
+}
 
 EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10)
 {
@@ -472,28 +523,27 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 			returnCount = 0 ;
 
 		SendMessage(g_hWnd, AHK_EXECUTE_FUNCTION_DLL, (WPARAM)&aFuncAndToken,NULL);
-		TCHAR abuf[MAX_NUMBER_SIZE]; // A separate buf because aResultToken.buf is sometimes used to store the result.
-		result_to_return_dll = TokenToString(aFuncAndToken.mToken, abuf);
-		return result_to_return_dll ;
+		return aFuncAndToken.result_to_return_dll;
 	}
 	else
 		return _T(""); 
 }
 
-bool callFuncDll(FuncAndToken *aFuncAndToken)
+//H30 changed to not return anything since it is not used
+void callFuncDll(FuncAndToken *aFuncAndToken)
 {
  	Func &func =  *(aFuncAndToken->mFunc); 
 	ExprTokenType & aResultToken = aFuncAndToken->mToken ;
 	// Func &func = *(Func *)g_script.mTempFunc ;
 	if (!INTERRUPTIBLE_IN_EMERGENCY)
-		return false;
+		return;
 	if (g_nThreads >= g_MaxThreadsTotal)
 		// Below: Only a subset of ACT_IS_ALWAYS_ALLOWED is done here because:
 		// 1) The omitted action types seem too obscure to grant always-run permission for msg-monitor events.
 		// 2) Reduction in code size.
 		if (g_nThreads >= MAX_THREADS_EMERGENCY // To avoid array overflow, this limit must by obeyed except where otherwise documented.
 			|| func.mJumpToLine->mActionType != ACT_EXITAPP && func.mJumpToLine->mActionType != ACT_RELOAD)
-			return false;
+			return;
 
 	// Need to check if backup is needed in case script explicitly called the function rather than using
 	// it solely as a callback.  UPDATE: And now that max_instances is supported, also need it for that.
@@ -502,7 +552,7 @@ bool callFuncDll(FuncAndToken *aFuncAndToken)
 	int var_backup_count; // The number of items in the above array.
 	if (func.mInstances > 0) // Backup is needed.
 		if (!Var::BackupFunctionVars(func, var_backup, var_backup_count)) // Out of memory.
-			return false;
+			return;
 			// Since we're in the middle of processing messages, and since out-of-memory is so rare,
 			// it seems justifiable not to have any error reporting and instead just avoid launching
 			// the new thread.
@@ -527,10 +577,37 @@ bool callFuncDll(FuncAndToken *aFuncAndToken)
 	func.Call(&aResultToken); // Call the UDF.
 
 		DEBUGGER_STACK_POP()
-
-	// Var::FreeAndRestoreFunctionVars(func, var_backup, var_backup_count);
+	switch (aFuncAndToken->mToken.symbol)
+	{
+	case SYM_VAR: // Caller has ensured that any SYM_VAR's Type() is VAR_NORMAL.
+		aFuncAndToken->result_to_return_dll = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,_tcslen(aFuncAndToken->mToken.var->Contents())*sizeof(TCHAR));
+		_tcscpy(aFuncAndToken->result_to_return_dll,aFuncAndToken->mToken.var->Contents()); // Contents() vs. mContents to support VAR_CLIPBOARD, and in case mContents needs to be updated by Contents().
+		if (aFuncAndToken->result_to_return_dll==_T("^a"))
+			break;
+		break;
+	case SYM_STRING:
+	case SYM_OPERAND:
+		aFuncAndToken->result_to_return_dll = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,_tcslen(aFuncAndToken->mToken.marker)*sizeof(TCHAR));
+		_tcscpy(aFuncAndToken->result_to_return_dll,aFuncAndToken->mToken.marker);
+		if (!_tcscmp(aFuncAndToken->result_to_return_dll,_T("^a")))
+			break;
+		break;
+	case SYM_INTEGER:
+		aFuncAndToken->result_to_return_dll = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,MAX_INTEGER_LENGTH);
+		ITOA64(aFuncAndToken->mToken.value_int64, aFuncAndToken->result_to_return_dll);
+		break;
+	case SYM_FLOAT:
+		result_to_return_dll = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,MAX_INTEGER_LENGTH);
+		sntprintf(aFuncAndToken->result_to_return_dll, MAX_NUMBER_SIZE, g->FormatFloat, aFuncAndToken->mToken.value_double);
+		break;
+	//case SYM_OBJECT: // L31: Treat objects as empty strings (or TRUE where appropriate).
+	default: // Not an operand: continue on to return the default at the bottom.
+		*aFuncAndToken->result_to_return_dll = '\n';
+	}
+	
+	//Var::FreeAndRestoreFunctionVars(func, var_backup, var_backup_count);
 	ResumeUnderlyingThread(ErrorLevel_saved);
-	return 0 ;
+	return;
 }
 
 

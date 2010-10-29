@@ -1,3 +1,7 @@
+25.10.2010
+- Fixed ahkFunction returning wrong value
+- Default script set to #Persistent`n#NoTrayIcon
+- Fixed ahkExec to return when no line was added
 15.08.2010
 - Merged AutoHotkey_L54
 - DllCall will now always search for W and A functions first, this is due to some functions do not have A suffix e.g. Process32First and Process32FirstW
