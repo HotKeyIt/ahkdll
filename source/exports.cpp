@@ -534,6 +534,7 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 {
  	Func &func =  *(aFuncAndToken->mFunc); 
 	ExprTokenType & aResultToken = aFuncAndToken->mToken ;
+	aFuncAndToken->result_to_return_dll = _T(""); // H31 Set default to ""
 	// Func &func = *(Func *)g_script.mTempFunc ;
 	if (!INTERRUPTIBLE_IN_EMERGENCY)
 		return;
@@ -580,17 +581,19 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 	switch (aFuncAndToken->mToken.symbol)
 	{
 	case SYM_VAR: // Caller has ensured that any SYM_VAR's Type() is VAR_NORMAL.
-		aFuncAndToken->result_to_return_dll = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,_tcslen(aFuncAndToken->mToken.var->Contents())*sizeof(TCHAR));
-		_tcscpy(aFuncAndToken->result_to_return_dll,aFuncAndToken->mToken.var->Contents()); // Contents() vs. mContents to support VAR_CLIPBOARD, and in case mContents needs to be updated by Contents().
-		if (aFuncAndToken->result_to_return_dll==_T("^a"))
-			break;
+		if (_tcslen(aFuncAndToken->mToken.var->Contents()))
+		{
+			aFuncAndToken->result_to_return_dll = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,_tcslen(aFuncAndToken->mToken.var->Contents())*sizeof(TCHAR));
+			_tcscpy(aFuncAndToken->result_to_return_dll,aFuncAndToken->mToken.var->Contents()); // Contents() vs. mContents to support VAR_CLIPBOARD, and in case mContents needs to be updated by Contents().
+		}
 		break;
 	case SYM_STRING:
 	case SYM_OPERAND:
-		aFuncAndToken->result_to_return_dll = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,_tcslen(aFuncAndToken->mToken.marker)*sizeof(TCHAR));
-		_tcscpy(aFuncAndToken->result_to_return_dll,aFuncAndToken->mToken.marker);
-		if (!_tcscmp(aFuncAndToken->result_to_return_dll,_T("^a")))
-			break;
+		if (_tcslen(aFuncAndToken->mToken.marker))
+		{
+			aFuncAndToken->result_to_return_dll = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,_tcslen(aFuncAndToken->mToken.marker)*sizeof(TCHAR));
+			_tcscpy(aFuncAndToken->result_to_return_dll,aFuncAndToken->mToken.marker);
+		}
 		break;
 	case SYM_INTEGER:
 		aFuncAndToken->result_to_return_dll = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,MAX_INTEGER_LENGTH);
