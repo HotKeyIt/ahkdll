@@ -534,7 +534,6 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 {
  	Func &func =  *(aFuncAndToken->mFunc); 
 	ExprTokenType & aResultToken = aFuncAndToken->mToken ;
-	aFuncAndToken->result_to_return_dll = _T(""); // H31 Set default to ""
 	// Func &func = *(Func *)g_script.mTempFunc ;
 	if (!INTERRUPTIBLE_IN_EMERGENCY)
 		return;
@@ -586,6 +585,8 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 			aFuncAndToken->result_to_return_dll = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,_tcslen(aFuncAndToken->mToken.var->Contents())*sizeof(TCHAR));
 			_tcscpy(aFuncAndToken->result_to_return_dll,aFuncAndToken->mToken.var->Contents()); // Contents() vs. mContents to support VAR_CLIPBOARD, and in case mContents needs to be updated by Contents().
 		}
+		else
+			*aFuncAndToken->result_to_return_dll = '\0';
 		break;
 	case SYM_STRING:
 	case SYM_OPERAND:
@@ -594,6 +595,8 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 			aFuncAndToken->result_to_return_dll = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,_tcslen(aFuncAndToken->mToken.marker)*sizeof(TCHAR));
 			_tcscpy(aFuncAndToken->result_to_return_dll,aFuncAndToken->mToken.marker);
 		}
+		else
+			*aFuncAndToken->result_to_return_dll = '\0';
 		break;
 	case SYM_INTEGER:
 		aFuncAndToken->result_to_return_dll = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,MAX_INTEGER_LENGTH);
@@ -605,7 +608,7 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 		break;
 	//case SYM_OBJECT: // L31: Treat objects as empty strings (or TRUE where appropriate).
 	default: // Not an operand: continue on to return the default at the bottom.
-		*aFuncAndToken->result_to_return_dll = '\n';
+		*aFuncAndToken->result_to_return_dll = '\0';
 	}
 	
 	//Var::FreeAndRestoreFunctionVars(func, var_backup, var_backup_count);
