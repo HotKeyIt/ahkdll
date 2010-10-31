@@ -585,7 +585,7 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 			aFuncAndToken->result_to_return_dll = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,_tcslen(aFuncAndToken->mToken.var->Contents())*sizeof(TCHAR));
 			_tcscpy(aFuncAndToken->result_to_return_dll,aFuncAndToken->mToken.var->Contents()); // Contents() vs. mContents to support VAR_CLIPBOARD, and in case mContents needs to be updated by Contents().
 		}
-		else
+		else if (aFuncAndToken->result_to_return_dll)
 			*aFuncAndToken->result_to_return_dll = '\0';
 		break;
 	case SYM_STRING:
@@ -595,7 +595,7 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 			aFuncAndToken->result_to_return_dll = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,_tcslen(aFuncAndToken->mToken.marker)*sizeof(TCHAR));
 			_tcscpy(aFuncAndToken->result_to_return_dll,aFuncAndToken->mToken.marker);
 		}
-		else
+		else if (aFuncAndToken->result_to_return_dll)
 			*aFuncAndToken->result_to_return_dll = '\0';
 		break;
 	case SYM_INTEGER:
@@ -608,7 +608,8 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 		break;
 	//case SYM_OBJECT: // L31: Treat objects as empty strings (or TRUE where appropriate).
 	default: // Not an operand: continue on to return the default at the bottom.
-		*aFuncAndToken->result_to_return_dll = '\0';
+		if (aFuncAndToken->result_to_return_dll)
+			*aFuncAndToken->result_to_return_dll = '\0';
 	}
 	
 	//Var::FreeAndRestoreFunctionVars(func, var_backup, var_backup_count);
