@@ -1166,7 +1166,6 @@ void SendKeySpecial(TCHAR aChar, int aRepeatCount)
 
 	TCHAR asc_string[16], *cp = asc_string;
 
-
 	// The following range isn't checked because this function appears never to be called for such
 	// characters (tested in English and Russian so far), probably because VkKeyScan() finds a way to
 	// manifest them via Control+VK combinations:
@@ -1190,7 +1189,6 @@ void SendKeySpecial(TCHAR aChar, int aRepeatCount)
 		else
 #endif
 		SendASC(asc_string);
-
 		DoKeyDelay(); // It knows not to do the delay for SM_INPUT.
 	}
 
@@ -1741,7 +1739,7 @@ void KeyEvent(KeyEventTypes aEventType, vk_type aVK, sc_type aSC, HWND aTargetWi
 			else
 			{
 				// Below is similar to the macro "Get_active_window_keybd_layout":
-				HWND active_window = GetForegroundWindow();
+				HWND active_window;
 #ifdef AHKX
 				target_keybd_layout = g_HKL; // When no foreground window, the script's own layout seems like the safest default.
 				target_layout_has_altgr = LayoutHasAltGr(target_keybd_layout); // In the case of this else's "if", target_layout_has_altgr was already set properly higher above.

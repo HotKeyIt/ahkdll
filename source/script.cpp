@@ -480,7 +480,7 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 	// with the program:
 	sntprintf(buf, _countof(buf), _T("%s\\%s"), mFileDir, mFileName);
 #else
-	sntprintf(buf, _countof(buf), _T("%s\\%s - %s"), mFileDir, mFileName, tNAME_PV);
+	sntprintf(buf, _countof(buf), _T("%s\\%s - %s"), mFileDir, mFileName, T_AHK_NAME_VERSION);
 #endif
 	if (   !(mMainWindowTitle = SimpleHeap::Malloc(buf))   )
 		return FAIL;  // It already displayed the error for us.
@@ -4504,6 +4504,8 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		g->CurrentFunc = NULL;
 		mFuncExceptionVar = NULL;
 
+		ConvertEscapeSequences(parameter, g_EscapeChar, false); // Normally done in ParseAndAddLine().
+
 		// ACT_EXPRESSION will be changed to ACT_IFEXPR after PreparseBlocks() is called so that EvaluateCondition()
 		// can be used and because ACT_EXPRESSION is designed to discard its result (since it normally would not be
 		// used). This can't be done before PreparseBlocks() is called since this isn't really an IF (it has no body).
@@ -5266,7 +5268,7 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType,
 
 				if (declare_type == VAR_DECLARE_STATIC)
 				{
-					LPTSTR args[] = {var->mName, omit_leading_whitespace(right_side_of_operator)};
+					LPTSTR args[] = {var->mName, ConvertEscapeSequences(omit_leading_whitespace(right_side_of_operator), g_EscapeChar, false)};
 					// UCHAR_MAX signals AddLine to avoid pointing any pending labels or functions at the new line.
 					// Otherwise, ParseAndAddLine could be used like in the section below to optimize simple
 					// assignments, but that would be nearly pointless for static initializers anyway:

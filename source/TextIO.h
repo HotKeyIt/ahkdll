@@ -192,10 +192,8 @@ protected:
 		if (mLength + aReadSize > TEXT_IO_BLOCK)
 			aReadSize = TEXT_IO_BLOCK - mLength;
 		DWORD dwRead = _Read(mBuffer + mLength, (DWORD)aReadSize);
-		if (dwRead) {
+		if (dwRead)
 			mLength += dwRead;
-			mPos = mBuffer;
-		}
 		else
 			mEOF = true;
 		return dwRead;
@@ -207,11 +205,12 @@ protected:
 		else if (mPos > mBuffer + mLength - aReadSize) {
 			ASSERT( (DWORD)(mPos - mBuffer) <= mLength );
 			mLength -= (DWORD)(mPos - mBuffer);
-			memcpy(mBuffer, mPos, mLength);
+			memmove(mBuffer, mPos, mLength);
 			Read(TEXT_IO_BLOCK);
 		}
 		else
 			return true;
+		mPos = mBuffer;
 		if (mLength < aReadSize)
 			mEOF = true;
 		return !mEOF;

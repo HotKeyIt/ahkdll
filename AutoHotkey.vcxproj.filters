@@ -216,6 +216,9 @@
     <ClInclude Include="source\ComServerImpl.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="source\ahkversion.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="source\resources\AutoHotkey.rc">
@@ -252,9 +255,6 @@
       <Filter>Resource Files</Filter>
     </None>
     <None Include="source\resources\icon_suspend.ico">
-      <Filter>Resource Files</Filter>
-    </None>
-    <None Include="source\resources\icon_tray.ico">
       <Filter>Resource Files</Filter>
     </None>
     <None Include="source\resources\icon_tray_win9x.ico">
