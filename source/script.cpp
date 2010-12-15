@@ -126,7 +126,9 @@ Script::Script()
 		ScriptError(_T("DEBUG: Since there are now more than 256 Action Types, the ActionTypeType")
 			_T(" typedef must be changed."));
 #endif
+#ifndef _USRDLL
 	OleInitialize(NULL);
+#endif
 }
 
 

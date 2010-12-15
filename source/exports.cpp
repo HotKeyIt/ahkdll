@@ -141,14 +141,6 @@ EXPORT unsigned int ahkExecuteLine(unsigned int line,unsigned int aMode,unsigned
 	Line *templine = (Line *)line;
 	if (templine == NULL)
 		return (unsigned int)g_script.mFirstLine;
-	if (templine->mActionType = ACT_BLOCK_BEGIN && templine->mAttribute)
-	{
-		for(;!(templine->mActionType == ACT_BLOCK_END && templine->mAttribute);templine = templine->mNextLine)
-			continue;
-		templine = templine->mNextLine;
-	} 
-	else if (templine->mActionType == ACT_BLOCK_BEGIN || templine->mActionType == ACT_BLOCK_END)
-		ahkExecuteLine((unsigned int) templine->mNextLine,aMode,wait);
 	if (aMode)
 	{
 		if (wait)
@@ -156,7 +148,14 @@ EXPORT unsigned int ahkExecuteLine(unsigned int line,unsigned int aMode,unsigned
 		else
 			PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)templine, (LPARAM)aMode);
 	}
-	return (unsigned int) templine->mNextLine;
+	if (templine = templine->mNextLine)
+	if (templine->mActionType == ACT_BLOCK_BEGIN && templine->mAttribute)
+	{
+		for(;!(templine->mActionType == ACT_BLOCK_END && templine->mAttribute);)
+			templine = templine->mNextLine;
+		templine = templine->mNextLine;
+	} 
+	return (unsigned int) templine;
 }
 
 EXPORT BOOL ahkLabel(LPTSTR aLabelName, unsigned int nowait) // 0 = wait = default

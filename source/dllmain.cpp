@@ -384,7 +384,7 @@ param = nameHinstanceP.argv ; //
 unsigned __stdcall runScript( void* pArguments )
 {
 	struct nameHinstance a =  *(struct nameHinstance *)pArguments;
-	
+	OleInitialize(NULL);
 	HINSTANCE hInstance = a.hInstanceP;
 	LPTSTR fileName = a.name;
 	OldWinMain(hInstance, 0, fileName, 0);	
