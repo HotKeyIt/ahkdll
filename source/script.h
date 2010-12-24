@@ -2958,6 +2958,9 @@ void BIF_ComObjActive(ExprTokenType &aResultToken, ExprTokenType *aParam[], int 
 void BIF_ComObjCreate(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_ComObjGet(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_ComObjConnect(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_ComObjError(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_ComObjTypeOrValue(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_ComObjArray(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 #endif
 
 

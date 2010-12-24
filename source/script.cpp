@@ -9416,15 +9416,36 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 			bif = BIF_ComObjCreate;
 		else if	(!_tcsicmp(suffix, _T("Get")))
 			bif = BIF_ComObjGet;
-		else if	(!_tcsicmp(suffix, _T("Connect")) || !_tcsicmp(suffix, _T("Error")))
+		else if	(!_tcsicmp(suffix, _T("Connect")))
 		{
 			bif = BIF_ComObjConnect;
 			max_params = 2;
 		}
+		else if (!_tcsicmp(suffix, _T("Error")))
+		{
+			bif = BIF_ComObjError;
+			min_params = 0;
+		}
+		else if (!_tcsicmp(suffix, _T("Type")))
+		{
+			bif = BIF_ComObjTypeOrValue;
+			max_params = 2;
+		}
+		else if (!_tcsicmp(suffix, _T("Value")))
+		{
+			bif = BIF_ComObjTypeOrValue;
+		}
+		else if (!_tcsicmp(suffix, _T("Array")))
+		{
+			bif = BIF_ComObjArray;
+			min_params = 2;
+			max_params = 9; // up to 8 dimensions
+		}
 		else
 		{
 			bif = BIF_ComObjActive;
-			max_params = 2;
+			min_params = 0;
+			max_params = 3;
 		}
 	}
 #endif

@@ -15137,11 +15137,11 @@ void RegExReplace(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 						int ref_num0 = aOffset[ref_num*2];
 						int ref_num1 = aOffset[ref_num*2 + 1];
 #ifdef UNICODE
+						match_length = UTF8LenToTLen(utf8Haystack, ref_num0, ref_num1 - ref_num0); // CALCULATE BEFORE CHANGING ref_num0 BELOW
 						int match_offset_utf8 = aOffset[0];
 						ref_num0 = ref_num0 > match_offset_utf8
 							? match_offset + UTF8PosToTPos(utf8Haystack + match_offset_utf8, ref_num0 - match_offset_utf8)
 							: UTF8PosToTPos(utf8Haystack, ref_num0);
-						match_length = UTF8LenToTLen(utf8Haystack, ref_num0, ref_num1 - ref_num0);
 #else
 						match_length = ref_num1 - ref_num0;
 #endif
@@ -15260,7 +15260,7 @@ void BIF_RegEx(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamC
 	int haystack_length = (int)EXPR_TOKEN_LENGTH(aParam[0], haystack);
 
 #ifdef UNICODE
-	CStringUTF8FromWChar utf8Haystack(haystack);
+	CStringUTF8FromWChar utf8Haystack(haystack, haystack_length);
 	int utf8haystack_length = (int)utf8Haystack.GetLength();
 #endif
 

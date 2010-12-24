@@ -42,32 +42,38 @@ public:
 
 class ComObject : public ObjectBase
 {
+public:
 	union
 	{
 		IDispatch *mDispatch;
+		IUnknown *mUnknown;
+		SAFEARRAY *mArray;
 		__int64 mVal64; // Allow 64-bit values when ComObject is used as a VARIANT in 32-bit builds.
 	};
 	ComEvent *mEventSink;
 	VARTYPE mVarType;
+	enum { F_OWNVALUE = 1 };
+	USHORT mFlags;
 
-public:
 	ResultType STDMETHODCALLTYPE Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	ResultType SafeArrayInvoke(ExprTokenType &aResultToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
 
 	void ToVariant(VARIANT &aVar)
 	{
 		aVar.vt = mVarType;
 		aVar.llVal = mVal64;
-		if (VT_DISPATCH == mVarType && mDispatch)
-			mDispatch->AddRef();
+		// Caller expects this ComObject to last longer than aVar, so no need to AddRef():
+		//if (VT_DISPATCH == mVarType && mDispatch)
+		//	mDispatch->AddRef();
 	}
 
-	ComObject(IDispatch *disp)
-		: mVal64((__int64)disp), mVarType(VT_DISPATCH), mEventSink(NULL) { }
-	ComObject(__int64 llVal, VARTYPE vt)
-		: mVal64(llVal), mVarType(vt), mEventSink(NULL) { }
+	ComObject(IDispatch *pdisp)
+		: mVal64((__int64)pdisp), mVarType(VT_DISPATCH), mEventSink(NULL), mFlags(0) { }
+	ComObject(__int64 llVal, VARTYPE vt, USHORT flags = 0)
+		: mVal64(llVal), mVarType(vt), mEventSink(NULL), mFlags(flags) { }
 	~ComObject()
 	{
-		if (VT_DISPATCH == mVarType && mDispatch)
+		if ((VT_DISPATCH == mVarType || VT_UNKNOWN == mVarType) && mUnknown)
 		{
 			if (mEventSink)
 			{
@@ -75,14 +81,13 @@ public:
 				mEventSink->mObject = NULL;
 				mEventSink->Release();
 			}
-			mDispatch->Release();
+			mUnknown->Release();
+		}
+		else if ((mVarType & (VT_BYREF|VT_ARRAY)) == VT_ARRAY && (mFlags & F_OWNVALUE))
+		{
+			SafeArrayDestroy(mArray);
 		}
 	}
-
-	friend void BIF_ComObjActive(ExprTokenType&, ExprTokenType*[], int);
-	friend void BIF_ComObjConnect(ExprTokenType&, ExprTokenType*[], int);
-	friend class ComEvent;
-	friend class Debugger;
 };
 
 
