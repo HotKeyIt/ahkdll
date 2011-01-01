@@ -817,7 +817,7 @@ ResultType STDMETHODCALLTYPE ComObject::Invoke(ExprTokenType &aResultToken, Expr
 		// If this param is SYM_OBJECT, it is either an unsupported object (in which case rgvarg[i] is empty)
 		// or a ComObject, in which case rgvarg[i] is a shallow copy and calling VariantClear would free the
 		// caller's data prematurely. Even VT_DISPATCH should not be cleared since TokenToVariant didn't AddRef.
-		if (aParam[i]->symbol != SYM_OBJECT)
+		if (aParam[aParamCount-i]->symbol != SYM_OBJECT)
 			VariantClear(&rgvarg[i]);
 	}
 
@@ -828,7 +828,7 @@ ResultType STDMETHODCALLTYPE ComObject::Invoke(ExprTokenType &aResultToken, Expr
 	else if	(IS_INVOKE_SET)
 	{	// Allow chaining, e.g. obj2.prop := obj1.prop := val.
 		ExprTokenType &rvalue = *aParam[aParamCount];
-		aResultToken.symbol = rvalue.symbol;
+		aResultToken.symbol = (rvalue.symbol == SYM_OPERAND) ? SYM_STRING : rvalue.symbol;
 		aResultToken.value_int64 = rvalue.value_int64;
 		if (rvalue.symbol == SYM_OBJECT)
 			rvalue.object->AddRef();
