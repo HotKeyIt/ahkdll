@@ -31,6 +31,7 @@ GNU General Public License for more details.
 static TCHAR g_CommentFlag[MAX_COMMENT_FLAG_LENGTH + 1] = _T(";"); // Adjust the below for any changes.
 static size_t g_CommentFlagLength = 1; // pre-calculated for performance
 static ExprOpFunc g_ObjGet(BIF_ObjInvoke, IT_GET), g_ObjSet(BIF_ObjInvoke, IT_SET), g_ObjCall(BIF_ObjInvoke, IT_CALL);
+static ExprOpFunc g_ObjGetInPlace(BIF_ObjGetInPlace, IT_GET);
 static TextMem::Buffer includedtextbuf; //HotKeyIt for dll to read script from memory
 
 // General note about the methods in here:
@@ -3473,8 +3474,8 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		//    ++phys_line_number;
 		// 5) "mCurrLine = NULL": Probably not necessary since it's only for error reporting.  Worst thing
 		//    that could happen is that syntax errors would be thrown off, which testing shows isn't the case.
-#ifndef MINIDLL
 examine_line:
+#ifndef MINIDLL
 		// "::" alone isn't a hotstring, it's a label whose name is colon.
 		// Below relies on the fact that no valid hotkey can start with a colon, since
 		// ": & somekey" is not valid (since colon is a shifted key) and colon itself
@@ -3852,18 +3853,18 @@ examine_line:
 		}
 		// Otherwise, treat it as a normal script line.
 
-		// v1.0.41: Support the "} else {" style in one-true-brace (OTB).  As a side-effect,
-		// any command, not just an else, is probably supported to the right of '}', not just "else".
-		// This is undocumented because it would make for less readable scripts, and doesn't seem
-		// to have much value.
-		if (*buf == '}')
+		if (*buf == '{' || *buf == '}')
 		{
-			if (!AddLine(ACT_BLOCK_END))
+			if (!AddLine(*buf == '{' ? ACT_BLOCK_BEGIN : ACT_BLOCK_END))
 				return CloseAndReturnFail(fp);
-			// The following allows the next stage to see "else" or "else {" if it's present:
-			if (   !*(buf = omit_leading_whitespace(buf + 1))   )
-				goto continue_main_loop; // It's just a naked "}", so no more processing needed for this line.
-			buf_length = _tcslen(buf); // Update for possible use below.
+			// Allow any command/action, directive or label to the right of "{" or "}":
+			if (   *(buf = omit_leading_whitespace(buf + 1))   )
+			{
+				buf_length = _tcslen(buf); // Update.
+				mCurrLine = NULL;  // To signify that we're in transition, trying to load a new line.
+				goto examine_line; // Have the main loop process the contents of "buf" as though it came in from the script.
+			}
+			goto continue_main_loop; // It's just a naked "{" or "}", so no more processing needed for this line.
 		}
 		// First do a little special handling to support actions on the same line as their
 		// ELSE, e.g.:
@@ -3882,24 +3883,8 @@ examine_line:
 		{
 			// It's not an ELSE.  Also, at this stage it can't be ACT_EXPRESSION (such as an isolated function call)
 			// because it would have been already handled higher above.
-			// v1.0.41.01: Check if there is a command/action on the same line as the '{'.  This is apparently
-			// a style that some people use, and it also supports "{}" as a shorthand way of writing an empty block.
-			if (*buf == '{')
-			{
-				if (!AddLine(ACT_BLOCK_BEGIN))
-					return CloseAndReturnFail(fp);
-				if (   *(action_end = omit_leading_whitespace(buf + 1))   )  // There is an action to the right of the '{'.
-				{
-					mCurrLine = NULL;  // To signify that we're in transition, trying to load a new one.
-					if (!ParseAndAddLine(action_end, IsFunction(action_end) ? ACT_EXPRESSION : ACT_INVALID)) // If it's a function, it must be a call vs. a definition because a function can't be defined on the same line as an open-brace.
-						return CloseAndReturnFail(fp);
-				}
-				// Otherwise, there was either no same-line action or the same-line action was successfully added,
-				// so do nothing.
-			}
-			else
-				if (!ParseAndAddLine(buf))
-					return CloseAndReturnFail(fp);
+			if (!ParseAndAddLine(buf))
+				return CloseAndReturnFail(fp);
 		}
 		else // This line is an ELSE, possibly with another command immediately after it (on the same line).
 		{
@@ -3910,13 +3895,19 @@ examine_line:
 			if (!AddLine(ACT_ELSE))
 				return CloseAndReturnFail(fp);
 			mCurrLine = NULL;  // To signify that we're in transition, trying to load a new one.
-			action_end = omit_leading_whitespace(action_end); // Now action_end is the word after the ELSE.
-			if (*action_end == g_delimiter) // Allow "else, action"
-				action_end = omit_leading_whitespace(action_end + 1);
-			if (*action_end && !ParseAndAddLine(action_end, IsFunction(action_end) ? ACT_EXPRESSION : ACT_INVALID)) // If it's a function, it must be a call vs. a definition because a function can't be defined on the same line as an Else.
-				return CloseAndReturnFail(fp);
-			// Otherwise, there was either no same-line action or the same-line action was successfully added,
-			// so do nothing.
+			buf = omit_leading_whitespace(action_end); // Now buf is the word after the ELSE.
+			if (*buf == g_delimiter) // Allow "else, action"
+				buf = omit_leading_whitespace(buf + 1);
+			// Allow any command/action to the right of "else", including "{":
+			if (*buf)
+			{
+				// This is done rather than calling ParseAndAddLine() as it handles "{" in a way that
+				// anything to the right of it is considered an arg of that line and is basically ignored.
+				buf_length = _tcslen(buf); // Update.
+				mCurrLine = NULL;  // To signify that we're in transition, trying to load a new line.
+				goto examine_line; // Have the main loop process the contents of "buf" as though it came in from the script.
+			}
+			// Otherwise, there was either no same-line action, so do nothing.
 		}
 
 continue_main_loop: // This method is used in lieu of "continue" for performance and code size reduction.
@@ -5715,7 +5706,9 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType,
 							// No valid identifier, doesn't look like a valid expression.
 							break;
 						cp = omit_leading_whitespace(cp);
-						if (*cp == '[' || *cp == ':' && cp[1] == '=' || !*cp)
+						if (*cp == '[' || !*cp // x.y[z] or x.y
+							|| cp[1] == '=' && _tcschr(_T(":+-*/|&^."), cp[0]) // Two-char assignment operator.
+							|| _tcschr(_T("/<>"), cp[0]) && cp[1] == cp[0] && cp[2] == '=') // //=, <<= or >>=
 						{	// Allow Set and bracketed Get as standalone expression.
 							aActionType = ACT_EXPRESSION;
 							break;
@@ -11109,7 +11102,6 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 //		, 78             // THIS VALUE MUST BE LEFT UNUSED so that the one above can be promoted to it by the infix-to-postfix routine.
 //		, 82, 82         // RESERVED FOR SYM_POST_INCREMENT, SYM_POST_DECREMENT (which are listed higher above for the performance of YIELDS_AN_OPERAND().
 		, 86             // SYM_FUNC -- Must be of highest precedence so that it stays tightly bound together as though it's a single operand for use by other operators.
-		/*, 86*/, 7 // L31: SYM_GET, SYM_SET.  SYM_GET moved to include in YIELDS_AN_OPERAND() range.
 		, 30 // SYM_REGEXMATCH
 	};
 	// Most programming languages give exponentiation a higher precedence than unary minus and logical-not.
@@ -11174,6 +11166,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 					break; // Break out of inner loop so that bottom of the outer loop will process this_deref itself.
 
 				ExprTokenType &this_infix_item = infix[infix_count]; // Might help reduce code size since it's referenced many places below.
+				this_infix_item.deref = NULL; // Init needed for SYM_ASSIGN and related; a non-NULL deref means it should be converted to an object-assignment.
 
 				// CHECK IF THIS CHARACTER IS AN OPERATOR.
 				cp1 = cp[1]; // Improves performance by nearly 5% and appreciably reduces code size (at the expense of being less maintainable).
@@ -11371,13 +11364,13 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 				case '[': // L31
 					if (  !(infix_count && YIELDS_AN_OPERAND(infix[infix_count - 1].symbol))  )
 						return LineError(_T("Unsupported use of \"[\""), FAIL, cp); // Reserve this for array construction; i.e. obj := [x,y,z]  (SYM_ASSIGN does not "yield an operand").
-					if (infix_count && infix[infix_count - 1].symbol == SYM_GET // obj.x[ ...
+					if (infix_count && infix[infix_count - 1].symbol == SYM_DOT // obj.x[ ...
 						&& *omit_leading_whitespace(cp + 1) != ']') // not obj.x[]
 					{
 						// L36: This is something like obj.x[y] or obj.x[y]:=z, which should be treated
 						//		as a single operation such as ObjGet(obj,"x",y) or ObjSet(obj,"x",y,z).
 						--infix_count;
-						// Below will change the SYM_GET into SYM_OBRACKET, keeping the existing deref struct.
+						// Below will change the SYM_DOT token into SYM_OBRACKET, keeping the existing deref struct.
 					}
 					else
 					{
@@ -11388,9 +11381,9 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 						deref_new->marker = cp; // For error-reporting.
 						this_infix_item.deref = deref_new;
 					}
-					// This SYM_OBRACKET will be converted to SYM_FUNC or SYM_SET (then SYM_FUNC) after we determine
-					// what type of operation is being performed.  SYM_FUNC requires a deref structure to point to the
-					// appropriate function; we will also use it to count parameters as each SYM_COMMA is encountered.
+					// This SYM_OBRACKET will be converted to SYM_FUNC after we determine what type of operation
+					// is being performed.  SYM_FUNC requires a deref structure to point to the appropriate 
+					// function; we will also use it to count parameters as each SYM_COMMA is encountered.
 					// deref->func will be set at a later stage.  deref->is_function need not be set.
 					// DO NOT USE this_infix_item in case above did --infix_count.
 					infix[infix_count].symbol = SYM_OBRACKET;
@@ -11630,7 +11623,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 
 							cp = omit_leading_whitespace(op_end);
 							
-							SymbolType new_symbol; // Type of token, SYM_FUNC or SYM_SET (which will become SYM_FUNC).
+							SymbolType new_symbol; // Type of token: SYM_FUNC or SYM_DOT (which must be treated differently as it doesn't have parentheses).
 							DerefType *new_deref; // Holds a reference to the appropriate function, and parameter count.
 							if (   !(new_deref = (DerefType *)SimpleHeap::Malloc(sizeof(DerefType)))   )
 								return LineError(ERR_OUTOFMEM);
@@ -11646,21 +11639,8 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 							}
 							else
 							{
-								// Allow whitespace preceding ":=" (but not '(', which is handled above).
-								op_end = omit_leading_whitespace(op_end);
-								
-								if (*op_end == ':' && op_end[1] == '=')
-								{
-									op_end += 2; // No need for further processing of this ":=".
-									new_symbol = SYM_SET;
-									new_deref->func = &g_ObjSet;
-									new_deref->param_count++; // Account for R-value of ":=".
-								}
-								else
-								{
-									new_symbol = SYM_GET; // Becomes SYM_FUNC, must be SYM_GET at this point because SYM_FUNC is assumed to have parentheses.
-									new_deref->func = &g_ObjGet;
-								}
+								new_symbol = SYM_DOT; // This will be converted to SYM_FUNC, either ObjGet or ObjSet.
+								new_deref->func = &g_ObjGet; // Set default.
 							}
 
 							// Output the operator next - after the operand to avoid auto-concat.
@@ -11873,7 +11853,7 @@ double_deref: // Caller has set cp to be start and op_end to be the character af
 
 	SymbolType stack_symbol, infix_symbol, sym_prev;
 	ExprTokenType *fwd_infix, *this_infix = infix;
-	DerefType *in_param_list = NULL; // L31: While processing the parameter list of a SYM_FUNC/SYM_SET, this points to its deref (for parameter counting and as an indicator).
+	DerefType *in_param_list = NULL; // While processing the parameter list of a function-call, this points to its deref (for parameter counting and as an indicator).
 
 	for (;;) // While SYM_BEGIN is still on the stack, continue iterating.
 	{
@@ -11931,8 +11911,8 @@ double_deref: // Caller has set cp to be start and op_end to be the character af
 		if (in_param_list && (stack_symbol == SYM_OPAREN && (infix_symbol == SYM_COMMA || infix_symbol == SYM_CPAREN)
 							|| stack_symbol == SYM_OBRACKET && (infix_symbol == SYM_COMMA || infix_symbol == SYM_CBRACKET)))
 		{
-			// L31: Parameter counting and validation is now done in this section rather than at an earlier stage
-			// to allow multiple parameters with SYM_GET/SET and more accurate parameter validation (i.e. for ByRef).
+			// Parameter counting and validation is done in this section rather than at an earlier stage
+			// to allow multiple parameters with object get/set and more accurate parameter validation.
 			// in_param_list points to the func deref which owns the current (inner-most) parameter list,
 			// as maintained by the sections which handle SYM_FUNC/SYM_CPAREN/OPAREN/CBRACKET/OBRACKET.
 			Func *func = in_param_list->func; // Can be NULL, e.g. for dynamic function calls.
@@ -12043,23 +12023,9 @@ double_deref: // Caller has set cp to be start and op_end to be the character af
 
 				in_param_list = (DerefType *)stack[stack_count]->buf; // L31: Restore in_param_list to the value it had when SYM_OPAREN was pushed onto the stack.
 
-				ExprTokenType &stack_token = *stack[stack_count - 1];
-				
-				// There should be no danger of stack underflow in the following because SYM_BEGIN always
-				// exists at the bottom of the stack:
-				if (stack_token.symbol == SYM_FUNC) // i.e. topmost item on stack is SYM_FUNC.
+				if (stack[stack_count-1]->symbol == SYM_FUNC) // i.e. topmost item on stack is SYM_FUNC.
 				{
-					// L36: Support obj.x(y):=v as equivalent to obj.x[y]:=v, primarily for users of COM_L.
-					if (stack_token.deref->func == &g_ObjCall && this_infix->symbol == SYM_ASSIGN)
-					{
-						++this_infix; // Discard this SYM_ASSIGN.
-						stack_token.symbol = SYM_SET; // To support correct operator precedence.
-						stack_token.deref->func = &g_ObjSet;
-						stack_token.deref->param_count++; // For final parameter: r-value of assignment.
-						// SYM_FUNC has become SYM_SET, which should remain on the stack until its r-value is complete.
-					}
-					else
-						goto standard_pop_into_postfix; // Within the postfix list, a function-call should always immediately follow its params.
+					goto standard_pop_into_postfix; // Within the postfix list, a function-call should always immediately follow its params.
 				}
 			}
 			else if (stack_symbol == SYM_BEGIN) // This can happen with bad expressions like "Var := 1 ? (:) :" even though theoretically it should mean that paren is closed without having been opened (currently impossible due to load-time balancing).
@@ -12088,52 +12054,42 @@ double_deref: // Caller has set cp to be start and op_end to be the character af
 			STACK_PUSH(this_infix++);
 			break;
 
-		case SYM_GET: // L31: SYM_GET in the infix array can only be the result of x.y syntax.
-			this_infix->symbol = SYM_FUNC; // Not done earlier since SYM_GET has no parentheses.
+		case SYM_DOT: // x.y
+			this_infix->symbol = SYM_FUNC;
 			STACK_PUSH(this_infix++);
-			goto standard_pop_into_postfix; // SYM_GET already follows its SYM_OPERAND, which it must be tightly bound to.
+			goto standard_pop_into_postfix; // Pop it into postfix to immediately follow its operands.
 
 		case SYM_CBRACKET: // L31
 			// The basic outer structure of this section is based on SYM_CPAREN case above, see there for more comments.
 			if (stack_symbol == SYM_OBRACKET)
 			{
-				ExprTokenType &this_obracket = *stack[stack_count - 1];
+				ExprTokenType &stack_top = *stack[stack_count - 1];
 				//--stack_count; // DON'T remove this SYM_OBRACKET from the stack.  It is left on the stack for reuse below.
 
 				// L37: Detect obj[method_name](params):
 				if (this_infix[1].symbol == SYM_CONCAT && this_infix[2].symbol == SYM_OPAREN && this_infix[2].buf == this_infix->buf + 1)
 				{	// The final check above ensures this is "](" and not "] (" or "] . (".
 					if (in_param_list->param_count != 2) // Require exactly one [parameter], excluding the target object.
-						return LineError(_T("Exactly one [ parameter ] required in this case"), FAIL, this_obracket.deref->marker);
+						return LineError(_T("Exactly one [ parameter ] required in this case"), FAIL, stack_top.deref->marker);
 					this_infix += 2; // Skip the SYM_CONCAT and SYM_CBRACKET.
 					// Treat this as a continuation of the parameter list for this operation, which is now known to be ObjCall.
 					// in_param_list must remain pointing to the same deref, which we will continue to use to count parameters.
-					this_obracket.symbol = SYM_FUNC;
-					this_obracket.deref->func = &g_ObjCall;
-					// Leave this_obracket (now SYM_FUNC) on the stack, but also push an open-parenthesis over it:
-					this_infix->buf = this_obracket.buf; // Points to the underlying/outer parameter list, which will be restored into in_param_list when this open-parenthesis is popped off the stack.
+					stack_top.symbol = SYM_FUNC;
+					stack_top.deref->func = &g_ObjCall;
+					// Leave stack_top (now SYM_FUNC) on the stack, but also push an open-parenthesis over it:
+					this_infix->buf = stack_top.buf; // Points to the underlying/outer parameter list, which will be restored into in_param_list when this open-parenthesis is popped off the stack.
 					STACK_PUSH(this_infix++);
 					break;
 				}
 				
-				in_param_list = (DerefType *)this_obracket.buf; // Restore in_param_list to the value it had when SYM_OBRACKET was pushed onto the stack.
+				in_param_list = (DerefType *)stack_top.buf; // Restore in_param_list to the value it had when SYM_OBRACKET was pushed onto the stack.
+
+				++this_infix; // Finished processing SYM_CBRACKET.
 				
-				if (this_infix[1].symbol == SYM_ASSIGN) // obj[name]:=value.  Other types of assignments are not supported.
-				{
-					this_infix += 2; // Done with SYM_CBRACKET and SYM_ASSIGN.
-					this_obracket.symbol = SYM_SET; // To support correct operator precedence, it must remain as SYM_SET until it is popped off the stack.
-					this_obracket.deref->func = &g_ObjSet;
-					this_obracket.deref->param_count++;
-					// this_obracket is already on the stack, so let it be processed as normal.
-				}
-				else // obj[name] -- SYM_GET
-				{
-					++this_infix; // Done with SYM_CBRACKET.
-					this_obracket.symbol = SYM_FUNC;
-					this_obracket.deref->func = &g_ObjGet;
-					// this_obracket is still on the stack, but we need it in the postfix array immediately following its params.
-					goto standard_pop_into_postfix;
-				}
+				stack_top.symbol = SYM_FUNC;
+				stack_top.deref->func = &g_ObjGet; // This may be overridden by standard_pop_into_postfix.
+				// Pop stack_top into the postfix array, immediately after its params.
+				goto standard_pop_into_postfix;
 			}
 			else if (stack_symbol == SYM_BEGIN)
 				return LineError(ERR_MISSING_OPEN_BRACKET);
@@ -12326,13 +12282,88 @@ double_deref: // Caller has set cp to be start and op_end to be the character af
 standard_pop_into_postfix: // Use of a goto slightly reduces code size.
 		this_postfix = STACK_POP;
 		this_postfix->circuit_token = NULL; // Set default. It's only ever overridden after it's in the postfix array.
-		switch (this_postfix->symbol)
+		// Additional processing for syntax sugar:
+		SymbolType postfix_symbol = this_postfix->symbol;
+		if (postfix_symbol == SYM_FUNC)
 		{
-		case SYM_SET: // L31: Convert SYM_SET to SYM_FUNC so SYM_SET doesn't need to be handled at run-time.  SYM_SET is required at load-time for precedence rules to apply correctly to ObjSet (obj["name"]:=value or obj.name:=value).
-		case SYM_REGEXMATCH: // a ~= b  ->  RegExMatch(a, b)
+			infix_symbol = this_infix->symbol;
+			// The sections below pre-process assignments to work with objects:
+			//	x.y := z	->	x "y" z (set)
+			//	x[y] += z	->	x y (get in-place, assume 2 params) z (add) (set)
+			//	x.y[i] /= z	->	x "y" i 3 (get in-place, n params) z (div) (set)
+			if ((this_postfix->deref->func == &g_ObjGet || this_postfix->deref->func == &g_ObjCall) // Allow g_ObjCall for something like x.y(i) := z, since x.y(i) can act as x.y[i] for COM objects.
+				&& IS_ASSIGNMENT_EXCEPT_POST_AND_PRE(infix_symbol))
+			{
+				if (infix_symbol != SYM_ASSIGN)
+				{
+					int param_count = this_postfix->deref->param_count; // Number of parameters preceding the assignment operator.
+					if (param_count != 2)
+					{
+						// Pass the actual param count via a separate token:
+						this_postfix = (ExprTokenType *)_alloca(sizeof(ExprTokenType));
+						this_postfix->symbol = SYM_INTEGER;
+						this_postfix->value_int64 = param_count;
+						this_postfix->circuit_token = NULL;
+						postfix_count++;
+						param_count = 1; // ExpandExpression should consider there to be only one param; the others should be left on the stack.
+					}
+					else
+					{
+						param_count = 0; // Omit the "param count" token to indicate the most common case: two params.
+					}
+					ExprTokenType *&that_postfix = postfix[postfix_count]; // In case above did postfix_count++.
+					that_postfix = (ExprTokenType *)_alloca(sizeof(ExprTokenType));
+					that_postfix->symbol = SYM_FUNC;
+					if (  !(that_postfix->deref = (DerefType *)SimpleHeap::Malloc(sizeof(DerefType)))  ) // Must be persistent memory, unlike that_postfix itself.
+						return LineError(ERR_OUTOFMEM);
+					that_postfix->deref->func = &g_ObjGetInPlace;
+					that_postfix->deref->param_count = param_count;
+					that_postfix->circuit_token = NULL;
+				}
+				else
+				{
+					--postfix_count; // Discard this token; the assignment op will be converted into SYM_FUNC later.
+				}
+				this_infix->deref = stack[stack_count]->deref; // Mark this assignment as an object assignment for the section below.
+				this_infix->deref->func = &g_ObjSet;
+				this_infix->deref->param_count++;
+				// Now let this_infix be processed by the next iteration.
+			}
+		}
+		else if (IS_ASSIGNMENT_EXCEPT_POST_AND_PRE(postfix_symbol))
+		{
+			if (this_postfix->deref) // The section above marked this as an object assignment in an earlier iteration.
+			{
+				ExprTokenType *assign_op = this_postfix;
+				if (postfix_symbol != SYM_ASSIGN) // e.g. += or .=
+				{
+					switch (postfix_symbol)
+					{
+					case SYM_ASSIGN_ADD:           postfix_symbol = SYM_ADD; break;
+					case SYM_ASSIGN_SUBTRACT:      postfix_symbol = SYM_SUBTRACT; break;
+					case SYM_ASSIGN_MULTIPLY:      postfix_symbol = SYM_MULTIPLY; break;
+					case SYM_ASSIGN_DIVIDE:        postfix_symbol = SYM_DIVIDE; break;
+					case SYM_ASSIGN_FLOORDIVIDE:   postfix_symbol = SYM_FLOORDIVIDE; break;
+					case SYM_ASSIGN_BITOR:         postfix_symbol = SYM_BITOR; break;
+					case SYM_ASSIGN_BITXOR:        postfix_symbol = SYM_BITXOR; break;
+					case SYM_ASSIGN_BITAND:        postfix_symbol = SYM_BITAND; break;
+					case SYM_ASSIGN_BITSHIFTLEFT:  postfix_symbol = SYM_BITSHIFTLEFT; break;
+					case SYM_ASSIGN_BITSHIFTRIGHT: postfix_symbol = SYM_BITSHIFTRIGHT; break;
+					case SYM_ASSIGN_CONCAT:        postfix_symbol = SYM_CONCAT; break;
+					}
+					// Insert the concat or math operator before the assignment:
+					this_postfix = (ExprTokenType *)_alloca(sizeof(ExprTokenType));
+					this_postfix->symbol = postfix_symbol;
+					this_postfix->circuit_token = NULL;
+					postfix[++postfix_count] = assign_op;
+				}
+				assign_op->symbol = SYM_FUNC; // An earlier stage already set up the func and param_count.
+			}
+		}
+		else if (postfix_symbol == SYM_REGEXMATCH) // a ~= b  ->  RegExMatch(a, b)
+		{
 			this_postfix->symbol = SYM_FUNC;
-			break;
- 		}
+		}
 		++postfix_count;
 	} // End of loop that builds postfix array from the infix array.
 end_of_infix_to_postfix:
