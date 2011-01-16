@@ -41,4 +41,31 @@ library LibCOMServer
 	{
 		[default] interface ICOMServer;
 	}
+#ifdef _WIN64
+	[ uuid(38D00012-DC83-4E17-9BAD-D9DD97902580),
+	  helpstring("AutoHotkey Script X64") 
+	]
+	coclass CoCOMServerOptional
+	{
+		[default] interface ICOMServer;
+	}
+#else
+#ifdef _UNICODE
+	[ uuid(C58DCD96-1D6F-4F85-B555-02B7F21F5CAF),
+	  helpstring("AutoHotkey Script UNICODE") 
+	]
+	coclass CoCOMServerOptional
+	{
+		[default] interface ICOMServer;
+	}
+#else
+	[ uuid(974318D9-A5B2-4FE5-8AC4-33A0C9EBB8B5),
+	  helpstring("AutoHotkey Script ANSI") 
+	]
+	coclass CoCOMServerOptional
+	{
+		[default] interface ICOMServer;
+	}
+#endif //Unicode
+#endif //Win64
 }

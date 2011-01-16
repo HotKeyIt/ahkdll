@@ -513,6 +513,22 @@ const char g_szVerIndProgID[] = "AutoHotkey.Script" ;
 // ProgID
 const char g_szProgID[] = "AutoHotkey.Script.1" ;
 
+#ifdef _WIN64
+const char g_szFriendlyNameOptional[] = "AutoHotkey Script X64" ;
+const char g_szVerIndProgIDOptional[] = "AutoHotkey.Script.X64" ;
+const char g_szProgIDOptional[] = "AutoHotkey.Script.X64.1" ;
+#else
+#ifdef _UNICODE
+const char g_szFriendlyNameOptional[] = "AutoHotkey Script UNICODE" ;
+const char g_szVerIndProgIDOptional[] = "AutoHotkey.Script.UNICODE" ;
+const char g_szProgIDOptional[] = "AutoHotkey.Script.UNICODE.1" ;
+#else
+const char g_szFriendlyNameOptional[] = "AutoHotkey Script ANSI" ;
+const char g_szVerIndProgIDOptional[] = "AutoHotkey.Script.ANSI" ;
+const char g_szProgIDOptional[] = "AutoHotkey.Script.ANSI.1" ;
+#endif // UNICODE
+#endif // WIN64
+
 //
 // Constructor
 //
@@ -604,19 +620,25 @@ unsigned int Variant2I(VARIANT var)
 
 HRESULT __stdcall CoCOMServer::ahktextdll(/*in,optional*/VARIANT script,/*in,optional*/VARIANT options,/*in,optional*/VARIANT params,/*out*/unsigned int* hThread)
 {
+	USES_CONVERSION;
 	TCHAR buf1[MAX_INTEGER_SIZE],buf2[MAX_INTEGER_SIZE],buf3[MAX_INTEGER_SIZE];
 	if (hThread==NULL)
 		return ERROR_INVALID_PARAMETER;
-	*hThread = com_ahktextdll(Variant2T(script,buf1),Variant2T(options,buf2),Variant2T(params,buf3)); //	(LPTSTR)params.bstrVal);
+	*hThread = com_ahktextdll(script.vt == VT_BSTR ? OLE2T(script.bstrVal) : Variant2T(script,buf1)
+							,options.vt == VT_BSTR ? OLE2T(options.bstrVal) : Variant2T(options,buf2)
+							,params.vt == VT_BSTR ? OLE2T(params.bstrVal) : Variant2T(params,buf3));
 	return S_OK;
 }
 
 HRESULT __stdcall CoCOMServer::ahkdll(/*in,optional*/VARIANT filepath,/*in,optional*/VARIANT options,/*in,optional*/VARIANT params,/*out*/unsigned int* hThread)
 {
+	USES_CONVERSION;
 	TCHAR buf1[MAX_INTEGER_SIZE],buf2[MAX_INTEGER_SIZE],buf3[MAX_INTEGER_SIZE];
 	if (hThread==NULL)
 		return ERROR_INVALID_PARAMETER;
-	*hThread = com_ahkdll(Variant2T(filepath,buf1),Variant2T(options,buf2),Variant2T(params,buf3)); //	(LPTSTR)params.bstrVal);
+	*hThread = com_ahkdll(filepath.vt == VT_BSTR ? OLE2T(filepath.bstrVal) : Variant2T(filepath,buf1)
+							,options.vt == VT_BSTR ? OLE2T(options.bstrVal) : Variant2T(options,buf2)
+							,params.vt == VT_BSTR ? OLE2T(params.bstrVal) : Variant2T(params,buf3));
 	return S_OK;
 }
 HRESULT __stdcall CoCOMServer::ahkPause(/*in,optional*/VARIANT aChangeTo,/*out*/BOOL* paused)
@@ -929,7 +951,7 @@ STDAPI DllGetClassObject(const CLSID& clsid,
                          void** ppv)
 {
 	// Can we create this component?
-	if (clsid != CLSID_CoCOMServer)
+	if (clsid != CLSID_CoCOMServer && clsid != CLSID_CoCOMServerOptional)
 	{
 		return CLASS_E_CLASSNOTAVAILABLE ;
 	}
@@ -980,8 +1002,13 @@ STDAPI DllGetClassObject(const CLSID& clsid,
 //
 STDAPI DllRegisterServer()
 {
-
-	HRESULT hr= RegisterServer(g_hInstance, 
+	HRESULT hr = RegisterServer(g_hInstance, 
+	                      CLSID_CoCOMServerOptional,
+	                      g_szFriendlyNameOptional,
+	                      g_szVerIndProgIDOptional,
+	                      g_szProgIDOptional,
+						  LIBID_LibCOMServer) ;
+	hr= RegisterServer(g_hInstance, 
 	                      CLSID_CoCOMServer,
 	                      g_szFriendlyName,
 	                      g_szVerIndProgID,
@@ -1000,7 +1027,11 @@ STDAPI DllRegisterServer()
 //
 STDAPI DllUnregisterServer()
 {
-	HRESULT hr= UnregisterServer(CLSID_CoCOMServer,
+	HRESULT hr = UnregisterServer(CLSID_CoCOMServerOptional,
+	                        g_szVerIndProgIDOptional,
+	                        g_szProgIDOptional,
+							LIBID_LibCOMServer) ;
+	hr = UnregisterServer(CLSID_CoCOMServer,
 	                        g_szVerIndProgID,
 	                        g_szProgID,
 							LIBID_LibCOMServer) ;
