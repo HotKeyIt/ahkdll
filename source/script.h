@@ -2550,7 +2550,6 @@ public:
 	ResultType CloseAndReturnFail(TextStream *ts);
 	size_t GetLine(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSection, TextStream *ts);
 	ResultType IsDirective(LPTSTR aBuf);
-	size_t GetLineFromText(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSection, TCHAR *&sBuf); // HotKeyIt H1 for LoadFromScript
 	ResultType ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType = ACT_INVALID
 		, ActionTypeType aOldActionType = OLD_INVALID, LPTSTR aActionName = NULL
 		, LPTSTR aEndMarker = NULL, LPTSTR aLiteralMap = NULL, size_t aLiteralMapLength = 0);

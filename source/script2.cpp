@@ -5276,11 +5276,7 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 		return 0; // Whether ExitApp() terminates depends on whether there's an OnExit subroutine and what it does.
 
 	case AHK_EXIT_BY_SINGLEINSTANCE:
-#ifndef _USRDLL
 		g_script.ExitApp(EXIT_SINGLEINSTANCE);
-#else
-		terminateDll();
-#endif
 		return 0; // Whether ExitApp() terminates depends on whether there's an OnExit subroutine and what it does.
 
 	case WM_DESTROY:
@@ -8941,7 +8937,7 @@ ResultType Line::FileCreateDir(LPTSTR aDirSpec)
 	{
 		TCHAR parent_dir[MAX_PATH];
 		if (_tcslen(aDirSpec) >= _countof(parent_dir)) // avoid overflow
-			return OK; // Let ErrorLevel tell the story.
+			return AssignErrorLevels(TRUE, ERROR_BUFFER_OVERFLOW);
 		tcslcpy(parent_dir, aDirSpec, last_backslash - aDirSpec + 1); // Omits the last backslash.
 		FileCreateDir(parent_dir); // Recursively create all needed ancestor directories.
 
@@ -8958,7 +8954,7 @@ ResultType Line::FileCreateDir(LPTSTR aDirSpec)
 	// The above has recursively created all parent directories of aDirSpec if needed.
 	// Now we can create aDirSpec.  Be sure to explicitly set g_ErrorLevel since it's value
 	// is now indeterminate due to action above:
-	return g_ErrorLevel->Assign(CreateDirectory(aDirSpec, NULL) ? ERRORLEVEL_NONE : ERRORLEVEL_ERROR);
+	return AssignErrorLevels(!CreateDirectory(aDirSpec, NULL));
 }
 
 
@@ -9206,10 +9202,11 @@ ResultType Line::FileReadLine(LPTSTR aFilespec, LPTSTR aLineNumber)
 
 	LONG_OPERATION_INIT
 
+	DWORD buf_length;
 	TCHAR buf[READ_FILE_LINE_SIZE];
 	for (__int64 i = 0; i < line_number; ++i)
 	{
-		if (!tfile.ReadLine(buf, _countof(buf) - 1)) // end-of-file or error
+		if (  !(buf_length = tfile.ReadLine(buf, _countof(buf) - 1))  ) // end-of-file or error
 		{
 			g->LastError = GetLastError();
 			tfile.Close();
@@ -9219,9 +9216,9 @@ ResultType Line::FileReadLine(LPTSTR aFilespec, LPTSTR aLineNumber)
 	}
 	tfile.Close();
 
-	size_t buf_length = _tcslen(buf);
 	if (buf_length && buf[buf_length - 1] == '\n') // Remove any trailing newline for the user.
-		buf[--buf_length] = '\0';
+		--buf_length;
+
 	if (!buf_length)
 	{
 		if (!output_var.Assign()) // Explicitly call it this way so that it won't free the memory.
@@ -9230,6 +9227,7 @@ ResultType Line::FileReadLine(LPTSTR aFilespec, LPTSTR aLineNumber)
 	else
 		if (!output_var.Assign(buf, (VarSizeType)buf_length))
 			return FAIL;
+
 	return AssignErrorLevels(FALSE, 0); // Indicate success.
 }
 

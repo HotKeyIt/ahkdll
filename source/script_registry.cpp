@@ -75,15 +75,15 @@ static BOOL IniEncodingFix(LPWSTR aFilespec, LPWSTR aSection)
 		hFile = CreateFile(aFilespec, GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL);
 		if (hFile != INVALID_HANDLE_VALUE)
 		{
-			size_t cc = wcslen(aSection);
-			size_t cb = (cc + 1) * sizeof(WCHAR);
+			DWORD cc = (DWORD)wcslen(aSection);
+			DWORD cb = (cc + 1) * sizeof(WCHAR);
 			
 			aSection[cc] = ']'; // Temporarily replace the null-terminator.
 
 			// Write a UTF-16LE BOM to identify this as a Unicode file.
 			// Write [%aSection%] to prevent WritePrivateProfileString from inserting an empty line (for consistency and style).
 			if (   !WriteFile(hFile, L"\xFEFF[", 4, &dwWritten, NULL) || dwWritten != 4
-				|| !WriteFile(hFile, aSection, (DWORD)cb, &dwWritten, NULL) || dwWritten != cb   )
+				|| !WriteFile(hFile, aSection, cb, &dwWritten, NULL) || dwWritten != cb   )
 				result = FALSE;
 
 			if (!CloseHandle(hFile))

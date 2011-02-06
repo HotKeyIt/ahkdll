@@ -1,6 +1,6 @@
 #pragma once
 
-#define TEXT_IO_BLOCK	4096
+#define TEXT_IO_BLOCK	8192
 
 #ifndef CP_UTF16
 #define CP_UTF16		1200 // the codepage of UTF-16LE
@@ -51,7 +51,7 @@ public:
 	};
 
 	TextStream()
-		: mFlags(0), mCodePage(-1), mLocale(NULL), mLength(0), mCapacity(0), mBuffer(NULL), mPos(NULL), mEOF(true)
+		: mFlags(0), mCodePage(-1), mLength(0), mBuffer(NULL), mPos(NULL), mEOF(true)
 	{
 		SetCodePage(CP_ACP);
 	}
@@ -59,58 +59,28 @@ public:
 	{
 		if (mBuffer)
 			free(mBuffer);
-		if (mLocale)
-			_free_locale(mLocale);
+		//if (mLocale)
+		//	_free_locale(mLocale);
 		// Close() isn't called here, it will rise a "pure virtual function call" exception.
 	}
 
 	bool Open(LPCTSTR aFileSpec, DWORD aFlags, UINT aCodePage = CP_ACP);
-	void Close() { _Close(); mEOF = true; }
-
-	DWORD ReadLine(LPTSTR aBuf, DWORD aBufLen)
+	void Close()
 	{
-		LPTSTR bufEnd = aBuf + aBufLen, bufStart = aBuf;
-		while (aBuf < bufEnd) {
-			*aBuf = GetChar();
-			if (mEOF)
-				break;
-			if (*aBuf++ == '\n')
-				break;
-		}
-		if (aBuf < bufEnd)
-			*aBuf = '\0';
-		return (DWORD)(aBuf - bufStart);
-	}
-	DWORD Read(LPTSTR aBuf, DWORD aBufLen)
-	{
-		LPTSTR bufEnd = aBuf + aBufLen, bufStart = aBuf;
-		while (aBuf < bufEnd) {
-			*aBuf = GetChar();
-			if (*aBuf == TEOF)
-				break;
-			aBuf++;
-		}
-		if (aBuf < bufEnd)
-			*aBuf = '\0';
-		return (DWORD)(aBuf - bufStart);
-	}
-	TCHAR GetChar()
-	{
-		TCHAR ch = ReadChar();
-		if (ch == '\r' && (mFlags & (EOL_CRLF | EOL_ORPHAN_CR))) {
-			TCHAR ch2 = ReadChar();
-			if (ch2 != '\n') {
-				mCache[1] = ch2;
-				if (mFlags & EOL_ORPHAN_CR)
-					return '\n';
-			}
-			else if (mFlags & EOL_CRLF)
-				return '\n';
-		}
-		return ch;
+		FlushWriteBuffer();
+		_Close();
+		mEOF = true;
 	}
 
 	DWORD Write(LPCTSTR aBuf, DWORD aBufLen = 0);
+	DWORD Write(LPCVOID aBuf, DWORD aBufLen);
+	DWORD Read(LPTSTR aBuf, DWORD aBufLen, int aNumLines = 0);
+	DWORD Read(LPVOID aBuf, DWORD aBufLen);
+
+	DWORD ReadLine(LPTSTR aBuf, DWORD aBufLen)
+	{
+		return Read(aBuf, aBufLen, 1);
+	}
 
 	INT_PTR FormatV(LPCTSTR fmt, va_list ap)
 	{
@@ -131,13 +101,14 @@ public:
 	{
 		if (mEOF)
 			return true;
-		if (!mCache[1] && (!mPos || mPos >= mBuffer + mLength)) {
+		if (!mPos || mPos >= mBuffer + mLength) {
 			__int64 pos = _Tell();
 			if (pos < 0 || pos >= _Length())
 				mEOF = true;
 		}
 		return mEOF;
 	}
+
 	void SetCodePage(UINT aCodePage)
 	{
 		if (aCodePage == CP_ACP)
@@ -147,27 +118,19 @@ public:
 
 		if (mCodePage != aCodePage)
 		{
+			// Switching from a multi-byte encoding to UTF-16 would cause issues if there were
+			// an odd number of bytes in the buffer.  For simplicity, just clear the buffer.
+			RollbackFilePointer();
+			FlushWriteBuffer();
+
 			mCodePage = aCodePage;
-
-			// mLocale is no longer relevant, so free it.
-			if (mLocale)
-				_free_locale(mLocale);
-
-			if (aCodePage != CP_UTF8 && aCodePage != CP_UTF16 && aCodePage != CP_UTF7)
-			{
-				// Recreate locale for use with _ismbblead_l.
-				char name_buf[16];
-				*name_buf = '.';
-				_ultoa(aCodePage, name_buf + 1, 10);
-				mLocale = _create_locale(LC_ALL, name_buf);
-			}
-			else
-				// _create_locale doesn't support Unicode; mLocale isn't needed for CP_UTF8 or CP_UTF16 anyway.
-				mLocale = NULL;
+			if (!GetCPInfo(aCodePage, &mCodePageInfo))
+				mCodePageInfo.LeadByte[0] = NULL;
 		}
 	}
 	UINT GetCodePage() { return mCodePage; }
 	DWORD GetFlags() { return mFlags; }
+
 protected:
 	// IO abstraction
 	virtual bool    _Open(LPCTSTR aFileSpec, DWORD aFlags) = 0;
@@ -177,9 +140,49 @@ protected:
 	virtual bool    _Seek(__int64 aDistance, int aOrigin) = 0;
 	virtual __int64	_Tell() const = 0;
 	virtual __int64 _Length() const = 0;
+	
+	void RollbackFilePointer()
+	{
+		if (mPos) // Buffered reading was used.
+		{
+			// Discard the buffer and rollback the file pointer.
+			ptrdiff_t offset = (mPos - mBuffer) - mLength; // should be a value <= 0
+			_Seek(offset, SEEK_CUR);
+			mPos = NULL;
+			mLength = 0;
+		}
+	}
+	
+	void FlushWriteBuffer()
+	{
+		if (mLength && !mPos)
+		{
+			// Flush write buffer.
+			_Write(mBuffer, mLength);
+			mLength = 0;
+		}
+		mLastWriteChar = 0;
+	}
 
-	TCHAR ReadChar();
+	bool PrepareToWrite()
+	{
+		if (!mBuffer)
+			mBuffer = (BYTE *) malloc(TEXT_IO_BLOCK);
+		else if (mPos) // Buffered reading was used.
+			RollbackFilePointer();
+		return mBuffer != NULL;
+	}
 
+	bool PrepareToRead()
+	{
+		FlushWriteBuffer();
+		return true;
+	}
+
+	template<typename TCHR>
+	DWORD WriteTranslateCRLF(TCHR *aBuf, DWORD aBufLen); // Used by TextStream::Write(LPCSTR,DWORD).
+
+	// Functions for populating the read buffer.
 	DWORD Read(DWORD aReadSize = TEXT_IO_BLOCK)
 	{
 		ASSERT(aReadSize);
@@ -187,7 +190,8 @@ protected:
 			return 0;
 		if (!mBuffer) {
 			mBuffer = (BYTE *) malloc(TEXT_IO_BLOCK);
-			mCapacity = TEXT_IO_BLOCK;
+			if (!mBuffer)
+				return 0;
 		}
 		if (mLength + aReadSize > TEXT_IO_BLOCK)
 			aReadSize = TEXT_IO_BLOCK - mLength;
@@ -216,37 +220,29 @@ protected:
 		return !mEOF;
 	}
 
+	__declspec(noinline) bool IsLeadByte(BYTE b) // noinline benchmarks slightly faster.
+	{
+		for (int i = 0; i < _countof(mCodePageInfo.LeadByte) && mCodePageInfo.LeadByte[i]; i += 2)
+			if (b >= mCodePageInfo.LeadByte[i] && b <= mCodePageInfo.LeadByte[i+1])
+				return true;
+		return false;
+	}
+
 	DWORD mFlags;
 	DWORD mLength;		// The length of available data in the buffer, in bytes.
-	DWORD mCapacity;	// The capacity of the buffer, in bytes.
 	UINT  mCodePage;
-	_locale_t mLocale;
+	CPINFO mCodePageInfo;
 	
 	bool  mEOF;
-	union
-	{
-		CHAR  mWriteCharA;
-		WCHAR mWriteCharW;
-	};
+	TCHAR mLastWriteChar;
 
-	union
-	{
-		DWORD mCacheInt;
-		TCHAR mCache[4 / sizeof(TCHAR)];
-		CHAR  mCacheA[4];
-#ifdef UNICODE
-		WCHAR mCacheW[2];
-#else
-		// See ReadChar()
-#endif
-	};
-	union // pointer to the next character to read in mBuffer
+	union // Pointer to the next character to read in mBuffer.
 	{
 		LPBYTE  mPos;
 		LPSTR   mPosA;
 		LPWSTR  mPosW;
 	};
-	union // used by buffered/translated IO. 
+	union // Used by buffered/translated IO to hold raw file data. 
 	{
 		LPBYTE  mBuffer;
 		LPSTR   mBufferA;
@@ -260,24 +256,23 @@ class TextFile : public TextStream
 {
 public:
 	TextFile() : mFile(INVALID_HANDLE_VALUE) {}
-	virtual ~TextFile() { _Close(); }
+	virtual ~TextFile() { FlushWriteBuffer(); _Close(); }
 
 	// Text IO methods from TextStream.
 	using TextStream::Read;
 	using TextStream::Write;
 
 	// These methods are exported to provide binary file IO.
-	DWORD   Read(LPVOID aBuffer, DWORD aBufSize)
+	bool    Seek(__int64 aDistance, int aOrigin)
 	{
 		RollbackFilePointer();
-		DWORD dwRead = _Read(aBuffer, aBufSize);
-		mEOF = _Tell() == _Length(); // binary IO is not buffered.
-		return dwRead;
+		FlushWriteBuffer();
+		return _Seek(aDistance, aOrigin);
 	}
-	DWORD	Write(LPCTSTR aBuf, DWORD aBufLen = 0) { RollbackFilePointer(); return TextStream::Write(aBuf, aBufLen); }
-	DWORD   Write(LPCVOID aBuffer, DWORD aBufSize) { RollbackFilePointer(); return _Write(aBuffer, aBufSize); }
-	bool    Seek(__int64 aDistance, int aOrigin) { RollbackFilePointer(); return _Seek(aDistance, aOrigin); }
-	__int64	Tell() { RollbackFilePointer(); return _Tell(); }
+	__int64	Tell()
+	{
+		return _Tell() + (mPos ? mPos - (mBuffer + mLength) : (ptrdiff_t)mLength);
+	}
 	__int64 Length() { return _Length(); }
 	__int64 Length(__int64 aLength)
 	{
@@ -288,7 +283,7 @@ public:
 		_Seek(min(aLength, pos), SEEK_SET);
 		return _Length();
 	}
-	HANDLE  Handle() { RollbackFilePointer(); return mFile; }
+	HANDLE  Handle() { RollbackFilePointer(); FlushWriteBuffer(); return mFile; }
 protected:
 	virtual bool    _Open(LPCTSTR aFileSpec, DWORD aFlags);
 	virtual void    _Close();
@@ -298,20 +293,6 @@ protected:
 	virtual __int64	_Tell() const;
 	virtual __int64 _Length() const;
 
-	void RollbackFilePointer()
-	{
-		if (mPos) // Text reading was used
-		{
-			mCacheInt = 0; // cache is cleared to prevent unexpected results.
-			mWriteCharW = 0;
-
-			// Discards the buffer and rollback the file pointer.
-			ptrdiff_t offset = (mPos - mBuffer) - mLength; // should be a value <= 0
-			_Seek(offset, SEEK_CUR);
-			mPos = NULL;
-			mLength = 0;
-		}
-	}
 private:
 	HANDLE mFile;
 };

@@ -885,11 +885,7 @@ ResultType Script::AutoExecSection()
 	// doesn't contain the #Persistent directive we're done unless there is an OnExit subroutine and it
 	// doesn't do "ExitApp":
 	if (!IS_PERSISTENT) // Resolve macro again in case any of its components changed since the last time.
-#ifndef _USRDLL // HotKeyIt no check for IS_PERSISTENT in DLL
 		g_script.ExitApp(ExecUntil_result == FAIL ? EXIT_ERROR : EXIT_EXIT);
-#else
-		terminateDll();
-#endif
 	return OK;
 }
 
@@ -1067,6 +1063,10 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 // Note that g_script's destructor takes care of most other cleanup work, such as destroying
 // tray icons, menus, and unowned windows such as ToolTip.
 {
+#ifdef _USRDLL
+	terminateDll();
+	return;
+#else
 	// L31: Release objects stored in variables, where possible.
 	if (aExitCode != CRITICAL_ERROR) // i.e. Avoid making matters worse if CRITICAL_ERROR.
 	{
@@ -1109,6 +1109,7 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 	}
 #ifndef MINIDLL
 	Hotkey::AllDestructAndExit(aExitCode);
+#endif
 #endif
 }
 
@@ -1506,8 +1507,8 @@ bool IsFunction(LPTSTR aBuf, bool *aPendingFunctionHasBrace = NULL)
 	// v1.0.40.04: Added condition "action_end != aBuf" to allow a hotkey or remap or hotkey such as
 	// such as "(::" to work even if it ends in a close-parenthesis such as "(::)" or "(::MsgBox )"
 	if (   !(action_end && *action_end == '(' && action_end != aBuf
-		&& (action_end - aBuf != 2 || _tcsnicmp(aBuf, _T("IF"), 2))
-		&& (action_end - aBuf != 5 || _tcsnicmp(aBuf, _T("WHILE"), 5))) // v1.0.48.04: Recognize While() as loop rather than a function because many programmers are in the habit of writing while() and if().
+		&& tcslicmp(aBuf, _T("IF"), action_end - aBuf)
+		&& tcslicmp(aBuf, _T("WHILE"), action_end - aBuf)) // v1.0.48.04: Recognize While() as loop rather than a function because many programmers are in the habit of writing while() and if().
 		|| action_end[1] == ':'   ) // v1.0.44.07: This prevents "$(::fn_call()" from being seen as a function-call vs. hotkey-with-call.  For simplicity and due to rarity, omit_leading_whitespace() isn't called; i.e. assumes that the colon immediate follows the '('.
 		return false;
 	LPTSTR aBuf_last_char = action_end + _tcslen(action_end) - 1; // Above has already ensured that action_end is "(...".
@@ -1540,14 +1541,7 @@ ResultType Script::LoadIncludedText(LPTSTR aFileSpec)
 	// Keep this var on the stack due to recursion, which allows newly created lines to be given the
 	// correct file number even when some #include's have been encountered in the middle of the script:
 	int source_file_index = Line::sSourceFileCount;
-/*
-	LPTSTR *realloc_temp = (LPTSTR *)realloc(Line::sSourceFile, (source_file_index<100 ? 100 : (source_file_index+1))*sizeof(TCHAR*)); // If passed NULL, realloc() will do a malloc().
-	if (!realloc_temp)
-		return ScriptError(ERR_OUTOFMEM); // Short msg since so rare.
 
-	Line::sSourceFile = realloc_temp;
-	Line::sSourceFile[source_file_index] = aFileSpec;
-*/
 	if (Line::sSourceFileCount >= Line::sMaxSourceFiles)
 	{
 		int new_max;
@@ -1678,23 +1672,22 @@ ResultType Script::LoadIncludedText(LPTSTR aFileSpec)
 			// This increment relies on the fact that this loop always has at least one iteration:
 			++phys_line_number; // Tracks phys. line number in *this* file (independent of any recursion caused by #Include).
 			next_buf_length = GetLine(next_buf, LINE_SIZE - 1, in_continuation_section, fp);
-			if (next_buf_length && next_buf_length != -1) // Prevents infinite loop when file ends with an unclosed "/*" section.  Compare directly to -1 since length is unsigned.
+			if (next_buf_length && next_buf_length != -1 // Prevents infinite loop when file ends with an unclosed "/*" section.  Compare directly to -1 since length is unsigned.
+				&& !in_continuation_section) // Multi-line comments can't be used in continuation sections. This line fixes '*/' being discarded in continuation sections (broken by L54).
 			{
-				if (in_comment_section) // Look for the uncomment-flag.
+				if (!_tcsncmp(next_buf, _T("*/"), 2)) // Check this even if !in_comment_section so it can be ignored (for convenience) and not treated as a line-continuation operator.
 				{
-					if (!_tcsncmp(next_buf, _T("*/"), 2) && !in_continuation_section)
-					{
-						in_comment_section = false;
-						next_buf_length -= 2; // Adjust for removal of /* from the beginning of the string.
-						tmemmove(next_buf, next_buf + 2, next_buf_length + 1);  // +1 to include the string terminator.
-						next_buf_length = ltrim(next_buf, next_buf_length); // Get rid of any whitespace that was between the comment-end and remaining text.
-						if (!*next_buf) // The rest of the line is empty, so it was just a naked comment-end.
-							continue;
-					}
-					else if (in_comment_section)
+					in_comment_section = false;
+					next_buf_length -= 2; // Adjust for removal of /* from the beginning of the string.
+					tmemmove(next_buf, next_buf + 2, next_buf_length + 1);  // +1 to include the string terminator.
+					next_buf_length = ltrim(next_buf, next_buf_length); // Get rid of any whitespace that was between the comment-end and remaining text.
+					if (!*next_buf) // The rest of the line is empty, so it was just a naked comment-end.
 						continue;
 				}
-				else if (!in_continuation_section && !_tcsncmp(next_buf, _T("/*"), 2))
+				else if (in_comment_section)
+					continue;
+
+				if (!_tcsncmp(next_buf, _T("/*"), 2))
 				{
 					in_comment_section = true;
 					continue; // It's now commented out, so the rest of this line is ignored.
@@ -2171,8 +2164,8 @@ ResultType Script::LoadIncludedText(LPTSTR aFileSpec)
 		//    ++phys_line_number;
 		// 5) "mCurrLine = NULL": Probably not necessary since it's only for error reporting.  Worst thing
 		//    that could happen is that syntax errors would be thrown off, which testing shows isn't the case.
-#ifndef MINIDLL
 examine_line:
+#ifndef MINIDLL
 		// "::" alone isn't a hotstring, it's a label whose name is colon.
 		// Below relies on the fact that no valid hotkey can start with a colon, since
 		// ": & somekey" is not valid (since colon is a shifted key) and colon itself
@@ -2417,7 +2410,7 @@ examine_line:
 					// But do put in the Return regardless, in case this label is ever jumped to
 					// via Goto/Gosub:
 					if (   !(hook_action = Hotkey::ConvertAltTab(hotkey_flag, false))   )
-						if (!ParseAndAddLine(hotkey_flag, IsFunction(hotkey_flag) ? ACT_EXPRESSION : ACT_INVALID)) // It can't be a function definition vs. call since it's a single-line hotkey.
+						if (!ParseAndAddLine(hotkey_flag))
 							return CloseAndReturnFail(fp);
 				// Also add a Return that's implicit for a single-line hotkey.  This is also
 				// done for auto-replace hotstrings in case gosub/goto is ever used to jump
@@ -2550,18 +2543,18 @@ examine_line:
 		}
 		// Otherwise, treat it as a normal script line.
 
-		// v1.0.41: Support the "} else {" style in one-true-brace (OTB).  As a side-effect,
-		// any command, not just an else, is probably supported to the right of '}', not just "else".
-		// This is undocumented because it would make for less readable scripts, and doesn't seem
-		// to have much value.
-		if (*buf == '}')
+		if (*buf == '{' || *buf == '}')
 		{
-			if (!AddLine(ACT_BLOCK_END))
+			if (!AddLine(*buf == '{' ? ACT_BLOCK_BEGIN : ACT_BLOCK_END))
 				return CloseAndReturnFail(fp);
-			// The following allows the next stage to see "else" or "else {" if it's present:
-			if (   !*(buf = omit_leading_whitespace(buf + 1))   )
-				goto continue_main_loop; // It's just a naked "}", so no more processing needed for this line.
-			buf_length = _tcslen(buf); // Update for possible use below.
+			// Allow any command/action, directive or label to the right of "{" or "}":
+			if (   *(buf = omit_leading_whitespace(buf + 1))   )
+			{
+				buf_length = _tcslen(buf); // Update.
+				mCurrLine = NULL;  // To signify that we're in transition, trying to load a new line.
+				goto examine_line; // Have the main loop process the contents of "buf" as though it came in from the script.
+			}
+			goto continue_main_loop; // It's just a naked "{" or "}", so no more processing needed for this line.
 		}
 		// First do a little special handling to support actions on the same line as their
 		// ELSE, e.g.:
@@ -2576,28 +2569,10 @@ examine_line:
 			action_end = buf + buf_length; // It's done this way so that ELSE can be fully handled here; i.e. that ELSE does not have to be in the list of commands recognizable by ParseAndAddLine().
 		// The following method ensures that words or variables that start with "Else", e.g. ElseAction, are not
 		// incorrectly detected as an Else command:
-		if (tcslicmp(buf, _T("Else"), (UINT)(action_end - buf))) // It's not an ELSE. ("Else" is used vs. g_act[ACT_ELSE].Name for performance).
+		if (tcslicmp(buf, _T("Else"), action_end - buf)) // It's not an ELSE. ("Else" is used vs. g_act[ACT_ELSE].Name for performance).
 		{
-			// It's not an ELSE.  Also, at this stage it can't be ACT_EXPRESSION (such as an isolated function call)
-			// because it would have been already handled higher above.
-			// v1.0.41.01: Check if there is a command/action on the same line as the '{'.  This is apparently
-			// a style that some people use, and it also supports "{}" as a shorthand way of writing an empty block.
-			if (*buf == '{')
-			{
-				if (!AddLine(ACT_BLOCK_BEGIN))
-					return CloseAndReturnFail(fp);
-				if (   *(action_end = omit_leading_whitespace(buf + 1))   )  // There is an action to the right of the '{'.
-				{
-					mCurrLine = NULL;  // To signify that we're in transition, trying to load a new one.
-					if (!ParseAndAddLine(action_end, IsFunction(action_end) ? ACT_EXPRESSION : ACT_INVALID)) // If it's a function, it must be a call vs. a definition because a function can't be defined on the same line as an open-brace.
-						return CloseAndReturnFail(fp);
-				}
-				// Otherwise, there was either no same-line action or the same-line action was successfully added,
-				// so do nothing.
-			}
-			else
-				if (!ParseAndAddLine(buf))
-					return CloseAndReturnFail(fp);
+			if (!ParseAndAddLine(buf))
+				return CloseAndReturnFail(fp);
 		}
 		else // This line is an ELSE, possibly with another command immediately after it (on the same line).
 		{
@@ -2608,13 +2583,19 @@ examine_line:
 			if (!AddLine(ACT_ELSE))
 				return CloseAndReturnFail(fp);
 			mCurrLine = NULL;  // To signify that we're in transition, trying to load a new one.
-			action_end = omit_leading_whitespace(action_end); // Now action_end is the word after the ELSE.
-			if (*action_end == g_delimiter) // Allow "else, action"
-				action_end = omit_leading_whitespace(action_end + 1);
-			if (*action_end && !ParseAndAddLine(action_end, IsFunction(action_end) ? ACT_EXPRESSION : ACT_INVALID)) // If it's a function, it must be a call vs. a definition because a function can't be defined on the same line as an Else.
-				return CloseAndReturnFail(fp);
-			// Otherwise, there was either no same-line action or the same-line action was successfully added,
-			// so do nothing.
+			buf = omit_leading_whitespace(action_end); // Now buf is the word after the ELSE.
+			if (*buf == g_delimiter) // Allow "else, action"
+				buf = omit_leading_whitespace(buf + 1);
+			// Allow any command/action to the right of "else", including "{":
+			if (*buf)
+			{
+				// This is done rather than calling ParseAndAddLine() as it handles "{" in a way that
+				// anything to the right of it is considered an arg of that line and is basically ignored.
+				buf_length = _tcslen(buf); // Update.
+				mCurrLine = NULL;  // To signify that we're in transition, trying to load a new line.
+				goto examine_line; // Have the main loop process the contents of "buf" as though it came in from the script.
+			}
+			// Otherwise, there was either no same-line action, so do nothing.
 		}
 
 continue_main_loop: // This method is used in lieu of "continue" for performance and code size reduction.
@@ -3720,7 +3701,7 @@ examine_line:
 					// But do put in the Return regardless, in case this label is ever jumped to
 					// via Goto/Gosub:
 					if (   !(hook_action = Hotkey::ConvertAltTab(hotkey_flag, false))   )
-						if (!ParseAndAddLine(hotkey_flag, IsFunction(hotkey_flag) ? ACT_EXPRESSION : ACT_INVALID)) // It can't be a function definition vs. call since it's a single-line hotkey.
+						if (!ParseAndAddLine(hotkey_flag))
 							return CloseAndReturnFail(fp);
 				// Also add a Return that's implicit for a single-line hotkey.  This is also
 				// done for auto-replace hotstrings in case gosub/goto is ever used to jump
@@ -3881,8 +3862,6 @@ examine_line:
 		// incorrectly detected as an Else command:
 		if (tcslicmp(buf, _T("Else"), action_end - buf)) // It's not an ELSE. ("Else" is used vs. g_act[ACT_ELSE].Name for performance).
 		{
-			// It's not an ELSE.  Also, at this stage it can't be ACT_EXPRESSION (such as an isolated function call)
-			// because it would have been already handled higher above.
 			if (!ParseAndAddLine(buf))
 				return CloseAndReturnFail(fp);
 		}
@@ -4041,145 +4020,6 @@ inline ResultType Script::CloseAndReturnFail(TextStream *ts)
 	return FAIL;
 }
 
-#ifndef AUTOHOTKEYSC
-size_t Script::GetLineFromText(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSection, TCHAR *&sBuf)
-// HotKeyIt H1 to parse trough text instead of file for LoadFromScript
-{
-	size_t aBuf_length = 0;
-	if (!aBuf || !sBuf) return -1;
-	if (aMaxCharsToRead < 1) return -1; // We're signaling to caller that the end of the memory file has been reached.
-	// Otherwise, continue reading characters from the memory file until either a newline is
-	// reached or aMaxCharsToRead have been read:
-	// Track "i" separately from aBuf_length because we want to read beyond the bounds of the memory file.
-	int i;
-	for (i = 0; i < aMaxCharsToRead; ++i)
-	{
-		if (sBuf[i] == '\n')
-		{
-			// The end of this line has been reached.  Don't copy this char into the target buffer.
-			// In addition, if the previous char was '\r', remove it from the target buffer:
-			if (aBuf_length > 0 && aBuf[aBuf_length - 1] == '\r')
-				aBuf[--aBuf_length] = '\0';
-			++i; // i.e. so that aMemFile will be adjusted to omit this newline char.
-			break;
-		}
-		else
-			aBuf[aBuf_length++] = sBuf[i];
-	}
-	// We either read aMaxCharsToRead or reached the end of the line (as indicated by the newline char).
-	// In the former case, aMemFile might now be changed to be a position outside the bounds of the
-	// memory area, which the caller will reflect back to us during the next call as a 0 value for
-	// aMaxCharsToRead, which we then signal to the caller (above) as the end of the file):
-	sBuf += i; // Update this value for use by the caller.
-	// Terminate the buffer (the caller has already ensured that there's room for the terminator
-	// via its value of aMaxCharsToRead):
-	aBuf[aBuf_length] = '\0';
-
-
-	if (aInContinuationSection)
-	{
-		LPTSTR cp = omit_leading_whitespace(aBuf);
-		if (aInContinuationSection == CONTINUATION_SECTION_WITHOUT_COMMENTS) // By default, continuation sections don't allow comments (lines beginning with a semicolon are treated as literal text).
-		{
-			// Caller relies on us to detect the end of the continuation section so that trimming
-			// will be done on the final line of the section and so that a comment can immediately
-			// follow the closing parenthesis (on the same line).  Example:
-			// (
-			//	Text
-			// ) ; Same line comment.
-			if (*cp != ')') // This isn't the last line of the continuation section, so leave the line untrimmed (caller will apply the ltrim setting on its own).
-				return aBuf_length; // Earlier sections are responsible for keeping aBufLength up-to-date with any changes to aBuf.
-			//else this line starts with ')', so continue on to later section that checks for a same-line comment on its right side.
-		}
-		else // aInContinuationSection == CONTINUATION_SECTION_WITH_COMMENTS (i.e. comments are allowed in this continuation section).
-		{
-			// Fix for v1.0.46.09+: The "com" option shouldn't put "ltrim" into effect.
-			if (!_tcsncmp(cp, g_CommentFlag, g_CommentFlagLength)) // Case sensitive.
-			{
-				*aBuf = '\0'; // Since this line is a comment, have the caller ignore it.
-				return -2; // Callers tolerate -2 only when in a continuation section.  -2 indicates, "don't include this line at all, not even as a blank line to which the JOIN string (default "\n") will apply.
-			}
-			if (*cp == ')') // This isn't the last line of the continuation section, so leave the line untrimmed (caller will apply the ltrim setting on its own).
-			{
-				ltrim(aBuf); // Ltrim this line unconditionally so that caller will see that it starts with ')' without having to do extra steps.
-				aBuf_length = _tcslen(aBuf); // ltrim() doesn't always return an accurate length, so do it this way.
-			}
-		}
-	}
-	// Since above didn't return, either:
-	// 1) We're not in a continuation section at all, so apply ltrim() to support semicolons after tabs or
-	//    other whitespace.  Seems best to rtrim also.
-	// 2) CONTINUATION_SECTION_WITHOUT_COMMENTS but this line is the final line of the section.  Apply
-	//    trim() and other logic further below because caller might rely on it.
-	// 3) CONTINUATION_SECTION_WITH_COMMENTS (i.e. comments allowed), but this line isn't a comment (though
-	//    it may start with ')' and thus be the final line of this section). In either case, need to check
-	//    for same-line comments further below.
-	if (aInContinuationSection != CONTINUATION_SECTION_WITH_COMMENTS) // Case #1 & #2 above.
-	{
-		aBuf_length = trim(aBuf);
-		if (!_tcsncmp(aBuf, g_CommentFlag, g_CommentFlagLength)) // Case sensitive.
-		{
-			// Due to other checks, aInContinuationSection==false whenever the above condition is true.
-			*aBuf = '\0';
-			return 0;
-		}
-	}
-	//else CONTINUATION_SECTION_WITH_COMMENTS (case #3 above), which due to other checking also means that
-	// this line isn't a comment (though it might have a comment on its right side, which is checked below).
-	// CONTINUATION_SECTION_WITHOUT_COMMENTS would already have returned higher above if this line isn't
-	// the last line of the continuation section.
-	if (g_AllowSameLineComments)
-	{
-		// Handle comment-flags that appear to the right of a valid line.  But don't
-		// allow these types of comments if the script is considers to be the AutoIt2
-		// style, to improve compatibility with old scripts that may use non-escaped
-		// comment-flags as literal characters rather than comments:
-		LPTSTR cp, prevp;
-		for (cp = _tcsstr(aBuf, g_CommentFlag); cp; cp = _tcsstr(cp + g_CommentFlagLength, g_CommentFlag))
-		{
-			// If no whitespace to its left, it's not a valid comment.
-			// We insist on this so that a semi-colon (for example) immediately after
-			// a word (as semi-colons are often used) will not be considered a comment.
-			prevp = cp - 1;
-			if (prevp < aBuf) // should never happen because we already checked above.
-			{
-				*aBuf = '\0';
-				return 0;
-			}
-			if (IS_SPACE_OR_TAB_OR_NBSP(*prevp)) // consider it to be a valid comment flag
-			{
-				*prevp = '\0';
-				aBuf_length = rtrim_with_nbsp(aBuf, prevp - aBuf); // Since it's our responsibility to return a fully trimmed string.
-				break; // Once the first valid comment-flag is found, nothing after it can matter.
-			}
-			else // No whitespace to the left.
-				if (*prevp == g_EscapeChar) // Remove the escape char.
-				{
-					// The following isn't exactly correct because it prevents an include filename from ever
-					// containing the literal string "`;".  This is because attempts to escape the accent via
-					// "``;" are not supported.  This is documented here as a known limitation because fixing
-					// it would probably break existing scripts that rely on the fact that accents do not need
-					// to be escaped inside #Include.  Also, the likelihood of "`;" appearing literally in a
-					// legitimate #Include file seems vanishingly small.
-					tmemmove(prevp, prevp + 1, _tcslen(prevp + 1) + 1);  // +1 for the terminator.
-					--aBuf_length;
-					// Then continue looking for others.
-				}
-				// else there wasn't any whitespace to its left, so keep looking in case there's
-				// another further on in the line.
-		} // for()
-	} // if (g_AllowSameLineComments)
-
-	return aBuf_length; // The above is responsible for keeping aBufLength up-to-date with any changes to aBuf.
-}
-
-
-
-
-
-
-
-#endif
 size_t Script::GetLine(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSection, TextStream *ts)
 {
 	size_t aBuf_length = 0;
@@ -4187,18 +4027,14 @@ size_t Script::GetLine(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSect
 	if (!aBuf || !ts) return -1;
 	if (aMaxCharsToRead < 1) return 0;
 	if (ts->AtEOF()) return -1; // Previous call to this function probably already read the last line.
-	if (ts->ReadLine(aBuf, aMaxCharsToRead) == 0) // end-of-file or error
+	if (  !(aBuf_length = ts->ReadLine(aBuf, aMaxCharsToRead))  ) // end-of-file or error
 	{
 		*aBuf = '\0';  // Reset since on error, contents added by fgets() are indeterminate.
 		return -1;
 	}
-	aBuf_length = _tcslen(aBuf);
-	if (!aBuf_length)
-		return 0;
 	if (aBuf[aBuf_length-1] == '\n')
-		aBuf[--aBuf_length] = '\0';
-	if (aBuf[aBuf_length-1] == '\r')  // In case there are any, e.g. a Macintosh or Unix file?
-		aBuf[--aBuf_length] = '\0';
+		--aBuf_length;
+	aBuf[aBuf_length] = '\0';
 
 	if (aInContinuationSection)
 	{
@@ -5383,9 +5219,10 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType,
 		action_args = omit_leading_whitespace(end_marker + 1);
 		// L34: Require that named commands and their args are delimited with a space, tab or comma.
 		// Detects errors such as "MsgBox< foo" or "If!foo" and allows things like "control[x]:=y".
-		// L36: Also allow '(' for if(expr) and while(expr).
 		TCHAR end_char = end_marker[1];
-		could_be_named_action = (end_char == g_delimiter || !end_char || IS_SPACE_OR_TAB(end_char) || end_char == '(');
+		could_be_named_action = (end_char == g_delimiter || !end_char || IS_SPACE_OR_TAB(end_char)
+			// Allow If() and While() but something like MsgBox() should always be a function-call:
+			|| (end_char == '(' && (!_tcsicmp(action_name, _T("IF")) || !_tcsicmp(action_name, _T("WHILE")))));
 	}
 	else
 	{
@@ -13154,7 +12991,6 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 			// the program itself to terminate.  Otherwise, it causes us to return from all blocks
 			// and Gosubs (i.e. all the way out of the current subroutine, which was usually triggered
 			// by a hotkey):
-#ifndef _USRDLL
 			if (IS_PERSISTENT)
 				return EARLY_EXIT;  // It's "early" because only the very end of the script is the "normal" exit.
 				// EARLY_EXIT needs to be distinct from FAIL for ExitApp() and AutoExecSection().
@@ -13162,15 +12998,8 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 				// This has been tested and it does yield to the OS the error code indicated in ARG1,
 				// if present (otherwise it returns 0, naturally) as expected:
 				return g_script.ExitApp(EXIT_EXIT, NULL, (int)line->ArgIndexToInt64(0));
-#else
-			return EARLY_RETURN;
-#endif
 		case ACT_EXITAPP: // Unconditional exit.
-#ifdef _USRDLL // HotKeyIt end dll thread and stop
-			return terminateDll();
-#else
 			return g_script.ExitApp(EXIT_EXIT, NULL, (int)line->ArgIndexToInt64(0));
-#endif
 		case ACT_BLOCK_BEGIN:
 			if (line->mAttribute == ATTR_TRUE) // This is the ACT_BLOCK_BEGIN that starts a function's body.
 			{
@@ -14073,7 +13902,7 @@ ResultType Line::PerformLoopFor(ExprTokenType *aResultToken, bool &aContinueMain
 		}
 
 		bool next_returned_true = TokenToBOOL(result_token, TokenIsPureNumeric(result_token));
-		
+
 		// Free any memory or object which may have been returned by Invoke:
 		if (result_token.mem_to_free)
 			free(result_token.mem_to_free);
@@ -14110,6 +13939,8 @@ ResultType Line::PerformLoopFor(ExprTokenType *aResultToken, bool &aContinueMain
 	enumerator.Release();
 	return result; // The script's loop is now over.
 }
+
+
 
 ResultType Line::PerformLoopFilePattern(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
 	, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, LPTSTR aFilePattern)
@@ -14671,15 +14502,15 @@ ResultType Line::PerformLoopReadFile(ExprTokenType *aResultToken, bool &aContinu
 
 	for (;; ++g.mLoopIteration)
 	{ 
-		if (!loop_info.mReadFile->ReadLine(loop_info.mCurrentLine, _countof(loop_info.mCurrentLine)))
+		if (  !(line_length = loop_info.mReadFile->ReadLine(loop_info.mCurrentLine, _countof(loop_info.mCurrentLine) - 1))  ) // -1 to ensure there's room for a null-terminator.
 		{
 			// We want to return OK except in some specific cases handled below (see "break").
 			result = OK;
 			break;
 		}
-		line_length = _tcslen(loop_info.mCurrentLine);
-		if (line_length && loop_info.mCurrentLine[line_length - 1] == '\n') // Remove newlines like FileReadLine does.
-			loop_info.mCurrentLine[--line_length] = '\0';
+		if (loop_info.mCurrentLine[line_length - 1] == '\n') // Remove newlines like FileReadLine does.
+			--line_length;
+		loop_info.mCurrentLine[line_length] = '\0';
 		g.mLoopReadFile = &loop_info;
 		if (mNextLine->mActionType == ACT_BLOCK_BEGIN) // See PerformLoop() for comments about this section.
 			do
@@ -14702,7 +14533,10 @@ ResultType Line::PerformLoopReadFile(ExprTokenType *aResultToken, bool &aContinu
 	}
 
 	if (loop_info.mWriteFile)
+	{
+		loop_info.mWriteFile->Close();
 		delete loop_info.mWriteFile;
+	}
 
 	return result;
 }
