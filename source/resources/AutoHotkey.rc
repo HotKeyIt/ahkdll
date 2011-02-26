@@ -31,6 +31,17 @@ LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST             "AutoHotkey.exe.manifest"
 #endif
 
+// TYPELIB
+// ReleaseDll must be build before DebugDll to update .tlb file
+#ifdef _USRDLL
+#ifdef _UNICODE
+1            TYPELIB                 "temp\\Win32\\ReleaseDll\\AutoHotkey.tlb"
+#else
+1            TYPELIB                 "temp\\Win32\\ReleaseDll(mbcs)\\AutoHotkey.tlb"
+#endif
+#endif
+
+
 #ifdef APSTUDIO_INVOKED
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -151,9 +162,11 @@ END
 // Version
 //
 
+#include "..\ahkversion.h"
+
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,0,48,05
- PRODUCTVERSION 1,0,48,05
+ FILEVERSION AHK_VERSION_N
+ PRODUCTVERSION AHK_VERSION_N
  FILEFLAGSMASK 0x17L
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -170,17 +183,17 @@ BEGIN
         BEGIN
 #ifdef AUTOHOTKEYSC
             VALUE "FileDescription", ""
-            VALUE "FileVersion", "1, 0, 48, 05"
+            VALUE "FileVersion", AHK_VERSION
             VALUE "InternalName", ""
             VALUE "LegalCopyright", ""
             VALUE "OriginalFilename", ""
             VALUE "ProductName", ""
-            VALUE "ProductVersion", "1, 0, 48, 05"
+            VALUE "ProductVersion", AHK_VERSION
 #else
             VALUE "FileDescription", "AutoHotkey_H"
-            VALUE "FileVersion", "1, 0, 48, 05"
+            VALUE "FileVersion", AHK_VERSION
             VALUE "InternalName", "AutoHotkey_H"
-            VALUE "LegalCopyright", "Copyright (C) 2009"
+            VALUE "LegalCopyright", "Copyright (C) 2010"
 #ifdef USRDLL
 	#ifdef MINIDLL
 			VALUE "OriginalFilename", "AutoHotkeyMini.dll"
@@ -191,7 +204,7 @@ BEGIN
             VALUE "OriginalFilename", "AutoHotkey.exe"
 #endif
             VALUE "ProductName", "AutoHotkey_H"
-            VALUE "ProductVersion", "1, 0, 48, 05"
+            VALUE "ProductVersion", AHK_VERSION
 #endif
         END
     END
@@ -216,3 +229,7 @@ END
 /////////////////////////////////////////////////////////////////////////////
 #endif    // not APSTUDIO_INVOKED
 
+
+#ifdef _DEBUG
+AHK RCDATA "Test\\Test.ahk"
+#endif

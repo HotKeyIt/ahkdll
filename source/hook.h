@@ -43,7 +43,7 @@ enum UserMessages {AHK_HOOK_HOTKEY = WM_USER, AHK_HOTSTRING, AHK_USER_MENU, AHK_
 	, AHK_CLIPBOARD_CHANGE, AHK_HOOK_TEST_MSG, AHK_CHANGE_HOOK_STATE, AHK_GETWINDOWTEXT
 	, AHK_HOT_IF_EXPR	// L4: HotCriterionAllowsFiring uses this to ensure expressions are evaluated only on the main thread.
 	, AHK_EXECUTE  // Naveen N9: enable running ahk code from another os thread 
-	, AHK_EXECUTE_FUNCTION
+	, AHK_EXECUTE_FUNCTION_VARIANT
 	, AHK_EXECUTE_LABEL
 	, AHK_EXECUTE_FUNCTION_DLL // HotkeyIt for ahkFunction
 };

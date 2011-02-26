@@ -22,9 +22,9 @@ EXPORT unsigned int addScript(LPTSTR script, int aReplace = 0);
 EXPORT BOOL ahkExec(LPTSTR script);
 #endif
 
-bool callFunc(WPARAM awParam, LPARAM alParam); 
+void callFuncDllVariant(FuncAndToken *aFuncAndToken); 
 void callFuncDll(FuncAndToken *aFuncAndToken); 
-// do not export callFunc, it must be called within script thread
+
 BIF(BIF_FindFunc);
 BIF(BIF_Getvar);
 BIF(BIF_Static) ;
@@ -52,12 +52,12 @@ ResultType terminateDll();
 //COM virtual functions declaration
 BOOL com_ahkPause(LPTSTR aChangeTo);
 unsigned int com_ahkFindLabel(LPTSTR aLabelName);
-LPTSTR com_ahkgetvar(LPTSTR name,unsigned int getVar);
-unsigned int com_ahkassign(LPTSTR name, LPTSTR value);
+// LPTSTR com_ahkgetvar(LPTSTR name,unsigned int getVar);
+// unsigned int com_ahkassign(LPTSTR name, LPTSTR value);
 unsigned int com_ahkExecuteLine(unsigned int line,unsigned int aMode,unsigned int wait);
 BOOL com_ahkLabel(LPTSTR aLabelName, unsigned int nowait);
 unsigned int com_ahkFindFunc(LPTSTR funcname);
-LPTSTR com_ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10);
+// LPTSTR com_ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10);
 unsigned int com_ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10);
 BOOL com_ahkKey(LPTSTR keys);
 #ifndef AUTOHOTKEYSC

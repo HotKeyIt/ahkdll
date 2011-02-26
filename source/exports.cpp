@@ -14,13 +14,13 @@ int returnCount = 0 ;
 //COM virtual functions
 BOOL com_ahkPause(LPTSTR aChangeTo){return ahkPause(aChangeTo);}
 unsigned int com_ahkFindLabel(LPTSTR aLabelName){return ahkFindLabel(aLabelName);}
-LPTSTR com_ahkgetvar(LPTSTR name,unsigned int getVar){return ahkgetvar(name,getVar);}
-unsigned int com_ahkassign(LPTSTR name, LPTSTR value){return ahkassign(name,value);}
+// LPTSTR com_ahkgetvar(LPTSTR name,unsigned int getVar){return ahkgetvar(name,getVar);}
+// unsigned int com_ahkassign(LPTSTR name, LPTSTR value){return ahkassign(name,value);}
 unsigned int com_ahkExecuteLine(unsigned int line,unsigned int aMode,unsigned int wait){return ahkExecuteLine(line,aMode,wait);}
 BOOL com_ahkLabel(LPTSTR aLabelName, unsigned int nowait){return ahkLabel(aLabelName,nowait);}
 unsigned int com_ahkFindFunc(LPTSTR funcname){return ahkFindFunc(funcname);}
-LPTSTR com_ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10){return ahkFunction(func,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10);}
-unsigned int com_ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10){return ahkPostFunction(func,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10);}
+// LPTSTR com_ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10){return ahkFunction(func,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10);}
+// unsigned int com_ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10){return ahkPostFunction(func,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10);}
 BOOL com_ahkKey(LPTSTR keys){return ahkKey(keys);}
 #ifndef AUTOHOTKEYSC
 unsigned int com_addScript(LPTSTR script, int aExecute){return addScript(script,aExecute);}
@@ -619,22 +619,105 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 
 
 
-
-
-
-bool callFunc(WPARAM awParam, LPARAM alParam)
+void AssignVariant(Var &aArg, VARIANT &aVar, bool aRetainVar);
+VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT param2,/*[in,optional]*/ VARIANT param3,/*[in,optional]*/ VARIANT param4,/*[in,optional]*/ VARIANT param5,/*[in,optional]*/ VARIANT param6,/*[in,optional]*/ VARIANT param7,/*[in,optional]*/ VARIANT param8,/*[in,optional]*/ VARIANT param9,/*[in,optional]*/ VARIANT param10, int sendOrPost)
 {
-	Func &func = *(Func *)g_script.mTempFunc ;   
-	if (!INTERRUPTIBLE_IN_EMERGENCY)
-		return false;
+	Func *aFunc = g_script.FindFunc(func) ;
+	if (aFunc)
+	{	
+		// g_script.mTempFunc = aFunc ;
+		// ExprTokenType return_value;
+		if (aFunc->mParamCount > 0 && &param1 != NULL)
+		{
+			// Copy the appropriate values into each of the function's formal parameters.
+			AssignVariant(*aFunc->mParam[0].var, param1, false); // Assign parameter #1
+			if (aFunc->mParamCount > 1  && &param2 != NULL) // Assign parameter #2
+			{
+				// v1.0.38.01: LPARAM is now written out as a DWORD because the majority of system messages
+				// use LPARAM as a pointer or other unsigned value.  This shouldn't affect most scripts because
+				// of the way ATOI64() and ATOU() wrap a negative number back into the unsigned domain for
+				// commands such as PostMessage/SendMessage.
+				AssignVariant(*aFunc->mParam[1].var, param2, false);
+				if (aFunc->mParamCount > 2 && &param3 != NULL) // Assign parameter #3
+				{
+					AssignVariant(*aFunc->mParam[2].var, param3, false);
+					if (aFunc->mParamCount > 3 && &param4 != NULL) // Assign parameter #4
+					{
+						AssignVariant(*aFunc->mParam[3].var, param4, false);
+						if (aFunc->mParamCount > 4 && &param5 != NULL) // Assign parameter #5
+						{
+							AssignVariant(*aFunc->mParam[4].var, param5, false);
+							if (aFunc->mParamCount > 5 && &param6 != NULL) // Assign parameter #6
+							{
+								AssignVariant(*aFunc->mParam[5].var, param6, false);
+								if (aFunc->mParamCount > 6 && &param7 != NULL) // Assign parameter #7
+								{
+									AssignVariant(*aFunc->mParam[6].var, param7, false);
+									if (aFunc->mParamCount > 7 && &param8 != NULL) // Assign parameter #8
+									{
+										AssignVariant(*aFunc->mParam[7].var, param8, false);
+										if (aFunc->mParamCount > 8 && &param9 != NULL) // Assign parameter #9
+										{
+											AssignVariant(*aFunc->mParam[8].var, param9, false);
+											if (aFunc->mParamCount > 9 && &param10 != NULL) // Assign parameter #10
+											{
+												AssignVariant(*aFunc->mParam[9].var, param10, false);
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		
+		FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
+		aFuncAndToken.mFunc = aFunc ;
+		returnCount++ ;
+		if (returnCount > 9)
+			returnCount = 0 ;
 
+		if (sendOrPost == 1)
+		{
+		SendMessage(g_hWnd, AHK_EXECUTE_FUNCTION_VARIANT, (WPARAM)&aFuncAndToken,NULL);
+		return aFuncAndToken.variant_to_return_dll;
+		}
+		else
+		{
+			PostMessage(g_hWnd, AHK_EXECUTE_FUNCTION_VARIANT, (WPARAM)&aFuncAndToken,NULL);
+			VARIANT &r =  aFuncAndToken.variant_to_return_dll;
+			r.vt = VT_NULL ;
+			return r ; 
+		}
+		}
+	FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
+	returnCount++ ;
+
+	VARIANT &r =  aFuncAndToken.variant_to_return_dll;
+	r.vt = VT_NULL ;
+	return r ; 
+	// should return a blank variant
+}
+
+
+void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar);
+
+void callFuncDllVariant(FuncAndToken *aFuncAndToken)
+{
+ 	Func &func =  *(aFuncAndToken->mFunc); 
+	ExprTokenType & aResultToken = aFuncAndToken->mToken ;
+	// Func &func = *(Func *)g_script.mTempFunc ;
+	if (!INTERRUPTIBLE_IN_EMERGENCY)
+		return;
 	if (g_nThreads >= g_MaxThreadsTotal)
 		// Below: Only a subset of ACT_IS_ALWAYS_ALLOWED is done here because:
 		// 1) The omitted action types seem too obscure to grant always-run permission for msg-monitor events.
 		// 2) Reduction in code size.
 		if (g_nThreads >= MAX_THREADS_EMERGENCY // To avoid array overflow, this limit must by obeyed except where otherwise documented.
 			|| func.mJumpToLine->mActionType != ACT_EXITAPP && func.mJumpToLine->mActionType != ACT_RELOAD)
-			return false;
+			return;
 
 	// Need to check if backup is needed in case script explicitly called the function rather than using
 	// it solely as a callback.  UPDATE: And now that max_instances is supported, also need it for that.
@@ -643,7 +726,7 @@ bool callFunc(WPARAM awParam, LPARAM alParam)
 	int var_backup_count; // The number of items in the above array.
 	if (func.mInstances > 0) // Backup is needed.
 		if (!Var::BackupFunctionVars(func, var_backup, var_backup_count)) // Out of memory.
-			return false;
+			return;
 			// Since we're in the middle of processing messages, and since out-of-memory is so rare,
 			// it seems justifiable not to have any error reporting and instead just avoid launching
 			// the new thread.
@@ -655,21 +738,6 @@ bool callFunc(WPARAM awParam, LPARAM alParam)
 	tcslcpy(ErrorLevel_saved, g_ErrorLevel->Contents(), _countof(ErrorLevel_saved));
 	InitNewThread(0, false, true, func.mJumpToLine->mActionType);
 
-	
-	// See ExpandExpression() for detailed comments about the following section.
-	if (func.mParamCount > 0)
-	{
-		// Copy the appropriate values into each of the function's formal parameters.
-		func.mParam[0].var->Assign((LPTSTR )awParam); // Assign parameter #1: wParam
-		if (func.mParamCount > 1) // Assign parameter #2: lParam
-		{
-			// v1.0.38.01: LPARAM is now written out as a DWORD because the majority of system messages
-			// use LPARAM as a pointer or other unsigned value.  This shouldn't affect most scripts because
-			// of the way ATOI64() and ATOU() wrap a negative number back into the unsigned domain for
-			// commands such as PostMessage/SendMessage.
-			func.mParam[1].var->Assign((LPTSTR )alParam);
-		}
-	}
 
 	// v1.0.38.04: Below was added to maximize responsiveness to incoming messages.  The reasoning
 	// is similar to why the same thing is done in MsgSleep() prior to its launch of a thread, so see
@@ -678,22 +746,13 @@ bool callFunc(WPARAM awParam, LPARAM alParam)
 
 
 		DEBUGGER_STACK_PUSH(func.mJumpToLine, func.mName)
+	// ExprTokenType aResultToken;
+	// ExprTokenType &aResultToken = aResultToken_to_return ;
+	func.Call(&aResultToken); // Call the UDF.
+	TokenToVariant(aResultToken, aFuncAndToken->variant_to_return_dll);
 
-	ExprTokenType return_value;
-	func.Call(&return_value); // Call the UDF.
+	DEBUGGER_STACK_POP()
 	
-		DEBUGGER_STACK_POP()
-
-	// Fix for v1.0.47: Must handle return_value BEFORE calling FreeAndRestoreFunctionVars() because return_value
-	// might be the contents of one of the function's local variables (which are about to be free'd).
-/*	bool block_further_processing = *return_value; // No need to check the following because they're implied for *return_value!=0: result != EARLY_EXIT && result != FAIL;
-	if (block_further_processing)
-		aMsgReply = (LPARAM)ATOI64(return_value); // Use 64-bit in case it's an unsigned number greater than 0x7FFFFFFF, in which case this allows it to wrap around to a negative.
-	//else leave aMsgReply uninitialized because we'll be returning false later below, which tells our caller
-	// to ignore aMsgReply.
-*/
-	Var::FreeAndRestoreFunctionVars(func, var_backup, var_backup_count);
 	ResumeUnderlyingThread(ErrorLevel_saved);
-	
-	return 0 ; // block_further_processing; // If false, the caller will ignore aMsgReply and process this message normally. If true, aMsgReply contains the reply the caller should immediately send for this message.
+	return;
 }

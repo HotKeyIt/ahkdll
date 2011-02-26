@@ -582,6 +582,7 @@ struct FuncAndToken {
 	ExprTokenType mToken ;
 	LPTSTR result_to_return_dll;
 	Func * mFunc ;
+	VARIANT variant_to_return_dll;
 };
 
 class Label;                //

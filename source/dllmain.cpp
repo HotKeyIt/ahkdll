@@ -664,21 +664,40 @@ HRESULT __stdcall CoCOMServer::ahkFindLabel(/*in*/VARIANT aLabelName,/*out*/unsi
 	*aLabelPointer = com_ahkFindLabel(Variant2T(aLabelName,buf));
 	return S_OK;
 }
-HRESULT __stdcall CoCOMServer::ahkgetvar(/*in*/VARIANT name,/*[in,optional]*/ VARIANT getVar,/*out*/BSTR* result)
+
+void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar);
+
+HRESULT __stdcall CoCOMServer::ahkgetvar(/*in*/VARIANT name,/*[in,optional]*/ VARIANT getVar,/*out*/VARIANT *result)
 {
 	if (result==NULL)
 		return ERROR_INVALID_PARAMETER;
 	//USES_CONVERSION;
 	TCHAR buf[MAX_INTEGER_SIZE];
-	*result = T2BSTR(com_ahkgetvar(Variant2T(name,buf),Variant2I(getVar)));
-	return S_OK;
+	Var *var;
+	ExprTokenType aToken ;
+	
+	var = g_script.FindVar(Variant2T(name,buf)) ;
+	var->TokenToContents(aToken) ;
+    VariantInit(result);
+   // CComVariant b ;
+	VARIANT b ; 
+	TokenToVariant(aToken, b);
+	return VariantCopy(result, &b) ;
+	// return S_OK ;
+	// return b.Detach(result);
 }
+
+void AssignVariant(Var &aArg, VARIANT &aVar, bool aRetainVar);
+
 HRESULT __stdcall CoCOMServer::ahkassign(/*in*/VARIANT name, /*in*/VARIANT value,/*out*/unsigned int* success)
 {
-	if (success==NULL)
-		return ERROR_INVALID_PARAMETER;
-	TCHAR buf1[MAX_INTEGER_SIZE],buf2[MAX_INTEGER_SIZE];
-	*success = com_ahkassign(Variant2T(name,buf1),Variant2T(value,buf2));
+	 if (success==NULL)
+      return ERROR_INVALID_PARAMETER;
+   TCHAR namebuf[MAX_INTEGER_SIZE];
+   Var *var;
+   if (   !(var = g_script.FindOrAddVar(Variant2T(name,namebuf)))   )
+      return ERROR_INVALID_PARAMETER;  // Realistically should never happen.
+   AssignVariant(*var, value, false) ;
 	return S_OK;
 }
 HRESULT __stdcall CoCOMServer::ahkExecuteLine(/*[in,optional]*/ VARIANT line,/*[in,optional]*/ VARIANT aMode,/*[in,optional]*/ VARIANT wait,/*[out, retval]*/ unsigned int* pLine)
@@ -704,42 +723,31 @@ HRESULT __stdcall CoCOMServer::ahkFindFunc(/*[in]*/ VARIANT FuncName,/*[out, ret
 	*pFunc = com_ahkFindFunc(Variant2T(FuncName,buf));
 	return S_OK;
 }
-HRESULT __stdcall CoCOMServer::ahkFunction(/*[in]*/ VARIANT FuncName,/*[in,optional]*/ VARIANT param1,/*[in,optional]*/ VARIANT param2,/*[in,optional]*/ VARIANT param3,/*[in,optional]*/ VARIANT param4,/*[in,optional]*/ VARIANT param5,/*[in,optional]*/ VARIANT param6,/*[in,optional]*/ VARIANT param7,/*[in,optional]*/ VARIANT param8,/*[in,optional]*/ VARIANT param9,/*[in,optional]*/ VARIANT param10,/*[out, retval]*/ BSTR* returnVal)
+
+VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT param2,/*[in,optional]*/ VARIANT param3,/*[in,optional]*/ VARIANT param4,/*[in,optional]*/ VARIANT param5,/*[in,optional]*/ VARIANT param6,/*[in,optional]*/ VARIANT param7,/*[in,optional]*/ VARIANT param8,/*[in,optional]*/ VARIANT param9,/*[in,optional]*/ VARIANT param10, int sendOrPost);
+HRESULT __stdcall CoCOMServer::ahkFunction(/*[in]*/ VARIANT FuncName,/*[in,optional]*/ VARIANT param1,/*[in,optional]*/ VARIANT param2,/*[in,optional]*/ VARIANT param3,/*[in,optional]*/ VARIANT param4,/*[in,optional]*/ VARIANT param5,/*[in,optional]*/ VARIANT param6,/*[in,optional]*/ VARIANT param7,/*[in,optional]*/ VARIANT param8,/*[in,optional]*/ VARIANT param9,/*[in,optional]*/ VARIANT param10,/*[out, retval]*/ VARIANT* returnVal)
 {
 	if (returnVal==NULL)
 		return ERROR_INVALID_PARAMETER;
-	TCHAR buf[MAX_INTEGER_SIZE],buf1[MAX_INTEGER_SIZE],buf2[MAX_INTEGER_SIZE],buf3[MAX_INTEGER_SIZE],buf4[MAX_INTEGER_SIZE],buf5[MAX_INTEGER_SIZE],buf6[MAX_INTEGER_SIZE],buf7[MAX_INTEGER_SIZE],buf8[MAX_INTEGER_SIZE],buf9[MAX_INTEGER_SIZE],buf10[MAX_INTEGER_SIZE];
-	*returnVal = T2BSTR(com_ahkFunction(Variant2T(FuncName,buf)
-				,param1.vt==VT_ERROR ? 0 : Variant2T(param1,buf1)
-				,param2.vt==VT_ERROR ? 0 : Variant2T(param2,buf2)
-				,param3.vt==VT_ERROR ? 0 : Variant2T(param3,buf3)
-				,param4.vt==VT_ERROR ? 0 : Variant2T(param4,buf4)
-				,param5.vt==VT_ERROR ? 0 : Variant2T(param5,buf5)
-				,param6.vt==VT_ERROR ? 0 : Variant2T(param6,buf6)
-				,param7.vt==VT_ERROR ? 0 : Variant2T(param7,buf7)
-				,param8.vt==VT_ERROR ? 0 : Variant2T(param8,buf8)
-				,param9.vt==VT_ERROR ? 0 : Variant2T(param9,buf9)
-				,param10.vt==VT_ERROR ? 0 : Variant2T(param10,buf10)));
-	return S_OK;
+	TCHAR buf[MAX_INTEGER_SIZE] ;
+	// CComVariant b ;
+	VARIANT b ;
+	b = ahkFunctionVariant(Variant2T(FuncName,buf), param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, 1);
+	 VariantInit(returnVal);
+	return VariantCopy(returnVal, &b) ;
+	 // return b.Detach(returnVal);			
 }
 HRESULT __stdcall CoCOMServer::ahkPostFunction(/*[in]*/ VARIANT FuncName,VARIANT param1,/*[in,optional]*/ VARIANT param2,/*[in,optional]*/ VARIANT param3,/*[in,optional]*/ VARIANT param4,/*[in,optional]*/ VARIANT param5,/*[in,optional]*/ VARIANT param6,/*[in,optional]*/ VARIANT param7,/*[in,optional]*/ VARIANT param8,/*[in,optional]*/ VARIANT param9,/*[in,optional]*/ VARIANT param10,/*[out, retval]*/ unsigned int* returnVal)
 {
-	if (returnVal==NULL)
+  	if (returnVal==NULL)
 		return ERROR_INVALID_PARAMETER;
-	TCHAR buf[MAX_INTEGER_SIZE],buf1[MAX_INTEGER_SIZE],buf2[MAX_INTEGER_SIZE],buf3[MAX_INTEGER_SIZE],buf4[MAX_INTEGER_SIZE],buf5[MAX_INTEGER_SIZE],buf6[MAX_INTEGER_SIZE],buf7[MAX_INTEGER_SIZE],buf8[MAX_INTEGER_SIZE],buf9[MAX_INTEGER_SIZE],buf10[MAX_INTEGER_SIZE];
-	*returnVal = com_ahkPostFunction(Variant2T(FuncName,buf)
-				,param1.vt==VT_ERROR ? 0 : Variant2T(param1,buf1)
-				,param2.vt==VT_ERROR ? 0 : Variant2T(param2,buf2)
-				,param3.vt==VT_ERROR ? 0 : Variant2T(param3,buf3)
-				,param4.vt==VT_ERROR ? 0 : Variant2T(param4,buf4)
-				,param5.vt==VT_ERROR ? 0 : Variant2T(param5,buf5)
-				,param6.vt==VT_ERROR ? 0 : Variant2T(param6,buf6)
-				,param7.vt==VT_ERROR ? 0 : Variant2T(param7,buf7)
-				,param8.vt==VT_ERROR ? 0 : Variant2T(param8,buf8)
-				,param9.vt==VT_ERROR ? 0 : Variant2T(param9,buf9)
-				,param10.vt==VT_ERROR ? 0 : Variant2T(param10,buf10));
-	return S_OK;
+	TCHAR buf[MAX_INTEGER_SIZE] ;
+	// CComVariant b ;
+	VARIANT b ;
+	b = ahkFunctionVariant(Variant2T(FuncName,buf), param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, 0);
+	return 0;		
 }
+
 HRESULT __stdcall CoCOMServer::ahkKey(/*[in]*/ VARIANT name,/*[out, retval]*/ BOOL* success)
 {
 	if (success==NULL)
@@ -956,7 +964,9 @@ STDAPI DllGetClassObject(const CLSID& clsid,
 		return CLASS_E_CLASSNOTAVAILABLE ;
 	}
 	TCHAR buf[MAX_PATH];
-	if (GetModuleFileName(g_hInstance, buf, MAX_PATH))
+
+	if (0 && GetModuleFileName(g_hInstance, buf, MAX_PATH))  // for debugging com 
+//	if (GetModuleFileName(g_hInstance, buf, MAX_PATH))
 	{
 		FILE *fp;
 		unsigned char *data=NULL;
