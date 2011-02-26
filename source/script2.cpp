@@ -5506,8 +5506,8 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 		g_script.mTempLabel = (Label *)wParam ;
 		g_script.mTempLabel->Execute();
 		return 0;
-	case AHK_EXECUTE_FUNCTION: 
-		callFunc(wParam, lParam);
+	case AHK_EXECUTE_FUNCTION_VARIANT: 
+		callFuncDllVariant((FuncAndToken *) wParam);
 		return 0;
 	case AHK_EXECUTE_FUNCTION_DLL: 
 		callFuncDll((FuncAndToken *) wParam);
@@ -8917,18 +8917,12 @@ ResultType Line::FileSelectFile(LPTSTR aOptions, LPTSTR aWorkingDir, LPTSTR aGre
 
 ResultType Line::FileCreateDir(LPTSTR aDirSpec)
 {
-	g_ErrorLevel->Assign(ERRORLEVEL_ERROR); // Set default ErrorLevel.
 	if (!aDirSpec || !*aDirSpec)
-		return OK;  // Return OK because g_ErrorLevel tells the story.
+		return AssignErrorLevels(TRUE, ERROR_INVALID_PARAMETER);
 
 	DWORD attr = GetFileAttributes(aDirSpec);
 	if (attr != 0xFFFFFFFF)  // aDirSpec already exists.
-	{
-		if (attr & FILE_ATTRIBUTE_DIRECTORY)
-			g_ErrorLevel->Assign(ERRORLEVEL_NONE);  // Indicate success since it already exists as a dir.
-		// else leave as failure, since aDirSpec exists as a file, not a dir.
-		return OK;
-	}
+		return AssignErrorLevels(!(attr & FILE_ATTRIBUTE_DIRECTORY), ERROR_ALREADY_EXISTS); // Indicate success if it already exists as a dir.
 
 	// If it has a backslash, make sure all its parent directories exist before we attempt
 	// to create this directory:
