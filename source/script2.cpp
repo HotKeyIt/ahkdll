@@ -417,10 +417,17 @@ ResultType Line::Splash(LPTSTR aOptions, LPTSTR aSubText, LPTSTR aMainText, LPTS
 	// for later font calculations:
 	if (aSplashImage && *image_filename && splash.object_height)
 	{
-		splash.pic_bmp = LoadPicture(image_filename,
-			splash.object_width == COORD_UNSPECIFIED ? 0 : splash.object_width,
-			splash.object_height == COORD_UNSPECIFIED ? 0 : splash.object_height,
-			splash.pic_type, 0, true);
+		for (bool use_gdi_plus = false; ; use_gdi_plus = true)
+		{
+			splash.pic_bmp = LoadPicture(image_filename,
+				splash.object_width == COORD_UNSPECIFIED ? 0 : splash.object_width,
+				splash.object_height == COORD_UNSPECIFIED ? 0 : splash.object_height,
+				splash.pic_type, 0, use_gdi_plus);
+			if (splash.pic_bmp || use_gdi_plus)
+				break;
+			// Re-attempt with GDI+. The first attempt is made without it for backward compatibility.
+			// In particular, GDI+ causes some issues with WinSet TransColor on Windows XP.
+		}
 		if (splash.pic_bmp && (splash.object_height < 0 || splash.object_width < 0))
 		{
 			HBITMAP hbmp_to_measure = NULL;
@@ -5411,7 +5418,7 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 				{
 					HDC hdc = CreateCompatibleDC((HDC)wParam);
 					HBITMAP hbmpOld = (HBITMAP)SelectObject(hdc, splash.pic_bmp);
-					BitBlt((HDC)wParam, splash.margin_x, ypos, splash.object_width, splash.object_width, hdc, 0, 0, SRCCOPY);
+					BitBlt((HDC)wParam, splash.margin_x, ypos, splash.object_width, splash.object_height, hdc, 0, 0, SRCCOPY);
 					SelectObject(hdc, hbmpOld);
 					DeleteDC(hdc);
 				}
@@ -5515,52 +5522,14 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 #ifndef MINIDLL
 	case WM_MEASUREITEM: // L17: Measure menu icon. Not used on Windows Vista or later.
 		if (hWnd == g_hWnd && wParam == 0 && !g_os.IsWinVistaOrLater())
-		{
-			LPMEASUREITEMSTRUCT measure_item_struct = (LPMEASUREITEMSTRUCT)lParam;
-
-			UserMenuItem *menu_item = g_script.FindMenuItemByID(measure_item_struct->itemID);
-			if (!menu_item) // L26: Check if the menu item is one with a submenu.
-				menu_item = g_script.FindMenuItemBySubmenu((HMENU)measure_item_struct->itemID);
-
-			if (menu_item && menu_item->mIcon)
-			{
-				BOOL size_is_valid = FALSE;
-				ICONINFO icon_info;
-				if (GetIconInfo(menu_item->mIcon, &icon_info))
-				{
-					BITMAP icon_bitmap;
-					if (GetObject(icon_info.hbmColor, sizeof(BITMAP), &icon_bitmap))
-					{
-						// Return size of icon.
-						measure_item_struct->itemWidth = icon_bitmap.bmWidth;
-						measure_item_struct->itemHeight = icon_bitmap.bmHeight;
-						size_is_valid = TRUE;
-					}
-					DeleteObject(icon_info.hbmColor);
-					DeleteObject(icon_info.hbmMask);
-				}
-				return size_is_valid;
-			}
-		}
+			if (UserMenu::OwnerMeasureItem((LPMEASUREITEMSTRUCT)lParam))
+				return TRUE;
 		break;
 
 	case WM_DRAWITEM: // L17: Draw menu icon. Not used on Windows Vista or later.
 		if (hWnd == g_hWnd && wParam == 0 && !g_os.IsWinVistaOrLater())
-		{
-			LPDRAWITEMSTRUCT draw_item_struct = (LPDRAWITEMSTRUCT)lParam;
-
-			UserMenuItem *menu_item = g_script.FindMenuItemByID(draw_item_struct->itemID);
-			if (!menu_item) // L26: Check if the menu item is one with a submenu.
-				menu_item = g_script.FindMenuItemBySubmenu((HMENU)draw_item_struct->itemID);
-
-			if (menu_item && menu_item->mIcon)
-			{
-				// Draw icon at actual size at requested position.
-				DrawIconEx(draw_item_struct->hDC
-							, draw_item_struct->rcItem.left, draw_item_struct->rcItem.top
-							, menu_item->mIcon, 0, 0, 0, NULL, DI_NORMAL);
-			}
-		}
+			if (UserMenu::OwnerDrawItem((LPDRAWITEMSTRUCT)lParam))
+				return TRUE;
 		break;
 
 	case WM_ENTERMENULOOP:
@@ -12596,7 +12565,17 @@ int ConvertDllArgTypes(LPTSTR aBuf, DYNAPARM *aDynaParam)
 	return arg_count;
 }
 
-
+bool IsDllArgTypeName(LPTSTR name)
+// Test whether given name is a valid DllCall arg type (used by Script::MaybeWarnLocalSameAsGlobal).
+{
+	LPTSTR names[] = { name, NULL };
+	DYNAPARM param;
+	// An alternate method using an array of strings and tcslicmp in a loop benchmarked
+	// slightly faster than this, but didn't seem worth the extra code size. This should
+	// be more maintainable and is guaranteed to be consistent with what DllCall accepts.
+	ConvertDllArgType(names, param);
+	return param.type != DLL_ARG_INVALID;
+}
 
 
 void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free) // L31: Contains code extracted from BIF_DllCall for reuse in ExpressionToPostfix.
@@ -12746,7 +12725,7 @@ IObject *DynaToken::Create(ExprTokenType *aParam[], int aParamCount)
 		LPTSTR return_type_string[1];
 		if (token.symbol == SYM_VAR) // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
 		{
-			return_type_string[0] = token.var->Contents();
+			return_type_string[0] = token.var->Contents(TRUE,TRUE);
 		}
 		else
 		{
@@ -13437,7 +13416,7 @@ void BIF_DllCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPara
 		LPTSTR return_type_string[2];
 		if (token.symbol == SYM_VAR) // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
 		{
-			return_type_string[0] = token.var->Contents();
+			return_type_string[0] = token.var->Contents(TRUE, TRUE);	
 			return_type_string[1] = token.var->mName; // v1.0.33.01: Improve convenience by falling back to the variable's name if the contents are not appropriate.
 		}
 		else
@@ -13529,7 +13508,7 @@ has_valid_return_type:
 		// Otherwise, this arg's type-name is a string as it should be, so retrieve it:
 		if (aParam[i]->symbol == SYM_VAR) // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
 		{
-			arg_type_string[0] = aParam[i]->var->Contents();
+			arg_type_string[0] = aParam[i]->var->Contents(TRUE, TRUE);
 			arg_type_string[1] = aParam[i]->var->mName;
 			// v1.0.33.01: arg_type_string[1] improves convenience by falling back to the variable's name
 			// if the contents are not appropriate.  In other words, both Int and "Int" are treated the same.
@@ -13934,7 +13913,7 @@ void BIF_StrLen(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParam
 	// Loadtime validation has ensured that there's exactly one actual parameter.
 	// Calling Length() is always valid for SYM_VAR because SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
 	aResultToken.value_int64 = (aParam[0]->symbol == SYM_VAR)
-		? aParam[0]->var->Length()
+		? (aParam[0]->var->MaybeWarnUninitialized(), aParam[0]->var->Length())
 		: _tcslen(TokenToString(*aParam[0], aResultToken.buf));  // Allow StrLen(numeric_expr) for flexibility.
 }
 
@@ -14886,11 +14865,33 @@ void RegExReplace(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 				// at the same position.  But since we're here, it wasn't able to find such a match.  So just copy
 				// the current character over literally then advance to the next character to resume normal searching.
 				empty_string_is_not_a_match = 0; // Reset so that the next iteration starts off with the normal matching method.
+#ifdef UNICODE
+				// Need to avoid chopping a Unicode character into pieces. Further complicating this is the
+				// fact that the number of UTF-8 code units may differ from the number of UTF-16 code units.
+				WCHAR c = haystack_pos[0];
+				if (IS_SURROGATE_PAIR(c, haystack_pos[1])) // i.e. one supplementary character.
+				{
+					result[result_length++] = c;
+					result[result_length++] = haystack_pos[1];
+					aStartingOffset += 2; // Supplementary characters are in the range U+010000 to U+10FFFF,
+					starting_offset += 4; // which translates to four UTF-8 bytes.
+					continue;
+				}
+				else
+				{
+					// Since this isn't a surrogate pair, it's a code point in the range U+0000 to U+FFFF.
+					// Copy and advance one char in the original haystack (below) and the corresponding
+					// number of code units in the UTF-8 haystack.
+					if (c >= 0x800)
+						starting_offset += 3;
+					else if (c >= 0x80)
+						starting_offset += 2;
+					else
+						starting_offset += 1;
+				}
+#endif
 				result[result_length++] = *haystack_pos; // This can't overflow because the size calculations in a previous iteration reserved 3 bytes: 1 for this character, 1 for the possible LF that follows CR, and 1 for the terminator.
 				++aStartingOffset; // Advance to next candidate section of haystack.
-#ifdef UNICODE
-				++starting_offset; // Keep in sync.
-#endif
 				// v1.0.46.06: This following section was added to avoid finding a match between a CR and LF
 				// when PCRE_NEWLINE_ANY mode is in effect.  The fact that this is the only change for
 				// PCRE_NEWLINE_ANY relies on the belief that any pattern that matches the empty string in between
@@ -15614,6 +15615,17 @@ void BIF_NumPut(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParam
 	if (target < 1024 // Basic sanity check to catch incoming raw addresses that are zero or blank.
 		|| target_token.symbol == SYM_VAR && aResultToken.value_int64 > (INT_PTR)right_side_bound) // i.e. it's ok if target+size==right_side_bound because the last byte to be read is actually at target+size-1. In other words, the position of the last possible terminator within the variable's capacity is considered an allowable address.
 	{
+		if (target_token.symbol == SYM_VAR)
+		{
+			// Since target_token is a var, maybe the target is out of bounds because the var
+			// hasn't been initialized (i.e. it has zero capacity).  Note that if a local var
+			// has been given semi-permanent memory in a previous call to the function, the
+			// check above might not catch it and we won't get an "uninitialized var" warning.
+			// However, for that to happen the script must use VarSetCapacity that time but
+			// not this time, which seems too rare to justify checking this every time.
+			target_token.var->MaybeWarnUninitialized();
+		}
+
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
 		return;
@@ -16042,7 +16054,14 @@ void BIF_VarSetCapacity(ExprTokenType &aResultToken, ExprTokenType *aParam[], in
 			else // ALLOC_SIMPLE, due to its nature, will not actually be freed, which is documented.
 				var.Free();
 		} // if (aParamCount > 1)
-		//else the var is not altered; instead, the current capacity is reported, which seems more intuitive/useful than having it do a Free().
+		else
+		{
+			// RequestedCapacity was omitted, so the var is not altered; instead, the current capacity
+			// is reported, which seems more intuitive/useful than having it do a Free(). In this case
+			// it's an input var rather than an output var, so check if it has been initialized:
+			var.MaybeWarnUninitialized();
+		}
+
 		if (aResultToken.value_int64 = var.ByteCapacity()) // Don't subtract 1 here in lieu doing it below (avoids underflow).
 			aResultToken.value_int64 -= sizeof(TCHAR); // Omit the room for the zero terminator since script capacity is defined as length vs. size.
 	} // (aParam[0]->symbol == SYM_VAR)
@@ -16820,7 +16839,7 @@ void BIF_RegisterCallback(ExprTokenType &aResultToken, ExprTokenType *aParam[], 
 	LPTSTR options = (aParamCount < 2) ? _T("") : TokenToString(*aParam[1]);
 
 	int actual_param_count;
-	if (aParamCount > 2 && !TokenIsEmptyString(*aParam[2])) // A parameter count was specified.
+	if (aParamCount > 2 && !TokenIsEmptyString(*aParam[2], TRUE)) // A parameter count was specified. Pass TRUE to warn if aParam[2] is an uninitialized var.
 	{
 		actual_param_count = (int)TokenToInt64(*aParam[2]);
 		if (   actual_param_count > func->mParamCount    // The function doesn't have enough formals to cover the specified number of actuals.
@@ -18458,7 +18477,10 @@ BOOL LegacyVarToBOOL(Var &aVar)
 // For comments see LegacyResultToBOOL().
 {
 	if (!aVar.HasContents()) // Must be checked first because otherwise IsPureNumeric() would consider "" to be non-numeric and thus TRUE.  For performance, it also exploits the binary number cache.
+	{
+		aVar.MaybeWarnUninitialized();
 		return FALSE;
+	}
 	switch (aVar.IsNonBlankIntegerOrFloat()) // See comments in LegacyResultToBOOL().
 	{
 	case PURE_INTEGER: return aVar.ToInt64(TRUE) != 0;
@@ -18506,6 +18528,14 @@ SymbolType TokenIsPureNumeric(ExprTokenType &aToken)
 }
 
 
+SymbolType TokenIsPureNumeric(ExprTokenType &aToken, BOOL aNoWarnUninitializedVar)
+{
+	if (aNoWarnUninitializedVar && aToken.symbol == SYM_VAR && aToken.var->IsUninitializedNormalVar())
+		return PURE_NOT_NUMERIC;
+
+	return TokenIsPureNumeric(aToken);
+}
+
 
 BOOL TokenIsEmptyString(ExprTokenType &aToken) // L31
 {
@@ -18521,6 +18551,14 @@ BOOL TokenIsEmptyString(ExprTokenType &aToken) // L31
 	}
 }
 
+
+BOOL TokenIsEmptyString(ExprTokenType &aToken, BOOL aWarnUninitializedVar)
+{
+	if (aWarnUninitializedVar && aToken.symbol == SYM_VAR)
+		aToken.var->MaybeWarnUninitialized();
+
+	return TokenIsEmptyString(aToken);
+}
 
 
 __int64 TokenToInt64(ExprTokenType &aToken, BOOL aIsPureInteger)
@@ -18669,8 +18707,15 @@ IObject *TokenToObject(ExprTokenType &aToken)
 {
 	if (aToken.symbol == SYM_OBJECT)
 		return aToken.object;
-	if (aToken.symbol == SYM_VAR && aToken.var->HasObject())
-		return aToken.var->Object();
+	
+	if (aToken.symbol == SYM_VAR)
+	{
+		if (aToken.var->HasObject())
+			return aToken.var->Object();
+
+		aToken.var->MaybeWarnUninitialized();
+	}
+
 	return NULL;
 }
 

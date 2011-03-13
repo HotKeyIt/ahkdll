@@ -36,7 +36,7 @@ BIF(BIF_Static)
 		Var *var = aParam[0]->var;
 		if (var->mType == VAR_ALIAS)
 			var = var->mAliasFor;
-		var->mAttrib |= VAR_ATTRIB_STATIC;
+		var->mAttrib |= VAR_LOCAL_STATIC;
 	}
 }
 

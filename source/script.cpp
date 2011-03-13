@@ -1337,7 +1337,7 @@ _T("; keystrokes and mouse clicks.  It also explains more about hotkeys.\n")
 		// a separate field within the CreateProcess() and ShellExecute() structures:
 		sntprintf(buf, _countof(buf), _T("\"%s\""), mFileSpec);
 		if (!ActionExec(_T("edit"), buf, mFileDir, false))
-			if (!ActionExec(_T("Notepad.exe"), buf, mFileDir, false))
+			if (!ActionExec(_T("notepad.exe"), buf, mFileDir, false))
 			{
 				MsgBox(_T("Can't open script.")); // Short msg since so rare.
 				return LOADING_FAILED;
@@ -1413,6 +1413,24 @@ _T("; keystrokes and mouse clicks.  It also explains more about hotkeys.\n")
 		mLastStaticLine->mNextLine = mFirstLine;
 		mFirstLine->mPrevLine = mLastStaticLine;
 		mFirstLine = mFirstStaticLine;
+	}
+
+	if (g_Warn_LocalSameAsGlobal)
+	{
+		// Scan all "automatic" local vars and warn the user if there are any with the same
+		// name as a global variable, since that would probably indicate a missing declaration:
+		int i, j;
+		Func *func;
+		for (i = 0; i < mFuncCount; ++i)
+		{
+			if (!(func = mFunc[i])->mIsBuiltIn)
+			{
+				for (j = 0; j < func->mVarCount; ++j)
+					MaybeWarnLocalSameAsGlobal(func, func->mVar[j]);
+				for (j = 0; j < func->mLazyVarCount; ++j)
+					MaybeWarnLocalSameAsGlobal(func, func->mLazyVar[j]);
+			}
+		}
 	}
 
 #ifndef AUTOHOTKEYSC
@@ -4682,6 +4700,64 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 			return ScriptError(parameter ? ERR_PARAM1_INVALID : ERR_PARAM1_REQUIRED, aBuf);
 	}
 
+	if (IS_DIRECTIVE_MATCH(_T("#Warn")))
+	{
+		if (!parameter)
+			parameter = _T("All");
+
+		LPTSTR param1_end = _tcschr(parameter, g_delimiter);
+		size_t param1_length = -1;
+		LPTSTR param2 = _T("");
+		if (param1_end)
+		{
+			param2 = omit_leading_whitespace(param1_end + 1);
+			param1_end = omit_trailing_whitespace(parameter, param1_end - 1);
+			param1_length = param1_end - parameter + 1;
+		}
+
+		#define IS_PARAM1_MATCH(value) (!tcslicmp(parameter, value, param1_length))
+
+		WarnType warnType;
+		if (IS_PARAM1_MATCH(_T("All")) || !param1_length)
+			warnType = WARN_ALL;
+		else if (IS_PARAM1_MATCH(_T("UseUnsetLocal")))
+			warnType = WARN_USE_UNSET_LOCAL;
+		else if (IS_PARAM1_MATCH(_T("UseUnsetGlobal")))
+			warnType = WARN_USE_UNSET_GLOBAL;
+		else if (IS_PARAM1_MATCH(_T("UseEnv")))
+			warnType = WARN_USE_ENV;
+		else if (IS_PARAM1_MATCH(_T("LocalSameAsGlobal")))
+			warnType = WARN_LOCAL_SAME_AS_GLOBAL;
+		else
+			return ScriptError(ERR_PARAM1_INVALID, aBuf);
+
+		WarnMode warnMode;
+		if (!*param2)
+			warnMode = WARNMODE_MSGBOX;	// omitted mode parameter implies "MsgBox" mode
+		else if (!_tcsicmp(param2, _T("MsgBox")))
+			warnMode = WARNMODE_MSGBOX;
+		else if (!_tcsicmp(param2, _T("OutputDebug")))
+			warnMode = WARNMODE_OUTPUTDEBUG;
+		else if (!_tcsicmp(param2, _T("Off")))
+			warnMode = WARNMODE_OFF;
+		else
+			return ScriptError(ERR_PARAM2_INVALID, aBuf);
+
+		if (warnType == WARN_USE_UNSET_LOCAL || warnType == WARN_ALL)
+			g_Warn_UseUnsetLocal = warnMode;
+
+		if (warnType == WARN_USE_UNSET_GLOBAL || warnType == WARN_ALL)
+			g_Warn_UseUnsetGlobal = warnMode;
+
+		if (warnType == WARN_USE_ENV || warnType == WARN_ALL)
+			g_Warn_UseEnv = warnMode;
+
+		if (warnType == WARN_LOCAL_SAME_AS_GLOBAL || warnType == WARN_ALL)
+			g_Warn_LocalSameAsGlobal = warnMode;
+
+		return CONDITION_TRUE;
+	}
+
 	// Otherwise, report that this line isn't a directive:
 	return CONDITION_FALSE;
 }
@@ -5014,9 +5090,12 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType,
 				if (declare_type == VAR_DECLARE_STATIC)
 					var->ConvertToStatic();
 				else if (declare_type == VAR_DECLARE_LOCAL && g->CurrentFunc->mDefaultVarType == VAR_DECLARE_STATIC) // v1.0.48: Lexikos.
-					// For explicitly-declared locals, remove VAR_ATTRIB_STATIC because AddVar() earlier set it
+					// For explicitly-declared locals, remove VAR_LOCAL_STATIC because AddVar() earlier set it
 					// as a default due to assume-static mode.
 					var->ConvertToNonStatic();
+
+				if (declare_type != VAR_DECLARE_GLOBAL)	// i.e. local or static.
+					var->MarkLocalDeclared();
 
 				item_end = omit_leading_whitespace(item_end); // Move up to the next comma, assignment-op, or '\0'.
 
@@ -8411,7 +8490,7 @@ ResultType Script::DefineFunc(LPTSTR aBuf, Var *aFuncExceptionVar[])
 		// new function's mDefaultVarType is always VAR_DECLARE_NONE at this early stage of its creation:
 		if (this_param.var = FindVar(param_start, param_length, &insert_pos))  // Assign.
 			return ScriptError(_T("Duplicate parameter."), param_start);
-		if (   !(this_param.var = AddVar(param_start, param_length, insert_pos, 2))   ) // Pass 2 as last parameter to mean "it's a local but more specifically a function's parameter".
+		if (   !(this_param.var = AddVar(param_start, param_length, insert_pos, VAR_LOCAL_FUNCPARAM | VAR_LOCAL_DECLARED))   )	// Pass VAR_LOCAL_FUNCPARAM as last parameter to mean "it's a local but more specifically a function's parameter".
 			return FAIL; // It already displayed the error, including attempts to have reserved names as parameter names.
 		
 		this_param.default_type = PARAM_DEFAULT_NONE;  // Set default.
@@ -9654,7 +9733,7 @@ Var *Script::FindOrAddVar(LPTSTR aVarName, size_t aVarNameLength, int aAlwaysUse
 		return var;
 	// Otherwise, no match found, so create a new var.  This will return NULL if there was a problem,
 	// in which case AddVar() will already have displayed the error:
-	return AddVar(aVarName, aVarNameLength, insert_pos, is_local);
+	return AddVar(aVarName, aVarNameLength, insert_pos, is_local ? VAR_LOCAL : FALSE);
 }
 
 
@@ -9857,12 +9936,11 @@ Var *Script::FindVar(LPTSTR aVarName, size_t aVarNameLength, int *apInsertPos, i
 
 Var *Script::AddVar(LPTSTR aVarName, size_t aVarNameLength, int aInsertPos, int aIsLocal)
 // Returns the address of the new variable or NULL on failure.
-// Caller must ensure that g->CurrentFunc!=NULL whenever aIsLocal==true.
+// Caller must ensure that g->CurrentFunc!=NULL whenever aIsLocal!=0.
 // Caller must ensure that aVarName isn't NULL and that this isn't a duplicate variable name.
 // In addition, it has provided aInsertPos, which is the insertion point so that the list stays sorted.
 // Finally, aIsLocal has been provided to indicate which list, global or local, should receive this
-// new variable.  aIsLocal is normally 0 or 1 (boolean), but it may be 2 to indicate "it's a local AND a
-// function's parameter".
+// new variable, as well as the type of local variable.  (See the declaration of VAR_LOCAL etc.)
 {
 	if (!*aVarName) // Should never happen, so just silently indicate failure.
 		return NULL;
@@ -9897,9 +9975,9 @@ Var *Script::AddVar(LPTSTR aVarName, size_t aVarNameLength, int aInsertPos, int 
 	void *var_type = GetVarType(var_name);
 	if (aIsLocal && (var_type != (void *)VAR_NORMAL || !_tcsicmp(var_name, _T("ErrorLevel")))) // Attempt to create built-in variable as local.
 	{
-		if (aIsLocal == 1) // It's not a UDF's parameter, so fall back to the global built-in variable of this name rather than displaying an error.
+		if (  !(aIsLocal & VAR_LOCAL_FUNCPARAM)  ) // It's not a UDF's parameter, so fall back to the global built-in variable of this name rather than displaying an error.
 			return FindOrAddVar(var_name, aVarNameLength, ALWAYS_USE_GLOBAL); // Force find-or-create of global.
-		else // aIsLocal == 2, which means "this is a local variable and a function's parameter".
+		else // (aIsLocal & VAR_LOCAL_FUNCPARAM), which means "this is a local variable and a function's parameter".
 		{
 			ScriptError(_T("Illegal parameter name."), aVarName); // Short message since so rare.
 			return NULL;
@@ -9913,17 +9991,21 @@ Var *Script::AddVar(LPTSTR aVarName, size_t aVarNameLength, int aInsertPos, int 
 		// to bother varying the error message to include ERR_ABORT if this occurs during runtime.
 		return NULL;
 
-	Var *the_new_var = new Var(new_name, var_type, aIsLocal != 0); // , aAttrib);
+	// Below specifically tests for VAR_LOCAL and excludes other non-zero values/flags:
+	//   VAR_LOCAL_FUNCPARAM should not be made static.
+	//   VAR_LOCAL_DECLARED indicates mDefaultVarType is irrelevant.
+	//   VAR_LOCAL_STATIC is already static.
+	if (aIsLocal == VAR_LOCAL && g->CurrentFunc->mDefaultVarType == VAR_DECLARE_STATIC)
+		// v1.0.48: Lexikos: Current function is assume-static, so set static attribute.
+		// This will be overwritten (again) if this variable is being explicitly declared "local".
+		aIsLocal |= VAR_LOCAL_STATIC;
+
+	Var *the_new_var = new Var(new_name, var_type, aIsLocal);
 	if (the_new_var == NULL)
 	{
 		ScriptError(ERR_OUTOFMEM);
 		return NULL;
 	}
-
-	if (aIsLocal == 1 && g->CurrentFunc->mDefaultVarType == VAR_DECLARE_STATIC)
-		// v1.0.48: Lexikos: Current function is assume-static, so set static attribute.
-		// This will be overwritten (again) if this variable is being explicitly declared "local".
-		the_new_var->ConvertToStatic();
 
 	// If there's a lazy var list, aInsertPos provided by the caller is for it, so this new variable
 	// always gets inserted into that list because there's always room for one more (because the
@@ -11398,7 +11480,21 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 					if (   !(infix[infix_count].marker = SimpleHeap::Malloc(cp, op_end - cp - 1))   ) // -1 to omit the ending quote.  cp was already adjusted to omit the starting quote.
 						return LineError(ERR_OUTOFMEM);
 					StrReplace(infix[infix_count].marker, _T("\"\""), _T("\""), SCS_SENSITIVE); // Resolve each "" into a single ".  Consequently, a little bit of memory in "marker" might be wasted, but it doesn't seem worth the code size to compensate for this.
-					cp = op_end; // Have the loop process whatever lies at op_end and beyond.
+					cp = omit_leading_whitespace(op_end); // Have the loop process whatever lies at op_end and beyond.
+					
+					if (*cp && _tcschr(_T("+-*&~!"), *cp) && cp[1] != '=' && (cp[1] != '&' || *cp != '&'))
+					{
+						// The symbol following this literal string is either a unary operator, or a
+						// binary operator for which literal strings are not valid input.  Instead of
+						// treating it as a syntax error (which may be difficult for the user to see),
+						// we will insert a concat operator and allow the symbol to be interpreted as
+						// a unary operator.  The most common cases where this helps are:
+						//	MsgBox % "var's address is " &var
+						//	MsgBox % "counter is now " ++var
+						if (infix_count > MAX_TOKENS - 2) // -2 to ensure room for this operator and the operand further below.
+							return LineError(ERR_EXPR_TOO_LONG);
+						infix[++infix_count].symbol = SYM_CONCAT;
+					}
 					continue; // Continue vs. break to avoid the ++cp at the bottom. Above has already set cp to be the character after this literal string's close-quote.
 
 				default: // NUMERIC-LITERAL, DOUBLE-DEREF, RELATIONAL OPERATOR SUCH AS "NOT", OR UNRECOGNIZED SYMBOL.
@@ -12998,8 +13094,10 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 				// This has been tested and it does yield to the OS the error code indicated in ARG1,
 				// if present (otherwise it returns 0, naturally) as expected:
 				return g_script.ExitApp(EXIT_EXIT, NULL, (int)line->ArgIndexToInt64(0));
+
 		case ACT_EXITAPP: // Unconditional exit.
 			return g_script.ExitApp(EXIT_EXIT, NULL, (int)line->ArgIndexToInt64(0));
+
 		case ACT_BLOCK_BEGIN:
 			if (line->mAttribute == ATTR_TRUE) // This is the ACT_BLOCK_BEGIN that starts a function's body.
 			{
@@ -13506,8 +13604,10 @@ ResultType Line::EvaluateHotCriterionExpression(LPTSTR aHotkeyName)
 
 #ifndef MINIDLL
 	// Update A_ThisHotkey, useful if #If calls a function to do its dirty work.
-	LPTSTR prior_hotkey_name = g_script.mThisHotkeyName;
-	DWORD prior_hotkey_time = g_script.mThisHotkeyStartTime;
+	LPTSTR prior_hotkey_name[] = { g_script.mThisHotkeyName, g_script.mPriorHotkeyName };
+	DWORD prior_hotkey_time[] = { g_script.mThisHotkeyStartTime, g_script.mPriorHotkeyStartTime };
+	g_script.mPriorHotkeyName = g_script.mThisHotkeyName;			// For consistency
+	g_script.mPriorHotkeyStartTime = g_script.mThisHotkeyStartTime; //
 	g_script.mThisHotkeyName = aHotkeyName;
 	g_script.mThisHotkeyStartTime = // Updated for consistency.
 	g_script.mLastScriptRest = g_script.mLastPeekTime = GetTickCount();
@@ -13519,9 +13619,12 @@ ResultType Line::EvaluateHotCriterionExpression(LPTSTR aHotkeyName)
 
 	// A_ThisHotkey must be restored else A_PriorHotkey will get an incorrect value later.
 #ifndef MINIDLL
-	g_script.mThisHotkeyName = prior_hotkey_name;
-	g_script.mThisHotkeyStartTime = prior_hotkey_time;
+	g_script.mThisHotkeyName = prior_hotkey_name[0];
+	g_script.mThisHotkeyStartTime = prior_hotkey_time[0];
+	g_script.mPriorHotkeyName = prior_hotkey_name[1];
+	g_script.mPriorHotkeyStartTime = prior_hotkey_time[1];
 #endif
+
 	DEBUGGER_STACK_POP()
 	ResumeUnderlyingThread(ErrorLevel_saved);
 
@@ -14875,7 +14978,7 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 
 	case ACT_STRINGLOWER:
 	case ACT_STRINGUPPER:
-		contents = output_var->Contents(); // Set default.
+		contents = output_var->Contents(TRUE, TRUE); // Set default.	
 		if (contents != ARG2 || output_var->Type() != VAR_NORMAL) // It's compared this way in case ByRef/aliases are involved.  This will detect even them.
 		{
 			// Clipboard is involved and/or source != dest.  Do it the more comprehensive way.
@@ -16526,7 +16629,8 @@ ResultType Line::LineError(LPCTSTR aErrorText, ResultType aErrorType, LPCTSTR aE
 		// change the error lexer of Scite recognizes this line as a Microsoft error message and it can be
 		// used to jump to that line."
 		#define STD_ERROR_FORMAT _T("%s (%d) : ==> %s\n")
-		ERR_PRINT(STD_ERROR_FORMAT, sSourceFile[mFileIndex], mLineNumber, aErrorText); // printf() does not signifantly increase the size of the EXE, probably because it shares most of the same code with sprintf(), etc.
+		#define STD_WARNING_FORMAT _T("%s (%d) : ==> Warning: %s\n")
+		ERR_PRINT(aErrorType == WARN ? STD_WARNING_FORMAT : STD_ERROR_FORMAT, sSourceFile[mFileIndex], mLineNumber, aErrorText); // printf() does not signifantly increase the size of the EXE, probably because it shares most of the same code with sprintf(), etc.
 		if (*aExtraInfo)
 			ERR_PRINT(_T("     Specifically: %s\n"), aExtraInfo);
 	}
@@ -16648,6 +16752,106 @@ ResultType Script::ScriptError(LPCTSTR aErrorText, LPCTSTR aExtraInfo) //, Resul
 		MsgBox(buf);
 	}
 	return FAIL; // See above for why it's better to return FAIL than CRITICAL_ERROR.
+}
+
+
+
+void Script::ScriptWarning(WarnMode warnMode, LPCTSTR aWarningText, LPCTSTR aExtraInfo, Line *line)
+{
+	if (warnMode == WARNMODE_OFF)
+		return;
+
+	if (!line) line = mCurrLine;
+	int fileIndex = line ? line->mFileIndex : mCurrFileIndex;
+	FileIndexType lineNumber = line ? line->mLineNumber : mCombinedLineNumber;
+
+	TCHAR buf[MSGBOX_TEXT_SIZE], *cp = buf;
+	int buf_space_remaining = (int)_countof(buf);
+	
+	cp += sntprintf(cp, buf_space_remaining, STD_WARNING_FORMAT, Line::sSourceFile[fileIndex], lineNumber, aWarningText);
+	buf_space_remaining = (int)(_countof(buf) - (cp - buf));
+
+	if (*aExtraInfo)
+	{
+		cp += sntprintf(cp, buf_space_remaining, _T("     Specifically: %s\n"), aExtraInfo);
+		buf_space_remaining = (int)(_countof(buf) - (cp - buf));
+	}
+
+#ifndef CONFIG_DEBUGGER
+	OutputDebugString(buf);
+#else
+	g_Debugger.OutputDebug(buf);
+#endif
+
+	// In MsgBox mode, MsgBox is in addition to OutputDebug
+	if (warnMode == WARNMODE_MSGBOX)
+	{
+		if (line)
+			line->LineError(aWarningText, WARN, aExtraInfo);
+		else
+			ScriptError(aWarningText, aExtraInfo);
+	}
+}
+
+
+
+void Script::WarnUninitializedVar(Var *var)
+{
+	bool isGlobal = !var->IsLocal();
+	WarnMode warnMode = isGlobal ? g_Warn_UseUnsetGlobal : g_Warn_UseUnsetLocal;
+	if (!warnMode)
+		return;
+
+	// Note: If warning mode is MsgBox, this method has side effect of marking the var initialized, so that
+	// only a single message box gets raised per variable.  (In other modes, e.g. OutputDebug, the var remains
+	// uninitialized because it may be beneficial to see the quantity and various locations of uninitialized
+	// uses, and doesn't present the same user interface problem that multiple message boxes can.)
+	if (warnMode == WARNMODE_MSGBOX)
+		var->MarkInitialized();
+
+	bool isNonStaticLocal = var->IsNonStaticLocal();
+	LPCTSTR varClass = isNonStaticLocal ? _T("local") : (isGlobal ? _T("global") : _T("static"));
+	LPCTSTR sameNameAsGlobal = (isNonStaticLocal && FindVar(var->mName, 0, NULL, ALWAYS_USE_GLOBAL)) ? _T(" with same name as a global") : _T("");
+	TCHAR buf[DIALOG_TITLE_SIZE], *cp = buf;
+
+	int buf_space_remaining = (int)_countof(buf);
+	sntprintf(cp, buf_space_remaining, _T("%s  (a %s variable%s)"), var->mName, varClass, sameNameAsGlobal);
+
+	ScriptWarning(warnMode, WARNING_USE_UNSET_VARIABLE, buf);
+}
+
+
+
+void Script::MaybeWarnLocalSameAsGlobal(Func *func, Var *var)
+{
+	if (!g_Warn_LocalSameAsGlobal)
+		return;
+
+	if (var->IsDeclaredLocal()) // Exclude function parameters and explicitly declared locals.
+		return;
+
+	LPTSTR varName = var->mName;
+
+#ifdef ENABLE_DLLCALL
+	if (IsDllArgTypeName(varName))
+		// Exclude unquoted DllCall arg type names.  Although variable names like "str" and "ptr"
+		// might be used for other purposes, it seems far more likely that both this var and its
+		// global counterpart (if it exists) are blank vars which were used as DllCall arg types.
+		return;
+#endif
+
+	if (!FindVar(varName, 0, NULL, ALWAYS_USE_GLOBAL))
+		return;
+
+	Line *line = func->mJumpToLine;
+	while (line && line->mActionType != ACT_BLOCK_BEGIN) line = line->mPrevLine;
+	if (!line) line = func->mJumpToLine;
+
+	TCHAR buf[DIALOG_TITLE_SIZE], *cp = buf;
+	int buf_space_remaining = (int)_countof(buf);
+	sntprintf(cp, buf_space_remaining, _T("%s  (in function %s)"), varName, func->mName);
+	
+	ScriptWarning(g_Warn_LocalSameAsGlobal, WARNING_LOCAL_SAME_AS_GLOBAL, buf, line);
 }
 
 
@@ -16776,9 +16980,6 @@ ResultType Script::ActionExec(LPTSTR aAction, LPTSTR aParams, LPTSTR aWorkingDir
 			ScriptError(_T("String too long.") ERR_ABORT); // Short msg since so rare.
 		return FAIL;
 	}
-	// Declare this buf here to ensure it's in scope for the entire function, since its
-	// contents may be referred to indirectly:
-	LPTSTR parse_buf = talloca(aAction_length + 1); // v1.0.44.14: _alloca() helps conserve stack space.
 
 	// Make sure this is set to NULL because CreateProcess() won't work if it's the empty string:
 	if (aWorkingDir && !*aWorkingDir)
@@ -16790,66 +16991,49 @@ ResultType Script::ActionExec(LPTSTR aAction, LPTSTR aParams, LPTSTR aWorkingDir
 	// Set default items to be run by ShellExecute().  These are also used by the error
 	// reporting at the end, which is why they're initialized even if CreateProcess() works
 	// and there's no need to use ShellExecute():
+	LPTSTR shell_verb = NULL;
 	LPTSTR shell_action = aAction;
-	LPTSTR shell_params = aParams ? aParams : _T("");
-	bool shell_action_is_system_verb = false;
-
+	LPTSTR shell_params = NULL;
+	
 	///////////////////////////////////////////////////////////////////////////////////
 	// This next section is done prior to CreateProcess() because when aParams is NULL,
 	// we need to find out whether aAction contains a system verb.
 	///////////////////////////////////////////////////////////////////////////////////
 	if (aParams) // Caller specified the params (even an empty string counts, for this purpose).
-		shell_action_is_system_verb = IS_VERB(shell_action);
-	else // Caller wants us to try to parse params out of aAction.
 	{
-		// Make a copy so that we can modify it (i.e. split it into action & params):
-		_tcscpy(parse_buf, aAction); // parse_buf is already known to be large enough.
-
-		// Find out the "first phrase" in the string.  This is done to support the special "find" and "explore"
-		// operations as well as minmize the chance that executable names intended by the user to be parameters
-		// will not be considered to be the program to run (e.g. for use with a compiler, perhaps).
-		LPTSTR first_phrase, first_phrase_end, second_phrase;
-		if (*parse_buf == '"')
+		if (IS_VERB(shell_action))
 		{
-			first_phrase = parse_buf + 1;  // Omit the double-quotes, for use with CreateProcess() and such.
-			first_phrase_end = _tcschr(first_phrase, '"');
+			shell_verb = shell_action;
+			shell_action = aParams;
 		}
 		else
+			shell_params = aParams;
+	}
+	else // Caller wants us to try to parse params out of aAction.
+	{
+		// Find out the "first phrase" in the string to support the special "find" and "explore" operations.
+		LPTSTR phrase;
+		size_t phrase_len;
+		// Set phrase_end to be the location of the first whitespace char, if one exists:
+		LPTSTR phrase_end = StrChrAny(shell_action, _T(" \t")); // Find space or tab.
+		if (phrase_end) // i.e. there is a second phrase.
 		{
-			first_phrase = parse_buf;
-			// Set first_phrase_end to be the location of the first whitespace char, if
-			// one exists:
-			first_phrase_end = StrChrAny(first_phrase, _T(" \t")); // Find space or tab.
+			phrase_len = phrase_end - shell_action;
+			// Create a null-terminated copy of the phrase for comparison.
+			phrase = tmemcpy(talloca(phrase_len + 1), shell_action, phrase_len);
+			phrase[phrase_len] = '\0';
+			// Firstly, treat anything following '*' as a verb, to support custom verbs like *Compile.
+			if (*phrase == '*')
+				shell_verb = phrase + 1;
+			// Secondly, check for common system verbs like "find" and "edit".
+			else if (IS_VERB(phrase))
+				shell_verb = phrase;
+			if (shell_verb)
+				// Exclude the verb and its trailing space or tab from further consideration.
+				shell_action += phrase_len + 1;
+			// Otherwise it's not a verb, and may be re-parsed later.
 		}
-		// Now first_phrase_end is either NULL, the position of the last double-quote in first-phrase,
-		// or the position of the first whitespace char to the right of first_phrase.
-		if (first_phrase_end)
-		{
-			// Split into two phrases:
-			*first_phrase_end = '\0';
-			second_phrase = first_phrase_end + 1;
-			if (*parse_buf == '"' && *second_phrase)
-				++second_phrase; // Skip the space between "first_phrase" and "second_phrase".
-
-			// Check if first_phrase should be considered a system verb:
-			if (*first_phrase == '*')
-			{
-				// Explicitly a system verb, perhaps a custom one such as "compile".
-				++first_phrase; // Exclude the leading '*' from the verb.
-				shell_action_is_system_verb = true;
-			}
-			else
-				// Is it a more common verb with no explicit prefix?
-				shell_action_is_system_verb = IS_VERB(first_phrase);
-		}
-		else // the entire string is considered to be the first_phrase, and there's no second:
-			second_phrase = NULL;
-		// If caller passed a quoted phrase, they most likely intended for it to be the action:
-		if (shell_action_is_system_verb || second_phrase && *parse_buf == '"')
-		{
-			shell_action = first_phrase;
-			shell_params = second_phrase ? second_phrase : _T("");
-		}
+		// shell_action will be split into action and params at a later stage if ShellExecuteEx is to be used.
 	}
 
 	// This is distinct from hprocess being non-NULL because the two aren't always the
@@ -16859,7 +17043,7 @@ ResultType Script::ActionExec(LPTSTR aAction, LPTSTR aParams, LPTSTR aWorkingDir
 	TCHAR system_error_text[512] = _T("");
 
 	bool use_runas = aUseRunAs && (!mRunAsUser.IsEmpty() || !mRunAsPass.IsEmpty() || !mRunAsDomain.IsEmpty());
-	if (use_runas && shell_action_is_system_verb)
+	if (use_runas && shell_verb)
 	{
 		if (aDisplayErrors)
 			ScriptError(_T("System verbs unsupported with RunAs.") ERR_ABORT);
@@ -16872,7 +17056,7 @@ ResultType Script::ActionExec(LPTSTR aAction, LPTSTR aParams, LPTSTR aWorkingDir
 	// In that case, we'll also skip the CreateProcess() attempt and do only the ShellExecute().
 	// If the user really meant to launch find.bat or find.exe, for example, he should add
 	// the extension (e.g. .exe) to differentiate "find" from "find.exe":
-	if (!shell_action_is_system_verb)
+	if (!shell_verb)
 	{
 		STARTUPINFO si = {0}; // Zero fill to be safer.
 		si.cb = sizeof(si);
@@ -16885,7 +17069,7 @@ ResultType Script::ActionExec(LPTSTR aAction, LPTSTR aParams, LPTSTR aWorkingDir
 
 		// Since CreateProcess() requires that the 2nd param be modifiable, ensure that it is
 		// (even if this is ANSI and not Unicode; it's just safer):
-		LPTSTR command_line; // Need a new buffer other than parse_buf because parse_buf's contents may still be pointed to directly or indirectly for use further below.
+		LPTSTR command_line;
 		if (aParams && *aParams)
 		{
 			command_line = talloca(aAction_length + _tcslen(aParams) + 10); // +10 to allow room for space, terminator, and any extra chars that might get added in the future.
@@ -16956,18 +17140,14 @@ ResultType Script::ActionExec(LPTSTR aAction, LPTSTR aParams, LPTSTR aWorkingDir
 		sei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
 		sei.lpDirectory = aWorkingDir; // OK if NULL or blank; that will cause current dir to be used.
 		sei.nShow = (aRunShowMode && *aRunShowMode) ? Line::ConvertRunMode(aRunShowMode) : SW_SHOWNORMAL;
-		if (shell_action_is_system_verb)
+		if (shell_verb)
 		{
-			sei.lpVerb = shell_action;
-			if (!_tcsicmp(shell_action, _T("properties")))
+			sei.lpVerb = shell_verb;
+			if (!_tcsicmp(shell_verb, _T("properties")))
 				sei.fMask |= SEE_MASK_INVOKEIDLIST;  // Need to use this for the "properties" verb to work reliably.
-			sei.lpFile = shell_params;
-			sei.lpParameters = NULL;
 		}
-		else
+		if (!shell_params) // i.e. above hasn't determined the params yet.
 		{
-			if (shell_action == aAction) // i.e. above hasn't determined the params yet.
-			{
 // Rather than just consider the first phrase to be the executable and the rest to be the param, we check it
 // for a proper extension so that the user can launch a document name containing spaces, without having to
 // enclose it in double quotes.  UPDATE: Want to be able to support executable filespecs without requiring them
@@ -16982,9 +17162,23 @@ ResultType Script::ActionExec(LPTSTR aAction, LPTSTR aParams, LPTSTR aWorkingDir
 //   -  It doesn't handle custom file types (scripts etc.) which don't exist in the working directory but can
 //      still be executed due to %PATH% and %PATHEXT% even when our caller doesn't supply an absolute path.
 // These limitations seem acceptable since the caller can allow even those cases to work by simply wrapping
-// the action in quote marks; if that is done, this section is not executed.
-				_tcscpy(parse_buf, aAction);  // Restore the original value in case it was changed. parse_buf is already known to be large enough.
-				LPTSTR action_extension, action_end;
+// the action in quote marks.
+			// Make a copy so that we can modify it (i.e. split it into action & params).
+			// Using talloca ensures it will stick around until the function exits:
+			LPTSTR parse_buf = talloca(aAction_length + 1); // aAction_length might be a little larger than necessary if shell_verb was set, but that seems better than calling _tcslen again.
+			_tcscpy(parse_buf, shell_action);
+			LPTSTR action_extension, action_end;
+			// Let quotation marks be used to remove all ambiguity:
+			if (*parse_buf == '"' && (action_end = _tcschr(parse_buf + 1, '"')))
+			{
+				shell_action = parse_buf + 1;
+				*action_end = '\0';
+				if (action_end[1])
+					shell_params = action_end + 1;
+				// Otherwise, there's only the action in quotation marks and no params.
+			}
+			else
+			{
 				if (aWorkingDir) // Set current directory temporarily in case the action is a relative path:
 					SetCurrentDirectory(aWorkingDir);
 				// For each space which possibly delimits the action and params:
@@ -17004,7 +17198,7 @@ ResultType Script::ActionExec(LPTSTR aAction, LPTSTR aParams, LPTSTR aWorkingDir
 						if ( (action_end-action_extension == 4 && tcscasestr(_T(".exe.bat.com.cmd.hta"), action_extension))
 						// Otherwise the file might still be something capable of accepting params, like a script,
 						// so check if what we have is the name of an existing file:
-						  || !(GetFileAttributes(parse_buf) & FILE_ATTRIBUTE_DIRECTORY) ) // i.e. THE FILE EXISTS and is not a directory. This works because (INVALID_FILE_ATTRIBUTES & FILE_ATTRIBUTE_DIRECTORY) is non-zero.
+							|| !(GetFileAttributes(parse_buf) & FILE_ATTRIBUTE_DIRECTORY) ) // i.e. THE FILE EXISTS and is not a directory. This works because (INVALID_FILE_ATTRIBUTES & FILE_ATTRIBUTE_DIRECTORY) is non-zero.
 						{	
 							shell_action = parse_buf;
 							shell_params = action_end + 1;
@@ -17018,17 +17212,19 @@ ResultType Script::ActionExec(LPTSTR aAction, LPTSTR aParams, LPTSTR aWorkingDir
 				if (aWorkingDir)
 					SetCurrentDirectory(g_WorkingDir); // Restore to proper value.
 			}
-			//else aParams!=NULL, so the extra parsing in the block above isn't necessary.
-
-			sei.lpVerb = NULL;  // A better choice than "open" because NULL causes default verb to be used.
-			sei.lpFile = shell_action;
-			sei.lpParameters = *shell_params ? shell_params : NULL; // Above has ensured that shell_params isn't NULL.
-			// Above was fixed v1.0.42.06 to be NULL rather than the empty string to prevent passing an
-			// extra space at the end of a parameter list (this might happen only when launching a shortcut
-			// [.lnk file]).  MSDN states: "If the lpFile member specifies a document file, lpParameters should
-			// be NULL."  This implies that NULL is a suitable value for lpParameters in cases where you don't
-			// want to pass any parameters at all.
 		}
+		//else aParams!=NULL, so the extra parsing in the block above isn't necessary.
+
+		// Not done because it may have been set to shell_verb above:
+		//sei.lpVerb = NULL;
+		sei.lpFile = shell_action;
+		sei.lpParameters = shell_params; // NULL if no parameters were present.
+		// Above was fixed v1.0.42.06 to be NULL rather than the empty string to prevent passing an
+		// extra space at the end of a parameter list (this might happen only when launching a shortcut
+		// [.lnk file]).  MSDN states: "If the lpFile member specifies a document file, lpParameters should
+		// be NULL."  This implies that NULL is a suitable value for lpParameters in cases where you don't
+		// want to pass any parameters at all.
+		
 		if (ShellExecuteEx(&sei)) // Relies on short-circuit boolean order.
 		{
 			hprocess = sei.hProcess;
@@ -17047,10 +17243,12 @@ ResultType Script::ActionExec(LPTSTR aAction, LPTSTR aParams, LPTSTR aWorkingDir
 		if (aDisplayErrors)
 		{
 			TCHAR error_text[2048], verb_text[128];
-			if (shell_action_is_system_verb)
-				sntprintf(verb_text, _countof(verb_text), _T("\nVerb: <%s>"), shell_action);
+			if (shell_verb)
+				sntprintf(verb_text, _countof(verb_text), _T("\nVerb: <%s>"), shell_verb);
 			else // Don't bother showing it if it's just "open".
 				*verb_text = '\0';
+			if (!shell_params)
+				shell_params = _T(""); // Expected to be non-NULL below.
 			// Use format specifier to make sure it doesn't get too big for the error
 			// function to display:
 			sntprintf(error_text, _countof(error_text)

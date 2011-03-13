@@ -84,31 +84,29 @@ void BIF_ComObjActive(ExprTokenType &aResultToken, ExprTokenType *aParam[], int 
 		if (vt == VT_DISPATCH || vt == VT_UNKNOWN)
 		{
 			IUnknown *punk = (IUnknown *)llVal;
-			if (!punk)
+			if (punk)
 			{
-				// This check covers what is probably the most likely error.  Other invalid
-				// values and NULL values for other types, such as VT_ARRAY, are not checked.
-				ComError(-1);
-				return;
-			}
-			if (aParamCount == 1) // Implies above set vt = VT_DISPATCH.
-			{
-				IDispatch *pdisp;
-				if (SUCCEEDED(punk->QueryInterface(IID_IDispatch, (void **)&pdisp)))
+				if (aParamCount == 1) // Implies above set vt = VT_DISPATCH.
 				{
-					// Replace caller-specified interface pointer with pdisp.  If caller
-					// has requested we take responsibility for freeing it, do that now:
-					if (flags & ComObject::F_OWNVALUE)
-						punk->Release();
-					flags |= ComObject::F_OWNVALUE; // Don't AddRef() below since we own this reference.
-					llVal = (__int64)pdisp;
+					IDispatch *pdisp;
+					if (SUCCEEDED(punk->QueryInterface(IID_IDispatch, (void **)&pdisp)))
+					{
+						// Replace caller-specified interface pointer with pdisp.  If caller
+						// has requested we take responsibility for freeing it, do that now:
+						if (flags & ComObject::F_OWNVALUE)
+							punk->Release();
+						flags |= ComObject::F_OWNVALUE; // Don't AddRef() below since we own this reference.
+						llVal = (__int64)pdisp;
+					}
+					// Otherwise interpret it as IDispatch anyway, since caller has requested it and
+					// there are known cases where it works (such as some CLR COM callable wrappers).
 				}
-				// Otherwise interpret it as IDispatch anyway, since caller has requested it and
-				// there are known cases where it works (such as some CLR COM callable wrappers).
+				if ( !(flags & ComObject::F_OWNVALUE) )
+					punk->AddRef(); // "Copy" caller's reference.
+				// Otherwise caller (or above) indicated the object now owns this reference.
 			}
-			if ( !(flags & ComObject::F_OWNVALUE) )
-				punk->AddRef(); // "Copy" caller's reference.
-			// Otherwise caller (or above) indicated the object now owns this reference.
+			// Otherwise, NULL may have some meaning, so allow it.  If the
+			// script tries to invoke the object, it'll get a warning then.
 		}
 
 		aResultToken.symbol = SYM_OBJECT;
@@ -262,10 +260,12 @@ void BIF_ComObjConnect(ExprTokenType &aResultToken, ExprTokenType *aParam[], int
 		}
 
 		if (obj->mEventSink)
+		{
 			obj->mEventSink->Connect(aParamCount>1 ? TokenToString(*aParam[1]) : NULL);
-		else
-			ComError(-1);
+			return;
+		}
 	}
+	ComError(-1);
 }
 
 void BIF_ComObjError(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
@@ -759,13 +759,19 @@ void ComEvent::Connect(LPTSTR pfx)
 ResultType STDMETHODCALLTYPE ComObject::Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
 	if (aParamCount < (IS_INVOKE_SET ? 2 : 1))
+	{
+		// Something like x[] or x[]:=y -- reserved for possible future use.  However, it could
+		// be x[prms*] where prms is an empty array or not an array at all, so raise an error:
+		ComError(g->LastError = DISP_E_BADPARAMCOUNT);
 		return OK;
+	}
 
 	if (mVarType != VT_DISPATCH || !mDispatch)
 	{
 		if (mVarType & VT_ARRAY)
 			return SafeArrayInvoke(aResultToken, aFlags, aParam, aParamCount);
 		// Otherwise: this object can't be invoked.
+		g->LastError = DISP_E_BADVARTYPE; // Seems more informative than -1.
 		ComError(-1);
 		return OK;
 	}
@@ -875,12 +881,18 @@ ResultType ComObject::SafeArrayInvoke(ExprTokenType &aResultToken, int aFlags, E
 	LONG index[8];
 	// Verify correct number of parameters/dimensions (maximum 8).
 	if (dims > _countof(index) || dims != (IS_INVOKE_SET ? aParamCount - 1 : aParamCount))
+	{
+		g->LastError = DISP_E_BADPARAMCOUNT;
 		return OK;
+	}
 	// Build array of indices from parameters.
 	for (UINT i = 0; i < dims; ++i)
 	{
 		if (!TokenIsPureNumeric(*aParam[i]))
+		{
+			g->LastError = E_INVALIDARG;
 			return OK;
+		}
 		index[i] = (LONG)TokenToInt64(*aParam[i]);
 	}
 

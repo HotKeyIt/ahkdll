@@ -72,6 +72,10 @@ extern HHOOK g_MouseHook;
 extern HHOOK g_PlaybackHook;
 extern bool g_ForceLaunch;
 extern bool g_WinActivateForce;
+extern WarnMode g_Warn_UseUnsetLocal;
+extern WarnMode g_Warn_UseUnsetGlobal;
+extern WarnMode g_Warn_UseEnv;
+extern WarnMode g_Warn_LocalSameAsGlobal;
 #ifndef MINIDLL
 extern SingleInstanceType g_AllowOnlyOneInstance;
 #endif
