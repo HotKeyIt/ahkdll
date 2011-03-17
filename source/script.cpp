@@ -263,11 +263,15 @@ void Script::Destroy()
 		if (mVar[v]->mType == VAR_BUILTIN ||mVar[v]->mType == VAR_CLIPBOARD ||mVar[v]->mType == VAR_CLIPBOARDALL)
 			continue;
 		mVar[v]->ConvertToNonAliasIfNecessary();
+		if (mVar[v]->IsObject())
+			mVar[v]->ReleaseObject();
 		mVar[v]->Free();
 	}
 	for (v = 0; v < mLazyVarCount; ++v)
 	{
 		mLazyVar[v]->ConvertToNonAliasIfNecessary();
+		if (mLazyVar[v]->IsObject())
+			mLazyVar[v]->ReleaseObject();
 		mLazyVar[v]->Free();
 	}
 	for (i = 0; i < mFuncCount; ++i)
@@ -280,11 +284,19 @@ void Script::Destroy()
 		// only static and global variables are released.  It seems best for consistency to also
 		// avoid releasing top-level non-static local variables (i.e. which aren't in var backups).
 		for (v = 0; v < f.mVarCount; ++v)
+		{
+			f.mVar[v]->ConvertToNonAliasIfNecessary();
+			if (f.mVar[v]->IsObject())
+				f.mVar[v]->ReleaseObject();
 			f.mVar[v]->Free();
+		}
 		for (v = 0; v < f.mLazyVarCount; ++v)
+		{
+			f.mLazyVar[v]->ConvertToNonAliasIfNecessary();
+			if (f.mLazyVar[v]->IsObject())
+				f.mLazyVar[v]->ReleaseObject();
 			f.mLazyVar[v]->Free();
-		for (v = 0; v < f.mLazyVarCount; ++v)
-			f.mLazyVar[v]->Free();
+		}
 		delete mFunc[i];
 	}
 	// Destroy Labels
@@ -345,10 +357,8 @@ void Script::Destroy()
 #endif
 	Script::~Script();
 	g_script.mIsReadyToExecute = false;
+        global_clear_state(*g);
 }
-#endif
-#ifdef ENABLE_KEY_HISTORY_FILE
-	KeyHistoryToFile();  // Close the KeyHistory file if it's open.
 #endif
 
 ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestart, HINSTANCE hInstance, bool aIsText)
@@ -1065,7 +1075,6 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 {
 #ifdef _USRDLL
 	terminateDll();
-	return;
 #else
 	// L31: Release objects stored in variables, where possible.
 	if (aExitCode != CRITICAL_ERROR) // i.e. Avoid making matters worse if CRITICAL_ERROR.
@@ -1107,9 +1116,7 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 		g_DestroyWindowCalled = true;
 		DestroyWindow(g_hWnd);
 	}
-#ifndef MINIDLL
 	Hotkey::AllDestructAndExit(aExitCode);
-#endif
 #endif
 }
 

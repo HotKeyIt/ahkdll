@@ -396,6 +396,7 @@ unsigned __stdcall runScript( void* pArguments )
 EXPORT BOOL ahkTerminate(bool kill)
 {
 	int lpExitCode = 0;
+	g_AllowInterruption = FALSE;
 	GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
 	if (!kill)
 	for (int i = 0; g_script.mIsReadyToExecute && (lpExitCode == 0 || lpExitCode == 259) && i < 10; i++)
@@ -405,13 +406,15 @@ EXPORT BOOL ahkTerminate(bool kill)
 		GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
 	}
 	if (lpExitCode != 0 && lpExitCode != 259)
+	{
+		g_AllowInterruption = TRUE;
 		return 0;
-	Line::sSourceFileCount = 0;
-	global_clear_state(*g);
+	}
 	g_script.Destroy();
 	TerminateThread(hThread, (DWORD)EARLY_EXIT);
 	CloseHandle(hThread);
-	g_script.mIsReadyToExecute = false;
+	hThread=0;
+	g_AllowInterruption = TRUE;
 	return 0;
 }
 
@@ -471,17 +474,16 @@ EXPORT unsigned int ahktextdll(LPTSTR fileName, LPTSTR argv, LPTSTR args)
 
 void reloadDll()
 {
-	unsigned threadID;
-	Line::sSourceFileCount = 0;
 	g_script.Destroy();
-	hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, &threadID );
-	_endthreadex( (DWORD)EARLY_RETURN ); 
+	hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, 0 );
+	g_AllowInterruption = TRUE;
+	_endthreadex( (DWORD)EARLY_RETURN );
 }
 
 ResultType terminateDll()
 {
-	Line::sSourceFileCount = 0;
 	g_script.Destroy();
+	g_AllowInterruption = TRUE;
 	_endthreadex( (DWORD)EARLY_EXIT );
 	return EARLY_EXIT;
 }
@@ -965,8 +967,8 @@ STDAPI DllGetClassObject(const CLSID& clsid,
 	}
 	TCHAR buf[MAX_PATH];
 
-	if (0 && GetModuleFileName(g_hInstance, buf, MAX_PATH))  // for debugging com 
-//	if (GetModuleFileName(g_hInstance, buf, MAX_PATH))
+//	if (0 && GetModuleFileName(g_hInstance, buf, MAX_PATH))  // for debugging com 
+	if (GetModuleFileName(g_hInstance, buf, MAX_PATH))
 	{
 		FILE *fp;
 		unsigned char *data=NULL;

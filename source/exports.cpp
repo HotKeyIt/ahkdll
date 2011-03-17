@@ -252,7 +252,9 @@ EXPORT unsigned int addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aI
 {   // dynamically include a file into a script !!
 	// labels, hotkeys, functions.   
 	static int filesAdded = 0  ; 
-	
+#ifndef MINIDLL
+	int HotkeyCount = Hotkey::sHotkeyCount;
+#endif
 	Line *oldLastLine = g_script.mLastLine;
 	
 	if (aIgnoreLoadFailure > 1)  // if third param is > 1, reset all functions, labels, remove hotkeys
@@ -298,6 +300,10 @@ EXPORT unsigned int addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aI
 	g_script.LoadIncludedFile(fileName, aAllowDuplicateInclude, (bool) aIgnoreLoadFailure);
 	if (!g_script.PreparseBlocks(oldLastLine->mNextLine) || !g_script.PreparseIfElse(oldLastLine->mNextLine))
 		return LOADING_FAILED;
+#ifndef MINIDLL
+	if (Hotkey::sHotkeyCount>HotkeyCount)
+		Line::ToggleSuspendState();Line::ToggleSuspendState();
+#endif
 	PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)g_script.mFirstLine, (LPARAM)g_script.mFirstLine);
 	filesAdded += 1;
 	return (unsigned int) g_script.mFirstLine;
@@ -307,6 +313,10 @@ EXPORT unsigned int addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aI
 	g_script.LoadIncludedFile(fileName, aAllowDuplicateInclude, (bool) aIgnoreLoadFailure);
 	if (!g_script.PreparseBlocks(oldLastLine->mNextLine) || !g_script.PreparseIfElse(oldLastLine->mNextLine))
 		return LOADING_FAILED;
+#ifndef MINIDLL
+	if (Hotkey::sHotkeyCount>HotkeyCount)
+		Line::ToggleSuspendState();Line::ToggleSuspendState();
+#endif
 	return (unsigned int) oldLastLine->mNextLine;  // 
 	}
 return 0;  // never reached
@@ -320,6 +330,9 @@ EXPORT unsigned int addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aI
 	// labels, hotkeys, functions.   
 	Func * aFunc = NULL ; 
 	int inFunc = 0 ;
+#ifndef MINIDLL
+	int HotkeyCount = Hotkey::sHotkeyCount;
+#endif
 	if (g->CurrentFunc)  // normally functions definitions are not allowed within functions.  But we're in a function call, not a function definition right now.
 	{
 		aFunc = g->CurrentFunc; 
@@ -343,9 +356,12 @@ EXPORT unsigned int addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aI
 	
 	if (inFunc == 1 )
 		g->CurrentFunc = aFunc ;
-
+#ifndef MINIDLL
 	if (!g_script.PreparseBlocks(oldLastLine->mNextLine) || !g_script.PreparseIfElse(oldLastLine->mNextLine))
 		return LOADING_FAILED;
+#endif	
+	if (Hotkey::sHotkeyCount>HotkeyCount)
+		Line::ToggleSuspendState();Line::ToggleSuspendState();
 	return (unsigned int) oldLastLine->mNextLine;  // 
 }
 
@@ -361,6 +377,9 @@ EXPORT unsigned int addScript(LPTSTR script, int aExecute)
 	// labels, hotkeys, functions.   
 	Func * aFunc = NULL ; 
 	int inFunc = 0 ;
+#ifndef MINIDLL
+	int HotkeyCount = Hotkey::sHotkeyCount;
+#endif
 	if (g->CurrentFunc)  // normally functions definitions are not allowed within functions.  But we're in a function call, not a function definition right now.
 	{
 		aFunc = g->CurrentFunc; 
@@ -373,9 +392,12 @@ EXPORT unsigned int addScript(LPTSTR script, int aExecute)
 	{
 	if (inFunc == 1 )
 		g->CurrentFunc = aFunc ; 
-
 		return LOADING_FAILED;
 	}	
+#ifndef MINIDLL
+	if (Hotkey::sHotkeyCount>HotkeyCount)
+		Line::ToggleSuspendState();Line::ToggleSuspendState();
+#endif
 	if (aExecute > 0)
 	{
 		if (aExecute > 1)
