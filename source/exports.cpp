@@ -302,7 +302,10 @@ EXPORT unsigned int addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aI
 		return LOADING_FAILED;
 #ifndef MINIDLL
 	if (Hotkey::sHotkeyCount>HotkeyCount)
-		Line::ToggleSuspendState();Line::ToggleSuspendState();
+	{
+		Line::ToggleSuspendState();
+		Line::ToggleSuspendState();
+	}
 #endif
 	PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)g_script.mFirstLine, (LPARAM)g_script.mFirstLine);
 	filesAdded += 1;
@@ -315,7 +318,10 @@ EXPORT unsigned int addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aI
 		return LOADING_FAILED;
 #ifndef MINIDLL
 	if (Hotkey::sHotkeyCount>HotkeyCount)
-		Line::ToggleSuspendState();Line::ToggleSuspendState();
+	{
+		Line::ToggleSuspendState();
+		Line::ToggleSuspendState();
+	}
 #endif
 	return (unsigned int) oldLastLine->mNextLine;  // 
 	}
@@ -361,7 +367,10 @@ EXPORT unsigned int addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aI
 		return LOADING_FAILED;
 #endif	
 	if (Hotkey::sHotkeyCount>HotkeyCount)
-		Line::ToggleSuspendState();Line::ToggleSuspendState();
+	{
+		Line::ToggleSuspendState();
+		Line::ToggleSuspendState();
+	}
 	return (unsigned int) oldLastLine->mNextLine;  // 
 }
 
@@ -396,7 +405,10 @@ EXPORT unsigned int addScript(LPTSTR script, int aExecute)
 	}	
 #ifndef MINIDLL
 	if (Hotkey::sHotkeyCount>HotkeyCount)
-		Line::ToggleSuspendState();Line::ToggleSuspendState();
+	{
+		Line::ToggleSuspendState();
+		Line::ToggleSuspendState();
+	}
 #endif
 	if (aExecute > 0)
 	{
