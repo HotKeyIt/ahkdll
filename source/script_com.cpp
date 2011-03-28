@@ -7,26 +7,50 @@
 #ifdef CONFIG_EXPERIMENTAL
 
 
+// IID__IObject -- .NET's System.Object:
+const IID IID__Object = {0x65074F7F, 0x63C0, 0x304E, 0xAF, 0x0A, 0xD5, 0x17, 0x41, 0xCB, 0x4A, 0x8D};
+
+
 void BIF_ComObjCreate(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
 	HRESULT hr;
-	CLSID clsid;
-	IDispatch *pdisp;
-	hr = CLSIDFromString(CStringWCharFromTCharIfNeeded(TokenToString(*aParam[0])), &clsid);
-	if (SUCCEEDED(hr))
-		hr = CoCreateInstance(clsid, NULL, CLSCTX_SERVER, IID_IDispatch, (void **)&pdisp);
-	if (SUCCEEDED(hr))
+	CLSID clsid, iid;
+	for (;;)
 	{
-		aResultToken.symbol = SYM_OBJECT;
-		aResultToken.object = new ComObject(pdisp);
+		hr = CLSIDFromString(CStringWCharFromTCharIfNeeded(TokenToString(*aParam[0])), &clsid);
+		if (FAILED(hr)) break;
+
+		if (aParamCount > 1)
+		{
+			hr = CLSIDFromString(CStringWCharFromTCharIfNeeded(TokenToString(*aParam[1])), &iid);
+			if (FAILED(hr)) break;
+			
+			IUnknown *punk;
+			hr = CoCreateInstance(clsid, NULL, CLSCTX_SERVER, iid, (void **)&punk);
+			if (FAILED(hr)) break;
+
+			// Return interface pointer, as requested.
+			aResultToken.symbol = SYM_INTEGER;
+			aResultToken.value_int64 = (__int64)punk;
+		}
+		else
+		{
+			IDispatch *pdisp;
+			hr = CoCreateInstance(clsid, NULL, CLSCTX_SERVER, IID_IDispatch, (void **)&pdisp);
+			if (FAILED(hr)) break;
+			
+			// Return dispatchable object.
+			if ( !(aResultToken.object = new ComObject(pdisp)) )
+				break;
+			aResultToken.symbol = SYM_OBJECT;
+		}
+		return;
 	}
-	else
-	{
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
-		ComError(hr);
-	}
+	aResultToken.symbol = SYM_STRING;
+	aResultToken.marker = _T("");
+	ComError(hr);
 }
+
 
 void BIF_ComObjGet(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
@@ -35,23 +59,24 @@ void BIF_ComObjGet(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 	hr = CoGetObject(CStringWCharFromTCharIfNeeded(TokenToString(*aParam[0])), NULL, IID_IDispatch, (void **)&pdisp);
 	if (SUCCEEDED(hr))
 	{
-		aResultToken.symbol = SYM_OBJECT;
-		aResultToken.object = new ComObject(pdisp);
+		if (aResultToken.object = new ComObject(pdisp))
+		{
+			aResultToken.symbol = SYM_OBJECT;
+			return;
+		}
+		pdisp->Release();
 	}
-	else
-	{
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
-		ComError(hr);
-	}
+	aResultToken.symbol = SYM_STRING;
+	aResultToken.marker = _T("");
+	ComError(hr);
 }
+
 
 void BIF_ComObjActive(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
 	if (!aParamCount) // ComObjMissing()
 	{
-		aResultToken.symbol = SYM_OBJECT;
-        aResultToken.object = new ComObject(DISP_E_PARAMNOTFOUND, VT_ERROR);
+		SafeSetTokenObject(aResultToken, new ComObject(DISP_E_PARAMNOTFOUND, VT_ERROR));
 		return;
 	}
 
@@ -109,8 +134,13 @@ void BIF_ComObjActive(ExprTokenType &aResultToken, ExprTokenType *aParam[], int 
 			// script tries to invoke the object, it'll get a warning then.
 		}
 
-		aResultToken.symbol = SYM_OBJECT;
-		aResultToken.object = new ComObject(llVal, vt, flags);
+		if (obj = new ComObject(llVal, vt, flags))
+		{
+			aResultToken.symbol = SYM_OBJECT;
+			aResultToken.object = obj;
+		}
+		else if (vt == VT_DISPATCH || vt == VT_UNKNOWN)
+			((IUnknown *)llVal)->Release();
 	}
 	else if (obj = dynamic_cast<ComObject *>(TokenToObject(*aParam[0])))
 	{
@@ -142,8 +172,13 @@ void BIF_ComObjActive(ExprTokenType &aResultToken, ExprTokenType *aParam[], int 
 				IDispatch *pdisp;
 				if (SUCCEEDED(punk->QueryInterface(IID_IDispatch, (void **)&pdisp)))
 				{
-					aResultToken.symbol = SYM_OBJECT;
-					aResultToken.object = new ComObject(pdisp);
+					if (obj = new ComObject(pdisp))
+					{
+						aResultToken.symbol = SYM_OBJECT;
+						aResultToken.object = obj;
+					}
+					else
+						pdisp->Release();
 				}
 				punk->Release();
 				return;
@@ -152,6 +187,7 @@ void BIF_ComObjActive(ExprTokenType &aResultToken, ExprTokenType *aParam[], int 
 		ComError(hr);
 	}
 }
+
 
 void BIF_ComObjConnect(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
@@ -268,12 +304,14 @@ void BIF_ComObjConnect(ExprTokenType &aResultToken, ExprTokenType *aParam[], int
 	ComError(-1);
 }
 
+
 void BIF_ComObjError(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
 	aResultToken.value_int64 = g_ComErrorNotify;
 	if (aParamCount && TokenIsPureNumeric(*aParam[0]))
 		g_ComErrorNotify = (TokenToInt64(*aParam[0]) != 0);
 }
+
 
 void BIF_ComObjTypeOrValue(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
@@ -336,6 +374,46 @@ void BIF_ComObjTypeOrValue(ExprTokenType &aResultToken, ExprTokenType *aParam[],
 	}
 }
 
+
+void BIF_ComObjFlags(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+{
+	ComObject *obj = dynamic_cast<ComObject *>(TokenToObject(*aParam[0]));
+	if (!obj)
+	{
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = _T("");
+		return;
+	}
+	if (aParamCount > 1)
+	{
+		USHORT flags, mask;
+		if (aParamCount > 2)
+		{
+			flags = (USHORT)TokenToInt64(*aParam[1]);
+			mask = (USHORT)TokenToInt64(*aParam[2]);
+		}
+		else
+		{
+			__int64 bigflags = TokenToInt64(*aParam[1]);
+			if (bigflags < 0)
+			{
+				// Remove specified -flags.
+				flags = 0;
+				mask = (USHORT)-bigflags;
+			}
+			else
+			{
+				// Add only specified flags.
+				flags = (USHORT)bigflags;
+				mask = flags;
+			}
+		}
+		obj->mFlags = (obj->mFlags & ~mask) | (flags & mask);
+	}
+	aResultToken.value_int64 = obj->mFlags;
+}
+
+
 void BIF_ComObjArray(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
 	VARTYPE vt = (VARTYPE)TokenToInt64(*aParam[0]);
@@ -348,16 +426,77 @@ void BIF_ComObjArray(ExprTokenType &aResultToken, ExprTokenType *aParam[], int a
 		bound[i].lLbound = 0;
 	}
 	SAFEARRAY *psa = SafeArrayCreate(vt, dims, bound);
+	if (psa && !SafeSetTokenObject(aResultToken, new ComObject((__int64)psa, VT_ARRAY | vt, ComObject::F_OWNVALUE)))
+		SafeArrayDestroy(psa);
+}
+
+
+void BIF_ComObjQuery(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+{
+	IUnknown *punk = NULL;
 	ComObject *obj;
-	if (psa && (obj = new ComObject((__int64)psa, VT_ARRAY | vt, ComObject::F_OWNVALUE)))
+	HRESULT hr;
+	
+	aResultToken.value_int64 = 0; // Set default; on 32-bit builds, only the low 32 bits may be set below.
+
+	if (obj = dynamic_cast<ComObject *>(TokenToObject(*aParam[0])))
 	{
-		aResultToken.symbol = SYM_OBJECT;
-		aResultToken.object = obj;
+		// We were passed a ComObject, but does it contain an interface pointer?
+		if (obj->mVarType == VT_UNKNOWN || obj->mVarType == VT_DISPATCH)
+			punk = obj->mUnknown;
+	}
+	if (!punk)
+	{
+		// Since it wasn't a valid ComObject, it should be a raw interface pointer.
+		punk = (IUnknown *)TokenToInt64(*aParam[0]);
+		if (punk < (IUnknown *)65536) // Error-detection: the first 64KB of address space is always invalid.
+		{
+			g->LastError = E_INVALIDARG; // For consistency.
+			ComError(-1);
+			return;
+		}
+	}
+
+	if (aParamCount > 2) // QueryService(obj, SID, IID)
+	{
+		GUID sid, iid;
+		if (   SUCCEEDED(hr = CLSIDFromString(CStringWCharFromTCharIfNeeded(TokenToString(*aParam[1])), &sid))
+			&& SUCCEEDED(hr = CLSIDFromString(CStringWCharFromTCharIfNeeded(TokenToString(*aParam[2])), &iid))   )
+		{
+			IServiceProvider *pprov;
+			if (SUCCEEDED(hr = punk->QueryInterface<IServiceProvider>(&pprov)))
+			{
+				hr = pprov->QueryService(sid, iid, (void **)&aResultToken.value_int64);
+			}
+		}
+	}
+	else // QueryInterface(obj, IID)
+	{
+		GUID iid;
+		if (SUCCEEDED(hr = CLSIDFromString(CStringWCharFromTCharIfNeeded(TokenToString(*aParam[1])), &iid)))
+		{
+			hr = punk->QueryInterface(iid, (void **)&aResultToken.value_int64);
+		}
+	}
+
+	g->LastError = hr;
+}
+
+
+bool SafeSetTokenObject(ExprTokenType &aToken, IObject *aObject)
+{
+	if (aObject)
+	{
+		aToken.symbol = SYM_OBJECT;
+		aToken.object = aObject;
+		return true;
 	}
 	else
 	{
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		aToken.symbol = SYM_STRING;
+		aToken.marker = _T("");
+		aToken.mem_to_free = NULL; // Only needed for some callers.
+		return false;
 	}
 }
 
@@ -417,28 +556,6 @@ void VariantToToken(VARIANT &aVar, ExprTokenType &aToken, bool aRetainVar = true
 		aToken.symbol = SYM_FLOAT;
 		aToken.value_double = (double)aVar.fltVal;
 		break;
-	case VT_DISPATCH:
-		if (aVar.pdispVal)
-		{
-			if (aToken.object = new ComObject(aVar.pdispVal))
-			{
-				aToken.symbol = SYM_OBJECT;
-				if (aRetainVar && aVar.pdispVal)
-					aVar.pdispVal->AddRef();
-				//else we're taking ownership of the reference.
-				break;
-			}
-			// Above failed, so check if we need to release the pointer:
-			if (!aRetainVar && aVar.pdispVal)
-				aVar.pdispVal->Release();
-		}
-		// FALL THROUGH to the next case:
-	case VT_EMPTY:
-	case VT_NULL:
-		aToken.symbol = SYM_STRING;
-		aToken.marker = _T("");
-		aToken.mem_to_free = NULL;
-		break;
 	case VT_UNKNOWN:
 		if (aVar.punkVal)
 		{
@@ -447,23 +564,51 @@ void VariantToToken(VARIANT &aVar, ExprTokenType &aToken, bool aRetainVar = true
 			{
 				if (!aRetainVar)
 					aVar.punkVal->Release();
-				aToken.symbol = SYM_OBJECT;
-				aToken.object = new ComEnum(penum);
+				if (!SafeSetTokenObject(aToken, new ComEnum(penum)))
+					penum->Release();
+				break;
+			}
+			IDispatch *pdisp;
+			// .NET objects implement the COM IDispatch interface, but unfortunately
+			// they don't always respond to QueryInterface() for said interface. So
+			// instead we have to query for the _Object interface, which itself
+			// inherits from IDispatch.
+			if (SUCCEEDED(aVar.punkVal->QueryInterface(IID__Object, (void**) &pdisp)))
+			{
+				if (!aRetainVar)
+					aVar.punkVal->Release();
+				if (!SafeSetTokenObject(aToken, new ComObject(pdisp)))
+					pdisp->Release();
 				break;
 			}
 		}
-		else
+		// FALL THROUGH to the next case:
+	case VT_DISPATCH:
+		if (aVar.punkVal)
 		{
-			aToken.symbol = SYM_STRING;
-			aToken.marker = _T("");
-			aToken.mem_to_free = NULL;
-			break;
+			if (aToken.object = new ComObject((__int64)aVar.punkVal, aVar.vt))
+			{
+				aToken.symbol = SYM_OBJECT;
+				if (aRetainVar)
+					// Caller is keeping their ref, so we AddRef.
+					aVar.punkVal->AddRef();
+				break;
+			}
+			if (!aRetainVar)
+				// Above failed, but caller doesn't want their ref, so release it.
+				aVar.punkVal->Release();
 		}
-		// FALL THROUGH to the default case:
+		// FALL THROUGH to the next case:
+	case VT_EMPTY:
+	case VT_NULL:
+		aToken.symbol = SYM_STRING;
+		aToken.marker = _T("");
+		aToken.mem_to_free = NULL;
+		break;
 	default:
 		{
 			VARIANT var = {0};
-			if (aVar.vt != VT_UNKNOWN && aVar.vt < VT_ARRAY // i.e. not byref or an array.
+			if (aVar.vt < VT_ARRAY // i.e. not byref or an array.
 				&& SUCCEEDED(VariantChangeType(&var, &aVar, 0, VT_BSTR))) // Convert it to a BSTR.
 			{
 				// Recursive call to handle conversions and memory management correctly:
@@ -471,8 +616,13 @@ void VariantToToken(VARIANT &aVar, ExprTokenType &aToken, bool aRetainVar = true
 			}
 			else
 			{
-				aToken.symbol = SYM_OBJECT;
-				aToken.object = new ComObject((__int64)aVar.parray, aVar.vt, aRetainVar ? 0 : ComObject::F_OWNVALUE);
+				if (!SafeSetTokenObject(aToken,
+						new ComObject((__int64)aVar.parray, aVar.vt, aRetainVar ? 0 : ComObject::F_OWNVALUE)))
+				{
+					// Out of memory; value cannot be returned, so must be freed here.
+					if (!aRetainVar)
+						VariantClear(&aVar);
+				}
 			}
 		}
 	}
@@ -490,16 +640,20 @@ void AssignVariant(Var &aArg, VARIANT &aVar, bool aRetainVar = true)
 	}
 	ExprTokenType token;
 	VariantToToken(aVar, token, aRetainVar);
-	if (token.symbol == SYM_OBJECT)
+	switch (token.symbol)
 	{
-		aArg.AssignSkipAddRef(token.object);
-	}
-	else
-	{
+	case SYM_STRING:  // VT_BSTR was handled above, but VariantToToken coerces unhandled types to strings.
+		if (token.mem_to_free)
+			aArg.AcceptNewMem(token.mem_to_free, token.marker_length);
+		else
+			aArg.Assign();
+		break;
+	case SYM_OBJECT:
+		aArg.AssignSkipAddRef(token.object); // Let aArg take responsibility for it.
+		break;
+	default:
 		aArg.Assign(token);
-		// VT_BSTR was handled above, but VariantToToken coerces unhandled types to strings:
-		if (token.symbol == SYM_STRING && token.mem_to_free)
-			free(token.mem_to_free);
+		break;
 	}
 }
 
@@ -860,19 +1014,38 @@ ResultType ComObject::SafeArrayInvoke(ExprTokenType &aResultToken, int aFlags, E
 		if (*name == '_')
 			++name;
 		LONG retval;
-		if (!_tcsicmp(name, _T("MaxIndex")))
-			hr = SafeArrayGetUBound(psa, aParamCount > 1 ? (UINT)TokenToInt64(*aParam[1]) : 1, &retval);
-		else if (!_tcsicmp(name, _T("MinIndex")))
-			hr = SafeArrayGetLBound(psa, aParamCount > 1 ? (UINT)TokenToInt64(*aParam[1]) : 1, &retval);
-		else
-			hr = DISP_E_UNKNOWNNAME; // Seems slightly better than ignoring the call.
-		g->LastError = hr;
-		if (SUCCEEDED(hr))
+		if (!_tcsicmp(name, _T("NewEnum")))
 		{
-			aResultToken.symbol = SYM_INTEGER;
-			aResultToken.value_int64 = retval;
+			ComArrayEnum *enm;
+			if (SUCCEEDED(hr = ComArrayEnum::Begin(this, enm)))
+			{
+				aResultToken.symbol = SYM_OBJECT;
+				aResultToken.object = enm;
+			}
+		}
+		else if (!_tcsicmp(name, _T("Clone")))
+		{
+			SAFEARRAY *clone;
+			if (SUCCEEDED(hr = SafeArrayCopy(psa, &clone)))
+				if (!SafeSetTokenObject(aResultToken, new ComObject((__int64)clone, mVarType, F_OWNVALUE)))
+					SafeArrayDestroy(clone);
 		}
 		else
+		{
+			if (!_tcsicmp(name, _T("MaxIndex")))
+				hr = SafeArrayGetUBound(psa, aParamCount > 1 ? (UINT)TokenToInt64(*aParam[1]) : 1, &retval);
+			else if (!_tcsicmp(name, _T("MinIndex")))
+				hr = SafeArrayGetLBound(psa, aParamCount > 1 ? (UINT)TokenToInt64(*aParam[1]) : 1, &retval);
+			else
+				hr = DISP_E_UNKNOWNNAME; // Seems slightly better than ignoring the call.
+			if (SUCCEEDED(hr))
+			{
+				aResultToken.symbol = SYM_INTEGER;
+				aResultToken.value_int64 = retval;
+			}
+		}
+		g->LastError = hr;
+		if (FAILED(hr))
 			ComError(hr);
 		return OK;
 	}
@@ -924,16 +1097,25 @@ ResultType ComObject::SafeArrayInvoke(ExprTokenType &aResultToken, int aFlags, E
 		{
 			ExprTokenType &rvalue = *aParam[dims];
 			TokenToVariant(rvalue, var);
-			if (var.vt == VT_DISPATCH || var.vt == VT_UNKNOWN)
+			if ((var.vt == VT_DISPATCH || var.vt == VT_UNKNOWN) && var.punkVal)
 				var.punkVal->AddRef();
 			// Otherwise: it could be VT_BSTR, in which case TokenToVariant created a new BSTR which we want to
 			// put directly it into the array rather than copying it, since it would only be freed later anyway.
 			if (item_type == VT_VARIANT)
 			{
-				// Free existing value.
-				VariantClear((VARIANTARG *)item);
-				// Write new value (shallow copy).
-				memcpy(item, &var, sizeof(VARIANT));
+				if ((var.vt & ~VT_TYPEMASK) == VT_ARRAY // Implies rvalue contains a ComObject.
+					&& (((ComObject *)rvalue.object)->mFlags & F_OWNVALUE))
+				{
+					// Copy array since both sides will call Destroy().
+					hr = VariantCopy((VARIANTARG *)item, &var);
+				}
+				else
+				{
+					// Free existing value.
+					VariantClear((VARIANTARG *)item);
+					// Write new value (shallow copy).
+					memcpy(item, &var, sizeof(VARIANT));
+				}
 			}
 			else
 			{
@@ -950,7 +1132,9 @@ ResultType ComObject::SafeArrayInvoke(ExprTokenType &aResultToken, int aFlags, E
 				// Free existing value.
 				if (item_type == VT_UNKNOWN || item_type == VT_DISPATCH)
 				{
-					((IUnknown **)item)[0]->Release();
+					IUnknown *punk = ((IUnknown **)item)[0];
+					if (punk)
+						punk->Release();
 				}
 				else if (item_type == VT_BSTR)
 				{
@@ -1011,6 +1195,68 @@ int ComEnum::Next(Var *aOutput, Var *aOutputType)
 		return true;
 	}
 	return	false;
+}
+
+
+HRESULT ComArrayEnum::Begin(ComObject *aArrayObject, ComArrayEnum *&aEnum)
+{
+	HRESULT hr;
+	SAFEARRAY *psa = aArrayObject->mArray;
+	char *arrayData, *arrayEnd;
+	long lbound, ubound;
+
+	if (SafeArrayGetDim(psa) != 1)
+		return E_NOTIMPL;
+	
+	if (   SUCCEEDED(hr = SafeArrayGetLBound(psa, 1, &lbound))
+		&& SUCCEEDED(hr = SafeArrayGetUBound(psa, 1, &ubound))
+		&& SUCCEEDED(hr = SafeArrayAccessData(psa, (void **)&arrayData))   )
+	{
+		VARTYPE arrayType = aArrayObject->mVarType & VT_TYPEMASK;
+		UINT elemSize = SafeArrayGetElemsize(psa);
+		arrayEnd = arrayData + (ubound - lbound) * elemSize;
+		if (aEnum = new ComArrayEnum(aArrayObject, arrayData, arrayEnd, elemSize, arrayType))
+		{
+			aArrayObject->AddRef(); // Keep obj alive until enumeration completes.
+		}
+		else
+		{
+			SafeArrayUnaccessData(psa);
+			hr = E_OUTOFMEMORY;
+		}
+	}
+	return hr;
+}
+
+ComArrayEnum::~ComArrayEnum()
+{
+	SafeArrayUnaccessData(mArrayObject->mArray); // Counter the lock done by ComArrayEnum::Begin.
+	mArrayObject->Release();
+}
+
+int ComArrayEnum::Next(Var *aOutput, Var *aOutputType)
+{
+	if ((mPointer += mElemSize) <= mEnd)
+	{
+		VARIANT var = {0};
+		if (mType == VT_VARIANT)
+		{
+			// Make shallow copy of the VARIANT item.
+			memcpy(&var, mPointer, sizeof(VARIANT));
+		}
+		else
+		{
+			// Build VARIANT with shallow copy of the item.
+			var.vt = mType;
+			memcpy(&var.lVal, mPointer, mElemSize);
+		}
+		// Copy value into var.
+		AssignVariant(*aOutput, var);
+		if (aOutputType)
+			aOutputType->Assign(var.vt);
+		return true;
+	}
+	return false;
 }
 
 
