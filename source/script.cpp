@@ -376,38 +376,39 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 	// It also provides more consistency.
 	GetModuleFileName(NULL, buf, _countof(buf));
 #else
+	TCHAR def_buf[MAX_PATH + 1], exe_buf[MAX_PATH + 1];
 	if (!aScriptFilename) // v1.0.46.08: Change in policy: store the default script in the My Documents directory rather than in Program Files.  It's more correct and solves issues that occur due to Vista's file-protection scheme.
 	{
-		TCHAR ahkinibuf[MAX_PATH+1];
-		// HotKeyIt changed to load ahk file having same name as AutoHotkey.exe from same directory instead AutoHotkey.ahk from My_Documents
-		aScriptFilename = ahkinibuf;
-		BIV_AhkPath(aScriptFilename,_T(""));
 #ifdef STANDALONE
 		BIV_AhkPath(aScriptFilename,_T(""));
 #else
 		// Since no script-file was specified on the command line, use the default name.
-		// For backward compatibility, FIRST check if there's an AutoHotkey.ini file in the current
-		// directory.  If there is, that needs to be used to retain compatibility.
+		// For portability, first check if there's an <EXENAME>.ahk file in the current directory.
+		LPTSTR suffix, dot;
+		GetModuleFileName(NULL, exe_buf, _countof(exe_buf));
+		if (  (suffix = _tcsrchr(exe_buf, '\\')) // Find name part of path.
+			&& (dot = _tcsrchr(suffix, '.')) // Find extension part of name.
+			&& dot - exe_buf + 5 < _countof(exe_buf)  ) // Enough space in buffer?
+		{
+			_tcscpy(dot, _T(".ahk"));
+		}
+		else // Very unlikely.
+			return FAIL;
 
-		_tcsncpy(aScriptFilename + _tcslen(aScriptFilename) - 3,_T("ahk"),3);
+		aScriptFilename = exe_buf; // Use the entire path, including the exe's directory.
 		if (GetFileAttributes(aScriptFilename) == 0xFFFFFFFF) // File doesn't exist, so fall back to new method.
 		{
-			_tcsncpy(aScriptFilename + _tcslen(aScriptFilename) - 3,_T("ini"),3);
-			if (GetFileAttributes(aScriptFilename) == 0xFFFFFFFF) // File doesn't exist, so fall back to new method.
-			{
-				// aScriptFilename = buf;
-				VarSizeType filespec_length = BIV_MyDocuments(aScriptFilename, _T("")); // e.g. C:\Documents and Settings\Home\My Documents
-				if (filespec_length	> _countof(buf)-16) // Need room for 16 characters ('\\' + "AutoHotkey.ahk" + terminator).
-					return FAIL; // Very rare, so for simplicity just abort.
-				_tcscpy(aScriptFilename + filespec_length, _T("\\AutoHotkey.ahk")); // Append the filename: .ahk vs. .ini seems slightly better in terms of clarity and usefulness (e.g. the ability to double click the default script to launch it).
-				// Now everything is set up right because even if aScriptFilename is a nonexistent file, the
-				// user will be prompted to create it by a stage further below.
-			} //else since the legacy .ini file exists, everything is now set up right. (The file might be a directory, but that isn't checked due to rarity.)
+			aScriptFilename = def_buf;
+			VarSizeType filespec_length = BIV_MyDocuments(aScriptFilename, _T("")); // e.g. C:\Documents and Settings\Home\My Documents
+			if (filespec_length + _tcslen(suffix) + 1 > _countof(def_buf))
+				return FAIL; // Very rare, so for simplicity just abort.
+			_tcscpy(aScriptFilename + filespec_length, suffix); // Append the filename: .ahk vs. .ini seems slightly better in terms of clarity and usefulness (e.g. the ability to double click the default script to launch it).
+			// Now everything is set up right because even if aScriptFilename is a nonexistent file, the
+			// user will be prompted to create it by a stage further below.
 		}
-		//else since the .ahk file exists, everything is now set up right. (The file might be a directory, but that isn't checked due to rarity.)
-#endif
+		//else since the legacy .ini file exists, everything is now set up right. (The file might be a directory, but that isn't checked due to rarity.)
 	}
-
+#endif
 	// In case the script is a relative filespec (relative to current working dir):
 	if (hInstance != NULL && aIsText) //It is a dll and script was given as text rather than file
 	{
@@ -10923,13 +10924,16 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 			{
 				if (!line->GetJumpTarget(false))
 					return NULL; // Error was already displayed by called function.
-				if (   line->mActionType == ACT_GOSUB && sInFunctionBody
-					&& ((Label *)(line->mRelatedLine))->mJumpToLine->IsOutsideAnyFunctionBody()   ) // Relies on above call to GetJumpTarget() having set line->mRelatedLine.
+				if (sInFunctionBody && ((Label *)(line->mRelatedLine))->mJumpToLine->IsOutsideAnyFunctionBody()) // Relies on above call to GetJumpTarget() having set line->mRelatedLine.
+				{
+					if (line->mActionType == ACT_GOTO)
+						return line->PreparseError(_T("A Goto cannot jump from inside a function to outside."));
 					// Since this Gosub and its target line are both inside a function, they must both
 					// be in the same function because otherwise GetJumpTarget() would have reported
 					// the target as invalid.
 					line->mAttribute = ATTR_TRUE; // v1.0.48.02: To improve runtime performance, mark this Gosub as having a target that is outside of any function body.
-				//else leave above at its line-constructor default of ATTR_NONE.
+				}
+				//else leave mAttribute at its line-constructor default of ATTR_NONE.
 			}
 			break;
 
@@ -12991,6 +12995,12 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 				file_loop_mode = (line->mArgc <= 1) ? FILE_LOOP_FILES_ONLY : ConvertLoopMode(ARG2);
 				if (file_loop_mode == FILE_LOOP_INVALID)
 					return line->LineError(ERR_PARAM2_INVALID ERR_ABORT, FAIL, ARG2);
+				if (cisalpha(*ARG1) && ARG1[1] == ':' && !ARG1[2])
+					// FilePattern is something like "C:".  MSDN indicates FindFirstFile does not support
+					// targetting the root directory itself (but "C:\*" is okay).  Testing has shown that
+					// FindFirstFile does not always fail with "C:" -- sometimes it gives inexplicable
+					// results, such as a folder which exists neither in C: nor in the working dir.
+					return line->LineError(ERR_PARAM1_INVALID ERR_ABORT, FAIL, ARG1);
 				recurse_subfolders = (*ARG3 == '1' && !*(ARG3 + 1));
 			}
 			else if (attr == ATTR_LOOP_REG)
@@ -13030,7 +13040,8 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 			// can be intrinsically recursive (this is also related to the loop-recursion bugfix documented
 			// for v1.0.20: fixes A_Index so that it doesn't wrongly reset to 0 inside recursive file-loops
 			// and registry loops).
-			g.mLoopIteration = 1;
+			if (attr != ATTR_LOOP_FOR) // PerformLoopFor() sets it later so its enumerator expression (which is evaluated only once) can refer to the A_Index of the outer loop.
+				g.mLoopIteration = 1;
 
 			// PERFORM THE LOOP:
 			switch ((size_t)attr)
@@ -13186,12 +13197,10 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 			if (IS_PERSISTENT)
 				return EARLY_EXIT;  // It's "early" because only the very end of the script is the "normal" exit.
 				// EARLY_EXIT needs to be distinct from FAIL for ExitApp() and AutoExecSection().
-			else
-				// This has been tested and it does yield to the OS the error code indicated in ARG1,
-				// if present (otherwise it returns 0, naturally) as expected:
-				return g_script.ExitApp(EXIT_EXIT, NULL, (int)line->ArgIndexToInt64(0));
-
+			// Otherwise, FALL THROUGH TO BELOW:
 		case ACT_EXITAPP: // Unconditional exit.
+			// This has been tested and it does yield to the OS the error code indicated in ARG1,
+			// if present (otherwise it returns 0, naturally) as expected:
 			return g_script.ExitApp(EXIT_EXIT, NULL, (int)line->ArgIndexToInt64(0));
 
 		case ACT_BLOCK_BEGIN:
@@ -14079,6 +14088,9 @@ ResultType Line::PerformLoopFor(ExprTokenType *aResultToken, bool &aContinueMain
 	IObject &enumerator = *enum_token.object; // Might perform better as a reference?
 
 	ExprTokenType result_token;
+
+	// Now that the enumerator expression has been evaluated, init A_Index:
+	g.mLoopIteration = 1;
 
 	for (;; ++g.mLoopIteration)
 	{
