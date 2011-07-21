@@ -118,9 +118,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	// Set defaults, to be overridden by command line args we receive:
 	bool restart_mode = false;
 
-#ifndef AUTOHOTKEYSC
 	LPTSTR script_filespec = lpCmdLine ; // Naveen changed from NULL;
-#endif
 
 	// The problem of some command line parameters such as /r being "reserved" is a design flaw (one that
 	// can't be fixed without breaking existing scripts).  Fortunately, I think it affects only compiled
@@ -135,40 +133,96 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	// and will be added as variables %1% %2% etc.
 	// The above rules effectively make it impossible to autostart AutoHotkey.ini with parameters
 	// unless the filename is explicitly given (shouldn't be an issue for 99.9% of people).
+
 	TCHAR var_name[32], *param; // Small size since only numbers will be used (e.g. %1%, %2%).
 	Var *var;
 	bool switch_processing_is_complete = false;
 	int script_param_num = 1;
 
-LPTSTR args[4];
-//args[0] = __targv[0];   //      name of host program
-args[0] = GetCommandLine();
-args[1] = nameHinstanceP.argv;  // 1 option such as /Debug  /R /F /STDOUT
-args[2] = nameHinstanceP.name;  // name of script to launch
-args[3] = nameHinstanceP.args;  // script parameters, all in one string (* char)
-int argc = 4;
-
-	for (int i = 1; i < argc; ++i)  //	Naveen changed from:  for (int i = 1; i < __argc; ++i) see above
-	{  // Naveen: v6.1 put options in script variables as well
-		param = args[i]; // Naveen changed from: __argv[i]; see above
+	int dllargc = 0;
+#ifndef _UNICODE
+	LPWSTR wargv = (LPWSTR) _alloca((_tcslen(nameHinstanceP.argv)+1)*sizeof(WCHAR));
+	MultiByteToWideChar(CP_UTF8,0,nameHinstanceP.argv,-1,wargv,(_tcslen(nameHinstanceP.argv)+1)*sizeof(WCHAR));
+	LPWSTR *dllargv = CommandLineToArgvW(wargv,&dllargc);
+#else
+	LPWSTR *dllargv = CommandLineToArgvW(nameHinstanceP.argv,&dllargc);
+#endif
+	int i;
+	for (i = 0; i < dllargc; ++i) // Start at 1 because 0 contains the program name.
+	{
+#ifndef _UNICODE
+		param = (TCHAR *) _alloca((wcslen(dllargv[i])+1)*sizeof(CHAR));
+		WideCharToMultiByte(CP_ACP,0,wargv,-1,param,(wcslen(dllargv[i])+1)*sizeof(CHAR),0,0);
+#else
+		param = dllargv[i]; // For performance and convenience.
+#endif
+		if (switch_processing_is_complete) // All args are now considered to be input parameters for the script.
+		{
 			if (   !(var = g_script.FindOrAddVar(var_name, _stprintf(var_name, _T("%d"), script_param_num)))   )
 				return CRITICAL_ERROR;  // Realistically should never happen.
 			var->Assign(param);
 			++script_param_num;
-		
-	}   // Naveen: v6.1 only argv needs special processing
-	    //              script will do its own parameter parsing
-
-param = nameHinstanceP.argv ; // 
+		}
+		// Insist that switches be an exact match for the allowed values to cut down on ambiguity.
+		// For example, if the user runs "CompiledScript.exe /find", we want /find to be considered
+		// an input parameter for the script rather than a switch:
+		else if (!_tcsicmp(param, _T("/R")) || !_tcsicmp(param, _T("/restart")))
+			restart_mode = true;
+		else if (!_tcsicmp(param, _T("/F")) || !_tcsicmp(param, _T("/force")))
+			g_ForceLaunch = true;
+		else if (!_tcsicmp(param, _T("/ErrorStdOut")))
+			g_script.mErrorStdOut = true;
+		else if (!_tcsicmp(param, _T("/iLib"))) // v1.0.47: Build an include-file so that ahk2exe can include library functions called by the script.
+		{
+			++i; // Consume the next parameter too, because it's associated with this one.
+			if (i >= dllargc) // Missing the expected filename parameter.
+				return CRITICAL_ERROR;
+			// For performance and simplicity, open/create the file unconditionally and keep it open until exit.
+			g_script.mIncludeLibraryFunctionsThenExit = new TextFile;
+			if (!g_script.mIncludeLibraryFunctionsThenExit->Open(param, TextStream::WRITE | TextStream::EOL_CRLF | TextStream::BOM_UTF8, CP_UTF8)) // Can't open the temp file.
+				return CRITICAL_ERROR;
+		}
+		else if (!_tcsnicmp(param, _T("/CP"), 3)) // /CPnnn
+		{
+			// Default codepage for the script file, NOT the default for commands used by it.
+			g_DefaultScriptCodepage = ATOU(param + 3);
+		}
 #ifdef CONFIG_DEBUGGER
+		// Allow a debug session to be initiated by command-line.
+		else if (!g_Debugger.IsConnected() && !_tcsnicmp(param, _T("/Debug"), 6) && (param[6] == '\0' || param[6] == '='))
+		{
+			if (param[6] == '=')
+			{
+				param += 7;
 
-				g_DebuggerHost = "localhost";
+				LPTSTR c = _tcsrchr(param, ':');
+
+				if (c)
+				{
+					StringTCharToChar(param, g_DebuggerHost, (int)(c-param));
+					StringTCharToChar(c + 1, g_DebuggerPort);
+				}
+				else
+				{
+					StringTCharToChar(param, g_DebuggerHost);
+					g_DebuggerPort = "9000";
+				}
+			}
+			else
+			{
+				g_DebuggerHost = "127.0.0.1";
 				g_DebuggerPort = "9000";
-
+			}
+			// The actual debug session is initiated after the script is successfully parsed.
+		}
 #endif
+		else // since this is not a recognized switch, the end of the [Switches] section has been reached (by design).
+		{
+			switch_processing_is_complete = true;  // No more switches allowed after this point.
+			break; // No more switches allowed after this point.
+		}
+	}
 
-
-#ifndef AUTOHOTKEYSC
 	if (script_filespec)// Script filename was explicitly specified, so check if it has the special conversion flag.
 	{
 		size_t filespec_length = _tcslen(script_filespec);
@@ -180,7 +234,6 @@ param = nameHinstanceP.argv ; //
 				return Line::ConvertEscapeChar(script_filespec);
 		}
 	}
-#endif
 
 	// Like AutoIt2, store the number of script parameters in the script variable %0%, even if it's zero:
 	if (   !(var = g_script.FindOrAddVar(_T("0")))   )
@@ -342,6 +395,14 @@ param = nameHinstanceP.argv ; //
 		else // InitCommonControlsEx not available, so must revert to non-Ex() to make controls work on Win95/NT4.
 			InitCommonControls();
 	}
+
+#ifdef CONFIG_DEBUGGER
+	// Initiate debug session now if applicable.
+	if (!g_DebuggerHost.IsEmpty() && g_Debugger.Connect(g_DebuggerHost, g_DebuggerPort) == DEBUGGER_E_OK)
+	{
+		g_Debugger.ProcessCommands();
+	}
+#endif
 
 	// Activate the hotkeys, hotstrings, and any hooks that are required prior to executing the
 	// top part (the auto-execute part) of the script so that they will be in effect even if the

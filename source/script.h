@@ -28,6 +28,7 @@ GNU General Public License for more details.
 #ifdef ENABLE_EXEARC
 	#include "lib/exearc_read.h"
 #endif
+#include "script_object.h"
 #include "Debugger.h"
 #include "exports.h"  // for addfile in script2.cpp
 #include "os_version.h" // For the global OS_Version object
@@ -203,6 +204,8 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_VAR_IS_READONLY _T("Not allowed as an output variable.")
 #define ERR_INVALID_DOT _T("Unsupported use of \".\"")
 #define ERR_UNQUOTED_NON_ALNUM _T("Unquoted literals may only consist of alphanumeric characters/underscore.")
+#define ERR_DUPLICATE_DECLARATION _T("Duplicate declaration.")
+#define ERR_INVALID_CLASS_VAR _T("Invalid class variable declaration.")
 
 #define WARNING_USE_UNSET_VARIABLE _T("Using value of uninitialized variable.")
 #define WARNING_LOCAL_SAME_AS_GLOBAL _T("Local variable with same name as global.")
@@ -439,6 +442,7 @@ enum DllArgTypes {
 	, DLL_ARG_STR  = UorA(DLL_ARG_WSTR, DLL_ARG_ASTR)
 	, DLL_ARG_xSTR = UorA(DLL_ARG_ASTR, DLL_ARG_WSTR) // To simplify some sections.
 };  // Some sections might rely on DLL_ARG_INVALID being 0.
+
 
 // Note that currently this value must fit into a sc_type variable because that is how TextToKey()
 // stores it in the hotkey class.  sc_type is currently a UINT, and will always be at least a
@@ -1933,7 +1937,7 @@ struct FuncCallData
 
 typedef void (* BuiltInFunctionType)(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 
-class Func
+class Func : public IObject
 {
 public:
 	LPTSTR mName;
@@ -1944,8 +1948,6 @@ public:
 	Var **mVar, **mLazyVar; // Array of pointers-to-variable, allocated upon first use and later expanded as needed.
 	int mVarCount, mVarCountMax, mLazyVarCount; // Count of items in the above array as well as the maximum capacity.
 	int mInstances; // How many instances currently exist on the call stack (due to recursion or thread interruption).  Future use: Might be used to limit how deep recursion can go to help prevent stack overflow.
-	Func *mNextFunc; // Next item in linked list. // L27: Replaced linked list with binary-searchable array Script::mFunc.
-	// L31: Re-enabled mNextFunc.  See AddFunc for comments.
 
 	// Keep small members adjacent to each other to save space and improve perf. due to byte alignment:
 	UCHAR mDefaultVarType;
@@ -2027,12 +2029,17 @@ public:
 		return result;
 	}
 
+	// IObject.
+	ResultType STDMETHODCALLTYPE Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	ULONG STDMETHODCALLTYPE AddRef() { return 1; }
+	ULONG STDMETHODCALLTYPE Release() { return 1; }
+
 	Func(LPTSTR aFuncName, bool aIsBuiltIn) // Constructor.
 		: mName(aFuncName) // Caller gave us a pointer to dynamic memory for this.
 		, mBIF(NULL)
 		, mParam(NULL), mParamCount(0), mMinParams(0)
 		, mVar(NULL), mVarCount(0), mVarCountMax(0), mLazyVar(NULL), mLazyVarCount(0)
-		, mInstances(0) /*, mNextFunc(NULL)*/
+		, mInstances(0)
 		, mDefaultVarType(VAR_DECLARE_NONE)
 		, mIsBuiltIn(aIsBuiltIn)
 		, mIsVariadic(false)
@@ -2538,6 +2545,12 @@ public:
 	Var **mFuncExceptionVar;   // A list of variables declared explicitly local or global.
 	int mFuncExceptionVarCount; // The number of items in the array.
 
+#define MAX_NESTED_CLASSES 5
+#define MAX_CLASS_NAME_LENGTH UCHAR_MAX
+	int mClassObjectCount;
+	Object *mClassObject[MAX_NESTED_CLASSES]; // Class definition currently being parsed.
+	TCHAR mClassName[MAX_CLASS_NAME_LENGTH + 1]; // Only used during load-time.
+
 	// These two track the file number and line number in that file of the line currently being loaded,
 	// which simplifies calls to ScriptError() and LineError() (reduces the number of params that must be passed).
 	// These are used ONLY while loading the script into memory.  After that (while the script is running),
@@ -2554,7 +2567,6 @@ public:
 		: (mFileName ? mFileName : T_AHK_NAME), _countof(mNIC.szTip));
 	NOTIFYICONDATA mNIC; // For ease of adding and deleting our tray icon.
 
-	ResultType CloseAndReturnFail(TextStream *ts);
 	size_t GetLine(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSection, TextStream *ts);
 	ResultType IsDirective(LPTSTR aBuf);
 	ResultType ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType = ACT_INVALID
@@ -2573,12 +2585,11 @@ public:
 	// be done before dereferencing any line's mNextLine, for example:
 	Line *PreparseBlocks(Line *aStartingLine, bool aFindBlockEnd = false, Line *aParentLine = NULL);
 	Line *PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode = NORMAL_MODE, AttributeType aLoopType = ATTR_NONE);
-	
+
 	Line *mFirstLine, *mLastLine;     // The first and last lines in the linked list.
 	Line *mFirstStaticLine, *mLastStaticLine; // The first and last static var initializer.
 	Label *mFirstLabel, *mLastLabel;  // The first and last labels in the linked list.
-	Func *mFirstFunc, *mLastFunc;     // The first and last functions in the linked list.
-	Func **mFunc; // L27: Use a binary-searchable array to speed up function searches (especially beneficial for dynamic function calls).
+	Func **mFunc;  // Binary-searchable array of functions.
 	int mFuncCount, mFuncCountMax;
 	Line *mTempLine; // for use with dll Execute # Naveen N9
 	Label *mTempLabel; // for use with dll Execute # Naveen N9
@@ -2680,9 +2691,12 @@ public:
 #ifndef AUTOHOTKEYSC
 	Func *FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &aErrorWasShown, bool &aFileWasFound);
 #endif
-	Func *FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength = 0, int *apInsertPos = NULL); // L27: Added apInsertPos for binary-search.
-	Func *AddFunc(LPCTSTR aFuncName, size_t aFuncNameLength, bool aIsBuiltIn, int aInsertPos); // L27: Added aInsertPos for binary-search.
+	Func *FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength = 0, int *apInsertPos = NULL);
+	Func *AddFunc(LPCTSTR aFuncName, size_t aFuncNameLength, bool aIsBuiltIn, int aInsertPos, Object *aClassObject = NULL);
 
+	ResultType DefineClass(LPTSTR aBuf);
+	ResultType DefineClassVars(LPTSTR aBuf);
+	Object *FindClass(LPCTSTR aClassName, size_t aClassNameLength = 0);
 
 	int AddBIF(LPTSTR aFuncName, BuiltInFunctionType bif, size_t minparams, size_t maxparams); // N10 added for dynamic BIFs
 	#define ALWAYS_USE_DEFAULT  0
@@ -2809,12 +2823,7 @@ VarSizeType BIV_WorkingDir(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_WinDir(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_Temp(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_ComSpec(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_ProgramFiles(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_AppData(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_Desktop(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_StartMenu(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_Programs(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_Startup(LPTSTR aBuf, LPTSTR aVarName);
+VarSizeType BIV_SpecialFolderPath(LPTSTR aBuf, LPTSTR aVarName); // Handles various variables.
 VarSizeType BIV_MyDocuments(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_Caret(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_Cursor(LPTSTR aBuf, LPTSTR aVarName);
@@ -2902,6 +2911,7 @@ void BIF_NumPut(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParam
 void BIF_StrGetPut(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_IsLabel(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_IsFunc(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_Func(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_GetKeyState(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_VarSetCapacity(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_FileExist(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
@@ -2947,8 +2957,10 @@ void BIF_Trim(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCo
 void BIF_IsObject(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_ObjCreate(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_ObjArray(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
-void BIF_ObjGetInPlace(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
-void BIF_ObjInvoke(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount); // See script_object.cpp for comments.
+void BIF_ObjInvoke(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount); // Pseudo-operator. See script_object.cpp for comments.
+void BIF_ObjGetInPlace(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount); // Pseudo-operator.
+void BIF_ObjNew(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount); // Pseudo-operator.
+void BIF_ObjIncDec(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount); // Pseudo-operator.
 void BIF_ObjAddRefRelease(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 // Built-ins also available as methods -- these are available as functions for use primarily by overridden methods (i.e. where using the built-in methods isn't possible as they're no longer accessible).
 void BIF_ObjInsert(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);

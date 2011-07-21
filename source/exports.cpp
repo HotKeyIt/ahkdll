@@ -245,90 +245,52 @@ EXPORT BOOL ahkKey(LPTSTR keys)
 }
 
 #ifndef AUTOHOTKEYSC
-#ifdef _USRDLL
-// Naveen: v6 addFile()
-// Todo: support for #Directives, and proper treatment of mIsReadytoExecute
-EXPORT unsigned int addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aIgnoreLoadFailure)
-{   // dynamically include a file into a script !!
-	// labels, hotkeys, functions.   
-	static int filesAdded = 0  ; 
+// Finalize addFile/addScript/ahkExec
+BOOL FinalizeScript(Line *aFirstLine,int aFuncCount,int aHotkeyCount)
+{
 #ifndef MINIDLL
-	int HotkeyCount = Hotkey::sHotkeyCount;
-#endif
-	Line *oldLastLine = g_script.mLastLine;
-	
-	if (aIgnoreLoadFailure > 1)  // if third param is > 1, reset all functions, labels, remove hotkeys
+	if (Hotkey::sHotkeyCount>aHotkeyCount)
 	{
-		g_script.mFuncCount = 0;   
-		g_script.mFirstLabel = NULL ; 
-		g_script.mLastLabel = NULL ; 
-		g_script.mLastFunc = NULL ; 
-	    g_script.mFirstLine = NULL ; 
-		g_script.mLastLine = NULL ;
-		 g_script.mCurrLine = NULL ; 
-
-		if (filesAdded == 0)
+		Line::ToggleSuspendState();
+		Line::ToggleSuspendState();
+	}
+#endif
+	if (!(g_script.AddLine(ACT_RETURN) && g_script.AddLine(ACT_RETURN))) // Second return guaranties non-NULL mRelatedLine(s).
+		return LOADING_FAILED;
+	// Check for any unprocessed static initializers:
+	if (g_script.mFirstStaticLine)
+	{
+		if (!g_script.PreparseBlocks(g_script.mFirstStaticLine))
+			return LOADING_FAILED;
+		// Prepend all Static initializers to the end of script.
+		g_script.mLastLine->mNextLine = g_script.mFirstStaticLine;
+		g_script.mLastLine = g_script.mLastStaticLine;
+		if (!g_script.AddLine(ACT_RETURN))
+			return LOADING_FAILED;
+	}
+	if (g_Warn_LocalSameAsGlobal)
+	{
+		// Scan all "automatic" local vars and warn the user if there are any with the same
+		// name as a global variable, since that would probably indicate a missing declaration:
+		int i, j;
+		Func *func;
+		for (i = aFuncCount; i < g_script.mFuncCount; ++i)
+		{
+			if (!(func = g_script.mFunc[i])->mIsBuiltIn)
 			{
-			SimpleHeap::sBlockCount = 0 ;
-			SimpleHeap::sFirst = NULL;
-			SimpleHeap::sLast  = NULL;
-			SimpleHeap::sMostRecentlyAllocated = NULL;
+				for (j = 0; j < func->mVarCount; ++j)
+					g_script.MaybeWarnLocalSameAsGlobal(func, func->mVar[j]);
+				for (j = 0; j < func->mLazyVarCount; ++j)
+					g_script.MaybeWarnLocalSameAsGlobal(func, func->mLazyVar[j]);
 			}
-		if (filesAdded > 0)
-			{
-			// Naveen v9 free simpleheap memory for late include files
-			SimpleHeap *next, *curr;
-			for (curr = SimpleHeap::sFirst; curr != NULL;)
-				{
-				next = curr->mNextBlock;  // Save this member's value prior to deleting the object.
-				curr->~SimpleHeap() ;
-				curr = next;
-				}
-			SimpleHeap::sBlockCount = 0 ;
-			SimpleHeap::sFirst = NULL;
-			SimpleHeap::sLast  = NULL;
-			SimpleHeap::sMostRecentlyAllocated = NULL;
-/*  Naveen: the following is causing a memory leak in the exe version of clearing the simple heap v10
- g_script.mVar = NULL ; 
- g_script.mVarCount = 0 ; 
- g_script.mVarCountMax = 0 ; 
- g_script.mLazyVar = NULL ; 
-
- g_script.mLazyVarCount = 0 ; 
-*/
 		}
-	g_script.LoadIncludedFile(fileName, aAllowDuplicateInclude, (bool) aIgnoreLoadFailure);
-	if (!g_script.PreparseBlocks(oldLastLine->mNextLine) || !g_script.PreparseIfElse(oldLastLine->mNextLine))
+	}
+	if (!g_script.PreparseIfElse(aFirstLine))
 		return LOADING_FAILED;
-#ifndef MINIDLL
-	if (Hotkey::sHotkeyCount>HotkeyCount)
-	{
-		Line::ToggleSuspendState();
-		Line::ToggleSuspendState();
-	}
-#endif
-	PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)g_script.mFirstLine, (LPARAM)g_script.mFirstLine);
-	filesAdded += 1;
-	return (unsigned int) g_script.mFirstLine;
-	}
-	else
-	{
-	g_script.LoadIncludedFile(fileName, aAllowDuplicateInclude, (bool) aIgnoreLoadFailure);
-	if (!g_script.PreparseBlocks(oldLastLine->mNextLine) || !g_script.PreparseIfElse(oldLastLine->mNextLine))
-		return LOADING_FAILED;
-#ifndef MINIDLL
-	if (Hotkey::sHotkeyCount>HotkeyCount)
-	{
-		Line::ToggleSuspendState();
-		Line::ToggleSuspendState();
-	}
-#endif
-	return (unsigned int) oldLastLine->mNextLine;  // 
-	}
-return 0;  // never reached
+	if (g_script.mFirstStaticLine)
+		SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)g_script.mFirstStaticLine, (LPARAM)NULL);
+	return 0;
 }
-
-#else
 // Naveen: v6 addFile()
 // Todo: support for #Directives, and proper treatment of mIsReadytoExecute
 EXPORT unsigned int addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aIgnoreLoadFailure)
@@ -338,6 +300,8 @@ EXPORT unsigned int addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aI
 	int inFunc = 0 ;
 #ifndef MINIDLL
 	int HotkeyCount = Hotkey::sHotkeyCount;
+#else
+	int HotkeyCount = NULL;
 #endif
 	if (g->CurrentFunc)  // normally functions definitions are not allowed within functions.  But we're in a function call, not a function definition right now.
 	{
@@ -346,39 +310,31 @@ EXPORT unsigned int addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aI
 		inFunc = 1 ;
 	}
 	Line *oldLastLine = g_script.mLastLine;
-	
-	if (aIgnoreLoadFailure > 1)  // if third param is > 1, reset all functions, labels, remove hotkeys
+	int aFuncCount = g_script.mFuncCount;
+	// FirstStaticLine is used only once and therefor can be reused
+	g_script.mFirstStaticLine = NULL;
+	g_script.mLastStaticLine = NULL;
+
+	if ((g_script.LoadIncludedFile(fileName, aAllowDuplicateInclude, (bool) aIgnoreLoadFailure) != OK) || !g_script.PreparseBlocks(oldLastLine->mNextLine))
 	{
-		g_script.mFuncCount = 0;   
-		g_script.mFirstLabel = NULL ; 
-		g_script.mLastLabel = NULL ; 
-		g_script.mLastFunc = NULL ; 
-		g_script.LoadIncludedFile(fileName, aAllowDuplicateInclude, aIgnoreLoadFailure);
-	}
-	else 
-	{
-		g_script.LoadIncludedFile(fileName, aAllowDuplicateInclude, (bool) aIgnoreLoadFailure);
-	}
-	
-	if (inFunc == 1 )
-		g->CurrentFunc = aFunc ;
-#ifndef MINIDLL
-	if (!g_script.PreparseBlocks(oldLastLine->mNextLine) || !g_script.PreparseIfElse(oldLastLine->mNextLine))
+		if (inFunc == 1 )
+			g->CurrentFunc = aFunc ; 
 		return LOADING_FAILED;
-#endif	
-	if (Hotkey::sHotkeyCount>HotkeyCount)
+	}	
+	if (FinalizeScript(oldLastLine->mNextLine,aFuncCount,HotkeyCount))
+		return LOADING_FAILED;
+	if (aIgnoreLoadFailure > 1)
 	{
-		Line::ToggleSuspendState();
-		Line::ToggleSuspendState();
+		if (aIgnoreLoadFailure > 2)
+			SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)oldLastLine->mNextLine, (LPARAM)NULL);
+		else
+			PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)oldLastLine->mNextLine, (LPARAM)NULL);
 	}
-	return (unsigned int) oldLastLine->mNextLine;  // 
+    if (inFunc == 1 )
+		g->CurrentFunc = aFunc ;
+	return (unsigned int) oldLastLine->mNextLine;
 }
 
-
-#endif // _USRDLL
-#endif // AUTOHOTKEYSC
-
-#ifndef AUTOHOTKEYSC
 // HotKeyIt: addScript()
 // Todo: support for #Directives, and proper treatment of mIsReadytoExecute
 EXPORT unsigned int addScript(LPTSTR script, int aExecute)
@@ -388,6 +344,8 @@ EXPORT unsigned int addScript(LPTSTR script, int aExecute)
 	int inFunc = 0 ;
 #ifndef MINIDLL
 	int HotkeyCount = Hotkey::sHotkeyCount;
+#else
+	int HotkeyCount = NULL;
 #endif
 	if (g->CurrentFunc)  // normally functions definitions are not allowed within functions.  But we're in a function call, not a function definition right now.
 	{
@@ -396,33 +354,29 @@ EXPORT unsigned int addScript(LPTSTR script, int aExecute)
 		inFunc = 1 ;
 	}
 	Line *oldLastLine = g_script.mLastLine;
+	int aFuncCount = g_script.mFuncCount;
+	// FirstStaticLine is used only once and therefor can be reused
+	g_script.mFirstStaticLine = NULL;
+	g_script.mLastStaticLine = NULL;
 
-	if ((g_script.LoadIncludedText(script) != OK) || !g_script.PreparseBlocks(oldLastLine->mNextLine) || !g_script.PreparseIfElse(oldLastLine->mNextLine))
+	if ((g_script.LoadIncludedText(script) != OK) || !g_script.PreparseBlocks(oldLastLine->mNextLine))
 	{
-	if (inFunc == 1 )
-		g->CurrentFunc = aFunc ; 
+		if (inFunc == 1 )
+			g->CurrentFunc = aFunc ; 
 		return LOADING_FAILED;
-	}	
-#ifndef MINIDLL
-	if (Hotkey::sHotkeyCount>HotkeyCount)
-	{
-		Line::ToggleSuspendState();
-		Line::ToggleSuspendState();
 	}
-#endif
+	if (FinalizeScript(oldLastLine->mNextLine,aFuncCount,HotkeyCount))
+		return LOADING_FAILED;
 	if (aExecute > 0)
 	{
 		if (aExecute > 1)
-			SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)oldLastLine->mNextLine, (LPARAM)oldLastLine->mNextLine);
+			SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)oldLastLine->mNextLine, (LPARAM)NULL);
 		else
-			PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)oldLastLine->mNextLine, (LPARAM)oldLastLine->mNextLine);
+			PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)oldLastLine->mNextLine, (LPARAM)NULL);
 	}
-
-    
 	if (inFunc == 1 )
 		g->CurrentFunc = aFunc ;
-
-	return (unsigned int) oldLastLine->mNextLine;  // 
+	return (unsigned int) oldLastLine->mNextLine;
 }
 #endif // AUTOHOTKEYSC
 
@@ -440,17 +394,21 @@ EXPORT BOOL ahkExec(LPTSTR script)
 		inFunc = 1 ;
 	}
 	Line *oldLastLine = g_script.mLastLine;
-
+	// FirstStaticLine is used only once and therefor can be reused
+	g_script.mFirstStaticLine = NULL;
+	g_script.mLastStaticLine = NULL;
+	int aFuncCount = g_script.mFuncCount;
+	
 	if ((g_script.LoadIncludedText(script) != OK) || !g_script.PreparseBlocks(oldLastLine->mNextLine))
 	{
 		if (inFunc == 1 )
 			g->CurrentFunc = aFunc;
 		return LOADING_FAILED;
 	}
-	if (!oldLastLine->mNextLine) //H30 - if no line was added, return
-		return OK;
-	g_script.PreparseIfElse(oldLastLine->mNextLine);
-	SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)oldLastLine->mNextLine, (LPARAM)oldLastLine->mNextLine);
+	if (FinalizeScript(oldLastLine->mNextLine,aFuncCount,UINT_MAX))
+		return LOADING_FAILED;
+
+	SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)oldLastLine->mNextLine, (LPARAM)NULL);
 	
 	if (inFunc == 1 )
 		g->CurrentFunc = aFunc ;
@@ -459,7 +417,9 @@ EXPORT BOOL ahkExec(LPTSTR script)
 	{
 		delete prevLine->mNextLine;
 	}
-	oldLastLine->mNextLine = NULL;  // 
+	SimpleHeap::Delete(Line::sSourceFile[Line::sSourceFileCount]);
+	--Line::sSourceFileCount;
+	oldLastLine->mNextLine = NULL; 
 	return OK;
 }
 #endif // AUTOHOTKEYSC

@@ -34,10 +34,14 @@ CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST             "AutoHotkey.exe.manif
 // TYPELIB
 // ReleaseDll must be build before DebugDll to update .tlb file
 #ifdef _USRDLL
+#ifdef _WIN64
+1            TYPELIB                 "temp\\x64\\ReleaseDll\\AutoHotkey.tlb"
+#else
 #ifdef _UNICODE
 1            TYPELIB                 "temp\\Win32\\ReleaseDll\\AutoHotkey.tlb"
 #else
 1            TYPELIB                 "temp\\Win32\\ReleaseDll(mbcs)\\AutoHotkey.tlb"
+#endif
 #endif
 #endif
 

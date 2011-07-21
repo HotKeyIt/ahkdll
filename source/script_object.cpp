@@ -235,11 +235,21 @@ bool Object::Delete()
 {
 	if (mBase)
 	{
+		KeyType key;
+		IndexType insert_pos;
+		key.s = _T("__Class");
+		if (FindField(SYM_STRING, key, insert_pos))
+			// This object appears to be a class definition, so it would probably be
+			// undesirable to call the super-class' __Delete() meta-function for this.
+			return ObjectBase::Delete();
+
 		ExprTokenType result_token, this_token, param_token, *param;
 		
+		TCHAR dummy_buf[MAX_NUMBER_SIZE];
 		result_token.marker = _T("");
 		result_token.symbol = SYM_STRING;
 		result_token.mem_to_free = NULL;
+		result_token.buf = dummy_buf; // This is required in the case where __Delete returns a short string (although there's no good reason to ever do that).
 
 		this_token.symbol = SYM_OBJECT;
 		this_token.object = this;
@@ -377,7 +387,10 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 		//		3) Repeat 1 through 3 for the base object's own base.
 		if (mBase)
 		{
-			ResultType r = mBase->Invoke(aResultToken, aThisToken, aFlags | IF_META, aParam, aParamCount);
+			// aFlags: If caller specified IF_METAOBJ but not IF_METAFUNC, they want to recursively
+			// find and execute a specific meta-function (__new or __delete) but don't want any base
+			// object to invoke __call.  So if this is already a meta-invocation, don't change aFlags.
+			ResultType r = mBase->Invoke(aResultToken, aThisToken, aFlags | (IS_INVOKE_META ? 0 : IF_META), aParam, aParamCount);
 			if (r != INVOKE_NOT_HANDLED)
 				return r;
 
@@ -602,7 +615,7 @@ ResultType Object::CallField(FieldType *aField, ExprTokenType &aResultToken, Exp
 		// Consequently, if 'that[this]' contains a value, it is invoked; seems obscure but rare, and could
 		// also be of use (for instance, as a means to remove the 'this' parameter or replace it with 'that').
 		aParam[0] = &aThisToken;
-		ResultType r = aField->object->Invoke(aResultToken, field_token, IT_CALL, aParam, aParamCount);
+		ResultType r = aField->object->Invoke(aResultToken, field_token, IT_CALL | IF_FUNCOBJ, aParam, aParamCount);
 		aParam[0] = tmp;
 		return r;
 	}
@@ -1382,6 +1395,108 @@ Object::FieldType *Object::Insert(SymbolType key_type, KeyType key, IndexType at
 
 	return &field;
 }
+
+
+//
+// Func: Script interface, accessible via "function reference".
+//
+
+ResultType STDMETHODCALLTYPE Func::Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount)
+{
+	if (!aParamCount)
+		return INVOKE_NOT_HANDLED;
+
+	LPTSTR member = TokenToString(*aParam[0]);
+
+	if (!IS_INVOKE_CALL)
+	{
+		if (IS_INVOKE_SET || aParamCount > 1)
+			return INVOKE_NOT_HANDLED;
+
+		if (!_tcsicmp(member, _T("Name")))
+		{
+			aResultToken.symbol = SYM_STRING;
+			aResultToken.marker = mName;
+		}
+		else if (!_tcsicmp(member, _T("MinParams")))
+		{
+			aResultToken.symbol = SYM_INTEGER;
+			aResultToken.value_int64 = mMinParams;
+		}
+		else if (!_tcsicmp(member, _T("MaxParams")))
+		{
+			aResultToken.symbol = SYM_INTEGER;
+			aResultToken.value_int64 = mParamCount;
+		}
+		else if (!_tcsicmp(member, _T("IsBuiltIn")))
+		{
+			aResultToken.symbol = SYM_INTEGER;
+			aResultToken.value_int64 = mIsBuiltIn;
+		}
+		else if (!_tcsicmp(member, _T("IsVariadic")))
+		{
+			aResultToken.symbol = SYM_INTEGER;
+			aResultToken.value_int64 = mIsVariadic;
+		}
+		else
+			return INVOKE_NOT_HANDLED;
+
+		return OK;
+	}
+	
+	if (  !(aFlags & IF_FUNCOBJ)  )
+	{
+		if (!_tcsicmp(member, _T("IsOptional")) && aParamCount <= 2)
+		{
+			if (aParamCount == 2)
+			{
+				int param = (int)TokenToInt64(*aParam[1]); // One-based.
+				if (param > 0 && (param <= mParamCount || mIsVariadic))
+				{
+					aResultToken.symbol = SYM_INTEGER;
+					aResultToken.value_int64 = param > mMinParams;
+				}
+			}
+			else
+			{
+				aResultToken.symbol = SYM_INTEGER;
+				aResultToken.value_int64 = mMinParams != mParamCount || mIsVariadic; // True if any params are optional.
+			}
+			return OK;
+		}
+		else if (!_tcsicmp(member, _T("IsByRef")) && aParamCount <= 2 && !mIsBuiltIn)
+		{
+			if (aParamCount == 2)
+			{
+				int param = (int)TokenToInt64(*aParam[1]); // One-based.
+				if (param > 0 && (param <= mParamCount || mIsVariadic))
+				{
+					aResultToken.symbol = SYM_INTEGER;
+					aResultToken.value_int64 = param <= mParamCount && mParam[param-1].is_byref;
+				}
+			}
+			else
+			{
+				aResultToken.symbol = SYM_INTEGER;
+				aResultToken.value_int64 = FALSE;
+				for (int param = 0; param < mParamCount; ++param)
+					if (mParam[param].is_byref)
+					{
+						aResultToken.value_int64 = TRUE;
+						break;
+					}
+			}
+			return OK;
+		}
+		if (!TokenIsEmptyString(*aParam[0]))
+			return INVOKE_NOT_HANDLED; // Reserved.
+		// Called explicitly by script, such as by "obj.funcref.()" or "x := obj.funcref, x.()"
+		// rather than implicitly, like "obj.funcref()".
+		++aParam;		// Discard the "method name" parameter.
+		--aParamCount;	// 
+	}
+	return CallFunc(*this, aResultToken, aParam, aParamCount);
+}
 	
 
 //
@@ -1390,14 +1505,43 @@ Object::FieldType *Object::Insert(SymbolType key_type, KeyType key, IndexType at
 
 MetaObject g_MetaObject;
 
-LPTSTR Object::sMetaFuncName[] = { _T("__Get"), _T("__Set"), _T("__Call"), _T("__Delete") };
+LPTSTR Object::sMetaFuncName[] = { _T("__Get"), _T("__Set"), _T("__Call"), _T("__Delete"), _T("__New") };
 
 ResultType STDMETHODCALLTYPE MetaObject::Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
+	// For something like base.Method() in a class-defined method:
+	// It seems more useful and intuitive for this special behaviour to take precedence over
+	// the default meta-functions, especially since "base" may become a reserved word in future.
+	if (aThisToken.symbol == SYM_VAR && !_tcsicmp(aThisToken.var->mName, _T("base"))
+		&& !aThisToken.var->HasContents() // Since scripts are able to assign to it, may as well let them use the assigned value.
+		&& g->CurrentFunc)
+	{
+		LPCTSTR full_name = g->CurrentFunc->mName;
+		LPCTSTR end_marker = _tcsrchr(full_name, '.');
+		Object *this_class;
+		Var *this_var;
+		if (   end_marker // Appears to be a class definition.
+			&& (this_class = g_script.FindClass(full_name, end_marker - full_name)) // Can fail if the class var was reassigned at run-time.
+			&& (this_var = g->CurrentFunc->mParam[0].var)->IsObject()   ) // Valid 'this' param.
+		{
+			ExprTokenType this_token;
+			this_token.symbol = SYM_VAR;
+			this_token.var = this_var;
+			if (IObject *this_class_base = this_class->Base())
+			{
+				return this_class_base->Invoke(aResultToken, this_token, (aFlags & ~IF_METAFUNC) | IF_METAOBJ, aParam, aParamCount);
+			}
+			return OK;
+		}
+	}
+
 	// Allow script-defined meta-functions to override the default behaviour:
 	ResultType result = Object::Invoke(aResultToken, aThisToken, aFlags, aParam, aParamCount);
 	
-	if (result == INVOKE_NOT_HANDLED && IS_INVOKE_CALL && aParamCount && TokenIsEmptyString(*aParam[0]))
+	if (result != INVOKE_NOT_HANDLED || !aParamCount)
+		return result;
+
+	if (IS_INVOKE_CALL && TokenIsEmptyString(*aParam[0]))
 	{
 		// Support func_var.(params) as a means to call either a function or an object-function.
 		// This can be done fairly easily in script, but not in a way that supports ByRef;

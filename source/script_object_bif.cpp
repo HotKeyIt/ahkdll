@@ -101,8 +101,16 @@ void BIF_ObjInvoke(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
     obj_param = *aParam; // aParam[0].  Load-time validation has ensured at least one parameter was specified.
 	++aParam;
 	--aParamCount;
+
+	// The following is used in place of TokenToObject to bypass #Warn UseUnset:
+	if (obj_param->symbol == SYM_OBJECT)
+		obj = obj_param->object;
+	else if (obj_param->symbol == SYM_VAR && obj_param->var->HasObject())
+		obj = obj_param->var->Object();
+	else
+		obj = NULL;
     
-    if (obj = TokenToObject(*obj_param))
+    if (obj)
 	{
 		bool param_is_var = obj_param->symbol == SYM_VAR;
 		if (param_is_var)
@@ -115,25 +123,33 @@ void BIF_ObjInvoke(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 			obj->Release();
 	}
 	// Invoke meta-functions of g_MetaObject.
-	else if (INVOKE_NOT_HANDLED == g_MetaObject.Invoke(aResultToken, *obj_param, invoke_type | IF_META, aParam, aParamCount)
-		// If above did not handle it, check for attempts to access .base of non-object value (g_MetaObject itself).
-		// CALL is unsupported (for simplicity); SET is supported only in "multi-dimensional" mode: "".base[x]:=y
-		&& invoke_type != IT_CALL && (invoke_type == IT_SET ? aParamCount > 2 : aParamCount)
-		&& !_tcsicmp(TokenToString(*aParam[0]), _T("base")))
+	else if (INVOKE_NOT_HANDLED == g_MetaObject.Invoke(aResultToken, *obj_param, invoke_type | IF_META, aParam, aParamCount))
 	{
-		if (aParamCount > 1)	// "".base[x] or similar
+		// Since above did not handle it, check for attempts to access .base of non-object value (g_MetaObject itself).
+		if (   invoke_type != IT_CALL // Exclude things like "".base().
+			&& aParamCount > (invoke_type == IT_SET ? 2 : 0) // SET is supported only when an index is specified: "".base[x]:=y
+			&& !_tcsicmp(TokenToString(*aParam[0]), _T("base"))   )
 		{
-			// Re-invoke g_MetaObject without meta flag or "base" param.
-			ExprTokenType base_token;
-			base_token.symbol = SYM_OBJECT;
-			base_token.object = &g_MetaObject;
-			g_MetaObject.Invoke(aResultToken, base_token, invoke_type, aParam + 1, aParamCount - 1);
+			if (aParamCount > 1)	// "".base[x] or similar
+			{
+				// Re-invoke g_MetaObject without meta flag or "base" param.
+				ExprTokenType base_token;
+				base_token.symbol = SYM_OBJECT;
+				base_token.object = &g_MetaObject;
+				g_MetaObject.Invoke(aResultToken, base_token, invoke_type, aParam + 1, aParamCount - 1);
+			}
+			else					// "".base
+			{
+				// Return a reference to g_MetaObject.  No need to AddRef as g_MetaObject ignores it.
+				aResultToken.symbol = SYM_OBJECT;
+				aResultToken.object = &g_MetaObject;
+			}
 		}
-		else					// "".base
+		else
 		{
-			// Return a reference to g_MetaObject.  No need to AddRef as g_MetaObject ignores it.
-			aResultToken.symbol = SYM_OBJECT;
-			aResultToken.object = &g_MetaObject;
+			// Since it wasn't handled (not even by g_MetaObject), maybe warn at this point:
+			if (obj_param->symbol == SYM_VAR)
+				obj_param->var->MaybeWarnUninitialized();
 		}
 	}
 }
@@ -150,6 +166,144 @@ void BIF_ObjGetInPlace(ExprTokenType &aResultToken, ExprTokenType *aParam[], int
 	// actual parameters below it on the stack.
 	aParamCount = aParamCount ? (int)TokenToInt64(*aParam[0]) : 2; // x[<n-1 params>] : x.y
 	BIF_ObjInvoke(aResultToken, aParam - aParamCount, aParamCount);
+}
+
+
+//
+// BIF_ObjNew - Handles "new" as in "new Class()".
+//
+
+void BIF_ObjNew(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+{
+	aResultToken.symbol = SYM_STRING;
+	aResultToken.marker = _T("");
+
+	ExprTokenType *class_token = aParam[0]; // Save this to be restored later.
+
+	IObject *class_object = TokenToObject(*class_token);
+	if (!class_object)
+		return;
+
+	Object *new_object = Object::Create(NULL, 0);
+	if (!new_object)
+		return;
+
+	new_object->SetBase(class_object);
+
+	ExprTokenType name_token, this_token;
+	name_token.symbol = SYM_STRING;
+	name_token.marker = Object::sMetaFuncName[4]; // __New
+	this_token.symbol = SYM_OBJECT;
+	this_token.object = new_object;
+	aParam[0] = &name_token;
+	if (class_object->Invoke(aResultToken, this_token, IT_CALL | IF_METAOBJ, aParam, aParamCount) != EARLY_RETURN)
+	{
+		// Although it isn't likely to happen, if __New points at a built-in function or if mBase
+		// (or an ancestor) is not an Object (i.e. it's a ComObject), aResultToken can be set even when
+		// the result is not EARLY_RETURN.  So make sure to clean up any result we're not going to use.
+		if (aResultToken.symbol == SYM_OBJECT)
+			aResultToken.object->Release();
+		if (aResultToken.mem_to_free)
+		{
+			// This can be done by our caller, but is done here for maintainability; i.e. because
+			// some callers might expect mem_to_free to be NULL when the result isn't a string.
+			free(aResultToken.mem_to_free);
+			aResultToken.mem_to_free = NULL;
+		}
+		// Either it wasn't handled (i.e. neither this class nor any of its super-classes define __New()),
+		// or there was no explicit "return", so just return the new object.
+		aResultToken.symbol = SYM_OBJECT;
+		aResultToken.object = new_object;
+	}
+	else
+		new_object->Release();
+	aParam[0] = class_token;
+}
+
+
+//
+// BIF_ObjIncDec - Handles pre/post-increment/decrement for object fields, such as ++x[y].
+//
+
+void BIF_ObjIncDec(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+{
+	// Func::mName (which aResultToken.marker is set to) has been overloaded to pass
+	// the type of increment/decrement to be performed on this object's field.
+	SymbolType op = (SymbolType)(INT_PTR)aResultToken.marker;
+
+	ExprTokenType temp_result, current_value, value_to_set;
+
+	// Set the defaults expected by BIF_ObjInvoke:
+	temp_result.symbol = SYM_INTEGER;
+	temp_result.marker = (LPTSTR)IT_GET;
+	temp_result.buf = aResultToken.buf;
+	temp_result.mem_to_free = NULL;
+
+	// Retrieve the current value.  Do it this way instead of calling Object::Invoke
+	// so that if aParam[0] is not an object, g_MetaObject is correctly invoked.
+	BIF_ObjInvoke(temp_result, aParam, aParamCount);
+
+	switch (value_to_set.symbol = current_value.symbol = TokenIsPureNumeric(temp_result))
+	{
+	case PURE_INTEGER:
+		value_to_set.value_int64 = (current_value.value_int64 = TokenToInt64(temp_result))
+			+ ((op == SYM_POST_INCREMENT || op == SYM_PRE_INCREMENT) ? +1 : -1);
+		break;
+
+	case PURE_FLOAT:
+		value_to_set.value_double = (current_value.value_double = TokenToDouble(temp_result))
+			+ ((op == SYM_POST_INCREMENT || op == SYM_PRE_INCREMENT) ? +1 : -1);
+		break;
+	}
+
+	// Free the object or string returned by BIF_ObjInvoke, if applicable.
+	if (temp_result.symbol == SYM_OBJECT)
+		temp_result.object->Release();
+	if (temp_result.mem_to_free)
+		free(temp_result.mem_to_free);
+
+	if (current_value.symbol == PURE_NOT_NUMERIC)
+	{
+		// Value is non-numeric, so return "".
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = _T("");
+		return;
+	}
+
+	// Although it's likely our caller's param array has enough space to hold the extra
+	// parameter, there's no way to know for sure whether it's safe, so we allocate our own:
+	ExprTokenType **param = (ExprTokenType **)_alloca((aParamCount + 1) * sizeof(ExprTokenType *));
+	memcpy(param, aParam, aParamCount * sizeof(ExprTokenType *)); // Copy caller's param pointers.
+	param[aParamCount++] = &value_to_set; // Append new value as the last parameter.
+
+	if (op == SYM_PRE_INCREMENT || op == SYM_PRE_DECREMENT)
+	{
+		aResultToken.marker = (LPTSTR)IT_SET;
+		// Set the new value and pass the return value of the invocation back to our caller.
+		// This should be consistent with something like x.y := x.y + 1.
+		BIF_ObjInvoke(aResultToken, param, aParamCount);
+	}
+	else // SYM_POST_INCREMENT || SYM_POST_DECREMENT
+	{
+		// Must be re-initialized (and must use IT_SET instead of IT_GET):
+		temp_result.symbol = SYM_INTEGER;
+		temp_result.marker = (LPTSTR)IT_SET;
+		temp_result.buf = aResultToken.buf;
+		temp_result.mem_to_free = NULL;
+		
+		// Set the new value.
+		BIF_ObjInvoke(temp_result, param, aParamCount);
+		
+		// Dispose of the result safely.
+		if (temp_result.symbol == SYM_OBJECT)
+			temp_result.object->Release();
+		if (temp_result.mem_to_free)
+			free(temp_result.mem_to_free);
+
+		// Return the previous value.
+		aResultToken.symbol = current_value.symbol;
+		aResultToken.value_int64 = current_value.value_int64; // Union copy.
+	}
 }
 
 

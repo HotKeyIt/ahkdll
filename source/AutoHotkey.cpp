@@ -129,7 +129,7 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 			}
 			else
 			{
-				g_DebuggerHost = "localhost";
+				g_DebuggerHost = "127.0.0.1";
 				g_DebuggerPort = "9000";
 			}
 			// The actual debug session is initiated after the script is successfully parsed.
