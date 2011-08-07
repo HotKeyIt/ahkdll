@@ -214,18 +214,18 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 //----------------------------------------------------------------------------------
 
 void DoIncrementalMouseMove(int aX1, int aY1, int aX2, int aY2, int aSpeed);
-DWORD ProcessExist9x2000(LPTSTR aProcess, LPTSTR aProcessName);
+DWORD ProcessExist9x2000(LPTSTR aProcess);
 #ifdef CONFIG_WINNT4
-DWORD ProcessExistNT4(LPTSTR aProcess, LPTSTR aProcessName);
+DWORD ProcessExistNT4(LPTSTR aProcess);
 #endif
 
-inline DWORD ProcessExist(LPTSTR aProcess, LPTSTR aProcessName = NULL)
+inline DWORD ProcessExist(LPTSTR aProcess)
 {
 	return 
 #ifdef CONFIG_WINNT4
-		g_os.IsWinNT4() ? ProcessExistNT4(aProcess, aProcessName) :
+		g_os.IsWinNT4() ? ProcessExistNT4(aProcess) :
 #endif
-		ProcessExist9x2000(aProcess, aProcessName);
+		ProcessExist9x2000(aProcess);
 }
 
 bool Util_Shutdown(int nFlag);
@@ -462,7 +462,7 @@ enum JoyControls {JOYCTRL_INVALID, JOYCTRL_XPOS, JOYCTRL_YPOS, JOYCTRL_ZPOS
 
 enum WinGetCmds {WINGET_CMD_INVALID, WINGET_CMD_ID, WINGET_CMD_IDLAST, WINGET_CMD_PID, WINGET_CMD_PROCESSNAME
 	, WINGET_CMD_COUNT, WINGET_CMD_LIST, WINGET_CMD_MINMAX, WINGET_CMD_CONTROLLIST, WINGET_CMD_CONTROLLISTHWND
-	, WINGET_CMD_STYLE, WINGET_CMD_EXSTYLE, WINGET_CMD_TRANSPARENT, WINGET_CMD_TRANSCOLOR
+	, WINGET_CMD_STYLE, WINGET_CMD_EXSTYLE, WINGET_CMD_TRANSPARENT, WINGET_CMD_TRANSCOLOR, WINGET_CMD_PROCESSPATH
 };
 
 enum SysGetCmds {SYSGET_CMD_INVALID, SYSGET_CMD_METRICS, SYSGET_CMD_MONITORCOUNT, SYSGET_CMD_MONITORPRIMARY
@@ -1608,6 +1608,7 @@ public:
 		if (!_tcsicmp(aBuf, _T("IDLast"))) return WINGET_CMD_IDLAST;
 		if (!_tcsicmp(aBuf, _T("PID"))) return WINGET_CMD_PID;
 		if (!_tcsicmp(aBuf, _T("ProcessName"))) return WINGET_CMD_PROCESSNAME;
+		if (!_tcsicmp(aBuf, _T("ProcessPath"))) return WINGET_CMD_PROCESSPATH;
 		if (!_tcsicmp(aBuf, _T("Count"))) return WINGET_CMD_COUNT;
 		if (!_tcsicmp(aBuf, _T("List"))) return WINGET_CMD_LIST;
 		if (!_tcsicmp(aBuf, _T("MinMax"))) return WINGET_CMD_MINMAX;
@@ -2695,7 +2696,7 @@ public:
 	Func *AddFunc(LPCTSTR aFuncName, size_t aFuncNameLength, bool aIsBuiltIn, int aInsertPos, Object *aClassObject = NULL);
 
 	ResultType DefineClass(LPTSTR aBuf);
-	ResultType DefineClassVars(LPTSTR aBuf);
+	ResultType DefineClassVars(LPTSTR aBuf, bool aStatic);
 	Object *FindClass(LPCTSTR aClassName, size_t aClassNameLength = 0);
 
 	int AddBIF(LPTSTR aFuncName, BuiltInFunctionType bif, size_t minparams, size_t maxparams); // N10 added for dynamic BIFs
@@ -2812,7 +2813,6 @@ VarSizeType BIV_Space_Tab(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_AhkVersion(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_AhkPath(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_DllPath(LPTSTR aBuf, LPTSTR aVarName); // HotKeyIt H1 path of loaded dll
-VarSizeType BIV_AhkHwnd(LPTSTR aBuf, LPTSTR aVarName); // HotKeyIt MINIDLL hwnd of main window
 VarSizeType BIV_TickCount(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_Now(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_OSType(LPTSTR aBuf, LPTSTR aVarName);
@@ -2831,6 +2831,7 @@ VarSizeType BIV_ScreenWidth_Height(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_ScriptName(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_ScriptDir(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_ScriptFullPath(LPTSTR aBuf, LPTSTR aVarName);
+VarSizeType BIV_ScriptHwnd(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_LineNumber(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_LineFile(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_LoopFileName(LPTSTR aBuf, LPTSTR aVarName);
@@ -2865,6 +2866,7 @@ VarSizeType BIV_EndChar(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_Gui(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_GuiControl(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_GuiEvent(LPTSTR aBuf, LPTSTR aVarName);
+VarSizeType BIV_PriorKey(LPTSTR aBuf, LPTSTR aVarName);
 #endif
 VarSizeType BIV_EventInfo(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_TimeIdle(LPTSTR aBuf, LPTSTR aVarName);
@@ -2912,7 +2914,9 @@ void BIF_StrGetPut(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 void BIF_IsLabel(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_IsFunc(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_Func(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_IsByRef(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_GetKeyState(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_GetKeyName(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_VarSetCapacity(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_FileExist(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_WinExistActive(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
@@ -2946,6 +2950,7 @@ void BIF_LV_SetImageList(ExprTokenType &aResultToken, ExprTokenType *aParam[], i
 void BIF_TV_AddModifyDelete(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_TV_GetRelatedItem(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_TV_Get(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_TV_SetImageList(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 
 void BIF_IL_Create(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_IL_Destroy(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);

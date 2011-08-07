@@ -24,6 +24,7 @@ GNU General Public License for more details.
 #include "application.h" // for MsgSleep()
 #include "resources/resource.h"  // For InputBox.
 #include "TextIO.h"
+#include <Psapi.h> // for GetModuleBaseName.
 
 #define PCRE_STATIC             // For RegEx. PCRE_STATIC tells PCRE to declare its functions for normal, static
 #include "lib_pcre/pcre/pcre.h" // linkage rather than as functions inside an external DLL.
@@ -1446,6 +1447,7 @@ ResultType Line::Input()
 		return g_ErrorLevel->Assign(prior_input_is_being_terminated ? ERRORLEVEL_NONE : ERRORLEVEL_ERROR);
 		// Above: It's considered an "error" of sorts when there is no prior input to terminate.
 	}
+
 	// Below are done directly this way rather than passed in as args mainly to emphasize that
 	// ArgLength() can safely be called in Line methods like this one (which is done further below).
 	// It also may also slightly improve performance and reduce code size.
@@ -1791,7 +1793,7 @@ ResultType Line::Input()
 		}
 		else
 			g_input.EndedBySC ? SCtoKeyName(g_input.EndingSC, key_name + 7, _countof(key_name) - 7)
-				: VKtoKeyName(g_input.EndingVK, g_input.EndingSC, key_name + 7, _countof(key_name) - 7);
+				: VKtoKeyName(g_input.EndingVK, key_name + 7, _countof(key_name) - 7);
 		g_ErrorLevel->Assign(key_name);
 		break;
 	}
@@ -3653,6 +3655,7 @@ ResultType Line::WinGet(LPTSTR aCmd, LPTSTR aTitle, LPTSTR aText, LPTSTR aExclud
 
 	case WINGET_CMD_PID:
 	case WINGET_CMD_PROCESSNAME:
+	case WINGET_CMD_PROCESSPATH:
 		if (!target_window_determined)
 			target_window = WinExist(*g, aTitle, aText, aExcludeTitle, aExcludeText);
 		if (target_window)
@@ -3662,10 +3665,16 @@ ResultType Line::WinGet(LPTSTR aCmd, LPTSTR aTitle, LPTSTR aText, LPTSTR aExclud
 			if (cmd == WINGET_CMD_PID)
 				return output_var.Assign(pid);
 			// Otherwise, get the full path and name of the executable that owns this window.
-			_ultot(pid, buf, 10);
 			TCHAR process_name[MAX_PATH];
-			if (ProcessExist(buf, process_name))
-				return output_var.Assign(process_name);
+			HANDLE hproc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
+			if (hproc)
+			{
+				if ((cmd == WINGET_CMD_PROCESSNAME)
+					? GetModuleBaseName(hproc, NULL, process_name, _countof(process_name))
+					: GetModuleFileNameEx(hproc, NULL, process_name, _countof(process_name)))
+					return output_var.Assign(process_name);
+				CloseHandle(hproc);
+			}
 		}
 		// If above didn't return:
 		return output_var.Assign();
@@ -10931,7 +10940,30 @@ VarSizeType BIV_IconNumber(LPTSTR aBuf, LPTSTR aVarName)
 	return (VarSizeType)_tcslen(UTOA(g_script.mCustomIconNumber, target_buf));
 }
 
+VarSizeType BIV_PriorKey(LPTSTR aBuf, LPTSTR aVarName)
+{
+	const int bufSize = 32;
+	if (!aBuf)
+		return bufSize;
 
+	*aBuf = '\0'; // Init for error & not-found cases
+
+	int validEventCount = 0;
+	// Start at the current event (offset 1)
+	for (int iOffset = 1; iOffset <= g_MaxHistoryKeys; ++iOffset)
+	{
+		// Get index for circular buffer
+		int i = (g_KeyHistoryNext + g_MaxHistoryKeys - iOffset) % g_MaxHistoryKeys;
+		// Keep looking until we hit the second valid event
+		if (g_KeyHistory[i].event_type != _T('i') && ++validEventCount > 1)
+		{
+			if (g_KeyHistory[i].vk)
+				GetKeyName(g_KeyHistory[i].vk, g_KeyHistory[i].sc, aBuf, bufSize);
+			break;
+		}
+	}
+	return (VarSizeType)_tcslen(aBuf);
+}
 
 #endif
 VarSizeType BIV_ExitReason(LPTSTR aBuf, LPTSTR aVarName)
@@ -11020,20 +11052,6 @@ VarSizeType BIV_DllPath(LPTSTR aBuf, LPTSTR aVarName) // HotKeyIt H1 path of loa
 	return length;
 }
 
-VarSizeType BIV_AhkHwnd(LPTSTR aBuf, LPTSTR aVarName) // HotKeyIt MINIDLL A_AhkHwnd
-{
-	TCHAR buf[MAX_INTEGER_LENGTH + 2];
-	buf[0] = '0';
-	buf[1] = 'x';
-#ifdef UNICODE
-	_ultow((UINT)(size_t)g_hWnd, buf + 2, 16);
-#else
-	_ultoa((UINT)(size_t)g_hWnd, buf + 2, 16);
-#endif
-	if (aBuf)
-		_tcscpy(aBuf,buf);
-	return (VarSizeType)_tcslen(buf);
-}
 
 VarSizeType BIV_TickCount(LPTSTR aBuf, LPTSTR aVarName)
 {
@@ -11421,6 +11439,18 @@ VarSizeType BIV_ScriptFullPath(LPTSTR aBuf, LPTSTR aVarName)
 	return aBuf
 		? _stprintf(aBuf, _T("%s\\%s"), g_script.mFileDir, g_script.mFileName)
 		:(VarSizeType)(_tcslen(g_script.mFileDir) + _tcslen(g_script.mFileName) + 1);
+}
+
+VarSizeType BIV_ScriptHwnd(LPTSTR aBuf, LPTSTR aVarName)
+{
+	if (aBuf)
+	{
+		aBuf[0] = '0';
+		aBuf[1] = 'x';
+		Exp32or64(_ultot,_ui64tot)((size_t)g_hWnd, aBuf + 2, 16); // See BIF_WinExistActive for comments.
+		return (VarSizeType)_tcslen(aBuf);
+	}
+	return MAX_INTEGER_LENGTH;
 }
 
 VarSizeType BIV_LineNumber(LPTSTR aBuf, LPTSTR aVarName)
@@ -15524,7 +15554,7 @@ void BIF_NumGet(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParam
 	// The following aren't covered by the check below:
 	// - Due to rarity of negative offsets, only the right-side boundary is checked, not the left.
 	// - Due to rarity and to simplify things, Float/Double (which "return" higher above) aren't checked.
-	if (target < 1024 // Basic sanity check to catch incoming raw addresses that are zero or blank.
+	if (target < 65536 // Basic sanity check to catch incoming raw addresses that are zero or blank.
 		|| target_token.symbol == SYM_VAR && target+size > right_side_bound) // i.e. it's ok if target+size==right_side_bound because the last byte to be read is actually at target+size-1. In other words, the position of the last possible terminator within the variable's capacity is considered an allowable address.
 	{
 		aResultToken.symbol = SYM_STRING;
@@ -15624,7 +15654,7 @@ void BIF_NumPut(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParam
 	aResultToken.value_int64 = target + size; // This is used below and also as NumPut's return value. It's the address to the right of the item to be written.  aResultToken.symbol was set to SYM_INTEGER by our caller.
 
 	// See comments in NumGet about the following section:
-	if (target < 1024 // Basic sanity check to catch incoming raw addresses that are zero or blank.
+	if (target < 65536 // Basic sanity check to catch incoming raw addresses that are zero or blank.
 		|| target_token.symbol == SYM_VAR && aResultToken.value_int64 > (INT_PTR)right_side_bound) // i.e. it's ok if target+size==right_side_bound because the last byte to be read is actually at target+size-1. In other words, the position of the last possible terminator within the variable's capacity is considered an allowable address.
 	{
 		if (target_token.symbol == SYM_VAR)
@@ -15711,6 +15741,8 @@ void BIF_StrGetPut(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 	// - If a parameter remains, it is Encoding.
 	// Encoding may therefore only be purely numeric if Address(X) and Length(Y) are specified.
 
+	const LPVOID FIRST_VALID_ADDRESS = (LPVOID)65536;
+
 	if (aParam < aParam_end && TokenIsPureNumeric(**aParam))
 	{
 		address = (LPVOID)TokenToInt64(**aParam);
@@ -15725,7 +15757,7 @@ void BIF_StrGetPut(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 		// A length of 0 when passed to the Win API conversion functions (or the code below) means
 		// "calculate the required buffer size, but don't do anything else."
 		length = 0;
-		address = (LPVOID)1024; // Skip validation below; address should never be used when length == 0.
+		address = FIRST_VALID_ADDRESS; // Skip validation below; address should never be used when length == 0.
 	}
 
 	if (aParam < aParam_end)
@@ -15756,7 +15788,7 @@ void BIF_StrGetPut(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 
 	// Check for obvious errors to prevent an Access Violation.
 	// Address can be zero for StrPut if length is also zero (see below).
-	if ( address < (LPVOID)1024
+	if ( address < FIRST_VALID_ADDRESS
 		// Also check for overlap, in case memcpy is used instead of MultiByteToWideChar/WideCharToMultiByte.
 		// (Behaviour for memcpy would be "undefined", whereas MBTWC/WCTBM would fail.)  Overlap in the
 		// other direction (source_string beginning inside address..length) should not be possible.
@@ -15980,6 +16012,23 @@ void BIF_Func(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCo
 }
 
 
+void BIF_IsByRef(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+{
+	if (aParam[0]->symbol != SYM_VAR)
+	{
+		// Incorrect usage: return empty string to indicate the error.
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = _T("");
+	}
+	else
+	{
+		// Return true if the var is an alias for another var.
+		aResultToken.symbol = SYM_INTEGER;
+		aResultToken.value_int64 = (aParam[0]->var->ResolveAlias() != aParam[0]->var);
+	}
+}
+
+
 
 void BIF_GetKeyState(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
@@ -16015,6 +16064,42 @@ void BIF_GetKeyState(ExprTokenType &aResultToken, ExprTokenType *aParam[], int a
 	}
 	// Caller has set aResultToken.symbol to a default of SYM_INTEGER, so no need to set it here.
 	aResultToken.value_int64 = ScriptGetKeyState(vk, key_state_type); // 1 for down and 0 for up.
+}
+
+
+
+void BIF_GetKeyName(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+{
+	// Get VK and/or SC from the first parameter, which may be a key name, scXXX or vkXX.
+	// Key names are allowed even for GetKeyName() for simplicity and so that it can be
+	// used to normalise a key name; e.g. GetKeyName("Esc") returns "Escape".
+	LPTSTR key = TokenToString(*aParam[0], aResultToken.buf);
+	vk_type vk = TextToVK(key, NULL, true); // Pass true for the third parameter to avoid it calling TextToSC(), in case this is something like vk23sc14F.
+	sc_type sc = TextToSC(key);
+	if (!sc)
+	{
+		if (LPTSTR cp = tcscasestr(key, _T("SC"))) // TextToSC() supports SCxxx but not VKxxSCyyy.
+			sc = (sc_type)_tcstoul(cp + 2, NULL, 16);
+		else
+			sc = vk_to_sc(vk);
+	}
+	else if (!vk)
+		vk = sc_to_vk(sc);
+
+	switch (ctoupper(aResultToken.marker[6]))
+	{
+	case 'V': // GetKey[V]K
+		aResultToken.symbol = SYM_INTEGER;
+		aResultToken.value_int64 = vk;
+		break;
+	case 'S': // GetKey[S]C
+		aResultToken.symbol = SYM_INTEGER;
+		aResultToken.value_int64 = sc;
+		break;
+	default: // GetKey[N]ame
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = GetKeyName(vk, sc, aResultToken.buf, MAX_NUMBER_SIZE, _T(""));
+	}
 }
 
 
@@ -18330,6 +18415,35 @@ void BIF_TV_Get(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParam
 	else // On failure, it seems best to also clear the output var for better consistency and in case the script doesn't check the return value.
 		output_var.Assign();
 		// And leave aResultToken.value_int64 set to its default of 0.
+}
+
+
+
+void BIF_TV_SetImageList(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+// Returns (MSDN): "handle to the image list previously associated with the control if successful; NULL otherwise."
+// Parameters:
+// 1: HIMAGELIST obtained from somewhere such as IL_Create().
+// 2: Optional: Type of list.
+{
+	aResultToken.value_int64 = 0; // Set default return value.
+	// Above sets default result in case of early return.  For code reduction, a zero is returned for all
+	// the following conditions:
+	// Window doesn't exist.
+	// Control doesn't exist (i.e. no TreeView in window).
+
+	if (!g_gui[g->GuiDefaultWindowIndex])
+		return;
+	GuiType &gui = *g_gui[g->GuiDefaultWindowIndex]; // Always operate on thread's default window to simplify the syntax.
+	if (!gui.mCurrentTreeView)
+		return;
+	// Caller has ensured that there is at least one incoming parameter:
+	HIMAGELIST himl = (HIMAGELIST)TokenToInt64(*aParam[0]);
+	int list_type;
+	if (aParamCount > 1)
+		list_type = (int)TokenToInt64(*aParam[1]);
+	else
+		list_type = TVSIL_NORMAL;
+	aResultToken.value_int64 = (__int64)TreeView_SetImageList(gui.mCurrentTreeView->hwnd, himl, list_type);
 }
 
 

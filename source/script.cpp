@@ -1995,11 +1995,6 @@ ResultType Script::LoadIncludedText(LPTSTR aFileSpec)
 
 				// OTHERWISE in_continuation_section != 0, so the above has found the first line of a new
 				// continuation section.
-				// "has_continuation_section" indicates whether the line we're about to construct is partially
-				// composed of continuation lines beneath it.  It's separate from continuation_line_count
-				// in case there is another continuation section immediately after/adjacent to the first one,
-				// but the second one doesn't have any lines in it:
-				has_continuation_section = true;
 				continuation_line_count = 0; // Reset for this new section.
 				// Otherwise, parse options.  First set the defaults, which can be individually overridden
 				// by any options actually present.  RTrim defaults to ON for two reasons:
@@ -2074,6 +2069,14 @@ ResultType Script::LoadIncludedText(LPTSTR aFileSpec)
 							case 'c': // identify it as the option to allow comments in the section.
 								in_continuation_section = CONTINUATION_SECTION_WITH_COMMENTS; // Override the default, which is boolean true (i.e. 1).
 								break;
+							case ')':
+								// Probably something like (x.y)[z](), which is not intended as the beginning of
+								// a continuation section.  Doing this only when ")" is found should remove the
+								// need to escape "(" in most real-world expressions while still allowing new
+								// options to be added later with minimal risk of breaking scripts.
+								in_continuation_section = 0;
+								*option_end = orig_char; // Undo the temporary termination.
+								goto process_completed_line;
 							}
 						}
 					}
@@ -2083,6 +2086,12 @@ ResultType Script::LoadIncludedText(LPTSTR aFileSpec)
 					*option_end = orig_char; // Undo the temporary termination.
 
 				} // for() each item in option list
+
+				// "has_continuation_section" indicates whether the line we're about to construct is partially
+				// composed of continuation lines beneath it.  It's separate from continuation_line_count
+				// in case there is another continuation section immediately after/adjacent to the first one,
+				// but the second one doesn't have any lines in it:
+				has_continuation_section = true;
 
 				continue; // Now that the open-parenthesis of this continuation section has been processed, proceed to the next line.
 			} // if (!in_continuation_section)
@@ -2180,6 +2189,7 @@ ResultType Script::LoadIncludedText(LPTSTR aFileSpec)
 		if (!buf_length) // Done only after the line number increments above so that the physical line number is properly tracked.
 			goto continue_main_loop; // In lieu of "continue", for performance.
 
+process_completed_line:
 		// Since neither of the above executed, or they did but didn't "continue",
 		// buf now contains a non-commented line, either by itself or built from
 		// any continuation sections/lines that might have been present.  Also note that
@@ -2308,20 +2318,26 @@ ResultType Script::LoadIncludedText(LPTSTR aFileSpec)
 
 			if (mClassObjectCount)
 			{
-				if (!_tcsnicmp(buf, _T("Var"), 3) && IS_SPACE_OR_TAB(buf[3]))
+				// Check for assignment first, in case of something like "Static := 123".
+				for (cp = buf; cisalnum(*cp) || *cp == '_'; ++cp);
+				if (cp > buf) // i.e. buf begins with an identifier.
 				{
-					if (!DefineClassVars(buf + 4))
-						return FAIL; // Above already displayed the error.
-					goto continue_main_loop; // In lieu of "continue", for performance.
+					cp = omit_leading_whitespace(cp);
+					if (*cp == ':' && cp[1] == '=') // This is an assignment.
+					{
+						if (!DefineClassVars(buf, false)) // See above for comments.
+							return FAIL;
+						goto continue_main_loop;
+					}
 				}
 				if (!_tcsnicmp(buf, _T("Static"), 6) && IS_SPACE_OR_TAB(buf[6]))
 				{
-					if (!DefineClassVars(buf + 7))
+					if (!DefineClassVars(buf + 7, true))
 						return FAIL; // Above already displayed the error.
 					goto continue_main_loop; // In lieu of "continue", for performance.
 				}
 				// Anything not already handled above is not valid directly inside a class definition.
-				return ScriptError(_T("Expected class, var or method definition."), buf);
+				return ScriptError(_T("Expected assignment or class/method definition."), buf);
 			}
 		}
 
@@ -3349,11 +3365,6 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 
 				// OTHERWISE in_continuation_section != 0, so the above has found the first line of a new
 				// continuation section.
-				// "has_continuation_section" indicates whether the line we're about to construct is partially
-				// composed of continuation lines beneath it.  It's separate from continuation_line_count
-				// in case there is another continuation section immediately after/adjacent to the first one,
-				// but the second one doesn't have any lines in it:
-				has_continuation_section = true;
 				continuation_line_count = 0; // Reset for this new section.
 				// Otherwise, parse options.  First set the defaults, which can be individually overridden
 				// by any options actually present.  RTrim defaults to ON for two reasons:
@@ -3428,6 +3439,14 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 							case 'c': // identify it as the option to allow comments in the section.
 								in_continuation_section = CONTINUATION_SECTION_WITH_COMMENTS; // Override the default, which is boolean true (i.e. 1).
 								break;
+							case ')':
+								// Probably something like (x.y)[z](), which is not intended as the beginning of
+								// a continuation section.  Doing this only when ")" is found should remove the
+								// need to escape "(" in most real-world expressions while still allowing new
+								// options to be added later with minimal risk of breaking scripts.
+								in_continuation_section = 0;
+								*option_end = orig_char; // Undo the temporary termination.
+								goto process_completed_line;
 							}
 						}
 					}
@@ -3437,6 +3456,12 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 					*option_end = orig_char; // Undo the temporary termination.
 
 				} // for() each item in option list
+
+				// "has_continuation_section" indicates whether the line we're about to construct is partially
+				// composed of continuation lines beneath it.  It's separate from continuation_line_count
+				// in case there is another continuation section immediately after/adjacent to the first one,
+				// but the second one doesn't have any lines in it:
+				has_continuation_section = true;
 
 				continue; // Now that the open-parenthesis of this continuation section has been processed, proceed to the next line.
 			} // if (!in_continuation_section)
@@ -3534,6 +3559,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		if (!buf_length) // Done only after the line number increments above so that the physical line number is properly tracked.
 			goto continue_main_loop; // In lieu of "continue", for performance.
 
+process_completed_line:
 		// Since neither of the above executed, or they did but didn't "continue",
 		// buf now contains a non-commented line, either by itself or built from
 		// any continuation sections/lines that might have been present.  Also note that
@@ -3662,20 +3688,26 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 
 			if (mClassObjectCount)
 			{
-				if (!_tcsnicmp(buf, _T("Var"), 3) && IS_SPACE_OR_TAB(buf[3]))
+				// Check for assignment first, in case of something like "Static := 123".
+				for (cp = buf; cisalnum(*cp) || *cp == '_'; ++cp);
+				if (cp > buf) // i.e. buf begins with an identifier.
 				{
-					if (!DefineClassVars(buf + 4))
-						return FAIL; // Above already displayed the error.
-					goto continue_main_loop; // In lieu of "continue", for performance.
+					cp = omit_leading_whitespace(cp);
+					if (*cp == ':' && cp[1] == '=') // This is an assignment.
+					{
+						if (!DefineClassVars(buf, false)) // See above for comments.
+							return FAIL;
+						goto continue_main_loop;
+					}
 				}
 				if (!_tcsnicmp(buf, _T("Static"), 6) && IS_SPACE_OR_TAB(buf[6]))
 				{
-					if (!DefineClassVars(buf + 7))
+					if (!DefineClassVars(buf + 7, true))
 						return FAIL; // Above already displayed the error.
 					goto continue_main_loop; // In lieu of "continue", for performance.
 				}
 				// Anything not already handled above is not valid directly inside a class definition.
-				return ScriptError(_T("Expected class, var or method definition."), buf);
+				return ScriptError(_T("Expected assignment or class/method definition."), buf);
 			}
 		}
 
@@ -5969,7 +6001,8 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType,
 		}
 		if (!aActionType) // Above still didn't find a valid action (i.e. check aActionType again in case the above changed it).
 		{
-			if (*action_args == '(' || *action_args == '[') // v1.0.46.11: Recognize as multi-statements that start with a function, like "fn(), x:=4".  v1.0.47.03: Removed the following check to allow a close-brace to be followed by a comma-less function-call: strchr(action_args, g_delimiter).
+			if (*action_args == '(' || *action_args == '[' // v1.0.46.11: Recognize as multi-statements that start with a function, like "fn(), x:=4".  v1.0.47.03: Removed the following check to allow a close-brace to be followed by a comma-less function-call: strchr(action_args, g_delimiter).
+				|| *aLineText == '(') // Probably an expression with parentheses to control order of evaluation.
 			{
 				aActionType = ACT_EXPRESSION; // Mark this line as a stand-alone expression.
 				action_args = aLineText; // Since this is a function-call followed by a comma and some other expression, use the line's full text for later parsing.
@@ -8925,7 +8958,7 @@ ResultType Script::DefineClass(LPTSTR aBuf)
 }
 
 
-ResultType Script::DefineClassVars(LPTSTR aBuf)
+ResultType Script::DefineClassVars(LPTSTR aBuf, bool aStatic)
 {
 	Object *class_object = mClassObject[mClassObjectCount - 1];
 	LPTSTR item, item_end;
@@ -8984,9 +9017,9 @@ ResultType Script::DefineClassVars(LPTSTR aBuf)
 
 		item_end += FindNextDelimiter(item_end); // Find the next comma which is not part of the initializer (or find end of string).
 
-		// Append "ClassName.VarName := Initializer, " to the buffer.
+		// Append "ClassNameOrThis.VarName := Initializer, " to the buffer.
 		int chars_written = _sntprintf(buf + buf_used, _countof(buf) - buf_used, _T("%s.%.*s := %.*s, ")
-			, mClassName, name_length, item, item_end - right_side_of_operator, right_side_of_operator);
+			, aStatic ? mClassName : _T("this"), name_length, item, item_end - right_side_of_operator, right_side_of_operator);
 		if (chars_written < 0)
 			return ScriptError(_T("Declaration too long.")); // Short message since should be rare.
 		buf_used += chars_written;
@@ -9000,20 +9033,84 @@ ResultType Script::DefineClassVars(LPTSTR aBuf)
 	{
 		// Above wrote at least one initializer expression into buf.
 		buf[buf_used -= 2] = '\0'; // Remove the final ", "
+
+		// The following section temporarily replaces mLastLine in order to insert script lines
+		// either at the end of the list of static initializers (separate from the main script)
+		// or at the end of the __Init method belonging to this class.  Save the current values:
+		Line *script_first_line = mFirstLine, *script_last_line = mLastLine;
+		Line *block_end;
+		Func *init_func = NULL;
+		Var *exvar;
+
+		if (aStatic)
+		{
+			mLastLine = mLastStaticLine;
+			mFirstLine = mFirstStaticLine;
+		}
+		else
+		{
+			ExprTokenType token;
+			if (class_object->GetItem(token, _T("__Init")) && token.symbol == SYM_OBJECT
+				&& (init_func = dynamic_cast<Func *>(token.object))) // This cast SHOULD always succeed; done for maintainability.
+			{
+				// __Init method already exists, so find the end of its body.
+				for (block_end = init_func->mJumpToLine;
+					 block_end->mActionType != ACT_BLOCK_END || !block_end->mAttribute;
+					 block_end = block_end->mNextLine);
+			}
+			else
+			{
+				// Create an __Init method for this class.
+				TCHAR def[] = _T("__Init()");
+				if (!DefineFunc(def, NULL) || !AddLine(ACT_BLOCK_BEGIN)
+					|| (class_object->Base() && !ParseAndAddLine(_T("base.__Init()"), ACT_EXPRESSION))) // Initialize base-class variables first. Relies on short-circuit evaluation.
+					return FAIL;
+				
+				mLastLine->mLineNumber = 0; // Signal the debugger to skip this line while stepping in/over/out.
+				init_func = g->CurrentFunc;
+				init_func->mDefaultVarType = VAR_DECLARE_GLOBAL; // Allow global variables/class names in initializer expressions.
+				
+				if (!AddLine(ACT_BLOCK_END)) // This also resets g->CurrentFunc to NULL.
+					return FAIL;
+				block_end = mLastLine;
+				block_end->mLineNumber = 0; // See above.
+				
+				// These must be updated as one or both have changed:
+				script_first_line = mFirstLine;
+				script_last_line = mLastLine;
+			}
+			g->CurrentFunc = init_func; // g->CurrentFunc should be NULL prior to this.
+			mFuncExceptionVar = &exvar; // Must be non-NULL for "this" to be resolved correctly, even though mFuncExceptionVarCount is 0.
+			mLastLine = block_end->mPrevLine; // i.e. insert before block_end.
+			mLastLine->mNextLine = NULL; // For maintainability; AddLine() should overwrite it regardless.
+		}
+
 		if (!ParseAndAddLine(buf, ACT_EXPRESSION))
 			return FAIL; // Above already displayed the error.
-		// This part is almost identical to the code used for static var initializers:
-		mLastLine = mLastLine->mPrevLine; // Restore mLastLine to the last non-'static' line, but leave mCurrLine set to the new line.
-		if (mLastLine) // This can be NULL if the class definition is at the top of the script.
-			mLastLine->mNextLine = NULL; // Remove the new line from the main script's linked list of lines. For maintainability: AddLine() unconditionally overwrites mLastLine->mNextLine anyway.
+		
+		if (aStatic)
+		{
+			if (!mFirstStaticLine)
+				mFirstStaticLine = mLastLine;
+			mLastStaticLine = mLastLine;
+			// The following is necessary if there weren't any executable lines above this static
+			// initializer (i.e. mFirstLine was NULL and has been set to the newly created line):
+			mFirstLine = script_first_line;
+		}
 		else
-			mFirstLine = NULL;
-		if (mLastStaticLine)
-			mLastStaticLine->mNextLine = mCurrLine;
-		else
-			mFirstStaticLine = mCurrLine;
-		mCurrLine->mPrevLine = mLastStaticLine; // Even if NULL. Must be set otherwise VicinityToText() will show the wrong line if this one or one "near" it has an error.
-		mLastStaticLine = mCurrLine;
+		{
+			if (init_func->mJumpToLine == block_end) // This can be true only for the first initializer of a class with no base-class.
+				init_func->mJumpToLine = mLastLine;
+			// Rejoin the function's block-end (and any lines following it) to the main script.
+			mLastLine->mNextLine = block_end;
+			block_end->mPrevLine = mLastLine;
+			// mFirstLine should be left as it is: if it was NULL, it now contains a pointer to our
+			// __init function's block-begin, which is now the very first executable line in the script.
+			mFuncExceptionVar = NULL;
+			g->CurrentFunc = NULL;
+		}
+		// Restore mLastLine so that any subsequent script lines are added at the correct point.
+		mLastLine = script_last_line;
 	}
 	return OK;
 }
@@ -9445,6 +9542,11 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 			min_params = 2;
 			max_params = 2;
 		}
+		else if (!_tcsicmp(suffix, _T("SetImageList")))
+		{
+			bif = BIF_TV_SetImageList;
+			max_params = 2; // Leave min at 1.
+		}
 		else
 			return NULL;
 	}
@@ -9515,7 +9617,12 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		min_params = 1;
 		max_params = 1;
 	}
-
+	else if (!_tcsicmp(func_name, _T("FindLabel")))  // HotKeyIt v1.1.02.00
+	{
+		bif = BIF_FindLabel;
+		min_params = 1;
+		max_params = 1;
+	}
 	else if (!_tcsicmp(func_name, _T("Static")))  // lowlevel() Naveen v9.
 	{
 		bif = BIF_Static;
@@ -9570,10 +9677,18 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		min_params = 2;
 		max_params = 6;
 	}
-	else if (!_tcsicmp(func_name, _T("GetKeyState")))
+	else if (!_tcsnicmp(func_name, _T("GetKey"), 6))
 	{
-		bif = BIF_GetKeyState;
-		max_params = 2;
+		suffix = func_name + 6;
+		if (!_tcsicmp(suffix, _T("State")))
+		{
+			bif = BIF_GetKeyState;
+			max_params = 2;
+		}
+		else if (!_tcsicmp(suffix, _T("Name")) || !_tcsicmp(suffix, _T("VK")) || !_tcsicmp(suffix, _T("SC")))
+			bif = BIF_GetKeyName;
+		else
+			return NULL;
 	}
 	else if (!_tcsicmp(func_name, _T("Asc")))
 		bif = BIF_Asc;
@@ -9606,6 +9721,8 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		bif = BIF_Func;
 	else if (!_tcsicmp(func_name, _T("IsFunc")))
 		bif = BIF_IsFunc;
+	else if (!_tcsicmp(func_name, _T("IsByRef")))
+		bif = BIF_IsByRef;
 #ifdef ENABLE_DLLCALL
 	else if (!_tcsicmp(func_name, _T("DllCall")))
 	{
@@ -10675,6 +10792,7 @@ void *Script::GetVarType(LPTSTR aVarName)
 	if (!_tcscmp(lower, _T("scriptname"))) return BIV_ScriptName;
 	if (!_tcscmp(lower, _T("scriptdir"))) return BIV_ScriptDir;
 	if (!_tcscmp(lower, _T("scriptfullpath"))) return BIV_ScriptFullPath;
+	if (!_tcscmp(lower, _T("scripthwnd"))) return BIV_ScriptHwnd;
 	if (!_tcscmp(lower, _T("linenumber"))) return BIV_LineNumber;
 	if (!_tcscmp(lower, _T("linefile"))) return BIV_LineFile;
 
@@ -10824,6 +10942,7 @@ void *Script::GetVarType(LPTSTR aVarName)
 		|| !_tcscmp(lower, _T("guiheight"))
 		|| !_tcscmp(lower, _T("guix")) // Naming: Brevity seems more a benefit than would A_GuiEventX's improved clarity.
 		|| !_tcscmp(lower, _T("guiy"))) return BIV_Gui; // These can be overloaded if a GuiMove label or similar is ever needed.
+	if (!_tcscmp(lower, _T("priorkey"))) return BIV_PriorKey;
 #endif
 	if (!_tcscmp(lower, _T("timeidle"))) return BIV_TimeIdle;
 	if (!_tcscmp(lower, _T("timeidlephysical"))) return BIV_TimeIdlePhysical;
@@ -10831,7 +10950,6 @@ void *Script::GetVarType(LPTSTR aVarName)
 		|| !_tcscmp(lower, _T("tab"))) return BIV_Space_Tab;
 	if (!_tcscmp(lower, _T("ahkversion"))) return BIV_AhkVersion;
 	if (!_tcscmp(lower, _T("ahkpath"))) return BIV_AhkPath;
-	if (!_tcscmp(lower, _T("ahkhwnd"))) return BIV_AhkHwnd;
 	if (!_tcscmp(lower, _T("dllpath"))) return BIV_DllPath;
 
 	// Since above didn't return:
@@ -11356,7 +11474,7 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 			break;
 
 		case ACT_SETTIMER:
-			if (!line->ArgHasDeref(1))
+			if (*line_raw_arg1 && !line->ArgHasDeref(1))
 				if (   !(line->mAttribute = FindLabel(line_raw_arg1))   )
 					return line->PreparseError(ERR_NO_LABEL);
 			if (*line_raw_arg2 && !line->ArgHasDeref(2))
@@ -15899,7 +16017,7 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 		// Note that only one timer per label is allowed because the label is the unique identifier
 		// that allows us to figure out whether to "update or create" when searching the list of timers.
 		if (   !(target_label = (Label *)mAttribute)   ) // Since it wasn't resolved at load-time, it must be a variable reference.
-			if (   !(target_label = g_script.FindLabel(ARG1))   )
+			if (   !(target_label = (*ARG1 ? g_script.FindLabel(ARG1) : g.CurrentLabel))   )
 				return LineError(ERR_NO_LABEL ERR_ABORT, FAIL, ARG1);
 		// And don't update mAttribute (leave it NULL) because we want ARG1 to be dynamically resolved
 		// every time the command is executed (in case the contents of the referenced variable change).

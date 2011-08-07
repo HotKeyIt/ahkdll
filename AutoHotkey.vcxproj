@@ -167,7 +167,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <AdditionalDependencies>wsock32.lib;winmm.lib;version.lib;comctl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>wsock32.lib;winmm.lib;version.lib;comctl32.lib;psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <StackReserveSize>4194304</StackReserveSize>
       <TerminalServerAware>false</TerminalServerAware>
     </Link>
@@ -607,7 +607,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='ReleaseDll' OR '$(Configuration)'=='ReleaseDll(mbcs)'">
     <Link>
-      <AdditionalDependencies>wsock32.lib;winmm.lib;version.lib;comctl32.lib;odbc32.lib;odbccp32.lib;shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>wsock32.lib;winmm.lib;version.lib;comctl32.lib;odbc32.lib;odbccp32.lib;shlwapi.lib;psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <RandomizedBaseAddress Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">false</RandomizedBaseAddress>
       <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">false</DataExecutionPrevention>
       <RandomizedBaseAddress Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|Win32'">false</RandomizedBaseAddress>
