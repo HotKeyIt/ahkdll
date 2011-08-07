@@ -13,12 +13,12 @@ int returnCount = 0 ;
 #ifndef MINIDLL
 //COM virtual functions
 BOOL com_ahkPause(LPTSTR aChangeTo){return ahkPause(aChangeTo);}
-unsigned int com_ahkFindLabel(LPTSTR aLabelName){return ahkFindLabel(aLabelName);}
+__int64 com_ahkFindLabel(LPTSTR aLabelName){return ahkFindLabel(aLabelName);}
 // LPTSTR com_ahkgetvar(LPTSTR name,unsigned int getVar){return ahkgetvar(name,getVar);}
 // unsigned int com_ahkassign(LPTSTR name, LPTSTR value){return ahkassign(name,value);}
 unsigned int com_ahkExecuteLine(unsigned int line,unsigned int aMode,unsigned int wait){return ahkExecuteLine(line,aMode,wait);}
 BOOL com_ahkLabel(LPTSTR aLabelName, unsigned int nowait){return ahkLabel(aLabelName,nowait);}
-unsigned int com_ahkFindFunc(LPTSTR funcname){return ahkFindFunc(funcname);}
+__int64 com_ahkFindFunc(LPTSTR funcname){return ahkFindFunc(funcname);}
 // LPTSTR com_ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10){return ahkFunction(func,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10);}
 // unsigned int com_ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10){return ahkPostFunction(func,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10);}
 BOOL com_ahkKey(LPTSTR keys){return ahkKey(keys);}
@@ -71,15 +71,14 @@ EXPORT BOOL ahkPause(LPTSTR aChangeTo) //Change pause state of a running script
 }
 
 
-EXPORT unsigned int ahkFindFunc(LPTSTR funcname)
+EXPORT __int64 ahkFindFunc(LPTSTR funcname)
 {
-	return (unsigned int)g_script.FindFunc(funcname);
+	return (__int64)g_script.FindFunc(funcname);
 }
 
-EXPORT unsigned int ahkFindLabel(LPTSTR aLabelName)
+EXPORT __int64 ahkFindLabel(LPTSTR aLabelName)
 {
-	Label *aLabel = g_script.FindLabel(aLabelName) ;
-	return (unsigned int)aLabel->mJumpToLine;
+	return (__int64)g_script.FindLabel(aLabelName);
 }
 
 EXPORT int ximportfunc(ahkx_int_str func1, ahkx_int_str func2, ahkx_int_str_str func3) // Naveen ahkx N11

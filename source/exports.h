@@ -6,12 +6,12 @@
 #define BIF(fun) void fun(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 
 EXPORT BOOL ahkPause(LPTSTR aChangeTo);
-EXPORT unsigned int ahkFindLabel(LPTSTR aLabelName);
+EXPORT __int64 ahkFindLabel(LPTSTR aLabelName);
 EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar);
 EXPORT unsigned int ahkassign(LPTSTR name, LPTSTR value);
 EXPORT unsigned int ahkExecuteLine(unsigned int line,unsigned int aMode,unsigned int wait);
 EXPORT BOOL ahkLabel(LPTSTR aLabelName, unsigned int nowait = 0);
-EXPORT unsigned int ahkFindFunc(LPTSTR funcname) ;
+EXPORT __int64 ahkFindFunc(LPTSTR funcname) ;
 EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1 = _T(""), LPTSTR param2 = _T(""), LPTSTR param3 = _T(""), LPTSTR param4 = _T(""), LPTSTR param5 = _T(""), LPTSTR param6 = _T(""), LPTSTR param7 = _T(""), LPTSTR param8 = _T(""), LPTSTR param9 = _T(""), LPTSTR param10 = _T(""));
 EXPORT unsigned int ahkPostFunction(LPTSTR func, LPTSTR param1 = _T(""), LPTSTR param2 = _T(""), LPTSTR param3 = _T(""), LPTSTR param4 = _T(""), LPTSTR param5 = _T(""), LPTSTR param6 = _T(""), LPTSTR param7 = _T(""), LPTSTR param8 = _T(""), LPTSTR param9 = _T(""), LPTSTR param10 = _T(""));
 EXPORT BOOL ahkKey(LPTSTR keys);
@@ -26,6 +26,7 @@ void callFuncDllVariant(FuncAndToken *aFuncAndToken);
 void callFuncDll(FuncAndToken *aFuncAndToken); 
 
 BIF(BIF_FindFunc);
+BIF(BIF_FindLabel);
 BIF(BIF_Getvar);
 BIF(BIF_Static) ;
 BIF(BIF_Alias) ;
@@ -51,12 +52,12 @@ ResultType terminateDll();
 #ifndef MINIDLL
 //COM virtual functions declaration
 BOOL com_ahkPause(LPTSTR aChangeTo);
-unsigned int com_ahkFindLabel(LPTSTR aLabelName);
+__int64 com_ahkFindLabel(LPTSTR aLabelName);
 // LPTSTR com_ahkgetvar(LPTSTR name,unsigned int getVar);
 // unsigned int com_ahkassign(LPTSTR name, LPTSTR value);
 unsigned int com_ahkExecuteLine(unsigned int line,unsigned int aMode,unsigned int wait);
 BOOL com_ahkLabel(LPTSTR aLabelName, unsigned int nowait);
-unsigned int com_ahkFindFunc(LPTSTR funcname);
+__int64 com_ahkFindFunc(LPTSTR funcname);
 // LPTSTR com_ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10);
 unsigned int com_ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10);
 BOOL com_ahkKey(LPTSTR keys);

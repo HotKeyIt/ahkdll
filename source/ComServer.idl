@@ -19,12 +19,12 @@ library LibCOMServer
 		[id(2)] HRESULT ahkdll([in,optional] VARIANT filepath,[in,optional] VARIANT options,[in,optional] VARIANT params, [out, retval] unsigned int* hThread);
 		[id(3)] HRESULT ahkPause([in,optional] VARIANT aChangeTo,[out, retval] BOOL* paused);
 		[id(4)] HRESULT ahkReady([out, retval] BOOL* ready);
-		[id(5)] HRESULT ahkFindLabel([in] VARIANT aLabelName,[out, retval] unsigned int* pLabel);
+		[id(5)] HRESULT ahkFindLabel([in] VARIANT aLabelName,[out, retval] __int64 *pLabel);
 		[id(6)] HRESULT ahkgetvar([in] VARIANT name,[in,optional] VARIANT getVar,[out, retval] VARIANT *returnVal);
 		[id(7)] HRESULT ahkassign([in] VARIANT name,[in,optional] VARIANT value,[out, retval] unsigned int* success);
 		[id(8)] HRESULT ahkExecuteLine([in,optional] VARIANT line,[in,optional] VARIANT aMode,[in,optional] VARIANT wait,[out, retval] unsigned int* pLine);
 		[id(9)] HRESULT ahkLabel([in] VARIANT aLabelName,[in,optional] VARIANT nowait,[out, retval] BOOL* success);
-		[id(10)] HRESULT ahkFindFunction([in] VARIANT FuncName,[out, retval] unsigned int* pFunc);
+		[id(10)] HRESULT ahkFindFunction([in] VARIANT FuncName,[out, retval] __int64 *pFunc);
 		[id(11)] HRESULT ahkFunction([in] VARIANT FuncName,[in,optional] VARIANT param1,[in,optional] VARIANT param2,[in,optional] VARIANT param3,[in,optional] VARIANT param4,[in,optional] VARIANT param5,[in,optional] VARIANT param6,[in,optional] VARIANT param7,[in,optional] VARIANT param8,[in,optional] VARIANT param9,[in,optional] VARIANT param10,[out, retval] VARIANT* returnVal);
 		[id(12)] HRESULT ahkPostFunction([in] VARIANT FuncName,[in,optional] VARIANT param1,[in,optional] VARIANT param2,[in,optional] VARIANT param3,[in,optional] VARIANT param4,[in,optional] VARIANT param5,[in,optional] VARIANT param6,[in,optional] VARIANT param7,[in,optional] VARIANT param8,[in,optional] VARIANT param9,[in,optional] VARIANT param10,[out, retval] unsigned int* returnVal);
 		[id(13)] HRESULT ahkKey([in] VARIANT name,[out, retval] BOOL* success);

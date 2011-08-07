@@ -719,7 +719,7 @@ HRESULT __stdcall CoCOMServer::ahkReady(/*out*/BOOL* ready)
 	*ready = com_ahkReady();
 	return S_OK;
 }
-HRESULT __stdcall CoCOMServer::ahkFindLabel(/*in*/VARIANT aLabelName,/*out*/unsigned int* aLabelPointer)
+HRESULT __stdcall CoCOMServer::ahkFindLabel(/*in*/VARIANT aLabelName,/*out*/__int64* aLabelPointer)
 {
 	if (aLabelPointer==NULL)
 		return ERROR_INVALID_PARAMETER;
@@ -778,7 +778,7 @@ HRESULT __stdcall CoCOMServer::ahkLabel(/*[in]*/ VARIANT aLabelName,/*[in,option
 	*success = com_ahkLabel(Variant2T(aLabelName,buf),Variant2I(nowait));
 	return S_OK;
 }
-HRESULT __stdcall CoCOMServer::ahkFindFunc(/*[in]*/ VARIANT FuncName,/*[out, retval]*/ unsigned int* pFunc)
+HRESULT __stdcall CoCOMServer::ahkFindFunc(/*[in]*/ VARIANT FuncName,/*[out, retval]*/ __int64* pFunc)
 {
 	if (pFunc==NULL)
 		return ERROR_INVALID_PARAMETER;
