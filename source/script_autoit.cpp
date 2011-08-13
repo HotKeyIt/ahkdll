@@ -1009,7 +1009,10 @@ ResultType Line::URLDownloadToFile(LPTSTR aURL, LPTSTR aFilespec)
 	MyInternetReadFileEx lpfnInternetReadFileEx = (MyInternetReadFileEx)GetProcAddress(hinstLib, "InternetReadFileExA"); // InternetReadFileExW() appears unimplemented prior to Windows 7, so always use InternetReadFileExA().
 	MyInternetReadFile lpfnInternetReadFile = (MyInternetReadFile)GetProcAddress(hinstLib, "InternetReadFile"); // Called unconditionally to reduce code size and because the time required is likely insignificant compared to network latency.
 	if (!(lpfnInternetOpen && lpfnInternetOpenUrl && lpfnInternetCloseHandle && lpfnInternetReadFileEx && lpfnInternetReadFile))
+	{
+		FreeLibrary(hinstLib);
 		return g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
+	}
 
 	// v1.0.44.07: Set default to INTERNET_FLAG_RELOAD vs. 0 because the vast majority of usages would want
 	// the file to be retrieved directly rather than from the cache.
@@ -1020,7 +1023,7 @@ ResultType Line::URLDownloadToFile(LPTSTR aURL, LPTSTR aFilespec)
 	// INTERNET_FLAG_CACHE_IF_NET_FAIL is related to this, but there's no way to specify it in these
 	// particular calls, and it's the opposite of the desired behavior anyway; so it seems impossible to
 	// turn it off explicitly.
-	DWORD flags_for_open_url = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_NO_CACHE_WRITE;
+	DWORD flags_for_open_url = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE;
 	aURL = omit_leading_whitespace(aURL);
 	if (*aURL == '*') // v1.0.44.07: Provide an option to override flags_for_open_url.
 	{
@@ -2164,11 +2167,8 @@ void DoIncrementalMouseMove(int aX1, int aY1, int aX2, int aY2, int aSpeed)
 // PROCESS ROUTINES
 ////////////////////
 
-DWORD ProcessExist9x2000(LPTSTR aProcess, LPTSTR aProcessName)
+DWORD ProcessExist9x2000(LPTSTR aProcess)
 {
-	if (aProcessName) // Init this output variable in case of early return.
-		*aProcessName = '\0';
-
 	// We must dynamically load the function or program will probably not launch at all on NT4.
 	typedef BOOL (WINAPI *PROCESSWALK)(HANDLE hSnapshot, LPPROCESSENTRY32 lppe);
 	typedef HANDLE (WINAPI *CREATESNAPSHOT)(DWORD dwFlags, DWORD th32ProcessID);
@@ -2194,13 +2194,6 @@ DWORD ProcessExist9x2000(LPTSTR aProcess, LPTSTR aProcessName)
 	{
 		if (specified_pid && specified_pid == proc.th32ProcessID)
 		{
-			if (aProcessName) // Caller wanted process name also.
-			{
-				// For consistency in results, use _splitpath() both here and below rather than
-				// something that just checks for a rightmost backslash.
-				_tsplitpath(proc.szExeFile, szDrive, szDir, aProcessName, szExt);
-				_tcscat(aProcessName, szExt);
-			}
 			CloseHandle(snapshot);
 			return specified_pid;
 		}
@@ -2212,8 +2205,6 @@ DWORD ProcessExist9x2000(LPTSTR aProcess, LPTSTR aProcessName)
 		_tcscat(szFile, szExt);
 		if (!_tcsicmp(szFile, aProcess)) // lstrcmpi() is not used: 1) avoids breaking exisitng scripts; 2) provides consistent behavior across multiple locales; 3) performance.
 		{
-			if (aProcessName) // Caller wanted process name also.
-				_tcscpy(aProcessName, szFile);
 			CloseHandle(snapshot);
 			return proc.th32ProcessID;
 		}

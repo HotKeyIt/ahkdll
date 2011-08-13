@@ -931,6 +931,7 @@ ResultType Script::AutoExecSection()
 	// doesn't do "ExitApp":
 	if (!IS_PERSISTENT) // Resolve macro again in case any of its components changed since the last time.
 		g_script.ExitApp(ExecUntil_result == FAIL ? EXIT_ERROR : EXIT_EXIT);
+
 	return OK;
 }
 
@@ -1605,6 +1606,9 @@ bool IsFunction(LPTSTR aBuf, bool *aPendingFunctionHasBrace = NULL)
 	// In addition, it seems best not to allow if(...) to ever be a function definition since such a function
 	// could never be called as ACT_EXPRESSION since it would be seen as an IF-stmt instead.
 }
+
+
+
 inline LPTSTR IsClassDefinition(LPTSTR aBuf, bool &aHasOTB)
 {
 	if (_tcsnicmp(aBuf, _T("Class"), 5) || !IS_SPACE_OR_TAB(aBuf[5])) // i.e. it's not "Class" followed by a space or tab.

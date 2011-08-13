@@ -37,12 +37,12 @@ public:
 	virtual HRESULT __stdcall ahkdll(/*in,optional*/VARIANT filepath,/*in,optional*/VARIANT options,/*in,optional*/VARIANT params, /*out*/unsigned int* hThread);
 	virtual HRESULT __stdcall ahkPause(/*in,optional*/VARIANT aChangeTo, /*out*/BOOL* paused);
 	virtual HRESULT __stdcall ahkReady(/*out*/BOOL* ready);
-	virtual HRESULT __stdcall ahkFindLabel(/*[in]*/ VARIANT aLabelName,/*[out, retval]*/ unsigned int* pLabel);
+	virtual HRESULT __stdcall ahkFindLabel(/*[in]*/ VARIANT aLabelName,/*[out, retval]*/ __int64 *pLabel);
     virtual HRESULT __stdcall ahkgetvar(/*[in]*/ VARIANT name,/*[in,optional]*/ VARIANT getVar,/*[out, retval]*/ VARIANT *returnVal);
     virtual HRESULT __stdcall ahkassign(/*[in]*/ VARIANT name,/*[in,optional]*/ VARIANT value,/*[out, retval]*/ unsigned int* success);
     virtual HRESULT __stdcall ahkExecuteLine(/*[in,optional]*/ VARIANT line,/*[in,optional]*/ VARIANT aMode,/*[in,optional]*/ VARIANT wait,/*[out, retval]*/ unsigned int* pLine);
     virtual HRESULT __stdcall ahkLabel(/*[in]*/ VARIANT aLabelName,/*[in,optional]*/ VARIANT nowait,/*[out, retval]*/ BOOL* success);
-    virtual HRESULT __stdcall ahkFindFunc(/*[in]*/ VARIANT FuncName,/*[out, retval]*/ unsigned int* pFunc);
+    virtual HRESULT __stdcall ahkFindFunc(/*[in]*/ VARIANT FuncName,/*[out, retval]*/ __int64 *pFunc);
     virtual HRESULT __stdcall ahkFunction(/*[in]*/ VARIANT FuncName,/*[in,optional]*/ VARIANT param1,/*[in,optional]*/ VARIANT param2,/*[in,optional]*/ VARIANT param3,/*[in,optional]*/ VARIANT param4,/*[in,optional]*/ VARIANT param5,/*[in,optional]*/ VARIANT param6,/*[in,optional]*/ VARIANT param7,/*[in,optional]*/ VARIANT param8,/*[in,optional]*/ VARIANT param9,/*[in,optional]*/ VARIANT param10,/*[out, retval]*/ VARIANT* returnVal);
     virtual HRESULT __stdcall ahkPostFunction(/*[in]*/ VARIANT FuncName,/*[in,optional]*/ VARIANT param1,/*[in,optional]*/ VARIANT param2,/*[in,optional]*/ VARIANT param3,/*[in,optional]*/ VARIANT param4,/*[in,optional]*/ VARIANT param5,/*[in,optional]*/ VARIANT param6,/*[in,optional]*/ VARIANT param7,/*[in,optional]*/ VARIANT param8,/*[in,optional]*/ VARIANT param9,/*[in,optional]*/ VARIANT param10,/*[out, retval]*/ unsigned int* returnVal);
 	virtual HRESULT __stdcall ahkKey(/*[in]*/ VARIANT name,/*[out, retval]*/ BOOL* success);
