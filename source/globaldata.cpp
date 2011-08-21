@@ -140,6 +140,7 @@ Line **g_HotExprLines = NULL; // Array of pointers to expression lines, allocate
 int g_HotExprLineCount = 0; // Number of expression lines currently present.
 int g_HotExprLineCountMax = 0; // Current capacity of g_HotExprLines.
 UINT g_HotExprTimeout = 1000; // Timeout for #if (expression) evaluation, in milliseconds.
+HWND g_HotExprLFW = NULL; // Last Found Window of last #if expression.
 
 MenuTypeType g_MenuIsVisible = MENU_TYPE_NONE;
 #endif
