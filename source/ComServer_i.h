@@ -69,14 +69,14 @@ extern "C"{
 
 
 
-#ifndef __LibCOMServer_LIBRARY_DEFINED__
-#define __LibCOMServer_LIBRARY_DEFINED__
+#ifndef __AutoHotkey_LIBRARY_DEFINED__
+#define __AutoHotkey_LIBRARY_DEFINED__
 
-/* library LibCOMServer */
+/* library AutoHotkey */
 /* [version][uuid] */ 
 
 
-DEFINE_GUID(LIBID_LibCOMServer,0xa9863c65, 0x8cd4, 0x4069, 0x89, 0x3d, 0x3b, 0x5a, 0x3d, 0xdf, 0xae, 0x88);
+DEFINE_GUID(LIBID_AutoHotkey,0xa9863c65, 0x8cd4, 0x4069, 0x89, 0x3d, 0x3b, 0x5a, 0x3d, 0xdf, 0xae, 0x88);
 
 #ifndef __ICOMServer_INTERFACE_DEFINED__
 #define __ICOMServer_INTERFACE_DEFINED__
@@ -277,7 +277,7 @@ class DECLSPEC_UUID("974318D9-A5B2-4FE5-8AC4-33A0C9EBB8B5")
 #endif
 CoCOMServerOptional;
 #endif
-#endif /* __LibCOMServer_LIBRARY_DEFINED__ */
+#endif /* __AutoHotkey_LIBRARY_DEFINED__ */
 
 /* Additional Prototypes for ALL interfaces */
 

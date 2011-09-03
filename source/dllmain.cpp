@@ -601,7 +601,7 @@ CoCOMServer::CoCOMServer() : m_cRef(1)
 	InterlockedIncrement(&g_cComponents) ; 
 
 	m_ptinfo = NULL;
-	LoadTypeInfo(&m_ptinfo, LIBID_LibCOMServer, IID_ICOMServer, 0);
+	LoadTypeInfo(&m_ptinfo, LIBID_AutoHotkey, IID_ICOMServer, 0);
 }
 
 //
@@ -1080,13 +1080,13 @@ STDAPI DllRegisterServer()
 	                      g_szFriendlyNameOptional,
 	                      g_szVerIndProgIDOptional,
 	                      g_szProgIDOptional,
-						  LIBID_LibCOMServer) ;
+						  LIBID_AutoHotkey) ;
 	hr= RegisterServer(g_hInstance, 
 	                      CLSID_CoCOMServer,
 	                      g_szFriendlyName,
 	                      g_szVerIndProgID,
 	                      g_szProgID,
-						  LIBID_LibCOMServer) ;
+						  LIBID_AutoHotkey) ;
 	if (SUCCEEDED(hr))
 	{
 		RegisterTypeLib( g_hInstance, NULL);
@@ -1103,11 +1103,11 @@ STDAPI DllUnregisterServer()
 	HRESULT hr = UnregisterServer(CLSID_CoCOMServerOptional,
 	                        g_szVerIndProgIDOptional,
 	                        g_szProgIDOptional,
-							LIBID_LibCOMServer) ;
+							LIBID_AutoHotkey) ;
 	hr = UnregisterServer(CLSID_CoCOMServer,
 	                        g_szVerIndProgID,
 	                        g_szProgID,
-							LIBID_LibCOMServer) ;
+							LIBID_AutoHotkey) ;
 	if (SUCCEEDED(hr))
 	{
 		UnRegisterTypeLib( g_hInstance, NULL);

@@ -1,5 +1,5 @@
 #pragma once
-// This file defines some macros for compile-time configrations.
+// This file defines some macros for compile-time configurations.
 // (Like many projects on *nix that using autotools.)
 
 #if defined(WIN32) && !defined(_WIN64)
@@ -35,9 +35,6 @@
 
 // Generates warnings to help we check whether the codes are ready to handle Unicode or not.
 //#define CONFIG_UNICODE_CHECK
-
-// Includes experimental features
-#define CONFIG_EXPERIMENTAL
 
 #if !defined(UNICODE) && (!defined(_MSC_VER) || _MSC_VER < 1500)
 // These should be defined if the compiler supports these platforms, otherwise run-time OS checks may be inaccurate.

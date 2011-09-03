@@ -15,8 +15,8 @@ GNU General Public License for more details.
 */
 
 // stdafx.h : include file for standard system include files,
-//  or project specific include files that are used frequently, but
-//      are changed infrequently
+// or project specific include files that are used frequently, but
+// are changed infrequently
 //
 #if !defined(AFX_STDAFX_H__35DF5079_0252_4D5A_98BD_71AEE0407B97__INCLUDED_)
 #if defined(_USRDLL) && !defined(MINIDLL)
@@ -41,7 +41,7 @@ GNU General Public License for more details.
 #define _WIN32_IE 0x0501  // Added for v1.0.35 to have MCS_NOTODAY resolve as expected, and possibly solve other problems on newer systems.
 
 #ifdef _MSC_VER
-	#include "config.h" // compile-time configrations
+	#include "config.h" // compile-time configurations
 	#include "debug.h"
 
 	// C RunTime Header Files

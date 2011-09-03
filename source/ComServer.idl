@@ -4,7 +4,7 @@ import "wtypes.idl";
     uuid(A9863C65-8CD4-4069-893D-3B5A3DDFAE88),
     version(1.0)
 ]
-library LibCOMServer
+library AutoHotkey
 {
 	importlib("stdole32.tlb");
 	importlib("stdole.tlb"); 
