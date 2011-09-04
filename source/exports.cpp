@@ -416,7 +416,7 @@ EXPORT BOOL ahkExec(LPTSTR script)
 	{
 		delete prevLine->mNextLine;
 	}
-	free(Line::sSourceFile[Line::sSourceFileCount]);
+	free(Line::sSourceFile[Line::sSourceFileCount - 1]);
 	--Line::sSourceFileCount;
 	oldLastLine->mNextLine = NULL; 
 	return OK;

@@ -1674,7 +1674,7 @@ ResultType Script::LoadIncludedText(LPTSTR aFileSpec)
 		Line::sSourceFile[source_file_index] = aFileSpec;
 	else
 	{
-		Line::sSourceFile[source_file_index] = (LPTSTR)malloc(_tcslen(aFileSpec)* sizeof(TCHAR));
+		Line::sSourceFile[source_file_index] = (LPTSTR)malloc((_tcslen(aFileSpec)+1)* sizeof(TCHAR));
 		_tcscpy(Line::sSourceFile[source_file_index],aFileSpec);
 	}
 	// <buf> should be no larger than LINE_SIZE because some later functions rely upon that:
