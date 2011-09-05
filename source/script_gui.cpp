@@ -60,6 +60,23 @@ GuiType *Script::ResolveGui(LPTSTR aBuf, LPTSTR &aCommand, LPTSTR *aName, size_t
 	tmemcpy(name, name_marker, name_length);
 	name[name_length] = '\0';
 	
+	// Even if Gui with this name exists, if aName != NULL, our caller wants to know what
+	// name to give a new or existing Gui.  Before returning the name, ensure it is valid.  At the very
+	// least, space must be outlawed for Gui label names and +OwnerGUINAME.  Requiring the
+	// name to be valid as a variable name allows for possible future use of the Gui name
+	// as part of a variable or function name.
+	if (aName)
+	{
+		if (Var::ValidateName(name, true, false))
+		{
+			// This name is okay.
+			*aName = name_marker;
+			if (aNameLength)
+				*aNameLength = name_length;
+		}
+		// Otherwise, leave it set to NULL so our caller knows it is invalid.
+	}
+
 	if (IsPureNumeric(name, TRUE, FALSE) == PURE_INTEGER) // Allow negatives, for flexibility.
 	{
 		__int64 gui_num = ATOI64(name);
@@ -80,23 +97,6 @@ GuiType *Script::ResolveGui(LPTSTR aBuf, LPTSTR &aCommand, LPTSTR *aName, size_t
 	// Search for the Gui!
 	if (GuiType *found_gui = GuiType::FindGui(name))
 		return found_gui;
-	
-	// Since no Gui with this name exists, if aName != NULL, our caller wants to know what
-	// name to give a new Gui.  Before returning the name, ensure it is valid.  At the very
-	// least, space must be outlawed for Gui label names and +OwnerGUINAME.  Requiring the
-	// name to be valid as a variable name allows for possible future use of the Gui name
-	// as part of a variable or function name.
-	if (aName)
-	{
-		if (Var::ValidateName(name, true, false))
-		{
-			// This name is okay.
-			*aName = name_marker;
-			if (aNameLength)
-				*aNameLength = name_length;
-		}
-		// Otherwise, leave it set to NULL so our caller knows it is invalid.
-	}
 	return NULL;
 }
 
