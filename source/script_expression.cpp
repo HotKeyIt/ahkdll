@@ -694,7 +694,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 			break;
 		default:
 			// If the operand is still generic/undetermined, find out whether it is a string, integer, or float:
-			right_is_number = TokenIsPureNumeric(right, TRUE); // If it's SYM_VAR, it can be the clipboard in this case, but it works even then.
+			right_is_number = TokenIsPureNumeric(right); // If it's SYM_VAR, it can be the clipboard in this case, but it works even then.
 		}
 
 		// IF THIS IS A UNARY OPERATOR, we now have the single operand needed to perform the operation.
@@ -961,7 +961,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 			// would make the call take a long time.  MUST NOT check the value of right_is_number until after
 			// checking for SYM_CONCAT because for SYM_CONCAT, right_is_number was left uninitialized at an
 			// earlier stage (for performance).
-			if (this_token.symbol == SYM_CONCAT || !right_is_number || !(left_is_number = TokenIsPureNumeric(left, TRUE))) // See comment above.
+			if (this_token.symbol == SYM_CONCAT || !right_is_number || !(left_is_number = TokenIsPureNumeric(left))) // See comment above.
 			{
 				// L31: Handle binary ops supported by objects (= == !=).
 				switch (this_token.symbol)
@@ -1666,6 +1666,11 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 
 				if (mem_to_free)
 					free(mem_to_free);
+				if (g->ThrownToken)
+				{
+					aResult = FAIL; // If this is not done, aResult would contain garbage
+					return false;
+				}
 				return true;
 			}
 			// Caller-supplied "params*" is not an Object, so treat it like an empty list; however,
@@ -1680,6 +1685,11 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 
 		// CALL THE BUILT-IN FUNCTION:
 		mBIF(aResultToken, aParam, aParamCount);
+		if (g->ThrownToken)
+		{
+			aResult = FAIL; // See above.
+			return false;
+		}
 		return true;
 	}
 	else // It's not a built-in function, or it's a built-in that was overridden with a custom function.
@@ -1735,7 +1745,7 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 			// first one's conversion must occur prior to calling BackupFunctionVars().  In addition, there
 			// might be other interdependencies between formals and actuals if a function is calling itself
 			// recursively.
-			for (j = 0; j < count_of_actuals_that_have_formals; ++j) // For each actual parameter than has a formal.
+			for (j = 0; j < aParamCount; ++j) // For each actual parameter.
 			{
 				ExprTokenType &this_param_token = *aParam[j]; // stack[stack_count] is the first actual parameter. A check higher above has already ensured that this line won't cause stack overflow.
 				if (this_param_token.symbol == SYM_VAR && !mParam[j].is_byref)

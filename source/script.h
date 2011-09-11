@@ -164,7 +164,6 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_PARAM2_MUST_BE_BLANK _T("Parameter #2 must be blank in this case.")
 #define ERR_PARAM3_MUST_BE_BLANK _T("Parameter #3 must be blank in this case.")
 #define ERR_PARAM4_MUST_BE_BLANK _T("Parameter #4 must be blank in this case.")
-#define ERR_INVALID_KEY_OR_BUTTON _T("Invalid key or button name")
 #define ERR_MISSING_OUTPUT_VAR _T("Requires at least one of its output variables.")
 #define ERR_MISSING_OPEN_PAREN _T("Missing \"(\"")
 #define ERR_MISSING_OPEN_BRACE _T("Missing \"{\"")
@@ -174,7 +173,6 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_UNEXPECTED_CLOSE_PAREN _T("Unexpected \")\"")
 #define ERR_UNEXPECTED_CLOSE_BRACKET _T("Unexpected \"]\"")
 #define ERR_UNEXPECTED_CLOSE_BRACE _T("Unexpected \"}\"")
-#define ERR_MISMATCHED_BRACKET_PAREN _T("Mismatched [] or ()") // L31
 #define ERR_MISSING_CLOSE_QUOTE _T("Missing close-quote") // No period after short phrases.
 #define ERR_MISSING_COMMA _T("Missing comma")             //
 #define ERR_BLANK_PARAM _T("Blank parameter")             //
@@ -182,6 +180,8 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_TOO_FEW_PARAMS _T("Too few parameters passed to function.") // L31
 #define ERR_ELSE_WITH_NO_IF _T("ELSE with no matching IF")
 #define ERR_UNTIL_WITH_NO_LOOP _T("UNTIL with no matching LOOP")
+#define ERR_CATCH_WITH_NO_TRY _T("CATCH with no matching TRY")
+#define ERR_EXPECTED_BLOCK_OR_ACTION _T("Expected \"{\" or single-line action.")
 #define ERR_OUTOFMEM _T("Out of memory.")  // Used by RegEx too, so don't change it without also changing RegEx to keep the former string.
 #define ERR_EXPR_TOO_LONG _T("Expression too long")
 #define ERR_MEM_LIMIT_REACHED _T("Memory limit reached (see #MaxMem in the help file).") ERR_ABORT
@@ -189,26 +189,17 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_MENU _T("Menu does not exist.")
 #define ERR_SUBMENU _T("Submenu does not exist.")
 #define ERR_WINDOW_PARAM _T("Requires at least one of its window parameters.")
-#define ERR_ON_OFF _T("Requires ON/OFF/blank")
-#define ERR_ON_OFF_LOCALE _T("Requires ON/OFF/LOCALE")
-#define ERR_ON_OFF_TOGGLE _T("Requires ON/OFF/TOGGLE/blank")
-#define ERR_ON_OFF_TOGGLE_PERMIT _T("Requires ON/OFF/TOGGLE/PERMIT/blank")
-#define ERR_TITLEMATCHMODE _T("Requires 1/2/3/Slow/Fast")
 #define ERR_MENUTRAY _T("Supported only for the tray menu")
-#define ERR_REG_KEY _T("Invalid registry root key")
-#define ERR_REG_VALUE_TYPE _T("Invalid registry value type")
-#define ERR_INVALID_DATETIME _T("Invalid YYYYMMDDHHMISS value")
-#define ERR_MOUSE_BUTTON _T("Invalid mouse button")
 #define ERR_MOUSE_COORD _T("X & Y must be either both absent or both present.")
 #define ERR_DIVIDEBYZERO _T("Divide by zero")
-#define ERR_PERCENT _T("Must be between -100 and 100.")
-#define ERR_MOUSE_SPEED _T("Mouse speed must be between 0 and ") MAX_MOUSE_SPEED_STR _T(".")
 #define ERR_VAR_IS_READONLY _T("Not allowed as an output variable.")
 #define ERR_INVALID_DOT _T("Unsupported use of \".\"")
 #define ERR_UNQUOTED_NON_ALNUM _T("Unquoted literals may only consist of alphanumeric characters/underscore.")
 #define ERR_DUPLICATE_DECLARATION _T("Duplicate declaration.")
 #define ERR_INVALID_CLASS_VAR _T("Invalid class variable declaration.")
+#define ERR_INVALID_LINE_IN_CLASS_DEF _T("Expected assignment or class/method definition.")
 #define ERR_INVALID_GUI_NAME _T("Invalid Gui name.")
+#define ERR_INVALID_OPTION _T("Invalid option.") // Generic message used by Gui and GuiControl/Get.
 
 #define WARNING_USE_UNSET_VARIABLE _T("Using value of uninitialized variable.")
 #define WARNING_LOCAL_SAME_AS_GLOBAL _T("Local variable with same name as global.")
@@ -508,7 +499,7 @@ enum MenuCommands {MENU_CMD_INVALID, MENU_CMD_SHOW, MENU_CMD_USEERRORLEVEL
 enum GuiCommands {GUI_CMD_INVALID, GUI_CMD_OPTIONS, GUI_CMD_ADD, GUI_CMD_MARGIN, GUI_CMD_MENU
 	, GUI_CMD_SHOW, GUI_CMD_SUBMIT, GUI_CMD_CANCEL, GUI_CMD_MINIMIZE, GUI_CMD_MAXIMIZE, GUI_CMD_RESTORE
 	, GUI_CMD_DESTROY, GUI_CMD_FONT, GUI_CMD_TAB, GUI_CMD_LISTVIEW, GUI_CMD_TREEVIEW, GUI_CMD_DEFAULT
-	, GUI_CMD_COLOR, GUI_CMD_FLASH
+	, GUI_CMD_COLOR, GUI_CMD_FLASH, GUI_CMD_NEW
 };
 
 enum GuiControlCmds {GUICONTROL_CMD_INVALID, GUICONTROL_CMD_OPTIONS, GUICONTROL_CMD_CONTENTS, GUICONTROL_CMD_TEXT
@@ -637,7 +628,7 @@ private:
 	ResultType RegRead(HKEY aRootKey, LPTSTR aRegSubkey, LPTSTR aValueName);
 	ResultType RegWrite(DWORD aValueType, HKEY aRootKey, LPTSTR aRegSubkey, LPTSTR aValueName, LPTSTR aValue);
 	ResultType RegDelete(HKEY aRootKey, LPTSTR aRegSubkey, LPTSTR aValueName);
-	static bool RegRemoveSubkeys(HKEY hRegKey);
+	static LONG RegRemoveSubkeys(HKEY hRegKey);
 #ifndef MINIDLL
 	#define DESTROY_SPLASH \
 	{\
@@ -698,6 +689,7 @@ private:
 	ResultType ScriptProcess(LPTSTR aCmd, LPTSTR aProcess, LPTSTR aParam3);
 	ResultType WinSet(LPTSTR aAttrib, LPTSTR aValue, LPTSTR aTitle, LPTSTR aText
 		, LPTSTR aExcludeTitle, LPTSTR aExcludeText);
+	ResultType WinSetRegion(HWND aWnd, LPTSTR aPoints);
 	ResultType WinSetTitle(LPTSTR aTitle, LPTSTR aText, LPTSTR aNewTitle
 		, LPTSTR aExcludeTitle = _T(""), LPTSTR aExcludeText = _T(""));
 	ResultType WinGetTitle(LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LPTSTR aExcludeText);
@@ -1019,6 +1011,7 @@ public:
 #endif
 			case ACT_FORMATTIME:
 			case ACT_FOR:
+			case ACT_CATCH:
 				return ARG_TYPE_OUTPUT_VAR;
 
 			case ACT_SORT:
@@ -1425,6 +1418,7 @@ public:
 		if (!_tcsicmp(aBuf, _T("Default"))) return GUI_CMD_DEFAULT;
 		if (!_tcsicmp(aBuf, _T("Color"))) return GUI_CMD_COLOR;
 		if (!_tcsicmp(aBuf, _T("Flash"))) return GUI_CMD_FLASH;
+		if (!_tcsicmp(aBuf, _T("New"))) return GUI_CMD_NEW;
 		return GUI_CMD_INVALID;
 	}
 
@@ -1759,7 +1753,7 @@ public:
 	// These are also the modes that AutoIt3 uses.
 	{
 		// For v1.0.19, this was made more permissive (the use of strcasestr vs. stricmp) to support
-		// the optional word ErrorLevel inside this parameter:
+		// the optional word UseErrorLevel inside this parameter:
 		if (!aBuf || !*aBuf) return SW_SHOWNORMAL;
 		if (tcscasestr(aBuf, _T("MIN"))) return SW_MINIMIZE;
 		if (tcscasestr(aBuf, _T("MAX"))) return SW_MAXIMIZE;
@@ -1857,6 +1851,14 @@ public:
 	Line *PreparseError(LPTSTR aErrorText, LPTSTR aExtraInfo = _T(""));
 	// Call this LineError to avoid confusion with Script's error-displaying functions:
 	ResultType LineError(LPCTSTR aErrorText, ResultType aErrorType = FAIL, LPCTSTR aExtraInfo = _T(""));
+	IObject *CreateRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat = NULL, LPCTSTR aExtraInfo = _T(""));
+	ResultType ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat = NULL, LPCTSTR aExtraInfo = _T(""));
+	
+	ResultType SetErrorsOrThrow(bool aError, DWORD aLastErrorOverride = -1);
+	ResultType SetErrorLevelOrThrow() { return SetErrorLevelOrThrowBool(true); }
+	ResultType SetErrorLevelOrThrowBool(bool aError);        //
+	ResultType SetErrorLevelOrThrowStr(LPCTSTR aErrorValue); // Explicit names to avoid calling the wrong overload.
+	ResultType SetErrorLevelOrThrowInt(int aErrorValue);     //
 
 	Line(FileIndexType aFileIndex, LineNumberType aFileLineNumber, ActionTypeType aActionType
 		, ArgStruct aArg[], ArgCountType aArgc) // Constructor
@@ -2174,6 +2176,7 @@ public:
 	UINT GetSubmenuPos(HMENU ahMenu);
 	UINT GetItemPos(LPTSTR aMenuItemName);
 	bool ContainsMenu(UserMenu *aMenu);
+	void UpdateAccelerators();
 	// L17: Functions for menu icons.
 	ResultType SetItemIcon(UserMenuItem *aMenuItem, LPTSTR aFilename, int aIconNumber, int aWidth);
 	ResultType ApplyItemIcon(UserMenuItem *aMenuItem);
@@ -2381,6 +2384,7 @@ public:
 	HDROP mHdrop;                 // Used for drag and drop operations.
 	HICON mIconEligibleForDestruction; // The window's icon, which can be destroyed when the window is destroyed if nothing else is using it.
 	HICON mIconEligibleForDestructionSmall; // L17: A window may have two icons: ICON_SMALL and ICON_BIG.
+	HACCEL mAccel; // Keyboard accelerator table.
 	int mMarginX, mMarginY, mPrevX, mPrevY, mPrevWidth, mPrevHeight, mMaxExtentRight, mMaxExtentDown
 		, mSectionX, mSectionY, mMaxExtentRightSection, mMaxExtentDownSection;
 	LONG mMinWidth, mMinHeight, mMaxWidth, mMaxHeight;
@@ -2423,6 +2427,7 @@ public:
 		, mBackgroundColorWin(CLR_DEFAULT), mBackgroundBrushWin(NULL)
 		, mBackgroundColorCtl(CLR_DEFAULT), mBackgroundBrushCtl(NULL)
 		, mHdrop(NULL), mIconEligibleForDestruction(NULL), mIconEligibleForDestructionSmall(NULL)
+		, mAccel(NULL)
 		, mMarginX(COORD_UNSPECIFIED), mMarginY(COORD_UNSPECIFIED) // These will be set when the first control is added.
 		, mPrevX(0), mPrevY(0)
 		, mPrevWidth(0), mPrevHeight(0) // Needs to be zero for first control to start off at right offset.
@@ -2448,7 +2453,7 @@ public:
 	static void UpdateMenuBars(HMENU aMenu);
 	ResultType AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR aText);
 
-	ResultType ParseOptions(LPTSTR aOptions, bool &aSetLastFoundWindow, ToggleValueType &aOwnDialogs);
+	ResultType ParseOptions(LPTSTR aOptions, bool &aSetLastFoundWindow, ToggleValueType &aOwnDialogs, Var *&aHwndVar);
 	void GetNonClientArea(LONG &aWidth, LONG &aHeight);
 	void GetTotalWidthAndHeight(LONG &aWidth, LONG &aHeight);
 
@@ -2520,6 +2525,11 @@ public:
 	static void LV_Sort(GuiControlType &aControl, int aColumnIndex, bool aSortOnlyIfEnabled, TCHAR aForceDirection = '\0');
 	static DWORD ControlGetListViewMode(HWND aWnd);
 	static IObject *ControlGetActiveX(HWND aWnd);
+	
+	void UpdateAccelerators(UserMenu &aMenu);
+	void UpdateAccelerators(UserMenu &aMenu, LPACCEL aAccel, int &aAccelCount);
+	void RemoveAccelerators();
+	static bool ConvertAccelerator(LPTSTR aString, ACCEL &aAccel);
 };
 #endif // MINIDLL
 
@@ -2690,7 +2700,7 @@ public:
 
 	ResultType DefineFunc(LPTSTR aBuf, Var *aFuncExceptionVar[]);
 #ifndef AUTOHOTKEYSC
-	Func *FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &aErrorWasShown, bool &aFileWasFound);
+	Func *FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &aErrorWasShown, bool &aFileWasFound, bool aIsAutoInclude);
 #endif
 	Func *FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength = 0, int *apInsertPos = NULL);
 	Func *AddFunc(LPCTSTR aFuncName, size_t aFuncNameLength, bool aIsBuiltIn, int aInsertPos, Object *aClassObject = NULL);
@@ -2756,6 +2766,15 @@ public:
 	void ScriptWarning(WarnMode warnMode, LPCTSTR aWarningText, LPCTSTR aExtraInfo = _T(""), Line *line = NULL);
 	void WarnUninitializedVar(Var *var);
 	void MaybeWarnLocalSameAsGlobal(Func *func, Var *var);
+
+	static ResultType UnhandledException(ExprTokenType*& aToken, Line* line);
+	static ResultType SetErrorLevelOrThrow() { return SetErrorLevelOrThrowBool(true); }
+	static ResultType SetErrorLevelOrThrowBool(bool aError);
+	static ResultType SetErrorLevelOrThrowInt(int aErrorValue, LPCTSTR aWhat);
+	static ResultType SetErrorLevelOrThrowStr(LPCTSTR aErrorValue);
+	static ResultType SetErrorLevelOrThrowStr(LPCTSTR aErrorValue, LPCTSTR aWhat);
+	static ResultType ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat = NULL, LPCTSTR aExtraInfo = _T(""));
+	static void FreeExceptionToken(ExprTokenType*& aToken);
 
 	#define SOUNDPLAY_ALIAS _T("AHK_PlayMe")  // Used by destructor and SoundPlay().
 
@@ -2994,11 +3013,13 @@ void BIF_ComObjArray(ExprTokenType &aResultToken, ExprTokenType *aParam[], int a
 void BIF_ComObjQuery(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 
 
+void BIF_Exception(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+
+
 BOOL LegacyResultToBOOL(LPTSTR aResult);
 BOOL LegacyVarToBOOL(Var &aVar);
 BOOL TokenToBOOL(ExprTokenType &aToken, SymbolType aTokenIsNumber);
 SymbolType TokenIsPureNumeric(ExprTokenType &aToken);
-SymbolType TokenIsPureNumeric(ExprTokenType &aToken, BOOL aNoWarnUninitializedVar); // Same as TokenIsPureNumeric but allows the possible "uninitialized var" warning to be avoiding.
 BOOL TokenIsEmptyString(ExprTokenType &aToken);
 BOOL TokenIsEmptyString(ExprTokenType &aToken, BOOL aWarnUninitializedVar); // Same as TokenIsEmptyString but optionally warns if the token is an uninitialized var.
 __int64 TokenToInt64(ExprTokenType &aToken, BOOL aIsPureInteger = FALSE);
