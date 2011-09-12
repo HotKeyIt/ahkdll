@@ -1646,7 +1646,7 @@ ResultType Script::LoadIncludedText(LPTSTR aFileSpec)
 #define HOTKEY_FLAG_LENGTH 2
 {
 	if (!aFileSpec || !*aFileSpec) return FAIL;
-
+	
 	// Keep this var on the stack due to recursion, which allows newly created lines to be given the
 	// correct file number even when some #include's have been encountered in the middle of the script:
 	int source_file_index = Line::sSourceFileCount;
@@ -1672,6 +1672,12 @@ ResultType Script::LoadIncludedText(LPTSTR aFileSpec)
 		Line::sMaxSourceFiles = new_max;
 	}
 
+	// copy script to local memory for processing
+	LPTSTR aScript = (LPTSTR)alloca((_tcslen(aFileSpec)+1)* sizeof(TCHAR));
+	if (!aScript)
+			return ScriptError(ERR_OUTOFMEM); // Short msg since so rare.
+	else
+		_tcscpy(aScript,aFileSpec);
 
 	if (!source_file_index)
 		// Since this is the first source file, it must be the main script file.  Just point it to the
@@ -1682,6 +1688,7 @@ ResultType Script::LoadIncludedText(LPTSTR aFileSpec)
 		Line::sSourceFile[source_file_index] = (LPTSTR)malloc((_tcslen(aFileSpec)+1)* sizeof(TCHAR));
 		_tcscpy(Line::sSourceFile[source_file_index],aFileSpec);
 	}
+
 	// <buf> should be no larger than LINE_SIZE because some later functions rely upon that:
 	TCHAR msg_text[MAX_PATH + 256], buf1[LINE_SIZE], buf2[LINE_SIZE], suffix[16], pending_buf[LINE_SIZE] = _T("");
 	LPTSTR buf = buf1, next_buf = buf2; // Oscillate between bufs to improve performance (avoids memcpy from buf2 to buf1).
@@ -1693,14 +1700,21 @@ ResultType Script::LoadIncludedText(LPTSTR aFileSpec)
 
 
 
+
+
+
+
 	++Line::sSourceFileCount;
 
 
 
 
+
+
+
 	
-	includedtextbuf.mBuffer = aFileSpec;
-	includedtextbuf.mLength = (DWORD)(_tcslen(aFileSpec) * sizeof(TCHAR));
+	includedtextbuf.mBuffer = aScript;
+	includedtextbuf.mLength = (DWORD)(_tcslen(aScript) * sizeof(TCHAR));
 	includedtextbuf.mOwned = false;
 	TextMem tmem, *fp = &tmem;
 	// NOTE: Ahk2Exe strips off the UTF-8 BOM.
@@ -1962,7 +1976,7 @@ ResultType Script::LoadIncludedText(LPTSTR aFileSpec)
 							// way to detect hotkeys such as the following:
 							//   +keyname:: (and other hotkey modifier symbols such as ! and ^)
 							//   +keyname1 & keyname2::
-							//   +^:: (i.e. a modifier symbol followed by something that is a hotkey modiefer and/or a hotkey suffix and/or an expression operator).
+							//   +^:: (i.e. a modifier symbol followed by something that is a hotkey modifier and/or a hotkey suffix and/or an expression operator).
 							//   <:: and &:: (i.e. hotkeys that are also expression-continuation symbols)
 							// By contrast, expressions that qualify as continuation lines can look like:
 							//   . "xxx::yyy"
@@ -2269,7 +2283,7 @@ process_completed_line:
 					return FAIL;
 				mCurrLine = NULL; // Prevents showing misleading vicinity lines if the line after a function call is a syntax error.
 			}
-			
+			*pending_buf = '\0'; // Reset now that it's been fully handled, as an indicator for subsequent iterations.
 			if (pending_buf_is_class)
 			{
 				// We have the "{" for this class, either in pending_buf (OTB) or in buf (the line after).
