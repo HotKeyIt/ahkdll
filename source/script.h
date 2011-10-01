@@ -1781,9 +1781,20 @@ public:
 		return 0;
 	}
 
-	static CoordModeAttribType ConvertCoordModeAttrib(LPTSTR aBuf)
+	static CoordModeType ConvertCoordMode(LPTSTR aBuf)
 	{
-		if (!aBuf || !*aBuf) return 0;
+		if (!aBuf || !*aBuf || !_tcsicmp(aBuf, _T("Screen")))
+			return COORD_MODE_SCREEN;
+		else if (!_tcsicmp(aBuf, _T("Relative")) || !_tcsicmp(aBuf, _T("Window")))
+			return COORD_MODE_WINDOW;
+		else if (!_tcsicmp(aBuf, _T("Client")))
+			return COORD_MODE_CLIENT;
+		return -1;
+	}
+
+	static CoordModeType ConvertCoordModeCmd(LPTSTR aBuf)
+	{
+		if (!aBuf || !*aBuf) return -1;
 #ifndef MINIDLL
 		if (!_tcsicmp(aBuf, _T("Pixel"))) return COORD_MODE_PIXEL;
 #endif
@@ -1793,7 +1804,7 @@ public:
 #ifndef MINIDLL
 		if (!_tcsicmp(aBuf, _T("Menu"))) return COORD_MODE_MENU;
 #endif
-		return 0;
+		return -1;
 	}
 
 	static VariableTypeType ConvertVariableTypeName(LPTSTR aBuf)
@@ -1964,15 +1975,17 @@ public:
 	int mParamCount; // The number of items in the above array.  This is also the function's maximum number of params.
 	int mMinParams;  // The number of mandatory parameters (populated for both UDFs and built-in's).
 	Var **mVar, **mLazyVar; // Array of pointers-to-variable, allocated upon first use and later expanded as needed.
-	int mVarCount, mVarCountMax, mLazyVarCount; // Count of items in the above array as well as the maximum capacity.
+	Var **mGlobalVar; // Array of global declarations.
+	int mVarCount, mVarCountMax, mLazyVarCount, mGlobalVarCount; // Count of items in the above array as well as the maximum capacity.
 	int mInstances; // How many instances currently exist on the call stack (due to recursion or thread interruption).  Future use: Might be used to limit how deep recursion can go to help prevent stack overflow.
 
 	// Keep small members adjacent to each other to save space and improve perf. due to byte alignment:
 	UCHAR mDefaultVarType;
 	#define VAR_DECLARE_NONE   0
-	#define VAR_DECLARE_GLOBAL 1
-	#define VAR_DECLARE_LOCAL  2
-	#define VAR_DECLARE_STATIC 3
+	#define VAR_DECLARE_GLOBAL (VAR_DECLARED | VAR_GLOBAL)
+	#define VAR_DECLARE_SUPER_GLOBAL (VAR_DECLARE_GLOBAL | VAR_SUPER_GLOBAL)
+	#define VAR_DECLARE_LOCAL  (VAR_DECLARED | VAR_LOCAL)
+	#define VAR_DECLARE_STATIC (VAR_DECLARED | VAR_LOCAL | VAR_LOCAL_STATIC)
 
 	bool mIsBuiltIn; // Determines contents of union. Keep this member adjacent/contiguous with the above.
 	// Note that it's possible for a built-in function such as WinExist() to become a normal/UDF via
@@ -2057,6 +2070,7 @@ public:
 		, mBIF(NULL)
 		, mParam(NULL), mParamCount(0), mMinParams(0)
 		, mVar(NULL), mVarCount(0), mVarCountMax(0), mLazyVar(NULL), mLazyVarCount(0)
+		, mGlobalVar(NULL), mGlobalVarCount(0)
 		, mInstances(0)
 		, mDefaultVarType(VAR_DECLARE_NONE)
 		, mIsBuiltIn(aIsBuiltIn)
@@ -2553,8 +2567,6 @@ public:
 	WinGroup *mFirstGroup, *mLastGroup;  // The first and last variables in the linked list.
 	int mCurrentFuncOpenBlockCount; // While loading the script, this is how many blocks are currently open in the current function's body.
 	bool mNextLineIsFunctionBody; // Whether the very next line to be added will be the first one of the body.
-	Var **mFuncExceptionVar;   // A list of variables declared explicitly local or global.
-	int mFuncExceptionVarCount; // The number of items in the array.
 
 #define MAX_NESTED_CLASSES 5
 #define MAX_CLASS_NAME_LENGTH UCHAR_MAX
@@ -2698,7 +2710,7 @@ public:
 	ResultType UpdateOrCreateTimer(Label *aLabel, LPTSTR aPeriod, LPTSTR aPriority, bool aEnable
 		, bool aUpdatePriorityOnly);
 
-	ResultType DefineFunc(LPTSTR aBuf, Var *aFuncExceptionVar[]);
+	ResultType DefineFunc(LPTSTR aBuf, Var *aFuncGlobalVar[]);
 #ifndef AUTOHOTKEYSC
 	Func *FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &aErrorWasShown, bool &aFileWasFound, bool aIsAutoInclude);
 #endif
@@ -2710,16 +2722,14 @@ public:
 	Object *FindClass(LPCTSTR aClassName, size_t aClassNameLength = 0);
 
 	int AddBIF(LPTSTR aFuncName, BuiltInFunctionType bif, size_t minparams, size_t maxparams); // N10 added for dynamic BIFs
-	#define ALWAYS_USE_DEFAULT  0
-	#define ALWAYS_USE_GLOBAL   1
-	#define ALWAYS_USE_LOCAL    2
-	#define ALWAYS_PREFER_LOCAL 3
-	Var *FindOrAddVar(LPTSTR aVarName, size_t aVarNameLength = 0, int aAlwaysUse = ALWAYS_USE_DEFAULT
-		, bool *apIsException = NULL);
+	#define FINDVAR_DEFAULT  (VAR_LOCAL | VAR_GLOBAL)
+	#define FINDVAR_GLOBAL   VAR_GLOBAL
+	#define FINDVAR_LOCAL    VAR_LOCAL
+	Var *FindOrAddVar(LPTSTR aVarName, size_t aVarNameLength = 0, int aScope = FINDVAR_DEFAULT);
 	Var *FindVar(LPTSTR aVarName, size_t aVarNameLength = 0, int *apInsertPos = NULL
-		, int aAlwaysUse = ALWAYS_USE_DEFAULT, bool *apIsException = NULL
+		, int aScope = FINDVAR_DEFAULT
 		, bool *apIsLocal = NULL);
-	Var *AddVar(LPTSTR aVarName, size_t aVarNameLength, int aInsertPos, int aIsLocal);
+	Var *AddVar(LPTSTR aVarName, size_t aVarNameLength, int aInsertPos, int aScope);
 	static void *GetVarType(LPTSTR aVarName);
 
 	WinGroup *FindGroup(LPTSTR aGroupName, bool aCreateIfNotFound = false);
@@ -2765,7 +2775,9 @@ public:
 	ResultType ScriptError(LPCTSTR aErrorText, LPCTSTR aExtraInfo = _T("")); // , ResultType aErrorType = FAIL);
 	void ScriptWarning(WarnMode warnMode, LPCTSTR aWarningText, LPCTSTR aExtraInfo = _T(""), Line *line = NULL);
 	void WarnUninitializedVar(Var *var);
-	void MaybeWarnLocalSameAsGlobal(Func *func, Var *var);
+	void MaybeWarnLocalSameAsGlobal(Func &func, Var &var);
+
+	void PreprocessLocalVars(Func &aFunc, Var **aVarList, int &aVarCount);
 
 	static ResultType UnhandledException(ExprTokenType*& aToken, Line* line);
 	static ResultType SetErrorLevelOrThrow() { return SetErrorLevelOrThrowBool(true); }

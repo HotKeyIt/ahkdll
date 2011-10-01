@@ -221,9 +221,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 					// since it seems relatively harmless to create a blank variable in something like var := Array%i%
 					// (though it will produce a runtime error if the double resolves to an illegal variable name such
 					// as one containing spaces).
-					// The use of ALWAYS_PREFER_LOCAL below improves flexibility of assume-global functions
-					// by allowing this command to resolve to a local first if such a local exists:
-					if (   !(temp_var = g_script.FindOrAddVar(left_buf, var_name_length, ALWAYS_PREFER_LOCAL))   )
+					if (   !(temp_var = g_script.FindOrAddVar(left_buf, var_name_length))   )
 					{
 						// Above already displayed the error.  As of v1.0.31, this type of error is displayed and
 						// causes the current thread to terminate, which seems more useful than the old behavior
@@ -486,8 +484,9 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 						// v1.0.45: This mode improves performance by avoiding the need to copy the result into
 						// more persistent memory, then avoiding the need to copy it into the defer buffer (which
 						// also avoids the possibility of needing to expand that buffer).
-						internal_output_var->Assign(this_token.marker); // Marker can be used because symbol will never be SYM_VAR in this case.
-					}													// ALSO: Assign() contains an optimization that avoids actually doing the mem-copying if output_var is being assigned to itself (which can happen in cases like RegExMatch()).
+						if (!internal_output_var->Assign(this_token.marker)) // Marker can be used because symbol will never be SYM_VAR in this case.
+							goto abort;										 // ALSO: Assign() contains an optimization that avoids actually doing the mem-copying if output_var is being assigned to itself (which can happen in cases like RegExMatch()).
+					}
 				}
 				if (done)
 					goto normal_end_skip_output_var; // No need to restore circuit_token because the expression is finished.
@@ -922,7 +921,8 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 				switch(this_token.symbol)
 				{
 				case SYM_ASSIGN: // Listed first for performance (it's probably the most common because things like ++ and += aren't expressions when they're by themselves on a line).
-					left.var->Assign(right); // left.var can be VAR_CLIPBOARD in this case.
+					if (!left.var->Assign(right)) // left.var can be VAR_CLIPBOARD in this case.
+						goto abort;
 					if (left.var->Type() == VAR_CLIPBOARD) // v1.0.46.01: Clipboard is present as SYM_VAR, but only for assign-to-clipboard so that built-in functions and other code sections don't need handling for VAR_CLIPBOARD.
 					{
 						this_token = right; // Struct copy.  Doing it this way is more maintainable than other methods, and is unlikely to perform much worse.
@@ -1285,7 +1285,8 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 
 		if (sym_assign_var) // Added in v1.0.46. There are some places higher above that handle sym_assign_var themselves and skip this section via goto.
 		{
-			sym_assign_var->Assign(this_token); // Assign the result (based on its type) to the target variable.
+			if (!sym_assign_var->Assign(this_token)) // Assign the result (based on its type) to the target variable.
+				goto abort;
 			if (sym_assign_var->Type() != VAR_CLIPBOARD)
 			{
 				this_token.var = sym_assign_var;    // Make the result a variable rather than a normal operand so that its
@@ -1417,7 +1418,8 @@ non_null_circuit_token:
 	{
 		// v1.0.45: Take a shortcut, which in the case of SYM_STRING/OPERAND/VAR avoids one memcpy
 		// (into the deref buffer).  In some cases, this also saves from having to expand the deref buffer.
-		output_var->Assign(result_token);
+		if (!output_var->Assign(result_token))
+			goto abort;
 		goto normal_end_skip_output_var; // result_to_return is left at its default of "", though its value doesn't matter as long as it isn't NULL.
 	}
 
@@ -1604,7 +1606,8 @@ abnormal_end: // Currently the same as normal_end; it's separate to improve read
 	// Our taking charge of output_var allows certain performance optimizations in other parts of this function,
 	// such as avoiding excess memcpy's and malloc's during intermediate stages.
 	if (output_var && result_to_return) // i.e. don't assign if NULL to preserve backward compatibility with scripts that rely on the old value being changed in cases where an expression fails (unlikely).
-		output_var->Assign(result_to_return);
+		if (!output_var->Assign(result_to_return))
+			aResult = FAIL;
 
 normal_end_skip_output_var:
 	for (i = mem_count; i--;) // Free any temporary memory blocks that were used.  Using reverse order might reduce memory fragmentation a little (depending on implementation of malloc).
@@ -1793,7 +1796,11 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 				// Numbered parameter?
 				if (param_key == j - aParamCount + 1)
 				{
-					this_formal_param.var->Assign(indexed_token);
+					if (!this_formal_param.var->Assign(indexed_token))
+					{
+						aResult = FAIL; // Abort thread.
+						return false;
+					}
 					// Get the next item, which might be at [i+1] (in which case the next iteration will
 					// get indexed_token) or a later index (in which case the next iteration will get a
 					// regular default value and a later iteration may get indexed_token). If there aren't
@@ -1808,7 +1815,11 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 				// Named parameter?
 				if (param_obj->GetItem(named_token, this_formal_param.var->mName))
 				{
-					this_formal_param.var->Assign(named_token);
+					if (!this_formal_param.var->Assign(named_token))
+					{
+						aResult = FAIL; // Abort thread.
+						return false;
+					}
 					continue;
 				}
 			}
@@ -1859,7 +1870,11 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 			// A SYM_VAR token can still happen because the previous loop's conversion of all
 			// by-value SYM_VAR operands into SYM_OPERAND would not have happened if no
 			// backup was needed for this function (which is usually the case).
-			mParam[j].var->Assign(token);
+			if (!mParam[j].var->Assign(token))
+			{
+				aResult = FAIL; // Abort thread.
+				return false;
+			}
 		} // for each formal parameter.
 		
 		if (mIsVariadic) // i.e. this function is capable of accepting excess params via an object/array.
@@ -2131,12 +2146,16 @@ ResultType Line::ExpandArgs(ExprTokenType *aResultToken, VarSizeType aSpaceNeede
 				// cached binary number, which some commands don't need to happen. Only the args that
 				// are specifically written to be optimized should skip it.  Otherwise there would be
 				// problems in things like: date += 31, %Var% (where Var contains "Days")
+				// Update #3: If an expression in an arg after this one causes the var's contents
+				// to be reallocated, it would invalidate any pointer we could get from Contents()
+				// in this iteration.  So instead of calling Contents() here, store a NULL value
+				// as a special indicator for the loop below to call Contents().
 				arg_deref[i] = // The following is ordered for short-circuit performance:
 					(   ACT_IS_ASSIGN(mActionType) && i == 1  // By contrast, for the below i==anything (all args):
 					|| (mActionType <= ACT_LAST_OPTIMIZED_IF && mActionType >= ACT_FIRST_OPTIMIZED_IF) // Ordered for short-circuit performance.
 					//|| mActionType == ACT_WHILE // Not necessary to check this one because loadtime leaves ACT_WHILE as an expression in all common cases. Also, there's no easy way to get ACT_WHILE into the range above due to the overlap of other ranges in enum_act.
-					) && the_only_var_of_this_arg->Type() == VAR_NORMAL // Otherwise, users of this optimization would have to reproduced more of the logic in ArgMustBeDereferenced().
-					? _T("") : the_only_var_of_this_arg->Contents(); // See "Update #2" comment above.
+					) && the_only_var_of_this_arg->Type() == VAR_NORMAL // Otherwise, users of this optimization would have to reproduce more of the logic in ArgMustBeDereferenced().
+					? _T("") : NULL; // See "Update #2" and later comments above.
 				break;
 			case CONDITION_TRUE:
 				// the_only_var_of_this_arg is either a reserved var or a normal var of that is also
@@ -2160,7 +2179,7 @@ ResultType Line::ExpandArgs(ExprTokenType *aResultToken, VarSizeType aSpaceNeede
 		// safe to set the args of this command for use by our caller, to whom we're about to return.
 		for (i = 0; i < mArgc; ++i) // Copying actual/used elements is probably faster than using memcpy to copy both entire arrays.
 		{
-			sArgDeref[i] = arg_deref[i];
+			sArgDeref[i] = arg_deref[i] ? arg_deref[i] : arg_var[i]->Contents(); // See "Update #3" comment above.
 			sArgVar[i] = arg_var[i];
 		}
 	} // mArgc > 0

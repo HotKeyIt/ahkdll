@@ -13,23 +13,23 @@ int returnCount = 0 ;
 #ifndef MINIDLL
 //COM virtual functions
 BOOL com_ahkPause(LPTSTR aChangeTo){return ahkPause(aChangeTo);}
-__int64 com_ahkFindLabel(LPTSTR aLabelName){return ahkFindLabel(aLabelName);}
+UINT_PTR com_ahkFindLabel(LPTSTR aLabelName){return ahkFindLabel(aLabelName);}
 // LPTSTR com_ahkgetvar(LPTSTR name,unsigned int getVar){return ahkgetvar(name,getVar);}
 // unsigned int com_ahkassign(LPTSTR name, LPTSTR value){return ahkassign(name,value);}
-unsigned int com_ahkExecuteLine(unsigned int line,unsigned int aMode,unsigned int wait){return ahkExecuteLine(line,aMode,wait);}
+UINT_PTR com_ahkExecuteLine(UINT_PTR line,unsigned int aMode,unsigned int wait){return ahkExecuteLine(line,aMode,wait);}
 BOOL com_ahkLabel(LPTSTR aLabelName, unsigned int nowait){return ahkLabel(aLabelName,nowait);}
-__int64 com_ahkFindFunc(LPTSTR funcname){return ahkFindFunc(funcname);}
+UINT_PTR com_ahkFindFunc(LPTSTR funcname){return ahkFindFunc(funcname);}
 // LPTSTR com_ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10){return ahkFunction(func,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10);}
 // unsigned int com_ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10){return ahkPostFunction(func,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10);}
 BOOL com_ahkKey(LPTSTR keys){return ahkKey(keys);}
 #ifndef AUTOHOTKEYSC
-unsigned int com_addScript(LPTSTR script, int aExecute){return addScript(script,aExecute);}
+UINT_PTR com_addScript(LPTSTR script, int aExecute){return addScript(script,aExecute);}
 BOOL com_ahkExec(LPTSTR script){return ahkExec(script);}
-unsigned int com_addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aIgnoreLoadFailure){return addFile(fileName,aAllowDuplicateInclude,aIgnoreLoadFailure);}
+UINT_PTR com_addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aIgnoreLoadFailure){return addFile(fileName,aAllowDuplicateInclude,aIgnoreLoadFailure);}
 #endif
 #ifdef _USRDLL
-unsigned int com_ahkdll(LPTSTR fileName,LPTSTR argv,LPTSTR args){return ahkdll(fileName,argv,args);}
-unsigned int com_ahktextdll(LPTSTR script,LPTSTR argv,LPTSTR args){return ahktextdll(script,argv,args);}
+UINT_PTR com_ahkdll(LPTSTR fileName,LPTSTR argv,LPTSTR args){return ahkdll(fileName,argv,args);}
+UINT_PTR com_ahktextdll(LPTSTR script,LPTSTR argv,LPTSTR args){return ahktextdll(script,argv,args);}
 BOOL com_ahkTerminate(bool kill){return ahkTerminate(kill);}
 BOOL com_ahkReady(){return ahkReady();}
 BOOL com_ahkReload(){return ahkReload();}
@@ -71,14 +71,14 @@ EXPORT BOOL ahkPause(LPTSTR aChangeTo) //Change pause state of a running script
 }
 
 
-EXPORT __int64 ahkFindFunc(LPTSTR funcname)
+EXPORT UINT_PTR ahkFindFunc(LPTSTR funcname)
 {
-	return (__int64)g_script.FindFunc(funcname);
+	return (UINT_PTR)g_script.FindFunc(funcname);
 }
 
-EXPORT __int64 ahkFindLabel(LPTSTR aLabelName)
+EXPORT UINT_PTR ahkFindLabel(LPTSTR aLabelName)
 {
-	return (__int64)g_script.FindLabel(aLabelName);
+	return (UINT_PTR)g_script.FindLabel(aLabelName);
 }
 
 EXPORT int ximportfunc(ahkx_int_str func1, ahkx_int_str func2, ahkx_int_str_str func3) // Naveen ahkx N11
@@ -135,11 +135,11 @@ EXPORT unsigned int ahkassign(LPTSTR name, LPTSTR value) // ahkwine 0.1
 	return 0; // success
 }
 //HotKeyIt ahkExecuteLine()
-EXPORT unsigned int ahkExecuteLine(unsigned int line,unsigned int aMode,unsigned int wait)
+EXPORT UINT_PTR ahkExecuteLine(UINT_PTR line,unsigned int aMode,unsigned int wait)
 {
 	Line *templine = (Line *)line;
 	if (templine == NULL)
-		return (unsigned int)g_script.mFirstLine;
+		return (UINT_PTR)g_script.mFirstLine;
 	if (aMode)
 	{
 		if (wait)
@@ -154,7 +154,7 @@ EXPORT unsigned int ahkExecuteLine(unsigned int line,unsigned int aMode,unsigned
 			templine = templine->mNextLine;
 		templine = templine->mNextLine;
 	} 
-	return (unsigned int) templine;
+	return (UINT_PTR) templine;
 }
 
 EXPORT BOOL ahkLabel(LPTSTR aLabelName, unsigned int nowait) // 0 = wait = default
@@ -267,23 +267,25 @@ BOOL FinalizeScript(Line *aFirstLine,int aFuncCount,int aHotkeyCount)
 		if (!g_script.AddLine(ACT_RETURN))
 			return LOADING_FAILED;
 	}
-	if (g_Warn_LocalSameAsGlobal)
+	// Scan for undeclared local variables which are named the same as a global variable.
+	// This loop has two purposes (but it's all handled in PreprocessLocalVars()):
+	//
+	//  1) Allow super-global variables to be referenced above the point of declaration.
+	//     This is a bit of a hack to work around the fact that variable references are
+	//     resolved as they are encountered, before all declarations have been processed.
+	//
+	//  2) Warn the user (if appropriate) since they probably meant it to be global.
+	//
+	for (int i = 0; i < g_script.mFuncCount; ++i)
 	{
-		// Scan all "automatic" local vars and warn the user if there are any with the same
-		// name as a global variable, since that would probably indicate a missing declaration:
-		int i, j;
-		Func *func;
-		for (i = aFuncCount; i < g_script.mFuncCount; ++i)
+		Func &func = *g_script.mFunc[i];
+		if (!func.mIsBuiltIn)
 		{
-			if (!(func = g_script.mFunc[i])->mIsBuiltIn)
-			{
-				for (j = 0; j < func->mVarCount; ++j)
-					g_script.MaybeWarnLocalSameAsGlobal(func, func->mVar[j]);
-				for (j = 0; j < func->mLazyVarCount; ++j)
-					g_script.MaybeWarnLocalSameAsGlobal(func, func->mLazyVar[j]);
-			}
+			g_script.PreprocessLocalVars(func, func.mVar, func.mVarCount);
+			g_script.PreprocessLocalVars(func, func.mLazyVar, func.mLazyVarCount);
 		}
 	}
+
 	if (!g_script.PreparseIfElse(aFirstLine))
 		return LOADING_FAILED;
 	if (g_script.mFirstStaticLine)
@@ -292,7 +294,7 @@ BOOL FinalizeScript(Line *aFirstLine,int aFuncCount,int aHotkeyCount)
 }
 // Naveen: v6 addFile()
 // Todo: support for #Directives, and proper treatment of mIsReadytoExecute
-EXPORT unsigned int addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aIgnoreLoadFailure)
+EXPORT UINT_PTR addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aIgnoreLoadFailure)
 {   // dynamically include a file into a script !!
 	// labels, hotkeys, functions.   
 	Func * aFunc = NULL ; 
@@ -331,12 +333,12 @@ EXPORT unsigned int addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aI
 	}
     if (inFunc == 1 )
 		g->CurrentFunc = aFunc ;
-	return (unsigned int) oldLastLine->mNextLine;
+	return (UINT_PTR) oldLastLine->mNextLine;
 }
 
 // HotKeyIt: addScript()
 // Todo: support for #Directives, and proper treatment of mIsReadytoExecute
-EXPORT unsigned int addScript(LPTSTR script, int aExecute)
+EXPORT UINT_PTR addScript(LPTSTR script, int aExecute)
 {   // dynamically include a script from text!!
 	// labels, hotkeys, functions.   
 	Func * aFunc = NULL ; 
@@ -375,7 +377,7 @@ EXPORT unsigned int addScript(LPTSTR script, int aExecute)
 	}
 	if (inFunc == 1 )
 		g->CurrentFunc = aFunc ;
-	return (unsigned int) oldLastLine->mNextLine;
+	return (UINT_PTR) oldLastLine->mNextLine;
 }
 #endif // AUTOHOTKEYSC
 

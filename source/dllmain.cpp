@@ -516,7 +516,7 @@ int setscriptstrings(LPTSTR fileName, LPTSTR argv, LPTSTR args)
 	return 0;
 }
 
-EXPORT unsigned int ahkdll(LPTSTR fileName, LPTSTR argv, LPTSTR args)
+EXPORT UINT_PTR ahkdll(LPTSTR fileName, LPTSTR argv, LPTSTR args)
 {
 	if (setscriptstrings(*fileName ? fileName : _T("#Persistent\n#NoTrayIcon"), argv, args))
 		return 0;
@@ -525,7 +525,7 @@ EXPORT unsigned int ahkdll(LPTSTR fileName, LPTSTR argv, LPTSTR args)
 }
 
 // HotKeyIt ahktextdll
-EXPORT unsigned int ahktextdll(LPTSTR fileName, LPTSTR argv, LPTSTR args)
+EXPORT UINT_PTR ahktextdll(LPTSTR fileName, LPTSTR argv, LPTSTR args)
 {
 	if (setscriptstrings(*fileName ? fileName : _T("#Persistent\n#NoTrayIcon"), argv, args))
 		return 0;
@@ -681,7 +681,7 @@ unsigned int Variant2I(VARIANT var)
 		return var.uintVal;
 }
 
-HRESULT __stdcall CoCOMServer::ahktextdll(/*in,optional*/VARIANT script,/*in,optional*/VARIANT options,/*in,optional*/VARIANT params,/*out*/unsigned int* hThread)
+HRESULT __stdcall CoCOMServer::ahktextdll(/*in,optional*/VARIANT script,/*in,optional*/VARIANT options,/*in,optional*/VARIANT params,/*out*/UINT_PTR* hThread)
 {
 	USES_CONVERSION;
 	TCHAR buf1[MAX_INTEGER_SIZE],buf2[MAX_INTEGER_SIZE],buf3[MAX_INTEGER_SIZE];
@@ -693,7 +693,7 @@ HRESULT __stdcall CoCOMServer::ahktextdll(/*in,optional*/VARIANT script,/*in,opt
 	return S_OK;
 }
 
-HRESULT __stdcall CoCOMServer::ahkdll(/*in,optional*/VARIANT filepath,/*in,optional*/VARIANT options,/*in,optional*/VARIANT params,/*out*/unsigned int* hThread)
+HRESULT __stdcall CoCOMServer::ahkdll(/*in,optional*/VARIANT filepath,/*in,optional*/VARIANT options,/*in,optional*/VARIANT params,/*out*/UINT_PTR* hThread)
 {
 	USES_CONVERSION;
 	TCHAR buf1[MAX_INTEGER_SIZE],buf2[MAX_INTEGER_SIZE],buf3[MAX_INTEGER_SIZE];
@@ -719,7 +719,7 @@ HRESULT __stdcall CoCOMServer::ahkReady(/*out*/BOOL* ready)
 	*ready = com_ahkReady();
 	return S_OK;
 }
-HRESULT __stdcall CoCOMServer::ahkFindLabel(/*in*/VARIANT aLabelName,/*out*/__int64* aLabelPointer)
+HRESULT __stdcall CoCOMServer::ahkFindLabel(/*in*/VARIANT aLabelName,/*out*/UINT_PTR* aLabelPointer)
 {
 	if (aLabelPointer==NULL)
 		return ERROR_INVALID_PARAMETER;
@@ -763,7 +763,7 @@ HRESULT __stdcall CoCOMServer::ahkassign(/*in*/VARIANT name, /*in*/VARIANT value
    AssignVariant(*var, value, false) ;
 	return S_OK;
 }
-HRESULT __stdcall CoCOMServer::ahkExecuteLine(/*[in,optional]*/ VARIANT line,/*[in,optional]*/ VARIANT aMode,/*[in,optional]*/ VARIANT wait,/*[out, retval]*/ unsigned int* pLine)
+HRESULT __stdcall CoCOMServer::ahkExecuteLine(/*[in,optional]*/ VARIANT line,/*[in,optional]*/ VARIANT aMode,/*[in,optional]*/ VARIANT wait,/*[out, retval]*/ UINT_PTR* pLine)
 {
 	if (pLine==NULL)
 		return ERROR_INVALID_PARAMETER;
@@ -778,7 +778,7 @@ HRESULT __stdcall CoCOMServer::ahkLabel(/*[in]*/ VARIANT aLabelName,/*[in,option
 	*success = com_ahkLabel(Variant2T(aLabelName,buf),Variant2I(nowait));
 	return S_OK;
 }
-HRESULT __stdcall CoCOMServer::ahkFindFunc(/*[in]*/ VARIANT FuncName,/*[out, retval]*/ __int64* pFunc)
+HRESULT __stdcall CoCOMServer::ahkFindFunc(/*[in]*/ VARIANT FuncName,/*[out, retval]*/ UINT_PTR* pFunc)
 {
 	if (pFunc==NULL)
 		return ERROR_INVALID_PARAMETER;
@@ -819,7 +819,7 @@ HRESULT __stdcall CoCOMServer::ahkKey(/*[in]*/ VARIANT name,/*[out, retval]*/ BO
 	*success = com_ahkKey(Variant2T(name,buf));
 	return S_OK;
 }
-HRESULT __stdcall CoCOMServer::addScript(/*[in]*/ VARIANT script,/*[in,optional]*/ VARIANT replace,/*[out, retval]*/ unsigned int* success)
+HRESULT __stdcall CoCOMServer::addScript(/*[in]*/ VARIANT script,/*[in,optional]*/ VARIANT replace,/*[out, retval]*/ UINT_PTR* success)
 {
 	if (success==NULL)
 		return ERROR_INVALID_PARAMETER;
@@ -827,7 +827,7 @@ HRESULT __stdcall CoCOMServer::addScript(/*[in]*/ VARIANT script,/*[in,optional]
 	*success = com_addScript(Variant2T(script,buf),Variant2I(replace));
 	return S_OK;
 }
-HRESULT __stdcall CoCOMServer::addFile(/*[in]*/ VARIANT filepath,/*[in,optional]*/ VARIANT aAllowDuplicateInclude,/*[in,optional]*/ VARIANT aIgnoreLoadFailure,/*[out, retval]*/ unsigned int* success)
+HRESULT __stdcall CoCOMServer::addFile(/*[in]*/ VARIANT filepath,/*[in,optional]*/ VARIANT aAllowDuplicateInclude,/*[in,optional]*/ VARIANT aIgnoreLoadFailure,/*[out, retval]*/ UINT_PTR* success)
 {
 	if (success==NULL)
 		return ERROR_INVALID_PARAMETER;
@@ -1027,9 +1027,11 @@ STDAPI DllGetClassObject(const CLSID& clsid,
 		return CLASS_E_CLASSNOTAVAILABLE ;
 	}
 	TCHAR buf[MAX_PATH];
-
-//	if (0 && GetModuleFileName(g_hInstance, buf, MAX_PATH))  // for debugging com 
+#ifdef DEBUG
+	if (0 && GetModuleFileName(g_hInstance, buf, MAX_PATH))  // for debugging com 
+#else
 	if (GetModuleFileName(g_hInstance, buf, MAX_PATH))
+#endif
 	{
 		FILE *fp;
 		unsigned char *data=NULL;

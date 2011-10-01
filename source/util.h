@@ -618,20 +618,18 @@ inline LPTSTR UTF8ToWide(LPCSTR str){
 
 #ifdef UNICODE
 #define UorA(u,a)      (u)
-#define RegExToUTF8(a) CStringUTF8FromTChar(a)
-#define TPosToUTF8Pos  PosToUTF8Pos
-#define TLenToUTF8Len  LenToUTF8Len
-#define UTF8PosToTPos  UTF8PosToPos
-#define UTF8LenToTLen  UTF8LenToLen
+//#define TPosToUTF8Pos  PosToUTF8Pos
+//#define TLenToUTF8Len  LenToUTF8Len
+//#define UTF8PosToTPos  UTF8PosToPos
+//#define UTF8LenToTLen  UTF8LenToLen
 #define ToUnicodeOrAsciiEx(wVirtKey, wScanCode, lpKeyState, pszBuff, wFlags, dwhkl) \
 	ToUnicodeEx((wVirtKey), (wScanCode), (lpKeyState), (LPWSTR)(pszBuff), 2, (wFlags), (dwhkl))
 #else
 #define UorA(u,a)            (a)
-#define RegExToUTF8(a)       (a)
-#define TPosToUTF8Pos(a,b)   (b)
-#define TLenToUTF8Len(a,b,c) (c)
-#define UTF8PosToTPos(a,b)   (b)
-#define UTF8LenToTLen(a,b,c) (c)
+//#define TPosToUTF8Pos(a,b)   (b)
+//#define TLenToUTF8Len(a,b,c) (c)
+//#define UTF8PosToTPos(a,b)   (b)
+//#define UTF8LenToTLen(a,b,c) (c)
 #define ToUnicodeOrAsciiEx(wVirtKey, wScanCode, lpKeyState, pszBuff, wFlags, dwhkl) \
 	ToAsciiEx((wVirtKey), (wScanCode), (lpKeyState), (LPWORD)(pszBuff), (wFlags), (dwhkl))
 #endif
@@ -703,7 +701,8 @@ int FindNextDelimiter(LPCTSTR aBuf, TCHAR aDelimiter = ',', int aStartIndex = 0,
 POINT CenterWindow(int aWidth, int aHeight);
 bool FontExist(HDC aHdc, LPCTSTR aTypeface);
 void ScreenToWindow(POINT &aPoint, HWND aHwnd);
-void WindowToScreen(int &aX, int &aY);
+void CoordToScreen(int &aX, int &aY, int aWhichMode);
+void CoordToScreen(POINT &aPoint, int aWhichMode);
 void GetVirtualDesktopRect(RECT &aRect);
 LPVOID AllocInterProcMem(HANDLE &aHandle, DWORD aSize, HWND aHwnd);
 void FreeInterProcMem(HANDLE aHandle, LPVOID aMem);

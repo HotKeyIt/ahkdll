@@ -281,6 +281,9 @@
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">_MBCS;MBCS;_USRDLL;AUTOCOMSERVER_EXPORTS;_STANDALONE;WIN32;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">_MBCS;MBCS;_USRDLL;AUTOCOMSERVER_EXPORTS;_STANDALONE;WIN32;_WINDOWS;_WIN64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\script.cpp" />
     <ClCompile Include="source\script2.cpp" />
@@ -468,14 +471,14 @@
       </ImportLibrary>
       <ImportLibrary Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">
       </ImportLibrary>
-      <OptimizeReferences Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" />
-      <OptimizeReferences Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'" />
-      <OptimizeReferences Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'" />
-      <OptimizeReferences Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'" />
-      <EnableCOMDATFolding Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" />
-      <EnableCOMDATFolding Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'" />
-      <EnableCOMDATFolding Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'" />
-      <EnableCOMDATFolding Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'" />
+      <OptimizeReferences Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</OptimizeReferences>
+      <OptimizeReferences Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'">true</OptimizeReferences>
+      <OptimizeReferences Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">true</OptimizeReferences>
+      <OptimizeReferences Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">true</OptimizeReferences>
+      <EnableCOMDATFolding Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</EnableCOMDATFolding>
+      <EnableCOMDATFolding Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'">true</EnableCOMDATFolding>
+      <EnableCOMDATFolding Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">true</EnableCOMDATFolding>
+      <EnableCOMDATFolding Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">true</EnableCOMDATFolding>
       <ForceSymbolReferences Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" />
       <ForceSymbolReferences Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'" />
       <ForceSymbolReferences Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'" />
@@ -547,7 +550,7 @@
       <ModuleDefinitionFile Condition="'$(Configuration)|$(Platform)'=='Release|x64'" />
       <ModuleDefinitionFile Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|x64'" />
       <ModuleDefinitionFile Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'" />
-      <ModuleDefinitionFile Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'" />
+      <ModuleDefinitionFile Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">.\comserver.def</ModuleDefinitionFile>
     </Link>
     <Manifest>
       <OutputManifestFile Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">
@@ -616,6 +619,8 @@
       </IgnoreAllDefaultLibraries>
       <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">
       </IgnoreAllDefaultLibraries>
+      <RandomizedBaseAddress Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">false</RandomizedBaseAddress>
+      <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">false</DataExecutionPrevention>
     </Link>
     <Manifest>
       <OutputManifestFile Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">
@@ -628,7 +633,7 @@
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|Win32'">_USRDLL</PreprocessorDefinitions>
     </ResourceCompile>
     <ResourceCompile>
-      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">_USRDLL;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">_USRDLL;_UNICODE;UNICODE;_WIN64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
     <ClCompile>
       <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">
@@ -639,6 +644,12 @@
       </MultiProcessorCompilation>
       <IntrinsicFunctions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">false</IntrinsicFunctions>
     </ClCompile>
+    <Midl>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">_WIN64</PreprocessorDefinitions>
+    </Midl>
+    <Midl>
+      <TargetEnvironment Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">X64</TargetEnvironment>
+    </Midl>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <Link>
@@ -709,6 +720,7 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">true</ExcludedFromBuild>
+      <TargetEnvironment Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">X64</TargetEnvironment>
     </Midl>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

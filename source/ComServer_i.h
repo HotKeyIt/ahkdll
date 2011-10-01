@@ -94,11 +94,11 @@ DEFINE_GUID(IID_ICOMServer,0x4ffe41b, 0x8fe9, 0x4479, 0x99, 0xa, 0xb1, 0x86, 0xe
     {
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahktextdll( 
-           /*in,optional*/VARIANT script,/*in,optional*/VARIANT options,/*in,optional*/VARIANT params, /* [retval][out] */unsigned int* hThread) = 0;
+           /*in,optional*/VARIANT script,/*in,optional*/VARIANT options,/*in,optional*/VARIANT params, /* [retval][out] */UINT_PTR* hThread) = 0;
         
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkdll( 
-           /*in,optional*/VARIANT filepath,/*in,optional*/VARIANT options,/*in,optional*/VARIANT params, /* [retval][out] */unsigned int* hThread) = 0;
+           /*in,optional*/VARIANT filepath,/*in,optional*/VARIANT options,/*in,optional*/VARIANT params, /* [retval][out] */UINT_PTR* hThread) = 0;
         
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkPause( 
@@ -109,7 +109,7 @@ DEFINE_GUID(IID_ICOMServer,0x4ffe41b, 0x8fe9, 0x4479, 0x99, 0xa, 0xb1, 0x86, 0xe
            /* [retval][out] */BOOL* ready) = 0;
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkFindLabel( 
-           /*[in]*/ VARIANT aLabelName,/*[out, retval]*/ __int64 *pLabel) = 0;
+           /*[in]*/ VARIANT aLabelName,/*[out, retval]*/ UINT_PTR *pLabel) = 0;
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkgetvar( 
            /*[in]*/ VARIANT name,/*[in,optional]*/ VARIANT getVar,/*[out, retval]*/ VARIANT *returnVal) = 0;
@@ -118,13 +118,13 @@ DEFINE_GUID(IID_ICOMServer,0x4ffe41b, 0x8fe9, 0x4479, 0x99, 0xa, 0xb1, 0x86, 0xe
            /*[in]*/ VARIANT name,/*[in,optional]*/ VARIANT value,/*[out, retval]*/ unsigned int* success) = 0;
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkExecuteLine( 
-           /*[in,optional]*/ VARIANT line,/*[in,optional]*/ VARIANT aMode,/*[in,optional]*/ VARIANT wait,/*[out, retval]*/ unsigned int* pLine) = 0;
+           /*[in,optional]*/ VARIANT line,/*[in,optional]*/ VARIANT aMode,/*[in,optional]*/ VARIANT wait,/*[out, retval]*/ UINT_PTR* pLine) = 0;
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkLabel( 
            /*[in]*/ VARIANT aLabelName,/*[in,optional]*/ VARIANT nowait,/*[out, retval]*/ BOOL* success) = 0;
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkFindFunc( 
-           /*[in]*/ VARIANT FuncName,/*[out, retval]*/ __int64 *pFunc) = 0;
+           /*[in]*/ VARIANT FuncName,/*[out, retval]*/ UINT_PTR *pFunc) = 0;
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkFunction( 
            /*[in]*/ VARIANT FuncName,/*[in,optional]*/ VARIANT param1,/*[in,optional]*/ VARIANT param2,/*[in,optional]*/ VARIANT param3,/*[in,optional]*/ VARIANT param4,/*[in,optional]*/ VARIANT param5,/*[in,optional]*/ VARIANT param6,/*[in,optional]*/ VARIANT param7,/*[in,optional]*/ VARIANT param8,/*[in,optional]*/ VARIANT param9,/*[in,optional]*/ VARIANT param10,/*[out, retval]*/ VARIANT* returnVal) = 0;
@@ -136,10 +136,10 @@ DEFINE_GUID(IID_ICOMServer,0x4ffe41b, 0x8fe9, 0x4479, 0x99, 0xa, 0xb1, 0x86, 0xe
            /*[in]*/ VARIANT name,/*[out, retval]*/ BOOL* success) = 0;
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE addScript( 
-           /*[in]*/ VARIANT script,/*[in,optional]*/ VARIANT replace,/*[out, retval]*/ unsigned int* success) = 0;
+           /*[in]*/ VARIANT script,/*[in,optional]*/ VARIANT replace,/*[out, retval]*/ UINT_PTR* success) = 0;
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE addFile( 
-           /*[in]*/ VARIANT filepath,/*[in,optional]*/ VARIANT aAllowDuplicateInclude,/*[in,optional]*/ VARIANT aIgnoreLoadFailure,/*[out, retval]*/ unsigned int* success) = 0;
+           /*[in]*/ VARIANT filepath,/*[in,optional]*/ VARIANT aAllowDuplicateInclude,/*[in,optional]*/ VARIANT aIgnoreLoadFailure,/*[out, retval]*/ UINT_PTR* success) = 0;
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkExec( 
            /*[in]*/ VARIANT script,/*[out, retval]*/ BOOL* success) = 0;
