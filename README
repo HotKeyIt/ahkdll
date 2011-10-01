@@ -1,3 +1,6 @@
+01.10.2011
+- Merged latest MemoryModule
+- Fixed x64w build AutoHotkey.dll also works fine using COM
 25.10.2010
 - Fixed ahkFunction returning wrong value
 - Default script set to #Persistent`n#NoTrayIcon
