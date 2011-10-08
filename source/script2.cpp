@@ -72,7 +72,7 @@ ResultType Line::Splash(LPTSTR aOptions, LPTSTR aSubText, LPTSTR aMainText, LPTS
 							image_filename = image_filename_omit_leading_whitespace;
 						window_index = ATOI(window_number_str) - 1;
 						if (window_index < 0 || window_index >= MAX_SPLASHIMAGE_WINDOWS)
-							return LineError(_T("Max window number is ") MAX_SPLASHIMAGE_WINDOWS_STR _T(".") ERR_ABORT
+							return LineError(_T("Max window number is ") MAX_SPLASHIMAGE_WINDOWS_STR _T(".")
 								, FAIL, aOptions);
 					}
 				}
@@ -91,7 +91,7 @@ ResultType Line::Splash(LPTSTR aOptions, LPTSTR aSubText, LPTSTR aMainText, LPTS
 		{
 			window_index = ATOI(aOptions) - 1;
 			if (window_index < 0 || window_index >= MAX_PROGRESS_WINDOWS)
-				return LineError(_T("Max window number is ") MAX_PROGRESS_WINDOWS_STR _T(".") ERR_ABORT, FAIL, aOptions);
+				return LineError(_T("Max window number is ") MAX_PROGRESS_WINDOWS_STR _T("."), FAIL, aOptions);
 			++options;
 		}
 		options = omit_leading_whitespace(options); // Added in v1.0.38.04 per someone's suggestion.
@@ -703,7 +703,7 @@ ResultType Line::ToolTip(LPTSTR aText, LPTSTR aX, LPTSTR aY, LPTSTR aID)
 {
 	int window_index = *aID ? ATOI(aID) - 1 : 0;
 	if (window_index < 0 || window_index >= MAX_TOOLTIPS)
-		return LineError(_T("Max window number is ") MAX_TOOLTIPS_STR _T(".") ERR_ABORT, FAIL, aID);
+		return LineError(_T("Max window number is ") MAX_TOOLTIPS_STR _T("."), FAIL, aID);
 	HWND tip_hwnd = g_hWndToolTip[window_index];
 
 	// Destroy windows except the first (for performance) so that resources/mem are conserved.
@@ -3051,7 +3051,7 @@ ResultType Line::ScriptProcess(LPTSTR aCmd, LPTSTR aProcess, LPTSTR aParam3)
 	ProcessCmds process_cmd = ConvertProcessCmd(aCmd);
 	// Runtime error is rare since it is caught at load-time unless it's in a var. ref.
 	if (process_cmd == PROCESS_CMD_INVALID)
-		return LineError(ERR_PARAM1_INVALID ERR_ABORT, FAIL, aCmd);
+		return LineError(ERR_PARAM1_INVALID, FAIL, aCmd);
 
 	HANDLE hProcess;
 	DWORD pid, priority;
@@ -3614,7 +3614,7 @@ ResultType Line::WinGet(LPTSTR aCmd, LPTSTR aTitle, LPTSTR aText, LPTSTR aExclud
 	// was contained in a variable reference.  But for simplicity of design here, return
 	// failure in this case (unlike other functions similar to this one):
 	if (cmd == WINGET_CMD_INVALID)
-		return LineError(ERR_PARAM2_INVALID ERR_ABORT, FAIL, aCmd);
+		return LineError(ERR_PARAM2_INVALID, FAIL, aCmd);
 
 	bool target_window_determined = true;  // Set default.
 	HWND target_window;
@@ -4066,7 +4066,7 @@ ResultType Line::SysGet(LPTSTR aCmd, LPTSTR aValue)
 	// was contained in a variable reference.  But for simplicity of design here, return
 	// failure in this case (unlike other functions similar to this one):
 	if (cmd == SYSGET_CMD_INVALID)
-		return LineError(ERR_PARAM2_INVALID ERR_ABORT, FAIL, aCmd);
+		return LineError(ERR_PARAM2_INVALID, FAIL, aCmd);
 
 	MonitorInfoPackage mip = {0};  // Improves maintainability to initialize unconditionally, here.
 	mip.monitor_info_ex.cbSize = sizeof(MONITORINFOEX); // Also improves maintainability.
@@ -5824,7 +5824,7 @@ ResultType InputBox(Var *aOutputVar, LPTSTR aTitle, LPTSTR aText, bool aHideInpu
 	if (g_nInputBoxes >= MAX_INPUTBOXES)
 	{
 		// Have a maximum to help prevent runaway hotkeys due to key-repeat feature, etc.
-		MsgBox(_T("The maximum number of InputBoxes has been reached.") ERR_ABORT);
+		MsgBox(_T("The maximum number of InputBoxes has been reached."));
 		return FAIL;
 	}
 	if (!aOutputVar) return FAIL;
@@ -6979,7 +6979,7 @@ ResultType Line::StringReplace()
 		, replacement_limit, -1, &dest, &length); // Length of haystack is passed to improve performance because ArgLength() can often discover it instantaneously.
 
 	if (!dest) // Failure due to out of memory.
-		return LineError(ERR_OUTOFMEM ERR_ABORT);
+		return LineError(ERR_OUTOFMEM);
 
 	if (dest != source) // StrReplace() allocated new memory rather than returning "source" to us unaltered.
 	{
@@ -8602,7 +8602,7 @@ ResultType Line::FileSelectFile(LPTSTR aOptions, LPTSTR aWorkingDir, LPTSTR aGre
 	if (g_nFileDialogs >= MAX_FILEDIALOGS)
 	{
 		// Have a maximum to help prevent runaway hotkeys due to key-repeat feature, etc.
-		return LineError(_T("The maximum number of File Dialogs has been reached.") ERR_ABORT);
+		return LineError(_T("The maximum number of File Dialogs has been reached."));
 	}
 	
 	// Large in case more than one file is allowed to be selected.
@@ -9042,7 +9042,7 @@ ResultType Line::FileRead(LPTSTR aFilespec)
 	{
 		CloseHandle(hfile);
 		// ErrorLevel doesn't matter now because the current quasi-thread will be aborted.
-		return is_binary_clipboard ? FAIL : LineError(ERR_OUTOFMEM ERR_ABORT);
+		return is_binary_clipboard ? FAIL : LineError(ERR_OUTOFMEM);
 	}
 
 	DWORD bytes_actually_read;
@@ -10441,10 +10441,7 @@ Label *Line::GetJumpTarget(bool aIsDereferenced)
 	Label *label = g_script.FindLabel(target_label);
 	if (!label)
 	{
-		if (aIsDereferenced)
-			LineError(ERR_NO_LABEL ERR_ABORT, FAIL, target_label);
-		else
-			LineError(ERR_NO_LABEL, FAIL, target_label);
+		LineError(ERR_NO_LABEL, FAIL, target_label);
 		return NULL;
 	}
 	if (!aIsDereferenced)
@@ -10489,7 +10486,6 @@ Label *Line::IsJumpValid(Label &aTargetLabel, bool aSilent)
 	if (!aSilent)
 		LineError(_T("A Goto/Gosub must not jump into a block that doesn't enclose it.")); // Omit GroupActivate from the error msg since that is rare enough to justify the increase in common-case clarity.
 	return NULL;
-	// Above currently doesn't attempt to detect runtime vs. load-time for the purpose of appending ERR_ABORT.
 }
 
 
@@ -12617,6 +12613,14 @@ void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free) // L31: 
 		}
 	}
 
+	if (!function && hmodule_to_free) // Caller wants us to set ErrorLevel.
+	{
+		// This must be done here since only we know for certain that the dll
+		// was loaded okay (if GetModuleHandle succeeded, nothing is passed
+		// back to the caller).
+		g_script.SetErrorLevelOrThrowStr(_T("-4"), _T("DllCall")); // Stage 4 error: Function could not be found in the DLL(s).
+	}
+
 	return function;
 }
 
@@ -13641,13 +13645,9 @@ has_valid_return_type:
     
 	if (!function) // The function's address hasn't yet been determined.
 	{
-		LPCTSTR aFuncName;
-		function = GetDllProcAddress(aFuncName = aParam[0]->symbol == SYM_VAR ? aParam[0]->var->Contents() : aParam[0]->marker, &hmodule_to_free);
+		function = GetDllProcAddress(aParam[0]->symbol == SYM_VAR ? aParam[0]->var->Contents() : aParam[0]->marker, &hmodule_to_free);
 		if (!function)
-		{
-			g_script.SetErrorLevelOrThrowStr(_T("-4"), _T("DllCall")); // Stage 4 error: Function could not be found in the DLL(s).
 			goto end;
-		}
 	}
 
 	////////////////////////
@@ -14084,7 +14084,7 @@ void RegExSetSubpatternVars(LPCTSTR haystack, pcre *re, pcre_extra *extra, TCHAR
 
 	if (output_mode == 'O')
 	{
-		IObject *m = RegExMatchObject::Create(haystack, offset, subpat_name, captured_pattern_count);
+		IObject *m = RegExMatchObject::Create(haystack, offset, subpat_name, pattern_count, captured_pattern_count);
 		if (m)
 			output_var.AssignSkipAddRef(m);
 		else
@@ -14234,22 +14234,32 @@ void RegExSetSubpatternVars(LPCTSTR haystack, pcre *re, pcre_extra *extra, TCHAR
 }
 
 
-RegExMatchObject *RegExMatchObject::Create(LPCTSTR aHaystack, int *aOffset, LPCTSTR *aPatternName, int aCapturedPatternCount)
+RegExMatchObject *RegExMatchObject::Create(LPCTSTR aHaystack, int *aOffset, LPCTSTR *aPatternName
+	, int aPatternCount, int aCapturedPatternCount)
 {
+	// If there was no match, seems best to not return an object:
+	if (aCapturedPatternCount < 1)
+		return NULL;
+
 	RegExMatchObject *m = new RegExMatchObject();
 	if (!m)
 		return NULL;
 
 	ASSERT(aCapturedPatternCount >= 1);
+	ASSERT(aPatternCount >= aCapturedPatternCount);
 
-	m->mPatternCount = aCapturedPatternCount;
+	// Use aPatternCount vs aCapturedPatternCount since we want to be able to retrieve the
+	// names of *all* subpatterns, even ones that weren't captured.  For instance, a loop
+	// converting the object to an old-style pseudo-array would need to initialize even the
+	// array items that weren't captured.
+	m->mPatternCount = aPatternCount;
 	
 	// Copy haystack.  Must copy the whole haystack since it is possible (though rare) for a
 	// subpattern to precede the overall match - for instance, if \K is used or a subpattern
 	// is captured inside a look-behind assertion.
 	if (  !(m->mHaystack = _tcsdup(aHaystack))
 	   // Allocate memory for a copy of the offset array.
-	   || !(m->mOffset = (int *)malloc(aCapturedPatternCount * 2 * sizeof(int *)))  )
+	   || !(m->mOffset = (int *)malloc(aPatternCount * 2 * sizeof(int *)))  )
 	{
 		m->Release(); // This also frees m->mHaystack if it is non-NULL.
 		return NULL;
@@ -14257,7 +14267,7 @@ RegExMatchObject *RegExMatchObject::Create(LPCTSTR aHaystack, int *aOffset, LPCT
 	
 	int p, i, pos, len;
 
-	// Convert start/end offsets to offset and length (also convert offsets from UTF-8 to UTF-16 in Unicode build).
+	// Convert start/end offsets to offset and length.
 	for (p = 0, i = 0; p < aCapturedPatternCount; ++p)
 	{
 		if (aOffset[i] < 0)
@@ -14273,12 +14283,18 @@ RegExMatchObject *RegExMatchObject::Create(LPCTSTR aHaystack, int *aOffset, LPCT
 		m->mOffset[i++] = pos;
 		m->mOffset[i++] = len;
 	}
+	// Initialize the remainder of the offset vector (patterns which were not captured):
+	for ( ; p < aPatternCount; ++p)
+	{
+		m->mOffset[i++] = -1;
+		m->mOffset[i++] = 0;
+	}
 
 	// Copy subpattern names.
 	if (aPatternName)
 	{
 		// Allocate array of pointers.
-		if (  !(m->mPatternName = (LPTSTR *)malloc(aCapturedPatternCount * sizeof(LPTSTR *)))  )
+		if (  !(m->mPatternName = (LPTSTR *)malloc(aPatternCount * sizeof(LPTSTR *)))  )
 		{
 			m->Release();
 			return NULL;
@@ -14286,7 +14302,7 @@ RegExMatchObject *RegExMatchObject::Create(LPCTSTR aHaystack, int *aOffset, LPCT
 
 		// Copy names and initialize array.
 		m->mPatternName[0] = NULL;
-		for (p = 1; p < aCapturedPatternCount; ++p)
+		for (p = 1; p < aPatternCount; ++p)
 			if (aPatternName[p])
 				// A failed allocation here seems rare and the consequences would be
 				// negligible, so in that case just act as if the subpattern has no name.

@@ -90,7 +90,7 @@ GuiType *Script::ResolveGui(LPTSTR aBuf, LPTSTR &aCommand, LPTSTR *aName, size_t
 		// found_gui: *aName must be set for GUI_CMD_NEW even if a GUI was found, since
 		// found_gui will be destroyed (along with found_gui->mName) and recreated. If a
 		// GUI was found, obviously the name is valid and ValidateName() can be skipped.
-		if (found_gui || Var::ValidateName(name, true, false))
+		if (found_gui || Var::ValidateName(name, false))
 		{
 			// This name is okay.
 			*aName = name_marker;
@@ -168,13 +168,13 @@ ResultType Script::PerformGui(LPTSTR aBuf, LPTSTR aParam2, LPTSTR aParam3, LPTST
 	size_t name_length;	//
 	GuiType *pgui = ResolveGui(aBuf, aCommand, &name, &name_length);
 	if (!pgui && !name)
-		return ScriptError(ERR_INVALID_GUI_NAME ERR_ABORT, aBuf);
+		return ScriptError(ERR_INVALID_GUI_NAME, aBuf);
 	
 	GuiCommands gui_command = Line::ConvertGuiCommand(aCommand);
 	if (gui_command == GUI_CMD_INVALID)
 		// This is caught at load-time 99% of the time and can only occur here if the sub-command name
 		// or Gui name is contained in a variable reference.
-		return ScriptError(ERR_PARAM1_INVALID ERR_ABORT, aCommand);
+		return ScriptError(ERR_PARAM1_INVALID, aCommand);
 
 	PRIVATIZE_S_DEREF_BUF;  // See comments in GuiControl() about this.
 	ResultType result = OK; // Set default return value for use with all instances of "goto" further below.
@@ -346,7 +346,7 @@ ResultType Script::PerformGui(LPTSTR aBuf, LPTSTR aParam2, LPTSTR aParam3, LPTST
 	if (!gui.mHwnd && !gui.Create())
 	{
 		GuiType::Destroy(gui); // Get rid of the object so that it stays in sync with the window's existence.
-		result = ScriptError(_T("Could not create window.") ERR_ABORT);
+		result = ScriptError(_T("Could not create window."));
 		goto return_the_result;
 	}
 
@@ -402,7 +402,7 @@ ResultType Script::PerformGui(LPTSTR aBuf, LPTSTR aParam2, LPTSTR aParam3, LPTST
 	case GUI_CMD_ADD:
 		if (   !(gui_control_type = Line::ConvertGuiControl(aParam2))   )
 		{
-			result = ScriptError(ERR_PARAM2_INVALID ERR_ABORT, aParam2);
+			result = ScriptError(ERR_PARAM2_INVALID, aParam2);
 			goto return_the_result;
 		}
 		result = gui.AddControl(gui_control_type, aParam3, aParam4); // It already displayed any error.
@@ -424,7 +424,7 @@ ResultType Script::PerformGui(LPTSTR aBuf, LPTSTR aParam2, LPTSTR aParam3, LPTST
 			// must always be of the popup type):
 			if (   !(menu = FindMenu(aParam2)) || menu == g_script.mTrayMenu   ) // Relies on short-circuit boolean.
 			{
-				result = ScriptError(ERR_MENU ERR_ABORT, aParam2);
+				result = ScriptError(ERR_MENU, aParam2);
 				goto return_the_result;
 			}
 			menu->Create(MENU_TYPE_BAR);  // Ensure the menu physically exists and is the "non-popup" type (for a menu bar).
@@ -505,7 +505,7 @@ ResultType Script::PerformGui(LPTSTR aBuf, LPTSTR aParam2, LPTSTR aParam3, LPTST
 				index = ATOI(aParam3) - 1;
 				if (index < 0 || index > MAX_TAB_CONTROLS - 1)
 				{
-					result = ScriptError(ERR_PARAM3_INVALID ERR_ABORT, aParam3);
+					result = ScriptError(ERR_PARAM3_INVALID, aParam3);
 					goto return_the_result;
 				}
 				if (index != gui.mCurrentTabControlIndex) // This is checked early in case of early return in the next section due to error.
@@ -534,7 +534,7 @@ ResultType Script::PerformGui(LPTSTR aBuf, LPTSTR aParam2, LPTSTR aParam3, LPTST
 					index = ATOI(aParam2) - 1;
 					if (index < 0 || index > MAX_TABS_PER_CONTROL - 1)
 					{
-						result = ScriptError(ERR_PARAM2_INVALID ERR_ABORT, aParam2);
+						result = ScriptError(ERR_PARAM2_INVALID, aParam2);
 						goto return_the_result;
 					}
 				}
@@ -546,7 +546,7 @@ ResultType Script::PerformGui(LPTSTR aBuf, LPTSTR aParam2, LPTSTR aParam3, LPTST
 						index = gui.FindTabIndexByName(*tab_control, aParam2, exact_match); // Returns -1 on failure.
 					if (index == -1)
 					{
-						result =ScriptError(_T("Tab name doesn't exist yet.") ERR_ABORT, aParam2);
+						result =ScriptError(_T("Tab name doesn't exist yet."), aParam2);
 						goto return_the_result;
 					}
 				}
@@ -1917,7 +1917,7 @@ void GuiType::UpdateMenuBars(HMENU aMenu)
 ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR aText)
 // Caller must have ensured that mHwnd is non-NULL (i.e. that the parent window already exists).
 {
-	#define TOO_MANY_CONTROLS _T("Too many controls.") ERR_ABORT // Short msg since so rare.
+	#define TOO_MANY_CONTROLS _T("Too many controls.") // Short msg since so rare.
 	if (mControlCount >= MAX_CONTROLS_PER_GUI)
 		return g_script.ScriptError(TOO_MANY_CONTROLS);
 	if (mControlCount >= mControlCapacity) // The section below on the above check already having been done.
@@ -1947,7 +1947,7 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 	if (aControlType == GUI_CONTROL_TAB)
 	{
 		if (mTabControlCount == MAX_TAB_CONTROLS)
-			return g_script.ScriptError(_T("Too many tab controls.") ERR_ABORT); // Short msg since so rare.
+			return g_script.ScriptError(_T("Too many tab controls.")); // Short msg since so rare.
 		// For now, don't allow a tab control to be create inside another tab control because it raises
 		// doubt and probably would create complications.  If it ever is allowed, note that
 		// control.tab_index stores this tab control's index (0 for the first tab control, 1 for the
@@ -1958,7 +1958,7 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 	else if (aControlType == GUI_CONTROL_STATUSBAR)
 	{
 		if (mStatusBarHwnd)
-			return g_script.ScriptError(_T("Too many status bars.") ERR_ABORT); // Short msg since so rare.
+			return g_script.ScriptError(_T("Too many status bars.")); // Short msg since so rare.
 		control.tab_control_index = MAX_TAB_CONTROLS; // Indicate that bar isn't owned by any tab control.
 		// No need to do the following because ZeroMem did it:
 		//control.tab_index = 0; // Ignored but set for maintainability/consistency.
@@ -3750,7 +3750,7 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 
 	// Below also serves as a bug check, i.e. GUI_CONTROL_INVALID or some unknown type.
 	if (!control.hwnd)
-		return g_script.ScriptError(_T("Can't create control.") ERR_ABORT);
+		return g_script.ScriptError(_T("Can't create control."));
 	// Otherwise the above control creation succeeded.
 	++mControlCount;
 	mControlWidthWasSetByContents = control_width_was_set_by_contents; // Set for use by next control, if any.
@@ -3985,56 +3985,74 @@ ResultType GuiType::ParseOptions(LPTSTR aOptions, bool &aSetLastFoundWindow, Tog
 		if ((set_owner = !_tcsnicmp(next_option, _T("Owner"), 5))
 			  || !_tcsnicmp(next_option, _T("Parent"), 6))
 		{
-			if (!mHwnd || !set_owner)
+			if (!adding)
+				mOwner = NULL;
+			else
 			{
-				if (!adding)
+				LPTSTR name = next_option + 5 + !set_owner; // 6 for "Parent"
+				if (*name || !set_owner) // i.e. "+Parent" on its own is invalid (and should not default to g_hWnd).
 				{
-					mOwner = NULL;
-					if (!set_owner) // -Parent.
+					HWND new_owner = NULL;
+					if (IsPureNumeric(name, TRUE, FALSE) == PURE_INTEGER) // Allow negatives, for flexibility.
 					{
-						mStyle = mStyle & ~WS_CHILD | WS_POPUP;
-						if (mHwnd)
-							SetParent(mHwnd, NULL);
+						__int64 gui_num = ATOI64(name);
+						if (gui_num < 1 || gui_num > 99 || (option_end - name) > 2) // See similar checks in ResolveGui() for comments.
+						{
+							// Something like +Owner%Hwnd%, where Hwnd may or may not be a Gui.
+							if (IsWindow((HWND)gui_num))
+								new_owner = (HWND)gui_num;
+						}
 					}
+					if (!new_owner)
+					{
+						// Something like +OwnerMyGui or +Owner1.
+						if (GuiType *owner_gui = FindGui(name))
+							new_owner = owner_gui->mHwnd;
+					}
+					if (new_owner && new_owner != mHwnd) // Window can't own itself!
+						mOwner = new_owner;
+					else
+						return g_script.ScriptError(_T("Invalid or nonexistent owner or parent window."), next_option);
 				}
 				else
-				{
-					LPTSTR name = next_option + 5 + !set_owner; // 6 for "Parent"
-					if (*name || !set_owner) // i.e. "+Parent" on its own is invalid (and should not default to g_hWnd).
-					{
-						HWND new_owner = NULL;
-						if (IsPureNumeric(name, TRUE, FALSE) == PURE_INTEGER) // Allow negatives, for flexibility.
-						{
-							__int64 gui_num = ATOI64(name);
-							if (gui_num < 1 || gui_num > 99 || (option_end - name) > 2) // See similar checks in ResolveGui() for comments.
-							{
-								// Something like +Owner%Hwnd%, where Hwnd may or may not be a Gui.
-								if (IsWindow((HWND)gui_num))
-									new_owner = (HWND)gui_num;
-							}
-						}
-						if (!new_owner)
-						{
-							// Something like +OwnerMyGui or +Owner1.
-							if (GuiType *owner_gui = FindGui(name))
-								new_owner = owner_gui->mHwnd;
-						}
-						if (new_owner && new_owner != mHwnd) // Window can't own itself!
-							mOwner = new_owner;
-						else
-							return g_script.ScriptError(_T("Invalid or nonexistent owner or parent window.") ERR_ABORT, next_option);
-						if (!set_owner) // +Parent
-						{
-							mStyle = mStyle & ~WS_POPUP | WS_CHILD;
-							if (mHwnd)
-								SetParent(mHwnd, mOwner);
-						}
-					}
-					else
-						mOwner = g_hWnd; // Make a window owned (by script's main window) omits its taskbar button.
-				}
+					mOwner = g_hWnd; // Make a window owned (by script's main window) omits its taskbar button.
 			}
-			//else mHwnd!=NULL. Since OS provides no way to change an existing window's owner, do nothing as documented.
+			if (set_owner) // +/-Owner
+			{
+				if (mStyle & WS_CHILD)
+				{
+					// Since Owner and Parent are mutually-exclusive by nature, it seems appropriate for
+					// +Owner to also apply -Parent.  If this wasn't done, +Owner would merely change the
+					// parent window (see comments further below).
+					mStyle = mStyle & ~WS_CHILD | WS_POPUP;
+					if (mHwnd)
+					{
+						// This seems to be necessary even if SetWindowLong() is called to update the
+						// style before attempting to change the owner.  By contrast, there doesn't seem
+						// to be any problem with delaying the style update until after all of the other
+						// options are parsed.
+						SetParent(mHwnd, NULL);
+					}
+				}
+				// Although MSDN doesn't explicitly document any way to change the owner of an existing
+				// window, the following method was mentioned in a PDC talk by Raymond Chen.  MSDN does
+				// say it shouldn't be used to change the parent of a child window, but maybe what it
+				// actually means is that "HWNDPARENT" is a misnomer; it should've been "HWNDOWNER".
+				// On the other hand, this method ACTUALLY DOES CHANGE THE PARENT WINDOW if mHwnd is a
+				// child window and the check above is disabled (at least it did during testing).
+				if (mHwnd)
+					SetWindowLongPtr(mHwnd, GWLP_HWNDPARENT, (LONG_PTR)mOwner);
+			}
+			else // +/-Parent
+			{
+				if (mHwnd)
+					SetParent(mHwnd, mOwner);
+				if (mOwner)
+					mStyle = mStyle & ~WS_POPUP | WS_CHILD;
+				else
+					mStyle = mStyle & ~WS_CHILD | WS_POPUP;
+				// The new style will be applied by a later section.
+			}
 		}
 
 		else if (!_tcsicmp(next_option, _T("AlwaysOnTop")))
@@ -4226,7 +4244,7 @@ ResultType GuiType::ParseOptions(LPTSTR aOptions, bool &aSetLastFoundWindow, Tog
 					mStyle &= ~given_style;
 			}
 			else // v1.1.04: Validate Gui options.
-				return g_script.ScriptError(ERR_INVALID_OPTION ERR_ABORT, next_option);
+				return g_script.ScriptError(ERR_INVALID_OPTION, next_option);
 		}
 
 		*option_end = orig_char; // Undo the temporary termination because the caller needs aOptions to be unaltered.
@@ -5333,7 +5351,7 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 					break;
 				default:
 					// v1.1.04: Validate Gui options.
-					return g_script.ScriptError(ERR_INVALID_OPTION ERR_ABORT, next_option-1);
+					return g_script.ScriptError(ERR_INVALID_OPTION, next_option-1);
 				}
 				*option_end = orig_char; // Undo the temporary termination because the caller needs aOptions to be unaltered.
 				continue;
@@ -5352,7 +5370,7 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 					// instead of a message displayed:
 					return aControl.hwnd ? g_script.SetErrorLevelOrThrow()
 						: g_script.ScriptError(_T("This control type should not have an associated subroutine.")
-							ERR_ABORT, next_option - 1);
+							, next_option - 1);
 				Label *candidate_label;
 				if (   !(candidate_label = g_script.FindLabel(next_option))   )
 				{
@@ -5367,7 +5385,7 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 					//	control.options |= GUI_CONTROL_ATTRIB_IMPLICIT_CLEAR;
 					else // Since a non-special label was explicitly specified, it's an error that it can't be found.
 						return aControl.hwnd ? g_script.SetErrorLevelOrThrow()
-							: g_script.ScriptError(ERR_NO_LABEL ERR_ABORT, next_option - 1);
+							: g_script.ScriptError(ERR_NO_LABEL, next_option - 1);
 				}
 				if (aControl.type == GUI_CONTROL_TEXT || aControl.type == GUI_CONTROL_PIC)
 					// Apply the SS_NOTIFY style *only* if the control actually has an associated action.
@@ -5411,7 +5429,7 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 				// that they point to the global instead.  But that is pretty ugly and doesn't seem worth it.
 				candidate_var = candidate_var->ResolveAlias(); // Update it to its target if it's an alias.  This might be relied upon by Gui::FindControl() and other things, and also the section below.
 				if (candidate_var->IsNonStaticLocal()) // Note that an alias can point to a local vs. global var.
-					return g_script.ScriptError(_T("A control's variable must be global or static.") ERR_ABORT, next_option - 1);
+					return g_script.ScriptError(_T("A control's variable must be global or static."), next_option - 1);
 				// Another reason that the above always resolves aliases is because it allows the next
 				// check below to find true duplicates, even if different aliases are used to create the
 				// controls (i.e. if two alias both point to the same global).
@@ -5427,7 +5445,7 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 					if (mControl[u].output_var == candidate_var)
 						return aControl.hwnd ? g_script.SetErrorLevelOrThrow()
 							: g_script.ScriptError(_T("The same variable cannot be used for more than one control.") // It used to say "one control per window" but that seems more confusing than it's worth.
-								ERR_ABORT, next_option - 1);
+								, next_option - 1);
 				aControl.output_var = candidate_var;
 				break;
 
@@ -5586,7 +5604,7 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 					break;
 				}
 				// v1.1.04: Validate Gui options.
-				return g_script.ScriptError(ERR_INVALID_OPTION ERR_ABORT, next_option-1);
+				return g_script.ScriptError(ERR_INVALID_OPTION, next_option-1);
 			} // switch()
 		} // Final "else" in the "else if" ladder.
 
@@ -6267,7 +6285,7 @@ ResultType GuiType::Show(LPTSTR aOptions, LPTSTR aText)
 			break;
 		} // switch()
 		if (cp_end == cp)
-			return g_script.ScriptError(ERR_INVALID_OPTION ERR_ABORT, cp);
+			return g_script.ScriptError(ERR_INVALID_OPTION, cp);
 	} // for()
 
 	int width_orig = width;
@@ -7432,7 +7450,7 @@ int GuiType::FindOrCreateFont(LPTSTR aOptions, LPTSTR aFontName, FontType *aFoun
 	// Since above didn't return, create the font if there's room.
 	if (sFontCount >= MAX_GUI_FONTS)
 	{
-		g_script.ScriptError(_T("Too many fonts.") ERR_ABORT);  // Short msg since so rare.
+		g_script.ScriptError(_T("Too many fonts."));  // Short msg since so rare.
 		return -1;
 	}
 
@@ -7443,7 +7461,7 @@ int GuiType::FindOrCreateFont(LPTSTR aOptions, LPTSTR aFontName, FontType *aFoun
 		, DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS, font.quality, FF_DONTCARE, font.name))   )
 		// OUT_DEFAULT_PRECIS/OUT_TT_PRECIS ... DEFAULT_QUALITY/PROOF_QUALITY
 	{
-		g_script.ScriptError(_T("Can't create font.") ERR_ABORT);  // Short msg since so rare.
+		g_script.ScriptError(_T("Can't create font."));  // Short msg since so rare.
 		return -1;
 	}
 

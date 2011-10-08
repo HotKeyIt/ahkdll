@@ -61,16 +61,16 @@ BIF(BIF_Alias)
 	{
 		Var &var = *aParam0.var;
 
-		UINT len = 0;
+		UINT_PTR len = 0;
 		switch (aParam1.symbol)
 		{
 		case SYM_VAR:
 		case SYM_INTEGER:
-			len = (UINT)aParam1.var;
+			len = (UINT_PTR)(aParam[1]->var->mType == VAR_ALIAS ? aParam1.var->ResolveAlias() : aParam1.var);
 		break;
 		// HotKeyIt H10 added to accept dynamic text and also when value is returned by ahkgetvar in AutoHotkey.dll
 		case SYM_OPERAND:
-			len = (UINT)ATOI64(aParam1.marker);
+			len = (UINT_PTR)ATOI64(aParam1.marker);
 		}
 		var.mType = len ? VAR_ALIAS : VAR_NORMAL;
 		var.mByteLength = len;
