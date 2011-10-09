@@ -59,7 +59,7 @@ BIF(BIF_Alias)
 	ExprTokenType &aParam1 = *aParam[1];
 	if (aParam0.symbol == SYM_VAR)
 	{
-		Var &var = *aParam0.var;
+		Var &var = (aParam[0]->var->mType == VAR_ALIAS ? *aParam0.var->ResolveAlias() : *aParam0.var);
 
 		UINT_PTR len = 0;
 		switch (aParam1.symbol)
