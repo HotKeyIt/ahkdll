@@ -248,7 +248,7 @@ EXPORT BOOL ahkKey(LPTSTR keys)
 BOOL FinalizeScript(Line *aFirstLine,int aFuncCount,int aHotkeyCount)
 {
 #ifndef MINIDLL
-	if (Hotkey::sHotkeyCount>aHotkeyCount > aHotkeyCount)
+	if (Hotkey::sHotkeyCount > aHotkeyCount)
 	{
 		Line::ToggleSuspendState();
 		Line::ToggleSuspendState();

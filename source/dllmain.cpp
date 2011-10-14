@@ -219,7 +219,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 		else // since this is not a recognized switch, the end of the [Switches] section has been reached (by design).
 		{
 			switch_processing_is_complete = true;  // No more switches allowed after this point.
-			break; // No more switches allowed after this point.
+			--i; // Make the loop process this item again so that it will be treated as a script param.
 		}
 	}
 
@@ -241,9 +241,6 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	var->Assign(script_param_num - 1);
 
 	// N11 
-	Var *A_ScriptParams;
-	A_ScriptParams = g_script.FindOrAddVar(_T("A_ScriptParams"));	
-	A_ScriptParams->Assign(nameHinstanceP.args);
 
 	Var *A_ScriptOptions;
 	A_ScriptOptions = g_script.FindOrAddVar(_T("A_ScriptOptions"));	
