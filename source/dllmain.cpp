@@ -141,13 +141,14 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 
 	int dllargc = 0;
 #ifndef _UNICODE
-	LPWSTR wargv = (LPWSTR) _alloca((_tcslen(nameHinstanceP.argv)+1)*sizeof(WCHAR));
-	MultiByteToWideChar(CP_UTF8,0,nameHinstanceP.argv,-1,wargv,(_tcslen(nameHinstanceP.argv)+1)*sizeof(WCHAR));
+	LPWSTR wargv = (LPWSTR) _alloca((_tcslen(nameHinstanceP.args)+1)*sizeof(WCHAR));
+	MultiByteToWideChar(CP_UTF8,0,nameHinstanceP.args,-1,wargv,(_tcslen(nameHinstanceP.args)+1)*sizeof(WCHAR));
 	LPWSTR *dllargv = CommandLineToArgvW(wargv,&dllargc);
 #else
-	LPWSTR *dllargv = CommandLineToArgvW(nameHinstanceP.argv,&dllargc);
+	LPWSTR *dllargv = CommandLineToArgvW(nameHinstanceP.args,&dllargc);
 #endif
 	int i;
+	if (*nameHinstanceP.args) // Only process if parameters were given
 	for (i = 0; i < dllargc; ++i) // Start at 1 because 0 contains the program name.
 	{
 #ifndef _UNICODE
