@@ -1763,8 +1763,8 @@ ResultType Script::LoadIncludedText(LPTSTR aFileSpec)
 	two_char_string[2] = '\0';  //
 	int continuation_line_count;
 
-	#define MAX_FUNC_VAR_EXCEPTIONS 2000
-	Var *func_exception_var[MAX_FUNC_VAR_EXCEPTIONS];
+	#define MAX_FUNC_VAR_GLOBALS 2000
+	Var *func_global_var[MAX_FUNC_VAR_GLOBALS];
 
 	// Init both for main file and any included files loaded by this function:
 	mCurrFileIndex = source_file_index;  // source_file_index is kept on the stack due to recursion (from #include).
@@ -2262,10 +2262,10 @@ process_completed_line:
 						// Though it might be allowed in the future -- perhaps to have nested functions have
 						// access to their parent functions' local variables, or perhaps just to improve
 						// script readability and maintainability -- it's currently not allowed because of
-						// the practice of maintaining the func_exception_var list on our stack:
+						// the practice of maintaining the func_global_var list on our stack:
 						return ScriptError(_T("Functions cannot contain functions."), pending_buf);
 					}
-					if (!DefineFunc(pending_buf, func_exception_var))
+					if (!DefineFunc(pending_buf, func_global_var))
 						return FAIL;
 					if (pending_buf_has_brace) // v1.0.41: Support one-true-brace for function def, e.g. fn() {
 					{
@@ -2382,6 +2382,19 @@ process_completed_line:
 					if (!DefineClassVars(buf + 7, true))
 						return FAIL; // Above already displayed the error.
 					goto continue_main_loop; // In lieu of "continue", for performance.
+				}
+				if (*buf == '#') // See the identical section further below for comments.
+				{
+					saved_line_number = mCombinedLineNumber;
+					switch(IsDirective(buf))
+					{
+					case CONDITION_TRUE:
+						mCurrFileIndex = source_file_index;
+						mCombinedLineNumber = saved_line_number;
+						goto continue_main_loop;
+					case FAIL:
+						return FAIL;
+					}
 				}
 				// Anything not already handled above is not valid directly inside a class definition.
 				return ScriptError(ERR_INVALID_LINE_IN_CLASS_DEF, buf);
@@ -3773,6 +3786,19 @@ process_completed_line:
 					if (!DefineClassVars(buf + 7, true))
 						return FAIL; // Above already displayed the error.
 					goto continue_main_loop; // In lieu of "continue", for performance.
+				}
+				if (*buf == '#') // See the identical section further below for comments.
+				{
+					saved_line_number = mCombinedLineNumber;
+					switch(IsDirective(buf))
+					{
+					case CONDITION_TRUE:
+						mCurrFileIndex = source_file_index;
+						mCombinedLineNumber = saved_line_number;
+						goto continue_main_loop;
+					case FAIL:
+						return FAIL;
+					}
 				}
 				// Anything not already handled above is not valid directly inside a class definition.
 				return ScriptError(ERR_INVALID_LINE_IN_CLASS_DEF, buf);
