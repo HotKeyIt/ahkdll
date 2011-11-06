@@ -10775,6 +10775,22 @@ VarSizeType BIV_IsCompiled(LPTSTR aBuf, LPTSTR aVarName)
 	}
 	return 1;
 }
+#else
+VarSizeType BIV_IsCompiled(LPTSTR aBuf, LPTSTR aVarName)
+{
+	if (!g_hResource)
+	{
+		if (aBuf)
+			*aBuf = '\0';
+		return 0;
+	} 
+	else if (aBuf)
+	{
+		*aBuf++ = '1';
+		*aBuf = '\0';
+	}
+	return 1;
+}
 #endif
 
 #ifdef UNICODE  // A_IsUnicode is left blank/undefined in the ANSI version.
@@ -12943,7 +12959,7 @@ CStringW **pStr = (CStringW **)
 					token.object->Invoke(result_token,token,IT_GET,param,1);
 					if (!IS_NUMERIC(result_token.symbol))
 					{
-						g_ErrorLevel->Assign(_T("-2")); // Stage 2 error: Invalid return type or arg type.
+						g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
 						return NULL;
 					}
 					obj->paramshift[i+1] = (int)result_token.value_int64-1;
@@ -12989,6 +13005,10 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
                                             int aParamCount
                                             )
  {
+	// Set default result in case of early return; a blank value:
+	aResultToken.symbol = SYM_STRING;
+	aResultToken.marker = _T("");
+
 	int arg_count = this->marg_count;
 	int i = arg_count * sizeof(void *);
 #ifdef WIN32_PLATFORM
@@ -13026,7 +13046,7 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 				// to be stack memory, which would be invalid memory upon return to the caller).
 				// The complexity of this doesn't seem worth the rarity of the need, so this will be
 				// documented in the help file.
-				g_ErrorLevel->Assign(_T("-2")); // Stage 2 error: Invalid return type or arg type.
+				g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
 				return OK;
 			}
 			// Otherwise, it's a supported type of string.
@@ -13053,7 +13073,7 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 			// Of course, it's not a complete solution because it doesn't stop a script from
 			// passing a variable whose capacity is non-zero yet too small to handle what the
 			// function will write to it.  But it's a far cry better than nothing because it's
-			// common for a script to forget to call VarSetCapacity before psssing a buffer to some
+			// common for a script to forget to call VarSetCapacity before passing a buffer to some
 			// function that writes a string to it.
 			//if (this_dyna_param.str == Var::sEmptyString) // To improve performance, compare directly to Var::sEmptyString rather than calling Capacity().
 			//	this_dyna_param.str = ""; // Make it read-only to force an exception.  See comments above.
@@ -13061,7 +13081,7 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 		case DLL_ARG_xSTR: // See the section above for comments.
 			if (IS_NUMERIC(this_param.symbol))
 			{
-				g_ErrorLevel->Assign(_T("-2"));
+				g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DllCall"));
 				return OK;
 			}
 			// String needing translation: ASTR on Unicode build, WSTR on ANSI build.
@@ -13079,8 +13099,9 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 			break;
 
 		case DLL_ARG_INVALID:
-			g_ErrorLevel->Assign(_T("-2")); // Stage 2 error: Invalid return type or arg type.
+			g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
 			return OK;
+
 
 		default: // Namely:
 		//case DLL_ARG_INT:
@@ -13143,6 +13164,7 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 		// Don't bother with freeing hmodule_to_free since a critical error like this calls for minimal cleanup.
 		// The OS almost certainly frees it upon termination anyway.
 		// Call ScriptErrror() so that the user knows *which* DllCall is at fault:
+		g->InTryBlock = false; // do not throw an exception
 		g_script.ScriptError(_T("This DllCall requires a prior VarSetCapacity. The program is now unstable and will exit."));
 		g_script.ExitApp(EXIT_CRITICAL); // Called this way, it will run the OnExit routine, which is debatable because it could cause more good than harm, but might avoid loss of data if the OnExit routine does something important.
 	}
@@ -13170,6 +13192,10 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 			{
 			case DLL_ARG_INT64:
 			case DLL_ARG_DOUBLE:
+#ifdef _WIN64 // fincs: pointers are 64-bit on x64.
+			case DLL_ARG_WSTR:
+			case DLL_ARG_ASTR:
+#endif
 				// Same as next section but for eight bytes:
 				return_value.Int64 = *(__int64 *)return_value.Pointer;
 				break;
@@ -13214,7 +13240,7 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 			// that will vanish when we return to our caller.  As long as every string that went into the
 			// function isn't on our stack (which is the case), there should be no way for what comes out to be
 			// on the stack either.
-			aResultToken.symbol = SYM_STRING;
+			//aResultToken.symbol = SYM_STRING; // This is the default.
 			aResultToken.marker = (LPTSTR)(return_value.Pointer ? return_value.Pointer : _T(""));
 			// Above: Fix for v1.0.33.01: Don't allow marker to be set to NULL, which prevents crash
 			// with something like the following, which in this case probably happens because the inner
@@ -13237,11 +13263,11 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 					CStringCharFromWChar result_buf(result);
 #endif
 					// Store the length of the translated string first since DetachBuffer() clears it.
-					aResultToken.buf = (LPTSTR)(size_t)result_buf.GetLength();
+					aResultToken.marker_length = result_buf.GetLength();
 					// Now attempt to take ownership of the malloc'd memory, to return to our caller.
-					if (aResultToken.circuit_token = (ExprTokenType *)result_buf.DetachBuffer())
-						aResultToken.marker = (LPTSTR)aResultToken.circuit_token;
-					//else circuit_token is NULL, so buf should be ignored.  See next comment below.
+					if (aResultToken.mem_to_free = result_buf.DetachBuffer())
+						aResultToken.marker = aResultToken.mem_to_free;
+					//else mem_to_free is NULL, so marker_length should be ignored.  See next comment below.
 				}
 				//else leave aResultToken as it was set at the top of this function: an empty string.
 			}
@@ -13292,7 +13318,7 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 				delete pStr[arg_count];
 			continue;
 		}
-		DYNAPARM &this_dyna_param = this->mdyna_param[arg_count]; // Resolved for performance and convenience.
+		DYNAPARM &this_dyna_param = this->mdyna_param[(this->paramshift[0] > 0) ? this->paramshift[arg_count+1] : arg_count]; // Resolved for performance and convenience.
 		Var &output_var = *this_param.var;                 //
 		if (this_dyna_param.type == DLL_ARG_STR) // Native string type for current build config.
 		{
@@ -16272,7 +16298,7 @@ void BIF_WinExistActive(ExprTokenType &aResultToken, ExprTokenType *aParam[], in
 	// are only 32-bit, so use _ultot() for performance.
 	// OLD/WRONG: _ui64toa((unsigned __int64)found_hwnd, aResultToken.marker + 2, 16);
 }
-#ifdef AUTOHOTKEYSC
+
 void BIF_ResourceLoadLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
 	aResultToken.symbol = PURE_INTEGER;
@@ -16322,7 +16348,7 @@ void BIF_ResourceLoadLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[
 	module = MemoryLoadLibrary( textbuf.mBuffer );
 	aResultToken.value_int64 = (unsigned)module;
 }
-#endif
+
 
 void BIF_MemoryLoadLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {

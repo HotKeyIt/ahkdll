@@ -32,6 +32,14 @@ GNU General Public License for more details.
 int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdLine, int nCmdShow)
 {
 	// Init any globals not in "struct g" that need it:
+
+#ifdef _DEBUG
+	g_hResource = FindResource(NULL, _T("AHK"), MAKEINTRESOURCE(RT_RCDATA));
+#else
+	if (!(g_hResource = FindResource(NULL, _T(">AUTOHOTKEY SCRIPT<"), MAKEINTRESOURCE(RT_RCDATA)))
+		&& !(g_hResource = FindResource(NULL, _T(">AHK WITH ICON<"), MAKEINTRESOURCE(RT_RCDATA))))
+		g_hResource = NULL;
+#endif
 	g_hInstance = hInstance;
 	InitializeCriticalSection(&g_CriticalRegExCache); // v1.0.45.04: Must be done early so that it's unconditional, so that DeleteCriticalSection() in the script destructor can also be unconditional (deleting when never initialized can crash, at least on Win 9x).
 
@@ -100,6 +108,10 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 			if (!g_script.mIncludeLibraryFunctionsThenExit->Open(__targv[i], TextStream::WRITE | TextStream::EOL_CRLF | TextStream::BOM_UTF8, CP_UTF8)) // Can't open the temp file.
 				return CRITICAL_ERROR;
 		}
+		else if (!_tcsicmp(param, _T("/E")) || !_tcsicmp(param, _T("/Execute")))
+		{
+			g_hResource = NULL; // Execute script from File. Override compiled, A_IsCompiled will also report 0
+		}
 		else if (!_tcsnicmp(param, _T("/CP"), 3)) // /CPnnn
 		{
 			// Default codepage for the script file, NOT the default for commands used by it.
@@ -141,7 +153,10 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 #ifdef AUTOHOTKEYSC
 			--i; // Make the loop process this item again so that it will be treated as a script param.
 #else
-			script_filespec = param;  // The first unrecognized switch must be the script filespec, by design.
+			if (!g_hResource) // Only apply if it is not a compiled AutoHotkey.exe
+				script_filespec = param;  // The first unrecognized switch must be the script filespec, by design.
+			else
+				--i; // Make the loop process this item again so that it will be treated as a script param.
 #endif
 		}
 	}

@@ -28,6 +28,7 @@ GNU General Public License for more details.
 // state, don't keep anything in the global_struct except those things
 // which are necessary to save and restore (even though it would clean
 // up the code and might make maintaining it easier):
+HRSRC g_hResource = NULL; // Set by WinMain()
 HINSTANCE g_hInstance = NULL; // Set by WinMain().
 DWORD g_MainThreadID = GetCurrentThreadId();
 DWORD g_HookThreadID; // Not initialized by design because 0 itself might be a valid thread ID.

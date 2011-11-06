@@ -431,7 +431,7 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 	}
 #endif
 	// In case the script is a relative filespec (relative to current working dir):
-	if (hInstance != NULL && aIsText) //It is a dll and script was given as text rather than file
+	if (g_hResource || (hInstance != NULL && aIsText)) //It is a dll and script was given as text rather than file
 	{
 		if (!GetModuleFileName(hInstance, buf, _countof(buf))) //Get dll path
 			GetModuleFileName(NULL, buf, _countof(buf)); //due to MemoryLoadLibrary dll path might be empty
@@ -1340,7 +1340,7 @@ UINT Script::LoadFromFile(bool aScriptWasNotspecified)
 
 #ifndef AUTOHOTKEYSC  // When not in stand-alone mode, read an external script file.
 	DWORD attr = GetFileAttributes(mFileSpec);
-	if (attr == MAXDWORD) // File does not exist or lacking the authorization to get its attributes.
+	if (attr == MAXDWORD && !g_hResource) // File does not exist or lacking the authorization to get its attributes.
 	{
 #ifdef MINIDLL
 		return LOADING_FAILED;
@@ -3047,21 +3047,44 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 	size_t buf_length, next_buf_length, suffix_length;
 	bool pending_buf_has_brace;
 	bool pending_buf_is_class; // True for class definition, false for function definition/call.
-
+	TextStream *fp;
+	TextFile tfile;
+	TextMem tmem;
 #ifndef AUTOHOTKEYSC
-	TextFile tfile, *fp = &tfile;
-	if (!tfile.Open(aFileSpec, DEFAULT_READ_FLAGS, g_DefaultScriptCodepage))
+	if (!g_hResource)
 	{
-		if (aIgnoreLoadFailure)
-			return OK;
-		sntprintf(msg_text, _countof(msg_text), _T("%s file \"%s\" cannot be opened.")
-			, Line::sSourceFileCount > 0 ? _T("#Include") : _T("Script"), aFileSpec);
-		return ScriptError(msg_text);
-	}
+		if (!tfile.Open(aFileSpec, DEFAULT_READ_FLAGS, g_DefaultScriptCodepage))
+		{
+			if (aIgnoreLoadFailure)
+				return OK;
+			sntprintf(msg_text, _countof(msg_text), _T("%s file \"%s\" cannot be opened.")
+				, Line::sSourceFileCount > 0 ? _T("#Include") : _T("Script"), aFileSpec);
+			return ScriptError(msg_text);
+		}
+		fp = &tfile;
+		// This is done only after the file has been successfully opened in case aIgnoreLoadFailure==true:
+		if (source_file_index > 0)
+			Line::sSourceFile[source_file_index] = SimpleHeap::Malloc(full_path);
+	} 
+	else
+	{
+		HGLOBAL hResData;
+		TextMem::Buffer textbuf(NULL, 0, false);
+		if ( !( (textbuf.mLength = SizeofResource(g_hInstance, g_hResource))
+			&& (hResData = LoadResource(g_hInstance, g_hResource))
+			&& (textbuf.mBuffer = LockResource(hResData)) ) )
+		{
+			MsgBox(_T("Could not extract script from EXE."), 0, aFileSpec);
+			return FAIL;
+		}
+		LPVOID hResDataTemp =  (LPVOID*)_alloca(textbuf.mLength);
+		memmove(hResDataTemp,LoadResource(g_hInstance, g_hResource),textbuf.mLength);
+		textbuf.mBuffer = hResDataTemp;
 
-	// This is done only after the file has been successfully opened in case aIgnoreLoadFailure==true:
-	if (source_file_index > 0)
-		Line::sSourceFile[source_file_index] = SimpleHeap::Malloc(full_path);
+		fp = &tmem;
+		// NOTE: Ahk2Exe strips off the UTF-8 BOM.
+		tmem.Open(textbuf, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR, CP_UTF8);
+	}
 	//else the first file was already taken care of by another means.
 
 #else // Stand-alone mode (there are no include files in this mode since all of them were merged into the main script at the time of compiling).
@@ -3119,7 +3142,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 	}
 #endif
 
-	TextMem tmem, *fp = &tmem;
+	fp = &tmem;
 	// NOTE: Ahk2Exe strips off the UTF-8 BOM.
 	tmem.Open(textbuf, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR, CP_UTF8);
 #endif
@@ -3177,7 +3200,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 	LineNumberType phys_line_number = 0;
 #endif
 	buf_length = GetLine(buf, LINE_SIZE - 1, 0, fp);
-
+	
 	if (in_comment_section = !_tcsncmp(buf, _T("/*"), 2))
 	{
 		// Fixed for v1.0.35.08. Must reset buffer to allow a script's first line to be "/*".
@@ -4370,7 +4393,6 @@ continue_main_loop: // This method is used in lieu of "continue" for performance
 			return FAIL;
 		mCombinedLineNumber = saved_line_number;
 	}
-
 	++mCombinedLineNumber; // L40: Put the implicit ACT_EXIT on the line after the last physical line (for the debugger).
 
 	// This is not required, it is called by the destructor.
@@ -10841,9 +10863,9 @@ void *Script::GetVarType(LPTSTR aVarName)
 	if (!_tcscmp(lower, _T("linefile"))) return BIV_LineFile;
 
 // A_IsCompiled is left blank/undefined in uncompiled scripts.
-#ifdef AUTOHOTKEYSC
+//#ifdef AUTOHOTKEYSC
 	if (!_tcscmp(lower, _T("iscompiled"))) return BIV_IsCompiled;
-#endif
+//#endif
 
 // A_IsUnicode is left blank/undefined in the ANSI version.
 #ifdef UNICODE

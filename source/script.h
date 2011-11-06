@@ -2827,9 +2827,9 @@ VarSizeType BIV_IsCritical(LPTSTR aBuf, LPTSTR aVarName);
 #ifndef MINIDLL
 VarSizeType BIV_IsSuspended(LPTSTR aBuf, LPTSTR aVarName);
 #endif
-#ifdef AUTOHOTKEYSC  // A_IsCompiled is left blank/undefined in uncompiled scripts.
+//#ifdef AUTOHOTKEYSC  // A_IsCompiled is left blank/undefined in uncompiled scripts.
 VarSizeType BIV_IsCompiled(LPTSTR aBuf, LPTSTR aVarName);
-#endif
+//#endif
 #ifdef UNICODE  // A_IsUnicode is left blank/undefined in the ANSI version.
 VarSizeType BIV_IsUnicode(LPTSTR aBuf, LPTSTR aVarName);
 #endif

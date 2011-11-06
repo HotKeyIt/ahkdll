@@ -106,7 +106,16 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 {
 	// Init any globals not in "struct g" that need it:
 	g_MainThreadID = GetCurrentThreadId();
-
+	
+	
+#ifdef _DEBUG
+	g_hResource = FindResource(g_hInstance, _T("AHK"), MAKEINTRESOURCE(RT_RCDATA));
+#else
+	if (!(g_hResource = FindResource(g_hInstance, _T(">AUTOHOTKEY SCRIPT<"), MAKEINTRESOURCE(RT_RCDATA)))
+		&& !(g_hResource = FindResource(g_hInstance, _T(">AHK WITH ICON<"), MAKEINTRESOURCE(RT_RCDATA))))
+		g_hResource = NULL;
+#endif
+	
 	InitializeCriticalSection(&g_CriticalRegExCache); // v1.0.45.04: Must be done early so that it's unconditional, so that DeleteCriticalSection() in the script destructor can also be unconditional (deleting when never initialized can crash, at least on Win 9x).
 
 	if (!GetCurrentDirectory(_countof(g_WorkingDir), g_WorkingDir)) // Needed for the FileSelectFile() workaround.
@@ -183,6 +192,10 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 			if (!g_script.mIncludeLibraryFunctionsThenExit->Open(param, TextStream::WRITE | TextStream::EOL_CRLF | TextStream::BOM_UTF8, CP_UTF8)) // Can't open the temp file.
 				return CRITICAL_ERROR;
 		}
+		else if (!_tcsicmp(param, _T("/E")) || !_tcsicmp(param, _T("/Execute")))
+		{
+			g_hResource = NULL; // Execute script from File. Override compiled, A_IsCompiled will also report 0
+		}
 		else if (!_tcsnicmp(param, _T("/CP"), 3)) // /CPnnn
 		{
 			// Default codepage for the script file, NOT the default for commands used by it.
@@ -250,7 +263,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	global_init(*g);  // Set defaults prior to the below, since below might override them for AutoIt2 scripts.
 
 // Set up the basics of the script:
-	if (g_script.Init(*g, script_filespec, restart_mode,hInstance,(bool)nameHinstanceP.istext) != OK)  // Set up the basics of the script, using the above.
+	if (g_script.Init(*g, script_filespec, restart_mode,hInstance,g_hResource ? 0 : (bool)nameHinstanceP.istext) != OK)  // Set up the basics of the script, using the above.
 		return CRITICAL_ERROR;
 	// Set g_default now, reflecting any changes made to "g" above, in case AutoExecSection(), below,
 	// never returns, perhaps because it contains an infinite loop (intentional or not):
@@ -271,7 +284,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 #ifdef AUTOHOTKEYSC
 	LineNumberType load_result = g_script.LoadFromFile();
 #else //HotKeyIt changed to load from Text in dll as well when file does not exist
-	LineNumberType load_result = !nameHinstanceP.istext ? g_script.LoadFromFile(script_filespec == NULL) : g_script.LoadFromText(script_filespec);
+	LineNumberType load_result = (g_hResource || !nameHinstanceP.istext) ? g_script.LoadFromFile(script_filespec == NULL) : g_script.LoadFromText(script_filespec);
 #endif
 	if (load_result == LOADING_FAILED) // Error during load (was already displayed by the function call).
 		return CRITICAL_ERROR;  // Should return this value because PostQuitMessage() also uses it.
@@ -281,17 +294,9 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	// Unless explicitly set to be non-SingleInstance via SINGLE_INSTANCE_OFF or a special kind of
 	// SingleInstance such as SINGLE_INSTANCE_REPLACE and SINGLE_INSTANCE_IGNORE, persistent scripts
 	// and those that contain hotkeys/hotstrings are automatically SINGLE_INSTANCE_PROMPT as of v1.0.16:
-#ifndef _USRDLL	
-	if (g_AllowOnlyOneInstance == ALLOW_MULTI_INSTANCE && IS_PERSISTENT)
-		g_AllowOnlyOneInstance = SINGLE_INSTANCE_PROMPT;
-#else
 #ifndef MINIDLL
 	if (g_AllowOnlyOneInstance == ALLOW_MULTI_INSTANCE)
 		g_AllowOnlyOneInstance = SINGLE_INSTANCE_PROMPT;
-#endif
-#endif
-
-#ifndef MINIDLL
 /*
 	HWND w_existing = NULL;
 	UserMessages reason_to_close_prior = (UserMessages)0;
