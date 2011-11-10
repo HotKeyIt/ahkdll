@@ -3077,9 +3077,6 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			MsgBox(_T("Could not extract script from EXE."), 0, aFileSpec);
 			return FAIL;
 		}
-		LPVOID hResDataTemp =  (LPVOID*)_alloca(textbuf.mLength);
-		memmove(hResDataTemp,LoadResource(g_hInstance, g_hResource),textbuf.mLength);
-		textbuf.mBuffer = hResDataTemp;
 
 		fp = &tmem;
 		// NOTE: Ahk2Exe strips off the UTF-8 BOM.

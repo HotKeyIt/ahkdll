@@ -87,7 +87,7 @@ DWORD TextStream::Read(LPTSTR aBuf, DWORD aBufLen, int aNumLines)
 {
 	if (!PrepareToRead())
 		return 0;
-	
+
 	DWORD target_used = 0;
 	LPBYTE src, src_end;
 	TCHAR dst[UorA(2,4)];
@@ -102,7 +102,7 @@ DWORD TextStream::Read(LPTSTR aBuf, DWORD aBufLen, int aNumLines)
 		// depending on how much data is in the buffer.  We want to either have at least
 		// two chars in the buffer (maybe \r and \n) or have the very last char of data.
 		// Byte mode: Try to read at least 4 bytes to simplify handling of 4-byte UTF-8 chars.
-		if (target_used == aBufLen || (!ReadAtLeast(4)) && !mLength)
+		if (target_used == aBufLen || !ReadAtLeast(4) && !mLength)
 			break;
 #define LAST_READ_HIT_EOF (mLength < 4) // Could be (mLength < TEXT_IO_BLOCK), but this seems safer.
 		
@@ -1180,27 +1180,32 @@ bool TextMem::_Open(LPCTSTR aFileSpec, DWORD aFlags)
 {
 	ASSERT( (aFlags & ACCESS_MODE_MASK) == TextStream::READ ); // Only read mode is supported.
 
-	Buffer *buf = (Buffer *) aFileSpec;
-	if (mOwned && mBuffer)
-		free(mBuffer);
-	mPosA = mBufferA = (LPSTR) buf->mBuffer;
-	mLength = buf->mLength;
-	mOwned = buf->mOwned;
+	if (mData.mOwned && mData.mBuffer)
+		free(mData.mBuffer);
+	mData = *(Buffer *)aFileSpec; // Struct copy.
+	mDataPos = (LPBYTE)mData.mBuffer;
+	mPos = NULL; // Discard temp buffer contents, if any.
+	mLength = 0;
 	return true;
 }
 
 void TextMem::_Close()
 {
-	if (mBuffer) {
-		if (mOwned)
-			free(mBuffer);
-		mBuffer = NULL;
+	if (mData.mBuffer) {
+		if (mData.mOwned)
+			free(mData.mBuffer);
+		mData.mBuffer = NULL;
 	}
 }
 
 DWORD TextMem::_Read(LPVOID aBuffer, DWORD aBufSize)
 {
-	return 0;
+	DWORD remainder = (DWORD)((LPBYTE)mData.mBuffer + mData.mLength - mDataPos);
+	if (aBufSize > remainder)
+		aBufSize = remainder;
+	memmove(aBuffer, mDataPos, aBufSize);
+	mDataPos += aBufSize;
+	return aBufSize;
 }
 
 DWORD TextMem::_Write(LPCVOID aBuffer, DWORD aBufSize)

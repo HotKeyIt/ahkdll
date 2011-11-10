@@ -43,6 +43,7 @@ GNU General Public License for more details.
 // hook functions.
 
 
+static LPTSTR aDefaultDllScript = _T("#Persistent\n#NoTrayIcon");
 static LPTSTR scriptstring;
 // Naveen v1. HANDLE hThread
 // Todo: move this to struct nameHinstance
@@ -521,7 +522,7 @@ int setscriptstrings(LPTSTR fileName, LPTSTR argv, LPTSTR args)
 
 EXPORT UINT_PTR ahkdll(LPTSTR fileName, LPTSTR argv, LPTSTR args)
 {
-	if (setscriptstrings(*fileName ? fileName : _T("#Persistent\n#NoTrayIcon"), argv, args))
+	if (setscriptstrings(*fileName ? fileName : aDefaultDllScript, argv, args))
 		return 0;
 	nameHinstanceP.istext = *fileName ? 0 : 1;
 	return runThread();
@@ -530,7 +531,7 @@ EXPORT UINT_PTR ahkdll(LPTSTR fileName, LPTSTR argv, LPTSTR args)
 // HotKeyIt ahktextdll
 EXPORT UINT_PTR ahktextdll(LPTSTR fileName, LPTSTR argv, LPTSTR args)
 {
-	if (setscriptstrings(*fileName ? fileName : _T("#Persistent\n#NoTrayIcon"), argv, args))
+	if (setscriptstrings(*fileName ? fileName : aDefaultDllScript, argv, args))
 		return 0;
 	nameHinstanceP.istext = 1;
 	return runThread();
