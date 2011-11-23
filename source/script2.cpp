@@ -705,7 +705,6 @@ ResultType Line::ToolTip(LPTSTR aText, LPTSTR aX, LPTSTR aY, LPTSTR aID)
 	if (window_index < 0 || window_index >= MAX_TOOLTIPS)
 		return LineError(_T("Max window number is ") MAX_TOOLTIPS_STR _T("."), FAIL, aID);
 	HWND tip_hwnd = g_hWndToolTip[window_index];
-
 	// Destroy windows except the first (for performance) so that resources/mem are conserved.
 	// The first window will be hidden by the TTM_UPDATETIPTEXT message if aText is blank.
 	// UPDATE: For simplicity, destroy even the first in this way, because otherwise a script
@@ -12087,6 +12086,33 @@ struct DYNAPARM
 	bool is_unsigned; // Allows return value and output parameters to be interpreted as unsigned vs. signed.
 };
 
+// CriticalObject Object
+class CriticalObject : public ObjectBase
+{
+protected:
+	IObject *object;
+	LPCRITICAL_SECTION lpCriticalSection;
+	CriticalObject()
+			: lpCriticalSection(0)
+			, object(0)
+	{}
+
+	bool Delete();
+	~CriticalObject(){}
+
+public:
+	__int64 GetObj()
+	{
+		return (__int64)&*this->object;
+	}
+	__int64 GetCriSec()
+	{
+		return (__int64) this->lpCriticalSection;
+	}
+	static IObject *Create(ExprTokenType *aParam[], int aParamCount);
+	ResultType STDMETHODCALLTYPE Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
+};
+
 // DynaCall Object
 class DynaToken : public ObjectBase
 {
@@ -12642,6 +12668,99 @@ void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free) // L31: 
 
 
 
+void BIF_CriticalObject(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+{
+	IObject *obj = NULL;
+	// If 2 parameters are given and second parameter is 1 or 2,
+	// means we want to get the reference to obj(1) or crisec(2)
+	if (aParamCount == 2 && TokenToInt64(*aParam[1]) < 3) 
+	{
+		aResultToken.symbol = PURE_INTEGER;
+		CriticalObject *criticalobj = (CriticalObject*)TokenToObject(*aParam[0]);
+		if (criticalobj < (IObject *)1024)
+			aResultToken.value_int64 = 0;
+		else if (TokenToInt64(*aParam[1]) == 1) // Get object reference
+			aResultToken.value_int64 = criticalobj->GetObj();
+		else if (TokenToInt64(*aParam[1]) == 2) // Get critical section reference
+			aResultToken.value_int64 = criticalobj->GetCriSec();
+	} 
+	else if (obj = CriticalObject::Create(aParam,aParamCount))
+	{
+		aResultToken.symbol = SYM_OBJECT;
+		aResultToken.object = obj;
+		// DO NOT ADDREF: after we return, the only reference will be in aResultToken.
+	}
+	else
+	{
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = _T("");
+	}
+}
+
+IObject *CriticalObject::Create(ExprTokenType *aParam[], int aParamCount)
+{
+	IObject *obj = NULL;
+	if (aParamCount == 0) // No parameters given, create new object
+		obj = Object::Create(0,0);
+	else if (IS_NUMERIC(aParam[0]->symbol) || IS_OPERAND(aParam[0]->symbol))
+	{	
+		obj = (IObject *)TokenToInt64(*aParam[0]); // object reference
+		if (obj < (IObject *)1024) // Prevent some obvious errors.
+			obj = NULL;
+		else
+			obj->AddRef();
+	}
+	if (!obj) // Check if it is an object or var containing object
+	{
+		obj = TokenToObject(*aParam[0]);
+		if (obj < (IObject *)1024) // Prevent some obvious errors.
+			return 0;
+		else
+			obj->AddRef();
+	}
+
+	// create new critical object and save reference
+	CriticalObject *criticalobj = new CriticalObject();
+	criticalobj->object = obj;
+
+	if (aParamCount < 2)
+	{	// no Critical Section reference was given, create one
+		criticalobj->lpCriticalSection = (LPCRITICAL_SECTION)malloc(sizeof(CRITICAL_SECTION));
+		InitializeCriticalSection(criticalobj->lpCriticalSection);
+	}
+	else
+		// An already initialized Critical Section reference was given, use it
+		criticalobj->lpCriticalSection = (LPCRITICAL_SECTION)TokenToInt64(*aParam[1]);
+	return criticalobj;
+}
+
+//
+// CriticalObject::Delete - Called immediately before the object is deleted.
+//					Returns false if object should not be deleted yet.
+//
+
+bool CriticalObject::Delete()
+{
+	return ObjectBase::Delete();
+}
+
+ResultType STDMETHODCALLTYPE CriticalObject::Invoke(
+                                            ExprTokenType &aResultToken,
+                                            ExprTokenType &aThisToken,
+                                            int aFlags,
+                                            ExprTokenType *aParam[],
+                                            int aParamCount
+                                            )
+ {
+	 // Avoid deadlocking the process so messages can still be processed
+	 while (!TryEnterCriticalSection(this->lpCriticalSection))
+		 MsgSleep(-1);
+	 // Invoke original object as if it was called
+	 ResultType r = this->object->Invoke(aResultToken,aThisToken,aFlags,aParam,aParamCount);
+	 LeaveCriticalSection(this->lpCriticalSection);
+	 return r;
+}
+
 void BIF_DynaCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
 	IObject *obj = NULL;
@@ -12979,7 +13098,6 @@ CStringW **pStr = (CStringW **)
 	return obj;
 }
 
-
 //
 // DynaToken::Delete - Called immediately before the object is deleted.
 //					Returns false if object should not be deleted yet.
@@ -12989,7 +13107,6 @@ bool DynaToken::Delete()
 {
 	return ObjectBase::Delete();
 }
-
 
 DynaToken::~DynaToken()
 {
@@ -13933,6 +14050,12 @@ void BIF_Lock(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCo
 	aResultToken.symbol = SYM_STRING;
 	aResultToken.marker = _T("");
 	EnterCriticalSection((LPCRITICAL_SECTION) TokenToInt64(*aParam[0]));
+}
+
+void BIF_TryLock(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+{
+	aResultToken.symbol = SYM_INTEGER;
+	aResultToken.value_int64 = TryEnterCriticalSection((LPCRITICAL_SECTION) TokenToInt64(*aParam[0]));
 }
 
 void BIF_UnLock(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)

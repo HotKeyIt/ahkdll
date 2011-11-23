@@ -93,7 +93,19 @@ switch(fwdReason)
 		 int lpExitCode = 0;
 		 GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
 		 if ( lpExitCode == 259 )
-			CloseHandle( hThread ); // need better cleanup: windows, variables, no exit from script
+			CloseHandle( hThread );
+	// Unregister window class registered in Script::CreateWindows
+#ifdef UNICODE
+	UnregisterClass((LPCWSTR)&WINDOW_CLASS_MAIN,g_hInstance);
+#ifndef MINIDLL
+	UnregisterClass((LPCWSTR)&WINDOW_CLASS_SPLASH,g_hInstance);
+#endif // MINIDLL
+#else
+	UnregisterClass((LPCSTR)&WINDOW_CLASS_MAIN,g_hInstance);
+#ifndef MINIDLL
+	UnregisterClass((LPCSTR)&WINDOW_CLASS_SPLASH,g_hInstance);
+#endif // MINIDLL
+#endif
 		 break;
 	 }
  case DLL_THREAD_DETACH:

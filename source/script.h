@@ -2077,6 +2077,7 @@ public:
 		, mIsBuiltIn(aIsBuiltIn)
 		, mIsVariadic(false)
 	{}
+
 	void *operator new(size_t aBytes) {return SimpleHeap::Malloc(aBytes);}
 	void *operator new[](size_t aBytes) {return SimpleHeap::Malloc(aBytes);}
 	void operator delete(void *aPtr) {}
@@ -2927,13 +2928,12 @@ void BIF_DllCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPara
 void BIF_DynaCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 #endif
 
-#ifdef AUTOHOTKEYSC
 void BIF_ResourceLoadLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
-#endif
 void BIF_MemoryLoadLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_MemoryGetProcAddress(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_MemoryFreeLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_Lock(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_TryLock(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_UnLock(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_StrLen(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_SubStr(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
@@ -2994,6 +2994,7 @@ void BIF_Trim(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCo
 
 void BIF_IsObject(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_ObjCreate(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_CriticalObject(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_ObjArray(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_ObjInvoke(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount); // Pseudo-operator. See script_object.cpp for comments.
 void BIF_ObjGetInPlace(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount); // Pseudo-operator.

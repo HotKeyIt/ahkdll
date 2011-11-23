@@ -7,7 +7,7 @@
 
 EXPORT BOOL ahkPause(LPTSTR aChangeTo);
 EXPORT UINT_PTR ahkFindLabel(LPTSTR aLabelName);
-EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar);
+EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar = 0);
 EXPORT unsigned int ahkassign(LPTSTR name, LPTSTR value);
 EXPORT UINT_PTR ahkExecuteLine(UINT_PTR line,unsigned int aMode,unsigned int wait);
 EXPORT BOOL ahkLabel(LPTSTR aLabelName, unsigned int nowait = 0);

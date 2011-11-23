@@ -568,33 +568,30 @@ ResultType Script::CreateWindows()
 	wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);  // Needed for ProgressBar. Old: (HBRUSH)GetStockObject(WHITE_BRUSH);
 	wc.lpszMenuName = MAKEINTRESOURCE(IDR_MENU_MAIN); // NULL; // "MainMenu";
 #endif
-#ifdef UNICODE
-	UnregisterClass((LPCWSTR)&WINDOW_CLASS_MAIN,g_hInstance);
+#ifdef _USRDLL  //Ignore errors since mostly AutoHotkey.exe alredy registered the class
+	RegisterClassEx(&wc);
 #else
-	UnregisterClass((LPCSTR)&WINDOW_CLASS_MAIN,g_hInstance);
-#endif
 	if (!RegisterClassEx(&wc))
 	{
 		MsgBox(_T("RegClass")); // Short/generic msg since so rare.
 		return FAIL;
 	}
-
+#endif
 	// Register a second class for the splash window.  The only difference is that
 	// it doesn't have the menu bar:
 #ifndef MINIDLL
 	wc.lpszClassName = WINDOW_CLASS_SPLASH;
 	wc.lpszMenuName = NULL; // Override the non-NULL value set higher above.
-#ifdef UNICODE
-	UnregisterClass((LPCWSTR)&WINDOW_CLASS_SPLASH,g_hInstance);
+#ifdef _USRDLL  //Ignore errors since mostly AutoHotkey.exe alredy registered the class
+	RegisterClassEx(&wc);
 #else
-	UnregisterClass((LPCSTR)&WINDOW_CLASS_SPLASH,g_hInstance);
-#endif
 	if (!RegisterClassEx(&wc))
 	{
 		MsgBox(_T("RegClass")); // Short/generic msg since so rare.
 		return FAIL;
 	}
-#endif
+#endif // _USRDLL
+#endif // MINIDLL
 	TCHAR class_name[64];
 	HWND fore_win = GetForegroundWindow();
 	bool do_minimize = !fore_win || (GetClassName(fore_win, class_name, _countof(class_name))
@@ -3051,7 +3048,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 	TextFile tfile;
 	TextMem tmem;
 #ifndef AUTOHOTKEYSC
-	if (!g_hResource)
+	if (!g_hResource || Line::sSourceFileCount) // It is not a compiled exe or main script was already loaded
 	{
 		if (!tfile.Open(aFileSpec, DEFAULT_READ_FLAGS, g_DefaultScriptCodepage))
 		{
@@ -4405,7 +4402,6 @@ size_t Script::GetLine(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSect
 
 	if (!aBuf || !ts) return -1;
 	if (aMaxCharsToRead < 1) return 0;
-	if (ts->AtEOF()) return -1; // Previous call to this function probably already read the last line.
 	if (  !(aBuf_length = ts->ReadLine(aBuf, aMaxCharsToRead))  ) // end-of-file or error
 	{
 		*aBuf = '\0';  // Reset since on error, contents added by fgets() are indeterminate.
@@ -9755,6 +9751,18 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		min_params = 1;
 		max_params = 1;
 	}
+	else if (!_tcsicmp(func_name, _T("CriticalObject")))
+	{
+		bif = BIF_CriticalObject;	
+		min_params = 0;
+		max_params = 2;
+	}
+	else if (!_tcsicmp(func_name, _T("TryLock")))
+	{
+		bif = BIF_TryLock;	
+		min_params = 1;
+		max_params = 1;
+	}
 	else if (!_tcsicmp(func_name, _T("UnLock")))
 	{
 		bif = BIF_UnLock;	
@@ -9880,14 +9888,12 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		max_params = 10000; // An arbitrarily high limit that will never realistically be reached.
 	}
 #endif
-#ifdef AUTOHOTKEYSC
 	else if (!_tcsicmp(func_name, _T("ResourceLoadLibrary")))
 	{
 		bif = BIF_ResourceLoadLibrary;
 		min_params = 1;
 		max_params = 1;
 	}
-#endif
 	else if (!_tcsicmp(func_name, _T("MemoryLoadLibrary")))
 	{
 		bif = BIF_MemoryLoadLibrary;
@@ -12526,7 +12532,8 @@ double_deref: // Caller has set cp to be start and op_end to be the character af
 			deref_start->marker = infix[infix_count].buf + (deref_start->marker - cp); // Point each to its position in the *new* buf.
 		infix[infix_count].var = (Var *)deref_new; // Postfix evaluation uses this to build the variable's name dynamically.
 
-		if (*op_end == '(') // i.e. dynamic function call (v1.0.47.06)
+		if (*op_end == '(' // i.e. dynamic function call (v1.0.47.06)
+			&& !(infix_count && infix[infix_count-1].symbol == SYM_NEW)) // Not something like "new TestClass%n%()".
 		{
 			if (infix_count > MAX_TOKENS - 2) // No room for the following symbol to be added (plus the ++infix done that will be done by the outer loop).
 				return LineError(ERR_EXPR_TOO_LONG);
