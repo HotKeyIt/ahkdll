@@ -97,6 +97,16 @@ void DisguiseWinAltIfNeeded(vk_type aVK)
 // moved from SendKeys
 void SendUnicodeChar(wchar_t aChar, int aModifiers = -1)
 {
+	// Set modifier keystate for consistent results. If not specified by caller, default to releasing
+	// Alt/Ctrl/Shift since these are known to interfere in some cases, and because SendAsc() does it
+	// (except for LAlt). Leave LWin/RWin as they are, for consistency with SendAsc().
+	if (aModifiers == -1)
+	{
+		aModifiers = sSendMode ? sEventModifiersLR : GetModifierLRState();
+		aModifiers &= ~(MOD_LALT | MOD_RALT | MOD_LCONTROL | MOD_RCONTROL | MOD_LSHIFT | MOD_RSHIFT);
+	}
+	SetModifierLRState((modLR_type)aModifiers, sSendMode ? sEventModifiersLR : GetModifierLRState(), NULL, false, true, KEY_IGNORE);
+
 	if (sSendMode == SM_INPUT)
 	{
 		// Calling SendInput() now would cause characters to appear out of sequence.
@@ -111,16 +121,6 @@ void SendUnicodeChar(wchar_t aChar, int aModifiers = -1)
 	// won't work, it seems better than sending chars out of order. One possible alternative could
 	// be to "flush" the event array, but since SendInput and SendEvent are probably much more common,
 	// this is left for a future version.
-
-	// Set modifier keystate for consistent results. If not specified by caller, default to releasing
-	// Alt/Ctrl/Shift since these are known to interfere in some cases, and because SendAsc() does it
-	// (except for LAlt). Leave LWin/RWin as they are, for consistency with SendAsc().
-	if (aModifiers == -1)
-	{
-		aModifiers = sSendMode ? sEventModifiersLR : GetModifierLRState();
-		aModifiers &= ~(MOD_LALT | MOD_RALT | MOD_LCONTROL | MOD_RCONTROL | MOD_LSHIFT | MOD_RSHIFT);
-	}
-	SetModifierLRState((modLR_type)aModifiers, sSendMode ? sEventModifiersLR : GetModifierLRState(), NULL, false, true, KEY_IGNORE);
 
 	INPUT u_input[2];
 
@@ -637,7 +637,10 @@ void SendKeys(LPTSTR aKeys, bool aSendRaw, SendModes aSendModeOrig, HWND aTarget
 				}
 				else if (isdigit((UCHAR)*aKeys) && key_name_length > 1)
 				{
-					SLEEP_WITHOUT_INTERRUPTION((int)ATOI(aKeys));
+					if (sSendMode != SM_EVENT) // || (sSendMode == SM_INPUT && !SystemHasAnotherKeybdHook()))
+						PutKeybdEventIntoArray(0, 0, 0, 0,ATOI(aKeys));
+					else
+						SLEEP_WITHOUT_INTERRUPTION(ATOI(aKeys));
 				}
 				else if (key_name_length == 1) // No vk/sc means a char of length one is sent via special method.
 				{
@@ -2815,7 +2818,23 @@ void SendEventArray(int &aFinalKeyDelay, modLR_type aModsDuringSend)
 			AddRemoveHooks(active_hooks & ~sHooksToRemoveDuringSendInput, true);
 #endif
 		// Caller has ensured that sMySendInput isn't NULL.
-		sMySendInput(sEventCount, sEventSI, sizeof(INPUT)); // Must call dynamically-resolved version for Win95/NT compatibility.
+		// Following is done to support Sleep in Send e.g. Send, abc{100}def
+		unsigned int aLastEventCount = 0;
+		for (unsigned int i = 0;i <= sEventCount;i++)
+		{
+			// wVK and wScan are 0 and dwExtraInfo holds time to sleep
+			if (sEventSI[i].ki.wVk == 0 && sEventSI[i].ki.wScan == 0)
+			{
+				sMySendInput(i - aLastEventCount, &sEventSI[aLastEventCount], sizeof(INPUT)); // Must call dynamically-resolved version for Win95/NT compatibility.
+				SLEEP_WITHOUT_INTERRUPTION((int)sEventSI[i].ki.dwExtraInfo);
+				aLastEventCount = i + 1; // + 1 to skip current item
+			}
+		}
+		// Process unprocessed Events
+		if (aLastEventCount == 0)
+			sMySendInput(sEventCount, sEventSI, sizeof(INPUT)); // Must call dynamically-resolved version for Win95/NT compatibility.
+		else
+			sMySendInput(aLastEventCount, &sEventSI[aLastEventCount], sizeof(INPUT)); // Must call dynamically-resolved version for Win95/NT compatibility.
 		// The return value is ignored because it never seems to be anything other than sEventCount, even if
 		// the Send seems to partially fail (e.g. due to hitting 5000 event maximum).
 		// Typical speed of SendInput: 10ms or less for short sends (under 100 events).
