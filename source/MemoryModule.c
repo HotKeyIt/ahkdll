@@ -434,7 +434,7 @@ FARPROC MemoryGetProcAddress(HMEMORYMODULE module, const char *name)
 	nameRef = (DWORD *) (codeBase + exports->AddressOfNames);
 	ordinal = (WORD *) (codeBase + exports->AddressOfNameOrdinals);
 	for (i=0; i<exports->NumberOfNames; i++, nameRef++, ordinal++) {
-		if (_stricmp(name, (const char *) (codeBase + (*nameRef))) == 0) {
+		if (stricmp(name, (const char *) (codeBase + (*nameRef))) == 0) {
 			idx = *ordinal;
 			break;
 		}
