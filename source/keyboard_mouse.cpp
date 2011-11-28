@@ -2820,7 +2820,7 @@ void SendEventArray(int &aFinalKeyDelay, modLR_type aModsDuringSend)
 		// Caller has ensured that sMySendInput isn't NULL.
 		// Following is done to support Sleep in Send e.g. Send, abc{100}def
 		unsigned int aLastEventCount = 0;
-		for (unsigned int i = 0;i <= sEventCount;i++)
+		for (unsigned int i = 0;i < sEventCount;i++)
 		{
 			// wVK and wScan are 0 and dwExtraInfo holds time to sleep
 			if (sEventSI[i].ki.wVk == 0 && sEventSI[i].ki.wScan == 0)
