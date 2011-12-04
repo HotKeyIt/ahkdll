@@ -12034,6 +12034,33 @@ VarSizeType BIV_TimeIdlePhysical(LPTSTR aBuf, LPTSTR aVarName)
 #endif
 }
 
+// CriticalObject Object
+class CriticalObject : public ObjectBase
+{
+protected:
+	IObject *object;
+	LPCRITICAL_SECTION lpCriticalSection;
+	CriticalObject()
+			: lpCriticalSection(0)
+			, object(0)
+	{}
+
+	bool Delete();
+	~CriticalObject(){}
+
+public:
+	__int64 GetObj()
+	{
+		return (__int64)&*this->object;
+	}
+	__int64 GetCriSec()
+	{
+		return (__int64) this->lpCriticalSection;
+	}
+	static IObject *Create(ExprTokenType *aParam[], int aParamCount);
+	ResultType STDMETHODCALLTYPE Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
+};
+
 
 ////////////////////////
 // BUILT-IN FUNCTIONS //
@@ -12086,33 +12113,6 @@ struct DYNAPARM
 	bool is_unsigned; // Allows return value and output parameters to be interpreted as unsigned vs. signed.
 };
 
-// CriticalObject Object
-class CriticalObject : public ObjectBase
-{
-protected:
-	IObject *object;
-	LPCRITICAL_SECTION lpCriticalSection;
-	CriticalObject()
-			: lpCriticalSection(0)
-			, object(0)
-	{}
-
-	bool Delete();
-	~CriticalObject(){}
-
-public:
-	__int64 GetObj()
-	{
-		return (__int64)&*this->object;
-	}
-	__int64 GetCriSec()
-	{
-		return (__int64) this->lpCriticalSection;
-	}
-	static IObject *Create(ExprTokenType *aParam[], int aParamCount);
-	ResultType STDMETHODCALLTYPE Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
-};
-
 // DynaCall Object
 class DynaToken : public ObjectBase
 {
@@ -12121,9 +12121,10 @@ protected:
 #ifdef WIN32_PLATFORM
 	int mdll_call_mode;
 #endif
-	int paramshift[MAX_NUMBER_SIZE];
+	int *paramshift;
 	void *mfunction;
 	DYNAPARM *mdyna_param;
+	DYNAPARM *mdefault_param;
 	DYNAPARM mreturn_attrib;
 
 	DynaToken()
@@ -12836,11 +12837,22 @@ IObject *DynaToken::Create(ExprTokenType *aParam[], int aParamCount)
 			aParam[1]->object->Invoke(result_token,*aParam[1],IT_GET,param,1);
 			if (IS_NUMERIC(result_token.symbol) || result_token.symbol == SYM_OBJECT)
 			{
-				g_ErrorLevel->Assign(_T("-2")); // Stage 2 error: Invalid return type or arg type.
+				g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
 				return NULL;
 			}
 		}
-		ExprTokenType token = (aParam[1]->symbol == SYM_OBJECT) ? result_token : *aParam[1];
+		else if (aParam[1]->symbol == SYM_VAR && aParam[1]->var->HasObject())
+		{
+			oParam.symbol = PURE_INTEGER;
+			oParam.value_int64 =1;
+			aParam[1]->var->mObject->Invoke(result_token,*aParam[1],IT_GET,param,1);
+			if (IS_NUMERIC(result_token.symbol) || result_token.symbol == SYM_OBJECT)
+			{
+				g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
+				return NULL;
+			}
+		}
+		ExprTokenType token = (aParam[1]->symbol == SYM_OBJECT || (aParam[1]->symbol == SYM_VAR && aParam[1]->var->HasObject())) ? result_token : *aParam[1];
 		LPTSTR return_type_string[1];
 		if (token.symbol == SYM_VAR) // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
 		{
@@ -12860,7 +12872,7 @@ IObject *DynaToken::Create(ExprTokenType *aParam[], int aParamCount)
 		DYNAPARM *dyna_param = (DYNAPARM *)_alloca(obj->marg_count * sizeof(DYNAPARM));
 		if (obj->marg_count != ConvertDllArgTypes(return_type_string[0],dyna_param))
 		{
-			g_ErrorLevel->Assign(_T("-2")); // Stage 2 error: Invalid return type or arg type.
+			g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
 			return NULL;
 		}
 		if (_tcschr(return_type_string[0],'='))
@@ -12905,7 +12917,7 @@ TEST_TYPE("W",	DLL_ARG_WSTR)
 #undef TEST_TYPE
 			else
 			{
-				g_ErrorLevel->Assign(_T("-2")); // Stage 2 error: Invalid return type or arg type.
+				g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
 				return NULL;
 			}
 		}
@@ -12932,11 +12944,14 @@ TEST_TYPE("W",	DLL_ARG_WSTR)
 			obj->mfunction = GetDllProcAddress(aParam[0]->symbol == SYM_VAR ? aParam[0]->var->Contents() : aParam[0]->marker, NULL);
 		if (!obj->mfunction)
 		{
-			g_ErrorLevel->Assign(_T("-4")); // Stage 4 error: Function could not be found in the DLL(s).
+			g_script.SetErrorLevelOrThrowStr(_T("-4"), _T("DllCall")); // Stage 4 error: Function could not be found in the DLL(s).
 			return NULL;
 		}
-
+		// allocate memory for parameters and default parameters
+		// in current design we need to have mdefault_param to be initialized
+		// it will be used instead of mdyna_param whenever parameters omitted
 		obj->mdyna_param = (DYNAPARM *)malloc(obj->marg_count * sizeof(DYNAPARM));
+		obj->mdefault_param = (DYNAPARM *)malloc(obj->marg_count * sizeof(DYNAPARM));
 		i = obj->marg_count * sizeof(void *);
 // for Unicode <-> ANSI charset conversion
 #ifdef UNICODE
@@ -12953,7 +12968,7 @@ CStringW **pStr = (CStringW **)
 
 			switch (this_dyna_param.type)
 			{
-			case DLL_ARG_ASTR:
+			case DLL_ARG_STR:
 				if (((aParamCount-2) > i) && IS_NUMERIC(this_param.symbol))
 				{
 					// For now, string args must be real strings rather than floats or ints.  An alternative
@@ -12963,16 +12978,11 @@ CStringW **pStr = (CStringW **)
 					// to be stack memory, which would be invalid memory upon return to the caller).
 					// The complexity of this doesn't seem worth the rarity of the need, so this will be
 					// documented in the help file.
-					g_ErrorLevel->Assign(_T("-2")); // Stage 2 error: Invalid return type or arg type.
+					g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
 					return NULL;
 				}
 				// Otherwise, it's a supported type of string.
-	#ifdef UNICODE
-				pStr[i] = new CStringCharFromWChar(((aParamCount-2) > i) ? TokenToString(this_param) : _T(""));
-				this_dyna_param.astr = pStr[i]->GetBuffer();
-	#else
-				this_dyna_param.astr = ((aParamCount-2) > i) ? TokenToString(this_param) : ""; // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
-	#endif
+				this_dyna_param.ptr = ((aParamCount-2) > i) ? TokenToString(this_param) : _T(""); // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
 				// NOTES ABOUT THE ABOVE:
 				// UPDATE: The v1.0.44.14 item below doesn't work in release mode, only debug mode (turning off
 				// "string pooling" doesn't help either).  So it's commented out until a way is found
@@ -12994,24 +13004,22 @@ CStringW **pStr = (CStringW **)
 				// Of course, it's not a complete solution because it doesn't stop a script from
 				// passing a variable whose capacity is non-zero yet too small to handle what the
 				// function will write to it.  But it's a far cry better than nothing because it's
-				// common for a script to forget to call VarSetCapacity before psssing a buffer to some
+				// common for a script to forget to call VarSetCapacity before passing a buffer to some
 				// function that writes a string to it.
 				//if (this_dyna_param.str == Var::sEmptyString) // To improve performance, compare directly to Var::sEmptyString rather than calling Capacity().
-				//	this_dyna_param.str = ""; // Make it read-only to force an exception.  See comments above.
+				//	this_dyna_param.str = _T(""); // Make it read-only to force an exception.  See comments above.
 				break;
-			case DLL_ARG_WSTR:
+			case DLL_ARG_xSTR:
+				// See the section above for comments.
 				if (((aParamCount-2) > i) && IS_NUMERIC(this_param.symbol))
 				{
-					g_ErrorLevel->Assign(_T("-2"));
+					g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
 					return NULL;
 				}
-				// Otherwise, it's a supported type of string.
-	#ifdef UNICODE
-				this_dyna_param.wstr = ((aParamCount-2) > i) ? TokenToString(this_param) : _T("");
-	#else
-				pStr[i] = new CStringWCharFromChar(((aParamCount-2) > i) ? TokenToString(this_param) : _T(""));
-				this_dyna_param.wstr = pStr[i]->GetBuffer();
-	#endif
+				// String needing translation: ASTR on Unicode build, WSTR on ANSI build.
+				pStr[i] = new UorA(CStringCharFromWChar,CStringWCharFromChar)(((aParamCount-2) > i) ? TokenToString(this_param) : _T(""));
+				this_dyna_param.ptr = pStr[i]->GetBuffer();
+
 				break;
 
 			case DLL_ARG_DOUBLE:
@@ -13024,7 +13032,7 @@ CStringW **pStr = (CStringW **)
 				break;
 
 			case DLL_ARG_INVALID:
-				g_ErrorLevel->Assign(_T("-2")); // Stage 2 error: Invalid return type or arg type.
+				g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
 				return NULL;
 
 			default: // Namely:
@@ -13061,39 +13069,70 @@ CStringW **pStr = (CStringW **)
 					this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
 			} // switch (this_dyna_param.type)
 		} // for() each arg.
-		if (aParam[1]->symbol == SYM_OBJECT)
+		if (aParam[1]->symbol == SYM_OBJECT || (aParam[1]->symbol == SYM_VAR && aParam[1]->var->HasObject()))
 		{
-			token = *aParam[1];
+			// Find out the length of array containing the definition and shift info for parameters
+			token = *aParam[1]; 
 			oParam.symbol = SYM_STRING;
 			oParam.marker =  _T("MaxIndex");
-			token.object->Invoke(result_token,token,IT_CALL,param,1);
-			int oParamCount = (int)result_token.value_int64-1;
+			if (aParam[1]->symbol != SYM_OBJECT)
+				token.var->mObject->Invoke(result_token,token,IT_CALL,param,1);
+			else
+				token.object->Invoke(result_token,token,IT_CALL,param,1);
 			oParam.symbol = PURE_INTEGER;
-			obj->paramshift[0] = oParamCount;
-			for (i=0;i < obj->marg_count;i++)
+			// Set the length of array containing shift info for parameters, -1 for definition in first item.
+			obj->paramshift = (int*)malloc(result_token.value_int64*sizeof(int));
+			if (obj->paramshift[0] = (int)result_token.value_int64-1)
 			{
-				if (i < oParamCount)
+				for (i=0;i < obj->marg_count;i++)
 				{
-					oParam.value_int64 = i+2;
-					token.object->Invoke(result_token,token,IT_GET,param,1);
-					if (!IS_NUMERIC(result_token.symbol))
+					// Set shift info for parameters
+					if (i < obj->paramshift[0])
 					{
-						g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
-						return NULL;
+						oParam.value_int64 = i+2;
+						if (aParam[1]->var->HasObject())
+							token.var->mObject->Invoke(result_token,token,IT_GET,param,1);
+						else
+							token.object->Invoke(result_token,token,IT_GET,param,1);
+						if (!IS_NUMERIC(result_token.symbol))
+						{
+							g_script.SetErrorLevelOrThrowInt(-2, _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
+							return NULL;
+						}
+						obj->paramshift[i+1] = (int)result_token.value_int64-1;
 					}
-					obj->paramshift[i+1] = (int)result_token.value_int64-1;
+					else
+					{   // Find next (not yet used) parameter
+						int oNextParam = 0;
+						for (int f = 1;;f = 1)
+						{
+							for (int v = 0;v <= obj->paramshift[0];v++)
+							{
+								if (obj->paramshift[v+1] == oNextParam)
+								{
+									oNextParam++;
+									f = 0;
+									break;
+								}
+							}
+							if (f)
+								break;
+						}
+						obj->paramshift[i+1] = oNextParam;
+					}
 				}
-				else
-					obj->paramshift[i+1] = i-oParamCount;
-
 			}
 		}
 		else
 		{
+			obj->paramshift = (int*)malloc(sizeof(int));
 			obj->paramshift[0] = NULL;
 		}
 		for (i=0;i < obj->marg_count;i++)
+		{
+			obj->mdefault_param[i] = dyna_param[i];
 			obj->mdyna_param[i] = dyna_param[i];
+		}
 	}
 	return obj;
 }
@@ -13110,7 +13149,9 @@ bool DynaToken::Delete()
 
 DynaToken::~DynaToken()
 {
+	free(paramshift);
 	free(mdyna_param);
+	free(mdefault_param);
 }
 
 
@@ -13146,11 +13187,15 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 	// or an even number of them.  In other words, each arg type will have an arg value to go with it.
 	// It has also verified that the dyna_param array is large enough to hold all of the args.
 	int is_call = IS_INVOKE_CALL ? 1 : 0;
-	for (i = 0; i < aParamCount - is_call; i++)  // Same loop as used in DynaToken::Create below, so maintain them together.
+	for (i = 0; i < this->marg_count; i++)  // Same loop as used in DynaToken::Create below, so maintain them together.
 	{
+		if (i >= aParamCount - is_call)
+		{
+			this->mdyna_param[(this->paramshift[0] > 0) ? this->paramshift[i+1] : i] = this->mdefault_param[(this->paramshift[0] > 0) ? this->paramshift[i+1] : i];
+			continue;
+		}
 		ExprTokenType &this_param = *aParam[i + is_call];
 		DYNAPARM &this_dyna_param = this->mdyna_param[(this->paramshift[0] > 0) ? this->paramshift[i+1] : i];
-
 		switch (this_dyna_param.type)
 		{
 		case DLL_ARG_STR:
@@ -13193,7 +13238,7 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 			// common for a script to forget to call VarSetCapacity before passing a buffer to some
 			// function that writes a string to it.
 			//if (this_dyna_param.str == Var::sEmptyString) // To improve performance, compare directly to Var::sEmptyString rather than calling Capacity().
-			//	this_dyna_param.str = ""; // Make it read-only to force an exception.  See comments above.
+			//	this_dyna_param.str = _T(""); // Make it read-only to force an exception.  See comments above.
 			break;
 		case DLL_ARG_xSTR: // See the section above for comments.
 			if (IS_NUMERIC(this_param.symbol))

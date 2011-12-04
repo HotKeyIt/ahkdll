@@ -93,8 +93,11 @@ CopySections(const unsigned char *data, PIMAGE_NT_HEADERS old_headers, PMEMORYMO
 					size,
 					MEM_COMMIT,
 					PAGE_READWRITE);
-
+#ifdef _WIN64
+				section->Misc.PhysicalAddress = (DWORD)(POINTER_TYPE)dest;
+#else
 				section->Misc.PhysicalAddress = (POINTER_TYPE)dest;
+#endif
 				memset(dest, 0, size);
 			}
 
@@ -108,7 +111,11 @@ CopySections(const unsigned char *data, PIMAGE_NT_HEADERS old_headers, PMEMORYMO
 							MEM_COMMIT,
 							PAGE_READWRITE);
 		memcpy(dest, data + section->PointerToRawData, section->SizeOfRawData);
+#ifdef _WIN64
+		section->Misc.PhysicalAddress = (DWORD)(POINTER_TYPE)dest;
+#else
 		section->Misc.PhysicalAddress = (POINTER_TYPE)dest;
+#endif
 	}
 }
 
@@ -212,7 +219,11 @@ PerformBaseRelocation(PMEMORYMODULE module, SIZE_T delta)
 				case IMAGE_REL_BASED_HIGHLOW:
 					// change complete 32 bit address
 					patchAddrHL = (DWORD *) (dest + offset);
+#ifdef _WIN64
+					*patchAddrHL += (DWORD)delta;
+#else
 					*patchAddrHL += delta;
+#endif
 					break;
 				
 #ifdef _WIN64
@@ -434,7 +445,7 @@ FARPROC MemoryGetProcAddress(HMEMORYMODULE module, const char *name)
 	nameRef = (DWORD *) (codeBase + exports->AddressOfNames);
 	ordinal = (WORD *) (codeBase + exports->AddressOfNameOrdinals);
 	for (i=0; i<exports->NumberOfNames; i++, nameRef++, ordinal++) {
-		if (stricmp(name, (const char *) (codeBase + (*nameRef))) == 0) {
+		if (_stricmp(name, (const char *) (codeBase + (*nameRef))) == 0) {
 			idx = *ordinal;
 			break;
 		}
