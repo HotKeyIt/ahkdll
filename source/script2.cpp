@@ -13081,9 +13081,15 @@ CStringW **pStr = (CStringW **)
 				token.object->Invoke(result_token,token,IT_CALL,param,1);
 			oParam.symbol = PURE_INTEGER;
 			// Set the length of array containing shift info for parameters, -1 for definition in first item.
-			obj->paramshift = (int*)malloc(result_token.value_int64*sizeof(int));
-			if (obj->paramshift[0] = (int)result_token.value_int64-1)
+			if (result_token.value_int64 < 2)
 			{
+				obj->paramshift = (int*)malloc(sizeof(int));
+				obj->paramshift[0] = NULL;
+			} 
+			else 
+			{
+				obj->paramshift = (int*)malloc((obj->marg_count + 1) * sizeof(int));
+				obj->paramshift[0] = (int)result_token.value_int64 - 1;
 				for (i=0;i < obj->marg_count;i++)
 				{
 					// Set shift info for parameters
@@ -13122,11 +13128,6 @@ CStringW **pStr = (CStringW **)
 					}
 				}
 			}
-		}
-		else
-		{
-			obj->paramshift = (int*)malloc(sizeof(int));
-			obj->paramshift[0] = NULL;
 		}
 		for (i=0;i < obj->marg_count;i++)
 		{
