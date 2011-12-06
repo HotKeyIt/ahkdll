@@ -13129,6 +13129,11 @@ CStringW **pStr = (CStringW **)
 				}
 			}
 		}
+		else
+		{
+			obj->paramshift = (int*)malloc(sizeof(int));
+			obj->paramshift[0] = NULL;
+		}
 		for (i=0;i < obj->marg_count;i++)
 		{
 			obj->mdefault_param[i] = dyna_param[i];
