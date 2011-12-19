@@ -12742,6 +12742,11 @@ IObject *CriticalObject::Create(ExprTokenType *aParam[], int aParamCount)
 
 bool CriticalObject::Delete()
 {
+	// Check if we own the critical section and release it
+	if (TryEnterCriticalSection(this->lpCriticalSection))
+	{
+		LeaveCriticalSection(this->lpCriticalSection);
+	}
 	return ObjectBase::Delete();
 }
 
@@ -13072,13 +13077,10 @@ CStringW **pStr = (CStringW **)
 		if (aParam[1]->symbol == SYM_OBJECT || (aParam[1]->symbol == SYM_VAR && aParam[1]->var->HasObject()))
 		{
 			// Find out the length of array containing the definition and shift info for parameters
-			token = *aParam[1]; 
+			IObject *paramobj = ((aParam[1]->symbol == SYM_OBJECT) ? aParam[1]->object : aParam[1]->var->mObject); 
 			oParam.symbol = SYM_STRING;
 			oParam.marker =  _T("MaxIndex");
-			if (aParam[1]->symbol != SYM_OBJECT)
-				token.var->mObject->Invoke(result_token,token,IT_CALL,param,1);
-			else
-				token.object->Invoke(result_token,token,IT_CALL,param,1);
+			paramobj->Invoke(result_token,token,IT_CALL,param,1);
 			oParam.symbol = PURE_INTEGER;
 			// Set the length of array containing shift info for parameters, -1 for definition in first item.
 			if (result_token.value_int64 < 2)
@@ -13090,16 +13092,14 @@ CStringW **pStr = (CStringW **)
 			{
 				obj->paramshift = (int*)malloc((obj->marg_count + 1) * sizeof(int));
 				obj->paramshift[0] = (int)result_token.value_int64 - 1;
+
 				for (i=0;i < obj->marg_count;i++)
 				{
 					// Set shift info for parameters
 					if (i < obj->paramshift[0])
 					{
 						oParam.value_int64 = i+2;
-						if (aParam[1]->var->HasObject())
-							token.var->mObject->Invoke(result_token,token,IT_GET,param,1);
-						else
-							token.object->Invoke(result_token,token,IT_GET,param,1);
+						paramobj->Invoke(result_token,*aParam[1],IT_GET,param,1);
 						if (!IS_NUMERIC(result_token.symbol))
 						{
 							g_script.SetErrorLevelOrThrowInt(-2, _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
@@ -13253,8 +13253,8 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 				return OK;
 			}
 			// String needing translation: ASTR on Unicode build, WSTR on ANSI build.
-			pStr[arg_count] = new UorA(CStringCharFromWChar,CStringWCharFromChar)(TokenToString(this_param));
-			this_dyna_param.ptr = pStr[arg_count]->GetBuffer();
+			pStr[i] = new UorA(CStringCharFromWChar,CStringWCharFromChar)(TokenToString(this_param));
+			this_dyna_param.ptr = pStr[i]->GetBuffer();
 			break;
 
 		case DLL_ARG_DOUBLE:
@@ -14538,7 +14538,19 @@ ResultType STDMETHODCALLTYPE RegExMatchObject::Invoke(ExprTokenType &aResultToke
 			name = TokenToString(name_param);
 			for (p = 0; p < mPatternCount; ++p)
 				if (mPatternName[p] && !_tcsicmp(mPatternName[p], name))
+				{
+					if (mOffset[2*p] < 0)
+						// This pattern wasn't matched, so check for one with a duplicate name.
+						for (int i = p + 1; i < mPatternCount; ++i)
+							if (mPatternName[i] && !_tcsicmp(mPatternName[i], name) // It has the same name.
+								&& mOffset[2*i] >= 0) // It matched something.
+							{
+								// Prefer this pattern.
+								p = i;
+								break;
+							}
 					break;
+				}
 		}
 	}
 

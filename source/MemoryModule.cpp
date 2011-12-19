@@ -37,9 +37,13 @@
 
 #include <Windows.h>
 #include <winnt.h>
-#ifdef DEBUG_OUTPUT
+
 #include <stdio.h>
-#endif
+
+//#ifdef DEBUG_OUTPUT
+//#include <stdio.h>
+//#endif
+
 
 #ifndef IMAGE_SIZEOF_BASE_RELOCATION
 // Vista SDKs no longer define IMAGE_SIZEOF_BASE_RELOCATION!?
@@ -68,9 +72,9 @@ OutputLastError(const char *msg)
 	char *tmpmsg;
 	FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
 		NULL, GetLastError(), MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPTSTR)&tmp, 0, NULL);
-	tmpmsg = (char *)LocalAlloc(LPTR, strlen(msg) + strlen(tmp) + 3);
+	tmpmsg = (char *)LocalAlloc(LPTR, strlen(msg) + strlen((const char*)tmp) + 3);
 	sprintf(tmpmsg, "%s: %s", msg, tmp);
-	OutputDebugString(tmpmsg);
+	OutputDebugStringA(tmpmsg);
 	LocalFree(tmpmsg);
 	LocalFree(tmp);
 }
@@ -92,7 +96,7 @@ CopySections(const unsigned char *data, PIMAGE_NT_HEADERS old_headers, PMEMORYMO
 				dest = (unsigned char *)VirtualAlloc(codeBase + section->VirtualAddress,
 					size,
 					MEM_COMMIT,
-					PAGE_READWRITE);
+					PAGE_EXECUTE_READWRITE);
 #ifdef _WIN64
 				section->Misc.PhysicalAddress = (DWORD)(POINTER_TYPE)dest;
 #else
@@ -109,7 +113,7 @@ CopySections(const unsigned char *data, PIMAGE_NT_HEADERS old_headers, PMEMORYMO
 		dest = (unsigned char *)VirtualAlloc(codeBase + section->VirtualAddress,
 							section->SizeOfRawData,
 							MEM_COMMIT,
-							PAGE_READWRITE);
+							PAGE_EXECUTE_READWRITE);
 		memcpy(dest, data + section->PointerToRawData, section->SizeOfRawData);
 #ifdef _WIN64
 		section->Misc.PhysicalAddress = (DWORD)(POINTER_TYPE)dest;
@@ -124,10 +128,10 @@ static int ProtectionFlags[2][2][2] = {
 	{
 		// not executable
 		{PAGE_NOACCESS, PAGE_WRITECOPY},
-		{PAGE_READONLY, PAGE_READWRITE},
+		{PAGE_READONLY, PAGE_EXECUTE_READWRITE},
 	}, {
 		// executable
-		{PAGE_EXECUTE, PAGE_EXECUTE_WRITECOPY},
+		{PAGE_EXECUTE, PAGE_EXECUTE_READWRITE},
 		{PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE},
 	},
 };
@@ -175,10 +179,12 @@ FinalizeSections(PMEMORYMODULE module)
 		if (size > 0) {
 			// change memory access flags
 			if (VirtualProtect((LPVOID)((POINTER_TYPE)section->Misc.PhysicalAddress | imageOffset), size, protect, &oldProtect) == 0)
+			{
 #ifdef DEBUG_OUTPUT
-				OutputLastError("Error protecting memory page")
+				OutputLastError("Error protecting memory page");
 #endif
-			;
+			break;
+			}
 		}
 	}
 #ifndef _WIN64
@@ -252,19 +258,92 @@ BuildImportTable(PMEMORYMODULE module)
 	unsigned char *codeBase = module->codeBase;
 
 	PIMAGE_DATA_DIRECTORY directory = GET_HEADER_DICTIONARY(module, IMAGE_DIRECTORY_ENTRY_IMPORT);
-	if (directory->Size > 0) {
+	PIMAGE_DATA_DIRECTORY resource = GET_HEADER_DICTIONARY(module, IMAGE_DIRECTORY_ENTRY_RESOURCE);
+	if (directory->Size > 0) 
+	{
 		PIMAGE_IMPORT_DESCRIPTOR importDesc = (PIMAGE_IMPORT_DESCRIPTOR) (codeBase + directory->VirtualAddress);
-		for (; !IsBadReadPtr(importDesc, sizeof(IMAGE_IMPORT_DESCRIPTOR)) && importDesc->Name; importDesc++) {
+		// Following will be used to resolve manifest in module
+		PIMAGE_RESOURCE_DIRECTORY resDir = (PIMAGE_RESOURCE_DIRECTORY)(codeBase + resource->VirtualAddress);
+		PIMAGE_RESOURCE_DIRECTORY resDirTemp;
+		PIMAGE_RESOURCE_DIRECTORY_ENTRY resDirEntry = (PIMAGE_RESOURCE_DIRECTORY_ENTRY) ((char*)resDir + sizeof(IMAGE_RESOURCE_DIRECTORY));
+		PIMAGE_RESOURCE_DIRECTORY_ENTRY resDirEntryTemp;
+		PIMAGE_RESOURCE_DATA_ENTRY resDataEntry;
+
+		// ACTCTX Structure, not used members must be set to 0!
+		ACTCTX actctx ={0,0,0,0,0,0,0,0,0};
+		actctx.cbSize =  sizeof(actctx);
+		HANDLE hActCtx;
+		ULONG_PTR lpCookie;
+		
+		// Path to temp directory + our temporary file name
+		CHAR buf[MAX_PATH];
+		DWORD tempPathLength = GetTempPathA(MAX_PATH, buf);
+		memcpy(buf + tempPathLength,"AutoHotkey.MemoryModule.temp.manifest",37);
+		*(buf + tempPathLength + 37) = '\0';
+		actctx.lpSource = buf;
+
+		// Enumerate Resources
+		int i = 0;
+		for (;i < resDir->NumberOfIdEntries + resDir->NumberOfNamedEntries;i++)
+		{
+			// Resolve current entry
+			resDirEntry = (PIMAGE_RESOURCE_DIRECTORY_ENTRY)((char*)resDir + sizeof(IMAGE_RESOURCE_DIRECTORY) + (i*sizeof(IMAGE_RESOURCE_DIRECTORY_ENTRY)));
+			
+			// If entry is directory and Id is 24 = RT_MANIFEST
+			if (resDirEntry->DataIsDirectory && resDirEntry->Id == 24)
+			{
+				resDirTemp = (PIMAGE_RESOURCE_DIRECTORY)((char*)resDir + (resDirEntry->OffsetToDirectory));
+				resDirEntryTemp = (PIMAGE_RESOURCE_DIRECTORY_ENTRY)((char*)resDir + (resDirEntry->OffsetToDirectory) + sizeof(IMAGE_RESOURCE_DIRECTORY));
+				resDirTemp = (PIMAGE_RESOURCE_DIRECTORY) ((char*)resDir + (resDirEntryTemp->OffsetToDirectory));
+				resDirEntryTemp = (PIMAGE_RESOURCE_DIRECTORY_ENTRY)((char*)resDir + (resDirEntryTemp->OffsetToDirectory) + sizeof(IMAGE_RESOURCE_DIRECTORY));
+				resDataEntry = (PIMAGE_RESOURCE_DATA_ENTRY) ((char*)resDir + (resDirEntryTemp->OffsetToData));
+				
+				// Write manifest to temportary file
+				// Using FILE_ATTRIBUTE_TEMPORARY will avoid writing it to disk
+				// It will be deleted after CreateActCtx has been called.
+				HANDLE hFile = CreateFileA(buf,GENERIC_WRITE,NULL,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_TEMPORARY,NULL);
+				if (hFile == INVALID_HANDLE_VALUE)
+				{
+					break; //failed to create file, continue and try loading without CreateActCtx
+				}
+				DWORD byteswritten = 0;
+				WriteFile(hFile,(codeBase + resDataEntry->OffsetToData),resDataEntry->Size,&byteswritten,NULL);
+				if (byteswritten == 0)
+				{
+					break; //failed to write data, continue and try loading
+				}
+				CloseHandle(hFile);
+				hActCtx = CreateActCtx(&actctx);
+				if (hActCtx == INVALID_HANDLE_VALUE)
+				{
+					hFile = CreateFileA(buf,GENERIC_WRITE,FILE_SHARE_DELETE,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_TEMPORARY|FILE_FLAG_DELETE_ON_CLOSE,NULL);
+					CloseHandle(hFile);
+					break; //failed to create context, continue and try loading
+				}
+				// Open file and automatically delete on CloseHandle (FILE_FLAG_DELETE_ON_CLOSE)
+				hFile = CreateFileA(buf,GENERIC_WRITE,FILE_SHARE_DELETE,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_TEMPORARY|FILE_FLAG_DELETE_ON_CLOSE,NULL);
+				CloseHandle(hFile);
+				ActivateActCtx(hActCtx,&lpCookie); // Don't care if this fails since we would countinue anyway
+				break; // Break since a dll can have only 1 manifest
+			}
+		}
+		for (; !IsBadReadPtr(importDesc, sizeof(IMAGE_IMPORT_DESCRIPTOR)) && importDesc->Name; importDesc++) 
+		{
 			POINTER_TYPE *thunkRef;
 			FARPROC *funcRef;
-			HMODULE handle = LoadLibraryA((LPCSTR) (codeBase + importDesc->Name));
-			if (handle == INVALID_HANDLE_VALUE) {
+			HMODULE handle;
+			// OutputDebugStringA((LPCSTR) (codeBase + importDesc->Name));
+			if (!(handle = LoadLibraryA((LPCSTR) (codeBase + importDesc->Name))))
+			{
 #if DEBUG_OUTPUT
-				OutputLastError("Can't load library");
+					OutputLastError("Can't load library");
 #endif
-				result = 0;
-				break;
+					result = 0;
+					break;
 			}
+#if DEBUG_OUTPUT
+			
+#endif
 
 			module->modules = (HMODULE *)realloc(module->modules, (module->numModules+1)*(sizeof(HMODULE)));
 			if (module->modules == NULL) {
@@ -284,9 +363,15 @@ BuildImportTable(PMEMORYMODULE module)
 			for (; *thunkRef; thunkRef++, funcRef++) {
 				if (IMAGE_SNAP_BY_ORDINAL(*thunkRef)) {
 					*funcRef = (FARPROC)GetProcAddress(handle, (LPCSTR)IMAGE_ORDINAL(*thunkRef));
+#if DEBUG_OUTPUT
+			//OutputDebugStringA((LPCSTR)IMAGE_ORDINAL(*thunkRef));
+#endif
 				} else {
 					PIMAGE_IMPORT_BY_NAME thunkData = (PIMAGE_IMPORT_BY_NAME) (codeBase + (*thunkRef));
 					*funcRef = (FARPROC)GetProcAddress(handle, (LPCSTR)&thunkData->Name);
+#if DEBUG_OUTPUT
+			//OutputDebugStringA((LPCSTR)&thunkData->Name);
+#endif
 				}
 				if (*funcRef == 0) {
 					result = 0;
@@ -316,7 +401,7 @@ HMEMORYMODULE MemoryLoadLibrary(const void *data)
 	dos_header = (PIMAGE_DOS_HEADER)data;
 	if (dos_header->e_magic != IMAGE_DOS_SIGNATURE) {
 #if DEBUG_OUTPUT
-		OutputDebugString("Not a valid executable file.\n");
+		OutputDebugStringA("Not a valid executable file.\n");
 #endif
 		return NULL;
 	}
@@ -324,7 +409,7 @@ HMEMORYMODULE MemoryLoadLibrary(const void *data)
 	old_header = (PIMAGE_NT_HEADERS)&((const unsigned char *)(data))[dos_header->e_lfanew];
 	if (old_header->Signature != IMAGE_NT_SIGNATURE) {
 #if DEBUG_OUTPUT
-		OutputDebugString("No PE header found.\n");
+		OutputDebugStringA("No PE header found.\n");
 #endif
 		return NULL;
 	}
@@ -333,14 +418,14 @@ HMEMORYMODULE MemoryLoadLibrary(const void *data)
 	code = (unsigned char *)VirtualAlloc((LPVOID)(old_header->OptionalHeader.ImageBase),
 		old_header->OptionalHeader.SizeOfImage,
 		MEM_RESERVE,
-		PAGE_READWRITE);
+		PAGE_EXECUTE_READWRITE);
 
     if (code == NULL) {
         // try to allocate memory at arbitrary position
         code = (unsigned char *)VirtualAlloc(NULL,
             old_header->OptionalHeader.SizeOfImage,
             MEM_RESERVE,
-            PAGE_READWRITE);
+            PAGE_EXECUTE_READWRITE);
 		if (code == NULL) {
 #if DEBUG_OUTPUT
 			OutputLastError("Can't reserve memory");
@@ -360,13 +445,13 @@ HMEMORYMODULE MemoryLoadLibrary(const void *data)
 	VirtualAlloc(code,
 		old_header->OptionalHeader.SizeOfImage,
 		MEM_COMMIT,
-		PAGE_READWRITE);
+		PAGE_EXECUTE_READWRITE);
 
 	// commit memory for headers
 	headers = (unsigned char *)VirtualAlloc(code,
 		old_header->OptionalHeader.SizeOfHeaders,
 		MEM_COMMIT,
-		PAGE_READWRITE);
+		PAGE_EXECUTE_READWRITE);
 	
 	// copy PE header to code
 	memcpy(headers, dos_header, dos_header->e_lfanew + old_header->OptionalHeader.SizeOfHeaders);
@@ -376,7 +461,7 @@ HMEMORYMODULE MemoryLoadLibrary(const void *data)
 	result->headers->OptionalHeader.ImageBase = (POINTER_TYPE)code;
 
 	// copy sections from DLL file block to new memory location
-	CopySections(data, old_header, result);
+	CopySections((const unsigned char*)data, old_header, result);
 
 	// adjust base address of imported data
 	locationDelta = (SIZE_T)(code - old_header->OptionalHeader.ImageBase);
@@ -386,6 +471,9 @@ HMEMORYMODULE MemoryLoadLibrary(const void *data)
 
 	// load required dlls and adjust function table of imports
 	if (!BuildImportTable(result)) {
+#if DEBUG_OUTPUT
+			OutputDebugStringA("BuildImportTable failed.\n");
+#endif
 		goto error;
 	}
 
@@ -398,16 +486,19 @@ HMEMORYMODULE MemoryLoadLibrary(const void *data)
 		DllEntry = (DllEntryProc) (code + result->headers->OptionalHeader.AddressOfEntryPoint);
 		if (DllEntry == 0) {
 #if DEBUG_OUTPUT
-			OutputDebugString("Library has no entry point.\n");
+			OutputDebugStringA("Library has no entry point.\n");
 #endif
 			goto error;
 		}
-
+		
 		// notify library about attaching to process
 		successfull = (*DllEntry)((HINSTANCE)code, DLL_PROCESS_ATTACH, 0);
 		if (!successfull) {
 #if DEBUG_OUTPUT
-			OutputDebugString("Can't attach library.\n");
+		CHAR buf[1024];
+			OutputDebugStringA("Can't attach library.\n");
+			_itoa((int)GetLastError(),buf,10);
+			OutputDebugStringA(buf);
 #endif
 			goto error;
 		}

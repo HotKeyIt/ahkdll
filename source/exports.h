@@ -37,8 +37,8 @@ int initPlugins();
 #ifdef _USRDLL
 EXPORT UINT_PTR ahkdll(LPTSTR fileName,LPTSTR argv,LPTSTR args);
 EXPORT UINT_PTR ahktextdll(LPTSTR fileName,LPTSTR argv,LPTSTR args);
-EXPORT BOOL ahkTerminate(bool kill=0);
-EXPORT BOOL com_ahkTerminate(bool kill);
+EXPORT BOOL ahkTerminate(int timeout);
+EXPORT BOOL com_ahkTerminate(int timeout);
 EXPORT BOOL ahkReady();
 EXPORT BOOL com_ahkReady();
 EXPORT BOOL ahkReload();
@@ -69,7 +69,7 @@ UINT_PTR com_addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aIgnoreLo
 #ifdef _USRDLL
 UINT_PTR com_ahkdll(LPTSTR fileName,LPTSTR argv,LPTSTR args);
 UINT_PTR com_ahktextdll(LPTSTR fileName,LPTSTR argv,LPTSTR args);
-BOOL com_ahkTerminate(bool kill);
+BOOL com_ahkTerminate(int timeout);
 BOOL com_ahkReady();
 BOOL com_ahkReload();
 #endif

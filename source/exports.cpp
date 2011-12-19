@@ -30,7 +30,7 @@ UINT_PTR com_addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aIgnoreLo
 #ifdef _USRDLL
 UINT_PTR com_ahkdll(LPTSTR fileName,LPTSTR argv,LPTSTR args){return ahkdll(fileName,argv,args);}
 UINT_PTR com_ahktextdll(LPTSTR script,LPTSTR argv,LPTSTR args){return ahktextdll(script,argv,args);}
-BOOL com_ahkTerminate(bool kill){return ahkTerminate(kill);}
+BOOL com_ahkTerminate(int timeout){return ahkTerminate(timeout);}
 BOOL com_ahkReady(){return ahkReady();}
 BOOL com_ahkReload(){return ahkReload();}
 #endif

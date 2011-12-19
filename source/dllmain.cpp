@@ -21,7 +21,6 @@ GNU General Public License for more details.
 #include "window.h" // For MsgBox() & SetForegroundLockTimeout()
 #include "TextIO.h"
 
-#include "windows.h"  // N11
 #include "exports.h"  // N11
 #include <process.h>  // N11
 
@@ -470,16 +469,19 @@ unsigned __stdcall runScript( void* pArguments )
 }
 
 
-EXPORT BOOL ahkTerminate(bool kill)
+EXPORT BOOL ahkTerminate(int timeout)
 {
 	int lpExitCode = 0;
+	if (hThread == 0)
+		return 0;
+	if (timeout < 1)
+		timeout = 500;
 	g_AllowInterruption = FALSE;
 	GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
-	if (!kill)
-	for (int i = 0; g_script.mIsReadyToExecute && (lpExitCode == 0 || lpExitCode == 259) && i < 10; i++)
+	for (int i = 0; g_script.mIsReadyToExecute && (lpExitCode == 0 || lpExitCode == 259) && i < (timeout/100); i++)
 	{
-		PostMessage(g_hWnd, AHK_EXIT_BY_SINGLEINSTANCE, EARLY_EXIT, 0);
-		Sleep(50);
+		SendMessageTimeout(g_hWnd, AHK_EXIT_BY_SINGLEINSTANCE, EARLY_EXIT, 0,0,(timeout/10),0);
+		Sleep((timeout/10));
 		GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
 	}
 	if (lpExitCode != 0 && lpExitCode != 259)
