@@ -254,7 +254,8 @@ PerformBaseRelocation(PMEMORYMODULE module, SIZE_T delta)
 static int
 BuildImportTable(PMEMORYMODULE module)
 {
-	int result=1;
+	int result = 1;
+	ULONG_PTR lpCookie = 0;
 	unsigned char *codeBase = module->codeBase;
 
 	PIMAGE_DATA_DIRECTORY directory = GET_HEADER_DICTIONARY(module, IMAGE_DIRECTORY_ENTRY_IMPORT);
@@ -273,13 +274,11 @@ BuildImportTable(PMEMORYMODULE module)
 		ACTCTX actctx ={0,0,0,0,0,0,0,0,0};
 		actctx.cbSize =  sizeof(actctx);
 		HANDLE hActCtx;
-		ULONG_PTR lpCookie;
 		
 		// Path to temp directory + our temporary file name
 		CHAR buf[MAX_PATH];
 		DWORD tempPathLength = GetTempPathA(MAX_PATH, buf);
 		memcpy(buf + tempPathLength,"AutoHotkey.MemoryModule.temp.manifest",37);
-		*(buf + tempPathLength + 37) = '\0';
 		actctx.lpSource = buf;
 
 		// Enumerate Resources
@@ -301,28 +300,34 @@ BuildImportTable(PMEMORYMODULE module)
 				// Write manifest to temportary file
 				// Using FILE_ATTRIBUTE_TEMPORARY will avoid writing it to disk
 				// It will be deleted after CreateActCtx has been called.
-				HANDLE hFile = CreateFileA(buf,GENERIC_WRITE,NULL,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_TEMPORARY,NULL);
+				HANDLE hFile = CreateFile(buf,GENERIC_WRITE,NULL,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_TEMPORARY,NULL);
 				if (hFile == INVALID_HANDLE_VALUE)
 				{
+#if DEBUG_OUTPUT
+					OutputDebugStringA("CreateFile failed.\n");
+#endif
 					break; //failed to create file, continue and try loading without CreateActCtx
 				}
 				DWORD byteswritten = 0;
 				WriteFile(hFile,(codeBase + resDataEntry->OffsetToData),resDataEntry->Size,&byteswritten,NULL);
+				CloseHandle(hFile);
 				if (byteswritten == 0)
 				{
+#if DEBUG_OUTPUT
+					OutputDebugStringA("WriteFile failed.\n");
+#endif
 					break; //failed to write data, continue and try loading
 				}
-				CloseHandle(hFile);
+				
 				hActCtx = CreateActCtx(&actctx);
-				if (hActCtx == INVALID_HANDLE_VALUE)
-				{
-					hFile = CreateFileA(buf,GENERIC_WRITE,FILE_SHARE_DELETE,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_TEMPORARY|FILE_FLAG_DELETE_ON_CLOSE,NULL);
-					CloseHandle(hFile);
-					break; //failed to create context, continue and try loading
-				}
+
 				// Open file and automatically delete on CloseHandle (FILE_FLAG_DELETE_ON_CLOSE)
 				hFile = CreateFileA(buf,GENERIC_WRITE,FILE_SHARE_DELETE,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_TEMPORARY|FILE_FLAG_DELETE_ON_CLOSE,NULL);
 				CloseHandle(hFile);
+
+				if (hActCtx == INVALID_HANDLE_VALUE)
+					break; //failed to create context, continue and try loading
+
 				ActivateActCtx(hActCtx,&lpCookie); // Don't care if this fails since we would countinue anyway
 				break; // Break since a dll can have only 1 manifest
 			}
@@ -332,7 +337,7 @@ BuildImportTable(PMEMORYMODULE module)
 			POINTER_TYPE *thunkRef;
 			FARPROC *funcRef;
 			HMODULE handle;
-			// OutputDebugStringA((LPCSTR) (codeBase + importDesc->Name));
+			OutputDebugStringA((LPCSTR) (codeBase + importDesc->Name));
 			if (!(handle = LoadLibraryA((LPCSTR) (codeBase + importDesc->Name))))
 			{
 #if DEBUG_OUTPUT
@@ -384,7 +389,8 @@ BuildImportTable(PMEMORYMODULE module)
 			}
 		}
 	}
-
+	if (lpCookie)
+		DeactivateActCtx(0,lpCookie);
 	return result;
 }
 
