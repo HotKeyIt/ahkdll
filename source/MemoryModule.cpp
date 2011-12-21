@@ -263,73 +263,77 @@ BuildImportTable(PMEMORYMODULE module)
 	if (directory->Size > 0) 
 	{
 		PIMAGE_IMPORT_DESCRIPTOR importDesc = (PIMAGE_IMPORT_DESCRIPTOR) (codeBase + directory->VirtualAddress);
+
 		// Following will be used to resolve manifest in module
-		PIMAGE_RESOURCE_DIRECTORY resDir = (PIMAGE_RESOURCE_DIRECTORY)(codeBase + resource->VirtualAddress);
-		PIMAGE_RESOURCE_DIRECTORY resDirTemp;
-		PIMAGE_RESOURCE_DIRECTORY_ENTRY resDirEntry = (PIMAGE_RESOURCE_DIRECTORY_ENTRY) ((char*)resDir + sizeof(IMAGE_RESOURCE_DIRECTORY));
-		PIMAGE_RESOURCE_DIRECTORY_ENTRY resDirEntryTemp;
-		PIMAGE_RESOURCE_DATA_ENTRY resDataEntry;
-
-		// ACTCTX Structure, not used members must be set to 0!
-		ACTCTX actctx ={0,0,0,0,0,0,0,0,0};
-		actctx.cbSize =  sizeof(actctx);
-		HANDLE hActCtx;
-		
-		// Path to temp directory + our temporary file name
-		CHAR buf[MAX_PATH];
-		DWORD tempPathLength = GetTempPathA(MAX_PATH, buf);
-		memcpy(buf + tempPathLength,"AutoHotkey.MemoryModule.temp.manifest",37);
-		actctx.lpSource = buf;
-
-		// Enumerate Resources
-		int i = 0;
-		for (;i < resDir->NumberOfIdEntries + resDir->NumberOfNamedEntries;i++)
+		if (resource->Size)
 		{
-			// Resolve current entry
-			resDirEntry = (PIMAGE_RESOURCE_DIRECTORY_ENTRY)((char*)resDir + sizeof(IMAGE_RESOURCE_DIRECTORY) + (i*sizeof(IMAGE_RESOURCE_DIRECTORY_ENTRY)));
-			
-			// If entry is directory and Id is 24 = RT_MANIFEST
-			if (resDirEntry->DataIsDirectory && resDirEntry->Id == 24)
+			PIMAGE_RESOURCE_DIRECTORY resDir = (PIMAGE_RESOURCE_DIRECTORY)(codeBase + resource->VirtualAddress);
+			PIMAGE_RESOURCE_DIRECTORY resDirTemp;
+			PIMAGE_RESOURCE_DIRECTORY_ENTRY resDirEntry = (PIMAGE_RESOURCE_DIRECTORY_ENTRY) ((char*)resDir + sizeof(IMAGE_RESOURCE_DIRECTORY));
+			PIMAGE_RESOURCE_DIRECTORY_ENTRY resDirEntryTemp;
+			PIMAGE_RESOURCE_DATA_ENTRY resDataEntry;
+
+			// ACTCTX Structure, not used members must be set to 0!
+			ACTCTX actctx ={0,0,0,0,0,0,0,0,0};
+			actctx.cbSize =  sizeof(actctx);
+			HANDLE hActCtx;
+		
+			// Path to temp directory + our temporary file name
+			CHAR buf[MAX_PATH];
+			DWORD tempPathLength = GetTempPathA(MAX_PATH, buf);
+			memcpy(buf + tempPathLength,"AutoHotkey.MemoryModule.temp.manifest",37);
+			actctx.lpSource = buf;
+
+			// Enumerate Resources
+			int i = 0;
+			for (;i < resDir->NumberOfIdEntries + resDir->NumberOfNamedEntries;i++)
 			{
-				resDirTemp = (PIMAGE_RESOURCE_DIRECTORY)((char*)resDir + (resDirEntry->OffsetToDirectory));
-				resDirEntryTemp = (PIMAGE_RESOURCE_DIRECTORY_ENTRY)((char*)resDir + (resDirEntry->OffsetToDirectory) + sizeof(IMAGE_RESOURCE_DIRECTORY));
-				resDirTemp = (PIMAGE_RESOURCE_DIRECTORY) ((char*)resDir + (resDirEntryTemp->OffsetToDirectory));
-				resDirEntryTemp = (PIMAGE_RESOURCE_DIRECTORY_ENTRY)((char*)resDir + (resDirEntryTemp->OffsetToDirectory) + sizeof(IMAGE_RESOURCE_DIRECTORY));
-				resDataEntry = (PIMAGE_RESOURCE_DATA_ENTRY) ((char*)resDir + (resDirEntryTemp->OffsetToData));
-				
-				// Write manifest to temportary file
-				// Using FILE_ATTRIBUTE_TEMPORARY will avoid writing it to disk
-				// It will be deleted after CreateActCtx has been called.
-				HANDLE hFile = CreateFile(buf,GENERIC_WRITE,NULL,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_TEMPORARY,NULL);
-				if (hFile == INVALID_HANDLE_VALUE)
+				// Resolve current entry
+				resDirEntry = (PIMAGE_RESOURCE_DIRECTORY_ENTRY)((char*)resDir + sizeof(IMAGE_RESOURCE_DIRECTORY) + (i*sizeof(IMAGE_RESOURCE_DIRECTORY_ENTRY)));
+			
+				// If entry is directory and Id is 24 = RT_MANIFEST
+				if (resDirEntry->DataIsDirectory && resDirEntry->Name == 24)
 				{
-#if DEBUG_OUTPUT
-					OutputDebugStringA("CreateFile failed.\n");
-#endif
-					break; //failed to create file, continue and try loading without CreateActCtx
-				}
-				DWORD byteswritten = 0;
-				WriteFile(hFile,(codeBase + resDataEntry->OffsetToData),resDataEntry->Size,&byteswritten,NULL);
-				CloseHandle(hFile);
-				if (byteswritten == 0)
-				{
-#if DEBUG_OUTPUT
-					OutputDebugStringA("WriteFile failed.\n");
-#endif
-					break; //failed to write data, continue and try loading
-				}
+					resDirTemp = (PIMAGE_RESOURCE_DIRECTORY)((char*)resDir + (resDirEntry->OffsetToDirectory));
+					resDirEntryTemp = (PIMAGE_RESOURCE_DIRECTORY_ENTRY)((char*)resDir + (resDirEntry->OffsetToDirectory) + sizeof(IMAGE_RESOURCE_DIRECTORY));
+					resDirTemp = (PIMAGE_RESOURCE_DIRECTORY) ((char*)resDir + (resDirEntryTemp->OffsetToDirectory));
+					resDirEntryTemp = (PIMAGE_RESOURCE_DIRECTORY_ENTRY)((char*)resDir + (resDirEntryTemp->OffsetToDirectory) + sizeof(IMAGE_RESOURCE_DIRECTORY));
+					resDataEntry = (PIMAGE_RESOURCE_DATA_ENTRY) ((char*)resDir + (resDirEntryTemp->OffsetToData));
 				
-				hActCtx = CreateActCtx(&actctx);
+					// Write manifest to temportary file
+					// Using FILE_ATTRIBUTE_TEMPORARY will avoid writing it to disk
+					// It will be deleted after CreateActCtx has been called.
+					HANDLE hFile = CreateFile(buf,GENERIC_WRITE,NULL,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_TEMPORARY,NULL);
+					if (hFile == INVALID_HANDLE_VALUE)
+					{
+	#if DEBUG_OUTPUT
+						OutputDebugStringA("CreateFile failed.\n");
+	#endif
+						break; //failed to create file, continue and try loading without CreateActCtx
+					}
+					DWORD byteswritten = 0;
+					WriteFile(hFile,(codeBase + resDataEntry->OffsetToData),resDataEntry->Size,&byteswritten,NULL);
+					CloseHandle(hFile);
+					if (byteswritten == 0)
+					{
+	#if DEBUG_OUTPUT
+						OutputDebugStringA("WriteFile failed.\n");
+	#endif
+						break; //failed to write data, continue and try loading
+					}
+				
+					hActCtx = CreateActCtx(&actctx);
 
-				// Open file and automatically delete on CloseHandle (FILE_FLAG_DELETE_ON_CLOSE)
-				hFile = CreateFileA(buf,GENERIC_WRITE,FILE_SHARE_DELETE,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_TEMPORARY|FILE_FLAG_DELETE_ON_CLOSE,NULL);
-				CloseHandle(hFile);
+					// Open file and automatically delete on CloseHandle (FILE_FLAG_DELETE_ON_CLOSE)
+					hFile = CreateFileA(buf,GENERIC_WRITE,FILE_SHARE_DELETE,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_TEMPORARY|FILE_FLAG_DELETE_ON_CLOSE,NULL);
+					CloseHandle(hFile);
 
-				if (hActCtx == INVALID_HANDLE_VALUE)
-					break; //failed to create context, continue and try loading
+					if (hActCtx == INVALID_HANDLE_VALUE)
+						break; //failed to create context, continue and try loading
 
-				ActivateActCtx(hActCtx,&lpCookie); // Don't care if this fails since we would countinue anyway
-				break; // Break since a dll can have only 1 manifest
+					ActivateActCtx(hActCtx,&lpCookie); // Don't care if this fails since we would countinue anyway
+					break; // Break since a dll can have only 1 manifest
+				}
 			}
 		}
 		for (; !IsBadReadPtr(importDesc, sizeof(IMAGE_IMPORT_DESCRIPTOR)) && importDesc->Name; importDesc++) 
@@ -501,10 +505,7 @@ HMEMORYMODULE MemoryLoadLibrary(const void *data)
 		successfull = (*DllEntry)((HINSTANCE)code, DLL_PROCESS_ATTACH, 0);
 		if (!successfull) {
 #if DEBUG_OUTPUT
-		CHAR buf[1024];
 			OutputDebugStringA("Can't attach library.\n");
-			_itoa((int)GetLastError(),buf,10);
-			OutputDebugStringA(buf);
 #endif
 			goto error;
 		}
