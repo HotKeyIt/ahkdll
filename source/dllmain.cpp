@@ -724,10 +724,11 @@ HRESULT __stdcall CoCOMServer::ahkdll(/*in,optional*/VARIANT filepath,/*in,optio
 }
 HRESULT __stdcall CoCOMServer::ahkPause(/*in,optional*/VARIANT aChangeTo,/*out*/BOOL* paused)
 {
+	USES_CONVERSION;
 	if (paused==NULL)
 		return ERROR_INVALID_PARAMETER;
 	TCHAR buf[MAX_INTEGER_SIZE];
-	*paused = com_ahkPause(Variant2T(aChangeTo,buf));
+	*paused = com_ahkPause(aChangeTo.vt == VT_BSTR ? OLE2T(aChangeTo.bstrVal) : Variant2T(aChangeTo,buf));
 	return S_OK;
 }
 HRESULT __stdcall CoCOMServer::ahkReady(/*out*/BOOL* ready)
@@ -739,10 +740,11 @@ HRESULT __stdcall CoCOMServer::ahkReady(/*out*/BOOL* ready)
 }
 HRESULT __stdcall CoCOMServer::ahkFindLabel(/*in*/VARIANT aLabelName,/*out*/UINT_PTR* aLabelPointer)
 {
+	USES_CONVERSION;
 	if (aLabelPointer==NULL)
 		return ERROR_INVALID_PARAMETER;
 	TCHAR buf[MAX_INTEGER_SIZE];
-	*aLabelPointer = com_ahkFindLabel(Variant2T(aLabelName,buf));
+	*aLabelPointer = com_ahkFindLabel(aLabelName.vt == VT_BSTR ? OLE2T(aLabelName.bstrVal) : Variant2T(aLabelName,buf));
 	return S_OK;
 }
 
@@ -750,6 +752,7 @@ void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar);
 
 HRESULT __stdcall CoCOMServer::ahkgetvar(/*in*/VARIANT name,/*[in,optional]*/ VARIANT getVar,/*out*/VARIANT *result)
 {
+	USES_CONVERSION;
 	if (result==NULL)
 		return ERROR_INVALID_PARAMETER;
 	//USES_CONVERSION;
@@ -757,7 +760,7 @@ HRESULT __stdcall CoCOMServer::ahkgetvar(/*in*/VARIANT name,/*[in,optional]*/ VA
 	Var *var;
 	ExprTokenType aToken ;
 	
-	var = g_script.FindVar(Variant2T(name,buf)) ;
+	var = g_script.FindVar(name.vt == VT_BSTR ? OLE2T(name.bstrVal) : Variant2T(name,buf)) ;
 	var->TokenToContents(aToken) ;
     VariantInit(result);
    // CComVariant b ;
@@ -772,11 +775,12 @@ void AssignVariant(Var &aArg, VARIANT &aVar, bool aRetainVar);
 
 HRESULT __stdcall CoCOMServer::ahkassign(/*in*/VARIANT name, /*in*/VARIANT value,/*out*/unsigned int* success)
 {
+   USES_CONVERSION;
 	 if (success==NULL)
       return ERROR_INVALID_PARAMETER;
    TCHAR namebuf[MAX_INTEGER_SIZE];
    Var *var;
-   if (   !(var = g_script.FindOrAddVar(Variant2T(name,namebuf)))   )
+   if (   !(var = g_script.FindOrAddVar(name.vt == VT_BSTR ? OLE2T(name.bstrVal) : Variant2T(name,namebuf)))   )
       return ERROR_INVALID_PARAMETER;  // Realistically should never happen.
    AssignVariant(*var, value, false) ;
 	return S_OK;
@@ -790,75 +794,87 @@ HRESULT __stdcall CoCOMServer::ahkExecuteLine(/*[in,optional]*/ VARIANT line,/*[
 }
 HRESULT __stdcall CoCOMServer::ahkLabel(/*[in]*/ VARIANT aLabelName,/*[in,optional]*/ VARIANT nowait,/*[out, retval]*/ BOOL* success)
 {
+	USES_CONVERSION;
 	if (success==NULL)
 		return ERROR_INVALID_PARAMETER;
 	TCHAR buf[MAX_INTEGER_SIZE];
-	*success = com_ahkLabel(Variant2T(aLabelName,buf),Variant2I(nowait));
+	*success = com_ahkLabel(aLabelName.vt == VT_BSTR ? OLE2T(aLabelName.bstrVal) : Variant2T(aLabelName,buf)
+							,Variant2I(nowait));
 	return S_OK;
 }
 HRESULT __stdcall CoCOMServer::ahkFindFunc(/*[in]*/ VARIANT FuncName,/*[out, retval]*/ UINT_PTR* pFunc)
 {
+	USES_CONVERSION;
 	if (pFunc==NULL)
 		return ERROR_INVALID_PARAMETER;
 	TCHAR buf[MAX_INTEGER_SIZE];
-	*pFunc = com_ahkFindFunc(Variant2T(FuncName,buf));
+	*pFunc = com_ahkFindFunc(FuncName.vt == VT_BSTR ? OLE2T(FuncName.bstrVal) : Variant2T(FuncName,buf));
 	return S_OK;
 }
 
 VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT param2,/*[in,optional]*/ VARIANT param3,/*[in,optional]*/ VARIANT param4,/*[in,optional]*/ VARIANT param5,/*[in,optional]*/ VARIANT param6,/*[in,optional]*/ VARIANT param7,/*[in,optional]*/ VARIANT param8,/*[in,optional]*/ VARIANT param9,/*[in,optional]*/ VARIANT param10, int sendOrPost);
 HRESULT __stdcall CoCOMServer::ahkFunction(/*[in]*/ VARIANT FuncName,/*[in,optional]*/ VARIANT param1,/*[in,optional]*/ VARIANT param2,/*[in,optional]*/ VARIANT param3,/*[in,optional]*/ VARIANT param4,/*[in,optional]*/ VARIANT param5,/*[in,optional]*/ VARIANT param6,/*[in,optional]*/ VARIANT param7,/*[in,optional]*/ VARIANT param8,/*[in,optional]*/ VARIANT param9,/*[in,optional]*/ VARIANT param10,/*[out, retval]*/ VARIANT* returnVal)
 {
+	USES_CONVERSION;
 	if (returnVal==NULL)
 		return ERROR_INVALID_PARAMETER;
 	TCHAR buf[MAX_INTEGER_SIZE] ;
 	// CComVariant b ;
 	VARIANT b ;
-	b = ahkFunctionVariant(Variant2T(FuncName,buf), param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, 1);
+	b = ahkFunctionVariant(FuncName.vt == VT_BSTR ? OLE2T(FuncName.bstrVal) : Variant2T(FuncName,buf)
+							, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, 1);
 	 VariantInit(returnVal);
 	return VariantCopy(returnVal, &b) ;
 	 // return b.Detach(returnVal);			
 }
 HRESULT __stdcall CoCOMServer::ahkPostFunction(/*[in]*/ VARIANT FuncName,VARIANT param1,/*[in,optional]*/ VARIANT param2,/*[in,optional]*/ VARIANT param3,/*[in,optional]*/ VARIANT param4,/*[in,optional]*/ VARIANT param5,/*[in,optional]*/ VARIANT param6,/*[in,optional]*/ VARIANT param7,/*[in,optional]*/ VARIANT param8,/*[in,optional]*/ VARIANT param9,/*[in,optional]*/ VARIANT param10,/*[out, retval]*/ unsigned int* returnVal)
 {
+	USES_CONVERSION;
   	if (returnVal==NULL)
 		return ERROR_INVALID_PARAMETER;
 	TCHAR buf[MAX_INTEGER_SIZE] ;
 	// CComVariant b ;
 	VARIANT b ;
-	b = ahkFunctionVariant(Variant2T(FuncName,buf), param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, 0);
+	b = ahkFunctionVariant(FuncName.vt == VT_BSTR ? OLE2T(FuncName.bstrVal) : Variant2T(FuncName,buf)
+							, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, 0);
 	return 0;		
 }
 
 HRESULT __stdcall CoCOMServer::ahkKey(/*[in]*/ VARIANT name,/*[out, retval]*/ BOOL* success)
 {
+	USES_CONVERSION;
 	if (success==NULL)
 		return ERROR_INVALID_PARAMETER;
 	TCHAR buf[MAX_INTEGER_SIZE];
-	*success = com_ahkKey(Variant2T(name,buf));
+	*success = com_ahkKey(name.vt == VT_BSTR ? OLE2T(name.bstrVal) : Variant2T(name,buf));
 	return S_OK;
 }
 HRESULT __stdcall CoCOMServer::addScript(/*[in]*/ VARIANT script,/*[in,optional]*/ VARIANT replace,/*[out, retval]*/ UINT_PTR* success)
 {
+	USES_CONVERSION;
 	if (success==NULL)
 		return ERROR_INVALID_PARAMETER;
 	TCHAR buf[MAX_INTEGER_SIZE];
-	*success = com_addScript(Variant2T(script,buf),Variant2I(replace));
+	*success = com_addScript(script.vt == VT_BSTR ? OLE2T(script.bstrVal) : Variant2T(script,buf),Variant2I(replace));
 	return S_OK;
 }
 HRESULT __stdcall CoCOMServer::addFile(/*[in]*/ VARIANT filepath,/*[in,optional]*/ VARIANT aAllowDuplicateInclude,/*[in,optional]*/ VARIANT aIgnoreLoadFailure,/*[out, retval]*/ UINT_PTR* success)
 {
+	USES_CONVERSION;
 	if (success==NULL)
 		return ERROR_INVALID_PARAMETER;
 	TCHAR buf[MAX_INTEGER_SIZE];
-	*success = com_addFile(Variant2T(filepath,buf),Variant2I(aAllowDuplicateInclude),Variant2I(aIgnoreLoadFailure));
+	*success = com_addFile(filepath.vt == VT_BSTR ? OLE2T(filepath.bstrVal) : Variant2T(filepath,buf)
+							,Variant2I(aAllowDuplicateInclude),Variant2I(aIgnoreLoadFailure));
 	return S_OK;
 }
 HRESULT __stdcall CoCOMServer::ahkExec(/*[in]*/ VARIANT script,/*[out, retval]*/ BOOL* success)
 {
+	USES_CONVERSION;
 	if (success==NULL)
 		return ERROR_INVALID_PARAMETER;
 	TCHAR buf[MAX_INTEGER_SIZE];
-	*success = com_ahkExec(Variant2T(script,buf));
+	*success = com_ahkExec(script.vt == VT_BSTR ? OLE2T(script.bstrVal) : Variant2T(script,buf));
 	return S_OK;
 }
 HRESULT __stdcall CoCOMServer::ahkTerminate(/*[in,optional]*/ VARIANT kill,/*[out, retval]*/ BOOL* success)
