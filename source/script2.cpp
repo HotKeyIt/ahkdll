@@ -12883,7 +12883,8 @@ IObject *DynaToken::Create(ExprTokenType *aParam[], int aParamCount)
 		if (_tcschr(return_type_string[0],'='))
 		{
 #ifdef WIN32_PLATFORM
-			obj->mdll_call_mode = DC_CALL_CDECL;
+			if (_tcschr((_tcschr(return_type_string[0],'=') + 1),'='))
+				obj->mdll_call_mode = DC_CALL_CDECL;
 #endif
 			obj->mreturn_attrib.type = DLL_ARG_INT;
 			TCHAR retrurn_type_arg[3]; // maximal length of return type
@@ -12920,11 +12921,6 @@ TEST_TYPE("D",	DLL_ARG_DOUBLE)
 TEST_TYPE("A",	DLL_ARG_ASTR)
 TEST_TYPE("W",	DLL_ARG_WSTR)
 #undef TEST_TYPE
-			else
-			{
-				g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
-				return NULL;
-			}
 		}
 		switch(aParam[0]->symbol)
 		{
@@ -13193,6 +13189,10 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 	// or an even number of them.  In other words, each arg type will have an arg value to go with it.
 	// It has also verified that the dyna_param array is large enough to hold all of the args.
 	int is_call = IS_INVOKE_CALL ? 1 : 0;
+	if (is_call && aParam[0]->symbol == SYM_OPERAND && _tcscmp(aParam[0]->marker,_T("")))
+	{
+		ConvertDllArgType(&aParam[0]->marker, return_attrib);
+	}
 	for (i = 0; i < this->marg_count; i++)  // Same loop as used in DynaToken::Create below, so maintain them together.
 	{
 		if (i >= aParamCount - is_call)
