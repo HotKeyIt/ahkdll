@@ -614,7 +614,7 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 
 
 
-void AssignVariant(Var &aArg, VARIANT &aVar, bool aRetainVar);
+void AssignVariant(Var &aArg, VARIANT &aVar, bool aRetainVar = true);
 VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT param2,/*[in,optional]*/ VARIANT param3,/*[in,optional]*/ VARIANT param4,/*[in,optional]*/ VARIANT param5,/*[in,optional]*/ VARIANT param6,/*[in,optional]*/ VARIANT param7,/*[in,optional]*/ VARIANT param8,/*[in,optional]*/ VARIANT param9,/*[in,optional]*/ VARIANT param10, int sendOrPost)
 {
 	Func *aFunc = g_script.FindFunc(func) ;
@@ -625,38 +625,38 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 		if (aFunc->mParamCount > 0 && &param1 != NULL)
 		{
 			// Copy the appropriate values into each of the function's formal parameters.
-			AssignVariant(*aFunc->mParam[0].var, param1, false); // Assign parameter #1
-			if (aFunc->mParamCount > 1  && &param2 != NULL) // Assign parameter #2
+			AssignVariant(*aFunc->mParam[0].var, param1); // Assign parameter #1
+			if (aFunc->mParamCount > 1 && param2.vt != VT_ERROR) // Assign parameter #2
 			{
 				// v1.0.38.01: LPARAM is now written out as a DWORD because the majority of system messages
 				// use LPARAM as a pointer or other unsigned value.  This shouldn't affect most scripts because
 				// of the way ATOI64() and ATOU() wrap a negative number back into the unsigned domain for
 				// commands such as PostMessage/SendMessage.
-				AssignVariant(*aFunc->mParam[1].var, param2, false);
-				if (aFunc->mParamCount > 2 && &param3 != NULL) // Assign parameter #3
+				AssignVariant(*aFunc->mParam[1].var, param2);
+				if (aFunc->mParamCount > 2 && param3.vt != VT_ERROR) // Assign parameter #3
 				{
-					AssignVariant(*aFunc->mParam[2].var, param3, false);
-					if (aFunc->mParamCount > 3 && &param4 != NULL) // Assign parameter #4
+					AssignVariant(*aFunc->mParam[2].var, param3);
+					if (aFunc->mParamCount > 3 && param4.vt != VT_ERROR) // Assign parameter #4
 					{
-						AssignVariant(*aFunc->mParam[3].var, param4, false);
-						if (aFunc->mParamCount > 4 && &param5 != NULL) // Assign parameter #5
+						AssignVariant(*aFunc->mParam[3].var, param4);
+						if (aFunc->mParamCount > 4 && param5.vt != VT_ERROR) // Assign parameter #5
 						{
-							AssignVariant(*aFunc->mParam[4].var, param5, false);
-							if (aFunc->mParamCount > 5 && &param6 != NULL) // Assign parameter #6
+							AssignVariant(*aFunc->mParam[4].var, param5);
+							if (aFunc->mParamCount > 5 && param6.vt != VT_ERROR) // Assign parameter #6
 							{
-								AssignVariant(*aFunc->mParam[5].var, param6, false);
-								if (aFunc->mParamCount > 6 && &param7 != NULL) // Assign parameter #7
+								AssignVariant(*aFunc->mParam[5].var, param6);
+								if (aFunc->mParamCount > 6 && param7.vt != VT_ERROR) // Assign parameter #7
 								{
-									AssignVariant(*aFunc->mParam[6].var, param7, false);
-									if (aFunc->mParamCount > 7 && &param8 != NULL) // Assign parameter #8
+									AssignVariant(*aFunc->mParam[6].var, param7);
+									if (aFunc->mParamCount > 7 && param8.vt != VT_ERROR) // Assign parameter #8
 									{
-										AssignVariant(*aFunc->mParam[7].var, param8, false);
-										if (aFunc->mParamCount > 8 && &param9 != NULL) // Assign parameter #9
+										AssignVariant(*aFunc->mParam[7].var, param8);
+										if (aFunc->mParamCount > 8 && param9.vt != VT_ERROR) // Assign parameter #9
 										{
-											AssignVariant(*aFunc->mParam[8].var, param9, false);
-											if (aFunc->mParamCount > 9 && &param10 != NULL) // Assign parameter #10
+											AssignVariant(*aFunc->mParam[8].var, param9);
+											if (aFunc->mParamCount > 9 && param10.vt != VT_ERROR) // Assign parameter #10
 											{
-												AssignVariant(*aFunc->mParam[9].var, param10, false);
+												AssignVariant(*aFunc->mParam[9].var, param10);
 											}
 										}
 									}

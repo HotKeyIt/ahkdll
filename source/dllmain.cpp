@@ -1062,7 +1062,7 @@ STDAPI DllGetClassObject(const CLSID& clsid,
 	}
 	TCHAR buf[MAX_PATH];
 #ifdef DEBUG
-	if (0 && GetModuleFileName(g_hInstance, buf, MAX_PATH))  // for debugging com 
+	if (0)  // for debugging com 
 #else
 	if (GetModuleFileName(g_hInstance, buf, MAX_PATH))
 #endif
