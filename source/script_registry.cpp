@@ -32,7 +32,7 @@
 ResultType Line::IniRead(LPTSTR aFilespec, LPTSTR aSection, LPTSTR aKey, LPTSTR aDefault)
 {
 	if (!aDefault || !*aDefault)
-		aDefault = _T("ERROR");  // This mirrors what AutoIt2 does for its default value.
+		aDefault = _T("");
 	TCHAR	szFileTemp[_MAX_PATH+1];
 	TCHAR	*szFilePart, *cp;
 	TCHAR	szBuffer[65535] = _T("");					// Max ini file size is 65535 under 95
@@ -55,6 +55,9 @@ ResultType Line::IniRead(LPTSTR aFilespec, LPTSTR aSection, LPTSTR aKey, LPTSTR 
 				*cp = '\n';
 			}
 	}
+	// If the value exists but is empty, the return value and GetLastError() will both be 0,
+	// so assign ErrorLevel solely based on GetLastError():
+	g_ErrorLevel->Assign(GetLastError() ? ERRORLEVEL_ERROR : ERRORLEVEL_NONE);
 	// The above function is supposed to set szBuffer to be aDefault if it can't find the
 	// file, section, or key.  In other words, it always changes the contents of szBuffer.
 	return OUTPUT_VAR->Assign(szBuffer); // Avoid using the length the API reported because it might be inaccurate if the data contains any binary zeroes, or if the data is double-terminated, etc.
@@ -131,7 +134,7 @@ ResultType Line::IniWrite(LPTSTR aValue, LPTSTR aFilespec, LPTSTR aSection, LPTS
 #ifdef UNICODE
 	}
 #endif
-	return g_script.mIsAutoIt2 ? OK : SetErrorLevelOrThrowBool(!result);
+	return SetErrorLevelOrThrowBool(!result);
 }
 
 
@@ -145,7 +148,7 @@ ResultType Line::IniDelete(LPTSTR aFilespec, LPTSTR aSection, LPTSTR aKey)
 	GetFullPathName(aFilespec, _MAX_PATH, szFileTemp, &szFilePart);
 	BOOL result = WritePrivateProfileString(aSection, aKey, NULL, szFileTemp);  // Returns zero on failure.
 	WritePrivateProfileString(NULL, NULL, NULL, szFileTemp);	// Flush
-	return g_script.mIsAutoIt2 ? OK : SetErrorLevelOrThrowBool(!result);
+	return SetErrorLevelOrThrowBool(!result);
 }
 
 

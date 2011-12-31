@@ -60,9 +60,10 @@ GuiType *Script::ResolveGui(LPTSTR aBuf, LPTSTR &aCommand, LPTSTR *aName, size_t
 	tmemcpy(name, name_marker, name_length);
 	name[name_length] = '\0';
 	
-	if (IsPureNumeric(name, TRUE, FALSE) == PURE_INTEGER) // Allow negatives, for flexibility.
+	__int64 gui_num = 0;
+	if (IsNumeric(name, TRUE, FALSE) == PURE_INTEGER) // Allow negatives, for flexibility.
 	{
-		__int64 gui_num = ATOI64(name);
+		gui_num = ATOI64(name);
 		if (gui_num < 1 || gui_num > 99 // The range of valid Gui numbers prior to v1.1.03.
 			|| name_length > 2) // Length is also checked because that's how it used to be.
 		{
@@ -90,7 +91,7 @@ GuiType *Script::ResolveGui(LPTSTR aBuf, LPTSTR &aCommand, LPTSTR *aName, size_t
 		// found_gui: *aName must be set for GUI_CMD_NEW even if a GUI was found, since
 		// found_gui will be destroyed (along with found_gui->mName) and recreated. If a
 		// GUI was found, obviously the name is valid and ValidateName() can be skipped.
-		if (found_gui || Var::ValidateName(name, false))
+		if (found_gui || gui_num || Var::ValidateName(name, false))
 		{
 			// This name is okay.
 			*aName = name_marker;
@@ -529,7 +530,7 @@ ResultType Script::PerformGui(LPTSTR aBuf, LPTSTR aParam2, LPTSTR aParam3, LPTST
 				bool exact_match = !_tcsicmp(aParam4, _T("Exact")); // v1.0.37.03.
 				// Unlike "GuiControl, Choose", in this case, don't allow negatives since that would just
 				// generate an error msg further below:
-				if (!exact_match && IsPureNumeric(aParam2, false, false))
+				if (!exact_match && IsNumeric(aParam2, false, false))
 				{
 					index = ATOI(aParam2) - 1;
 					if (index < 0 || index > MAX_TABS_PER_CONTROL - 1)
@@ -830,7 +831,7 @@ ResultType Line::GuiControl(LPTSTR aCommand, LPTSTR aControlID, LPTSTR aParam3)
 
 		case GUI_CONTROL_CHECKBOX:
 		case GUI_CONTROL_RADIO:
-			if (guicontrol_cmd == GUICONTROL_CMD_CONTENTS && IsPureNumeric(aParam3, true, false))
+			if (guicontrol_cmd == GUICONTROL_CMD_CONTENTS && IsNumeric(aParam3, true, false))
 			{
 				checked = ATOI(aParam3);
 				if (!checked || checked == 1 || (control.type == GUI_CONTROL_CHECKBOX && checked == -1))
@@ -1265,7 +1266,7 @@ ResultType Line::GuiControl(LPTSTR aCommand, LPTSTR aControlID, LPTSTR aParam3)
 			// selected tab. In this case, the tab control sends the TCN_SELCHANGING and TCN_SELCHANGE
 			// notification messages to its parent window. 
 			// Automatically switch to CHOOSESTRING if parameter isn't numeric:
-			if (guicontrol_cmd == GUICONTROL_CMD_CHOOSE && !IsPureNumeric(aParam3, true, false))
+			if (guicontrol_cmd == GUICONTROL_CMD_CHOOSE && !IsNumeric(aParam3, true, false))
 				guicontrol_cmd = GUICONTROL_CMD_CHOOSESTRING;
 			if (guicontrol_cmd == GUICONTROL_CMD_CHOOSESTRING)
 				selection_index = gui.FindTabIndexByName(control, aParam3); // Returns -1 on failure.
@@ -1296,7 +1297,7 @@ ResultType Line::GuiControl(LPTSTR aCommand, LPTSTR aControlID, LPTSTR aParam3)
 			++aParam3; // Omit this pipe char from further consideration below.
 			++extra_actions;
 		}
-		if (guicontrol_cmd == GUICONTROL_CMD_CHOOSE && !IsPureNumeric(aParam3, true, false)) // Must be done only after the above.
+		if (guicontrol_cmd == GUICONTROL_CMD_CHOOSE && !IsNumeric(aParam3, true, false)) // Must be done only after the above.
 			guicontrol_cmd = GUICONTROL_CMD_CHOOSESTRING;
 		UINT msg, x_msg, y_msg;
 		switch(control.type)
@@ -1515,34 +1516,29 @@ ResultType Line::GuiControlGet(LPTSTR aCommand, LPTSTR aControlID, LPTSTR aParam
 		// var names that are too long:
 		TCHAR var_name[MAX_VAR_NAME_LENGTH + 20];
 		Var *var;
-		int always_use = output_var.IsLocal() ? FINDVAR_LOCAL : FINDVAR_GLOBAL;
 		if (   !(var = g_script.FindOrAddVar(var_name
-			, sntprintf(var_name, _countof(var_name), _T("%sX"), output_var.mName)
-			, always_use))   )
+			, sntprintf(var_name, _countof(var_name), _T("%sX"), output_var.mName)))   )
 		{
 			result = FAIL; // It will have already displayed the error.
 			goto return_the_result;
 		}
 		var->Assign(pt.x);
 		if (   !(var = g_script.FindOrAddVar(var_name
-			, sntprintf(var_name, _countof(var_name), _T("%sY"), output_var.mName)
-			, always_use))   )
+			, sntprintf(var_name, _countof(var_name), _T("%sY"), output_var.mName)))   )
 		{
 			result = FAIL; // It will have already displayed the error.
 			goto return_the_result;
 		}
 		var->Assign(pt.y);
 		if (   !(var = g_script.FindOrAddVar(var_name
-			, sntprintf(var_name, _countof(var_name), _T("%sW"), output_var.mName)
-			, always_use))   )
+			, sntprintf(var_name, _countof(var_name), _T("%sW"), output_var.mName)))   )
 		{
 			result = FAIL; // It will have already displayed the error.
 			goto return_the_result;
 		}
 		var->Assign(rect.right - rect.left);
 		if (   !(var = g_script.FindOrAddVar(var_name
-			, sntprintf(var_name, _countof(var_name), _T("%sH"), output_var.mName)
-			, always_use))   )
+			, sntprintf(var_name, _countof(var_name), _T("%sH"), output_var.mName)))   )
 		{
 			result = FAIL; // It will have already displayed the error.
 			goto return_the_result;
@@ -1552,8 +1548,8 @@ ResultType Line::GuiControlGet(LPTSTR aCommand, LPTSTR aControlID, LPTSTR aParam
 	}
 
 	case GUICONTROLGET_CMD_ENABLED:
-		// See comment below.
-		result = output_var.Assign(IsWindowEnabled(control.hwnd) ? _T("1") : _T("0"));
+		// See commment below.
+		result = output_var.Assign(IsWindowEnabled(control.hwnd) ? 1 : 0); // Force pure boolean 0/1.
 		goto return_the_result;
 
 	case GUICONTROLGET_CMD_VISIBLE:
@@ -1561,9 +1557,9 @@ ResultType Line::GuiControlGet(LPTSTR aCommand, LPTSTR aControlID, LPTSTR aParam
 		// for determining visibility than simply checking for WS_VISIBLE is the control and its parent
 		// window.  If so, it might be undocumented in MSDN.  It is mentioned here to explain why
 		// this "visible" sub-cmd is kept separate from some figure command such as "GuiControlGet, Out, Style":
-		// 1) The style method is cumbersome to script with since it requires bitwise operates afterward.
-		// 2) IsVisible() uses a different standard of detection than simply checking WS_VISIBLE.
-		result = output_var.Assign(IsWindowVisible(control.hwnd) ? _T("1") : _T("0"));
+		// 1) The style method is cumbersome to script with since it requires bitwise operations afterward.
+		// 2) IsWindowVisible() uses a different standard of detection than simply checking WS_VISIBLE.
+		result = output_var.Assign(IsWindowVisible(control.hwnd) ? 1 : 0); // Force pure boolean 0/1.
 		goto return_the_result;
 
 	case GUICONTROLGET_CMD_HWND: // v1.0.46.16: Although it overlaps with HwndOutputVar, Majkinetor wanted this to help with encapsulation/modularization.
@@ -1712,6 +1708,8 @@ ResultType GuiType::Destroy(GuiType &gui)
 	gui.mControlCount = 0; // All child windows (controls) are automatically destroyed with parent.
 	free(gui.mControl); // Free the control array, which was previously malloc'd.
 	gui.Release(); // After this, the var "gui" is invalid so should not be referenced.
+	// If this Gui was the last thing keeping the script running, exit the script:
+	g_script.ExitIfNotPersistent(EXIT_DESTROY);
 	return OK;
 }
 
@@ -2107,9 +2105,6 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 	case GUI_CONTROL_SLIDER:
 		opt.style_add |= WS_TABSTOP;
 		break;
-	case GUI_CONTROL_PROGRESS:
-		opt.style_add |= PBS_SMOOTH; // The smooth ones seem preferable as a default.  Theme is removed later below.
-		break;
 	case GUI_CONTROL_TAB:
 		// Override the normal default, requiring a manual +Theme in the control's options.  This is done
 		// because themed tabs have a gradient background that is currently not well supported by the method
@@ -2139,6 +2134,7 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 	//case GUI_CONTROL_MONTHCAL: Can't be focused, so no tabstop.
 	//case GUI_CONTROL_PIC:
 	//case GUI_CONTROL_GROUPBOX:
+	//case GUI_CONTROL_PROGRESS:
 		// v1.0.44.11: The following was commented out for GROUPBOX to avoid unwanted wrapping of last letter when
 		// the font is bold on XP Classic theme (other font styles and desktop themes may also be cause this).
 		// Avoiding this problem seems to outweigh the breaking of old scripts that use GroupBoxes with more than
@@ -3993,7 +3989,7 @@ ResultType GuiType::ParseOptions(LPTSTR aOptions, bool &aSetLastFoundWindow, Tog
 				if (*name || !set_owner) // i.e. "+Parent" on its own is invalid (and should not default to g_hWnd).
 				{
 					HWND new_owner = NULL;
-					if (IsPureNumeric(name, TRUE, FALSE) == PURE_INTEGER) // Allow negatives, for flexibility.
+					if (IsNumeric(name, TRUE, FALSE) == PURE_INTEGER) // Allow negatives, for flexibility.
 					{
 						__int64 gui_num = ATOI64(name);
 						if (gui_num < 1 || gui_num > 99 || (option_end - name) > 2) // See similar checks in ResolveGui() for comments.
@@ -4111,7 +4107,7 @@ ResultType GuiType::ParseOptions(LPTSTR aOptions, bool &aSetLastFoundWindow, Tog
 		}
 		
 		else if (!_tcsnicmp(next_option, _T("Hwnd"), 4))
-			aHwndVar = g_script.FindOrAddVar(next_option + 4); // ALWAYS_PREFER_LOCAL is debatable, but for simplicity it seems best since it causes HwndOutputVar to behave the same as the vVar option.
+			aHwndVar = g_script.FindOrAddVar(next_option + 4);
 
 		else if (!_tcsnicmp(next_option, _T("Label"), 5)) // v1.0.44.09: Allow custom label prefix for the reasons described in SetLabels().
 		{
@@ -4221,7 +4217,7 @@ ResultType GuiType::ParseOptions(LPTSTR aOptions, bool &aSetLastFoundWindow, Tog
 		else if (ctoupper(*next_option) == 'E') // Extended style
 		{
 			++next_option; // Skip over the E itself.
-			if (IsPureNumeric(next_option, false, false)) // Disallow whitespace in case option string ends in naked "E".
+			if (IsNumeric(next_option, false, false)) // Disallow whitespace in case option string ends in naked "E".
 			{
 				// Pure numbers are assumed to be style additions or removals:
 				DWORD given_exstyle = ATOU(next_option); // ATOU() for unsigned.
@@ -4234,7 +4230,7 @@ ResultType GuiType::ParseOptions(LPTSTR aOptions, bool &aSetLastFoundWindow, Tog
 
 		else // Handle things that are more general than the above, such as single letter options and pure numbers:
 		{
-			if (IsPureNumeric(next_option)) // Above has already verified that *next_option can't be whitespace.
+			if (IsNumeric(next_option)) // Above has already verified that *next_option can't be whitespace.
 			{
 				// Pure numbers are assumed to be style additions or removals:
 				DWORD given_style = ATOU(next_option); // ATOU() for unsigned.
@@ -4693,7 +4689,7 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 		else if (!_tcsnicmp(next_option, _T("LV"), 2))
 		{
 			next_option += 2;
-			if (IsPureNumeric(next_option, false, false)) // Disallow whitespace in case option string ends in naked "LV".
+			if (IsNumeric(next_option, false, false)) // Disallow whitespace in case option string ends in naked "LV".
 			{
 				DWORD given_lvstyle = ATOU(next_option); // ATOU() for unsigned.
 				if (adding) aOpt.listview_style |= given_lvstyle; else aOpt.listview_style &= ~given_lvstyle;
@@ -4796,11 +4792,11 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 				aOpt.style_add |= ES_PASSWORD;
 				if (aControl.hwnd) // Update the existing edit.
 				{
-					// Don't know how to achieve the black circle on XP *after* the control has
+					// Don't know how to use the actual system password char *after* the control has
 					// been created.  Maybe it's impossible.  Thus, provide default since otherwise
 					// pass-char will be removed vs. added:
 					if (!aOpt.password_char)
-						aOpt.password_char = '*';
+						aOpt.password_char = UorA(L'\x25CF', '*');
 					SendMessage(aControl.hwnd, EM_SETPASSWORDCHAR, (WPARAM)aOpt.password_char, 0);
 				}
 			}
@@ -5320,7 +5316,7 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 			// if "visible" and "resize" ever become valid option words, the below would otherwise wrongly
 			// detect them as variable=isible and row_count=esize, respectively.
 
-			if (IsPureNumeric(next_option)) // Above has already verified that *next_option can't be whitespace.
+			if (IsNumeric(next_option)) // Above has already verified that *next_option can't be whitespace.
 			{
 				// Pure numbers are assumed to be style additions or removals:
 				DWORD given_style = ATOU(next_option); // ATOU() for unsigned.
@@ -5596,7 +5592,7 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 				//  a number; if it isn't numeric, it will be treated as 0, which will probably be
 				//  easy to detect. Cases like the following are ignored for simplicity and due to
 				//  rarity: xpp (trailing p is ignored) y100abc (abc is ignored).
-				if (ctoupper(next_option[-1]) == 'E' && IsPureNumeric(next_option, false, false)) // Disallow whitespace in case option string ends in naked "E".
+				if (ctoupper(next_option[-1]) == 'E' && IsNumeric(next_option, false, false)) // Disallow whitespace in case option string ends in naked "E".
 				{
 					// Pure numbers are assumed to be style additions or removals:
 					DWORD given_exstyle = ATOU(next_option); // ATOU() for unsigned.
@@ -6610,10 +6606,9 @@ ResultType GuiType::Show(LPTSTR aOptions, LPTSTR aText)
 	// Update for v1.0.25: The below is now done last to prevent the GuiSize label (if any) from launching
 	// while this function is still incomplete; in other words, don't allow the GuiSize label to launch
 	// until after all of the above members and actions have been completed.
-	// This is done for the same reason it's done for ACT_SPLASHTEXTON.  If it weren't done, whenever
-	// a command that blocks (fully uses) the main thread such as "Drive Eject" immediately follows
-	// "Gui Show", the GUI window might not appear until afterward because our thread never had a
-	// chance to call its WindowProc with all the messages needed to actually show the window:
+	// If this weren't done, whenever a command that blocks (fully uses) the main thread such as "Drive Eject"
+	// immediately follows "Gui Show", the GUI window might not appear until afterward because our thread
+	// never had a chance to call its WindowProc with all the messages needed to actually show the window:
 	SLEEP_WITHOUT_INTERRUPTION(-1)
 	// UpdateWindow() would probably achieve the same effect as the above, but it feels safer to do
 	// the above because it ensures that our message queue is empty prior to returning to our caller.
@@ -6636,6 +6631,8 @@ ResultType GuiType::Cancel()
 {
 	if (mHwnd)
 		ShowWindow(mHwnd, SW_HIDE);
+	// If this Gui was the last thing keeping the script running, exit the script:
+	g_script.ExitIfNotPersistent(EXIT_WM_CLOSE);
 	return OK;
 }
 
@@ -6721,9 +6718,6 @@ ResultType GuiType::Submit(bool aHideIt)
 				// for multiple selections is left intact.
 				if (selection_number == -1)
 					selection_number = 0;
-				// Convert explicitly to decimal so that g->FormatIntAsHex is not obeyed.
-				// This is so that this result matches the decimal format tradition set by
-				// the "1" and "0" strings normally used for radios and checkboxes:
 				_itot(selection_number, temp, 10); // selection_number can be legitimately zero.
 				group_var->Assign(temp); // group_var should not be NULL since group_radios_with_var == 1
 			}
@@ -6748,11 +6742,11 @@ ResultType GuiType::Submit(bool aHideIt)
 				else
 					selection_number = group_radios;
 				if (output_var)
-					output_var->Assign(_T("1"));
+					output_var->Assign(1);
 			}
 			else
 				if (output_var)
-					output_var->Assign(_T("0"));
+					output_var->Assign(0);
 		}
 	} // for()
 
@@ -6884,15 +6878,15 @@ ResultType GuiType::ControlGetContents(Var &aOutputVar, GuiControlType &aControl
 			switch (SendMessage(aControl.hwnd, BM_GETCHECK, 0, 0))
 			{
 			case BST_CHECKED:
-				return aOutputVar.Assign(_T("1"));
+				return aOutputVar.Assign(1);
 			case BST_UNCHECKED:
-				return aOutputVar.Assign(_T("0"));
+				return aOutputVar.Assign(0);
 			case BST_INDETERMINATE:
 				// Seems better to use a value other than blank because blank might sometimes represent the
 				// state of an uninitialized or unfetched control.  In other words, a blank variable often
 				// has an external meaning that transcends the more specific meaning often desirable when
 				// retrieving the state of the control:
-				return aOutputVar.Assign(_T("-1"));
+				return aOutputVar.Assign(-1);
 			}
 			return FAIL; // Shouldn't be reached since ZERO(BST_UNCHECKED) is returned on failure.
 
@@ -7150,7 +7144,7 @@ GuiIndexType GuiType::FindControl(LPTSTR aControlID)
 	if (!*aControlID)
 		return -1;
 	GuiIndexType u;
-	if (IsPureNumeric(aControlID, TRUE, FALSE) == PURE_INTEGER) // Allow negatives, for flexibility.
+	if (IsNumeric(aControlID, TRUE, FALSE) == PURE_INTEGER) // Allow negatives, for flexibility.
 	{
 		// v1.1.04: Allow Gui controls to be referenced by HWND.  There is some risk of breaking
 		// scripts, but only if the text of one control contains the HWND of another control.

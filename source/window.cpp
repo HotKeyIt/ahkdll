@@ -553,8 +553,7 @@ HWND WinExist(global_struct &aSettings, LPTSTR aTitle, LPTSTR aText, LPTSTR aExc
 	if (!(*aTitle || *aText || *aExcludeTitle || *aExcludeText))
 		// User passed no params, so use the window most recently found by WinExist().
 		// It's correct to do this even in this function because it's called by
-		// WINWAITCLOSE and IFWINEXIST specifically to discover if the Last-Used
-		// window still exists.
+		// WINWAITCLOSE specifically to discover if the Last-Used window still exists.
 		return GetValidLastUsedWindow(aSettings);
 
 	WindowSearch ws;
@@ -757,7 +756,7 @@ ResultType StatusBarUtil(Var *aOutputVar, HWND aBarHwnd, int aPartNumber, LPTSTR
 	if (aOutputVar)
 		aOutputVar->Assign(); // Init to blank in case of early return.
 
-	// Legacy: Waiting 500ms in place of a "0" seems more useful than a true zero, which doens't need
+	// Legacy: Waiting 500ms in place of a "0" seems more useful than a true zero, which doesn't need
 	// to be supported because it's the same thing as something like "IfWinExist":
 	if (!aWaitTime)
 		aWaitTime = 500;
@@ -865,7 +864,7 @@ ResultType StatusBarUtil(Var *aOutputVar, HWND aBarHwnd, int aPartNumber, LPTSTR
 	return result_to_return;
 
 error:
-	return g_script.SetErrorLevelOrThrowStr(aOutputVar ? ERRORLEVEL_ERROR : ERRORLEVEL_ERROR2);
+	return g_script.SetErrorLevelOrThrowInt(aOutputVar ? ERRORLEVEL_ERROR : ERRORLEVEL_ERROR2);
 }
 
 
@@ -1822,8 +1821,7 @@ HWND WindowSearch::IsMatch(bool aInvert)
 		// var names that are too long:
 		TCHAR var_name[MAX_VAR_NAME_LENGTH + 20];
 		Var *array_item = g_script.FindOrAddVar(var_name
-			, sntprintf(var_name, _countof(var_name), _T("%s%u"), mArrayStart->mName, mFoundCount)
-			, mArrayStart->IsLocal() ? FINDVAR_LOCAL : FINDVAR_GLOBAL);
+			, sntprintf(var_name, _countof(var_name), _T("%s%u"), mArrayStart->mName, mFoundCount));
 		if (array_item)
 			array_item->AssignHWND(mFoundParent);
 		//else no error reporting currently, since should be very rare.

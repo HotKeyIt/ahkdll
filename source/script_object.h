@@ -91,8 +91,8 @@ protected:
 			double n_double;	// for SYM_FLOAT
 			IObject *object;	// for SYM_OBJECT
 			struct {
-				LPTSTR marker;		// for SYM_OPERAND
-				size_t size;		// for SYM_OPERAND; allows reuse of allocated memory. For UNICODE: count in characters
+				LPTSTR marker;		// for SYM_STRING
+				size_t size;		// for SYM_STRING; allows reuse of allocated memory. For UNICODE: count in characters
 			};
 		};
 		// key and symbol probably need to be adjacent to each other to conserve memory due to 8-byte alignment.
@@ -109,9 +109,8 @@ protected:
 	
 		inline void ToToken(ExprTokenType &aToken) // Used when we want the value as is, in a token.  Does not AddRef() or copy strings.
 		{
-			aToken.value_int64 = n_int64; // Union copy. Overlaps with buf on x86 builds, so do it first.
-			if ((aToken.symbol = symbol) == SYM_OPERAND)
-				aToken.buf = NULL; // Indicate that this SYM_OPERAND token LACKS a pre-converted binary integer.
+			aToken.value_int64 = n_int64;
+			aToken.symbol = symbol;
 		}
 	};
 
@@ -170,10 +169,13 @@ protected:
 	
 public:
 	static Object *Create(ExprTokenType *aParam[], int aParamCount);
+	static Object *CreateFromArgV(LPTSTR *aArgV, int aArgC);
+	
+	bool Append(LPTSTR aValue, size_t aValueLength = -1);
 
-	// Used by Func::Call() for variadic functions/function-calls:
 	Object *Clone(INT_PTR aStartOffset = 0);
 	ResultType ArrayToParams(void *&aMemToFree, ExprTokenType **&aParam, int &aParamCount, int aMinParams);
+	ResultType ArrayToStrings(LPTSTR *aStrings, int &aStringCount, int aStringsMax);
 	
 	inline bool GetNextItem(ExprTokenType &aToken, INT_PTR &aOffset, INT_PTR &aKey)
 	{
@@ -184,11 +186,16 @@ public:
 		field.ToToken(aToken);
 		return true;
 	}
-	
+
+	int GetNumericItemCount()
+	{
+		return (int)mKeyOffsetObject;
+	}
+
 	bool GetItem(ExprTokenType &aToken, LPTSTR aKey)
 	{
 		KeyType key;
-		SymbolType key_type = IsPureNumeric(aKey, FALSE, FALSE, FALSE); // SYM_STRING or SYM_INTEGER.
+		SymbolType key_type = IsNumeric(aKey, FALSE, FALSE, FALSE); // SYM_STRING or SYM_INTEGER.
 		if (key_type == SYM_INTEGER)
 			key.i = ATOI(aKey);
 		else
@@ -204,7 +211,7 @@ public:
 	bool SetItem(LPTSTR aKey, ExprTokenType &aValue)
 	{
 		KeyType key;
-		SymbolType key_type = IsPureNumeric(aKey, FALSE, FALSE, FALSE); // SYM_STRING or SYM_INTEGER.
+		SymbolType key_type = IsNumeric(aKey, FALSE, FALSE, FALSE); // SYM_STRING or SYM_INTEGER.
 		if (key_type == SYM_INTEGER)
 			key.i = ATOI(aKey);
 		else
@@ -223,7 +230,7 @@ public:
 		token.object = aValue;
 		return SetItem(aKey, token);
 	}
-	
+
 	void ReduceKeys(INT_PTR aAmount)
 	{
 		for (IndexType i = 0; i < mKeyOffsetObject; ++i)

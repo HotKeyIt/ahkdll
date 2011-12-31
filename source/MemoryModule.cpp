@@ -179,12 +179,10 @@ FinalizeSections(PMEMORYMODULE module)
 		if (size > 0) {
 			// change memory access flags
 			if (VirtualProtect((LPVOID)((POINTER_TYPE)section->Misc.PhysicalAddress | imageOffset), size, protect, &oldProtect) == 0)
-			{
 #ifdef DEBUG_OUTPUT
-				OutputLastError("Error protecting memory page");
+				OutputLastError("Error protecting memory page")
 #endif
 			break;
-			}
 		}
 	}
 #ifndef _WIN64
@@ -292,7 +290,7 @@ BuildImportTable(PMEMORYMODULE module)
 				resDirEntry = (PIMAGE_RESOURCE_DIRECTORY_ENTRY)((char*)resDir + sizeof(IMAGE_RESOURCE_DIRECTORY) + (i*sizeof(IMAGE_RESOURCE_DIRECTORY_ENTRY)));
 			
 				// If entry is directory and Id is 24 = RT_MANIFEST
-				if (resDirEntry->DataIsDirectory && resDirEntry->Name == 24)
+				if (resDirEntry->DataIsDirectory && resDirEntry->Id == 24)
 				{
 					resDirTemp = (PIMAGE_RESOURCE_DIRECTORY)((char*)resDir + (resDirEntry->OffsetToDirectory));
 					resDirEntryTemp = (PIMAGE_RESOURCE_DIRECTORY_ENTRY)((char*)resDir + (resDirEntry->OffsetToDirectory) + sizeof(IMAGE_RESOURCE_DIRECTORY));

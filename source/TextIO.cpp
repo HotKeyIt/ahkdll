@@ -858,6 +858,8 @@ class FileObject : public ObjectBase // fincs: No longer allowing the script to 
 					break; // Return "" or throw.
 				DWORD length = mFile.ReadLine(aResultToken.marker, READ_FILE_LINE_SIZE - 1);
 				aResultToken.symbol = SYM_STRING;
+				if (length && aResultToken.marker[length - 1] == '\n')
+					--length;
 				aResultToken.marker[length] = '\0';
 				aResultToken.buf = (LPTSTR)(size_t) length;
 				return OK;
@@ -905,7 +907,7 @@ class FileObject : public ObjectBase // fincs: No longer allowing the script to 
 					// Check if the user requested a size larger than the variable.
 					if ( size > target_token.var->ByteCapacity()
 						// Too small: expand the target variable if reading; abort otherwise.
-						&& (!reading || !target_token.var->SetCapacity(size, false, false)) ) // Relies on short-circuit order.
+						&& (!reading || !target_token.var->SetCapacity(size, false)) ) // Relies on short-circuit order.
 					{
 						if (g->InTryBlock)
 							break; // Throw an exception.
@@ -990,7 +992,7 @@ class FileObject : public ObjectBase // fincs: No longer allowing the script to 
 			UINT codepage;
 			if (aParamCount > 0)
 			{
-				if (TokenIsPureNumeric(*aParam[1]))
+				if (TokenIsNumeric(*aParam[1]))
 					codepage = (UINT)TokenToInt64(*aParam[1]);
 				else
 					codepage = Line::ConvertFileEncoding(TokenToString(*aParam[1]));
@@ -1035,7 +1037,7 @@ class FileObject : public ObjectBase // fincs: No longer allowing the script to 
 		// marker should already be set to "".
 		if (g->InTryBlock)
 			// For simplicity, don't attempt to identify what kind of error occurred:
-			Script::ThrowRuntimeException(ERRORLEVEL_ERROR, _T("FileObject"));
+			Script::ThrowRuntimeException(ERRORLEVEL_ERROR_STR, _T("FileObject"));
 		return OK;
 	}
 
@@ -1057,7 +1059,7 @@ void BIF_FileOpen(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 	DWORD aFlags;
 	UINT aEncoding;
 
-	if (TokenIsPureNumeric(*aParam[1]))
+	if (TokenIsNumeric(*aParam[1]))
 	{
 		aFlags = (DWORD) TokenToInt64(*aParam[1]);
 	}
@@ -1089,13 +1091,16 @@ void BIF_FileOpen(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 		
 		// Default to not locking file, for consistency with fopen/standard AutoHotkey and because it seems best for flexibility.
 		aFlags |= TextStream::SHARE_ALL;
+		// Default to translating `r`n and `r, for convenience and consistency with the other file I/O commands.
+		aFlags |= TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR;
 
 		for (++sflag; *sflag; ++sflag)
 		{
 			switch (ctolower(*sflag))
 			{
-			case '\n': aFlags |= TextStream::EOL_CRLF; break;
-			case '\r': aFlags |= TextStream::EOL_ORPHAN_CR; break;
+			case '*':
+				aFlags &= ~(TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR);
+				break;
 			case ' ':
 			case '\t':
 				// Allow spaces and tabs for readability.
@@ -1126,7 +1131,7 @@ void BIF_FileOpen(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 
 	if (aParamCount > 2)
 	{
-		if (!TokenIsPureNumeric(*aParam[2]))
+		if (!TokenIsNumeric(*aParam[2]))
 		{
 			aEncoding = Line::ConvertFileEncoding(TokenToString(*aParam[2]));
 			if (aEncoding == -1)

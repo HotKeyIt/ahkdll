@@ -69,14 +69,14 @@ extern "C"{
 
 
 
-#ifndef __AutoHotkey_LIBRARY_DEFINED__
-#define __AutoHotkey_LIBRARY_DEFINED__
+#ifndef __AutoHotkey2_LIBRARY_DEFINED__
+#define __AutoHotkey2_LIBRARY_DEFINED__
 
 /* library AutoHotkey */
 /* [version][uuid] */ 
 
 
-DEFINE_GUID(LIBID_AutoHotkey,0xa9863c65, 0x8cd4, 0x4069, 0x89, 0x3d, 0x3b, 0x5a, 0x3d, 0xdf, 0xae, 0x88);
+DEFINE_GUID(LIBID_AutoHotkey2,0x9c5f743b, 0xa646, 0x4ec9, 0x8c, 0xe1, 0x7, 0x28, 0xa0, 0x7e, 0x7c, 0x21);
 
 #ifndef __ICOMServer_INTERFACE_DEFINED__
 #define __ICOMServer_INTERFACE_DEFINED__
@@ -85,20 +85,20 @@ DEFINE_GUID(LIBID_AutoHotkey,0xa9863c65, 0x8cd4, 0x4069, 0x89, 0x3d, 0x3b, 0x5a,
 /* [object][oleautomation][dual][uuid] */ 
 
 
-DEFINE_GUID(IID_ICOMServer,0x4ffe41b, 0x8fe9, 0x4479, 0x99, 0xa, 0xb1, 0x86, 0xec, 0x73, 0xf4, 0x9c);
+DEFINE_GUID(IID_ICOMServer,0xa58e17b4, 0xf892, 0x4839, 0x8c, 0x46, 0x9f, 0x3c, 0x6, 0x2f, 0xdf, 0x7d);
 
 #if defined(__cplusplus) && !defined(CINTERFACE)
     
-    MIDL_INTERFACE("04FFE41B-8FE9-4479-990A-B186EC73F49C")
+    MIDL_INTERFACE("A58E17B4-F892-4839-8C46-9F3C062FDF7D")
     ICOMServer : public IDispatch
     {
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahktextdll( 
-           /*in,optional*/VARIANT script,/*in,optional*/VARIANT options,/*in,optional*/VARIANT params, /* [retval][out] */UINT_PTR* hThread) = 0;
+           /*in,optional*/VARIANT script,/*in,optional*/VARIANT params, /* [retval][out] */UINT_PTR* hThread) = 0;
         
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkdll( 
-           /*in,optional*/VARIANT filepath,/*in,optional*/VARIANT options,/*in,optional*/VARIANT params, /* [retval][out] */UINT_PTR* hThread) = 0;
+           /*in,optional*/VARIANT filepath,/*in,optional*/VARIANT params, /* [retval][out] */UINT_PTR* hThread) = 0;
         
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkPause( 
@@ -249,35 +249,35 @@ DEFINE_GUID(IID_ICOMServer,0x4ffe41b, 0x8fe9, 0x4479, 0x99, 0xa, 0xb1, 0x86, 0xe
 #endif 	/* __ICOMServer_INTERFACE_DEFINED__ */
 
 
-DEFINE_GUID(CLSID_CoCOMServer,0xc00bcc8c, 0x5a04, 0x4392, 0x87, 0xf, 0x20, 0xaa, 0xe1, 0xb9, 0x26, 0xb2);
+DEFINE_GUID(CLSID_CoCOMServer,0xfeeec4ba, 0x4af, 0x45f0, 0xb3, 0x85, 0x72, 0x90, 0xc6, 0x5c, 0xfb, 0x9b);
 
 #ifdef _WIN64
-DEFINE_GUID(CLSID_CoCOMServerOptioal,0x38D00012,0xDC83,0x4E17,0x9B,0xAD,0xD9,0xDD,0x97,0x90,0x25,0x80);
+DEFINE_GUID(CLSID_CoCOMServerOptioal,0xf1d0de03, 0x30fd, 0x4326, 0xb3, 0x3f, 0x98, 0x9b, 0xbf, 0xaa, 0x5f, 0xfa);
 #else
 #ifdef _UNICODE
-DEFINE_GUID(CLSID_CoCOMServerOptional,0xC58DCD96,0x1D6F,0x4F85,0xB5,0x55,0x02,0xB7,0xF2,0x1F,0x5C,0xAF);
+DEFINE_GUID(CLSID_CoCOMServerOptional,0xec81ebba, 0x6cee, 0x4363, 0xab, 0x77, 0xc0, 0xe5, 0x70, 0x46, 0xaa, 0x89);
 #else
-DEFINE_GUID(CLSID_CoCOMServerOptional,0x974318D9,0xA5B2,0x4FE5,0x8A,0xC4,0x33,0xA0,0xC9,0xEB,0xB8,0xB5);
+DEFINE_GUID(CLSID_CoCOMServerOptional,0xde91ae03, 0xec49, 0x4a4f, 0x85, 0xdc, 0x10, 0xa, 0x74, 0x40, 0x61, 0x3);
 #endif
 #endif
 
 #ifdef __cplusplus
 
-class DECLSPEC_UUID("C00BCC8C-5A04-4392-870F-20AAE1B926B2")
+class DECLSPEC_UUID("FEEEC4BA-04AF-45F0-B385-7290C65CFB9B")
 CoCOMServer;
 
 #ifdef _WIN64
-class DECLSPEC_UUID("38D00012-DC83-4E17-9BAD-D9DD97902580")
+class DECLSPEC_UUID("F1D0DE03-30FD-4326-B33F-989BBFAA5FFA")
 #else
 #ifdef _UNICODE
-class DECLSPEC_UUID("C58DCD96-1D6F-4F85-B555-02B7F21F5CAF")
+class DECLSPEC_UUID("EC81EBBA-6CEE-4363-AB77-C0E57046AA89")
 #else
-class DECLSPEC_UUID("974318D9-A5B2-4FE5-8AC4-33A0C9EBB8B5")
+class DECLSPEC_UUID("DE91AE03-EC49-4A4F-85DC-100A74406103")
 #endif
 #endif
 CoCOMServerOptional;
 #endif
-#endif /* __AutoHotkey_LIBRARY_DEFINED__ */
+#endif /* __AutoHotkey2_LIBRARY_DEFINED__ */
 
 /* Additional Prototypes for ALL interfaces */
 

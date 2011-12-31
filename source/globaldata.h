@@ -37,10 +37,6 @@ extern bool g_DestroyWindowCalled;
 extern HWND g_hWnd;  // The main window
 extern HWND g_hWndEdit;  // The edit window, child of main.
 extern HFONT g_hFontEdit;
-#ifndef MINIDLL
-extern HWND g_hWndSplash;  // The SplashText window.
-extern HFONT g_hFontSplash;
-#endif
 extern HACCEL g_hAccelTable; // Accelerator table for main menu shortcut keys.
 
 typedef int (WINAPI *StrCmpLogicalW_type)(LPCWSTR, LPCWSTR);
@@ -74,21 +70,17 @@ extern HHOOK g_MouseHook;
 extern HHOOK g_PlaybackHook;
 extern bool g_ForceLaunch;
 extern bool g_WinActivateForce;
+extern bool g_MustDeclare;
 extern WarnMode g_Warn_UseUnsetLocal;
 extern WarnMode g_Warn_UseUnsetGlobal;
-extern WarnMode g_Warn_UseEnv;
 extern WarnMode g_Warn_LocalSameAsGlobal;
 #ifndef MINIDLL
 extern SingleInstanceType g_AllowOnlyOneInstance;
-#endif
-extern bool g_persistent;
-#ifndef MINIDLL
 extern bool g_NoTrayIcon;
 #endif
 #ifdef AUTOHOTKEYSC
 	extern bool g_AllowMainWindow;
 #endif
-extern bool g_AllowSameLineComments;
 extern bool g_DeferMessagesForUnderlyingPump;
 extern bool g_MainTimerExists;
 extern bool g_AutoExecTimerExists;
@@ -100,9 +92,6 @@ extern bool g_SoundWasPlayed;
 #ifndef MINIDLL
 extern bool g_IsSuspended;
 #endif
-extern BOOL g_WriteCacheDisabledInt64;
-extern BOOL g_WriteCacheDisabledDouble;
-extern BOOL g_NoEnv;
 extern BOOL g_AllowInterruption;
 extern int g_nLayersNeedingTimer;
 extern int g_nThreads;
@@ -111,7 +100,6 @@ extern int g_nPausedThreads;
 extern int g_MaxHistoryKeys;
 #endif
 
-extern VarSizeType g_MaxVarCapacity;
 #ifndef MINIDLL
 extern UCHAR g_MaxThreadsPerHotkey;
 #endif
@@ -143,8 +131,6 @@ extern int g_nInputBoxes;
 extern int g_nFileDialogs;
 extern int g_nFolderDialogs;
 extern InputBoxType g_InputBox[MAX_INPUTBOXES];
-extern SplashType g_Progress[MAX_PROGRESS_WINDOWS];
-extern SplashType g_SplashImage[MAX_SPLASHIMAGE_WINDOWS];
 extern GuiType **g_gui;
 extern int g_guiCount, g_guiCountMax;
 #endif
@@ -158,9 +144,10 @@ extern bool g_SortReverse;
 extern int g_SortColumnOffset;
 extern Func *g_SortFunc;
 
-extern TCHAR g_delimiter;
-extern TCHAR g_DerefChar;
-extern TCHAR g_EscapeChar;
+#define g_DerefChar   '%' // As of v2 these are constant, so even more parts of the code assume they
+#define g_EscapeChar  '`' // are at their usual default values to reduce code size/complexity.
+#define g_delimiter   ',' // Also, g_delimiter was never used in expressions (i.e. for SYM_COMMA).
+#define g_CommentChar ';'
 #ifndef MINIDLL
 // Hot-string vars:
 extern TCHAR g_HSBuf[HS_BUF_SIZE];
@@ -202,7 +189,6 @@ extern global_struct g_default, *g_array;
 extern TCHAR g_WorkingDir[MAX_PATH];  // Explicit size needed here in .h file for use with sizeof().
 extern LPTSTR g_WorkingDirOrig;
 
-extern bool g_ContinuationLTrim;
 extern bool g_ForceKeybdHook;
 extern ToggleValueType g_ForceNumLock;
 extern ToggleValueType g_ForceCapsLock;

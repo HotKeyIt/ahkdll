@@ -1,5 +1,6 @@
 #include "stdafx.h" // pre-compiled headers
 #include "defines.h"
+#include "application.h"
 #include "globaldata.h"
 #include "script.h"
 
@@ -54,28 +55,41 @@ Object *Object::Create(ExprTokenType *aParam[], int aParamCount)
 	Object *obj = new Object();
 	if (obj && aParamCount)
 	{
-		ExprTokenType result_token, this_token;
-		TCHAR buf[MAX_NUMBER_SIZE];
+		if (aParamCount > 8)
+			// Set initial capacity to avoid multiple expansions.
+			// For simplicity, failure is handled by the loop below.
+			obj->SetInternalCapacity(aParamCount >> 1);
+		// Otherwise, there are 4 or less key-value pairs.  When the first
+		// item is inserted, a default initial capacity of 4 will be set.
 
-		this_token.symbol = SYM_OBJECT;
-		this_token.object = obj;
+		TCHAR buf[MAX_NUMBER_SIZE];
+		FieldType *field;
+		SymbolType key_type;
+		KeyType key;
+		IndexType insert_pos;
 		
 		for (int i = 0; i + 1 < aParamCount; i += 2)
 		{
-			result_token.symbol = SYM_STRING;
-			result_token.marker = _T("");
-			result_token.mem_to_free = NULL;
-			result_token.buf = buf;
-
-			// This is used rather than a more direct approach to ensure it is equivalent to assignment.
-			// For instance, Object("base",MyBase,"a",1,"b",2) invokes meta-functions contained by MyBase.
-			// For future consideration: Maybe it *should* bypass the meta-mechanism?
-			obj->Invoke(result_token, this_token, IT_SET, aParam + i, 2);
-
-			if (result_token.symbol == SYM_OBJECT) // L33: Bugfix.  Invoke must assume the result will be used and as a result we must account for this object reference:
-				result_token.object->Release();
-			if (result_token.mem_to_free) // Comment may be obsolete: Currently should never happen, but may happen in future.
-				free(result_token.mem_to_free);
+			field = obj->FindField(*aParam[i], buf, key_type, key, insert_pos);
+			if (!field // Probably NULL, but calling FindField() first avoids an extra call to TokenToString() below.
+				&& key_type == SYM_STRING && !_tcsicmp(key.s, _T("base")))
+			{
+				// For consistency with assignments, the following is allowed to overwrite a previous
+				// base object (although having "base" occur twice in the parameter list would be quite
+				// useless) or set mBase to NULL if the value parameter is not an object.
+				if (obj->mBase)
+					obj->mBase->Release();
+				if (obj->mBase = TokenToObject(*aParam[i + 1]))
+					obj->mBase->AddRef();
+				continue;
+			}
+			if (  !(field
+				 || (field = obj->Insert(key_type, key, insert_pos)))
+				|| !field->Assign(*aParam[i + 1])  )
+			{	// Out of memory.
+				obj->Release();
+				return NULL;
+			}
 		}
 	}
 	return obj;
@@ -144,7 +158,7 @@ Object *Object::Clone(INT_PTR aStartOffset)
 		// Copy value.
 		switch (dst.symbol = src.symbol)
 		{
-		case SYM_OPERAND:
+		case SYM_STRING:
 			if (dst.size = src.size)
 			{
 				if (dst.marker = tmalloc(dst.size))
@@ -222,6 +236,23 @@ ResultType Object::ArrayToParams(void *&aMemToFree, ExprTokenType **&aParam, int
 		field[i].ToToken(*(param_list[i] = &token[i]));
 	aParamCount += field_count; // Update caller's count.
 	aMemToFree = token; // Return the memory block for caller to take care of.
+	return OK;
+}
+
+
+//
+// Object::ArrayToStrings - Used by BIF_StrSplit.
+//
+
+ResultType Object::ArrayToStrings(LPTSTR *aStrings, int &aStringCount, int aStringsMax)
+{
+	int i, j;
+	for (i = 0, j = 0; i < aStringsMax && j < mKeyOffsetObject; ++j)
+		if (SYM_STRING == mFields[j].symbol)
+			aStrings[i++] = mFields[j].marker;
+		else
+			return FAIL;
+	aStringCount = i;
 	return OK;
 }
 
@@ -358,15 +389,20 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 		// Prior validation of ObjSet() param count ensures the result won't be negative:
 		--param_count_excluding_rvalue;
 		
-		if (IS_INVOKE_META)
-		{
-			if (param_count_excluding_rvalue == 1)
-				// Prevent below from searching for or setting a field, since this is a base object of aThisToken.
-				// Relies on mBase->Invoke recursion using aParamCount and not param_count_excluding_rvalue.
-				param_count_excluding_rvalue = 0;
-			//else: Allow SET to operate on a field of an object stored in the target's base.
-			//		For instance, x[y,z]:=w may operate on x[y][z], x.base[y][z], x[y].base[z], etc.
-		}
+		// Since defining base[key] prevents base.base.__Get and __Call from being invoked, it seems best
+		// to have it also block __Set. The code below is disabled to achieve this, with a slight cost to
+		// performance when assigning to a new key in any object which has a base object. (The cost may
+		// depend on how many key-value pairs each base object has.) Note that this doesn't affect meta-
+		// functions defined in *this* base object, since they were already invoked if present.
+		//if (IS_INVOKE_META)
+		//{
+		//	if (param_count_excluding_rvalue == 1)
+		//		// Prevent below from unnecessarily searching for a field, since it won't actually be assigned to.
+		//		// Relies on mBase->Invoke recursion using aParamCount and not param_count_excluding_rvalue.
+		//		param_count_excluding_rvalue = 0;
+		//	//else: Allow SET to operate on a field of an object stored in the target's base.
+		//	//		For instance, x[y,z]:=w may operate on x[y][z], x.base[y][z], x[y].base[z], etc.
+		//}
 	}
 	
 	if (param_count_excluding_rvalue)
@@ -554,17 +590,11 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 			// L34: Assigning an empty string no longer removes the field.
 			if ( (field || (field = Insert(key_type, key, insert_pos))) && field->Assign(value_param) )
 			{
-				if (field->symbol == SYM_OPERAND)
+				if (field->symbol == SYM_STRING)
 				{
 					// Use value_param since our copy may be freed prematurely in some (possibly rare) cases:
 					aResultToken.symbol = SYM_STRING;
 					aResultToken.marker = TokenToString(value_param);
-					// Below: no longer used as other areas expect string results to always be SYM_STRING.
-					// If it is ever used in future, we MUST copy marker and buf separately for x64 support.
-					// However, it seems appropriate *not* to return a SYM_OPERAND with cached binary integer
-					// since above has stored only the string part of it.
-					//aResultToken.symbol		 = value_param.symbol;
-					//aResultToken.value_int64 = value_param.value_int64; // Copy marker and buf (via union) in case it is SYM_OPERAND with a cached integer.
 				}
 				else
 					field->Get(aResultToken); // L34: Corrected this to be aResultToken instead of value_param (broken by L33).
@@ -576,10 +606,8 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 	// GET
 	else if (field)
 	{
-		if (field->symbol == SYM_OPERAND)
+		if (field->symbol == SYM_STRING)
 		{
-			// Use SYM_STRING and not SYM_OPERAND, since SYM_OPERAND's use of aResultToken.buf
-			// would conflict with the use of mem_to_free/buf to return a memory allocation.
 			aResultToken.symbol = SYM_STRING;
 			// L33: Make a persistent copy; our copy might be freed indirectly by releasing this object.
 			//		Prior to L33, callers took care of this UNLESS this was the last op in an expression.
@@ -619,32 +647,96 @@ ResultType Object::CallField(FieldType *aField, ExprTokenType &aResultToken, Exp
 		aParam[0] = tmp;
 		return r;
 	}
-	else if (aField->symbol == SYM_OPERAND)
+	else if (aField->symbol == SYM_STRING)
 	{
 		Func *func = g_script.FindFunc(aField->marker);
 		if (func)
 		{
-			// At this point, aIdCount == 1 and aParamCount includes only the explicit parameters for the call.
-			if (IS_INVOKE_META)
-			{
-				ExprTokenType *tmp = aParam[0];
-				// Called indirectly by means of the meta-object mechanism (mBase); treat it as a "method call".
-				// For this type of call, "this" object is included as the first parameter.  To do this, aParam[0] is
-				// temporarily overwritten with a pointer to aThisToken.  Note that aThisToken contains the original
-				// object specified in script, not the real "this" which is actually a meta-object/base of that object.
-				aParam[0] = &aThisToken;
-				ResultType r = CallFunc(*func, aResultToken, aParam, aParamCount);
-				aParam[0] = tmp;
-				return r;
-			}
-			else
-				// This object directly contains a function name.  Assume this object is intended
-				// as a simple array of functions; do not pass aThisToken as is done above.
-				// aParam + 1 vs aParam because aParam[0] is the key which was used to find this field, not a parameter of the call.
-				return CallFunc(*func, aResultToken, aParam + 1, aParamCount - 1);
+			ExprTokenType *tmp = aParam[0];
+			// v2: Always pass "this" as the first parameter.  The old behaviour of passing it only when called
+			// indirectly via mBase was confusing to many users, and isn't needed now that the script can do
+			// this.func.() instead of this.func() if they don't want to pass "this".
+			// For this type of call, "this" object is included as the first parameter.  To do this, aParam[0] is
+			// temporarily overwritten with a pointer to aThisToken.  Note that aThisToken contains the original
+			// object specified in script, not the C++ "this" which is actually a meta-object/base of that object.
+			aParam[0] = &aThisToken;
+			ResultType r = CallFunc(*func, aResultToken, aParam, aParamCount);
+			aParam[0] = tmp;
+			return r;
 		}
 	}
 	return INVOKE_NOT_HANDLED;
+}
+
+
+//
+// Helper function for WinMain()
+//
+
+Object *Object::CreateFromArgV(LPTSTR *aArgV, int aArgC)
+{
+	Object *args;
+	if (  !(args = Create(NULL, 0))  )
+		return NULL;
+	ExprTokenType *token = (ExprTokenType *)_alloca(aArgC * sizeof(ExprTokenType));
+	ExprTokenType **param = (ExprTokenType **)_alloca(aArgC * sizeof(ExprTokenType*));
+	for (int j = 0; j < aArgC; ++j)
+	{
+		token[j].symbol = SYM_STRING;
+		token[j].marker = aArgV[j];
+		param[j] = &token[j];
+	}
+	if (!args->InsertAt(0, 1, param, aArgC))
+	{
+		args->Release();
+		return NULL;
+	}
+	return args;
+}
+
+
+
+//
+// Helper function for StringSplit()
+//
+
+bool Object::Append(LPTSTR aValue, size_t aValueLength)
+{
+	if (mFieldCount == mFieldCountMax && !Expand()) // Attempt to expand if at capacity.
+		return false;
+
+	if (aValueLength == -1)
+		aValueLength = _tcslen(aValue);
+	
+	FieldType &field = mFields[mKeyOffsetObject];
+	if (mKeyOffsetObject < mFieldCount)
+		// For maintainability. This might never be done, because our caller
+		// doesn't use string/object keys. Move existing fields to make room:
+		memmove(&field + 1, &field, (mFieldCount - mKeyOffsetObject) * sizeof(FieldType));
+	++mFieldCount; // Only after memmove above.
+	++mKeyOffsetObject;
+	++mKeyOffsetString;
+	
+	// The following relies on the fact that callers of this function ONLY use
+	// this function, so the last integer key == the number of integer keys.
+	field.key.i = mKeyOffsetObject;
+
+	field.symbol = SYM_STRING;
+	if (aValueLength) // i.e. a non-empty string was supplied.
+	{
+		++aValueLength; // Convert length to size.
+		if (field.marker = tmalloc(aValueLength))
+		{
+			tmemcpy(field.marker, aValue, aValueLength);
+			field.marker[aValueLength-1] = '\0';
+			field.size = aValueLength;
+			return true;
+		}
+		// Otherwise, mem alloc failed; assign an empty string.
+	}
+	field.marker = Var::sEmptyString;
+	field.size = 0;
+	return (aValueLength == 0); // i.e. true if caller supplied an empty string.
 }
 
 
@@ -733,7 +825,7 @@ ResultType Object::_Insert(ExprTokenType &aResultToken, ExprTokenType *aParam[],
 				if (InsertAt(insert_pos, key.i, aParam + 1, aParamCount - 1))
 				{
 					aResultToken.symbol = SYM_INTEGER;
-					aResultToken.value_int64 = 1;
+					aResultToken.value_int64 = aParamCount - 1;
 				}
 				return OK;
 			}
@@ -755,9 +847,12 @@ ResultType Object::_Insert(ExprTokenType &aResultToken, ExprTokenType *aParam[],
 		if (key_type == SYM_INTEGER)
 			for (pos = insert_pos + 1; pos < mKeyOffsetObject; ++pos)
 				++mFields[pos].key.i;
-		// Return indication of success.  Probably isn't useful to return the caller-specified index; zero can be a valid index (and may be mistaken for "fail").
+		// Return indication of success.  If caller supplied only one parameter,
+		// return the index of the insertion.  Otherwise the caller specified the
+		// index; returning it wouldn't be as useful, so return a value guaranteed
+		// to be "true" (even if the caller specifies 0 as the index).
 		aResultToken.symbol = SYM_INTEGER;
-		aResultToken.value_int64 = 1;
+		aResultToken.value_int64 = (aParamCount == 1) ? key.i : 1;
 	}
 	// else insert failed; leave aResultToken at default, empty string.  Numeric indices are *not* adjusted in this case.
 	return OK;
@@ -831,7 +926,7 @@ ResultType Object::_Remove(ExprTokenType &aResultToken, ExprTokenType *aParam[],
 		// seems more useful to return the field being removed than a count.
 		switch (aResultToken.symbol = min_field->symbol)
 		{
-		case SYM_OPERAND:
+		case SYM_STRING:
 			if (min_field->size)
 			{
 				// Detach the memory allocated for this field's string and pass it back to caller.
@@ -931,7 +1026,7 @@ ResultType Object::_GetCapacity(ExprTokenType &aResultToken, ExprTokenType *aPar
 		FieldType *field;
 
 		if ( (field = FindField(*aParam[0], aResultToken.buf, /*out*/ key_type, /*out*/ key, /*out*/ insert_pos))
-			&& field->symbol == SYM_OPERAND )
+			&& field->symbol == SYM_STRING )
 		{
 			aResultToken.symbol = SYM_INTEGER;
 			aResultToken.value_int64 = field->size ? _TSIZE(field->size - 1) : 0; // -1 to exclude null-terminator.
@@ -949,10 +1044,10 @@ ResultType Object::_GetCapacity(ExprTokenType &aResultToken, ExprTokenType *aPar
 ResultType Object::_SetCapacity(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 // _SetCapacity( [field_name,] new_capacity )
 {
-	if ((aParamCount != 1 && aParamCount != 2) || !TokenIsPureNumeric(*aParam[aParamCount - 1]))
+	if ((aParamCount != 1 && aParamCount != 2) || !TokenIsNumeric(*aParam[aParamCount - 1]))
 		// Invalid or missing param(s); return default empty string.
 		return OK;
-	__int64 desired_capacity = TokenToInt64(*aParam[aParamCount - 1], TRUE);
+	__int64 desired_capacity = TokenToInt64(*aParam[aParamCount - 1]);
 	if (aParamCount == 2) // Field name was specified.
 	{
 		if (desired_capacity < 0) // Check before sign is dropped.
@@ -970,7 +1065,7 @@ ResultType Object::_SetCapacity(ExprTokenType &aResultToken, ExprTokenType *aPar
 			|| (field = Insert(key_type, key, insert_pos)) )
 		{	
 			// Field was successfully found or inserted.
-			if (field->symbol != SYM_OPERAND)
+			if (field->symbol != SYM_STRING)
 				// Wrong type of field.
 				return OK;
 			if (!desired_size)
@@ -1037,7 +1132,7 @@ ResultType Object::_GetAddress(ExprTokenType &aResultToken, ExprTokenType *aPara
 		FieldType *field;
 
 		if ( (field = FindField(*aParam[0], aResultToken.buf, /*out*/ key_type, /*out*/ key, /*out*/ insert_pos))
-			&& field->symbol == SYM_OPERAND && field->size )
+			&& field->symbol == SYM_STRING && field->size )
 		{
 			aResultToken.symbol = SYM_INTEGER;
 			aResultToken.value_int64 = (__int64)field->marker;
@@ -1101,7 +1196,7 @@ bool Object::FieldType::Assign(LPTSTR str, size_t len, bool exact_size)
 	if (!str || !*str && (len == -1 || !len)) // If empty string or null pointer, free our contents.  Passing len >= 1 allows copying \0, so don't check *str in that case.  Ordered for short-circuit performance (len is usually -1).
 	{
 		Free();
-		symbol = SYM_OPERAND;
+		symbol = SYM_STRING;
 		marker = Var::sEmptyString;
 		size = 0;
 		return true;
@@ -1110,10 +1205,10 @@ bool Object::FieldType::Assign(LPTSTR str, size_t len, bool exact_size)
 	if (len == -1)
 		len = _tcslen(str);
 
-	if (symbol != SYM_OPERAND || len >= size)
+	if (symbol != SYM_STRING || len >= size)
 	{
 		Free(); // Free object or previous buffer (which was too small).
-		symbol = SYM_OPERAND;
+		symbol = SYM_STRING;
 		size_t new_size = len + 1;
 		if (!exact_size)
 		{
@@ -1155,7 +1250,7 @@ bool Object::FieldType::Assign(ExprTokenType &aParam)
 		// format of a literal number such as 0x123 or 00001, and even less likely for a number stored
 		// in an object (even implicitly via a variadic function).  If the value is eventually passed
 		// to a COM method call, it can be important that it is passed as VT_I4 and not VT_BSTR.
-		aParam.var->TokenToContents(temp);
+		aParam.var->ToToken(temp);
 		val = &temp;
 	}
 	else
@@ -1163,16 +1258,6 @@ bool Object::FieldType::Assign(ExprTokenType &aParam)
 
 	switch (val->symbol)
 	{
-	case SYM_OPERAND:
-		if (val->buf)
-		{
-			// Store this integer literal as a pure integer.  See above for comments.
-			Free();
-			symbol = SYM_INTEGER;
-			n_int64 = *(__int64 *)val->buf;
-			break;
-		}
-		// FALL THROUGH to the next case.
 	case SYM_STRING:
 		return Assign(val->marker);
 	case SYM_INTEGER:
@@ -1208,7 +1293,7 @@ void Object::FieldType::Free()
 // entirely or the Object is being deleted.  See Object::Delete.
 // CONTAINED VALUE WILL NOT BE VALID AFTER THIS FUNCTION RETURNS.
 {
-	if (symbol == SYM_OPERAND) {
+	if (symbol == SYM_STRING) {
 		if (size)
 			free(marker);
 	} else if (symbol == SYM_OBJECT)
@@ -1270,7 +1355,7 @@ int Object::Enumerator::Next(Var *aKey, Var *aVal)
 		{
 			switch (field.symbol)
 			{
-			case SYM_OPERAND:	aVal->AssignString(field.marker);	break;
+			case SYM_STRING:	aVal->AssignString(field.marker);	break;
 			case SYM_INTEGER:	aVal->Assign(field.n_int64);			break;
 			case SYM_FLOAT:		aVal->Assign(field.n_double);		break;
 			case SYM_OBJECT:	aVal->Assign(field.object);			break;
@@ -1346,18 +1431,18 @@ Object::FieldType *Object::FindField(SymbolType key_type, KeyType key, IndexType
 Object::FieldType *Object::FindField(ExprTokenType &key_token, LPTSTR aBuf, SymbolType &key_type, KeyType &key, IndexType &insert_pos)
 // Searches for a field with the given key, where the key is a token passed from script.
 {
-	if (TokenIsPureNumeric(key_token) == PURE_INTEGER)
-	{	// Treat all integer keys (even numeric strings) as pure integers for consistency and performance.
-		key.i = (IntKeyType)TokenToInt64(key_token, TRUE);
+	if (TokenIsNumeric(key_token) == PURE_INTEGER)
+	{	// Pure integer or numeric string.
+		key.i = (IntKeyType)TokenToInt64(key_token);
 		key_type = SYM_INTEGER;
 	}
 	else if (key.p = TokenToObject(key_token))
-	{	// SYM_OBJECT or SYM_VAR containing object.
+	{	// SYM_OBJECT or SYM_VAR which contains an object.
 		key_type = SYM_OBJECT;
 	}
 	else
-	{	// SYM_STRING, SYM_FLOAT, SYM_OPERAND or SYM_VAR (all confirmed not to be an integer at this point).
-		key.s = TokenToString(key_token, aBuf); // L41: Pass aBuf to allow float->string conversion as documented (but not previously working).
+	{	// SYM_STRING or SYM_VAR (both confirmed not to be numeric); or SYM_FLOAT.
+		key.s = TokenToString(key_token, aBuf); // Pass aBuf to allow float -> string conversion.
 		key_type = SYM_STRING;
 	}
 	return FindField(key_type, key, insert_pos);
@@ -1408,7 +1493,7 @@ Object::FieldType *Object::Insert(SymbolType key_type, KeyType key, IndexType at
 	field.marker = _T(""); // Init for maintainability.
 	field.size = 0; // Init to ensure safe behaviour in Assign().
 	field.key = key; // Above has already copied string or called key.p->AddRef() as appropriate.
-	field.symbol = SYM_OPERAND;
+	field.symbol = SYM_STRING;
 
 	return &field;
 }

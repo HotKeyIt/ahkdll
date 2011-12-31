@@ -984,16 +984,16 @@ int Debugger::WritePropertyXml(Var &aVar, int aMaxEncodedSize, int aPage)
 	if (facet[0] != '\0') // Remove the final space.
 		facet[strlen(facet)-1] = '\0';
 
-	if (attrib & VAR_ATTRIB_OBJECT)
+	if (attrib & VAR_ATTRIB_IS_OBJECT)
 	{
 		CStringUTF8FromTChar name_buf(aVar.mName);
 		return WritePropertyXml(aVar.Object(), name_buf.GetString(), name_buf, aPage, mMaxChildren, mMaxDepth, aMaxEncodedSize, facet);
 	}
 
 	char *type;
-	if (attrib & VAR_ATTRIB_HAS_VALID_INT64)
+	if (attrib & VAR_ATTRIB_IS_INT64)
 		type = "integer";
-	else if (attrib & VAR_ATTRIB_HAS_VALID_DOUBLE)
+	else if (attrib & VAR_ATTRIB_IS_DOUBLE)
 		type = "float";
 	else if (attrib & VAR_ATTRIB_UNINITIALIZED)
 		type = "undefined";
@@ -1101,7 +1101,7 @@ int Debugger::WritePropertyXml(IObject *aObject, const char *aName, CStringA &aN
 						{
 							*cp++ = c;
 							if (c == '"')
-								*cp++ = '"'; // i.e. replace " with ""
+								*cp++ = '"'; // i.e. replace " with "".  This currently doesn't match up with expression syntax, but is left this way for simplicity.
 						}
 						strcpy(cp, "\"]");
 						// aNameBuf is released below.
@@ -1159,7 +1159,7 @@ int Debugger::WritePropertyXml(Object::FieldType &aField, const char *aName, CSt
 
 	switch (aField.symbol)
 	{
-	case SYM_OPERAND:
+	case SYM_STRING:
 		value = aField.marker;
 		type = "string";
 		break;
@@ -1175,7 +1175,7 @@ int Debugger::WritePropertyXml(Object::FieldType &aField, const char *aName, CSt
 		}
 		else
 		{
-			sntprintf(number_buf, _countof(number_buf), g->FormatFloat, aField.n_double);
+			sntprintf(number_buf, _countof(number_buf), FORMAT_FLOAT, aField.n_double);
 			type = "float";
 		}
 		value = number_buf;
@@ -1278,7 +1278,7 @@ int Debugger::WritePropertyData(Object::FieldType &aField, int aMaxEncodedSize)
 
 	switch (aField.symbol)
 	{
-	case SYM_OPERAND:
+	case SYM_STRING:
 		value = aField.marker;
 		type = "string";
 		break;
@@ -1294,7 +1294,7 @@ int Debugger::WritePropertyData(Object::FieldType &aField, int aMaxEncodedSize)
 		}
 		else
 		{
-			sntprintf(number_buf, _countof(number_buf), g->FormatFloat, aField.n_double);
+			sntprintf(number_buf, _countof(number_buf), FORMAT_FLOAT, aField.n_double);
 			type = "float";
 		}
 		value = number_buf;
@@ -1371,13 +1371,13 @@ int Debugger::ParsePropertyName(const char *aFullName, int aVarScope, bool aVarM
 			if (*name == '"')
 			{
 				// Quoted string which may contain any character.
-				// Replace "" with " in-place and find and of string:
+				// Replace "" with " in-place and find end of string:
 				for (dst = src = ++name; c = *src; ++src)
 				{
 					if (c == '"')
 					{
 						// Quote mark; but is it a literal quote mark?
-						if (*++src != '"')
+						if (*++src != '"') // This currently doesn't match up with expression syntax, but is left this way for simplicity.
 							// Nope.
 							break;
 						//else above skipped the second quote mark, so fall through:
@@ -1415,7 +1415,7 @@ int Debugger::ParsePropertyName(const char *aFullName, int aVarScope, bool aVarM
 			// For simplicity, let this be any string terminated by '.' or '['.
 			// Actual expressions require it to contain only alphanumeric chars and/or '_'.
 			name_end = StrChrAny(name, _T(".[")); // This also sets it up for the next iteration.
-			key_type = IsPureNumeric(name); // SYM_INTEGER or SYM_STRING.
+			key_type = IsNumeric(name); // SYM_INTEGER or SYM_STRING.
 			if (name_end)
 			{
 				c = *name_end; // Save this for the next iteration.
@@ -1446,7 +1446,7 @@ int Debugger::ParsePropertyName(const char *aFullName, int aVarScope, bool aVarM
 				}
 				else
 				{
-					sBaseField->symbol = SYM_OPERAND;
+					sBaseField->symbol = SYM_STRING;
 					sBaseField->marker = _T("");
 					sBaseField->size = 0;
 				}
@@ -2590,7 +2590,7 @@ DbgStack::Entry *DbgStack::Push()
 LPTSTR Var::ObjectToText(LPTSTR aBuf, int aBufSize)
 {
 	LPTSTR aBuf_orig = aBuf;
-	aBuf += sntprintf(aBuf, aBufSize, _T("%s[Object]: 0x%p"), mName, mObject);
+	aBuf += sntprintf(aBuf, aBufSize, _T("%s: Object(0x%p)"), mName, mObject);
 	if (ComObject *cobj = dynamic_cast<ComObject *>(mObject))
 		aBuf += sntprintf(aBuf, BUF_SPACE_REMAINING, _T(" <= ComObject(0x%04hX, 0x%I64X)"), cobj->mVarType, cobj->mVal64);
 	return aBuf;

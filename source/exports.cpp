@@ -28,8 +28,8 @@ BOOL com_ahkExec(LPTSTR script){return ahkExec(script);}
 UINT_PTR com_addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aIgnoreLoadFailure){return addFile(fileName,aAllowDuplicateInclude,aIgnoreLoadFailure);}
 #endif
 #ifdef _USRDLL
-UINT_PTR com_ahkdll(LPTSTR fileName,LPTSTR argv,LPTSTR args){return ahkdll(fileName,argv,args);}
-UINT_PTR com_ahktextdll(LPTSTR script,LPTSTR argv,LPTSTR args){return ahktextdll(script,argv,args);}
+UINT_PTR com_ahkdll(LPTSTR fileName,LPTSTR argv){return ahkdll(fileName,argv);}
+UINT_PTR com_ahktextdll(LPTSTR script,LPTSTR argv){return ahktextdll(script,argv);}
 BOOL com_ahkTerminate(int timeout){return ahkTerminate(timeout);}
 BOOL com_ahkReady(){return ahkReady();}
 BOOL com_ahkReload(){return ahkReload();}
@@ -436,7 +436,6 @@ LPTSTR FuncTokenToString(ExprTokenType &aToken, LPTSTR aBuf)
 	case SYM_VAR: // Caller has ensured that any SYM_VAR's Type() is VAR_NORMAL.
 		return aToken.var->Contents(); // Contents() vs. mContents to support VAR_CLIPBOARD, and in case mContents needs to be updated by Contents().
 	case SYM_STRING:
-	case SYM_OPERAND:
 		return aToken.marker;
 	case SYM_INTEGER:
 		if (aBuf)
@@ -446,7 +445,7 @@ LPTSTR FuncTokenToString(ExprTokenType &aToken, LPTSTR aBuf)
 	case SYM_FLOAT:
 		if (aBuf)
 		{
-			sntprintf(aBuf, MAX_NUMBER_SIZE, g->FormatFloat, aToken.value_double);
+			sntprintf(aBuf, MAX_NUMBER_SIZE, FORMAT_FLOAT, aToken.value_double);
 			return aBuf;
 		}
 		//else continue on to return the default at the bottom.
@@ -554,15 +553,10 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 	// Since above didn't return, the launch of the new thread is now considered unavoidable.
 
 	// See MsgSleep() for comments about the following section.
-	TCHAR ErrorLevel_saved[ERRORLEVEL_SAVED_SIZE];
-	tcslcpy(ErrorLevel_saved, g_ErrorLevel->Contents(), _countof(ErrorLevel_saved));
+	VarBkp ErrorLevel_saved;
+	g_ErrorLevel->Backup(ErrorLevel_saved); // Back up the current ErrorLevel for later restoration.
 	InitNewThread(0, false, true, func.mJumpToLine->mActionType);
 
-
-	// v1.0.38.04: Below was added to maximize responsiveness to incoming messages.  The reasoning
-	// is similar to why the same thing is done in MsgSleep() prior to its launch of a thread, so see
-	// MsgSleep for more comments:
-	g_script.mLastScriptRest = g_script.mLastPeekTime = GetTickCount();
 
 
 		DEBUGGER_STACK_PUSH(func.mJumpToLine, func.mName)
@@ -583,7 +577,6 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 			*aFuncAndToken->result_to_return_dll = '\0';
 		break;
 	case SYM_STRING:
-	case SYM_OPERAND:
 		if (_tcslen(aFuncAndToken->mToken.marker))
 		{
 			aFuncAndToken->result_to_return_dll = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,_tcslen(aFuncAndToken->mToken.marker)*sizeof(TCHAR));
@@ -598,7 +591,7 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 		break;
 	case SYM_FLOAT:
 		result_to_return_dll = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,MAX_INTEGER_LENGTH);
-		sntprintf(aFuncAndToken->result_to_return_dll, MAX_NUMBER_SIZE, g->FormatFloat, aFuncAndToken->mToken.value_double);
+		sntprintf(aFuncAndToken->result_to_return_dll, MAX_NUMBER_SIZE, FORMAT_FLOAT, aFuncAndToken->mToken.value_double);
 		break;
 	//case SYM_OBJECT: // L31: Treat objects as empty strings (or TRUE where appropriate).
 	default: // Not an operand: continue on to return the default at the bottom.
@@ -729,16 +722,9 @@ void callFuncDllVariant(FuncAndToken *aFuncAndToken)
 	// Since above didn't return, the launch of the new thread is now considered unavoidable.
 
 	// See MsgSleep() for comments about the following section.
-	TCHAR ErrorLevel_saved[ERRORLEVEL_SAVED_SIZE];
-	tcslcpy(ErrorLevel_saved, g_ErrorLevel->Contents(), _countof(ErrorLevel_saved));
+	VarBkp ErrorLevel_saved;
+	g_ErrorLevel->Backup(ErrorLevel_saved);
 	InitNewThread(0, false, true, func.mJumpToLine->mActionType);
-
-
-	// v1.0.38.04: Below was added to maximize responsiveness to incoming messages.  The reasoning
-	// is similar to why the same thing is done in MsgSleep() prior to its launch of a thread, so see
-	// MsgSleep for more comments:
-	g_script.mLastScriptRest = g_script.mLastPeekTime = GetTickCount();
-
 
 		DEBUGGER_STACK_PUSH(func.mJumpToLine, func.mName)
 	// ExprTokenType aResultToken;

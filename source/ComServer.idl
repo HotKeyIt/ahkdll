@@ -1,9 +1,10 @@
 import "wtypes.idl";
 
 [
-    uuid(A9863C65-8CD4-4069-893D-3B5A3DDFAE88),
+    uuid(9C5F743B-A646-4EC9-8CE1-0728A07E7C21),
     version(1.0)
 ]
+
 library AutoHotkey
 {
 	importlib("stdole32.tlb");
@@ -12,14 +13,14 @@ library AutoHotkey
 #else
 	importlib("stdole.tlb");
 #endif
-	[ uuid(04FFE41B-8FE9-4479-990A-B186EC73F49C),
+	[ uuid(A58E17B4-F892-4839-8C46-9F3C062FDF7D),
 	  dual,
 	  oleautomation 
 	]
 	interface ICOMServer : IDispatch
 	{
-		[id(1)] HRESULT ahktextdll([in,optional] VARIANT script,[in,optional] VARIANT options,[in,optional] VARIANT params, [out, retval] UINT_PTR* hThread);
-		[id(2)] HRESULT ahkdll([in,optional] VARIANT filepath,[in,optional] VARIANT options,[in,optional] VARIANT params, [out, retval] UINT_PTR* hThread);
+		[id(1)] HRESULT ahktextdll([in,optional] VARIANT script,[in,optional] VARIANT params, [out, retval] UINT_PTR* hThread);
+		[id(2)] HRESULT ahkdll([in,optional] VARIANT filepath,[in,optional] VARIANT params, [out, retval] UINT_PTR* hThread);
 		[id(3)] HRESULT ahkPause([in,optional] VARIANT aChangeTo,[out, retval] BOOL* paused);
 		[id(4)] HRESULT ahkReady([out, retval] BOOL* ready);
 		[id(5)] HRESULT ahkFindLabel([in] VARIANT aLabelName,[out, retval] UINT_PTR *pLabel);
@@ -37,16 +38,16 @@ library AutoHotkey
 		[id(17)] HRESULT ahkTerminate([in,optional] VARIANT kill,[out, retval] BOOL* success);
 	}
 
-	[ uuid(C00BCC8C-5A04-4392-870F-20AAE1B926B2),
-	  helpstring("AutoHotkey Script") 
+	[ uuid(FEEEC4BA-04AF-45F0-B385-7290C65CFB9B),
+	  helpstring("AutoHotkey2 Script") 
 	]
 	coclass CoCOMServer
 	{
 		[default] interface ICOMServer;
 	}
 #ifdef _WIN64
-	[ uuid(38D00012-DC83-4E17-9BAD-D9DD97902580),
-	  helpstring("AutoHotkey Script X64") 
+	[ uuid(F1D0DE03-30FD-4326-B33F-989BBFAA5FFA),
+	  helpstring("AutoHotkey2 Script X64") 
 	]
 	coclass CoCOMServerOptional
 	{
@@ -54,16 +55,16 @@ library AutoHotkey
 	}
 #else
 #ifdef _UNICODE
-	[ uuid(C58DCD96-1D6F-4F85-B555-02B7F21F5CAF),
-	  helpstring("AutoHotkey Script UNICODE") 
+	[ uuid(EC81EBBA-6CEE-4363-AB77-C0E57046AA89),
+	  helpstring("AutoHotkey2 Script UNICODE") 
 	]
 	coclass CoCOMServerOptional
 	{
 		[default] interface ICOMServer;
 	}
 #else
-	[ uuid(974318D9-A5B2-4FE5-8AC4-33A0C9EBB8B5),
-	  helpstring("AutoHotkey Script ANSI") 
+	[ uuid(DE91AE03-EC49-4A4F-85DC-100A74406103),
+	  helpstring("AutoHotkey2 Script ANSI") 
 	]
 	coclass CoCOMServerOptional
 	{

@@ -475,8 +475,6 @@ void SendKeys(LPTSTR aKeys, bool aSendRaw, SendModes aSendModeOrig, HWND aTarget
 					mods_for_next_key |= MOD_LALT;
 				continue;
 			case '#':
-				if (g_script.mIsAutoIt2) // Since AutoIt2 ignores these, ignore them if script is in AutoIt2 mode.
-					continue;
 				if (!(persistent_modifiers_for_this_SendKeys & (MOD_LWIN|MOD_RWIN)))
 					mods_for_next_key |= MOD_LWIN;
 				continue;
@@ -1342,10 +1340,20 @@ LRESULT CALLBACK PlaybackProc(int aCode, WPARAM wParam, LPARAM lParam)
 		bool is_keyboard_not_mouse;
 		if (is_keyboard_not_mouse = (source_event.message >= WM_KEYFIRST && source_event.message <= WM_KEYLAST)) // Keyboard event.
 		{
-			event.paramL = (source_event.sc << 8) | source_event.vk;
-			event.paramH = source_event.sc & 0xFF; // 0xFF omits the extended-key-bit, if present.
-			if (source_event.sc & 0x100) // It's an extended key.
-				event.paramH |= 0x8000; // So mark it that way using EVENTMSG's convention.
+			if (source_event.vk != 255 || source_event.sc < 10)
+			{
+				event.paramL = (source_event.sc << 8) | source_event.vk;
+				event.paramH = source_event.sc & 0xFF; // 0xFF omits the extended-key-bit, if present.
+				if (source_event.sc & 0x100) // It's an extended key.
+					event.paramH |= 0x8000; // So mark it that way using EVENTMSG's convention.
+			}
+			else
+			{
+				event.paramL = 0;
+				event.paramH = 0;
+				SLEEP_WITHOUT_INTERRUPTION(source_event.sc/2); // divide by to for WM_KEYDOWN + WM_KEYUP
+				return CallNextHookEx(g_PlaybackHook, aCode, wParam, lParam);
+			}
 			// Notes about inability of playback to simulate LWin and RWin in a way that performs their native function:
 			// For the following reasons, it seems best not to send LWin/RWin via keybd_event inside the playback hook:
 			// 1) Complexities such as having to check for an array that consists entirely of LWin/RWin events,
@@ -1876,12 +1884,12 @@ void KeyEvent(KeyEventTypes aEventType, vk_type aVK, sc_type aSC, HWND aTargetWi
 						target_layout_has_altgr = LayoutHasAltGr(target_keybd_layout, IsKeyDownAsync(control_vk) ? CONDITION_FALSE : CONDITION_TRUE);
 				}
 			}
+#ifndef MINIDLL
 			// The following is done to avoid an extraneous artificial {LCtrl Up} later on,
 			// since the keyboard driver should insert one in response to this {RAlt Up}:
 			if (target_layout_has_altgr && aSC == SC_RALT)
 				sEventModifiersLR &= ~MOD_LCONTROL;
 
-#ifndef MINIDLL
 			if (do_key_history)
 				UpdateKeyEventHistory(true, aVK, aSC);
 #endif
@@ -1944,14 +1952,14 @@ void ParseClickOptions(LPTSTR aOptions, int &aX, int &aY, vk_type &aVK, KeyEvent
 		if (   !(option_end = StrChrAny(next_option, _T(" \t,")))   )  // Space, tab, comma.
 			option_end = next_option + _tcslen(next_option); // Set to position of zero terminator instead.
 
-		// Temp termination for IsPureNumeric(), ConvertMouseButton(), and peace-of-mind.
+		// Temp termination for IsNumeric(), ConvertMouseButton(), and peace-of-mind.
 		orig_char = *option_end;
 		*option_end = '\0';
 
 		// Parameters can occur in almost any order to enhance usability (at the cost of
 		// slightly diminishing the ability unambiguously add more parameters in the future).
 		// Seems okay to support floats because ATOI() will just omit the decimal portion.
-		if (IsPureNumeric(next_option, true, false, true))
+		if (IsNumeric(next_option, true, false, true))
 		{
 			// Any numbers present must appear in the order: X, Y, RepeatCount
 			// (optionally with other options between them).

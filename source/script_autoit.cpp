@@ -19,7 +19,7 @@
 //#include <winsock.h>  // for WSADATA.  This also requires wsock32.lib to be linked in.
 #include <winsock2.h>
 #include <tlhelp32.h> // For the ProcessExist routines.
-#include <wininet.h> // For URLDownloadToFile().
+#include <wininet.h> // For Download().
 #include "script.h"
 #include "globaldata.h" // for g_ErrorLevel and probably other globals.
 #include "window.h" // For ControlExist().
@@ -203,96 +203,14 @@ ResultType Line::PixelGetColor(int aX, int aY, LPTSTR aOptions)
 		ReleaseDC(NULL, hdc);
 
 	TCHAR buf[32];
-	_stprintf(buf, _T("0x%06X"), tcscasestr(aOptions, _T("RGB")) ? bgr_to_rgb(color) : color);
+	_stprintf(buf, _T("0x%06X"), bgr_to_rgb(color));
 	g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
 	return output_var.Assign(buf);
 }
 
 
-
-ResultType Line::SplashTextOn(int aWidth, int aHeight, LPTSTR aTitle, LPTSTR aText)
-{
-	// Add some caption and frame size to window:
-	aWidth += GetSystemMetrics(SM_CXFIXEDFRAME) * 2;
-	int min_height = GetSystemMetrics(SM_CYCAPTION) + (GetSystemMetrics(SM_CXFIXEDFRAME) * 2);
-	if (g_script.mIsAutoIt2)
-	{
-		// I think this is probably something like how AutoIt2 does things:
-		if (aHeight < min_height)
-			aHeight = min_height;
-	}
-	else // Use the new method that seems more friendly.
-		aHeight += min_height;
-
-	POINT pt = CenterWindow(aWidth, aHeight); // Determine how to center the window in the region that excludes the task bar.
-
-	// My: Probably not too much overhead to do this, though it probably would perform better to resize and
-	// "re-text" the existing window rather than recreating it like this:
-	DESTROY_SPLASH
-
-	// Doesn't seem necessary to have it owned by the main window, but neither
-	// does doing so seem to cause any harm.  Feels safer to have it be
-	// an independent window.  Update: Must make it owned by the parent window
-	// otherwise it will get its own task-bar icon, which is usually undesirable.
-	// In addition, making it an owned window should automatically cause it to be
-	// destroyed when it's parent window is destroyed:
-	g_hWndSplash = CreateWindowEx(WS_EX_TOPMOST, WINDOW_CLASS_SPLASH, aTitle, WS_DISABLED|WS_POPUP|WS_CAPTION
-		, pt.x, pt.y, aWidth, aHeight, g_hWnd, (HMENU)NULL, g_hInstance, NULL);
-
-	RECT rect;
-	GetClientRect(g_hWndSplash, &rect);	// get the client size
-
-	// CREATE static label full size of client area.
-	HWND static_win = CreateWindowEx(0, _T("static"), aText, WS_CHILD|WS_VISIBLE|SS_CENTER
-		, 0, 0, rect.right - rect.left, rect.bottom - rect.top, g_hWndSplash, (HMENU)NULL, g_hInstance, NULL);
-
-	if (!g_hFontSplash)
-	{
-		TCHAR default_font_name[65];
-		int CyPixels, nSize = 12, nWeight = FW_NORMAL;
-		HDC hdc = CreateDC(_T("DISPLAY"), NULL, NULL, NULL);
-		if (FontExist(hdc, _T("Segoe UI"))) // Use a more appealing font under Windows Vista or later (Segoe UI).
-		{
-			nSize = 11;
-			_tcscpy(default_font_name, _T("Segoe UI"));
-		}
-		else
-		{
-			SelectObject(hdc, (HFONT)GetStockObject(DEFAULT_GUI_FONT));		// Get Default Font Name
-			GetTextFace(hdc, _countof(default_font_name) - 1, default_font_name); // -1 just in case, like AutoIt3.
-		}
-		CyPixels = GetDeviceCaps(hdc, LOGPIXELSY);			// For Some Font Size Math
-		DeleteDC(hdc);
-		//strcpy(default_font_name,vParams[7].szValue());	// Font Name
-		//nSize = vParams[8].nValue();		// Font Size
-		//if ( vParams[9].nValue() >= 0 && vParams[9].nValue() <= 1000 )
-		//	nWeight = vParams[9].nValue();			// Font Weight
-		g_hFontSplash = CreateFont(0-(nSize*CyPixels)/72,0,0,0,nWeight,0,0,0,DEFAULT_CHARSET,
-			OUT_TT_PRECIS,CLIP_DEFAULT_PRECIS,PROOF_QUALITY,FF_DONTCARE,default_font_name);	// Create Font
-		// The font is deleted when by g_script's destructor.
-	}
-
-	SendMessage(static_win, WM_SETFONT, (WPARAM)g_hFontSplash, MAKELPARAM(TRUE, 0));	// Do Font
-	ShowWindow(g_hWndSplash, SW_SHOWNOACTIVATE);				// Show the Splash
-	// Doesn't help with the brief delay in updating the window that happens when
-	// something like URLDownloadToFile is used immediately after SplashTextOn:
-	//InvalidateRect(g_hWndSplash, NULL, TRUE);
-	// But this does, but for now it seems unnecessary since the user can always do
-	// a manual sleep in the extremely rare cases this ever happens (even when it does
-	// happen, the window updates eventually, after the download starts, at least on
-	// my system.  Update: Might as well do it since it's a little nicer this way
-	// (the text appears more quickly when the command after the splash is something
-	// that might keep our thread tied up and unable to check messages).
-	SLEEP_WITHOUT_INTERRUPTION(-1)
-	// UpdateWindow() would probably achieve the same effect as the above, but it feels safer to do
-	// the above because it ensures that our message queue is empty prior to returning to our caller.
-	return OK;
-}
 #endif
-
-
-
-ResultType Line::WinMenuSelectItem(LPTSTR aTitle, LPTSTR aText, LPTSTR aMenu1, LPTSTR aMenu2
+ResultType Line::MenuSelect(LPTSTR aTitle, LPTSTR aText, LPTSTR aMenu1, LPTSTR aMenu2
 	, LPTSTR aMenu3, LPTSTR aMenu4, LPTSTR aMenu5, LPTSTR aMenu6, LPTSTR aMenu7
 	, LPTSTR aExcludeTitle, LPTSTR aExcludeText)
 {
@@ -720,15 +638,15 @@ ResultType Line::ControlGet(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR 
 	case CONTROLGET_CMD_CHECKED: //Must be a Button
 		if (!SendMessageTimeout(control_window, BM_GETCHECK, 0, 0, SMTO_ABORTIFHUNG, 2000, &dwResult))
 			goto error;
-		output_var.Assign(dwResult == BST_CHECKED ? _T("1") : _T("0"));
+		output_var.Assign(dwResult == BST_CHECKED);
 		break;
 
 	case CONTROLGET_CMD_ENABLED:
-		output_var.Assign(IsWindowEnabled(control_window) ? _T("1") : _T("0"));
+		output_var.Assign(IsWindowEnabled(control_window) ? 1 : 0); // Force pure boolean 0/1.
 		break;
 
 	case CONTROLGET_CMD_VISIBLE:
-		output_var.Assign(IsWindowVisible(control_window) ? _T("1") : _T("0"));
+		output_var.Assign(IsWindowVisible(control_window) ? 1 : 0); // Force pure boolean 0/1.
 		break;
 
 	case CONTROLGET_CMD_TAB: // must be a Tab Control
@@ -842,7 +760,7 @@ ResultType Line::ControlGet(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR 
 		// other precedents where a variable is sized to something larger than it winds up carrying.
 		// Set up the var, enlarging it if necessary.  If the output_var is of type VAR_CLIPBOARD,
 		// this call will set up the clipboard for writing:
-		if (output_var.AssignString(NULL, (VarSizeType)length, true, true) != OK)
+		if (output_var.AssignString(NULL, (VarSizeType)length, true) != OK)
 			return FAIL;  // It already displayed the error.
 		for (cp = output_var.Contents(), length = item_count - 1, u = 0; u < item_count; ++u)
 		{
@@ -984,7 +902,7 @@ error:
 
 
 
-ResultType Line::URLDownloadToFile(LPTSTR aURL, LPTSTR aFilespec)
+ResultType Line::Download(LPTSTR aURL, LPTSTR aFilespec)
 {
 	// Check that we have IE3 and access to wininet.dll
 	HINSTANCE hinstLib = LoadLibrary(_T("wininet"));
@@ -1017,8 +935,8 @@ ResultType Line::URLDownloadToFile(LPTSTR aURL, LPTSTR aFilespec)
 	// v1.0.44.07: Set default to INTERNET_FLAG_RELOAD vs. 0 because the vast majority of usages would want
 	// the file to be retrieved directly rather than from the cache.
 	// v1.0.46.04: Added more no-cache flags because otherwise, it definitely falls back to the cache if
-	// the remote server doesn't respond (and perhaps other errors), which defeats the ability to use
-	// UrlDownloadToFile for uptime/server monitoring.  Also, in spite of what MSDN says, it seems nearly
+	// the remote server doesn't repond (and perhaps other errors), which defeats the ability to use the
+	// Download command for uptime/server monitoring.  Also, in spite of what MSDN says, it seems nearly
 	// certain based on other sources that more than one flag is supported.  Someone also mentioned that
 	// INTERNET_FLAG_CACHE_IF_NET_FAIL is related to this, but there's no way to specify it in these
 	// particular calls, and it's the opposite of the desired behavior anyway; so it seems impossible to
@@ -1063,7 +981,7 @@ ResultType Line::URLDownloadToFile(LPTSTR aURL, LPTSTR aFilespec)
 		return SetErrorLevelOrThrow();
 	}
 
-	BYTE bufData[1024 * 1]; // v1.0.44.11: Reduced from 8 KB to alleviate GUI window lag during UrlDownloadtoFile.  Testing shows this reduction doesn't affect performance on high-speed downloads (in fact, downloads are slightly faster; I tested two sites, one at 184 KB/s and the other at 380 KB/s).  It might affect slow downloads, but that seems less likely so wasn't tested.
+	BYTE bufData[1024 * 1]; // v1.0.44.11: Reduced from 8 KB to alleviate GUI window lag during Download.  Testing shows this reduction doesn't affect performance on high-speed downloads (in fact, downloads are slightly faster; I tested two sites, one at 184 KB/s and the other at 380 KB/s).  It might affect slow downloads, but that seems less likely so wasn't tested.
 	INTERNET_BUFFERSA buffers = {0};
 	buffers.dwStructSize = sizeof(INTERNET_BUFFERSA);
 	buffers.lpvBuffer = bufData;
@@ -2074,7 +1992,7 @@ BOOL Util_ShutdownHandler(HWND hwnd, DWORD lParam)
 {
 	// if the window is me, don't terminate!
 #ifndef MINIDLL
-	if (hwnd != g_hWnd && hwnd != g_hWndSplash)
+	if (hwnd != g_hWnd)
 		Util_WinKill(hwnd);
 #endif
 	// Continue the enumeration.
@@ -2192,7 +2110,7 @@ DWORD ProcessExist9x2000(LPTSTR aProcess)
 
 	// Determine the PID if aProcess is a pure, non-negative integer (any negative number
 	// is more likely to be the name of a process [with a leading dash], rather than the PID).
-	DWORD specified_pid = IsPureNumeric(aProcess) ? ATOU(aProcess) : 0;
+	DWORD specified_pid = IsNumeric(aProcess) ? ATOU(aProcess) : 0;
 	TCHAR szDrive[_MAX_PATH+1], szDir[_MAX_PATH+1], szFile[_MAX_PATH+1], szExt[_MAX_PATH+1];
 
 	while (lpfnProcess32Next(snapshot, &proc))
@@ -2272,7 +2190,7 @@ DWORD ProcessExistNT4(LPTSTR aProcess, LPTSTR aProcessName)
 	DWORD cProcesses = cbNeeded / sizeof(DWORD);
 	// Determine the PID if aProcess is a pure, non-negative integer (any negative number
 	// is more likely to be the name of a process [with a leading dash], rather than the PID).
-	DWORD specified_pid = IsPureNumeric(aProcess) ? ATOU(aProcess) : 0;
+	DWORD specified_pid = IsNumeric(aProcess) ? ATOU(aProcess) : 0;
 	TCHAR szDrive[_MAX_PATH+1], szDir[_MAX_PATH+1], szFile[_MAX_PATH+1], szExt[_MAX_PATH+1];
 	TCHAR szProcessName[_MAX_PATH+1];
 	HMODULE hMod;

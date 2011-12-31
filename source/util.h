@@ -19,7 +19,6 @@ GNU General Public License for more details.
 
 #include "stdafx.h" // pre-compiled headers
 #include "defines.h"
-EXTERN_G;  // For ITOA() and related functions' use of g->FormatIntAsHex
 
 #ifdef UNICODE
 #define tmemcpy			wmemcpy
@@ -44,14 +43,6 @@ EXTERN_G;  // For ITOA() and related functions' use of g->FormatIntAsHex
 #define IS_SPACE_OR_TAB_OR_NBSP(c) (c == ' ' || c == '\t' || c == -96) // Use a negative to support signed chars.
 #else
 #define IS_SPACE_OR_TAB_OR_NBSP(c) IS_SPACE_OR_TAB(c) // wchar_t is unsigned
-#endif
-
-#ifdef UNICODE
-#define TRANS_CHAR_TO_INT(a) ((int)(USHORT)(a)) // Cast not actually necessary since wchar_t is usually unsigned.
-#define TRANS_CHAR_MAX 65535
-#else
-#define TRANS_CHAR_TO_INT(a) ((int)(UCHAR)(a)) // Cast to UCHAR so that chars above Asc(127) show as positive.
-#define TRANS_CHAR_MAX 255
 #endif
 
 // v1.0.43.04: The following are macros to avoid crash bugs caused by improper casting, namely a failure to cast
@@ -236,7 +227,6 @@ inline size_t omit_trailing_any(LPTSTR aBuf, LPTSTR aOmitList, LPTSTR aBuf_marke
 inline size_t ltrim(LPTSTR aStr, size_t aLength = -1)
 // Caller must ensure that aStr is not NULL.
 // v1.0.25: Returns the length if it was discovered as a result of the operation, or aLength otherwise.
-// This greatly improves the performance of PerformAssign().
 // NOTE: THIS VERSION trims only tabs and spaces.  It specifically avoids
 // trimming newlines because some callers want to retain those.
 {
@@ -245,7 +235,7 @@ inline size_t ltrim(LPTSTR aStr, size_t aLength = -1)
 	// Find the first non-whitespace char (which might be the terminator):
 	for (ptr = aStr; IS_SPACE_OR_TAB(*ptr); ++ptr); // Self-contained loop.
 	// v1.0.25: If no trimming needed, don't do the memmove.  This seems to make a big difference
-	// in the performance of critical sections of the program such as PerformAssign():
+	// in the performance of critical sections of the program:
 	size_t offset;
 	if (offset = ptr - aStr) // Assign.
 	{
@@ -261,8 +251,7 @@ inline size_t ltrim(LPTSTR aStr, size_t aLength = -1)
 inline size_t rtrim(LPTSTR aStr, size_t aLength = -1)
 // Caller must ensure that aStr is not NULL.
 // To improve performance, caller may specify a length (e.g. when it is already known).
-// v1.0.25: Always returns the new length of the string.  This greatly improves the performance of
-// PerformAssign().
+// v1.0.25: Always returns the new length of the string.
 // NOTE: THIS VERSION trims only tabs and spaces.  It specifically avoids trimming newlines because
 // some callers want to retain those.
 {
@@ -335,8 +324,7 @@ inline size_t trim(LPTSTR aStr, size_t aLength = -1)
 {
 	aLength = ltrim(aStr, aLength);  // It may return -1 to indicate that it still doesn't know the length.
     return rtrim(aStr, aLength);
-	// v1.0.25: rtrim() always returns the new length of the string.  This greatly improves the
-	// performance of PerformAssign() and possibly other things.
+	// v1.0.25: rtrim() always returns the new length of the string.
 }
 
 inline size_t strip_trailing_backslash(LPTSTR aPath)
@@ -357,6 +345,18 @@ inline size_t strip_trailing_backslash(LPTSTR aPath)
 }
 
 
+
+#define IS_IDENTIFIER_CHAR(c) (cisalnum(c) || (c) == '_' || ((UINT)(c) > 0x7F))
+template<typename T> inline T find_identifier_end(T aBuf)
+// Locates the next character which is not valid in an identifier (var, func, or obj.key name).
+{
+	while (IS_IDENTIFIER_CHAR(*aBuf)) ++aBuf;
+	return aBuf;
+}
+
+
+
+
 // Transformation is the same in either direction because the end bytes are swapped
 // and the middle byte is left as-is:
 #define bgr_to_rgb(aBGR) rgb_to_bgr(aBGR)
@@ -369,8 +369,7 @@ inline COLORREF rgb_to_bgr(DWORD aRGB)
 
 
 inline bool IsHex(LPCTSTR aBuf) // 10/17/2006: __forceinline worsens performance, but physically ordering it near ATOI64() [via /ORDER] boosts by 3.5%.
-// Note: AHK support for hex ints reduces performance by only 10% for decimal ints, even in the tightest
-// of math loops that have SetBatchLines set to -1.
+// Note: AHK support for hex ints reduces performance by only 10% for decimal ints, even in the tightest of math loops.
 {
 	// For whatever reason, omit_leading_whitespace() benches consistently faster (albeit slightly) than
 	// the same code put inline (confirmed again on 10/17/2006, though the difference is hardly anything):
@@ -400,14 +399,8 @@ inline bool IsHex(LPCTSTR aBuf) // 10/17/2006: __forceinline worsens performance
 // the performance isn't any better.
 
 inline __int64 ATOI64(LPCTSTR buf)
-// The following comment only applies if the code is a macro or actually put inline by the compiler,
-// which is no longer true:
-// A more complex macro is used for ATOI64(), since it is more often called from places where
-// performance matters (e.g. ACT_ADD).  It adds about 500 bytes to the code size  in exchange for
-// a 8% faster math loops.  But it's probably about 8% slower when used with hex integers, but
-// those are so rare that the speed-up seems worth the extra code size:
-//#define ATOI64(buf) _strtoi64(buf, NULL, 0) // formerly used _atoi64()
 {
+	// See ATOI() for the reason IsHex() is used.
 	return IsHex(buf) ? _tcstoi64(buf, NULL, 16) : _ttoi64(buf);  // _atoi64() has superior performance, so use it when possible.
 }
 
@@ -445,85 +438,14 @@ inline double ATOF(LPCTSTR buf)
 	return IsHex(buf) ? (double)_tcstoi64(buf, NULL, 16) : _tstof(buf);
 }
 
-inline LPTSTR ITOA(int value, LPTSTR buf)
-{
-	if (g->FormatInt == 'D')
-	{
-		return _itot(value, buf, 10);
-	}
-	// g->FormatInt == 'h' or 'H'
-	LPTSTR our_buf_temp = buf;
-	// Negative hex numbers need special handling, otherwise something like zero minus one would create
-	// a huge 0xffffffffffffffff value, which would subsequently not be read back in correctly as
-	// a negative number (but UTOA() doesn't need this since there can't be negatives in that case).
-	if (value < 0)
-	{
-		*our_buf_temp++ = '-';
-		value = -value;
-	}
-	*our_buf_temp++ = '0';
-	*our_buf_temp++ = 'x';
-	_itot(value, our_buf_temp, 16);
-	// Must not return the result of the above because it's our_buf_temp and we want buf.
-	if (g->FormatInt == 'H') // uppercase
-		CharUpper(our_buf_temp);
-	return buf;
-}
-
-inline LPTSTR ITOA64(__int64 value, LPTSTR buf)
-{
-	if (g->FormatInt == 'D')
-	{
-		return _i64tot(value, buf, 10);
-	}
-	// g->FormatInt == 'h' or 'H'
-	LPTSTR our_buf_temp = buf;
-	if (value < 0)
-	{
-		*our_buf_temp++ = '-';
-		value = -value;
-	}
-	*our_buf_temp++ = '0';
-	*our_buf_temp++ = 'x';
-	_i64tot(value, our_buf_temp, 16);
-	// Must not return the result of the above because it's our_buf_temp and we want buf.
-	if (g->FormatInt == 'H') // uppercase
-		CharUpper(our_buf_temp);
-	return buf;
-}
-
-inline LPTSTR UTOA(unsigned long value, LPTSTR buf)
-{
-	if (g->FormatInt == 'D')
-	{
-		return _ultot(value, buf, 10);
-	}
-	// g->FormatInt == 'h' or 'H'
-	*buf = '0';
-	*(buf + 1) = 'x';
-	_ultot(value, buf + 2, 16);
-	// Must not return the result of the above because it's buf + 2 and we want buf.
-	if (g->FormatInt == 'H') // uppercase
-		CharUpper(buf + 2);
-	return buf;
-}
-
+#define ITOA(value, buf)	_itot(value, buf, 10)
+#define ITOA64(value, buf)	_i64tot(value, buf, 10)
+#define UTOA(value, buf)	_ultot(value, buf, 10)
+#define UTOA64(value, buf)	_ui64tot(value, buf, 10)
 #ifdef _WIN64
-inline LPTSTR UTOA64(unsigned __int64 value, LPTSTR buf) 
-{
-	if (g->FormatInt == 'D')
-	{
-		return _ui64tot(value, buf, 10);
-	}
-	// g->FormatInt == 'h' or 'H'
-	*buf = '0';
-	*(buf + 1) = 'x';
-	_ui64tot(value, buf + 2, 16);
-	// Must not return the result of the above because it's buf + 2 and we want buf.
-	if (g->FormatInt == 'H') // uppercase
-		CharUpper(buf + 2);
-	return buf;
-}
+#define UPTRTOA UTOA64
+#else
+#define UPTRTOA UTOA
 #endif
 
 //inline LPTSTR tcscatmove(LPTSTR aDst, LPCTSTR aSrc)
@@ -661,7 +583,7 @@ LPTSTR SystemTimeToYYYYMMDD(LPTSTR aBuf, SYSTEMTIME &aTime);
 __int64 YYYYMMDDSecondsUntil(LPTSTR aYYYYMMDDStart, LPTSTR aYYYYMMDDEnd, bool &aFailed);
 __int64 FileTimeSecondsUntil(FILETIME *pftStart, FILETIME *pftEnd);
 
-SymbolType IsPureNumeric(LPCTSTR aBuf, BOOL aAllowNegative = false // BOOL vs. bool might squeeze a little more performance out of this frequently-called function.
+SymbolType IsNumeric(LPCTSTR aBuf, BOOL aAllowNegative = false // BOOL vs. bool might squeeze a little more performance out of this frequently-called function.
 	, BOOL aAllowAllWhitespace = true, BOOL aAllowFloat = false, BOOL aAllowImpure = false);
 
 void strlcpy(LPSTR aDst, LPCSTR aSrc, size_t aDstSize);
@@ -696,7 +618,7 @@ void AssignColor(LPTSTR aColorName, COLORREF &aColor, HBRUSH &aBrush);
 COLORREF ColorNameToBGR(LPTSTR aColorName);
 HRESULT MySetWindowTheme(HWND hwnd, LPCWSTR pszSubAppName, LPCWSTR pszSubIdList);
 //HRESULT MyEnableThemeDialogTexture(HWND hwnd, DWORD dwFlags);
-LPTSTR ConvertEscapeSequences(LPTSTR aBuf, TCHAR aEscapeChar, bool aAllowEscapedSpace);
+LPTSTR ConvertEscapeSequences(LPTSTR aBuf, LPTSTR aLiteralMap, bool aAllowEscapedSpace = false);
 int FindNextDelimiter(LPCTSTR aBuf, TCHAR aDelimiter = ',', int aStartIndex = 0, LPCTSTR aLiteralMap = NULL);
 POINT CenterWindow(int aWidth, int aHeight);
 bool FontExist(HDC aHdc, LPCTSTR aTypeface);
@@ -716,6 +638,7 @@ HBITMAP IconToBitmap(HICON ahIcon, bool aDestroyIcon);
 HBITMAP IconToBitmap32(HICON aIcon, bool aDestroyIcon); // Lexikos: Used for menu icons on Vista+. Creates a 32-bit (ARGB) device-independent bitmap from an icon.
 int CALLBACK FontEnumProc(ENUMLOGFONTEX *lpelfe, NEWTEXTMETRICEX *lpntme, DWORD FontType, LPARAM lParam);
 bool IsStringInList(LPTSTR aStr, LPTSTR aList, bool aFindExactMatch);
+LPTSTR InStrAny(LPTSTR aStr, LPTSTR aNeedle[], int aNeedleCount, size_t &aFoundLen);
 
 int ResourceIndexToId(HMODULE aModule, LPCTSTR aType, int aIndex); // L17: Find integer ID of resource from index. i.e. IconNumber -> resource ID.
 HICON ExtractIconFromExecutable(LPTSTR aFilespec, int aIconNumber, int aWidth, int aHeight); // L17: Extract icon of the appropriate size from an executable (or compatible) file.

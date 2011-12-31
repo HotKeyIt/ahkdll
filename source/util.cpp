@@ -305,7 +305,7 @@ __int64 FileTimeSecondsUntil(FILETIME *pftStart, FILETIME *pftEnd)
 
 
 
-SymbolType IsPureNumeric(LPCTSTR aBuf, BOOL aAllowNegative, BOOL aAllowAllWhitespace
+SymbolType IsNumeric(LPCTSTR aBuf, BOOL aAllowNegative, BOOL aAllowAllWhitespace
 	, BOOL aAllowFloat, BOOL aAllowImpure)  // BOOL vs. bool might squeeze a little more performance out of this frequently-called function.
 // String can contain whitespace.
 // If aBuf doesn't contain something purely numeric, PURE_NOT_NUMERIC is returned.  The same happens if
@@ -340,6 +340,7 @@ SymbolType IsPureNumeric(LPCTSTR aBuf, BOOL aAllowNegative, BOOL aAllowAllWhites
 
 	// Set defaults:
 	BOOL has_decimal_point = false;
+	BOOL has_exponent = false;
 	BOOL has_at_least_one_digit = false; // i.e. a string consisting of only "+", "-" or "." is not considered numeric.
 	int c; // int vs. char might squeeze a little more performance out of it (it does reduce code size by 5 bytes). Probably must stay signed vs. unsigned for some of the uses below.
 
@@ -360,7 +361,7 @@ SymbolType IsPureNumeric(LPCTSTR aBuf, BOOL aAllowNegative, BOOL aAllowAllWhites
 			break; // The number qualifies as pure, so fall through to the logic at the bottom. (It would already have returned elsewhere in the loop if the number is impure).
 		if (c == '.')
 		{
-			if (!aAllowFloat || has_decimal_point || is_hex) // If aAllowFloat==false, a decimal point at the very end of the number is considered non-numeric even if aAllowImpure==true.  Some callers like "case ACT_ADD" might rely on this.
+			if (!aAllowFloat || has_decimal_point || is_hex) // If aAllowFloat==false, a decimal point at the very end of the number is considered non-numeric even if aAllowImpure==true.  Some callers might rely on this.
 				// i.e. if aBuf contains 2 decimal points, it can't be a valid number.
 				// Note that decimal points are allowed in hexadecimal strings, e.g. 0xFF.EE.
 				// But since that format doesn't seem to be supported by VC++'s atof() and probably
@@ -382,11 +383,10 @@ SymbolType IsPureNumeric(LPCTSTR aBuf, BOOL aAllowNegative, BOOL aAllowAllWhites
 				}
 				else
 				{
-					// As written below, this actually tolerates malformed scientific notation such as numbers
-					// containing two or more E's (e.g. 1.0e4e+5e-6,).  But for performance and due to rarity,
-					// it seems best not to check for them.
 					if (ctoupper(c) != 'E' // v1.0.46.11: Support scientific notation in floating point numbers.
-						|| !(has_decimal_point && has_at_least_one_digit)) // But it must have a decimal point and at least one digit to the left of the 'E'. This avoids variable names like "1e4" from being seen as sci-notation literals (for backward compatibility). Some callers rely on this check.
+						|| !has_at_least_one_digit // But it must have at least one digit to the left of the 'E'. Some callers rely on this check.
+						|| has_exponent
+						|| !aAllowFloat)
 						return PURE_NOT_NUMERIC;
 					if (aBuf[1] == '-' || aBuf[1] == '+') // The optional sign is present on the exponent.
 						++aBuf; // Omit it from further consideration so that the outer loop doesn't see it as an extra/illegal sign.
@@ -394,6 +394,8 @@ SymbolType IsPureNumeric(LPCTSTR aBuf, BOOL aAllowNegative, BOOL aAllowAllWhites
 						// Even if it is an 'e', ensure what follows it is a valid exponent.  Some callers rely
 						// on this check, such as ones that expect "0.6e" to be non-numeric (for "SetFormat Float") 
 						return PURE_NOT_NUMERIC;
+					has_exponent = true;
+					has_decimal_point = true; // For simplicity, since a decimal point after the exponent isn't valid.
 				}
 			}
 			else // This character is a valid digit or hex-digit.
@@ -2512,18 +2514,18 @@ HRESULT MySetWindowTheme(HWND hwnd, LPCWSTR pszSubAppName, LPCWSTR pszSubIdList)
 
 
 
-LPTSTR ConvertEscapeSequences(LPTSTR aBuf, TCHAR aEscapeChar, bool aAllowEscapedSpace)
+LPTSTR ConvertEscapeSequences(LPTSTR aBuf, LPTSTR aLiteralMap, bool aAllowEscapedSpace)
 // Replaces any escape sequences in aBuf with their reduced equivalent.  For example, if aEscapeChar
 // is accent, Each `n would become a literal linefeed.  aBuf's length should always be the same or
 // lower than when the process started, so there is no chance of overflow.
 {
-	LPTSTR cp, cp1;
-	for (cp = aBuf; ; ++cp)  // Increment to skip over the symbol just found by the inner for().
+	int i;
+	for (i = 0; ; ++i)  // Increment to skip over the symbol just found by the inner for().
 	{
-		for (; *cp && *cp != aEscapeChar; ++cp);  // Find the next escape char.
-		if (!*cp) // end of string.
+		for (; aBuf[i] && aBuf[i] != g_EscapeChar; ++i);  // Find the next escape char.
+		if (!aBuf[i]) // end of string.
 			break;
-		cp1 = cp + 1;
+		LPTSTR cp1 = aBuf + i + 1;
 		switch (*cp1)
 		{
 			// Only lowercase is recognized for these:
@@ -2539,15 +2541,13 @@ LPTSTR ConvertEscapeSequences(LPTSTR aBuf, TCHAR aEscapeChar, bool aAllowEscaped
 					*cp1 = ' ';
 				//else do nothing extra, just let the standard action for unrecognized escape sequences.
 				break;
-			// Otherwise, if it's not one of the above, the escape-char is considered to
-			// mark the next character as literal, regardless of what it is. Examples:
-			// `` -> `
-			// `:: -> :: (effectively)
-			// `; -> ;
-			// `c -> c (i.e. unknown escape sequences resolve to the char after the `)
 		}
-		// Below has a final +1 to include the terminator:
-		tmemmove(cp, cp1, _tcslen(cp1) + 1);
+		// Replace escape-sequence with its single-char value.  This is done even if the pair isn't
+		// a recognizable escape sequence (e.g. `? becomes ?), which is the Microsoft approach and
+		// might not be a bad way of handling things. Below has a final +1 to include the terminator:
+		tmemmove(aBuf + i, cp1, _tcslen(cp1) + 1);
+		if (aLiteralMap)
+			aLiteralMap[i] = 1;  // In the map, mark this char as literal.
 	}
 	return aBuf;
 }
@@ -2558,7 +2558,7 @@ int FindNextDelimiter(LPCTSTR aBuf, TCHAR aDelimiter, int aStartIndex, LPCTSTR a
 // Returns the index of the next delimiter, taking into account quotes, parentheses, etc.
 // If the delimiter is not found, returns the length of aBuf.
 {
-	bool in_quotes = false;
+	TCHAR in_quotes = 0;
 	int open_parens = 0;
 	for (int mark = aStartIndex; ; ++mark)
 	{
@@ -2572,8 +2572,20 @@ int FindNextDelimiter(LPCTSTR aBuf, TCHAR aDelimiter, int aStartIndex, LPCTSTR a
 		}
 		switch (aBuf[mark])
 		{
-		case '"': // There are sections similar this one later below; so see them for comments.
-			in_quotes = !in_quotes;
+		case '"': 
+		case '\'':
+			if (!in_quotes)
+ 				in_quotes = aBuf[mark];
+			else if (in_quotes == aBuf[mark] && !(aLiteralMap && aLiteralMap[mark]))
+ 				in_quotes = 0;
+ 			//else the other type of quote mark was used to begin this quoted string.
+ 			break;
+		case '`':
+			// If the caller passed non-NULL aLiteralMap, this must be a literal ` char.
+			// Otherwise, caller wants it to escape quote marks inside strings, but not aDelimiter.
+			if (!aLiteralMap && aBuf[mark+1] == in_quotes)
+				++mark; // Skip this escape char and let the loop's increment skip the quote mark.
+			//else this is an ordinary literal ` or an escape sequence we don't need to handle.
 			break;
 		case '(': // For our purpose, "(", "[" and "{" can be treated the same.
 		case '[': // If they aren't balanced properly, a later stage will detect it.
@@ -2651,6 +2663,39 @@ bool IsStringInList(LPTSTR aStr, LPTSTR aList, bool aFindExactMatch)
 
 	return false;  // No match found.
 }
+
+
+
+LPTSTR InStrAny(LPTSTR aStr, LPTSTR aNeedle[], int aNeedleCount, size_t &aFoundLen)
+{
+	// For each character in aStr:
+	for ( ; *aStr; ++aStr)
+		// For each needle:
+		for (int i = 0; i < aNeedleCount; ++i)
+			// For each character in this needle:
+			for (LPTSTR needle_pos = aNeedle[i], str_pos = aStr; ; ++needle_pos, ++str_pos)
+			{
+				if (!*needle_pos)
+				{
+					// All characters in needle matched aStr at this position, so we've
+					// found our string.  If this needle is empty, it implicitly matches
+					// at the first position in the string.
+					aFoundLen = needle_pos - aNeedle[i];
+					return aStr;
+				}
+				// Otherwise, we haven't reached the end of the needle. If we've reached
+				// the end of aStr, *str_pos and *needle_pos won't match, so the check
+				// below will break out of the loop.
+				if (*needle_pos != *str_pos)
+					// Not a match: continue on to the next needle, or the next starting
+					// position in aStr if this is the last needle.
+					break;
+			}
+	// If the above loops completed without returning, no matches were found.
+	return NULL;
+}
+
+
 
 #if defined(_MSC_VER) && defined(_DEBUG)
 void OutputDebugStringFormat(LPCTSTR fmt, ...)

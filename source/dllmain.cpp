@@ -21,6 +21,7 @@ GNU General Public License for more details.
 #include "window.h" // For MsgBox() & SetForegroundLockTimeout()
 #include "TextIO.h"
 
+#include "windows.h"  // N11
 #include "exports.h"  // N11
 #include <process.h>  // N11
 
@@ -41,8 +42,7 @@ GNU General Public License for more details.
 // (GetMessage() or PeekMessage()) is the only means by which events are ever sent to the
 // hook functions.
 
-
-static LPTSTR aDefaultDllScript = _T("#Persistent\n#NoTrayIcon");
+static LPTSTR aDefaultDllScript = _T("#NoTrayIcon\nOnMessage(0,\" \")\n (){\n}");
 static LPTSTR scriptstring;
 // Naveen v1. HANDLE hThread
 // Todo: move this to struct nameHinstance
@@ -52,16 +52,8 @@ static struct nameHinstance
        HINSTANCE hInstanceP;
 	   LPTSTR name ;
 	   LPTSTR argv;
-	   LPTSTR args;
-	 //  TCHAR argv[1000];
-	 //  TCHAR args[1000];
 	   int istext;
      } nameHinstanceP ;
-// Naveen v1. hThread2 and threadCount
-// Todo: remove these as multithreading was implemented 
-//       with multiple loading of the dll under separate names.
-static int threadCount = 1 ; 
-static 	HANDLE hThread2;
 unsigned __stdcall runScript( void* pArguments );
 
 // Naveen v1. DllMain() - puts hInstance into struct nameHinstanceP 
@@ -96,14 +88,8 @@ switch(fwdReason)
 	// Unregister window class registered in Script::CreateWindows
 #ifdef UNICODE
 	UnregisterClass((LPCWSTR)&WINDOW_CLASS_MAIN,g_hInstance);
-#ifndef MINIDLL
-	UnregisterClass((LPCWSTR)&WINDOW_CLASS_SPLASH,g_hInstance);
-#endif // MINIDLL
 #else
 	UnregisterClass((LPCSTR)&WINDOW_CLASS_MAIN,g_hInstance);
-#ifndef MINIDLL
-	UnregisterClass((LPCSTR)&WINDOW_CLASS_SPLASH,g_hInstance);
-#endif // MINIDLL
 #endif
 		 break;
 	 }
@@ -127,7 +113,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 		&& !(g_hResource = FindResource(g_hInstance, _T(">AHK WITH ICON<"), MAKEINTRESOURCE(RT_RCDATA))))
 		g_hResource = NULL;
 #endif
-	
+
 	InitializeCriticalSection(&g_CriticalRegExCache); // v1.0.45.04: Must be done early so that it's unconditional, so that DeleteCriticalSection() in the script destructor can also be unconditional (deleting when never initialized can crash, at least on Win 9x).
 
 	if (!GetCurrentDirectory(_countof(g_WorkingDir), g_WorkingDir)) // Needed for the FileSelectFile() workaround.
@@ -155,22 +141,21 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	// The above rules effectively make it impossible to autostart AutoHotkey.ini with parameters
 	// unless the filename is explicitly given (shouldn't be an issue for 99.9% of people).
 
-	TCHAR var_name[32], *param; // Small size since only numbers will be used (e.g. %1%, %2%).
-	Var *var;
+	TCHAR *param; // Small size since only numbers will be used (e.g. %1%, %2%).
 	bool switch_processing_is_complete = false;
 	int script_param_num = 1;
 
 	int dllargc = 0;
 #ifndef _UNICODE
-	LPWSTR wargv = (LPWSTR) _alloca((_tcslen(nameHinstanceP.args)+1)*sizeof(WCHAR));
-	MultiByteToWideChar(CP_UTF8,0,nameHinstanceP.args,-1,wargv,(_tcslen(nameHinstanceP.args)+1)*sizeof(WCHAR));
+	LPWSTR wargv = (LPWSTR) _alloca((_tcslen(nameHinstanceP.argv)+1)*sizeof(WCHAR));
+	MultiByteToWideChar(CP_UTF8,0,nameHinstanceP.argv,-1,wargv,(_tcslen(nameHinstanceP.argv)+1)*sizeof(WCHAR));
 	LPWSTR *dllargv = CommandLineToArgvW(wargv,&dllargc);
 #else
-	LPWSTR *dllargv = CommandLineToArgvW(nameHinstanceP.args,&dllargc);
+	LPWSTR *dllargv = CommandLineToArgvW(nameHinstanceP.argv,&dllargc);
 #endif
 	int i;
-	if (*nameHinstanceP.args) // Only process if parameters were given
-	for (i = 0; i < dllargc; ++i) // Start at 1 because 0 contains the program name.
+	if (*nameHinstanceP.argv) // Only process if parameters were given
+	for (i = 0; i < dllargc; ++i) // Start at 0 because 0 does not contains the program name or script.
 	{
 #ifndef _UNICODE
 		param = (TCHAR *) _alloca((wcslen(dllargv[i])+1)*sizeof(CHAR));
@@ -178,17 +163,18 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 #else
 		param = dllargv[i]; // For performance and convenience.
 #endif
-		if (switch_processing_is_complete) // All args are now considered to be input parameters for the script.
-		{
-			if (   !(var = g_script.FindOrAddVar(var_name, _stprintf(var_name, _T("%d"), script_param_num)))   )
-				return CRITICAL_ERROR;  // Realistically should never happen.
-			var->Assign(param);
-			++script_param_num;
-		}
+		//if (switch_processing_is_complete) // All args are now considered to be input parameters for the script.
+		//{
+		//	if (   !(var = g_script.FindOrAddVar(var_name, _stprintf(var_name, _T("%d"), script_param_num)))   )
+		//		return CRITICAL_ERROR;  // Realistically should never happen.
+		//	var->Assign(param);
+		//	++script_param_num;
+		//}
+
 		// Insist that switches be an exact match for the allowed values to cut down on ambiguity.
 		// For example, if the user runs "CompiledScript.exe /find", we want /find to be considered
 		// an input parameter for the script rather than a switch:
-		else if (!_tcsicmp(param, _T("/R")) || !_tcsicmp(param, _T("/restart")))
+		if (!_tcsicmp(param, _T("/R")) || !_tcsicmp(param, _T("/restart")))
 			restart_mode = true;
 		else if (!_tcsicmp(param, _T("/F")) || !_tcsicmp(param, _T("/force")))
 			g_ForceLaunch = true;
@@ -244,33 +230,20 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 #endif
 		else // since this is not a recognized switch, the end of the [Switches] section has been reached (by design).
 		{
-			switch_processing_is_complete = true;  // No more switches allowed after this point.
-			--i; // Make the loop process this item again so that it will be treated as a script param.
+			break;  // No more switches allowed after this point.
 		}
 	}
 
-	if (script_filespec)// Script filename was explicitly specified, so check if it has the special conversion flag.
+	if (i < dllargc)
 	{
-		size_t filespec_length = _tcslen(script_filespec);
-		if (filespec_length >= CONVERSION_FLAG_LENGTH)
-		{
-			LPTSTR cp = script_filespec + filespec_length - CONVERSION_FLAG_LENGTH;
-			// Now cp points to the first dot in the CONVERSION_FLAG of script_filespec (if it has one).
-			if (!_tcsicmp(cp, CONVERSION_FLAG))
-				return Line::ConvertEscapeChar(script_filespec);
-		}
+		// Insert the remaining args into an array and assign to the "args" global var.
+		Var *var;
+		Object *args;
+		if (  !( var = g_script.FindOrAddVar(_T("Args")) )
+			|| !( args = Object::CreateFromArgV((LPTSTR*)(dllargv + i), dllargc - i) )   )
+			return CRITICAL_ERROR;  // Realistically should never happen.
+		var->AssignSkipAddRef(args);
 	}
-
-	// Like AutoIt2, store the number of script parameters in the script variable %0%, even if it's zero:
-	if (   !(var = g_script.FindOrAddVar(_T("0")))   )
-		return CRITICAL_ERROR;  // Realistically should never happen.
-	var->Assign(script_param_num - 1);
-
-	// N11 
-
-	Var *A_ScriptOptions;
-	A_ScriptOptions = g_script.FindOrAddVar(_T("A_ScriptOptions"));	
-	A_ScriptOptions->Assign(nameHinstanceP.argv);
 
 	global_init(*g);  // Set defaults prior to the below, since below might override them for AutoIt2 scripts.
 
@@ -280,6 +253,12 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	// Set g_default now, reflecting any changes made to "g" above, in case AutoExecSection(), below,
 	// never returns, perhaps because it contains an infinite loop (intentional or not):
 	CopyMemory(&g_default, g, sizeof(global_struct));
+
+	// Use FindOrAdd vs Add for maintainability, although it shouldn't already exist:
+	if (   !(g_ErrorLevel = g_script.FindOrAddVar(_T("ErrorLevel")))   )
+		return CRITICAL_ERROR; // Error.  Above already displayed it for us.
+	// Initialize the var state to zero:
+	g_ErrorLevel->Assign(ERRORLEVEL_NONE);
 
 	//if (nameHinstanceP.istext)
 	//	GetCurrentDirectory(MAX_PATH, g_script.mFileDir);
@@ -302,74 +281,6 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 		return CRITICAL_ERROR;  // Should return this value because PostQuitMessage() also uses it.
 	if (!load_result) // LoadFromFile() relies upon us to do this check.  No lines were loaded, so we're done.
 		return 0;
-
-	// Unless explicitly set to be non-SingleInstance via SINGLE_INSTANCE_OFF or a special kind of
-	// SingleInstance such as SINGLE_INSTANCE_REPLACE and SINGLE_INSTANCE_IGNORE, persistent scripts
-	// and those that contain hotkeys/hotstrings are automatically SINGLE_INSTANCE_PROMPT as of v1.0.16:
-#ifndef MINIDLL
-	if (g_AllowOnlyOneInstance == ALLOW_MULTI_INSTANCE)
-		g_AllowOnlyOneInstance = SINGLE_INSTANCE_PROMPT;
-/*
-	HWND w_existing = NULL;
-	UserMessages reason_to_close_prior = (UserMessages)0;
-	if (g_AllowOnlyOneInstance && g_AllowOnlyOneInstance != SINGLE_INSTANCE_OFF && !restart_mode && !g_ForceLaunch)
-	{
-		// Note: the title below must be constructed the same was as is done by our
-		// CreateWindows(), which is why it's standardized in g_script.mMainWindowTitle:
-		if (w_existing = FindWindow(WINDOW_CLASS_MAIN, g_script.mMainWindowTitle))
-		{
-			if (g_AllowOnlyOneInstance == SINGLE_INSTANCE_IGNORE)
-				return 0;
-			if (g_AllowOnlyOneInstance != SINGLE_INSTANCE_REPLACE)
-				if (MsgBox(_T("An older instance of this script is already running.  Replace it with this")
-					_T(" instance?\nNote: To avoid this message, see #SingleInstance in the help file.")
-					, MB_YESNO, g_script.mFileName) == IDNO)
-					return 0;
-			// Otherwise:
-			reason_to_close_prior = AHK_EXIT_BY_SINGLEINSTANCE;
-		}
-	}
-	if (!reason_to_close_prior && restart_mode)
-		if (w_existing = FindWindow(WINDOW_CLASS_MAIN, g_script.mMainWindowTitle))
-			reason_to_close_prior = AHK_EXIT_BY_RELOAD;
-	if (reason_to_close_prior)
-	{
-		// Now that the script has been validated and is ready to run, close the prior instance.
-		// We wait until now to do this so that the prior instance's "restart" hotkey will still
-		// be available to use again after the user has fixed the script.  UPDATE: We now inform
-		// the prior instance of why it is being asked to close so that it can make that reason
-		// available to the OnExit subroutine via a built-in variable:
-		terminateDll();
-		//PostMessage(w_existing, WM_CLOSE, 0, 0);
-
-		// Wait for it to close before we continue, so that it will deinstall any
-		// hooks and unregister any hotkeys it has:
-		int interval_count;
-		for (interval_count = 0; ; ++interval_count)
-		{
-			Sleep(10);  // No need to use MsgSleep() in this case.
-			if (!IsWindow(w_existing))
-				break;  // done waiting.
-			if (interval_count == 100)
-			{
-				// This can happen if the previous instance has an OnExit subroutine that takes a long
-				// time to finish, or if it's waiting for a network drive to timeout or some other
-				// operation in which it's thread is occupied.
-				if (MsgBox(_T("Could not close the previous instance of this script.  Keep waiting?"), 4) == IDNO)
-					return CRITICAL_ERROR;
-				interval_count = 0;
-			}
-		}
-		// Give it a small amount of additional time to completely terminate, even though
-		// its main window has already been destroyed:
-		Sleep(100);
-	}
-
-	// Call this only after closing any existing instance of the program,
-	// because otherwise the change to the "focus stealing" setting would never be undone:
-	SetForegroundLockTimeout();
-*/
-#endif
 
 	// Create all our windows and the tray icon.  This is done after all other chances
 	// to return early due to an error have passed, above.
@@ -434,19 +345,13 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	//free(nameHinstanceP.name);
 
 	Var *clipboard_var = g_script.FindOrAddVar(_T("Clipboard")); // Add it if it doesn't exist, in case the script accesses "Clipboard" via a dynamic variable.
-	if (clipboard_var)
-		// This is done here rather than upon variable creation speed up runtime/dynamic variable creation.
-		// Since the clipboard can be changed by activity outside the program, don't read-cache its contents.
-		// Since other applications and the user should see any changes the program makes to the clipboard,
-		// don't write-cache it either.
-		clipboard_var->DisableCache();
-
+	
 	// Run the auto-execute part at the top of the script (this call might never return):
 	if (!g_script.AutoExecSection()) // Can't run script at all. Due to rarity, just abort.
 		return CRITICAL_ERROR;
 	// REMEMBER: The call above will never return if one of the following happens:
 	// 1) The AutoExec section never finishes (e.g. infinite loop).
-	// 2) The AutoExec function uses uses the Exit or ExitApp command to terminate the script.
+	// 2) The AutoExec function uses the Exit or ExitApp command to terminate the script.
 	// 3) The script isn't persistent and its last line is reached (in which case an ExitApp is implicit).
 
 	// Call it in this special mode to kick off the main event loop.
@@ -513,39 +418,35 @@ unsigned runThread()
 	if (hThread)
  		ahkTerminate(0);
 	hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, 0 );
-	//hThread = (HANDLE)CreateThread(NULL,0,(LPTHREAD_START_ROUTINE)&runScript,&nameHinstanceP,0,(LPDWORD)&threadID);
-	//hThread = AfxBeginThread(&runScript,&nameHinstanceP,THREAD_PRIORITY_NORMAL,0,0,NULL);
 	WaitIsReadyToExecute();
 	return (unsigned int)hThread;
 }
 
-int setscriptstrings(LPTSTR fileName, LPTSTR argv, LPTSTR args)
+int setscriptstrings(LPTSTR fileName, LPTSTR argv)
 {
-	LPTSTR newstring = (LPTSTR)realloc(scriptstring,(_tcslen(fileName)+_tcslen(argv)+_tcslen(args)+3)*sizeof(TCHAR));
+	LPTSTR newstring = (LPTSTR)realloc(scriptstring,(_tcslen(fileName)+_tcslen(argv)+2)*sizeof(TCHAR));
 	if (!newstring)
 		return 1;
 	scriptstring = newstring;
 	_tcscpy(scriptstring,fileName);
 	_tcscpy(scriptstring + _tcslen(fileName) + 1,argv);
-	_tcscpy(scriptstring + _tcslen(fileName) + _tcslen(argv) + 2,args);
 	nameHinstanceP.name = scriptstring;
 	nameHinstanceP.argv = scriptstring + _tcslen(fileName) + 1 ;
-	nameHinstanceP.args = scriptstring + _tcslen(fileName) + _tcslen(argv) + 2 ;
 	return 0;
 }
 
-EXPORT UINT_PTR ahkdll(LPTSTR fileName, LPTSTR argv, LPTSTR args)
+EXPORT UINT_PTR ahkdll(LPTSTR fileName, LPTSTR argv)
 {
-	if (setscriptstrings(*fileName ? fileName : aDefaultDllScript, argv, args))
+	if (setscriptstrings(*fileName ? fileName : aDefaultDllScript, argv))
 		return 0;
 	nameHinstanceP.istext = *fileName ? 0 : 1;
 	return runThread();
 }
 
 // HotKeyIt ahktextdll
-EXPORT UINT_PTR ahktextdll(LPTSTR fileName, LPTSTR argv, LPTSTR args)
+EXPORT UINT_PTR ahktextdll(LPTSTR fileName, LPTSTR argv)
 {
-	if (setscriptstrings(*fileName ? fileName : aDefaultDllScript, argv, args))
+	if (setscriptstrings(*fileName ? fileName : aDefaultDllScript, argv))
 		return 0;
 	nameHinstanceP.istext = 1;
 	return runThread();
@@ -586,27 +487,27 @@ static long g_cComponents = 0 ;     // Count of active components
 static long g_cServerLocks = 0 ;    // Count of locks
 
 // Friendly name of component
-const char g_szFriendlyName[] = "AutoHotkey Script" ;
+const char g_szFriendlyName[] = "AutoHotkey2 Script" ;
 
 // Version-independent ProgID
-const char g_szVerIndProgID[] = "AutoHotkey.Script" ;
+const char g_szVerIndProgID[] = "AutoHotkey2.Script" ;
 
 // ProgID
-const char g_szProgID[] = "AutoHotkey.Script.1" ;
+const char g_szProgID[] = "AutoHotkey2.Script.1" ;
 
 #ifdef _WIN64
-const char g_szFriendlyNameOptional[] = "AutoHotkey Script X64" ;
-const char g_szVerIndProgIDOptional[] = "AutoHotkey.Script.X64" ;
-const char g_szProgIDOptional[] = "AutoHotkey.Script.X64.1" ;
+const char g_szFriendlyNameOptional[] = "AutoHotkey2 Script X64" ;
+const char g_szVerIndProgIDOptional[] = "AutoHotkey2.Script.X64" ;
+const char g_szProgIDOptional[] = "AutoHotkey2.Script.X64.1" ;
 #else
 #ifdef _UNICODE
-const char g_szFriendlyNameOptional[] = "AutoHotkey Script UNICODE" ;
-const char g_szVerIndProgIDOptional[] = "AutoHotkey.Script.UNICODE" ;
-const char g_szProgIDOptional[] = "AutoHotkey.Script.UNICODE.1" ;
+const char g_szFriendlyNameOptional[] = "AutoHotkey2 Script UNICODE" ;
+const char g_szVerIndProgIDOptional[] = "AutoHotkey2.Script.UNICODE" ;
+const char g_szProgIDOptional[] = "AutoHotkey2.Script.UNICODE.1" ;
 #else
-const char g_szFriendlyNameOptional[] = "AutoHotkey Script ANSI" ;
-const char g_szVerIndProgIDOptional[] = "AutoHotkey.Script.ANSI" ;
-const char g_szProgIDOptional[] = "AutoHotkey.Script.ANSI.1" ;
+const char g_szFriendlyNameOptional[] = "AutoHotkey2 Script ANSI" ;
+const char g_szVerIndProgIDOptional[] = "AutoHotkey2.Script.ANSI" ;
+const char g_szProgIDOptional[] = "AutoHotkey2.Script.ANSI.1" ;
 #endif // UNICODE
 #endif // WIN64
 
@@ -619,7 +520,7 @@ CoCOMServer::CoCOMServer() : m_cRef(1)
 	InterlockedIncrement(&g_cComponents) ; 
 
 	m_ptinfo = NULL;
-	LoadTypeInfo(&m_ptinfo, LIBID_AutoHotkey, IID_ICOMServer, 0);
+	LoadTypeInfo(&m_ptinfo, LIBID_AutoHotkey2, IID_ICOMServer, 0);
 }
 
 //
@@ -699,27 +600,25 @@ unsigned int Variant2I(VARIANT var)
 		return var.uintVal;
 }
 
-HRESULT __stdcall CoCOMServer::ahktextdll(/*in,optional*/VARIANT script,/*in,optional*/VARIANT options,/*in,optional*/VARIANT params,/*out*/UINT_PTR* hThread)
+HRESULT __stdcall CoCOMServer::ahktextdll(/*in,optional*/VARIANT script,/*in,optional*/VARIANT params,/*out*/UINT_PTR* hThread)
 {
 	USES_CONVERSION;
-	TCHAR buf1[MAX_INTEGER_SIZE],buf2[MAX_INTEGER_SIZE],buf3[MAX_INTEGER_SIZE];
+	TCHAR buf1[MAX_INTEGER_SIZE],buf2[MAX_INTEGER_SIZE];
 	if (hThread==NULL)
 		return ERROR_INVALID_PARAMETER;
 	*hThread = com_ahktextdll(script.vt == VT_BSTR ? OLE2T(script.bstrVal) : Variant2T(script,buf1)
-							,options.vt == VT_BSTR ? OLE2T(options.bstrVal) : Variant2T(options,buf2)
-							,params.vt == VT_BSTR ? OLE2T(params.bstrVal) : Variant2T(params,buf3));
+							,params.vt == VT_BSTR ? OLE2T(params.bstrVal) : Variant2T(params,buf2));
 	return S_OK;
 }
 
-HRESULT __stdcall CoCOMServer::ahkdll(/*in,optional*/VARIANT filepath,/*in,optional*/VARIANT options,/*in,optional*/VARIANT params,/*out*/UINT_PTR* hThread)
+HRESULT __stdcall CoCOMServer::ahkdll(/*in,optional*/VARIANT filepath,/*in,optional*/VARIANT params,/*out*/UINT_PTR* hThread)
 {
 	USES_CONVERSION;
-	TCHAR buf1[MAX_INTEGER_SIZE],buf2[MAX_INTEGER_SIZE],buf3[MAX_INTEGER_SIZE];
+	TCHAR buf1[MAX_INTEGER_SIZE],buf2[MAX_INTEGER_SIZE];
 	if (hThread==NULL)
 		return ERROR_INVALID_PARAMETER;
 	*hThread = com_ahkdll(filepath.vt == VT_BSTR ? OLE2T(filepath.bstrVal) : Variant2T(filepath,buf1)
-							,options.vt == VT_BSTR ? OLE2T(options.bstrVal) : Variant2T(options,buf2)
-							,params.vt == VT_BSTR ? OLE2T(params.bstrVal) : Variant2T(params,buf3));
+							,params.vt == VT_BSTR ? OLE2T(params.bstrVal) : Variant2T(params,buf2));
 	return S_OK;
 }
 HRESULT __stdcall CoCOMServer::ahkPause(/*in,optional*/VARIANT aChangeTo,/*out*/BOOL* paused)
@@ -761,7 +660,7 @@ HRESULT __stdcall CoCOMServer::ahkgetvar(/*in*/VARIANT name,/*[in,optional]*/ VA
 	ExprTokenType aToken ;
 	
 	var = g_script.FindVar(name.vt == VT_BSTR ? OLE2T(name.bstrVal) : Variant2T(name,buf)) ;
-	var->TokenToContents(aToken) ;
+	var->ToToken(aToken) ;
     VariantInit(result);
    // CComVariant b ;
 	VARIANT b ; 
@@ -1062,7 +961,7 @@ STDAPI DllGetClassObject(const CLSID& clsid,
 	}
 	TCHAR buf[MAX_PATH];
 #ifdef DEBUG
-	if (0)  // for debugging com 
+	if (0 && GetModuleFileName(g_hInstance, buf, MAX_PATH))  // for debugging com 
 #else
 	if (GetModuleFileName(g_hInstance, buf, MAX_PATH))
 #endif
@@ -1116,13 +1015,13 @@ STDAPI DllRegisterServer()
 	                      g_szFriendlyNameOptional,
 	                      g_szVerIndProgIDOptional,
 	                      g_szProgIDOptional,
-						  LIBID_AutoHotkey) ;
+						  LIBID_AutoHotkey2) ;
 	hr= RegisterServer(g_hInstance, 
 	                      CLSID_CoCOMServer,
 	                      g_szFriendlyName,
 	                      g_szVerIndProgID,
 	                      g_szProgID,
-						  LIBID_AutoHotkey) ;
+						  LIBID_AutoHotkey2) ;
 	if (SUCCEEDED(hr))
 	{
 		RegisterTypeLib( g_hInstance, NULL);
@@ -1139,11 +1038,11 @@ STDAPI DllUnregisterServer()
 	HRESULT hr = UnregisterServer(CLSID_CoCOMServerOptional,
 	                        g_szVerIndProgIDOptional,
 	                        g_szProgIDOptional,
-							LIBID_AutoHotkey) ;
+							LIBID_AutoHotkey2) ;
 	hr = UnregisterServer(CLSID_CoCOMServer,
 	                        g_szVerIndProgID,
 	                        g_szProgID,
-							LIBID_AutoHotkey) ;
+							LIBID_AutoHotkey2) ;
 	if (SUCCEEDED(hr))
 	{
 		UnRegisterTypeLib( g_hInstance, NULL);

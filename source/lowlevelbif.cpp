@@ -69,7 +69,7 @@ BIF(BIF_Alias)
 			len = (UINT_PTR)(aParam[1]->var->mType == VAR_ALIAS ? aParam1.var->ResolveAlias() : aParam1.var);
 		break;
 		// HotKeyIt H10 added to accept dynamic text and also when value is returned by ahkgetvar in AutoHotkey.dll
-		case SYM_OPERAND:
+		case SYM_STRING:
 			len = (UINT_PTR)ATOI64(aParam1.marker);
 		}
 		var.mType = len ? VAR_ALIAS : VAR_NORMAL;
@@ -81,7 +81,7 @@ BIF(BIF_CacheEnable)
 	if (aParam[0]->symbol == SYM_VAR)
 	{
 		(aParam[0]->var->mType == VAR_ALIAS ? aParam[0]->var->mAliasFor : aParam[0]->var)
-			->mAttrib &= ~VAR_ATTRIB_CACHE_DISABLED;
+			->mAttrib &= ~VAR_ATTRIB_CACHE;
 	}
 }
 
@@ -98,21 +98,21 @@ BIF(BIF_getTokenValue)
     {
       Var &var = *token->var;
 
-      VarAttribType cache_attrib = var.mAttrib & (VAR_ATTRIB_HAS_VALID_INT64 | VAR_ATTRIB_HAS_VALID_DOUBLE);
+      VarAttribType cache_attrib = var.mAttrib & (VAR_ATTRIB_IS_INT64 | VAR_ATTRIB_IS_DOUBLE);
       if (cache_attrib)
       {
          aResultToken.symbol = (SymbolType) (cache_attrib >> 4);
          aResultToken.value_int64 = var.mContentsInt64;
       }
 
-      else if (var.mAttrib & VAR_ATTRIB_OBJECT)
+      else if (var.mAttrib & VAR_ATTRIB_IS_OBJECT)
       {
          aResultToken.symbol = SYM_OBJECT;
          aResultToken.object = var.mObject;
       }
       else
       {
-         aResultToken.symbol = SYM_OPERAND;
+         aResultToken.symbol = SYM_STRING;
          aResultToken.marker = var.mCharContents;
       }
     }

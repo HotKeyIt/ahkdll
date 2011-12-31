@@ -58,18 +58,15 @@ enum ExecUntilMode {NORMAL_MODE, UNTIL_RETURN, UNTIL_BLOCK_END, ONLY_ONE_LINE};
 // might just match one of them:
 #define ATTR_NONE (void *)0  // Some places might rely on this being zero.
 #define ATTR_TRUE (void *)1
-#define ATTR_LOOP_UNKNOWN (void *)1 // Same value as the above.        // KEEP IN SYNC WITH BELOW.
-#define ATTR_LOOP_IS_UNKNOWN_OR_NONE(attr) (attr <= ATTR_LOOP_UNKNOWN) // KEEP IN SYNC WITH ABOVE.
-#define ATTR_LOOP_NORMAL (void *)2
-#define ATTR_LOOP_FILEPATTERN (void *)3
-#define ATTR_LOOP_REG (void *)4
-#define ATTR_LOOP_READ_FILE (void *)5
-#define ATTR_LOOP_PARSE (void *)6
-#define ATTR_LOOP_WHILE (void *)7 // Lexikos: This is used to differentiate ACT_WHILE from ACT_LOOP, allowing code to be shared.
-#define ATTR_LOOP_FOR (void *)8
 typedef void *AttributeType;
 
-enum FileLoopModeType {FILE_LOOP_INVALID, FILE_LOOP_FILES_ONLY, FILE_LOOP_FILES_AND_FOLDERS, FILE_LOOP_FOLDERS_ONLY};
+typedef int FileLoopModeType;
+#define FILE_LOOP_INVALID		0
+#define FILE_LOOP_FILES_ONLY	1
+#define FILE_LOOP_FOLDERS_ONLY	2
+#define FILE_LOOP_RECURSE		4
+#define FILE_LOOP_FILES_AND_FOLDERS (FILE_LOOP_FILES_ONLY | FILE_LOOP_FOLDERS_ONLY)
+
 enum VariableTypeType {VAR_TYPE_INVALID, VAR_TYPE_NUMBER, VAR_TYPE_INTEGER, VAR_TYPE_FLOAT
 	, VAR_TYPE_TIME	, VAR_TYPE_DIGIT, VAR_TYPE_XDIGIT, VAR_TYPE_ALNUM, VAR_TYPE_ALPHA
 	, VAR_TYPE_UPPER, VAR_TYPE_LOWER, VAR_TYPE_SPACE};
@@ -101,11 +98,7 @@ enum VariableTypeType {VAR_TYPE_INVALID, VAR_TYPE_NUMBER, VAR_TYPE_INTEGER, VAR_
 	GetSystemTimeAsFileTime(&ft);\
 	init_genrand(ft.dwLowDateTime);\
 }
-#ifndef MINIDLL
-#define IS_PERSISTENT (Hotkey::sHotkeyCount || Hotstring::sHotstringCount || g_KeybdHook || g_MouseHook || g_persistent)
-#else
-#define IS_PERSISTENT (g_persistent)
-#endif
+
 // Since WM_COMMAND IDs must be shared among all menus and controls, they are carefully conserved,
 // especially since there are only 65,535 possible IDs.  In addition, they are assigned to ranges
 // to minimize the need that they will need to be changed in the future (changing the ID of a main
@@ -148,6 +141,7 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_NONEXISTENT_HOTKEY _T("Nonexistent hotkey.")
 #define ERR_NONEXISTENT_VARIANT _T("Nonexistent hotkey variant (IfWin).")
 #define ERR_NONEXISTENT_FUNCTION _T("Call to nonexistent function.")
+#define ERR_UNRECOGNIZED_DIRECTIVE _T("Unknown directive.")
 #define ERR_EXE_CORRUPTED _T("EXE corrupted")
 #define ERR_PARAM1_INVALID _T("Parameter #1 invalid.")
 #define ERR_PARAM2_INVALID _T("Parameter #2 invalid.")
@@ -178,13 +172,13 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_BLANK_PARAM _T("Blank parameter")             //
 #define ERR_TOO_MANY_PARAMS _T("Too many parameters passed to function.") // L31
 #define ERR_TOO_FEW_PARAMS _T("Too few parameters passed to function.") // L31
+#define ERR_BAD_OPTIONAL_PARAM _T("Expected \":=\"")
 #define ERR_ELSE_WITH_NO_IF _T("ELSE with no matching IF")
 #define ERR_UNTIL_WITH_NO_LOOP _T("UNTIL with no matching LOOP")
 #define ERR_CATCH_WITH_NO_TRY _T("CATCH with no matching TRY")
 #define ERR_EXPECTED_BLOCK_OR_ACTION _T("Expected \"{\" or single-line action.")
 #define ERR_OUTOFMEM _T("Out of memory.")  // Used by RegEx too, so don't change it without also changing RegEx to keep the former string.
 #define ERR_EXPR_TOO_LONG _T("Expression too long")
-#define ERR_MEM_LIMIT_REACHED _T("Memory limit reached (see #MaxMem in the help file).")
 #define ERR_NO_LABEL _T("Target label does not exist.")
 #define ERR_MENU _T("Menu does not exist.")
 #define ERR_SUBMENU _T("Submenu does not exist.")
@@ -193,13 +187,15 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_MOUSE_COORD _T("X & Y must be either both absent or both present.")
 #define ERR_DIVIDEBYZERO _T("Divide by zero")
 #define ERR_VAR_IS_READONLY _T("Not allowed as an output variable.")
-#define ERR_INVALID_DOT _T("Unsupported use of \".\"")
+#define ERR_INVALID_CHAR _T("This character is not allowed here.")
+#define ERR_INVALID_DOT _T("Ambiguous or invalid use of \".\"")
 #define ERR_UNQUOTED_NON_ALNUM _T("Unquoted literals may only consist of alphanumeric characters/underscore.")
 #define ERR_DUPLICATE_DECLARATION _T("Duplicate declaration.")
 #define ERR_INVALID_CLASS_VAR _T("Invalid class variable declaration.")
 #define ERR_INVALID_LINE_IN_CLASS_DEF _T("Expected assignment or class/method definition.")
 #define ERR_INVALID_GUI_NAME _T("Invalid Gui name.")
 #define ERR_INVALID_OPTION _T("Invalid option.") // Generic message used by Gui and GuiControl/Get.
+#define ERR_MUST_DECLARE _T("This variable must be declared.")
 
 #define WARNING_USE_UNSET_VARIABLE _T("Using value of uninitialized variable.")
 #define WARNING_LOCAL_SAME_AS_GLOBAL _T("Local variable with same name as global.")
@@ -244,46 +240,12 @@ struct InputBoxType
 	int ypos;
 	Var *output_var;
 	TCHAR password_char;
+	bool set_password_char;
 	LPTSTR default_string;
 	DWORD timeout;
 	HWND hwnd;
 	HFONT font;
 };
-
-struct SplashType
-{
-	int width;
-	int height;
-	int bar_pos;  // The amount of progress of the bar (it's position).
-	int margin_x; // left/right margin
-	int margin_y; // top margin
-	int text1_height; // Height of main text control.
-	int object_width;   // Width of image.
-	int object_height;  // Height of the progress bar or image.
-	HWND hwnd;
-	int pic_type;
-	union
-	{
-		HBITMAP pic_bmp; // For SplashImage.
-		HICON pic_icon;
-	};
-	HWND hwnd_bar;
-	HWND hwnd_text1;  // MainText
-	HWND hwnd_text2;  // SubText
-	HFONT hfont1; // Main
-	HFONT hfont2; // Sub
-	HBRUSH hbrush; // Window background color brush.
-	COLORREF color_bk; // The background color itself.
-	COLORREF color_text; // Color of the font.
-};
-
-// Use GetClientRect() to determine the available width so that control's can be centered.
-#define SPLASH_CALC_YPOS \
-	int bar_y = splash.margin_y + (splash.text1_height ? (splash.text1_height + splash.margin_y) : 0);\
-	int sub_y = bar_y + splash.object_height + (splash.object_height ? splash.margin_y : 0); // i.e. don't include margin_y twice if there's no bar.
-#define PROGRESS_MAIN_POS splash.margin_x, splash.margin_y, control_width, splash.text1_height
-#define PROGRESS_BAR_POS  splash.margin_x, bar_y, control_width, splash.object_height
-#define PROGRESS_SUB_POS  splash.margin_x, sub_y, control_width, (client_rect.bottom - client_rect.top) - sub_y
 
 // From AutoIt3's InputBox.  This doesn't add a measurable amount of code size, so the compiler seems to implement
 // it efficiently (somewhat like a macro).
@@ -295,8 +257,8 @@ inline void swap(T &v1, T &v2) {
 }
 
 #define INPUTBOX_DEFAULT INT_MIN
-ResultType InputBox(Var *aOutputVar, LPTSTR aTitle, LPTSTR aText, bool aHideInput
-	, int aWidth, int aHeight, int aX, int aY, double aTimeout, LPTSTR aDefault);
+ResultType InputBoxParseOptions(LPTSTR aOptions, InputBoxType &aInputBox);
+ResultType InputBox(Var *aOutputVar, LPTSTR aTitle, LPTSTR aText, LPTSTR aOptions, LPTSTR aDefault);
 INT_PTR CALLBACK InputBoxProc(HWND hWndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam);
 VOID CALLBACK InputBoxTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime);
 #endif
@@ -342,9 +304,11 @@ struct DerefType
 };
 
 typedef UCHAR ArgTypeType;  // UCHAR vs. an enum, to save memory.
+typedef WORD ArgLengthType; // Relies on the fact that an arg's literal text can't be longer than LINE_SIZE.
 #define ARG_TYPE_NORMAL     (UCHAR)0
 #define ARG_TYPE_INPUT_VAR  (UCHAR)1
 #define ARG_TYPE_OUTPUT_VAR (UCHAR)2
+#define ARGMAP_END_MARKER ((ArgLengthType)~0) // ExpressionToPostfix() may rely on this being greater than any possible arg character offset.
 
 struct ArgStruct
 {
@@ -353,10 +317,10 @@ struct ArgStruct
 	// Above are kept adjacent to each other to conserve memory (any fields that aren't an even
 	// multiple of 4, if adjacent to each other, consume less memory due to default byte alignment
 	// setting [which helps performance]).
-	WORD length; // Keep adjacent to above so that it uses no extra memory. This member was added in v1.0.44.14 to improve runtime performance.  It relies on the fact that an arg's literal text can't be longer than LINE_SIZE.
+	ArgLengthType length; // Keep adjacent to above so that it uses no extra memory. This member was added in v1.0.44.14 to improve runtime performance.
 	LPTSTR text;
 	DerefType *deref;  // Will hold a NULL-terminated array of var-deref locations within <text>.
-	ExprTokenType *postfix;  // An array of tokens in postfix order. Also used for ACT_ADD and others to store pre-converted binary integers.
+	ExprTokenType *postfix;  // An array of tokens in postfix order. Also used for ACT_(NOT)BETWEEN to store pre-converted binary integers.
 };
 
 
@@ -405,7 +369,7 @@ struct LoopReadFileStruct
 {
 	TextStream *mReadFile, *mWriteFile;
 	TCHAR mWriteFileName[MAX_PATH];
-	#define READ_FILE_LINE_SIZE (64 * 1024)  // This is also used by FileReadLine().
+	#define READ_FILE_LINE_SIZE (64 * 1024)
 	TCHAR mCurrentLine[READ_FILE_LINE_SIZE];
 	LoopReadFileStruct(TextStream *aReadFile, LPTSTR aWriteFileName)
 		: mReadFile(aReadFile), mWriteFile(NULL) // mWriteFile is opened by FileAppend() only upon first use.
@@ -416,7 +380,7 @@ struct LoopReadFileStruct
 	}
 };
 
-// TextStream flags for LoadIncludedFile (script files), file-reading loops and FileReadLine.
+// TextStream flags for LoadIncludedFile (script files) and file-reading loops.
 // Do not lock read/write: older versions used fopen(), which is implicitly permissive.
 #define DEFAULT_READ_FLAGS (TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR | TextStream::SHARE_READ | TextStream::SHARE_WRITE)
 
@@ -465,14 +429,6 @@ enum SysGetCmds {SYSGET_CMD_INVALID, SYSGET_CMD_METRICS, SYSGET_CMD_MONITORCOUNT
 	, SYSGET_CMD_MONITORAREA, SYSGET_CMD_MONITORWORKAREA, SYSGET_CMD_MONITORNAME
 };
 
-enum TransformCmds {TRANS_CMD_INVALID, TRANS_CMD_ASC, TRANS_CMD_CHR, TRANS_CMD_DEREF
-	, TRANS_CMD_UNICODE, TRANS_CMD_HTML
-	, TRANS_CMD_MOD, TRANS_CMD_POW, TRANS_CMD_EXP, TRANS_CMD_SQRT, TRANS_CMD_LOG, TRANS_CMD_LN
-	, TRANS_CMD_ROUND, TRANS_CMD_CEIL, TRANS_CMD_FLOOR, TRANS_CMD_ABS
-	, TRANS_CMD_SIN, TRANS_CMD_COS, TRANS_CMD_TAN, TRANS_CMD_ASIN, TRANS_CMD_ACOS, TRANS_CMD_ATAN
-	, TRANS_CMD_BITAND, TRANS_CMD_BITOR, TRANS_CMD_BITXOR, TRANS_CMD_BITNOT
-	, TRANS_CMD_BITSHIFTLEFT, TRANS_CMD_BITSHIFTRIGHT
-};
 #ifndef MINIDLL
 enum MenuCommands {MENU_CMD_INVALID, MENU_CMD_SHOW, MENU_CMD_USEERRORLEVEL
 	, MENU_CMD_ADD, MENU_CMD_RENAME, MENU_CMD_CHECK, MENU_CMD_UNCHECK, MENU_CMD_TOGGLECHECK
@@ -546,8 +502,8 @@ enum ControlGetCmds {CONTROLGET_CMD_INVALID, CONTROLGET_CMD_CHECKED, CONTROLGET_
 enum DriveCmds {DRIVE_CMD_INVALID, DRIVE_CMD_EJECT, DRIVE_CMD_LOCK, DRIVE_CMD_UNLOCK, DRIVE_CMD_LABEL};
 
 enum DriveGetCmds {DRIVEGET_CMD_INVALID, DRIVEGET_CMD_LIST, DRIVEGET_CMD_FILESYSTEM, DRIVEGET_CMD_LABEL
-	, DRIVEGET_CMD_SETLABEL, DRIVEGET_CMD_SERIAL, DRIVEGET_CMD_TYPE, DRIVEGET_CMD_STATUS
-	, DRIVEGET_CMD_STATUSCD, DRIVEGET_CMD_CAPACITY};
+	, DRIVEGET_CMD_SERIAL, DRIVEGET_CMD_TYPE, DRIVEGET_CMD_STATUS
+	, DRIVEGET_CMD_STATUSCD, DRIVEGET_CMD_CAPACITY, DRIVEGET_CMD_SPACEFREE};
 
 enum WinSetAttributes {WINSET_INVALID, WINSET_TRANSPARENT, WINSET_TRANSCOLOR, WINSET_ALWAYSONTOP
 	, WINSET_BOTTOM, WINSET_TOP, WINSET_STYLE, WINSET_EXSTYLE, WINSET_REDRAW, WINSET_ENABLE, WINSET_DISABLE
@@ -572,12 +528,11 @@ private:
 	ResultType PerformLoopWhile(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine); // Lexikos: ACT_WHILE.
 	ResultType PerformLoopFor(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil); // Lexikos: ACT_FOR.
 	ResultType Perform();
+	friend void BIF_PerformAction(ExprTokenType &, ExprTokenType *[], int);
 
 	ResultType MouseGetPos(DWORD aOptions);
 	ResultType FormatTime(LPTSTR aYYYYMMDD, LPTSTR aFormat);
-	ResultType PerformAssign();
 	ResultType StringReplace();
-	ResultType StringSplit(LPTSTR aArrayName, LPTSTR aInputString, LPTSTR aDelimiterList, LPTSTR aOmitList);
 	ResultType SplitPath(LPTSTR aFileSpec);
 	ResultType PerformSort(LPTSTR aContents, LPTSTR aOptions);
 	ResultType GetKeyJoyState(LPTSTR aKeyName, LPTSTR aOption);
@@ -587,10 +542,8 @@ private:
 	ResultType DriveGet(LPTSTR aCmd, LPTSTR aValue);
 	ResultType SoundSetGet(LPTSTR aSetting, DWORD aComponentType, int aComponentInstance
 		, DWORD aControlType, UINT aMixerID);
-	ResultType SoundGetWaveVolume(HWAVEOUT aDeviceID);
-	ResultType SoundSetWaveVolume(LPTSTR aVolume, HWAVEOUT aDeviceID);
 	ResultType SoundPlay(LPTSTR aFilespec, bool aSleepUntilDone);
-	ResultType URLDownloadToFile(LPTSTR aURL, LPTSTR aFilespec);
+	ResultType Download(LPTSTR aURL, LPTSTR aFilespec);
 	ResultType FileSelectFile(LPTSTR aOptions, LPTSTR aWorkingDir, LPTSTR aGreeting, LPTSTR aFilter);
 
 	// Bitwise flags:
@@ -604,7 +557,6 @@ private:
 		, LPTSTR aDescription, LPTSTR aIconFile, LPTSTR aHotkey, LPTSTR aIconNumber, LPTSTR aRunState);
 	ResultType FileCreateDir(LPTSTR aDirSpec);
 	ResultType FileRead(LPTSTR aFilespec);
-	ResultType FileReadLine(LPTSTR aFilespec, LPTSTR aLineNumber);
 	ResultType FileAppend(LPTSTR aFilespec, LPTSTR aBuf, LoopReadFileStruct *aCurrentReadFile);
 	ResultType WriteClipboardToFile(LPTSTR aFilespec);
 	ResultType ReadClipboardFromFile(HANDLE hfile);
@@ -629,22 +581,11 @@ private:
 	ResultType RegWrite(DWORD aValueType, HKEY aRootKey, LPTSTR aRegSubkey, LPTSTR aValueName, LPTSTR aValue);
 	ResultType RegDelete(HKEY aRootKey, LPTSTR aRegSubkey, LPTSTR aValueName);
 	static LONG RegRemoveSubkeys(HKEY hRegKey);
-#ifndef MINIDLL
-	#define DESTROY_SPLASH \
-	{\
-		if (g_hWndSplash && IsWindow(g_hWndSplash))\
-			DestroyWindow(g_hWndSplash);\
-		g_hWndSplash = NULL;\
-	}
-	ResultType SplashTextOn(int aWidth, int aHeight, LPTSTR aTitle, LPTSTR aText);
-	ResultType Splash(LPTSTR aOptions, LPTSTR aSubText, LPTSTR aMainText, LPTSTR aTitle, LPTSTR aFontName
-		, LPTSTR aImageFile, bool aSplashImage);
-#endif
+
 	ResultType ToolTip(LPTSTR aText, LPTSTR aX, LPTSTR aY, LPTSTR aID);
 #ifndef MINIDLL
 	ResultType TrayTip(LPTSTR aTitle, LPTSTR aText, LPTSTR aTimeout, LPTSTR aOptions);
 #endif
-	ResultType Transform(LPTSTR aCmd, LPTSTR aValue1, LPTSTR aValue2);
 #ifndef MINIDLL
 	ResultType Input(); // The Input command.
 #endif
@@ -655,7 +596,7 @@ private:
 
 	ResultType WinMove(LPTSTR aTitle, LPTSTR aText, LPTSTR aX, LPTSTR aY
 		, LPTSTR aWidth = _T(""), LPTSTR aHeight = _T(""), LPTSTR aExcludeTitle = _T(""), LPTSTR aExcludeText = _T(""));
-	ResultType WinMenuSelectItem(LPTSTR aTitle, LPTSTR aText, LPTSTR aMenu1, LPTSTR aMenu2
+	ResultType MenuSelect(LPTSTR aTitle, LPTSTR aText, LPTSTR aMenu1, LPTSTR aMenu2
 		, LPTSTR aMenu3, LPTSTR aMenu4, LPTSTR aMenu5, LPTSTR aMenu6, LPTSTR aMenu7
 		, LPTSTR aExcludeTitle, LPTSTR aExcludeText);
 	ResultType ControlSend(LPTSTR aControl, LPTSTR aKeysToSend, LPTSTR aTitle, LPTSTR aText
@@ -893,7 +834,7 @@ public:
 	#define EXPR_OPERAND_TERMINATORS_EX_DOT EXPR_COMMON _T("+-?") // L31: Used in a few places where '.' needs special treatment.
 	#define EXPR_OPERAND_TERMINATORS EXPR_OPERAND_TERMINATORS_EX_DOT _T(".") // L31: Used in expressions where '.' is always an operator.
 	#define EXPR_ALL_SYMBOLS EXPR_OPERAND_TERMINATORS _T("\"")
-	#define EXPR_ILLEGAL_CHARS _T("'\\;`") // Characters illegal in an expression.
+	#define EXPR_ILLEGAL_CHARS _T("\\;`@#$") // Characters illegal in an expression.
 	// The following HOTSTRING option recognizer is kept somewhat forgiving/non-specific for backward compatibility
 	// (e.g. scripts may have some invalid hotstring options, which are simply ignored).  This definition is here
 	// because it's related to continuation line symbols. Also, avoid ever adding "&" to hotstring options because
@@ -903,7 +844,7 @@ public:
 	#define IS_HOTSTRING_OPTION(chr) (cisalnum(chr) || _tcschr(_T("?*- \t"), chr))
 	// The characters below are ordered with most-often used ones first, for performance:
 	#define DEFINE_END_FLAGS \
-		TCHAR end_flags[] = {' ', g_delimiter, '(', '\t', '<', '>', ':', '=', '+', '-', '*', '/', '!', '~', '&', '|', '^', '[', '.', '?', '\0'}; // '\0' must be last.
+		LPTSTR end_flags = _T(" ,(\t<>:=+-*/!~&|^[.?");
 		// L31: Added '[' for standalone ObjSet/Get to work as ACT_EXPRESSION.  "Get" is allowed for simplicity and for future use with functions-as-values (e.g. varContainingFunc[]).
 		// L34: Added '.' and changed dot handling to fix x.=y, improve support in other areas, catch more errors and give slightly better error messages.
 
@@ -931,15 +872,11 @@ public:
 		, LPTSTR aFilePath, size_t aFilePathLength);
 
 	Label *GetJumpTarget(bool aIsDereferenced);
+	Label *GetJumpTarget(bool aIsDereferenced, Func *aFunc);
 	Label *IsJumpValid(Label &aTargetLabel, bool aSilent = false);
 	BOOL IsOutsideAnyFunctionBody();
 
 	HWND DetermineTargetWindow(LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LPTSTR aExcludeText);
-
-#ifndef AUTOHOTKEYSC
-	static int ConvertEscapeChar(LPTSTR aFilespec);
-	static size_t ConvertEscapeCharGetLine(LPTSTR aBuf, int aMaxCharsToRead, FILE *fp);
-#endif  // The functions above are not needed by the self-contained version.
 
 	
 	// This is in the .h file so that it's more likely the compiler's cost/benefit estimate will
@@ -953,23 +890,11 @@ public:
 		case 0:  // Arg #1
 			switch(aActionType)
 			{
-			case ACT_ASSIGN:
 			case ACT_ASSIGNEXPR:
-			case ACT_ADD:
-			case ACT_SUB:
-			case ACT_MULT:
-			case ACT_DIV:
-			case ACT_TRANSFORM:
-			case ACT_STRINGLEFT:
-			case ACT_STRINGRIGHT:
-			case ACT_STRINGMID:
-			case ACT_STRINGTRIMLEFT:
-			case ACT_STRINGTRIMRIGHT:
+			case ACT_DEREF:
 			case ACT_STRINGLOWER:
 			case ACT_STRINGUPPER:
-			case ACT_STRINGLEN:
 			case ACT_STRINGREPLACE:
-			case ACT_STRINGGETPOS:
 			case ACT_GETKEYSTATE:
 			case ACT_CONTROLGETFOCUS:
 			case ACT_CONTROLGETTEXT:
@@ -982,12 +907,9 @@ public:
 			case ACT_RANDOM:
 			case ACT_INIREAD:
 			case ACT_REGREAD:
-			case ACT_DRIVESPACEFREE:
 			case ACT_DRIVEGET:
 			case ACT_SOUNDGET:
-			case ACT_SOUNDGETWAVEVOLUME:
 			case ACT_FILEREAD:
-			case ACT_FILEREADLINE:
 			case ACT_FILEGETATTRIB:
 			case ACT_FILEGETTIME:
 			case ACT_FILEGETSIZE:
@@ -1012,46 +934,14 @@ public:
 			case ACT_FORMATTIME:
 			case ACT_FOR:
 			case ACT_CATCH:
-				return ARG_TYPE_OUTPUT_VAR;
-
 			case ACT_SORT:
-			case ACT_SPLITPATH:
-			case ACT_IFINSTRING:
-			case ACT_IFNOTINSTRING:
-			case ACT_IFEQUAL:
-			case ACT_IFNOTEQUAL:
-			case ACT_IFGREATER:
-			case ACT_IFGREATEROREQUAL:
-			case ACT_IFLESS:
-			case ACT_IFLESSOREQUAL:
-			case ACT_IFBETWEEN:
-			case ACT_IFNOTBETWEEN:
-			case ACT_IFIN:
-			case ACT_IFNOTIN:
-			case ACT_IFCONTAINS:
-			case ACT_IFNOTCONTAINS:
-			case ACT_IFIS:
-			case ACT_IFISNOT:
-				return ARG_TYPE_INPUT_VAR;
+				return ARG_TYPE_OUTPUT_VAR;
 			}
 			break;
 
 		case 1:  // Arg #2
 			switch(aActionType)
 			{
-			case ACT_STRINGLEFT:
-			case ACT_STRINGRIGHT:
-			case ACT_STRINGMID:
-			case ACT_STRINGTRIMLEFT:
-			case ACT_STRINGTRIMRIGHT:
-			case ACT_STRINGLOWER:
-			case ACT_STRINGUPPER:
-			case ACT_STRINGLEN:
-			case ACT_STRINGREPLACE:
-			case ACT_STRINGGETPOS:
-			case ACT_STRINGSPLIT:
-				return ARG_TYPE_INPUT_VAR;
-
 			case ACT_MOUSEGETPOS:
 			case ACT_WINGETPOS:
 			case ACT_CONTROLGETPOS:
@@ -1093,6 +983,9 @@ public:
 			break;
 
 		case 4:  // Arg #5
+			if (aActionType == ACT_STRINGREPLACE)
+				return ARG_TYPE_OUTPUT_VAR;
+			// Otherwise, fall through to below:
 		case 5:  // Arg #6
 			if (aActionType == ACT_SPLITPATH || aActionType == ACT_FILEGETSHORTCUT)
 				return ARG_TYPE_OUTPUT_VAR;
@@ -1135,46 +1028,55 @@ public:
 			return (arg.type == ARG_TYPE_INPUT_VAR);
 	}
 
-	static HKEY RegConvertRootKey(LPTSTR aBuf, bool *aIsRemoteRegistry = NULL)
+	static HKEY RegConvertKey(LPTSTR aBuf, LPTSTR *aSubkey = NULL, bool *aIsRemoteRegistry = NULL)
 	{
-		// Even if the computer name is a single letter, it seems like using a colon as delimiter is ok
-		// (e.g. a:HKEY_LOCAL_MACHINE), since we wouldn't expect the root key to be used as a filename
-		// in that exact way, i.e. a drive letter should be followed by a backslash 99% of the time in
-		// this context.
-		// Research indicates that colon is an illegal char in a computer name (at least for NT,
-		// and by extension probably all other OSes).  So it should be safe to use it as a delimiter
-		// for the remote registry feature.  But just in case, get the right-most one,
-		// e.g. Computer:01:HKEY_LOCAL_MACHINE  ; the first colon is probably illegal on all OSes.
-		// Additional notes from the Internet:
-		// "A Windows NT computer name can be up to 15 alphanumeric characters with no blank spaces
-		// and must be unique on the network. It can contain the following special characters:
-		// ! @ # $ % ^ & ( ) -   ' { } .
-		// It may not contain:
-		// \ * + = | : ; " ? ,
-		// The following is a list of illegal characters in a computer name:
-		// regEx.Pattern = "`|~|!|@|#|\$|\^|\&|\*|\(|\)|\=|\+|{|}|\\|;|:|'|<|>|/|\?|\||%"
+		const size_t COMPUTER_NAME_BUF_SIZE = 128;
 
-		LPTSTR colon_pos = _tcsrchr(aBuf, ':');
-		LPTSTR key_name = colon_pos ? omit_leading_whitespace(colon_pos + 1) : aBuf;
-		if (aIsRemoteRegistry) // Caller wanted the below put into the output parameter.
-			*aIsRemoteRegistry = (colon_pos != NULL);
-		HKEY root_key = NULL; // Set default.
+		LPTSTR key_name_pos = aBuf, computer_name_end = NULL;
+
+		if (*aBuf == '\\' && aBuf[1] == '\\') // Something like \\ComputerName\HKLM.
+		{
+			if (  !(computer_name_end = _tcschr(aBuf + 2, '\\'))
+				|| (computer_name_end - aBuf) >= COMPUTER_NAME_BUF_SIZE  )
+				return NULL;
+			key_name_pos = computer_name_end + 1;
+		}
+
+		// Copy root key name into temporary buffer for use by _tcsicmp().
+		TCHAR key_name[20];
+		int i;
+		for (i = 0; key_name_pos[i] && key_name_pos[i] != '\\'; ++i)
+		{
+			if (i == 19)
+				return NULL; // Too long to be valid.
+			key_name[i] = key_name_pos[i];
+		}
+		key_name[i] = '\0';
+		
+		// Set output parameters for caller.
+		if (aSubkey)
+			*aSubkey = key_name_pos + i + (key_name_pos[i] == '\\');
+		if (aIsRemoteRegistry)
+			*aIsRemoteRegistry = (computer_name_end != NULL);
+
+		HKEY root_key;
 		if (!_tcsicmp(key_name, _T("HKLM")) || !_tcsicmp(key_name, _T("HKEY_LOCAL_MACHINE")))       root_key = HKEY_LOCAL_MACHINE;
 		else if (!_tcsicmp(key_name, _T("HKCR")) || !_tcsicmp(key_name, _T("HKEY_CLASSES_ROOT")))   root_key = HKEY_CLASSES_ROOT;
 		else if (!_tcsicmp(key_name, _T("HKCC")) || !_tcsicmp(key_name, _T("HKEY_CURRENT_CONFIG"))) root_key = HKEY_CURRENT_CONFIG;
 		else if (!_tcsicmp(key_name, _T("HKCU")) || !_tcsicmp(key_name, _T("HKEY_CURRENT_USER")))   root_key = HKEY_CURRENT_USER;
 		else if (!_tcsicmp(key_name, _T("HKU")) || !_tcsicmp(key_name, _T("HKEY_USERS")))           root_key = HKEY_USERS;
-		if (!root_key)  // Invalid or unsupported root key name.
+		else // Invalid or unsupported root key name.
 			return NULL;
-		if (!aIsRemoteRegistry || !colon_pos) // Either caller didn't want it opened, or it doesn't need to be.
+
+		if (!aIsRemoteRegistry || !computer_name_end) // Either caller didn't want it opened, or it doesn't need to be.
 			return root_key; // If it's a remote key, this value should only be used by the caller as an indicator.
 		// Otherwise, it's a remote computer whose registry the caller wants us to open:
 		// It seems best to require the two leading backslashes in case the computer name contains
 		// spaces (just in case spaces are allowed on some OSes or perhaps for Unix interoperability, etc.).
 		// Therefore, make no attempt to trim leading and trailing spaces from the computer name:
-		TCHAR computer_name[128];
+		TCHAR computer_name[COMPUTER_NAME_BUF_SIZE];
 		tcslcpy(computer_name, aBuf, _countof(computer_name));
-		computer_name[colon_pos - aBuf] = '\0';
+		computer_name[computer_name_end - aBuf] = '\0';
 		HKEY remote_key;
 		return (RegConnectRegistry(computer_name, root_key, &remote_key) == ERROR_SUCCESS) ? remote_key : NULL;
 	}
@@ -1257,7 +1159,7 @@ public:
 	static DWORD SoundConvertControlType(LPTSTR aBuf)
 	{
 		// v1.0.37.06: The following was added to allow unnamed control types (if any) to be accessed via number:
-		if (IsPureNumeric(aBuf, false, false, true)) // Seems best to allowing floating point here, since .000 on the end might happen sometimes.
+		if (IsNumeric(aBuf, false, false, true)) // Seems best to allowing floating point here, since .000 on the end might happen sometimes.
 			return ATOU(aBuf);
 		// The following are the types that seem to correspond to actual sound attributes.  Some of the
 		// values are not included here, such as MIXERCONTROL_CONTROLTYPE_FADER, which seems to be a type
@@ -1296,7 +1198,7 @@ public:
 	static SysGetCmds ConvertSysGetCmd(LPTSTR aBuf)
 	{
 		if (!aBuf || !*aBuf) return SYSGET_CMD_INVALID;
-		if (IsPureNumeric(aBuf)) return SYSGET_CMD_METRICS;
+		if (IsNumeric(aBuf)) return SYSGET_CMD_METRICS;
 		if (!_tcsicmp(aBuf, _T("MonitorCount"))) return SYSGET_CMD_MONITORCOUNT;
 		if (!_tcsicmp(aBuf, _T("MonitorPrimary"))) return SYSGET_CMD_MONITORPRIMARY;
 		if (!_tcsicmp(aBuf, _T("Monitor"))) return SYSGET_CMD_MONITORAREA; // Called "Monitor" vs. "MonitorArea" to make it easier to remember.
@@ -1305,40 +1207,6 @@ public:
 		return SYSGET_CMD_INVALID;
 	}
 
-	static TransformCmds ConvertTransformCmd(LPTSTR aBuf)
-	{
-		if (!aBuf || !*aBuf) return TRANS_CMD_INVALID;
-		if (!_tcsicmp(aBuf, _T("Asc"))) return TRANS_CMD_ASC;
-		if (!_tcsicmp(aBuf, _T("Chr"))) return TRANS_CMD_CHR;
-		if (!_tcsicmp(aBuf, _T("Deref"))) return TRANS_CMD_DEREF;
-#ifndef UNICODE
-		if (!_tcsicmp(aBuf, _T("Unicode"))) return TRANS_CMD_UNICODE;
-#endif
-		if (!_tcsicmp(aBuf, _T("HTML"))) return TRANS_CMD_HTML;
-		if (!_tcsicmp(aBuf, _T("Mod"))) return TRANS_CMD_MOD;
-		if (!_tcsicmp(aBuf, _T("Pow"))) return TRANS_CMD_POW;
-		if (!_tcsicmp(aBuf, _T("Exp"))) return TRANS_CMD_EXP;
-		if (!_tcsicmp(aBuf, _T("Sqrt"))) return TRANS_CMD_SQRT;
-		if (!_tcsicmp(aBuf, _T("Log"))) return TRANS_CMD_LOG;
-		if (!_tcsicmp(aBuf, _T("Ln"))) return TRANS_CMD_LN;  // Natural log.
-		if (!_tcsicmp(aBuf, _T("Round"))) return TRANS_CMD_ROUND;
-		if (!_tcsicmp(aBuf, _T("Ceil"))) return TRANS_CMD_CEIL;
-		if (!_tcsicmp(aBuf, _T("Floor"))) return TRANS_CMD_FLOOR;
-		if (!_tcsicmp(aBuf, _T("Abs"))) return TRANS_CMD_ABS;
-		if (!_tcsicmp(aBuf, _T("Sin"))) return TRANS_CMD_SIN;
-		if (!_tcsicmp(aBuf, _T("Cos"))) return TRANS_CMD_COS;
-		if (!_tcsicmp(aBuf, _T("Tan"))) return TRANS_CMD_TAN;
-		if (!_tcsicmp(aBuf, _T("ASin"))) return TRANS_CMD_ASIN;
-		if (!_tcsicmp(aBuf, _T("ACos"))) return TRANS_CMD_ACOS;
-		if (!_tcsicmp(aBuf, _T("ATan"))) return TRANS_CMD_ATAN;
-		if (!_tcsicmp(aBuf, _T("BitAnd"))) return TRANS_CMD_BITAND;
-		if (!_tcsicmp(aBuf, _T("BitOr"))) return TRANS_CMD_BITOR;
-		if (!_tcsicmp(aBuf, _T("BitXOr"))) return TRANS_CMD_BITXOR;
-		if (!_tcsicmp(aBuf, _T("BitNot"))) return TRANS_CMD_BITNOT;
-		if (!_tcsicmp(aBuf, _T("BitShiftLeft"))) return TRANS_CMD_BITSHIFTLEFT;
-		if (!_tcsicmp(aBuf, _T("BitShiftRight"))) return TRANS_CMD_BITSHIFTRIGHT;
-		return TRANS_CMD_INVALID;
-	}
 #ifndef MINIDLL
 	static MenuCommands ConvertMenuCommand(LPTSTR aBuf)
 	{
@@ -1583,12 +1451,12 @@ public:
 		if (!_tcsicmp(aBuf, _T("List"))) return DRIVEGET_CMD_LIST;
 		if (!_tcsicmp(aBuf, _T("FileSystem")) || !_tcsicmp(aBuf, _T("FS"))) return DRIVEGET_CMD_FILESYSTEM;
 		if (!_tcsicmp(aBuf, _T("Label"))) return DRIVEGET_CMD_LABEL;
-		if (!_tcsnicmp(aBuf, _T("SetLabel:"), 9)) return DRIVEGET_CMD_SETLABEL;  // Uses strnicmp() vs. stricmp().
 		if (!_tcsicmp(aBuf, _T("Serial"))) return DRIVEGET_CMD_SERIAL;
 		if (!_tcsicmp(aBuf, _T("Type"))) return DRIVEGET_CMD_TYPE;
 		if (!_tcsicmp(aBuf, _T("Status"))) return DRIVEGET_CMD_STATUS;
 		if (!_tcsicmp(aBuf, _T("StatusCD"))) return DRIVEGET_CMD_STATUSCD;
 		if (!_tcsicmp(aBuf, _T("Capacity")) || !_tcsicmp(aBuf, _T("Cap"))) return DRIVEGET_CMD_CAPACITY;
+		if (!_tcsicmp(aBuf, _T("SpaceFree"))) return DRIVEGET_CMD_SPACEFREE;
 		return DRIVEGET_CMD_INVALID;
 	}
 
@@ -1720,32 +1588,33 @@ public:
 	static FileLoopModeType ConvertLoopMode(LPTSTR aBuf)
 	// Returns the file loop mode, or FILE_LOOP_INVALID if aBuf contains an invalid mode.
 	{
-		switch (ATOI(aBuf))
+		for (FileLoopModeType mode = FILE_LOOP_INVALID;;)
 		{
-		case 0: return FILE_LOOP_FILES_ONLY; // This is also the default mode if the param is blank.
-		case 1: return FILE_LOOP_FILES_AND_FOLDERS;
-		case 2: return FILE_LOOP_FOLDERS_ONLY;
+			switch (ctoupper(*aBuf++))
+			{
+			// For simplicity, both are allowed with either kind of loop:
+			case 'F': // Files
+			case 'V': // Values
+				mode |= FILE_LOOP_FILES_ONLY;
+				break;
+			case 'D': // Directories
+			case 'K': // Keys
+				mode |= FILE_LOOP_FOLDERS_ONLY;
+				break;
+			case 'R':
+				mode |= FILE_LOOP_RECURSE;
+				break;
+			case ' ':  // Allow whitespace.
+			case '\t': //
+				break;
+			case '\0':
+				if ((mode & FILE_LOOP_FILES_AND_FOLDERS) == 0)
+					mode |= FILE_LOOP_FILES_ONLY; // Set default.
+				return mode;
+			default: // Invalid character.
+				return FILE_LOOP_INVALID;
+			}
 		}
-		// Otherwise:
-		return FILE_LOOP_INVALID;
-	}
-
-	static int ConvertMsgBoxResult(LPTSTR aBuf)
-	// Returns the matching ID, or zero if none.
-	{
-		if (!aBuf || !*aBuf) return 0;
-		// Keeping the most oft-used ones up top helps perf. a little:
-		if (!_tcsicmp(aBuf, _T("YES"))) return IDYES;
-		if (!_tcsicmp(aBuf, _T("NO"))) return IDNO;
-		if (!_tcsicmp(aBuf, _T("OK"))) return IDOK;
-		if (!_tcsicmp(aBuf, _T("CANCEL"))) return IDCANCEL;
-		if (!_tcsicmp(aBuf, _T("ABORT"))) return IDABORT;
-		if (!_tcsicmp(aBuf, _T("IGNORE"))) return IDIGNORE;
-		if (!_tcsicmp(aBuf, _T("RETRY"))) return IDRETRY;
-		if (!_tcsicmp(aBuf, _T("CONTINUE"))) return IDCONTINUE; // v1.0.44.08: For use with 2000/XP's "Cancel/Try Again/Continue" MsgBox.
-		if (!_tcsicmp(aBuf, _T("TRYAGAIN"))) return IDTRYAGAIN; //
-		if (!_tcsicmp(aBuf, _T("Timeout"))) return AHK_TIMEOUT; // Our custom result value.
-		return 0;
 	}
 
 	static int ConvertRunMode(LPTSTR aBuf)
@@ -1836,7 +1705,7 @@ public:
 		if (!_tcsicmp(aBuf, _T("UTF-8-RAW")))	return CP_UTF8 | CP_AHKNOBOM;
 		if (!_tcsicmp(aBuf, _T("UTF-16")))		return 1200;
 		if (!_tcsicmp(aBuf, _T("UTF-16-RAW")))	return 1200 | CP_AHKNOBOM;
-		if (!_tcsnicmp(aBuf, _T("CP"), 2) && IsPureNumeric(aBuf + 2, false, false))
+		if (!_tcsnicmp(aBuf, _T("CP"), 2) && IsNumeric(aBuf + 2, false, false))
 			// CPnnn
 			return ATOU(aBuf + 2);
 		return -1;
@@ -1975,6 +1844,7 @@ public:
 	FuncParam *mParam;  // Will hold an array of FuncParams.
 	int mParamCount; // The number of items in the above array.  This is also the function's maximum number of params.
 	int mMinParams;  // The number of mandatory parameters (populated for both UDFs and built-in's).
+	Label *mFirstLabel, *mLastLabel; // Linked list of private labels.
 	Var **mVar, **mLazyVar; // Array of pointers-to-variable, allocated upon first use and later expanded as needed.
 	Var **mGlobalVar; // Array of global declarations.
 	int mVarCount, mVarCountMax, mLazyVarCount, mGlobalVarCount; // Count of items in the above array as well as the maximum capacity.
@@ -1993,6 +1863,7 @@ public:
 	// override in the script.  So mIsBuiltIn should always be used to determine whether the function
 	// is truly built-in, not its name.
 	bool mIsVariadic;
+	bool mHasReturn; // Does the UDF have at least one ACT_RETURN with a value specified?
 
 	bool Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount, bool aIsVariadic = false);
 
@@ -2070,12 +1941,14 @@ public:
 		: mName(aFuncName) // Caller gave us a pointer to dynamic memory for this.
 		, mBIF(NULL)
 		, mParam(NULL), mParamCount(0), mMinParams(0)
+		, mFirstLabel(NULL), mLastLabel(NULL)
 		, mVar(NULL), mVarCount(0), mVarCountMax(0), mLazyVar(NULL), mLazyVarCount(0)
 		, mGlobalVar(NULL), mGlobalVarCount(0)
 		, mInstances(0)
 		, mDefaultVarType(VAR_DECLARE_NONE)
 		, mIsBuiltIn(aIsBuiltIn)
 		, mIsVariadic(false)
+		, mHasReturn(false)
 	{}
 
 	void *operator new(size_t aBytes) {return SimpleHeap::Malloc(aBytes);}
@@ -2595,12 +2468,11 @@ public:
 	size_t GetLine(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSection, TextStream *ts);
 	ResultType IsDirective(LPTSTR aBuf);
 	ResultType ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType = ACT_INVALID
-		, ActionTypeType aOldActionType = OLD_INVALID, LPTSTR aActionName = NULL
-		, LPTSTR aEndMarker = NULL, LPTSTR aLiteralMap = NULL, size_t aLiteralMapLength = 0);
+		, LPTSTR aActionName = NULL, LPTSTR aEndMarker = NULL
+		, LPTSTR aLiteralMap = NULL, size_t aLiteralMapLength = 0);
 	ResultType ParseDerefs(LPTSTR aArgText, LPTSTR aArgMap, DerefType *aDeref, int &aDerefCount);
 	LPTSTR ParseActionType(LPTSTR aBufTarget, LPTSTR aBufSource, bool aDisplayErrors);
 	static ActionTypeType ConvertActionType(LPTSTR aActionTypeString);
-	static ActionTypeType ConvertOldActionType(LPTSTR aActionTypeString);
 	ResultType AddLabel(LPTSTR aLabelName, bool aAllowDupe);
 	ResultType AddLine(ActionTypeType aActionType, LPTSTR aArg[] = NULL, int aArgc = 0, LPTSTR aArgMap[] = NULL);
 
@@ -2609,7 +2481,7 @@ public:
 	// were member functions of class Line, a check for NULL would have to
 	// be done before dereferencing any line's mNextLine, for example:
 	Line *PreparseBlocks(Line *aStartingLine, bool aFindBlockEnd = false, Line *aParentLine = NULL);
-	Line *PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode = NORMAL_MODE, AttributeType aLoopType = ATTR_NONE);
+	Line *PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode = NORMAL_MODE, ActionTypeType aLoopType = ACT_INVALID);
 
 	Line *mFirstLine, *mLastLine;     // The first and last lines in the linked list.
 	Line *mFirstStaticLine, *mLastStaticLine; // The first and last static var initializer.
@@ -2657,17 +2529,15 @@ public:
 	bool mIsReadyToExecute;
 	bool mAutoExecSectionIsRunning;
 	bool mIsRestart; // The app is restarting rather than starting from scratch.
-	bool mIsAutoIt2; // Whether this script is considered to be an AutoIt2 script.
 	bool mErrorStdOut; // true if load-time syntax errors should be sent to stdout vs. a MsgBox.
 #ifdef AUTOHOTKEYSC
 	bool mCompiledHasCustomIcon; // Whether the compiled script uses a custom icon.
 #else
 	TextStream *mIncludeLibraryFunctionsThenExit;
 #endif
-	__int64 mLinesExecutedThisCycle; // Use 64-bit to match the type of g->LinesPerCycle
 	int mUninterruptedLineCountMax; // 32-bit for performance (since huge values seem unnecessary here).
 	int mUninterruptibleTime;
-	DWORD mLastScriptRest, mLastPeekTime;
+	DWORD mLastPeekTime;
 
 	CStringW mRunAsUser, mRunAsPass, mRunAsDomain;
 #ifndef MINIDLL
@@ -2696,6 +2566,8 @@ public:
 #ifndef MINIDLL
 	ResultType Edit();
 #endif
+	bool IsPersistent();
+	void ExitIfNotPersistent(ExitReasons aExitReason);
 	ResultType Reload(bool aDisplayErrors);
 	ResultType ExitApp(ExitReasons aExitReason, LPTSTR aBuf = NULL, int ExitCode = 0);
 	void TerminateApp(ExitReasons aExitReason, int aExitCode); // L31: Added aExitReason. See script.cpp.
@@ -2784,7 +2656,7 @@ public:
 	static ResultType UnhandledException(ExprTokenType*& aToken, Line* aLine);
 	static ResultType SetErrorLevelOrThrow() { return SetErrorLevelOrThrowBool(true); }
 	static ResultType SetErrorLevelOrThrowBool(bool aError);
-	static ResultType SetErrorLevelOrThrowInt(int aErrorValue, LPCTSTR aWhat);
+	static ResultType SetErrorLevelOrThrowInt(int aErrorValue, LPCTSTR aWhat = NULL);
 	static ResultType SetErrorLevelOrThrowStr(LPCTSTR aErrorValue);
 	static ResultType SetErrorLevelOrThrowStr(LPCTSTR aErrorValue, LPCTSTR aWhat);
 	static ResultType ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat = NULL, LPCTSTR aExtraInfo = _T(""));
@@ -2809,15 +2681,11 @@ public:
 VarSizeType BIV_True_False(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_MMM_DDD(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_DateTime(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_BatchLines(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_TitleMatchMode(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_TitleMatchModeSpeed(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_DetectHiddenWindows(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_DetectHiddenText(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_AutoTrim(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_StringCaseSense(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_FormatInteger(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_FormatFloat(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_KeyDelay(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_WinDelay(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_ControlDelay(LPTSTR aBuf, LPTSTR aVarName);
@@ -2835,6 +2703,7 @@ VarSizeType BIV_IsCompiled(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_IsUnicode(LPTSTR aBuf, LPTSTR aVarName);
 #endif
 VarSizeType BIV_FileEncoding(LPTSTR aBuf, LPTSTR aVarName);
+VarSizeType BIV_MsgBoxResult(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_LastError(LPTSTR aBuf, LPTSTR aVarName);
 #ifndef MINIDLL
 VarSizeType BIV_IconHidden(LPTSTR aBuf, LPTSTR aVarName);
@@ -2849,11 +2718,14 @@ VarSizeType BIV_AhkPath(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_DllPath(LPTSTR aBuf, LPTSTR aVarName); // HotKeyIt H1 path of loaded dll
 VarSizeType BIV_TickCount(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_Now(LPTSTR aBuf, LPTSTR aVarName);
+#ifdef CONFIG_WIN9X
 VarSizeType BIV_OSType(LPTSTR aBuf, LPTSTR aVarName);
+#endif
 VarSizeType BIV_OSVersion(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_Language(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_UserName_ComputerName(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_WorkingDir(LPTSTR aBuf, LPTSTR aVarName);
+VarSizeType BIV_InitialWorkingDir(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_WinDir(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_Temp(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_ComSpec(LPTSTR aBuf, LPTSTR aVarName);
@@ -2872,8 +2744,8 @@ VarSizeType BIV_LoopFileName(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_LoopFileShortName(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_LoopFileExt(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_LoopFileDir(LPTSTR aBuf, LPTSTR aVarName);
+VarSizeType BIV_LoopFilePath(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_LoopFileFullPath(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_LoopFileLongPath(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_LoopFileShortPath(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_LoopFileTime(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_LoopFileAttrib(LPTSTR aBuf, LPTSTR aVarName);
@@ -2900,7 +2772,6 @@ VarSizeType BIV_EndChar(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_Gui(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_GuiControl(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_GuiEvent(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_PriorKey(LPTSTR aBuf, LPTSTR aVarName);
 #endif
 VarSizeType BIV_EventInfo(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_TimeIdle(LPTSTR aBuf, LPTSTR aVarName);
@@ -2908,6 +2779,7 @@ VarSizeType BIV_TimeIdlePhysical(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_IPAddress(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_IsAdmin(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_PtrSize(LPTSTR aBuf, LPTSTR aVarName);
+VarSizeType BIV_PriorKey(LPTSTR aBuf, LPTSTR aVarName);
 
 
 
@@ -2938,8 +2810,9 @@ void BIF_UnLock(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParam
 void BIF_StrLen(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_SubStr(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_InStr(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_StrSplit(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_RegEx(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
-void BIF_Asc(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_Ord(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_Chr(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_NumGet(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_NumPut(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
@@ -2964,6 +2837,8 @@ void BIF_ASinACos(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 void BIF_ATan(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_Exp(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_SqrtLogLn(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_DateAdd(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+void BIF_DateDiff(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 
 void BIF_OnMessage(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 #ifdef ENABLE_REGISTERCALLBACK
@@ -2991,6 +2866,8 @@ void BIF_IL_Add(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParam
 #endif
 void BIF_Trim(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount); // L31: Also handles LTrim and RTrim.
 
+void BIF_Type(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+
 
 void BIF_IsObject(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_ObjCreate(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
@@ -3016,6 +2893,9 @@ void BIF_ObjClone(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 
 // Advanced file IO interfaces
 void BIF_FileOpen(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+
+
+// COM interop
 void BIF_ComObjActive(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_ComObjCreate(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 void BIF_ComObjGet(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
@@ -3029,15 +2909,18 @@ void BIF_ComObjQuery(ExprTokenType &aResultToken, ExprTokenType *aParam[], int a
 
 void BIF_Exception(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 
+void BIF_PerformAction(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 
-BOOL LegacyResultToBOOL(LPTSTR aResult);
-BOOL LegacyVarToBOOL(Var &aVar);
-BOOL TokenToBOOL(ExprTokenType &aToken, SymbolType aTokenIsNumber);
-SymbolType TokenIsPureNumeric(ExprTokenType &aToken);
+
+BOOL ResultToBOOL(LPTSTR aResult);
+BOOL VarToBOOL(Var &aVar);
+BOOL TokenToBOOL(ExprTokenType &aToken);
+SymbolType TokenIsNumeric(ExprTokenType &aToken);
+SymbolType TokenIsPureNumeric(ExprTokenType &aToken, SymbolType &aNumType);
 BOOL TokenIsEmptyString(ExprTokenType &aToken);
 BOOL TokenIsEmptyString(ExprTokenType &aToken, BOOL aWarnUninitializedVar); // Same as TokenIsEmptyString but optionally warns if the token is an uninitialized var.
-__int64 TokenToInt64(ExprTokenType &aToken, BOOL aIsPureInteger = FALSE);
-double TokenToDouble(ExprTokenType &aToken, BOOL aCheckForHex = TRUE, BOOL aIsPureFloat = FALSE);
+__int64 TokenToInt64(ExprTokenType &aToken);
+double TokenToDouble(ExprTokenType &aToken, BOOL aCheckForHex = TRUE);
 LPTSTR TokenToString(ExprTokenType &aToken, LPTSTR aBuf = NULL);
 ResultType TokenToDoubleOrInt64(ExprTokenType &aToken);
 IObject *TokenToObject(ExprTokenType &aToken); // L31

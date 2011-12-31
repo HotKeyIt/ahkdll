@@ -87,7 +87,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 	// EVALUATE POSTFIX EXPRESSION
 	///////////////////////////////
 	int i, actual_param_count, delta;
-	SymbolType right_is_number, left_is_number, result_symbol;
+	SymbolType right_is_number, left_is_number, right_is_pure_number, left_is_pure_number, result_symbol;
 	double right_double, left_double;
 	__int64 right_int64, left_int64;
 	LPTSTR right_string, left_string;
@@ -99,7 +99,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 	size_t result_size, alloca_usage = 0; // v1.0.45: Track amount of alloca mem to avoid stress on stack from extreme expressions (mostly theoretical).
 	BOOL done, done_and_have_an_output_var, make_result_persistent, left_branch_is_true
 		, left_was_negative, is_pre_op; // BOOL vs. bool benchmarks slightly faster, and is slightly smaller in code size (or maybe it's cp1's int vs. char that shrunk it).
-	ExprTokenType *circuit_token, *this_postfix, *p_postfix;
+	ExprTokenType *this_postfix, *p_postfix;
 	Var *sym_assign_var, *temp_var;
 
 	// v1.0.44.06: EXPR_SMALL_MEM_LIMIT is the means by which _alloca() is used to boost performance a
@@ -129,7 +129,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 		ExprTokenType &this_token = *(ExprTokenType *)_alloca(sizeof(ExprTokenType)); // Saves a lot of stack space, and seems to perform just as well as something like the following (at the cost of ~82 byte increase in OBJ code size): ExprTokenType &this_token = new_token[new_token_count++]  // array size MAX_TOKENS
 		this_token = *this_postfix; // Struct copy. See comment section above.
 
-		// At this stage, operands in the postfix array should be SYM_OPERAND, SYM_STRING, or SYM_DYNAMIC.
+		// At this stage, operands in the postfix array should be SYM_STRING, SYM_INTEGER, SYM_FLOAT or SYM_DYNAMIC.
 		// But all are checked since that operation is just as fast:
 		if (IS_OPERAND(this_token.symbol)) // If it's an operand, just push it onto stack for use by an operator in a future iteration.
 		{
@@ -238,12 +238,8 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 				switch (this_token.var->Type())
   				{
 				case VAR_NORMAL:
-					if (g_NoEnv || this_token.var->HasContents()) // v1.0.46.07: It's not an environment variable.
-					{
-						this_token.symbol = SYM_VAR; // The fact that a SYM_VAR operand is always VAR_NORMAL (with one limited exception) is relied upon in several places such as built-in functions.
-						goto push_this_token;
-					}
-					break;
+					this_token.symbol = SYM_VAR; // The fact that a SYM_VAR operand is always VAR_NORMAL (with one limited exception) is relied upon in several places such as built-in functions.
+					goto push_this_token;
 				case VAR_BUILTIN: // v1.0.48.02: Ensure it's VAR_BUILTIN prior to below because mBIV is a union with mCapacity.
 					if (this_token.var->mBIV == BIV_LoopIndex) // v1.0.48.01: Improve performance of A_Index by treating it as an integer rather than a string in expressions (avoids conversions to/from strings).
 					{
@@ -279,37 +275,15 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 					//
 					break; // case VAR_BUILTIN
   				}
-				// Otherwise, it's an environment variable, built-in variable, or normal variable of zero-length
-				result_size = this_token.var->Get() + 1; // Get() is used even for environment vars because it has a cache that improves their performance.
+				// Otherwise, it's a built-in variable.
+				result_size = this_token.var->Get() + 1;
 				if (result_size == 1)
 				{
-					if (this_token.var->Type() == VAR_NORMAL) // It's an empty variable, so treated as a non-environment (normal) var.
-					{
-						// The following is done here rather than during infix creation/tokenizing because
-						// 1) It's more correct because it's conceivable that some part of the expression
-						//    that has already been evaluated before this_token has newly made an environment
-						//    variable blank or non-blank, which should be detected here (i.e. only at the
-						//    last possible moment).  For example, a function might have the side-effect of
-						//    altering an environment variable.
-						// 2) It performs better because Get()'s environment variable cache is most effective
-						//    when each size-Get() is followed immediately by a contents-Get() for the same
-						//    variable.
-						// Must make empty variables that aren't environment variables into SYM_VAR so that
-						// they can be passed by reference into functions, their address can be taken with
-						// the '&' operator, and so that they can be the lvalue for an assignment.
-						// Environment variables aren't supported for any of that because it would be silly
-						// in most cases, and would probably complicate the code far more than its worth.
-						this_token.symbol = SYM_VAR; // The fact that a SYM_VAR operand is always VAR_NORMAL (with one limited exception) is relied upon in several places such as built-in functions.
-					}
-					else // It's a built-in variable that's blank.
-					{
-						this_token.marker = _T("");
-						this_token.symbol = SYM_STRING;
-					}
+					this_token.marker = _T("");
+					this_token.symbol = SYM_STRING;
 					goto push_this_token;
 				}
-				// Otherwise, it's neither an empty string nor a normal variable.
-				// It must be an environment variable or built-in variable. Need some memory to store it.
+				// Otherwise, it's a built-in variable which is not empty. Need some memory to store it.
 				// The following section is similar to that in the make_result_persistent section further
 				// below.  So maintain them together and see it for more comments.
 				// Must cast to int to avoid loss of negative values:
@@ -338,8 +312,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 				}
 				this_token.var->Get(result); // MUST USE "result" TO AVOID OVERWRITING MARKER/VAR UNION.
 				this_token.marker = result;  // Must be done after above because marker and var overlap in union.
-				this_token.buf = NULL; // Indicate that this SYM_OPERAND token LACKS a pre-converted binary integer.
-				this_token.symbol = SYM_OPERAND; // Generic operand so that it can later be interpreted as a number (if it's numeric).
+				this_token.symbol = SYM_STRING;
 			} // if (this_token.symbol == SYM_DYNAMIC)
 			goto push_this_token;
 		} // if (IS_OPERAND(this_token.symbol))
@@ -356,24 +329,10 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 			
 			// The following two steps are now done inside Func::Call:
 			//this_token.symbol = SYM_INTEGER; // Set default return type so that functions don't have to do it if they return INTs.
-			//this_token.marker = func.mName;  // Inform function of which built-in function called it (allows code sharing/reduction). Can't use circuit_token because it's value is still needed later below.
+			//this_token.marker = func.mName;  // Inform function of which built-in function called it (allows code sharing/reduction).
 			this_token.buf = left_buf;       // mBIF() can use this to store a string result, and for other purposes.
 			
-			// BACK UP THE CIRCUIT TOKEN (it's saved because it can be non-NULL at this point; verified
-			// through code review).  Currently refers to the same memory as mem_to_free via union.
-			circuit_token = this_token.circuit_token;
-			this_token.mem_to_free = NULL; // Init to detect whether the called function allocates it (i.e. we're overloading it with a new purpose).  It's no longer necessary to back up & restore the previous value in circuit_token because circuit_token is used only when a result is about to get pushed onto the stack.
-			// RESIST TEMPTATIONS TO OPTIMIZE CIRCUIT_TOKEN by passing output_var as circuit_token/mem_to_free
-			// when done==true (i.e. the built-in function could then assign directly to output_var).
-			// It doesn't help performance at all except for a mere 10% or less in certain fairly rare cases.
-			// More importantly, it hurts maintainability because it makes RegExReplace() more complicated
-			// than it already is, and worse: each BIF would have to check that output_var doesn't overlap
-			// with its input/source strings because if it does, the function must not initialize a default
-			// in output_var before starting (and avoiding this would further complicate the code).
-			// Here is the crux of the abandoned approach: Any function that wishes to pass memory back to
-			// us via mem_to_free: When mem_to_free!=NULL, that function MUST INSTEAD: 1) Turn that
-			// memory over to output_var via AcceptNewMem(); 2) Set mem_to_free to NULL to indicate to
-			// us that it is a user of mem_to_free.
+			this_token.mem_to_free = NULL; // Init to detect whether the called function allocates it.
 			
 			FuncCallData func_call;
 			// Call the user-defined or built-in function.  Func::Call takes care of variadic parameter
@@ -399,16 +358,14 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 #endif
 			g_script.mCurrLine = this; // For error-reporting.
 
-			if (IS_NUMERIC(this_token.symbol) || this_token.symbol == SYM_OBJECT) // No need for make_result_persistent or early Assign(). Any numeric result can be considered final because it's already stored in permanent memory (namely the token itself).  L31: This also applies to SYM_OBJECT.
+			if (this_token.symbol != SYM_STRING)
 			{
-				// For code simplicity, the optimization for numeric results is done at a later stage.
+				// No need for make_result_persistent or early Assign().  Any numeric or object result can
+				// be considered final because it's already stored in permanent memory (the token itself).
 				// Additionally, this_token.mem_to_free is assumed to be NULL since the result is not
-				// a string; i.e. the function would've freed any memory it allocated without our help.
-				this_token.circuit_token = circuit_token; // Restore it to its original value.
+				// a string; i.e. the function would've had no need to return memory to us.
 				goto push_this_token;
 			}
-			//else it's a string, which might need to be moved to persistent memory further below.
-				ASSERT(this_token.symbol == SYM_STRING);
 			
 			#define EXPR_IS_DONE (!stack_count && this_postfix[1].symbol == SYM_INVALID) // True if we've used up the last of the operators & operands.
 			done = EXPR_IS_DONE;
@@ -492,9 +449,9 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 					goto normal_end_skip_output_var; // No need to restore circuit_token because the expression is finished.
 				// Next operation is ":=" and above has verified the target is SYM_VAR and VAR_NORMAL.
 				--stack_count; // STACK_POP;
-				this_token.circuit_token = (++this_postfix)->circuit_token; // Must be done AFTER above. Old, somewhat obsolete comment: this_postfix.circuit_token should have been NULL prior to this because the final right-side result of an assignment shouldn't be the last item of an AND/OR/IFF's left branch. The assignment itself would be that.
 				this_token.var = internal_output_var; // Make the result a variable rather than a normal operand so that its
 				this_token.symbol = SYM_VAR; // address can be taken, and it can be passed ByRef. e.g. &(x:=1)
+				++this_postfix; // We've fully handled the assignment.
 				goto push_this_token;
 			}
 			// Otherwise, there's no output_var or the expression isn't finished yet, so do normal processing.
@@ -517,8 +474,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 				mem[mem_count++] = this_token.mem_to_free;
 			}
 			//else this_token.mem_to_free==NULL, so the BIF just called didn't allocate memory to give to us.
-			this_token.circuit_token = circuit_token; // Restore it to its original value.
-
+			
 			// Empty strings are returned pretty often by UDFs, such as when they don't use "return"
 			// at all.  Therefore, handle them fully now, which should improve performance (since it
 			// avoids all the other checking later on).  It also doesn't hurt code size because this
@@ -526,8 +482,6 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 			if (!*this_token.marker) // Various make-persistent sections further below may rely on this check.
 			{
 				this_token.marker = _T(""); // Ensure it's a constant memory area, not a buf that might get overwritten soon.
-				this_token.symbol = SYM_OPERAND; // SYM_OPERAND vs. SYM_STRING probably doesn't matter in the case of empty string, but it's used for consistency with what the other UDF handling further below does.
-				this_token.buf = NULL; // Indicate that this SYM_OPERAND token LACKS a pre-converted binary integer.
 				goto push_this_token; // For code simplicity, the optimization for numeric results is done at a later stage.
 			}
 
@@ -581,8 +535,6 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 				} // This is the end of the section that determines the value of "make_result_persistent" for UDFs.
 			}
 
-			this_token.buf = NULL; // Indicate that this SYM_OPERAND token LACKS a pre-converted binary integer.
-			this_token.symbol = SYM_OPERAND; // Use generic, not string, so that any operator or function call that uses this result is free to reinterpret it as an integer or float.
 			if (make_result_persistent) // Both UDFs and built-in functions have ensured make_result_persistent is set.
 			{
 				// BELOW RELIES ON THE ABOVE ALWAYS HAVING VERIFIED AND FULLY HANDLED RESULT BEING AN EMPTY STRING.
@@ -628,22 +580,13 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 			goto push_this_token;
 		} // if (this_token.symbol == SYM_FUNC)
 
-		if (this_token.symbol == SYM_IFF_ELSE) // This is encountered when a ternary's condition was found to be false by a prior iteration.
+		if (this_token.symbol == SYM_IFF_ELSE)
 		{
-			if (this_token.circuit_token // This ternary's result is some other ternary's condition (somewhat rare).
-				&& stack_count) // Prevent underflow (this check might not be necessary; so it's just in case there's a way it can happen).
-			{
-				// To support *cascading* short-circuit when ternary/IFF's are nested inside each other, pop the
-				// topmost operand off the stack to modify its circuit_token.  The routine below will then
-				// use this as the parent IFF's *condition*, which is an non-operand of sorts because it's
-				// used only to determine which branch of an IFF will become the operand/result of this IFF.
-				this_token = *STACK_POP; // Struct copy.  Doing it this way is more maintainable than other methods, and is unlikely to perform much worse.
-				this_token.circuit_token = this_postfix->circuit_token; // Override the circuit_token that was just set in the line above.
-				goto non_null_circuit_token; // Must do this so that it properly evaluates this_postfix as the next ternary's condition.
-			}
-			// Otherwise, ignore it because its final result has already been evaluated and pushed onto the
-			// stack via prior iterations.  In other words, this ELSE branch was the IFF's final result, which
-			// is now topmost on the stack for use as an operand by a future operator.
+			// SYM_IFF_ELSE is encountered only when a previous iteration has determined that the ternary's condition
+			// is true.  At this stage, the ternary's "THEN" branch has already been evaluated and stored at the top
+			// of the stack.  So skip over its "else" branch (short-circuit) because that doesn't need to be evaluated.
+			this_postfix = this_token.circuit_token; // The address in any circuit_token always points into the arg's postfix array (never any temporary array or token created here) due to the nature/definition of circuit_token.
+			// And very soon, the outer loop will skip over the SYM_IFF_ELSE just found above.
 			continue;
 		}
 
@@ -652,48 +595,31 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 		if (!stack_count) // Prevent stack underflow.  An expression such as -*3 causes this.
 			goto abnormal_end;
 		ExprTokenType &right = *STACK_POP;
-		// Below uses IS_OPERAND rather than checking for only SYM_OPERAND because the stack can contain
-		// both generic and specific operands.  Specific operands were evaluated by a previous iteration
-		// of this section.  Generic ones were pushed as-is onto the stack by a previous iteration.
 		if (!IS_OPERAND(right.symbol)) // Haven't found a way to produce this situation yet, but safe to assume it's possible.
 			goto abnormal_end;
-
-		// The following check is done after popping "right" off the stack because a prior iteration has set up
-		// SYM_IFF_THEN to be a unary operator of sorts.
-		if (this_token.symbol == SYM_IFF_THEN) // This is encountered when a ternary's condition was found to be true by a prior iteration.
-		{
-			if (!this_token.circuit_token) // This check is needed for syntax errors such as "1 ? 2" (no matching else) and perhaps other unusual circumstances.
-				goto abnormal_end; // Seems best to consider it a syntax error rather than supporting partial functionality (hard to imagine much legitimate need to omit an ELSE).
-			// SYM_IFF_THEN is encountered only when a previous iteration has determined that the ternary's condition
-			// is true.  At this stage, the ternary's "THEN" branch has already been evaluated and stored in
-			// "right".  So skip over its "else" branch (short-circuit) because that doesn't need to be evaluated.
-			this_postfix = this_token.circuit_token; // The address in any circuit_token always points into the arg's postfix array (never any temporary array or token created here) due to the nature/definition of circuit_token.
-			// And very soon, the outer loop will skip over the SYM_IFF_ELSE just found above.
-			right.circuit_token = this_token.circuit_token->circuit_token; // Can be NULL (in fact, it usually is).
-			this_token = right;   // Struct copy to set things up for push_this_token, which in turn is needed
-			right.symbol = SYM_INTEGER; // L33: Bugfix.  Since only one reference is counted and this reference is no longer needed, "disable" it.  This avoids calling Release too many times; an alternative would be to call AddRef (if this is an object) and let Release be called later.
-			goto push_this_token; // (rather than a simple STACK_PUSH(right)) because it checks for *cascading* short circuit in cases where this ternary's result is the boolean condition of another ternary.
-		}
-
-		if (this_token.symbol == SYM_COMMA) // This can only be a statement-separator comma, not a function comma, since function commas weren't put into the postfix array.
-			// Do nothing other than discarding the right-side operand that was just popped off the stack.
-			// This collapses the two sub-statements delimited by a given comma into a single result for
-			// subsequent uses by another operator.  Unlike C++, the leftmost operand is preserved, not the
-			// rightmost.  This is because it's faster to just discard the topmost item on the stack, but
-			// more importantly it allows ACT_ASSIGNEXPR, ACT_ADD, and others to work properly.  For example:
-			//    Var:=5, Var1:=(Var2:=1, Var3:=2)
-			// Without the behavior implemented here, the above would wrongly put Var3's rvalue into Var2.
-			continue;
 
 		switch (this_token.symbol)
 		{
 		case SYM_ASSIGN:        // These don't need "right_is_number" to be resolved. v1.0.48.01: Also avoid
 		case SYM_CONCAT:        // resolving right_is_number for CONCAT because TokenIsPureNumeric() will take
 		case SYM_ASSIGN_CONCAT: // a long time if the string is very long and consists entirely of digits/whitespace.
+			right_is_pure_number = right_is_number = PURE_NOT_NUMERIC; // Init for convenience/maintainability.
+		case SYM_AND:			// v2: These don't need it either since even numeric strings are considered "true".
+		case SYM_OR:			//
+		case SYM_LOWNOT:		//
+		case SYM_HIGHNOT:		//
 			break;
+			
+		case SYM_COMMA: // This can only be a statement-separator comma, not a function comma, since function commas weren't put into the postfix array.
+			// Do nothing other than discarding the operand that was just popped off the stack, which is the
+			// result of the comma's left-hand sub-statement.  At this point the right-hand sub-statement
+			// has not yet been evaluated.  Like C++ and other languages, but unlike AutoHotkey v1, the
+			// rightmost operand is preserved, not the leftmost.
+			continue;
+
 		default:
 			// If the operand is still generic/undetermined, find out whether it is a string, integer, or float:
-			right_is_number = TokenIsPureNumeric(right); // If it's SYM_VAR, it can be the clipboard in this case, but it works even then.
+			right_is_pure_number = TokenIsPureNumeric(right, right_is_number); // If it's SYM_VAR, it can be the clipboard in this case, but it works even then.
 		}
 
 		// IF THIS IS A UNARY OPERATOR, we now have the single operand needed to perform the operation.
@@ -702,23 +628,47 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 		sym_assign_var = NULL; // Set default for use at the bottom of the following switch().
 		switch (this_token.symbol)
 		{
-		case SYM_AND: // These are now unary operators because short-circuit has made them so.  If the AND/OR
-		case SYM_OR:  // had short-circuited, we would never be here, so this is the right branch of a non-short-circuit AND/OR.
-			this_token.value_int64 = TokenToBOOL(right, right_is_number);
-			this_token.symbol = SYM_INTEGER; // Result of AND or OR is always a boolean integer (one or zero).
-			break;
+		case SYM_AND:
+		case SYM_OR:
+		case SYM_IFF_THEN:
+			// this_token is the left branch of an AND/OR or the condition of a ternary op.  Check for short-circuit.
+			left_branch_is_true = TokenToBOOL(right);
+
+			if (left_branch_is_true == (this_token.symbol == SYM_OR))
+			{
+				// The ternary's condition is false or this AND/OR causes a short-circuit.
+				// Discard the entire right branch of this AND/OR or "then" branch of this IFF:
+				this_postfix = this_token.circuit_token; // The address in any circuit_token always points into the arg's postfix array (never any temporary array or token created here) due to the nature/definition of circuit_token.
+
+				if (this_token.symbol != SYM_IFF_THEN)
+				{
+					// This will be the final result of this AND/OR because it's right branch was
+					// discarded above without having been evaluated nor any of its functions called:
+					this_token = right;
+					right.symbol = SYM_INTEGER; // i.e if it was SYM_OBJECT, don't call Release() for this copy of the pointer.
+					break;
+				}
+			}
+			else
+			{
+				// AND/OR: This left branch is simply discarded (by means of the outer loop) because its
+				//	right branch will be the sole determination of whether this AND/OR is true or false.
+				// IFF: The ternary's condition is true.  Do nothing; just let subsequent iterations evaluate
+				//	the THEN portion; the SYM_IFF_ELSE which follows it will jump over the ELSE branch.
+			}
+			continue;
 
 		case SYM_LOWNOT:  // The operator-word "not".
 		case SYM_HIGHNOT: // The symbol '!'. Both NOTs are equivalent at this stage because precedence was already acted upon by infix-to-postfix.
-			this_token.value_int64 = !TokenToBOOL(right, right_is_number);
+			this_token.value_int64 = !TokenToBOOL(right);
 			this_token.symbol = SYM_INTEGER; // Result is always one or zero.
 			break;
 
 		case SYM_NEGATIVE:  // Unary-minus.
 			if (right_is_number == PURE_INTEGER)
-				this_token.value_int64 = -TokenToInt64(right, TRUE);
+				this_token.value_int64 = -TokenToInt64(right);
 			else if (right_is_number == PURE_FLOAT)
-				this_token.value_double = -TokenToDouble(right, FALSE, TRUE); // Pass FALSE for aCheckForHex since PURE_FLOAT is never hex.
+				this_token.value_double = -TokenToDouble(right, FALSE); // Pass FALSE for aCheckForHex since PURE_FLOAT is never hex.
 			else // String.
 			{
 				// Seems best to consider the application of unary minus to a string, even a quoted string
@@ -733,7 +683,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 				break;
 			}
 			// Since above didn't "break":
-			this_token.symbol = right_is_number; // Convert generic SYM_OPERAND into a specific type: float or int.
+			this_token.symbol = right_is_number;
 			break;
 
 		case SYM_POST_INCREMENT: // These were added in v1.0.46.  It doesn't seem worth translating them into
@@ -797,12 +747,12 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 			delta = (this_token.symbol == SYM_POST_INCREMENT || this_token.symbol == SYM_PRE_INCREMENT) ? 1 : -1;
 			if (right_is_number == PURE_INTEGER)
 			{
-				this_token.value_int64 = TokenToInt64(right, TRUE);
+				this_token.value_int64 = TokenToInt64(right);
 				right.var->Assign(this_token.value_int64 + delta);
 			}
 			else // right_is_number must be PURE_FLOAT because it's the only remaining alternative.
 			{
-				this_token.value_double = TokenToDouble(right, FALSE, TRUE); // Pass FALSE for aCheckForHex since PURE_FLOAT is never hex.
+				this_token.value_double = TokenToDouble(right, FALSE); // Pass FALSE for aCheckForHex since PURE_FLOAT is never hex.
 				right.var->Assign(this_token.value_double + delta);
 			}
 			if (is_pre_op)
@@ -831,24 +781,16 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 			break;
 
 		case SYM_ADDRESS: // Take the address of a variable.
-			if (right.symbol == SYM_VAR) // At this stage, SYM_VAR is always a normal variable, never a built-in one, so taking its address should be safe.
-			{
-				if (right.var->HasObject()) // L31
-				{
-					this_token.symbol = SYM_INTEGER;
-					this_token.value_int64 = (__int64)right.var->Object();
-				}
-				else
-				{
-					right.var->DisableCache(); // Once the script take the address of a variable, there's no way to predict when it will make changes to the variable's contents.  So don't allow mContents to get out-of-sync with the variable's binary int/float.
-					this_token.symbol = SYM_INTEGER;
-					this_token.value_int64 = (__int64)right.var->Contents(); // Contents() vs. mContents to support VAR_CLIPBOARD, and in case mContents needs to be updated by Contents().
-				}
-			}
-			else if (right.symbol == SYM_OBJECT) // L31
+			if (IObject *obj = TokenToObject(right))
 			{
 				this_token.symbol = SYM_INTEGER;
-				this_token.value_int64 = (__int64)right.object;
+				this_token.value_int64 = (__int64)obj;
+			}
+			else if (right.symbol == SYM_VAR // At this stage, SYM_VAR is always a normal variable, never a built-in one, so taking its address should be safe.
+				&& !right.var->IsPureNumeric()) // Seems best not to return Contents() in this case since any changes to it might cause inconsistency.
+			{
+				this_token.symbol = SYM_INTEGER;
+				this_token.value_int64 = (__int64)right.var->Contents(); // Contents() vs. mContents to support VAR_CLIPBOARD, and in case mContents needs to be updated by Contents().
 			}
 			else // Invalid, so make it a localized blank value.
 			{
@@ -866,15 +808,20 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 				break;
 			}
 			// Since above didn't "break": right_is_number is PURE_INTEGER or PURE_FLOAT.
-			right_int64 = TokenToInt64(right, right_is_number==PURE_INTEGER); // Although PURE_FLOAT can't be hex, for simplicity and due to the rarity of encountering a PURE_FLOAT in this case, the slight performance reduction of calling TokenToInt64() is done for both PURE_FLOAT and PURE_INTEGER.
+			right_int64 = TokenToInt64(right); // Although PURE_FLOAT can't be hex, for simplicity and due to the rarity of encountering a PURE_FLOAT in this case, the slight performance reduction of calling TokenToInt64() is done for both PURE_FLOAT and PURE_INTEGER.
 			if (this_token.symbol == SYM_BITNOT)
 			{
-				// Note that it is not legal to perform ~, &, |, or ^ on doubles.  Because of this, and also to
-				// conform to the behavior of the Transform command, any floating point operand is truncated to
-				// an integer above.
+				// Note that it is not legal to perform ~, &, |, or ^ on doubles.  Because of this,
+				// any floating point operand is truncated to an integer above.
 				if (right_int64 < 0 || right_int64 > UINT_MAX)
+					// Treat it as a 64-bit signed value, since no other aspects of the program
+					// (e.g. IfEqual) will recognize an unsigned 64 bit number.
 					this_token.value_int64 = ~right_int64;
-				else // See comments at TRANS_CMD_BITNOT for why it's done this way:
+				else
+					// Treat it as a 32-bit unsigned value when inverting and assigning.  This is
+					// because assigning it as a signed value would "convert" it into a 64-bit
+					// value, which in turn is caused by the fact that the script sees all negative
+					// numbers as 64-bit values (e.g. -1 is 0xFFFFFFFFFFFFFFFF).
 					this_token.value_int64 = (size_t)~(DWORD)right_int64; // Casting this way avoids compiler warning.
 			}
 			else // SYM_DEREF
@@ -927,7 +874,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 					if (left.var->Type() == VAR_CLIPBOARD) // v1.0.46.01: Clipboard is present as SYM_VAR, but only for assign-to-clipboard so that built-in functions and other code sections don't need handling for VAR_CLIPBOARD.
 					{
 						this_token = right; // Struct copy.  Doing it this way is more maintainable than other methods, and is unlikely to perform much worse.
-						this_token.circuit_token = this_postfix->circuit_token; // Override the circuit_token that was just set in the line above.
+						right.symbol = SYM_INTEGER; // i.e if it was SYM_OBJECT (which would be pointless in this case, but could happen), don't call Release() for this copy of the pointer.
 					}
 					else
 					{
@@ -959,10 +906,12 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 			// If the operand is still generic/undetermined, find out whether it is a string, integer, or float.
 			// Fix for v1.0.48.01: For performance, call TokenIsPureNumeric(left) only as a last resort
 			// because "left" could be a very long string consisting entirely of digits or whitespace, which
-			// would make the call take a long time.  MUST NOT check the value of right_is_number until after
-			// checking for SYM_CONCAT because for SYM_CONCAT, right_is_number was left uninitialized at an
-			// earlier stage (for performance).
-			if (this_token.symbol == SYM_CONCAT || !right_is_number || !(left_is_number = TokenIsPureNumeric(left))) // See comment above.
+			// would make the call take a long time.  
+			if (right_is_number) // right_is_number is always PURE_NOT_NUMERIC for SYM_CONCAT.
+				left_is_pure_number = TokenIsPureNumeric(left, left_is_number);
+			// Otherwise, leave left_is' uninitialized as below will short-circuit.
+			if (  !(right_is_number && left_is_number)  // i.e. they're not both numeric (or this is SYM_CONCAT).
+				|| IS_RELATIONAL_OPERATOR(this_token.symbol) && !right_is_pure_number && !left_is_pure_number  ) // i.e. if both are strings, compare them alphabetically.
 			{
 				// L31: Handle binary ops supported by objects (= == !=).
 				switch (this_token.symbol)
@@ -1059,7 +1008,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 									goto normal_end_skip_output_var; // Nothing more to do because it has even taken care of output_var already.
 								else // temp_var is from look-ahead to a future assignment.
 								{
-									this_token.circuit_token = (++this_postfix)->circuit_token; // Old, somewhat obsolete comment: this_postfix.circuit_token should have been NULL prior to this because the final right-side result of an assignment shouldn't be the last item of an AND/OR/IFF's left branch. The assignment itself would be that.
+									++this_postfix;
 									this_token.var = STACK_POP->var; // Make the result a variable rather than a normal operand so that its
 									this_token.symbol = SYM_VAR;     // address can be taken, and it can be passed ByRef. e.g. &(x:=1)
 									goto push_this_token;
@@ -1088,7 +1037,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 								goto normal_end_skip_output_var; // Nothing more to do because it has even taken care of output_var already.
 							else // temp_var is from look-ahead to a future assignment.
 							{
-								this_token.circuit_token = (++this_postfix)->circuit_token; // Old, somewhat obsolete comment: this_token.circuit_token should have been NULL prior to this because the final right-side result of an assignment shouldn't be the last item of an AND/OR/IFF's left branch. The assignment itself would be that.
+								++this_postfix;
 								this_token.var = STACK_POP->var; // Make the result a variable rather than a normal operand so that its
 								this_token.symbol = SYM_VAR;     // address can be taken, and it can be passed ByRef. e.g. &(x:=1)
 								goto push_this_token;
@@ -1136,19 +1085,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 					if (left_length)
 						tmemcpy(this_token.marker, left_string, left_length);  // Not +1 because don't need the zero terminator.
 					tmemcpy(this_token.marker + left_length, right_string, right_length + 1); // +1 to include its zero terminator.
-
-					// For this new concat operator introduced in v1.0.31, it seems best to treat the
-					// result as a SYM_STRING if either operand is a SYM_STRING.  That way, when the
-					// result of the operation is later used, it will be a real string even if pure numeric,
-					// which might affect the behavior of some things such as "casting" a string to a boolean,
-					// e.g. if ("0" . 0)
-					if (left.symbol == SYM_STRING || right.symbol == SYM_STRING)
-						result_symbol = SYM_STRING;
-					else
-					{
-						result_symbol = SYM_OPERAND;
-                        this_token.buf = NULL; // Indicate that this SYM_OPERAND token LACKS a pre-converted binary integer.
-					}
+					result_symbol = SYM_STRING;
 					break;
 
 				default:
@@ -1164,11 +1101,10 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 			{
 				// Because both are integers and the operation isn't division, the result is integer.
 				// The result is also an integer for the bitwise operations listed in the if-statement
-				// above.  This is because it is not legal to perform ~, &, |, or ^ on doubles, and also
-				// because this behavior conforms to that of the Transform command.  Any floating point
-				// operands are truncated to integers prior to doing the bitwise operation.
-				right_int64 = TokenToInt64(right, right_is_number==PURE_INTEGER); // It can't be SYM_STRING because in here, both right and
-				left_int64 = TokenToInt64(left, left_is_number==PURE_INTEGER);    // left are known to be numbers (otherwise an earlier "else if" would have executed instead of this one).
+				// above.  This is because it is not legal to perform ~, &, |, or ^ on doubles.  Any
+				// floating point operands are truncated to integers prior to doing the bitwise operation.
+				right_int64 = TokenToInt64(right); // It can't be SYM_STRING because in here, both right and
+				left_int64 = TokenToInt64(left);    // left are known to be numbers (otherwise an earlier "else if" would have executed instead of this one).
 				result_symbol = SYM_INTEGER; // Set default.
 				switch(this_token.symbol)
 				{
@@ -1220,7 +1156,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 						if (left_was_negative && right_int64 % 2) // Negative base and odd exponent (not zero or even).
 							this_token.value_double = -this_token.value_double;
 						if (right_int64 < 0)
-							result_symbol = SYM_FLOAT; // Due to negative exponent, override to float like TRANS_CMD_POW.
+							result_symbol = SYM_FLOAT; // Due to negative exponent, override to float.
 						else
 							this_token.value_int64 = (__int64)this_token.value_double;
 					}
@@ -1231,8 +1167,8 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 
 			else // Since one or both operands are floating point (or this is the division of two integers), the result will be floating point.
 			{
-				right_double = TokenToDouble(right, TRUE, right_is_number==PURE_FLOAT); // Pass TRUE for aCheckForHex one of them is an integer to
-				left_double = TokenToDouble(left, TRUE, left_is_number==PURE_FLOAT);   // be converted to a float for the purpose of this calculation.
+				right_double = TokenToDouble(right, TRUE); // Pass TRUE for aCheckForHex in case one of them is an integer to
+				left_double = TokenToDouble(left, TRUE);   // be converted to a float for the purpose of this calculation.
 				result_symbol = IS_RELATIONAL_OPERATOR(this_token.symbol) ? SYM_INTEGER : SYM_FLOAT; // Set default. v1.0.47.01: Changed relational operators to yield integers vs. floats because it's more intuitive and traditional (might also make relational operators perform better).
 				switch(this_token.symbol)
 				{
@@ -1301,96 +1237,22 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 		}
 
 push_this_token:
-		if (!this_token.circuit_token) // It's not capable of short-circuit.
+		while (high_water_mark > stack_count)
 		{
-			while (high_water_mark > stack_count)
-			{	// L31: Release any objects which have been previously popped off the stack. This seems
-				// to be the simplest way to do it as tokens are popped off the stack at multiple points,
-				// but only this one point where parameters are pushed.  high_water_mark allows us to determine
-				// if there were tokens on the stack before returning, regardless of how expression evaluation
-				// ended (abort, abnormal_end, normal_end_skip_output_var...).  This method also ensures any
-				// objects passed as parameters to a function (such as ObjGet()) are released *AFTER* the return
-				// value is made persistent, which is important if the return value refers to the object's memory.
-				--high_water_mark;
-				if (stack[high_water_mark]->symbol == SYM_OBJECT)
-					stack[high_water_mark]->object->Release();
-			}
-			STACK_PUSH(&this_token);   // Push the result onto the stack for use as an operand by a future operator.
-			high_water_mark = stack_count; // L31
+			// Release any objects which have been previously popped off the stack. This seems to be the
+			// simplest way to do it as tokens are popped off the stack at multiple points, but only this
+			// one point where parameters are pushed.  high_water_mark allows us to determine if there were
+			// tokens on the stack before returning, regardless of how expression evaluation ended (abort,
+			// abnormal_end, normal_end_skip_output_var...).  This method also ensures any objects passed as
+			// parameters to a function (such as ObjGet()) are released *AFTER* the return value is made
+			// persistent, which is important if the return value refers to the object's memory (but that
+			// might currently never happen?).
+			--high_water_mark;
+			if (stack[high_water_mark]->symbol == SYM_OBJECT)
+				stack[high_water_mark]->object->Release();
 		}
-		else // This is the final result of an IFF's condition or a AND or OR's left branch.  Apply short-circuit boolean method to it.
-		{
-non_null_circuit_token:
-			// Cast this left-branch result to true/false, then determine whether it should cause its
-			// parent AND/OR/IFF to short-circuit.
-			left_branch_is_true = TokenToBOOL(this_token, TokenIsPureNumeric(this_token));
-			if (this_token.circuit_token->symbol == SYM_IFF_THEN)
-			{
-				if (!left_branch_is_true) // The ternary's condition is false.
-				{
-					// Discard the entire "then" branch of this ternary operator, leaving only the
-					// "else" branch to be evaluated later as the result.
-					// Ternaries nested inside each other don't need to be considered special for the purpose
-					// of discarding ternary branches due to the very nature of postfix (i.e. it's already put
-					// nesting in the right postfix order to support this method of discarding a branch).
-					this_postfix = this_token.circuit_token; // The address in any circuit_token always points into the arg's postfix array (never any temporary array or token created here) due to the nature/definition of circuit_token.
-					// The outer loop will now discard the SYM_IFF_THEN itself.
-				}
-				//else the ternary's condition is true.  Do nothing; just let the next iteration evaluate the
-				// THEN portion and then treat the SYM_IFF_THEN it encounters as a unary operator (after that,
-				// it will discard the ELSE branch).
-				continue;
-			}
-			// Since above didn't "continue", this_token is the left branch of an AND/OR.  Check for short-circuit.
-			// The following loop exists to support cascading short-circuiting such as the following example:
-			// 2>3 and 2>3 and 2>3
-			// In postfix notation, the above looks like:
-			// 2 3 > 2 3 > and 2 3 > and
-			// When the first '>' operator is evaluated to false, it sees that its parent is an AND and
-			// thus it short-circuits, discarding everything between the first '>' and the "and".
-			// But since the first and's parent is the second "and", that false result just produced is now
-			// the left branch of the second "and", so the loop conducts a second iteration to discard
-			// everything between the first "and" and the second.  By contrast, if the second "and" were
-			// an "or", the second iteration would never occur because the loop's condition would be false
-			// on the second iteration, which would then cause the first and's false value to be discarded
-			// (due to the loop ending without having PUSHed) because solely the right side of the "or" should
-			// determine the final result of the "or".
-			//
-			// The following code is probably equivalent to the loop below it.  However, it's only slightly
-			// smaller in code size when you examine what it actually does, and it almost certainly performs
-			// slightly worse because the "goto" incurs unnecessary steps such as recalculating left_branch_is_true.
-			// Therefore, it doesn't seem worth changing it:
-			//if (left_branch_is_true == (this_token.circuit_token->symbol == SYM_OR)) // If true, this AND/OR causes a short-circuit
-			//{
-			//	for (++i; postfix+i != this_token.circuit_token; ++i); // (This line obsolete; needs revision.) Should always be found, so no need to guard against reading beyond the end of the array.
-			//	this_token.symbol = SYM_INTEGER;
-			//	this_token.value_int64 = left_branch_is_true; // Assign a pure 1 (for SYM_OR) or 0 (for SYM_AND).
-			//	this_token.circuit_token = this_postfix->circuit_token; // In case circuit_token == SYM_IFF_THEN.
-			//	goto push_this_token; // In lieu of STACK_PUSH(this_token) in case circuit_token == SYM_IFF_THEN.
-			//}
-			for (circuit_token = this_token.circuit_token
-				; left_branch_is_true == (circuit_token->symbol == SYM_OR);) // If true, this AND/OR causes a short-circuit
-			{
-				// Discard the entire right branch of this AND/OR:
-				this_postfix = circuit_token; // The address in any circuit_token always points into the arg's postfix array (never any temporary array or token created here) due to the nature/definition of circuit_token.
-				if (   !(circuit_token = this_postfix->circuit_token) // This value is also used by our loop's condition. Relies on short-circuit boolean order with the below.
-					|| circuit_token->symbol == SYM_IFF_THEN   ) // Don't cascade from AND/OR into IFF because IFF requires a different cascade approach that's implemented only after its winning branch is evaluated.  Otherwise, things like "0 and 1 ? 3 : 4" wouldn't work.
-				{
-					// No more cascading is needed because this AND/OR isn't the left branch of another.
-					// This will be the final result of this AND/OR because it's right branch was discarded
-					// above without having been evaluated nor any of its functions called.
-					this_token.symbol = SYM_INTEGER;
-					this_token.value_int64 = left_branch_is_true; // Assign a pure 1 (for SYM_OR) or 0 (for SYM_AND).
-					this_token.circuit_token = circuit_token; // In case circuit_token->symbol == SYM_IFF_THEN.
-					goto push_this_token; // In lieu of STACK_PUSH(this_token) in case circuit_token->symbol == SYM_IFF_THEN.
-				}
-				//else there is more cascading to be checked, so continue looping.
-			}
-			// If the loop ends normally (not via "break"), this_postfix is now the left branch of an
-			// AND/OR that should not short-circuit.  As a result, this left branch is simply discarded
-			// (by means of the outer loop) because its right branch will be the sole determination
-			// of whether this AND/OR is true or false.
-		} // Short-circuit (an IFF or the left branch of an AND/OR).
+		STACK_PUSH(&this_token);   // Push the result onto the stack for use as an operand by a future operator.
+		high_water_mark = stack_count;
 	} // For each item in the postfix array.
 
 	// Although ACT_EXPRESSION was already checked higher above for function calls, there are other ways besides
@@ -1408,13 +1270,6 @@ non_null_circuit_token:
 
 	ExprTokenType &result_token = *stack[0];  // For performance and convenience.  Even for multi-statement, the bottommost item on the stack is the final result so that things like var1:=1,var2:=2 work.
 
-	// Store the result of the expression in the deref buffer for the caller.  It is stored in the current
-	// format in effect via SetFormat because:
-	// 1) The := operator then doesn't have to convert to int/double then back to string to put the right format into effect.
-	// 2) It might add a little bit of flexibility in places parameters where floating point values are expected
-	//    (i.e. it allows a way to do automatic rounding), without giving up too much.  Changing floating point
-	//    precision from the default of 6 decimal places is rare anyway, so as long as this behavior is documented,
-	//    it seems okay for the moment.
 	if (output_var)
 	{
 		// v1.0.45: Take a shortcut, which in the case of SYM_STRING/OPERAND/VAR avoids one memcpy
@@ -1424,53 +1279,39 @@ non_null_circuit_token:
 		goto normal_end_skip_output_var; // result_to_return is left at its default of "", though its value doesn't matter as long as it isn't NULL.
 	}
 
-	if (mActionType == ACT_IFEXPR || mActionType == ACT_WHILE || mActionType == ACT_UNTIL) // This is an optimization that improves the speed of ACT_IFEXPR by up to 50% (ACT_WHILE is probably improved by only up-to-15%). Simple expressions like "if (x < y)" see the biggest speedup.
+	if (mActionType == ACT_IF || mActionType == ACT_WHILE || mActionType == ACT_UNTIL)
 	{
-		BOOL result_is_true;
+		// This is an optimization that improves the speed of ACT_IF by up to 50% (ACT_WHILE is
+		// probably improved by only up-to-15%). Simple expressions like "if (x < y)" see the biggest
+		// speedup.
+		result_to_return = TokenToBOOL(result_token) ? _T("1") : _T(""); // Return "" vs. "0" for FALSE for consistency with "goto abnormal_end" (which bypasses this section).
+		goto normal_end_skip_output_var; // ACT_IF never has an output_var.
+	}
+
+	if (aResultToken)
+	{
 		switch (result_token.symbol)
 		{
-		case SYM_INTEGER: result_is_true = (result_token.value_int64 != 0); break;
-		case SYM_FLOAT:   result_is_true = (result_token.value_double != 0.0); break;
-		case SYM_OPERAND:
-			if (result_token.buf)
-			{
-				result_is_true = (*(__int64 *)result_token.buf != 0); // Use the stored binary integer for performance.
-				break;
-			}
-			//else DON'T BREAK; FALL THROUGH TO NEXT CASE:
-		case SYM_STRING: // *** OR IT FELL THROUGH FROM ABOVE CASE ***
-			result_is_true = LegacyResultToBOOL(result_token.marker);
-			break;
-		case SYM_VAR: // SYM_VAR is somewhat unusual at this late a stage.
-			result_is_true = LegacyVarToBOOL(*result_token.var);
-			break;
-		case SYM_OBJECT: // L31: Objects are always treated as TRUE values.
-			result_is_true = true;
-			break;
-		}
-		result_to_return = result_is_true ? _T("1") : _T(""); // Return "" vs. "0" for FALSE for consistency with "goto abnormal_end" (which bypasses this section).
-		goto normal_end_skip_output_var; // ACT_IFEXPR never has an output_var.
-	}
-
-	if (aResultToken) // L31
-	{
-		if (IS_NUMERIC(result_token.symbol) || result_token.symbol == SYM_OBJECT)
-		{	// Return numeric or object result as-is.
+		case SYM_INTEGER:
+		case SYM_FLOAT:
+		case SYM_OBJECT:
+			// Return numeric or object result as-is.
 			aResultToken->symbol = result_token.symbol;
-			aResultToken->value_int64 = result_token.value_int64;
-			return _T(""); // Must not return NULL; any other value is OK (will be ignored).
+			aResultToken->value_int64 = result_token.value_int64; // Union copy.
+			return _T(""); // Must not return NULL; any other value is OK (and will be ignored).
+		case SYM_VAR:
+			if (result_token.var->IsPureNumericOrObject())
+			{
+				result_token.var->ToToken(*aResultToken);
+				return _T("");
+			}
 		}
-		if (result_token.symbol == SYM_VAR && result_token.var->HasObject())
-		{	// L34: Allow returning of objects contained by variables; 'return var' was already supported since that is not treated as an expression.
-			aResultToken->symbol = SYM_OBJECT;
-			aResultToken->object = result_token.var->Object();
-			aResultToken->object->AddRef();
-			return _T("");
-		}
+		// Since above didn't return, the result is a string.  Continue on below to copy it into persistent memory.
 	}
-	//else result is a string.  Since it may be contained by a temporary memory block which we will free before returning, just return it as per usual.
 
-	// Otherwise:
+	//
+	// Store the result of the expression in the deref buffer for the caller.
+	//
 	result_to_return = aTarget; // Set default.
 	switch (result_token.symbol)
 	{
@@ -1484,10 +1325,9 @@ non_null_circuit_token:
 	case SYM_FLOAT:
 		// In case of float formats that are too long to be supported, use snprint() to restrict the length.
 		 // %f probably defaults to %0.6f.  %f can handle doubles in MSVC++.
-		aTarget += sntprintf(aTarget, MAX_NUMBER_SIZE, g->FormatFloat, result_token.value_double) + 1; // +1 because that's what callers want; i.e. the position after the terminator.
+		aTarget += sntprintf(aTarget, MAX_NUMBER_SIZE, FORMAT_FLOAT, result_token.value_double) + 1; // +1 because that's what callers want; i.e. the position after the terminator.
 		goto normal_end_skip_output_var; // output_var was already checked higher above, so no need to consider it again.
 	case SYM_STRING:
-	case SYM_OPERAND:
 	case SYM_VAR: // SYM_VAR is somewhat unusual at this late a stage.
 		// At this stage, we know the result has to go into our deref buffer because if a way existed to
 		// avoid that, we would already have goto/returned higher above (e.g. for ACT_ASSIGNEXPR OR ACT_EXPRESSION.
@@ -1500,7 +1340,7 @@ non_null_circuit_token:
 		if (result_token.symbol == SYM_VAR)
 		{
 			result = result_token.var->Contents();
-            result_size = result_token.var->LengthIgnoreBinaryClip() + 1; // Ignore binary clipboard for anything other than ACT_ASSIGNEXPR (i.e. output_var!=NULL) because it's documented that except for certain features, binary clipboard variables are seen only up to the first binary zero (mostly to simplify the code).
+			result_size = result_token.var->LengthIgnoreBinaryClip() + 1; // Ignore binary clipboard for anything other than ACT_ASSIGNEXPR (i.e. output_var!=NULL) because it's documented that except for certain features, binary clipboard variables are seen only up to the first binary zero (mostly to simplify the code).
 		}
 		else
 		{
@@ -1587,6 +1427,7 @@ non_null_circuit_token:
 
 	case SYM_OBJECT: // L31: Objects are always treated as empty strings; except with ACT_RETURN, which was handled above, and any usage which expects a boolean result.
 		result_to_return = _T("");
+		// result_token is still on the stack, so the object will be released below.
 		goto normal_end_skip_output_var;
 
 	default: // Result contains a non-operand symbol such as an operator.
@@ -1761,7 +1602,7 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 					// DllCall() relies on the fact that this transformation is only done for user
 					// functions, not built-in ones such as DllCall().  This is because DllCall()
 					// sometimes needs the variable of a parameter for use as an output parameter.
-					this_param_token.var->TokenToContents(this_param_token);
+					this_param_token.var->ToToken(this_param_token);
 				}
 			}
 			// BackupFunctionVars() will also clear each local variable and formal parameter so that
@@ -1869,8 +1710,8 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 			// local variable in the function).  
 			// token.var's Type() is always VAR_NORMAL (e.g. never the clipboard).
 			// A SYM_VAR token can still happen because the previous loop's conversion of all
-			// by-value SYM_VAR operands into SYM_OPERAND would not have happened if no
-			// backup was needed for this function (which is usually the case).
+			// by-value SYM_VAR operands into the appropriate operand symbol would not have
+			// happened if no backup was needed for this function (which is usually the case).
 			if (!mParam[j].var->Assign(token))
 			{
 				aResult = FAIL; // Abort thread.
@@ -1973,10 +1814,6 @@ ResultType Line::ExpandArgs(ExprTokenType *aResultToken, VarSizeType aSpaceNeede
 		for (i = 0; i < mArgc; ++i) // Copying only the actual/used elements is probably faster than using memcpy to copy both entire arrays.
 			arg_var[i] = aArgVar[i]; // Init to values determined by caller, which helps performance if any of the args are dynamic variables.
 	}
-
-	if (space_needed > g_MaxVarCapacity)
-		// Dereferencing the variables in this line's parameters would exceed the allowed size of the temp buffer:
-		return LineError(ERR_MEM_LIMIT_REACHED);
 
 	// Only allocate the buf at the last possible moment,
 	// when it's sure the buffer will be used (improves performance when only a short
@@ -2136,9 +1973,7 @@ ResultType Line::ExpandArgs(ExprTokenType *aResultToken, VarSizeType aSpaceNeede
 				// temp buffer, it's much better for performance (especially for
 				// potentially huge variables like %clipboard%) to simply set
 				// the pointer to be the variable itself.  However, this can only
-				// be done if the var is the clipboard or a non-environment
-				// normal var (since zero-length normal vars need to be fetched via
-				// GetEnvironmentVariable() when g_NoEnv==FALSE).
+				// be done if the var is the clipboard or a normal var.
 				// Update: Changed it so that it will deref the clipboard if it contains only
 				// files and no text, so that the files will be transcribed into the deref buffer.
 				// This is because the clipboard object needs a memory area into which to write
@@ -2153,16 +1988,15 @@ ResultType Line::ExpandArgs(ExprTokenType *aResultToken, VarSizeType aSpaceNeede
 				// as a special indicator for the loop below to call Contents().
 				arg_deref[i] = // The following is ordered for short-circuit performance:
 					(   ACT_IS_ASSIGN(mActionType) && i == 1  // By contrast, for the below i==anything (all args):
-					|| (mActionType <= ACT_LAST_OPTIMIZED_IF && mActionType >= ACT_FIRST_OPTIMIZED_IF) // Ordered for short-circuit performance.
+					||  mActionType == ACT_IF
 					//|| mActionType == ACT_WHILE // Not necessary to check this one because loadtime leaves ACT_WHILE as an expression in all common cases. Also, there's no easy way to get ACT_WHILE into the range above due to the overlap of other ranges in enum_act.
 					) && the_only_var_of_this_arg->Type() == VAR_NORMAL // Otherwise, users of this optimization would have to reproduce more of the logic in ArgMustBeDereferenced().
 					? _T("") : NULL; // See "Update #2" and later comments above.
 				break;
 			case CONDITION_TRUE:
-				// the_only_var_of_this_arg is either a reserved var or a normal var of that is also
-				// an environment var (for which GetEnvironmentVariable() is called for), or is used
-				// again in this line as an output variable.  In all these cases, it must
-				// be expanded into the buffer rather than accessed directly:
+				// the_only_var_of_this_arg is either a reserved var or a normal var which is either
+				// numeric or is used again in this line as an output variable.  In all these cases,
+				// it must be expanded into the buffer rather than accessed directly:
 				arg_deref[i] = our_buf_marker; // Point it to its location in the buffer.
 				our_buf_marker += the_only_var_of_this_arg->Get(our_buf_marker) + 1; // +1 for terminator.
 				break;
@@ -2358,7 +2192,7 @@ ResultType Line::ArgMustBeDereferenced(Var *aVar, int aArgIndex, Var *aArgVar[])
 // (since normally output vars lie to the left of all input vars, so it doesn't seem worth doing anything
 // more complicated).
 // Returns CONDITION_TRUE, CONDITION_FALSE, or FAIL.
-// There are some other functions like ArgLength() and ACT_ADD that have procedures similar to this one, so
+// There are some other functions like ArgLength() that have procedures similar to this one, so
 // maintain them together.
 {
 	if (mActionType == ACT_SORT) // See PerformSort() for why it's always dereferenced.
@@ -2372,11 +2206,8 @@ ResultType Line::ArgMustBeDereferenced(Var *aVar, int aArgIndex, Var *aArgVar[])
 		// the clipboard has only files on it, in which case those files need
 		// to be converted into plain text:
 		return CLIPBOARD_CONTAINS_ONLY_FILES ? CONDITION_TRUE : CONDITION_FALSE;
-	if (aVar_type != VAR_NORMAL || (!g_NoEnv && !aVar->HasContents()) || aVar == g_ErrorLevel) // v1.0.43.08: Added g_NoEnv.
+	if (aVar_type != VAR_NORMAL || aVar == g_ErrorLevel)
 		// Reserved vars must always be dereferenced due to their volatile nature.
-		// When g_NoEnv==FALSE, normal vars of length zero are dereferenced because they might exist
-		// as system environment variables, whose contents are also potentially volatile (i.e. they
-		// are sometimes changed by outside forces).
 		// As of v1.0.25.12, g_ErrorLevel is always dereferenced also so that a command that sets ErrorLevel
 		// can itself use ErrorLevel as in this example: StringReplace, EndKey, ErrorLevel, EndKey:
 		return CONDITION_TRUE;
@@ -2389,8 +2220,8 @@ ResultType Line::ArgMustBeDereferenced(Var *aVar, int aArgIndex, Var *aArgVar[])
 	// StringRight/Left and similar can tolerate the same address because they always produce a string whose
 	// length is less-than-or-equal to the input-string, thus Assign() will never need to free/realloc the
 	// output-var prior to assigning the input-var's contents to it (whose contents are the same as output-var).
-	if (!(g_act[mActionType].MaxParamsAu2WithHighBit & 0x80)) // Commands that have this bit don't need final check
-		return CONDITION_FALSE;                               // further below (though they do need the ones above).
+	if (!g_act[mActionType].CheckOverlap) // Commands that have this flag don't need final check
+		return CONDITION_FALSE;           // further below (though they do need the ones above).
 
 	// Since the above didn't return, we know that this is a NORMAL input var that isn't an
 	// environment variable.  Such input vars only need to be dereferenced if they are also
