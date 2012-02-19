@@ -1,3 +1,8 @@
+15.02.2012
+- ResourceLibrary
+- Removed ahkKey
+- FileInstall for Scripts compiled with AutoHotkey.exe
+- Allow pure integers (pointers) for DllCall and DynaCall "Str" prameter.
 01.10.2011
 - Merged latest MemoryModule
 - Fixed x64w build AutoHotkey.dll also works fine using COM

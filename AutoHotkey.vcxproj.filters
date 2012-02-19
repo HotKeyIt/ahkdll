@@ -103,9 +103,6 @@
     <ClCompile Include="source\script_com.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="source\MemoryModule.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="source\dllmain.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -116,6 +113,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="source\Registry.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="source\MemoryModule.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

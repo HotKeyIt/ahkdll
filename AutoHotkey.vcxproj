@@ -167,7 +167,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <AdditionalDependencies>wsock32.lib;winmm.lib;version.lib;comctl32.lib;psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>wsock32.lib;winmm.lib;version.lib;comctl32.lib;odbc32.lib;odbccp32.lib;shlwapi.lib;psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <StackReserveSize>4194304</StackReserveSize>
       <TerminalServerAware>false</TerminalServerAware>
     </Link>
@@ -229,7 +229,7 @@
       <PreprocessorDefinitions>AUTOHOTKEYSC;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ResourceCompile>
-      <PreprocessorDefinitions>AUTOHOTKEYSC;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_WIN64;AUTOHOTKEYSC;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PreprocessorDefinitions Condition="$(ConfigDebug)">_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
     <Link>
@@ -269,8 +269,36 @@
     <ClCompile Include="source\hotkey.cpp" />
     <ClCompile Include="source\keyboard_mouse.cpp" />
     <ClCompile Include="source\lowlevelbif.cpp" />
-    <ClCompile Include="source\MemoryModule.c">
+    <ClCompile Include="source\MemoryModule.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">_MBCS;_WIN64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">DEBUG_OUTPUT;_MBCS;_WIN64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
+      <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</MinimalRebuild>
+      <BasicRuntimeChecks Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">EnableFastChecks</BasicRuntimeChecks>
+      <FunctionLevelLinking Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+      </FunctionLevelLinking>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">_MBCS;DEBUG_OUTPUT;_STANDALONE;WIN32;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">_MBCS;_STANDALONE;WIN32;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">_MBCS;_USRDLL;AUTOCOMSERVER_EXPORTS;_STANDALONE;WIN32;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">_MBCS;_USRDLL;MINIDLL;_STANDALONE;WIN32;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">_MBCS;AUTOHOTKEYSC;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Self-contained|x64'">_MBCS;AUTOHOTKEYSC;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Self-contained|x64'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">_MBCS;_WIN64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">_MBCS;_WIN64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">_MBCS;_WIN64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">_MBCS;_USRDLL;AUTOCOMSERVER_EXPORTS;_STANDALONE;WIN32;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="source\mt19937ar-cok.cpp" />
     <ClCompile Include="source\os_version.cpp" />
@@ -459,8 +487,12 @@
       <HeapReserveSize Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">
       </HeapReserveSize>
       <Driver Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">NotSet</Driver>
-      <OptimizeReferences Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">true</OptimizeReferences>
-      <LinkTimeCodeGeneration Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">Default</LinkTimeCodeGeneration>
+      <OptimizeReferences Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">
+      </OptimizeReferences>
+      <LinkTimeCodeGeneration Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">
+      </LinkTimeCodeGeneration>
+      <EnableCOMDATFolding Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">
+      </EnableCOMDATFolding>
     </Link>
     <Link>
       <ModuleDefinitionFile Condition="'$(Configuration)'=='ReleaseDll'">.\comserver.def</ModuleDefinitionFile>
@@ -541,7 +573,7 @@
       <ComponentFileName Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'" />
     </Manifest>
     <ResourceCompile>
-      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">_DEBUG;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
     <Link>
       <ModuleDefinitionFile Condition="'$(Configuration)'=='ReleaseDll(mbcs)' OR '$(Configuration)'=='ReleaseDll'">.\comserver.def</ModuleDefinitionFile>
@@ -560,7 +592,7 @@
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|Win32'" />
     </ResourceCompile>
     <ResourceCompile>
-      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">_USRDLL;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">_USRDLL;_DEBUG;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
     <Link>
       <RandomizedBaseAddress Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">false</RandomizedBaseAddress>
@@ -607,6 +639,18 @@
     <Bscmake>
       <PreserveSBR Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">false</PreserveSBR>
     </Bscmake>
+    <ResourceCompile>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">_WIN64;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">_WIN64;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">_WIN64;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">_WIN64;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='ReleaseDll' OR '$(Configuration)'=='ReleaseDll(mbcs)'">
     <Link>
