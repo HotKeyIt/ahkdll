@@ -30,11 +30,12 @@ GNU General Public License for more details.
 #define MAX_COMMENT_FLAG_LENGTH 15
 static TCHAR g_CommentFlag[MAX_COMMENT_FLAG_LENGTH + 1] = _T(";"); // Adjust the below for any changes.
 static size_t g_CommentFlagLength = 1; // pre-calculated for performance
-static ExprOpFunc g_ObjGet(BIF_ObjInvoke, IT_GET), g_ObjSet(BIF_ObjInvoke, IT_SET), g_ObjCall(BIF_ObjInvoke, IT_CALL);
+static ExprOpFunc g_ObjGet(BIF_ObjInvoke, IT_GET), g_ObjSet(BIF_ObjInvoke, IT_SET);
 static ExprOpFunc g_ObjGetInPlace(BIF_ObjGetInPlace, IT_GET);
 static ExprOpFunc g_ObjNew(BIF_ObjNew, 0);
 static ExprOpFunc g_ObjPreInc(BIF_ObjIncDec, SYM_PRE_INCREMENT), g_ObjPreDec(BIF_ObjIncDec, SYM_PRE_DECREMENT)
 				, g_ObjPostInc(BIF_ObjIncDec, SYM_POST_INCREMENT), g_ObjPostDec(BIF_ObjIncDec, SYM_POST_DECREMENT);
+ExprOpFunc g_ObjCall(BIF_ObjInvoke, IT_CALL); // Also needed in script_expression.cpp.
 
 // See Script::CreateWindows() for details about the following:
 typedef BOOL (WINAPI* AddRemoveClipboardListenerType)(HWND);
@@ -113,6 +114,8 @@ Script::Script()
 		ScriptError(_T("DEBUG: ID_FILE_EXIT is too large (conflicts with IDs reserved via ID_USER_FIRST)."));
 	if (MAX_CONTROLS_PER_GUI > ID_USER_FIRST - 3)
 		ScriptError(_T("DEBUG: MAX_CONTROLS_PER_GUI is too large (conflicts with IDs reserved via ID_USER_FIRST)."));
+	if (g_ActionCount != ACT_COUNT) // This enum value only exists in debug mode.
+		ScriptError(_T("DEBUG: g_act and enum_act are out of sync."));
 	int LargestMaxParams, i, j;
 	ActionTypeType *np;
 	// Find the Largest value of MaxParams used by any command and make sure it
@@ -1102,7 +1105,7 @@ ResultType Script::ExitApp(ExitReasons aExitReason, LPTSTR aBuf, int aExitCode)
 	ResumeUnderlyingThread(ErrorLevel_saved);
 	g_AllowInterruption = g_AllowInterruption_prev;  // Restore original setting.
 
-	return OK;  // for caller convenience.
+	return EARLY_EXIT;
 }
 
 
@@ -5052,7 +5055,21 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		else
 			return ScriptError(parameter ? ERR_PARAM1_INVALID : ERR_PARAM1_REQUIRED, aBuf);
 	}
+	if (IS_DIRECTIVE_MATCH(_T("#InputLevel")))
+	{
+		// All hotkeys declared after this directive are assigned the specified InputLevel.
+		// Input generated at a given SendLevel can only trigger hotkeys that belong to the
+		// same or lower InputLevel. Hotkeys at the lowest level (0) cannot be triggered by
+		// any generated input (the same behavior as AHK versions before this feature).
+		// The default level is 0.
 
+		int group = parameter ? ATOI(parameter) : 0;
+		if (!SendLevelIsValid(group))
+			return ScriptError(ERR_PARAM1_INVALID, aBuf);
+
+		g_InputLevel = group;
+		return CONDITION_TRUE;
+	}
 	if (IS_DIRECTIVE_MATCH(_T("#Warn")))
 	{
 		if (!parameter)
@@ -6234,119 +6251,68 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType,
 	int mark, max_params_override = 0; // Set default.
 	if (aActionType == ACT_MSGBOX)
 	{
-		// First find out how many non-literal (non-escaped) delimiters are present.
-		// Use a high maximum so that we can almost always find and analyze the command's
-		// last apparent parameter.  This helps error-checking be more informative in a
-		// case where the command specifies a timeout as its last param but it's next-to-last
-		// param contains delimiters that the user forgot to escape.  In other words, this
-		// helps detect more often when the user is trying to use the timeout feature.
-		// If this weren't done, the command would more often forgive improper syntax
-		// and not report a load-time error, even though it's pretty obvious that a load-time
-		// error should have been reported:
-		#define MAX_MSGBOX_DELIMITERS 20
-		LPTSTR delimiter[MAX_MSGBOX_DELIMITERS];
-		int delimiter_count;
-		for (mark = delimiter_count = 0; action_args[mark] && delimiter_count < MAX_MSGBOX_DELIMITERS;)
+		for (int next, mark = 0, arg = 1; action_args[mark]; mark = next, ++arg)
 		{
-			for (; action_args[mark]; ++mark)
-				if (action_args[mark] == g_delimiter && !literal_map[mark]) // Match found: a non-literal delimiter.
-				{
-					delimiter[delimiter_count++] = action_args + mark;
-					++mark; // Skip over this delimiter for the next iteration of the outer loop.
-					break;
-				}
-		}
-		// If it has only 1 arg (i.e. 0 delimiters within the arg list) no override is needed.
-		// Otherwise do more checking:
-		if (delimiter_count)
-		{
-			LPTSTR cp;
-			// If the first apparent arg is not a non-blank pure number or there are apparently
-			// only 2 args present (i.e. 1 delimiter in the arg list), assume the command is being
-			// used in its 1-parameter mode:
-			if (delimiter_count <= 1) // 2 parameters or less.
-				// Force it to be 1-param mode.  In other words, we want to make MsgBox a very forgiving
-				// command and have it rarely if ever report syntax errors:
-				max_params_override = 1;
-			else // It has more than 3 apparent params, but is the first param even numeric?
+			if (arg > 1)
+				mark++; // Skip the delimiter...
+			while (IS_SPACE_OR_TAB(action_args[mark]))
+				mark++; // ...and any leading whitespace.
+
+			if (action_args[mark] == g_DerefChar && !literal_map[mark] && IS_SPACE_OR_TAB(action_args[mark+1]))
 			{
-				*delimiter[0] = '\0'; // Temporarily terminate action_args at the first delimiter.
+				// Since this parameter is an expression, commas inside it can't be intended to be
+				// literal/displayed by the user unless they're enclosed in quotes; but in that case,
+				// the smartness below isn't needed because it's provided by the parameter-parsing
+				// logic in a later section.
+				if (arg >= 3) // Text or Timeout
+					break;
+				// Otherwise, just jump to the next parameter so we can check it too:
+				next = FindNextDelimiter(action_args, g_delimiter, mark+2, literal_map);
+				continue;
+			}
+			
+			// Find the next non-literal delimiter:
+			for (next = mark; action_args[next]; ++next)
+				if (action_args[next] == g_delimiter && !literal_map[next])
+					break;
+
+			if (arg == 1) // Options (or Text in single-arg mode)
+			{
+				if (!action_args[next]) // Below relies on this check.
+					break; // There's only one parameter, so no further checks are required.
+				// It has more than one apparent param, but is the first param even numeric?
+				action_args[next] = '\0'; // Temporarily terminate action_args at the first delimiter.
 				// Note: If it's a number inside a variable reference, it's still considered 1-parameter
-				// mode to avoid ambiguity (unlike the new deref checking for param #4 mentioned below,
+				// mode to avoid ambiguity (unlike the deref check for param #4 in the section below,
 				// there seems to be too much ambiguity in this case to justify trying to figure out
 				// if the first parameter is a pure deref, and thus that the command should use
 				// 3-param or 4-param mode instead).
-				if (!IsPureNumeric(action_args)) // No floats allowed.  Allow all-whitespace for aut2 compatibility.
+				if (!IsPureNumeric(action_args + mark)) // No floats allowed.
 					max_params_override = 1;
-				*delimiter[0] = g_delimiter; // Restore the string.
-				if (!max_params_override)
+				action_args[next] = g_delimiter; // Restore the string.
+				if (max_params_override)
+					break;
+			}
+			else if (arg == 4) // Timeout (or part of Text)
+			{
+				// If the 4th parameter isn't blank or pure numeric, assume the user didn't intend it
+				// to be the MsgBox timeout (since that feature is rarely used), instead intending it
+				// to be part of parameter #3.
+				if (!IsPureNumeric(action_args + mark, false, true, true))
 				{
-					// IMPORATANT: The MsgBox cmd effectively has 3 parameter modes:
-					// 1-parameter (where all commas in the 1st parameter are automatically literal)
-					// 3-parameter (where all commas in the 3rd parameter are automatically literal)
-					// 4-parameter (whether the 4th parameter is the timeout value)
-					// Thus, the below must be done in a way that recognizes & supports all 3 modes.
-					// The above has determined that the cmd isn't in 1-parameter mode.
-					// If at this point it has exactly 3 apparent params, allow the command to be
-					// processed normally without an override.  Otherwise, do more checking:
-					if (delimiter_count == 3) // i.e. 3 delimiters, which means 4 params.
-					{
-						// If the 4th parameter isn't blank or pure numeric, assume the user didn't
-						// intend it to be the MsgBox timeout (since that feature is rarely used),
-						// instead intending it to be part of parameter #3.
-						if (!IsPureNumeric(delimiter[2] + 1, false, true, true))
-						{
-							// Not blank and not a int or float.  Update for v1.0.20: Check if it's a
-							// single deref.  If so, assume that deref contains the timeout and thus
-							// 4-param mode is in effect.  This allows the timeout to be contained in
-							// a variable, which was requested by one user:
-							cp = omit_leading_whitespace(delimiter[2] + 1);
-							// Relies on short-circuit boolean order:
-							if (*cp != g_DerefChar || literal_map[cp - action_args]) // not a proper deref char.
-								max_params_override = 3;
-							// else since it does start with a real deref symbol, it must end with one otherwise
-							// that will be caught later on as a syntax error anyway.  Therefore, don't override
-							// max_params, just let it be parsed as 4 parameters.
-						}
-						// If it has more than 4 params or it has exactly 4 but the 4th isn't blank,
-						// pure numeric, or a deref: assume it's being used in 3-parameter mode and
-						// that all the other delimiters were intended to be literal.
-					}
-					else if (delimiter_count > 3) // i.e. 4 or more delimiters, which means 5 or more params.
-					{
-						// v1.0.48: This section extends smart comma handling so that if parameter #3 (Text)
-						// is an expression, any commas in it won't interfere with the Timeout parameter.
-						// For example, the timeout parameter below should work now:
-						//    MsgBox 0, Title, % Func(x,y), 1
-						//
-						// If the "Text" parameter is an expression then commas inside it can't be intended to
-						// be literal/displayed by the user unless they're enclosed in quotes; but in that case,
-						// the smartness below isn't needed because it's provided by the parameter-parsing logic
-						// in a later section.  So in that case it seems safe to avoid setting max_params_override,
-						// which fixes examples like the one above.  The code further below does this.
-						//
-						// By contrast, fixing the second parameter (Title) in a similar way would be more
-						// difficult and/or would be more likely to break existing scripts.  For example if "title"
-						// is an expression but "text" is NOT an expression, there might be some commas in "text"
-						// that are currently handled as smart/auto-literal, and those cases should be preserved
-						// for backward compatibility.
-						//
-						// If expressions in the "title" parameter ever are fixed to not interfere with the
-						// Timeout parameter, perhaps the best way to do it would be to verify that it's an
-						// expression, then skip over any commas that are enclosed in quotes or parentheses so that
-						// the "real" commas can be counted and used by the rest of the smart-comma logic.
-						//
-						// For the section below, see comments at the similar code section above:
-						cp = omit_leading_whitespace(delimiter[1] + 1); // Parameter #3, the "text" parameter.
-						if (   *cp != g_DerefChar || literal_map[cp - action_args] // not a proper deref char...
-							|| !IS_SPACE_OR_TAB(cp[1])   ) // ...or it's not followed by a space or tab, so it isn't "% ".
-							// Since it has too many delimiters to be 4-param mode and since there is no "% "
-							// expression present, assume it's 3-param mode so that non-escaped commas in
-							// parameters 4 and beyond will be all treated as strings that are part of parameter #3.
-							max_params_override = 3;
-					}
-					//else if 3 params or less: Don't override via max_params_override, just parse it normally.
+					// Not blank and not a int or float.  Update for v1.0.20: Check if it's a single
+					// deref.  If so, assume that deref contains the timeout and thus 4-param mode is
+					// in effect.  This allows the timeout to be contained in a variable, which was
+					// requested by one user.  Update for v1.1.06: Do some additional checking to
+					// exclude things like "%x% marks the spot" but not "%Timeout%.500".
+					LPTSTR deref_end;
+					if (action_args[next] // There are too many delimiters (there appears to be another arg after this one).
+						|| action_args[mark] != g_DerefChar || literal_map[mark] // Not a proper deref char.
+						|| !(deref_end = _tcschr(action_args + mark + 1, g_DerefChar)) // No deref end char (this syntax error will be handled later).
+						|| !IsPureNumeric(deref_end + 1, false, true, true)) // There is something non-numeric following the deref (things like %Timeout%.500 are allowed for flexibility and backward-compatibility).
+						max_params_override = 3;
 				}
+				break;
 			}
 		}
 	} // end of special handling for MsgBox.
@@ -6512,9 +6478,9 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType,
 			// because the map is still accurate due to the nature of rtrim).  UPDATE: Note that this
 			// version of rtrim() specifically avoids trimming newline characters, since the user may
 			// have included literal newlines at the end of the string by using an escape sequence:
-			rtrim(arg[nArgs]);
+			rtrim_literal(arg[nArgs], arg_map[nArgs]);
 			// Omit the leading whitespace from the next arg:
-			for (++mark; IS_SPACE_OR_TAB(action_args[mark]); ++mark);
+			for (++mark; IS_SPACE_OR_TAB(action_args[mark]) && !literal_map[mark]; ++mark);
 			// Now <mark> marks the end of the string, the start of the next arg,
 			// or a delimiter-char (if the next arg is blank).
 		}
@@ -7801,6 +7767,11 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 			return ScriptError(ERR_PARAM1_INVALID, new_raw_arg1);
 		break;
 
+	case ACT_SENDLEVEL:
+		if (aArgc > 0 && !line.ArgHasDeref(1) && !SendLevelIsValid(ATOI(new_raw_arg1)))
+			return ScriptError(ERR_PARAM1_INVALID, new_raw_arg1);
+		break;
+
 	case ACT_PAUSE:
 #ifndef MINIDLL
 	case ACT_KEYHISTORY:
@@ -8591,11 +8562,11 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 #endif
 	case ACT_MSGBOX:
 		if (aArgc > 1) // i.e. this MsgBox is using the 3-param or 4-param style.
-			if (!line.ArgHasDeref(1)) // i.e. if it's a deref, we won't try to validate it now.
+			if (!line.mArg[0].is_expression && !line.ArgHasDeref(1)) // i.e. if it's an expression (or an expression which was converted into a simple deref), we won't try to validate it now.
 				if (!IsPureNumeric(new_raw_arg1)) // Allow it to be entirely whitespace to indicate 0, like Aut2.
 					return ScriptError(ERR_PARAM1_INVALID, new_raw_arg1);
-		if (aArgc > 3) // EVEN THOUGH IT'S NUMERIC, due to MsgBox's smart-comma handling, this cannot be an expression because it would never have been detected as the fourth parameter to begin with.
-			if (!line.ArgHasDeref(4)) // i.e. if it's a deref, we won't try to validate it now.
+		if (aArgc > 3)
+			if (!line.mArg[3].is_expression && !line.ArgHasDeref(4)) // i.e. if it's an expression or deref, we won't try to validate it now.
 				if (!IsPureNumeric(new_raw_arg4, false, true, true))
 					return ScriptError(ERR_PARAM4_INVALID, new_raw_arg4);
 		break;
@@ -9091,7 +9062,7 @@ ResultType Script::DefineClass(LPTSTR aBuf)
 	token.symbol = SYM_STRING;
 	token.marker = mClassName;
 
-	if (   !(class_object = Object::Create(NULL, 0))
+	if (   !(class_object = Object::Create())
 		|| !(class_object->SetItem(_T("__Class"), token))
 		|| !(mClassObjectCount
 				? outer_class->SetItem(class_name, class_object) // Assign to super_class[class_name].
@@ -9478,12 +9449,6 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 			SetWorkingDir(sLib[i].path); // See similar section in the #Include directive.
 			*terminate_here = '\\'; // Undo the termination.
 
-			if (!LoadIncludedFile(sLib[i].path, false, false)) // Fix for v1.0.47.05: Pass false for allow-dupe because otherwise, it's possible for a stdlib file to attempt to include itself (especially via the LibNamePrefix_ method) and thus give a misleading "duplicate function" vs. "func does not exist" error message.  Obsolete: For performance, pass true for allow-dupe so that it doesn't have to check for a duplicate file (seems too rare to worry about duplicates since by definition, the function doesn't yet exist so it's file shouldn't yet be included).
-			{
-				aErrorWasShown = true; // Above has just displayed its error (e.g. syntax error in a line, failed to open the include file, etc).  So override the default set earlier.
-				return NULL;
-			}
-
 			if (mIncludeLibraryFunctionsThenExit && aIsAutoInclude)
 			{
 				// For each auto-included library-file, write out two #Include lines:
@@ -9503,6 +9468,14 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 				mIncludeLibraryFunctionsThenExit->Format(_T("#Include %-0.*s\n#IncludeAgain %s\n")
 					, sLib[i].length, sLib[i].path, sLib[i].path);
 				// Now continue on normally so that our caller can continue looking for syntax errors.
+			}
+			
+			// Fix for v1.1.06.00: If the file contains any lib #includes, it must be loaded AFTER the
+			// above writes sLib[i].path to the iLib file, otherwise the wrong filename could be written.
+			if (!LoadIncludedFile(sLib[i].path, false, false)) // Fix for v1.0.47.05: Pass false for allow-dupe because otherwise, it's possible for a stdlib file to attempt to include itself (especially via the LibNamePrefix_ method) and thus give a misleading "duplicate function" vs. "func does not exist" error message.  Obsolete: For performance, pass true for allow-dupe so that it doesn't have to check for a duplicate file (seems too rare to worry about duplicates since by definition, the function doesn't yet exist so it's file shouldn't yet be included).
+			{
+				aErrorWasShown = true; // Above has just displayed its error (e.g. syntax error in a line, failed to open the include file, etc).  So override the default set earlier.
+				return NULL;
 			}
 
 			// Now that a matching filename has been found, it seems best to stop searching here even if that
@@ -9527,8 +9500,58 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 		naked_filename[naked_filename_length] = '\0';
 	} // 2-iteration for().
 
+	// HotKeyIt find library in Resource
 	// Since above didn't return, no match found in any library.
-	return NULL;
+	// Search in Resource for a library
+	tmemcpy(class_name_buf, aFuncName, aFuncNameLength);
+	tmemcpy(class_name_buf + aFuncNameLength,_T(".ahk"),4);
+	class_name_buf[aFuncNameLength + 4] = '\0';
+	HRSRC lib_hResource;
+	if (!(lib_hResource = FindResource(g_hInstance, class_name_buf, _T("LIB"))))
+	{
+		// Now that the resource is not found, set up for the second one that searches by class/prefix.
+		// Notes about ambiguity and naming collisions:
+		// By the time it gets to the prefix/class search, it's almost given up.  Even if it wrongly finds a
+		// match in a filename that isn't really a class, it seems inconsequential because at worst it will
+		// still not find the function and will then say "call to nonexistent function".  In addition, the
+		// ability to customize which libraries are searched is planned.  This would allow a publicly
+		// distributed script to turn off all libraries except stdlib.
+		if (   !(first_underscore = _tcschr(aFuncName, '_'))   ) // No second iteration needed.
+			return NULL;
+		naked_filename_length = first_underscore - aFuncName;
+		if (naked_filename_length >= _countof(class_name_buf)) // Class name too long (probably impossible currently).
+			return NULL;
+		tmemcpy(class_name_buf, aFuncName, naked_filename_length);
+		tmemcpy(class_name_buf + naked_filename_length,_T(".ahk"),4);
+		class_name_buf[naked_filename_length + 4] = '\0';
+		if (!(lib_hResource = FindResource(g_hInstance, class_name_buf, _T("LIB"))))
+			return NULL;
+	}
+	// Now a resouce was found and it can be loaded
+	HGLOBAL hResData;
+	TextMem::Buffer textbuf(NULL, 0, false);
+	if ( !( (textbuf.mLength = SizeofResource(g_hInstance, lib_hResource))
+		&& (hResData = LoadResource(g_hInstance, lib_hResource))
+		&& (textbuf.mBuffer = LockResource(hResData)) ) )
+	{
+		// aErrorWasShown = true; // Do not display errors here
+		return NULL;
+	}
+	aFileWasFound = true;
+	// NOTE: Ahk2Exe strips off the UTF-8 BOM.
+	TextMem tmem;
+	LPTSTR resource_script = (LPTSTR)_alloca(textbuf.mLength * sizeof(TCHAR));
+	tmem.Open(textbuf, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR, CP_UTF8);
+	tmem.Read(resource_script, textbuf.mLength);
+	if (!LoadIncludedText(resource_script))
+	{
+		aFileWasFound = false;
+		return NULL;
+	}
+	else
+	{
+		return FindFunc(aFuncName, aFuncNameLength);
+	}
 }
 #endif
 
@@ -10865,16 +10888,10 @@ void *Script::GetVarType(LPTSTR aVarName)
 	if (!_tcscmp(lower, _T("linenumber"))) return BIV_LineNumber;
 	if (!_tcscmp(lower, _T("linefile"))) return BIV_LineFile;
 
-// A_IsCompiled is left blank/undefined in uncompiled scripts.
 //#ifdef AUTOHOTKEYSC
 	if (!_tcscmp(lower, _T("iscompiled"))) return BIV_IsCompiled;
 //#endif
-
-// A_IsUnicode is left blank/undefined in the ANSI version.
-#ifdef UNICODE
-	if (!_tcscmp(lower, _T("isunicode"))) return BIV_IsUnicode;
-#endif
-	
+	if (!_tcscmp(lower, _T("isunicode"))) return BIV_IsUnicode;	
 	if (!_tcscmp(lower, _T("ptrsize"))) return BIV_PtrSize;
 
 	if (   !_tcscmp(lower, _T("batchlines"))
@@ -12477,13 +12494,16 @@ numeric_literal:
 						infix[infix_count].symbol = SYM_INTEGER;
 						infix[infix_count].value_int64 = sizeof(void*);
 					}
-#ifdef UNICODE
 					else if (this_deref_ref.var->mBIV == BIV_IsUnicode)
 					{
+#ifdef UNICODE
 						infix[infix_count].symbol = SYM_INTEGER;
 						infix[infix_count].value_int64 = 1;
-					}
+#else
+						infix[infix_count].symbol = SYM_STRING;
+						infix[infix_count].marker = _T(""); // See BIV_IsUnicode for comments about why it is blank.
 #endif
+					}
 					else
 					{
 						infix[infix_count].symbol = SYM_DYNAMIC;
@@ -16779,6 +16799,15 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 		g.SendMode = ConvertSendMode(ARG1, g.SendMode); // Leave value unchanged if ARG1 is invalid.
 		return OK;
 
+	case ACT_SENDLEVEL:
+	{
+		int sendLevel = ArgToInt(1);
+		if (SendLevelIsValid(sendLevel))
+			g.SendLevel = sendLevel;
+
+		return OK;
+	}
+
 	case ACT_SETKEYDELAY:
 		if (!_tcsicmp(ARG3, _T("Play")))
 		{
@@ -17262,6 +17291,9 @@ LPTSTR Line::LogToText(LPTSTR aBuf, int aBufSize) // aBufSize should be an int t
 		_T(" the right (if not 0).  The bottommost line's elapsed time is the number of seconds since it executed.\r\n\r\n"));
 
 	int i, lines_to_show, line_index, line_index2, space_remaining; // space_remaining must be an int to detect negatives.
+#ifndef AUTOHOTKEYSC
+	int last_file_index = -1;
+#endif
 	DWORD elapsed;
 	bool this_item_is_special, next_item_is_special;
 
@@ -17311,6 +17343,14 @@ LPTSTR Line::LogToText(LPTSTR aBuf, int aBufSize) // aBufSize should be an int t
 			}
 			else // This is the last line (whether special or not), so compare it's time against the current time instead.
 				elapsed = GetTickCount() - sLogTick[line_index];
+#ifndef AUTOHOTKEYSC
+			// If the this line and the previous line are in different files, display the filename:
+			if (last_file_index != sLog[line_index]->mFileIndex)
+			{
+				last_file_index = sLog[line_index]->mFileIndex;
+				aBuf += sntprintf(aBuf, BUF_SPACE_REMAINING, _T("---- %s\r\n"), sSourceFile[last_file_index]);
+			}
+#endif
 			space_remaining = BUF_SPACE_REMAINING;  // Resolve macro only once for performance.
 			// Truncate really huge lines so that the Edit control's size is less likely to be exhausted.
 			// In v1.0.30.02, this is even more likely due to having increased the line-buf's capacity from
@@ -18469,11 +18509,18 @@ ResultType Script::ActionExec(LPTSTR aAction, LPTSTR aParams, LPTSTR aWorkingDir
 		
 		if (ShellExecuteEx(&sei)) // Relies on short-circuit boolean order.
 		{
-			hprocess = sei.hProcess;
-			// aOutputVar is left blank because:
-			// ProcessID is not available when launched this way, and since GetProcessID() is only
-			// available in WinXP SP1, no effort is currently made to dynamically load it from
-			// kernel32.dll (to retain compatibility with older OSes).
+			typedef DWORD (WINAPI *GetProcessIDType)(HANDLE);
+			// GetProcessID is only available on WinXP SP1 or later, so load it dynamically.
+			static GetProcessIDType fnGetProcessID = (GetProcessIDType)GetProcAddress(GetModuleHandle(_T("kernel32.dll")), "GetProcessId");
+
+			if (hprocess = sei.hProcess)
+			{
+				// A new process was created, so get its ID if possible.
+				if (aOutputVar && fnGetProcessID)
+					aOutputVar->Assign(fnGetProcessID(hprocess));
+			}
+			// Even if there's no process handle, it's considered a success because some
+			// system verbs and file associations do not create a new process, by design.
 			success = true;
 		}
 		else

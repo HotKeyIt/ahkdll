@@ -21,6 +21,14 @@ GNU General Public License for more details.
 #include "defines.h"
 EXTERN_G;  // For ITOA() and related functions' use of g->FormatIntAsHex
 
+
+#ifdef _WIN64
+#define Exp32or64(a,b) (b)
+#else
+#define Exp32or64(a,b) (a)
+#endif
+
+
 #ifdef UNICODE
 #define tmemcpy			wmemcpy
 #define tmemmove		wmemmove
@@ -296,6 +304,36 @@ inline size_t rtrim(LPTSTR aStr, size_t aLength = -1)
 	}
 }
 
+inline void rtrim_literal(LPTSTR aStr, TCHAR aLiteralMap[])
+// Caller must ensure that aStr is not NULL.
+// NOTE: THIS VERSION trims only tabs and spaces which aren't marked as literal (so not "`t" or "` ").
+// It specifically avoids trimming newlines because some callers want to retain those.
+{
+	if (!*aStr) return; // The below relies upon this check having been done.
+	// It's done this way in case aStr just happens to be address 0x00 (probably not possible
+	// on Intel & Intel-clone hardware) because otherwise --cp would decrement, causing an
+	// underflow since pointers are probably considered unsigned values, which would
+	// probably cause an infinite loop.  Extremely unlikely, but might as well try
+	// to be thorough:
+	for (size_t last = _tcslen(aStr) - 1; ; --last)
+	{
+		if (!IS_SPACE_OR_TAB(aStr[last]) || aLiteralMap[last]) // It's not a space or tab, or it's a literal one.
+		{
+			aStr[last + 1] = '\0';
+			return;
+		}
+		// Otherwise, it is a space or tab...
+		if (last == 0) // ... and we're now at the first character of the string...
+		{
+			if (IS_SPACE_OR_TAB(aStr[last])) // ... and that first character is also a space or tab...
+				*aStr = '\0'; // ... so the entire string is made empty.
+			return; // ... and we return in any case.
+		}
+		// else it's a space or tab, and there are still more characters to check.  Let the loop
+		// do its decrements.
+	}
+}
+
 inline size_t rtrim_with_nbsp(LPTSTR aStr, size_t aLength = -1)
 // Returns the new length of the string.
 // Caller must ensure that aStr is not NULL.
@@ -526,6 +564,18 @@ inline LPTSTR UTOA64(unsigned __int64 value, LPTSTR buf)
 }
 #endif
 
+
+inline LPTSTR HwndToString(HWND aHwnd, LPTSTR aBuf)
+{
+	aBuf[0] = '0';
+	aBuf[1] = 'x';
+	// Use _ultot for performance on 32-bit systems and _ui64tot on 64-bit systems in case it's
+	// possible for HWNDs to have non-zero upper 32-bits:
+	Exp32or64(_ultot,_ui64tot)((size_t)aHwnd, aBuf + 2, 16);
+	return aBuf;
+}
+
+
 //inline LPTSTR tcscatmove(LPTSTR aDst, LPCTSTR aSrc)
 //// Same as strcat() but allows aSrc and aDst to overlap.
 //// Unlike strcat(), it doesn't return aDst.  Instead, it returns the position
@@ -560,11 +610,6 @@ inline LPTSTR UTOA64(unsigned __int64 value, LPTSTR buf)
 // this case.
 #define lstrcmpni(str1, len1, str2, len2) (CompareString(LOCALE_USER_DEFAULT, NORM_IGNORECASE, str1, (int)(len1), str2, (int)(len2)) - 2) // -2 for maintainability
 
-#ifndef _WIN64
-#define Exp32or64(a,b) (a)
-#else
-#define Exp32or64(a,b) (b)
-#endif
 
 // The following macros simplify and make consistent the calls to MultiByteToWideChar().
 // MSDN implies that passing -1 for cbMultiByte is the most typical and secure usage because it ensures

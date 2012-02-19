@@ -129,13 +129,14 @@ int g_MaxHotkeysPerInterval = 70; // Increased to 70 because 60 was still causin
 int g_HotkeyThrottleInterval = 2000; // Milliseconds.
 #endif
 bool g_MaxThreadsBuffer = false;  // This feature usually does more harm than good, so it defaults to OFF.
+SendLevelType g_InputLevel = 0;
 #ifndef MINIDLL
 HotCriterionType g_HotCriterion = HOT_NO_CRITERION;
 LPTSTR g_HotWinTitle = _T(""); // In spite of the above being the primary indicator,
 LPTSTR g_HotWinText = _T("");  // these are initialized for maintainability.
 HotkeyCriterion *g_FirstHotCriterion = NULL, *g_LastHotCriterion = NULL;
 
-// L4: Added global variables for #if (expression).
+// Global variables for #if (expression).
 int g_HotExprIndex = -1; // The index of the Line containing the expression defined by the most recent #if (expression) directive.
 Line **g_HotExprLines = NULL; // Array of pointers to expression lines, allocated when needed.
 int g_HotExprLineCount = 0; // Number of expression lines currently present.
@@ -340,7 +341,7 @@ Action g_act[] =
 	, {_T("IfNotExist"), 1, 1, 1, NULL} // File or directory.
 	// IfMsgBox must be physically adjacent to the other IFs in this array:
 	, {_T("IfMsgBox"), 1, 1, 1, NULL} // MsgBox result (e.g. OK, YES, NO)
-	, {_T("MsgBox"), 0, 4, 3, {4, 0}} // Text (if only 1 param) or: Mode-flag, Title, Text, Timeout.
+	, {_T("MsgBox"), 0, 4, 3, NULL} // Text (if only 1 param) or: Mode-flag, Title, Text, Timeout.
 	, {_T("InputBox"), 1, 11, 11 H, {5, 6, 7, 8, 10, 0}} // Output var, title, prompt, hide-text (e.g. passwords), width, height, X, Y, Font (e.g. courier:8 maybe), Timeout, Default
 	, {_T("SplashTextOn"), 0, 4, 4, {1, 2, 0}} // Width, height, title, text
 	, {_T("SplashTextOff"), 0, 0, 0, NULL}
@@ -400,6 +401,7 @@ Action g_act[] =
 	, {_T("ControlGet"), 2, 8, 8 H, NULL}   // Output-var, Command, Value, Control, std. 4 window params
 
 	, {_T("SendMode"), 1, 1, 1, NULL}
+	, {_T("SendLevel"), 1, 1, 1, {1, 0}}
 	, {_T("CoordMode"), 1, 2, 2, NULL} // Attribute, screen|relative
 	, {_T("SetDefaultMouseSpeed"), 1, 1, 1, {1, 0}} // speed (numeric)
 	, {_T("Click"), 0, 1, 1, NULL} // Flex-list of options.

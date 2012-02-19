@@ -121,6 +121,7 @@ extern int g_MaxHotkeysPerInterval;
 extern int g_HotkeyThrottleInterval;
 #endif
 extern bool g_MaxThreadsBuffer;
+extern SendLevelType g_InputLevel;
 #ifndef MINIDLL
 extern HotCriterionType g_HotCriterion;
 extern LPTSTR g_HotWinTitle;

@@ -1222,6 +1222,15 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 				// 2) Reserves ErrorLevel for potential future uses.
 				if (gui_action == GUI_EVENT_RESIZE || gui_action == GUI_EVENT_DROPFILES)
 					g_ErrorLevel->Assign(gui_event_info); // For backward compatibility.
+				//this might not be the best place to put this, but other places would need a larger gui_action_errorlevel buffer or a new variable.
+				else if(pcontrol && pcontrol->type == GUI_CONTROL_LINK)
+				{
+					LITEM item = {};
+					item.mask=LIF_URL|LIF_ITEMID|LIF_ITEMINDEX;
+					item.iLink = gui_event_info - 1;
+					if(SendMessage(pcontrol->hwnd,LM_GETITEM,NULL,(LPARAM)&item))
+						g_ErrorLevel->AssignString(*item.szUrl ? CStringTCharFromWCharIfNeeded(item.szUrl) : CStringTCharFromWCharIfNeeded(item.szID));
+				}
 				else
 					g_ErrorLevel->Assign(gui_action_errorlevel); // Helps reserve it for future use. See explanation above.
 
@@ -1303,6 +1312,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 
 			case AHK_HOTSTRING:
 				g.hWndLastUsed = criterion_found_hwnd; // v1.0.42. Even if the window is invalid for some reason, IsWindow() and such are called whenever the script accesses it (GetValidLastUsedWindow()).
+				g.SendLevel = hs->mInputLevel;
 				hs->PerformInNewThreadMadeByCaller();
 				break;
 
@@ -1323,6 +1333,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 					g.EventInfo = (DWORD)msg.lParam; // v1.0.43.03: Override the thread default of 0 with the number of notches by which the wheel was turned.
 					// Above also works for RunAgainAfterFinished since that feature reuses the same thread attributes set above.
 				g.hWndLastUsed = criterion_found_hwnd; // v1.0.42. Even if the window is invalid for some reason, IsWindow() and such are called whenever the script accesses it (GetValidLastUsedWindow()).
+				g.SendLevel = variant->mInputLevel;
 				hk->PerformInNewThreadMadeByCaller(*variant);
 			}
 

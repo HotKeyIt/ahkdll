@@ -132,9 +132,6 @@ DEFINE_GUID(IID_ICOMServer,0x4ffe41b, 0x8fe9, 0x4479, 0x99, 0xa, 0xb1, 0x86, 0xe
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkPostFunction( 
            /*[in]*/ VARIANT FuncName,/*[in,optional]*/ VARIANT param1,/*[in,optional]*/ VARIANT param2,/*[in,optional]*/ VARIANT param3,/*[in,optional]*/ VARIANT param4,/*[in,optional]*/ VARIANT param5,/*[in,optional]*/ VARIANT param6,/*[in,optional]*/ VARIANT param7,/*[in,optional]*/ VARIANT param8,/*[in,optional]*/ VARIANT param9,/*[in,optional]*/ VARIANT param10,/*[out, retval]*/ unsigned int* returnVal) = 0;
 	public:
-        virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkKey( 
-           /*[in]*/ VARIANT name,/*[out, retval]*/ BOOL* success) = 0;
-    public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE addScript( 
            /*[in]*/ VARIANT script,/*[in,optional]*/ VARIANT replace,/*[out, retval]*/ UINT_PTR* success) = 0;
     public:

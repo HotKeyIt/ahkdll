@@ -4,9 +4,8 @@
 #include "exports.h"
 #include "script.h"
 
-#define BIF(fun) void fun(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 
-BIF(BIF_FindFunc) // Added in Nv8.
+BIF_DECL(BIF_FindFunc) // Added in Nv8.
 {
 	// Set default return value in case of early return.
 	aResultToken.symbol = SYM_INTEGER ;
@@ -19,7 +18,7 @@ BIF(BIF_FindFunc) // Added in Nv8.
 	return;
 }
 
-BIF(BIF_FindLabel) // HotKeyIt Added in 1.1.02.00
+BIF_DECL(BIF_FindLabel) // HotKeyIt Added in 1.1.02.00
 {
 	// Set default return value in case of early return.
 	aResultToken.symbol = SYM_INTEGER ;
@@ -33,7 +32,7 @@ BIF(BIF_FindLabel) // HotKeyIt Added in 1.1.02.00
 }
 
 
-BIF(BIF_Getvar)
+BIF_DECL(BIF_Getvar)
 {
 	int i = 0;
 	if (aParam[0]->symbol == SYM_VAR)
@@ -42,7 +41,7 @@ BIF(BIF_Getvar)
 }
 
 
-BIF(BIF_Static)
+BIF_DECL(BIF_Static)
 {
 	if (aParam[0]->symbol == SYM_VAR)
 	{
@@ -53,7 +52,7 @@ BIF(BIF_Static)
 	}
 }
 
-BIF(BIF_Alias)
+BIF_DECL(BIF_Alias)
 {
 	ExprTokenType &aParam0 = *aParam[0];
 	ExprTokenType &aParam1 = *aParam[1];
@@ -76,7 +75,7 @@ BIF(BIF_Alias)
 		var.mByteLength = len;
 	}
 }
-BIF(BIF_CacheEnable)
+BIF_DECL(BIF_CacheEnable)
 {
 	if (aParam[0]->symbol == SYM_VAR)
 	{
@@ -85,7 +84,7 @@ BIF(BIF_CacheEnable)
 	}
 }
 
-BIF(BIF_getTokenValue)
+BIF_DECL(BIF_getTokenValue)
 {
    ExprTokenType *token = aParam[0];
    

@@ -36,10 +36,26 @@ ResultType Line::IniRead(LPTSTR aFilespec, LPTSTR aSection, LPTSTR aKey, LPTSTR 
 	TCHAR	szFileTemp[_MAX_PATH+1];
 	TCHAR	*szFilePart, *cp;
 	TCHAR	szBuffer[65535] = _T("");					// Max ini file size is 65535 under 95
+	TCHAR	szEmpty[] = _T("");
 	// Get the fullpathname (ini functions need a full path):
 	GetFullPathName(aFilespec, _MAX_PATH, szFileTemp, &szFilePart);
 	if (*aKey)
 	{
+		// An access violation can occur if the following conditions are met:
+		//	1) aFilespec specifies a Unicode file.
+		//	2) aSection is a read-only string, either empty or containing only spaces.
+		//
+		// Debugging at the assembly level indicates that in this specific situation,
+		// it tries to write a zero at the end of aSection (which is already null-
+		// terminated).
+		//
+		// The second condition can ordinarily only be met if Section is omitted,
+		// since in all other cases aSection is writable.  Although Section was a
+		// required parameter prior to revision 57, empty or blank section names
+		// are actually valid.  Simply passing an empty writable buffer appears
+		// to work around the problem effectively:
+		if (!*aSection)
+			aSection = szEmpty;
 		GetPrivateProfileString(aSection, aKey, aDefault, szBuffer, _countof(szBuffer), szFileTemp);
 	}
 	else if (*aSection
@@ -190,6 +206,7 @@ ResultType Line::RegRead(HKEY aRootKey, LPTSTR aRegSubkey, LPTSTR aValueName)
 			result = RegQueryValueEx(hRegKey, aValueName, NULL, NULL, (LPBYTE)&dwBuf, &dwRes);
 			if (result == ERROR_SUCCESS)
 				output_var.Assign((DWORD)dwBuf);
+			RegCloseKey(hRegKey);
 			break;
 
 		// Note: The contents of any of these types can be >64K on NT/2k/XP+ (though that is probably rare):
@@ -315,6 +332,7 @@ ResultType Line::RegRead(HKEY aRootKey, LPTSTR aRegSubkey, LPTSTR aValueName)
 				return FAIL;
 		}
 		default:
+			RegCloseKey(hRegKey);
 			result = ERROR_UNSUPPORTED_TYPE; // Indicate the error.
 			break;
 	}

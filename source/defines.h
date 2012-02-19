@@ -303,7 +303,7 @@ enum enum_act {
 , ACT_SEND, ACT_SENDRAW, ACT_SENDINPUT, ACT_SENDPLAY, ACT_SENDEVENT
 , ACT_CONTROLSEND, ACT_CONTROLSENDRAW, ACT_CONTROLCLICK, ACT_CONTROLMOVE, ACT_CONTROLGETPOS, ACT_CONTROLFOCUS
 , ACT_CONTROLGETFOCUS, ACT_CONTROLSETTEXT, ACT_CONTROLGETTEXT, ACT_CONTROL, ACT_CONTROLGET
-, ACT_SENDMODE, ACT_COORDMODE, ACT_SETDEFAULTMOUSESPEED
+, ACT_SENDMODE, ACT_SENDLEVEL, ACT_COORDMODE, ACT_SETDEFAULTMOUSESPEED
 , ACT_CLICK, ACT_MOUSEMOVE, ACT_MOUSECLICK, ACT_MOUSECLICKDRAG, ACT_MOUSEGETPOS
 , ACT_STATUSBARGETTEXT
 , ACT_STATUSBARWAIT
@@ -349,10 +349,12 @@ enum enum_act {
 // in a match anyway.  UPDATE: No longer used because Run/RunWait is now required, which greatly
 // improves syntax checking during load:
 //, ACT_EXEC
-// It's safer not to do this here.  It's better set by a
-// calculation immediately after the array is declared and initialized,
-// at which time we know its true size:
-// , ACT_COUNT
+// It's safer to use g_ActionCount, which is calculated immediately after the array is declared
+// and initialized, at which time we know its true size.  However, the following lets us detect
+// when the size of the array doesn't match the enum (in debug mode):
+#ifdef _DEBUG
+, ACT_COUNT
+#endif
 };
 
 enum enum_act_old {
@@ -588,6 +590,16 @@ typedef USHORT CoordModeType;
 
 typedef UINT_PTR EventInfoType;
 
+typedef UCHAR SendLevelType;
+// Setting the max level to 100 is somewhat arbitrary. It seems that typical usage would only
+// require a few levels at most. We do want to keep the max somewhat small to keep the range
+// for magic values that get used in dwExtraInfo to a minimum, to avoid conflicts with other
+// apps that may be using the field in other ways.
+const SendLevelType SendLevelMax = 100;
+// Using int as the type for level so this can be used as validation before converting to SendLevelType.
+inline bool SendLevelIsValid(int level) { return level >= 0 && level <= SendLevelMax; }
+
+
 // Same reason as above struct.  It's best to keep this struct as small as possible
 // because it's used as a local (stack) var by at least one recursive function:
 // Each instance of this struct generally corresponds to a quasi-thread.  The function that creates
@@ -675,6 +687,7 @@ struct global_struct
 	bool StoreCapslockMode;
 	bool AutoTrim;
 	char FormatInt;
+	SendLevelType SendLevel;
 	bool MsgBoxTimedOut; // Doesn't require initialization.
 	bool IsPaused; // The latter supports better toggling via "Pause" or "Pause Toggle".
 	bool ListLinesIsEnabled;
@@ -782,6 +795,7 @@ inline void global_init(global_struct &g)
 	g.AutoTrim = true;  // AutoIt2's default, and overall the best default in most cases.
 	_tcscpy(g.FormatFloat, _T("%0.6f"));
 	g.FormatInt = 'D';
+	g.SendLevel = 0;
 	g.ListLinesIsEnabled = true;
 	g.Encoding = CP_ACP;
 	// For FormatFloat:

@@ -10,7 +10,7 @@
 // BIF_ObjCreate - Object()
 //
 
-void BIF_ObjCreate(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_ObjCreate)
 {
 	IObject *obj = NULL;
 
@@ -49,9 +49,9 @@ void BIF_ObjCreate(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 // BIF_ObjArray - Array(items*)
 //
 
-void BIF_ObjArray(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_ObjArray)
 {
-	Object *obj = Object::Create(NULL, 0);
+	Object *obj = Object::Create();
 	if (obj)
 	{
 		if (!aParamCount || obj->InsertAt(0, 1, aParam, aParamCount))
@@ -71,7 +71,7 @@ void BIF_ObjArray(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 // BIF_IsObject - IsObject(obj)
 //
 
-void BIF_IsObject(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_IsObject)
 // IsObject(obj) is currently equivalent to (obj && obj=""), but much more intuitive.
 {
 	int i;
@@ -84,7 +84,7 @@ void BIF_IsObject(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 // BIF_ObjInvoke - Handles ObjGet/Set/Call() and get/set/call syntax.
 //
 
-void BIF_ObjInvoke(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_ObjInvoke)
 {
     int invoke_type;
     IObject *obj;
@@ -118,12 +118,12 @@ void BIF_ObjInvoke(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 			// This is not necessary for SYM_OBJECT since that reference is already counted and cannot be released before we return.  Each object
 			// could take care not to delete itself prematurely, but it seems more proper, more reliable and more maintainable to handle it here.
 			obj->AddRef();
-        obj->Invoke(aResultToken, *obj_param, invoke_type, aParam, aParamCount);
+        aResult = obj->Invoke(aResultToken, *obj_param, invoke_type, aParam, aParamCount);
 		if (param_is_var)
 			obj->Release();
 	}
 	// Invoke meta-functions of g_MetaObject.
-	else if (INVOKE_NOT_HANDLED == g_MetaObject.Invoke(aResultToken, *obj_param, invoke_type | IF_META, aParam, aParamCount))
+	else if (INVOKE_NOT_HANDLED == (aResult = g_MetaObject.Invoke(aResultToken, *obj_param, invoke_type | IF_META, aParam, aParamCount)))
 	{
 		// Since above did not handle it, check for attempts to access .base of non-object value (g_MetaObject itself).
 		if (   invoke_type != IT_CALL // Exclude things like "".base().
@@ -152,6 +152,8 @@ void BIF_ObjInvoke(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 				obj_param->var->MaybeWarnUninitialized();
 		}
 	}
+	if (aResult == INVOKE_NOT_HANDLED)
+		aResult = OK;
 }
 	
 
@@ -159,13 +161,13 @@ void BIF_ObjInvoke(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 // BIF_ObjGetInPlace - Handles part of a compound assignment like x.y += z.
 //
 
-void BIF_ObjGetInPlace(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_ObjGetInPlace)
 {
 	// Since the most common cases have two params, the "param count" param is omitted in
 	// those cases. Otherwise we have one visible parameter, which indicates the number of
 	// actual parameters below it on the stack.
 	aParamCount = aParamCount ? (int)TokenToInt64(*aParam[0]) : 2; // x[<n-1 params>] : x.y
-	BIF_ObjInvoke(aResultToken, aParam - aParamCount, aParamCount);
+	BIF_ObjInvoke(aResult, aResultToken, aParam - aParamCount, aParamCount);
 }
 
 
@@ -173,7 +175,7 @@ void BIF_ObjGetInPlace(ExprTokenType &aResultToken, ExprTokenType *aParam[], int
 // BIF_ObjNew - Handles "new" as in "new Class()".
 //
 
-void BIF_ObjNew(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_ObjNew)
 {
 	aResultToken.symbol = SYM_STRING;
 	aResultToken.marker = _T("");
@@ -184,7 +186,7 @@ void BIF_ObjNew(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParam
 	if (!class_object)
 		return;
 
-	Object *new_object = Object::Create(NULL, 0);
+	Object *new_object = Object::Create();
 	if (!new_object)
 		return;
 
@@ -256,7 +258,7 @@ void BIF_ObjNew(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParam
 // BIF_ObjIncDec - Handles pre/post-increment/decrement for object fields, such as ++x[y].
 //
 
-void BIF_ObjIncDec(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_ObjIncDec)
 {
 	// Func::mName (which aResultToken.marker is set to) has been overloaded to pass
 	// the type of increment/decrement to be performed on this object's field.
@@ -272,7 +274,10 @@ void BIF_ObjIncDec(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 
 	// Retrieve the current value.  Do it this way instead of calling Object::Invoke
 	// so that if aParam[0] is not an object, g_MetaObject is correctly invoked.
-	BIF_ObjInvoke(temp_result, aParam, aParamCount);
+	BIF_ObjInvoke(aResult, temp_result, aParam, aParamCount);
+
+	if (aResult == FAIL || aResult == EARLY_EXIT)
+		return;
 
 	// Change SYM_STRING to SYM_OPERAND so below may treat it as a numeric string.
 	if (temp_result.symbol == SYM_STRING)
@@ -302,10 +307,11 @@ void BIF_ObjIncDec(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 
 	if (current_value.symbol == PURE_NOT_NUMERIC)
 	{
-		// Value is non-numeric, so return "".
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
-		return;
+		// Value is non-numeric, so assign and return "".
+		value_to_set.symbol = SYM_STRING;
+		value_to_set.marker = _T("");
+		//current_value.symbol = SYM_STRING; // Already done (SYM_STRING == PURE_NOT_NUMERIC).
+		current_value.marker = _T("");
 	}
 
 	// Although it's likely our caller's param array has enough space to hold the extra
@@ -319,7 +325,7 @@ void BIF_ObjIncDec(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 		aResultToken.marker = (LPTSTR)IT_SET;
 		// Set the new value and pass the return value of the invocation back to our caller.
 		// This should be consistent with something like x.y := x.y + 1.
-		BIF_ObjInvoke(aResultToken, param, aParamCount);
+		BIF_ObjInvoke(aResult, aResultToken, param, aParamCount);
 	}
 	else // SYM_POST_INCREMENT || SYM_POST_DECREMENT
 	{
@@ -330,7 +336,7 @@ void BIF_ObjIncDec(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 		temp_result.mem_to_free = NULL;
 		
 		// Set the new value.
-		BIF_ObjInvoke(temp_result, param, aParamCount);
+		BIF_ObjInvoke(aResult, temp_result, param, aParamCount);
 		
 		// Dispose of the result safely.
 		if (temp_result.symbol == SYM_OBJECT)
@@ -350,7 +356,7 @@ void BIF_ObjIncDec(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 //
 
 #define BIF_METHOD(name) \
-void BIF_Obj##name(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount) \
+BIF_DECL(BIF_Obj##name) \
 { \
 	aResultToken.symbol = SYM_STRING; \
 	aResultToken.marker = _T(""); \
@@ -376,7 +382,7 @@ BIF_METHOD(Clone)
 // ObjAddRef/ObjRelease - used with pointers rather than object references.
 //
 
-void BIF_ObjAddRefRelease(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_ObjAddRefRelease)
 {
 	IObject *obj = (IObject *)TokenToInt64(*aParam[0]);
 	if (obj < (IObject *)4096) // Rule out some obvious errors.

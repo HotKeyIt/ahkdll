@@ -281,7 +281,7 @@ BuildImportTable(PMEMORYMODULE module)
 			// Path to temp directory + our temporary file name
 			CHAR buf[MAX_PATH];
 			DWORD tempPathLength = GetTempPathA(MAX_PATH, buf);
-			memcpy(buf + tempPathLength,"AutoHotkey.MemoryModule.temp.manifest",37);
+			memcpy(buf + tempPathLength,"AutoHotkey.MemoryModule.temp.manifest",38);
 			actctx.lpSource = buf;
 
 			// Enumerate Resources
@@ -292,9 +292,9 @@ BuildImportTable(PMEMORYMODULE module)
 				resDirEntry = (PIMAGE_RESOURCE_DIRECTORY_ENTRY)((char*)resDir + sizeof(IMAGE_RESOURCE_DIRECTORY) + (i*sizeof(IMAGE_RESOURCE_DIRECTORY_ENTRY)));
 			
 				// If entry is directory and Id is 24 = RT_MANIFEST
-				if (resDirEntry->DataIsDirectory && resDirEntry->Name == 24)
+				if (resDirEntry->DataIsDirectory && resDirEntry->Id == 24)
 				{
-					resDirTemp = (PIMAGE_RESOURCE_DIRECTORY)((char*)resDir + (resDirEntry->OffsetToDirectory));
+					//resDirTemp = (PIMAGE_RESOURCE_DIRECTORY)((char*)resDir + (resDirEntry->OffsetToDirectory));
 					resDirEntryTemp = (PIMAGE_RESOURCE_DIRECTORY_ENTRY)((char*)resDir + (resDirEntry->OffsetToDirectory) + sizeof(IMAGE_RESOURCE_DIRECTORY));
 					resDirTemp = (PIMAGE_RESOURCE_DIRECTORY) ((char*)resDir + (resDirEntryTemp->OffsetToDirectory));
 					resDirEntryTemp = (PIMAGE_RESOURCE_DIRECTORY_ENTRY)((char*)resDir + (resDirEntryTemp->OffsetToDirectory) + sizeof(IMAGE_RESOURCE_DIRECTORY));
