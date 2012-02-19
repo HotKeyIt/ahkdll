@@ -1831,37 +1831,46 @@ ResultType Line::ScriptPostSendMessage(bool aUseSend)
 
 
 
-ResultType Line::ScriptProcess(LPTSTR aCmd, LPTSTR aProcess, LPTSTR aParam3)
+BIF_DECL(BIF_Process)
 {
-	ProcessCmds process_cmd = ConvertProcessCmd(aCmd);
-	// Runtime error is rare since it is caught at load-time unless it's in a var. ref.
-	if (process_cmd == PROCESS_CMD_INVALID)
-		return LineError(ERR_PARAM1_INVALID, FAIL, aCmd);
+	BIF_DECL_STRING_PARAM(1, aProcess);
+
+	ProcessCmds process_cmd = Line::ConvertProcessCmd(aResultToken.marker + 7);
+	// Since an invalid name wouldn't resolve to this function in the first place,
+	// the following check should be unnecessary:
+	ASSERT(process_cmd != PROCESS_CMD_INVALID);
 
 	HANDLE hProcess;
 	DWORD pid, priority;
-	BOOL result;
+	
+	//aResultToken.symbol = SYM_INTEGER; // Caller already set this.
+	aResultToken.value_int64 = 0; // Set default return value: indicate failure.
 
 	switch (process_cmd)
 	{
 	case PROCESS_CMD_EXIST:
-		return g_ErrorLevel->Assign(*aProcess ? ProcessExist(aProcess) : GetCurrentProcessId()); // The discovered PID or zero if none.
+		// Return the discovered PID or zero if none.
+		aResultToken.value_int64 = *aProcess ? ProcessExist(aProcess) : GetCurrentProcessId();
+		return; 
 
 	case PROCESS_CMD_CLOSE:
 		if (pid = ProcessExist(aProcess))  // Assign
 		{
 			if (hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid))
 			{
-				result = TerminateProcess(hProcess, 0);
+				if (TerminateProcess(hProcess, 0))
+					aResultToken.value_int64 = pid; // Indicate success.
 				CloseHandle(hProcess);
-				return g_ErrorLevel->Assign(result ? pid : 0); // Indicate success or failure.
+				return;
 			}
 		}
 		// Since above didn't return, yield a PID of 0 to indicate failure.
-		return g_ErrorLevel->Assign(0);
+		return;
 
 	case PROCESS_CMD_PRIORITY:
-		switch (_totupper(*aParam3))
+	{
+		LPTSTR aPriority = aParamCount > 1 ? TokenToString(*aParam[1]) : _T("");
+		switch (_totupper(*aPriority))
 		{
 		case 'L': priority = IDLE_PRIORITY_CLASS; break;
 		case 'B': priority = BELOW_NORMAL_PRIORITY_CLASS; break;
@@ -1870,7 +1879,8 @@ ResultType Line::ScriptProcess(LPTSTR aCmd, LPTSTR aProcess, LPTSTR aParam3)
 		case 'H': priority = HIGH_PRIORITY_CLASS; break;
 		case 'R': priority = REALTIME_PRIORITY_CLASS; break;
 		default:
-			return g_ErrorLevel->Assign(0);  // 0 indicates failure in this case (i.e. a PID of zero).
+			// Since above didn't break, yield a PID of 0 to indicate failure.
+			return;
 		}
 		if (pid = *aProcess ? ProcessExist(aProcess) : GetCurrentProcessId())  // Assign
 		{
@@ -1880,13 +1890,14 @@ ResultType Line::ScriptProcess(LPTSTR aCmd, LPTSTR aProcess, LPTSTR aParam3)
 				// since "above/below normal" aren't that dramatically different from normal:
 				if (!g_os.IsWin2000orLater() && (priority == BELOW_NORMAL_PRIORITY_CLASS || priority == ABOVE_NORMAL_PRIORITY_CLASS))
 					priority = NORMAL_PRIORITY_CLASS;
-				result = SetPriorityClass(hProcess, priority);
+				if (SetPriorityClass(hProcess, priority))
+					aResultToken.value_int64 = pid; // Indicate success.
 				CloseHandle(hProcess);
-				return g_ErrorLevel->Assign(result ? pid : 0); // Indicate success or failure.
 			}
 		}
 		// Otherwise, return a PID of 0 to indicate failure.
-		return g_ErrorLevel->Assign(0);
+		return;
+	}
 
 	case PROCESS_CMD_WAIT:
 	case PROCESS_CMD_WAITCLOSE:
@@ -1895,10 +1906,10 @@ ResultType Line::ScriptProcess(LPTSTR aCmd, LPTSTR aProcess, LPTSTR aParam3)
 		bool wait_indefinitely;
 		int sleep_duration;
 		DWORD start_time;
-		if (*aParam3) // the param containing the timeout value isn't blank.
+		if (aParamCount > 1) // The param containing the timeout value was specified.
 		{
 			wait_indefinitely = false;
-			sleep_duration = (int)(ATOF(aParam3) * 1000); // Can be zero.
+			sleep_duration = (int)(TokenToDouble(*aParam[1]) * 1000); // Can be zero.
 			start_time = GetTickCount();
 		}
 		else
@@ -1909,35 +1920,33 @@ ResultType Line::ScriptProcess(LPTSTR aCmd, LPTSTR aProcess, LPTSTR aParam3)
 		for (;;)
 		{ // Always do the first iteration so that at least one check is done.
 			pid = ProcessExist(aProcess);
-			if (process_cmd == PROCESS_CMD_WAIT)
+			if ((process_cmd == PROCESS_CMD_WAIT) == (pid != 0)) // i.e. condition of this cmd is satisfied.
 			{
-				if (pid)
-					return g_ErrorLevel->Assign(pid);
-			}
-			else // PROCESS_CMD_WAITCLOSE
-			{
-				// Since PID cannot always be determined (i.e. if process never existed, there was
-				// no need to wait for it to close), for consistency, return 0 on success.
-				if (!pid)
-					return g_ErrorLevel->Assign(0);
+				// For WaitClose: Since PID cannot always be determined (i.e. if process never existed,
+				// there was no need to wait for it to close), for consistency, return 0 on success.
+				aResultToken.value_int64 = pid;
+				return;
 			}
 			// Must cast to int or any negative result will be lost due to DWORD type:
 			if (wait_indefinitely || (int)(sleep_duration - (GetTickCount() - start_time)) > SLEEP_INTERVAL_HALF)
+			{
 				MsgSleep(100);  // For performance reasons, don't check as often as the WinWait family does.
+			}
 			else // Done waiting.
-				return g_ErrorLevel->Assign(pid);
-				// Above assigns 0 if "Process Wait" times out; or the PID of the process that still exists
+			{
+				// Return 0 if "Process Wait" times out; or the PID of the process that still exists
 				// if "Process WaitClose" times out.
+				aResultToken.value_int64 = pid;
+				return;
+			}
 		} // for()
 	} // case
 	} // switch()
-
-	return FAIL;  // Should never be executed; just here to catch bugs.
 }
 
 
 
-ResultType Line::WinSetRegion(HWND aWnd, LPTSTR aPoints)
+ResultType WinSetRegion(HWND aWnd, LPTSTR aPoints)
 {
 	if (!*aPoints) // Attempt to restore the window's normal/correct region.
 	{
@@ -1965,7 +1974,7 @@ ResultType Line::WinSetRegion(HWND aWnd, LPTSTR aPoints)
 
 		// It's undocumented by MSDN, but apparently setting the Window's region to NULL restores it
 		// to proper working order:
-		return SetErrorLevelOrThrowBool(!SetWindowRgn(aWnd, NULL, TRUE)); // Let ErrorLevel tell the story.
+		return Script::SetErrorLevelOrThrowBool(!SetWindowRgn(aWnd, NULL, TRUE)); // Let ErrorLevel tell the story.
 	}
 
 	#define MAX_REGION_POINTS 2000  // 2000 requires 16 KB of stack space.
@@ -2084,26 +2093,35 @@ ResultType Line::WinSetRegion(HWND aWnd, LPTSTR aPoints)
 	//else don't delete hrgn since the system has taken ownership of it.
 
 	// Since above didn't return, indicate success.
-	return SetErrorLevelOrThrowBool(false);
+	return Script::SetErrorLevelOrThrowBool(false);
 
 error:
-	return SetErrorLevelOrThrow();
+	return Script::SetErrorLevelOrThrow();
 }
 
 
-						
-ResultType Line::WinSet(LPTSTR aAttrib, LPTSTR aValue, LPTSTR aTitle, LPTSTR aText
-	, LPTSTR aExcludeTitle, LPTSTR aExcludeText)
+
+BIF_DECL(BIF_WinSet)
 {
-	WinSetAttributes attrib = ConvertWinSetAttribute(aAttrib);
-	if (attrib == WINSET_INVALID)
-		return LineError(ERR_PARAM1_INVALID, FAIL, aAttrib);
+	BIF_DECL_STRING_PARAM(1, aValue);
+	BIF_DECL_STRING_PARAM(2, aTitle);
+	BIF_DECL_STRING_PARAM(3, aText);
+	BIF_DECL_STRING_PARAM(4, aExcludeTitle);
+	BIF_DECL_STRING_PARAM(5, aExcludeText);
+
+	WinSetAttributes attrib = Line::ConvertWinSetAttribute(aResultToken.marker + 6); // Get the "CMD" from "WinSetCMD".
+	// Since an invalid name wouldn't resolve to this function in the first place,
+	// the following check should be unnecessary:
+	ASSERT(attrib != WINSET_INVALID);
+
+	// Set default return value.
+	aResultToken.symbol = SYM_STRING;
+	aResultToken.marker = _T("");
 
 	// Only the following sub-commands affect ErrorLevel:
 	bool use_errorlevel = (attrib == WINSET_STYLE || attrib == WINSET_EXSTYLE || attrib == WINSET_REGION);
 
-	// Since this is a macro, avoid repeating it for every case of the switch():
-	HWND target_window = DetermineTargetWindow(aTitle, aText, aExcludeTitle, aExcludeText);
+	HWND target_window = Line::DetermineTargetWindow(aTitle, aText, aExcludeTitle, aExcludeText);
 	if (!target_window)
 		goto error;
 
@@ -2115,15 +2133,15 @@ ResultType Line::WinSet(LPTSTR aAttrib, LPTSTR aValue, LPTSTR aTitle, LPTSTR aTe
 	case WINSET_ALWAYSONTOP:
 	{
 		if (   !(exstyle = GetWindowLong(target_window, GWL_EXSTYLE))   )
-			return OK;
+			return;
 		HWND topmost_or_not;
-		switch(ConvertOnOffToggle(aValue))
+		switch(Line::ConvertOnOffToggle(aValue))
 		{
 		case TOGGLED_ON: topmost_or_not = HWND_TOPMOST; break;
 		case TOGGLED_OFF: topmost_or_not = HWND_NOTOPMOST; break;
 		case NEUTRAL: // parameter was blank, so it defaults to TOGGLE.
 		case TOGGLE: topmost_or_not = (exstyle & WS_EX_TOPMOST) ? HWND_NOTOPMOST : HWND_TOPMOST; break;
-		default: return OK;
+		default: return;
 		}
 		// SetWindowLong() didn't seem to work, at least not on some windows.  But this does.
 		// As of v1.0.25.14, SWP_NOACTIVATE is also specified, though its absence does not actually
@@ -2174,7 +2192,7 @@ ResultType Line::WinSet(LPTSTR aAttrib, LPTSTR aValue, LPTSTR aTitle, LPTSTR aTe
 		static MySetLayeredWindowAttributesType MySetLayeredWindowAttributes = (MySetLayeredWindowAttributesType)
 			GetProcAddress(GetModuleHandle(_T("user32")), "SetLayeredWindowAttributes");
 		if (!MySetLayeredWindowAttributes || !(exstyle = GetWindowLong(target_window, GWL_EXSTYLE)))
-			return OK;  // Do nothing on OSes that don't support it.
+			return;  // Do nothing on OSes that don't support it.
 		if (!_tcsicmp(aValue, _T("Off")))
 			// One user reported that turning off the attribute helps window's scrolling performance.
 			SetWindowLong(target_window, GWL_EXSTYLE, exstyle & ~WS_EX_LAYERED);
@@ -2280,10 +2298,11 @@ ResultType Line::WinSet(LPTSTR aAttrib, LPTSTR aValue, LPTSTR aTitle, LPTSTR aTe
 	case WINSET_ENABLE:
 	case WINSET_DISABLE: // These are separate sub-commands from WINSET_STYLE because merely changing the WS_DISABLED style is usually not as effective as calling EnableWindow().
 		EnableWindow(target_window, attrib == WINSET_ENABLE);
-		return OK;
+		return;
 
 	case WINSET_REGION:
-		return WinSetRegion(target_window, aValue);
+		WinSetRegion(target_window, aValue);
+		return;
 
 	case WINSET_REDRAW:
 		// Seems best to always have the last param be TRUE, for now, so that aValue can be
@@ -2301,12 +2320,15 @@ ResultType Line::WinSet(LPTSTR aAttrib, LPTSTR aValue, LPTSTR aTitle, LPTSTR aTe
 		break;
 
 	} // switch()
-	return use_errorlevel ? SetErrorLevelOrThrowBool(false) : OK;
+	if (use_errorlevel)
+		Script::SetErrorLevelOrThrowBool(false);
+	return;
 
 error:
 	// Only STYLE, EXSTYLE and REDRAW affect ErrorLevel for compatibility reasons,
 	// but seems best to allow the other sub-commands to throw exceptions:
-	return (use_errorlevel || g->InTryBlock) ? SetErrorLevelOrThrow() : OK;
+	if (use_errorlevel || g->InTryBlock)
+		Script::SetErrorLevelOrThrow();
 }
 
 
@@ -2374,32 +2396,54 @@ ResultType Line::WinGetClass(LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, 
 
 
 
-ResultType WinGetList(Var &aOutputVar, WinGetCmds aCmd, LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LPTSTR aExcludeText)
+void WinGetList(ExprTokenType &aResultToken, WinGetCmds aCmd, LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LPTSTR aExcludeText)
 // Helper function for WinGet() to avoid having a WindowSearch object on its stack (since that object
 // normally isn't needed).
 {
 	WindowSearch ws;
 	ws.mFindLastMatch = true; // Must set mFindLastMatch to get all matches rather than just the first.
-	ws.mArrayStart = (aCmd == WINGET_CMD_LIST) ? &aOutputVar : NULL; // Provide the position in the var list of where the array-element vars will be.
+	if (aCmd == WINGET_CMD_LIST)
+		if (  !(ws.mArray = Object::Create())  )
+			return;
 	// If aTitle is ahk_id nnnn, the Enum() below will be inefficient.  However, ahk_id is almost unheard of
 	// in this context because it makes little sense, so no extra code is added to make that case efficient.
 	if (ws.SetCriteria(*g, aTitle, aText, aExcludeTitle, aExcludeText)) // These criteria allow the possibility of a match.
 		EnumWindows(EnumParentFind, (LPARAM)&ws);
 	//else leave ws.mFoundCount set to zero (by the constructor).
-	return aOutputVar.Assign(ws.mFoundCount);
+	if (aCmd == WINGET_CMD_LIST)
+	{
+		// Return the array even if it is empty:
+		aResultToken.symbol = SYM_OBJECT;
+		aResultToken.object = ws.mArray;
+	}
+	else
+	{
+		aResultToken.symbol = SYM_INTEGER;
+		aResultToken.value_int64 = ws.mFoundCount;
+	}
 }
 
+void WinGetControlList(ExprTokenType &aResultToken, HWND aTargetWindow, bool aFetchHWNDs); // Forward declaration.
 
 
-ResultType Line::WinGet(LPTSTR aCmd, LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LPTSTR aExcludeText)
+
+BIF_DECL(BIF_WinGet)
 {
-	Var &output_var = *OUTPUT_VAR;  // This is done even for WINGET_CMD_LIST.
-	WinGetCmds cmd = ConvertWinGetCmd(aCmd);
-	// Since command names are validated at load-time, this only happens if the command name
-	// was contained in a variable reference.  But for simplicity of design here, return
-	// failure in this case (unlike other functions similar to this one):
-	if (cmd == WINGET_CMD_INVALID)
-		return LineError(ERR_PARAM2_INVALID, FAIL, aCmd);
+	BIF_DECL_STRING_PARAM(1, aTitle);
+	BIF_DECL_STRING_PARAM(2, aText);
+	BIF_DECL_STRING_PARAM(3, aExcludeTitle);
+	BIF_DECL_STRING_PARAM(4, aExcludeText);
+
+	WinGetCmds cmd = Line::ConvertWinGetCmd(aResultToken.marker + 6); // Get the "CMD" from "WinGetCMD".
+	// Since an invalid name wouldn't resolve to this function in the first place,
+	// the following check should be unnecessary:
+	ASSERT(cmd != WINGET_CMD_INVALID);
+
+	// Set default return value (it's done this way so that sub-commands which
+	// return a short string can simply write directly into aResultToken.buf):
+	aResultToken.symbol = SYM_STRING;
+	*aResultToken.buf = '\0';
+	aResultToken.marker = aResultToken.buf;
 
 	bool target_window_determined = true;  // Set default.
 	HWND target_window;
@@ -2410,11 +2454,6 @@ ResultType Line::WinGet(LPTSTR aCmd, LPTSTR aTitle, LPTSTR aText, LPTSTR aExclud
 	else
 		target_window_determined = false;  // A different method is required.
 
-	// Used with WINGET_CMD_LIST to create an array (if needed).  Make it longer than Max var name
-	// so that FindOrAddVar() will be able to spot and report var names that are too long:
-	TCHAR var_name[MAX_VAR_NAME_LENGTH + 20], buf[32];
-	Var *array_item;
-
 	switch(cmd)
 	{
 	case WINGET_CMD_ID:
@@ -2422,9 +2461,9 @@ ResultType Line::WinGet(LPTSTR aCmd, LPTSTR aTitle, LPTSTR aText, LPTSTR aExclud
 		if (!target_window_determined)
 			target_window = WinExist(*g, aTitle, aText, aExcludeTitle, aExcludeText, cmd == WINGET_CMD_IDLAST);
 		if (target_window)
-			return output_var.AssignHWND(target_window);
-		else
-			return output_var.Assign();
+			HwndToString(target_window, aResultToken.buf);
+		// Otherwise, return the default value.
+		return;
 
 	case WINGET_CMD_PID:
 	case WINGET_CMD_PROCESSNAME:
@@ -2436,14 +2475,17 @@ ResultType Line::WinGet(LPTSTR aCmd, LPTSTR aTitle, LPTSTR aText, LPTSTR aExclud
 			DWORD pid;
 			GetWindowThreadProcessId(target_window, &pid);
 			if (cmd == WINGET_CMD_PID)
-				return output_var.Assign(pid);
+			{
+				aResultToken.symbol = SYM_INTEGER;
+				aResultToken.value_int64 = pid;
+				return;
+			}
 			// Otherwise, get the full path and name of the executable that owns this window.
 			TCHAR process_name[MAX_PATH];
 			GetProcessName(pid, process_name, _countof(process_name), cmd == WINGET_CMD_PROCESSNAME);
-			return output_var.Assign(process_name);
+			TokenSetResult(aResultToken, process_name);
 		}
-		// If above didn't return:
-		return output_var.Assign();
+		return;
 
 	case WINGET_CMD_COUNT:
 	case WINGET_CMD_LIST:
@@ -2458,23 +2500,30 @@ ResultType Line::WinGet(LPTSTR aCmd, LPTSTR aTitle, LPTSTR aText, LPTSTR aExclud
 		// breaks from the StringSplit tradition:
 		if (target_window_determined)
 		{
-			if (!target_window)
-				return output_var.Assign(0); // 0 windows found
-			if (cmd == WINGET_CMD_LIST)
+			if (cmd == WINGET_CMD_COUNT)
 			{
-				// Otherwise, since the target window has been determined, we know that it is
-				// the only window to be put into the array:
-				if (   !(array_item = g_script.FindOrAddVar(var_name
-					, sntprintf(var_name, _countof(var_name), _T("%s1"), output_var.mName)))   )  // Find or create element #1.
-					return FAIL;  // It will have already displayed the error.
-				if (!array_item->AssignHWND(target_window))
-					return FAIL;
+				aResultToken.symbol = SYM_INTEGER;
+				aResultToken.value_int64 = (target_window != NULL); // i.e. 1 if a window was found.
+				return;
 			}
-			return output_var.Assign(1);  // 1 window found
+			// Otherwise, it's WINGET_CMD_LIST:
+			Object *arr = Object::Create();
+			if (!arr)
+				return;
+			TCHAR buf[MAX_INTEGER_SIZE];
+			if (target_window)
+				// Since the target window has been determined, we know that it is the only window
+				// to be put into the array:
+				arr->Append(HwndToString(target_window, buf));
+			// Otherwise, return an empty array.
+			aResultToken.symbol = SYM_OBJECT;
+			aResultToken.object = arr;
+			return;
 		}
 		// Otherwise, the target window(s) have not yet been determined and a special method
 		// is required to gather them.
-		return WinGetList(output_var, cmd, aTitle, aText, aExcludeTitle, aExcludeText); // Outsourced to avoid having a WindowSearch object on this function's stack.
+		WinGetList(aResultToken, cmd, aTitle, aText, aExcludeTitle, aExcludeText); // Outsourced to avoid having a WindowSearch object on this function's stack.
+		return;
 
 	case WINGET_CMD_MINMAX:
 		if (!target_window_determined)
@@ -2483,33 +2532,35 @@ ResultType Line::WinGet(LPTSTR aCmd, LPTSTR aTitle, LPTSTR aText, LPTSTR aExclud
 		// the theory that upon restoration, it *would* be maximized.  This is unfortunate if there
 		// is no other way to determine what the restoration size and maximized state will be for a
 		// minimized window.
-		if (target_window)
-			return output_var.Assign(IsZoomed(target_window) ? 1 : (IsIconic(target_window) ? -1 : 0));
-		else
-			return output_var.Assign();
+		if (!target_window)
+			return;
+		aResultToken.symbol = SYM_INTEGER;
+		aResultToken.value_int64 = IsZoomed(target_window) ? 1 : (IsIconic(target_window) ? -1 : 0);
+		return;
 
 	case WINGET_CMD_CONTROLLIST:
 	case WINGET_CMD_CONTROLLISTHWND:
 		if (!target_window_determined)
 			target_window = WinExist(*g, aTitle, aText, aExcludeTitle, aExcludeText);
-		return target_window ? WinGetControlList(output_var, target_window, cmd == WINGET_CMD_CONTROLLISTHWND)
-			: output_var.Assign();
+		if (target_window)
+			WinGetControlList(aResultToken, target_window, cmd == WINGET_CMD_CONTROLLISTHWND);
+		return;
 
 	case WINGET_CMD_STYLE:
 	case WINGET_CMD_EXSTYLE:
 		if (!target_window_determined)
 			target_window = WinExist(*g, aTitle, aText, aExcludeTitle, aExcludeText);
 		if (!target_window)
-			return output_var.Assign();
-		_stprintf(buf, _T("0x%08X"), GetWindowLong(target_window, cmd == WINGET_CMD_STYLE ? GWL_STYLE : GWL_EXSTYLE));
-		return output_var.Assign(buf);
+			return;
+		_stprintf(aResultToken.buf, _T("0x%08X"), GetWindowLong(target_window, cmd == WINGET_CMD_STYLE ? GWL_STYLE : GWL_EXSTYLE));
+		return;
 
 	case WINGET_CMD_TRANSPARENT:
 	case WINGET_CMD_TRANSCOLOR:
 		if (!target_window_determined)
 			target_window = WinExist(*g, aTitle, aText, aExcludeTitle, aExcludeText);
 		if (!target_window)
-			return output_var.Assign();
+			return;
 		typedef BOOL (WINAPI *MyGetLayeredWindowAttributesType)(HWND, COLORREF*, BYTE*, DWORD*);
 		static MyGetLayeredWindowAttributesType MyGetLayeredWindowAttributes = (MyGetLayeredWindowAttributesType)
 			GetProcAddress(GetModuleHandle(_T("user32")), "GetLayeredWindowAttributes");
@@ -2520,63 +2571,45 @@ ResultType Line::WinGet(LPTSTR aCmd, LPTSTR aTitle, LPTSTR aText, LPTSTR aExclud
 		// SetLayeredWindowAttributes(), which works on Windows 2000, GetLayeredWindowAttributes()
 		// is supported only on XP or later.
 		if (!MyGetLayeredWindowAttributes || !(MyGetLayeredWindowAttributes(target_window, &color, &alpha, &flags)))
-			return output_var.Assign();
+			return;
 		if (cmd == WINGET_CMD_TRANSPARENT)
-			return (flags & LWA_ALPHA) ? output_var.Assign((DWORD)alpha) : output_var.Assign();
+		{
+			if (flags & LWA_ALPHA)
+			{
+				aResultToken.symbol = SYM_INTEGER;
+				aResultToken.value_int64 = (UINT)alpha;
+			}
+		}
 		else // WINGET_CMD_TRANSCOLOR
 		{
 			if (flags & LWA_COLORKEY)
 			{
 				// Store in hex format to aid in debugging scripts.  Also, the color is always
 				// stored in RGB format, since that's what WinSet uses:
-				_stprintf(buf, _T("0x%06X"), bgr_to_rgb(color));
-				return output_var.Assign(buf);
+				_stprintf(aResultToken.buf, _T("0x%06X"), bgr_to_rgb(color));
 			}
-			else // This window does not have a transparent color (or it's not accessible to us, perhaps for reasons described at MSDN GetLayeredWindowAttributes()).
-				return output_var.Assign();
+			// Otherwise, this window does not have a transparent color (or it's not accessible to us,
+			// perhaps for reasons described at MSDN GetLayeredWindowAttributes()).
 		}
 	}
-
-	return FAIL;  // Never executed (increases maintainability and avoids compiler warning).
 }
 
 
 
-ResultType Line::WinGetControlList(Var &aOutputVar, HWND aTargetWindow, bool aFetchHWNDs)
+void WinGetControlList(ExprTokenType &aResultToken, HWND aTargetWindow, bool aFetchHWNDs)
 // Caller must ensure that aTargetWindow is non-NULL and valid.
 // Every control is fetched rather than just a list of distinct class names (possibly with a
 // second script array containing the quantity of each class) because it's conceivable that the
 // z-order of the controls will be useful information to some script authors.
-// A delimited list is used rather than the array technique used by "WinGet, OutputVar, List" because:
-// 1) It allows the flexibility of searching the list more easily with something like InStr.
-// 2) It seems rather rare that the count of items in the list would be useful info to a script author
-//    (the count can be derived with a parsing loop if it's ever needed).
-// 3) It saves memory since script arrays are permanent and since each array element would incur
-//    the overhead of being a script variable, not to mention that each variable has a minimum
-//    capacity (additional overhead) of 64 bytes.
 {
 	control_list_type cl; // A big struct containing room to store class names and counts for each.
+	if (  !(cl.target_array = Object::Create())  )
+		return;
 	CL_INIT_CONTROL_LIST(cl)
 	cl.fetch_hwnds = aFetchHWNDs;
-	cl.target_buf = NULL;  // First pass: Signal it not not to write to the buf, but instead only calculate the length.
 	EnumChildWindows(aTargetWindow, EnumChildGetControlList, (LPARAM)&cl);
-	if (!cl.total_length) // No controls in the window.
-		return aOutputVar.Assign();
-	// Set up the var, enlarging it if necessary.  If the aOutputVar is of type VAR_CLIPBOARD,
-	// this call will set up the clipboard for writing:
-	if (aOutputVar.AssignString(NULL, (VarSizeType)cl.total_length) != OK)
-		return FAIL;  // It already displayed the error.
-	// Fetch the text directly into the var.  Also set the length explicitly
-	// in case actual size written was off from the estimated size (in case the list of
-	// controls changed in the split second between pass #1 and pass #2):
-	CL_INIT_CONTROL_LIST(cl)
-	cl.target_buf = aOutputVar.Contents();  // Second pass: Write to the buffer.
-	cl.capacity = aOutputVar.Capacity(); // Because granted capacity might be a little larger than we asked for.
-	EnumChildWindows(aTargetWindow, EnumChildGetControlList, (LPARAM)&cl);
-	aOutputVar.SetCharLength((VarSizeType)cl.total_length);  // In case it wound up being smaller than expected.
-	if (!cl.total_length) // Something went wrong, so make sure its terminated just in case.
-		*aOutputVar.Contents() = '\0';  // Safe because Assign() gave us a non-constant memory area.
-	return aOutputVar.Close(); // Must be called after Assign(NULL, ...) or when Contents() has been altered because it updates the variable's attributes and properly handles VAR_CLIPBOARD.
+	aResultToken.symbol = SYM_OBJECT;
+	aResultToken.object = cl.target_array;
 }
 
 
@@ -2591,9 +2624,7 @@ BOOL CALLBACK EnumChildGetControlList(HWND aWnd, LPARAM lParam)
 	// scripts that want to operate directly on the HWNDs.
 	if (cl.fetch_hwnds)
 	{
-		line[0] = '0';
-		line[1] = 'x';
-		line_length = 2 + (int)_tcslen(_ultot((UINT)(size_t)aWnd, line + 2, 16)); // Type-casting: See comments in BIF_WinExistActive().
+		HwndToString(aWnd, line);
 	}
 	else // The mode that fetches ClassNN vs. HWND.
 	{
@@ -2630,33 +2661,9 @@ BOOL CALLBACK EnumChildGetControlList(HWND aWnd, LPARAM lParam)
 		}
 
 		_itot(cl.class_count[class_index], line + line_length, 10); // Append the seq. number to line.
-		line_length = (int)_tcslen(line);  // Update the length.
 	}
 
-	int extra_length;
-	if (cl.is_first_iteration)
-	{
-		extra_length = 0; // All items except the first are preceded by a delimiting LF.
-		cl.is_first_iteration = false;
-	}
-	else
-		extra_length = 1;
-
-	if (cl.target_buf)
-	{
-		if ((int)(cl.capacity - cl.total_length - extra_length - 1) < line_length)
-			// No room in target_buf (i.e. don't write a partial item to the buffer).
-			return TRUE;  // Rare: it should only happen if size in pass #2 differed from that calc'd in pass #1.
-		if (extra_length)
-		{
-			cl.target_buf[cl.total_length] = '\n'; // Replace previous item's terminator with newline.
-			cl.total_length += extra_length;
-		}
-		_tcscpy(cl.target_buf + cl.total_length, line); // Write hwnd or class name+seq. number.
-		cl.total_length += line_length;
-	}
-	else // Caller only wanted the total length calculated.
-		cl.total_length += line_length + extra_length;
+	cl.target_array->Append(line); // Append hwnd or class name+seq. number to the array.
 
 	return TRUE; // Continue enumeration through all the windows.
 }
@@ -5430,7 +5437,7 @@ ResultType Line::StringReplace()
 
 
 
-void BIF_StrSplit(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_StrSplit)
 {
 	LPTSTR aInputString = TokenToString(*aParam[0], aResultToken.buf);
 	LPTSTR *aDelimiterList = NULL;
@@ -5463,7 +5470,7 @@ void BIF_StrSplit(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 			aOmitList = TokenToString(*aParam[2]);
 	}
 	
-	Object *output_array = Object::Create(NULL, 0);
+	Object *output_array = Object::Create();
 	if (!output_array)
 		goto return_empty_string;
 	aResultToken.symbol = SYM_OBJECT;	// Set default, overridden only for critical errors.
@@ -7915,14 +7922,50 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 
 #endif
 #else // AUTOHOTKEYSC not defined:
+	if (g_hResource)
+	{
+		// Open the file first since it's the most likely to fail:
+		HANDLE hfile = CreateFile(aDest, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+		if (hfile == INVALID_HANDLE_VALUE)
+			return SetErrorLevelOrThrow();
 
-	// v1.0.35.11: Must search in A_ScriptDir by default because that's where ahk2exe will search by default.
-	// The old behavior was to search in A_WorkingDir, which seems pointless because ahk2exe would never
-	// be able to use that value if the script changes it while running.
-	SetCurrentDirectory(g_script.mFileDir);
-	success = CopyFile(aSource, aDest, !allow_overwrite);
-	SetCurrentDirectory(g_WorkingDir); // Restore to proper value.
+		// Create a temporary copy of aSource to ensure it is the correct case (upper-case).
+		// Ahk2Exe converts it to upper-case before adding the resource. My testing showed that
+		// using lower or mixed case in some instances prevented the resource from being found.
+		// Since file paths are case-insensitive, it certainly doesn't seem harmful to do this:
+		TCHAR source[MAX_PATH];
+		size_t source_length = _tcslen(aSource);
+		if (source_length >= _countof(source))
+			// Probably can't happen; for simplicity, truncate it.
+			source_length = _countof(source) - 1;
+		tmemcpy(source, aSource, source_length + 1);
+		_tcsupr(source);
 
+		// Find and load the resource.
+		HRSRC res;
+		HGLOBAL res_load;
+		LPVOID res_lock;
+		if ( (res = FindResource(NULL, source, MAKEINTRESOURCE(RT_RCDATA)))
+		  && (res_load = LoadResource(NULL, res))
+		  && (res_lock = LockResource(res_load))  )
+		{
+			DWORD num_bytes_written;
+			// Write the resource data to file.
+			success = WriteFile(hfile, res_lock, SizeofResource(NULL, res), &num_bytes_written, NULL);
+		}
+		else
+			success = false;
+		CloseHandle(hfile);
+	}
+	else
+	{
+		// v1.0.35.11: Must search in A_ScriptDir by default because that's where ahk2exe will search by default.
+		// The old behavior was to search in A_WorkingDir, which seems pointless because ahk2exe would never
+		// be able to use that value if the script changes it while running.
+		SetCurrentDirectory(g_script.mFileDir);
+		success = CopyFile(aSource, aDest, !allow_overwrite);
+		SetCurrentDirectory(g_WorkingDir); // Restore to proper value.
+	}
 #endif
 
 	return SetErrorLevelOrThrowBool(!success);
@@ -8444,7 +8487,7 @@ ResultType Line::FileGetSize(LPTSTR aFilespec, LPTSTR aGranularity)
 		return SetErrorsOrThrow(true); // Let ErrorLevel tell the story.
 	FindClose(file_search);
 
-	unsigned __int64 size = (found_file.nFileSizeHigh * (unsigned __int64)MAXDWORD) + found_file.nFileSizeLow;
+	unsigned __int64 size = ((unsigned __int64)found_file.nFileSizeHigh << 32) | found_file.nFileSizeLow;
 
 	switch(ctoupper(*aGranularity))
 	{
@@ -8866,19 +8909,16 @@ VarSizeType BIV_IsSuspended(LPTSTR aBuf, LPTSTR aVarName)
 }
 
 #endif
-#ifdef AUTOHOTKEYSC  // A_IsCompiled is left blank/undefined in uncompiled scripts.
 VarSizeType BIV_IsCompiled(LPTSTR aBuf, LPTSTR aVarName)
 {
+#ifdef AUTOHOTKEYSC
 	if (aBuf)
 	{
 		*aBuf++ = '1';
 		*aBuf = '\0';
 	}
 	return 1;
-}
 #else
-VarSizeType BIV_IsCompiled(LPTSTR aBuf, LPTSTR aVarName)
-{
 	if (!g_hResource)
 	{
 		if (aBuf)
@@ -8891,20 +8931,31 @@ VarSizeType BIV_IsCompiled(LPTSTR aBuf, LPTSTR aVarName)
 		*aBuf = '\0';
 	}
 	return 1;
-}
 #endif
+}
 
-#ifdef UNICODE  // A_IsUnicode is left blank/undefined in the ANSI version.
+
+
 VarSizeType BIV_IsUnicode(LPTSTR aBuf, LPTSTR aVarName)
 {
+#ifdef UNICODE
 	if (aBuf)
 	{
 		*aBuf++ = '1';
 		*aBuf = '\0';
 	}
 	return 1;
-}
+#else
+	// v1.1.06: A_IsUnicode is defined so that it does not cause warnings with #Warn enabled,
+	// but left empty to encourage compatibility with older versions and AutoHotkey Basic.
+	// This prevents scripts from using expressions like A_IsUnicode+1, which would succeed
+	// if A_IsUnicode is 0 or 1 but fail if it is "".  This change has side-effects similar
+	// to those described for A_IsCompiled above.
+	if (aBuf)
+		*aBuf = '\0';
+	return 0;
 #endif
+}
 
 
 
@@ -9522,12 +9573,7 @@ VarSizeType BIV_ScriptFullPath(LPTSTR aBuf, LPTSTR aVarName)
 VarSizeType BIV_ScriptHwnd(LPTSTR aBuf, LPTSTR aVarName)
 {
 	if (aBuf)
-	{
-		aBuf[0] = '0';
-		aBuf[1] = 'x';
-		Exp32or64(_ultot,_ui64tot)((size_t)g_hWnd, aBuf + 2, 16); // See BIF_WinExistActive for comments.
-		return (VarSizeType)_tcslen(aBuf);
-	}
+		return (VarSizeType)_tcslen(HwndToString(g_hWnd, aBuf));
 	return MAX_INTEGER_LENGTH;
 }
 
@@ -10770,7 +10816,7 @@ void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free) // L31: 
 
 
 
-void BIF_CriticalObject(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_CriticalObject)
 {
 	IObject *obj = NULL;
 	// If 2 parameters are given and second parameter is 1 or 2,
@@ -10868,7 +10914,7 @@ ResultType STDMETHODCALLTYPE CriticalObject::Invoke(
 	 return r;
 }
 
-void BIF_DynaCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_DynaCall)
 {
 	IObject *obj = NULL;
 	if (aParam[0]->symbol == SYM_OBJECT)
@@ -10943,7 +10989,7 @@ IObject *DynaToken::Create(ExprTokenType *aParam[], int aParamCount)
 			aParam[1]->object->Invoke(result_token,*aParam[1],IT_GET,param,1);
 			if (IS_NUMERIC(result_token.symbol) || result_token.symbol == SYM_OBJECT)
 			{
-				g_script.SetErrorLevelOrThrowInt(-2, _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
+				g_script.SetErrorLevelOrThrowInt(-2, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 				return NULL;
 			}
 		}
@@ -10954,7 +11000,7 @@ IObject *DynaToken::Create(ExprTokenType *aParam[], int aParamCount)
 			aParam[1]->var->mObject->Invoke(result_token,*aParam[1],IT_GET,param,1);
 			if (IS_NUMERIC(result_token.symbol) || result_token.symbol == SYM_OBJECT)
 			{
-				g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
+				g_script.SetErrorLevelOrThrowInt(-2, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 				return NULL;
 			}
 		}
@@ -10978,7 +11024,7 @@ IObject *DynaToken::Create(ExprTokenType *aParam[], int aParamCount)
 		DYNAPARM *dyna_param = (DYNAPARM *)_alloca(obj->marg_count * sizeof(DYNAPARM));
 		if (obj->marg_count != ConvertDllArgTypes(return_type_string[0],dyna_param))
 		{
-			g_script.SetErrorLevelOrThrowInt(-2, _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
+			g_script.SetErrorLevelOrThrowInt(-2, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 			return NULL;
 		}
 		if (_tcschr(return_type_string[0],'='))
@@ -11049,7 +11095,7 @@ TEST_TYPE("W",	DLL_ARG_WSTR)
 			obj->mfunction = GetDllProcAddress(aParam[0]->symbol == SYM_VAR ? aParam[0]->var->Contents() : aParam[0]->marker, NULL);
 		if (!obj->mfunction)
 		{
-			g_script.SetErrorLevelOrThrowInt(-4, _T("DllCall")); // Stage 4 error: Function could not be found in the DLL(s).
+			g_script.SetErrorLevelOrThrowInt(-4, _T("DynaCall")); // Stage 4 error: Function could not be found in the DLL(s).
 			return NULL;
 		}
 		// allocate memory for parameters and default parameters
@@ -11083,11 +11129,42 @@ CStringW **pStr = (CStringW **)
 					// to be stack memory, which would be invalid memory upon return to the caller).
 					// The complexity of this doesn't seem worth the rarity of the need, so this will be
 					// documented in the help file.
-					g_script.SetErrorLevelOrThrowInt(-2, _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
-					return NULL;
+					
+					// HotKeyIt - Allow PURE_INTEGER = Pointers (also used in functions like FindResource >> MAKEINTRESOURCE
+					if (this_param.symbol == PURE_INTEGER)
+					{
+#ifdef _WIN64
+					this_dyna_param.type = DLL_ARG_INT64; // Ptr vs IntPtr to simplify recognition of the pointer suffix, to avoid any possible confusion with IntP, and because it is easier to type.
+#else
+					this_dyna_param.type = DLL_ARG_INT;
+#endif
+					this_dyna_param.value_int64 = TokenToInt64(this_param);
+					if (this_dyna_param.type != DLL_ARG_INT64) // Shift the 32-bit value into the high-order DWORD of the 64-bit value for later use by DynaCall().
+						this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
 				}
-				// Otherwise, it's a supported type of string.
-				this_dyna_param.ptr = ((aParamCount-2) > i) ? TokenToString(this_param) : _T(""); // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
+					else
+					{
+						g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
+						return NULL;
+					}
+				}
+				else
+				{
+					if (aParamCount-2 > i && this_param.symbol == SYM_VAR && (this_param.var->mType == VAR_ALIAS ? this_param.var->mAliasFor : this_param.var)->mAttrib & VAR_ATTRIB_IS_INT64)
+					{
+#ifdef _WIN64
+						this_dyna_param.type = DLL_ARG_INT64; // Ptr vs IntPtr to simplify recognition of the pointer suffix, to avoid any possible confusion with IntP, and because it is easier to type.
+#else
+						this_dyna_param.type = DLL_ARG_INT;
+#endif
+						this_dyna_param.value_int64 = this_param.var->ToInt64();
+						if (this_dyna_param.type != DLL_ARG_INT64) // Shift the 32-bit value into the high-order DWORD of the 64-bit value for later use by DynaCall().
+							this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
+					}
+					else
+						// Otherwise, it's a supported type of string.
+						this_dyna_param.ptr = ((aParamCount-2) > i) ? TokenToString(this_param) : _T(""); // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
+				}
 				// NOTES ABOUT THE ABOVE:
 				// UPDATE: The v1.0.44.14 item below doesn't work in release mode, only debug mode (turning off
 				// "string pooling" doesn't help either).  So it's commented out until a way is found
@@ -11118,13 +11195,30 @@ CStringW **pStr = (CStringW **)
 				// See the section above for comments.
 				if (((aParamCount-2) > i) && IS_NUMERIC(this_param.symbol))
 				{
-					g_script.SetErrorLevelOrThrowInt(-2, _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
-					return NULL;
+					// HotKeyIt - Allow PURE_INTEGER = Pointers (also used in functions like FindResource >> MAKEINTRESOURCE
+					if (this_param.symbol == PURE_INTEGER)
+					{
+#ifdef _WIN64
+						this_dyna_param.type = DLL_ARG_INT64; // Ptr vs IntPtr to simplify recognition of the pointer suffix, to avoid any possible confusion with IntP, and because it is easier to type.
+#else
+						this_dyna_param.type = DLL_ARG_INT;
+#endif
+						this_dyna_param.value_int64 = TokenToInt64(this_param);
+						if (this_dyna_param.type != DLL_ARG_INT64) // Shift the 32-bit value into the high-order DWORD of the 64-bit value for later use by DynaCall().
+							this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
+					}
+					else
+					{
+						g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
+						return NULL;
+					}
 				}
-				// String needing translation: ASTR on Unicode build, WSTR on ANSI build.
-				pStr[i] = new UorA(CStringCharFromWChar,CStringWCharFromChar)(((aParamCount-2) > i) ? TokenToString(this_param) : _T(""));
-				this_dyna_param.ptr = pStr[i]->GetBuffer();
-
+				else
+				{
+					// String needing translation: ASTR on Unicode build, WSTR on ANSI build.
+					pStr[i] = new UorA(CStringCharFromWChar,CStringWCharFromChar)(((aParamCount-2) > i) ? TokenToString(this_param) : _T(""));
+					this_dyna_param.ptr = pStr[i]->GetBuffer();
+				}
 				break;
 
 			case DLL_ARG_DOUBLE:
@@ -11137,7 +11231,7 @@ CStringW **pStr = (CStringW **)
 				break;
 
 			case DLL_ARG_INVALID:
-				g_script.SetErrorLevelOrThrowInt(-2, _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
+				g_script.SetErrorLevelOrThrowInt(-2, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 				return NULL;
 
 			default: // Namely:
@@ -11201,7 +11295,7 @@ CStringW **pStr = (CStringW **)
 						paramobj->Invoke(result_token,*aParam[1],IT_GET,param,1);
 						if (!IS_NUMERIC(result_token.symbol))
 						{
-							g_script.SetErrorLevelOrThrowInt(-2, _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
+							g_script.SetErrorLevelOrThrowInt(-2, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 							return NULL;
 						}
 						obj->paramshift[i+1] = (int)result_token.value_int64-1;
@@ -11296,13 +11390,14 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 	{
 		ConvertDllArgType(&aParam[0]->marker, return_attrib);
 	}
+	// Set default dynacall parameters
+	for (i = 0; i < this->marg_count; i++)  // Same loop as used in DynaToken::Create below, so maintain them together.
+		this->mdyna_param[(this->paramshift[0] > 0) ? this->paramshift[i+1] : i] = this->mdefault_param[(this->paramshift[0] > 0) ? this->paramshift[i+1] : i];
+
 	for (i = 0; i < this->marg_count; i++)  // Same loop as used in DynaToken::Create below, so maintain them together.
 	{
 		if (i >= aParamCount - is_call)
-		{
-			this->mdyna_param[(this->paramshift[0] > 0) ? this->paramshift[i+1] : i] = this->mdefault_param[(this->paramshift[0] > 0) ? this->paramshift[i+1] : i];
-			continue;
-		}
+			break;
 		ExprTokenType &this_param = *aParam[i + is_call];
 		DYNAPARM &this_dyna_param = this->mdyna_param[(this->paramshift[0] > 0) ? this->paramshift[i+1] : i];
 		switch (this_dyna_param.type)
@@ -11317,12 +11412,42 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 				// to be stack memory, which would be invalid memory upon return to the caller).
 				// The complexity of this doesn't seem worth the rarity of the need, so this will be
 				// documented in the help file.
-				g_script.SetErrorLevelOrThrowInt(-2, _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
-				return OK;
-			}
-			// Otherwise, it's a supported type of string.
-			this_dyna_param.ptr = TokenToString(this_param); // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
 
+				// HotKeyIt - Allow PURE_INTEGER = Pointers (also used in functions like FindResource >> MAKEINTRESOURCE
+				if (this_param.symbol == PURE_INTEGER)
+				{
+#ifdef _WIN64
+					this_dyna_param.type = DLL_ARG_INT64; // Ptr vs IntPtr to simplify recognition of the pointer suffix, to avoid any possible confusion with IntP, and because it is easier to type.
+#else
+					this_dyna_param.type = DLL_ARG_INT;
+#endif
+					this_dyna_param.value_int64 = TokenToInt64(this_param);
+					if (this_dyna_param.type != DLL_ARG_INT64) // Shift the 32-bit value into the high-order DWORD of the 64-bit value for later use by DynaCall().
+						this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
+				}
+				else
+				{
+					g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
+					return OK;
+				}
+			}
+			else
+			{
+				if (this_param.symbol == SYM_VAR && (this_param.var->mType == VAR_ALIAS ? this_param.var->mAliasFor : this_param.var)->mAttrib & VAR_ATTRIB_IS_INT64)
+				{
+#ifdef _WIN64
+					this_dyna_param.type = DLL_ARG_INT64; // Ptr vs IntPtr to simplify recognition of the pointer suffix, to avoid any possible confusion with IntP, and because it is easier to type.
+#else
+					this_dyna_param.type = DLL_ARG_INT;
+#endif
+					this_dyna_param.value_int64 = this_param.var->ToInt64();
+					if (this_dyna_param.type != DLL_ARG_INT64) // Shift the 32-bit value into the high-order DWORD of the 64-bit value for later use by DynaCall().
+						this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
+				}
+				else
+					// Otherwise, it's a supported type of string.
+					this_dyna_param.ptr = TokenToString(this_param); // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
+			}
 			// NOTES ABOUT THE ABOVE:
 			// UPDATE: The v1.0.44.14 item below doesn't work in release mode, only debug mode (turning off
 			// "string pooling" doesn't help either).  So it's commented out until a way is found
@@ -11352,12 +11477,30 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 		case DLL_ARG_xSTR: // See the section above for comments.
 			if (IS_NUMERIC(this_param.symbol))
 			{
-				g_script.SetErrorLevelOrThrowInt(-2, _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
-				return OK;
+				// HotKeyIt - Allow PURE_INTEGER = Pointers (also used in functions like FindResource >> MAKEINTRESOURCE
+				if (this_param.symbol == PURE_INTEGER)
+				{
+#ifdef _WIN64
+					this_dyna_param.type = DLL_ARG_INT64; // Ptr vs IntPtr to simplify recognition of the pointer suffix, to avoid any possible confusion with IntP, and because it is easier to type.
+#else
+					this_dyna_param.type = DLL_ARG_INT;
+#endif
+					this_dyna_param.value_int64 = TokenToInt64(this_param);
+					if (this_dyna_param.type != DLL_ARG_INT64) // Shift the 32-bit value into the high-order DWORD of the 64-bit value for later use by DynaCall().
+						this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
+				}
+				else
+				{
+					g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
+					return OK;
+				}
 			}
-			// String needing translation: ASTR on Unicode build, WSTR on ANSI build.
-			pStr[i] = new UorA(CStringCharFromWChar,CStringWCharFromChar)(TokenToString(this_param));
-			this_dyna_param.ptr = pStr[i]->GetBuffer();
+			else
+			{
+				// String needing translation: ASTR on Unicode build, WSTR on ANSI build.
+				pStr[i] = new UorA(CStringCharFromWChar,CStringWCharFromChar)(TokenToString(this_param));
+				this_dyna_param.ptr = pStr[i]->GetBuffer();
+			}
 			break;
 
 		case DLL_ARG_DOUBLE:
@@ -11370,7 +11513,7 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 			break;
 
 		case DLL_ARG_INVALID:
-			g_script.SetErrorLevelOrThrowInt(-2, _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
+			g_script.SetErrorLevelOrThrowInt(-2, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 			return OK;
 
 
@@ -11436,7 +11579,7 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 		// The OS almost certainly frees it upon termination anyway.
 		// Call ScriptErrror() so that the user knows *which* DllCall is at fault:
 		g->InTryBlock = false; // do not throw an exception
-		g_script.ScriptError(_T("This DllCall requires a prior VarSetCapacity. The program is now unstable and will exit."));
+		g_script.ScriptError(_T("This DynaCall requires a prior VarSetCapacity. The program is now unstable and will exit."));
 		g_script.ExitApp(EXIT_CRITICAL); // Called this way, it will run the OnExit routine, which is debatable because it could cause more good than harm, but might avoid loss of data if the OnExit routine does something important.
 	}
 
@@ -11598,17 +11741,20 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 		Var &output_var = *this_param.var;                 //
 		if (this_dyna_param.type == DLL_ARG_STR) // Native string type for current build config.
 		{
-			LPTSTR contents = output_var.Contents(); // Contents() shouldn't update mContents in this case because Contents() was already called for each "str" parameter prior to calling the Dll function.
-			VarSizeType capacity = output_var.Capacity();
-			// Since the performance cost is low, ensure the string is terminated at the limit of its
-			// capacity (helps prevent crashes if DLL function didn't do its job and terminate the string,
-			// or when a function is called that deliberately doesn't terminate the string, such as
-			// RtlMoveMemory()).
-			if (capacity)
-				contents[capacity - 1] = '\0';
-			// The function might have altered Contents(), so update Length().
-			output_var.SetCharLength((VarSizeType)_tcslen(contents));
-			output_var.Close(); // Clear the attributes of the variable to reflect the fact that the contents may have changed.
+			if (!(output_var.mAttrib & VAR_ATTRIB_IS_INT64))
+			{
+				LPTSTR contents = output_var.Contents(); // Contents() shouldn't update mContents in this case because Contents() was already called for each "str" parameter prior to calling the Dll function.
+				VarSizeType capacity = output_var.Capacity();
+				// Since the performance cost is low, ensure the string is terminated at the limit of its
+				// capacity (helps prevent crashes if DLL function didn't do its job and terminate the string,
+				// or when a function is called that deliberately doesn't terminate the string, such as
+				// RtlMoveMemory()).
+				if (capacity)
+					contents[capacity - 1] = '\0';
+				// The function might have altered Contents(), so update Length().
+				output_var.SetCharLength((VarSizeType)_tcslen(contents));
+				output_var.Close(); // Clear the attributes of the variable to reflect the fact that the contents may have changed.
+			}
 			continue;
 		}
 		
@@ -11652,7 +11798,7 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 	return OK;
 }
 
-void BIF_DllCall(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_DllCall)
 // Stores a number or a SYM_STRING result in aResultToken.
 // Sets ErrorLevel to the error code appropriate to any problem that occurred.
 // Caller has set up aParam to be viewable as a left-to-right array of params rather than a stack.
@@ -11831,18 +11977,48 @@ has_valid_return_type:
 		case DLL_ARG_STR:
 			if (IS_NUMERIC(this_param.symbol))
 			{
-				// For now, string args must be real strings rather than floats or ints.  An alternative
-				// to this would be to convert it to number using persistent memory from the caller (which
-				// is necessary because our own stack memory should not be passed to any function since
-				// that might cause it to return a pointer to stack memory, or update an output-parameter
-				// to be stack memory, which would be invalid memory upon return to the caller).
-				// The complexity of this doesn't seem worth the rarity of the need, so this will be
-				// documented in the help file.
-				g_script.SetErrorLevelOrThrowInt(-2, _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
-				return;
+				// HotKeyIt - Allow PURE_INTEGER = Pointers (also used in functions like FindResource >> MAKEINTRESOURCE
+				if (this_param.symbol == PURE_INTEGER)
+				{
+#ifdef _WIN64
+					this_dyna_param.type = DLL_ARG_INT64; // Ptr vs IntPtr to simplify recognition of the pointer suffix, to avoid any possible confusion with IntP, and because it is easier to type.
+#else
+					this_dyna_param.type = DLL_ARG_INT;
+#endif
+					this_dyna_param.value_int64 = TokenToInt64(this_param);
+					if (this_dyna_param.type != DLL_ARG_INT64) // Shift the 32-bit value into the high-order DWORD of the 64-bit value for later use by DynaCall().
+						this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
+				}
+				else
+				{
+					// For now, string args must be real strings rather than floats or ints.  An alternative
+					// to this would be to convert it to number using persistent memory from the caller (which
+					// is necessary because our own stack memory should not be passed to any function since
+					// that might cause it to return a pointer to stack memory, or update an output-parameter
+					// to be stack memory, which would be invalid memory upon return to the caller).
+					// The complexity of this doesn't seem worth the rarity of the need, so this will be
+					// documented in the help file.
+					g_script.SetErrorLevelOrThrowInt(-2, _T("DllCall"));
+					return;
+				}
 			}
-			// Otherwise, it's a supported type of string.
-			this_dyna_param.ptr = TokenToString(this_param); // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
+			else
+			{
+				if (this_param.symbol == SYM_VAR && (this_param.var->mType == VAR_ALIAS ? this_param.var->mAliasFor : this_param.var)->mAttrib & VAR_ATTRIB_IS_INT64)
+				{
+#ifdef _WIN64
+					this_dyna_param.type = DLL_ARG_INT64; // Ptr vs IntPtr to simplify recognition of the pointer suffix, to avoid any possible confusion with IntP, and because it is easier to type.
+#else
+					this_dyna_param.type = DLL_ARG_INT;
+#endif
+					this_dyna_param.value_int64 = this_param.var->ToInt64();
+					if (this_dyna_param.type != DLL_ARG_INT64) // Shift the 32-bit value into the high-order DWORD of the 64-bit value for later use by DynaCall().
+						this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
+				}
+				else
+					// Otherwise, it's a supported type of string.
+					this_dyna_param.ptr = TokenToString(this_param); // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
+			}
 			// NOTES ABOUT THE ABOVE:
 			// UPDATE: The v1.0.44.14 item below doesn't work in release mode, only debug mode (turning off
 			// "string pooling" doesn't help either).  So it's commented out until a way is found
@@ -11873,12 +12049,44 @@ has_valid_return_type:
 			// See the section above for comments.
 			if (IS_NUMERIC(this_param.symbol))
 			{
-				g_script.SetErrorLevelOrThrowInt(-2, _T("DllCall"));
-				return;
+				// HotKeyIt - Allow PURE_INTEGER = Pointers (also used in functions like FindResource >> MAKEINTRESOURCE
+				if (this_param.symbol == PURE_INTEGER)
+				{
+#ifdef _WIN64
+					this_dyna_param.type = DLL_ARG_INT64; // Ptr vs IntPtr to simplify recognition of the pointer suffix, to avoid any possible confusion with IntP, and because it is easier to type.
+#else
+					this_dyna_param.type = DLL_ARG_INT;
+#endif
+					this_dyna_param.value_int64 = TokenToInt64(this_param);
+					if (this_dyna_param.type != DLL_ARG_INT64) // Shift the 32-bit value into the high-order DWORD of the 64-bit value for later use by DynaCall().
+						this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
+				}
+				else
+				{
+					g_script.SetErrorLevelOrThrowInt(-2, _T("DllCall"));
+					return;
+				}
+			} 
+			else
+			{
+				if (this_param.symbol == SYM_VAR && (this_param.var->mType == VAR_ALIAS ? this_param.var->mAliasFor : this_param.var)->mAttrib & VAR_ATTRIB_IS_INT64)
+				{
+#ifdef _WIN64
+					this_dyna_param.type = DLL_ARG_INT64; // Ptr vs IntPtr to simplify recognition of the pointer suffix, to avoid any possible confusion with IntP, and because it is easier to type.
+#else
+					this_dyna_param.type = DLL_ARG_INT;
+#endif
+					this_dyna_param.value_int64 = this_param.var->ToInt64();
+					if (this_dyna_param.type != DLL_ARG_INT64) // Shift the 32-bit value into the high-order DWORD of the 64-bit value for later use by DynaCall().
+						this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
+				}
+				else
+				{
+					// String needing translation: ASTR on Unicode build, WSTR on ANSI build.
+					pStr[arg_count] = new UorA(CStringCharFromWChar,CStringWCharFromChar)(TokenToString(this_param));
+					this_dyna_param.ptr = pStr[arg_count]->GetBuffer();
+				}
 			}
-			// String needing translation: ASTR on Unicode build, WSTR on ANSI build.
-			pStr[arg_count] = new UorA(CStringCharFromWChar,CStringWCharFromChar)(TokenToString(this_param));
-			this_dyna_param.ptr = pStr[arg_count]->GetBuffer();
 			break;
 
 		case DLL_ARG_DOUBLE:
@@ -12123,17 +12331,20 @@ has_valid_return_type:
 		Var &output_var = *this_param.var;                 //
 		if (this_dyna_param.type == DLL_ARG_STR) // Native string type for current build config.
 		{
-			LPTSTR contents = output_var.Contents(); // Contents() shouldn't update mContents in this case because Contents() was already called for each "str" parameter prior to calling the Dll function.
-			VarSizeType capacity = output_var.Capacity();
-			// Since the performance cost is low, ensure the string is terminated at the limit of its
-			// capacity (helps prevent crashes if DLL function didn't do its job and terminate the string,
-			// or when a function is called that deliberately doesn't terminate the string, such as
-			// RtlMoveMemory()).
-			if (capacity)
-				contents[capacity - 1] = '\0';
-			// The function might have altered Contents(), so update Length().
-			output_var.SetCharLength((VarSizeType)_tcslen(contents));
-			output_var.Close(); // Clear the attributes of the variable to reflect the fact that the contents may have changed.
+			if (!(output_var.mAttrib & VAR_ATTRIB_IS_INT64))
+			{
+				LPTSTR contents = output_var.Contents(); // Contents() shouldn't update mContents in this case because Contents() was already called for each "str" parameter prior to calling the Dll function.
+				VarSizeType capacity = output_var.Capacity();
+				// Since the performance cost is low, ensure the string is terminated at the limit of its
+				// capacity (helps prevent crashes if DLL function didn't do its job and terminate the string,
+				// or when a function is called that deliberately doesn't terminate the string, such as
+				// RtlMoveMemory()).
+				if (capacity)
+					contents[capacity - 1] = '\0';
+				// The function might have altered Contents(), so update Length().
+				output_var.SetCharLength((VarSizeType)_tcslen(contents));
+				output_var.Close(); // Clear the attributes of the variable to reflect the fact that the contents may have changed.
+			}
 			continue;
 		}
 
@@ -12181,27 +12392,27 @@ end:
 }
 
 #endif
-void BIF_Lock(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_Lock)
 {
 	aResultToken.symbol = SYM_STRING;
 	aResultToken.marker = _T("");
 	EnterCriticalSection((LPCRITICAL_SECTION) TokenToInt64(*aParam[0]));
 }
 
-void BIF_TryLock(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_TryLock)
 {
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = TryEnterCriticalSection((LPCRITICAL_SECTION) TokenToInt64(*aParam[0]));
 }
 
-void BIF_UnLock(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_UnLock)
 {
 	aResultToken.symbol = SYM_STRING;
 	aResultToken.marker = _T("");
 	LeaveCriticalSection((LPCRITICAL_SECTION) TokenToInt64(*aParam[0]));
 }
 
-void BIF_StrLen(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_StrLen)
 // Caller has ensured that SYM_VAR's Type() is VAR_NORMAL and that it's either not an environment
 // variable or the caller wants environment variables treated as having zero length.
 // Result is always an integer (caller has set aResultToken.symbol to a default of SYM_INTEGER, so no need
@@ -12216,7 +12427,7 @@ void BIF_StrLen(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParam
 
 
 
-void BIF_SubStr(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount) // Added in v1.0.46.
+BIF_DECL(BIF_SubStr) // Added in v1.0.46.
 {
 	// Set default return value in case of early return.
 	aResultToken.symbol = SYM_STRING;
@@ -12277,7 +12488,7 @@ void BIF_SubStr(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParam
 
 
 
-void BIF_InStr(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_InStr)
 {
 	// Load-time validation has already ensured that at least two actual parameters are present.
 	TCHAR needle_buf[MAX_NUMBER_SIZE];
@@ -13467,7 +13678,7 @@ set_count_and_return:
 
 
 
-void BIF_RegEx(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_RegEx)
 // This function is the initial entry point for both RegExMatch() and RegExReplace().
 // Caller has set aResultToken.symbol to a default of SYM_INTEGER.
 {
@@ -13584,7 +13795,7 @@ void BIF_RegEx(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamC
 
 
 
-void BIF_Ord(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_Ord)
 {
 	// Result will always be an integer (this simplifies scripts that work with binary zeros since an
 	// empty string yields zero).
@@ -13604,7 +13815,7 @@ void BIF_Ord(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCou
 
 
 
-void BIF_Chr(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_Chr)
 {
 	int param1 = (int)TokenToInt64(*aParam[0]); // Convert to INT vs. UINT so that negatives can be detected.
 	LPTSTR cp = aResultToken.buf; // If necessary, it will be moved to a persistent memory location by our caller.
@@ -13632,7 +13843,7 @@ void BIF_Chr(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCou
 
 
 
-void BIF_NumGet(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_NumGet)
 {
 	size_t right_side_bound, target; // Don't make target a pointer-type because the integer offset might not be a multiple of 4 (i.e. the below increments "target" directly by "offset" and we don't want that to use pointer math).
 	ExprTokenType &target_token = *aParam[0];
@@ -13745,7 +13956,7 @@ void BIF_NumGet(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParam
 
 
 
-void BIF_NumPut(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_NumPut)
 {
 	// Load-time validation has ensured that at least the first two parameters are present.
 	ExprTokenType &token_to_write = *aParam[0];
@@ -13860,7 +14071,7 @@ void BIF_NumPut(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParam
 
 
 
-void BIF_StrGetPut(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_StrGetPut)
 {
 	// To simplify flexible handling of parameters:
 	ExprTokenType **aParam_end = aParam + aParamCount;
@@ -14119,7 +14330,7 @@ void BIF_StrGetPut(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 
 
 
-void BIF_IsLabel(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_IsLabel)
 // For performance and code-size reasons, this function does not currently return what
 // type of label it is (hotstring, hotkey, or generic).  To preserve the option to do
 // this in the future, it has been documented that the function returns non-zero rather
@@ -14132,7 +14343,7 @@ void BIF_IsLabel(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPara
 
 
 
-void BIF_IsFunc(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount) // Lexikos: Added for use with dynamic function calls.
+BIF_DECL(BIF_IsFunc) // Lexikos: Added for use with dynamic function calls.
 // Although it's tempting to return an integer like 0x8000000_min_max, where min/max are the function's
 // minimum and maximum number of parameters stored in the low-order DWORD, it would be more friendly and
 // readable to implement those outputs as optional ByRef parameters;
@@ -14146,15 +14357,13 @@ void BIF_IsFunc(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParam
 // dynamic function-call fails when too few parameters are passed (but not too many), it seems best to
 // indicate to the caller not only that the function exists, but also how many parameters are required.
 {
-	Func *func;
-	if (  !(func = dynamic_cast<Func *>(TokenToObject(*aParam[0])))  )
-		func = g_script.FindFunc(TokenToString(*aParam[0], aResultToken.buf));
+	Func *func = TokenToFunc(*aParam[0]);
 	aResultToken.value_int64 = func ? (__int64)func->mMinParams+1 : 0;
 }
 
 
 
-void BIF_Func(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_Func)
 // Returns a reference to an existing user-defined or built-in function, as an object.
 {
 	Func *func = g_script.FindFunc(TokenToString(*aParam[0], aResultToken.buf));
@@ -14168,7 +14377,7 @@ void BIF_Func(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCo
 }
 
 
-void BIF_IsByRef(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_IsByRef)
 {
 	if (aParam[0]->symbol != SYM_VAR)
 	{
@@ -14186,7 +14395,7 @@ void BIF_IsByRef(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPara
 
 
 
-void BIF_GetKeyState(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_GetKeyState)
 {
 	TCHAR key_name_buf[MAX_NUMBER_SIZE]; // Because aResultToken.buf is used for something else below.
 	LPTSTR key_name = TokenToString(*aParam[0], key_name_buf);
@@ -14224,7 +14433,7 @@ void BIF_GetKeyState(ExprTokenType &aResultToken, ExprTokenType *aParam[], int a
 
 
 
-void BIF_GetKeyName(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_GetKeyName)
 {
 	// Get VK and/or SC from the first parameter, which may be a key name, scXXX or vkXX.
 	// Key names are allowed even for GetKeyName() for simplicity and so that it can be
@@ -14260,7 +14469,7 @@ void BIF_GetKeyName(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aP
 
 
 
-void BIF_VarSetCapacity(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_VarSetCapacity)
 // Returns: The variable's new capacity.
 // Parameters:
 // 1: Target variable (unquoted).
@@ -14326,7 +14535,7 @@ void BIF_VarSetCapacity(ExprTokenType &aResultToken, ExprTokenType *aParam[], in
 
 
 
-void BIF_FileExist(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_FileExist)
 {
 	TCHAR filename_buf[MAX_NUMBER_SIZE]; // Because aResultToken.buf is used for something else below.
 	LPTSTR filename = TokenToString(*aParam[0], filename_buf);
@@ -14363,7 +14572,7 @@ void BIF_FileExist(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 
 
 
-void BIF_WinExistActive(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_WinExistActive)
 {
 	LPTSTR bif_name = aResultToken.marker;  // Save this early for maintainability (it is the name of the function, provided by the caller).
 	aResultToken.symbol = SYM_STRING; // Returns a string to preserve hex format.
@@ -14371,30 +14580,15 @@ void BIF_WinExistActive(ExprTokenType &aResultToken, ExprTokenType *aParam[], in
 	TCHAR *param[4], param_buf[4][MAX_NUMBER_SIZE];
 	for (int j = 0; j < 4; ++j) // For each formal parameter, including optional ones.
 		param[j] = (j >= aParamCount) ? _T("") : TokenToString(*aParam[j], param_buf[j]);
-		// For above, the following are notes from a time when this function was part of expression evaluation:
-		// Assign empty string if no actual to go with it.
-		// Otherwise, assign actual parameter's value to the formal parameter.
-		// The stack can contain both generic and specific operands.  Specific operands were
-		// evaluated by a previous iteration of this section.  Generic ones were pushed as-is
-		// onto the stack by a previous iteration.
 
 	HWND found_hwnd = (ctoupper(bif_name[3]) == 'E') // Win[E]xist.
 		? WinExist(*g, param[0], param[1], param[2], param[3], false, true)
 		: WinActive(*g, param[0], param[1], param[2], param[3], true);
-	aResultToken.marker = aResultToken.buf; // If necessary, this result will be moved to a persistent memory location by our caller.
-	aResultToken.marker[0] = '0';
-	aResultToken.marker[1] = 'x';
-	Exp32or64(_ultot,_ui64tot)((size_t)found_hwnd, aResultToken.marker + 2, 16); // See below.
-	// Use _ultot for performance on 32-bit systems and _ui64tot on 64-bit systems in case it's
-	// possible for HWNDs to have non-zero upper 32-bits.  Comments below are mostly obsolete:
-	// Fix for v1.0.48: Any HWND or pointer that can be greater than 0x7FFFFFFF must be cast to
-	// something like (unsigned __int64)(size_t) rather than directly to (unsigned __int64). Otherwise
-	// the high-order DWORD will wind up containing FFFFFFFF.  But since everything is 32-bit now, HWNDs
-	// are only 32-bit, so use _ultot() for performance.
-	// OLD/WRONG: _ui64toa((unsigned __int64)found_hwnd, aResultToken.marker + 2, 16);
+
+	aResultToken.marker = HwndToString(found_hwnd, aResultToken.buf);
 }
 
-void BIF_ResourceLoadLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_ResourceLoadLibrary)
 {
 	aResultToken.symbol = PURE_INTEGER;
 	aResultToken.value_int64 = 0;
@@ -14441,7 +14635,7 @@ void BIF_ResourceLoadLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[
 }
 
 
-void BIF_MemoryLoadLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_MemoryLoadLibrary)
 {
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = 0;
@@ -14466,7 +14660,7 @@ void BIF_MemoryLoadLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[],
 		module = MemoryLoadLibrary(data);
 	aResultToken.value_int64 = (unsigned)module;
 }
-void BIF_MemoryGetProcAddress(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_MemoryGetProcAddress)
 {
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = 0;
@@ -14494,7 +14688,7 @@ void BIF_MemoryGetProcAddress(ExprTokenType &aResultToken, ExprTokenType *aParam
 #endif
 }
 
-void BIF_MemoryFreeLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_MemoryFreeLibrary)
 {
 	MemoryFreeLibrary(aParam[0]->symbol == SYM_VAR ? (HMEMORYMODULE)aParam[0]->var->mContentsInt64 : (aParam[0]->symbol != PURE_INTEGER
 #ifdef _WIN64
@@ -14507,7 +14701,7 @@ void BIF_MemoryFreeLibrary(ExprTokenType &aResultToken, ExprTokenType *aParam[],
 	aResultToken.marker =_T("");
 }
 
-void BIF_Round(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_Round)
 // For simplicity and backward compatibility, this always yields something numeric (or a string that's numeric).
 // Even Round(empty_or_unintialized_var) is zero rather than "".
 {
@@ -14577,7 +14771,7 @@ void BIF_Round(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamC
 
 
 
-void BIF_FloorCeil(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_FloorCeil)
 // Probably saves little code size to merge extremely short/fast functions, hence FloorCeil.
 // Floor() rounds down to the nearest integer; that is, to the integer that lies to the left on the
 // number line (this is not the same as truncation because Floor(-1.2) is -2, not -1).
@@ -14604,7 +14798,7 @@ void BIF_FloorCeil(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 
 
 
-void BIF_Mod(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_Mod)
 {
 	// Load-time validation has already ensured there are exactly two parameters.
 	// "Cast" each operand to Int64/Double depending on whether it has a decimal point.
@@ -14645,7 +14839,7 @@ void BIF_Mod(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCou
 
 
 
-void BIF_Abs(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_Abs)
 {
 	// Unlike TRANS_CMD_ABS, which removed the minus sign from the string if it had one,
 	// this is done in a more traditional way.  It's hard to imagine needing the minus
@@ -14675,7 +14869,7 @@ void BIF_Abs(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCou
 
 
 
-void BIF_Sin(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_Sin)
 // For simplicity and backward compatibility, a numeric result is always returned (even if the input
 // is non-numeric or an empty string).
 {
@@ -14685,7 +14879,7 @@ void BIF_Sin(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCou
 
 
 
-void BIF_Cos(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_Cos)
 // For simplicity and backward compatibility, a numeric result is always returned (even if the input
 // is non-numeric or an empty string).
 {
@@ -14695,7 +14889,7 @@ void BIF_Cos(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCou
 
 
 
-void BIF_Tan(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_Tan)
 // For simplicity and backward compatibility, a numeric result is always returned (even if the input
 // is non-numeric or an empty string).
 {
@@ -14705,7 +14899,7 @@ void BIF_Tan(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCou
 
 
 
-void BIF_ASinACos(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_ASinACos)
 {
 	double value = TokenToDouble(*aParam[0]);
 	if (value > 1 || value < -1) // ASin and ACos aren't defined for such values.
@@ -14725,7 +14919,7 @@ void BIF_ASinACos(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 
 
 
-void BIF_ATan(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_ATan)
 // For simplicity and backward compatibility, a numeric result is always returned (even if the input
 // is non-numeric or an empty string).
 {
@@ -14735,7 +14929,7 @@ void BIF_ATan(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCo
 
 
 
-void BIF_Exp(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_Exp)
 // For simplicity and backward compatibility, a numeric result is always returned (even if the input
 // is non-numeric or an empty string).
 {
@@ -14745,7 +14939,7 @@ void BIF_Exp(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCou
 
 
 
-void BIF_SqrtLogLn(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_SqrtLogLn)
 {
 	double value = TokenToDouble(*aParam[0]);
 	if (value < 0) // Result is undefined in these cases, so make blank to indicate.
@@ -14774,7 +14968,7 @@ void BIF_SqrtLogLn(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 
 
 
-void BIF_DateAdd(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_DateAdd)
 {
 	aResultToken.symbol = SYM_STRING;
 	aResultToken.marker = _T(""); // Set default in case of early return.
@@ -14819,7 +15013,7 @@ void BIF_DateAdd(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPara
 
 
 
-void BIF_DateDiff(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_DateDiff)
 {
 	// Since above didn't return, the command is being used to subtract date-time values.
 	bool failed;
@@ -14852,7 +15046,7 @@ void BIF_DateDiff(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 
 
 
-void BIF_OnMessage(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_OnMessage)
 // Returns: An empty string on failure or the name of a function (depends on mode) on success.
 // Parameters:
 // 1: Message number to monitor.
@@ -15149,7 +15343,7 @@ UINT_PTR CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address) // Used
 
 
 
-void BIF_RegisterCallback(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_RegisterCallback)
 // Returns: Address of callback procedure, or empty string on failure.
 // Parameters:
 // 1: Name of the function to be called when the callback routine is executed.
@@ -15164,11 +15358,8 @@ void BIF_RegisterCallback(ExprTokenType &aResultToken, ExprTokenType *aParam[], 
 	aResultToken.marker = _T("");
 
 	// Loadtime validation has ensured that at least 1 parameter is present.
-	TCHAR func_buf[MAX_NUMBER_SIZE], *func_name;
 	Func *func;
-	if (   !*(func_name = TokenToString(*aParam[0], func_buf))  // Blank function name or...
-		|| !(func = g_script.FindFunc(func_name))  // ...the function doesn't exist or...
-		|| func->mIsBuiltIn   )  // ...the function is built-in.
+	if (  !(func = TokenToFunc(*aParam[0])) || func->mIsBuiltIn  )  // Not a valid user-defined function.
 		return; // Indicate failure by yielding the default result set earlier.
 
 	LPTSTR options = (aParamCount < 2) ? _T("") : TokenToString(*aParam[1]);
@@ -15269,7 +15460,7 @@ void BIF_RegisterCallback(ExprTokenType &aResultToken, ExprTokenType *aParam[], 
 #endif
 
 #ifndef MINIDLL
-void BIF_StatusBar(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_StatusBar)
 {
 	TCHAR mode = ctoupper(aResultToken.marker[6]); // Union's marker initially contains the function name. SB_Set[T]ext.
 	LPTSTR buf = aResultToken.buf; // Must be saved early since below overwrites the union (better maintainability too).
@@ -15361,7 +15552,7 @@ void BIF_StatusBar(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 
 
 
-void BIF_LV_GetNextOrCount(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_LV_GetNextOrCount)
 // LV_GetNext:
 // Returns: The index of the found item, or 0 on failure.
 // Parameters:
@@ -15442,7 +15633,7 @@ void BIF_LV_GetNextOrCount(ExprTokenType &aResultToken, ExprTokenType *aParam[],
 
 
 
-void BIF_LV_GetText(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_LV_GetText)
 // Returns: 1 on success and 0 on failure.
 // Parameters:
 // 1: Output variable (doing it this way allows success/fail return value to more closely mirror the API and
@@ -15512,7 +15703,7 @@ void BIF_LV_GetText(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aP
 
 
 
-void BIF_LV_AddInsertModify(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_LV_AddInsertModify)
 // Returns: 1 on success and 0 on failure.
 // Parameters:
 // 1: For Add(), this is the options.  For Insert/Modify, it's the row index (one-based when it comes in).
@@ -15769,7 +15960,7 @@ void BIF_LV_AddInsertModify(ExprTokenType &aResultToken, ExprTokenType *aParam[]
 
 
 
-void BIF_LV_Delete(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_LV_Delete)
 // Returns: 1 on success and 0 on failure.
 // Parameters:
 // 1: Row index (one-based when it comes in).
@@ -15803,7 +15994,7 @@ void BIF_LV_Delete(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 
 
 
-void BIF_LV_InsertModifyDeleteCol(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_LV_InsertModifyDeleteCol)
 // Returns: 1 on success and 0 on failure.
 // Parameters:
 // 1: Column index (one-based when it comes in).
@@ -16113,7 +16304,7 @@ void BIF_LV_InsertModifyDeleteCol(ExprTokenType &aResultToken, ExprTokenType *aP
 
 
 
-void BIF_LV_SetImageList(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_LV_SetImageList)
 // Returns (MSDN): "handle to the image list previously associated with the control if successful; NULL otherwise."
 // Parameters:
 // 1: HIMAGELIST obtained from somewhere such as IL_Create().
@@ -16147,7 +16338,7 @@ void BIF_LV_SetImageList(ExprTokenType &aResultToken, ExprTokenType *aParam[], i
 
 
 
-void BIF_TV_AddModifyDelete(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_TV_AddModifyDelete)
 // TV_Add():
 // Returns the HTREEITEM of the item on success, zero on failure.
 // Parameters:
@@ -16450,7 +16641,7 @@ HTREEITEM GetNextTreeItem(HWND aTreeHwnd, HTREEITEM aItem)
 
 
 
-void BIF_TV_GetRelatedItem(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_TV_GetRelatedItem)
 // TV_GetParent/Child/Selection/Next/Prev(hitem):
 // The above all return the HTREEITEM (or 0 on failure).
 // When TV_GetNext's second parameter is present, the search scope expands to include not just siblings,
@@ -16551,7 +16742,7 @@ void BIF_TV_GetRelatedItem(ExprTokenType &aResultToken, ExprTokenType *aParam[],
 
 
 
-void BIF_TV_Get(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_TV_Get)
 // LV_Get()
 // Returns: Varies depending on param #2.
 // Parameters:
@@ -16637,7 +16828,7 @@ void BIF_TV_Get(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParam
 
 
 
-void BIF_TV_SetImageList(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_TV_SetImageList)
 // Returns (MSDN): "handle to the image list previously associated with the control if successful; NULL otherwise."
 // Parameters:
 // 1: HIMAGELIST obtained from somewhere such as IL_Create().
@@ -16666,7 +16857,7 @@ void BIF_TV_SetImageList(ExprTokenType &aResultToken, ExprTokenType *aParam[], i
 
 
 
-void BIF_IL_Create(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_IL_Create)
 // Returns: Handle to the new image list, or 0 on failure.
 // Parameters:
 // 1: Initial image count (ImageList_Create() ignores values <=0, so no need for error checking).
@@ -16688,7 +16879,7 @@ void BIF_IL_Create(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPa
 
 
 
-void BIF_IL_Destroy(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_IL_Destroy)
 // Returns: 1 on success and 0 on failure.
 // Parameters:
 // 1: HIMAGELIST obtained from somewhere such as IL_Create().
@@ -16701,7 +16892,7 @@ void BIF_IL_Destroy(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aP
 
 
 
-void BIF_IL_Add(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_IL_Add)
 // Returns: the one-based index of the newly added icon, or zero on failure.
 // Parameters:
 // 1: HIMAGELIST: Handle of an existing ImageList.
@@ -16763,7 +16954,7 @@ void BIF_IL_Add(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParam
 
 
 #endif
-void BIF_Trim(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount) // L31
+BIF_DECL(BIF_Trim) // L31
 {
 	TCHAR trim_type = ctoupper(*aResultToken.marker); // aResultToken.marker points to the name of the Func which was called.
 
@@ -16803,7 +16994,7 @@ void BIF_Trim(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCo
 
 
 
-void BIF_Type(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_Type)
 // Returns the pure type of the given value.
 {
 	aResultToken.symbol = SYM_STRING;
@@ -16848,7 +17039,7 @@ void BIF_Type(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCo
 
 
 
-void BIF_Exception(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_Exception)
 {
 	LPTSTR message = TokenToString(*aParam[0], aResultToken.buf);
 	TCHAR what_buf[MAX_NUMBER_SIZE], extra_buf[MAX_NUMBER_SIZE];
@@ -17177,6 +17368,17 @@ IObject *TokenToObject(ExprTokenType &aToken)
 	return NULL;
 }
 
+
+
+Func *TokenToFunc(ExprTokenType &aToken)
+{
+	// No need for buf since function names can't be pure numeric:
+	//TCHAR buf[MAX_NUMBER_SIZE];
+	Func *func;
+	if (  !(func = dynamic_cast<Func *>(TokenToObject(aToken)))  )
+		func = g_script.FindFunc(TokenToString(aToken));
+	return func;
+}
 
 
 ResultType TokenSetResult(ExprTokenType &aResultToken, LPCTSTR aResult, size_t aResultLength)

@@ -117,6 +117,7 @@ int g_MaxHotkeysPerInterval = 70; // Increased to 70 because 60 was still causin
 int g_HotkeyThrottleInterval = 2000; // Milliseconds.
 #endif
 bool g_MaxThreadsBuffer = false;  // This feature usually does more harm than good, so it defaults to OFF.
+SendLevelType g_InputLevel = 0;
 #ifndef MINIDLL
 HotCriterionType g_HotCriterion = HOT_NO_CRITERION;
 LPTSTR g_HotWinTitle = _T(""); // In spite of the above being the primary indicator,
@@ -298,13 +299,13 @@ Action g_act[] =
 	, {_T("Goto"), 1, 1, false, NULL}
 	, {_T("Gosub"), 1, 1, false, NULL}   // Label (or dereference that resolves to a label).
 	, {_T("Return"), 0, 1, false, {1, 0}}
-	, {_T("Exit"), 0, 1, false, {1, 0}} // ExitCode
-	, {_T("ExitApp"), 0, 1, false, {1, 0}}  // Optional exit-code. v1.0.48.01: Allow an expression like ACT_EXIT does.
 	, {_T("Try"), 0, 0, false, NULL}
 	, {_T("Catch"), 0, 1, false, NULL} // fincs: seems best to allow catch without a parameter
 	, {_T("Throw"), 0, 1, false, {1, 0}}
+	, {_T("Exit"), 0, 1, false, NULL} // ExitCode
+	, {_T("ExitApp"), 0, 1, false, NULL} // ExitCode
 
-	, {_T("MsgBox"), 0, 4, false, {4, 0}} // Text (if only 1 param) or: Mode-flag, Title, Text, Timeout.
+	, {_T("MsgBox"), 0, 4, false, NULL} // Text (if only 1 param) or: Mode-flag, Title, Text, Timeout.
 	, {_T("InputBox"), 1, 5, true, NULL} // OutputVar, Title, Prompt, Options, Default
 	, {_T("ToolTip"), 0, 4, false, {2, 3, 4, 0}}  // Text, X, Y, ID.  If Text is omitted, the Tooltip is turned off.
 	, {_T("TrayTip"), 0, 4, false, {3, 4, 0}}  // Title, Text, Timeout, Options
@@ -351,6 +352,7 @@ Action g_act[] =
 	, {_T("ControlGet"), 2, 8, true, NULL}   // Output-var, Command, Value, Control, std. 4 window params
 
 	, {_T("SendMode"), 1, 1, false, NULL}
+	, {_T("SendLevel"), 1, 1, false, {1, 0}}
 	, {_T("CoordMode"), 1, 2, false, NULL} // Attribute, screen|relative
 	, {_T("SetDefaultMouseSpeed"), 1, 1, false, {1, 0}} // speed (numeric)
 	, {_T("Click"), 0, 1, false, NULL} // Flex-list of options.
@@ -392,8 +394,6 @@ Action g_act[] =
 	// but that is explicitly checked for, even though it is required it to be numeric in the definition here.
 	, {_T("MenuSelect"), 0, 11, false, NULL} // WinTitle, WinText, Menu name, 6 optional sub-menu names, ExcludeTitle/Text
 
-	, {_T("Process"), 1, 3, false, NULL}  // Sub-cmd, PID/name, Param3 (use minimum of 1 param so that 2nd can be blank)
-
 	, {_T("WinSet"), 1, 6, false, NULL} // attribute, setting, title, text, exclude-title, exclude-text
 	// WinSetTitle: Allow a minimum of zero params so that title isn't forced to be non-blank.
 	// Also, if the user passes only one param, the title of the "last used" window will be
@@ -401,7 +401,6 @@ Action g_act[] =
 	, {_T("WinSetTitle"), 0, 5, false, NULL} // title, text, newtitle, exclude-title, exclude-text
 	, {_T("WinGetTitle"), 1, 5, true, NULL} // Output-var, std. 4 window params
 	, {_T("WinGetClass"), 1, 5, true, NULL} // Output-var, std. 4 window params
-	, {_T("WinGet"), 1, 6, true, NULL} // Output-var/array, cmd (if omitted, defaults to ID), std. 4 window params
 	, {_T("WinGetPos"), 0, 8, true, NULL} // Four optional output vars: xpos, ypos, width, height.  Std. 4 window params.
 	, {_T("WinGetText"), 1, 5, true, NULL} // Output var, std 4 window params.
 

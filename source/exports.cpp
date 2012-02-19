@@ -21,7 +21,6 @@ BOOL com_ahkLabel(LPTSTR aLabelName, unsigned int nowait){return ahkLabel(aLabel
 UINT_PTR com_ahkFindFunc(LPTSTR funcname){return ahkFindFunc(funcname);}
 // LPTSTR com_ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10){return ahkFunction(func,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10);}
 // unsigned int com_ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10){return ahkPostFunction(func,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10);}
-BOOL com_ahkKey(LPTSTR keys){return ahkKey(keys);}
 #ifndef AUTOHOTKEYSC
 UINT_PTR com_addScript(LPTSTR script, int aExecute){return addScript(script,aExecute);}
 BOOL com_ahkExec(LPTSTR script){return ahkExec(script);}
@@ -234,13 +233,6 @@ EXPORT unsigned int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, L
 		return 0;
 	}
 	return -1;
-}
-
-
-EXPORT BOOL ahkKey(LPTSTR keys) 
-{
-	SendKeys(keys, false, SM_EVENT, 0, 1); // N11 sendahk
-	return 0;
 }
 
 #ifndef AUTOHOTKEYSC

@@ -27,11 +27,185 @@ GNU General Public License for more details.
 #include "MemoryModule.h"
 
 // Globals that are for only this module:
-static ExprOpFunc g_ObjGet(BIF_ObjInvoke, IT_GET), g_ObjSet(BIF_ObjInvoke, IT_SET), g_ObjCall(BIF_ObjInvoke, IT_CALL);
+static ExprOpFunc g_ObjGet(BIF_ObjInvoke, IT_GET), g_ObjSet(BIF_ObjInvoke, IT_SET);
 static ExprOpFunc g_ObjGetInPlace(BIF_ObjGetInPlace, IT_GET);
 static ExprOpFunc g_ObjNew(BIF_ObjNew, 0);
 static ExprOpFunc g_ObjPreInc(BIF_ObjIncDec, SYM_PRE_INCREMENT), g_ObjPreDec(BIF_ObjIncDec, SYM_PRE_DECREMENT)
 				, g_ObjPostInc(BIF_ObjIncDec, SYM_POST_INCREMENT), g_ObjPostDec(BIF_ObjIncDec, SYM_POST_DECREMENT);
+ExprOpFunc g_ObjCall(BIF_ObjInvoke, IT_CALL); // Also needed in script_expression.cpp.
+
+FuncEntry g_BIF[] =
+{
+#ifndef MINIDLL
+	{_T("LV_GetNext"), BIF_LV_GetNextOrCount, 0, 2, true},
+	{_T("LV_GetCount"), BIF_LV_GetNextOrCount, 0, 1, true},
+	{_T("LV_GetText"), BIF_LV_GetText, 2, 3, true},
+	{_T("LV_Add"), BIF_LV_AddInsertModify, 0, 10000, true},
+	{_T("LV_Insert"), BIF_LV_AddInsertModify, 1, 10000, true},
+	{_T("LV_Modify"), BIF_LV_AddInsertModify, 2, 10000, true},
+	{_T("LV_Delete"), BIF_LV_Delete, 0, 1, true},
+	{_T("LV_InsertCol"), BIF_LV_InsertModifyDeleteCol, 1, 3, true},
+	{_T("LV_ModifyCol"), BIF_LV_InsertModifyDeleteCol, 0, 3, true},
+	{_T("LV_DeleteCol"), BIF_LV_InsertModifyDeleteCol, 1, 1, true},
+	{_T("LV_SetImageList"), BIF_LV_SetImageList, 1, 2, true},
+	
+	{_T("TV_Add"), BIF_TV_AddModifyDelete, 1, 3, true},
+	{_T("TV_Modify"), BIF_TV_AddModifyDelete, 1, 3, true},
+	{_T("TV_Delete"), BIF_TV_AddModifyDelete, 0, 1, true},
+	{_T("TV_GetParent"), BIF_TV_GetRelatedItem, 1, 1, true},
+	{_T("TV_GetChild"), BIF_TV_GetRelatedItem, 1, 1, true},
+	{_T("TV_GetPrev"), BIF_TV_GetRelatedItem, 1, 1, true},
+	{_T("TV_GetCount"), BIF_TV_GetRelatedItem, 0, 0, true},
+	{_T("TV_GetSelection"), BIF_TV_GetRelatedItem, 0, 0, true},
+	{_T("TV_GetNext"), BIF_TV_GetRelatedItem, 0, 2, true},
+	{_T("TV_Get"), BIF_TV_Get, 2, 2, true},
+	{_T("TV_GetText"), BIF_TV_Get, 2, 2, true},
+	{_T("TV_SetImageList"), BIF_TV_SetImageList, 1, 2, true},
+
+	{_T("IL_Create"), BIF_IL_Create, 0, 3, true},
+	{_T("IL_Destroy"), BIF_IL_Destroy, 1, 1, true},
+	{_T("IL_Add"), BIF_IL_Add, 2, 4, true},
+	
+	{_T("SB_SetText"), BIF_StatusBar, 1, 3, true},
+	{_T("SB_SetParts"), BIF_StatusBar, 0, 255, true},
+	{_T("SB_SetIcon"), BIF_StatusBar, 1, 3, true},
+#endif
+	{_T("StrLen"), BIF_StrLen, 1, 1, true},
+	{_T("SubStr"), BIF_SubStr, 2, 3, true},
+	{_T("Trim"), BIF_Trim, 1, 2, true},
+	{_T("LTrim"), BIF_Trim, 1, 2, true},
+	{_T("RTrim"), BIF_Trim, 1, 2, true},
+	{_T("InStr"), BIF_InStr, 2, 5, true},
+	{_T("StrSplit"), BIF_StrSplit, 2, 3, true},
+	{_T("RegExMatch"), BIF_RegEx, 2, 4, true},
+	{_T("RegExReplace"), BIF_RegEx, 2, 6, true},
+
+	{_T("GetKeyState"), BIF_GetKeyState, 1, 2, true},
+	{_T("GetKeyName"), BIF_GetKeyName, 1, 1, true},
+	{_T("GetKeyVK"), BIF_GetKeyName, 1, 1, true},
+	{_T("GetKeySC"), BIF_GetKeyName, 1, 1, true},
+
+	{_T("Ord"), BIF_Ord, 1, 1, true},
+	{_T("Chr"), BIF_Chr, 1, 1, true},
+	{_T("StrGet"), BIF_StrGetPut, 1, 3, true},
+	{_T("StrPut"), BIF_StrGetPut, 1, 4, true},
+	{_T("NumGet"), BIF_NumGet, 1, 3, true},
+	{_T("NumPut"), BIF_NumPut, 2, 4, true},
+	{_T("IsLabel"), BIF_IsLabel, 1, 1, true},
+	{_T("Func"), BIF_Func, 1, 1, true},
+	{_T("IsFunc"), BIF_IsFunc, 1, 1, true},
+	{_T("IsByRef"), BIF_IsByRef, 1, 1, true},
+	{_T("DllCall"), BIF_DllCall, 1, 10000, true},
+	{_T("VarSetCapacity"), BIF_VarSetCapacity, 1, 3, true},
+	{_T("FileExist"), BIF_FileExist, 1, 1, true},
+	{_T("DirExist"), BIF_FileExist, 1, 1, true},
+	{_T("WinExist"), BIF_WinExistActive, 0, 4, true},
+	{_T("WinActive"), BIF_WinExistActive, 0, 4, true},
+	{_T("Round"), BIF_Round, 1, 2, true},
+	{_T("Floor"), BIF_FloorCeil, 1, 1, true},
+	{_T("Ceil"), BIF_FloorCeil, 1, 1, true},
+	{_T("Mod"), BIF_Mod, 2, 2, true},
+	{_T("Abs"), BIF_Abs, 1, 1, true},
+	{_T("Sin"), BIF_Sin, 1, 1, true},
+	{_T("Cos"), BIF_Cos, 1, 1, true},
+	{_T("Tan"), BIF_Tan, 1, 1, true},
+	{_T("ASin"), BIF_ASinACos, 1, 1, true},
+	{_T("ACos"), BIF_ASinACos, 1, 1, true},
+	{_T("ATan"), BIF_ATan, 1, 1, true},
+	{_T("Exp"), BIF_Exp, 1, 1, true},
+	{_T("Sqrt"), BIF_SqrtLogLn, 1, 1, true},
+	{_T("Log"), BIF_SqrtLogLn, 1, 1, true},
+	{_T("Ln"), BIF_SqrtLogLn, 1, 1, true},
+	{_T("DateAdd"), BIF_DateAdd, 3, 3, true},
+	{_T("DateDiff"), BIF_DateDiff, 3, 3, true},
+	{_T("OnMessage"), BIF_OnMessage, 1, 3, true},
+	{_T("RegisterCallback"), BIF_RegisterCallback, 1, 4, true},
+	{_T("Type"), BIF_Type, 1, 1, true},
+	{_T("IsObject"), BIF_IsObject, 1, 10000, true},
+	// AHK_H Functions
+	{_T("FindFunc"), BIF_FindFunc, 1, 1, true},
+	{_T("FindLabel"), BIF_FindLabel, 1, 1, true},
+	{_T("GetVar"), BIF_Getvar, 1, 1, true},
+	{_T("Static"), BIF_Static, 1, 1, true},
+	{_T("Alias"), BIF_Alias, 1, 2, true},
+	{_T("CacheEnable"), BIF_CacheEnable, 1, 1, true},
+	{_T("GetTokenValue"), BIF_getTokenValue, 1, 1, true},
+	{_T("ResourceLoadLibrary"), BIF_ResourceLoadLibrary, 1, 1, true},
+	{_T("MemoryLoadLibrary"), BIF_MemoryLoadLibrary, 1, 1, true},
+	{_T("MemoryGetProcAddress"), BIF_MemoryGetProcAddress, 2, 2, true},
+	{_T("MemoryFreeLibrary"), BIF_MemoryFreeLibrary, 1, 1, true},
+	{_T("Lock"), BIF_Lock, 1, 1, true},
+	{_T("TryLock"), BIF_TryLock, 1, 1, true},
+	{_T("UnLock"), BIF_UnLock, 1, 1, true},
+	{_T("DynaCall"), BIF_DynaCall, 0, 10000, true},
+	{_T("CriticalObject"), BIF_CriticalObject, 0, 2, true},
+	
+	{_T("Object"), BIF_ObjCreate, 0, 10000, true},
+	{_T("ObjInsert"), BIF_ObjInsert, 2, 10000, true},
+	{_T("ObjRemove"), BIF_ObjRemove, 1, 3, true},
+	{_T("ObjMinIndex"), BIF_ObjMinIndex, 1, 1, true},
+	{_T("ObjMaxIndex"), BIF_ObjMaxIndex, 1, 1, true},
+	{_T("ObjHasKey"), BIF_ObjHasKey, 2, 2, true},
+	{_T("ObjGetCapacity"), BIF_ObjGetCapacity, 1, 2, true},
+	{_T("ObjSetCapacity"), BIF_ObjSetCapacity, 2, 3, true},
+	{_T("ObjGetAddress"), BIF_ObjGetAddress, 2, 2, true},
+	{_T("ObjNewEnum"), BIF_ObjNewEnum, 1, 1, true},
+	{_T("ObjClone"), BIF_ObjClone, 1, 1, true},
+	{_T("ObjAddRef"), BIF_ObjAddRefRelease, 1, 1, true},
+	{_T("ObjRelease"), BIF_ObjAddRefRelease, 1, 1, true},
+
+	{_T("Array"), BIF_ObjArray, 0, 10000, true},
+	{_T("FileOpen"), BIF_FileOpen, 2, 3, true},
+	
+	{_T("ComObject"), BIF_ComObjActive, 0, 3, true},
+	{_T("ComObjCreate"), BIF_ComObjCreate, 1, 2, true},
+	{_T("ComObjGet"), BIF_ComObjGet, 1, 1, true},
+	{_T("ComObjConnect"), BIF_ComObjConnect, 1, 2, true},
+	{_T("ComObjError"), BIF_ComObjError, 0, 1, true},
+	{_T("ComObjType"), BIF_ComObjTypeOrValue, 1, 2, true},
+	{_T("ComObjValue"), BIF_ComObjTypeOrValue, 1, 1, true},
+	{_T("ComObjFlags"), BIF_ComObjFlags, 1, 3, true},
+	{_T("ComObjArray"), BIF_ComObjArray, 2, 9, true},
+	{_T("ComObjQuery"), BIF_ComObjQuery, 2, 3, true},
+	
+	{_T("Exception"), BIF_Exception, 1, 3, true},
+
+	{_T("WinGetID"), BIF_WinGet, 0, 4, true},
+	{_T("WinGetIDLast"), BIF_WinGet, 0, 4, true},
+	{_T("WinGetPID"), BIF_WinGet, 0, 4, true},
+	{_T("WinGetProcessName"), BIF_WinGet, 0, 4, true},
+	{_T("WinGetProcessPath"), BIF_WinGet, 0, 4, true},
+	{_T("WinGetCount"), BIF_WinGet, 0, 4, true},
+	{_T("WinGetList"), BIF_WinGet, 0, 4, true},
+	{_T("WinGetMinMax"), BIF_WinGet, 0, 4, true},
+	{_T("WinGetControlList"), BIF_WinGet, 0, 4, true},
+	{_T("WinGetControlListHwnd"), BIF_WinGet, 0, 4, true},
+	{_T("WinGetTransparent"), BIF_WinGet, 0, 4, true},
+	{_T("WinGetTransColor"), BIF_WinGet, 0, 4, true},
+	{_T("WinGetStyle"), BIF_WinGet, 0, 4, true},
+	{_T("WinGetExStyle"), BIF_WinGet, 0, 4, true},
+
+	{_T("WinSetTrans"), BIF_WinSet, 1, 5, false},
+	{_T("WinSetTransparent"), BIF_WinSet, 1, 5, false},
+	{_T("WinSetTransColor"), BIF_WinSet, 1, 5, false},
+	{_T("WinSetAlwaysOnTop"), BIF_WinSet, 0, 5, false},
+	{_T("WinSetTopmost"), BIF_WinSet, 0, 5, false},
+	{_T("WinSetBottom"), BIF_WinSet, 0, 5, false},
+	{_T("WinSetTop"), BIF_WinSet, 0, 5, false},
+	{_T("WinSetStyle"), BIF_WinSet, 1, 5, false},
+	{_T("WinSetExStyle"), BIF_WinSet, 1, 5, false},
+	{_T("WinSetRedraw"), BIF_WinSet, 0, 5, false},
+	{_T("WinSetEnable"), BIF_WinSet, 0, 5, false},
+	{_T("WinSetDisable"), BIF_WinSet, 0, 5, false},
+	{_T("WinSetRegion"), BIF_WinSet, 0, 5, false},
+	
+	{_T("ProcessExist"), BIF_Process, 0, 1, true},
+	{_T("ProcessClose"), BIF_Process, 1, 1, true},
+	{_T("ProcessPriority"), BIF_Process, 2, 2, true},
+	{_T("ProcessWait"), BIF_Process, 1, 2, true},
+	{_T("ProcessWaitClose"), BIF_Process, 1, 2, true},
+
+};
 
 // See Script::CreateWindows() for details about the following:
 typedef BOOL (WINAPI* AddRemoveClipboardListenerType)(HWND);
@@ -110,6 +284,8 @@ Script::Script()
 		ScriptError(_T("DEBUG: ID_FILE_EXIT is too large (conflicts with IDs reserved via ID_USER_FIRST)."));
 	if (MAX_CONTROLS_PER_GUI > ID_USER_FIRST - 3)
 		ScriptError(_T("DEBUG: MAX_CONTROLS_PER_GUI is too large (conflicts with IDs reserved via ID_USER_FIRST)."));
+	if (g_ActionCount != ACT_COUNT) // This enum value only exists in debug mode.
+		ScriptError(_T("DEBUG: g_act and enum_act are out of sync."));
 	int LargestMaxParams, i, j;
 	ActionTypeType *np;
 	// Find the Largest value of MaxParams used by any command and make sure it
@@ -1021,7 +1197,6 @@ ResultType Script::ExitApp(ExitReasons aExitReason, LPTSTR aBuf, int aExitCode)
 		TerminateApp(aExitReason, aExitCode);
 	}
 	DEBUGGER_STACK_POP()
-	sExitLabelIsRunning = false;  // In case the user wanted the thread to end normally (see above).
 
 	if (terminate_afterward)
 		TerminateApp(aExitReason, aExitCode);
@@ -1029,8 +1204,12 @@ ResultType Script::ExitApp(ExitReasons aExitReason, LPTSTR aBuf, int aExitCode)
 	// Otherwise:
 	g_AllowInterruption = g_AllowInterruption_prev;  // Restore original setting.
 	ResumeUnderlyingThread(ErrorLevel_saved);
+	// If this OnExit thread is the last script thread and the script is not persistent, the above
+	// call recurses into this function.  sExitLabelIsRunning == true prevents infinite recursion
+	// in that case.  It is now safe to reset:
+	sExitLabelIsRunning = false;  // In case the user wanted the thread to end normally (see above).
 
-	return OK;  // for caller convenience.
+	return EARLY_EXIT;
 }
 
 
@@ -4916,6 +5095,22 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		else
 			return ScriptError(parameter ? ERR_PARAM1_INVALID : ERR_PARAM1_REQUIRED, aBuf);
 	}
+	
+	if (IS_DIRECTIVE_MATCH(_T("#InputLevel")))
+	{
+		// All hotkeys declared after this directive are assigned the specified InputLevel.
+		// Input generated at a given SendLevel can only trigger hotkeys that belong to the
+		// same or lower InputLevel. Hotkeys at the lowest level (0) cannot be triggered by
+		// any generated input (the same behavior as AHK versions before this feature).
+		// The default level is 0.
+
+		int group = parameter ? ATOI(parameter) : 0;
+		if (!SendLevelIsValid(group))
+			return ScriptError(ERR_PARAM1_INVALID, aBuf);
+
+		g_InputLevel = group;
+		return CONDITION_TRUE;
+	}
 
 	if (IS_DIRECTIVE_MATCH(_T("#MustDeclare")))
 	{
@@ -5683,7 +5878,7 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 				// Assume this is a function; a later stage will throw up an error if it isn't.
 				aActionType = ACT_FUNC;
 				// Include the function name as an arg:
-				if (end_marker[1])
+				if (end_marker[1] && g_delimiter != *omit_leading_whitespace(end_marker + 1))
 					end_marker[1] = g_delimiter;
 				action_args = aLineText;
 			}
@@ -5769,119 +5964,68 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 	int mark, max_params_override = 0; // Set default.
 	if (aActionType == ACT_MSGBOX)
 	{
-		// First find out how many non-literal (non-escaped) delimiters are present.
-		// Use a high maximum so that we can almost always find and analyze the command's
-		// last apparent parameter.  This helps error-checking be more informative in a
-		// case where the command specifies a timeout as its last param but it's next-to-last
-		// param contains delimiters that the user forgot to escape.  In other words, this
-		// helps detect more often when the user is trying to use the timeout feature.
-		// If this weren't done, the command would more often forgive improper syntax
-		// and not report a load-time error, even though it's pretty obvious that a load-time
-		// error should have been reported:
-		#define MAX_MSGBOX_DELIMITERS 20
-		LPTSTR delimiter[MAX_MSGBOX_DELIMITERS];
-		int delimiter_count;
-		for (mark = delimiter_count = 0; action_args[mark] && delimiter_count < MAX_MSGBOX_DELIMITERS;)
+		for (int next, mark = 0, arg = 1; action_args[mark]; mark = next, ++arg)
 		{
-			for (; action_args[mark]; ++mark)
-				if (action_args[mark] == g_delimiter && !literal_map[mark]) // Match found: a non-literal delimiter.
-				{
-					delimiter[delimiter_count++] = action_args + mark;
-					++mark; // Skip over this delimiter for the next iteration of the outer loop.
-					break;
-				}
-		}
-		// If it has only 1 arg (i.e. 0 delimiters within the arg list) no override is needed.
-		// Otherwise do more checking:
-		if (delimiter_count)
-		{
-			LPTSTR cp;
-			// If the first apparent arg is not a non-blank pure number or there are apparently
-			// only 2 args present (i.e. 1 delimiter in the arg list), assume the command is being
-			// used in its 1-parameter mode:
-			if (delimiter_count <= 1) // 2 parameters or less.
-				// Force it to be 1-param mode.  In other words, we want to make MsgBox a very forgiving
-				// command and have it rarely if ever report syntax errors:
-				max_params_override = 1;
-			else // It has more than 3 apparent params, but is the first param even numeric?
+			if (arg > 1)
+				mark++; // Skip the delimiter...
+			while (IS_SPACE_OR_TAB(action_args[mark]))
+				mark++; // ...and any leading whitespace.
+
+			if (action_args[mark] == g_DerefChar && !literal_map[mark] && IS_SPACE_OR_TAB(action_args[mark+1]))
 			{
-				*delimiter[0] = '\0'; // Temporarily terminate action_args at the first delimiter.
+				// Since this parameter is an expression, commas inside it can't be intended to be
+				// literal/displayed by the user unless they're enclosed in quotes; but in that case,
+				// the smartness below isn't needed because it's provided by the parameter-parsing
+				// logic in a later section.
+				if (arg >= 3) // Text or Timeout
+					break;
+				// Otherwise, just jump to the next parameter so we can check it too:
+				next = FindNextDelimiter(action_args, g_delimiter, mark+2, literal_map);
+				continue;
+			}
+			
+			// Find the next non-literal delimiter:
+			for (next = mark; action_args[next]; ++next)
+				if (action_args[next] == g_delimiter && !literal_map[next])
+					break;
+
+			if (arg == 1) // Options (or Text in single-arg mode)
+			{
+				if (!action_args[next]) // Below relies on this check.
+					break; // There's only one parameter, so no further checks are required.
+				// It has more than one apparent param, but is the first param even numeric?
+				action_args[next] = '\0'; // Temporarily terminate action_args at the first delimiter.
 				// Note: If it's a number inside a variable reference, it's still considered 1-parameter
-				// mode to avoid ambiguity (unlike the new deref checking for param #4 mentioned below,
+				// mode to avoid ambiguity (unlike the deref check for param #4 in the section below,
 				// there seems to be too much ambiguity in this case to justify trying to figure out
 				// if the first parameter is a pure deref, and thus that the command should use
 				// 3-param or 4-param mode instead).
-				if (!IsNumeric(action_args)) // No floats allowed.  Allow all-whitespace for aut2 compatibility.
+				if (!IsNumeric(action_args + mark)) // No floats allowed.
 					max_params_override = 1;
-				*delimiter[0] = g_delimiter; // Restore the string.
-				if (!max_params_override)
+				action_args[next] = g_delimiter; // Restore the string.
+				if (max_params_override)
+					break;
+			}
+			else if (arg == 4) // Timeout (or part of Text)
+			{
+				// If the 4th parameter isn't blank or pure numeric, assume the user didn't intend it
+				// to be the MsgBox timeout (since that feature is rarely used), instead intending it
+				// to be part of parameter #3.
+				if (!IsNumeric(action_args + mark, false, true, true))
 				{
-					// IMPORTANT: The MsgBox cmd effectively has 3 parameter modes:
-					// 1-parameter (where all commas in the 1st parameter are automatically literal)
-					// 3-parameter (where all commas in the 3rd parameter are automatically literal)
-					// 4-parameter (whether the 4th parameter is the timeout value)
-					// Thus, the below must be done in a way that recognizes & supports all 3 modes.
-					// The above has determined that the cmd isn't in 1-parameter mode.
-					// If at this point it has exactly 3 apparent params, allow the command to be
-					// processed normally without an override.  Otherwise, do more checking:
-					if (delimiter_count == 3) // i.e. 3 delimiters, which means 4 params.
-					{
-						// If the 4th parameter isn't blank or pure numeric, assume the user didn't
-						// intend it to be the MsgBox timeout (since that feature is rarely used),
-						// instead intending it to be part of parameter #3.
-						if (!IsNumeric(delimiter[2] + 1, false, true, true))
-						{
-							// Not blank and not a int or float.  Update for v1.0.20: Check if it's a
-							// single deref.  If so, assume that deref contains the timeout and thus
-							// 4-param mode is in effect.  This allows the timeout to be contained in
-							// a variable, which was requested by one user:
-							cp = omit_leading_whitespace(delimiter[2] + 1);
-							// Relies on short-circuit boolean order:
-							if (*cp != g_DerefChar || literal_map[cp - action_args]) // not a proper deref char.
-								max_params_override = 3;
-							// else since it does start with a real deref symbol, it must end with one otherwise
-							// that will be caught later on as a syntax error anyway.  Therefore, don't override
-							// max_params, just let it be parsed as 4 parameters.
-						}
-						// If it has more than 4 params or it has exactly 4 but the 4th isn't blank,
-						// pure numeric, or a deref: assume it's being used in 3-parameter mode and
-						// that all the other delimiters were intended to be literal.
-					}
-					else if (delimiter_count > 3) // i.e. 4 or more delimiters, which means 5 or more params.
-					{
-						// v1.0.48: This section extends smart comma handling so that if parameter #3 (Text)
-						// is an expression, any commas in it won't interfere with the Timeout parameter.
-						// For example, the timeout parameter below should work now:
-						//    MsgBox 0, Title, % Func(x,y), 1
-						//
-						// If the "Text" parameter is an expression then commas inside it can't be intended to
-						// be literal/displayed by the user unless they're enclosed in quotes; but in that case,
-						// the smartness below isn't needed because it's provided by the parameter-parsing logic
-						// in a later section.  So in that case it seems safe to avoid setting max_params_override,
-						// which fixes examples like the one above.  The code further below does this.
-						//
-						// By contrast, fixing the second parameter (Title) in a similar way would be more
-						// difficult and/or would be more likely to break existing scripts.  For example if "title"
-						// is an expression but "text" is NOT an expression, there might be some commas in "text"
-						// that are currently handled as smart/auto-literal, and those cases should be preserved
-						// for backward compatibility.
-						//
-						// If expressions in the "title" parameter ever are fixed to not interfere with the
-						// Timeout parameter, perhaps the best way to do it would be to verify that it's an
-						// expression, then skip over any commas that are enclosed in quotes or parentheses so that
-						// the "real" commas can be counted and used by the rest of the smart-comma logic.
-						//
-						// For the section below, see comments at the similar code section above:
-						cp = omit_leading_whitespace(delimiter[1] + 1); // Parameter #3, the "text" parameter.
-						if (   *cp != g_DerefChar || literal_map[cp - action_args] // not a proper deref char...
-							|| !IS_SPACE_OR_TAB(cp[1])   ) // ...or it's not followed by a space or tab, so it isn't "% ".
-							// Since it has too many delimiters to be 4-param mode and since there is no "% "
-							// expression present, assume it's 3-param mode so that non-escaped commas in
-							// parameters 4 and beyond will be all treated as strings that are part of parameter #3.
-							max_params_override = 3;
-					}
-					//else if 3 params or less: Don't override via max_params_override, just parse it normally.
+					// Not blank and not a int or float.  Update for v1.0.20: Check if it's a single
+					// deref.  If so, assume that deref contains the timeout and thus 4-param mode is
+					// in effect.  This allows the timeout to be contained in a variable, which was
+					// requested by one user.  Update for v1.1.06: Do some additional checking to
+					// exclude things like "%x% marks the spot" but not "%Timeout%.500".
+					LPTSTR deref_end;
+					if (action_args[next] // There are too many delimiters (there appears to be another arg after this one).
+						|| action_args[mark] != g_DerefChar || literal_map[mark] // Not a proper deref char.
+						|| !(deref_end = _tcschr(action_args + mark + 1, g_DerefChar)) // No deref end char (this syntax error will be handled later).
+						|| !IsNumeric(deref_end + 1, false, true, true)) // There is something non-numeric following the deref (things like %Timeout%.500 are allowed for flexibility and backward-compatibility).
+						max_params_override = 3;
 				}
+				break;
 			}
 		}
 	} // end of special handling for MsgBox.
@@ -6002,9 +6146,9 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 			// because the map is still accurate due to the nature of rtrim).  UPDATE: Note that this
 			// version of rtrim() specifically avoids trimming newline characters, since the user may
 			// have included literal newlines at the end of the string by using an escape sequence:
-			rtrim(arg[nArgs]);
+			rtrim_literal(arg[nArgs], arg_map[nArgs]);
 			// Omit the leading whitespace from the next arg:
-			for (++mark; IS_SPACE_OR_TAB(action_args[mark]); ++mark);
+			for (++mark; IS_SPACE_OR_TAB(action_args[mark]) && !literal_map[mark]; ++mark);
 			// Now <mark> marks the end of the string, the start of the next arg,
 			// or a delimiter-char (if the next arg is blank).
 		}
@@ -6518,22 +6662,19 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 									&& (op_begin[2] == 't' || op_begin[2] == 'T')   )
 									continue; // "NOT" was found.
 								if (   (op_begin[1] == 'e' || op_begin[1] == 'E')
-									&& (op_begin[2] == 'w' || op_begin[2] == 'W')
-									&& IS_SPACE_OR_TAB(op_begin[3])   )
+									&& (op_begin[2] == 'w' || op_begin[2] == 'W')   ) // "new"
 								{
-									cp = omit_leading_whitespace(op_begin + 4);
-									// This "new " is a keyword only if followed immediately by an operand,
-									// such as "new ClassVar", "new Class.NestedClass()" or "new %Var%()",
-									// but not "new := 1" or "x := new + 1" and not '"string" new "string"'.
+									cp = omit_leading_whitespace(op_begin + 3);
 									if (!_tcschr(EXPR_OPERAND_TERMINATORS, *cp) && *cp != '"')
 									{
-										// If this is "new ClassVar()", we need to avoid parsing "ClassVar()" as a
-										// function deref.  The check below handles that.  Note that "new X.Y()" is
-										// excluded, since it wouldn't be parsed as a function deref anyway.
+										// This "new" is followed by something that looks like an operand;
+										// perhaps "new ClassVar()", which we need to avoid parsing as a
+										// function-call.  The check below intentionally excludes "new X.Y()"
+										// since it wouldn't be parsed as a function deref anyway.
 										for ( ; !_tcschr(EXPR_OPERAND_TERMINATORS, *cp); ++cp); // Find end of var.
 										pending_function_is_new_op = (*cp == '(');
-										continue;
 									}
+									continue;
 								}
 								break;
 							}
@@ -6846,6 +6987,11 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 
 	case ACT_SENDMODE:
 		if (aArgc > 0 && !line.ArgHasDeref(1) && line.ConvertSendMode(new_raw_arg1, SM_INVALID) == SM_INVALID)
+			return ScriptError(ERR_PARAM1_INVALID, new_raw_arg1);
+		break;
+
+	case ACT_SENDLEVEL:
+		if (aArgc > 0 && !line.ArgHasDeref(1) && !SendLevelIsValid(ATOI(new_raw_arg1)))
 			return ScriptError(ERR_PARAM1_INVALID, new_raw_arg1);
 		break;
 
@@ -7330,34 +7476,6 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 		}
 		break;
 
-	case ACT_PROCESS:
-		if (aArgc > 0 && !line.ArgHasDeref(1))
-		{
-			ProcessCmds process_cmd = line.ConvertProcessCmd(new_raw_arg1);
-			if (process_cmd != PROCESS_CMD_PRIORITY && process_cmd != PROCESS_CMD_EXIST && !*new_raw_arg2)
-				return ScriptError(_T("Parameter #2 must not be blank in this case."));
-			switch (process_cmd)
-			{
-			case PROCESS_CMD_INVALID:
-				return ScriptError(ERR_PARAM1_INVALID, new_raw_arg1);
-			case PROCESS_CMD_EXIST:
-			case PROCESS_CMD_CLOSE:
-				if (*new_raw_arg3)
-					return ScriptError(ERR_PARAM3_MUST_BE_BLANK, new_raw_arg3);
-				break;
-			case PROCESS_CMD_PRIORITY:
-				if (!*new_raw_arg3 || (!line.ArgHasDeref(3) && !_tcschr(PROCESS_PRIORITY_LETTERS, ctoupper(*new_raw_arg3))))
-					return ScriptError(ERR_PARAM3_INVALID, new_raw_arg3);
-				break;
-			case PROCESS_CMD_WAIT:
-			case PROCESS_CMD_WAITCLOSE:
-				if (*new_raw_arg3 && !line.ArgHasDeref(3) && !IsNumeric(new_raw_arg3, false, true, true))
-					return ScriptError(_T("If present, parameter #3 must be a positive number in this case."), new_raw_arg3);
-				break;
-			}
-		}
-		break;
-
 	// For ACT_WINMOVE, don't validate anything for mandatory args so that its two modes of
 	// operation can be supported: 2-param mode and normal-param mode.
 	// For these, although we validate that at least one is non-blank here, it's okay at
@@ -7422,11 +7540,6 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 		}
 		break;
 
-	case ACT_WINGET:
-		if (!line.ArgHasDeref(2) && !line.ConvertWinGetCmd(new_raw_arg2)) // It's okay if ARG2 is blank.
-			return ScriptError(ERR_PARAM2_INVALID, new_raw_arg2);
-		break;
-
 	case ACT_SYSGET:
 		if (!line.ArgHasDeref(2) && !line.ConvertSysGetCmd(new_raw_arg2))
 			return ScriptError(ERR_PARAM2_INVALID, new_raw_arg2);
@@ -7434,11 +7547,11 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 
 	case ACT_MSGBOX:
 		if (aArgc > 1) // i.e. this MsgBox is using the 3-param or 4-param style.
-			if (!line.ArgHasDeref(1)) // i.e. if it's a deref, we won't try to validate it now.
+			if (!line.mArg[0].is_expression && !line.ArgHasDeref(1)) // i.e. if it's an expression (or an expression which was converted into a simple deref), we won't try to validate it now.
 				if (!IsNumeric(new_raw_arg1)) // Allow it to be entirely whitespace to indicate 0, like Aut2.
 					return ScriptError(ERR_PARAM1_INVALID, new_raw_arg1);
-		if (aArgc > 3) // EVEN THOUGH IT'S NUMERIC, due to MsgBox's smart-comma handling, this cannot be an expression because it would never have been detected as the fourth parameter to begin with.
-			if (!line.ArgHasDeref(4)) // i.e. if it's a deref, we won't try to validate it now.
+		if (aArgc > 3)
+			if (!line.mArg[3].is_expression && !line.ArgHasDeref(4)) // i.e. if it's an expression or deref, we won't try to validate it now.
 				if (!IsNumeric(new_raw_arg4, false, true, true))
 					return ScriptError(ERR_PARAM4_INVALID, new_raw_arg4);
 		break;
@@ -7674,6 +7787,7 @@ ResultType Script::DefineFunc(LPTSTR aBuf, Var *aFuncGlobalVar[])
 				found_func->mParamCount = 0; // Revert to the default appropriate for non-built-in functions.
 				found_func->mMinParams = 0;  //
 				found_func->mJumpToLine = NULL; // Fixed for v1.0.35.12: Must reset for detection elsewhere.
+				found_func->mHasReturn = false; // For consistency.
 				g->CurrentFunc = found_func;
 			}
 		}
@@ -7942,7 +8056,7 @@ ResultType Script::DefineClass(LPTSTR aBuf)
 	token.symbol = SYM_STRING;
 	token.marker = mClassName;
 
-	if (   !(class_object = Object::Create(NULL, 0))
+	if (   !(class_object = Object::Create())
 		|| !(class_object->SetItem(_T("__Class"), token))
 		|| !(mClassObjectCount
 				? outer_class->SetItem(class_name, class_object) // Assign to super_class[class_name].
@@ -8315,26 +8429,6 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 			// Since above didn't "continue", a file exists whose name matches that of the requested function.
 			aFileWasFound = true; // Indicate success for #include <lib>, which doesn't necessarily expect a function to be found.
 
-			// Save the current #MustDeclare setting to allow func lib authors a choice about
-			// whether they use it, without imposing their choice on users of their libs.
-			bool must_declare = g_MustDeclare;
-
-			// g->CurrentFunc is non-NULL when the function-call being resolved is inside
-			// a function.  Save and reset it for correct behaviour in the include file:
-			Func *current_func = g->CurrentFunc;
-			g->CurrentFunc = NULL;
-
-			if (!LoadIncludedFile(sLib[i].path, false, false)) // Fix for v1.0.47.05: Pass false for allow-dupe because otherwise, it's possible for a stdlib file to attempt to include itself (especially via the LibNamePrefix_ method) and thus give a misleading "duplicate function" vs. "func does not exist" error message.  Obsolete: For performance, pass true for allow-dupe so that it doesn't have to check for a duplicate file (seems too rare to worry about duplicates since by definition, the function doesn't yet exist so it's file shouldn't yet be included).
-			{
-				aErrorWasShown = true; // Above has just displayed its error (e.g. syntax error in a line, failed to open the include file, etc).  So override the default set earlier.
-				return NULL;
-			}
-
-			g->CurrentFunc = current_func; // Restore.
-
-			// Restore setting as per the comment above.
-			g_MustDeclare = must_declare;
-
 			if (mIncludeLibraryFunctionsThenExit && aIsAutoInclude)
 			{
 				// For each auto-included library-file, write out two #Include lines:
@@ -8355,6 +8449,28 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 					, sLib[i].length, sLib[i].path, sLib[i].path);
 				// Now continue on normally so that our caller can continue looking for syntax errors.
 			}
+			
+			// Save the current #MustDeclare setting to allow func lib authors a choice about
+			// whether they use it, without imposing their choice on users of their libs.
+			bool must_declare = g_MustDeclare;
+
+			// g->CurrentFunc is non-NULL when the function-call being resolved is inside
+			// a function.  Save and reset it for correct behaviour in the include file:
+			Func *current_func = g->CurrentFunc;
+			g->CurrentFunc = NULL;
+
+			// Fix for v1.1.06.00: If the file contains any lib #includes, it must be loaded AFTER the
+			// above writes sLib[i].path to the iLib file, otherwise the wrong filename could be written.
+			if (!LoadIncludedFile(sLib[i].path, false, false)) // Fix for v1.0.47.05: Pass false for allow-dupe because otherwise, it's possible for a stdlib file to attempt to include itself (especially via the LibNamePrefix_ method) and thus give a misleading "duplicate function" vs. "func does not exist" error message.  Obsolete: For performance, pass true for allow-dupe so that it doesn't have to check for a duplicate file (seems too rare to worry about duplicates since by definition, the function doesn't yet exist so it's file shouldn't yet be included).
+			{
+				aErrorWasShown = true; // Above has just displayed its error (e.g. syntax error in a line, failed to open the include file, etc).  So override the default set earlier.
+				return NULL;
+			}
+			
+			g->CurrentFunc = current_func; // Restore.
+
+			// Restore setting as per the comment above.
+			g_MustDeclare = must_declare;
 
 			// Now that a matching filename has been found, it seems best to stop searching here even if that
 			// file doesn't actually contain the requested function.  This helps library authors catch bugs/typos.
@@ -8378,8 +8494,58 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 		naked_filename[naked_filename_length] = '\0';
 	} // 2-iteration for().
 
+	// HotKeyIt find library in Resource
 	// Since above didn't return, no match found in any library.
-	return NULL;
+	// Search in Resource for a library
+	tmemcpy(class_name_buf, aFuncName, aFuncNameLength);
+	tmemcpy(class_name_buf + aFuncNameLength,_T(".ahk"),4);
+	class_name_buf[aFuncNameLength + 4] = '\0';
+	HRSRC lib_hResource;
+	if (!(lib_hResource = FindResource(g_hInstance, class_name_buf, _T("LIB"))))
+	{
+		// Now that the resource is not found, set up for the second one that searches by class/prefix.
+		// Notes about ambiguity and naming collisions:
+		// By the time it gets to the prefix/class search, it's almost given up.  Even if it wrongly finds a
+		// match in a filename that isn't really a class, it seems inconsequential because at worst it will
+		// still not find the function and will then say "call to nonexistent function".  In addition, the
+		// ability to customize which libraries are searched is planned.  This would allow a publicly
+		// distributed script to turn off all libraries except stdlib.
+		if (   !(first_underscore = _tcschr(aFuncName, '_'))   ) // No second iteration needed.
+			return NULL;
+		naked_filename_length = first_underscore - aFuncName;
+		if (naked_filename_length >= _countof(class_name_buf)) // Class name too long (probably impossible currently).
+			return NULL;
+		tmemcpy(class_name_buf, aFuncName, naked_filename_length);
+		tmemcpy(class_name_buf + naked_filename_length,_T(".ahk"),4);
+		class_name_buf[naked_filename_length + 4] = '\0';
+		if (!(lib_hResource = FindResource(g_hInstance, class_name_buf, _T("LIB"))))
+			return NULL;
+	}
+	// Now a resouce was found and it can be loaded
+	HGLOBAL hResData;
+	TextMem::Buffer textbuf(NULL, 0, false);
+	if ( !( (textbuf.mLength = SizeofResource(g_hInstance, lib_hResource))
+		&& (hResData = LoadResource(g_hInstance, lib_hResource))
+		&& (textbuf.mBuffer = LockResource(hResData)) ) )
+	{
+		// aErrorWasShown = true; // Do not display errors here
+		return NULL;
+	}
+	aFileWasFound = true;
+	// NOTE: Ahk2Exe strips off the UTF-8 BOM.
+	TextMem tmem;
+	LPTSTR resource_script = (LPTSTR)_alloca(textbuf.mLength * sizeof(TCHAR));
+	tmem.Open(textbuf, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR, CP_UTF8);
+	tmem.Read(resource_script, textbuf.mLength);
+	if (!LoadIncludedText(resource_script))
+	{
+		aFileWasFound = false;
+		return NULL;
+	}
+	else
+	{
+		return FindFunc(aFuncName, aFuncNameLength);
+	}
 }
 #endif
 
@@ -8428,532 +8594,25 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 	// Since above didn't return, there is no match.  See if it's a built-in function that hasn't yet
 	// been added to the function list.
 
-	// Set defaults to be possibly overridden below:
-	int min_params = 1;
-	int max_params = 1;
-	BuiltInFunctionType bif;
-	LPTSTR suffix = func_name + 3;
+	FuncEntry bif;
+	bif.mBIF = NULL; // Set default.
 	ActionTypeType action_type = ACT_INVALID;
-#ifndef MINIDLL
 
-	if (!_tcsnicmp(func_name, _T("LV_"), 3)) // As a built-in function, LV_* can only be a ListView function.
+	for (int i = 0; i < _countof(g_BIF); i++)
 	{
-		suffix = func_name + 3;
-		if (!_tcsicmp(suffix, _T("GetNext")))
+		if (!_tcsicmp(g_BIF[i].mName, func_name))
 		{
-			bif = BIF_LV_GetNextOrCount;
-			min_params = 0;
-			max_params = 2;
+			bif = g_BIF[i]; // Struct copy.
+			break;
 		}
-		else if (!_tcsicmp(suffix, _T("GetCount")))
-		{
-			bif = BIF_LV_GetNextOrCount;
-			min_params = 0; // But leave max at its default of 1.
-		}
-		else if (!_tcsicmp(suffix, _T("GetText")))
-		{
-			bif = BIF_LV_GetText;
-			min_params = 2;
-			max_params = 3;
-		}
-		else if (!_tcsicmp(suffix, _T("Add")))
-		{
-			bif = BIF_LV_AddInsertModify;
-			min_params = 0; // 0 params means append a blank row.
-			max_params = 10000; // An arbitrarily high limit that will never realistically be reached.
-		}
-		else if (!_tcsicmp(suffix, _T("Insert")))
-		{
-			bif = BIF_LV_AddInsertModify;
-			// Leave min_params at 1.  Passing only 1 param to it means "insert a blank row".
-			max_params = 10000; // An arbitrarily high limit that will never realistically be reached.
-		}
-		else if (!_tcsicmp(suffix, _T("Modify")))
-		{
-			bif = BIF_LV_AddInsertModify; // Although it shares the same function with "Insert", it can still have its own min/max params.
-			min_params = 2;
-			max_params = 10000; // An arbitrarily high limit that will never realistically be reached.
-		}
-		else if (!_tcsicmp(suffix, _T("Delete")))
-		{
-			bif = BIF_LV_Delete;
-			min_params = 0; // Leave max at its default of 1.
-		}
-		else if (!_tcsicmp(suffix, _T("InsertCol")))
-		{
-			bif = BIF_LV_InsertModifyDeleteCol;
-			// Leave min_params at 1 because inserting a blank column ahead of the first column
-			// does not seem useful enough to sacrifice the no-parameter mode, which might have
-			// potential future uses.
-			max_params = 3;
-		}
-		else if (!_tcsicmp(suffix, _T("ModifyCol")))
-		{
-			bif = BIF_LV_InsertModifyDeleteCol;
-			min_params = 0;
-			max_params = 3;
-		}
-		else if (!_tcsicmp(suffix, _T("DeleteCol")))
-			bif = BIF_LV_InsertModifyDeleteCol; // Leave min/max set to 1.
-		else if (!_tcsicmp(suffix, _T("SetImageList")))
-		{
-			bif = BIF_LV_SetImageList;
-			max_params = 2; // Leave min at 1.
-		}
-		else
-			return NULL;
 	}
-	else if (!_tcsnicmp(func_name, _T("TV_"), 3)) // As a built-in function, TV_* can only be a TreeView function.
-	{
-		suffix = func_name + 3;
-		if (!_tcsicmp(suffix, _T("Add")))
-		{
-			bif = BIF_TV_AddModifyDelete;
-			max_params = 3; // Leave min at its default of 1.
-		}
-		else if (!_tcsicmp(suffix, _T("Modify")))
-		{
-			bif = BIF_TV_AddModifyDelete;
-			max_params = 3; // One-parameter mode is "select specified item".
-		}
-		else if (!_tcsicmp(suffix, _T("Delete")))
-		{
-			bif = BIF_TV_AddModifyDelete;
-			min_params = 0;
-		}
-		else if (!_tcsicmp(suffix, _T("GetParent")) || !_tcsicmp(suffix, _T("GetChild")) || !_tcsicmp(suffix, _T("GetPrev")))
-			bif = BIF_TV_GetRelatedItem;
-		else if (!_tcsicmp(suffix, _T("GetCount")) || !_tcsicmp(suffix, _T("GetSelection")))
-		{
-			bif = BIF_TV_GetRelatedItem;
-			min_params = 0;
-			max_params = 0;
-		}
-		else if (!_tcsicmp(suffix, _T("GetNext"))) // Unlike "Prev", Next also supports 0 or 2 parameters.
-		{
-			bif = BIF_TV_GetRelatedItem;
-			min_params = 0;
-			max_params = 2;
-		}
-		else if (!_tcsicmp(suffix, _T("Get")) || !_tcsicmp(suffix, _T("GetText")))
-		{
-			bif = BIF_TV_Get;
-			min_params = 2;
-			max_params = 2;
-		}
-		else if (!_tcsicmp(suffix, _T("SetImageList")))
-		{
-			bif = BIF_TV_SetImageList;
-			max_params = 2; // Leave min at 1.
-		}
-		else
-			return NULL;
-	}
-	else if (!_tcsnicmp(func_name, _T("IL_"), 3)) // It's an ImageList function.
-	{
-		suffix = func_name + 3;
-		if (!_tcsicmp(suffix, _T("Create")))
-		{
-			bif = BIF_IL_Create;
-			min_params = 0;
-			max_params = 3;
-		}
-		else if (!_tcsicmp(suffix, _T("Destroy")))
-		{
-			bif = BIF_IL_Destroy; // Leave Min/Max set to 1.
-		}
-		else if (!_tcsicmp(suffix, _T("Add")))
-		{
-			bif = BIF_IL_Add;
-			min_params = 2;
-			max_params = 4;
-		}
-		else
-			return NULL;
-	}
-	else if (!_tcsicmp(func_name, _T("SB_SetText")))
-	{
-		bif = BIF_StatusBar;
-		max_params = 3; // Leave min_params at its default of 1.
-	}
-	else if (!_tcsicmp(func_name, _T("SB_SetParts")))
-	{
-		bif = BIF_StatusBar;
-		min_params = 0;
-		max_params = 255; // 255 params allows for up to 256 parts, which is SB's max.
-	}
-	else if (!_tcsicmp(func_name, _T("SB_SetIcon")))
-	{
-		bif = BIF_StatusBar;
-		max_params = 3; // Leave min_params at its default of 1.
-	}
-	else if (!_tcsicmp(func_name, _T("StrLen")))
-#else
-	if (!_tcsicmp(func_name, _T("StrLen")))
-#endif
-		bif = BIF_StrLen;
-	else if (!_tcsicmp(func_name, _T("SubStr")))
-	{
-		bif = BIF_SubStr;
-		min_params = 2;
-		max_params = 3;
-	}
-	else if (!_tcsicmp(func_name, _T("Lock")))
-	{
-		bif = BIF_Lock;	
-		min_params = 1;
-		max_params = 1;
-	}
-	else if (!_tcsicmp(func_name, _T("CriticalObject")))
-	{
-		bif = BIF_CriticalObject;	
-		min_params = 0;
-		max_params = 2;
-	}
-	else if (!_tcsicmp(func_name, _T("TryLock")))
-	{
-		bif = BIF_TryLock;	
-		min_params = 1;
-		max_params = 1;
-	}
-	else if (!_tcsicmp(func_name, _T("UnLock")))
-	{
-		bif = BIF_UnLock;	
-		min_params = 1;
-		max_params = 1;
-	}
-	else if (!_tcsicmp(func_name, _T("FindFunc")))  // addFile() Naveen v8.
-	{
-		bif = BIF_FindFunc;
-		min_params = 1;
-		max_params = 1;
-	}
-	else if (!_tcsicmp(func_name, _T("FindLabel")))  // HotKeyIt v1.1.02.00
-	{
-		bif = BIF_FindLabel;
-		min_params = 1;
-		max_params = 1;
-	}
-	else if (!_tcsicmp(func_name, _T("Static")))  // lowlevel() Naveen v9.
-	{
-		bif = BIF_Static;
-		min_params = 1;
-		max_params = 1;
-	}
-	else if (!_tcsicmp(func_name, _T("Alias")))  // lowlevel() Naveen v9.
-	{
-		bif = BIF_Alias;
-		min_params = 1;
-		max_params = 2;
-	}
-	else if (!_tcsicmp(func_name, _T("getTokenValue")))  // lowlevel() Naveen v9.
-	{
-		bif = BIF_getTokenValue;
-		min_params = 1;
-		max_params = 1;
-	}
-	else if (!_tcsicmp(func_name, _T("CacheEnable")))  // lowlevel() Naveen v9.
-	{
-		bif = BIF_CacheEnable;
-		min_params = 1;
-		max_params = 1;
-	}
-	else if (!_tcsicmp(func_name, _T("Getvar")))  // lowlevel() Naveen v9.
-	{
-		bif = BIF_Getvar;
-		min_params = 1;
-		max_params = 1;
-	}
-	else if (!_tcsicmp(func_name, _T("Trim")) || !_tcsicmp(func_name, _T("LTrim")) || !_tcsicmp(func_name, _T("RTrim"))) // L31
-	{
-		bif = BIF_Trim;
-		min_params = 1;
-		max_params = 2;
-	}
-	else if (!_tcsicmp(func_name, _T("InStr")))
-	{
-		bif = BIF_InStr;
-		min_params = 2;
-		max_params = 5;
-	}
-	else if (!_tcsicmp(func_name, _T("StrSplit")))
-	{
-		bif = BIF_StrSplit;
-		min_params = 2;
-		max_params = 3;
-	}
-	else if (!_tcsicmp(func_name, _T("RegExMatch")))
-	{
-		bif = BIF_RegEx;
-		min_params = 2;
-		max_params = 4;
-	}
-	else if (!_tcsicmp(func_name, _T("RegExReplace")))
-	{
-		bif = BIF_RegEx;
-		min_params = 2;
-		max_params = 6;
-	}
-	else if (!_tcsnicmp(func_name, _T("GetKey"), 6))
-	{
-		suffix = func_name + 6;
-		if (!_tcsicmp(suffix, _T("State")))
-		{
-			bif = BIF_GetKeyState;
-			max_params = 2;
-		}
-		else if (!_tcsicmp(suffix, _T("Name")) || !_tcsicmp(suffix, _T("VK")) || !_tcsicmp(suffix, _T("SC")))
-			bif = BIF_GetKeyName;
-		else
-			return NULL;
-	}
-	else if (!_tcsicmp(func_name, _T("Ord")))
-		bif = BIF_Ord;
-	else if (!_tcsicmp(func_name, _T("Chr")))
-		bif = BIF_Chr;
-	else if (!_tcsicmp(func_name, _T("StrGet")))
-	{
-		bif = BIF_StrGetPut;
-		max_params = 3;
-	}
-	else if (!_tcsicmp(func_name, _T("StrPut")))
-	{
-		bif = BIF_StrGetPut;
-		max_params = 4;
-	}
-	else if (!_tcsicmp(func_name, _T("NumGet")))
-	{
-		bif = BIF_NumGet;
-		max_params = 3;
-	}
-	else if (!_tcsicmp(func_name, _T("NumPut")))
-	{
-		bif = BIF_NumPut;
-		min_params = 2;
-		max_params = 4;
-	}
-	else if (!_tcsicmp(func_name, _T("IsLabel")))
-		bif = BIF_IsLabel;
-	else if (!_tcsicmp(func_name, _T("Func")))
-		bif = BIF_Func;
-	else if (!_tcsicmp(func_name, _T("IsFunc")))
-		bif = BIF_IsFunc;
-	else if (!_tcsicmp(func_name, _T("IsByRef")))
-		bif = BIF_IsByRef;
-#ifdef ENABLE_DLLCALL
-	else if (!_tcsicmp(func_name, _T("DllCall")))
-	{
-		bif = BIF_DllCall;
-		max_params = 10000; // An arbitrarily high limit that will never realistically be reached.
-	}
-#endif
-	else if (!_tcsicmp(func_name, _T("ResourceLoadLibrary")))
-	{
-		bif = BIF_ResourceLoadLibrary;
-		min_params = 1;
-		max_params = 1;
-	}
-	else if (!_tcsicmp(func_name, _T("MemoryLoadLibrary")))
-	{
-		bif = BIF_MemoryLoadLibrary;
-		min_params = 1;
-		max_params = 1;
-	}
-	else if (!_tcsicmp(func_name, _T("MemoryGetProcAddress")))
-	{
-		bif = BIF_MemoryGetProcAddress;
-		min_params = 2;
-		max_params = 2;
-	}
-	else if (!_tcsicmp(func_name, _T("MemoryFreeLibrary")))
-	{
-		bif = BIF_MemoryFreeLibrary;
-		min_params = 1;
-		max_params = 1;
-	}
-	else if (!_tcsicmp(func_name, _T("DynaCall")))
-	{
-		bif = BIF_DynaCall;
-		min_params = 0;
-		max_params = 10000; // An arbitrarily high limit that will never realistically be reached.
-	}
-	else if (!_tcsicmp(func_name, _T("VarSetCapacity")))
-	{
-		bif = BIF_VarSetCapacity;
-		max_params = 3;
-	}
-	else if (!_tcsicmp(func_name, _T("FileExist")) || !_tcsicmp(func_name, _T("DirExist")))
-		bif = BIF_FileExist;
-	else if (!_tcsicmp(func_name, _T("WinExist")) || !_tcsicmp(func_name, _T("WinActive")))
-	{
-		bif = BIF_WinExistActive;
-		min_params = 0;
-		max_params = 4;
-	}
-	else if (!_tcsicmp(func_name, _T("Round")))
-	{
-		bif = BIF_Round;
-		max_params = 2;
-	}
-	else if (!_tcsicmp(func_name, _T("Floor")) || !_tcsicmp(func_name, _T("Ceil")))
-		bif = BIF_FloorCeil;
-	else if (!_tcsicmp(func_name, _T("Mod")))
-	{
-		bif = BIF_Mod;
-		min_params = 2;
-		max_params = 2;
-	}
-	else if (!_tcsicmp(func_name, _T("Abs")))
-		bif = BIF_Abs;
-	else if (!_tcsicmp(func_name, _T("Sin")))
-		bif = BIF_Sin;
-	else if (!_tcsicmp(func_name, _T("Cos")))
-		bif = BIF_Cos;
-	else if (!_tcsicmp(func_name, _T("Tan")))
-		bif = BIF_Tan;
-	else if (!_tcsicmp(func_name, _T("ASin")) || !_tcsicmp(func_name, _T("ACos")))
-		bif = BIF_ASinACos;
-	else if (!_tcsicmp(func_name, _T("ATan")))
-		bif = BIF_ATan;
-	else if (!_tcsicmp(func_name, _T("Exp")))
-		bif = BIF_Exp;
-	else if (!_tcsicmp(func_name, _T("Sqrt")) || !_tcsicmp(func_name, _T("Log")) || !_tcsicmp(func_name, _T("Ln")))
-		bif = BIF_SqrtLogLn;
-	else if (!_tcsicmp(func_name, _T("DateAdd")))
-	{
-		bif = BIF_DateAdd;
-		min_params = max_params = 3;
-	}
-	else if (!_tcsicmp(func_name, _T("DateDiff")))
-	{
-		bif = BIF_DateDiff;
-		min_params = max_params = 3;
-	}
-	else if (!_tcsicmp(func_name, _T("OnMessage")))
-	{
-		bif = BIF_OnMessage;
-		max_params = 3;  // Leave min at 1.
-	}
-#ifdef ENABLE_REGISTERCALLBACK
-	else if (!_tcsicmp(func_name, _T("RegisterCallback")))
-	{
-		bif = BIF_RegisterCallback;
-		max_params = 4; // Leave min_params at 1.
-	}
-#endif
-	else if (!_tcsicmp(func_name, _T("Type")))
-		bif = BIF_Type;
-	else if (!_tcsicmp(func_name, _T("IsObject"))) // L31
-	{
-		bif = BIF_IsObject;
-		max_params = 10000; // Leave min_params at 1.
-	}
-	else if (!_tcsnicmp(func_name, _T("Obj"), 3)) // L31: See script_object.cpp for details.
-	{
-		suffix = func_name + 3;
 
-		if (!_tcsicmp(suffix, _T("ect"))) // i.e. "Object"
-		{
-			bif = BIF_ObjCreate;
-			min_params = 0;
-			max_params = 10000;
-		}
-#define BIF_OBJ_CASE(aCaseSuffix, aMinParams, aMaxParams) \
-		else if (!_tcsicmp(suffix, _T(#aCaseSuffix))) \
-		{ \
-			bif = BIF_Obj##aCaseSuffix; \
-			min_params = (1 + aMinParams); \
-			max_params = (1 + aMaxParams); \
-		}
-		// All of these functions require the "object" parameter,
-		// but it is excluded from the counts below for clarity:
-		BIF_OBJ_CASE(Insert, 		1, 10000) // [key,] value [, value2, ...]
-		BIF_OBJ_CASE(Remove, 		0, 2) // [min_key, max_key]
-		BIF_OBJ_CASE(MinIndex, 		0, 0)
-		BIF_OBJ_CASE(MaxIndex, 		0, 0)
-		BIF_OBJ_CASE(HasKey,		1, 1) // key
-		BIF_OBJ_CASE(GetCapacity,	0, 1) // [key]
-		BIF_OBJ_CASE(SetCapacity,	1, 2) // [key,] new_capacity
-		BIF_OBJ_CASE(GetAddress,	1, 1) // key
-		BIF_OBJ_CASE(NewEnum,		0, 0)
-		BIF_OBJ_CASE(Clone,			0, 0)
-#undef BIF_OBJ_CASE
-		else if (!_tcsicmp(suffix, _T("AddRef")) || !_tcsicmp(suffix, _T("Release")))
-			bif = BIF_ObjAddRefRelease;
-		else return NULL;
-	}
-	else if (!_tcsicmp(func_name, _T("Array")))
+	if (!bif.mBIF)
 	{
-		bif = BIF_ObjArray;
-		min_params = 0;
-		max_params = 10000;
-	}
-	else if (!_tcsicmp(func_name, _T("FileOpen")))
-	{
-		bif = BIF_FileOpen;
-		min_params = 2;
-		max_params = 3;
-	}
-	else if (!_tcsnicmp(func_name, _T("ComObj"), 6))
-	{
-		suffix = func_name + 6;
-		if	(!_tcsicmp(suffix, _T("Create")))
-		{
-			bif = BIF_ComObjCreate;
-			max_params = 2;
-		}
-		else if	(!_tcsicmp(suffix, _T("Get")))
-			bif = BIF_ComObjGet;
-		else if	(!_tcsicmp(suffix, _T("Connect")))
-		{
-			bif = BIF_ComObjConnect;
-			max_params = 2;
-		}
-		else if (!_tcsicmp(suffix, _T("Error")))
-		{
-			bif = BIF_ComObjError;
-			min_params = 0;
-		}
-		else if (!_tcsicmp(suffix, _T("Type")))
-		{
-			bif = BIF_ComObjTypeOrValue;
-			max_params = 2;
-		}
-		else if (!_tcsicmp(suffix, _T("Value")))
-		{
-			bif = BIF_ComObjTypeOrValue;
-		}
-		else if (!_tcsicmp(suffix, _T("Flags")))
-		{
-			bif = BIF_ComObjFlags;
-			max_params = 3;
-		}
-		else if (!_tcsicmp(suffix, _T("Array")))
-		{
-			bif = BIF_ComObjArray;
-			min_params = 2;
-			max_params = 9; // up to 8 dimensions
-		}
-		else if (!_tcsicmp(suffix, _T("Query")))
-		{
-			bif = BIF_ComObjQuery;
-			min_params = 2;
-			max_params = 3;
-		}
-		else
-		{
-			bif = BIF_ComObjActive;
-			min_params = 0;
-			max_params = 3;
-		}
-	}
-	else if (!_tcsicmp(func_name, _T("Exception")))
-	{
-		bif = BIF_Exception;
-		max_params = 3;
-	}
-	else
-	{
+		if (!_tcsnicmp(func_name, _T("ComObj"), 6))
+			// Recursive call for simplicity.  This check may be removed in future.
+			return FindFunc(_T("ComObject"), 9, apInsertPos);
+
 		// The following handles calling of commands using function syntax:
 		action_type = ConvertActionType(func_name);
 		if (action_type == ACT_INVALID
@@ -8963,49 +8622,51 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 			|| ACT_IS_CONTROL_FLOW(action_type))
 			return NULL; // Maint: There may be other lines above that also return NULL.
 		// Otherwise, there is a command with this name which can be converted to a function.
-		bif = BIF_PerformAction;
-		min_params = g_act[action_type].MinParams;
-		max_params = g_act[action_type].MaxParams;
-		// Reserve some space in Func::mName to hold some extra data (see below).
-		aFuncNameLength += max_params + 1;
-		// This should never exceed func_name because all command names are much
-		// shorter than the maximum function name length.
-		ASSERT(aFuncNameLength < _countof(func_name));
-	}
 
-	// Since above didn't return, this is a built-in function that hasn't yet been added to the list.
-	// Add it now:
-	if (   !(pfunc = AddFunc(func_name, aFuncNameLength, true, left))   ) // L27: left contains the position within mFunc to insert the function.  Cannot use *apInsertPos as caller may have omitted it or passed NULL.
-		return NULL;
-
-	pfunc->mBIF = bif;
-	pfunc->mMinParams = min_params;
-	pfunc->mParamCount = max_params;
-
-	if (action_type != ACT_INVALID)
-	{
+		bif.mBIF = BIF_PerformAction;
+		bif.mMinParams = g_act[action_type].MinParams;
+		bif.mMaxParams = g_act[action_type].MaxParams;
+		
+		// Func::mName is overloaded to contain the name, param types and action type.  +1 for '\0'
+		LPTSTR new_name = (LPTSTR)SimpleHeap::Malloc((aFuncNameLength + bif.mMaxParams + 2) * sizeof(TCHAR));
+		if (!new_name)
+			return NULL;
+		
 		// For performance, the action and arg types are cached in Func::mName, which is
 		// accessible from BIF_PerformAction via aResultToken.marker.  But since mName
 		// needs to point to the correct name, we adjust it here so that it points into
 		// the middle of the memory block, where the extra data ends and the name begins:
-		TCHAR *type = pfunc->mName;
-		pfunc->mName += max_params + 1;
-		tmemmove(pfunc->mName, type, aFuncNameLength - max_params); // Includes \0.
+		TCHAR *type = new_name;
+		new_name += bif.mMaxParams + 1;
+		_tcscpy(new_name, g_act[action_type].Name);
 		int i;
 		// Store the arg types:
-		for (i = 0; i < max_params; ++i)
+		for (i = 0; i < bif.mMaxParams; ++i)
 			type[i] = (TCHAR)Line::ArgIsVar(action_type, i);
-		// Store the action type (now at mName[-1]):
+		// Store the action type (now at new_name[-1]):
 		type[i] = (TCHAR)action_type;
 		// If the command's first arg is an output var (and its second arg isn't), it will
 		// be used as the return value.  So adjust min/max params in that case.
-		if (max_params && type[0] == ARG_TYPE_OUTPUT_VAR && type[1] != ARG_TYPE_OUTPUT_VAR)
+		if (bif.mMaxParams && type[0] == ARG_TYPE_OUTPUT_VAR && type[1] != ARG_TYPE_OUTPUT_VAR)
 		{
-			if (min_params)
-				--pfunc->mMinParams;
-			--pfunc->mParamCount;
+			if (bif.mMinParams)
+				bif.mMinParams--;
+			bif.mMaxParams--;
 		}
+
+		// Pass this pointer to AddFunc():
+		bif.mName = new_name;
 	}
+
+	// Since above didn't return, this is a built-in function that hasn't yet been added to the list.
+	// Add it now:
+	if (   !(pfunc = AddFunc(bif.mName, aFuncNameLength, true, left))   ) // L27: left contains the position within mFunc to insert the function.  Cannot use *apInsertPos as caller may have omitted it or passed NULL.
+		return NULL;
+
+	pfunc->mBIF = bif.mBIF;
+	pfunc->mMinParams = bif.mMinParams;
+	pfunc->mParamCount = bif.mMaxParams;
+	pfunc->mHasReturn = bif.mHasReturn;
 
 	return pfunc;
 }
@@ -9035,8 +8696,11 @@ Func *Script::AddFunc(LPCTSTR aFuncName, size_t aFuncNameLength, bool aIsBuiltIn
 		// Above already displayed error for us.  This can happen at loadtime or runtime (e.g. StringSplit).
 		return NULL;
 
-	// Allocate some dynamic memory to pass to the constructor:
-	LPTSTR new_name = SimpleHeap::Malloc(func_name, aFuncNameLength);
+	// If this function is built-in, caller wants us to store the pointer as-is.  It is either a
+	// pointer to static memory (just a name) or a memory block containing the name and additional
+	// information (for BIF_PerformAction).  Otherwise, allocate some dynamic memory to pass to
+	// the constructor:
+	LPTSTR new_name = aIsBuiltIn ? (LPTSTR)aFuncName : SimpleHeap::Malloc(func_name, aFuncNameLength);
 	if (!new_name)
 		// It already displayed the error for us.
 		return NULL;
@@ -9766,16 +9430,8 @@ void *Script::GetVarType(LPTSTR aVarName)
 	if (!_tcscmp(lower, _T("linenumber"))) return BIV_LineNumber;
 	if (!_tcscmp(lower, _T("linefile"))) return BIV_LineFile;
 
-// A_IsCompiled is left blank/undefined in uncompiled scripts.
-//#ifdef AUTOHOTKEYSC
 	if (!_tcscmp(lower, _T("iscompiled"))) return BIV_IsCompiled;
-//#endif
-
-// A_IsUnicode is left blank/undefined in the ANSI version.
-#ifdef UNICODE
-	if (!_tcscmp(lower, _T("isunicode"))) return BIV_IsUnicode;
-#endif
-	
+	if (!_tcscmp(lower, _T("isunicode"))) return BIV_IsUnicode;	
 	if (!_tcscmp(lower, _T("ptrsize"))) return BIV_PtrSize;
 
 	if (!_tcscmp(lower, _T("titlematchmode"))) return BIV_TitleMatchMode;
@@ -10048,8 +9704,7 @@ Line *Script::PreparseBlocks(Line *aStartingLine, bool aFindBlockEnd, Line *aPar
 						: ERR_NONEXISTENT_FUNCTION, first_arg.text);
 #endif
 				}
-				if (  !(func->mIsBuiltIn || func->mHasReturn)  )
-					has_output_var = false; // This UDF doesn't need an output var.
+				has_output_var = func->mHasReturn; // Does it need an output var?
 				if (param_count - has_output_var < func->mMinParams)
 				{
 					abort = true;
@@ -10730,7 +10385,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 //		, 78             // THIS VALUE MUST BE LEFT UNUSED so that the one above can be promoted to it by the infix-to-postfix routine.
 //		, 82, 82         // RESERVED FOR SYM_POST_INCREMENT, SYM_POST_DECREMENT (which are listed higher above for the performance of YIELDS_AN_OPERAND().
 		, 86             // SYM_FUNC -- Has special handling which ensures it stays tightly bound with its parameters as though it's a single operand for use by other operators; the actual value here is irrelevant.
-		, 86             // SYM_NEW -- should be popped off the stack immediately after the pseudo function-call which follows it.
+		, 87             // SYM_NEW.  Unlike SYM_FUNC, SYM_DOT, etc., precedence actually matters for this one.
 		, 36             // SYM_REGEXMATCH
 	};
 	// Most programming languages give exponentiation a higher precedence than unary minus and logical-not.
@@ -10982,7 +10637,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 					// the string "int)", this symbol is not open-paren at all but instead the unary type-cast-to-int
 					// operator.
 					if (infix_count && YIELDS_AN_OPERAND(infix[infix_count - 1].symbol)
-						&& _tcschr(_T(" \t)\""), cp[-1])) // For backward-compatibility, )( and "foo"(bar) are allowed.  Otherwise, a space/tab is required, as documented and so things like x[y]() don't need to deal with an extraneous SYM_CONCAT.
+						&& IS_SPACE_OR_TAB(cp[-1])) // A space/tab is required: as documented, and to simplify handling of expressions like x[y]().
 					{
 						if (infix_count > MAX_TOKENS - 2) // -2 to ensure room for this operator and the operand further below.
 							return LineError(ERR_EXPR_TOO_LONG);
@@ -11321,19 +10976,6 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 							if (op_end == cp && *op_end != '(')
 								return LineError(ERR_INVALID_DOT, FAIL, cp-1); // Intentionally vague since the user's intention isn't clear.
 
-							bool is_new_op = false;
-							// For the '(' check below, determine if this op is part of a "new" operation, such as "new Class.NestedClass()".
-							for (ExprTokenType *prev_infix = infix + infix_count - 1; prev_infix >= infix; prev_infix -= 2)
-							{
-								if (prev_infix->symbol != SYM_DOT)
-								{
-									if (IS_OPERAND(prev_infix->symbol) && prev_infix > infix)
-										--prev_infix; // This is the target of the SYM_DOT, as in "target.foo".
-									is_new_op = (prev_infix->symbol == SYM_NEW);
-									break;
-								}
-							}
-
 							// Output an operand for the text following '.'
 							if (op_end - cp < MAX_NUMBER_SIZE)
 								tcslcpy(number_buf, cp, op_end - cp + 1); // +1 for null terminator.
@@ -11362,7 +11004,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 							new_deref->marker = cp - 1; // Not typically needed, set for error-reporting.
 							new_deref->param_count = 2; // Initially two parameters: the object and identifier.
 							
-							if (*op_end == '(' && !is_new_op)
+							if (*op_end == '(')
 							{
 								new_symbol = SYM_FUNC;
 								new_deref->func = &g_ObjCall;
@@ -11428,9 +11070,9 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 								this_infix_item.symbol = SYM_CONCAT;
 								++infix_count;
 							}
-							// A previous stage ensured this "new" is followed by something which looks like
-							// a function call.  Push this pseudo-operator onto the stack.  When the open-
-							// parenthesis is encountered, symbol will be changed to SYM_FUNC.
+							// Push this pseudo-operator onto the stack.  When it is popped off the stack
+							// (perhaps because an open-parenthesis is encountered), its symbol will be
+							// changed to SYM_FUNC.
 							if (  !(deref_new = (DerefType *)SimpleHeap::Malloc(sizeof(DerefType)))  )
 								return LineError(ERR_OUTOFMEM);
 							deref_new->marker = cp; // For error-reporting.
@@ -11556,13 +11198,16 @@ unquoted_literal:
 						infix[infix_count].symbol = SYM_INTEGER;
 						infix[infix_count].value_int64 = sizeof(void*);
 					}
-#ifdef UNICODE
 					else if (this_deref_ref.var->mBIV == BIV_IsUnicode)
 					{
+#ifdef UNICODE
 						infix[infix_count].symbol = SYM_INTEGER;
 						infix[infix_count].value_int64 = 1;
-					}
+#else
+						infix[infix_count].symbol = SYM_STRING;
+						infix[infix_count].marker = _T(""); // See BIV_IsUnicode for comments about why it is blank.
 #endif
+					}
 					else
 					{
 						infix[infix_count].symbol = SYM_DYNAMIC;
@@ -11816,7 +11461,8 @@ double_deref: // Caller has set cp to be start and op_end to be the character af
 				//--stack_count; // DON'T DO THIS.
 				stack_top.symbol = SYM_FUNC; // Change this OBRACKET to FUNC (see below).
 
-				if (this_infix->buf[1] == '(') // i.e. "]("
+				if (this_infix->buf[1] == '(' // i.e. "]("
+					&& !(stack_count > 1 && stack[stack_count - 2]->symbol == SYM_NEW)) // Not "new x[n]()" or "new {...}()"
 				{
 					// Appears to be a method call with a computed method name, such as x[y](prms).
 					ASSERT(this_infix[1].symbol == SYM_OPAREN);
@@ -11872,15 +11518,37 @@ double_deref: // Caller has set cp to be start and op_end to be the character af
 		case SYM_OPAREN:
 			// Open-parentheses always go on the stack to await their matching close-parentheses.
 			this_infix->buf = (LPTSTR)in_param_list; // L31: Save current value on the stack with this SYM_OPAREN.
-			if (infix_symbol == SYM_FUNC)
-				in_param_list = this_infix[-1].deref	; // Store this SYM_FUNC's deref.
-			else if (stack_symbol == SYM_NEW)
+			if (stack_symbol == SYM_NEW // Something like "new Class()".
+				&& this_infix[-1].symbol != SYM_NEW) // Not "new (Class)" or "new(Class)".
 			{
+				if (infix_symbol == SYM_FUNC)
+				{
+					// It can't be anything but ObjCall at this point because stack_symbol == SYM_NEW.
+					//	new Func()		; This would be SYM_VAR, SYM_OPAREN, SYM_CPAREN.
+					//	new (Func())	; stack_symbol would be SYM_OPAREN.
+					//	new x[Func()]()	; stack_symbol would be SYM_OBRACKET.
+					//	new x Func()	; SYM_NEW would've been popped off the stack by auto-SYM_CONCAT.
+					ASSERT(this_infix[-1].deref->func == &g_ObjCall);
+					// It can be anything like:
+					//	new x.y(z)		; This simple case could be easily handled at an earlier stage.
+					//	new (getClass()).y(z)
+					//	new x[y](z)
+					// So at this point, this_infix[-1] has two parameters: the target object x
+					// and method name y.  Instead of calling method y of object x, we want to
+					// get property y of object x and use the result as the class to instantiate.
+					// To achieve this, we can just change ObjCall to ObjGet:
+					this_infix[-1].deref->func = &g_ObjGet;
+					goto standard_pop_into_postfix;
+					// Let the next iteration encounter SYM_OPAREN while stack_symbol is still
+					// SYM_NEW so that the lines below will be executed:
+				}
 				// Now that the SYM_OPAREN of this SYM_NEW has been found, translate it to SYM_FUNC
 				// so that it will be popped off the stack immediately after its parameter list:
 				stack[stack_count - 1]->symbol = SYM_FUNC;
 				in_param_list = stack[stack_count - 1]->deref;
 			}
+			else if (infix_symbol == SYM_FUNC)
+				in_param_list = this_infix[-1].deref	; // Store this SYM_FUNC's deref.
 			else
 				in_param_list = NULL; // Allow multi-statement commas, even in cases like Func((x,y)).
 			STACK_PUSH(this_infix++);
@@ -13093,19 +12761,6 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 			return FAIL;
 		}
 
-		case ACT_EXIT:
-			// It seems best to simply return EARLY_EXIT rather than sometimes calling ExitApp(); even
-			// if the script isn't persistent NOW, this thread might've interrupted another which should
-			// be allowed to complete normally.  For instance, maybe the auto-execute section is still
-			// running (perhaps in a loop) and this is a timer thread, but the timer disabled itself
-			// so the script is no longer persistent.
-			return EARLY_EXIT; // EARLY_EXIT needs to be distinct from FAIL for ExitApp() and AutoExecSection().
-
-		case ACT_EXITAPP: // Unconditional exit.
-			// This has been tested and it does yield to the OS the error code indicated in ARG1,
-			// if present (otherwise it returns 0, naturally) as expected:
-			return g_script.ExitApp(EXIT_EXIT, NULL, (int)line->ArgIndexToInt64(0));
-
 		case ACT_BLOCK_BEGIN:
 			if (line->mAttribute) // This is the ACT_BLOCK_BEGIN that starts a function's body.
 			{
@@ -13191,10 +12846,10 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 
 		default:
 			result = line->Perform();
-			if (!result || aMode == ONLY_ONE_LINE)
+			if (result != OK || aMode == ONLY_ONE_LINE)
 				// Thus, Perform() should be designed to only return FAIL if it's an error that would make
 				// it unsafe to proceed in the subroutine we're executing now:
-				return result; // Can be either OK or FAIL.
+				return result; // Usually OK or FAIL; can also be EARLY_EXIT.
 			line = line->mNextLine;
 		} // switch()
 	} // for each line
@@ -14653,18 +14308,12 @@ ResultType Line::Perform()
 	case ACT_POSTMESSAGE:
 	case ACT_SENDMESSAGE:
 		return ScriptPostSendMessage(mActionType == ACT_SENDMESSAGE);
-	case ACT_PROCESS:
-		return ScriptProcess(THREE_ARGS);
-	case ACT_WINSET:
-		return WinSet(SIX_ARGS);
 	case ACT_WINSETTITLE:
 		return mArgc > 1 ? WinSetTitle(FIVE_ARGS) : WinSetTitle(_T(""), _T(""), ARG1);
 	case ACT_WINGETTITLE:
 		return WinGetTitle(ARG2, ARG3, ARG4, ARG5);
 	case ACT_WINGETCLASS:
 		return WinGetClass(ARG2, ARG3, ARG4, ARG5);
-	case ACT_WINGET:
-		return WinGet(ARG2, ARG3, ARG4, ARG5, ARG6);
 	case ACT_WINGETTEXT:
 		return WinGetText(ARG2, ARG3, ARG4, ARG5);
 	case ACT_WINGETPOS:
@@ -15124,6 +14773,15 @@ ResultType Line::Perform()
 		g.SendMode = ConvertSendMode(ARG1, g.SendMode); // Leave value unchanged if ARG1 is invalid.
 		return OK;
 
+	case ACT_SENDLEVEL:
+	{
+		int sendLevel = ArgToInt(1);
+		if (SendLevelIsValid(sendLevel))
+			g.SendLevel = sendLevel;
+
+		return OK;
+	}
+
 	case ACT_SETKEYDELAY:
 		if (!_tcsicmp(ARG3, _T("Play")))
 		{
@@ -15408,7 +15066,7 @@ ResultType Line::Perform()
 		
 		int param_count = mArgc - 1;
 		int arg = 1;
-		if (param_count && (func->mIsBuiltIn || func->mHasReturn))
+		if (param_count && func->mHasReturn)
 		{
 			// Above: mArg[1].type isn't checked because the output var is optional and
 			// might have been omitted, in which case type would be ARG_TYPE_NORMAL.
@@ -15468,8 +15126,24 @@ ResultType Line::Perform()
 		if (result_token.symbol == SYM_OBJECT)
 			result_token.object->Release();
 
-		return OK;
+		if (result == EARLY_RETURN) // This would cause our caller to "return".
+			result = OK;
+		return result;
 	}
+	
+	case ACT_EXIT:
+		// Even if the script isn't persistent, this thread might've interrupted another which should
+		// be allowed to complete normally.  This is especially important in v2 because a persistent
+		// script can become non-persistent by disabling a timer, closing a GUI, etc.  So if there
+		// are any threads below this one, only exit this thread:
+		if (g_nThreads > 1 || g_script.IsPersistent())
+			return EARLY_EXIT; // EARLY_EXIT needs to be distinct from FAIL for ExitApp() and AutoExecSection().
+		// Otherwise, this is the last thread in a non-persistent script.
+		// FALL THROUGH TO BELOW (this is the only time Exit's ExitCode is used):
+	case ACT_EXITAPP: // Unconditional exit.
+		// This has been tested and it does yield to the OS the error code indicated in ARG1,
+		// if present (otherwise it returns 0, naturally) as expected:
+		return g_script.ExitApp(EXIT_EXIT, NULL, (int)ArgIndexToInt64(0));
 
 	} // switch()
 
@@ -15486,7 +15160,7 @@ ResultType Line::Perform()
 
 
 
-void BIF_PerformAction(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+BIF_DECL(BIF_PerformAction)
 {
 	// aResultToken.marker was overloaded to pass us the name of the function,
 	// which in this case is immediately preceded by the arg types and action type.
@@ -15616,7 +15290,9 @@ void BIF_PerformAction(ExprTokenType &aResultToken, ExprTokenType *aParam[], int
 
 
 	// PERFORM THE ACTION
-	if (line.Perform())
+	aResult = line.Perform();
+
+	if (aResult == OK) // Can be OK, FAIL or EARLY_EXIT.
 	{
 		// Return the value of the output var if there is one, or ErrorLevel if there isn't:
 		output_var->ToToken(aResultToken);
@@ -15636,8 +15312,7 @@ void BIF_PerformAction(ExprTokenType &aResultToken, ExprTokenType *aParam[], int
 			// comment and also because our line exists only until this function returns.
 			g->ExcptLine = g_script.mCurrLine;
 		}
-		// Otherwise, maybe the command somehow caused script to execute, and that threw an
-		// exception; or some other type of critical error occurred?
+		// Set the result to an empty string for maintainability.
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
 	}
@@ -15780,6 +15455,9 @@ LPTSTR Line::LogToText(LPTSTR aBuf, int aBufSize) // aBufSize should be an int t
 		_T(" the right (if not 0).  The bottommost line's elapsed time is the number of seconds since it executed.\r\n\r\n"));
 
 	int i, lines_to_show, line_index, line_index2, space_remaining; // space_remaining must be an int to detect negatives.
+#ifndef AUTOHOTKEYSC
+	int last_file_index = -1;
+#endif
 	DWORD elapsed;
 	bool this_item_is_special, next_item_is_special;
 
@@ -15829,6 +15507,14 @@ LPTSTR Line::LogToText(LPTSTR aBuf, int aBufSize) // aBufSize should be an int t
 			}
 			else // This is the last line (whether special or not), so compare it's time against the current time instead.
 				elapsed = GetTickCount() - sLogTick[line_index];
+#ifndef AUTOHOTKEYSC
+			// If the this line and the previous line are in different files, display the filename:
+			if (last_file_index != sLog[line_index]->mFileIndex)
+			{
+				last_file_index = sLog[line_index]->mFileIndex;
+				aBuf += sntprintf(aBuf, BUF_SPACE_REMAINING, _T("---- %s\r\n"), sSourceFile[last_file_index]);
+			}
+#endif
 			space_remaining = BUF_SPACE_REMAINING;  // Resolve macro only once for performance.
 			// Truncate really huge lines so that the Edit control's size is less likely to be exhausted.
 			// In v1.0.30.02, this is even more likely due to having increased the line-buf's capacity from
@@ -16986,11 +16672,18 @@ ResultType Script::ActionExec(LPTSTR aAction, LPTSTR aParams, LPTSTR aWorkingDir
 		
 		if (ShellExecuteEx(&sei)) // Relies on short-circuit boolean order.
 		{
-			hprocess = sei.hProcess;
-			// aOutputVar is left blank because:
-			// ProcessID is not available when launched this way, and since GetProcessID() is only
-			// available in WinXP SP1, no effort is currently made to dynamically load it from
-			// kernel32.dll (to retain compatibility with older OSes).
+			typedef DWORD (WINAPI *GetProcessIDType)(HANDLE);
+			// GetProcessID is only available on WinXP SP1 or later, so load it dynamically.
+			static GetProcessIDType fnGetProcessID = (GetProcessIDType)GetProcAddress(GetModuleHandle(_T("kernel32.dll")), "GetProcessId");
+
+			if (hprocess = sei.hProcess)
+			{
+				// A new process was created, so get its ID if possible.
+				if (aOutputVar && fnGetProcessID)
+					aOutputVar->Assign(fnGetProcessID(hprocess));
+			}
+			// Even if there's no process handle, it's considered a success because some
+			// system verbs and file associations do not create a new process, by design.
 			success = true;
 		}
 		else

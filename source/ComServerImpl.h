@@ -45,7 +45,6 @@ public:
     virtual HRESULT __stdcall ahkFindFunc(/*[in]*/ VARIANT FuncName,/*[out, retval]*/ UINT_PTR* pFunc);
     virtual HRESULT __stdcall ahkFunction(/*[in]*/ VARIANT FuncName,/*[in,optional]*/ VARIANT param1,/*[in,optional]*/ VARIANT param2,/*[in,optional]*/ VARIANT param3,/*[in,optional]*/ VARIANT param4,/*[in,optional]*/ VARIANT param5,/*[in,optional]*/ VARIANT param6,/*[in,optional]*/ VARIANT param7,/*[in,optional]*/ VARIANT param8,/*[in,optional]*/ VARIANT param9,/*[in,optional]*/ VARIANT param10,/*[out, retval]*/ VARIANT* returnVal);
     virtual HRESULT __stdcall ahkPostFunction(/*[in]*/ VARIANT FuncName,/*[in,optional]*/ VARIANT param1,/*[in,optional]*/ VARIANT param2,/*[in,optional]*/ VARIANT param3,/*[in,optional]*/ VARIANT param4,/*[in,optional]*/ VARIANT param5,/*[in,optional]*/ VARIANT param6,/*[in,optional]*/ VARIANT param7,/*[in,optional]*/ VARIANT param8,/*[in,optional]*/ VARIANT param9,/*[in,optional]*/ VARIANT param10,/*[out, retval]*/ unsigned int* returnVal);
-	virtual HRESULT __stdcall ahkKey(/*[in]*/ VARIANT name,/*[out, retval]*/ BOOL* success);
     virtual HRESULT __stdcall addScript(/*[in]*/ VARIANT script,/*[in,optional]*/ VARIANT aExecute,/*[out, retval]*/ UINT_PTR* success);
     virtual HRESULT __stdcall addFile(/*[in]*/ VARIANT filepath,/*[in,optional]*/ VARIANT aAllowDuplicateInclude,/*[in,optional]*/ VARIANT aIgnoreLoadFailure,/*[out, retval]*/ UINT_PTR* success);
     virtual HRESULT __stdcall ahkExec(/*[in]*/ VARIANT script,/*[out, retval]*/ BOOL* success);

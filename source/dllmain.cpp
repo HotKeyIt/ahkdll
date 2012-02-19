@@ -739,15 +739,6 @@ HRESULT __stdcall CoCOMServer::ahkPostFunction(/*[in]*/ VARIANT FuncName,VARIANT
 	return 0;		
 }
 
-HRESULT __stdcall CoCOMServer::ahkKey(/*[in]*/ VARIANT name,/*[out, retval]*/ BOOL* success)
-{
-	USES_CONVERSION;
-	if (success==NULL)
-		return ERROR_INVALID_PARAMETER;
-	TCHAR buf[MAX_INTEGER_SIZE];
-	*success = com_ahkKey(name.vt == VT_BSTR ? OLE2T(name.bstrVal) : Variant2T(name,buf));
-	return S_OK;
-}
 HRESULT __stdcall CoCOMServer::addScript(/*[in]*/ VARIANT script,/*[in,optional]*/ VARIANT replace,/*[out, retval]*/ UINT_PTR* success)
 {
 	USES_CONVERSION;

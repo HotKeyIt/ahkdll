@@ -1030,7 +1030,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 			}
 
 			// Also save the ErrorLevel of the subroutine that's about to be suspended.
-			g_ErrorLevel->Backup(ErrorLevel_saved);
+			ErrorLevel_Backup(ErrorLevel_saved);
 			// Make every newly launched subroutine start off with the global default values that
 			// the user set up in the auto-execute part of the script (e.g. KeyDelay, WinDelay, etc.).
 			// However, we do not set ErrorLevel to anything special here (except for GUI threads, later
@@ -1185,17 +1185,16 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 					g.GuiEvent = gui_action; // Set g.GuiEvent to indicate whether a double-click or other non-standard event launched it.
 				} // switch (msg.message)
 
-				// We're still in case AHK_GUI_ACTION; other cases have their own handling for g.EventInfo.
-				// gui_event_info is a separate variable because it is sometimes set before g.EventInfo is available
-				// for the new thread.
-				// v1.0.44: For the following reasons, make ErrorLevel mirror A_EventInfo only when it
-				// is documented to do so for backward compatibility:
-				// 1) Avoids slight performance drain of having to convert a number to text and store it in ErrorLevel.
-				// 2) Reserves ErrorLevel for potential future uses.
-				if (gui_action == GUI_EVENT_RESIZE || gui_action == GUI_EVENT_DROPFILES)
-					g_ErrorLevel->Assign(gui_event_info); // For backward compatibility.
+				if (pcontrol && pcontrol->type == GUI_CONTROL_LINK)
+				{
+					LITEM item = {};
+					item.mask=LIF_URL|LIF_ITEMID|LIF_ITEMINDEX;
+					item.iLink = gui_event_info - 1;
+					if(SendMessage(pcontrol->hwnd,LM_GETITEM,NULL,(LPARAM)&item))
+						g_ErrorLevel->AssignString(*item.szUrl ? CStringTCharFromWCharIfNeeded(item.szUrl) : CStringTCharFromWCharIfNeeded(item.szID));
+				}
 				else
-					g_ErrorLevel->Assign(gui_action_errorlevel); // Helps reserve it for future use. See explanation above.
+					g_ErrorLevel->Assign(gui_action_errorlevel);
 
 				// Set last found window (as documented).  It's not necessary to check IsWindow/IsWindowVisible/
 				// DetectHiddenWindows since GetValidLastUsedWindow() takes care of that whenever the script
@@ -1275,6 +1274,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 
 			case AHK_HOTSTRING:
 				g.hWndLastUsed = criterion_found_hwnd; // v1.0.42. Even if the window is invalid for some reason, IsWindow() and such are called whenever the script accesses it (GetValidLastUsedWindow()).
+				g.SendLevel = hs->mInputLevel;
 				hs->PerformInNewThreadMadeByCaller();
 				break;
 
@@ -1294,6 +1294,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 					g.EventInfo = (DWORD)msg.lParam; // v1.0.43.03: Override the thread default of 0 with the number of notches by which the wheel was turned.
 					// Above also works for RunAgainAfterFinished since that feature reuses the same thread attributes set above.
 				g.hWndLastUsed = criterion_found_hwnd; // v1.0.42. Even if the window is invalid for some reason, IsWindow() and such are called whenever the script accesses it (GetValidLastUsedWindow()).
+				g.SendLevel = variant->mInputLevel;
 				hk->PerformInNewThreadMadeByCaller(*variant);
 			}
 
@@ -1620,7 +1621,7 @@ bool CheckScriptTimers()
 			// seems best since some timed subroutines might take a long time to run:
 			++g_nThreads; // These are the counterparts the decrements that will be done further
 			++g;          // below by ResumeUnderlyingThread().
-			g_ErrorLevel->Backup(ErrorLevel_saved); // Back up the current ErrorLevel for later restoration.
+			ErrorLevel_Backup(ErrorLevel_saved); // Back up the current ErrorLevel for later restoration.
 			// But never kill the main timer, since the mere fact that we're here means that
 			// there's at least one enabled timed subroutine.  Though later, performance can
 			// be optimized by killing it if there's exactly one enabled subroutine, or if
@@ -1784,7 +1785,7 @@ bool MsgMonitor(HWND aWnd, UINT aMsg, WPARAM awParam, LPARAM alParam, MSG *apMsg
 
 	// See MsgSleep() for comments about the following section.
 	VarBkp ErrorLevel_saved;
-	g_ErrorLevel->Backup(ErrorLevel_saved);
+	ErrorLevel_Backup(ErrorLevel_saved);
 	InitNewThread(0, false, true, func.mJumpToLine->mActionType);
 	DEBUGGER_STACK_PUSH(func.mJumpToLine, func.mName) // Push a "thread" onto the debugger's stack.  For simplicity and performance, use the function name vs something like "message 0x123".
 
@@ -2028,6 +2029,7 @@ void ResumeUnderlyingThread(VarBkp aSavedErrorLevel)
 	// The following section handles the switch-over to the former/underlying "g" item:
 	--g_nThreads; // Other sections below might rely on this having been done early.
 	--g;
+	g_ErrorLevel->Free();
 	g_ErrorLevel->Restore(aSavedErrorLevel);
 	// The below relies on the above having restored "g" to be the global_struct of the underlying thread.
 

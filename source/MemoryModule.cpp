@@ -146,7 +146,6 @@ FinalizeSections(PMEMORYMODULE module)
 #else
 	#define imageOffset 0
 #endif
-	
 	// loop through all sections and change access flags
 	for (i=0; i<module->headers->FileHeader.NumberOfSections; i++, section++) {
 		DWORD protect, oldProtect, size;
@@ -165,7 +164,7 @@ FinalizeSections(PMEMORYMODULE module)
 		if (section->Characteristics & IMAGE_SCN_MEM_NOT_CACHED) {
 			protect |= PAGE_NOCACHE;
 		}
-
+		
 		// determine size of region
 		size = section->SizeOfRawData;
 		if (size == 0) {
@@ -175,14 +174,16 @@ FinalizeSections(PMEMORYMODULE module)
 				size = module->headers->OptionalHeader.SizeOfUninitializedData;
 			}
 		}
-
+		
 		if (size > 0) {
 			// change memory access flags
 			if (VirtualProtect((LPVOID)((POINTER_TYPE)section->Misc.PhysicalAddress | imageOffset), size, protect, &oldProtect) == 0)
+			{
 #ifdef DEBUG_OUTPUT
-				OutputLastError("Error protecting memory page")
+				OutputLastError("Error protecting memory page");
 #endif
 			break;
+			}
 		}
 	}
 #ifndef _WIN64
@@ -258,6 +259,7 @@ BuildImportTable(PMEMORYMODULE module)
 
 	PIMAGE_DATA_DIRECTORY directory = GET_HEADER_DICTIONARY(module, IMAGE_DIRECTORY_ENTRY_IMPORT);
 	PIMAGE_DATA_DIRECTORY resource = GET_HEADER_DICTIONARY(module, IMAGE_DIRECTORY_ENTRY_RESOURCE);
+	
 	if (directory->Size > 0) 
 	{
 		PIMAGE_IMPORT_DESCRIPTOR importDesc = (PIMAGE_IMPORT_DESCRIPTOR) (codeBase + directory->VirtualAddress);
@@ -279,7 +281,7 @@ BuildImportTable(PMEMORYMODULE module)
 			// Path to temp directory + our temporary file name
 			CHAR buf[MAX_PATH];
 			DWORD tempPathLength = GetTempPathA(MAX_PATH, buf);
-			memcpy(buf + tempPathLength,"AutoHotkey.MemoryModule.temp.manifest",37);
+			memcpy(buf + tempPathLength,"AutoHotkey.MemoryModule.temp.manifest",38);
 			actctx.lpSource = buf;
 
 			// Enumerate Resources
@@ -292,7 +294,7 @@ BuildImportTable(PMEMORYMODULE module)
 				// If entry is directory and Id is 24 = RT_MANIFEST
 				if (resDirEntry->DataIsDirectory && resDirEntry->Id == 24)
 				{
-					resDirTemp = (PIMAGE_RESOURCE_DIRECTORY)((char*)resDir + (resDirEntry->OffsetToDirectory));
+					//resDirTemp = (PIMAGE_RESOURCE_DIRECTORY)((char*)resDir + (resDirEntry->OffsetToDirectory));
 					resDirEntryTemp = (PIMAGE_RESOURCE_DIRECTORY_ENTRY)((char*)resDir + (resDirEntry->OffsetToDirectory) + sizeof(IMAGE_RESOURCE_DIRECTORY));
 					resDirTemp = (PIMAGE_RESOURCE_DIRECTORY) ((char*)resDir + (resDirEntryTemp->OffsetToDirectory));
 					resDirEntryTemp = (PIMAGE_RESOURCE_DIRECTORY_ENTRY)((char*)resDir + (resDirEntryTemp->OffsetToDirectory) + sizeof(IMAGE_RESOURCE_DIRECTORY));
@@ -454,7 +456,7 @@ HMEMORYMODULE MemoryLoadLibrary(const void *data)
 		old_header->OptionalHeader.SizeOfImage,
 		MEM_COMMIT,
 		PAGE_EXECUTE_READWRITE);
-
+	
 	// commit memory for headers
 	headers = (unsigned char *)VirtualAlloc(code,
 		old_header->OptionalHeader.SizeOfHeaders,
@@ -476,7 +478,7 @@ HMEMORYMODULE MemoryLoadLibrary(const void *data)
 	if (locationDelta != 0) {
 		PerformBaseRelocation(result, locationDelta);
 	}
-
+	
 	// load required dlls and adjust function table of imports
 	if (!BuildImportTable(result)) {
 #if DEBUG_OUTPUT
@@ -484,7 +486,6 @@ HMEMORYMODULE MemoryLoadLibrary(const void *data)
 #endif
 		goto error;
 	}
-
 	// mark memory pages depending on section headers and release
 	// sections that are marked as "discardable"
 	FinalizeSections(result);

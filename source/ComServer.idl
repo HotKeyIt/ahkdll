@@ -31,11 +31,10 @@ library AutoHotkey
 		[id(10)] HRESULT ahkFindFunction([in] VARIANT FuncName,[out, retval] UINT_PTR *pFunc);
 		[id(11)] HRESULT ahkFunction([in] VARIANT FuncName,[in,optional] VARIANT param1,[in,optional] VARIANT param2,[in,optional] VARIANT param3,[in,optional] VARIANT param4,[in,optional] VARIANT param5,[in,optional] VARIANT param6,[in,optional] VARIANT param7,[in,optional] VARIANT param8,[in,optional] VARIANT param9,[in,optional] VARIANT param10,[out, retval] VARIANT* returnVal);
 		[id(12)] HRESULT ahkPostFunction([in] VARIANT FuncName,[in,optional] VARIANT param1,[in,optional] VARIANT param2,[in,optional] VARIANT param3,[in,optional] VARIANT param4,[in,optional] VARIANT param5,[in,optional] VARIANT param6,[in,optional] VARIANT param7,[in,optional] VARIANT param8,[in,optional] VARIANT param9,[in,optional] VARIANT param10,[out, retval] unsigned int* returnVal);
-		[id(13)] HRESULT ahkKey([in] VARIANT name,[out, retval] BOOL* success);
-		[id(14)] HRESULT addScript([in] VARIANT script,[in,optional] VARIANT replace,[out, retval]UINT_PTR* success);
-		[id(15)] HRESULT addFile([in] VARIANT filepath,[in,optional] VARIANT aAllowDuplicateInclude,[in,optional] VARIANT aIgnoreLoadFailure,[out, retval] UINT_PTR* success);
-		[id(16)] HRESULT ahkExec([in] VARIANT script,[out, retval] BOOL* success);
-		[id(17)] HRESULT ahkTerminate([in,optional] VARIANT kill,[out, retval] BOOL* success);
+		[id(13)] HRESULT addScript([in] VARIANT script,[in,optional] VARIANT replace,[out, retval]UINT_PTR* success);
+		[id(14)] HRESULT addFile([in] VARIANT filepath,[in,optional] VARIANT aAllowDuplicateInclude,[in,optional] VARIANT aIgnoreLoadFailure,[out, retval] UINT_PTR* success);
+		[id(15)] HRESULT ahkExec([in] VARIANT script,[out, retval] BOOL* success);
+		[id(16)] HRESULT ahkTerminate([in,optional] VARIANT kill,[out, retval] BOOL* success);
 	}
 
 	[ uuid(FEEEC4BA-04AF-45F0-B385-7290C65CFB9B),
