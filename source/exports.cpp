@@ -5,9 +5,11 @@
 #include "script.h"
 
 LPTSTR result_to_return_dll; //HotKeyIt H2 for ahkgetvar and ahkFunction return.
+VARIANT variant_to_return_dll;
 // ExprTokenType aResultToken_to_return ;  // for ahkPostFunction
 FuncAndToken aFuncAndTokenToReturn[10] ;    // for ahkPostFunction
 int returnCount = 0 ;
+void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar);
 
 #ifdef _USRDLL
 #ifndef MINIDLL
@@ -176,63 +178,39 @@ EXPORT unsigned int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, L
 	Func *aFunc = g_script.FindFunc(func) ;
 	if (aFunc)
 	{	
-		// g_script.mTempFunc = aFunc ;
-		// ExprTokenType return_value;
-		if (aFunc->mParamCount > 0 && param1 != NULL)
+		int aParamCount = 0;
+		LPTSTR *params[10];
+		params[0]=&param1;params[1]=&param2;params[2]=&param3;params[3]=&param4;params[4]=&param5;
+		params[5]=&param6;params[6]=&param7;params[7]=&param8;params[8]=&param9;params[9]=&param10;
+		if(aFunc->mIsBuiltIn)
 		{
-			// Copy the appropriate values into each of the function's formal parameters.
-			aFunc->mParam[0].var->Assign((LPTSTR )param1); // Assign parameter #1
-			if (aFunc->mParamCount > 1  && param2 != NULL) // Assign parameter #2
+			ResultType aResult = OK;
+			ExprTokenType aResultToken;
+			ExprTokenType **aParam = (ExprTokenType**)alloca(sizeof(ExprTokenType)*10);
+			for (;aFunc->mParamCount > aParamCount && params[aParamCount] != NULL && *params[aParamCount];aParamCount++)
 			{
-				// v1.0.38.01: LPARAM is now written out as a DWORD because the majority of system messages
-				// use LPARAM as a pointer or other unsigned value.  This shouldn't affect most scripts because
-				// of the way ATOI64() and ATOU() wrap a negative number back into the unsigned domain for
-				// commands such as PostMessage/SendMessage.
-				aFunc->mParam[1].var->Assign((LPTSTR )param2);
-				if (aFunc->mParamCount > 2 && param3 != NULL) // Assign parameter #3
-				{
-					aFunc->mParam[2].var->Assign((LPTSTR )param3);
-					if (aFunc->mParamCount > 3 && param4 != NULL) // Assign parameter #4
-					{
-						aFunc->mParam[3].var->Assign((LPTSTR )param4);
-						if (aFunc->mParamCount > 4 && param5 != NULL) // Assign parameter #5
-						{
-							aFunc->mParam[4].var->Assign((LPTSTR )param5);
-							if (aFunc->mParamCount > 5 && param6 != NULL) // Assign parameter #6
-							{
-								aFunc->mParam[5].var->Assign((LPTSTR )param6);
-								if (aFunc->mParamCount > 6 && param7 != NULL) // Assign parameter #7
-								{
-									aFunc->mParam[6].var->Assign((LPTSTR )param7);
-									if (aFunc->mParamCount > 7 && param8 != NULL) // Assign parameter #8
-									{
-										aFunc->mParam[7].var->Assign((LPTSTR )param8);
-										if (aFunc->mParamCount > 8 && param9 != NULL) // Assign parameter #9
-										{
-											aFunc->mParam[8].var->Assign((LPTSTR )param9);
-											if (aFunc->mParamCount > 9 && param10 != NULL) // Assign parameter #10
-											{
-												aFunc->mParam[9].var->Assign((LPTSTR )param10);
-											}
-										}
-									}
-								}
-							}
-						}
-					}
-				}
+				aParam[aParamCount] = (ExprTokenType*)alloca(sizeof(ExprTokenType));
+				aParam[aParamCount]->symbol = SYM_STRING;aParam[aParamCount]->marker = *params[aParamCount];aParamCount++; // Assign parameter #1
 			}
+			aResultToken.symbol = PURE_INTEGER;
+			aFunc->mBIF(aResult,aResultToken,aParam,aParamCount);
+			return 0;
 		}
-		
-		FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
-		aFuncAndToken.mFunc = aFunc ;
-		returnCount++ ;
-		if (returnCount > 9)
-			returnCount = 0 ;
-		PostMessage(g_hWnd, AHK_EXECUTE_FUNCTION_DLL, (WPARAM)&aFuncAndToken,NULL);
-		return 0;
-	}
-	return -1;
+		else
+		{
+			for (;aFunc->mParamCount > aParamCount && params[aParamCount] != NULL && *params[aParamCount];aParamCount++)
+				aFunc->mParam[aParamCount].var->Assign(*params[aParamCount]);
+			FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
+			aFuncAndToken.mFunc = aFunc ;
+			returnCount++ ;
+			if (returnCount > 9)
+				returnCount = 0 ;
+			PostMessage(g_hWnd, AHK_EXECUTE_FUNCTION_DLL, (WPARAM)&aFuncAndToken,NULL);
+			return 0;
+		}
+	} 
+	else // Function not found
+		return -1;
 }
 
 #ifndef AUTOHOTKEYSC
@@ -454,64 +432,72 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 	Func *aFunc = g_script.FindFunc(func) ;
 	if (aFunc)
 	{	
-		// g_script.mTempFunc = aFunc ;
-		// ExprTokenType return_value;
-		if (aFunc->mParamCount > 0 && param1 != NULL)
+		int aParamCount = 0;
+		LPTSTR *params[10];
+		params[0]=&param1;params[1]=&param2;params[2]=&param3;params[3]=&param4;params[4]=&param5;
+		params[5]=&param6;params[6]=&param7;params[7]=&param8;params[8]=&param9;params[9]=&param10;
+		if(aFunc->mIsBuiltIn)
 		{
-			// Copy the appropriate values into each of the function's formal parameters.
-			aFunc->mParam[0].var->Assign((LPTSTR )param1); // Assign parameter #1
-			if (aFunc->mParamCount > 1  && param2 != NULL) // Assign parameter #2
+			ResultType aResult = OK;
+			ExprTokenType aResultToken;
+			ExprTokenType **aParam = (ExprTokenType**)alloca(sizeof(ExprTokenType)*10);
+			for (;aFunc->mParamCount > aParamCount && params[aParamCount] != NULL && *params[aParamCount];aParamCount++)
 			{
-				// v1.0.38.01: LPARAM is now written out as a DWORD because the majority of system messages
-				// use LPARAM as a pointer or other unsigned value.  This shouldn't affect most scripts because
-				// of the way ATOI64() and ATOU() wrap a negative number back into the unsigned domain for
-				// commands such as PostMessage/SendMessage.
-				aFunc->mParam[1].var->Assign((LPTSTR )param2);
-				if (aFunc->mParamCount > 2 && param3 != NULL) // Assign parameter #3
-				{
-					aFunc->mParam[2].var->Assign((LPTSTR )param3);
-					if (aFunc->mParamCount > 3 && param4 != NULL) // Assign parameter #4
-					{
-						aFunc->mParam[3].var->Assign((LPTSTR )param4);
-						if (aFunc->mParamCount > 4 && param5 != NULL) // Assign parameter #5
-						{
-							aFunc->mParam[4].var->Assign((LPTSTR )param5);
-							if (aFunc->mParamCount > 5 && param6 != NULL) // Assign parameter #6
-							{
-								aFunc->mParam[5].var->Assign((LPTSTR )param6);
-								if (aFunc->mParamCount > 6 && param7 != NULL) // Assign parameter #7
-								{
-									aFunc->mParam[6].var->Assign((LPTSTR )param7);
-									if (aFunc->mParamCount > 7 && param8 != NULL) // Assign parameter #8
-									{
-										aFunc->mParam[7].var->Assign((LPTSTR )param8);
-										if (aFunc->mParamCount > 8 && param9 != NULL) // Assign parameter #9
-										{
-											aFunc->mParam[8].var->Assign((LPTSTR )param9);
-											if (aFunc->mParamCount > 9 && param10 != NULL) // Assign parameter #10
-											{
-												aFunc->mParam[9].var->Assign((LPTSTR )param10);
-											}
-										}
-									}
-								}
-							}
-						}
-					}
-				}
+				aParam[aParamCount] = (ExprTokenType*)alloca(sizeof(ExprTokenType));
+				aParam[aParamCount]->symbol = SYM_STRING;aParam[aParamCount]->marker = *params[aParamCount];aParamCount++; // Assign parameter #1
 			}
+			aResultToken.symbol = PURE_INTEGER;
+			aFunc->mBIF(aResult,aResultToken,aParam,aParamCount);
+			switch (aResultToken.symbol)
+			{
+			case SYM_VAR: // Caller has ensured that any SYM_VAR's Type() is VAR_NORMAL.
+				if (_tcslen(aResultToken.var->Contents()))
+				{
+					result_to_return_dll = (LPTSTR )realloc((LPTSTR )result_to_return_dll,_tcslen(aResultToken.var->Contents())*sizeof(TCHAR));
+					_tcscpy(result_to_return_dll,aResultToken.var->Contents()); // Contents() vs. mContents to support VAR_CLIPBOARD, and in case mContents needs to be updated by Contents().
+				}
+				else if (result_to_return_dll)
+					*result_to_return_dll = '\0';
+				break;
+			case SYM_STRING:
+			case SYM_OPERAND:
+				if (_tcslen(aResultToken.marker))
+				{
+					result_to_return_dll = (LPTSTR )realloc((LPTSTR )result_to_return_dll,_tcslen(aResultToken.marker)*sizeof(TCHAR));
+					_tcscpy(result_to_return_dll,aResultToken.marker);
+				}
+				else if (result_to_return_dll)
+					*result_to_return_dll = '\0';
+				break;
+			case SYM_INTEGER:
+				result_to_return_dll = (LPTSTR )realloc((LPTSTR )result_to_return_dll,MAX_INTEGER_LENGTH);
+				ITOA64(aResultToken.value_int64, result_to_return_dll);
+				break;
+			case SYM_FLOAT:
+				result_to_return_dll = (LPTSTR )realloc((LPTSTR )result_to_return_dll,MAX_INTEGER_LENGTH);
+				sntprintf(result_to_return_dll, MAX_NUMBER_SIZE, g->FormatFloat, aResultToken.value_double);
+				break;
+			//case SYM_OBJECT: // L31: Treat objects as empty strings (or TRUE where appropriate).
+			default: // Not an operand: continue on to return the default at the bottom.
+				result_to_return_dll = (LPTSTR )realloc((LPTSTR )result_to_return_dll,MAX_INTEGER_LENGTH);
+				ITOA64(aResultToken.value_int64, result_to_return_dll);
+			}
+			return result_to_return_dll;
 		}
-		
-		FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
-		aFuncAndToken.mFunc = aFunc ;
-		returnCount++ ;
-		if (returnCount > 9)
-			returnCount = 0 ;
-
-		SendMessage(g_hWnd, AHK_EXECUTE_FUNCTION_DLL, (WPARAM)&aFuncAndToken,NULL);
-		return aFuncAndToken.result_to_return_dll;
+		else // UDF
+		{
+			for (;aFunc->mParamCount > aParamCount && params[aParamCount] != NULL && *params[aParamCount];aParamCount++)
+				aFunc->mParam[aParamCount].var->Assign(*params[aParamCount]);
+			FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
+			aFuncAndToken.mFunc = aFunc ;
+			returnCount++ ;
+			if (returnCount > 9)
+				returnCount = 0 ;
+			SendMessage(g_hWnd, AHK_EXECUTE_FUNCTION_DLL, (WPARAM)&aFuncAndToken,NULL);
+			return aFuncAndToken.result_to_return_dll;
+		}
 	}
-	else
+	else // Function not found
 		return _T(""); 
 }
 
@@ -612,73 +598,52 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 	Func *aFunc = g_script.FindFunc(func) ;
 	if (aFunc)
 	{	
-		// g_script.mTempFunc = aFunc ;
-		// ExprTokenType return_value;
-		if (aFunc->mParamCount > 0 && &param1 != NULL)
+		VARIANT *variants[10];
+		int aParamCount = 0;
+		variants[0]=&param1;variants[1]=&param2;variants[2]=&param3;variants[3]=&param4;variants[4]=&param5;
+		variants[5]=&param6;variants[6]=&param7;variants[7]=&param8;variants[8]=&param9;variants[9]=&param10;
+		if(aFunc->mIsBuiltIn)
 		{
-			// Copy the appropriate values into each of the function's formal parameters.
-			AssignVariant(*aFunc->mParam[0].var, param1); // Assign parameter #1
-			if (aFunc->mParamCount > 1 && param2.vt != VT_ERROR) // Assign parameter #2
+			ResultType aResult = OK;
+			ExprTokenType aResultToken;
+			ExprTokenType **aParam = (ExprTokenType**)alloca(sizeof(ExprTokenType)*10);
+			void *var_type = (void *)VAR_NORMAL;
+			for (;aFunc->mParamCount > aParamCount && variants[aParamCount]->vt != VT_ERROR;aParamCount++)
 			{
-				// v1.0.38.01: LPARAM is now written out as a DWORD because the majority of system messages
-				// use LPARAM as a pointer or other unsigned value.  This shouldn't affect most scripts because
-				// of the way ATOI64() and ATOU() wrap a negative number back into the unsigned domain for
-				// commands such as PostMessage/SendMessage.
-				AssignVariant(*aFunc->mParam[1].var, param2);
-				if (aFunc->mParamCount > 2 && param3.vt != VT_ERROR) // Assign parameter #3
-				{
-					AssignVariant(*aFunc->mParam[2].var, param3);
-					if (aFunc->mParamCount > 3 && param4.vt != VT_ERROR) // Assign parameter #4
-					{
-						AssignVariant(*aFunc->mParam[3].var, param4);
-						if (aFunc->mParamCount > 4 && param5.vt != VT_ERROR) // Assign parameter #5
-						{
-							AssignVariant(*aFunc->mParam[4].var, param5);
-							if (aFunc->mParamCount > 5 && param6.vt != VT_ERROR) // Assign parameter #6
-							{
-								AssignVariant(*aFunc->mParam[5].var, param6);
-								if (aFunc->mParamCount > 6 && param7.vt != VT_ERROR) // Assign parameter #7
-								{
-									AssignVariant(*aFunc->mParam[6].var, param7);
-									if (aFunc->mParamCount > 7 && param8.vt != VT_ERROR) // Assign parameter #8
-									{
-										AssignVariant(*aFunc->mParam[7].var, param8);
-										if (aFunc->mParamCount > 8 && param9.vt != VT_ERROR) // Assign parameter #9
-										{
-											AssignVariant(*aFunc->mParam[8].var, param9);
-											if (aFunc->mParamCount > 9 && param10.vt != VT_ERROR) // Assign parameter #10
-											{
-												AssignVariant(*aFunc->mParam[9].var, param10);
-											}
-										}
-									}
-								}
-							}
-						}
-					}
-				}
+				aParam[aParamCount] = (ExprTokenType*)alloca(sizeof(ExprTokenType));
+				aParam[aParamCount]->symbol = SYM_VAR;
+				aParam[aParamCount]->var = new Var(_T(""),var_type,VAR_NORMAL);
+				AssignVariant(*aParam[aParamCount]->var, *variants[aParamCount]);
+			}
+			aResultToken.symbol = PURE_INTEGER;
+			aFunc->mBIF(aResult,aResultToken,aParam,aParamCount);
+			TokenToVariant(aResultToken, variant_to_return_dll);
+			return variant_to_return_dll;
+		}
+		else // UDF
+		{
+			for (;aFunc->mParamCount > aParamCount && variants[aParamCount]->vt != VT_ERROR;aParamCount++)
+				AssignVariant(*aFunc->mParam[aParamCount].var, *variants[aParamCount]);
+			FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
+			aFuncAndToken.mFunc = aFunc ;
+			returnCount++ ;
+			if (returnCount > 9)
+				returnCount = 0 ;
+
+			if (sendOrPost == 1)
+			{
+				SendMessage(g_hWnd, AHK_EXECUTE_FUNCTION_VARIANT, (WPARAM)&aFuncAndToken,NULL);
+				return aFuncAndToken.variant_to_return_dll;
+			}
+			else
+			{
+				PostMessage(g_hWnd, AHK_EXECUTE_FUNCTION_VARIANT, (WPARAM)&aFuncAndToken,NULL);
+				VARIANT &r =  aFuncAndToken.variant_to_return_dll;
+				r.vt = VT_NULL ;
+				return r ; 
 			}
 		}
-		
-		FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
-		aFuncAndToken.mFunc = aFunc ;
-		returnCount++ ;
-		if (returnCount > 9)
-			returnCount = 0 ;
-
-		if (sendOrPost == 1)
-		{
-		SendMessage(g_hWnd, AHK_EXECUTE_FUNCTION_VARIANT, (WPARAM)&aFuncAndToken,NULL);
-		return aFuncAndToken.variant_to_return_dll;
-		}
-		else
-		{
-			PostMessage(g_hWnd, AHK_EXECUTE_FUNCTION_VARIANT, (WPARAM)&aFuncAndToken,NULL);
-			VARIANT &r =  aFuncAndToken.variant_to_return_dll;
-			r.vt = VT_NULL ;
-			return r ; 
-		}
-		}
+	}
 	FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
 	returnCount++ ;
 
@@ -687,9 +652,6 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 	return r ; 
 	// should return a blank variant
 }
-
-
-void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar);
 
 void callFuncDllVariant(FuncAndToken *aFuncAndToken)
 {
