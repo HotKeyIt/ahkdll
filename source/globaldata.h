@@ -29,6 +29,8 @@ extern HRSRC g_hResource;
 extern HINSTANCE g_hInstance;
 extern DWORD g_MainThreadID;
 extern DWORD g_HookThreadID;
+extern ATOM g_ClassRegistered;
+extern ATOM g_ClassSplashRegistered;
 extern CRITICAL_SECTION g_CriticalRegExCache;
 
 extern UINT g_DefaultScriptCodepage;

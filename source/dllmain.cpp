@@ -94,17 +94,19 @@ switch(fwdReason)
 		 if ( lpExitCode == 259 )
 			CloseHandle( hThread );
 	// Unregister window class registered in Script::CreateWindows
+#ifndef MINIDLL
 #ifdef UNICODE
-	UnregisterClass((LPCWSTR)&WINDOW_CLASS_MAIN,g_hInstance);
-#ifndef MINIDLL
-	UnregisterClass((LPCWSTR)&WINDOW_CLASS_SPLASH,g_hInstance);
-#endif // MINIDLL
+	if (g_ClassRegistered)
+		UnregisterClass((LPCWSTR)&WINDOW_CLASS_MAIN,g_hInstance);
+	if (g_ClassSplashRegistered)
+		UnregisterClass((LPCWSTR)&WINDOW_CLASS_SPLASH,g_hInstance);
 #else
-	UnregisterClass((LPCSTR)&WINDOW_CLASS_MAIN,g_hInstance);
-#ifndef MINIDLL
-	UnregisterClass((LPCSTR)&WINDOW_CLASS_SPLASH,g_hInstance);
-#endif // MINIDLL
+	if (g_ClassRegistered)
+		UnregisterClass((LPCSTR)&WINDOW_CLASS_MAIN,g_hInstance);
+	if (g_ClassSplashRegistered)
+		UnregisterClass((LPCSTR)&WINDOW_CLASS_SPLASH,g_hInstance);
 #endif
+#endif // MINIDLL
 		 break;
 	 }
  case DLL_THREAD_DETACH:
