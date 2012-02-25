@@ -652,7 +652,7 @@ ResultType Script::CreateWindows()
 	wc.lpszMenuName = MAKEINTRESOURCE(IDR_MENU_MAIN); // NULL; // "MainMenu";
 #endif // MINIDLL
 #ifdef _USRDLL  //Ignore errors since mostly AutoHotkey.exe alredy registered the class
-	RegisterClassEx(&wc);
+	g_ClassRegistered = RegisterClassEx(&wc);
 #else
 	if (!RegisterClassEx(&wc))
 	{

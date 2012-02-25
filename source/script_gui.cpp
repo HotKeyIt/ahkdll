@@ -1779,11 +1779,15 @@ ResultType GuiType::Create()
 		wc.hCursor = LoadCursor((HINSTANCE) NULL, IDC_ARROW);
 		wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
 		wc.cbWndExtra = DLGWINDOWEXTRA;  // So that it will be the type that uses DefDlgProc() vs. DefWindowProc().
+#ifdef _USRDLL  //Ignore errors since mostly AutoHotkey.exe alredy registered the class
+		RegisterClassEx(&wc);
+#else
 		if (!RegisterClassEx(&wc))
 		{
 			MsgBox(_T("RegClass")); // Short/generic msg since so rare.
 			return FAIL;
 		}
+#endif
 		sGuiInitialized = true;
 	}
 

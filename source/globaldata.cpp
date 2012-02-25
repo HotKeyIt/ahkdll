@@ -32,6 +32,7 @@ HRSRC g_hResource = NULL; // Set by WinMain()
 HINSTANCE g_hInstance = NULL; // Set by WinMain().
 DWORD g_MainThreadID = GetCurrentThreadId();
 DWORD g_HookThreadID; // Not initialized by design because 0 itself might be a valid thread ID.
+ATOM g_ClassRegistered = 0;
 CRITICAL_SECTION g_CriticalRegExCache;
 
 UINT g_DefaultScriptCodepage = UorA(CP_UTF8, CP_ACP);

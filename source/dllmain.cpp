@@ -85,11 +85,10 @@ switch(fwdReason)
 		 GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
 		 if ( lpExitCode == 259 )
 			CloseHandle( hThread );
-	// Unregister window class registered in Script::CreateWindows
-#ifdef UNICODE
-	UnregisterClass((LPCWSTR)&WINDOW_CLASS_MAIN,g_hInstance);
-#else
-	UnregisterClass((LPCSTR)&WINDOW_CLASS_MAIN,g_hInstance);
+#ifndef MINIDLL
+		 // Unregister window class if it was registered in Script::CreateWindows
+		 if (g_ClassRegistered)
+			UnregisterClass((LPCWSTR)&WINDOW_CLASS_MAIN,g_hInstance);
 #endif
 		 break;
 	 }
