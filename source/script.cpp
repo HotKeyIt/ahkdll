@@ -8029,15 +8029,14 @@ ResultType Script::DefineClass(LPTSTR aBuf)
 	else // Top-level class definition.
 	{
 		*mClassName = '\0'; // Init.
-		if (  !(class_var = FindOrAddVar(class_name))  )
+		if (  !(class_var = FindOrAddVar(class_name, 0, VAR_DECLARE_SUPER_GLOBAL))  )
 			return FAIL;
 		if (class_var->IsObject())
 			// At this point it can only be an Object() created by a class definition.
 			class_object = (Object *)class_var->Object();
 		else
-			// Force the variable to be super-global rather than passing this flag to
-			// FindOrAddVar: a prior reference to this variable may have created it as
-			// an ordinary global.
+			// Explicitly set the variable scope, since FindOrAddVar may have returned
+			// an existing ordinary global instead of creating a super-global.
 			class_var->Scope() = VAR_DECLARE_SUPER_GLOBAL;
 	}
 	
@@ -9774,6 +9773,7 @@ Line *Script::PreparseBlocks(Line *aStartingLine, bool aFindBlockEnd, Line *aPar
 						// to a variable; only a sole variable reference would work for ByRef).
 						if (arg_type == ARG_TYPE_OUTPUT_VAR)
 							return line->PreparseError(ERR_PARAM1_INVALID, arg.text);
+						continue; // Leave it as it is.
 					}
 					if (lone_var)
 					{
