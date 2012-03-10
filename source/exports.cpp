@@ -605,7 +605,7 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 				aParam[aParamCount] = (ExprTokenType*)alloca(sizeof(ExprTokenType));
 				aParam[aParamCount]->symbol = SYM_VAR;
 				aParam[aParamCount]->var = new Var(_T(""),var_type,VAR_NORMAL);
-				AssignVariant(*aParam[aParamCount]->var, *variants[aParamCount]);
+				AssignVariant(*aParam[aParamCount]->var, *variants[aParamCount],false);
 			}
 			aResultToken.symbol = PURE_INTEGER;
 			aFunc->mBIF(aResult,aResultToken,aParam,aParamCount);
@@ -615,7 +615,7 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 		else // UDF
 		{
 			for (;aFunc->mParamCount > aParamCount && variants[aParamCount]->vt != VT_ERROR;aParamCount++)
-				AssignVariant(*aFunc->mParam[aParamCount].var, *variants[aParamCount]);
+				AssignVariant(*aFunc->mParam[aParamCount].var, *variants[aParamCount],false);
 			FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
 			aFuncAndToken.mFunc = aFunc ;
 			returnCount++ ;

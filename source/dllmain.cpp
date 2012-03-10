@@ -680,7 +680,7 @@ HRESULT __stdcall CoCOMServer::ahkassign(/*in*/VARIANT name, /*in*/VARIANT value
    Var *var;
    if (   !(var = g_script.FindOrAddVar(name.vt == VT_BSTR ? OLE2T(name.bstrVal) : Variant2T(name,namebuf)))   )
       return ERROR_INVALID_PARAMETER;  // Realistically should never happen.
-   AssignVariant(*var, value);
+   AssignVariant(*var, value, false);
 	return S_OK;
 }
 HRESULT __stdcall CoCOMServer::ahkExecuteLine(/*[in,optional]*/ VARIANT line,/*[in,optional]*/ VARIANT aMode,/*[in,optional]*/ VARIANT wait,/*[out, retval]*/ UINT_PTR* pLine)
