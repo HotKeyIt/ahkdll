@@ -32,6 +32,8 @@ GNU General Public License for more details.
 #include "Debugger.h"
 #include "exports.h"  // for addfile in script2.cpp
 #include "os_version.h" // For the global OS_Version object
+
+#include "Winternl.h"
 EXTERN_OSVER; // For the access to the g_os version object without having to include globaldata.h
 EXTERN_G;
 
@@ -2555,6 +2557,12 @@ public:
 };
 #endif // MINIDLL
 
+typedef NTSTATUS (NTAPI *PFN_NT_QUERY_INFORMATION_PROCESS) (
+    HANDLE ProcessHandle,
+    PROCESSINFOCLASS ProcessInformationClass,
+    PVOID ProcessInformation,
+    ULONG ProcessInformationLength,
+    PULONG ReturnLength OPTIONAL);
 typedef int (* ahkx_int_str)(LPTSTR ahkx_str); // ahkx N11
 typedef int (* ahkx_int_str_str)(LPTSTR ahkx_str, LPTSTR ahkx_str2); // ahkx N11
 

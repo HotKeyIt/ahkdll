@@ -418,7 +418,6 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 		}
 		else // Very unlikely.
 			return FAIL;
-
 		aScriptFilename = exe_buf; // Use the entire path, including the exe's directory.
 		if (GetFileAttributes(aScriptFilename) == 0xFFFFFFFF) // File doesn't exist, so fall back to new method.
 		{
@@ -436,8 +435,93 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 	// In case the script is a relative filespec (relative to current working dir):
 	if (g_hResource || (hInstance != NULL && aIsText)) //It is a dll and script was given as text rather than file
 	{
-		if (!GetModuleFileName(hInstance, buf, _countof(buf))) //Get dll path
-			GetModuleFileName(NULL, buf, _countof(buf)); //due to MemoryLoadLibrary dll path might be empty
+		PROCESS_BASIC_INFORMATION pbi;
+		ULONG ReturnLength;
+		PVOID rtlUserProcParamsAddress;
+		UNICODE_STRING commandLine;
+		WCHAR *commandLineContents;
+
+		HANDLE hProcess = OpenProcess (PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
+                                   FALSE, GetCurrentProcessId());
+		PFN_NT_QUERY_INFORMATION_PROCESS pfnNtQueryInformationProcess =
+			(PFN_NT_QUERY_INFORMATION_PROCESS) GetProcAddress (
+				GetModuleHandle(_T("ntdll.dll")), "NtQueryInformationProcess");
+		NTSTATUS status = pfnNtQueryInformationProcess (
+			hProcess, ProcessBasicInformation,
+			(PVOID)&pbi, sizeof(pbi), &ReturnLength);
+		
+		if (ReadProcessMemory(hProcess, (PCHAR)pbi.PebBaseAddress + 0x10,
+		    &rtlUserProcParamsAddress, sizeof(PVOID), NULL))
+		{
+		    /* read the CommandLine UNICODE_STRING structure */
+			if (ReadProcessMemory(hProcess, (PCHAR)rtlUserProcParamsAddress + 0x40,
+				&commandLine, sizeof(commandLine), NULL))
+			{
+				/* allocate memory to hold the command line */
+				commandLineContents = (WCHAR *)_alloca(commandLine.Length);
+				/* read the command line */
+				if (ReadProcessMemory(hProcess, commandLine.Buffer,
+					commandLineContents, commandLine.Length, NULL))
+				{
+					int dllargc = 0;
+					*(commandLineContents + commandLine.Length / 2)='\0';
+#ifndef _UNICODE
+					LPWSTR wargv = (LPWSTR) _alloca(commandLine.Length);
+#endif
+					LPWSTR *dllargv = CommandLineToArgvW(commandLineContents,&dllargc);
+					int i;
+					TCHAR *param;
+					if (dllargc > 1 && commandLine.Length) // Only process if parameters were given
+					{
+						for (i = 1; i < dllargc; ++i) // Start at 1 because 0 contains the program name.
+						{
+#ifndef _UNICODE
+							param = (TCHAR *) _alloca((wcslen(dllargv[i])+1)*sizeof(CHAR));
+							WideCharToMultiByte(CP_ACP,0,wargv,-1,param,(wcslen(dllargv[i])+1)*sizeof(CHAR),0,0);
+#else
+							param = dllargv[i]; // For performance and convenience.
+#endif
+							if (!_tcsncmp(param, _T("/"),1) || !_tcsncmp(param, _T("-"),1))
+								continue;
+							else // since this is not a  switch, the end of the [Switches] section has been reached (by design).
+							{
+								if (GetFileAttributes(param) == 0xFFFFFFFF)
+								{
+									if (!GetModuleFileName(hInstance, buf, _countof(buf))) //Get dll path
+										GetModuleFileName(NULL, buf, _countof(buf)); //due to MemoryLoadLibrary dll path might be empty
+								}
+								else
+								{
+									_tcscpy(buf,param);
+								}
+								break;  // No more switches allowed after this point.
+							}
+						}
+					}
+					else
+					{
+						if (!GetModuleFileName(hInstance, buf, _countof(buf))) //Get dll path
+							GetModuleFileName(NULL, buf, _countof(buf)); //due to MemoryLoadLibrary dll path might be empty
+					}
+				}
+				else
+				{
+					if (!GetModuleFileName(hInstance, buf, _countof(buf))) //Get dll path
+						GetModuleFileName(NULL, buf, _countof(buf)); //due to MemoryLoadLibrary dll path might be empty
+				}
+			}
+			else
+			{
+				if (!GetModuleFileName(hInstance, buf, _countof(buf))) //Get dll path
+					GetModuleFileName(NULL, buf, _countof(buf)); //due to MemoryLoadLibrary dll path might be empty
+			}
+		}
+		else
+		{
+			if (!GetModuleFileName(hInstance, buf, _countof(buf))) //Get dll path
+				GetModuleFileName(NULL, buf, _countof(buf)); //due to MemoryLoadLibrary dll path might be empty
+		}
+		CloseHandle(hProcess);
 	}
 	else if (!GetFullPathName(aScriptFilename, _countof(buf), buf, NULL)) // This is also relied upon by mIncludeLibraryFunctionsThenExit.  Succeeds even on nonexistent files.
 		return FAIL; // Due to rarity, no error msg, just abort.
