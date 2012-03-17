@@ -1886,7 +1886,7 @@ BIF_DECL(BIF_Process)
 	ASSERT(process_cmd != PROCESS_CMD_INVALID);
 
 	HANDLE hProcess;
-	DWORD pid, priority;
+	DWORD pid;
 	
 	//aResultToken.symbol = SYM_INTEGER; // Caller already set this.
 	aResultToken.value_int64 = 0; // Set default return value: indicate failure.
@@ -1911,38 +1911,6 @@ BIF_DECL(BIF_Process)
 		}
 		// Since above didn't return, yield a PID of 0 to indicate failure.
 		return;
-
-	case PROCESS_CMD_PRIORITY:
-	{
-		LPTSTR aPriority = aParamCount > 1 ? TokenToString(*aParam[1]) : _T("");
-		switch (_totupper(*aPriority))
-		{
-		case 'L': priority = IDLE_PRIORITY_CLASS; break;
-		case 'B': priority = BELOW_NORMAL_PRIORITY_CLASS; break;
-		case 'N': priority = NORMAL_PRIORITY_CLASS; break;
-		case 'A': priority = ABOVE_NORMAL_PRIORITY_CLASS; break;
-		case 'H': priority = HIGH_PRIORITY_CLASS; break;
-		case 'R': priority = REALTIME_PRIORITY_CLASS; break;
-		default:
-			// Since above didn't break, yield a PID of 0 to indicate failure.
-			return;
-		}
-		if (pid = *aProcess ? ProcessExist(aProcess) : GetCurrentProcessId())  // Assign
-		{
-			if (hProcess = OpenProcess(PROCESS_SET_INFORMATION, FALSE, pid)) // Assign
-			{
-				// If OS doesn't support "above/below normal", seems best to default to normal rather than high/low,
-				// since "above/below normal" aren't that dramatically different from normal:
-				if (!g_os.IsWin2000orLater() && (priority == BELOW_NORMAL_PRIORITY_CLASS || priority == ABOVE_NORMAL_PRIORITY_CLASS))
-					priority = NORMAL_PRIORITY_CLASS;
-				if (SetPriorityClass(hProcess, priority))
-					aResultToken.value_int64 = pid; // Indicate success.
-				CloseHandle(hProcess);
-			}
-		}
-		// Otherwise, return a PID of 0 to indicate failure.
-		return;
-	}
 
 	case PROCESS_CMD_WAIT:
 	case PROCESS_CMD_WAITCLOSE:
@@ -1987,6 +1955,46 @@ BIF_DECL(BIF_Process)
 		} // for()
 	} // case
 	} // switch()
+}
+
+
+
+BIF_DECL(BIF_ProcessSetPriority)
+{
+	BIF_DECL_STRING_PARAM(1, aPriority);
+	BIF_DECL_STRING_PARAM(2, aProcess);
+
+	DWORD pid, priority;
+	HANDLE hProcess;
+
+	aResultToken.value_int64 = 0; // Set default.
+
+	switch (_totupper(*aPriority))
+	{
+	case 'L': priority = IDLE_PRIORITY_CLASS; break;
+	case 'B': priority = BELOW_NORMAL_PRIORITY_CLASS; break;
+	case 'N': priority = NORMAL_PRIORITY_CLASS; break;
+	case 'A': priority = ABOVE_NORMAL_PRIORITY_CLASS; break;
+	case 'H': priority = HIGH_PRIORITY_CLASS; break;
+	case 'R': priority = REALTIME_PRIORITY_CLASS; break;
+	default:
+		// Since above didn't break, yield a PID of 0 to indicate failure.
+		return;
+	}
+	if (pid = *aProcess ? ProcessExist(aProcess) : GetCurrentProcessId())  // Assign
+	{
+		if (hProcess = OpenProcess(PROCESS_SET_INFORMATION, FALSE, pid)) // Assign
+		{
+			// If OS doesn't support "above/below normal", seems best to default to normal rather than high/low,
+			// since "above/below normal" aren't that dramatically different from normal:
+			if (!g_os.IsWin2000orLater() && (priority == BELOW_NORMAL_PRIORITY_CLASS || priority == ABOVE_NORMAL_PRIORITY_CLASS))
+				priority = NORMAL_PRIORITY_CLASS;
+			if (SetPriorityClass(hProcess, priority))
+				aResultToken.value_int64 = pid; // Indicate success.
+			CloseHandle(hProcess);
+		}
+	}
+	// Otherwise, return a PID of 0 to indicate failure.
 }
 
 
@@ -2149,10 +2157,6 @@ error:
 BIF_DECL(BIF_WinSet)
 {
 	BIF_DECL_STRING_PARAM(1, aValue);
-	BIF_DECL_STRING_PARAM(2, aTitle);
-	BIF_DECL_STRING_PARAM(3, aText);
-	BIF_DECL_STRING_PARAM(4, aExcludeTitle);
-	BIF_DECL_STRING_PARAM(5, aExcludeText);
 
 	WinSetAttributes attrib = Line::ConvertWinSetAttribute(aResultToken.marker + 6); // Get the "CMD" from "WinSetCMD".
 	// Since an invalid name wouldn't resolve to this function in the first place,
@@ -2166,7 +2170,7 @@ BIF_DECL(BIF_WinSet)
 	// Only the following sub-commands affect ErrorLevel:
 	bool use_errorlevel = (attrib == WINSET_STYLE || attrib == WINSET_EXSTYLE || attrib == WINSET_REGION);
 
-	HWND target_window = Line::DetermineTargetWindow(aTitle, aText, aExcludeTitle, aExcludeText);
+	HWND target_window = DetermineTargetWindow(aParam + 1, aParamCount - 1);
 	if (!target_window)
 		goto error;
 
@@ -2197,19 +2201,6 @@ BIF_DECL(BIF_WinSet)
 		SetWindowPos(target_window, topmost_or_not, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
 		break;
 	}
-
-	// Note that WINSET_TOP is not offered as an option since testing reveals it has no effect on
-	// top level (parent) windows, perhaps due to the anti focus-stealing measures in the OS.
-	case WINSET_BOTTOM:
-		// Note: SWP_NOACTIVATE must be specified otherwise the target window often/always fails to go
-		// to the bottom:
-		SetWindowPos(target_window, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
-		break;
-	case WINSET_TOP:
-		// Note: SWP_NOACTIVATE must be specified otherwise the target window often/always fails to go
-		// to the bottom:
-		SetWindowPos(target_window, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
-		break;
 
 	case WINSET_TRANSPARENT:
 	case WINSET_TRANSCOLOR:
@@ -2340,9 +2331,13 @@ BIF_DECL(BIF_WinSet)
 		goto error; // Since above didn't break, it's a failure.
 	}
 
-	case WINSET_ENABLE:
-	case WINSET_DISABLE: // These are separate sub-commands from WINSET_STYLE because merely changing the WS_DISABLED style is usually not as effective as calling EnableWindow().
-		EnableWindow(target_window, attrib == WINSET_ENABLE);
+	case WINSET_ENABLED: // This is a separate from WINSET_STYLE because merely changing the WS_DISABLED style is usually not as effective as calling EnableWindow().
+		switch (Line::ConvertOnOffToggle(aValue))
+		{
+		case TOGGLED_ON:	EnableWindow(target_window, TRUE); break;
+		case TOGGLED_OFF:	EnableWindow(target_window, FALSE); break;
+		case TOGGLE:		EnableWindow(target_window, !IsWindowEnabled(target_window)); break;
+		}
 		return;
 
 	case WINSET_REGION:
@@ -2374,6 +2369,23 @@ error:
 	// but seems best to allow the other sub-commands to throw exceptions:
 	if (use_errorlevel || g->InTryBlock)
 		Script::SetErrorLevelOrThrow();
+}
+
+
+
+BIF_DECL(BIF_WinMoveTopBottom)
+{
+	if (HWND target_window = DetermineTargetWindow(aParam, aParamCount))
+	{
+		HWND mode = ctoupper(aResultToken.marker[7]) == 'B' ? HWND_BOTTOM : HWND_TOP;
+		// Note: SWP_NOACTIVATE must be specified otherwise the target window often fails to move:
+		if (SetWindowPos(target_window, mode, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE))
+		{
+			aResultToken.value_int64 = TRUE;
+			return;
+		}
+	}
+	aResultToken.value_int64 = FALSE;
 }
 
 
@@ -8625,6 +8637,15 @@ HWND Line::DetermineTargetWindow(LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTit
 	return target_window;
 }
 
+HWND DetermineTargetWindow(ExprTokenType *aParam[], int aParamCount)
+{
+	TCHAR number_buf[4][MAX_NUMBER_SIZE];
+	LPTSTR param[4];
+	for (int i = 0; i < 4; i++)
+		param[i] = i < aParamCount ? TokenToString(*aParam[i], number_buf[i]) : _T("");
+	return Line::DetermineTargetWindow(param[0], param[1], param[2], param[3]);
+}
+
 
 
 bool Line::FileIsFilteredOut(WIN32_FIND_DATA &aCurrentFile, FileLoopModeType aFileLoopMode
@@ -12566,15 +12587,16 @@ BIF_DECL(BIF_InStr)
 			occurrence_number = (int)TokenToInt64(*aParam[4]);
 		// For offset validation and reverse search we need to know the length of haystack:
 		INT_PTR haystack_length = EXPR_TOKEN_LENGTH(aParam[0], haystack);
-		if (offset <= 0) // Special mode to search from the right side.
+		if (offset < 0) // Special mode to search from the right side.
 		{
+			++offset; // Convert from negative-one-based to zero-based.
 			haystack_length += offset; // i.e. reduce haystack_length by the absolute value of offset.
 			found_pos = (haystack_length >= 0) ? tcsrstr(haystack, haystack_length, needle, string_case_sense, occurrence_number) : NULL;
 			aResultToken.value_int64 = found_pos ? (found_pos - haystack + 1) : 0;  // +1 to convert to 1-based, since 0 indicates "not found".
 			return;
 		}
 		--offset; // Convert from one-based to zero-based.
-		if (offset > haystack_length || occurrence_number < 1)
+		if (offset > haystack_length || occurrence_number < 1 || offset < 0)
 		{
 			aResultToken.value_int64 = 0; // Match never found when offset is beyond length of string.
 			return;

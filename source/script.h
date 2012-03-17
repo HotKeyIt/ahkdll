@@ -489,7 +489,7 @@ enum GuiControlTypes {GUI_CONTROL_INVALID // GUI_CONTROL_INVALID must be zero du
 enum ThreadCommands {THREAD_CMD_INVALID, THREAD_CMD_PRIORITY, THREAD_CMD_INTERRUPT, THREAD_CMD_NOTIMERS};
 
 #define PROCESS_PRIORITY_LETTERS _T("LBNAHR")
-enum ProcessCmds {PROCESS_CMD_INVALID, PROCESS_CMD_EXIST, PROCESS_CMD_CLOSE, PROCESS_CMD_PRIORITY
+enum ProcessCmds {PROCESS_CMD_INVALID, PROCESS_CMD_EXIST, PROCESS_CMD_CLOSE
 	, PROCESS_CMD_WAIT, PROCESS_CMD_WAITCLOSE};
 
 enum ControlCmds {CONTROL_CMD_INVALID, CONTROL_CMD_CHECK, CONTROL_CMD_UNCHECK
@@ -513,8 +513,7 @@ enum DriveGetCmds {DRIVEGET_CMD_INVALID, DRIVEGET_CMD_LIST, DRIVEGET_CMD_FILESYS
 	, DRIVEGET_CMD_STATUSCD, DRIVEGET_CMD_CAPACITY, DRIVEGET_CMD_SPACEFREE};
 
 enum WinSetAttributes {WINSET_INVALID, WINSET_TRANSPARENT, WINSET_TRANSCOLOR, WINSET_ALWAYSONTOP
-	, WINSET_BOTTOM, WINSET_TOP, WINSET_STYLE, WINSET_EXSTYLE, WINSET_REDRAW, WINSET_ENABLE, WINSET_DISABLE
-	, WINSET_REGION};
+	, WINSET_STYLE, WINSET_EXSTYLE, WINSET_REDRAW, WINSET_ENABLED, WINSET_REGION};
 
 
 class Label; // Forward declaration so that each can use the other.
@@ -1384,7 +1383,6 @@ public:
 		if (!aBuf || !*aBuf) return PROCESS_CMD_INVALID;
 		if (!_tcsicmp(aBuf, _T("Exist"))) return PROCESS_CMD_EXIST;
 		if (!_tcsicmp(aBuf, _T("Close"))) return PROCESS_CMD_CLOSE;
-		if (!_tcsicmp(aBuf, _T("Priority"))) return PROCESS_CMD_PRIORITY;
 		if (!_tcsicmp(aBuf, _T("Wait"))) return PROCESS_CMD_WAIT;
 		if (!_tcsicmp(aBuf, _T("WaitClose"))) return PROCESS_CMD_WAITCLOSE;
 		return PROCESS_CMD_INVALID;
@@ -1465,13 +1463,10 @@ public:
 		if (!_tcsicmp(aBuf, _T("Trans")) || !_tcsicmp(aBuf, _T("Transparent"))) return WINSET_TRANSPARENT;
 		if (!_tcsicmp(aBuf, _T("TransColor"))) return WINSET_TRANSCOLOR;
 		if (!_tcsicmp(aBuf, _T("AlwaysOnTop")) || !_tcsicmp(aBuf, _T("Topmost"))) return WINSET_ALWAYSONTOP;
-		if (!_tcsicmp(aBuf, _T("Bottom"))) return WINSET_BOTTOM;
-		if (!_tcsicmp(aBuf, _T("Top"))) return WINSET_TOP;
 		if (!_tcsicmp(aBuf, _T("Style"))) return WINSET_STYLE;
 		if (!_tcsicmp(aBuf, _T("ExStyle"))) return WINSET_EXSTYLE;
 		if (!_tcsicmp(aBuf, _T("Redraw"))) return WINSET_REDRAW;
-		if (!_tcsicmp(aBuf, _T("Enable"))) return WINSET_ENABLE;
-		if (!_tcsicmp(aBuf, _T("Disable"))) return WINSET_DISABLE;
+		if (!_tcsicmp(aBuf, _T("Enabled"))) return WINSET_ENABLED;
 		if (!_tcsicmp(aBuf, _T("Region"))) return WINSET_REGION;
 		return WINSET_INVALID;
 	}
@@ -1509,17 +1504,16 @@ public:
 	// Returns aDefault if aBuf isn't either ON, OFF, or blank.
 	{
 		if (!aBuf || !*aBuf) return NEUTRAL;
-		if (!_tcsicmp(aBuf, _T("ON"))) return TOGGLED_ON;
-		if (!_tcsicmp(aBuf, _T("OFF"))) return TOGGLED_OFF;
+		if (!_tcsicmp(aBuf, _T("On")) || !_tcscmp(aBuf, _T("1"))) return TOGGLED_ON;
+		if (!_tcsicmp(aBuf, _T("Off")) || !_tcscmp(aBuf, _T("0"))) return TOGGLED_OFF;
 		return aDefault;
 	}
 
 	static ToggleValueType ConvertOnOffAlways(LPTSTR aBuf, ToggleValueType aDefault = TOGGLE_INVALID)
 	// Returns aDefault if aBuf isn't either ON, OFF, ALWAYSON, ALWAYSOFF, or blank.
 	{
-		if (!aBuf || !*aBuf) return NEUTRAL;
-		if (!_tcsicmp(aBuf, _T("On"))) return TOGGLED_ON;
-		if (!_tcsicmp(aBuf, _T("Off"))) return TOGGLED_OFF;
+		if (ToggleValueType toggle = ConvertOnOff(aBuf))
+			return toggle;
 		if (!_tcsicmp(aBuf, _T("AlwaysOn"))) return ALWAYS_ON;
 		if (!_tcsicmp(aBuf, _T("AlwaysOff"))) return ALWAYS_OFF;
 		return aDefault;
@@ -1528,10 +1522,9 @@ public:
 	static ToggleValueType ConvertOnOffToggle(LPTSTR aBuf, ToggleValueType aDefault = TOGGLE_INVALID)
 	// Returns aDefault if aBuf isn't either ON, OFF, TOGGLE, or blank.
 	{
-		if (!aBuf || !*aBuf) return NEUTRAL;
-		if (!_tcsicmp(aBuf, _T("On"))) return TOGGLED_ON;
-		if (!_tcsicmp(aBuf, _T("Off"))) return TOGGLED_OFF;
-		if (!_tcsicmp(aBuf, _T("Toggle"))) return TOGGLE;
+		if (ToggleValueType toggle = ConvertOnOff(aBuf))
+			return toggle;
+		if (!_tcsicmp(aBuf, _T("Toggle")) || !_tcscmp(aBuf, _T("-1"))) return TOGGLE;
 		return aDefault;
 	}
 
@@ -1546,19 +1539,16 @@ public:
 	static ToggleValueType ConvertOnOffTogglePermit(LPTSTR aBuf, ToggleValueType aDefault = TOGGLE_INVALID)
 	// Returns aDefault if aBuf isn't either ON, OFF, TOGGLE, PERMIT, or blank.
 	{
-		if (!aBuf || !*aBuf) return NEUTRAL;
-		if (!_tcsicmp(aBuf, _T("On"))) return TOGGLED_ON;
-		if (!_tcsicmp(aBuf, _T("Off"))) return TOGGLED_OFF;
-		if (!_tcsicmp(aBuf, _T("Toggle"))) return TOGGLE;
+		if (ToggleValueType toggle = ConvertOnOffToggle(aBuf))
+			return toggle;
 		if (!_tcsicmp(aBuf, _T("Permit"))) return TOGGLE_PERMIT;
 		return aDefault;
 	}
 
 	static ToggleValueType ConvertBlockInput(LPTSTR aBuf)
 	{
-		if (!aBuf || !*aBuf) return NEUTRAL;  // For backward compatibility, blank is not considered INVALID.
-		if (!_tcsicmp(aBuf, _T("On"))) return TOGGLED_ON;
-		if (!_tcsicmp(aBuf, _T("Off"))) return TOGGLED_OFF;
+		if (ToggleValueType toggle = ConvertOnOff(aBuf))
+			return toggle;
 		if (!_tcsicmp(aBuf, _T("Send"))) return TOGGLE_SEND;
 		if (!_tcsicmp(aBuf, _T("Mouse"))) return TOGGLE_MOUSE;
 		if (!_tcsicmp(aBuf, _T("SendAndMouse"))) return TOGGLE_SENDANDMOUSE;
@@ -2931,7 +2921,9 @@ BIF_DECL(BIF_Exception);
 
 BIF_DECL(BIF_WinGet);
 BIF_DECL(BIF_WinSet);
+BIF_DECL(BIF_WinMoveTopBottom);
 BIF_DECL(BIF_Process);
+BIF_DECL(BIF_ProcessSetPriority);
 
 BIF_DECL(BIF_PerformAction);
 
@@ -2961,6 +2953,8 @@ void SetWorkingDir(LPTSTR aNewDir);
 int ConvertJoy(LPTSTR aBuf, int *aJoystickID = NULL, bool aAllowOnlyButtons = false);
 bool ScriptGetKeyState(vk_type aVK, KeyStateTypes aKeyStateType);
 double ScriptGetJoyState(JoyControls aJoy, int aJoystickID, ExprTokenType &aToken, bool aUseBoolForUpDown);
+
+HWND DetermineTargetWindow(ExprTokenType *aParam[], int aParamCount);
 
 #endif
 
