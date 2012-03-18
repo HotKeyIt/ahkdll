@@ -8513,12 +8513,17 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	// HotKeyIt find library in Resource
 	// Since above didn't return, no match found in any library.
 	// Search in Resource for a library
+	//
+	// If using dll, first try find function in dll resource, then function + underscore (function_) in dll resource
+	// If nothing in dll resource is found, search again in main executable.
 	tmemcpy(class_name_buf, aFuncName, aFuncNameLength);
 	tmemcpy(class_name_buf + aFuncNameLength,_T(".ahk"),4);
 	class_name_buf[aFuncNameLength + 4] = '\0';
-	HRSRC lib_hResource;
+	HRSRC lib_hResource,lib_hResourceMain = NULL;
 	if (!(lib_hResource = FindResource(g_hInstance, class_name_buf, _T("LIB"))))
 	{
+		// Search main executable its resources for the function in advance.
+		lib_hResourceMain = FindResource(NULL, class_name_buf, _T("LIB"));
 		// Now that the resource is not found, set up for the second one that searches by class/prefix.
 		// Notes about ambiguity and naming collisions:
 		// By the time it gets to the prefix/class search, it's almost given up.  Even if it wrongly finds a
@@ -8526,16 +8531,28 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 		// still not find the function and will then say "call to nonexistent function".  In addition, the
 		// ability to customize which libraries are searched is planned.  This would allow a publicly
 		// distributed script to turn off all libraries except stdlib.
-		if (   !(first_underscore = _tcschr(aFuncName, '_'))   ) // No second iteration needed.
+		if (   !(first_underscore = _tcschr(aFuncName, '_')) && !lib_hResourceMain   ) // No second iteration needed.
+		{
 			return NULL;
-		naked_filename_length = first_underscore - aFuncName;
-		if (naked_filename_length >= _countof(class_name_buf)) // Class name too long (probably impossible currently).
-			return NULL;
-		tmemcpy(class_name_buf, aFuncName, naked_filename_length);
-		tmemcpy(class_name_buf + naked_filename_length,_T(".ahk"),4);
-		class_name_buf[naked_filename_length + 4] = '\0';
-		if (!(lib_hResource = FindResource(g_hInstance, class_name_buf, _T("LIB"))))
-			return NULL;
+		}
+		else if (first_underscore)
+		{
+			naked_filename_length = first_underscore - aFuncName;
+			if (naked_filename_length >= _countof(class_name_buf)) // Class name too long (probably impossible currently).
+				return NULL;
+			tmemcpy(class_name_buf, aFuncName, naked_filename_length);
+			tmemcpy(class_name_buf + naked_filename_length,_T(".ahk"),4);
+			class_name_buf[naked_filename_length + 4] = '\0';
+			if ( !(lib_hResource = FindResource(g_hInstance, class_name_buf, _T("LIB")))
+				 && !(lib_hResource = lib_hResourceMain)
+				 && !(lib_hResource = lib_hResourceMain = FindResource(NULL, class_name_buf, _T("LIB")))    )
+					return NULL;
+		}
+		else if (lib_hResourceMain)
+		{
+			// Use main resource since a function was found there.
+			lib_hResource = lib_hResourceMain;
+		}
 	}
 	// Now a resouce was found and it can be loaded
 	HGLOBAL hResData;
