@@ -818,6 +818,10 @@ ResultType Object::_Remove(ExprTokenType &aResultToken, ExprTokenType *aParam[],
 	{
 		if (!min_field) // Nothing to remove.
 		{
+			// Fix for v1.1.06.03: As documented, adjust keys as if Remove(min, min) was called.
+			if (max_key_type == SYM_INTEGER) // Fix for v1.1.07.02: Exclude Obj.Remove(i, "").
+				for (pos = min_pos; pos < mKeyOffsetObject; ++pos)
+					mFields[pos].key.i--;
 			// L34: Must not continue since min_pos points at the wrong key or an invalid location.
 			// As of L50, our return value when (aParamCount < 2) is the value which was removed, not
 			// the number of removed items. Since this[min_field] would return "", an empty string is
@@ -832,6 +836,7 @@ ResultType Object::_Remove(ExprTokenType &aResultToken, ExprTokenType *aParam[],
 		switch (aResultToken.symbol = min_field->symbol)
 		{
 		case SYM_OPERAND:
+			aResultToken.symbol = SYM_STRING;
 			if (min_field->size)
 			{
 				// Detach the memory allocated for this field's string and pass it back to caller.
@@ -1546,7 +1551,10 @@ ResultType STDMETHODCALLTYPE MetaObject::Invoke(ExprTokenType &aResultToken, Exp
 			this_token.var = this_var;
 			if (IObject *this_class_base = this_class->Base())
 			{
-				return this_class_base->Invoke(aResultToken, this_token, (aFlags & ~IF_METAFUNC) | IF_METAOBJ, aParam, aParamCount);
+				ResultType result = this_class_base->Invoke(aResultToken, this_token, (aFlags & ~IF_METAFUNC) | IF_METAOBJ, aParam, aParamCount);
+				// Avoid returning INVOKE_NOT_HANDLED in this case so that our caller never
+				// shows an "uninitialized var" warning for base.Foo() in a class method.
+				return result == INVOKE_NOT_HANDLED ? OK : result;
 			}
 			return OK;
 		}
