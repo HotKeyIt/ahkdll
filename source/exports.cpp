@@ -179,26 +179,33 @@ EXPORT unsigned int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, L
 	if (aFunc)
 	{	
 		int aParamCount = 0;
+		int aParamsCount = 0;
 		LPTSTR *params[10];
 		params[0]=&param1;params[1]=&param2;params[2]=&param3;params[3]=&param4;params[4]=&param5;
 		params[5]=&param6;params[6]=&param7;params[7]=&param8;params[8]=&param9;params[9]=&param10;
+		for (int i=0;i<10;i++)
+		{
+			if (*params[i] && _tcscmp(*params[i],_T("")))
+				aParamsCount = i + 1;
+		}
 		if(aFunc->mIsBuiltIn)
 		{
 			ResultType aResult = OK;
 			ExprTokenType aResultToken;
-			ExprTokenType **aParam = (ExprTokenType**)alloca(sizeof(ExprTokenType)*10);
-			for (;aFunc->mParamCount > aParamCount && params[aParamCount] != NULL && *params[aParamCount];aParamCount++)
+			ExprTokenType **aParam = (ExprTokenType**)_alloca(sizeof(ExprTokenType)*10);
+			for (;aFunc->mParamCount > aParamCount && aParamsCount>aParamCount;aParamCount++)
 			{
-				aParam[aParamCount] = (ExprTokenType*)alloca(sizeof(ExprTokenType));
-				aParam[aParamCount]->symbol = SYM_STRING;aParam[aParamCount]->marker = *params[aParamCount];aParamCount++; // Assign parameter #1
+				aParam[aParamCount] = (ExprTokenType*)_alloca(sizeof(ExprTokenType));
+				aParam[aParamCount]->symbol = SYM_STRING;aParam[aParamCount]->marker = *params[aParamCount]; // Assign parameters
 			}
-			aResultToken.symbol = PURE_INTEGER;
+			aResultToken.symbol = SYM_INTEGER;
+			aResultToken.marker = aFunc->mName;
 			aFunc->mBIF(aResult,aResultToken,aParam,aParamCount);
 			return 0;
 		}
 		else
 		{
-			for (;aFunc->mParamCount > aParamCount && params[aParamCount] != NULL && *params[aParamCount];aParamCount++)
+			for (;aFunc->mParamCount > aParamCount && aParamsCount>aParamCount;aParamCount++)
 				aFunc->mParam[aParamCount].var->Assign(*params[aParamCount]);
 			FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
 			aFuncAndToken.mFunc = aFunc ;
@@ -432,20 +439,27 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 	if (aFunc)
 	{	
 		int aParamCount = 0;
+		int aParamsCount = 0;
 		LPTSTR *params[10];
 		params[0]=&param1;params[1]=&param2;params[2]=&param3;params[3]=&param4;params[4]=&param5;
 		params[5]=&param6;params[6]=&param7;params[7]=&param8;params[8]=&param9;params[9]=&param10;
+		for (int i=0;i<10;i++)
+		{
+			if (*params[i] && _tcscmp(*params[i],_T("")))
+				aParamsCount = i + 1;
+		}
 		if(aFunc->mIsBuiltIn)
 		{
 			ResultType aResult = OK;
 			ExprTokenType aResultToken;
-			ExprTokenType **aParam = (ExprTokenType**)alloca(sizeof(ExprTokenType)*10);
-			for (;aFunc->mParamCount > aParamCount && params[aParamCount] != NULL && *params[aParamCount];aParamCount++)
+			ExprTokenType **aParam = (ExprTokenType**)_alloca(sizeof(ExprTokenType)*10);
+			for (;aFunc->mParamCount > aParamCount && aParamsCount>aParamCount;aParamCount++)
 			{
-				aParam[aParamCount] = (ExprTokenType*)alloca(sizeof(ExprTokenType));
-				aParam[aParamCount]->symbol = SYM_STRING;aParam[aParamCount]->marker = *params[aParamCount];aParamCount++; // Assign parameter #1
+				aParam[aParamCount] = (ExprTokenType*)_alloca(sizeof(ExprTokenType));
+				aParam[aParamCount]->symbol = SYM_STRING;aParam[aParamCount]->marker = *params[aParamCount]; // Assign parameters
 			}
-			aResultToken.symbol = PURE_INTEGER;
+			aResultToken.symbol = SYM_INTEGER;
+			aResultToken.marker = aFunc->mName;
 			aFunc->mBIF(aResult,aResultToken,aParam,aParamCount);
 			switch (aResultToken.symbol)
 			{
@@ -484,7 +498,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 		}
 		else // UDF
 		{
-			for (;aFunc->mParamCount > aParamCount && params[aParamCount] != NULL && *params[aParamCount];aParamCount++)
+			for (;aFunc->mParamCount > aParamCount && aParamsCount>aParamCount;aParamCount++)
 				aFunc->mParam[aParamCount].var->Assign(*params[aParamCount]);
 			FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
 			aFuncAndToken.mFunc = aFunc ;
@@ -598,16 +612,17 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 		{
 			ResultType aResult = OK;
 			ExprTokenType aResultToken;
-			ExprTokenType **aParam = (ExprTokenType**)alloca(sizeof(ExprTokenType)*10);
+			ExprTokenType **aParam = (ExprTokenType**)_alloca(sizeof(ExprTokenType)*10);
 			void *var_type = (void *)VAR_NORMAL;
 			for (;aFunc->mParamCount > aParamCount && variants[aParamCount]->vt != VT_ERROR;aParamCount++)
 			{
-				aParam[aParamCount] = (ExprTokenType*)alloca(sizeof(ExprTokenType));
+				aParam[aParamCount] = (ExprTokenType*)_alloca(sizeof(ExprTokenType));
 				aParam[aParamCount]->symbol = SYM_VAR;
 				aParam[aParamCount]->var = new Var(_T(""),var_type,VAR_NORMAL);
 				AssignVariant(*aParam[aParamCount]->var, *variants[aParamCount],false);
 			}
-			aResultToken.symbol = PURE_INTEGER;
+			aResultToken.symbol = SYM_INTEGER;
+			aResultToken.marker = aFunc->mName;
 			aFunc->mBIF(aResult,aResultToken,aParam,aParamCount);
 			TokenToVariant(aResultToken, variant_to_return_dll);
 			return variant_to_return_dll;

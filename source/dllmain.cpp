@@ -152,7 +152,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 #else
 	LPWSTR *dllargv = CommandLineToArgvW(nameHinstanceP.argv,&dllargc);
 #endif
-	int i;
+	int i = 0;
 	if (*nameHinstanceP.argv) // Only process if parameters were given
 	for (i = 0; i < dllargc; ++i) // Start at 0 because 0 does not contains the program name or script.
 	{
