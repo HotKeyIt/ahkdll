@@ -437,7 +437,6 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 	{
 		PROCESS_BASIC_INFORMATION pbi;
 		ULONG ReturnLength;
-		WCHAR *commandLineContents;
 
 		HANDLE hProcess = OpenProcess (PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
                                    FALSE, GetCurrentProcessId());
@@ -447,17 +446,15 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 		NTSTATUS status = pfnNtQueryInformationProcess (
 			hProcess, ProcessBasicInformation,
 			(PVOID)&pbi, sizeof(pbi), &ReturnLength);
-		USHORT CommanLineLength = pbi.PebBaseAddress->ProcessParameters->CommandLine.Length;
-		if (CommanLineLength && ReadProcessMemory(hProcess, &pbi.PebBaseAddress->ProcessParameters->CommandLine.Buffer,
-			&commandLineContents, CommanLineLength, NULL))
+		if (pbi.PebBaseAddress->ProcessParameters->CommandLine.Length)
 		{
 			int dllargc = 0;
 			TCHAR *param;
 #ifndef _UNICODE
-			LPWSTR wargv = (LPWSTR) _alloca(CommanLineLength);
+			LPWSTR wargv = (LPWSTR) _alloca(pbi.PebBaseAddress->ProcessParameters->CommandLine.Length);
 #endif
-			LPWSTR *dllargv = CommandLineToArgvW(commandLineContents,&dllargc);
-			if (dllargc > 1 && CommanLineLength) // Only process if parameters were given
+			LPWSTR *dllargv = CommandLineToArgvW(pbi.PebBaseAddress->ProcessParameters->CommandLine.Buffer,&dllargc);
+			if (dllargc > 1 && pbi.PebBaseAddress->ProcessParameters->CommandLine.Length) // Only process if parameters were given
 			{
 				for (int i = 1; i < dllargc; ++i) // Start at 1 because 0 contains the program name.
 				{
