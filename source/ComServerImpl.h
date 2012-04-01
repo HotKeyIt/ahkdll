@@ -49,6 +49,7 @@ public:
     virtual HRESULT __stdcall addFile(/*[in]*/ VARIANT filepath,/*[in,optional]*/ VARIANT aAllowDuplicateInclude,/*[in,optional]*/ VARIANT aIgnoreLoadFailure,/*[out, retval]*/ UINT_PTR* success);
     virtual HRESULT __stdcall ahkExec(/*[in]*/ VARIANT script,/*[out, retval]*/ BOOL* success);
     virtual HRESULT __stdcall ahkTerminate(/*[in,optional]*/ VARIANT kill,/*[out, retval]*/ BOOL* success);
+	virtual HRESULT __stdcall ahkReload(/*[in]*/ VARIANT timeout);
 
 private:
 

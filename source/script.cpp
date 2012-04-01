@@ -325,7 +325,6 @@ void Script::Destroy()
 		label->mName = _T("");
 		label->mPrevLabel = NULL;
 	}
-	
 	for (Line *line = g_script.mLastLine; line;)
 	{
 		Line *nextLine = line->mPrevLine;
@@ -333,7 +332,6 @@ void Script::Destroy()
 		line = nextLine;
 	}
 	
-
 	mFuncCount = 0; 
 	mFirstLabel = NULL ; 
 	mLastLabel = NULL ;
@@ -353,7 +351,7 @@ void Script::Destroy()
 	mTempFunc = NULL;
 	mTempLabel = NULL;
 	mTempLine = NULL;
-	for(i=1;Line::sSourceFileCount>i;i++) // HotKeyIt: first include file must not be deleted
+	for(i=1;Line::sSourceFileCount>i;i++) // first include file must not be deleted
 		free(Line::sSourceFile[i]);
 	Line::sSourceFileCount = 0;
 	//free(Line::sSourceFile);
@@ -361,7 +359,6 @@ void Script::Destroy()
 	// DestroyWindow() will cause MainWindowProc() to immediately receive and process the
 	// WM_DESTROY msg, which should in turn result in any child windows being destroyed
 	// and other cleanup being done:
-	
 	KILL_AUTOEXEC_TIMER
 	KILL_MAIN_TIMER
 	if (IsWindow(g_hWnd)) // Adds peace of mind in case WM_DESTROY was already received in some unusual way.
@@ -375,7 +372,6 @@ void Script::Destroy()
 	Hotstring::AllDestruct();
 #endif
 	Script::~Script();
-
     global_clear_state(*g);
 	//free(g_Debugger.mStack.mBottom);
 #ifndef MINIDLL
@@ -435,6 +431,8 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 	// In case the script is a relative filespec (relative to current working dir):
 	if (g_hResource || (hInstance != NULL && aIsText)) //It is a dll and script was given as text rather than file
 	{
+		if (!GetModuleFileName(hInstance, buf, _countof(buf))) //Get dll path in front to make sure we have a valid path anyway
+			GetModuleFileName(NULL, buf, _countof(buf)); //due to MemoryLoadLibrary dll path might be empty
 		PROCESS_BASIC_INFORMATION pbi;
 		ULONG ReturnLength;
 
@@ -481,16 +479,6 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 					}
 				}
 			}
-			else
-			{
-				if (!GetModuleFileName(hInstance, buf, _countof(buf))) //Get dll path
-					GetModuleFileName(NULL, buf, _countof(buf)); //due to MemoryLoadLibrary dll path might be empty
-			}
-		}
-		else
-		{
-			if (!GetModuleFileName(hInstance, buf, _countof(buf))) //Get dll path
-				GetModuleFileName(NULL, buf, _countof(buf)); //due to MemoryLoadLibrary dll path might be empty
 		}
 		CloseHandle(hProcess);
 	}
@@ -874,7 +862,7 @@ ResultType Script::AutoExecSection()
 {
 	// Now that g_MaxThreadsTotal has been permanently set by the processing of script directives like
 	// #MaxThreads, an appropriately sized array can be allocated:
-	if (   !(g_array = (global_struct *)malloc((g_MaxThreadsTotal+TOTAL_ADDITIONAL_THREADS) * sizeof(global_struct)))   )
+	if (   !(g_array = (global_struct *)realloc(g_array,(g_MaxThreadsTotal+TOTAL_ADDITIONAL_THREADS) * sizeof(global_struct)))   )
 		return FAIL; // Due to rarity, just abort. It wouldn't be safe to run ExitApp() due to possibility of an OnExit routine.
 	CopyMemory(g_array, g, sizeof(global_struct)); // Copy the temporary/startup "g" into array[0] to preserve historical behaviors that may rely on the idle thread starting with that "g".
 	g = g_array; // Must be done after above.
@@ -931,7 +919,7 @@ ResultType Script::AutoExecSection()
 		// v1.0.25: This is now done here, closer to the actual execution of the first line in the script,
 		// to avoid an unnecessary Sleep(10) that would otherwise occur in ExecUntil:
 		mLastScriptRest = mLastPeekTime = GetTickCount();
-
+		
 		++g_nThreads;
 		DEBUGGER_STACK_PUSH(mFirstLine, _T("auto-execute"))
 		ExecUntil_result = mFirstLine->ExecUntil(UNTIL_RETURN); // Might never return (e.g. infinite loop or ExitApp).
@@ -3119,7 +3107,10 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		fp = &tfile;
 		// This is done only after the file has been successfully opened in case aIgnoreLoadFailure==true:
 		if (source_file_index > 0)
-			Line::sSourceFile[source_file_index] = SimpleHeap::Malloc(full_path);
+		{
+			Line::sSourceFile[source_file_index] = (LPTSTR)malloc((_tcslen(full_path)+1)* sizeof(TCHAR)); //SimpleHeap::Malloc(full_path);
+			_tcscpy(Line::sSourceFile[source_file_index],full_path);
+		}
 	} 
 	else
 	{
@@ -13329,7 +13320,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 	ResultType if_condition, result;
 	LONG_OPERATION_INIT
 	global_struct &g = *::g; // Reduces code size and may improve performance. Eclipsing ::g with local g makes compiler remind/enforce the use of the right one.
-
+	
 	for (Line *line = this; line != NULL;)
 	{
 		// If a previous command (line) had the clipboard open, perhaps because it directly accessed
