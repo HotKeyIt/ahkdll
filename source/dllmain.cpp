@@ -375,7 +375,7 @@ unsigned __stdcall runScript( void* pArguments )
 
 EXPORT BOOL ahkTerminate(int timeout)
 {
-	int lpExitCode = 0;
+	DWORD lpExitCode = 0;
 	if (hThread == 0)
 		return 0;
 	if (timeout < 1)
@@ -467,9 +467,9 @@ ResultType terminateDll()
 	return EARLY_EXIT;
 }
 
-EXPORT BOOL ahkReload()
+EXPORT BOOL ahkReload(int timeout)
 {
-	ahkTerminate(0);
+	ahkTerminate(timeout);
 	hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, 0 );
 	return 0;
 }
@@ -774,6 +774,11 @@ HRESULT __stdcall CoCOMServer::ahkTerminate(/*[in,optional]*/ VARIANT kill,/*[ou
 	return S_OK;
 }
 
+HRESULT __stdcall CoCOMServer::ahkReload(/*[in,optional]*/ VARIANT timeout)
+{
+	com_ahkReload(Variant2I(timeout));
+	return S_OK;
+}
 HRESULT CoCOMServer::LoadTypeInfo(ITypeInfo ** pptinfo, const CLSID &libid, const CLSID &iid, LCID lcid)
 {
    HRESULT hr;
@@ -951,7 +956,7 @@ STDAPI DllGetClassObject(const CLSID& clsid,
 	}
 	TCHAR buf[MAX_PATH];
 #ifdef DEBUG
-	if (0 && GetModuleFileName(g_hInstance, buf, MAX_PATH))  // for debugging com 
+	if (0)  // for debugging com 
 #else
 	if (GetModuleFileName(g_hInstance, buf, MAX_PATH))
 #endif

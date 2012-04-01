@@ -35,6 +35,7 @@ library AutoHotkey
 		[id(14)] HRESULT addFile([in] VARIANT filepath,[in,optional] VARIANT aAllowDuplicateInclude,[in,optional] VARIANT aIgnoreLoadFailure,[out, retval] UINT_PTR* success);
 		[id(15)] HRESULT ahkExec([in] VARIANT script,[out, retval] BOOL* success);
 		[id(16)] HRESULT ahkTerminate([in,optional] VARIANT kill,[out, retval] BOOL* success);
+		[id(17)] HRESULT ahkReload([in,optional] VARIANT timeout);
 	}
 
 	[ uuid(FEEEC4BA-04AF-45F0-B385-7290C65CFB9B),

@@ -22,6 +22,7 @@ EXPORT BOOL ahkExec(LPTSTR script);
 
 void callFuncDllVariant(FuncAndToken *aFuncAndToken); 
 void callFuncDll(FuncAndToken *aFuncAndToken); 
+
 int initPlugins();
 
 #ifdef _USRDLL
@@ -31,7 +32,7 @@ EXPORT BOOL ahkTerminate(int timeout);
 EXPORT BOOL com_ahkTerminate(int timeout);
 EXPORT BOOL ahkReady();
 EXPORT BOOL com_ahkReady();
-EXPORT BOOL ahkReload();
+EXPORT BOOL ahkReload(int timeout);
 EXPORT BOOL com_ahkReload();
 void reloadDll();
 ResultType terminateDll();
@@ -60,6 +61,6 @@ UINT_PTR com_ahkdll(LPTSTR fileName,LPTSTR argv);
 UINT_PTR com_ahktextdll(LPTSTR fileName,LPTSTR argv);
 BOOL com_ahkTerminate(int timeout);
 BOOL com_ahkReady();
-BOOL com_ahkReload();
+BOOL com_ahkReload(int timeout);
 #endif
 #endif

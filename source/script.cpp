@@ -489,10 +489,10 @@ void Script::Destroy()
 	mTempFunc = NULL;
 	mTempLabel = NULL;
 	mTempLine = NULL;
-	for(i=1;Line::sSourceFileCount>i;i++) // HotKeyIt: first include file must not be deleted
+	for(i=1;Line::sSourceFileCount>i;i++) // first include file must not be deleted
 		free(Line::sSourceFile[i]);
 	Line::sSourceFileCount = 0;
-	//free(Line::sSourceFile);
+	// free(Line::sSourceFile);
 	// We call DestroyWindow() because MainWindowProc() has left that up to us.
 	// DestroyWindow() will cause MainWindowProc() to immediately receive and process the
 	// WM_DESTROY msg, which should in turn result in any child windows being destroyed
@@ -568,6 +568,8 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 	// In case the script is a relative filespec (relative to current working dir):
 	if (g_hResource || (hInstance != NULL && aIsText)) //It is a dll and script was given as text rather than file
 	{
+		if (!GetModuleFileName(hInstance, buf, _countof(buf))) //Get dll path in front to make sure we have a valid path anyway
+			GetModuleFileName(NULL, buf, _countof(buf)); //due to MemoryLoadLibrary dll path might be empty
 		PROCESS_BASIC_INFORMATION pbi;
 		ULONG ReturnLength;
 
@@ -607,16 +609,6 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 					}
 				}
 			}
-			else
-			{
-				if (!GetModuleFileName(hInstance, buf, _countof(buf))) //Get dll path
-					GetModuleFileName(NULL, buf, _countof(buf)); //due to MemoryLoadLibrary dll path might be empty
-			}
-		}
-		else
-		{
-			if (!GetModuleFileName(hInstance, buf, _countof(buf))) //Get dll path
-				GetModuleFileName(NULL, buf, _countof(buf)); //due to MemoryLoadLibrary dll path might be empty
 		}
 		CloseHandle(hProcess);
 	}
@@ -3228,7 +3220,10 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 
 		// This is done only after the file has been successfully opened in case aIgnoreLoadFailure==true:
 		if (source_file_index > 0)
-			Line::sSourceFile[source_file_index] = SimpleHeap::Malloc(full_path);
+		{
+			Line::sSourceFile[source_file_index] = (LPTSTR)malloc((_tcslen(full_path)+1)* sizeof(TCHAR)); //SimpleHeap::Malloc(full_path);
+			_tcscpy(Line::sSourceFile[source_file_index],full_path);
+		}
 	} 
 	else
 	{
@@ -15284,7 +15279,10 @@ BIF_DECL(BIF_PerformAction)
 	// benefit, ErrorLevel is not affected by the function if it is used as the return value.
 	VarBkp el_bkp;
 	if (output_var == g_ErrorLevel)
+	{
 		g_ErrorLevel->Backup(el_bkp);
+		g_ErrorLevel->MarkInitialized();
+	}
 
 
 	// PERFORM THE ACTION

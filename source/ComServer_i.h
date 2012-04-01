@@ -143,6 +143,9 @@ DEFINE_GUID(IID_ICOMServer,0xa58e17b4, 0xf892, 0x4839, 0x8c, 0x46, 0x9f, 0x3c, 0
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkTerminate( 
            /*[in,optional]*/ VARIANT kill,/*[out, retval]*/ BOOL* success) = 0;
+    public:
+        virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkReload( 
+           /*[in,optional]*/ VARIANT timeout) = 0;
     };
     
 #else 	/* C style interface */

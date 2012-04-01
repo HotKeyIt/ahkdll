@@ -33,7 +33,7 @@ UINT_PTR com_ahkdll(LPTSTR fileName,LPTSTR argv){return ahkdll(fileName,argv);}
 UINT_PTR com_ahktextdll(LPTSTR script,LPTSTR argv){return ahktextdll(script,argv);}
 BOOL com_ahkTerminate(int timeout){return ahkTerminate(timeout);}
 BOOL com_ahkReady(){return ahkReady();}
-BOOL com_ahkReload(){return ahkReload();}
+BOOL com_ahkReload(int timeout){return ahkReload(timeout);}
 #endif
 #endif
 #endif
