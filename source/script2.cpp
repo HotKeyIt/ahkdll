@@ -468,6 +468,7 @@ ResultType Line::Input()
 	g_input.FindAnywhere = false;
 	int timeout = 0;  // Set default.
 	TCHAR input_buf[INPUT_BUFFER_SIZE] = _T(""); // Will contain the actual input from the user.
+	TCHAR prev_buf[INPUT_BUFFER_SIZE] = _T("");
 	g_input.buffer = input_buf;
 	g_input.BufferLength = 0;
 	g_input.BufferLengthMax = INPUT_BUFFER_SIZE - 1;
@@ -477,8 +478,14 @@ ResultType Line::Input()
 		switch(ctoupper(*cp))
 		{
 		case 'A':
-			_tcscpy(g_input.buffer,output_var->Contents());
-			g_input.BufferLength = (int)_tcslen(g_input.buffer);
+			if (_tcslen(output_var->Contents())) // Append value if variable is not empty (only strings allowed)
+			{
+				g_input.BufferLength = (int) _tcslen(output_var->Contents());
+				if (g_input.BufferLength > INPUT_BUFFER_SIZE - 1)
+					g_input.BufferLength = INPUT_BUFFER_SIZE - 1;
+				_tcsncpy(input_buf,output_var->Contents(),g_input.BufferLength);
+				_tcscpy(prev_buf,input_buf);
+			}
 			break;
 		case 'B':
 			g_input.BackspaceIsUndo = false;
@@ -534,29 +541,33 @@ ResultType Line::Input()
 	// 2) A thread that interrupts us with a new Input of its own;
 	// 3) The timer we put in effect for our timeout (if we have one).
 	//////////////////////////////////////////////////////////////////
-	// HotKeyIt H24 check for vars contents and updatebuffer
-	TCHAR prev_buf[INPUT_BUFFER_SIZE];
-	if ((int)output_var->Length() <= INPUT_BUFFER_SIZE)
-		_tcscpy(prev_buf,output_var->Contents());
+
 	for (;;)
 	{
 		// Rather than monitoring the timeout here, just wait for the incoming WM_TIMER message
 		// to take effect as a TimerProc() call during the MsgSleep():
 		MsgSleep();
-		// HotKeyIt H15 added for multithreading support so variable can be read from other threads while input is in progress
-		if (_tcscmp(prev_buf,output_var->Contents())) // HotKeyIt H24 check for vars contents and updatebuffer
+		// HotKeyIt added multi-threading support so variable can be read from other threads while input is in progress
+		if (_tcsncmp(prev_buf,output_var->Contents(),_tcslen(output_var->Contents()) > INPUT_BUFFER_SIZE - 1 ? INPUT_BUFFER_SIZE - 1 : _tcslen(output_var->Contents()))) // Check for vars contents and updatebuffer
 		{
-			if ((int)output_var->Length() <= INPUT_BUFFER_SIZE)
-			{
-				g_input.BufferLength = (int)output_var->Length();
-				_tcscpy(g_input.buffer,output_var->Contents());
-				_tcscpy(prev_buf,output_var->Contents());
-			}
+			g_input.BufferLength = (int) _tcslen(output_var->Contents());
+			if (g_input.BufferLength > INPUT_BUFFER_SIZE - 1)
+				g_input.BufferLength = INPUT_BUFFER_SIZE - 1;
+			_tcsncpy(input_buf,output_var->Contents(),g_input.BufferLength);
+			_tcscpy(prev_buf,input_buf);
 		}
 		else if (_tcscmp(prev_buf,input_buf))
 		{
-			output_var->Assign(input_buf);
-			_tcscpy(prev_buf,output_var->Contents());
+			if (_tcslen(input_buf) || !output_var->CharCapacity()) // Assign will free memory if input_buf empty
+			{
+				output_var->Assign(input_buf);
+				_tcscpy(prev_buf,input_buf);
+			}
+			else
+			{  // Assign empty string
+				*output_var->mAliasFor->mCharContents = '\0';
+				*prev_buf = '\0';
+			}
 		}
 		if (g_input.status != INPUT_IN_PROGRESS)
 			break;
@@ -613,7 +624,13 @@ ResultType Line::Input()
 	// Seems ok to assign after the kill/purge above since input_buf is our own stack variable
 	// and its contents shouldn't be affected even if KILL_AND_PURGE_INPUT_TIMER's MsgSleep()
 	// results in a new thread being created that starts a new Input:
-	return output_var->Assign(input_buf);
+	if (_tcslen(input_buf) || !output_var->CharCapacity()) // Assign will free memory if input_buf empty
+		return output_var->Assign(input_buf);
+	else
+	{
+		*output_var->mAliasFor->mCharContents = '\0'; // Assign empty string
+		return OK;
+	}
 }
 #endif
 
