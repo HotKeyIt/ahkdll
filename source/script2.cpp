@@ -1733,17 +1733,21 @@ ResultType Line::Input()
 
 	for (;;)
 	{
+		int output_var_len;
 		// Rather than monitoring the timeout here, just wait for the incoming WM_TIMER message
 		// to take effect as a TimerProc() call during the MsgSleep():
 		MsgSleep();
 		// HotKeyIt added multi-threading support so variable can be read from other threads while input is in progress
-		if (_tcsncmp(prev_buf,output_var->Contents(),_tcslen(output_var->Contents()) > INPUT_BUFFER_SIZE - 1 ? INPUT_BUFFER_SIZE - 1 : _tcslen(output_var->Contents()))) // Check for vars contents and updatebuffer
+		output_var_len = (int) _tcslen(output_var->Contents());
+		if (output_var_len > INPUT_BUFFER_SIZE - 1)
+			output_var_len = INPUT_BUFFER_SIZE - 1;
+		if (_tcsncmp(prev_buf,output_var->Contents(),output_var_len ? output_var_len : 1)) // Check for vars contents and updatebuffer
 		{
-			g_input.BufferLength = (int) _tcslen(output_var->Contents());
-			if (g_input.BufferLength > INPUT_BUFFER_SIZE - 1)
-				g_input.BufferLength = INPUT_BUFFER_SIZE - 1;
-			_tcsncpy(input_buf,output_var->Contents(),g_input.BufferLength);
-			_tcscpy(prev_buf,input_buf);
+			g_input.BufferLength = output_var_len;
+			_tcsncpy(input_buf,output_var->Contents(),output_var_len);
+			input_buf[output_var_len] = '\0';
+			_tcsncpy(prev_buf,input_buf,output_var_len);
+			prev_buf[output_var_len] = '\0';
 		}
 		else if (_tcscmp(prev_buf,input_buf))
 		{
