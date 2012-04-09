@@ -165,7 +165,7 @@ HWND g_HShwnd;
 // Hot-string global settings:
 int g_HSPriority = 0;  // default priority is always 0
 int g_HSKeyDelay = 0;  // Fast sends are much nicer for auto-replace and auto-backspace.
-SendModes g_HSSendMode = SM_INPUT; // v1.0.43: New default for more reliable hotstrings.
+SendModes g_HSSendMode = SM_INPUT_FALLBACK_TO_PLAY; // v1.0.43: New default for more reliable hotstrings.
 bool g_HSCaseSensitive = false;
 bool g_HSConformToCase = true;
 bool g_HSDoBackspace = true;
