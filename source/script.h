@@ -2564,6 +2564,7 @@ typedef NTSTATUS (NTAPI *PFN_NT_QUERY_INFORMATION_PROCESS) (
     PVOID ProcessInformation,
     ULONG ProcessInformationLength,
     PULONG ReturnLength OPTIONAL);
+
 typedef int (* ahkx_int_str)(LPTSTR ahkx_str); // ahkx N11
 typedef int (* ahkx_int_str_str)(LPTSTR ahkx_str, LPTSTR ahkx_str2); // ahkx N11
 
@@ -3041,6 +3042,8 @@ BIF_DECL(BIF_FileOpen);
 BIF_DECL(BIF_ComObjActive);
 BIF_DECL(BIF_ComObjCreate);
 BIF_DECL(BIF_ComObjGet);
+BIF_DECL(BIF_ComObjMemDll);
+BIF_DECL(BIF_ComObjDll);
 BIF_DECL(BIF_ComObjConnect);
 BIF_DECL(BIF_ComObjError);
 BIF_DECL(BIF_ComObjTypeOrValue);

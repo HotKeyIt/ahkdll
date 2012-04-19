@@ -10125,6 +10125,18 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		}
 		else if	(!_tcsicmp(suffix, _T("Get")))
 			bif = BIF_ComObjGet;
+		else if	(!_tcsicmp(suffix, _T("MemDll")))
+		{
+			bif = BIF_ComObjMemDll;
+			min_params = 2;
+			max_params = 2;
+		}
+		else if	(!_tcsicmp(suffix, _T("Dll")))
+		{
+			bif = BIF_ComObjDll;
+			min_params = 2;
+			max_params = 2;
+		}
 		else if	(!_tcsicmp(suffix, _T("Connect")))
 		{
 			bif = BIF_ComObjConnect;
