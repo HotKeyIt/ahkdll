@@ -160,6 +160,8 @@ FuncEntry g_BIF[] =
 	{_T("ComObject"), BIF_ComObjActive, 0, 3, true},
 	{_T("ComObjCreate"), BIF_ComObjCreate, 1, 2, true},
 	{_T("ComObjGet"), BIF_ComObjGet, 1, 1, true},
+	{_T("ComObjDll"), BIF_ComObjDll, 2, 2, true},
+	{_T("ComObjMemDll"), BIF_ComObjMemDll, 2, 2, true},
 	{_T("ComObjConnect"), BIF_ComObjConnect, 1, 2, true},
 	{_T("ComObjError"), BIF_ComObjError, 0, 1, true},
 	{_T("ComObjType"), BIF_ComObjTypeOrValue, 1, 2, true},

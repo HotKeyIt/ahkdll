@@ -2909,6 +2909,8 @@ BIF_DECL(BIF_FileOpen);
 BIF_DECL(BIF_ComObjActive);
 BIF_DECL(BIF_ComObjCreate);
 BIF_DECL(BIF_ComObjGet);
+BIF_DECL(BIF_ComObjMemDll);
+BIF_DECL(BIF_ComObjDll);
 BIF_DECL(BIF_ComObjConnect);
 BIF_DECL(BIF_ComObjError);
 BIF_DECL(BIF_ComObjTypeOrValue);
