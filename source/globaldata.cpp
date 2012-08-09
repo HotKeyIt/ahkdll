@@ -36,7 +36,7 @@ ATOM g_ClassRegistered = 0;
 ATOM g_ClassSplashRegistered = 0;
 CRITICAL_SECTION g_CriticalRegExCache;
 
-UINT g_DefaultScriptCodepage = UorA(CP_UTF8, CP_ACP);
+UINT g_DefaultScriptCodepage = CP_ACP;
 
 bool g_DestroyWindowCalled = false;
 HWND g_hWnd = NULL;
@@ -536,6 +536,7 @@ Action g_act[] =
 	, {_T("RegRead"), 1, 5, 5 H, NULL} // output var, (ValueType [optional]), RegKey, RegSubkey, ValueName
 	, {_T("RegWrite"), 0, 5, 5, NULL} // ValueType, RegKey, RegSubKey, ValueName, Value (set to blank if omitted?)
 	, {_T("RegDelete"), 0, 3, 3, NULL} // RegKey, RegSubKey, ValueName
+	, {_T("SetRegView"), 1, 1, 1, NULL}
 
 	, {_T("OutputDebug"), 1, 1, 1, NULL}
 

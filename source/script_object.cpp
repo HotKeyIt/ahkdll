@@ -20,7 +20,7 @@ ResultType CallFunc(Func &aFunc, ExprTokenType &aResultToken, ExprTokenType *aPa
 	{
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
-		return FAIL;
+		return OK; // Not FAIL, which would cause the entire thread to exit.
 	}
 
 	// When this variable goes out of scope, Var::FreeAndRestoreFunctionVars() is called (if appropriate):
@@ -853,6 +853,10 @@ ResultType Object::_Remove(ExprTokenType &aResultToken, ExprTokenType *aParam[],
 		default:
 			aResultToken.value_int64 = min_field->n_int64; // Effectively also value_double = n_double.
 		}
+		// If the key is an object, release it now because Free() doesn't.
+		// Note that object keys can only be removed in the single-item mode.
+		if (min_key_type == SYM_OBJECT)
+			min_field->key.p->Release();
 		// Set these up as if caller did _Remove(min_key, min_key):
 		max_pos = min_pos + 1;
 		max_key.i = min_key.i; // Union copy. Used only if min_key_type == SYM_INTEGER; has no effect in other cases.
@@ -1519,7 +1523,7 @@ ResultType STDMETHODCALLTYPE Func::Invoke(ExprTokenType &aResultToken, ExprToken
 	}
 	return CallFunc(*this, aResultToken, aParam, aParamCount);
 }
-	
+
 
 //
 // MetaObject - Defines behaviour of object syntax when used on a non-object value.
@@ -1579,3 +1583,30 @@ ResultType STDMETHODCALLTYPE MetaObject::Invoke(ExprTokenType &aResultToken, Exp
 
 	return result;
 }
+
+
+#ifdef CONFIG_DEBUGGER
+
+void ObjectBase::DebugWriteProperty(IDebugProperties *aDebugger, int aPage, int aPageSize, int aMaxDepth)
+{
+	DebugCookie cookie;
+	aDebugger->BeginProperty(NULL, "object", 0, cookie);
+	//if (aPage == 0)
+	//{
+	//	// This is mostly a workaround for debugger clients which make it difficult to
+	//	// tell when a property contains an object with no child properties of its own:
+	//	aDebugger->WriteProperty("Note", _T("This object doesn't support debugging."));
+	//}
+	aDebugger->EndProperty(cookie);
+}
+
+void Func::DebugWriteProperty(IDebugProperties *aDebugger, int aPage, int aPageSize, int aMaxDepth)
+{
+	DebugCookie cookie;
+	aDebugger->BeginProperty(NULL, "object", 1, cookie);
+	if (aPage == 0)
+		aDebugger->WriteProperty("Name", mName);
+	aDebugger->EndProperty(cookie);
+}
+
+#endif

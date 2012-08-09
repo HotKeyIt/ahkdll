@@ -216,6 +216,10 @@ ResultType Var::AssignClipboardAll()
 	//    (above avoids using four times the amount of memory that would otherwise be required)
 	//    UPDATE: Only the first text format is included now, since MSDN says there is no
 	//    advantage/reason to having multiple non-synthesized text formats on the clipboard.
+	//    UPDATE: MS Word 2010 (and perhaps other versions) stores CF_TEXT before CF_UNICODETEXT,
+	//    even when CF_TEXT is incomplete/inaccurate. Since there's no way to know whether it was
+	//    synthesized, it is now stored unconditionally. CF_TEXT and CF_OEMTEXT are discarded to
+	//    save memory and because they should always be synthesized correctly.
 	// CF_DIB: Always omit this if CF_DIBV5 is available (which must be present on Win2k+, at least
 	// as a synthesized format, whenever CF_DIB is present?) This policy seems likely to avoid
 	// the issue where CF_DIB occurs first yet CF_DIBV5 that comes later is *not* synthesized,
@@ -228,12 +232,11 @@ ResultType Var::AssignClipboardAll()
 	// under the theory that an app would never store both formats on the clipboard since MSDN
 	// says: "If the system provides an automatic type conversion for a particular clipboard format,
 	// there is no advantage to placing the conversion format(s) on the clipboard."
-	bool format_is_text;
 	HGLOBAL hglobal;
 	SIZE_T size;
 	UINT format;
 	VarSizeType space_needed;
-	UINT dib_format_to_omit = 0, /*meta_format_to_omit = 0,*/ text_format_to_include = 0;
+	UINT dib_format_to_omit = 0;
 	// Start space_needed off at 4 to allow room for guaranteed final termination of the variable's contents.
 	// The termination must be of the same size as format because a single-byte terminator would
 	// be read in as a format of 0x00?????? where ?????? is an access violation beyond the buffer.
@@ -249,8 +252,7 @@ ResultType Var::AssignClipboardAll()
 		}
 		// No point in calling GetLastError() since it would never be executed because the loop's
 		// condition breaks on zero return value.
-		format_is_text = (format == CF_NATIVETEXT || format == CF_OEMTEXT || format == CF_OTHERTEXT);
-		if ((format_is_text && text_format_to_include) // The first text format has already been found and included, so exclude all other text formats.
+		if (format == CF_TEXT || format == CF_OEMTEXT // This format is excluded in favour of CF_UNICODETEXT.
 			|| format == dib_format_to_omit) // ... or this format was marked excluded by a prior iteration.
 			continue;
 		// GetClipboardData() causes Task Manager to report a (sometimes large) increase in
@@ -266,8 +268,6 @@ ResultType Var::AssignClipboardAll()
 		if (hglobal = g_clip.GetClipboardDataTimeout(format))
 		{
 			space_needed += (VarSizeType)(sizeof(format) + sizeof(size) + GlobalSize(hglobal)); // The total amount of storage space required for this item.
-			if (format_is_text) // If this is true, then text_format_to_include must be 0 since above didn't "continue".
-				text_format_to_include = format;
 			if (!dib_format_to_omit)
 			{
 				if (format == CF_DIB)
@@ -321,7 +321,7 @@ ResultType Var::AssignClipboardAll()
 		}
 		// No point in calling GetLastError() since it would never be executed because the loop's
 		// condition breaks on zero return value.
-		if ((format == CF_NATIVETEXT || format == CF_OEMTEXT || format == CF_OTHERTEXT) && format != text_format_to_include
+		if (format == CF_TEXT || format == CF_OEMTEXT
 			|| format == dib_format_to_omit /*|| format == meta_format_to_omit*/)
 			continue;
 		// Although the GlobalSize() documentation implies that a valid HGLOBAL should not be zero in
@@ -857,8 +857,10 @@ void Var::Free(int aWhenToFree, bool aExcludeAliasesAndRequireInit)
 
 	// Must check this one first because caller relies not only on var not being freed in this case,
 	// but also on its contents not being set to an empty string:
-	if (aWhenToFree == VAR_ALWAYS_FREE_BUT_EXCLUDE_STATIC && IsStatic())
-		return; // This is the only case in which the variable ISN'T made blank.
+	
+	// HotKeyIt changed because static vars are saved in separate list
+	//if (aWhenToFree == VAR_ALWAYS_FREE_BUT_EXCLUDE_STATIC && IsStatic())
+	//	return; // This is the only case in which the variable ISN'T made blank.
 
 	if (IsObject()) // L31: Release this variable's reference to its object.
 		ReleaseObject();
@@ -1076,10 +1078,12 @@ ResultType Var::BackupFunctionVars(Func &aFunc, VarBkp *&aVarBackup, int &aVarBa
 	// Note that Backup() does not make the variable empty after backing it up because that is something
 	// that must be done by our caller at a later stage.
 	for (i = 0; i < aFunc.mVarCount; ++i)
-		if (!aFunc.mVar[i]->IsStatic()) // Don't bother backing up statics because they won't need to be restored.
+		// HotKeyIt removed since static are now saved in a separate list
+		// if (!aFunc.mVar[i]->IsStatic()) // Don't bother backing up statics because they won't need to be restored.
 			aFunc.mVar[i]->Backup(aVarBackup[aVarBackupCount++]);
 	for (i = 0; i < aFunc.mLazyVarCount; ++i)
-		if (!aFunc.mLazyVar[i]->IsStatic()) // Don't bother backing up statics because they won't need to be restored.
+		// HotKeyIt static vars are saved separately
+		// if (!aFunc.mLazyVar[i]->IsStatic()) // Don't bother backing up statics because they won't need to be restored.
 			aFunc.mLazyVar[i]->Backup(aVarBackup[aVarBackupCount++]);
 	return OK;
 }
@@ -1130,9 +1134,9 @@ void Var::FreeAndRestoreFunctionVars(Func &aFunc, VarBkp *&aVarBackup, int &aVar
 {
 	int i;
 	for (i = 0; i < aFunc.mVarCount; ++i)
-		aFunc.mVar[i]->Free(VAR_ALWAYS_FREE_BUT_EXCLUDE_STATIC, true); // Pass "true" to exclude aliases, since their targets should not be freed (they don't belong to this function). Also resets the "uninitialized" attribute.
+		aFunc.mVar[i]->Free(VAR_ALWAYS_FREE, true); // Pass "true" to exclude aliases, since their targets should not be freed (they don't belong to this function). Also resets the "uninitialized" attribute.
 	for (i = 0; i < aFunc.mLazyVarCount; ++i)
-		aFunc.mLazyVar[i]->Free(VAR_ALWAYS_FREE_BUT_EXCLUDE_STATIC, true);
+		aFunc.mLazyVar[i]->Free(VAR_ALWAYS_FREE, true);
 
 	// The freeing (above) MUST be done prior to the restore-from-backup below (otherwise there would be
 	// a memory leak).  Static variables are never backed up and thus do not exist in the aVarBackup array.

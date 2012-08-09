@@ -534,10 +534,11 @@ public:
 
 	// Not an enum so that it can be global more easily:
 	#define VAR_ALWAYS_FREE                    0 // This item and the next must be first and numerically adjacent to
-	#define VAR_ALWAYS_FREE_BUT_EXCLUDE_STATIC 1 // each other so that VAR_ALWAYS_FREE_LAST covers only them.
-	#define VAR_ALWAYS_FREE_LAST               2 // Never actually passed as a parameter, just a placeholder (see above comment).
-	#define VAR_NEVER_FREE                     3
-	#define VAR_FREE_IF_LARGE                  4
+	// HotKeyIt removed due to separate static var list
+	//#define VAR_ALWAYS_FREE_BUT_EXCLUDE_STATIC 1 // each other so that VAR_ALWAYS_FREE_LAST covers only them.
+	#define VAR_ALWAYS_FREE_LAST               1 // Never actually passed as a parameter, just a placeholder (see above comment).
+	#define VAR_NEVER_FREE                     2
+	#define VAR_FREE_IF_LARGE                  3
 	void Free(int aWhenToFree = VAR_ALWAYS_FREE, bool aExcludeAliasesAndRequireInit = false);
 	ResultType AppendIfRoom(LPTSTR aStr, VarSizeType aLength);
 	void AcceptNewMem(LPTSTR aNewMem, VarSizeType aLength);

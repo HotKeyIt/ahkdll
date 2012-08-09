@@ -54,6 +54,10 @@ public:
 	// and because it is likely to be more convenient and reliable than overriding
 	// Delete(), especially with a chain of derived types.
 	virtual ~ObjectBase() {}
+
+#ifdef CONFIG_DEBUGGER
+	void DebugWriteProperty(IDebugProperties *, int aPage, int aPageSize, int aDepth);
+#endif
 };	
 
 
@@ -263,6 +267,10 @@ public:
 	ResultType _Clone(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 
 	static LPTSTR sMetaFuncName[];
+
+#ifdef CONFIG_DEBUGGER
+	void DebugWriteProperty(IDebugProperties *, int aPage, int aPageSize, int aDepth);
+#endif
 };
 
 
@@ -294,8 +302,9 @@ class RegExMatchObject : public ObjectBase
 	int *mOffset;
 	LPTSTR *mPatternName;
 	int mPatternCount;
+	LPTSTR mMark;
 
-	RegExMatchObject() : mHaystack(NULL), mOffset(NULL), mPatternName(NULL), mPatternCount(0) {}
+	RegExMatchObject() : mHaystack(NULL), mOffset(NULL), mPatternName(NULL), mPatternCount(0), mMark(NULL) {}
 	
 	~RegExMatchObject()
 	{
@@ -312,11 +321,102 @@ class RegExMatchObject : public ObjectBase
 			// Free the array:
 			free(mPatternName);
 		}
+		if (mMark)
+			free(mMark);
 	}
 
 public:
 	static RegExMatchObject *Create(LPCTSTR aHaystack, int *aOffset, LPCTSTR *aPatternName
-		, int aPatternCount, int aCapturedPatternCount);
+		, int aPatternCount, int aCapturedPatternCount, LPCTSTR aMark);
 	
 	ResultType STDMETHODCALLTYPE Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
+
+#ifdef CONFIG_DEBUGGER
+	void DebugWriteProperty(IDebugProperties *, int aPage, int aPageSize, int aDepth);
+#endif
+};
+
+//
+// Struct - Scriptable associative array.
+//
+
+class Struct : public ObjectBase
+{
+protected:
+	typedef INT_PTR IndexType; // Type of index for the internal array.  Must be signed for FindKey to work correctly.
+	struct FieldType
+	{
+		UINT_PTR *mStructMem;	// Pointer to allocated memory
+		int mSize;				// Size of field
+		int mOffset;			// Offset for field	
+		int mIsPointer;			// Pointer depth
+		bool mIsInteger;		// IsInteger for NumGet/NumPut
+		bool mIsUnsigned;		// IsUnsigned for NumGet/NumPut
+		USHORT mEncoding;		// Encoding for StrGet/StrPut
+		int mArraySize;			// ArraySize = 0 if not an array
+		int mMemAllocated;		// Identify that we allocated memory
+		Var *mVarRef;			// Reference to a variable containing the definition
+		LPTSTR key;				// Name of field
+	};
+	
+	FieldType *mFields;
+	IndexType mFieldCount, mFieldCountMax; // Current/max number of fields.
+
+	// for loop enumerator
+	class Enumerator : public EnumBase
+	{
+		Struct *mObject;
+		IndexType mOffset;
+	public:
+		Enumerator(Struct *aObject) : mObject(aObject), mOffset(-1) { mObject->AddRef(); }
+		~Enumerator() { mObject->Release(); }
+		int Next(Var *aKey, Var *aVal);
+	};
+
+#ifdef CONFIG_DEBUGGER
+	friend class Debugger;
+#endif
+
+	Struct()
+		: mFields(NULL), mFieldCount(0), mFieldCountMax(0), mTypeOnly(false)
+		, mStructMem(0), mSize(0), mIsPointer(0), mIsInteger(true), mIsUnsigned(true)
+		, mEncoding(-1), mArraySize(0), mMemAllocated(false), mVarRef(NULL)
+	{}
+
+	bool Delete();
+	~Struct();
+
+	FieldType *FindField(LPTSTR val);
+	FieldType *Insert(LPTSTR key, IndexType at,UCHAR aIspointer,int aOffset,int aArrsize,Var *variableref,int aFieldsize,bool aIsinteger,bool aIsunsigned,USHORT aEncoding);
+	bool SetInternalCapacity(IndexType new_capacity);
+	bool Expand()
+	// Expands mFields by at least one field.
+	{
+		return SetInternalCapacity(mFieldCountMax ? mFieldCountMax * 2 : 4);
+	}
+
+public:
+	UINT_PTR *mStructMem;		// Pointer to allocated memory
+	bool mTypeOnly;				// Identify that structure has no fields
+	int mSize;					// Size of structure
+	int mIsPointer;				// Pointer depth
+	bool mIsInteger;			// IsInteger for NumGet/NumPut
+	bool mIsUnsigned;			// IsUnsigned for NumGet/NumPut
+	USHORT mEncoding;			// Encoding for StrGet/StrPut
+	int mArraySize;				// ArraySize = 0 if not an array
+	int mMemAllocated;			// Identify that we allocated memory
+	Var *mVarRef;				// Reference to a variable containing the definition
+
+	static Struct *Create(ExprTokenType *aParam[] = NULL, int aParamCount = 0);
+	
+	Struct *Clone(bool aIsDynamic = false);
+	Struct *CloneField(FieldType *field,bool aIsDynamic = false);
+	UINT_PTR SetPointer(UINT_PTR aPointer,int aArrayItem = 1);
+	void ObjectToStruct(IObject *objfrom);
+	ResultType _NewEnum(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+	ResultType STDMETHODCALLTYPE Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
+
+#ifdef CONFIG_DEBUGGER
+	void DebugWriteProperty(IDebugProperties *, int aPage, int aPageSize, int aDepth);
+#endif
 };

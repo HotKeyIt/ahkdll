@@ -29,16 +29,20 @@
 #pragma warning( disable : 4311 4312 )
 #endif
 
+#include "stdafx.h" // pre-compiled headers
+#include "MemoryModule.h"
+#include "globaldata.h" // for access to many global vars
+
 #ifdef _WIN64
 #define POINTER_TYPE ULONGLONG
 #else
 #define POINTER_TYPE DWORD
 #endif
 
-#include <Windows.h>
+//#include <Windows.h>
 #include <winnt.h>
 
-#include <stdio.h>
+//#include <stdio.h>
 
 //#ifdef DEBUG_OUTPUT
 //#include <stdio.h>
@@ -49,8 +53,6 @@
 // Vista SDKs no longer define IMAGE_SIZEOF_BASE_RELOCATION!?
 #define IMAGE_SIZEOF_BASE_RELOCATION (sizeof(IMAGE_BASE_RELOCATION))
 #endif
-
-#include "MemoryModule.h"
 
 typedef struct {
 	PIMAGE_NT_HEADERS headers;
@@ -274,7 +276,7 @@ BuildImportTable(PMEMORYMODULE module)
 			PIMAGE_RESOURCE_DATA_ENTRY resDataEntry;
 
 			// ACTCTX Structure, not used members must be set to 0!
-			ACTCTX actctx ={0,0,0,0,0,0,0,0,0};
+			ACTCTXA actctx ={0,0,0,0,0,0,0,0,0};
 			actctx.cbSize =  sizeof(actctx);
 			HANDLE hActCtx;
 		
@@ -303,7 +305,7 @@ BuildImportTable(PMEMORYMODULE module)
 					// Write manifest to temportary file
 					// Using FILE_ATTRIBUTE_TEMPORARY will avoid writing it to disk
 					// It will be deleted after CreateActCtx has been called.
-					HANDLE hFile = CreateFile(buf,GENERIC_WRITE,NULL,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_TEMPORARY,NULL);
+					HANDLE hFile = CreateFileA(buf,GENERIC_WRITE,NULL,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_TEMPORARY,NULL);
 					if (hFile == INVALID_HANDLE_VALUE)
 					{
 	#if DEBUG_OUTPUT
@@ -316,13 +318,13 @@ BuildImportTable(PMEMORYMODULE module)
 					CloseHandle(hFile);
 					if (byteswritten == 0)
 					{
-	#if DEBUG_OUTPUT
+#if DEBUG_OUTPUT
 						OutputDebugStringA("WriteFile failed.\n");
-	#endif
+#endif
 						break; //failed to write data, continue and try loading
 					}
 				
-					hActCtx = CreateActCtx(&actctx);
+					hActCtx = CreateActCtxA(&actctx);
 
 					// Open file and automatically delete on CloseHandle (FILE_FLAG_DELETE_ON_CLOSE)
 					hFile = CreateFileA(buf,GENERIC_WRITE,FILE_SHARE_DELETE,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_TEMPORARY|FILE_FLAG_DELETE_ON_CLOSE,NULL);
@@ -341,7 +343,9 @@ BuildImportTable(PMEMORYMODULE module)
 			POINTER_TYPE *thunkRef;
 			FARPROC *funcRef;
 			HMODULE handle;
+#if DEBUG_OUTPUT
 			OutputDebugStringA((LPCSTR) (codeBase + importDesc->Name));
+#endif
 			if (!(handle = LoadLibraryA((LPCSTR) (codeBase + importDesc->Name))))
 			{
 #if DEBUG_OUTPUT

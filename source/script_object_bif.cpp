@@ -7,6 +7,307 @@
 
 
 //
+// BIF_Struct - Create structure
+//
+
+BIF_DECL(BIF_Struct)
+{
+	// At least the definition for structure must be given
+	if (!aParamCount)
+		return;
+	IObject *obj = Struct::Create(aParam,aParamCount);
+	if (obj)
+	{
+		aResultToken.symbol = SYM_OBJECT;
+		aResultToken.object = obj;
+		return;
+		// DO NOT ADDREF: after we return, the only reference will be in aResultToken.
+	}
+	// indicate error
+	aResultToken.symbol = SYM_STRING;
+	aResultToken.marker = _T("");
+}
+//
+// BIF_sizeof - sizeof() for structures and default types
+//
+
+BIF_DECL(BIF_sizeof)
+// This code is very similar to BIF_Struct so should be maintained together
+{
+	int ptrsize = sizeof(UINT_PTR); // Used for pointers on 32/64 bit system
+	int offset = 0;					// also used to calculate total size of structure
+	int arraydef = 0;				// count arraysize to update offset
+	int unionoffset[100];			// backup offset before we enter union or structure
+	int unionsize[100];				// calculate unionsize
+	bool unionisstruct[10];			// updated to move offset for structure in structure
+	int totalunionsize = 0;			// total size of all unions and structures in structure
+	int uniondepth = 0;				// count how deep we are in union/structure
+#ifdef _WIN64
+	int aligntotal = 0;				// pointer alignment for total structure
+#endif
+	int thissize;					// used to save size returned from IsDefaultType
+	
+	// following are used to find variable and also get size of a structure defined in variable
+	// this will hold the variable reference and offset that is given to size() to align if necessary in 64-bit
+	ResultType Result = OK;
+	ExprTokenType ResultToken;
+	ExprTokenType Var1,Var2;
+	Var1.symbol = SYM_VAR;
+	Var2.symbol = SYM_INTEGER;
+	ExprTokenType *param[] = {&Var1,&Var2};
+	
+	// will hold pointer to structure definition while we parse it
+	TCHAR *buf;
+	size_t buf_size;
+	// Should be enough buffer to accept any definition and name.
+	TCHAR tempbuf[LINE_SIZE]; // just in case if we have a long comment
+
+	// definition and field name are same max size as variables
+	// also add enough room to store pointers (**) and arrays [1000]
+	TCHAR defbuf[MAX_VAR_NAME_LENGTH*2 + 40];
+	
+	// buffer for arraysize + 2 for bracket ] and terminating character
+	TCHAR intbuf[MAX_INTEGER_LENGTH + 2];
+
+	// Set result to empty string to identify error
+	aResultToken.symbol = SYM_STRING;
+	aResultToken.marker = _T("");
+	
+	// Parameter passed to IsDefaultType needs to be ' Definition '
+	// this is because spaces are used as delimiters ( see IsDefaultType function )
+	// So first character will be always a space
+	defbuf[0] = ' ';
+	
+	// if first parameter is an object (struct), simply return its size
+	if (TokenToObject(*aParam[0]))
+	{
+		aResultToken.symbol = SYM_INTEGER;
+		Struct *obj = (Struct*)TokenToObject(*aParam[0]);
+		aResultToken.value_int64 = obj->mSize;
+		return;
+	}
+
+	if (aParamCount > 1 && TokenIsPureNumeric(*aParam[1]))
+	{	// an offset was given, set starting offset 
+		offset = (int)TokenToInt64(*aParam[1]);
+		Var2.value_int64 = (__int64)offset;
+	}
+
+	// Set buf to beginning of structure definition
+	buf = TokenToString(*aParam[0]);
+
+	// continue as long as we did not reach end of string / structure definition
+	while (*buf)
+	{
+		if (!_tcsncmp(buf,_T("//"),2)) // exclude comments
+		{
+			buf = StrChrAny(buf,_T("\n\r")) ? StrChrAny(buf,_T("\n\r")) : (buf + _tcslen(buf));
+			if (!*buf)
+				break; // end of definition reached
+		}
+		if (buf == StrChrAny(buf,_T("\n\r\t ")))
+		{	// Ignore spaces, tabs and new lines before field definition
+			buf++;
+			continue;
+		}
+		else if (_tcschr(buf,'{') && (!StrChrAny(buf, _T(";,")) || _tcschr(buf,'{') < StrChrAny(buf, _T(";,"))))
+		{   // union or structure in structure definition
+			if (!uniondepth++)
+				totalunionsize = 0; // done here to reduce code
+			if (_tcsstr(buf,_T("struct")) && _tcsstr(buf,_T("struct")) < _tcschr(buf,'{'))
+				unionisstruct[uniondepth] = true; // mark that union is a structure
+			else 
+				unionisstruct[uniondepth] = false; 
+			// backup offset because we need to set it back after this union / struct was parsed
+			// unionsize is initialized to 0 and buffer moved to next character
+			unionoffset[uniondepth] = offset; 
+			unionsize[uniondepth] = 0;
+			// ignore even any wrong input here so it is even {mystructure...} for struct and  {anyother string...} for union
+			buf = _tcschr(buf,'{') + 1;
+			continue;
+		} 
+		else if (*buf == '}')
+		{	// update union
+			// now restore offset even if we had a structure in structure
+			if (unionsize[uniondepth]>totalunionsize)
+				totalunionsize = unionsize[uniondepth];
+			// last item in union or structure, update offset now if not struct, for struct offset is up to date
+			if (--uniondepth == 0)
+			{
+				if (!unionisstruct[uniondepth + 1]) // because it was decreased above
+					offset += totalunionsize;
+			}
+			else 
+				offset = unionoffset[uniondepth];
+			buf++;
+			if (buf == StrChrAny(buf,_T(";,")))
+				buf++;
+			continue;
+		}
+		// set default
+		arraydef = 0;
+
+		// copy current definition field to temporary buffer
+		if (StrChrAny(buf, _T("};,")))
+		{
+			if ((buf_size = _tcscspn(buf, _T("};,"))) > LINE_SIZE - 1)
+				return;
+			_tcsncpy(tempbuf,buf,buf_size);
+			tempbuf[buf_size] = '\0';
+		}
+		else if (_tcslen(buf) > LINE_SIZE - 1)
+			return;
+		else
+			_tcscpy(tempbuf,buf);
+		
+		// Trim trailing spaces
+		rtrim(tempbuf);
+
+		// Array
+		if (_tcschr(tempbuf,'['))
+		{
+			_tcsncpy(intbuf,_tcschr(tempbuf,'['),MAX_INTEGER_LENGTH);
+			intbuf[_tcscspn(intbuf,_T("]")) + 1] = '\0';
+			arraydef = (int)ATOI64(intbuf + 1);
+			// remove array definition
+			StrReplace(tempbuf, intbuf, _T(""), SCS_SENSITIVE, UINT_MAX, LINE_SIZE);
+		}
+
+		// Pointer, while loop will continue here because we only need size
+		if (_tcschr(tempbuf,'*'))
+		{
+			offset += ptrsize * (arraydef ? arraydef : 1);
+#ifdef _WIN64
+			// align offset for pointer
+			if (offset % ptrsize)
+				offset += (ptrsize - (offset % ptrsize)) * (arraydef ? arraydef : 1);
+			if (ptrsize > aligntotal)
+				aligntotal = ptrsize;
+#endif
+			// update offset
+			if (uniondepth)
+			{
+				if ((offset - unionoffset[uniondepth]) > unionsize[uniondepth])
+					unionsize[uniondepth] = offset - unionoffset[uniondepth];
+				// reset offset if in union and union is not a structure
+				if (!unionisstruct[uniondepth])
+					offset = unionoffset[uniondepth];
+			}
+
+			// Move buffer pointer now and continue
+			if (_tcschr(buf,'}') && (!StrChrAny(buf, _T(";,")) || _tcschr(buf,'}') < StrChrAny(buf, _T(";,"))))
+				buf += _tcscspn(buf,_T("}")); // keep } character to update union
+			else if (StrChrAny(buf, _T(";,")))
+				buf += _tcscspn(buf,_T(";,")) + 1;
+			else
+				buf += _tcslen(buf);
+			continue;
+		}
+		
+		// if offset is 0 and there are no };, characters, it means we have a pure definition
+		if (StrChrAny(tempbuf, _T(" \t")) || StrChrAny(tempbuf,_T("};,")) || (!StrChrAny(buf,_T("};,")) && !offset))
+		{
+			if ((buf_size = _tcscspn(tempbuf,_T("\t ["))) > MAX_VAR_NAME_LENGTH*2 + 30)
+				return;
+			_tcsncpy(defbuf + 1,tempbuf,_tcscspn(tempbuf,_T("\t [")));
+			_tcscpy(defbuf + 1 + _tcscspn(tempbuf,_T("\t [")),_T(" "));
+		}
+		else // Not 'TypeOnly' definition because there are more than one fields in array so use default type UInt
+			_tcscpy(defbuf,_T(" UInt "));
+		
+		// Now find size in default types array and create new field
+		// If Type not found, resolve type to variable and get size of struct defined in it
+		if ((thissize = IsDefaultType(defbuf)))
+		{
+			offset += thissize * (arraydef ? arraydef : 1);
+#ifdef _WIN64
+			// align offset for pointer
+			if (offset % thissize)
+				offset += thissize - (offset % thissize);
+			if (thissize > aligntotal)
+				aligntotal = thissize;
+#endif
+		}
+		else // type was not found, check for user defined type in variables
+		{
+			Var1.var = NULL;
+			Func *bkpfunc = NULL;
+			// check if we have a local/static declaration and resolve to function
+			// For example Struct("MyFunc(mystruct) mystr")
+			if (_tcschr(defbuf,'('))
+			{
+				bkpfunc = g->CurrentFunc; // don't bother checking, just backup and restore later
+				g->CurrentFunc = g_script.FindFunc(defbuf + 1,_tcscspn(defbuf,_T("(")) - 1);
+				if (g->CurrentFunc) // break if not found to identify error
+				{
+					_tcscpy(tempbuf,defbuf + 1);
+					_tcscpy(defbuf + 1,tempbuf + _tcscspn(tempbuf,_T("(")) + 1); //,_tcschr(tempbuf,')') - _tcschr(tempbuf,'('));
+					_tcscpy(_tcschr(defbuf,')'),_T(" \0"));
+				}
+				else // release object and return
+				{
+					if (bkpfunc)
+						g->CurrentFunc = bkpfunc;
+					return;
+				}
+			}
+			if (g->CurrentFunc)
+			{
+				Var1.var = g_script.FindVar(defbuf + 1,_tcslen(defbuf) - 2,NULL,FINDVAR_LOCAL,NULL);
+				// restore CurrentFunc
+				if (bkpfunc)
+					g->CurrentFunc = bkpfunc;
+			}
+			// try to find global variable if local was not found or we are not in func
+			if (Var1.var == NULL)
+				Var1.var = g_script.FindVar(defbuf + 1,_tcslen(defbuf) - 2,NULL,FINDVAR_GLOBAL,NULL);
+			if (Var1.var != NULL)
+			{
+				// Call BIF_sizeof passing offset in second parameter to align if necessary
+				param[1]->value_int64 = (__int64)offset;
+				BIF_sizeof(Result,ResultToken,param,2);
+				if (ResultToken.symbol != SYM_INTEGER)
+				{	// could not resolve structure
+					return;
+				}
+				// sizeof was given an offset that it applied and aligned if necessary, so set offset =  and not +=
+				offset = (int)ResultToken.value_int64 * (arraydef ? arraydef : 1);
+				/*
+#ifdef _WIN64
+				// align offset for pointer, not necessary to align total because this is the only field
+				if (offset % ResultToken.value_int64)
+					offset += ResultToken.value_int64 - (offset % ResultToken.value_int64);
+#endif
+					*/
+			}
+			else // No variable was found and it is not default type so we can't determine size, return empty string.
+				return;
+		}
+		// update union size
+		if (uniondepth)
+		{
+			if ((offset - unionoffset[uniondepth]) > unionsize[uniondepth])
+				unionsize[uniondepth] = offset - unionoffset[uniondepth];
+			// reset offset if in union and union is not a structure
+			if (!unionisstruct[uniondepth])
+				offset = unionoffset[uniondepth];
+		}
+		// Move buffer pointer now
+		if (_tcschr(buf,'}') && (!StrChrAny(buf, _T(";,")) || _tcschr(buf,'}') < StrChrAny(buf, _T(";,"))))
+			buf += _tcscspn(buf,_T("}")); // keep } character to update union
+		else if (StrChrAny(buf, _T(";,")))
+			buf += _tcscspn(buf,_T(";,")) + 1;
+		else
+			buf += _tcslen(buf);
+	}
+#ifdef _WIN64
+	if (aligntotal)
+		offset += offset % aligntotal;
+#endif
+	aResultToken.symbol = SYM_INTEGER;
+	aResultToken.value_int64 = offset;
+}
+//
 // BIF_ObjCreate - Object()
 //
 
@@ -246,7 +547,7 @@ BIF_DECL(BIF_ObjNew)
 		// Either it wasn't handled (i.e. neither this class nor any of its super-classes define __New()),
 		// or there was no explicit "return", so just return the new object.
 		aResultToken.symbol = SYM_OBJECT;
-		aResultToken.object = new_object;
+		aResultToken.object = this_token.object;
 	}
 	else
 		new_object->Release();
@@ -391,7 +692,7 @@ BIF_DECL(BIF_ObjAddRefRelease)
 		aResultToken.marker = _T("");
 		return;
 	}
-	if (aResultToken.marker[3] == 'A')
+	if (ctoupper(aResultToken.marker[3]) == 'A')
 		aResultToken.value_int64 = obj->AddRef();
 	else
 		aResultToken.value_int64 = obj->Release();

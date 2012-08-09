@@ -259,7 +259,9 @@ BOOL FinalizeScript(Line *aFirstLine,int aFuncCount,int aHotkeyCount)
 		if (!func.mIsBuiltIn)
 		{
 			g_script.PreprocessLocalVars(func, func.mVar, func.mVarCount);
+			g_script.PreprocessLocalVars(func, func.mStaticVar, func.mStaticVarCount);
 			g_script.PreprocessLocalVars(func, func.mLazyVar, func.mLazyVarCount);
+			g_script.PreprocessLocalVars(func, func.mStaticLazyVar, func.mStaticLazyVarCount);
 		}
 	}
 
@@ -598,7 +600,7 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 			*aFuncAndToken->result_to_return_dll = '\0';
 	}
 	
-	//Var::FreeAndRestoreFunctionVars(func, var_backup, var_backup_count);
+	Var::FreeAndRestoreFunctionVars(func, var_backup, var_backup_count);
 	ResumeUnderlyingThread(ErrorLevel_saved);
 	return;
 }
@@ -609,6 +611,7 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 void AssignVariant(Var &aArg, VARIANT &aVar, bool aRetainVar = true);
 VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT param2,/*[in,optional]*/ VARIANT param3,/*[in,optional]*/ VARIANT param4,/*[in,optional]*/ VARIANT param5,/*[in,optional]*/ VARIANT param6,/*[in,optional]*/ VARIANT param7,/*[in,optional]*/ VARIANT param8,/*[in,optional]*/ VARIANT param9,/*[in,optional]*/ VARIANT param10, int sendOrPost)
 {
+
 	Func *aFunc = g_script.FindFunc(func) ;
 	if (aFunc)
 	{	
@@ -621,17 +624,27 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 			ResultType aResult = OK;
 			ExprTokenType aResultToken;
 			ExprTokenType **aParam = (ExprTokenType**)_alloca(sizeof(ExprTokenType)*10);
-			void *var_type = (void *)VAR_NORMAL;
 			for (;aFunc->mParamCount > aParamCount && variants[aParamCount]->vt != VT_ERROR;aParamCount++)
 			{
 				aParam[aParamCount] = (ExprTokenType*)_alloca(sizeof(ExprTokenType));
 				aParam[aParamCount]->symbol = SYM_VAR;
-				aParam[aParamCount]->var = new Var(_T(""),var_type,VAR_NORMAL);
+				aParam[aParamCount]->var = (Var*)alloca(sizeof(Var));
+
+				// prepare variable
+				aParam[aParamCount]->var->mType = VAR_NORMAL;
+				aParam[aParamCount]->var->mAttrib = 0;
+				aParam[aParamCount]->var->mByteCapacity = 0;
+				aParam[aParamCount]->var->mHowAllocated = ALLOC_MALLOC;
+
 				AssignVariant(*aParam[aParamCount]->var, *variants[aParamCount],false);
 			}
 			aResultToken.symbol = SYM_INTEGER;
 			aResultToken.marker = aFunc->mName;
 			aFunc->mBIF(aResult,aResultToken,aParam,aParamCount);
+
+			// free all variables in case memory was allocated
+			for (;aParamCount >= 0;aParamCount--)
+				aParam[aParamCount]->var->Free();
 			TokenToVariant(aResultToken, variant_to_return_dll);
 			return variant_to_return_dll;
 		}
