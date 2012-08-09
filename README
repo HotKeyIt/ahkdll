@@ -1,54 +1,84 @@
+09.08.2012
+- Merged AutoHotkey_L 1.1.08.01
+- Fixed a bug in ahkFunction, variables were not freed.
+- Fixed freeing some internal variables on restart or ExitApp in AutoHotkey.dll.
+- Fixed OnMessage was not correctly handled on reload and ExitApp in AutoHotkey.dll.
+
+- Static variables are now saved separately from local variables
+- - When a function uses many static variables the time used to call the function is greatly improved.
+- - This is because only local variables need to be freed and we do not need to check if a variable is static.
+- - ListVars also shows static variables separate from local, this also helps debugging.
+
+- New Build-in functions
+- - Struct() and sizeof(), see manual for usage.
+
 15.02.2012
 - ResourceLibrary
 - Removed ahkKey
 - FileInstall for Scripts compiled with AutoHotkey.exe
 - Allow pure integers (pointers) for DllCall and DynaCall "Str" prameter.
+
 01.10.2011
 - Merged latest MemoryModule
 - Fixed x64w build AutoHotkey.dll also works fine using COM
+
 25.10.2010
 - Fixed ahkFunction returning wrong value
 - Default script set to #Persistent`n#NoTrayIcon
 - Fixed ahkExec to return when no line was added
+
 15.08.2010
 - Merged AutoHotkey_L54
 - DllCall will now always search for W and A functions first, this is due to some functions do not have A suffix e.g. Process32First and Process32FirstW
 - when empty string is passed to ahkdll function, it will run in text mode same as ahktextdll so it will run "#Persistent".
 - ahkLabel second parameter is called nowait now so when 0 (default) AutoHotkey will wait for code to finish execution, because using PostMessage times out often when CPU is under load.
+
 12.08.2010
 - Merged AutoHotkey_L Revision 53
 - new exported function ahkExec used to temporarily run some script, accepts also several lines of code
 - when empty string is passed in first parameter, AutoHotkey will run "#Pesistent" as script.
+
 18.07.2010
 - Fixed a bug for dll when it was in root folder
 - DynaCall is now managed trough internal DynaToken, similar to objects but without object features and much faster but can be used with DynaCall only (thanks Lexikos)
 - DynaCall can set default parameters now, so you can call the function later with less or even witout parameters: func.()
+
 16.07.2010
 - Fixed not to delete ClipBoard vars when ahkdll is reloaded
+
 11.07.2010
 - Merged latest fixes by tinku99
+
 19.06.2010 - H17
 - Merged with AHK_L52
+
 10.06.2010
 - Fixed addScript and addFile loop bug
 - Fixed ahkFunction bug when returning empty parameters and strings
+
 27.05.2010
 - Fixed when terminating dll not to destroy Build in variables
 - Fixed problem when dll reloads, now parameter strings given to ahkdll and ahktextdll are copied and not used.
+
 14.05.2010
 - Fix for Alias BIF
 - Multithread support for Input command, see other changes in docs.
+
 28.03.2010
 - Merge AutoHotkey_L Revision 50
 - DynaCall fix, *pP parameter was not initialized correctly
+
 28.02.2010
 - DynaCall returns Objects now.
 - You can use object features like dll.ahkgetvar.var or dll.ahkFunction["func"] or dll.ahkassign.var := value
+
 13.02.2010
 - ResourceLoadLibrary for AutoHotkeySC.bin
+
 10.02.2010
 - fix for A_DllPath
 - fix on DLL_PROCESS_DETACH invalid hThread (MemoryFreeLibrary works fine now)
+
 07.02.2010
 - fixed ahkFunction
 - added ahkPostFunction same syntax as ahkFunction but returns unsigned int 0 if func found, else -1
@@ -65,8 +95,10 @@
 - - So now multithreading is even easier as only 1 dll is needed.
 - - Hook does not work currently.
 - DynaCall, runs faster than DllCall and uses internally saved array of DllCall structures based on functions pointer.
+
 03.02.2010
 - Unicode
+
 18.01.2010
 - fixed MsgSleep to work after termination and reload.
 - enabled #Persistent so a script that does not use #Persistent will terminate (use ahkdll ahktextdll or ahkReload to run it again).

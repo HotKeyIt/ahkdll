@@ -118,6 +118,9 @@
     <ClCompile Include="source\MemoryModule.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="source\script_struct.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="source\application.h">
