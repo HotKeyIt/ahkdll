@@ -241,7 +241,6 @@ void Hotkey::ManifestAllHotkeysHotstringsHooks()
 					shk[j]->mKeybdHookMandatory = true; // Fix for v1.1.07.03: Prevent it from reverting back to HK_NORMAL, which would otherwise happen if j > i (i.e. the key-up hotkey is defined first).
 					// And if it's currently registered, it will be unregistered later below.
 				}
-
 			}
 		}
 

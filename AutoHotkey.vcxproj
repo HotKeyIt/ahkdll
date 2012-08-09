@@ -129,34 +129,61 @@
   </PropertyGroup>
   <!-- x64 toolset: must precede the import below -->
   <PropertyGroup Label="Configuration" Condition="'$(Platform)'=='x64'">
-    <PlatformToolset>Windows7.1SDK</PlatformToolset>
+    <PlatformToolset>
+    </PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <PlatformToolset>Windows7.1SDK</PlatformToolset>
+    <PlatformToolset>
+    </PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'" Label="Configuration">
-    <PlatformToolset>Windows7.1SDK</PlatformToolset>
+    <PlatformToolset>
+    </PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'" Label="Configuration">
-    <PlatformToolset>Windows7.1SDK</PlatformToolset>
+    <PlatformToolset>
+    </PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'" Label="Configuration">
-    <PlatformToolset>Windows7.1SDK</PlatformToolset>
+    <PlatformToolset>
+    </PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
-    <PlatformToolset>Windows7.1SDK</PlatformToolset>
+    <PlatformToolset>
+    </PlatformToolset>
     <UseOfMfc>false</UseOfMfc>
     <UseOfAtl>false</UseOfAtl>
     <CharacterSet />
   </PropertyGroup>
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|Win32'">
-    <PlatformToolset>Windows7.1SDK</PlatformToolset>
+    <PlatformToolset>
+    </PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|Win32'" Label="Configuration">
-    <PlatformToolset>Windows7.1SDK</PlatformToolset>
+    <PlatformToolset>
+    </PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">
-    <PlatformToolset>Windows7.1SDK</PlatformToolset>
+    <PlatformToolset>
+    </PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">
+    <PlatformToolset />
+  </PropertyGroup>
+  <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Release(minimal)|Win32'">
+    <PlatformToolset />
+  </PropertyGroup>
+  <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">
+    <PlatformToolset />
+  </PropertyGroup>
+  <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">
+    <PlatformToolset />
+  </PropertyGroup>
+  <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">
+    <PlatformToolset />
+  </PropertyGroup>
+  <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Self-contained(minimal)|Win32'">
+    <PlatformToolset />
   </PropertyGroup>
   <!-- import common config -->
   <Import Project="Config.vcxproj" />
@@ -263,18 +290,90 @@
     <ClCompile Include="source\lowlevelbif.cpp" />
     <ClCompile Include="source\MemoryModule.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
-      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
-      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
-      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
-      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Self-contained|x64'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
-      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|x64'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
-      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
-      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
-      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
-      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
-      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
-      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
-      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">
+      </UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+      </UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">
+      </UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Self-contained|x64'">
+      </UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|x64'">
+      </UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+      </UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">
+      </UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+      </UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">
+      </UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+      </UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">
+      </UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">
+      </UndefinePreprocessorDefinitions>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release(minimal)|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(minimal)|Win32'">Use</PrecompiledHeader>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">
+      </UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release(minimal)|Win32'">
+      </UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|Win32'">
+      </UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'">
+      </UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|Win32'">
+      </UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">
+      </UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">
+      </UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Self-contained(minimal)|Win32'">
+      </UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">
+      </UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release(minimal)|x64'">
+      </UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|x64'">
+      </UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|x64'">
+      </UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|x64'">
+      </UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|x64'">
+      </UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|x64'">
+      </UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Self-contained(minimal)|x64'">
+      </UndefinePreprocessorDefinitions>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release(minimal)|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(minimal)|x64'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\mt19937ar-cok.cpp" />
     <ClCompile Include="source\os_version.cpp" />
@@ -288,6 +387,10 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">NotUsing</PrecompiledHeader>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">_MBCS;MBCS;_USRDLL;AUTOCOMSERVER_EXPORTS;_WIN64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="source\script.cpp" />
     <ClCompile Include="source\script2.cpp" />
@@ -299,6 +402,7 @@
     <ClCompile Include="source\script_object.cpp" />
     <ClCompile Include="source\script_object_bif.cpp" />
     <ClCompile Include="source\script_registry.cpp" />
+    <ClCompile Include="source\script_struct.cpp" />
     <ClCompile Include="source\SimpleHeap.cpp" />
     <ClCompile Include="source\stdafx.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
@@ -313,7 +417,12 @@
   <ItemGroup>
     <ClInclude Include="source\ahkversion.h" />
     <ClInclude Include="source\application.h" />
-    <ClInclude Include="source\ComServerImpl.h" />
+    <ClInclude Include="source\ComServerImpl.h">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">true</ExcludedFromBuild>
+    </ClInclude>
     <ClInclude Include="source\clipboard.h" />
     <ClInclude Include="source\config.h" />
     <ClInclude Include="source\debug.h" />
@@ -331,7 +440,12 @@
     <ClInclude Include="source\os_version.h" />
     <ClInclude Include="source\lib_pcre\pcre\pcre.h" />
     <ClInclude Include="source\qmath.h" />
-    <ClInclude Include="source\Registry.h" />
+    <ClInclude Include="source\Registry.h">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">true</ExcludedFromBuild>
+    </ClInclude>
     <ClInclude Include="source\resources\resource.h" />
     <ClInclude Include="source\script.h" />
     <ClInclude Include="source\script_com.h" />
@@ -437,7 +551,7 @@
       <StringPooling Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'" />
       <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">true</MinimalRebuild>
       <BasicRuntimeChecks Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">EnableFastChecks</BasicRuntimeChecks>
-      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">MultiThreadedDebug</RuntimeLibrary>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">MultiThreadedDebugDLL</RuntimeLibrary>
       <BufferSecurityCheck Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">true</BufferSecurityCheck>
       <EnableFiberSafeOptimizations Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">false</EnableFiberSafeOptimizations>
       <IntrinsicFunctions Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">false</IntrinsicFunctions>
@@ -487,9 +601,13 @@
       <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">false</DataExecutionPrevention>
       <RandomizedBaseAddress Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'">false</RandomizedBaseAddress>
       <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'">false</DataExecutionPrevention>
-      <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" />
-      <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'" />
-      <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'" />
+      <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+      </IgnoreAllDefaultLibraries>
+      <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">
+      </IgnoreAllDefaultLibraries>
+      <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'">
+      </IgnoreAllDefaultLibraries>
+      <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</GenerateDebugInformation>
     </Link>
     <Midl>
       <MkTypLibCompatible Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">true</MkTypLibCompatible>
@@ -527,7 +645,7 @@
       <ComponentFileName Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'" />
     </Manifest>
     <ResourceCompile>
-      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">_DEBUG;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
     <Link>
       <ModuleDefinitionFile Condition="'$(Configuration)'=='ReleaseDll(mbcs)' OR '$(Configuration)'=='ReleaseDll'">.\comserver.def</ModuleDefinitionFile>
@@ -537,6 +655,12 @@
       <ModuleDefinitionFile Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|x64'" />
       <ModuleDefinitionFile Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'" />
       <ModuleDefinitionFile Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">.\comserver.def</ModuleDefinitionFile>
+      <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|x64'">
+      </IgnoreAllDefaultLibraries>
+      <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">
+      </IgnoreAllDefaultLibraries>
+      <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+      </IgnoreAllDefaultLibraries>
     </Link>
     <Manifest>
       <OutputManifestFile Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'" />
@@ -558,14 +682,16 @@
     </Link>
     <Link>
       <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|Win32'">false</DataExecutionPrevention>
-      <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|Win32'" />
+      <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|Win32'">
+      </IgnoreAllDefaultLibraries>
     </Link>
     <Link>
       <RandomizedBaseAddress Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">false</RandomizedBaseAddress>
     </Link>
     <Link>
       <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">false</DataExecutionPrevention>
-      <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'" />
+      <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">
+      </IgnoreAllDefaultLibraries>
     </Link>
     <Link>
       <RandomizedBaseAddress Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">false</RandomizedBaseAddress>
@@ -578,7 +704,8 @@
     </Link>
     <Link>
       <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">false</DataExecutionPrevention>
-      <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'" />
+      <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">
+      </IgnoreAllDefaultLibraries>
     </Link>
     <ClCompile>
       <OmitFramePointers Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</OmitFramePointers>
@@ -589,6 +716,89 @@
     <Bscmake>
       <PreserveSBR Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">false</PreserveSBR>
     </Bscmake>
+    <ClCompile>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <ClCompile>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">MultiThreaded</RuntimeLibrary>
+      <InlineFunctionExpansion Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">AnySuitable</InlineFunctionExpansion>
+    </ClCompile>
+    <ClCompile>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <ClCompile>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Self-contained|x64'">MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <ClCompile>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <ClCompile>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Release|x64'">MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <ClCompile>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Release(minimal)|Win32'">MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <ClCompile>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'">MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <ClCompile>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|Win32'">MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <ClCompile>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <ClCompile>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Self-contained(minimal)|Win32'">MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <ClCompile>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Release(minimal)|x64'">MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <ClCompile>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|x64'">MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <ClCompile>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|x64'">MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <ClCompile>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|x64'">MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <ClCompile>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Self-contained(minimal)|x64'">MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Release(minimal)|Win32'">
+      </IgnoreAllDefaultLibraries>
+    </Link>
+    <Link>
+      <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Self-contained(minimal)|Win32'">
+      </IgnoreAllDefaultLibraries>
+    </Link>
+    <Link>
+      <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Release(minimal)|x64'">
+      </IgnoreAllDefaultLibraries>
+    </Link>
+    <Link>
+      <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|x64'">
+      </IgnoreAllDefaultLibraries>
+    </Link>
+    <Link>
+      <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Self-contained|x64'">
+      </IgnoreAllDefaultLibraries>
+    </Link>
+    <Link>
+      <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|x64'">
+      </IgnoreAllDefaultLibraries>
+    </Link>
+    <Link>
+      <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Self-contained(minimal)|x64'">
+      </IgnoreAllDefaultLibraries>
+    </Link>
+    <ClCompile>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">MultiThreadedDebugDLL</RuntimeLibrary>
+    </ClCompile>
+    <ClCompile>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">MultiThreadedDebugDLL</RuntimeLibrary>
+    </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='ReleaseDll' OR '$(Configuration)'=='ReleaseDll(mbcs)'">
     <Link>
@@ -597,8 +807,14 @@
       <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">false</DataExecutionPrevention>
       <RandomizedBaseAddress Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|Win32'">false</RandomizedBaseAddress>
       <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|Win32'">false</DataExecutionPrevention>
-      <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|Win32'" />
-      <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'" />
+      <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|Win32'">
+      </IgnoreAllDefaultLibraries>
+      <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">
+      </IgnoreAllDefaultLibraries>
+      <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|x64'">
+      </IgnoreAllDefaultLibraries>
+      <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">
+      </IgnoreAllDefaultLibraries>
     </Link>
     <Manifest>
       <OutputManifestFile Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'" />
@@ -614,10 +830,18 @@
     </ResourceCompile>
     <ClCompile>
       <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'" />
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <ClCompile>
       <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'" />
       <IntrinsicFunctions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">false</IntrinsicFunctions>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <ClCompile>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|Win32'">MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <ClCompile>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|x64'">MultiThreaded</RuntimeLibrary>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
@@ -625,7 +849,13 @@
       <ImportLibrary />
       <RandomizedBaseAddress>false</RandomizedBaseAddress>
       <DataExecutionPrevention>false</DataExecutionPrevention>
+      <IgnoreSpecificDefaultLibraries>
+      </IgnoreSpecificDefaultLibraries>
     </Link>
+    <ClCompile>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <InlineFunctionExpansion>Default</InlineFunctionExpansion>
+    </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
     <CustomBuild Include="source\lib\win2kcompat.asm">

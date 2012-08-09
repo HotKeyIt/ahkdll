@@ -343,7 +343,9 @@ BuildImportTable(PMEMORYMODULE module)
 			POINTER_TYPE *thunkRef;
 			FARPROC *funcRef;
 			HMODULE handle;
-			//OutputDebugStringA((LPCSTR) (codeBase + importDesc->Name));
+#if DEBUG_OUTPUT
+			OutputDebugStringA((LPCSTR) (codeBase + importDesc->Name));
+#endif
 			if (!(handle = LoadLibraryA((LPCSTR) (codeBase + importDesc->Name))))
 			{
 #if DEBUG_OUTPUT

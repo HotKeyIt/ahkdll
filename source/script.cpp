@@ -139,6 +139,8 @@ FuncEntry g_BIF[] =
 	{_T("UnLock"), BIF_UnLock, 1, 1, true},
 	{_T("DynaCall"), BIF_DynaCall, 0, 10000, true},
 	{_T("CriticalObject"), BIF_CriticalObject, 0, 2, true},
+	{_T("Struct"), BIF_Struct, 1, 3, true},
+	{_T("sizeof"), BIF_sizeof, 1, 2, true},
 	
 	{_T("Object"), BIF_ObjCreate, 0, 10000, true},
 	{_T("ObjInsert"), BIF_ObjInsert, 2, 10000, true},
@@ -376,7 +378,7 @@ Script::~Script() // Destructor.
 			MyRemoveClipboardListener(g_hWnd); // MyAddClipboardListener was used.
 		else
 			ChangeClipboardChain(g_hWnd, mNextClipboardViewer); // SetClipboardViewer was used.
-
+	mOnClipboardChangeLabel = 0;
 	// Close any open sound item to prevent hang-on-exit in certain operating systems or conditions.
 	// If there's any chance that a sound was played and not closed out, or that it is still playing,
 	// this check is done.  Otherwise, the check is avoided since it might be a high overhead call,
@@ -387,6 +389,7 @@ Script::~Script() // Destructor.
 		mciSendString(_T("status ") SOUNDPLAY_ALIAS _T(" mode"), buf, _countof(buf), NULL);
 		if (*buf) // "playing" or "stopped"
 			mciSendString(_T("close ") SOUNDPLAY_ALIAS, NULL, 0, NULL);
+		g_SoundWasPlayed = 0;
 	}
 #ifndef MINIDLL
 #ifdef ENABLE_KEY_HISTORY_FILE
@@ -425,8 +428,8 @@ void Script::Destroy()
 		if (mVar[v]->mType == VAR_BUILTIN || mVar[v]->mType == VAR_CLIPBOARD ||mVar[v]->mType == VAR_CLIPBOARDALL)
 			continue;
 		mVar[v]->ConvertToNonAliasIfNecessary();
-		if (!_tcsicmp(mVar[v]->mName,_T("Args")))
-			continue;
+		//if (!_tcsicmp(mVar[v]->mName,_T("Args")))  // if we restart args are filled again anyway ???
+		//	continue;
 		mVar[v]->Free();
 	}
 	for (v = 0; v < mLazyVarCount; ++v)
@@ -448,10 +451,20 @@ void Script::Destroy()
 			f.mVar[v]->ConvertToNonAliasIfNecessary();
 			f.mVar[v]->Free();
 		}
+		for (v = 0; v < f.mStaticVarCount; ++v)
+		{
+			f.mStaticVar[v]->ConvertToNonAliasIfNecessary();
+			f.mStaticVar[v]->Free();
+		}
 		for (v = 0; v < f.mLazyVarCount; ++v)
 		{
 			f.mLazyVar[v]->ConvertToNonAliasIfNecessary();
 			f.mLazyVar[v]->Free();
+		}
+		for (v = 0; v < f.mStaticLazyVarCount; ++v)
+		{
+			f.mStaticLazyVar[v]->ConvertToNonAliasIfNecessary();
+			f.mStaticLazyVar[v]->Free();
 		}
 		delete mFunc[i];
 	}
@@ -491,6 +504,20 @@ void Script::Destroy()
 	mTempFunc = NULL;
 	mTempLabel = NULL;
 	mTempLine = NULL;
+
+	//reset count for OnMessage
+	if (g_MsgMonitor)
+		free(g_MsgMonitor);
+	g_MsgMonitorCount = 0;
+	g_MsgMonitor = NULL;
+
+	g_nMessageBoxes = 0;
+#ifndef MINIDLL
+	g_nInputBoxes = 0;
+	g_nFileDialogs = 0;
+	g_nFolderDialogs = 0;
+#endif
+
 	for(i=1;Line::sSourceFileCount>i;i++) // first include file must not be deleted
 		free(Line::sSourceFile[i]);
 	Line::sSourceFileCount = 0;
@@ -519,7 +546,6 @@ void Script::Destroy()
 #ifndef MINIDLL
 	free(g_input.match);
 #endif
-	free(g_MsgMonitor);
 }
 #endif
 
@@ -1285,12 +1311,24 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 			// calls and all tokens in the 'stack' of each currently executing expression, currently
 			// only static and global variables are released.  It seems best for consistency to also
 			// avoid releasing top-level non-static local variables (i.e. which aren't in var backups).
-			for (v = 0; v < f.mVarCount; ++v)
-				if (f.mVar[v]->IsStatic() && f.mVar[v]->IsObject()) // For consistency, only free static vars (see above).
-					f.mVar[v]->ReleaseObject();
-			for (v = 0; v < f.mLazyVarCount; ++v)
-				if (f.mLazyVar[v]->IsStatic() && f.mLazyVar[v]->IsObject())
-					f.mLazyVar[v]->ReleaseObject();
+
+			// For consistency, only free static vars (see above).
+
+			for (v = 0; v < f.mStaticVarCount; ++v)
+				if (f.mStaticVar[v]->IsObject())
+					f.mStaticVar[v]->ReleaseObject();
+			
+			for (v = 0; v < f.mStaticLazyVarCount; ++v)
+				if (f.mStaticLazyVar[v]->IsObject())
+					f.mStaticLazyVar[v]->ReleaseObject();
+			
+			// so no need to run below since static vars are in a separate array
+			//for (v = 0; v < f.mVarCount; ++v)
+			//	if (f.mVar[v]->IsStatic() && f.mVar[v]->IsObject()) 
+			//		f.mVar[v]->ReleaseObject();
+			//for (v = 0; v < f.mLazyVarCount; ++v)
+			//	if (f.mLazyVar[v]->IsStatic() && f.mLazyVar[v]->IsObject())
+			//		f.mLazyVar[v]->ReleaseObject();
 		}
 	}
 #ifdef CONFIG_DEBUGGER // L34: Exit debugger *after* the above to allow debugging of any invoked __Delete handlers.
@@ -1402,7 +1440,9 @@ LineNumberType Script::LoadFromText(LPTSTR aScript)
 		if (!func.mIsBuiltIn)
 		{
 			PreprocessLocalVars(func, func.mVar, func.mVarCount);
+			PreprocessLocalVars(func, func.mStaticVar, func.mStaticVarCount);
 			PreprocessLocalVars(func, func.mLazyVar, func.mLazyVarCount);
+			PreprocessLocalVars(func, func.mStaticLazyVar, func.mStaticLazyVarCount);
 		}
 	}
 
@@ -1640,7 +1680,9 @@ _T("; keystrokes and mouse clicks.  It also explains more about hotkeys.\n")
 		if (!func.mIsBuiltIn)
 		{
 			PreprocessLocalVars(func, func.mVar, func.mVarCount);
+			PreprocessLocalVars(func, func.mStaticVar, func.mStaticVarCount);
 			PreprocessLocalVars(func, func.mLazyVar, func.mLazyVarCount);
+			PreprocessLocalVars(func, func.mStaticLazyVar, func.mStaticLazyVarCount);
 		}
 	}
 
@@ -3970,7 +4012,7 @@ process_completed_line:
 			if (mClassObjectCount)
 			{
 				// Check for assignment first, in case of something like "Static := 123".
-				cp = find_identifier_end(buf);
+				for (cp = buf; IS_IDENTIFIER_CHAR(*cp) || *cp == '.'; ++cp);
 				if (cp > buf) // i.e. buf begins with an identifier.
 				{
 					cp = omit_leading_whitespace(cp);
@@ -5534,8 +5576,8 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 						if (!tcslicmp(item, g->CurrentFunc->mParam[i].var->mName, var_name_length))
 							return ScriptError(_T("Parameters must not be declared."), item);
 					// Detect conflicting declarations:
-					var = FindVar(item, var_name_length, NULL, FINDVAR_LOCAL);
-					if (var && (var->Scope() & ~VAR_DECLARED) == (declare_type & ~VAR_DECLARED) && declare_type != VAR_DECLARE_STATIC)
+					var = FindVar(item, var_name_length, NULL, FINDVAR_LOCAL); // will also find a static var if exists
+					if (var &&  (var->Scope() & ~VAR_DECLARED) == (declare_type & ~VAR_DECLARED) && declare_type != VAR_DECLARE_STATIC) // HotKeyIt changed since static list is separate && (var->Scope() & ~VAR_DECLARED) == (declare_type & ~VAR_DECLARED) && declare_type != VAR_DECLARE_STATIC)
 						var = NULL; // Allow redeclaration using same scope; e.g. "local x := 1 ... local x := 2" down two different code paths.
 					if (!var && declare_type != VAR_DECLARE_GLOBAL)
 						for (i = 0; i < g->CurrentFunc->mGlobalVarCount; ++i) // Explicitly search this array vs calling FindVar() in case func is assume-global.
@@ -5912,7 +5954,8 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 		if (!aActionType) // Above still didn't find a valid action (i.e. check aActionType again in case the above changed it).
 		{
 			if (*action_args == '(' || *action_args == '[' // v1.0.46.11: Recognize as multi-statements that start with a function, like "fn(), x:=4".  v1.0.47.03: Removed the following check to allow a close-brace to be followed by a comma-less function-call: strchr(action_args, g_delimiter).
-				|| *aLineText == '(') // Probably an expression with parentheses to control order of evaluation.
+				|| *aLineText == '(' // Probably an expression with parentheses to control order of evaluation.
+				|| !_tcsnicmp(aLineText, _T("new"), 3) && IS_SPACE_OR_TAB(aLineText[3]))
 			{
 				aActionType = ACT_EXPRESSION; // Mark this line as a stand-alone expression.
 				action_args = aLineText; // Since this is a function-call followed by a comma and some other expression, use the line's full text for later parsing.
@@ -7062,6 +7105,11 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 			return ScriptError(ERR_PARAM2_INVALID, new_raw_arg2);
 		break;
 
+	case ACT_SETREGVIEW:
+		if (!line.ArgHasDeref(1) && line.RegConvertView(new_raw_arg1) == -1)
+			return ScriptError(ERR_PARAM1_INVALID, new_raw_arg1);
+		break;
+
 	case ACT_REGWRITE:
 		// Both of these checks require that at least two parameters be present.  Otherwise, the command
 		// is being used in its registry-loop mode and is validated elsewhere:
@@ -7855,6 +7903,7 @@ ResultType Script::DefineFunc(LPTSTR aBuf, Var *aFuncGlobalVar[])
 		if (   !(param_length = param_end - param_start)   )
 			return ScriptError(ERR_BLANK_PARAM, aBuf); // Reporting aBuf vs. param_start seems more informative since Vicinity isn't shown.
 
+		// search for local vars (static vars will be double checked before searching locals)
 		if (this_param.var = FindVar(param_start, param_length, &insert_pos, FINDVAR_LOCAL))  // Assign.
 			return ScriptError(_T("Duplicate parameter."), param_start);
 		if (   !(this_param.var = AddVar(param_start, param_length, insert_pos, VAR_DECLARE_LOCAL | VAR_LOCAL_FUNCPARAM))   )	// Pass VAR_LOCAL_FUNCPARAM as last parameter to mean "it's a local but more specifically a function's parameter".
@@ -8100,15 +8149,38 @@ ResultType Script::DefineClassVars(LPTSTR aBuf, bool aStatic)
 			return ScriptError(ERR_INVALID_CLASS_VAR, item);
 		orig_char = *item_end;
 		*item_end = '\0'; // Temporarily terminate.
-		if (class_object->GetItem(temp_token, item))
-			return ScriptError(ERR_DUPLICATE_DECLARATION, item);
-		// Assigning class_object[item] := "" is sufficient to mark it as a class variable:
-		if (!class_object->SetItem(item, aStatic ? empty_token : int_token))
-			return ScriptError(ERR_OUTOFMEM);
-		*item_end = orig_char; // Undo termination.
+		bool item_exists = class_object->GetItem(temp_token, item);
+		if (orig_char == '.')
+		{
+			*item_end = orig_char; // Undo termination.
+			// This is something like "object.key := 5", which is only valid if "object" was
+			// previously declared (and will presumably be assigned an object at runtime).
+			// Ensure that at least the root class var exists; any further validation would
+			// be impossible since the object doesn't exist yet.
+			if (!item_exists)
+				return ScriptError(_T("Unknown class var."), item);
+			for (TCHAR *cp; *item_end == '.'; item_end = cp)
+			{
+				for (cp = item_end + 1; cisalnum(*cp) || *cp == '_'; ++cp);
+				if (cp == item_end + 1)
+					// This '.' wasn't followed by a valid identifier.  Leave item_end
+					// pointing at '.' and allow the switch() below to report the error.
+					break;
+			}
+		}
+		else
+		{
+			if (item_exists)
+				return ScriptError(ERR_DUPLICATE_DECLARATION, item);
+			// Assign class_object[item] := "" to mark it as a class variable
+			// and allow duplicate declarations to be detected:
+			if (!class_object->SetItem(item, aStatic ? empty_token : int_token))
+				return ScriptError(ERR_OUTOFMEM);
+			*item_end = orig_char; // Undo termination.
+		}
 		size_t name_length = item_end - item;
 						
-		// This section is very similar to the on in ParseAndAddLine() which deals with
+		// This section is very similar to the one in ParseAndAddLine() which deals with
 		// variable declarations, so maybe maintain them together:
 
 		item_end = omit_leading_whitespace(item_end); // Move up to the next comma, assignment-op, or '\0'.
@@ -9037,7 +9109,7 @@ Var *Script::FindOrAddVar(LPTSTR aVarName, size_t aVarNameLength, int aScope)
 	// Otherwise, no match found, so create a new var.
 	// This will return NULL if there was a problem, in which case AddVar() will already have displayed the error:
 	return AddVar(aVarName, aVarNameLength, insert_pos
-		, (aScope & ~(VAR_LOCAL | VAR_GLOBAL)) | (is_local ? VAR_LOCAL : VAR_GLOBAL)); // When aScope == FINDVAR_DEFAULT, it contains both the "local" and "global" bits.  This ensures only the appropriate bit is set.
+		, (aScope & ~(VAR_LOCAL | VAR_GLOBAL)) | (is_local ? (VAR_LOCAL | ((aScope & VAR_LOCAL_STATIC) ? VAR_LOCAL_STATIC : NULL)) : VAR_GLOBAL)); // When aScope == FINDVAR_DEFAULT, it contains both the "local" and "global" bits.  This ensures only the appropriate bit is set.
 }
 
 
@@ -9070,53 +9142,20 @@ Var *Script::FindVar(LPTSTR aVarName, size_t aVarNameLength, int *apInsertPos, i
 
 	global_struct &g = *::g; // Reduces code size and may improve performance.
 	bool search_local = (aScope & VAR_LOCAL) && g.CurrentFunc;
+	bool search_static = search_local && g.CurrentFunc && ((aScope & VAR_LOCAL_STATIC) || (g.CurrentFunc->mDefaultVarType == VAR_DECLARE_STATIC && (aScope & VAR_GLOBAL)));
 	// Above has ensured that g.CurrentFunc!=NULL whenever search_local==true.
 
 	// Init for binary search loop:
 	int left, right, mid, result;  // left/right must be ints to allow them to go negative and detect underflow.
 	Var **var;  // An array of pointers-to-var.
-	if (search_local)
+	if (search_static)
 	{
+		// double ckeck local list
 		var = g.CurrentFunc->mVar;
 		right = g.CurrentFunc->mVarCount - 1;
-	}
-	else
-	{
-		var = mVar;
-		right = mVarCount - 1;
-	}
 
-	// Binary search:
-	for (left = 0; left <= right;) // "right" was already initialized above.
-	{
-		mid = (left + right) / 2;
-		result = _tcsicmp(var_name, var[mid]->mName); // lstrcmpi() is not used: 1) avoids breaking existing scripts; 2) provides consistent behavior across multiple locales; 3) performance.
-		if (result > 0)
-			left = mid + 1;
-		else if (result < 0)
-			right = mid - 1;
-		else // Match found.
-			return var[mid];
-	}
-
-	// Since above didn't return, no match was found in the main list, so search the lazy list if there
-	// is one.  If there's no lazy list, the value of "left" established above will be used as the
-	// insertion point further below:
-	if (search_local)
-	{
-		var = g.CurrentFunc->mLazyVar;
-		right = g.CurrentFunc->mLazyVarCount - 1;
-	}
-	else
-	{
-		var = mLazyVar;
-		right = mLazyVarCount - 1;
-	}
-
-	if (var) // There is a lazy list to search (and even if the list is empty, left must be reset to 0 below).
-	{
 		// Binary search:
-		for (left = 0; left <= right;)  // "right" was already initialized above.
+		for (left = 0; left <= right;) // "right" was already initialized above.
 		{
 			mid = (left + right) / 2;
 			result = _tcsicmp(var_name, var[mid]->mName); // lstrcmpi() is not used: 1) avoids breaking existing scripts; 2) provides consistent behavior across multiple locales; 3) performance.
@@ -9126,6 +9165,193 @@ Var *Script::FindVar(LPTSTR aVarName, size_t aVarNameLength, int *apInsertPos, i
 				right = mid - 1;
 			else // Match found.
 				return var[mid];
+		}
+	
+		var = g.CurrentFunc->mLazyVar;
+		right = g.CurrentFunc->mLazyVarCount - 1;
+
+		if (var) // There is a lazy list to search (and even if the list is empty, left must be reset to 0 below).
+		{
+			// Binary search:
+			for (left = 0; left <= right;)  // "right" was already initialized above.
+			{
+				mid = (left + right) / 2;
+				result = _tcsicmp(var_name, var[mid]->mName); // lstrcmpi() is not used: 1) avoids breaking existing scripts; 2) provides consistent behavior across multiple locales; 3) performance.
+				if (result > 0)
+					left = mid + 1;
+				else if (result < 0)
+					right = mid - 1;
+				else // Match found.
+					return var[mid];
+			}
+		}
+
+
+
+
+		// Since above didn't return, no match was found in main lists, so search the static list if there
+		// is one.  If there's no lazy list, the value of "left" established above will be used as the
+		// insertion point further below:
+		var = g.CurrentFunc->mStaticVar;
+		right = g.CurrentFunc->mStaticVarCount - 1;
+		// Binary search:
+		for (left = 0; left <= right;) // "right" was already initialized above.
+		{
+			mid = (left + right) / 2;
+			result = _tcsicmp(var_name, var[mid]->mName); // lstrcmpi() is not used: 1) avoids breaking existing scripts; 2) provides consistent behavior across multiple locales; 3) performance.
+			if (result > 0)
+				left = mid + 1;
+			else if (result < 0)
+				right = mid - 1;
+			else // Match found.
+				return var[mid];
+		}
+	
+		// Since above didn't return, no match was found in the main static list, so search the static lazy list if there
+		// is one.  If there's no lazy list, the value of "left" established above will be used as the
+		// insertion point further below:
+		var = g.CurrentFunc->mStaticLazyVar;
+		right = g.CurrentFunc->mStaticLazyVarCount - 1;
+
+		if (var) // There is a lazy list to search (and even if the list is empty, left must be reset to 0 below).
+		{
+			// Binary search:
+			for (left = 0; left <= right;)  // "right" was already initialized above.
+			{
+				mid = (left + right) / 2;
+				result = _tcsicmp(var_name, var[mid]->mName); // lstrcmpi() is not used: 1) avoids breaking existing scripts; 2) provides consistent behavior across multiple locales; 3) performance.
+				if (result > 0)
+					left = mid + 1;
+				else if (result < 0)
+					right = mid - 1;
+				else // Match found.
+					return var[mid];
+			}
+		}
+	}
+	else if (search_local)
+	{
+		// double check static lists
+		var = g.CurrentFunc->mStaticVar;
+		right = g.CurrentFunc->mStaticVarCount - 1;
+		// Binary search:
+		for (left = 0; left <= right;) // "right" was already initialized above.
+		{
+			mid = (left + right) / 2;
+			result = _tcsicmp(var_name, var[mid]->mName); // lstrcmpi() is not used: 1) avoids breaking existing scripts; 2) provides consistent behavior across multiple locales; 3) performance.
+			if (result > 0)
+				left = mid + 1;
+			else if (result < 0)
+				right = mid - 1;
+			else // Match found.
+				return var[mid];
+		}
+	
+		// Since above didn't return, no match was found in the main static list, so search the static lazy list if there
+		// is one.  If there's no lazy list, the value of "left" established above will be used as the
+		// insertion point further below:
+		var = g.CurrentFunc->mStaticLazyVar;
+		right = g.CurrentFunc->mStaticLazyVarCount - 1;
+
+		if (var) // There is a lazy list to search (and even if the list is empty, left must be reset to 0 below).
+		{
+			// Binary search:
+			for (left = 0; left <= right;)  // "right" was already initialized above.
+			{
+				mid = (left + right) / 2;
+				result = _tcsicmp(var_name, var[mid]->mName); // lstrcmpi() is not used: 1) avoids breaking existing scripts; 2) provides consistent behavior across multiple locales; 3) performance.
+				if (result > 0)
+					left = mid + 1;
+				else if (result < 0)
+					right = mid - 1;
+				else // Match found.
+					return var[mid];
+			}
+		}
+
+
+
+
+		// Since above didn't return, no match was found in static lists, so search the main lists if there
+		// is one.  If there's no lazy list, the value of "left" established above will be used as the
+		// insertion point further below:
+		var = g.CurrentFunc->mVar;
+		right = g.CurrentFunc->mVarCount - 1;
+
+		// Binary search:
+		for (left = 0; left <= right;) // "right" was already initialized above.
+		{
+			mid = (left + right) / 2;
+			result = _tcsicmp(var_name, var[mid]->mName); // lstrcmpi() is not used: 1) avoids breaking existing scripts; 2) provides consistent behavior across multiple locales; 3) performance.
+			if (result > 0)
+				left = mid + 1;
+			else if (result < 0)
+				right = mid - 1;
+			else // Match found.
+				return var[mid];
+		}
+	
+		// Since above didn't return, no match was found in the static list either, so search the lazy list if there
+		// is one.  If there's no lazy list, the value of "left" established above will be used as the
+		// insertion point further below:
+		var = g.CurrentFunc->mLazyVar;
+		right = g.CurrentFunc->mLazyVarCount - 1;
+
+		if (var) // There is a lazy list to search (and even if the list is empty, left must be reset to 0 below).
+		{
+			// Binary search:
+			for (left = 0; left <= right;)  // "right" was already initialized above.
+			{
+				mid = (left + right) / 2;
+				result = _tcsicmp(var_name, var[mid]->mName); // lstrcmpi() is not used: 1) avoids breaking existing scripts; 2) provides consistent behavior across multiple locales; 3) performance.
+				if (result > 0)
+					left = mid + 1;
+				else if (result < 0)
+					right = mid - 1;
+				else // Match found.
+					return var[mid];
+			}
+		}
+	} 
+	else // !search_static && !search_local
+	{
+		var = mVar;
+		right = mVarCount - 1;
+	
+	
+		// Binary search:
+		for (left = 0; left <= right;) // "right" was already initialized above.
+		{
+			mid = (left + right) / 2;
+			result = _tcsicmp(var_name, var[mid]->mName); // lstrcmpi() is not used: 1) avoids breaking existing scripts; 2) provides consistent behavior across multiple locales; 3) performance.
+			if (result > 0)
+				left = mid + 1;
+			else if (result < 0)
+				right = mid - 1;
+			else // Match found.
+				return var[mid];
+		}
+
+		if (!search_local)
+		{
+			var = mLazyVar;
+			right = mLazyVarCount - 1;
+		}
+
+		if (var) // There is a lazy list to search (and even if the list is empty, left must be reset to 0 below).
+		{
+			// Binary search:
+			for (left = 0; left <= right;)  // "right" was already initialized above.
+			{
+				mid = (left + right) / 2;
+				result = _tcsicmp(var_name, var[mid]->mName); // lstrcmpi() is not used: 1) avoids breaking existing scripts; 2) provides consistent behavior across multiple locales; 3) performance.
+				if (result > 0)
+					left = mid + 1;
+				else if (result < 0)
+					right = mid - 1;
+				else // Match found.
+					return var[mid];
+			}
 		}
 	}
 
@@ -9225,7 +9451,6 @@ Var *Script::AddVar(LPTSTR aVarName, size_t aVarNameLength, int aInsertPos, int 
 	if (!new_name)
 		// It already displayed the error for us.
 		return NULL;
-
 	// Below specifically tests for VAR_LOCAL and excludes other non-zero values/flags:
 	//   VAR_LOCAL_FUNCPARAM should not be made static.
 	//   VAR_LOCAL_STATIC is already static.
@@ -9233,6 +9458,8 @@ Var *Script::AddVar(LPTSTR aVarName, size_t aVarNameLength, int aInsertPos, int 
 	if (aScope == VAR_LOCAL && g->CurrentFunc->mDefaultVarType == VAR_DECLARE_STATIC)
 		// v1.0.48: Lexikos: Current function is assume-static, so set static attribute.
 		aScope |= VAR_LOCAL_STATIC;
+
+	bool aIsStatic = aIsLocal ? (aScope & VAR_LOCAL_STATIC) : false;
 
 	Var *the_new_var = new Var(new_name, var_type, aScope);
 	if (the_new_var == NULL)
@@ -9244,8 +9471,8 @@ Var *Script::AddVar(LPTSTR aVarName, size_t aVarNameLength, int aInsertPos, int 
 	// If there's a lazy var list, aInsertPos provided by the caller is for it, so this new variable
 	// always gets inserted into that list because there's always room for one more (because the
 	// previously added variable would have purged it if it had reached capacity).
-	Var **lazy_var = aIsLocal ? g->CurrentFunc->mLazyVar : mLazyVar;
-	int &lazy_var_count = aIsLocal ? g->CurrentFunc->mLazyVarCount : mLazyVarCount; // Used further below too.
+	Var **lazy_var = aIsStatic ? g->CurrentFunc->mStaticLazyVar : (aIsLocal ? g->CurrentFunc->mLazyVar : mLazyVar);
+	int &lazy_var_count = aIsStatic ? g->CurrentFunc->mStaticLazyVarCount : (aIsLocal ? g->CurrentFunc->mLazyVarCount : mLazyVarCount); // Used further below too.
 	if (lazy_var)
 	{
 		if (aInsertPos != lazy_var_count) // Need to make room at the indicated position for this variable.
@@ -9269,9 +9496,9 @@ Var *Script::AddVar(LPTSTR aVarName, size_t aVarNameLength, int aInsertPos, int 
 
 	// Create references to whichever variable list (local or global) is being acted upon.  These
 	// references simplify the code:
-	Var **&var = aIsLocal ? g->CurrentFunc->mVar : mVar; // This needs to be a ref. too in case it needs to be realloc'd.
-	int &var_count = aIsLocal ? g->CurrentFunc->mVarCount : mVarCount;
-	int &var_count_max = aIsLocal ? g->CurrentFunc->mVarCountMax : mVarCountMax;
+	Var **&var = aIsStatic ? g->CurrentFunc->mStaticVar : (aIsLocal ? g->CurrentFunc->mVar : mVar); // This needs to be a ref. too in case it needs to be realloc'd.
+	int &var_count = aIsStatic ? g->CurrentFunc->mStaticVarCount : (aIsLocal ? g->CurrentFunc->mVarCount : mVarCount);
+	int &var_count_max = aIsStatic ? g->CurrentFunc->mStaticVarCountMax : (aIsLocal ? g->CurrentFunc->mVarCountMax : mVarCountMax);
 	int alloc_count;
 
 	// Since the above would have returned if the lazy list is present but not yet full, if the left side
@@ -9293,7 +9520,7 @@ Var *Script::AddVar(LPTSTR aVarName, size_t aVarNameLength, int aInsertPos, int 
 			alloc_count = 100000;
 			// This is also the threshold beyond which the lazy list is used to accelerate performance.
 			// Create the permanent lazy list:
-			Var **&lazy_var = aIsLocal ? g->CurrentFunc->mLazyVar : mLazyVar;
+			Var **&lazy_var = aIsStatic ? g->CurrentFunc->mStaticLazyVar : (aIsLocal ? g->CurrentFunc->mLazyVar : mLazyVar);
 			if (   !(lazy_var = (Var **)malloc(MAX_LAZY_VARS * sizeof(Var *)))   )
 			{
 				ScriptError(ERR_OUTOFMEM);
@@ -9479,6 +9706,7 @@ void *Script::GetVarType(LPTSTR aVarName)
 	if (!_tcscmp(lower, _T("iscritical"))) return BIV_IsCritical;
 	if (!_tcscmp(lower, _T("fileencoding"))) return BIV_FileEncoding;
 	if (!_tcscmp(lower, _T("msgboxresult"))) return BIV_MsgBoxResult;
+	if (!_tcscmp(lower, _T("regview"))) return BIV_RegView;
 #ifndef MINIDLL
 	if (!_tcscmp(lower, _T("issuspended"))) return BIV_IsSuspended;
 
@@ -9493,6 +9721,7 @@ void *Script::GetVarType(LPTSTR aVarName)
 	if (!_tcscmp(lower, _T("ostype"))) return BIV_OSType;
 #endif
 	if (!_tcscmp(lower, _T("osversion"))) return BIV_OSVersion;
+	if (!_tcscmp(lower, _T("is64bitos"))) return BIV_Is64bitOS;
 	if (!_tcscmp(lower, _T("language"))) return BIV_Language;
 	if (   !_tcscmp(lower, _T("computername"))
 		|| !_tcscmp(lower, _T("username"))) return BIV_UserName_ComputerName;
@@ -9586,6 +9815,8 @@ void *Script::GetVarType(LPTSTR aVarName)
 	if (!_tcscmp(lower, _T("endchar"))) return BIV_EndChar;
 #endif
 	if (!_tcscmp(lower, _T("lasterror"))) return BIV_LastError;
+	if (!_tcscmp(lower, _T("globalstruct"))) return BIV_GlobalStruct;
+	if (!_tcscmp(lower, _T("scriptstruct"))) return BIV_ScriptStruct;
 
 	if (!_tcscmp(lower, _T("eventinfo"))) return BIV_EventInfo; // It's called "EventInfo" vs. "GuiEventInfo" because it applies to non-Gui events such as OnClipboardChange.
 #ifndef MINIDLL
@@ -13045,6 +13276,7 @@ ResultType Line::PerformLoopWhile(ExprTokenType *aResultToken, bool &aContinueMa
 
 	for (;; ++g.mLoopIteration)
 	{
+		g_script.mCurrLine = this; // For error-reporting purposes.
 #ifdef CONFIG_DEBUGGER
 		// L31: Let the debugger break at the 'While' line each iteration. Before this change,
 		// a While loop with empty body such as While FuncWithSideEffect() {} would be "hit"
@@ -13223,6 +13455,7 @@ ResultType Line::IncludeFiles(bool aAllowDuplicateInclude, bool aIgnoreLoadFailu
 
 bool Line::EvaluateLoopUntil(ResultType &aResult)
 {
+	g_script.mCurrLine = this; // For error-reporting purposes.
 	if (g->ListLinesIsEnabled)
 		LOG_THIS_LINE
 #ifdef CONFIG_DEBUGGER
@@ -13555,7 +13788,7 @@ ResultType Line::PerformLoopReg(ExprTokenType *aResultToken, bool &aContinueMain
 	// Open the specified subkey.  Be sure to only open with the minimum permission level so that
 	// the keys & values can be deleted or written to (though I'm not sure this would be an issue
 	// in most cases):
-	if (RegOpenKeyEx(reg_item.root_key, reg_item.subkey, 0, KEY_QUERY_VALUE | KEY_ENUMERATE_SUB_KEYS, &hRegKey) != ERROR_SUCCESS)
+	if (RegOpenKeyEx(reg_item.root_key, reg_item.subkey, 0, KEY_QUERY_VALUE | KEY_ENUMERATE_SUB_KEYS | g->RegView, &hRegKey) != ERROR_SUCCESS)
 		return OK;
 
 	// Get the count of how many values and subkeys are contained in this parent key:
@@ -15010,6 +15243,18 @@ ResultType Line::Perform()
 		if (is_remote_registry && root_key) // Never try to close local root keys, which the OS always keeps open.
 			RegCloseKey(root_key);
 		return result;
+	case ACT_SETREGVIEW:
+	{
+		DWORD reg_view = RegConvertView(ARG1);
+		// Validate the parameter even if it's not going to be used.
+		if (reg_view == -1)
+			return LineError(ERR_PARAM1_INVALID, FAIL, ARG1);
+		// Since these flags cause the registry functions to fail on Win2k and have no effect on
+		// any later 32-bit OS, ignore this command when the OS is 32-bit.  Leave A_RegView blank.
+		if (IsOS64Bit())
+			g.RegView = reg_view;
+		return OK;
+	}
 
 	case ACT_OUTPUTDEBUG:
 #ifndef CONFIG_DEBUGGER
@@ -15964,7 +16209,7 @@ ResultType Line::LineError(LPCTSTR aErrorText, ResultType aErrorType, LPCTSTR aE
 			, (aErrorType == FAIL && g_script.mIsReadyToExecute) ? ERR_ABORT_NO_SPACES
 			: (aErrorType == CRITICAL_ERROR || aErrorType == FAIL) ? (g_script.mIsRestart ? OLD_STILL_IN_EFFECT : WILL_EXIT)
 			: (aErrorType == EARLY_EXIT) ? _T("Continue running the script?")
-			: NULL);
+			: _T("For more details, read the documentation for #Warn."));
 
 		g_script.mCurrLine = this;  // This needs to be set in some cases where the caller didn't.
 		
@@ -16312,8 +16557,14 @@ LPTSTR Script::ListVars(LPTSTR aBuf, int aBufSize) // aBufSize should be an int 
 		// This definition might help compiler string pooling by ensuring it stays the same for both usages:
 		#define LIST_VARS_UNDERLINE _T("\r\n--------------------------------------------------\r\n")
 		// Start at the oldest and continue up through the newest:
-		aBuf += sntprintf(aBuf, BUF_SPACE_REMAINING, _T("Local Variables for %s()%s"), current_func->mName, LIST_VARS_UNDERLINE);
+		aBuf += sntprintf(aBuf, BUF_SPACE_REMAINING, _T("Static Variables for %s()%s"), current_func->mName, LIST_VARS_UNDERLINE);
 		Func &func = *current_func; // For performance.
+		for (int i = 0; i < func.mStaticVarCount; ++i)
+			if (func.mStaticVar[i]->Type() == VAR_NORMAL) // Don't bother showing clipboard and other built-in vars.
+				aBuf = func.mStaticVar[i]->ToText(aBuf, BUF_SPACE_REMAINING, true);
+
+		// Start at the oldest and continue up through the newest:
+		aBuf += sntprintf(aBuf, BUF_SPACE_REMAINING, _T("\r\n\r\nLocal Variables for %s()%s"), current_func->mName, LIST_VARS_UNDERLINE);
 		for (int i = 0; i < func.mVarCount; ++i)
 			if (func.mVar[i]->Type() == VAR_NORMAL) // Don't bother showing clipboard and other built-in vars.
 				aBuf = func.mVar[i]->ToText(aBuf, BUF_SPACE_REMAINING, true);

@@ -1665,7 +1665,7 @@ DWORD GetEnvVarReliable(LPCTSTR aEnvVarName, LPTSTR aBuf)
 
 
 
-DWORD ReadRegString(HKEY aRootKey, LPTSTR aSubkey, LPTSTR aValueName, LPTSTR aBuf, DWORD aBufSize)
+DWORD ReadRegString(HKEY aRootKey, LPTSTR aSubkey, LPTSTR aValueName, LPTSTR aBuf, DWORD aBufSize, DWORD aFlag)
 // Returns the length of the string (0 if empty).
 // Caller must ensure that size of aBuf is REALLY aBufSize (even when it knows aBufSize is more than
 // it needs) because the API apparently reads/writes parts of the buffer beyond the string it writes!
@@ -1674,7 +1674,7 @@ DWORD ReadRegString(HKEY aRootKey, LPTSTR aSubkey, LPTSTR aValueName, LPTSTR aBu
 // sure is probably to actually fetch the data and check if the terminator is present.
 {
 	HKEY hkey;
-	if (RegOpenKeyEx(aRootKey, aSubkey, 0, KEY_QUERY_VALUE, &hkey) != ERROR_SUCCESS)
+	if (RegOpenKeyEx(aRootKey, aSubkey, 0, KEY_QUERY_VALUE | aFlag, &hkey) != ERROR_SUCCESS)
 	{
 		*aBuf = '\0';
 		return 0;
@@ -1718,6 +1718,13 @@ DWORD ReadRegString(HKEY aRootKey, LPTSTR aSubkey, LPTSTR aValueName, LPTSTR aBu
 
 
 
+#ifndef _WIN64
+// Load function dynamically to allow the program to launch on Win2k/XPSP1:
+typedef BOOL (WINAPI *PFN_IsWow64Process)(HANDLE, PBOOL);
+static PFN_IsWow64Process _IsWow64Process = (PFN_IsWow64Process)GetProcAddress(GetModuleHandle(_T("kernel32"))
+	, "IsWow64Process");
+#endif
+
 BOOL IsProcess64Bit(HANDLE aHandle)
 {
 	BOOL is32on64;
@@ -1730,18 +1737,14 @@ BOOL IsProcess64Bit(HANDLE aHandle)
 	// cause this, so for simplicity just assume the target process is 64-bit (like this one).
 	return TRUE;
 #else
-	// Load function dynamically to allow the program to launch on Win2k/XPSP1:
-	typedef BOOL (WINAPI *MyIsWow64ProcessType)(HANDLE, PBOOL);
-	static MyIsWow64ProcessType MyIsWow64Process = (MyIsWow64ProcessType)GetProcAddress(GetModuleHandle(_T("kernel32"))
-		, "IsWow64Process");
-	if (MyIsWow64Process && MyIsWow64Process(GetCurrentProcess(), &is32on64))
+	if (_IsWow64Process && _IsWow64Process(GetCurrentProcess(), &is32on64))
 	{
 		if (is32on64)
 		{
 			// We're running under WOW64.  Since WOW64 only exists on 64-bit systems and on such systems
 			// 32-bit processes can run ONLY under WOW64, if the target process is also running under
 			// WOW64 it must be 32-bit; otherwise it must be 64-bit.
-			if (MyIsWow64Process(aHandle, &is32on64))
+			if (_IsWow64Process(aHandle, &is32on64))
 				return !is32on64;
 		}
 	}
@@ -1751,6 +1754,20 @@ BOOL IsProcess64Bit(HANDLE aHandle)
 	//     can cause this, so for simplicity just assume the target process is 32-bit (like this one).
 	//  c) The current process is not running under WOW64.  Since we know it is 32-bit (due to our use
 	//     of conditional compilation), the OS and all running processes must be 32-bit.
+	return FALSE;
+#endif
+}
+
+BOOL IsOS64Bit()
+{
+#ifdef _WIN64
+	// OS must be 64-bit to run this program.
+	return TRUE;
+#else
+	// If OS is 64-bit, this program must be running in WOW64.
+	BOOL is32on64;
+	if (_IsWow64Process && _IsWow64Process(GetCurrentProcess(), &is32on64))
+		return is32on64;
 	return FALSE;
 #endif
 }
@@ -2015,7 +2032,7 @@ HBITMAP LoadPicture(LPTSTR aFilespec, int aWidth, int aHeight, int &aImageType, 
 	}
 
 	IPicture *pic = NULL; // Also used to detect whether IPic method was used to load the image.
-
+	
 	if (!hbitmap) // Above hasn't loaded the image yet, so use the fall-back methods.
 	{
 		// At this point, regardless of the image type being loaded (even an icon), it will
@@ -2707,7 +2724,34 @@ LPTSTR InStrAny(LPTSTR aStr, LPTSTR aNeedle[], int aNeedleCount, size_t &aFoundL
 	return NULL;
 }
 
-
+short IsDefaultType(LPTSTR aTypeDef){
+	static LPTSTR sTypeDef[8] = {_T(" CHAR UCHAR BOOLEAN BYTE ")
+#ifndef _WIN64
+			,_T(" ATOM LANGID WCHAR WORD SHORT USHORT BYTE TCHAR HALF_PTR UHALF_PTR ")
+#else
+			,_T(" ATOM LANGID WCHAR WORD SHORT USHORT BYTE TCHAR ")
+#endif
+			,_T("")
+#ifdef _WIN64
+			,_T(" INT UINT FLOAT INT32 LONG LONG32 HFILE HRESULT BOOL COLORREF DWORD DWORD32 LCID LCTYPE LGRPID LRESULT UINT32 ULONG ULONG32 HALF_PTR UHALF_PTR ")
+#else
+			,_T(" INT UINT FLOAT INT32 LONG LONG32 HFILE HRESULT BOOL COLORREF DWORD DWORD32 LCID LCTYPE LGRPID LRESULT UINT32 ULONG ULONG32 PTR UPTR INT_PTR LONG_PTR POINTER_64 POINTER_SIGNED SSIZE_T WPARAM PBOOL PBOOLEAN PBYTE PCHAR PCSTR PCTSTR PCWSTR PDWORD PDWORDLONG PDWORD_PTR PDWORD32 PDWORD64 PFLOAT PHALF_PTR DWORD_PTR HACCEL HANDLE HBITMAP HBRUSH HCOLORSPACE HCONV HCONVLIST HCURSOR HDC HDDEDATA HDESK HDROP HDWP HENHMETAFILE HFONT HGDIOBJ HGLOBAL HHOOK HICON HINSTANCE HKEY HKL HLOCAL HMENU HMETAFILE HMODULE HMONITOR HPALETTE HPEN HRGN HRSRC HSZ HWINSTA HWND LPARAM LPBOOL LPBYTE LPCOLORREF LPCSTR LPCTSTR LPCVOID LPCWSTR LPDWORD LPHANDLE LPINT LPLONG LPSTR LPTSTR LPVOID LPWORD LPWSTR PHANDLE PHKEY PINT PINT_PTR PINT32 PINT64 PLCID PLONG PLONGLONG PLONG_PTR PLONG32 PLONG64 POINTER_32 POINTER_UNSIGNED PSHORT PSIZE_T PSSIZE_T PSTR PTBYTE PTCHAR PTSTR PUCHAR PUHALF_PTR PUINT PUINT_PTR PUINT32 PUINT64 PULONG PULONGLONG PULONG_PTR PULONG32 PULONG64 PUSHORT PVOID PWCHAR PWORD PWSTR SC_HANDLE SC_LOCK SERVICE_STATUS_HANDLE SIZE_T UINT_PTR ULONG_PTR VOID ")
+#endif
+			,_T(""),_T(""),_T("")
+#ifdef _WIN64
+			,_T(" INT64 UINT64 DOUBLE __int64 LONGLONG LONG64 USN DWORDLONG DWORD64 ULONGLONG ULONG64 PTR UPTR INT_PTR LONG_PTR POINTER_64 POINTER_SIGNED SSIZE_T WPARAM PBOOL PBOOLEAN PBYTE PCHAR PCSTR PCTSTR PCWSTR PDWORD PDWORDLONG PDWORD_PTR PDWORD32 PDWORD64 PFLOAT PHALF_PTR DWORD_PTR HACCEL HANDLE HBITMAP HBRUSH HCOLORSPACE HCONV HCONVLIST HCURSOR HDC HDDEDATA HDESK HDROP HDWP HENHMETAFILE HFONT HGDIOBJ HGLOBAL HHOOK HICON HINSTANCE HKEY HKL HLOCAL HMENU HMETAFILE HMODULE HMONITOR HPALETTE HPEN HRGN HRSRC HSZ HWINSTA HWND LPARAM LPBOOL LPBYTE LPCOLORREF LPCSTR LPCTSTR LPCVOID LPCWSTR LPDWORD LPHANDLE LPINT LPLONG LPSTR LPTSTR LPVOID LPWORD LPWSTR PHANDLE PHKEY PINT PINT_PTR PINT32 PINT64 PLCID PLONG PLONGLONG PLONG_PTR PLONG32 PLONG64 POINTER_32 POINTER_UNSIGNED PSHORT PSIZE_T PSSIZE_T PSTR PTBYTE PTCHAR PTSTR PUCHAR PUHALF_PTR PUINT PUINT_PTR PUINT32 PUINT64 PULONG PULONGLONG PULONG_PTR PULONG32 PULONG64 PUSHORT PVOID PWCHAR PWORD PWSTR SC_HANDLE SC_LOCK SERVICE_STATUS_HANDLE SIZE_T UINT_PTR ULONG_PTR VOID ")
+#else
+			,_T(" INT64 UINT64 DOUBLE __int64 LONGLONG LONG64 USN DWORDLONG DWORD64 ULONGLONG ULONG64 ")
+#endif
+			};
+	for (int i=0;i<8;i++)
+	{
+		if (tcscasestr(sTypeDef[i],aTypeDef))
+			return i + 1;
+	}
+	// type was not found
+	return NULL;
+}
 
 #if defined(_MSC_VER) && defined(_DEBUG)
 void OutputDebugStringFormat(LPCTSTR fmt, ...)

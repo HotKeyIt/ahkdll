@@ -1,3 +1,23 @@
+09.08.2012
+- Merged AutoHotkey_L 1.1.08.01
+- Fixed a bug in ahkFunction, variables were not freed.
+- Fixed freeing some internal variables on restart or ExitApp in AutoHotkey.dll.
+- Fixed OnMessage was not correctly handled on reload and ExitApp in AutoHotkey.dll.
+
+- Static variables are now saved separately from local variables
+- - When a function uses many static variables the time used to call the function is greatly improved.
+- - This is because only local variables need to be freed and we do not need to check if a variable is static.
+- - ListVars also shows static variables separate from local, this also helps debugging.
+
+- New Build-in functions
+- - Struct() and sizeof(), see manual for usage.
+
+15.02.2012
+- ResourceLibrary
+- Removed ahkKey
+- FileInstall for Scripts compiled with AutoHotkey.exe
+- Allow pure integers (pointers) for DllCall and DynaCall "Str" prameter.
+
 01.10.2011
 - Merged latest MemoryModule
 - Fixed x64w build AutoHotkey.dll also works fine using COM

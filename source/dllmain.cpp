@@ -373,7 +373,7 @@ unsigned __stdcall runScript( void* pArguments )
 }
 
 
-EXPORT BOOL ahkTerminate(int timeout)
+EXPORT BOOL ahkTerminate(int timeout = 0)
 {
 	DWORD lpExitCode = 0;
 	if (hThread == 0)
