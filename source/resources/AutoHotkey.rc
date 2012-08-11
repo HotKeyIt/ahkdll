@@ -168,6 +168,17 @@ END
 
 #include "..\ahkversion.h"
 
+#ifdef UNICODE
+#define AHK_ENC "Unicode"
+#else
+#define AHK_ENC "ANSI"
+#endif
+#ifdef _WIN64
+#define AHK_BIT "64-bit"
+#else
+#define AHK_BIT "32-bit"
+#endif
+
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION AHK_VERSION_N
  PRODUCTVERSION AHK_VERSION_N
@@ -194,7 +205,7 @@ BEGIN
             VALUE "ProductName", " "
             VALUE "ProductVersion", AHK_VERSION
 #else
-            VALUE "FileDescription", "AutoHotkey_H"
+            VALUE "FileDescription", "AutoHotkey_H " AHK_ENC " " AHK_BIT
             VALUE "FileVersion", AHK_VERSION
             VALUE "InternalName", "AutoHotkey_H"
             VALUE "LegalCopyright", "Copyright (C) 2010"
@@ -236,6 +247,6 @@ END
 // AutoHotkey debugging script
 #ifdef _DEBUG
 #ifndef _USRDLL
-AHK RCDATA "Test\\Test.ahk"
+//AHK RCDATA "Test\\Test.ahk"
 #endif
 #endif
