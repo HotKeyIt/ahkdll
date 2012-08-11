@@ -271,23 +271,18 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 					_tcscpy(tempbuf,defbuf + 1);
 					_tcscpy(defbuf + 1,tempbuf + _tcscspn(tempbuf,_T("(")) + 1); //,_tcschr(tempbuf,')') - _tcschr(tempbuf,'('));
 					_tcscpy(_tcschr(defbuf,')'),_T(" \0"));
+					Var1.var = g_script.FindVar(defbuf + 1,_tcslen(defbuf) - 2,NULL,FINDVAR_LOCAL,NULL);
+					g->CurrentFunc = bkpfunc;
 				}
 				else // release object and return
 				{
-					if (bkpfunc)
-						g->CurrentFunc = bkpfunc;
+					g->CurrentFunc = bkpfunc;
 					obj->Release();
 					return NULL;
 				}
 			}
-			// try to find local variable first
-			if (g->CurrentFunc)
-			{
+			else if (g->CurrentFunc) // try to find local variable first
 				Var1.var = g_script.FindVar(defbuf + 1,_tcslen(defbuf) - 2,NULL,FINDVAR_LOCAL,NULL);
-				// only restore here because otherwise no function
-				if (bkpfunc)
-					g->CurrentFunc = bkpfunc;
-			}
 			// try to find global variable if local was not found or we are not in func
 			if (Var1.var == NULL)
 				Var1.var = g_script.FindVar(defbuf + 1,_tcslen(defbuf) - 2,NULL,FINDVAR_GLOBAL,NULL);
