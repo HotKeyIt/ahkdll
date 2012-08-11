@@ -168,6 +168,17 @@ END
 
 #include "..\ahkversion.h"
 
+#ifdef UNICODE
+#define AHK_ENC "Unicode"
+#else
+#define AHK_ENC "ANSI"
+#endif
+#ifdef _WIN64
+#define AHK_BIT "64-bit"
+#else
+#define AHK_BIT "32-bit"
+#endif
+
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION AHK_VERSION_N
  PRODUCTVERSION AHK_VERSION_N
@@ -186,15 +197,15 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
 #ifdef AUTOHOTKEYSC
-            VALUE "FileDescription", ""
+            VALUE "FileDescription", " "
             VALUE "FileVersion", AHK_VERSION
-            VALUE "InternalName", ""
+            VALUE "InternalName", " "
             VALUE "LegalCopyright", ""
-            VALUE "OriginalFilename", ""
-            VALUE "ProductName", ""
+            VALUE "OriginalFilename", " "
+            VALUE "ProductName", " "
             VALUE "ProductVersion", AHK_VERSION
 #else
-            VALUE "FileDescription", "AutoHotkey_H"
+            VALUE "FileDescription", "AutoHotkey_H " AHK_ENC " " AHK_BIT
             VALUE "FileVersion", AHK_VERSION
             VALUE "InternalName", "AutoHotkey_H"
             VALUE "LegalCopyright", "Copyright (C) 2010"
@@ -233,37 +244,9 @@ END
 /////////////////////////////////////////////////////////////////////////////
 #endif    // not APSTUDIO_INVOKED
 
-
+// AutoHotkey debugging script
 #ifdef _DEBUG
-AHK RCDATA "Test\\Test.ahk"
+#ifndef _USRDLL
+//AHK RCDATA "Test\\Test.ahk"
 #endif
-
-// Windows API definitions
-// ADVAPI32	RCDATA "source\\resources\\ADVAPI32.api"
-// ATL			RCDATA "source\\resources\\ATL.api"
-// COMCTL32	RCDATA "source\\resources\\COMCTL32.api"
-// COMDLG32	RCDATA "source\\resources\\COMDLG32.api"
-// CRYPT32		RCDATA "source\\resources\\CRYPT32.api"
-// GDI32		RCDATA "source\\resources\\GDI32.api"
-// GDIPLUS		RCDATA "source\\resources\\GDIPLUS.api"
-// IMAGEHLP	RCDATA "source\\resources\\IMAGEHLP.api"
-// IMM32		RCDATA "source\\resources\\IMM32.api"
-// KERNEL32	RCDATA "source\\resources\\kernel32.api"
-// MPR			RCDATA "source\\resources\\MPR.api"
-// MSCTF		RCDATA "source\\resources\\MSCTF.api"
-// NETAPI32	RCDATA "source\\resources\\NETAPI32.api"
-// NTDLL		RCDATA "source\\resources\\NTDLL.api"
-// OLE32		RCDATA "source\\resources\\OLE32.api"
-// OLEAUT32	RCDATA "source\\resources\\OLEAUT32.api"
-// PSAPI		RCDATA "source\\resources\\PSAPI.api"
-// RPCRT4		RCDATA "source\\resources\\RPCRT4.api"
-// SECUR32		RCDATA "source\\resources\\SECUR32.api"
-// SETUPAPI	RCDATA "source\\resources\\SETUPAPI.api"
-// SHELL32		RCDATA "source\\resources\\SHELL32.api"
-// USER32		RCDATA "source\\resources\\USER32.api"
-// USERENV		RCDATA "source\\resources\\USERENV.api"
-// UxTheme		RCDATA "source\\resources\\UXTHEME.api"
-// WININET		RCDATA "source\\resources\\WININET.api"
-// WINMM		RCDATA "source\\resources\\WINMM.api"
-// WS2_32		RCDATA "source\\resources\\WS2_32.api"
-// WSOCK32		RCDATA "source\\resources\\WSOCK32.api"
+#endif
