@@ -42,9 +42,7 @@ BIF_DECL(BIF_sizeof)
 	bool unionisstruct[10];			// updated to move offset for structure in structure
 	int totalunionsize = 0;			// total size of all unions and structures in structure
 	int uniondepth = 0;				// count how deep we are in union/structure
-#ifdef _WIN64
 	int aligntotal = 0;				// pointer alignment for total structure
-#endif
 	int thissize;					// used to save size returned from IsDefaultType
 	
 	// following are used to find variable and also get size of a structure defined in variable
@@ -177,13 +175,11 @@ BIF_DECL(BIF_sizeof)
 		if (_tcschr(tempbuf,'*'))
 		{
 			offset += ptrsize * (arraydef ? arraydef : 1);
-#ifdef _WIN64
 			// align offset for pointer
 			if (offset % ptrsize)
 				offset += (ptrsize - (offset % ptrsize)) * (arraydef ? arraydef : 1);
 			if (ptrsize > aligntotal)
 				aligntotal = ptrsize;
-#endif
 			// update offset
 			if (uniondepth)
 			{
@@ -219,14 +215,16 @@ BIF_DECL(BIF_sizeof)
 		// If Type not found, resolve type to variable and get size of struct defined in it
 		if ((thissize = IsDefaultType(defbuf)))
 		{
+			if (!_tcscmp(defbuf,_T(" bool ")))
+				thissize = 1;
 			offset += thissize * (arraydef ? arraydef : 1);
-#ifdef _WIN64
-			// align offset for pointer
-			if (offset % thissize)
+			// align offset
+			if (thissize > 1 && offset % thissize)
+			{
 				offset += thissize - (offset % thissize);
-			if (thissize > aligntotal)
-				aligntotal = thissize;
-#endif
+				if (thissize > aligntotal)
+					aligntotal = thissize;
+			}
 		}
 		else // type was not found, check for user defined type in variables
 		{
@@ -272,13 +270,6 @@ BIF_DECL(BIF_sizeof)
 				}
 				// sizeof was given an offset that it applied and aligned if necessary, so set offset =  and not +=
 				offset = (int)ResultToken.value_int64 * (arraydef ? arraydef : 1);
-				/*
-#ifdef _WIN64
-				// align offset for pointer, not necessary to align total because this is the only field
-				if (offset % ResultToken.value_int64)
-					offset += ResultToken.value_int64 - (offset % ResultToken.value_int64);
-#endif
-					*/
 			}
 			else // No variable was found and it is not default type so we can't determine size, return empty string.
 				return;
@@ -300,10 +291,8 @@ BIF_DECL(BIF_sizeof)
 		else
 			buf += _tcslen(buf);
 	}
-#ifdef _WIN64
-	if (aligntotal)
-		offset += offset % aligntotal;
-#endif
+	if (aligntotal && offset % aligntotal) // align only if offset was not given
+		offset += aligntotal - (offset % aligntotal);
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = offset;
 }

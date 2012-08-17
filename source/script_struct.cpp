@@ -24,9 +24,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 	int totalunionsize = 0;			// total size of all unions and structures in structure
 	int uniondepth = 0;				// count how deep we are in union/structure
 	int ispointer = NULL;			// identify pointer and how deep it goes
-#ifdef _WIN64
 	int aligntotal = 0;				// pointer alignment for total structure
-#endif
 	int thissize;					// used to check if type was found in above array.
 	
 	// following are used to find variable and also get size of a structure defined in variable
@@ -229,17 +227,9 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 		// If Type not found, resolve type to variable and get size of struct defined in it
 		if ((thissize = IsDefaultType(defbuf)))
 		{
-			if (!(field = obj->Insert(keybuf, insert_pos++,ispointer,offset,arraydef,NULL,ispointer ? ptrsize : thissize
-						,ispointer ? true : !tcscasestr(_T(" FLOAT DOUBLE PFLOAT PDOUBLE "),defbuf)
-						,!tcscasestr(_T(" PTR SHORT INT INT64 CHAR VOID HALF_PTR BOOL INT32 LONG LONG32 LONGLONG LONG64 USN INT_PTR LONG_PTR POINTER_64 POINTER_SIGNED SSIZE_T WPARAM __int64 "),defbuf)
-						,tcscasestr(_T(" TCHAR LPTSTR LPCTSTR LPWSTR LPCWSTR WCHAR "),defbuf) ? 1200 : tcscasestr(_T(" CHAR LPSTR LPCSTR LPSTR UCHAR "),defbuf) ? 0 : -1)))
-			{	// Out of memory.
-				obj->Release();
-				return NULL;
-			}
-			offset += (ispointer ? ptrsize : thissize) * (arraydef ? arraydef : 1);
-#ifdef _WIN64
-			// align offset for pointer
+			if (!_tcscmp(defbuf,_T(" bool ")))
+				thissize = 1;
+			// align offset
 			if (ispointer)
 			{
 				if (offset % ptrsize)
@@ -254,7 +244,15 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 				if (thissize > aligntotal)
 					aligntotal = thissize;
 			}
-#endif
+			if (!(field = obj->Insert(keybuf, insert_pos++,ispointer,offset,arraydef,NULL,ispointer ? ptrsize : thissize
+						,ispointer ? true : !tcscasestr(_T(" FLOAT DOUBLE PFLOAT PDOUBLE "),defbuf)
+						,!tcscasestr(_T(" PTR SHORT INT INT64 CHAR VOID HALF_PTR BOOL INT32 LONG LONG32 LONGLONG LONG64 USN INT_PTR LONG_PTR POINTER_64 POINTER_SIGNED SSIZE_T WPARAM __int64 "),defbuf)
+						,tcscasestr(_T(" TCHAR LPTSTR LPCTSTR LPWSTR LPCWSTR WCHAR "),defbuf) ? 1200 : tcscasestr(_T(" CHAR LPSTR LPCSTR LPSTR UCHAR "),defbuf) ? 0 : -1)))
+			{	// Out of memory.
+				obj->Release();
+				return NULL;
+			}
+			offset += (ispointer ? ptrsize : thissize) * (arraydef ? arraydef : 1);
 		}
 		else // type was not found, check for user defined type in variables
 		{
@@ -347,32 +345,34 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 				}
 				// Call BIF_sizeof passing offset in second parameter to align offset if necessary
 				// if field is a pointer we will need its size only
-				param[1]->value_int64 = (__int64)ispointer ? 0 : offset;
-				BIF_sizeof(Result,ResultToken,param,ispointer ? 1 : 2);
-				if (ResultToken.symbol != SYM_INTEGER)
-				{	// could not resolve structure
-					obj->Release();
-					return NULL;
+				if (!ispointer)
+				{
+					param[1]->value_int64 = (__int64)ispointer ? 0 : offset;
+					BIF_sizeof(Result,ResultToken,param,ispointer ? 1 : 2);
+					if (ResultToken.symbol != SYM_INTEGER)
+					{	// could not resolve structure
+						obj->Release();
+						return NULL;
+					}
+				} 
+				else
+				{
+					if (offset % ptrsize)
+						offset += (ptrsize - (offset % ptrsize)) * (arraydef ? arraydef : 1);
+					if (ptrsize > aligntotal)
+						aligntotal = ptrsize;
 				}
 				// Insert new field in our structure
-				if (!(field = obj->Insert(keybuf, insert_pos++,ispointer,offset,arraydef,Var1.var,ispointer ? 4 : (int)ResultToken.value_int64,1,1,-1)))
+				if (!(field = obj->Insert(keybuf, insert_pos++,ispointer,offset,arraydef,Var1.var,ispointer ? ptrsize : (int)ResultToken.value_int64,1,1,-1)))
 				{	// Out of memory.
 					obj->Release();
 					return NULL;
 				}
 				if (ispointer)
-					offset += (int)(ispointer ? ptrsize : ResultToken.value_int64) * (arraydef ? arraydef : 1);
+					offset += (int)ptrsize * (arraydef ? arraydef : 1);
 				else
 				// sizeof was given an offset that it applied and aligned if necessary, so set offset =  and not +=
-					offset = (int)(ispointer ? ptrsize : ResultToken.value_int64) * (arraydef ? arraydef : 1);
-#ifdef _WIN64
-				// align offset for pointer
-				if (ispointer)
-				{
-					if (offset % ptrsize)
-						offset += ptrsize - (offset % ptrsize);
-				}
-#endif
+					offset = (int)ResultToken.value_int64 * (arraydef ? arraydef : 1);
 			}
 			else // No variable was found and it is not default type so we can't determine size.
 			{
@@ -402,11 +402,9 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			buf += _tcslen(buf);
 		}
 	}
-#ifdef _WIN64
 	// align total structure if necessary
-	if (aligntotal)
-		offset += offset % aligntotal;
-#endif
+	if (aligntotal && offset % aligntotal)
+		offset += aligntotal - (offset % aligntotal);
 	if (!offset) // structure could not be build
 	{
 		obj->Release();
@@ -564,7 +562,10 @@ Struct::~Struct()
 
 UINT_PTR Struct::SetPointer(UINT_PTR aPointer,int aArrayItem)
 {
-	*((UINT_PTR*)((UINT_PTR)mStructMem + (aArrayItem-1)*(mSize/(mArraySize ? mArraySize : 1)))) = aPointer;
+	if (mIsPointer)
+		*((UINT_PTR*)(*mStructMem + (aArrayItem-1)*(mSize/(mArraySize ? mArraySize : 1)))) = aPointer;
+	else
+		*((UINT_PTR*)((UINT_PTR)mStructMem + (aArrayItem-1)*(mSize/(mArraySize ? mArraySize : 1)))) = aPointer;
 	return aPointer;
 }
 
@@ -732,9 +733,9 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 		//	//		For instance, x[y,z]:=w may operate on x[y][z], x.base[y][z], x[y].base[z], etc.
 		//}
 	}
-
+	
 	if (!param_count_excluding_rvalue || (param_count_excluding_rvalue == 1 && TokenIsEmptyString(*aParam[0])))
-	{   // struct[] or struct[""] / obj[] := ptr 
+	{   // for struct[] and struct[""...] / struct[] := ptr and struct[""...] := ptr 
 		if (IS_INVOKE_SET)
 		{
 			if (TokenToObject(*aParam[param_count_excluding_rvalue]))
@@ -755,7 +756,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 			}
 			// assign new pointer to structure
 			// releasing/deleting structure will not free that memory
-			mStructMem = (UINT_PTR *)TokenToInt64(*aParam[0]);
+			mStructMem = (UINT_PTR *)TokenToInt64(*aParam[param_count_excluding_rvalue]);
 		}
 		// Return new structure address
 		aResultToken.symbol = SYM_INTEGER;
@@ -775,7 +776,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 						aResultToken.value_int64 = SetPointer((UINT_PTR)TokenToInt64(*aParam[2]),(int)TokenToInt64(*aParam[0]));
 					else
 					{	// resolve pointer to pointer and set it
-						UINT_PTR *aDeepPointer = ((UINT_PTR*)((UINT_PTR)target + (TokenToInt64(*aParam[0])-1)*(mSize/(mArraySize ? mArraySize : 1))));
+						UINT_PTR *aDeepPointer = ((UINT_PTR*)((mIsPointer ? *target : (UINT_PTR)target) + (TokenToInt64(*aParam[0])-1)*(mSize/(mArraySize ? mArraySize : 1))));
 						for (int i = param_count_excluding_rvalue - 2;i && aDeepPointer;i--)
 							aDeepPointer = (UINT_PTR*)*aDeepPointer;
 						*aDeepPointer = (UINT_PTR)TokenToInt64(*aParam[aParamCount]);
@@ -785,7 +786,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 				else // GET pointer
 				{
 					if (param_count_excluding_rvalue < 3)
-						aResultToken.value_int64 = ((UINT_PTR)target + (TokenToInt64(*aParam[0])-1)*(mSize / (mArraySize ? mArraySize : 1)));
+						aResultToken.value_int64 = ((mIsPointer ? *target : (UINT_PTR)target) + (TokenToInt64(*aParam[0])-1)*(mSize / (mArraySize ? mArraySize : 1)));
 					else
 					{	// resolve pointer to pointer
 						UINT_PTR *aDeepPointer = ((UINT_PTR*)((UINT_PTR)target + (TokenToInt64(*aParam[0])-1)*(mSize/(mArraySize ? mArraySize : 1))));
@@ -924,7 +925,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 		}
 		if (mTypeOnly && !IS_INVOKE_CALL) // IS_INVOKE_CALL does not need the tentative field, it will handle it itself
 		{
-			if (mVarRef)
+			if (mVarRef && !TokenIsEmptyString(*aParam[0]))
 			{
 				if (releaseobj)
 					objclone->Release();
@@ -942,14 +943,12 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 					Var1.symbol = SYM_STRING;
 					Var1.marker = TokenToString(Var2);
 					Var2.symbol = SYM_INTEGER;
-
-					// resolve pointer
-					Var2.value_int64 = mIsPointer ? *target : (UINT_PTR)target; 
-
+					Var2.value_int64 = 0;
 					if (objclone = Struct::Create(param,2))
 					{	// create structure from variable
-						Struct *tempobj = objclone->Clone(true);
-						tempobj->mStructMem = objclone->mStructMem;
+						Struct* tempobj = objclone->Clone(true);
+						// resolve pointer
+						tempobj->mStructMem = mIsPointer ? (UINT_PTR*)*target : target;
 						tempobj->Invoke(aResultToken,aThisToken ,aFlags,aParam,aParamCount);
 						tempobj->Release();
 						objclone->Release();
@@ -1051,7 +1050,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 			} 
 			else if (aParamCount)
 			{   // we must have to parmeters here since first parameter is field
-				if (!TokenIsPureNumeric(*aParam[0]) || !TokenToInt64(*aParam[0]))
+				if (!TokenIsPureNumeric(*aParam[0]) || !TokenToInt64(*aParam[0]) || TokenToInt64(*aParam[0]) == 0)
 				{
 					if (field->mMemAllocated > 0)
 					{
@@ -1299,11 +1298,11 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 				if (param_count_excluding_rvalue < 3)
 				{   // set simple pointer
 					*((UINT_PTR*)((UINT_PTR)target + field->mOffset)) = (UINT_PTR)TokenToInt64(*aParam[2]);
-					aResultToken.value_int64 = (UINT_PTR)target + field->mOffset;
+					aResultToken.value_int64 = (UINT_PTR)*(target + field->mOffset);
 				}
 				else // set pointer to pointer
 				{
-					UINT_PTR *aDeepPointer = ((UINT_PTR*)((UINT_PTR)target + field->mOffset));
+					UINT_PTR *aDeepPointer = ((UINT_PTR*)((mIsPointer ? *target : (UINT_PTR)target) + field->mOffset));
 					for (int i = param_count_excluding_rvalue - 2;i && aDeepPointer;i--)
 						aDeepPointer = (UINT_PTR*)*aDeepPointer;
 					*aDeepPointer = (UINT_PTR)TokenToInt64(*aParam[aParamCount]);
@@ -1313,10 +1312,10 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 			else // GET pointer
 			{
 				if (param_count_excluding_rvalue < 3)
-					aResultToken.value_int64 = (UINT_PTR)target + field->mOffset;
+					aResultToken.value_int64 = (mIsPointer ? *target : (UINT_PTR)target) + field->mOffset;
 				else
 				{	// get pointer to pointer
-					UINT_PTR *aDeepPointer = ((UINT_PTR*)((UINT_PTR)target + field->mOffset));
+					UINT_PTR *aDeepPointer = ((UINT_PTR*)((mIsPointer ? *target : (UINT_PTR)target) + field->mOffset));
 					for (int i = param_count_excluding_rvalue - 2;i && *aDeepPointer;i--)
 						aDeepPointer = (UINT_PTR*)*aDeepPointer;
 					aResultToken.value_int64 = (__int64)aDeepPointer;
@@ -1680,7 +1679,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 			}
 			aResultToken.symbol = SYM_STRING;
 		}
-		else
+		else // NumGet (code stolen from BIF_NumGet())
 		{
 			switch(field->mSize)
 			{
