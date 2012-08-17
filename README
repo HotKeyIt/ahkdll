@@ -1,3 +1,7 @@
+17.08.2012
+- Fixed to use alignment for all types and also in 32-bit environment
+- Fixed pointer handling in some cases
+- To set Pointer in main structure you will need to use struct["",""]:=ptr
 09.08.2012
 - Merged AutoHotkey_L 1.1.08.01
 - Fixed a bug in ahkFunction, variables were not freed.

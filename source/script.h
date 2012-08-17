@@ -2464,7 +2464,7 @@ public:
 	WinGroup *mFirstGroup, *mLastGroup;  // The first and last variables in the linked list.
 	int mCurrentFuncOpenBlockCount; // While loading the script, this is how many blocks are currently open in the current function's body.
 	bool mNextLineIsFunctionBody; // Whether the very next line to be added will be the first one of the body.
-
+	
 #define MAX_NESTED_CLASSES 5
 #define MAX_CLASS_NAME_LENGTH UCHAR_MAX
 	int mClassObjectCount;
@@ -2755,6 +2755,7 @@ VarSizeType BIV_ComSpec(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_SpecialFolderPath(LPTSTR aBuf, LPTSTR aVarName); // Handles various variables.
 VarSizeType BIV_MyDocuments(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_Caret(LPTSTR aBuf, LPTSTR aVarName);
+VarSizeType BIV_CoordMode(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_Cursor(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_ScreenWidth_Height(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_ScriptName(LPTSTR aBuf, LPTSTR aVarName);
