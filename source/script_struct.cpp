@@ -1495,7 +1495,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 					// It is tempting to always null-terminate (potentially replacing the last byte of data),
 					// but that would exclude this function as a means to copy a string into a fixed-length array.
 					if (field->mSize > 2 && char_count && char_count < length) // NOT TCHAR or CHAR or WCHAR
-						((LPSTR)*(UINT_PTR*)((UINT_PTR)target + field->mOffset))[char_count] = '\0';
+						((LPTSTR)*(UINT_PTR*)((UINT_PTR)target + field->mOffset))[char_count] = '\0';
 #ifndef UNICODE
 				}
 #endif
