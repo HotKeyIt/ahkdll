@@ -1420,7 +1420,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 			else
 			{
 				if (TokenIsEmptyString(*aParam[1]))
-					*((LPSTR)(field->mSize > 2 ? *((UINT_PTR*)((UINT_PTR)target + field->mOffset)) : ((UINT_PTR)target + field->mOffset))) = '\0';
+					*((LPTSTR)(field->mSize > 2 ? *((UINT_PTR*)((UINT_PTR)target + field->mOffset)) : ((UINT_PTR)target + field->mOffset))) = '\0';
 				else
 				{
 					char_count = WideCharToMultiByte(field->mEncoding, WC_NO_BEST_FIT_CHARS, (LPCWSTR)source_string, source_length, NULL, 0, NULL, NULL);
