@@ -9170,26 +9170,28 @@ VarSizeType BIV_LastError(LPTSTR aBuf, LPTSTR aVarName)
 
 VarSizeType BIV_GlobalStruct(LPTSTR aBuf, LPTSTR aVarName)
 {
-	TCHAR buf[MAX_INTEGER_SIZE];
-	LPTSTR target_buf = aBuf ? aBuf : buf;
+	if (!aBuf)
+		return MAX_INTEGER_LENGTH; // Conservative, both for performance and in case the value changes between first and second call.
+
 #ifdef _WIN64
-	_i64tot((__int64)g, target_buf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
+	_i64tot((__int64)g, aBuf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
 #else
-	_itot((int)g, target_buf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
+	_itot((int)g, aBuf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
 #endif
-	return (VarSizeType)_tcslen(target_buf);
+	return (VarSizeType)_tcslen(aBuf);
 }
 
 VarSizeType BIV_ScriptStruct(LPTSTR aBuf, LPTSTR aVarName)
 {
-	TCHAR buf[MAX_INTEGER_SIZE];
-	LPTSTR target_buf = aBuf ? aBuf : buf;
+	if (!aBuf)
+		return MAX_INTEGER_LENGTH; // Conservative, both for performance and in case the value changes between first and second call.
+
 #ifdef _WIN64
-	_i64tot((__int64)&g_script, target_buf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
+	_i64tot((__int64)&g_script, aBuf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
 #else
-	_itot((int)&g_script, target_buf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
+	_itot((int)&g_script, aBuf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
 #endif
-	return (VarSizeType)_tcslen(target_buf);
+	return (VarSizeType)_tcslen(aBuf);
 }
 
 
@@ -9581,7 +9583,17 @@ VarSizeType BIV_MyDocuments(LPTSTR aBuf, LPTSTR aVarName) // Called by multiple 
 	return length;
 }
 
-
+VarSizeType BIV_CoordMode(LPTSTR aBuf, LPTSTR aVarName)
+{
+	if (!aBuf)
+		return MAX_INTEGER_LENGTH; // Conservative, both for performance and in case the value changes between first and second call.
+#ifdef _WIN64
+	_i64tot(((g->CoordMode >> Line::ConvertCoordModeCmd(aVarName + 11)) & COORD_MODE_MASK), aBuf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
+#else
+	_itot(((g->CoordMode >> Line::ConvertCoordModeCmd(aVarName + 11)) & COORD_MODE_MASK), aBuf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
+#endif
+	return (VarSizeType)_tcslen(aBuf);
+}
 
 VarSizeType BIV_Caret(LPTSTR aBuf, LPTSTR aVarName)
 {
@@ -11146,7 +11158,7 @@ DynaToken *DynaToken::Create(ExprTokenType *aParam[], int aParamCount)
 		this_token.object = obj;
 		
 		// Determine the type of return value.
-		DYNAPARM return_attrib = {0}; // Init all to default in case ConvertDllArgType() isn't called below. This struct holds the type and other attributes of the function's return value.
+		// DYNAPARM return_attrib = {0}; // Init all to default in case ConvertDllArgType() isn't called below. This struct holds the type and other attributes of the function's return value.
 #ifdef WIN32_PLATFORM
 		obj->mdll_call_mode = DC_CALL_STD; // Set default.  Can be overridden to DC_CALL_CDECL and flags can be OR'd into it.
 #endif
@@ -11250,6 +11262,15 @@ TEST_TYPE("W",	DLL_ARG_WSTR)
 					g_script.SetErrorLevelOrThrowInt(-2, _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
 					return NULL;
 				}
+#ifdef WIN32_PLATFORM
+				if (!obj->mreturn_attrib.passed_by_address) // i.e. the special return flags below are not needed when an address is being returned.
+				{
+					if (obj->mreturn_attrib.type == DLL_ARG_DOUBLE)
+						obj->mdll_call_mode |= DC_RETVAL_MATH8;
+					else if (obj->mreturn_attrib.type == DLL_ARG_FLOAT)
+						obj->mdll_call_mode |= DC_RETVAL_MATH4;
+				}
+#endif
 			}
 		}
 		switch(aParam[0]->symbol)
@@ -11312,14 +11333,14 @@ CStringW **pStr = (CStringW **)
 					if (this_param.symbol == PURE_INTEGER)
 					{
 #ifdef _WIN64
-					this_dyna_param.type = DLL_ARG_INT64; // Ptr vs IntPtr to simplify recognition of the pointer suffix, to avoid any possible confusion with IntP, and because it is easier to type.
+						this_dyna_param.type = DLL_ARG_INT64; // Ptr vs IntPtr to simplify recognition of the pointer suffix, to avoid any possible confusion with IntP, and because it is easier to type.
 #else
-					this_dyna_param.type = DLL_ARG_INT;
+						this_dyna_param.type = DLL_ARG_INT;
 #endif
-					this_dyna_param.value_int64 = TokenToInt64(this_param);
-					if (this_dyna_param.type != DLL_ARG_INT64) // Shift the 32-bit value into the high-order DWORD of the 64-bit value for later use by DynaCall().
-						this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
-				}
+						this_dyna_param.value_int64 = TokenToInt64(this_param);
+						if (this_dyna_param.type != DLL_ARG_INT64) // Shift the 32-bit value into the high-order DWORD of the 64-bit value for later use by DynaCall().
+							this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
+					}
 					else
 					{
 						g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.

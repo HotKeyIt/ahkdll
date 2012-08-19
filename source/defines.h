@@ -599,6 +599,8 @@ struct FuncAndToken {
 	LPTSTR result_to_return_dll;
 	Func * mFunc ;
 	VARIANT variant_to_return_dll;
+	LPTSTR param[10];
+	BYTE mParamCount;
 };
 
 class Label;                //
