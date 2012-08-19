@@ -12896,7 +12896,7 @@ DynaToken *DynaToken::Create(ExprTokenType *aParam[], int aParamCount)
 		this_token.object = obj;
 		
 		// Determine the type of return value.
-		DYNAPARM return_attrib = {0}; // Init all to default in case ConvertDllArgType() isn't called below. This struct holds the type and other attributes of the function's return value.
+		//DYNAPARM return_attrib = {0}; // Init all to default in case ConvertDllArgType() isn't called below. This struct holds the type and other attributes of the function's return value.
 #ifdef WIN32_PLATFORM
 		obj->mdll_call_mode = DC_CALL_STD; // Set default.  Can be overridden to DC_CALL_CDECL and flags can be OR'd into it.
 #endif
@@ -13000,6 +13000,15 @@ TEST_TYPE("W",	DLL_ARG_WSTR)
 					g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 					return NULL;
 				}
+#ifdef WIN32_PLATFORM
+				if (!obj->mreturn_attrib.passed_by_address) // i.e. the special return flags below are not needed when an address is being returned.
+				{
+					if (obj->mreturn_attrib.type == DLL_ARG_DOUBLE)
+						obj->mdll_call_mode |= DC_RETVAL_MATH8;
+					else if (obj->mreturn_attrib.type == DLL_ARG_FLOAT)
+						obj->mdll_call_mode |= DC_RETVAL_MATH4;
+				}
+#endif
 			}
 		}
 		switch(aParam[0]->symbol)

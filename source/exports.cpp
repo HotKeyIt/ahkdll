@@ -183,7 +183,7 @@ EXPORT unsigned int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, L
 		LPTSTR *params[10];
 		params[0]=&param1;params[1]=&param2;params[2]=&param3;params[3]=&param4;params[4]=&param5;
 		params[5]=&param6;params[6]=&param7;params[7]=&param8;params[8]=&param9;params[9]=&param10;
-		for (int i=0;i<10;i++)
+		for (int i=0;i < aParamsCount;i++)
 		{
 			if (*params[i] && _tcscmp(*params[i],_T("")))
 				aParamsCount = i + 1;
@@ -196,7 +196,7 @@ EXPORT unsigned int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, L
 			for (;aFunc->mParamCount > aParamCount && aParamsCount>aParamCount;aParamCount++)
 			{
 				aParam[aParamCount] = (ExprTokenType*)_alloca(sizeof(ExprTokenType));
-				aParam[aParamCount]->symbol = SYM_STRING;aParam[aParamCount]->marker = *params[aParamCount]; // Assign parameters
+				aParam[aParamCount]->symbol = SYM_OPERAND;aParam[aParamCount]->marker = *params[aParamCount]; // Assign parameters
 			}
 			aResultToken.symbol = SYM_INTEGER;
 			aResultToken.marker = aFunc->mName;
@@ -205,9 +205,16 @@ EXPORT unsigned int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, L
 		}
 		else
 		{
-			for (;aFunc->mParamCount > aParamCount && aParamsCount>aParamCount;aParamCount++)
-				aFunc->mParam[aParamCount].var->Assign(*params[aParamCount]);
+
 			FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
+			aFuncAndToken.mParamCount = aParamsCount;
+			for (int i = 0;i < 10;i++)
+			{
+				aFuncAndToken.param[aParamCount] = (LPTSTR)realloc(aFuncAndToken.param[aParamCount],_tcslen(*params[aParamCount])*sizeof(WCHAR));
+				_tcscpy(aFuncAndToken.param[aParamCount],*params[aParamCount]);
+			}
+			//for (;aFunc->mParamCount > aParamCount && aParamsCount>aParamCount;aParamCount++)
+			//	aFunc->mParam[aParamCount].var->AssignString(*params[aParamCount]);
 			aFuncAndToken.mFunc = aFunc ;
 			returnCount++ ;
 			if (returnCount > 9)
@@ -459,7 +466,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 			for (;aFunc->mParamCount > aParamCount && aParamsCount>aParamCount;aParamCount++)
 			{
 				aParam[aParamCount] = (ExprTokenType*)_alloca(sizeof(ExprTokenType));
-				aParam[aParamCount]->symbol = SYM_STRING;aParam[aParamCount]->marker = *params[aParamCount]; // Assign parameters
+				aParam[aParamCount]->symbol = SYM_OPERAND;aParam[aParamCount]->marker = *params[aParamCount]; // Assign parameters
 			}
 			aResultToken.symbol = SYM_INTEGER;
 			aResultToken.marker = aFunc->mName;
@@ -502,9 +509,15 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 		}
 		else // UDF
 		{
-			for (;aFunc->mParamCount > aParamCount && aParamsCount>aParamCount;aParamCount++)
-				aFunc->mParam[aParamCount].var->Assign(*params[aParamCount]);
+			//for (;aFunc->mParamCount > aParamCount && aParamsCount>aParamCount;aParamCount++)
+			//	aFunc->mParam[aParamCount].var->AssignString(*params[aParamCount]);
 			FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
+			aFuncAndToken.mParamCount = aParamsCount;
+			for (int i = 0;i < aParamsCount;i++)
+			{
+				aFuncAndToken.param[aParamCount] = (LPTSTR)realloc(aFuncAndToken.param[aParamCount],_tcslen(*params[aParamCount])*sizeof(WCHAR));
+				_tcscpy(aFuncAndToken.param[aParamCount],*params[aParamCount]);
+			}
 			aFuncAndToken.mFunc = aFunc ;
 			returnCount++ ;
 			if (returnCount > 9)
@@ -552,6 +565,8 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 	tcslcpy(ErrorLevel_saved, g_ErrorLevel->Contents(), _countof(ErrorLevel_saved));
 	InitNewThread(0, false, true, func.mJumpToLine->mActionType);
 
+	for (int aParamCount = 0;func.mParamCount > aParamCount && aFuncAndToken->mParamCount > aParamCount;aParamCount++)
+		func.mParam[aParamCount].var->AssignString(aFuncAndToken->param[aParamCount]);
 
 	// v1.0.38.04: Below was added to maximize responsiveness to incoming messages.  The reasoning
 	// is similar to why the same thing is done in MsgSleep() prior to its launch of a thread, so see
