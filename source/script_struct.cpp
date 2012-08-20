@@ -1405,7 +1405,6 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 				}
 				else if (field->mMemAllocated > 0)  // free previously allocated memory
 					free(field->mStructMem);
-				UINT_PTR* tst = (UINT_PTR*)*((UINT_PTR*)((UINT_PTR)target + field->mOffset));
 				field->mMemAllocated = (source_length + 1) * (field->mEncoding == 1200 ? sizeof(WCHAR) : sizeof(CHAR)); // + 1 for terminating character
 				field->mStructMem = (UINT_PTR*)malloc(field->mMemAllocated);
 				*((UINT_PTR*)((UINT_PTR)target + field->mOffset)) = (UINT_PTR)field->mStructMem;
@@ -1415,12 +1414,16 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 				if (TokenIsEmptyString(*aParam[1]))
 					*((LPWSTR)(field->mSize > 2 ? *((UINT_PTR*)((UINT_PTR)target + field->mOffset)) : ((UINT_PTR)target + field->mOffset))) = '\0';
 				else
+				{
 					tmemcpy((LPWSTR)(field->mSize > 2 ? *((UINT_PTR*)((UINT_PTR)target + field->mOffset)) : ((UINT_PTR)target + field->mOffset)), (LPTSTR)source_string, field->mSize < 4 ? 1 : source_length);
+					if (field->mSize > 2) // NOT TCHAR or CHAR or WCHAR
+						((LPWSTR)*(UINT_PTR*)((UINT_PTR)target + field->mOffset))[source_length] = '\0';
+				}
 			}
 			else
 			{
 				if (TokenIsEmptyString(*aParam[1]))
-					*((LPTSTR)(field->mSize > 2 ? *((UINT_PTR*)((UINT_PTR)target + field->mOffset)) : ((UINT_PTR)target + field->mOffset))) = '\0';
+					*((LPSTR)(field->mSize > 2 ? *((UINT_PTR*)((UINT_PTR)target + field->mOffset)) : ((UINT_PTR)target + field->mOffset))) = '\0';
 				else
 				{
 					char_count = WideCharToMultiByte(field->mEncoding, WC_NO_BEST_FIT_CHARS, (LPCWSTR)source_string, source_length, NULL, 0, NULL, NULL);
@@ -1448,9 +1451,6 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 					// Assume there is sufficient buffer space and hope for the best:
 					length = char_count;
 					// Convert to target encoding.
-					LPSTR trgt;
-					if (!_tcscmp(field->key,_T("a4")))
-						trgt = (LPSTR)*((UINT_PTR*)((UINT_PTR)target + field->mOffset));
 					char_count = WideCharToMultiByte(field->mEncoding, flags, (LPCWSTR)source_string, source_length, (LPSTR)(field->mSize > 2 ? *((UINT_PTR*)((UINT_PTR)target + field->mOffset)) : ((UINT_PTR)target + field->mOffset)), char_count, NULL, NULL);
 					
 					// Since above did not null-terminate, check for buffer space and null-terminate if there's room.
@@ -1458,8 +1458,6 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 					// but that would exclude this function as a means to copy a string into a fixed-length array.
 					if (field->mSize > 2 && char_count && char_count < length) // NOT TCHAR or CHAR or WCHAR
 						((LPSTR)*(UINT_PTR*)((UINT_PTR)target + field->mOffset))[char_count] = '\0';
-					if (!_tcscmp(field->key,_T("a4")))
-						trgt = (LPSTR)*((UINT_PTR*)((UINT_PTR)target + field->mOffset));
 				}
 			}
 			aResultToken.symbol = SYM_INTEGER;
