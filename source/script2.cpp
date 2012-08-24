@@ -9170,28 +9170,36 @@ VarSizeType BIV_LastError(LPTSTR aBuf, LPTSTR aVarName)
 
 VarSizeType BIV_GlobalStruct(LPTSTR aBuf, LPTSTR aVarName)
 {
-	if (!aBuf)
-		return MAX_INTEGER_LENGTH; // Conservative, both for performance and in case the value changes between first and second call.
-
-#ifdef _WIN64
-	_i64tot((__int64)g, aBuf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
-#else
-	_itot((int)g, aBuf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
-#endif
-	return (VarSizeType)_tcslen(aBuf);
+	return aBuf
+		? (VarSizeType)_tcslen(ITOA64((LONGLONG)g, aBuf))
+		: MAX_INTEGER_LENGTH;
 }
+
 
 VarSizeType BIV_ScriptStruct(LPTSTR aBuf, LPTSTR aVarName)
 {
-	if (!aBuf)
-		return MAX_INTEGER_LENGTH; // Conservative, both for performance and in case the value changes between first and second call.
+	return aBuf
+		? (VarSizeType)_tcslen(ITOA64((LONGLONG)&g_script, aBuf))
+		: MAX_INTEGER_LENGTH;
+}
 
-#ifdef _WIN64
-	_i64tot((__int64)&g_script, aBuf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
-#else
-	_itot((int)&g_script, aBuf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
-#endif
-	return (VarSizeType)_tcslen(aBuf);
+
+VarSizeType BIV_ModuleHandle(LPTSTR aBuf, LPTSTR aVarName)
+{
+	return aBuf
+		? (VarSizeType)_tcslen(ITOA64((LONGLONG)g_hInstance, aBuf))
+		: MAX_INTEGER_LENGTH; // IMPORTANT: Conservative estimate because tick might change between 1st & 2nd calls.
+}
+
+
+VarSizeType BIV_IsDll(LPTSTR aBuf, LPTSTR aVarName)
+{
+	if (aBuf)
+	{
+		*aBuf++ = (g_hInstance == GetModuleHandle(NULL)) ? '0' : '1';
+		*aBuf = '\0';
+	}
+	return 1;
 }
 
 
@@ -9379,7 +9387,6 @@ VarSizeType BIV_TickCount(LPTSTR aBuf, LPTSTR aVarName)
 		? (VarSizeType)_tcslen(ITOA64(GetTickCount(), aBuf))
 		: MAX_INTEGER_LENGTH; // IMPORTANT: Conservative estimate because tick might change between 1st & 2nd calls.
 }
-
 
 
 VarSizeType BIV_Now(LPTSTR aBuf, LPTSTR aVarName)

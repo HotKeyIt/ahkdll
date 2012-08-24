@@ -9752,6 +9752,8 @@ void *Script::GetVarType(LPTSTR aVarName)
 	if (   !_tcscmp(lower, _T("screenwidth"))
 		|| !_tcscmp(lower, _T("screenheight"))) return BIV_ScreenWidth_Height;
 
+	if (!_tcsncmp(lower, _T("coordmode"), 9)) return BIV_CoordMode;
+
 	if (!_tcsncmp(lower, _T("ipaddress"), 9))
 	{
 		lower += 9;
@@ -9817,6 +9819,8 @@ void *Script::GetVarType(LPTSTR aVarName)
 	if (!_tcscmp(lower, _T("lasterror"))) return BIV_LastError;
 	if (!_tcscmp(lower, _T("globalstruct"))) return BIV_GlobalStruct;
 	if (!_tcscmp(lower, _T("scriptstruct"))) return BIV_ScriptStruct;
+	if (!_tcscmp(lower, _T("modulehandle"))) return BIV_ModuleHandle;
+	if (!_tcscmp(lower, _T("isdll"))) return BIV_IsDll;
 
 	if (!_tcscmp(lower, _T("eventinfo"))) return BIV_EventInfo; // It's called "EventInfo" vs. "GuiEventInfo" because it applies to non-Gui events such as OnClipboardChange.
 #ifndef MINIDLL
