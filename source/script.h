@@ -2870,6 +2870,10 @@ VarSizeType BIV_IsUnicode(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_FileEncoding(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_RegView(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_LastError(LPTSTR aBuf, LPTSTR aVarName);
+VarSizeType BIV_GlobalStruct(LPTSTR aBuf, LPTSTR aVarName);
+VarSizeType BIV_ScriptStruct(LPTSTR aBuf, LPTSTR aVarName);
+VarSizeType BIV_ModuleHandle(LPTSTR aBuf, LPTSTR aVarName);
+VarSizeType BIV_IsDll(LPTSTR aBuf, LPTSTR aVarName);
 #ifndef MINIDLL
 VarSizeType BIV_IconHidden(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_IconTip(LPTSTR aBuf, LPTSTR aVarName);

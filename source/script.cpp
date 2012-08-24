@@ -11331,6 +11331,11 @@ void *Script::GetVarType(LPTSTR aVarName)
 	if (!_tcscmp(lower, _T("endchar"))) return BIV_EndChar;
 #endif
 	if (!_tcscmp(lower, _T("lasterror"))) return BIV_LastError;
+	
+	if (!_tcscmp(lower, _T("globalstruct"))) return BIV_GlobalStruct;
+	if (!_tcscmp(lower, _T("scriptstruct"))) return BIV_ScriptStruct;
+	if (!_tcscmp(lower, _T("modulehandle"))) return BIV_ModuleHandle;
+	if (!_tcscmp(lower, _T("isdll"))) return BIV_IsDll;
 
 	if (!_tcscmp(lower, _T("eventinfo"))) return BIV_EventInfo; // It's called "EventInfo" vs. "GuiEventInfo" because it applies to non-Gui events such as OnClipboardChange.
 #ifndef MINIDLL

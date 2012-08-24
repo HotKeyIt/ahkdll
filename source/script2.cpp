@@ -11008,6 +11008,39 @@ VarSizeType BIV_LastError(LPTSTR aBuf, LPTSTR aVarName)
 	return (VarSizeType)_tcslen(target_buf);
 }
 
+VarSizeType BIV_GlobalStruct(LPTSTR aBuf, LPTSTR aVarName)
+{
+	return aBuf
+		? (VarSizeType)_tcslen(ITOA64((LONGLONG)g, aBuf))
+		: MAX_INTEGER_LENGTH;
+}
+
+
+VarSizeType BIV_ScriptStruct(LPTSTR aBuf, LPTSTR aVarName)
+{
+	return aBuf
+		? (VarSizeType)_tcslen(ITOA64((LONGLONG)&g_script, aBuf))
+		: MAX_INTEGER_LENGTH;
+}
+
+
+VarSizeType BIV_ModuleHandle(LPTSTR aBuf, LPTSTR aVarName)
+{
+	return aBuf
+		? (VarSizeType)_tcslen(ITOA64((LONGLONG)g_hInstance, aBuf))
+		: MAX_INTEGER_LENGTH; // IMPORTANT: Conservative estimate because tick might change between 1st & 2nd calls.
+}
+
+
+VarSizeType BIV_IsDll(LPTSTR aBuf, LPTSTR aVarName)
+{
+	if (aBuf)
+	{
+		*aBuf++ = (g_hInstance == GetModuleHandle(NULL)) ? '0' : '1';
+		*aBuf = '\0';
+	}
+	return 1;
+}
 
 
 VarSizeType BIV_PtrSize(LPTSTR aBuf, LPTSTR aVarName)
