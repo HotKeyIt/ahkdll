@@ -2874,6 +2874,7 @@ VarSizeType BIV_GlobalStruct(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_ScriptStruct(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_ModuleHandle(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_IsDll(LPTSTR aBuf, LPTSTR aVarName);
+VarSizeType BIV_CoordMode(LPTSTR aBuf, LPTSTR aVarName);
 #ifndef MINIDLL
 VarSizeType BIV_IconHidden(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_IconTip(LPTSTR aBuf, LPTSTR aVarName);

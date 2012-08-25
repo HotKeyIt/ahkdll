@@ -183,10 +183,10 @@ EXPORT unsigned int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, L
 		LPTSTR *params[10];
 		params[0]=&param1;params[1]=&param2;params[2]=&param3;params[3]=&param4;params[4]=&param5;
 		params[5]=&param6;params[6]=&param7;params[7]=&param8;params[8]=&param9;params[9]=&param10;
-		for (int i=0;i < aParamsCount;i++)
+		for (int i=0;i < 10;i++)
 		{
 			if (*params[i] && _tcscmp(*params[i],_T("")))
-				aParamsCount = i + 1;
+				aParamsCount++;
 		}
 		if(aFunc->mIsBuiltIn)
 		{
@@ -208,10 +208,10 @@ EXPORT unsigned int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, L
 
 			FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
 			aFuncAndToken.mParamCount = aParamsCount;
-			for (int i = 0;i < 10;i++)
+			for (int i = 0;i < aParamsCount;i++)
 			{
-				aFuncAndToken.param[aParamCount] = (LPTSTR)realloc(aFuncAndToken.param[aParamCount],_tcslen(*params[aParamCount])*sizeof(WCHAR));
-				_tcscpy(aFuncAndToken.param[aParamCount],*params[aParamCount]);
+				aFuncAndToken.param[i] = (LPTSTR)realloc(aFuncAndToken.param[i],_tcslen(*params[i])*sizeof(WCHAR));
+				_tcscpy(aFuncAndToken.param[i],*params[i]);
 			}
 			//for (;aFunc->mParamCount > aParamCount && aParamsCount>aParamCount;aParamCount++)
 			//	aFunc->mParam[aParamCount].var->AssignString(*params[aParamCount]);
@@ -456,7 +456,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 		for (int i=0;i<10;i++)
 		{
 			if (*params[i] && _tcscmp(*params[i],_T("")))
-				aParamsCount = i + 1;
+				aParamsCount++;
 		}
 		if(aFunc->mIsBuiltIn)
 		{
@@ -515,8 +515,8 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 			aFuncAndToken.mParamCount = aParamsCount;
 			for (int i = 0;i < aParamsCount;i++)
 			{
-				aFuncAndToken.param[aParamCount] = (LPTSTR)realloc(aFuncAndToken.param[aParamCount],_tcslen(*params[aParamCount])*sizeof(WCHAR));
-				_tcscpy(aFuncAndToken.param[aParamCount],*params[aParamCount]);
+				aFuncAndToken.param[i] = (LPTSTR)realloc(aFuncAndToken.param[i],_tcslen(*params[i])*sizeof(WCHAR));
+				_tcscpy(aFuncAndToken.param[i],*params[i]);
 			}
 			aFuncAndToken.mFunc = aFunc ;
 			returnCount++ ;

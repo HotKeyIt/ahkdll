@@ -11028,7 +11028,7 @@ VarSizeType BIV_ModuleHandle(LPTSTR aBuf, LPTSTR aVarName)
 {
 	return aBuf
 		? (VarSizeType)_tcslen(ITOA64((LONGLONG)g_hInstance, aBuf))
-		: MAX_INTEGER_LENGTH; // IMPORTANT: Conservative estimate because tick might change between 1st & 2nd calls.
+		: MAX_INTEGER_LENGTH;
 }
 
 
@@ -11042,6 +11042,13 @@ VarSizeType BIV_IsDll(LPTSTR aBuf, LPTSTR aVarName)
 	return 1;
 }
 
+
+VarSizeType BIV_CoordMode(LPTSTR aBuf, LPTSTR aVarName)
+{
+	return aBuf
+		? (VarSizeType)_tcslen(ITOA64(((g->CoordMode >> Line::ConvertCoordModeCmd(aVarName + 11)) & COORD_MODE_MASK), aBuf))
+		: MAX_INTEGER_LENGTH;
+}
 
 VarSizeType BIV_PtrSize(LPTSTR aBuf, LPTSTR aVarName)
 {
