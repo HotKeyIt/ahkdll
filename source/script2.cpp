@@ -9204,6 +9204,14 @@ VarSizeType BIV_IsDll(LPTSTR aBuf, LPTSTR aVarName)
 
 
 
+VarSizeType BIV_CoordMode(LPTSTR aBuf, LPTSTR aVarName)
+{
+	return aBuf
+		? (VarSizeType)_tcslen(ITOA64(((g->CoordMode >> Line::ConvertCoordModeCmd(aVarName + 11)) & COORD_MODE_MASK), aBuf))
+		: MAX_INTEGER_LENGTH;
+}
+
+
 VarSizeType BIV_PtrSize(LPTSTR aBuf, LPTSTR aVarName)
 {
 	if (aBuf)
@@ -9590,17 +9598,6 @@ VarSizeType BIV_MyDocuments(LPTSTR aBuf, LPTSTR aVarName) // Called by multiple 
 	return length;
 }
 
-VarSizeType BIV_CoordMode(LPTSTR aBuf, LPTSTR aVarName)
-{
-	if (!aBuf)
-		return MAX_INTEGER_LENGTH; // Conservative, both for performance and in case the value changes between first and second call.
-#ifdef _WIN64
-	_i64tot(((g->CoordMode >> Line::ConvertCoordModeCmd(aVarName + 11)) & COORD_MODE_MASK), aBuf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
-#else
-	_itot(((g->CoordMode >> Line::ConvertCoordModeCmd(aVarName + 11)) & COORD_MODE_MASK), aBuf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
-#endif
-	return (VarSizeType)_tcslen(aBuf);
-}
 
 VarSizeType BIV_Caret(LPTSTR aBuf, LPTSTR aVarName)
 {

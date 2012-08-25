@@ -2729,6 +2729,7 @@ VarSizeType BIV_GlobalStruct(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_ScriptStruct(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_ModuleHandle(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_IsDll(LPTSTR aBuf, LPTSTR aVarName);
+VarSizeType BIV_CoordMode(LPTSTR aBuf, LPTSTR aVarName);
 #ifndef MINIDLL
 VarSizeType BIV_IconHidden(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_IconTip(LPTSTR aBuf, LPTSTR aVarName);
@@ -2757,7 +2758,6 @@ VarSizeType BIV_ComSpec(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_SpecialFolderPath(LPTSTR aBuf, LPTSTR aVarName); // Handles various variables.
 VarSizeType BIV_MyDocuments(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_Caret(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_CoordMode(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_Cursor(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_ScreenWidth_Height(LPTSTR aBuf, LPTSTR aVarName);
 VarSizeType BIV_ScriptName(LPTSTR aBuf, LPTSTR aVarName);
