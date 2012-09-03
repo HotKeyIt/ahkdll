@@ -106,7 +106,7 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 		return _T("");
 	if (*ahkvar->mCharContents == '\0')
 	{
-		result_to_return_dll = (LPTSTR )realloc((LPTSTR )result_to_return_dll,(ahkvar->mByteCapacity ? ahkvar->mByteCapacity : ahkvar->mByteLength) + MAX_NUMBER_LENGTH + 1);
+		result_to_return_dll = (LPTSTR )realloc((LPTSTR )result_to_return_dll,(ahkvar->mByteCapacity ? ahkvar->mByteCapacity : ahkvar->mByteLength) + MAX_NUMBER_LENGTH + sizeof(TCHAR));
 		if ( ahkvar->mType == VAR_BUILTIN )
 			ahkvar->mBIV(result_to_return_dll,name); //Hotkeyit 
 		else if ( ahkvar->mType == VAR_ALIAS )
@@ -116,7 +116,7 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 	}
 	else
 	{
-		result_to_return_dll = (LPTSTR )realloc((LPTSTR )result_to_return_dll,ahkvar->mByteLength+1);
+		result_to_return_dll = (LPTSTR )realloc((LPTSTR )result_to_return_dll,ahkvar->mByteLength + sizeof(TCHAR));
 		if ( ahkvar->mType == VAR_ALIAS )
 			ahkvar->mAliasFor->Get(result_to_return_dll); //Hotkeyit removed ebiv.cpp and made ahkgetvar return all vars
  		else if ( ahkvar->mType == VAR_NORMAL )
@@ -210,7 +210,7 @@ EXPORT unsigned int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, L
 			aFuncAndToken.mParamCount = aParamsCount;
 			for (int i = 0;i < aParamsCount;i++)
 			{
-				aFuncAndToken.param[i] = (LPTSTR)realloc(aFuncAndToken.param[i],_tcslen(*params[i])*sizeof(WCHAR));
+				aFuncAndToken.param[i] = (LPTSTR)realloc(aFuncAndToken.param[i],(_tcslen(*params[i])+1)*sizeof(TCHAR));
 				_tcscpy(aFuncAndToken.param[i],*params[i]);
 			}
 			//for (;aFunc->mParamCount > aParamCount && aParamsCount>aParamCount;aParamCount++)
@@ -475,7 +475,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 			case SYM_VAR: // Caller has ensured that any SYM_VAR's Type() is VAR_NORMAL.
 				if (_tcslen(aResultToken.var->Contents()))
 				{
-					result_to_return_dll = (LPTSTR )realloc((LPTSTR )result_to_return_dll,_tcslen(aResultToken.var->Contents())*sizeof(TCHAR));
+					result_to_return_dll = (LPTSTR )realloc((LPTSTR )result_to_return_dll,(_tcslen(aResultToken.var->Contents()) + 1)*sizeof(TCHAR));
 					_tcscpy(result_to_return_dll,aResultToken.var->Contents()); // Contents() vs. mContents to support VAR_CLIPBOARD, and in case mContents needs to be updated by Contents().
 				}
 				else if (result_to_return_dll)
@@ -484,7 +484,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 			case SYM_STRING:
 				if (_tcslen(aResultToken.marker))
 				{
-					result_to_return_dll = (LPTSTR )realloc((LPTSTR )result_to_return_dll,_tcslen(aResultToken.marker)*sizeof(TCHAR));
+					result_to_return_dll = (LPTSTR )realloc((LPTSTR )result_to_return_dll,(_tcslen(aResultToken.marker) + 1)*sizeof(TCHAR));
 					_tcscpy(result_to_return_dll,aResultToken.marker);
 				}
 				else if (result_to_return_dll)
@@ -513,7 +513,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 			aFuncAndToken.mParamCount = aParamsCount;
 			for (int i = 0;i < aParamsCount;i++)
 			{
-				aFuncAndToken.param[i] = (LPTSTR)realloc(aFuncAndToken.param[i],_tcslen(*params[i])*sizeof(WCHAR));
+				aFuncAndToken.param[i] = (LPTSTR)realloc(aFuncAndToken.param[i],(_tcslen(*params[i]) + 1)*sizeof(TCHAR));
 				_tcscpy(aFuncAndToken.param[i],*params[i]);
 			}
 			aFuncAndToken.mFunc = aFunc ;
@@ -577,7 +577,7 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 	case SYM_VAR: // Caller has ensured that any SYM_VAR's Type() is VAR_NORMAL.
 		if (_tcslen(aFuncAndToken->mToken.var->Contents()))
 		{
-			aFuncAndToken->result_to_return_dll = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,_tcslen(aFuncAndToken->mToken.var->Contents())*sizeof(TCHAR));
+			aFuncAndToken->result_to_return_dll = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,(_tcslen(aFuncAndToken->mToken.var->Contents()) + 1)*sizeof(TCHAR));
 			_tcscpy(aFuncAndToken->result_to_return_dll,aFuncAndToken->mToken.var->Contents()); // Contents() vs. mContents to support VAR_CLIPBOARD, and in case mContents needs to be updated by Contents().
 		}
 		else if (aFuncAndToken->result_to_return_dll)
@@ -586,7 +586,7 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 	case SYM_STRING:
 		if (_tcslen(aFuncAndToken->mToken.marker))
 		{
-			aFuncAndToken->result_to_return_dll = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,_tcslen(aFuncAndToken->mToken.marker)*sizeof(TCHAR));
+			aFuncAndToken->result_to_return_dll = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,(_tcslen(aFuncAndToken->mToken.marker) + 1)*sizeof(TCHAR));
 			_tcscpy(aFuncAndToken->result_to_return_dll,aFuncAndToken->mToken.marker);
 		}
 		else if (aFuncAndToken->result_to_return_dll)
