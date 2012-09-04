@@ -494,7 +494,8 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 						}
 						else
 						{
-							_tcscpy(buf,param);
+							if (!GetFullPathName(param, _countof(buf), buf, NULL)) // This is also relied upon by mIncludeLibraryFunctionsThenExit.  Succeeds even on nonexistent files.
+								return FAIL;
 						}
 						break;  // No more switches allowed after this point.
 					}
