@@ -14216,7 +14216,9 @@ BIF_DECL(BIF_CriticalObject)
 	if (aParamCount == 2 && TokenToInt64(*aParam[1]) < 3) 
 	{
 		aResultToken.symbol = PURE_INTEGER;
-		CriticalObject *criticalobj = (CriticalObject*)TokenToObject(*aParam[0]);
+		CriticalObject *criticalobj;
+		if (!(criticalobj = (CriticalObject *)TokenToObject(*aParam[0])))
+			criticalobj = (CriticalObject *)TokenToInt64(*aParam[0]);
 		if (criticalobj < (IObject *)1024)
 			aResultToken.value_int64 = 0;
 		else if (TokenToInt64(*aParam[1]) == 1) // Get object reference
