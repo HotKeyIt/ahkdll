@@ -9731,19 +9731,7 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 	{
 		DWORD num_bytes_written;
 		// Write the resource data to file.
-		if (*(unsigned int*)res_lock == 0x005F5A4C)
-		{
-			DWORD aSizeDecompressed = DecompressBuffer(res_lock);
-			if (aSizeDecompressed)
-			{
-				success = WriteFile(hfile, res_lock, aSizeDecompressed, &num_bytes_written, NULL);
-				VirtualFree(res_lock,aSizeDecompressed,MEM_RELEASE);
-			}
-			else
-				success = WriteFile(hfile, res_lock, SizeofResource(NULL, res), &num_bytes_written, NULL);
-		}
-		else
-			success = WriteFile(hfile, res_lock, SizeofResource(NULL, res), &num_bytes_written, NULL);
+		success = WriteFile(hfile, res_lock, SizeofResource(NULL, res), &num_bytes_written, NULL);
 	}
 	else
 		success = false;
@@ -9779,19 +9767,7 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 		{
 			DWORD num_bytes_written;
 			// Write the resource data to file.
-			if (*(unsigned int*)res_lock == 0x005F5A4C)
-			{
-				DWORD aSizeDecompressed = DecompressBuffer(res_lock);
-				if (aSizeDecompressed)
-				{
-					success = WriteFile(hfile, res_lock, aSizeDecompressed, &num_bytes_written, NULL);
-					VirtualFree(res_lock,aSizeDecompressed,MEM_RELEASE);
-				}
-				else
-					success = WriteFile(hfile, res_lock, SizeofResource(NULL, res), &num_bytes_written, NULL);
-			}
-			else
-				success = WriteFile(hfile, res_lock, SizeofResource(NULL, res), &num_bytes_written, NULL);
+			success = WriteFile(hfile, res_lock, SizeofResource(NULL, res), &num_bytes_written, NULL);
 		}
 		else
 			success = false;
@@ -16748,6 +16724,28 @@ BIF_DECL(BIF_ResourceLoadLibrary)
 	aResultToken.value_int64 = 0;
 	HMEMORYMODULE module = NULL;
 	TextMem::Buffer textbuf;
+#ifdef ENABLE_EXEARC
+	HS_EXEArc_Read oRead;
+
+	// AutoIt3: Open the archive in this compiled exe.
+	// Jon gave me some details about why a password isn't needed: "The code in those libararies will
+	// only allow files to be extracted from the exe is is bound to (i.e the script that it was
+	// compiled with).  There are various checks and CRCs to make sure that it can't be used to read
+	// the files from any other exe that is passed."
+	if (oRead.Open(CStringCharFromTCharIfNeeded(g_script.mFileSpec), "") != HS_EXEARC_E_OK)
+	{
+		MsgBox(ERR_EXE_CORRUPTED, 0, g_script.mFileSpec); // Usually caused by virus corruption.
+		return;
+	}
+	// AutoIt3: Read resource (the func allocates the memory for the buffer :) )
+	if (!oRead.FileExtractToMem(CStringCharFromTCharIfNeeded(aParam[0]->symbol == SYM_VAR ? aParam[0]->var->Contents() : aParam[0]->marker), (UCHAR **) &textbuf.mBuffer, &textbuf.mLength) == HS_EXEARC_E_OK)
+	{
+		oRead.Close();							// Close the archive
+		MsgBox(_T("Could not extract script from EXE."), 0, g_script.mFileSpec);
+		return;
+	}
+	oRead.Close(); // no longer used
+#else
 	HRSRC hRes;
 	HGLOBAL hResData;
 
@@ -16765,20 +16763,8 @@ BIF_DECL(BIF_ResourceLoadLibrary)
 		MsgBox(_T("Could not extract script from EXE."), 0, aParam[0]->symbol == SYM_VAR ? aParam[0]->var->Contents() : aParam[0]->marker);
 		return;
 	}
-	if (*(unsigned int*)textbuf.mBuffer == 0x005F5A4C)
-	{
-		DWORD aSizeDecompressed = DecompressBuffer(textbuf.mBuffer);
-		if (aSizeDecompressed)
-		{
-			textbuf.mLength = aSizeDecompressed;
-			module = MemoryLoadLibrary( textbuf.mBuffer );
-			VirtualFree(textbuf.mBuffer,textbuf.mLength,MEM_RELEASE);
-		}
-		else
-			module = MemoryLoadLibrary( textbuf.mBuffer );
-	}
-	else
-		module = MemoryLoadLibrary( textbuf.mBuffer );
+#endif
+	module = MemoryLoadLibrary( textbuf.mBuffer );
 	aResultToken.value_int64 = (unsigned)module;
 }
 

@@ -1417,9 +1417,9 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 					objclone->Release();
 					return g_script.ScriptError(ERR_MUST_INIT_STRUCT);
 			}
-			if (field->mSize > 2 && (!*((UINT_PTR*)((UINT_PTR)target + field->mOffset)) || (field->mMemAllocated > 0 && (field->mMemAllocated < ((source_length + 1) * (field->mEncoding == 1200 ? sizeof(WCHAR) : sizeof(CHAR)))))))
+			if (field->mSize > 2 && (!target || !*((UINT_PTR*)((UINT_PTR)target + field->mOffset)) || (field->mMemAllocated > 0 && (field->mMemAllocated < ((source_length + 1) * (int)(field->mEncoding == 1200 ? sizeof(WCHAR) : sizeof(CHAR)))))))
 			{   // no memory allocated yet, allocate now
-				if (field->mMemAllocated == -1 && !*((UINT_PTR*)((UINT_PTR)target + field->mOffset))){
+				if (field->mMemAllocated == -1 && (!target || !*((UINT_PTR*)((UINT_PTR)target + field->mOffset)))){
 					if (deletefield) // we created the field from a structure so no memory can be allocated
 						delete field;
 					if (releaseobj)
@@ -1491,6 +1491,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 					length = char_count;
 					// Convert to target encoding.
 					char_count = WideCharToMultiByte(field->mEncoding, flags, (LPCWSTR)source_string, source_length, (LPSTR)(field->mSize > 2 ? *((UINT_PTR*)((UINT_PTR)target + field->mOffset)) : ((UINT_PTR)target + field->mOffset)), char_count, NULL, NULL);
+					
 					// Since above did not null-terminate, check for buffer space and null-terminate if there's room.
 					// It is tempting to always null-terminate (potentially replacing the last byte of data),
 					// but that would exclude this function as a means to copy a string into a fixed-length array.
@@ -1503,8 +1504,8 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 			aResultToken.symbol = SYM_INTEGER;
 			aResultToken.value_int64 = char_count;
 		}
-		else
-		{
+		else // NumPut
+		{	 // code stolen from BIF_NumPut
 			switch(field->mSize)
 			{
 			case 4: // Listed first for performance.
@@ -1867,41 +1868,4 @@ Struct::FieldType *Struct::Insert(LPTSTR key, IndexType at,UCHAR aIspointer,int 
 	field.mMemAllocated = 0;
 	return &field;
 }
-#ifdef CONFIG_DEBUGGER
 
-void Struct::DebugWriteProperty(IDebugProperties *aDebugger, int aPage, int aPageSize, int aDepth)
-{
-	DebugCookie cookie;
-	aDebugger->BeginProperty(NULL, "object", (int)mFieldCount, cookie);
-
-	if (aDepth)
-	{
-		int i = aPageSize * aPage, j = aPageSize * (aPage + 1);
-
-		if (j > (int)mFieldCount)
-			j = (int)mFieldCount;
-		// For each field in the requested page...
-		for ( ; i < j; ++i)
-		{
-			Struct::FieldType &field = mFields[i];
-			
-			ExprTokenType value;
-			TCHAR buf[MAX_PATH];
-			value.buf = buf;
-			ExprTokenType aThisToken;
-			aThisToken.symbol = SYM_OBJECT;
-			aThisToken.object = this;
-			ExprTokenType *aVarToken = new ExprTokenType();
-			aVarToken->symbol = SYM_STRING;
-			aVarToken->marker = field.key;
-			this->Invoke(value,aThisToken,0,&aVarToken,1);
-			delete aVarToken;
-
-			if (field.mEncoding != 65535) // String
-				aDebugger->WriteProperty(CStringUTF8FromTChar(field.key), value);
-		}
-	}
-
-	aDebugger->EndProperty(cookie);
-}
-#endif
