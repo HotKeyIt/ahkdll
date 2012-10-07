@@ -17,6 +17,7 @@ GNU General Public License for more details.
 #include "stdafx.h" // pre-compiled headers
 #include <olectl.h> // for OleLoadPicture()
 #include <gdiplus.h> // Used by LoadPicture().
+#include "Shlwapi.h"
 #include "util.h"
 #include "globaldata.h"
 
@@ -2751,6 +2752,52 @@ short IsDefaultType(LPTSTR aTypeDef){
 	}
 	// type was not found
 	return NULL;
+}
+
+DWORD DecompressBuffer(LPVOID &aBuffer)
+{
+	unsigned int hdrsz = 18;
+	ULONG aSizeCompressed = *(ULONG*)((ULONG)aBuffer + 14);
+	DWORD hash;
+	HashData((LPBYTE)aBuffer+8,aSizeCompressed+10,(LPBYTE)&hash,4);
+	if (hash == *(ULONG*)((ULONG)aBuffer + 4))
+	{
+		USHORT CompressionMode = *(USHORT*)((ULONG)aBuffer + 8);
+		ULONG aSizeDecompressed = *(ULONG*)((ULONG)aBuffer + 10);
+		ULONG aSizeUncompressed = 0;
+		typedef NTSTATUS (WINAPI * RtlDecompressBuffer)(USHORT, PUCHAR, ULONG, PUCHAR, ULONG, PULONG);
+		RtlDecompressBuffer xRtlDecompressBuffer;
+		xRtlDecompressBuffer = RtlDecompressBuffer(GetProcAddress(GetModuleHandle(_T("ntdll.dll")), "RtlDecompressBuffer"));
+		//aResData = (LPCWSTR)_alloca(aSizeDecompressed);
+		LPVOID aResData = VirtualAlloc(NULL, aSizeDecompressed, MEM_COMMIT, PAGE_READWRITE);
+		xRtlDecompressBuffer(CompressionMode,(PUCHAR)aResData,aSizeDecompressed,(PUCHAR)aBuffer + hdrsz,aSizeCompressed,&aSizeUncompressed);
+		if (*(unsigned int*)aResData == 0x315F5A4C)
+		{
+			*(unsigned int*)aResData = 0x005F5A4C;
+			aSizeCompressed = *(ULONG*)((ULONG)aResData + 14);
+			HashData((LPBYTE)aResData+8,aSizeCompressed+10,(LPBYTE)&hash,4);
+			if (hash == *(ULONG*)((ULONG)aResData + 4))
+			{
+				ULONG aSizeMultiDecompressed = *(ULONG*)((ULONG)aResData + 10);
+				LPVOID aResMultiData = VirtualAlloc(NULL, aSizeMultiDecompressed, MEM_COMMIT, PAGE_READWRITE);
+				xRtlDecompressBuffer(CompressionMode,(PUCHAR)aResMultiData,aSizeMultiDecompressed,(PUCHAR)aResData + hdrsz,aSizeCompressed,&aSizeUncompressed);
+				VirtualFree(aResData,aSizeDecompressed,MEM_RELEASE);
+				aBuffer = aResMultiData;
+				return aSizeUncompressed + hdrsz;
+			}
+			else
+			{
+				aBuffer = aResData;
+				return aSizeUncompressed + hdrsz;
+			}
+		}
+		else
+		{
+			aBuffer = aResData;
+			return aSizeUncompressed + hdrsz;
+		}
+	}
+	return 0;
 }
 
 #if defined(_MSC_VER) && defined(_DEBUG)

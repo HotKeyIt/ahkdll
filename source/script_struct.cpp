@@ -1394,9 +1394,9 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 			source_length = (int)((aParam[1]->symbol == SYM_VAR) ? aParam[1]->var->CharLength() : _tcslen((LPCTSTR)source_string));
 			//if (field->mSize > 2) // not [T|W|U]CHAR
 			//	source_length++; // for terminating character
-			if (field->mSize > 2 && (!*((UINT_PTR*)((UINT_PTR)target + field->mOffset)) || (field->mMemAllocated > 0 && (field->mMemAllocated < ((source_length + 1) * (field->mEncoding == 1200 ? sizeof(WCHAR) : sizeof(CHAR)))))))
+			if (field->mSize > 2 && (!target || !*((UINT_PTR*)((UINT_PTR)target + field->mOffset)) || (field->mMemAllocated > 0 && (field->mMemAllocated < ((source_length + 1) * (int)(field->mEncoding == 1200 ? sizeof(WCHAR) : sizeof(CHAR)))))))
 			{   // no memory allocated yet, allocate now
-				if (field->mMemAllocated == -1 && !*((UINT_PTR*)((UINT_PTR)target + field->mOffset))){
+				if (field->mMemAllocated == -1 && (!target || !*((UINT_PTR*)((UINT_PTR)target + field->mOffset)))){
 					if (deletefield) // we created the field from a structure so no memory can be allocated
 						delete field;
 					if (releaseobj)
@@ -1798,41 +1798,4 @@ Struct::FieldType *Struct::Insert(LPTSTR key, IndexType at,UCHAR aIspointer,int 
 	field.mMemAllocated = 0;
 	return &field;
 }
-#ifdef CONFIG_DEBUGGER
 
-void Struct::DebugWriteProperty(IDebugProperties *aDebugger, int aPage, int aPageSize, int aDepth)
-{
-	DebugCookie cookie;
-	aDebugger->BeginProperty(NULL, "object", (int)mFieldCount, cookie);
-
-	if (aDepth)
-	{
-		int i = aPageSize * aPage, j = aPageSize * (aPage + 1);
-
-		if (j > (int)mFieldCount)
-			j = (int)mFieldCount;
-		// For each field in the requested page...
-		for ( ; i < j; ++i)
-		{
-			Struct::FieldType &field = mFields[i];
-			
-			ExprTokenType value;
-			TCHAR buf[MAX_PATH];
-			value.buf = buf;
-			ExprTokenType aThisToken;
-			aThisToken.symbol = SYM_OBJECT;
-			aThisToken.object = this;
-			ExprTokenType *aVarToken = new ExprTokenType();
-			aVarToken->symbol = SYM_STRING;
-			aVarToken->marker = field.key;
-			this->Invoke(value,aThisToken,0,&aVarToken,1);
-			delete aVarToken;
-
-			if (field.mEncoding != 65535) // String
-				aDebugger->WriteProperty(CStringUTF8FromTChar(field.key), value);
-		}
-	}
-
-	aDebugger->EndProperty(cookie);
-}
-#endif

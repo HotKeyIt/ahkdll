@@ -1,3 +1,11 @@
+07.10.2012
+- Merged latest AutoHotkey_L changes from https://github.com/Lexikos/AutoHotkey_L.
+- OnMessage accepts optionally a window handle now, e.g. OnMessage(0x200,hwnd,"WM_MOUSEMOVE")
+- - this allows to have separate function for each window or launch the function for specified window only.
+- fixed to launch default script if parameters in ahktextdll and ahkdll functions are missing completely.
+- small fix for Struct() string data handling.
+- Enabled compression for compiled scripts, use https://github.com/HotKeyIt/Ahk2Exe to compile using compression
+- - Many thanks to SKAN for VarZ http://www.autohotkey.com/community/viewtopic.php?p=276616#p276616
 17.08.2012
 - Fixed to use alignment for all types and also in 32-bit environment
 - Fixed pointer handling in some cases

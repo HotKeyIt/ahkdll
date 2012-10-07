@@ -8007,19 +8007,7 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 	{
 		DWORD num_bytes_written;
 		// Write the resource data to file.
-		if (*(unsigned int*)res_lock == 0x005F5A4C)
-		{
-			DWORD aSizeDecompressed = DecompressBuffer(res_lock);
-			if (aSizeDecompressed)
-			{
-				success = WriteFile(hfile, res_lock, aSizeDecompressed, &num_bytes_written, NULL);
-				VirtualFree(res_lock,aSizeDecompressed,MEM_RELEASE);
-			}
-			else
-				success = WriteFile(hfile, res_lock, SizeofResource(NULL, res), &num_bytes_written, NULL);
-		}
-		else
-			success = WriteFile(hfile, res_lock, SizeofResource(NULL, res), &num_bytes_written, NULL);
+		success = WriteFile(hfile, res_lock, SizeofResource(NULL, res), &num_bytes_written, NULL);
 	}
 	else
 		success = false;
@@ -8055,19 +8043,7 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 		{
 			DWORD num_bytes_written;
 			// Write the resource data to file.
-			if (*(unsigned int*)res_lock == 0x005F5A4C)
-			{
-				DWORD aSizeDecompressed = DecompressBuffer(res_lock);
-				if (aSizeDecompressed)
-				{
-					success = WriteFile(hfile, res_lock, aSizeDecompressed, &num_bytes_written, NULL);
-					VirtualFree(res_lock,aSizeDecompressed,MEM_RELEASE);
-				}
-				else
-					success = WriteFile(hfile, res_lock, SizeofResource(NULL, res), &num_bytes_written, NULL);
-			}
-			else
-				success = WriteFile(hfile, res_lock, SizeofResource(NULL, res), &num_bytes_written, NULL);
+			success = WriteFile(hfile, res_lock, SizeofResource(NULL, res), &num_bytes_written, NULL);
 		}
 		else
 			success = false;
@@ -14837,6 +14813,28 @@ BIF_DECL(BIF_ResourceLoadLibrary)
 	aResultToken.value_int64 = 0;
 	HMEMORYMODULE module = NULL;
 	TextMem::Buffer textbuf;
+#ifdef ENABLE_EXEARC
+	HS_EXEArc_Read oRead;
+
+	// AutoIt3: Open the archive in this compiled exe.
+	// Jon gave me some details about why a password isn't needed: "The code in those libararies will
+	// only allow files to be extracted from the exe is is bound to (i.e the script that it was
+	// compiled with).  There are various checks and CRCs to make sure that it can't be used to read
+	// the files from any other exe that is passed."
+	if (oRead.Open(CStringCharFromTCharIfNeeded(g_script.mFileSpec), "") != HS_EXEARC_E_OK)
+	{
+		MsgBox(ERR_EXE_CORRUPTED, 0, g_script.mFileSpec); // Usually caused by virus corruption.
+		return;
+	}
+	// AutoIt3: Read resource (the func allocates the memory for the buffer :) )
+	if (!oRead.FileExtractToMem(CStringCharFromTCharIfNeeded(aParam[0]->symbol == SYM_VAR ? aParam[0]->var->Contents() : aParam[0]->marker), (UCHAR **) &textbuf.mBuffer, &textbuf.mLength) == HS_EXEARC_E_OK)
+	{
+		oRead.Close();							// Close the archive
+		MsgBox(_T("Could not extract script from EXE."), 0, g_script.mFileSpec);
+		return;
+	}
+	oRead.Close(); // no longer used
+#else
 	HRSRC hRes;
 	HGLOBAL hResData;
 
@@ -14850,20 +14848,8 @@ BIF_DECL(BIF_ResourceLoadLibrary)
 		MsgBox(_T("Could not extract script from EXE."), 0, aParam[0]->symbol == SYM_VAR ? aParam[0]->var->Contents() : aParam[0]->marker);
 		return;
 	}
-	if (*(unsigned int*)textbuf.mBuffer == 0x005F5A4C)
-	{
-		DWORD aSizeDecompressed = DecompressBuffer(textbuf.mBuffer);
-		if (aSizeDecompressed)
-		{
-			textbuf.mLength = aSizeDecompressed;
-			module = MemoryLoadLibrary( textbuf.mBuffer );
-			VirtualFree(textbuf.mBuffer,textbuf.mLength,MEM_RELEASE);
-		}
-		else
-			module = MemoryLoadLibrary( textbuf.mBuffer );
-	}
-	else
-		module = MemoryLoadLibrary( textbuf.mBuffer );
+#endif
+	module = MemoryLoadLibrary( textbuf.mBuffer );
 	aResultToken.value_int64 = (unsigned)module;
 }
 
@@ -15294,16 +15280,16 @@ BIF_DECL(BIF_OnMessage)
 	// Load-time validation has ensured there's at least one parameter for use here:
 	UINT specified_msg = (UINT)TokenToInt64(*aParam[0]); // Parameter #1
 	HWND specified_hwnd;
-	if (aParamCount > 1 && TokenToInt64(*aParam[1])) // Parameter #2
-		specified_hwnd = (HWND)TokenToInt64(*aParam[1]);
+	if (aParamCount > 2)  // Parameter #2
+		specified_hwnd = (HWND) TokenToInt64(*aParam[2]);
 	else
 		specified_hwnd = 0;
 
 	Func *func = NULL;           // Set defaults.
 	bool mode_is_delete = false; //
-	if (aParamCount > (specified_hwnd ? 2 : 1)) // Parameter func is present.
+	if (aParamCount > 1) // Parameter #2 is present.
 	{
-		LPTSTR func_name = TokenToString(*aParam[specified_hwnd ? 2 : 1], buf); // Resolve parameter #2.
+		LPTSTR func_name = TokenToString(*aParam[1], buf); // Resolve parameter #2.
 		if (*func_name)
 		{
 			if (   !(func = g_script.FindFunc(func_name))   ) // Nonexistent function.
@@ -15365,7 +15351,7 @@ BIF_DECL(BIF_OnMessage)
 				MoveMemory(g_MsgMonitor+msg_index, g_MsgMonitor+msg_index+1, sizeof(MsgMonitorStruct)*(g_MsgMonitorCount-msg_index));
 			return;
 		}
-		if (aParamCount < 2 || (specified_hwnd && aParamCount < 3)) // Single-parameter mode: Report existing item's function name.
+		if (aParamCount < 2) // Single-parameter mode: Report existing item's function name.
 			return; // Everything was already set up above to yield the proper return value.
 		// Otherwise, an existing item is being assigned a new function (the function has already
 		// been verified valid above). Continue on to update this item's attributes.
@@ -15392,8 +15378,8 @@ BIF_DECL(BIF_OnMessage)
 	monitor.msg = specified_msg;
 	monitor.func = func;
 	monitor.hwnd = specified_hwnd;
-	if (aParamCount > (specified_hwnd ? 3 : 2))
-		monitor.max_instances = (short)TokenToInt64(*aParam[specified_hwnd ? 3 : 2]); // No validation because it seems harmless if it's negative or some huge number.
+	if (aParamCount > 3)
+		monitor.max_instances = (short)TokenToInt64(*aParam[2]); // No validation because it seems harmless if it's negative or some huge number.
 	else // Unspecified, so if this item is being newly created fall back to the default.
 		if (!item_already_exists)
 			monitor.max_instances = 1;

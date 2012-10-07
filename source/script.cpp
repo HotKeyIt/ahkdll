@@ -3246,22 +3246,22 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			return ScriptError(msg_text);
 		}
 		fp = &tfile;
-	// Set the working directory so that any #Include directives are relative to the directory
-	// containing this file by default.  Call SetWorkingDir() vs. SetCurrentDirectory() so that it
-	// succeeds even for a root drive like C: that lacks a backslash (see SetWorkingDir() for details).
-	if (source_file_index)
-	{
-		LPTSTR terminate_here = _tcsrchr(full_path, '\\');
-		if (terminate_here > full_path)
+		// Set the working directory so that any #Include directives are relative to the directory
+		// containing this file by default.  Call SetWorkingDir() vs. SetCurrentDirectory() so that it
+		// succeeds even for a root drive like C: that lacks a backslash (see SetWorkingDir() for details).
+		if (source_file_index)
 		{
-			*terminate_here = '\0'; // Temporarily terminate it for use with SetWorkingDir().
-			SetWorkingDir(full_path);
-			*terminate_here = '\\'; // Undo the termination.
+			LPTSTR terminate_here = _tcsrchr(full_path, '\\');
+			if (terminate_here > full_path)
+			{
+				*terminate_here = '\0'; // Temporarily terminate it for use with SetWorkingDir().
+				SetWorkingDir(full_path);
+				*terminate_here = '\\'; // Undo the termination.
+			}
+			//else: probably impossible? Just leave the working dir as-is, for simplicity.
 		}
-		//else: probably impossible? Just leave the working dir as-is, for simplicity.
-	}
-	else
-		SetWorkingDir(mFileDir);
+		else
+			SetWorkingDir(mFileDir);
 
 		// This is done only after the file has been successfully opened in case aIgnoreLoadFailure==true:
 		if (source_file_index > 0)
@@ -3281,7 +3281,18 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			MsgBox(_T("Could not extract script from EXE."), 0, aFileSpec);
 			return FAIL;
 		}
-
+		if (*(unsigned int*)textbuf.mBuffer == 0x005F5A4C)
+		{
+			DWORD aSizeDecompressed = DecompressBuffer(textbuf.mBuffer);
+			if (aSizeDecompressed)
+			{
+				LPVOID buff = _alloca(aSizeDecompressed); // will be freed when function returns
+				memmove(buff,textbuf.mBuffer,aSizeDecompressed);
+				VirtualFree(textbuf.mBuffer,aSizeDecompressed,MEM_RELEASE);
+				textbuf.mLength = aSizeDecompressed;
+				textbuf.mBuffer = buff;
+			}
+		}
 		fp = &tmem;
 		// NOTE: Ahk2Exe strips off the UTF-8 BOM.
 		tmem.Open(textbuf, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR, CP_UTF8);
@@ -3291,36 +3302,6 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 #else // Stand-alone mode (there are no include files in this mode since all of them were merged into the main script at the time of compiling).
 	TextMem::Buffer textbuf(NULL, 0, false);
 
-#ifdef ENABLE_EXEARC
-	HS_EXEArc_Read oRead;
-
-	// AutoIt3: Open the archive in this compiled exe.
-	// Jon gave me some details about why a password isn't needed: "The code in those libraries will
-	// only allow files to be extracted from the exe it is bound to (i.e the script that it was
-	// compiled with).  There are various checks and CRCs to make sure that it can't be used to read
-	// the files from any other exe that is passed."
-	if (oRead.Open(CStringCharFromTCharIfNeeded(aFileSpec), "") != HS_EXEARC_E_OK)
-	{
-		MsgBox(ERR_EXE_CORRUPTED, 0, aFileSpec); // Usually caused by virus corruption.
-		return FAIL;
-	}
-	// AutoIt3: Read the script (the func allocates the memory for the buffer :) )
-	if (oRead.FileExtractToMem(">AUTOHOTKEY SCRIPT<", (UCHAR **) &textbuf.mBuffer, &textbuf.mLength) == HS_EXEARC_E_OK)
-		mCompiledHasCustomIcon = false;
-	else if (oRead.FileExtractToMem(">AHK WITH ICON<", (UCHAR **) &textbuf.mBuffer, &textbuf.mLength) == HS_EXEARC_E_OK)
-		mCompiledHasCustomIcon = true;
-	else
-	{
-		oRead.Close();							// Close the archive
-		MsgBox(_T("Could not extract script from EXE."), 0, aFileSpec);
-		return FAIL;
-	}
-
-	// AutoIt3: We have the data in RAW BINARY FORM, the script is a text file, so
-	// this means that instead of a newline character, there may also be carriage
-	// returns 0x0d 0x0a (\r\n)
-	oRead.Close(); // no longer used
-#else
 	HRSRC hRes;
 	HGLOBAL hResData;
 
@@ -3341,8 +3322,18 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		MsgBox(_T("Could not extract script from EXE."), 0, aFileSpec);
 		return FAIL;
 	}
-#endif
-
+	if (*(unsigned int*)textbuf.mBuffer == 0x005F5A4C)
+	{
+		DWORD aSizeDecompressed = DecompressBuffer(textbuf.mBuffer);
+		if (aSizeDecompressed)
+		{
+			LPVOID buff = _alloca(aSizeDecompressed); // will be freed when function returns
+			memmove(buff,textbuf.mBuffer,aSizeDecompressed);
+			VirtualFree(textbuf.mBuffer,aSizeDecompressed,MEM_RELEASE);
+			textbuf.mLength = aSizeDecompressed;
+			textbuf.mBuffer = buff;
+		}
+	}
 	fp = &tmem;
 	// NOTE: Ahk2Exe strips off the UTF-8 BOM.
 	tmem.Open(textbuf, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR, CP_UTF8);
@@ -8631,6 +8622,18 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	{
 		// aErrorWasShown = true; // Do not display errors here
 		return NULL;
+	}
+	if (*(unsigned int*)textbuf.mBuffer == 0x005F5A4C)
+	{
+		DWORD aSizeDecompressed = DecompressBuffer(textbuf.mBuffer);
+		if (aSizeDecompressed)
+		{
+			LPVOID buff = _alloca(aSizeDecompressed); // will be freed when function returns
+			memmove(buff,textbuf.mBuffer,aSizeDecompressed);
+			VirtualFree(textbuf.mBuffer,aSizeDecompressed,MEM_RELEASE);
+			textbuf.mLength = aSizeDecompressed;
+			textbuf.mBuffer = buff;
+		}
 	}
 	aFileWasFound = true;
 	// NOTE: Ahk2Exe strips off the UTF-8 BOM.

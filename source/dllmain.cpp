@@ -70,8 +70,9 @@ switch(fwdReason)
 	 {
 		nameHinstanceP.hInstanceP = (HINSTANCE)hInstance;
 		g_hInstance = (HINSTANCE)hInstance;
+		//ahkdll(_T(""),_T(""));
 #ifdef AUTODLL
-	ahkdll("autoload.ahk", "", "");	  // used for remoteinjection of dll 
+	ahkdll("autoload.ahk", "");	  // used for remoteinjection of dll 
 #endif
 	   break;
 	 }
@@ -436,7 +437,7 @@ int setscriptstrings(LPTSTR fileName, LPTSTR argv)
 
 EXPORT UINT_PTR ahkdll(LPTSTR fileName, LPTSTR argv)
 {
-	if (setscriptstrings(*fileName ? fileName : aDefaultDllScript, argv))
+	if (setscriptstrings(fileName && *fileName ? fileName : aDefaultDllScript, argv && *argv ? argv : _T("")))
 		return 0;
 	nameHinstanceP.istext = *fileName ? 0 : 1;
 	return runThread();
@@ -445,7 +446,7 @@ EXPORT UINT_PTR ahkdll(LPTSTR fileName, LPTSTR argv)
 // HotKeyIt ahktextdll
 EXPORT UINT_PTR ahktextdll(LPTSTR fileName, LPTSTR argv)
 {
-	if (setscriptstrings(*fileName ? fileName : aDefaultDllScript, argv))
+	if (setscriptstrings(fileName && *fileName ? fileName : aDefaultDllScript, argv && *argv ? argv : _T("")))
 		return 0;
 	nameHinstanceP.istext = 1;
 	return runThread();
