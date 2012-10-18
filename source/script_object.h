@@ -337,6 +337,36 @@ public:
 };
 
 //
+// CriticalObject - Multithread save object wrapper
+//
+
+class CriticalObject : public ObjectBase
+{
+protected:
+	IObject *object;
+	LPCRITICAL_SECTION lpCriticalSection;
+	CriticalObject()
+			: lpCriticalSection(0)
+			, object(0)
+	{}
+
+	bool Delete();
+	~CriticalObject(){}
+
+public:
+	__int64 GetObj()
+	{
+		return (__int64)&*this->object;
+	}
+	__int64 GetCriSec()
+	{
+		return (__int64) this->lpCriticalSection;
+	}
+	static CriticalObject *Create(ExprTokenType *aParam[], int aParamCount);
+	ResultType STDMETHODCALLTYPE Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
+};
+
+//
 // Struct - Scriptable associative array.
 //
 
