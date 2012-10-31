@@ -64,6 +64,15 @@ typedef struct {
 
 typedef BOOL (WINAPI *DllEntryProc)(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved);
 
+typedef HANDLE (*MyCreateActCtx)(PACTCTXA);
+typedef HANDLE (*MyDeactivateActCtx)(DWORD,ULONG_PTR);
+typedef BOOL (*MyActivateActCtx)(HANDLE,ULONG_PTR*);
+HMODULE libkernel32 = LoadLibrary(_T("kernel32.dll"));
+MyCreateActCtx _CreateActCtxA = (MyCreateActCtx)GetProcAddress(libkernel32,"CreateActCtxA");
+MyDeactivateActCtx _DeactivateActCtx = (MyDeactivateActCtx)GetProcAddress(libkernel32,"DeactivateActCtx");
+MyActivateActCtx _ActivateActCtx = (MyActivateActCtx)GetProcAddress(libkernel32,"ActivateActCtx");
+
+
 #define GET_HEADER_DICTIONARY(module, idx)	&(module)->headers->OptionalHeader.DataDirectory[idx]
 
 #ifdef DEBUG_OUTPUT
@@ -324,7 +333,7 @@ BuildImportTable(PMEMORYMODULE module)
 						break; //failed to write data, continue and try loading
 					}
 				
-					hActCtx = CreateActCtxA(&actctx);
+					hActCtx = _CreateActCtxA(&actctx);
 
 					// Open file and automatically delete on CloseHandle (FILE_FLAG_DELETE_ON_CLOSE)
 					hFile = CreateFileA(buf,GENERIC_WRITE,FILE_SHARE_DELETE,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_TEMPORARY|FILE_FLAG_DELETE_ON_CLOSE,NULL);
@@ -333,7 +342,7 @@ BuildImportTable(PMEMORYMODULE module)
 					if (hActCtx == INVALID_HANDLE_VALUE)
 						break; //failed to create context, continue and try loading
 
-					ActivateActCtx(hActCtx,&lpCookie); // Don't care if this fails since we would countinue anyway
+					_ActivateActCtx(hActCtx,&lpCookie); // Don't care if this fails since we would countinue anyway
 					break; // Break since a dll can have only 1 manifest
 				}
 			}
@@ -398,7 +407,7 @@ BuildImportTable(PMEMORYMODULE module)
 		}
 	}
 	if (lpCookie)
-		DeactivateActCtx(0,lpCookie);
+		_DeactivateActCtx(0,lpCookie);
 	return result;
 }
 
