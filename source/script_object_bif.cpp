@@ -269,7 +269,7 @@ BIF_DECL(BIF_sizeof)
 					return;
 				}
 				// sizeof was given an offset that it applied and aligned if necessary, so set offset =  and not +=
-				offset = (int)ResultToken.value_int64 * (arraydef ? arraydef : 1);					
+				offset = (int)ResultToken.value_int64 + (arraydef ? ((arraydef - 1) * ((int)ResultToken.value_int64 - offset)) : 0);					
 			}
 			else // No variable was found and it is not default type so we can't determine size, return empty string.
 				return;
