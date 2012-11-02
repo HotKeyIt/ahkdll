@@ -175,8 +175,8 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	for (i = 0; i < dllargc; ++i) // Start at 1 because 0 contains the program name.
 	{
 #ifndef _UNICODE
-		param = (TCHAR *) _alloca((wcslen(dllargv[i])+1)*sizeof(CHAR));
-		WideCharToMultiByte(CP_ACP,0,wargv,-1,param,(wcslen(dllargv[i])+1)*sizeof(CHAR),0,0);
+		param = (TCHAR *) _alloca(wcslen(dllargv[i])+1);
+		WideCharToMultiByte(CP_ACP,0,dllargv[i],-1,param,(wcslen(dllargv[i])+1),0,0);
 #else
 		param = dllargv[i]; // For performance and convenience.
 #endif
