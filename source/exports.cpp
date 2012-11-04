@@ -33,10 +33,20 @@ UINT_PTR com_ahkdll(LPTSTR fileName,LPTSTR argv,LPTSTR args){return ahkdll(fileN
 UINT_PTR com_ahktextdll(LPTSTR script,LPTSTR argv,LPTSTR args){return ahktextdll(script,argv,args);}
 BOOL com_ahkTerminate(int timeout){return ahkTerminate(timeout);}
 BOOL com_ahkReady(){return ahkReady();}
+BOOL com_ahkIsUnicode(){return ahkIsUnicode();}
 BOOL com_ahkReload(int timeout){return ahkReload(timeout);}
 #endif
 #endif
 #endif
+
+EXPORT BOOL ahkIsUnicode()
+{
+#ifdef UNICODE
+	return true;
+#else
+	return false;
+#endif
+}
 
 EXPORT BOOL ahkPause(LPTSTR aChangeTo) //Change pause state of a running script
 {

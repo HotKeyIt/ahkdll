@@ -738,6 +738,13 @@ HRESULT __stdcall CoCOMServer::ahkReady(/*out*/BOOL* ready)
 	*ready = com_ahkReady();
 	return S_OK;
 }
+HRESULT __stdcall CoCOMServer::ahkIsUnicode(/*out*/BOOL* IsUnicode)
+{
+	if (IsUnicode==NULL)
+		return ERROR_INVALID_PARAMETER;
+	*IsUnicode = com_ahkIsUnicode();
+	return S_OK;
+}
 HRESULT __stdcall CoCOMServer::ahkFindLabel(/*in*/VARIANT aLabelName,/*out*/UINT_PTR* aLabelPointer)
 {
 	USES_CONVERSION;

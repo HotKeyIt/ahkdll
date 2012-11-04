@@ -36,6 +36,7 @@ EXPORT BOOL ahkReload(int timeout);
 EXPORT BOOL com_ahkReload();
 void reloadDll();
 ResultType terminateDll();
+EXPORT BOOL ahkIsUnicode();
 #endif
 
 #endif
@@ -61,6 +62,7 @@ UINT_PTR com_ahkdll(LPTSTR fileName,LPTSTR argv,LPTSTR args);
 UINT_PTR com_ahktextdll(LPTSTR fileName,LPTSTR argv,LPTSTR args);
 BOOL com_ahkTerminate(int timeout);
 BOOL com_ahkReady();
+BOOL com_ahkIsUnicode();
 BOOL com_ahkReload(int timeout);
 #endif
 #endif
