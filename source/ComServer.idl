@@ -36,6 +36,7 @@ library AutoHotkey
 		[id(15)] HRESULT ahkExec([in] VARIANT script,[out, retval] BOOL* success);
 		[id(16)] HRESULT ahkTerminate([in,optional] VARIANT kill,[out, retval] BOOL* success);
 		[id(17)] HRESULT ahkReload([in,optional] VARIANT timeout);
+		[id(18)] HRESULT ahkIsUnicode([out, retval] BOOL* IsUnicode);
 	}
 
 	[ uuid(FEEEC4BA-04AF-45F0-B385-7290C65CFB9B),

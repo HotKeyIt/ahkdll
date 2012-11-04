@@ -50,6 +50,7 @@ public:
     virtual HRESULT __stdcall ahkExec(/*[in]*/ VARIANT script,/*[out, retval]*/ BOOL* success);
     virtual HRESULT __stdcall ahkTerminate(/*[in,optional]*/ VARIANT kill,/*[out, retval]*/ BOOL* success);
     virtual HRESULT __stdcall ahkReload(/*[in]*/ VARIANT timeout);
+	virtual HRESULT __stdcall ahkIsUnicode(/*out*/BOOL* IsUnicode);
 
 private:
 
