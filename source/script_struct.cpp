@@ -34,6 +34,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 	ExprTokenType *param[] = {&Var1,&Var2,&Var3};
 	Var1.symbol = SYM_VAR;
 	Var2.symbol = SYM_INTEGER;
+	Var3.symbol = SYM_INTEGER;
 
 	// will hold pointer to structure definition string while we parse trough it
 	TCHAR *buf;
@@ -140,8 +141,13 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			// last item in union or structure, update offset now if not struct, for struct offset is up to date
 			if (--uniondepth == 0)
 			{
+				// end of structure, align it
+				if (totalunionsize % aligntotal)
+					totalunionsize += aligntotal - (totalunionsize % aligntotal);
 				if (!unionisstruct[uniondepth + 1]) // because it was decreased above
 					offset += totalunionsize;
+				else if (offset % aligntotal)
+					offset += aligntotal - (offset % aligntotal);
 			}
 			else 
 				offset = unionoffset[uniondepth];
@@ -347,7 +353,8 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 				if (!ispointer)
 				{
 					param[1]->value_int64 = (__int64)ispointer ? 0 : offset;
-					BIF_sizeof(Result,ResultToken,param,ispointer ? 1 : 2);
+					param[2]->value_int64 = (__int64)&aligntotal;
+					BIF_sizeof(Result,ResultToken,param,ispointer ? 1 : 3);
 					if (ResultToken.symbol != SYM_INTEGER)
 					{	// could not resolve structure
 						obj->Release();

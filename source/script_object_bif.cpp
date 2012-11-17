@@ -42,17 +42,22 @@ BIF_DECL(BIF_sizeof)
 	bool unionisstruct[10];			// updated to move offset for structure in structure
 	int totalunionsize = 0;			// total size of all unions and structures in structure
 	int uniondepth = 0;				// count how deep we are in union/structure
-	int aligntotal = 0;				// pointer alignment for total structure
+	int align = 0;
+	int *aligntotal = &align;				// pointer alignment for total structure
 	int thissize;					// used to save size returned from IsDefaultType
 	
 	// following are used to find variable and also get size of a structure defined in variable
 	// this will hold the variable reference and offset that is given to size() to align if necessary in 64-bit
 	ResultType Result = OK;
 	ExprTokenType ResultToken;
-	ExprTokenType Var1,Var2;
+	ExprTokenType Var1,Var2,Var3;
 	Var1.symbol = SYM_VAR;
 	Var2.symbol = SYM_INTEGER;
-	ExprTokenType *param[] = {&Var1,&Var2};
+
+	// used to pass aligntotal counter to structure in structure
+	Var3.symbol = SYM_INTEGER;
+	Var3.value_int64 = (__int64)&align;
+	ExprTokenType *param[] = {&Var1,&Var2,&Var3};
 	
 	// will hold pointer to structure definition while we parse it
 	TCHAR *buf;
@@ -90,7 +95,10 @@ BIF_DECL(BIF_sizeof)
 		offset = (int)TokenToInt64(*aParam[1]);
 		Var2.value_int64 = (__int64)offset;
 	}
-
+	if (aParamCount > 2 && TokenIsNumeric(*aParam[2]))
+	{   // a pointer was given to return memory to align
+		aligntotal = (int *)TokenToInt64(*aParam[2]);
+	}
 	// Set buf to beginning of structure definition
 	buf = TokenToString(*aParam[0]);
 
@@ -132,8 +140,13 @@ BIF_DECL(BIF_sizeof)
 			// last item in union or structure, update offset now if not struct, for struct offset is up to date
 			if (--uniondepth == 0)
 			{
+				// end of structure, align it
+				if (totalunionsize % *aligntotal)
+					totalunionsize += *aligntotal - (totalunionsize % *aligntotal);
 				if (!unionisstruct[uniondepth + 1]) // because it was decreased above
 					offset += totalunionsize;
+				else if (offset % *aligntotal)
+					offset += *aligntotal - (offset % *aligntotal);
 			}
 			else 
 				offset = unionoffset[uniondepth];
@@ -178,8 +191,8 @@ BIF_DECL(BIF_sizeof)
 			// align offset for pointer
 			if (offset % ptrsize)
 				offset += (ptrsize - (offset % ptrsize)) * (arraydef ? arraydef : 1);
-			if (ptrsize > aligntotal)
-				aligntotal = ptrsize;
+			if (ptrsize > *aligntotal)
+				*aligntotal = ptrsize;
 			// update offset
 			if (uniondepth)
 			{
@@ -222,9 +235,9 @@ BIF_DECL(BIF_sizeof)
 			if (thissize > 1 && offset % thissize)
 			{
 				offset += thissize - (offset % thissize);
-				if (thissize > aligntotal)
-					aligntotal = thissize;
 			}
+			if (thissize > *aligntotal)
+				*aligntotal = thissize;
 		}
 		else // type was not found, check for user defined type in variables
 		{
@@ -259,7 +272,7 @@ BIF_DECL(BIF_sizeof)
 			{
 				// Call BIF_sizeof passing offset in second parameter to align if necessary
 				param[1]->value_int64 = (__int64)offset;
-				BIF_sizeof(Result,ResultToken,param,2);
+				BIF_sizeof(Result,ResultToken,param,3);
 				if (ResultToken.symbol != SYM_INTEGER)
 				{	// could not resolve structure
 					return;
@@ -287,8 +300,8 @@ BIF_DECL(BIF_sizeof)
 		else
 			buf += _tcslen(buf);
 	}
-	if (aligntotal && offset % aligntotal) // align only if offset was not given
-		offset += aligntotal - (offset % aligntotal);
+	if (*aligntotal && offset % *aligntotal) // align only if offset was not given
+		offset += *aligntotal - (offset % *aligntotal);
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = offset;
 }
