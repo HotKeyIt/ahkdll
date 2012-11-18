@@ -63,10 +63,13 @@ BIF_DECL(BIF_Alias)
 		switch (aParam1.symbol)
 		{
 		case SYM_VAR:
-		case SYM_INTEGER:
 			len = (UINT_PTR)(aParam[1]->var->mType == VAR_ALIAS ? aParam1.var->ResolveAlias() : aParam1.var);
-		break;
-		// HotKeyIt H10 added to accept dynamic text and also when value is returned by ahkgetvar in AutoHotkey.dll
+			break;
+		case SYM_INTEGER:
+			// HotKeyIt added to accept var pointer
+			len = (UINT_PTR)aParam[1]->value_int64;
+			break;
+			// HotKeyIt H10 added to accept dynamic text and also when value is returned by ahkgetvar in AutoHotkey.dll
 		case SYM_STRING:
 			len = (UINT_PTR)ATOI64(aParam1.marker);
 		}
