@@ -248,7 +248,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 				if (offset % thissize)
 					offset += thissize - (offset % thissize);
 				if (thissize > aligntotal)
-					aligntotal = thissize;
+					aligntotal = thissize > ptrsize ? ptrsize : thissize;
 			}
 			if (!(field = obj->Insert(keybuf, insert_pos++,ispointer,offset,arraydef,NULL,ispointer ? ptrsize : thissize
 						,ispointer ? true : !tcscasestr(_T(" FLOAT DOUBLE PFLOAT PDOUBLE "),defbuf)
