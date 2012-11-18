@@ -237,7 +237,7 @@ BIF_DECL(BIF_sizeof)
 				offset += thissize - (offset % thissize);
 			}
 			if (thissize > *aligntotal)
-				*aligntotal = thissize;
+				*aligntotal = thissize>ptrsize ? ptrsize : thissize;
 		}
 		else // type was not found, check for user defined type in variables
 		{
