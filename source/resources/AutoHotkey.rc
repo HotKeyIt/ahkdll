@@ -208,7 +208,7 @@ BEGIN
             VALUE "FileDescription", "AutoHotkey_H " AHK_ENC " " AHK_BIT
             VALUE "FileVersion", AHK_VERSION
             VALUE "InternalName", "AutoHotkey_H"
-            VALUE "LegalCopyright", "Copyright (C) 2010"
+            VALUE "LegalCopyright", "Copyright (C) 2012"
 #ifdef USRDLL
 	#ifdef MINIDLL
 			VALUE "OriginalFilename", "AutoHotkeyMini.dll"

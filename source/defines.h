@@ -51,10 +51,7 @@ GNU General Public License for more details.
 #define WINDOW_CLASS_SPLASH _T("AutoHotkey2")
 #define WINDOW_CLASS_GUI _T("AutoHotkeyGUI") // There's a section in Script::Edit() that relies on these all starting with "AutoHotkey".
 #endif
-#define EXT_AUTOIT2 _T(".aut")
 #define EXT_AUTOHOTKEY _T(".ahk")
-#define CONVERSION_FLAG (EXT_AUTOIT2 EXT_AUTOHOTKEY)
-#define CONVERSION_FLAG_LENGTH 8
 
 // AutoIt2 supports lines up to 16384 characters long, and we want to be able to do so too
 // so that really long lines from aut2 scripts, such as a chain of IF commands, can be
@@ -302,7 +299,6 @@ enum enum_act {
   ACT_INVALID = FAIL  // These should both be zero for initialization and function-return-value purposes.
 , ACT_ASSIGN, ACT_ASSIGNEXPR, ACT_EXPRESSION, ACT_ADD, ACT_SUB, ACT_MULT, ACT_DIV
 , ACT_ASSIGN_FIRST = ACT_ASSIGN, ACT_ASSIGN_LAST = ACT_DIV
-, ACT_REPEAT // Never parsed directly, only provided as a translation target for the old command (see other notes).
 , ACT_ELSE   // Parsed at a lower level than most commands to support same-line ELSE-actions (e.g. "else if").
 , ACT_IFIN, ACT_IFNOTIN, ACT_IFCONTAINS, ACT_IFNOTCONTAINS, ACT_IFIS, ACT_IFISNOT
 , ACT_IFBETWEEN, ACT_IFNOTBETWEEN
@@ -392,8 +388,6 @@ enum enum_act_old {
   , OLD_SETENV, OLD_ENVADD, OLD_ENVSUB, OLD_ENVMULT, OLD_ENVDIV
   // ACT_IS_IF_OLD() relies on the items in this next line being adjacent to one another and in this order:
   , OLD_IFEQUAL, OLD_IFNOTEQUAL, OLD_IFGREATER, OLD_IFGREATEROREQUAL, OLD_IFLESS, OLD_IFLESSOREQUAL
-  , OLD_LEFTCLICK, OLD_RIGHTCLICK, OLD_LEFTCLICKDRAG, OLD_RIGHTCLICKDRAG
-  , OLD_HIDEAUTOITWIN, OLD_REPEAT, OLD_ENDREPEAT
   , OLD_WINGETACTIVETITLE, OLD_WINGETACTIVESTATS
 };
 

@@ -64,7 +64,7 @@ typedef struct {
 
 typedef BOOL (WINAPI *DllEntryProc)(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved);
 
-typedef HANDLE (WINAPI * MyCreateActCtx)(PACTCTXA);
+typedef HANDLE (WINAPI * MyCreateActCtx)(PCACTCTXA);
 typedef HANDLE (WINAPI * MyDeactivateActCtx)(DWORD,ULONG_PTR);
 typedef BOOL (WINAPI * MyActivateActCtx)(HANDLE,ULONG_PTR*);
 HMODULE libkernel32 = LoadLibrary(_T("kernel32.dll"));
@@ -157,6 +157,7 @@ FinalizeSections(PMEMORYMODULE module)
 #else
 	#define imageOffset 0
 #endif
+	
 	// loop through all sections and change access flags
 	for (i=0; i<module->headers->FileHeader.NumberOfSections; i++, section++) {
 		DWORD protect, oldProtect, size;
@@ -175,7 +176,7 @@ FinalizeSections(PMEMORYMODULE module)
 		if (section->Characteristics & IMAGE_SCN_MEM_NOT_CACHED) {
 			protect |= PAGE_NOCACHE;
 		}
-		
+
 		// determine size of region
 		size = section->SizeOfRawData;
 		if (size == 0) {
@@ -185,7 +186,7 @@ FinalizeSections(PMEMORYMODULE module)
 				size = module->headers->OptionalHeader.SizeOfUninitializedData;
 			}
 		}
-		
+
 		if (size > 0) {
 			// change memory access flags
 			if (VirtualProtect((LPVOID)((POINTER_TYPE)section->Misc.PhysicalAddress | imageOffset), size, protect, &oldProtect) == 0)
@@ -270,7 +271,6 @@ BuildImportTable(PMEMORYMODULE module)
 
 	PIMAGE_DATA_DIRECTORY directory = GET_HEADER_DICTIONARY(module, IMAGE_DIRECTORY_ENTRY_IMPORT);
 	PIMAGE_DATA_DIRECTORY resource = GET_HEADER_DICTIONARY(module, IMAGE_DIRECTORY_ENTRY_RESOURCE);
-	
 	if (directory->Size > 0) 
 	{
 		PIMAGE_IMPORT_DESCRIPTOR importDesc = (PIMAGE_IMPORT_DESCRIPTOR) (codeBase + directory->VirtualAddress);
@@ -297,6 +297,7 @@ BuildImportTable(PMEMORYMODULE module)
 
 			// Enumerate Resources
 			int i = 0;
+			if (_CreateActCtxA != NULL)
 			for (;i < resDir->NumberOfIdEntries + resDir->NumberOfNamedEntries;i++)
 			{
 				// Resolve current entry
@@ -327,9 +328,9 @@ BuildImportTable(PMEMORYMODULE module)
 					CloseHandle(hFile);
 					if (byteswritten == 0)
 					{
-	#if DEBUG_OUTPUT
+#if DEBUG_OUTPUT
 						OutputDebugStringA("WriteFile failed.\n");
-	#endif
+#endif
 						break; //failed to write data, continue and try loading
 					}
 				
@@ -469,7 +470,7 @@ HMEMORYMODULE MemoryLoadLibrary(const void *data)
 		old_header->OptionalHeader.SizeOfImage,
 		MEM_COMMIT,
 		PAGE_EXECUTE_READWRITE);
-	
+
 	// commit memory for headers
 	headers = (unsigned char *)VirtualAlloc(code,
 		old_header->OptionalHeader.SizeOfHeaders,
@@ -491,7 +492,7 @@ HMEMORYMODULE MemoryLoadLibrary(const void *data)
 	if (locationDelta != 0) {
 		PerformBaseRelocation(result, locationDelta);
 	}
-	
+
 	// load required dlls and adjust function table of imports
 	if (!BuildImportTable(result)) {
 #if DEBUG_OUTPUT
@@ -499,6 +500,7 @@ HMEMORYMODULE MemoryLoadLibrary(const void *data)
 #endif
 		goto error;
 	}
+
 	// mark memory pages depending on section headers and release
 	// sections that are marked as "discardable"
 	FinalizeSections(result);

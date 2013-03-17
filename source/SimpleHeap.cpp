@@ -23,6 +23,7 @@ SimpleHeap *SimpleHeap::sFirst = NULL;
 SimpleHeap *SimpleHeap::sLast  = NULL;
 char *SimpleHeap::sMostRecentlyAllocated = NULL;
 UINT SimpleHeap::sBlockCount = 0;
+SimpleHeap **sBlocks;
 
 LPTSTR SimpleHeap::Malloc(LPTSTR aBuf, size_t aLength)
 // v1.0.44.14: Added aLength to improve performance in cases where callers already know the length.
@@ -102,17 +103,26 @@ void SimpleHeap::Delete(void *aPtr)
 
 
 // Commented out because not currently used:
-//void SimpleHeap::DeleteAll()
-//// See Hotkey::AllDestructAndExit for comments about why this isn't actually called.
-//{
-//	SimpleHeap *next, *curr;
-//	for (curr = sFirst; curr != NULL;)
-//	{
-//		next = curr->mNextBlock;  // Save this member's value prior to deleting the object.
-//		delete curr;
-//		curr = next;
-//	}
-//}
+void SimpleHeap::DeleteAll()
+// See Hotkey::AllDestructAndExit for comments about why this isn't actually called.
+{
+	EnterCriticalSection(&g_CriticalHeapBlocks);
+	if (sBlocks) // don't process again if we already freed Heap
+	{
+		for (;sBlockCount;)
+		{
+			if (sBlocks[sBlockCount - 1])
+				delete sBlocks[--sBlockCount];
+			sBlocks[sBlockCount] = NULL;
+		}
+		sFirst = NULL;
+		sLast = NULL;
+		sMostRecentlyAllocated = NULL;
+		free(sBlocks);
+		sBlocks = NULL;
+	}
+	LeaveCriticalSection(&g_CriticalHeapBlocks);
+}
 
 
 
@@ -135,6 +145,17 @@ SimpleHeap *SimpleHeap::CreateBlock()
 	// Since above didn't return, block was successfully created:
 	block->mSpaceAvailable = BLOCK_SIZE;
 	sLast = block;  // Constructing a new block always results in it becoming the current block.
+	if (!sBlockCount || !(sBlockCount % 1024))
+	{
+		SimpleHeap **new_Blocks;
+		if (!(new_Blocks = (SimpleHeap**)realloc(sBlocks,(!sBlockCount ? 1024 : sBlockCount * 2) * sizeof(SimpleHeap*))))
+		{
+			delete block;
+			return NULL;
+		}
+		sBlocks = new_Blocks;
+	}
+	sBlocks[sBlockCount] = block;
 	++sBlockCount;
 	return block;
 }

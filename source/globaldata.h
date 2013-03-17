@@ -32,6 +32,7 @@ extern DWORD g_HookThreadID;
 extern ATOM g_ClassRegistered;
 extern ATOM g_ClassSplashRegistered;
 extern CRITICAL_SECTION g_CriticalRegExCache;
+extern CRITICAL_SECTION g_CriticalHeapBlocks;
 
 extern UINT g_DefaultScriptCodepage;
 
@@ -39,6 +40,7 @@ extern bool g_DestroyWindowCalled;
 extern HWND g_hWnd;  // The main window
 extern HWND g_hWndEdit;  // The edit window, child of main.
 extern HFONT g_hFontEdit;
+
 #ifndef MINIDLL
 extern HWND g_hWndSplash;  // The SplashText window.
 extern HFONT g_hFontSplash;
@@ -90,7 +92,6 @@ extern bool g_NoTrayIcon;
 #ifdef AUTOHOTKEYSC
 	extern bool g_AllowMainWindow;
 #endif
-extern bool g_AllowSameLineComments;
 extern bool g_DeferMessagesForUnderlyingPump;
 extern bool g_MainTimerExists;
 extern bool g_AutoExecTimerExists;

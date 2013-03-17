@@ -474,8 +474,6 @@ void SendKeys(LPTSTR aKeys, bool aSendRaw, SendModes aSendModeOrig, HWND aTarget
 					mods_for_next_key |= MOD_LALT;
 				continue;
 			case '#':
-				if (g_script.mIsAutoIt2) // Since AutoIt2 ignores these, ignore them if script is in AutoIt2 mode.
-					continue;
 				if (!(persistent_modifiers_for_this_SendKeys & (MOD_LWIN|MOD_RWIN)))
 					mods_for_next_key |= MOD_LWIN;
 				continue;
@@ -2786,7 +2784,7 @@ void SendEventArray(int &aFinalKeyDelay, modLR_type aModsDuringSend)
 		for (unsigned int i = 0;i < sEventCount;i++)
 		{
 			// wVK and wScan are 0 and dwExtraInfo holds time to sleep
-			if (sEventSI[i].ki.wVk == 0 && sEventSI[i].ki.wScan == 0)
+			if (sEventSI[i].type == INPUT_KEYBOARD && sEventSI[i].ki.wVk == 0 && sEventSI[i].ki.wScan == 0)
 			{
 				sMySendInput(i - aLastEventCount, &sEventSI[aLastEventCount], sizeof(INPUT)); // Must call dynamically-resolved version for Win95/NT compatibility.
 				SLEEP_WITHOUT_INTERRUPTION((int)sEventSI[i].ki.dwExtraInfo);

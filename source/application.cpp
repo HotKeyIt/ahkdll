@@ -514,10 +514,10 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 		if (g_guiCount && msg.hwnd && msg.hwnd != g_hWnd && !(msg.message == AHK_GUI_ACTION || msg.message == AHK_USER_MENU))
 		{
 			// Relies heavily on short-circuit boolean order:
-			if (  (msg.message >= WM_KEYFIRST || msg.message <= WM_KEYLAST)
+			if (  (msg.message >= WM_KEYFIRST && msg.message <= WM_KEYLAST)  // v1.1.09.04: Fixed to use && vs || and therefore actually exclude other messages.
 				&& (focused_control = GetFocus())
 				&& (focused_parent = GetNonChildParent(focused_control))
-				&& (pgui = GuiType::FindGui(focused_parent))  )
+				&& (pgui = GuiType::FindGuiParent(focused_control))  )  // v1.1.09.03: Fixed to support +Parent.  v1.1.09.04: Re-fixed to work when focused_control itself is a Gui. 
 			{
 				if (pgui->mAccel) // v1.1.04: Keyboard accelerators.
 					if (TranslateAccelerator(focused_parent, pgui->mAccel, &msg))
@@ -1848,7 +1848,7 @@ bool MsgMonitor(HWND aWnd, UINT aMsg, WPARAM awParam, LPARAM alParam, MSG *apMsg
 	// Nested controls like ComboBoxes require more than a simple call to GetParent().
 	if (g->hWndLastUsed = GetNonChildParent(aWnd)) // Assign parent window as the last found window (it's ok if it's hidden).
 	{
-		pgui = GuiType::FindGui(g->hWndLastUsed);
+		pgui = GuiType::FindGuiParent(aWnd); // Fix for v1.1.09.03: Search the chain of parent windows in case this control's Gui was embedded in another Gui using +Parent.
 		if (pgui) // This parent window is a GUI window.
 		{
 			pgui->AddRef(); // Keep the pointer valid at least until the thread finishes.

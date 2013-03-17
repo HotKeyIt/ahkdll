@@ -133,9 +133,10 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 		// But all are checked since that operation is just as fast:
 		if (IS_OPERAND(this_token.symbol)) // If it's an operand, just push it onto stack for use by an operator in a future iteration.
 		{
-			if (this_token.symbol == SYM_DYNAMIC) // CONVERTED HERE/EARLY TO SOMETHING *OTHER* THAN SYM_DYNAMIC so that no later stages need any handling for them as operands. SYM_DYNAMIC is quite similar to SYM_FUNC/BIF in this respect.
+			// HotKeyIt added a way to override default behaviour for Manually added BuildIn Variable
+			if (this_token.symbol == SYM_DYNAMIC || (this_token.symbol == SYM_VAR && this_token.var->mType == VAR_BUILTIN)) // CONVERTED HERE/EARLY TO SOMETHING *OTHER* THAN SYM_DYNAMIC so that no later stages need any handling for them as operands. SYM_DYNAMIC is quite similar to SYM_FUNC/BIF in this respect.
 			{
-				if (SYM_DYNAMIC_IS_DOUBLE_DEREF(this_token)) // Double-deref such as Array%i%.
+				if (SYM_DYNAMIC_IS_DOUBLE_DEREF(this_token) && this_token.symbol != SYM_VAR) // Double-deref such as Array%i%.
 				{
 					// Start off by looking for the first deref.
 					deref = (DerefType *)this_token.var; // MUST BE DONE PRIOR TO OVERWRITING MARKER/UNION BELOW.
@@ -730,21 +731,12 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 			goto push_this_token; // (rather than a simple STACK_PUSH(right)) because it checks for *cascading* short circuit in cases where this ternary's result is the boolean condition of another ternary.
 		}
 
-		if (this_token.symbol == SYM_COMMA) // This can only be a statement-separator comma, not a function comma, since function commas weren't put into the postfix array.
-			// Do nothing other than discarding the right-side operand that was just popped off the stack.
-			// This collapses the two sub-statements delimited by a given comma into a single result for
-			// subsequent uses by another operator.  Unlike C++, the leftmost operand is preserved, not the
-			// rightmost.  This is because it's faster to just discard the topmost item on the stack, but
-			// more importantly it allows ACT_ASSIGNEXPR, ACT_ADD, and others to work properly.  For example:
-			//    Var:=5, Var1:=(Var2:=1, Var3:=2)
-			// Without the behavior implemented here, the above would wrongly put Var3's rvalue into Var2.
-			continue;
-
 		switch (this_token.symbol)
 		{
 		case SYM_ASSIGN:        // These don't need "right_is_number" to be resolved. v1.0.48.01: Also avoid
 		case SYM_CONCAT:        // resolving right_is_number for CONCAT because TokenIsPureNumeric() will take
 		case SYM_ASSIGN_CONCAT: // a long time if the string is very long and consists entirely of digits/whitespace.
+		case SYM_COMMA:
 			break;
 		default:
 			// If the operand is still generic/undetermined, find out whether it is a string, integer, or float:
@@ -965,6 +957,28 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 			ExprTokenType &left = *STACK_POP; // i.e. the right operand always comes off the stack before the left.
 			if (!IS_OPERAND(left.symbol)) // Haven't found a way to produce this situation yet, but safe to assume it's possible.
 				goto abnormal_end;
+			
+			if (this_token.symbol == SYM_COMMA) // This can only be a statement-separator comma, not a function comma, since function commas weren't put into the postfix array.
+			{
+				// Do nothing other than discarding the right-side operand that was just popped off the stack.
+				// This collapses the two sub-statements delimited by a given comma into a single result for
+				// subsequent uses by another operator.  Unlike C++, the leftmost operand is preserved, not the
+				// rightmost.  This is because it's faster to just discard the topmost item on the stack, but
+				// more importantly it allows ACT_ASSIGNEXPR, ACT_ADD, and others to work properly.  For example:
+				//    Var:=5, Var1:=(Var2:=1, Var3:=2)
+				// Without the behavior implemented here, the above would wrongly put Var3's rvalue into Var2.
+				// Lexikos: Comments above may be incorrect; if SYM_COMMA is placed immediately after the left
+				// branch (i.e. when the topmost item on the stack is the leftmost operand), the rightmost
+				// operand is preserved while retaining performance and correct behaviour.  However, the old
+				// behaviour is kept in v1 for backward-compatibility.
+				// The left operand is popped off the stack (above) and pushed back on so that circuit_token
+				// is checked.  Without this, expressions like ((x, y) and z) fail.
+				this_token = left; // Struct copy.
+				this_token.circuit_token = this_postfix->circuit_token;
+				if (this_token.symbol == SYM_OBJECT)
+					this_token.object->AddRef();
+				goto push_this_token;
+			}
 
 			if (IS_ASSIGNMENT_EXCEPT_POST_AND_PRE(this_token.symbol)) // v1.0.46: Added support for various assignment operators.
 			{
@@ -1103,6 +1117,16 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 					if (temp_var)
 					{
 						result = temp_var->Contents(FALSE); // No need to update the contents because we just want to know if the current address of mContents matches some other addresses.
+						if (result == Var::sEmptyString) // Added in v1.1.09.03.
+						{
+							// One of the following is true:
+							//   1) temp_var has zero capacity and is empty.
+							//   2) temp_var has zero capacity and contains an unflushed binary number.
+							// In the first case, AppendIfRoom() will always fail, so we want to skip it and use
+							// the "no overlap" optimization below. In the second case, calling AppendIfRoom()
+							// would produce the wrong result; e.g. (x := 0+1, x := y 0) would produce "10".
+							result = NULL;
+						}
 						if (result == left_string) // This is something like x := x . y, so simplify it to x .= y
 						{
 							// MUST DO THE ABOVE CHECK because the next section further below might free the

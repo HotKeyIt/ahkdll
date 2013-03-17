@@ -1498,14 +1498,13 @@ int Debugger::ParsePropertyName(const char *aFullName, int aVarScope, bool aVarM
 			// For simplicity, let this be any string terminated by '.' or '['.
 			// Actual expressions require it to contain only alphanumeric chars and/or '_'.
 			name_end = StrChrAny(name, _T(".[")); // This also sets it up for the next iteration.
-
 			if (name_end)
 			{
 				c = *name_end; // Save this for the next iteration.
 				*name_end = '\0';
 			}
-			key_type = IsPureNumeric(name); // SYM_INTEGER or SYM_STRING.
 			//else there won't be a next iteration.
+			key_type = IsPureNumeric(name); // SYM_INTEGER or SYM_STRING.
 		}
 		else
 			return DEBUGGER_E_INVALID_OPTIONS;

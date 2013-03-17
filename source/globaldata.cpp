@@ -35,6 +35,7 @@ DWORD g_HookThreadID; // Not initialized by design because 0 itself might be a v
 ATOM g_ClassRegistered = 0;
 ATOM g_ClassSplashRegistered = 0;
 CRITICAL_SECTION g_CriticalRegExCache;
+CRITICAL_SECTION g_CriticalHeapBlocks;
 
 UINT g_DefaultScriptCodepage = CP_ACP;
 
@@ -93,7 +94,6 @@ bool g_NoTrayIcon = false;
 #ifdef AUTOHOTKEYSC
 	bool g_AllowMainWindow = false;
 #endif
-bool g_AllowSameLineComments = true;
 bool g_MainTimerExists = false;
 bool g_AutoExecTimerExists = false;
 #ifndef MINIDLL
@@ -234,7 +234,6 @@ global_struct *g = &g_startup; // g_startup provides a non-NULL placeholder duri
 // the working directory is comparatively rare:
 TCHAR g_WorkingDir[MAX_PATH] = _T("");
 TCHAR *g_WorkingDirOrig = NULL;  // Assigned a value in WinMain().
-
 bool g_ContinuationLTrim = false;
 #ifndef MINIDLL
 bool g_ForceKeybdHook = false;
@@ -308,13 +307,6 @@ Action g_act[] =
 	, {_T("*="), 2, 2, 2, {2, 0}}
 	, {_T("/="), 2, 2, 2, {2, 0}}
 
-	// This command is never directly parsed, but we need to have it here as a translation
-	// target for the old "repeat" command.  This is because that command treats a zero
-	// first-param as an infinite loop.  Since that param can be a dereferenced variable,
-	// there's no way to reliably translate each REPEAT command into a LOOP command at
-	// load-time.  Thus, we support both types of loops as actual commands that are
-	// handled separately at runtime.
-	, {_T("Repeat"), 0, 1, 1, {1, 0}}  // Iteration Count: was mandatory in AutoIt2 but doesn't seem necessary here.
 	, {_T("Else"), 0, 0, 0, NULL}
 
 	, {_T("in"), 2, 2, 2, NULL}, {_T("not in"), 2, 2, 2, NULL}
@@ -594,11 +586,6 @@ Action g_old_act[] =
 	, {_T("IfEqual"), 1, 2, 2, NULL}, {_T("IfNotEqual"), 1, 2, 2, NULL}
 	, {_T("IfGreater"), 1, 2, 2, NULL}, {_T("IfGreaterOrEqual"), 1, 2, 2, NULL}
 	, {_T("IfLess"), 1, 2, 2, NULL}, {_T("IfLessOrEqual"), 1, 2, 2, NULL}
-	, {_T("LeftClick"), 2, 2, 2, {1, 2, 0}}, {_T("RightClick"), 2, 2, 2, {1, 2, 0}}
-	, {_T("LeftClickDrag"), 4, 4, 4, {1, 2, 3, 4, 0}}, {_T("RightClickDrag"), 4, 4, 4, {1, 2, 3, 4, 0}}
-	, {_T("HideAutoItWin"), 1, 1, 1, NULL}
-	  // Allow zero params, unlike AutoIt.  These params should match those for REPEAT in the above array:
-	, {_T("Repeat"), 0, 1, 1, {1, 0}}, {_T("EndRepeat"), 0, 0, 0, NULL}
 	, {_T("WinGetActiveTitle"), 1, 1, 1, NULL} // <Title Var>
 	, {_T("WinGetActiveStats"), 5, 5, 5, NULL} // <Title Var>, <Width Var>, <Height Var>, <Xpos Var>, <Ypos Var>
 };

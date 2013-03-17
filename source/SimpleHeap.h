@@ -56,7 +56,7 @@ public:
 	static LPTSTR Malloc(LPTSTR aBuf, size_t aLength = -1); // Return a block of memory to the caller and copy aBuf into it.
 	static void* Malloc(size_t aSize); // Return a block of memory to the caller.
 	static void Delete(void *aPtr);
-	//static void DeleteAll();
+	static void DeleteAll();
 };
 
 #endif
