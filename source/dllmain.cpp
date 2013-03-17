@@ -450,18 +450,6 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	return 0; // Never executed; avoids compiler warning.
 }
 
-// Naveen: v1. runscript() - runs the script in a separate thread compared to host application.
-unsigned __stdcall runScript( void* pArguments )
-{
-	struct nameHinstance a =  *(struct nameHinstance *)pArguments;
-	OleInitialize(NULL);
-	HINSTANCE hInstance = a.hInstanceP;
-	LPTSTR fileName = a.name;
-	OldWinMain(hInstance, 0, fileName, 0);
-	_endthreadex( (DWORD)EARLY_RETURN );  
-    return 0;
-}
-
 
 EXPORT BOOL ahkTerminate(int timeout = 0)
 {
@@ -489,6 +477,20 @@ EXPORT BOOL ahkTerminate(int timeout = 0)
 	g_AllowInterruption = TRUE;
 	return 0;
 }
+
+// Naveen: v1. runscript() - runs the script in a separate thread compared to host application.
+unsigned __stdcall runScript( void* pArguments )
+{
+	struct nameHinstance a =  *(struct nameHinstance *)pArguments;
+	OleInitialize(NULL);
+	HINSTANCE hInstance = a.hInstanceP;
+	LPTSTR fileName = a.name;
+	OldWinMain(hInstance, 0, fileName, 0);
+	ahkTerminate();
+	_endthreadex( (DWORD)EARLY_RETURN );  
+    return 0;
+}
+
 
 void WaitIsReadyToExecute()
 {
