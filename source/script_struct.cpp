@@ -247,7 +247,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 				if (offset % thissize)
 					offset += thissize - (offset % thissize);
 				if (thissize > aligntotal)
-					aligntotal = thissize>ptrsize ? ptrsize : thissize;
+					aligntotal = thissize > ptrsize ? ptrsize : thissize;
 			}
 			if (!(field = obj->Insert(keybuf, insert_pos++,ispointer,offset,arraydef,NULL,ispointer ? ptrsize : thissize
 						,ispointer ? true : !tcscasestr(_T(" FLOAT DOUBLE PFLOAT PDOUBLE "),defbuf)
@@ -433,7 +433,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 	// an object was passed to initialize fields
 	// enumerate trough object and assign values
 	if ((aParamCount > 1 && !TokenIsNumeric(*aParam[1])) || aParamCount > 2 )
-		obj->ObjectToStruct(TokenToObject(aParamCount == 2 ? *aParam[1] : *aParam[2]));
+		obj->ObjectToStruct(TokenToObject(*aParam[aParamCount - 1]));
 	return obj;
 }
 
@@ -1476,28 +1476,45 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 			{
 			case 4: // Listed first for performance.
 				if (field->mIsInteger)
+				{
 					*((unsigned int *)((UINT_PTR)target + field->mOffset)) = (unsigned int)TokenToInt64(*aParam[1]);
+					aResultToken.symbol = SYM_INTEGER;
+					aResultToken.value_int64 = TokenToInt64(*aParam[1]);
+				}
 				else // Float (32-bit).
+				{
 					*((float *)((UINT_PTR)target + field->mOffset)) = (float)TokenToDouble(*aParam[1]);
+					aResultToken.symbol = SYM_FLOAT;
+					aResultToken.value_double = TokenToDouble(*aParam[1]);
+				}
 				break;
 			case 8:
 				if (field->mIsInteger)
+				{
 					// v1.0.48: Support unsigned 64-bit integers like DllCall does:
 					*((__int64 *)((UINT_PTR)target + field->mOffset)) = (field->mIsUnsigned && !IS_NUMERIC(aParam[1]->symbol)) // Must not be numeric because those are already signed values, so should be written out as signed so that whoever uses them can interpret negatives as large unsigned values.
 						? (__int64)ATOU64(TokenToString(*aParam[1])) // For comments, search for ATOU64 in BIF_DllCall().
 						: TokenToInt64(*aParam[1]);
+					aResultToken.symbol = SYM_INTEGER;
+					aResultToken.value_int64 = TokenToInt64(*aParam[1]);
+				}
 				else // Double (64-bit).
+				{
 					*((double *)((UINT_PTR)target + field->mOffset)) = TokenToDouble(*aParam[1]);
+					aResultToken.symbol = SYM_FLOAT;
+					aResultToken.value_double = TokenToDouble(*aParam[1]);
+				}
 				break;
 			case 2:
 				*((unsigned short *)((UINT_PTR)target + field->mOffset)) = (unsigned short)TokenToInt64(*aParam[1]);
+				aResultToken.symbol = SYM_INTEGER;
+				aResultToken.value_int64 = TokenToInt64(*aParam[1]);
 				break;
 			default: // size 1
 				*((unsigned char *)((UINT_PTR)target + field->mOffset)) = (unsigned char)TokenToInt64(*aParam[1]);
+				aResultToken.symbol = SYM_INTEGER;
+				aResultToken.value_int64 = TokenToInt64(*aParam[1]);
 			}
-			//*((int*)target + field->mOffset) = (int)TokenToInt64(*aParam[1]);
-			aResultToken.symbol = SYM_INTEGER;
-			aResultToken.value_int64 = TokenToInt64(*aParam[1]);
 		}
 		if (deletefield) // we created the field from a structure
 			delete field;
@@ -1623,30 +1640,44 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 			{
 			case 4: // Listed first for performance.
 				if (!field->mIsInteger)
+				{
 					aResultToken.value_double = *((float *)((UINT_PTR)target + field->mOffset));
+					aResultToken.symbol = SYM_FLOAT;
+				}
 				else if (!field->mIsUnsigned)
+				{
 					aResultToken.value_int64 = *((int *)((UINT_PTR)target + field->mOffset)); // aResultToken.symbol was set to SYM_FLOAT or SYM_INTEGER higher above.
+					aResultToken.symbol = SYM_INTEGER;
+				}
 				else
+				{
 					aResultToken.value_int64 = *((unsigned int *)((UINT_PTR)target + field->mOffset));
+					aResultToken.symbol = SYM_INTEGER;
+				}
 				break;
 			case 8:
 				// The below correctly copies both DOUBLE and INT64 into the union.
 				// Unsigned 64-bit integers aren't supported because variables/expressions can't support them.
 				aResultToken.value_int64 = *((__int64 *)((UINT_PTR)target + field->mOffset));
+				if (!field->mIsInteger)
+					aResultToken.symbol = SYM_FLOAT;
+				else
+					aResultToken.symbol = SYM_INTEGER;
 				break;
 			case 2:
 				if (!field->mIsUnsigned) // Don't use ternary because that messes up type-casting.
 					aResultToken.value_int64 = *((short *)((UINT_PTR)target + field->mOffset));
 				else
 					aResultToken.value_int64 = *((unsigned short *)((UINT_PTR)target + field->mOffset));
+				aResultToken.symbol = SYM_INTEGER;
 				break;
 			default: // size 1
 				if (!field->mIsUnsigned) // Don't use ternary because that messes up type-casting.
 					aResultToken.value_int64 = *((char *)((UINT_PTR)target + field->mOffset));
 				else
 					aResultToken.value_int64 = *((unsigned char *)((UINT_PTR)target + field->mOffset));
+				aResultToken.symbol = SYM_INTEGER;
 			}
-			aResultToken.symbol = SYM_INTEGER;
 		}
 		if (deletefield) // we created the field from a structure
 			delete field;

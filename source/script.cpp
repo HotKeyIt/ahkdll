@@ -230,6 +230,7 @@ static TextMem::Buffer includedtextbuf; //HotKeyIt for dll to read script from m
 // using things such as static data members or static local variables.
 
 
+
 Script::Script()
 	: mFirstLine(NULL), mLastLine(NULL), mCurrLine(NULL), mPlaceholderLabel(NULL), mFirstStaticLine(NULL), mLastStaticLine(NULL)
 #ifndef MINIDLL
@@ -399,7 +400,9 @@ Script::~Script() // Destructor.
 	DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
 	OleUninitialize();
 }
-#ifdef _USRDLL 
+
+
+#ifdef _USRDLL
 void Script::Destroy()
 // HotKeyIt H1 destroy script for ahkTerminate and ahkReload and ExitApp for dll
 {
@@ -421,8 +424,7 @@ void Script::Destroy()
 	}
 	// L31: Release objects stored in variables, where possible.
 	int v, i;
-	g_script.mIsReadyToExecute = false;
-	for (v = 0; v < mVarCount; ++v)
+	for (v = 0; v < mVarCount; v++)
 	{
 		// H19 fix not to delete Clipboard wars
 		if (mVar[v]->mType == VAR_BUILTIN || mVar[v]->mType == VAR_CLIPBOARD ||mVar[v]->mType == VAR_CLIPBOARDALL)
@@ -431,13 +433,21 @@ void Script::Destroy()
 		//if (!_tcsicmp(mVar[v]->mName,_T("Args")))  // if we restart args are filled again anyway ???
 		//	continue;
 		mVar[v]->Free();
+		//free(mVar[v]->mName);
+		delete mVar[v];
 	}
-	for (v = 0; v < mLazyVarCount; ++v)
+	free(mVar);
+	mVar = NULL;
+	for (v = 0; v < mLazyVarCount; v++)
 	{
 		mLazyVar[v]->ConvertToNonAliasIfNecessary();
+		//free(mLazyVar[v]->mName);
 		mLazyVar[v]->Free();
+		delete mLazyVar[v];
 	}
-	for (i = 0; i < mFuncCount; ++i)
+	free(mLazyVar);
+	mLazyVar = NULL;
+	for (i = 0; i < mFuncCount; i++)
 	{
 		Func &f = *mFunc[i];
 		if (f.mIsBuiltIn)
@@ -446,46 +456,78 @@ void Script::Destroy()
 		// calls and all tokens in the 'stack' of each currently executing expression, currently
 		// only static and global variables are released.  It seems best for consistency to also
 		// avoid releasing top-level non-static local variables (i.e. which aren't in var backups).
-		for (v = 0; v < f.mVarCount; ++v)
+		for (v = 0; v < f.mVarCount; v++)
 		{
 			f.mVar[v]->ConvertToNonAliasIfNecessary();
 			f.mVar[v]->Free();
+			//free(f.mVar[v]->mName);
+			delete mVar[v];
 		}
-		for (v = 0; v < f.mStaticVarCount; ++v)
+		for (v = 0; v < f.mStaticVarCount; v++)
 		{
 			f.mStaticVar[v]->ConvertToNonAliasIfNecessary();
 			f.mStaticVar[v]->Free();
+			//free(f.mStaticVar[v]->mName);
+			delete f.mStaticVar[v];
 		}
-		for (v = 0; v < f.mLazyVarCount; ++v)
+		for (v = 0; v < f.mLazyVarCount; v++)
 		{
 			f.mLazyVar[v]->ConvertToNonAliasIfNecessary();
 			f.mLazyVar[v]->Free();
+			//free(f.mLazyVar[v]->mName);
+			delete f.mLazyVar[v];
 		}
-		for (v = 0; v < f.mStaticLazyVarCount; ++v)
+		for (v = 0; v < f.mStaticLazyVarCount; v++)
 		{
 			f.mStaticLazyVar[v]->ConvertToNonAliasIfNecessary();
 			f.mStaticLazyVar[v]->Free();
+			//free(f.mStaticLazyVar[v]->mName);
+			delete f.mStaticLazyVar[v];
 		}
+		//if (mFunc[i]->mParamCount)
+		//	free(mFunc[i]->mParam);
+		//free(mFunc[i]->mName);
+		if (mFunc[i]->mLazyVarCount)
+			free(mFunc[i]->mLazyVar);
+		if (mFunc[i]->mVarCount)
+			free(mFunc[i]->mVar);
+		if (mFunc[i]->mStaticVar)
+			free(mFunc[i]->mStaticVar);
+		if (mFunc[i]->mStaticLazyVarCount)
+			free(mFunc[i]->mStaticLazyVar);
 		delete mFunc[i];
 	}
 	// Destroy Labels
-	for (Label *label = mFirstLabel; label != NULL;label = label->mNextLabel)
+	for (Label *label = mFirstLabel,*nextLabel = NULL; label;)
 	{
-		Label *nextLabel = label->mNextLabel;
-		label->mJumpToLine = NULL;
-		label->mName = _T("");
-		label->mPrevLabel = NULL;
+		nextLabel = label->mNextLabel;
+		//label->mJumpToLine = NULL;
+		//label->mPrevLabel = NULL;
+		//free(label->mName);
+		delete label;
+		label = nextLabel;
 	}
-	
-	for (Line *line = g_script.mLastLine; line;)
+	// Destroy Groups
+	for (WinGroup *group = mFirstGroup, *nextGroup = NULL; group;)
 	{
-		Line *nextLine = line->mPrevLine;
+		nextGroup = group->mNextGroup;
+		//free(group->mName);
+		delete group;
+		group = nextGroup;
+	}
+	for (Line *line = g_script.mLastLine, *nextLine = NULL; line;)
+	{
+		nextLine = line->mPrevLine;
+		line->FreeDerefBufIfLarge();
 		delete line;
 		line = nextLine;
 	}
-	
 
+	mVarCount = 0;
+	mVarCountMax = 0;
+	mLazyVarCount = 0;
 	mFuncCount = 0; 
+	mFuncCountMax = 0;
 	mFirstLabel = NULL ; 
 	mLastLabel = NULL ;
 	mFirstStaticLine = 0; 
@@ -494,11 +536,11 @@ void Script::Destroy()
 	mLastLine = NULL ;
 	mCurrLine = NULL ;
 	mCurrFileIndex = 0 ;
+	mCombinedLineNumber = 0;
 #ifndef MINIDLL
 	mFirstMenu = NULL;
 #endif
 	mFirstTimer = NULL;
-	mIsReadyToExecute = false;
 	mOnExitLabel = NULL;
 	mOnClipboardChangeLabel = NULL;
 	mTempFunc = NULL;
@@ -511,16 +553,100 @@ void Script::Destroy()
 	g_MsgMonitorCount = 0;
 	g_MsgMonitor = NULL;
 
+
 	g_nMessageBoxes = 0;
 #ifndef MINIDLL
 	g_nInputBoxes = 0;
 	g_nFileDialogs = 0;
 	g_nFolderDialogs = 0;
+	g_NoTrayIcon = false;
+#endif
+	
+	g_MainTimerExists = false;
+	g_AutoExecTimerExists = false;
+	#ifndef MINIDLL
+	g_InputTimerExists = false;
+#endif
+	g_DerefTimerExists = false;
+	g_SoundWasPlayed = false;
+#ifndef MINIDLL
+	g_IsSuspended = false;  // Make this separate from g_AllowInterruption since that is frequently turned off & on.
+#endif
+	g_DeferMessagesForUnderlyingPump = false;
+	g_nLayersNeedingTimer = 0;
+	g_nThreads = 0;
+	g_nPausedThreads = 0;
+	g_MaxThreadsTotal = MAX_THREADS_DEFAULT;
+#ifndef MINIDLL
+	g_MaxHistoryKeys = 40;
+	g_MaxThreadsPerHotkey = 1;
+	g_MaxHotkeysPerInterval = 70; // Increased to 70 because 60 was still causing the warning dialog for repeating keys sometimes.  Increased from 50 to 60 for v1.0.31.02 since 50 would be triggered by keyboard auto-repeat when it is set to its fastest.
+	g_HotkeyThrottleInterval = 2000; // Milliseconds.
+#endif
+	g_MaxThreadsBuffer = false;  // This feature usually does more harm than good, so it defaults to OFF.
+	g_InputLevel = 0;
+#ifndef MINIDLL
+	g_HotCriterion = HOT_NO_CRITERION;
+	g_HotWinTitle = _T(""); // In spite of the above being the primary indicator,
+	g_HotWinText = _T("");  // these are initialized for maintainability.
+	g_FirstHotCriterion = NULL;
+	g_LastHotCriterion = NULL;
+	g_HotExprIndex = -1; // The index of the Line containing the expression defined by the most recent #if (expression) directive.
+	g_HotExprLines = NULL; // Array of pointers to expression lines, allocated when needed.
+	g_HotExprLineCount = 0; // Number of expression lines currently present.
+	g_HotExprLineCountMax = 0; // Current capacity of g_HotExprLines.
+	g_HotExprTimeout = 1000; // Timeout for #if (expression) evaluation, in milliseconds.
+	g_HotExprLFW = NULL; // Last Found Window of last #if expression.
+	g_MenuIsVisible = MENU_TYPE_NONE;
+	g_guiCount = 0;
+	g_guiCountMax = 0;
+#ifndef MINIDLL
+	g_HSPriority = 0;  // default priority is always 0
+	g_HSKeyDelay = 0;  // Fast sends are much nicer for auto-replace and auto-backspace.
+	g_HSSendMode = SM_INPUT; // v1.0.43: New default for more reliable hotstrings.
+	g_HSCaseSensitive = false;
+	g_HSConformToCase = true;
+	g_HSDoBackspace = true;
+	g_HSOmitEndChar = false;
+	g_HSSendRaw = false;
+	g_HSEndCharRequired = true;
+	g_HSDetectWhenInsideWord = false;
+	g_HSDoReset = false;
+	g_HSResetUponMouseClick = true;
+	_tcscpy(g_EndChars,_T("-()[]{}:;'\"/\\,.?!\n \t"));  // Hotstring default end chars, including a space.
+#endif
+	g_ErrorLevel = NULL; // Allows us (in addition to the user) to set this var to indicate success/failure.
+	
+#ifndef MINIDLL
+	g_ForceKeybdHook = false;
+#endif
+	g_ForceNumLock = NEUTRAL;
+	g_ForceCapsLock = NEUTRAL;
+	g_ForceScrollLock = NEUTRAL;
+
+	g_BlockInputMode = TOGGLE_DEFAULT;
+	g_BlockInput = false;
+	g_BlockMouseMove = false;
+#endif
+
+#ifndef MINIDLL
+	g_KeyHistoryNext = 0;
+
+#ifdef ENABLE_KEY_HISTORY_FILE
+	g_KeyHistoryToFile = false;
+#endif
+
+	g_HistoryTickNow = 0;
+	g_HistoryTickPrev = GetTickCount();  // So that the first logged key doesn't have a huge elapsed time.
+	g_HistoryHwndPrev = NULL;
 #endif
 
 	for(i=1;Line::sSourceFileCount>i;i++) // first include file must not be deleted
 		free(Line::sSourceFile[i]);
 	Line::sSourceFileCount = 0;
+	//Line::sMaxSourceFiles = 0;
+	//SimpleHeap::Delete(Line::sSourceFile);
+	//Line::sSourceFile = 0;
 	// free(Line::sSourceFile);
 	// We call DestroyWindow() because MainWindowProc() has left that up to us.
 	// DestroyWindow() will cause MainWindowProc() to immediately receive and process the
@@ -535,17 +661,19 @@ void Script::Destroy()
 		DestroyWindow(g_hWnd);
 	}
 #ifndef MINIDLL
-	AddRemoveHooks(0);
+	// AddRemoveHooks(0); // done in ~Script
 	Hotkey::AllDestruct();
 	Hotstring::AllDestruct();
 #endif
-	Script::~Script();
 
     global_clear_state(*g);
 	//free(g_Debugger.mStack.mBottom);
 #ifndef MINIDLL
 	free(g_input.match);
 #endif
+	Script::~Script();
+	SimpleHeap::DeleteAll();
+	mIsReadyToExecute = false;
 }
 #endif
 
@@ -657,8 +785,6 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 	if (   !(mFileSpec = SimpleHeap::Malloc(buf))   )  // The full spec is stored for convenience, and it's relied upon by mIncludeLibraryFunctionsThenExit.
 		return FAIL;  // It already displayed the error for us.
 	filename_marker[-1] = '\0'; // Terminate buf in this position to divide the string.
-#ifndef _USRDLL
-#endif
 	if (   !(mFileDir = SimpleHeap::Malloc(buf))   )
 		return FAIL;  // It already displayed the error for us.
 	if (   !(mFileName = SimpleHeap::Malloc(filename_marker))   )
@@ -1864,7 +1990,8 @@ ResultType Script::LoadIncludedText(LPTSTR aFileSpec)
 		Line::sSourceFile[source_file_index] = aFileSpec;
 	else
 	{
-		Line::sSourceFile[source_file_index] = (LPTSTR)malloc((_tcslen(aFileSpec)+1)* sizeof(TCHAR));
+		if (!(Line::sSourceFile[source_file_index] = tmalloc(_tcslen(aFileSpec)+1)))
+			return ScriptError(ERR_OUTOFMEM);
 		_tcscpy(Line::sSourceFile[source_file_index],aFileSpec);
 	}
 	// <buf> should be no larger than LINE_SIZE because some later functions rely upon that:
@@ -1885,7 +2012,7 @@ ResultType Script::LoadIncludedText(LPTSTR aFileSpec)
 
 	
 	includedtextbuf.mBuffer = aScript;
-	includedtextbuf.mLength = (DWORD)(_tcslen(aFileSpec) * sizeof(TCHAR));
+	includedtextbuf.mLength = (DWORD)(_tcslen(aScript) * sizeof(TCHAR));
 	includedtextbuf.mOwned = false;
 	TextMem tmem, *fp = &tmem;
 	// NOTE: Ahk2Exe strips off the UTF-8 BOM.
@@ -3266,7 +3393,12 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		// This is done only after the file has been successfully opened in case aIgnoreLoadFailure==true:
 		if (source_file_index > 0)
 		{
-			Line::sSourceFile[source_file_index] = (LPTSTR)malloc((_tcslen(full_path)+1)* sizeof(TCHAR)); //SimpleHeap::Malloc(full_path);
+			Line::sSourceFile[source_file_index] = tmalloc(_tcslen(full_path)+1); //SimpleHeap::Malloc(full_path);
+			if (Line::sSourceFile[source_file_index] == 0)
+			{
+				ScriptError(ERR_OUTOFMEM);
+				return FAIL;
+			}
 			_tcscpy(Line::sSourceFile[source_file_index],full_path);
 		}
 	} 
@@ -5439,7 +5571,7 @@ ResultType Script::AddLabel(LPTSTR aLabelName, bool aAllowDupe)
 
 
 ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
-	, LPTSTR aActionName, LPTSTR aEndMarker, LPTSTR aLiteralMap, size_t aLiteralMapLength)
+	, LPTSTR aLiteralMap, size_t aLiteralMapLength)
 // Returns OK or FAIL.
 // aLineText needs to be a string whose contents are modifiable (though the string won't be made any
 // longer than it is now, so it doesn't have to be of size LINE_SIZE). This helps performance by
@@ -5451,12 +5583,7 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 #endif
 
 	TCHAR action_name[MAX_VAR_NAME_LENGTH + 1], *end_marker;
-	if (aActionName) // i.e. this function was called recursively with explicit values for the optional params.
-	{
-		_tcscpy(action_name, aActionName);
-		end_marker = aEndMarker;
-	}
-	else if (aActionType == ACT_EXPRESSION)
+	if (aActionType == ACT_EXPRESSION)
 	{
 		*action_name = '\0';
 		end_marker = NULL; // Indicate that there is no action to mark the end of.
@@ -6016,9 +6143,9 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 	if (aLiteralMap)
 	{
 		// Since literal map is NOT a string, just an array of char values, be sure to
-		// use memcpy() vs. _tcscpy() on it.  Also, caller's aLiteralMap starts at aEndMarker,
+		// use memcpy() vs. _tcscpy() on it.  Also, caller's aLiteralMap starts at aLineText,
 		// so adjust it so that it starts at the newly found position of action_args instead:
-		int map_offset = (int)(action_args - end_marker);  // end_marker is known not to be NULL when aLiteralMap is non-NULL.
+		int map_offset = (int)(action_args - aLineText);
 		int map_length = (int)(aLiteralMapLength - map_offset);
 		if (map_length > 0)
 			tmemcpy(literal_map, aLiteralMap + map_offset, map_length);
@@ -6306,7 +6433,7 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 		// been determined.  Unlike the "legacy" IF commands, we want to support
 		// assignments and expressions, not just named commands, so we let the
 		// recursive call figure it out rather than calling ConvertActionType():
-		return ParseAndAddLine(subaction_start, ACT_INVALID, NULL, NULL
+		return ParseAndAddLine(subaction_start, ACT_INVALID
 			, literal_map + (subaction_start - action_args) // Pass only the relevant substring of literal_map.
 			, _tcslen(subaction_start));
 	}
@@ -8267,6 +8394,7 @@ ResultType Script::DefineClassVars(LPTSTR aBuf, bool aStatic)
 			g->CurrentFunc = init_func; // g->CurrentFunc should be NULL prior to this.
 			mLastLine = block_end->mPrevLine; // i.e. insert before block_end.
 			mLastLine->mNextLine = NULL; // For maintainability; AddLine() should overwrite it regardless.
+			mCurrLine = NULL; // Fix for v1.1.09.02: Leaving this non-NULL at best causes error messages to show irrelevant vicinity lines, and at worst causes a crash because the linked list is in an inconsistent state.
 		}
 
 		if (!ParseAndAddLine(buf, ACT_EXPRESSION))
@@ -8377,7 +8505,11 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	if (!sLib[0].path) // Allocate & discover paths only upon first use because many scripts won't use anything from the library. This saves a bit of memory and performance.
 	{
 		for (i = 0; i < FUNC_LIB_COUNT; ++i)
+#ifdef _USRDLL
+			if (   !(sLib[i].path = tmalloc(MAX_PATH))   ) // When dll script is restarted, SimpleHeap is deleted and we don't want to delete static memberst
+#else
 			if (   !(sLib[i].path = (LPTSTR) SimpleHeap::Malloc(MAX_PATH * sizeof(TCHAR)))   ) // Need MAX_PATH for to allow room for appending each candidate file/function name.
+#endif
 				return NULL; // Due to rarity, simply pass the failure back to caller.
 
 		FuncLibrary *this_lib;
@@ -8616,8 +8748,8 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	// Now a resouce was found and it can be loaded
 	HGLOBAL hResData;
 	TextMem::Buffer textbuf(NULL, 0, false);
-	if ( !( (textbuf.mLength = SizeofResource(g_hInstance, lib_hResource))
-		&& (hResData = LoadResource(g_hInstance, lib_hResource))
+	if ( !( (textbuf.mLength = SizeofResource(lib_hResourceMain ? NULL : g_hInstance, lib_hResource))
+		&& (hResData = LoadResource(lib_hResourceMain ? NULL : g_hInstance, lib_hResource))
 		&& (textbuf.mBuffer = LockResource(hResData)) ) )
 	{
 		// aErrorWasShown = true; // Do not display errors here
@@ -8829,6 +8961,7 @@ Func *Script::AddFunc(LPCTSTR aFuncName, size_t aFuncNameLength, bool aIsBuiltIn
 			ScriptError(ERR_OUTOFMEM);
 			return NULL;
 		}
+		the_new_func->mClass = aClassObject;
 		// Also add it to the script's list of functions, to support #Warn LocalSameAsGlobal
 		// and automatic cleanup of objects in static vars on program exit.
 	}
@@ -14287,7 +14420,9 @@ ResultType Line::Perform()
 				//		x := normal_var
 				if (  !(output_var = ResolveVarOfArg(0))  )
 					return FAIL;
-				return output_var->Assign(*mArg[1].postfix);
+				// HotKeyIt override routine for manually added BuildIn variables
+				if (!(mArg[1].postfix->symbol == SYM_VAR && (mArg[1].postfix->var->mType == VAR_BUILTIN)))
+					return output_var->Assign(*mArg[1].postfix);
 			}
 
 			if (!ExpandArgs()) // This also resolves OUTPUT_VAR.
@@ -14973,6 +15108,10 @@ ResultType Line::Perform()
 		//	// not have any effect.  The below only takes effect if MsgBox()'s call to
 		//	// MessageBox() failed in some unexpected way:
 		//	LineError("The MsgBox could not be displayed.");
+		// v1.1.09.02: If the MsgBox failed due to invalid options, it seems better to display
+		// an error dialog than to silently exit the thread:
+		if (!result && GetLastError() == ERROR_INVALID_MSGBOX_STYLE)
+			return LineError(ERR_PARAM1_INVALID, FAIL, ARG1);
 		return result ? OK : FAIL;
 	}
 #ifndef MINIDLL
@@ -15521,8 +15660,17 @@ BIF_DECL(BIF_PerformAction)
 	bool in_try = g->InTryBlock;
 	g->InTryBlock = true;
 
+	FileIndexType line_file = 0;
+	LineNumberType line_num = 0;
+	if (g_script.mCurrLine)
+	{
+		// These are used by CreateRuntimeException().
+		line_file = g_script.mCurrLine->mFileIndex;
+		line_num = g_script.mCurrLine->mLineNumber;
+	}
+
 	// Construct a Line containing the required context for ExpandArgs() and Perform().
-	Line line(0, 0, act, arg, aParamCount);
+	Line line(line_file, line_num, act, arg, aParamCount);
 
 	// Expand args BEFORE RESETTING ERRORLEVEL BELOW.
 	if (!line.ExpandArgs())

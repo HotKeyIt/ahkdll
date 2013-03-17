@@ -133,9 +133,10 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 		// But all are checked since that operation is just as fast:
 		if (IS_OPERAND(this_token.symbol)) // If it's an operand, just push it onto stack for use by an operator in a future iteration.
 		{
-			if (this_token.symbol == SYM_DYNAMIC) // CONVERTED HERE/EARLY TO SOMETHING *OTHER* THAN SYM_DYNAMIC so that no later stages need any handling for them as operands. SYM_DYNAMIC is quite similar to SYM_FUNC/BIF in this respect.
+			// HotKeyIt added a way to override default behaviour for Manually added BuildIn Variable
+			if (this_token.symbol == SYM_DYNAMIC || (this_token.symbol == SYM_VAR && this_token.var->mType == VAR_BUILTIN)) // CONVERTED HERE/EARLY TO SOMETHING *OTHER* THAN SYM_DYNAMIC so that no later stages need any handling for them as operands. SYM_DYNAMIC is quite similar to SYM_FUNC/BIF in this respect.
 			{
-				if (SYM_DYNAMIC_IS_DOUBLE_DEREF(this_token)) // Double-deref such as Array%i%.
+				if (SYM_DYNAMIC_IS_DOUBLE_DEREF(this_token) && this_token.symbol != SYM_VAR) // Double-deref such as Array%i%.
 				{
 					// Start off by looking for the first deref.
 					deref = (DerefType *)this_token.var; // MUST BE DONE PRIOR TO OVERWRITING MARKER/UNION BELOW.
@@ -912,7 +913,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 			ExprTokenType &left = *STACK_POP; // i.e. the right operand always comes off the stack before the left.
 			if (!IS_OPERAND(left.symbol)) // Haven't found a way to produce this situation yet, but safe to assume it's possible.
 				goto abnormal_end;
-
+			
 			if (IS_ASSIGNMENT_EXCEPT_POST_AND_PRE(this_token.symbol)) // v1.0.46: Added support for various assignment operators.
 			{
 				if (left.symbol != SYM_VAR)
@@ -1052,6 +1053,16 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 					if (temp_var)
 					{
 						result = temp_var->Contents(FALSE); // No need to update the contents because we just want to know if the current address of mContents matches some other addresses.
+						if (result == Var::sEmptyString) // Added in v1.1.09.03.
+						{
+							// One of the following is true:
+							//   1) temp_var has zero capacity and is empty.
+							//   2) temp_var has zero capacity and contains an unflushed binary number.
+							// In the first case, AppendIfRoom() will always fail, so we want to skip it and use
+							// the "no overlap" optimization below. In the second case, calling AppendIfRoom()
+							// would produce the wrong result; e.g. (x := 0+1, x := y 0) would produce "10".
+							result = NULL;
+						}
 						if (result == left_string) // This is something like x := x . y, so simplify it to x .= y
 						{
 							// MUST DO THE ABOVE CHECK because the next section further below might free the
@@ -2051,7 +2062,14 @@ ResultType Line::ExpandArgs(ExprTokenType *aResultToken, VarSizeType aSpaceNeede
 			}
 		} // for each arg.
 
-		// IT'S NOT SAFE to do the following until the above loop FULLY completes because any calls made above to
+		// See "Update #3" comment above.  This must be done separately to the loop below since Contents()
+		// may cause a warning dialog, which in turn may cause a new thread to launch, thus potentially
+		// corrupting sArgDeref/sArgVar.
+		for (i = 0; i < mArgc; ++i)
+			if (arg_deref[i] == NULL)
+				arg_deref[i] = arg_var[i]->Contents();
+
+		// IT'S NOT SAFE to do the following until the above loops FULLY complete because any calls made above to
 		// ExpandExpression() might call functions, which in turn might result in a recursive call to ExpandArgs(),
 		// which in turn might change the values in the static arrays sArgDeref and sArgVar.
 		// Also, only when the loop ends normally is the following needed, since otherwise it's a failure condition.
@@ -2059,7 +2077,7 @@ ResultType Line::ExpandArgs(ExprTokenType *aResultToken, VarSizeType aSpaceNeede
 		// safe to set the args of this command for use by our caller, to whom we're about to return.
 		for (i = 0; i < mArgc; ++i) // Copying actual/used elements is probably faster than using memcpy to copy both entire arrays.
 		{
-			sArgDeref[i] = arg_deref[i] ? arg_deref[i] : arg_var[i]->Contents(); // See "Update #3" comment above.
+			sArgDeref[i] = arg_deref[i];
 			sArgVar[i] = arg_var[i];
 		}
 	} // mArgc > 0

@@ -34,6 +34,7 @@ DWORD g_MainThreadID = GetCurrentThreadId();
 DWORD g_HookThreadID; // Not initialized by design because 0 itself might be a valid thread ID.
 ATOM g_ClassRegistered = 0;
 CRITICAL_SECTION g_CriticalRegExCache;
+CRITICAL_SECTION g_CriticalHeapBlocks;
 
 UINT g_DefaultScriptCodepage = CP_ACP;
 

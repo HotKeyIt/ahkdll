@@ -33,10 +33,12 @@ BIF_DECL(BIF_FindLabel) // HotKeyIt Added in 1.1.02.00
 
 BIF_DECL(BIF_Getvar)
 {
-	int i = 0;
-	if (aParam[0]->symbol == SYM_VAR)
-		i = (int)aParam[0]->var;
-	aResultToken.value_int64 = i;
+	if (aParam[0]->symbol == SYM_STRING && !(TokenToInt64(*aParam[0])))
+		aResultToken.value_int64 = (__int64)g_script.FindOrAddVar(aParam[0]->marker);
+	else if (aParam[0]->symbol == SYM_VAR)
+		aResultToken.value_int64 = (__int64)aParam[0]->var;
+	else
+		aResultToken.value_int64 = 0;
 }
 
 

@@ -1837,12 +1837,12 @@ void KeyEvent(KeyEventTypes aEventType, vk_type aVK, sc_type aSC, HWND aTargetWi
 						target_layout_has_altgr = LayoutHasAltGr(target_keybd_layout, IsKeyDownAsync(control_vk) ? CONDITION_FALSE : CONDITION_TRUE);
 				}
 			}
-#ifndef MINIDLL
 			// The following is done to avoid an extraneous artificial {LCtrl Up} later on,
 			// since the keyboard driver should insert one in response to this {RAlt Up}:
 			if (target_layout_has_altgr && aSC == SC_RALT)
 				sEventModifiersLR &= ~MOD_LCONTROL;
 
+#ifndef MINIDLL
 			if (do_key_history)
 				UpdateKeyEventHistory(true, aVK, aSC);
 #endif
@@ -2784,7 +2784,7 @@ void SendEventArray(int &aFinalKeyDelay, modLR_type aModsDuringSend)
 		for (unsigned int i = 0;i < sEventCount;i++)
 		{
 			// wVK and wScan are 0 and dwExtraInfo holds time to sleep
-			if (sEventSI[i].ki.wVk == 0 && sEventSI[i].ki.wScan == 0)
+			if (sEventSI[i].type == INPUT_KEYBOARD && sEventSI[i].ki.wVk == 0 && sEventSI[i].ki.wScan == 0)
 			{
 				sMySendInput(i - aLastEventCount, &sEventSI[aLastEventCount], sizeof(INPUT)); // Must call dynamically-resolved version for Win95/NT compatibility.
 				SLEEP_WITHOUT_INTERRUPTION((int)sEventSI[i].ki.dwExtraInfo);

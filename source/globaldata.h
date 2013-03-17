@@ -30,6 +30,7 @@ extern DWORD g_MainThreadID;
 extern DWORD g_HookThreadID;
 extern ATOM g_ClassRegistered;
 extern CRITICAL_SECTION g_CriticalRegExCache;
+extern CRITICAL_SECTION g_CriticalHeapBlocks;
 
 extern UINT g_DefaultScriptCodepage;
 

@@ -412,6 +412,7 @@ EXPORT BOOL ahkExec(LPTSTR script)
 	Line *prevLine = g_script.mLastLine->mPrevLine;
 	for(; prevLine != oldLastLine; prevLine = prevLine->mPrevLine)
 	{
+		prevLine->mNextLine->FreeDerefBufIfLarge();
 		delete prevLine->mNextLine;
 	}
 	free(Line::sSourceFile[Line::sSourceFileCount - 1]);

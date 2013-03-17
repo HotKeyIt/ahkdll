@@ -2324,10 +2324,14 @@ void Hotstring::AllDestruct()
 {
 	if (sHotstringCount < 1) // At least one part below relies on this check.
 		return;
-
+	
 	UINT u;
 	for (mAtLeastOneEnabled = false, u = 0; u < sHotstringCount; ++u)
+	{
 		delete shs[u];
+	}
+	free(shs);
+	shs = NULL;
 	sHotstringCount = 0;
 	sHotstringCountMax = 0;
 }

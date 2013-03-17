@@ -1844,6 +1844,7 @@ public:
 	int mParamCount; // The number of items in the above array.  This is also the function's maximum number of params.
 	int mMinParams;  // The number of mandatory parameters (populated for both UDFs and built-in's).
 	Label *mFirstLabel, *mLastLabel; // Linked list of private labels.
+	Object *mClass; // The class which this Func was defined in, if applicable.
 	Var **mGlobalVar; // Array of global declarations
 	Var **mVar, **mLazyVar; // Array of pointers-to-variable, allocated upon first use and later expanded as needed.
 	Var **mStaticVar, **mStaticLazyVar;
@@ -1946,6 +1947,7 @@ public:
 		, mBIF(NULL)
 		, mParam(NULL), mParamCount(0), mMinParams(0)
 		, mFirstLabel(NULL), mLastLabel(NULL)
+		, mClass(NULL)
 		, mVar(NULL), mVarCount(0), mVarCountMax(0), mLazyVar(NULL), mLazyVarCount(0)
 		, mStaticVar(NULL), mStaticVarCount(0), mStaticVarCountMax(0), mStaticLazyVar(NULL), mStaticLazyVarCount(0)
 		, mGlobalVar(NULL), mGlobalVarCount(0)
@@ -2376,6 +2378,7 @@ public:
 	
 	static GuiType *FindGui(LPTSTR aName);
 	static GuiType *FindGui(HWND aHwnd);
+	static GuiType *FindGuiParent(HWND aHwnd);
 
 	static GuiType *ValidGui(GuiType *&aGuiRef); // Updates aGuiRef if it points to a destroyed Gui.
 
@@ -2391,7 +2394,7 @@ public:
 			if (aHwnd = GetParent(aHwnd)) // Note that a ComboBox's drop-list (class ComboLBox) is apparently a direct child of the desktop, so this won't help us in that case.
 				index = GUI_HWND_TO_INDEX(aHwnd); // Retrieves a small negative on failure, which will be out of bounds when converted to unsigned.
 		}
-		if (index < mControlCount) // A match was found.
+		if (index < mControlCount && mControl[index].hwnd == aHwnd) // A match was found.  Fix for v1.1.09.03: Confirm it is actually one of our controls.
 			return aRetrieveIndexInstead ? (GuiControlType *)(size_t)index : mControl + index;
 		else // No match, so indicate failure.
 			return aRetrieveIndexInstead ? (GuiControlType *)NO_CONTROL_INDEX : NULL;
@@ -2488,7 +2491,6 @@ public:
 	size_t GetLine(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSection, TextStream *ts);
 	ResultType IsDirective(LPTSTR aBuf);
 	ResultType ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType = ACT_INVALID
-		, LPTSTR aActionName = NULL, LPTSTR aEndMarker = NULL
 		, LPTSTR aLiteralMap = NULL, size_t aLiteralMapLength = 0);
 	ResultType ParseDerefs(LPTSTR aArgText, LPTSTR aArgMap, DerefType *aDeref, int &aDerefCount);
 	LPTSTR ParseActionType(LPTSTR aBufTarget, LPTSTR aBufSource, bool aDisplayErrors);
@@ -2694,7 +2696,9 @@ public:
 	// leak will result).
 };
 
-
+#ifdef _USRDLL
+class MallocHeap; // forward declaration for export.cpp
+#endif
 
 ////////////////////////
 // BUILT-IN VARIABLES //

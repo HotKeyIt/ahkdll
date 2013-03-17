@@ -246,7 +246,7 @@ END
 
 
 #ifdef _DEBUG
-AHK RCDATA "Test\\Test.ahk"
+//AHK RCDATA "test\\test.ahk"
 #endif
 
 // Windows API definitions

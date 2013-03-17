@@ -64,7 +64,7 @@ typedef struct {
 
 typedef BOOL (WINAPI *DllEntryProc)(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved);
 
-typedef HANDLE (WINAPI * MyCreateActCtx)(PACTCTXA);
+typedef HANDLE (WINAPI * MyCreateActCtx)(PCACTCTXA);
 typedef HANDLE (WINAPI * MyDeactivateActCtx)(DWORD,ULONG_PTR);
 typedef BOOL (WINAPI * MyActivateActCtx)(HANDLE,ULONG_PTR*);
 HMODULE libkernel32 = LoadLibrary(_T("kernel32.dll"));

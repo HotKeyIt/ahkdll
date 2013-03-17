@@ -82,10 +82,13 @@ switch(fwdReason)
 	 }
  case DLL_PROCESS_DETACH:
 	 {
-		 int lpExitCode = 0;
-		 GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
-		 if ( lpExitCode == 259 )
-			CloseHandle( hThread );
+		 if (hThread)
+		 {
+			 int lpExitCode = 0;
+			 GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
+			 if ( lpExitCode == 259 )
+				CloseHandle( hThread );
+		 }
 #ifndef MINIDLL
 		 // Unregister window class if it was registered in Script::CreateWindows
 		 if (g_ClassRegistered)
@@ -115,11 +118,13 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 #endif
 
 	InitializeCriticalSection(&g_CriticalRegExCache); // v1.0.45.04: Must be done early so that it's unconditional, so that DeleteCriticalSection() in the script destructor can also be unconditional (deleting when never initialized can crash, at least on Win 9x).
+	InitializeCriticalSection(&g_CriticalHeapBlocks); // used to block memory freeing in case of timeout in ahkTerminate so no corruption happens when both threads try to free Heap.
 
 	if (!GetCurrentDirectory(_countof(g_WorkingDir), g_WorkingDir)) // Needed for the FileSelectFile() workaround.
 		*g_WorkingDir = '\0';
 	// Unlike the below, the above must not be Malloc'd because the contents can later change to something
 	// as large as MAX_PATH by means of the SetWorkingDir command.
+	
 	g_WorkingDirOrig = SimpleHeap::Malloc(g_WorkingDir); // Needed by the Reload command.
 
 	// Set defaults, to be overridden by command line args we receive:
@@ -296,7 +301,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	setvbuf(stdout, NULL, _IONBF, 0); // Must be done PRIOR to writing anything to stdout.
 
 #ifndef MINIDLL
-	if (g_MaxHistoryKeys && (g_KeyHistory = (KeyHistoryItem *)malloc(g_MaxHistoryKeys * sizeof(KeyHistoryItem))))
+	if (g_MaxHistoryKeys && (g_KeyHistory = (KeyHistoryItem *)realloc(g_KeyHistory,g_MaxHistoryKeys * sizeof(KeyHistoryItem))))
 		ZeroMemory(g_KeyHistory, g_MaxHistoryKeys * sizeof(KeyHistoryItem)); // Must be zeroed.
 	//else leave it NULL as it was initialized in globaldata.
 #endif
@@ -326,7 +331,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	// Initiate debug session now if applicable.
 	if (!g_DebuggerHost.IsEmpty() && g_Debugger.Connect(g_DebuggerHost, g_DebuggerPort) == DEBUGGER_E_OK)
 	{
-		g_Debugger.ProcessCommands();
+		g_Debugger.Break();
 	}
 #endif
 
@@ -379,25 +384,24 @@ EXPORT BOOL ahkTerminate(int timeout = 0)
 	DWORD lpExitCode = 0;
 	if (hThread == 0)
 		return 0;
-	if (timeout < 1)
-		timeout = 500;
+	if (timeout == 0)
+		timeout = 10000;
 	g_AllowInterruption = FALSE;
 	GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
-	for (int i = 0; g_script.mIsReadyToExecute && (lpExitCode == 0 || lpExitCode == 259) && i < (timeout/100); i++)
+	int tick = GetTickCount();
+	for (int i = 0; hThread && g_script.mIsReadyToExecute && (lpExitCode == 0 || lpExitCode == 259) && (timeout < 0 || i < timeout/200); i++)
 	{
-		SendMessageTimeout(g_hWnd, AHK_EXIT_BY_SINGLEINSTANCE, EARLY_EXIT, 0,0,(timeout/10),0);
-		Sleep((timeout/10));
-		GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
+		SendMessageTimeout(g_hWnd, AHK_EXIT_BY_SINGLEINSTANCE, EARLY_EXIT, 0,0,100,0);
+		Sleep(100);
 	}
-	if (lpExitCode != 0 && lpExitCode != 259)
+	int end = GetTickCount() - tick;
+	if (g_script.mIsReadyToExecute || hThread)
 	{
-		g_AllowInterruption = TRUE;
-		return 0;
+		g_script.Destroy();
+		TerminateThread(hThread, (DWORD)EARLY_EXIT);
+		CloseHandle(hThread);
+		hThread = NULL;
 	}
-	g_script.Destroy();
-	TerminateThread(hThread, (DWORD)EARLY_EXIT);
-	CloseHandle(hThread);
-	hThread=0;
 	g_AllowInterruption = TRUE;
 	return 0;
 }
@@ -415,8 +419,15 @@ void WaitIsReadyToExecute()
 
 unsigned runThread()
 {
-	if (hThread)
- 		ahkTerminate(0);
+	if (hThread && g_script.mIsReadyToExecute)
+	{	// Small check to be done to make sure we do not start a new thread before the old is closed
+		int lpExitCode = 0;
+		GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
+		if ((lpExitCode == 0 || lpExitCode == 259) && g_script.mIsReadyToExecute)
+			Sleep(50); // make sure the script is not about to be terminated, because this might lead to problems
+		if (hThread && g_script.mIsReadyToExecute)
+ 			ahkTerminate(0);
+	}
 	hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, 0 );
 	WaitIsReadyToExecute();
 	return (unsigned int)hThread;
@@ -437,7 +448,7 @@ int setscriptstrings(LPTSTR fileName, LPTSTR argv)
 
 EXPORT UINT_PTR ahkdll(LPTSTR fileName, LPTSTR argv)
 {
-	if (setscriptstrings(fileName && *fileName ? fileName : aDefaultDllScript, argv && *argv ? argv : _T("")))
+	if (setscriptstrings(fileName && !IsBadReadPtr(fileName,1) && *fileName ? fileName : aDefaultDllScript, argv && !IsBadReadPtr(argv,1) && *argv ? argv : _T("")))
 		return 0;
 	nameHinstanceP.istext = *fileName ? 0 : 1;
 	return runThread();
@@ -446,7 +457,7 @@ EXPORT UINT_PTR ahkdll(LPTSTR fileName, LPTSTR argv)
 // HotKeyIt ahktextdll
 EXPORT UINT_PTR ahktextdll(LPTSTR fileName, LPTSTR argv)
 {
-	if (setscriptstrings(fileName && *fileName ? fileName : aDefaultDllScript, argv && *argv ? argv : _T("")))
+	if (setscriptstrings(fileName && !IsBadReadPtr(fileName,1) && *fileName ? fileName : aDefaultDllScript, argv && !IsBadReadPtr(argv,1) && *argv ? argv : _T("")))
 		return 0;
 	nameHinstanceP.istext = 1;
 	return runThread();
@@ -457,6 +468,7 @@ void reloadDll()
 	g_script.Destroy();
 	hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, 0 );
 	g_AllowInterruption = TRUE;
+	hThread = NULL;
 	_endthreadex( (DWORD)EARLY_RETURN );
 }
 
@@ -464,6 +476,7 @@ ResultType terminateDll()
 {
 	g_script.Destroy();
 	g_AllowInterruption = TRUE;
+	hThread = NULL;
 	_endthreadex( (DWORD)EARLY_EXIT );
 	return EARLY_EXIT;
 }

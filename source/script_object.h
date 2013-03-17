@@ -311,6 +311,10 @@ class RegExMatchObject : public ObjectBase
 	int mPatternCount;
 	LPTSTR mMark;
 
+#ifdef CONFIG_DEBUGGER
+	friend class Debugger;
+#endif
+
 	RegExMatchObject() : mHaystack(NULL), mOffset(NULL), mPatternName(NULL), mPatternCount(0), mMark(NULL) {}
 	
 	~RegExMatchObject()
@@ -341,6 +345,37 @@ public:
 #ifdef CONFIG_DEBUGGER
 	void DebugWriteProperty(IDebugProperties *, int aPage, int aPageSize, int aDepth);
 #endif
+};
+
+
+//
+// CriticalObject - Multithread save object wrapper
+//
+
+class CriticalObject : public ObjectBase
+{
+protected:
+	IObject *object;
+	LPCRITICAL_SECTION lpCriticalSection;
+	CriticalObject()
+			: lpCriticalSection(0)
+			, object(0)
+	{}
+
+	bool Delete();
+	~CriticalObject(){}
+
+public:
+	__int64 GetObj()
+	{
+		return (__int64)&*this->object;
+	}
+	__int64 GetCriSec()
+	{
+		return (__int64) this->lpCriticalSection;
+	}
+	static CriticalObject *Create(ExprTokenType *aParam[], int aParamCount);
+	ResultType STDMETHODCALLTYPE Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
 };
 
 //
