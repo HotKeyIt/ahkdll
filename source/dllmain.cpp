@@ -456,17 +456,14 @@ EXPORT BOOL ahkTerminate(int timeout = 0)
 	DWORD lpExitCode = 0;
 	if (hThread == 0)
 		return 0;
-	if (timeout == 0)
-		timeout = 10000;
 	g_AllowInterruption = FALSE;
 	GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
-	int tick = GetTickCount();
-	for (int i = 0; hThread && g_script.mIsReadyToExecute && (lpExitCode == 0 || lpExitCode == 259) && (timeout < 0 || i < timeout/200); i++)
+	int tickstart = GetTickCount();
+	for (int tick = tickstart; hThread && g_script.mIsReadyToExecute && (lpExitCode == 0 || lpExitCode == 259) && (timeout == 0 || timeout < (tickstart-tick)); tick = GetTickCount())
 	{
-		SendMessageTimeout(g_hWnd, AHK_EXIT_BY_SINGLEINSTANCE, EARLY_EXIT, 0,0,100,0);
-		Sleep(100);
+		SendMessageTimeout(g_hWnd, AHK_EXIT_BY_SINGLEINSTANCE, OK, 0,timeout < 0 ? SMTO_NORMAL : SMTO_NOTIMEOUTIFNOTHUNG,timeout == 0 ? 500 : timeout < 0 ? timeout * -1 : timeout,0);
+		Sleep(50);
 	}
-	int end = GetTickCount() - tick;
 	if (g_script.mIsReadyToExecute || hThread)
 	{
 		g_script.Destroy();
@@ -486,7 +483,7 @@ unsigned __stdcall runScript( void* pArguments )
 	HINSTANCE hInstance = a.hInstanceP;
 	LPTSTR fileName = a.name;
 	OldWinMain(hInstance, 0, fileName, 0);
-	ahkTerminate();
+	g_script.Destroy();
 	_endthreadex( (DWORD)EARLY_RETURN );  
     return 0;
 }
@@ -556,7 +553,6 @@ void reloadDll()
 	g_script.Destroy();
 	hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, 0 );
 	g_AllowInterruption = TRUE;
-	hThread = NULL;
 	_endthreadex( (DWORD)EARLY_RETURN );
 }
 
