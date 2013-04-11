@@ -848,6 +848,11 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 				this_token.symbol = SYM_INTEGER;
 				this_token.value_int64 = (__int64)right.var->Contents(); // Contents() vs. mContents to support VAR_CLIPBOARD, and in case mContents needs to be updated by Contents().
 			}
+			else if (right.symbol == SYM_STRING && *right.marker) // HotKeyIt added a way to pass pointer of string without using a variable e.g. &"String"
+			{
+				this_token.symbol = SYM_INTEGER;
+				this_token.value_int64 = (__int64)right.marker;
+			}
 			else // Invalid, so make it a localized blank value.
 			{
 				this_token.marker = _T("");
