@@ -284,6 +284,14 @@ EXPORT unsigned int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, L
 BOOL FinalizeScript(Line *aFirstLine,int aFuncCount,int aHotkeyCount)
 {
 #ifndef MINIDLL
+	for (int expr_line_index = 0 ; expr_line_index < g_HotExprLineCount; ++expr_line_index)
+	{
+		Line *line = g_HotExprLines[expr_line_index];
+		if (!g_script.PreparseBlocks(line))
+			return LOADING_FAILED;
+		// Search for "ACT_EXPRESSION will be changed to ACT_IFEXPR" for comments about the following line:
+		line->mActionType = ACT_IFEXPR;
+	}
 	if (Hotkey::sHotkeyCount > aHotkeyCount)
 	{
 		Line::ToggleSuspendState();
@@ -404,8 +412,10 @@ EXPORT UINT_PTR addScript(LPTSTR script, int aExecute)
 			g->CurrentFunc = aFunc ; 
 		return LOADING_FAILED;
 	}
+
 	if (FinalizeScript(oldLastLine->mNextLine,aFuncCount,HotkeyCount))
 		return LOADING_FAILED;
+
 	if (aExecute > 0)
 	{
 		if (aExecute > 1)
@@ -444,6 +454,7 @@ EXPORT BOOL ahkExec(LPTSTR script)
 			g->CurrentFunc = aFunc;
 		return LOADING_FAILED;
 	}
+	
 	if (FinalizeScript(oldLastLine->mNextLine,aFuncCount,UINT_MAX))
 		return LOADING_FAILED;
 
