@@ -111,8 +111,8 @@ void SimpleHeap::DeleteAll()
 	{
 		for (;sBlockCount;)
 		{
-			if (sBlocks[sBlockCount - 1])
-				delete sBlocks[--sBlockCount];
+			if (sBlocks[--sBlockCount])
+				delete sBlocks[sBlockCount];
 			sBlocks[sBlockCount] = NULL;
 		}
 		sFirst = NULL;

@@ -659,6 +659,8 @@ void Script::Destroy()
 	{
 		g_DestroyWindowCalled = true;
 		DestroyWindow(g_hWnd);
+		DestroyWindow(g_hWndEdit);
+		DeleteObject(g_hFontEdit);
 	}
 #ifndef MINIDLL
 	// AddRemoveHooks(0); // done in ~Script
@@ -673,6 +675,7 @@ void Script::Destroy()
 #endif
 	Script::~Script();
 	SimpleHeap::DeleteAll();
+	DeleteCriticalSection(&g_CriticalHeapBlocks); // g_CriticalHeapBlocks is used in simpleheap for thread-safety.
 	mIsReadyToExecute = false;
 }
 #endif
@@ -766,6 +769,7 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 					}
 				}
 			}
+			LocalFree(dllargv);
 		}
 		CloseHandle(hProcess);
 	}

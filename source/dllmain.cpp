@@ -238,6 +238,8 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 			break;  // No more switches allowed after this point.
 		}
 	}
+	
+	LocalFree(dllargv); // free memory allocated by CommandLineToArgvW
 
 	if (i < dllargc)
 	{
@@ -478,7 +480,7 @@ ResultType terminateDll()
 	return EARLY_EXIT;
 }
 
-EXPORT BOOL ahkReload(int timeout)
+EXPORT BOOL ahkReload(int timeout = 0)
 {
 	ahkTerminate(timeout);
 	hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, 0 );
