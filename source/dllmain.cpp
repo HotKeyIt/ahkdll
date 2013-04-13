@@ -255,8 +255,9 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 			--i; // Make the loop process this item again so that it will be treated as a script param.
 		}
 	}
-
-
+	
+	LocalFree(dllargv); // free memory allocated by CommandLineToArgvW
+	
 	// Like AutoIt2, store the number of script parameters in the script variable %0%, even if it's zero:
 	if (   !(var = g_script.FindOrAddVar(_T("0")))   )
 		return CRITICAL_ERROR;  // Realistically should never happen.
@@ -553,7 +554,7 @@ void reloadDll()
 	g_script.Destroy();
 	hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, 0 );
 	g_AllowInterruption = TRUE;
-	_endthreadex( (DWORD)EARLY_RETURN );
+	_endthreadex( (DWORD)EARLY_EXIT );
 }
 
 ResultType terminateDll()
@@ -565,7 +566,7 @@ ResultType terminateDll()
 	return EARLY_EXIT;
 }
 
-EXPORT BOOL ahkReload(int timeout)
+EXPORT BOOL ahkReload(int timeout = 0)
 {
 	ahkTerminate(timeout);
 	hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, 0 );

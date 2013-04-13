@@ -230,10 +230,7 @@ Script::~Script() // Destructor.
 	for (i = 0; i < MAX_TOOLTIPS; ++i)
 		if (g_hWndToolTip[i] && IsWindow(g_hWndToolTip[i]))
 			DestroyWindow(g_hWndToolTip[i]);
-#ifndef MINIDLL
-	if (g_hFontSplash) // The splash window itself should auto-destroyed, since it's owned by main.
-		DeleteObject(g_hFontSplash);
-#endif
+	
 	if (mOnClipboardChangeLabel) // Remove from viewer chain.
 		if (MyRemoveClipboardListener && MyAddClipboardListener)
 			MyRemoveClipboardListener(g_hWnd); // MyAddClipboardListener was used.
@@ -519,6 +516,14 @@ void Script::Destroy()
 	{
 		g_DestroyWindowCalled = true;
 		DestroyWindow(g_hWnd);
+		DestroyWindow(g_hWndEdit);
+		DeleteObject(g_hFontEdit);
+#ifndef MINIDLL
+		if (g_hWndSplash)
+			DestroyWindow(g_hWndSplash);
+		if (g_hFontSplash)
+			DeleteObject(g_hFontSplash);
+#endif
 	}
 #ifndef MINIDLL
 	// AddRemoveHooks(0); // done in ~Script
@@ -532,6 +537,7 @@ void Script::Destroy()
 #endif
 	Script::~Script();
 	SimpleHeap::DeleteAll();
+	DeleteCriticalSection(&g_CriticalHeapBlocks); // g_CriticalHeapBlocks is used in simpleheap for thread-safety.
 	mIsReadyToExecute = false;
 }
 #endif
@@ -632,6 +638,7 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 					}
 				}
 			}
+			LocalFree(dllargv);
 		}
 		CloseHandle(hProcess);
 	}
