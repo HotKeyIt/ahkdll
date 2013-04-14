@@ -381,6 +381,8 @@ void Script::Destroy()
 		delete line;
 		line = nextLine;
 	}
+	
+	Script::~Script(); // destroy main script before resetting variables
 
 	mVarCount = 0;
 	mVarCountMax = 0;
@@ -535,7 +537,6 @@ void Script::Destroy()
 #ifndef MINIDLL
 	free(g_input.match);
 #endif
-	Script::~Script();
 	SimpleHeap::DeleteAll();
 	DeleteCriticalSection(&g_CriticalHeapBlocks); // g_CriticalHeapBlocks is used in simpleheap for thread-safety.
 	mIsReadyToExecute = false;
