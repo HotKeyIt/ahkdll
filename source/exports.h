@@ -35,7 +35,7 @@ EXPORT BOOL com_ahkReady();
 EXPORT BOOL ahkReload(int timeout);
 EXPORT BOOL com_ahkReload();
 void reloadDll();
-ResultType terminateDll();
+ResultType terminateDll(ExitReasons aExitReason);
 EXPORT BOOL ahkIsUnicode();
 #endif
 

@@ -198,9 +198,16 @@ Script::~Script() // Destructor.
 	// its menu bar prior to destroying its window:
 	while (g_guiCount)
 		GuiType::Destroy(*g_gui[g_guiCount-1]); // Static method to avoid problems with object destroying itself.
+	
 	for (i = 0; i < GuiType::sFontCount; ++i) // Now that GUI windows are gone, delete all GUI fonts.
 		if (GuiType::sFont[i].hfont)
 			DeleteObject(GuiType::sFont[i].hfont);
+	
+	if (GuiType::sFontCount)
+	{
+		GuiType::sFontCount = 0;
+		GuiType::sFont = NULL;
+	}
 	// The above might attempt to delete an HFONT from GetStockObject(DEFAULT_GUI_FONT), etc.
 	// But that should be harmless:
 	// MSDN: "It is not necessary (but it is not harmful) to delete stock objects by calling DeleteObject."
@@ -459,7 +466,7 @@ void Script::Destroy()
 	g_HotExprLFW = NULL; // Last Found Window of last #if expression.
 	g_MenuIsVisible = MENU_TYPE_NONE;
 	g_guiCount = 0;
-	g_guiCountMax = 0;
+	// g_guiCountMax = 0; no need because we use realloc for g_gui
 #ifndef MINIDLL
 	g_HSPriority = 0;  // default priority is always 0
 	g_HSKeyDelay = 0;  // Fast sends are much nicer for auto-replace and auto-backspace.
@@ -1147,6 +1154,7 @@ ResultType Script::Reload(bool aDisplayErrors)
 	// The new instance we're about to start will tell our process to stop, or it will display
 	// a syntax error or some other error, in which case our process will still be running:
 #ifdef _USRDLL
+	terminateDll(EXIT_RELOAD);
 	reloadDll();
 	return EARLY_RETURN;
 #else
@@ -1266,7 +1274,7 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 // tray icons, menus, and unowned windows such as ToolTip.
 {
 #ifdef _USRDLL
-	terminateDll();
+	terminateDll(aExitReason);
 #else
 	// L31: Release objects stored in variables, where possible.
 	if (aExitCode != CRITICAL_ERROR) // i.e. Avoid making matters worse if CRITICAL_ERROR.
