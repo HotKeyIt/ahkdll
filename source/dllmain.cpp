@@ -239,7 +239,6 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 		}
 	}
 	
-	LocalFree(dllargv); // free memory allocated by CommandLineToArgvW
 
 	if (i < dllargc)
 	{
@@ -251,6 +250,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 			return CRITICAL_ERROR;  // Realistically should never happen.
 		var->AssignSkipAddRef(args);
 	}
+	LocalFree(dllargv); // free memory allocated by CommandLineToArgvW
 
 	global_init(*g);  // Set defaults prior to the below, since below might override them for AutoIt2 scripts.
 
@@ -465,18 +465,19 @@ EXPORT UINT_PTR ahktextdll(LPTSTR fileName, LPTSTR argv)
 
 void reloadDll()
 {
-	g_script.Destroy();
+	//g_script.Destroy(); // already done in terminateDll by ExitApp
 	hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, 0 );
 	g_AllowInterruption = TRUE;
 	_endthreadex( (DWORD)EARLY_RETURN );
 }
 
-ResultType terminateDll()
+ResultType terminateDll(ExitReasons aExitReason)
 {
 	g_script.Destroy();
 	g_AllowInterruption = TRUE;
 	hThread = NULL;
-	_endthreadex( (DWORD)EARLY_EXIT );
+	if (aExitReason != EXIT_RELOAD)
+		_endthreadex( (DWORD)EARLY_EXIT );
 	return EARLY_EXIT;
 }
 
