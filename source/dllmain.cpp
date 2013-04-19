@@ -427,6 +427,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	//	AddRemoveHooks(3);
 #endif
 	g_script.mIsReadyToExecute = true; // This is done only after the above to support error reporting in Hotkey.cpp.
+	g_script.mReloading = false;
 	Sleep(20);
 	//free(nameHinstanceP.name);
 	Var *clipboard_var = g_script.FindOrAddVar(_T("Clipboard")); // Add it if it doesn't exist, in case the script accesses "Clipboard" via a dynamic variable.
