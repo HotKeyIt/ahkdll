@@ -408,6 +408,8 @@ void Script::Destroy()
 #ifndef MINIDLL
 	mFirstMenu = NULL;
 #endif
+	mFirstGroup = NULL;
+	mLastGroup = NULL;
 	mFirstTimer = NULL;
 	mOnExitLabel = NULL;
 	mOnClipboardChangeLabel = NULL;
