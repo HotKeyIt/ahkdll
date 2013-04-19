@@ -351,6 +351,7 @@ Script::~Script() // Destructor.
 		GuiType::sFontCount = 0;
 		GuiType::sFont = NULL;
 	}
+		
 	// The above might attempt to delete an HFONT from GetStockObject(DEFAULT_GUI_FONT), etc.
 	// But that should be harmless:
 	// MSDN: "It is not necessary (but it is not harmful) to delete stock objects by calling DeleteObject."
@@ -549,6 +550,10 @@ void Script::Destroy()
 #ifndef MINIDLL
 	mFirstMenu = NULL;
 #endif
+	
+	mFirstGroup = NULL;
+	mLastGroup = NULL;
+
 	mFirstTimer = NULL;
 	mOnExitLabel = NULL;
 	mOnClipboardChangeLabel = NULL;
