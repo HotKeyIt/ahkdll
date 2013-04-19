@@ -1306,6 +1306,7 @@ ResultType Script::Reload(bool aDisplayErrors)
 	// The new instance we're about to start will tell our process to stop, or it will display
 	// a syntax error or some other error, in which case our process will still be running:
 #ifdef _USRDLL
+	mReloading = true;
 	ExitApp(EXIT_RELOAD);
 	reloadDll();
 	return EARLY_RETURN;
@@ -1355,8 +1356,11 @@ ResultType Script::ExitApp(ExitReasons aExitReason, LPTSTR aBuf, int aExitCode)
 		// extra thread for ExitApp() (which allows it to run even when MAX_THREADS_EMERGENCY has
 		// been reached).  See TOTAL_ADDITIONAL_THREADS.
 #ifdef _USRDLL
-		if (aExitReason == EXIT_RELOAD)
+		if (sExitLabelIsRunning && mReloading)
+		{
+			sExitLabelIsRunning = false;
 			return EARLY_EXIT;
+		}
 #endif
 		g_AllowInterruption = FALSE; // In case TerminateApp releases objects and indirectly causes
 		g->IsPaused = false;		 // more script to be executed.
@@ -1409,9 +1413,11 @@ ResultType Script::ExitApp(ExitReasons aExitReason, LPTSTR aBuf, int aExitCode)
 		// If the subroutine encounters a failure condition such as a runtime error, exit immediately.
 		// Otherwise, there will be no way to exit the script if the subroutine fails on each attempt.
 		TerminateApp(aExitReason, aExitCode);
-	} 
-	else if (aExitReason == EXIT_RELOAD)
+	}
+#ifdef _USRDLL
+	if (aExitReason == EXIT_RELOAD)
 		return EARLY_EXIT;
+#endif
 	DEBUGGER_STACK_POP()
 
 	if (terminate_afterward)

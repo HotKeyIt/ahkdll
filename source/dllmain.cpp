@@ -348,6 +348,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	//	AddRemoveHooks(3);
 #endif
 	g_script.mIsReadyToExecute = true; // This is done only after the above to support error reporting in Hotkey.cpp.
+	g_script.mReloading = false;
 	Sleep(20);
 	//free(nameHinstanceP.name);
 

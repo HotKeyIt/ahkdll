@@ -2528,6 +2528,7 @@ public:
 #endif
 	HWND mNextClipboardViewer;
 	bool mOnClipboardChangeIsRunning;
+	bool mReloading;
 	Label *mOnClipboardChangeLabel, *mOnExitLabel;  // The label to run when the script terminates (NULL if none).
 	ExitReasons mExitReason;
 
