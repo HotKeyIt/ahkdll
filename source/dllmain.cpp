@@ -465,7 +465,7 @@ EXPORT UINT_PTR ahktextdll(LPTSTR fileName, LPTSTR argv)
 
 void reloadDll()
 {
-	//g_script.Destroy(); // already done in terminateDll by ExitApp
+	g_script.Destroy();
 	hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, 0 );
 	g_AllowInterruption = TRUE;
 	_endthreadex( (DWORD)EARLY_RETURN );
@@ -476,8 +476,7 @@ ResultType terminateDll(ExitReasons aExitReason)
 	g_script.Destroy();
 	g_AllowInterruption = TRUE;
 	hThread = NULL;
-	if (aExitReason != EXIT_RELOAD)
-		_endthreadex( (DWORD)EARLY_EXIT );
+	_endthreadex( (DWORD)EARLY_EXIT );
 	return EARLY_EXIT;
 }
 
