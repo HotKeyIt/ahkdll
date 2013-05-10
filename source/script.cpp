@@ -327,7 +327,7 @@ void Script::Destroy()
 			f.mVar[v]->ConvertToNonAliasIfNecessary();
 			f.mVar[v]->Free();
 			//free(f.mVar[v]->mName);
-			delete mVar[v];
+			delete f.mVar[v];
 		}
 		for (v = 0; v < f.mStaticVarCount; v++)
 		{
