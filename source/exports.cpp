@@ -216,13 +216,18 @@ EXPORT unsigned int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, L
 			ResultType aResult = OK;
 			ExprTokenType aResultToken;
 			FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
-			ExprTokenType** new_mem = (ExprTokenType**)realloc(aFuncAndToken.param,sizeof(ExprTokenType)*aParamsCount);
-			if (!new_mem)
+			if (aParamsCount)
 			{
-				g_script.ScriptError(ERR_OUTOFMEM, func);
-				return -1;
+				ExprTokenType **new_mem = (ExprTokenType**)realloc(aFuncAndToken.param,sizeof(ExprTokenType)*aParamsCount);
+				if (!new_mem)
+				{
+					g_script.ScriptError(ERR_OUTOFMEM,func);
+					return -1;
+				}
+				aFuncAndToken.param = new_mem;
 			}
-			aFuncAndToken.param = new_mem;
+			else
+				aFuncAndToken.param = NULL;
 			for (int i = 0;aFunc->mParamCount > i && aParamsCount>i;i++)
 			{
 				aFuncAndToken.param[i] = &aFuncAndToken.params[i];
@@ -247,14 +252,19 @@ EXPORT unsigned int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, L
 
 			FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
 			aFuncAndToken.mParamCount = aParamsCount;
-			ExprTokenType **new_mem = (ExprTokenType**)realloc(aFuncAndToken.param,sizeof(ExprTokenType)*aParamsCount);
-			if (!new_mem)
+			if (aParamsCount)
 			{
-				g_script.ScriptError(ERR_OUTOFMEM, func);
-				return -1;
+				ExprTokenType **new_mem = (ExprTokenType**)realloc(aFuncAndToken.param,sizeof(ExprTokenType)*aParamsCount);
+				if (!new_mem)
+				{
+					g_script.ScriptError(ERR_OUTOFMEM,func);
+					return -1;
+				}
+				aFuncAndToken.param = new_mem;
 			}
-			aFuncAndToken.param = new_mem;
-			for (int i = 0;aFunc->mParamCount > i && aParamsCount>i;i++)
+			else
+				aFuncAndToken.param = NULL;
+			for (int i = 0;(aFunc->mParamCount > i || aFunc->mIsVariadic) && aParamsCount>i;i++)
 			{
 				aFuncAndToken.param[i] = &aFuncAndToken.params[i];
 				aFuncAndToken.param[i]->symbol = SYM_STRING;
@@ -412,6 +422,7 @@ EXPORT UINT_PTR addScript(LPTSTR script, int aExecute)
 	{
 		if (inFunc == 1 )
 			g->CurrentFunc = aFunc ; 
+		oldLastLine->mNextLine = NULL;
 		return LOADING_FAILED;
 	}
 
@@ -521,13 +532,18 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 		{
 			ResultType aResult = OK;
 			FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
-			ExprTokenType ** new_mem = (ExprTokenType**)realloc(aFuncAndToken.param,sizeof(ExprTokenType)*aParamsCount);
-			if (!new_mem)
+			if (aParamsCount)
 			{
-				g_script.ScriptError(ERR_OUTOFMEM,func);
-				return _T("");
+				ExprTokenType **new_mem = (ExprTokenType**)realloc(aFuncAndToken.param,sizeof(ExprTokenType)*aParamsCount);
+				if (!new_mem)
+				{
+					g_script.ScriptError(ERR_OUTOFMEM,func);
+					return _T("");
+				}
+				aFuncAndToken.param = new_mem;
 			}
-			aFuncAndToken.param = new_mem;
+			else
+				aFuncAndToken.param = NULL;
 			for (int i = 0;aFunc->mParamCount > i && aParamsCount>i;i++)
 			{
 				aFuncAndToken.param[i] = &aFuncAndToken.params[i];
@@ -615,16 +631,21 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 			//for (;aFunc->mParamCount > aParamCount && aParamsCount>aParamCount;aParamCount++)
 			//	aFunc->mParam[aParamCount].var->AssignString(*params[aParamCount]);
 			FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
-			ExprTokenType **new_mem = (ExprTokenType**)realloc(aFuncAndToken.param,sizeof(ExprTokenType)*aParamsCount);
-			if (!new_mem)
+			if (aParamsCount)
 			{
-				g_script.ScriptError(ERR_OUTOFMEM,func);
-				return _T("");
+				ExprTokenType **new_mem = (ExprTokenType**)realloc(aFuncAndToken.param,sizeof(ExprTokenType)*aParamsCount);
+				if (!new_mem)
+				{
+					g_script.ScriptError(ERR_OUTOFMEM,func);
+					return _T("");
+				}
+				aFuncAndToken.param = new_mem;
 			}
-			aFuncAndToken.param = new_mem;
+			else
+				aFuncAndToken.param = NULL;
 			aFuncAndToken.mParamCount = aParamsCount;
 			LPTSTR new_buf;
-			for (int i = 0;aFunc->mParamCount > i && aParamsCount>i;i++)
+			for (int i = 0;(aFunc->mParamCount > i || aFunc->mIsVariadic) && aParamsCount>i;i++)
 			{
 				aFuncAndToken.param[i] = &aFuncAndToken.params[i];
 				aFuncAndToken.param[i]->symbol = SYM_STRING;
@@ -691,68 +712,72 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 	ResultType aResult;
 	FuncCallData func_call;
 	// ExprTokenType &aResultToken = aResultToken_to_return ;
-	func.Call(func_call,aResult,aResultToken,aFuncAndToken->param,(int) aFuncAndToken->mParamCount,false); // Call the UDF.
+	bool result = func.Call(func_call,aResult,aResultToken,aFuncAndToken->param,(int) aFuncAndToken->mParamCount,false); // Call the UDF.
 
 	DEBUGGER_STACK_POP()
 	LPTSTR new_buf;
-	switch (aFuncAndToken->mToken.symbol)
+	if (result)
 	{
-	case SYM_VAR: // Caller has ensured that any SYM_VAR's Type() is VAR_NORMAL.
-		if (_tcslen(aFuncAndToken->mToken.var->Contents()))
+		switch (aFuncAndToken->mToken.symbol)
 		{
-			new_buf = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,(_tcslen(aFuncAndToken->mToken.var->Contents()) + 1)*sizeof(TCHAR));
+		case SYM_VAR: // Caller has ensured that any SYM_VAR's Type() is VAR_NORMAL.
+			if (_tcslen(aFuncAndToken->mToken.var->Contents()))
+			{
+				new_buf = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,(_tcslen(aFuncAndToken->mToken.var->Contents()) + 1)*sizeof(TCHAR));
+				if (!new_buf)
+				{
+					g_script.ScriptError(ERR_OUTOFMEM,func.mName);
+					return;
+				}
+				aFuncAndToken->result_to_return_dll = new_buf;
+				_tcscpy(aFuncAndToken->result_to_return_dll,aFuncAndToken->mToken.var->Contents()); // Contents() vs. mContents to support VAR_CLIPBOARD, and in case mContents needs to be updated by Contents().
+			}
+			else if (aFuncAndToken->result_to_return_dll)
+				*aFuncAndToken->result_to_return_dll = '\0';
+			break;
+		case SYM_STRING:
+			if (_tcslen(aFuncAndToken->mToken.marker))
+			{
+				new_buf = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,(_tcslen(aFuncAndToken->mToken.marker) + 1)*sizeof(TCHAR));
+				if (!new_buf)
+				{
+					g_script.ScriptError(ERR_OUTOFMEM,func.mName);
+					return;
+				}
+				aFuncAndToken->result_to_return_dll = new_buf;
+				_tcscpy(aFuncAndToken->result_to_return_dll,aFuncAndToken->mToken.marker);
+			}
+			else if (aFuncAndToken->result_to_return_dll)
+				*aFuncAndToken->result_to_return_dll = '\0';
+			break;
+		case SYM_INTEGER:
+			new_buf = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,MAX_INTEGER_LENGTH);
 			if (!new_buf)
 			{
 				g_script.ScriptError(ERR_OUTOFMEM,func.mName);
 				return;
 			}
 			aFuncAndToken->result_to_return_dll = new_buf;
-			_tcscpy(aFuncAndToken->result_to_return_dll,aFuncAndToken->mToken.var->Contents()); // Contents() vs. mContents to support VAR_CLIPBOARD, and in case mContents needs to be updated by Contents().
-		}
-		else if (aFuncAndToken->result_to_return_dll)
-			*aFuncAndToken->result_to_return_dll = '\0';
-		break;
-	case SYM_STRING:
-		if (_tcslen(aFuncAndToken->mToken.marker))
-		{
-			new_buf = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,(_tcslen(aFuncAndToken->mToken.marker) + 1)*sizeof(TCHAR));
+			ITOA64(aFuncAndToken->mToken.value_int64, aFuncAndToken->result_to_return_dll);
+			break;
+		case SYM_FLOAT:
+			new_buf = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,MAX_INTEGER_LENGTH);
 			if (!new_buf)
 			{
 				g_script.ScriptError(ERR_OUTOFMEM,func.mName);
 				return;
 			}
-			aFuncAndToken->result_to_return_dll = new_buf;
-			_tcscpy(aFuncAndToken->result_to_return_dll,aFuncAndToken->mToken.marker);
+			result_to_return_dll = new_buf;
+			sntprintf(aFuncAndToken->result_to_return_dll, MAX_NUMBER_SIZE, FORMAT_FLOAT, aFuncAndToken->mToken.value_double);
+			break;
+		//case SYM_OBJECT: // L31: Treat objects as empty strings (or TRUE where appropriate).
+		default: // Not an operand: continue on to return the default at the bottom.
+			if (aFuncAndToken->result_to_return_dll)
+				*aFuncAndToken->result_to_return_dll = '\0';
 		}
-		else if (aFuncAndToken->result_to_return_dll)
-			*aFuncAndToken->result_to_return_dll = '\0';
-		break;
-	case SYM_INTEGER:
-		new_buf = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,MAX_INTEGER_LENGTH);
-		if (!new_buf)
-		{
-			g_script.ScriptError(ERR_OUTOFMEM,func.mName);
-			return;
-		}
-		aFuncAndToken->result_to_return_dll = new_buf;
-		ITOA64(aFuncAndToken->mToken.value_int64, aFuncAndToken->result_to_return_dll);
-		break;
-	case SYM_FLOAT:
-		new_buf = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,MAX_INTEGER_LENGTH);
-		if (!new_buf)
-		{
-			g_script.ScriptError(ERR_OUTOFMEM,func.mName);
-			return;
-		}
-		result_to_return_dll = new_buf;
-		sntprintf(aFuncAndToken->result_to_return_dll, MAX_NUMBER_SIZE, FORMAT_FLOAT, aFuncAndToken->mToken.value_double);
-		break;
-	//case SYM_OBJECT: // L31: Treat objects as empty strings (or TRUE where appropriate).
-	default: // Not an operand: continue on to return the default at the bottom.
-		if (aFuncAndToken->result_to_return_dll)
-			*aFuncAndToken->result_to_return_dll = '\0';
 	}
-	
+	else if (aFuncAndToken->result_to_return_dll)
+			*aFuncAndToken->result_to_return_dll = '\0';
 	Var::FreeAndRestoreFunctionVars(func, var_backup, var_backup_count);
 	ResumeUnderlyingThread(ErrorLevel_saved);
 	return;

@@ -11714,6 +11714,12 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 				// LLONG_MAX (return values can be written out as unsigned since the script can specify
 				// signed to avoid this, since they don't need the incoming detection for ATOU()).
 				this_dyna_param.value_int64 = (__int64)ATOU64(TokenToString(this_param)); // Cast should not prevent called function from seeing it as an undamaged unsigned number.
+#ifdef _WIN64   // HotKeyIt - caller explicitely given a string and parameter type is PTR or Int in 32-bit or Int64 in 64-bit so convert to address
+			else if (!this_dyna_param.passed_by_address && (this_dyna_param.type == DLL_ARG_INT64) && !TokenIsNumeric(this_param) && !TokenIsEmptyString(this_param))
+#else
+			else if (!this_dyna_param.passed_by_address && (this_dyna_param.type == DLL_ARG_INT) && !TokenIsNumeric(this_param) && !TokenIsEmptyString(this_param))
+#endif
+				this_dyna_param.value_int64 = (__int64)TokenToString(this_param);
 			else
 				this_dyna_param.value_int64 = TokenToInt64(this_param);
 
@@ -12299,6 +12305,12 @@ has_valid_return_type:
 				// LLONG_MAX (return values can be written out as unsigned since the script can specify
 				// signed to avoid this, since they don't need the incoming detection for ATOU()).
 				this_dyna_param.value_int64 = (__int64)ATOU64(TokenToString(this_param)); // Cast should not prevent called function from seeing it as an undamaged unsigned number.
+#ifdef _WIN64   // HotKeyIt - caller explicitely given a string and parameter type is PTR or Int in 32-bit or Int64 in 64-bit so convert to address
+			else if (!this_dyna_param.passed_by_address && (this_dyna_param.type == DLL_ARG_INT64) && !TokenIsNumeric(this_param) && !TokenIsEmptyString(this_param))
+#else
+			else if (!this_dyna_param.passed_by_address && (this_dyna_param.type == DLL_ARG_INT) && !TokenIsNumeric(this_param) && !TokenIsEmptyString(this_param))
+#endif
+				this_dyna_param.value_int64 = (__int64)TokenToString(this_param);
 			else
 				this_dyna_param.value_int64 = TokenToInt64(this_param);
 
