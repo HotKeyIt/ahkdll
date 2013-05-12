@@ -14411,9 +14411,6 @@ ResultType Line::Perform()
 	// Use signed values for these in case they're really given an explicit negative value:
 	vk_type vk; // For GetKeyState.
 	Label *target_label;  // For ACT_SETTIMER and ACT_HOTKEY
-	int instance_number;  // For sound commands.
-	DWORD component_type; // For sound commands.
-	__int64 device_id;  // For sound commands.  __int64 helps avoid compiler warning for some conversions.
 	bool is_remote_registry; // For Registry commands.
 	HKEY root_key; // For Registry commands.
 	LPTSTR subkey; // For Registry commands.
@@ -14942,15 +14939,7 @@ ResultType Line::Perform()
 
 	case ACT_SOUNDGET:
 	case ACT_SOUNDSET:
-		device_id = *ARG4 ? ArgToInt(4) - 1 : 0;
-		if (device_id < 0)
-			device_id = 0;
-		instance_number = 1;  // Set default.
-		component_type = *ARG2 ? SoundConvertComponentType(ARG2, &instance_number) : MIXERLINE_COMPONENTTYPE_DST_SPEAKERS;
-		return SoundSetGet(mActionType == ACT_SOUNDGET ? NULL : ARG1
-			, component_type, instance_number  // Which instance of this component, 1 = first
-			, *ARG3 ? SoundConvertControlType(ARG3) : MIXERCONTROL_CONTROLTYPE_VOLUME  // Default
-			, (UINT)device_id);
+		return SoundSetGet(mActionType == ACT_SOUNDGET ? NULL : ARG1, ARG2, ARG3, ARG4);
 
 	case ACT_SOUNDBEEP:
 		// For simplicity and support for future/greater capabilities, no range checking is done.
@@ -17058,7 +17047,13 @@ ResultType Script::ActionExec(LPTSTR aAction, LPTSTR aParams, LPTSTR aWorkingDir
 				shell_action = parse_buf + 1;
 				*action_end = '\0';
 				if (action_end[1])
+				{
 					shell_params = action_end + 1;
+					// Omit the space which should follow, but only one, in case spaces
+					// are meaningful to the target program.
+					if (*shell_params == ' ')
+						++shell_params;
+				}
 				// Otherwise, there's only the action in quotation marks and no params.
 			}
 			else
