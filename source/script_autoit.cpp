@@ -288,7 +288,7 @@ ResultType Line::SplashTextOn(int aWidth, int aHeight, LPTSTR aTitle, LPTSTR aTe
 
 ResultType Line::WinMenuSelectItem(LPTSTR aTitle, LPTSTR aText, LPTSTR aMenu1, LPTSTR aMenu2
 	, LPTSTR aMenu3, LPTSTR aMenu4, LPTSTR aMenu5, LPTSTR aMenu6, LPTSTR aMenu7
-	, LPTSTR aExcludeTitle, LPTSTR aExcludeText)
+	, LPTSTR aExcludeTitle, LPTSTR aExcludeText)	
 {
 	// Set up a temporary array make it easier to traverse nested menus & submenus
 	// in a loop.  Also add a NULL at the end to simplify the loop a little:

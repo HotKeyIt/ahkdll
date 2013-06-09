@@ -388,7 +388,6 @@ void Script::Destroy()
 		delete line;
 		line = nextLine;
 	}
-	
 	Script::~Script(); // destroy main script before resetting variables
 
 	mVarCount = 0;
@@ -406,7 +405,14 @@ void Script::Destroy()
 	mCurrFileIndex = 0 ;
 	mCombinedLineNumber = 0;
 #ifndef MINIDLL
+	for (UserMenu *menu = mFirstMenu;menu;)
+	{
+		menu->Destroy();
+		menu = menu->mNextMenu;
+	}
 	mFirstMenu = NULL;
+	mLastMenu = NULL;
+	mTrayIconTip = NULL;
 #endif
 	mFirstGroup = NULL;
 	mLastGroup = NULL;
@@ -548,7 +554,9 @@ void Script::Destroy()
 #endif
 	SimpleHeap::DeleteAll();
 	DeleteCriticalSection(&g_CriticalHeapBlocks); // g_CriticalHeapBlocks is used in simpleheap for thread-safety.
+	DeleteCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
 	mIsReadyToExecute = false;
+	ZeroMemory(&g_script,sizeof(g_script));
 }
 #endif
 
