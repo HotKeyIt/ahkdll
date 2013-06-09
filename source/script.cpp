@@ -1,4 +1,4 @@
-/*
+﻿/*
 AutoHotkey
 
 Copyright 2003-2009 Chris Mallett (support@autohotkey.com)
@@ -406,6 +406,7 @@ Script::~Script() // Destructor.
 #endif
 #endif // MINIDLL
 	DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
+	DeleteCriticalSection(&g_CriticalAhkFunction); // g_CriticalRegExCache is used elsewhere for thread-safety.
 	OleUninitialize();
 }
 
@@ -548,7 +549,14 @@ void Script::Destroy()
 	mCurrFileIndex = 0 ;
 	mCombinedLineNumber = 0;
 #ifndef MINIDLL
+	for (UserMenu *menu = mFirstMenu;menu;)
+	{
+		menu->Destroy();
+		menu = menu->mNextMenu;
+	}
 	mFirstMenu = NULL;
+	mLastMenu = NULL;
+	mTrayIconTip = NULL;
 #endif
 	
 	mFirstGroup = NULL;
@@ -560,7 +568,6 @@ void Script::Destroy()
 	mTempFunc = NULL;
 	mTempLabel = NULL;
 	mTempLine = NULL;
-
 	//reset count for OnMessage
 	if (g_MsgMonitor)
 		free(g_MsgMonitor);
@@ -689,7 +696,9 @@ void Script::Destroy()
 #endif
 	SimpleHeap::DeleteAll();
 	DeleteCriticalSection(&g_CriticalHeapBlocks); // g_CriticalHeapBlocks is used in simpleheap for thread-safety.
+	DeleteCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
 	mIsReadyToExecute = false;
+	ZeroMemory(&g_script,sizeof(g_script));
 }
 #endif
 
@@ -2888,7 +2897,7 @@ examine_line:
 					&& (remap_dest_vk = hotkey_flag[1] ? TextToVK(cp = Hotkey::TextToModifiers(hotkey_flag, NULL)) : 0xFF)   ) // And the action appears to be a remap destination rather than a command.
 					// For above:
 					// Fix for v1.0.44.07: Set remap_dest_vk to 0xFF if hotkey_flag's length is only 1 because:
-					// 1) It allows a destination key that doesn't exist in the keyboard layout (such as 6::� in
+					// 1) It allows a destination key that doesn't exist in the keyboard layout (such as 6::ð in
 					//    English).
 					// 2) It improves performance a little by not calling TextToVK except when the destination key
 					//    might be a mouse button or some longer key name whose actual/correct VK value is relied
@@ -3093,8 +3102,8 @@ examine_line:
 				// v1.0.44.03: Don't allow anything that ends in "::" (other than a line consisting only
 				// of "::") to be a normal label.  Assume it's a command instead (if it actually isn't, a
 				// later stage will report it as "invalid hotkey"). This change avoids the situation in
-				// which a hotkey like ^!�:: is seen as invalid because the current keyboard layout doesn't
-				// have a "�" key. Without this change, if such a hotkey appears at the top of the script,
+				// which a hotkey like ^!ä:: is seen as invalid because the current keyboard layout doesn't
+				// have a "ä" key. Without this change, if such a hotkey appears at the top of the script,
 				// its subroutine would execute immediately as a normal label, which would be especially
 				// bad if the hotkey were something like the "Shutdown" command.
 				if (buf[buf_length - 2] == ':' && buf_length > 2) // i.e. allow "::" as a normal label, but consider anything else with double-colon to be a failed-hotkey label that terminates the auto-exec section.
@@ -3375,7 +3384,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		// to support automatic "include once" behavior.  So just ignore repeats:
 		if (!aAllowDuplicateInclude)
 			for (int f = 0; f < source_file_index; ++f) // Here, source_file_index==Line::sSourceFileCount
-				if (!lstrcmpi(Line::sSourceFile[f], full_path)) // Case insensitive like the file system (testing shows that "�" == "�" in the NTFS, which is hopefully how lstrcmpi works regardless of locale).
+				if (!lstrcmpi(Line::sSourceFile[f], full_path)) // Case insensitive like the file system (testing shows that "Ä" == "ä" in the NTFS, which is hopefully how lstrcmpi works regardless of locale).
 					return OK;
 		// The file is added to the list further below, after the file has been opened, in case the
 		// opening fails and aIgnoreLoadFailure==true.
@@ -4343,7 +4352,7 @@ examine_line:
 					&& (remap_dest_vk = hotkey_flag[1] ? TextToVK(cp = Hotkey::TextToModifiers(hotkey_flag, NULL)) : 0xFF)   ) // And the action appears to be a remap destination rather than a command.
 					// For above:
 					// Fix for v1.0.44.07: Set remap_dest_vk to 0xFF if hotkey_flag's length is only 1 because:
-					// 1) It allows a destination key that doesn't exist in the keyboard layout (such as 6::� in
+					// 1) It allows a destination key that doesn't exist in the keyboard layout (such as 6::ð in
 					//    English).
 					// 2) It improves performance a little by not calling TextToVK except when the destination key
 					//    might be a mouse button or some longer key name whose actual/correct VK value is relied
@@ -4548,8 +4557,8 @@ examine_line:
 				// v1.0.44.03: Don't allow anything that ends in "::" (other than a line consisting only
 				// of "::") to be a normal label.  Assume it's a command instead (if it actually isn't, a
 				// later stage will report it as "invalid hotkey"). This change avoids the situation in
-				// which a hotkey like ^!�:: is seen as invalid because the current keyboard layout doesn't
-				// have a "�" key. Without this change, if such a hotkey appears at the top of the script,
+				// which a hotkey like ^!ä:: is seen as invalid because the current keyboard layout doesn't
+				// have a "ä" key. Without this change, if such a hotkey appears at the top of the script,
 				// its subroutine would execute immediately as a normal label, which would be especially
 				// bad if the hotkey were something like the "Shutdown" command.
 				if (buf[buf_length - 2] == ':' && buf_length > 2) // i.e. allow "::" as a normal label, but consider anything else with double-colon to be a failed-hotkey label that terminates the auto-exec section.
@@ -7766,7 +7775,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 		break;
 
 	case ACT_GETKEYSTATE:
-		// v1.0.44.03: Don't validate single-character key names because although a character like � might have no
+		// v1.0.44.03: Don't validate single-character key names because although a character like ü might have no
 		// matching VK in system's default layout, that layout could change to something which does have a VK for it.
 		if (aArgc > 1 && !line.ArgHasDeref(2) && _tcslen(new_raw_arg2) > 1 && !TextToVK(new_raw_arg2) && !ConvertJoy(new_raw_arg2))
 			return ScriptError(ERR_PARAM2_INVALID, new_raw_arg2);
@@ -8648,7 +8657,7 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	LPTSTR naked_filename = aFuncName;               // Set up for the first iteration.
 	size_t naked_filename_length = aFuncNameLength; //
 
-	for (int second_iteration = 0; second_iteration < 2; ++second_iteration)
+	for (int second_iteration = 0; second_iteration < 3; ++second_iteration)
 	{
 		for (i = 0; i < FUNC_LIB_COUNT; ++i)
 		{
@@ -8714,6 +8723,20 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 			return FindFunc(aFuncName, aFuncNameLength);
 		} // for() each library directory.
 
+		if  (second_iteration == 1) // Further iterations, search for uppercase letters (reuse variables)
+		{
+			naked_filename = aFuncName;               // Set up again for the first iteration.
+			naked_filename_length = aFuncNameLength; //
+			if (   !(first_underscore = StrChrAny(aFuncName + sizeof(TCHAR), _T("ԤԦჇჍⱰⱾⱿⳫⳭⳲꙠꞍꞐꞒꞠꞢꞤꞦꞨꞪƼↃAＡÁÀȦÂÄǍĂĀÃÅÅĄȺẤẦẮẰǠǺǞẪẴẢȀȂẨẲẠḀẬẶⱯⱭꜲÆǼǢꜴꜶꜸꜺꜼBＢℬḂɃƁḄḆƂƄCＣℂℭĆĊꜾĈČÇȻḈƇƆDⅅＤḊĎḐĐƋƊḌḒḎÐꝹǱǄƉEＥℰÉÈĖÊËĚĔĒẼĘȨɆẾỀḖḔỄḜẺȄȆỂẸḘḚℇỆƐƎƏȜFＦℲℱḞꝻƑGＧǴĠĜǦĞḠĢǤƓƔꝽHＨℍℌℋḢĤḦȞḨĦḤḪⱧǶⱵꜦIＩℐℑÍÌİÎÏǏĬĪĨĮƗḮỈȈȊỊḬƖĲJＪĴɈKKＫḰǨĶƘḲḴⱩLＬℒĹĿĽⱢⱠĻȽŁḶḼḺḸǇỺMＭℳḾṀⱮṂƜNＮℕŃǸṄŇÑŅƝȠṆṊṈǊŊOＯÓÒȮÔÖǑŎŌÕǪŐỐỒƟØṒṐȰṌȪỖṎǾȬǬỎȌȎƠỔỌỚỜỠỘƢỞỢŒꝎȢPＰℙṔṖⱣƤQＱℚɊꝖꝘRＲƦℝℛℜŔṘŘŖɌⱤȐȒṚṞṜSＳŚṠŜŠŞṤṦṢȘṨƩƧẞꞄTＴṪŤŢƬṬƮȚṰṮȾÞꝤꝦŦUＵÚÙÛÜǓŬŪŨŮŲŰɄǗǛǙṸǕṺỦȔȖƯỤṲỨỪṶṴỮƱỬỰVＶṼṾƲɅꝠWＷẂẀẆŴẄẈǷXＸẊẌYＹÝỲẎŶŸȲỸɎỶƳỴZＺℤℨŹŻẐŽƵȤẒẔⱫƷǮƸɁꜪꜬꜮꜢꞋꝾꝀꝂꝄꝆꝈꞀꝌꝊꝐꝒꝔꞂꝚꝜꞆꜨꝞỼⱲỾꝢꝨꝪꝬꝮꜤΑΆΆᾺᾸᾹἈἉἌἊἍἋἎἏΒΓℾΔΕΈΈῈἘἙἜἚἝἛΖͰΗΉΉῊἨἩἬἪἭἫἮἯΘϴΙΊΊῚΪῘῙἸἹἼἺἽἻἾἿΚΛΜΝΞΟΌΌῸὈὉὌὊὍὋΠℿϺΡῬΣϹϾϽϿΤΥΎΎῪΫῨῩϒϓϔὙὝὛὟΦΧΨΩΩΏΏῺὨὩὬὪὭὫὮὯϚϜͶϞϘϏϠͲϷϢϤϦϨϪϬϮАӒӐБВГЃҒӺҐҔӶДԀЂԂЕЀЁӖҼҾӘӚЄЖӜӁҖЗӞҘԐԄЅꙄИЍӤЙӢҊІЇꙆЈꙈКҞӃҜҠЌҚЛԒԠЉꙤԈԔМНҢҤҺꚔӇԢЊԊОꙨꙪꙬӦӨҨԜӪӀПҦРСҪԌТꚌԎҬꚊЋУӰЎӮӲҮҰꙊФХӼӾҲЦҴꚐЧҶҸӴӋЏШꚖЩЪꙐЫӸЬҌЭӬЮꙔꙖЯԘѠѢꙒѤѦꙘѨꙜѪꙚѬѮѰѲѴѶꙞѸѺѼѾꙌҀҎԖӅӉӍꙦӔӠꚈԆꚂꚀꙢꚄꙀꙂԞԚꚎꚒꚆꙎԱԲԳԴԵԶԷԸԹԺԻԼԽԾԿՀՁՂՃՄՅՆՇՈՉՊՋՌՍՎՏՐՑՒՓՔՕՖႠႡႢႣႤႥႦჁႧႨႩႪႫႬჂႭႮႯႰႱႲႳჃႴႵႶႷႸႹႺႻႼႽႾჄႿჀჅⰀⰁⰂⰃⰄⰅⰆⰇⰈⰉⰊⰋⰌⰍⰎⰏⰐⰑⰒⰓⰔⰕⰖⰗⰘⰙⰚⰛⰜⰝⰞⰟⰠⰡⰢⰣⰤⰥⰦⰧⰨⰩⰪⰫⰬⰭⰮⲀⲂⲄⲆⲈⲊⲌⲎⲐⲒⲔⲖⲘⲚⲜⲞⲠⲢⲤⲦⲨⲪⲬⲮⲰⲲⲴⲶⲸⲺⲼⲾⳀⳂⳄⳆⳈⳊⳌⳎⳐⳒⳔⳖⳘⳚⳜⳞⳠⳢ𐐀𐐁𐐂𐐃𐐄𐐅𐐆𐐇𐐈𐐉𐐊𐐋𐐌𐐍𐐎𐐏𐐐𐐑𐐒𐐓𐐔𐐕𐐖𐐗𐐘𐐙𐐚𐐛𐐜𐐝𐐞𐐟𐐠𐐡𐐢𐐣𐐤𐐥𐐦𐐧𝐀𝐁𝐂𝐃𝐄𝐅𝐆𝐇𝐈𝐉𝐊𝐋𝐌𝐍𝐎𝐏𝐐𝐑𝐒𝐓𝐔𝐕𝐖𝐗𝐘𝐙𝐴𝐵𝐶𝐷𝐸𝐹𝐺𝐻𝐼𝐽𝐾𝐿𝑀𝑁𝑂𝑃𝑄𝑅𝑆𝑇𝑈𝑉𝑊𝑋𝑌𝑍𝑨𝑩𝑪𝑫𝑬𝑭𝑮𝑯𝑰𝑱𝑲𝑳𝑴𝑵𝑶𝑷𝑸𝑹𝑺𝑻𝑼𝑽𝑾𝑿𝒀𝒁𝒜𝒞𝒟𝒢𝒥𝒦𝒩𝒪𝒫𝒬𝒮𝒯𝒰𝒱𝒲𝒳𝒴𝒵𝓐𝓑𝓒𝓓𝓔𝓕𝓖𝓗𝓘𝓙𝓚𝓛𝓜𝓝𝓞𝓟𝓠𝓡𝓢𝓣𝓤𝓥𝓦𝓧𝓨𝓩𝔄𝔅𝔇𝔈𝔉𝔊𝔍𝔎𝔏𝔐𝔑𝔒𝔓𝔔𝔖𝔗𝔘𝔙𝔚𝔛𝔜𝔸𝔹𝔻𝔼𝔽𝔾𝕀𝕁𝕂𝕃𝕄𝕆𝕊𝕋𝕌𝕍𝕎𝕏𝕐𝕬𝕭𝕮𝕯𝕰𝕱𝕲𝕳𝕴𝕵𝕶𝕷𝕸𝕹𝕺𝕻𝕼𝕽𝕾𝕿𝖀𝖁𝖂𝖃𝖄𝖅𝖠𝖡𝖢𝖣𝖤𝖥𝖦𝖧𝖨𝖩𝖪𝖫𝖬𝖭𝖮𝖯𝖰𝖱𝖲𝖳𝖴𝖵𝖶𝖷𝖸𝖹𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭𝘈𝘉𝘊𝘋𝘌𝘍𝘎𝘏𝘐𝘑𝘒𝘓𝘔𝘕𝘖𝘗𝘘𝘙𝘚𝘛𝘜𝘝𝘞𝘟𝘠𝘡𝘼𝘽𝘾𝘿𝙀𝙁𝙂𝙃𝙄𝙅𝙆𝙇𝙈𝙉𝙊𝙋𝙌𝙍𝙎𝙏𝙐𝙑𝙒𝙓𝙔𝙕𝙰𝙱𝙲𝙳𝙴𝙵𝙶𝙷𝙸𝙹𝙺𝙻𝙼𝙽𝙾𝙿𝚀𝚁𝚂𝚃𝚄𝚅𝚆𝚇𝚈𝚉𝚨𝚩𝚪𝚫𝚬𝚭𝚮𝚯𝚰𝚱𝚲𝚳𝚴𝚵𝚶𝚷𝚸𝚹𝚺𝚻𝚼𝚽𝚾𝚿𝛀𝛢𝛣𝛤𝛥𝛦𝛧𝛨𝛩𝛪𝛫𝛬𝛭𝛮𝛯𝛰𝛱𝛲𝛳𝛴𝛵𝛶𝛷𝛸𝛹𝛺𝜜𝜝𝜞𝜟𝜠𝜡𝜢𝜣𝜤𝜥𝜦𝜧𝜨𝜩𝜪𝜫𝜬𝜭𝜮𝜯𝜰𝜱𝜲𝜳𝜴𝝖𝝗𝝘𝝙𝝚𝝛𝝜𝝝𝝞𝝟𝝠𝝡𝝢𝝣𝝤𝝥𝝦𝝧𝝨𝝩𝝪𝝫𝝬𝝭𝝮𝞐𝞑𝞒𝞓𝞔𝞕𝞖𝞗𝞘𝞙𝞚𝞛𝞜𝞝𝞞𝞟𝞠𝞡𝞢𝞣𝞤𝞥𝞦𝞧𝞨𝟊")))   ) // No second iteration needed.
+				break; // All loops are done because second iteration is the last possible attempt.
+			naked_filename_length = first_underscore - aFuncName;
+			if (naked_filename_length >= _countof(class_name_buf)) // Class name too long (probably impossible currently).
+				break; // All loops are done because second iteration is the last possible attempt.
+			naked_filename = class_name_buf; // Point it to a buffer for use below.
+			tmemcpy(naked_filename, aFuncName, naked_filename_length);
+			naked_filename[naked_filename_length] = '\0';
+			continue;
+		}
 		// Now that the first iteration is done, set up for the second one that searches by class/prefix.
 		// Notes about ambiguity and naming collisions:
 		// By the time it gets to the prefix/class search, it's almost given up.  Even if it wrongly finds a
@@ -8722,10 +8745,10 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 		// ability to customize which libraries are searched is planned.  This would allow a publicly
 		// distributed script to turn off all libraries except stdlib.
 		if (   !(first_underscore = _tcschr(aFuncName, '_'))   ) // No second iteration needed.
-			break; // All loops are done because second iteration is the last possible attempt.
+			continue; // All loops are done because second iteration is the last possible attempt.
 		naked_filename_length = first_underscore - aFuncName;
 		if (naked_filename_length >= _countof(class_name_buf)) // Class name too long (probably impossible currently).
-			break; // All loops are done because second iteration is the last possible attempt.
+			continue; // All loops are done because second iteration is the last possible attempt.
 		naked_filename = class_name_buf; // Point it to a buffer for use below.
 		tmemcpy(naked_filename, aFuncName, naked_filename_length);
 		naked_filename[naked_filename_length] = '\0';
@@ -8754,7 +8777,7 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 		// distributed script to turn off all libraries except stdlib.
 		if (   !(first_underscore = _tcschr(aFuncName, '_')) && !lib_hResourceMain   ) // No second iteration needed.
 		{
-			return NULL;
+			lib_hResource = lib_hResourceMain = 0;
 		}
 		else if (first_underscore)
 		{
@@ -8767,12 +8790,29 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 			if ( !(lib_hResource = FindResource(g_hInstance, class_name_buf, _T("LIB")))
 				 && !(lib_hResource = lib_hResourceMain)
 				 && !(lib_hResource = lib_hResourceMain = FindResource(NULL, class_name_buf, _T("LIB")))    )
-					return NULL;
+					lib_hResource = lib_hResourceMain = 0;
 		}
-		else if (lib_hResourceMain)
+		if (lib_hResourceMain)
 		{
 			// Use main resource since a function was found there.
 			lib_hResource = lib_hResourceMain;
+		}
+		else if ((first_underscore = StrChrAny(aFuncName + sizeof(TCHAR), _T("ԤԦჇჍⱰⱾⱿⳫⳭⳲꙠꞍꞐꞒꞠꞢꞤꞦꞨꞪƼↃAＡÁÀȦÂÄǍĂĀÃÅÅĄȺẤẦẮẰǠǺǞẪẴẢȀȂẨẲẠḀẬẶⱯⱭꜲÆǼǢꜴꜶꜸꜺꜼBＢℬḂɃƁḄḆƂƄCＣℂℭĆĊꜾĈČÇȻḈƇƆDⅅＤḊĎḐĐƋƊḌḒḎÐꝹǱǄƉEＥℰÉÈĖÊËĚĔĒẼĘȨɆẾỀḖḔỄḜẺȄȆỂẸḘḚℇỆƐƎƏȜFＦℲℱḞꝻƑGＧǴĠĜǦĞḠĢǤƓƔꝽHＨℍℌℋḢĤḦȞḨĦḤḪⱧǶⱵꜦIＩℐℑÍÌİÎÏǏĬĪĨĮƗḮỈȈȊỊḬƖĲJＪĴɈKKＫḰǨĶƘḲḴⱩLＬℒĹĿĽⱢⱠĻȽŁḶḼḺḸǇỺMＭℳḾṀⱮṂƜNＮℕŃǸṄŇÑŅƝȠṆṊṈǊŊOＯÓÒȮÔÖǑŎŌÕǪŐỐỒƟØṒṐȰṌȪỖṎǾȬǬỎȌȎƠỔỌỚỜỠỘƢỞỢŒꝎȢPＰℙṔṖⱣƤQＱℚɊꝖꝘRＲƦℝℛℜŔṘŘŖɌⱤȐȒṚṞṜSＳŚṠŜŠŞṤṦṢȘṨƩƧẞꞄTＴṪŤŢƬṬƮȚṰṮȾÞꝤꝦŦUＵÚÙÛÜǓŬŪŨŮŲŰɄǗǛǙṸǕṺỦȔȖƯỤṲỨỪṶṴỮƱỬỰVＶṼṾƲɅꝠWＷẂẀẆŴẄẈǷXＸẊẌYＹÝỲẎŶŸȲỸɎỶƳỴZＺℤℨŹŻẐŽƵȤẒẔⱫƷǮƸɁꜪꜬꜮꜢꞋꝾꝀꝂꝄꝆꝈꞀꝌꝊꝐꝒꝔꞂꝚꝜꞆꜨꝞỼⱲỾꝢꝨꝪꝬꝮꜤΑΆΆᾺᾸᾹἈἉἌἊἍἋἎἏΒΓℾΔΕΈΈῈἘἙἜἚἝἛΖͰΗΉΉῊἨἩἬἪἭἫἮἯΘϴΙΊΊῚΪῘῙἸἹἼἺἽἻἾἿΚΛΜΝΞΟΌΌῸὈὉὌὊὍὋΠℿϺΡῬΣϹϾϽϿΤΥΎΎῪΫῨῩϒϓϔὙὝὛὟΦΧΨΩΩΏΏῺὨὩὬὪὭὫὮὯϚϜͶϞϘϏϠͲϷϢϤϦϨϪϬϮАӒӐБВГЃҒӺҐҔӶДԀЂԂЕЀЁӖҼҾӘӚЄЖӜӁҖЗӞҘԐԄЅꙄИЍӤЙӢҊІЇꙆЈꙈКҞӃҜҠЌҚЛԒԠЉꙤԈԔМНҢҤҺꚔӇԢЊԊОꙨꙪꙬӦӨҨԜӪӀПҦРСҪԌТꚌԎҬꚊЋУӰЎӮӲҮҰꙊФХӼӾҲЦҴꚐЧҶҸӴӋЏШꚖЩЪꙐЫӸЬҌЭӬЮꙔꙖЯԘѠѢꙒѤѦꙘѨꙜѪꙚѬѮѰѲѴѶꙞѸѺѼѾꙌҀҎԖӅӉӍꙦӔӠꚈԆꚂꚀꙢꚄꙀꙂԞԚꚎꚒꚆꙎԱԲԳԴԵԶԷԸԹԺԻԼԽԾԿՀՁՂՃՄՅՆՇՈՉՊՋՌՍՎՏՐՑՒՓՔՕՖႠႡႢႣႤႥႦჁႧႨႩႪႫႬჂႭႮႯႰႱႲႳჃႴႵႶႷႸႹႺႻႼႽႾჄႿჀჅⰀⰁⰂⰃⰄⰅⰆⰇⰈⰉⰊⰋⰌⰍⰎⰏⰐⰑⰒⰓⰔⰕⰖⰗⰘⰙⰚⰛⰜⰝⰞⰟⰠⰡⰢⰣⰤⰥⰦⰧⰨⰩⰪⰫⰬⰭⰮⲀⲂⲄⲆⲈⲊⲌⲎⲐⲒⲔⲖⲘⲚⲜⲞⲠⲢⲤⲦⲨⲪⲬⲮⲰⲲⲴⲶⲸⲺⲼⲾⳀⳂⳄⳆⳈⳊⳌⳎⳐⳒⳔⳖⳘⳚⳜⳞⳠⳢ𐐀𐐁𐐂𐐃𐐄𐐅𐐆𐐇𐐈𐐉𐐊𐐋𐐌𐐍𐐎𐐏𐐐𐐑𐐒𐐓𐐔𐐕𐐖𐐗𐐘𐐙𐐚𐐛𐐜𐐝𐐞𐐟𐐠𐐡𐐢𐐣𐐤𐐥𐐦𐐧𝐀𝐁𝐂𝐃𝐄𝐅𝐆𝐇𝐈𝐉𝐊𝐋𝐌𝐍𝐎𝐏𝐐𝐑𝐒𝐓𝐔𝐕𝐖𝐗𝐘𝐙𝐴𝐵𝐶𝐷𝐸𝐹𝐺𝐻𝐼𝐽𝐾𝐿𝑀𝑁𝑂𝑃𝑄𝑅𝑆𝑇𝑈𝑉𝑊𝑋𝑌𝑍𝑨𝑩𝑪𝑫𝑬𝑭𝑮𝑯𝑰𝑱𝑲𝑳𝑴𝑵𝑶𝑷𝑸𝑹𝑺𝑻𝑼𝑽𝑾𝑿𝒀𝒁𝒜𝒞𝒟𝒢𝒥𝒦𝒩𝒪𝒫𝒬𝒮𝒯𝒰𝒱𝒲𝒳𝒴𝒵𝓐𝓑𝓒𝓓𝓔𝓕𝓖𝓗𝓘𝓙𝓚𝓛𝓜𝓝𝓞𝓟𝓠𝓡𝓢𝓣𝓤𝓥𝓦𝓧𝓨𝓩𝔄𝔅𝔇𝔈𝔉𝔊𝔍𝔎𝔏𝔐𝔑𝔒𝔓𝔔𝔖𝔗𝔘𝔙𝔚𝔛𝔜𝔸𝔹𝔻𝔼𝔽𝔾𝕀𝕁𝕂𝕃𝕄𝕆𝕊𝕋𝕌𝕍𝕎𝕏𝕐𝕬𝕭𝕮𝕯𝕰𝕱𝕲𝕳𝕴𝕵𝕶𝕷𝕸𝕹𝕺𝕻𝕼𝕽𝕾𝕿𝖀𝖁𝖂𝖃𝖄𝖅𝖠𝖡𝖢𝖣𝖤𝖥𝖦𝖧𝖨𝖩𝖪𝖫𝖬𝖭𝖮𝖯𝖰𝖱𝖲𝖳𝖴𝖵𝖶𝖷𝖸𝖹𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭𝘈𝘉𝘊𝘋𝘌𝘍𝘎𝘏𝘐𝘑𝘒𝘓𝘔𝘕𝘖𝘗𝘘𝘙𝘚𝘛𝘜𝘝𝘞𝘟𝘠𝘡𝘼𝘽𝘾𝘿𝙀𝙁𝙂𝙃𝙄𝙅𝙆𝙇𝙈𝙉𝙊𝙋𝙌𝙍𝙎𝙏𝙐𝙑𝙒𝙓𝙔𝙕𝙰𝙱𝙲𝙳𝙴𝙵𝙶𝙷𝙸𝙹𝙺𝙻𝙼𝙽𝙾𝙿𝚀𝚁𝚂𝚃𝚄𝚅𝚆𝚇𝚈𝚉𝚨𝚩𝚪𝚫𝚬𝚭𝚮𝚯𝚰𝚱𝚲𝚳𝚴𝚵𝚶𝚷𝚸𝚹𝚺𝚻𝚼𝚽𝚾𝚿𝛀𝛢𝛣𝛤𝛥𝛦𝛧𝛨𝛩𝛪𝛫𝛬𝛭𝛮𝛯𝛰𝛱𝛲𝛳𝛴𝛵𝛶𝛷𝛸𝛹𝛺𝜜𝜝𝜞𝜟𝜠𝜡𝜢𝜣𝜤𝜥𝜦𝜧𝜨𝜩𝜪𝜫𝜬𝜭𝜮𝜯𝜰𝜱𝜲𝜳𝜴𝝖𝝗𝝘𝝙𝝚𝝛𝝜𝝝𝝞𝝟𝝠𝝡𝝢𝝣𝝤𝝥𝝦𝝧𝝨𝝩𝝪𝝫𝝬𝝭𝝮𝞐𝞑𝞒𝞓𝞔𝞕𝞖𝞗𝞘𝞙𝞚𝞛𝞜𝞝𝞞𝞟𝞠𝞡𝞢𝞣𝞤𝞥𝞦𝞧𝞨𝟊"))) )
+		{
+			naked_filename_length = first_underscore - aFuncName;
+			if (naked_filename_length >= _countof(class_name_buf)) // Class name too long (probably impossible currently).
+				return NULL;
+			tmemcpy(class_name_buf, aFuncName, naked_filename_length);
+			tmemcpy(class_name_buf + naked_filename_length,_T(".ahk"),4);
+			class_name_buf[naked_filename_length + 4] = '\0';
+			if ( !(lib_hResource = FindResource(g_hInstance, class_name_buf, _T("LIB")))
+				 && !(lib_hResource = lib_hResourceMain)
+				 && !(lib_hResource = lib_hResourceMain = FindResource(NULL, class_name_buf, _T("LIB")))    )
+					return NULL;
+		}
+		else
+		{
+			return NULL;
 		}
 	}
 	// Now a resouce was found and it can be loaded
@@ -14627,7 +14667,7 @@ ResultType Line::Perform()
 		return EnvGet(ARG2);
 
 	case ACT_ENVSET:
-		// MSDN: "If [the 2nd] parameter is NULL, the variable is deleted from the current process�s environment."
+		// MSDN: "If [the 2nd] parameter is NULL, the variable is deleted from the current process’s environment."
 		// My: Though it seems okay, for now, just to set it to be blank if the user omitted the 2nd param or
 		// left it blank (AutoIt3 does this too).  Also, no checking is currently done to ensure that ARG2
 		// isn't longer than 32K, since future OSes may support longer env. vars.  SetEnvironmentVariable()

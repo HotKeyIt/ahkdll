@@ -680,11 +680,17 @@ Object *Object::CreateFromArgV(LPTSTR *aArgV, int aArgC)
 		return NULL;
 	ExprTokenType *token = (ExprTokenType *)_alloca(aArgC * sizeof(ExprTokenType));
 	ExprTokenType **param = (ExprTokenType **)_alloca(aArgC * sizeof(ExprTokenType*));
+	ExprTokenType aResult;
+	ExprTokenType thisToken;
+	thisToken.symbol = SYM_OBJECT;
+	thisToken.object = args;
 	for (int j = 0; j < aArgC; ++j)
 	{
 		token[j].symbol = SYM_STRING;
 		token[j].marker = aArgV[j];
 		param[j] = &token[j];
+		if ( !((j+1) % 2) )
+			args->Invoke(aResult,thisToken,IT_SET,&param[j-1],2);
 	}
 	if (!args->InsertAt(0, 1, param, aArgC))
 	{

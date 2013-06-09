@@ -8,7 +8,7 @@ LPTSTR result_to_return_dll; //HotKeyIt H2 for ahkgetvar and ahkFunction return.
 VARIANT variant_to_return_dll;
 // ExprTokenType aResultToken_to_return ;  // for ahkPostFunction
 FuncAndToken aFuncAndTokenToReturn[10] ;    // for ahkPostFunction
-int returnCount = 0 ;
+int returnCount = -1 ;
 void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar);
 
 #ifdef _USRDLL
@@ -213,8 +213,10 @@ EXPORT unsigned int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, L
 				break;
 		if(aFunc->mIsBuiltIn)
 		{
+			EnterCriticalSection(&g_CriticalAhkFunction);
 			ResultType aResult = OK;
-			ExprTokenType aResultToken;
+			if (++returnCount > 9)
+				returnCount = 0 ;
 			FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
 			if (aParamsCount)
 			{
@@ -222,6 +224,7 @@ EXPORT unsigned int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, L
 				if (!new_mem)
 				{
 					g_script.ScriptError(ERR_OUTOFMEM,func);
+					LeaveCriticalSection(&g_CriticalAhkFunction);
 					return -1;
 				}
 				aFuncAndToken.param = new_mem;
@@ -232,56 +235,62 @@ EXPORT unsigned int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, L
 			{
 				aFuncAndToken.param[i] = &aFuncAndToken.params[i];
 				aFuncAndToken.param[i]->symbol = SYM_STRING;
-				aFuncAndToken.param[i]->marker = *params[i]; // Assign parameters
+				aFuncAndToken.params[i].marker = *params[i]; // Assign parameters
 			}
 			aFuncAndToken.mToken.symbol = SYM_INTEGER;
 			LPTSTR new_buf = (LPTSTR)realloc(aFuncAndToken.buf,MAX_NUMBER_SIZE * sizeof(TCHAR));
 			if (!new_buf)
 			{
 				g_script.ScriptError(ERR_OUTOFMEM, func);
+				LeaveCriticalSection(&g_CriticalAhkFunction);
 				return -1;
 			}
 			aFuncAndToken.buf = new_buf;
 			aFuncAndToken.mToken.buf = aFuncAndToken.buf;
 			aFuncAndToken.mToken.marker = aFunc->mName;
-			aFunc->mBIF(aResult,aResultToken,aFuncAndToken.param,aParamsCount);
+			
+			aFunc->mBIF(aResult,aFuncAndToken.mToken,aFuncAndToken.param,aParamsCount);
+			LeaveCriticalSection(&g_CriticalAhkFunction);
 			return 0;
 		}
 		else
 		{
-
+			EnterCriticalSection(&g_CriticalAhkFunction);
+			if (++returnCount > 9)
+				returnCount = 0 ;
 			FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
-			aFuncAndToken.mParamCount = aParamsCount;
 			if (aParamsCount)
 			{
 				ExprTokenType **new_mem = (ExprTokenType**)realloc(aFuncAndToken.param,sizeof(ExprTokenType)*aParamsCount);
 				if (!new_mem)
 				{
 					g_script.ScriptError(ERR_OUTOFMEM,func);
+					LeaveCriticalSection(&g_CriticalAhkFunction);
 					return -1;
 				}
 				aFuncAndToken.param = new_mem;
 			}
 			else
 				aFuncAndToken.param = NULL;
+			aFuncAndToken.mParamCount = aParamsCount;
+			LPTSTR new_buf;
 			for (int i = 0;(aFunc->mParamCount > i || aFunc->mIsVariadic) && aParamsCount>i;i++)
 			{
 				aFuncAndToken.param[i] = &aFuncAndToken.params[i];
 				aFuncAndToken.param[i]->symbol = SYM_STRING;
-				LPTSTR new_buf = (LPTSTR)realloc(aFuncAndToken.param[i]->marker,(_tcslen(*params[i])+1)*sizeof(TCHAR));
+				new_buf = (LPTSTR)realloc(aFuncAndToken.param[i]->marker,(_tcslen(*params[i])+1)*sizeof(TCHAR));
 				if (!new_buf)
 				{
 					g_script.ScriptError(ERR_OUTOFMEM, func);
+					LeaveCriticalSection(&g_CriticalAhkFunction);
 					return -1;
 				}
 				aFuncAndToken.param[i]->marker = new_buf;
 				_tcscpy(aFuncAndToken.param[i]->marker,*params[i]); // Assign parameters
 			}
 			aFuncAndToken.mFunc = aFunc ;
-			returnCount++ ;
-			if (returnCount > 9)
-				returnCount = 0 ;
 			PostMessage(g_hWnd, AHK_EXECUTE_FUNCTION_DLL, (WPARAM)&aFuncAndToken,NULL);
+			LeaveCriticalSection(&g_CriticalAhkFunction);
 			return 0;
 		}
 	} 
@@ -531,6 +540,9 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 		if(aFunc->mIsBuiltIn)
 		{
 			ResultType aResult = OK;
+			EnterCriticalSection(&g_CriticalAhkFunction);
+			if (++returnCount > 9)
+				returnCount = 0 ;
 			FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
 			if (aParamsCount)
 			{
@@ -538,6 +550,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 				if (!new_mem)
 				{
 					g_script.ScriptError(ERR_OUTOFMEM,func);
+					LeaveCriticalSection(&g_CriticalAhkFunction);
 					return _T("");
 				}
 				aFuncAndToken.param = new_mem;
@@ -555,12 +568,15 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 			if (!new_buf)
 			{
 				g_script.ScriptError(ERR_OUTOFMEM,func);
+				LeaveCriticalSection(&g_CriticalAhkFunction);
 				return _T("");
 			}
 			aFuncAndToken.buf = new_buf;
 			aFuncAndToken.mToken.buf = aFuncAndToken.buf;
 			aFuncAndToken.mToken.marker = aFunc->mName;
+			
 			aFunc->mBIF(aResult,aFuncAndToken.mToken,aFuncAndToken.param,aParamsCount);
+			
 			switch (aFuncAndToken.mToken.symbol)
 			{
 			case SYM_VAR: // Caller has ensured that any SYM_VAR's Type() is VAR_NORMAL.
@@ -570,6 +586,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 					if (!new_buf)
 					{
 						g_script.ScriptError(ERR_OUTOFMEM,func);
+						LeaveCriticalSection(&g_CriticalAhkFunction);
 						return _T("");
 					}
 					result_to_return_dll = new_buf;
@@ -585,6 +602,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 					if (!new_buf)
 					{
 						g_script.ScriptError(ERR_OUTOFMEM,func);
+						LeaveCriticalSection(&g_CriticalAhkFunction);
 						return _T("");
 					}
 					result_to_return_dll = new_buf;
@@ -598,6 +616,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 				if (!new_buf)
 				{
 					g_script.ScriptError(ERR_OUTOFMEM,func);
+					LeaveCriticalSection(&g_CriticalAhkFunction);
 					return _T("");
 				}
 				result_to_return_dll = new_buf;
@@ -608,6 +627,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 				if (!new_buf)
 				{
 					g_script.ScriptError(ERR_OUTOFMEM,func);
+					LeaveCriticalSection(&g_CriticalAhkFunction);
 					return _T("");
 				}
 				result_to_return_dll = new_buf;
@@ -619,17 +639,22 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 				if (!new_buf)
 				{
 					g_script.ScriptError(ERR_OUTOFMEM,func);
+					LeaveCriticalSection(&g_CriticalAhkFunction);
 					return _T("");
 				}
 				result_to_return_dll = new_buf;
 				ITOA64(aFuncAndToken.mToken.value_int64, result_to_return_dll);
 			}
+			LeaveCriticalSection(&g_CriticalAhkFunction);
 			return result_to_return_dll;
 		}
 		else // UDF
 		{
 			//for (;aFunc->mParamCount > aParamCount && aParamsCount>aParamCount;aParamCount++)
 			//	aFunc->mParam[aParamCount].var->AssignString(*params[aParamCount]);
+			EnterCriticalSection(&g_CriticalAhkFunction);
+			if (++returnCount > 9)
+				returnCount = 0 ;
 			FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
 			if (aParamsCount)
 			{
@@ -637,6 +662,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 				if (!new_mem)
 				{
 					g_script.ScriptError(ERR_OUTOFMEM,func);
+					LeaveCriticalSection(&g_CriticalAhkFunction);
 					return _T("");
 				}
 				aFuncAndToken.param = new_mem;
@@ -653,16 +679,15 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 				if (!new_buf)
 				{
 					g_script.ScriptError(ERR_OUTOFMEM,func);
+					LeaveCriticalSection(&g_CriticalAhkFunction);
 					return _T("");
 				}
 				aFuncAndToken.param[i]->marker = new_buf;
 				_tcscpy(aFuncAndToken.param[i]->marker,*params[i]); // Assign parameters
 			}
 			aFuncAndToken.mFunc = aFunc ;
-			returnCount++ ;
-			if (returnCount > 9)
-				returnCount = 0 ;
 			SendMessage(g_hWnd, AHK_EXECUTE_FUNCTION_DLL, (WPARAM)&aFuncAndToken,NULL);
+			LeaveCriticalSection(&g_CriticalAhkFunction);
 			return aFuncAndToken.result_to_return_dll;
 		}
 	}
@@ -797,6 +822,7 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 		if(aFunc->mIsBuiltIn)
 		{
 			ResultType aResult = OK;
+			EnterCriticalSection(&g_CriticalAhkFunction);
 			ExprTokenType aResultToken;
 			ExprTokenType **aParam = (ExprTokenType**)_alloca(sizeof(ExprTokenType)*10);
 			if (!aParam)
@@ -804,6 +830,7 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 				g_script.ScriptError(ERR_OUTOFMEM,func);
 				VARIANT ret = {};
 				ret.vt = NULL;
+				LeaveCriticalSection(&g_CriticalAhkFunction);
 				return ret;
 			}
 			for (;aFunc->mParamCount > aParamCount && variants[aParamCount]->vt != VT_ERROR;aParamCount++)
@@ -813,6 +840,7 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 				{
 					VARIANT ret = {};
 					ret.vt = NULL;
+					LeaveCriticalSection(&g_CriticalAhkFunction);
 					return ret;
 				}
 				aParam[aParamCount]->symbol = SYM_VAR;
@@ -821,6 +849,7 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 				{
 					VARIANT ret = {};
 					ret.vt = NULL;
+					LeaveCriticalSection(&g_CriticalAhkFunction);
 					return ret;
 				}
 				// prepare variable
@@ -833,27 +862,30 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 			}
 			aResultToken.symbol = SYM_INTEGER;
 			aResultToken.marker = aFunc->mName;
+			
 			aFunc->mBIF(aResult,aResultToken,aParam,aParamCount);
 
 			// free all variables in case memory was allocated
 			for (;aParamCount >= 0;aParamCount--)
 				aParam[aParamCount]->var->Free();
 			TokenToVariant(aResultToken, variant_to_return_dll);
+			LeaveCriticalSection(&g_CriticalAhkFunction);
 			return variant_to_return_dll;
 		}
 		else // UDF
 		{
+			EnterCriticalSection(&g_CriticalAhkFunction);
 			for (;aFunc->mParamCount > aParamCount && variants[aParamCount]->vt != VT_ERROR;aParamCount++)
 				AssignVariant(*aFunc->mParam[aParamCount].var, *variants[aParamCount],false);
+			if (++returnCount > 9)
+				returnCount = 0 ;
 			FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
 			aFuncAndToken.mFunc = aFunc ;
-			returnCount++ ;
-			if (returnCount > 9)
-				returnCount = 0 ;
 
 			if (sendOrPost == 1)
 			{
 				SendMessage(g_hWnd, AHK_EXECUTE_FUNCTION_VARIANT, (WPARAM)&aFuncAndToken,NULL);
+				LeaveCriticalSection(&g_CriticalAhkFunction);
 				return aFuncAndToken.variant_to_return_dll;
 			}
 			else
@@ -861,13 +893,12 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 				PostMessage(g_hWnd, AHK_EXECUTE_FUNCTION_VARIANT, (WPARAM)&aFuncAndToken,NULL);
 				VARIANT &r =  aFuncAndToken.variant_to_return_dll;
 				r.vt = VT_NULL ;
+				LeaveCriticalSection(&g_CriticalAhkFunction);
 				return r ; 
 			}
 		}
 	}
 	FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
-	returnCount++ ;
-
 	VARIANT &r =  aFuncAndToken.variant_to_return_dll;
 	r.vt = VT_NULL ;
 	return r ; 
