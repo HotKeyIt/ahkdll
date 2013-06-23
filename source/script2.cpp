@@ -27,8 +27,8 @@ GNU General Public License for more details.
 #include "TextIO.h"
 #include <Psapi.h> // for GetModuleBaseName.
 
-#undef _WIN32_WINNT // v1.1.10.01: Redefine this just for these APIs, to avoid breaking some other commands on Win XP (such as Process Close).  
-#define _WIN32_WINNT 0x0600 // Windows Vista 
+#undef _WIN32_WINNT // v1.1.10.01: Redefine this just for these APIs, to avoid breaking some other commands on Win XP (such as Process Close).
+#define _WIN32_WINNT 0x0600 // Windows Vista
 #include <mmdeviceapi.h> // for SoundSet/SoundGet.
 #include <endpointvolume.h> // for SoundSet/SoundGet.
 
@@ -42,6 +42,7 @@ GNU General Public License for more details.
 ////////////////////
 // Window related //
 ////////////////////
+
 
 
 ResultType Line::ToolTip(LPTSTR aText, LPTSTR aX, LPTSTR aY, LPTSTR aID)
@@ -1869,7 +1870,7 @@ ResultType Line::ScriptPostSendMessage(bool aUseSend)
 		{
 			ArgStruct &this_arg = mArg[i];
 			var_to_update[i-1] = this_arg.text[0] == '&'  // Must start with '&', so things like 5+&MyVar aren't supported.
-				&& this_arg.deref && !this_arg.deref->is_function
+				&& this_arg.deref && !this_arg.deref->is_function()
 				&& this_arg.deref->var->Type() == VAR_NORMAL // Check VAR_NORMAL to be extra-certain it can't be the clipboard or a built-in variable (ExpandExpression() probably prevents taking the address of such a variable, but might not stop it from being in the deref array that way).
 				? this_arg.deref->var
 				: NULL;
@@ -2369,21 +2370,6 @@ BIF_DECL(BIF_WinSet)
 		WinSetRegion(target_window, aValue);
 		return;
 
-	case WINSET_REDRAW:
-		// Seems best to always have the last param be TRUE, for now, so that aValue can be
-		// reserved for future use such as invalidating only part of a window, etc. Also, it
-		// seems best not to call UpdateWindow(), which forces the window to immediately
-		// process a WM_PAINT message, since that might not be desirable as a default (maybe
-		// an option someday).  Other future options might include alternate methods of
-		// getting a window to redraw, such as:
-		// SendMessage(mHwnd, WM_NCPAINT, 1, 0);
-		// RedrawWindow(mHwnd, NULL, NULL, RDW_INVALIDATE|RDW_FRAME|RDW_UPDATENOW);
-		// SetWindowPos(mHwnd, NULL, 0, 0, 0, 0, SWP_DRAWFRAME|SWP_FRAMECHANGED|SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE);
-		// GetClientRect(mControl[mDefaultButtonIndex].hwnd, &client_rect);
-		// InvalidateRect(mControl[mDefaultButtonIndex].hwnd, &client_rect, TRUE);
-		InvalidateRect(target_window, NULL, TRUE);
-		break;
-
 	} // switch()
 	if (use_errorlevel)
 		Script::SetErrorLevelOrThrowBool(false);
@@ -2394,6 +2380,25 @@ error:
 	// but seems best to allow the other sub-commands to throw exceptions:
 	if (use_errorlevel || g->InTryBlock)
 		Script::SetErrorLevelOrThrow();
+}
+
+
+
+BIF_DECL(BIF_WinRedraw)
+{
+	if (HWND target_window = DetermineTargetWindow(aParam, aParamCount))
+	{
+		// Seems best to always have the last param be TRUE. Also, it seems best not to call
+		// UpdateWindow(), which forces the window to immediately process a WM_PAINT message,
+		// since that might not be desirable.  Some other methods of getting a window to redraw:
+		// SendMessage(mHwnd, WM_NCPAINT, 1, 0);
+		// RedrawWindow(mHwnd, NULL, NULL, RDW_INVALIDATE|RDW_FRAME|RDW_UPDATENOW);
+		// SetWindowPos(mHwnd, NULL, 0, 0, 0, 0, SWP_DRAWFRAME|SWP_FRAMECHANGED|SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE);
+		// GetClientRect(mHwnd, &client_rect); InvalidateRect(mHwnd, &client_rect, TRUE);
+		InvalidateRect(target_window, NULL, TRUE);
+	}
+	aResultToken.symbol = SYM_STRING;
+	aResultToken.marker = _T("");
 }
 
 
@@ -2917,32 +2922,18 @@ ResultType Line::EnvGet(LPTSTR aEnvVarName)
 
 
 
-ResultType Line::SysGet(LPTSTR aCmd, LPTSTR aValue)
-// Thanks to Gregory F. Hogg of Hogg's Software for providing sample code on which this function
-// is based.
+#if defined(CONFIG_WIN9X) || defined(CONFIG_WINNT4)
+#error MonitorGet: Win9x/NT4 support was removed; to restore it, load EnumDisplayMonitors dynamically.
+#endif
+BIF_DECL(BIF_MonitorGet)
 {
-	// For simplicity and array look-up performance, this is done even for sub-commands that output to an array:
-	Var &output_var = *OUTPUT_VAR;
-	SysGetCmds cmd = ConvertSysGetCmd(aCmd);
-	// Since command names are validated at load-time, this only happens if the command name
-	// was contained in a variable reference.  But for simplicity of design here, return
-	// failure in this case (unlike other functions similar to this one):
-	if (cmd == SYSGET_CMD_INVALID)
-		return LineError(ERR_PARAM2_INVALID, FAIL, aCmd);
+	int cmd = ctoupper(aResultToken.marker[10]); // StrLen("MonitorGet") = 10
 
 	MonitorInfoPackage mip = {0};  // Improves maintainability to initialize unconditionally, here.
 	mip.monitor_info_ex.cbSize = sizeof(MONITORINFOEX); // Also improves maintainability.
 
-	// EnumDisplayMonitors() must be dynamically loaded; otherwise, the app won't launch at all on Win95/NT.
-	typedef BOOL (WINAPI* EnumDisplayMonitorsType)(HDC, LPCRECT, MONITORENUMPROC, LPARAM);
-	static EnumDisplayMonitorsType MyEnumDisplayMonitors = (EnumDisplayMonitorsType)
-		GetProcAddress(GetModuleHandle(_T("user32")), "EnumDisplayMonitors");
-
 	switch(cmd)
 	{
-	case SYSGET_CMD_METRICS: // In this case, aCmd is the value itself.
-		return output_var.Assign(GetSystemMetrics(ATOI(aCmd)));  // Input and output are both signed integers.
-
 	// For the next few cases, I'm not sure if it is possible to have zero monitors.  Obviously it's possible
 	// to not have a monitor turned on or not connected at all.  But it seems likely that these various API
 	// functions will provide a "default monitor" in the absence of a physical monitor connected to the
@@ -2950,104 +2941,61 @@ ResultType Line::SysGet(LPTSTR aCmd, LPTSTR aValue)
 	// under some conditions.  However, on Win95/NT, "1" is assumed since there is probably no way to tell
 	// for sure if there are zero monitors except via GetSystemMetrics(SM_CMONITORS), which is a different
 	// animal as described below.
-	case SYSGET_CMD_MONITORCOUNT:
+	case 'C': // MonitorGetCount()
 		// Don't use GetSystemMetrics(SM_CMONITORS) because of this:
 		// MSDN: "GetSystemMetrics(SM_CMONITORS) counts only display monitors. This is different from
 		// EnumDisplayMonitors, which enumerates display monitors and also non-display pseudo-monitors."
-		if (!MyEnumDisplayMonitors) // Since system only supports 1 monitor, the first must be primary.
-			return output_var.Assign(1); // Assign as 1 vs. "1" to use hexadecimal display if that is in effect.
 		mip.monitor_number_to_find = COUNT_ALL_MONITORS;
-		MyEnumDisplayMonitors(NULL, NULL, EnumMonitorProc, (LPARAM)&mip);
-		return output_var.Assign(mip.count); // Will assign zero if the API ever returns a legitimate zero.
+		EnumDisplayMonitors(NULL, NULL, EnumMonitorProc, (LPARAM)&mip);
+		aResultToken.value_int64 = mip.count; // Will return zero if the API ever returns a legitimate zero.
+		break;
 
 	// Even if the first monitor to be retrieved by the EnumProc is always the primary (which is doubtful
 	// since there's no mention of this in the MSDN docs) it seems best to have this sub-cmd in case that
 	// policy ever changes:
-	case SYSGET_CMD_MONITORPRIMARY:
-		if (!MyEnumDisplayMonitors) // Since system only supports 1 monitor, the first must be primary.
-			return output_var.Assign(1); // Assign as 1 vs. "1" to use hexadecimal display if that is in effect.
+	case 'P': // MonitorGetPrimary()
 		// The mip struct's values have already initialized correctly for the below:
-		MyEnumDisplayMonitors(NULL, NULL, EnumMonitorProc, (LPARAM)&mip);
-		return output_var.Assign(mip.count); // Will assign zero if the API ever returns a legitimate zero.
+		EnumDisplayMonitors(NULL, NULL, EnumMonitorProc, (LPARAM)&mip);
+		aResultToken.value_int64 = mip.count; // Will return zero if the API ever returns a legitimate zero.
+		break;
 
-	case SYSGET_CMD_MONITORAREA:
-	case SYSGET_CMD_MONITORWORKAREA:
-		Var *output_var_left, *output_var_top, *output_var_right, *output_var_bottom;
-		// Make it longer than max var name so that FindOrAddVar() will be able to spot and report
-		// var names that are too long:
-		TCHAR var_name[MAX_VAR_NAME_LENGTH + 20];
-		// To help performance (in case the linked list of variables is huge), tell FindOrAddVar where
-		// to start the search.  Use the base array name rather than the preceding element because,
-		// for example, Array19 is alphabetically less than Array2, so we can't rely on the
-		// numerical ordering:
-		if (   !(output_var_left = g_script.FindOrAddVar(var_name
-			, sntprintf(var_name, _countof(var_name), _T("%sLeft"), output_var.mName)))   )
-			return FAIL;  // It already reported the error.
-		if (   !(output_var_top = g_script.FindOrAddVar(var_name
-			, sntprintf(var_name, _countof(var_name), _T("%sTop"), output_var.mName)))   )
-			return FAIL;
-		if (   !(output_var_right = g_script.FindOrAddVar(var_name
-			, sntprintf(var_name, _countof(var_name), _T("%sRight"), output_var.mName)))   )
-			return FAIL;
-		if (   !(output_var_bottom = g_script.FindOrAddVar(var_name
-			, sntprintf(var_name, _countof(var_name), _T("%sBottom"), output_var.mName)))   )
-			return FAIL;
+	case 0: // MonitorGet(N, Left, Top, Right, Bottom)
+	case 'W': // MonitorGetWorkArea(N, Left, Top, Right, Bottom)
+	{
+		mip.monitor_number_to_find = aParamCount ? (int)TokenToInt64(*aParam[0]) : 0;  // If this returns 0, it will default to the primary monitor.
+		EnumDisplayMonitors(NULL, NULL, EnumMonitorProc, (LPARAM)&mip);
+		if (!mip.count || (mip.monitor_number_to_find && mip.monitor_number_to_find != mip.count))
+		{
+			// With the exception of the caller having specified a non-existent monitor number, all of
+			// the ways the above can happen are probably impossible in practice.  Make all the variables
+			// blank vs. zero (and return zero) to indicate the problem.
+			for (int i = 1; i <= 4; ++i)
+				if (i < aParamCount && aParam[i]->symbol == SYM_VAR)
+					aParam[i]->var->Assign();
+			aResultToken.value_int64 = 0;
+			break;
+		}
+		// Otherwise:
+		LONG *monitor_rect = (LONG *)((cmd == 'W') ? &mip.monitor_info_ex.rcWork : &mip.monitor_info_ex.rcMonitor);
+		for (int i = 1; i <= 4; ++i) // Params: N (0), Left (1), Top, Right, Bottom.
+			if (i < aParamCount && aParam[i]->symbol == SYM_VAR)
+				aParam[i]->var->Assign(monitor_rect[i-1]);
+		aResultToken.value_int64 = 1;
+		break;
+	}
 
-		RECT monitor_rect;
-		if (MyEnumDisplayMonitors)
-		{
-			mip.monitor_number_to_find = ATOI(aValue);  // If this returns 0, it will default to the primary monitor.
-			MyEnumDisplayMonitors(NULL, NULL, EnumMonitorProc, (LPARAM)&mip);
-			if (!mip.count || (mip.monitor_number_to_find && mip.monitor_number_to_find != mip.count))
-			{
-				// With the exception of the caller having specified a non-existent monitor number, all of
-				// the ways the above can happen are probably impossible in practice.  Make all the variables
-				// blank vs. zero to indicate the problem.
-				output_var_left->Assign();
-				output_var_top->Assign();
-				output_var_right->Assign();
-				output_var_bottom->Assign();
-				return OK;
-			}
-			// Otherwise:
-			monitor_rect = (cmd == SYSGET_CMD_MONITORAREA) ? mip.monitor_info_ex.rcMonitor : mip.monitor_info_ex.rcWork;
-		}
-		else // Win95/NT: Since system only supports 1 monitor, the first must be primary.
-		{
-			if (cmd == SYSGET_CMD_MONITORAREA)
-			{
-				monitor_rect.left = 0;
-				monitor_rect.top = 0;
-				monitor_rect.right = GetSystemMetrics(SM_CXSCREEN);
-				monitor_rect.bottom = GetSystemMetrics(SM_CYSCREEN);
-			}
-			else // Work area
-				SystemParametersInfo(SPI_GETWORKAREA, 0, &monitor_rect, 0);  // Get desktop rect excluding task bar.
-		}
-		output_var_left->Assign(monitor_rect.left);
-		output_var_top->Assign(monitor_rect.top);
-		output_var_right->Assign(monitor_rect.right);
-		output_var_bottom->Assign(monitor_rect.bottom);
-		return OK;
-
-	case SYSGET_CMD_MONITORNAME:
-		if (MyEnumDisplayMonitors)
-		{
-			mip.monitor_number_to_find = ATOI(aValue);  // If this returns 0, it will default to the primary monitor.
-			MyEnumDisplayMonitors(NULL, NULL, EnumMonitorProc, (LPARAM)&mip);
-			if (!mip.count || (mip.monitor_number_to_find && mip.monitor_number_to_find != mip.count))
-				// With the exception of the caller having specified a non-existent monitor number, all of
-				// the ways the above can happen are probably impossible in practice.  Make the variable
-				// blank to indicate the problem:
-				return output_var.Assign();
-			else
-				return output_var.Assign(mip.monitor_info_ex.szDevice);
-		}
-		else // Win95/NT: There is probably no way to find out the name of the monitor.
-			return output_var.Assign();
+	case 'N': // MonitorGetName(N)
+		mip.monitor_number_to_find = aParamCount ? (int)TokenToInt64(*aParam[0]) : 0;  // If this returns 0, it will default to the primary monitor.
+		EnumDisplayMonitors(NULL, NULL, EnumMonitorProc, (LPARAM)&mip);
+		if (!mip.count || (mip.monitor_number_to_find && mip.monitor_number_to_find != mip.count))
+			// With the exception of the caller having specified a non-existent monitor number, all of
+			// the ways the above can happen are probably impossible in practice.  Make the variable
+			// blank to indicate the problem:
+			aResultToken.marker = _T("");
+		else
+			TokenSetResult(aResultToken, mip.monitor_info_ex.szDevice);
+		aResultToken.symbol = SYM_STRING;
 	} // switch()
-
-	return FAIL;  // Never executed (increases maintainability and avoids compiler warning).
 }
 
 
@@ -3927,7 +3875,7 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 		break;
 	} // case AHK_NOTIFYICON
 #endif
-	case AHK_DIALOG:  // User defined msg sent from our functions MsgBox() or FileSelectFile().
+	case AHK_DIALOG:  // User defined msg sent from our functions MsgBox() or FileSelect().
 	{
 		// Always call this to close the clipboard if it was open (e.g. due to a script
 		// line such as "MsgBox, %clipboard%" that got us here).  Seems better just to
@@ -3952,7 +3900,7 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 			// Setting the big icon makes AutoHotkey dialogs more distinct in the Alt-tab menu.
 			// Unfortunately, it seems that setting the big icon also indirectly sets the small
 			// icon, or more precisely, that the dialog simply scales the large icon whenever
-			// a small one isn't available.  This results in the FileSelectFile dialog's title
+			// a small one isn't available.  This results in the FileSelect dialog's title
 			// being initially messed up (at least on WinXP) and also puts an unwanted icon in
 			// the title bar of each MsgBox.  So for now it's disabled:
 			//LPARAM main_icon = (LPARAM)LoadImage(g_hInstance, MAKEINTRESOURCE(IDI_MAIN), IMAGE_ICON, 0, 0, LR_SHARED);
@@ -4602,8 +4550,8 @@ ResultType InputBoxParseOptions(LPTSTR aOptions, InputBoxType &aInputBox)
 
 			switch (ctoupper(*next_option))
 			{
-			case 'W': aInputBox.width = ATOI(next_option + 1); break;
-			case 'H': aInputBox.height = ATOI(next_option + 1); break;
+			case 'W': aInputBox.width = DPIScale(ATOI(next_option + 1)); break;
+			case 'H': aInputBox.height = DPIScale(ATOI(next_option + 1)); break;
 			case 'X': aInputBox.xpos = ATOI(next_option + 1); break;
 			case 'Y': aInputBox.ypos = ATOI(next_option + 1); break;
 			case 'T': aInputBox.timeout = (DWORD)(ATOF(next_option + 1) * 1000); break;
@@ -7436,7 +7384,7 @@ ResultType Line::SoundPlay(LPTSTR aFilespec, bool aSleepUntilDone)
 
 
 
-void SetWorkingDir(LPTSTR aNewDir)
+void SetWorkingDir(LPTSTR aNewDir, bool aSetErrorLevel)
 // Sets ErrorLevel to indicate success/failure, but only if the script has begun runtime execution (callers
 // want that).
 // This function was added in v1.0.45.01 for the reasons commented further below.
@@ -7444,7 +7392,7 @@ void SetWorkingDir(LPTSTR aNewDir)
 {
 	if (!SetCurrentDirectory(aNewDir)) // Caused by nonexistent directory, permission denied, etc.
 	{
-		if (g_script.mIsReadyToExecute)
+		if (aSetErrorLevel && g_script.mIsReadyToExecute)
 			g_script.SetErrorLevelOrThrow();
 		return;
 	}
@@ -7454,7 +7402,7 @@ void SetWorkingDir(LPTSTR aNewDir)
 	TCHAR buf[_countof(g_WorkingDir)];
 	LPTSTR actual_working_dir = g_script.mIsReadyToExecute ? g_WorkingDir : buf; // i.e. don't update g_WorkingDir when our caller is the #include directive.
 	// Other than during program startup, this should be the only place where the official
-	// working dir can change.  The exception is FileSelectFile(), which changes the working
+	// working dir can change.  The exception is FileSelect(), which changes the working
 	// dir as the user navigates from folder to folder.  However, the whole purpose of
 	// maintaining g_WorkingDir is to workaround that very issue.
 
@@ -7493,13 +7441,13 @@ void SetWorkingDir(LPTSTR aNewDir)
 	}
 
 	// Since the above didn't return, it wants us to indicate success.
-	if (g_script.mIsReadyToExecute) // Callers want ErrorLevel changed only during script runtime.
+	if (aSetErrorLevel && g_script.mIsReadyToExecute) // Callers want ErrorLevel changed only during script runtime.
 		g_ErrorLevel->Assign(ERRORLEVEL_NONE);
 }
 
 #ifndef MINIDLL
 
-ResultType Line::FileSelectFile(LPTSTR aOptions, LPTSTR aWorkingDir, LPTSTR aGreeting, LPTSTR aFilter)
+ResultType Line::FileSelect(LPTSTR aOptions, LPTSTR aWorkingDir, LPTSTR aGreeting, LPTSTR aFilter)
 // Since other script threads can interrupt this command while it's running, it's important that
 // this command not refer to sArgDeref[] and sArgVar[] anytime after an interruption becomes possible.
 // This is because an interrupting thread usually changes the values to something inappropriate for this thread.
@@ -9364,6 +9312,21 @@ VarSizeType BIV_TitleMatchMode(LPTSTR aBuf, LPTSTR aVarName)
 	return (VarSizeType)_tcslen(target_buf);
 }
 
+BIV_DECL_W(BIV_TitleMatchMode_Set)
+{
+	switch (Line::ConvertTitleMatchMode((LPTSTR)aBuf))
+	{
+	case FIND_IN_LEADING_PART: g->TitleMatchMode = FIND_IN_LEADING_PART; break;
+	case FIND_ANYWHERE: g->TitleMatchMode = FIND_ANYWHERE; break;
+	case FIND_REGEX: g->TitleMatchMode = FIND_REGEX; break;
+	case FIND_EXACT: g->TitleMatchMode = FIND_EXACT; break;
+	// For simplicity, this function handles both variables.
+	case FIND_FAST: g->TitleFindFast = true; break;
+	case FIND_SLOW: g->TitleFindFast = false; break;
+	}
+	return OK;
+}
+
 VarSizeType BIV_TitleMatchModeSpeed(LPTSTR aBuf, LPTSTR aVarName)
 {
 	if (aBuf)  // For backward compatibility (due to StringCaseSense), never change the case used here:
@@ -9378,11 +9341,27 @@ VarSizeType BIV_DetectHiddenWindows(LPTSTR aBuf, LPTSTR aVarName)
 		: 3; // Room for either On or Off (in the estimation phase).
 }
 
+BIV_DECL_W(BIV_DetectHiddenWindows_Set)
+{
+	ToggleValueType toggle;
+	if ( (toggle = Line::ConvertOnOff(aBuf, NEUTRAL)) != NEUTRAL )
+		g->DetectHiddenWindows = (toggle == TOGGLED_ON);
+	return OK;
+}
+
 VarSizeType BIV_DetectHiddenText(LPTSTR aBuf, LPTSTR aVarName)
 {
 	return aBuf
 		? (VarSizeType)_tcslen(_tcscpy(aBuf, g->DetectHiddenText ? _T("On") : _T("Off"))) // For backward compatibility (due to StringCaseSense), never change the case used here. Fixed in v1.0.42.01 to return exact length (required).
 		: 3; // Room for either On or Off (in the estimation phase).
+}
+
+BIV_DECL_W(BIV_DetectHiddenText_Set)
+{
+	ToggleValueType toggle;
+	if ( (toggle = Line::ConvertOnOff(aBuf, NEUTRAL)) != NEUTRAL )
+		g->DetectHiddenText = (toggle == TOGGLED_ON);
+	return OK;
 }
 
 VarSizeType BIV_StringCaseSense(LPTSTR aBuf, LPTSTR aVarName)
@@ -9393,12 +9372,26 @@ VarSizeType BIV_StringCaseSense(LPTSTR aBuf, LPTSTR aVarName)
 		: 6; // Room for On, Off, or Locale (in the estimation phase).
 }
 
+BIV_DECL_W(BIV_StringCaseSense_Set)
+{
+	StringCaseSenseType sense;
+	if ( (sense = Line::ConvertStringCaseSense(aBuf)) != SCS_INVALID )
+		g->StringCaseSense = sense;
+	return OK;
+}
+
 VarSizeType BIV_KeyDelay(LPTSTR aBuf, LPTSTR aVarName)
 {
 	TCHAR buf[MAX_INTEGER_SIZE];
 	LPTSTR target_buf = aBuf ? aBuf : buf;
 	_itot(g->KeyDelay, target_buf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
 	return (VarSizeType)_tcslen(target_buf);
+}
+
+BIV_DECL_W(BIV_KeyDelay_Set)
+{
+	g->KeyDelay = ATOI(aBuf);
+	return OK;
 }
 
 VarSizeType BIV_WinDelay(LPTSTR aBuf, LPTSTR aVarName)
@@ -9409,12 +9402,24 @@ VarSizeType BIV_WinDelay(LPTSTR aBuf, LPTSTR aVarName)
 	return (VarSizeType)_tcslen(target_buf);
 }
 
+BIV_DECL_W(BIV_WinDelay_Set)
+{
+	g->WinDelay = ATOI(aBuf);
+	return OK;
+}
+
 VarSizeType BIV_ControlDelay(LPTSTR aBuf, LPTSTR aVarName)
 {
 	TCHAR buf[MAX_INTEGER_SIZE];
 	LPTSTR target_buf = aBuf ? aBuf : buf;
 	_itot(g->ControlDelay, target_buf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
 	return (VarSizeType)_tcslen(target_buf);
+}
+
+BIV_DECL_W(BIV_ControlDelay_Set)
+{
+	g->ControlDelay = ATOI(aBuf);
+	return OK;
 }
 
 VarSizeType BIV_MouseDelay(LPTSTR aBuf, LPTSTR aVarName)
@@ -9425,12 +9430,24 @@ VarSizeType BIV_MouseDelay(LPTSTR aBuf, LPTSTR aVarName)
 	return (VarSizeType)_tcslen(target_buf);
 }
 
+BIV_DECL_W(BIV_MouseDelay_Set)
+{
+	g->MouseDelay = ATOI(aBuf);
+	return OK;
+}
+
 VarSizeType BIV_DefaultMouseSpeed(LPTSTR aBuf, LPTSTR aVarName)
 {
 	TCHAR buf[MAX_INTEGER_SIZE];
 	LPTSTR target_buf = aBuf ? aBuf : buf;
 	_itot(g->DefaultMouseSpeed, target_buf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
 	return (VarSizeType)_tcslen(target_buf);
+}
+
+BIV_DECL_W(BIV_DefaultMouseSpeed_Set)
+{
+	g->DefaultMouseSpeed = ATOI(aBuf);
+	return OK;
 }
 
 VarSizeType BIV_IsPaused(LPTSTR aBuf, LPTSTR aVarName) // v1.0.48: Lexikos: Added BIV_IsPaused and BIV_IsCritical.
@@ -9564,6 +9581,14 @@ VarSizeType BIV_FileEncoding(LPTSTR aBuf, LPTSTR aVarName)
 	}
 }
 
+BIV_DECL_W(BIV_FileEncoding_Set)
+{
+	UINT new_encoding = Line::ConvertFileEncoding(aBuf);
+	if (new_encoding != -1)
+		g->Encoding = new_encoding;
+	return OK;
+}
+
 
 
 VarSizeType BIV_MsgBoxResult(LPTSTR aBuf, LPTSTR aVarName)
@@ -9609,6 +9634,14 @@ VarSizeType BIV_RegView(LPTSTR aBuf, LPTSTR aVarName)
 	return (VarSizeType)_tcslen(value);
 }
 
+BIV_DECL_W(BIV_RegView_Set)
+{
+	DWORD reg_view = Line::RegConvertView(aBuf);
+	if (reg_view != -1 && IsOS64Bit())
+		g->RegView = reg_view;
+	return OK;
+}
+
 
 
 VarSizeType BIV_LastError(LPTSTR aBuf, LPTSTR aVarName)
@@ -9624,6 +9657,12 @@ VarSizeType BIV_GlobalStruct(LPTSTR aBuf, LPTSTR aVarName)
 	return aBuf
 		? (VarSizeType)_tcslen(ITOA64((LONGLONG)g, aBuf))
 		: MAX_INTEGER_LENGTH;
+}
+
+BIV_DECL_W(BIV_LastError_Set)
+{
+	SetLastError(g->LastError = ATOU(aBuf));
+	return OK;
 }
 
 
@@ -9662,6 +9701,17 @@ VarSizeType BIV_CoordMode(LPTSTR aBuf, LPTSTR aVarName)
 		: MAX_INTEGER_LENGTH;
 }
 
+BIV_DECL_W(BIV_CoordMode_Set)
+{
+	UINT new_mode = Line::ConvertCoordMode(aBuf);
+	if (new_mode != -1)
+	{
+		CoordModeType shift = Line::ConvertCoordModeCmd(aVarName + 11);
+		if (shift != -1) // Compare directly to -1 because unsigned.
+			g->CoordMode = (g->CoordMode & ~(COORD_MODE_MASK << shift)) | (new_mode << shift);
+	}
+	return OK;
+}
 
 VarSizeType BIV_PtrSize(LPTSTR aBuf, LPTSTR aVarName)
 {
@@ -9676,6 +9726,15 @@ VarSizeType BIV_PtrSize(LPTSTR aBuf, LPTSTR aVarName)
 
 
 #ifndef MINIDLL
+VarSizeType BIV_ScreenDPI(LPTSTR aBuf, LPTSTR aVarName)
+{
+	if (aBuf)
+		_itot(g_ScreenDPI, aBuf, 10);
+	return aBuf ? (VarSizeType)_tcslen(aBuf) : MAX_INTEGER_SIZE;
+}
+
+
+
 VarSizeType BIV_IconHidden(LPTSTR aBuf, LPTSTR aVarName)
 {
 	if (aBuf)
@@ -9924,7 +9983,7 @@ VarSizeType BIV_UserName_ComputerName(LPTSTR aBuf, LPTSTR aVarName)
 
 VarSizeType BIV_WorkingDir(LPTSTR aBuf, LPTSTR aVarName)
 {
-	// Use GetCurrentDirectory() vs. g_WorkingDir because any in-progress FileSelectFile()
+	// Use GetCurrentDirectory() vs. g_WorkingDir because any in-progress FileSelect()
 	// dialog is able to keep functioning even when it's quasi-thread is suspended.  The
 	// dialog can thus change the current directory as seen by the active quasi-thread even
 	// though g_WorkingDir hasn't been updated.  It might also be possible for the working
@@ -9946,6 +10005,12 @@ VarSizeType BIV_WorkingDir(LPTSTR aBuf, LPTSTR aVarName)
 	//	? GetCurrentDirectory(MAX_PATH, aBuf)
 	//	: GetCurrentDirectory(0, NULL); // MSDN says that this is a valid way to call it on all OSes, and testing shows that it works on WinXP and 98se.
 		// Above avoids subtracting 1 to be conservative and to reduce code size (due to the need to otherwise check for zero and avoid subtracting 1 in that case).
+}
+
+BIV_DECL_W(BIV_WorkingDir_Set)
+{
+	SetWorkingDir(aBuf, false);
+	return OK;
 }
 
 VarSizeType BIV_InitialWorkingDir(LPTSTR aBuf, LPTSTR aVarName)
@@ -10507,6 +10572,12 @@ VarSizeType BIV_LoopIndex(LPTSTR aBuf, LPTSTR aVarName)
 		: MAX_INTEGER_LENGTH; // Probably performs better to return a conservative estimate for the first pass than to call ITOA64 for both passes.
 }
 
+BIV_DECL_W(BIV_LoopIndex_Set)
+{
+	g->mLoopIteration = ATOI64(aBuf);
+	return OK;
+}
+
 
 
 VarSizeType BIV_ThisFunc(LPTSTR aBuf, LPTSTR aVarName)
@@ -10642,8 +10713,9 @@ VarSizeType BIV_Gui(LPTSTR aBuf, LPTSTR aVarName)
 {
 	TCHAR buf[MAX_INTEGER_SIZE];
 	LPTSTR target_buf = aBuf ? aBuf : buf;
+	GuiType* gui = g->GuiWindow; // For performance.
 
-	if (!g->GuiWindow) // The current thread was not launched as a result of GUI action.
+	if (!gui) // The current thread was not launched as a result of GUI action.
 	{
 		*target_buf = '\0';
 		return 0;
@@ -10655,17 +10727,17 @@ VarSizeType BIV_Gui(LPTSTR aBuf, LPTSTR aVarName)
 		// g->GuiPoint.x was overloaded to contain the size, since there are currently never any cases when
 		// A_GuiX/Y and A_GuiWidth/Height are both valid simultaneously.  It is documented that each of these
 		// variables is defined only in proper types of subroutines.
-		_itot(LOWORD(g->GuiPoint.x), target_buf, 10);
+		_itot(gui->Unscale(LOWORD(g->GuiPoint.x)), target_buf, 10);
 		// Above is always stored as decimal vs. hex, regardless of script settings.
 		break;
 	case 'H':
-		_itot(HIWORD(g->GuiPoint.x), target_buf, 10); // See comments above.
+		_itot(gui->Unscale(HIWORD(g->GuiPoint.x)), target_buf, 10); // See comments above.
 		break;
 	case 'X':
-		_itot(g->GuiPoint.x, target_buf, 10);
+		_itot(gui->Unscale(g->GuiPoint.x), target_buf, 10);
 		break;
 	case 'Y':
-		_itot(g->GuiPoint.y, target_buf, 10);
+		_itot(gui->Unscale(g->GuiPoint.y), target_buf, 10);
 		break;
 	case '\0': // A_Gui
 		if (!*g->GuiWindow->mName) // v1.1.04: Anonymous GUI.
@@ -10768,6 +10840,12 @@ VarSizeType BIV_EventInfo(LPTSTR aBuf, LPTSTR aVarName)
 	return aBuf
 		? (VarSizeType)_tcslen(UPTRTOA(g->EventInfo, aBuf)) // Must return exact length when aBuf isn't NULL.
 		: MAX_INTEGER_LENGTH;
+}
+
+BIV_DECL_W(BIV_EventInfo_Set)
+{
+	g->EventInfo = (EventInfoType)ATOI64(aBuf);
+	return OK;
 }
 
 
@@ -13139,7 +13217,7 @@ BIF_DECL(BIF_InStr)
 	//    for every call of InStr.  It's nice to be able to omit the CaseSensitive parameter every time and know that
 	//    the behavior of both InStr and its counterpart the equals operator are always consistent with each other.
 	// 3) Avoids breaking existing scripts that may pass something other than true/false for the CaseSense parameter.
-	StringCaseSenseType string_case_sense = (StringCaseSenseType)(aParamCount >= 3 && TokenToInt64(*aParam[2]));
+	StringCaseSenseType string_case_sense = (StringCaseSenseType)(aParamCount >= 3 && TokenToBOOL(*aParam[2]));
 	// Above has assigned SCS_INSENSITIVE (0) or SCS_SENSITIVE (1).  If it's insensitive, resolve it to
 	// be Locale-mode if the StringCaseSense mode is either case-sensitive or Locale-insensitive.
 	if (g->StringCaseSense != SCS_INSENSITIVE && string_case_sense == SCS_INSENSITIVE) // Ordered for short-circuit performance.
@@ -16167,8 +16245,9 @@ BIF_DECL(BIF_StatusBar)
 
 	if (!g->GuiDefaultWindowValid()) // Always operate on thread's default window to simplify the syntax.
 		return;
+	GuiType& gui = *g->GuiDefaultWindow; // For performance.
 	HWND control_hwnd;
-	if (   !(control_hwnd = g->GuiDefaultWindow->mStatusBarHwnd)   )
+	if (   !(control_hwnd = gui.mStatusBarHwnd)   )
 		return;
 
 	HICON hicon;
@@ -16186,7 +16265,7 @@ BIF_DECL(BIF_StatusBar)
 		int edge, part[256]; // Load-time validation has ensured aParamCount is under 255, so it shouldn't overflow.
 		for (edge = 0, new_part_count = 0; new_part_count < aParamCount; ++new_part_count)
 		{
-			edge += (int)TokenToInt64(*aParam[new_part_count]); // For code simplicity, no check for negative (seems fairly harmless since the bar will simply show up with the wrong number of parts to indicate the problem).
+			edge += gui.Scale((int)TokenToInt64(*aParam[new_part_count])); // For code simplicity, no check for negative (seems fairly harmless since the bar will simply show up with the wrong number of parts to indicate the problem).
 			part[new_part_count] = edge;
 		}
 		// For code simplicity, there is currently no means to have the last part of the bar use less than
@@ -16929,7 +17008,7 @@ BIF_DECL(BIF_LV_InsertModifyDeleteCol)
 			{
 				do_auto_size = 0; // Turn off any auto-sizing that may have been put into effect by default (such as for insertion).
 				lvc.mask |= LVCF_WIDTH;
-				lvc.cx = ATOI(next_option);
+				lvc.cx = gui.Scale(ATOI(next_option));
 			}
 		}
 

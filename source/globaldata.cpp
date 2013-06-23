@@ -135,6 +135,19 @@ int g_HotExprLineCountMax = 0; // Current capacity of g_HotExprLines.
 UINT g_HotExprTimeout = 1000; // Timeout for #if (expression) evaluation, in milliseconds.
 HWND g_HotExprLFW = NULL; // Last Found Window of last #if expression.
 
+static int GetScreenDPI()
+{
+	// The DPI setting can be different for each screen axis, but
+	// apparently it is such a rare situation that it is not worth
+	// supporting it. So we just retrieve the X axis DPI.
+
+	HDC hdc = GetDC(NULL);
+	int dpi = GetDeviceCaps(hdc, LOGPIXELSX);
+	ReleaseDC(NULL, hdc);
+	return dpi;
+}
+
+int g_ScreenDPI = GetScreenDPI();
 MenuTypeType g_MenuIsVisible = MENU_TYPE_NONE;
 #endif
 int g_nMessageBoxes = 0;
@@ -406,7 +419,7 @@ Action g_act[] =
 	, {_T("WinGetPos"), 0, 8, true, NULL} // Four optional output vars: xpos, ypos, width, height.  Std. 4 window params.
 	, {_T("WinGetText"), 1, 5, true, NULL} // Output var, std 4 window params.
 
-	, {_T("SysGet"), 2, 4, true, NULL} // Output-var/array, sub-cmd or sys-metrics-number, input-value1, future-use
+	, {_T("SysGet"), 2, 2, true, NULL} // Output-var, sys-metrics-number
 
 	, {_T("PostMessage"), 1, 8, false, {1, 2, 3, 0}}  // msg, wParam, lParam, Control, WinTitle, WinText, ExcludeTitle, ExcludeText
 	, {_T("SendMessage"), 1, 9, false, {1, 2, 3, 9, 0}}  // msg, wParam, lParam, Control, WinTitle, WinText, ExcludeTitle, ExcludeText, Timeout
@@ -451,8 +464,8 @@ Action g_act[] =
 	, {_T("FileGetVersion"), 1, 2, true, NULL} // OutputVar, Filespec
 
 	, {_T("SetWorkingDir"), 1, 1, false, NULL} // New path
-	, {_T("FileSelectFile"), 1, 5, true, NULL} // output var, options, working dir, greeting, filter
-	, {_T("FileSelectFolder"), 1, 4, true, {3, 0}} // output var, root directory, options, greeting
+	, {_T("FileSelect"), 1, 5, true, NULL} // output var, options, working dir, greeting, filter
+	, {_T("DirSelect"), 1, 4, true, {3, 0}} // output var, root directory, options, greeting
 
 	, {_T("FileGetShortcut"), 1, 8, true, NULL} // Filespec, OutTarget, OutDir, OutArg, OutDescrip, OutIcon, OutIconIndex, OutShowState.
 	, {_T("FileCreateShortcut"), 2, 9, false, {8, 9, 0}} // file, lnk [, workdir, args, desc, icon, hotkey, icon_number, run_state]

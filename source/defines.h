@@ -170,6 +170,7 @@ enum SymbolType // For use with ExpandExpression() and IsNumeric().
 	, SYM_GT, SYM_LT, SYM_GTOE, SYM_LTOE  // >, <, >=, <= ... Keep this in sync with IS_RELATIONAL_OPERATOR() below.
 #define IS_RELATIONAL_OPERATOR(symbol) (symbol >= SYM_EQUAL && symbol <= SYM_LTOE)
 	, SYM_CONCAT
+	, SYM_LOW_CONCAT // Zero-precedence concat, used so that "x%y=z%" is equivalent to "x%(y=z)%".
 	, SYM_BITOR // Seems more intuitive to have these higher in prec. than the above, unlike C and Perl, but like Python.
 	, SYM_BITXOR // SYM_BITOR (ABOVE) MUST BE KEPT FIRST AMONG THE BIT OPERATORS BECAUSE IT'S USED IN A RANGE-CHECK.
 	, SYM_BITAND
@@ -186,8 +187,8 @@ enum SymbolType // For use with ExpandExpression() and IsNumeric().
 	, SYM_INVALID = SYM_COUNT // Some callers may rely on YIELDS_AN_OPERAND(SYM_INVALID)==false.
 };
 // These two are macros for maintainability (i.e. seeing them together here helps maintain them together).
-#define SYM_DYNAMIC_IS_DOUBLE_DEREF(token) (token.buf) // SYM_DYNAMICs other than doubles have NULL buf, at least at the stage this macro is called.
-#define SYM_DYNAMIC_IS_CLIPBOARD(token) (!(token)->buf && (token)->var->Type() == VAR_CLIPBOARD) // i.e. it's the clipboard, not a built-in variable or double-deref.
+#define SYM_DYNAMIC_IS_DOUBLE_DEREF(token) ((token).buf) // SYM_DYNAMICs other than doubles have NULL buf, at least at the stage this macro is called.
+#define SYM_DYNAMIC_IS_WRITABLE(token) (!(token)->buf && (token)->var->Type() <= VAR_LAST_WRITABLE) // i.e. it's the clipboard, not a built-in variable or double-deref.
 
 
 struct ExprTokenType; // Forward declarations for use below.
@@ -349,7 +350,7 @@ enum enum_act {
 , ACT_DIRCREATE, ACT_DIRDELETE
 , ACT_FILEGETATTRIB, ACT_FILESETATTRIB, ACT_FILEGETTIME, ACT_FILESETTIME
 , ACT_FILEGETSIZE, ACT_FILEGETVERSION
-, ACT_SETWORKINGDIR, ACT_FILESELECTFILE, ACT_FILESELECTFOLDER, ACT_FILEGETSHORTCUT, ACT_FILECREATESHORTCUT
+, ACT_SETWORKINGDIR, ACT_FILESELECT, ACT_DIRSELECT, ACT_FILEGETSHORTCUT, ACT_FILECREATESHORTCUT
 , ACT_INIREAD, ACT_INIWRITE, ACT_INIDELETE
 , ACT_REGREAD, ACT_REGWRITE, ACT_REGDELETE, ACT_SETREGVIEW
 , ACT_OUTPUTDEBUG
@@ -384,7 +385,6 @@ enum enum_act {
 	|| ActionType == ACT_RELOAD)
 #endif
 #define ACT_IS_CONTROL_FLOW(ActionType) (ActionType <= ACT_LAST_CONTROL_FLOW && ActionType >= ACT_FIRST_CONTROL_FLOW)
-#define ACT_IS_ASSIGN(ActionType) (ActionType == ACT_ASSIGNEXPR)
 #define ACT_IS_IF(ActionType) (ActionType == ACT_IF)
 #define ACT_IS_LOOP(ActionType) (ActionType >= ACT_LOOP && ActionType <= ACT_WHILE)
 #define ACT_IS_IF_OR_ELSE_OR_LOOP(ActionType) (ActionType <= ACT_WHILE && ActionType >= ACT_ELSE)

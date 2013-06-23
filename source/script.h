@@ -166,6 +166,7 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_UNEXPECTED_CLOSE_PAREN _T("Unexpected \")\"")
 #define ERR_UNEXPECTED_CLOSE_BRACKET _T("Unexpected \"]\"")
 #define ERR_UNEXPECTED_CLOSE_BRACE _T("Unexpected \"}\"")
+#define ERR_BAD_AUTO_CONCAT _T("Missing space or operator before this.")
 #define ERR_MISSING_CLOSE_QUOTE _T("Missing close-quote") // No period after short phrases.
 #define ERR_MISSING_COMMA _T("Missing comma")             //
 #define ERR_BLANK_PARAM _T("Blank parameter")             //
@@ -177,7 +178,8 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_CATCH_WITH_NO_TRY _T("CATCH with no matching TRY")
 #define ERR_EXPECTED_BLOCK_OR_ACTION _T("Expected \"{\" or single-line action.")
 #define ERR_OUTOFMEM _T("Out of memory.")  // Used by RegEx too, so don't change it without also changing RegEx to keep the former string.
-#define ERR_EXPR_TOO_LONG _T("Expression too long")
+#define ERR_EXPR_TOO_LONG _T("Expression too complex")
+#define ERR_TOO_MANY_REFS ERR_EXPR_TOO_LONG // No longer applies to just var/func refs. Old message: "Too many var/func refs."
 #define ERR_NO_LABEL _T("Target label does not exist.")
 #define ERR_MENU _T("Menu does not exist.")
 #define ERR_SUBMENU _T("Submenu does not exist.")
@@ -194,8 +196,11 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_INVALID_LINE_IN_CLASS_DEF _T("Expected assignment or class/method definition.")
 #define ERR_INVALID_GUI_NAME _T("Invalid Gui name.")
 #define ERR_INVALID_OPTION _T("Invalid option.") // Generic message used by Gui and GuiControl/Get.
-#define ERR_MUST_DECLARE _T("This variable must be declared.")
 #define ERR_MUST_INIT_STRUCT _T("Empty pointer, dynamic Structure fields must be initialized manually first.")
+#define ERR_MUST_DECLARE _T("This variable must be declared.")
+#define ERR_REMOVE_THE_PERCENT _T("If this variable was not intended to be dynamic, remove the % symbols from it.")
+#define ERR_DYNAMIC_TOO_LONG _T("This dynamically built variable name is too long.  ") ERR_REMOVE_THE_PERCENT
+#define ERR_DYNAMIC_BLANK _T("This dynamic variable is blank.  ") ERR_REMOVE_THE_PERCENT
 
 #define WARNING_USE_UNSET_VARIABLE _T("This variable has not been assigned a value.")
 #define WARNING_LOCAL_SAME_AS_GLOBAL _T("This local variable has the same name as a global variable.")
@@ -256,6 +261,22 @@ inline void swap(T &v1, T &v2) {
 	v2=tmp;
 }
 
+// The following functions are used in GUI DPI scaling, so that
+// GUIs designed for a 96 DPI setting (i.e. using absolute coords
+// or explicit widths/sizes) can continue to run with mostly no issues.
+
+static inline int DPIScale(int x)
+{
+	extern int g_ScreenDPI;
+	return MulDiv(x, g_ScreenDPI, 96);
+}
+
+static inline int DPIUnscale(int x)
+{
+	extern int g_ScreenDPI;
+	return MulDiv(x, 96, g_ScreenDPI);
+}
+
 #define INPUTBOX_DEFAULT INT_MIN
 ResultType InputBoxParseOptions(LPTSTR aOptions, InputBoxType &aInputBox);
 ResultType InputBox(Var *aOutputVar, LPTSTR aTitle, LPTSTR aText, LPTSTR aOptions, LPTSTR aDefault);
@@ -286,19 +307,36 @@ typedef WORD FileIndexType; // Use WORD to conserve memory due to its use in the
 typedef WORD DerefLengthType; // WORD might perform better than UCHAR, but this can be changed to UCHAR if another field is ever needed in the struct.
 typedef UCHAR DerefParamCountType;
 
+// Traditionally DerefType was used to hold var and func references, which are parsed at an
+// early stage, but when the capability to nest expressions between percent signs was added,
+// it became necessary to pre-parse more.  All non-numeric operands are represented in it.
+enum DerefTypeType : BYTE
+{
+	DT_VAR,			// Variable reference, including built-ins.
+	DT_DOUBLE,		// Marks the end of a double-deref.
+	DT_STRING,		// Segment of text in a text arg (delimited by '%').
+	DT_QSTRING,		// Segment of text in a quoted string (delimited by '%').
+	DT_WORDOP,		// Word operator: and, or, not, new.
+	// DerefType::is_function() requires that these are last:
+	DT_FUNC,		// Function call.
+	DT_VARIADIC		// Variadic function call.
+};
+
 class Func; // Forward declaration for use below.
 struct DerefType
 {
 	LPTSTR marker;
 	union
 	{
-		Var *var;
-		Func *func;
+		Var *var; // DT_VAR
+		Func *func; // DT_FUNC
+		DerefType *next; // DT_STRING
+		SymbolType symbol; // DT_WORDOP
 	};
 	// Keep any fields that aren't an even multiple of 4 adjacent to each other.  This conserves memory
 	// due to byte-alignment:
-	BYTE is_function;
-#define DEREF_VARIADIC 2
+	DerefTypeType type;
+	bool is_function() { return type >= DT_FUNC; }
 	DerefParamCountType param_count; // The actual number of parameters present in this function *call*.  Left uninitialized except for functions.
 	DerefLengthType length; // Listed only after byte-sized fields, due to it being a WORD.
 };
@@ -319,7 +357,7 @@ struct ArgStruct
 	// setting [which helps performance]).
 	ArgLengthType length; // Keep adjacent to above so that it uses no extra memory. This member was added in v1.0.44.14 to improve runtime performance.
 	LPTSTR text;
-	DerefType *deref;  // Will hold a NULL-terminated array of var-deref locations within <text>.
+	DerefType *deref;  // Will hold a NULL-terminated array of operands/word-operators pre-parsed by ParseDerefs()/ParseOperands().
 	ExprTokenType *postfix;  // An array of tokens in postfix order. Also used for ACT_(NOT)BETWEEN to store pre-converted binary integers.
 };
 
@@ -430,10 +468,6 @@ enum WinGetCmds {WINGET_CMD_INVALID, WINGET_CMD_ID, WINGET_CMD_IDLAST, WINGET_CM
 	, WINGET_CMD_STYLE, WINGET_CMD_EXSTYLE, WINGET_CMD_TRANSPARENT, WINGET_CMD_TRANSCOLOR, WINGET_CMD_PROCESSPATH
 };
 
-enum SysGetCmds {SYSGET_CMD_INVALID, SYSGET_CMD_METRICS, SYSGET_CMD_MONITORCOUNT, SYSGET_CMD_MONITORPRIMARY
-	, SYSGET_CMD_MONITORAREA, SYSGET_CMD_MONITORWORKAREA, SYSGET_CMD_MONITORNAME
-};
-
 #ifndef MINIDLL
 enum MenuCommands {MENU_CMD_INVALID, MENU_CMD_SHOW, MENU_CMD_USEERRORLEVEL
 	, MENU_CMD_ADD, MENU_CMD_RENAME, MENU_CMD_CHECK, MENU_CMD_UNCHECK, MENU_CMD_TOGGLECHECK
@@ -511,7 +545,7 @@ enum DriveGetCmds {DRIVEGET_CMD_INVALID, DRIVEGET_CMD_LIST, DRIVEGET_CMD_FILESYS
 	, DRIVEGET_CMD_STATUSCD, DRIVEGET_CMD_CAPACITY, DRIVEGET_CMD_SPACEFREE};
 
 enum WinSetAttributes {WINSET_INVALID, WINSET_TRANSPARENT, WINSET_TRANSCOLOR, WINSET_ALWAYSONTOP
-	, WINSET_STYLE, WINSET_EXSTYLE, WINSET_REDRAW, WINSET_ENABLED, WINSET_REGION};
+	, WINSET_STYLE, WINSET_EXSTYLE, WINSET_ENABLED, WINSET_REGION};
 
 
 class Label; // Forward declaration so that each can use the other.
@@ -551,13 +585,13 @@ private:
 		, DWORD aControlType, LPTSTR aDevice);
 	ResultType SoundPlay(LPTSTR aFilespec, bool aSleepUntilDone);
 	ResultType Download(LPTSTR aURL, LPTSTR aFilespec);
-	ResultType FileSelectFile(LPTSTR aOptions, LPTSTR aWorkingDir, LPTSTR aGreeting, LPTSTR aFilter);
+	ResultType FileSelect(LPTSTR aOptions, LPTSTR aWorkingDir, LPTSTR aGreeting, LPTSTR aFilter);
 
 	// Bitwise flags:
 	#define FSF_ALLOW_CREATE 0x01
 	#define FSF_EDITBOX      0x02
 	#define FSF_NONEWDIALOG  0x04
-	ResultType FileSelectFolder(LPTSTR aRootDir, LPTSTR aOptions, LPTSTR aGreeting);
+	ResultType DirSelect(LPTSTR aRootDir, LPTSTR aOptions, LPTSTR aGreeting);
 
 	ResultType FileGetShortcut(LPTSTR aShortcutFile);
 	ResultType FileCreateShortcut(LPTSTR aTargetFile, LPTSTR aShortcutFile, LPTSTR aWorkingDir, LPTSTR aArgs
@@ -588,6 +622,7 @@ private:
 	ResultType RegWrite(DWORD aValueType, HKEY aRootKey, LPTSTR aRegSubkey, LPTSTR aValueName, LPTSTR aValue);
 	ResultType RegDelete(HKEY aRootKey, LPTSTR aRegSubkey, LPTSTR aValueName);
 	static LONG RegRemoveSubkeys(HKEY hRegKey);
+	ResultType SetRegView(LPTSTR aView);
 
 	ResultType ToolTip(LPTSTR aText, LPTSTR aX, LPTSTR aY, LPTSTR aID);
 #ifndef MINIDLL
@@ -639,7 +674,6 @@ private:
 	ResultType WinGetText(LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LPTSTR aExcludeText);
 	ResultType WinGetPos(LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LPTSTR aExcludeText);
 	ResultType EnvGet(LPTSTR aEnvVarName);
-	ResultType SysGet(LPTSTR aCmd, LPTSTR aValue);
 #ifndef MINIDLL
 	ResultType PixelSearch(int aLeft, int aTop, int aRight, int aBottom, COLORREF aColorBGR, int aVariation
 		, LPTSTR aOptions, bool aIsPixelGetColor);
@@ -830,7 +864,7 @@ public:
 	// e.g. WinMove, -%x%, -%y%:
 	#define EXPR_TELLTALES EXPR_COMMON _T("\"")
 	// Characters that mark the end of an operand inside an expression.  Double-quote must not be included:
-	#define EXPR_OPERAND_TERMINATORS_EX_DOT EXPR_COMMON _T("+-?") // L31: Used in a few places where '.' needs special treatment.
+	#define EXPR_OPERAND_TERMINATORS_EX_DOT EXPR_COMMON _T("%+-?\n") // L31: Used in a few places where '.' needs special treatment.
 	#define EXPR_OPERAND_TERMINATORS EXPR_OPERAND_TERMINATORS_EX_DOT _T(".") // L31: Used in expressions where '.' is always an operator.
 	#define EXPR_ALL_SYMBOLS EXPR_OPERAND_TERMINATORS _T("\"")
 	#define EXPR_ILLEGAL_CHARS _T("\\;`@#$") // Characters illegal in an expression.
@@ -856,12 +890,11 @@ public:
 	double ArgIndexToDouble(int aArgIndex);
 	size_t ArgIndexLength(int aArgIndex);
 
-	Var *ResolveVarOfArg(int aArgIndex, bool aCreateIfNecessary = true);
 	ResultType ExpandArgs(ExprTokenType *aResultToken = NULL, VarSizeType aSpaceNeeded = VARSIZE_ERROR, Var *aArgVar[] = NULL);
 	VarSizeType GetExpandedArgSize(Var *aArgVar[]);
-	LPTSTR ExpandArg(LPTSTR aBuf, int aArgIndex, Var *aArgVar = NULL);
 	LPTSTR ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType *aResultToken
-		, LPTSTR &aTarget, LPTSTR &aDerefBuf, size_t &aDerefBufSize, LPTSTR aArgDeref[], size_t aExtraSize);
+		, LPTSTR &aTarget, LPTSTR &aDerefBuf, size_t &aDerefBufSize, LPTSTR aArgDeref[], size_t aExtraSize
+		, Var **aArgVar = NULL);
 	ResultType ExpressionToPostfix(ArgStruct &aArg);
 	ResultType EvaluateHotCriterionExpression(LPTSTR aHotkeyName); // L4: Called by MainWindowProc to handle an AHK_HOT_IF_EXPR message.
 
@@ -913,8 +946,8 @@ public:
 			case ACT_FILEGETTIME:
 			case ACT_FILEGETSIZE:
 			case ACT_FILEGETVERSION:
-			case ACT_FILESELECTFILE:
-			case ACT_FILESELECTFOLDER:
+			case ACT_FILESELECT:
+			case ACT_DIRSELECT:
 			case ACT_MOUSEGETPOS:
 			case ACT_WINGETTITLE:
 			case ACT_WINGETCLASS:
@@ -1205,18 +1238,6 @@ public:
 		return MATCHMODE_INVALID;
 	}
 
-	static SysGetCmds ConvertSysGetCmd(LPTSTR aBuf)
-	{
-		if (!aBuf || !*aBuf) return SYSGET_CMD_INVALID;
-		if (IsNumeric(aBuf)) return SYSGET_CMD_METRICS;
-		if (!_tcsicmp(aBuf, _T("MonitorCount"))) return SYSGET_CMD_MONITORCOUNT;
-		if (!_tcsicmp(aBuf, _T("MonitorPrimary"))) return SYSGET_CMD_MONITORPRIMARY;
-		if (!_tcsicmp(aBuf, _T("Monitor"))) return SYSGET_CMD_MONITORAREA; // Called "Monitor" vs. "MonitorArea" to make it easier to remember.
-		if (!_tcsicmp(aBuf, _T("MonitorWorkArea"))) return SYSGET_CMD_MONITORWORKAREA;
-		if (!_tcsicmp(aBuf, _T("MonitorName"))) return SYSGET_CMD_MONITORNAME;
-		return SYSGET_CMD_INVALID;
-	}
-
 #ifndef MINIDLL
 	static MenuCommands ConvertMenuCommand(LPTSTR aBuf)
 	{
@@ -1474,12 +1495,11 @@ public:
 	static WinSetAttributes ConvertWinSetAttribute(LPTSTR aBuf)
 	{
 		if (!aBuf || !*aBuf) return WINSET_INVALID;
-		if (!_tcsicmp(aBuf, _T("Trans")) || !_tcsicmp(aBuf, _T("Transparent"))) return WINSET_TRANSPARENT;
+		if (!_tcsicmp(aBuf, _T("Transparent"))) return WINSET_TRANSPARENT;
 		if (!_tcsicmp(aBuf, _T("TransColor"))) return WINSET_TRANSCOLOR;
-		if (!_tcsicmp(aBuf, _T("AlwaysOnTop")) || !_tcsicmp(aBuf, _T("Topmost"))) return WINSET_ALWAYSONTOP;
+		if (!_tcsicmp(aBuf, _T("AlwaysOnTop"))) return WINSET_ALWAYSONTOP;
 		if (!_tcsicmp(aBuf, _T("Style"))) return WINSET_STYLE;
 		if (!_tcsicmp(aBuf, _T("ExStyle"))) return WINSET_EXSTYLE;
-		if (!_tcsicmp(aBuf, _T("Redraw"))) return WINSET_REDRAW;
 		if (!_tcsicmp(aBuf, _T("Enabled"))) return WINSET_ENABLED;
 		if (!_tcsicmp(aBuf, _T("Region"))) return WINSET_REGION;
 		return WINSET_INVALID;
@@ -1501,9 +1521,9 @@ public:
 		if (!_tcsicmp(aBuf, _T("ExStyle"))) return WINGET_CMD_EXSTYLE;
 		if (!_tcsicmp(aBuf, _T("Transparent"))) return WINGET_CMD_TRANSPARENT;
 		if (!_tcsicmp(aBuf, _T("TransColor"))) return WINGET_CMD_TRANSCOLOR;
-		if (!_tcsnicmp(aBuf, _T("ControlList"), 11))
+		if (!_tcsnicmp(aBuf, _T("Controls"), 8))
 		{
-			aBuf += 11;
+			aBuf += 8;
 			if (!*aBuf)
 				return WINGET_CMD_CONTROLLIST;
 			if (!_tcsicmp(aBuf, _T("Hwnd")))
@@ -2260,12 +2280,12 @@ class GuiType
 {
 public:
 	#define GUI_STANDARD_WIDTH_MULTIPLIER 15 // This times font size = width, if all other means of determining it are exhausted.
-	#define GUI_STANDARD_WIDTH (GUI_STANDARD_WIDTH_MULTIPLIER * sFont[mCurrentFontIndex].point_size)
+	#define GUI_STANDARD_WIDTH DPIScale(GUI_STANDARD_WIDTH_MULTIPLIER * sFont[mCurrentFontIndex].point_size)
 	// Update for v1.0.21: Reduced it to 8 vs. 9 because 8 causes the height each edit (with the
 	// default style) to exactly match that of a Combo or DropDownList.  This type of spacing seems
 	// to be what other apps use too, and seems to make edits stand out a little nicer:
-	#define GUI_CTL_VERTICAL_DEADSPACE 8
-	#define PROGRESS_DEFAULT_THICKNESS (2 * sFont[mCurrentFontIndex].point_size)
+	#define GUI_CTL_VERTICAL_DEADSPACE DPIScale(8)
+	#define PROGRESS_DEFAULT_THICKNESS DPIScale(2 * sFont[mCurrentFontIndex].point_size)
 	LPTSTR mName;
 	HWND mHwnd, mStatusBarHwnd;
 	HWND mOwner;  // The window that owns this one, if any.  Note that Windows provides no way to change owners after window creation.
@@ -2303,6 +2323,7 @@ public:
 	TabIndexType mCurrentTabIndex;// Which tab of a tab control is currently the default for newly added controls.
 	bool mGuiShowHasNeverBeenDone, mFirstActivation, mShowIsInProgress, mDestroyWindowHasBeenCalled;
 	bool mControlWidthWasSetByContents; // Whether the most recently added control was auto-width'd to fit its contents.
+	bool mUsesDPIScaling; // Whether the GUI uses DPI scaling.
 
 	#define MAX_GUI_FONTS 200  // v1.0.44.14: Increased from 100 to 200 due to feedback that 100 wasn't enough.  But to alleviate memory usage, the array is now allocated upon first use.
 	static FontType *sFont; // An array of structs, allocated upon first use.
@@ -2320,7 +2341,7 @@ public:
 		, mDefaultButtonIndex(-1), mLabelForClose(NULL), mLabelForEscape(NULL), mLabelForSize(NULL)
 		, mLabelForDropFiles(NULL), mLabelForContextMenu(NULL), mReferenceCount(1)
 		, mLabelForCloseIsRunning(false), mLabelForEscapeIsRunning(false), mLabelForSizeIsRunning(false)
-		, mLabelsHaveBeenSet(false)
+		, mLabelsHaveBeenSet(false), mUsesDPIScaling(true)
 		// The styles DS_CENTER and DS_3DLOOK appear to be ineffectual in this case.
 		// Also note that WS_CLIPSIBLINGS winds up on the window even if unspecified, which is a strong hint
 		// that it should always be used for top level windows across all OSes.  Usenet posts confirm this.
@@ -2442,6 +2463,10 @@ public:
 	void UpdateAccelerators(UserMenu &aMenu, LPACCEL aAccel, int &aAccelCount);
 	void RemoveAccelerators();
 	static bool ConvertAccelerator(LPTSTR aString, ACCEL &aAccel);
+
+	// See DPIScale() and DPIUnscale() for more details.
+	int Scale(int x) { return mUsesDPIScaling ? DPIScale(x) : x; }
+	int Unscale(int x) { return mUsesDPIScaling ? DPIUnscale(x) : x; }
 };
 #endif // MINIDLL
 
@@ -2477,6 +2502,7 @@ public:
 	int mClassObjectCount;
 	Object *mClassObject[MAX_NESTED_CLASSES]; // Class definition currently being parsed.
 	TCHAR mClassName[MAX_CLASS_NAME_LENGTH + 1]; // Only used during load-time.
+	Object *mUnresolvedClasses;
 
 	// These two track the file number and line number in that file of the line currently being loaded,
 	// which simplifies calls to ScriptError() and LineError() (reduces the number of params that must be passed).
@@ -2498,7 +2524,9 @@ public:
 	ResultType IsDirective(LPTSTR aBuf);
 	ResultType ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType = ACT_INVALID
 		, LPTSTR aLiteralMap = NULL, size_t aLiteralMapLength = 0);
-	ResultType ParseDerefs(LPTSTR aArgText, LPTSTR aArgMap, DerefType *aDeref, int &aDerefCount);
+	ResultType ParseDerefs(LPTSTR aArgText, LPTSTR aArgMap, DerefType *aDeref, int &aDerefCount, int *aPos = NULL, TCHAR aEndChar = 0);
+	ResultType ParseOperands(LPTSTR aArgText, LPTSTR aArgMap, DerefType *aDeref, int &aDerefCount, int *aPos = NULL, TCHAR aEndChar = 0);
+	ResultType ParseDoubleDeref(LPTSTR aArgText, LPTSTR aArgMap, DerefType *aDeref, int &aDerefCount, int *aPos);
 	LPTSTR ParseActionType(LPTSTR aBufTarget, LPTSTR aBufSource, bool aDisplayErrors);
 	static ActionTypeType ConvertActionType(LPTSTR aActionTypeString);
 	ResultType AddLabel(LPTSTR aLabelName, bool aAllowDupe);
@@ -2623,6 +2651,7 @@ public:
 	ResultType DefineClass(LPTSTR aBuf);
 	ResultType DefineClassVars(LPTSTR aBuf, bool aStatic);
 	Object *FindClass(LPCTSTR aClassName, size_t aClassNameLength = 0);
+	ResultType ResolveClasses();
 
 	int AddBIF(LPTSTR aFuncName, BuiltInFunctionType bif, size_t minparams, size_t maxparams); // N10 added for dynamic BIFs
 	#define FINDVAR_DEFAULT  (VAR_LOCAL | VAR_GLOBAL)
@@ -2634,7 +2663,8 @@ public:
 		, int aScope = FINDVAR_DEFAULT
 		, bool *apIsLocal = NULL);
 	Var *AddVar(LPTSTR aVarName, size_t aVarNameLength, int aInsertPos, int aScope);
-	static void *GetVarType(LPTSTR aVarName);
+	static VarTypes GetVarType(LPTSTR aVarName, VirtualVar *aBIV = NULL);
+	static BuiltInVarType GetVarType_BIV(LPTSTR aVarName, BuiltInVarSetType &setter); // Helper function.
 
 	WinGroup *FindGroup(LPTSTR aGroupName, bool aCreateIfNotFound = false);
 	ResultType AddGroup(LPTSTR aGroupName);
@@ -2710,112 +2740,120 @@ class MallocHeap; // forward declaration for export.cpp
 ////////////////////////
 // BUILT-IN VARIABLES //
 ////////////////////////
-VarSizeType BIV_True_False(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_MMM_DDD(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_DateTime(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_TitleMatchMode(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_TitleMatchModeSpeed(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_DetectHiddenWindows(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_DetectHiddenText(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_StringCaseSense(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_KeyDelay(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_WinDelay(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_ControlDelay(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_MouseDelay(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_DefaultMouseSpeed(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_IsPaused(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_IsCritical(LPTSTR aBuf, LPTSTR aVarName);
-#ifndef MINIDLL
-VarSizeType BIV_IsSuspended(LPTSTR aBuf, LPTSTR aVarName);
-#endif
-VarSizeType BIV_IsCompiled(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_IsUnicode(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_FileEncoding(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_MsgBoxResult(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_RegView(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_LastError(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_GlobalStruct(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_ScriptStruct(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_ModuleHandle(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_IsDll(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_CoordMode(LPTSTR aBuf, LPTSTR aVarName);
-#ifndef MINIDLL
-VarSizeType BIV_IconHidden(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_IconTip(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_IconFile(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_IconNumber(LPTSTR aBuf, LPTSTR aVarName);
-#endif
-VarSizeType BIV_ExitReason(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_Space_Tab(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_AhkVersion(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_AhkPath(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_DllPath(LPTSTR aBuf, LPTSTR aVarName); // HotKeyIt H1 path of loaded dll
-VarSizeType BIV_TickCount(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_Now(LPTSTR aBuf, LPTSTR aVarName);
-#ifdef CONFIG_WIN9X
-VarSizeType BIV_OSType(LPTSTR aBuf, LPTSTR aVarName);
-#endif
-VarSizeType BIV_OSVersion(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_Is64bitOS(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_Language(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_UserName_ComputerName(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_WorkingDir(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_InitialWorkingDir(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_WinDir(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_Temp(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_ComSpec(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_SpecialFolderPath(LPTSTR aBuf, LPTSTR aVarName); // Handles various variables.
-VarSizeType BIV_MyDocuments(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_Caret(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_Cursor(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_ScreenWidth_Height(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_ScriptName(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_ScriptDir(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_ScriptFullPath(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_ScriptHwnd(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_LineNumber(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_LineFile(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_LoopFileName(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_LoopFileShortName(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_LoopFileExt(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_LoopFileDir(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_LoopFilePath(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_LoopFileFullPath(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_LoopFileShortPath(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_LoopFileTime(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_LoopFileAttrib(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_LoopFileSize(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_LoopRegType(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_LoopRegKey(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_LoopRegSubKey(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_LoopRegName(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_LoopRegTimeModified(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_LoopReadLine(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_LoopField(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_LoopIndex(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_ThisFunc(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_ThisLabel(LPTSTR aBuf, LPTSTR aVarName);
-#ifndef MINIDLL
-VarSizeType BIV_ThisMenuItem(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_ThisMenuItemPos(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_ThisMenu(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_ThisHotkey(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_PriorHotkey(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_TimeSinceThisHotkey(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_TimeSincePriorHotkey(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_EndChar(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_Gui(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_GuiControl(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_GuiEvent(LPTSTR aBuf, LPTSTR aVarName);
-#endif
-VarSizeType BIV_EventInfo(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_TimeIdle(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_TimeIdlePhysical(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_IPAddress(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_IsAdmin(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_PtrSize(LPTSTR aBuf, LPTSTR aVarName);
-VarSizeType BIV_PriorKey(LPTSTR aBuf, LPTSTR aVarName);
 
+// Declare built-in var read function.
+#define BIV_DECL_R(name) VarSizeType name(LPTSTR aBuf, LPTSTR aVarName)
+// Declare built-in var write function.
+#define BIV_DECL_W(name) ResultType name(LPTSTR aBuf, LPTSTR aVarName)
+// Declare built-in var read and write functions.
+#define BIV_DECL_RW(name) BIV_DECL_R(name); BIV_DECL_W(name##_Set)
+
+BIV_DECL_R (BIV_True_False);
+BIV_DECL_R (BIV_MMM_DDD);
+BIV_DECL_R (BIV_DateTime);
+BIV_DECL_RW(BIV_TitleMatchMode);
+BIV_DECL_RW(BIV_TitleMatchModeSpeed);
+BIV_DECL_RW(BIV_DetectHiddenWindows);
+BIV_DECL_RW(BIV_DetectHiddenText);
+BIV_DECL_RW(BIV_StringCaseSense);
+BIV_DECL_RW(BIV_KeyDelay);
+BIV_DECL_RW(BIV_WinDelay);
+BIV_DECL_RW(BIV_ControlDelay);
+BIV_DECL_RW(BIV_MouseDelay);
+BIV_DECL_RW(BIV_DefaultMouseSpeed);
+BIV_DECL_R (BIV_IsPaused);
+BIV_DECL_R (BIV_IsCritical);
+#ifndef MINIDLL
+BIV_DECL_R (BIV_IsSuspended);
+#endif
+BIV_DECL_R (BIV_IsCompiled);
+BIV_DECL_R (BIV_IsUnicode);
+BIV_DECL_RW(BIV_FileEncoding);
+BIV_DECL_R (BIV_MsgBoxResult);
+BIV_DECL_RW(BIV_RegView);
+BIV_DECL_RW(BIV_LastError);
+BIV_DECL_R (BIV_GlobalStruct);
+BIV_DECL_R (BIV_ScriptStruct);
+BIV_DECL_R (BIV_ModuleHandle);
+BIV_DECL_R (BIV_IsDll);
+BIV_DECL_RW(BIV_CoordMode);
+#ifndef MINIDLL
+BIV_DECL_R (BIV_IconHidden);
+BIV_DECL_R (BIV_IconTip);
+BIV_DECL_R (BIV_IconFile);
+BIV_DECL_R (BIV_IconNumber);
+#endif
+BIV_DECL_R (BIV_ExitReason);
+BIV_DECL_R (BIV_Space_Tab);
+BIV_DECL_R (BIV_AhkVersion);
+BIV_DECL_R (BIV_AhkPath);
+BIV_DECL_R (BIV_DllPath);
+BIV_DECL_R (BIV_TickCount);
+BIV_DECL_R (BIV_Now);
+#ifdef CONFIG_WIN9X
+BIV_DECL_R (BIV_OSType);
+#endif
+BIV_DECL_R (BIV_OSVersion);
+BIV_DECL_R (BIV_Is64bitOS);
+BIV_DECL_R (BIV_Language);
+BIV_DECL_R (BIV_UserName_ComputerName);
+BIV_DECL_RW(BIV_WorkingDir);
+BIV_DECL_R (BIV_InitialWorkingDir);
+BIV_DECL_R (BIV_WinDir);
+BIV_DECL_R (BIV_Temp);
+BIV_DECL_R (BIV_ComSpec);
+BIV_DECL_R (BIV_SpecialFolderPath); // Handles various variables.
+BIV_DECL_R (BIV_MyDocuments);
+BIV_DECL_R (BIV_Caret);
+BIV_DECL_R (BIV_Cursor);
+BIV_DECL_R (BIV_ScreenWidth_Height);
+BIV_DECL_R (BIV_ScriptName);
+BIV_DECL_R (BIV_ScriptDir);
+BIV_DECL_R (BIV_ScriptFullPath);
+BIV_DECL_R (BIV_ScriptHwnd);
+BIV_DECL_R (BIV_LineNumber);
+BIV_DECL_R (BIV_LineFile);
+BIV_DECL_R (BIV_LoopFileName);
+BIV_DECL_R (BIV_LoopFileShortName);
+BIV_DECL_R (BIV_LoopFileExt);
+BIV_DECL_R (BIV_LoopFileDir);
+BIV_DECL_R (BIV_LoopFilePath);
+BIV_DECL_R (BIV_LoopFileFullPath);
+BIV_DECL_R (BIV_LoopFileShortPath);
+BIV_DECL_R (BIV_LoopFileTime);
+BIV_DECL_R (BIV_LoopFileAttrib);
+BIV_DECL_R (BIV_LoopFileSize);
+BIV_DECL_R (BIV_LoopRegType);
+BIV_DECL_R (BIV_LoopRegKey);
+BIV_DECL_R (BIV_LoopRegSubKey);
+BIV_DECL_R (BIV_LoopRegName);
+BIV_DECL_R (BIV_LoopRegTimeModified);
+BIV_DECL_R (BIV_LoopReadLine);
+BIV_DECL_R (BIV_LoopField);
+BIV_DECL_RW(BIV_LoopIndex);
+BIV_DECL_R (BIV_ThisFunc);
+BIV_DECL_R (BIV_ThisLabel);
+#ifndef MINIDLL
+BIV_DECL_R (BIV_ThisMenuItem);
+BIV_DECL_R (BIV_ThisMenuItemPos);
+BIV_DECL_R (BIV_ThisMenu);
+BIV_DECL_R (BIV_ThisHotkey);
+BIV_DECL_R (BIV_PriorHotkey);
+BIV_DECL_R (BIV_TimeSinceThisHotkey);
+BIV_DECL_R (BIV_TimeSincePriorHotkey);
+BIV_DECL_R (BIV_EndChar);
+BIV_DECL_R (BIV_Gui);
+BIV_DECL_R (BIV_GuiControl);
+BIV_DECL_R (BIV_GuiEvent);
+BIV_DECL_R (BIV_ScreenDPI);
+#endif
+BIV_DECL_RW(BIV_EventInfo);
+BIV_DECL_R (BIV_TimeIdle);
+BIV_DECL_R (BIV_TimeIdlePhysical);
+BIV_DECL_R (BIV_IPAddress);
+BIV_DECL_R (BIV_IsAdmin);
+BIV_DECL_R (BIV_PtrSize);
+BIV_DECL_R (BIV_PriorKey);
 
 
 ////////////////////////
@@ -2961,9 +2999,11 @@ BIF_DECL(BIF_Exception);
 
 BIF_DECL(BIF_WinGet);
 BIF_DECL(BIF_WinSet);
+BIF_DECL(BIF_WinRedraw);
 BIF_DECL(BIF_WinMoveTopBottom);
 BIF_DECL(BIF_Process);
 BIF_DECL(BIF_ProcessSetPriority);
+BIF_DECL(BIF_MonitorGet);
 
 BIF_DECL(BIF_PerformAction);
 
@@ -2989,7 +3029,7 @@ Func *TokenToFunc(ExprTokenType &aToken);
 ResultType TokenSetResult(ExprTokenType &aResultToken, LPCTSTR aResult, size_t aResultLength = -1);
 
 LPTSTR RegExMatch(LPTSTR aHaystack, LPTSTR aNeedleRegEx);
-void SetWorkingDir(LPTSTR aNewDir);
+void SetWorkingDir(LPTSTR aNewDir, bool aSetErrorLevel = true);
 int ConvertJoy(LPTSTR aBuf, int *aJoystickID = NULL, bool aAllowOnlyButtons = false);
 bool ScriptGetKeyState(vk_type aVK, KeyStateTypes aKeyStateType);
 double ScriptGetJoyState(JoyControls aJoy, int aJoystickID, ExprTokenType &aToken, bool aUseBoolForUpDown);

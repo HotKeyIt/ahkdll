@@ -44,7 +44,7 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	InitializeCriticalSection(&g_CriticalRegExCache); // v1.0.45.04: Must be done early so that it's unconditional, so that DeleteCriticalSection() in the script destructor can also be unconditional (deleting when never initialized can crash, at least on Win 9x).
 	InitializeCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
 
-	if (!GetCurrentDirectory(_countof(g_WorkingDir), g_WorkingDir)) // Needed for the FileSelectFile() workaround.
+	if (!GetCurrentDirectory(_countof(g_WorkingDir), g_WorkingDir)) // Needed for the FileSelect() workaround.
 		*g_WorkingDir = '\0';
 	// Unlike the below, the above must not be Malloc'd because the contents can later change to something
 	// as large as MAX_PATH by means of the SetWorkingDir command.
@@ -150,15 +150,23 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 		}
 	}
 
-	if (i < __argc)
+	if (Var *var = g_script.FindOrAddVar(_T("Args"), 4, VAR_DECLARE_GLOBAL))
 	{
-		// Insert the remaining args into an array and assign to the "args" global var.
-		Var *var;
-		Object *args;
-		if (  !( var = g_script.FindOrAddVar(_T("Args")) )
-			|| !( args = Object::CreateFromArgV(__targv + i, __argc - i) )   )
-			return CRITICAL_ERROR;  // Realistically should never happen.
-		var->AssignSkipAddRef(args);
+		if (i < __argc)
+		{
+			// Store the remaining args in an array and assign it to "Args".
+    		Object *args = Object::CreateFromArgV(__targv + i, __argc - i);
+    		if (!args)
+    			return CRITICAL_ERROR;  // Realistically should never happen.
+    		var->AssignSkipAddRef(args);
+		}
+		else
+		{
+			// Leave it empty, but mark it initialized so that scripts can check it without
+			// causing an unavoidable warning when #Warn is enabled.  We could assign an empty
+			// array, but if(Args) seems more convenient and meaningful than if(Args.MaxIndex()).
+    		var->MarkInitialized();
+		}
 	}
 
 	global_init(*g);  // Set defaults.
