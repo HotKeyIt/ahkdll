@@ -256,7 +256,7 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 		int interval_count;
 		for (interval_count = 0; ; ++interval_count)
 		{
-			Sleep(20);  // No need to use MsgSleep() in this case.
+			Sleep(50);  // No need to use MsgSleep() in this case.
 			if (!IsWindow(w_existing))
 				break;  // done waiting.
 			if (interval_count == 100)
