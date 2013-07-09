@@ -122,7 +122,7 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 		return _T("");
 	if (*ahkvar->mCharContents == '\0')
 	{
-		LPTSTR new_mem = (LPTSTR )realloc((LPTSTR )result_to_return_dll,(ahkvar->mByteCapacity ? ahkvar->mByteCapacity : ahkvar->mByteLength) + MAX_NUMBER_LENGTH + sizeof(TCHAR));
+		LPTSTR new_mem = (LPTSTR )realloc((LPTSTR )result_to_return_dll,(ahkvar->mType == VAR_BUILTIN ? ahkvar->mBIV(0,name) : ahkvar->mByteCapacity ? ahkvar->mByteCapacity : ahkvar->mByteLength) + MAX_NUMBER_LENGTH + sizeof(TCHAR));
 		if (!new_mem)
 		{
 			g_script.ScriptError(ERR_OUTOFMEM, name);
@@ -138,7 +138,7 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 	}
 	else
 	{
-		LPTSTR new_mem = (LPTSTR )realloc((LPTSTR )result_to_return_dll,ahkvar->mByteLength + sizeof(TCHAR));
+		LPTSTR new_mem = (LPTSTR )realloc((LPTSTR )result_to_return_dll,ahkvar->mType == VAR_BUILTIN ? ahkvar->mBIV(0,name) : ahkvar->mByteLength + sizeof(TCHAR));
 		if (!new_mem)
 		{
 			g_script.ScriptError(ERR_OUTOFMEM, name);

@@ -9513,7 +9513,7 @@ VarSizeType BIV_IsCompiled(LPTSTR aBuf, LPTSTR aVarName)
 	{
 		if (aBuf)
 			*aBuf = '\0';
-		return 0;
+		return 1;
 	} 
 	else if (aBuf)
 	{
