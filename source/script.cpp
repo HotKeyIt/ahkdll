@@ -2580,7 +2580,7 @@ process_completed_line:
 			if (mClassObjectCount)
 			{
 				// Check for assignment first, in case of something like "Static := 123".
-				for (cp = buf; cisalnum(*cp) || *cp == '_'; ++cp);
+				for (cp = buf; cisalnum(*cp) || *cp == '_' || *cp == '.'; ++cp);
 				if (cp > buf) // i.e. buf begins with an identifier.
 				{
 					cp = omit_leading_whitespace(cp);

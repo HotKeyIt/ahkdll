@@ -1585,7 +1585,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 				if (TokenToObject(Var2))
 				{	// Variable is a structure object
 					objclone = ((Struct *)TokenToObject(Var2))->Clone(true);
-					objclone->mStructMem = target + field->mOffset;
+					objclone->mStructMem = (UINT_PTR *)((UINT_PTR)target + (UINT_PTR)field->mOffset);
 					aResultToken.object = objclone;
 					aResultToken.symbol = SYM_OBJECT;
 				}

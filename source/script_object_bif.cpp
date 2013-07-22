@@ -86,7 +86,7 @@ BIF_DECL(BIF_sizeof)
 	{
 		aResultToken.symbol = SYM_INTEGER;
 		Struct *obj = (Struct*)TokenToObject(*aParam[0]);
-		aResultToken.value_int64 = obj->mSize;
+		aResultToken.value_int64 = obj->mSize + (aParamCount > 1 ? TokenToInt64(*aParam[1],true) : 0);
 		return;
 	}
 
