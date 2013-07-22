@@ -370,7 +370,7 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aIgnor
 	int HotkeyCount = NULL;
 #endif
 	if (!g_script.mIsReadyToExecute)
-		return; // AutoHotkey needs to be running at this point
+		return LOADING_FAILED; // AutoHotkey needs to be running at this point
 	if (g->CurrentFunc)  // normally functions definitions are not allowed within functions.  But we're in a function call, not a function definition right now.
 	{
 		aFunc = g->CurrentFunc; 
@@ -422,7 +422,7 @@ EXPORT UINT_PTR addScript(LPTSTR script, int aExecute)
 	int HotkeyCount = NULL;
 #endif
 	if (!g_script.mIsReadyToExecute)
-		return; // AutoHotkey needs to be running at this point
+		return LOADING_FAILED; // AutoHotkey needs to be running at this point
 	if (g->CurrentFunc)  // normally functions definitions are not allowed within functions.  But we're in a function call, not a function definition right now.
 	{
 		aFunc = g->CurrentFunc; 
