@@ -369,6 +369,8 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aIgnor
 #else
 	int HotkeyCount = NULL;
 #endif
+	if (!g_script.mIsReadyToExecute)
+		return; // AutoHotkey needs to be running at this point
 	if (g->CurrentFunc)  // normally functions definitions are not allowed within functions.  But we're in a function call, not a function definition right now.
 	{
 		aFunc = g->CurrentFunc; 
@@ -377,16 +379,20 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aIgnor
 	}
 	Line *oldLastLine = g_script.mLastLine;
 	int aFuncCount = g_script.mFuncCount;
+	
 	// FirstStaticLine is used only once and therefor can be reused
 	g_script.mFirstStaticLine = NULL;
 	g_script.mLastStaticLine = NULL;
+	g_script.mIsReadyToExecute = false; // requiered to properly declare vars in function
 
 	if ((g_script.LoadIncludedFile(fileName, aAllowDuplicateInclude, (bool) aIgnoreLoadFailure) != OK) || !g_script.PreparseBlocks(oldLastLine->mNextLine))
 	{
+		g_script.mIsReadyToExecute = true;
 		if (inFunc == 1 )
 			g->CurrentFunc = aFunc ; 
 		return LOADING_FAILED;
 	}	
+	g_script.mIsReadyToExecute = true;
 
 	if (FinalizeScript(oldLastLine->mNextLine,aFuncCount,HotkeyCount))
 		return LOADING_FAILED;
@@ -415,6 +421,8 @@ EXPORT UINT_PTR addScript(LPTSTR script, int aExecute)
 #else
 	int HotkeyCount = NULL;
 #endif
+	if (!g_script.mIsReadyToExecute)
+		return; // AutoHotkey needs to be running at this point
 	if (g->CurrentFunc)  // normally functions definitions are not allowed within functions.  But we're in a function call, not a function definition right now.
 	{
 		aFunc = g->CurrentFunc; 
@@ -426,14 +434,17 @@ EXPORT UINT_PTR addScript(LPTSTR script, int aExecute)
 	// FirstStaticLine is used only once and therefor can be reused
 	g_script.mFirstStaticLine = NULL;
 	g_script.mLastStaticLine = NULL;
+	g_script.mIsReadyToExecute = false; // requiered to properly declare vars in function
 
 	if ((g_script.LoadIncludedText(script) != OK) || !g_script.PreparseBlocks(oldLastLine->mNextLine))
 	{
+		g_script.mIsReadyToExecute = true;
 		if (inFunc == 1 )
 			g->CurrentFunc = aFunc ; 
 		oldLastLine->mNextLine = NULL;
 		return LOADING_FAILED;
 	}
+	g_script.mIsReadyToExecute = true;
 
 	if (FinalizeScript(oldLastLine->mNextLine,aFuncCount,HotkeyCount))
 		return LOADING_FAILED;
