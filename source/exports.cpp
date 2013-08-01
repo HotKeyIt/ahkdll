@@ -300,10 +300,10 @@ EXPORT unsigned int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, L
 
 #ifndef AUTOHOTKEYSC
 // Finalize addFile/addScript/ahkExec
-BOOL FinalizeScript(Line *aFirstLine,int aFuncCount,int aHotkeyCount)
+BOOL FinalizeScript(Line *aFirstLine,int aFuncCount,int aHotkeyCount,int aHotExprLineCount)
 {
 #ifndef MINIDLL
-	for (int expr_line_index = 0 ; expr_line_index < g_HotExprLineCount; ++expr_line_index)
+	for (int expr_line_index = aHotExprLineCount ; expr_line_index < g_HotExprLineCount; ++expr_line_index)
 	{
 		Line *line = g_HotExprLines[expr_line_index];
 		if (!g_script.PreparseBlocks(line))
@@ -366,8 +366,10 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aIgnor
 	int inFunc = 0 ;
 #ifndef MINIDLL
 	int HotkeyCount = Hotkey::sHotkeyCount;
+	int oldHotExprLineCount = g_HotExprLineCount;
 #else
 	int HotkeyCount = NULL;
+	int oldHotExprLineCount = 0;
 #endif
 	if (!g_script.mIsReadyToExecute)
 		return LOADING_FAILED; // AutoHotkey needs to be running at this point
@@ -393,7 +395,7 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aIgnor
 	}	
 	g_script.mIsReadyToExecute = true;
 
-	if (FinalizeScript(oldLastLine->mNextLine,aFuncCount,HotkeyCount))
+	if (FinalizeScript(oldLastLine->mNextLine,aFuncCount,HotkeyCount,oldHotExprLineCount))
 		return LOADING_FAILED;
 
 	if (aIgnoreLoadFailure > 1)
@@ -417,8 +419,10 @@ EXPORT UINT_PTR addScript(LPTSTR script, int aExecute)
 	int inFunc = 0 ;
 #ifndef MINIDLL
 	int HotkeyCount = Hotkey::sHotkeyCount;
+	int oldHotExprLineCount = g_HotExprLineCount;
 #else
 	int HotkeyCount = NULL;
+	int oldHotExprLineCount = NULL;
 #endif
 	if (!g_script.mIsReadyToExecute)
 		return LOADING_FAILED; // AutoHotkey needs to be running at this point
@@ -444,7 +448,7 @@ EXPORT UINT_PTR addScript(LPTSTR script, int aExecute)
 		return LOADING_FAILED;
 	}
 	g_script.mIsReadyToExecute = true;
-	if (FinalizeScript(oldLastLine->mNextLine,aFuncCount,HotkeyCount))
+	if (FinalizeScript(oldLastLine->mNextLine,aFuncCount,HotkeyCount,oldHotExprLineCount))
 		return LOADING_FAILED;
 
 	if (aExecute > 0)
@@ -467,6 +471,15 @@ EXPORT BOOL ahkExec(LPTSTR script)
 	// labels, hotkeys, functions.   
 	Func * aFunc = NULL ; 
 	int inFunc = 0 ;
+#ifndef MINIDLL
+	int HotkeyCount = Hotkey::sHotkeyCount;
+	int oldHotExprLineCount = g_HotExprLineCount;
+#else
+	int HotkeyCount = NULL;
+	int oldHotExprLineCount = NULL;
+#endif
+	if (!g_script.mIsReadyToExecute)
+		return LOADING_FAILED; // AutoHotkey needs to be running at this point
 	if (g->CurrentFunc)  // normally functions definitions are not allowed within functions.  But we're in a function call, not a function definition right now.
 	{
 		aFunc = g->CurrentFunc; 
@@ -474,18 +487,21 @@ EXPORT BOOL ahkExec(LPTSTR script)
 		inFunc = 1 ;
 	}
 	Line *oldLastLine = g_script.mLastLine;
+	int aFuncCount = g_script.mFuncCount;
 	// FirstStaticLine is used only once and therefor can be reused
 	g_script.mFirstStaticLine = NULL;
 	g_script.mLastStaticLine = NULL;
-	int aFuncCount = g_script.mFuncCount;
-	
+	g_script.mIsReadyToExecute = false; // requiered to properly declare vars in function
+
 	if ((g_script.LoadIncludedText(script) != OK) || !g_script.PreparseBlocks(oldLastLine->mNextLine))
 	{
+		g_script.mIsReadyToExecute = true;
 		if (inFunc == 1 )
 			g->CurrentFunc = aFunc;
 		return LOADING_FAILED;
 	}
-	if (FinalizeScript(oldLastLine->mNextLine,aFuncCount,UINT_MAX))
+	g_script.mIsReadyToExecute = true;
+	if (FinalizeScript(oldLastLine->mNextLine,aFuncCount,HotkeyCount,oldHotExprLineCount))
 		return LOADING_FAILED;
 
 	SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)oldLastLine->mNextLine, (LPARAM)NULL);
