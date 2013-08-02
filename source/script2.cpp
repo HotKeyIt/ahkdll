@@ -15411,7 +15411,7 @@ BIF_DECL(BIF_MemoryLoadLibrary)
 	size_t size;
 	HMEMORYMODULE module;
 	
-	fp = _tfopen(aParam[0]->symbol == SYM_VAR ? aParam[0]->var->Contents() : aParam[0]->marker, _T("rb"));
+	fp = _tfopen(TokenToString(*aParam[0]), _T("rb"));
 	if (fp == NULL)
 	{
 		return;
@@ -15431,25 +15431,18 @@ BIF_DECL(BIF_MemoryGetProcAddress)
 {
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = 0;
-	if (!aParam[0]->deref->marker)
-		return;
-	TCHAR *FuncName = aParam[1]->symbol == SYM_VAR ? aParam[1]->var->Contents() : aParam[1]->marker;
+	//if (!aParam[0]->deref->marker)
+		//return;
+	TCHAR *FuncName = TokenToString(*aParam[1]);
 #ifdef _UNICODE
-	char *buf = (char*)malloc(_tcslen(FuncName)+sizeof(char*));
+	char *buf = (char*)_alloca(_tcslen(FuncName)+sizeof(char*));
 	wcstombs(buf,FuncName,_tcslen(FuncName));
 	buf[_tcslen(FuncName)] = '\0';
 #endif
 
-	aResultToken.value_int64 =  (__int64)MemoryGetProcAddress((aParam[0]->symbol == SYM_VAR ? (HMEMORYMODULE)aParam[0]->var->mContentsInt64 : (aParam[0]->symbol != PURE_INTEGER
-#ifdef _WIN64
-								? (HMEMORYMODULE)ATOI64(aParam[0]->marker) 
-#else
-								? (HMEMORYMODULE)ATOI(aParam[0]->marker) 
-#endif
-								: (HMEMORYMODULE)aParam[0]->marker))
+	aResultToken.value_int64 =  (__int64)MemoryGetProcAddress((HMEMORYMODULE)TokenToInt64(*aParam[0])
 #ifdef _UNICODE
 								,buf);
-	free(buf);
 #else
 								,FuncName);
 #endif
@@ -15457,16 +15450,90 @@ BIF_DECL(BIF_MemoryGetProcAddress)
 
 BIF_DECL(BIF_MemoryFreeLibrary)
 {
-	MemoryFreeLibrary(aParam[0]->symbol == SYM_VAR ? (HMEMORYMODULE)aParam[0]->var->mContentsInt64 : (aParam[0]->symbol != PURE_INTEGER
-#ifdef _WIN64
-								? (HMEMORYMODULE)ATOI64(aParam[0]->marker) 
-#else
-								? (HMEMORYMODULE)ATOI(aParam[0]->marker) 
-#endif
-								: (HMEMORYMODULE)aParam[0]->marker));
+	MemoryFreeLibrary((HMEMORYMODULE)TokenToInt64(*aParam[0]));
 	aResultToken.symbol = SYM_STRING;
 	aResultToken.marker =_T("");
 }
+
+BIF_DECL(BIF_MemoryFindResource)
+{
+	HMEMORYRSRC resource = NULL;
+	resource = MemoryFindResource((HMEMORYMODULE)TokenToInt64(*aParam[0]),TokenIsNumeric(*aParam[1]) ? (LPCTSTR)TokenToInt64(*aParam[1]) : TokenToString(*aParam[1]),TokenIsNumeric(*aParam[2]) ? (LPCTSTR)TokenToInt64(*aParam[2]) : TokenToString(*aParam[2]));
+	if (resource)
+	{
+		aResultToken.symbol = SYM_INTEGER;
+		aResultToken.value_int64 = (__int64)resource;
+	}
+	else
+	{
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker =_T("");
+	}
+}
+BIF_DECL(BIF_MemoryFindResourceEx)
+{
+	HMEMORYRSRC resource = NULL;
+	resource = MemoryFindResourceEx((HMEMORYMODULE)TokenToInt64(*aParam[0]),TokenIsNumeric(*aParam[1]) ? (LPCTSTR)TokenToInt64(*aParam[1]) : TokenToString(*aParam[1]),TokenIsNumeric(*aParam[2]) ? (LPCTSTR)TokenToInt64(*aParam[2]) : TokenToString(*aParam[2]),(WORD)TokenToInt64(*aParam[2]));
+	if (resource)
+	{
+		aResultToken.symbol = SYM_INTEGER;
+		aResultToken.value_int64 = (__int64)resource;
+	}
+	else
+	{
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker =_T("");
+	}
+}
+BIF_DECL(BIF_MemorySizeofResource)
+{
+	aResultToken.value_int64 = MemorySizeofResource((HMEMORYMODULE)TokenToInt64(*aParam[0]),(HMEMORYRSRC)TokenToInt64(*aParam[1]));
+	if (aResultToken.value_int64)
+		aResultToken.symbol = SYM_INTEGER;
+	else
+	{
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker =_T("");
+	}
+
+}
+BIF_DECL(BIF_MemoryLoadResource)
+{
+	aResultToken.value_int64 = (__int64)MemoryLoadResource((HMEMORYMODULE)TokenToInt64(*aParam[0]),(HMEMORYRSRC)TokenToInt64(*aParam[1]));
+	if (aResultToken.value_int64)
+		aResultToken.symbol = SYM_INTEGER;
+	else
+	{
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker =_T("");
+	}
+
+}
+BIF_DECL(BIF_MemoryLoadString)
+{
+	aResultToken.value_int64 = MemoryLoadString((HMEMORYMODULE)TokenToInt64(*aParam[0]),(UINT)TokenToInt64(*aParam[1]),TokenToString(*aParam[2]),(int)TokenToInt64(*aParam[3]));
+	if (aResultToken.value_int64)
+		aResultToken.symbol = SYM_INTEGER;
+	else
+	{
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker =_T("");
+	}
+
+}
+BIF_DECL(BIF_MemoryLoadStringEx)
+{
+	aResultToken.value_int64 = MemoryLoadStringEx((HMEMORYMODULE)TokenToInt64(*aParam[0]),(UINT)TokenToInt64(*aParam[1]),TokenToString(*aParam[2]),(int)TokenToInt64(*aParam[3]),(WORD)TokenToInt64(*aParam[4]));
+	if (aResultToken.value_int64)
+		aResultToken.symbol = SYM_INTEGER;
+	else
+	{
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker =_T("");
+	}
+
+}
+
 
 BIF_DECL(BIF_Round)
 // For simplicity and backward compatibility, this always yields something numeric (or a string that's numeric).
