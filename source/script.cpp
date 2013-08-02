@@ -202,12 +202,6 @@ Script::~Script() // Destructor.
 	for (i = 0; i < GuiType::sFontCount; ++i) // Now that GUI windows are gone, delete all GUI fonts.
 		if (GuiType::sFont[i].hfont)
 			DeleteObject(GuiType::sFont[i].hfont);
-	
-	if (GuiType::sFontCount)
-	{
-		GuiType::sFontCount = 0;
-		GuiType::sFont = NULL;
-	}
 	// The above might attempt to delete an HFONT from GetStockObject(DEFAULT_GUI_FONT), etc.
 	// But that should be harmless:
 	// MSDN: "It is not necessary (but it is not harmful) to delete stock objects by calling DeleteObject."
@@ -237,7 +231,10 @@ Script::~Script() // Destructor.
 	for (i = 0; i < MAX_TOOLTIPS; ++i)
 		if (g_hWndToolTip[i] && IsWindow(g_hWndToolTip[i]))
 			DestroyWindow(g_hWndToolTip[i]);
-	
+#ifndef MINIDLL
+	if (g_hFontSplash) // The splash window itself should auto-destroyed, since it's owned by main.
+		DeleteObject(g_hFontSplash);
+#endif
 	if (mOnClipboardChangeLabel) // Remove from viewer chain.
 		if (MyRemoveClipboardListener && MyAddClipboardListener)
 			MyRemoveClipboardListener(g_hWnd); // MyAddClipboardListener was used.
@@ -254,7 +251,6 @@ Script::~Script() // Destructor.
 		mciSendString(_T("status ") SOUNDPLAY_ALIAS _T(" mode"), buf, _countof(buf), NULL);
 		if (*buf) // "playing" or "stopped"
 			mciSendString(_T("close ") SOUNDPLAY_ALIAS, NULL, 0, NULL);
-		g_SoundWasPlayed = 0;
 	}
 #ifndef MINIDLL
 #ifdef ENABLE_KEY_HISTORY_FILE
@@ -1044,7 +1040,7 @@ ResultType Script::AutoExecSection()
 		// v1.0.25: This is now done here, closer to the actual execution of the first line in the script,
 		// to avoid an unnecessary Sleep(10) that would otherwise occur in ExecUntil:
 		mLastScriptRest = mLastPeekTime = GetTickCount();
-		
+
 		++g_nThreads;
 		DEBUGGER_STACK_PUSH(mFirstLine, _T("auto-execute"))
 		ExecUntil_result = mFirstLine->ExecUntil(UNTIL_RETURN); // Might never return (e.g. infinite loop or ExitApp).
@@ -7135,7 +7131,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 			// The length must fit into a WORD, which it will since each arg is literal text from a script's line,
 			// which is limited to LINE_SIZE. The length member was added in v1.0.44.14 to boost runtime performance.
 			this_new_arg.length = (WORD)_tcslen(this_aArg);
-			if (   !(this_new_arg.text = (LPTSTR)SimpleHeap::Malloc(this_aArg, this_new_arg.length))   )
+			if (   !(this_new_arg.text = SimpleHeap::Malloc(this_aArg, this_new_arg.length))   )
 				return FAIL;  // It already displayed the error for us.
 
 			////////////////////////////////////////////////////
@@ -9026,7 +9022,6 @@ ResultType Script::DefineFunc(LPTSTR aBuf, Var *aFuncGlobalVar[])
 		// search for local vars (static vars will be double checked before searching locals)
 		if (this_param.var = FindVar(param_start, param_length, &insert_pos, FINDVAR_LOCAL))  // Assign.
 			return ScriptError(_T("Duplicate parameter."), param_start);
-		
 		if (   !(this_param.var = AddVar(param_start, param_length, insert_pos, VAR_DECLARE_LOCAL | VAR_LOCAL_FUNCPARAM))   )	// Pass VAR_LOCAL_FUNCPARAM as last parameter to mean "it's a local but more specifically a function's parameter".
 			return FAIL; // It already displayed the error, including attempts to have reserved names as parameter names.
 		
@@ -10250,6 +10245,42 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		min_params = 1;
 		max_params = 1;
 	}
+	else if (!_tcsicmp(func_name, _T("MemoryFindResource")))
+	{
+		bif = BIF_MemoryFindResource;
+		min_params = 3;
+		max_params = 3;
+	}
+	else if (!_tcsicmp(func_name, _T("MemoryFindResourceEx")))
+	{
+		bif = BIF_MemoryFindResourceEx;
+		min_params = 4;
+		max_params = 4;
+	}
+	else if (!_tcsicmp(func_name, _T("MemorySizeofResource")))
+	{
+		bif = BIF_MemorySizeofResource;
+		min_params = 2;
+		max_params = 2;
+	}
+	else if (!_tcsicmp(func_name, _T("MemoryLoadResource")))
+	{
+		bif = BIF_MemoryLoadResource;
+		min_params = 2;
+		max_params = 2;
+	}
+	else if (!_tcsicmp(func_name, _T("MemoryLoadString")))
+	{
+		bif = BIF_MemoryLoadString;
+		min_params = 4;
+		max_params = 4;
+	}
+	else if (!_tcsicmp(func_name, _T("MemoryLoadStringEx")))
+	{
+		bif = BIF_MemoryLoadStringEx;
+		min_params = 5;
+		max_params = 5;
+	}
 	else if (!_tcsicmp(func_name, _T("DynaCall")))
 	{
 		bif = BIF_DynaCall;
@@ -11132,6 +11163,7 @@ Var *Script::AddVar(LPTSTR aVarName, size_t aVarNameLength, int aInsertPos, int 
 	if (!new_name)
 		// It already displayed the error for us.
 		return NULL;
+
 	// Below specifically tests for VAR_LOCAL and excludes other non-zero values/flags:
 	//   VAR_LOCAL_FUNCPARAM should not be made static.
 	//   VAR_LOCAL_STATIC is already static.
@@ -16173,9 +16205,9 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 	int start_char_num, chars_to_extract; // For String commands.
 	size_t source_length; // For String commands.
 	SymbolType var_is_pure_numeric, value_is_pure_numeric; // For math operations.
-	__int64 device_id;  // For sound commands.  __int64 helps avoid compiler warning for some conversions.
 	vk_type vk; // For GetKeyState.
 	Label *target_label;  // For ACT_SETTIMER and ACT_HOTKEY
+	__int64 device_id;  // For sound commands.  __int64 helps avoid compiler warning for some conversions.
 	bool is_remote_registry; // For Registry commands.
 	HKEY root_key; // For Registry commands.
 	ResultType result;  // General purpose.

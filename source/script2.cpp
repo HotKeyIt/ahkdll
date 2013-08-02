@@ -25,6 +25,9 @@ GNU General Public License for more details.
 #include "resources/resource.h"  // For InputBox.
 #include "TextIO.h"
 #include <Psapi.h> // for GetModuleBaseName.
+
+#undef _WIN32_WINNT // v1.1.10.01: Redefine this just for these APIs, to avoid breaking some other commands on Win XP (such as Process Close).
+#define _WIN32_WINNT 0x0600 // Windows Vista
 #include <mmdeviceapi.h> // for SoundSet/SoundGet.
 #include <endpointvolume.h> // for SoundSet/SoundGet.
 
@@ -5966,8 +5969,8 @@ ResultType InputBox(Var *aOutputVar, LPTSTR aTitle, LPTSTR aText, bool aHideInpu
 	g_InputBox[g_nInputBoxes].timeout = (DWORD)(aTimeout * 1000);  // Convert to ms
 
 	// Allow 0 width or height (hides the window):
-	g_InputBox[g_nInputBoxes].width = aWidth != INPUTBOX_DEFAULT && aWidth < 0 ? 0 : DPIScale(aWidth);
-	g_InputBox[g_nInputBoxes].height = aHeight != INPUTBOX_DEFAULT && aHeight < 0 ? 0 : DPIScale(aHeight);
+	g_InputBox[g_nInputBoxes].width = aWidth != INPUTBOX_DEFAULT ? (aWidth < 0 ? 0 : DPIScale(aWidth)) : INPUTBOX_DEFAULT;
+	g_InputBox[g_nInputBoxes].height = aHeight != INPUTBOX_DEFAULT ? (aHeight < 0 ? 0 : DPIScale(aHeight)) : INPUTBOX_DEFAULT;
 	g_InputBox[g_nInputBoxes].xpos = aX;  // But seems okay to allow these to be negative, even if absolute coords.
 	g_InputBox[g_nInputBoxes].ypos = aY;
 	g_InputBox[g_nInputBoxes].output_var = aOutputVar;
@@ -14236,6 +14239,8 @@ has_valid_return_type:
 			break;
 
 		case DLL_ARG_INVALID:
+			if (aParam[i]->symbol == SYM_VAR)
+				aParam[i]->var->MaybeWarnUninitialized();
 			g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
 			return;
 
@@ -14827,7 +14832,7 @@ void RegExSetSubpatternVars(LPCTSTR haystack, pcret *re, pcret_extra *extra, TCH
 	if (output_mode == 'O')
 	{
 		LPTSTR mark = (extra->flags & PCRE_EXTRA_MARK) ? (LPTSTR)*extra->mark : NULL;
-		IObject *m = RegExMatchObject::Create(haystack, offset, subpat_name, pattern_count, captured_pattern_count, (LPTSTR) mark);
+		IObject *m = RegExMatchObject::Create(haystack, offset, subpat_name, pattern_count, captured_pattern_count, mark);
 		if (m)
 			output_var.AssignSkipAddRef(m);
 		else
@@ -15334,6 +15339,7 @@ int RegExCallout(pcret_callout_block *cb)
 		cb->offset_vector[1] = cb->current_position;
 		if (cd.extra->flags & PCRE_EXTRA_MARK)
 			*cd.extra->mark = UorA(wchar_t *, UCHAR *) cb->mark;
+		
 		// Set up local vars for capturing subpatterns.
 		RegExSetSubpatternVars(cb->subject, cd.re, cd.extra, cd.output_mode, output_var, cb->offset_vector, cd.pattern_count, cb->capture_top, mem_to_free);
 
@@ -16221,6 +16227,7 @@ BIF_DECL(BIF_RegEx)
 	callout_data.extra = extra;
 	// extra->mark is used by PCRE to return the NAME of a (*MARK:NAME), if encountered.
 	extra->mark = UorA(wchar_t **, UCHAR **) &mark;
+
 	if (mode_is_replace) // Handle RegExReplace() completely then return.
 	{
 		RegExReplace(aResultToken, aParam, aParamCount, re, extra, haystack, haystack_length
@@ -17079,18 +17086,14 @@ BIF_DECL(BIF_ResourceLoadLibrary)
 	HRSRC hRes;
 	HGLOBAL hResData;
 
-#ifdef _DEBUG
-	if (hRes = FindResource(NULL, aParam[0]->symbol == SYM_VAR ? aParam[0]->var->Contents() : aParam[0]->marker, MAKEINTRESOURCE(RT_RCDATA)))
-#else
-	if (hRes = FindResource(NULL, aParam[0]->symbol == SYM_VAR ? aParam[0]->var->Contents() : aParam[0]->marker, MAKEINTRESOURCE(RT_RCDATA)))
-#endif
+	if (hRes = FindResource(NULL, TokenToString(*aParam[0]), MAKEINTRESOURCE(RT_RCDATA)))
 	
 	if ( !( hRes 
 			&& (textbuf.mLength = SizeofResource(NULL, hRes))
 			&& (hResData = LoadResource(NULL, hRes))
 			&& (textbuf.mBuffer = LockResource(hResData)) ) )
 	{
-		MsgBox(_T("Could not extract script from EXE."), 0, aParam[0]->symbol == SYM_VAR ? aParam[0]->var->Contents() : aParam[0]->marker);
+		MsgBox(_T("Could not extract script from EXE."), 0, TokenToString(*aParam[0]));
 		return;
 	}
 	if (*(unsigned int*)textbuf.mBuffer == 0x005F5A4C)
@@ -17120,7 +17123,7 @@ BIF_DECL(BIF_MemoryLoadLibrary)
 	size_t size;
 	HMEMORYMODULE module;
 	
-	fp = _tfopen(aParam[0]->symbol == SYM_VAR ? aParam[0]->var->Contents() : aParam[0]->marker, _T("rb"));
+	fp = _tfopen(TokenToString(*aParam[0]), _T("rb"));
 	if (fp == NULL)
 	{
 		return;
@@ -17140,25 +17143,18 @@ BIF_DECL(BIF_MemoryGetProcAddress)
 {
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = 0;
-	if (!aParam[0]->deref->marker)
-		return;
-	TCHAR *FuncName = aParam[1]->symbol == SYM_VAR ? aParam[1]->var->Contents() : aParam[1]->marker;
+	//if (!aParam[0]->deref->marker)
+		//return;
+	TCHAR *FuncName = TokenToString(*aParam[1]);
 #ifdef _UNICODE
-	char *buf = (char*)malloc(_tcslen(FuncName)+sizeof(char*));
+	char *buf = (char*)_alloca(_tcslen(FuncName)+sizeof(char*));
 	wcstombs(buf,FuncName,_tcslen(FuncName));
 	buf[_tcslen(FuncName)] = '\0';
 #endif
 
-	aResultToken.value_int64 =  (__int64)MemoryGetProcAddress((aParam[0]->symbol == SYM_VAR ? (HMEMORYMODULE)aParam[0]->var->mContentsInt64 : (aParam[0]->symbol != PURE_INTEGER
-#ifdef _WIN64
-								? (HMEMORYMODULE)ATOI64(aParam[0]->marker) 
-#else
-								? (HMEMORYMODULE)ATOI(aParam[0]->marker) 
-#endif
-								: (HMEMORYMODULE)aParam[0]->marker))
+	aResultToken.value_int64 =  (__int64)MemoryGetProcAddress((HMEMORYMODULE)TokenToInt64(*aParam[0])
 #ifdef _UNICODE
 								,buf);
-	free(buf);
 #else
 								,FuncName);
 #endif
@@ -17166,15 +17162,89 @@ BIF_DECL(BIF_MemoryGetProcAddress)
 
 BIF_DECL(BIF_MemoryFreeLibrary)
 {
-	MemoryFreeLibrary(aParam[0]->symbol == SYM_VAR ? (HMEMORYMODULE)aParam[0]->var->mContentsInt64 : (aParam[0]->symbol != PURE_INTEGER
-#ifdef _WIN64
-								? (HMEMORYMODULE)ATOI64(aParam[0]->marker) 
-#else
-								? (HMEMORYMODULE)ATOI(aParam[0]->marker) 
-#endif
-								: (HMEMORYMODULE)aParam[0]->marker));
+	MemoryFreeLibrary((HMEMORYMODULE)TokenToInt64(*aParam[0]));
 	aResultToken.symbol = SYM_STRING;
 	aResultToken.marker =_T("");
+}
+
+BIF_DECL(BIF_MemoryFindResource)
+{
+	HMEMORYRSRC resource = NULL;
+	resource = MemoryFindResource((HMEMORYMODULE)TokenToInt64(*aParam[0]),TokenIsPureNumeric(*aParam[1]) ? (LPCTSTR)TokenToInt64(*aParam[1]) : TokenToString(*aParam[1]),TokenIsPureNumeric(*aParam[2]) ? (LPCTSTR)TokenToInt64(*aParam[2]) : TokenToString(*aParam[2]));
+	if (resource)
+	{
+		aResultToken.symbol = SYM_INTEGER;
+		aResultToken.value_int64 = (__int64)resource;
+	}
+	else
+	{
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker =_T("");
+	}
+}
+BIF_DECL(BIF_MemoryFindResourceEx)
+{
+	HMEMORYRSRC resource = NULL;
+	resource = MemoryFindResourceEx((HMEMORYMODULE)TokenToInt64(*aParam[0]),TokenIsPureNumeric(*aParam[1]) ? (LPCTSTR)TokenToInt64(*aParam[1]) : TokenToString(*aParam[1]),TokenIsPureNumeric(*aParam[2]) ? (LPCTSTR)TokenToInt64(*aParam[2]) : TokenToString(*aParam[2]),(WORD)TokenToInt64(*aParam[2]));
+	if (resource)
+	{
+		aResultToken.symbol = SYM_INTEGER;
+		aResultToken.value_int64 = (__int64)resource;
+	}
+	else
+	{
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker =_T("");
+	}
+}
+BIF_DECL(BIF_MemorySizeofResource)
+{
+	aResultToken.value_int64 = MemorySizeofResource((HMEMORYMODULE)TokenToInt64(*aParam[0]),(HMEMORYRSRC)TokenToInt64(*aParam[1]));
+	if (aResultToken.value_int64)
+		aResultToken.symbol = SYM_INTEGER;
+	else
+	{
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker =_T("");
+	}
+
+}
+BIF_DECL(BIF_MemoryLoadResource)
+{
+	aResultToken.value_int64 = (__int64)MemoryLoadResource((HMEMORYMODULE)TokenToInt64(*aParam[0]),(HMEMORYRSRC)TokenToInt64(*aParam[1]));
+	if (aResultToken.value_int64)
+		aResultToken.symbol = SYM_INTEGER;
+	else
+	{
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker =_T("");
+	}
+
+}
+BIF_DECL(BIF_MemoryLoadString)
+{
+	aResultToken.value_int64 = MemoryLoadString((HMEMORYMODULE)TokenToInt64(*aParam[0]),(UINT)TokenToInt64(*aParam[1]),TokenToString(*aParam[2]),(int)TokenToInt64(*aParam[3]));
+	if (aResultToken.value_int64)
+		aResultToken.symbol = SYM_INTEGER;
+	else
+	{
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker =_T("");
+	}
+
+}
+
+BIF_DECL(BIF_MemoryLoadStringEx)
+{
+	aResultToken.value_int64 = MemoryLoadStringEx((HMEMORYMODULE)TokenToInt64(*aParam[0]),(UINT)TokenToInt64(*aParam[1]),TokenToString(*aParam[2]),(int)TokenToInt64(*aParam[3]),(WORD)TokenToInt64(*aParam[4]));
+	if (aResultToken.value_int64)
+		aResultToken.symbol = SYM_INTEGER;
+	else
+	{
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker =_T("");
+	}
+
 }
 
 BIF_DECL(BIF_Round)

@@ -873,11 +873,13 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 						Struct *tempobj = objclone;
 						objclone = objclone->Clone(true);
 						objclone->mStructMem = tempobj->mStructMem;
+						/*
 						if (mArraySize)
 						{
 							objclone->mArraySize = 0;
 							objclone->mSize = mSize / mArraySize;
 						}
+						*/
 						tempobj->Release();
 						if (IS_INVOKE_SET && TokenToObject(*aParam[1]))
 						{
@@ -907,11 +909,12 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 				objclone->mStructMem = target;
 				if (!mArraySize && mIsPointer)
 					objclone->mIsPointer--;
-				else if (mArraySize)
+				/*else if (mArraySize)
 				{
 					objclone->mArraySize = 0;
 					objclone->mSize = mSize / mArraySize;
 				}
+				*/
 				if (objclone->mIsPointer || (aParamCount == 1 && !mTypeOnly))
 				{
 					if (param_count_excluding_rvalue > 1)
@@ -1400,8 +1403,6 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 		{	// field is [T|W|U]CHAR or LP[TC]STR, set get character or string
 			source_string = (LPCVOID)TokenToString(*aParam[1], aResultToken.buf);
 			source_length = (int)((aParam[1]->symbol == SYM_VAR) ? aParam[1]->var->CharLength() : _tcslen((LPCTSTR)source_string));
-			//if (field->mSize > 2) // not [T|W|U]CHAR
-			//	source_length++; // for terminating character
 			if (!source_length)
 			{	// Take a shortcut when source_string is empty, since some paths below might not handle it correctly.
 				if (field->mSize > 2 && !*((UINT_PTR*)((UINT_PTR)target + field->mOffset))) // no memory allocated, don't allocate just return
@@ -1424,6 +1425,8 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 					objclone->Release();
 					return g_script.ScriptError(ERR_MUST_INIT_STRUCT);
 			}
+			else if (field->mSize > 2) // not [T|W|U]CHAR
+				source_length++; // for terminating character
 			if (field->mSize > 2 && (!target || !*((UINT_PTR*)((UINT_PTR)target + field->mOffset)) || (field->mMemAllocated > 0 && (field->mMemAllocated < ((source_length + 1) * (int)(field->mEncoding == 1200 ? sizeof(WCHAR) : sizeof(CHAR)))))))
 			{   // no memory allocated yet, allocate now
 				if (field->mMemAllocated == -1 && (!target || !*((UINT_PTR*)((UINT_PTR)target + field->mOffset)))){
