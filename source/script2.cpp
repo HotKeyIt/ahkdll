@@ -1721,7 +1721,8 @@ ResultType Line::Input()
 	g_input.EndVK = end_vk;
 	g_input.EndSC = end_sc;
 	g_input.status = INPUT_IN_PROGRESS; // Signal the hook to start the input.
-
+	if (!g_input.BufferLength) // Free variable since user did not use A option
+		output_var->Free();
 	// Make script persistent.  This is mostly for backward compatibility because it is documented behavior.
 	// even though as of v1.0.42.03, the keyboard hook does not become permanent (which allows a subsequent
 	// use of the commands Suspend/Hotkey to deinstall it, which seems to add flexibility/benefit).

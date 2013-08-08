@@ -1548,6 +1548,19 @@ ResultType WindowSearch::SetCriteria(global_struct &aSettings, LPTSTR aTitle, LP
 				return FAIL; // Inform caller of invalid criteria.  No need to do anything else further below.
 			}
 		}
+		else if (!_tcsnicmp(cp, _T("parent"), 6)) // Parent of the window
+		{
+			cp += 6;
+			mCriteria |= CRITERION_PARENT;
+			mCriterionParentHwnd = (HWND)ATOU64(cp);
+			// Note that this can validly be the HWND of a child window; i.e. ahk_id %ChildWindowHwnd% is supported.
+			if (mCriterionParentHwnd != HWND_BROADCAST && !IsWindow(mCriterionParentHwnd)) // Checked here once rather than each call to IsMatch().
+			{
+				mCriterionParentHwnd = NULL;
+				return FAIL; // Inform caller of invalid criteria.  No need to do anything else further below.
+			}
+		}
+
 		else if (!_tcsnicmp(cp, _T("pid"), 3))
 		{
 			cp += 3;
@@ -1675,6 +1688,8 @@ void WindowSearch::UpdateCandidateAttributes()
 	}
 	if (mCriteria & CRITERION_CLASS)
 		GetClassName(mCandidateParent, mCandidateClass, _countof(mCandidateClass)); // Limit to WINDOW_CLASS_SIZE in this case since that's the maximum that can be searched.
+	if (mCriteria & CRITERION_PARENT)
+		mCandidateParentHwnd = GetParent(mCandidateParent);
 	// Nothing to do for these:
 	//CRITERION_GROUP:    Can't be pre-processed at this stage.
 	//CRITERION_ID:       It is mCandidateParent, which has already been set by SetCandidate().
@@ -1763,6 +1778,8 @@ HWND WindowSearch::IsMatch(bool aInvert)
 	// mCriterionHwnd should already be filled in, though it might be an explicitly specified zero.
 	// Note: IsWindow(mCriterionHwnd) was already called by SetCriteria().
 	if ((mCriteria & CRITERION_ID) && mCandidateParent != mCriterionHwnd) // Doesn't match the required HWND.
+		return NULL;
+	if ((mCriteria & CRITERION_PARENT) && mCandidateParentHwnd != mCriterionParentHwnd) // Parent window doesn't match the reqired Hwnd
 		return NULL;
 	//else it's a match so far, but continue onward in case there are other criteria.
 

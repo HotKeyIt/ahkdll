@@ -1488,6 +1488,7 @@ void ComObject::DebugWriteProperty(IDebugProperties *aDebugger, int aPage, int a
 			if (!StringFromGUID2(mEventSink->mIID, buf, _countof(buf)))
 				*buf = 0;
 			aDebugger->WriteProperty("IID", (LPTSTR)(LPCTSTR)CStringTCharFromWCharIfNeeded(buf));
+			
 			aDebugger->EndProperty(sinkCookie);
 		}
 	}
