@@ -530,7 +530,8 @@ ResultType Line::Input()
 	g_input.EndVK = end_vk;
 	g_input.EndSC = end_sc;
 	g_input.status = INPUT_IN_PROGRESS; // Signal the hook to start the input.
-
+	if (!g_input.BufferLength) // Free variable since user did not use A option
+		output_var->Free();
 	Hotkey::InstallKeybdHook(); // Install the hook (if needed).
 
 	// A timer is used rather than monitoring the elapsed time here directly because
