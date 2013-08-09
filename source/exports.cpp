@@ -211,6 +211,11 @@ EXPORT unsigned int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, L
 		for (;aParamsCount < 10;aParamsCount++)
 			if (!*params[aParamsCount])
 				break;
+		if (aParamsCount < aFunc->mMinParams)
+		{
+			g_script.ScriptError(ERR_TOO_FEW_PARAMS);
+			return -1;
+		}
 		if(aFunc->mIsBuiltIn)
 		{
 			EnterCriticalSection(&g_CriticalAhkFunction);
@@ -272,7 +277,7 @@ EXPORT unsigned int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, L
 			}
 			else
 				aFuncAndToken.param = NULL;
-			aFuncAndToken.mParamCount = aParamsCount;
+			aFuncAndToken.mParamCount = aFunc->mParamCount < aParamsCount ? aFunc->mParamCount : aParamsCount;
 			LPTSTR new_buf;
 			for (int i = 0;(aFunc->mParamCount > i || aFunc->mIsVariadic) && aParamsCount>i;i++)
 			{
@@ -563,6 +568,11 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 		for (;aParamsCount < 10;aParamsCount++)
 			if (!*params[aParamsCount])
 				break;
+		if (aParamsCount < aFunc->mMinParams)
+		{
+			g_script.ScriptError(ERR_TOO_FEW_PARAMS);
+			return _T("");
+		}
 		if(aFunc->mIsBuiltIn)
 		{
 			ResultType aResult = OK;
@@ -696,7 +706,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 			}
 			else
 				aFuncAndToken.param = NULL;
-			aFuncAndToken.mParamCount = aParamsCount;
+			aFuncAndToken.mParamCount = aFunc->mParamCount < aParamsCount ? aFunc->mParamCount : aParamsCount;
 			LPTSTR new_buf;
 			for (int i = 0;(aFunc->mParamCount > i || aFunc->mIsVariadic) && aParamsCount>i;i++)
 			{
@@ -852,7 +862,17 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 	if (aFunc)
 	{	
 		VARIANT *variants[10] = {&param1,&param2,&param3,&param4,&param5,&param6,&param7,&param8,&param9,&param10};
-		int aParamCount = 0;
+		int aParamsCount = 0;
+		for (;aParamsCount < 10;aParamsCount++)
+			if (variants[aParamsCount]->vt == VT_ERROR)
+				break;
+		if (aParamsCount < aFunc->mMinParams)
+		{
+			g_script.ScriptError(ERR_TOO_FEW_PARAMS);
+			VARIANT &r =  aFuncAndTokenToReturn[returnCount + 1].variant_to_return_dll;
+			r.vt = VT_NULL ;
+			return r ; 
+		}
 		if(aFunc->mIsBuiltIn)
 		{
 			ResultType aResult = OK;
@@ -867,19 +887,19 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 				LeaveCriticalSection(&g_CriticalAhkFunction);
 				return ret;
 			}
-			for (;aFunc->mParamCount > aParamCount && variants[aParamCount]->vt != VT_ERROR;aParamCount++)
+			for (int i = 0;aFunc->mParamCount > aParamsCount && variants[i]->vt != VT_ERROR;i++)
 			{
-				aParam[aParamCount] = (ExprTokenType*)_alloca(sizeof(ExprTokenType));
-				if (!aParam[aParamCount])
+				aParam[i] = (ExprTokenType*)_alloca(sizeof(ExprTokenType));
+				if (!aParam[i])
 				{
 					VARIANT ret = {};
 					ret.vt = NULL;
 					LeaveCriticalSection(&g_CriticalAhkFunction);
 					return ret;
 				}
-				aParam[aParamCount]->symbol = SYM_VAR;
-				aParam[aParamCount]->var = (Var*)alloca(sizeof(Var));
-				if (!aParam[aParamCount]->var)
+				aParam[i]->symbol = SYM_VAR;
+				aParam[i]->var = (Var*)alloca(sizeof(Var));
+				if (!aParam[i]->var)
 				{
 					VARIANT ret = {};
 					ret.vt = NULL;
@@ -887,21 +907,21 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 					return ret;
 				}
 				// prepare variable
-				aParam[aParamCount]->var->mType = VAR_NORMAL;
-				aParam[aParamCount]->var->mAttrib = 0;
-				aParam[aParamCount]->var->mByteCapacity = 0;
-				aParam[aParamCount]->var->mHowAllocated = ALLOC_MALLOC;
+				aParam[i]->var->mType = VAR_NORMAL;
+				aParam[i]->var->mAttrib = 0;
+				aParam[i]->var->mByteCapacity = 0;
+				aParam[i]->var->mHowAllocated = ALLOC_MALLOC;
 
-				AssignVariant(*aParam[aParamCount]->var, *variants[aParamCount],false);
+				AssignVariant(*aParam[i]->var, *variants[i],false);
 			}
 			aResultToken.symbol = SYM_INTEGER;
 			aResultToken.marker = aFunc->mName;
 			
-			aFunc->mBIF(aResult,aResultToken,aParam,aParamCount);
+			aFunc->mBIF(aResult,aResultToken,aParam,aParamsCount);
 
 			// free all variables in case memory was allocated
-			for (;aParamCount >= 0;aParamCount--)
-				aParam[aParamCount]->var->Free();
+			for (int i = 0;i < aParamsCount;i++)
+				aParam[i]->var->Free();
 			TokenToVariant(aResultToken, variant_to_return_dll);
 			LeaveCriticalSection(&g_CriticalAhkFunction);
 			return variant_to_return_dll;
@@ -909,13 +929,13 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 		else // UDF
 		{
 			EnterCriticalSection(&g_CriticalAhkFunction);
-			for (;aFunc->mParamCount > aParamCount && variants[aParamCount]->vt != VT_ERROR;aParamCount++)
-				AssignVariant(*aFunc->mParam[aParamCount].var, *variants[aParamCount],false);
+			for (int i = 0;aFunc->mParamCount > i;i++)
+				AssignVariant(*aFunc->mParam[i].var, *variants[i],false);
 			if (++returnCount > 9)
 				returnCount = 0 ;
 			FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
 			aFuncAndToken.mFunc = aFunc ;
-
+			aFuncAndToken.mParamCount = aFunc->mParamCount < aParamsCount ? aFunc->mParamCount : aParamsCount;
 			if (sendOrPost == 1)
 			{
 				SendMessage(g_hWnd, AHK_EXECUTE_FUNCTION_VARIANT, (WPARAM)&aFuncAndToken,NULL);
