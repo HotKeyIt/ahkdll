@@ -553,7 +553,10 @@ ResultType Line::Input()
 		int output_var_len;
 		// Rather than monitoring the timeout here, just wait for the incoming WM_TIMER message
 		// to take effect as a TimerProc() call during the MsgSleep():
-		MsgSleep();
+		if (g_MainThreadID == GetCurrentThreadId())
+			MsgSleep();
+		else
+			Sleep(SLEEP_INTERVAL);
 		// HotKeyIt added multi-threading support so variable can be read from other threads while input is in progress
 		output_var_len = (int) _tcslen(output_var->Contents());
 		if (output_var_len > INPUT_BUFFER_SIZE - 1)
@@ -926,7 +929,7 @@ ResultType Line::PerformWait()
 		}
 
 		// Must cast to int or any negative result will be lost due to DWORD type:
-		if (wait_indefinitely || (int)(sleep_duration - (GetTickCount() - start_time)) > SLEEP_INTERVAL_HALF)
+		if (g_MainThreadID == GetCurrentThreadId() && (wait_indefinitely || (int)(sleep_duration - (GetTickCount() - start_time)) > SLEEP_INTERVAL_HALF))
 		{
 			if (MsgSleep(INTERVAL_UNSPECIFIED)) // INTERVAL_UNSPECIFIED performs better.
 			{
@@ -949,6 +952,8 @@ ResultType Line::PerformWait()
 				}
 			}
 		}
+		else if (wait_indefinitely || (int)(sleep_duration - (GetTickCount() - start_time)) > SLEEP_INTERVAL_HALF)
+			Sleep(SLEEP_INTERVAL);
 		else // Done waiting.
 			return g_ErrorLevel->Assign(ERRORLEVEL_ERROR); // Since it timed out, we override the default with this.
 	} // for()
@@ -1970,7 +1975,10 @@ BIF_DECL(BIF_Process)
 			// Must cast to int or any negative result will be lost due to DWORD type:
 			if (wait_indefinitely || (int)(sleep_duration - (GetTickCount() - start_time)) > SLEEP_INTERVAL_HALF)
 			{
-				MsgSleep(100);  // For performance reasons, don't check as often as the WinWait family does.
+				if (g_MainThreadID == GetCurrentThreadId())
+					MsgSleep(100);  // For performance reasons, don't check as often as the WinWait family does.
+				else
+					Sleep(100);
 			}
 			else // Done waiting.
 			{
@@ -3961,7 +3969,10 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 		// *LCtrl up::Send {Blind}{Alt up}
 		PostMessage(NULL, iMsg, wParam, lParam);
 		if (IsInterruptible())
-			MsgSleep(-1, RETURN_AFTER_MESSAGES_SPECIAL_FILTER);
+			if (g_MainThreadID == GetCurrentThreadId())
+				MsgSleep(-1, RETURN_AFTER_MESSAGES_SPECIAL_FILTER);
+			else
+				Sleep(SLEEP_INTERVAL);
 		//else let the other pump discard this hotkey event since in most cases it would do more harm than good
 		// (see comments above for why the message is posted even when it is 90% certain it will be discarded
 		// in all cases where MsgSleep isn't done).
@@ -7378,7 +7389,10 @@ ResultType Line::SoundPlay(LPTSTR aFilespec, bool aSleepUntilDone)
 		}
 		// Sleep a little longer than normal because I'm not sure how much overhead
 		// and CPU utilization the above incurs:
-		MsgSleep(20);
+		if (g_MainThreadID == GetCurrentThreadId())
+			MsgSleep(20);
+		else
+			Sleep(20);
 	}
 	return OK;
 }
@@ -11594,7 +11608,10 @@ ResultType STDMETHODCALLTYPE CriticalObject::Invoke(
  {
 	 // Avoid deadlocking the process so messages can still be processed
 	 while (!TryEnterCriticalSection(this->lpCriticalSection))
-		 MsgSleep(-1);
+		 if (g_MainThreadID == GetCurrentThreadId())
+			 MsgSleep(-1);
+		 else
+			 Sleep(0);
 	 // Invoke original object as if it was called
 	 ResultType r = this->object->Invoke(aResultToken,aThisToken,aFlags,aParam,aParamCount);
 	 LeaveCriticalSection(this->lpCriticalSection);

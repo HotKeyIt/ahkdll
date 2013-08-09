@@ -40,7 +40,10 @@ bool MsgSleep(int aSleepDuration = INTERVAL_UNSPECIFIED, MessageMode aMode = RET
 #define SLEEP_WITHOUT_INTERRUPTION(aSleepTime) \
 {\
 	g_AllowInterruption = FALSE;\
-	MsgSleep(aSleepTime);\
+	if (g_MainThreadID == GetCurrentThreadId())\
+		MsgSleep(aSleepTime);\
+	else\
+		Sleep(aSleepTime);\
 	g_AllowInterruption = TRUE;\
 }
 
@@ -60,7 +63,7 @@ bool MsgSleep(int aSleepDuration = INTERVAL_UNSPECIFIED, MessageMode aMode = RET
 #define DoWinDelay \
 	if (::g->WinDelay > -1)\
 	{\
-		if (::g->WinDelay < 25 && g_os.IsWin9x())\
+		if (g_MainThreadID != GetCurrentThreadId() || (::g->WinDelay < 25 && g_os.IsWin9x()))\
 			Sleep(::g->WinDelay);\
 		else\
 			MsgSleep(::g->WinDelay);\
@@ -69,7 +72,7 @@ bool MsgSleep(int aSleepDuration = INTERVAL_UNSPECIFIED, MessageMode aMode = RET
 #define DoControlDelay \
 	if (g->ControlDelay > -1)\
 	{\
-		if (g->ControlDelay < 25 && g_os.IsWin9x())\
+		if (g_MainThreadID != GetCurrentThreadId() || (g->ControlDelay < 25 && g_os.IsWin9x()))\
 			Sleep(g->ControlDelay);\
 		else\
 			MsgSleep(g->ControlDelay);\

@@ -689,7 +689,7 @@ Object *Object::CreateFromArgV(LPTSTR *aArgV, int aArgC)
 		token[j].symbol = SYM_STRING;
 		token[j].marker = aArgV[j];
 		param[j] = &token[j];
-		if ( !((j+1) % 2) )
+		if ( !((j+1) % 2) && _tcscmp(_T("0"),aArgV[j]) && !ATOI64(aArgV[j]))
 			args->Invoke(aResult,thisToken,IT_SET,&param[j-1],2);
 	}
 	if (!args->InsertAt(0, 1, param, aArgC))

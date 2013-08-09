@@ -66,6 +66,7 @@ typedef struct {
     CustomGetProcAddressFunc getProcAddress;
     CustomFreeLibraryFunc freeLibrary;
     void *userdata;
+	ULONG_PTR lpCookie;
 } MEMORYMODULE, *PMEMORYMODULE;
 
 typedef BOOL (WINAPI *DllEntryProc)(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved);
@@ -259,7 +260,6 @@ static int
 BuildImportTable(PMEMORYMODULE module)
 {
     int result=1;
-    ULONG_PTR lpCookie = 0;
     unsigned char *codeBase = module->codeBase;
     HCUSTOMMODULE *tmp;
 
@@ -337,7 +337,7 @@ BuildImportTable(PMEMORYMODULE module)
                     if (hActCtx == INVALID_HANDLE_VALUE)
                         break; //failed to create context, continue and try loading
 
-                    _ActivateActCtx(hActCtx,&lpCookie); // Don't care if this fails since we would countinue anyway
+                    _ActivateActCtx(hActCtx,&module->lpCookie); // Don't care if this fails since we would countinue anyway
                     break; // Break since a dll can have only 1 manifest
                 }
             }
@@ -592,6 +592,8 @@ void MemoryFreeLibrary(HMEMORYMODULE mod)
             (*DllEntry)((HINSTANCE)module->codeBase, DLL_PROCESS_DETACH, 0);
             module->initialized = 0;
         }
+		if (_DeactivateActCtx)
+			_DeactivateActCtx(NULL,module->lpCookie);
 
         if (module->modules != NULL) {
             // free previously opened libraries

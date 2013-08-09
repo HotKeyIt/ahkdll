@@ -71,12 +71,13 @@ inline bool IsTextMatch(LPTSTR aHaystack, LPTSTR aNeedle)
 #define WINDOW_CLASS_SIZE 257  // MSDN implies length can't be greater than 256: "The maximum length for [WNDCLASS] lpszClassName is 256. If lpszClassName is greater than the maximum length, the RegisterClass function will fail."
 
 // Bitwise fields to support multiple criteria in v1.0.36.02
-#define CRITERION_TITLE 0x01
-#define CRITERION_ID    0x02
-#define CRITERION_PID   0x04
-#define CRITERION_CLASS 0x08
-#define CRITERION_GROUP 0x10
-#define CRITERION_PATH	0x20
+#define CRITERION_TITLE  0x01
+#define CRITERION_ID     0x02
+#define CRITERION_PID    0x04
+#define CRITERION_CLASS  0x08
+#define CRITERION_GROUP  0x10
+#define CRITERION_PATH	 0x20
+#define CRITERION_PARENT 0x100
 
 class WindowSearch
 {
@@ -98,6 +99,7 @@ public:
 	LPTSTR mCriterionText;                     // WinText.
 	LPTSTR mCriterionExcludeText;              // ExcludeText.
 	HWND mCriterionHwnd;                      // For "ahk_id".
+	HWND mCriterionParentHwnd;                // For "ahk_parent".
 	DWORD mCriterionPID;                      // For "ahk_pid".
 	WinGroup *mCriterionGroup;                // For "ahk_group".
 	TCHAR mCriterionPath[SEARCH_PHRASE_SIZE]; // For "ahk_exe".
@@ -117,6 +119,7 @@ public:
 
 	// Controlled by the SetCandidate() method:
 	HWND mCandidateParent;
+	HWND mCandidateParentHwnd;
 	DWORD mCandidatePID;
 	TCHAR mCandidateTitle[WINDOW_TEXT_SIZE];  // For storing title or class name of the given mCandidateParent.
 	TCHAR mCandidateClass[WINDOW_CLASS_SIZE]; // Must not share mem with mCandidateTitle because even if ahk_class is in effect, ExcludeTitle can also be in effect.

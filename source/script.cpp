@@ -12593,7 +12593,10 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 		// At this point, a pause may have been triggered either by the above MsgSleep()
 		// or due to the action of a command (e.g. Pause, or perhaps tray menu "pause" was selected during Sleep):
 		while (g.IsPaused) // An initial "if (g.IsPaused)" prior to the loop doesn't make it any faster.
-			MsgSleep(INTERVAL_UNSPECIFIED);  // Must check often to periodically run timed subroutines.
+			if (g_MainThreadID == GetCurrentThreadId())
+				MsgSleep(INTERVAL_UNSPECIFIED);  // Must check often to periodically run timed subroutines.
+			else
+				Sleep(SLEEP_INTERVAL);
 
 		// Do these only after the above has had its opportunity to spend a significant amount
 		// of time doing what it needed to do.  i.e. do these immediately before the line will actually
@@ -15438,7 +15441,7 @@ ResultType Line::Perform()
 		// But only do so for short sleeps, for which the user has a greater expectation of
 		// accuracy.  UPDATE: Do not change the 25 below without also changing it in Critical's
 		// documentation.
-		if (sleep_time < 25 && sleep_time > 0 && g_os.IsWin9x()) // Ordered for short-circuit performance. v1.0.38.05: Added "sleep_time > 0" so that Sleep -1/0 will work the same on Win9x as it does on other OSes.
+		if (g_MainThreadID != GetCurrentThreadId() || (sleep_time < 25 && sleep_time > 0 && g_os.IsWin9x())) // Ordered for short-circuit performance. v1.0.38.05: Added "sleep_time > 0" so that Sleep -1/0 will work the same on Win9x as it does on other OSes.
 			Sleep(sleep_time);
 		else
 			MsgSleep(sleep_time);

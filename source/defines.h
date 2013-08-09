@@ -494,8 +494,10 @@ typedef UCHAR HookType;
 	tick_now = GetTickCount();\
 	if (tick_now - g_script.mLastPeekTime > ::g->PeekFrequency)\
 	{\
-		if (PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE))\
+		if (PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE) && g_MainThreadID == GetCurrentThreadId())\
 			MsgSleep(-1);\
+		else\
+			Sleep(SLEEP_INTERVAL);\
 		tick_now = GetTickCount();\
 		g_script.mLastPeekTime = tick_now;\
 	}\
