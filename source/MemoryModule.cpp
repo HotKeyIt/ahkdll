@@ -281,6 +281,7 @@ BuildImportTable(PMEMORYMODULE module)
             ACTCTXA actctx ={0,0,0,0,0,0,0,0,0};
             actctx.cbSize =  sizeof(actctx);
             HANDLE hActCtx;
+			module->lpCookie = 0;
         
             // Path to temp directory + our temporary file name
             CHAR buf[MAX_PATH];
@@ -334,7 +335,7 @@ BuildImportTable(PMEMORYMODULE module)
                     CloseHandle(hFile);
 
                     if (hActCtx == INVALID_HANDLE_VALUE)
-                        return 0; //failed to create context, continue and try loading
+                        break; //failed to create context, continue and try loading
 
                     _ActivateActCtx(hActCtx,&module->lpCookie); // Don't care if this fails since we would countinue anyway
                     break; // Break since a dll can have only 1 manifest
@@ -591,7 +592,7 @@ void MemoryFreeLibrary(HMEMORYMODULE mod)
             (*DllEntry)((HINSTANCE)module->codeBase, DLL_PROCESS_DETACH, 0);
             module->initialized = 0;
         }
-		if (_DeactivateActCtx)
+		if (_DeactivateActCtx && module->lpCookie)
 			_DeactivateActCtx(NULL,module->lpCookie);
 
         if (module->modules != NULL) {
