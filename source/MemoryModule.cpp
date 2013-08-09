@@ -66,6 +66,7 @@ typedef struct {
     CustomGetProcAddressFunc getProcAddress;
     CustomFreeLibraryFunc freeLibrary;
     void *userdata;
+	ULONG_PTR lpCookie;
 } MEMORYMODULE, *PMEMORYMODULE;
 
 typedef BOOL (WINAPI *DllEntryProc)(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved);
@@ -77,7 +78,6 @@ HMODULE libkernel32 = LoadLibrary(_T("kernel32.dll"));
 MyCreateActCtx _CreateActCtxA = (MyCreateActCtx)GetProcAddress(libkernel32,"CreateActCtxA");
 MyDeactivateActCtx _DeactivateActCtx = (MyDeactivateActCtx)GetProcAddress(libkernel32,"DeactivateActCtx");
 MyActivateActCtx _ActivateActCtx = (MyActivateActCtx)GetProcAddress(libkernel32,"ActivateActCtx");
-
 
 #define GET_HEADER_DICTIONARY(module, idx)	&(module)->headers->OptionalHeader.DataDirectory[idx]
 
@@ -259,7 +259,6 @@ static int
 BuildImportTable(PMEMORYMODULE module)
 {
     int result=1;
-    ULONG_PTR lpCookie = 0;
     unsigned char *codeBase = module->codeBase;
     HCUSTOMMODULE *tmp;
 
@@ -335,9 +334,9 @@ BuildImportTable(PMEMORYMODULE module)
                     CloseHandle(hFile);
 
                     if (hActCtx == INVALID_HANDLE_VALUE)
-                        break; //failed to create context, continue and try loading
+                        return 0; //failed to create context, continue and try loading
 
-                    _ActivateActCtx(hActCtx,&lpCookie); // Don't care if this fails since we would countinue anyway
+                    _ActivateActCtx(hActCtx,&module->lpCookie); // Don't care if this fails since we would countinue anyway
                     break; // Break since a dll can have only 1 manifest
                 }
             }
@@ -592,6 +591,8 @@ void MemoryFreeLibrary(HMEMORYMODULE mod)
             (*DllEntry)((HINSTANCE)module->codeBase, DLL_PROCESS_DETACH, 0);
             module->initialized = 0;
         }
+		if (_DeactivateActCtx)
+			_DeactivateActCtx(NULL,module->lpCookie);
 
         if (module->modules != NULL) {
             // free previously opened libraries
@@ -610,6 +611,7 @@ void MemoryFreeLibrary(HMEMORYMODULE mod)
         }
 
         HeapFree(GetProcessHeap(), 0, module);
+		
     }
 }
 

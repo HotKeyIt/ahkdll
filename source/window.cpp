@@ -475,7 +475,10 @@ HWND WinClose(HWND aWnd, int aTimeToWaitForClose, bool aKillIfHung)
 	{
 		// Seems best to always do the first one regardless of the value 
 		// of aTimeToWaitForClose:
-		MsgSleep(INTERVAL_UNSPECIFIED);
+		if (g_MainThreadID == GetCurrentThreadId())
+			MsgSleep(INTERVAL_UNSPECIFIED);
+		else
+			Sleep(SLEEP_INTERVAL);
 		if (!IsWindow(aWnd)) // It's gone, so we're done.
 			return aWnd;
 		// Must cast to int or any negative result will be lost due to DWORD type:
@@ -841,8 +844,10 @@ ResultType StatusBarUtil(Var *aOutputVar, HWND aBarHwnd, int aPartNumber, LPTSTR
 		// Since above didn't break, we're in "wait" mode (more than one iteration).
 		// In the following, must cast to int or any negative result will be lost due to DWORD type.
 		// Note: A negative aWaitTime means we're waiting indefinitely for a match to appear.
-		if (aWaitTime < 0 || (int)(aWaitTime - (GetTickCount() - start_time)) > SLEEP_INTERVAL_HALF)
+		if (g_MainThreadID == GetCurrentThreadId() && (aWaitTime < 0 || (int)(aWaitTime - (GetTickCount() - start_time)) > SLEEP_INTERVAL_HALF))
 			MsgSleep(aCheckInterval);
+		else if (aWaitTime < 0 || (int)(aWaitTime - (GetTickCount() - start_time)) > SLEEP_INTERVAL_HALF)
+			Sleep(aCheckInterval);
 		else // Timed out.
 		{
 			g_ErrorLevel->Assign(ERRORLEVEL_ERROR); // Indicate "timeout".

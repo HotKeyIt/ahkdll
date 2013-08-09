@@ -34,11 +34,6 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 // caller's script subroutine is suspended due to action by us, an unknowable
 // amount of time may pass prior to finally returning to the caller.
 {
-	if (g_MainThreadID != GetCurrentThreadId())
-	{  // do a short sleep for RETURN_AFTER_MESSAGES and RETURN_AFTER_MESSAGES_SPECIAL_FILTER to allow processing messages
-		Sleep(aSleepDuration < 0 ? (aMode == WAIT_FOR_MESSAGES ? 0 : 10) : aSleepDuration == INTERVAL_UNSPECIFIED ? SLEEP_INTERVAL : aSleepDuration);
-		return false;
-	}
 	bool we_turned_on_defer = false; // Set default.
 	if (aMode == RETURN_AFTER_MESSAGES_SPECIAL_FILTER)
 	{

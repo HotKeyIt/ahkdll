@@ -751,11 +751,11 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 	// Need to check if backup is needed in case script explicitly called the function rather than using
 	// it solely as a callback.  UPDATE: And now that max_instances is supported, also need it for that.
 	// See ExpandExpression() for detailed comments about the following section.
-	VarBkp *var_backup = NULL;   // If needed, it will hold an array of VarBkp objects.
-	int var_backup_count; // The number of items in the above array.
-	if (func.mInstances > 0) // Backup is needed.
-		if (!Var::BackupFunctionVars(func, var_backup, var_backup_count)) // Out of memory.
-			return;
+	//VarBkp *var_backup = NULL;   // If needed, it will hold an array of VarBkp objects.
+	//int var_backup_count; // The number of items in the above array.
+	//if (func.mInstances > 0) // Backup is needed.
+		//if (!Var::BackupFunctionVars(func, var_backup, var_backup_count)) // Out of memory.
+			//return;
 			// Since we're in the middle of processing messages, and since out-of-memory is so rare,
 			// it seems justifiable not to have any error reporting and instead just avoid launching
 			// the new thread.
@@ -783,6 +783,7 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 	bool result = func.Call(func_call,aResult,aResultToken,aFuncAndToken->param,(int) aFuncAndToken->mParamCount,false); // Call the UDF.
 
 	DEBUGGER_STACK_POP()
+	//Var::FreeAndRestoreFunctionVars(func, var_backup, var_backup_count);
 	LPTSTR new_buf;
 	if (result)
 	{
@@ -847,7 +848,6 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 	}
 	else if (aFuncAndToken->result_to_return_dll)
 			*aFuncAndToken->result_to_return_dll = '\0';
-	Var::FreeAndRestoreFunctionVars(func, var_backup, var_backup_count);
 	ResumeUnderlyingThread(ErrorLevel_saved);
 	return;
 }
@@ -977,10 +977,10 @@ void callFuncDllVariant(FuncAndToken *aFuncAndToken)
 	// Need to check if backup is needed in case script explicitly called the function rather than using
 	// it solely as a callback.  UPDATE: And now that max_instances is supported, also need it for that.
 	// See ExpandExpression() for detailed comments about the following section.
-	VarBkp *var_backup = NULL;   // If needed, it will hold an array of VarBkp objects.
-	int var_backup_count; // The number of items in the above array.
-	if (func.mInstances > 0) // Backup is needed.
-		if (!Var::BackupFunctionVars(func, var_backup, var_backup_count)) // Out of memory.
+	//VarBkp *var_backup = NULL;   // If needed, it will hold an array of VarBkp objects.
+	//int var_backup_count; // The number of items in the above array.
+	//if (func.mInstances > 0) // Backup is needed.
+		//if (!Var::BackupFunctionVars(func, var_backup, var_backup_count)) // Out of memory.
 			return;
 			// Since we're in the middle of processing messages, and since out-of-memory is so rare,
 			// it seems justifiable not to have any error reporting and instead just avoid launching
