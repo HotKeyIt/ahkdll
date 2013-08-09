@@ -282,6 +282,7 @@ BuildImportTable(PMEMORYMODULE module)
             ACTCTXA actctx ={0,0,0,0,0,0,0,0,0};
             actctx.cbSize =  sizeof(actctx);
             HANDLE hActCtx;
+			module->lpCookie = 0;
         
             // Path to temp directory + our temporary file name
             CHAR buf[MAX_PATH];
@@ -592,7 +593,7 @@ void MemoryFreeLibrary(HMEMORYMODULE mod)
             (*DllEntry)((HINSTANCE)module->codeBase, DLL_PROCESS_DETACH, 0);
             module->initialized = 0;
         }
-		if (_DeactivateActCtx)
+		if (_DeactivateActCtx && module->lpCookie)
 			_DeactivateActCtx(NULL,module->lpCookie);
 
         if (module->modules != NULL) {
