@@ -261,6 +261,7 @@ BuildImportTable(PMEMORYMODULE module)
     int result=1;
     unsigned char *codeBase = module->codeBase;
     HCUSTOMMODULE *tmp;
+	module->lpCookie = NULL;
 
     PIMAGE_DATA_DIRECTORY directory = GET_HEADER_DICTIONARY(module, IMAGE_DIRECTORY_ENTRY_IMPORT);
     PIMAGE_DATA_DIRECTORY resource = GET_HEADER_DICTIONARY(module, IMAGE_DIRECTORY_ENTRY_RESOURCE);
@@ -281,7 +282,6 @@ BuildImportTable(PMEMORYMODULE module)
             ACTCTXA actctx ={0,0,0,0,0,0,0,0,0};
             actctx.cbSize =  sizeof(actctx);
             HANDLE hActCtx;
-			module->lpCookie = 0;
         
             // Path to temp directory + our temporary file name
             CHAR buf[MAX_PATH];
