@@ -25,8 +25,8 @@
  */
 
 #ifndef __GNUC__
-// disable warnings about pointer <-> DWORD conversions
-#pragma warning( disable : 4311 4312 )
+// disable warnings about pointer <-> DWORD conversions and empty statement
+#pragma warning( disable : 4311 4312 4390 )
 #endif
 
 #include "stdafx.h" // pre-compiled headers
@@ -391,7 +391,8 @@ BuildImportTable(PMEMORYMODULE module)
             }
         }
     }
-
+	if (_DeactivateActCtx && module->lpCookie)
+		_DeactivateActCtx(NULL,module->lpCookie);
     return result;
 }
 
@@ -592,8 +593,6 @@ void MemoryFreeLibrary(HMEMORYMODULE mod)
             (*DllEntry)((HINSTANCE)module->codeBase, DLL_PROCESS_DETACH, 0);
             module->initialized = 0;
         }
-		if (_DeactivateActCtx && module->lpCookie)
-			_DeactivateActCtx(NULL,module->lpCookie);
 
         if (module->modules != NULL) {
             // free previously opened libraries
