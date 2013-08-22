@@ -11743,25 +11743,25 @@ DynaToken *DynaToken::Create(ExprTokenType *aParam[], int aParamCount)
 					obj->mdll_call_mode = DC_CALL_CDECL;
 #endif
 				obj->mreturn_attrib.type = DLL_ARG_INT;
-				TCHAR retrurn_type_arg[3]; // maximal length of return type
+				TCHAR return_type_arg[4]; // maximal length of return type + terminating character
 				for (i=0;_tcschr(return_type_string[0] + i + 1,'=');i++)
-					retrurn_type_arg[i] = return_type_string[0][i];
-				retrurn_type_arg[i] = '\0';
-				if (StrChrAny(retrurn_type_arg, _T("uU")))
+					return_type_arg[i] = return_type_string[0][i];
+				return_type_arg[i] = '\0';
+				if (StrChrAny(return_type_arg, _T("uU")))
 				{
-					_tcsncpy(retrurn_type_arg,retrurn_type_arg + 1,sizeof(TCHAR));
-					_tcsncpy(retrurn_type_arg + 1,retrurn_type_arg + 2,sizeof(TCHAR));
-					//*(retrurn_type_arg + 2) = '\0';
+					_tcsncpy(return_type_arg,return_type_arg + 1,sizeof(TCHAR));
+					_tcsncpy(return_type_arg + 1,return_type_arg + 2,sizeof(TCHAR));
+					//*(return_type_arg + 2) = '\0';
 					obj->mreturn_attrib.is_unsigned = true;
 				}
 				else
 					obj->mreturn_attrib.is_unsigned = false;
-				if (StrChrAny(retrurn_type_arg + 1, _T("*pP")))
+				if (StrChrAny(return_type_arg + 1, _T("*pP")))
 					obj->mreturn_attrib.passed_by_address = true;
 				else
 					obj->mreturn_attrib.passed_by_address = false;
 				if (false) {} // To simplify the macro below.  It should have no effect on the compiled code.
-#define TEST_TYPE(t, n)  else if (!_tcsnicmp(retrurn_type_arg, _T(t), 1))  obj->mreturn_attrib.type = (n);
+#define TEST_TYPE(t, n)  else if (!_tcsnicmp(return_type_arg, _T(t), 1))  obj->mreturn_attrib.type = (n);
 TEST_TYPE("I",	DLL_ARG_INT) // The few most common types are kept up top for performance.
 TEST_TYPE("S",	DLL_ARG_STR)
 #ifdef _WIN64
@@ -15922,8 +15922,13 @@ BIF_DECL(BIF_OnMessage)
 	bool mode_is_delete = false; //
 	if (aParamCount > (specified_hwnd ? 2 : 1)) // Parameter func is present.
 	{
-		LPTSTR func_name = TokenToString(*aParam[specified_hwnd ? 2 : 1], buf); // Resolve parameter #2.
-		if (*func_name)
+		LPTSTR func_name;
+		if (func = dynamic_cast<Func*>(TokenToObject(*aParam[specified_hwnd ? 2 : 1])))
+		{
+			if (func->mIsBuiltIn || func->mMinParams > 4) // Requires too many params.
+				return; // Yield the default return value set earlier.
+		}
+		else if (*(func_name = TokenToString(*aParam[specified_hwnd ? 2 : 1], buf))) // Resolve parameter #2.
 		{
 			if (   !(func = g_script.FindFunc(func_name))   ) // Nonexistent function.
 				return; // Yield the default return value set earlier.

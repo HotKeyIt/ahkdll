@@ -1397,7 +1397,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 			return OK;
 		}
 
-		// StrPut (code stolen from BIF_StrPut())
+		// StrPut (code taken from BIF_StrPut())
 		if (field->mEncoding != 65535)
 		{	// field is [T|W|U]CHAR or LP[TC]STR, set get character or string
 			source_string = (LPCVOID)TokenToString(*aParam[1], aResultToken.buf);
@@ -1474,7 +1474,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 			aResultToken.value_int64 = char_count;
 		}
 		else // NumPut
-		{	 // code stolen from BIF_NumPut
+		{	 // code taken from BIF_NumPut
 			switch(field->mSize)
 			{
 			case 4: // Listed first for performance.

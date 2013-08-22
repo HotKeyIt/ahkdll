@@ -105,6 +105,16 @@ switch(fwdReason)
  
 int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdLine, int nCmdShow)
 {
+#ifndef MINIDLL
+	// Lastly (after the above have been initialized), anything that can fail:
+	if ( !g_script.mTrayMenu && !(g_script.mTrayMenu = g_script.AddMenu(_T("Tray")))   ) // realistically never happens
+	{
+		g_script.ScriptError(_T("No tray mem"));
+		g_script.ExitApp(EXIT_CRITICAL);
+	}
+	else
+		g_script.mTrayMenu->mIncludeStandardItems = true;
+#endif
 	// Init any globals not in "struct g" that need it:
 	g_MainThreadID = GetCurrentThreadId();
 	
