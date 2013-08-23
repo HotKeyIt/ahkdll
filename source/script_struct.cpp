@@ -1425,7 +1425,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 					objclone->Release();
 					return g_script.ScriptError(ERR_MUST_INIT_STRUCT);
 			}
-			else if (field->mSize > 2) // not [T|W|U]CHAR
+			if (field->mSize > 2) // not [T|W|U]CHAR
 				source_length++; // for terminating character
 			if (field->mSize > 2 && (!target || !*((UINT_PTR*)((UINT_PTR)target + field->mOffset)) || (field->mMemAllocated > 0 && (field->mMemAllocated < ((source_length + 1) * (int)(field->mEncoding == 1200 ? sizeof(WCHAR) : sizeof(CHAR)))))))
 			{   // no memory allocated yet, allocate now
@@ -1495,8 +1495,6 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 							return OK;
 						}
 					}
-					if (field->mSize > 2) // Not TCHAR or CHAR or WCHAR
-						++char_count; // + 1 for null-terminator (source_length causes it to be excluded from char_count).
 					// Assume there is sufficient buffer space and hope for the best:
 					length = char_count;
 					// Convert to target encoding.
