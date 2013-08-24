@@ -981,7 +981,7 @@ void callFuncDllVariant(FuncAndToken *aFuncAndToken)
 	//int var_backup_count; // The number of items in the above array.
 	//if (func.mInstances > 0) // Backup is needed.
 		//if (!Var::BackupFunctionVars(func, var_backup, var_backup_count)) // Out of memory.
-			return;
+			//return;
 			// Since we're in the middle of processing messages, and since out-of-memory is so rare,
 			// it seems justifiable not to have any error reporting and instead just avoid launching
 			// the new thread.
