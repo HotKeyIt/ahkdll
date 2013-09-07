@@ -377,7 +377,7 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aIgnor
 	int oldHotExprLineCount = 0;
 #endif
 	if (!g_script.mIsReadyToExecute)
-		return LOADING_FAILED; // AutoHotkey needs to be running at this point
+		return 0;  // AutoHotkey needs to be running at this point // LOADING_FAILED cant be used due to PTR return type
 	if (g->CurrentFunc)  // normally functions definitions are not allowed within functions.  But we're in a function call, not a function definition right now.
 	{
 		aFunc = g->CurrentFunc; 
@@ -396,12 +396,12 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, bool aAllowDuplicateInclude, int aIgnor
 		g_script.mIsReadyToExecute = true;
 		if (inFunc == 1 )
 			g->CurrentFunc = aFunc ; 
-		return LOADING_FAILED;
+		return 0; // LOADING_FAILED cant be used due to PTR return type
 	}	
 	g_script.mIsReadyToExecute = true;
 
 	if (FinalizeScript(oldLastLine->mNextLine,aFuncCount,HotkeyCount,oldHotExprLineCount))
-		return LOADING_FAILED;
+		return 0; // LOADING_FAILED cant be used due to PTR return type
 
 	if (aIgnoreLoadFailure > 1)
 	{
@@ -430,7 +430,7 @@ EXPORT UINT_PTR addScript(LPTSTR script, int aExecute)
 	int oldHotExprLineCount = NULL;
 #endif
 	if (!g_script.mIsReadyToExecute)
-		return LOADING_FAILED; // AutoHotkey needs to be running at this point
+		return 0; // AutoHotkey needs to be running at this point // LOADING_FAILED cant be used due to PTR return type
 	if (g->CurrentFunc)  // normally functions definitions are not allowed within functions.  But we're in a function call, not a function definition right now.
 	{
 		aFunc = g->CurrentFunc; 
@@ -450,11 +450,11 @@ EXPORT UINT_PTR addScript(LPTSTR script, int aExecute)
 		if (inFunc == 1 )
 			g->CurrentFunc = aFunc ; 
 		oldLastLine->mNextLine = NULL;
-		return LOADING_FAILED;
+		return 0;  // LOADING_FAILED cant be used due to PTR return type
 	}
 	g_script.mIsReadyToExecute = true;
 	if (FinalizeScript(oldLastLine->mNextLine,aFuncCount,HotkeyCount,oldHotExprLineCount))
-		return LOADING_FAILED;
+		return 0; // LOADING_FAILED cant be used due to PTR return type
 
 	if (aExecute > 0)
 	{

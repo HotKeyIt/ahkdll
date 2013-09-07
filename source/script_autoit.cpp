@@ -209,6 +209,7 @@ ResultType Line::PixelGetColor(int aX, int aY, LPTSTR aOptions)
 }
 
 
+	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
 #endif
 ResultType Line::MenuSelect(LPTSTR aTitle, LPTSTR aText, LPTSTR aMenu1, LPTSTR aMenu2
 	, LPTSTR aMenu3, LPTSTR aMenu4, LPTSTR aMenu5, LPTSTR aMenu6, LPTSTR aMenu7
@@ -345,6 +346,7 @@ ResultType Line::Control(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR aTi
 	vk_type vk;
 	int key_count;
 	TCHAR temp_buf[32];
+	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
 
 	switch(control_cmd)
 	{
@@ -995,6 +997,8 @@ ResultType Line::Download(LPTSTR aURL, LPTSTR aFilespec)
 	// having it return the moment there is any data in the buffer, the program is made more
 	// responsive, especially when the download is very slow and/or one of the hooks is installed:
 	BOOL result;
+	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
+
 	if (*aURL == 'h' || *aURL == 'H')
 	{
 		while (result = lpfnInternetReadFileEx(hFile, &buffers, IRF_NO_WAIT, NULL)) // Assign
@@ -1630,7 +1634,7 @@ int Line::Util_CopyFile(LPCTSTR szInputSource, LPCTSTR szInputDest, bool bOverwr
 
 	int failure_count = 0;
 	LONG_OPERATION_INIT
-
+	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
 	do
 	{
 		// Since other script threads can interrupt during LONG_OPERATION_UPDATE, it's important that

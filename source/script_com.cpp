@@ -69,51 +69,6 @@ BIF_DECL(BIF_ComObjGet)
 	ComError(hr);
 }
 
-BIF_DECL(BIF_ComObjMemDll)
-{ // ComObjMemDll(MemoryModuleHandle,CLSID)
-	if ((aParam[0]->symbol != SYM_INTEGER && aParam[0]->symbol != SYM_VAR)
-		|| (aParam[1]->symbol != SYM_STRING && aParam[1]->symbol != SYM_VAR))
-	{
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
-		return; // simply exit
-	}
-    HMEMORYMODULE hDLL = (HMEMORYMODULE)TokenToInt64(*aParam[0]);
-	
-	typedef HRESULT (__stdcall *pDllGetClassObject)(IN REFCLSID clsid,IN REFIID iid,OUT LPVOID FAR* ppv);
-	pDllGetClassObject GetClassObject = (pDllGetClassObject)::MemoryGetProcAddress(hDLL,"DllGetClassObject");
-    IClassFactory* pClassFactory = NULL;
-	CLSID clsid;
-	CLSIDFromString(CStringWCharFromTCharIfNeeded(TokenToString(*aParam[1])), &clsid);
-	HRESULT hr;
-    hr = GetClassObject(clsid, IID_IClassFactory, (LPVOID*)&pClassFactory);
-    if(FAILED(hr)){
-        ComError(hr);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
-		return;
-    }
-	IDispatch *pdisp;
-    hr = pClassFactory->CreateInstance(NULL, IID_IUnknown, (void**)&pdisp);
-    pClassFactory->Release();
-    if(FAILED(hr))
-    {
-        ComError(hr);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
-		return;
-    }
-	if (aResultToken.object = new ComObject(pdisp))
-	{
-		aResultToken.symbol = SYM_OBJECT;
-		return;
-	}
-	pdisp->Release();
-    ComError(hr);
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = _T("");
-}
-
 BIF_DECL(BIF_ComObjDll)
 { // ComObjDll(moduleHandle,CLSID)
 	if ((aParam[0]->symbol != SYM_INTEGER && aParam[0]->symbol != SYM_VAR)
@@ -126,7 +81,12 @@ BIF_DECL(BIF_ComObjDll)
     HMODULE hDLL = (HMODULE)TokenToInt64(*aParam[0]);
 	
 	typedef HRESULT (__stdcall *pDllGetClassObject)(IN REFCLSID clsid,IN REFIID iid,OUT LPVOID FAR* ppv);
-	pDllGetClassObject GetClassObject = (pDllGetClassObject)::GetProcAddress(hDLL,"DllGetClassObject");
+	WCHAR buf[MAX_PATH * sizeof(WCHAR)]; // LoadTypeLibEx needs Unicode string
+	pDllGetClassObject GetClassObject;
+	if (GetModuleFileNameW(hDLL, buf, _countof(buf)))
+		GetClassObject = (pDllGetClassObject)::GetProcAddress(hDLL,"DllGetClassObject");
+	else
+		GetClassObject = (pDllGetClassObject)::MemoryGetProcAddress(hDLL,"DllGetClassObject");
     IClassFactory* pClassFactory = NULL;
 	CLSID clsid;
 	CLSIDFromString(CStringWCharFromTCharIfNeeded(TokenToString(*aParam[1])), &clsid);
@@ -788,6 +748,10 @@ void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar)
 			obj->ToVariant(aVar);
 		else
 			aVar.vt = VT_EMPTY;
+		break;
+	case SYM_MISSING:
+		aVar.vt = VT_ERROR;
+		aVar.scode = DISP_E_PARAMNOTFOUND;
 		break;
 	}
 }

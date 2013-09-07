@@ -143,6 +143,7 @@ enum SymbolType // For use with ExpandExpression() and IsNumeric().
 	, PURE_INTEGER, PURE_FLOAT
 	, SYM_STRING = PURE_NOT_NUMERIC, SYM_INTEGER = PURE_INTEGER, SYM_FLOAT = PURE_FLOAT // Specific operand types.
 #define IS_NUMERIC(symbol) ((symbol) == SYM_INTEGER || (symbol) == SYM_FLOAT) // Ordered for short-circuit performance.
+	, SYM_MISSING // Only used in parameter lists.
 	, SYM_VAR // An operand that is a variable's contents.
 	, SYM_OBJECT // L31: Represents an IObject interface pointer.
 	, SYM_DYNAMIC // An operand that needs further processing during the evaluation phase.
@@ -494,10 +495,8 @@ typedef UCHAR HookType;
 	tick_now = GetTickCount();\
 	if (tick_now - g_script.mLastPeekTime > ::g->PeekFrequency)\
 	{\
-		if (PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE) && g_MainThreadID == GetCurrentThreadId())\
+		if (PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE) && g_MainThreadID == aThreadID)\
 			MsgSleep(-1);\
-		else\
-			Sleep(SLEEP_INTERVAL);\
 		tick_now = GetTickCount();\
 		g_script.mLastPeekTime = tick_now;\
 	}\

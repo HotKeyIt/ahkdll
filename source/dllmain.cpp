@@ -70,6 +70,7 @@ switch(fwdReason)
 	 {
 		nameHinstanceP.hInstanceP = (HINSTANCE)hInstance;
 		g_hInstance = (HINSTANCE)hInstance;
+		g_hMemoryModule = (HMODULE)lpvReserved;
 		//ahkdll(_T(""),_T(""));
 #ifdef AUTODLL
 	ahkdll("autoload.ahk", "");	  // used for remoteinjection of dll 
@@ -819,12 +820,54 @@ HRESULT CoCOMServer::LoadTypeInfo(ITypeInfo ** pptinfo, const CLSID &libid, cons
    LPTYPEINFO ptinfo = NULL;
 
    *pptinfo = NULL;
-
+   
    // Load type library.
    hr = LoadRegTypeLib(libid, 1, 0, lcid, &ptlib);
    if (FAILED(hr))
-      return hr;
-
+   { // search for TypeLib in current dll
+	  WCHAR buf[MAX_PATH * sizeof(WCHAR)]; // LoadTypeLibEx needs Unicode string
+	  if (GetModuleFileNameW(g_hInstance, buf, _countof(buf)))
+		  hr = LoadTypeLibEx(buf,REGKIND_NONE,&ptlib);
+	  else // MemoryModule, search troug g_ListOfMemoryModules and use temp file to extract and load TypeLib file
+	  {
+		  HMEMORYMODULE hmodule = (HMEMORYMODULE)(g_hMemoryModule);
+		  HMEMORYRSRC res = MemoryFindResource(hmodule,_T("TYPELIB"),MAKEINTRESOURCE(1));
+		  if (!res)
+			return TYPE_E_INVALIDSTATE;
+		  DWORD resSize = MemorySizeofResource(hmodule,res);
+		  // Path to temp directory + our temporary file name
+		  DWORD tempPathLength = GetTempPathW(MAX_PATH, buf);
+		  wcscpy(buf + tempPathLength,L"AutoHotkey.MemoryModule.temp.tlb");
+		  // Write manifest to temportary file
+		  // Using FILE_ATTRIBUTE_TEMPORARY will avoid writing it to disk
+		  // It will be deleted after LoadTypeLib has been called.
+		  HANDLE hFile = CreateFileW(buf,GENERIC_WRITE,NULL,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_TEMPORARY,NULL);
+		  if (hFile == INVALID_HANDLE_VALUE)
+		  {
+#if DEBUG_OUTPUT
+			OutputDebugStringA("CreateFile failed.\n");
+#endif
+			return TYPE_E_CANTLOADLIBRARY; //failed to create file, continue and try loading without CreateActCtx
+		  }
+		  DWORD byteswritten = 0;
+		  WriteFile(hFile,MemoryLoadResource(hmodule,res),resSize,&byteswritten,NULL);
+		  CloseHandle(hFile);
+		  if (byteswritten == 0)
+		  {
+#if DEBUG_OUTPUT
+			  OutputDebugStringA("WriteFile failed.\n");
+#endif
+			  return TYPE_E_CANTLOADLIBRARY; //failed to write data, continue and try loading
+		  }
+                
+		  hr = LoadTypeLibEx(buf,REGKIND_NONE,&ptlib);
+		  // Open file and automatically delete on CloseHandle (FILE_FLAG_DELETE_ON_CLOSE)
+		  hFile = CreateFileW(buf,GENERIC_WRITE,FILE_SHARE_DELETE,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_TEMPORARY|FILE_FLAG_DELETE_ON_CLOSE,NULL);
+		  CloseHandle(hFile);
+	  }
+	  if (FAILED(hr))
+		  return hr;
+   }
    // Get type information for interface of the object.
    hr = ptlib->GetTypeInfoOfGuid(iid, &ptinfo);
    if (FAILED(hr))
@@ -832,7 +875,6 @@ HRESULT CoCOMServer::LoadTypeInfo(ITypeInfo ** pptinfo, const CLSID &libid, cons
       ptlib->Release();
       return hr;
    }
-
    ptlib->Release();
    *pptinfo = ptinfo;
    return NOERROR;

@@ -169,7 +169,6 @@ FuncEntry g_BIF[] =
 	{_T("ComObjCreate"), BIF_ComObjCreate, 1, 2, true},
 	{_T("ComObjGet"), BIF_ComObjGet, 1, 1, true},
 	{_T("ComObjDll"), BIF_ComObjDll, 2, 2, true},
-	{_T("ComObjMemDll"), BIF_ComObjMemDll, 2, 2, true},
 	{_T("ComObjConnect"), BIF_ComObjConnect, 1, 2, true},
 	{_T("ComObjError"), BIF_ComObjError, 0, 1, true},
 	{_T("ComObjType"), BIF_ComObjTypeOrValue, 1, 2, true},
@@ -258,7 +257,7 @@ Script::Script()
 #endif
 	, mVar(NULL), mVarCount(0), mVarCountMax(0), mLazyVar(NULL), mLazyVarCount(0)
 	, mCurrentFuncOpenBlockCount(0), mNextLineIsFunctionBody(false)
-	, mClassObjectCount(0)
+	, mClassObjectCount(0), mUnresolvedClasses(NULL)
 	, mCurrFileIndex(0), mCombinedLineNumber(0), mNoHotkeyLabels(true)
 #ifndef MINIDLL
 	, mMenuUseErrorLevel(false)
@@ -8988,7 +8987,7 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 			// Use main resource since a function was found there.
 			lib_hResource = lib_hResourceMain;
 		}
-		else if ((first_underscore = StrChrAny(aFuncName + sizeof(TCHAR), _T("ԤԦჇჍⱰⱾⱿⳫⳭⳲꙠꞍꞐꞒꞠꞢꞤꞦꞨꞪƼↃAＡÁÀȦÂÄǍĂĀÃÅÅĄȺẤẦẮẰǠǺǞẪẴẢȀȂẨẲẠḀẬẶⱯⱭꜲÆǼǢꜴꜶꜸꜺꜼBＢℬḂɃƁḄḆƂƄCＣℂℭĆĊꜾĈČÇȻḈƇƆDⅅＤḊĎḐĐƋƊḌḒḎÐꝹǱǄƉEＥℰÉÈĖÊËĚĔĒẼĘȨɆẾỀḖḔỄḜẺȄȆỂẸḘḚℇỆƐƎƏȜFＦℲℱḞꝻƑGＧǴĠĜǦĞḠĢǤƓƔꝽHＨℍℌℋḢĤḦȞḨĦḤḪⱧǶⱵꜦIＩℐℑÍÌİÎÏǏĬĪĨĮƗḮỈȈȊỊḬƖĲJＪĴɈKKＫḰǨĶƘḲḴⱩLＬℒĹĿĽⱢⱠĻȽŁḶḼḺḸǇỺMＭℳḾṀⱮṂƜNＮℕŃǸṄŇÑŅƝȠṆṊṈǊŊOＯÓÒȮÔÖǑŎŌÕǪŐỐỒƟØṒṐȰṌȪỖṎǾȬǬỎȌȎƠỔỌỚỜỠỘƢỞỢŒꝎȢPＰℙṔṖⱣƤQＱℚɊꝖꝘRＲƦℝℛℜŔṘŘŖɌⱤȐȒṚṞṜSＳŚṠŜŠŞṤṦṢȘṨƩƧẞꞄTＴṪŤŢƬṬƮȚṰṮȾÞꝤꝦŦUＵÚÙÛÜǓŬŪŨŮŲŰɄǗǛǙṸǕṺỦȔȖƯỤṲỨỪṶṴỮƱỬỰVＶṼṾƲɅꝠWＷẂẀẆŴẄẈǷXＸẊẌYＹÝỲẎŶŸȲỸɎỶƳỴZＺℤℨŹŻẐŽƵȤẒẔⱫƷǮƸɁꜪꜬꜮꜢꞋꝾꝀꝂꝄꝆꝈꞀꝌꝊꝐꝒꝔꞂꝚꝜꞆꜨꝞỼⱲỾꝢꝨꝪꝬꝮꜤΑΆΆᾺᾸᾹἈἉἌἊἍἋἎἏΒΓℾΔΕΈΈῈἘἙἜἚἝἛΖͰΗΉΉῊἨἩἬἪἭἫἮἯΘϴΙΊΊῚΪῘῙἸἹἼἺἽἻἾἿΚΛΜΝΞΟΌΌῸὈὉὌὊὍὋΠℿϺΡῬΣϹϾϽϿΤΥΎΎῪΫῨῩϒϓϔὙὝὛὟΦΧΨΩΩΏΏῺὨὩὬὪὭὫὮὯϚϜͶϞϘϏϠͲϷϢϤϦϨϪϬϮАӒӐБВГЃҒӺҐҔӶДԀЂԂЕЀЁӖҼҾӘӚЄЖӜӁҖЗӞҘԐԄЅꙄИЍӤЙӢҊІЇꙆЈꙈКҞӃҜҠЌҚЛԒԠЉꙤԈԔМНҢҤҺꚔӇԢЊԊОꙨꙪꙬӦӨҨԜӪӀПҦРСҪԌТꚌԎҬꚊЋУӰЎӮӲҮҰꙊФХӼӾҲЦҴꚐЧҶҸӴӋЏШꚖЩЪꙐЫӸЬҌЭӬЮꙔꙖЯԘѠѢꙒѤѦꙘѨꙜѪꙚѬѮѰѲѴѶꙞѸѺѼѾꙌҀҎԖӅӉӍꙦӔӠꚈԆꚂꚀꙢꚄꙀꙂԞԚꚎꚒꚆꙎԱԲԳԴԵԶԷԸԹԺԻԼԽԾԿՀՁՂՃՄՅՆՇՈՉՊՋՌՍՎՏՐՑՒՓՔՕՖႠႡႢႣႤႥႦჁႧႨႩႪႫႬჂႭႮႯႰႱႲႳჃႴႵႶႷႸႹႺႻႼႽႾჄႿჀჅⰀⰁⰂⰃⰄⰅⰆⰇⰈⰉⰊⰋⰌⰍⰎⰏⰐⰑⰒⰓⰔⰕⰖⰗⰘⰙⰚⰛⰜⰝⰞⰟⰠⰡⰢⰣⰤⰥⰦⰧⰨⰩⰪⰫⰬⰭⰮⲀⲂⲄⲆⲈⲊⲌⲎⲐⲒⲔⲖⲘⲚⲜⲞⲠⲢⲤⲦⲨⲪⲬⲮⲰⲲⲴⲶⲸⲺⲼⲾⳀⳂⳄⳆⳈⳊⳌⳎⳐⳒⳔⳖⳘⳚⳜⳞⳠⳢ𐐀𐐁𐐂𐐃𐐄𐐅𐐆𐐇𐐈𐐉𐐊𐐋𐐌𐐍𐐎𐐏𐐐𐐑𐐒𐐓𐐔𐐕𐐖𐐗𐐘𐐙𐐚𐐛𐐜𐐝𐐞𐐟𐐠𐐡𐐢𐐣𐐤𐐥𐐦𐐧𝐀𝐁𝐂𝐃𝐄𝐅𝐆𝐇𝐈𝐉𝐊𝐋𝐌𝐍𝐎𝐏𝐐𝐑𝐒𝐓𝐔𝐕𝐖𝐗𝐘𝐙𝐴𝐵𝐶𝐷𝐸𝐹𝐺𝐻𝐼𝐽𝐾𝐿𝑀𝑁𝑂𝑃𝑄𝑅𝑆𝑇𝑈𝑉𝑊𝑋𝑌𝑍𝑨𝑩𝑪𝑫𝑬𝑭𝑮𝑯𝑰𝑱𝑲𝑳𝑴𝑵𝑶𝑷𝑸𝑹𝑺𝑻𝑼𝑽𝑾𝑿𝒀𝒁𝒜𝒞𝒟𝒢𝒥𝒦𝒩𝒪𝒫𝒬𝒮𝒯𝒰𝒱𝒲𝒳𝒴𝒵𝓐𝓑𝓒𝓓𝓔𝓕𝓖𝓗𝓘𝓙𝓚𝓛𝓜𝓝𝓞𝓟𝓠𝓡𝓢𝓣𝓤𝓥𝓦𝓧𝓨𝓩𝔄𝔅𝔇𝔈𝔉𝔊𝔍𝔎𝔏𝔐𝔑𝔒𝔓𝔔𝔖𝔗𝔘𝔙𝔚𝔛𝔜𝔸𝔹𝔻𝔼𝔽𝔾𝕀𝕁𝕂𝕃𝕄𝕆𝕊𝕋𝕌𝕍𝕎𝕏𝕐𝕬𝕭𝕮𝕯𝕰𝕱𝕲𝕳𝕴𝕵𝕶𝕷𝕸𝕹𝕺𝕻𝕼𝕽𝕾𝕿𝖀𝖁𝖂𝖃𝖄𝖅𝖠𝖡𝖢𝖣𝖤𝖥𝖦𝖧𝖨𝖩𝖪𝖫𝖬𝖭𝖮𝖯𝖰𝖱𝖲𝖳𝖴𝖵𝖶𝖷𝖸𝖹𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭𝘈𝘉𝘊𝘋𝘌𝘍𝘎𝘏𝘐𝘑𝘒𝘓𝘔𝘕𝘖𝘗𝘘𝘙𝘚𝘛𝘜𝘝𝘞𝘟𝘠𝘡𝘼𝘽𝘾𝘿𝙀𝙁𝙂𝙃𝙄𝙅𝙆𝙇𝙈𝙉𝙊𝙋𝙌𝙍𝙎𝙏𝙐𝙑𝙒𝙓𝙔𝙕𝙰𝙱𝙲𝙳𝙴𝙵𝙶𝙷𝙸𝙹𝙺𝙻𝙼𝙽𝙾𝙿𝚀𝚁𝚂𝚃𝚄𝚅𝚆𝚇𝚈𝚉𝚨𝚩𝚪𝚫𝚬𝚭𝚮𝚯𝚰𝚱𝚲𝚳𝚴𝚵𝚶𝚷𝚸𝚹𝚺𝚻𝚼𝚽𝚾𝚿𝛀𝛢𝛣𝛤𝛥𝛦𝛧𝛨𝛩𝛪𝛫𝛬𝛭𝛮𝛯𝛰𝛱𝛲𝛳𝛴𝛵𝛶𝛷𝛸𝛹𝛺𝜜𝜝𝜞𝜟𝜠𝜡𝜢𝜣𝜤𝜥𝜦𝜧𝜨𝜩𝜪𝜫𝜬𝜭𝜮𝜯𝜰𝜱𝜲𝜳𝜴𝝖𝝗𝝘𝝙𝝚𝝛𝝜𝝝𝝞𝝟𝝠𝝡𝝢𝝣𝝤𝝥𝝦𝝧𝝨𝝩𝝪𝝫𝝬𝝭𝝮𝞐𝞑𝞒𝞓𝞔𝞕𝞖𝞗𝞘𝞙𝞚𝞛𝞜𝞝𝞞𝞟𝞠𝞡𝞢𝞣𝞤𝞥𝞦𝞧𝞨𝟊"))) )
+		else if ((first_underscore = StrChrAny(aFuncName + sizeof(TCHAR), _T("ԤԦჇჍⱰⱾⱿⳫⳭⳲꙠꞍꞐꞒꞠꞢꞤꞦꞨꞪƼↃAＡÁÀȦÂÄǍĂĀÃÅÅĄȺẤẦẮẰǠǺǞẪẴẢȀȂẨẲẠḀẬẶⱯⱭꜲÆǼǢꜴꜶꜸꜺꜼBＢℬḂɃƁḄḆƂƄCＣℂℭĆĊꜾĈČÇȻḈƇƆDⅅＤḊĎḐĐƋƊḌḒḎÐꝹǱǄƉEＥℰÉÈĖÊËĚĔĒẼĘȨɆẾỀḖḔỄḜẺȄȆỂẸḘḚℇỆƐƎƏȜFＦℲℱḞꝻƑGＧǴĠĜǦĞḠĢǤƓƔꝽHＨℍℌℋḢĤḦȞḨĦḤḪⱧǶⱵꜦIＩℐℑÍÌİÎÏǏĬĪĨĮƗḮỈȈȊỊḬƖĲJＪĴɈKKＫḰǨĶƘḲḴⱩLＬℒĹĿĽⱢⱠĻȽŁḶḼḺḸǇỺMＭℳḾṀⱮṂƜNＮℕŃǸṄŇÑŅƝȠṆṊṈǊŊOＯÓÒȮÔÖǑŎŌÕǪŐỐỒƟØṒṐȰṌȪỖṎǾȬǬỎȌȎƠỔỌỚỜỠỘƢỞỢŒꝎȢPＰℙṔṖⱣƤQＱℚɊꝖꝘRＲƦℝℛℜŔṘŘŖɌⱤȐȒṚṞṜSＳŚṠŜŠŞṤṦṢȘṨƩƧẞꞄTＴṪŤŢƬṬƮȚṰṮȾÞꝤꝦŦUＵÚÙÛÜǓŬŪŨŮŲŰɄǗǛǙṸǕṺỦȔȖƯỤṲỨỪṶṴỮƱỬỰVＶṼṾƲɅꝠWＷẂẀẆŴẄẈǷXＸẊẌYＹÝỲẎŶŸȲỸɎỶƳỴZＺℤℨŹŻẐŽƵȤẒẔⱫƷǮƸɁꜪꜬꜮꜢꞋꝾꝀꝂꝄꝆꝈꞀꝌꝊꝐꝒꝔꞂꝚꝜꞆꜨꝞỼⱲỾꝢꝨꝪꝬꝮꜤΑΆΆᾺᾸᾹἈἉἌἊἍἋἎἏΒΓℾΔΕΈΈῈἘἙἜἚἝἛΖͰΗΉΉῊἨἩἬἪἭἫἮἯΘϴΙΊΊῚΪῘῙἸἹἼἺἽἻἾἿΚΛΜΝΞΟΌΌῸὈὉὌὊὍὋΠℿϺΡῬΣϹϾϽϿΤΥΎΎῪΫῨῩϒϓϔὙὝὛὟΦΧΨΩΩΏΏῺὨὩὬὪὭὫὮὯϚϜͶϞϘϏϠͲϷϢϤϦϨϪϬϮАӒӐБВГЃҒӺҐҔӶДԀЂԂЕЀЁӖҼҾӘӚЄЖӜӁҖЗӞҘԐԄЅꙄИЍӤЙӢҊІЇꙆЈꙈКҞӃҜҠЌҚЛԒԠЉꙤԈԔМНҢҤҺꚔӇԢЊԊОꙨꙪꙬӦӨҨԜӪӀПҦРСҪԌТꚌԎҬꚊЋУӰЎӮӲҮҰꙊФХӼӾҲЦҴꚐЧҶҸӴӋЏШꚖЩЪꙐЫӸЬҌЭӬЮꙔꙖЯԘѠѢꙒѤѦꙘѨꙜѪꙚѬѮѰѲѴѶꙞѸѺѼѾꙌҀҎԖӅӉӍꙦӔӠꚈԆꚂꚀꙢꚄꙀꙂԞԚꚎꚒꚆꙎԱԲԳԴԵԶԷԸԹԺԻԼԽԾԿՀՁՂՃՄՅՆՇՈՉՊՋՌՍՎՏՐՑՒՓՔՕՖႠႡႢႣႤႥႦჁႧႨႩႪႫႬჂႭႮႯႰႱႲႳჃႴႵႶႷႸႹႺႻႼႽႾჄႿჀჅⰀⰁⰂⰃⰄⰅⰆⰇⰈⰉⰊⰋⰌⰍⰎⰏⰐⰑⰒⰓⰔⰕⰖⰗⰘⰙⰚⰛⰜⰝⰞⰟⰠⰡⰢⰣⰤⰥⰦⰧⰨⰩⰪⰫⰬⰭⰮⲀⲂⲄⲆⲈⲊⲌⲎⲐⲒⲔⲖⲘⲚⲜⲞⲠⲢⲤⲦⲨⲪⲬⲮⲰⲲⲴⲶⲸⲺⲼⲾⳀⳂⳄⳆⳈⳊⳌⳎⳐⳒⳔⳖⳘⳚⳜⳞⳠⳢ𐐀𐐁𐐂𐐃𐐄𐐅𐐆𐐇𐐈𐐉𐐊𐐋𐐌𐐍𐐎𐐏𐐐𐐑𐐒𐐓𐐔𐐕𐐖𐐗𐐘𐐙𐐚𐐛𐐜𐐝𐐞𐐟𐐠𐐡𐐢𐐣𐐤𐐥𐐦𐐧𝐀𝐁𝐂𝐃𝐄𝐅𝐆𝐇𝐈𝐉𝐊𝐋𝐌𝐍𝐎𝐏𝐐𝐑𝐒𝐓𝐔𝐕𝐖𝐗𝐘𝐙𝐴𝐵𝐶𝐷𝐸𝐹𝐺𝐻𝐼𝐽𝐾𝐿𝑀𝑁𝑂𝑃𝑄𝑅𝑆𝑇𝑈𝑉𝑊𝑋𝑌𝑍𝑨𝑩𝑪𝑫𝑬𝑭𝑮𝑯𝑰𝑱𝑲𝑳𝑴𝑵𝑶𝑷𝑸𝑹𝑺𝑻𝑼𝑽𝑾𝑿𝒀𝒁𝒜𝒞𝒟𝒢𝒥𝒦𝒩𝒪𝒫𝒬𝒮𝒯𝒰𝒱𝒲𝒳𝒴𝒵𝓐𝓑𝓒𝓓𝓔𝓕𝓖𝓗𝓘𝓙𝓚𝓛𝓜𝓝𝓞𝓟𝓠𝓡𝓢𝓣𝓤𝓥𝓦𝓧𝓨𝓩𝔄𝔅𝔇𝔈𝔉𝔊𝔍𝔎𝔏𝔐𝔑𝔒𝔓𝔔𝔖𝔗𝔘𝔙𝔚𝔛𝔜𝔸𝔹𝔻𝔼𝔽𝔾𝕀𝕁𝕂𝕃𝕄𝕆𝕊𝕋𝕌𝕍𝕎𝕏𝕐𝕬𝕭𝕮𝕯𝕰𝕱𝕲𝕳𝕴𝕵𝕶𝕷𝕸𝕹𝕺𝕻𝕼𝕽𝕾𝕿𝖀𝖁𝖂𝖃𝖄𝖅𝖠𝖡𝖢𝖣𝖤𝖥𝖦𝖧𝖨𝖩𝖪𝖫𝖬𝖭𝖮𝖯𝖰𝖱𝖲𝖳𝖴𝖵𝖶𝖷𝖸𝖹𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭𝘈𝘉𝘊𝘋𝘌𝘍𝘎𝘏𝘐𝘑𝘒𝘓𝘔𝘕𝘖𝘗𝘘𝘙𝘚𝘛𝘜𝘝𝘞𝘟𝘠𝘡𝘼𝘽𝘾𝘿𝙀𝙁𝙂𝙃𝙄𝙅𝙆𝙇𝙈𝙉𝙊𝙋𝙌𝙍𝙎𝙏𝙐𝙑𝙒𝙓𝙔𝙕𝙰𝙱𝙲𝙳𝙴𝙵𝙶𝙷𝙸𝙹𝙺𝙻𝙼𝙽𝙾𝙿𝚀𝚁𝚂𝚃𝚄𝚅𝚆𝚇𝚈𝚉𝚨𝚩𝚪𝚫𝚬𝚭𝚮𝚯𝚰𝚱𝚲𝚳𝚴𝚵𝚶𝚷𝚸����𝚺𝚻𝚼����𝚾𝚿𝛀𝛢𝛣𝛤𝛥𝛦𝛧𝛨𝛩𝛪𝛫𝛬𝛭𝛮𝛯𝛰𝛱𝛲𝛳𝛴𝛵𝛶𝛷𝛸𝛹𝛺𝜜𝜝𝜞𝜟𝜠𝜡𝜢𝜣𝜤𝜥𝜦𝜧𝜨𝜩𝜪𝜫𝜬𝜭𝜮𝜯𝜰𝜱𝜲𝜳𝜴𝝖𝝗𝝘𝝙𝝚𝝛𝝜𝝝𝝞𝝟𝝠𝝡𝝢𝝣𝝤𝝥𝝦𝝧𝝨𝝩𝝪𝝫𝝬𝝭𝝮𝞐𝞑𝞒𝞓𝞔𝞕𝞖𝞗𝞘𝞙𝞚𝞛𝞜𝞝𝞞𝞟𝞠𝞡𝞢𝞣𝞤𝞥𝞦𝞧𝞨𝟊"))) )
 		{
 			naked_filename_length = first_underscore - aFuncName;
 			if (naked_filename_length >= _countof(class_name_buf)) // Class name too long (probably impossible currently).
@@ -10927,7 +10926,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 	// Also, dimensioning explicitly by SYM_COUNT helps enforce that at compile-time:
 	static UCHAR sPrecedence[SYM_COUNT] =  // Performance: UCHAR vs. INT benches a little faster, perhaps due to the slight reduction in code size it causes.
 	{
-		0,0,0,0,0,0,0  // SYM_STRING, SYM_INTEGER, SYM_FLOAT, SYM_VAR, SYM_OBJECT, SYM_DYNAMIC, SYM_BEGIN (SYM_BEGIN must be lowest precedence).
+		0,0,0,0,0,0,0,0  // SYM_STRING, SYM_INTEGER, SYM_FLOAT, SYM_MISSING, SYM_VAR, SYM_OBJECT, SYM_DYNAMIC, SYM_BEGIN (SYM_BEGIN must be lowest precedence).
 		, 82, 82         // SYM_POST_INCREMENT, SYM_POST_DECREMENT: Highest precedence operator so that it will work even though it comes *after* a variable name (unlike other unaries, which come before).
 		, 86             // SYM_DOT
 		, 2,2,2,2,2,2    // SYM_CPAREN, SYM_CBRACKET, SYM_CBRACE, SYM_OPAREN, SYM_OBRACKET, SYM_OBRACE (to simplify the code, parentheses/brackets/braces must be lower than all operators in precedence).
@@ -11868,6 +11867,7 @@ unquoted_literal:
 							//case PARAM_DEFAULT_NONE: Should not be possible due to mMinParams check above.
 							}
 							this_postfix->value_int64 = param.default_int64; // Union copy.
+							this_postfix->circuit_token = NULL;
 							++postfix_count;
 							// Since this_infix is a function parameter comma and there are no more operators
 							// to pop off the stack, it does not need any further processing.  This method
@@ -12536,6 +12536,8 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 	ResultType if_condition, result;
 	LONG_OPERATION_INIT
 	global_struct &g = *::g; // Reduces code size and may improve performance. Eclipsing ::g with local g makes compiler remind/enforce the use of the right one.
+	
+	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
 
 	for (Line *line = this; line != NULL;)
 	{
@@ -12593,7 +12595,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 		// At this point, a pause may have been triggered either by the above MsgSleep()
 		// or due to the action of a command (e.g. Pause, or perhaps tray menu "pause" was selected during Sleep):
 		while (g.IsPaused) // An initial "if (g.IsPaused)" prior to the loop doesn't make it any faster.
-			if (g_MainThreadID == GetCurrentThreadId())
+			if (g_MainThreadID == aThreadID)
 				MsgSleep(INTERVAL_UNSPECIFIED);  // Must check often to periodically run timed subroutines.
 			else
 				Sleep(SLEEP_INTERVAL);
@@ -14505,6 +14507,7 @@ ResultType Line::Perform()
 	HKEY root_key; // For Registry commands.
 	LPTSTR subkey; // For Registry commands.
 	ResultType result;  // General purpose.
+	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
 
 	// Even though the loading-parser already checked, check again, for now,
 	// at least until testing raises confidence.  UPDATE: Don't do this because
@@ -15441,7 +15444,7 @@ ResultType Line::Perform()
 		// But only do so for short sleeps, for which the user has a greater expectation of
 		// accuracy.  UPDATE: Do not change the 25 below without also changing it in Critical's
 		// documentation.
-		if (g_MainThreadID != GetCurrentThreadId() || (sleep_time < 25 && sleep_time > 0 && g_os.IsWin9x())) // Ordered for short-circuit performance. v1.0.38.05: Added "sleep_time > 0" so that Sleep -1/0 will work the same on Win9x as it does on other OSes.
+		if (g_MainThreadID != aThreadID || (sleep_time < 25 && sleep_time > 0 && g_os.IsWin9x())) // Ordered for short-circuit performance. v1.0.38.05: Added "sleep_time > 0" so that Sleep -1/0 will work the same on Win9x as it does on other OSes.
 			Sleep(sleep_time);
 		else
 			MsgSleep(sleep_time);

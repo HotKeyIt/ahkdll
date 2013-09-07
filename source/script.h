@@ -2775,6 +2775,7 @@ BIV_DECL_RW(BIV_LastError);
 BIV_DECL_R (BIV_GlobalStruct);
 BIV_DECL_R (BIV_ScriptStruct);
 BIV_DECL_R (BIV_ModuleHandle);
+BIV_DECL_R (BIV_MemoryModule);
 BIV_DECL_R (BIV_IsDll);
 BIV_DECL_RW(BIV_CoordMode);
 #ifndef MINIDLL
@@ -2990,7 +2991,6 @@ BIF_DECL(BIF_FileOpen);
 BIF_DECL(BIF_ComObjActive);
 BIF_DECL(BIF_ComObjCreate);
 BIF_DECL(BIF_ComObjGet);
-BIF_DECL(BIF_ComObjMemDll);
 BIF_DECL(BIF_ComObjDll);
 BIF_DECL(BIF_ComObjConnect);
 BIF_DECL(BIF_ComObjError);
