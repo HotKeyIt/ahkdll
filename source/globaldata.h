@@ -27,6 +27,7 @@ GNU General Public License for more details.
 extern HRSRC g_hResource;
 
 extern HINSTANCE g_hInstance;
+extern HMODULE g_hMemoryModule;
 extern DWORD g_MainThreadID;
 extern DWORD g_HookThreadID;
 extern ATOM g_ClassRegistered;

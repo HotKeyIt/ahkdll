@@ -10168,6 +10168,12 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		min_params = 2;
 		max_params = 6;
 	}
+	else if (!_tcsicmp(func_name, _T("StrSplit")))
+	{
+		bif = BIF_StrSplit;
+		min_params = 1;
+		max_params = 3;
+	}
 	else if (!_tcsnicmp(func_name, _T("GetKey"), 6))
 	{
 		suffix = func_name + 6;
@@ -10408,12 +10414,6 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		}
 		else if	(!_tcsicmp(suffix, _T("Get")))
 			bif = BIF_ComObjGet;
-		else if	(!_tcsicmp(suffix, _T("MemDll")))
-		{
-			bif = BIF_ComObjMemDll;
-			min_params = 2;
-			max_params = 2;
-		}
 		else if	(!_tcsicmp(suffix, _T("Dll")))
 		{
 			bif = BIF_ComObjDll;
@@ -11535,6 +11535,7 @@ void *Script::GetVarType(LPTSTR aVarName)
 	if (!_tcscmp(lower, _T("globalstruct"))) return BIV_GlobalStruct;
 	if (!_tcscmp(lower, _T("scriptstruct"))) return BIV_ScriptStruct;
 	if (!_tcscmp(lower, _T("modulehandle"))) return BIV_ModuleHandle;
+	if (!_tcscmp(lower, _T("memorymodule"))) return BIV_MemoryModule;
 	if (!_tcscmp(lower, _T("isdll"))) return BIV_IsDll;
 	if (!_tcsncmp(lower, _T("coordmode"), 9)) return BIV_CoordMode;
 
@@ -13775,7 +13776,8 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 	ResultType if_condition, result;
 	LONG_OPERATION_INIT
 	global_struct &g = *::g; // Reduces code size and may improve performance. Eclipsing ::g with local g makes compiler remind/enforce the use of the right one.
-	
+	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
+
 	for (Line *line = this; line != NULL;)
 	{
 		// If a previous command (line) had the clipboard open, perhaps because it directly accessed
@@ -13843,7 +13845,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 		// At this point, a pause may have been triggered either by the above MsgSleep()
 		// or due to the action of a command (e.g. Pause, or perhaps tray menu "pause" was selected during Sleep):
 		while (g.IsPaused) // An initial "if (g.IsPaused)" prior to the loop doesn't make it any faster.
-			if (g_MainThreadID == GetCurrentThreadId())
+			if (g_MainThreadID == aThreadID)
 				MsgSleep(INTERVAL_UNSPECIFIED);  // Must check often to periodically run timed subroutines.
 			else
 				Sleep(SLEEP_INTERVAL);
@@ -16210,6 +16212,7 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 	bool is_remote_registry; // For Registry commands.
 	HKEY root_key; // For Registry commands.
 	ResultType result;  // General purpose.
+	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
 
 	// Even though the loading-parser already checked, check again, for now,
 	// at least until testing raises confidence.  UPDATE: Don't this because
@@ -17562,7 +17565,7 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 		// But only do so for short sleeps, for which the user has a greater expectation of
 		// accuracy.  UPDATE: Do not change the 25 below without also changing it in Critical's
 		// documentation.
-		if (g_MainThreadID != GetCurrentThreadId() || (sleep_time < 25 && sleep_time > 0 && g_os.IsWin9x())) // Ordered for short-circuit performance. v1.0.38.05: Added "sleep_time > 0" so that Sleep -1/0 will work the same on Win9x as it does on other OSes.
+		if (g_MainThreadID != aThreadID || (sleep_time < 25 && sleep_time > 0 && g_os.IsWin9x())) // Ordered for short-circuit performance. v1.0.38.05: Added "sleep_time > 0" so that Sleep -1/0 will work the same on Win9x as it does on other OSes.
 			Sleep(sleep_time);
 		else
 			MsgSleep(sleep_time);

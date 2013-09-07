@@ -1738,7 +1738,9 @@ ResultType Line::Input()
 	// of which quasi-thread is active, and it will end our input on schedule:
 	if (timeout > 0)
 		SET_INPUT_TIMER(timeout < 10 ? 10 : timeout)
-
+	
+	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
+	
 	//////////////////////////////////////////////////////////////////
 	// Wait for one of the following to terminate our input:
 	// 1) The hook (due a match in aEndKeys or aMatchList);
@@ -1750,7 +1752,7 @@ ResultType Line::Input()
 		int output_var_len;
 		// Rather than monitoring the timeout here, just wait for the incoming WM_TIMER message
 		// to take effect as a TimerProc() call during the MsgSleep():
-		if (g_MainThreadID == GetCurrentThreadId())
+		if (g_MainThreadID == aThreadID)
 			MsgSleep();
 		else
 			Sleep(SLEEP_INTERVAL);
@@ -2041,6 +2043,8 @@ ResultType Line::PerformWait()
 		}
 	}
 
+	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
+
 	for (start_time = GetTickCount();;) // start_time is initialized unconditionally for use with v1.0.30.02's new logging feature further below.
 	{ // Always do the first iteration so that at least one check is done.
 		switch(mActionType)
@@ -2126,7 +2130,7 @@ ResultType Line::PerformWait()
 		}
 
 		// Must cast to int or any negative result will be lost due to DWORD type:
-		if (g_MainThreadID == GetCurrentThreadId() && (wait_indefinitely || (int)(sleep_duration - (GetTickCount() - start_time)) > SLEEP_INTERVAL_HALF))
+		if (g_MainThreadID == aThreadID && (wait_indefinitely || (int)(sleep_duration - (GetTickCount() - start_time)) > SLEEP_INTERVAL_HALF))
 		{
 			if (MsgSleep(INTERVAL_UNSPECIFIED)) // INTERVAL_UNSPECIFIED performs better.
 			{
@@ -3205,6 +3209,9 @@ ResultType Line::ScriptProcess(LPTSTR aCmd, LPTSTR aProcess, LPTSTR aParam3)
 			wait_indefinitely = true;
 			sleep_duration = 0; // Just to catch any bugs.
 		}
+
+		DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
+
 		for (;;)
 		{ // Always do the first iteration so that at least one check is done.
 			pid = ProcessExist(aProcess);
@@ -3222,7 +3229,7 @@ ResultType Line::ScriptProcess(LPTSTR aCmd, LPTSTR aProcess, LPTSTR aParam3)
 			}
 			// Must cast to int or any negative result will be lost due to DWORD type:
 			if (wait_indefinitely || (int)(sleep_duration - (GetTickCount() - start_time)) > SLEEP_INTERVAL_HALF)
-				if (g_MainThreadID == GetCurrentThreadId())
+				if (g_MainThreadID == aThreadID)
 					MsgSleep(100);  // For performance reasons, don't check as often as the WinWait family does.
 				else
 					Sleep(100);
@@ -5254,10 +5261,7 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 		// *LCtrl up::Send {Blind}{Alt up}
 		PostMessage(NULL, iMsg, wParam, lParam);
 		if (IsInterruptible())
-			if (g_MainThreadID == GetCurrentThreadId())
-				MsgSleep(-1, RETURN_AFTER_MESSAGES_SPECIAL_FILTER);
-			else
-				Sleep(SLEEP_INTERVAL);
+			MsgSleep(-1, RETURN_AFTER_MESSAGES_SPECIAL_FILTER);
 		//else let the other pump discard this hotkey event since in most cases it would do more harm than good
 		// (see comments above for why the message is posted even when it is 90% certain it will be discarded
 		// in all cases where MsgSleep isn't done).
@@ -7224,6 +7228,124 @@ ResultType Line::StringSplit(LPTSTR aArrayName, LPTSTR aInputString, LPTSTR aDel
 
 
 
+BIF_DECL(BIF_StrSplit)
+// Array := StrSplit(String [, Delimiters, OmitChars])
+// This is the v2 version of Line::StringSplit(), and as such, is kept separate from Line::StringSplit().
+// Unlike StringSplit, this function allows an array of Delimiters (vs a string of delimiter characters).
+{
+	LPTSTR aInputString = TokenToString(*aParam[0], aResultToken.buf);
+	LPTSTR *aDelimiterList = NULL;
+	int aDelimiterCount = 0;
+	LPTSTR aOmitList = _T("");
+
+	if (aParamCount > 1)
+	{
+		if (Object *obj = dynamic_cast<Object *>(TokenToObject(*aParam[1])))
+		{
+			aDelimiterCount = obj->GetNumericItemCount();
+			aDelimiterList = (LPTSTR *)_alloca(aDelimiterCount * sizeof(LPTSTR *));
+			if (!obj->ArrayToStrings(aDelimiterList, aDelimiterCount, aDelimiterCount))
+				// Array contains something other than a string.
+				goto return_empty_string;
+			for (int i = 0; i < aDelimiterCount; ++i)
+				if (!*aDelimiterList[i])
+					// Empty string in delimiter list. Although it could be treated similarly to the
+					// "no delimiter" case, it's far more likely to be an error. If ever this check
+					// is removed, the loop below must be changed to support "" as a delimiter.
+					goto return_empty_string;
+		}
+		else
+		{
+			aDelimiterList = (LPTSTR *)_alloca(sizeof(LPTSTR *));
+			*aDelimiterList = TokenToString(*aParam[1]);
+			aDelimiterCount = **aDelimiterList != '\0'; // i.e. non-empty string.
+		}
+		if (aParamCount > 2)
+			aOmitList = TokenToString(*aParam[2]);
+	}
+	
+	Object *output_array = Object::Create();
+	if (!output_array)
+		goto return_empty_string;
+	aResultToken.symbol = SYM_OBJECT;	// Set default, overridden only for critical errors.
+	aResultToken.object = output_array;	//
+
+	if (!*aInputString) // The input variable is blank, thus there will be zero elements.
+		return;
+	
+	if (aDelimiterCount) // The user provided a list of delimiters, so process the input variable normally.
+	{
+		LPTSTR contents_of_next_element, delimiter, new_starting_pos;
+		size_t element_length, delimiter_length;
+		for (contents_of_next_element = aInputString; ; )
+		{
+			if (delimiter = InStrAny(contents_of_next_element, aDelimiterList, aDelimiterCount, delimiter_length)) // A delimiter was found.
+			{
+				element_length = delimiter - contents_of_next_element;
+				if (*aOmitList && element_length > 0)
+				{
+					contents_of_next_element = omit_leading_any(contents_of_next_element, aOmitList, element_length);
+					element_length = delimiter - contents_of_next_element; // Update in case above changed it.
+					if (element_length)
+						element_length = omit_trailing_any(contents_of_next_element, aOmitList, delimiter - 1);
+				}
+				// If there are no chars to the left of the delim, or if they were all in the list of omitted
+				// chars, the variable will be assigned the empty string:
+				if (!output_array->Append(contents_of_next_element, element_length))
+					break;
+				contents_of_next_element = delimiter + delimiter_length;  // Omit the delimiter since it's never included in contents.
+			}
+			else // the entire length of contents_of_next_element is what will be stored
+			{
+				element_length = _tcslen(contents_of_next_element);
+				if (*aOmitList && element_length > 0)
+				{
+					new_starting_pos = omit_leading_any(contents_of_next_element, aOmitList, element_length);
+					element_length -= (new_starting_pos - contents_of_next_element); // Update in case above changed it.
+					contents_of_next_element = new_starting_pos;
+					if (element_length)
+						// If this is true, the string must contain at least one char that isn't in the list
+						// of omitted chars, otherwise omit_leading_any() would have already omitted them:
+						element_length = omit_trailing_any(contents_of_next_element, aOmitList
+							, contents_of_next_element + element_length - 1);
+				}
+				// If there are no chars to the left of the delim, or if they were all in the list of omitted
+				// chars, the variable will be assigned the empty string:
+				if (!output_array->Append(contents_of_next_element, element_length))
+					break;
+				// This is the only way out of the loop other than critical errors:
+				return;
+			}
+		}
+	}
+	else
+	{
+		// Otherwise aDelimiterList is empty, so store each char of aInputString in its own array element.
+		LPTSTR cp, dp;
+		for (cp = aInputString; ; ++cp)
+		{
+			if (!*cp)
+				return; // All done; result already set.
+			for (dp = aOmitList; *dp; ++dp)
+				if (*cp == *dp) // This char is a member of the omitted list, thus it is not included in the output array.
+					break;
+			if (*dp) // Omitted.
+				continue;
+			if (!output_array->Append(cp, 1))
+				break;
+		}
+	}
+	// The fact that this section is executing means that a memory allocation failed and caused the
+	// loop to break, so return a false value to let the caller detect the failure.  Empty string
+	// is used vs 0 for consistency with Object() and Array().
+	output_array->Release(); // Since we're not returning it.
+return_empty_string:
+	aResultToken.symbol = SYM_STRING;
+	aResultToken.marker = _T("");
+}
+
+
+
 ResultType Line::SplitPath(LPTSTR aFileSpec)
 {
 	Var *output_var_name = ARGVAR2;  // i.e. Param #2. Ok if NULL.
@@ -9081,6 +9203,7 @@ ResultType Line::SoundPlay(LPTSTR aFilespec, bool aSleepUntilDone)
 	// Otherwise, caller wants us to wait until the file is done playing.  To allow our app to remain
 	// responsive during this time, use a loop that checks our message queue:
 	// Older method: "mciSendString("play " SOUNDPLAY_ALIAS " wait", NULL, 0, NULL)"
+	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
 	for (;;)
 	{
 		mciSendString(_T("status ") SOUNDPLAY_ALIAS _T(" mode"), buf, _countof(buf), NULL);
@@ -9093,7 +9216,7 @@ ResultType Line::SoundPlay(LPTSTR aFilespec, bool aSleepUntilDone)
 		}
 		// Sleep a little longer than normal because I'm not sure how much overhead
 		// and CPU utilization the above incurs:
-		if (g_MainThreadID == GetCurrentThreadId())
+		if (g_MainThreadID == aThreadID)
 			MsgSleep(20);
 		else
 			Sleep(20);
@@ -9728,6 +9851,7 @@ ResultType Line::FileReadLine(LPTSTR aFilespec, LPTSTR aLineNumber)
 
 	DWORD buf_length;
 	TCHAR buf[READ_FILE_LINE_SIZE];
+	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
 	for (__int64 i = 0; i < line_number; ++i)
 	{
 		if (  !(buf_length = tfile.ReadLine(buf, _countof(buf) - 1))  ) // end-of-file or error
@@ -10126,7 +10250,7 @@ ResultType Line::FileDelete()
 	size_t space_remaining = _countof(file_path) - file_path_length - 1; // Space left in file_path for the changing part.
 
 	g->LastError = 0; // Set default. Overridden only when a failure occurs.
-
+	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
 	do
 	{
 		// Since other script threads can interrupt during LONG_OPERATION_UPDATE, it's important that
@@ -10371,6 +10495,7 @@ int Line::FileSetAttrib(LPTSTR aAttributes, LPTSTR aFilePattern, FileLoopModeTyp
 	int failure_count = 0;
 	WIN32_FIND_DATA current_file;
 	HANDLE file_search = FindFirstFile(file_pattern, &current_file);
+	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
 
 	if (file_search != INVALID_HANDLE_VALUE)
 	{
@@ -10652,7 +10777,7 @@ int Line::FileSetTime(LPTSTR aYYYYMMDD, LPTSTR aFilePattern, TCHAR aWhichTime
 	int failure_count = 0;
 	WIN32_FIND_DATA current_file;
 	HANDLE file_search = FindFirstFile(file_pattern, &current_file);
-
+	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
 	if (file_search != INVALID_HANDLE_VALUE)
 	{
 		do
@@ -11381,6 +11506,13 @@ VarSizeType BIV_ModuleHandle(LPTSTR aBuf, LPTSTR aVarName)
 {
 	return aBuf
 		? (VarSizeType)_tcslen(ITOA64((LONGLONG)g_hInstance, aBuf))
+		: MAX_INTEGER_LENGTH;
+}
+
+VarSizeType BIV_MemoryModule(LPTSTR aBuf, LPTSTR aVarName)
+{
+	return aBuf
+		? (VarSizeType)_tcslen(ITOA64((LONGLONG)g_hMemoryModule, aBuf))
 		: MAX_INTEGER_LENGTH;
 }
 
@@ -14074,21 +14206,22 @@ BIF_DECL(BIF_DllCall)
 	{
 		// Check validity of this arg's return type:
 		ExprTokenType &token = *aParam[aParamCount - 1];
-		if (IS_NUMERIC(token.symbol) || token.symbol == SYM_OBJECT) // The return type should be a string, not something purely numeric.
-		{
-			g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
-			return;
-		}
 		LPTSTR return_type_string[2];
-		if (token.symbol == SYM_VAR) // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
+		switch (token.symbol)
 		{
+		case SYM_VAR: // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
 			return_type_string[0] = token.var->Contents(TRUE, TRUE);	
 			return_type_string[1] = token.var->mName; // v1.0.33.01: Improve convenience by falling back to the variable's name if the contents are not appropriate.
-		}
-		else
-		{
+			break;
+		case SYM_STRING:
+		case SYM_OPERAND:
 			return_type_string[0] = token.marker;
 			return_type_string[1] = NULL; // Added in 1.0.48.
+			break;
+		default:
+			return_type_string[0] = _T(""); // It will be detected as invalid below.
+			return_type_string[1] = NULL;
+			break;
 		}
 
 		// 64-bit note: The calling convention detection code is preserved here for script compatibility.
@@ -14165,26 +14298,25 @@ has_valid_return_type:
 	// It has also verified that the dyna_param array is large enough to hold all of the args.
 	for (arg_count = 0, i = 1; i < aParamCount; ++arg_count, i += 2)  // Same loop as used later below, so maintain them together.
 	{
-		// Check validity of this arg's type and contents:
-		if (IS_NUMERIC(aParam[i]->symbol)) // The arg type should be a string, not something purely numeric.
+		switch (aParam[i]->symbol)
 		{
-			g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
-			return;
-		}
-		// Otherwise, this arg's type-name is a string as it should be, so retrieve it:
-		if (aParam[i]->symbol == SYM_VAR) // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
-		{
+		case SYM_VAR: // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
 			arg_type_string[0] = aParam[i]->var->Contents(TRUE, TRUE);
 			arg_type_string[1] = aParam[i]->var->mName;
 			// v1.0.33.01: arg_type_string[1] improves convenience by falling back to the variable's name
 			// if the contents are not appropriate.  In other words, both Int and "Int" are treated the same.
 			// It's done this way to allow the variable named "Int" to actually contain some other legitimate
 			// type-name such as "Str" (in case anyone ever happens to do that).
-		}
-		else
-		{
+			break;
+		case SYM_STRING:
+		case SYM_OPERAND:
 			arg_type_string[0] = aParam[i]->marker;
+			arg_type_string[1] = NULL; // Added in 1.0.48.
+			break;
+		default:
+			arg_type_string[0] = _T(""); // It will be detected as invalid below.
 			arg_type_string[1] = NULL;
+			break;
 		}
 
 		ExprTokenType &this_param = *aParam[i + 1];         // Resolved for performance and convenience.
@@ -14649,8 +14781,9 @@ ResultType STDMETHODCALLTYPE CriticalObject::Invoke(
                                             )
  {
 	 // Avoid deadlocking the process so messages can still be processed
+	 DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
 	 while (!TryEnterCriticalSection(this->lpCriticalSection))
-		 if (g_MainThreadID == GetCurrentThreadId())
+		 if (g_MainThreadID == aThreadID)
 			 MsgSleep(-1);
 		 else
 			 Sleep(0); 
@@ -16471,7 +16604,7 @@ BIF_DECL(BIF_NumPut)
 	// Load-time validation has ensured that at least the first two parameters are present.
 	ExprTokenType &token_to_write = *aParam[0];
 
-	size_t right_side_bound, target; // Don't make target a pointer-type because the integer offset might not be a multiple of 4 (i.e. the below increments "target" directly by "offset" and we don't want that to use pointer math).
+	size_t right_side_bound = 0, target; // Don't make target a pointer-type because the integer offset might not be a multiple of 4 (i.e. the below increments "target" directly by "offset" and we don't want that to use pointer math).
 	ExprTokenType &target_token = *aParam[1];
 	if (target_token.symbol == SYM_VAR) // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
 	{
@@ -16479,10 +16612,7 @@ BIF_DECL(BIF_NumPut)
 		right_side_bound = target + target_token.var->ByteCapacity(); // This is the first illegal address to the right of target.
 	}
 	else
-	{
 		target = (size_t)TokenToInt64(target_token);
-		right_side_bound = 0;
-	}
 
 	if (aParamCount > 2) // Parameter "offset" is present, so increment the address by that amount.  For flexibility, this is done even when the target isn't a variable.
 	{

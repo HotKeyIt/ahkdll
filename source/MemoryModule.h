@@ -35,13 +35,28 @@ typedef void *HMEMORYRSRC;
 
 typedef void *HCUSTOMMODULE;
 
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+#define GET_HEADER_DICTIONARY(module, idx)	&(module)->headers->OptionalHeader.DataDirectory[idx]
+
 typedef HCUSTOMMODULE (*CustomLoadLibraryFunc)(LPCSTR, void *);
 typedef FARPROC (*CustomGetProcAddressFunc)(HCUSTOMMODULE, LPCSTR, void *);
 typedef void (*CustomFreeLibraryFunc)(HCUSTOMMODULE, void *);
+
+typedef struct {
+    PIMAGE_NT_HEADERS headers;
+    unsigned char *codeBase;
+    HCUSTOMMODULE *modules;
+    int numModules;
+    int initialized;
+    CustomLoadLibraryFunc loadLibrary;
+    CustomGetProcAddressFunc getProcAddress;
+    CustomFreeLibraryFunc freeLibrary;
+    void *userdata;
+} MEMORYMODULE, *PMEMORYMODULE;
 
 /**
  * Load DLL from memory location.

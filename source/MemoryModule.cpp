@@ -56,19 +56,6 @@
 
 #include "MemoryModule.h"
 
-typedef struct {
-    PIMAGE_NT_HEADERS headers;
-    unsigned char *codeBase;
-    HCUSTOMMODULE *modules;
-    int numModules;
-    int initialized;
-    CustomLoadLibraryFunc loadLibrary;
-    CustomGetProcAddressFunc getProcAddress;
-    CustomFreeLibraryFunc freeLibrary;
-    void *userdata;
-	ULONG_PTR lpCookie;
-} MEMORYMODULE, *PMEMORYMODULE;
-
 typedef BOOL (WINAPI *DllEntryProc)(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved);
 
 typedef HANDLE (WINAPI * MyCreateActCtx)(PCACTCTXA);
@@ -78,8 +65,6 @@ HMODULE libkernel32 = LoadLibrary(_T("kernel32.dll"));
 MyCreateActCtx _CreateActCtxA = (MyCreateActCtx)GetProcAddress(libkernel32,"CreateActCtxA");
 MyDeactivateActCtx _DeactivateActCtx = (MyDeactivateActCtx)GetProcAddress(libkernel32,"DeactivateActCtx");
 MyActivateActCtx _ActivateActCtx = (MyActivateActCtx)GetProcAddress(libkernel32,"ActivateActCtx");
-
-#define GET_HEADER_DICTIONARY(module, idx)	&(module)->headers->OptionalHeader.DataDirectory[idx]
 
 #ifdef DEBUG_OUTPUT
 static void
@@ -261,7 +246,7 @@ BuildImportTable(PMEMORYMODULE module)
     int result=1;
     unsigned char *codeBase = module->codeBase;
     HCUSTOMMODULE *tmp;
-	module->lpCookie = NULL;
+	ULONG_PTR lpCookie = NULL;
 
     PIMAGE_DATA_DIRECTORY directory = GET_HEADER_DICTIONARY(module, IMAGE_DIRECTORY_ENTRY_IMPORT);
     PIMAGE_DATA_DIRECTORY resource = GET_HEADER_DICTIONARY(module, IMAGE_DIRECTORY_ENTRY_RESOURCE);
@@ -337,7 +322,7 @@ BuildImportTable(PMEMORYMODULE module)
                     if (hActCtx == INVALID_HANDLE_VALUE)
                         break; //failed to create context, continue and try loading
 
-                    _ActivateActCtx(hActCtx,&module->lpCookie); // Don't care if this fails since we would countinue anyway
+                    _ActivateActCtx(hActCtx,&lpCookie); // Don't care if this fails since we would countinue anyway
                     break; // Break since a dll can have only 1 manifest
                 }
             }
@@ -391,8 +376,8 @@ BuildImportTable(PMEMORYMODULE module)
             }
         }
     }
-	if (_DeactivateActCtx && module->lpCookie)
-		_DeactivateActCtx(NULL,module->lpCookie);
+	if (_DeactivateActCtx && lpCookie)
+		_DeactivateActCtx(NULL,lpCookie);
     return result;
 }
 
@@ -518,7 +503,7 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data,
     if (result->headers->OptionalHeader.AddressOfEntryPoint != 0) {
         DllEntry = (DllEntryProc) (code + result->headers->OptionalHeader.AddressOfEntryPoint);
         // notify library about attaching to process
-        successfull = (*DllEntry)((HINSTANCE)code, DLL_PROCESS_ATTACH, 0);
+        successfull = (*DllEntry)((HINSTANCE)code, DLL_PROCESS_ATTACH, result);
         if (!successfull) {
             SetLastError(ERROR_DLL_INIT_FAILED);
             goto error;
@@ -617,9 +602,9 @@ void MemoryFreeLibrary(HMEMORYMODULE mod)
 
 #define DEFAULT_LANGUAGE        MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL)
 
-HMEMORYRSRC MemoryFindResource(HMEMORYMODULE module, LPCTSTR name, LPCTSTR type)
+HMEMORYRSRC MemoryFindResource(HMEMORYMODULE module, LPCTSTR type, LPCTSTR name)
 {
-    return MemoryFindResourceEx(module, name, type, DEFAULT_LANGUAGE);
+    return MemoryFindResourceEx(module, type, name, DEFAULT_LANGUAGE);
 }
 
 static PIMAGE_RESOURCE_DIRECTORY_ENTRY _MemorySearchResourceEntry(
@@ -712,7 +697,7 @@ static PIMAGE_RESOURCE_DIRECTORY_ENTRY _MemorySearchResourceEntry(
     return result;
 }
 
-HMEMORYRSRC MemoryFindResourceEx(HMEMORYMODULE module, LPCTSTR name, LPCTSTR type, WORD language)
+HMEMORYRSRC MemoryFindResourceEx(HMEMORYMODULE module, LPCTSTR type, LPCTSTR name, WORD language)
 {
     unsigned char *codeBase = ((PMEMORYMODULE) module)->codeBase;
     PIMAGE_DATA_DIRECTORY directory = GET_HEADER_DICTIONARY((PMEMORYMODULE) module, IMAGE_DIRECTORY_ENTRY_RESOURCE);
@@ -790,8 +775,8 @@ int
 MemoryLoadStringEx(HMEMORYMODULE module, UINT id, LPTSTR buffer, int maxsize, WORD language)
 {
     HMEMORYRSRC resource;
-	PIMAGE_RESOURCE_DIR_STRING_U data;
-	DWORD size;
+    PIMAGE_RESOURCE_DIR_STRING_U data;
+    DWORD size;
     if (maxsize == 0) {
         return 0;
     }

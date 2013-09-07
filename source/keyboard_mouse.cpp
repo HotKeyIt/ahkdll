@@ -154,6 +154,7 @@ void SendKeys(LPTSTR aKeys, bool aSendRaw, SendModes aSendModeOrig, HWND aTarget
 	if (!*aKeys)
 		return;
 	global_struct &g = *::g; // Reduces code size and may improve performance.
+	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
 
 	// For performance and also to reserve future flexibility, recognize {Blind} only when it's the first item
 	// in the string.
@@ -446,7 +447,6 @@ void SendKeys(LPTSTR aKeys, bool aSendRaw, SendModes aSendModeOrig, HWND aTarget
 	single_char_string[1] = '\0'; // Terminate in advance.
 
 	LONG_OPERATION_INIT  // Needed even for SendInput/Play.
-
 	for (; *aKeys; ++aKeys, sPrevEventModifierDown = this_event_modifier_down)
 	{
 		this_event_modifier_down = 0; // Set default for this iteration, overridden selectively below.
@@ -985,6 +985,7 @@ void SendKey(vk_type aVK, sc_type aSC, modLR_type aModifiersLR, modLR_type aModi
 	bool vk_is_mouse = IsMouseVK(aVK); // Caller has ensured that VK is non-zero when it wants a mouse click.
 
 	LONG_OPERATION_INIT
+	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
 	for (int i = 0; i < aRepeatCount; ++i)
 	{
 		if (!sSendMode)
@@ -1150,6 +1151,7 @@ void SendKeySpecial(TCHAR aChar, int aRepeatCount)
 	_itot((TBYTE)aChar, cp, 10); // Convert to UCHAR in case aChar < 0.
 
 	LONG_OPERATION_INIT
+	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
 	for (int i = 0; i < aRepeatCount; ++i)
 	{
 		if (!sSendMode)
@@ -2758,6 +2760,7 @@ void SendEventArray(int &aFinalKeyDelay, modLR_type aModsDuringSend)
 // to the desired/final delay.  Caller must not act upon it until changing sTypeOfHookToBuild to something
 // that will allow DoKeyDelay() to do a real delay.
 {
+	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
 	if (sSendMode == SM_INPUT)
 	{
 		// Remove hook(s) temporarily because the presence of low-level (LL) keybd hook completely disables
@@ -2935,6 +2938,7 @@ void CleanupEventArray(int aFinalKeyDelay)
 void DoKeyDelay(int aDelay)
 // Doesn't need to be thread safe because it should only ever be called from main thread.
 {
+	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
 	if (aDelay < 0) // To support user-specified KeyDelay of -1 (fastest send rate).
 		return;
 	if (sSendMode)
@@ -2989,7 +2993,10 @@ void DoMouseDelay() // Helper function for the mouse functions below.
 	if (mouse_delay < 11 || (mouse_delay < 25 && g_os.IsWin9x()))
 		Sleep(mouse_delay);
 	else
+	{
+		DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
 		SLEEP_WITHOUT_INTERRUPTION(mouse_delay)
+	}
 }
 
 
@@ -3063,6 +3070,7 @@ ToggleValueType ToggleKeyState(vk_type aVK, ToggleValueType aToggleValue)
 	// v1.0.43: Extended the above fix to include all toggleable keys (not just Capslock) and to apply
 	// to both directions (ON and OFF) since it seems likely to be needed for them all.
 	bool our_thread_is_foreground;
+	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
 	if (our_thread_is_foreground = (GetWindowThreadProcessId(GetForegroundWindow(), NULL) == g_MainThreadID)) // GetWindowThreadProcessId() tolerates a NULL hwnd.
 		SLEEP_WITHOUT_INTERRUPTION(-1);
 	if (aVK == VK_CAPITAL && aToggleValue == TOGGLED_OFF && IsKeyToggledOn(aVK))
@@ -3476,6 +3484,7 @@ void SetModifierLRState(modLR_type aModifiersLRnew, modLR_type aModifiersLRnow, 
 		// exactly as if the hook were in the same thread.
 		if (aTargetWindow)
 		{
+			DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
 			if (g_KeybdHook)
 				SLEEP_WITHOUT_INTERRUPTION(0) // Don't use ternary operator to combine this with next due to "else if".
 			else if (GetWindowThreadProcessId(aTargetWindow, NULL) == g_MainThreadID)

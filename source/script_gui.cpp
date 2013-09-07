@@ -6782,6 +6782,7 @@ ResultType GuiType::Show(LPTSTR aOptions, LPTSTR aText)
 	// a command that blocks (fully uses) the main thread such as "Drive Eject" immediately follows
 	// "Gui Show", the GUI window might not appear until afterward because our thread never had a
 	// chance to call its WindowProc with all the messages needed to actually show the window:
+	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
 	SLEEP_WITHOUT_INTERRUPTION(-1)
 	// UpdateWindow() would probably achieve the same effect as the above, but it feels safer to do
 	// the above because it ensures that our message queue is empty prior to returning to our caller.
