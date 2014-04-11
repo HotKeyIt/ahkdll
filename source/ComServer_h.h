@@ -116,10 +116,10 @@ DEFINE_GUID(IID_ICOMServer,0x04FFE41B,0x8FE9,0x4479,0x99,0x0A,0xB1,0x86,0xEC,0x7
         
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkPause( 
             /* [optional][in] */ VARIANT aChangeTo,
-            /* [retval][out] */ BOOL *paused) = 0;
+            /* [retval][out] */ int *paused) = 0;
         
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkReady( 
-            /* [retval][out] */ BOOL *ready) = 0;
+            /* [retval][out] */ int *ready) = 0;
         
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkFindLabel( 
             /* [in] */ VARIANT aLabelName,
@@ -144,7 +144,7 @@ DEFINE_GUID(IID_ICOMServer,0x04FFE41B,0x8FE9,0x4479,0x99,0x0A,0xB1,0x86,0xEC,0x7
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkLabel( 
             /* [in] */ VARIANT aLabelName,
             /* [optional][in] */ VARIANT nowait,
-            /* [retval][out] */ BOOL *success) = 0;
+            /* [retval][out] */ int *success) = 0;
         
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkFindFunction( 
             /* [in] */ VARIANT FuncName,
@@ -180,7 +180,7 @@ DEFINE_GUID(IID_ICOMServer,0x04FFE41B,0x8FE9,0x4479,0x99,0x0A,0xB1,0x86,0xEC,0x7
         
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkKey( 
             /* [in] */ VARIANT name,
-            /* [retval][out] */ BOOL *success) = 0;
+            /* [retval][out] */ int *success) = 0;
         
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE addScript( 
             /* [in] */ VARIANT script,
@@ -195,11 +195,11 @@ DEFINE_GUID(IID_ICOMServer,0x04FFE41B,0x8FE9,0x4479,0x99,0x0A,0xB1,0x86,0xEC,0x7
         
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkExec( 
             /* [in] */ VARIANT script,
-            /* [retval][out] */ BOOL *success) = 0;
+            /* [retval][out] */ int *success) = 0;
         
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkTerminate( 
             /* [optional][in] */ VARIANT kill,
-            /* [retval][out] */ BOOL *success) = 0;
+            /* [retval][out] */ int *success) = 0;
         
     };
     
@@ -265,11 +265,11 @@ DEFINE_GUID(IID_ICOMServer,0x04FFE41B,0x8FE9,0x4479,0x99,0x0A,0xB1,0x86,0xEC,0x7
         /* [id] */ HRESULT ( STDMETHODCALLTYPE *ahkPause )( 
             ICOMServer * This,
             /* [optional][in] */ VARIANT aChangeTo,
-            /* [retval][out] */ BOOL *paused);
+            /* [retval][out] */ int *paused);
         
         /* [id] */ HRESULT ( STDMETHODCALLTYPE *ahkReady )( 
             ICOMServer * This,
-            /* [retval][out] */ BOOL *ready);
+            /* [retval][out] */ int *ready);
         
         /* [id] */ HRESULT ( STDMETHODCALLTYPE *ahkFindLabel )( 
             ICOMServer * This,
@@ -299,7 +299,7 @@ DEFINE_GUID(IID_ICOMServer,0x04FFE41B,0x8FE9,0x4479,0x99,0x0A,0xB1,0x86,0xEC,0x7
             ICOMServer * This,
             /* [in] */ VARIANT aLabelName,
             /* [optional][in] */ VARIANT nowait,
-            /* [retval][out] */ BOOL *success);
+            /* [retval][out] */ int *success);
         
         /* [id] */ HRESULT ( STDMETHODCALLTYPE *ahkFindFunction )( 
             ICOMServer * This,
@@ -339,7 +339,7 @@ DEFINE_GUID(IID_ICOMServer,0x04FFE41B,0x8FE9,0x4479,0x99,0x0A,0xB1,0x86,0xEC,0x7
         /* [id] */ HRESULT ( STDMETHODCALLTYPE *ahkKey )( 
             ICOMServer * This,
             /* [in] */ VARIANT name,
-            /* [retval][out] */ BOOL *success);
+            /* [retval][out] */ int *success);
         
         /* [id] */ HRESULT ( STDMETHODCALLTYPE *addScript )( 
             ICOMServer * This,
@@ -357,12 +357,12 @@ DEFINE_GUID(IID_ICOMServer,0x04FFE41B,0x8FE9,0x4479,0x99,0x0A,0xB1,0x86,0xEC,0x7
         /* [id] */ HRESULT ( STDMETHODCALLTYPE *ahkExec )( 
             ICOMServer * This,
             /* [in] */ VARIANT script,
-            /* [retval][out] */ BOOL *success);
+            /* [retval][out] */ int *success);
         
         /* [id] */ HRESULT ( STDMETHODCALLTYPE *ahkTerminate )( 
             ICOMServer * This,
             /* [optional][in] */ VARIANT kill,
-            /* [retval][out] */ BOOL *success);
+            /* [retval][out] */ int *success);
         
         END_INTERFACE
     } ICOMServerVtbl;

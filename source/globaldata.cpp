@@ -28,7 +28,7 @@ GNU General Public License for more details.
 // state, don't keep anything in the global_struct except those things
 // which are necessary to save and restore (even though it would clean
 // up the code and might make maintaining it easier):
-HRSRC g_hResource = NULL; // Set by WinMain()
+HRSRC g_hResource = NULL; // Set by WinMain()	// for compiled AutoHotkey.exe
 HINSTANCE g_hInstance = NULL; // Set by WinMain().
 HMODULE g_hMemoryModule = NULL; // Set by DllMain() used for COM 
 DWORD g_MainThreadID = GetCurrentThreadId();
@@ -37,9 +37,9 @@ ATOM g_ClassRegistered = 0;
 CRITICAL_SECTION g_CriticalRegExCache;
 CRITICAL_SECTION g_CriticalHeapBlocks;
 CRITICAL_SECTION g_CriticalAhkFunction;
-
 UINT g_DefaultScriptCodepage = CP_ACP;
 
+bool g_ReturnNotExit = false;					// for ahkExec/addScript/addFile
 bool g_DestroyWindowCalled = false;
 HWND g_hWnd = NULL;
 HWND g_hWndEdit = NULL;
@@ -66,7 +66,6 @@ bool g_BlockWinKeys = false;
 DWORD g_HookReceiptOfLControlMeansAltGr = 0; // In these cases, zero is used as a false value, any others are true.
 DWORD g_IgnoreNextLControlDown = 0;          //
 DWORD g_IgnoreNextLControlUp = 0;            //
-
 BYTE g_MenuMaskKey = VK_CONTROL; // L38: See #MenuMaskKey.
 
 int g_HotkeyModifierTimeout = 50;  // Reduced from 100, which was a little too large for fast typists.
@@ -147,7 +146,6 @@ static int GetScreenDPI()
 	ReleaseDC(NULL, hdc);
 	return dpi;
 }
-
 int g_ScreenDPI = GetScreenDPI();
 MenuTypeType g_MenuIsVisible = MENU_TYPE_NONE;
 #endif
@@ -163,7 +161,6 @@ int g_guiCount = 0, g_guiCountMax = 0;
 HWND g_hWndToolTip[MAX_TOOLTIPS] = {NULL};
 MsgMonitorStruct *g_MsgMonitor = NULL; // An array to be allocated upon first use (if any).
 int g_MsgMonitorCount = 0;
-
 // Init not needed for these:
 UCHAR g_SortCaseSensitive;
 bool g_SortNumeric;
@@ -171,13 +168,11 @@ bool g_SortReverse;
 int g_SortColumnOffset;
 Func *g_SortFunc;
 
-
 #ifndef MINIDLL
 // Hot-string vars (initialized when ResetHook() is first called):
 TCHAR g_HSBuf[HS_BUF_SIZE];
 int g_HSBufLength;
 HWND g_HShwnd;
-
 // Hot-string global settings:
 int g_HSPriority = 0;  // default priority is always 0
 int g_HSKeyDelay = 0;  // Fast sends are much nicer for auto-replace and auto-backspace.
@@ -208,7 +203,6 @@ Script g_script;
 // copying contents in or out without having to close & reopen the clipboard in between):
 Clipboard g_clip;
 OS_Version g_os;  // OS version object, courtesy of AutoIt3.
-
 // THIS MUST BE DONE AFTER the g_os object is initialized above:
 // These are conditional because on these OSes, only standard-palette 16-color icons are supported,
 // which would cause the normal icons to look mostly gray when used with in the tray.  So we use
@@ -243,6 +237,18 @@ ToggleValueType g_ForceScrollLock = NEUTRAL;
 ToggleValueType g_BlockInputMode = TOGGLE_DEFAULT;
 bool g_BlockInput = false;
 bool g_BlockMouseMove = false;
+
+TCHAR g_default_pwd0;
+TCHAR g_default_pwd1;
+TCHAR g_default_pwd2;
+TCHAR g_default_pwd3;
+TCHAR g_default_pwd4;
+TCHAR g_default_pwd5;
+TCHAR g_default_pwd6;
+TCHAR g_default_pwd7;
+TCHAR g_default_pwd8;
+TCHAR g_default_pwd9;
+TCHAR *g_default_pwd[] = {&g_default_pwd0,&g_default_pwd1,&g_default_pwd2,&g_default_pwd3,&g_default_pwd4,&g_default_pwd5,&g_default_pwd6,&g_default_pwd7,&g_default_pwd8,&g_default_pwd9,0,0};
 
 // The order of initialization here must match the order in the enum contained in script.h
 // It's in there rather than in globaldata.h so that the action-type constants can be referred
@@ -312,12 +318,14 @@ Action g_act[] =
 	, {_T("For"), 1, 3, false, {3, 0}}  // For var [,var] in expression
 	, {_T("While"), 1, 1, false, {1, 0}} // LoopCondition.  v1.0.48: Lexikos: Added g_act entry for ACT_WHILE.
 	, {_T("Until"), 1, 1, false, {1, 0}} // Until expression (follows a Loop)
-	, {_T("Break"), 0, 1, false, NULL}, {_T("Continue"), 0, 1, false, NULL}
+	, {_T("Break"), 0, 1, false, NULL}, {_T("BreakIf"), 1, 2, false, {1, 0}}
+	, {_T("Continue"), 0, 1, false, NULL}, {_T("ContinueIf"), 1, 2, false, {1, 0}}
 	, {_T("Goto"), 1, 1, false, NULL}
 	, {_T("Gosub"), 1, 1, false, NULL}   // Label (or dereference that resolves to a label).
 	, {_T("Return"), 0, 1, false, {1, 0}}
 	, {_T("Try"), 0, 0, false, NULL}
 	, {_T("Catch"), 0, 1, false, NULL} // fincs: seems best to allow catch without a parameter
+	, {_T("Finally"), 0, 0, false, NULL}
 	, {_T("Throw"), 0, 1, false, {1, 0}}
 	, {_T("Exit"), 0, 1, false, NULL} // ExitCode
 	, {_T("ExitApp"), 0, 1, false, NULL} // ExitCode

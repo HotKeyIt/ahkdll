@@ -24,7 +24,7 @@ GNU General Public License for more details.
 
 #include "Debugger.h"
 
-extern HRSRC g_hResource;
+extern HRSRC g_hResource;		// for compiled AutoHotkey.exe
 extern HINSTANCE g_hInstance;
 extern HMODULE g_hMemoryModule;
 extern DWORD g_MainThreadID;
@@ -36,6 +36,7 @@ extern CRITICAL_SECTION g_CriticalAhkFunction;
 
 extern UINT g_DefaultScriptCodepage;
 
+extern bool g_ReturnNotExit;	// for ahkExec/addScript/addFile
 extern bool g_DestroyWindowCalled;
 extern HWND g_hWnd;  // The main window
 extern HWND g_hWndEdit;  // The edit window, child of main.
@@ -226,6 +227,18 @@ extern DWORD g_TimeLastInputPhysical;
 extern bool g_KeyHistoryToFile;
 #endif
 #endif // MINIDLL
+
+extern TCHAR g_default_pwd0;
+extern TCHAR g_default_pwd1;
+extern TCHAR g_default_pwd2;
+extern TCHAR g_default_pwd3;
+extern TCHAR g_default_pwd4;
+extern TCHAR g_default_pwd5;
+extern TCHAR g_default_pwd6;
+extern TCHAR g_default_pwd7;
+extern TCHAR g_default_pwd8;
+extern TCHAR g_default_pwd9;
+extern TCHAR *g_default_pwd[];
 
 // 9 might be better than 10 because if the granularity/timer is a little
 // off on certain systems, a Sleep(10) might really result in a Sleep(20),

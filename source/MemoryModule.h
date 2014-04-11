@@ -35,7 +35,6 @@ typedef void *HMEMORYRSRC;
 
 typedef void *HCUSTOMMODULE;
 
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -100,7 +99,7 @@ HMEMORYRSRC MemoryFindResourceEx(HMEMORYMODULE, LPCTSTR, LPCTSTR, WORD);
 /**
  * Get the size of the resource in bytes.
  */
-DWORD MemorySizeofResource(HMEMORYMODULE, HMEMORYRSRC);
+DWORD MemorySizeOfResource(HMEMORYMODULE, HMEMORYRSRC);
 
 /**
  * Get a pointer to the contents of the resource.
@@ -110,12 +109,12 @@ LPVOID MemoryLoadResource(HMEMORYMODULE, HMEMORYRSRC);
 /**
  * Load a string resource.
  */
-int MemoryLoadString(HMEMORYMODULE, UINT, LPTSTR, int);
+LPVOID MemoryLoadString(HMEMORYMODULE, UINT, LPTSTR, int);
 
 /**
  * Load a string resource with a given language.
  */
-int MemoryLoadStringEx(HMEMORYMODULE, UINT, LPTSTR, int, WORD);
+LPVOID MemoryLoadStringEx(HMEMORYMODULE, UINT, LPTSTR, int, WORD);
 
 #ifdef __cplusplus
 }

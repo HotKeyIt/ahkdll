@@ -20,7 +20,7 @@ GNU General Public License for more details.
 #include "Shlwapi.h"
 #include "util.h"
 #include "globaldata.h"
-
+#include "LiteUnzip.h"
 
 int GetYDay(int aMon, int aDay, bool aIsLeapYear)
 // Returns a number between 1 and 366.
@@ -264,7 +264,10 @@ __int64 YYYYMMDDSecondsUntil(LPTSTR aYYYYMMDDStart, LPTSTR aYYYYMMDDEnd, bool &a
 	if (*aYYYYMMDDStart)
 	{
 		if (!YYYYMMDDToFileTime(aYYYYMMDDStart, ftStart))
+		{
+			g_script.ScriptError(ERR_PARAM2_INVALID);
 			return 0;
+		}
 	}
 	else // Use the current time in its place.
 	{
@@ -274,7 +277,10 @@ __int64 YYYYMMDDSecondsUntil(LPTSTR aYYYYMMDDStart, LPTSTR aYYYYMMDDEnd, bool &a
 	if (*aYYYYMMDDEnd)
 	{
 		if (!YYYYMMDDToFileTime(aYYYYMMDDEnd, ftEnd))
+		{
+			g_script.ScriptError(ERR_PARAM1_INVALID);
 			return 0;
+		}
 	}
 	else // Use the current time in its place.
 	{
@@ -2797,47 +2803,85 @@ short IsDefaultType(LPTSTR aTypeDef){
 	return NULL;
 }
 
-DWORD DecompressBuffer(LPVOID &aBuffer)
+DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf, TCHAR *pwd[]) // LiteZip Raw compression
 {
-	unsigned int hdrsz = 18;
-	ULONG aSizeCompressed = *(ULONG*)((ULONG)aBuffer + 14);
+	unsigned int hdrsz = 20;
+	TCHAR pw[1024] = {0};
+	if (pwd && pwd[0])
+		for(unsigned int i = 0;pwd[i];i++)
+			pw[i] = (TCHAR)*pwd[i];
+	ULONG aSizeCompressed = *(ULONG*)((UINT_PTR)aBuffer + 8);
+	DWORD aSizeEncrypted = *(DWORD*)((UINT_PTR)aBuffer + 16);
 	DWORD hash;
-	HashData((LPBYTE)aBuffer+8,aSizeCompressed+10,(LPBYTE)&hash,4);
-	if (hash == *(ULONG*)((ULONG)aBuffer + 4))
+	BYTE *aDataEncrypted = NULL;
+	HashData((LPBYTE)aBuffer + hdrsz,aSizeEncrypted?aSizeEncrypted:aSizeCompressed,(LPBYTE)&hash,4);
+	if (0x04034b50 == *(ULONG*)(UINT_PTR)aBuffer && hash == *(ULONG*)((UINT_PTR)aBuffer + 4))
 	{
-		USHORT CompressionMode = *(USHORT*)((ULONG)aBuffer + 8);
-		ULONG aSizeDecompressed = *(ULONG*)((ULONG)aBuffer + 10);
-		ULONG aSizeUncompressed = 0;
-		typedef NTSTATUS (WINAPI * RtlDecompressBuffer)(USHORT, PUCHAR, ULONG, PUCHAR, ULONG, PULONG);
-		RtlDecompressBuffer xRtlDecompressBuffer;
-		xRtlDecompressBuffer = RtlDecompressBuffer(GetProcAddress(GetModuleHandle(_T("ntdll.dll")), "RtlDecompressBuffer"));
-		//aResData = (LPCWSTR)_alloca(aSizeDecompressed);
-		LPVOID aResData = VirtualAlloc(NULL, aSizeDecompressed, MEM_COMMIT, PAGE_READWRITE);
-		xRtlDecompressBuffer(CompressionMode,(PUCHAR)aResData,aSizeDecompressed,(PUCHAR)aBuffer + hdrsz,aSizeCompressed,&aSizeUncompressed);
-		if (*(unsigned int*)aResData == 0x315F5A4C)
+		HUNZIP		huz;
+		ZIPENTRY	ze;
+		DWORD		result;
+		ULONG aSizeDeCompressed = *(ULONG*)((UINT_PTR)aBuffer + 12);
+		aDataBuf = VirtualAlloc(NULL, aSizeDeCompressed, MEM_COMMIT, PAGE_READWRITE);
+		if (aDataBuf)
 		{
-			*(unsigned int*)aResData = 0x005F5A4C;
-			aSizeCompressed = *(ULONG*)((ULONG)aResData + 14);
-			HashData((LPBYTE)aResData+8,aSizeCompressed+10,(LPBYTE)&hash,4);
-			if (hash == *(ULONG*)((ULONG)aResData + 4))
+			if (aSizeEncrypted)
 			{
-				ULONG aSizeMultiDecompressed = *(ULONG*)((ULONG)aResData + 10);
-				LPVOID aResMultiData = VirtualAlloc(NULL, aSizeMultiDecompressed, MEM_COMMIT, PAGE_READWRITE);
-				xRtlDecompressBuffer(CompressionMode,(PUCHAR)aResMultiData,aSizeMultiDecompressed,(PUCHAR)aResData + hdrsz,aSizeCompressed,&aSizeUncompressed);
-				VirtualFree(aResData,aSizeDecompressed,MEM_RELEASE);
-				aBuffer = aResMultiData;
-				return aSizeUncompressed + hdrsz;
+				typedef BOOL (_stdcall *MyDecrypt)(HCRYPTKEY,HCRYPTHASH,BOOL,DWORD,BYTE*,DWORD*);
+				HMODULE advapi32 = LoadLibrary(_T("advapi32.dll"));
+				MyDecrypt Decrypt = (MyDecrypt)GetProcAddress(advapi32,"CryptDecrypt");
+				LPSTR aDataEncryptedString = (LPSTR)VirtualAlloc(NULL, aSizeEncrypted, MEM_COMMIT, PAGE_READWRITE);
+				DWORD aSizeEncryptedString = aSizeEncrypted;
+				DWORD aSizeEncryptedTemp = aSizeEncrypted;
+				HCRYPTPROV hProv;
+				HCRYPTKEY hKey;
+				HCRYPTHASH hHash;
+				CryptAcquireContext(&hProv,NULL,NULL,PROV_RSA_AES,CRYPT_VERIFYCONTEXT);
+				CryptCreateHash(hProv,CALG_SHA1,NULL,NULL,&hHash);
+				CryptHashData(hHash,(BYTE *) pw,(DWORD)_tcslen(pw) * sizeof(TCHAR),0);
+				CryptDeriveKey(hProv,CALG_AES_256,hHash,256<<16,&hKey);
+				CryptDestroyHash(hHash);
+				memmove(aDataEncryptedString,(LPBYTE)aBuffer + hdrsz,aSizeEncrypted);
+				Decrypt(hKey,NULL,true,0,(BYTE*)aDataEncryptedString,&aSizeEncryptedString);
+				CryptStringToBinaryA(aDataEncryptedString,NULL,CRYPT_STRING_BASE64,NULL,&aSizeEncryptedTemp,NULL,NULL);
+				if (aSizeEncryptedTemp == 0)
+				{   // incorrect password
+					VirtualFree(aDataBuf,aSizeDeCompressed,MEM_RELEASE);
+					VirtualFree(aDataEncrypted,aSizeDeCompressed,MEM_RELEASE);
+					return 0;
+				}
+				aDataEncrypted = (BYTE*)VirtualAlloc(NULL, aSizeEncryptedTemp, MEM_COMMIT, PAGE_READWRITE);
+				CryptStringToBinaryA(aDataEncryptedString,NULL,CRYPT_STRING_BASE64,aDataEncrypted,&aSizeEncryptedTemp,NULL,NULL);
+				VirtualFree(aDataEncryptedString,aSizeEncrypted,MEM_RELEASE);
+				CryptDestroyKey(hKey);
+				CryptReleaseContext(hProv,0);
+				if (openArchive(&huz,(LPBYTE)aDataEncrypted, aSizeCompressed, ZIP_MEMORY|ZIP_RAW, 0))
+				{   // failed to open archive
+					closeArchive((TUNZIP *)huz);
+					VirtualFree(aDataBuf,aSizeDeCompressed,MEM_RELEASE);
+					VirtualFree(aDataEncrypted,aSizeDeCompressed,MEM_RELEASE);
+					return 0;
+				}
 			}
+			else if (openArchive(&huz,(LPBYTE)aBuffer + hdrsz, aSizeCompressed, ZIP_MEMORY|ZIP_RAW, 0))
+			{   // failed to open archive
+				closeArchive((TUNZIP *)huz);
+				VirtualFree(aDataBuf,aSizeDeCompressed,MEM_RELEASE);
+				return 0;
+			}
+			ze.CompressedSize = aSizeDeCompressed;
+			ze.UncompressedSize = aSizeDeCompressed;
+			if ((result = unzipEntry((TUNZIP *)huz, aDataBuf, &ze, ZIP_MEMORY)))
+				VirtualFree(aDataBuf,aSizeDeCompressed,MEM_RELEASE);
 			else
 			{
-				aBuffer = aResData;
-				return aSizeUncompressed + hdrsz;
+				closeArchive((TUNZIP *)huz);
+				if (aDataEncrypted)
+					VirtualFree(aDataEncrypted,aSizeDeCompressed,MEM_RELEASE);
+				return aSizeDeCompressed;
 			}
-		}
-		else
-		{
-			aBuffer = aResData;
-			return aSizeUncompressed + hdrsz;
+			closeArchive((TUNZIP *)huz);
+			if (aDataEncrypted)
+				VirtualFree(aDataEncrypted,aSizeDeCompressed,MEM_RELEASE);
 		}
 	}
 	return 0;

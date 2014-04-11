@@ -382,18 +382,19 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	return 0; // Never executed; avoids compiler warning.
 }
 
-EXPORT BOOL ahkTerminate(int timeout = 0)
+EXPORT int ahkTerminate(DWORD timeout = 0)
 {
 	DWORD lpExitCode = 0;
 	if (hThread == 0)
 		return 0;
 	g_AllowInterruption = FALSE;
 	GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
-	int tickstart = GetTickCount();
-	for (int tick = tickstart; hThread && g_script.mIsReadyToExecute && (lpExitCode == 0 || lpExitCode == 259) && (timeout == 0 || timeout < (tickstart-tick)); tick = GetTickCount())
+	DWORD tickstart = GetTickCount();
+	DWORD timetowait = timeout < 0 ? timeout * -1 : timeout;
+	for (;hThread && g_script.mIsReadyToExecute && (lpExitCode == 0 || lpExitCode == 259) && (timeout == 0 || timetowait > (GetTickCount()-tickstart));)
 	{
-		SendMessageTimeout(g_hWnd, AHK_EXIT_BY_SINGLEINSTANCE, OK, 0,timeout < 0 ? SMTO_NORMAL : SMTO_NOTIMEOUTIFNOTHUNG,timeout == 0 ? 500 : timeout < 0 ? timeout * -1 : timeout,0);
-		Sleep(50);
+		SendMessageTimeout(g_hWnd, AHK_EXIT_BY_SINGLEINSTANCE, OK, 0,timeout < 0 ? SMTO_NORMAL : SMTO_NOTIMEOUTIFNOTHUNG,SLEEP_INTERVAL * 3,0);
+		Sleep(100); // give it a bit time to exit thread
 	}
 	if (g_script.mIsReadyToExecute || hThread)
 	{
@@ -485,23 +486,23 @@ void reloadDll()
 	_endthreadex( (DWORD)EARLY_RETURN );
 }
 
-ResultType terminateDll(ExitReasons aExitReason)
+ResultType terminateDll(int aExitCode)
 {
 	g_script.Destroy();
 	g_AllowInterruption = TRUE;
 	hThread = NULL;
-	_endthreadex( (DWORD)EARLY_EXIT );
-	return EARLY_EXIT;
+	_endthreadex( (DWORD)aExitCode );
+	return (ResultType)aExitCode;
 }
 
-EXPORT BOOL ahkReload(int timeout = 0)
+EXPORT int ahkReload(int timeout = 0)
 {
 	ahkTerminate(timeout);
 	hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, 0 );
 	return 0;
 }
 
-EXPORT BOOL ahkReady() // HotKeyIt check if dll is ready to execute
+EXPORT int ahkReady() // HotKeyIt check if dll is ready to execute
 {
 	return g_script.mIsReadyToExecute;
 }
@@ -647,7 +648,7 @@ HRESULT __stdcall CoCOMServer::ahkdll(/*in,optional*/VARIANT filepath,/*in,optio
 							,params.vt == VT_BSTR ? OLE2T(params.bstrVal) : Variant2T(params,buf2));
 	return S_OK;
 }
-HRESULT __stdcall CoCOMServer::ahkPause(/*in,optional*/VARIANT aChangeTo,/*out*/BOOL* paused)
+HRESULT __stdcall CoCOMServer::ahkPause(/*in,optional*/VARIANT aChangeTo,/*out*/int* paused)
 {
 	USES_CONVERSION;
 	if (paused==NULL)
@@ -656,14 +657,14 @@ HRESULT __stdcall CoCOMServer::ahkPause(/*in,optional*/VARIANT aChangeTo,/*out*/
 	*paused = com_ahkPause(aChangeTo.vt == VT_BSTR ? OLE2T(aChangeTo.bstrVal) : Variant2T(aChangeTo,buf));
 	return S_OK;
 }
-HRESULT __stdcall CoCOMServer::ahkReady(/*out*/BOOL* ready)
+HRESULT __stdcall CoCOMServer::ahkReady(/*out*/int* ready)
 {
 	if (ready==NULL)
 		return ERROR_INVALID_PARAMETER;
 	*ready = com_ahkReady();
 	return S_OK;
 }
-HRESULT __stdcall CoCOMServer::ahkIsUnicode(/*out*/BOOL* IsUnicode)
+HRESULT __stdcall CoCOMServer::ahkIsUnicode(/*out*/int* IsUnicode)
 {
 	if (IsUnicode==NULL)
 		return ERROR_INVALID_PARAMETER;
@@ -705,7 +706,7 @@ HRESULT __stdcall CoCOMServer::ahkgetvar(/*in*/VARIANT name,/*[in,optional]*/ VA
 
 void AssignVariant(Var &aArg, VARIANT &aVar, bool aRetainVar = true);
 
-HRESULT __stdcall CoCOMServer::ahkassign(/*in*/VARIANT name, /*in*/VARIANT value,/*out*/unsigned int* success)
+HRESULT __stdcall CoCOMServer::ahkassign(/*in*/VARIANT name, /*in*/VARIANT value,/*out*/int* success)
 {
    USES_CONVERSION;
 	 if (success==NULL)
@@ -724,7 +725,7 @@ HRESULT __stdcall CoCOMServer::ahkExecuteLine(/*[in,optional]*/ VARIANT line,/*[
 	*pLine = com_ahkExecuteLine(Variant2I(line),Variant2I(aMode),Variant2I(wait));
 	return S_OK;
 }
-HRESULT __stdcall CoCOMServer::ahkLabel(/*[in]*/ VARIANT aLabelName,/*[in,optional]*/ VARIANT nowait,/*[out, retval]*/ BOOL* success)
+HRESULT __stdcall CoCOMServer::ahkLabel(/*[in]*/ VARIANT aLabelName,/*[in,optional]*/ VARIANT nowait,/*[out, retval]*/ int* success)
 {
 	USES_CONVERSION;
 	if (success==NULL)
@@ -759,7 +760,7 @@ HRESULT __stdcall CoCOMServer::ahkFunction(/*[in]*/ VARIANT FuncName,/*[in,optio
 	return VariantCopy(returnVal, &b) ;
 	 // return b.Detach(returnVal);			
 }
-HRESULT __stdcall CoCOMServer::ahkPostFunction(/*[in]*/ VARIANT FuncName,VARIANT param1,/*[in,optional]*/ VARIANT param2,/*[in,optional]*/ VARIANT param3,/*[in,optional]*/ VARIANT param4,/*[in,optional]*/ VARIANT param5,/*[in,optional]*/ VARIANT param6,/*[in,optional]*/ VARIANT param7,/*[in,optional]*/ VARIANT param8,/*[in,optional]*/ VARIANT param9,/*[in,optional]*/ VARIANT param10,/*[out, retval]*/ unsigned int* returnVal)
+HRESULT __stdcall CoCOMServer::ahkPostFunction(/*[in]*/ VARIANT FuncName,VARIANT param1,/*[in,optional]*/ VARIANT param2,/*[in,optional]*/ VARIANT param3,/*[in,optional]*/ VARIANT param4,/*[in,optional]*/ VARIANT param5,/*[in,optional]*/ VARIANT param6,/*[in,optional]*/ VARIANT param7,/*[in,optional]*/ VARIANT param8,/*[in,optional]*/ VARIANT param9,/*[in,optional]*/ VARIANT param10,/*[out, retval]*/ int* returnVal)
 {
 	USES_CONVERSION;
   	if (returnVal==NULL)
@@ -772,26 +773,26 @@ HRESULT __stdcall CoCOMServer::ahkPostFunction(/*[in]*/ VARIANT FuncName,VARIANT
 	return 0;		
 }
 
-HRESULT __stdcall CoCOMServer::addScript(/*[in]*/ VARIANT script,/*[in,optional]*/ VARIANT replace,/*[out, retval]*/ UINT_PTR* success)
+HRESULT __stdcall CoCOMServer::addScript(/*[in]*/ VARIANT script,/*[in,optional]*/ VARIANT waitexecute,/*[out, retval]*/ UINT_PTR* success)
 {
 	USES_CONVERSION;
 	if (success==NULL)
 		return ERROR_INVALID_PARAMETER;
 	TCHAR buf[MAX_INTEGER_SIZE];
-	*success = com_addScript(script.vt == VT_BSTR ? OLE2T(script.bstrVal) : Variant2T(script,buf),Variant2I(replace));
+	*success = com_addScript(script.vt == VT_BSTR ? OLE2T(script.bstrVal) : Variant2T(script,buf),Variant2I(waitexecute));
 	return S_OK;
 }
-HRESULT __stdcall CoCOMServer::addFile(/*[in]*/ VARIANT filepath,/*[in,optional]*/ VARIANT aAllowDuplicateInclude,/*[in,optional]*/ VARIANT aIgnoreLoadFailure,/*[out, retval]*/ UINT_PTR* success)
+HRESULT __stdcall CoCOMServer::addFile(/*[in]*/ VARIANT filepath,/*[in,optional]*/ VARIANT waitexecute,/*[out, retval]*/ UINT_PTR* success)
 {
 	USES_CONVERSION;
 	if (success==NULL)
 		return ERROR_INVALID_PARAMETER;
 	TCHAR buf[MAX_INTEGER_SIZE];
 	*success = com_addFile(filepath.vt == VT_BSTR ? OLE2T(filepath.bstrVal) : Variant2T(filepath,buf)
-							,Variant2I(aAllowDuplicateInclude),Variant2I(aIgnoreLoadFailure));
+							,Variant2I(waitexecute));
 	return S_OK;
 }
-HRESULT __stdcall CoCOMServer::ahkExec(/*[in]*/ VARIANT script,/*[out, retval]*/ BOOL* success)
+HRESULT __stdcall CoCOMServer::ahkExec(/*[in]*/ VARIANT script,/*[out, retval]*/ int* success)
 {
 	USES_CONVERSION;
 	if (success==NULL)
@@ -800,7 +801,7 @@ HRESULT __stdcall CoCOMServer::ahkExec(/*[in]*/ VARIANT script,/*[out, retval]*/
 	*success = com_ahkExec(script.vt == VT_BSTR ? OLE2T(script.bstrVal) : Variant2T(script,buf));
 	return S_OK;
 }
-HRESULT __stdcall CoCOMServer::ahkTerminate(/*[in,optional]*/ VARIANT kill,/*[out, retval]*/ BOOL* success)
+HRESULT __stdcall CoCOMServer::ahkTerminate(/*[in,optional]*/ VARIANT kill,/*[out, retval]*/ int* success)
 {
 	if (success==NULL)
 		return ERROR_INVALID_PARAMETER;
@@ -834,7 +835,7 @@ HRESULT CoCOMServer::LoadTypeInfo(ITypeInfo ** pptinfo, const CLSID &libid, cons
 		  HMEMORYRSRC res = MemoryFindResource(hmodule,_T("TYPELIB"),MAKEINTRESOURCE(1));
 		  if (!res)
 			return TYPE_E_INVALIDSTATE;
-		  DWORD resSize = MemorySizeofResource(hmodule,res);
+		  DWORD resSize = MemorySizeOfResource(hmodule,res);
 		  // Path to temp directory + our temporary file name
 		  DWORD tempPathLength = GetTempPathW(MAX_PATH, buf);
 		  wcscpy(buf + tempPathLength,L"AutoHotkey.MemoryModule.temp.tlb");

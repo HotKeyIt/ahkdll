@@ -41,40 +41,31 @@ BIF_DECL(BIF_Getvar)
 		aResultToken.value_int64 = 0;
 }
 
-
-BIF_DECL(BIF_Static)
-{
-	if (aParam[0]->symbol == SYM_VAR)
-	{
-		Var *var = aParam[0]->var;
-		if (var->mType == VAR_ALIAS)
-			var = var->mAliasFor;
-		var->mAttrib |= VAR_LOCAL_STATIC;
-	}
-}
-
 BIF_DECL(BIF_Alias)
 {
 	ExprTokenType &aParam0 = *aParam[0];
 	ExprTokenType &aParam1 = *aParam[1];
+	aResultToken.symbol = SYM_STRING;
+	aResultToken.marker = _T("");
 	if (aParam0.symbol == SYM_VAR)
 	{
 		Var &var = *aParam0.var;
 
 		UINT_PTR len = 0;
-		switch (aParam1.symbol)
-		{
-		case SYM_VAR:
-			len = (UINT_PTR)(aParam[1]->var->mType == VAR_ALIAS ? aParam1.var->ResolveAlias() : aParam1.var);
-			break;
-		case SYM_INTEGER:
-			// HotKeyIt added to accept var pointer
-			len = (UINT_PTR)aParam[1]->value_int64;
-			break;
-			// HotKeyIt H10 added to accept dynamic text and also when value is returned by ahkgetvar in AutoHotkey.dll
-		case SYM_STRING:
-			len = (UINT_PTR)ATOI64(aParam1.marker);
-		}
+		if (aParamCount == 2)
+			switch (aParam1.symbol)
+			{
+			case SYM_VAR:
+				len = (UINT_PTR)(aParam[1]->var->mType == VAR_ALIAS ? aParam1.var->ResolveAlias() : aParam1.var);
+				break;
+			case SYM_INTEGER:
+				// HotKeyIt added to accept var pointer
+				len = (UINT_PTR)aParam[1]->value_int64;
+				break;
+				// HotKeyIt H10 added to accept dynamic text and also when value is returned by ahkgetvar in AutoHotkey.dll
+			case SYM_STRING:
+				len = (UINT_PTR)ATOI64(aParam1.marker);
+			}
 		var.mType = len ? VAR_ALIAS : VAR_NORMAL;
 		var.mByteLength = len;
 	}

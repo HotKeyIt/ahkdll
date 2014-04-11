@@ -600,8 +600,7 @@ DEBUGGER_COMMAND(Debugger::breakpoint_set)
 			return DEBUGGER_E_BREAKPOINT_INVALID;
 	}
 
-	Line *line = NULL;
-	bool found_line = false;
+	Line *line = NULL, *found_line = NULL;
 	// Due to the introduction of expressions in static initializers, lines aren't necessarily in
 	// line number order.  First determine if any static initializers match the requested lineno.
 	// If not, use the first non-static line at or following that line number.
@@ -609,9 +608,9 @@ DEBUGGER_COMMAND(Debugger::breakpoint_set)
 	if (g_script.mFirstStaticLine)
 		for (line = g_script.mFirstStaticLine; ; line = line->mNextLine)
 		{
-			if (line->mFileIndex == file_index && line->mLineNumber == lineno)
+			if (line->mFileIndex == file_index && line->mLineNumber == lineno) // Exact match, unlike normal lines.
 			{
-				found_line = true;
+				found_line = line;
 				break;
 			}
 			if (line == g_script.mLastStaticLine)
@@ -631,19 +630,21 @@ DEBUGGER_COMMAND(Debugger::breakpoint_set)
 					continue;
 				// Use the first line of code at or after lineno, like Visual Studio.
 				// To display the breakpoint correctly, an IDE should use breakpoint_get.
-				found_line = true;
-				break;
+				if (!found_line || found_line->mLineNumber > line->mLineNumber)
+					found_line = line;
+				// Must keep searching, since class var initializers can cause lines to be listed out of order.
+				//break;
 			}
 	if (found_line)
 	{
-		if (!line->mBreakpoint)
-			line->mBreakpoint = new Breakpoint();
-		line->mBreakpoint->state = state;
-		line->mBreakpoint->temporary = temporary;
+		if (!found_line->mBreakpoint)
+			found_line->mBreakpoint = new Breakpoint();
+		found_line->mBreakpoint->state = state;
+		found_line->mBreakpoint->temporary = temporary;
 
 		return mResponseBuf.WriteF(
 			"<response command=\"breakpoint_set\" transaction_id=\"%e\" state=\"%s\" id=\"%i\"/>"
-			, aTransactionId, state ? "enabled" : "disabled", line->mBreakpoint->id);
+			, aTransactionId, state ? "enabled" : "disabled", found_line->mBreakpoint->id);
 	}
 	// There are no lines of code beginning at or after lineno.
 	return DEBUGGER_E_BREAKPOINT_INVALID;
@@ -861,7 +862,7 @@ DEBUGGER_COMMAND(Debugger::stack_get)
 				mResponseBuf.WriteF("%e (thread)", U4T(se->desc)); // %e to escape characters which desc may contain (e.g. "a & b" in hotkey name).
 				break;
 			case DbgStack::SE_Func:
-				mResponseBuf.WriteF("%s()", U4T(se->func->mName)); // %s because function names should never contain characters which need escaping.
+				mResponseBuf.WriteF("%e()", U4T(se->Name()));
 				break;
 			case DbgStack::SE_Sub:
 				mResponseBuf.WriteF("%e:", U4T(se->sub->mName)); // %e because label/hotkey names may contain almost anything.
@@ -2658,6 +2659,22 @@ DbgStack::Entry *DbgStack::Push()
 		mTop->line = g_script.mCurrLine;
 	}
 	return ++mTop;
+}
+
+
+TCHAR *DbgStack::Entry::Name()
+{
+	switch (type)
+	{
+	case SE_Sub:
+		return sub->mName;
+	case SE_Func:
+		if ((UINT_PTR)func->mName < SYM_COUNT)
+			return _T("<object>");
+		return func->mName;
+	default: // SE_Thread
+		return desc;
+	}
 }
 
 

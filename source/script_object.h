@@ -178,7 +178,7 @@ public:
 	bool Append(LPTSTR aValue, size_t aValueLength = -1);
 
 	Object *Clone(BOOL aExcludeIntegerKeys = false);
-	ResultType ArrayToParams(ExprTokenType *token, ExprTokenType **param_list, int extra_params, ExprTokenType **&aParam, int &aParamCount);
+	void ArrayToParams(ExprTokenType *token, ExprTokenType **param_list, int extra_params, ExprTokenType **&aParam, int &aParamCount);
 	ResultType ArrayToStrings(LPTSTR *aStrings, int &aStringCount, int aStringsMax);
 	
 	inline bool GetNextItem(ExprTokenType &aToken, INT_PTR &aOffset, INT_PTR &aKey)
@@ -266,6 +266,8 @@ public:
 	{
 		return mBase; // Callers only want to call Invoke(), so no AddRef is done.
 	}
+
+	bool IsDerivedFrom(IObject *aBase);
 	
 	// Used by Object::_Insert() and Func::Call():
 	bool InsertAt(INT_PTR aOffset, INT_PTR aKey, ExprTokenType *aValue[], int aValueCount);
@@ -323,10 +325,6 @@ class RegExMatchObject : public ObjectBase
 	LPTSTR *mPatternName;
 	int mPatternCount;
 	LPTSTR mMark;
-
-#ifdef CONFIG_DEBUGGER
-	friend class Debugger;
-#endif
 
 	RegExMatchObject() : mHaystack(NULL), mOffset(NULL), mPatternName(NULL), mPatternCount(0), mMark(NULL) {}
 	
@@ -398,20 +396,20 @@ public:
 class Struct : public ObjectBase
 {
 protected:
-	typedef INT_PTR IndexType; // Type of index for the internal array.  Must be signed for FindKey to work correctly.
+	typedef INT64 IndexType; // Type of index for the internal array.  Must be signed for FindKey to work correctly.
 	struct FieldType
 	{
 		UINT_PTR *mStructMem;	// Pointer to allocated memory
 		int mSize;				// Size of field
 		int mOffset;			// Offset for field	
-		int mIsPointer;			// Pointer depth
+		int mIsPointer;			// Pointer depth (Pointer to Pointer...)
 		bool mIsInteger;		// IsInteger for NumGet/NumPut
 		bool mIsUnsigned;		// IsUnsigned for NumGet/NumPut
 		USHORT mEncoding;		// Encoding for StrGet/StrPut
-		int mArraySize;			// ArraySize = 0 if not an array
-		int mMemAllocated;		// Identify that we allocated memory
+		int mArraySize;			// Struct is array if ArraySize > 0
+		int mMemAllocated;		// size of allocated memory
 		Var *mVarRef;			// Reference to a variable containing the definition
-		LPTSTR key;				// Name of field
+		LPTSTR key;				// Field's name
 	};
 	
 	FieldType *mFields;

@@ -67,7 +67,10 @@ BIF_DECL(BIF_sizeof)
 
 	// definition and field name are same max size as variables
 	// also add enough room to store pointers (**) and arrays [1000]
-	TCHAR defbuf[MAX_VAR_NAME_LENGTH*2 + 40];
+	// give more room to use local or static variable Function(variable)
+	// Parameter passed to IsDefaultType needs to be ' Definition '
+	// this is because spaces are used as delimiters ( see IsDefaultType function )
+	TCHAR defbuf[MAX_VAR_NAME_LENGTH*2 + 40] = _T(" UInt "); // Set default UInt definition
 	
 	// buffer for arraysize + 2 for bracket ] and terminating character
 	TCHAR intbuf[MAX_INTEGER_LENGTH + 2];
@@ -75,11 +78,6 @@ BIF_DECL(BIF_sizeof)
 	// Set result to empty string to identify error
 	aResultToken.symbol = SYM_STRING;
 	aResultToken.marker = _T("");
-	
-	// Parameter passed to IsDefaultType needs to be ' Definition '
-	// this is because spaces are used as delimiters ( see IsDefaultType function )
-	// So first character will be always a space
-	defbuf[0] = ' ';
 	
 	// if first parameter is an object (struct), simply return its size
 	if (TokenToObject(*aParam[0]))
@@ -221,8 +219,12 @@ BIF_DECL(BIF_sizeof)
 			_tcsncpy(defbuf + 1,tempbuf,_tcscspn(tempbuf,_T("\t [")));
 			_tcscpy(defbuf + 1 + _tcscspn(tempbuf,_T("\t [")),_T(" "));
 		}
-		else // Not 'TypeOnly' definition because there are more than one fields in array so use default type UInt
-			_tcscpy(defbuf,_T(" UInt "));
+		//else // Not 'TypeOnly' definition because there are more than one fields in structure so use default type UInt
+		//{
+			// Commented out following line to keep previous or default UInt definition like in c++, e.g. "Int x,y,Char a,b", 
+			// Note: separator , or ; can be still used but
+			// _tcscpy(defbuf,_T(" UInt "));
+		//}
 		
 		// Now find size in default types array and create new field
 		// If Type not found, resolve type to variable and get size of struct defined in it
@@ -322,7 +324,7 @@ BIF_DECL(BIF_ObjCreate)
 			return; // symbol is already SYM_INTEGER.
 		}
 		obj = (IObject *)TokenToInt64(*aParam[0]);
-		if (obj < (IObject *)1024) // Prevent some obvious errors.
+		if (obj < (IObject *)65536) // Prevent some obvious errors.
 			obj = NULL;
 		else
 			obj->AddRef();
@@ -338,8 +340,7 @@ BIF_DECL(BIF_ObjCreate)
 	}
 	else
 	{
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		aResult = g_script.ScriptError(aParamCount == 1 ? ERR_PARAM1_INVALID : ERR_OUTOFMEM);
 	}
 }
 
@@ -361,8 +362,7 @@ BIF_DECL(BIF_ObjArray)
 		}
 		obj->Release();
 	}
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = _T("");
+	aResult = g_script.ScriptError(ERR_OUTOFMEM);
 }
 	
 
@@ -371,7 +371,6 @@ BIF_DECL(BIF_ObjArray)
 //
 
 BIF_DECL(BIF_IsObject)
-// IsObject(obj) is currently equivalent to (obj && obj=""), but much more intuitive.
 {
 	int i;
 	for (i = 0; i < aParamCount && TokenToObject(*aParam[i]); ++i);
@@ -435,13 +434,14 @@ BIF_DECL(BIF_ObjInvoke)
 				ExprTokenType base_token;
 				base_token.symbol = SYM_OBJECT;
 				base_token.object = &g_MetaObject;
-				g_MetaObject.Invoke(aResultToken, base_token, invoke_type, aParam + 1, aParamCount - 1);
+				aResult = g_MetaObject.Invoke(aResultToken, base_token, invoke_type, aParam + 1, aParamCount - 1);
 			}
 			else					// "".base
 			{
 				// Return a reference to g_MetaObject.  No need to AddRef as g_MetaObject ignores it.
 				aResultToken.symbol = SYM_OBJECT;
 				aResultToken.object = &g_MetaObject;
+				aResult = OK;
 			}
 		}
 		else
@@ -452,7 +452,14 @@ BIF_DECL(BIF_ObjInvoke)
 		}
 	}
 	if (aResult == INVOKE_NOT_HANDLED)
-		aResult = OK;
+	{
+		// Invocation not handled. Either there was no target object, or the object doesn't handle
+		// this method/property.  For Object (associative arrays), only CALL should give this result.
+		if (!obj)
+			aResult = g_script.ThrowRuntimeException(ERR_NO_OBJECT);
+		else
+			aResult = g_script.ThrowRuntimeException(ERR_NO_MEMBER, NULL, aParamCount ? TokenToString(*aParam[0]) : _T(""));
+	}
 }
 	
 
@@ -483,11 +490,17 @@ BIF_DECL(BIF_ObjNew)
 
 	IObject *class_object = TokenToObject(*class_token);
 	if (!class_object)
+	{
+		aResult = g_script.ScriptError(_T("Missing class object for \"new\" operator."));
 		return;
+	}
 
 	Object *new_object = Object::Create();
 	if (!new_object)
+	{
+		aResult = g_script.ScriptError(ERR_OUTOFMEM);
 		return;
+	}
 
 	new_object->SetBase(class_object);
 
@@ -521,6 +534,7 @@ BIF_DECL(BIF_ObjNew)
 		aResultToken.buf = buf;
 		if (result == FAIL)
 		{
+			new_object->Release();
 			aParam[0] = class_token; // Restore it to original caller-supplied value.
 			return;
 		}
@@ -546,8 +560,8 @@ BIF_DECL(BIF_ObjNew)
 		if (result == FAIL)
 		{
 			// Invocation failed, probably due to omitting a required parameter.
-			aResultToken.symbol = SYM_STRING;
-			aResultToken.marker = _T("");
+			new_object->Release();
+			aResult = FAIL;
 		}
 		else
 		{
@@ -687,10 +701,9 @@ BIF_METHOD(Clone)
 BIF_DECL(BIF_ObjAddRefRelease)
 {
 	IObject *obj = (IObject *)TokenToInt64(*aParam[0]);
-	if (obj < (IObject *)4096) // Rule out some obvious errors.
+	if (obj < (IObject *)65536) // Rule out some obvious errors.
 	{
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		aResult = g_script.ScriptError(ERR_PARAM1_INVALID);
 		return;
 	}
 	if (ctoupper(aResultToken.marker[3]) == 'A')

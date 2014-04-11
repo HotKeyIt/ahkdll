@@ -45,7 +45,10 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 
 	// definition and field name are same max size as variables
 	// also add enough room to store pointers (**) and arrays [1000]
-	TCHAR defbuf[MAX_VAR_NAME_LENGTH*2 + 40]; // give more room to use local or static variable Function(variable)
+	// give more room to use local or static variable Function(variable)
+	// Parameter passed to IsDefaultType needs to be ' Definition '
+	// this is because spaces are used as delimiters ( see IsDefaultType function )
+	TCHAR defbuf[MAX_VAR_NAME_LENGTH*2 + 40] = _T(" UInt "); // Set default UInt definition
 	TCHAR keybuf[MAX_VAR_NAME_LENGTH + 40];
 
 	// buffer for arraysize + 2 for bracket ] and terminating character
@@ -59,12 +62,6 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 
 	// the new structure object
 	Struct *obj = new Struct();
-
-
-	// Parameter passed to IsDefaultType needs to be ' Definition '
-	// this is because spaces are used as delimiters ( see IsDefaultType function )
-	// So first character will be always a space
-	defbuf[0] = ' ';
 
 	if (TokenToObject(*aParam[0]))
 	{
@@ -198,7 +195,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			rtrim(tempbuf);
 		}
 		// copy type 
-		// if offset is 0 and there are no };, characters, it means we have a pure definition
+		// if offset is 0 and there are no };, characters, it means we have a pure type definition
 		if (StrChrAny(tempbuf, _T(" \t")) || StrChrAny(tempbuf,_T("};,")) || (!StrChrAny(buf,_T("};,")) && !offset))
 		{
 			if ((buf_size = _tcscspn(tempbuf,_T("\t "))) > MAX_VAR_NAME_LENGTH*2 + 30)
@@ -223,9 +220,11 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			else 
 				keybuf[0] = '\0';
 		}
-		else // Not 'TypeOnly' definition because there are more than one fields in array so use default type UInt
+		else // Not 'TypeOnly' definition because there are more than one fields in structure so use default type UInt
 		{
-			_tcscpy(defbuf,_T(" UInt "));
+			// Commented following line to keep previous definition like in c++, e.g. "Int x,y,Char a,b", 
+			// Note: separator , or ; can be still used but
+			// _tcscpy(defbuf,_T(" UInt "));
 			_tcscpy(keybuf,tempbuf);
 		}
 		// Now find size in default types array and create new field
@@ -271,10 +270,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 				g->CurrentFunc = g_script.FindFunc(defbuf + 1,_tcscspn(defbuf,_T("(")) - 1);
 				if (g->CurrentFunc) // break if not found to identify error
 				{
-					_tcscpy(tempbuf,defbuf + 1);
-					_tcscpy(defbuf + 1,tempbuf + _tcscspn(tempbuf,_T("(")) + 1); //,_tcschr(tempbuf,')') - _tcschr(tempbuf,'('));
-					_tcscpy(_tcschr(defbuf,')'),_T(" \0"));
-					Var1.var = g_script.FindVar(defbuf + 1,_tcslen(defbuf) - 2,NULL,FINDVAR_LOCAL,NULL);
+					Var1.var = g_script.FindVar(defbuf + _tcscspn(defbuf,_T("(")) + 1,_tcslen(defbuf) - _tcscspn(defbuf,_T("(")) - 3,NULL,FINDVAR_LOCAL,NULL);
 					g->CurrentFunc = bkpfunc;
 				}
 				else // release object and return
@@ -1045,14 +1041,19 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 						objclone->Release();
 					return OK;
 				}
-				if (mMemAllocated > 0)
-					free(mStructMem);
-				// allocate memory and zero-fill
+				UINT_PTR *aBkpMem = mStructMem;
+				int aBkpMemAlloc = mMemAllocated;
+				// allocate memory
 				if (mStructMem = (UINT_PTR*)malloc((size_t)TokenToInt64(*aParam[0])))
 				{
 					mMemAllocated = (int)TokenToInt64(*aParam[0]);
-					memset(mStructMem,NULL,(size_t)mMemAllocated);
+					if (aBkpMemAlloc)	// fill existent structure
+						memmove(mStructMem,aBkpMem,mMemAllocated < aBkpMemAlloc ? mMemAllocated : aBkpMemAlloc);
+					else				// zero-fill structure
+						memset(mStructMem,NULL,(size_t)mMemAllocated);
 					aResultToken.value_int64 = mMemAllocated;
+					if (aBkpMemAlloc > 0)
+						free(aBkpMem);
 				}
 				else
 					mMemAllocated = 0;
@@ -1710,7 +1711,7 @@ bool Struct::SetInternalCapacity(IndexType new_capacity)
 // Expands mFields to the specified number if fields.
 // Caller *must* ensure new_capacity >= 1 && new_capacity >= mFieldCount.
 {
-	FieldType *new_fields = (FieldType *)realloc(mFields, new_capacity * sizeof(FieldType));
+	FieldType *new_fields = (FieldType *)realloc(mFields, (size_t)new_capacity * sizeof(FieldType));
 	if (!new_fields)
 		return false;
 	mFields = new_fields;
@@ -1820,7 +1821,7 @@ Struct::FieldType *Struct::Insert(LPTSTR key, IndexType at,UCHAR aIspointer,int 
 	FieldType &field = mFields[at];
 	if (at < mFieldCount)
 		// Move existing fields to make room.
-		memmove(&field + 1, &field, (mFieldCount - at) * sizeof(FieldType));
+		memmove(&field + 1, &field, (size_t)(mFieldCount - at) * sizeof(FieldType));
 	++mFieldCount; // Only after memmove above.
 	
 	// Update key-type offsets based on where and what was inserted; also update this key's ref count:

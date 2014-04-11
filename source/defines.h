@@ -33,6 +33,7 @@ GNU General Public License for more details.
 
 #define AHK_NAME "AutoHotkey"
 #include "ahkversion.h"
+#define AHK_WEBSITE "http://ahkscript.org"
 
 #define T_AHK_NAME			_T(AHK_NAME)
 #define T_AHK_VERSION		_T(AHK_VERSION)
@@ -184,6 +185,7 @@ enum SymbolType // For use with ExpandExpression() and IsNumeric().
 	, SYM_FUNC     // A call to a function.
 	, SYM_NEW      // new Class()
 	, SYM_REGEXMATCH // L31: Experimental ~= RegExMatch operator, equivalent to a RegExMatch call in two-parameter mode.
+	, SYM_IS, SYM_IN, SYM_CONTAINS
 	, SYM_COUNT    // Must be last because it's the total symbol count for everything above.
 	, SYM_INVALID = SYM_COUNT // Some callers may rely on YIELDS_AN_OPERAND(SYM_INVALID)==false.
 };
@@ -311,9 +313,9 @@ enum enum_act {
 , ACT_FIRST_NAMED_ACTION, ACT_IF = ACT_FIRST_NAMED_ACTION
 , ACT_LOOP, ACT_LOOP_FILE, ACT_LOOP_REG, ACT_LOOP_READ, ACT_LOOP_PARSE
 , ACT_FOR, ACT_WHILE, ACT_UNTIL // Keep LOOP, FOR, WHILE and UNTIL together and in this order for range checks in various places.
-, ACT_BREAK, ACT_CONTINUE
+, ACT_BREAK, ACT_BREAKIF, ACT_CONTINUE, ACT_CONTINUEIF
 , ACT_GOTO, ACT_GOSUB, ACT_RETURN
-, ACT_TRY, ACT_CATCH, ACT_THROW
+, ACT_TRY, ACT_CATCH, ACT_FINALLY, ACT_THROW
 , ACT_FIRST_CONTROL_FLOW = ACT_BLOCK_BEGIN, ACT_LAST_CONTROL_FLOW = ACT_THROW
 , ACT_EXIT, ACT_EXITAPP // Excluded from the "CONTROL_FLOW" range above because they can be safely wrapped into a Func.
 , ACT_FIRST_COMMAND, ACT_MSGBOX = ACT_FIRST_COMMAND

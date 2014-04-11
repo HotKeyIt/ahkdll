@@ -132,13 +132,13 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 		// But all are checked since that operation is just as fast:
 		if (IS_OPERAND(this_token.symbol)) // If it's an operand, just push it onto stack for use by an operator in a future iteration.
 		{
-			// HotKeyIt added a way to override default behaviour for Manually added BuildIn Variable
-			if (this_token.symbol == SYM_DYNAMIC || (this_token.symbol == SYM_VAR && this_token.var->mType == VAR_BUILTIN)) // CONVERTED HERE/EARLY TO SOMETHING *OTHER* THAN SYM_DYNAMIC so that no later stages need any handling for them as operands. SYM_DYNAMIC is quite similar to SYM_FUNC/BIF in this respect.
+			// HotKeyIt added a way to override default behaviour for Manually added BuildIn Variable -removed->> || (this_token.symbol == SYM_VAR && this_token.var->mType == VAR_BUILTIN)
+			if (this_token.symbol == SYM_DYNAMIC) // CONVERTED HERE/EARLY TO SOMETHING *OTHER* THAN SYM_DYNAMIC so that no later stages need any handling for them as operands. SYM_DYNAMIC is quite similar to SYM_FUNC/BIF in this respect.
 			{
-				if (SYM_DYNAMIC_IS_DOUBLE_DEREF(this_token) && this_token.symbol != SYM_VAR) // Double-deref such as Array%i%.
+				if (SYM_DYNAMIC_IS_DOUBLE_DEREF(this_token)) // Double-deref such as Array%i%.  HotKeyIt added a way to override default behaviour manual buildin var -removed && this_token.symbol != SYM_VAR
 				{
 					if (!stack_count) // Prevent stack underflow.
-						goto abnormal_end;
+						goto abort_with_exception;
 					ExprTokenType &right = *STACK_POP;
 					right_string = TokenToString(right, right_buf);
 					right_length = EXPR_TOKEN_LENGTH((&right), right_string);
@@ -275,7 +275,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 			Func *func = this_token.deref->func;
 			actual_param_count = this_token.deref->param_count; // For performance.
 			if (actual_param_count > stack_count) // Prevent stack underflow (probably impossible if actual_param_count is accurate).
-				goto abnormal_end;
+				goto abort_with_exception;
 			// Adjust the stack early to simplify.  Above already confirmed that the following won't underflow.
 			// Pop the actual number of params involved in this function-call off the stack.
 			stack_count -= actual_param_count; // Now stack[stack_count] is the leftmost item in an array of function-parameters, which simplifies processing later on.
@@ -285,7 +285,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 			{
 				// This is a dynamic function call.
 				if (!stack_count) // SYM_DYNAMIC should have pushed a function name or reference onto the stack, but a syntax error may still cause this condition.
-					goto abnormal_end;
+					goto abort_with_exception;
 				stack_count--;
 				func = TokenToFunc(*stack[stack_count]); // Supports function names and function references.
 				if (!func)
@@ -323,11 +323,11 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 				// built-in functions would have to be reviewed, or the minimum would have to be enforced
 				// for them but not user-defined functions, which is inconsistent.  Finally, allowing too-
 				// few parameters seems like it would reduce the ability to detect script bugs at runtime.
-				// Traditionally, expressions don't display any runtime errors.  So if the function is being
-				// called incorrectly by the script, the expression is aborted like it would be for other
-				// syntax errors:
 				if (actual_param_count < func->mMinParams && this_token.deref->type != DT_VARIADIC)
-					goto abnormal_end;
+				{
+					LineError(ERR_TOO_FEW_PARAMS, FAIL, func->mName);
+					goto abort;
+				}
 			}
 			
 			// The following two steps are now done inside Func::Call:
@@ -595,16 +595,19 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 		// Since the above didn't goto or continue, this token must be a unary or binary operator.
 		// Get the first operand for this operator (for non-unary operators, this is the right-side operand):
 		if (!stack_count) // Prevent stack underflow.  An expression such as -*3 causes this.
-			goto abnormal_end;
+			goto abort_with_exception;
 		ExprTokenType &right = *STACK_POP;
 		if (!IS_OPERAND(right.symbol)) // Haven't found a way to produce this situation yet, but safe to assume it's possible.
-			goto abnormal_end;
+			goto abort_with_exception;
 
 		switch (this_token.symbol)
 		{
 		case SYM_ASSIGN:        // These don't need "right_is_number" to be resolved. v1.0.48.01: Also avoid
 		case SYM_CONCAT:        // resolving right_is_number for CONCAT because TokenIsPureNumeric() will take
 		case SYM_ASSIGN_CONCAT: // a long time if the string is very long and consists entirely of digits/whitespace.
+		case SYM_IS:
+		case SYM_IN:
+		case SYM_CONTAINS:
 			right_is_pure_number = right_is_number = PURE_NOT_NUMERIC; // Init for convenience/maintainability.
 		case SYM_AND:			// v2: These don't need it either since even numeric strings are considered "true".
 		case SYM_OR:			//
@@ -860,10 +863,10 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 		default: // NON-UNARY OPERATOR.
 			// GET THE SECOND (LEFT-SIDE) OPERAND FOR THIS OPERATOR:
 			if (!stack_count) // Prevent stack underflow.
-				goto abnormal_end;
+				goto abort_with_exception;
 			ExprTokenType &left = *STACK_POP; // i.e. the right operand always comes off the stack before the left.
 			if (!IS_OPERAND(left.symbol)) // Haven't found a way to produce this situation yet, but safe to assume it's possible.
-				goto abnormal_end;
+				goto abort_with_exception;
 			
 			if (IS_ASSIGNMENT_EXCEPT_POST_AND_PRE(this_token.symbol)) // v1.0.46: Added support for various assignment operators.
 			{
@@ -1105,6 +1108,11 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 					result_symbol = SYM_STRING;
 					break;
 
+				case SYM_IS:
+					if (!ValueIsType(this_token, left, left_string, right, right_string))
+						goto abort;
+					break;
+
 				default:
 					// Other operators do not support string operands, so the result is an empty string.
 					this_token.marker = _T("");
@@ -1283,7 +1291,7 @@ push_this_token:
 		goto normal_end_skip_output_var; // Can't be any output_var for this action type. Also, leave result_to_return at its default of "".
 
 	if (stack_count != 1)  // Even for multi-statement expressions, the stack should have only one item left on it:
-		goto abnormal_end; // the overall result. Examples of errors include: () ... x y ... (x + y) (x + z) ... etc. (some of these might no longer produce this issue due to auto-concat).
+		goto abort_with_exception; // the overall result. Examples of errors include: () ... x y ... (x + y) (x + z) ... etc. (some of these might no longer produce this issue due to auto-concat).
 
 	ExprTokenType &result_token = *stack[0];  // For performance and convenience.  Even for multi-statement, the bottommost item on the stack is the final result so that things like var1:=1,var2:=2 work.
 
@@ -1467,12 +1475,12 @@ push_this_token:
 		result_to_return = _T("");
 		// result_token is still on the stack, so the object will be released below.
 		goto normal_end_skip_output_var;
-
-	default: // Result contains a non-operand symbol such as an operator.
-		goto abnormal_end;
 	} // switch (result_token.symbol)
 
 // ALL PATHS ABOVE SHOULD "GOTO".  TO CATCH BUGS, ANY THAT DON'T FALL INTO "ABORT" BELOW.
+abort_with_exception:
+	ThrowRuntimeException(ERR_EXPR_EVAL);
+	// FALL THROUGH:
 abort:
 	// The callers of this function know that the value of aResult (which contains the reason
 	// for early exit) should be considered valid/meaningful only if result_to_return is NULL.
@@ -1480,7 +1488,7 @@ abort:
 	aResult = FAIL; // Indicate reason to caller.
 	goto normal_end_skip_output_var; // output_var is skipped as part of standard abort behavior.
 
-abnormal_end: // Currently the same as normal_end; it's separate to improve readability.  When this happens, result_to_return is typically "" (unless the caller overrode that default).
+//abnormal_end: // Currently the same as normal_end; it's separate to improve readability.  When this happens, result_to_return is typically "" (unless the caller overrode that default).
 //normal_end: // This isn't currently used, but is available for future-use and readability.
 	// v1.0.45: ACT_ASSIGNEXPR relies on us to set the output_var (i.e. whenever it's ARG1's is_expression==true).
 	// Our taking charge of output_var allows certain performance optimizations in other parts of this function,
@@ -1538,18 +1546,23 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 				ExprTokenType **param_list = (ExprTokenType **)(token + extra_params);
 				// Since built-in functions don't have variables we can directly assign to,
 				// we need to expand the param object's contents into an array of tokens:
-				if (!param_obj->ArrayToParams(token, param_list, extra_params, aParam, aParamCount))
-					return false; // Abort expression.
+				param_obj->ArrayToParams(token, param_list, extra_params, aParam, aParamCount);
 			}
 		}
 		if (rvalue)
 			aParam[aParamCount++] = rvalue; // In place of the variadic param.
 		// mMinParams isn't validated at load-time for variadic calls, so we must do it here:
-		if (aParamCount < mMinParams)
+		// However, this check must be skipped for user-defined functions so that a named value
+		// can be supplied for a required parameter.  Missing required parameters are detected
+		// in the loop below by the absence of a default value.
+		if (aParamCount < mMinParams && mIsBuiltIn)
+		{
+			aResult = g_script.ScriptError(ERR_TOO_FEW_PARAMS, mName);
 			return false; // Abort expression.
+		}
 		// Otherwise, even if some params are SYM_MISSING, it is relatively safe to call the function.
 		// The TokenTo' set of functions will produce 0 or "" for missing params.  Although that isn't
-		// technically correct, it seems preferable over silently aborting the call.
+		// technically correct, it is simple and fairly logical.
 	}
 
 	if (mIsBuiltIn)
@@ -1557,8 +1570,16 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 		aResultToken.symbol = SYM_INTEGER; // Set default return type so that functions don't have to do it if they return INTs.
 		aResultToken.marker = mName;       // Inform function of which built-in function called it (allows code sharing/reduction). Can't use circuit_token because it's value is still needed later below.
 
+		// Push an entry onto the debugger's stack.  This has two purposes:
+		//  1) Allow CreateRuntimeException() to know which function is throwing an exception.
+		//  2) If a UDF is called before the BIF returns, it will show on the call stack.
+		//     e.g. DllCall(RegisterCallback("F")) will show DllCall while F is running.
+		DEBUGGER_STACK_PUSH(g_script.mCurrLine, this)
+
 		// CALL THE BUILT-IN FUNCTION:
 		mBIF(aResult, aResultToken, aParam, aParamCount);
+
+		DEBUGGER_STACK_POP()
 		
 		if (g->ThrownToken)
 			aResult = FAIL; // Abort thread.
@@ -1600,7 +1621,7 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 			for (j = 0; j < aParamCount; ++j) // For each actual parameter.
 			{
 				ExprTokenType &this_param_token = *aParam[j]; // stack[stack_count] is the first actual parameter. A check higher above has already ensured that this line won't cause stack overflow.
-				if (this_param_token.symbol == SYM_VAR && !mParam[j].is_byref)
+				if (this_param_token.symbol == SYM_VAR && !(j < mParamCount && mParam[j].is_byref))
 				{
 					// Since this formal parameter is passed by value, if it's SYM_VAR, convert it to
 					// a non-var to allow the variables to be backed up and reset further below without
@@ -1658,6 +1679,7 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 				case PARAM_DEFAULT_FLOAT: this_formal_param.var->Assign(this_formal_param.default_double); break;
 				default: //case PARAM_DEFAULT_NONE:
 					// No value has been supplied for this REQUIRED parameter.
+					aResult = g_script.ScriptError(ERR_PARAM_REQUIRED, this_formal_param.var->mName);
 					return false; // Abort expression.
 				}
 				continue;
@@ -1665,9 +1687,6 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 
 			ExprTokenType &token = *aParam[j];
 			
-			if (!IS_OPERAND(token.symbol)) // Haven't found a way to produce this situation yet, but safe to assume it's possible.
-				return false; // Abort expression.
-
 			if (this_formal_param.is_byref)
 			{
 				// Note that the previous loop might not have checked things like the following because that
@@ -1952,6 +1971,8 @@ ResultType Line::ExpandArgs(ExprTokenType *aResultToken, VarSizeType aSpaceNeede
 				arg_deref[i] = // The following is ordered for short-circuit performance:
 					(   mActionType == ACT_ASSIGNEXPR && i == 1  // By contrast, for the below i==anything (all args):
 					||  mActionType == ACT_IF
+					||  mActionType == ACT_BREAKIF
+					||  mActionType == ACT_CONTINUEIF
 					//|| mActionType == ACT_WHILE // Not necessary to check this one because loadtime leaves ACT_WHILE as an expression in all common cases. Also, there's no easy way to get ACT_WHILE into the range above due to the overlap of other ranges in enum_act.
 					) && the_only_var_of_this_arg->Type() == VAR_NORMAL // Otherwise, users of this optimization would have to reproduce more of the logic in ArgMustBeDereferenced().
 					? _T("") : NULL; // See "Update #2" and later comments above.
@@ -2173,3 +2194,139 @@ ResultType Line::ArgMustBeDereferenced(Var *aVar, int aArgIndex, Var *aArgVar[])
 	// Otherwise:
 	return CONDITION_FALSE;
 }
+
+
+ResultType Line::ValueIsType(ExprTokenType &aResultToken, ExprTokenType &aValue, LPTSTR aValueStr, ExprTokenType &aType, LPTSTR aTypeStr)
+{
+	VariableTypeType variable_type = ConvertVariableTypeName(aTypeStr);
+	bool if_condition;
+	TCHAR *cp;
+
+	if (variable_type == VAR_TYPE_BYREF)
+	{
+		if (aValue.symbol == SYM_VAR)
+		{
+			aResultToken.value_int64 = aValue.var->ResolveAlias() != aValue.var;
+			return OK;
+		}
+		// Otherwise, the comparison is invalid.
+	}
+	else if (IObject *type_obj = TokenToObject(aType))
+	{
+		// Is the value an object which can derive, and is it derived from type_obj?
+		Object *value_obj = dynamic_cast<Object *>(TokenToObject(aValue));
+		aResultToken.value_int64 = value_obj && value_obj->IsDerivedFrom(type_obj);
+		return OK;
+	}
+	else if (TokenToObject(aValue))
+	{
+		// Since it's an object, the only type it should match is "object" (even though aValueStr
+		// is an empty string, which matches several other types).
+		aResultToken.value_int64 = variable_type == VAR_TYPE_OBJECT;
+		return OK;
+	}
+
+	// The remainder of this function is based on the original code for ACT_IFIS, which was removed
+	// in commit 3382e6e2.
+	switch (variable_type)
+	{
+	case VAR_TYPE_NUMBER:
+		if_condition = IsNumeric(aValueStr, true, false, true);
+		break;
+	case VAR_TYPE_INTEGER:
+		if_condition = IsNumeric(aValueStr, true, false, false);  // Passes false for aAllowFloat.
+		break;
+	case VAR_TYPE_FLOAT:
+		if_condition = (IsNumeric(aValueStr, true, false, true) == PURE_FLOAT);
+		break;
+	case VAR_TYPE_OBJECT:
+		// if aValue was an object, it was already handled above.
+		if_condition = false;
+		break;
+	case VAR_TYPE_TIME:
+	{
+		SYSTEMTIME st;
+		// Also insist on numeric, because even though YYYYMMDDToFileTime() will properly convert a
+		// non-conformant string such as "2004.4", for future compatibility, we don't want to
+		// report that such strings are valid times:
+		if_condition = IsNumeric(aValueStr, false, false, false) && YYYYMMDDToSystemTime(aValueStr, st, true); // Can't call Var::IsNumeric() here because it doesn't support aAllowNegative.
+		break;
+	}
+	case VAR_TYPE_DIGIT:
+		if_condition = true;
+		for (cp = aValueStr; *cp; ++cp)
+			if (!_istdigit((UCHAR)*cp))
+			{
+				if_condition = false;
+				break;
+			}
+		break;
+	case VAR_TYPE_XDIGIT:
+		cp = aValueStr;
+		if (!_tcsnicmp(cp, _T("0x"), 2)) // Allow 0x prefix.
+			cp += 2;
+		if_condition = true;
+		for (; *cp; ++cp)
+			if (!_istxdigit((UCHAR)*cp))
+			{
+				if_condition = false;
+				break;
+			}
+		break;
+	case VAR_TYPE_ALNUM:
+		if_condition = true;
+		for (cp = aValueStr; *cp; ++cp)
+			//if (!IsCharAlphaNumeric(*cp)) // Use this to better support chars from non-English languages.
+			if (!aisalnum(*cp)) // But some users don't like it, Chinese users for example.
+			{
+				if_condition = false;
+				break;
+			}
+		break;
+	case VAR_TYPE_ALPHA:
+		// Like AutoIt3, the empty string is considered to be alphabetic, which is only slightly debatable.
+		if_condition = true;
+		for (cp = aValueStr; *cp; ++cp)
+			//if (!IsCharAlpha(*cp)) // Use this to better support chars from non-English languages.
+			if (!aisalpha(*cp)) // But some users don't like it, Chinese users for example.
+			{
+				if_condition = false;
+				break;
+			}
+		break;
+	case VAR_TYPE_UPPER:
+		if_condition = true;
+		for (cp = aValueStr; *cp; ++cp)
+			//if (!IsCharUpper(*cp)) // Use this to better support chars from non-English languages.
+			if (!aisupper(*cp)) // But some users don't like it, Chinese users for example.
+			{
+				if_condition = false;
+				break;
+			}
+		break;
+	case VAR_TYPE_LOWER:
+		if_condition = true;
+		for (cp = aValueStr; *cp; ++cp)
+			//if (!IsCharLower(*cp)) // Use this to better support chars from non-English languages.
+			if (!aislower(*cp)) // But some users don't like it, Chinese users for example.
+			{
+				if_condition = false;
+				break;
+			}
+		break;
+	case VAR_TYPE_SPACE:
+		if_condition = true;
+		for (cp = aValueStr; *cp; ++cp)
+			if (!_istspace(*cp))
+			{
+				if_condition = false;
+				break;
+			}
+		break;
+	default:
+		return LineError(_T("Unsupported comparison type."), FAIL, aTypeStr);
+	}
+	aResultToken.value_int64 = if_condition;
+	return OK;
+}
+

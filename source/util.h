@@ -19,7 +19,7 @@ GNU General Public License for more details.
 
 #include "stdafx.h" // pre-compiled headers
 #include "defines.h"
-
+#include <WinCrypt.h>
 
 #ifdef _WIN64
 #define Exp32or64(a,b) (b)
@@ -665,7 +665,7 @@ void AssignColor(LPTSTR aColorName, COLORREF &aColor, HBRUSH &aBrush);
 COLORREF ColorNameToBGR(LPTSTR aColorName);
 HRESULT MySetWindowTheme(HWND hwnd, LPCWSTR pszSubAppName, LPCWSTR pszSubIdList);
 //HRESULT MyEnableThemeDialogTexture(HWND hwnd, DWORD dwFlags);
-LPTSTR ConvertEscapeSequences(LPTSTR aBuf, LPTSTR aLiteralMap, bool aAllowEscapedSpace = false);
+LPTSTR ConvertEscapeSequences(LPTSTR aBuf, LPTSTR aLiteralMap, bool aAllowEscapedSpace = true);
 int FindExprDelim(LPCTSTR aBuf, TCHAR aDelimiter = ',', int aStartIndex = 0, LPCTSTR aLiteralMap = NULL);
 int FindTextDelim(LPCTSTR aBuf, TCHAR aDelimiter = ',', int aStartIndex = 0, LPCTSTR aLiteralMap = NULL);
 POINT CenterWindow(int aWidth, int aHeight);
@@ -690,7 +690,7 @@ int CALLBACK FontEnumProc(ENUMLOGFONTEX *lpelfe, NEWTEXTMETRICEX *lpntme, DWORD 
 bool IsStringInList(LPTSTR aStr, LPTSTR aList, bool aFindExactMatch);
 LPTSTR InStrAny(LPTSTR aStr, LPTSTR aNeedle[], int aNeedleCount, size_t &aFoundLen);
 short IsDefaultType(LPTSTR aTypeDef);
-DWORD DecompressBuffer(LPVOID &buffer);
+DWORD DecompressBuffer(void *buffer,LPVOID &aDataBuf, TCHAR *pwd[] = NULL);
 
 int ResourceIndexToId(HMODULE aModule, LPCTSTR aType, int aIndex); // L17: Find integer ID of resource from index. i.e. IconNumber -> resource ID.
 HICON ExtractIconFromExecutable(LPTSTR aFilespec, int aIconNumber, int aWidth, int aHeight); // L17: Extract icon of the appropriate size from an executable (or compatible) file.

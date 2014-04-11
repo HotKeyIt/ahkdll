@@ -102,11 +102,11 @@ DEFINE_GUID(IID_ICOMServer,0xa58e17b4, 0xf892, 0x4839, 0x8c, 0x46, 0x9f, 0x3c, 0
         
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkPause( 
-           /*in,optional*/VARIANT aChangeTo,/* [retval][out] */BOOL* paused) = 0;
+           /*in,optional*/VARIANT aChangeTo,/* [retval][out] */int* paused) = 0;
         
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkReady( 
-           /* [retval][out] */BOOL* ready) = 0;
+           /* [retval][out] */int* ready) = 0;
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkFindLabel( 
            /*[in]*/ VARIANT aLabelName,/*[out, retval]*/ UINT_PTR *pLabel) = 0;
@@ -115,13 +115,13 @@ DEFINE_GUID(IID_ICOMServer,0xa58e17b4, 0xf892, 0x4839, 0x8c, 0x46, 0x9f, 0x3c, 0
            /*[in]*/ VARIANT name,/*[in,optional]*/ VARIANT getVar,/*[out, retval]*/ VARIANT *returnVal) = 0;
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkassign( 
-           /*[in]*/ VARIANT name,/*[in,optional]*/ VARIANT value,/*[out, retval]*/ unsigned int* success) = 0;
+           /*[in]*/ VARIANT name,/*[in,optional]*/ VARIANT value,/*[out, retval]*/ int* success) = 0;
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkExecuteLine( 
            /*[in,optional]*/ VARIANT line,/*[in,optional]*/ VARIANT aMode,/*[in,optional]*/ VARIANT wait,/*[out, retval]*/ UINT_PTR* pLine) = 0;
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkLabel( 
-           /*[in]*/ VARIANT aLabelName,/*[in,optional]*/ VARIANT nowait,/*[out, retval]*/ BOOL* success) = 0;
+           /*[in]*/ VARIANT aLabelName,/*[in,optional]*/ VARIANT nowait,/*[out, retval]*/ int* success) = 0;
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkFindFunc( 
            /*[in]*/ VARIANT FuncName,/*[out, retval]*/ UINT_PTR *pFunc) = 0;
@@ -130,25 +130,25 @@ DEFINE_GUID(IID_ICOMServer,0xa58e17b4, 0xf892, 0x4839, 0x8c, 0x46, 0x9f, 0x3c, 0
            /*[in]*/ VARIANT FuncName,/*[in,optional]*/ VARIANT param1,/*[in,optional]*/ VARIANT param2,/*[in,optional]*/ VARIANT param3,/*[in,optional]*/ VARIANT param4,/*[in,optional]*/ VARIANT param5,/*[in,optional]*/ VARIANT param6,/*[in,optional]*/ VARIANT param7,/*[in,optional]*/ VARIANT param8,/*[in,optional]*/ VARIANT param9,/*[in,optional]*/ VARIANT param10,/*[out, retval]*/ VARIANT* returnVal) = 0;
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkPostFunction( 
-           /*[in]*/ VARIANT FuncName,/*[in,optional]*/ VARIANT param1,/*[in,optional]*/ VARIANT param2,/*[in,optional]*/ VARIANT param3,/*[in,optional]*/ VARIANT param4,/*[in,optional]*/ VARIANT param5,/*[in,optional]*/ VARIANT param6,/*[in,optional]*/ VARIANT param7,/*[in,optional]*/ VARIANT param8,/*[in,optional]*/ VARIANT param9,/*[in,optional]*/ VARIANT param10,/*[out, retval]*/ unsigned int* returnVal) = 0;
+           /*[in]*/ VARIANT FuncName,/*[in,optional]*/ VARIANT param1,/*[in,optional]*/ VARIANT param2,/*[in,optional]*/ VARIANT param3,/*[in,optional]*/ VARIANT param4,/*[in,optional]*/ VARIANT param5,/*[in,optional]*/ VARIANT param6,/*[in,optional]*/ VARIANT param7,/*[in,optional]*/ VARIANT param8,/*[in,optional]*/ VARIANT param9,/*[in,optional]*/ VARIANT param10,/*[out, retval]*/ int* returnVal) = 0;
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE addScript( 
-           /*[in]*/ VARIANT script,/*[in,optional]*/ VARIANT replace,/*[out, retval]*/ UINT_PTR* success) = 0;
+           /*[in]*/ VARIANT script,/*[in,optional]*/ VARIANT waitexecute,/*[out, retval]*/ UINT_PTR* success) = 0;
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE addFile( 
-           /*[in]*/ VARIANT filepath,/*[in,optional]*/ VARIANT aAllowDuplicateInclude,/*[in,optional]*/ VARIANT aIgnoreLoadFailure,/*[out, retval]*/ UINT_PTR* success) = 0;
+           /*[in]*/ VARIANT filepath,/*[in,optional]*/ VARIANT waitexecute,/*[out, retval]*/ UINT_PTR* success) = 0;
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkExec( 
-           /*[in]*/ VARIANT script,/*[out, retval]*/ BOOL* success) = 0;
+           /*[in]*/ VARIANT script,/*[out, retval]*/ int* success) = 0;
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkTerminate( 
-           /*[in,optional]*/ VARIANT kill,/*[out, retval]*/ BOOL* success) = 0;
+           /*[in,optional]*/ VARIANT kill,/*[out, retval]*/ int* success) = 0;
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkReload( 
            /*[in,optional]*/ VARIANT timeout) = 0;
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkIsUnicode( 
-           /* [retval][out] */BOOL* IsUnicode) = 0;
+           /* [retval][out] */int* IsUnicode) = 0;
     };
     
 #else 	/* C style interface */

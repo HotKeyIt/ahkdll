@@ -68,7 +68,8 @@ typedef int FileLoopModeType;
 
 enum VariableTypeType {VAR_TYPE_INVALID, VAR_TYPE_NUMBER, VAR_TYPE_INTEGER, VAR_TYPE_FLOAT
 	, VAR_TYPE_TIME	, VAR_TYPE_DIGIT, VAR_TYPE_XDIGIT, VAR_TYPE_ALNUM, VAR_TYPE_ALPHA
-	, VAR_TYPE_UPPER, VAR_TYPE_LOWER, VAR_TYPE_SPACE};
+	, VAR_TYPE_UPPER, VAR_TYPE_LOWER, VAR_TYPE_SPACE
+	, VAR_TYPE_OBJECT, VAR_TYPE_BYREF}; // v2
 
 #define ATTACH_THREAD_INPUT \
 	bool threads_are_attached = false;\
@@ -166,16 +167,20 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_UNEXPECTED_CLOSE_PAREN _T("Unexpected \")\"")
 #define ERR_UNEXPECTED_CLOSE_BRACKET _T("Unexpected \"]\"")
 #define ERR_UNEXPECTED_CLOSE_BRACE _T("Unexpected \"}\"")
+#define ERR_UNEXPECTED_COMMA _T("Unexpected comma")
 #define ERR_BAD_AUTO_CONCAT _T("Missing space or operator before this.")
 #define ERR_MISSING_CLOSE_QUOTE _T("Missing close-quote") // No period after short phrases.
 #define ERR_MISSING_COMMA _T("Missing comma")             //
-#define ERR_BLANK_PARAM _T("Blank parameter")             //
+#define ERR_MISSING_PARAM_NAME _T("Missing parameter name.")
+#define ERR_PARAM_REQUIRED _T("Missing a required parameter.")
 #define ERR_TOO_MANY_PARAMS _T("Too many parameters passed to function.") // L31
 #define ERR_TOO_FEW_PARAMS _T("Too few parameters passed to function.") // L31
 #define ERR_BAD_OPTIONAL_PARAM _T("Expected \":=\"")
 #define ERR_ELSE_WITH_NO_IF _T("ELSE with no matching IF")
 #define ERR_UNTIL_WITH_NO_LOOP _T("UNTIL with no matching LOOP")
 #define ERR_CATCH_WITH_NO_TRY _T("CATCH with no matching TRY")
+#define ERR_FINALLY_WITH_NO_PRECEDENT _T("FINALLY with no matching TRY or CATCH")
+#define ERR_BAD_JUMP_INSIDE_FINALLY _T("Jumps cannot exit a FINALLY block.")
 #define ERR_EXPECTED_BLOCK_OR_ACTION _T("Expected \"{\" or single-line action.")
 #define ERR_OUTOFMEM _T("Out of memory.")  // Used by RegEx too, so don't change it without also changing RegEx to keep the former string.
 #define ERR_EXPR_TOO_LONG _T("Expression too complex")
@@ -201,6 +206,12 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_REMOVE_THE_PERCENT _T("If this variable was not intended to be dynamic, remove the % symbols from it.")
 #define ERR_DYNAMIC_TOO_LONG _T("This dynamically built variable name is too long.  ") ERR_REMOVE_THE_PERCENT
 #define ERR_DYNAMIC_BLANK _T("This dynamic variable is blank.  ") ERR_REMOVE_THE_PERCENT
+#define ERR_HOTKEY_IF_EXPR _T("Parameter #2 must match an existing #If expression.")
+#define ERR_EXCEPTION _T("An exception was thrown.")
+#define ERR_EXPR_EVAL _T("Error evaluating expression.  There may be a syntax error.")
+#define ERR_NO_OBJECT _T("No object to invoke.")
+#define ERR_NO_MEMBER _T("Unknown property or method.")
+#define ERR_NO_GUI _T("No default GUI.")
 
 #define WARNING_USE_UNSET_VARIABLE _T("This variable has not been assigned a value.")
 #define WARNING_LOCAL_SAME_AS_GLOBAL _T("This local variable has the same name as a global variable.")
@@ -291,7 +302,6 @@ BOOL CALLBACK EnumMonitorProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMoni
 BOOL CALLBACK EnumChildGetText(HWND aWnd, LPARAM lParam);
 LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lParam);
 bool HandleMenuItem(HWND aHwnd, WORD aMenuItemID, HWND aGuiHwnd);
-
 
 typedef UINT LineNumberType;
 typedef WORD FileIndexType; // Use WORD to conserve memory due to its use in the Line class (adjacency to other members and due to 4-byte struct alignment).
@@ -866,7 +876,7 @@ public:
 	// Characters that mark the end of an operand inside an expression.  Double-quote must not be included:
 	#define EXPR_OPERAND_TERMINATORS_EX_DOT EXPR_COMMON _T("%+-?\n") // L31: Used in a few places where '.' needs special treatment.
 	#define EXPR_OPERAND_TERMINATORS EXPR_OPERAND_TERMINATORS_EX_DOT _T(".") // L31: Used in expressions where '.' is always an operator.
-	#define EXPR_ALL_SYMBOLS EXPR_OPERAND_TERMINATORS _T("\"")
+	#define EXPR_ALL_SYMBOLS EXPR_OPERAND_TERMINATORS _T("\"'")
 	#define EXPR_ILLEGAL_CHARS _T("\\;`@#$") // Characters illegal in an expression.
 	// The following HOTSTRING option recognizer is kept somewhat forgiving/non-specific for backward compatibility
 	// (e.g. scripts may have some invalid hotstring options, which are simply ignored).  This definition is here
@@ -898,6 +908,8 @@ public:
 	ResultType ExpressionToPostfix(ArgStruct &aArg);
 	ResultType EvaluateHotCriterionExpression(LPTSTR aHotkeyName); // L4: Called by MainWindowProc to handle an AHK_HOT_IF_EXPR message.
 
+	ResultType ValueIsType(ExprTokenType &aResultToken, ExprTokenType &aValue, LPTSTR aValueStr, ExprTokenType &aType, LPTSTR aTypeStr);
+
 	ResultType Deref(Var *aOutputVar, LPTSTR aBuf);
 
 	static bool FileIsFilteredOut(WIN32_FIND_DATA &aCurrentFile, FileLoopModeType aFileLoopMode
@@ -907,6 +919,7 @@ public:
 	Label *GetJumpTarget(bool aIsDereferenced, Func *aFunc);
 	Label *IsJumpValid(Label &aTargetLabel, bool aSilent = false);
 	BOOL IsOutsideAnyFunctionBody();
+	BOOL CheckValidFinallyJump(Line* jumpTarget);
 
 	static HWND DetermineTargetWindow(LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LPTSTR aExcludeText);
 
@@ -1706,6 +1719,8 @@ public:
 		if (!_tcsicmp(aBuf, _T("Integer"))) return VAR_TYPE_INTEGER;
 		if (!_tcsicmp(aBuf, _T("Float"))) return VAR_TYPE_FLOAT;
 		if (!_tcsicmp(aBuf, _T("Number"))) return VAR_TYPE_NUMBER;
+		if (!_tcsicmp(aBuf, _T("Object"))) return VAR_TYPE_OBJECT; // v2
+		if (!_tcsicmp(aBuf, _T("ByRef"))) return VAR_TYPE_BYREF; // v2
 		if (!_tcsicmp(aBuf, _T("Time"))) return VAR_TYPE_TIME;
 		if (!_tcsicmp(aBuf, _T("Date"))) return VAR_TYPE_TIME;  // "date" is just an alias for "time".
 		if (!_tcsicmp(aBuf, _T("Digit"))) return VAR_TYPE_DIGIT;
@@ -1864,7 +1879,7 @@ class Func : public IObject
 public:
 	LPTSTR mName;
 	union {BuiltInFunctionType mBIF; Line *mJumpToLine;};
-	FuncParam *mParam;  // Will hold an array of FuncParams.
+	union {FuncParam *mParam; UCHAR *mOutputVars;}; // For UDFs, mParam will hold an array of FuncParams.
 	int mParamCount; // The number of items in the above array.  This is also the function's maximum number of params.
 	int mMinParams;  // The number of mandatory parameters (populated for both UDFs and built-in's).
 	Label *mFirstLabel, *mLastLabel; // Linked list of private labels.
@@ -1890,6 +1905,20 @@ public:
 	// is truly built-in, not its name.
 	bool mIsVariadic;
 	bool mHasReturn; // Does the function require an output var to receive the return value in command syntax mode?
+
+#define MAX_FUNC_OUTPUT_VAR 7
+	bool ArgIsOutputVar(int aIndex)
+	{
+		if (!mIsBuiltIn)
+			return aIndex <= mParamCount && mParam[aIndex].is_byref;
+		if (!mOutputVars)
+			return false;
+		++aIndex; // Convert to one-based.
+		for (int i = 0; i < MAX_FUNC_OUTPUT_VAR && mOutputVars[i]; ++i)
+			if (mOutputVars[i] == aIndex)
+				return true;
+		return false;
+	}
 
 	bool Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount, bool aIsVariadic = false);
 
@@ -2007,8 +2036,9 @@ struct FuncEntry
 {
 	LPCTSTR mName;
 	BuiltInFunctionType mBIF;
-	int mMinParams, mMaxParams;
+	UCHAR mMinParams, mMaxParams;
 	bool mHasReturn;
+	UCHAR mOutputVars[MAX_FUNC_OUTPUT_VAR];
 };
 
 
@@ -2476,8 +2506,6 @@ typedef NTSTATUS (NTAPI *PFN_NT_QUERY_INFORMATION_PROCESS) (
     PVOID ProcessInformation,
     ULONG ProcessInformationLength,
     PULONG ReturnLength OPTIONAL);
-typedef int (* ahkx_int_str)(LPTSTR ahkx_str); // ahkx N11
-typedef int (* ahkx_int_str_str)(LPTSTR ahkx_str, LPTSTR ahkx_str2); // ahkx N11
 
 
 class Script
@@ -2547,10 +2575,6 @@ public:
 	Line *mTempLine; // for use with dll Execute # Naveen N9
 	Label *mTempLabel; // for use with dll Execute # Naveen N9
 	Func *mTempFunc; // for use with dll Execute # Naveen N9
-	
-    ahkx_int_str xifwinactive ; // ahkx N11 context sensitivity
-    ahkx_int_str xwingetid ;    // 
-    ahkx_int_str_str xsend ;    // ahksend
 
 	// Naveen moved above from private
 	Line *mCurrLine;     // Seems better to make this public than make Line our friend.
@@ -2634,8 +2658,8 @@ public:
 	LineNumberType LoadFromFile(bool aScriptWasNotspecified);
 #endif
 #ifndef AUTOHOTKEYSC
-	LineNumberType LoadFromText(LPTSTR aScript); // HotKeyIt H1 load text instead file ahktextdll
-	ResultType LoadIncludedText(LPTSTR aFileSpec); //New read text
+	LineNumberType LoadFromText(LPTSTR aScript,LPCTSTR aPathToShow = NULL); // HotKeyIt H1 load text instead file ahktextdll
+	ResultType LoadIncludedText(LPTSTR aScript,LPCTSTR aPathToShow = NULL); //New read text
 #endif
 	ResultType LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure);
 	ResultType UpdateOrCreateTimer(Label *aLabel, LPTSTR aPeriod, LPTSTR aPriority, bool aEnable
@@ -2717,8 +2741,7 @@ public:
 	static ResultType SetErrorLevelOrThrow() { return SetErrorLevelOrThrowBool(true); }
 	static ResultType SetErrorLevelOrThrowBool(bool aError);
 	static ResultType SetErrorLevelOrThrowInt(int aErrorValue, LPCTSTR aWhat = NULL);
-	static ResultType SetErrorLevelOrThrowStr(LPCTSTR aErrorValue);
-	static ResultType SetErrorLevelOrThrowStr(LPCTSTR aErrorValue, LPCTSTR aWhat);
+	static ResultType SetErrorLevelOrThrowStr(LPCTSTR aErrorValue, LPCTSTR aWhat = NULL);
 	static ResultType ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat = NULL, LPCTSTR aExtraInfo = _T(""));
 	static void FreeExceptionToken(ExprTokenType*& aToken);
 
@@ -2748,7 +2771,7 @@ class MallocHeap; // forward declaration for export.cpp
 // Declare built-in var read and write functions.
 #define BIV_DECL_RW(name) BIV_DECL_R(name); BIV_DECL_W(name##_Set)
 
-BIV_DECL_R (BIV_True_False);
+BIV_DECL_R (BIV_True_False_Null);
 BIV_DECL_R (BIV_MMM_DDD);
 BIV_DECL_R (BIV_DateTime);
 BIV_DECL_RW(BIV_TitleMatchMode);
@@ -2880,20 +2903,18 @@ BIF_DECL(BIF_sizeof);
 BIF_DECL(BIF_FindFunc);
 BIF_DECL(BIF_FindLabel);
 BIF_DECL(BIF_Getvar);
-BIF_DECL(BIF_Static);
 BIF_DECL(BIF_Alias);
 BIF_DECL(BIF_CacheEnable);
 BIF_DECL(BIF_getTokenValue);
+BIF_DECL(BIF_UnZipRawMemory);
 BIF_DECL(BIF_ResourceLoadLibrary);
 BIF_DECL(BIF_MemoryLoadLibrary);
 BIF_DECL(BIF_MemoryGetProcAddress);
 BIF_DECL(BIF_MemoryFreeLibrary);
 BIF_DECL(BIF_MemoryFindResource);
-BIF_DECL(BIF_MemoryFindResourceEx);
-BIF_DECL(BIF_MemorySizeofResource);
+BIF_DECL(BIF_MemorySizeOfResource);
 BIF_DECL(BIF_MemoryLoadResource);
 BIF_DECL(BIF_MemoryLoadString);
-BIF_DECL(BIF_MemoryLoadStringEx);
 BIF_DECL(BIF_Lock);
 BIF_DECL(BIF_TryLock);
 BIF_DECL(BIF_UnLock);
@@ -2989,6 +3010,9 @@ BIF_DECL(BIF_FileOpen);
 
 // COM interop
 BIF_DECL(BIF_ComObjActive);
+BIF_DECL(BIF_ComObjParameter);
+BIF_DECL(BIF_ComObjEnwrap);
+BIF_DECL(BIF_ComObjUnwrap);
 BIF_DECL(BIF_ComObjCreate);
 BIF_DECL(BIF_ComObjGet);
 BIF_DECL(BIF_ComObjDll);

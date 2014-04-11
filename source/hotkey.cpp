@@ -899,7 +899,7 @@ void Hotkey::PerformInNewThreadMadeByCaller(HotkeyVariant &aVariant)
 		Unregister(); // This takes care of other details for us.
 	++aVariant.mExistingThreads;  // This is the thread count for this particular hotkey only.
 	ResultType result;
-	DEBUGGER_STACK_PUSH(aVariant.mJumpToLabel->mJumpToLine, g_script.mThisHotkeyName)
+	DEBUGGER_STACK_PUSH(aVariant.mJumpToLabel->mJumpToLine, _T("Hotkey"))
 	result = aVariant.mJumpToLabel->Execute();
 	DEBUGGER_STACK_POP()
 	--aVariant.mExistingThreads;
@@ -946,13 +946,13 @@ ResultType Hotkey::Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOption
 		else if (!_tcsicmp(aHotkeyName + (invert ? 8 : 5), _T("Exist")))
 			hot_criterion = invert ? HOT_IF_NOT_EXIST : HOT_IF_EXIST;
 		else // It starts with IfWin but isn't Active or Exist: Don't alter the current criterion.
-			return g_script.SetErrorLevelOrThrow();
+			return g_script.ScriptError(ERR_PARAM1_INVALID);
 		if (!(*aLabelName || *aOptions)) // This check is done only after detecting bad spelling of IfWin above.
 			g_HotCriterion = HOT_NO_CRITERION;
 		else if (SetGlobalHotTitleText(aLabelName, aOptions)) // Currently, it only fails upon out-of-memory.
 			g_HotCriterion = hot_criterion; // Only set at the last minute so that previous criteria will stay in effect if it fails.
 		else
-			return g_script.SetErrorLevelOrThrow();
+			return FAIL; // Error message has already been displayed.
 		return g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
 	}
 
@@ -961,7 +961,7 @@ ResultType Hotkey::Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOption
 	{
 		if (*aOptions)
 		{	// Let the script know of this error since it may indicate an unescaped comma in the expression text.
-			return g_script.SetErrorLevelOrThrow();
+			return g_script.ScriptError(ERR_PARAM3_MUST_BE_BLANK);
 		}
 		if (!*aLabelName)
 		{
@@ -981,8 +981,11 @@ ResultType Hotkey::Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOption
 					break;
 				}
 			}
-			if (i == g_HotExprLineCount)
-				return g_script.SetErrorLevelOrThrow();
+			if (i == g_HotExprLineCount) // Expression not found.
+				// This should only occur if aLabelName contains a variable reference, since this parameter is
+				// validated at load time where possible.  Setting ErrorLevel might go unnoticed and would be
+				// inconsistent with other modes of this command (without UseErrorLevel), so throw an error.
+				return g_script.ScriptError(ERR_HOTKEY_IF_EXPR);
 		}
 		return g_ErrorLevel->Assign(ERRORLEVEL_NONE);
 	}
@@ -2386,7 +2389,7 @@ ResultType Hotstring::PerformInNewThreadMadeByCaller()
 	g_script.mThisHotkeyModifiersLR = 0;
 	++mExistingThreads;  // This is the thread count for this particular hotstring only.
 	ResultType result;
-	DEBUGGER_STACK_PUSH(mJumpToLabel->mJumpToLine, g_script.mThisHotkeyName)
+	DEBUGGER_STACK_PUSH(mJumpToLabel->mJumpToLine, _T("Hotstring"))
 	result = mJumpToLabel->Execute();
 	DEBUGGER_STACK_POP()
 	--mExistingThreads;

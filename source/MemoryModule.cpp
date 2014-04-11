@@ -25,8 +25,8 @@
  */
 
 #ifndef __GNUC__
-// disable warnings about pointer <-> DWORD conversions and empty statement
-#pragma warning( disable : 4311 4312 4390 )
+// disable warnings about pointer <-> DWORD conversions
+#pragma warning( disable : 4311 4312 )
 #endif
 
 #include "stdafx.h" // pre-compiled headers
@@ -41,13 +41,6 @@
 
 #include <windows.h>
 #include <winnt.h>
-
-//#include <stdio.h>
-
-//#ifdef DEBUG_OUTPUT
-//#include <stdio.h>
-//#endif
-
 
 #ifndef IMAGE_SIZEOF_BASE_RELOCATION
 // Vista SDKs no longer define IMAGE_SIZEOF_BASE_RELOCATION!?
@@ -174,16 +167,35 @@ FinalizeSections(PMEMORYMODULE module)
 
         if (size > 0) {
             // change memory access flags
-            if (VirtualProtect((LPVOID)((POINTER_TYPE)section->Misc.PhysicalAddress | imageOffset), size, protect, &oldProtect) == 0)
 #ifdef DEBUG_OUTPUT
-                OutputLastError("Error protecting memory page")
+			if (VirtualProtect((LPVOID)((POINTER_TYPE)section->Misc.PhysicalAddress | imageOffset), size, protect, &oldProtect) == 0)
+                OutputLastError("Error protecting memory page");
+#else
+			VirtualProtect((LPVOID)((POINTER_TYPE)section->Misc.PhysicalAddress | imageOffset), size, protect, &oldProtect);
 #endif
-            ;
         }
     }
 #ifndef _WIN64
 #undef imageOffset
 #endif
+}
+
+static void
+ExecuteTLS(PMEMORYMODULE module) 
+{
+    unsigned char *codeBase = module->codeBase;
+    
+    PIMAGE_DATA_DIRECTORY directory = GET_HEADER_DICTIONARY(module, IMAGE_DIRECTORY_ENTRY_TLS);
+    if (directory->VirtualAddress > 0) {
+        PIMAGE_TLS_DIRECTORY tls = (PIMAGE_TLS_DIRECTORY) (codeBase + directory->VirtualAddress);
+        PIMAGE_TLS_CALLBACK* callback = (PIMAGE_TLS_CALLBACK *) tls->AddressOfCallBacks;
+        if (callback) {
+            while (*callback) {
+                (*callback)((LPVOID) codeBase, DLL_PROCESS_ATTACH, NULL);
+                callback++;
+            }
+        }
+    }
 }
 
 static void
@@ -332,16 +344,18 @@ BuildImportTable(PMEMORYMODULE module)
         {
             POINTER_TYPE *thunkRef;
             FARPROC *funcRef;
-            HCUSTOMMODULE handle = module->loadLibrary((LPCSTR) (codeBase + importDesc->Name), module->userdata);
-            if (handle == NULL) {
-                SetLastError(ERROR_MOD_NOT_FOUND);
-                result = 0;
-                break;
-            }
+			HCUSTOMMODULE handle;
+			handle = module->loadLibrary((LPCSTR) (codeBase + importDesc->Name), module->userdata);
+			if (handle == NULL)
+			{
+				SetLastError(ERROR_MOD_NOT_FOUND);
+				result = 0;
+				break;
+			}
 
             tmp = (HCUSTOMMODULE *) realloc(module->modules, (module->numModules+1)*(sizeof(HCUSTOMMODULE)));
             if (tmp == NULL) {
-                module->freeLibrary(handle, module->userdata);
+				module->freeLibrary(handle, module->userdata);
                 SetLastError(ERROR_OUTOFMEMORY);
                 result = 0;
                 break;
@@ -362,7 +376,7 @@ BuildImportTable(PMEMORYMODULE module)
                     *funcRef = module->getProcAddress(handle, (LPCSTR)IMAGE_ORDINAL(*thunkRef), module->userdata);
                 } else {
                     PIMAGE_IMPORT_BY_NAME thunkData = (PIMAGE_IMPORT_BY_NAME) (codeBase + (*thunkRef));
-                    *funcRef = module->getProcAddress(handle, (LPCSTR)&thunkData->Name, module->userdata);
+					*funcRef = module->getProcAddress(handle, (LPCSTR)&thunkData->Name, module->userdata);
                 }
                 if (*funcRef == 0) {
                     result = 0;
@@ -476,7 +490,7 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data,
         PAGE_EXECUTE_READWRITE);
     
     // copy PE header to code
-    memcpy(headers, dos_header, dos_header->e_lfanew + old_header->OptionalHeader.SizeOfHeaders);
+    memcpy(headers, dos_header, old_header->OptionalHeader.SizeOfHeaders);
     result->headers = (PIMAGE_NT_HEADERS)&((const unsigned char *)(headers))[dos_header->e_lfanew];
 
     // update position
@@ -499,6 +513,9 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data,
     // mark memory pages depending on section headers and release
     // sections that are marked as "discardable"
     FinalizeSections(result);
+
+	// TLS callbacks are executed BEFORE the main loading
+    ExecuteTLS(result);
 
     // get entry point of loaded library
     if (result->headers->OptionalHeader.AddressOfEntryPoint != 0) {
@@ -602,9 +619,9 @@ void MemoryFreeLibrary(HMEMORYMODULE mod)
 
 #define DEFAULT_LANGUAGE        MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL)
 
-HMEMORYRSRC MemoryFindResource(HMEMORYMODULE module, LPCTSTR type, LPCTSTR name)
+HMEMORYRSRC MemoryFindResource(HMEMORYMODULE module, LPCTSTR name, LPCTSTR type)
 {
-    return MemoryFindResourceEx(module, type, name, DEFAULT_LANGUAGE);
+    return MemoryFindResourceEx(module, name, type, DEFAULT_LANGUAGE);
 }
 
 static PIMAGE_RESOURCE_DIRECTORY_ENTRY _MemorySearchResourceEntry(
@@ -636,9 +653,8 @@ static PIMAGE_RESOURCE_DIRECTORY_ENTRY _MemorySearchResourceEntry(
     // a binary search to find faster...
     if (IS_INTRESOURCE(key)) {
         WORD check = (WORD) (POINTER_TYPE) key;
-        start = resources->NumberOfNamedEntries;
-        end = start + resources->NumberOfIdEntries;
-        
+        start = 0; //resources->NumberOfNamedEntries;
+        end = resources->NumberOfIdEntries;
         while (end > start) {
             WORD entryName;
             middle = (start + end) >> 1;
@@ -697,7 +713,7 @@ static PIMAGE_RESOURCE_DIRECTORY_ENTRY _MemorySearchResourceEntry(
     return result;
 }
 
-HMEMORYRSRC MemoryFindResourceEx(HMEMORYMODULE module, LPCTSTR type, LPCTSTR name, WORD language)
+HMEMORYRSRC MemoryFindResourceEx(HMEMORYMODULE module, LPCTSTR name, LPCTSTR type, WORD language)
 {
     unsigned char *codeBase = ((PMEMORYMODULE) module)->codeBase;
     PIMAGE_DATA_DIRECTORY directory = GET_HEADER_DICTIONARY((PMEMORYMODULE) module, IMAGE_DIRECTORY_ENTRY_RESOURCE);
@@ -750,7 +766,7 @@ HMEMORYRSRC MemoryFindResourceEx(HMEMORYMODULE module, LPCTSTR type, LPCTSTR nam
     return (codeBase + directory->VirtualAddress + (foundLanguage->OffsetToData & 0x7fffffff));
 }
 
-DWORD MemorySizeofResource(HMEMORYMODULE module, HMEMORYRSRC resource)
+DWORD MemorySizeOfResource(HMEMORYMODULE module, HMEMORYRSRC resource)
 {
     PIMAGE_RESOURCE_DATA_ENTRY entry = (PIMAGE_RESOURCE_DATA_ENTRY) resource;
     
@@ -765,19 +781,17 @@ LPVOID MemoryLoadResource(HMEMORYMODULE module, HMEMORYRSRC resource)
     return codeBase + entry->OffsetToData;
 }
 
-int
-MemoryLoadString(HMEMORYMODULE module, UINT id, LPTSTR buffer, int maxsize)
+LPVOID MemoryLoadString(HMEMORYMODULE module, UINT id, LPTSTR buffer, int maxsize)
 {
     return MemoryLoadStringEx(module, id, buffer, maxsize, DEFAULT_LANGUAGE);
 }
 
-int
-MemoryLoadStringEx(HMEMORYMODULE module, UINT id, LPTSTR buffer, int maxsize, WORD language)
+LPVOID MemoryLoadStringEx(HMEMORYMODULE module, UINT id, LPTSTR buffer, int maxsize, WORD language)
 {
     HMEMORYRSRC resource;
     PIMAGE_RESOURCE_DIR_STRING_U data;
     DWORD size;
-    if (maxsize == 0) {
+    if (buffer && maxsize == 0) {
         return 0;
     }
     
@@ -796,7 +810,8 @@ MemoryLoadStringEx(HMEMORYMODULE module, UINT id, LPTSTR buffer, int maxsize, WO
         SetLastError(ERROR_RESOURCE_NAME_NOT_FOUND);
         buffer[0] = 0;
         return 0;
-    }
+    } else if (!buffer)
+		return data->NameString;
     
     size = data->Length;
     if (size >= (DWORD) maxsize) {
@@ -809,5 +824,5 @@ MemoryLoadStringEx(HMEMORYMODULE module, UINT id, LPTSTR buffer, int maxsize, WO
 #else
     wcstombs(buffer, data->NameString, size);
 #endif
-    return size;
+    return (LPVOID)size;
 }
