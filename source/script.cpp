@@ -409,6 +409,7 @@ void Script::Destroy()
 	mFirstMenu = NULL;
 	mLastMenu = NULL;
 	mTrayIconTip = NULL;
+	mPriorHotkeyStartTime = 0;
 #endif
 	mFirstGroup = NULL;
 	mLastGroup = NULL;
@@ -512,6 +513,60 @@ void Script::Destroy()
 	g_HistoryHwndPrev = NULL;
 #endif
 
+	g_DefaultScriptCodepage  =  CP_ACP;
+	g_DestroyWindowCalled  =  false;
+	g_hWnd  =  NULL;
+	g_hWndEdit  =  NULL;
+	g_hFontEdit  =  NULL;
+#ifndef MINIDLL
+	g_hWndSplash  =  NULL;
+	g_hFontSplash  =  NULL;  // So that font can be deleted on program close.
+#endif
+	g_StrCmpLogicalW  =  NULL;
+	g_TabClassProc  =  NULL;
+	g_modifiersLR_logical  =  0;
+	g_modifiersLR_logical_non_ignored  =  0;
+	g_modifiersLR_physical  =  0;
+#ifdef FUTURE_USE_MOUSE_BUTTONS_LOGICAL
+	g_mouse_buttons_logical  =  0;
+#endif
+	g_BlockWinKeys  =  false;
+	g_HookReceiptOfLControlMeansAltGr  =  0; // In these cases, zero is used as a false value, any others are true.
+	g_IgnoreNextLControlDown  =  0;          //
+	g_IgnoreNextLControlUp  =  0;            //
+	g_MenuMaskKey  =  VK_CONTROL; // L38: See #MenuMaskKey.
+	g_HotkeyModifierTimeout  =  50;  // Reduced from 100, which was a little too large for fast typists.
+	g_ClipboardTimeout  =  1000; // v1.0.31
+	g_KeybdHook  =  NULL;
+	g_MouseHook  =  NULL;
+	g_PlaybackHook  =  NULL;
+	g_ForceLaunch  =  false;
+	g_WinActivateForce  =  false;
+	g_Warn_UseUnsetLocal  =  WARNMODE_OFF;
+	g_Warn_UseUnsetGlobal  =  WARNMODE_OFF;
+	g_Warn_UseEnv  =  WARNMODE_OFF;
+	g_Warn_LocalSameAsGlobal  =  WARNMODE_OFF;
+#ifndef MINIDLL
+	g_AllowOnlyOneInstance  =  ALLOW_MULTI_INSTANCE;
+#endif
+	g_persistent  =  false;  // Whether the script should stay running even after the auto-exec section finishes.
+	g_WriteCacheDisabledInt64  =  FALSE;  // BOOL vs. bool might improve performance a little for
+	g_WriteCacheDisabledDouble  =  FALSE; // frequently-accessed variables (it has helped performance in
+	g_NoEnv  =  TRUE;                    // HotKeyIt H5 new default
+	// g_MaxVarCapacity is used to prevent a buggy script from consuming all available system RAM. It is defined = 
+	g_MaxVarCapacity  =  64 * 1024 * 1024;
+#ifndef MINIDLL
+	//g_ScreenDPI  =  GetScreenDPI();
+	HDC hdc = GetDC(NULL);
+	g_ScreenDPI = GetDeviceCaps(hdc, LOGPIXELSX);
+	ReleaseDC(NULL, hdc);
+	g_gui  =  NULL;
+#endif
+	g_delimiter  =  ',';
+	g_DerefChar  =  '%';
+	g_EscapeChar  =  '`';
+	g_ContinuationLTrim  =  false;
+
 	for(i=1;Line::sSourceFileCount>i;i++) // first include file must not be deleted
 		free(Line::sSourceFile[i]);
 	Line::sSourceFileCount = 0;
@@ -553,6 +608,9 @@ void Script::Destroy()
 	DeleteCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
 	mIsReadyToExecute = false;
 	ZeroMemory(&g_script,sizeof(g_script));
+#ifndef MINIDLL
+	mPriorHotkeyName = mThisHotkeyName = _T("");
+#endif
 }
 #endif
 
@@ -1292,7 +1350,7 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 // tray icons, menus, and unowned windows such as ToolTip.
 {
 #ifdef _USRDLL
-	terminateDll(aExitReason);
+	terminateDll(aExitCode);
 #else
 	// L31: Release objects stored in variables, where possible.
 	if (aExitCode != CRITICAL_ERROR) // i.e. Avoid making matters worse if CRITICAL_ERROR.
@@ -1351,7 +1409,7 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 }
 
 #ifndef AUTOHOTKEYSC
-LineNumberType Script::LoadFromText(LPTSTR aScript)
+LineNumberType Script::LoadFromText(LPTSTR aScript,LPCTSTR aPathToShow)
 // HotKeyIt H1 LoadFromText() for text instead LoadFromFile()
 // Returns the number of non-comment lines that were loaded, or LOADING_FAILED on error.
 {
@@ -1371,7 +1429,7 @@ LineNumberType Script::LoadFromText(LPTSTR aScript)
 	// function library auto-inclusions to be processed correctly.
 
 	// Load the main script file.  This will also load any files it includes with #Include.
-	if (   LoadIncludedText(aScript) != OK
+	if (   LoadIncludedText(aScript, aPathToShow) != OK
 		|| !AddLine(ACT_EXIT)) // Fix for v1.0.47.04: Add an Exit because otherwise, a script that ends in an IF-statement will crash in PreparseBlocks() because PreparseBlocks() expects every IF-statements mNextLine to be non-NULL (helps loading performance too).
 		return LOADING_FAILED;
 
@@ -1846,7 +1904,7 @@ inline LPTSTR IsClassDefinition(LPTSTR aBuf, bool &aHasOTB)
 
 
 #ifndef AUTOHOTKEYSC
-ResultType Script::LoadIncludedText(LPTSTR aFileSpec)
+ResultType Script::LoadIncludedText(LPTSTR aScript,LPCTSTR aPathToShow)
 // Returns OK or FAIL.
 // Below: Use double-colon as delimiter to set these apart from normal labels.
 // The main reason for this is that otherwise the user would have to worry
@@ -1856,7 +1914,7 @@ ResultType Script::LoadIncludedText(LPTSTR aFileSpec)
 #define HOTKEY_FLAG _T("::")
 #define HOTKEY_FLAG_LENGTH 2
 {
-	if (!aFileSpec || !*aFileSpec) return FAIL;
+	if (!aScript || !*aScript) return FAIL;
 	
 	// Keep this var on the stack due to recursion, which allows newly created lines to be given the
 	// correct file number even when some #include's have been encountered in the middle of the script:
@@ -1883,24 +1941,21 @@ ResultType Script::LoadIncludedText(LPTSTR aFileSpec)
 		Line::sMaxSourceFiles = new_max;
 	}
 
-	// copy script to local memory for processing
-	LPTSTR aScript = (LPTSTR)alloca((_tcslen(aFileSpec)+1)* sizeof(TCHAR));
-	if (!aScript)
-			return ScriptError(ERR_OUTOFMEM); // Short msg since so rare.
-	else
-		_tcscpy(aScript,aFileSpec);
-
 	if (!source_file_index)
 		// Since this is the first source file, it must be the main script file.  Just point it to the
 		// location of the filespec already dynamically allocated:
-		Line::sSourceFile[source_file_index] = aFileSpec;
+		Line::sSourceFile[source_file_index] = aScript;
 	else
 	{
-		if (!(Line::sSourceFile[source_file_index] = tmalloc(_tcslen(aFileSpec)+1)))
-			return ScriptError(ERR_OUTOFMEM);
-		_tcscpy(Line::sSourceFile[source_file_index],aFileSpec);
+		if (aPathToShow)
+		{
+			if (!(Line::sSourceFile[source_file_index] = tmalloc(_tcslen(aPathToShow)+1)))
+				return ScriptError(ERR_OUTOFMEM);
+			_tcscpy(Line::sSourceFile[source_file_index], aPathToShow);
+		}
+		else
+			Line::sSourceFile[source_file_index] = g_script.mOurEXE;
 	}
-
 	// <buf> should be no larger than LINE_SIZE because some later functions rely upon that:
 	TCHAR msg_text[MAX_PATH + 256], buf1[LINE_SIZE], buf2[LINE_SIZE], suffix[16], pending_buf[LINE_SIZE] = _T("");
 	LPTSTR buf = buf1, next_buf = buf2; // Oscillate between bufs to improve performance (avoids memcpy from buf2 to buf1).
@@ -1912,14 +1967,7 @@ ResultType Script::LoadIncludedText(LPTSTR aFileSpec)
 
 
 
-
-
-
-
 	++Line::sSourceFileCount;
-
-
-
 
 
 
@@ -3028,26 +3076,27 @@ examine_line:
 			action_end = buf + buf_length; // It's done this way so that ELSE can be fully handled here; i.e. that ELSE does not have to be in the list of commands recognizable by ParseAndAddLine().
 		// The following method ensures that words or variables that start with "Else", e.g. ElseAction, are not
 		// incorrectly detected as an Else command:
-		int try_cmp = 1;
-		if (tcslicmp(buf, _T("Else"), action_end - buf) // It's not an ELSE or a TRY. ("Else"/"Try" is used vs. g_act[ACT_ELSE/TRY].Name for performance).
-		  && (try_cmp = tcslicmp(buf, _T("Try"), action_end - buf)))
+		int try_cmp = 1, finally_cmp = 1;
+		if (tcslicmp(buf, _T("Else"), action_end - buf) // It's not an ELSE, a TRY or a FINALLY. ("Else"/"Try"/"Finally" is used vs. g_act[ACT_ELSE/TRY/FINALLY].Name for performance).
+		  && (try_cmp = tcslicmp(buf, _T("Try"), action_end - buf))
+		  && (finally_cmp = tcslicmp(buf, _T("Finally"), action_end - buf)))
 		{
 			if (!ParseAndAddLine(buf))
 				return FAIL;
 		}
-		else // This line is an ELSE or a TRY, possibly with another command immediately after it (on the same line).
+		else // This line is an ELSE, a TRY or a FINALLY, possibly with another command immediately after it (on the same line).
 		{
-			// Add the ELSE or TRY directly rather than calling ParseAndAddLine() because that function
+			// Add the ELSE, TRY or FINALLY directly rather than calling ParseAndAddLine() because that function
 			// would resolve escape sequences throughout the entire length of <buf>, which we
 			// don't want because we wouldn't have access to the corresponding literal-map to
 			// figure out the proper use of escaped characters:
-			if (!AddLine(try_cmp ? ACT_ELSE : ACT_TRY))
+			if (!AddLine(try_cmp ? (finally_cmp ? ACT_ELSE : ACT_FINALLY) : ACT_TRY))
 				return FAIL;
 			mCurrLine = NULL;  // To signify that we're in transition, trying to load a new one.
 			buf = omit_leading_whitespace(action_end); // Now buf is the word after the ELSE or TRY.
-			if (*buf == g_delimiter) // Allow "else, action" and "try, action"
+			if (*buf == g_delimiter) // Allow "else, action", "try, action" and "finally, action"
 				buf = omit_leading_whitespace(buf + 1);
-			// Allow any command/action to the right of "else" or "try", including "{":
+			// Allow any command/action to the right of "else", "try" or "finally", including "{":
 			if (*buf)
 			{
 				// This is done rather than calling ParseAndAddLine() as it handles "{" in a way that
@@ -3176,7 +3225,6 @@ continue_main_loop: // This method is used in lieu of "continue" for performance
 			return FAIL;
 		mCombinedLineNumber = saved_line_number;
 	}
-
 	++mCombinedLineNumber; // L40: Put the implicit ACT_EXIT on the line after the last physical line (for the debugger).
 
 	// This is not required, it is called by the destructor.
@@ -3295,15 +3343,16 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			MsgBox(_T("Could not extract script from EXE."), 0, aFileSpec);
 			return FAIL;
 		}
-		if (*(unsigned int*)textbuf.mBuffer == 0x005F5A4C)
+		if (*(unsigned int*)textbuf.mBuffer == 0x04034b50)
 		{
-			DWORD aSizeDecompressed = DecompressBuffer(textbuf.mBuffer);
-			if (aSizeDecompressed)
+			LPVOID aDataBuf;
+			DWORD aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer,aDataBuf,g_default_pwd);
+			if (aSizeDeCompressed)
 			{
-				LPVOID buff = _alloca(aSizeDecompressed); // will be freed when function returns
-				memmove(buff,textbuf.mBuffer,aSizeDecompressed);
-				VirtualFree(textbuf.mBuffer,aSizeDecompressed,MEM_RELEASE);
-				textbuf.mLength = aSizeDecompressed;
+				LPVOID buff = _alloca(aSizeDeCompressed); // will be freed when function returns
+				memmove(buff,aDataBuf,aSizeDeCompressed);
+				VirtualFree(aDataBuf,aSizeDeCompressed,MEM_RELEASE);
+				textbuf.mLength = aSizeDeCompressed;
 				textbuf.mBuffer = buff;
 			}
 		}
@@ -3336,15 +3385,16 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		MsgBox(_T("Could not extract script from EXE."), 0, aFileSpec);
 		return FAIL;
 	}
-	if (*(unsigned int*)textbuf.mBuffer == 0x005F5A4C)
+	if (*(unsigned int*)textbuf.mBuffer == 0x04034b50)
 	{
-		DWORD aSizeDecompressed = DecompressBuffer(textbuf.mBuffer);
-		if (aSizeDecompressed)
+		LPVOID aDataBuf;
+		DWORD aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer,aDataBuf,g_default_pwd);
+		if (aSizeDeCompressed)
 		{
-			LPVOID buff = _alloca(aSizeDecompressed); // will be freed when function returns
-			memmove(buff,textbuf.mBuffer,aSizeDecompressed);
-			VirtualFree(textbuf.mBuffer,aSizeDecompressed,MEM_RELEASE);
-			textbuf.mLength = aSizeDecompressed;
+			LPVOID buff = _alloca(aSizeDeCompressed); // will be freed when function returns
+			memmove(buff,aDataBuf,aSizeDeCompressed);
+			VirtualFree(aDataBuf,aSizeDeCompressed,MEM_RELEASE);
+			textbuf.mLength = aSizeDeCompressed;
 			textbuf.mBuffer = buff;
 		}
 	}
@@ -3846,11 +3896,11 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			}
 		} // for() each sub-line (continued line) that composes this line.
 
+process_completed_line:
 		// buf_length can't be -1 (though next_buf_length can) because outer loop's condition prevents it:
 		if (!buf_length) // Done only after the line number increments above so that the physical line number is properly tracked.
 			goto continue_main_loop; // In lieu of "continue", for performance.
 
-process_completed_line:
 		// Since neither of the above executed, or they did but didn't "continue",
 		// buf now contains a non-commented line, either by itself or built from
 		// any continuation sections/lines that might have been present.  Also note that
@@ -4451,26 +4501,27 @@ examine_line:
 			action_end = buf + buf_length; // It's done this way so that ELSE can be fully handled here; i.e. that ELSE does not have to be in the list of commands recognizable by ParseAndAddLine().
 		// The following method ensures that words or variables that start with "Else", e.g. ElseAction, are not
 		// incorrectly detected as an Else command:
-		int try_cmp = 1;
-		if (tcslicmp(buf, _T("Else"), action_end - buf) // It's not an ELSE or a TRY. ("Else"/"Try" is used vs. g_act[ACT_ELSE/TRY].Name for performance).
-		  && (try_cmp = tcslicmp(buf, _T("Try"), action_end - buf)))
+		int try_cmp = 1, finally_cmp = 1;
+		if (tcslicmp(buf, _T("Else"), action_end - buf) // It's not an ELSE, a TRY or a FINALLY. ("Else"/"Try"/"Finally" is used vs. g_act[ACT_ELSE/TRY/FINALLY].Name for performance).
+		  && (try_cmp = tcslicmp(buf, _T("Try"), action_end - buf))
+		  && (finally_cmp = tcslicmp(buf, _T("Finally"), action_end - buf)))
 		{
 			if (!ParseAndAddLine(buf))
 				return FAIL;
 		}
-		else // This line is an ELSE or a TRY, possibly with another command immediately after it (on the same line).
+		else // This line is an ELSE, a TRY or a FINALLY, possibly with another command immediately after it (on the same line).
 		{
-			// Add the ELSE or TRY directly rather than calling ParseAndAddLine() because that function
+			// Add the ELSE, TRY or FINALLY directly rather than calling ParseAndAddLine() because that function
 			// would resolve escape sequences throughout the entire length of <buf>, which we
 			// don't want because we wouldn't have access to the corresponding literal-map to
 			// figure out the proper use of escaped characters:
-			if (!AddLine(try_cmp ? ACT_ELSE : ACT_TRY))
+			if (!AddLine(try_cmp ? (finally_cmp ? ACT_ELSE : ACT_FINALLY) : ACT_TRY))
 				return FAIL;
 			mCurrLine = NULL;  // To signify that we're in transition, trying to load a new one.
 			buf = omit_leading_whitespace(action_end); // Now buf is the word after the ELSE or TRY.
-			if (*buf == g_delimiter) // Allow "else, action" and "try, action"
+			if (*buf == g_delimiter) // Allow "else, action", "try, action" and "finally, action"
 				buf = omit_leading_whitespace(buf + 1);
-			// Allow any command/action to the right of "else" or "try", including "{":
+			// Allow any command/action to the right of "else", "try" or "finally", including "{":
 			if (*buf)
 			{
 				// This is done rather than calling ParseAndAddLine() as it handles "{" in a way that
@@ -6285,7 +6336,7 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType,
 			aActionType = ACT_LOOP;
 			add_openbrace_afterward = true;
 		}
-		// fincs: same as above, but for try and catch:
+		// fincs: same as above, but for try, catch and finally:
 		else if (!_tcsicmp(action_name, _T("try{")) && !*action_args)
 		{
 			aActionType = ACT_TRY;
@@ -6294,6 +6345,11 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType,
 		else if (!_tcsicmp(action_name, _T("catch{")) && !*action_args)
 		{
 			aActionType = ACT_CATCH;
+			add_openbrace_afterward = true;
+		}
+		else if (!_tcsicmp(action_name, _T("finally{")) && !*action_args)
+		{
+			aActionType = ACT_FINALLY;
 			add_openbrace_afterward = true;
 		}
 		else if (_tcschr(EXPR_ALL_SYMBOLS, *action_args))
@@ -9090,7 +9146,7 @@ ResultType Script::DefineFunc(LPTSTR aBuf, Var *aFuncGlobalVar[])
 				if (value_length > MAX_NUMBER_LENGTH) // Too rare to justify elaborate handling or error reporting.
 					value_length = MAX_NUMBER_LENGTH;
 				tcslcpy(buf, param_start, value_length + 1);  // Make a temp copy to simplify the below (especially IsPureNumeric).
-				if (!_tcsicmp(buf, _T("false")))
+				if (!_tcsicmp(buf, _T("false")) || !_tcsicmp(buf, _T("null")))
 				{
 					this_param.default_type = PARAM_DEFAULT_INT;
 					this_param.default_int64 = 0;
@@ -9739,17 +9795,29 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 				// Now continue on normally so that our caller can continue looking for syntax errors.
 			}
 			
+			// g->CurrentFunc is non-NULL when the function-call being resolved is inside
+			// a function.  Save and reset it for correct behaviour in the include file:
+			Func *current_func = g->CurrentFunc;
+			g->CurrentFunc = NULL;
+
 			// Fix for v1.1.06.00: If the file contains any lib #includes, it must be loaded AFTER the
 			// above writes sLib[i].path to the iLib file, otherwise the wrong filename could be written.
 			if (!LoadIncludedFile(sLib[i].path, false, false)) // Fix for v1.0.47.05: Pass false for allow-dupe because otherwise, it's possible for a stdlib file to attempt to include itself (especially via the LibNamePrefix_ method) and thus give a misleading "duplicate function" vs. "func does not exist" error message.  Obsolete: For performance, pass true for allow-dupe so that it doesn't have to check for a duplicate file (seems too rare to worry about duplicates since by definition, the function doesn't yet exist so it's file shouldn't yet be included).
 			{
+				g->CurrentFunc = current_func; // Restore.
 				aErrorWasShown = true; // Above has just displayed its error (e.g. syntax error in a line, failed to open the include file, etc).  So override the default set earlier.
 				return NULL;
 			}
+			
+			g->CurrentFunc = current_func; // Restore.
 
 			// Now that a matching filename has been found, it seems best to stop searching here even if that
 			// file doesn't actually contain the requested function.  This helps library authors catch bugs/typos.
-			return FindFunc(aFuncName, aFuncNameLength);
+			
+			// HotKeyIt, override so resource can be tried too
+			if (current_func = FindFunc(aFuncName, aFuncNameLength))
+				return current_func;
+			continue;
 		} // for() each library directory.
 
 		// Now that the first iteration is done, set up for the second one that searches by class/prefix.
@@ -9778,11 +9846,10 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	tmemcpy(class_name_buf, aFuncName, aFuncNameLength);
 	tmemcpy(class_name_buf + aFuncNameLength,_T(".ahk"),4);
 	class_name_buf[aFuncNameLength + 4] = '\0';
-	HRSRC lib_hResource,lib_hResourceMain = NULL;
+	HRSRC lib_hResource;
+	BOOL aUseHinstance = true;
 	if (!(lib_hResource = FindResource(g_hInstance, class_name_buf, _T("LIB"))))
 	{
-		// Search main executable its resources for the function in advance.
-		lib_hResourceMain = FindResource(NULL, class_name_buf, _T("LIB"));
 		// Now that the resource is not found, set up for the second one that searches by class/prefix.
 		// Notes about ambiguity and naming collisions:
 		// By the time it gets to the prefix/class search, it's almost given up.  Even if it wrongly finds a
@@ -9790,48 +9857,49 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 		// still not find the function and will then say "call to nonexistent function".  In addition, the
 		// ability to customize which libraries are searched is planned.  This would allow a publicly
 		// distributed script to turn off all libraries except stdlib.
-		if (   !(first_underscore = _tcschr(aFuncName, '_')) && !lib_hResourceMain   ) // No second iteration needed.
+		aUseHinstance = false;
+		if (  !(lib_hResource = FindResource(NULL, class_name_buf, _T("LIB")))  )
 		{
-			return NULL;
-		}
-		else if (first_underscore)
-		{
-			naked_filename_length = first_underscore - aFuncName;
-			if (naked_filename_length >= _countof(class_name_buf)) // Class name too long (probably impossible currently).
+			if (  !(first_underscore = _tcschr(aFuncName, '_'))  ) // No second iteration needed.
 				return NULL;
-			tmemcpy(class_name_buf, aFuncName, naked_filename_length);
-			tmemcpy(class_name_buf + naked_filename_length,_T(".ahk"),4);
-			class_name_buf[naked_filename_length + 4] = '\0';
-			if ( !(lib_hResource = FindResource(g_hInstance, class_name_buf, _T("LIB")))
-				 && !(lib_hResource = lib_hResourceMain)
-				 && !(lib_hResource = lib_hResourceMain = FindResource(NULL, class_name_buf, _T("LIB")))    )
+			else
+			{
+				naked_filename_length = first_underscore - aFuncName;
+				if (naked_filename_length >= _countof(class_name_buf)) // Class name too long (probably impossible currently).
 					return NULL;
-		}
-		else if (lib_hResourceMain)
-		{
-			// Use main resource since a function was found there.
-			lib_hResource = lib_hResourceMain;
+				tmemcpy(class_name_buf, aFuncName, naked_filename_length);
+				tmemcpy(class_name_buf + naked_filename_length,_T(".ahk"),4);
+				class_name_buf[naked_filename_length + 4] = '\0';
+				if (  !(lib_hResource = FindResource(g_hInstance, class_name_buf, _T("LIB")))  )
+				{
+					if (  !(lib_hResource = FindResource(NULL, class_name_buf, _T("LIB")))  )
+						return NULL;
+				} 
+				else
+					aUseHinstance = true;
+			}
 		}
 	}
 	// Now a resouce was found and it can be loaded
 	HGLOBAL hResData;
+	HINSTANCE ahInstance = aUseHinstance ? g_hInstance : NULL;
 	TextMem::Buffer textbuf(NULL, 0, false);
-	if ( !( (textbuf.mLength = SizeofResource(lib_hResourceMain ? NULL : g_hInstance, lib_hResource))
-		&& (hResData = LoadResource(lib_hResourceMain ? NULL : g_hInstance, lib_hResource))
+	if ( !( (textbuf.mLength = SizeofResource(ahInstance, lib_hResource))
+		&& (hResData = LoadResource(ahInstance, lib_hResource))
 		&& (textbuf.mBuffer = LockResource(hResData)) ) )
-	{
-		// aErrorWasShown = true; // Do not display errors here
+	{	// aErrorWasShown = true; // Do not display errors here
 		return NULL;
 	}
-	if (*(unsigned int*)textbuf.mBuffer == 0x005F5A4C)
+	if (*(unsigned int*)textbuf.mBuffer == 0x04034b50)
 	{
-		DWORD aSizeDecompressed = DecompressBuffer(textbuf.mBuffer);
-		if (aSizeDecompressed)
+		LPVOID aDataBuf;
+		DWORD aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer,aDataBuf);
+		if (aSizeDeCompressed)
 		{
-			LPVOID buff = _alloca(aSizeDecompressed); // will be freed when function returns
-			memmove(buff,textbuf.mBuffer,aSizeDecompressed);
-			VirtualFree(textbuf.mBuffer,aSizeDecompressed,MEM_RELEASE);
-			textbuf.mLength = aSizeDecompressed;
+			LPVOID buff = _alloca(aSizeDeCompressed); // will be freed when function returns
+			memmove(buff,aDataBuf,aSizeDeCompressed);
+			VirtualFree(aDataBuf,aSizeDeCompressed,MEM_RELEASE);
+			textbuf.mLength = aSizeDeCompressed;
 			textbuf.mBuffer = buff;
 		}
 	}
@@ -9841,15 +9909,23 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	LPTSTR resource_script = (LPTSTR)_alloca(textbuf.mLength * sizeof(TCHAR));
 	tmem.Open(textbuf, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR, CP_UTF8);
 	tmem.Read(resource_script, textbuf.mLength);
-	if (!LoadIncludedText(resource_script))
+	
+	// g->CurrentFunc is non-NULL when the function-call being resolved is inside
+	// a function.  Save and reset it for correct behaviour in the include file:
+	Func *current_func = g->CurrentFunc;
+	g->CurrentFunc = NULL;
+
+	// Fix for v1.1.06.00: If the file contains any lib #includes, it must be loaded AFTER the
+	// above writes sLib[i].path to the iLib file, otherwise the wrong filename could be written.
+	if (!LoadIncludedText(resource_script, class_name_buf)) // Fix for v1.0.47.05: Pass false for allow-dupe because otherwise, it's possible for a stdlib file to attempt to include itself (especially via the LibNamePrefix_ method) and thus give a misleading "duplicate function" vs. "func does not exist" error message.  Obsolete: For performance, pass true for allow-dupe so that it doesn't have to check for a duplicate file (seems too rare to worry about duplicates since by definition, the function doesn't yet exist so it's file shouldn't yet be included).
 	{
-		aFileWasFound = false;
+		g->CurrentFunc = current_func; // Restore.
+		aErrorWasShown = true; // Above has just displayed its error (e.g. syntax error in a line, failed to open the include file, etc).  So override the default set earlier.
 		return NULL;
 	}
-	else
-	{
-		return FindFunc(aFuncName, aFuncNameLength);
-	}
+			
+	g->CurrentFunc = current_func; // Restore.
+	return FindFunc(aFuncName, aFuncNameLength);
 }
 #endif
 
@@ -10114,17 +10190,17 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		min_params = 1;
 		max_params = 1;
 	}
-	else if (!_tcsicmp(func_name, _T("Static")))  // lowlevel() Naveen v9.
-	{
-		bif = BIF_Static;
-		min_params = 1;
-		max_params = 1;
-	}
 	else if (!_tcsicmp(func_name, _T("Alias")))  // lowlevel() Naveen v9.
 	{
 		bif = BIF_Alias;
 		min_params = 1;
 		max_params = 2;
+	}
+	else if (!_tcsicmp(func_name, _T("UnZipRawMemory")))  // lowlevel() Naveen v9.
+	{
+		bif = BIF_UnZipRawMemory;
+		min_params = 1;
+		max_params = 3;
 	}
 	else if (!_tcsicmp(func_name, _T("getTokenValue")))  // lowlevel() Naveen v9.
 	{
@@ -10255,17 +10331,11 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 	{
 		bif = BIF_MemoryFindResource;
 		min_params = 3;
-		max_params = 3;
-	}
-	else if (!_tcsicmp(func_name, _T("MemoryFindResourceEx")))
-	{
-		bif = BIF_MemoryFindResourceEx;
-		min_params = 4;
 		max_params = 4;
 	}
-	else if (!_tcsicmp(func_name, _T("MemorySizeofResource")))
+	else if (!_tcsicmp(func_name, _T("MemorySizeOfResource")))
 	{
-		bif = BIF_MemorySizeofResource;
+		bif = BIF_MemorySizeOfResource;
 		min_params = 2;
 		max_params = 2;
 	}
@@ -10278,13 +10348,7 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 	else if (!_tcsicmp(func_name, _T("MemoryLoadString")))
 	{
 		bif = BIF_MemoryLoadString;
-		min_params = 4;
-		max_params = 4;
-	}
-	else if (!_tcsicmp(func_name, _T("MemoryLoadStringEx")))
-	{
-		bif = BIF_MemoryLoadStringEx;
-		min_params = 5;
+		min_params = 2;
 		max_params = 5;
 	}
 	else if (!_tcsicmp(func_name, _T("DynaCall")))
@@ -10456,12 +10520,32 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 			min_params = 2;
 			max_params = 3;
 		}
-		else
+		else if (!_tcsicmp(suffix, _T("Active")))
 		{
 			bif = BIF_ComObjActive;
-			min_params = 0;
+			min_params = 1;
+			max_params = 1;
+		}
+		else if (!_tcsicmp(suffix, _T("Parameter")))
+		{
+			bif = BIF_ComObjParameter;
+			min_params = 2;
 			max_params = 3;
 		}
+		else if (!_tcsicmp(suffix, _T("Enwrap")))
+		{
+			bif = BIF_ComObjEnwrap;
+			min_params = 1;
+			max_params = 2;
+		}
+		else if (!_tcsicmp(suffix, _T("Unwrap")))
+		{
+			bif = BIF_ComObjUnwrap;
+			min_params = 1;
+			max_params = 1;
+		}
+		else
+			return NULL; // Function does not exist
 	}
 	else if (!_tcsicmp(func_name, _T("Exception")))
 	{
@@ -11354,7 +11438,8 @@ void *Script::GetVarType(LPTSTR aVarName)
 	if (lowercase[0] != 'a' || lowercase[1] != '_')  // This check helps average-case performance.
 	{
 		if (   !_tcscmp(lowercase, _T("true"))
-			|| !_tcscmp(lowercase, _T("false"))) return BIV_True_False;
+			|| !_tcscmp(lowercase, _T("false"))
+			|| !_tcscmp(lowercase, _T("null"))) return BIV_True_False_Null;
 		if (!_tcscmp(lowercase, _T("clipboard"))) return (void *)VAR_CLIPBOARD;
 		if (!_tcscmp(lowercase, _T("clipboardall"))) return (void *)VAR_CLIPBOARDALL;
 		if (!_tcscmp(lowercase, _T("comspec"))) return BIV_ComSpec; // Lacks an "A_" prefix for backward compatibility with pre-NoEnv scripts and also it's easier to type & remember.
@@ -11700,7 +11785,8 @@ Line *Script::PreparseBlocks(Line *aStartingLine, bool aFindBlockEnd, Line *aPar
 		if (line->mParentLine == NULL) // i.e. don't do it if it's already "owned" by an IF or ELSE.
 			line->mParentLine = aParentLine; // Can be NULL.
 
-		if (ACT_IS_IF_OR_ELSE_OR_LOOP(line->mActionType))
+#define ACT_IS_BLOCK_OWNER(act) (ACT_IS_IF_OR_ELSE_OR_LOOP(act) || (act) == ACT_TRY || (act) == ACT_CATCH || (act) == ACT_FINALLY)
+		if (ACT_IS_BLOCK_OWNER(line->mActionType))
 		{
 			// In this case, the loader should have already ensured that line->mNextLine is not NULL.
 			if (line->mNextLine->mActionType == ACT_BLOCK_BEGIN && line->mNextLine->mAttribute == ATTR_TRUE)
@@ -11844,7 +11930,9 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 			//	return line->PreparseError(_T("Q")); // Placeholder. Formerly "This if-statement or loop has no action."
 
 			// Other things rely on this check having been done, such as "if (line->mRelatedLine != NULL)":
-			if (line_temp->mActionType == ACT_ELSE || line_temp->mActionType == ACT_BLOCK_END || line_temp->mActionType == ACT_CATCH)
+#define IS_BAD_ACTION_LINE(l) ((l)->mActionType == ACT_ELSE || (l)->mActionType == ACT_BLOCK_END || (l)->mActionType == ACT_CATCH || (l)->mActionType == ACT_FINALLY)
+
+			if (IS_BAD_ACTION_LINE(line_temp))
 				return line->PreparseError(ERR_EXPECTED_BLOCK_OR_ACTION);
 
 			// Lexikos: This section once maintained separate variables for file-pattern, registry, file-reading
@@ -11913,8 +12001,7 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 			// so always continue on to evaluate the IF's ELSE, if present:
 			if (line_temp->mActionType == ACT_ELSE)
 			{
-				if (line->mActionType == ACT_LOOP || line->mActionType == ACT_WHILE || line->mActionType == ACT_FOR
-				  || line->mActionType == ACT_TRY)
+				if (line->mActionType == ACT_LOOP || line->mActionType == ACT_WHILE || line->mActionType == ACT_FOR || line->mActionType == ACT_TRY)
 				{
 					 // this can't be our else, so let the caller handle it.
 					if (aMode != ONLY_ONE_LINE)
@@ -11937,7 +12024,7 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 				// Thus, it's commented out:
 				//if (line == NULL) // An else with no action.
 				//	return line_temp->PreparseError(_T("Q")); // Placeholder since impossible. Formerly "This ELSE has no action."
-				if (line->mActionType == ACT_ELSE || line->mActionType == ACT_BLOCK_END || line->mActionType == ACT_CATCH)
+				if (IS_BAD_ACTION_LINE(line))
 					return line_temp->PreparseError(ERR_EXPECTED_BLOCK_OR_ACTION);
 				// Assign to line rather than line_temp:
 				line = PreparseIfElse(line, ONLY_ONE_LINE, aLoopType);
@@ -11968,14 +12055,50 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 						return line_temp->PreparseError(ERR_CATCH_WITH_NO_TRY);
 					return line_temp;
 				}
+				line_temp->mParentLine = line->mParentLine;
 				line = line_temp->mNextLine;
-				if (line->mActionType == ACT_ELSE || line->mActionType == ACT_BLOCK_END || line->mActionType == ACT_CATCH)
+				if (IS_BAD_ACTION_LINE(line))
 					return line_temp->PreparseError(ERR_EXPECTED_BLOCK_OR_ACTION);
 				// Assign to line rather than line_temp:
 				line = PreparseIfElse(line, ONLY_ONE_LINE, aLoopType);
 				if (line == NULL)
 					return NULL; // Error or end-of-script.
 				// Set this CATCH's jumppoint.
+				line_temp->mRelatedLine = line;
+				// Detect and fix FINALLY.
+				if (line->mActionType == ACT_FINALLY)
+				{
+					line->mParentLine = line_temp->mParentLine;
+					Line* temp = line->mNextLine;
+					if (IS_BAD_ACTION_LINE(temp))
+						return line->PreparseError(ERR_EXPECTED_BLOCK_OR_ACTION);
+					// Preparse FINALLY block - obscure the loop type so that attempts to use
+					// break/continue to exit the FINALLY block are caught at load time.
+					line->mRelatedLine = PreparseIfElse(temp, ONLY_ONE_LINE, ATTR_OBSCURE(aLoopType));
+					if (!line->mRelatedLine)
+						return NULL; // Error or end-of-script.
+					line = line->mRelatedLine;
+				}
+			}
+			else if (line_temp->mActionType == ACT_FINALLY)
+			{
+				// This code section can only be triggered by try..finally (with no catch)
+				if (line->mActionType != ACT_TRY)
+				{
+					// Again, this is similar to the section above, so see there for comments.
+					if (aMode != ONLY_ONE_LINE)
+						return line_temp->PreparseError(ERR_FINALLY_WITH_NO_PRECEDENT);
+					return line_temp;
+				}
+				line_temp->mParentLine = line->mParentLine;
+				line = line_temp->mNextLine;
+				if (IS_BAD_ACTION_LINE(line))
+					return line_temp->PreparseError(ERR_EXPECTED_BLOCK_OR_ACTION);
+				// Assign to line rather than line_temp:
+				line = PreparseIfElse(line, ONLY_ONE_LINE, ATTR_OBSCURE(aLoopType)); // ATTR_OBSCURE: see above for more details.
+				if (line == NULL)
+					return NULL; // Error or end-of-script.
+				// Set this TRY's jumppoint.
 				line_temp->mRelatedLine = line;
 			}
 			else // line doesn't have an else, so just continue processing from line_temp's position
@@ -12025,6 +12148,8 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 		case ACT_CONTINUE:
 			if (!aLoopType)
 				return line->PreparseError(_T("Break/Continue must be enclosed by a Loop."));
+			if (aLoopType == ATTR_LOOP_OBSCURED)
+				return line->PreparseError(ERR_BAD_JUMP_INSIDE_FINALLY);
 			if (line->mArgc)
 			{
 				if (line->ArgHasDeref(1) || line->mArg->is_expression)
@@ -12032,6 +12157,58 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 					// For simplicity, rule out things like "break %var%" and "break % func()":
 					return line->PreparseError(ERR_PARAM1_INVALID); //_T("Target label of Break/Continue cannot be dynamic."));
 				LPTSTR loop_name = line->mArg[0].text;
+				Label *loop_label;
+				Line *loop_line;
+				if (IsPureNumeric(loop_name))
+				{
+					int n = _ttoi(loop_name);
+					// Find the nth innermost loop which encloses this line:
+					for (loop_line = line->mParentLine; loop_line; loop_line = loop_line->mParentLine)
+						if (loop_line->mActionType >= ACT_LOOP && loop_line->mActionType <= ACT_WHILE) // i.e. LOOP, FOR or WHILE.
+							if (--n < 1)
+								break;
+					if (!loop_line || n != 0)
+						return line->PreparseError(ERR_PARAM1_INVALID);
+				}
+				else
+				{
+					// Target is a named loop.
+					if ( !(loop_label = FindLabel(loop_name)) )
+						return line->PreparseError(ERR_NO_LABEL, loop_name);
+					loop_line = loop_label->mJumpToLine;
+					// Ensure the label points to a Loop, For-loop or While-loop ...
+					if (   !(loop_line->mActionType >= ACT_LOOP && loop_line->mActionType <= ACT_WHILE)
+						// ... which encloses this line.  Use line->mParentLine as the starting-point of
+						// the "jump" to ensure the target isn't at the same nesting level as this line:
+						|| !line->mParentLine->IsJumpValid(*loop_label, true)   )
+						return line->PreparseError(ERR_PARAM1_INVALID); //_T("Target label does not point to an appropriate Loop."));
+					// Although we've validated that it points to a loop, we can't resolve the line
+					// after the loop's body as that (mRelatedLine) hasn't been determined yet.
+					if (loop_line == line->mParentLine
+						// line->mParentLine must be non-NULL because above verified this line is enclosed by a Loop:
+						|| line->mParentLine->mActionType == ACT_BLOCK_BEGIN && loop_line == line->mParentLine->mParentLine)
+					{
+						// Set mRelatedLine to NULL since the target loop directly encloses this line.
+						loop_line = NULL;
+					}
+				}
+				if (!line->CheckValidFinallyJump(loop_line))
+					return NULL; // Error already shown.
+				line->mRelatedLine = loop_line;
+			}
+			break;
+
+		case ACT_BREAKIF:
+		case ACT_CONTINUEIF:
+			if (!aLoopType)
+				return line->PreparseError(_T("Break/Continue must be enclosed by a Loop."));
+			if (line->mArgc == 2)
+			{
+				if (line->ArgHasDeref(2) || line->mArg[1].is_expression)
+					// It seems unlikely that computing the target loop at runtime would be useful.
+					// For simplicity, rule out things like "break %var%" and "break % func()":
+					return line->PreparseError(ERR_PARAM1_INVALID); //_T("Target label of Break/Continue cannot be dynamic."));
+				LPTSTR loop_name = line->mArg[1].text;
 				Label *loop_label;
 				Line *loop_line;
 				if (IsPureNumeric(loop_name))
@@ -12089,6 +12266,8 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 					// the target as invalid.
 					line->mAttribute = ATTR_TRUE; // v1.0.48.02: To improve runtime performance, mark this Gosub as having a target that is outside of any function body.
 				}
+				if (line->mActionType == ACT_GOTO && !line->CheckValidFinallyJump(((Label *)(line->mRelatedLine))->mJumpToLine))
+					return NULL; // Error already displayed above.
 				//else leave mAttribute at its line-constructor default of ATTR_NONE.
 			}
 			break;
@@ -12185,6 +12364,10 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 		case ACT_CATCH:
 			// Similar to above.
 			return line->PreparseError(ERR_CATCH_WITH_NO_TRY);
+
+		case ACT_FINALLY:
+			// Similar to above.
+			return line->PreparseError(ERR_FINALLY_WITH_NO_PRECEDENT);
 		} // switch()
 
 		line = line->mNextLine; // If NULL due to physical end-of-script, the for-loop's condition will catch it.
@@ -13007,7 +13190,7 @@ numeric_literal:
 				{
 					// The following "variables" previously had optimizations in ExpandExpression(),
 					// but since their values never change at run-time, it is better to do it here:
-					if (this_deref_ref.var->mBIV == BIV_True_False)
+					if (this_deref_ref.var->mBIV == BIV_True_False_Null)
 					{
 						infix[infix_count].symbol = SYM_INTEGER;
 						infix[infix_count].value_int64 = (ctoupper(*this_deref_ref.marker) == 'T');
@@ -14032,6 +14215,39 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 		// flow-control types:
 		switch (line->mActionType)
 		{
+		case ACT_BREAKIF:
+			if_condition = line->EvaluateCondition();
+			if (if_condition == CONDITION_TRUE)
+			{
+				if (line->mRelatedLine)
+				{
+					// Rather than having PerformLoop() handle LOOP_BREAK specifically, tell our caller to jump to
+					// the line *after* the loop's body. This is always a jump our caller must handle, unlike GOTO:
+					caller_jump_to_line = line->mRelatedLine->mRelatedLine;
+				}
+				return LOOP_BREAK;
+			} 
+			else if (aMode == ONLY_ONE_LINE) // if_condition == CONDITION_FALSE and one line mode
+				return LOOP_CONTINUE;
+			line = line->mNextLine;
+			continue;
+
+		case ACT_CONTINUEIF:
+			if_condition = line->EvaluateCondition();
+			if (if_condition == CONDITION_TRUE)
+			{
+				if (line->mRelatedLine)
+				{
+					// Signal any loops nested between this line and the target loop to return LOOP_CONTINUE:
+					caller_jump_to_line = line->mRelatedLine; // Okay even if NULL.
+				}
+				return LOOP_CONTINUE;
+			} 
+			else if (aMode == ONLY_ONE_LINE) // if_condition == CONDITION_FALSE and one line mode
+				return LOOP_CONTINUE;
+			line = line->mNextLine;
+			continue;
+
 		case ACT_GOSUB:
 			// A single gosub can cause an infinite loop if misused (i.e. recursive gosubs),
 			// so be sure to do this to prevent the program from hanging:
@@ -14313,7 +14529,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 			// PERFORM THE LOOP:
 			switch ((size_t)attr)
 			{
-			case ATTR_LOOP_NORMAL: // Listed first for performance.
+			case (size_t)ATTR_LOOP_NORMAL: // Listed first for performance.
 				bool is_infinite; // "is_infinite" is more maintainable and future-proof than using LLONG_MAX to simulate an infinite loop. Plus it gives peace-of-mind and the LLONG_MAX method doesn't measurably improve benchmarks (nor does BOOL vs. bool).
 				__int64 iteration_limit;
 				if (line->mArgc > 0) // At least one parameter is present.
@@ -14331,13 +14547,13 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 				result = line->PerformLoop(aResultToken, continue_main_loop, jump_to_line, until
 					, iteration_limit, is_infinite);
 				break;
-			case ATTR_LOOP_WHILE: // Lexikos: ATTR_LOOP_WHILE is used to differentiate ACT_WHILE from ACT_LOOP, allowing code to be shared.
+			case (size_t)ATTR_LOOP_WHILE: // Lexikos: ATTR_LOOP_WHILE is used to differentiate ACT_WHILE from ACT_LOOP, allowing code to be shared.
 				result = line->PerformLoopWhile(aResultToken, continue_main_loop, jump_to_line);
 				break;
-			case ATTR_LOOP_FOR:
+			case (size_t)ATTR_LOOP_FOR:
 				result = line->PerformLoopFor(aResultToken, continue_main_loop, jump_to_line, until);
 				break;
-			case ATTR_LOOP_PARSE:
+			case (size_t)ATTR_LOOP_PARSE:
 				// The phrase "csv" is unique enough since user can always rearrange the letters
 				// to do a literal parse using C, S, and V as delimiters:
 				if (_tcsicmp(ARG3, _T("CSV")))
@@ -14345,7 +14561,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 				else
 					result = line->PerformLoopParseCSV(aResultToken, continue_main_loop, jump_to_line, until);
 				break;
-			case ATTR_LOOP_READ_FILE:
+			case (size_t)ATTR_LOOP_READ_FILE:
 				{
 					TextFile tfile;
 					if (*ARG2 && tfile.Open(ARG2, DEFAULT_READ_FLAGS, g.Encoding & CP_AHKCP)) // v1.0.47: Added check for "" to avoid debug-assertion failure while in debug mode (maybe it's bad to to open file "" in release mode too).
@@ -14362,11 +14578,11 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 						result = OK;
 				}
 				break;
-			case ATTR_LOOP_FILEPATTERN:
+			case (size_t)ATTR_LOOP_FILEPATTERN:
 				result = line->PerformLoopFilePattern(aResultToken, continue_main_loop, jump_to_line, until
 					, file_loop_mode, recurse_subfolders, ARG1);
 				break;
-			case ATTR_LOOP_REG:
+			case (size_t)ATTR_LOOP_REG:
 				// This isn't the most efficient way to do things (e.g. the repeated calls to
 				// RegConvertRootKey()), but it the simplest way for now.  Optimization can
 				// be done at a later time:
@@ -14499,9 +14715,11 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 			{
 				// Restore the previous InTryBlock value.
 				g.InTryBlock = bSavedInTryBlock;
+				bool bHasCatch = false;
 
 				if (line->mActionType == ACT_CATCH)
 				{
+					bHasCatch = true;
 					if (g.ThrownToken)
 					{
 						// An exception was thrown and we have a 'catch' block, so let the next
@@ -14512,16 +14730,32 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 					// Otherwise: no exception was thrown, so skip the 'catch' block.
 					line = line->mRelatedLine;
 				}
-				else
+				if (line->mActionType == ACT_FINALLY)
 				{
-					if (g.ThrownToken)
-					{
-						// An exception was thrown, but no 'catch' is present.  In this case 'try'
-						// acts as a catch-all.
-						g_script.FreeExceptionToken(g.ThrownToken);
-						result = OK;
-					}
+					// Let the section below handle the FINALLY block.
+					this_act = ACT_CATCH;
 				}
+				else if (!bHasCatch && g.ThrownToken)
+				{
+					// An exception was thrown, but no 'catch' nor 'finally' is present.
+					// In this case 'try' acts as a catch-all.
+					g_script.FreeExceptionToken(g.ThrownToken);
+					result = OK;
+				}
+			}
+			if (this_act == ACT_CATCH && line->mActionType == ACT_FINALLY)
+			{
+				if (!g.ThrownToken)
+				{
+					// Let the next iteration handle the finally block.
+					continue;
+				}
+
+				// An exception was thrown, and this try..(catch)..finally block didn't handle it.
+				// Therefore we must execute the finally block before returning.
+				ResultType res = line->ExecUntil(ONLY_ONE_LINE, NULL, &jump_to_line);
+				if (jump_to_line || res == LOOP_BREAK || res == LOOP_CONTINUE)
+					return g_script.mCurrLine->LineError(ERR_BAD_JUMP_INSIDE_FINALLY);
 			}
 			
 			if (aMode == ONLY_ONE_LINE || result != OK)
@@ -14547,6 +14781,12 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 		{
 			if (!line->mArgc)
 				return line->ThrowRuntimeException(_T("An exception was thrown."));
+
+			if (g.ThrownToken)
+			{
+				// This may happen if the catch is executed inside a finally block.
+				g_script.FreeExceptionToken(g.ThrownToken);
+			}
 
 			ExprTokenType* token = new ExprTokenType;
 			if (!token) // Unlikely.
@@ -14599,12 +14839,19 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 			return FAIL;
 		}
 
+		case ACT_FINALLY:
+		{
+			// Directly execute next line
+			line = line->mNextLine;
+			continue;
+		}
+
 		case ACT_EXIT:
 			// If this script has no hotkeys and hasn't activated one of the hooks, EXIT will cause the
 			// the program itself to terminate.  Otherwise, it causes us to return from all blocks
 			// and Gosubs (i.e. all the way out of the current subroutine, which was usually triggered
 			// by a hotkey):
-			if (IS_PERSISTENT)
+			if (g_ReturnNotExit == true || IS_PERSISTENT)
 				return EARLY_EXIT;  // It's "early" because only the very end of the script is the "normal" exit.
 				// EARLY_EXIT needs to be distinct from FAIL for ExitApp() and AutoExecSection().
 			// Otherwise, FALL THROUGH TO BELOW:
@@ -14738,7 +14985,7 @@ ResultType Line::EvaluateCondition() // __forceinline on this reduces benchmarks
 // Returns CONDITION_TRUE or CONDITION_FALSE (FAIL is returned only in DEBUG mode).
 {
 #ifdef _DEBUG
-	if (!ACT_IS_IF(mActionType))
+	if (!ACT_IS_IF(mActionType) && mActionType != ACT_CONTINUEIF && mActionType != ACT_BREAKIF)
 		return LineError(_T("DEBUG: EvaluateCondition() was called with a line that isn't a condition."));
 #endif
 
@@ -18261,14 +18508,6 @@ ResultType Script::SetErrorLevelOrThrowBool(bool aError)
 		return g_ErrorLevel->Assign(ERRORLEVEL_NONE);
 	if (!g->InTryBlock)
 		return g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
-	// Otherwise, an error occurred and there is a try block, so throw an exception:
-	return ThrowRuntimeException(ERRORLEVEL_ERROR);
-}
-
-ResultType Script::SetErrorLevelOrThrowStr(LPCTSTR aErrorValue)
-{
-	if ((*aErrorValue == '0' && !aErrorValue[1]) || !g->InTryBlock)
-		return g_ErrorLevel->Assign(aErrorValue);
 	// Otherwise, an error occurred and there is a try block, so throw an exception:
 	return ThrowRuntimeException(ERRORLEVEL_ERROR);
 }

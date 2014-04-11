@@ -133,10 +133,10 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 		// But all are checked since that operation is just as fast:
 		if (IS_OPERAND(this_token.symbol)) // If it's an operand, just push it onto stack for use by an operator in a future iteration.
 		{
-			// HotKeyIt added a way to override default behaviour for Manually added BuildIn Variable
-			if (this_token.symbol == SYM_DYNAMIC || (this_token.symbol == SYM_VAR && this_token.var->mType == VAR_BUILTIN)) // CONVERTED HERE/EARLY TO SOMETHING *OTHER* THAN SYM_DYNAMIC so that no later stages need any handling for them as operands. SYM_DYNAMIC is quite similar to SYM_FUNC/BIF in this respect.
+			// HotKeyIt added a way to override default behaviour for Manually added BuildIn Variable -removed->> || (this_token.symbol == SYM_VAR && this_token.var->mType == VAR_BUILTIN)
+			if (this_token.symbol == SYM_DYNAMIC ) // CONVERTED HERE/EARLY TO SOMETHING *OTHER* THAN SYM_DYNAMIC so that no later stages need any handling for them as operands. SYM_DYNAMIC is quite similar to SYM_FUNC/BIF in this respect.
 			{
-				if (SYM_DYNAMIC_IS_DOUBLE_DEREF(this_token) && this_token.symbol != SYM_VAR) // Double-deref such as Array%i%.
+				if (SYM_DYNAMIC_IS_DOUBLE_DEREF(this_token)) // Double-deref such as Array%i%.   // Hotkeyit override default behaviour manual build in var -removed->> && this_token.symbol != SYM_VAR
 				{
 					// Start off by looking for the first deref.
 					deref = (DerefType *)this_token.var; // MUST BE DONE PRIOR TO OVERWRITING MARKER/UNION BELOW.
@@ -1761,7 +1761,10 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 		if (rvalue)
 			aParam[aParamCount++] = rvalue; // In place of the variadic param.
 		// mMinParams isn't validated at load-time for variadic calls, so we must do it here:
-		if (aParamCount < mMinParams)
+		// However, this check must be skipped for user-defined functions so that a named value
+		// can be supplied for a required parameter.  Missing required parameters are detected
+		// in the loop below by the absence of a default value.
+		if (aParamCount < mMinParams && mIsBuiltIn)
 			return false; // Abort expression.
 		// Otherwise, even if some params are SYM_MISSING, it is relatively safe to call the function.
 		// The TokenTo' set of functions will produce 0 or "" for missing params.  Although that isn't
@@ -1816,7 +1819,7 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 			for (j = 0; j < aParamCount; ++j) // For each actual parameter.
 			{
 				ExprTokenType &this_param_token = *aParam[j]; // stack[stack_count] is the first actual parameter. A check higher above has already ensured that this line won't cause stack overflow.
-				if (this_param_token.symbol == SYM_VAR && !mParam[j].is_byref)
+				if (this_param_token.symbol == SYM_VAR && !(j < mParamCount && mParam[j].is_byref))
 				{
 					// Since this formal parameter is passed by value, if it's SYM_VAR, convert it to
 					// a non-var to allow the variables to be backed up and reset further below without
@@ -2181,6 +2184,7 @@ ResultType Line::ExpandArgs(ExprTokenType *aResultToken, VarSizeType aSpaceNeede
 				arg_deref[i] = // The following is ordered for short-circuit performance:
 					(   ACT_IS_ASSIGN(mActionType) && i == 1  // By contrast, for the below i==anything (all args):
 					|| (mActionType <= ACT_LAST_OPTIMIZED_IF && mActionType >= ACT_FIRST_OPTIMIZED_IF) // Ordered for short-circuit performance.
+					||  mActionType == ACT_BREAKIF ||  mActionType == ACT_CONTINUEIF
 					//|| mActionType == ACT_WHILE // Not necessary to check this one because loadtime leaves ACT_WHILE as an expression in all common cases. Also, there's no easy way to get ACT_WHILE into the range above due to the overlap of other ranges in enum_act.
 					) && the_only_var_of_this_arg->Type() == VAR_NORMAL // Otherwise, users of this optimization would have to reproduce more of the logic in ArgMustBeDereferenced().
 					? _T("") : NULL; // See "Update #2" and later comments above.

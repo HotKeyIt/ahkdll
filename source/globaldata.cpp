@@ -28,7 +28,7 @@ GNU General Public License for more details.
 // state, don't keep anything in the global_struct except those things
 // which are necessary to save and restore (even though it would clean
 // up the code and might make maintaining it easier):
-HRSRC g_hResource = NULL; // Set by WinMain()
+HRSRC g_hResource = NULL; // Set by WinMain() // for compiled AutoHotkey.exe
 HINSTANCE g_hInstance = NULL; // Set by WinMain().
 HMODULE g_hMemoryModule = NULL; // Set by DllMain() used for COM 
 DWORD g_MainThreadID = GetCurrentThreadId();
@@ -41,6 +41,7 @@ CRITICAL_SECTION g_CriticalAhkFunction;
 
 UINT g_DefaultScriptCodepage = CP_ACP;
 
+bool g_ReturnNotExit;	// for ahkExec/addScript/addFile
 bool g_DestroyWindowCalled = false;
 HWND g_hWnd = NULL;
 HWND g_hWndEdit = NULL;
@@ -261,6 +262,18 @@ ToggleValueType g_BlockInputMode = TOGGLE_DEFAULT;
 bool g_BlockInput = false;
 bool g_BlockMouseMove = false;
 
+TCHAR g_default_pwd0;
+TCHAR g_default_pwd1;
+TCHAR g_default_pwd2;
+TCHAR g_default_pwd3;
+TCHAR g_default_pwd4;
+TCHAR g_default_pwd5;
+TCHAR g_default_pwd6;
+TCHAR g_default_pwd7;
+TCHAR g_default_pwd8;
+TCHAR g_default_pwd9;
+TCHAR *g_default_pwd[] = {&g_default_pwd0,&g_default_pwd1,&g_default_pwd2,&g_default_pwd3,&g_default_pwd4,&g_default_pwd5,&g_default_pwd6,&g_default_pwd7,&g_default_pwd8,&g_default_pwd9,0,0};
+
 // The order of initialization here must match the order in the enum contained in script.h
 // It's in there rather than in globaldata.h so that the action-type constants can be referred
 // to without having access to the global array itself (i.e. it avoids having to include
@@ -440,10 +453,12 @@ Action g_act[] =
 	, {_T("For"), 1, 3, 3, {3, 0}}  // For var [,var] in expression
 	, {_T("While"), 1, 1, 1, {1, 0}} // LoopCondition.  v1.0.48: Lexikos: Added g_act entry for ACT_WHILE.
 	, {_T("Until"), 1, 1, 1, {1, 0}} // Until expression (follows a Loop)
-	, {_T("Break"), 0, 1, 1, NULL}, {_T("Continue"), 0, 1, 1, NULL}
+	, {_T("Break"), 0, 1, 1, NULL}, {_T("BreakIf"), 1, 2, 2, {1, 0}}
+	, {_T("Continue"), 0, 1, 1, NULL}, {_T("ContinueIf"), 1, 2, 2, {1, 0}}
 	, {_T("Try"), 0, 0, 0, NULL}
 	, {_T("Catch"), 0, 1, 0, NULL} // fincs: seems best to allow catch without a parameter
 	, {_T("Throw"), 0, 1, 1, {1, 0}}
+	, {_T("Finally"), 0, 0, 0, NULL}
 	, {_T("{"), 0, 0, 0, NULL}, {_T("}"), 0, 0, 0, NULL}
 
 	, {_T("WinActivate"), 0, 4, 2, NULL} // Passing zero params results in activating the LastUsed window.

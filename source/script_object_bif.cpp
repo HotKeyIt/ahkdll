@@ -67,7 +67,10 @@ BIF_DECL(BIF_sizeof)
 
 	// definition and field name are same max size as variables
 	// also add enough room to store pointers (**) and arrays [1000]
-	TCHAR defbuf[MAX_VAR_NAME_LENGTH*2 + 40];
+	// give more room to use local or static variable Function(variable)
+	// Parameter passed to IsDefaultType needs to be ' Definition '
+	// this is because spaces are used as delimiters ( see IsDefaultType function )
+	TCHAR defbuf[MAX_VAR_NAME_LENGTH*2 + 40] = _T(" UInt "); // Set default UInt definition
 	
 	// buffer for arraysize + 2 for bracket ] and terminating character
 	TCHAR intbuf[MAX_INTEGER_LENGTH + 2];
@@ -221,8 +224,8 @@ BIF_DECL(BIF_sizeof)
 			_tcsncpy(defbuf + 1,tempbuf,_tcscspn(tempbuf,_T("\t [")));
 			_tcscpy(defbuf + 1 + _tcscspn(tempbuf,_T("\t [")),_T(" "));
 		}
-		else // Not 'TypeOnly' definition because there are more than one fields in array so use default type UInt
-			_tcscpy(defbuf,_T(" UInt "));
+		// else // Not 'TypeOnly' definition because there are more than one fields in array so use default type UInt
+			// _tcscpy(defbuf,_T(" UInt "));
 		
 		// Now find size in default types array and create new field
 		// If Type not found, resolve type to variable and get size of struct defined in it
@@ -371,7 +374,6 @@ BIF_DECL(BIF_ObjArray)
 //
 
 BIF_DECL(BIF_IsObject)
-// IsObject(obj) is currently equivalent to (obj && obj=""), but much more intuitive.
 {
 	int i;
 	for (i = 0; i < aParamCount && TokenToObject(*aParam[i]); ++i);
@@ -521,6 +523,7 @@ BIF_DECL(BIF_ObjNew)
 		aResultToken.buf = buf;
 		if (result == FAIL)
 		{
+			new_object->Release();
 			aParam[0] = class_token; // Restore it to original caller-supplied value.
 			return;
 		}

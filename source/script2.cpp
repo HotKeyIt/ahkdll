@@ -4135,14 +4135,28 @@ ResultType Line::WinGetPos(LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LP
 
 ResultType Line::EnvGet(LPTSTR aEnvVarName)
 {
+	Var *output_var = OUTPUT_VAR;
 	// Don't use a size greater than 32767 because that will cause it to fail on Win95 (tested by Robert Yalkin).
 	// According to MSDN, 32767 is exactly large enough to handle the largest variable plus its zero terminator.
+	// Update: In practice, at least on Windows 7, the limit only applies to the ANSI functions.
 	TCHAR buf[32767];
 	// GetEnvironmentVariable() could be called twice, the first time to get the actual size.  But that would
-	// probably perform worse since GetEnvironmentVariable() is a very slow function.  In addition, it would
-	// add code complexity, so it seems best to fetch it into a large buffer then just copy it to dest-var.
+	// probably perform worse since GetEnvironmentVariable() is a very slow function, so it seems best to fetch
+	// it into a large buffer then just copy it to dest-var.
 	DWORD length = GetEnvironmentVariable(aEnvVarName, buf, _countof(buf));
-	return OUTPUT_VAR->Assign(length ? buf : _T(""), length);
+	if (length >= _countof(buf))
+	{
+		// In this case, length indicates the required buffer size, and the contents of the buffer are undefined.
+		// Since our buffer is 32767 characters, the var apparently exceeds the documented limit, as can happen
+		// if the var was set with the Unicode API.
+		if (!output_var->AssignString(NULL, length - 1, true))
+			return FAIL;
+		length = GetEnvironmentVariable(aEnvVarName, output_var->Contents(), length);
+		if (!length)
+			*output_var->Contents() = '\0'; // Ensure var is null-terminated.
+		return output_var->Close();
+	}
+	return output_var->Assign(length ? buf : _T(""), length);
 }
 
 
@@ -4634,7 +4648,7 @@ fast_end:
 		// Otherwise, success.  Calculate xpos and ypos of where the match was found and adjust
 		// coords to make them relative to the position of the target window (rect will contain
 		// zeroes if this doesn't need to be done):
-		if (!aIsPixelGetColor)
+		if (!aIsPixelGetColor && found)
 		{
 			if (output_var_x && !output_var_x->Assign((aLeft + i%screen_width) - origin.x))
 				return FAIL;
@@ -5082,6 +5096,8 @@ end:
 		free(image_mask);
 	if (screen_pixel)
 		free(screen_pixel);
+	else // One of the GDI calls failed.
+		goto error;
 
 	if (!found) // Let ErrorLevel, which is either "1" or "2" as set earlier, tell the story.
 		return OK;
@@ -5764,8 +5780,8 @@ bool HandleMenuItem(HWND aHwnd, WORD aMenuItemID, HWND aGuiHwnd)
 		ShowMainWindow(MAIN_MODE_REFRESH);
 		return true;
 	case ID_HELP_WEBSITE:
-		if (!g_script.ActionExec(_T("http://www.autohotkey.com"), _T(""), NULL, false))
-			MsgBox(_T("Could not open URL http://www.autohotkey.com in default browser."));
+		if (!g_script.ActionExec(_T(AHK_WEBSITE), _T(""), NULL, false))
+			MsgBox(_T("Could not open URL ") _T(AHK_WEBSITE) _T(" in default browser."));
 		return true;
 	default:
 		// See if this command ID is one of the user's custom menu items.  Due to the possibility
@@ -9724,7 +9740,7 @@ ResultType Line::FileRead(LPTSTR aFilespec)
 	{
 		// Set up the var, enlarging it if necessary.  If the output_var is of type VAR_CLIPBOARD,
 		// this call will set up the clipboard for writing:
-		if (output_var.SetCapacity(VarSizeType(bytes_to_read), true, false) == OK)
+		if (output_var.SetCapacity(VarSizeType(bytes_to_read) + (sizeof(wchar_t) - sizeof(TCHAR)), true, false) == OK) // SetCapacity() reserves 1 TCHAR for null-terminator.  Allow an extra byte on ANSI builds for wchar_t.
 			output_buf = (LPBYTE) output_var.Contents();
 		else
 			output_buf = NULL; // Above already displayed the error message.
@@ -10318,19 +10334,19 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 	  && (res_lock = LockResource(res_load))  )
 	{
 		DWORD num_bytes_written;
+		DWORD aSizeDeCompressed = NULL;
 		// Write the resource data to file.
-		if (*(unsigned int*)res_lock == 0x005F5A4C)
+		if (*(unsigned int*)res_lock == 0x04034b50)
 		{
-			DWORD aSizeDecompressed = DecompressBuffer(res_lock);
-			if (aSizeDecompressed)
+			LPVOID aDataBuf;
+			aSizeDeCompressed = DecompressBuffer(res_lock,aDataBuf,g_default_pwd);
+			if (aSizeDeCompressed)
 			{
-				success = WriteFile(hfile, res_lock, aSizeDecompressed, &num_bytes_written, NULL);
-				VirtualFree(res_lock,aSizeDecompressed,MEM_RELEASE);
+				success = WriteFile(hfile, res_lock, aSizeDeCompressed, &num_bytes_written, NULL);
+				VirtualFree(aDataBuf,aSizeDeCompressed,MEM_RELEASE);
 			}
-			else
-				success = WriteFile(hfile, res_lock, SizeofResource(NULL, res), &num_bytes_written, NULL);
 		}
-		else
+		if (!aSizeDeCompressed)
 			success = WriteFile(hfile, res_lock, SizeofResource(NULL, res), &num_bytes_written, NULL);
 	}
 	else
@@ -10366,19 +10382,19 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 		  && (res_lock = LockResource(res_load))  )
 		{
 			DWORD num_bytes_written;
+			DWORD aSizeDeCompressed = NULL;
 			// Write the resource data to file.
-			if (*(unsigned int*)res_lock == 0x005F5A4C)
+			if (*(unsigned int*)res_lock == 0x04034b50)
 			{
-				DWORD aSizeDecompressed = DecompressBuffer(res_lock);
-				if (aSizeDecompressed)
+				LPVOID aDataBuf;
+				aSizeDeCompressed = DecompressBuffer(res_lock,aDataBuf,g_default_pwd);
+				if (aSizeDeCompressed)
 				{
-					success = WriteFile(hfile, res_lock, aSizeDecompressed, &num_bytes_written, NULL);
-					VirtualFree(res_lock,aSizeDecompressed,MEM_RELEASE);
+					success = WriteFile(hfile, aDataBuf, aSizeDeCompressed, &num_bytes_written, NULL);
+					VirtualFree(aDataBuf,aSizeDeCompressed,MEM_RELEASE);
 				}
-				else
-					success = WriteFile(hfile, res_lock, SizeofResource(NULL, res), &num_bytes_written, NULL);
 			}
-			else
+			if (!aSizeDeCompressed)
 				success = WriteFile(hfile, res_lock, SizeofResource(NULL, res), &num_bytes_written, NULL);
 		}
 		else
@@ -11110,19 +11126,37 @@ BOOL Line::IsOutsideAnyFunctionBody() // v1.0.48.02
 }
 
 
+BOOL Line::CheckValidFinallyJump(Line* jumpTarget) // v1.1.14
+{
+	Line* jumpParent = jumpTarget->mParentLine;
+	for (Line *ancestor = mParentLine; ancestor != NULL; ancestor = ancestor->mParentLine)
+	{
+		if (ancestor == jumpParent)
+			return TRUE; // We found the common ancestor.
+		if (ancestor->mActionType == ACT_FINALLY)
+		{
+			LineError(ERR_BAD_JUMP_INSIDE_FINALLY);
+			return FALSE; // The common ancestor is outside the FINALLY block and thus this jump is invalid.
+		}
+	}
+	return TRUE; // The common ancestor is the root of the script.
+}
+
+
 ////////////////////////
 // BUILT-IN VARIABLES //
 ////////////////////////
 
-VarSizeType BIV_True_False(LPTSTR aBuf, LPTSTR aVarName)
+VarSizeType BIV_True_False_Null(LPTSTR aBuf, LPTSTR aVarName)
 {
 	if (aBuf)
 	{
-		*aBuf++ = aVarName[4] ? '0': '1';
+		*aBuf++ = (aVarName[2] == 'l' || aVarName[2] == 'L') ? '0': '1';
 		*aBuf = '\0';
 	}
 	return 1; // The length of the value.
 }
+
 
 VarSizeType BIV_MMM_DDD(LPTSTR aBuf, LPTSTR aVarName)
 {
@@ -13179,7 +13213,7 @@ int ConvertDllArgTypes(LPTSTR aBuf, DYNAPARM *aDynaParam)
 
 	for (i = 0, type_string = aBuf; *type_string; type_string = (aBuf + (++i)))
 	{
-		if (_tcschr(type_string,'=') || ctoupper(*type_string) == 'U' || (*type_string == '*') )// Unsigned
+		if (_tcschr(type_string,'=') || _tcschr(type_string,' ') || _tcschr(type_string,'\t') || ctoupper(*type_string) == 'U' || (*type_string == '*') )
 			continue;
 		if (i>0 && ctoupper(*(aBuf + i - 1)) == 'U') // Unsigned
 			aDynaParam[arg_count].is_unsigned = true;
@@ -13333,10 +13367,11 @@ void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free) // L31: 
 
 BIF_DECL(BIF_DynaCall)
 {
-	IObject *obj = NULL;
-	if (aParam[0]->symbol == SYM_OBJECT)
+	IObject *obj = TokenToObject(*aParam[0]);
+	if (obj)
 	{
-		aParam[0]->object->Invoke(aResultToken,*aParam[0],IT_SET,aParam+1,aParamCount-1);
+		obj->Invoke(aResultToken,*aParam[0],IT_SET,aParam+1,aParamCount-1);
+		return;
 	}
 	else if (aParamCount == 1 && aParam[0]->symbol == PURE_INTEGER) // L33: POTENTIALLY UNSAFE - Cast IObject address to object reference.
 	{
@@ -13404,22 +13439,14 @@ DynaToken *DynaToken::Create(ExprTokenType *aParam[], int aParamCount)
 				g_ErrorLevel->Assign(_T("-2")); // Stage 2 error: Invalid return type or arg type.
 				return NULL;
 			}
-			else if (aParam[1]->symbol == SYM_OBJECT)
+			else if (aParam[1]->symbol == SYM_OBJECT || (aParam[1]->symbol == SYM_VAR && aParam[1]->var->HasObject()))
 			{
 				oParam.symbol = PURE_INTEGER;
 				oParam.value_int64 =1;
-				aParam[1]->object->Invoke(result_token,*aParam[1],IT_GET,param,1);
-				if (IS_NUMERIC(result_token.symbol) || result_token.symbol == SYM_OBJECT)
-				{
-					g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
-					return NULL;
-				}
-			}
-			else if (aParam[1]->symbol == SYM_VAR && aParam[1]->var->HasObject())
-			{
-				oParam.symbol = PURE_INTEGER;
-				oParam.value_int64 =1;
-				aParam[1]->var->mObject->Invoke(result_token,*aParam[1],IT_GET,param,1);
+				if (aParam[1]->symbol == SYM_OBJECT)
+					aParam[1]->object->Invoke(result_token,*aParam[1],IT_GET,param,1);
+				else
+					aParam[1]->var->mObject->Invoke(result_token,*aParam[1],IT_GET,param,1);
 				if (IS_NUMERIC(result_token.symbol) || result_token.symbol == SYM_OBJECT)
 				{
 					g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
@@ -13427,44 +13454,46 @@ DynaToken *DynaToken::Create(ExprTokenType *aParam[], int aParamCount)
 				}
 			}
 			token = (aParam[1]->symbol == SYM_OBJECT || (aParam[1]->symbol == SYM_VAR && aParam[1]->var->HasObject())) ? result_token : *aParam[1];
-			LPTSTR return_type_string[1];
+			LPTSTR return_type_string;
 			if (token.symbol == SYM_VAR) // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
 			{
-				return_type_string[0] = token.var->Contents(TRUE,TRUE);
+				return_type_string = token.var->Contents(TRUE,TRUE);
 			}
 			else
 			{
-				return_type_string[0] = token.marker;
+				return_type_string = token.marker;
 			}
 
 			int i = 0;
-			for (;return_type_string[0][i];i++)
+			for (;return_type_string[i];i++)
 			{
-				if ( !(_tcschr(return_type_string[0]+i,'=') || ctoupper(return_type_string[0][i]) == 'U' || ctoupper(return_type_string[0][i]) == 'P' || (return_type_string[0][i] == '*')) )// Unsigned
+				if ( !(_tcschr(return_type_string+i,'=') || ctoupper(return_type_string[i]) == 'U' || ctoupper(return_type_string[i]) == 'P' || (return_type_string[i] == '*')) )// Unsigned
 					obj->marg_count++;
 			}
 			dyna_param = (DYNAPARM *)_alloca(obj->marg_count * sizeof(DYNAPARM));
-			if (obj->marg_count != ConvertDllArgTypes(return_type_string[0],dyna_param))
+			if (obj->marg_count != ConvertDllArgTypes(return_type_string,dyna_param))
 			{
 				g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 				return NULL;
 			}
-			if (_tcschr(return_type_string[0],'='))
+			if (_tcschr(return_type_string,'='))
 			{
 #ifdef WIN32_PLATFORM
-				if (_tcschr((_tcschr(return_type_string[0],'=') + 1),'='))
+				if (_tcschr((_tcschr(return_type_string,'=') + 1),'='))
 					obj->mdll_call_mode = DC_CALL_CDECL;
 #endif
 				obj->mreturn_attrib.type = DLL_ARG_INT;
 				TCHAR return_type_arg[4]; // maximal length of return type + terminating character
-				for (i=0;_tcschr(return_type_string[0] + i + 1,'=');i++)
-					return_type_arg[i] = return_type_string[0][i];
+				int c = 0;
+				for (i = 0, c = 0;_tcschr(return_type_string + c + 1,'=');c++)
+				{
+					if (return_type_string[c] != ' ' && return_type_string[c] != '/t')
+						return_type_arg[i++] = return_type_string[c];
+				}
 				return_type_arg[i] = '\0';
 				if (StrChrAny(return_type_arg, _T("uU")))
 				{
-					_tcsncpy(return_type_arg,return_type_arg + 1,sizeof(TCHAR));
-					_tcsncpy(return_type_arg + 1,return_type_arg + 2,sizeof(TCHAR));
-					//*(return_type_arg + 2) = '\0';
+					_tcsncpy(return_type_arg,return_type_arg + 1,sizeof(TCHAR) * 2);
 					obj->mreturn_attrib.is_unsigned = true;
 				}
 				else
@@ -13563,7 +13592,7 @@ CStringW **pStr = (CStringW **)
 					// to be stack memory, which would be invalid memory upon return to the caller).
 					// The complexity of this doesn't seem worth the rarity of the need, so this will be
 					// documented in the help file.
-					g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
+					g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 					return NULL;
 				}
 				// Otherwise, it's a supported type of string.
@@ -13598,7 +13627,7 @@ CStringW **pStr = (CStringW **)
 				// See the section above for comments.
 				if (((aParamCount-2) > i) && IS_NUMERIC(this_param.symbol))
 				{
-					g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
+					g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 					return NULL;
 				}
 				// String needing translation: ASTR on Unicode build, WSTR on ANSI build.
@@ -14769,6 +14798,7 @@ bool CriticalObject::Delete()
 	{
 		LeaveCriticalSection(this->lpCriticalSection);
 	}
+	this->object->Release();
 	return ObjectBase::Delete();
 }
 
@@ -17148,6 +17178,14 @@ BIF_DECL(BIF_VarSetCapacity)
 			}
 			if (new_capacity)
 			{
+				BYTE *aBkpContents;
+				VarSizeType aBkpCapacity;
+				if (aParamCount < 3 && (aBkpCapacity = var.Capacity()) > 1)  // Third parameter is present and var has enough capacity to make memmove() meaningful.
+				{   // backup variables content to restore later
+					// usefull when size of a variable is changed without loosing its content, e.g. increase memory array
+					aBkpContents = (BYTE*)_alloca(aBkpCapacity);
+					memmove(aBkpContents,var.Contents(false),aBkpCapacity);
+				}
 				var.SetCapacity(new_capacity, true, false); // This also destroys the variables contents.
 				// in characters
 				VarSizeType capacity;
@@ -17165,9 +17203,14 @@ BIF_DECL(BIF_VarSetCapacity)
 					var.SetCharLength(fill_byte ? capacity : 0); // Length is same as capacity unless fill_byte is zero.
 				}
 				else
+				{
+					// restore variables content if FillMemory parameter is not used and the size is apropriate
+					if (aParamCount < 3 && aBkpCapacity > 1 && (var.Capacity()) > 1)
+						memmove(var.Contents(false),aBkpContents,var.Capacity() < aBkpCapacity ? var.Capacity() : aBkpCapacity);
 					// By design, Assign() has already set the length of the variable to reflect new_capacity.
 					// This is not what is wanted in this case since it should be truly empty.
 					var.ByteLength() = 0;
+				}
 			}
 			else // ALLOC_SIMPLE, due to its nature, will not actually be freed, which is documented.
 				var.Free();
@@ -17183,6 +17226,8 @@ BIF_DECL(BIF_VarSetCapacity)
 		if (aResultToken.value_int64 = var.ByteCapacity()) // Don't subtract 1 here in lieu doing it below (avoids underflow).
 			aResultToken.value_int64 -= sizeof(TCHAR); // Omit the room for the zero terminator since script capacity is defined as length vs. size.
 	} // (aParam[0]->symbol == SYM_VAR)
+	else
+		aResult = g_script.ScriptError(ERR_PARAM1_INVALID);
 }
 
 
@@ -17243,36 +17288,34 @@ BIF_DECL(BIF_ResourceLoadLibrary)
 {
 	aResultToken.symbol = PURE_INTEGER;
 	aResultToken.value_int64 = 0;
+	if (TokenIsEmptyString(*aParam[0]))
+		return;
 	HMEMORYMODULE module = NULL;
 	TextMem::Buffer textbuf;
 	HRSRC hRes;
-	HGLOBAL hResData;
+	HGLOBAL hResData = NULL;
 
-	if (hRes = FindResource(NULL, TokenToString(*aParam[0]), MAKEINTRESOURCE(RT_RCDATA)))
+	hRes = FindResource(NULL, aParam[0]->symbol == SYM_VAR ? aParam[0]->var->Contents() : aParam[0]->marker, MAKEINTRESOURCE(RT_RCDATA));
 	
 	if ( !( hRes 
 			&& (textbuf.mLength = SizeofResource(NULL, hRes))
 			&& (hResData = LoadResource(NULL, hRes))
 			&& (textbuf.mBuffer = LockResource(hResData)) ) )
-	{
-		MsgBox(_T("Could not extract script from EXE."), 0, TokenToString(*aParam[0]));
 		return;
-	}
-	if (*(unsigned int*)textbuf.mBuffer == 0x005F5A4C)
+	DWORD aSizeDeCompressed = NULL;
+	if (*(unsigned int*)textbuf.mBuffer == 0x04034b50)
 	{
-		DWORD aSizeDecompressed = DecompressBuffer(textbuf.mBuffer);
-		if (aSizeDecompressed)
+		LPVOID aDataBuf;
+		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer,aDataBuf,g_default_pwd);
+		if (aSizeDeCompressed)
 		{
-			textbuf.mLength = aSizeDecompressed;
-			module = MemoryLoadLibrary( textbuf.mBuffer );
-			VirtualFree(textbuf.mBuffer,textbuf.mLength,MEM_RELEASE);
+			module = MemoryLoadLibrary( aDataBuf );
+			VirtualFree(aDataBuf,aSizeDeCompressed,MEM_RELEASE);
 		}
-		else
-			module = MemoryLoadLibrary( textbuf.mBuffer );
 	}
-	else
+	if (!aSizeDeCompressed)
 		module = MemoryLoadLibrary( textbuf.mBuffer );
-	aResultToken.value_int64 = (unsigned)module;
+	aResultToken.value_int64 = (UINT_PTR)module;
 }
 
 
@@ -17280,6 +17323,8 @@ BIF_DECL(BIF_MemoryLoadLibrary)
 {
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = 0;
+	if (TokenIsEmptyString(*aParam[0]))
+		return;
 	FILE *fp;
 	unsigned char *data=NULL;
 	size_t size;
@@ -17287,9 +17332,7 @@ BIF_DECL(BIF_MemoryLoadLibrary)
 	
 	fp = _tfopen(TokenToString(*aParam[0]), _T("rb"));
 	if (fp == NULL)
-	{
 		return;
-	}
 
 	fseek(fp, 0, SEEK_END);
 	size = ftell(fp);
@@ -17301,10 +17344,13 @@ BIF_DECL(BIF_MemoryLoadLibrary)
 		module = MemoryLoadLibrary(data);
 	aResultToken.value_int64 = (UINT_PTR)module;
 }
+
 BIF_DECL(BIF_MemoryGetProcAddress)
 {
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = 0;
+	if (!TokenToInt64(*aParam[0]))
+		return;
 	//if (!aParam[0]->deref->marker)
 		//return;
 	TCHAR *FuncName = TokenToString(*aParam[1]);
@@ -17324,89 +17370,106 @@ BIF_DECL(BIF_MemoryGetProcAddress)
 
 BIF_DECL(BIF_MemoryFreeLibrary)
 {
-	MemoryFreeLibrary((HMEMORYMODULE)TokenToInt64(*aParam[0]));
 	aResultToken.symbol = SYM_STRING;
 	aResultToken.marker =_T("");
+	if (!TokenToInt64(*aParam[0]))
+		return;
+	MemoryFreeLibrary((HMEMORYMODULE)TokenToInt64(*aParam[0]));
 }
 
 BIF_DECL(BIF_MemoryFindResource)
 {
+	aResultToken.symbol = SYM_STRING;
+	aResultToken.marker =_T("");
+	if (!TokenToInt64(*aParam[0]))
+		return;
 	HMEMORYRSRC resource = NULL;
-	resource = MemoryFindResource((HMEMORYMODULE)TokenToInt64(*aParam[0]),TokenIsPureNumeric(*aParam[1]) ? (LPCTSTR)TokenToInt64(*aParam[1]) : TokenToString(*aParam[1]),TokenIsPureNumeric(*aParam[2]) ? (LPCTSTR)TokenToInt64(*aParam[2]) : TokenToString(*aParam[2]));
+	if (ParamIndexIsOmitted(3)) // FindResource
+		resource = MemoryFindResource((HMEMORYMODULE)TokenToInt64(*aParam[0]),TokenIsPureNumeric(*aParam[1]) ? (LPCTSTR)TokenToInt64(*aParam[1]) : TokenToString(*aParam[1]),TokenIsPureNumeric(*aParam[2]) ? (LPCTSTR)TokenToInt64(*aParam[2]) : TokenToString(*aParam[2]));
+	else // FindResourceEx
+		resource = MemoryFindResourceEx((HMEMORYMODULE)TokenToInt64(*aParam[0]),TokenIsPureNumeric(*aParam[1]) ? (LPCTSTR)TokenToInt64(*aParam[1]) : TokenToString(*aParam[1]),TokenIsPureNumeric(*aParam[2]) ? (LPCTSTR)TokenToInt64(*aParam[2]) : TokenToString(*aParam[2]),(WORD)TokenToInt64(*aParam[3]));
 	if (resource)
 	{
 		aResultToken.symbol = SYM_INTEGER;
 		aResultToken.value_int64 = (__int64)resource;
 	}
-	else
-	{
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker =_T("");
-	}
 }
-BIF_DECL(BIF_MemoryFindResourceEx)
-{
-	HMEMORYRSRC resource = NULL;
-	resource = MemoryFindResourceEx((HMEMORYMODULE)TokenToInt64(*aParam[0]),TokenIsPureNumeric(*aParam[1]) ? (LPCTSTR)TokenToInt64(*aParam[1]) : TokenToString(*aParam[1]),TokenIsPureNumeric(*aParam[2]) ? (LPCTSTR)TokenToInt64(*aParam[2]) : TokenToString(*aParam[2]),(WORD)TokenToInt64(*aParam[2]));
-	if (resource)
-	{
-		aResultToken.symbol = SYM_INTEGER;
-		aResultToken.value_int64 = (__int64)resource;
-	}
-	else
-	{
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker =_T("");
-	}
-}
-BIF_DECL(BIF_MemorySizeofResource)
-{
-	aResultToken.value_int64 = MemorySizeofResource((HMEMORYMODULE)TokenToInt64(*aParam[0]),(HMEMORYRSRC)TokenToInt64(*aParam[1]));
-	if (aResultToken.value_int64)
-		aResultToken.symbol = SYM_INTEGER;
-	else
-	{
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker =_T("");
-	}
 
+BIF_DECL(BIF_MemorySizeOfResource)
+{
+	aResultToken.symbol = SYM_INTEGER;
+	aResultToken.value_int64 = 0;
+	if (!TokenToInt64(*aParam[0]))
+		return;
+	aResultToken.value_int64 = MemorySizeOfResource((HMEMORYMODULE)TokenToInt64(*aParam[0]),(HMEMORYRSRC)TokenToInt64(*aParam[1]));
 }
+
 BIF_DECL(BIF_MemoryLoadResource)
 {
+	aResultToken.symbol = SYM_INTEGER;
+	aResultToken.value_int64 = 0;
+	if (!TokenToInt64(*aParam[0]))
+		return;
 	aResultToken.value_int64 = (__int64)MemoryLoadResource((HMEMORYMODULE)TokenToInt64(*aParam[0]),(HMEMORYRSRC)TokenToInt64(*aParam[1]));
-	if (aResultToken.value_int64)
-		aResultToken.symbol = SYM_INTEGER;
-	else
-	{
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker =_T("");
-	}
-
 }
+
 BIF_DECL(BIF_MemoryLoadString)
 {
-	aResultToken.value_int64 = MemoryLoadString((HMEMORYMODULE)TokenToInt64(*aParam[0]),(UINT)TokenToInt64(*aParam[1]),TokenToString(*aParam[2]),(int)TokenToInt64(*aParam[3]));
-	if (aResultToken.value_int64)
+	aResultToken.symbol = SYM_STRING;
+	aResultToken.marker = _T("");
+	if (!TokenToInt64(*aParam[0]))
+		return;
+	LPVOID result;
+	if (ParamIndexIsOmitted(2) || TokenToInt64(*aParam[2]) == 0 )
+		result = MemoryLoadStringEx((HMEMORYMODULE)TokenToInt64(*aParam[0]),(UINT)TokenToInt64(*aParam[1]),0,0,ParamIndexIsOmitted(4) ? 0 : (WORD)TokenToInt64(*aParam[4]));
+	else
+		result = MemoryLoadStringEx((HMEMORYMODULE)TokenToInt64(*aParam[0]),(UINT)TokenToInt64(*aParam[1]),TokenToString(*aParam[2]),(int)TokenToInt64(*aParam[3]),ParamIndexIsOmitted(4) ? 0 : (WORD)TokenToInt64(*aParam[4]));
+	if (result)
+	{	
 		aResultToken.symbol = SYM_INTEGER;
+		aResultToken.value_int64 = (__int64)result;
+	}
 	else
 	{
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker =_T("");
 	}
-
 }
 
-BIF_DECL(BIF_MemoryLoadStringEx)
+BIF_DECL(BIF_UnZipRawMemory)
 {
-	aResultToken.value_int64 = MemoryLoadStringEx((HMEMORYMODULE)TokenToInt64(*aParam[0]),(UINT)TokenToInt64(*aParam[1]),TokenToString(*aParam[2]),(int)TokenToInt64(*aParam[3]),(WORD)TokenToInt64(*aParam[4]));
-	if (aResultToken.value_int64)
-		aResultToken.symbol = SYM_INTEGER;
-	else
+	if (TokenToInt64(*aParam[0]))
 	{
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker =_T("");
-	}
+		LPVOID aDataBuf = NULL;
+		TCHAR *pw[1024] = {};
+		if (!ParamIndexIsOmittedOrEmpty(2))
+		{
+			TCHAR *pwd = TokenToString(*aParam[2]);
+			size_t pwlen = _tcslen(TokenToString(*aParam[2]));
+			for(size_t i = 0;i <= pwlen;i++)
+				pw[i] = &pwd[i];
+		}
+		aResultToken.value_int64 = DecompressBuffer((void *)TokenToInt64(*aParam[0]), aDataBuf,pw);
+		if (aResultToken.value_int64)
+		{
+			aResultToken.symbol = SYM_INTEGER;
+			if (!ParamIndexIsOmitted(1))
+			{
+				if (aParam[1]->symbol == SYM_VAR)
+				{
+					aParam[1]->var->SetCapacity((VarSizeType)aResultToken.value_int64 + sizeof(TCHAR));
+					memmove(aParam[1]->var->mCharContents,aDataBuf,(SIZE_T)aResultToken.value_int64 + sizeof(TCHAR));
+				}
+				else if (TokenToInt64(*aParam[1]) > 1024) // Assume address
+					memmove((void *)TokenToInt64(*aParam[1]),aDataBuf,(SIZE_T)aResultToken.value_int64);
 
+			}
+			VirtualFree(aDataBuf,(SIZE_T)aResultToken.value_int64,MEM_RELEASE);
+			return;
+		}
+	}
+	aResultToken.symbol = SYM_STRING;
+	aResultToken.marker =_T("");
 }
 
 BIF_DECL(BIF_Round)
@@ -17769,7 +17832,7 @@ BIF_DECL(BIF_OnMessage)
 				MoveMemory(g_MsgMonitor+msg_index, g_MsgMonitor+msg_index+1, sizeof(MsgMonitorStruct)*(g_MsgMonitorCount-msg_index));
 			return;
 		}
-		if (aParamCount < 2 || (specified_hwnd && aParamCount < 3)) // Single-parameter mode: Report existing item's function name.
+		if (aParamCount < (specified_hwnd ? 3 : 2)) // Single-parameter mode: Report existing item's function name.
 			return; // Everything was already set up above to yield the proper return value.
 		// Otherwise, an existing item is being assigned a new function or MaxThreads limit.
 		// Continue on to update this item's attributes.

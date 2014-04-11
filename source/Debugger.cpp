@@ -600,8 +600,7 @@ DEBUGGER_COMMAND(Debugger::breakpoint_set)
 			return DEBUGGER_E_BREAKPOINT_INVALID;
 	}
 
-	Line *line = NULL;
-	bool found_line = false;
+	Line *line = NULL, *found_line = NULL;
 	// Due to the introduction of expressions in static initializers, lines aren't necessarily in
 	// line number order.  First determine if any static initializers match the requested lineno.
 	// If not, use the first non-static line at or following that line number.
@@ -609,9 +608,9 @@ DEBUGGER_COMMAND(Debugger::breakpoint_set)
 	if (g_script.mFirstStaticLine)
 		for (line = g_script.mFirstStaticLine; ; line = line->mNextLine)
 		{
-			if (line->mFileIndex == file_index && line->mLineNumber == lineno)
+			if (line->mFileIndex == file_index && line->mLineNumber == lineno) // Exact match, unlike normal lines.
 			{
-				found_line = true;
+				found_line = line;
 				break;
 			}
 			if (line == g_script.mLastStaticLine)
@@ -631,19 +630,21 @@ DEBUGGER_COMMAND(Debugger::breakpoint_set)
 					continue;
 				// Use the first line of code at or after lineno, like Visual Studio.
 				// To display the breakpoint correctly, an IDE should use breakpoint_get.
-				found_line = true;
-				break;
+				if (!found_line || found_line->mLineNumber > line->mLineNumber)
+					found_line = line;
+				// Must keep searching, since class var initializers can cause lines to be listed out of order.
+				//break;
 			}
 	if (found_line)
 	{
-		if (!line->mBreakpoint)
-			line->mBreakpoint = new Breakpoint();
-		line->mBreakpoint->state = state;
-		line->mBreakpoint->temporary = temporary;
+		if (!found_line->mBreakpoint)
+			found_line->mBreakpoint = new Breakpoint();
+		found_line->mBreakpoint->state = state;
+		found_line->mBreakpoint->temporary = temporary;
 
 		return mResponseBuf.WriteF(
 			"<response command=\"breakpoint_set\" transaction_id=\"%e\" state=\"%s\" id=\"%i\"/>"
-			, aTransactionId, state ? "enabled" : "disabled", line->mBreakpoint->id);
+			, aTransactionId, state ? "enabled" : "disabled", found_line->mBreakpoint->id);
 	}
 	// There are no lines of code beginning at or after lineno.
 	return DEBUGGER_E_BREAKPOINT_INVALID;
@@ -1460,7 +1461,7 @@ int Debugger::ParsePropertyName(const char *aFullName, int aVarScope, bool aVarM
 					if (c == '"')
 					{
 						// Quote mark; but is it a literal quote mark?
-						if (*++src != '"') // This currently doesn't match up with expression syntax, but is left this way for simplicity.
+						if (*++src != '"')
 							// Nope.
 							break;
 						//else above skipped the second quote mark, so fall through:
