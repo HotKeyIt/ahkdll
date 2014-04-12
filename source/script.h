@@ -143,6 +143,7 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_NONEXISTENT_FUNCTION _T("Call to nonexistent function.")
 #define ERR_UNRECOGNIZED_DIRECTIVE _T("Unknown directive.")
 #define ERR_EXE_CORRUPTED _T("EXE corrupted")
+#define ERR_INVALID_VALUE _T("Invalid value.")
 #define ERR_PARAM1_INVALID _T("Parameter #1 invalid.")
 #define ERR_PARAM2_INVALID _T("Parameter #2 invalid.")
 #define ERR_PARAM3_INVALID _T("Parameter #3 invalid.")
@@ -3009,6 +3010,7 @@ BIF_DECL(BIF_FileOpen);
 
 
 // COM interop
+BIF_DECL(BIF_ComObject);
 BIF_DECL(BIF_ComObjActive);
 BIF_DECL(BIF_ComObjParameter);
 BIF_DECL(BIF_ComObjEnwrap);

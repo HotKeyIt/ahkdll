@@ -164,10 +164,8 @@ FuncEntry g_BIF[] =
 	{_T("Array"), BIF_ObjArray, 0, NA, true},
 	{_T("FileOpen"), BIF_FileOpen, 2, 3, true},
 	
+	{_T("ComObject"), BIF_ComObject, 1, 3, true},
 	{_T("ComObjActive"), BIF_ComObjActive, 1, 1, true},
-	{_T("ComObjParameter"), BIF_ComObjParameter, 2, 3, true},
-	{_T("ComObjEnwrap"), BIF_ComObjEnwrap, 1, 2, true},
-	{_T("ComObjUnwrap"), BIF_ComObjUnwrap, 1, 1, true},
 	{_T("ComObjCreate"), BIF_ComObjCreate, 1, 2, true},
 	{_T("ComObjGet"), BIF_ComObjGet, 1, 1, true},
 	{_T("ComObjDll"), BIF_ComObjDll, 2, 2, true},
@@ -621,15 +619,8 @@ void Script::Destroy()
 	g_MaxThreadsBuffer = false;  // This feature usually does more harm than good, so it defaults to OFF.
 	g_InputLevel = 0;
 #ifndef MINIDLL
-	g_HotCriterion = HOT_NO_CRITERION;
-	g_HotWinTitle = _T(""); // In spite of the above being the primary indicator,
-	g_HotWinText = _T("");  // these are initialized for maintainability.
 	g_FirstHotCriterion = NULL;
 	g_LastHotCriterion = NULL;
-	g_HotExprIndex = -1; // The index of the Line containing the expression defined by the most recent #if (expression) directive.
-	g_HotExprLines = NULL; // Array of pointers to expression lines, allocated when needed.
-	g_HotExprLineCount = 0; // Number of expression lines currently present.
-	g_HotExprLineCountMax = 0; // Current capacity of g_HotExprLines.
 	g_HotExprTimeout = 1000; // Timeout for #if (expression) evaluation, in milliseconds.
 	g_HotExprLFW = NULL; // Last Found Window of last #if expression.
 	g_MenuIsVisible = MENU_TYPE_NONE;
@@ -1183,6 +1174,11 @@ ResultType Script::AutoExecSection()
 	CopyMemory(g_array, g, sizeof(global_struct)); // Copy the temporary/startup "g" into array[0] to preserve historical behaviors that may rely on the idle thread starting with that "g".
 	g = g_array; // Must be done after above.
 	
+	// v2: Ensure the Hotkey command defaults to no criterion rather than the last #IfWin.  Alternatively we
+	// could replace CopyMemory() above with global_init(), but it would need to be changed back if ever we
+	// want a directive to affect the default settings.
+	g->HotCriterion = NULL;
+
 	// v1.0.48: Due to switching from SET_UNINTERRUPTIBLE_TIMER to IsInterruptible():
 	// In spite of the comments in IsInterruptible(), periodically have a timer call IsInterruptible() due to
 	// the following scenario:
@@ -1311,6 +1307,7 @@ bool Script::IsPersistent()
 	if (Hotkey::sHotkeyCount || Hotstring::sHotstringCount // At least one hotkey or hotstring exists.
 		// No attempt is made to determine if the hotkeys/hotstrings are enabled, since even if they
 		// are, it's impossible to detect whether #If/#IfWin will allow them to ever execute.
+		|| g_persistent // #Persistent has been used somewhere in the script.
 		|| g_script.mTimerEnabledCount // At least one script timer is currently enabled.
 		|| g_MsgMonitorCount // At least one message monitor is active (installed by OnMessage).
 		// The following isn't checked because there has to be at least one script thread
@@ -1619,18 +1616,24 @@ LineNumberType Script::LoadFromText(LPTSTR aScript,LPCTSTR aPathToShow)
 	//   (c) Auto-inclusions can introduce more #If expressions or Static initializers.
 	// The loop below handles these potentially "recursive" cases.
 	Line *last_line_processed = NULL, *last_static_processed = NULL;
-	int expr_line_index = 0;
+	HotkeyCriterion *hot_expr = NULL;
 	for (;;)
 	{
 		// Check for any unprocessed #if expressions:
 #ifndef MINIDLL
-		for ( ; expr_line_index < g_HotExprLineCount; ++expr_line_index)
+		while (hot_expr != g_LastHotExpr)
 		{
-			Line *line = g_HotExprLines[expr_line_index];
-			if (!PreparseBlocks(line))
-				return LOADING_FAILED;
-			// Search for "ACT_EXPRESSION will be changed to ACT_IF" for comments about the following line:
-			line->mActionType = ACT_IF;
+			if (hot_expr)
+				hot_expr = hot_expr->NextCriterion; // hot_expr itself had already been processed by a prior iteration.
+			else
+				hot_expr = g_FirstHotExpr; // May have been set by a prior iteration.
+			if (hot_expr)
+			{
+				if (!PreparseBlocks(hot_expr->ExprLine))
+					return LOADING_FAILED;
+				// Search for "ACT_EXPRESSION will be changed to ACT_IF" for comments about the following line:
+				hot_expr->ExprLine->mActionType = ACT_IF;
+			}
 		}
 #endif
 		// Check for any unprocessed static initializers:
@@ -1866,18 +1869,24 @@ _T("; keystrokes and mouse clicks.  It also explains more about hotkeys.\n")
 	//   (c) Auto-inclusions can introduce more #If expressions or Static initializers.
 	// The loop below handles these potentially "recursive" cases.
 	Line *last_line_processed = NULL, *last_static_processed = NULL;
-	int expr_line_index = 0;
+	HotkeyCriterion *hot_expr = NULL;
 	for (;;)
 	{
 		// Check for any unprocessed #if expressions:
 #ifndef MINIDLL
-		for ( ; expr_line_index < g_HotExprLineCount; ++expr_line_index)
+		while (hot_expr != g_LastHotExpr)
 		{
-			Line *line = g_HotExprLines[expr_line_index];
-			if (!PreparseBlocks(line))
-				return LOADING_FAILED;
-			// Search for "ACT_EXPRESSION will be changed to ACT_IF" for comments about the following line:
-			line->mActionType = ACT_IF;
+			if (hot_expr)
+				hot_expr = hot_expr->NextCriterion; // hot_expr itself had already been processed by a prior iteration.
+			else
+				hot_expr = g_FirstHotExpr; // May have been set by a prior iteration.
+			if (hot_expr)
+			{
+				if (!PreparseBlocks(hot_expr->ExprLine))
+					return LOADING_FAILED;
+				// Search for "ACT_EXPRESSION will be changed to ACT_IF" for comments about the following line:
+				hot_expr->ExprLine->mActionType = ACT_IF;
+			}
 		}
 #endif
 		// Check for any unprocessed static initializers:
@@ -5121,6 +5130,11 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 #endif
 		return CONDITION_TRUE;
 	}
+	if (IS_DIRECTIVE_MATCH(_T("#Persistent")))
+	{
+		g_persistent = true;
+		return CONDITION_TRUE;
+	}
 	if (IS_DIRECTIVE_MATCH(_T("#SingleInstance")))
 	{
 #ifndef MINIDLL
@@ -5170,10 +5184,7 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 	{
 		if (!parameter) // The omission of the parameter indicates that any existing criteria should be turned off.
 		{
-			g_HotCriterion = HOT_NO_CRITERION; // Indicate that no criteria are in effect for subsequent hotkeys.
-			g_HotWinTitle = _T(""); // Helps maintainability and some things might rely on it.
-			g_HotWinText = _T("");  //
-			g_HotExprIndex = -1;
+			g->HotCriterion = NULL; // Indicate that no criteria are in effect for subsequent hotkeys.
 			return CONDITION_TRUE;
 		}
 
@@ -5205,18 +5216,19 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		g->CurrentFunc = currentFunc;
 
 		// Set the new criterion.
-		g_HotCriterion = HOT_IF_EXPR;
-		// Use the expression text to identify hotkey variants.
-		g_HotWinTitle = hot_expr_line->mArg[0].text;
-		g_HotWinText = _T("");
+		if (  !(g->HotCriterion = (HotkeyCriterion *)SimpleHeap::Malloc(sizeof(HotkeyCriterion)))  )
+			return FAIL;
+		g->HotCriterion->Type = HOT_IF_EXPR;
+		g->HotCriterion->ExprLine = hot_expr_line;
+		g->HotCriterion->WinTitle = hot_expr_line->mArg[0].text;
+		g->HotCriterion->WinText = _T("");
+		g->HotCriterion->NextCriterion = NULL;
+		if (g_LastHotExpr)
+			g_LastHotExpr->NextCriterion = g->HotCriterion;
+		else
+			g_FirstHotExpr = g->HotCriterion;
+		g_LastHotExpr = g->HotCriterion;
 
-		if (g_HotExprLineCount + 1 > g_HotExprLineCountMax)
-		{	// Allocate or reallocate g_HotExprLines.
-			g_HotExprLineCountMax += 100;
-			g_HotExprLines = (Line**)realloc(g_HotExprLines, g_HotExprLineCountMax * sizeof(Line**));
-		}
-		g_HotExprIndex = g_HotExprLineCount++;
-		g_HotExprLines[g_HotExprIndex] = hot_expr_line;
 		// VicinityToText() assumes lines are linked both ways, so clear mPrevLine in case an error occurs when this line is validated.
 		hot_expr_line->mPrevLine = NULL;
 		// The lines could be linked to simplify function resolution (i.e. allow calling PreparseBlocks() for all lines instead of once for each line) -- However, this would cause confusing/irrelevant vicinity lines to be shown if an error occurs.
@@ -5233,19 +5245,17 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 
 	if (!_tcsnicmp(aBuf, _T("#IfWin"), 6))
 	{
+		HotCriterionType hot_criterion;
 		bool invert = !_tcsnicmp(aBuf + 6, _T("Not"), 3);
 		if (!_tcsnicmp(aBuf + (invert ? 9 : 6), _T("Active"), 6)) // It matches #IfWin[Not]Active.
-			g_HotCriterion = invert ? HOT_IF_NOT_ACTIVE : HOT_IF_ACTIVE;
+			hot_criterion = invert ? HOT_IF_NOT_ACTIVE : HOT_IF_ACTIVE;
 		else if (!_tcsnicmp(aBuf + (invert ? 9 : 6), _T("Exist"), 5))
-			g_HotCriterion = invert ? HOT_IF_NOT_EXIST : HOT_IF_EXIST;
-		else // It starts with #IfWin but isn't Active or Exist: Don't alter g_HotCriterion.
+			hot_criterion = invert ? HOT_IF_NOT_EXIST : HOT_IF_EXIST;
+		else // It starts with #IfWin but isn't Active or Exist: Don't alter g->HotCriterion.
 			return CONDITION_FALSE; // Indicate unknown directive since there are currently no other possibilities.
-		g_HotExprIndex = -1;	// L4: For consistency, don't allow mixing of #if and other #ifWin criterion.
 		if (!parameter) // The omission of the parameter indicates that any existing criteria should be turned off.
 		{
-			g_HotCriterion = HOT_NO_CRITERION; // Indicate that no criteria are in effect for subsequent hotkeys.
-			g_HotWinTitle = _T(""); // Helps maintainability and some things might rely on it.
-			g_HotWinText = _T("");  //
+			g->HotCriterion = NULL; // Indicate that no criteria are in effect for subsequent hotkeys.
 			return CONDITION_TRUE;
 		}
 		LPTSTR hot_win_title = parameter, hot_win_text; // Set default for title; text is determined later.
@@ -5295,7 +5305,7 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		ConvertEscapeSequences(hot_win_title, NULL, true);
 		// The following also handles the case where both title and text are blank, which could happen
 		// due to something weird but legit like: #IfWinActive, ,
-		if (!SetGlobalHotTitleText(hot_win_title, hot_win_text))
+		if (!SetHotkeyCriterion(hot_criterion, hot_win_title, hot_win_text))
 			return ScriptError(ERR_OUTOFMEM); // So rare that no second param is provided (since its contents may have been temp-terminated or altered above).
 		return CONDITION_TRUE;
 	} // Above completely handles all directives and non-directives that start with "#IfWin".
@@ -10917,12 +10927,13 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, ActionTyp
 							// as required by the Hotkey command.  This seems worth doing since the current
 							// behaviour might be unexpected (despite being documented), and because typos
 							// are likely due to the fact that case and whitespace matter.
-							int i;
-							for (i = 0; i < g_HotExprLineCount; ++i)
-								if (!_tcscmp(line_raw_arg2, g_HotExprLines[i]->mArg[0].text))
+							for (HotkeyCriterion *cp = g_FirstHotExpr; ; cp = cp->NextCriterion)
+							{
+								if (!cp)
+									return line->PreparseError(ERR_HOTKEY_IF_EXPR);
+								if (!_tcscmp(line_raw_arg2, cp->WinTitle))
 									break;
-							if (i == g_HotExprLineCount)
-								return line->PreparseError(ERR_HOTKEY_IF_EXPR);
+							}
 						}
 						break;
 					}
@@ -15466,16 +15477,7 @@ ResultType Line::Perform()
 		return OK;
 
 	case ACT_SETTITLEMATCHMODE:
-		switch (ConvertTitleMatchMode(ARG1))
-		{
-		case FIND_IN_LEADING_PART: g.TitleMatchMode = FIND_IN_LEADING_PART; return OK;
-		case FIND_ANYWHERE: g.TitleMatchMode = FIND_ANYWHERE; return OK;
-		case FIND_REGEX: g.TitleMatchMode = FIND_REGEX; return OK;
-		case FIND_EXACT: g.TitleMatchMode = FIND_EXACT; return OK;
-		case FIND_FAST: g.TitleFindFast = true; return OK;
-		case FIND_SLOW: g.TitleFindFast = false; return OK;
-		}
-		return LineError(ERR_PARAM1_INVALID, FAIL, ARG1);
+		return BIV_TitleMatchMode_Set(ARG1, NULL);
 
 	case ACT_FORMATTIME:
 		return FormatTime(ARG2, ARG3);
@@ -15525,17 +15527,11 @@ ResultType Line::Perform()
 	case ACT_PAUSE:
 		return ChangePauseState(ConvertOnOffToggle(ARG1), (bool)ArgToInt(2));
 	case ACT_STRINGCASESENSE:
-		if ((g.StringCaseSense = ConvertStringCaseSense(ARG1)) == SCS_INVALID)
-			g.StringCaseSense = SCS_INSENSITIVE; // For simplicity, just fall back to default if value is invalid (normally its caught at load-time; only rarely here).
-		return OK;
+		return BIV_StringCaseSense_Set(ARG1, NULL);
 	case ACT_DETECTHIDDENWINDOWS:
-		if (   (toggle = ConvertOnOff(ARG1, NEUTRAL)) != NEUTRAL   )
-			g.DetectHiddenWindows = (toggle == TOGGLED_ON);
-		return OK;
+		return BIV_DetectHiddenWindows_Set(ARG1, NULL);
 	case ACT_DETECTHIDDENTEXT:
-		if (   (toggle = ConvertOnOff(ARG1, NEUTRAL)) != NEUTRAL   )
-			g.DetectHiddenText = (toggle == TOGGLED_ON);
-		return OK;
+		return BIV_DetectHiddenText_Set(ARG1, NULL);
 	case ACT_BLOCKINPUT:
 		switch (toggle = ConvertBlockInput(ARG1))
 		{
@@ -15665,17 +15661,7 @@ ResultType Line::Perform()
 			RegCloseKey(root_key);
 		return result;
 	case ACT_SETREGVIEW:
-	{
-		DWORD reg_view = RegConvertView(ARG1);
-		// Validate the parameter even if it's not going to be used.
-		if (reg_view == -1)
-			return LineError(ERR_PARAM1_INVALID, FAIL, ARG1);
-		// Since these flags cause the registry functions to fail on Win2k and have no effect on
-		// any later 32-bit OS, ignore this command when the OS is 32-bit.  Leave A_RegView blank.
-		if (IsOS64Bit())
-			g.RegView = reg_view;
-		return OK;
-	}
+		return BIV_RegView_Set(ARG1, NULL);
 
 	case ACT_OUTPUTDEBUG:
 #ifndef CONFIG_DEBUGGER
@@ -15711,13 +15697,7 @@ ResultType Line::Perform()
 		//return OK; //do not show error for not supported commands
 #endif
 	case ACT_FILEENCODING:
-	{
-		UINT new_encoding = ConvertFileEncoding(ARG1);
-		if (new_encoding == -1)
-			return LineError(ERR_PARAM1_INVALID, FAIL, ARG1); // Probably a variable, otherwise load-time validation would've caught it.
-		g.Encoding = new_encoding;
-		return OK;
-	}
+		return BIV_FileEncoding_Set(ARG1, NULL);
 
 	case ACT_FUNC:
 	{
@@ -15924,11 +15904,9 @@ BIF_DECL(BIF_PerformAction)
 	}
 
 	
-	// Always have LineError() throw an exception, for two reasons:
-	//  1) It would otherwise give the message that the current thread will exit, but we can't
-	//     actually make that happen.
-	//  2) If it reported an error immediately, the dialog would show our temporary line rather
-	//     than the line which actually called this function (which is far more relevant).
+	// Always have LineError() throw an exception.  If it reported an error immediately,
+	// the dialog would show our temporary line rather than the line which actually called
+	// this function (which is far more relevant).
 	bool in_try = g->InTryBlock;
 	g->InTryBlock = true;
 
@@ -15969,7 +15947,9 @@ BIF_DECL(BIF_PerformAction)
 
 	if (aResult == OK) // Can be OK, FAIL or EARLY_EXIT.
 	{
-		if (output_var == g_ErrorLevel && !(act == ACT_RUNWAIT || act == ACT_SENDMESSAGE))
+		if (output_var == g_ErrorLevel 
+			&& !(act == ACT_RUNWAIT || act == ACT_SENDMESSAGE) // These two have a more useful return value.
+			&& output_var->HasContents()) // Commands which don't set ErrorLevel at all shouldn't return 1.
 		{
 			aResultToken.symbol = SYM_INTEGER;
 			aResultToken.value_int64 = !VarToBOOL(*output_var); // Return TRUE for success, otherwise FALSE.

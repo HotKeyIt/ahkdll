@@ -42,7 +42,7 @@ GNU General Public License for more details.
 // (GetMessage() or PeekMessage()) is the only means by which events are ever sent to the
 // hook functions.
 
-static LPTSTR aDefaultDllScript = _T("#NoTrayIcon\nOnMessage(0,\" \")\n (){\n}");
+static LPTSTR aDefaultDllScript = _T("#NoTrayIcon\n#Persistent");
 static LPTSTR scriptstring;
 // Naveen v1. HANDLE hThread
 // Todo: move this to struct nameHinstance

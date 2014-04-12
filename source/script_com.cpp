@@ -126,12 +126,84 @@ BIF_DECL(BIF_ComObjDll)
 	aResultToken.marker = _T("");
 }
 
+BIF_DECL(BIF_ComObject)
+{
+	if (!TokenIsNumeric(*aParam[0]))
+	{
+		aResult = g_script.ScriptError(ERR_PARAM1_INVALID);
+		return;
+	}
+		
+	VARTYPE vt;
+	__int64 llVal;
+	USHORT flags = 0;
+
+	if (aParamCount > 1)
+	{
+		if (!TokenIsNumeric(*aParam[1]))
+		{
+			aResult = g_script.ScriptError(ERR_PARAM2_INVALID);
+			return;
+		}
+		// ComObject(vt, value [, flags])
+		vt = (VARTYPE)TokenToInt64(*aParam[0]);
+		llVal = TokenToInt64(*aParam[1]);
+		if (aParamCount > 2)
+			flags = (USHORT)TokenToInt64(*aParam[2]);
+	}
+	else
+	{
+		// ComObject(pdisp)
+		vt = VT_DISPATCH;
+		llVal = TokenToInt64(*aParam[0]);
+	}
+
+	if (vt == VT_DISPATCH || vt == VT_UNKNOWN)
+	{
+		IUnknown *punk = (IUnknown *)llVal;
+		if (punk)
+		{
+			if (aParamCount == 1) // Implies above set vt = VT_DISPATCH.
+			{
+				IDispatch *pdisp;
+				if (SUCCEEDED(punk->QueryInterface(IID_IDispatch, (void **)&pdisp)))
+				{
+					// Replace caller-specified interface pointer with pdisp.  v2: Caller is expected
+					// to have called AddRef() if they want to keep the pointer.  In v1, nearly all
+					// users of this function either passed the F_OWNVALUE flag or simply failed to
+					// release their copy of the pointer, so now "taking ownership" is the default
+					// behaviour and the flag has no effect on VT_DISPATCH/VT_UNKNOWN.
+					punk->Release();
+					llVal = (__int64)pdisp;
+				}
+				// Otherwise interpret it as IDispatch anyway, since caller has requested it and
+				// there are known cases where it works (such as some CLR COM callable wrappers).
+			}
+		}
+		// Otherwise, NULL may have some meaning, so allow it.  If the
+		// script tries to invoke the object, it'll get a warning then.
+	}
+
+	ComObject *obj;
+	if (  !(obj = new ComObject(llVal, vt, flags))  )
+	{
+		aResult = g_script.ScriptError(ERR_OUTOFMEM);
+		// Do any cleanup that the object may have been expected to do:
+		if (vt == VT_DISPATCH || vt == VT_UNKNOWN)
+			((IUnknown *)llVal)->Release();
+		else if ((vt & (VT_BYREF | VT_ARRAY)) == VT_ARRAY && (flags & ComObject::F_OWNVALUE))
+			SafeArrayDestroy((SAFEARRAY *)llVal);
+		return;
+	}
+	aResultToken.symbol = SYM_OBJECT;
+	aResultToken.object = obj;
+}
+
+
 BIF_DECL(BIF_ComObjActive)
 {
 	aResultToken.symbol = SYM_STRING;
 	aResultToken.marker = _T("");
-
-	ComObject *obj;
 
 	HRESULT hr;
 	CLSID clsid;
@@ -145,142 +217,24 @@ BIF_DECL(BIF_ComObjActive)
 			IDispatch *pdisp;
 			if (SUCCEEDED(punk->QueryInterface(IID_IDispatch, (void **)&pdisp)))
 			{
-				if (obj = new ComObject(pdisp))
+				if (ComObject *obj = new ComObject(pdisp))
 				{
 					aResultToken.symbol = SYM_OBJECT;
 					aResultToken.object = obj;
 				}
 				else
+				{
+					hr = E_OUTOFMEMORY;
 					pdisp->Release();
+				}
 			}
 			punk->Release();
-			return;
 		}
 	}
-	ComError(hr);
+	if (FAILED(hr))
+		ComError(hr);
 }
 
-BIF_DECL(BIF_ComObjParameter)
-{
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = _T("");
-
-	ComObject *obj;
-
-	if (!TokenIsNumeric(*aParam[0]))
-		return;
-	VARTYPE vt;
-	__int64 llVal;
-	USHORT flags = 0;
-
-	vt = (VARTYPE)TokenToInt64(*aParam[0]);
-	llVal = TokenToInt64(*aParam[1]);
-	if (aParamCount > 2)
-		flags = (USHORT)TokenToInt64(*aParam[2]);
-	
-	if (vt == VT_DISPATCH || vt == VT_UNKNOWN)
-	{
-		IUnknown *punk = (IUnknown *)llVal;
-		if (punk)
-		{
-			if (aParamCount == 1) // Implies above set vt = VT_DISPATCH.
-			{
-				IDispatch *pdisp;
-				if (SUCCEEDED(punk->QueryInterface(IID_IDispatch, (void **)&pdisp)))
-				{
-					// Replace caller-specified interface pointer with pdisp.  If caller
-					// has requested we take responsibility for freeing it, do that now:
-					if (flags & ComObject::F_OWNVALUE)
-						punk->Release();
-					flags |= ComObject::F_OWNVALUE; // Don't AddRef() below since we own this reference.
-					llVal = (__int64)pdisp;
-				}
-				// Otherwise interpret it as IDispatch anyway, since caller has requested it and
-				// there are known cases where it works (such as some CLR COM callable wrappers).
-			}
-			if ( !(flags & ComObject::F_OWNVALUE) )
-				punk->AddRef(); // "Copy" caller's reference.
-			// Otherwise caller (or above) indicated the object now owns this reference.
-		}
-		// Otherwise, NULL may have some meaning, so allow it.  If the
-		// script tries to invoke the object, it'll get a warning then.
-	}
-
-	if (obj = new ComObject(llVal, vt, flags))
-	{
-		aResultToken.symbol = SYM_OBJECT;
-		aResultToken.object = obj;
-	}
-	else if (vt == VT_DISPATCH || vt == VT_UNKNOWN)
-		((IUnknown *)llVal)->Release();
-}
-
-BIF_DECL(BIF_ComObjEnwrap)
-{
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = _T("");
-	
-	if (!TokenIsNumeric(*aParam[0]))
-		return;
-
-	VARTYPE vt;
-	__int64 llVal;
-	USHORT flags = 0;
-	ComObject *obj;
-
-	vt = VT_DISPATCH;
-	llVal = TokenToInt64(*aParam[0]);
-	IUnknown *punk = (IUnknown *)llVal;
-	if (punk)
-	{
-		if (aParamCount == 1) // Implies above set vt = VT_DISPATCH.
-		{
-			IDispatch *pdisp;
-			if (SUCCEEDED(punk->QueryInterface(IID_IDispatch, (void **)&pdisp)))
-			{
-				// Replace caller-specified interface pointer with pdisp.  If caller
-				// has requested we take responsibility for freeing it, do that now:
-				if (flags & ComObject::F_OWNVALUE)
-					punk->Release();
-				flags |= ComObject::F_OWNVALUE; // Don't AddRef() below since we own this reference.
-				llVal = (__int64)pdisp;
-			}
-			// Otherwise interpret it as IDispatch anyway, since caller has requested it and
-			// there are known cases where it works (such as some CLR COM callable wrappers).
-		}
-		if ( !(flags & ComObject::F_OWNVALUE) )
-			punk->AddRef(); // "Copy" caller's reference.
-		// Otherwise caller (or above) indicated the object now owns this reference.
-		if (obj = new ComObject(llVal, vt, flags))
-		{
-			aResultToken.symbol = SYM_OBJECT;
-			aResultToken.object = obj;
-		}
-		else if (vt == VT_DISPATCH || vt == VT_UNKNOWN)
-			((IUnknown *)llVal)->Release();
-	}
-	// Otherwise, NULL may have some meaning, so allow it.  If the
-	// script tries to invoke the object, it'll get a warning then.
-}
-
-BIF_DECL(BIF_ComObjUnwrap)
-{
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = _T("");
-
-	ComObject *obj;
-
-	if (obj = dynamic_cast<ComObject *>(TokenToObject(*aParam[0])))
-	{
-		if (VT_DISPATCH == obj->mVarType)
-		{
-			aResultToken.symbol = SYM_INTEGER;
-			aResultToken.value_int64 = (__int64) obj->mDispatch; // mDispatch vs mVal64 ensures we zero the high 32 bits in 32-bit builds.
-			if (obj->mDispatch)
-				obj->mDispatch->AddRef();
-		}
-	}
-}
 
 BIF_DECL(BIF_ComObjConnect)
 {

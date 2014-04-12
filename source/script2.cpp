@@ -4185,8 +4185,10 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 #endif
 #ifndef MINIDLL
 	case AHK_HOT_IF_EXPR: // L4: HotCriterionAllowsFiring uses this to ensure expressions are evaluated only on the main thread.
-		if ((int)wParam > -1 && (int)wParam < g_HotExprLineCount)
-			return g_HotExprLines[(int)wParam]->EvaluateHotCriterionExpression((LPTSTR)lParam);
+		// Ensure wParam is a valid criterion (might prevent shatter attacks):
+		for (HotkeyCriterion *cp = g_FirstHotExpr; cp; cp = cp->NextCriterion)
+			if ((WPARAM)cp == wParam)
+				return cp->ExprLine->EvaluateHotCriterionExpression((LPTSTR)lParam);
 		return 0;
 #endif
 	case AHK_EXECUTE:   // sent from dll host # Naveen N9 
@@ -9388,6 +9390,8 @@ BIV_DECL_W(BIV_TitleMatchMode_Set)
 	// For simplicity, this function handles both variables.
 	case FIND_FAST: g->TitleFindFast = true; break;
 	case FIND_SLOW: g->TitleFindFast = false; break;
+	default:
+		return g_script.ScriptError(ERR_INVALID_VALUE, aBuf);
 	}
 	return OK;
 }
@@ -9411,6 +9415,8 @@ BIV_DECL_W(BIV_DetectHiddenWindows_Set)
 	ToggleValueType toggle;
 	if ( (toggle = Line::ConvertOnOff(aBuf, NEUTRAL)) != NEUTRAL )
 		g->DetectHiddenWindows = (toggle == TOGGLED_ON);
+	else
+		return g_script.ScriptError(ERR_INVALID_VALUE, aBuf);
 	return OK;
 }
 
@@ -9426,6 +9432,8 @@ BIV_DECL_W(BIV_DetectHiddenText_Set)
 	ToggleValueType toggle;
 	if ( (toggle = Line::ConvertOnOff(aBuf, NEUTRAL)) != NEUTRAL )
 		g->DetectHiddenText = (toggle == TOGGLED_ON);
+	else
+		return g_script.ScriptError(ERR_INVALID_VALUE, aBuf);
 	return OK;
 }
 
@@ -9442,6 +9450,8 @@ BIV_DECL_W(BIV_StringCaseSense_Set)
 	StringCaseSenseType sense;
 	if ( (sense = Line::ConvertStringCaseSense(aBuf)) != SCS_INVALID )
 		g->StringCaseSense = sense;
+	else
+		return g_script.ScriptError(ERR_INVALID_VALUE, aBuf);
 	return OK;
 }
 
@@ -9649,8 +9659,9 @@ VarSizeType BIV_FileEncoding(LPTSTR aBuf, LPTSTR aVarName)
 BIV_DECL_W(BIV_FileEncoding_Set)
 {
 	UINT new_encoding = Line::ConvertFileEncoding(aBuf);
-	if (new_encoding != -1)
-		g->Encoding = new_encoding;
+	if (new_encoding == -1)
+		return g_script.ScriptError(ERR_INVALID_VALUE, aBuf);
+	g->Encoding = new_encoding;
 	return OK;
 }
 
@@ -9702,7 +9713,12 @@ VarSizeType BIV_RegView(LPTSTR aBuf, LPTSTR aVarName)
 BIV_DECL_W(BIV_RegView_Set)
 {
 	DWORD reg_view = Line::RegConvertView(aBuf);
-	if (reg_view != -1 && IsOS64Bit())
+	// Validate the parameter even if it's not going to be used.
+	if (reg_view == -1)
+		return g_script.ScriptError(ERR_INVALID_VALUE, aBuf);
+	// Since these flags cause the registry functions to fail on Win2k and have no effect on
+	// any later 32-bit OS, ignore this command when the OS is 32-bit.  Leave A_RegView blank.
+	if (IsOS64Bit())
 		g->RegView = reg_view;
 	return OK;
 }
@@ -13947,7 +13963,11 @@ pcret *get_compiled_regex(LPTSTR aRegEx, pcret_extra *&aExtra, int *aOptionsLeng
 		case 'U': pcre_options |= PCRE_UNGREEDY;       break; //
 		case 'X': pcre_options |= PCRE_EXTRA;          break; //
 		case 'C': pcre_options |= PCRE_AUTO_CALLOUT;   break; // L14: PCRE_AUTO_CALLOUT causes callouts to be created with callout_number == 255 before each item in the pattern.
-		case '\a':pcre_options = (pcre_options & ~PCRE_NEWLINE_BITS) | PCRE_NEWLINE_ANY; break; // v1.0.46.06: alert/bell (i.e. `a) is used for PCRE_NEWLINE_ANY.
+		case '\a':
+			// Enable matching of any kind of newline, including Unicode newline characters.
+			// v2: \R doesn't match Unicode newlines by default, so `a also enables that.
+			pcre_options = (pcre_options & ~PCRE_NEWLINE_BITS) | PCRE_NEWLINE_ANY | PCRE_BSR_UNICODE;
+			break; 
 		case '\n':pcre_options = (pcre_options & ~PCRE_NEWLINE_BITS) | PCRE_NEWLINE_LF; break; // See below.
 			// Above option: Could alternatively have called it "LF" rather than or in addition to "`n", but that
 			// seems slightly less desirable due to potential overlap/conflict with future option letters,
@@ -16049,7 +16069,7 @@ BIF_DECL(BIF_OnMessage)
 			LPTSTR func_name;
 			if (func = dynamic_cast<Func*>(ParamIndexToObject(specified_hwnd ? 2 : 1)))
 			{
-				if (func->mIsBuiltIn || func->mMinParams > 4) // Requires too many params.
+				if (func->mIsBuiltIn || func->mMinParams > 4 || func->mClass) // Requires too many params.
 				{
 					aResult = g_script.ScriptError(ERR_PARAM2_INVALID);
 					return;
@@ -16058,7 +16078,7 @@ BIF_DECL(BIF_OnMessage)
 			else if (*(func_name = ParamIndexToString(specified_hwnd ? 2 : 1, buf))) // Resolve parameter #2.
 			{
 				func = TokenToFunc(*aParam[specified_hwnd ? 2 : 1]); // Parameter #2: function name or reference.
-				if (!func || func->mIsBuiltIn || func->mMinParams > 4)
+				if (!func || func->mIsBuiltIn || func->mMinParams > 4 || func->mClass)
 				{
 					aResult = g_script.ScriptError(ERR_PARAM2_INVALID);
 					return;
@@ -18375,7 +18395,7 @@ LPTSTR TokenToString(ExprTokenType &aToken, LPTSTR aBuf)
 	case SYM_FLOAT:
 		if (aBuf)
 		{
-			sntprintf(aBuf, MAX_NUMBER_SIZE, FORMAT_FLOAT, aToken.value_double);
+			FTOA(aToken.value_double, aBuf, MAX_NUMBER_SIZE);
 			return aBuf;
 		}
 		//else continue on to return the default at the bottom.

@@ -1181,7 +1181,7 @@ int Debugger::WritePropertyXml(ExprTokenType &aValue, const char *aName, CString
 		}
 		else
 		{
-			sntprintf(number_buf, _countof(number_buf), FORMAT_FLOAT, aValue.value_double);
+			FTOA(aValue.value_double, number_buf, _countof(number_buf));
 			type = "float";
 		}
 		value = number_buf;
@@ -1373,7 +1373,7 @@ int Debugger::WritePropertyData(Object::FieldType &aField, int aMaxEncodedSize)
 		}
 		else
 		{
-			sntprintf(number_buf, _countof(number_buf), FORMAT_FLOAT, aField.n_double);
+			FTOA(aField.n_double, number_buf, _countof(number_buf));
 			type = "float";
 		}
 		value = number_buf;

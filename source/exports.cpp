@@ -549,7 +549,7 @@ LPTSTR FuncTokenToString(ExprTokenType &aToken, LPTSTR aBuf)
 	case SYM_FLOAT:
 		if (aBuf)
 		{
-			sntprintf(aBuf, MAX_NUMBER_SIZE, FORMAT_FLOAT, aToken.value_double);
+			FTOA(aToken.value_double, aBuf, MAX_NUMBER_SIZE);
 			return aBuf;
 		}
 		//else continue on to return the default at the bottom.
@@ -669,7 +669,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 					return _T("");
 				}
 				result_to_return_dll = new_buf;
-				sntprintf(result_to_return_dll, MAX_NUMBER_SIZE, FORMAT_FLOAT, aFuncAndToken.mToken.value_double);
+				FTOA(aFuncAndToken.mToken.value_double, result_to_return_dll, MAX_NUMBER_SIZE);
 				break;
 			//case SYM_OBJECT: // L31: Treat objects as empty strings (or TRUE where appropriate).
 			default: // Not an operand: continue on to return the default at the bottom.
@@ -831,7 +831,7 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 				return;
 			}
 			result_to_return_dll = new_buf;
-			sntprintf(aFuncAndToken->result_to_return_dll, MAX_NUMBER_SIZE, FORMAT_FLOAT, aFuncAndToken->mToken.value_double);
+			FTOA(aFuncAndToken->mToken.value_double, aFuncAndToken->result_to_return_dll, MAX_NUMBER_SIZE);
 			break;
 		//case SYM_OBJECT: // L31: Treat objects as empty strings (or TRUE where appropriate).
 		default: // Not an operand: continue on to return the default at the bottom.
