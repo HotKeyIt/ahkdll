@@ -251,17 +251,18 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 		}
 	}
 	
-
-	if (i < dllargc)
+	if (Var *var = g_script.FindOrAddVar(_T("A_Args"), 6, VAR_DECLARE_SUPER_GLOBAL))
 	{
-		// Insert the remaining args into an array and assign to the "args" global var.
-		Var *var;
-		Object *args;
-		if (  !( var = g_script.FindOrAddVar(_T("Args")) )
-			|| !( args = Object::CreateFromArgV((LPTSTR*)(dllargv + i), dllargc - i) )   )
+		// Store the remaining args in an array and assign it to "A_Args".
+		// If there are no args, assign an empty array so that A_Args[1]
+		// and A_Args.MaxIndex() don't cause an error.
+		Object *args = Object::CreateFromArgV((LPTSTR*)(dllargv + i), dllargc - i);
+		if (!args)
 			return CRITICAL_ERROR;  // Realistically should never happen.
 		var->AssignSkipAddRef(args);
 	}
+	else
+		return CRITICAL_ERROR;
 	LocalFree(dllargv); // free memory allocated by CommandLineToArgvW
 
 	global_init(*g);  // Set defaults prior to the below, since below might override them for AutoIt2 scripts.

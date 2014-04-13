@@ -124,8 +124,6 @@ FuncEntry g_BIF[] =
 	{_T("Type"), BIF_Type, 1, 1, true},
 	{_T("IsObject"), BIF_IsObject, 1, NA, true},
 	// AHK_H Functions
-	{_T("FindFunc"), BIF_FindFunc, 1, 1, true},
-	{_T("FindLabel"), BIF_FindLabel, 1, 1, true},
 	{_T("GetVar"), BIF_Getvar, 1, 1, true},
 	{_T("Alias"), BIF_Alias, 1, 2, false},
 	{_T("UnZipRawMemory"), BIF_UnZipRawMemory, 1, 3, true},
@@ -1299,6 +1297,7 @@ bool Script::IsPersistent()
 {
 #ifdef MINIDLL
 	if (g_script.mTimerEnabledCount // At least one script timer is currently enabled.
+		|| g_persistent // #Persistent has been used somewhere in the script.
 		|| g_MsgMonitorCount) // At least one message monitor is active (installed by OnMessage).
 		return true;
 	return false;

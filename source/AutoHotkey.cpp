@@ -151,7 +151,7 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 
 	if (Var *var = g_script.FindOrAddVar(_T("A_Args"), 6, VAR_DECLARE_SUPER_GLOBAL))
 	{
-		// Store the remaining args in an array and assign it to "Args".
+		// Store the remaining args in an array and assign it to "A_Args".
 		// If there are no args, assign an empty array so that A_Args[1]
 		// and A_Args.MaxIndex() don't cause an error.
 		Object *args = Object::CreateFromArgV(__targv + i, __argc - i);

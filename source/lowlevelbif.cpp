@@ -4,33 +4,6 @@
 #include "exports.h"
 #include "script.h"
 
-BIF_DECL(BIF_FindFunc) // Added in Nv8.
-{
-	// Set default return value in case of early return.
-	aResultToken.symbol = SYM_INTEGER ;
-	aResultToken.marker = _T("");
-	// Get the first arg, which is the string used as the source of the extraction. Call it "findfunc" for clarity.
-	TCHAR funcname_buf[MAX_NUMBER_SIZE]; // A separate buf because aResultToken.buf is sometimes used to store the result.
-	LPTSTR funcname = TokenToString(*aParam[0], funcname_buf); // Remember that aResultToken.buf is part of a union, though in this case there's no danger of overwriting it since our result will always be of STRING type (not int or float).
-	int funcname_length = (int)EXPR_TOKEN_LENGTH(aParam[0], funcname);
-	aResultToken.value_int64 = (__int64)ahkFindFunc(funcname);
-	return;
-}
-
-BIF_DECL(BIF_FindLabel) // HotKeyIt Added in 1.1.02.00
-{
-	// Set default return value in case of early return.
-	aResultToken.symbol = SYM_INTEGER ;
-	aResultToken.marker = _T("");
-	// Get the first arg, which is the string used as the source of the extraction. Call it "findfunc" for clarity.
-	TCHAR labelname_buf[MAX_NUMBER_SIZE]; // A separate buf because aResultToken.buf is sometimes used to store the result.
-	LPTSTR labelname = TokenToString(*aParam[0], labelname_buf); // Remember that aResultToken.buf is part of a union, though in this case there's no danger of overwriting it since our result will always be of STRING type (not int or float).
-	int labelname_length = (int)EXPR_TOKEN_LENGTH(aParam[0], labelname);
-	aResultToken.value_int64 = (__int64)ahkFindLabel(labelname);
-	return;
-}
-
-
 BIF_DECL(BIF_Getvar)
 {
 	if (aParam[0]->symbol == SYM_STRING && !(TokenToInt64(*aParam[0])))

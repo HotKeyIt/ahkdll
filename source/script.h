@@ -2901,8 +2901,6 @@ BIF_DECL(BIF_DynaCall);
 BIF_DECL(BIF_Struct);
 BIF_DECL(BIF_sizeof);
 
-BIF_DECL(BIF_FindFunc);
-BIF_DECL(BIF_FindLabel);
 BIF_DECL(BIF_Getvar);
 BIF_DECL(BIF_Alias);
 BIF_DECL(BIF_CacheEnable);
