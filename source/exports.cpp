@@ -14,15 +14,16 @@ void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar);
 #ifndef MINIDLL
 // HotExpr code from LoadFromFile, Hotkeys need to be toggled to get activated
 #define FINALIZE_HOTKEYS \
+	HotkeyCriterion *hot_expr = NULL;\
 	while (hot_expr != g_LastHotExpr)\
 		{\
 			if (hot_expr)\
 				hot_expr = hot_expr->NextCriterion;\
 			else\
-				hot_expr = g_FirstHotExpr;\
+				hot_expr = LastHotExpr==NULL ? g_FirstHotExpr : LastHotExpr->NextCriterion;\
 			if (hot_expr)\
 			{\
-				if (!PreparseBlocks(hot_expr->ExprLine))\
+				if (!g_script.PreparseBlocks(hot_expr->ExprLine))\
 					return LOADING_FAILED;\
 				hot_expr->ExprLine->mActionType = ACT_IF;\
 			}\
@@ -333,10 +334,7 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute)
 
 #ifndef MINIDLL
 	int HotkeyCount = Hotkey::sHotkeyCount;
-	int oldHotExprLineCount = g_HotExprLineCount;
-#else
-	int HotkeyCount = NULL;
-	int oldHotExprLineCount = 0;
+	HotkeyCriterion *LastHotExpr = g_LastHotExpr;
 #endif
 
 	if (!g_script.mIsReadyToExecute)
@@ -424,10 +422,7 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute)
 
 #ifndef MINIDLL
 	int HotkeyCount = Hotkey::sHotkeyCount;
-	int oldHotExprLineCount = g_HotExprLineCount;
-#else
-	int HotkeyCount = NULL;
-	int oldHotExprLineCount = 0;
+	HotkeyCriterion *LastHotExpr = g_LastHotExpr;
 #endif
 
 	if (!g_script.mIsReadyToExecute)
@@ -510,10 +505,7 @@ EXPORT int ahkExec(LPTSTR script)
 
 #ifndef MINIDLL
 	int HotkeyCount = Hotkey::sHotkeyCount;
-	int oldHotExprLineCount = g_HotExprLineCount;
-#else
-	int HotkeyCount = NULL;
-	int oldHotExprLineCount = 0;
+	HotkeyCriterion *LastHotExpr = g_LastHotExpr;
 #endif
 
 	if (!g_script.mIsReadyToExecute)
