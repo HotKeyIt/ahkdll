@@ -12,14 +12,21 @@ int returnCount = -1 ;
 void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar);
 
 #ifndef MINIDLL
+// HotExpr code from LoadFromFile, Hotkeys need to be toggled to get activated
 #define FINALIZE_HOTKEYS \
-	for (int expr_line_index = oldHotExprLineCount ; expr_line_index < g_HotExprLineCount; ++expr_line_index)\
-	{\
-		Line *line = g_HotExprLines[expr_line_index];\
-		if (!g_script.PreparseBlocks(line))\
-			return LOADING_FAILED;\
-		line->mActionType = ACT_IFEXPR;\
-	}\
+	while (hot_expr != g_LastHotExpr)\
+		{\
+			if (hot_expr)\
+				hot_expr = hot_expr->NextCriterion;\
+			else\
+				hot_expr = g_FirstHotExpr;\
+			if (hot_expr)\
+			{\
+				if (!PreparseBlocks(hot_expr->ExprLine))\
+					return LOADING_FAILED;\
+				hot_expr->ExprLine->mActionType = ACT_IF;\
+			}\
+		}\
 	if (Hotkey::sHotkeyCount > HotkeyCount)\
 	{\
 		Line::ToggleSuspendState();\
