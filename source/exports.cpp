@@ -12,6 +12,7 @@ int returnCount = -1 ;
 void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar);
 
 #ifndef MINIDLL
+// HotExpr code from LoadFromFile, Hotkeys need to be toggled to get activated
 #define FINALIZE_HOTKEYS \
 	for (int expr_line_index = oldHotExprLineCount ; expr_line_index < g_HotExprLineCount; ++expr_line_index)\
 	{\
@@ -350,6 +351,7 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute)
 	g->CurrentFunc = NULL;
 
 	LPTSTR oldFileSpec = g_script.mFileSpec;
+	g_script.mFileSpec = fileName;
 	if (g_script.LoadFromFile(false)!= OK) //fileName, aAllowDuplicateInclude, (bool) aIgnoreLoadFailure) != OK) || !g_script.PreparseBlocks(oldLastLine->mNextLine))
 	{
 		g_script.mFileSpec = oldFileSpec;
