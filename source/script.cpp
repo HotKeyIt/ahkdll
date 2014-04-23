@@ -10520,32 +10520,12 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 			min_params = 2;
 			max_params = 3;
 		}
-		else if (!_tcsicmp(suffix, _T("Active")))
+		else
 		{
 			bif = BIF_ComObjActive;
-			min_params = 1;
-			max_params = 1;
-		}
-		else if (!_tcsicmp(suffix, _T("Parameter")))
-		{
-			bif = BIF_ComObjParameter;
-			min_params = 2;
+			min_params = 0;
 			max_params = 3;
 		}
-		else if (!_tcsicmp(suffix, _T("Enwrap")))
-		{
-			bif = BIF_ComObjEnwrap;
-			min_params = 1;
-			max_params = 2;
-		}
-		else if (!_tcsicmp(suffix, _T("Unwrap")))
-		{
-			bif = BIF_ComObjUnwrap;
-			min_params = 1;
-			max_params = 1;
-		}
-		else
-			return NULL; // Function does not exist
 	}
 	else if (!_tcsicmp(func_name, _T("Exception")))
 	{

@@ -17215,19 +17215,20 @@ BIF_DECL(BIF_VarSetCapacity)
 			else // ALLOC_SIMPLE, due to its nature, will not actually be freed, which is documented.
 				var.Free();
 		} // if (aParamCount > 1)
-		else
-		{
+		//else
+		//{
 			// RequestedCapacity was omitted, so the var is not altered; instead, the current capacity
 			// is reported, which seems more intuitive/useful than having it do a Free(). In this case
 			// it's an input var rather than an output var, so check if it has been initialized:
-			var.MaybeWarnUninitialized();
-		}
+			// v1.1.11.01: Support VarSetCapacity(var) as a means for the script to check if it
+			// has initialized a var.  In other words, don't show a warning even in that case.
+			//var.MaybeWarnUninitialized();
+
+		//}
 
 		if (aResultToken.value_int64 = var.ByteCapacity()) // Don't subtract 1 here in lieu doing it below (avoids underflow).
 			aResultToken.value_int64 -= sizeof(TCHAR); // Omit the room for the zero terminator since script capacity is defined as length vs. size.
 	} // (aParam[0]->symbol == SYM_VAR)
-	else
-		aResult = g_script.ScriptError(ERR_PARAM1_INVALID);
 }
 
 

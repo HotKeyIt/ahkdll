@@ -3108,9 +3108,6 @@ BIF_DECL(BIF_ObjClone);
 // Advanced file IO interfaces
 BIF_DECL(BIF_FileOpen);
 BIF_DECL(BIF_ComObjActive);
-BIF_DECL(BIF_ComObjParameter);
-BIF_DECL(BIF_ComObjEnwrap);
-BIF_DECL(BIF_ComObjUnwrap);
 BIF_DECL(BIF_ComObjCreate);
 BIF_DECL(BIF_ComObjGet);
 BIF_DECL(BIF_ComObjDll);

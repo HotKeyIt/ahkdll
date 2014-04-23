@@ -126,129 +126,66 @@ BIF_DECL(BIF_ComObjGet)
 
 BIF_DECL(BIF_ComObjActive)
 {
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = _T("");
-
-	ComObject *obj;
-
-	HRESULT hr;
-	CLSID clsid;
-	IUnknown *punk;
-	hr = CLSIDFromString(CStringWCharFromTCharIfNeeded(TokenToString(*aParam[0])), &clsid);
-	if (SUCCEEDED(hr))
+	if (!aParamCount) // ComObjMissing()
 	{
-		hr = GetActiveObject(clsid, NULL, &punk);
-		if (SUCCEEDED(hr))
-		{
-			IDispatch *pdisp;
-			if (SUCCEEDED(punk->QueryInterface(IID_IDispatch, (void **)&pdisp)))
-			{
-				if (obj = new ComObject(pdisp))
-				{
-					aResultToken.symbol = SYM_OBJECT;
-					aResultToken.object = obj;
-				}
-				else
-					pdisp->Release();
-			}
-			punk->Release();
-			return;
-		}
-	}
-	ComError(hr);
-}
-
-BIF_DECL(BIF_ComObjParameter)
-{
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = _T("");
-
-	ComObject *obj;
-
-	if (!TokenIsPureNumeric(*aParam[0]))
+		SafeSetTokenObject(aResultToken, new ComObject(DISP_E_PARAMNOTFOUND, VT_ERROR));
 		return;
-	VARTYPE vt;
-	__int64 llVal;
-	USHORT flags = 0;
-
-	vt = (VARTYPE)TokenToInt64(*aParam[0]);
-	llVal = TokenToInt64(*aParam[1]);
-	if (aParamCount > 2)
-		flags = (USHORT)TokenToInt64(*aParam[2]);
-	
-	if (vt == VT_DISPATCH || vt == VT_UNKNOWN)
-	{
-		IUnknown *punk = (IUnknown *)llVal;
-		if (punk)
-		{
-			if (aParamCount == 1) // Implies above set vt = VT_DISPATCH.
-			{
-				IDispatch *pdisp;
-				if (SUCCEEDED(punk->QueryInterface(IID_IDispatch, (void **)&pdisp)))
-				{
-					// Replace caller-specified interface pointer with pdisp.  If caller
-					// has requested we take responsibility for freeing it, do that now:
-					if (flags & ComObject::F_OWNVALUE)
-						punk->Release();
-					flags |= ComObject::F_OWNVALUE; // Don't AddRef() below since we own this reference.
-					llVal = (__int64)pdisp;
-				}
-				// Otherwise interpret it as IDispatch anyway, since caller has requested it and
-				// there are known cases where it works (such as some CLR COM callable wrappers).
-			}
-			if ( !(flags & ComObject::F_OWNVALUE) )
-				punk->AddRef(); // "Copy" caller's reference.
-			// Otherwise caller (or above) indicated the object now owns this reference.
-		}
-		// Otherwise, NULL may have some meaning, so allow it.  If the
-		// script tries to invoke the object, it'll get a warning then.
 	}
 
-	if (obj = new ComObject(llVal, vt, flags))
-	{
-		aResultToken.symbol = SYM_OBJECT;
-		aResultToken.object = obj;
-	}
-	else if (vt == VT_DISPATCH || vt == VT_UNKNOWN)
-		((IUnknown *)llVal)->Release();
-}
-
-BIF_DECL(BIF_ComObjEnwrap)
-{
 	aResultToken.symbol = SYM_STRING;
 	aResultToken.marker = _T("");
-	
-	if (!TokenIsPureNumeric(*aParam[0]))
-		return;
 
-	VARTYPE vt;
-	__int64 llVal;
-	USHORT flags = 0;
 	ComObject *obj;
 
-	vt = VT_DISPATCH;
-	llVal = TokenToInt64(*aParam[0]);
-	IUnknown *punk = (IUnknown *)llVal;
-	if (punk)
+	if (TokenIsPureNumeric(*aParam[0]))
 	{
-		if (aParamCount == 1) // Implies above set vt = VT_DISPATCH.
+		VARTYPE vt;
+		__int64 llVal;
+		USHORT flags = 0;
+
+		if (aParamCount > 1)
 		{
-			IDispatch *pdisp;
-			if (SUCCEEDED(punk->QueryInterface(IID_IDispatch, (void **)&pdisp)))
-			{
-				// Replace caller-specified interface pointer with pdisp.  If caller
-				// has requested we take responsibility for freeing it, do that now:
-				if (flags & ComObject::F_OWNVALUE)
-					punk->Release();
-				flags |= ComObject::F_OWNVALUE; // Don't AddRef() below since we own this reference.
-				llVal = (__int64)pdisp;
-			}
-			// Otherwise interpret it as IDispatch anyway, since caller has requested it and
-			// there are known cases where it works (such as some CLR COM callable wrappers).
+			// ComObj(vt, value [, flags])
+			vt = (VARTYPE)TokenToInt64(*aParam[0]);
+			llVal = TokenToInt64(*aParam[1]);
+			if (aParamCount > 2)
+				flags = (USHORT)TokenToInt64(*aParam[2]);
 		}
-		if ( !(flags & ComObject::F_OWNVALUE) )
-			punk->AddRef(); // "Copy" caller's reference.
-		// Otherwise caller (or above) indicated the object now owns this reference.
+		else
+		{
+			// ComObj(pdisp)
+			vt = VT_DISPATCH;
+			llVal = TokenToInt64(*aParam[0]);
+		}
+		
+		if (vt == VT_DISPATCH || vt == VT_UNKNOWN)
+		{
+			IUnknown *punk = (IUnknown *)llVal;
+			if (punk)
+			{
+				if (aParamCount == 1) // Implies above set vt = VT_DISPATCH.
+				{
+					IDispatch *pdisp;
+					if (SUCCEEDED(punk->QueryInterface(IID_IDispatch, (void **)&pdisp)))
+					{
+						// Replace caller-specified interface pointer with pdisp.  If caller
+						// has requested we take responsibility for freeing it, do that now:
+						if (flags & ComObject::F_OWNVALUE)
+							punk->Release();
+						flags |= ComObject::F_OWNVALUE; // Don't AddRef() below since we own this reference.
+						llVal = (__int64)pdisp;
+					}
+					// Otherwise interpret it as IDispatch anyway, since caller has requested it and
+					// there are known cases where it works (such as some CLR COM callable wrappers).
+				}
+				if ( !(flags & ComObject::F_OWNVALUE) )
+					punk->AddRef(); // "Copy" caller's reference.
+				// Otherwise caller (or above) indicated the object now owns this reference.
+			}
+			// Otherwise, NULL may have some meaning, so allow it.  If the
+			// script tries to invoke the object, it'll get a warning then.
+		}
+
 		if (obj = new ComObject(llVal, vt, flags))
 		{
 			aResultToken.symbol = SYM_OBJECT;
@@ -257,26 +194,50 @@ BIF_DECL(BIF_ComObjEnwrap)
 		else if (vt == VT_DISPATCH || vt == VT_UNKNOWN)
 			((IUnknown *)llVal)->Release();
 	}
-	// Otherwise, NULL may have some meaning, so allow it.  If the
-	// script tries to invoke the object, it'll get a warning then.
-}
-
-BIF_DECL(BIF_ComObjUnwrap)
-{
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = _T("");
-
-	ComObject *obj;
-
-	if (obj = dynamic_cast<ComObject *>(TokenToObject(*aParam[0])))
+	else if (obj = dynamic_cast<ComObject *>(TokenToObject(*aParam[0])))
 	{
-		if (VT_DISPATCH == obj->mVarType)
+		if (aParamCount > 1)
+		{
+			// For backward-compatibility:
+			aResultToken.symbol = SYM_INTEGER;
+			aResultToken.marker = _T("ComObjType");
+			BIF_ComObjTypeOrValue(aResult, aResultToken, aParam, aParamCount);
+		}
+		else if (VT_DISPATCH == obj->mVarType)
 		{
 			aResultToken.symbol = SYM_INTEGER;
 			aResultToken.value_int64 = (__int64) obj->mDispatch; // mDispatch vs mVal64 ensures we zero the high 32 bits in 32-bit builds.
 			if (obj->mDispatch)
 				obj->mDispatch->AddRef();
 		}
+	}
+	else
+	{
+		HRESULT hr;
+		CLSID clsid;
+		IUnknown *punk;
+		hr = CLSIDFromString(CStringWCharFromTCharIfNeeded(TokenToString(*aParam[0])), &clsid);
+		if (SUCCEEDED(hr))
+		{
+			hr = GetActiveObject(clsid, NULL, &punk);
+			if (SUCCEEDED(hr))
+			{
+				IDispatch *pdisp;
+				if (SUCCEEDED(punk->QueryInterface(IID_IDispatch, (void **)&pdisp)))
+				{
+					if (obj = new ComObject(pdisp))
+					{
+						aResultToken.symbol = SYM_OBJECT;
+						aResultToken.object = obj;
+					}
+					else
+						pdisp->Release();
+				}
+				punk->Release();
+				return;
+			}
+		}
+		ComError(hr);
 	}
 }
 
