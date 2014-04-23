@@ -11,6 +11,22 @@ FuncAndToken aFuncAndTokenToReturn[10] ;    // for ahkPostFunction
 int returnCount = -1 ;
 void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar);
 
+#ifndef MINIDLL
+#define FINALIZE_HOTKEYS \
+	for (int expr_line_index = oldHotExprLineCount ; expr_line_index < g_HotExprLineCount; ++expr_line_index)\
+	{\
+		Line *line = g_HotExprLines[expr_line_index];\
+		if (!g_script.PreparseBlocks(line))\
+			return LOADING_FAILED;\
+		line->mActionType = ACT_IFEXPR;\
+	}\
+	if (Hotkey::sHotkeyCount > HotkeyCount)\
+	{\
+		Line::ToggleSuspendState();\
+		Line::ToggleSuspendState();\
+	}
+#endif
+
 #ifdef _USRDLL
 #ifndef MINIDLL
 //COM virtual functions
@@ -308,6 +324,14 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute)
 {   // dynamically include a file into a script !!
 	// labels, hotkeys, functions.   
 
+#ifndef MINIDLL
+	int HotkeyCount = Hotkey::sHotkeyCount;
+	int oldHotExprLineCount = g_HotExprLineCount;
+#else
+	int HotkeyCount = NULL;
+	int oldHotExprLineCount = 0;
+#endif
+
 	if (!g_script.mIsReadyToExecute)
 		return 0;  // AutoHotkey needs to be running at this point // LOADING_FAILED cant be used due to PTR return type
 	
@@ -350,6 +374,11 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute)
 	for (;aTempLine->mActionType == ACT_EXIT;aTempLine = aTempLine->mPrevLine)
 		aTempLine->mActionType = ACT_RETURN;
 	*/
+
+#ifndef MINIDLL
+	FINALIZE_HOTKEYS
+#endif
+
 	g_script.mIsReadyToExecute = true;
 	g->CurrentFunc = aCurrFunc;
 	if (waitexecute != 0)
@@ -385,6 +414,15 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute)
 EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute)
 {   // dynamically include a script from text!!
 	// labels, hotkeys, functions.
+
+#ifndef MINIDLL
+	int HotkeyCount = Hotkey::sHotkeyCount;
+	int oldHotExprLineCount = g_HotExprLineCount;
+#else
+	int HotkeyCount = NULL;
+	int oldHotExprLineCount = 0;
+#endif
+
 	if (!g_script.mIsReadyToExecute)
 		return 0; // AutoHotkey needs to be running at this point // LOADING_FAILED cant be used due to PTR return type
 
@@ -424,6 +462,9 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute)
 	for (;aTempLine->mActionType == ACT_EXIT;aTempLine = aTempLine->mPrevLine)
 		aTempLine->mActionType = ACT_RETURN;
 	*/
+#ifndef MINIDLL
+	FINALIZE_HOTKEYS
+#endif
 	g_script.mIsReadyToExecute = true;
 	g->CurrentFunc = aCurrFunc;
 	if (waitexecute != 0)
@@ -459,6 +500,15 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute)
 EXPORT int ahkExec(LPTSTR script)
 {   // dynamically include a script from text!!
 	// labels, hotkeys, functions.
+
+#ifndef MINIDLL
+	int HotkeyCount = Hotkey::sHotkeyCount;
+	int oldHotExprLineCount = g_HotExprLineCount;
+#else
+	int HotkeyCount = NULL;
+	int oldHotExprLineCount = 0;
+#endif
+
 	if (!g_script.mIsReadyToExecute)
 		return NULL; // AutoHotkey needs to be running at this point
 	
@@ -497,6 +547,9 @@ EXPORT int ahkExec(LPTSTR script)
 	for (;aTempLine && aTempLine->mActionType == ACT_EXIT;aTempLine = aTempLine->mPrevLine)
 		aTempLine->mActionType = ACT_RETURN;
 	*/
+#ifndef MINIDLL
+	FINALIZE_HOTKEYS
+#endif
 	g_script.mIsReadyToExecute = true;
 	g->CurrentFunc = aCurrFunc;
 	Line *aTempLine = g_script.mLastLine;
@@ -841,7 +894,6 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 	}
 	else if (aFuncAndToken->result_to_return_dll)
 			*aFuncAndToken->result_to_return_dll = '\0';
-	// Var::FreeAndRestoreFunctionVars(func, var_backup, var_backup_count);
 	ResumeUnderlyingThread(ErrorLevel_saved);
 	return;
 }
