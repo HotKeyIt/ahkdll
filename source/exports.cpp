@@ -14,13 +14,6 @@ void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar);
 #ifndef MINIDLL
 // HotExpr code from LoadFromFile, Hotkeys need to be toggled to get activated
 #define FINALIZE_HOTKEYS \
-	for (int expr_line_index = oldHotExprLineCount ; expr_line_index < g_HotExprLineCount; ++expr_line_index)\
-	{\
-		Line *line = g_HotExprLines[expr_line_index];\
-		if (!g_script.PreparseBlocks(line))\
-			return LOADING_FAILED;\
-		line->mActionType = ACT_IFEXPR;\
-	}\
 	if (Hotkey::sHotkeyCount > HotkeyCount)\
 	{\
 		Line::ToggleSuspendState();\
@@ -370,13 +363,19 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute)
 	}	
 	g_script.mFileSpec = oldFileSpec;
 
-	/*
-	// change ACT_EXIT TO ACT_RETURN
-	Line *aTempLine = g_script.mLastLine;
-	for (;aTempLine->mActionType == ACT_EXIT;aTempLine = aTempLine->mPrevLine)
-		aTempLine->mActionType = ACT_RETURN;
-	*/
-
+	// backup to return
+	Line *aTempLine = g_script.mFirstLine;
+	// restore
+	g_script.mFirstLine = aFirstLine;
+	g_script.mLastLine = aLastLine;
+	g_script.mLastLine->mNextLine = NULL;
+	g_script.mCurrLine = aCurrLine;
+	g_script.mClassObjectCount = aClassObjectCount;
+	g_script.mCurrFileIndex = aCurrFileIndex;
+	g_script.mCurrentFuncOpenBlockCount = aCurrentFuncOpenBlockCount;
+	g_script.mNextLineIsFunctionBody = aNextLineIsFunctionBody;
+	g_script.mCombinedLineNumber = aCombinedLineNumber;
+	
 #ifndef MINIDLL
 	FINALIZE_HOTKEYS
 #endif
@@ -395,19 +394,6 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute)
 			PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)g_script.mFirstLine, (LPARAM)NULL);
 		g_ReturnNotExit = false;
 	}
-	// backup to return
-	Line *aTempLine = g_script.mFirstLine;
-	// restore
-	g_script.mFirstLine = aFirstLine;
-	g_script.mLastLine = aLastLine;
-	g_script.mLastLine->mNextLine = NULL;
-	g_script.mCurrLine = aCurrLine;
-	g_script.mClassObjectCount = aClassObjectCount;
-	g_script.mCurrFileIndex = aCurrFileIndex;
-	g_script.mCurrentFuncOpenBlockCount = aCurrentFuncOpenBlockCount;
-	g_script.mNextLineIsFunctionBody = aNextLineIsFunctionBody;
-	g_script.mCombinedLineNumber = aCombinedLineNumber;
-
 	return (UINT_PTR) aTempLine; //oldLastLine->mNextLine;
 }
 
@@ -457,13 +443,20 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute)
 		g_script.mIsReadyToExecute = true;
 		return 0;  // LOADING_FAILED cant be used due to PTR return type
 	}
-
-	/*
-	// change ACT_EXIT TO ACT_RETURN
-	Line *aTempLine = g_script.mLastLine;
-	for (;aTempLine->mActionType == ACT_EXIT;aTempLine = aTempLine->mPrevLine)
-		aTempLine->mActionType = ACT_RETURN;
-	*/
+	
+	// backup to return
+	Line *aTempLine = g_script.mFirstLine;
+	// restore
+	g_script.mFirstLine = aFirstLine;
+	g_script.mLastLine = aLastLine;
+	g_script.mLastLine->mNextLine = NULL;
+	g_script.mCurrLine = aCurrLine;
+	g_script.mClassObjectCount = aClassObjectCount;
+	g_script.mCurrFileIndex = aCurrFileIndex;
+	g_script.mCurrentFuncOpenBlockCount = aCurrentFuncOpenBlockCount;
+	g_script.mNextLineIsFunctionBody = aNextLineIsFunctionBody;
+	g_script.mCombinedLineNumber = aCombinedLineNumber;
+	
 #ifndef MINIDLL
 	FINALIZE_HOTKEYS
 #endif
@@ -480,19 +473,6 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute)
 		else
 			PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)g_script.mFirstLine, (LPARAM)NULL);
 	}
-	// backup to return
-	Line *aTempLine = g_script.mFirstLine;
-	// restore
-	g_script.mFirstLine = aFirstLine;
-	g_script.mLastLine = aLastLine;
-	g_script.mLastLine->mNextLine = NULL;
-	g_script.mCurrLine = aCurrLine;
-	g_script.mClassObjectCount = aClassObjectCount;
-	g_script.mCurrFileIndex = aCurrFileIndex;
-	g_script.mCurrentFuncOpenBlockCount = aCurrentFuncOpenBlockCount;
-	g_script.mNextLineIsFunctionBody = aNextLineIsFunctionBody;
-	g_script.mCombinedLineNumber = aCombinedLineNumber;
-
 	return (UINT_PTR) aTempLine; //oldLastLine ? (UINT_PTR) oldLastLine->mNextLine : (UINT_PTR) OK;
 }
 #endif // AUTOHOTKEYSC
