@@ -363,18 +363,6 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute)
 	}	
 	g_script.mFileSpec = oldFileSpec;
 
-	// backup to return
-	Line *aTempLine = g_script.mFirstLine;
-	// restore
-	g_script.mFirstLine = aFirstLine;
-	g_script.mLastLine = aLastLine;
-	g_script.mLastLine->mNextLine = NULL;
-	g_script.mCurrLine = aCurrLine;
-	g_script.mClassObjectCount = aClassObjectCount;
-	g_script.mCurrFileIndex = aCurrFileIndex;
-	g_script.mCurrentFuncOpenBlockCount = aCurrentFuncOpenBlockCount;
-	g_script.mNextLineIsFunctionBody = aNextLineIsFunctionBody;
-	g_script.mCombinedLineNumber = aCombinedLineNumber;
 	
 #ifndef MINIDLL
 	FINALIZE_HOTKEYS
@@ -394,6 +382,32 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute)
 			PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)g_script.mFirstLine, (LPARAM)NULL);
 		g_ReturnNotExit = false;
 	}
+	else
+	{  // Static init lines need always to run
+		Line *tempstatic = NULL;
+		while (tempstatic != g_script.mLastStaticLine)
+		{
+			if (tempstatic == NULL)
+				tempstatic = g_script.mFirstStaticLine;
+			else
+				tempstatic = tempstatic->mNextLine;
+			SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)tempstatic, (LPARAM)ONLY_ONE_LINE);
+		}
+	}
+
+	// backup to return
+	Line *aTempLine = g_script.mFirstLine;
+	// restore
+	g_script.mFirstLine = aFirstLine;
+	g_script.mLastLine = aLastLine;
+	g_script.mLastLine->mNextLine = NULL;
+	g_script.mCurrLine = aCurrLine;
+	g_script.mClassObjectCount = aClassObjectCount;
+	g_script.mCurrFileIndex = aCurrFileIndex;
+	g_script.mCurrentFuncOpenBlockCount = aCurrentFuncOpenBlockCount;
+	g_script.mNextLineIsFunctionBody = aNextLineIsFunctionBody;
+	g_script.mCombinedLineNumber = aCombinedLineNumber;
+
 	return (UINT_PTR) aTempLine; //oldLastLine->mNextLine;
 }
 
@@ -444,18 +458,6 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute)
 		return 0;  // LOADING_FAILED cant be used due to PTR return type
 	}
 	
-	// backup to return
-	Line *aTempLine = g_script.mFirstLine;
-	// restore
-	g_script.mFirstLine = aFirstLine;
-	g_script.mLastLine = aLastLine;
-	g_script.mLastLine->mNextLine = NULL;
-	g_script.mCurrLine = aCurrLine;
-	g_script.mClassObjectCount = aClassObjectCount;
-	g_script.mCurrFileIndex = aCurrFileIndex;
-	g_script.mCurrentFuncOpenBlockCount = aCurrentFuncOpenBlockCount;
-	g_script.mNextLineIsFunctionBody = aNextLineIsFunctionBody;
-	g_script.mCombinedLineNumber = aCombinedLineNumber;
 	
 #ifndef MINIDLL
 	FINALIZE_HOTKEYS
@@ -473,6 +475,32 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute)
 		else
 			PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)g_script.mFirstLine, (LPARAM)NULL);
 	}
+	else
+	{  // Static init lines need always to run
+		Line *tempstatic = NULL;
+		while (tempstatic != g_script.mLastStaticLine)
+		{
+			if (tempstatic == NULL)
+				tempstatic = g_script.mFirstStaticLine;
+			else
+				tempstatic = tempstatic->mNextLine;
+			SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)tempstatic, (LPARAM)ONLY_ONE_LINE);
+		}
+	}
+
+	// backup to return
+	Line *aTempLine = g_script.mFirstLine;
+	// restore
+	g_script.mFirstLine = aFirstLine;
+	g_script.mLastLine = aLastLine;
+	g_script.mLastLine->mNextLine = NULL;
+	g_script.mCurrLine = aCurrLine;
+	g_script.mClassObjectCount = aClassObjectCount;
+	g_script.mCurrFileIndex = aCurrFileIndex;
+	g_script.mCurrentFuncOpenBlockCount = aCurrentFuncOpenBlockCount;
+	g_script.mNextLineIsFunctionBody = aNextLineIsFunctionBody;
+	g_script.mCombinedLineNumber = aCombinedLineNumber;
+
 	return (UINT_PTR) aTempLine; //oldLastLine ? (UINT_PTR) oldLastLine->mNextLine : (UINT_PTR) OK;
 }
 #endif // AUTOHOTKEYSC
@@ -504,6 +532,7 @@ EXPORT int ahkExec(LPTSTR script)
 	g_script.mClassObjectCount = NULL;
 	g_script.mFirstStaticLine = NULL;g_script.mLastStaticLine = NULL;
 	g_script.mFirstLine = NULL;g_script.mLastLine = NULL; //g_script.mCurrLine = NULL;
+	int aSourceFileIdx = Line::sSourceFileCount;
 	g_script.mIsReadyToExecute = false; // requiered to properly declare vars in function
 	g->CurrentFunc = NULL;
 
@@ -535,7 +564,6 @@ EXPORT int ahkExec(LPTSTR script)
 	g_script.mIsReadyToExecute = true;
 	g->CurrentFunc = aCurrFunc;
 	Line *aTempLine = g_script.mLastLine;
-	UINT aSourceFileIdx = Line::sSourceFileCount - 1;
 	Line *aExecLine = g_script.mFirstLine;
 	// restore
 	g_script.mFirstLine = aFirstLine;
@@ -555,11 +583,9 @@ EXPORT int ahkExec(LPTSTR script)
 		prevLine->mNextLine->FreeDerefBufIfLarge();
 		delete prevLine->mNextLine;
 	}
-	if ( Line::sSourceFile[aSourceFileIdx] != g_script.mOurEXE )
-		free(Line::sSourceFile[aSourceFileIdx]);
-	if (Line::sSourceFileCount == ++aSourceFileIdx)
-		--Line::sSourceFileCount;
-
+	for (;Line::sSourceFileCount>aSourceFileIdx;)
+		if (Line::sSourceFile[--Line::sSourceFileCount] != g_script.mOurEXE)
+			free(Line::sSourceFile[Line::sSourceFileCount]);
 	return OK;
 }
 #endif // AUTOHOTKEYSC
