@@ -703,7 +703,7 @@ void Script::Destroy()
 	HDC hdc = GetDC(NULL);
 	g_ScreenDPI = GetDeviceCaps(hdc, LOGPIXELSX);
 	ReleaseDC(NULL, hdc);
-	g_gui  =  NULL;
+	g_guiCount = 0;
 #endif
 #ifndef MINIDLL
 	_tcscpy(g_EndChars,_T("-()[]{}:;'\"/\\,.?!\n \t"));  // Hotstring default end chars, including a space.
