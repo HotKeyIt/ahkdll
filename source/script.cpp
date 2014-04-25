@@ -560,7 +560,7 @@ void Script::Destroy()
 	HDC hdc = GetDC(NULL);
 	g_ScreenDPI = GetDeviceCaps(hdc, LOGPIXELSX);
 	ReleaseDC(NULL, hdc);
-	g_gui  =  NULL;
+	g_guiCount = 0;
 #endif
 	g_delimiter  =  ',';
 	g_DerefChar  =  '%';
