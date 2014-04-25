@@ -2767,10 +2767,10 @@ public:
 #ifdef AUTOHOTKEYSC
 	LineNumberType LoadFromFile();
 #else
-	LineNumberType LoadFromFile(bool aScriptWasNotspecified);
+	LineNumberType LoadFromFile(bool aScriptWasNotspecified,bool aCheckIfExpr = true);
 #endif
 #ifndef AUTOHOTKEYSC
-	LineNumberType LoadFromText(LPTSTR aScript,LPCTSTR aPathToShow = NULL); // HotKeyIt H1 load text instead file ahktextdll
+	LineNumberType LoadFromText(LPTSTR aScript,LPCTSTR aPathToShow = NULL, bool aCheckIfExpr = true); // HotKeyIt H1 load text instead file ahktextdll
 	ResultType LoadIncludedText(LPTSTR aScript,LPCTSTR aPathToShow = NULL); //New read text
 #endif
 	ResultType LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure);
