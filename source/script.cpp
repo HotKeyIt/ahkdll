@@ -1409,7 +1409,7 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 }
 
 #ifndef AUTOHOTKEYSC
-LineNumberType Script::LoadFromText(LPTSTR aScript,LPCTSTR aPathToShow)
+LineNumberType Script::LoadFromText(LPTSTR aScript,LPCTSTR aPathToShow, bool aCheckIfExpr)
 // HotKeyIt H1 LoadFromText() for text instead LoadFromFile()
 // Returns the number of non-comment lines that were loaded, or LOADING_FAILED on error.
 {
@@ -1446,6 +1446,9 @@ LineNumberType Script::LoadFromText(LPTSTR aScript,LPCTSTR aPathToShow)
 	for (;;)
 	{
 		// Check for any unprocessed #if expressions:
+#ifndef AUTOHOTKEYSC
+		if (aCheckIfExpr)
+#endif
 #ifndef MINIDLL
 		for ( ; expr_line_index < g_HotExprLineCount; ++expr_line_index)
 		{
@@ -1586,7 +1589,7 @@ LineNumberType Script::LoadFromText(LPTSTR aScript,LPCTSTR aPathToShow)
 #ifdef AUTOHOTKEYSC
 UINT Script::LoadFromFile()
 #else
-UINT Script::LoadFromFile(bool aScriptWasNotspecified)
+UINT Script::LoadFromFile(bool aScriptWasNotspecified, bool aCheckIfExpr)
 #endif
 // Returns the number of non-comment lines that were loaded, or LOADING_FAILED on error.
 {
@@ -1701,6 +1704,9 @@ _T("; keystrokes and mouse clicks.  It also explains more about hotkeys.\n")
 	for (;;)
 	{
 		// Check for any unprocessed #if expressions:
+#ifndef AUTOHOTKEYSC
+		if (aCheckIfExpr)
+#endif
 #ifndef MINIDLL
 		for ( ; expr_line_index < g_HotExprLineCount; ++expr_line_index)
 		{
@@ -10522,6 +10528,9 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		}
 		else
 		{
+			// Fixed in v1.1.14.04: Avoid trying to make a Func with an invalid name. This fixes IsFunc("ComObj(") throwing an exception.
+			if (!Var::ValidateName(func_name, DISPLAY_NO_ERROR))
+				return NULL;
 			bif = BIF_ComObjActive;
 			min_params = 0;
 			max_params = 3;
