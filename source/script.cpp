@@ -1446,10 +1446,10 @@ LineNumberType Script::LoadFromText(LPTSTR aScript,LPCTSTR aPathToShow, bool aCh
 	for (;;)
 	{
 		// Check for any unprocessed #if expressions:
+#ifndef MINIDLL
 #ifndef AUTOHOTKEYSC
 		if (aCheckIfExpr)
 #endif
-#ifndef MINIDLL
 		for ( ; expr_line_index < g_HotExprLineCount; ++expr_line_index)
 		{
 			Line *line = g_HotExprLines[expr_line_index];
@@ -1704,10 +1704,10 @@ _T("; keystrokes and mouse clicks.  It also explains more about hotkeys.\n")
 	for (;;)
 	{
 		// Check for any unprocessed #if expressions:
+#ifndef MINIDLL
 #ifndef AUTOHOTKEYSC
 		if (aCheckIfExpr)
 #endif
-#ifndef MINIDLL
 		for ( ; expr_line_index < g_HotExprLineCount; ++expr_line_index)
 		{
 			Line *line = g_HotExprLines[expr_line_index];
