@@ -430,6 +430,11 @@ void WaitIsReadyToExecute()
 		 Sleep(10);
 		 GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
 	 }
+	 if (!g_script.mIsReadyToExecute)
+	 {
+		 hThread = NULL;
+		 SetLastError(lpExitCode);
+	 }
 }
 
 
