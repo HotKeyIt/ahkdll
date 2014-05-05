@@ -10829,56 +10829,6 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, ActionTyp
 			}
 			break;
 
-		case ACT_BREAKIF:
-		case ACT_CONTINUEIF:
-			if (!aLoopType)
-				return line->PreparseError(_T("Break/Continue must be enclosed by a Loop."));
-			if (line->mArgc == 2)
-			{
-				if (line->ArgHasDeref(2) || line->mArg[1].is_expression)
-					// It seems unlikely that computing the target loop at runtime would be useful.
-					// For simplicity, rule out things like "break %var%" and "break % func()":
-					return line->PreparseError(ERR_PARAM1_INVALID); //_T("Target label of Break/Continue cannot be dynamic."));
-				LPTSTR loop_name = line->mArg[1].text;
-				Label *loop_label;
-				Line *loop_line;
-				if (IsNumeric(loop_name))
-				{
-					int n = _ttoi(loop_name);
-					// Find the nth innermost loop which encloses this line:
-					for (loop_line = line->mParentLine; loop_line; loop_line = loop_line->mParentLine)
-						if (ACT_IS_LOOP(loop_line->mActionType)) // Any type of LOOP, FOR or WHILE.
-							if (--n < 1)
-								break;
-					if (!loop_line || n != 0)
-						return line->PreparseError(ERR_PARAM1_INVALID);
-				}
-				else
-				{
-					// Target is a named loop.
-					if ( !(loop_label = FindLabel(loop_name)) )
-						return line->PreparseError(ERR_NO_LABEL, loop_name);
-					loop_line = loop_label->mJumpToLine;
-					// Ensure the label points to a Loop, For-loop or While-loop ...
-					if (   !ACT_IS_LOOP(loop_line->mActionType)
-						// ... which encloses this line.  Use line->mParentLine as the starting-point of
-						// the "jump" to ensure the target isn't at the same nesting level as this line:
-						|| !line->mParentLine->IsJumpValid(*loop_label, true)   )
-						return line->PreparseError(ERR_PARAM1_INVALID); //_T("Target label does not point to an appropriate Loop."));
-					// Although we've validated that it points to a loop, we can't resolve the line
-					// after the loop's body as that (mRelatedLine) hasn't been determined yet.
-					if (loop_line == line->mParentLine
-						// line->mParentLine must be non-NULL because above verified this line is enclosed by a Loop:
-						|| line->mParentLine->mActionType == ACT_BLOCK_BEGIN && loop_line == line->mParentLine->mParentLine)
-					{
-						// Set mRelatedLine to NULL since the target loop directly encloses this line.
-						loop_line = NULL;
-					}
-				}
-				line->mRelatedLine = loop_line;
-			}
-			break;
-
 		case ACT_GOSUB: // These two must be done here (i.e. *after* all the script lines have been added),
 		case ACT_GOTO:  // so that labels both above and below each Gosub/Goto can be resolved.
 			if (line->ArgHasDeref(1))
@@ -12879,39 +12829,6 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 			continue; // Let the for-loop process the new location specified by <line>.
 
 		
-		case ACT_BREAKIF:
-			if_condition = line->EvaluateCondition();
-			if (if_condition == CONDITION_TRUE)
-			{
-				if (line->mRelatedLine)
-				{
-					// Rather than having PerformLoop() handle LOOP_BREAK specifically, tell our caller to jump to
-					// the line *after* the loop's body. This is always a jump our caller must handle, unlike GOTO:
-					caller_jump_to_line = line->mRelatedLine->mRelatedLine;
-				}
-				return LOOP_BREAK;
-			} 
-			else if (aMode == ONLY_ONE_LINE) // if_condition == CONDITION_FALSE and one line mode
-				return LOOP_CONTINUE;
-			line = line->mNextLine;
-			continue;
-
-		case ACT_CONTINUEIF:
-			if_condition = line->EvaluateCondition();
-			if (if_condition == CONDITION_TRUE)
-			{
-				if (line->mRelatedLine)
-				{
-					// Signal any loops nested between this line and the target loop to return LOOP_CONTINUE:
-					caller_jump_to_line = line->mRelatedLine; // Okay even if NULL.
-				}
-				return LOOP_CONTINUE;
-			} 
-			else if (aMode == ONLY_ONE_LINE) // if_condition == CONDITION_FALSE and one line mode
-				return LOOP_CONTINUE;
-			line = line->mNextLine;
-			continue;
-
 		case ACT_GOSUB:
 			// A single gosub can cause an infinite loop if misused (i.e. recursive gosubs),
 			// so be sure to do this to prevent the program from hanging:
@@ -13542,7 +13459,7 @@ ResultType Line::EvaluateCondition()
 // Returns CONDITION_TRUE or CONDITION_FALSE (FAIL is returned only in DEBUG mode).
 {
 #ifdef _DEBUG
-	if (mActionType != ACT_IF && mActionType != ACT_CONTINUEIF && mActionType != ACT_BREAKIF)
+	if (mActionType != ACT_IF)
 		return LineError(_T("DEBUG: EvaluateCondition() was called with a line that isn't a condition."));
 #endif
 

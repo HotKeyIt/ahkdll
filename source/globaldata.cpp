@@ -313,8 +313,8 @@ Action g_act[] =
 	, {_T("For"), 1, 3, false, {3, 0}}  // For var [,var] in expression
 	, {_T("While"), 1, 1, false, {1, 0}} // LoopCondition.  v1.0.48: Lexikos: Added g_act entry for ACT_WHILE.
 	, {_T("Until"), 1, 1, false, {1, 0}} // Until expression (follows a Loop)
-	, {_T("Break"), 0, 1, false, NULL}, {_T("BreakIf"), 1, 2, false, {1, 0}}
-	, {_T("Continue"), 0, 1, false, NULL}, {_T("ContinueIf"), 1, 2, false, {1, 0}}
+	, {_T("Break"), 0, 1, false, NULL}
+	, {_T("Continue"), 0, 1, false, NULL}
 	, {_T("Goto"), 1, 1, false, NULL}
 	, {_T("Gosub"), 1, 1, false, NULL}   // Label (or dereference that resolves to a label).
 	, {_T("Return"), 0, 1, false, {1, 0}}

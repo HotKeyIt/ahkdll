@@ -1969,8 +1969,6 @@ ResultType Line::ExpandArgs(ExprTokenType *aResultToken, VarSizeType aSpaceNeede
 				arg_deref[i] = // The following is ordered for short-circuit performance:
 					(   mActionType == ACT_ASSIGNEXPR && i == 1  // By contrast, for the below i==anything (all args):
 					||  mActionType == ACT_IF
-					||  mActionType == ACT_BREAKIF
-					||  mActionType == ACT_CONTINUEIF
 					//|| mActionType == ACT_WHILE // Not necessary to check this one because loadtime leaves ACT_WHILE as an expression in all common cases. Also, there's no easy way to get ACT_WHILE into the range above due to the overlap of other ranges in enum_act.
 					) && the_only_var_of_this_arg->Type() == VAR_NORMAL // Otherwise, users of this optimization would have to reproduce more of the logic in ArgMustBeDereferenced().
 					? _T("") : NULL; // See "Update #2" and later comments above.
