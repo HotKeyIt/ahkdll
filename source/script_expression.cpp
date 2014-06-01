@@ -1522,6 +1522,8 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 	aResult = OK; // Set default.
 	
 	Object *param_obj = NULL;
+	CriticalObject *param_critical = NULL;
+	CRITICAL_SECTION *crisec = NULL;
 	if (aIsVariadic) // i.e. this is a variadic function call.
 	{
 		ExprTokenType *rvalue = NULL;
@@ -1529,7 +1531,9 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 			rvalue = aParam[--aParamCount];
 		
 		--aParamCount; // i.e. make aParamCount the count of normal params.
-		if (param_obj = dynamic_cast<Object *>(TokenToObject(*aParam[aParamCount])))
+		if (param_critical = dynamic_cast<CriticalObject *>(TokenToObject(*aParam[aParamCount])))
+			EnterCriticalSection(crisec = (LPCRITICAL_SECTION)param_critical->GetCriSec());
+		if ( (param_obj = (Object *)param_critical->GetObj()) || (param_obj = dynamic_cast<Object *>(TokenToObject(*aParam[aParamCount]))) )
 		{
 			int extra_params = param_obj->MaxIndex();
 			if (extra_params > 0 || param_obj->HasNonnumericKeys())
@@ -1547,6 +1551,8 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 				param_obj->ArrayToParams(token, param_list, extra_params, aParam, aParamCount);
 			}
 		}
+		if (crisec)
+			LeaveCriticalSection(crisec);
 		if (rvalue)
 			aParam[aParamCount++] = rvalue; // In place of the variadic param.
 		// mMinParams isn't validated at load-time for variadic calls, so we must do it here:
@@ -1663,11 +1669,20 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 				if (param_obj)
 				{
 					ExprTokenType named_value;
+					if (crisec)
+					{
+						EnterCriticalSection(crisec);
+						param_obj = (Object *)param_critical->GetObj(); // make sure we have the right object
+					}
 					if (param_obj->GetItem(named_value, this_formal_param.var->mName))
 					{
+						if (crisec)
+							LeaveCriticalSection(crisec);
 						this_formal_param.var->Assign(named_value);
 						continue;
 					}
+					if (crisec)
+						LeaveCriticalSection(crisec);
 				}
 			
 				switch(this_formal_param.default_type)
@@ -1721,7 +1736,14 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 		{
 			// If the caller supplied an array of parameters, copy any key-value pairs with non-numbered keys;
 			// otherwise, just create a new object.  Either way, numbered params will be inserted below.
+			if (crisec)
+			{
+				EnterCriticalSection(crisec);
+				param_obj = (Object *)param_critical->GetObj(); // make sure we have the right object
+			}
 			Object *vararg_obj = param_obj ? param_obj->Clone(true) : Object::Create();
+			if (crisec)
+				LeaveCriticalSection(crisec);
 			if (!vararg_obj)
 			{
 				aResult = g_script.ScriptError(ERR_OUTOFMEM, mName);

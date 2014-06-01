@@ -14032,24 +14032,8 @@ ResultType Line::PerformLoopFilePattern(ExprTokenType *aResultToken, bool &aCont
 			while (jump_to_line == mNextLine);
 		else
 			result = mNextLine->ExecUntil(ONLY_ONE_LINE, aResultToken, &jump_to_line);
-		if (jump_to_line && !(result == LOOP_CONTINUE && jump_to_line == this)) // See comments in PerformLoop() about this section.
-		{
-			if (jump_to_line == this)
-				aContinueMainLoop = true;
-			else
-				aJumpToLine = jump_to_line; // Signal our caller to handle this jump.
-			FindClose(file_search);
-			return result;
-		}
-		if ( result != OK && result != LOOP_CONTINUE // i.e. result == LOOP_BREAK || result == EARLY_RETURN || result == EARLY_EXIT || result == FAIL)
-			|| (aUntil && aUntil->EvaluateLoopUntil(result)) )
-		{
-			FindClose(file_search);
-			// Although ExecUntil() will treat the LOOP_BREAK result identically to OK, we
-			// need to return LOOP_BREAK in case our caller is another instance of this
-			// same function (i.e. due to recursing into subfolders):
-			return result;
-		}
+		
+
 		// Otherwise, the result of executing the body of the loop, above, was either OK
 		// (the current iteration completed normally) or LOOP_CONTINUE (the current loop
 		// iteration was cut short).  In both cases, just continue on through the loop.
