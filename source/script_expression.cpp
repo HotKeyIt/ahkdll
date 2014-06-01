@@ -1743,7 +1743,8 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 		--aParamCount; // i.e. make aParamCount the count of normal params.
 		if (param_critical = dynamic_cast<CriticalObject *>(TokenToObject(*aParam[aParamCount])))
 			EnterCriticalSection(crisec = (LPCRITICAL_SECTION)param_critical->GetCriSec());
-		if ( (param_obj = (Object *)param_critical->GetObj()) || (param_obj = dynamic_cast<Object *>(TokenToObject(*aParam[aParamCount]))) )
+		if (	(param_critical && (param_obj = (Object *)param_critical->GetObj())) 
+			||  (param_obj = dynamic_cast<Object *>(TokenToObject(*aParam[aParamCount]))) )
 		{
 			int extra_params = param_obj->MaxIndex();
 			if (extra_params > 0 || param_obj->HasNonnumericKeys())
@@ -1766,8 +1767,6 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 				}
 			}
 		}
-		if (crisec)
-				LeaveCriticalSection(crisec);
 		if (rvalue)
 			aParam[aParamCount++] = rvalue; // In place of the variadic param.
 		// mMinParams isn't validated at load-time for variadic calls, so we must do it here:
@@ -1775,7 +1774,11 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 		// can be supplied for a required parameter.  Missing required parameters are detected
 		// in the loop below by the absence of a default value.
 		if (aParamCount < mMinParams && mIsBuiltIn)
+		{
+			if (crisec)
+				LeaveCriticalSection(crisec);
 			return false; // Abort expression.
+		}
 		// Otherwise, even if some params are SYM_MISSING, it is relatively safe to call the function.
 		// The TokenTo' set of functions will produce 0 or "" for missing params.  Although that isn't
 		// technically correct, it seems preferable over silently aborting the call.
@@ -1785,6 +1788,9 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 	{
 		aResultToken.symbol = SYM_INTEGER; // Set default return type so that functions don't have to do it if they return INTs.
 		aResultToken.marker = mName;       // Inform function of which built-in function called it (allows code sharing/reduction). Can't use circuit_token because it's value is still needed later below.
+
+		if (crisec)
+			LeaveCriticalSection(crisec);
 
 		// CALL THE BUILT-IN FUNCTION:
 		mBIF(aResult, aResultToken, aParam, aParamCount);
@@ -1848,6 +1854,8 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 			if (!Var::BackupFunctionVars(*this, aFuncCall.mBackup, aFuncCall.mBackupCount)) // Out of memory.
 			{
 				aResult = g_script.ScriptError(ERR_OUTOFMEM, mName);
+				if (crisec)
+					LeaveCriticalSection(crisec);
 				return false;
 			}
 		} // if (func.mInstances > 0)
@@ -1873,20 +1881,11 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 				if (param_obj)
 				{
 					ExprTokenType named_value;
-					if (crisec)
-					{
-						EnterCriticalSection(crisec);
-						param_obj = (Object *)param_critical->GetObj(); // make sure we have the right object
-					}
 					if (param_obj->GetItem(named_value, this_formal_param.var->mName))
 					{
-						if (crisec)
-							LeaveCriticalSection(crisec);
 						this_formal_param.var->Assign(named_value);
 						continue;
 					}
-					if (crisec)
-						LeaveCriticalSection(crisec);
 				}
 			
 				switch(this_formal_param.default_type)
@@ -1896,6 +1895,8 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 				case PARAM_DEFAULT_FLOAT: this_formal_param.var->Assign(this_formal_param.default_double); break;
 				default: //case PARAM_DEFAULT_NONE:
 					// No value has been supplied for this REQUIRED parameter.
+					if (crisec)
+						LeaveCriticalSection(crisec);
 					return false; // Abort expression.
 				}
 				continue;
@@ -1904,7 +1905,11 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 			ExprTokenType &token = *aParam[j];
 			
 			if (!IS_OPERAND(token.symbol)) // Haven't found a way to produce this situation yet, but safe to assume it's possible.
+			{
+				if (crisec)
+					LeaveCriticalSection(crisec);
 				return false; // Abort expression.
+			}
 
 			if (this_formal_param.is_byref)
 			{
@@ -1934,6 +1939,8 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 			if (!this_formal_param.var->Assign(token))
 			{
 				aResult = FAIL; // Abort thread.
+				if (crisec)
+					LeaveCriticalSection(crisec);
 				return false;
 			}
 		} // for each formal parameter.
@@ -1942,16 +1949,11 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 		{
 			// If the caller supplied an array of parameters, copy any key-value pairs with non-numbered keys;
 			// otherwise, just create a new object.  Either way, numbered params will be inserted below.
-			if (crisec)
-			{
-				EnterCriticalSection(crisec);
-				param_obj = (Object *)param_critical->GetObj(); // make sure we have the right object
-			}
 			Object *vararg_obj = param_obj ? param_obj->Clone(true) : Object::Create();
-			if (crisec)
-				LeaveCriticalSection(crisec);
 			if (!vararg_obj)
 			{
+				if (crisec)
+					LeaveCriticalSection(crisec);
 				aResult = g_script.ScriptError(ERR_OUTOFMEM, mName);
 				return false; // Abort thread.
 			}
@@ -1961,7 +1963,8 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 			// Assign to the "param*" var:
 			mParam[mParamCount].var->AssignSkipAddRef(vararg_obj);
 		}
-
+		if (crisec)
+			LeaveCriticalSection(crisec);
 		aResult = Call(&aResultToken); // Call the UDF.
 	}
 	return (aResult != EARLY_EXIT && aResult != FAIL);
