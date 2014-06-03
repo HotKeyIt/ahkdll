@@ -97,9 +97,6 @@
     <ClCompile Include="source\window.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="source\WinGroup.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="source\script_com.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -109,9 +106,6 @@
     <ClCompile Include="source\exports.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="source\lowlevelbif.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="source\Registry.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -119,6 +113,15 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="source\script_struct.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="source\WinGroup.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="source\LiteUnzip.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="source\lowlevelbif.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -154,9 +157,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="source\KuString.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="source\lib\exearc_read.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="source\lib_pcre\pcre\pcre.h">
@@ -201,9 +201,6 @@
     <ClInclude Include="source\window.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="source\WinGroup.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="source\script_com.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -220,6 +217,15 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="source\ahkversion.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="source\script_func_impl.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="source\WinGroup.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="source\LiteUnzip.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
