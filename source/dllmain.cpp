@@ -383,7 +383,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	return 0; // Never executed; avoids compiler warning.
 }
 
-EXPORT int ahkTerminate(DWORD timeout = 0)
+EXPORT int ahkTerminate(int timeout = 0)
 {
 	DWORD lpExitCode = 0;
 	if (hThread == 0)

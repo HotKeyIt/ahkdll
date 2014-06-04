@@ -30,7 +30,7 @@ EXPORT UINT_PTR ahkdll(LPTSTR fileName,LPTSTR argv);
 EXPORT UINT_PTR ahktextdll(LPTSTR fileName,LPTSTR argv);
 EXPORT int ahkReady();
 EXPORT int ahkReload(int timeout);
-EXPORT int ahkTerminate(DWORD timeout);
+EXPORT int ahkTerminate(int timeout);
 EXPORT int com_ahkReady();
 EXPORT int com_ahkReload();
 EXPORT int com_ahkTerminate(int timeout);
