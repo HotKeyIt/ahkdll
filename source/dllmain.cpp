@@ -462,7 +462,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 }
 
 
-EXPORT BOOL ahkTerminate(DWORD timeout = 0)
+EXPORT BOOL ahkTerminate(int timeout = 0)
 {
 	DWORD lpExitCode = 0;
 	if (hThread == 0)
@@ -508,6 +508,11 @@ void WaitIsReadyToExecute()
 	 {
 		 Sleep(10);
 		 GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
+	 }
+	 if (!g_script.mIsReadyToExecute)
+	 {
+		 hThread = NULL;
+		 SetLastError(lpExitCode);
 	 }
 }
 
