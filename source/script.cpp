@@ -424,16 +424,6 @@ Script::~Script() // Destructor.
 void Script::Destroy()
 // HotKeyIt H1 destroy script for ahkTerminate and ahkReload and ExitApp for dll
 {
-	/*
-	//ExprTokenType aResultToken;
-	static ExprTokenType **aParam = (ExprTokenType **)SimpleHeap::Malloc(sizeof(__int64));;
-	ExprTokenType aThisParam[1];
-	aThisParam[0].symbol = SYM_STRING;
-	aThisParam[0].marker = _T("");
-	aParam[0] = aThisParam;
-	int aParamCount = 0;
-	BIF_DynaCall(aThisParam[0], aParam, aParamCount);
-	*/
 	// Disconnect Debugger
 	if (!g_DebuggerHost.IsEmpty())
 	{
@@ -448,10 +438,7 @@ void Script::Destroy()
 		if (mVar[v]->mType == VAR_BUILTIN || mVar[v]->mType == VAR_CLIPBOARD ||mVar[v]->mType == VAR_CLIPBOARDALL)
 			continue;
 		mVar[v]->ConvertToNonAliasIfNecessary();
-		//if (!_tcsicmp(mVar[v]->mName,_T("Args")))  // if we restart args are filled again anyway ???
-		//	continue;
 		mVar[v]->Free();
-		//free(mVar[v]->mName);
 		delete mVar[v];
 	}
 	free(mVar);
@@ -459,7 +446,6 @@ void Script::Destroy()
 	for (v = 0; v < mLazyVarCount; v++)
 	{
 		mLazyVar[v]->ConvertToNonAliasIfNecessary();
-		//free(mLazyVar[v]->mName);
 		mLazyVar[v]->Free();
 		delete mLazyVar[v];
 	}
@@ -474,54 +460,46 @@ void Script::Destroy()
 		// calls and all tokens in the 'stack' of each currently executing expression, currently
 		// only static and global variables are released.  It seems best for consistency to also
 		// avoid releasing top-level non-static local variables (i.e. which aren't in var backups).
-		for (v = 0; v < f.mVarCount; v++)
-		{
-			f.mVar[v]->ConvertToNonAliasIfNecessary();
-			f.mVar[v]->Free();
-			//free(f.mVar[v]->mName);
-			delete f.mVar[v];
-		}
 		for (v = 0; v < f.mStaticVarCount; v++)
 		{
 			f.mStaticVar[v]->ConvertToNonAliasIfNecessary();
 			f.mStaticVar[v]->Free();
-			//free(f.mStaticVar[v]->mName);
 			delete f.mStaticVar[v];
-		}
-		for (v = 0; v < f.mLazyVarCount; v++)
-		{
-			f.mLazyVar[v]->ConvertToNonAliasIfNecessary();
-			f.mLazyVar[v]->Free();
-			//free(f.mLazyVar[v]->mName);
-			delete f.mLazyVar[v];
 		}
 		for (v = 0; v < f.mStaticLazyVarCount; v++)
 		{
 			f.mStaticLazyVar[v]->ConvertToNonAliasIfNecessary();
 			f.mStaticLazyVar[v]->Free();
-			//free(f.mStaticLazyVar[v]->mName);
 			delete f.mStaticLazyVar[v];
 		}
-		//if (mFunc[i]->mParamCount)
-		//	free(mFunc[i]->mParam);
-		//free(mFunc[i]->mName);
-		if (mFunc[i]->mLazyVarCount)
-			free(mFunc[i]->mLazyVar);
-		if (mFunc[i]->mVarCount)
-			free(mFunc[i]->mVar);
+		for (v = 0; v < f.mVarCount; v++)
+		{
+			f.mVar[v]->ConvertToNonAliasIfNecessary();
+			f.mVar[v]->Free();
+			delete f.mVar[v];
+		}
+		for (v = 0; v < f.mLazyVarCount; v++)
+		{
+			f.mLazyVar[v]->ConvertToNonAliasIfNecessary();
+			f.mLazyVar[v]->Free();
+			delete f.mLazyVar[v];
+		}
 		if (mFunc[i]->mStaticVar)
 			free(mFunc[i]->mStaticVar);
 		if (mFunc[i]->mStaticLazyVarCount)
 			free(mFunc[i]->mStaticLazyVar);
+		if (mFunc[i]->mVarCount)
+			free(mFunc[i]->mVar);
+		if (mFunc[i]->mLazyVarCount)
+			free(mFunc[i]->mLazyVar);
+		if (mFunc[i]->mGlobalVarCount)
+			free(mFunc[i]->mGlobalVar);
 		delete mFunc[i];
 	}
 	// Destroy Labels
 	for (Label *label = mFirstLabel,*nextLabel = NULL; label;)
 	{
 		nextLabel = label->mNextLabel;
-		//label->mJumpToLine = NULL;
-		//label->mPrevLabel = NULL;
-		//free(label->mName);
 		delete label;
 		label = nextLabel;
 	}
@@ -529,7 +507,6 @@ void Script::Destroy()
 	for (WinGroup *group = mFirstGroup, *nextGroup = NULL; group;)
 	{
 		nextGroup = group->mNextGroup;
-		//free(group->mName);
 		delete group;
 		group = nextGroup;
 	}
@@ -1387,8 +1364,8 @@ ResultType Script::Reload(bool aDisplayErrors)
 	// The new instance we're about to start will tell our process to stop, or it will display
 	// a syntax error or some other error, in which case our process will still be running:
 #ifdef _USRDLL
-	mReloading = true;
-	ExitApp(EXIT_RELOAD);
+	g_Reloading = true;
+	//ExitApp(EXIT_RELOAD);
 	reloadDll();
 	return EARLY_RETURN;
 #else
@@ -1437,7 +1414,7 @@ ResultType Script::ExitApp(ExitReasons aExitReason, LPTSTR aBuf, int aExitCode)
 		// extra thread for ExitApp() (which allows it to run even when MAX_THREADS_EMERGENCY has
 		// been reached).  See TOTAL_ADDITIONAL_THREADS.
 #ifdef _USRDLL
-		if (sExitLabelIsRunning && mReloading)
+		if (sExitLabelIsRunning && g_Reloading)
 		{
 			sExitLabelIsRunning = false;
 			return EARLY_EXIT;
@@ -5461,6 +5438,134 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 			return ScriptError(ERR_PARAM1_INVALID, aBuf);
 
 		g_InputLevel = group;
+		return CONDITION_TRUE;
+	}
+
+	if (IS_DIRECTIVE_MATCH(_T("#DllImport")))
+	{
+		LPTSTR aFuncName = omit_leading_whitespace(parameter);
+		if (!*(parameter = _tcschr(parameter,',')))
+			return ScriptError(ERR_PARAM2_REQUIRED, aBuf);
+		else
+			parameter++;
+		*(_tcschr(aFuncName,',')) = '\0';
+
+		int insert_pos;
+		Func *found_func = FindFunc(aFuncName,_tcslen(aFuncName),&insert_pos);
+		if (found_func)
+		{
+			if (!found_func->mIsBuiltIn)
+				return ScriptError(_T("Duplicate function definition."), aFuncName); // Seems more descriptive than "Function already defined."
+			else // It's a built-in function that the user wants to override with a custom definition.
+			{
+				found_func->mIsBuiltIn = false;  // Override built-in with custom.
+				found_func->mParamCount = 0; // Revert to the default appropriate for non-built-in functions.
+				found_func->mMinParams = 0;  //
+				found_func->mJumpToLine = NULL; // Fixed for v1.0.35.12: Must reset for detection elsewhere.
+				found_func->mHasReturn = false; // For consistency.
+				found_func->mParam = NULL;
+			}
+		}
+		else
+			if (   !(found_func = AddFunc(aFuncName, _tcslen(aFuncName), false, insert_pos))   )
+				return FAIL; // It already displayed the error.
+		found_func->mBIF = (BuiltInFunctionType)BIF_DllImport; //aDynaToken->mfunction;
+		found_func->mIsBuiltIn = true;
+
+
+		// terminate dll\function name, find it and jump to next parameter
+		*(_tcschr(parameter,',')) = '\0';
+		HANDLE func_ptr = GetDllProcAddress(parameter);
+		if (!func_ptr )
+			return ScriptError(ERR_NONEXISTENT_FUNCTION, parameter);
+		parameter = parameter + _tcslen(parameter) + 1;
+
+
+		LPTSTR parm = SimpleHeap::Malloc(parameter);
+
+		// If next parameter starts with digit, it is a shift_param definition and is omitted from paramters list for dllcall
+		int aParamCount = ATOI(parm) ? 0 : 1;
+		for(;parameter;aParamCount++)
+		{
+			if (parameter = _tcschr(parameter,','))
+				parameter++;
+		}
+		if (aParamCount < 2)
+			return ScriptError(ERR_PARAM3_REQUIRED, aBuf);
+		// set max possible parameters for the new function
+		found_func->mParamCount = aParamCount/2;
+		// misuse mGlobalVarCount to hold total amount of parmeters for DllCall
+		found_func->mGlobalVarCount = aParamCount;
+
+		// allocate memory to hold the parameters and defaults
+		ExprTokenType **func_param = (ExprTokenType**)SimpleHeap::Malloc(aParamCount * sizeof(ExprTokenType*));
+		ExprTokenType **func_defaults = (ExprTokenType**)SimpleHeap::Malloc(found_func->mParamCount * sizeof(ExprTokenType*));
+		// misuse mParam to hold default parameters
+		found_func->mParam = (FuncParam*)func_param;
+		found_func->mStaticVar = (Var**)func_defaults;
+
+		// assign function pointer
+		func_param[0] = (ExprTokenType*)SimpleHeap::Malloc(sizeof(ExprTokenType));
+		func_param[0]->symbol = PURE_INTEGER;
+		func_param[0]->value_int64 = (__int64)func_ptr;
+		
+		// set parameters shift
+		if (ATOI(parm))
+		{
+			int shift_param[MAX_FUNCTION_PARAMS];
+			int shift_count = 0;
+			for (int i;parm && *parm || *parm != ',';parm++)
+			{
+				if (!(i = ATOI(parm)))
+					break;  // next parameter is a string
+				shift_param[shift_count] = i*2;
+				parm = StrChrAny(parm,_T("\t ,"));
+				shift_count++;
+			}
+			if (!parm || !(parm = _tcschr(parm,',')))
+				return ScriptError(ERR_PARAM3_REQUIRED, aBuf);
+			parm++; // adnvance pointer to next parameter since above left a ,
+
+			// fill left parameters order
+			for (int c = 1; shift_count < found_func->mParamCount;c++)
+			{
+				bool found = false;
+				for (int i = 0; i < shift_count || found;i++)
+					found = shift_param[i] == c*2;
+				if (!found)
+					shift_param[shift_count++] = c*2;
+			}
+
+			// misuse mGlobalVar, allocate memory and fill shift_param
+			found_func->mGlobalVar = (Var**)SimpleHeap::Malloc(aParamCount * sizeof(int));
+			memcpy(found_func->mGlobalVar,&shift_param,aParamCount * sizeof(int));
+		}
+		// fill definition and default parameters
+		for ( aParamCount = 1 ; parm ; aParamCount++ )
+		{
+			func_param[aParamCount] = (ExprTokenType*)SimpleHeap::Malloc(sizeof(ExprTokenType));
+			ExprTokenType &this_param = *func_param[aParamCount];
+			if (this_param.symbol = IsNumeric(parm,true,true,true,true))
+			{
+				if (this_param.symbol == PURE_FLOAT)
+					this_param.value_double = ATOF(parm);
+				else
+					this_param.value_int64 = ATOI(parm);
+			}
+			else
+				this_param.marker = parm;
+			if (!(aParamCount % 2))
+			{
+				func_defaults[aParamCount/2 - 1] = (ExprTokenType*)SimpleHeap::Malloc(sizeof(ExprTokenType));
+				memcpy(func_defaults[aParamCount/2 - 1],&this_param,sizeof(ExprTokenType));
+			}
+			if (parm = _tcschr(parm,','))
+			{
+				*parm = '\0';
+				parm++;
+			}
+		}
+		
 		return CONDITION_TRUE;
 	}
 
@@ -10109,6 +10214,7 @@ BuiltInVarType Script::GetVarType_BIV(LPTSTR lowercase, BuiltInVarSetType &sette
 	if (!_tcscmp(lower, _T("globalstruct"))) return BIV_GlobalStruct;
 	if (!_tcscmp(lower, _T("scriptstruct"))) return BIV_ScriptStruct;
 	if (!_tcscmp(lower, _T("modulehandle"))) return BIV_ModuleHandle;
+	if (!_tcscmp(lower, _T("memorymodule"))) return BIV_MemoryModule;
 	if (!_tcscmp(lower, _T("isdll"))) return BIV_IsDll;
 	if (!_tcsncmp(lower, _T("coordmode"), 9)) { setter = BIV_CoordMode_Set; return BIV_CoordMode; }
 
@@ -14032,7 +14138,25 @@ ResultType Line::PerformLoopFilePattern(ExprTokenType *aResultToken, bool &aCont
 			while (jump_to_line == mNextLine);
 		else
 			result = mNextLine->ExecUntil(ONLY_ONE_LINE, aResultToken, &jump_to_line);
-		
+		if (jump_to_line && !(result == LOOP_CONTINUE && jump_to_line == this)) // See comments in PerformLoop() about this section.
+		{
+			if (jump_to_line == this)
+				aContinueMainLoop = true;
+			else
+				aJumpToLine = jump_to_line; // Signal our caller to handle this jump.
+			FindClose(file_search);
+			return result;
+		}
+		if ( result != OK && result != LOOP_CONTINUE // i.e. result == LOOP_BREAK || result == EARLY_RETURN || result == EARLY_EXIT || result == FAIL)
+			|| (aUntil && aUntil->EvaluateLoopUntil(result)) )
+		{
+			FindClose(file_search);
+			// Although ExecUntil() will treat the LOOP_BREAK result identically to OK, we
+			// need to return LOOP_BREAK in case our caller is another instance of this
+			// same function (i.e. due to recursing into subfolders):
+			return result;
+		}
+
 
 		// Otherwise, the result of executing the body of the loop, above, was either OK
 		// (the current iteration completed normally) or LOOP_CONTINUE (the current loop
@@ -14716,6 +14840,15 @@ ResultType Line::Perform()
 		return OK;
 
 	case ACT_CLICK:
+		if (mArgc > 1)
+		{
+			// Join all args so that Click(x,y) is equivalent to Click %x% %y%.  Anything longer than
+			// _countof(buf_temp) is almost certainly invalid, so simply truncate in that case.
+			*buf_temp = '\0';
+			for (int i = 0; i < mArgc; ++i)
+				sntprintfcat(buf_temp, _countof(buf_temp), _T("%s,"), sArgDeref[i]);
+			return PerformClick(buf_temp);
+		}
 		return PerformClick(ARG1);
 	case ACT_MOUSECLICKDRAG:
 		return PerformMouse(mActionType, SEVEN_ARGS);

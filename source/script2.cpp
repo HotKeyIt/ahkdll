@@ -554,7 +554,6 @@ ResultType Line::Input()
 	//////////////////////////////////////////////////////////////////
 	for (;;)
 	{
-		int output_var_len;
 		// Rather than monitoring the timeout here, just wait for the incoming WM_TIMER message
 		// to take effect as a TimerProc() call during the MsgSleep():
 		if (g_MainThreadID == aThreadID)
@@ -562,29 +561,26 @@ ResultType Line::Input()
 		else
 			Sleep(SLEEP_INTERVAL);
 		// HotKeyIt added multi-threading support so variable can be read from other threads while input is in progress
-		output_var_len = (int) _tcslen(output_var->Contents());
+		LPCTSTR output_var_contents = output_var->Contents();
+		int output_var_len = (int) _tcslen(output_var_contents);
 		if (output_var_len > INPUT_BUFFER_SIZE - 1)
 			output_var_len = INPUT_BUFFER_SIZE - 1;
-		if (_tcsncmp(prev_buf,output_var->Contents(),output_var_len ? output_var_len : 1)) // Check for vars contents and updatebuffer
+		if (_tcsncmp(prev_buf,output_var_contents,output_var_len ? output_var_len : 1)
+			|| (!_tcscmp(prev_buf,input_buf) && _tcscmp(output_var_contents,input_buf)) ) // Check for vars contents and updatebuffer
 		{
 			g_input.BufferLength = output_var_len;
-			_tcsncpy(input_buf,output_var->Contents(),output_var_len);
+			_tcsncpy(input_buf,output_var_contents,output_var_len);
 			input_buf[output_var_len] = '\0';
 			_tcsncpy(prev_buf,input_buf,output_var_len);
 			prev_buf[output_var_len] = '\0';
 		}
 		else if (_tcscmp(prev_buf,input_buf))
 		{
-			if (_tcslen(input_buf) || !output_var->CharCapacity()) // Assign will free memory if input_buf empty
-			{
-				output_var->Assign(input_buf);
+			output_var->Assign(input_buf);
+			if (g_input.BufferLength)
 				_tcscpy(prev_buf,input_buf);
-			}
 			else
-			{  // Assign empty string
-				output_var->Assign(_T(""));
 				*prev_buf = '\0';
-			}
 		}
 		if (g_input.status != INPUT_IN_PROGRESS)
 			break;
@@ -11011,6 +11007,11 @@ union DYNARESULT                // Various result types
 	UINT_PTR UIntPtr;
 };
 
+
+////////////////////////
+// DYNACALL TOKEN //
+////////////////////////
+
 struct DYNAPARM
 {
     union
@@ -11744,7 +11745,7 @@ DynaToken *DynaToken::Create(ExprTokenType *aParam[], int aParamCount)
 
 	DYNAPARM *dyna_param;
 	ExprTokenType token;
-
+	
 	if (obj && aParamCount)
 	{
 		ExprTokenType this_token;
@@ -12607,6 +12608,39 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 		}
 	}
 	return OK;
+}
+
+BIF_DECL(BIF_DllImport)
+// #DllImport will create a dummy function that will redirect the call here
+// All parameters are pre-defined in func-> structure and are used to call the Dll function via DllCall
+{
+	Func *func = g_script.FindFunc(aResultToken.marker);
+	int *shift_param = (int*)func->mGlobalVar;
+	int param_count = func->mGlobalVarCount;
+	ExprTokenType **func_param = (ExprTokenType **)func->mParam;
+	ExprTokenType **default_param = (ExprTokenType **)func->mStaticVar;
+	if (shift_param)
+	{
+		// apply default paramters first
+		for (int c = 0,i = 2;i < param_count;i+=2,c++)
+		{
+			func_param[i] = default_param[c];
+		}
+		// now put passed parameters in correct place (defined by shift_param)
+		for (int i = 0;i < aParamCount;i++)
+		{
+			func_param[shift_param[i]] = aParam[i];
+		}
+	}
+	else
+	{
+		// if a parameter was passed, apply it, otherwise apply default parameter
+		for (int c = 0,i = 2;i < param_count;i+=2,c++)
+		{
+			func_param[i] = (aParamCount >= i/2) ? aParam[c] : default_param[c];
+		}
+	}
+	BIF_DllCall(aResult,aResultToken,func_param,param_count);
 }
 
 BIF_DECL(BIF_DllCall)
@@ -14157,7 +14191,7 @@ void RegExReplace(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 {
 	// Set default return value in case of early return.
 	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = aHaystack; // v1.0.46.06: aHaystack vs. "" is the new default because it seems a much safer and more convenient to return aHaystack when an unexpected PCRE-exec error occurs (such an error might otherwise cause loss of data in scripts that don't meticulously check ErrorLevel after each RegExReplace()).
+	aResultToken.marker = aHaystack;
 
 	// If an output variable was provided for the count, resolve it early in case of early goto.
 	// Fix for v1.0.47.05: In the unlikely event that output_var_count is the same script-variable as
@@ -14297,15 +14331,15 @@ void RegExReplace(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 				//result = NULL; // This tells the caller that we already freed it (i.e. from its POV, we never allocated anything).
 			//}
 
-			g_ErrorLevel->Assign(ERRORLEVEL_NONE); // All done, indicate success via ErrorLevel.
-			goto set_count_and_return;             //
+			goto set_count_and_return; // All done.
 		}
 
 		// Otherwise:
 		if (captured_pattern_count < 0) // An error other than "no match". These seem very rare, so it seems best to abort rather than yielding a partially-converted result.
 		{
-			g_script.SetErrorLevelOrThrowInt(captured_pattern_count, _T("RegExReplace")); // No error text is stored; just a negative integer (since these errors are pretty rare).
-			goto set_count_and_return; // Goto vs. break to leave aResultToken.marker set to aHaystack and replacement_count set to 0, and let ErrorLevel tell the story.
+			ITOA(captured_pattern_count, repl_buf);
+			g_script.ThrowRuntimeException(ERR_PCRE_EXEC, NULL, repl_buf);
+			goto set_count_and_return; // Goto vs. break to leave aResultToken.marker set to aHaystack and replacement_count set to 0.
 		}
 
 		// Otherwise (since above didn't return or break or continue), a match has been found (i.e.
@@ -14532,14 +14566,11 @@ void RegExReplace(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aPar
 	// All paths above should return (or goto some other label), so execution should never reach here except
 	// through goto:
 out_of_mem:
-	// Due to extreme rarity and since this is a regex execution error of sorts, use PCRE's own error code.
-	g_script.SetErrorLevelOrThrowInt(PCRE_ERROR_NOMEMORY, _T("RegExReplace"));
+	g_script.ThrowRuntimeException(ERR_OUTOFMEM);
 	if (result)
 	{
 		free(result);  // Since result is probably an non-terminated string (not to mention an incompletely created result), it seems best to free it here to remove it from any further consideration by the caller.
 		result = NULL; // Tell caller that it was freed.
-		// AND LEAVE aResultToken.marker (i.e. the final result) set to aHaystack, because the altered result is
-		// indeterminate and thus discarded.
 	}
 	// Now fall through to below so that count is set even for out-of-memory error.
 set_count_and_return:
@@ -14562,7 +14593,7 @@ BIF_DECL(BIF_RegEx)
 
 	// COMPILE THE REGEX OR GET IT FROM CACHE.
 	if (   !(re = get_compiled_regex(needle, extra, &options_length, &aResultToken))   ) // Compiling problem.
-		return; // It already set ErrorLevel and aResultToken for us. If caller provided an output var/array, it is not changed under these conditions because there's no way of knowing how many subpatterns are in the RegEx, and thus no way of knowing how far to init the array.
+		return; // It already set aResultToken for us.
 
 	// Since compiling succeeded, get info about other parameters.
 	TCHAR haystack_buf[MAX_NUMBER_SIZE];
@@ -14637,23 +14668,20 @@ BIF_DECL(BIF_RegEx)
 
 	int match_offset = 0; // Set default for no match/error cases below.
 
-	// SET THE RETURN VALUE AND ERRORLEVEL BASED ON THE RESULTS OF EXECUTING THE EXPRESSION.
+	// SET THE RETURN VALUE BASED ON THE RESULTS OF EXECUTING THE EXPRESSION.
 	if (captured_pattern_count == PCRE_ERROR_NOMATCH)
 	{
-		g_ErrorLevel->Assign(ERRORLEVEL_NONE); // i.e. "no match" isn't an error.
 		aResultToken.value_int64 = 0;
-		// BUT CONTINUE ON so that the output-array (if any) is fully reset (made blank), which improves
-		// convenience for the script.
+		// BUT CONTINUE ON so that the output variable (if any) is fully reset (made blank).
 	}
 	else if (captured_pattern_count < 0) // An error other than "no match".
 	{
-		g_script.SetErrorLevelOrThrowInt(captured_pattern_count, _T("RegExMatch")); // No error text is stored; just a negative integer (since these errors are pretty rare).
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		TCHAR err_info[MAX_INTEGER_SIZE];
+		ITOA(captured_pattern_count, err_info);
+		g_script.ThrowRuntimeException(ERR_PCRE_EXEC, NULL, err_info);
 	}
 	else // Match found, and captured_pattern_count >= 0 (but should never be 0 in this case because that only happens when offset[] is too small, which it isn't).
 	{
-		g_ErrorLevel->Assign(ERRORLEVEL_NONE);
 		match_offset = offset[0];
 		aResultToken.value_int64 = match_offset + 1; // i.e. the position of the entire-pattern match is the function's return value.
 	}
@@ -14833,7 +14861,7 @@ BIF_DECL(BIF_NumPut)
 	// Load-time validation has ensured that at least the first two parameters are present.
 	ExprTokenType &token_to_write = *aParam[0];
 
-	size_t right_side_bound = 0, target; // Don't make target a pointer-type because the integer offset might not be a multiple of 4 (i.e. the below increments "target" directly by "offset" and we don't want that to use pointer math).
+	size_t right_side_bound, target; // Don't make target a pointer-type because the integer offset might not be a multiple of 4 (i.e. the below increments "target" directly by "offset" and we don't want that to use pointer math).
 	ExprTokenType &target_token = *aParam[1];
 	if (target_token.symbol == SYM_VAR // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
 		&& !target_token.var->IsPureNumeric()) // If the var contains a pure/binary number, its probably an address.  Scripts can't directly access Contents() in that case anyway.
@@ -14842,7 +14870,10 @@ BIF_DECL(BIF_NumPut)
 		right_side_bound = target + target_token.var->ByteCapacity(); // This is the first illegal address to the right of target.
 	}
 	else
+	{
 		target = (size_t)TokenToInt64(target_token);
+		right_side_bound = 0;
+	}
 
 	if (aParamCount > 2) // Parameter "offset" is present, so increment the address by that amount.  For flexibility, this is done even when the target isn't a variable.
 	{
@@ -15435,15 +15466,32 @@ BIF_DECL(BIF_VarSetCapacity)
 			else // ALLOC_SIMPLE, due to its nature, will not actually be freed, which is documented.
 				var.Free();
 		} // if (aParamCount > 1)
-		//else
-		//{
+		else
+		{
 			// RequestedCapacity was omitted, so the var is not altered; instead, the current capacity
 			// is reported, which seems more intuitive/useful than having it do a Free(). In this case
 			// it's an input var rather than an output var, so check if it has been initialized:
 			// v1.1.11.01: Support VarSetCapacity(var) as a means for the script to check if it
 			// has initialized a var.  In other words, don't show a warning even in that case.
 			//var.MaybeWarnUninitialized();
-		//}
+
+			switch (var.IsPureNumericOrObject())
+			{
+			case VAR_ATTRIB_IS_INT64:
+			case VAR_ATTRIB_IS_DOUBLE:
+				// For consistency and maintainability, return the size of the usable space returned by
+				// &var even though in this case it is a pure __int64 or double.  Any script which uses
+				// &var intentionally in this context already knows what it's getting so has no need to
+				// call this function; therefore, the caller of this function probably expects the return
+				// value to exclude space for the null-terminator (sizeof(TCHAR)).
+				aResultToken.value_int64 = 8 - sizeof(TCHAR); // sizeof(__int64) or sizeof(double), minus 1 TCHAR.
+				return;
+			case VAR_ATTRIB_IS_OBJECT:
+				// For consistency, though it seems of dubious usefulness:
+				aResultToken.value_int64 = 0;
+				return;
+			}
+		}
 
 		if (aResultToken.value_int64 = var.ByteCapacity()) // Don't subtract 1 here in lieu doing it below (avoids underflow).
 			aResultToken.value_int64 -= sizeof(TCHAR); // Omit the room for the zero terminator since script capacity is defined as length vs. size.

@@ -791,22 +791,21 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 				this_token.symbol = SYM_INTEGER;
 				this_token.value_int64 = (__int64)obj;
 			}
-			else if (right.symbol == SYM_VAR // At this stage, SYM_VAR is always a normal variable, never a built-in one, so taking its address should be safe.
-				&& !right.var->IsPureNumeric()) // Seems best not to return Contents() in this case since any changes to it might cause inconsistency.
+			else if (right.symbol == SYM_VAR) // At this stage, SYM_VAR is always a normal variable, never a built-in one, so taking its address should be safe.
 			{
+				if (right.var->IsPureNumeric())
+					this_token.value_int64 = (__int64)&right.var->mContentsInt64; // Since the value is a pure number, this seems more useful and less confusing than returning the address of a numeric string.
+				else
+					this_token.value_int64 = (__int64)right.var->Contents(); // Contents() vs. mContents to support VAR_CLIPBOARD, and in case mContents needs to be updated by Contents().
 				this_token.symbol = SYM_INTEGER;
-				this_token.value_int64 = (__int64)right.var->Contents(); // Contents() vs. mContents to support VAR_CLIPBOARD, and in case mContents needs to be updated by Contents().
 			}
 			else if (right.symbol == SYM_STRING && *right.marker) // HotKeyIt added a way to pass pointer of string without using a variable e.g. &"String"
 			{
 				this_token.symbol = SYM_INTEGER;
 				this_token.value_int64 = (__int64)right.marker;
 			}
-			else // Invalid, so make it a localized blank value.
-			{
-				this_token.marker = _T("");
-				this_token.symbol = SYM_STRING;
-			}
+			else // Syntax error: operand is not an object or a variable reference.
+				goto abort_with_exception;
 			break;
 
 		case SYM_DEREF:   // Dereference an address to retrieve a single byte.

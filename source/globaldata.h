@@ -25,6 +25,9 @@ GNU General Public License for more details.
 #include "Debugger.h"
 
 extern HRSRC g_hResource;		// for compiled AutoHotkey.exe
+#ifdef _USRDLL
+extern bool g_Reloading;
+#endif
 extern HINSTANCE g_hInstance;
 extern HMODULE g_hMemoryModule;
 extern DWORD g_MainThreadID;

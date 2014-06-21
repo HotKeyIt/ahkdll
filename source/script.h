@@ -213,6 +213,7 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_NO_OBJECT _T("No object to invoke.")
 #define ERR_NO_MEMBER _T("Unknown property or method.")
 #define ERR_NO_GUI _T("No default GUI.")
+#define ERR_PCRE_EXEC _T("PCRE execution error.")
 
 #define WARNING_USE_UNSET_VARIABLE _T("This variable has not been assigned a value.")
 #define WARNING_LOCAL_SAME_AS_GLOBAL _T("This local variable has the same name as a global variable.")
@@ -2587,7 +2588,6 @@ public:
 #endif
 	HWND mNextClipboardViewer;
 	bool mOnClipboardChangeIsRunning;
-	bool mReloading;
 	Label *mOnClipboardChangeLabel, *mOnExitLabel;  // The label to run when the script terminates (NULL if none).
 	ExitReasons mExitReason;
 
@@ -2895,6 +2895,7 @@ BIV_DECL_R (BIV_PriorKey);
 bool IsDllArgTypeName(LPTSTR name);
 void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free = NULL);
 BIF_DECL(BIF_DllCall);
+BIF_DECL(BIF_DllImport);
 BIF_DECL(BIF_DynaCall);
 #endif
 

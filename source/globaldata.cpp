@@ -29,6 +29,9 @@ GNU General Public License for more details.
 // which are necessary to save and restore (even though it would clean
 // up the code and might make maintaining it easier):
 HRSRC g_hResource = NULL; // Set by WinMain()	// for compiled AutoHotkey.exe
+#ifdef _USRDLL
+bool g_Reloading = false;
+#endif
 HINSTANCE g_hInstance = NULL; // Set by WinMain().
 HMODULE g_hMemoryModule = NULL; // Set by DllMain() used for COM 
 DWORD g_MainThreadID = GetCurrentThreadId();
@@ -313,8 +316,7 @@ Action g_act[] =
 	, {_T("For"), 1, 3, false, {3, 0}}  // For var [,var] in expression
 	, {_T("While"), 1, 1, false, {1, 0}} // LoopCondition.  v1.0.48: Lexikos: Added g_act entry for ACT_WHILE.
 	, {_T("Until"), 1, 1, false, {1, 0}} // Until expression (follows a Loop)
-	, {_T("Break"), 0, 1, false, NULL}
-	, {_T("Continue"), 0, 1, false, NULL}
+	, {_T("Break"), 0, 1, false, NULL}, {_T("Continue"), 0, 1, false, NULL}
 	, {_T("Goto"), 1, 1, false, NULL}
 	, {_T("Gosub"), 1, 1, false, NULL}   // Label (or dereference that resolves to a label).
 	, {_T("Return"), 0, 1, false, {1, 0}}
@@ -375,7 +377,7 @@ Action g_act[] =
 	, {_T("SendLevel"), 1, 1, false, {1, 0}}
 	, {_T("CoordMode"), 1, 2, false, NULL} // Attribute, screen|relative
 	, {_T("SetDefaultMouseSpeed"), 1, 1, false, {1, 0}} // speed (numeric)
-	, {_T("Click"), 0, 1, false, NULL} // Flex-list of options.
+	, {_T("Click"), 0, 6, false, NULL} // Flex-list of options.
 	, {_T("MouseMove"), 2, 4, false, {1, 2, 3, 0}} // x, y, speed, option
 	, {_T("MouseClick"), 0, 7, false, {2, 3, 4, 5, 0}} // which-button, x, y, ClickCount, speed, d=hold-down/u=release, Relative
 	, {_T("MouseClickDrag"), 1, 7, false, {2, 3, 4, 5, 6, 0}} // which-button, x1, y1, x2, y2, speed, Relative
