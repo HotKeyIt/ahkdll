@@ -2699,7 +2699,6 @@ public:
 #endif
 	HWND mNextClipboardViewer;
 	bool mOnClipboardChangeIsRunning;
-	bool mReloading;
 	Label *mOnClipboardChangeLabel, *mOnExitLabel;  // The label to run when the script terminates (NULL if none).
 	ExitReasons mExitReason;
 
@@ -2997,6 +2996,7 @@ VarSizeType BIV_PtrSize(LPTSTR aBuf, LPTSTR aVarName);
 bool IsDllArgTypeName(LPTSTR name);
 void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free = NULL);
 BIF_DECL(BIF_DllCall);
+BIF_DECL(BIF_DllImport);
 BIF_DECL(BIF_DynaCall);
 #endif
 

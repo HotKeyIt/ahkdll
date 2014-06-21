@@ -23,7 +23,9 @@ GNU General Public License for more details.
 #include "os_version.h" // For the global OS_Version object
 
 #include "Debugger.h"
-
+#ifdef _USRDLL
+extern bool g_Reloading;
+#endif
 extern HRSRC g_hResource;		// for compiled AutoHotkey.exe
 extern HINSTANCE g_hInstance;
 extern HMODULE g_hMemoryModule;

@@ -27,7 +27,8 @@ void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar);
 		if (!g_script.PreparseBlocks(line))\
 			return NULL;\
 		line->mActionType = ACT_IFEXPR;\
-	}
+	}\
+	g_HotExprLineCount = g_HotExprLineCount + aHotExprLineCount;
 #endif
 // AutoHotkey needs to be running at this point
 #define BACKUP_G_SCRIPT \

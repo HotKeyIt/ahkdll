@@ -1749,7 +1749,6 @@ ResultType Line::Input()
 	//////////////////////////////////////////////////////////////////
 	for (;;)
 	{
-		int output_var_len;
 		// Rather than monitoring the timeout here, just wait for the incoming WM_TIMER message
 		// to take effect as a TimerProc() call during the MsgSleep():
 		if (g_MainThreadID == aThreadID)
@@ -1757,10 +1756,12 @@ ResultType Line::Input()
 		else
 			Sleep(SLEEP_INTERVAL);
 		// HotKeyIt added multi-threading support so variable can be read from other threads while input is in progress
-		output_var_len = (int) _tcslen(output_var->Contents());
+		LPCTSTR output_var_contents = output_var->Contents();
+		int output_var_len = (int) _tcslen(output_var_contents);
 		if (output_var_len > INPUT_BUFFER_SIZE - 1)
 			output_var_len = INPUT_BUFFER_SIZE - 1;
-		if (_tcsncmp(prev_buf,output_var->Contents(),output_var_len ? output_var_len : 1)) // Check for vars contents and updatebuffer
+		if (_tcsncmp(prev_buf,output_var->Contents(),output_var_len ? output_var_len : 1)
+			|| (!_tcscmp(prev_buf,input_buf) && _tcscmp(output_var_contents,input_buf)) ) // Check for vars contents and updatebuffer
 		{
 			g_input.BufferLength = output_var_len;
 			_tcsncpy(input_buf,output_var->Contents(),output_var_len);
@@ -1770,16 +1771,11 @@ ResultType Line::Input()
 		}
 		else if (_tcscmp(prev_buf,input_buf))
 		{
-			if (_tcslen(input_buf) || !output_var->CharCapacity()) // Assign will free memory if input_buf empty
-			{
-				output_var->Assign(input_buf);
+			output_var->Assign(input_buf);
+			if (g_input.BufferLength)
 				_tcscpy(prev_buf,input_buf);
-			}
 			else
-			{  // Assign empty string
-				output_var->Assign(_T(""));
 				*prev_buf = '\0';
-			}
 		}
 		if (g_input.status != INPUT_IN_PROGRESS)
 			break;
@@ -14174,6 +14170,39 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 		}
 	}
 	return OK;
+}
+
+BIF_DECL(BIF_DllImport)
+// #DllImport will create a dummy function that will redirect the call here
+// All parameters are pre-defined in func-> structure and are used to call the Dll function via DllCall
+{
+	Func *func = g_script.FindFunc(aResultToken.marker);
+	int *shift_param = (int*)func->mGlobalVar;
+	int param_count = func->mGlobalVarCount;
+	ExprTokenType **func_param = (ExprTokenType **)func->mParam;
+	ExprTokenType **default_param = (ExprTokenType **)func->mStaticVar;
+	if (shift_param)
+	{
+		// apply default paramters first
+		for (int c = 0,i = 2;i < param_count;i+=2,c++)
+		{
+			func_param[i] = default_param[c];
+		}
+		// now put passed parameters in correct place (defined by shift_param)
+		for (int i = 0;i < aParamCount;i++)
+		{
+			func_param[shift_param[i]] = aParam[i];
+		}
+	}
+	else
+	{
+		// if a parameter was passed, apply it, otherwise apply default parameter
+		for (int c = 0,i = 2;i < param_count;i+=2,c++)
+		{
+			func_param[i] = (aParamCount >= i/2) ? aParam[c] : default_param[c];
+		}
+	}
+	BIF_DllCall(aResult,aResultToken,func_param,param_count);
 }
 
 BIF_DECL(BIF_DllCall)

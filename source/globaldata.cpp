@@ -29,6 +29,9 @@ GNU General Public License for more details.
 // which are necessary to save and restore (even though it would clean
 // up the code and might make maintaining it easier):
 HRSRC g_hResource = NULL; // Set by WinMain() // for compiled AutoHotkey.exe
+#ifdef _USRDLL
+bool g_Reloading = false;
+#endif
 HINSTANCE g_hInstance = NULL; // Set by WinMain().
 HMODULE g_hMemoryModule = NULL; // Set by DllMain() used for COM 
 DWORD g_MainThreadID = GetCurrentThreadId();

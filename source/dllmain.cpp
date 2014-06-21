@@ -195,7 +195,10 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 		if (switch_processing_is_complete) // All args are now considered to be input parameters for the script.
 		{
 			if (   !(var = g_script.FindOrAddVar(var_name, _stprintf(var_name, _T("%d"), script_param_num)))   )
+			{
+				g_Reloading = false;
 				return CRITICAL_ERROR;  // Realistically should never happen.
+			}
 			var->Assign(param);
 			++script_param_num;
 		}
@@ -212,11 +215,17 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 		{
 			++i; // Consume the next parameter too, because it's associated with this one.
 			if (i >= dllargc) // Missing the expected filename parameter.
+			{
+				g_Reloading = false;
 				return CRITICAL_ERROR;
+			}
 			// For performance and simplicity, open/create the file unconditionally and keep it open until exit.
 			g_script.mIncludeLibraryFunctionsThenExit = new TextFile;
 			if (!g_script.mIncludeLibraryFunctionsThenExit->Open(param, TextStream::WRITE | TextStream::EOL_CRLF | TextStream::BOM_UTF8, CP_UTF8)) // Can't open the temp file.
+			{
+				g_Reloading = false;
 				return CRITICAL_ERROR;
+			}
 		}
 		else if (!_tcsicmp(param, _T("/E")) || !_tcsicmp(param, _T("/Execute")))
 		{
@@ -267,7 +276,10 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	
 	// Like AutoIt2, store the number of script parameters in the script variable %0%, even if it's zero:
 	if (   !(var = g_script.FindOrAddVar(_T("0")))   )
+	{
+		g_Reloading = false;
 		return CRITICAL_ERROR;  // Realistically should never happen.
+	}
 	var->Assign(script_param_num - 1);
 
 	// N11 
@@ -280,7 +292,10 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 
 // Set up the basics of the script:
 	if (g_script.Init(*g, script_filespec, restart_mode,hInstance,g_hResource ? 0 : (bool)nameHinstanceP.istext) != OK)  // Set up the basics of the script, using the above.
+	{
+		g_Reloading = false;
 		return CRITICAL_ERROR;
+	}
 	// Set g_default now, reflecting any changes made to "g" above, in case AutoExecSection(), below,
 	// never returns, perhaps because it contains an infinite loop (intentional or not):
 	CopyMemory(&g_default, g, sizeof(global_struct));
@@ -304,9 +319,15 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 #endif
 	
 	if (load_result == LOADING_FAILED) // Error during load (was already displayed by the function call).
+	{
+		g_Reloading = false;
 		return CRITICAL_ERROR;  // Should return this value because PostQuitMessage() also uses it.
+	}
 	if (!load_result) // LoadFromFile() relies upon us to do this check.  No lines were loaded, so we're done.
+	{
+		g_Reloading = false;
 		return 0;
+	}
 
 	// Unless explicitly set to be non-SingleInstance via SINGLE_INSTANCE_OFF or a special kind of
 	// SingleInstance such as SINGLE_INSTANCE_REPLACE and SINGLE_INSTANCE_IGNORE, persistent scripts
@@ -379,7 +400,10 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	// Create all our windows and the tray icon.  This is done after all other chances
 	// to return early due to an error have passed, above.
 	if (g_script.CreateWindows() != OK)
+	{
+		g_Reloading = false;
 		return CRITICAL_ERROR;
+	}
 	// Set AutoHotkey.dll its main window (ahk_class AutoHotkey) bottom so it does not receive Reload or ExitApp Message send e.g. when Reload message is sent.
 	SetWindowPos(g_hWnd,HWND_BOTTOM,0,0,0,0,SWP_NOACTIVATE|SWP_NOCOPYBITS|SWP_NOMOVE|SWP_NOREDRAW|SWP_NOSENDCHANGING|SWP_NOSIZE);
 	// At this point, it is nearly certain that the script will be executed.
@@ -436,8 +460,8 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	//	AddRemoveHooks(3);
 #endif
 	g_script.mIsReadyToExecute = true; // This is done only after the above to support error reporting in Hotkey.cpp.
-	g_script.mReloading = false;
 	Sleep(20);
+	g_Reloading = false;
 	//free(nameHinstanceP.name);
 	Var *clipboard_var = g_script.FindOrAddVar(_T("Clipboard")); // Add it if it doesn't exist, in case the script accesses "Clipboard" via a dynamic variable.
 	if (clipboard_var)
@@ -591,7 +615,7 @@ EXPORT int ahkReload(int timeout = 0)
 
 EXPORT int ahkReady() // HotKeyIt check if dll is ready to execute
 {
-	return g_script.mIsReadyToExecute;
+	return g_script.mIsReadyToExecute ||g_Reloading;
 }
 
 #ifndef MINIDLL
