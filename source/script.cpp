@@ -5472,6 +5472,29 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		found_func->mBIF = (BuiltInFunctionType)BIF_DllImport; //aDynaToken->mfunction;
 		found_func->mIsBuiltIn = true;
 
+		TCHAR buf[MAX_PATH];
+		size_t space_remaining = LINE_SIZE - (parameter-aBuf);
+		StrReplace(parameter, _T("%A_ScriptDir%"), mFileDir, SCS_INSENSITIVE, 1, space_remaining); // v1.0.35.11.  Caller has ensured string is writable.
+		if (tcscasestr(parameter, _T("%A_AppData%"))) // v1.0.45.04: This and the next were requested by Tekl to make it easier to customize scripts on a per-user basis.
+		{
+			BIV_SpecialFolderPath(buf, _T("A_AppData"));
+			StrReplace(parameter, _T("%A_AppData%"), buf, SCS_INSENSITIVE, 1, space_remaining);
+		}
+		if (tcscasestr(parameter, _T("%A_AppDataCommon%"))) // v1.0.45.04.
+		{
+			BIV_SpecialFolderPath(buf, _T("A_AppDataCommon"));
+			StrReplace(parameter, _T("%A_AppDataCommon%"), buf, SCS_INSENSITIVE, 1, space_remaining);
+		}
+		if (tcscasestr(parameter, _T("%A_AhkPath%"))) // v1.0.45.04.
+		{
+			BIV_AhkPath(buf, _T("A_AhkPath"));
+			StrReplace(parameter, _T("%A_AhkPath%"), buf, SCS_INSENSITIVE, 1, space_remaining);
+		}
+		if (tcscasestr(parameter, _T("%A_DllPath%"))) // v1.0.45.04.
+		{
+			BIV_AhkPath(buf, _T("A_DllPath"));
+			StrReplace(parameter, _T("%A_DllPath%"), buf, SCS_INSENSITIVE, 1, space_remaining);
+		}
 
 		// terminate dll\function name, find it and jump to next parameter
 		*(_tcschr(parameter,',')) = '\0';
@@ -5479,7 +5502,6 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		if (!func_ptr )
 			return ScriptError(ERR_NONEXISTENT_FUNCTION, parameter);
 		parameter = parameter + _tcslen(parameter) + 1;
-
 
 		LPTSTR parm = SimpleHeap::Malloc(parameter);
 
