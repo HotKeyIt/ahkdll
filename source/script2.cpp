@@ -14191,7 +14191,8 @@ BIF_DECL(BIF_DllImport)
 		// now put passed parameters in correct place (defined by shift_param)
 		for (int i = 0;i < aParamCount;i++)
 		{
-			func_param[shift_param[i]] = aParam[i];
+			if (aParam[i]->symbol != SYM_MISSING)
+				func_param[shift_param[i]] = aParam[i];
 		}
 	}
 	else
@@ -14199,7 +14200,7 @@ BIF_DECL(BIF_DllImport)
 		// if a parameter was passed, apply it, otherwise apply default parameter
 		for (int c = 0,i = 2;i < param_count;i+=2,c++)
 		{
-			func_param[i] = (aParamCount >= i/2) ? aParam[c] : default_param[c];
+			func_param[i] = (aParamCount >= i/2 && aParam[c]->symbol != SYM_MISSING) ? aParam[c] : default_param[c];
 		}
 	}
 	BIF_DllCall(aResult,aResultToken,func_param,param_count);
