@@ -873,7 +873,7 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 				LeaveCriticalSection(&g_CriticalAhkFunction);
 				return ret;
 			}
-			for (int i = 0;aFunc->mParamCount > aParamsCount && variants[i]->vt != VT_ERROR;i++)
+			for (int i = 0;aFunc->mParamCount > i && aParamsCount>i;i++)
 			{
 				aParam[i] = (ExprTokenType*)_alloca(sizeof(ExprTokenType));
 				if (!aParam[i])
