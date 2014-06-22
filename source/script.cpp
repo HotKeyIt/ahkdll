@@ -5382,18 +5382,7 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		int insert_pos;
 		Func *found_func = FindFunc(aFuncName,_tcslen(aFuncName),&insert_pos);
 		if (found_func)
-		{
-			if (!found_func->mIsBuiltIn)
-				return ScriptError(_T("Duplicate function definition."), aFuncName); // Seems more descriptive than "Function already defined."
-			else // It's a built-in function that the user wants to override with a custom definition.
-			{
-				found_func->mIsBuiltIn = false;  // Override built-in with custom.
-				found_func->mParamCount = 0; // Revert to the default appropriate for non-built-in functions.
-				found_func->mMinParams = 0;  //
-				found_func->mJumpToLine = NULL; // Fixed for v1.0.35.12: Must reset for detection elsewhere.
-				found_func->mParam = NULL;
-			}
-		}
+			return ScriptError(_T("Duplicate function definition."), aFuncName); // Seems more descriptive than "Function already defined."
 		else
 			if (   !(found_func = AddFunc(aFuncName, _tcslen(aFuncName), false, insert_pos))   )
 				return FAIL; // It already displayed the error.
@@ -5427,7 +5416,9 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 
 		// terminate dll\function name, find it and jump to next parameter
 		*(_tcschr(parameter,',')) = '\0';
-		HANDLE func_ptr = GetDllProcAddress(parameter);
+		HANDLE func_ptr = (HANDLE)ATOI64(parameter);
+		if (!func_ptr)
+			func_ptr = GetDllProcAddress(parameter);
 		if (!func_ptr )
 			return ScriptError(ERR_NONEXISTENT_FUNCTION, parameter);
 		parameter = parameter + _tcslen(parameter) + 1;
@@ -5501,7 +5492,7 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 				if (this_param.symbol == PURE_FLOAT)
 					this_param.value_double = ATOF(parm);
 				else
-					this_param.value_int64 = ATOI(parm);
+					this_param.value_int64 = ATOI64(parm);
 			}
 			else
 				this_param.marker = parm;
