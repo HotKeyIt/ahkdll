@@ -432,25 +432,7 @@ void Script::Destroy()
 	}
 	// L31: Release objects stored in variables, where possible.
 	int v, i;
-	for (v = 0; v < mVarCount; v++)
-	{
-		// H19 fix not to delete Clipboard wars
-		if (mVar[v]->mType == VAR_BUILTIN || mVar[v]->mType == VAR_CLIPBOARD ||mVar[v]->mType == VAR_CLIPBOARDALL)
-			continue;
-		mVar[v]->ConvertToNonAliasIfNecessary();
-		mVar[v]->Free();
-		delete mVar[v];
-	}
-	free(mVar);
-	mVar = NULL;
-	for (v = 0; v < mLazyVarCount; v++)
-	{
-		mLazyVar[v]->ConvertToNonAliasIfNecessary();
-		mLazyVar[v]->Free();
-		delete mLazyVar[v];
-	}
-	free(mLazyVar);
-	mLazyVar = NULL;
+	// delete static func vars first
 	for (i = 0; i < mFuncCount; i++)
 	{
 		Func &f = *mFunc[i];
@@ -492,10 +474,28 @@ void Script::Destroy()
 			free(mFunc[i]->mVar);
 		if (mFunc[i]->mLazyVarCount)
 			free(mFunc[i]->mLazyVar);
-		if (mFunc[i]->mGlobalVarCount)
-			free(mFunc[i]->mGlobalVar);
 		delete mFunc[i];
 	}
+	for (v = 0; v < mVarCount; v++)
+	{
+		// H19 fix not to delete Clipboard wars
+		if (mVar[v]->mType == VAR_BUILTIN || mVar[v]->mType == VAR_CLIPBOARD ||mVar[v]->mType == VAR_CLIPBOARDALL)
+			continue;
+		mVar[v]->ConvertToNonAliasIfNecessary();
+		mVar[v]->Free();
+		delete mVar[v];
+	}
+	free(mVar);
+	mVar = NULL;
+	for (v = 0; v < mLazyVarCount; v++)
+	{
+		mLazyVar[v]->ConvertToNonAliasIfNecessary();
+		mLazyVar[v]->Free();
+		delete mLazyVar[v];
+	}
+	free(mLazyVar);
+	mLazyVar = NULL;
+
 	// Destroy Labels
 	for (Label *label = mFirstLabel,*nextLabel = NULL; label;)
 	{
