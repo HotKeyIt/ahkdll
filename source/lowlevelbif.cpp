@@ -77,6 +77,10 @@ BIF_DECL(BIF_Alias)
 			}
 		var.mType = len ? VAR_ALIAS : VAR_NORMAL;
 		var.mByteLength = len;
+		if (len && var.mAliasFor->HasObject()){
+			var.mObject = var.mAliasFor->Object();
+			var.mObject->AddRef();
+		}
 	}
 }
 BIF_DECL(BIF_CacheEnable)
