@@ -13553,7 +13553,7 @@ TEST_TYPE("W",	DLL_ARG_WSTR)
 					: NULL; // Not a pure integer, so fall back to normal method of considering it to be path+name.
 		}
 		if (!obj->mfunction)
-			obj->mfunction = GetDllProcAddress(aParam[0]->symbol == SYM_VAR ? aParam[0]->var->Contents() : aParam[0]->marker, NULL);
+			obj->mfunction = GetDllProcAddress(TokenToString(*aParam[0]), NULL);
 		if (!obj->mfunction)
 		{
 			g_script.SetErrorLevelOrThrowStr(_T("-4"), _T("DynaCall")); // Stage 4 error: Function could not be found in the DLL(s).
