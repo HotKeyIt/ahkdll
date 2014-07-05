@@ -432,6 +432,24 @@ void Script::Destroy()
 	}
 	// L31: Release objects stored in variables, where possible.
 	int v, i;
+	for (v = 0; v < mVarCount; v++)
+	{
+		if (mVar[v]->mType == VAR_BUILTIN || mVar[v]->mType == VAR_CLIPBOARD ||mVar[v]->mType == VAR_CLIPBOARDALL)
+			continue;
+		if (mVar[v]->mType == VAR_ALIAS && mVar[v]->HasObject())
+			mVar[v]->mObject->Release();
+		mVar[v]->ConvertToNonAliasIfNecessary();
+		mVar[v]->Free();
+	}
+	for (v = 0; v < mLazyVarCount; v++)
+	{
+		if (mLazyVar[v]->mType == VAR_ALIAS && mLazyVar[v]->HasObject())
+			mLazyVar[v]->mObject->Release();
+		mLazyVar[v]->ConvertToNonAliasIfNecessary();
+		mLazyVar[v]->Free();
+	}
+	free(mLazyVar);
+	mLazyVar = NULL;
 	// delete static func vars first
 	for (i = 0; i < mFuncCount; i++)
 	{
@@ -444,26 +462,74 @@ void Script::Destroy()
 		// avoid releasing top-level non-static local variables (i.e. which aren't in var backups).
 		for (v = 0; v < f.mStaticVarCount; v++)
 		{
+			if (f.mStaticVar[v]->mType == VAR_ALIAS && f.mStaticVar[v]->HasObject())
+				f.mStaticVar[v]->mObject->Release();
 			f.mStaticVar[v]->ConvertToNonAliasIfNecessary();
 			f.mStaticVar[v]->Free();
+		}
+		for (v = 0; v < f.mStaticLazyVarCount; v++)
+		{
+			if (f.mStaticLazyVar[v]->mType == VAR_ALIAS && f.mStaticLazyVar[v]->HasObject())
+				f.mStaticLazyVar[v]->mObject->Release();
+			f.mStaticLazyVar[v]->ConvertToNonAliasIfNecessary();
+			f.mStaticLazyVar[v]->Free();
+		}
+		for (v = 0; v < f.mVarCount; v++)
+		{
+			if (f.mVar[v]->mType == VAR_ALIAS && f.mVar[v]->HasObject())
+				f.mVar[v]->mObject->Release();
+			f.mVar[v]->ConvertToNonAliasIfNecessary();
+			f.mVar[v]->Free();
+		}
+		for (v = 0; v < f.mLazyVarCount; v++)
+		{
+			if (f.mLazyVar[v]->mType == VAR_ALIAS && f.mLazyVar[v]->HasObject())
+				f.mLazyVar[v]->mObject->Release();
+			f.mLazyVar[v]->ConvertToNonAliasIfNecessary();
+			f.mLazyVar[v]->Free();
+		}
+	}
+
+	// Now all objects are freed and variables can be deleted
+	for (v = 0; v < mVarCount; v++)
+	{
+		// H19 fix not to delete Clipboard wars
+		if (mVar[v]->mType == VAR_BUILTIN || mVar[v]->mType == VAR_CLIPBOARD || mVar[v]->mType == VAR_CLIPBOARDALL)
+			continue;
+		delete mVar[v];
+	}
+	free(mVar);
+	mVar = NULL;
+	for (v = 0; v < mLazyVarCount; v++)
+	{
+		delete mLazyVar[v];
+	}
+	free(mLazyVar);
+	mLazyVar = NULL;
+	// delete static func vars first
+	for (i = 0; i < mFuncCount; i++)
+	{
+		Func &f = *mFunc[i];
+		if (f.mIsBuiltIn)
+			continue;
+		// Since it doesn't seem feasible to release all var backups created by recursive function
+		// calls and all tokens in the 'stack' of each currently executing expression, currently
+		// only static and global variables are released.  It seems best for consistency to also
+		// avoid releasing top-level non-static local variables (i.e. which aren't in var backups).
+		for (v = 0; v < f.mStaticVarCount; v++)
+		{
 			delete f.mStaticVar[v];
 		}
 		for (v = 0; v < f.mStaticLazyVarCount; v++)
 		{
-			f.mStaticLazyVar[v]->ConvertToNonAliasIfNecessary();
-			f.mStaticLazyVar[v]->Free();
 			delete f.mStaticLazyVar[v];
 		}
 		for (v = 0; v < f.mVarCount; v++)
 		{
-			f.mVar[v]->ConvertToNonAliasIfNecessary();
-			f.mVar[v]->Free();
 			delete f.mVar[v];
 		}
 		for (v = 0; v < f.mLazyVarCount; v++)
 		{
-			f.mLazyVar[v]->ConvertToNonAliasIfNecessary();
-			f.mLazyVar[v]->Free();
 			delete f.mLazyVar[v];
 		}
 		if (mFunc[i]->mStaticVar)
@@ -476,25 +542,6 @@ void Script::Destroy()
 			free(mFunc[i]->mLazyVar);
 		delete mFunc[i];
 	}
-	for (v = 0; v < mVarCount; v++)
-	{
-		// H19 fix not to delete Clipboard wars
-		if (mVar[v]->mType == VAR_BUILTIN || mVar[v]->mType == VAR_CLIPBOARD ||mVar[v]->mType == VAR_CLIPBOARDALL)
-			continue;
-		mVar[v]->ConvertToNonAliasIfNecessary();
-		mVar[v]->Free();
-		delete mVar[v];
-	}
-	free(mVar);
-	mVar = NULL;
-	for (v = 0; v < mLazyVarCount; v++)
-	{
-		mLazyVar[v]->ConvertToNonAliasIfNecessary();
-		mLazyVar[v]->Free();
-		delete mLazyVar[v];
-	}
-	free(mLazyVar);
-	mLazyVar = NULL;
 
 	// Destroy Labels
 	for (Label *label = mFirstLabel,*nextLabel = NULL; label;)
@@ -1534,7 +1581,7 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 			
 			// so no need to run below since static vars are in a separate array
 			//for (v = 0; v < f.mVarCount; ++v)
-			//	if (f.mVar[v]->IsStatic() && f.mVar[v]->IsObject()) 
+			//	if (f.mVbar[v]->IsStatic() && f.mVar[v]->IsObject()) 
 			//		f.mVar[v]->ReleaseObject();
 			//for (v = 0; v < f.mLazyVarCount; ++v)
 			//	if (f.mLazyVar[v]->IsStatic() && f.mLazyVar[v]->IsObject())
@@ -5444,12 +5491,14 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 	if (IS_DIRECTIVE_MATCH(_T("#DllImport")))
 	{
 		LPTSTR aFuncName = omit_leading_whitespace(parameter);
+		// backup current function
+		// Func currentfunc = **g_script.mFunc;
 		if (!*(parameter = _tcschr(parameter,',')))
 			return ScriptError(ERR_PARAM2_REQUIRED, aBuf);
 		else
 			parameter++;
 		*(_tcschr(aFuncName,',')) = '\0';
-
+		ltrim(parameter);
 		int insert_pos;
 		Func *found_func = FindFunc(aFuncName,_tcslen(aFuncName),&insert_pos);
 		if (found_func)
@@ -5457,12 +5506,21 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		else
 			if (   !(found_func = AddFunc(aFuncName, _tcslen(aFuncName), false, insert_pos))   )
 				return FAIL; // It already displayed the error.
-		found_func->mBIF = (BuiltInFunctionType)BIF_DllImport; //aDynaToken->mfunction;
+		
+		// restore previous function
+		//memcpy(*g_script.mFunc,&currentfunc,sizeof(Func));
+		found_func->mBIF = (BuiltInFunctionType)BIF_DllImport;
 		found_func->mIsBuiltIn = true;
+		found_func->mHasReturn = true;
+		found_func->mMinParams = 0;
 
 		TCHAR buf[MAX_PATH];
 		size_t space_remaining = LINE_SIZE - (parameter-aBuf);
-		StrReplace(parameter, _T("%A_ScriptDir%"), mFileDir, SCS_INSENSITIVE, 1, space_remaining); // v1.0.35.11.  Caller has ensured string is writable.
+		if (tcscasestr(parameter, _T("%A_ScriptDir%")))
+		{
+			BIV_ScriptDir(buf, _T("A_ScriptDir"));
+			StrReplace(parameter, _T("%A_ScriptDir%"), buf, SCS_INSENSITIVE, 1, space_remaining);
+		}
 		if (tcscasestr(parameter, _T("%A_AppData%"))) // v1.0.45.04: This and the next were requested by Tekl to make it easier to customize scripts on a per-user basis.
 		{
 			BIV_SpecialFolderPath(buf, _T("A_AppData"));
@@ -5480,15 +5538,28 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		}
 		if (tcscasestr(parameter, _T("%A_DllPath%"))) // v1.0.45.04.
 		{
-			BIV_AhkPath(buf, _T("A_DllPath"));
+			BIV_DllPath(buf, _T("A_DllPath"));
 			StrReplace(parameter, _T("%A_DllPath%"), buf, SCS_INSENSITIVE, 1, space_remaining);
 		}
-
+		if (_tcschr(parameter,'%'))
+		{
+			return ScriptError(_T("Reference not allowed here, use & where possible. Only %A_AhkPath% %A_DllPath% %A_ScriptDir% %A_AppData[Common]% can be used here."), parameter);
+		}
 		// terminate dll\function name, find it and jump to next parameter
 		*(_tcschr(parameter,',')) = '\0';
 		HANDLE func_ptr = (HANDLE)ATOI64(parameter);
 		if (!func_ptr)
+		{
+			LPTSTR dll_name = _tcschr(parameter,'\\');
+			if (dll_name)
+			{
+				*dll_name = '\0';
+				if (!GetModuleHandle(parameter))
+					LoadLibrary(parameter);
+				*dll_name = '\\';
+			}
 			func_ptr = GetDllProcAddress(parameter);
+		}
 		if (!func_ptr )
 			return ScriptError(ERR_NONEXISTENT_FUNCTION, parameter);
 		parameter = parameter + _tcslen(parameter) + 1;
@@ -5507,14 +5578,14 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		// set max possible parameters for the new function
 		found_func->mParamCount = aParamCount/2;
 		// misuse mGlobalVarCount to hold total amount of parmeters for DllCall
-		found_func->mGlobalVarCount = aParamCount;
+		found_func->mLazyVarCount = aParamCount;
 
 		// allocate memory to hold the parameters and defaults
 		ExprTokenType **func_param = (ExprTokenType**)SimpleHeap::Malloc(aParamCount * sizeof(ExprTokenType*));
 		ExprTokenType **func_defaults = (ExprTokenType**)SimpleHeap::Malloc(found_func->mParamCount * sizeof(ExprTokenType*));
 		// misuse mParam to hold default parameters
-		found_func->mParam = (FuncParam*)func_param;
-		found_func->mStaticVar = (Var**)func_defaults;
+		found_func->mStaticVar = (Var**)func_param;
+		found_func->mStaticLazyVar = (Var**)func_defaults;
 
 		// assign function pointer
 		func_param[0] = (ExprTokenType*)SimpleHeap::Malloc(sizeof(ExprTokenType));
@@ -5522,21 +5593,24 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		func_param[0]->value_int64 = (__int64)func_ptr;
 		
 		// set parameters shift
+		ltrim(parm);
 		if (ATOI(parm))
 		{
 			int shift_param[MAX_FUNCTION_PARAMS];
 			int shift_count = 0;
-			for (int i;parm && *parm || *parm != ',';parm++)
+			for (int i;parm && *parm || *parm != ',';)
 			{
 				if (!(i = ATOI(parm)))
-					break;  // next parameter is a string
+					break;  // next parameter is not number
 				shift_param[shift_count] = i*2;
 				parm = StrChrAny(parm,_T("\t ,"));
+				ltrim(parm);
 				shift_count++;
 			}
-			if (!parm || !(parm = _tcschr(parm,',')))
+			if (!parm || !_tcschr(parm,','))
 				return ScriptError(ERR_PARAM3_REQUIRED, aBuf);
-			parm++; // adnvance pointer to next parameter since above left a ,
+			if (*parm == ',')
+				parm++; // adnvance pointer to next parameter since above left a ,
 
 			// fill left parameters order
 			for (int c = 1; shift_count < found_func->mParamCount;c++)
@@ -5548,36 +5622,60 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 					shift_param[shift_count++] = c*2;
 			}
 
-			// misuse mGlobalVar, allocate memory and fill shift_param
-			found_func->mGlobalVar = (Var**)SimpleHeap::Malloc(aParamCount * sizeof(int));
-			memcpy(found_func->mGlobalVar,&shift_param,aParamCount * sizeof(int));
+			// misuse mLazyVar, allocate memory and fill shift_param
+			found_func->mLazyVar = (Var**)SimpleHeap::Malloc(aParamCount * sizeof(int));
+			memcpy(found_func->mLazyVar,&shift_param,aParamCount * sizeof(int));
 		}
 		// fill definition and default parameters
 		for ( aParamCount = 1 ; parm ; aParamCount++ )
 		{
-			func_param[aParamCount] = (ExprTokenType*)SimpleHeap::Malloc(sizeof(ExprTokenType));
-			ExprTokenType &this_param = *func_param[aParamCount];
-			if (this_param.symbol = IsNumeric(parm,true,true,true,true))
-			{
-				if (this_param.symbol == PURE_FLOAT)
-					this_param.value_double = ATOF(parm);
-				else
-					this_param.value_int64 = ATOI64(parm);
-			}
-			else
-				this_param.marker = parm;
-			if (!(aParamCount % 2))
-			{
-				func_defaults[aParamCount/2 - 1] = (ExprTokenType*)SimpleHeap::Malloc(sizeof(ExprTokenType));
-				memcpy(func_defaults[aParamCount/2 - 1],&this_param,sizeof(ExprTokenType));
-			}
+			LPTSTR this_parm = parm;
 			if (parm = _tcschr(parm,','))
 			{
 				*parm = '\0';
 				parm++;
 			}
+			trim(this_parm);
+			func_param[aParamCount] = (ExprTokenType*)SimpleHeap::Malloc(sizeof(ExprTokenType));
+			ExprTokenType &this_param = *func_param[aParamCount];
+			if (this_param.symbol = IsNumeric(this_parm,true,true,true,true))
+			{
+				if (this_param.symbol == PURE_FLOAT)
+					this_param.value_double = ATOF(this_parm);
+				else
+					this_param.value_int64 = ATOI64(this_parm);
+			}
+			else
+			{
+				if (aParamCount % 2)
+				{
+					if (_tcschr(this_parm,'\"') == this_parm && _tcsrchr(this_parm,'\"') == (this_parm + _tcslen(this_parm) - 1))
+					{
+						this_param.marker = ++this_parm;
+						*(_tcsrchr(this_parm,'\"')) = '\0';
+					}
+					else
+						this_param.marker = this_parm;
+				}
+				else if (_tcschr(this_parm,'\"') == this_parm && _tcsrchr(this_parm,'\"') == (this_parm + _tcslen(this_parm) - 1))
+				{
+					this_param.marker = ++this_parm;
+					*(_tcsrchr(this_parm,'\"')) = '\0';
+				}
+				else
+				{  // user variable
+					this_param.var = FindVar(this_parm);
+					if (!this_param.var) // static variable could not be found
+						return ScriptError(_T("The variable name contains illegal character or is not declared."), this_parm);
+					this_param.symbol = SYM_VAR;
+				}
+			}
+			if (!(aParamCount % 2))
+			{
+				func_defaults[aParamCount/2 - 1] = (ExprTokenType*)SimpleHeap::Malloc(sizeof(ExprTokenType));
+				memcpy(func_defaults[aParamCount/2 - 1],&this_param,sizeof(ExprTokenType));
+			}
 		}
-		
 		return CONDITION_TRUE;
 	}
 
@@ -10252,7 +10350,8 @@ BuiltInVarType Script::GetVarType_BIV(LPTSTR lowercase, BuiltInVarSetType &sette
 	if (!_tcscmp(lower, _T("ahkversion"))) return BIV_AhkVersion;
 	if (!_tcscmp(lower, _T("ahkpath"))) return BIV_AhkPath;
 	if (!_tcscmp(lower, _T("dllpath"))) return BIV_DllPath;
-
+	if (ATOI64(lower))
+		return BIV_ORD;
 	// Since above didn't return:
 	return NULL;
 }

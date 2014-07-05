@@ -9270,6 +9270,32 @@ BOOL Line::CheckValidFinallyJump(Line* jumpTarget) // v1.1.14
 // BUILT-IN VARIABLES //
 ////////////////////////
 
+VarSizeType BIV_ORD(LPTSTR aBuf, LPTSTR aVarName)
+{
+	// Result will always be an integer (this simplifies scripts that work with binary zeros since an
+	// empty string yields zero).
+	// Caller has set aResultToken.symbol to a default of SYM_INTEGER, so no need to set it here.
+	if (aBuf)
+	{
+		int param1 = ATOI(aVarName + 2); // Convert to INT vs. UINT so that negatives can be detected.
+		if (param1 < 0 || param1 > UorA(0x10FFFF, UCHAR_MAX))
+			*aBuf = '\0'; // Empty string indicates both Chr(0) and an out-of-bounds param1.
+		else if (param1 >= 0x10000)
+		{
+			param1 -= 0x10000;
+			aBuf[0] = 0xd800 + ((param1 >> 10) & 0x3ff);
+			aBuf[1] = 0xdc00 + ( param1        & 0x3ff);
+			aBuf[2] = '\0';
+		}
+		else
+		{
+			aBuf[0] = param1;
+			aBuf[1] = '\0';
+		}
+	}
+	return MAX_INTEGER_LENGTH;
+}
+
 VarSizeType BIV_True_False_Null(LPTSTR aBuf, LPTSTR aVarName)
 {
 	if (aBuf)
@@ -9787,8 +9813,11 @@ VarSizeType BIV_CoordMode(LPTSTR aBuf, LPTSTR aVarName)
 
 BIV_DECL_W(BIV_CoordMode_Set)
 {
-	UINT new_mode = Line::ConvertCoordMode(aBuf);
-	if (new_mode != 65535)
+
+	UINT new_mode;
+	if (!(new_mode = ATOI(aBuf)))
+		new_mode = Line::ConvertCoordMode(aBuf);
+	if (new_mode <= COORD_MODE_SCREEN) // != 65535)
 	{
 		CoordModeType shift = Line::ConvertCoordModeCmd(aVarName + 11);
 		if (shift != -1) // Compare directly to -1 because unsigned.
@@ -12615,10 +12644,10 @@ BIF_DECL(BIF_DllImport)
 // All parameters are pre-defined in func-> structure and are used to call the Dll function via DllCall
 {
 	Func *func = g_script.FindFunc(aResultToken.marker);
-	int *shift_param = (int*)func->mGlobalVar;
-	int param_count = func->mGlobalVarCount;
-	ExprTokenType **func_param = (ExprTokenType **)func->mParam;
-	ExprTokenType **default_param = (ExprTokenType **)func->mStaticVar;
+	int *shift_param = (int*)func->mLazyVar;
+	int param_count = func->mLazyVarCount;
+	ExprTokenType **func_param = (ExprTokenType **)func->mStaticVar;
+	ExprTokenType **default_param = (ExprTokenType **)func->mStaticLazyVar;
 	if (shift_param)
 	{
 		// apply default paramters first
@@ -12638,7 +12667,7 @@ BIF_DECL(BIF_DllImport)
 		// if a parameter was passed, apply it, otherwise apply default parameter
 		for (int c = 0,i = 2;i < param_count;i+=2,c++)
 		{
-			func_param[i] = (aParamCount >= i/2 && aParam[c]->symbol != SYM_MISSING) ? aParam[c] : default_param[c];
+			func_param[i] = (aParamCount > c && aParam[c]->symbol != SYM_MISSING) ? aParam[c] : default_param[c];
 		}
 	}
 	BIF_DllCall(aResult,aResultToken,func_param,param_count);

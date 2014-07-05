@@ -341,6 +341,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 			// Call the user-defined or built-in function.  Func::Call takes care of variadic parameter
 			// lists and stores local var backups for UDFs in func_call.  Once func_call goes out of scope,
 			// its destructor calls Var::FreeAndRestoreFunctionVars() if appropriate.
+			g->ExcptDeref = this_token.deref;
 			if (!func->Call(func_call, aResult, this_token, params, actual_param_count
 									, this_token.deref->type == DT_VARIADIC))
 			{
@@ -348,13 +349,14 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 				// for that matter) is being aborted by this type of early return (i.e. if there's an
 				// output_var, its contents are left as-is).  In other words, this expression will have
 				// no result storable by the outside world.
+				g->ExcptDeref = NULL;
 				if (aResult != OK) // i.e. EARLY_EXIT or FAIL
 					result_to_return = NULL; // Use NULL to inform our caller that this thread is finished (whether through normal means such as Exit or a critical error).
 					// Above: The callers of this function know that the value of aResult (which already contains the
 					// reason for early exit) should be considered valid/meaningful only if result_to_return is NULL.
 				goto normal_end_skip_output_var; // output_var is left unchanged in these cases.
 			}
-
+			g->ExcptDeref = NULL;
 #ifdef CONFIG_DEBUGGER
 			// See PostExecFunctionCall() itself for comments.
 			g_Debugger.PostExecFunctionCall(this);

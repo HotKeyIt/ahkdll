@@ -456,9 +456,9 @@ BIF_DECL(BIF_ObjInvoke)
 		// Invocation not handled. Either there was no target object, or the object doesn't handle
 		// this method/property.  For Object (associative arrays), only CALL should give this result.
 		if (!obj)
-			aResult = g_script.ThrowRuntimeException(ERR_NO_OBJECT);
+			aResult = g_script.ThrowRuntimeException(ERR_NO_OBJECT, NULL, g->ExcptDeref ? g->ExcptDeref->marker : _T(""));
 		else
-			aResult = g_script.ThrowRuntimeException(ERR_NO_MEMBER, NULL, aParamCount ? TokenToString(*aParam[0]) : _T(""));
+			aResult = g_script.ThrowRuntimeException(ERR_NO_MEMBER, NULL, aParamCount && *TokenToString(*aParam[0]) ? TokenToString(*aParam[0]) : g->ExcptDeref ? g->ExcptDeref->marker : _T(""));
 	}
 }
 	

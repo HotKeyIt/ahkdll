@@ -2772,6 +2772,7 @@ class MallocHeap; // forward declaration for export.cpp
 // Declare built-in var read and write functions.
 #define BIV_DECL_RW(name) BIV_DECL_R(name); BIV_DECL_W(name##_Set)
 
+BIV_DECL_R (BIV_ORD);
 BIV_DECL_R (BIV_True_False_Null);
 BIV_DECL_R (BIV_MMM_DDD);
 BIV_DECL_R (BIV_DateTime);

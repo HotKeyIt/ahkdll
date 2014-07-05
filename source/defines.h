@@ -692,6 +692,7 @@ struct global_struct
 	UINT Encoding;
 	ExprTokenType* ThrownToken;
 	Line* ExcptLine;
+	DerefType* ExcptDeref;
 	bool InTryBlock;
 };
 
