@@ -14177,10 +14177,10 @@ BIF_DECL(BIF_DllImport)
 // All parameters are pre-defined in func-> structure and are used to call the Dll function via DllCall
 {
 	Func *func = g_script.FindFunc(aResultToken.marker);
-	int *shift_param = (int*)func->mGlobalVar;
-	int param_count = func->mGlobalVarCount;
-	ExprTokenType **func_param = (ExprTokenType **)func->mParam;
-	ExprTokenType **default_param = (ExprTokenType **)func->mStaticVar;
+	int *shift_param = (int*)func->mLazyVar;
+	int param_count = func->mLazyVarCount;
+	ExprTokenType **func_param = (ExprTokenType **)func->mStaticVar;
+	ExprTokenType **default_param = (ExprTokenType **)func->mStaticLazyVar;
 	if (shift_param)
 	{
 		// apply default paramters first
@@ -14200,7 +14200,7 @@ BIF_DECL(BIF_DllImport)
 		// if a parameter was passed, apply it, otherwise apply default parameter
 		for (int c = 0,i = 2;i < param_count;i+=2,c++)
 		{
-			func_param[i] = (aParamCount >= i/2 && aParam[c]->symbol != SYM_MISSING) ? aParam[c] : default_param[c];
+			func_param[i] = (aParamCount > c && aParam[c]->symbol != SYM_MISSING) ? aParam[c] : default_param[c];
 		}
 	}
 	BIF_DllCall(aResult,aResultToken,func_param,param_count);
