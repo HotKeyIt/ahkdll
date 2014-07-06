@@ -5493,7 +5493,7 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		LPTSTR aFuncName = omit_leading_whitespace(parameter);
 		// backup current function
 		// Func currentfunc = **g_script.mFunc;
-		if (!*(parameter = _tcschr(parameter,',')))
+		if (!(parameter = _tcschr(parameter,',')) || !*parameter)
 			return ScriptError(ERR_PARAM2_REQUIRED, aBuf);
 		else
 			parameter++;
@@ -5546,7 +5546,8 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 			return ScriptError(_T("Reference not allowed here, use & where possible. Only %A_AhkPath% %A_DllPath% %A_ScriptDir% %A_AppData[Common]% can be used here."), parameter);
 		}
 		// terminate dll\function name, find it and jump to next parameter
-		*(_tcschr(parameter,',')) = '\0';
+		if (_tcschr(parameter,','))
+			*(_tcschr(parameter,',')) = '\0';
 		HANDLE func_ptr = (HANDLE)ATOI64(parameter);
 		if (!func_ptr)
 		{
@@ -5568,12 +5569,13 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 
 		// If next parameter starts with digit, it is a shift_param definition and is omitted from paramters list for dllcall
 		int aParamCount = ATOI(parm) ? 0 : 1;
-		for(;parameter;aParamCount++)
-		{
-			if (parameter = _tcschr(parameter,','))
-				parameter++;
-		}
-		if (aParamCount < 2)
+		if (*parm)
+			for(;parameter;aParamCount++)
+			{
+				if (parameter = _tcschr(parameter,','))
+					parameter++;
+			}
+		if (*parm && aParamCount < 2)
 			return ScriptError(ERR_PARAM3_REQUIRED, aBuf);
 		// set max possible parameters for the new function
 		found_func->mParamCount = aParamCount/2;
@@ -5591,9 +5593,10 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		func_param[0] = (ExprTokenType*)SimpleHeap::Malloc(sizeof(ExprTokenType));
 		func_param[0]->symbol = PURE_INTEGER;
 		func_param[0]->value_int64 = (__int64)func_ptr;
-		
-		// set parameters shift
+		if (!*parm)
+			return CONDITION_TRUE;
 		ltrim(parm);
+		// set parameters shift
 		if (ATOI(parm))
 		{
 			int shift_param[MAX_FUNCTION_PARAMS];
