@@ -150,6 +150,7 @@ FuncEntry g_BIF[] =
 	{_T("ObjRemove"), BIF_ObjRemove, 1, 3, true},
 	{_T("ObjMinIndex"), BIF_ObjMinIndex, 1, 1, true},
 	{_T("ObjMaxIndex"), BIF_ObjMaxIndex, 1, 1, true},
+	{_T("ObjCount"), BIF_ObjCount, 1, 1, true},
 	{_T("ObjHasKey"), BIF_ObjHasKey, 2, 2, true},
 	{_T("ObjGetCapacity"), BIF_ObjGetCapacity, 1, 2, true},
 	{_T("ObjSetCapacity"), BIF_ObjSetCapacity, 2, 3, true},

@@ -1748,8 +1748,11 @@ bool MsgMonitor(HWND aWnd, UINT aMsg, WPARAM awParam, LPARAM alParam, MSG *apMsg
 	// of message monitoring scripts are expected to monitor only a few message numbers.
 	int msg_index, msg_count_orig;
 	for (msg_count_orig = g_MsgMonitorCount, msg_index = 0; msg_index < g_MsgMonitorCount; ++msg_index)
-		if (g_MsgMonitor[msg_index].msg == aMsg && g_MsgMonitor[msg_index].hwnd == aWnd)
-			break;
+		if (g_MsgMonitor[msg_index].msg == aMsg 
+			&& (g_MsgMonitor[msg_index].hwnd == aWnd 
+				|| (aMsg == WM_NOTIFY && g_MsgMonitor[msg_index].hwnd == (HWND)((NMHDR&)*(LPNMHDR)alParam).hwndFrom))
+				|| (aMsg == WM_COMMAND && g_MsgMonitor[msg_index].hwnd == (HWND)alParam))
+ 			break;
 	if (msg_index == g_MsgMonitorCount) // No match found, so the script isn't monitoring this message for this hwnd.
 		for (msg_count_orig = g_MsgMonitorCount, msg_index = 0; msg_index < g_MsgMonitorCount; ++msg_index)
 			if (g_MsgMonitor[msg_index].msg == aMsg && g_MsgMonitor[msg_index].hwnd == 0)
@@ -1899,7 +1902,10 @@ bool MsgMonitor(HWND aWnd, UINT aMsg, WPARAM awParam, LPARAM alParam, MSG *apMsg
 		// message(s) that were deleted lay to the left of it in the array).  So check if the monitor is
 		// somewhere else in the array and if found (i.e. it didn't delete itself), update it.
 		for (msg_index = 0; msg_index < g_MsgMonitorCount; ++msg_index)
-			if (g_MsgMonitor[msg_index].msg == aMsg && g_MsgMonitor[msg_index].hwnd == aWnd)
+			if (g_MsgMonitor[msg_index].msg == aMsg 
+				&& (g_MsgMonitor[msg_index].hwnd == aWnd 
+					|| (aMsg == WM_NOTIFY && g_MsgMonitor[msg_index].hwnd == (HWND)((NMHDR&)*(LPNMHDR)alParam).hwndFrom))
+					|| (aMsg == WM_COMMAND && g_MsgMonitor[msg_index].hwnd == (HWND)alParam))
 			{
 				if (g_MsgMonitor[msg_index].instance_count) // Avoid going negative, which might otherwise be possible in weird circumstances described in other comments.
 					--g_MsgMonitor[msg_index].instance_count;

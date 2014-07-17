@@ -462,6 +462,8 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 					return _HasKey(aResultToken, aParam, aParamCount);
 				if (!_tcsicmp(name, _T("MaxIndex")))
 					return _MaxIndex(aResultToken, aParam, aParamCount);
+				if (!_tcsicmp(name, _T("Count")))
+					return _Count(aResultToken, aParam, aParamCount);
 				if (!_tcsicmp(name, _T("NewEnum")))
 					return _NewEnum(aResultToken, aParam, aParamCount);
 				if (!_tcsicmp(name, _T("GetAddress")))
@@ -1084,6 +1086,16 @@ ResultType Object::_MaxIndex(ExprTokenType &aResultToken, ExprTokenType *aParam[
 		aResultToken.symbol = SYM_INTEGER;
 		aResultToken.value_int64 = (__int64)mFields[mKeyOffsetObject - 1].key.i;
 	}
+	// else no integer keys; leave aResultToken at default, empty string.
+	return OK;
+}
+
+ResultType Object::_Count(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+{
+	if (aParamCount)
+		return OK;
+	aResultToken.symbol = SYM_INTEGER;
+	aResultToken.value_int64 = (__int64)mFieldCount;
 	// else no integer keys; leave aResultToken at default, empty string.
 	return OK;
 }
