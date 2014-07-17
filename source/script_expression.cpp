@@ -70,7 +70,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 
 	// The following must be defined early so that mem_count is initialized and the array is guaranteed to be
 	// "in scope" in case of early "goto" (goto substantially boosts performance and reduces code size here).
-	#define MAX_EXPR_MEM_ITEMS 200 // v1.0.47.01: Raised from 100 because a line consisting entirely of concat operators can exceed it.  However, there's probably not much point to going much above MAX_TOKENS/2 because then it would reach the MAX_TOKENS limit first.
+	#define MAX_EXPR_MEM_ITEMS 256 // v1.0.47.01: Raised from 100 because a line consisting entirely of concat operators can exceed it.  However, there's probably not much point to going much above MAX_TOKENS/2 because then it would reach the MAX_TOKENS limit first.
 	LPTSTR mem[MAX_EXPR_MEM_ITEMS]; // No init necessary.  In most cases, it will never be used.
 	int mem_count = 0; // The actual number of items in use in the above array.
 	LPTSTR result_to_return = _T(""); // By contrast, NULL is used to tell the caller to abort the current thread.  That isn't done for normal syntax errors, just critical conditions such as out-of-memory.

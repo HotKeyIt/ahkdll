@@ -3100,6 +3100,7 @@ BIF_DECL(BIF_ObjSetCapacity);
 BIF_DECL(BIF_ObjGetAddress);
 BIF_DECL(BIF_ObjMaxIndex);
 BIF_DECL(BIF_ObjMinIndex);
+BIF_DECL(BIF_ObjCount);
 BIF_DECL(BIF_ObjNewEnum);
 BIF_DECL(BIF_ObjHasKey);
 BIF_DECL(BIF_ObjClone);

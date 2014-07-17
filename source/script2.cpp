@@ -10402,8 +10402,10 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 		// v1.0.35.11: Must search in A_ScriptDir by default because that's where ahk2exe will search by default.
 		// The old behavior was to search in A_WorkingDir, which seems pointless because ahk2exe would never
 		// be able to use that value if the script changes it while running.
+		TCHAR aDestPath[MAX_PATH];
+		GetFullPathName(aDest, MAX_PATH, aDestPath, NULL);
 		SetCurrentDirectory(g_script.mFileDir);
-		success = CopyFile(aSource, aDest, !allow_overwrite);
+		success = CopyFile(aSource, aDestPath, !allow_overwrite);
 		SetCurrentDirectory(g_WorkingDir); // Restore to proper value.
 	}
 #endif
@@ -15407,7 +15409,6 @@ void RegExMatchObject::DebugWriteProperty(IDebugProperties *aDebugger, int aPage
 #else
 		static LPSTR *sNamesT = sNames;
 #endif
-		char indexBuf[MAX_INTEGER_SIZE];
 		TCHAR resultBuf[MAX_NUMBER_SIZE];
 		ExprTokenType resultToken, thisTokenUnused, paramToken[2], *param[] = { &paramToken[0], &paramToken[1] };
 		for (int i = 0; i < _countof(sNames); i++)
@@ -15424,7 +15425,7 @@ void RegExMatchObject::DebugWriteProperty(IDebugProperties *aDebugger, int aPage
 				paramToken[1].symbol = SYM_INTEGER;
 				paramToken[1].value_int64 = p;
 				Invoke(resultToken, thisTokenUnused, IT_GET, param, 2);
-				aDebugger->WriteProperty(_itoa(p, indexBuf, 10), resultToken);
+				aDebugger->WriteProperty(p, resultToken);
 				if (resultToken.mem_to_free)
 					free(resultToken.mem_to_free);
 			}
