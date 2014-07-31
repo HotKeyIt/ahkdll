@@ -179,6 +179,8 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 						}
 						// Take a shortcut to allow dynamic output vars to resolve to builtin vars such as Clipboard
 						// or A_WorkingDir.  For additional comments, search for "SYM_VAR is somewhat unusual".
+						// This also ensures that the var's content is not transferred to aResultToken, which means
+						// that PerformLoopFor() is not required to check for/release an object in args 0 and 1.
 						aArgVar[aArgIndex] = temp_var;
 						result_to_return = _T(""); // No need to dereference it; this value won't be used but must be non-NULL.
 						goto normal_end_skip_output_var;
@@ -1736,7 +1738,10 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 		{
 			// If the caller supplied an array of parameters, copy any key-value pairs with non-numbered keys;
 			// otherwise, just create a new object.  Either way, numbered params will be inserted below.
-			Object *vararg_obj = param_obj ? param_obj->Clone(true) : Object::Create();
+			ExprTokenType *aToken = new ExprTokenType();
+			aToken->symbol = SYM_STRING;
+			aToken->marker = _T("");
+			Object *vararg_obj = param_obj ? param_obj->Clone(&aToken,1) : Object::Create();
 			if (!vararg_obj)
 			{
 				if (crisec)
@@ -1786,7 +1791,7 @@ FuncCallData::~FuncCallData()
 
 
 
-ResultType Line::ExpandArgs(ExprTokenType *aResultToken, VarSizeType aSpaceNeeded, Var *aArgVar[])
+ResultType Line::ExpandArgs(ExprTokenType *aResultTokens)
 // Caller should either provide both or omit both of the parameters.  If provided, it means
 // caller already called GetExpandedArgSize for us.
 // Returns OK, FAIL, or EARLY_EXIT.  EARLY_EXIT occurs when a function-call inside an expression
@@ -1806,36 +1811,20 @@ ResultType Line::ExpandArgs(ExprTokenType *aResultToken, VarSizeType aSpaceNeede
 	// more memory if needed.  Second pass: dereference the args into the buffer.
 
 	// First pass. It takes into account the same things as 2nd pass.
-	size_t space_needed;
-	if (aSpaceNeeded == VARSIZE_ERROR)
-	{
-		space_needed = GetExpandedArgSize(arg_var);
-		if (space_needed == VARSIZE_ERROR)
-			return FAIL;  // It will have already displayed the error.
-	}
-	else // Caller already determined it.
-	{
-		space_needed = aSpaceNeeded;
-		for (i = 0; i < mArgc; ++i) // Copying only the actual/used elements is probably faster than using memcpy to copy both entire arrays.
-			arg_var[i] = aArgVar[i]; // Init to values determined by caller, which helps performance if any of the args are dynamic variables.
-	}
+	size_t space_needed = GetExpandedArgSize(arg_var);
+	if (space_needed == VARSIZE_ERROR)
+		return FAIL;  // It will have already displayed the error.
 
-	// Only allocate the buf at the last possible moment,
-	// when it's sure the buffer will be used (improves performance when only a short
-	// script with no derefs is being run):
+	// Only allocate the buf at the last possible moment, when it's sure the buffer will be used
+	// (improves performance when only a short script with no derefs is being run):
 	if (space_needed > sDerefBufSize)
 	{
 		// KNOWN LIMITATION: The memory utilization of *recursive* user-defined functions is rather high because
-		// of the size of DEREF_BUF_EXPAND_INCREMENT, which is used to create a new deref buffer for each
-		// layer of recursion.  So if a UDF recurses deeply, say 100 layers, about 1600 MB (16KB*100) of
-		// memory would be temporarily allocated, which in a worst-case scenario would cause swapping and
-		// kill performance.  Perhaps the best solution to this is to dynamically change the size of
-		// DEREF_BUF_EXPAND_INCREMENT (via a new global variable) in the expression evaluation section that
-		// detects that a UDF has another instance of itself on the call stack.  To ensure proper collapse-back
-		// out of nested udfs and threads, the old value should be backed up, the new smaller increment set,
-		// then the old size should be passed to FreeAndRestoreFunctionVars() so that it can restore it.
-		// However, given the rarity of deep recursion, this doesn't seem worth the extra code size and loss of
-		// performance.
+		// of the size of DEREF_BUF_EXPAND_INCREMENT, which is used to create a new deref buffer for each layer
+		// of recursion.  Due to limited stack space, the limit of recursion is about 300 to 800 layers depending
+		// on the build.  For 800 layers on Unicode, about 25MB (32KB*800) of memory would be temporarily allocated,
+		// which in a worst-case scenario would cause swapping and kill performance.  However, on most systems it
+		// wouldn't be an issue, and the bigger problem is that recursion may be limited to ~300 layers.
 		size_t increments_needed = space_needed / DEREF_BUF_EXPAND_INCREMENT;
 		if (space_needed % DEREF_BUF_EXPAND_INCREMENT)  // Need one more if above division truncated it.
 			++increments_needed;
@@ -1909,7 +1898,7 @@ ResultType Line::ExpandArgs(ExprTokenType *aResultToken, VarSizeType aSpaceNeede
 				// for use in arg_var[] (for performance) because only rarely does an expression yield
 				// a variable other than some function's local variable (and a local's contents are no
 				// longer valid due to having been freed after the call [unless it's static]).
-				arg_deref[i] = ExpandExpression(i, result, mActionType == ACT_RETURN ? aResultToken : NULL  // L31: aResultToken is used to return a non-string value. Pass NULL if mMctionType != ACT_RETURN for maintainability; non-NULL aResultToken should mean we want a token returned - this can be used in future for numeric params or array support in commands.
+				arg_deref[i] = ExpandExpression(i, result, aResultTokens ? &aResultTokens[i] : NULL
 					, our_buf_marker, our_deref_buf, our_deref_buf_size, arg_deref, extra_size, arg_var);
 				extra_size = 0; // See comment below.
 				// v1.0.46.01: The whole point of passing extra_size is to allow an expression to write
@@ -1957,6 +1946,12 @@ ResultType Line::ExpandArgs(ExprTokenType *aResultToken, VarSizeType aSpaceNeede
 			// arg_var[i] was previously set by GetExpandedArgSize() or ExpandExpression() above.
 			if (   !(the_only_var_of_this_arg = arg_var[i])   )
 			{
+				if (aResultTokens && this_arg.postfix)
+				{
+					// Since above did not "continue", this arg must have been an expression which was
+					// converted back to a plain value.  *postfix is a single numeric or string literal.
+					aResultTokens[i] = *this_arg.postfix;
+				}
 				// Since above did not "continue" and arg_var[i] is NULL, this arg can't be an expression
 				// or input/output var and must therefore be plain text.
 				arg_deref[i] = this_arg.text;  // Point the dereferenced arg to the arg text itself.
@@ -2090,6 +2085,16 @@ end:
 	// such as WinWait, that large deref buffer would never get freed.
 	if (sDerefBufSize > LARGE_DEREF_BUF_SIZE)
 		SET_DEREF_TIMER(10000) // Reset the timer right before the deref buf is possibly about to become idle.
+
+	if (aResultTokens && result_to_return != OK)
+	{
+		// For maintainability, release any objects here.  Caller was responsible for ensuring
+		// aResultTokens is initialized and has at least mArgc elements.  Caller must assume
+		// contents of aResultTokens are invalid if we return != OK.
+		for (int i = 0; i < mArgc; ++i)
+			if (aResultTokens[i].symbol == SYM_OBJECT)
+				aResultTokens[i].object->Release();
+	}
 
 	return result_to_return;
 }

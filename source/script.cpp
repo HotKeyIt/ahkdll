@@ -146,19 +146,23 @@ FuncEntry g_BIF[] =
 	{_T("sizeof"), BIF_sizeof, 1, 2, true},
 	
 	{_T("Object"), BIF_ObjCreate, 0, NA, true},
-	{_T("ObjInsert"), BIF_ObjInsert, 2, NA, true},
-	{_T("ObjRemove"), BIF_ObjRemove, 1, 3, true},
-	{_T("ObjMinIndex"), BIF_ObjMinIndex, 1, 1, true},
-	{_T("ObjMaxIndex"), BIF_ObjMaxIndex, 1, 1, true},
-	{_T("ObjCount"), BIF_ObjCount, 1, 1, true},
-	{_T("ObjHasKey"), BIF_ObjHasKey, 2, 2, true},
-	{_T("ObjGetCapacity"), BIF_ObjGetCapacity, 1, 2, true},
-	{_T("ObjSetCapacity"), BIF_ObjSetCapacity, 2, 3, true},
-	{_T("ObjGetAddress"), BIF_ObjGetAddress, 2, 2, true},
-	{_T("ObjNewEnum"), BIF_ObjNewEnum, 1, 1, true},
-	{_T("ObjClone"), BIF_ObjClone, 1, 1, true},
 	{_T("ObjAddRef"), BIF_ObjAddRefRelease, 1, 1, true},
 	{_T("ObjRelease"), BIF_ObjAddRefRelease, 1, 1, true},
+	{_T("ObjRawSet"), BIF_ObjRawSet, 3, 3, false},
+
+	{_T("ObjInsertAt"), BIF_ObjXXX, 3, NA, false},
+	{_T("ObjRemove"), BIF_ObjXXX, 2, 3, true},
+	{_T("ObjRemoveAt"), BIF_ObjXXX, 2, 3, true},
+	{_T("ObjPush"), BIF_ObjXXX, 2, NA, false},
+	{_T("ObjPop"), BIF_ObjXXX, 1, 1, false},
+	{_T("ObjLength"), BIF_ObjXXX, 1, 1, true},
+	{_T("ObjCount"), BIF_ObjXXX, 1, 1, true},
+	{_T("ObjHasKey"), BIF_ObjXXX, 2, 2, true},
+	{_T("ObjGetCapacity"), BIF_ObjXXX, 1, 2, true},
+	{_T("ObjSetCapacity"), BIF_ObjXXX, 2, 3, true},
+	{_T("ObjGetAddress"), BIF_ObjXXX, 2, 2, true},
+	{_T("ObjNewEnum"), BIF_ObjNewEnum, 1, 1, true},
+	{_T("ObjClone"), BIF_ObjXXX, 1, 3, true},
 
 	{_T("Array"), BIF_ObjArray, 0, NA, true},
 	{_T("FileOpen"), BIF_FileOpen, 2, 3, true},
@@ -6295,6 +6299,7 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 			{
 				LPTSTR id_begin = action_args + 1;
 				LPTSTR cp;
+				bool has_space_or_tab;
 				for (;;) // L35: Loop to fix x.y.z() and similar.
 				{
 					cp = find_identifier_end(id_begin);
@@ -6306,6 +6311,7 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 					if (cp == id_begin)
 						// No valid identifier, doesn't look like a valid expression.
 						break;
+					has_space_or_tab = IS_SPACE_OR_TAB(*cp);
 					cp = omit_leading_whitespace(cp);
 					if (*cp == '[' || !*cp // x.y[z] or x.y
 						|| cp[1] == '=' && _tcschr(_T(":+-*/|&^."), cp[0]) // Two-char assignment operator.
@@ -6317,8 +6323,18 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 						break;
 					}
 					if (*cp != '.')
-						// Must be something which is not allowed as a standalone expression.
+					{
+						if (has_space_or_tab || *cp == g_delimiter)
+						{
+							id_begin[-1] = g_delimiter; // Separate target object from method name.
+							if (*cp != g_delimiter)
+								cp[-1] = g_delimiter; // Separate method name from parameters.
+							action_args = aLineText;
+							aActionType = ACT_METHOD;
+						}
+						//else: Neither a command nor a legal standalone expression.
 						break;
+					}
 					id_begin = cp + 1;
 				}
 			}
@@ -6875,6 +6891,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 			this_aArgMap = aArgMap ? aArgMap[i] : NULL; // Same.
 			ArgStruct &this_new_arg = new_arg[i];       // Same.
 			this_new_arg.is_expression = false;         // Set default early, for maintainability.
+			this_new_arg.postfix = NULL;                // Same.  ExpressionToPostfix() may override it even when setting is_expression back to false.
 
 			// Before allocating memory for this Arg's text, first check if it's a pure
 			// variable.  If it is, we store it differently (and there's no need to resolve
@@ -8772,7 +8789,7 @@ ResultType Script::DefineClassVars(LPTSTR aBuf, bool aStatic)
 		item_end += FindExprDelim(item_end); // Find the next comma which is not part of the initializer (or find end of string).
 
 		// Append "ClassNameOrThis.VarName := Initializer, " to the buffer.
-		int chars_written = _sntprintf(buf + buf_used, _countof(buf) - buf_used, _T("ObjInsert(%s,\"%.*s\",(%.*s)), ")
+		int chars_written = _sntprintf(buf + buf_used, _countof(buf) - buf_used, _T("ObjRawSet(%s,\"%.*s\",(%.*s)), ")
 			, aStatic ? mClassName : _T("this"), name_length, item, item_end - right_side_of_operator, right_side_of_operator);
 		if (chars_written < 0)
 			return ScriptError(_T("Declaration too long.")); // Short message since should be rare.
@@ -9443,7 +9460,10 @@ Func *Script::AddFunc(LPCTSTR aFuncName, size_t aFuncNameLength, bool aIsBuiltIn
 			ScriptError(_T("Invalid method name."), new_name); // Shouldn't ever happen.
 			return NULL;
 		}
-		if (!aClassObject->SetItem(key + 1, the_new_func))
+		++key;
+		if (!Var::ValidateName(key, DISPLAY_FUNC_ERROR))
+			return NULL;
+		if (!aClassObject->SetItem(key, the_new_func))
 		{
 			ScriptError(ERR_OUTOFMEM);
 			return NULL;
@@ -10645,16 +10665,6 @@ Line *Script::PreparseBlocks(Line *aStartingLine, bool aFindBlockEnd, Line *aPar
 				abort = true; // So that the caller doesn't also report an error.
 				return line->PreparseError(_T("Improper line below this.")); // Short message since so rare. A function must not be defined directly below an IF/ELSE/LOOP because runtime evaluation won't handle it properly.
 			}
-
-			if (line->mActionType == ACT_FOR)
-			{
-				ASSERT(line->mArgc == 3);
-				// Now that this FOR's expression has been pre-parsed, exclude it from mArgc so that ExpandArgs()
-				// won't evaluate it -- PerformLoopFor() needs to call ExpandExpression() directly in order to
-				// receive the object reference which is the result of the expression.
-				line->mArgc--;
-			}
-
 
 			// Make the line immediately following each ELSE, IF or LOOP be enclosed by that stmt.
 			// This is done to make it illegal for a Goto or Gosub to jump into a deeper layer,
@@ -12709,7 +12719,7 @@ end_of_infix_to_postfix:
 				break;
 			}
 			aArg.is_expression = false;
-			if (mActionType != ACT_ASSIGNEXPR && mActionType != ACT_RETURN)
+			if (mActionType != ACT_ASSIGNEXPR && mActionType != ACT_RETURN && mActionType != ACT_FUNC)
 				return OK;
 			// Otherwise, continue on below to copy the postfix token into persistent memory.
 		}
@@ -12905,9 +12915,9 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 		// Note: Only one line at a time be expanded via the above function.  So be sure
 		// to store any parts of a line that are needed prior to moving on to the next
 		// line (e.g. control stmts such as IF and LOOP).
-		if (line->mActionType != ACT_ASSIGNEXPR && line->mActionType != ACT_WHILE && line->mActionType != ACT_THROW)
+		if (!ACT_EXPANDS_ITS_OWN_ARGS(line->mActionType)) // Not ACT_ASSIGNEXPR, ACT_FUNC, ACT_WHILE or ACT_THROW.
 		{
-			result = line->ExpandArgs(aResultToken);
+			result = line->ExpandArgs(line->mActionType == ACT_RETURN ? aResultToken : NULL);
 			// As of v1.0.31, ExpandArgs() will also return EARLY_EXIT if a function call inside one of this
 			// line's expressions did an EXIT.
 			if (result != OK)
@@ -13143,24 +13153,13 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 				}
 				else // Not a var, or not one that supports ToToken().
 				{
-					if (line->mArg[0].postfix && !line->mArg[0].is_expression) // Lone numeric or string literal.
-					{
-						aResultToken->symbol = line->mArg[0].postfix->symbol;
-#ifndef _WIN64
-						if (aResultToken->symbol == SYM_STRING)
-							aResultToken->marker = line->mArg[0].postfix->marker; // Avoid union copy in this case since some callers use aResultToken.buf to make the string persistent.
-						else
-#endif
-						aResultToken->value_int64 = line->mArg[0].postfix->value_int64; // Union copy.
-					}
-					else // An expression which returned a string, or a lone dynamic/built-in var deref.
-					{
-						aResultToken->symbol = SYM_STRING;
-						aResultToken->marker = ARG1; // This sets it to blank if this return lacks an arg.
-					}
+					// ExpandArgs() or ExpandExpression() takes care of assigning aResultToken
+					// if it was a number or object, but leaves it unset for strings.
+					//aResultToken->symbol = SYM_STRING; // The check above verified it is already SYM_STRING.
+					aResultToken->marker = ARG1;
 				}
 			}
-			//else the return value, if any, is discarded.
+			// Otherwise, the return value either has already been set or is being discarded.
 			if (aMode != UNTIL_RETURN)
 				// Tells the caller to return early if it's not the Gosub that directly
 				// brought us into this subroutine.  i.e. it allows us to escape from
@@ -14048,41 +14047,28 @@ ResultType Line::PerformLoopFor(ExprTokenType *aResultToken, bool &aContinueMain
 	Line *jump_to_line;
 	global_struct &g = *::g; // Might slightly speed up the loop below.
 
-	// Save these pointers since they will be overwritten during the loop:
-	Var *var[] = { ARGVARRAW1, ARGVARRAW2 };
-	
-	if (!sDerefBuf)
-	{
-		// This must be done in case ExpandExpression() needs the deref buf for temporary storage.
-		sDerefBufSize = (mArg[2].length < MAX_NUMBER_LENGTH ? MAX_NUMBER_LENGTH : mArg[2].length) + 1; // See EXPR_BUF_SIZE macro in script_expression.cpp.
-		if ( !(sDerefBuf = tmalloc(sDerefBufSize)) )
-		{
-			sDerefBufSize = 0;
-			return LineError(ERR_OUTOFMEM);
-		}
-	}
+	ExprTokenType param_tokens[3];
+	for (int i = 0; i < 3; ++i)
+		param_tokens[i].symbol = SYM_INVALID; // Set default.  ExpandArgs() doesn't always set it.
 
-	LPTSTR our_buf_marker = sDerefBuf;
-	LPTSTR arg_deref[] = {0, 0}; // ExpandExpression checks these if it needs to expand the deref buffer.
-	ExprTokenType object_token;
-	object_token.symbol = SYM_INVALID; // Init in case ExpandExpression() resolves to a string, in which case it won't use enum_token.
-
-	// Since expressions aren't normally capable of resolving to an object (except for RETURN), we need to
-	// call ExpandExpression() directly and pass in a "result token" which will be used if the result is an
-	// object or number. Load-time pre-parsing has ensured there are really three args, but mArgc == 2 so
-	// this one hasn't been evaluated yet:
-	if (!ExpandExpression(2, result, &object_token, our_buf_marker, sDerefBuf, sDerefBufSize, arg_deref, 0))
+	result = ExpandArgs(param_tokens);
+	if (result != OK)
 		// A script-function-call inside the expression returned EARLY_EXIT or FAIL.
 		return result;
 
-	if (object_token.symbol != SYM_OBJECT)
+	// Not required because the tokens aren't used for ARG_TYPE_OUTPUT_VAR:
+	//if (param_tokens[0].symbol == SYM_OBJECT)
+	//    param_tokens[0].object->Release();
+	if (param_tokens[2].symbol != SYM_OBJECT)
 		// The expression didn't resolve to an object, so no enumerator is available.
 		return OK;
+	
+	// Save these pointers since they will be overwritten during the loop:
+	Var *var[] = { ARGVARRAW1, ARGVARRAW2 };
 	
 	TCHAR buf[MAX_NUMBER_SIZE]; // Small buffer which may be used by object->Invoke().
 	
 	ExprTokenType enum_token;
-	ExprTokenType param_tokens[3];
 	ExprTokenType *params[] = { param_tokens, param_tokens+1, param_tokens+2 };
 	int param_count;
 
@@ -14096,8 +14082,9 @@ ResultType Line::PerformLoopFor(ExprTokenType *aResultToken, bool &aContinueMain
 	param_tokens[0].symbol = SYM_STRING;
 	param_tokens[0].marker = _T("_NewEnum");
 
-	object_token.object->Invoke(enum_token, object_token, IT_CALL, params, 1);
-	object_token.object->Release(); // This object reference is no longer needed.
+	// enum := object._NewEnum()
+	param_tokens[2].object->Invoke(enum_token, param_tokens[2], IT_CALL, params, 1);
+	param_tokens[2].object->Release(); // This object reference is no longer needed.
 
 	if (enum_token.mem_to_free)
 		// Invoke returned memory for us to free.
@@ -15848,14 +15835,23 @@ ResultType Line::Perform()
 		return BIV_FileEncoding_Set(ARG1, NULL);
 
 	case ACT_FUNC:
+	case ACT_METHOD:
 	{
-		Func *func = (Func *)mAttribute;
+		ExprTokenType param_tok[MAX_ARGS], *param_ptr[MAX_ARGS];
+		for (int i = 0; i < mArgc; ++i)
+			param_tok[i].symbol = SYM_STRING; // Set default.  ExpandArgs() might not set it.
+
+		result = ExpandArgs(param_tok);
+		if (result != OK) // Probably FAIL or EARLY_EXIT.
+			return result;
+
+		Func *func = (Func *)mAttribute; // NULL for ACT_METHOD.
 		//if (!func && !(func = g_script.FindFunc(ARG1)))
 		//	return LineError(ERR_NONEXISTENT_FUNCTION, FAIL, ARG1);
 		
 		int param_count = mArgc - 1;
 		int arg = 1;
-		if (param_count && func->mHasReturn)
+		if (param_count && func && func->mHasReturn)
 		{
 			// Above: mArg[1].type isn't checked because the output var is optional and
 			// might have been omitted, in which case type would be ARG_TYPE_NORMAL.
@@ -15872,20 +15868,20 @@ ResultType Line::Perform()
 		//if (param_count < func->mMinParams)
 		//	return LineError(ERR_TOO_FEW_PARAMS, FAIL, ARG1);
 
-		ExprTokenType params[MAX_ARGS], *param[MAX_ARGS];
 		for (int i = 0; i < param_count; ++i, ++arg)
 		{
-			param[i] = &params[i];
 			if (sArgVar[arg] && sArgVar[arg]->Type() == VAR_NORMAL) // Only normal variables can be SYM_VAR.
 			{
-				params[i].symbol = SYM_VAR;
-				params[i].var = sArgVar[arg];
+				param_tok[arg].symbol = SYM_VAR;
+				param_tok[arg].var = sArgVar[arg];
 			}
 			else
 			{
-				params[i].symbol = SYM_STRING;
-				params[i].marker = sArgDeref[arg];
+				if (param_tok[arg].symbol == SYM_STRING) // i.e. still at the default we set.
+					param_tok[arg].marker = sArgDeref[arg];
+				//else use the type and value set by ExpandArgs().
 			}
+			param_ptr[i] = &param_tok[arg];
 		}
 		
 		TCHAR result_buf[MAX_NUMBER_SIZE];
@@ -15895,8 +15891,32 @@ ResultType Line::Perform()
 		result_token.buf = result_buf; // Built-in functions expect this to be available.
 		result_token.mem_to_free = NULL; // Init to allow detection below.
 
-		// CALL THE FUNCTION.
-		func->Call(func_call, result, result_token, param, param_count);
+		if (func) // ACT_FUNC
+		{
+			func->Call(func_call, result, result_token, param_ptr, param_count);
+		}
+		else // ACT_METHOD
+		{
+			if (ARGVAR1)
+			{
+				// This could only be a plain var reference, for which param_tok[0] wasn't set.
+				if (IObject *object = ARGVAR1->ToObject())
+				{
+					param_tok[0].symbol = SYM_OBJECT;
+					param_tok[0].object = object;
+					object->AddRef(); // Release() will be called below.
+				}
+			}
+			// Otherwise, it's not a plain var reference so must be something like X.Y (in X.Y.Z).
+			if (param_tok[0].symbol == SYM_OBJECT)
+			{
+				result_token.symbol = SYM_STRING;
+				result_token.marker = _T("");
+				result = param_tok[0].object->Invoke(result_token, param_tok[0], IT_CALL, param_ptr, param_count);
+			}
+			else
+				result = LineError(ERR_NO_OBJECT);
+		}
 
 		if (output_var)
 		{
@@ -15916,6 +15936,9 @@ ResultType Line::Perform()
 			free(result_token.mem_to_free);
 		if (result_token.symbol == SYM_OBJECT)
 			result_token.object->Release();
+		for (int i = 0; i < mArgc; ++i)
+			if (param_tok[i].symbol == SYM_OBJECT)
+				param_tok[i].object->Release();
 
 		if (result == EARLY_RETURN) // This would cause our caller to "return".
 			result = OK;
@@ -16443,6 +16466,8 @@ LPTSTR Line::ToText(LPTSTR aBuf, int aBufSize, bool aCRLF, DWORD aElapsed, bool 
 		int i = 0;
 		if (mActionType == ACT_FUNC)
 			aBuf += sntprintf(aBuf, BUF_SPACE_REMAINING, _T("%s"), mArg[i++].text);
+		else if (mActionType == ACT_METHOD)
+			aBuf += sntprintf(aBuf, BUF_SPACE_REMAINING, _T("%s.%s"), *mArg[0].text ? mArg[0].text : VAR(mArg[0])->mName, mArg[1].text), i = 2;
 		else
 			aBuf += sntprintf(aBuf, BUF_SPACE_REMAINING, _T("%s"), g_act[mActionType].Name);
 		for ( ; i < mArgc; ++i)

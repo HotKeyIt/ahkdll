@@ -101,11 +101,11 @@ Object *Object::Create(ExprTokenType *aParam[], int aParamCount)
 // Object::Clone - Used for variadic function-calls.
 //
 
-Object *Object::Clone(BOOL aExcludeIntegerKeys)
+Object *Object::Clone(ExprTokenType *aParam[], int aParamCount)
 // Creates an object and copies to it the fields at and after the given offset.
 {
-	IndexType aStartOffset = aExcludeIntegerKeys ? mKeyOffsetObject : 0;
-
+	SymbolType is_number;
+	IndexType aStartOffset = aParamCount && aParam[0]->symbol != SYM_MISSING && !TokenIsPureNumeric(*aParam[0],is_number) ? mKeyOffsetObject : 0;
 	Object *objptr = new Object();
 	if (!objptr|| aStartOffset >= mFieldCount)
 		return objptr;
@@ -134,15 +134,30 @@ Object *Object::Clone(BOOL aExcludeIntegerKeys)
 			obj.mKeyOffsetString = 0; // aStartOffset also excluded some string keys.
 	}
 	//else no need to check mKeyOffsetString since it should always be >= mKeyOffsetObject.
-
-	for (i = 0; i < field_count; ++i)
+	int j = 0;
+	for (i = 0; i < field_count; ++i,++j)
 	{
-		FieldType &dst = fields[i];
+		FieldType &dst = fields[j];
 		FieldType &src = mFields[aStartOffset + i];
 
 		// Copy key.
-		if (i >= obj.mKeyOffsetString)
+		if (j >= obj.mKeyOffsetString)
 		{
+			if (aParamCount)
+			{
+				if (aParam[0]->symbol != SYM_MISSING && !TokenIsPureNumeric(*aParam[0],is_number) && 0 < _tcscmp(TokenToString(*aParam[0]),src.key.s))
+				{
+					obj.mFieldCount--;
+					j--;
+					continue;
+				}
+				else if (aParamCount == 2 && aParam[1]->symbol != SYM_MISSING 
+						&& (TokenIsPureNumeric(*aParam[1],is_number) || 0 > _tcscmp(TokenToString(*aParam[1]),src.key.s)))
+				{
+					obj.mFieldCount = j;
+					break;
+				}
+			}
 			if ( !(dst.key.s = _tcsdup(src.key.s)) )
 			{
 				// Key allocation failed. At this point, all int and object keys
@@ -153,10 +168,36 @@ Object *Object::Clone(BOOL aExcludeIntegerKeys)
 				++failure_count;
 			}
 		}
-		else if (i >= obj.mKeyOffsetObject)
+		else if (j >= obj.mKeyOffsetObject)
+		{
+			if (aParamCount)
+			{
+				obj.mFieldCount = obj.mFieldCount - (obj.mKeyOffsetString - obj.mKeyOffsetObject);
+				obj.mKeyOffsetString = obj.mKeyOffsetObject;
+				j--;
+				continue;
+			}
 			(dst.key.p = src.key.p)->AddRef();
+		}
 		else
+		{
+			if (aParamCount && aParam[0]->symbol != SYM_MISSING && TokenIsPureNumeric(*aParam[0],is_number) && TokenToInt64(*aParam[0]) > src.key.i)
+			{
+				obj.mFieldCount--;
+				obj.mKeyOffsetString--;
+				obj.mKeyOffsetObject--;
+				j--;
+				continue;
+			}
+			else if (aParamCount == 2 && aParam[1]->symbol != SYM_MISSING && TokenIsPureNumeric(*aParam[1],is_number) && TokenToInt64(*aParam[1]) > src.key.i)
+			{
+				obj.mFieldCount = j;
+				obj.mKeyOffsetString = j;
+				obj.mKeyOffsetObject = j;
+				break;
+			}
 			dst.key.i = src.key.i;
+		}
 
 		// Copy value.
 		switch (dst.symbol = src.symbol)
@@ -382,6 +423,8 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 				// Propagate EARLY_RETURN in case this was the __Call meta-function of a
 				// "function object" which is used as a meta-function of some other object.
 				return EARLY_RETURN; // TODO: Detection of 'return' vs 'return empty_value'.
+			if (r != OK) // Likely FAIL or EARLY_EXIT.
+				return r;
 		}
 	}
 	
@@ -450,59 +493,25 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 			if (IS_INVOKE_CALL)
 			{
 				// Since above has not handled this call and no field exists, check for built-in methods.
-				LPTSTR name = key.s;
-				if (*name == '_')
-					++name; // ++ to exclude '_' from further consideration.
-				++aParam; --aParamCount; // Exclude the method identifier.  A prior check ensures there was at least one param in this case.
-				if (!_tcsicmp(name, _T("Insert")))
-					return _Insert(aResultToken, aParam, aParamCount);
-				if (!_tcsicmp(name, _T("Remove")))
-					return _Remove(aResultToken, aParam, aParamCount);
-				if (!_tcsicmp(name, _T("HasKey")))
-					return _HasKey(aResultToken, aParam, aParamCount);
-				if (!_tcsicmp(name, _T("MaxIndex")))
-					return _MaxIndex(aResultToken, aParam, aParamCount);
-				if (!_tcsicmp(name, _T("Count")))
-					return _Count(aResultToken, aParam, aParamCount);
-				if (!_tcsicmp(name, _T("NewEnum")))
-					return _NewEnum(aResultToken, aParam, aParamCount);
-				if (!_tcsicmp(name, _T("GetAddress")))
-					return _GetAddress(aResultToken, aParam, aParamCount);
-				if (!_tcsicmp(name, _T("SetCapacity")))
-					return _SetCapacity(aResultToken, aParam, aParamCount);
-				if (!_tcsicmp(name, _T("GetCapacity")))
-					return _GetCapacity(aResultToken, aParam, aParamCount);
-				if (!_tcsicmp(name, _T("MinIndex")))
-					return _MinIndex(aResultToken, aParam, aParamCount);
-				if (!_tcsicmp(name, _T("Clone")))
-					return _Clone(aResultToken, aParam, aParamCount);
-				// For maintainability: explicitly return since above has done ++aParam, --aParamCount.
-				return INVOKE_NOT_HANDLED;
+				return CallBuiltin(key.s, aResultToken, aParam + 1, aParamCount - 1); // +/- 1 to exclude the method identifier.
 			}
 			//
 			// BUILT-IN "BASE" PROPERTY
 			//
-			else if (param_count_excluding_rvalue == 1 && !_tcsicmp(key.s, _T("base")))
+			else if (param_count_excluding_rvalue == 1)
 			{
-				if (IS_INVOKE_SET)
-				// "base" must be handled before inserting a new field.
+				if (!_tcsicmp(key.s, _T("base")))
 				{
-					IObject *obj = TokenToObject(*aParam[1]);
-					if (obj)
+					if (IS_INVOKE_SET)
 					{
-						obj->AddRef(); // for mBase
-						obj->AddRef(); // for aResultToken
-						aResultToken.symbol = SYM_OBJECT;
-						aResultToken.object = obj;
+						IObject *obj = TokenToObject(*aParam[1]);
+						if (obj)
+							obj->AddRef(); // for mBase
+						if (mBase)
+							mBase->Release();
+						mBase = obj; // May be NULL.
 					}
-					// else leave as empty string.
-					if (mBase)
-						mBase->Release();
-					mBase = obj; // May be NULL.
-					return OK;
-				}
-				else // GET
-				{
+	
 					if (mBase)
 					{
 						aResultToken.symbol = SYM_OBJECT;
@@ -646,6 +655,64 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 	// Fell through from one of the sections above: invocation was not handled.
 	return INVOKE_NOT_HANDLED;
 }
+
+
+ResultType Object::CallBuiltin(LPCTSTR aName, ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+{
+	switch (toupper(*aName))
+	{
+	case 'I':
+		if (!_tcsicmp(aName, _T("InsertAt")))
+			return _InsertAt(aResultToken, aParam, aParamCount);
+		break;
+	case 'P':
+		if (!_tcsicmp(aName, _T("Push")))
+			return _Push(aResultToken, aParam, aParamCount);
+		if (!_tcsicmp(aName, _T("Pop")))
+			return _Pop(aResultToken, aParam, aParamCount);
+		break;
+	case 'R':
+		if (!_tcsnicmp(aName, _T("Remove"), 6))
+		{
+			aName += 6;
+			if (!*aName)
+				return _Remove(aResultToken, aParam, aParamCount);
+			if (!_tcsicmp(aName, _T("At")))
+				return _RemoveAt(aResultToken, aParam, aParamCount);
+		}
+		break;
+	case 'H':
+		if (!_tcsicmp(aName, _T("HasKey")))
+			return _HasKey(aResultToken, aParam, aParamCount);
+		break;
+	case 'L':
+		if (!_tcsicmp(aName, _T("Length")))
+			return _Push(aResultToken, NULL, 0);
+		break;
+	case '_':
+		if (!_tcsicmp(aName, _T("_NewEnum")))
+			return _NewEnum(aResultToken, aParam, aParamCount);
+		break;
+	case 'G':
+		if (!_tcsicmp(aName, _T("GetAddress")))
+			return _GetAddress(aResultToken, aParam, aParamCount);
+		if (!_tcsicmp(aName, _T("GetCapacity")))
+			return _GetCapacity(aResultToken, aParam, aParamCount);
+		break;
+	case 'S':
+		if (!_tcsicmp(aName, _T("SetCapacity")))
+			return _SetCapacity(aResultToken, aParam, aParamCount);
+		break;
+	case 'C':
+		if (!_tcsicmp(aName, _T("Count")))
+			return _Count(aResultToken);
+		if (!_tcsicmp(aName, _T("Clone")))
+			return _Clone(aResultToken, aParam, aParamCount);
+		break;
+	}
+	return INVOKE_NOT_HANDLED;
+}
+
 
 //
 // Internal: Object::CallField - Used by Object::Invoke to call a function/method stored in this object.
@@ -851,89 +918,61 @@ bool Object::InsertAt(INT_PTR aOffset, INT_PTR aKey, ExprTokenType *aValue[], in
 	return true;
 }
 
-ResultType Object::_Insert(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
-// _Insert( key, value )
+ResultType Object::_InsertAt(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+// InsertAt(index, value1, ...)
 {
-	if (!aParamCount)
-		return OK; // Error.
+	if (aParamCount < 2)
+		return g_script.ScriptError(ERR_TOO_FEW_PARAMS);
 
 	SymbolType key_type;
 	KeyType key;
-	IndexType insert_pos, pos;
-	FieldType *field = NULL;
-
-	if (aParamCount == 1)
+	IndexType insert_pos;
+	FieldType *field = FindField(**aParam, aResultToken.buf, /*out*/ key_type, /*out*/ key, /*out*/ insert_pos);
+	if (key_type != SYM_INTEGER)
+		return g_script.ScriptError(ERR_PARAM1_INVALID, key_type == SYM_STRING ? key.s : _T(""));
+		
+	if (field)
 	{
-		// Insert at the end when no key is supplied, since that is typically most useful
-		// and is also most efficient (because no int-keyed fields are moved or adjusted).
-		insert_pos = mKeyOffsetObject; // int keys end here.
-		key.i = insert_pos ? mFields[insert_pos - 1].key.i + 1 : 1;
-		key_type = SYM_INTEGER;
+		insert_pos = field - mFields; // insert_pos wasn't set in this case.
+		field = NULL; // Insert, don't overwrite.
 	}
-	else
-	{
-		field = FindField(**aParam, aResultToken.buf, /*out*/ key_type, /*out*/ key, /*out*/ insert_pos);
-		if (key_type == SYM_INTEGER)
-		{
-			if (field)
-			{	// Don't overwrite this key's value; instead insert a new field.
-				insert_pos = field - mFields; // insert_pos wasn't set in this case.
-				field = NULL;
-			}
 
-			if (aParamCount > 2) // Multiple value params.  Could also handle aParamCount == 2, but the simpler method is faster.
-			{
-				if (InsertAt(insert_pos, key.i, aParam + 1, aParamCount - 1))
-				{
-					aResultToken.symbol = SYM_INTEGER;
-					aResultToken.value_int64 = aParamCount - 1;
-				}
-				return OK;
-			}
-		}
-		else
-			if (aParamCount > 2)
-				// Error: multiple values but not an integer key.
-				return OK;
-		++aParam; // See below.
-	}
-	// If we were passed only one parameter, aParam points to it.  Otherwise it
-	// was interpreted as the key and aParam now points to the next parameter.
+	if (!InsertAt(insert_pos, key.i, aParam + 1, aParamCount - 1))
+		return g_script.ScriptError(ERR_OUTOFMEM);
 	
-	if ( field || (field = Insert(key_type, key, insert_pos)) )
-	{
-		// Assign this field its new value:
-		field->Assign(**aParam);
-		// Increment any numeric keys following this one.  At this point, insert_pos always indicates the position of a field just inserted.
-		if (key_type == SYM_INTEGER)
-			for (pos = insert_pos + 1; pos < mKeyOffsetObject; ++pos)
-				++mFields[pos].key.i;
-		// Return indication of success.  If caller supplied only one parameter,
-		// return the index of the insertion.  Otherwise the caller specified the
-		// index; returning it wouldn't be as useful, so return a value guaranteed
-		// to be "true" (even if the caller specifies 0 as the index).
-		aResultToken.symbol = SYM_INTEGER;
-		aResultToken.value_int64 = (aParamCount == 1) ? key.i : 1;
-	}
-	// else insert failed; leave aResultToken at default, empty string.  Numeric indices are *not* adjusted in this case.
+	// Leave aResultToken at its default empty value.
 	return OK;
 }
 
-ResultType Object::_Remove(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
-// _Remove( [ min_key, max_key ] )
+ResultType Object::_Push(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+// Push(value1, ...)
 {
-	if (aParamCount > 2)
-		return OK;
+	IndexType insert_pos = mKeyOffsetObject; // int keys end here.;
+	IntKeyType start_index = (insert_pos ? mFields[insert_pos - 1].key.i + 1 : 1);
+	if (!InsertAt(insert_pos, start_index, aParam, aParamCount))
+		return g_script.ScriptError(ERR_OUTOFMEM);
 
-	FieldType *min_field, *max_field;
+	// Return the new "length" of the array.
+	aResultToken.symbol = SYM_INTEGER;
+	aResultToken.value_int64 = start_index + aParamCount - 1;
+	return OK;
+}
+
+ResultType Object::_Remove_impl(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount, RemoveMode aMode)
+// Remove(first_key [, last_key := first_key])
+// RemoveAt(index [, virtual_count := 1])
+// Pop()
+{
+	FieldType *min_field;
 	IndexType min_pos, max_pos, pos;
-	SymbolType min_key_type, max_key_type;
+	SymbolType min_key_type;
 	KeyType min_key, max_key;
+	IntKeyType logical_count_removed = 1;
 
 	// Find the position of "min".
-	if (!aParamCount)
+	if (aMode == RM_Pop)
 	{
-		if (mKeyOffsetObject) // i.e. at least one int field; use _MaxIndex()
+		if (mKeyOffsetObject) // i.e. at least one int field; use Length()
 		{
 			min_field = &mFields[min_pos = mKeyOffsetObject - 1];
 			min_key = min_field->key;
@@ -943,14 +982,36 @@ ResultType Object::_Remove(ExprTokenType &aResultToken, ExprTokenType *aParam[],
 			return OK;
 	}
 	else
+	{
+		if (!aParamCount)
+			return g_script.ScriptError(ERR_TOO_FEW_PARAMS);
+
 		if (min_field = FindField(*aParam[0], aResultToken.buf, min_key_type, min_key, min_pos))
 			min_pos = min_field - mFields; // else min_pos was already set by FindField.
+		
+		if (min_key_type != SYM_INTEGER && aMode != RM_RemoveKey)
+			return g_script.ScriptError(ERR_PARAM1_INVALID);
+	}
 	
-	if (aParamCount > 1)
+	if (aParamCount > 1) // Removing a range of keys.
 	{
-		// Find the position following "max".
-		if (max_field = FindField(*aParam[1], aResultToken.buf, max_key_type, max_key, max_pos))
-			max_pos = max_field - mFields + 1;
+		SymbolType max_key_type;
+		FieldType *max_field;
+		if (aMode == RM_RemoveAt)
+		{
+			logical_count_removed = (IntKeyType)TokenToInt64(*aParam[1]);
+			// Find the next position >= [aParam[1] + Count].
+			max_key_type = SYM_INTEGER;
+			max_key.i = min_key.i + logical_count_removed;
+			if (max_field = FindField(max_key_type, max_key, max_pos))
+				max_pos = max_field - mFields;
+		}
+		else
+		{
+			// Find the next position > [aParam[1]].
+			if (max_field = FindField(*aParam[1], aResultToken.buf, max_key_type, max_key, max_pos))
+				max_pos = max_field - mFields + 1;
+		}
 		// Since the order of key-types in mFields is of no logical consequence, require that both keys be the same type.
 		// Do not allow removing a range of object keys since there is probably no meaning to their order.
 		if (max_key_type != min_key_type || max_key_type == SYM_OBJECT || max_pos < min_pos
@@ -958,33 +1019,23 @@ ResultType Object::_Remove(ExprTokenType &aResultToken, ExprTokenType *aParam[],
 			|| (max_pos == min_pos && (max_key_type == SYM_INTEGER ? max_key.i < min_key.i : _tcsicmp(max_key.s, min_key.s) < 0)))
 			// max < min, but no keys exist in that range so (max_pos < min_pos) check above didn't catch it.
 		{
-			if (min_key_type == SYM_INTEGER && max_key_type == SYM_STRING && !*max_key.s)
-				// Allow Remove(i,"") to mean "remove [i] but don't adjust keys".
-				aParamCount = 1;
-			else
-				return OK;
+			return g_script.ScriptError(ERR_PARAM2_INVALID);
 		}
 		//else if (max_pos == min_pos): specified range is valid, but doesn't match any keys.
-		//	Continue on, adjust integer keys as necessary and return 0 instead of "".
+		//	Continue on, adjust integer keys as necessary and return 0.
 	}
-	else
-		max_key_type = min_key_type;
-
-	if (aParamCount < 2)
+	else // Removing a single item.
 	{
 		if (!min_field) // Nothing to remove.
 		{
-			// Fix for v1.1.06.03: As documented, adjust keys as if Remove(min, min) was called.
-			if (max_key_type == SYM_INTEGER) // Fix for v1.1.07.02: Exclude Obj.Remove(i, "").
+			if (aMode == RM_RemoveAt)
 				for (pos = min_pos; pos < mKeyOffsetObject; ++pos)
 					mFields[pos].key.i--;
-			// L34: Must not continue since min_pos points at the wrong key or an invalid location.
-			// As of L50, our return value when (aParamCount < 2) is the value which was removed, not
-			// the number of removed items. Since this[min_field] would return "", an empty string is
-			// the only sensible value we can return here. An earlier check already ensured Remove()
-			// with no params returned "" if there was nothing to remove.
+			// Our return value when only one key is given is supposed to be the value
+			// previously at this[key], which has just been removed.  Since this[key]
+			// would return "", it makes sense to return an empty string in this case.
 			aResultToken.symbol = SYM_STRING;	
-			aResultToken.marker = _T(""); // L61: Changed from 0 to "". See comment above.
+			aResultToken.marker = _T("");
 			return OK;
 		}
 		// Since only one field (at maximum) can be removed in this mode, it
@@ -1012,7 +1063,7 @@ ResultType Object::_Remove(ExprTokenType &aResultToken, ExprTokenType *aParam[],
 		// Note that object keys can only be removed in the single-item mode.
 		if (min_key_type == SYM_OBJECT)
 			min_field->key.p->Release();
-		// Set these up as if caller did _Remove(min_key, min_key):
+		// Set these up as if caller did Remove(min_key, min_key):
 		max_pos = min_pos + 1;
 		max_key.i = min_key.i; // Union copy. Used only if min_key_type == SYM_INTEGER; has no effect in other cases.
 	}
@@ -1040,16 +1091,14 @@ ResultType Object::_Remove(ExprTokenType &aResultToken, ExprTokenType *aParam[],
 		if (min_key_type == SYM_INTEGER)
 		{
 			mKeyOffsetObject -= actual_count_removed;
-			if (max_key_type == SYM_INTEGER)
+			if (aMode == RM_RemoveAt)
 			{
 				// Regardless of whether any fields were removed, min_pos contains the position of the field which
 				// immediately followed the specified range.  Decrement each numeric key from this position onward.
-				IntKeyType logical_count_removed = max_key.i - min_key.i + 1;
 				if (logical_count_removed > 0)
 					for (pos = min_pos; pos < mKeyOffsetObject; ++pos)
 						mFields[pos].key.i -= logical_count_removed;
 			}
-			//else max_key must be "", a special flag caller may pass to indicate keys shouldn't be adjusted.
 		}
 	}
 	if (aParamCount > 1)
@@ -1062,47 +1111,35 @@ ResultType Object::_Remove(ExprTokenType &aResultToken, ExprTokenType *aParam[],
 	return OK;
 }
 
-ResultType Object::_MinIndex(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+ResultType Object::_Remove(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
-	if (aParamCount)
-		return OK;
-
-	if (mKeyOffsetObject) // i.e. there are fields with integer keys
-	{
-		aResultToken.symbol = SYM_INTEGER;
-		aResultToken.value_int64 = (__int64)mFields[0].key.i;
-	}
-	// else no integer keys; leave aResultToken at default, empty string.
-	return OK;
+	return _Remove_impl(aResultToken, aParam, aParamCount, RM_RemoveKey);
 }
 
-ResultType Object::_MaxIndex(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+ResultType Object::_RemoveAt(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
-	if (aParamCount)
-		return OK;
-
-	if (mKeyOffsetObject) // i.e. there are fields with integer keys
-	{
-		aResultToken.symbol = SYM_INTEGER;
-		aResultToken.value_int64 = (__int64)mFields[mKeyOffsetObject - 1].key.i;
-	}
-	// else no integer keys; leave aResultToken at default, empty string.
-	return OK;
+	return _Remove_impl(aResultToken, aParam, aParamCount, RM_RemoveAt);
 }
 
-ResultType Object::_Count(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+ResultType Object::_Pop(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
-	if (aParamCount)
-		return OK;
+	// Unwanted parameters are ignored, as is conventional for dynamic calls.
+	// _Remove_impl relies on aParamCount == 0 for Pop().
+	return _Remove_impl(aResultToken, NULL, 0, RM_Pop);
+}
+
+
+ResultType Object::_Count(ExprTokenType &aResultToken)
+{
 	aResultToken.symbol = SYM_INTEGER;
-	aResultToken.value_int64 = (__int64)mFieldCount;
-	// else no integer keys; leave aResultToken at default, empty string.
+	aResultToken.value_int64 = mFieldCount;
 	return OK;
 }
+
 
 ResultType Object::_GetCapacity(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
-	if (aParamCount == 1)
+	if (aParamCount)
 	{
 		SymbolType key_type;
 		KeyType key;
@@ -1117,7 +1154,7 @@ ResultType Object::_GetCapacity(ExprTokenType &aResultToken, ExprTokenType *aPar
 		}
 		// else wrong type of field; leave aResultToken at default, empty string.
 	}
-	else if (aParamCount == 0)
+	else // aParamCount == 0
 	{
 		aResultToken.symbol = SYM_INTEGER;
 		aResultToken.value_int64 = mFieldCountMax;
@@ -1126,17 +1163,16 @@ ResultType Object::_GetCapacity(ExprTokenType &aResultToken, ExprTokenType *aPar
 }
 
 ResultType Object::_SetCapacity(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
-// _SetCapacity( [field_name,] new_capacity )
+// SetCapacity([field_name,] new_capacity)
 {
-	if ((aParamCount != 1 && aParamCount != 2) || !TokenIsNumeric(*aParam[aParamCount - 1]))
-		// Invalid or missing param(s); return default empty string.
-		return OK;
+	if (!aParamCount || !TokenIsNumeric(*aParam[aParamCount - 1]))
+		return g_script.ScriptError(ERR_PARAM_INVALID);
+
 	__int64 desired_capacity = TokenToInt64(*aParam[aParamCount - 1]);
-	if (aParamCount == 2) // Field name was specified.
+	if (aParamCount >= 2) // Field name was specified.
 	{
 		if (desired_capacity < 0) // Check before sign is dropped.
-			// Bad param.
-			return OK;
+			return g_script.ScriptError(ERR_PARAM2_INVALID);
 		size_t desired_size = (size_t)desired_capacity;
 
 		SymbolType key_type;
@@ -1151,7 +1187,7 @@ ResultType Object::_SetCapacity(ExprTokenType &aResultToken, ExprTokenType *aPar
 			// Field was successfully found or inserted.
 			if (field->symbol != SYM_STRING)
 				// Wrong type of field.
-				return OK;
+				return g_script.ScriptError(ERR_INVALID_VALUE);
 			if (!desired_size)
 			{	// Caller specified zero - empty the field but do not remove it.
 				field->Assign(NULL);
@@ -1175,15 +1211,19 @@ ResultType Object::_SetCapacity(ExprTokenType &aResultToken, ExprTokenType *aPar
 				// Return new size, minus one char reserved for null-terminator.
 				aResultToken.symbol = SYM_INTEGER;
 				aResultToken.value_int64 = _TSIZE(desired_size - 1);
+				return OK;
 			}
-			//else out of memory.
 		}
-		return OK;
+		// Out of memory.  Throw an error, otherwise scripts might assume success and end up corrupting the heap:
+		return g_script.ScriptError(ERR_OUTOFMEM);
 	}
-	IndexType desired_count = (IndexType)desired_capacity;
 	// else aParamCount == 1: set the capacity of this object.
+	IndexType desired_count = (IndexType)desired_capacity;
 	if (desired_count < mFieldCount)
-	{	// It doesn't seem intuitive to allow _SetCapacity to truncate the fields array.
+	{
+		// It doesn't seem intuitive to allow SetCapacity to truncate the fields array, so just reallocate
+		// as necessary to remove any unused space.  Allow negative values since SetCapacity(-1) seems more
+		// intuitive than SetCapacity(0) when the contents aren't being discarded.
 		desired_count = mFieldCount;
 	}
 	if (!desired_count)
@@ -1201,72 +1241,68 @@ ResultType Object::_SetCapacity(ExprTokenType &aResultToken, ExprTokenType *aPar
 	{
 		aResultToken.symbol = SYM_INTEGER;
 		aResultToken.value_int64 = mFieldCountMax;
+		return OK;
 	}
-	return OK;
+	// At this point, failure isn't critical since nothing is being stored yet.  However, it might be easier to
+	// debug if an error is thrown here rather than possibly later, when the array attempts to resize itself to
+	// fit new items.  This also avoids the need for scripts to check if the return value is less than expected:
+	return g_script.ScriptError(ERR_OUTOFMEM);
 }
 
 ResultType Object::_GetAddress(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
-// _GetAddress( key )
+// GetAddress(key)
 {
-	if (aParamCount == 1)
-	{
-		SymbolType key_type;
-		KeyType key;
-		IndexType insert_pos;
-		FieldType *field;
+	if (!aParamCount)
+		return g_script.ScriptError(ERR_TOO_FEW_PARAMS);
+	
+	SymbolType key_type;
+	KeyType key;
+	IndexType insert_pos;
+	FieldType *field;
 
-		if ( (field = FindField(*aParam[0], aResultToken.buf, /*out*/ key_type, /*out*/ key, /*out*/ insert_pos))
-			&& field->symbol == SYM_STRING && field->size )
-		{
-			aResultToken.symbol = SYM_INTEGER;
-			aResultToken.value_int64 = (__int64)field->marker;
-		}
-		// else field has no memory allocated; leave aResultToken at default, empty string.
+	if ( (field = FindField(*aParam[0], aResultToken.buf, /*out*/ key_type, /*out*/ key, /*out*/ insert_pos))
+		&& field->symbol == SYM_STRING && field->size )
+	{
+		aResultToken.symbol = SYM_INTEGER;
+		aResultToken.value_int64 = (__int64)field->marker;
 	}
+	// else field has no memory allocated; leave aResultToken at default, empty string.
 	return OK;
 }
 
 ResultType Object::_NewEnum(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
-	if (aParamCount == 0)
-	{
-		IObject *newenum;
-		if (newenum = new Enumerator(this))
-		{
-			aResultToken.symbol = SYM_OBJECT;
-			aResultToken.object = newenum;
-		}
-	}
+	IObject *newenum = new Enumerator(this);
+	if (!newenum)
+		return g_script.ScriptError(ERR_OUTOFMEM);
+	aResultToken.symbol = SYM_OBJECT;
+	aResultToken.object = newenum;
 	return OK;
 }
 
 ResultType Object::_HasKey(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
-	if (aParamCount == 1)
-	{
-		SymbolType key_type;
-		KeyType key;
-		INT_PTR insert_pos;
-		FieldType *field = FindField(**aParam, aResultToken.buf, key_type, key, insert_pos);
-		aResultToken.symbol = SYM_INTEGER;
-		aResultToken.value_int64 = (field != NULL);
-	}
+	if (!aParamCount)
+		return g_script.ScriptError(ERR_TOO_FEW_PARAMS);
+	
+	SymbolType key_type;
+	KeyType key;
+	INT_PTR insert_pos;
+	FieldType *field = FindField(**aParam, aResultToken.buf, key_type, key, insert_pos);
+	aResultToken.symbol = SYM_INTEGER;
+	aResultToken.value_int64 = (field != NULL);
 	return OK;
 }
 
 ResultType Object::_Clone(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
-	if (aParamCount == 0)
-	{
-		Object *clone = Clone();
-		if (clone)
-		{
-			if (mBase)
-				(clone->mBase = mBase)->AddRef();
-			aResultToken.object = clone;
-			aResultToken.symbol = SYM_OBJECT;
-		}
-	}
+	Object *clone = Clone(aParam, aParamCount);
+	if (!clone)
+		return g_script.ScriptError(ERR_OUTOFMEM);	
+	if (mBase)
+		(clone->mBase = mBase)->AddRef();
+	aResultToken.object = clone;
+	aResultToken.symbol = SYM_OBJECT;
 	return OK;
 }
 

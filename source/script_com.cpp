@@ -1104,10 +1104,8 @@ ResultType ComObject::SafeArrayInvoke(ExprTokenType &aResultToken, int aFlags, E
 	if (IS_INVOKE_CALL)
 	{
 		LPTSTR name = TokenToString(*aParam[0]);
-		if (*name == '_')
-			++name;
 		LONG retval;
-		if (!_tcsicmp(name, _T("NewEnum")))
+		if (!_tcsicmp(name, _T("_NewEnum")))
 		{
 			ComArrayEnum *enm;
 			if (SUCCEEDED(hr = ComArrayEnum::Begin(this, enm)))
@@ -1125,10 +1123,10 @@ ResultType ComObject::SafeArrayInvoke(ExprTokenType &aResultToken, int aFlags, E
 		}
 		else
 		{
-			if (!_tcsicmp(name, _T("MaxIndex")) || !_tcsicmp(name, _T("Count")))
+			if (!_tcsicmp(name, _T("Length")) || !_tcsicmp(name, _T("Count")))
 				hr = SafeArrayGetUBound(psa, aParamCount > 1 ? (UINT)TokenToInt64(*aParam[1]) : 1, &retval);
-			else if (!_tcsicmp(name, _T("MinIndex")))
-				hr = SafeArrayGetLBound(psa, aParamCount > 1 ? (UINT)TokenToInt64(*aParam[1]) : 1, &retval);
+			//else if (!_tcsicmp(name, _T("MinIndex")))
+				//hr = SafeArrayGetLBound(psa, aParamCount > 1 ? (UINT)TokenToInt64(*aParam[1]) : 1, &retval);
 			else
 				hr = DISP_E_UNKNOWNNAME; // Seems slightly better than ignoring the call.
 			if (SUCCEEDED(hr))

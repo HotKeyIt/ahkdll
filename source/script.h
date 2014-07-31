@@ -144,6 +144,7 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_UNRECOGNIZED_DIRECTIVE _T("Unknown directive.")
 #define ERR_EXE_CORRUPTED _T("EXE corrupted")
 #define ERR_INVALID_VALUE _T("Invalid value.")
+#define ERR_PARAM_INVALID _T("Invalid parameter(s).")
 #define ERR_PARAM1_INVALID _T("Parameter #1 invalid.")
 #define ERR_PARAM2_INVALID _T("Parameter #2 invalid.")
 #define ERR_PARAM3_INVALID _T("Parameter #3 invalid.")
@@ -902,7 +903,7 @@ public:
 	double ArgIndexToDouble(int aArgIndex);
 	size_t ArgIndexLength(int aArgIndex);
 
-	ResultType ExpandArgs(ExprTokenType *aResultToken = NULL, VarSizeType aSpaceNeeded = VARSIZE_ERROR, Var *aArgVar[] = NULL);
+	ResultType ExpandArgs(ExprTokenType *aResultTokens = NULL);
 	VarSizeType GetExpandedArgSize(Var *aArgVar[]);
 	LPTSTR ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType *aResultToken
 		, LPTSTR &aTarget, LPTSTR &aDerefBuf, size_t &aDerefBufSize, LPTSTR aArgDeref[], size_t aExtraSize
@@ -2992,18 +2993,10 @@ BIF_DECL(BIF_ObjGetInPlace); // Pseudo-operator.
 BIF_DECL(BIF_ObjNew); // Pseudo-operator.
 BIF_DECL(BIF_ObjIncDec); // Pseudo-operator.
 BIF_DECL(BIF_ObjAddRefRelease);
+BIF_DECL(BIF_ObjRawSet);
 // Built-ins also available as methods -- these are available as functions for use primarily by overridden methods (i.e. where using the built-in methods isn't possible as they're no longer accessible).
-BIF_DECL(BIF_ObjInsert);
-BIF_DECL(BIF_ObjRemove);
-BIF_DECL(BIF_ObjGetCapacity);
-BIF_DECL(BIF_ObjSetCapacity);
-BIF_DECL(BIF_ObjGetAddress);
-BIF_DECL(BIF_ObjMaxIndex);
-BIF_DECL(BIF_ObjMinIndex);
-BIF_DECL(BIF_ObjCount);
+BIF_DECL(BIF_ObjXXX);
 BIF_DECL(BIF_ObjNewEnum);
-BIF_DECL(BIF_ObjHasKey);
-BIF_DECL(BIF_ObjClone);
 
 
 // Advanced file IO interfaces
@@ -3013,9 +3006,6 @@ BIF_DECL(BIF_FileOpen);
 // COM interop
 BIF_DECL(BIF_ComObject);
 BIF_DECL(BIF_ComObjActive);
-BIF_DECL(BIF_ComObjParameter);
-BIF_DECL(BIF_ComObjEnwrap);
-BIF_DECL(BIF_ComObjUnwrap);
 BIF_DECL(BIF_ComObjCreate);
 BIF_DECL(BIF_ComObjGet);
 BIF_DECL(BIF_ComObjDll);

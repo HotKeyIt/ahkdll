@@ -18538,12 +18538,7 @@ IObject *TokenToObject(ExprTokenType &aToken)
 		return aToken.object;
 	
 	if (aToken.symbol == SYM_VAR)
-	{
-		if (aToken.var->HasObject())
-			return aToken.var->Object();
-
-		aToken.var->MaybeWarnUninitialized();
-	}
+		return aToken.var->ToObject();
 
 	return NULL;
 }

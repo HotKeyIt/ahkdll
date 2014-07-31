@@ -177,7 +177,7 @@ public:
 	
 	bool Append(LPTSTR aValue, size_t aValueLength = -1);
 
-	Object *Clone(BOOL aExcludeIntegerKeys = false);
+	Object *Clone(ExprTokenType *aParam[] = NULL, int aParamCount = 0);
 	void ArrayToParams(ExprTokenType *token, ExprTokenType **param_list, int extra_params, ExprTokenType **&aParam, int &aParamCount);
 	ResultType ArrayToStrings(LPTSTR *aStrings, int &aStringCount, int aStringsMax);
 	
@@ -212,19 +212,24 @@ public:
 		return true;
 	}
 	
-	bool SetItem(LPTSTR aKey, ExprTokenType &aValue)
+	bool SetItem(ExprTokenType &aKey, ExprTokenType &aValue)
 	{
-		KeyType key;
-		SymbolType key_type = IsNumeric(aKey, FALSE, FALSE, FALSE); // SYM_STRING or SYM_INTEGER.
-		if (key_type == SYM_INTEGER)
-			key.i = ATOI(aKey);
-		else
-			key.s = aKey;
 		IndexType insert_pos;
-		FieldType *field = FindField(key_type, key, insert_pos);
-		if (  !field && !(field = Insert(key_type, key, insert_pos))  ) // Relies on short-circuit boolean evaluation.
+		TCHAR buf[MAX_NUMBER_SIZE];
+		SymbolType key_type;
+		KeyType key;
+		FieldType *field = FindField(aKey, buf, key_type, key, insert_pos);
+		if (!field && !(field = Insert(key_type, key, insert_pos))) // Relies on short-circuit boolean evaluation.
 			return false;
 		return field->Assign(aValue);
+	}
+
+	bool SetItem(LPTSTR aKey, ExprTokenType &aValue)
+	{
+		ExprTokenType key;
+		key.symbol = SYM_STRING;
+		key.marker = aKey;
+		return SetItem(key, aValue);
 	}
 
 	bool SetItem(LPTSTR aKey, __int64 aValue)
@@ -278,14 +283,21 @@ public:
 	
 	ResultType STDMETHODCALLTYPE Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
 
-	ResultType _Insert(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+	ResultType CallBuiltin(LPCTSTR aMethod, ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+
+	ResultType _InsertAt(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+	ResultType _Push(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+	
+	enum RemoveMode { RM_RemoveKey = 0, RM_RemoveAt, RM_Pop };
+	ResultType _Remove_impl(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount, RemoveMode aMode);
 	ResultType _Remove(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+	ResultType _RemoveAt(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+	ResultType _Pop(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+	
 	ResultType _GetCapacity(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 	ResultType _SetCapacity(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 	ResultType _GetAddress(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
-	ResultType _MaxIndex(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
-	ResultType _MinIndex(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
-	ResultType _Count(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
+	ResultType _Count(ExprTokenType &aResultToken);
 	ResultType _NewEnum(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 	ResultType _HasKey(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 	ResultType _Clone(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
