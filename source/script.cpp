@@ -2501,11 +2501,12 @@ ResultType Script::LoadIncludedText(LPTSTR aScript,LPCTSTR aPathToShow)
 			}
 		} // for() each sub-line (continued line) that composes this line.
 
+process_completed_line:
 		// buf_length can't be -1 (though next_buf_length can) because outer loop's condition prevents it:
 		if (!buf_length) // Done only after the line number increments above so that the physical line number is properly tracked.
 			goto continue_main_loop; // In lieu of "continue", for performance.
 
-process_completed_line:
+
 		// Since neither of the above executed, or they did but didn't "continue",
 		// buf now contains a non-commented line, either by itself or built from
 		// any continuation sections/lines that might have been present.  Also note that
@@ -12330,7 +12331,7 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 		case ACT_BLOCK_BEGIN:
 			if (line->mAttribute == ATTR_TRUE) // This is the opening brace of a function definition.
 				sInFunctionBody = TRUE; // Must be set only for the above condition because functions can of course contain types of blocks other than the function's own block.
-			line = PreparseIfElse(line->mNextLine, UNTIL_BLOCK_END, aLoopType);
+			line = PreparseIfElse(line->mNextLine, UNTIL_BLOCK_END, line->mAttribute ? 0 : aLoopType); // mAttribute usage: don't consider a function's body to be inside the loop, since it can be called from outside.
 			// "line" is now either NULL due to an error, or the location of the END_BLOCK itself.
 			if (line == NULL)
 				return NULL; // Error.
@@ -12338,20 +12339,24 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 		case ACT_BLOCK_END:
 			if (line->mAttribute == ATTR_TRUE) // This is the closing brace of a function definition.
 				sInFunctionBody = FALSE; // Must be set only for the above condition because functions can of course contain types of blocks other than the function's own block.
+#ifdef _DEBUG
 			if (aMode == ONLY_ONE_LINE)
 				 // Syntax error.  The caller would never expect this single-line to be an
 				 // end-block.  UPDATE: I think this is impossible because callers only use
 				 // aMode == ONLY_ONE_LINE when aStartingLine's ActionType is already
 				 // known to be an IF or a BLOCK_BEGIN:
 				return line->PreparseError(_T("Q")); // Placeholder (see above). Formerly "Unexpected end-of-block (single)."
-			if (UNTIL_BLOCK_END)
+			if (aMode == UNTIL_BLOCK_END)
+#endif
 				// Return line rather than line->mNextLine because, if we're at the end of
 				// the script, it's up to the caller to differentiate between that condition
 				// and the condition where NULL is an error indicator.
 				return line;
+#ifdef _DEBUG
 			// Otherwise, we found an end-block we weren't looking for.  This should be
 			// impossible since the block pre-parsing already balanced all the blocks?
 			return line->PreparseError(_T("Q")); // Placeholder (see above). Formerly "Unexpected end-of-block (multi)."
+#endif
 		case ACT_BREAK:
 		case ACT_CONTINUE:
 			if (!aLoopType)
