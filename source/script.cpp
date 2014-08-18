@@ -2842,7 +2842,7 @@ process_completed_line:
 			if (mClassObjectCount)
 			{
 				// Check for assignment first, in case of something like "Static := 123".
-				cp = find_identifier_end(buf);
+				for (cp = buf; IS_IDENTIFIER_CHAR(*cp) || *cp == '.'; ++cp);
 				if (cp > buf) // i.e. buf begins with an identifier.
 				{
 					cp = omit_leading_whitespace(cp);
@@ -3294,11 +3294,10 @@ examine_line:
 		  && (try_cmp = tcslicmp(buf, _T("Try"), action_end - buf))
 		  && (finally_cmp = tcslicmp(buf, _T("Finally"), action_end - buf)))
 		{
-
 			if (!ParseAndAddLine(buf))
 				return FAIL;
 		}
-		else // This line is an ELSE or a TRY or a FINALLY, possibly with another command immediately after it (on the same line).
+		else // This line is an ELSE, a TRY or a FINALLY, possibly with another command immediately after it (on the same line).
 		{
 			// Add the ELSE, TRY or FINALLY directly rather than calling ParseAndAddLine() because that function
 			// would resolve escape sequences throughout the entire length of <buf>, which we
