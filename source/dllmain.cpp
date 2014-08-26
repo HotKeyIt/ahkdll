@@ -261,7 +261,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	{
 		// Store the remaining args in an array and assign it to "A_Args".
 		// If there are no args, assign an empty array so that A_Args[1]
-		// and A_Args.MaxIndex() don't cause an error.
+		// and A_Args.Length() don't cause an error.
 		Object *args = Object::CreateFromArgV((LPTSTR*)(dllargv + i), dllargc - i);
 		if (!args)
 		{

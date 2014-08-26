@@ -12102,7 +12102,7 @@ CStringW **pStr = (CStringW **)
 			// Find out the length of array containing the definition and shift info for parameters
 			IObject *paramobj = ((aParam[1]->symbol == SYM_OBJECT) ? aParam[1]->object : aParam[1]->var->mObject); 
 			oParam.symbol = SYM_STRING;
-			oParam.marker =  _T("MaxIndex");
+			oParam.marker =  _T("Length");
 			paramobj->Invoke(result_token,token,IT_CALL,param,1);
 			oParam.symbol = PURE_INTEGER;
 			// Set the length of array containing shift info for parameters, -1 for definition in first item.
