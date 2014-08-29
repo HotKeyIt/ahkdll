@@ -415,6 +415,7 @@ Script::~Script() // Destructor.
 		g_SoundWasPlayed = 0;
 	}
 #ifndef MINIDLL
+	RemoveVectoredExceptionHandler(g_ExceptionHandler); // Exception handler to remove hooks to avoid system/mouse freeze
 #ifdef ENABLE_KEY_HISTORY_FILE
 	KeyHistoryToFile();  // Close the KeyHistory file if it's open.
 #endif

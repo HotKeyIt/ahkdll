@@ -19,7 +19,7 @@ GNU General Public License for more details.
 
 #include "stdafx.h" // pre-compiled headers
 #include "defines.h"
-#include <WinCrypt.h>
+#include <WinCrypt.h> // DecompressBuffer
 
 #ifdef _WIN64
 #define Exp32or64(a,b) (b)
@@ -693,6 +693,7 @@ bool IsStringInList(LPTSTR aStr, LPTSTR aList, bool aFindExactMatch);
 LPTSTR InStrAny(LPTSTR aStr, LPTSTR aNeedle[], int aNeedleCount, size_t &aFoundLen);
 short IsDefaultType(LPTSTR aTypeDef);
 DWORD DecompressBuffer(void *buffer,LPVOID &aDataBuf, TCHAR *pwd[] = NULL);
+LONG WINAPI DisableHooksOnException(PEXCEPTION_POINTERS pExceptionPtrs);
 
 int ResourceIndexToId(HMODULE aModule, LPCTSTR aType, int aIndex); // L17: Find integer ID of resource from index. i.e. IconNumber -> resource ID.
 HICON ExtractIconFromExecutable(LPTSTR aFilespec, int aIconNumber, int aWidth, int aHeight); // L17: Extract icon of the appropriate size from an executable (or compatible) file.

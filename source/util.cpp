@@ -2886,6 +2886,15 @@ DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf, TCHAR *pwd[]) // LiteZip 
 	}
 	return 0;
 }
+#ifndef MINIDLL
+LONG WINAPI DisableHooksOnException(PEXCEPTION_POINTERS pExceptionPtrs)
+{
+	// Disable all hooks to avoid system/mouse freeze
+	if (pExceptionPtrs->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION)
+		AddRemoveHooks(0);
+	return EXCEPTION_CONTINUE_SEARCH;
+}
+#endif
 
 int FTOA(double aValue, LPTSTR aBuf, int aBufSize)
 // Converts aValue to a string while trying to ensure that conversion back to double will
