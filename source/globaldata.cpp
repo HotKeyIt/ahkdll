@@ -91,6 +91,7 @@ WarnMode g_Warn_UseUnsetGlobal = WARNMODE_OFF;		//
 WarnMode g_Warn_UseEnv = WARNMODE_OFF;				//
 WarnMode g_Warn_LocalSameAsGlobal = WARNMODE_OFF;	//
 #ifndef MINIDLL
+PVOID g_ExceptionHandler = NULL;
 SingleInstanceType g_AllowOnlyOneInstance = ALLOW_MULTI_INSTANCE;
 #endif
 bool g_persistent = false;  // Whether the script should stay running even after the auto-exec section finishes.

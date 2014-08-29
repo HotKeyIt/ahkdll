@@ -781,6 +781,7 @@ bool IsStringInList(LPTSTR aStr, LPTSTR aList, bool aFindExactMatch);
 LPTSTR InStrAny(LPTSTR aStr, LPTSTR aNeedle[], int aNeedleCount, size_t &aFoundLen);
 short IsDefaultType(LPTSTR aTypeDef);
 DWORD DecompressBuffer(void *buffer,LPVOID &aDataBuf, TCHAR *pwd[] = NULL);
+LONG WINAPI DisableHooksOnException(PEXCEPTION_POINTERS pExceptionPtrs);
 
 int ResourceIndexToId(HMODULE aModule, LPCTSTR aType, int aIndex); // L17: Find integer ID of resource from index. i.e. IconNumber -> resource ID.
 HICON ExtractIconFromExecutable(LPTSTR aFilespec, int aIconNumber, int aWidth, int aHeight); // L17: Extract icon of the appropriate size from an executable (or compatible) file.
