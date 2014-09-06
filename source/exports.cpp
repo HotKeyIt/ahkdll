@@ -17,8 +17,7 @@ void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar);
 #define FINALIZE_HOTKEYS \
 	if (Hotkey::sHotkeyCount > HotkeyCount)\
 	{\
-		Line::ToggleSuspendState();\
-		Line::ToggleSuspendState();\
+		Hotkey::ManifestAllHotkeysHotstringsHooks();\
 	}
 #define RESTORE_IF_EXPR \
 	for (int expr_line_index = aHotExprLineCount ; expr_line_index < g_HotExprLineCount; ++expr_line_index)\
@@ -358,6 +357,9 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute)
 	int HotkeyCount = Hotkey::sHotkeyCount;
 	int aHotExprLineCount = g_HotExprLineCount;
 #endif
+#ifdef _USRDLL
+	g_Loading = true;
+#endif
 	BACKUP_G_SCRIPT
 	LPTSTR oldFileSpec = g_script.mFileSpec;
 	g_script.mFileSpec = fileName;
@@ -370,6 +372,9 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute)
 		RESTORE_IF_EXPR
 #endif
 		g_script.mIsReadyToExecute = true; // Set program to be ready for continuing previous script.
+#ifdef _USRDLL
+		g_Loading = false;
+#endif
 		return 0; // LOADING_FAILED cant be used due to PTR return type
 	}	
 	g_script.mFileSpec = oldFileSpec;
@@ -378,6 +383,9 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute)
 	RESTORE_IF_EXPR
 #endif
 	g_script.mIsReadyToExecute = true;
+#ifdef _USRDLL
+	g_Loading = false;
+#endif
 	g->CurrentFunc = aCurrFunc;
 	if (waitexecute != 0)
 	{
@@ -421,6 +429,9 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute)
 #endif
 
 	LPCTSTR aPathToShow = g_script.mCurrLine->mArg ? g_script.mCurrLine->mArg->text : g_script.mFileSpec;
+#ifdef _USRDLL
+	g_Loading = true;
+#endif
 	BACKUP_G_SCRIPT
 	if (g_script.LoadFromText(script,aPathToShow, false) != OK) // || !g_script.PreparseBlocks(oldLastLine->mNextLine)))
 	{
@@ -430,6 +441,9 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute)
 		RESTORE_IF_EXPR
 #endif
 		g_script.mIsReadyToExecute = true;
+#ifdef _USRDLL
+		g_Loading = false;
+#endif
 		return 0;  // LOADING_FAILED cant be used due to PTR return type
 	}
 #ifndef MINIDLL
@@ -437,6 +451,9 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute)
 	RESTORE_IF_EXPR
 #endif
 	g_script.mIsReadyToExecute = true;
+#ifdef _USRDLL
+	g_Loading = false;
+#endif
 	g->CurrentFunc = aCurrFunc;
 	if (waitexecute != 0)
 	{
@@ -478,6 +495,9 @@ EXPORT int ahkExec(LPTSTR script)
 	int HotkeyCount = Hotkey::sHotkeyCount;
 	int aHotExprLineCount = g_HotExprLineCount;
 #endif
+#ifdef _USRDLL
+	g_Loading = true;
+#endif
 	BACKUP_G_SCRIPT
 	int aSourceFileIdx = Line::sSourceFileCount;
 	if ((g_script.LoadFromText(script, NULL, false) != OK)) // || !g_script.PreparseBlocks(oldLastLine->mNextLine))
@@ -488,6 +508,9 @@ EXPORT int ahkExec(LPTSTR script)
 		RESTORE_IF_EXPR
 #endif
 		g_script.mIsReadyToExecute = true;
+#ifdef _USRDLL
+		g_Loading = false;
+#endif
 		return NULL;
 	}
 #ifndef MINIDLL
@@ -495,6 +518,9 @@ EXPORT int ahkExec(LPTSTR script)
 	RESTORE_IF_EXPR
 #endif
 	g_script.mIsReadyToExecute = true;
+#ifdef _USRDLL
+	g_Loading = false;
+#endif
 	g->CurrentFunc = aCurrFunc;
 	Line *aTempLine = g_script.mLastLine;
 	Line *aExecLine = g_script.mFirstLine;

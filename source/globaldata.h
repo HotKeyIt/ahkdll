@@ -25,6 +25,7 @@ GNU General Public License for more details.
 #include "Debugger.h"
 #ifdef _USRDLL
 extern bool g_Reloading;
+extern bool g_Loading;
 #endif
 extern HRSRC g_hResource;		// for compiled AutoHotkey.exe
 extern HINSTANCE g_hInstance;
