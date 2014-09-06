@@ -31,6 +31,7 @@ GNU General Public License for more details.
 HRSRC g_hResource = NULL; // Set by WinMain()	// for compiled AutoHotkey.exe
 #ifdef _USRDLL
 bool g_Reloading = false;
+bool g_Loading = false;
 #endif
 HINSTANCE g_hInstance = NULL; // Set by WinMain().
 HMODULE g_hMemoryModule = NULL; // Set by DllMain() used for COM 

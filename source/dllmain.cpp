@@ -537,7 +537,7 @@ EXPORT int ahkReload(int timeout = 0)
 
 EXPORT int ahkReady() // HotKeyIt check if dll is ready to execute
 {
-	return g_script.mIsReadyToExecute || g_Reloading;
+	return g_script.mIsReadyToExecute || g_Reloading || g_Loading;
 }
 
 #ifndef MINIDLL

@@ -27,6 +27,7 @@ GNU General Public License for more details.
 extern HRSRC g_hResource;		// for compiled AutoHotkey.exe
 #ifdef _USRDLL
 extern bool g_Reloading;
+extern bool g_Loading;
 #endif
 extern HINSTANCE g_hInstance;
 extern HMODULE g_hMemoryModule;
