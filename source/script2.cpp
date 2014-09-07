@@ -14786,6 +14786,7 @@ BIF_DECL(BIF_CriticalObject)
 CriticalObject *CriticalObject::Create(ExprTokenType *aParam[], int aParamCount)
 {
 	IObject *obj = NULL;
+	CriticalObject *criticalref = NULL;
 	if (aParamCount == 0) // No parameters given, create new object
 		obj = Object::Create(0,0);
 	else if (IS_NUMERIC(aParam[0]->symbol) || IS_OPERAND(aParam[0]->symbol))
@@ -14793,23 +14794,27 @@ CriticalObject *CriticalObject::Create(ExprTokenType *aParam[], int aParamCount)
 		obj = (IObject *)TokenToInt64(*aParam[0]); // object reference
 		if (obj < (IObject *)1024) // Prevent some obvious errors.
 			obj = NULL;
-		else
-			obj->AddRef();
+		else if (criticalref = dynamic_cast<CriticalObject *>(obj))
+			obj = (IObject *)criticalref->GetObj();
+		obj->AddRef();
 	}
+
 	if (!obj) // Check if it is an object or var containing object
 	{
 		obj = TokenToObject(*aParam[0]);
 		if (obj < (IObject *)1024) // Prevent some obvious errors.
 			return 0;
-		else
-			obj->AddRef();
+		else if (criticalref = dynamic_cast<CriticalObject *>(obj))
+			obj = (IObject *)criticalref->GetObj();
+		obj->AddRef();
 	}
-
-	// create new critical object and save reference
+	// create new critical object
 	CriticalObject *criticalobj = new CriticalObject();
 	criticalobj->object = obj;
 
-	if (aParamCount < 2)
+	if (criticalref)
+		criticalobj->lpCriticalSection = (LPCRITICAL_SECTION)criticalref->GetCriSec();
+	else if (aParamCount < 2)
 	{	// no Critical Section reference was given, create one
 		criticalobj->lpCriticalSection = (LPCRITICAL_SECTION)malloc(sizeof(CRITICAL_SECTION));
 		InitializeCriticalSection(criticalobj->lpCriticalSection);
@@ -14832,7 +14837,12 @@ bool CriticalObject::Delete()
 	{
 		LeaveCriticalSection(this->lpCriticalSection);
 	}
-	this->object->Release();
+	ULONG refcount = this->object->Release();
+	if (refcount == 0)
+	{
+		DeleteCriticalSection((LPCRITICAL_SECTION)this->GetCriSec());
+		free(this->lpCriticalSection);
+	}
 	return ObjectBase::Delete();
 }
 
