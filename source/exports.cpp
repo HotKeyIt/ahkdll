@@ -17,6 +17,9 @@ void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar);
 #define FINALIZE_HOTKEYS \
 	if (Hotkey::sHotkeyCount > HotkeyCount)\
 	{\
+		Hotstring::SuspendAll(!g_IsSuspended);\
+		Hotkey::ManifestAllHotkeysHotstringsHooks();\
+		Hotstring::SuspendAll(g_IsSuspended);\
 		Hotkey::ManifestAllHotkeysHotstringsHooks();\
 	}
 #define RESTORE_IF_EXPR \
