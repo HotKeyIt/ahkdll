@@ -11700,12 +11700,16 @@ CriticalObject *CriticalObject::Create(ExprTokenType *aParam[], int aParamCount)
 
 bool CriticalObject::Delete()
 {
+	// Avoid deadlocking the process so messages can still be processed
+	 DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
 	// Check if we own the critical section and release it
-	if (TryEnterCriticalSection(this->lpCriticalSection))
-	{
-		LeaveCriticalSection(this->lpCriticalSection);
-	}
+	while (!TryEnterCriticalSection(this->lpCriticalSection))
+		if (g_MainThreadID == aThreadID)
+			MsgSleep(-1);
+		else
+			Sleep(0); 
 	ULONG refcount = this->object->Release();
+	LeaveCriticalSection(this->lpCriticalSection);
 	if (refcount == 0)
 	{
 		DeleteCriticalSection((LPCRITICAL_SECTION)this->GetCriSec());
