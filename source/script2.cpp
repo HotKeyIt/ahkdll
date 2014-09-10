@@ -14796,7 +14796,8 @@ CriticalObject *CriticalObject::Create(ExprTokenType *aParam[], int aParamCount)
 			obj = NULL;
 		else if (criticalref = dynamic_cast<CriticalObject *>(obj))
 			obj = (IObject *)criticalref->GetObj();
-		obj->AddRef();
+		if (obj)
+			obj->AddRef();
 	}
 
 	if (!obj) // Check if it is an object or var containing object
