@@ -14783,31 +14783,35 @@ BIF_DECL(BIF_CriticalObject)
 	}
 }
 
+
 CriticalObject *CriticalObject::Create(ExprTokenType *aParam[], int aParamCount)
 {
 	IObject *obj = NULL;
 	CriticalObject *criticalref = NULL;
 	if (aParamCount == 0) // No parameters given, create new object
 		obj = Object::Create(0,0);
-	else if (IS_NUMERIC(aParam[0]->symbol) || IS_OPERAND(aParam[0]->symbol))
+	else if (obj = TokenToObject(*aParam[0]))
 	{	
-		obj = (IObject *)TokenToInt64(*aParam[0]); // object reference
+		if (criticalref = dynamic_cast<CriticalObject *>(obj))
+			obj = (IObject *)criticalref->GetObj();
+		obj->AddRef();
+	} 
+	else if (obj = (IObject *)TokenToInt64(*aParam[0]))
+	{
 		if (obj < (IObject *)1024) // Prevent some obvious errors.
 			obj = NULL;
 		else if (criticalref = dynamic_cast<CriticalObject *>(obj))
+		{
 			obj = (IObject *)criticalref->GetObj();
-		if (obj)
+			obj->AddRef();
+		}
+		else
 			obj->AddRef();
 	}
-
-	if (!obj) // Check if it is an object or var containing object
-	{
-		obj = TokenToObject(*aParam[0]);
-		if (obj < (IObject *)1024) // Prevent some obvious errors.
-			return 0;
-		else if (criticalref = dynamic_cast<CriticalObject *>(obj))
-			obj = (IObject *)criticalref->GetObj();
-		obj->AddRef();
+	if (!obj)
+	{	
+		g_script.ScriptError(aParamCount == 0 ? ERR_OUTOFMEM : ERR_PARAM1_INVALID );
+		return NULL;
 	}
 	// create new critical object
 	CriticalObject *criticalobj = new CriticalObject();
