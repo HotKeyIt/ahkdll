@@ -11689,7 +11689,7 @@ CriticalObject *CriticalObject::Create(ExprTokenType *aParam[], int aParamCount)
 		criticalobj->lpCriticalSection = (LPCRITICAL_SECTION)criticalref->GetCriSec();
 	else if (aParamCount < 2)
 	{	// no Critical Section reference was given, create one
-		criticalobj->lpCriticalSection = (LPCRITICAL_SECTION)malloc(sizeof(CRITICAL_SECTION));
+		criticalobj->lpCriticalSection = (LPCRITICAL_SECTION)GlobalAlloc(0, sizeof(CRITICAL_SECTION));
 		InitializeCriticalSection(criticalobj->lpCriticalSection);
 	}
 	else
@@ -11714,13 +11714,8 @@ bool CriticalObject::Delete()
 			MsgSleep(-1);
 		else
 			Sleep(0); 
-	ULONG refcount = this->object->Release();
+	this->object->Release();
 	LeaveCriticalSection(this->lpCriticalSection);
-	if (refcount == 0)
-	{
-		DeleteCriticalSection((LPCRITICAL_SECTION)this->GetCriSec());
-		free(this->lpCriticalSection);
-	}
 	return ObjectBase::Delete();
 }
 
