@@ -40,7 +40,7 @@ DWORD g_HookThreadID; // Not initialized by design because 0 itself might be a v
 ATOM g_ClassRegistered = 0;
 CRITICAL_SECTION g_CriticalRegExCache;
 CRITICAL_SECTION g_CriticalHeapBlocks;
-
+CRITICAL_SECTION g_CriticalAhkFunction;
 UINT g_DefaultScriptCodepage = CP_ACP;
 
 bool g_ReturnNotExit = false;					// for ahkExec/addScript/addFile

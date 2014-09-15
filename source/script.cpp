@@ -421,6 +421,7 @@ Script::~Script() // Destructor.
 #endif
 #endif // MINIDLL
 	DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
+	DeleteCriticalSection(&g_CriticalAhkFunction); // g_CriticalRegExCache is used elsewhere for thread-safety.
 	OleUninitialize();
 }
 
@@ -772,6 +773,7 @@ void Script::Destroy()
 #endif
 	SimpleHeap::DeleteAll();
 	DeleteCriticalSection(&g_CriticalHeapBlocks); // g_CriticalHeapBlocks is used in simpleheap for thread-safety.
+	DeleteCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
 	mIsReadyToExecute = false;
 	ZeroMemory(&g_script,sizeof(g_script));
 #ifndef MINIDLL
