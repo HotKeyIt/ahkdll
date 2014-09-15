@@ -41,7 +41,6 @@ ATOM g_ClassRegistered = 0;
 ATOM g_ClassSplashRegistered = 0;
 CRITICAL_SECTION g_CriticalRegExCache;
 CRITICAL_SECTION g_CriticalHeapBlocks;
-CRITICAL_SECTION g_CriticalAhkFunction;
 
 UINT g_DefaultScriptCodepage = CP_ACP;
 
