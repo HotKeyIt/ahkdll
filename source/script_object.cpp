@@ -351,8 +351,9 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 {
 	SymbolType key_type;
 	KeyType key;
-    FieldType *field;
+    FieldType *field, *prop_field;
 	IndexType insert_pos;
+	Property *prop = NULL; // Set default.
 
 	// If this is some object's base and is being invoked in that capacity, call
 	//	__Get/__Set/__Call as defined in this base object before searching further.
@@ -382,23 +383,64 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 
 	if (IS_INVOKE_SET)
 	{
-		// Prior validation of ObjSet() param count ensures the result won't be negative:
+		// Due to the way expression parsing works, the result should never be negative
+		// (and any direct callers of Invoke must always pass aParamCount >= 1):
 		--param_count_excluding_rvalue;
-		
-		if (IS_INVOKE_META)
-		{
-			if (param_count_excluding_rvalue == 1)
-				// Prevent below from searching for or setting a field, since this is a base object of aThisToken.
-				// Relies on mBase->Invoke recursion using aParamCount and not param_count_excluding_rvalue.
-				param_count_excluding_rvalue = 0;
-			//else: Allow SET to operate on a field of an object stored in the target's base.
-			//		For instance, x[y,z]:=w may operate on x[y][z], x.base[y][z], x[y].base[z], etc.
-		}
 	}
 	
 	if (param_count_excluding_rvalue)
 	{
 		field = FindField(*aParam[0], aResultToken.buf, /*out*/ key_type, /*out*/ key, /*out*/ insert_pos);
+
+		// There used to be a check prior to the FindField() call above which avoided searching
+		// for base[field] when performing an assignment.  As an unintended side-effect, it was
+		// possible for base.base.__Set to be called even if base[field] exists, which is
+		// inconsistent with __Get and __Call.  That check was removed for v1.1.16 in order
+		// to implement property accessors, and a check was added below to retain the old
+		// behaviour for compatibility -- this should be changed in v2.
+
+		static Property sProperty;
+
+		// v1.1.16: Handle class property accessors:
+		if (field && field->symbol == SYM_OBJECT && *(void **)field->object == *(void **)&sProperty)
+		{
+			// The "type check" above is used for speed.  Simple benchmarks of x[1] where x := [[]]
+			// shows this check to not affect performance, whereas dynamic_cast<> hurt performance by
+			// about 25% and typeid()== by about 20%.  We can safely assume that the vtable pointer is
+			// stored at the beginning of the object even though it isn't guaranteed by the C++ standard,
+			// since COM fundamentally requires it:  http://msdn.microsoft.com/en-us/library/dd757710
+			prop = (Property *)field->object;
+			prop_field = field;
+			if (IS_INVOKE_SET ? prop->CanSet() : prop->CanGet())
+			{
+				if (aParamCount > 2 && IS_INVOKE_SET)
+				{
+					// Do some shuffling to put value before the other parameters.  This relies on above
+					// having verified that we're handling this invocation; otherwise the parameters would
+					// need to be swapped back later in case they're passed to a base's meta-function.
+					ExprTokenType *value = aParam[aParamCount - 1];
+					for (int i = aParamCount - 1; i > 1; --i)
+						aParam[i] = aParam[i - 1];
+					aParam[1] = value; // Corresponds to the setter's hidden "value" parameter.
+				}
+				ExprTokenType *name_token = aParam[0];
+				aParam[0] = &aThisToken; // For the hidden "this" parameter in the getter/setter.
+				// Pass IF_FUNCOBJ so that it'll pass all parameters to the getter/setter.
+				// For a functor Object, we would need to pass a token representing "this" Property,
+				// but since Property::Invoke doesn't use it, we pass our aThisToken for simplicity.
+				ResultType result = prop->Invoke(aResultToken, aThisToken, aFlags | IF_FUNCOBJ, aParam, aParamCount);
+				aParam[0] = name_token;
+				return result == EARLY_RETURN ? OK : result;
+			}
+			// The property was missing get/set (whichever this invocation is), so continue as
+			// if the property itself wasn't defined.
+			field = NULL;
+		}
+		else if (IS_INVOKE_META && IS_INVOKE_SET && param_count_excluding_rvalue == 1) // v1.1.16: For compatibility with earlier versions - see above.
+		{
+			field = NULL;
+			param_count_excluding_rvalue = 0;
+		}
 	}
 	else
 	{
@@ -418,19 +460,24 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 			// find and execute a specific meta-function (__new or __delete) but don't want any base
 			// object to invoke __call.  So if this is already a meta-invocation, don't change aFlags.
 			ResultType r = mBase->Invoke(aResultToken, aThisToken, aFlags | (IS_INVOKE_META ? 0 : IF_META), aParam, aParamCount);
-			if (r != INVOKE_NOT_HANDLED)
+			if (r != INVOKE_NOT_HANDLED // Base handled it.
+				|| !param_count_excluding_rvalue) // Nothing left to do in this case.
 				return r;
 
 			// Since the above may have inserted or removed fields (including the specified one),
 			// insert_pos may no longer be correct or safe.  Updating field also allows a meta-function
 			// to initialize a field and allow processing to continue as if it already existed.
-			if (param_count_excluding_rvalue)
-				field = FindField(key_type, key, /*out*/ insert_pos);
+			field = FindField(key_type, key, /*out*/ insert_pos);
+			if (prop)
+				if (field && field->symbol == SYM_OBJECT && field->object == prop)
+					prop_field = field; // Must update this pointer.
+				else
+					prop = NULL; // field was reassigned or removed, so ignore the property.
 		}
 
 		// Since the base object didn't handle this op, check for built-in properties/methods.
 		// This must apply only to the original target object (aThisToken), not one of its bases.
-		if (!IS_INVOKE_META && key_type == SYM_STRING)
+		if (!IS_INVOKE_META && key_type == SYM_STRING && !field) // v1.1.16: Check field again so if __Call sets a field, it gets called.
 		{
 			//
 			// BUILT-IN METHODS
@@ -547,8 +594,11 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 				Object *new_obj = new Object();
 				if (new_obj)
 				{
-					if ( field = Insert(key_type, key, insert_pos) )
-					{	// Don't do field->Assign() since it would do AddRef() and we would need to counter with Release().
+					if ( field = prop ? prop_field : Insert(key_type, key, insert_pos) )
+					{
+						if (prop) // Otherwise, field is already empty.
+							prop->Release();
+						// Don't do field->Assign() since it would do AddRef() and we would need to counter with Release().
 						field->symbol = SYM_OBJECT;
 						field->object = obj = new_obj;
 					}
@@ -581,7 +631,8 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 		{
 			ExprTokenType &value_param = *aParam[1];
 			// L34: Assigning an empty string no longer removes the field.
-			if ( (field || (field = Insert(key_type, key, insert_pos))) && field->Assign(value_param) )
+			if ( (field || (field = prop ? prop_field : Insert(key_type, key, insert_pos)))
+				&& field->Assign(value_param) )
 			{
 				if (field->symbol == SYM_OPERAND)
 				{
@@ -733,8 +784,12 @@ void Object::EndClassDefinition()
 	// value (currently any integer, since static initializers haven't been evaluated yet).
 	for (IndexType i = mFieldCount - 1; i >= 0; --i)
 		if (mFields[i].symbol == SYM_INTEGER)
+		{
+			if (i >= mKeyOffsetString) // Must be checked since key can be an integer, such as for "0 := (expr)".
+				free(mFields[i].key.s);
 			if (i < --mFieldCount)
 				memmove(mFields + i, mFields + i + 1, (mFieldCount - i) * sizeof(FieldType));
+		}
 }
 	
 
@@ -1232,7 +1287,7 @@ bool Object::FieldType::Assign(LPTSTR str, size_t len, bool exact_size)
 			else if (new_size < (1600 * 1024))  // 160 to 1600 KB -> 16 KB extra
 				new_size += (16 * 1024);
 			else if (new_size < (6400 * 1024)) // 1600 to 6400 KB -> 1% extra
-				new_size = (size_t)(new_size * 1.01);
+				new_size += (new_size / 100);
 			else  // 6400 KB or more: Cap the extra margin at some reasonable compromise of speed vs. mem usage: 64 KB
 				new_size += (64 * 1024);
 		}
@@ -1505,6 +1560,69 @@ Object::FieldType *Object::Insert(SymbolType key_type, KeyType key, IndexType at
 	field.symbol = SYM_OPERAND;
 
 	return &field;
+}
+
+
+//
+// Property: Invoked when a derived object gets/sets the corresponding key.
+//
+
+ResultType STDMETHODCALLTYPE Property::Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount)
+{
+	Func **member;
+
+	if (aFlags & IF_FUNCOBJ)
+	{
+		// Use mGet even if IS_INVOKE_CALL, for symmetry:
+		//   obj.prop()         ; Get
+		//   obj.prop() := val  ; Set (translation is performed by the preparser).
+		member = IS_INVOKE_SET ? &mSet : &mGet;
+	}
+	else
+	{
+		if (!aParamCount)
+			return INVOKE_NOT_HANDLED;
+
+		LPTSTR name = TokenToString(*aParam[0]);
+		
+		if (!_tcsicmp(name, _T("Get")))
+		{
+			member = &mGet;
+		}
+		else if (!_tcsicmp(name, _T("Set")))
+		{
+			member = &mSet;
+		}
+		else
+			return INVOKE_NOT_HANDLED;
+		// ALL CODE PATHS ABOVE MUST RETURN OR SET member.
+
+		if (!IS_INVOKE_CALL)
+		{
+			if (IS_INVOKE_SET)
+			{
+				if (aParamCount != 2)
+					return OK;
+				// Allow changing the GET/SET function, since it's simple and seems harmless.
+				*member = TokenToFunc(*aParam[1]); // Can be NULL.
+				--aParamCount;
+			}
+			if (*member && aParamCount == 1)
+			{
+				aResultToken.symbol = SYM_OBJECT;
+				aResultToken.object = *member;
+			}
+			return OK;
+		}
+		// Since above did not return, we're explicitly calling Get or Set.
+		++aParam;      // Omit method name.
+		--aParamCount; // 
+	}
+	// Since above did not return, member must have been set to either &mGet or &mSet.
+	// However, their actual values might be NULL:
+	if (!*member)
+		return INVOKE_NOT_HANDLED;
+	return CallFunc(**member, aResultToken, aParam, aParamCount);
 }
 
 
