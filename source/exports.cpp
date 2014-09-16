@@ -288,8 +288,7 @@ EXPORT int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR par
 			for (int i = 0;aFunc->mParamCount > i && aParamsCount>i;i++)
 			{
 				aFuncAndToken.param[i] = &aFuncAndToken.params[i];
-				aFuncAndToken.param[i]->symbol = SYM_STRING;
-				aFuncAndToken.params[i].marker = *params[i]; // Assign parameters
+				aFuncAndToken.param[i]->SetValue(*params[i]); // Assign parameters
 			}
 			aFuncAndToken.mToken.symbol = SYM_INTEGER;
 			LPTSTR new_buf = (LPTSTR)realloc(aFuncAndToken.buf,MAX_NUMBER_SIZE * sizeof(TCHAR));
@@ -303,7 +302,7 @@ EXPORT int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR par
 			aFuncAndToken.mToken.buf = aFuncAndToken.buf;
 			aFuncAndToken.mToken.marker = aFunc->mName;
 			
-			aFunc->mBIF(aResult,aFuncAndToken.mToken,aFuncAndToken.param,aParamsCount);
+			aFunc->mBIF(aFuncAndToken.mToken,aFuncAndToken.param,aParamsCount);
 			LeaveCriticalSection(&g_CriticalAhkFunction);
 			return 0;
 		}
@@ -331,7 +330,6 @@ EXPORT int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR par
 			for (int i = 0;(aFunc->mParamCount > i || aFunc->mIsVariadic) && aParamsCount>i;i++)
 			{
 				aFuncAndToken.param[i] = &aFuncAndToken.params[i];
-				aFuncAndToken.param[i]->symbol = SYM_STRING;
 				new_buf = (LPTSTR)realloc(aFuncAndToken.param[i]->marker,(_tcslen(*params[i])+1)*sizeof(TCHAR));
 				if (!new_buf)
 				{
@@ -339,8 +337,8 @@ EXPORT int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR par
 					LeaveCriticalSection(&g_CriticalAhkFunction);
 					return -1;
 				}
-				aFuncAndToken.param[i]->marker = new_buf;
-				_tcscpy(aFuncAndToken.param[i]->marker,*params[i]); // Assign parameters
+				_tcscpy(new_buf,*params[i]); // Assign parameters
+				aFuncAndToken.param[i]->SetValue(new_buf);
 			}
 			aFuncAndToken.mFunc = aFunc ;
 			PostMessage(g_hWnd, AHK_EXECUTE_FUNCTION_DLL, (WPARAM)&aFuncAndToken,NULL);
@@ -550,37 +548,6 @@ EXPORT int ahkExec(LPTSTR script)
 	return OK;
 }
 #endif // AUTOHOTKEYSC
-LPTSTR FuncTokenToString(ExprTokenType &aToken, LPTSTR aBuf)
-// Supports Type() VAR_NORMAL and VAR-CLIPBOARD.
-// Returns "" on failure to simplify logic in callers.  Otherwise, it returns either aBuf (if aBuf was needed
-// for the conversion) or the token's own string.  aBuf may be NULL, in which case the caller presumably knows
-// that this token is SYM_STRING or SYM_OPERAND (or caller wants "" back for anything other than those).
-// If aBuf is not NULL, caller has ensured that aBuf is at least MAX_NUMBER_SIZE in size.
-{
-	switch (aToken.symbol)
-	{
-	case SYM_VAR: // Caller has ensured that any SYM_VAR's Type() is VAR_NORMAL.
-		return aToken.var->Contents(); // Contents() vs. mContents to support VAR_CLIPBOARD, and in case mContents needs to be updated by Contents().
-	case SYM_STRING:
-		return aToken.marker;
-	case SYM_INTEGER:
-		if (aBuf)
-			return ITOA64(aToken.value_int64, aBuf);
-		//else continue on to return the default at the bottom.
-		break;
-	case SYM_FLOAT:
-		if (aBuf)
-		{
-			FTOA(aToken.value_double, aBuf, MAX_NUMBER_SIZE);
-			return aBuf;
-		}
-		//else continue on to return the default at the bottom.
-		break;
-	//case SYM_OBJECT: // L31: Treat objects as empty strings (or TRUE where appropriate).
-	//default: // Not an operand: continue on to return the default at the bottom.
-	}
-	return _T("");
-}
 
 EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10)
 {
@@ -620,8 +587,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 			for (int i = 0;aFunc->mParamCount > i && aParamsCount>i;i++)
 			{
 				aFuncAndToken.param[i] = &aFuncAndToken.params[i];
-				aFuncAndToken.param[i]->symbol = SYM_STRING;
-				aFuncAndToken.params[i].marker = *params[i]; // Assign parameters
+				aFuncAndToken.param[i]->SetValue(*params[i]); // Assign parameters
 			}
 			aFuncAndToken.mToken.symbol = SYM_INTEGER;
 			LPTSTR new_buf = (LPTSTR)realloc(aFuncAndToken.buf,MAX_NUMBER_SIZE * sizeof(TCHAR));
@@ -635,7 +601,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 			aFuncAndToken.mToken.buf = aFuncAndToken.buf;
 			aFuncAndToken.mToken.marker = aFunc->mName;
 			
-			aFunc->mBIF(aResult,aFuncAndToken.mToken,aFuncAndToken.param,aParamsCount);
+			aFunc->mBIF(aFuncAndToken.mToken,aFuncAndToken.param,aParamsCount);
 			
 			switch (aFuncAndToken.mToken.symbol)
 			{
@@ -734,7 +700,6 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 			for (int i = 0;(aFunc->mParamCount > i || aFunc->mIsVariadic) && aParamsCount>i;i++)
 			{
 				aFuncAndToken.param[i] = &aFuncAndToken.params[i];
-				aFuncAndToken.param[i]->symbol = SYM_STRING;
 				new_buf = (LPTSTR)realloc(aFuncAndToken.param[i]->marker,(_tcslen(*params[i])+1)*sizeof(TCHAR));
 				if (!new_buf)
 				{
@@ -742,8 +707,8 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 					LeaveCriticalSection(&g_CriticalAhkFunction);
 					return _T("");
 				}
-				aFuncAndToken.param[i]->marker = new_buf;
-				_tcscpy(aFuncAndToken.param[i]->marker,*params[i]); // Assign parameters
+				_tcscpy(new_buf,*params[i]); // Assign parameters
+				aFuncAndToken.param[i]->SetValue(new_buf);
 			}
 			aFuncAndToken.mFunc = aFunc ;
 			SendMessage(g_hWnd, AHK_EXECUTE_FUNCTION_DLL, (WPARAM)&aFuncAndToken,NULL);
@@ -759,7 +724,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 void callFuncDll(FuncAndToken *aFuncAndToken)
 {
  	Func &func =  *(aFuncAndToken->mFunc); 
-	ExprTokenType & aResultToken = aFuncAndToken->mToken ;
+	ResultToken & aResultToken = aFuncAndToken->mToken ;
 	// Func &func = *(Func *)g_script.mTempFunc ;
 	if (!INTERRUPTIBLE_IN_EMERGENCY)
 		return;
@@ -793,44 +758,44 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 	//for (int aParamCount = 0;func.mParamCount > aParamCount && aFuncAndToken->mParamCount > aParamCount;aParamCount++)
 	//	func.mParam[aParamCount].var->AssignString(aFuncAndToken->param[aParamCount]);
 
-		DEBUGGER_STACK_PUSH(func.mJumpToLine, func.mName)
-	ResultType aResult;
-	FuncCallData func_call;
+	DEBUGGER_STACK_PUSH(func.mJumpToLine, func.mName)
+	FuncResult func_call;
+	// func_call.CopyExprFrom(aResultToken);
 	// ExprTokenType &aResultToken = aResultToken_to_return ;
-	bool result = func.Call(func_call,aResult,aResultToken,aFuncAndToken->param,(int) aFuncAndToken->mParamCount,false); // Call the UDF.
+	bool result = func.Call(func_call,aFuncAndToken->param,(int) aFuncAndToken->mParamCount,false); // Call the UDF.
 
 	DEBUGGER_STACK_POP()
 	LPTSTR new_buf;
 	if (result)
 	{
-		switch (aFuncAndToken->mToken.symbol)
+		switch (func_call.symbol)
 		{
 		case SYM_VAR: // Caller has ensured that any SYM_VAR's Type() is VAR_NORMAL.
-			if (_tcslen(aFuncAndToken->mToken.var->Contents()))
+			if (_tcslen(func_call.var->Contents()))
 			{
-				new_buf = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,(_tcslen(aFuncAndToken->mToken.var->Contents()) + 1)*sizeof(TCHAR));
+				new_buf = (LPTSTR)realloc((LPTSTR)aFuncAndToken->result_to_return_dll, (_tcslen(func_call.var->Contents()) + 1)*sizeof(TCHAR));
 				if (!new_buf)
 				{
 					g_script.ScriptError(ERR_OUTOFMEM,func.mName);
 					return;
 				}
 				aFuncAndToken->result_to_return_dll = new_buf;
-				_tcscpy(aFuncAndToken->result_to_return_dll,aFuncAndToken->mToken.var->Contents()); // Contents() vs. mContents to support VAR_CLIPBOARD, and in case mContents needs to be updated by Contents().
+				_tcscpy(aFuncAndToken->result_to_return_dll, func_call.var->Contents()); // Contents() vs. mContents to support VAR_CLIPBOARD, and in case mContents needs to be updated by Contents().
 			}
 			else if (aFuncAndToken->result_to_return_dll)
 				*aFuncAndToken->result_to_return_dll = '\0';
 			break;
 		case SYM_STRING:
-			if (_tcslen(aFuncAndToken->mToken.marker))
+			if (_tcslen(func_call.marker))
 			{
-				new_buf = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,(_tcslen(aFuncAndToken->mToken.marker) + 1)*sizeof(TCHAR));
+				new_buf = (LPTSTR)realloc((LPTSTR)aFuncAndToken->result_to_return_dll, (_tcslen(func_call.marker) + 1)*sizeof(TCHAR));
 				if (!new_buf)
 				{
 					g_script.ScriptError(ERR_OUTOFMEM,func.mName);
 					return;
 				}
 				aFuncAndToken->result_to_return_dll = new_buf;
-				_tcscpy(aFuncAndToken->result_to_return_dll,aFuncAndToken->mToken.marker);
+				_tcscpy(aFuncAndToken->result_to_return_dll, func_call.marker);
 			}
 			else if (aFuncAndToken->result_to_return_dll)
 				*aFuncAndToken->result_to_return_dll = '\0';
@@ -843,7 +808,7 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 				return;
 			}
 			aFuncAndToken->result_to_return_dll = new_buf;
-			ITOA64(aFuncAndToken->mToken.value_int64, aFuncAndToken->result_to_return_dll);
+			ITOA64(func_call.value_int64, aFuncAndToken->result_to_return_dll);
 			break;
 		case SYM_FLOAT:
 			new_buf = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,MAX_INTEGER_LENGTH);
@@ -853,7 +818,7 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 				return;
 			}
 			result_to_return_dll = new_buf;
-			FTOA(aFuncAndToken->mToken.value_double, aFuncAndToken->result_to_return_dll, MAX_NUMBER_SIZE);
+			FTOA(func_call.value_double, aFuncAndToken->result_to_return_dll, MAX_NUMBER_SIZE);
 			break;
 		//case SYM_OBJECT: // L31: Treat objects as empty strings (or TRUE where appropriate).
 		default: // Not an operand: continue on to return the default at the bottom.
@@ -892,7 +857,7 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 		{
 			ResultType aResult = OK;
 			EnterCriticalSection(&g_CriticalAhkFunction);
-			ExprTokenType aResultToken;
+			ResultToken aResultToken;
 			ExprTokenType **aParam = (ExprTokenType**)_alloca(sizeof(ExprTokenType)*10);
 			if (!aParam)
 			{
@@ -926,13 +891,13 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 				aParam[i]->var->mAttrib = 0;
 				aParam[i]->var->mByteCapacity = 0;
 				aParam[i]->var->mHowAllocated = ALLOC_MALLOC;
-
+				
 				AssignVariant(*aParam[i]->var, *variants[i],false);
 			}
 			aResultToken.symbol = SYM_INTEGER;
 			aResultToken.marker = aFunc->mName;
 			
-			aFunc->mBIF(aResult,aResultToken,aParam,aParamsCount);
+			aFunc->mBIF(aResultToken,aParam,aParamsCount);
 
 			// free all variables in case memory was allocated
 			for (int i = 0;i < aParamsCount;i++)
@@ -977,7 +942,7 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 void callFuncDllVariant(FuncAndToken *aFuncAndToken)
 {
  	Func &func =  *(aFuncAndToken->mFunc); 
-	ExprTokenType & aResultToken = aFuncAndToken->mToken ;
+	ResultToken & aResultToken = aFuncAndToken->mToken ;
 	// Func &func = *(Func *)g_script.mTempFunc ;
 	if (!INTERRUPTIBLE_IN_EMERGENCY)
 		return;

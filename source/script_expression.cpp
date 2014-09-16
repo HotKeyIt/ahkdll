@@ -50,7 +50,7 @@ GNU General Public License for more details.
 //    DWORD stack
 //    _asm mov stack, esp
 //    MsgBox(stack);
-LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType *aResultToken
+LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *aResultToken
 		, LPTSTR &aTarget, LPTSTR &aDerefBuf, size_t &aDerefBufSize, LPTSTR aArgDeref[], size_t aExtraSize
 		, Var **aArgVar)
 // Caller should ignore aResult unless this function returns NULL.
@@ -69,16 +69,16 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 {
 	LPTSTR target = aTarget; // "target" is used to track our usage (current position) within the aTarget buffer.
 
-	// The following must be defined early so that mem_count is initialized and the array is guaranteed to be
+	// The following must be defined early so that to_free_count is initialized and the array is guaranteed to be
 	// "in scope" in case of early "goto" (goto substantially boosts performance and reduces code size here).
 	#define MAX_EXPR_MEM_ITEMS 256 // v1.0.47.01: Raised from 100 because a line consisting entirely of concat operators can exceed it.  However, there's probably not much point to going much above MAX_TOKENS/2 because then it would reach the MAX_TOKENS limit first.
-	LPTSTR mem[MAX_EXPR_MEM_ITEMS]; // No init necessary.  In most cases, it will never be used.
-	int mem_count = 0; // The actual number of items in use in the above array.
+	ExprTokenType *to_free[MAX_EXPR_MEM_ITEMS]; // No init necessary.  In many cases, it will never be used.
+	int to_free_count = 0; // The actual number of items in use in the above array.
 	LPTSTR result_to_return = _T(""); // By contrast, NULL is used to tell the caller to abort the current thread.  That isn't done for normal syntax errors, just critical conditions such as out-of-memory.
 	Var *output_var = (mActionType == ACT_ASSIGNEXPR && aArgIndex == 1) ? *aArgVar : NULL; // Resolve early because it's similar in usage/scope to the above.  Plus MUST be resolved prior to calling any script-functions since they could change the values in sArgVar[].
 
 	ExprTokenType *stack[MAX_TOKENS];
-	int stack_count = 0, high_water_mark = 0; // L31: high_water_mark is used to simplify object management.
+	int stack_count = 0;
 	ExprTokenType *&postfix = mArg[aArgIndex].postfix;
 
 	///////////////////////////////
@@ -109,7 +109,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 	// expression due to MAX_TOKENS (probably around MAX_TOKENS / 3).
 	#define EXPR_SMALL_MEM_LIMIT 4097 // The maximum size allowed for an item to qualify for alloca.
 	#define EXPR_ALLOCA_LIMIT 40000  // The maximum amount of alloca memory for all items.  v1.0.45: An extra precaution against stack stress in extreme/theoretical cases.
-	#define EXPR_IS_DONE (!stack_count && this_postfix[1].symbol == SYM_INVALID) // True if we've used up the last of the operators & operands.
+	#define EXPR_IS_DONE (!stack_count && this_postfix[1].symbol == SYM_INVALID) // True if we've used up the last of the operators & operands.  Non-zero stack_count combined with SYM_INVALID would indicate an error (an exception will be thrown later, so don't take any shortcuts).
 
 	// For each item in the postfix array: if it's an operand, push it onto stack; if it's an operator or
 	// function call, evaluate it and push its result onto the stack.  SYM_INVALID is the special symbol
@@ -126,7 +126,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 		// 2) Using a particular variable very frequently might help compiler to optimize that variable to
 		//    generate faster code.
 		ExprTokenType &this_token = *(ExprTokenType *)_alloca(sizeof(ExprTokenType)); // Saves a lot of stack space, and seems to perform just as well as something like the following (at the cost of ~82 byte increase in OBJ code size): ExprTokenType &this_token = new_token[new_token_count++]  // array size MAX_TOKENS
-		this_token = *this_postfix; // Struct copy. See comment section above.
+		this_token.CopyExprFrom(*this_postfix); // See comment section above.
 
 		// At this stage, operands in the postfix array should be SYM_STRING, SYM_INTEGER, SYM_FLOAT or SYM_DYNAMIC.
 		// But all are checked since that operation is just as fast:
@@ -140,8 +140,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 					if (!stack_count) // Prevent stack underflow.
 						goto abort_with_exception;
 					ExprTokenType &right = *STACK_POP;
-					right_string = TokenToString(right, right_buf);
-					right_length = EXPR_TOKEN_LENGTH((&right), right_string);
+					right_string = TokenToString(right, right_buf, &right_length);
 					// Do some basic validation to ensure a helpful error message is displayed on failure.
 					if (right_length == 0)
 					{
@@ -182,8 +181,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 						// This also ensures that the var's content is not transferred to aResultToken, which means
 						// that PerformLoopFor() is not required to check for/release an object in args 0 and 1.
 						aArgVar[aArgIndex] = temp_var;
-						result_to_return = _T(""); // No need to dereference it; this value won't be used but must be non-NULL.
-						goto normal_end_skip_output_var;
+						goto normal_end_skip_output_var; // result_to_return is left at its default of "", though its value doesn't matter as long as it isn't NULL.
 					}
 					this_token.var = temp_var;
 				}
@@ -198,14 +196,12 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 				case VAR_VIRTUAL:
 					if (this_token.var->mVV->Get == BIV_LoopIndex) // v1.0.48.01: Improve performance of A_Index by treating it as an integer rather than a string in expressions (avoids conversions to/from strings).
 					{
-						this_token.value_int64 = g->mLoopIteration;
-						this_token.symbol = SYM_INTEGER;
+						this_token.SetValue(g->mLoopIteration);
 						goto push_this_token;
 					}
 					if (this_token.var->mVV->Get == BIV_EventInfo) // v1.0.48.02: A_EventInfo is used often enough in performance-sensitive numeric contexts to seem worth special treatment like A_Index; e.g. LV_GetText(RowText, A_EventInfo) or RegisterCallback()'s A_EventInfo.
 					{
-						this_token.value_int64 = g->EventInfo;
-						this_token.symbol = SYM_INTEGER;
+						this_token.SetValue(g->EventInfo);
 						goto push_this_token;
 					}
 					// ABOVE: Goto's and simple assignments (like the SYM_INTEGER ones above) are only a few
@@ -234,8 +230,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 				result_size = this_token.var->Get() + 1;
 				if (result_size == 1)
 				{
-					this_token.marker = _T("");
-					this_token.symbol = SYM_STRING;
+					this_token.SetValue(_T(""), 0);
 					goto push_this_token;
 				}
 				// Otherwise, it's a built-in variable which is not empty. Need some memory to store it.
@@ -255,18 +250,17 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 				}
 				else // Need to create some new persistent memory for our temporary use.
 				{
-					if (mem_count == MAX_EXPR_MEM_ITEMS // No more slots left (should be nearly impossible).
-						|| !(mem[mem_count] = tmalloc(result_size)))
+					if (to_free_count == MAX_EXPR_MEM_ITEMS // No more slots left (should be nearly impossible).
+						|| !(result = tmalloc(result_size)))
 					{
 						LineError(ERR_OUTOFMEM, FAIL, this_token.var->mName);
 						goto abort;
 					}
-					// Point result to its new, more persistent location:
-					result = mem[mem_count];
-					++mem_count; // Must be done last.
+					to_free[to_free_count++] = &this_token;
 				}
-				this_token.var->Get(result); // MUST USE "result" TO AVOID OVERWRITING MARKER/VAR UNION.
+				result_length = this_token.var->Get(result);
 				this_token.marker = result;  // Must be done after above because marker and var overlap in union.
+				this_token.marker_length = result_length;
 				this_token.symbol = SYM_STRING;
 			} // if (this_token.symbol == SYM_DYNAMIC)
 			goto push_this_token;
@@ -302,10 +296,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 					// That is, each extra (SYM_OPAREN, SYM_COMMA or SYM_CPAREN) token in infix
 					// effectively reserves one stack slot.
 					if (actual_param_count)
-					{
 						memmove(params + 1, params, actual_param_count * sizeof(ExprTokenType *));
-						high_water_mark++; // If this isn't done and the last param is an object, it won't be released.
-					}
 					// Insert an empty string:
 					params[0] = (ExprTokenType *)_alloca(sizeof(ExprTokenType));
 					params[0]->symbol = SYM_STRING;
@@ -325,52 +316,60 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 				// built-in functions would have to be reviewed, or the minimum would have to be enforced
 				// for them but not user-defined functions, which is inconsistent.  Finally, allowing too-
 				// few parameters seems like it would reduce the ability to detect script bugs at runtime.
-				if (actual_param_count < func->mMinParams && this_token.deref->type != DT_VARIADIC)
-				{
-					LineError(ERR_TOO_FEW_PARAMS, FAIL, func->mName);
-					goto abort;
-				}
+				// Param count is now checked in Func::Call(), so doesn't need to be checked here.
 			}
 			
-			// The following two steps are now done inside Func::Call:
-			//this_token.symbol = SYM_INTEGER; // Set default return type so that functions don't have to do it if they return INTs.
-			//this_token.marker = func.mName;  // Inform function of which built-in function called it (allows code sharing/reduction).
-			this_token.buf = left_buf;       // mBIF() can use this to store a string result, and for other purposes.
+			// The following two steps are done for built-in functions inside Func::Call:
+			//result_token.symbol = SYM_INTEGER; // Set default return type so that functions don't have to do it if they return INTs.
+			//result_token.func = func;          // Inform function of which built-in function called it (allows code sharing/reduction).
 			
-			this_token.mem_to_free = NULL; // Init to detect whether the called function allocates it.
+			// This is done by ResultToken below:
+			//result_token.buf = left_buf;       // mBIF() can use this to store a string result, and for other purposes.
+			//result_token.mem_to_free = NULL;   // Init to detect whether the called function allocates it.
 			
-			FuncCallData func_call;
-			// Call the user-defined or built-in function.  Func::Call takes care of variadic parameter
-			// lists and stores local var backups for UDFs in func_call.  Once func_call goes out of scope,
-			// its destructor calls Var::FreeAndRestoreFunctionVars() if appropriate.
+			ResultToken result_token;
+			result_token.InitResult(left_buf); // But we'll take charge of its contents INSTEAD of calling Free().
+
+			// Call the user-defined or built-in function.
 			g->ExcptDeref = this_token.deref;
-			if (!func->Call(func_call, aResult, this_token, params, actual_param_count
-									, this_token.deref->type == DT_VARIADIC))
+			if (!func->Call(result_token, params, actual_param_count, this_token.deref->type == DT_VARIADIC))
 			{
-				// Take a shortcut because for backward compatibility, ACT_ASSIGNEXPR (and anything else
-				// for that matter) is being aborted by this type of early return (i.e. if there's an
-				// output_var, its contents are left as-is).  In other words, this expression will have
-				// no result storable by the outside world.
+				// Func::Call returning false indicates an EARLY_EXIT or FAIL result, meaning that the
+				// thread should exit or transfer control to a Catch statement.  Abort the remainder
+				// of this expression and pass the result back to our caller:
+				aResult = result_token.Result();
 				g->ExcptDeref = NULL;
-				if (aResult != OK) // i.e. EARLY_EXIT or FAIL
-					result_to_return = NULL; // Use NULL to inform our caller that this thread is finished (whether through normal means such as Exit or a critical error).
-					// Above: The callers of this function know that the value of aResult (which already contains the
-					// reason for early exit) should be considered valid/meaningful only if result_to_return is NULL.
+				result_to_return = NULL; // Use NULL to inform our caller that this thread is finished (whether through normal means such as Exit or a critical error).
+				// Above: The callers of this function know that the value of aResult (which already contains the
+				// reason for early exit) should be considered valid/meaningful only if result_to_return is NULL.
 				goto normal_end_skip_output_var; // output_var is left unchanged in these cases.
 			}
 			g->ExcptDeref = NULL;
 #ifdef CONFIG_DEBUGGER
 			// See PostExecFunctionCall() itself for comments.
-			g_Debugger.PostExecFunctionCall(this);
+			if (g_Debugger.IsConnected())
+				g_Debugger.PostExecFunctionCall(this);
 #endif
 			g_script.mCurrLine = this; // For error-reporting.
 
-			if (this_token.symbol != SYM_STRING)
+			if (result_token.symbol != SYM_STRING)
 			{
 				// No need for make_result_persistent or early Assign().  Any numeric or object result can
 				// be considered final because it's already stored in permanent memory (the token itself).
 				// Additionally, this_token.mem_to_free is assumed to be NULL since the result is not
 				// a string; i.e. the function would've had no need to return memory to us.
+				this_token.value_int64 = result_token.value_int64;
+				this_token.symbol = result_token.symbol;
+				if (this_token.symbol == SYM_OBJECT)
+				{
+					if (to_free_count == MAX_EXPR_MEM_ITEMS) // No more slots left (should be nearly impossible).
+					{
+						this_token.object->Release();
+						LineError(ERR_OUTOFMEM);
+						goto abort;
+					}
+					to_free[to_free_count++] = &this_token;
+				}
 				goto push_this_token;
 			}
 			
@@ -387,8 +386,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 			{
 				if (mActionType == ACT_EXPRESSION) // Isolated expression: Outermost function call's result will be ignored, so no need to store it.
 				{
-					if (this_token.mem_to_free)
-						free(this_token.mem_to_free); // Don't bother putting it into mem[].
+					result_token.Free(); // Since we're not taking charge of it in this case.
 					goto normal_end_skip_output_var; // No output_var is possible for ACT_EXPRESSION.
 				}
 				internal_output_var = output_var; // NULL unless this is ACT_ASSIGNEXPR.
@@ -403,36 +401,30 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 			else
 				internal_output_var = NULL;
 			
-			// RELIES ON THE IS_NUMERIC() CHECK above having been done first.
-			result = this_token.marker; // Marker can be used because symbol will never be SYM_VAR in this case.
+			// RELIES ON THE SYM_STRING CHECK above having been done first.
+			result        = result_token.marker;
+			result_length = result_token.marker_length;
+			if (result_length == -1)
+				result_length = (VarSizeType)_tcslen(result);
 
-			if (internal_output_var
-				&& !(g->CurrentFunc == func && internal_output_var->IsNonStaticLocal())) // Ordered for short-circuit performance.
-				// Above line is a fix for v1.0.45.03: It detects whether output_var is among the variables
-				// that are about to be restored from backup.  If it is, we can't assign to it now
-				// because it's currently a local that belongs to the instance we're in the middle of
-				// calling; i.e. it doesn't belong to our instance (which is beneath it on the call stack
-				// until after the restore-from-backup is done later below).  And we can't assign "result"
-				// to it *after* the restore because by then result may have been freed (if it happens to be
-				// a local variable too).  Therefore, continue on to the normal method, which will check
-				// whether "result" needs to be stored in more persistent memory.
+			if (internal_output_var)
 			{
 				// Check if the called function allocated some memory for its result and turned it over to us.
 				// In most cases, the string stored in mem_to_free (if it has been set) is the same address as
 				// this_token.marker (i.e. what is named "result" further below), because that's what the
 				// built-in functions are normally using the memory for.
-				if (this_token.mem_to_free == this_token.marker) // marker is checked in case caller alloc'd mem but didn't use it as its actual result.  Relies on the fact that marker is never NULL.
+				if (result_token.mem_to_free)
 				{
+					ASSERT(result_token.mem_to_free == result); // See similar line below for comments.
 					// So now, turn over responsibility for this memory to the variable. The called function
 					// is responsible for having stored the length of what's in the memory as an overload of
 					// this_token.buf, but only when that memory is the result (currently might always be true).
 					// AcceptNewMem() will shrink the memory for us, via _expand(), if there's a lot of
 					// extra/unused space in it.
-					internal_output_var->AcceptNewMem(this_token.mem_to_free, this_token.marker_length);
+					internal_output_var->AcceptNewMem(result_token.mem_to_free, result_token.marker_length);
 				}
 				else
 				{
-					result_length = (VarSizeType)_tcslen(result);
 					// 1.0.46.06: If the UDF has stored its result in its deref buffer, take possession
 					// of that buffer, which saves a memcpy of a potentially huge string.  The cost
 					// of this is that if there are any other UDF-calls pending after this one, the
@@ -447,8 +439,8 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 						// v1.0.45: This mode improves performance by avoiding the need to copy the result into
 						// more persistent memory, then avoiding the need to copy it into the defer buffer (which
 						// also avoids the possibility of needing to expand that buffer).
-						if (!internal_output_var->Assign(this_token.marker)) // Marker can be used because symbol will never be SYM_VAR in this case.
-							goto abort;										 // ALSO: Assign() contains an optimization that avoids actually doing the mem-copying if output_var is being assigned to itself (which can happen in cases like RegExMatch()).
+						if (!internal_output_var->Assign(result, result_length)) // Assign() contains an optimization that avoids actually doing the mem-copying if output_var is being assigned to itself (which can happen in cases like RegExMatch()).
+							goto abort;
 					}
 				}
 				if (done)
@@ -463,21 +455,33 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 			// Otherwise, there's no output_var or the expression isn't finished yet, so do normal processing.
 				
 			make_result_persistent = true; // Set default.
+			this_token.symbol = SYM_STRING;
+			this_token.marker_length = result_length;
 
-			// RESTORE THE CIRCUIT TOKEN (after handling what came back inside it):
-			if (this_token.mem_to_free) // The called function allocated some memory and turned it over to us.
+			if (result_token.mem_to_free) // The called function allocated some memory and turned it over to us.
 			{
-				if (mem_count == MAX_EXPR_MEM_ITEMS) // No more slots left (should be nearly impossible).
+				// mem_to_free == result is checked only in debug mode because it should always be true.
+				// Other sections rely on mem_to_free not needing to be freed if symbol != SYM_STRING,
+				// so users of mem_to_free must never use it other than to return the result.
+				ASSERT(result_token.mem_to_free == result);
+				if (done && aResultToken)
+				{
+					// Return this memory block to our caller.  This is handled here rather than
+					// at a later stage in order to avoid an unnecessary _tcslen() call.
+					aResultToken->AcceptMem(result_to_return = result, result_length);
+					goto normal_end_skip_output_var;
+				}
+				if (to_free_count == MAX_EXPR_MEM_ITEMS) // No more slots left (should be nearly impossible).
 				{
 					LineError(ERR_OUTOFMEM, FAIL, func->mName);
 					goto abort;
 				}
-				if (this_token.mem_to_free == this_token.marker) // mem_to_free is checked in case caller alloc'd mem but didn't use it as its actual result.
-				{
-					make_result_persistent = false; // Override the default set higher above.
-				}
 				// Mark it to be freed at the time we return.
-				mem[mem_count++] = this_token.mem_to_free;
+				to_free[to_free_count++] = &this_token;
+				// Invariant: any string token put in to_free must have marker set to the memory block
+				// to be freed.  marker = result is set further below, but only when result_length != 0.
+				this_token.marker = result;
+				goto push_this_token;
 			}
 			//else this_token.mem_to_free==NULL, so the BIF just called didn't allocate memory to give to us.
 			
@@ -485,37 +489,43 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 			// at all.  Therefore, handle them fully now, which should improve performance (since it
 			// avoids all the other checking later on).  It also doesn't hurt code size because this
 			// check avoids having to check for empty string in other sections later on.
-			if (!*this_token.marker) // Various make-persistent sections further below may rely on this check.
+			if (result_length == 0) // Various make-persistent sections further below may rely on this check.
 			{
 				this_token.marker = _T(""); // Ensure it's a constant memory area, not a buf that might get overwritten soon.
-				goto push_this_token; // For code simplicity, the optimization for numeric results is done at a later stage.
+				goto push_this_token;
 			}
 
+			if (make_result_persistent) // At this stage, this means that the above wasn't able to determine its correct value yet.
 			if (func->mIsBuiltIn)
 			{
 				// Since above didn't goto, "result" is not SYM_INTEGER/FLOAT/VAR, and not "".  Therefore, it's
 				// either a pointer to static memory (such as a constant string), or more likely the small buf
 				// we gave to the BIF for storing small strings.  For simplicity assume it's the buf, which is
 				// volatile and must be made persistent if called for below.
-				if (make_result_persistent) // At this stage, this means that the above wasn't able to determine its correct value yet.
-					make_result_persistent = !done;
+				make_result_persistent = !done;
 			}
 			else // It's not a built-in function.
 			{
-				// Since above didn't goto:
-				// The result just returned may need to be copied to a more persistent location.  This is done right
-				// away if the result is the contents of a local variable (since all locals are about to be freed
-				// and overwritten), which is assumed to be the case if it's not in the new deref buf because it's
-				// difficult to distinguish between when the function returned one of its own local variables
-				// rather than a global or a string/numeric literal).  The only exceptions are covered below.
+				// Since above didn't goto, the result may need to be copied to a more persistent location.
+
+				// For UDFs, "result" can be any of the following (some of which were handled above):
+				//	- mem_to_free:  Passed back from some other function call.
+				//	- mem_to_free:  The result of a concat (if other allocation methods were unavailable).
+				//	- mem_to_free:  "Stolen" from a local var by ToReturnValue().
+				//	- left_buf:  A local var's contents, copied into result_token.buf by ToReturnValue().
+				//	- sDerefBuf:  Any other string result of ExpandExpression().
+				//	- sDerefBuf:  A value copied from a variable by ExpandArgs():  return just_a_var
+				//	- A literal string which was optimized into a non-expression:  return "just a string"
+				//	- The Contents() of a static or global variable, which ExpandArgs() determined did not need
+				//	  to be dereferenced. Only applies when !is_expression; i.e.  return static_var
+
 				// Old method, not necessary to be so thorough because "return" always puts its result as the
 				// very first item in its deref buf.  So this is commented out in favor of the line below it:
 				//if (result < sDerefBuf || result >= sDerefBuf + sDerefBufSize)
 				if (result != sDerefBuf) // Not in their deref buffer (yields correct result even if sDerefBuf is NULL; also, see above.)
-					// In this case, the result must be assumed to be one of their local variables (since there's
-					// no way to distinguish between that and a literal string such as "abc"?). So it should be
-					// immediately copied since if it's a local, it's about to be freed.
-					make_result_persistent = true;
+					// In this case, the result can probably only be left_buf or the Contents() of a var,
+					// either of which may need to be made persistent if the expression isn't finished:
+					make_result_persistent = !done;
 				else // The result must be in their deref buffer, perhaps due to something like "return x+3" or "return bif()" on their part.
 				{
 					make_result_persistent = false; // Set default to be possibly overridden below.
@@ -538,7 +548,8 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 					//else done==true, so don't have to make it persistent here because the final stage will
 					// copy it from their deref buf into ours (since theirs is only deleted later, by our caller).
 					// In this case, leave make_result_persistent set to false.
-				} // This is the end of the section that determines the value of "make_result_persistent" for UDFs.
+				}
+				// This is the end of the section that determines the value of "make_result_persistent" for UDFs.
 			}
 
 			if (make_result_persistent) // Both UDFs and built-in functions have ensured make_result_persistent is set.
@@ -546,17 +557,17 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 				// BELOW RELIES ON THE ABOVE ALWAYS HAVING VERIFIED AND FULLY HANDLED RESULT BEING AN EMPTY STRING.
 				// So now we know result isn't an empty string, which in turn ensures that size > 1 and length > 0,
 				// which might be relied upon by things further below.
-				result_size = _tcslen(result) + 1; // No easy way to avoid strlen currently. Maybe some future revisions to architecture will provide a length.
+				result_size = result_length + 1;
 				// Must cast to int to avoid loss of negative values:
 				if (result_size <= aDerefBufSize - (target - aDerefBuf)) // There is room at the end of our deref buf, so use it.
 				{
 					// Make the token's result the new, more persistent location:
-					this_token.marker = (LPTSTR)tmemcpy(target, result, result_size); // Benches slightly faster than strcpy().
+					this_token.marker = tmemcpy(target, result, result_size); // Benches slightly faster than strcpy().
 					target += result_size; // Point it to the location where the next string would be written.
 				}
 				else if (result_size < EXPR_SMALL_MEM_LIMIT && alloca_usage < EXPR_ALLOCA_LIMIT) // See comments at EXPR_SMALL_MEM_LIMIT.
 				{
-					this_token.marker = (LPTSTR)tmemcpy((LPTSTR)talloca(result_size), result, result_size); // Benches slightly faster than strcpy().
+					this_token.marker = tmemcpy(talloca(result_size), result, result_size); // Benches slightly faster than strcpy().
 					alloca_usage += result_size; // This might put alloca_usage over the limit by as much as EXPR_SMALL_MEM_LIMIT, but that is fine because it's more of a guideline than a limit.
 				}
 				else // Need to create some new persistent memory for our temporary use.
@@ -569,15 +580,14 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 					// - There's insufficient room at the end of the deref buf to store the return value
 					//   (unusual because the deref buf expands in block-increments, and also because
 					//   return values are usually small, such as numbers).
-					if (mem_count == MAX_EXPR_MEM_ITEMS // No more slots left (should be nearly impossible).
-						|| !(mem[mem_count] = tmalloc(result_size)))
+					if (to_free_count == MAX_EXPR_MEM_ITEMS // No more slots left (should be nearly impossible).
+						|| !(this_token.marker = tmalloc(result_size)))
 					{
 						LineError(ERR_OUTOFMEM, FAIL, func->mName);
 						goto abort;
 					}
-					// Make the token's result the new, more persistent location:
-					this_token.marker = (LPTSTR)tmemcpy(mem[mem_count], result, result_size); // Benches slightly faster than strcpy().
-					++mem_count; // Must be done last.
+					tmemcpy(this_token.marker, result, result_size); // Benches slightly faster than strcpy().
+					to_free[to_free_count++] = &this_token;
 				}
 			}
 			else // make_result_persistent==false
@@ -613,6 +623,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 		case SYM_IN:
 		case SYM_CONTAINS:
 			right_is_pure_number = right_is_number = PURE_NOT_NUMERIC; // Init for convenience/maintainability.
+		case SYM_ADDRESS:
 		case SYM_AND:			// v2: These don't need it either since even numeric strings are considered "true".
 		case SYM_OR:			//
 		case SYM_LOWNOT:		//
@@ -653,8 +664,10 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 				{
 					// This will be the final result of this AND/OR because it's right branch was
 					// discarded above without having been evaluated nor any of its functions called:
-					this_token = right;
-					right.symbol = SYM_INTEGER; // i.e if it was SYM_OBJECT, don't call Release() for this copy of the pointer.
+					this_token.CopyValueFrom(right);
+					// Any SYM_OBJECT on our stack was already put into to_free[], so if this is SYM_OBJECT,
+					// there's no need to do anything; we actually MUST NOT AddRef() unless we also put it
+					// into to_free[].
 					break;
 				}
 			}
@@ -669,8 +682,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 
 		case SYM_LOWNOT:  // The operator-word "not".
 		case SYM_HIGHNOT: // The symbol '!'. Both NOTs are equivalent at this stage because precedence was already acted upon by infix-to-postfix.
-			this_token.value_int64 = !TokenToBOOL(right);
-			this_token.symbol = SYM_INTEGER; // Result is always one or zero.
+			this_token.SetValue(!TokenToBOOL(right)); // Result is always one or zero.
 			break;
 
 		case SYM_NEGATIVE:  // Unary-minus.
@@ -680,15 +692,14 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 				this_token.value_double = -TokenToDouble(right, FALSE); // Pass FALSE for aCheckForHex since PURE_FLOAT is never hex.
 			else // String.
 			{
-				// Seems best to consider the application of unary minus to a string, even a quoted string
-				// literal such as "15", to be a failure.  UPDATE: For v1.0.25.06, invalid operations like
-				// this instead treat the operand as an empty string.  This avoids aborting a long, complex
-				// expression entirely just because on of its operands is invalid.  However, the net effect
-				// in most cases might be the same, since the empty string is a non-numeric result and thus
-				// will cause any operator it is involved with to treat its other operand as a string too.
-				// And the result of a math operation on two strings is typically an empty string.
-				this_token.marker = _T("");
-				this_token.symbol = SYM_STRING;
+				// Seems best to consider the application of unary minus to a string to be a failure.
+				// UPDATE: For v1.0.25.06, invalid operations like this instead treat the operand as an
+				// empty string.  This avoids aborting a long, complex expression entirely just because
+				// one of its operands is invalid.  However, the net effect in most cases might be the same,
+				// since the empty string is a non-numeric result and thus will cause any operator it is
+				// involved with to treat its other operand as a string too.  And the result of a math
+				// operation on two strings is typically an empty string.
+				this_token.SetValue(_T(""), 0);
 				break;
 			}
 			// Since above didn't "break":
@@ -738,10 +749,9 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 					}
 					//else post_op against non-numeric target-var.  Fall through to below to yield blank result.
 				}
-				//else target isn't a var.  Fall through to below to yield blank result.
-				this_token.marker = _T("");          // Make the result blank to indicate invalid operation
-				this_token.symbol = SYM_STRING;  // (assign to non-lvalue or increment/decrement a non-number).
-				break;
+				//else target isn't a var, so yield blank result.
+				this_token.SetValue(_T(""), 0); // Make the result blank to indicate invalid operation
+				break;                          // (assign to non-lvalue or increment/decrement a non-number).
 			} // end of "invalid operation" block.
 
 			// DUE TO CODE SIZE AND PERFORMANCE decided not to support things like the following:
@@ -792,15 +802,15 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 		case SYM_ADDRESS: // Take the address of a variable.
 			if (IObject *obj = TokenToObject(right))
 			{
-				this_token.symbol = SYM_INTEGER;
-				this_token.value_int64 = (__int64)obj;
+				this_token.SetValue((__int64)obj);
 			}
 			else if (right.symbol == SYM_VAR) // At this stage, SYM_VAR is always a normal variable, never a built-in one, so taking its address should be safe.
 			{
-				if (right.var->IsPureNumeric())
-					this_token.value_int64 = (__int64)&right.var->mContentsInt64; // Since the value is a pure number, this seems more useful and less confusing than returning the address of a numeric string.
+				Var *right_var = right.var->ResolveAlias();
+				if (right_var->IsPureNumeric())
+					this_token.value_int64 = (__int64)&right_var->mContentsInt64; // Since the value is a pure number, this seems more useful and less confusing than returning the address of a numeric string.
 				else
-					this_token.value_int64 = (__int64)right.var->Contents(); // Contents() vs. mContents to support VAR_CLIPBOARD, and in case mContents needs to be updated by Contents().
+					this_token.value_int64 = (__int64)right_var->Contents(); // Contents() vs. mContents to support VAR_CLIPBOARD, and in case mContents needs to be updated by Contents().
 				this_token.symbol = SYM_INTEGER;
 			}
 			else if (right.symbol == SYM_STRING && *right.marker) // HotKeyIt added a way to pass pointer of string without using a variable e.g. &"String"
@@ -814,10 +824,9 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 
 		case SYM_DEREF:   // Dereference an address to retrieve a single byte.
 		case SYM_BITNOT:  // The tilde (~) operator.
-			if (right_is_number == PURE_NOT_NUMERIC) // String.  Seems best to consider the application of '*' or '~' to a string, even a quoted string literal such as "15", to be a failure.
+			if (right_is_number == PURE_NOT_NUMERIC) // String.  Seems best to consider the application of '*' or '~' to a non-numeric string to be a failure.
 			{
-				this_token.marker = _T("");
-				this_token.symbol = SYM_STRING;
+				this_token.SetValue(_T(""), 0);
 				break;
 			}
 			// Since above didn't "break": right_is_number is PURE_INTEGER or PURE_FLOAT.
@@ -875,8 +884,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 			{
 				if (left.symbol != SYM_VAR)
 				{
-					this_token.marker = _T("");          // Make the result blank to indicate invalid operation
-					this_token.symbol = SYM_STRING;  // (assign to non-lvalue).
+					this_token.SetValue(_T(""), 0); // Make the result blank to indicate invalid operation (assign to non-lvalue).
 					break; // Equivalent to "goto push_this_token" in this case.
 				}
 				switch(this_token.symbol)
@@ -886,8 +894,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 						goto abort;
 					if (left.var->Type() == VAR_CLIPBOARD) // v1.0.46.01: Clipboard is present as SYM_VAR, but only for assign-to-clipboard so that built-in functions and other code sections don't need handling for VAR_CLIPBOARD.
 					{
-						this_token = right; // Struct copy.  Doing it this way is more maintainable than other methods, and is unlikely to perform much worse.
-						right.symbol = SYM_INTEGER; // i.e if it was SYM_OBJECT (which would be pointless in this case, but could happen), don't call Release() for this copy of the pointer.
+						this_token.CopyValueFrom(right); // Doing it this way is more maintainable than other methods, and is unlikely to perform much worse.
 					}
 					else
 					{
@@ -944,8 +951,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 					// comparison operators as unsupported than for (obj == "") to evaluate to true.
 					if (right_obj || left_obj)
 					{
-						this_token.value_int64 = (this_token.symbol != SYM_NOTEQUAL) == (right_obj == left_obj);
-						this_token.symbol = SYM_INTEGER; // Must be set *after* above checks symbol.
+						this_token.SetValue((this_token.symbol != SYM_NOTEQUAL) == (right_obj == left_obj));
 						goto push_this_token;
 					}
 				}
@@ -953,15 +959,21 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 				// Above check has ensured that at least one of them is a string.  But the other
 				// one might be a number such as in 5+10="15", in which 5+10 would be a numerical
 				// result being compared to the raw string literal "15".
-				right_string = TokenToString(right, right_buf);
-				left_string = TokenToString(left, left_buf);
+				right_string = TokenToString(right, right_buf, &right_length);
+				left_string = TokenToString(left, left_buf, &left_length);
 				result_symbol = SYM_INTEGER; // Set default.  Boolean results are treated as integers.
 				switch(this_token.symbol)
 				{
 				case SYM_EQUAL:     this_token.value_int64 = !((g->StringCaseSense == SCS_INSENSITIVE)
 										? _tcsicmp(left_string, right_string)
 										: lstrcmpi(left_string, right_string)); break; // i.e. use the "more correct mode" except when explicitly told to use the fast mode (v1.0.43.03).
-				case SYM_EQUALCASE: this_token.value_int64 = !_tcscmp(left_string, right_string); break; // Case sensitive.
+				case SYM_EQUALCASE: // Case sensitive.  Also supports binary data.
+					// Support basic equality checking of binary data by using tmemcmp rather than _tcscmp.
+					// The results should be the same for strings, but faster.  Length must be checked first
+					// since tmemcmp wouldn't stop at the null-terminator (and that's why we're using it).
+					// As a result, the comparison is much faster when the length differs.
+					this_token.value_int64 = (left_length == right_length) && !tmemcmp(left_string, right_string, left_length);
+					break; 
 				// The rest all obey g->StringCaseSense since they have no case sensitive counterparts:
 				case SYM_NOTEQUAL:  this_token.value_int64 = g_tcscmp(left_string, right_string) ? 1 : 0; break;
 				case SYM_GT:        this_token.value_int64 = g_tcscmp(left_string, right_string) > 0; break;
@@ -975,7 +987,6 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 					// Binary clipboard is ignored because it's documented that except for certain features,
 					// binary clipboard variables are seen only up to the first binary zero (mostly to
 					// simplify the code).
-					right_length = (right.symbol == SYM_VAR) ? right.var->LengthIgnoreBinaryClip() : _tcslen(right_string);
 					if (sym_assign_var // Since "right" is being appended onto a variable ("left"), an optimization is possible.
 						&& sym_assign_var->AppendIfRoom(right_string, (VarSizeType)right_length)) // But only if the target variable has enough remaining capacity.
 					{
@@ -987,7 +998,6 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 						goto push_this_token; // Skip over all other sections such as subsequent checks of sym_assign_var because it was all taken care of here.
 					}
 					// Otherwise, fall back to the other concat methods:
-					left_length = (left.symbol == SYM_VAR) ? left.var->LengthIgnoreBinaryClip() : _tcslen(left_string);
 					result_size = right_length + left_length + 1;
 
 					if (sym_assign_var)  // Fix for v1.0.48: These 2 lines were added, and they must take
@@ -1091,23 +1101,24 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 					}
 					else if (result_size < EXPR_SMALL_MEM_LIMIT && alloca_usage < EXPR_ALLOCA_LIMIT) // See comments at EXPR_SMALL_MEM_LIMIT.
 					{
-						this_token.marker = (LPTSTR)talloca(result_size);
+						this_token.marker = talloca(result_size);
 						alloca_usage += result_size; // This might put alloca_usage over the limit by as much as EXPR_SMALL_MEM_LIMIT, but that is fine because it's more of a guideline than a limit.
 					}
 					else // Need to create some new persistent memory for our temporary use.
 					{
 						// See the nearly identical section higher above for comments:
-						if (mem_count == MAX_EXPR_MEM_ITEMS // No more slots left (should be nearly impossible).
-							|| !(this_token.marker = mem[mem_count] = tmalloc(result_size)))
+						if (to_free_count == MAX_EXPR_MEM_ITEMS // No more slots left (should be nearly impossible).
+							|| !(this_token.marker = tmalloc(result_size)))
 						{
 							LineError(ERR_OUTOFMEM);
 							goto abort;
 						}
-						++mem_count;
+						to_free[to_free_count++] = &this_token;
 					}
 					if (left_length)
 						tmemcpy(this_token.marker, left_string, left_length);  // Not +1 because don't need the zero terminator.
 					tmemcpy(this_token.marker + left_length, right_string, right_length + 1); // +1 to include its zero terminator.
+					this_token.marker_length = result_size - 1;
 					result_symbol = SYM_STRING;
 					break;
 
@@ -1119,6 +1130,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 				default:
 					// Other operators do not support string operands, so the result is an empty string.
 					this_token.marker = _T("");
+					this_token.marker_length = 0;
 					result_symbol = SYM_STRING;
 				}
 				this_token.symbol = result_symbol; // Must be done only after the switch() above.
@@ -1128,7 +1140,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 				|| this_token.symbol <= SYM_BITSHIFTRIGHT && this_token.symbol >= SYM_BITOR) // Check upper bound first for short-circuit performance (because operators like +-*/ are much more frequently used).
 			{
 				// Because both are integers and the operation isn't division, the result is integer.
-				// The result is also an integer for the bitwise operations listed in the if-statement
+				// The result is also an integer for the bitwise operations listed in the if-statementto_free[i]
 				// above.  This is because it is not legal to perform ~, &, |, or ^ on doubles.  Any
 				// floating point operands are truncated to integers prior to doing the bitwise operation.
 				right_int64 = TokenToInt64(right); // It can't be SYM_STRING because in here, both right and
@@ -1161,6 +1173,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 					if (right_int64 == 0) // Divide by zero produces blank result (perhaps will produce exception if scripts ever support exception handlers).
 					{
 						this_token.marker = _T("");
+						this_token.marker_length = 0;
 						result_symbol = SYM_STRING;
 					}
 					else
@@ -1174,6 +1187,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 					{
 						// Return a consistent result rather than something that varies:
 						this_token.marker = _T("");
+						this_token.marker_length = 0;
 						result_symbol = SYM_STRING;
 					}
 					else // We have a valid base and exponent and both are integers, so the calculation will always have a defined result.
@@ -1205,9 +1219,10 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 				case SYM_MULTIPLY: this_token.value_double = left_double * right_double; break;
 				case SYM_DIVIDE:
 				case SYM_FLOORDIVIDE:
-					if (right_double == 0.0) // Divide by zero produces blank result (perhaps will produce exception if script's ever support exception handlers).
+					if (right_double == 0.0) // Divide by zero produces blank result.
 					{
 						this_token.marker = _T("");
+						this_token.marker_length = 0;
 						result_symbol = SYM_STRING;
 					}
 					else
@@ -1232,6 +1247,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 						|| left_was_negative && qmathFmod(right_double, 1.0) != 0.0) // Negative base, but exponent isn't close enough to being an integer: unsupported (to simplify code).
 					{
 						this_token.marker = _T("");
+						this_token.marker_length = 0;
 						result_symbol = SYM_STRING;
 					}
 					else
@@ -1265,22 +1281,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 		}
 
 push_this_token:
-		while (high_water_mark > stack_count)
-		{
-			// Release any objects which have been previously popped off the stack. This seems to be the
-			// simplest way to do it as tokens are popped off the stack at multiple points, but only this
-			// one point where parameters are pushed.  high_water_mark allows us to determine if there were
-			// tokens on the stack before returning, regardless of how expression evaluation ended (abort,
-			// abnormal_end, normal_end_skip_output_var...).  This method also ensures any objects passed as
-			// parameters to a function (such as ObjGet()) are released *AFTER* the return value is made
-			// persistent, which is important if the return value refers to the object's memory (but that
-			// might currently never happen?).
-			--high_water_mark;
-			if (stack[high_water_mark]->symbol == SYM_OBJECT)
-				stack[high_water_mark]->object->Release();
-		}
 		STACK_PUSH(&this_token);   // Push the result onto the stack for use as an operand by a future operator.
-		high_water_mark = stack_count;
 	} // For each item in the postfix array.
 
 	// Although ACT_EXPRESSION was already checked higher above for function calls, there are other ways besides
@@ -1328,13 +1329,34 @@ push_this_token:
 			aResultToken->value_int64 = result_token.value_int64; // Union copy.
 			if (result_token.symbol == SYM_OBJECT)
 				result_token.object->AddRef();
-			result_to_return = _T(""); // Must not return NULL; any other value is OK (and will be ignored).
-			goto normal_end_skip_output_var;
+			goto normal_end_skip_output_var; // result_to_return is left at its default of "".
 		case SYM_VAR:
+			// This check must be done first to allow a variable containing a number or object to be passed ByRef:
+			if (mActionType == ACT_FUNC || mActionType == ACT_METHOD)
+			{
+				aArgVar[aArgIndex] = result_token.var; // Let the command refer to this variable directly.
+				goto normal_end_skip_output_var; // result_to_return is left at its default of "", though its value doesn't matter as long as it isn't NULL.
+			}
 			if (result_token.var->IsPureNumericOrObject())
 			{
 				result_token.var->ToToken(*aResultToken);
-				result_to_return = _T("");
+				goto normal_end_skip_output_var; // result_to_return is left at its default of "".
+			}
+			if (mActionType == ACT_RETURN && result_token.var->ToReturnValue(*aResultToken))
+			{
+				// This is a non-static local var and the call above has either transferred its memory block
+				// into aResultToken or copied its value into aResultToken->buf.  This should be faster than
+				// copying it into the deref buffer, and also allows binary data to be retained.
+				// "case ACT_RETURN:" does something similar for non-expressions like "return local_var".
+				goto normal_end_skip_output_var; // result_to_return is left at its default of "", though its value doesn't matter as long as it isn't NULL.
+			}
+			break;
+		case SYM_STRING:
+			if (to_free_count && to_free[to_free_count - 1] == &result_token)
+			{
+				// Pass this mem item back to caller instead of freeing it when we return.
+				aResultToken->AcceptMem(result_to_return = result_token.marker, result_token.marker_length);
+				--to_free_count;
 				goto normal_end_skip_output_var;
 			}
 		}
@@ -1358,16 +1380,8 @@ push_this_token:
 		aTarget += FTOA(result_token.value_double, aTarget, MAX_NUMBER_SIZE) + 1; // +1 because that's what callers want; i.e. the position after the terminator.
 		goto normal_end_skip_output_var; // output_var was already checked higher above, so no need to consider it again.
 	case SYM_VAR:
-		// SYM_VAR is somewhat unusual at this late a stage.  This next check allows ACT_FUNC to pass a variable
-		// reference to the function in cases like `SomeFunc % var := ""`.  Dynamic output vars were already handled
-		// by the SYM_DYNAMIC code.
-		if (aArgVar && mActionType == ACT_FUNC)
-		{
-			aArgVar[aArgIndex] = result_token.var; // Let the command refer to this variable directly.
-			result_to_return = _T(""); // No need to dereference it; this value won't be used but must be non-NULL.
-			goto normal_end_skip_output_var;
-		}
-		// Otherwise:
+		// SYM_VAR is somewhat unusual at this late a stage.  Dynamic output vars were already handled by the
+		// SYM_DYNAMIC code, while ACT_FUNC and ACT_METHOD were handled above.
 		// It is tempting to simply return now and let ExpandArgs() decide whether the var needs to be dereferenced.
 		// However, the var's length might not fit within the amount calculated by GetExpandedArgSize(), and in that
 		// case would overflow the deref buffer.  The var can be safely returned if it won't be dereferenced, but it
@@ -1392,7 +1406,7 @@ push_this_token:
 		else
 		{
 			result = result_token.marker;
-			result_size = _tcslen(result) + 1;
+			result_size = result_token.marker_length + 1; // At this stage, marker_length should always be valid, not -1.
 		}
 
 		// Notes about the macro below:
@@ -1469,18 +1483,25 @@ push_this_token:
 		else // Deref buf is already large enough to fit the string.
 			if (aTarget != result) // Currently, might be always true.
 				tmemmove(aTarget, result, result_size); // memmove() vs. memcpy() in this case, since source and dest might overlap (i.e. "target" may have been used to put temporary things into aTarget, but those things are no longer needed and now safe to overwrite).
+		if (aResultToken)
+		{
+			aResultToken->marker = aTarget;
+			aResultToken->marker_length = result_size - 1;
+		}
 		aTarget += result_size;
 		goto normal_end_skip_output_var; // output_var was already checked higher above, so no need to consider it again.
 
-	case SYM_OBJECT: // L31: Objects are always treated as empty strings; except with ACT_RETURN, which was handled above, and any usage which expects a boolean result.
-		result_to_return = _T("");
+	case SYM_OBJECT:
+		// At this point we aren't capable of returning an object, otherwise above would have
+		// already returned.  The documented fallback behaviour is for the object to be treated
+		// as an empty string, so just leave result_to_return at its default value of _T("").
 		// result_token is still on the stack, so the object will be released below.
 		goto normal_end_skip_output_var;
 	} // switch (result_token.symbol)
 
 // ALL PATHS ABOVE SHOULD "GOTO".  TO CATCH BUGS, ANY THAT DON'T FALL INTO "ABORT" BELOW.
 abort_with_exception:
-	ThrowRuntimeException(ERR_EXPR_EVAL);
+	LineError(ERR_EXPR_EVAL);
 	// FALL THROUGH:
 abort:
 	// The callers of this function know that the value of aResult (which contains the reason
@@ -1500,15 +1521,12 @@ abort:
 	//		aResult = FAIL;
 
 normal_end_skip_output_var:
-	for (i = mem_count; i--;) // Free any temporary memory blocks that were used.  Using reverse order might reduce memory fragmentation a little (depending on implementation of malloc).
-		free(mem[i]);
-
-	// L31: Release any objects which have been previous pushed onto the stack and not yet released.
-	while (high_water_mark)
-	{	// See similar section under push_this_token for comments.
-		--high_water_mark;
-		if (stack[high_water_mark]->symbol == SYM_OBJECT)
-			stack[high_water_mark]->object->Release();
+	for (i = to_free_count; i--;) // Free any temporary memory blocks that were used.  Using reverse order might reduce memory fragmentation a little (depending on implementation of malloc).
+	{
+		if (to_free[i]->symbol == SYM_STRING)
+			free(to_free[i]->marker);
+		else if (to_free[i]->symbol == SYM_OBJECT)
+			to_free[i]->object->Release();
 	}
 
 	return result_to_return;
@@ -1516,14 +1534,8 @@ normal_end_skip_output_var:
 
 
 
-bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount, bool aIsVariadic)
-// aFuncCall: Caller passes a variable which should go out of scope after the function call's result
-//   has been used; this automatically frees and restores a UDFs local vars (where applicable).
-// aSpaceAvailable: -1 indicates this is a regular function call.  Otherwise this must be the amount of
-//   space available after aParam for expanding the array of parameters for a variadic function call.
+bool Func::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, bool aIsVariadic)
 {
-	aResult = OK; // Set default.
-	
 	Object *param_obj = NULL;
 	CriticalObject *param_critical = NULL;
 	CRITICAL_SECTION *crisec = NULL;
@@ -1557,13 +1569,19 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 		}
 		if (rvalue)
 			aParam[aParamCount++] = rvalue; // In place of the variadic param.
-		// mMinParams isn't validated at load-time for variadic calls, so we must do it here:
-		// However, this check must be skipped for user-defined functions so that a named value
-		// can be supplied for a required parameter.  Missing required parameters are detected
-		// in the loop below by the absence of a default value.
-		if (aParamCount < mMinParams && mIsBuiltIn)
+	}
+
+	if (mIsBuiltIn)
+	{
+		// mMinParams is validated at load-time where possible; so not for variadic or dynamic calls,
+		// nor for calls via objects.  This check could be avoided for normal calls by instead checking
+		// in each of the above cases, but any performance gain would probably be marginal and not worth
+		// the slightly larger code size and loss of maintainability.  This check is not done for UDFS
+		// since param_obj might contain the remaining parameters as name-value pairs.  Missing required
+		// parameters are instead detected by the absence of a default value.
+		if (aParamCount < mMinParams)
 		{
-			aResult = g_script.ScriptError(ERR_TOO_FEW_PARAMS, mName);
+			aResultToken.Error(ERR_TOO_FEW_PARAMS, mName);
 			if (crisec)
 				LeaveCriticalSection(crisec);
 			return false; // Abort expression.
@@ -1571,12 +1589,9 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 		// Otherwise, even if some params are SYM_MISSING, it is relatively safe to call the function.
 		// The TokenTo' set of functions will produce 0 or "" for missing params.  Although that isn't
 		// technically correct, it is simple and fairly logical.
-	}
 
-	if (mIsBuiltIn)
-	{
 		aResultToken.symbol = SYM_INTEGER; // Set default return type so that functions don't have to do it if they return INTs.
-		aResultToken.marker = mName;       // Inform function of which built-in function called it (allows code sharing/reduction). Can't use circuit_token because it's value is still needed later below.
+		aResultToken.func = this;          // Inform function of which built-in function called it (allows code sharing/reduction).
 		if (crisec)
 				LeaveCriticalSection(crisec);
 		// Push an entry onto the debugger's stack.  This has two purposes:
@@ -1586,15 +1601,21 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 		DEBUGGER_STACK_PUSH(g_script.mCurrLine, this)
 
 		// CALL THE BUILT-IN FUNCTION:
-		mBIF(aResult, aResultToken, aParam, aParamCount);
+		mBIF(aResultToken, aParam, aParamCount);
 
 		DEBUGGER_STACK_POP()
 		
-		if (g->ThrownToken)
-			aResult = FAIL; // Abort thread.
+		// There shouldn't be any need to check g->ThrownToken since built-in functions
+		// currently throw exceptions via aResultToken.Error():
+		//if (g->ThrownToken)
+		//	aResultToken.SetExitResult(FAIL); // Abort thread.
 	}
 	else // It's not a built-in function, or it's a built-in that was overridden with a custom function.
 	{
+		ResultType result;
+		VarBkp *backup = NULL;
+		int backup_count;
+
 		int j, count_of_actuals_that_have_formals;
 		count_of_actuals_that_have_formals = (aParamCount > mParamCount)
 			? mParamCount  // Omit any actuals that lack formals (this can happen when a dynamic call passes too many parameters).
@@ -1639,16 +1660,18 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 					// DllCall() relies on the fact that this transformation is only done for user
 					// functions, not built-in ones such as DllCall().  This is because DllCall()
 					// sometimes needs the variable of a parameter for use as an output parameter.
-					this_param_token.var->ToToken(this_param_token);
+					// Skip AddRef() if this is an object because Release() won't be called, and
+					// AddRef() will be called when the object is assigned to a parameter.
+					this_param_token.var->ToTokenSkipAddRef(this_param_token);
 				}
 			}
 			// BackupFunctionVars() will also clear each local variable and formal parameter so that
 			// if that parameter or local var is assigned a value by any other means during our call
 			// to it, new memory will be allocated to hold that value rather than overwriting the
 			// underlying recursed/interrupted instance's memory, which it will need intact when it's resumed.
-			if (!Var::BackupFunctionVars(*this, aFuncCall.mBackup, aFuncCall.mBackupCount)) // Out of memory.
+			if (!Var::BackupFunctionVars(*this, backup, backup_count)) // Out of memory.
 			{
-				aResult = g_script.ScriptError(ERR_OUTOFMEM, mName);
+				aResultToken.Error(ERR_OUTOFMEM, mName);
 				if (crisec)
 					LeaveCriticalSection(crisec);
 				return false;
@@ -1661,9 +1684,6 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 		// instances of this function on the call-stack and yet SYM_VAR to be one of this function's own
 		// locals or formal params because it would have no legitimate origin.
 
-		// Set after above succeeds to ensure local vars are freed and the backup is restored (at some point):
-		aFuncCall.mFunc = this;
-		
 		for (j = 0; j < mParamCount; ++j) // For each formal parameter.
 		{
 			FuncParam &this_formal_param = mParam[j]; // For performance and convenience.
@@ -1692,8 +1712,8 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 					// No value has been supplied for this REQUIRED parameter.
 					if (crisec)
 						LeaveCriticalSection(crisec);
-					aResult = g_script.ScriptError(ERR_PARAM_REQUIRED, this_formal_param.var->mName);
-					return false; // Abort expression.
+					aResultToken.Error(ERR_PARAM_REQUIRED, this_formal_param.var->mName); // Abort thread.
+					goto free_and_return;
 				}
 				continue;
 			}
@@ -1727,10 +1747,10 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 			// happened if no backup was needed for this function (which is usually the case).
 			if (!this_formal_param.var->Assign(token))
 			{
-				aResult = FAIL; // Abort thread.
+				aResultToken.SetExitResult(FAIL); // Abort thread.
 				if (crisec)
 					LeaveCriticalSection(crisec);
-				return false;
+				goto free_and_return;
 			}
 		} // for each formal parameter.
 		
@@ -1744,10 +1764,10 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 			Object *vararg_obj = param_obj ? param_obj->Clone(&aToken,1) : Object::Create();
 			if (!vararg_obj)
 			{
+				aResultToken.Error(ERR_OUTOFMEM, mName); // Abort thread.
 				if (crisec)
 					LeaveCriticalSection(crisec);
-				aResult = g_script.ScriptError(ERR_OUTOFMEM, mName);
-				return false; // Abort thread.
+				goto free_and_return;
 			}
 			if (j < aParamCount)
 				// Insert the excess parameters from the actual parameter list.
@@ -1757,16 +1777,15 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 		}
 		if (crisec)
 			LeaveCriticalSection(crisec);
-		aResult = Call(&aResultToken); // Call the UDF.
-	}
-	return (aResult != EARLY_EXIT && aResult != FAIL);
-}
+		result = Call(&aResultToken); // Call the UDF.
+		
+		// Setting this unconditionally isn't likely to perform any worse than checking for EXIT/FAIL,
+		// and likely produces smaller code.  Currently EARLY_RETURN results are possible and must be
+		// passed back in case this is a meta-function, but this should be revised at some point since
+		// most of our callers only expect OK, FAIL or EARLY_EXIT.
+		aResultToken.SetResult(result);
 
-// This is used for maintainability: to ensure it's never forgotten and to reduce code repetition.
-FuncCallData::~FuncCallData()
-{
-	if (mFunc) // mFunc != NULL implies it is a UDF and Var::BackupFunctionVars() has succeeded.
-	{
+free_and_return:
 		// Free the memory of all the just-completed function's local variables.  This is done in
 		// both of the following cases:
 		// 1) There are other instances of this function beneath us on the call-stack: Must free
@@ -1785,13 +1804,50 @@ FuncCallData::~FuncCallData()
 		//    c) To yield results consistent with when the same function is called while other instances
 		//       of itself exist on the call stack.  In other words, it would be inconsistent to make
 		//       all variables blank for case #1 above but not do it here in case #2.
-		Var::FreeAndRestoreFunctionVars(*mFunc, mBackup, mBackupCount);
+		Var::FreeAndRestoreFunctionVars(*this, backup, backup_count);
 	}
+	return !aResultToken.Exited(); // i.e. aResultToken.SetExitResult() or aResultToken.Error() was not called.
+}
+
+
+bool Func::Call(ResultToken &aResultToken, int aParamCount, ...)
+{
+	ASSERT(aParamCount >= 0);
+
+	// Allocate and build the parameter array
+	ExprTokenType **aParam = (ExprTokenType**) _alloca(aParamCount*sizeof(ExprTokenType*));
+	ExprTokenType *args    = (ExprTokenType*)  _alloca(aParamCount*sizeof(ExprTokenType));
+	va_list va;
+	va_start(va, aParamCount);
+	for (int i = 0; i < aParamCount; i ++)
+	{
+		ExprTokenType &cur_arg = args[i];
+		aParam[i] = &cur_arg;
+
+		// Initialize the argument structure
+		cur_arg.symbol = va_arg(va, SymbolType);
+
+		// Fill in the argument value
+		switch (cur_arg.symbol)
+		{
+			case SYM_INTEGER: cur_arg.value_int64  = va_arg(va, __int64);  break;
+			case SYM_STRING:
+				cur_arg.marker = va_arg(va, LPTSTR);
+				cur_arg.marker_length = -1;
+				break;
+			case SYM_FLOAT:   cur_arg.value_double = va_arg(va, double);   break;
+			case SYM_OBJECT:  cur_arg.object       = va_arg(va, IObject*); break;
+		}
+	}
+	va_end(va);
+
+	// Perform function call
+	return Call(aResultToken, aParam, aParamCount);
 }
 
 
 
-ResultType Line::ExpandArgs(ExprTokenType *aResultTokens)
+ResultType Line::ExpandArgs(ResultToken *aResultTokens)
 // Caller should either provide both or omit both of the parameters.  If provided, it means
 // caller already called GetExpandedArgSize for us.
 // Returns OK, FAIL, or EARLY_EXIT.  EARLY_EXIT occurs when a function-call inside an expression
@@ -1950,13 +2006,16 @@ ResultType Line::ExpandArgs(ExprTokenType *aResultTokens)
 				{
 					// Since above did not "continue", this arg must have been an expression which was
 					// converted back to a plain value.  *postfix is a single numeric or string literal.
-					aResultTokens[i] = *this_arg.postfix;
+					aResultTokens[i].CopyValueFrom(*this_arg.postfix);
 				}
 				// Since above did not "continue" and arg_var[i] is NULL, this arg can't be an expression
 				// or input/output var and must therefore be plain text.
 				arg_deref[i] = this_arg.text;  // Point the dereferenced arg to the arg text itself.
 				continue;  // Don't need to use the deref buffer in this case.
 			}
+			// Since above didn't continue, this arg is a plain variable reference.
+			// Even if aResultTokens != NULL, it isn't set because our callers handle vars
+			// in different ways (and checking sArgVar is easier than checking for SYM_VAR).
 
 			switch(ArgMustBeDereferenced(the_only_var_of_this_arg, i, arg_var)) // Yes, it was called by GetExpandedArgSize() too, but a review shows it's difficult to avoid this without being worse than the disease (10/22/2006).
 			{
@@ -1982,7 +2041,7 @@ ResultType Line::ExpandArgs(ExprTokenType *aResultTokens)
 				arg_deref[i] = // The following is ordered for short-circuit performance:
 					(   mActionType == ACT_ASSIGNEXPR && i == 1  // By contrast, for the below i==anything (all args):
 					||  mActionType == ACT_IF
-					//|| mActionType == ACT_WHILE // Not necessary to check this one because loadtime leaves ACT_WHILE as an expression in all common cases. Also, there's no easy way to get ACT_WHILE into the range above due to the overlap of other ranges in enum_act.
+					//|| mActionType == ACT_WHILE // Not necessary to check this one because loadtime leaves ACT_WHILE as an expression in all common cases.
 					) && the_only_var_of_this_arg->Type() == VAR_NORMAL // Otherwise, users of this optimization would have to reproduce more of the logic in ArgMustBeDereferenced().
 					? _T("") : NULL; // See "Update #2" and later comments above.
 				break;
@@ -2092,8 +2151,7 @@ end:
 		// aResultTokens is initialized and has at least mArgc elements.  Caller must assume
 		// contents of aResultTokens are invalid if we return != OK.
 		for (int i = 0; i < mArgc; ++i)
-			if (aResultTokens[i].symbol == SYM_OBJECT)
-				aResultTokens[i].object->Release();
+			aResultTokens[i].Free();
 	}
 
 	return result_to_return;

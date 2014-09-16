@@ -200,7 +200,8 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_UNQUOTED_NON_ALNUM _T("Unquoted literals may only consist of alphanumeric characters/underscore.")
 #define ERR_DUPLICATE_DECLARATION _T("Duplicate declaration.")
 #define ERR_INVALID_CLASS_VAR _T("Invalid class variable declaration.")
-#define ERR_INVALID_LINE_IN_CLASS_DEF _T("Expected assignment or class/method definition.")
+#define ERR_INVALID_LINE_IN_CLASS_DEF _T("Not a valid method, class or property definition.")
+#define ERR_INVALID_LINE_IN_PROPERTY_DEF _T("Not a valid property getter/setter.")
 #define ERR_INVALID_GUI_NAME _T("Invalid Gui name.")
 #define ERR_INVALID_OPTION _T("Invalid option.") // Generic message used by Gui and GuiControl/Get.
 #define ERR_MUST_INIT_STRUCT _T("Empty pointer, dynamic Structure fields must be initialized manually first.")
@@ -214,7 +215,16 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_NO_OBJECT _T("No object to invoke.")
 #define ERR_NO_MEMBER _T("Unknown property or method.")
 #define ERR_NO_GUI _T("No default GUI.")
+#define ERR_NO_STATUSBAR _T("No StatusBar.")
+#define ERR_NO_LISTVIEW _T("No ListView.")
+#define ERR_NO_TREEVIEW _T("No TreeView.")
 #define ERR_PCRE_EXEC _T("PCRE execution error.")
+#define ERR_ARRAY_NOT_MULTIDIM _T("Array is not multi-dimensional.")
+#define ERR_NEW_NO_CLASS _T("Missing class object for \"new\" operator.")
+#define ERR_INVALID_ARG_TYPE _T("Invalid arg type.")
+#define ERR_INVALID_RETURN_TYPE _T("Invalid return type.")
+#define ERR_INVALID_LENGTH _T("Invalid Length.")
+#define ERR_INVALID_USAGE _T("Invalid usage.")
 
 #define WARNING_USE_UNSET_VARIABLE _T("This variable has not been assigned a value.")
 #define WARNING_LOCAL_SAME_AS_GLOBAL _T("This local variable has the same name as a global variable.")
@@ -374,10 +384,42 @@ struct ArgStruct
 	ExprTokenType *postfix;  // An array of tokens in postfix order. Also used for ACT_(NOT)BETWEEN to store pre-converted binary integers.
 };
 
-#define BIF_DECL_PARAMS ResultType &aResult, ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount
+#define BIF_DECL_PARAMS ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount
 
 // The following macro is used for definitions and declarations of built-in functions:
 #define BIF_DECL(name) void name(BIF_DECL_PARAMS)
+
+#define _f__oneline(act)		do { act } while (0)		// Make the macro safe to use like a function, under if(), etc.
+#define _f__ret(act)			_f__oneline( act; return; )	// BIFs have no return value.
+#define _o__ret(act)			return (act)				// IObject::Invoke() returns ResultType.
+// The following macros are used in built-in functions and objects to reduce code repetition
+// and facilitate changes to the script "ABI" (i.e. the way in which parameters and return
+// values are passed around).  For instance, the built-in functions might someday be exposed
+// via COM IDispatch or coupled with different scripting languages.
+#define _f_return(...)			_f__ret(aResultToken.Return(__VA_ARGS__))
+#define _o_return(...)			_o__ret(aResultToken.Return(__VA_ARGS__))
+#define _f_throw(...)			_f__ret(aResultToken.Error(__VA_ARGS__))
+#define _o_throw(...)			_o__ret(aResultToken.Error(__VA_ARGS__))
+// The _f_set_retval macros should be used with care because the integer macros assume symbol
+// is set to its default value; i.e. don't set a string and then attempt to return an integer.
+// It is also best for maintainability to avoid setting mem_to_free or an object without
+// returning if there's any chance _f_throw() will be used, since in that case the caller
+// may or may not Free() the result.  _f_set_retval_i() may also invalidate _f_retval_buf.
+//#define _f_set_retval(...)		aResultToken.Return(__VA_ARGS__)  // Overrides the default return value but doesn't return.
+#define _f_set_retval_i(n)		(aResultToken.value_int64 = static_cast<__int64>(n)) // Assumes symbol == SYM_INTEGER, the default for BIFs.
+#define _f_set_retval_p(...)	aResultToken.ReturnPtr(__VA_ARGS__) // Overrides the default return value but doesn't return.  Arg must already be in persistent memory.
+#define _f_return_i(n)			_f__ret(_f_set_retval_i(n)) // Return an integer.  Reduces code size vs _f_return() by assuming symbol == SYM_INTEGER, the default for BIFs.
+#define _f_return_b				_f_return_i // Boolean.  Currently just returns an int because we have no boolean type.
+#define _f_return_p(...)		_f__ret(_f_set_retval_p(__VA_ARGS__)) // Return a string which is already in persistent memory.
+#define _o_return_p(...)		_o__ret(_f_set_retval_p(__VA_ARGS__)) // Return a string which is already in persistent memory.
+#define _f_return_retval		return  // Return the value set by _f_set_retval().
+#define _f_return_empty			_f_return_p(_T(""), 0)
+#define _o_return_empty			return OK  // Default return value for Invoke is "".
+#define _o_return_or_throw(p)	if (p) _o_return(p); else _o_throw(ERR_OUTOFMEM);
+#define _f_retval_buf			(aResultToken.buf)
+#define _f_retval_buf_size		MAX_NUMBER_SIZE
+#define _f_number_buf			_f_retval_buf  // An alias to show intended usage, and in case the buffer size is changed.
+#define _f_callee_id			(aResultToken.func->mID)
 
 
 // Some of these lengths and such are based on the MSDN example at
@@ -476,11 +518,6 @@ enum JoyControls {JOYCTRL_INVALID, JOYCTRL_XPOS, JOYCTRL_YPOS, JOYCTRL_ZPOS
 };
 #define IS_JOYSTICK_BUTTON(joy) (joy >= JOYCTRL_1 && joy <= JOYCTRL_BUTTON_MAX)
 
-enum WinGetCmds {WINGET_CMD_INVALID, WINGET_CMD_ID, WINGET_CMD_IDLAST, WINGET_CMD_PID, WINGET_CMD_PROCESSNAME
-	, WINGET_CMD_COUNT, WINGET_CMD_LIST, WINGET_CMD_MINMAX, WINGET_CMD_CONTROLLIST, WINGET_CMD_CONTROLLISTHWND
-	, WINGET_CMD_STYLE, WINGET_CMD_EXSTYLE, WINGET_CMD_TRANSPARENT, WINGET_CMD_TRANSCOLOR, WINGET_CMD_PROCESSPATH
-};
-
 #ifndef MINIDLL
 enum MenuCommands {MENU_CMD_INVALID, MENU_CMD_SHOW, MENU_CMD_USEERRORLEVEL
 	, MENU_CMD_ADD, MENU_CMD_RENAME, MENU_CMD_CHECK, MENU_CMD_UNCHECK, MENU_CMD_TOGGLECHECK
@@ -489,7 +526,42 @@ enum MenuCommands {MENU_CMD_INVALID, MENU_CMD_SHOW, MENU_CMD_USEERRORLEVEL
 	, MENU_CMD_DELETE, MENU_CMD_DELETEALL, MENU_CMD_TIP, MENU_CMD_ICON, MENU_CMD_NOICON
 	, MENU_CMD_CLICK, MENU_CMD_MAINWINDOW, MENU_CMD_NOMAINWINDOW
 };
+#endif //MINIDLL
+// Each line in the enumeration below corresponds to a group of built-in functions (defined
+// in g_BIF) which are implemented using a single C++ function.  These IDs are passed to the
+// C++ function to tell it which function is being called.  Each group starts at ID 0 in case
+// it helps the compiler to reduce code size.
+enum BuiltInFunctionID {
+#ifndef MINIDLL
+	FID_LV_GetNext = 0, FID_LV_GetCount,
+	FID_LV_Add = 0, FID_LV_Insert, FID_LV_Modify,
+	FID_LV_InsertCol = 0, FID_LV_ModifyCol, FID_LV_DeleteCol,
+	FID_TV_Add = 0, FID_TV_Modify, FID_TV_Delete,
+	FID_TV_GetNext = 0, FID_TV_GetPrev, FID_TV_GetParent, FID_TV_GetChild, FID_TV_GetSelection, FID_TV_GetCount,
+	FID_TV_Get = 0, FID_TV_GetText,
+	FID_SB_SetText = 0, FID_SB_SetParts, FID_SB_SetIcon,
+#endif
+	FID_Trim = 0, FID_LTrim, FID_RTrim,
+	FID_RegExMatch = 0, FID_RegExReplace,
+	FID_GetKeyName = 0, FID_GetKeyVK = 1, FID_GetKeySC,
+	FID_StrGet = 0, FID_StrPut,
+	FID_FileExist = 0, FID_DirExist,
+	FID_WinExist = 0, FID_WinActive,
+	FID_Floor = 0, FID_Ceil,
+	FID_ASin = 0, FID_ACos,
+	FID_Sqrt = 0, FID_Log, FID_Ln,
+	FID_ObjAddRef = 0, FID_ObjRelease,
+	FID_ObjInsertAt = 0, FID_ObjRemove, FID_ObjRemoveAt, FID_ObjPush, FID_ObjPop, FID_ObjLength, FID_ObjHasKey, FID_ObjGetCapacity, FID_ObjSetCapacity, FID_ObjGetAddress, FID_ObjClone, FID_ObjNewEnum, FID_ObjCount,
+	FID_ComObjType = 0, FID_ComObjValue,
+	FID_WinGetID = 0, FID_WinGetIDLast, FID_WinGetPID, FID_WinGetProcessName, FID_WinGetProcessPath, FID_WinGetCount, FID_WinGetList, FID_WinGetMinMax, FID_WinGetControls, FID_WinGetControlsHwnd, FID_WinGetTransparent, FID_WinGetTransColor, FID_WinGetStyle, FID_WinGetExStyle,
+	FID_WinSetTransparent = 0, FID_WinSetTransColor, FID_WinSetAlwaysOnTop, FID_WinSetStyle, FID_WinSetExStyle, FID_WinSetEnabled, FID_WinSetRegion,
+	FID_WinMoveBottom = 0, FID_WinMoveTop,
+	FID_ProcessExist = 0, FID_ProcessClose, FID_ProcessWait, FID_ProcessWaitClose, 
+	FID_MonitorGet = 0, FID_MonitorGetWorkArea, FID_MonitorGetCount, FID_MonitorGetPrimary, FID_MonitorGetName, 
+	FID_OnExit = 0, FID_OnClipboardChange
+};
 
+#ifndef MINIDLL
 #define AHK_LV_SELECT       0x0100
 #define AHK_LV_DESELECT     0x0200
 #define AHK_LV_FOCUS        0x0400
@@ -557,9 +629,6 @@ enum DriveGetCmds {DRIVEGET_CMD_INVALID, DRIVEGET_CMD_LIST, DRIVEGET_CMD_FILESYS
 	, DRIVEGET_CMD_SERIAL, DRIVEGET_CMD_TYPE, DRIVEGET_CMD_STATUS
 	, DRIVEGET_CMD_STATUSCD, DRIVEGET_CMD_CAPACITY, DRIVEGET_CMD_SPACEFREE};
 
-enum WinSetAttributes {WINSET_INVALID, WINSET_TRANSPARENT, WINSET_TRANSCOLOR, WINSET_ALWAYSONTOP
-	, WINSET_STYLE, WINSET_EXSTYLE, WINSET_ENABLED, WINSET_REGION};
-
 
 class Label; // Forward declaration so that each can use the other.
 class Line
@@ -567,17 +636,17 @@ class Line
 private:
 	ResultType EvaluateCondition();
 	bool EvaluateLoopUntil(ResultType &aResult);
-	ResultType Line::PerformLoop(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
+	ResultType Line::PerformLoop(ResultToken *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
 		, __int64 aIterationLimit, bool aIsInfinite);
-	ResultType Line::PerformLoopFilePattern(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
+	ResultType Line::PerformLoopFilePattern(ResultToken *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
 		, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, LPTSTR aFilePattern);
-	ResultType PerformLoopReg(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
+	ResultType PerformLoopReg(ResultToken *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
 		, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, HKEY aRootKeyType, HKEY aRootKey, LPTSTR aRegSubkey);
-	ResultType PerformLoopParse(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil);
-	ResultType Line::PerformLoopParseCSV(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil);
-	ResultType PerformLoopReadFile(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil, TextStream *aReadFile, LPTSTR aWriteFileName);
-	ResultType PerformLoopWhile(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine); // Lexikos: ACT_WHILE.
-	ResultType PerformLoopFor(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil); // Lexikos: ACT_FOR.
+	ResultType PerformLoopParse(ResultToken *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil);
+	ResultType Line::PerformLoopParseCSV(ResultToken *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil);
+	ResultType PerformLoopReadFile(ResultToken *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil, TextStream *aReadFile, LPTSTR aWriteFileName);
+	ResultType PerformLoopWhile(ResultToken *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine); // Lexikos: ACT_WHILE.
+	ResultType PerformLoopFor(ResultToken *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil); // Lexikos: ACT_FOR.
 	ResultType Perform();
 	friend BIF_DECL(BIF_PerformAction);
 
@@ -586,7 +655,6 @@ private:
 	ResultType StringReplace();
 	ResultType SplitPath(LPTSTR aFileSpec);
 	ResultType PerformSort(LPTSTR aContents, LPTSTR aOptions);
-	ResultType GetKeyJoyState(LPTSTR aKeyName, LPTSTR aOption);
 	ResultType DriveSpace(LPTSTR aPath, bool aGetFreeSpace);
 	ResultType Drive(LPTSTR aCmd, LPTSTR aValue, LPTSTR aValue2);
 	ResultType DriveLock(TCHAR aDriveLetter, bool aLockIt);
@@ -612,8 +680,7 @@ private:
 	ResultType FileCreateDir(LPTSTR aDirSpec);
 	ResultType FileRead(LPTSTR aFilespec);
 	ResultType FileAppend(LPTSTR aFilespec, LPTSTR aBuf, LoopReadFileStruct *aCurrentReadFile);
-	ResultType WriteClipboardToFile(LPTSTR aFilespec);
-	ResultType ReadClipboardFromFile(HANDLE hfile);
+	ResultType WriteClipboardToFile(LPTSTR aFilespec, Var *aBinaryClipVar = NULL);
 	ResultType FileDelete();
 	ResultType FileRecycle(LPTSTR aFilePattern);
 	ResultType FileRecycleEmpty(LPTSTR aDriveLetter);
@@ -864,7 +931,7 @@ public:
 
 	static void FreeDerefBufIfLarge();
 
-	ResultType ExecUntil(ExecUntilMode aMode, ExprTokenType *apReturnValue = NULL, Line **apJumpToLine = NULL);
+	ResultType ExecUntil(ExecUntilMode aMode, ResultToken *aResultToken = NULL, Line **apJumpToLine = NULL);
 
 	// The following are characters that can't legally occur after an AND or OR.  It excludes all unary operators
 	// "!~*&-+" as well as the parentheses chars "()":
@@ -903,9 +970,9 @@ public:
 	double ArgIndexToDouble(int aArgIndex);
 	size_t ArgIndexLength(int aArgIndex);
 
-	ResultType ExpandArgs(ExprTokenType *aResultTokens = NULL);
+	ResultType ExpandArgs(ResultToken *aResultTokens = NULL);
 	VarSizeType GetExpandedArgSize(Var *aArgVar[]);
-	LPTSTR ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType *aResultToken
+	LPTSTR ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *aResultToken
 		, LPTSTR &aTarget, LPTSTR &aDerefBuf, size_t &aDerefBufSize, LPTSTR aArgDeref[], size_t aExtraSize
 		, Var **aArgVar = NULL);
 	ResultType ExpressionToPostfix(ArgStruct &aArg);
@@ -943,7 +1010,6 @@ public:
 			case ACT_STRINGLOWER:
 			case ACT_STRINGUPPER:
 			case ACT_STRINGREPLACE:
-			case ACT_GETKEYSTATE:
 			case ACT_CONTROLGETFOCUS:
 			case ACT_CONTROLGETTEXT:
 			case ACT_CONTROLGET:
@@ -1508,48 +1574,6 @@ public:
 		return DRIVEGET_CMD_INVALID;
 	}
 
-	static WinSetAttributes ConvertWinSetAttribute(LPTSTR aBuf)
-	{
-		if (!aBuf || !*aBuf) return WINSET_INVALID;
-		if (!_tcsicmp(aBuf, _T("Transparent"))) return WINSET_TRANSPARENT;
-		if (!_tcsicmp(aBuf, _T("TransColor"))) return WINSET_TRANSCOLOR;
-		if (!_tcsicmp(aBuf, _T("AlwaysOnTop"))) return WINSET_ALWAYSONTOP;
-		if (!_tcsicmp(aBuf, _T("Style"))) return WINSET_STYLE;
-		if (!_tcsicmp(aBuf, _T("ExStyle"))) return WINSET_EXSTYLE;
-		if (!_tcsicmp(aBuf, _T("Enabled"))) return WINSET_ENABLED;
-		if (!_tcsicmp(aBuf, _T("Region"))) return WINSET_REGION;
-		return WINSET_INVALID;
-	}
-
-
-	static WinGetCmds ConvertWinGetCmd(LPTSTR aBuf)
-	{
-		if (!aBuf || !*aBuf) return WINGET_CMD_ID;  // If blank, return the default command.
-		if (!_tcsicmp(aBuf, _T("ID"))) return WINGET_CMD_ID;
-		if (!_tcsicmp(aBuf, _T("IDLast"))) return WINGET_CMD_IDLAST;
-		if (!_tcsicmp(aBuf, _T("PID"))) return WINGET_CMD_PID;
-		if (!_tcsicmp(aBuf, _T("ProcessName"))) return WINGET_CMD_PROCESSNAME;
-		if (!_tcsicmp(aBuf, _T("ProcessPath"))) return WINGET_CMD_PROCESSPATH;
-		if (!_tcsicmp(aBuf, _T("Count"))) return WINGET_CMD_COUNT;
-		if (!_tcsicmp(aBuf, _T("List"))) return WINGET_CMD_LIST;
-		if (!_tcsicmp(aBuf, _T("MinMax"))) return WINGET_CMD_MINMAX;
-		if (!_tcsicmp(aBuf, _T("Style"))) return WINGET_CMD_STYLE;
-		if (!_tcsicmp(aBuf, _T("ExStyle"))) return WINGET_CMD_EXSTYLE;
-		if (!_tcsicmp(aBuf, _T("Transparent"))) return WINGET_CMD_TRANSPARENT;
-		if (!_tcsicmp(aBuf, _T("TransColor"))) return WINGET_CMD_TRANSCOLOR;
-		if (!_tcsnicmp(aBuf, _T("Controls"), 8))
-		{
-			aBuf += 8;
-			if (!*aBuf)
-				return WINGET_CMD_CONTROLLIST;
-			if (!_tcsicmp(aBuf, _T("Hwnd")))
-				return WINGET_CMD_CONTROLLISTHWND;
-			// Otherwise fall through to the below.
-		}
-		// Otherwise:
-		return WINGET_CMD_INVALID;
-	}
-
 	static ToggleValueType ConvertOnOff(LPTSTR aBuf, ToggleValueType aDefault = TOGGLE_INVALID)
 	// Returns aDefault if aBuf isn't either ON, OFF, or blank.
 	{
@@ -1866,14 +1890,16 @@ struct FuncParam
 	union {LPTSTR default_str; __int64 default_int64; double default_double;};
 };
 
-struct FuncCallData
+struct FuncResult : public ResultToken
 {
-	Func *mFunc; // If non-NULL, indicates this is a UDF whose vars will need to be freed/restored later.
-	VarBkp *mBackup; // For UDFs.
-	int mBackupCount;
-	FuncCallData() : mFunc(NULL), mBackup(NULL), mBackupCount(0) { }
-	~FuncCallData();
+	TCHAR mRetValBuf[MAX_NUMBER_SIZE];
+
+	FuncResult()
+	{
+		InitResult(mRetValBuf);
+	}
 };
+
 
 typedef BIF_DECL((* BuiltInFunctionType));
 
@@ -1881,12 +1907,21 @@ class Func : public IObject
 {
 public:
 	LPTSTR mName;
-	union {BuiltInFunctionType mBIF; Line *mJumpToLine;};
-	union {FuncParam *mParam; UCHAR *mOutputVars;}; // For UDFs, mParam will hold an array of FuncParams.
-	int mParamCount; // The number of items in the above array.  This is also the function's maximum number of params.
+	union {
+		struct { // User-defined functions.
+			Line *mJumpToLine;
+			FuncParam *mParam; // Holds an array of FuncParams (array length: mParamCount).
+			Object *mClass; // The class which this Func was defined in, if applicable.
+		};
+		struct { // Built-in functions.
+			BuiltInFunctionType mBIF;
+			UCHAR *mOutputVars; // String of indices indicating which params are output vars (for ACT_FUNC and BIF_PerformAction).
+			BuiltInFunctionID mID; // For code sharing: this function's ID in the group of functions which share the same C++ function.
+		};
+	};
+	int mParamCount; // The function's maximum number of parameters.  For UDFs, also the number of items in the mParam array.
 	int mMinParams;  // The number of mandatory parameters (populated for both UDFs and built-in's).
 	Label *mFirstLabel, *mLastLabel; // Linked list of private labels.
-	Object *mClass; // The class which this Func was defined in, if applicable.
 	Var **mGlobalVar; // Array of global declarations
 	Var **mVar, **mLazyVar; // Array of pointers-to-variable, allocated upon first use and later expanded as needed.
 	Var **mStaticVar, **mStaticLazyVar;
@@ -1923,16 +1958,18 @@ public:
 		return false;
 	}
 
-	bool Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount, bool aIsVariadic = false);
+	// bool result indicates whether aResultToken contains a value (i.e. false for FAIL/EARLY_EXIT).
+	bool Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, bool aIsVariadic = false);
+	bool Call(ResultToken &aResultToken, int aParamCount, ...);
 
-	ResultType Call(ExprTokenType *aResultToken) // Making this a function vs. inline doesn't measurably impact performance.
+// Macros for specifying arguments in Func::Call(aResultToken, aParamCount, ...)
+#define FUNC_ARG_INT(_arg)   SYM_INTEGER, static_cast<__int64>(_arg)
+#define FUNC_ARG_STR(_arg)   SYM_STRING,  static_cast<LPTSTR>(_arg)
+#define FUNC_ARG_FLOAT(_arg) SYM_FLOAT,   static_cast<double>(_arg)
+#define FUNC_ARG_OBJ(_arg)   SYM_OBJECT,  static_cast<IObject *>(_arg)
+
+	ResultType Call(ResultToken *aResultToken)
 	{
-		if (aResultToken) // L31: Return value is returned via token rather than char** to support objects (and binary numbers as an added benefit).
-		{
-			// Init to default in case function doesn't return a value or it EXITs or fails.
-			aResultToken->symbol = SYM_STRING;
-			aResultToken->marker = _T("");
-		}
 		// Launch the function similar to Gosub (i.e. not as a new quasi-thread):
 		// The performance gain of conditionally passing NULL in place of result (when this is the
 		// outermost function call of a line consisting only of function calls, namely ACT_EXPRESSION)
@@ -1991,7 +2028,7 @@ public:
 	}
 
 	// IObject.
-	ResultType STDMETHODCALLTYPE Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	ResultType STDMETHODCALLTYPE Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	ULONG STDMETHODCALLTYPE AddRef() { return 1; }
 	ULONG STDMETHODCALLTYPE Release() { return 1; }
 #ifdef CONFIG_DEBUGGER
@@ -2000,10 +2037,10 @@ public:
 
 	Func(LPTSTR aFuncName, bool aIsBuiltIn) // Constructor.
 		: mName(aFuncName) // Caller gave us a pointer to dynamic memory for this.
-		, mBIF(NULL)
-		, mParam(NULL), mParamCount(0), mMinParams(0)
+		, mBIF(NULL) // Also initializes mJumpToLine via union.
+		, mParam(NULL), mParamCount(0), mMinParams(0) // Also initializes mOutputVar via union (mParam).
 		, mFirstLabel(NULL), mLastLabel(NULL)
-		, mClass(NULL)
+		, mClass(NULL) // Also initializes mID via union.
 		, mVar(NULL), mVarCount(0), mVarCountMax(0), mLazyVar(NULL), mLazyVarCount(0)
 		, mStaticVar(NULL), mStaticVarCount(0), mStaticVarCountMax(0), mStaticLazyVar(NULL), mStaticLazyVarCount(0)
 		, mGlobalVar(NULL), mGlobalVarCount(0)
@@ -2022,15 +2059,17 @@ public:
 
 class ExprOpFunc : public Func
 {	// ExprOpFunc: Used in combination with SYM_FUNC to implement certain operations in expressions.
-	// These are not inserted into the script's function list, so mName is used only to pass a simple
-	// identifier to mBIF (currently only BIF_ObjInvoke).
+	// These are not inserted into the script's function list, so mName is used only by the debugger.
 public:
-	ExprOpFunc(BuiltInFunctionType aBIF, INT_PTR aID, int aMinParams = 1, int aParamCount = 1000)
-		: Func((LPTSTR)aID, true)
+	ExprOpFunc(BuiltInFunctionType aBIF, int aID)
+		: Func(_T("<object>"), true)
 	{
 		mBIF = aBIF;
-		mMinParams = aMinParams;	// These are only enforced in some cases.
-		mParamCount = aParamCount;	//
+		mID = (BuiltInFunctionID)aID;
+		// Allow any number of parameters, since these functions aren't called directly by users
+		// and might break the rules in some cases, such as Op_ObjGetInPlace() having 0 *visible*
+		// parameters but actually reading 2 which are then also passed to the next function call.
+		mParamCount = 1000;
 	}
 };
 
@@ -2041,6 +2080,7 @@ struct FuncEntry
 	BuiltInFunctionType mBIF;
 	UCHAR mMinParams, mMaxParams;
 	bool mHasReturn;
+	UCHAR mID;
 	UCHAR mOutputVars[MAX_FUNC_OUTPUT_VAR];
 };
 
@@ -2534,6 +2574,8 @@ public:
 	Object *mClassObject[MAX_NESTED_CLASSES]; // Class definition currently being parsed.
 	TCHAR mClassName[MAX_CLASS_NAME_LENGTH + 1]; // Only used during load-time.
 	Object *mUnresolvedClasses;
+	Property *mClassProperty;
+	LPTSTR mClassPropertyDef;
 
 	// These two track the file number and line number in that file of the line currently being loaded,
 	// which simplifies calls to ScriptError() and LineError() (reduces the number of params that must be passed).
@@ -2589,7 +2631,7 @@ public:
 #endif
 	HWND mNextClipboardViewer;
 	bool mOnClipboardChangeIsRunning;
-	Label *mOnClipboardChangeLabel, *mOnExitLabel;  // The label to run when the script terminates (NULL if none).
+	Func *mOnClipboardChangeFunc, *mOnExitFunc;  // The function to run when the script terminates (NULL if none).
 	ExitReasons mExitReason;
 
 	ScriptTimer *mFirstTimer, *mLastTimer;  // The first and last script timers in the linked list.
@@ -2676,6 +2718,7 @@ public:
 
 	ResultType DefineClass(LPTSTR aBuf);
 	ResultType DefineClassVars(LPTSTR aBuf, bool aStatic);
+	ResultType DefineClassProperty(LPTSTR aBuf);
 	Object *FindClass(LPCTSTR aClassName, size_t aClassNameLength = 0);
 	ResultType ResolveClasses();
 
@@ -2739,15 +2782,17 @@ public:
 
 	void PreprocessLocalVars(Func &aFunc, Var **aVarList, int &aVarCount);
 
-	static ResultType UnhandledException(ExprTokenType*& aToken, Line* aLine);
+	static ResultType UnhandledException(ResultToken*& aToken, Line* aLine);
 	static ResultType SetErrorLevelOrThrow() { return SetErrorLevelOrThrowBool(true); }
 	static ResultType SetErrorLevelOrThrowBool(bool aError);
 	static ResultType SetErrorLevelOrThrowInt(int aErrorValue, LPCTSTR aWhat = NULL);
 	static ResultType SetErrorLevelOrThrowStr(LPCTSTR aErrorValue, LPCTSTR aWhat = NULL);
 	static ResultType ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat = NULL, LPCTSTR aExtraInfo = _T(""));
-	static void FreeExceptionToken(ExprTokenType*& aToken);
+	static void FreeExceptionToken(ResultToken*& aToken);
 
 	#define SOUNDPLAY_ALIAS _T("AHK_PlayMe")  // Used by destructor and SoundPlay().
+
+	void EnableClipboardListener(bool aEnable);
 
 	Script();
 	~Script();
@@ -2810,7 +2855,6 @@ BIV_DECL_R (BIV_IconTip);
 BIV_DECL_R (BIV_IconFile);
 BIV_DECL_R (BIV_IconNumber);
 #endif
-BIV_DECL_R (BIV_ExitReason);
 BIV_DECL_R (BIV_Space_Tab);
 BIV_DECL_R (BIV_AhkVersion);
 BIV_DECL_R (BIV_AhkPath);
@@ -2886,12 +2930,6 @@ BIV_DECL_R (BIV_PriorKey);
 ////////////////////////
 // BUILT-IN FUNCTIONS //
 ////////////////////////
-// Caller has ensured that SYM_VAR's Type() is VAR_NORMAL and that it's either not an environment
-// variable or the caller wants environment variables treated as having zero length.
-#define EXPR_TOKEN_LENGTH(token_raw, token_as_string) \
-( (token_raw->symbol == SYM_VAR && !token_raw->var->IsBinaryClip()) \
-	? token_raw->var->Length()\
-	: _tcslen(token_as_string) )
 
 #ifdef ENABLE_DLLCALL
 bool IsDllArgTypeName(LPTSTR name);
@@ -2985,18 +3023,19 @@ BIF_DECL(BIF_Type);
 
 
 BIF_DECL(BIF_IsObject);
-BIF_DECL(BIF_ObjCreate);
-BIF_DECL(BIF_ObjArray);
+BIF_DECL(BIF_Object);
+BIF_DECL(BIF_Array);
 BIF_DECL(BIF_CriticalObject);
-BIF_DECL(BIF_ObjInvoke); // Pseudo-operator. See script_object.cpp for comments.
-BIF_DECL(BIF_ObjGetInPlace); // Pseudo-operator.
-BIF_DECL(BIF_ObjNew); // Pseudo-operator.
-BIF_DECL(BIF_ObjIncDec); // Pseudo-operator.
 BIF_DECL(BIF_ObjAddRefRelease);
 BIF_DECL(BIF_ObjRawSet);
 // Built-ins also available as methods -- these are available as functions for use primarily by overridden methods (i.e. where using the built-in methods isn't possible as they're no longer accessible).
 BIF_DECL(BIF_ObjXXX);
-BIF_DECL(BIF_ObjNewEnum);
+
+// Expression operators implemented via SYM_FUNC:
+BIF_DECL(Op_ObjInvoke);
+BIF_DECL(Op_ObjGetInPlace);
+BIF_DECL(Op_ObjIncDec);
+BIF_DECL(Op_ObjNew);
 
 
 // Advanced file IO interfaces
@@ -3030,6 +3069,8 @@ BIF_DECL(BIF_MonitorGet);
 
 BIF_DECL(BIF_PerformAction);
 
+BIF_DECL(BIF_OnExitOrClipboardChange);
+
 
 #define BIF_DECL_STRING_PARAM(n, name) \
 	TCHAR name##_buf[MAX_NUMBER_SIZE], \
@@ -3045,19 +3086,21 @@ BOOL TokenIsEmptyString(ExprTokenType &aToken);
 BOOL TokenIsEmptyString(ExprTokenType &aToken, BOOL aWarnUninitializedVar); // Same as TokenIsEmptyString but optionally warns if the token is an uninitialized var.
 __int64 TokenToInt64(ExprTokenType &aToken);
 double TokenToDouble(ExprTokenType &aToken, BOOL aCheckForHex = TRUE);
-LPTSTR TokenToString(ExprTokenType &aToken, LPTSTR aBuf = NULL);
-ResultType TokenToDoubleOrInt64(ExprTokenType &aToken);
+LPTSTR TokenToString(ExprTokenType &aToken, LPTSTR aBuf = NULL, size_t *aLength = NULL);
+ResultType TokenToDoubleOrInt64(const ExprTokenType &aInput, ExprTokenType &aOutput);
 IObject *TokenToObject(ExprTokenType &aToken); // L31
 Func *TokenToFunc(ExprTokenType &aToken);
-ResultType TokenSetResult(ExprTokenType &aResultToken, LPCTSTR aResult, size_t aResultLength = -1);
+ResultType TokenSetResult(ResultToken &aResultToken, LPCTSTR aValue, size_t aLength = -1);
 
 LPTSTR RegExMatch(LPTSTR aHaystack, LPTSTR aNeedleRegEx);
 void SetWorkingDir(LPTSTR aNewDir, bool aSetErrorLevel = true);
 int ConvertJoy(LPTSTR aBuf, int *aJoystickID = NULL, bool aAllowOnlyButtons = false);
 bool ScriptGetKeyState(vk_type aVK, KeyStateTypes aKeyStateType);
-double ScriptGetJoyState(JoyControls aJoy, int aJoystickID, ExprTokenType &aToken, bool aUseBoolForUpDown);
+bool ScriptGetJoyState(JoyControls aJoy, int aJoystickID, ExprTokenType &aToken, LPTSTR aBuf);
 
 HWND DetermineTargetWindow(ExprTokenType *aParam[], int aParamCount);
+
+LPTSTR GetExitReasonString(ExitReasons aExitReason);
 
 #endif
 
