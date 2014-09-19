@@ -299,8 +299,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 						memmove(params + 1, params, actual_param_count * sizeof(ExprTokenType *));
 					// Insert an empty string:
 					params[0] = (ExprTokenType *)_alloca(sizeof(ExprTokenType));
-					params[0]->symbol = SYM_STRING;
-					params[0]->marker = _T("");
+					params[0]->SetValue(_T(""), 0);
 					params--; // Include the object, which is already in the right place.
 					actual_param_count += 2;
 					extern ExprOpFunc g_ObjCall;
@@ -987,12 +986,15 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 					// Binary clipboard is ignored because it's documented that except for certain features,
 					// binary clipboard variables are seen only up to the first binary zero (mostly to
 					// simplify the code).
-					if (sym_assign_var // Since "right" is being appended onto a variable ("left"), an optimization is possible.
-						&& sym_assign_var->AppendIfRoom(right_string, (VarSizeType)right_length)) // But only if the target variable has enough remaining capacity.
+					if (sym_assign_var && sym_assign_var->Type() == VAR_NORMAL) // Since "right" is being appended onto a variable ("left"), an optimization is possible.
 					{
-						// AppendIfRoom() always fails for VAR_CLIPBOARD, so below won't execute for it (which is
-						// good because don't want clipboard to stay as SYM_VAR after the assignment. This is
-						// because it simplifies the code not to have to worry about VAR_CLIPBOARD in BIFs, etc.)
+						// Append() is particularly efficient when the var already has room to append the value,
+						// but improves performance even in other cases by avoiding an extra memcpy and allocating
+						// extra space for future expansion.  It is necessary to completely handle this case here
+						// because otherwise this_token might need to be put into to_mem[], in which case it must
+						// not be converted to SYM_VAR.
+						if (!sym_assign_var->Append(right_string, (VarSizeType)right_length))
+							goto abort;
 						this_token.var = sym_assign_var; // Make the result a variable rather than a normal operand so that its
 						this_token.symbol = SYM_VAR;     // address can be taken, and it can be passed ByRef. e.g. &(x+=1)
 						goto push_this_token; // Skip over all other sections such as subsequent checks of sym_assign_var because it was all taken care of here.
@@ -1140,7 +1142,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 				|| this_token.symbol <= SYM_BITSHIFTRIGHT && this_token.symbol >= SYM_BITOR) // Check upper bound first for short-circuit performance (because operators like +-*/ are much more frequently used).
 			{
 				// Because both are integers and the operation isn't division, the result is integer.
-				// The result is also an integer for the bitwise operations listed in the if-statementto_free[i]
+				// The result is also an integer for the bitwise operations listed in the if-statement
 				// above.  This is because it is not legal to perform ~, &, |, or ^ on doubles.  Any
 				// floating point operands are truncated to integers prior to doing the bitwise operation.
 				right_int64 = TokenToInt64(right); // It can't be SYM_STRING because in here, both right and
@@ -1525,7 +1527,7 @@ normal_end_skip_output_var:
 	{
 		if (to_free[i]->symbol == SYM_STRING)
 			free(to_free[i]->marker);
-		else if (to_free[i]->symbol == SYM_OBJECT)
+		else // SYM_OBJECT
 			to_free[i]->object->Release();
 	}
 
@@ -1758,10 +1760,7 @@ bool Func::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCo
 		{
 			// If the caller supplied an array of parameters, copy any key-value pairs with non-numbered keys;
 			// otherwise, just create a new object.  Either way, numbered params will be inserted below.
-			ExprTokenType *aToken = new ExprTokenType();
-			aToken->symbol = SYM_STRING;
-			aToken->marker = _T("");
-			Object *vararg_obj = param_obj ? param_obj->Clone(&aToken,1) : Object::Create();
+			Object *vararg_obj = param_obj ? param_obj->Clone(NULL,true) : Object::Create();
 			if (!vararg_obj)
 			{
 				aResultToken.Error(ERR_OUTOFMEM, mName); // Abort thread.

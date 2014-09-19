@@ -25,13 +25,7 @@ TCHAR Var::sEmptyString[] = _T(""); // For explanation, see its declaration in .
 
 ResultType Var::AssignHWND(HWND aWnd)
 {
-	// For backward compatibility, tradition, and the fact that operations involving HWNDs tend not to
-	// be nearly as performance-critical as pure-math expressions, HWNDs are stored as a hex string,
-	// and thus UpdateBinaryInt64() isn't called here.
-	// Older comment: Always assign as hex for better compatibility with Spy++ and other apps that
-	// report window handles.
-	TCHAR buf[MAX_INTEGER_SIZE];
-	return Assign(HwndToString(aWnd, buf));
+	return Assign((size_t)aWnd);
 }
 
 
@@ -78,7 +72,7 @@ ResultType Var::Assign(ExprTokenType &aToken)
 	case SYM_FLOAT:   return Assign(aToken.value_double); // Listed last because it's probably the least common.
 	}
 	// Since above didn't return, it can only be SYM_STRING.
-	return Assign(aToken.marker);
+	return Assign(aToken.marker, aToken.marker_length);
 }
 
 
@@ -87,16 +81,16 @@ ResultType Var::AssignClipboardAll()
 // Caller must ensure that "this" is a normal variable or the clipboard (though if it's the clipboard, this
 // function does nothing).
 {
-	if (mType == VAR_ALIAS)
-		// For maintainability, it seems best not to use the following method:
-		//    Var &var = *(mType == VAR_ALIAS ? mAliasFor : this);
-		// If that were done, bugs would be easy to introduce in a long function like this one
-		// if your forget at use the implicit "this" by accident.  So instead, just call self.
-		return mAliasFor->AssignClipboardAll();
 	if (mType == VAR_CLIPBOARD) // Seems pointless to do Clipboard:=ClipboardAll, and the below isn't equipped
 		return OK;              // to handle it, so make this have no effect.
 	if (mType == VAR_VIRTUAL)
 		return g_script.ScriptError(_T("Bad assignment.")); // Short message since rare.
+
+	return GetClipboardAll(mType == VAR_ALIAS ? mAliasFor : this, NULL, NULL);
+}
+
+ResultType Var::GetClipboardAll(Var *aOutputVar, void **aData, size_t *aDataSize)
+{
 	if (!g_clip.Open())
 		return g_script.ScriptError(CANT_OPEN_CLIPBOARD_READ);
 
@@ -153,6 +147,7 @@ ResultType Var::AssignClipboardAll()
 	UINT format;
 	VarSizeType space_needed;
 	UINT dib_format_to_omit = 0;
+	BOOL save_null_data;
 	// Start space_needed off at 4 to allow room for guaranteed final termination of the variable's contents.
 	// The termination must be of the same size as format because a single-byte terminator would
 	// be read in as a format of 0x00?????? where ?????? is an access violation beyond the buffer.
@@ -181,7 +176,7 @@ ResultType Var::AssignClipboardAll()
 		// text). Because of this example, it seems likely it can fail in other places or under
 		// other circumstances, perhaps by design of the app. Therefore, be tolerant of failures
 		// because partially saving the clipboard seems much better than aborting the operation.
-		if (hglobal = g_clip.GetClipboardDataTimeout(format))
+		if (hglobal = g_clip.GetClipboardDataTimeout(format, &save_null_data))
 		{
 			space_needed += (VarSizeType)(sizeof(format) + sizeof(size) + GlobalSize(hglobal)); // The total amount of storage space required for this item.
 			if (!dib_format_to_omit)
@@ -200,20 +195,41 @@ ResultType Var::AssignClipboardAll()
 			//		meta_format_to_omit = CF_ENHMETAFILE;
 			//}
 		}
+		else if (save_null_data)
+			space_needed += (VarSizeType)(sizeof(format) + sizeof(size));
 		//else omit this format from consideration.
 	}
 
 	if (space_needed == sizeof(format)) // This works because even a single empty format requires space beyond sizeof(format) for storing its format+size.
 	{
 		g_clip.Close();
-		return Assign(); // Nothing on the clipboard, so just make the variable blank.
+		if (aOutputVar)
+			return aOutputVar->Assign(); // Nothing on the clipboard, so just make the variable blank.
+		*aData = NULL;
+		*aDataSize = 0;
+		return OK;
 	}
 
+	LPVOID binary_contents; 
+	
 	// Resize the output variable, if needed:
-	if (!SetCapacity(space_needed, true))
+	if (aOutputVar)
+		if (aOutputVar->SetCapacity(space_needed, true))
+		{
+			binary_contents = aOutputVar->mCharContents; // mCharContents vs. Contents() is okay since aOutputVar type is never VAR_ALIAS.
+			space_needed = aOutputVar->mByteCapacity; // Update to actual granted capacity, which might be a little larger than requested.
+		}
+		else
+			binary_contents = NULL; // For detection below.
+	else
+		*aData = binary_contents = malloc(space_needed);
+	
+	if (!binary_contents)
 	{
 		g_clip.Close();
-		return FAIL; // Above should have already reported the error.
+		if (aOutputVar)
+			return FAIL; // Above should have already reported the error.
+		return g_script.ScriptError(ERR_OUTOFMEM);
 	}
 
 	// Retrieve and store all the clipboard formats.  Because failures of GetClipboardData() are now
@@ -223,7 +239,6 @@ ResultType Var::AssignClipboardAll()
 	// Otherwise, the variable's mLength member would be set to something too high (the estimate),
 	// which might cause problems elsewhere.
 	LPVOID hglobal_locked;
-	LPVOID binary_contents = mByteContents; // mContents vs. Contents() is okay due to the call to Assign() above.
 	VarSizeType added_size, actual_space_used;
 	for (actual_space_used = sizeof(format), format = 0; format = EnumClipboardFormats(format);)
 	{
@@ -244,14 +259,20 @@ ResultType Var::AssignClipboardAll()
 		// size, it does happen, at least in MS Word and for CF_BITMAP.  Therefore, in order to save
 		// the clipboard as accurately as possible, also save formats whose size is zero.  Note that
 		// GlobalLock() fails to work on hglobals of size zero, so don't do it for them.
-		if ((hglobal = g_clip.GetClipboardDataTimeout(format)) // This and the next line rely on short-circuit boolean order.
-			&& (!(size = GlobalSize(hglobal)) || (hglobal_locked = GlobalLock(hglobal)))) // Size of zero or lock succeeded: Include this format.
+		hglobal = g_clip.GetClipboardDataTimeout(format, &save_null_data);
+		if (hglobal)
+			size = GlobalSize(hglobal);
+		else if (save_null_data)
+			size = 0; // This format usually has NULL data.
+		else
+			continue; // GetClipboardData() failed: skip this format.
+		if (!size || (hglobal_locked = GlobalLock(hglobal))) // Size of zero or lock succeeded: Include this format.
 		{
 			// Any changes made to how things are stored here should also be made to the size-estimation
 			// phase so that space_needed matches what is done here:
 			added_size = (VarSizeType)(sizeof(format) + sizeof(size) + size);
 			actual_space_used += added_size;
-			if (actual_space_used > mByteCapacity) // Tolerate incorrect estimate by omitting formats that won't fit. Note that mCapacity is the granted capacity, which might be a little larger than requested.
+			if (actual_space_used > space_needed) // Tolerate incorrect estimate by omitting formats that won't fit.
 				actual_space_used -= added_size;
 			else
 			{
@@ -272,9 +293,26 @@ ResultType Var::AssignClipboardAll()
 	}
 	g_clip.Close();
 	*(UINT *)binary_contents = 0; // Final termination (must be UINT, see above).
-	mByteLength = actual_space_used;
-	mAttrib |= VAR_ATTRIB_BINARY_CLIP; // VAR_ATTRIB_CONTENTS_OUT_OF_DATE and VAR_ATTRIB_CACHE were already removed by earlier call to Assign().
 
+	if (aOutputVar)
+	{
+#ifdef UNICODE
+		// v1.1.16: Although it might change the behaviour of some scripts, it seems safer
+		// to use the "rounded up" size than an odd byte count, which would cause the last
+		// byte to be truncated due to integer division in Var::CharLength().
+		if (actual_space_used & 1) // Odd number of bytes.
+		{
+			// Add one byte to form a complete WCHAR.  This should always be safe because
+			// aOutputVar->SetCapacity() always allocates an even number of bytes.
+			((LPBYTE)binary_contents)[sizeof(UINT)] = 0; // binary_contents points at the "final termination" UINT.
+			++actual_space_used;
+		}
+#endif
+		aOutputVar->mByteLength = actual_space_used;
+		aOutputVar->mAttrib |= VAR_ATTRIB_BINARY_CLIP; // VAR_ATTRIB_CONTENTS_OUT_OF_DATE and VAR_ATTRIB_CACHE were already removed by earlier call to SetCapacity().
+	}
+	else
+		*aDataSize = (DWORD)actual_space_used;
 	return OK;
 }
 
@@ -300,7 +338,7 @@ ResultType Var::AssignBinaryClip(Var &aSourceVar)
 	{
 		if (this == &source_var) // i.e. source == destination.  Aliases were already resolved.
 			return OK;
-		if (!SetCapacity(source_var.mByteLength, true)) // source_var.mLength vs. Length() is okay (see above).
+		if (!SetCapacity(source_var.mByteLength, true)) // Also sets length.  source_var.mByteLength vs. Length() is okay (see above).
 			return FAIL; // Above should have already reported the error.
 		memcpy(mByteContents, source_var.mByteContents, source_var.mByteLength + sizeof(TCHAR)); // Add sizeof(TCHAR) not sizeof(format). Contents() vs. a variable for the same because mContents might have just changed due Assign() above.
 		mAttrib |= VAR_ATTRIB_BINARY_CLIP; // VAR_ATTRIB_CACHE and VAR_ATTRIB_CONTENTS_OUT_OF_DATE were already removed by earlier call to Assign().
@@ -316,14 +354,19 @@ ResultType Var::AssignBinaryClip(Var &aSourceVar)
 	}
 
 	// SINCE ABOVE DIDN'T RETURN, A VARIABLE CONTAINING BINARY CLIPBOARD DATA IS BEING COPIED BACK ONTO THE CLIPBOARD.
+	return SetClipboardAll(source_var.mByteContents, source_var.mByteLength);
+}
+
+ResultType Var::SetClipboardAll(void *aData, size_t aDataSize)
+{
 	if (!g_clip.Open())
 		return g_script.ScriptError(CANT_OPEN_CLIPBOARD_WRITE);
 	EmptyClipboard(); // Failure is not checked for since it's probably impossible under these conditions.
 
 	// In case the variable contents are incomplete or corrupted (such as having been read in from a
 	// bad file with FileRead), prevent reading beyond the end of the variable:
-	LPVOID next, binary_contents = source_var.mByteContents; // Fix for v1.0.47.05: Changed aSourceVar to source_var in this line and the next.
-	LPVOID binary_contents_max = (char *)binary_contents + source_var.mByteLength; // The last accessible byte, which should be the last byte of the (UINT)0 terminator.
+	LPVOID next, binary_contents = aData;
+	LPVOID binary_contents_max = (char *)binary_contents + aDataSize; // The last accessible byte, which should be the last byte of the (UINT)0 terminator.
 	HGLOBAL hglobal;
 	LPVOID hglobal_locked;
 	UINT format;
@@ -339,12 +382,17 @@ ResultType Var::AssignBinaryClip(Var &aSourceVar)
 		binary_contents = next;
 		if ((next = (char *)binary_contents + size) > binary_contents_max)
 			break;
-		if (   !(hglobal = GlobalAlloc(GMEM_MOVEABLE, size))   ) // size==0 is okay.
+		// v1.1.16: Always allocate a non-zero amount, since testing shows that SetClipboardData()
+		// fails when passed a zero-length HGLOBAL, at least on Windows 8.  Zero-initialize using
+		// GMEM_ZEROINIT since GlobalAlloc() might return a block larger than requested.  Although
+		// it isn't necessarily safer (depending on what programs do with this format), it should
+		// at least be more consistent than leaving it uninitialized, if anything ever uses it.
+		if (   !(hglobal = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, size + (size == 0)))   )
 		{
 			g_clip.Close();
 			return g_script.ScriptError(ERR_OUTOFMEM); // Short msg since so rare.
 		}
-		if (size) // i.e. Don't try to lock memory of size zero.  It won't work and it's not needed.
+		if (size) // i.e. Don't try to lock memory of size zero.  It's not needed.
 		{
 			if (   !(hglobal_locked = GlobalLock(hglobal))   )
 			{
@@ -515,7 +563,7 @@ ResultType Var::AssignString(LPCTSTR aBuf, VarSizeType aLength, bool aExactSize)
 				else if (new_size < _TSIZE(1600 * 1024))  // 160 to 1600 KB -> 16 KB extra
 					new_size += _TSIZE(16 * 1024);
 				else if (new_size < _TSIZE(6400 * 1024)) // 1600 to 6400 KB -> 1% extra
-					new_size = (size_t)(new_size * 1.01);
+					new_size += (new_size / 100); // Produces smaller code than (new_size * 1.01) and benchmarks the same.
 				else  // 6400 KB or more: Cap the extra margin at some reasonable compromise of speed vs. mem usage: 64 KB
 					new_size += _TSIZE(64 * 1024);
 			}
@@ -528,19 +576,29 @@ ResultType Var::AssignString(LPCTSTR aBuf, VarSizeType aLength, bool aExactSize)
 				free(mByteContents); // The other members are left temporarily out-of-sync for performance (they're resync'd only if an error occurs).
 			//else mContents contains a "" or it points to memory on SimpleHeap, so don't attempt to free it.
 
-			if (   (ptrdiff_t)new_size < 0 || !(new_mem = (char *)malloc(new_size))   ) // v1.0.44.10: Added a sanity limit of 2 GB so that small negatives like VarSetCapacity(Var, -2) [and perhaps other callers of this function] don't crash.
+			if (  !(new_mem = (char *)malloc(new_size))  )
 			{
 				if (memory_was_freed) // Resync members to reflect the fact that it was freed (it's done this way for performance).
 				{
 					mByteCapacity = 0;             // Invariant: Anyone setting mCapacity to 0 must also set
 					mCharContents = sEmptyString;  // mContents to the empty string.
-					mByteLength = 0;               // mAttrib was already updated higher above.
 				}
-				// IMPORTANT: else it's the empty string (a constant) or it points to memory on SimpleHeap,
-				// so don't change mContents/Capacity (that would cause a memory leak for reasons described elsewhere).
-				// Also, don't bother making the variable blank and its length zero.  Just leave its contents
-				// untouched due to the rarity of out-of-memory and the fact that the script thread will be terminated
-				// anyway, so in most cases won't care what the contents are.
+				else
+				{
+					// IMPORTANT: It's the empty string (a constant) or it points to memory on SimpleHeap, so don't
+					// change mContents/Capacity (that would cause a memory leak for reasons described elsewhere).
+					// Make the var empty for the following reasons:
+					//  1) This condition could be caused by the script requesting a very high (possibly invalid)
+					//     capacity with VarSetCapacity().  The script might be handling the failure using TRY/CATCH,
+					//     so we want the result to be sane.
+					//  2) It's safer and more maintainable.  For instance, VarSetCapacity() sets length to 0, which
+					//     can produce bad/undefined results if there is no null-terminator at mCharContents[Length()]
+					//     as some other parts of the code assume.
+					//  3) It's more consistent.  If this var contained a binary number or object, it has already
+					//     been cleared by "mAttrib &=" above.
+					*mCharContents = '\0'; // If it's sEmptyString, that's okay too because it's writable.
+				}
+				mByteLength = 0; // mAttrib was already updated higher above.
 				return g_script.ScriptError(ERR_OUTOFMEM); // since an error is most likely to occur at runtime.
 			}
 
@@ -579,7 +637,7 @@ ResultType Var::AssignString(LPCTSTR aBuf, VarSizeType aLength, bool aExactSize)
 	{
 		// Init for greater robustness/safety (the ongoing conflict between robustness/redundancy and performance).
 		// This has been in effect for so long that some callers probably rely on it.
-		*mCharContents = '\0'; // If it's sEmptyVar, that's okay too because it's writable.
+		*mCharContents = '\0'; // If it's sEmptyString, that's okay too because it's writable.
 		// We've done everything except the actual assignment.  Let the caller handle that.
 		// Also, the length will be set below to the expected length in case the caller
 		// doesn't override this.
@@ -594,6 +652,32 @@ ResultType Var::AssignString(LPCTSTR aBuf, VarSizeType aLength, bool aExactSize)
 
 	// Writing to union is safe because above already ensured that "this" isn't an alias.
 	mByteLength = aLength * sizeof(TCHAR); // aLength was verified accurate higher above.
+	return OK;
+}
+
+
+
+ResultType Var::AssignSkipAddRef(IObject *aValueToAssign)
+{
+	// Relies on the fact that aliases can't point to other aliases (enforced by UpdateAlias()).
+	Var &var = *(mType == VAR_ALIAS ? mAliasFor : this);
+
+	if (var.mType != VAR_NORMAL)
+	{
+		aValueToAssign->Release();
+		return g_script.ScriptError(ERR_INVALID_VALUE, _T("An object."));
+	}
+
+	var.Free(); // If var contains an object, this will Release() it.  It will also clear any string contents and free memory if appropriate.
+		
+	var.mObject = aValueToAssign;
+		
+	// Already done by Free() above:
+	//mAttrib &= ~(VAR_ATTRIB_OFTEN_REMOVED | VAR_ATTRIB_UNINITIALIZED);
+
+	// Mark this variable to indicate it contains an object (objects are never considered numeric).
+	var.mAttrib |= VAR_ATTRIB_IS_OBJECT | VAR_ATTRIB_NOT_NUMERIC;
+
 	return OK;
 }
 
@@ -838,6 +922,34 @@ ResultType Var::AppendIfRoom(LPTSTR aStr, VarSizeType aLength)
 	// but it might not be perfect since corruption is so rare).  Also remove the other flags that are no longer
 	// appropriate:
 	var.mAttrib &= ~VAR_ATTRIB_OFTEN_REMOVED; // This also removes VAR_ATTRIB_NOT_NUMERIC because appending some digits to an empty variable would make it numeric.
+	return OK;
+}
+
+
+
+ResultType Var::Append(LPTSTR aStr, VarSizeType aLength)
+// Caller must ensure that Type() == VAR_NORMAL.
+{
+	if (mType == VAR_ALIAS)
+		return mAliasFor->Append(aStr, aLength);
+	if (AppendIfRoom(aStr, aLength))
+		return OK;
+	// Since above didn't return, we need to allocate space and postpone freeing our current value
+	// until after it is copied into the new buffer.
+	LPTSTR old_contents = mCharContents; // Caller has ensured UpdateContents() was called if necessary.
+	VarSizeType old_length = _CharLength();
+	VarSizeType old_capacity = (mHowAllocated == ALLOC_MALLOC) ? mByteCapacity : 0;
+	if (old_capacity)
+		mByteCapacity = 0; // Prevent the call below from freeing it.
+	if (!AssignString(NULL, _CharLength() + aLength))
+	{
+		mByteCapacity = old_capacity; // Restore this since the contents are being left as is.
+		return FAIL;
+	}
+	tmemcpy(mCharContents, old_contents, old_length);
+	tmemcpy(mCharContents + old_length, aStr, aLength + 1);
+	if (old_capacity)
+		free(old_contents);
 	return OK;
 }
 
@@ -1125,4 +1237,17 @@ __forceinline void Var::MaybeWarnUninitialized()
 		//else
 			g_script.WarnUninitializedVar(this);
 	}
+}
+
+
+
+LPTSTR ResultToken::Malloc(LPTSTR aValue, size_t aLength)
+{
+	if (aLength == -1)
+		aLength = _tcslen(aValue);
+	if (  !(mem_to_free = tmalloc(aLength + 1))  )
+		return NULL;
+	symbol = SYM_STRING;
+	marker_length = aLength;
+	return tmemcpy(marker = mem_to_free, aValue, aLength + 1); // +1 to include the null-terminator.
 }

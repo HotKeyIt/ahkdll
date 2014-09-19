@@ -253,6 +253,8 @@ public:
 	ResultType AssignHWND(HWND aWnd);
 	ResultType Assign(Var &aVar);
 	ResultType Assign(ExprTokenType &aToken);
+	static ResultType GetClipboardAll(Var *aOutputVar, void **aData, size_t *aDataSize);
+	static ResultType SetClipboardAll(void *aData, size_t aDataSize);
 	ResultType AssignClipboardAll();
 	ResultType AssignBinaryClip(Var &aSourceVar);
 	// Assign(char *, ...) has been break into four methods below.
@@ -328,23 +330,7 @@ public:
 		return OK;
 	}
 
-	ResultType AssignSkipAddRef(IObject *aValueToAssign)
-	{
-		// Relies on the fact that aliases can't point to other aliases (enforced by UpdateAlias()).
-		Var &var = *(mType == VAR_ALIAS ? mAliasFor : this);
-		if (var.mType == VAR_VIRTUAL)
-		{
-			// Virtual vars don't accept objects. Must also be careful not to overwrite mVV union.
-			return var.mVV->Set(_T(""), var.mName);
-		}
-		var.Free(); // If var contains an object, this will Release() it.  It will also clear any string contents and free memory if appropriate.
-		var.mObject = aValueToAssign;
-		// Already done by Free() above:
-		//mAttrib &= ~VAR_ATTRIB_OFTEN_REMOVED;
-		// Mark this variable to indicate it contains an object (objects are never considered numeric).
-		var.mAttrib |= VAR_ATTRIB_IS_OBJECT | VAR_ATTRIB_NOT_NUMERIC;
-		return OK;
-	}
+	ResultType AssignSkipAddRef(IObject *aValueToAssign);
 
 	inline ResultType Assign(IObject *aValueToAssign)
 	{
@@ -472,35 +458,83 @@ public:
 			break;
 		default: // Not a pure number.
 			aToken.marker = _T(""); // For completeness.  Some callers such as BIF_Abs() rely on this being done.
+			aToken.marker_length = 0;
 			return FAIL;
 		}
 		return OK; // Since above didn't return, indicate success.
 	}
 
-	void ToToken(ExprTokenType &aToken)
+	void ToTokenSkipAddRef(ExprTokenType &aToken)
 	// See ToDoubleOrInt64 for comments.
 	{
 		Var &var = *(mType == VAR_ALIAS ? mAliasFor : this);
 		switch (var.mAttrib & VAR_ATTRIB_TYPES)
 		{
 		case VAR_ATTRIB_IS_INT64:
-			aToken.symbol = SYM_INTEGER;
-			aToken.value_int64 = var.mContentsInt64;
+			aToken.SetValue(var.mContentsInt64);
 			return;
 		case VAR_ATTRIB_IS_DOUBLE:
-			aToken.symbol = SYM_FLOAT;
-			aToken.value_double = var.mContentsDouble;
+			aToken.SetValue(var.mContentsDouble);
 			return;
 		case VAR_ATTRIB_IS_OBJECT:
-			aToken.symbol = SYM_OBJECT;
-			aToken.object = var.mObject;
-			aToken.object->AddRef();
+			aToken.SetValue(var.mObject);
 			return;
 		default:
 			// VAR_ATTRIB_BINARY_CLIP or 0.
-			aToken.symbol = SYM_STRING;
-			aToken.marker = var.Contents();
+			aToken.SetValue(var.Contents(), var.Length());
 		}
+	}
+
+	void ToToken(ExprTokenType &aToken)
+	{
+		ToTokenSkipAddRef(aToken);
+		if (aToken.symbol == SYM_OBJECT)
+			aToken.object->AddRef();
+	}
+
+	bool MoveMemToResultToken(ResultToken &aResultToken)
+	// Caller must ensure mType == VAR_NORMAL.
+	{
+		if (mHowAllocated == ALLOC_MALLOC // malloc() is our allocator...
+			&& ((mAttrib & (VAR_ATTRIB_IS_INT64 | VAR_ATTRIB_IS_DOUBLE | VAR_ATTRIB_IS_OBJECT | VAR_ATTRIB_UNINITIALIZED)) == 0)
+			&& mByteCapacity) // ...and we actually have memory allocated.
+		{
+			// Caller has determined that this var's value won't be needed anymore, so avoid
+			// an extra malloc and copy by moving this var's memory block into aResultToken:
+			aResultToken.StealMem(this);
+			return true;
+		}
+		return false;
+	}
+
+	bool ToReturnValue(ResultToken &aResultToken)
+	{
+		Var &var = *(mType == VAR_ALIAS ? mAliasFor : this);
+		// Caller may have checked the following, but check it anyway for maintainability:
+		if ((var.mAttrib & (VAR_ATTRIB_IS_INT64 | VAR_ATTRIB_IS_DOUBLE | VAR_ATTRIB_IS_OBJECT | VAR_ATTRIB_UNINITIALIZED)) != 0)
+		{
+			var.ToToken(aResultToken);
+			return true;
+		}
+		if (!var.IsNonStaticLocal())
+			return false;
+		// Var is local.  Since the function is returning, we won't be needing its value.
+		if (var.mHowAllocated == ALLOC_MALLOC && var.mByteCapacity)
+		{
+			// var.mCharContents was allocated with malloc(); pass it back to the caller.
+			aResultToken.StealMem(this);
+		}
+		else
+		{
+			// Copy contents into aResultToken.buf, which is always large enough because
+			// MAX_ALLOC_SIMPLE < MAX_NUMBER_LENGTH.  mCharContents is used vs Contents()
+			// because this isn't a number and therefore never needs UpdateContents().
+			// Although Contents() should be harmless, we want to be absolutely sure
+			// length isn't increased since that could cause buffer overflow.
+			memcpy(aResultToken.marker = aResultToken.buf, var.mCharContents, var.mByteLength + sizeof(TCHAR));
+			aResultToken.marker_length = var.mByteLength / sizeof(TCHAR);
+		}
+		return true;
 	}
 
 	void DisableSimpleMalloc()
@@ -527,6 +561,7 @@ public:
 	#define VAR_NEVER_FREE                     2
 	#define VAR_FREE_IF_LARGE                  3
 	void Free(int aWhenToFree = VAR_ALWAYS_FREE, bool aExcludeAliasesAndRequireInit = false);
+	ResultType Append(LPTSTR aStr, VarSizeType aLength);
 	ResultType AppendIfRoom(LPTSTR aStr, VarSizeType aLength);
 	void AcceptNewMem(LPTSTR aNewMem, VarSizeType aLength);
 	void SetLengthFromContents();
@@ -694,7 +729,7 @@ public:
 		//if (var.mType == VAR_NORMAL)
 		{
 			if (var.mAttrib & VAR_ATTRIB_CONTENTS_OUT_OF_DATE)
-				var.UpdateContents();  // Update mContents (and indirectly, mLength).
+				var.UpdateContents();  // Update mContents (and indirectly, mByteLength).
 			return var.mByteLength;
 		}
 		// Since the length of the clipboard isn't normally tracked, we just return a
@@ -916,5 +951,11 @@ public:
 #pragma pack(pop) // Calling pack with no arguments restores the default value (which is 8, but "the alignment of a member will be on a boundary that is either a multiple of n or a multiple of the size of the member, whichever is smaller.")
 
 #pragma warning(pop)
+
+inline void ResultToken::StealMem(Var *aVar)
+// Caller must ensure that aVar->mType == VAR_NORMAL and aVar->mHowAllocated == ALLOC_MALLOC.
+{
+	AcceptMem(aVar->StealMem(), aVar->Length());
+}
 
 #endif

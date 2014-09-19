@@ -28,8 +28,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 	
 	// following are used to find variable and also get size of a structure defined in variable
 	// this will hold the variable reference and offset that is given to size() to align if necessary in 64-bit
-	ResultType Result = OK;
-	ExprTokenType ResultToken;
+	ResultToken ResultToken;
 	ExprTokenType Var1,Var2,Var3;
 	ExprTokenType *param[] = {&Var1,&Var2,&Var3};
 	Var1.symbol = SYM_VAR;
@@ -350,7 +349,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 				{
 					param[1]->value_int64 = (__int64)ispointer ? 0 : offset;
 					param[2]->value_int64 = (__int64)&aligntotal;
-					BIF_sizeof(Result,ResultToken,param,ispointer ? 1 : 3);
+					BIF_sizeof(ResultToken,param,ispointer ? 1 : 3);
 					if (ResultToken.symbol != SYM_INTEGER)
 					{	// could not resolve structure
 						obj->Release();
@@ -439,7 +438,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 
 void Struct::ObjectToStruct(IObject *objfrom)
 {
-	ExprTokenType ResultToken, this_token,enum_token,param_tokens[3];
+	ResultToken Result, this_token,enum_token,param_tokens[3];
 	ExprTokenType *params[] = { param_tokens, param_tokens+1, param_tokens+2 };
 	TCHAR defbuf[MAX_PATH],buf[MAX_PATH];
 	int param_count = 3;
@@ -454,7 +453,7 @@ void Struct::ObjectToStruct(IObject *objfrom)
 	param_tokens[0].symbol = SYM_STRING;
 	param_tokens[0].marker = _T("_NewEnum");
 		
-	objfrom->Invoke(enum_token, ResultToken, IT_CALL, params, 1);
+	objfrom->Invoke(enum_token, Result, IT_CALL, params, 1);
 
 	if (enum_token.mem_to_free)
 		// Invoke returned memory for us to free.
@@ -483,7 +482,7 @@ void Struct::ObjectToStruct(IObject *objfrom)
 	param_tokens[2].var = var2;
 	param_tokens[2].mem_to_free = 0;
 
-	ExprTokenType result_token;
+	ResultToken result_token;
 	IObject &enumerator = *enum_token.object; // Might perform better as a reference?
 
 	this_token.symbol = SYM_OBJECT;
@@ -504,7 +503,7 @@ void Struct::ObjectToStruct(IObject *objfrom)
 		if (!next_returned_true)
 			break;
 
-		this->Invoke(ResultToken,this_token,IT_SET,params+1,2);
+		this->Invoke(Result,this_token,IT_SET,params+1,2);
 		
 		// release object if it was assigned prevoiously when calling enum.Next
 		if (var1->IsObject())
@@ -677,7 +676,7 @@ Struct *Struct::Clone(bool aIsDynamic)
 //
 
 ResultType STDMETHODCALLTYPE Struct::Invoke(
-                                            ExprTokenType &aResultToken,
+                                            ResultToken &aResultToken,
                                             ExprTokenType &aThisToken,
                                             int aFlags,
                                             ExprTokenType *aParam[],
@@ -688,13 +687,13 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 {
 	int ptrsize = sizeof(UINT_PTR);
     FieldType *field = NULL; // init to NULL to use in IS_INVOKE_CALL
-	ResultType Result = OK;
 
 	// Used to resolve dynamic structures
 	ExprTokenType Var1,Var2;
 	Var1.symbol = SYM_VAR;
 	Var2.symbol = SYM_INTEGER;
-	ExprTokenType *param[] = {&Var1,&Var2},ResultToken;
+	ExprTokenType *param[] = { &Var1, &Var2 };
+	ResultToken ResultToken;
 	
 	// used to clone a dynamic field or structure
 	Struct *objclone = NULL;
@@ -812,7 +811,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 				{	// use sizeof to find out the size of structure
 					param[0]->symbol = SYM_STRING;
 					Var1.marker = TokenToString(*param[1]);
-					BIF_sizeof(Result,ResultToken,param,1);
+					BIF_sizeof(ResultToken,param,1);
 				}
 			}
 			// Check if we have an array, if structure is not array and not pointer, assume array
@@ -1268,9 +1267,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 			{
 				if (aThisToken.symbol == SYM_OBJECT)
 					aThisToken.object->Release();
-				else
-					aThisToken.symbol = SYM_OBJECT;
-				aThisToken.object = objclone;
+				aThisToken.SetValue(objclone);
 				objclone->AddRef();
 			}
 			aResultToken.symbol = SYM_OBJECT;
@@ -1719,15 +1716,14 @@ bool Struct::SetInternalCapacity(IndexType new_capacity)
 	return true;
 }
 
-ResultType Struct::_NewEnum(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+ResultType Struct::_NewEnum(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
 	if (aParamCount == 0)
 	{
 		IObject *newenum;
 		if (newenum = new Enumerator(this))
 		{
-			aResultToken.symbol = SYM_OBJECT;
-			aResultToken.object = newenum;
+			aResultToken.SetValue(newenum);
 		}
 	}
 	return OK;
@@ -1742,16 +1738,14 @@ int Struct::Enumerator::Next(Var *aKey, Var *aVal)
 			aKey->Assign(field.key);
 		if (aVal)
 		{	// We need to invoke the structure to retrieve the value
-			ExprTokenType aResultToken;
+			ResultToken aResultToken;
 			// not sure about the buffer
 			TCHAR buf[MAX_PATH];
 			aResultToken.buf = buf;
 			ExprTokenType aThisToken;
-			aThisToken.symbol = SYM_OBJECT;
-			aThisToken.object = mObject;
+			aThisToken.SetValue(mObject);
 			ExprTokenType *aVarToken = new ExprTokenType();
-			aVarToken->symbol = SYM_STRING;
-			aVarToken->marker = field.key;
+			aVarToken->SetValue(field.key);
 			mObject->Invoke(aResultToken,aThisToken,0,&aVarToken,1);
 			switch (aResultToken.symbol)
 			{
@@ -1770,15 +1764,13 @@ int Struct::Enumerator::Next(Var *aKey, Var *aVal)
 			aKey->Assign(mOffset + 1); // mOffset starts at 1
 		if (aVal)
 		{	// again we need to invoke structure to retrieve the value
-			ExprTokenType aResultToken;
+			ResultToken aResultToken;
 			TCHAR buf[MAX_PATH];
 			aResultToken.buf = buf;
 			ExprTokenType aThisToken;
-			aThisToken.symbol = SYM_OBJECT;
-			aThisToken.object = mObject;
+			aThisToken.SetValue(mObject);
 			ExprTokenType *aVarToken = new ExprTokenType();
-			aVarToken->symbol = SYM_INTEGER;
-			aVarToken->value_int64 = mOffset + 1; // mOffset starts at 1
+			aVarToken->SetValue(mOffset + 1); // mOffset starts at 1
 			mObject->Invoke(aResultToken,aThisToken,0,&aVarToken,1);
 			switch (aResultToken.symbol)
 			{

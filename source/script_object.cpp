@@ -9,40 +9,7 @@
 
 
 //
-//	Internal: CallFunc - Call a script function with given params.
-//
-
-ResultType CallFunc(Func &aFunc, ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
-// Caller should pass an aResultToken with the usual setup:
-//	buf points to a buffer the called function may use: TCHAR[MAX_NUMBER_SIZE]
-//	mem_to_free is NULL; if it is non-NULL on return, caller (or caller's caller) is responsible for it.
-// Caller is responsible for making a persistent copy of the result, if appropriate.
-{
-	if (aParamCount < aFunc.mMinParams)
-		return g_script.ScriptError(ERR_TOO_FEW_PARAMS, aFunc.mName);
-
-	// When this variable goes out of scope, Var::FreeAndRestoreFunctionVars() is called (if appropriate):
-	FuncCallData func_call;
-	ResultType result;
-
-	// CALL THE FUNCTION.
-	if (aFunc.Call(func_call, result, aResultToken, aParam, aParamCount)
-		// Make return value persistent if applicable:
-		&& aResultToken.symbol == SYM_STRING && !aFunc.mIsBuiltIn)
-	{
-		// Make a persistent copy of the string in case it is the contents of one of the function's local variables.
-		if (!*aResultToken.marker)
-			aResultToken.marker = _T("");
-		else if (!TokenSetResult(aResultToken, aResultToken.marker))
-			result = FAIL;
-	}
-
-	return result;
-}
-	
-
-//
-// Object::Create - Called by BIF_ObjCreate to create a new object, optionally passing key/value pairs to set.
+// Object::Create - Called by BIF_Object to create a new object, optionally passing key/value pairs to set.
 //
 
 Object *Object::Create(ExprTokenType *aParam[], int aParamCount)
@@ -203,25 +170,13 @@ Object *Object::Clone(ExprTokenType *aParam[], int aParamCount)
 		switch (dst.symbol = src.symbol)
 		{
 		case SYM_STRING:
-			if (dst.size = src.size)
-			{
-				if (dst.marker = tmalloc(dst.size))
-				{
-					// Since user may have stored binary data, copy the entire field:
-					tmemcpy(dst.marker, src.marker, src.size);
-					continue;
-				}
-				// Since above didn't continue: allocation failed.
+			dst.string.Init();
+			if (!dst.Assign(src.string, src.string.Length(), true)) // Pass true to conserve memory (no space is allowed for future expansion).
 				++failure_count; // See failure comment further above.
-			}
-			dst.marker = Var::sEmptyString;
-			dst.size = 0;
 			break;
-
 		case SYM_OBJECT:
 			(dst.object = src.object)->AddRef();
 			break;
-
 		//case SYM_INTEGER:
 		//case SYM_FLOAT:
 		default:
@@ -267,6 +222,7 @@ void Object::ArrayToParams(ExprTokenType *token, ExprTokenType **param_list, int
 		{
 			token[param_index].symbol = SYM_MISSING;
 			token[param_index].marker = _T("");
+			token[param_index].marker_length = 0;
 		}
 		mFields[field_index].ToToken(token[param_index]);
 	}
@@ -293,7 +249,7 @@ ResultType Object::ArrayToStrings(LPTSTR *aStrings, int &aStringCount, int aStri
 	int i, j;
 	for (i = 0, j = 0; i < aStringsMax && j < mKeyOffsetObject; ++j)
 		if (SYM_STRING == mFields[j].symbol)
-			aStrings[i++] = mFields[j].marker;
+			aStrings[i++] = mFields[j].string;
 		else
 			return FAIL;
 	aStringCount = i;
@@ -318,36 +274,21 @@ bool Object::Delete()
 			// undesirable to call the super-class' __Delete() meta-function for this.
 			return ObjectBase::Delete();
 
-		ExprTokenType result_token, this_token, param_token, *param;
-		
-		TCHAR dummy_buf[MAX_NUMBER_SIZE];
-		result_token.marker = _T("");
-		result_token.symbol = SYM_STRING;
-		result_token.mem_to_free = NULL;
-		result_token.buf = dummy_buf; // This is required in the case where __Delete returns a short string (although there's no good reason to ever do that).
-
-		this_token.symbol = SYM_OBJECT;
-		this_token.object = this;
-
-		param_token.symbol = SYM_STRING;
-		param_token.marker = sMetaFuncName[3]; // "__Delete"
-		param = &param_token;
+		FuncResult result_token;
+		ExprTokenType this_token(this), param_token(_T("__Delete"), 8), *param = &param_token;
 
 		// L33: Privatize the last recursion layer's deref buffer in case it is in use by our caller.
-		// It's done here rather than in Var::FreeAndRestoreFunctionVars or CallFunc (even though the
-		// below might not actually call any script functions) because this function is probably
-		// executed much less often in most cases.
+		// It's done here rather than in Var::FreeAndRestoreFunctionVars (even though the below might
+		// not actually call any script functions) because this function is probably executed much
+		// less often in most cases.
 		PRIVATIZE_S_DEREF_BUF;
 
 		mBase->Invoke(result_token, this_token, IT_CALL | IF_METAOBJ, &param, 1);
 
 		DEPRIVATIZE_S_DEREF_BUF; // L33: See above.
 
-		// L33: Release result if given, although typically there should not be one:
-		if (result_token.mem_to_free)
-			free(result_token.mem_to_free);
-		if (result_token.symbol == SYM_OBJECT)
-			result_token.object->Release();
+		// Release result if any, although there should typically not be one:
+		result_token.Free();
 
 		// Above may pass the script a reference to this object to allow cleanup routines to free any
 		// associated resources.  Deleting it is only safe if the script no longer holds any references
@@ -386,11 +327,11 @@ Object::~Object()
 
 
 //
-// Object::Invoke - Called by BIF_ObjInvoke when script explicitly interacts with an object.
+// Object::Invoke
 //
 
 ResultType STDMETHODCALLTYPE Object::Invoke(
-                                            ExprTokenType &aResultToken,
+                                            ResultToken &aResultToken,
                                             ExprTokenType &aThisToken,
                                             int aFlags,
                                             ExprTokenType *aParam[],
@@ -401,8 +342,9 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 {
 	SymbolType key_type;
 	KeyType key;
-    FieldType *field;
+    FieldType *field, *prop_field;
 	IndexType insert_pos;
+	Property *prop = NULL; // Set default.
 
 	// If this is some object's base and is being invoked in that capacity, call
 	//	__Get/__Set/__Call as defined in this base object before searching further.
@@ -419,10 +361,10 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 			memcpy(meta_params + 1, aParam, aParamCount * sizeof(ExprTokenType*));
 
 			ResultType r = CallField(field, aResultToken, aThisToken, aFlags, meta_params, aParamCount + 1);
-			if (r == EARLY_RETURN)
+			//if (r == EARLY_RETURN)
 				// Propagate EARLY_RETURN in case this was the __Call meta-function of a
 				// "function object" which is used as a meta-function of some other object.
-				return EARLY_RETURN; // TODO: Detection of 'return' vs 'return empty_value'.
+				//return EARLY_RETURN; // return r below:
 			if (r != OK) // Likely FAIL or EARLY_EXIT.
 				return r;
 		}
@@ -432,28 +374,52 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 
 	if (IS_INVOKE_SET)
 	{
-		// Prior validation of ObjSet() param count ensures the result won't be negative:
+		// Due to the way expression parsing works, the result should never be negative
+		// (and any direct callers of Invoke must always pass aParamCount >= 1):
 		--param_count_excluding_rvalue;
-		
-		// Since defining base[key] prevents base.base.__Get and __Call from being invoked, it seems best
-		// to have it also block __Set. The code below is disabled to achieve this, with a slight cost to
-		// performance when assigning to a new key in any object which has a base object. (The cost may
-		// depend on how many key-value pairs each base object has.) Note that this doesn't affect meta-
-		// functions defined in *this* base object, since they were already invoked if present.
-		//if (IS_INVOKE_META)
-		//{
-		//	if (param_count_excluding_rvalue == 1)
-		//		// Prevent below from unnecessarily searching for a field, since it won't actually be assigned to.
-		//		// Relies on mBase->Invoke recursion using aParamCount and not param_count_excluding_rvalue.
-		//		param_count_excluding_rvalue = 0;
-		//	//else: Allow SET to operate on a field of an object stored in the target's base.
-		//	//		For instance, x[y,z]:=w may operate on x[y][z], x.base[y][z], x[y].base[z], etc.
-		//}
 	}
 	
 	if (param_count_excluding_rvalue)
 	{
-		field = FindField(*aParam[0], aResultToken.buf, /*out*/ key_type, /*out*/ key, /*out*/ insert_pos);
+		field = FindField(*aParam[0], _f_number_buf, /*out*/ key_type, /*out*/ key, /*out*/ insert_pos);
+
+		static Property sProperty;
+
+		// v1.1.16: Handle class property accessors:
+		if (field && field->symbol == SYM_OBJECT && *(void **)field->object == *(void **)&sProperty)
+		{
+			// The "type check" above is used for speed.  Simple benchmarks of x[1] where x := [[]]
+			// shows this check to not affect performance, whereas dynamic_cast<> hurt performance by
+			// about 25% and typeid()== by about 20%.  We can safely assume that the vtable pointer is
+			// stored at the beginning of the object even though it isn't guaranteed by the C++ standard,
+			// since COM fundamentally requires it:  http://msdn.microsoft.com/en-us/library/dd757710
+			prop = (Property *)field->object;
+			prop_field = field;
+			if (IS_INVOKE_SET ? prop->CanSet() : prop->CanGet())
+			{
+				if (aParamCount > 2 && IS_INVOKE_SET)
+				{
+					// Do some shuffling to put value before the other parameters.  This relies on above
+					// having verified that we're handling this invocation; otherwise the parameters would
+					// need to be swapped back later in case they're passed to a base's meta-function.
+					ExprTokenType *value = aParam[aParamCount - 1];
+					for (int i = aParamCount - 1; i > 1; --i)
+						aParam[i] = aParam[i - 1];
+					aParam[1] = value; // Corresponds to the setter's hidden "value" parameter.
+				}
+				ExprTokenType *name_token = aParam[0];
+				aParam[0] = &aThisToken; // For the hidden "this" parameter in the getter/setter.
+				// Pass IF_FUNCOBJ so that it'll pass all parameters to the getter/setter.
+				// For a functor Object, we would need to pass a token representing "this" Property,
+				// but since Property::Invoke doesn't use it, we pass our aThisToken for simplicity.
+				ResultType result = prop->Invoke(aResultToken, aThisToken, aFlags | IF_FUNCOBJ, aParam, aParamCount);
+				aParam[0] = name_token;
+				return result == EARLY_RETURN ? OK : result;
+			}
+			// The property was missing get/set (whichever this invocation is), so continue as
+			// if the property itself wasn't defined.
+			field = NULL;
+		}
 	}
 	else
 	{
@@ -473,19 +439,24 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 			// find and execute a specific meta-function (__new or __delete) but don't want any base
 			// object to invoke __call.  So if this is already a meta-invocation, don't change aFlags.
 			ResultType r = mBase->Invoke(aResultToken, aThisToken, aFlags | (IS_INVOKE_META ? 0 : IF_META), aParam, aParamCount);
-			if (r != INVOKE_NOT_HANDLED)
+			if (r != INVOKE_NOT_HANDLED // Base handled it.
+				|| !param_count_excluding_rvalue) // Nothing left to do in this case.
 				return r;
 
 			// Since the above may have inserted or removed fields (including the specified one),
 			// insert_pos may no longer be correct or safe.  Updating field also allows a meta-function
 			// to initialize a field and allow processing to continue as if it already existed.
-			if (param_count_excluding_rvalue)
-				field = FindField(key_type, key, /*out*/ insert_pos);
+			field = FindField(key_type, key, /*out*/ insert_pos);
+			if (prop)
+				if (field && field->symbol == SYM_OBJECT && field->object == prop)
+					prop_field = field; // Must update this pointer.
+				else
+					prop = NULL; // field was reassigned or removed, so ignore the property.
 		}
 
 		// Since the base object didn't handle this op, check for built-in properties/methods.
 		// This must apply only to the original target object (aThisToken), not one of its bases.
-		if (!IS_INVOKE_META && key_type == SYM_STRING)
+		if (!IS_INVOKE_META && key_type == SYM_STRING && !field) // v1.1.16: Check field again so if __Call sets a field, it gets called.
 		{
 			//
 			// BUILT-IN METHODS
@@ -493,7 +464,7 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 			if (IS_INVOKE_CALL)
 			{
 				// Since above has not handled this call and no field exists, check for built-in methods.
-				return CallBuiltin(key.s, aResultToken, aParam + 1, aParamCount - 1); // +/- 1 to exclude the method identifier.
+				return CallBuiltin(GetBuiltinID(key.s), aResultToken, aParam + 1, aParamCount - 1); // +/- 1 to exclude the method identifier.
 			}
 			//
 			// BUILT-IN "BASE" PROPERTY
@@ -514,12 +485,11 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 	
 					if (mBase)
 					{
-						aResultToken.symbol = SYM_OBJECT;
-						aResultToken.object = mBase;
 						mBase->AddRef();
+						_o_return(mBase);
 					}
-					// else leave as empty string.
-					return OK;
+					//else return empty string.
+					_o_return_empty;
 				}
 			}
 		} // if (!IS_INVOKE_META && key_type == SYM_STRING)
@@ -552,7 +522,7 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 				// AddRef not used.  See below.
 				obj = field->object;
 			else if (!IS_INVOKE_META)
-				return g_script.ScriptError(_T("Array is not multi-dimensional."));
+				_o_throw(ERR_ARRAY_NOT_MULTIDIM);
 		}
 		else if (!IS_INVOKE_META)
 		{
@@ -570,8 +540,11 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 				Object *new_obj = new Object();
 				if (new_obj)
 				{
-					if ( field = Insert(key_type, key, insert_pos) )
-					{	// Don't do field->Assign() since it would do AddRef() and we would need to counter with Release().
+					if ( field = prop ? prop_field : Insert(key_type, key, insert_pos) )
+					{
+						if (prop) // Otherwise, field is already empty.
+							prop->Release();
+						// Don't do field->Assign() since it would do AddRef() and we would need to counter with Release().
 						field->symbol = SYM_OBJECT;
 						field->object = obj = new_obj;
 					}
@@ -582,22 +555,20 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 					}
 				}
 				if (!new_obj)
-					return g_script.ScriptError(ERR_OUTOFMEM);
+					_o_throw(ERR_OUTOFMEM);
 			}
 			else if (IS_INVOKE_GET)
 			{
 				// Treat x[y,z] like x[y] when x[y] is not set: just return "", don't throw an exception.
 				// On the other hand, if x[y] is set to something which is not an object, the "if (field)"
 				// section above raises an error.
-				return OK;
+				_o_return_empty;
 			}
 		}
 		if (obj) // Object was successfully found or created.
 		{
 			// obj now contains a pointer to the object contained by this field, possibly newly created above.
-			ExprTokenType obj_token;
-			obj_token.symbol = SYM_OBJECT;
-			obj_token.object = obj;
+			ExprTokenType obj_token(obj);
 			// References in obj_token and obj weren't counted (AddRef wasn't called), so Release() does not
 			// need to be called before returning, and accessing obj after calling Invoke() would not be safe
 			// since it could Release() the object (by overwriting our field via script) as a side-effect.
@@ -614,20 +585,14 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 		{
 			ExprTokenType &value_param = *aParam[1];
 			// L34: Assigning an empty string no longer removes the field.
-			if ( (field || (field = Insert(key_type, key, insert_pos))) && field->Assign(value_param) )
+			if ( (field || (field = prop ? prop_field : Insert(key_type, key, insert_pos)))
+				&& field->Assign(value_param) )
 			{
-				if (field->symbol == SYM_STRING)
-				{
-					// Use value_param since our copy may be freed prematurely in some (possibly rare) cases:
-					aResultToken.symbol = SYM_STRING;
-					aResultToken.marker = TokenToString(value_param);
-				}
-				else
-					field->Get(aResultToken); // L34: Corrected this to be aResultToken instead of value_param (broken by L33).
+				// See the similar call below for comments.
+				field->Get(aResultToken);
+				return OK;
 			}
-			else
-				return g_script.ScriptError(ERR_OUTOFMEM);
-			return OK;
+			_o_throw(ERR_OUTOFMEM);
 		}
 	}
 
@@ -636,20 +601,21 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 	{
 		if (field)
 		{
-			if (field->symbol == SYM_STRING)
-			{
-				aResultToken.symbol = SYM_STRING;
-				// L33: Make a persistent copy; our copy might be freed indirectly by releasing this object.
-				//		Prior to L33, callers took care of this UNLESS this was the last op in an expression.
-				return TokenSetResult(aResultToken, field->marker);
-			}
+			// Caller takes care of copying the result into persistent memory when necessary, and must
+			// ensure this is done before they Release() this object.  For ExpandExpression(), there are
+			// two different danger scenarios:
+			//   1) Command % {value:"string"}.value  ; Temporary object could be released prematurely.
+			//   2) Fn( obj.value, obj := "" )        ; Object is freed by the assignment.
+			// For #1, SYM_OBJECT refs are released after the result of the expression is copied into the
+			// deref buf (as of commit d1ab199).  For #2, the value is copied immediately after we return,
+			// because the result of any BIF is assumed to be volatile if expression eval isn't finished.
 			field->Get(aResultToken);
 			return OK;
 		}
 		// If 'this' is the target object (not its base), produce OK so that something like if(!foo.bar) is
 		// considered valid even when foo.bar has not been set.
 		if (!IS_INVOKE_META && aParamCount)
-			return OK;
+			_o_return_empty;
 	}
 
 	// Fell through from one of the sections above: invocation was not handled.
@@ -657,58 +623,80 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 }
 
 
-ResultType Object::CallBuiltin(LPCTSTR aName, ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+int Object::GetBuiltinID(LPCTSTR aName)
 {
 	switch (toupper(*aName))
 	{
 	case 'I':
 		if (!_tcsicmp(aName, _T("InsertAt")))
-			return _InsertAt(aResultToken, aParam, aParamCount);
+			return FID_ObjInsertAt;
 		break;
 	case 'P':
 		if (!_tcsicmp(aName, _T("Push")))
-			return _Push(aResultToken, aParam, aParamCount);
+			return FID_ObjPush;
 		if (!_tcsicmp(aName, _T("Pop")))
-			return _Pop(aResultToken, aParam, aParamCount);
+			return FID_ObjPop;
 		break;
 	case 'R':
 		if (!_tcsnicmp(aName, _T("Remove"), 6))
 		{
 			aName += 6;
 			if (!*aName)
-				return _Remove(aResultToken, aParam, aParamCount);
+				return FID_ObjRemove;
 			if (!_tcsicmp(aName, _T("At")))
-				return _RemoveAt(aResultToken, aParam, aParamCount);
+				return FID_ObjRemoveAt;
 		}
 		break;
 	case 'H':
 		if (!_tcsicmp(aName, _T("HasKey")))
-			return _HasKey(aResultToken, aParam, aParamCount);
+			return FID_ObjHasKey;
 		break;
 	case 'L':
 		if (!_tcsicmp(aName, _T("Length")))
-			return _Push(aResultToken, NULL, 0);
+			return FID_ObjPush;
 		break;
 	case '_':
 		if (!_tcsicmp(aName, _T("_NewEnum")))
-			return _NewEnum(aResultToken, aParam, aParamCount);
+			return FID_ObjNewEnum;
 		break;
 	case 'G':
 		if (!_tcsicmp(aName, _T("GetAddress")))
-			return _GetAddress(aResultToken, aParam, aParamCount);
+			return FID_ObjGetAddress;
 		if (!_tcsicmp(aName, _T("GetCapacity")))
-			return _GetCapacity(aResultToken, aParam, aParamCount);
+			return FID_ObjGetCapacity;
 		break;
 	case 'S':
 		if (!_tcsicmp(aName, _T("SetCapacity")))
-			return _SetCapacity(aResultToken, aParam, aParamCount);
+			return FID_ObjSetCapacity;
 		break;
 	case 'C':
 		if (!_tcsicmp(aName, _T("Count")))
-			return _Count(aResultToken);
+			return FID_ObjCount;
 		if (!_tcsicmp(aName, _T("Clone")))
-			return _Clone(aResultToken, aParam, aParamCount);
+			return FID_ObjClone;
 		break;
+	}
+	return -1;
+}
+
+
+ResultType Object::CallBuiltin(int aID, ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount)
+{
+	switch (aID)
+	{
+	case FID_ObjInsertAt:		return _InsertAt(aResultToken, aParam, aParamCount);
+	case FID_ObjRemove:			return _Remove(aResultToken, aParam, aParamCount);
+	case FID_ObjRemoveAt:		return _RemoveAt(aResultToken, aParam, aParamCount);
+	case FID_ObjPush:			return _Push(aResultToken, aParam, aParamCount);
+	case FID_ObjPop:			return _Pop(aResultToken, aParam, aParamCount);
+	case FID_ObjLength:			return _Push(aResultToken, aParam, 0);
+	case FID_ObjCount:			return _Count(aResultToken);
+	case FID_ObjHasKey:			return _HasKey(aResultToken, aParam, aParamCount);
+	case FID_ObjGetCapacity:	return _GetCapacity(aResultToken, aParam, aParamCount);
+	case FID_ObjSetCapacity:	return _SetCapacity(aResultToken, aParam, aParamCount);
+	case FID_ObjGetAddress:		return _GetAddress(aResultToken, aParam, aParamCount);
+	case FID_ObjClone:			return _Clone(aResultToken, aParam, aParamCount);
+	case FID_ObjNewEnum:		return _NewEnum(aResultToken, aParam, aParamCount);
 	}
 	return INVOKE_NOT_HANDLED;
 }
@@ -718,14 +706,12 @@ ResultType Object::CallBuiltin(LPCTSTR aName, ExprTokenType &aResultToken, ExprT
 // Internal: Object::CallField - Used by Object::Invoke to call a function/method stored in this object.
 //
 
-ResultType Object::CallField(FieldType *aField, ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount)
+ResultType Object::CallField(FieldType *aField, ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount)
 // aParam[0] contains the identifier of this field or an empty space (for __Get etc.).
 {
 	if (aField->symbol == SYM_OBJECT)
 	{
-		ExprTokenType field_token;
-		field_token.symbol = SYM_OBJECT;
-		field_token.object = aField->object;
+		ExprTokenType field_token(aField->object);
 		ExprTokenType *tmp = aParam[0];
 		// Something must be inserted into the parameter list to remove any ambiguity between an intentionally
 		// and directly called function of 'that' object and one of our parameters matching an existing name.
@@ -740,7 +726,7 @@ ResultType Object::CallField(FieldType *aField, ExprTokenType &aResultToken, Exp
 	}
 	else if (aField->symbol == SYM_STRING)
 	{
-		Func *func = g_script.FindFunc(aField->marker);
+		Func *func = g_script.FindFunc(aField->string, aField->string.Length());
 		if (func)
 		{
 			ExprTokenType *tmp = aParam[0];
@@ -751,15 +737,15 @@ ResultType Object::CallField(FieldType *aField, ExprTokenType &aResultToken, Exp
 			// temporarily overwritten with a pointer to aThisToken.  Note that aThisToken contains the original
 			// object specified in script, not the C++ "this" which is actually a meta-object/base of that object.
 			aParam[0] = &aThisToken;
-			ResultType r = CallFunc(*func, aResultToken, aParam, aParamCount);
+			func->Call(aResultToken, aParam, aParamCount);
 			aParam[0] = tmp;
-			return r;
+			return aResultToken.Result();
 		}
 	}
 	// The field's value is neither a function reference nor the name of a known function.
 	ExprTokenType tok;
 	aField->ToToken(tok);
-	return g_script.ScriptError(ERR_NONEXISTENT_FUNCTION, TokenToString(tok, aResultToken.buf));
+	_o_throw(ERR_NONEXISTENT_FUNCTION, TokenToString(tok, _f_number_buf));
 }
 
 
@@ -776,14 +762,12 @@ Object *Object::CreateFromArgV(LPTSTR *aArgV, int aArgC)
 		return args;
 	ExprTokenType *token = (ExprTokenType *)_alloca(aArgC * sizeof(ExprTokenType));
 	ExprTokenType **param = (ExprTokenType **)_alloca(aArgC * sizeof(ExprTokenType*));
-	ExprTokenType aResult;
+	ResultToken aResult;
 	ExprTokenType thisToken;
-	thisToken.symbol = SYM_OBJECT;
-	thisToken.object = args;
+	thisToken.SetValue(args);
 	for (int j = 0; j < aArgC; ++j)
 	{
-		token[j].symbol = SYM_STRING;
-		token[j].marker = aArgV[j];
+		token[j].SetValue(aArgV[j]);
 		param[j] = &token[j];
 		if ( !((j+1) % 2) && _tcscmp(_T("0"),aArgV[j - 1]) && !ATOI64(aArgV[j - 1]) )
 			args->Invoke(aResult,thisToken,IT_SET,&param[j-1],2);
@@ -799,17 +783,14 @@ Object *Object::CreateFromArgV(LPTSTR *aArgV, int aArgC)
 
 
 //
-// Helper function for StringSplit()
+// Helper function for StrSplit/WinGetList/WinGetControls
 //
 
-bool Object::Append(LPTSTR aValue, size_t aValueLength)
+bool Object::Append(ExprTokenType &aValue)
 {
 	if (mFieldCount == mFieldCountMax && !Expand()) // Attempt to expand if at capacity.
 		return false;
 
-	if (aValueLength == -1)
-		aValueLength = _tcslen(aValue);
-	
 	FieldType &field = mFields[mKeyOffsetObject];
 	if (mKeyOffsetObject < mFieldCount)
 		// For maintainability. This might never be done, because our caller
@@ -823,22 +804,8 @@ bool Object::Append(LPTSTR aValue, size_t aValueLength)
 	// this function, so the last integer key == the number of integer keys.
 	field.key.i = mKeyOffsetObject;
 
-	field.symbol = SYM_STRING;
-	if (aValueLength) // i.e. a non-empty string was supplied.
-	{
-		++aValueLength; // Convert length to size.
-		if (field.marker = tmalloc(aValueLength))
-		{
-			tmemcpy(field.marker, aValue, aValueLength);
-			field.marker[aValueLength-1] = '\0';
-			field.size = aValueLength;
-			return true;
-		}
-		// Otherwise, mem alloc failed; assign an empty string.
-	}
-	field.marker = Var::sEmptyString;
-	field.size = 0;
-	return (aValueLength == 0); // i.e. true if caller supplied an empty string.
+	field.symbol = SYM_INVALID; // Init for Assign(): indicate that it does not contain a valid string or object.
+	return field.Assign(aValue);
 }
 
 
@@ -854,8 +821,12 @@ void Object::EndClassDefinition()
 	// value (currently any integer, since static initializers haven't been evaluated yet).
 	for (IndexType i = mFieldCount - 1; i >= 0; --i)
 		if (mFields[i].symbol == SYM_INTEGER)
+		{
+			if (i >= mKeyOffsetString) // Must be checked since key can be an integer, such as for "0 := (expr)".
+				free(mFields[i].key.s);
 			if (i < --mFieldCount)
 				memmove(mFields + i, mFields + i + 1, (mFieldCount - i) * sizeof(FieldType));
+		}
 }
 
 
@@ -905,7 +876,7 @@ bool Object::InsertAt(INT_PTR aOffset, INT_PTR aKey, ExprTokenType *aValue[], in
 		if (value.symbol != SYM_MISSING)
 		{
 			field->key.i = aKey;
-			field->symbol = SYM_INTEGER; // Must be init'd for Assign().
+			field->symbol = SYM_INVALID; // Init for Assign(): indicate that it does not contain a valid string or object.
 			field->Assign(value);
 			field++;
 		}
@@ -918,18 +889,18 @@ bool Object::InsertAt(INT_PTR aOffset, INT_PTR aKey, ExprTokenType *aValue[], in
 	return true;
 }
 
-ResultType Object::_InsertAt(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+ResultType Object::_InsertAt(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount)
 // InsertAt(index, value1, ...)
 {
 	if (aParamCount < 2)
-		return g_script.ScriptError(ERR_TOO_FEW_PARAMS);
+		_o_throw(ERR_TOO_FEW_PARAMS);
 
 	SymbolType key_type;
 	KeyType key;
 	IndexType insert_pos;
-	FieldType *field = FindField(**aParam, aResultToken.buf, /*out*/ key_type, /*out*/ key, /*out*/ insert_pos);
+	FieldType *field = FindField(**aParam, _f_number_buf, /*out*/ key_type, /*out*/ key, /*out*/ insert_pos);
 	if (key_type != SYM_INTEGER)
-		return g_script.ScriptError(ERR_PARAM1_INVALID, key_type == SYM_STRING ? key.s : _T(""));
+		_o_throw(ERR_PARAM1_INVALID, key_type == SYM_STRING ? key.s : _T(""));
 		
 	if (field)
 	{
@@ -938,27 +909,24 @@ ResultType Object::_InsertAt(ExprTokenType &aResultToken, ExprTokenType *aParam[
 	}
 
 	if (!InsertAt(insert_pos, key.i, aParam + 1, aParamCount - 1))
-		return g_script.ScriptError(ERR_OUTOFMEM);
+		_o_throw(ERR_OUTOFMEM);
 	
-	// Leave aResultToken at its default empty value.
-	return OK;
+	_o_return_empty; // No return value.
 }
 
-ResultType Object::_Push(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+ResultType Object::_Push(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount)
 // Push(value1, ...)
 {
 	IndexType insert_pos = mKeyOffsetObject; // int keys end here.;
 	IntKeyType start_index = (insert_pos ? mFields[insert_pos - 1].key.i + 1 : 1);
 	if (!InsertAt(insert_pos, start_index, aParam, aParamCount))
-		return g_script.ScriptError(ERR_OUTOFMEM);
+		_o_throw(ERR_OUTOFMEM);
 
 	// Return the new "length" of the array.
-	aResultToken.symbol = SYM_INTEGER;
-	aResultToken.value_int64 = start_index + aParamCount - 1;
-	return OK;
+	_o_return(start_index + aParamCount - 1);
 }
 
-ResultType Object::_Remove_impl(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount, RemoveMode aMode)
+ResultType Object::_Remove_impl(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, RemoveMode aMode)
 // Remove(first_key [, last_key := first_key])
 // RemoveAt(index [, virtual_count := 1])
 // Pop()
@@ -968,6 +936,8 @@ ResultType Object::_Remove_impl(ExprTokenType &aResultToken, ExprTokenType *aPar
 	SymbolType min_key_type;
 	KeyType min_key, max_key;
 	IntKeyType logical_count_removed = 1;
+
+	LPTSTR number_buf = _f_number_buf;
 
 	// Find the position of "min".
 	if (aMode == RM_Pop)
@@ -979,18 +949,18 @@ ResultType Object::_Remove_impl(ExprTokenType &aResultToken, ExprTokenType *aPar
 			min_key_type = SYM_INTEGER;
 		}
 		else // No appropriate field to remove, just return "".
-			return OK;
+			_o_return_empty;
 	}
 	else
 	{
 		if (!aParamCount)
-			return g_script.ScriptError(ERR_TOO_FEW_PARAMS);
+			_o_throw(ERR_TOO_FEW_PARAMS);
 
-		if (min_field = FindField(*aParam[0], aResultToken.buf, min_key_type, min_key, min_pos))
+		if (min_field = FindField(*aParam[0], number_buf, min_key_type, min_key, min_pos))
 			min_pos = min_field - mFields; // else min_pos was already set by FindField.
 		
 		if (min_key_type != SYM_INTEGER && aMode != RM_RemoveKey)
-			return g_script.ScriptError(ERR_PARAM1_INVALID);
+			_o_throw(ERR_PARAM1_INVALID);
 	}
 	
 	if (aParamCount > 1) // Removing a range of keys.
@@ -1009,7 +979,7 @@ ResultType Object::_Remove_impl(ExprTokenType &aResultToken, ExprTokenType *aPar
 		else
 		{
 			// Find the next position > [aParam[1]].
-			if (max_field = FindField(*aParam[1], aResultToken.buf, max_key_type, max_key, max_pos))
+			if (max_field = FindField(*aParam[1], number_buf, max_key_type, max_key, max_pos))
 				max_pos = max_field - mFields + 1;
 		}
 		// Since the order of key-types in mFields is of no logical consequence, require that both keys be the same type.
@@ -1019,7 +989,7 @@ ResultType Object::_Remove_impl(ExprTokenType &aResultToken, ExprTokenType *aPar
 			|| (max_pos == min_pos && (max_key_type == SYM_INTEGER ? max_key.i < min_key.i : _tcsicmp(max_key.s, min_key.s) < 0)))
 			// max < min, but no keys exist in that range so (max_pos < min_pos) check above didn't catch it.
 		{
-			return g_script.ScriptError(ERR_PARAM2_INVALID);
+			_o_throw(ERR_PARAM2_INVALID);
 		}
 		//else if (max_pos == min_pos): specified range is valid, but doesn't match any keys.
 		//	Continue on, adjust integer keys as necessary and return 0.
@@ -1033,29 +1003,25 @@ ResultType Object::_Remove_impl(ExprTokenType &aResultToken, ExprTokenType *aPar
 					mFields[pos].key.i--;
 			// Our return value when only one key is given is supposed to be the value
 			// previously at this[key], which has just been removed.  Since this[key]
-			// would return "", it makes sense to return an empty string in this case.
-			aResultToken.symbol = SYM_STRING;	
-			aResultToken.marker = _T("");
-			return OK;
+			// would return "", it makes sense to return the same in this case.
+			_o_return_empty;
 		}
 		// Since only one field (at maximum) can be removed in this mode, it
 		// seems more useful to return the field being removed than a count.
 		switch (aResultToken.symbol = min_field->symbol)
 		{
 		case SYM_STRING:
-			if (min_field->size)
-			{
-				// Detach the memory allocated for this field's string and pass it back to caller.
-				aResultToken.mem_to_free = aResultToken.marker = min_field->marker;
-				aResultToken.marker_length = _tcslen(aResultToken.marker); // NOT min_field->size, which is the allocation size.
-				min_field->size = 0; // Prevent Free() from freeing min_field->marker.
-			}
-			//else aResultToken already contains an empty string.
+			// For simplicity, just discard the memory of min_field->marker (can't return it as-is
+			// since the string isn't at the start of its memory block).  Scripts can use the 2-param
+			// mode to avoid any performance penalty this may incur.
+			TokenSetResult(aResultToken, min_field->string, min_field->string.Length());
 			break;
 		case SYM_OBJECT:
 			aResultToken.object = min_field->object;
-			min_field->symbol = SYM_INTEGER; // Prevent Free() from calling object->Release(), instead of calling AddRef().
+			min_field->symbol = SYM_INVALID; // Prevent Free() from calling object->Release(), since caller is taking ownership of the ref.
 			break;
+		//case SYM_INTEGER:
+		//case SYM_FLOAT:
 		default:
 			aResultToken.value_int64 = min_field->n_int64; // Effectively also value_double = n_double.
 		}
@@ -1063,9 +1029,8 @@ ResultType Object::_Remove_impl(ExprTokenType &aResultToken, ExprTokenType *aPar
 		// Note that object keys can only be removed in the single-item mode.
 		if (min_key_type == SYM_OBJECT)
 			min_field->key.p->Release();
-		// Set these up as if caller did Remove(min_key, min_key):
+		// Set max_pos for the loops below.
 		max_pos = min_pos + 1;
-		max_key.i = min_key.i; // Union copy. Used only if min_key_type == SYM_INTEGER; has no effect in other cases.
 	}
 
 	for (pos = min_pos; pos < max_pos; ++pos)
@@ -1104,24 +1069,23 @@ ResultType Object::_Remove_impl(ExprTokenType &aResultToken, ExprTokenType *aPar
 	if (aParamCount > 1)
 	{
 		// Return actual number of fields removed:
-		aResultToken.symbol = SYM_INTEGER;
-		aResultToken.value_int64 = actual_count_removed;
+		_o_return(actual_count_removed);
 	}
 	//else result was set above.
 	return OK;
 }
 
-ResultType Object::_Remove(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+ResultType Object::_Remove(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
 	return _Remove_impl(aResultToken, aParam, aParamCount, RM_RemoveKey);
 }
 
-ResultType Object::_RemoveAt(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+ResultType Object::_RemoveAt(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
 	return _Remove_impl(aResultToken, aParam, aParamCount, RM_RemoveAt);
 }
 
-ResultType Object::_Pop(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+ResultType Object::_Pop(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
 	// Unwanted parameters are ignored, as is conventional for dynamic calls.
 	// _Remove_impl relies on aParamCount == 0 for Pop().
@@ -1129,15 +1093,14 @@ ResultType Object::_Pop(ExprTokenType &aResultToken, ExprTokenType *aParam[], in
 }
 
 
-ResultType Object::_Count(ExprTokenType &aResultToken)
+ResultType Object::_Count(ResultToken &aResultToken)
 {
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = mFieldCount;
 	return OK;
 }
 
-
-ResultType Object::_GetCapacity(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+ResultType Object::_GetCapacity(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
 	if (aParamCount)
 	{
@@ -1146,76 +1109,69 @@ ResultType Object::_GetCapacity(ExprTokenType &aResultToken, ExprTokenType *aPar
 		IndexType insert_pos;
 		FieldType *field;
 
-		if ( (field = FindField(*aParam[0], aResultToken.buf, /*out*/ key_type, /*out*/ key, /*out*/ insert_pos))
+		if ( (field = FindField(*aParam[0], _f_number_buf, /*out*/ key_type, /*out*/ key, /*out*/ insert_pos))
 			&& field->symbol == SYM_STRING )
 		{
-			aResultToken.symbol = SYM_INTEGER;
-			aResultToken.value_int64 = field->size ? _TSIZE(field->size - 1) : 0; // -1 to exclude null-terminator.
+			size_t size = field->string.Capacity();
+			_o_return(size ? _TSIZE(size - 1) : 0); // -1 to exclude null-terminator.
 		}
-		// else wrong type of field; leave aResultToken at default, empty string.
+		//else: wrong type of field, so return an empty string.
 	}
 	else // aParamCount == 0
 	{
-		aResultToken.symbol = SYM_INTEGER;
-		aResultToken.value_int64 = mFieldCountMax;
+		_o_return(mFieldCountMax);
 	}
-	return OK;
+	_o_return_empty;
 }
 
-ResultType Object::_SetCapacity(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+ResultType Object::_SetCapacity(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount)
 // SetCapacity([field_name,] new_capacity)
 {
 	if (!aParamCount || !TokenIsNumeric(*aParam[aParamCount - 1]))
-		return g_script.ScriptError(ERR_PARAM_INVALID);
+		_o_throw(ERR_PARAM_INVALID);
 
 	__int64 desired_capacity = TokenToInt64(*aParam[aParamCount - 1]);
 	if (aParamCount >= 2) // Field name was specified.
 	{
 		if (desired_capacity < 0) // Check before sign is dropped.
-			return g_script.ScriptError(ERR_PARAM2_INVALID);
+			_o_throw(ERR_PARAM2_INVALID);
 		size_t desired_size = (size_t)desired_capacity;
 
 		SymbolType key_type;
 		KeyType key;
 		IndexType insert_pos;
 		FieldType *field;
-		LPTSTR buf;
 
-		if ( (field = FindField(*aParam[0], aResultToken.buf, /*out*/ key_type, /*out*/ key, /*out*/ insert_pos))
+		if ( (field = FindField(*aParam[0], _f_number_buf, /*out*/ key_type, /*out*/ key, /*out*/ insert_pos))
 			|| (field = Insert(key_type, key, insert_pos)) )
 		{	
 			// Field was successfully found or inserted.
 			if (field->symbol != SYM_STRING)
 				// Wrong type of field.
-				return g_script.ScriptError(ERR_INVALID_VALUE);
+				_o_throw(ERR_INVALID_VALUE);
 			if (!desired_size)
-			{	// Caller specified zero - empty the field but do not remove it.
-				field->Assign(NULL);
-				aResultToken.symbol = SYM_INTEGER;
-				aResultToken.value_int64 = 0;
-				return OK;
+			{
+				// Caller specified zero - empty the field but do not remove it.
+				field->Clear();
+				_o_return(0);
 			}
 #ifdef UNICODE
 			// Convert size in bytes to size in chars.
 			desired_size = (desired_size >> 1) + (desired_size & 1);
 #endif
-			// Like VarSetCapacity, always reserve one char for the null-terminator.
-			++desired_size;
-			// Unlike VarSetCapacity, allow fields to shrink; preserve existing data up to min(new size, old size).
-			// size is checked because if it is 0, marker is Var::sEmptyString which we can't pass to realloc.
-			if (buf = trealloc(field->size ? field->marker : NULL, desired_size))
+			size_t length = field->string.Length();
+			if (desired_size < length)
+				desired_size = length; // Consistent with Object.SetCapacity(n): never truncate data.
+			// Unlike VarSetCapacity: allow fields to shrink, preserves existing data.
+			if (field->string.SetCapacity(desired_size + 1)) // Like VarSetCapacity, reserve one char for the null-terminator.
 			{
-				buf[desired_size - 1] = '\0'; // Terminate at the new end of data.
-				field->marker = buf;
-				field->size = desired_size;
-				// Return new size, minus one char reserved for null-terminator.
-				aResultToken.symbol = SYM_INTEGER;
-				aResultToken.value_int64 = _TSIZE(desired_size - 1);
-				return OK;
+				// Return new size, excluding null-terminator.
+				_o_return(_TSIZE(desired_size));
 			}
+			// Since above didn't return, it failed.
 		}
 		// Out of memory.  Throw an error, otherwise scripts might assume success and end up corrupting the heap:
-		return g_script.ScriptError(ERR_OUTOFMEM);
+		_o_throw(ERR_OUTOFMEM);
 	}
 	// else aParamCount == 1: set the capacity of this object.
 	IndexType desired_count = (IndexType)desired_capacity;
@@ -1239,71 +1195,59 @@ ResultType Object::_SetCapacity(ExprTokenType &aResultToken, ExprTokenType *aPar
 	}
 	if (desired_count == mFieldCountMax || SetInternalCapacity(desired_count))
 	{
-		aResultToken.symbol = SYM_INTEGER;
-		aResultToken.value_int64 = mFieldCountMax;
-		return OK;
+		_o_return(mFieldCountMax);
 	}
 	// At this point, failure isn't critical since nothing is being stored yet.  However, it might be easier to
 	// debug if an error is thrown here rather than possibly later, when the array attempts to resize itself to
 	// fit new items.  This also avoids the need for scripts to check if the return value is less than expected:
-	return g_script.ScriptError(ERR_OUTOFMEM);
+	_o_throw(ERR_OUTOFMEM);
 }
 
-ResultType Object::_GetAddress(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+ResultType Object::_GetAddress(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount)
 // GetAddress(key)
 {
 	if (!aParamCount)
-		return g_script.ScriptError(ERR_TOO_FEW_PARAMS);
+		_o_throw(ERR_TOO_FEW_PARAMS);
 	
 	SymbolType key_type;
 	KeyType key;
 	IndexType insert_pos;
 	FieldType *field;
 
-	if ( (field = FindField(*aParam[0], aResultToken.buf, /*out*/ key_type, /*out*/ key, /*out*/ insert_pos))
-		&& field->symbol == SYM_STRING && field->size )
+	if ( (field = FindField(*aParam[0], _f_number_buf, /*out*/ key_type, /*out*/ key, /*out*/ insert_pos))
+		&& field->symbol == SYM_STRING && field->string.Capacity() != 0 )
 	{
-		aResultToken.symbol = SYM_INTEGER;
-		aResultToken.value_int64 = (__int64)field->marker;
+		_o_return((__int64)field->string.Value());
 	}
-	// else field has no memory allocated; leave aResultToken at default, empty string.
-	return OK;
+	//else: field has no memory allocated, so return an empty string.
+	_o_return_empty;
 }
 
-ResultType Object::_NewEnum(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+ResultType Object::_NewEnum(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
-	IObject *newenum = new Enumerator(this);
-	if (!newenum)
-		return g_script.ScriptError(ERR_OUTOFMEM);
-	aResultToken.symbol = SYM_OBJECT;
-	aResultToken.object = newenum;
-	return OK;
+	_o_return_or_throw(new Enumerator(this));
 }
 
-ResultType Object::_HasKey(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+ResultType Object::_HasKey(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
 	if (!aParamCount)
-		return g_script.ScriptError(ERR_TOO_FEW_PARAMS);
+		_o_throw(ERR_TOO_FEW_PARAMS);
 	
 	SymbolType key_type;
 	KeyType key;
 	INT_PTR insert_pos;
-	FieldType *field = FindField(**aParam, aResultToken.buf, key_type, key, insert_pos);
-	aResultToken.symbol = SYM_INTEGER;
-	aResultToken.value_int64 = (field != NULL);
-	return OK;
+	FieldType *field = FindField(*aParam[0], _f_number_buf, /*out*/ key_type, /*out*/ key, /*out*/ insert_pos);
+	_o_return(field != NULL);
 }
 
-ResultType Object::_Clone(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+ResultType Object::_Clone(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
 	Object *clone = Clone(aParam, aParamCount);
 	if (!clone)
-		return g_script.ScriptError(ERR_OUTOFMEM);	
+		_o_throw(ERR_OUTOFMEM);	
 	if (mBase)
 		(clone->mBase = mBase)->AddRef();
-	aResultToken.object = clone;
-	aResultToken.symbol = SYM_OBJECT;
-	return OK;
+	_o_return(clone);
 }
 
 
@@ -1311,30 +1255,36 @@ ResultType Object::_Clone(ExprTokenType &aResultToken, ExprTokenType *aParam[], 
 // Object::FieldType
 //
 
+void Object::FieldType::Clear()
+{
+	Free();
+	symbol = SYM_STRING;
+	string.Init();
+}
+
 bool Object::FieldType::Assign(LPTSTR str, size_t len, bool exact_size)
 {
-	if (!str || !*str && (len == -1 || !len)) // If empty string or null pointer, free our contents.  Passing len >= 1 allows copying \0, so don't check *str in that case.  Ordered for short-circuit performance (len is usually -1).
-	{
-		Free();
-		symbol = SYM_STRING;
-		marker = Var::sEmptyString;
-		size = 0;
-		return true;
-	}
-	
 	if (len == -1)
 		len = _tcslen(str);
 
-	if (symbol != SYM_STRING || len >= size)
+	if (!len) // Check len, not *str, since it might be binary data or not null-terminated.
+	{
+		Clear();
+		return true;
+	}
+
+	if (symbol != SYM_STRING || len >= string.Capacity())
 	{
 		Free(); // Free object or previous buffer (which was too small).
 		symbol = SYM_STRING;
+		string.Init();
+
 		size_t new_size = len + 1;
 		if (!exact_size)
 		{
 			// Use size calculations equivalent to Var:
-			if (new_size < 16) // v1.0.45.03: Added this new size to prevent all local variables in a recursive
-				new_size = 16; // function from having a minimum size of MAX_PATH.  16 seems like a good size because it holds nearly any number.  It seems counterproductive to go too small because each malloc, no matter how small, could have around 40 bytes of overhead.
+			if (new_size < 16)
+				new_size = 16; // 16 seems like a good size because it holds nearly any number.  It seems counterproductive to go too small because each malloc has overhead.
 			else if (new_size < MAX_PATH)
 				new_size = MAX_PATH;  // An amount that will fit all standard filenames seems good.
 			else if (new_size < (160 * 1024)) // MAX_PATH to 160 KB or less -> 10% extra.
@@ -1342,21 +1292,19 @@ bool Object::FieldType::Assign(LPTSTR str, size_t len, bool exact_size)
 			else if (new_size < (1600 * 1024))  // 160 to 1600 KB -> 16 KB extra
 				new_size += (16 * 1024);
 			else if (new_size < (6400 * 1024)) // 1600 to 6400 KB -> 1% extra
-				new_size = (size_t)(new_size * 1.01);
+				new_size += (new_size / 100);
 			else  // 6400 KB or more: Cap the extra margin at some reasonable compromise of speed vs. mem usage: 64 KB
 				new_size += (64 * 1024);
 		}
-		if ( !(marker = tmalloc(new_size)) )
-		{
-			marker = Var::sEmptyString;
-			size = 0;
-			return false; // See "Sanity check" above.
-		}
-		size = new_size;
+		if (!string.SetCapacity(new_size))
+			return false; // And leave string empty (as set by Free() above).
 	}
 	// else we have a buffer with sufficient capacity already.
 
-	tmemcpy(marker, str, len + 1); // +1 for null-terminator.
+	LPTSTR buf = string.Value();
+	tmemcpy(buf, str, len);
+	buf[len] = '\0'; // Must be done separately since some callers pass a substring.
+	string.Length() = len;
 	return true; // Success.
 }
 
@@ -1370,7 +1318,7 @@ bool Object::FieldType::Assign(ExprTokenType &aParam)
 		// format of a literal number such as 0x123 or 00001, and even less likely for a number stored
 		// in an object (even implicitly via a variadic function).  If the value is eventually passed
 		// to a COM method call, it can be important that it is passed as VT_I4 and not VT_BSTR.
-		aParam.var->ToToken(temp);
+		aParam.var->ToTokenSkipAddRef(temp); // Skip AddRef() if applicable because it's called below.
 		val = &temp;
 	}
 	else
@@ -1379,33 +1327,53 @@ bool Object::FieldType::Assign(ExprTokenType &aParam)
 	switch (val->symbol)
 	{
 	case SYM_STRING:
-		return Assign(val->marker);
-	case SYM_INTEGER:
-	case SYM_FLOAT:
-		Free(); // Free string or object, if applicable.
-		symbol = val->symbol; // Either SYM_INTEGER or SYM_FLOAT.  Set symbol *after* calling Free().
-		n_int64 = val->value_int64; // Also handles value_double via union.
-		break;
+		return Assign(val->marker, val->marker_length);
 	case SYM_OBJECT:
 		Free(); // Free string or object, if applicable.
 		symbol = SYM_OBJECT; // Set symbol *after* calling Free().
 		object = val->object;
-		if (aParam.symbol != SYM_VAR)
-			object->AddRef();
-		// Otherwise, take ownership of the ref in temp.
+		object->AddRef();
 		break;
+	//case SYM_INTEGER:
+	//case SYM_FLOAT:
 	default:
-		ASSERT(FALSE);
+		Free(); // Free string or object, if applicable.
+		symbol = val->symbol; // Either SYM_INTEGER or SYM_FLOAT.  Set symbol *after* calling Free().
+		n_int64 = val->value_int64; // Also handles value_double via union.
+		break;
 	}
 	return true;
 }
 
 void Object::FieldType::Get(ExprTokenType &result)
 {
-	result.symbol = symbol;
-	result.value_int64 = n_int64; // Union copy.
-	if (symbol == SYM_OBJECT)
+	switch (result.symbol = symbol) // Assign.
+	{
+	case SYM_STRING:
+		result.marker = string;
+		result.marker_length = string.Length();
+		break;
+	case SYM_OBJECT:
 		object->AddRef();
+		result.object = object;
+		break;
+	default:
+		result.value_int64 = n_int64; // Union copy.
+	}
+}
+
+void Object::FieldType::ToToken(ExprTokenType &aToken)
+// Used when we want the value as is, in a token.  Does not AddRef() or copy strings.
+{
+	switch (aToken.symbol = symbol) // Assign.
+	{
+	case SYM_STRING:
+		aToken.marker = string;
+		aToken.marker_length = string.Length();
+		break;
+	default:
+		aToken.value_int64 = n_int64; // Union copy.
+	}
 }
 
 void Object::FieldType::Free()
@@ -1413,10 +1381,9 @@ void Object::FieldType::Free()
 // entirely or the Object is being deleted.  See Object::Delete.
 // CONTAINED VALUE WILL NOT BE VALID AFTER THIS FUNCTION RETURNS.
 {
-	if (symbol == SYM_STRING) {
-		if (size)
-			free(marker);
-	} else if (symbol == SYM_OBJECT)
+	if (symbol == SYM_STRING)
+		string.Free();
+	else if (symbol == SYM_OBJECT)
 		object->Release();
 }
 
@@ -1425,7 +1392,7 @@ void Object::FieldType::Free()
 // Enumerator
 //
 
-ResultType STDMETHODCALLTYPE EnumBase::Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount)
+ResultType STDMETHODCALLTYPE EnumBase::Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
 	if (IS_INVOKE_SET)
 		return INVOKE_NOT_HANDLED;
@@ -1441,9 +1408,7 @@ ResultType STDMETHODCALLTYPE EnumBase::Invoke(ExprTokenType &aResultToken, ExprT
 	}
 	Var *var0 = ParamIndexToOptionalVar(0);
 	Var *var1 = ParamIndexToOptionalVar(1);
-	aResultToken.symbol = SYM_INTEGER;
-	aResultToken.value_int64 = Next(var0, var1);
-	return OK;
+	_o_return(Next(var0, var1));
 }
 
 int Object::Enumerator::Next(Var *aKey, Var *aVal)
@@ -1464,8 +1429,8 @@ int Object::Enumerator::Next(Var *aKey, Var *aVal)
 		{
 			switch (field.symbol)
 			{
-			case SYM_STRING:	aVal->AssignString(field.marker);	break;
-			case SYM_INTEGER:	aVal->Assign(field.n_int64);			break;
+			case SYM_STRING:	aVal->AssignString(field.string, field.string.Length());	break;
+			case SYM_INTEGER:	aVal->Assign(field.n_int64);		break;
 			case SYM_FLOAT:		aVal->Assign(field.n_double);		break;
 			case SYM_OBJECT:	aVal->Assign(field.object);			break;
 			}
@@ -1600,12 +1565,75 @@ Object::FieldType *Object::Insert(SymbolType key_type, KeyType key, IndexType at
 			key.p->AddRef();
 	}
 	
-	field.marker = _T(""); // Init for maintainability.
-	field.size = 0; // Init to ensure safe behaviour in Assign().
 	field.key = key; // Above has already copied string or called key.p->AddRef() as appropriate.
 	field.symbol = SYM_STRING;
+	field.string.Init(); // Initialize to empty string.  Caller will likely reassign.
 
 	return &field;
+}
+
+
+//
+// Property: Invoked when a derived object gets/sets the corresponding key.
+//
+
+ResultType STDMETHODCALLTYPE Property::Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount)
+{
+	Func **member;
+
+	if (aFlags & IF_FUNCOBJ)
+	{
+		// Use mGet even if IS_INVOKE_CALL, for symmetry:
+		//   obj.prop()         ; Get
+		//   obj.prop() := val  ; Set (translation is performed by the preparser).
+		member = IS_INVOKE_SET ? &mSet : &mGet;
+	}
+	else
+	{
+		if (!aParamCount)
+			return INVOKE_NOT_HANDLED;
+
+		LPTSTR name = TokenToString(*aParam[0]);
+		
+		if (!_tcsicmp(name, _T("Get")))
+		{
+			member = &mGet;
+		}
+		else if (!_tcsicmp(name, _T("Set")))
+		{
+			member = &mSet;
+		}
+		else
+			return INVOKE_NOT_HANDLED;
+		// ALL CODE PATHS ABOVE MUST RETURN OR SET member.
+
+		if (!IS_INVOKE_CALL)
+		{
+			if (IS_INVOKE_SET)
+			{
+				if (aParamCount != 2)
+					return OK;
+				// Allow changing the GET/SET function, since it's simple and seems harmless.
+				*member = TokenToFunc(*aParam[1]); // Can be NULL.
+				--aParamCount;
+			}
+			if (*member && aParamCount == 1)
+			{
+				aResultToken.symbol = SYM_OBJECT;
+				aResultToken.object = *member;
+			}
+			return OK;
+		}
+		// Since above did not return, we're explicitly calling Get or Set.
+		++aParam;      // Omit method name.
+		--aParamCount; // 
+	}
+	// Since above did not return, member must have been set to either &mGet or &mSet.
+	// However, their actual values might be NULL:
+	if (!*member)
+		return INVOKE_NOT_HANDLED;
+	(*member)->Call(aResultToken, aParam, aParamCount);
+	return aResultToken.Result();
 }
 
 
@@ -1613,7 +1641,7 @@ Object::FieldType *Object::Insert(SymbolType key_type, KeyType key, IndexType at
 // Func: Script interface, accessible via "function reference".
 //
 
-ResultType STDMETHODCALLTYPE Func::Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount)
+ResultType STDMETHODCALLTYPE Func::Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
 	if (!aParamCount)
 		return INVOKE_NOT_HANDLED;
@@ -1625,35 +1653,12 @@ ResultType STDMETHODCALLTYPE Func::Invoke(ExprTokenType &aResultToken, ExprToken
 		if (IS_INVOKE_SET || aParamCount > 1)
 			return INVOKE_NOT_HANDLED;
 
-		if (!_tcsicmp(member, _T("Name")))
-		{
-			aResultToken.symbol = SYM_STRING;
-			aResultToken.marker = mName;
-		}
-		else if (!_tcsicmp(member, _T("MinParams")))
-		{
-			aResultToken.symbol = SYM_INTEGER;
-			aResultToken.value_int64 = mMinParams;
-		}
-		else if (!_tcsicmp(member, _T("MaxParams")))
-		{
-			aResultToken.symbol = SYM_INTEGER;
-			aResultToken.value_int64 = mParamCount;
-		}
-		else if (!_tcsicmp(member, _T("IsBuiltIn")))
-		{
-			aResultToken.symbol = SYM_INTEGER;
-			aResultToken.value_int64 = mIsBuiltIn;
-		}
-		else if (!_tcsicmp(member, _T("IsVariadic")))
-		{
-			aResultToken.symbol = SYM_INTEGER;
-			aResultToken.value_int64 = mIsVariadic;
-		}
-		else
-			return INVOKE_NOT_HANDLED;
-
-		return OK;
+		     if (!_tcsicmp(member, _T("Name")))			_o_return(mName);
+		else if (!_tcsicmp(member, _T("MinParams")))	_o_return(mMinParams);
+		else if (!_tcsicmp(member, _T("MaxParams")))	_o_return(mParamCount);
+		else if (!_tcsicmp(member, _T("IsBuiltIn")))	_o_return(mIsBuiltIn);
+		else if (!_tcsicmp(member, _T("IsVariadic")))	_o_return(mIsVariadic);
+		else return INVOKE_NOT_HANDLED;
 	}
 	
 	if (  !(aFlags & IF_FUNCOBJ)  )
@@ -1664,17 +1669,12 @@ ResultType STDMETHODCALLTYPE Func::Invoke(ExprTokenType &aResultToken, ExprToken
 			{
 				int param = (int)TokenToInt64(*aParam[1]); // One-based.
 				if (param > 0 && (param <= mParamCount || mIsVariadic))
-				{
-					aResultToken.symbol = SYM_INTEGER;
-					aResultToken.value_int64 = param > mMinParams;
-				}
+					_o_return(param > mMinParams);
+				else
+					_o_return_empty;
 			}
 			else
-			{
-				aResultToken.symbol = SYM_INTEGER;
-				aResultToken.value_int64 = mMinParams != mParamCount || mIsVariadic; // True if any params are optional.
-			}
-			return OK;
+				_o_return(mMinParams != mParamCount || mIsVariadic); // True if any params are optional.
 		}
 		else if (!_tcsicmp(member, _T("IsByRef")) && aParamCount <= 2 && !mIsBuiltIn)
 		{
@@ -1682,23 +1682,17 @@ ResultType STDMETHODCALLTYPE Func::Invoke(ExprTokenType &aResultToken, ExprToken
 			{
 				int param = (int)TokenToInt64(*aParam[1]); // One-based.
 				if (param > 0 && (param <= mParamCount || mIsVariadic))
-				{
-					aResultToken.symbol = SYM_INTEGER;
-					aResultToken.value_int64 = param <= mParamCount && mParam[param-1].is_byref;
-				}
+					_o_return(param <= mParamCount && mParam[param-1].is_byref);
+				else
+					_o_return_empty;
 			}
 			else
 			{
-				aResultToken.symbol = SYM_INTEGER;
-				aResultToken.value_int64 = FALSE;
 				for (int param = 0; param < mParamCount; ++param)
 					if (mParam[param].is_byref)
-					{
-						aResultToken.value_int64 = TRUE;
-						break;
-					}
+						_o_return(TRUE);
+				_o_return(FALSE);
 			}
-			return OK;
 		}
 		if (!TokenIsEmptyString(*aParam[0]))
 			return INVOKE_NOT_HANDLED; // Reserved.
@@ -1707,7 +1701,8 @@ ResultType STDMETHODCALLTYPE Func::Invoke(ExprTokenType &aResultToken, ExprToken
 		++aParam;		// Discard the "method name" parameter.
 		--aParamCount;	// 
 	}
-	return CallFunc(*this, aResultToken, aParam, aParamCount);
+	Call(aResultToken, aParam, aParamCount);
+	return aResultToken.Result();
 }
 
 
@@ -1717,9 +1712,9 @@ ResultType STDMETHODCALLTYPE Func::Invoke(ExprTokenType &aResultToken, ExprToken
 
 MetaObject g_MetaObject;
 
-LPTSTR Object::sMetaFuncName[] = { _T("__Get"), _T("__Set"), _T("__Call"), _T("__Delete"), _T("__New") };
+LPTSTR Object::sMetaFuncName[] = { _T("__Get"), _T("__Set"), _T("__Call") };
 
-ResultType STDMETHODCALLTYPE MetaObject::Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount)
+ResultType STDMETHODCALLTYPE MetaObject::Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
 	// For something like base.Method() in a class-defined method:
 	// It seems more useful and intuitive for this special behaviour to take precedence over
@@ -1739,7 +1734,7 @@ ResultType STDMETHODCALLTYPE MetaObject::Invoke(ExprTokenType &aResultToken, Exp
 			if (result != INVOKE_NOT_HANDLED)
 				return result;
 		}
-		return OK;
+		_o_return_empty;
 	}
 
 	// Allow script-defined meta-functions to override the default behaviour:

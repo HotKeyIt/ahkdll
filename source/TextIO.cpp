@@ -688,8 +688,7 @@ class FileObject : public ObjectBase // fincs: No longer allowing the script to 
 		Close
 	};
 
-	ResultType STDMETHODCALLTYPE Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount)
-	// Reference: MetaObject::Invoke
+	ResultType STDMETHODCALLTYPE Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount)
 	{
 		if (!aParamCount) // file[]
 			return INVOKE_NOT_HANDLED;
@@ -744,7 +743,7 @@ class FileObject : public ObjectBase // fincs: No longer allowing the script to 
 			if (aParamCount != (IS_INVOKE_SET ? 1 : 0))
 				// Get: disallow File.Length[newLength] and File.Seek[dist,origin].
 				// Set: disallow File[]:=PropertyName and File["Pos",dist]:=origin.
-				return g_script.ScriptError(_T("Invalid usage."));
+				_o_throw(ERR_INVALID_USAGE);
 		}
 
 		aResultToken.symbol = SYM_INTEGER; // Set default return type -- the most common cases return integer.
@@ -828,7 +827,7 @@ class FileObject : public ObjectBase // fincs: No longer allowing the script to 
 				else
 				{
 					if (aParamCount < 1)
-						return g_script.ScriptError(ERR_PARAM1_REQUIRED);
+						_o_throw(ERR_PARAM1_REQUIRED);
 
 					ExprTokenType &token_to_write = *aParam[1];
 					
@@ -868,7 +867,7 @@ class FileObject : public ObjectBase // fincs: No longer allowing the script to 
 				length = mFile.Read(aResultToken.marker, length);
 				aResultToken.symbol = SYM_STRING;
 				aResultToken.marker[length] = '\0';
-				aResultToken.buf = (LPTSTR)(size_t) length; // Update buf to the actual number of characters read. Only strictly necessary in some cases; see TokenSetResult.
+				aResultToken.marker_length = length; // Update marker_length to the actual number of characters read.
 				return OK;
 			}
 			break;
@@ -882,7 +881,7 @@ class FileObject : public ObjectBase // fincs: No longer allowing the script to 
 				if (length && aResultToken.marker[length - 1] == '\n')
 					--length;
 				aResultToken.marker[length] = '\0';
-				aResultToken.buf = (LPTSTR)(size_t) length;
+				aResultToken.marker_length = length;
 				return OK;
 			}
 			break;
@@ -890,16 +889,15 @@ class FileObject : public ObjectBase // fincs: No longer allowing the script to 
 		case Write:
 		case WriteLine:
 			{
-				DWORD bytes_written = 0, chars_to_write = 0;
+				DWORD bytes_written = 0;
+				size_t chars_to_write = 0;
 				if (aParamCount)
 				{
-					LPTSTR param1 = TokenToString(*aParam[1], aResultToken.buf);
-					chars_to_write = (DWORD)EXPR_TOKEN_LENGTH(aParam[1], param1);
-					bytes_written = mFile.Write(param1, chars_to_write);
+					LPTSTR param1 = TokenToString(*aParam[1], aResultToken.buf, &chars_to_write);
+					bytes_written = mFile.Write(param1, (DWORD)chars_to_write);
 				}
 				if (member == WriteLine && (bytes_written || !chars_to_write)) // i.e. don't attempt it if above failed.
 				{
-					chars_to_write += 1;
 					bytes_written += mFile.Write(_T("\n"), 1);
 				}
 				aResultToken.value_int64 = bytes_written;
@@ -910,7 +908,7 @@ class FileObject : public ObjectBase // fincs: No longer allowing the script to 
 		case RawReadWrite:
 			{
 				if (aParamCount < 2)
-					return g_script.ScriptError(ERR_TOO_FEW_PARAMS);
+					_o_throw(ERR_TOO_FEW_PARAMS);
 
 				bool reading = (name[3] == 'R' || name[3] == 'r');
 
@@ -927,7 +925,7 @@ class FileObject : public ObjectBase // fincs: No longer allowing the script to 
 					{
 						if (reading)
 							return FAIL; // SetCapacity() already showed the error message.
-						return g_script.ScriptError(ERR_PARAM2_INVALID); // Invalid size (param #2).
+						_o_throw(ERR_PARAM2_INVALID); // Invalid size (param #2).
 					}
 					target = target_token.var->Contents();
 				}
@@ -936,7 +934,7 @@ class FileObject : public ObjectBase // fincs: No longer allowing the script to 
 
 				DWORD result;
 				if (target < (LPVOID)65536) // Basic sanity check to catch incoming raw addresses that are zero or blank.
-					return g_script.ScriptError(ERR_PARAM1_INVALID);
+					_o_throw(ERR_PARAM1_INVALID);
 				else if (reading)
 					result = mFile.Read(target, size);
 				else
@@ -990,6 +988,13 @@ class FileObject : public ObjectBase // fincs: No longer allowing the script to 
 
 		case Encoding:
 		{
+			// Encoding: UTF-8, UTF-16 or CPnnn.  The -RAW suffix (CP_AHKNOBOM) is not supported; it is normally
+			// stripped out when the file is opened, so passing it to SetCodePage() would break encoding/decoding
+			// of non-ASCII characters (and did in v1.1.15.03 and earlier).  Although it could be detected/added
+			// via TextStream::mFlags, this isn't done because:
+			//  - It would only tell us whether the script passed "-RAW", not whether the file really has a BOM.
+			//  - It's questionable which behaviour is more more useful, but excluding "-RAW" is definitely simpler.
+			//  - Existing scripts may rely on File.Encoding not returning "-RAW".
 			UINT codepage;
 			if (aParamCount > 0)
 			{
@@ -998,32 +1003,29 @@ class FileObject : public ObjectBase // fincs: No longer allowing the script to 
 				else
 					codepage = Line::ConvertFileEncoding(TokenToString(*aParam[1]));
 				if (codepage != -1)
-					mFile.SetCodePage(codepage);
+					mFile.SetCodePage(codepage & ~CP_AHKNOBOM); // Ignore "-RAW" by removing the CP_AHKNOBOM flag; see comments above.
 				// Now fall through to below and return the actual codepage.
 			}
-			LPTSTR buf = aResultToken.buf;
-			aResultToken.marker = buf;
-			aResultToken.symbol = SYM_STRING;
+			LPTSTR name;
 			codepage = mFile.GetCodePage();
-			// This is based on BIV_FileEncoding, so maintain the two together:
+			// There's no need to check for the CP_AHKNOBOM flag here because it's stripped out when the file is opened.
 			switch (codepage)
 			{
 			// GetCodePage() returns the value of GetACP() in place of CP_ACP, so this case is not needed:
-			//case CP_ACP:
-				//*buf = '\0';
-				//return OK;
-			case CP_UTF8:					_tcscpy(buf, _T("UTF-8"));		break;
-			case CP_UTF8 | CP_AHKNOBOM:		_tcscpy(buf, _T("UTF-8-RAW"));	break;
-			case CP_UTF16:					_tcscpy(buf, _T("UTF-16"));		break;
-			case CP_UTF16 | CP_AHKNOBOM:	_tcscpy(buf, _T("UTF-16-RAW"));	break;
+			//case CP_ACP:  name = _T("");  break;
+			case CP_UTF8:	name = _T("UTF-8");  break;
+			case CP_UTF16:	name = _T("UTF-16"); break;
 			default:
 				// Although we could check codepage == GetACP() and return blank in that case, there's no way
 				// to know whether something like "CP0" or the actual codepage was passed to FileOpen, so just
 				// return "CPn" when none of the cases above apply:
-				buf[0] = _T('C');
-				buf[1] = _T('P');
-				_itot(codepage, buf + 2, 10);
+				name = aResultToken.buf;
+				name[0] = _T('C');
+				name[1] = _T('P');
+				_itot(codepage, name + 2, 10);
 			}
+			aResultToken.symbol = SYM_STRING;
+			aResultToken.marker = name;
 			return OK;
 		}
 
@@ -1168,7 +1170,7 @@ BIF_DECL(BIF_FileOpen)
 
 invalid_param:
 	g->LastError = ERROR_INVALID_PARAMETER; // For consistency.
-	aResult = g_script.ScriptError(ERR_PARAM2_INVALID);
+	_f_throw(ERR_PARAM2_INVALID);
 }
 
 

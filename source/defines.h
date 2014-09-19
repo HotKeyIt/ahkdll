@@ -188,18 +188,19 @@ enum SymbolType // For use with ExpandExpression() and IsNumeric().
 	, SYM_INVALID = SYM_COUNT // Some callers may rely on YIELDS_AN_OPERAND(SYM_INVALID)==false.
 };
 // These two are macros for maintainability (i.e. seeing them together here helps maintain them together).
-#define SYM_DYNAMIC_IS_DOUBLE_DEREF(token) ((token).buf) // SYM_DYNAMICs other than doubles have NULL buf, at least at the stage this macro is called.
-#define SYM_DYNAMIC_IS_WRITABLE(token) (!(token)->buf && (token)->var->Type() <= VAR_LAST_WRITABLE) // i.e. it's the clipboard, not a built-in variable or double-deref.
+#define SYM_DYNAMIC_IS_DOUBLE_DEREF(token) (!(token).var) // SYM_DYNAMICs are either double-derefs or built-in vars.
+#define SYM_DYNAMIC_IS_WRITABLE(token) ((token)->var && (token)->var->Type() <= VAR_LAST_WRITABLE) // i.e. it's the clipboard, not a built-in variable or double-deref.
 
 
 struct ExprTokenType; // Forward declarations for use below.
+struct ResultToken;
 struct IDebugProperties;
 
 
 struct DECLSPEC_NOVTABLE IObject // L31: Abstract interface for "objects".
 {
 	// See script_object.cpp for comments.
-	virtual ResultType STDMETHODCALLTYPE Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount) = 0;
+	virtual ResultType STDMETHODCALLTYPE Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount) = 0;
 	
 	// Simple reference-counting mechanism.  Usage should be similar to IUnknown (COM).
 	// Some scripts may rely on these being at the same offset as IUnknown::AddRef/Release.
@@ -243,6 +244,7 @@ struct DECLSPEC_NOVTABLE IDebugProperties
 #define IF_METAFUNC			0x20000 // Indicates Invoke should call a meta-function before checking the object's fields.
 #define IF_META				(IF_METAOBJ | IF_METAFUNC)	// Flags for regular recursion into base object.
 #define IF_FUNCOBJ			0x40000 // Indicates 'this' is a function, being called via another object (aParam[0]).
+#define IF_NEWENUM			0x80000 // Workaround for COM objects which don't resolve "_NewEnum" to DISPID_NEWENUM.
 
 
 struct DerefType; // Forward declarations for use below.
@@ -261,41 +263,191 @@ struct ExprTokenType  // Something in the compiler hates the name TokenType, so 
 			union // These nested structs and unions minimize the token size by overlapping data.
 			{
 				IObject *object;
-				DerefType *deref; // for SYM_FUNC
-				Var *var;         // for SYM_VAR (and SYM_DYNAMIC when buf is NULL)
+				DerefType *deref;  // for SYM_FUNC
+				Var *var;          // for SYM_VAR and SYM_DYNAMIC
 				LPTSTR marker;     // for SYM_STRING
 				ExprTokenType *circuit_token; // for short-circuit operators
 			};
 			union // Due to the outermost union, this doesn't increase the total size of the struct on x86 builds (but it does on x64).
 			{
-				LPTSTR buf; // Used by SYM_FUNC (helps built-in functions), SYM_DYNAMIC, and perhaps other misc. purposes.
-				size_t marker_length; // Used only with aResultToken. TODO: Move into separate ResultTokenType struct.
+				DerefType *outer_deref; // Used by ExpressionToPostfix().
+				size_t marker_length;
 			};
 		};  
 	};
-	// Note that marker's str-length should not be stored in this struct, even though it might be readily
-	// available in places and thus help performance.  This is because if it were stored and the marker
-	// or SYM_VAR's var pointed to a location that was changed as a side effect of an expression's
-	// call to a script function, the length would then be invalid.
-	SymbolType symbol; // Short-circuit benchmark is currently much faster with this and the next beneath the union, perhaps due to CPU optimizations for 8-byte alignment.
-	LPTSTR mem_to_free; // Used only with aResultToken. TODO: Move into separate ResultTokenType struct.
-	// The above two probably need to be adjacent to each other to conserve memory due to 8-byte alignment,
-	// which is the default alignment (for performance reasons) in any struct that contains 8-byte members
-	// such as double and __int64.
-	ExprTokenType & operator = (ExprTokenType &other)
+	SymbolType symbol;
+
+	ExprTokenType() {}
+	ExprTokenType(__int64 aValue) { SetValue(aValue); }
+	ExprTokenType(double aValue) { SetValue(aValue); }
+	ExprTokenType(IObject *aValue) { SetValue(aValue); }
+	ExprTokenType(LPTSTR aValue, size_t aLength = -1) { SetValue(aValue, aLength); }
+	
+	void SetValue(__int64 aValue)
 	{
-		value_int64 = other.value_int64;
+		symbol = SYM_INTEGER;
+		value_int64 = aValue;
+	}
+	void SetValue(int aValue) { SetValue((__int64)aValue); }
+	void SetValue(UINT aValue) { SetValue((__int64)aValue); }
+	void SetValue(UINT64 aValue) { SetValue((__int64)aValue); }
+	void SetValue(double aValue)
+	{
+		symbol = SYM_FLOAT;
+		value_double = aValue;
+	}
+	void SetValue(LPTSTR aValue, size_t aLength = -1)
+	{
+		ASSERT(aValue);
+		symbol = SYM_STRING;
+		marker = aValue;
+		marker_length = aLength;
+	}
+	void SetValue(IObject *aValue)
+	// Caller must AddRef() if appropriate.
+	{
+		symbol = SYM_OBJECT;
+		object = aValue;
+	}
+
+	inline void CopyValueFrom(ExprTokenType &other)
+	// Copies the value of a token (by reference where applicable).  Does not object->AddRef().
+	{
+		value_int64 = other.value_int64; // Union copy.
 #ifdef _WIN64
-		buf = other.buf; // Already covered by above on x86.
+		// For simplicity/smaller code size, don't bother checking symbol == SYM_STRING.
+		marker_length = other.marker_length; // Already covered by the above on x86.
 #endif
 		symbol = other.symbol;
-		// Don't copy mem_to_free since that's only needed for SYM_FUNC result token, which doesn't use this operator.
+	}
+
+	inline void CopyExprFrom(ExprTokenType &other)
+	// Copies all fields typically needed in a postfix expression.
+	{
+		return CopyValueFrom(other); // Currently nothing needs to be done differently.
+	}
+
+private: // Force code to use one of the CopyFrom() methods, for clarity.
+	ExprTokenType & operator = (ExprTokenType &other)
+	{
 		return *this;
 	}
 };
 #define MAX_TOKENS 512 // Max number of operators/operands.  Seems enough to handle anything realistic, while conserving call-stack space.
 #define STACK_PUSH(token_ptr) stack[stack_count++] = token_ptr
 #define STACK_POP stack[--stack_count]  // To be used as the r-value for an assignment.
+
+class Func;
+struct ResultToken : public ExprTokenType
+{
+	LPTSTR buf; // Points to a buffer of _f_retval_buf_size characters for returning short strings and misc purposes.
+	LPTSTR mem_to_free; // Callee stores memory allocated for the result here.  Must be NULL or equal to marker.
+
+	// Utility function for initializing result tokens.
+	void InitResult(LPTSTR aResultBuf)
+	{
+		symbol = SYM_STRING;
+		marker = _T("");
+		marker_length = -1; // Helps code size to do this here instead of in ReturnPtr(), which should be inlined.
+		buf = aResultBuf;
+		mem_to_free = NULL;
+		result = OK;
+	}
+
+	// Utility function for properly freeing a token's contents.
+	void Free()
+	{
+		// If the token contains an object, release it.
+		if (symbol == SYM_OBJECT)
+			object->Release();
+		// If the token has memory allocated for it, free it.
+		if (mem_to_free)
+			free(mem_to_free);
+	}
+
+	void StealMem(Var *aVar);
+	
+	void AcceptMem(LPTSTR aNewMem, size_t aLength)
+	{
+		symbol = SYM_STRING;
+		marker = mem_to_free = aNewMem;
+		marker_length = aLength;
+	}
+	
+	LPTSTR Malloc(LPTSTR aValue, size_t aLength);
+
+	ResultType Return(LPTSTR aValue, size_t aLength = -1);
+	ResultType ReturnPtr(LPTSTR aValue)
+	// Return a null-terminated string which is already in persistent memory.
+	{
+		ASSERT(aValue);
+		symbol = SYM_STRING;
+		marker = aValue;
+		//marker_length is left at its default value, -1.  Caller will call _tcslen().
+		return OK;
+	}
+	ResultType ReturnPtr(LPTSTR aValue, size_t aLength)
+	// Return a string which is already in persistent memory.
+	{
+		SetValue(aValue, aLength);
+		return OK;
+	}
+	ResultType Return(__int64 aValue)
+	{
+		SetValue(aValue);
+		return OK;
+	}
+	ResultType Return(int aValue) { return Return((__int64)aValue); }
+	ResultType Return(UINT aValue) { return Return((__int64)aValue); }
+	ResultType Return(DWORD aValue) { return Return((__int64)aValue); }
+	ResultType Return(UINT64 aValue) { return Return((__int64)aValue); }
+	ResultType Return(double aValue)
+	{
+		SetValue(aValue);
+		return OK;
+	}
+	ResultType Return(IObject *aValue)
+	// Caller must AddRef() if appropriate and must not pass NULL.
+	{
+		symbol = SYM_OBJECT;
+		object = aValue;
+		return OK;
+	}
+	
+	ResultType SetExitResult(ResultType aResult)
+	{
+		ASSERT(aResult == FAIL || aResult == EARLY_EXIT);
+		return result = aResult;
+	}
+
+	ResultType SetResult(ResultType aResult) // See comments for 'result' below.
+	{
+		return result = aResult;
+	}
+
+	bool Exited()
+	{
+		return result == FAIL || result == EARLY_EXIT;
+	}
+
+	ResultType Result()
+	{
+		return result;
+	}
+
+	ResultType Error(LPCTSTR aErrorText);
+	ResultType Error(LPCTSTR aErrorText, LPCTSTR aExtraInfo);
+
+	Func *func; // For maintainability, this is separate from the ExprTokenType union.  Its main uses are func->mID and func->mOutputVars.
+
+private:
+	// Currently can't be included in the value union because meta-functions
+	// need the EARLY_RETURN result *and* return value passed back.  However,
+	// probably best to keep it separate for code size and maintainability.
+	// Struct size is a non-issue since there is only one ResultToken per
+	// function call on the stack (or MAX_ARGS for ACT_FUNC/ACT_METHOD).
+	ResultType result;
+};
 
 // But the array that goes with these actions is in globaldata.cpp because
 // otherwise it would be a little cumbersome to declare the extern version
@@ -325,7 +477,6 @@ enum enum_act {
 , ACT_STRINGREPLACE, ACT_SPLITPATH, ACT_SORT
 , ACT_ENVGET, ACT_ENVSET
 , ACT_RUNAS, ACT_RUN, ACT_RUNWAIT, ACT_DOWNLOAD
-, ACT_GETKEYSTATE
 , ACT_SEND, ACT_SENDRAW, ACT_SENDINPUT, ACT_SENDPLAY, ACT_SENDEVENT
 , ACT_CONTROLSEND, ACT_CONTROLSENDRAW, ACT_CONTROLCLICK, ACT_CONTROLMOVE, ACT_CONTROLGETPOS, ACT_CONTROLFOCUS
 , ACT_CONTROLGETFOCUS, ACT_CONTROLSETTEXT, ACT_CONTROLGETTEXT, ACT_CONTROL, ACT_CONTROLGET
@@ -335,7 +486,7 @@ enum enum_act {
 , ACT_STATUSBARWAIT
 , ACT_CLIPWAIT, ACT_KEYWAIT
 , ACT_SLEEP, ACT_RANDOM
-, ACT_ONEXIT, ACT_HOTKEY, ACT_SETTIMER, ACT_CRITICAL, ACT_THREAD
+, ACT_HOTKEY, ACT_SETTIMER, ACT_CRITICAL, ACT_THREAD
 , ACT_WINACTIVATE, ACT_WINACTIVATEBOTTOM
 , ACT_WINWAIT, ACT_WINWAITCLOSE, ACT_WINWAITACTIVE, ACT_WINWAITNOTACTIVE
 , ACT_WINMINIMIZE, ACT_WINMAXIMIZE, ACT_WINRESTORE
@@ -394,6 +545,7 @@ enum enum_act {
 #define ACT_IS_IF_OR_ELSE_OR_LOOP(ActionType) (ActionType <= ACT_WHILE && ActionType >= ACT_ELSE)
 #define ACT_LOOP_ALLOWS_UNTIL(ActionType) (ActionType <= ACT_FOR && ActionType >= ACT_LOOP) // UNTIL is currently unsupported with WHILE, for performance/code size (doesn't seem useful anyway).
 #define ACT_EXPANDS_ITS_OWN_ARGS(ActionType) (ActionType <= ACT_FUNC || ActionType == ACT_WHILE || ActionType == ACT_FOR || ActionType == ACT_THROW)
+#define ACT_USES_SIMPLE_POSTFIX(ActionType) (ActionType <= ACT_FUNC || ActionType == ACT_RETURN) // Actions which are optimized to use arg.postfix when is_expression == false, via the "only_token" optimization.
 
 // For convenience in many places.  Must cast to int to avoid loss of negative values.
 #define BUF_SPACE_REMAINING ((int)(aBufSize - (aBuf - aBuf_orig)))
@@ -610,7 +762,7 @@ struct HotkeyCriterion
 class Func;                 // Forward declarations
 
 struct FuncAndToken {
-	ExprTokenType mToken ;
+	ResultToken mToken ;
 	LPTSTR result_to_return_dll;
 	Func * mFunc ;
 	VARIANT variant_to_return_dll;
@@ -639,7 +791,7 @@ struct global_struct
 
 	HotkeyCriterion *HotCriterion;
 	TitleMatchModes TitleMatchMode;
-	int UninterruptedLineCount; // Stored as a g-struct attribute in case OnExit sub interrupts it while uninterruptible.
+	int UninterruptedLineCount; // Stored as a g-struct attribute in case OnExit func interrupts it while uninterruptible.
 	int Priority;  // This thread's priority relative to others.
 	DWORD LastError; // The result of GetLastError() after the most recent DllCall or Run.
 #ifndef MINIDLL
@@ -694,7 +846,7 @@ struct global_struct
 	bool IsPaused; // The latter supports better toggling via "Pause" or "Pause Toggle".
 	bool ListLinesIsEnabled;
 	UINT Encoding;
-	ExprTokenType* ThrownToken;
+	ResultToken* ThrownToken;
 	Line* ExcptLine;
 	DerefType* ExcptDeref;
 	bool InTryBlock;

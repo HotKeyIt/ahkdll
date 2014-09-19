@@ -313,8 +313,9 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 					// to be in chronological order by checking the timestamps of each Peek first message, and
 					// then fetching the one that's oldest (since it should be the one that's been waiting the
 					// longest and thus generally should be ahead of the other Peek's message in the queue):
+					UINT filter_max = (IsInterruptible() ? UINT_MAX : WM_HOTKEY - 1); // Fixed in v1.1.16 to not use MSG_FILTER_MAX, which would produce 0 when IsInterruptible(). Although WM_MOUSELAST+1..0 seems to produce the right results, MSDN does not indicate that it is valid.
 #define PEEK1(mode) PeekMessage(&msg, NULL, 0, WM_MOUSEFIRST-1, mode) // Relies on the fact that WM_MOUSEFIRST < MSG_FILTER_MAX
-#define PEEK2(mode) PeekMessage(&msg, NULL, WM_MOUSELAST+1, MSG_FILTER_MAX, mode)
+#define PEEK2(mode) PeekMessage(&msg, NULL, WM_MOUSELAST+1, filter_max, mode)
 					if (!PEEK1(PM_NOREMOVE))  // Since no message in Peek1, safe to always use Peek2's (even if it has no message either).
 						peek_result = PEEK2(PM_REMOVE);
 					else // Peek1 has a message.  So if Peek2 does too, compare their timestamps.
@@ -816,9 +817,9 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 				type_of_first_line = hs->mJumpToLabel->mJumpToLine->mActionType;
 				break;
 
-			case AHK_CLIPBOARD_CHANGE: // Due to the presence of an OnClipboardChange label in the script.
-				// Caller has ensured that mOnClipboardChangeLabel is a non-NULL, valid pointer.
-				type_of_first_line = g_script.mOnClipboardChangeLabel->mJumpToLine->mActionType;
+			case AHK_CLIPBOARD_CHANGE: // Due to the registration of an OnClipboardChange function in the script.
+				if (g_script.mOnClipboardChangeFunc)
+					type_of_first_line = g_script.mOnClipboardChangeFunc->mJumpToLine->mActionType;
 				break;
 
 			default: // hotkey
@@ -959,7 +960,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 			case AHK_HOTSTRING:
 				priority = hs->mPriority;
 				break;
-			case AHK_CLIPBOARD_CHANGE: // Due to the presence of an OnClipboardChange label in the script.
+			case AHK_CLIPBOARD_CHANGE: // Due to the registration of an OnClipboardChange function in the script.
 				if (g_script.mOnClipboardChangeIsRunning)
 					continue;
 				priority = 0;  // Always use default for now.
@@ -1290,15 +1291,27 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 				break;
 
 			case AHK_CLIPBOARD_CHANGE:
-				g.EventInfo = CountClipboardFormats() ? (IsClipboardFormatAvailable(CF_NATIVETEXT) || IsClipboardFormatAvailable(CF_HDROP) ? 1 : 2) : 0;
+			{
+				// Sometimes OnClipboardChange messages are processed after the function is unregistered.
+				if (!g_script.mOnClipboardChangeFunc)
+					break;
+
 				// ACT_IS_ALWAYS_ALLOWED() was already checked above.
-				// The message poster has ensured that g_script.mOnClipboardChangeLabel is non-NULL and valid.
+
+				// Call the OnClipboardChange function.
 				g_script.mOnClipboardChangeIsRunning = true;
-				DEBUGGER_STACK_PUSH(g_script.mOnClipboardChangeLabel->mJumpToLine, _T("OnClipboardChange"))
-				g_script.mOnClipboardChangeLabel->Execute();
+				DEBUGGER_STACK_PUSH(g_script.mOnClipboardChangeFunc->mJumpToLine, _T("OnClipboardChange"))
+
+				int arg = CountClipboardFormats() ? (IsClipboardFormatAvailable(CF_NATIVETEXT) || IsClipboardFormatAvailable(CF_HDROP) ? 1 : 2) : 0;
+
+				FuncResult result_token;
+				g_script.mOnClipboardChangeFunc->Call(result_token, 1, FUNC_ARG_INT(arg));
+				result_token.Free(); // Result not needed.
+
 				DEBUGGER_STACK_POP()
 				g_script.mOnClipboardChangeIsRunning = false;
 				break;
+			}
 
 			default: // hotkey
 				if (IS_WHEEL_VK(hk->mVK)) // If this is true then also: msg.message==AHK_HOOK_HOTKEY
@@ -1812,26 +1825,6 @@ bool MsgMonitor(HWND aWnd, UINT aMsg, WPARAM awParam, LPARAM alParam, MSG *apMsg
 #endif
 	//else leave them at their init-thread defaults.
 
-	// Set up the array of parameters for Func::Call().  Benchmarks showed very little difference
-	// between this approach and the old approach of assigning directly to the function's parameters:
-	ExprTokenType param_token[4];
-	ExprTokenType *param[4];
-	// Message parameters:
-	param[0] = &param_token[0];
-	param_token[0].symbol = SYM_INTEGER;
-	param_token[0].value_int64 = (__int64)awParam;
-	param[1] = &param_token[1];
-	param_token[1].symbol = SYM_INTEGER;
-	param_token[1].value_int64 = (__int64)alParam;
-	// Message number:
-	param[2] = &param_token[2];
-	param_token[2].symbol = SYM_INTEGER;
-	param_token[2].value_int64 = aMsg;
-	// HWND:
-	param[3] = &param_token[3];
-	param_token[3].symbol = SYM_INTEGER;
-	param_token[3].value_int64 = (__int64)(size_t)aWnd;
-
 	// v1.0.38.04: Below was added to maximize responsiveness to incoming messages.  The reasoning
 	// is similar to why the same thing is done in MsgSleep() prior to its launch of a thread, so see
 	// MsgSleep for more comments:
@@ -1839,27 +1832,24 @@ bool MsgMonitor(HWND aWnd, UINT aMsg, WPARAM awParam, LPARAM alParam, MSG *apMsg
 	++monitor.instance_count;
 
 	bool block_further_processing;
-	{// Scope for func_call.
-		ExprTokenType result_token;
-		FuncCallData func_call;
-		ResultType result;
+	
+	FuncResult result_token;
 
-		if (func.Call(func_call, result, result_token, param, 4))
-		{
-			// Fix for v1.0.47: Must handle return_value BEFORE calling FreeAndRestoreFunctionVars() because return_value
-			// might be the contents of one of the function's local variables (which are about to be free'd).
-			block_further_processing = !TokenIsEmptyString(result_token); // No need to check the following because they're implied for *return_value!=0: result != EARLY_EXIT && result != FAIL;
-			if (block_further_processing)
-				aMsgReply = (LRESULT)TokenToInt64(result_token); // Use 64-bit in case it's an unsigned number greater than 0x7FFFFFFF, in which case this allows it to wrap around to a negative.
-			//else leave aMsgReply uninitialized because we'll be returning false later below, which tells our caller
-			// to ignore aMsgReply.
-			if (result_token.symbol == SYM_OBJECT)
-				result_token.object->Release();
-		}
-		else
-			// Above exited or failed.  result_token may not have been initialized, so treat it as empty:
-			block_further_processing = false;
-	}// func_call destructor causes Var::FreeAndRestoreFunctionVars() to be called here.
+	if (func.Call(result_token, 4, FUNC_ARG_INT(awParam), FUNC_ARG_INT(alParam), FUNC_ARG_INT(aMsg), FUNC_ARG_INT((size_t)aWnd)))
+	{
+		// Fix for v1.0.47: Must handle return_value BEFORE calling FreeAndRestoreFunctionVars() because return_value
+		// might be the contents of one of the function's local variables (which are about to be free'd).
+		block_further_processing = !TokenIsEmptyString(result_token);
+		if (block_further_processing)
+			aMsgReply = (LRESULT)TokenToInt64(result_token); // Use 64-bit in case it's an unsigned number greater than 0x7FFFFFFF, in which case this allows it to wrap around to a negative.
+		//else leave aMsgReply uninitialized because we'll be returning false later below, which tells our caller
+		// to ignore aMsgReply.
+	}
+	else
+		// Above exited or failed.  result_token may not have been initialized, so treat it as empty:
+		block_further_processing = false;
+
+	result_token.Free();
 	
 	DEBUGGER_STACK_POP()
 #ifndef MINIDLL

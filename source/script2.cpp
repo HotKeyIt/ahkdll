@@ -11605,7 +11605,7 @@ DynaToken *DynaToken::Create(ExprTokenType *aParam[], int aParamCount)
 	ResultToken result_token;
 	result_token.InitResult(buf);
 
-	ExprTokenType oParam = {};
+	ExprTokenType oParam = ExprTokenType();
 	ExprTokenType *param[1] = {&oParam};
 
 	DYNAPARM *dyna_param;

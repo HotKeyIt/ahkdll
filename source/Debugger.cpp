@@ -511,7 +511,7 @@ DEBUGGER_COMMAND(Debugger::stop)
 {
 	mContinuationTransactionId = aTransactionId;
 
-	// Call g_script.TerminateApp instead of g_script.ExitApp to bypass OnExit subroutine.
+	// Call g_script.TerminateApp instead of g_script.ExitApp to bypass OnExit function.
 	g_script.TerminateApp(EXIT_EXIT, 0); // This also causes this->Exit() to be called.
 	
 	// Should never be reached, but must be here to avoid a compile error:
@@ -1097,15 +1097,13 @@ void Struct::DebugWriteProperty(IDebugProperties *aDebugger, int aPage, int aPag
 			// For each array item in the requested page...
 			for ( ; i < j; ++i)
 			{
-				ExprTokenType value;
+				ResultToken value;
 				TCHAR buf[MAX_PATH];
 				value.buf = buf;
 				ExprTokenType aThisToken;
-				aThisToken.symbol = SYM_OBJECT;
-				aThisToken.object = this;
+				aThisToken.SetValue(this);
 				ExprTokenType *aVarToken = new ExprTokenType();
-				aVarToken->symbol = SYM_INTEGER;
-				aVarToken->value_int64 = i + 1; // Struct array is 1-based
+				aVarToken->SetValue(i + 1); // Struct array is 1-based
 				this->Invoke(value,aThisToken,0,&aVarToken,1);
 				delete aVarToken;
 				char intbuf[MAX_INTEGER_SIZE];
@@ -1125,15 +1123,13 @@ void Struct::DebugWriteProperty(IDebugProperties *aDebugger, int aPage, int aPag
 			{
 				Struct::FieldType &field = mFields[i];
 			
-				ExprTokenType value;
+				ResultToken value;
 				TCHAR buf[MAX_PATH];
 				value.buf = buf;
 				ExprTokenType aThisToken;
-				aThisToken.symbol = SYM_OBJECT;
-				aThisToken.object = this;
+				aThisToken.SetValue(this);
 				ExprTokenType *aVarToken = new ExprTokenType();
-				aVarToken->symbol = SYM_STRING;
-				aVarToken->marker = field.key;
+				aVarToken->SetValue(field.key);
 				this->Invoke(value,aThisToken,0,&aVarToken,1);
 				delete aVarToken;
 
@@ -1156,6 +1152,7 @@ int Debugger::WritePropertyXml(ExprTokenType &aValue, const char *aName, CString
 // This function has an equivalent WritePropertyData() for property_value, so maintain the two together.
 {
 	LPTSTR value;
+	size_t value_length = -1;
 	char *type;
 	TCHAR number_buf[MAX_NUMBER_SIZE];
 
@@ -1166,6 +1163,7 @@ int Debugger::WritePropertyXml(ExprTokenType &aValue, const char *aName, CString
 
 	case SYM_STRING:
 		value = aValue.marker;
+		value_length = aValue.marker_length;
 		type = "string";
 		break;
 
@@ -1198,7 +1196,7 @@ int Debugger::WritePropertyXml(ExprTokenType &aValue, const char *aName, CString
 	// If we fell through, value and type have been set appropriately above.
 	mResponseBuf.WriteF("<property name=\"%e\" fullname=\"%e\" type=\"%s\" facet=\"\" children=\"0\" encoding=\"base64\" size=\"", aName, aNameBuf.GetString(), type);
 	int err;
-	if (err = WritePropertyData(value, _tcslen(value), aMaxEncodedSize))
+	if (err = WritePropertyData(value, value_length == -1 ? _tcslen(value) : value_length, aMaxEncodedSize))
 		return err;
 	return mResponseBuf.Write("</property>");
 }
@@ -1357,7 +1355,7 @@ int Debugger::WritePropertyData(Object::FieldType &aField, int aMaxEncodedSize)
 	switch (aField.symbol)
 	{
 	case SYM_STRING:
-		value = aField.marker;
+		value = aField.string;
 		type = "string";
 		break;
 
@@ -1530,8 +1528,7 @@ int Debugger::ParsePropertyName(const char *aFullName, int aVarScope, bool aVarM
 				else
 				{
 					sBaseField->symbol = SYM_STRING;
-					sBaseField->marker = _T("");
-					sBaseField->size = 0;
+					sBaseField->string.Init();
 				}
 				field = sBaseField;
 				// If this is the end of 'name', sBaseField will be returned to our caller.
@@ -1553,28 +1550,24 @@ int Debugger::ParsePropertyName(const char *aFullName, int aVarScope, bool aVarM
 			aVar->mAttrib = 0;
 			aVar->mByteCapacity = 0;
 			aVar->mHowAllocated = ALLOC_MALLOC;
-			ExprTokenType aResultToken,aThisToken;
-			aResultToken.symbol = SYM_VAR;
-			aResultToken.var = aVar;
-			aResultToken.marker = _T("");
-			aResultToken.mem_to_free = NULL;
-			aResultToken.buf = buf;
-			aThisToken.symbol = SYM_OBJECT;
+			ExprTokenType aThisToken;
+			ResultToken aResultToken;
+			aResultToken.InitResult(buf);
 			if (criobj)
-				aThisToken.object = criobj;
+				aThisToken.SetValue(criobj);
 			else
-				aThisToken.object = strct;
+				aThisToken.SetValue(strct);
 			ExprTokenType *aVarToken = new ExprTokenType();
 			switch (aVarToken->symbol = key_type)
 			{
 				case SYM_STRING:
-					aVarToken->marker = key.s;
+					aVarToken->SetValue(key.s);
 					break;
 				case SYM_INTEGER:
-					aVarToken->value_int64 = key.i;
+					aVarToken->SetValue(key.i);
 					break;
 				case SYM_OBJECT:
-					aVarToken->object = key.p;
+					aVarToken->SetValue(key.p);
 					break;
 			}
 			if (criobj)
@@ -1584,18 +1577,6 @@ int Debugger::ParsePropertyName(const char *aFullName, int aVarScope, bool aVarM
 			sBaseField->key.s = key.s;
 			switch (sBaseField->symbol = aResultToken.symbol)
 			{
-				case SYM_STRING:
-					criobj = NULL;strct = NULL;
-					sBaseField->marker = aResultToken.marker;
-					break;
-				case SYM_INTEGER:
-					criobj = NULL;strct = NULL;
-					sBaseField->n_int64 = aResultToken.value_int64;
-					break;
-				case SYM_FLOAT:
-					criobj = NULL;strct = NULL;
-					sBaseField->n_double = aResultToken.value_double;
-					break;
 				case SYM_OBJECT:
 					sBaseField->object = aResultToken.object;
 					if (criobj)
@@ -1614,6 +1595,10 @@ int Debugger::ParsePropertyName(const char *aFullName, int aVarScope, bool aVarM
 						strct = NULL;
 						strct = dynamic_cast<Struct *>(aResultToken.object);
 					}
+					break;
+				default:
+					criobj = NULL; strct = NULL;
+					sBaseField->Assign(aResultToken.marker);
 					break;
 			}
 			delete aVarToken;
@@ -1800,19 +1785,16 @@ DEBUGGER_COMMAND(Debugger::property_set)
 	ExprTokenType val;
 	if (!strcmp(type, "integer"))
 	{
-		val.symbol = SYM_INTEGER;
-		val.value_int64 = _atoi64(new_value);
+		val.SetValue(_atoi64(new_value));
 	}
 	else if (!strcmp(type, "float"))
 	{
-		val.symbol = SYM_FLOAT;
-		val.value_double = atof(new_value);
+		val.SetValue(atof(new_value));
 	}
 	else // Assume type is "string", since that's the only other supported type.
 	{
 		StringUTF8ToTChar(new_value, val_buf, (int)Base64Decode(new_value, new_value));
-		val.symbol = SYM_STRING;
-		val.marker = (LPTSTR)val_buf.GetString();
+		val.SetValue((LPTSTR)val_buf.GetString(), val_buf.GetLength());
 	}
 
 	bool success;
@@ -2264,7 +2246,7 @@ int Debugger::FatalError(LPCTSTR aMessage)
 
 	if (IDNO == MessageBox(g_hWnd, aMessage, g_script.mFileSpec, MB_YESNO | MB_ICONSTOP | MB_SETFOREGROUND | MB_APPLMODAL))
 	{
-		// The following will exit even if the OnExit subroutine does not use ExitApp:
+		// The following will exit even if the OnExit function does not use ExitApp:
 		g_script.ExitApp(EXIT_ERROR, _T(""));
 	}
 	return DEBUGGER_E_INTERNAL_ERROR;
@@ -2668,8 +2650,6 @@ TCHAR *DbgStack::Entry::Name()
 	case SE_Sub:
 		return sub->mName;
 	case SE_Func:
-		if ((UINT_PTR)func->mName < SYM_COUNT)
-			return _T("<object>");
 		return func->mName;
 	default: // SE_Thread
 		return desc;

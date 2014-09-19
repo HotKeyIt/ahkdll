@@ -4,11 +4,9 @@
 #define ParamIndexToInt(index)						(int)ParamIndexToInt64(index)
 #define ParamIndexToIntPtr(index)					(INT_PTR)ParamIndexToInt64(index)
 #define ParamIndexToDouble(index)					TokenToDouble(*aParam[(index)])
-#define ParamIndexToNumber(index)					TokenToDoubleOrInt64(*aParam[(index)])
+#define ParamIndexToNumber(index, output)			TokenToDoubleOrInt64(*aParam[(index)], output)
 #define ParamIndexToBOOL(index)						TokenToBOOL(*aParam[(index)])
 #define ParamIndexToObject(index)					TokenToObject(*aParam[(index)])
-
-#define ParamIndexLength(index, param_as_string)	EXPR_TOKEN_LENGTH(aParam[index], param_as_string)
 
 // For functions that allow "" to mean parameter is omitted.
 #define ParamIndexIsOmittedOrEmpty(index)  (ParamIndexIsOmitted(index) || TokenIsEmptyString(*aParam[(index)], TRUE))

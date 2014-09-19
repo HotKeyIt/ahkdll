@@ -5635,6 +5635,7 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 			case 'X':
 				if (*next_option == '+')
 				{
+					int offset = (ctoupper(next_option[1]) == 'M') ? mMarginX : Scale(ATOI(next_option + 1));
 					if (tab_control = FindTabControl(aControl.tab_control_index)) // Assign.
 					{
 						// Since this control belongs to a tab control and that tab control already exists,
@@ -5643,7 +5644,7 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 						if (!GetControlCountOnTabPage(aControl.tab_control_index, aControl.tab_index))
 						{
 							pt = GetPositionOfTabClientArea(*tab_control);
-							aOpt.x = pt.x + Scale(ATOI(next_option + 1));
+							aOpt.x = pt.x + offset;
 							if (aOpt.y == COORD_UNSPECIFIED) // Not yet explicitly set, so use default.
 								aOpt.y = pt.y + mMarginY;
 							break;
@@ -5651,7 +5652,7 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 						// else fall through and do it the standard way.
 					}
 					// Since above didn't break, do it the standard way.
-					aOpt.x = mPrevX + mPrevWidth + Scale(ATOI(next_option + 1));
+					aOpt.x = mPrevX + mPrevWidth + offset;
 					if (aOpt.y == COORD_UNSPECIFIED) // Not yet explicitly set, so use default.
 						aOpt.y = mPrevY;  // Since moving in the X direction, retain the same Y as previous control.
 				}
@@ -5687,6 +5688,7 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 			case 'Y':
 				if (*next_option == '+')
 				{
+					int offset = (ctoupper(next_option[1]) == 'M') ? mMarginY : Scale(ATOI(next_option + 1));
 					if (tab_control = FindTabControl(aControl.tab_control_index)) // Assign.
 					{
 						// Since this control belongs to a tab control and that tab control already exists,
@@ -5695,7 +5697,7 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 						if (!GetControlCountOnTabPage(aControl.tab_control_index, aControl.tab_index))
 						{
 							pt = GetPositionOfTabClientArea(*tab_control);
-							aOpt.y = pt.y + Scale(ATOI(next_option + 1));
+							aOpt.y = pt.y + offset;
 							if (aOpt.x == COORD_UNSPECIFIED) // Not yet explicitly set, so use default.
 								aOpt.x = pt.x + mMarginX;
 							break;
@@ -5703,7 +5705,7 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 						// else fall through and do it the standard way.
 					}
 					// Since above didn't break, do it the standard way.
-					aOpt.y = mPrevY + mPrevHeight + Scale(ATOI(next_option + 1));
+					aOpt.y = mPrevY + mPrevHeight + offset;
 					if (aOpt.x == COORD_UNSPECIFIED) // Not yet explicitly set, so use default.
 						aOpt.x = mPrevX;  // Since moving in the Y direction, retain the same X as previous control.
 				}
@@ -8138,8 +8140,8 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 				// problem, it seems best to do it the "correct" way.
 				DWORD pos;
 				pos = GetMessagePos();
-				ht.pt.x = LOWORD(pos);
-				ht.pt.y = HIWORD(pos);
+				ht.pt.x = (short)LOWORD(pos);
+				ht.pt.y = (short)HIWORD(pos);
 				ScreenToClient(control.hwnd, &ht.pt);
 				event_info = (DWORD)(size_t)TreeView_HitTest(control.hwnd, &ht);
 				break;
