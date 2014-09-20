@@ -5657,7 +5657,8 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 			return ScriptError(ERR_PARAM2_REQUIRED, aBuf);
 		else
 			parameter++;
-		*(_tcschr(aFuncName,',')) = '\0';
+		if (_tcschr(aFuncName, ','))
+			*(_tcschr(aFuncName,',')) = '\0';
 		ltrim(parameter);
 		int insert_pos;
 		Func *found_func = FindFunc(aFuncName,_tcslen(aFuncName),&insert_pos);
@@ -5671,7 +5672,6 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		//memcpy(*g_script.mFunc,&currentfunc,sizeof(Func));
 		found_func->mBIF = (BuiltInFunctionType)BIF_DllImport;
 		found_func->mIsBuiltIn = true;
-		found_func->mHasReturn = true;
 		found_func->mMinParams = 0;
 
 		TCHAR buf[MAX_PATH];
