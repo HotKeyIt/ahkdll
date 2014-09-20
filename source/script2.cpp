@@ -12476,7 +12476,7 @@ BIF_DECL(BIF_DllImport)
 // #DllImport will create a dummy function that will redirect the call here
 // All parameters are pre-defined in func-> structure and are used to call the Dll function via DllCall
 {
-	Func *func = g_script.FindFunc(aResultToken.marker);
+	Func *func = aResultToken.func;
 	int *shift_param = (int*)func->mLazyVar;
 	int param_count = func->mLazyVarCount;
 	ExprTokenType **func_param = (ExprTokenType **)func->mStaticVar;
