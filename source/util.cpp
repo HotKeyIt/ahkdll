@@ -2802,6 +2802,209 @@ short IsDefaultType(LPTSTR aTypeDef){
 	// type was not found
 	return NULL;
 }
+ResultType LoadDllFunction(LPTSTR parameter,LPTSTR aBuf)
+{
+	LPTSTR aFuncName = omit_leading_whitespace(parameter);
+	// backup current function
+	// Func currentfunc = **g_script.mFunc;
+	if (!(parameter = _tcschr(parameter, ',')) || !*parameter)
+		return g_script.ScriptError(ERR_PARAM2_REQUIRED, aBuf);
+	else
+		parameter++;
+	if (_tcschr(aFuncName, ','))
+		*(_tcschr(aFuncName, ',')) = '\0';
+	ltrim(parameter);
+	int insert_pos;
+	Func *found_func = g_script.FindFunc(aFuncName, _tcslen(aFuncName), &insert_pos);
+	if (found_func)
+		return g_script.ScriptError(_T("Duplicate function definition."), aFuncName); // Seems more descriptive than "Function already defined."
+	else
+		if (!(found_func = g_script.AddFunc(aFuncName, _tcslen(aFuncName), false, insert_pos)))
+	return FAIL; // It already displayed the error.
+
+	// restore previous function
+	//memcpy(*g_script.mFunc,&currentfunc,sizeof(Func));
+	found_func->mBIF = (BuiltInFunctionType)BIF_DllImport;
+	found_func->mIsBuiltIn = true;
+	found_func->mMinParams = 0;
+
+	TCHAR buf[MAX_PATH];
+	size_t space_remaining = LINE_SIZE - (parameter - aBuf);
+	if (tcscasestr(parameter, _T("%A_ScriptDir%")))
+	{
+		BIV_ScriptDir(buf, _T("A_ScriptDir"));
+		StrReplace(parameter, _T("%A_ScriptDir%"), buf, SCS_INSENSITIVE, 1, space_remaining);
+	}
+	if (tcscasestr(parameter, _T("%A_AppData%"))) // v1.0.45.04: This and the next were requested by Tekl to make it easier to customize scripts on a per-user basis.
+	{
+		BIV_SpecialFolderPath(buf, _T("A_AppData"));
+		StrReplace(parameter, _T("%A_AppData%"), buf, SCS_INSENSITIVE, 1, space_remaining);
+	}
+	if (tcscasestr(parameter, _T("%A_AppDataCommon%"))) // v1.0.45.04.
+	{
+		BIV_SpecialFolderPath(buf, _T("A_AppDataCommon"));
+		StrReplace(parameter, _T("%A_AppDataCommon%"), buf, SCS_INSENSITIVE, 1, space_remaining);
+	}
+	if (tcscasestr(parameter, _T("%A_AhkPath%"))) // v1.0.45.04.
+	{
+		BIV_AhkPath(buf, _T("A_AhkPath"));
+		StrReplace(parameter, _T("%A_AhkPath%"), buf, SCS_INSENSITIVE, 1, space_remaining);
+	}
+	if (tcscasestr(parameter, _T("%A_AhkDir%"))) // v1.0.45.04.
+	{
+		BIV_AhkDir(buf, _T("A_AhkDir"));
+		StrReplace(parameter, _T("%A_AhkDir%"), buf, SCS_INSENSITIVE, 1, space_remaining);
+	}
+	if (tcscasestr(parameter, _T("%A_DllPath%"))) // v1.0.45.04.
+	{
+		BIV_DllPath(buf, _T("A_DllPath"));
+		StrReplace(parameter, _T("%A_DllPath%"), buf, SCS_INSENSITIVE, 1, space_remaining);
+	}
+	if (tcscasestr(parameter, _T("%A_DllDir%"))) // v1.0.45.04.
+	{
+		BIV_DllDir(buf, _T("A_DllDir"));
+		StrReplace(parameter, _T("%A_DllDir%"), buf, SCS_INSENSITIVE, 1, space_remaining);
+	}
+	if (_tcschr(parameter, '%'))
+	{
+		return g_script.ScriptError(_T("Reference not allowed here, use & where possible. Only %A_AhkPath% %A_AhkDir% %A_DllPath% %A_DllDir% %A_ScriptDir% %A_AppData[Common]% can be used here."), parameter);
+	}
+	// terminate dll\function name, find it and jump to next parameter
+	if (_tcschr(parameter, ','))
+	*(_tcschr(parameter, ',')) = '\0';
+	HANDLE func_ptr = (HANDLE)ATOI64(parameter);
+	if (!func_ptr)
+	{
+		LPTSTR dll_name = _tcsrchr(parameter, '\\');
+		if (dll_name)
+		{
+			*dll_name = '\0';
+			if (!GetModuleHandle(parameter))
+				LoadLibrary(parameter);
+			*dll_name = '\\';
+		}
+		func_ptr = GetDllProcAddress(parameter);
+	}
+	if (!func_ptr)
+		return g_script.ScriptError(ERR_NONEXISTENT_FUNCTION, parameter);
+	parameter = parameter + _tcslen(parameter) + 1;
+
+	LPTSTR parm = SimpleHeap::Malloc(parameter);
+
+	// If next parameter starts with digit, it is a shift_param definition and is omitted from paramters list for dllcall
+	int aParamCount = ATOI(parm) ? 0 : 1;
+	if (*parm)
+	for (; parameter; aParamCount++)
+	{
+		if (parameter = _tcschr(parameter, ','))
+			parameter++;
+	}
+	if (*parm && aParamCount < 2)
+		return g_script.ScriptError(ERR_PARAM3_REQUIRED, aBuf);
+	// set max possible parameters for the new function
+	found_func->mParamCount = aParamCount / 2;
+	// misuse mGlobalVarCount to hold total amount of parmeters for DllCall
+	found_func->mLazyVarCount = aParamCount;
+
+	// allocate memory to hold the parameters and defaults
+	ExprTokenType **func_param = (ExprTokenType**)SimpleHeap::Malloc(aParamCount * sizeof(ExprTokenType*));
+	ExprTokenType **func_defaults = (ExprTokenType**)SimpleHeap::Malloc(found_func->mParamCount * sizeof(ExprTokenType*));
+	// misuse mParam to hold default parameters
+	found_func->mStaticVar = (Var**)func_param;
+	found_func->mStaticLazyVar = (Var**)func_defaults;
+
+	// assign function pointer
+	func_param[0] = (ExprTokenType*)SimpleHeap::Malloc(sizeof(ExprTokenType));
+	func_param[0]->symbol = PURE_INTEGER;
+	func_param[0]->value_int64 = (__int64)func_ptr;
+	if (!*parm)
+	return CONDITION_TRUE;
+	ltrim(parm);
+	// set parameters shift
+	if (ATOI(parm))
+	{
+		int shift_param[MAX_FUNCTION_PARAMS];
+		int shift_count = 0;
+		for (int i; parm && *parm || *parm != ',';)
+		{
+			if (!(i = ATOI(parm)))
+				break;  // next parameter is not number
+			shift_param[shift_count] = i * 2;
+			parm = StrChrAny(parm, _T("\t ,"));
+			ltrim(parm);
+			shift_count++;
+		}
+		if (!parm || !_tcschr(parm, ','))
+			return g_script.ScriptError(ERR_PARAM3_REQUIRED, aBuf);
+		if (*parm == ',')
+			parm++; // adnvance pointer to next parameter since above left a ,
+
+		// fill left parameters order
+		for (int c = 1; shift_count < found_func->mParamCount; c++)
+		{
+			bool found = false;
+			for (int i = 0; i < shift_count || found; i++)
+				found = shift_param[i] == c * 2;
+			if (!found)
+				shift_param[shift_count++] = c * 2;
+		}
+
+		// misuse mLazyVar, allocate memory and fill shift_param
+		found_func->mLazyVar = (Var**)SimpleHeap::Malloc(aParamCount * sizeof(int));
+		memcpy(found_func->mLazyVar, &shift_param, aParamCount * sizeof(int));
+	}
+	// fill definition and default parameters
+	for (aParamCount = 1; parm; aParamCount++)
+	{
+		LPTSTR this_parm = parm;
+		if (parm = _tcschr(parm, ','))
+		{
+			*parm = '\0';
+			parm++;
+		}
+		trim(this_parm);
+		func_param[aParamCount] = (ExprTokenType*)SimpleHeap::Malloc(sizeof(ExprTokenType));
+		ExprTokenType &this_param = *func_param[aParamCount];
+		if (this_param.symbol = IsNumeric(this_parm, true, true, true, true))
+		{
+			if (this_param.symbol == PURE_FLOAT)
+				this_param.value_double = ATOF(this_parm);
+			else
+				this_param.value_int64 = ATOI64(this_parm);
+		}
+		else
+		{
+			if (aParamCount % 2)
+			{
+				if (_tcschr(this_parm, '\"') == this_parm && _tcsrchr(this_parm, '\"') == (this_parm + _tcslen(this_parm) - 1))
+				{
+					this_param.marker = ++this_parm;
+					*(_tcsrchr(this_parm, '\"')) = '\0';
+				}
+				else
+					this_param.marker = this_parm;
+			}
+			else if (_tcschr(this_parm, '\"') == this_parm && _tcsrchr(this_parm, '\"') == (this_parm + _tcslen(this_parm) - 1))
+			{
+				this_param.marker = ++this_parm;
+				*(_tcsrchr(this_parm, '\"')) = '\0';
+			}
+			else
+			{  // user variable
+				this_param.var = g_script.FindVar(this_parm);
+				if (!this_param.var) // static variable could not be found
+					return g_script.ScriptError(_T("The variable name contains illegal character or is not declared."), this_parm);
+				this_param.symbol = SYM_VAR;
+			}
+		}
+		if (!(aParamCount % 2))
+		{
+			func_defaults[aParamCount / 2 - 1] = (ExprTokenType*)SimpleHeap::Malloc(sizeof(ExprTokenType));
+			memcpy(func_defaults[aParamCount / 2 - 1], &this_param, sizeof(ExprTokenType));
+		}
+	}
+	return CONDITION_TRUE;
+}
 
 DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf, TCHAR *pwd[]) // LiteZip Raw compression
 {
@@ -2890,7 +3093,8 @@ DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf, TCHAR *pwd[]) // LiteZip 
 LONG WINAPI DisableHooksOnException(PEXCEPTION_POINTERS pExceptionPtrs)
 {
 	// Disable all hooks to avoid system/mouse freeze
-	if (pExceptionPtrs->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION)
+	if (pExceptionPtrs->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION
+		&& pExceptionPtrs->ExceptionRecord->ExceptionFlags == EXCEPTION_NONCONTINUABLE)
 		AddRemoveHooks(0);
 	return EXCEPTION_CONTINUE_SEARCH;
 }

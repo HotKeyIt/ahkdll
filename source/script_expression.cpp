@@ -1538,6 +1538,7 @@ normal_end_skip_output_var:
 
 bool Func::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, bool aIsVariadic)
 {
+
 	Object *param_obj = NULL;
 	CriticalObject *param_critical = NULL;
 	CRITICAL_SECTION *crisec = NULL;
@@ -1546,7 +1547,7 @@ bool Func::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCo
 		ExprTokenType *rvalue = NULL;
 		if (mName == (LPTSTR)IT_SET && aParamCount > 1) // x[y*]:=z
 			rvalue = aParam[--aParamCount];
-		
+
 		--aParamCount; // i.e. make aParamCount the count of normal params.
 		if (param_critical = dynamic_cast<CriticalObject *>(TokenToObject(*aParam[aParamCount])))
 			EnterCriticalSection(crisec = (LPCRITICAL_SECTION)param_critical->GetCriSec());

@@ -2858,7 +2858,9 @@ BIV_DECL_R (BIV_IconNumber);
 BIV_DECL_R (BIV_Space_Tab);
 BIV_DECL_R (BIV_AhkVersion);
 BIV_DECL_R (BIV_AhkPath);
+BIV_DECL_R (BIV_AhkDir);
 BIV_DECL_R (BIV_DllPath);
+BIV_DECL_R (BIV_DllDir);
 BIV_DECL_R (BIV_TickCount);
 BIV_DECL_R (BIV_Now);
 #ifdef CONFIG_WIN9X

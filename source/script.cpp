@@ -138,7 +138,7 @@ FuncEntry g_BIF[] =
 	BIF1(CacheEnable, 1, 1, true ),
 	BIF1(getTokenValue, 1, 1, true ),
 	BIF1(ResourceLoadLibrary, 1, 1, true ),
-	BIF1(MemoryLoadLibrary, 1, 1, true ),
+	BIF1(MemoryLoadLibrary, 1, 5, true),
 	BIF1(MemoryGetProcAddress, 2, 2, true ),
 	BIF1(MemoryFreeLibrary, 1, 1, true ),
 	BIF1(MemoryFindResource, 3, 4, true ),
@@ -5649,198 +5649,7 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 	}
 
 	if (IS_DIRECTIVE_MATCH(_T("#DllImport")))
-	{
-		LPTSTR aFuncName = omit_leading_whitespace(parameter);
-		// backup current function
-		// Func currentfunc = **g_script.mFunc;
-		if (!(parameter = _tcschr(parameter,',')) || !*parameter)
-			return ScriptError(ERR_PARAM2_REQUIRED, aBuf);
-		else
-			parameter++;
-		if (_tcschr(aFuncName, ','))
-			*(_tcschr(aFuncName,',')) = '\0';
-		ltrim(parameter);
-		int insert_pos;
-		Func *found_func = FindFunc(aFuncName,_tcslen(aFuncName),&insert_pos);
-		if (found_func)
-			return ScriptError(_T("Duplicate function definition."), aFuncName); // Seems more descriptive than "Function already defined."
-		else
-			if (   !(found_func = AddFunc(aFuncName, _tcslen(aFuncName), false, insert_pos))   )
-				return FAIL; // It already displayed the error.
-		
-		// restore previous function
-		//memcpy(*g_script.mFunc,&currentfunc,sizeof(Func));
-		found_func->mBIF = (BuiltInFunctionType)BIF_DllImport;
-		found_func->mIsBuiltIn = true;
-		found_func->mMinParams = 0;
-
-		TCHAR buf[MAX_PATH];
-		size_t space_remaining = LINE_SIZE - (parameter-aBuf);
-		if (tcscasestr(parameter, _T("%A_ScriptDir%")))
-		{
-			BIV_ScriptDir(buf, _T("A_ScriptDir"));
-			StrReplace(parameter, _T("%A_ScriptDir%"), buf, SCS_INSENSITIVE, 1, space_remaining);
-		}
-		if (tcscasestr(parameter, _T("%A_AppData%"))) // v1.0.45.04: This and the next were requested by Tekl to make it easier to customize scripts on a per-user basis.
-		{
-			BIV_SpecialFolderPath(buf, _T("A_AppData"));
-			StrReplace(parameter, _T("%A_AppData%"), buf, SCS_INSENSITIVE, 1, space_remaining);
-		}
-		if (tcscasestr(parameter, _T("%A_AppDataCommon%"))) // v1.0.45.04.
-		{
-			BIV_SpecialFolderPath(buf, _T("A_AppDataCommon"));
-			StrReplace(parameter, _T("%A_AppDataCommon%"), buf, SCS_INSENSITIVE, 1, space_remaining);
-		}
-		if (tcscasestr(parameter, _T("%A_AhkPath%"))) // v1.0.45.04.
-		{
-			BIV_AhkPath(buf, _T("A_AhkPath"));
-			StrReplace(parameter, _T("%A_AhkPath%"), buf, SCS_INSENSITIVE, 1, space_remaining);
-		}
-		if (tcscasestr(parameter, _T("%A_DllPath%"))) // v1.0.45.04.
-		{
-			BIV_DllPath(buf, _T("A_DllPath"));
-			StrReplace(parameter, _T("%A_DllPath%"), buf, SCS_INSENSITIVE, 1, space_remaining);
-		}
-		if (_tcschr(parameter,'%'))
-		{
-			return ScriptError(_T("Reference not allowed here, use & where possible. Only %A_AhkPath% %A_DllPath% %A_ScriptDir% %A_AppData[Common]% can be used here."), parameter);
-		}
-		// terminate dll\function name, find it and jump to next parameter
-		if (_tcschr(parameter,','))
-			*(_tcschr(parameter,',')) = '\0';
-		HANDLE func_ptr = (HANDLE)ATOI64(parameter);
-		if (!func_ptr)
-		{
-			LPTSTR dll_name = _tcschr(parameter,'\\');
-			if (dll_name)
-			{
-				*dll_name = '\0';
-				if (!GetModuleHandle(parameter))
-					LoadLibrary(parameter);
-				*dll_name = '\\';
-			}
-			func_ptr = GetDllProcAddress(parameter);
-		}
-		if (!func_ptr )
-			return ScriptError(ERR_NONEXISTENT_FUNCTION, parameter);
-		parameter = parameter + _tcslen(parameter) + 1;
-
-		LPTSTR parm = SimpleHeap::Malloc(parameter);
-
-		// If next parameter starts with digit, it is a shift_param definition and is omitted from paramters list for dllcall
-		int aParamCount = ATOI(parm) ? 0 : 1;
-		if (*parm)
-			for(;parameter;aParamCount++)
-			{
-				if (parameter = _tcschr(parameter,','))
-					parameter++;
-			}
-		if (*parm && aParamCount < 2)
-			return ScriptError(ERR_PARAM3_REQUIRED, aBuf);
-		// set max possible parameters for the new function
-		found_func->mParamCount = aParamCount/2;
-		// misuse mGlobalVarCount to hold total amount of parmeters for DllCall
-		found_func->mLazyVarCount = aParamCount;
-
-		// allocate memory to hold the parameters and defaults
-		ExprTokenType **func_param = (ExprTokenType**)SimpleHeap::Malloc(aParamCount * sizeof(ExprTokenType*));
-		ExprTokenType **func_defaults = (ExprTokenType**)SimpleHeap::Malloc(found_func->mParamCount * sizeof(ExprTokenType*));
-		// misuse mParam to hold default parameters
-		found_func->mStaticVar = (Var**)func_param;
-		found_func->mStaticLazyVar = (Var**)func_defaults;
-
-		// assign function pointer
-		func_param[0] = (ExprTokenType*)SimpleHeap::Malloc(sizeof(ExprTokenType));
-		func_param[0]->symbol = PURE_INTEGER;
-		func_param[0]->value_int64 = (__int64)func_ptr;
-		if (!*parm)
-			return CONDITION_TRUE;
-		ltrim(parm);
-		// set parameters shift
-		if (ATOI(parm))
-		{
-			int shift_param[MAX_FUNCTION_PARAMS];
-			int shift_count = 0;
-			for (int i;parm && *parm || *parm != ',';)
-			{
-				if (!(i = ATOI(parm)))
-					break;  // next parameter is not number
-				shift_param[shift_count] = i*2;
-				parm = StrChrAny(parm,_T("\t ,"));
-				ltrim(parm);
-				shift_count++;
-			}
-			if (!parm || !_tcschr(parm,','))
-				return ScriptError(ERR_PARAM3_REQUIRED, aBuf);
-			if (*parm == ',')
-				parm++; // adnvance pointer to next parameter since above left a ,
-
-			// fill left parameters order
-			for (int c = 1; shift_count < found_func->mParamCount;c++)
-			{
-				bool found = false;
-				for (int i = 0; i < shift_count || found;i++)
-					found = shift_param[i] == c*2;
-				if (!found)
-					shift_param[shift_count++] = c*2;
-			}
-
-			// misuse mLazyVar, allocate memory and fill shift_param
-			found_func->mLazyVar = (Var**)SimpleHeap::Malloc(aParamCount * sizeof(int));
-			memcpy(found_func->mLazyVar,&shift_param,aParamCount * sizeof(int));
-		}
-		// fill definition and default parameters
-		for ( aParamCount = 1 ; parm ; aParamCount++ )
-		{
-			LPTSTR this_parm = parm;
-			if (parm = _tcschr(parm,','))
-			{
-				*parm = '\0';
-				parm++;
-			}
-			trim(this_parm);
-			func_param[aParamCount] = (ExprTokenType*)SimpleHeap::Malloc(sizeof(ExprTokenType));
-			ExprTokenType &this_param = *func_param[aParamCount];
-			if (this_param.symbol = IsNumeric(this_parm,true,true,true,true))
-			{
-				if (this_param.symbol == PURE_FLOAT)
-					this_param.value_double = ATOF(this_parm);
-				else
-					this_param.value_int64 = ATOI64(this_parm);
-			}
-			else
-			{
-				if (aParamCount % 2)
-				{
-					if (_tcschr(this_parm,'\"') == this_parm && _tcsrchr(this_parm,'\"') == (this_parm + _tcslen(this_parm) - 1))
-					{
-						this_param.marker = ++this_parm;
-						*(_tcsrchr(this_parm,'\"')) = '\0';
-					}
-					else
-						this_param.marker = this_parm;
-				}
-				else if (_tcschr(this_parm,'\"') == this_parm && _tcsrchr(this_parm,'\"') == (this_parm + _tcslen(this_parm) - 1))
-				{
-					this_param.marker = ++this_parm;
-					*(_tcsrchr(this_parm,'\"')) = '\0';
-				}
-				else
-				{  // user variable
-					this_param.var = FindVar(this_parm);
-					if (!this_param.var) // static variable could not be found
-						return ScriptError(_T("The variable name contains illegal character or is not declared."), this_parm);
-					this_param.symbol = SYM_VAR;
-				}
-			}
-			if (!(aParamCount % 2))
-			{
-				func_defaults[aParamCount/2 - 1] = (ExprTokenType*)SimpleHeap::Malloc(sizeof(ExprTokenType));
-				memcpy(func_defaults[aParamCount/2 - 1],&this_param,sizeof(ExprTokenType));
-			}
-		}
-		return CONDITION_TRUE;
-	}
+		return LoadDllFunction(parameter, aBuf);
 
 	if (IS_DIRECTIVE_MATCH(_T("#MustDeclare")))
 	{
@@ -9169,6 +8978,8 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	LPTSTR char_after_last_backslash;
 	TCHAR buf[MAX_PATH+1];
 	DWORD attr;
+	TextMem tmem;
+	TextMem::Buffer textbuf(NULL, 0, false);
 
 	#define FUNC_LIB_EXT _T(".ahk")
 	#define FUNC_LIB_EXT_LENGTH (_countof(FUNC_LIB_EXT) - 1)
@@ -9181,9 +8992,15 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 
 	#define FUNC_LIB_COUNT 4
 	static FuncLibrary sLib[FUNC_LIB_COUNT] = {0};
+	static LPTSTR winapi;
 
 	if (!sLib[0].path) // Allocate & discover paths only upon first use because many scripts won't use anything from the library. This saves a bit of memory and performance.
 	{
+		// Load WinApi library
+		LPVOID aDataBuf;
+		HRSRC hResInfo = NULL;
+		DecompressBuffer(LockResource(LoadResource(g_hInstance, FindResource(g_hInstance, _T("WINAPI"), MAKEINTRESOURCE(10)))), aDataBuf, g_default_pwd);
+		winapi = UTF8ToWide((LPCSTR) aDataBuf);
 		for (i = 0; i < FUNC_LIB_COUNT; ++i)
 #ifdef _USRDLL
 			if (   !(sLib[i].path = tmalloc(MAX_PATH))   ) // When dll script is restarted, SimpleHeap is deleted and we don't want to delete static memberst
@@ -9407,8 +9224,8 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 		aUseHinstance = false;
 		if (  !(lib_hResource = FindResource(NULL, class_name_buf, _T("LIB")))  )
 		{
-			if (  !(first_underscore = _tcschr(aFuncName, '_'))  ) // No second iteration needed.
-				return NULL;
+			if (!(first_underscore = _tcschr(aFuncName, '_'))) // No second iteration needed.
+				goto winapi;
 			else
 			{
 				naked_filename_length = first_underscore - aFuncName;
@@ -9420,7 +9237,7 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 				if (  !(lib_hResource = FindResource(g_hInstance, class_name_buf, _T("LIB")))  )
 				{
 					if (  !(lib_hResource = FindResource(NULL, class_name_buf, _T("LIB")))  )
-						return NULL;
+						goto winapi;
 				} 
 				else
 					aUseHinstance = true;
@@ -9430,12 +9247,11 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	// Now a resouce was found and it can be loaded
 	HGLOBAL hResData;
 	HINSTANCE ahInstance = aUseHinstance ? g_hInstance : NULL;
-	TextMem::Buffer textbuf(NULL, 0, false);
 	if ( !( (textbuf.mLength = SizeofResource(ahInstance, lib_hResource))
 		&& (hResData = LoadResource(ahInstance, lib_hResource))
 		&& (textbuf.mBuffer = LockResource(hResData)) ) )
 	{   // aErrorWasShown = true; // Do not display errors here
-		return NULL;
+		goto winapi;
 	}
 	if (*(unsigned int*)textbuf.mBuffer == 0x04034b50)
 	{
@@ -9452,7 +9268,6 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	}
 	aFileWasFound = true;
 	// NOTE: Ahk2Exe strips off the UTF-8 BOM.
-	TextMem tmem;
 	LPTSTR resource_script = (LPTSTR)_alloca(textbuf.mLength * sizeof(TCHAR));
 	tmem.Open(textbuf, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR, CP_UTF8);
 	tmem.Read(resource_script, textbuf.mLength);
@@ -9480,6 +9295,100 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	// Restore setting as per the comment above.
 	g_MustDeclare = must_declare;
 	return FindFunc(aFuncName, aFuncNameLength);
+winapi:
+	TCHAR parameter[1024] = { L'#', L'D', L'l', L'l', L'I', L'm', L'p', L'o', L'r', L't', L'\\'};
+	memmove(&parameter[11], aFuncName, aFuncNameLength*sizeof(TCHAR));
+	parameter[aFuncNameLength + 11] = L',';
+	parameter[aFuncNameLength + 12] = '\0';
+	LPTSTR found;
+	if (found = _tcsstr(winapi, (LPTSTR)&parameter[10]))
+	{
+		parameter[10] = L',';
+		LPTSTR aDest = (LPTSTR)&parameter[aFuncNameLength + 12];
+		LPTSTR aDllName = _tcsstr(found, _T("\t")) + 1;
+		size_t aNameLen = _tcsstr(aDllName, _T("\\")) - aDllName + 1;
+		_tcsncpy(aDest, aDllName, aNameLen);
+		aDest = aDest + aNameLen;
+		_tcsncpy(aDest,found + 1,aFuncNameLength + 1);
+		aDest = aDest + aFuncNameLength + 1;
+		for (found = _tcsstr(found, _T(",")) + 1; *found != L'\\'; found++)
+		{
+			if (*found == L'U' || *found == L'u')
+			{
+				*aDest = L'U';
+				aDest++;
+				continue;
+			}
+			if (*found == L's' || *found == L'S')
+			{
+				_tcscpy(aDest, _T("STR"));
+				aDest = aDest + 3;
+			}
+			else if (*found == L't' || *found == L't')
+			{
+				_tcscpy(aDest, _T("PTR"));
+				aDest = aDest + 3;
+			}
+			else if (*found == L'a' || *found == L'A')
+			{
+				_tcscpy(aDest, _T("ASTR"));
+				aDest = aDest + 4;
+			}
+			else if (*found == L'w' || *found == L'W')
+			{
+				_tcscpy(aDest, _T("WSTR"));
+				aDest = aDest + 4;
+			}
+			else if (*found == L'x' || *found == L'X') // TCHAR
+			{
+				_tcscpy(aDest, _T("USHORT"));
+				aDest = aDest + 6;
+			}
+			else if ((*found == L'i' || *found == L'I') && *(found + 1) == L'6')
+			{
+				_tcscpy(aDest, _T("INT64"));
+				aDest = aDest + 5;
+				found++;
+			}
+			else if (*found == L'i' || *found == L'I')
+			{
+				_tcscpy(aDest, _T("INT"));
+				aDest = aDest + 3;
+			}
+			else if (*found == L'h' || *found == L'H')
+			{
+				_tcscpy(aDest, _T("SHORT"));
+				aDest = aDest + 5;
+			}
+			else if (*found == L'c' || *found == L'C')
+			{
+				_tcscpy(aDest, _T("CHAR"));
+				aDest = aDest + 4;
+			}
+			else if (*found == L'f' || *found == L'F')
+			{
+				_tcscpy(aDest, _T("FLOAT"));
+				aDest = aDest + 5;
+			}
+			else if (*found == L'd' || *found == L'D')
+			{
+				_tcscpy(aDest, _T("DOUBLE"));
+				aDest = aDest + 6;
+			}
+
+			if (*(found + 1) == L'*' || *(found + 1) == L'p' || *(found + 1) == L'P')
+			{
+				*aDest = *found;
+				aDest++;
+			}
+			_tcscpy(aDest, _T(",,"));
+			aDest = aDest + 2;
+		}
+		*(aDest - 2) = L'\0';
+		LoadDllFunction(_tcschr(parameter,L',') + 1, parameter);
+		return FindFunc(aFuncName, aFuncNameLength);
+	}
+	return NULL;
 }
 #endif
 
@@ -10564,7 +10473,9 @@ BuiltInVarType Script::GetVarType_BIV(LPTSTR lowercase, BuiltInVarSetType &sette
 		|| !_tcscmp(lower, _T("tab"))) return BIV_Space_Tab;
 	if (!_tcscmp(lower, _T("ahkversion"))) return BIV_AhkVersion;
 	if (!_tcscmp(lower, _T("ahkpath"))) return BIV_AhkPath;
+	if (!_tcscmp(lower, _T("ahkdir"))) return BIV_AhkDir;
 	if (!_tcscmp(lower, _T("dllpath"))) return BIV_DllPath;
+	if (!_tcscmp(lower, _T("dlldir"))) return BIV_DllDir;
 	if (ATOI64(lower))
 		return BIV_ORD;
 	// Since above didn't return:
@@ -11742,6 +11653,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 							deref_new->param_count = 1; // Initially one parameter: the target object.
 						}
 						deref_new->marker = cp; // For error-reporting.
+						deref_new->type = DT_FUNC;
 						this_infix_item.deref = deref_new;
 					}
 					// This SYM_OBRACKET will be converted to SYM_FUNC after we determine what type of operation
@@ -11760,6 +11672,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 					if (  !(deref_new = (DerefType *)SimpleHeap::Malloc(sizeof(DerefType)))  )
 						return LineError(ERR_OUTOFMEM);
 					deref_new->func = g_script.FindFunc(_T("Object"));
+					deref_new->type = DT_FUNC;
 					deref_new->param_count = 0;
 					deref_new->marker = cp; // For error-reporting.
 					this_infix_item.deref = deref_new;
@@ -11876,6 +11789,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 						if (   !(this_infix_item.deref = (DerefType *)SimpleHeap::Malloc(sizeof(DerefType)))   )
 							return LineError(ERR_OUTOFMEM);
 						this_infix_item.deref->func = g_script.FindFunc(_T("RegExMatch"));
+						this_infix_item.deref->type = DT_FUNC;
 						this_infix_item.deref->param_count = 2;
 						this_infix_item.symbol = SYM_REGEXMATCH;
 					}
@@ -11989,6 +11903,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 								return LineError(ERR_OUTOFMEM);
 							new_deref->marker = cp - 1; // Not typically needed, set for error-reporting.
 							new_deref->param_count = 2; // Initially two parameters: the object and identifier.
+							new_deref->type = DT_FUNC;
 							
 							if (*op_end == '(')
 							{
@@ -12755,6 +12670,7 @@ standard_pop_into_postfix: // Use of a goto slightly reduces code size.
 						if (  !(that_postfix->deref = (DerefType *)SimpleHeap::Malloc(sizeof(DerefType)))  ) // Must be persistent memory, unlike that_postfix itself.
 							return LineError(ERR_OUTOFMEM);
 						that_postfix->deref->func = &g_ObjGetInPlace;
+						that_postfix->deref->type = DT_FUNC;
 						that_postfix->deref->param_count = param_count;
 					}
 					else
@@ -12870,6 +12786,7 @@ end_of_infix_to_postfix:
 	if (   postfix_count == 1 && IS_OPERAND(only_symbol) // This expression is a lone operand, like (1) or "string".
 		&& (mActionType < ACT_FOR || mActionType > ACT_UNTIL) // It's not WHILE or UNTIL, which currently perform better as expressions, or FOR, which performs the same but currently expects aResultToken to always be set.
 		&& (mActionType != ACT_THROW) // Exclude THROW to simplify variable handling (ensures vars are always dereferenced).
+		&& (only_symbol != SYM_VAR || mActionType != ACT_RETURN) // "return var" is kept as an expression for correct handling of local vars (see "ToReturnValue") and ByRef.
 		&& (only_symbol != SYM_STRING || mActionType != ACT_SENDMESSAGE && mActionType != ACT_POSTMESSAGE)   ) // It's not something like SendMessage WM_SETTEXT,,"New text" (which requires the leading quote mark to be present).
 	{
 		if (only_symbol == SYM_DYNAMIC) // This needs some extra checks to ensure correct behaviour.
@@ -13349,23 +13266,6 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ResultToken *aResultToken, Line 
 			// which is desirable *even* if aResultToken is NULL (i.e. the caller will be
 			// ignoring the return value) in case the return's expression calls a function
 			// which has side-effects.  For example, "return LogThisEvent()".
-			if (aResultToken && aResultToken->symbol == SYM_STRING && line->mArgc // Caller wants the return value, but since symbol == string, ExpandExpression() might not have set it.
-				&& !aResultToken->mem_to_free) // Doesn't already contain a dynamic memory block.
-			{
-				if (!ARGVAR1 || !ARGVAR1->ToReturnValue(*aResultToken)) // For something like "return local_var", ToReturnValue() handles it.
-				{
-					// ExpandArgs() or ExpandExpression() takes care of assigning aResultToken
-					// if it was a number or object, but leaves it unset for strings.
-					// The exception is that expressions consisting of just a literal string are
-					// optimized to skip ExpandExpression() and just assign the string token.
-					// In that case, arg.text contains quote marks which we want to omit
-					// (the quote marks are left for ListLines and Line::VicinityToText()).
-					//aResultToken->symbol = SYM_STRING; // The check above verified it is already SYM_STRING.
-					if (!*aResultToken->marker) // i.e. it really hasn't been set (or it was set to "", but ARG1 is also "").
-						aResultToken->marker = ARG1;
-				}
-			}
-			// Otherwise, the return value either has already been set or is being discarded.
 			if (aMode != UNTIL_RETURN)
 				// Tells the caller to return early if it's not the Gosub that directly
 				// brought us into this subroutine.  i.e. it allows us to escape from

@@ -9832,6 +9832,31 @@ VarSizeType BIV_AhkPath(LPTSTR aBuf, LPTSTR aVarName) // v1.0.41.
 #endif
 }
 
+VarSizeType BIV_AhkDir(LPTSTR aBuf, LPTSTR aVarName) // v1.0.41.
+{
+#ifdef AUTOHOTKEYSC
+	if (aBuf)
+	{
+		GetAHKInstallDir(aBuf);
+		return (VarSizeType)_tcslen(aBuf);
+	}
+	// Otherwise: Always return an estimate of MAX_PATH in case the registry entry changes between the
+	// first call and the second.  This is also relied upon by strlcpy() above, which zero-fills the tail
+	// of the destination up through the limit of its capacity (due to calling strncpy, which does this).
+	return MAX_PATH;
+#else
+	TCHAR buf[MAX_PATH];
+	GetModuleFileName(NULL, buf, MAX_PATH);
+	VarSizeType length = (_tcsrchr(buf, L'\\') - buf);
+	if (aBuf)
+	{
+		_tcsncpy(aBuf, buf, length); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string). This is true for ReadRegString()'s API call and may be true for other API calls like this one.
+		*(aBuf + length) = L'\0';
+	}
+	return length;
+#endif
+}
+
 VarSizeType BIV_DllPath(LPTSTR aBuf, LPTSTR aVarName) // HotKeyIt H1 path of loaded dll
 {
 	TCHAR buf[MAX_PATH];
@@ -9843,6 +9868,20 @@ VarSizeType BIV_DllPath(LPTSTR aBuf, LPTSTR aVarName) // HotKeyIt H1 path of loa
 	return length;
 }
 
+VarSizeType BIV_DllDir(LPTSTR aBuf, LPTSTR aVarName) // HotKeyIt H1 path of loaded dll
+{
+	TCHAR buf[MAX_PATH];
+	VarSizeType length = (VarSizeType)GetModuleFileName(g_hInstance, buf, _countof(buf));
+	if (length == 0)
+		GetModuleFileName(NULL, buf, _countof(buf));
+	length = _tcsrchr(buf, L'\\') - buf;
+	if (aBuf)
+	{
+		_tcsncpy(aBuf, buf, length); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string). This is true for ReadRegString()'s API call and may be true for other API calls like this one.
+		*(aBuf + length) = '\0';
+	}
+	return length;
+}
 
 VarSizeType BIV_TickCount(LPTSTR aBuf, LPTSTR aVarName)
 {
@@ -13310,8 +13349,8 @@ ResultType RegExMatchObject::Create(LPCTSTR aHaystack, int *aOffset, LPCTSTR *aP
 	// Do some pre-processing:
 	//  - Locate the smallest portion of haystack that contains all matches.
 	//  - Convert end offsets to lengths.
-	int min_offset = INT_MAX, max_offset = -1;
-	for (int p = 0; p < aPatternCount; ++p)
+	int p, min_offset = INT_MAX, max_offset = -1;
+	for (p = 0; p < aCapturedPatternCount; ++p)
 	{
 		if (m->mOffset[p*2] > -1)
 		{
@@ -13323,6 +13362,14 @@ ResultType RegExMatchObject::Create(LPCTSTR aHaystack, int *aOffset, LPCTSTR *aP
 		}
 		// Convert end offset to length.
 		m->mOffset[p*2+1] -= m->mOffset[p*2];
+	}
+	// Initialize the remainder of the offset vector (patterns which were not captured),
+	// which have indeterminate values if we're called by a regex callout and therefore
+	// can't be handled the same way as in the loop above.
+	for ( ; p < aPatternCount; ++p)
+	{
+		m->mOffset[p*2] = -1;
+		m->mOffset[p*2+1] = 0;
 	}
 	
 	// Copy only the portion of aHaystack which contains matches.  This can be much faster
@@ -15238,7 +15285,6 @@ BIF_DECL(BIF_VarSetCapacity)
 					return;
 				}
 				VarSizeType capacity; // in characters
-
 				if (aParamCount > 2 && (capacity = var.Capacity()) > 1) // Third parameter is present and var has enough capacity to make FillMemory() meaningful.
 				{
 					--capacity; // Convert to script-POV capacity. To avoid underflow, do this only now that Capacity() is known not to be zero.
@@ -15387,27 +15433,38 @@ BIF_DECL(BIF_ResourceLoadLibrary)
 
 BIF_DECL(BIF_MemoryLoadLibrary)
 {
+	HMEMORYMODULE module = NULL;
+	unsigned char *data = NULL;
 	aResultToken.symbol = SYM_INTEGER;
-	aResultToken.value_int64 = 0;
 	if (TokenIsEmptyString(*aParam[0]))
+	{
+		aResultToken.value_int64 = 0;
 		return;
-	FILE *fp;
-	unsigned char *data=NULL;
-	size_t size;
-	HMEMORYMODULE module;
-	
-	fp = _tfopen(TokenToString(*aParam[0]), _T("rb"));
-	if (fp == NULL)
-		return;
+	}
+	else if (!TokenIsNumeric(*aParam[0]))
+	{
+		FILE *fp;
+		size_t size;
 
-	fseek(fp, 0, SEEK_END);
-	size = ftell(fp);
-	data = (unsigned char *)_alloca(size);
-	fseek(fp, 0, SEEK_SET);
-	fread(data, 1, size, fp);
-	fclose(fp);
+		fp = _tfopen(TokenToString(*aParam[0]), _T("rb"));
+		if (fp == NULL)
+			return;
+
+		fseek(fp, 0, SEEK_END);
+		size = ftell(fp);
+		data = (unsigned char *)_alloca(size);
+		fseek(fp, 0, SEEK_SET);
+		fread(data, 1, size, fp);
+		fclose(fp);
+	}
+	else
+		data = (unsigned char*)TokenToInt64(*aParam[0]);
 	if (data)
-		module = MemoryLoadLibrary(data);
+		module = MemoryLoadLibraryEx(data,
+									(CustomLoadLibraryFunc)(aParamCount > 1 ? (HCUSTOMMODULE)TokenToInt64(*aParam[1]) : _LoadLibrary),
+									(CustomGetProcAddressFunc)(aParamCount > 2 ? (HCUSTOMMODULE)TokenToInt64(*aParam[2]) : _GetProcAddress),
+									(CustomFreeLibraryFunc)(aParamCount > 3 ? (HCUSTOMMODULE)TokenToInt64(*aParam[3]) : _FreeLibrary),
+									(void*)(aParamCount > 4 ? TokenToInt64(*aParam[4]) : NULL));
 	aResultToken.value_int64 = (UINT_PTR)module;
 }
 
