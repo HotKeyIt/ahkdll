@@ -11648,6 +11648,31 @@ VarSizeType BIV_AhkPath(LPTSTR aBuf, LPTSTR aVarName) // v1.0.41.
 #endif
 }
 
+VarSizeType BIV_AhkDir(LPTSTR aBuf, LPTSTR aVarName) // v1.0.41.
+{
+#ifdef AUTOHOTKEYSC
+	if (aBuf)
+	{
+		GetAHKInstallDir(aBuf);
+		return (VarSizeType)_tcslen(aBuf);
+	}
+	// Otherwise: Always return an estimate of MAX_PATH in case the registry entry changes between the
+	// first call and the second.  This is also relied upon by strlcpy() above, which zero-fills the tail
+	// of the destination up through the limit of its capacity (due to calling strncpy, which does this).
+	return MAX_PATH;
+#else
+	TCHAR buf[MAX_PATH];
+	GetModuleFileName(NULL, buf, MAX_PATH);
+	VarSizeType length = (_tcsrchr(buf, L'\\') - buf);
+	if (aBuf)
+	{
+		_tcsncpy(aBuf, buf, length); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string). This is true for ReadRegString()'s API call and may be true for other API calls like this one.
+		*(aBuf + length) = L'\0';
+	}
+	return length;
+#endif
+}
+
 VarSizeType BIV_DllPath(LPTSTR aBuf, LPTSTR aVarName) // HotKeyIt H1 path of loaded dll
 {
 	TCHAR buf[MAX_PATH];
@@ -11656,6 +11681,22 @@ VarSizeType BIV_DllPath(LPTSTR aBuf, LPTSTR aVarName) // HotKeyIt H1 path of loa
 		VarSizeType length = (VarSizeType)GetModuleFileName(NULL, buf, _countof(buf));
 	if (aBuf)
 		_tcscpy(aBuf, buf); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string). This is true for ReadRegString()'s API call and may be true for other API calls like this one.
+	return length;
+}
+
+
+VarSizeType BIV_DllDir(LPTSTR aBuf, LPTSTR aVarName) // HotKeyIt H1 path of loaded dll
+{
+	TCHAR buf[MAX_PATH];
+	VarSizeType length = (VarSizeType)GetModuleFileName(g_hInstance, buf, _countof(buf));
+	if (length == 0)
+		GetModuleFileName(NULL, buf, _countof(buf));
+	length = _tcsrchr(buf, L'\\') - buf;
+	if (aBuf)
+	{
+		_tcsncpy(aBuf, buf, length); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string). This is true for ReadRegString()'s API call and may be true for other API calls like this one.
+		*(aBuf + length) = '\0';
+	}
 	return length;
 }
 
@@ -16604,7 +16645,7 @@ BIF_DECL(BIF_NumPut)
 	// Load-time validation has ensured that at least the first two parameters are present.
 	ExprTokenType &token_to_write = *aParam[0];
 
-	size_t right_side_bound = 0, target; // Don't make target a pointer-type because the integer offset might not be a multiple of 4 (i.e. the below increments "target" directly by "offset" and we don't want that to use pointer math).
+	size_t right_side_bound, target; // Don't make target a pointer-type because the integer offset might not be a multiple of 4 (i.e. the below increments "target" directly by "offset" and we don't want that to use pointer math).
 	ExprTokenType &target_token = *aParam[1];
 	if (target_token.symbol == SYM_VAR) // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
 	{
@@ -16702,7 +16743,7 @@ BIF_DECL(BIF_NumPut)
 	default: // size 1
 		*(unsigned char *)target = (unsigned char)TokenToInt64(token_to_write);
 	}
-	if (right_side_bound) // Implies (target_token.symbol == SYM_VAR && !target_token.var->IsPureNumeric()).
+	if (target_token.symbol == SYM_VAR)
 		target_token.var->Close(); // This updates various attributes of the variable.
 	//else the target was an raw address.  If that address is inside some variable's contents, the above
 	// attributes would already have been removed at the time the & operator was used on the variable.
@@ -17292,27 +17333,38 @@ BIF_DECL(BIF_ResourceLoadLibrary)
 
 BIF_DECL(BIF_MemoryLoadLibrary)
 {
+	HMEMORYMODULE module = NULL;
+	unsigned char *data = NULL;
 	aResultToken.symbol = SYM_INTEGER;
-	aResultToken.value_int64 = 0;
 	if (TokenIsEmptyString(*aParam[0]))
+	{
+		aResultToken.value_int64 = 0;
 		return;
-	FILE *fp;
-	unsigned char *data=NULL;
-	size_t size;
-	HMEMORYMODULE module;
-	
-	fp = _tfopen(TokenToString(*aParam[0]), _T("rb"));
-	if (fp == NULL)
-		return;
+	}
+	else if (!TokenIsPureNumeric(*aParam[0]))
+	{
+		FILE *fp;
+		size_t size;
 
-	fseek(fp, 0, SEEK_END);
-	size = ftell(fp);
-	data = (unsigned char *)_alloca(size);
-	fseek(fp, 0, SEEK_SET);
-	fread(data, 1, size, fp);
-	fclose(fp);
+		fp = _tfopen(TokenToString(*aParam[0]), _T("rb"));
+		if (fp == NULL)
+			return;
+
+		fseek(fp, 0, SEEK_END);
+		size = ftell(fp);
+		data = (unsigned char *)_alloca(size);
+		fseek(fp, 0, SEEK_SET);
+		fread(data, 1, size, fp);
+		fclose(fp);
+	}
+	else
+		data = (unsigned char*)TokenToInt64(*aParam[0]);
 	if (data)
-		module = MemoryLoadLibrary(data);
+		module = MemoryLoadLibraryEx(data,
+		(CustomLoadLibraryFunc)(aParamCount > 1 ? (HCUSTOMMODULE)TokenToInt64(*aParam[1]) : _LoadLibrary),
+		(CustomGetProcAddressFunc)(aParamCount > 2 ? (HCUSTOMMODULE)TokenToInt64(*aParam[2]) : _GetProcAddress),
+		(CustomFreeLibraryFunc)(aParamCount > 3 ? (HCUSTOMMODULE)TokenToInt64(*aParam[3]) : _FreeLibrary),
+		(void*)(aParamCount > 4 ? TokenToInt64(*aParam[4]) : NULL));
 	aResultToken.value_int64 = (UINT_PTR)module;
 }
 
@@ -17983,8 +18035,12 @@ UINT_PTR CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address) // Used
 	g_script.mLastScriptRest = g_script.mLastPeekTime = GetTickCount(); // Somewhat debatable, but might help minimize interruptions when the callback is called via message (e.g. subclassing a control; overriding a WindowProc).
 
 	ExprTokenType result_token; // L31
+	bool oldcreate = cb.create_new_thread;
+	if (oldcreate)
+		Sleep(1);
 	func.Call(&result_token); // Call the UDF.  Call()'s own return value (e.g. EARLY_EXIT or FAIL) is ignored because it wouldn't affect the handling below.
-
+	if (oldcreate != cb.create_new_thread)
+		Sleep(1);
 	UINT_PTR number_to_return = (UINT_PTR)TokenToInt64(result_token); // L31: For simplicity, DEFAULT_CB_RETURN_VALUE is not used - DEFAULT_CB_RETURN_VALUE is 0, which TokenToInt64 will return if the token is empty.
 	if (result_token.symbol == SYM_OBJECT) // L31
 		result_token.object->Release();

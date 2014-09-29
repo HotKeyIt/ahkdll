@@ -95,6 +95,8 @@ EXPORT int ahkIsUnicode()
 
 EXPORT int ahkPause(LPTSTR aChangeTo) //Change pause state of a running script
 {
+	if (!g_script.mIsReadyToExecute)
+		return 0; // AutoHotkey needs to be running at this point //
 
 	if ( (((int)aChangeTo == 1 || (int)aChangeTo == 0) || (*aChangeTo == 'O' || *aChangeTo == 'o') && ( *(aChangeTo+1) == 'N' || *(aChangeTo+1) == 'n' ) ) || *aChangeTo == '1')
 	{
@@ -134,12 +136,16 @@ EXPORT UINT_PTR ahkFindFunc(LPTSTR funcname)
 
 EXPORT UINT_PTR ahkFindLabel(LPTSTR aLabelName)
 {
+	if (!g_script.mIsReadyToExecute)
+		return 0; // AutoHotkey needs to be running at this point //
 	return (UINT_PTR)g_script.FindLabel(aLabelName);
 }
 
 // Naveen: v1. ahkgetvar()
 EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 {
+	if (!g_script.mIsReadyToExecute)
+		return 0; // AutoHotkey needs to be running at this point //
 	Var *ahkvar = g_script.FindOrAddVar(name);
 	if (getVar != NULL)
 	{
@@ -202,6 +208,8 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 
 EXPORT int ahkassign(LPTSTR name, LPTSTR value) // ahkwine 0.1
 {
+	if (!g_script.mIsReadyToExecute)
+		return 0; // AutoHotkey needs to be running at this point //
 	Var *var;
 	if (   !(var = g_script.FindOrAddVar(name, _tcslen(name)))   )
 		return -1;  // Realistically should never happen.
@@ -211,6 +219,8 @@ EXPORT int ahkassign(LPTSTR name, LPTSTR value) // ahkwine 0.1
 //HotKeyIt ahkExecuteLine()
 EXPORT UINT_PTR ahkExecuteLine(UINT_PTR line,unsigned int aMode,unsigned int wait)
 {
+	if (!g_script.mIsReadyToExecute)
+		return 0; // AutoHotkey needs to be running at this point //
 	Line *templine = (Line *)line;
 	if (templine == NULL)
 		return (UINT_PTR)g_script.mFirstLine;
@@ -233,6 +243,8 @@ EXPORT UINT_PTR ahkExecuteLine(UINT_PTR line,unsigned int aMode,unsigned int wai
 
 EXPORT int ahkLabel(LPTSTR aLabelName, unsigned int nowait) // 0 = wait = default
 {
+	if (!g_script.mIsReadyToExecute)
+		return 0; // AutoHotkey needs to be running at this point //
 	Label *aLabel = g_script.FindLabel(aLabelName) ;
 	if (aLabel)
 	{
@@ -248,6 +260,8 @@ EXPORT int ahkLabel(LPTSTR aLabelName, unsigned int nowait) // 0 = wait = defaul
 
 EXPORT int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10)
 {
+	if (!g_script.mIsReadyToExecute)
+		return 0; // AutoHotkey needs to be running at this point //
 	Func *aFunc = g_script.FindFunc(func) ;
 	if (aFunc)
 	{	
@@ -578,6 +592,8 @@ LPTSTR FuncTokenToString(ExprTokenType &aToken, LPTSTR aBuf)
 
 EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10)
 {
+	if (!g_script.mIsReadyToExecute)
+		return 0; // AutoHotkey needs to be running at this point //
 	Func *aFunc = g_script.FindFunc(func) ;
 	if (aFunc)
 	{	

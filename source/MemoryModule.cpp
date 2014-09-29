@@ -396,26 +396,6 @@ BuildImportTable(PMEMORYMODULE module)
     return result;
 }
 
-static HCUSTOMMODULE _LoadLibrary(LPCSTR filename, void *userdata)
-{
-    HMODULE result = LoadLibraryA(filename);
-    if (result == NULL) {
-        return NULL;
-    }
-    
-    return (HCUSTOMMODULE) result;
-}
-
-static FARPROC _GetProcAddress(HCUSTOMMODULE module, LPCSTR name, void *userdata)
-{
-    return (FARPROC) GetProcAddress((HMODULE) module, name);
-}
-
-static void _FreeLibrary(HCUSTOMMODULE module, void *userdata)
-{
-    FreeLibrary((HMODULE) module);
-}
-
 HMEMORYMODULE MemoryLoadLibrary(const void *data)
 {
     return MemoryLoadLibraryEx(data, _LoadLibrary, _GetProcAddress, _FreeLibrary, NULL);
