@@ -377,7 +377,30 @@ public:
 	ULONG STDMETHODCALLTYPE AddRef() { return 1; }
 	ULONG STDMETHODCALLTYPE Release() { return 1; }
 	bool Delete() { return false; }
-
+#ifdef _USRDLL
+	void Free()
+	{
+		if (mFields)
+		{
+			if (mFieldCount)
+			{
+				IndexType i = mFieldCount - 1;
+				// Free keys: first strings, then objects (objects have a lower index in the mFields array).
+				for (; i >= mKeyOffsetString; --i)
+					free(mFields[i].key.s);
+				for (; i >= mKeyOffsetObject; --i)
+					mFields[i].key.p->Release();
+				// Free values.
+				while (mFieldCount)
+					mFields[--mFieldCount].Free();
+			}
+			// Free fields array.
+			free(mFields);
+			mFields = NULL;
+			mFieldCountMax = 0;
+		}
+	}
+#endif
 	ResultType STDMETHODCALLTYPE Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
 };
 

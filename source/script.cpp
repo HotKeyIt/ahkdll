@@ -440,6 +440,8 @@ Script::~Script() // Destructor.
 void Script::Destroy()
 // HotKeyIt H1 destroy script for ahkTerminate and ahkReload and ExitApp for dll
 {
+	// free Meta Object
+	g_MetaObject.Free();
 	// Disconnect Debugger
 	if (!g_DebuggerHost.IsEmpty())
 	{
