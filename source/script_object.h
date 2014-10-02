@@ -74,6 +74,24 @@ public:
 	
 
 //
+// Property: Invoked when a derived object gets/sets the corresponding key.
+//
+
+class Property : public ObjectBase
+{
+public:
+	Func *mGet, *mSet;
+
+	bool CanGet() { return mGet; }
+	bool CanSet() { return mSet; }
+
+	Property() : mGet(NULL), mSet(NULL) { }
+	
+	ResultType STDMETHODCALLTYPE Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
+};
+
+
+//
 // Object - Scriptable associative array.
 //
 
@@ -309,7 +327,30 @@ public:
 	ULONG STDMETHODCALLTYPE AddRef() { return 1; }
 	ULONG STDMETHODCALLTYPE Release() { return 1; }
 	bool Delete() { return false; }
-
+#ifdef _USRDLL
+	void Free()
+	{
+		if (mFields)
+		{
+			if (mFieldCount)
+			{
+				IndexType i = mFieldCount - 1;
+				// Free keys: first strings, then objects (objects have a lower index in the mFields array).
+				for (; i >= mKeyOffsetString; --i)
+					free(mFields[i].key.s);
+				for (; i >= mKeyOffsetObject; --i)
+					mFields[i].key.p->Release();
+				// Free values.
+				while (mFieldCount)
+					mFields[--mFieldCount].Free();
+			}
+			// Free fields array.
+			free(mFields);
+			mFields = NULL;
+			mFieldCountMax = 0;
+		}
+	}
+#endif
 	ResultType STDMETHODCALLTYPE Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
 };
 
@@ -322,6 +363,7 @@ extern MetaObject g_MetaObject;		// Defines "object" behaviour for non-object va
 class RegExMatchObject : public ObjectBase
 {
 	LPTSTR mHaystack;
+	int mHaystackStart;
 	int *mOffset;
 	LPTSTR *mPatternName;
 	int mPatternCount;
