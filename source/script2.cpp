@@ -9084,7 +9084,7 @@ VarSizeType BIV_ORD(LPTSTR aBuf, LPTSTR aVarName)
 			aBuf[1] = '\0';
 		}
 	}
-	return MAX_INTEGER_LENGTH;
+	return ATOI(aVarName + 2) >= 0x10000 ? 2 : 1;
 }
 
 VarSizeType BIV_True_False_Null(LPTSTR aBuf, LPTSTR aVarName)
