@@ -805,8 +805,8 @@ void Var::Free(int aWhenToFree, bool aExcludeAliasesAndRequireInit)
 	// but also on its contents not being set to an empty string:
 	
 	// HotKeyIt changed because static vars are saved in separate list
-	//if (aWhenToFree == VAR_ALWAYS_FREE_BUT_EXCLUDE_STATIC && IsStatic())
-	//	return; // This is the only case in which the variable ISN'T made blank.
+	if (IsStatic())
+		return; // This is the only case in which the variable ISN'T made blank.
 
 	if (mAttrib & VAR_ATTRIB_IS_OBJECT) // This attrib will be removed below.
 		mObject->Release(); // But no need to set mObject = NULL.

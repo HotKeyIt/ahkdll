@@ -10249,14 +10249,14 @@ VarTypes Script::GetVarType(LPTSTR aVarName, VirtualVar *aBIV)
 
 	if (lowercase[0] != 'a' || lowercase[1] != '_')  // This check helps average-case performance.
 	{
-		if (   !_tcscmp(lowercase, _T("true"))
+		if (!_tcscmp(lowercase, _T("true"))
 			|| !_tcscmp(lowercase, _T("false"))
 			|| !_tcscmp(lowercase, _T("null")))
 		{
 			if (aBIV)
 			{
 				aBIV->Get = BIV_True_False_Null;
-    			aBIV->Set = NULL;
+				aBIV->Set = NULL;
 			}
 			return VAR_BUILTIN;
 		}
@@ -10288,13 +10288,13 @@ BuiltInVarType Script::GetVarType_BIV(LPTSTR lowercase, BuiltInVarSetType &sette
 	// Keeping the most common ones near the top helps performance a little.
 	if (!_tcscmp(lower, _T("index"))) { setter = BIV_LoopIndex_Set; return BIV_LoopIndex; }  // A short name since it's typed so often.
 
-	if (   !_tcscmp(lower, _T("mmmm"))    // Long name of month.
+	if (!_tcscmp(lower, _T("mmmm"))    // Long name of month.
 		|| !_tcscmp(lower, _T("mmm"))     // 3-char abbrev. month name.
 		|| !_tcscmp(lower, _T("dddd"))    // Name of weekday, e.g. Sunday
-		|| !_tcscmp(lower, _T("ddd"))   ) // Abbrev., e.g. Sun
+		|| !_tcscmp(lower, _T("ddd"))) // Abbrev., e.g. Sun
 		return BIV_MMM_DDD;
 
-	if (   !_tcscmp(lower, _T("yyyy"))
+	if (!_tcscmp(lower, _T("yyyy"))
 		|| !_tcscmp(lower, _T("year")) // Same as above.
 		|| !_tcscmp(lower, _T("mm"))   // 01 thru 12
 		|| !_tcscmp(lower, _T("mon"))  // Same
@@ -10306,11 +10306,11 @@ BuiltInVarType Script::GetVarType_BIV(LPTSTR lowercase, BuiltInVarSetType &sette
 		|| !_tcscmp(lower, _T("hour"))
 		|| !_tcscmp(lower, _T("min"))
 		|| !_tcscmp(lower, _T("sec"))
-		|| !_tcscmp(lower, _T("msec"))   )
+		|| !_tcscmp(lower, _T("msec")))
 		return BIV_DateTime;
 
 	if (!_tcscmp(lower, _T("tickcount"))) return BIV_TickCount;
-	if (   !_tcscmp(lower, _T("now"))
+	if (!_tcscmp(lower, _T("now"))
 		|| !_tcscmp(lower, _T("nowutc"))) return BIV_Now;
 
 	if (!_tcscmp(lower, _T("workingdir"))) { setter = BIV_WorkingDir_Set; return BIV_WorkingDir; }
@@ -10323,7 +10323,7 @@ BuiltInVarType Script::GetVarType_BIV(LPTSTR lowercase, BuiltInVarSetType &sette
 	if (!_tcscmp(lower, _T("linefile"))) return BIV_LineFile;
 
 	if (!_tcscmp(lower, _T("iscompiled"))) return BIV_IsCompiled;
-	if (!_tcscmp(lower, _T("isunicode"))) return BIV_IsUnicode;	
+	if (!_tcscmp(lower, _T("isunicode"))) return BIV_IsUnicode;
 	if (!_tcscmp(lower, _T("ptrsize"))) return BIV_PtrSize;
 
 	if (!_tcscmp(lower, _T("titlematchmode"))) { setter = BIV_TitleMatchMode_Set; return BIV_TitleMatchMode; }
@@ -10374,14 +10374,14 @@ BuiltInVarType Script::GetVarType_BIV(LPTSTR lowercase, BuiltInVarSetType &sette
 		|| !_tcscmp(lower, _T("startup"))
 		|| !_tcscmp(lower, _T("startupcommon")))
 		return BIV_SpecialFolderPath;
-	
+
 	if (!_tcscmp(lower, _T("comspec"))) return BIV_ComSpec;
 
 	if (!_tcscmp(lower, _T("isadmin"))) return BIV_IsAdmin;
 	if (!_tcscmp(lower, _T("cursor"))) return BIV_Cursor;
-	if (   !_tcscmp(lower, _T("caretx"))
+	if (!_tcscmp(lower, _T("caretx"))
 		|| !_tcscmp(lower, _T("carety"))) return BIV_Caret;
-	if (   !_tcscmp(lower, _T("screenwidth"))
+	if (!_tcscmp(lower, _T("screenwidth"))
 		|| !_tcscmp(lower, _T("screenheight"))) return BIV_ScreenWidth_Height;
 
 	if (!_tcsncmp(lower, _T("ipaddress"), 9))
@@ -10411,10 +10411,10 @@ BuiltInVarType Script::GetVarType_BIV(LPTSTR lowercase, BuiltInVarSetType &sette
 			if (!_tcscmp(lower, _T("shortpath"))) return BIV_LoopFileShortPath;
 			if (!_tcscmp(lower, _T("attrib"))) return BIV_LoopFileAttrib;
 
-			if (   !_tcscmp(lower, _T("timemodified"))
+			if (!_tcscmp(lower, _T("timemodified"))
 				|| !_tcscmp(lower, _T("timecreated"))
 				|| !_tcscmp(lower, _T("timeaccessed"))) return BIV_LoopFileTime;
-			if (   !_tcscmp(lower, _T("size"))
+			if (!_tcscmp(lower, _T("size"))
 				|| !_tcscmp(lower, _T("sizekb"))
 				|| !_tcscmp(lower, _T("sizemb"))) return BIV_LoopFileSize;
 			// Otherwise, it can't be a match for any built-in variable:
@@ -10458,10 +10458,10 @@ BuiltInVarType Script::GetVarType_BIV(LPTSTR lowercase, BuiltInVarSetType &sette
 #ifndef MINIDLL
 	if (!_tcscmp(lower, _T("guicontrol"))) return BIV_GuiControl;
 
-	if (   !_tcscmp(lower, _T("guicontrolevent")) // v1.0.36: A_GuiEvent was added as a synonym for A_GuiControlEvent because it seems unlikely that A_GuiEvent will ever be needed for anything:
+	if (!_tcscmp(lower, _T("guicontrolevent")) // v1.0.36: A_GuiEvent was added as a synonym for A_GuiControlEvent because it seems unlikely that A_GuiEvent will ever be needed for anything:
 		|| !_tcscmp(lower, _T("guievent"))) return BIV_GuiEvent;
 
-	if (   !_tcscmp(lower, _T("gui"))
+	if (!_tcscmp(lower, _T("gui"))
 		|| !_tcscmp(lower, _T("guiwidth"))
 		|| !_tcscmp(lower, _T("guiheight"))
 		|| !_tcscmp(lower, _T("guix")) // Naming: Brevity seems more a benefit than would A_GuiEventX's improved clarity.
@@ -10471,15 +10471,13 @@ BuiltInVarType Script::GetVarType_BIV(LPTSTR lowercase, BuiltInVarSetType &sette
 #endif
 	if (!_tcscmp(lower, _T("timeidle"))) return BIV_TimeIdle;
 	if (!_tcscmp(lower, _T("timeidlephysical"))) return BIV_TimeIdlePhysical;
-	if (   !_tcscmp(lower, _T("space"))
+	if (!_tcscmp(lower, _T("space"))
 		|| !_tcscmp(lower, _T("tab"))) return BIV_Space_Tab;
 	if (!_tcscmp(lower, _T("ahkversion"))) return BIV_AhkVersion;
 	if (!_tcscmp(lower, _T("ahkpath"))) return BIV_AhkPath;
 	if (!_tcscmp(lower, _T("ahkdir"))) return BIV_AhkDir;
 	if (!_tcscmp(lower, _T("dllpath"))) return BIV_DllPath;
 	if (!_tcscmp(lower, _T("dlldir"))) return BIV_DllDir;
-	if (ATOI64(lower))
-		return BIV_ORD;
 	// Since above didn't return:
 	return NULL;
 }

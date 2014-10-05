@@ -9061,32 +9061,6 @@ BOOL Line::CheckValidFinallyJump(Line* jumpTarget) // v1.1.14
 // BUILT-IN VARIABLES //
 ////////////////////////
 
-VarSizeType BIV_ORD(LPTSTR aBuf, LPTSTR aVarName)
-{
-	// Result will always be an integer (this simplifies scripts that work with binary zeros since an
-	// empty string yields zero).
-	// Caller has set aResultToken.symbol to a default of SYM_INTEGER, so no need to set it here.
-	if (aBuf)
-	{
-		int param1 = ATOI(aVarName + 2); // Convert to INT vs. UINT so that negatives can be detected.
-		if (param1 < 0 || param1 > UorA(0x10FFFF, UCHAR_MAX))
-			*aBuf = '\0'; // Empty string indicates both Chr(0) and an out-of-bounds param1.
-		else if (param1 >= 0x10000)
-		{
-			param1 -= 0x10000;
-			aBuf[0] = 0xd800 + ((param1 >> 10) & 0x3ff);
-			aBuf[1] = 0xdc00 + ( param1        & 0x3ff);
-			aBuf[2] = '\0';
-		}
-		else
-		{
-			aBuf[0] = param1;
-			aBuf[1] = '\0';
-		}
-	}
-	return ATOI(aVarName + 2) >= 0x10000 ? 2 : 1;
-}
-
 VarSizeType BIV_True_False_Null(LPTSTR aBuf, LPTSTR aVarName)
 {
 	if (aBuf)
