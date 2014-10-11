@@ -2925,8 +2925,9 @@ BIV_DECL_R (BIV_TimeIdlePhysical);
 BIV_DECL_R (BIV_IPAddress);
 BIV_DECL_R (BIV_IsAdmin);
 BIV_DECL_R (BIV_PtrSize);
+#ifndef MINIDLL
 BIV_DECL_R (BIV_PriorKey);
-
+#endif
 
 ////////////////////////
 // BUILT-IN FUNCTIONS //

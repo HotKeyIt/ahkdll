@@ -9580,7 +9580,7 @@ BIV_DECL_W(BIV_CoordMode_Set)
 {
 
 	UINT new_mode;
-	if (!(new_mode = ATOI(aBuf)))
+	if (!(new_mode = ATOI(aBuf)) && (_tcscmp(aBuf, _T("0"))))
 		new_mode = Line::ConvertCoordMode(aBuf);
 	if (new_mode <= COORD_MODE_SCREEN) // != 65535)
 	{
@@ -9836,7 +9836,7 @@ VarSizeType BIV_DllPath(LPTSTR aBuf, LPTSTR aVarName) // HotKeyIt H1 path of loa
 	TCHAR buf[MAX_PATH];
 	VarSizeType length = (VarSizeType)GetModuleFileName(g_hInstance, buf, _countof(buf));
 	if (length == 0)
-		VarSizeType length = (VarSizeType)GetModuleFileName(NULL, buf, _countof(buf));
+		length = (VarSizeType)GetModuleFileName(NULL, buf, _countof(buf));
 	if (aBuf)
 		_tcscpy(aBuf, buf); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string). This is true for ReadRegString()'s API call and may be true for other API calls like this one.
 	return length;

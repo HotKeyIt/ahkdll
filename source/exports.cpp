@@ -316,6 +316,7 @@ EXPORT int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR par
 			}
 			aFuncAndToken.buf = new_buf;
 			aFuncAndToken.mToken.buf = aFuncAndToken.buf;
+			aFuncAndToken.mToken.func = aFunc;
 			aFuncAndToken.mToken.marker = aFunc->mName;
 			
 			aFunc->mBIF(aFuncAndToken.mToken,aFuncAndToken.param,aParamsCount);
@@ -617,6 +618,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 			}
 			aFuncAndToken.buf = new_buf;
 			aFuncAndToken.mToken.buf = aFuncAndToken.buf;
+			aFuncAndToken.mToken.func = aFunc;
 			aFuncAndToken.mToken.marker = aFunc->mName;
 			
 			aFunc->mBIF(aFuncAndToken.mToken,aFuncAndToken.param,aParamsCount);
