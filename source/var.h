@@ -270,6 +270,8 @@ public:
 	ResultType AssignHWND(HWND aWnd);
 	ResultType Assign(Var &aVar);
 	ResultType Assign(ExprTokenType &aToken);
+	static ResultType GetClipboardAll(Var *aOutputVar, void **aData, size_t *aDataSize);
+	static ResultType SetClipboardAll(void *aData, size_t aDataSize);
 	ResultType AssignClipboardAll();
 	ResultType AssignBinaryClip(Var &aSourceVar);
 	// Assign(char *, ...) has been break into four methods below.
@@ -457,7 +459,7 @@ public:
 		return d;
 	}
 
-	ResultType TokenToDoubleOrInt64(ExprTokenType &aToken)
+	ResultType ToDoubleOrInt64(ExprTokenType &aToken)
 	// aToken.var is the same as the "this" var. Converts var into a number and stores it numerically in aToken.
 	// Supports VAR_NORMAL and VAR_CLIPBOARD.  It would need review if any other types need to be supported.
 	{
@@ -479,7 +481,7 @@ public:
 	}
 
 	void TokenToContents(ExprTokenType &aToken) // L31: Mostly for object support.
-	// See TokenToDoubleOrInt64 for comments.
+	// See ToDoubleOrInt64 for comments.
 	{
 		Var &var = *(mType == VAR_ALIAS ? mAliasFor : this);
 		// L33: For greater compatibility with the official release and L revisions prior to L31,
