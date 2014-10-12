@@ -90,6 +90,7 @@ switch(fwdReason)
 			 if ( lpExitCode == 259 )
 				CloseHandle( hThread );
 		 }
+		 free(g_array);
 #ifndef MINIDLL
 		 // Unregister window class if it was registered in Script::CreateWindows
 		 if (g_ClassRegistered)
