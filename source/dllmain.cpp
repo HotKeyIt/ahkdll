@@ -74,6 +74,9 @@ switch(fwdReason)
 		nameHinstanceP.hInstanceP = (HINSTANCE)hInstance;
 		g_hInstance = (HINSTANCE)hInstance;
 		g_hMemoryModule = (HMODULE)lpvReserved;
+		InitializeCriticalSection(&g_CriticalRegExCache); // v1.0.45.04: Must be done early so that it's unconditional, so that DeleteCriticalSection() in the script destructor can also be unconditional (deleting when never initialized can crash, at least on Win 9x).
+		InitializeCriticalSection(&g_CriticalHeapBlocks); // used to block memory freeing in case of timeout in ahkTerminate so no corruption happens when both threads try to free Heap.
+		InitializeCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
 #ifdef AUTODLL
 	ahkdll("autoload.ahk", "", "");	  // used for remoteinjection of dll 
 #endif
@@ -92,21 +95,25 @@ switch(fwdReason)
 			 if ( lpExitCode == 259 )
 				CloseHandle( hThread );
 		 }
-		 free(g_array);
-	// Unregister window class registered in Script::CreateWindows
-#ifndef MINIDLL
-#ifdef UNICODE
-	if (g_ClassRegistered)
-		UnregisterClass((LPCWSTR)&WINDOW_CLASS_MAIN,g_hInstance);
-	if (g_ClassSplashRegistered)
-		UnregisterClass((LPCWSTR)&WINDOW_CLASS_SPLASH,g_hInstance);
-#else
-	if (g_ClassRegistered)
-		UnregisterClass((LPCSTR)&WINDOW_CLASS_MAIN,g_hInstance);
-	if (g_ClassSplashRegistered)
-		UnregisterClass((LPCSTR)&WINDOW_CLASS_SPLASH,g_hInstance);
+		 DeleteCriticalSection(&g_CriticalHeapBlocks); // g_CriticalHeapBlocks is used in simpleheap for thread-safety.
+		 DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
+		 DeleteCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
+		 if (scriptstring)
+			 free(scriptstring);
+		 if (Line::sMaxSourceFiles)
+			 free(Line::sSourceFile);
+#ifdef _DEBUG
+		 free(g_Debugger.mStack.mBottom);
 #endif
-#endif // MINIDLL
+#ifndef MINIDLL
+		 if (g_input.MatchCount)
+		 {
+			 free(g_input.match);
+		 }
+		 if (g_script.mTrayMenu)
+			 g_script.ScriptDeleteMenu(g_script.mTrayMenu);
+		 free(g_KeyHistory);
+#endif
 		 break;
 	 }
  case DLL_THREAD_DETACH:
@@ -140,10 +147,6 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 		g_hResource = NULL;
 #endif
 	
-	InitializeCriticalSection(&g_CriticalRegExCache); // v1.0.45.04: Must be done early so that it's unconditional, so that DeleteCriticalSection() in the script destructor can also be unconditional (deleting when never initialized can crash, at least on Win 9x).
-	InitializeCriticalSection(&g_CriticalHeapBlocks); // used to block memory freeing in case of timeout in ahkTerminate so no corruption happens when both threads try to free Heap.
-	InitializeCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
-
 	if (!GetCurrentDirectory(_countof(g_WorkingDir), g_WorkingDir)) // Needed for the FileSelectFile() workaround.
 		*g_WorkingDir = '\0';
 	// Unlike the below, the above must not be Malloc'd because the contents can later change to something
@@ -520,12 +523,11 @@ EXPORT BOOL ahkTerminate(int timeout = 0)
 // Naveen: v1. runscript() - runs the script in a separate thread compared to host application.
 unsigned __stdcall runScript( void* pArguments )
 {
-	struct nameHinstance a =  *(struct nameHinstance *)pArguments;
 	OleInitialize(NULL);
-	HINSTANCE hInstance = a.hInstanceP;
-	LPTSTR fileName = a.name;
-	OldWinMain(hInstance, 0, fileName, 0);
+	OldWinMain(nameHinstanceP.hInstanceP, 0, nameHinstanceP.name, 0);
 	g_script.Destroy();
+	CloseHandle(hThread);
+	hThread = NULL;
 	_endthreadex( (DWORD)EARLY_RETURN );  
     return 0;
 }
@@ -551,6 +553,7 @@ unsigned runThread()
 {
 	if (hThread && g_script.mIsReadyToExecute)
 	{	// Small check to be done to make sure we do not start a new thread before the old is closed
+		Sleep(50);
 		int lpExitCode = 0;
 		GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
 		if ((lpExitCode == 0 || lpExitCode == 259) && g_script.mIsReadyToExecute)
@@ -558,7 +561,7 @@ unsigned runThread()
 		if (hThread && g_script.mIsReadyToExecute)
  			ahkTerminate(0);
 	}
-	hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, 0 );
+	hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, NULL, 0, 0 );
 	WaitIsReadyToExecute();
 	return (unsigned int)hThread;
 }
@@ -598,8 +601,10 @@ EXPORT UINT_PTR ahktextdll(LPTSTR fileName, LPTSTR argv, LPTSTR args)
 void reloadDll()
 {
 	g_script.Destroy();
+	HANDLE oldhThread = hThread;
 	hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, 0 );
 	g_AllowInterruption = TRUE;
+	CloseHandle(oldhThread);
 	_endthreadex( (DWORD)EARLY_EXIT );
 }
 
@@ -607,6 +612,7 @@ ResultType terminateDll(int aExitCode)
 {
 	g_script.Destroy();
 	g_AllowInterruption = TRUE;
+	CloseHandle(hThread);
 	hThread = NULL;
 	_endthreadex( (DWORD)aExitCode );
 	return (ResultType)aExitCode;

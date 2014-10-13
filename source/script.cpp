@@ -222,11 +222,27 @@ Script::~Script() // Destructor.
 	{
 		menu_to_delete = m;
 		m = m->mNextMenu;
+#ifdef _USRDLL
+		if (menu_to_delete != mTrayMenu)
+#endif
 		ScriptDeleteMenu(menu_to_delete);
 		// Above call should not return FAIL, since the only way FAIL can realistically happen is
 		// when a GUI window is still using the menu as its menu bar.  But all GUI windows are gone now.
 	}
+#ifdef _USRDLL
+	if (mFirstMenu != mTrayMenu)
+	{
+		mFirstMenu = NULL;
+		mLastMenu = NULL;
+		mTrayMenu = NULL;
+	}
+	else
+	{
+		mFirstMenu->mNextMenu = NULL;
+		mLastMenu = mFirstMenu;
+	}
 #endif
+#endif // MINIDLL
 	// Since tooltip windows are unowned, they should be destroyed to avoid resource leak:
 	for (i = 0; i < MAX_TOOLTIPS; ++i)
 		if (g_hWndToolTip[i] && IsWindow(g_hWndToolTip[i]))
@@ -235,6 +251,39 @@ Script::~Script() // Destructor.
 	if (g_hFontSplash) // The splash window itself should auto-destroyed, since it's owned by main.
 		DeleteObject(g_hFontSplash);
 #endif
+	// We call DestroyWindow() because MainWindowProc() has left that up to us.
+	// DestroyWindow() will cause MainWindowProc() to immediately receive and process the
+	// WM_DESTROY msg, which should in turn result in any child windows being destroyed
+	// and other cleanup being done:
+	KILL_AUTOEXEC_TIMER
+	KILL_MAIN_TIMER
+	if (IsWindow(g_hWnd)) // Adds peace of mind in case WM_DESTROY was already received in some unusual way.
+	{
+		g_DestroyWindowCalled = true;
+		DestroyWindow(g_hWnd);
+		DestroyWindow(g_hWndEdit);
+		DeleteObject(g_hFontEdit);
+#ifndef MINIDLL
+		if (g_hWndSplash)
+			DestroyWindow(g_hWndSplash);
+		if (g_hFontSplash)
+			DeleteObject(g_hFontSplash);
+		// Unregister window class registered in Script::CreateWindows
+#ifdef UNICODE
+		if (g_ClassRegistered)
+			UnregisterClass((LPCWSTR)&WINDOW_CLASS_MAIN, g_hInstance);
+		if (g_ClassSplashRegistered)
+			UnregisterClass((LPCWSTR)&WINDOW_CLASS_SPLASH, g_hInstance);
+#else
+		if (g_ClassRegistered)
+			UnregisterClass((LPCSTR)&WINDOW_CLASS_MAIN, g_hInstance);
+		if (g_ClassSplashRegistered)
+			UnregisterClass((LPCSTR)&WINDOW_CLASS_SPLASH, g_hInstance);
+#endif
+#endif // MINIDLL
+	}
+	if (g_hAccelTable)
+		DestroyAcceleratorTable(g_hAccelTable);
 	if (mOnClipboardChangeLabel) // Remove from viewer chain.
 		if (MyRemoveClipboardListener && MyAddClipboardListener)
 			MyRemoveClipboardListener(g_hWnd); // MyAddClipboardListener was used.
@@ -258,7 +307,6 @@ Script::~Script() // Destructor.
 	KeyHistoryToFile();  // Close the KeyHistory file if it's open.
 #endif
 #endif // MINIDLL
-	DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
 	OleUninitialize();
 }
 
@@ -601,25 +649,7 @@ void Script::Destroy()
 	//SimpleHeap::Delete(Line::sSourceFile);
 	//Line::sSourceFile = 0;
 	// free(Line::sSourceFile);
-	// We call DestroyWindow() because MainWindowProc() has left that up to us.
-	// DestroyWindow() will cause MainWindowProc() to immediately receive and process the
-	// WM_DESTROY msg, which should in turn result in any child windows being destroyed
-	// and other cleanup being done:
-	KILL_AUTOEXEC_TIMER
-	KILL_MAIN_TIMER
-	if (IsWindow(g_hWnd)) // Adds peace of mind in case WM_DESTROY was already received in some unusual way.
-	{
-		g_DestroyWindowCalled = true;
-		DestroyWindow(g_hWnd);
-		DestroyWindow(g_hWndEdit);
-		DeleteObject(g_hFontEdit);
-#ifndef MINIDLL
-		if (g_hWndSplash)
-			DestroyWindow(g_hWndSplash);
-		if (g_hFontSplash)
-			DeleteObject(g_hFontSplash);
-#endif
-	}
+
 #ifndef MINIDLL
 	// AddRemoveHooks(0); // done in ~Script
 	Hotkey::AllDestruct();
@@ -631,7 +661,6 @@ void Script::Destroy()
 	free(g_input.match);
 #endif
 	SimpleHeap::DeleteAll();
-	DeleteCriticalSection(&g_CriticalHeapBlocks); // g_CriticalHeapBlocks is used in simpleheap for thread-safety.
 	mIsReadyToExecute = false;
 	ZeroMemory(&g_script,sizeof(g_script));
 #ifndef MINIDLL
