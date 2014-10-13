@@ -2676,9 +2676,6 @@ public:
 
 	UserMenu *mTrayMenu; // Our tray menu, which should be destroyed upon exiting the program.
 #endif
-#ifdef _USRDLL
-	void Destroy(); // HotKeyIt H1 destroy script
-#endif
 	ResultType Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestart, HINSTANCE hInstance,bool aIsText);
 	// ResultType InitDll(global_struct &g,HINSTANCE hInstance); // HotKeyIt init dll from text
 	ResultType CreateWindows();

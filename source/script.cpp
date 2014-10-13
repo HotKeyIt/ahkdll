@@ -353,93 +353,9 @@ Script::Script()
 
 Script::~Script() // Destructor.
 {
-	// MSDN: "Before terminating, an application must call the UnhookWindowsHookEx function to free
-	// system resources associated with the hook."
-#ifndef MINIDLL
-	AddRemoveHooks(0); // Remove all hooks.
-	if (mNIC.hWnd) // Tray icon is installed.
-		Shell_NotifyIcon(NIM_DELETE, &mNIC); // Remove it.
-#endif
 	int i;
-#ifndef MINIDLL
-	// It is safer/easier to destroy the GUI windows prior to the menus (especially the menu bars).
-	// This is because one GUI window might get destroyed and take with it a menu bar that is still
-	// in use by an existing GUI window.  GuiType::Destroy() adheres to this philosophy by detaching
-	// its menu bar prior to destroying its window:
-	while (g_guiCount)
-		GuiType::Destroy(*g_gui[g_guiCount - 1]); // Static method to avoid problems with object destroying itself.
-
-	for (i = 0; i < GuiType::sFontCount; ++i) // Now that GUI windows are gone, delete all GUI fonts.
-		if (GuiType::sFont[i].hfont)
-			DeleteObject(GuiType::sFont[i].hfont);
-
-	if (GuiType::sFontCount)
-	{
-		GuiType::sFontCount = 0;
-		GuiType::sFont = NULL;
-	}
-
-	// The above might attempt to delete an HFONT from GetStockObject(DEFAULT_GUI_FONT), etc.
-	// But that should be harmless:
-	// MSDN: "It is not necessary (but it is not harmful) to delete stock objects by calling DeleteObject."
-
-	// Above: Probably best to have removed icon from tray and destroyed any Gui windows that were
-	// using it prior to getting rid of the script's custom icon below:
-	if (mCustomIcon)
-	{
-		DestroyIcon(mCustomIcon);
-		DestroyIcon(mCustomIconSmall); // Should always be non-NULL if mCustomIcon is non-NULL.
-	}
-
-	// Since they're not associated with a window, we must free the resources for all popup menus.
-	// Update: Even if a menu is being used as a GUI window's menu bar, see note above for why menu
-	// destruction is done AFTER the GUI windows are destroyed:
-	UserMenu *menu_to_delete;
-	for (UserMenu *m = mFirstMenu; m;)
-	{
-		menu_to_delete = m;
-		m = m->mNextMenu;
-		ScriptDeleteMenu(menu_to_delete);
-		// Above call should not return FAIL, since the only way FAIL can realistically happen is
-		// when a GUI window is still using the menu as its menu bar.  But all GUI windows are gone now.
-	}
-#endif
-	// Since tooltip windows are unowned, they should be destroyed to avoid resource leak:
-	for (i = 0; i < MAX_TOOLTIPS; ++i)
-		if (g_hWndToolTip[i] && IsWindow(g_hWndToolTip[i]))
-			DestroyWindow(g_hWndToolTip[i]);
-
-	if (mOnClipboardChangeFunc)
-		EnableClipboardListener(false); // Remove from viewer chain.
-
-	// Close any open sound item to prevent hang-on-exit in certain operating systems or conditions.
-	// If there's any chance that a sound was played and not closed out, or that it is still playing,
-	// this check is done.  Otherwise, the check is avoided since it might be a high overhead call,
-	// especially if the sound subsystem part of the OS is currently swapped out or something:
-	if (g_SoundWasPlayed)
-	{
-		TCHAR buf[MAX_PATH * 2];
-		mciSendString(_T("status ") SOUNDPLAY_ALIAS _T(" mode"), buf, _countof(buf), NULL);
-		if (*buf) // "playing" or "stopped"
-			mciSendString(_T("close ") SOUNDPLAY_ALIAS, NULL, 0, NULL);
-		g_SoundWasPlayed = 0;
-	}
-#ifndef MINIDLL
-	RemoveVectoredExceptionHandler(g_ExceptionHandler); // Exception handler to remove hooks to avoid system/mouse freeze
-#ifdef ENABLE_KEY_HISTORY_FILE
-	KeyHistoryToFile();  // Close the KeyHistory file if it's open.
-#endif
-#endif // MINIDLL
-	DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
-	DeleteCriticalSection(&g_CriticalAhkFunction); // g_CriticalRegExCache is used elsewhere for thread-safety.
-	OleUninitialize();
-}
-
-
 #ifdef _USRDLL
-void Script::Destroy()
-// HotKeyIt H1 destroy script for ahkTerminate and ahkReload and ExitApp for dll
-{
+	// HotKeyIt H1 destroy script for ahkTerminate and ahkReload and ExitApp for dll
 	// free Meta Object
 	g_MetaObject.Free();
 	// Disconnect Debugger
@@ -449,7 +365,7 @@ void Script::Destroy()
 		g_Debugger.Disconnect();
 	}
 	// L31: Release objects stored in variables, where possible.
-	int v, i;
+	int v;
 	for (v = 0; v < mVarCount; v++)
 	{
 		if (mVar[v]->mType == VAR_BUILTIN || mVar[v]->mType == VAR_CLIPBOARD || mVar[v]->mType == VAR_CLIPBOARDALL)
@@ -466,7 +382,8 @@ void Script::Destroy()
 		mLazyVar[v]->ConvertToNonAliasIfNecessary();
 		mLazyVar[v]->Free();
 	}
-	free(mLazyVar);
+	if (mLazyVar)
+		free(mLazyVar);
 	mLazyVar = NULL;
 	// delete static func vars first
 	for (i = 0; i < mFuncCount; i++)
@@ -507,22 +424,23 @@ void Script::Destroy()
 			f.mLazyVar[v]->Free();
 		}
 	}
-
 	// Now all objects are freed and variables can be deleted
 	for (v = 0; v < mVarCount; v++)
 	{
 		// H19 fix not to delete Clipboard wars
-		if (mVar[v]->mType == VAR_BUILTIN || mVar[v]->mType == VAR_CLIPBOARD || mVar[v]->mType == VAR_CLIPBOARDALL)
-			continue;
+		//if (mVar[v]->mType == VAR_BUILTIN || mVar[v]->mType == VAR_CLIPBOARD || mVar[v]->mType == VAR_CLIPBOARDALL)
+		//	continue;
 		delete mVar[v];
 	}
-	free(mVar);
+	if (mVarCount)
+		free(mVar);
 	mVar = NULL;
 	for (v = 0; v < mLazyVarCount; v++)
 	{
 		delete mLazyVar[v];
 	}
-	free(mLazyVar);
+	if (mLazyVarCount)
+		free(mLazyVar);
 	mLazyVar = NULL;
 	// delete static func vars first
 	for (i = 0; i < mFuncCount; i++)
@@ -561,6 +479,10 @@ void Script::Destroy()
 		delete mFunc[i];
 	}
 
+	if (mFuncCount)
+		free(mFunc);
+	mFunc = NULL;
+
 	// Destroy Labels
 	for (Label *label = mFirstLabel, *nextLabel = NULL; label;)
 	{
@@ -582,9 +504,120 @@ void Script::Destroy()
 		delete line;
 		line = nextLine;
 	}
+	
+#endif
+	// MSDN: "Before terminating, an application must call the UnhookWindowsHookEx function to free
+	// system resources associated with the hook."
+#ifndef MINIDLL
+	AddRemoveHooks(0); // Remove all hooks.
+	if (mNIC.hWnd) // Tray icon is installed.
+		Shell_NotifyIcon(NIM_DELETE, &mNIC); // Remove it.
 
-	Script::~Script(); // destroy main script before resetting variables
+	// It is safer/easier to destroy the GUI windows prior to the menus (especially the menu bars).
+	// This is because one GUI window might get destroyed and take with it a menu bar that is still
+	// in use by an existing GUI window.  GuiType::Destroy() adheres to this philosophy by detaching
+	// its menu bar prior to destroying its window:
+	while (g_guiCount)
+		GuiType::Destroy(*g_gui[g_guiCount - 1]); // Static method to avoid problems with object destroying itself.
 
+	for (i = 0; i < GuiType::sFontCount; ++i) // Now that GUI windows are gone, delete all GUI fonts.
+		if (GuiType::sFont[i].hfont)
+			DeleteObject(GuiType::sFont[i].hfont);
+
+	if (GuiType::sFontCount)
+	{
+		GuiType::sFontCount = 0;
+		GuiType::sFont = NULL;
+	}
+
+	// The above might attempt to delete an HFONT from GetStockObject(DEFAULT_GUI_FONT), etc.
+	// But that should be harmless:
+	// MSDN: "It is not necessary (but it is not harmful) to delete stock objects by calling DeleteObject."
+
+	// Above: Probably best to have removed icon from tray and destroyed any Gui windows that were
+	// using it prior to getting rid of the script's custom icon below:
+	if (mCustomIcon)
+	{
+		DestroyIcon(mCustomIcon);
+		DestroyIcon(mCustomIconSmall); // Should always be non-NULL if mCustomIcon is non-NULL.
+	}
+
+	// Since they're not associated with a window, we must free the resources for all popup menus.
+	// Update: Even if a menu is being used as a GUI window's menu bar, see note above for why menu
+	// destruction is done AFTER the GUI windows are destroyed:
+	UserMenu *menu_to_delete;
+	for (UserMenu *m = mFirstMenu; m;)
+	{
+		menu_to_delete = m;
+		m = m->mNextMenu;
+#ifdef _USRDLL
+		if (menu_to_delete != mTrayMenu)
+#endif
+			ScriptDeleteMenu(menu_to_delete);
+		// Above call should not return FAIL, since the only way FAIL can realistically happen is
+		// when a GUI window is still using the menu as its menu bar.  But all GUI windows are gone now.
+	}
+#ifdef _USRDLL
+	if (mFirstMenu != mTrayMenu)
+	{
+		mFirstMenu = NULL;
+		mLastMenu = NULL;
+		mTrayMenu = NULL;
+	}
+	else
+	{
+		mFirstMenu->mNextMenu = NULL;
+		mLastMenu = mFirstMenu;
+	}
+	mTrayIconTip = NULL;
+	mPriorHotkeyStartTime = 0;
+
+	// We call DestroyWindow() because MainWindowProc() has left that up to us.
+	// DestroyWindow() will cause MainWindowProc() to immediately receive and process the
+	// WM_DESTROY msg, which should in turn result in any child windows being destroyed
+	// and other cleanup being done:
+	KILL_AUTOEXEC_TIMER
+	KILL_MAIN_TIMER
+	if (IsWindow(g_hWnd)) // Adds peace of mind in case WM_DESTROY was already received in some unusual way.
+	{
+		g_DestroyWindowCalled = true;
+		DestroyWindow(g_hWnd);
+		DestroyWindow(g_hWndEdit);
+		DeleteObject(g_hFontEdit);
+#ifndef MINIDLL
+		// Unregister window class if it was registered in Script::CreateWindows
+		if (g_ClassRegistered)
+			UnregisterClass((LPCWSTR)&WINDOW_CLASS_MAIN, g_hInstance);
+		g_ClassRegistered = 0;
+#endif
+	}
+#endif
+	if (g_hAccelTable)
+		DestroyAcceleratorTable(g_hAccelTable);
+#endif
+
+	// Since tooltip windows are unowned, they should be destroyed to avoid resource leak:
+	for (i = 0; i < MAX_TOOLTIPS; ++i)
+		if (g_hWndToolTip[i] && IsWindow(g_hWndToolTip[i]))
+			DestroyWindow(g_hWndToolTip[i]);
+
+	if (mOnClipboardChangeFunc)
+		EnableClipboardListener(false); // Remove from viewer chain.
+
+	// Close any open sound item to prevent hang-on-exit in certain operating systems or conditions.
+	// If there's any chance that a sound was played and not closed out, or that it is still playing,
+	// this check is done.  Otherwise, the check is avoided since it might be a high overhead call,
+	// especially if the sound subsystem part of the OS is currently swapped out or something:
+	if (g_SoundWasPlayed)
+	{
+		TCHAR buf[MAX_PATH * 2];
+		mciSendString(_T("status ") SOUNDPLAY_ALIAS _T(" mode"), buf, _countof(buf), NULL);
+		if (*buf) // "playing" or "stopped"
+			mciSendString(_T("close ") SOUNDPLAY_ALIAS, NULL, 0, NULL);
+		g_SoundWasPlayed = 0;
+	}
+
+#ifdef _USRDLL
 	mVarCount = 0;
 	mVarCountMax = 0;
 	mLazyVarCount = 0;
@@ -599,17 +632,6 @@ void Script::Destroy()
 	mCurrLine = NULL;
 	mCurrFileIndex = 0;
 	mCombinedLineNumber = 0;
-#ifndef MINIDLL
-	for (UserMenu *menu = mFirstMenu; menu;)
-	{
-		menu->Destroy();
-		menu = menu->mNextMenu;
-	}
-	mFirstMenu = NULL;
-	mLastMenu = NULL;
-	mTrayIconTip = NULL;
-	mPriorHotkeyStartTime = 0;
-#endif
 
 	mFirstGroup = NULL;
 	mLastGroup = NULL;
@@ -679,7 +701,6 @@ void Script::Destroy()
 	g_HSDetectWhenInsideWord = false;
 	g_HSDoReset = false;
 	g_HSResetUponMouseClick = true;
-	_tcscpy(g_EndChars, _T("-()[]{}:;'\"/\\,.?!\n \t"));  // Hotstring default end chars, including a space.
 #endif
 	g_ErrorLevel = NULL; // Allows us (in addition to the user) to set this var to indicate success/failure.
 
@@ -758,20 +779,7 @@ void Script::Destroy()
 	//SimpleHeap::Delete(Line::sSourceFile);
 	//Line::sSourceFile = 0;
 	// free(Line::sSourceFile);
-	// We call DestroyWindow() because MainWindowProc() has left that up to us.
-	// DestroyWindow() will cause MainWindowProc() to immediately receive and process the
-	// WM_DESTROY msg, which should in turn result in any child windows being destroyed
-	// and other cleanup being done:
 
-	KILL_AUTOEXEC_TIMER
-		KILL_MAIN_TIMER
-		if (IsWindow(g_hWnd)) // Adds peace of mind in case WM_DESTROY was already received in some unusual way.
-		{
-		g_DestroyWindowCalled = true;
-		DestroyWindow(g_hWnd);
-		DestroyWindow(g_hWndEdit);
-		DeleteObject(g_hFontEdit);
-		}
 #ifndef MINIDLL
 	// AddRemoveHooks(0); // done in ~Script
 	Hotkey::AllDestruct();
@@ -780,19 +788,21 @@ void Script::Destroy()
 
 	global_clear_state(*g);
 	//free(g_Debugger.mStack.mBottom);
-#ifndef MINIDLL
-	free(g_input.match);
-#endif
 	SimpleHeap::DeleteAll();
-	DeleteCriticalSection(&g_CriticalHeapBlocks); // g_CriticalHeapBlocks is used in simpleheap for thread-safety.
-	DeleteCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
 	mIsReadyToExecute = false;
-	ZeroMemory(&g_script, sizeof(g_script));
+	//ZeroMemory(&g_script, sizeof(g_script));
 #ifndef MINIDLL
 	mPriorHotkeyName = mThisHotkeyName = _T("");
 #endif
-}
 #endif
+#ifndef MINIDLL
+	RemoveVectoredExceptionHandler(g_ExceptionHandler); // Exception handler to remove hooks to avoid system/mouse freeze
+#ifdef ENABLE_KEY_HISTORY_FILE
+	KeyHistoryToFile();  // Close the KeyHistory file if it's open.
+#endif
+#endif // MINIDLL
+	OleUninitialize();
+}
 
 ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestart, HINSTANCE hInstance, bool aIsText)
 // Returns OK or FAIL.
@@ -887,7 +897,10 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 						else
 						{
 							if (!GetFullPathName(param, _countof(buf), buf, NULL)) // This is also relied upon by mIncludeLibraryFunctionsThenExit.  Succeeds even on nonexistent files.
+							{
+								LocalFree(dllargv);
 								return FAIL;
+							}
 						}
 						break;  // No more switches allowed after this point.
 					}
@@ -9005,7 +9018,7 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 		winapi = UTF8ToWide((LPCSTR)aDataBuf);
 		for (i = 0; i < FUNC_LIB_COUNT; ++i)
 #ifdef _USRDLL
-			if (!(sLib[i].path = tmalloc(MAX_PATH))) // When dll script is restarted, SimpleHeap is deleted and we don't want to delete static memberst
+			if (!(sLib[i].path = tmalloc(MAX_PATH))) // When dll script is restarted, SimpleHeap is deleted and we don't want to delete static members
 #else
 			if (!(sLib[i].path = (LPTSTR)SimpleHeap::Malloc(MAX_PATH * sizeof(TCHAR)))) // Need MAX_PATH for to allow room for appending each candidate file/function name.
 #endif
