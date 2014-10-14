@@ -9878,8 +9878,8 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	if (!sLib[0].path) // Allocate & discover paths only upon first use because many scripts won't use anything from the library. This saves a bit of memory and performance.
 	{
 		LPVOID aDataBuf;
-		HRSRC hResInfo = NULL;
-		DecompressBuffer(LockResource(LoadResource(g_hInstance, FindResource(g_hInstance, _T("WINAPI"), MAKEINTRESOURCE(10)))), aDataBuf, g_default_pwd);
+		HRSRC hResInfo = FindResource(g_hInstance, _T("WINAPI"), MAKEINTRESOURCE(10));
+		DecompressBuffer(LockResource(LoadResource(g_hInstance, hResInfo)), aDataBuf, g_default_pwd);
 #ifdef _UNICODE
 		winapi = UTF8ToWide((LPCSTR)aDataBuf);
 #else
@@ -10240,8 +10240,13 @@ winapi:
 			}
 			else if (*found == L'i' || *found == L'I')
 			{
-				_tcscpy(aDest, _T("INT"));
-				aDest = aDest + 3;
+				if (*(found + 1) != L'\\')
+				{	// Default Return type int, no need to define
+					_tcscpy(aDest, _T("INT"));
+					aDest = aDest + 3;
+				}
+				else // remove last , since no return type is given
+					aDest--;
 			}
 			else if (*found == L'h' || *found == L'H')
 			{
