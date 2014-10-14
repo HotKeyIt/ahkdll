@@ -99,11 +99,8 @@ switch(fwdReason)
 		 if (Line::sMaxSourceFiles)
 			free(Line::sSourceFile);
 #ifdef _DEBUG
-		 free(g_Debugger.mStack.mBottom);
+		free(g_Debugger.mStack.mBottom);
 #endif
-		 DeleteCriticalSection(&g_CriticalHeapBlocks); // g_CriticalHeapBlocks is used in simpleheap for thread-safety.
-		 DeleteCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
-		 DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
 #ifndef MINIDLL
 		 if (g_input.MatchCount)
 		 {
@@ -112,6 +109,9 @@ switch(fwdReason)
 		 if (g_script.mTrayMenu)
 			 g_script.ScriptDeleteMenu(g_script.mTrayMenu);
 		 free(g_KeyHistory);
+		 DeleteCriticalSection(&g_CriticalHeapBlocks); // g_CriticalHeapBlocks is used in simpleheap for thread-safety.
+		 DeleteCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
+		 DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
 #endif
 		 break;
 	 }

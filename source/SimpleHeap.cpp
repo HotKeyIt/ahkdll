@@ -106,11 +106,12 @@ void SimpleHeap::Delete(void *aPtr)
 void SimpleHeap::DeleteAll()
 // See Hotkey::AllDestructAndExit for comments about why this isn't actually called.
 {
-#ifdef _USRDLL
-	EnterCriticalSection(&g_CriticalHeapBlocks);
-#endif
+	// Do not EnterCriticalSection because the dll might be being deattached and critical section already deleted, see dllmain->DllMain.
 	if (sBlocks) // don't process again if we already freed Heap
 	{
+#ifdef _USRDLL
+		EnterCriticalSection(&g_CriticalHeapBlocks);
+#endif
 		for (; sBlockCount;)
 		{
 			if (sBlocks[--sBlockCount])
@@ -122,10 +123,10 @@ void SimpleHeap::DeleteAll()
 		sMostRecentlyAllocated = NULL;
 		free(sBlocks);
 		sBlocks = NULL;
-	}
 #ifdef _USRDLL
-	LeaveCriticalSection(&g_CriticalHeapBlocks);
+		LeaveCriticalSection(&g_CriticalHeapBlocks);
 #endif
+	}
 }
 
 

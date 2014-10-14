@@ -94,7 +94,7 @@ CopySections(const unsigned char *data, PIMAGE_NT_HEADERS old_headers, PMEMORYMO
                     MEM_COMMIT,
                     PAGE_EXECUTE_READWRITE);
 
-                section->Misc.PhysicalAddress = (DWORD) (POINTER_TYPE) dest;
+				section->Misc.PhysicalAddress = ((DWORD)(((POINTER_TYPE)(dest)) & 0xffffffff));
                 memset(dest, 0, size);
             }
 
@@ -108,7 +108,7 @@ CopySections(const unsigned char *data, PIMAGE_NT_HEADERS old_headers, PMEMORYMO
                             MEM_COMMIT,
                             PAGE_EXECUTE_READWRITE);
         memcpy(dest, data + section->PointerToRawData, section->SizeOfRawData);
-        section->Misc.PhysicalAddress = (DWORD) (POINTER_TYPE) dest;
+		section->Misc.PhysicalAddress = ((DWORD)(((POINTER_TYPE)(dest)) & 0xffffffff));
     }
 }
 

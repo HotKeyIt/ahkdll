@@ -9013,8 +9013,8 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	{
 		// Load WinApi library
 		LPVOID aDataBuf;
-		HRSRC hResInfo = NULL;
-		DecompressBuffer(LockResource(LoadResource(g_hInstance, FindResource(g_hInstance, _T("WINAPI"), MAKEINTRESOURCE(10)))), aDataBuf, g_default_pwd);
+		HRSRC hWinApi = FindResource(g_hInstance, _T("WINAPI"), MAKEINTRESOURCE(10));
+		DecompressBuffer(LockResource(LoadResource(g_hInstance, hWinApi)), aDataBuf, g_default_pwd);
 		winapi = UTF8ToWide((LPCSTR)aDataBuf);
 		for (i = 0; i < FUNC_LIB_COUNT; ++i)
 #ifdef _USRDLL
@@ -9367,8 +9367,13 @@ winapi:
 			}
 			else if (*found == L'i' || *found == L'I')
 			{
-				_tcscpy(aDest, _T("INT"));
-				aDest = aDest + 3;
+				if (*(found + 1) != L'\\')
+				{	// Default Return type int, no need to define
+					_tcscpy(aDest, _T("INT"));
+					aDest = aDest + 3;
+				}
+				else // remove last , since no return type is given
+					aDest--;
 			}
 			else if (*found == L'h' || *found == L'H')
 			{
