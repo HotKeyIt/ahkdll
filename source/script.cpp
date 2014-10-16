@@ -564,7 +564,7 @@ Script::~Script() // Destructor.
 		mLastMenu = NULL;
 		mTrayMenu = NULL;
 	}
-	else
+	else if (mFirstMenu)
 	{
 		mFirstMenu->mNextMenu = NULL;
 		mLastMenu = mFirstMenu;
@@ -801,6 +801,10 @@ Script::~Script() // Destructor.
 	KeyHistoryToFile();  // Close the KeyHistory file if it's open.
 #endif
 #endif // MINIDLL
+#ifndef _USRDLL
+	DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
+	DeleteCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
+#endif
 	OleUninitialize();
 }
 
