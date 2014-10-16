@@ -2802,7 +2802,8 @@ short IsDefaultType(LPTSTR aTypeDef){
 	// type was not found
 	return NULL;
 }
-ResultType LoadDllFunction(LPTSTR parameter,LPTSTR aBuf)
+
+ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 {
 	LPTSTR aFuncName = omit_leading_whitespace(parameter);
 	// backup current function
@@ -2820,10 +2821,9 @@ ResultType LoadDllFunction(LPTSTR parameter,LPTSTR aBuf)
 		return g_script.ScriptError(_T("Duplicate function definition."), aFuncName); // Seems more descriptive than "Function already defined."
 	else
 		if (!(found_func = g_script.AddFunc(aFuncName, _tcslen(aFuncName), false, insert_pos)))
-	return FAIL; // It already displayed the error.
+			return FAIL; // It already displayed the error.
+	void *function = NULL; // Will hold the address of the function to be called.
 
-	// restore previous function
-	//memcpy(*g_script.mFunc,&currentfunc,sizeof(Func));
 	found_func->mBIF = (BuiltInFunctionType)BIF_DllImport;
 	found_func->mIsBuiltIn = true;
 	found_func->mMinParams = 0;
@@ -2855,15 +2855,15 @@ ResultType LoadDllFunction(LPTSTR parameter,LPTSTR aBuf)
 		BIV_AhkDir(buf, _T("A_AhkDir"));
 		StrReplace(parameter, _T("%A_AhkDir%"), buf, SCS_INSENSITIVE, 1, space_remaining);
 	}
-	if (tcscasestr(parameter, _T("%A_DllPath%"))) // v1.0.45.04.
-	{
-		BIV_DllPath(buf, _T("A_DllPath"));
-		StrReplace(parameter, _T("%A_DllPath%"), buf, SCS_INSENSITIVE, 1, space_remaining);
-	}
 	if (tcscasestr(parameter, _T("%A_DllDir%"))) // v1.0.45.04.
 	{
 		BIV_DllDir(buf, _T("A_DllDir"));
 		StrReplace(parameter, _T("%A_DllDir%"), buf, SCS_INSENSITIVE, 1, space_remaining);
+	}
+	if (tcscasestr(parameter, _T("%A_DllPath%"))) // v1.0.45.04.
+	{
+		BIV_DllPath(buf, _T("A_DllPath"));
+		StrReplace(parameter, _T("%A_DllPath%"), buf, SCS_INSENSITIVE, 1, space_remaining);
 	}
 	if (_tcschr(parameter, '%'))
 	{
@@ -2871,9 +2871,9 @@ ResultType LoadDllFunction(LPTSTR parameter,LPTSTR aBuf)
 	}
 	// terminate dll\function name, find it and jump to next parameter
 	if (_tcschr(parameter, ','))
-	*(_tcschr(parameter, ',')) = '\0';
-	HANDLE func_ptr = (HANDLE)ATOI64(parameter);
-	if (!func_ptr)
+		*(_tcschr(parameter, ',')) = '\0';
+	function = (void*)ATOI64(parameter);
+	if (!function)
 	{
 		LPTSTR dll_name = _tcsrchr(parameter, '\\');
 		if (dll_name)
@@ -2883,126 +2883,233 @@ ResultType LoadDllFunction(LPTSTR parameter,LPTSTR aBuf)
 				LoadLibrary(parameter);
 			*dll_name = '\\';
 		}
-		func_ptr = GetDllProcAddress(parameter);
+		function = (void*)GetDllProcAddress(parameter);
 	}
-	if (!func_ptr)
+	if (!function)
 		return g_script.ScriptError(ERR_NONEXISTENT_FUNCTION, parameter);
 	parameter = parameter + _tcslen(parameter) + 1;
 
 	LPTSTR parm = SimpleHeap::Malloc(parameter);
-
-	// If next parameter starts with digit, it is a shift_param definition and is omitted from paramters list for dllcall
+	bool has_return = false;
 	int aParamCount = ATOI(parm) ? 0 : 1;
 	if (*parm)
-	for (; parameter; aParamCount++)
-	{
+		for (; _tcschr(parameter, ','); aParamCount++)
+		{
 		if (parameter = _tcschr(parameter, ','))
 			parameter++;
-	}
-	if (*parm && aParamCount < 2)
+		}
+	if (*parm && aParamCount < 1)
 		return g_script.ScriptError(ERR_PARAM3_REQUIRED, aBuf);
-	// set max possible parameters for the new function
-	found_func->mParamCount = aParamCount / 2;
-	// misuse mGlobalVarCount to hold total amount of parmeters for DllCall
-	found_func->mLazyVarCount = aParamCount;
 
-	// allocate memory to hold the parameters and defaults
-	ExprTokenType **func_param = (ExprTokenType**)SimpleHeap::Malloc(aParamCount * sizeof(ExprTokenType*));
-	ExprTokenType **func_defaults = (ExprTokenType**)SimpleHeap::Malloc(found_func->mParamCount * sizeof(ExprTokenType*));
-	// misuse mParam to hold default parameters
-	found_func->mStaticVar = (Var**)func_param;
-	found_func->mStaticLazyVar = (Var**)func_defaults;
-
-	// assign function pointer
-	func_param[0] = (ExprTokenType*)SimpleHeap::Malloc(sizeof(ExprTokenType));
-	func_param[0]->symbol = PURE_INTEGER;
-	func_param[0]->value_int64 = (__int64)func_ptr;
-	if (!*parm)
-	return CONDITION_TRUE;
-	ltrim(parm);
-	// set parameters shift
-	if (ATOI(parm))
+	// Determine the type of return value.
+	DYNAPARM *return_attrib = (DYNAPARM*)malloc(sizeof(DYNAPARM));
+	memset(return_attrib, 0, sizeof(DYNAPARM)); // Init all to default in case ConvertDllArgType() isn't called below. This struct holds the type and other attributes of the function's return value.
+#ifdef WIN32_PLATFORM
+	int dll_call_mode = DC_CALL_STD; // Set default.  Can be overridden to DC_CALL_CDECL and flags can be OR'd into it.
+#endif
+	if (!(aParamCount % 2)) // Even number of parameters indicates the return type has been omitted, so assume BOOL/INT.
+		return_attrib->type = DLL_ARG_INT;
+	else
 	{
-		int shift_param[MAX_FUNCTION_PARAMS];
-		int shift_count = 0;
-		for (int i; parm && *parm || *parm != ',';)
-		{
-			if (!(i = ATOI(parm)))
-				break;  // next parameter is not number
-			shift_param[shift_count] = i * 2;
-			parm = StrChrAny(parm, _T("\t ,"));
-			ltrim(parm);
-			shift_count++;
-		}
-		if (!parm || !_tcschr(parm, ','))
-			return g_script.ScriptError(ERR_PARAM3_REQUIRED, aBuf);
-		if (*parm == ',')
-			parm++; // adnvance pointer to next parameter since above left a ,
+		// Check validity of this arg's return type:
+		LPTSTR return_type_string[2];
+		return_type_string[0] = parameter;
+		return_type_string[1] = NULL; // Added in 1.0.48.
 
-		// fill left parameters order
-		for (int c = 1; shift_count < found_func->mParamCount; c++)
+		// 64-bit note: The calling convention detection code is preserved here for script compatibility.
+
+		if (!_tcsnicmp(return_type_string[0], _T("CDecl"), 5)) // Alternate calling convention.
 		{
-			bool found = false;
-			for (int i = 0; i < shift_count || found; i++)
-				found = shift_param[i] == c * 2;
-			if (!found)
-				shift_param[shift_count++] = c * 2;
+#ifdef WIN32_PLATFORM
+			dll_call_mode = DC_CALL_CDECL;
+#endif
+			return_type_string[0] = omit_leading_whitespace(return_type_string[0] + 5);
+			if (!*return_type_string[0])
+			{	// Take a shortcut since we know this empty string will be used as "Int":
+				return_attrib->type = DLL_ARG_INT;
+				goto has_valid_return_type;
+			}
 		}
 
-		// misuse mLazyVar, allocate memory and fill shift_param
-		found_func->mLazyVar = (Var**)SimpleHeap::Malloc(aParamCount * sizeof(int));
-		memcpy(found_func->mLazyVar, &shift_param, aParamCount * sizeof(int));
+		ConvertDllArgType(return_type_string, *return_attrib);
+		if (return_attrib->type == DLL_ARG_INVALID)
+			return CONDITION_FALSE;
+		has_return = true;
+
+	has_valid_return_type:
+		aParamCount--;
+#ifdef WIN32_PLATFORM
+		if (!return_attrib->passed_by_address) // i.e. the special return flags below are not needed when an address is being returned.
+		{
+			if (return_attrib->type == DLL_ARG_DOUBLE)
+				dll_call_mode |= DC_RETVAL_MATH8;
+			else if (return_attrib->type == DLL_ARG_FLOAT)
+				dll_call_mode |= DC_RETVAL_MATH4;
+		}
+#endif
 	}
-	// fill definition and default parameters
-	for (aParamCount = 1; parm; aParamCount++)
+
+	// Using stack memory, create an array of dll args large enough to hold the actual number of args present.
+	int arg_count = aParamCount / 2; // Might provide one extra due to first/last params, which is inconsequential.
+	DYNAPARM *dyna_param_def = arg_count ? (DYNAPARM *)malloc(arg_count * sizeof(DYNAPARM)) : NULL;
+	DYNAPARM *dyna_param = arg_count ? (DYNAPARM *)malloc(arg_count * sizeof(DYNAPARM)) : NULL;
+	// Above: _alloca() has been checked for code-bloat and it doesn't appear to be an issue.
+	// Above: Fix for v1.0.36.07: According to MSDN, on failure, this implementation of _alloca() generates a
+	// stack overflow exception rather than returning a NULL value.  Therefore, NULL is no longer checked,
+	// nor is an exception block used since stack overflow in this case should be exceptionally rare (if it
+	// does happen, it would probably mean the script or the program has a design flaw somewhere, such as
+	// infinite recursion).
+
+	LPTSTR arg_type_string[2];
+	int i = arg_count * sizeof(void *);
+	// for Unicode <-> ANSI charset conversion
+#ifdef UNICODE
+	CStringA **pStr = (CStringA **)
+#else
+	CStringW **pStr = (CStringW **)
+#endif
+		malloc(i); // _alloca vs malloc can make a significant difference to performance in some cases.
+	memset(pStr, 0, i);
+
+	// Above has already ensured that after the first parameter, there are either zero additional parameters
+	// or an even number of them.  In other words, each arg type will have an arg value to go with it.
+	// It has also verified that the dyna_param array is large enough to hold all of the args.
+	LPTSTR this_param;
+	for (arg_count = 0, i = 1; i < aParamCount; ++arg_count, i += 2)  // Same loop as used later below, so maintain them together.
 	{
-		LPTSTR this_parm = parm;
-		if (parm = _tcschr(parm, ','))
+		this_param = _tcschr(parm, ',');
+		*this_param = '\0';
+		this_param++;
+		arg_type_string[0] = parm; // It will be detected as invalid below.
+		arg_type_string[1] = NULL;
+
+		//ExprTokenType &this_param = *aParam[i + 1];         // Resolved for performance and convenience.
+		DYNAPARM &this_dyna_param = dyna_param_def[arg_count];  //
+		
+		// Store the each arg into a dyna_param struct, using its arg type to determine how.
+		ConvertDllArgType(arg_type_string, this_dyna_param);
+
+		switch (this_dyna_param.type)
 		{
-			*parm = '\0';
-			parm++;
-		}
-		trim(this_parm);
-		func_param[aParamCount] = (ExprTokenType*)SimpleHeap::Malloc(sizeof(ExprTokenType));
-		ExprTokenType &this_param = *func_param[aParamCount];
-		if (this_param.symbol = IsNumeric(this_parm, true, true, true, true))
-		{
-			if (this_param.symbol == PURE_FLOAT)
-				this_param.value_double = ATOF(this_parm);
-			else
-				this_param.value_int64 = ATOI64(this_parm);
-		}
-		else
-		{
-			if (aParamCount % 2)
+		case DLL_ARG_STR:
+			if (ATOI64(this_param))
 			{
-				if (_tcschr(this_parm, '\"') == this_parm && _tcsrchr(this_parm, '\"') == (this_parm + _tcslen(this_parm) - 1))
-				{
-					this_param.marker = ++this_parm;
-					*(_tcsrchr(this_parm, '\"')) = '\0';
-				}
-				else
-					this_param.marker = this_parm;
+				// HotKeyIt - Allow PURE_INTEGER = Pointers (also used in functions like FindResource >> MAKEINTRESOURCE
+#ifdef _WIN64
+				this_dyna_param.type = DLL_ARG_INT64; // Ptr vs IntPtr to simplify recognition of the pointer suffix, to avoid any possible confusion with IntP, and because it is easier to type.
+#else
+				this_dyna_param.type = DLL_ARG_INT;
+#endif
+				this_dyna_param.value_int64 = ATOI64(this_param);
+				if (this_dyna_param.type != DLL_ARG_INT64) // Shift the 32-bit value into the high-order DWORD of the 64-bit value for later use by DynaCall().
+					this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
 			}
-			else if (_tcschr(this_parm, '\"') == this_parm && _tcsrchr(this_parm, '\"') == (this_parm + _tcslen(this_parm) - 1))
+			// Otherwise, it's a supported type of string.
+			this_dyna_param.ptr = this_param; // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
+
+			// NOTES ABOUT THE ABOVE:
+			// UPDATE: The v1.0.44.14 item below doesn't work in release mode, only debug mode (turning off
+			// "string pooling" doesn't help either).  So it's commented out until a way is found
+			// to pass the address of a read-only empty string (if such a thing is possible in
+			// release mode).  Such a string should have the following properties:
+			// 1) The first byte at its address should be '\0' so that functions can read it
+			//    and recognize it as a valid empty string.
+			// 2) The memory address should be readable but not writable: it should throw an
+			//    access violation if the function tries to write to it (like "" does in debug mode).
+			// SO INSTEAD of the following, DllCall() now checks further below for whether sEmptyString
+			// has been overwritten/trashed by the call, and if so displays a warning dialog.
+			// See note above about this: v1.0.44.14: If a variable is being passed that has no capacity, pass a
+			// read-only memory area instead of a writable empty string. There are two big benefits to this:
+			// 1) It forces an immediate exception (catchable by DllCall's exception handler) so
+			//    that the program doesn't crash from memory corruption later on.
+			// 2) It avoids corrupting the program's static memory area (because sEmptyString
+			//    resides there), which can save many hours of debugging for users when the program
+			//    crashes on some seemingly unrelated line.
+			// Of course, it's not a complete solution because it doesn't stop a script from
+			// passing a variable whose capacity is non-zero yet too small to handle what the
+			// function will write to it.  But it's a far cry better than nothing because it's
+			// common for a script to forget to call VarSetCapacity before passing a buffer to some
+			// function that writes a string to it.
+			//if (this_dyna_param.str == Var::sEmptyString) // To improve performance, compare directly to Var::sEmptyString rather than calling Capacity().
+			//	this_dyna_param.str = _T(""); // Make it read-only to force an exception.  See comments above.
+			break;
+		case DLL_ARG_xSTR:
+			// See the section above for comments.
+			if (ATOI64(this_param))
 			{
-				this_param.marker = ++this_parm;
-				*(_tcsrchr(this_parm, '\"')) = '\0';
+#ifdef _WIN64
+				this_dyna_param.type = DLL_ARG_INT64; // Ptr vs IntPtr to simplify recognition of the pointer suffix, to avoid any possible confusion with IntP, and because it is easier to type.
+#else
+				this_dyna_param.type = DLL_ARG_INT;
+#endif
+				this_dyna_param.value_int64 = ATOI64(this_param);
+				if (this_dyna_param.type != DLL_ARG_INT64) // Shift the 32-bit value into the high-order DWORD of the 64-bit value for later use by DynaCall().
+					this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
 			}
+			// String needing translation: ASTR on Unicode build, WSTR on ANSI build.
+			pStr[arg_count] = new UorA(CStringCharFromWChar, CStringWCharFromChar)(this_param);
+			this_dyna_param.ptr = pStr[arg_count]->GetBuffer();
+			break;
+
+		case DLL_ARG_DOUBLE:
+		case DLL_ARG_FLOAT:
+			// This currently doesn't validate that this_dyna_param.is_unsigned==false, since it seems
+			// too rare and mostly harmless to worry about something like "Ufloat" having been specified.
+			this_dyna_param.value_double = ATOF(this_param);
+			if (this_dyna_param.type == DLL_ARG_FLOAT)
+				this_dyna_param.value_float = (float)this_dyna_param.value_double;
+			break;
+
+		case DLL_ARG_INVALID:
+			return CONDITION_FALSE;
+
+		default: // Namely:
+			//case DLL_ARG_INT:
+			//case DLL_ARG_SHORT:
+			//case DLL_ARG_CHAR:
+			//case DLL_ARG_INT64:
+			if (this_dyna_param.is_unsigned && this_dyna_param.type == DLL_ARG_INT64 && !ATOI64(this_param))
+				// The above and below also apply to BIF_NumPut(), so maintain them together.
+				// !IS_NUMERIC() is checked because such tokens are already signed values, so should be
+				// written out as signed so that whoever uses them can interpret negatives as large
+				// unsigned values.
+				// Support for unsigned values that are 32 bits wide or less is done via ATOI64() since
+				// it should be able to handle both signed and unsigned values.  However, unsigned 64-bit
+				// values probably require ATOU64(), which will prevent something like -1 from being seen
+				// as the largest unsigned 64-bit int; but more importantly there are some other issues
+				// with unsigned 64-bit numbers: The script internals use 64-bit signed values everywhere,
+				// so unsigned values can only be partially supported for incoming parameters, but probably
+				// not for outgoing parameters (values the function changed) or the return value.  Those
+				// should probably be written back out to the script as negatives so that other parts of
+				// the script, such as expressions, can see them as signed values.  In other words, if the
+				// script somehow gets a 64-bit unsigned value into a variable, and that value is larger
+				// that LLONG_MAX (i.e. too large for ATOI64 to handle), ATOU64() will be able to resolve
+				// it, but any output parameter should be written back out as a negative if it exceeds
+				// LLONG_MAX (return values can be written out as unsigned since the script can specify
+				// signed to avoid this, since they don't need the incoming detection for ATOU()).
+				this_dyna_param.value_int64 = (__int64)ATOU64(this_param); // Cast should not prevent called function from seeing it as an undamaged unsigned number.
 			else
-			{  // user variable
-				this_param.var = g_script.FindVar(this_parm);
-				if (!this_param.var) // static variable could not be found
-					return g_script.ScriptError(_T("The variable name contains illegal character or is not declared."), this_parm);
-				this_param.symbol = SYM_VAR;
-			}
-		}
-		if (!(aParamCount % 2))
-		{
-			func_defaults[aParamCount / 2 - 1] = (ExprTokenType*)SimpleHeap::Malloc(sizeof(ExprTokenType));
-			memcpy(func_defaults[aParamCount / 2 - 1], &this_param, sizeof(ExprTokenType));
-		}
-	}
+				this_dyna_param.value_int64 = ATOI64(this_param);
+
+			// Values less than or equal to 32-bits wide always get copied into a single 32-bit value
+			// because they should be right justified within it for insertion onto the call stack.
+			if (this_dyna_param.type != DLL_ARG_INT64) // Shift the 32-bit value into the high-order DWORD of the 64-bit value for later use by DynaCall().
+				this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
+		} // switch (this_dyna_param.type)
+		parm = _tcschr(this_param, ',') + 1;
+	} // for() each arg.
+	if (has_return)
+		*(this_param) = '\0';
+
+	found_func->mClass = (Object*)function;
+	found_func->mParamCount = arg_count;
+	found_func->mVar = (Var**)return_attrib;
+	found_func->mStaticVar = (Var**)pStr;
+	found_func->mLazyVar = (Var**)dyna_param_def;
+	found_func->mParam = (FuncParam*)dyna_param;
+#ifdef WIN32_PLATFORM
+	found_func->mVarCount = dll_call_mode;
+#endif
 	return CONDITION_TRUE;
 }
 
@@ -3089,6 +3196,7 @@ DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf, TCHAR *pwd[]) // LiteZip 
 	}
 	return 0;
 }
+
 #ifndef MINIDLL
 LONG WINAPI DisableHooksOnException(PEXCEPTION_POINTERS pExceptionPtrs)
 {
