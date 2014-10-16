@@ -12712,51 +12712,6 @@ VarSizeType BIV_TimeIdlePhysical(LPTSTR aBuf, LPTSTR aVarName)
 
 #ifdef ENABLE_DLLCALL
 
-#ifdef WIN32_PLATFORM
-// Interface for DynaCall():
-#define  DC_MICROSOFT           0x0000      // Default
-#define  DC_BORLAND             0x0001      // Borland compat
-#define  DC_CALL_CDECL          0x0010      // __cdecl
-#define  DC_CALL_STD            0x0020      // __stdcall
-#define  DC_RETVAL_MATH4        0x0100      // Return value in ST
-#define  DC_RETVAL_MATH8        0x0200      // Return value in ST
-
-#define  DC_CALL_STD_BO         (DC_CALL_STD | DC_BORLAND)
-#define  DC_CALL_STD_MS         (DC_CALL_STD | DC_MICROSOFT)
-#define  DC_CALL_STD_M8         (DC_CALL_STD | DC_RETVAL_MATH8)
-#endif
-
-union DYNARESULT                // Various result types
-{      
-    int     Int;                // Generic four-byte type
-    long    Long;               // Four-byte long
-    void   *Pointer;            // 32-bit pointer
-    float   Float;              // Four byte real
-    double  Double;             // 8-byte real
-    __int64 Int64;              // big int (64-bit)
-	UINT_PTR UIntPtr;
-};
-
-struct DYNAPARM
-{
-    union
-	{
-		int value_int; // Args whose width is less than 32-bit are also put in here because they are right justified within a 32-bit block on the stack.
-		float value_float;
-		__int64 value_int64;
-		UINT_PTR value_uintptr;
-		double value_double;
-		char *astr;
-		wchar_t *wstr;
-		void *ptr;
-    };
-	// Might help reduce struct size to keep other members last and adjacent to each other (due to
-	// 8-byte alignment caused by the presence of double and __int64 members in the union above).
-	DllArgTypes type;
-	bool passed_by_address;
-	bool is_unsigned; // Allows return value and output parameters to be interpreted as unsigned vs. signed.
-};
-
 // DynaCall Object
 class DynaToken : public ObjectBase
 {
@@ -14127,6 +14082,390 @@ BIF_DECL(BIF_DllImport)
 // All parameters are pre-defined in func-> structure and are used to call the Dll function via DllCall
 {
 	Func *func = g_script.FindFunc(aResultToken.marker);
+	void *function = (void*)func->mClass;
+	int arg_count = func->mParamCount;
+	DYNAPARM *dyna_param = (DYNAPARM*)func->mParam;
+	DYNAPARM *dyna_param_def = (DYNAPARM*)func->mLazyVar;
+	DYNAPARM *return_attrib = (DYNAPARM*)func->mVar;
+#ifdef UNICODE
+	CStringA **pStr = (CStringA **)func->mStaticVar;
+#else
+	CStringW **pStr = (CStringW **)func->mStaticVar;
+#endif
+
+#ifdef WIN32_PLATFORM
+	int dll_call_mode = func->mVarCount;
+#endif
+
+	// Set default result in case of early return; a blank value:
+	aResultToken.symbol = SYM_STRING;
+	aResultToken.marker = _T("");
+	int i;
+	for (i = 0; i < arg_count; i++)  // Same loop as used later below, so maintain them together.
+	{
+		dyna_param[i] = dyna_param_def[i]; // Struct copy.
+		if (aParamCount <= i)
+			continue;
+
+		ExprTokenType &this_param = *aParam[i];         // Resolved for performance and convenience.
+		DYNAPARM &this_dyna_param = dyna_param[i];  //
+		DYNAPARM &def_dyna_param = dyna_param_def[i];  //
+		if (this_param.symbol == SYM_MISSING)
+			continue;
+		switch (this_dyna_param.type)
+		{
+		case DLL_ARG_STR:
+			if (IS_NUMERIC(this_param.symbol))
+			{
+				// For now, string args must be real strings rather than floats or ints.  An alternative
+				// to this would be to convert it to number using persistent memory from the caller (which
+				// is necessary because our own stack memory should not be passed to any function since
+				// that might cause it to return a pointer to stack memory, or update an output-parameter
+				// to be stack memory, which would be invalid memory upon return to the caller).
+				// The complexity of this doesn't seem worth the rarity of the need, so this will be
+				// documented in the help file.
+				g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DllImport")); // Stage 2 error: Invalid return type or arg type.
+				return;
+			}
+			// Otherwise, it's a supported type of string.
+			this_dyna_param.ptr = TokenToString(this_param); // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
+			// NOTES ABOUT THE ABOVE:
+			// UPDATE: The v1.0.44.14 item below doesn't work in release mode, only debug mode (turning off
+			// "string pooling" doesn't help either).  So it's commented out until a way is found
+			// to pass the address of a read-only empty string (if such a thing is possible in
+			// release mode).  Such a string should have the following properties:
+			// 1) The first byte at its address should be '\0' so that functions can read it
+			//    and recognize it as a valid empty string.
+			// 2) The memory address should be readable but not writable: it should throw an
+			//    access violation if the function tries to write to it (like "" does in debug mode).
+			// SO INSTEAD of the following, DllCall() now checks further below for whether sEmptyString
+			// has been overwritten/trashed by the call, and if so displays a warning dialog.
+			// See note above about this: v1.0.44.14: If a variable is being passed that has no capacity, pass a
+			// read-only memory area instead of a writable empty string. There are two big benefits to this:
+			// 1) It forces an immediate exception (catchable by DllCall's exception handler) so
+			//    that the program doesn't crash from memory corruption later on.
+			// 2) It avoids corrupting the program's static memory area (because sEmptyString
+			//    resides there), which can save many hours of debugging for users when the program
+			//    crashes on some seemingly unrelated line.
+			// Of course, it's not a complete solution because it doesn't stop a script from
+			// passing a variable whose capacity is non-zero yet too small to handle what the
+			// function will write to it.  But it's a far cry better than nothing because it's
+			// common for a script to forget to call VarSetCapacity before passing a buffer to some
+			// function that writes a string to it.
+			//if (this_dyna_param.str == Var::sEmptyString) // To improve performance, compare directly to Var::sEmptyString rather than calling Capacity().
+			//	this_dyna_param.str = _T(""); // Make it read-only to force an exception.  See comments above.
+			break;
+		case DLL_ARG_xSTR:
+			// See the section above for comments.
+			if (IS_NUMERIC(this_param.symbol))
+			{
+				g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DllImport"));
+				return;
+			}
+			// String needing translation: ASTR on Unicode build, WSTR on ANSI build.
+			pStr[arg_count] = new UorA(CStringCharFromWChar, CStringWCharFromChar)(TokenToString(this_param));
+			this_dyna_param.ptr = pStr[arg_count]->GetBuffer();
+			break;
+
+		case DLL_ARG_DOUBLE:
+		case DLL_ARG_FLOAT:
+			// This currently doesn't validate that this_dyna_param.is_unsigned==false, since it seems
+			// too rare and mostly harmless to worry about something like "Ufloat" having been specified.
+			this_dyna_param.value_double = TokenToDouble(this_param);
+			if (this_dyna_param.type == DLL_ARG_FLOAT)
+				this_dyna_param.value_float = (float)this_dyna_param.value_double;
+			break;
+
+		case DLL_ARG_INVALID:
+			if (aParam[i]->symbol == SYM_VAR)
+				aParam[i]->var->MaybeWarnUninitialized();
+			g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DllImport")); // Stage 2 error: Invalid return type or arg type.
+			return;
+
+		default: // Namely:
+			//case DLL_ARG_INT:
+			//case DLL_ARG_SHORT:
+			//case DLL_ARG_CHAR:
+			//case DLL_ARG_INT64:
+			if (this_dyna_param.is_unsigned && this_dyna_param.type == DLL_ARG_INT64 && !IS_NUMERIC(this_param.symbol))
+				// The above and below also apply to BIF_NumPut(), so maintain them together.
+				// !IS_NUMERIC() is checked because such tokens are already signed values, so should be
+				// written out as signed so that whoever uses them can interpret negatives as large
+				// unsigned values.
+				// Support for unsigned values that are 32 bits wide or less is done via ATOI64() since
+				// it should be able to handle both signed and unsigned values.  However, unsigned 64-bit
+				// values probably require ATOU64(), which will prevent something like -1 from being seen
+				// as the largest unsigned 64-bit int; but more importantly there are some other issues
+				// with unsigned 64-bit numbers: The script internals use 64-bit signed values everywhere,
+				// so unsigned values can only be partially supported for incoming parameters, but probably
+				// not for outgoing parameters (values the function changed) or the return value.  Those
+				// should probably be written back out to the script as negatives so that other parts of
+				// the script, such as expressions, can see them as signed values.  In other words, if the
+				// script somehow gets a 64-bit unsigned value into a variable, and that value is larger
+				// that LLONG_MAX (i.e. too large for ATOI64 to handle), ATOU64() will be able to resolve
+				// it, but any output parameter should be written back out as a negative if it exceeds
+				// LLONG_MAX (return values can be written out as unsigned since the script can specify
+				// signed to avoid this, since they don't need the incoming detection for ATOU()).
+				this_dyna_param.value_int64 = (__int64)ATOU64(TokenToString(this_param)); // Cast should not prevent called function from seeing it as an undamaged unsigned number.
+			else
+				this_dyna_param.value_int64 = TokenToInt64(this_param);
+
+			// Values less than or equal to 32-bits wide always get copied into a single 32-bit value
+			// because they should be right justified within it for insertion onto the call stack.
+			if (this_dyna_param.type != DLL_ARG_INT64) // Shift the 32-bit value into the high-order DWORD of the 64-bit value for later use by DynaCall().
+				this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
+		} // switch (this_dyna_param.type)
+	} // for() each arg.
+
+	////////////////////////
+	// Call the DLL function
+	////////////////////////
+	DWORD exception_occurred; // Must not be named "exception_code" to avoid interfering with MSVC macros.
+	DYNARESULT return_value;  // Doing assignment (below) as separate step avoids compiler warning about "goto end" skipping it.
+#ifdef WIN32_PLATFORM
+	return_value = DynaCall(dll_call_mode, function, dyna_param, arg_count, exception_occurred, NULL, 0);
+#endif
+#ifdef _WIN64
+	return_value = DynaCall(function, dyna_param, arg_count, exception_occurred);
+#endif
+	// The above has also set g_ErrorLevel appropriately.
+
+	if (*Var::sEmptyString)
+	{
+		// v1.0.45.01 Above has detected that a variable of zero capacity was passed to the called function
+		// and the function wrote to it (assuming sEmptyString wasn't already trashed some other way even
+		// before the call).  So patch up the empty string to stabilize a little; but it's too late to
+		// salvage this instance of the program because there's no knowing how much static data adjacent to
+		// sEmptyString has been overwritten and corrupted.
+		*Var::sEmptyString = '\0';
+		// Don't bother with freeing hmodule_to_free since a critical error like this calls for minimal cleanup.
+		// The OS almost certainly frees it upon termination anyway.
+		// Call ScriptErrror() so that the user knows *which* DllCall is at fault:
+		g->InTryBlock = false; // do not throw an exception
+		g_script.ScriptError(_T("This DllCall requires a prior VarSetCapacity. The program is now unstable and will exit."));
+		g_script.ExitApp(EXIT_CRITICAL); // Called this way, it will run the OnExit routine, which is debatable because it could cause more good than harm, but might avoid loss of data if the OnExit routine does something important.
+	}
+
+	// It seems best to have the above take precedence over "exception_occurred" below.
+	if (exception_occurred)
+	{
+		// If the called function generated an exception, I think it's impossible for the return value
+		// to be valid/meaningful since it the function never returned properly.  Confirmation of this
+		// would be good, but in the meantime it seems best to make the return value an empty string as
+		// an indicator that the call failed (in addition to ErrorLevel).
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = _T("");
+		// But continue on to write out any output parameters because the called function might have
+		// had a chance to update them before aborting.
+	}
+	else // The call was successful.  Interpret and store the return value.
+	{
+		// If the return value is passed by address, dereference it here.
+		if (return_attrib->passed_by_address)
+		{
+			return_attrib->passed_by_address = false; // Because the address is about to be dereferenced/resolved.
+
+			switch (return_attrib->type)
+			{
+			case DLL_ARG_INT64:
+			case DLL_ARG_DOUBLE:
+#ifdef _WIN64 // fincs: pointers are 64-bit on x64.
+			case DLL_ARG_WSTR:
+			case DLL_ARG_ASTR:
+#endif
+				// Same as next section but for eight bytes:
+				return_value.Int64 = *(__int64 *)return_value.Pointer;
+				break;
+			default: // Namely:
+				//case DLL_ARG_STR:  // Even strings can be passed by address, which is equivalent to "char **".
+				//case DLL_ARG_INT:
+				//case DLL_ARG_SHORT:
+				//case DLL_ARG_CHAR:
+				//case DLL_ARG_FLOAT:
+				// All the above are stored in four bytes, so a straight dereference will copy the value
+				// over unchanged, even if it's a float.
+				return_value.Int = *(int *)return_value.Pointer;
+			}
+		}
+#ifdef _WIN64
+		else
+		{
+			switch (return_attrib->type)
+			{
+				// Floating-point values are returned via the xmm0 register. Copy it for use in the next section:
+			case DLL_ARG_FLOAT:
+				return_value.Float = read_xmm0_float();
+				break;
+			case DLL_ARG_DOUBLE:
+				return_value.Double = read_xmm0_double();
+				break;
+			}
+		}
+#endif
+
+		switch (return_attrib->type)
+		{
+		case DLL_ARG_INT: // Listed first for performance. If the function has a void return value (formerly DLL_ARG_NONE), the value assigned here is undefined and inconsequential since the script should be designed to ignore it.
+			aResultToken.symbol = SYM_INTEGER;
+			if (return_attrib->is_unsigned)
+				aResultToken.value_int64 = (UINT)return_value.Int; // Preserve unsigned nature upon promotion to signed 64-bit.
+			else // Signed.
+				aResultToken.value_int64 = return_value.Int;
+			break;
+		case DLL_ARG_STR:
+			// The contents of the string returned from the function must not reside in our stack memory since
+			// that will vanish when we return to our caller.  As long as every string that went into the
+			// function isn't on our stack (which is the case), there should be no way for what comes out to be
+			// on the stack either.
+			//aResultToken.symbol = SYM_STRING; // This is the default.
+			aResultToken.marker = (LPTSTR)(return_value.Pointer ? return_value.Pointer : _T(""));
+			// Above: Fix for v1.0.33.01: Don't allow marker to be set to NULL, which prevents crash
+			// with something like the following, which in this case probably happens because the inner
+			// call produces a non-numeric string, which "int" then sees as zero, which CharLower() then
+			// sees as NULL, which causes CharLower to return NULL rather than a real string:
+			//result := DllCall("CharLower", "int", DllCall("CharUpper", "str", MyVar, "str"), "str")
+			break;
+		case DLL_ARG_xSTR:
+		{	// String needing translation: ASTR on Unicode build, WSTR on ANSI build.
+#ifdef UNICODE
+			LPCSTR result = (LPCSTR)return_value.Pointer;
+#else
+			LPCWSTR result = (LPCWSTR)return_value.Pointer;
+#endif
+			if (result && *result)
+			{
+#ifdef UNICODE		// Perform the translation:
+				CStringWCharFromChar result_buf(result);
+#else
+				CStringCharFromWChar result_buf(result);
+#endif
+				// Store the length of the translated string first since DetachBuffer() clears it.
+				aResultToken.marker_length = result_buf.GetLength();
+				// Now attempt to take ownership of the malloc'd memory, to return to our caller.
+				if (aResultToken.mem_to_free = result_buf.DetachBuffer())
+					aResultToken.marker = aResultToken.mem_to_free;
+				//else mem_to_free is NULL, so marker_length should be ignored.  See next comment below.
+			}
+			//else leave aResultToken as it was set at the top of this function: an empty string.
+		}
+			break;
+		case DLL_ARG_SHORT:
+			aResultToken.symbol = SYM_INTEGER;
+			if (return_attrib->is_unsigned)
+				aResultToken.value_int64 = return_value.Int & 0x0000FFFF; // This also forces the value into the unsigned domain of a signed int.
+			else // Signed.
+				aResultToken.value_int64 = (SHORT)(WORD)return_value.Int; // These casts properly preserve negatives.
+			break;
+		case DLL_ARG_CHAR:
+			aResultToken.symbol = SYM_INTEGER;
+			if (return_attrib->is_unsigned)
+				aResultToken.value_int64 = return_value.Int & 0x000000FF; // This also forces the value into the unsigned domain of a signed int.
+			else // Signed.
+				aResultToken.value_int64 = (char)(BYTE)return_value.Int; // These casts properly preserve negatives.
+			break;
+		case DLL_ARG_INT64:
+			// Even for unsigned 64-bit values, it seems best both for simplicity and consistency to write
+			// them back out to the script as signed values because script internals are not currently
+			// equipped to handle unsigned 64-bit values.  This has been documented.
+			aResultToken.symbol = SYM_INTEGER;
+			aResultToken.value_int64 = return_value.Int64;
+			break;
+		case DLL_ARG_FLOAT:
+			aResultToken.symbol = SYM_FLOAT;
+			aResultToken.value_double = return_value.Float;
+			break;
+		case DLL_ARG_DOUBLE:
+			aResultToken.symbol = SYM_FLOAT; // There is no SYM_DOUBLE since all floats are stored as doubles.
+			aResultToken.value_double = return_value.Double;
+			break;
+			//default: // Should never be reached unless there's a bug.
+			//	aResultToken.symbol = SYM_STRING;
+			//	aResultToken.marker = "";
+		} // switch(return_attrib.type)
+	} // Storing the return value when no exception occurred.
+
+	// Store any output parameters back into the input variables.  This allows a function to change the
+	// contents of a variable for the following arg types: String and Pointer to <various number types>.
+
+	for (arg_count = 0, i = 1; i < aParamCount; ++arg_count, i += 2) // Same loop as used above, so maintain them together.
+	{
+		ExprTokenType &this_param = *aParam[arg_count];  // Resolved for performance and convenience.
+		if (this_param.symbol != SYM_VAR) // Output parameters are copied back only if its counterpart parameter is a naked variable.
+		{
+			if (pStr[arg_count]) // We don't need to copy it back, so delete it.
+				delete pStr[arg_count];
+			continue;
+		}
+		DYNAPARM &this_dyna_param = dyna_param[arg_count]; // Resolved for performance and convenience.
+		Var &output_var = *this_param.var;                 //
+		if (this_dyna_param.type == DLL_ARG_STR) // Native string type for current build config.
+		{
+			LPTSTR contents = output_var.Contents(); // Contents() shouldn't update mContents in this case because Contents() was already called for each "str" parameter prior to calling the Dll function.
+			VarSizeType capacity = output_var.Capacity();
+			// Since the performance cost is low, ensure the string is terminated at the limit of its
+			// capacity (helps prevent crashes if DLL function didn't do its job and terminate the string,
+			// or when a function is called that deliberately doesn't terminate the string, such as
+			// RtlMoveMemory()).
+			if (capacity)
+				contents[capacity - 1] = '\0';
+			// The function might have altered Contents(), so update Length().
+			output_var.SetCharLength((VarSizeType)_tcslen(contents));
+			output_var.Close(); // Clear the attributes of the variable to reflect the fact that the contents may have changed.
+			continue;
+		}
+		if (this_dyna_param.type == DLL_ARG_xSTR) // String needing translation: ASTR on Unicode build, WSTR on ANSI build.
+		{
+			pStr[arg_count]->ReleaseBuffer();
+#ifdef UNICODE
+			output_var.AssignStringFromCodePage(
+#else
+			output_var.AssignStringToCodePage(
+#endif
+				pStr[arg_count]->GetString());
+			delete pStr[arg_count];
+			continue;
+		}
+
+		// Since above didn't "continue", this arg wasn't passed as a string.  Of the remaining types, only
+		// those passed by address can possibly be output parameters, so skip the rest:
+		if (!this_dyna_param.passed_by_address)
+			continue;
+
+		switch (this_dyna_param.type)
+		{
+			// case DLL_ARG_STR:  Already handled above.
+		case DLL_ARG_INT:
+			if (this_dyna_param.is_unsigned)
+				output_var.Assign((DWORD)this_dyna_param.value_int);
+			else // Signed.
+				output_var.Assign(this_dyna_param.value_int);
+			break;
+		case DLL_ARG_SHORT:
+			if (this_dyna_param.is_unsigned) // Force omission of the high-order word in case it is non-zero from a parameter that was originally and erroneously larger than a short.
+				output_var.Assign(this_dyna_param.value_int & 0x0000FFFF); // This also forces the value into the unsigned domain of a signed int.
+			else // Signed.
+				output_var.Assign((int)(SHORT)(WORD)this_dyna_param.value_int); // These casts properly preserve negatives.
+			break;
+		case DLL_ARG_CHAR:
+			if (this_dyna_param.is_unsigned) // Force omission of the high-order bits in case it is non-zero from a parameter that was originally and erroneously larger than a char.
+				output_var.Assign(this_dyna_param.value_int & 0x000000FF); // This also forces the value into the unsigned domain of a signed int.
+			else // Signed.
+				output_var.Assign((int)(char)(BYTE)this_dyna_param.value_int); // These casts properly preserve negatives.
+			break;
+		case DLL_ARG_INT64: // Unsigned and signed are both written as signed for the reasons described elsewhere above.
+			output_var.Assign(this_dyna_param.value_int64);
+			break;
+		case DLL_ARG_FLOAT:
+			output_var.Assign(this_dyna_param.value_float);
+			break;
+		case DLL_ARG_DOUBLE:
+			output_var.Assign(this_dyna_param.value_double);
+			break;
+		}
+	}
+}
+/*
+	Func *func = g_script.FindFunc(aResultToken.marker);
 	int *shift_param = (int*)func->mLazyVar;
 	int param_count = func->mLazyVarCount;
 	ExprTokenType **func_param = (ExprTokenType **)func->mStaticVar;
@@ -14155,7 +14494,7 @@ BIF_DECL(BIF_DllImport)
 	}
 	BIF_DllCall(aResult,aResultToken,func_param,param_count);
 }
-
+*/
 BIF_DECL(BIF_DllCall)
 // Stores a number or a SYM_STRING result in aResultToken.
 // Sets ErrorLevel to the error code appropriate to any problem that occurred.

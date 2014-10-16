@@ -1986,7 +1986,58 @@ public:
 	void operator delete[](void *aPtr) {}
 };
 
+#ifdef ENABLE_DLLCALL
 
+#ifdef WIN32_PLATFORM
+// Interface for DynaCall():
+#define  DC_MICROSOFT           0x0000      // Default
+#define  DC_BORLAND             0x0001      // Borland compat
+#define  DC_CALL_CDECL          0x0010      // __cdecl
+#define  DC_CALL_STD            0x0020      // __stdcall
+#define  DC_RETVAL_MATH4        0x0100      // Return value in ST
+#define  DC_RETVAL_MATH8        0x0200      // Return value in ST
+
+#define  DC_CALL_STD_BO         (DC_CALL_STD | DC_BORLAND)
+#define  DC_CALL_STD_MS         (DC_CALL_STD | DC_MICROSOFT)
+#define  DC_CALL_STD_M8         (DC_CALL_STD | DC_RETVAL_MATH8)
+#endif
+union DYNARESULT                // Various result types
+{
+	int     Int;                // Generic four-byte type
+	long    Long;               // Four-byte long
+	void   *Pointer;            // 32-bit pointer
+	float   Float;              // Four byte real
+	double  Double;             // 8-byte real
+	__int64 Int64;              // big int (64-bit)
+	UINT_PTR UIntPtr;
+};
+
+////////////////////////
+// DYNACALL TOKEN //
+////////////////////////
+
+struct DYNAPARM
+{
+	union
+	{
+		int value_int; // Args whose width is less than 32-bit are also put in here because they are right justified within a 32-bit block on the stack.
+		float value_float;
+		__int64 value_int64;
+		UINT_PTR value_uintptr;
+		double value_double;
+		char *astr;
+		wchar_t *wstr;
+		void *ptr;
+	};
+	// Might help reduce struct size to keep other members last and adjacent to each other (due to
+	// 8-byte alignment caused by the presence of double and __int64 members in the union above).
+	DllArgTypes type;
+	bool passed_by_address;
+	bool is_unsigned; // Allows return value and output parameters to be interpreted as unsigned vs. signed.
+};
+
+void ConvertDllArgType(LPTSTR aBuf[], DYNAPARM &aDynaParam);
+#endif
 
 enum FuncParamDefaults {PARAM_DEFAULT_NONE, PARAM_DEFAULT_STR, PARAM_DEFAULT_INT, PARAM_DEFAULT_FLOAT};
 struct FuncParam

@@ -17,10 +17,8 @@ void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar);
 #define FINALIZE_HOTKEYS \
 	if (Hotkey::sHotkeyCount > HotkeyCount)\
 	{\
-		Hotstring::SuspendAll(!g_IsSuspended);\
-		Hotkey::ManifestAllHotkeysHotstringsHooks();\
-		Hotstring::SuspendAll(g_IsSuspended);\
-		Hotkey::ManifestAllHotkeysHotstringsHooks();\
+		Line::ToggleSuspendState();\
+		Line::ToggleSuspendState();\
 	}
 #define RESTORE_IF_EXPR \
 	for (int expr_line_index = aHotExprLineCount ; expr_line_index < g_HotExprLineCount; ++expr_line_index)\
