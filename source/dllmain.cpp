@@ -465,9 +465,11 @@ EXPORT int ahkTerminate(int timeout = 0)
 unsigned __stdcall runScript( void* pArguments )
 {
 	OleInitialize(NULL);
-	int result = OldWinMain(nameHinstanceP.hInstanceP, 0, nameHinstanceP.name, 0);
+	OldWinMain(nameHinstanceP.hInstanceP, 0, nameHinstanceP.name, 0);
 	g_script.~Script();
-	_endthreadex( result );  
+	CloseHandle(hThread);
+	hThread = NULL;
+	_endthreadex( (DWORD)EARLY_RETURN );  
     return 0;
 }
 
@@ -477,14 +479,13 @@ void WaitIsReadyToExecute()
 	 int lpExitCode = 0;
 	 while (!g_script.mIsReadyToExecute && (lpExitCode == 0 || lpExitCode == 259))
 	 {
-		Sleep(10);
-		GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
+		 Sleep(10);
+		 GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
 	 }
 	 if (!g_script.mIsReadyToExecute)
 	 {
-		CloseHandle(hThread);
-		hThread = NULL;
-		SetLastError(lpExitCode);
+		 hThread = NULL;
+		 SetLastError(lpExitCode);
 	 }
 }
 
