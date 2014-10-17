@@ -2844,7 +2844,7 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 		return g_script.ScriptError(ERR_PARAM3_REQUIRED, aBuf);
 
 	// Determine the type of return value.
-	DYNAPARM *return_attrib = (DYNAPARM*)malloc(sizeof(DYNAPARM));
+	DYNAPARM *return_attrib = (DYNAPARM*)SimpleHeap::Malloc(sizeof(DYNAPARM));
 	memset(return_attrib, 0, sizeof(DYNAPARM)); // Init all to default in case ConvertDllArgType() isn't called below. This struct holds the type and other attributes of the function's return value.
 #ifdef WIN32_PLATFORM
 	int dll_call_mode = DC_CALL_STD; // Set default.  Can be overridden to DC_CALL_CDECL and flags can be OR'd into it.
@@ -2893,8 +2893,8 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 
 	// Using stack memory, create an array of dll args large enough to hold the actual number of args present.
 	int arg_count = aParamCount / 2; // Might provide one extra due to first/last params, which is inconsequential.
-	DYNAPARM *dyna_param_def = arg_count ? (DYNAPARM *)malloc(arg_count * sizeof(DYNAPARM)) : NULL;
-	DYNAPARM *dyna_param = arg_count ? (DYNAPARM *)malloc(arg_count * sizeof(DYNAPARM)) : NULL;
+	DYNAPARM *dyna_param_def = arg_count ? (DYNAPARM *)SimpleHeap::Malloc(arg_count * sizeof(DYNAPARM)) : NULL;
+	DYNAPARM *dyna_param = arg_count ? (DYNAPARM *)SimpleHeap::Malloc(arg_count * sizeof(DYNAPARM)) : NULL;
 	// Above: _alloca() has been checked for code-bloat and it doesn't appear to be an issue.
 	// Above: Fix for v1.0.36.07: According to MSDN, on failure, this implementation of _alloca() generates a
 	// stack overflow exception rather than returning a NULL value.  Therefore, NULL is no longer checked,
@@ -2910,7 +2910,7 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 #else
 	CStringW **pStr = (CStringW **)
 #endif
-		malloc(i); // _alloca vs malloc can make a significant difference to performance in some cases.
+		SimpleHeap::Malloc(i); // _alloca vs malloc can make a significant difference to performance in some cases.
 	memset(pStr, 0, i);
 
 	// Above has already ensured that after the first parameter, there are either zero additional parameters
