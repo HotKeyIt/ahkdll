@@ -524,11 +524,9 @@ EXPORT BOOL ahkTerminate(int timeout = 0)
 unsigned __stdcall runScript( void* pArguments )
 {
 	OleInitialize(NULL);
-	OldWinMain(nameHinstanceP.hInstanceP, 0, nameHinstanceP.name, 0);
+	int result = OldWinMain(nameHinstanceP.hInstanceP, 0, nameHinstanceP.name, 0);
 	g_script.Destroy();
-	CloseHandle(hThread);
-	hThread = NULL;
-	_endthreadex( (DWORD)EARLY_RETURN );  
+	_endthreadex( result);  
     return 0;
 }
 
@@ -543,6 +541,7 @@ void WaitIsReadyToExecute()
 	 }
 	 if (!g_script.mIsReadyToExecute)
 	 {
+		 CloseHandle(hThread);
 		 hThread = NULL;
 		 SetLastError(lpExitCode);
 	 }
