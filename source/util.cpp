@@ -2826,6 +2826,7 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 
 	found_func->mBIF = (BuiltInFunctionType)BIF_DllImport;
 	found_func->mIsBuiltIn = true;
+	found_func->mHasReturn = true;
 	found_func->mMinParams = 0;
 
 	TCHAR buf[MAX_PATH];
@@ -3098,7 +3099,7 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 		} // switch (this_dyna_param.type)
 		parm = _tcschr(this_param, ',') + 1;
 	} // for() each arg.
-	if (has_return)
+	if (has_return && aParamCount)
 		*(this_param) = '\0';
 
 	found_func->mClass = (Object*)function;
