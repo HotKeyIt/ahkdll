@@ -4386,5 +4386,5 @@ vk_type sc_to_vk(sc_type aSC)
 	// should be okay even on XP because the left/right specific keys have already
 	// been resolved above so don't need to be looked up here (LWIN and RWIN
 	// each have their own VK's so shouldn't be problem for the below call to resolve):
-	return MapVirtualKey((BYTE)aSC, 1);
+	return MapVirtualKey(LOBYTE(aSC), 1);
 }

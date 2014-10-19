@@ -10197,7 +10197,17 @@ winapi:
 		_tcsncpy(aDest, aDllName, aNameLen);
 		aDest = aDest + aNameLen;
 		_tcsncpy(aDest, found + 1, aFuncNameLength + 1);
-		aDest = aDest + aFuncNameLength + 1;
+		// Override _ in the end of definition (ahk function like SendMessage, Sleep, Send, SendInput ...
+		if (*(aFuncName + aFuncNameLength - 1) == '_')
+		{
+			*(aDest + aFuncNameLength - 1) = ',';
+			*(aDest + aFuncNameLength) = '\0';
+			aDest = aDest + aFuncNameLength;
+		}
+		else
+		{
+			aDest = aDest + aFuncNameLength + 1;
+		}
 		for (found = _tcsstr(found, _T(",")) + 1; *found != L'\\'; found++)
 		{
 			if (*found == L'U' || *found == L'u')
@@ -10244,13 +10254,15 @@ winapi:
 			}
 			else if (*found == L'i' || *found == L'I')
 			{
-				if (*(found + 1) != L'\\')
-				{	// Default Return type int, no need to define
+				if (*(found + 1) != L'\\' || *(aDest - 1) == 'u' || *(aDest - 1) == 'U')
+				{	// Not default return type int, no need to define
 					_tcscpy(aDest, _T("INT"));
 					aDest = aDest + 3;
 				}
 				else // remove last , since no return type is given
+				{
 					aDest--;
+				}
 			}
 			else if (*found == L'h' || *found == L'H')
 			{
