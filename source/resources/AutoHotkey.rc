@@ -244,6 +244,8 @@ END
 /////////////////////////////////////////////////////////////////////////////
 #endif    // not APSTUDIO_INVOKED
 
+WINAPI	RCDATA	".\\source\\resources\\WINAPI.zip"
+
 // AutoHotkey debugging script
 #ifdef _DEBUG
 #ifndef _USRDLL
