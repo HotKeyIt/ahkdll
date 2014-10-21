@@ -18504,7 +18504,23 @@ LPTSTR Line::LogToText(LPTSTR aBuf, int aBufSize) // aBufSize should be an int t
 			if (last_file_index != sLog[line_index]->mFileIndex)
 			{
 				last_file_index = sLog[line_index]->mFileIndex;
+#ifdef _USRDLL
+				// terminate source file if it contains new lines
+				LPTSTR new_line_pos = _tcschr(sSourceFile[last_file_index], '\r');
+				if (!new_line_pos)
+					new_line_pos = _tcschr(sSourceFile[last_file_index], '\n');
+				TCHAR new_line_char = NULL;
+				if (new_line_pos)
+				{
+					new_line_char = *new_line_pos;
+					*new_line_pos = '\0';
+				}
+#endif
 				aBuf += sntprintf(aBuf, BUF_SPACE_REMAINING, _T("---- %s\r\n"), sSourceFile[last_file_index]);
+#ifdef _USRDLL
+				if (new_line_pos)
+					*new_line_pos = new_line_char;
+#endif
 			}
 #endif
 			space_remaining = BUF_SPACE_REMAINING;  // Resolve macro only once for performance.
@@ -18938,7 +18954,23 @@ ResultType Line::LineError(LPCTSTR aErrorText, ResultType aErrorType, LPCTSTR aE
 		// change the error lexer of Scite recognizes this line as a Microsoft error message and it can be
 		// used to jump to that line."
 		#define STD_ERROR_FORMAT _T("%s (%d) : ==> %s\n")
+#ifdef _USRDLL
+		// terminate source file if it contains new lines
+		LPTSTR new_line_pos = _tcschr(Line::sSourceFile[mFileIndex], '\r');
+		if (!new_line_pos)
+			new_line_pos = _tcschr(Line::sSourceFile[mFileIndex], '\n');
+		TCHAR new_line_char = NULL;
+		if (new_line_pos)
+		{
+			new_line_char = *new_line_pos;
+			*new_line_pos = '\0';
+		}
+#endif
 		ERR_PRINT(STD_ERROR_FORMAT, sSourceFile[mFileIndex], mLineNumber, aErrorText); // printf() does not significantly increase the size of the EXE, probably because it shares most of the same code with sprintf(), etc.
+#ifdef _USRDLL
+		if (new_line_pos)
+			*new_line_pos = new_line_char;
+#endif
 		if (*aExtraInfo)
 			ERR_PRINT(_T("     Specifically: %s\n"), aExtraInfo);
 	}
@@ -19036,8 +19068,24 @@ ResultType Script::ScriptError(LPCTSTR aErrorText, LPCTSTR aExtraInfo) //, Resul
 
 	if (g_script.mErrorStdOut && !g_script.mIsReadyToExecute) // i.e. runtime errors are always displayed via dialog.
 	{
+#ifdef _USRDLL
+		// terminate source file if it contains new lines
+		LPTSTR new_line_pos = _tcschr(Line::sSourceFile[mCurrFileIndex], '\r');
+		if (!new_line_pos)
+			new_line_pos = _tcschr(Line::sSourceFile[mCurrFileIndex], '\n');
+		TCHAR new_line_char = NULL;
+		if (new_line_pos)
+		{
+			new_line_char = *new_line_pos;
+			*new_line_pos = '\0';
+		}
+#endif
 		// See LineError() for details.
 		ERR_PRINT(STD_ERROR_FORMAT, Line::sSourceFile[mCurrFileIndex], mCombinedLineNumber, aErrorText);
+#ifdef _USRDLL
+		if (new_line_pos)
+			*new_line_pos = new_line_char;
+#endif
 		if (*aExtraInfo)
 			ERR_PRINT(_T("     Specifically: %s\n"), aExtraInfo);
 	}
@@ -19165,7 +19213,23 @@ void Script::ScriptWarning(WarnMode warnMode, LPCTSTR aWarningText, LPCTSTR aExt
 	int buf_space_remaining = (int)_countof(buf);
 	
 	#define STD_WARNING_FORMAT _T("%s (%d) : ==> Warning: %s\n")
+#ifdef _USRDLL
+	// terminate source file if it contains new lines
+	LPTSTR new_line_pos = _tcschr(Line::sSourceFile[fileIndex], '\r');
+	if (!new_line_pos)
+		new_line_pos = _tcschr(Line::sSourceFile[fileIndex], '\n');
+	TCHAR new_line_char = NULL;
+	if (new_line_pos)
+	{
+		new_line_char = *new_line_pos;
+		*new_line_pos = '\0';
+	}
+#endif
 	cp += sntprintf(cp, buf_space_remaining, STD_WARNING_FORMAT, Line::sSourceFile[fileIndex], lineNumber, aWarningText);
+#ifdef _USRDLL
+	if (new_line_pos)
+		*new_line_pos = new_line_char;
+#endif
 	buf_space_remaining = (int)(_countof(buf) - (cp - buf));
 
 	if (*aExtraInfo)
