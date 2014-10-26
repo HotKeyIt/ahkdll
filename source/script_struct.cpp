@@ -1521,13 +1521,13 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 				{
 					*((unsigned int *)((UINT_PTR)target + field->mOffset)) = (unsigned int)TokenToInt64(*aParam[1]);
 					aResultToken.symbol = SYM_INTEGER;
-					aResultToken.value_int64 = TokenToInt64(*aParam[1]);
+					aResultToken.value_int64 = *((unsigned int *)((UINT_PTR)target + field->mOffset));
 				}
 				else // Float (32-bit).
 				{
 					*((float *)((UINT_PTR)target + field->mOffset)) = (float)TokenToDouble(*aParam[1]);
 					aResultToken.symbol = SYM_FLOAT;
-					aResultToken.value_double = TokenToDouble(*aParam[1]);
+					aResultToken.value_double = *((float *)((UINT_PTR)target + field->mOffset));
 				}
 				break;
 			case 8:
@@ -1544,18 +1544,18 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 				{
 					*((double *)((UINT_PTR)target + field->mOffset)) = TokenToDouble(*aParam[1]);
 					aResultToken.symbol = SYM_FLOAT;
-					aResultToken.value_double = TokenToDouble(*aParam[1]);
+					aResultToken.value_double = *((double *)((UINT_PTR)target + field->mOffset));
 				}
 				break;
 			case 2:
 				*((unsigned short *)((UINT_PTR)target + field->mOffset)) = (unsigned short)TokenToInt64(*aParam[1]);
 				aResultToken.symbol = SYM_INTEGER;
-				aResultToken.value_int64 = TokenToInt64(*aParam[1]);
+				aResultToken.value_int64 = *((unsigned short *)((UINT_PTR)target + field->mOffset));
 				break;
 			default: // size 1
 				*((unsigned char *)((UINT_PTR)target + field->mOffset)) = (unsigned char)TokenToInt64(*aParam[1]);
 				aResultToken.symbol = SYM_INTEGER;
-				aResultToken.value_int64 = TokenToInt64(*aParam[1]);
+				aResultToken.value_int64 = *((unsigned char *)((UINT_PTR)target + field->mOffset));
 			}
 		}
 		if (deletefield) // we created the field from a structure

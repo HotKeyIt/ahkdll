@@ -95,9 +95,7 @@ switch(fwdReason)
 			 if ( lpExitCode == 259 )
 				CloseHandle( hThread );
 		 }
-		 DeleteCriticalSection(&g_CriticalHeapBlocks); // g_CriticalHeapBlocks is used in simpleheap for thread-safety.
-		 DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
-		 DeleteCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
+		 g_script.~Script();
 		 if (scriptstring)
 			 free(scriptstring);
 		 if (Line::sMaxSourceFiles)
@@ -114,6 +112,9 @@ switch(fwdReason)
 			 g_script.ScriptDeleteMenu(g_script.mTrayMenu);
 		 free(g_KeyHistory);
 #endif
+		 DeleteCriticalSection(&g_CriticalHeapBlocks); // g_CriticalHeapBlocks is used in simpleheap for thread-safety.
+		 DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
+		 DeleteCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
 		 break;
 	 }
  case DLL_THREAD_DETACH:

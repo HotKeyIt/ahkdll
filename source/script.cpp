@@ -10216,7 +10216,17 @@ winapi:
 				aDest++;
 				continue;
 			}
-			if (*found == L's' || *found == L'S')
+			else if (*found == L'z' || *found == L'Z')
+			{
+#ifdef _UNICODE
+				_tcscpy(aDest, _T("USHORT"));
+				aDest = aDest + 6;
+#else
+				_tcscpy(aDest, _T("UCHAR"));
+				aDest = aDest + 5;
+#endif
+			}
+			else if (*found == L's' || *found == L'S')
 			{
 				_tcscpy(aDest, _T("STR"));
 				aDest = aDest + 3;
