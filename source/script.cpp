@@ -9348,7 +9348,12 @@ winapi:
 				aDest++;
 				continue;
 			}
-			if (*found == L's' || *found == L'S')
+			else if (*found == L'z' || *found == L'Z')
+			{
+				_tcscpy(aDest, _T("USHORT"));
+				aDest = aDest + 6;
+			}
+			else if (*found == L's' || *found == L'S')
 			{
 				_tcscpy(aDest, _T("STR"));
 				aDest = aDest + 3;

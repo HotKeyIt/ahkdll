@@ -94,6 +94,7 @@ switch(fwdReason)
 			 if ( lpExitCode == 259 )
 				CloseHandle( hThread );
 		 }
+		 g_script.~Script();
 		 if (scriptstring)
 			 free(scriptstring);
 		 if (Line::sMaxSourceFiles)
