@@ -2855,7 +2855,7 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 	{
 		// Check validity of this arg's return type:
 		LPTSTR return_type_string[2];
-		return_type_string[0] = parameter;
+		return_type_string[0] = omit_leading_whitespace(parameter);
 		return_type_string[1] = NULL; // Added in 1.0.48.
 
 		// 64-bit note: The calling convention detection code is preserved here for script compatibility.
@@ -3027,7 +3027,8 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 			if (this_dyna_param.type != DLL_ARG_INT64) // Shift the 32-bit value into the high-order DWORD of the 64-bit value for later use by DynaCall().
 				this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
 		} // switch (this_dyna_param.type)
-		parm = _tcschr(this_param,',') + 1;
+		if ((parm = _tcschr(this_param, ',')))
+			*parm++ = '\0';
 	} // for() each arg.
 	if (has_return && aParamCount)
 		*(this_param) = '\0';
