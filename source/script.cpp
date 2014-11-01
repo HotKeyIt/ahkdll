@@ -10124,7 +10124,7 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 			{
 				naked_filename_length = first_underscore - aFuncName;
 				if (naked_filename_length >= _countof(class_name_buf)) // Class name too long (probably impossible currently).
-					return NULL;
+					goto winapi;
 				tmemcpy(class_name_buf, aFuncName, naked_filename_length);
 				tmemcpy(class_name_buf + naked_filename_length,_T(".ahk"),4);
 				class_name_buf[naked_filename_length + 4] = '\0';
