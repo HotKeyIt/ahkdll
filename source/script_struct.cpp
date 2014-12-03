@@ -247,7 +247,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 				if (thissize > aligntotal)
 					aligntotal = thissize > ptrsize ? ptrsize : thissize;
 			}
-			if (!(field = obj->Insert(keybuf, insert_pos++,ispointer,offset,arraydef,NULL,ispointer ? ptrsize : thissize
+			if (!(field = obj->Insert(keybuf, insert_pos++,ispointer,offset,arraydef,NULL,thissize
 						,ispointer ? true : !tcscasestr(_T(" FLOAT DOUBLE PFLOAT PDOUBLE "),defbuf)
 						,!tcscasestr(_T(" PTR SHORT INT INT64 CHAR VOID HALF_PTR BOOL INT32 LONG LONG32 LONGLONG LONG64 USN INT_PTR LONG_PTR POINTER_64 POINTER_SIGNED SSIZE_T WPARAM __int64 "),defbuf)
 						,tcscasestr(_T(" TCHAR LPTSTR LPCTSTR LPWSTR LPCWSTR WCHAR "),defbuf) ? 1200 : tcscasestr(_T(" CHAR LPSTR LPCSTR LPSTR UCHAR "),defbuf) ? 0 : -1)))
@@ -364,7 +364,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 						aligntotal = ptrsize;
 				}
 				// Insert new field in our structure
-				if (!(field = obj->Insert(keybuf, insert_pos++,ispointer,offset,arraydef,Var1.var,ispointer ? ptrsize : (int)ResultToken.value_int64,1,1,-1)))
+				if (!(field = obj->Insert(keybuf, insert_pos++,ispointer,offset,arraydef,Var1.var,(int)ResultToken.value_int64,1,1,-1)))
 				{	// Out of memory.
 					obj->Release();
 					return NULL;
@@ -800,7 +800,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 				return OK;
 			}
 			// Structure is a reference to variable and not a pointer, get size of structure
-			if (mVarRef && !mIsPointer)
+			if (mVarRef) // && !mIsPointer)
 			{
 				Var2.symbol = SYM_VAR;
 				Var2.var = mVarRef;
@@ -815,12 +815,10 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 				}
 			}
 			// Check if we have an array, if structure is not array and not pointer, assume array
-			if (mArraySize || !mIsPointer) // if not Array and not pointer assume it is an array
-				target = (UINT_PTR*)((UINT_PTR)target + (TokenToInt64(*aParam[0])-1)*(mIsPointer ? ptrsize : (mVarRef ? ResultToken.value_int64 : mSize/(mArraySize ? mArraySize : 1))));
-			else if (mIsPointer) // resolve pointer
-				target = (UINT_PTR*)(*target + (TokenToInt64(*aParam[0])-1)*ptrsize);
-			else // amend target to memory of field
-				target = (UINT_PTR*)((UINT_PTR)target + (TokenToInt64(*aParam[0])-1)*(mVarRef ? ResultToken.value_int64 : mSize));
+			if (mIsPointer) // resolve pointer
+				target = (UINT_PTR*)(*target + (TokenToInt64(*aParam[0]) - 1)*(mIsPointer>1 ? ptrsize : (mVarRef ? ResultToken.value_int64 : mSize / (mArraySize ? mArraySize : 1))));
+			else // amend target to memory of field, if it is not an array and not a pointer assume array
+				target = (UINT_PTR*)((UINT_PTR)target + (TokenToInt64(*aParam[0]) - 1)*(mVarRef ? ResultToken.value_int64 : mSize / (mArraySize ? mArraySize : 1)));
 			
 			// Structure has a variable reference and might be a pointer but not pointer to pointer
 			if (mVarRef && mIsPointer < 2)
@@ -1580,12 +1578,11 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 				target = (UINT_PTR*)*target;
 		}
 		if (field->mIsPointer)
-		{	// field is a pointer we need to return an object
+			
 			if (releaseobj)
 				objclone->Release();
 			objclone = this->CloneField(field,true);
-			objclone->mIsPointer--;
-			objclone->mStructMem = (UINT_PTR*)*((UINT_PTR*)((UINT_PTR)target + field->mOffset));
+			objclone->mStructMem = (UINT_PTR*)((UINT_PTR*)((UINT_PTR)target + field->mOffset));
 			aResultToken.symbol = SYM_OBJECT;
 			aResultToken.object = objclone;
 			return OK;

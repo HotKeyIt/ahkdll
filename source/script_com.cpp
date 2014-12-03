@@ -235,7 +235,7 @@ BIF_DECL(BIF_ComObjActive)
 
 BIF_DECL(BIF_ComObjConnect)
 {
-	_f_set_retval_p(_T(""), 0);
+	//_f_set_retval_p(_T(""), 0);
 
 	if (ComObject *obj = dynamic_cast<ComObject *>(TokenToObject(*aParam[0])))
 	{
