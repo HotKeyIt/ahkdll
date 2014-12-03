@@ -8005,8 +8005,16 @@ ResultType Line::PerformSort(LPTSTR aContents, LPTSTR aOptions)
 	// Terminate the variable's contents.
 	if (trailing_crlf_added_temporarily) // Remove the CRLF only after its presence was used above to simplify the code by reducing the number of types/cases.
 	{
-		dest[-2] = '\0';
-		output_var.ByteLength() -= 2 * sizeof(TCHAR);
+		if (dest[-2] == '\r') // ends with CRLF
+		{
+			dest[-2] = '\0';
+			output_var.ByteLength() -= 2 * sizeof(TCHAR);
+		}
+		else // ens with LF
+		{
+			dest[-1] = '\0';
+			output_var.ByteLength() -= sizeof(TCHAR);
+		}
 	}
 	else
 		*dest = '\0';
