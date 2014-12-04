@@ -46,7 +46,11 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 
 	// definition and field name are same max size as variables
 	// also add enough room to store pointers (**) and arrays [1000]
-	TCHAR defbuf[MAX_VAR_NAME_LENGTH*2 + 40]; // give more room to use local or static variable Function(variable)
+	// give more room to use local or static variable Function(variable)
+	// Parameter passed to IsDefaultType needs to be ' Definition '
+	// this is because spaces are used as delimiters ( see IsDefaultType function )
+	TCHAR defbuf[MAX_VAR_NAME_LENGTH * 2 + 40] = _T(" UInt "); // Set default UInt definition
+
 	TCHAR keybuf[MAX_VAR_NAME_LENGTH + 40];
 
 	// buffer for arraysize + 2 for bracket ] and terminating character
@@ -60,12 +64,6 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 
 	// the new structure object
 	Struct *obj = new Struct();
-
-
-	// Parameter passed to IsDefaultType needs to be ' Definition '
-	// this is because spaces are used as delimiters ( see IsDefaultType function )
-	// So first character will be always a space
-	defbuf[0] = ' ';
 
 	if (TokenToObject(*aParam[0]))
 	{
@@ -182,9 +180,9 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 
 		// Trim trailing spaces
 		rtrim(tempbuf);
-		
+
 		// Pointer
-		if (_tcschr(tempbuf,'*'))
+		if (_tcschr(tempbuf, '*'))
 			ispointer = StrReplace(tempbuf, _T("*"), _T(""), SCS_SENSITIVE, UINT_MAX, LINE_SIZE);
 		
 		// Array
@@ -224,11 +222,14 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			else 
 				keybuf[0] = '\0';
 		}
-		else // Not 'TypeOnly' definition because there are more than one fields in array so use default type UInt
+		else // Not 'TypeOnly' definition because there are more than one fields in array so use previous type
 		{
-			_tcscpy(defbuf,_T(" UInt "));
+			// Commented following line to keep previous definition like in c++, e.g. "Int x,y,Char a,b", 
+			// Note: separator , or ; can be still used but
+			// _tcscpy(defbuf,_T(" UInt "));
 			_tcscpy(keybuf,tempbuf);
 		}
+
 		// Now find size in default types array and create new field
 		// If Type not found, resolve type to variable and get size of struct defined in it
 		if ((thissize = IsDefaultType(defbuf)))
