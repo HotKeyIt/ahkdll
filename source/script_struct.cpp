@@ -178,6 +178,10 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 		// Trim trailing spaces
 		rtrim(tempbuf);
 		
+		// Pointer
+		if (_tcschr(tempbuf,'*'))
+			ispointer = StrReplace(tempbuf, _T("*"), _T(""), SCS_SENSITIVE, UINT_MAX, LINE_SIZE);
+		
 		// Array
 		if (_tcschr(tempbuf,'['))
 		{
@@ -222,13 +226,6 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			// _tcscpy(defbuf,_T(" UInt "));
 			_tcscpy(keybuf,tempbuf);
 		}
-
-		// Pointer
-		if (_tcschr(defbuf, '*'))
-			ispointer += StrReplace(defbuf, _T("*"), _T(""), SCS_SENSITIVE, UINT_MAX, LINE_SIZE);
-		if (_tcschr(keybuf, '*'))
-			ispointer += StrReplace(keybuf, _T("*"), _T(""), SCS_SENSITIVE, UINT_MAX, LINE_SIZE);
-
 		// Now find size in default types array and create new field
 		// If Type not found, resolve type to variable and get size of struct defined in it
 		if ((thissize = IsDefaultType(defbuf)))
@@ -1581,7 +1578,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 				target = (UINT_PTR*)*target;
 		}
 		if (field->mIsPointer)
-		{	// field is a pointer we need to return an object	
+			
 			if (releaseobj)
 				objclone->Release();
 			objclone = this->CloneField(field,true);
