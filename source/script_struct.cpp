@@ -219,13 +219,14 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			else 
 				keybuf[0] = '\0';
 		}
-		else // Not 'TypeOnly' definition because there are more than one fields in structure so use default type UInt
+		else // Not 'TypeOnly' definition because there are more than one fields in structure so use previous type
 		{
 			// Commented following line to keep previous definition like in c++, e.g. "Int x,y,Char a,b", 
 			// Note: separator , or ; can be still used but
 			// _tcscpy(defbuf,_T(" UInt "));
 			_tcscpy(keybuf,tempbuf);
 		}
+
 		// Now find size in default types array and create new field
 		// If Type not found, resolve type to variable and get size of struct defined in it
 		if ((thissize = IsDefaultType(defbuf)))
@@ -358,6 +359,13 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 				} 
 				else
 				{
+					param[1]->value_int64 = (__int64)0;
+					BIF_sizeof(ResultToken,param,1);
+					if (ResultToken.symbol != SYM_INTEGER)
+					{	// could not resolve structure
+						obj->Release();
+						return NULL;
+					}
 					if (offset % ptrsize)
 						offset += (ptrsize - (offset % ptrsize)) * (arraydef ? arraydef : 1);
 					if (ptrsize > aligntotal)
@@ -1288,6 +1296,8 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 	{	// field was not found
 		if (releaseobj)
 			objclone->Release();
+		// The structure doesn't handle this method/property.
+		_o_throw(ERR_NO_MEMBER, aParamCount && *TokenToString(*aParam[0]) ? TokenToString(*aParam[0]) : g->ExcptDeref ? g->ExcptDeref->marker : _T(""));
 		return INVOKE_NOT_HANDLED;
 	}
 
@@ -1578,7 +1588,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 				target = (UINT_PTR*)*target;
 		}
 		if (field->mIsPointer)
-			
+		{	// field is a pointer we need to return an object	
 			if (releaseobj)
 				objclone->Release();
 			objclone = this->CloneField(field,true);
@@ -1683,6 +1693,8 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 	}
 	if (releaseobj)
 		objclone->Release();
+	// The structure doesn't handle this method/property.
+	_o_throw(ERR_NO_MEMBER, aParamCount && *TokenToString(*aParam[0]) ? TokenToString(*aParam[0]) : g->ExcptDeref ? g->ExcptDeref->marker : _T(""));
 	return INVOKE_NOT_HANDLED;
 }
 
