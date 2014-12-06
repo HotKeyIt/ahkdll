@@ -365,6 +365,13 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 				} 
 				else
 				{
+					param[1]->value_int64 = (__int64)0;
+					BIF_sizeof(Result,ResultToken, param, 1);
+					if (ResultToken.symbol != SYM_INTEGER)
+					{	// could not resolve structure
+						obj->Release();
+						return NULL;
+					}
 					if (offset % ptrsize)
 						offset += (ptrsize - (offset % ptrsize)) * (arraydef ? arraydef : 1);
 					if (ptrsize > aligntotal)
