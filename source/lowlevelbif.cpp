@@ -42,7 +42,10 @@ BIF_DECL(BIF_Getvar)
 				aResultToken.value_int64 = (__int64)g_script.FindOrAddVar(aParam[0]->marker);
 			break;
 		case SYM_VAR:
-			aResultToken.value_int64 = (__int64)aParam[0]->var;
+			if (aParam[0]->var->mType == VAR_ALIAS)
+				aResultToken.value_int64 = (__int64)aParam[0]->var->mAliasFor;
+			else
+				aResultToken.value_int64 = (__int64)aParam[0]->var;
 			break;
 		default:
 			aResultToken.value_int64 = 0;

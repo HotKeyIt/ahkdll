@@ -11474,6 +11474,20 @@ VarSizeType BIV_IsDll(LPTSTR aBuf, LPTSTR aVarName)
 	return 1;
 }
 
+VarSizeType BIV_IsMini(LPTSTR aBuf, LPTSTR aVarName)
+{
+	if (aBuf)
+	{
+#ifdef MINIDLL
+		*aBuf++ = '1';
+#else
+		*aBuf++ = '0';
+#endif
+		*aBuf = '\0';
+	}
+	return 1;
+}
+
 
 VarSizeType BIV_CoordMode(LPTSTR aBuf, LPTSTR aVarName)
 {
