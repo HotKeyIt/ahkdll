@@ -10496,6 +10496,7 @@ BuiltInVarType Script::GetVarType_BIV(LPTSTR lowercase, BuiltInVarSetType &sette
 	if (!_tcscmp(lower, _T("modulehandle"))) return BIV_ModuleHandle;
 	if (!_tcscmp(lower, _T("memorymodule"))) return BIV_MemoryModule;
 	if (!_tcscmp(lower, _T("isdll"))) return BIV_IsDll;
+	if (!_tcscmp(lower, _T("ismini"))) return BIV_IsMini;
 	if (!_tcsncmp(lower, _T("coordmode"), 9)) { setter = BIV_CoordMode_Set; return BIV_CoordMode; }
 
 	if (!_tcscmp(lower, _T("eventinfo"))) { setter = BIV_EventInfo_Set; return BIV_EventInfo; } // It's called "EventInfo" vs. "GuiEventInfo" because it applies to non-Gui events such as RegisterCallback().

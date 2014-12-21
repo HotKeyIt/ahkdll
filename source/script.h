@@ -2896,6 +2896,7 @@ BIV_DECL_R (BIV_ScriptStruct);
 BIV_DECL_R (BIV_ModuleHandle);
 BIV_DECL_R (BIV_MemoryModule);
 BIV_DECL_R (BIV_IsDll);
+BIV_DECL_R (BIV_IsMini);
 BIV_DECL_RW(BIV_CoordMode);
 #ifndef MINIDLL
 BIV_DECL_R (BIV_IconHidden);
