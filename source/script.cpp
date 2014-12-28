@@ -88,6 +88,7 @@ FuncEntry g_BIF[] =
 	BIF1(StrSplit, 1, 3, true),
 	BIFn(RegExMatch, 2, 4, true, BIF_RegEx, { 3 }),
 	BIFn(RegExReplace, 2, 6, true, BIF_RegEx, { 4 }),
+	BIF1(Format, 1, NA, true),
 
 	BIF1(GetKeyState, 1, 2, true),
 	BIFn(GetKeyName, 1, 1, true, BIF_GetKeyName),
@@ -132,7 +133,7 @@ FuncEntry g_BIF[] =
 	BIF1(Type, 1, 1, true),
 	BIF1(IsObject, 1, NA, true),
 	// AHK_H Functions
-	BIF1(Getvar, 1, 1, true),
+	BIF1(Getvar, 1, 2, true),
 	BIF1(Alias, 1, 2, false),
 	BIF1(UnZipRawMemory, 1, 3, true),
 	BIF1(CacheEnable, 1, 1, true),
@@ -756,9 +757,7 @@ Script::~Script() // Destructor.
 	g_Warn_UseUnsetLocal = WARNMODE_OFF;
 	g_Warn_UseUnsetGlobal = WARNMODE_OFF;
 	g_Warn_LocalSameAsGlobal = WARNMODE_OFF;
-#ifndef MINIDLL
 	g_AllowOnlyOneInstance = SINGLE_INSTANCE_PROMPT;
-#endif
 	g_AllowInterruption = TRUE;         //
 	// g_MaxVarCapacity is used to prevent a buggy script from consuming all available system RAM. It is defined = 
 #ifndef MINIDLL
@@ -917,6 +916,12 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 	else if (!GetFullPathName(aScriptFilename, _countof(buf), buf, NULL)) // This is also relied upon by mIncludeLibraryFunctionsThenExit.  Succeeds even on nonexistent files.
 		return FAIL; // Due to rarity, no error msg, just abort.
 #endif
+	if (g_RunStdIn = (*aScriptFilename == '*' && !aScriptFilename[1])) // v1.1.17: Read script from stdin.
+	{
+		// Seems best to disable #SingleInstance for stdin scripts.
+		g_AllowOnlyOneInstance = SINGLE_INSTANCE_OFF;
+	}
+	else // i.e. don't call the following function for stdin.
 	// Using the correct case not only makes it look better in title bar & tray tool tip,
 	// it also helps with the detection of "this script already running" since otherwise
 	// it might not find the dupe if the same script name is launched with different
@@ -1843,7 +1848,7 @@ UINT Script::LoadFromFile(bool aScriptWasNotspecified)
 	mIsReadyToExecute = mAutoExecSectionIsRunning = false;
 	if (!mFileSpec || !*mFileSpec) return LOADING_FAILED;
 #ifndef AUTOHOTKEYSC  // When not in stand-alone mode, read an external script file.
-	DWORD attr = GetFileAttributes(mFileSpec);
+	DWORD attr = g_RunStdIn ? 0 : GetFileAttributes(mFileSpec); // v1.1.17: Don't check if reading script from stdin.
 	if (attr == MAXDWORD && !g_hResource) // File does not exist or lacking the authorization to get its attributes.
 	{
 #ifdef MINIDLL
@@ -1886,7 +1891,7 @@ UINT Script::LoadFromFile(bool aScriptWasNotspecified)
 			_T("; and it launches a new Notepad window (or activates an existing one).  To\n")
 			_T("; try out these hotkeys, run AutoHotkey again, which will load this file.\n")
 			_T("\n")
-			_T("#z::Run www.autohotkey.com\n")
+_T("#z::Run http://ahkscript.org\n")
 			_T("\n")
 			_T("^!n::\n")
 			_T("If WinExist(\"Untitled - Notepad\")\n")
@@ -1932,7 +1937,7 @@ UINT Script::LoadFromFile(bool aScriptWasNotspecified)
 	// function library auto-inclusions to be processed correctly.
 
 	// Load the main script file.  This will also load any files it includes with #Include.
-	if (LoadIncludedFile(mFileSpec, false, false) != OK
+	if (   LoadIncludedFile(g_RunStdIn ? _T("*") : mFileSpec, false, false) != OK
 		|| !AddLine(ACT_EXIT)) // Fix for v1.0.47.04: Add an Exit because otherwise, a script that ends in an IF-statement will crash in PreparseBlocks() because PreparseBlocks() expects every IF-statements mNextLine to be non-NULL (helps loading performance too).
 		return LOADING_FAILED;
 
@@ -8876,7 +8881,14 @@ ResultType Script::DefineClassVars(LPTSTR aBuf, bool aStatic)
 			mCurrLine = NULL; // Fix for v1.1.09.02: Leaving this non-NULL at best causes error messages to show irrelevant vicinity lines, and at worst causes a crash because the linked list is in an inconsistent state.
 		}
 
-		if (!ParseAndAddLine(buf, ACT_EXPRESSION))
+		TCHAR literal_map[LINE_SIZE];
+		ZeroMemory(literal_map, sizeof(literal_map));  // Must be fully zeroed for this purpose.
+		LPTSTR arg[] = { ConvertEscapeSequences(buf, literal_map) };
+		LPTSTR arg_map[] = { literal_map };
+		// UCHAR_MAX signals AddLine to avoid pointing any pending labels or functions at the new line.
+		// Otherwise, ParseAndAddLine could be used like in the section below to optimize simple
+		// assignments, but that would be nearly pointless for static initializers anyway:
+		if (!AddLine(ACT_EXPRESSION, arg, UCHAR_MAX + 1, arg_map)) 
 			return FAIL; // Above already displayed the error.
 
 		if (aStatic)

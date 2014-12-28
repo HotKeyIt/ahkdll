@@ -9,7 +9,7 @@ VARIANT variant_to_return_dll;
 // ExprTokenType aResultToken_to_return ;  // for ahkPostFunction
 FuncAndToken aFuncAndTokenToReturn[10] ;    // for ahkPostFunction
 int returnCount = -1 ;
-void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar);
+void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar, BOOL aVarIsArg);
 
 // Following macros are used in addFile addScript ahkExec
 #ifndef MINIDLL
@@ -922,7 +922,7 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 			// free all variables in case memory was allocated
 			for (int i = 0;i < aParamsCount;i++)
 				aParam[i]->var->Free();
-			TokenToVariant(aResultToken, variant_to_return_dll);
+			TokenToVariant(aResultToken, variant_to_return_dll, FALSE);
 			LeaveCriticalSection(&g_CriticalAhkFunction);
 			return variant_to_return_dll;
 		}
@@ -997,7 +997,7 @@ void callFuncDllVariant(FuncAndToken *aFuncAndToken)
 	// ExprTokenType aResultToken;
 	// ExprTokenType &aResultToken = aResultToken_to_return ;
 	func.Call(&aResultToken); // Call the UDF.
-	TokenToVariant(aResultToken, aFuncAndToken->variant_to_return_dll);
+	TokenToVariant(aResultToken, aFuncAndToken->variant_to_return_dll, FALSE);
 
 	DEBUGGER_STACK_POP()
 	

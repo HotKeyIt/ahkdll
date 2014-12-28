@@ -743,7 +743,7 @@ HRESULT __stdcall CoCOMServer::ahkFindLabel(/*in*/VARIANT aLabelName,/*out*/UINT
 	return S_OK;
 }
 
-void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar);
+void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar, BOOL aVarIsArg);
 
 HRESULT __stdcall CoCOMServer::ahkgetvar(/*in*/VARIANT name,/*[in,optional]*/ VARIANT getVar,/*out*/VARIANT *result)
 {
@@ -760,7 +760,7 @@ HRESULT __stdcall CoCOMServer::ahkgetvar(/*in*/VARIANT name,/*[in,optional]*/ VA
     VariantInit(result);
    // CComVariant b ;
 	VARIANT b ; 
-	TokenToVariant(aToken, b);
+	TokenToVariant(aToken, b, FALSE);
 	return VariantCopy(result, &b) ;
 	// return S_OK ;
 	// return b.Detach(result);
