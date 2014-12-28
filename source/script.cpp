@@ -625,7 +625,7 @@ void Script::Destroy()
 	g_Warn_UseUnsetGlobal  =  WARNMODE_OFF;
 	g_Warn_UseEnv  =  WARNMODE_OFF;
 	g_Warn_LocalSameAsGlobal  =  WARNMODE_OFF;
-#ifndef MINIDLL
+#ifndef _USRDLL
 	g_AllowOnlyOneInstance  =  ALLOW_MULTI_INSTANCE;
 #endif
 	g_persistent  =  false;  // Whether the script should stay running even after the auto-exec section finishes.
@@ -776,6 +776,15 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 	else if (!GetFullPathName(aScriptFilename, _countof(buf), buf, NULL)) // This is also relied upon by mIncludeLibraryFunctionsThenExit.  Succeeds even on nonexistent files.
 		return FAIL; // Due to rarity, no error msg, just abort.
 #endif
+	if (g_RunStdIn = (*aScriptFilename == '*' && !aScriptFilename[1])) // v1.1.17: Read script from stdin.
+	{
+#ifndef _USRDLL
+		// Seems best to disable #SingleInstance and enable #NoEnv for stdin scripts.
+		g_AllowOnlyOneInstance = SINGLE_INSTANCE_OFF;
+#endif
+		g_NoEnv = true;
+	}
+	else // i.e. don't call the following function for stdin.
 	// Using the correct case not only makes it look better in title bar & tray tool tip,
 	// it also helps with the detection of "this script already running" since otherwise
 	// it might not find the dupe if the same script name is launched with different
@@ -1657,7 +1666,7 @@ UINT Script::LoadFromFile(bool aScriptWasNotspecified, bool aCheckIfExpr)
 	if (!mFileSpec || !*mFileSpec) return LOADING_FAILED;
 
 #ifndef AUTOHOTKEYSC  // When not in stand-alone mode, read an external script file.
-	DWORD attr = GetFileAttributes(mFileSpec);
+	DWORD attr = g_RunStdIn ? 0 : GetFileAttributes(mFileSpec); // v1.1.17: Don't check if reading script from stdin.
 	if (attr == MAXDWORD && !g_hResource) // File does not exist or lacking the authorization to get its attributes.
 	{
 #ifdef MINIDLL
@@ -1700,7 +1709,7 @@ _T("; launches a web site in the default browser.  The second is Control+Alt+N\n
 _T("; and it launches a new Notepad window (or activates an existing one).  To\n")
 _T("; try out these hotkeys, run AutoHotkey again, which will load this file.\n")
 _T("\n")
-_T("#z::Run www.autohotkey.com\n")
+_T("#z::Run http://ahkscript.org\n")
 _T("\n")
 _T("^!n::\n")
 _T("IfWinExist Untitled - Notepad\n")
@@ -1746,7 +1755,7 @@ _T("; keystrokes and mouse clicks.  It also explains more about hotkeys.\n")
 	// function library auto-inclusions to be processed correctly.
 
 	// Load the main script file.  This will also load any files it includes with #Include.
-	if (   LoadIncludedFile(mFileSpec, false, false) != OK
+	if (   LoadIncludedFile(g_RunStdIn ? _T("*") : mFileSpec, false, false) != OK
 		|| !AddLine(ACT_EXIT)) // Fix for v1.0.47.04: Add an Exit because otherwise, a script that ends in an IF-statement will crash in PreparseBlocks() because PreparseBlocks() expects every IF-statements mNextLine to be non-NULL (helps loading performance too).
 		return LOADING_FAILED;
 
@@ -5109,7 +5118,7 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 	}
 	if (IS_DIRECTIVE_MATCH(_T("#SingleInstance")))
 	{
-#ifndef MINIDLL
+#ifndef _USRDLL
 		g_AllowOnlyOneInstance = SINGLE_INSTANCE_PROMPT; // Set default.
 		if (parameter)
 		{
@@ -9742,7 +9751,8 @@ ResultType Script::DefineClassVars(LPTSTR aBuf, bool aStatic)
 			mCurrLine = NULL; // Fix for v1.1.09.02: Leaving this non-NULL at best causes error messages to show irrelevant vicinity lines, and at worst causes a crash because the linked list is in an inconsistent state.
 		}
 
-		if (!ParseAndAddLine(buf, ACT_EXPRESSION))
+		LPTSTR arg[] = { ConvertEscapeSequences(buf, g_EscapeChar, false) };
+		if (!AddLine(ACT_EXPRESSION, arg, UCHAR_MAX + 1)) // v1.1.17: Avoid pointing labels at this line by passing UCHAR_MAX+ for aArgc.
 			return FAIL; // Above already displayed the error.
 		
 		if (aStatic)
@@ -10600,7 +10610,7 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 	{
 		bif = BIF_Getvar;
 		min_params = 1;
-		max_params = 1;
+		max_params = 2;
 	}
 	else if (!_tcsicmp(func_name, _T("Trim")) || !_tcsicmp(func_name, _T("LTrim")) || !_tcsicmp(func_name, _T("RTrim"))) // L31
 	{
@@ -10649,6 +10659,11 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		bif = BIF_Asc;
 	else if (!_tcsicmp(func_name, _T("Chr")))
 		bif = BIF_Chr;
+	else if (!_tcsicmp(func_name, _T("Format")))
+	{
+		bif = BIF_Format;
+		max_params = 10000; // An arbitrarily high limit that will never realistically be reached.
+	}
 	else if (!_tcsicmp(func_name, _T("StrGet")))
 	{
 		bif = BIF_StrGetPut;

@@ -338,9 +338,9 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	// SingleInstance such as SINGLE_INSTANCE_REPLACE and SINGLE_INSTANCE_IGNORE, persistent scripts
 	// and those that contain hotkeys/hotstrings are automatically SINGLE_INSTANCE_PROMPT as of v1.0.16:
 #ifndef MINIDLL
+/*
 	if (g_AllowOnlyOneInstance == ALLOW_MULTI_INSTANCE)
 		g_AllowOnlyOneInstance = SINGLE_INSTANCE_PROMPT;
-/*
 	HWND w_existing = NULL;
 	UserMessages reason_to_close_prior = (UserMessages)0;
 	if (g_AllowOnlyOneInstance && g_AllowOnlyOneInstance != SINGLE_INSTANCE_OFF && !restart_mode && !g_ForceLaunch)
@@ -806,7 +806,7 @@ HRESULT __stdcall CoCOMServer::ahkFindLabel(/*in*/VARIANT aLabelName,/*out*/UINT
 	return S_OK;
 }
 
-void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar);
+void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar, BOOL aVarIsArg);
 
 HRESULT __stdcall CoCOMServer::ahkgetvar(/*in*/VARIANT name,/*[in,optional]*/ VARIANT getVar,/*out*/VARIANT *result)
 {
@@ -823,7 +823,7 @@ HRESULT __stdcall CoCOMServer::ahkgetvar(/*in*/VARIANT name,/*[in,optional]*/ VA
     VariantInit(result);
    // CComVariant b ;
 	VARIANT b ; 
-	TokenToVariant(aToken, b);
+	TokenToVariant(aToken, b, FALSE);
 	return VariantCopy(result, &b) ;
 	// return S_OK ;
 	// return b.Detach(result);
