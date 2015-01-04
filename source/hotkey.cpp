@@ -899,7 +899,7 @@ void Hotkey::PerformInNewThreadMadeByCaller(HotkeyVariant &aVariant)
 		Unregister(); // This takes care of other details for us.
 	++aVariant.mExistingThreads;  // This is the thread count for this particular hotkey only.
 	ResultType result;
-	DEBUGGER_STACK_PUSH(aVariant.mJumpToLabel->mJumpToLine, g_script.mThisHotkeyName)
+	DEBUGGER_STACK_PUSH(g_script.mThisHotkeyName)
 	result = aVariant.mJumpToLabel->Execute();
 	DEBUGGER_STACK_POP()
 	--aVariant.mExistingThreads;
@@ -1083,6 +1083,20 @@ ResultType Hotkey::Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOption
 				// their interdependencies, will be re-initialized correctly.
 				update_all_hotkeys = true;
 			}
+			
+			// v1.1.15: Allow the ~tilde prefix to be added/removed from an existing hotkey variant.
+			// v1.1.19: Apply this change even if aJumpToLabel is omitted.
+			if (variant->mNoSuppress = suffix_has_tilde)
+				hk->mNoSuppress |= AT_LEAST_ONE_VARIANT_HAS_TILDE;
+			else
+				hk->mNoSuppress |= AT_LEAST_ONE_VARIANT_LACKS_TILDE;
+			// v1.1.19: Allow the $UseHook prefix to be added to an existing hotkey.
+			if (!hk->mKeybdHookMandatory && (variant->mNoSuppress || hook_is_mandatory))
+			{
+				update_all_hotkeys = true; // Since it may be switching from reg to k-hook.
+				hk->mKeybdHookMandatory = true; // See Hotkey::AddVariant() for comments.
+			}
+
 			// If the above changed the action from an Alt-tab type to non-alt-tab, there may be a label present
 			// to be applied to the existing variant (or created as a new variant).
 			if (aJumpToLabel) // COMMAND (update hotkey): Hotkey, Name, LabelName [, Options]
@@ -1107,18 +1121,6 @@ ResultType Hotkey::Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOption
 						// never change; it will always contain the true name of this hotkey, namely its
 						// keystroke+modifiers (e.g. ^!c).
 					}
-					// v1.1.15: Allow the ~tilde prefix to be added/removed from an existing hotkey variant.
-					if (variant->mNoSuppress = suffix_has_tilde)
-					{
-						hk->mNoSuppress |= AT_LEAST_ONE_VARIANT_HAS_TILDE;
-						if (!hk->mKeybdHookMandatory)
-						{
-							update_all_hotkeys = true; // Since it may be switching from reg to k-hook.
-							hk->mKeybdHookMandatory = true; // See Hotkey::AddVariant() for comments.
-						}
-					}
-					else
-						hk->mNoSuppress |= AT_LEAST_ONE_VARIANT_LACKS_TILDE;
 				}
 				else // No existing variant matching current #IfWin criteria, so create a new variant.
 				{
@@ -2415,7 +2417,7 @@ ResultType Hotstring::PerformInNewThreadMadeByCaller()
 	g_script.mThisHotkeyModifiersLR = 0;
 	++mExistingThreads;  // This is the thread count for this particular hotstring only.
 	ResultType result;
-	DEBUGGER_STACK_PUSH(mJumpToLabel->mJumpToLine, g_script.mThisHotkeyName)
+	DEBUGGER_STACK_PUSH(g_script.mThisHotkeyName)
 	result = mJumpToLabel->Execute();
 	DEBUGGER_STACK_POP()
 	--mExistingThreads;

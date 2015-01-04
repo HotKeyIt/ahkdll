@@ -808,7 +808,7 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 	g_script.mLastScriptRest = g_script.mLastPeekTime = GetTickCount();
 
 
-		DEBUGGER_STACK_PUSH(func.mJumpToLine, func.mName)
+	DEBUGGER_STACK_PUSH(&func)
 	ResultType aResult;
 	FuncCallData func_call;
 	// ExprTokenType &aResultToken = aResultToken_to_return ;
@@ -1031,7 +1031,7 @@ void callFuncDllVariant(FuncAndToken *aFuncAndToken)
 	g_script.mLastScriptRest = g_script.mLastPeekTime = GetTickCount();
 
 
-		DEBUGGER_STACK_PUSH(func.mJumpToLine, func.mName)
+	DEBUGGER_STACK_PUSH(&func)
 	// ExprTokenType aResultToken;
 	// ExprTokenType &aResultToken = aResultToken_to_return ;
 	func.Call(&aResultToken); // Call the UDF.
