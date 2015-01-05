@@ -53,11 +53,11 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	bool restart_mode = false;
 
 #ifndef AUTOHOTKEYSC
-	//#ifdef _DEBUG				// HotKeyIt, debugger will launch AutoHotkey.ahk as normal AutoHotkey.exe does
-	//	TCHAR *script_filespec = _T("Test\\Test.ahk");
-	//#else
+	#ifdef _DEBUG				// HotKeyIt, debugger will launch AutoHotkey.ahk as normal AutoHotkey.exe does
+		TCHAR *script_filespec = _T("Test\\Test.ahk");
+	#else
 		TCHAR *script_filespec = NULL; // Set default as "unspecified/omitted".
-	//#endif
+	#endif
 #endif
 
 	// The problem of some command line parameters such as /r being "reserved" is a design flaw (one that

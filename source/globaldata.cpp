@@ -35,7 +35,7 @@ bool g_Loading = false;
 #endif
 HINSTANCE g_hInstance = NULL; // Set by WinMain().
 HMODULE g_hMemoryModule = NULL; // Set by DllMain() used for COM 
-DWORD g_MainThreadID = GetCurrentThreadId();
+EXPORT DWORD g_MainThreadID = GetCurrentThreadId();
 DWORD g_HookThreadID; // Not initialized by design because 0 itself might be a valid thread ID.
 ATOM g_ClassRegistered = 0;
 CRITICAL_SECTION g_CriticalRegExCache;
@@ -107,7 +107,7 @@ bool g_SoundWasPlayed = false;
 bool g_IsSuspended = false;  // Make this separate from g_AllowInterruption since that is frequently turned off & on.
 #endif
 bool g_DeferMessagesForUnderlyingPump = false;
-BOOL g_AllowInterruption = TRUE;  // BOOL vs. bool might improve performance a little for frequently-accessed variables.
+EXPORT BOOL g_AllowInterruption = TRUE;  // BOOL vs. bool might improve performance a little for frequently-accessed variables.
 int g_nLayersNeedingTimer = 0;
 int g_nThreads = 0;
 int g_nPausedThreads = 0;

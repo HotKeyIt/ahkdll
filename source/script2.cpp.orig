@@ -8092,8 +8092,7 @@ ResultType Line::WriteClipboardToFile(LPTSTR aFilespec, Var *aBinaryClipVar)
 	g->LastError = GetLastError(); // Always done, for simplicity.  Must be called before CloseHandle().
 	if (hfile != INVALID_HANDLE_VALUE)
 		CloseHandle(hfile); // Close file.
-	if (!aBinaryClipVar)
-		free(data); // Free ClipboardAll data.  Can be NULL.
+	free(data); // Free ClipboardAll data.  Can be NULL.
 
 	return SetErrorLevelOrThrowBool(!success); // Set ErrorLevel based on result.
 }
@@ -9529,12 +9528,6 @@ VarSizeType BIV_LastError(LPTSTR aBuf, LPTSTR aVarName)
 	return (VarSizeType)_tcslen(target_buf);
 }
 
-BIV_DECL_W(BIV_LastError_Set)
-{
-	SetLastError(g->LastError = ATOU(aBuf));
-	return OK;
-}
-
 VarSizeType BIV_GlobalStruct(LPTSTR aBuf, LPTSTR aVarName)
 {
 	return aBuf
@@ -9542,6 +9535,11 @@ VarSizeType BIV_GlobalStruct(LPTSTR aBuf, LPTSTR aVarName)
 		: MAX_INTEGER_LENGTH;
 }
 
+BIV_DECL_W(BIV_LastError_Set)
+{
+	SetLastError(g->LastError = ATOU(aBuf));
+	return OK;
+}
 
 
 VarSizeType BIV_ScriptStruct(LPTSTR aBuf, LPTSTR aVarName)
@@ -9571,11 +9569,7 @@ VarSizeType BIV_IsDll(LPTSTR aBuf, LPTSTR aVarName)
 {
 	if (aBuf)
 	{
-#ifdef _USRDLL
-		*aBuf++ = '1';
-#else
-		*aBuf++ = '0';
-#endif
+		*aBuf++ = (g_hInstance == GetModuleHandle(NULL)) ? '0' : '1';
 		*aBuf = '\0';
 	}
 	return 1;
@@ -9595,6 +9589,8 @@ VarSizeType BIV_IsMini(LPTSTR aBuf, LPTSTR aVarName)
 	}
 	return 1;
 }
+
+
 
 VarSizeType BIV_CoordMode(LPTSTR aBuf, LPTSTR aVarName)
 {

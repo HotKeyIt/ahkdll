@@ -2,8 +2,6 @@
 #ifndef exports_h
 #define exports_h
 
-#define EXPORT extern "C" __declspec(dllexport)
-
 EXPORT int ahkPause(LPTSTR aChangeTo);
 EXPORT UINT_PTR ahkFindLabel(LPTSTR aLabelName);
 EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar = 0);

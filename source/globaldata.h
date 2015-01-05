@@ -31,7 +31,7 @@ extern bool g_Loading;
 #endif
 extern HINSTANCE g_hInstance;
 extern HMODULE g_hMemoryModule;
-extern DWORD g_MainThreadID;
+EXPORT extern DWORD g_MainThreadID;
 extern DWORD g_HookThreadID;
 extern ATOM g_ClassRegistered;
 extern CRITICAL_SECTION g_CriticalRegExCache;
@@ -105,7 +105,7 @@ extern bool g_SoundWasPlayed;
 #ifndef MINIDLL
 extern bool g_IsSuspended;
 #endif
-extern BOOL g_AllowInterruption;
+EXPORT extern BOOL g_AllowInterruption;
 extern int g_nLayersNeedingTimer;
 extern int g_nThreads;
 extern int g_nPausedThreads;

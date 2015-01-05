@@ -17,6 +17,7 @@ GNU General Public License for more details.
 #ifndef defines_h
 #define defines_h
 
+#define EXPORT extern "C" __declspec(dllexport)
 
 // Disable silly performance warning about converting int to bool:
 // Unlike other typecasts from a larger type to a smaller, I'm 99% sure
