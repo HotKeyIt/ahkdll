@@ -522,7 +522,9 @@ void Hotkey::AllDestruct()
 		hk.mParentEnabled = false;
 		hk.mSC = NULL;
 		hk.mType = NULL;
+#ifdef CONFIG_WIN9X
 		hk.mUnregisterDuringThread = false;
+#endif
 		hk.mVK = NULL;
 		hk.mVK_WasSpecifiedByNumber = false;
 	}
@@ -887,9 +889,10 @@ void Hotkey::PerformInNewThreadMadeByCaller(HotkeyVariant &aVariant)
 	// in which case we would want SendKeys() to take note of these modifiers even
 	// if it was called from an ExecUntil() other than ours here:
 	g_script.mThisHotkeyModifiersLR = mModifiersConsolidatedLR;
+
+#ifdef CONFIG_WIN9X
 	bool unregistered_during_thread = mUnregisterDuringThread && mIsRegistered;
 
-	// LAUNCH HOTKEY SUBROUTINE:
 	// For v1.0.23, the below allows the $ hotkey prefix to unregister the hotkey on
 	// Windows 9x, which allows the send command to send the hotkey itself without
 	// causing an infinite loop of keystrokes.  For simplicity, the hotkey is kept
@@ -897,14 +900,20 @@ void Hotkey::PerformInNewThreadMadeByCaller(HotkeyVariant &aVariant)
 	// selectively do it before and after each Send command of the thread:
 	if (unregistered_during_thread) // Do it every time through the loop in case the hotkey is re-registered by its own subroutine.
 		Unregister(); // This takes care of other details for us.
+#endif
+
+	// LAUNCH HOTKEY SUBROUTINE:
 	++aVariant.mExistingThreads;  // This is the thread count for this particular hotkey only.
 	ResultType result;
 	DEBUGGER_STACK_PUSH(g_script.mThisHotkeyName)
 	result = aVariant.mJumpToLabel->Execute();
 	DEBUGGER_STACK_POP()
 	--aVariant.mExistingThreads;
+
+#ifdef CONFIG_WIN9X
 	if (unregistered_during_thread)
 		Register();
+#endif
 
 	if (result == FAIL)
 		aVariant.mRunAgainAfterFinished = false;  // Ensure this is reset due to the error.
@@ -1084,19 +1093,6 @@ ResultType Hotkey::Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOption
 				update_all_hotkeys = true;
 			}
 			
-			// v1.1.15: Allow the ~tilde prefix to be added/removed from an existing hotkey variant.
-			// v1.1.19: Apply this change even if aJumpToLabel is omitted.
-			if (variant->mNoSuppress = suffix_has_tilde)
-				hk->mNoSuppress |= AT_LEAST_ONE_VARIANT_HAS_TILDE;
-			else
-				hk->mNoSuppress |= AT_LEAST_ONE_VARIANT_LACKS_TILDE;
-			// v1.1.19: Allow the $UseHook prefix to be added to an existing hotkey.
-			if (!hk->mKeybdHookMandatory && (variant->mNoSuppress || hook_is_mandatory))
-			{
-				update_all_hotkeys = true; // Since it may be switching from reg to k-hook.
-				hk->mKeybdHookMandatory = true; // See Hotkey::AddVariant() for comments.
-			}
-
 			// If the above changed the action from an Alt-tab type to non-alt-tab, there may be a label present
 			// to be applied to the existing variant (or created as a new variant).
 			if (aJumpToLabel) // COMMAND (update hotkey): Hotkey, Name, LabelName [, Options]
@@ -1128,20 +1124,43 @@ ResultType Hotkey::Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOption
 						RETURN_HOTKEY_ERROR(HOTKEY_EL_MEM, ERR_OUTOFMEM, aHotkeyName);
 					variant_was_just_created = true;
 					update_all_hotkeys = true;
-					if (hook_is_mandatory || (!g_os.IsWin9x() && g_ForceKeybdHook))
-					{
-						// Require the hook for all variants of this hotkey if any variant requires it.
-						// This seems more intuitive than the old behaviour, which required $ or #UseHook
-						// to be used on the *first* variant, even though it affected all variants.
-						if (g_os.IsWin9x())
-							hk->mUnregisterDuringThread = true;
-						else
-							hk->mKeybdHookMandatory = true;
-					}
+					// It seems undesirable for #UseHook to be applied to a hotkey just because it's options
+					// were updated with the Hotkey command; therefore, #UseHook is only applied for newly
+					// created variants such as this one.  For others, the $ prefix can be applied.
+					if (g_ForceKeybdHook && !g_os.IsWin9x())
+						hook_is_mandatory = true;
 				}
 			}
-			//else NULL label, so either it just became an alt-tab hotkey above, or it's "Hotkey, Name,, Options".
-			// Either way, continue on and let the error-catch below report it if it qualifies as an error.
+			else
+				// NULL label, so either it just became an alt-tab hotkey above, or it's "Hotkey, Name,, Options".
+				if (!variant) // Below relies on this check.
+					break; // Let the error-catch below report it as an error.
+#ifdef CONFIG_WIN9X
+			if (g_os.IsWin9x())
+			{
+				if (hook_is_mandatory)
+					hk->mUnregisterDuringThread = true;
+				// Skip the checks below, since the tilde prefix and #UseHook are ignored on Win9x.
+				break;
+			}
+#endif
+			// v1.1.15: Allow the ~tilde prefix to be added/removed from an existing hotkey variant.
+			// v1.1.19: Apply this change even if aJumpToLabel is omitted.  This is redundant if
+			// variant_was_just_created, but checking that condition seems counter-productive.
+			if (variant->mNoSuppress = suffix_has_tilde)
+				hk->mNoSuppress |= AT_LEAST_ONE_VARIANT_HAS_TILDE;
+			else
+				hk->mNoSuppress |= AT_LEAST_ONE_VARIANT_LACKS_TILDE;
+				
+			// v1.1.19: Allow the $UseHook prefix to be added to an existing hotkey.
+			if (!hk->mKeybdHookMandatory && (hook_is_mandatory || suffix_has_tilde))
+			{
+				// Require the hook for all variants of this hotkey if any variant requires it.
+				// This seems more intuitive than the old behaviour, which required $ or #UseHook
+				// to be used on the *first* variant, even though it affected all variants.
+				update_all_hotkeys = true; // Since it may be switching from reg to k-hook.
+				hk->mKeybdHookMandatory = true;
+			}
 		} // Hotkey already existed.
 		break;
 	} // switch(hook_action)
@@ -1286,7 +1305,9 @@ Hotkey::Hotkey(HotkeyIDType aID, Label *aJumpToLabel, HookActionType aHookAction
 	, mModifiersConsolidatedLR(0)
 	, mType(HK_NORMAL) // Default unless overridden to become mouse, joystick, hook, etc.
 	, mVK_WasSpecifiedByNumber(false)
+#ifdef CONFIG_WIN9X
 	, mUnregisterDuringThread(false)
+#endif
 	, mIsRegistered(false)
 	, mParentEnabled(true)
 	, mHookAction(aHookAction)   // Alt-tab and possibly other uses.
@@ -1777,12 +1798,14 @@ LPTSTR Hotkey::TextToModifiers(LPTSTR aText, Hotkey *aThisHotkey, HotkeyProperti
 				aProperties->suffix_has_tilde = true; // If this is the prefix's tilde rather than the suffix, it will be overridden later below.
 			break;
 		case '$':
+#ifdef CONFIG_WIN9X
 			if (g_os.IsWin9x())
 			{
 				if (aThisHotkey)
 					aThisHotkey->mUnregisterDuringThread = true;
 			}
 			else
+#endif
 				if (aThisHotkey)
 					aThisHotkey->mKeybdHookMandatory = true; // This flag will be ignored if TextToKey() decides this is a JOYSTICK or MOUSE hotkey.
 				// else ignore the flag and try to register normally, which in most cases seems better

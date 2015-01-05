@@ -2814,7 +2814,30 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 	// terminate dll\function name, find it and jump to next parameter
 	if (_tcschr(parameter, ','))
 		*(_tcschr(parameter, ',')) = '\0';
-	function = (void*)ATOI64(parameter);
+	if (RegExMatch(parameter, _T("^\\s*[A-Fa-f0-9]+(:[A-Fa-f0-9]+)?\\s*$")))
+	{
+		TCHAR hex[4] = { '0', 'x' };
+#ifdef _WIN64
+		if (_tcschr(parameter, ':'))
+			parameter = _tcschr(parameter, ':') + 1;
+#endif
+		int end;
+		if (_tcschr(parameter, ':'))
+			end = (int)(_tcschr(parameter, ':') - parameter);
+		else
+			end = (int)_tcslen(parameter);
+		if (!(function = (void*)SimpleHeap::Malloc(end / 2)))
+			return g_script.ScriptError(ERR_OUTOFMEM, parameter);
+		if (!VirtualAlloc(function, end / 2, MEM_COMMIT, PAGE_EXECUTE_READWRITE))
+			return g_script.ScriptError(_T("Could not commit memory for DllImport."), parameter);
+		for (int i = 0; i < end; i += 2)
+		{
+			_tcsncpy(&hex[2], parameter + i, 2);
+			*((char*)function + i / 2) = (char)_tcstol(hex, NULL, 16);
+		}
+	} 
+	else
+		function = (void*)ATOI64(parameter);
 	if (!function)
 	{
 		LPTSTR dll_name = _tcsrchr(parameter, '\\');
@@ -2833,7 +2856,7 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 
 	LPTSTR parm = SimpleHeap::Malloc(parameter);
 	bool has_return = false;
-	int aParamCount = ATOI(parm) ? 0 : 1;
+	int aParamCount = !*parm||ATOI(parm) ? 0 : 1;
 	if (*parm)
 		for (; _tcschr(parameter, ','); aParamCount++)
 		{
@@ -2845,6 +2868,8 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 
 	// Determine the type of return value.
 	DYNAPARM *return_attrib = (DYNAPARM*)SimpleHeap::Malloc(sizeof(DYNAPARM));
+	if (!return_attrib)
+		return g_script.ScriptError(ERR_OUTOFMEM);
 	memset(return_attrib, 0, sizeof(DYNAPARM)); // Init all to default in case ConvertDllArgType() isn't called below. This struct holds the type and other attributes of the function's return value.
 #ifdef WIN32_PLATFORM
 	int dll_call_mode = DC_CALL_STD; // Set default.  Can be overridden to DC_CALL_CDECL and flags can be OR'd into it.
@@ -2895,6 +2920,8 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 	int arg_count = aParamCount / 2; // Might provide one extra due to first/last params, which is inconsequential.
 	DYNAPARM *dyna_param_def = arg_count ? (DYNAPARM *)SimpleHeap::Malloc(arg_count * sizeof(DYNAPARM)) : NULL;
 	DYNAPARM *dyna_param = arg_count ? (DYNAPARM *)SimpleHeap::Malloc(arg_count * sizeof(DYNAPARM)) : NULL;
+	if (arg_count && (!dyna_param_def || !dyna_param))
+		return g_script.ScriptError(ERR_OUTOFMEM);
 	// Above: _alloca() has been checked for code-bloat and it doesn't appear to be an issue.
 	// Above: Fix for v1.0.36.07: According to MSDN, on failure, this implementation of _alloca() generates a
 	// stack overflow exception rather than returning a NULL value.  Therefore, NULL is no longer checked,
@@ -2911,6 +2938,8 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 	CStringW **pStr = (CStringW **)
 #endif
 		SimpleHeap::Malloc(i); // _alloca vs malloc can make a significant difference to performance in some cases.
+	if (i && !pStr)
+		return g_script.ScriptError(ERR_OUTOFMEM);
 	memset(pStr, 0, i);
 
 	// Above has already ensured that after the first parameter, there are either zero additional parameters
@@ -2927,7 +2956,7 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 
 		//ExprTokenType &this_param = *aParam[i + 1];         // Resolved for performance and convenience.
 		DYNAPARM &this_dyna_param = dyna_param_def[arg_count];  //
-
+		
 		// Store the each arg into a dyna_param struct, using its arg type to determine how.
 		ConvertDllArgType(arg_type_string, this_dyna_param);
 
