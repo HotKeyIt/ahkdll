@@ -9303,6 +9303,27 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	tmem.Open(textbuf, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR, CP_UTF8);
 	tmem.Read(resource_script, textbuf.mLength);
 
+	if (mIncludeLibraryFunctionsThenExit && aIsAutoInclude)
+	{
+		// For each auto-included library-file, write out two #Include lines:
+		// 1) Use #Include in its "change working directory" mode so that any explicit #include directives
+		//    or FileInstalls inside the library file itself will work consistently and properly.
+		// 2) Use #IncludeAgain (to improve performance since no dupe-checking is needed) to include
+		//    the library file itself.
+		// We don't directly append library files onto the main script here because:
+		// 1) ahk2exe needs to be able to see and act upon FileInstall and #Include lines (i.e. library files
+		//    might contain #Include even though it's rare).
+		// 2) #IncludeAgain and #Include directives that bring in fragments rather than entire functions or
+		//    subroutines wouldn't work properly if we resolved such includes in AutoHotkey.exe because they
+		//    wouldn't be properly interleaved/asynchronous, but instead brought out of their library file
+		//    and deposited separately/synchronously into the temp-include file by some new logic at the
+		//    AutoHotkey.exe's code for the #Include directive.
+		// 3) ahk2exe prefers to omit comments from included files to minimize size of compiled scripts.
+		mIncludeLibraryFunctionsThenExit->Format(_T("%*s\n")
+			, (DWORD_PTR)_tcslen(resource_script), resource_script);
+		// Now continue on normally so that our caller can continue looking for syntax errors.
+	}
+
 	//Func *current_func = g->CurrentFunc;
 	//UINT_PTR aScriptWasLoaded = NULL;
 	bool must_declare = g_MustDeclare;
@@ -9438,6 +9459,26 @@ winapi:
 			aDest = aDest + 2;
 		}
 		*(aDest - 2) = L'\0';
+		if (mIncludeLibraryFunctionsThenExit && aIsAutoInclude)
+		{
+			// For each auto-included library-file, write out two #Include lines:
+			// 1) Use #Include in its "change working directory" mode so that any explicit #include directives
+			//    or FileInstalls inside the library file itself will work consistently and properly.
+			// 2) Use #IncludeAgain (to improve performance since no dupe-checking is needed) to include
+			//    the library file itself.
+			// We don't directly append library files onto the main script here because:
+			// 1) ahk2exe needs to be able to see and act upon FileInstall and #Include lines (i.e. library files
+			//    might contain #Include even though it's rare).
+			// 2) #IncludeAgain and #Include directives that bring in fragments rather than entire functions or
+			//    subroutines wouldn't work properly if we resolved such includes in AutoHotkey.exe because they
+			//    wouldn't be properly interleaved/asynchronous, but instead brought out of their library file
+			//    and deposited separately/synchronously into the temp-include file by some new logic at the
+			//    AutoHotkey.exe's code for the #Include directive.
+			// 3) ahk2exe prefers to omit comments from included files to minimize size of compiled scripts.
+			mIncludeLibraryFunctionsThenExit->Format(_T("%*s\n")
+				, _tcslen(parameter), parameter);
+			// Now continue on normally so that our caller can continue looking for syntax errors.
+		}
 		LoadDllFunction(_tcschr(parameter, L',') + 1, parameter);
 		return FindFunc(aFuncName, aFuncNameLength);
 	}
