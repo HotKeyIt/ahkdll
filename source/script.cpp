@@ -3697,14 +3697,16 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			MsgBox(_T("Could not extract script from EXE."), 0, aFileSpec);
 			return FAIL;
 		}
+		DWORD aSizeDeCompressed = 0;
 		if (*(unsigned int*)textbuf.mBuffer == 0x04034b50)
 		{
 			LPVOID aDataBuf;
-			DWORD aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, g_default_pwd);
+			aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, g_default_pwd);
 			if (aSizeDeCompressed)
 			{
 				LPVOID buff = _alloca(aSizeDeCompressed); // will be freed when function returns
 				memmove(buff, aDataBuf, aSizeDeCompressed);
+				SecureZeroMemory(aDataBuf, aSizeDeCompressed);
 				VirtualFree(aDataBuf, aSizeDeCompressed, MEM_RELEASE);
 				textbuf.mLength = aSizeDeCompressed;
 				textbuf.mBuffer = buff;
@@ -3713,6 +3715,8 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		fp = &tmem;
 		// NOTE: Ahk2Exe strips off the UTF-8 BOM.
 		tmem.Open(textbuf, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR, CP_UTF8);
+		if (aSizeDeCompressed)
+			SecureZeroMemory(textbuf.mBuffer, aSizeDeCompressed);
 	}
 	//else the first file was already taken care of by another means.
 
@@ -3739,14 +3743,16 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		MsgBox(_T("Could not extract script from EXE."), 0, aFileSpec);
 		return FAIL;
 	}
+	DWORD aSizeDeCompressed = 0;
 	if (*(unsigned int*)textbuf.mBuffer == 0x04034b50)
 	{
 		LPVOID aDataBuf;
-		DWORD aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, g_default_pwd);
+		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, g_default_pwd);
 		if (aSizeDeCompressed)
 		{
 			LPVOID buff = _alloca(aSizeDeCompressed); // will be freed when function returns
 			memmove(buff, aDataBuf, aSizeDeCompressed);
+			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
 			VirtualFree(aDataBuf, aSizeDeCompressed, MEM_RELEASE);
 			textbuf.mLength = aSizeDeCompressed;
 			textbuf.mBuffer = buff;
@@ -3755,6 +3761,8 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 	fp = &tmem;
 	// NOTE: Ahk2Exe strips off the UTF-8 BOM.
 	tmem.Open(textbuf, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR, CP_UTF8);
+	if (aSizeDeCompressed)
+		SecureZeroMemory(textbuf.mBuffer, aSizeDeCompressed);
 #endif
 
 	++Line::sSourceFileCount;
@@ -9284,14 +9292,16 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	{   // aErrorWasShown = true; // Do not display errors here
 		goto winapi;
 	}
+	DWORD aSizeDeCompressed = 0;
 	if (*(unsigned int*)textbuf.mBuffer == 0x04034b50)
 	{
 		LPVOID aDataBuf;
-		DWORD aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, g_default_pwd);
+		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, g_default_pwd);
 		if (aSizeDeCompressed)
 		{
 			LPVOID buff = _alloca(aSizeDeCompressed); // will be freed when function returns
 			memmove(buff, aDataBuf, aSizeDeCompressed);
+			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
 			VirtualFree(aDataBuf, aSizeDeCompressed, MEM_RELEASE);
 			textbuf.mLength = aSizeDeCompressed;
 			textbuf.mBuffer = buff;
@@ -9299,8 +9309,10 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	}
 	aFileWasFound = true;
 	// NOTE: Ahk2Exe strips off the UTF-8 BOM.
-	LPTSTR resource_script = (LPTSTR)_alloca(textbuf.mLength * sizeof(TCHAR));
+	LPTSTR resource_script = (LPTSTR)_alloca(textbuf.mLength);
 	tmem.Open(textbuf, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR, CP_UTF8);
+	if (aSizeDeCompressed)
+		SecureZeroMemory(textbuf.mBuffer, aSizeDeCompressed);
 	tmem.Read(resource_script, textbuf.mLength);
 
 	if (mIncludeLibraryFunctionsThenExit && aIsAutoInclude)
@@ -9337,11 +9349,12 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	// above writes sLib[i].path to the iLib file, otherwise the wrong filename could be written.
 	if (!LoadIncludedText(resource_script, class_name_buf)) // Fix for v1.0.47.05: Pass false for allow-dupe because otherwise, it's possible for a stdlib file to attempt to include itself (especially via the LibNamePrefix_ method) and thus give a misleading "duplicate function" vs. "func does not exist" error message.  Obsolete: For performance, pass true for allow-dupe so that it doesn't have to check for a duplicate file (seems too rare to worry about duplicates since by definition, the function doesn't yet exist so it's file shouldn't yet be included).
 	{
+		SecureZeroMemory(resource_script, textbuf.mLength);
 		g->CurrentFunc = current_func; // Restore.
 		aErrorWasShown = true; // Above has just displayed its error (e.g. syntax error in a line, failed to open the include file, etc).  So override the default set earlier.
 		return NULL;
 	}
-
+	SecureZeroMemory(resource_script, textbuf.mLength);
 	g->CurrentFunc = current_func; // Restore.
 
 	// Restore setting as per the comment above.

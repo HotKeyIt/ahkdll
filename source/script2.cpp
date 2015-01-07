@@ -15912,11 +15912,13 @@ BIF_DECL(BIF_ResourceLoadLibrary)
 		if (aSizeDeCompressed)
 		{
 			module = MemoryLoadLibrary( aDataBuf );
+			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
 			VirtualFree(aDataBuf,aSizeDeCompressed,MEM_RELEASE);
 		}
 	}
 	if (!aSizeDeCompressed)
 		module = MemoryLoadLibrary( textbuf.mBuffer );
+	
 	aResultToken.value_int64 = (UINT_PTR)module;
 }
 
@@ -16077,7 +16079,8 @@ BIF_DECL(BIF_UnZipRawMemory)
 					memmove((void *)TokenToInt64(*aParam[1]),aDataBuf,(SIZE_T)aResultToken.value_int64);
 
 			}
-			VirtualFree(aDataBuf,(SIZE_T)aResultToken.value_int64,MEM_RELEASE);
+			SecureZeroMemory(aDataBuf, (size_t)aResultToken.value_int64);
+			VirtualFree(aDataBuf,(size_t)aResultToken.value_int64,MEM_RELEASE);
 			return;
 		}
 	}
