@@ -2355,16 +2355,32 @@ static void inflateEnd(register ENTRYREADVARS *entryReadVars)
 		{
 			case IBM_BTREE:
 			case IBM_DTREE:
-				if ((ptr = entryReadVars->stream.state->blocks.sub.trees.blens)) GlobalFree(ptr);
+				if ((ptr = entryReadVars->stream.state->blocks.sub.trees.blens))
+				{
+					SecureZeroMemory(ptr, GlobalSize(ptr));
+					GlobalFree(ptr);
+				}
 				break;
 
 			case IBM_CODES:
-				if ((ptr = entryReadVars->stream.state->blocks.sub.decode.codes)) GlobalFree(ptr);
+				if ((ptr = entryReadVars->stream.state->blocks.sub.decode.codes))
+				{
+					SecureZeroMemory(ptr, GlobalSize(ptr));
+					GlobalFree(ptr);
+				}
 		}
 
-		if ((ptr = entryReadVars->stream.state->blocks.window)) GlobalFree(ptr);
-		if ((ptr = entryReadVars->stream.state->blocks.hufts)) GlobalFree(ptr);
-
+		if ((ptr = entryReadVars->stream.state->blocks.window))
+		{
+			SecureZeroMemory(ptr, GlobalSize(ptr));
+			GlobalFree(ptr);
+		}
+		if ((ptr = entryReadVars->stream.state->blocks.hufts))
+		{
+			SecureZeroMemory(ptr, GlobalSize(ptr));
+			GlobalFree(ptr);
+		}
+		SecureZeroMemory(entryReadVars->stream.state, GlobalSize(entryReadVars->stream.state));
 		GlobalFree(entryReadVars->stream.state);
 
 #ifndef NDEBUG
@@ -2386,7 +2402,11 @@ static void inflateEnd(register ENTRYREADVARS *entryReadVars)
 static void cleanupEntry(register TUNZIP * tunzip)
 {
 	// Free the input buffer
-	if (tunzip->EntryReadVars.InputBuffer) GlobalFree(tunzip->EntryReadVars.InputBuffer);
+	if (tunzip->EntryReadVars.InputBuffer)
+	{
+		SecureZeroMemory(tunzip->EntryReadVars.InputBuffer, GlobalSize(tunzip->EntryReadVars.InputBuffer));
+		GlobalFree(tunzip->EntryReadVars.InputBuffer);
+	}
 	tunzip->EntryReadVars.InputBuffer = 0;
 
 	// Free stuff allocated for decompressing in DEFLATE mode
@@ -3278,6 +3298,7 @@ DWORD unzipEntry(register TUNZIP *tunzip, void *dst, ZIPENTRY *ze, DWORD flags)
 		}
 
 		ze->CompressedSize = readEntry(tunzip, dst, ze->CompressedSize);
+
 		if (tunzip->LastErr || !tunzip->EntryReadVars.RemainingUncompressed)
 		{
 			tunzip->CurrentEntryInfo.internal_fa = 0;
@@ -3375,8 +3396,17 @@ void closeArchive(register TUNZIP *tunzip)
 	cleanupEntry(tunzip);
 	if (tunzip->Flags & TZIP_ARCCLOSEFH)
 		CloseHandle(tunzip->ArchivePtr);
-	if (tunzip->Password) GlobalFree(tunzip->Password);
-	if (tunzip->OutBuffer) GlobalFree(tunzip->OutBuffer);
+	if (tunzip->Password)
+	{
+		SecureZeroMemory(tunzip->Password, GlobalSize(tunzip->Password));
+		GlobalFree(tunzip->Password);
+	}
+	if (tunzip->OutBuffer)
+	{
+		SecureZeroMemory(tunzip->OutBuffer, GlobalSize(tunzip->OutBuffer));
+		GlobalFree(tunzip->OutBuffer);
+	}
+	SecureZeroMemory(tunzip, GlobalSize(tunzip));
 	GlobalFree(tunzip);
 }
 
