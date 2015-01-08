@@ -3148,12 +3148,18 @@ DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf, TCHAR *pwd[]) // LiteZip 
 			{
 				closeArchive((TUNZIP *)huz);
 				if (aDataEncrypted)
-					VirtualFree(aDataEncrypted,aSizeDeCompressed,MEM_RELEASE);
+				{
+					SecureZeroMemory(aDataEncrypted, aSizeDeCompressed);
+					VirtualFree(aDataEncrypted, aSizeDeCompressed, MEM_RELEASE);
+				}
 				return aSizeDeCompressed;
 			}
 			closeArchive((TUNZIP *)huz);
 			if (aDataEncrypted)
-				VirtualFree(aDataEncrypted,aSizeDeCompressed,MEM_RELEASE);
+			{
+				SecureZeroMemory(aDataEncrypted, aSizeDeCompressed);
+				VirtualFree(aDataEncrypted, aSizeDeCompressed, MEM_RELEASE);
+			}
 		}
 	}
 	return 0;
