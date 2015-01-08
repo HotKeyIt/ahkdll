@@ -58,7 +58,10 @@ public:
 	virtual ~TextStream()
 	{
 		if (mBuffer)
+		{
+			SecureZeroMemory(mBuffer,TEXT_IO_BLOCK);
 			free(mBuffer);
+		}
 		//if (mLocale)
 		//	_free_locale(mLocale);
 		// Close() isn't called here, it will rise a "pure virtual function call" exception.

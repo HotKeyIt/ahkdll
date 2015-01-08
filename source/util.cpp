@@ -2885,7 +2885,7 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 			end = (int)(_tcschr(parameter, ':') - parameter);
 		else
 			end = (int)_tcslen(parameter);
-		if (!(function = (Label*)SimpleHeap::Malloc(end / 2)))
+		if (!(function = (void*)SimpleHeap::Malloc(end / 2)))
 			return g_script.ScriptError(ERR_OUTOFMEM, parameter);
 		if (!VirtualAlloc(function, end / 2, MEM_COMMIT, PAGE_EXECUTE_READWRITE))
 			return g_script.ScriptError(_T("Could not commit memory for DllImport."), parameter);
@@ -3165,14 +3165,15 @@ DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf, TCHAR *pwd[]) // LiteZip 
 		aDataBuf = VirtualAlloc(NULL, aSizeDeCompressed, MEM_COMMIT, PAGE_READWRITE);
 		if (aDataBuf)
 		{
+			DWORD aSizeDataEncrypted = 0;
 			if (aSizeEncrypted)
 			{
 				typedef BOOL (_stdcall *MyDecrypt)(HCRYPTKEY,HCRYPTHASH,BOOL,DWORD,BYTE*,DWORD*);
 				HMODULE advapi32 = LoadLibrary(_T("advapi32.dll"));
 				MyDecrypt Decrypt = (MyDecrypt)GetProcAddress(advapi32,"CryptDecrypt");
 				LPSTR aDataEncryptedString = (LPSTR)VirtualAlloc(NULL, aSizeEncrypted, MEM_COMMIT, PAGE_READWRITE);
+				aSizeDataEncrypted = aSizeEncrypted;
 				DWORD aSizeEncryptedString = aSizeEncrypted;
-				DWORD aSizeEncryptedTemp = aSizeEncrypted;
 				HCRYPTPROV hProv;
 				HCRYPTKEY hKey;
 				HCRYPTHASH hHash;
@@ -3182,16 +3183,16 @@ DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf, TCHAR *pwd[]) // LiteZip 
 				CryptDeriveKey(hProv,CALG_AES_256,hHash,256<<16,&hKey);
 				CryptDestroyHash(hHash);
 				memmove(aDataEncryptedString,(LPBYTE)aBuffer + hdrsz,aSizeEncrypted);
-				Decrypt(hKey,NULL,true,0,(BYTE*)aDataEncryptedString,&aSizeEncryptedString);
-				CryptStringToBinaryA(aDataEncryptedString,NULL,CRYPT_STRING_BASE64,NULL,&aSizeEncryptedTemp,NULL,NULL);
-				if (aSizeEncryptedTemp == 0)
+				Decrypt(hKey, NULL, true, 0, (BYTE*)aDataEncryptedString, &aSizeDataEncrypted);
+				CryptStringToBinaryA(aDataEncryptedString, NULL, CRYPT_STRING_BASE64, NULL, &aSizeEncryptedString, NULL, NULL);
+				if (aSizeEncryptedString == 0)
 				{   // incorrect password
 					VirtualFree(aDataBuf,aSizeDeCompressed,MEM_RELEASE);
-					VirtualFree(aDataEncrypted,aSizeDeCompressed,MEM_RELEASE);
+					VirtualFree(aDataEncryptedString, aSizeEncrypted, MEM_RELEASE);
 					return 0;
 				}
-				aDataEncrypted = (BYTE*)VirtualAlloc(NULL, aSizeEncryptedTemp, MEM_COMMIT, PAGE_READWRITE);
-				CryptStringToBinaryA(aDataEncryptedString,NULL,CRYPT_STRING_BASE64,aDataEncrypted,&aSizeEncryptedTemp,NULL,NULL);
+				aDataEncrypted = (BYTE*)VirtualAlloc(NULL, aSizeDataEncrypted = aSizeEncryptedString, MEM_COMMIT, PAGE_READWRITE);
+				CryptStringToBinaryA(aDataEncryptedString, NULL, CRYPT_STRING_BASE64, aDataEncrypted, &aSizeEncryptedString, NULL, NULL);
 				VirtualFree(aDataEncryptedString,aSizeEncrypted,MEM_RELEASE);
 				CryptDestroyKey(hKey);
 				CryptReleaseContext(hProv,0);
@@ -3199,7 +3200,7 @@ DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf, TCHAR *pwd[]) // LiteZip 
 				{   // failed to open archive
 					closeArchive((TUNZIP *)huz);
 					VirtualFree(aDataBuf,aSizeDeCompressed,MEM_RELEASE);
-					VirtualFree(aDataEncrypted,aSizeDeCompressed,MEM_RELEASE);
+					VirtualFree(aDataEncrypted, aSizeDataEncrypted, MEM_RELEASE);
 					return 0;
 				}
 			}
@@ -3217,18 +3218,12 @@ DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf, TCHAR *pwd[]) // LiteZip 
 			{
 				closeArchive((TUNZIP *)huz);
 				if (aDataEncrypted)
-				{
-					SecureZeroMemory(aDataEncrypted, aSizeDeCompressed);
-					VirtualFree(aDataEncrypted, aSizeDeCompressed, MEM_RELEASE);
-				}
+					VirtualFree(aDataEncrypted, aSizeDataEncrypted, MEM_RELEASE);
 				return aSizeDeCompressed;
 			}
 			closeArchive((TUNZIP *)huz);
 			if (aDataEncrypted)
-			{
-				SecureZeroMemory(aDataEncrypted, aSizeDeCompressed);
-				VirtualFree(aDataEncrypted, aSizeDeCompressed, MEM_RELEASE);
-			}
+				VirtualFree(aDataEncrypted, aSizeDataEncrypted, MEM_RELEASE);
 		}
 	}
 	return 0;
