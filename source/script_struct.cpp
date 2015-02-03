@@ -47,7 +47,8 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 	// give more room to use local or static variable Function(variable)
 	// Parameter passed to IsDefaultType needs to be ' Definition '
 	// this is because spaces are used as delimiters ( see IsDefaultType function )
-	TCHAR defbuf[MAX_VAR_NAME_LENGTH*2 + 40] = _T(" UInt "); // Set default UInt definition
+	TCHAR defbuf[MAX_VAR_NAME_LENGTH * 2 + 40] = _T(" UInt "); // Set default UInt definition
+
 	TCHAR keybuf[MAX_VAR_NAME_LENGTH + 40];
 
 	// buffer for arraysize + 2 for bracket ] and terminating character
@@ -177,9 +178,9 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 
 		// Trim trailing spaces
 		rtrim(tempbuf);
-		
+
 		// Pointer
-		if (_tcschr(tempbuf,'*'))
+		if (_tcschr(tempbuf, '*'))
 			ispointer = StrReplace(tempbuf, _T("*"), _T(""), SCS_SENSITIVE, UINT_MAX, LINE_SIZE);
 		
 		// Array
@@ -194,7 +195,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			rtrim(tempbuf);
 		}
 		// copy type 
-		// if offset is 0 and there are no };, characters, it means we have a pure type definition
+		// if offset is 0 and there are no };, characters, it means we have a pure definition
 		if (StrChrAny(tempbuf, _T(" \t")) || StrChrAny(tempbuf,_T("};,")) || (!StrChrAny(buf,_T("};,")) && !offset))
 		{
 			if ((buf_size = _tcscspn(tempbuf,_T("\t "))) > MAX_VAR_NAME_LENGTH*2 + 30)
@@ -237,14 +238,22 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			if (ispointer)
 			{
 				if (offset % ptrsize)
-					offset += (ptrsize - (offset % ptrsize)) * (arraydef ? arraydef : 1);
+				{
+					offset += ptrsize - (offset % ptrsize);
+					if (uniondepth && offset > unionoffset[uniondepth])
+						unionoffset[uniondepth] = offset;
+				}
 				if (ptrsize > aligntotal)
 					aligntotal = ptrsize;
 			}
 			else
 			{
 				if (offset % thissize)
+				{
 					offset += thissize - (offset % thissize);
+					if (uniondepth && offset > unionoffset[uniondepth])
+						unionoffset[uniondepth] = offset;
+				}
 				if (thissize > aligntotal)
 					aligntotal = thissize > ptrsize ? ptrsize : thissize;
 			}
@@ -356,6 +365,12 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 						obj->Release();
 						return NULL;
 					}
+					if (offset % aligntotal)
+					{
+						offset += aligntotal - (offset % aligntotal);
+						if (uniondepth && offset > unionoffset[uniondepth])
+							unionoffset[uniondepth] = offset;
+					}
 				} 
 				else
 				{
@@ -367,12 +382,16 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 						return NULL;
 					}
 					if (offset % ptrsize)
-						offset += (ptrsize - (offset % ptrsize)) * (arraydef ? arraydef : 1);
+					{
+						offset += ptrsize - (offset % ptrsize);
+						if (uniondepth && offset > unionoffset[uniondepth])
+							unionoffset[uniondepth] = offset;
+					}
 					if (ptrsize > aligntotal)
 						aligntotal = ptrsize;
 				}
 				// Insert new field in our structure
-				if (!(field = obj->Insert(keybuf, insert_pos++,ispointer,offset,arraydef,Var1.var,(int)ResultToken.value_int64,1,1,-1)))
+				if (!(field = obj->Insert(keybuf, insert_pos++, ispointer, offset, arraydef, Var1.var, (int)ResultToken.value_int64,1,1,-1)))
 				{	// Out of memory.
 					obj->Release();
 					return NULL;

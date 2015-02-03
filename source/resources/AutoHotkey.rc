@@ -27,9 +27,12 @@ LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 // RT_MANIFEST
 //
 
-#ifdef EMBED_MANIFEST // VC++ 2005 and later don't require the next line.
+// The following #ifdef is disabled because manifest generation is disabled
+// in project properties.  VC++ 2010 changes the manifest in a way that causes
+// XP SP2 systems to blue-screen.
+//#ifdef EMBED_MANIFEST // VC++ 2005 and later don't require the next line.
 CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST             "AutoHotkey.exe.manifest"
-#endif
+//#endif
 
 // TYPELIB
 // ReleaseDll must be build before DebugDll to update .tlb file
@@ -247,5 +250,9 @@ END
 
 /////////////////////////////////////////////////////////////////////////////
 #endif    // not APSTUDIO_INVOKED
-
+#ifndef AUTOHOTKEYSC
 WINAPI	RCDATA	".\\source\\resources\\WINAPI.zip"
+#endif
+#ifdef _DEBUG
+//AHK		RCDATA	".\\source\\resources\\AHK.zip"
+#endif

@@ -85,7 +85,7 @@ BIF_DECL(BIF_sizeof)
 	{
 		aResultToken.symbol = SYM_INTEGER;
 		Struct *obj = (Struct*)TokenToObject(*aParam[0]);
-		aResultToken.value_int64 = obj->mSize + (aParamCount > 1 ? TokenToInt64(*aParam[1]) : 0);;
+		aResultToken.value_int64 = obj->mSize + (aParamCount > 1 ? TokenToInt64(*aParam[1]) : 0);
 		return;
 	}
 
@@ -186,10 +186,14 @@ BIF_DECL(BIF_sizeof)
 		// Pointer, while loop will continue here because we only need size
 		if (_tcschr(tempbuf,'*'))
 		{
-			offset += ptrsize * (arraydef ? arraydef : 1);
 			// align offset for pointer
 			if (offset % ptrsize)
-				offset += (ptrsize - (offset % ptrsize)) * (arraydef ? arraydef : 1);
+			{
+				offset += (ptrsize - (offset % ptrsize));
+				if (uniondepth && offset > unionoffset[uniondepth])
+					unionoffset[uniondepth] = offset;
+			}
+			offset += ptrsize * (arraydef ? arraydef : 1);
 			if (ptrsize > *aligntotal)
 				*aligntotal = ptrsize;
 			// update offset
@@ -233,12 +237,14 @@ BIF_DECL(BIF_sizeof)
 		{
 			if (!_tcscmp(defbuf,_T(" bool ")))
 				thissize = 1;
-			offset += thissize * (arraydef ? arraydef : 1);
 			// align offset
 			if (thissize > 1 && offset % thissize)
 			{
 				offset += thissize - (offset % thissize);
+				if (uniondepth && offset > unionoffset[uniondepth])
+					unionoffset[uniondepth] = offset;
 			}
+			offset += thissize * (arraydef ? arraydef : 1);
 			if (thissize > *aligntotal)
 				*aligntotal = thissize>ptrsize ? ptrsize : thissize;
 		}
@@ -280,8 +286,14 @@ BIF_DECL(BIF_sizeof)
 				{	// could not resolve structure
 					return;
 				}
+				if (offset % *aligntotal)
+				{
+					offset += *aligntotal - (offset % *aligntotal);
+					if (uniondepth && offset > unionoffset[uniondepth])
+						unionoffset[uniondepth] = offset;
+				}
 				// sizeof was given an offset that it applied and aligned if necessary, so set offset =  and not +=
-				offset = (int)ResultToken.value_int64 + (arraydef ? ((arraydef - 1) * ((int)ResultToken.value_int64 - offset)) : 0);					
+				offset = (int)ResultToken.value_int64 + (arraydef ? ((arraydef - 1) * ((int)ResultToken.value_int64 - offset)) : 0);
 			}
 			else // No variable was found and it is not default type so we can't determine size, return empty string.
 				return;
