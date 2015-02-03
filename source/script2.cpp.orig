@@ -635,10 +635,7 @@ ResultType Line::Splash(LPTSTR aOptions, LPTSTR aSubText, LPTSTR aMainText, LPTS
 			small_icon = (LPARAM)g_script.mCustomIconSmall; // Should always be non-NULL when mCustomIcon is non-NULL.
 		}
 		else
-		{
-			big_icon = (LPARAM)g_IconLarge;
-			small_icon = (LPARAM)g_IconSmall;
-		}
+			big_icon = small_icon = (LPARAM)LoadImage(g_hInstance, MAKEINTRESOURCE(IDI_MAIN), IMAGE_ICON, 0, 0, LR_SHARED); // Use LR_SHARED to conserve memory (since the main icon is loaded for so many purposes).
 
 		if (style & WS_SYSMENU)
 			SendMessage(splash.hwnd, WM_SETICON, ICON_SMALL, small_icon);
@@ -2575,14 +2572,22 @@ ResultType Line::ControlGetFocus(LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTit
 	if (!target_window)
 		goto error;
 
-	GUITHREADINFO guithreadInfo;
-	guithreadInfo.cbSize = sizeof(GUITHREADINFO);
-	if (!GetGUIThreadInfo(GetWindowThreadProcessId(target_window, NULL), &guithreadInfo))
-		goto error;
+	// Unlike many of the other Control commands, this one requires AttachThreadInput().
+	ATTACH_THREAD_INPUT
 
 	class_and_hwnd_type cah;
+	cah.hwnd = GetFocus();  // Do this now that our thread is attached to the target window's.
+
+	// Very important to detach any threads whose inputs were attached above,
+	// prior to returning, otherwise the next attempt to attach thread inputs
+	// for these particular windows may result in a hung thread or other
+	// undesirable effect:
+	DETACH_THREAD_INPUT
+
+	if (!cah.hwnd)
+		goto error;
+
 	TCHAR class_name[WINDOW_CLASS_SIZE];
-	cah.hwnd = guithreadInfo.hwndFocus;
 	cah.class_name = class_name;
 	if (!GetClassName(cah.hwnd, class_name, _countof(class_name) - 5)) // -5 to allow room for sequence number.
 		goto error;
@@ -6125,10 +6130,7 @@ INT_PTR CALLBACK InputBoxProc(HWND hWndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 			small_icon = (LPARAM)g_script.mCustomIconSmall; // Should always be non-NULL when mCustomIcon is non-NULL.
 		}
 		else
-		{
-			big_icon = (LPARAM)g_IconLarge;
-			small_icon = (LPARAM)g_IconSmall;
-		}
+			big_icon = small_icon = (LPARAM)LoadImage(g_hInstance, MAKEINTRESOURCE(IDI_MAIN), IMAGE_ICON, 0, 0, LR_SHARED); // Use LR_SHARED to conserve memory (since the main icon is loaded for so many purposes).
 
 		SendMessage(hWndDlg, WM_SETICON, ICON_SMALL, small_icon);
 		SendMessage(hWndDlg, WM_SETICON, ICON_BIG, big_icon);
@@ -10235,10 +10237,10 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 		if (*(unsigned int*)res_lock == 0x04034b50)
 		{
 			LPVOID aDataBuf;
-			aSizeDeCompressed = DecompressBuffer(res_lock, aDataBuf, NULL);
+			aSizeDeCompressed = DecompressBuffer(res_lock,aDataBuf,g_default_pwd);
 			if (aSizeDeCompressed)
 			{
-				success = WriteFile(hfile, aDataBuf, aSizeDeCompressed, &num_bytes_written, NULL);
+				success = WriteFile(hfile, res_lock, aSizeDeCompressed, &num_bytes_written, NULL);
 				VirtualFree(aDataBuf,aSizeDeCompressed,MEM_RELEASE);
 			}
 		}
@@ -10283,7 +10285,7 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 			if (*(unsigned int*)res_lock == 0x04034b50)
 			{
 				LPVOID aDataBuf;
-				aSizeDeCompressed = DecompressBuffer(res_lock, aDataBuf, NULL);
+				aSizeDeCompressed = DecompressBuffer(res_lock,aDataBuf,g_default_pwd);
 				if (aSizeDeCompressed)
 				{
 					success = WriteFile(hfile, aDataBuf, aSizeDeCompressed, &num_bytes_written, NULL);
@@ -17829,7 +17831,7 @@ BIF_DECL(BIF_ResourceLoadLibrary)
 	if (*(unsigned int*)textbuf.mBuffer == 0x04034b50)
 	{
 		LPVOID aDataBuf;
-		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer,aDataBuf);
+		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer,aDataBuf,g_default_pwd);
 		if (aSizeDeCompressed)
 		{
 			module = MemoryLoadLibrary( aDataBuf );

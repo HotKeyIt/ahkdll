@@ -222,7 +222,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			else 
 				keybuf[0] = '\0';
 		}
-		else // Not 'TypeOnly' definition because there are more than one fields in structure so use previous type
+		else // Not 'TypeOnly' definition because there are more than one fields in array so use previous type
 		{
 			// Commented following line to keep previous definition like in c++, e.g. "Int x,y,Char a,b", 
 			// Note: separator , or ; can be still used but
@@ -240,22 +240,14 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			if (ispointer)
 			{
 				if (offset % ptrsize)
-				{
-					offset += ptrsize - (offset % ptrsize);
-					if (uniondepth && offset > unionoffset[uniondepth])
-						unionoffset[uniondepth] = offset;
-				}
+					offset += (ptrsize - (offset % ptrsize)) * (arraydef ? arraydef : 1);
 				if (ptrsize > aligntotal)
 					aligntotal = ptrsize;
 			}
 			else
 			{
 				if (offset % thissize)
-				{
 					offset += thissize - (offset % thissize);
-					if (uniondepth && offset > unionoffset[uniondepth])
-						unionoffset[uniondepth] = offset;
-				}
 				if (thissize > aligntotal)
 					aligntotal = thissize > ptrsize ? ptrsize : thissize;
 			}
@@ -370,12 +362,6 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 						obj->Release();
 						return NULL;
 					}
-					if (offset % aligntotal)
-					{
-						offset += aligntotal - (offset % aligntotal);
-						if (uniondepth && offset > unionoffset[uniondepth])
-							unionoffset[uniondepth] = offset;
-					}
 				} 
 				else
 				{
@@ -387,11 +373,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 						return NULL;
 					}
 					if (offset % ptrsize)
-					{
-						offset += ptrsize - (offset % ptrsize);
-						if (uniondepth && offset > unionoffset[uniondepth])
-							unionoffset[uniondepth] = offset;
-					}
+						offset += (ptrsize - (offset % ptrsize)) * (arraydef ? arraydef : 1);
 					if (ptrsize > aligntotal)
 						aligntotal = ptrsize;
 				}

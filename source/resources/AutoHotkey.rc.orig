@@ -27,12 +27,9 @@ LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 // RT_MANIFEST
 //
 
-// The following #ifdef is disabled because manifest generation is disabled
-// in project properties.  VC++ 2010 changes the manifest in a way that causes
-// XP SP2 systems to blue-screen.  Update: See AutoHotkey.exe.manifest for comments.
-//#ifdef EMBED_MANIFEST // VC++ 2005 and later don't require the next line.
-CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST  "AutoHotkey.exe.manifest"
-//#endif
+#ifdef EMBED_MANIFEST // VC++ 2005 and later don't require the next line.
+CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST             "AutoHotkey.exe.manifest"
+#endif
 
 // TYPELIB
 // ReleaseDll must be build before DebugDll to update .tlb file
@@ -122,11 +119,10 @@ IDI_MAIN                ICON                    "icon_main.ico"
 IDI_SUSPEND             ICON                    "icon_suspend.ico"
 IDI_PAUSE               ICON                    "icon_pause.ico"
 IDI_PAUSE_SUSPEND       ICON                    "icon_pause_suspend.ico"
-#ifdef AUTOHOTKEYSC
-IDI_FILETYPE            ICON                    "icon_filetype_small.ico"
-#else
 IDI_FILETYPE            ICON                    "icon_filetype.ico"
-#endif
+IDI_TRAY_WIN9X          ICON                    "icon_tray_win9x.ico"
+IDI_TRAY_WIN9X_SUSPEND  ICON                    "icon_tray_win9x_suspend.ico"
+IDI_TRAY                ICON                    "icon_tray.ico"
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -201,18 +197,18 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
 #ifdef AUTOHOTKEYSC
-            VALUE "FileDescription", ""
+            VALUE "FileDescription", " "
             VALUE "FileVersion", AHK_VERSION
-            VALUE "InternalName", ""
+            VALUE "InternalName", " "
             VALUE "LegalCopyright", ""
-            VALUE "OriginalFilename", ""
-            VALUE "ProductName", ""
+            VALUE "OriginalFilename", " "
+            VALUE "ProductName", " "
             VALUE "ProductVersion", AHK_VERSION
 #else
             VALUE "FileDescription", "AutoHotkey_H " AHK_ENC " " AHK_BIT
             VALUE "FileVersion", AHK_VERSION
             VALUE "InternalName", "AutoHotkey_H"
-            VALUE "LegalCopyright", "Copyright (C) 2003-2014"
+            VALUE "LegalCopyright", "Copyright (C) 2012"
 #ifdef USRDLL
 	#ifdef MINIDLL
 			VALUE "OriginalFilename", "AutoHotkeyMini.dll"
@@ -247,13 +243,12 @@ END
 
 /////////////////////////////////////////////////////////////////////////////
 #endif    // not APSTUDIO_INVOKED
-#ifndef AUTOHOTKEYSC
+
 WINAPI	RCDATA	".\\source\\resources\\WINAPI.zip"
-#endif
+
 // AutoHotkey debugging script
 #ifdef _DEBUG
 #ifndef _USRDLL
-//AHK		RCDATA	".\\source\\resources\\AHK.zip"
 //AHK RCDATA "Test\\Test.ahk"
 #endif
 #endif

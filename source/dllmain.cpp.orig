@@ -326,8 +326,6 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	if (load_result == LOADING_FAILED) // Error during load (was already displayed by the function call).
 	{
 		g_Reloading = false;
-		if (g_script.mIncludeLibraryFunctionsThenExit)
-			g_script.mIncludeLibraryFunctionsThenExit->Close(); // Flush its buffer to disk.
 		return CRITICAL_ERROR;  // Should return this value because PostQuitMessage() also uses it.
 	}
 	if (!load_result) // LoadFromFile() relies upon us to do this check.  No lines were loaded, so we're done.
