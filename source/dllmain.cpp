@@ -150,8 +150,8 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 #endif
 	// Init any globals not in "struct g" that need it:
 	g_MainThreadID = GetCurrentThreadId();
-	
-	
+
+
 #ifdef _DEBUG
 	g_hResource = FindResource(g_hInstance, _T("AHK"), MAKEINTRESOURCE(RT_RCDATA));
 #else
@@ -164,7 +164,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 		*g_WorkingDir = '\0';
 	// Unlike the below, the above must not be Malloc'd because the contents can later change to something
 	// as large as MAX_PATH by means of the SetWorkingDir command.
-	
+
 	g_WorkingDirOrig = SimpleHeap::Malloc(g_WorkingDir); // Needed by the Reload command.
 
 	// Set defaults, to be overridden by command line args we receive:
@@ -199,91 +199,91 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 #endif
 	ahkdll_i = 0;
 	if (*nameHinstanceP.argv) // Only process if parameters were given
-	for (ahkdll_i = 0; ahkdll_i < ahkdll_argc; ++ahkdll_i) // Start at 0 because 0 does not contains the program name or script.
-	{
+		for (ahkdll_i = 0; ahkdll_i < ahkdll_argc; ++ahkdll_i) // Start at 0 because 0 does not contains the program name or script.
+		{
 #ifndef _UNICODE
-		param = (TCHAR *) _alloca((wcslen(dllargv[i])+1)*sizeof(CHAR));
-		WideCharToMultiByte(CP_ACP,0,wargv,-1,param,(wcslen(dllargv[i])+1)*sizeof(CHAR),0,0);
+			param = (TCHAR *) _alloca((wcslen(dllargv[i])+1)*sizeof(CHAR));
+			WideCharToMultiByte(CP_ACP,0,wargv,-1,param,(wcslen(dllargv[i])+1)*sizeof(CHAR),0,0);
 #else
-		ahkdll_param = ahkdll_argv[ahkdll_i]; // For performance and convenience.
+			ahkdll_param = ahkdll_argv[ahkdll_i]; // For performance and convenience.
 #endif
-		//if (switch_processing_is_complete) // All args are now considered to be input parameters for the script.
-		//{
-		//	if (   !(var = g_script.FindOrAddVar(var_name, _stprintf(var_name, _T("%d"), script_param_num)))   )
-		//		return CRITICAL_ERROR;  // Realistically should never happen.
-		//	var->Assign(param);
-		//	++script_param_num;
-		//}
+			//if (switch_processing_is_complete) // All args are now considered to be input parameters for the script.
+			//{
+			//	if (   !(var = g_script.FindOrAddVar(var_name, _stprintf(var_name, _T("%d"), script_param_num)))   )
+			//		return CRITICAL_ERROR;  // Realistically should never happen.
+			//	var->Assign(param);
+			//	++script_param_num;
+			//}
 
-		// Insist that switches be an exact match for the allowed values to cut down on ambiguity.
-		// For example, if the user runs "CompiledScript.exe /find", we want /find to be considered
-		// an input parameter for the script rather than a switch:
-		if (!_tcsicmp(ahkdll_param, _T("/R")) || !_tcsicmp(ahkdll_param, _T("/restart")))
-			ahkdll_restart_mode = true;
-		else if (!_tcsicmp(ahkdll_param, _T("/F")) || !_tcsicmp(ahkdll_param, _T("/force")))
-			g_ForceLaunch = true;
-		else if (!_tcsicmp(ahkdll_param, _T("/ErrorStdOut")))
-			g_script.mErrorStdOut = true;
-		else if (!_tcsicmp(ahkdll_param, _T("/iLib"))) // v1.0.47: Build an include-file so that ahk2exe can include library functions called by the script.
-		{
-			++ahkdll_i; // Consume the next parameter too, because it's associated with this one.
-			if (ahkdll_i >= ahkdll_argc) // Missing the expected filename parameter.
+			// Insist that switches be an exact match for the allowed values to cut down on ambiguity.
+			// For example, if the user runs "CompiledScript.exe /find", we want /find to be considered
+			// an input parameter for the script rather than a switch:
+			if (!_tcsicmp(ahkdll_param, _T("/R")) || !_tcsicmp(ahkdll_param, _T("/restart")))
+				ahkdll_restart_mode = true;
+			else if (!_tcsicmp(ahkdll_param, _T("/F")) || !_tcsicmp(ahkdll_param, _T("/force")))
+				g_ForceLaunch = true;
+			else if (!_tcsicmp(ahkdll_param, _T("/ErrorStdOut")))
+				g_script.mErrorStdOut = true;
+			else if (!_tcsicmp(ahkdll_param, _T("/iLib"))) // v1.0.47: Build an include-file so that ahk2exe can include library functions called by the script.
 			{
-				g_Reloading = false;
-				return CRITICAL_ERROR;
-			}
-			// For performance and simplicity, open/create the file unconditionally and keep it open until exit.
-			g_script.mIncludeLibraryFunctionsThenExit = new TextFile;
-			if (!g_script.mIncludeLibraryFunctionsThenExit->Open(ahkdll_param, TextStream::WRITE | TextStream::EOL_CRLF | TextStream::BOM_UTF8, CP_UTF8)) // Can't open the temp file.
-			{
-				g_Reloading = false;
-				return CRITICAL_ERROR;
-			}
-		}
-		else if (!_tcsicmp(ahkdll_param, _T("/E")) || !_tcsicmp(ahkdll_param, _T("/Execute")))
-		{
-			g_hResource = NULL; // Execute script from File. Override compiled, A_IsCompiled will also report 0
-		}
-		else if (!_tcsnicmp(ahkdll_param, _T("/CP"), 3)) // /CPnnn
-		{
-			// Default codepage for the script file, NOT the default for commands used by it.
-			g_DefaultScriptCodepage = ATOU(ahkdll_param + 3);
-		}
-#ifdef CONFIG_DEBUGGER
-		// Allow a debug session to be initiated by command-line.
-		else if (!g_Debugger.IsConnected() && !_tcsnicmp(ahkdll_param, _T("/Debug"), 6) && (ahkdll_param[6] == '\0' || ahkdll_param[6] == '='))
-		{
-			if (ahkdll_param[6] == '=')
-			{
-				ahkdll_param += 7;
-
-				LPTSTR c = _tcsrchr(ahkdll_param, ':');
-
-				if (c)
+				++ahkdll_i; // Consume the next parameter too, because it's associated with this one.
+				if (ahkdll_i >= ahkdll_argc) // Missing the expected filename parameter.
 				{
-					StringTCharToChar(ahkdll_param, g_DebuggerHost, (int)(c - ahkdll_param));
-					StringTCharToChar(c + 1, g_DebuggerPort);
+					g_Reloading = false;
+					return CRITICAL_ERROR;
+				}
+				// For performance and simplicity, open/create the file unconditionally and keep it open until exit.
+				g_script.mIncludeLibraryFunctionsThenExit = new TextFile;
+				if (!g_script.mIncludeLibraryFunctionsThenExit->Open(ahkdll_param, TextStream::WRITE | TextStream::EOL_CRLF | TextStream::BOM_UTF8, CP_UTF8)) // Can't open the temp file.
+				{
+					g_Reloading = false;
+					return CRITICAL_ERROR;
+				}
+			}
+			else if (!_tcsicmp(ahkdll_param, _T("/E")) || !_tcsicmp(ahkdll_param, _T("/Execute")))
+			{
+				g_hResource = NULL; // Execute script from File. Override compiled, A_IsCompiled will also report 0
+			}
+			else if (!_tcsnicmp(ahkdll_param, _T("/CP"), 3)) // /CPnnn
+			{
+				// Default codepage for the script file, NOT the default for commands used by it.
+				g_DefaultScriptCodepage = ATOU(ahkdll_param + 3);
+			}
+#ifdef CONFIG_DEBUGGER
+			// Allow a debug session to be initiated by command-line.
+			else if (!g_Debugger.IsConnected() && !_tcsnicmp(ahkdll_param, _T("/Debug"), 6) && (ahkdll_param[6] == '\0' || ahkdll_param[6] == '='))
+			{
+				if (ahkdll_param[6] == '=')
+				{
+					ahkdll_param += 7;
+
+					LPTSTR c = _tcsrchr(ahkdll_param, ':');
+
+					if (c)
+					{
+						StringTCharToChar(ahkdll_param, g_DebuggerHost, (int)(c - ahkdll_param));
+						StringTCharToChar(c + 1, g_DebuggerPort);
+					}
+					else
+					{
+						StringTCharToChar(ahkdll_param, g_DebuggerHost);
+						g_DebuggerPort = "9000";
+					}
 				}
 				else
 				{
-					StringTCharToChar(ahkdll_param, g_DebuggerHost);
+					g_DebuggerHost = "127.0.0.1";
 					g_DebuggerPort = "9000";
 				}
+				// The actual debug session is initiated after the script is successfully parsed.
 			}
-			else
-			{
-				g_DebuggerHost = "127.0.0.1";
-				g_DebuggerPort = "9000";
-			}
-			// The actual debug session is initiated after the script is successfully parsed.
-		}
 #endif
-		else // since this is not a recognized switch, the end of the [Switches] section has been reached (by design).
-		{
-			break;  // No more switches allowed after this point.
+			else // since this is not a recognized switch, the end of the [Switches] section has been reached (by design).
+			{
+				break;  // No more switches allowed after this point.
+			}
 		}
-	}
-	
+
 	if (Var *var = g_script.FindOrAddVar(_T("A_Args"), 6, VAR_DECLARE_SUPER_GLOBAL))
 	{
 		// Store the remaining args in an array and assign it to "A_Args".
@@ -303,10 +303,10 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 		return CRITICAL_ERROR;
 	}
 	LocalFree(ahkdll_argv); // free memory allocated by CommandLineToArgvW
-	
+
 	global_init(*g);  // Set defaults prior to the below, since below might override them for AutoIt2 scripts.
-	
-// Set up the basics of the script:
+
+	// Set up the basics of the script:
 	if (g_script.Init(*g, ahkdll_script_filespec, ahkdll_restart_mode,hInstance,g_hResource ? 0 : (bool)nameHinstanceP.istext) != OK)  // Set up the basics of the script, using the above.
 	{
 		g_Reloading = false;
@@ -343,7 +343,12 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	LineNumberType load_result = (g_hResource || !nameHinstanceP.istext) ? g_script.LoadFromFile(ahkdll_script_filespec == NULL) : g_script.LoadFromText(ahkdll_script_filespec);
 #endif
 	if (load_result == LOADING_FAILED) // Error during load (was already displayed by the function call).
+	{
+		g_Reloading = false;
+		if (g_script.mIncludeLibraryFunctionsThenExit)
+			g_script.mIncludeLibraryFunctionsThenExit->Close(); // Flush its buffer to disk.
 		return CRITICAL_ERROR;  // Should return this value because PostQuitMessage() also uses it.
+	}
 	if (!load_result) // LoadFromFile() relies upon us to do this check.  No lines were loaded, so we're done.
 	{
 		g_Reloading = false;

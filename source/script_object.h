@@ -10,6 +10,10 @@
 #define INVOKE_NOT_HANDLED	CONDITION_FALSE
 
 //
+// sizeof_maxsize - helper for Struct and sizeof
+//
+BYTE sizeof_maxsize(TCHAR *buf);
+//
 // ObjectBase - Common base class, implements reference counting.
 //
 

@@ -16,16 +16,19 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 {
 	int ptrsize = sizeof(UINT_PTR); // Used for pointers on 32/64 bit system
 	int offset = 0;					// also used to calculate total size of structure
+	int mod = 0;
 	int arraydef = 0;				// count arraysize to update offset
-	int unionoffset[100];			// backup offset before we enter union or structure
-	int unionsize[100];				// calculate unionsize
-	bool unionisstruct[100];			// updated to move offset for structure in structure
+	int unionoffset[16];			// backup offset before we enter union or structure
+	int unionsize[16];				// calculate unionsize
+	bool unionisstruct[16];			// updated to move offset for structure in structure
+	int structalign[16];			// keep track of struct alignment
 	int totalunionsize = 0;			// total size of all unions and structures in structure
 	int uniondepth = 0;				// count how deep we are in union/structure
 	int ispointer = NULL;			// identify pointer and how deep it goes
 	int aligntotal = 0;				// pointer alignment for total structure
 	int thissize;					// used to check if type was found in above array.
-	
+	int maxsize = 0;				// max size of union or struct
+
 	// following are used to find variable and also get size of a structure defined in variable
 	// this will hold the variable reference and offset that is given to size() to align if necessary in 64-bit
 	ResultToken ResultToken;
@@ -124,6 +127,10 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 				unionisstruct[uniondepth] = false;
 			// backup offset because we need to set it back after this union / struct was parsed
 			// unionsize is initialized to 0 and buffer moved to next character
+			if (mod = offset % (maxsize = sizeof_maxsize(buf)))
+				offset += (maxsize - mod) % maxsize;
+			structalign[uniondepth] = aligntotal > maxsize ? aligntotal : maxsize;
+			aligntotal = 0;
 			unionoffset[uniondepth] = offset; // backup offset
 			unionsize[uniondepth] = 0;
 			// ignore even any wrong input here so it is even {mystructure...} for struct and  {anyother string...} for union
@@ -133,21 +140,25 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 		else if (*buf == '}')
 		{	// update union
 			// restore offset even if we had a structure in structure
+			if (uniondepth > 1 && unionisstruct[uniondepth - 1])
+			{
+				if (mod = offset % structalign[uniondepth])
+					offset += (structalign[uniondepth] - mod) % structalign[uniondepth];
+			}
+			else
+				offset = unionoffset[uniondepth];
+			if (unionisstruct[uniondepth] && structalign[uniondepth] > aligntotal)
+				aligntotal = structalign[uniondepth];
 			if (unionsize[uniondepth]>totalunionsize)
 				totalunionsize = unionsize[uniondepth];
 			// last item in union or structure, update offset now if not struct, for struct offset is up to date
 			if (--uniondepth == 0)
 			{
 				// end of structure, align it
-				if (totalunionsize % aligntotal)
-					totalunionsize += aligntotal - (totalunionsize % aligntotal);
-				if (!unionisstruct[uniondepth + 1]) // because it was decreased above
-					offset += totalunionsize;
-				else if (offset % aligntotal)
-					offset += aligntotal - (offset % aligntotal);
+				if (mod = totalunionsize % aligntotal)
+					totalunionsize += (aligntotal - mod) % aligntotal;
+				offset += totalunionsize;
 			}
-			else 
-				offset = unionoffset[uniondepth];
 			buf++;
 			if (buf == StrChrAny(buf,_T(";,")))
 				buf++;
@@ -237,25 +248,17 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			// align offset
 			if (ispointer)
 			{
-				if (offset % ptrsize)
-				{
-					offset += ptrsize - (offset % ptrsize);
-					if (uniondepth && offset > unionoffset[uniondepth])
-						unionoffset[uniondepth] = offset;
-				}
+				if (mod = offset % ptrsize)
+					offset += (ptrsize - mod) % ptrsize;
 				if (ptrsize > aligntotal)
 					aligntotal = ptrsize;
 			}
 			else
 			{
-				if (offset % thissize)
-				{
-					offset += thissize - (offset % thissize);
-					if (uniondepth && offset > unionoffset[uniondepth])
-						unionoffset[uniondepth] = offset;
-				}
+				if (mod = offset % thissize)
+					offset += (thissize - mod) % thissize;
 				if (thissize > aligntotal)
-					aligntotal = thissize > ptrsize ? ptrsize : thissize;
+					aligntotal = thissize; // > ptrsize ? ptrsize : thissize;
 			}
 			if (!(field = obj->Insert(keybuf, insert_pos++,ispointer,offset,arraydef,NULL,thissize
 						,ispointer ? true : !tcscasestr(_T(" FLOAT DOUBLE PFLOAT PDOUBLE "),defbuf)
@@ -365,12 +368,8 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 						obj->Release();
 						return NULL;
 					}
-					if (offset % aligntotal)
-					{
-						offset += aligntotal - (offset % aligntotal);
-						if (uniondepth && offset > unionoffset[uniondepth])
-							unionoffset[uniondepth] = offset;
-					}
+					if (mod = offset % aligntotal)
+						offset += (aligntotal - mod) % aligntotal;
 				} 
 				else
 				{
@@ -381,12 +380,8 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 						obj->Release();
 						return NULL;
 					}
-					if (offset % ptrsize)
-					{
-						offset += ptrsize - (offset % ptrsize);
-						if (uniondepth && offset > unionoffset[uniondepth])
-							unionoffset[uniondepth] = offset;
-					}
+					if (mod = offset % ptrsize)
+						offset += (ptrsize - mod) % ptrsize;
 					if (ptrsize > aligntotal)
 						aligntotal = ptrsize;
 				}
@@ -411,8 +406,8 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 		// update union size
 		if (uniondepth)
 		{
-			if ((offset - unionoffset[uniondepth]) > unionsize[uniondepth])
-				unionsize[uniondepth] = offset - unionoffset[uniondepth];
+			if ((maxsize = offset - unionoffset[uniondepth]) > unionsize[uniondepth])
+				unionsize[uniondepth] = maxsize;
 			// reset offset if in union and union is not a structure
 			if (!unionisstruct[uniondepth])
 				offset = unionoffset[uniondepth];
@@ -431,8 +426,8 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 		}
 	}
 	// align total structure if necessary
-	if (aligntotal && offset % aligntotal)
-		offset += aligntotal - (offset % aligntotal);
+	if (aligntotal && (mod = offset % aligntotal))
+		offset += (aligntotal - mod) % aligntotal;
 	if (!offset) // structure could not be build
 	{
 		obj->Release();
