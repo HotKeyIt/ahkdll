@@ -27,6 +27,86 @@ BIF_DECL(BIF_Struct)
 	aResultToken.symbol = SYM_STRING;
 	aResultToken.marker = _T("");
 }
+
+//
+// sizeof_maxsize - get max size of union or structure, helper function for BIF_Sizeof and BIF_Struct
+//
+BYTE sizeof_maxsize(TCHAR *buf)
+{
+	ResultType Result = OK;
+	ExprTokenType ResultToken;
+	int align = 0;
+	ExprTokenType Var1, Var2, Var3;
+	Var1.symbol = SYM_STRING;
+	TCHAR tempbuf[LINE_SIZE];
+	Var1.marker = tempbuf;
+	Var2.symbol = SYM_INTEGER;
+	Var2.value_int64 = 0;
+	// used to pass aligntotal counter to structure in structure
+	Var3.symbol = SYM_INTEGER;
+	Var3.value_int64 = (__int64)&align;
+	ExprTokenType *param[] = { &Var1, &Var2, &Var3 };
+	int depth = 0;
+	int max = 0,thissize = 0;
+	LPCTSTR comments = 0;
+	for (int i = 0;buf[i];)
+	{
+		if (buf[i] == '{')
+		{
+			depth++;
+			i++;
+		}
+		else if (buf[i] == '}')
+		{
+			if (--depth < 1)
+				break;
+			i++;
+		}
+		else if (StrChrAny(&buf[i], _T(";, \t\n\r")) == &buf[i])
+		{
+			i++;
+			continue;
+		}
+		else if (comments = RegExMatch(&buf[i], _T("i)^(union|struct)?\\s*(\\{|\\})\\s*\\K")))
+		{
+			i += (int)(comments - &buf[i]);
+			continue;
+		}
+		else if (buf[i] == '\\' && buf[i + 1] == '\\')
+		{
+			if (!(comments = StrChrAny(&buf[i], _T("\r\n"))))
+				break; // end of structure
+			i += (int)(comments - &buf[i]);
+			continue;
+		}
+		else
+		{
+			if (StrChrAny(&buf[i], _T(";,")))
+			{
+				_tcsncpy(tempbuf, &buf[i], thissize = (int)(StrChrAny(&buf[i], _T(";,")) - &buf[i]));
+				i += thissize + 1;
+			}
+			else
+			{
+				_tcscpy(tempbuf, &buf[i]);
+				thissize = (int)_tcslen(&buf[i]);
+				i += thissize;
+			}
+			*(tempbuf + thissize) = '\0';
+			if (StrChrAny(tempbuf, _T("\t ")))
+			{
+				align = 0;
+ 				BIF_sizeof(Result, ResultToken, param, 3);
+				if (max < align)
+					max = (BYTE)align;
+			}
+			else if (max < 4)
+				max = 4;
+		}
+	}
+	return max;
+}
+
 //
 // BIF_sizeof - sizeof() for structures and default types
 //
@@ -36,16 +116,19 @@ BIF_DECL(BIF_sizeof)
 {
 	int ptrsize = sizeof(UINT_PTR); // Used for pointers on 32/64 bit system
 	int offset = 0;					// also used to calculate total size of structure
+	int mod = 0;
 	int arraydef = 0;				// count arraysize to update offset
-	int unionoffset[100];			// backup offset before we enter union or structure
-	int unionsize[100];				// calculate unionsize
-	bool unionisstruct[10];			// updated to move offset for structure in structure
+	int unionoffset[16];			// backup offset before we enter union or structure
+	int unionsize[16];				// calculate unionsize
+	bool unionisstruct[16];		// updated to move offset for structure in structure
+	int structalign[16];			// keep track of struct alignment
 	int totalunionsize = 0;			// total size of all unions and structures in structure
 	int uniondepth = 0;				// count how deep we are in union/structure
 	int align = 0;
-	int *aligntotal = &align;				// pointer alignment for total structure
+	int *aligntotal = &align;		// pointer alignment for total structure
 	int thissize;					// used to save size returned from IsDefaultType
-	
+	int maxsize = 0;				// max size of union or struct
+
 	// following are used to find variable and also get size of a structure defined in variable
 	// this will hold the variable reference and offset that is given to size() to align if necessary in 64-bit
 	ResultType Result = OK;
@@ -100,7 +183,8 @@ BIF_DECL(BIF_sizeof)
 	}
 	if (aParamCount > 2 && TokenIsPureNumeric(*aParam[2]))
 	{   // a pointer was given to return memory to align
-		aligntotal = (int *)TokenToInt64(*aParam[2],true);
+		aligntotal = (int*)TokenToInt64(*aParam[2], true);
+		Var3.value_int64 = (__int64)aligntotal;
 	}
 	// Set buf to beginning of structure definition
 	buf = TokenToString(*aParam[0]);
@@ -129,7 +213,11 @@ BIF_DECL(BIF_sizeof)
 				unionisstruct[uniondepth] = false; 
 			// backup offset because we need to set it back after this union / struct was parsed
 			// unionsize is initialized to 0 and buffer moved to next character
-			unionoffset[uniondepth] = offset; 
+			if (mod = offset % (maxsize = sizeof_maxsize(buf)))
+				offset += (maxsize - mod) % maxsize;
+			structalign[uniondepth] = *aligntotal > maxsize ? *aligntotal : maxsize;
+			*aligntotal = 0;
+			unionoffset[uniondepth] = offset; // backup offset 
 			unionsize[uniondepth] = 0;
 			// ignore even any wrong input here so it is even {mystructure...} for struct and  {anyother string...} for union
 			buf = _tcschr(buf,'{') + 1;
@@ -137,22 +225,27 @@ BIF_DECL(BIF_sizeof)
 		} 
 		else if (*buf == '}')
 		{	// update union
-			// now restore offset even if we had a structure in structure
+			// now restore or correct offset even if we had a structure in structure
+			if (uniondepth > 1 && unionisstruct[uniondepth - 1])
+			{
+				if (mod = offset % structalign[uniondepth])
+					offset += (structalign[uniondepth] - mod) % structalign[uniondepth];
+			}
+			else
+				offset = unionoffset[uniondepth];
+			if (unionisstruct[uniondepth] && structalign[uniondepth] > *aligntotal)
+				*aligntotal = structalign[uniondepth];
 			if (unionsize[uniondepth]>totalunionsize)
 				totalunionsize = unionsize[uniondepth];
 			// last item in union or structure, update offset now if not struct, for struct offset is up to date
 			if (--uniondepth == 0)
 			{
 				// end of structure, align it
-				if (totalunionsize % *aligntotal)
-					totalunionsize += *aligntotal - (totalunionsize % *aligntotal);
-				if (!unionisstruct[uniondepth + 1]) // because it was decreased above
-					offset += totalunionsize;
-				else if (offset % *aligntotal)
-					offset += *aligntotal - (offset % *aligntotal);
+				if (mod = totalunionsize % *aligntotal)
+					totalunionsize += (*aligntotal - mod) % *aligntotal;
+				// correct offset
+				offset += totalunionsize;
 			}
-			else 
-				offset = unionoffset[uniondepth];
 			buf++;
 			if (buf == StrChrAny(buf,_T(";,")))
 				buf++;
@@ -191,20 +284,16 @@ BIF_DECL(BIF_sizeof)
 		if (_tcschr(tempbuf,'*'))
 		{
 			// align offset for pointer
-			if (offset % ptrsize)
-			{
-				offset += (ptrsize - (offset % ptrsize));
-				if (uniondepth && offset > unionoffset[uniondepth])
-					unionoffset[uniondepth] = offset;
-			}
+			if (mod = offset % ptrsize)
+				offset += (ptrsize - mod) % ptrsize;
 			offset += ptrsize * (arraydef ? arraydef : 1);
 			if (ptrsize > *aligntotal)
 				*aligntotal = ptrsize;
 			// update offset
 			if (uniondepth)
 			{
-				if ((offset - unionoffset[uniondepth]) > unionsize[uniondepth])
-					unionsize[uniondepth] = offset - unionoffset[uniondepth];
+				if ((maxsize = offset - unionoffset[uniondepth]) > unionsize[uniondepth])
+					unionsize[uniondepth] = maxsize;
 				// reset offset if in union and union is not a structure
 				if (!unionisstruct[uniondepth])
 					offset = unionoffset[uniondepth];
@@ -238,15 +327,11 @@ BIF_DECL(BIF_sizeof)
 			if (!_tcscmp(defbuf,_T(" bool ")))
 				thissize = 1;
 			// align offset
-			if (thissize > 1 && offset % thissize)
-			{
-				offset += thissize - (offset % thissize);
-				if (uniondepth && offset > unionoffset[uniondepth])
-					unionoffset[uniondepth] = offset;
-			}
+			if (thissize > 1 && (mod = offset % thissize))
+				offset += (thissize - mod) % thissize;
 			offset += thissize * (arraydef ? arraydef : 1);
 			if (thissize > *aligntotal)
-				*aligntotal = thissize>ptrsize ? ptrsize : thissize;
+				*aligntotal = thissize; // > ptrsize ? ptrsize : thissize;
 		}
 		else // type was not found, check for user defined type in variables
 		{
@@ -286,12 +371,8 @@ BIF_DECL(BIF_sizeof)
 				{	// could not resolve structure
 					return;
 				}
-				if (offset % *aligntotal)
-				{
-					offset += *aligntotal - (offset % *aligntotal);
-					if (uniondepth && offset > unionoffset[uniondepth])
-						unionoffset[uniondepth] = offset;
-				}
+				if (offset && (mod = offset % *aligntotal))
+					offset += (*aligntotal - mod) % *aligntotal;
 				// sizeof was given an offset that it applied and aligned if necessary, so set offset =  and not +=
 				offset = (int)ResultToken.value_int64 + (arraydef ? ((arraydef - 1) * ((int)ResultToken.value_int64 - offset)) : 0);
 			}
@@ -301,8 +382,8 @@ BIF_DECL(BIF_sizeof)
 		// update union size
 		if (uniondepth)
 		{
-			if ((offset - unionoffset[uniondepth]) > unionsize[uniondepth])
-				unionsize[uniondepth] = offset - unionoffset[uniondepth];
+			if ((maxsize = offset - unionoffset[uniondepth]) > unionsize[uniondepth])
+				unionsize[uniondepth] = maxsize;
 			// reset offset if in union and union is not a structure
 			if (!unionisstruct[uniondepth])
 				offset = unionoffset[uniondepth];
@@ -315,8 +396,8 @@ BIF_DECL(BIF_sizeof)
 		else
 			buf += _tcslen(buf);
 	}
-	if (*aligntotal && offset % *aligntotal) // align only if offset was not given
-		offset += *aligntotal - (offset % *aligntotal);
+	if (*aligntotal && (mod = offset % *aligntotal)) // align only if offset was not given
+		offset += (*aligntotal - mod) % *aligntotal;
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = offset;
 }
