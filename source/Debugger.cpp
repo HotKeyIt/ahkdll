@@ -1598,7 +1598,7 @@ int Debugger::ParsePropertyName(const char *aFullName, int aVarScope, bool aVarM
 					break;
 				default:
 					criobj = NULL; strct = NULL;
-					sBaseField->Assign(aResultToken.marker);
+					sBaseField->Assign(aResultToken);
 					break;
 			}
 			delete aVarToken;
