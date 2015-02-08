@@ -1595,18 +1595,6 @@ int Debugger::ParsePropertyName(const char *aFullName, int aVarScope, bool aVarM
 			sBaseField->key.s = key.s;
 			switch (sBaseField->symbol = aResultToken.symbol)
 			{
-				case SYM_STRING:
-					criobj = NULL;strct = NULL;
-					sBaseField->marker = aResultToken.marker;
-					break;
-				case SYM_INTEGER:
-					criobj = NULL;strct = NULL;
-					sBaseField->n_int64 = aResultToken.value_int64;
-					break;
-				case SYM_FLOAT:
-					criobj = NULL;strct = NULL;
-					sBaseField->n_double = aResultToken.value_double;
-					break;
 				case SYM_OBJECT:
 					sBaseField->object = aResultToken.object;
 					if (criobj)
@@ -1625,6 +1613,10 @@ int Debugger::ParsePropertyName(const char *aFullName, int aVarScope, bool aVarM
 						strct = NULL;
 						strct = dynamic_cast<Struct *>(aResultToken.object);
 					}
+					break;
+				default:
+					criobj = NULL; strct = NULL;
+					sBaseField->Assign(aResultToken);
 					break;
 			}
 			delete aVarToken;
