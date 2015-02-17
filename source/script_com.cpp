@@ -3,6 +3,7 @@
 #include "script.h"
 #include "script_object.h"
 #include "script_com.h"
+#include <DispEx.h>
 #include "MemoryModule.h"
 
 // IID__IObject -- .NET's System.Object:
@@ -43,13 +44,13 @@ BIF_DECL(BIF_ComObjCreate)
 			
 			// Return dispatchable object.
 			if ( !(aResultToken.object = new ComObject(pdisp)) )
-				break;
+				_f_throw(ERR_OUTOFMEM);
 			aResultToken.symbol = SYM_OBJECT;
 		}
 		return;
 	}
 	_f_set_retval_p(_T(""), 0);
-	ComError(hr);
+	ComError(hr, aResultToken);
 }
 
 
@@ -66,9 +67,10 @@ BIF_DECL(BIF_ComObjGet)
 			return;
 		}
 		pdisp->Release();
+		_f_throw(ERR_OUTOFMEM);
 	}
 	_f_set_retval_p(_T(""), 0);
-	ComError(hr);
+	ComError(hr, aResultToken);
 }
 
 BIF_DECL(BIF_ComObjDll)
@@ -76,16 +78,15 @@ BIF_DECL(BIF_ComObjDll)
 	if ((aParam[0]->symbol != SYM_INTEGER && aParam[0]->symbol != SYM_VAR)
 		|| (aParam[1]->symbol != SYM_STRING && aParam[1]->symbol != SYM_VAR))
 	{
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
-		ComError(TYPE_E_CANTLOADLIBRARY);
+		_f_set_retval_p(_T(""), 0);
+		ComError(TYPE_E_CANTLOADLIBRARY, aResultToken);
 		return; // simply exit
 	}
     HMODULE hDLL = (HMODULE)TokenToInt64(*aParam[0]);
 	
 	if (hDLL == NULL)
 	{
-		ComError(TYPE_E_CANTLOADLIBRARY);
+		ComError((HRESULT)TYPE_E_CANTLOADLIBRARY, aResultToken);
 		return;
 	}
 
@@ -102,9 +103,8 @@ BIF_DECL(BIF_ComObjDll)
 	HRESULT hr;
     hr = GetClassObject(clsid, IID_IClassFactory, (LPVOID*)&pClassFactory);
     if(FAILED(hr)){
-        ComError(hr);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		_f_set_retval_p(_T(""), 0);
+        ComError(hr, aResultToken);
 		return;
     }
 	IDispatch *pdisp;
@@ -112,9 +112,8 @@ BIF_DECL(BIF_ComObjDll)
     pClassFactory->Release();
     if(FAILED(hr))
     {
-        ComError(hr);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		_f_set_retval_p(_T(""), 0);
+        ComError(hr, aResultToken);
 		return;
     }
 	if (aResultToken.object = new ComObject(pdisp))
@@ -123,9 +122,8 @@ BIF_DECL(BIF_ComObjDll)
 		return;
 	}
 	pdisp->Release();
-    ComError(hr);
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = _T("");
+	_f_set_retval_p(_T(""), 0);
+	ComError(hr, aResultToken);
 }
 
 BIF_DECL(BIF_ComObject)
@@ -216,7 +214,9 @@ BIF_DECL(BIF_ComObjActive)
 		if (SUCCEEDED(hr))
 		{
 			IDispatch *pdisp;
-			if (SUCCEEDED(punk->QueryInterface(IID_IDispatch, (void **)&pdisp)))
+			hr = punk->QueryInterface(IID_IDispatch, (void **)&pdisp);
+			punk->Release();
+			if (SUCCEEDED(hr))
 			{
 				if (ComObject *obj = new ComObject(pdisp))
 				{
@@ -225,15 +225,14 @@ BIF_DECL(BIF_ComObjActive)
 				}
 				else
 				{
-					hr = E_OUTOFMEMORY;
 					pdisp->Release();
+					_f_throw(ERR_OUTOFMEM);
 				}
 			}
-			punk->Release();
 		}
 	}
 	if (FAILED(hr))
-		ComError(hr);
+		ComError(hr, aResultToken);
 }
 
 
@@ -348,14 +347,15 @@ BIF_DECL(BIF_ComObjConnect)
 			if (aParamCount < 2)
 				obj->mEventSink->Connect(); // Disconnect.
 			else
-				obj->mEventSink->Connect(TokenToString(*aParam[1]), TokenToObject(*aParam[1]));
+				if (!obj->mEventSink->Connect(TokenToString(*aParam[1]), TokenToObject(*aParam[1])))
+					aResultToken.SetExitResult(FAIL);
 			return;
 		}
 
-		ComError(E_NOINTERFACE);
+		ComError(E_NOINTERFACE, aResultToken);
 	}
 	else
-		ComError(-1); // "No COM object"
+		ComError(-1, aResultToken); // "No COM object"
 }
 
 
@@ -499,7 +499,7 @@ BIF_DECL(BIF_ComObjQuery)
 		if (punk < (IUnknown *)65536) // Error-detection: the first 64KB of address space is always invalid.
 		{
 			g->LastError = E_INVALIDARG; // For consistency.
-			ComError(-1);
+			ComError(-1, aResultToken);
 			return;
 		}
 	}
@@ -878,7 +878,15 @@ void RValueToResultToken(ExprTokenType &aRValue, ExprTokenType &aResultToken)
 
 bool g_ComErrorNotify = true;
 
-void ComError(HRESULT hr, LPTSTR name, EXCEPINFO* pei)
+ResultType ComError(HRESULT hr)
+{
+	ResultToken errorToken;
+	errorToken.SetResult(OK);
+	ComError(hr, errorToken);
+	return errorToken.Result();
+}
+
+void ComError(HRESULT hr, ResultToken &aResultToken, LPTSTR name, EXCEPINFO* pei)
 {
 	if (hr != DISP_E_EXCEPTION)
 		pei = NULL;
@@ -907,7 +915,8 @@ void ComError(HRESULT hr, LPTSTR name, EXCEPINFO* pei)
 			error_text = buf;
 		}
 
-		g_script.mCurrLine->LineError(error_text, EARLY_EXIT, name);
+		if (g_script.mCurrLine->LineError(error_text, EARLY_EXIT, name) == FAIL)
+			aResultToken.SetExitResult(FAIL); // An exception was thrown.
 	}
 
 	if (pei)
@@ -961,15 +970,15 @@ STDMETHODIMP ComEvent::Invoke(DISPID dispIdMember, REFIID riid, LCID lcid, WORD 
 	DISPPARAMS dispParams;
 	VARIANTARG *vargs = (VARIANTARG *)_alloca((cArgs + 1) * sizeof(VARIANTARG));
 	memcpy(&dispParams, pDispParams, sizeof(dispParams));
-	memcpy(vargs, pDispParams->rgvarg, cArgs * sizeof(VARIANTARG));
+	memcpy(vargs + 1, pDispParams->rgvarg, cArgs * sizeof(VARIANTARG));
 	dispParams.rgvarg = vargs;
 	
-	// Pass our object last for either of the following cases:
+	// Pass our object last (right-to-left) for either of the following cases:
 	//	a) Our caller doesn't include its IDispatch interface pointer in the parameter list.
 	//	b) The script needs a reference to the original wrapper object; i.e. mObject.
-	vargs[cArgs].vt = VT_DISPATCH;
-	vargs[cArgs].pdispVal = mObject;
-	++dispParams.cArgs;
+	vargs[0].vt = VT_DISPATCH;
+	vargs[0].pdispVal = mObject;
+	dispParams.cArgs = ++cArgs;
 
 	HRESULT hr;
 	IDispatch *func;
@@ -1000,7 +1009,7 @@ STDMETHODIMP ComEvent::Invoke(DISPID dispIdMember, REFIID riid, LCID lcid, WORD 
 	return S_OK;
 }
 
-void ComEvent::Connect(LPTSTR pfx, IObject *ahkObject)
+ResultType ComEvent::Connect(LPTSTR pfx, IObject *ahkObject)
 {
 	HRESULT hr;
 
@@ -1049,9 +1058,10 @@ void ComEvent::Connect(LPTSTR pfx, IObject *ahkObject)
 			_tcscpy(mPrefix, pfx);
 		else
 			*mPrefix = '\0'; // For maintainability.
+		return OK;
 	}
 	else
-		ComError(hr);
+		return ComError(hr);
 }
 
 ResultType STDMETHODCALLTYPE ComObject::Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount)
@@ -1080,8 +1090,8 @@ ResultType STDMETHODCALLTYPE ComObject::Invoke(ResultToken &aResultToken, ExprTo
 		}
 		// For other types, this syntax is reserved for possible future use.  However, it could
 		// be x[prms*] where prms is an empty array or not an array at all, so raise an error:
-		ComError(g->LastError = hr);
-		return OK;
+		ComError(g->LastError = hr, aResultToken);
+		return aResultToken.Result();
 	}
 
 	if (mVarType != VT_DISPATCH || !mDispatch)
@@ -1090,8 +1100,8 @@ ResultType STDMETHODCALLTYPE ComObject::Invoke(ResultToken &aResultToken, ExprTo
 			return SafeArrayInvoke(aResultToken, aFlags, aParam, aParamCount);
 		// Otherwise: this object can't be invoked.
 		g->LastError = DISP_E_BADVARTYPE; // Seems more informative than -1.
-		ComError(-1);
-		return OK;
+		ComError(-1, aResultToken);
+		return aResultToken.Result();
 	}
 
 	static DISPID dispidParam = DISPID_PROPERTYPUT;
@@ -1130,12 +1140,40 @@ ResultType STDMETHODCALLTYPE ComObject::Invoke(ResultToken &aResultToken, ExprTo
 	else
 	{
 #ifdef UNICODE
-		hr = mDispatch->GetIDsOfNames(IID_NULL, &aName, 1, LOCALE_USER_DEFAULT, &dispid);
+		LPOLESTR wname = aName;
 #else
 		CStringWCharFromChar cnvbuf(aName);
-		LPOLESTR cnvbuf_ptr = (LPOLESTR)(LPCWSTR)cnvbuf;
-		hr = mDispatch->GetIDsOfNames(IID_NULL, &cnvbuf_ptr, 1, LOCALE_USER_DEFAULT, &dispid);
+		LPOLESTR wname = (LPOLESTR)(LPCWSTR)cnvbuf;
 #endif
+		hr = mDispatch->GetIDsOfNames(IID_NULL, &wname, 1, LOCALE_USER_DEFAULT, &dispid);
+		if (hr == DISP_E_UNKNOWNNAME) // v1.1.18: Retry with IDispatchEx if supported, to allow creating new properties.
+		{
+			if (IS_INVOKE_SET)
+			{
+				IDispatchEx *dispEx;
+				if (SUCCEEDED(mDispatch->QueryInterface<IDispatchEx>(&dispEx)))
+				{
+					BSTR bname = SysAllocString(wname);
+					// fdexNameEnsure gives us a new ID if needed, though GetIDsOfNames() will
+					// still fail for some objects until after the assignment is performed below.
+					hr = dispEx->GetDispID(bname, fdexNameEnsure, &dispid);
+					SysFreeString(bname);
+					dispEx->Release();
+				}
+			}
+			else if (IS_INVOKE_CALL && TokenIsEmptyString(*aParam[0]))
+			{
+				// Fn.() and %Fn%() both produce this condition.  aParam[0] is checked instead of aName
+				// because aName is also empty if an object was passed, as for Fn[Obj]() or {X: Fn}.X().
+				// Although allowing JScript functions to act as methods of AutoHotkey objects could be
+				// useful, a different approach would be needed to pass 'this', such as:
+				//  - IDispatchEx::InvokeEx with the named arg DISPID_THIS.
+				//  - Fn.call(this) -- this would also work with AutoHotkey functions, but would break
+				//    existing meta-function scripts.
+				dispid = DISPID_VALUE;
+				hr = S_OK;
+			}
+		}
 	}
 	if (SUCCEEDED(hr)
 		// For obj.x:=y where y is a ComObject, invoke PROPERTYPUTREF first:
@@ -1155,7 +1193,7 @@ ResultType STDMETHODCALLTYPE ComObject::Invoke(ResultToken &aResultToken, ExprTo
 
 	if	(FAILED(hr))
 	{
-		ComError(hr, aName, &excepinfo);
+		ComError(hr, aResultToken, aName, &excepinfo);
 	}
 	else if	(IS_INVOKE_SET)
 	{
@@ -1170,7 +1208,7 @@ ResultType STDMETHODCALLTYPE ComObject::Invoke(ResultToken &aResultToken, ExprTo
 	}
 
 	g->LastError = hr;
-	return	OK;
+	return	aResultToken.Result();
 }
 
 ResultType ComObject::SafeArrayInvoke(ResultToken &aResultToken, int aFlags, ExprTokenType *aParam[], int aParamCount)
@@ -1215,8 +1253,8 @@ ResultType ComObject::SafeArrayInvoke(ResultToken &aResultToken, int aFlags, Exp
 		}
 		g->LastError = hr;
 		if (FAILED(hr))
-			ComError(hr);
-		return OK;
+			ComError(hr, aResultToken);
+		return aResultToken.Result();
 	}
 
 	UINT dims = SafeArrayGetDim(psa);
@@ -1263,8 +1301,8 @@ ResultType ComObject::SafeArrayInvoke(ResultToken &aResultToken, int aFlags, Exp
 
 	g->LastError = hr;
 	if (FAILED(hr))
-		ComError(hr);
-	return OK;
+		ComError(hr, aResultToken);
+	return aResultToken.Result();
 }
 
 
@@ -1471,12 +1509,14 @@ STDMETHODIMP IObjectComCompatible::Invoke(DISPID dispIdMember, REFIID riid, LCID
 		}
 		param[0] = &param_token[0];
 		++param_count;
+		if (flags == IT_CALL && (wFlags & DISPATCH_PROPERTYGET))
+			flags |= IF_CALL_FUNC_ONLY;
 	}
 	else
 	{
 		if (dispIdMember != DISPID_VALUE)
 			return DISP_E_MEMBERNOTFOUND;
-		if (flags == IT_CALL)
+		if (flags == IT_CALL && !(wFlags & DISPATCH_PROPERTYGET))
 		{
 			// This approach works well for Func, but not for an Object implementing __Call,
 			// which always expects a method name or the object whose method is being called:
@@ -1484,14 +1524,16 @@ STDMETHODIMP IObjectComCompatible::Invoke(DISPID dispIdMember, REFIID riid, LCID
 			//++first_param;
 			// This is consistent with %func%():
 			param_token[0].symbol = SYM_STRING;
-			param_token[0].marker = _T("");
+			param_token[0].marker = _T("Call");
 			param[0] = &param_token[0];
 			++param_count;
-			if (wFlags & DISPATCH_PROPERTYGET)
-				flags |= IF_CALL_FUNC_ONLY;
 		}
 		else
+		{
+			if (flags == IT_CALL) // Obj(X) in VBScript and C#, or Obj[X] in C#
+				flags = IT_GET|IF_FUNCOBJ;
 			++first_param;
+		}
 	}
 	
 	for (UINT i = 1; i <= cArgs; ++i)
@@ -1510,22 +1552,53 @@ STDMETHODIMP IObjectComCompatible::Invoke(DISPID dispIdMember, REFIID riid, LCID
 	HRESULT result_to_return;
 	FuncResult result_token;
 
-	// Call method of mAhkObject by name.
-	switch (static_cast<IObject *>(this)->Invoke(result_token, this_token, flags, first_param, param_count))
+	for (;;)
 	{
-	case FAIL:
-		result_to_return = E_FAIL;
-		break;
-	case INVOKE_NOT_HANDLED:
-		if (flags == IT_CALL)
+		switch (static_cast<IObject *>(this)->Invoke(result_token, this_token, flags, first_param, param_count))
 		{
-			result_to_return = DISP_E_MEMBERNOTFOUND;
+		case FAIL:
+			result_to_return = E_FAIL;
+			if (g->ThrownToken)
+			{
+				Object *obj;
+				if (pExcepInfo && (obj = dynamic_cast<Object*>(TokenToObject(*g->ThrownToken)))) // MSDN: pExcepInfo "Can be NULL"
+				{
+					ZeroMemory(pExcepInfo, sizeof(EXCEPINFO));
+					pExcepInfo->scode = result_to_return = DISP_E_EXCEPTION;
+					
+					#define SysStringFromToken(...) \
+						SysAllocString(CStringWCharFromTCharIfNeeded(TokenToString(__VA_ARGS__)))
+
+					ExprTokenType token;
+					if (obj->GetItem(token, _T("Message")))
+						pExcepInfo->bstrDescription = SysStringFromToken(token, result_token.buf);
+					if (obj->GetItem(token, _T("What")))
+						pExcepInfo->bstrSource = SysStringFromToken(token, result_token.buf);
+					if (obj->GetItem(token, _T("File")))
+						pExcepInfo->bstrHelpFile = SysStringFromToken(token, result_token.buf);
+					if (obj->GetItem(token, _T("Line")))
+						pExcepInfo->dwHelpContext = (DWORD)TokenToInt64(token);
+				}
+				g_script.FreeExceptionToken(g->ThrownToken);
+			}
 			break;
+		case INVOKE_NOT_HANDLED:
+			if ((flags & IT_BITMASK) != IT_GET)
+			{
+				if (wFlags & DISPATCH_PROPERTYGET)
+				{
+					flags = IT_GET;
+					continue;
+				}
+				result_to_return = DISP_E_MEMBERNOTFOUND;
+				break;
+			}
+		default:
+			result_to_return = S_OK;
+			if (pVarResult)
+				TokenToVariant(result_token, *pVarResult, FALSE);
 		}
-	default:
-		result_to_return = S_OK;
-		if (pVarResult)
-			TokenToVariant(result_token, *pVarResult, FALSE);
+		break;
 	}
 
 	// Clean up:

@@ -778,7 +778,7 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 	//for (int aParamCount = 0;func.mParamCount > aParamCount && aFuncAndToken->mParamCount > aParamCount;aParamCount++)
 	//	func.mParam[aParamCount].var->AssignString(aFuncAndToken->param[aParamCount]);
 
-	DEBUGGER_STACK_PUSH(func.mJumpToLine, func.mName)
+	DEBUGGER_STACK_PUSH(&func)
 	FuncResult func_call;
 	// func_call.CopyExprFrom(aResultToken);
 	// ExprTokenType &aResultToken = aResultToken_to_return ;
@@ -993,7 +993,7 @@ void callFuncDllVariant(FuncAndToken *aFuncAndToken)
 	g_ErrorLevel->Backup(ErrorLevel_saved);
 	InitNewThread(0, false, true, func.mJumpToLine->mActionType);
 
-		DEBUGGER_STACK_PUSH(func.mJumpToLine, func.mName)
+	DEBUGGER_STACK_PUSH(&func)
 	// ExprTokenType aResultToken;
 	// ExprTokenType &aResultToken = aResultToken_to_return ;
 	func.Call(&aResultToken); // Call the UDF.

@@ -283,9 +283,7 @@ Script::Script()
 	, mFileSpec(_T("")), mFileDir(_T("")), mFileName(_T("")), mOurEXE(_T("")), mOurEXEDir(_T("")), mMainWindowTitle(_T(""))
 	, mIsReadyToExecute(false), mAutoExecSectionIsRunning(false)
 	, mIsRestart(false), mErrorStdOut(false)
-#ifdef AUTOHOTKEYSC
-	, mCompiledHasCustomIcon(false)
-#else
+#ifndef AUTOHOTKEYSC
 	, mIncludeLibraryFunctionsThenExit(NULL)
 #endif
 	, mUninterruptedLineCountMax(1000), mUninterruptibleTime(15)
@@ -843,7 +841,7 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 			&& (dot = _tcsrchr(suffix, '.')) // Find extension part of name.
 			&& dot - exe_buf + 5 < _countof(exe_buf)) // Enough space in buffer?
 		{
-			_tcscpy(dot, _T(".ahk"));
+			_tcscpy(dot, EXT_AUTOHOTKEY);
 		}
 		else // Very unlikely.
 			return FAIL;
@@ -993,7 +991,11 @@ ResultType Script::CreateWindows()
 	//wc.cbClsExtra = 0;
 	//wc.cbWndExtra = 0;
 #ifndef MINIDLL
-	wc.hIcon = wc.hIconSm = (HICON)LoadImage(g_hInstance, MAKEINTRESOURCE(IDI_MAIN), IMAGE_ICON, 0, 0, LR_SHARED); // Use LR_SHARED to conserve memory (since the main icon is loaded for so many purposes).
+	// Load the main icon in the two sizes needed throughout the program:
+	g_IconLarge = ExtractIconFromExecutable(NULL, -IDI_MAIN, 0, 0);
+	g_IconSmall = ExtractIconFromExecutable(NULL, -IDI_MAIN, GetSystemMetrics(SM_CXSMICON), 0);
+	wc.hIcon = g_IconLarge;
+	wc.hIconSm = g_IconSmall;
 	wc.hCursor = LoadCursor((HINSTANCE)NULL, IDC_ARROW);
 	wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);  // Needed for ProgressBar. Old: (HBRUSH)GetStockObject(WHITE_BRUSH);
 	wc.lpszMenuName = MAKEINTRESOURCE(IDR_MENU_MAIN); // NULL; // "MainMenu";
@@ -1182,12 +1184,7 @@ void Script::CreateTrayIcon()
 	mNIC.uID = AHK_NOTIFYICON; // This is also used for the ID, see TRANSLATE_AHK_MSG for details.
 	mNIC.uFlags = NIF_MESSAGE | NIF_TIP | NIF_ICON;
 	mNIC.uCallbackMessage = AHK_NOTIFYICON;
-#ifdef AUTOHOTKEYSC
-	// i.e. don't override the user's custom icon:
-	mNIC.hIcon = mCustomIconSmall ? mCustomIconSmall : (HICON)LoadImage(g_hInstance, MAKEINTRESOURCE(mCompiledHasCustomIcon ? IDI_MAIN : g_IconTray), IMAGE_ICON, 0, 0, LR_SHARED);
-#else // L17: Always use small icon for tray.
-	mNIC.hIcon = mCustomIconSmall ? mCustomIconSmall : (HICON)LoadImage(g_hInstance, MAKEINTRESOURCE(g_IconTray), IMAGE_ICON, 0, 0, LR_SHARED); // Use LR_SHARED to conserve memory (since the main icon is loaded for so many purposes).
-#endif
+	mNIC.hIcon = mCustomIconSmall ? mCustomIconSmall : g_IconSmall;
 	UPDATE_TIP_FIELD
 		// If we were called due to an Explorer crash, I don't think it's necessary to call
 		// Shell_NotifyIcon() to remove the old tray icon because it was likely destroyed
@@ -1212,15 +1209,12 @@ void Script::UpdateTrayIcon(bool aForceUpdate)
 	else if (g->IsPaused)
 		icon = IDI_PAUSE;
 	else if (g_IsSuspended)
-		icon = g_IconTraySuspend;
+		icon = IDI_SUSPEND;
 	else
-#ifdef AUTOHOTKEYSC
-		icon = mCompiledHasCustomIcon ? IDI_MAIN : g_IconTray;  // i.e. don't override the user's custom icon.
-#else
-		icon = g_IconTray;
-#endif
+		icon = IDI_MAIN;
 	// Use the custom tray icon if the icon is normal (non-paused & non-suspended):
 	mNIC.hIcon = (mCustomIconSmall && (mIconFrozen || (!g->IsPaused && !g_IsSuspended))) ? mCustomIconSmall // L17: Always use small icon for tray.
+		: (icon == IDI_MAIN) ? g_IconSmall // Use the pre-loaded small icon for best quality.
 		: (HICON)LoadImage(g_hInstance, MAKEINTRESOURCE(icon), IMAGE_ICON, 0, 0, LR_SHARED); // Use LR_SHARED for simplicity and performance more than to conserve memory in this case.
 	if (Shell_NotifyIcon(NIM_MODIFY, &mNIC))
 	{
@@ -1301,7 +1295,7 @@ ResultType Script::AutoExecSection()
 		mLastPeekTime = GetTickCount();
 
 		++g_nThreads;
-		DEBUGGER_STACK_PUSH(mFirstLine, _T("Auto-execute section"))
+		DEBUGGER_STACK_PUSH(_T("Auto-execute"))
 			ExecUntil_result = mFirstLine->ExecUntil(UNTIL_RETURN); // Might never return (e.g. infinite loop or ExitApp).
 		DEBUGGER_STACK_POP()
 			--g_nThreads;
@@ -1557,7 +1551,7 @@ ResultType Script::ExitApp(ExitReasons aExitReason, LPTSTR aBuf, int aExitCode)
 	g_AllowInterruption = FALSE; // Mark the thread just created above as permanently uninterruptible (i.e. until it finishes and is destroyed).
 
 	sExitFuncIsRunning = true;
-	DEBUGGER_STACK_PUSH(mOnExitFunc->mJumpToLine, _T("OnExit"))
+	DEBUGGER_STACK_PUSH(_T("OnExit"))
 
 		// Set the parameter to be either the exit code or the exit reason:
 		FuncResult result_token;
@@ -2252,6 +2246,7 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 #ifndef MINIDLL
 	HookActionType hook_action;
 	bool is_label, suffix_has_tilde, hook_is_mandatory, in_comment_section, hotstring_options_all_valid;
+	ResultType hotkey_validity;
 #else
 	bool is_label, in_comment_section;
 #endif
@@ -2746,11 +2741,11 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 			}
 		} // for() each sub-line (continued line) that composes this line.
 
+	process_completed_line:
 		// buf_length can't be -1 (though next_buf_length can) because outer loop's condition prevents it:
 		if (!buf_length) // Done only after the line number increments above so that the physical line number is properly tracked.
 			goto continue_main_loop; // In lieu of "continue", for performance.
 
-	process_completed_line:
 		// Since neither of the above executed, or they did but didn't "continue",
 		// buf now contains a non-commented line, either by itself or built from
 		// any continuation sections/lines that might have been present.  Also note that
@@ -3092,8 +3087,19 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 				cp = omit_trailing_whitespace(buf, hotkey_flag); // For maintainability.
 				orig_char = *cp;
 				*cp = '\0'; // Temporarily terminate.
-				if (!Hotkey::TextInterpret(omit_leading_whitespace(buf), NULL, false)) // Passing NULL calls it in validate-only mode.
+				hotkey_validity = Hotkey::TextInterpret(omit_leading_whitespace(buf), NULL, false); // Passing NULL calls it in validate-only mode.
+				switch (hotkey_validity)
+				{
+				case FAIL:
 					hotkey_flag = NULL; // It's not a valid hotkey, so indicate that it's a command (i.e. one that contains a literal double-colon, which avoids the need to escape the double-colon).
+					break;
+				case CONDITION_FALSE:
+					return FAIL; // It's an invalid hotkey and above already displayed the error message.
+					//case CONDITION_TRUE:
+					// It's a key that doesn't exist on the current keyboard layout.  Leave hotkey_flag set
+					// so that the section below handles it as a hotkey.  This allows it to end the auto-exec
+					// section and register the appropriate label even though it won't be an active hotkey.
+				}
 				*cp = orig_char; // Undo the temp. termination above.
 			}
 		}
@@ -3124,7 +3130,6 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 				cp = hotkey_flag; // Set default, conditionally overridden below (v1.0.44.07).
 				// v1.0.40: Check if this is a remap rather than hotkey:
 				if (*hotkey_flag // This hotkey's action is on the same line as its label.
-					&& (remap_source_vk = TextToVK(cp1 = Hotkey::TextToModifiers(buf, NULL)))
 					&& (remap_dest_vk = hotkey_flag[1] ? TextToVK(cp = Hotkey::TextToModifiers(hotkey_flag, NULL)) : 0xFF)) // And the action appears to be a remap destination rather than a command.
 					// For above:
 					// Fix for v1.0.44.07: Set remap_dest_vk to 0xFF if hotkey_flag's length is only 1 because:
@@ -3140,6 +3145,7 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 					// would trigger such a bug.
 				{
 					// These will be ignored in other stages if it turns out not to be a remap later below:
+					remap_source_vk = TextToVK(cp1 = Hotkey::TextToModifiers(buf, NULL)); // An earlier stage verified that it's a valid hotkey, though VK could be zero.
 					remap_source_is_mouse = IsMouseVK(remap_source_vk);
 					remap_dest_is_mouse = IsMouseVK(remap_dest_vk);
 					remap_keybd_to_mouse = !remap_source_is_mouse && remap_dest_is_mouse;
@@ -3296,16 +3302,29 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 							// Require the hook for all variants of this hotkey if any variant requires it.
 							// This seems more intuitive than the old behaviour, which required $ or #UseHook
 							// to be used on the *first* variant, even though it affected all variants.
+#ifdef CONFIG_WIN9X
 							if (g_os.IsWin9x())
 								hk->mUnregisterDuringThread = true;
 							else
+#endif
 								hk->mKeybdHookMandatory = true;
 						}
 					}
 				}
 				else // No parent hotkey yet, so create it.
 					if (!(hk = Hotkey::AddHotkey(mLastLabel, hook_action, NULL, suffix_has_tilde, false)))
-						return FAIL; // It already displayed the error.
+					{
+						if (hotkey_validity != CONDITION_TRUE)
+							return FAIL; // It already displayed the error.
+						// This hotkey uses a single-character key name, which could be valid on some other
+						// keyboard layout.  Allow the script to start, but warn the user about the problem.
+						// Note that this hotkey's label is still valid even though the hotkey wasn't created.
+						if (!mIncludeLibraryFunctionsThenExit) // Current keyboard layout is not relevant in /iLib mode.
+						{
+							sntprintf(msg_text, _countof(msg_text), _T("Note: The hotkey %s will not be active because it does not exist in the current keyboard layout."), buf);
+							MsgBox(msg_text);
+						}
+					}
 			}
 			goto continue_main_loop; // In lieu of "continue", for performance.
 		} // if (is_label = ...)
@@ -3326,7 +3345,8 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 				is_label = false;
 				break;
 				}
-			if (is_label) // It's a generic, non-hotkey/non-hotstring label.
+			if (is_label // It's a generic label, since valid hotkeys and hotstrings have already been handled.
+				&& !(buf[buf_length - 2] == ':' && buf_length > 2)) // i.e. allow "::" as a normal label, but consider anything else with double-colon to be an error (reported at a later stage).
 			{
 				// v1.0.44.04: Fixed this check by moving it after the above loop.
 				// Above has ensured buf_length>1, so it's safe to check for double-colon:
@@ -3337,12 +3357,11 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 				// have a "ä" key. Without this change, if such a hotkey appears at the top of the script,
 				// its subroutine would execute immediately as a normal label, which would be especially
 				// bad if the hotkey were something like the "Shutdown" command.
-				if (buf[buf_length - 2] == ':' && buf_length > 2) // i.e. allow "::" as a normal label, but consider anything else with double-colon to be a failed-hotkey label that terminates the auto-exec section.
-				{
-					//CHECK_mNoHotkeyLabels // Terminate the auto-execute section since this is a failed hotkey vs. a mere normal label.
-					sntprintf(msg_text, _countof(msg_text), _T("Note: The hotkey %s will not be active because it does not exist in the current keyboard layout."), buf);
-					MsgBox(msg_text);
-				}
+				// Update: Hotkeys with single-character names like ^!ä are now handled earlier, so that
+				// anything else with double-colon can be detected as an error.  The checks above prevent
+				// something like foo:: from being interpreted as a generic label, so when the line fails
+				// to resolve to a command or expression, an error message will be shown.
+
 				buf[--buf_length] = '\0';  // Remove the trailing colon.
 				rtrim(buf, buf_length); // Has already been ltrimmed.
 				if (!AddLabel(buf, false))
@@ -3727,9 +3746,9 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 #else
 	if (hRes = FindResource(NULL, _T(">AUTOHOTKEY SCRIPT<"), MAKEINTRESOURCE(RT_RCDATA)))
 #endif
-		mCompiledHasCustomIcon = false;
+	{}
 	else if (hRes = FindResource(NULL, _T(">AHK WITH ICON<"), MAKEINTRESOURCE(RT_RCDATA)))
-		mCompiledHasCustomIcon = true;
+	{}
 
 	if (!(hRes
 		&& (textbuf.mLength = SizeofResource(NULL, hRes))
@@ -3773,6 +3792,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 #ifndef MINIDLL
 	HookActionType hook_action;
 	bool is_label, suffix_has_tilde, hook_is_mandatory, in_comment_section, hotstring_options_all_valid;
+	ResultType hotkey_validity;
 #else
 	bool is_label, in_comment_section;
 #endif
@@ -4642,8 +4662,19 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 				cp = omit_trailing_whitespace(buf, hotkey_flag); // For maintainability.
 				orig_char = *cp;
 				*cp = '\0'; // Temporarily terminate.
-				if (!Hotkey::TextInterpret(omit_leading_whitespace(buf), NULL, false)) // Passing NULL calls it in validate-only mode.
+				hotkey_validity = Hotkey::TextInterpret(omit_leading_whitespace(buf), NULL, false); // Passing NULL calls it in validate-only mode.
+				switch (hotkey_validity)
+				{
+				case FAIL:
 					hotkey_flag = NULL; // It's not a valid hotkey, so indicate that it's a command (i.e. one that contains a literal double-colon, which avoids the need to escape the double-colon).
+					break;
+				case CONDITION_FALSE:
+					return FAIL; // It's an invalid hotkey and above already displayed the error message.
+				//case CONDITION_TRUE:
+					// It's a key that doesn't exist on the current keyboard layout.  Leave hotkey_flag set
+					// so that the section below handles it as a hotkey.  This allows it to end the auto-exec
+					// section and register the appropriate label even though it won't be an active hotkey.
+				}
 				*cp = orig_char; // Undo the temp. termination above.
 			}
 		}
@@ -4676,7 +4707,6 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 				cp = hotkey_flag; // Set default, conditionally overridden below (v1.0.44.07).
 				// v1.0.40: Check if this is a remap rather than hotkey:
 				if (*hotkey_flag // This hotkey's action is on the same line as its label.
-					&& (remap_source_vk = TextToVK(cp1 = Hotkey::TextToModifiers(buf, NULL)))
 					&& (remap_dest_vk = hotkey_flag[1] ? TextToVK(cp = Hotkey::TextToModifiers(hotkey_flag, NULL)) : 0xFF)) // And the action appears to be a remap destination rather than a command.
 					// For above:
 					// Fix for v1.0.44.07: Set remap_dest_vk to 0xFF if hotkey_flag's length is only 1 because:
@@ -4692,6 +4722,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 					// would trigger such a bug.
 				{
 					// These will be ignored in other stages if it turns out not to be a remap later below:
+					remap_source_vk = TextToVK(cp1 = Hotkey::TextToModifiers(buf, NULL)); // An earlier stage verified that it's a valid hotkey, though VK could be zero.
 					remap_source_is_mouse = IsMouseVK(remap_source_vk);
 					remap_dest_is_mouse = IsMouseVK(remap_dest_vk);
 					remap_keybd_to_mouse = !remap_source_is_mouse && remap_dest_is_mouse;
@@ -4856,16 +4887,31 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 							// Require the hook for all variants of this hotkey if any variant requires it.
 							// This seems more intuitive than the old behaviour, which required $ or #UseHook
 							// to be used on the *first* variant, even though it affected all variants.
+#ifdef CONFIG_WIN9X
 							if (g_os.IsWin9x())
 								hk->mUnregisterDuringThread = true;
 							else
+#endif
 								hk->mKeybdHookMandatory = true;
 						}
 					}
 				}
 				else // No parent hotkey yet, so create it.
 					if (!(hk = Hotkey::AddHotkey(mLastLabel, hook_action, NULL, suffix_has_tilde, false)))
-						goto FAIL; // It already displayed the error.
+					{
+						if (hotkey_validity != CONDITION_TRUE)
+							goto FAIL; // It already displayed the error.
+						// This hotkey uses a single-character key name, which could be valid on some other
+						// keyboard layout.  Allow the script to start, but warn the user about the problem.
+						// Note that this hotkey's label is still valid even though the hotkey wasn't created.
+#ifndef AUTOHOTKEYSC
+						if (!mIncludeLibraryFunctionsThenExit) // Current keyboard layout is not relevant in /iLib mode.
+#endif
+						{
+							sntprintf(msg_text, _countof(msg_text), _T("Note: The hotkey %s will not be active because it does not exist in the current keyboard layout."), buf);
+							MsgBox(msg_text);
+						}
+					}
 			}
 			goto continue_main_loop; // In lieu of "continue", for performance.
 		} // if (is_label = ...)
@@ -4890,7 +4936,8 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 				is_label = false;
 				break;
 				}
-			if (is_label) // It's a generic, non-hotkey/non-hotstring label.
+			if (is_label // It's a generic label, since valid hotkeys and hotstrings have already been handled.
+				&& !(buf[buf_length - 2] == ':' && buf_length > 2)) // i.e. allow "::" as a normal label, but consider anything else with double-colon to be an error (reported at a later stage).
 			{
 				// v1.0.44.04: Fixed this check by moving it after the above loop.
 				// Above has ensured buf_length>1, so it's safe to check for double-colon:
@@ -4901,12 +4948,10 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 				// have a "ä" key. Without this change, if such a hotkey appears at the top of the script,
 				// its subroutine would execute immediately as a normal label, which would be especially
 				// bad if the hotkey were something like the "Shutdown" command.
-				if (buf[buf_length - 2] == ':' && buf_length > 2) // i.e. allow "::" as a normal label, but consider anything else with double-colon to be a failed-hotkey label that terminates the auto-exec section.
-				{
-					//CHECK_mNoHotkeyLabels // Terminate the auto-execute section since this is a failed hotkey vs. a mere normal label.
-					sntprintf(msg_text, _countof(msg_text), _T("Note: The hotkey %s will not be active because it does not exist in the current keyboard layout."), buf);
-					MsgBox(msg_text);
-				}
+				// Update: Hotkeys with single-character names like ^!ä are now handled earlier, so that
+				// anything else with double-colon can be detected as an error.  The checks above prevent
+				// something like foo:: from being interpreted as a generic label, so when the line fails
+				// to resolve to a command or expression, an error message will be shown.
 				buf[--buf_length] = '\0';  // Remove the trailing colon.
 				rtrim(buf, buf_length); // Has already been ltrimmed.
 				if (!AddLabel(buf, false))
@@ -5336,7 +5381,7 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 				// Restore the working directory.
 				SetCurrentDirectory(buf);
 				// If any file was included, consider it a success; i.e. allow #include <lib> and #include <lib_func>.
-				if (!error_was_shown && file_was_found || ignore_load_failure)
+				if (!error_was_shown && (file_was_found || ignore_load_failure))
 					return CONDITION_TRUE;
 				*parameter_end = '>'; // Restore '>' for display to the user.
 				return error_was_shown ? FAIL : ScriptError(_T("Function library not found."), aBuf);
@@ -9065,16 +9110,16 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	TextMem tmem;
 	TextMem::Buffer textbuf(NULL, 0, false);
 
-#define FUNC_LIB_EXT _T(".ahk")
-#define FUNC_LIB_EXT_LENGTH (_countof(FUNC_LIB_EXT) - 1)
-#define FUNC_LOCAL_LIB _T("\\Lib\\") // Needs leading and trailing backslash.
-#define FUNC_LOCAL_LIB_LENGTH (_countof(FUNC_LOCAL_LIB) - 1)
-#define FUNC_USER_LIB _T("\\AutoHotkey\\Lib\\") // Needs leading and trailing backslash.
-#define FUNC_USER_LIB_LENGTH (_countof(FUNC_USER_LIB) - 1)
-#define FUNC_STD_LIB _T("Lib\\") // Needs trailing but not leading backslash.
-#define FUNC_STD_LIB_LENGTH (_countof(FUNC_STD_LIB) - 1)
+	#define FUNC_LIB_EXT EXT_AUTOHOTKEY
+	#define FUNC_LIB_EXT_LENGTH (_countof(FUNC_LIB_EXT) - 1)
+	#define FUNC_LOCAL_LIB _T("\\Lib\\") // Needs leading and trailing backslash.
+	#define FUNC_LOCAL_LIB_LENGTH (_countof(FUNC_LOCAL_LIB) - 1)
+	#define FUNC_USER_LIB _T("\\AutoHotkey\\Lib\\") // Needs leading and trailing backslash.
+	#define FUNC_USER_LIB_LENGTH (_countof(FUNC_USER_LIB) - 1)
+	#define FUNC_STD_LIB _T("Lib\\") // Needs trailing but not leading backslash.
+	#define FUNC_STD_LIB_LENGTH (_countof(FUNC_STD_LIB) - 1)
 
-#define FUNC_LIB_COUNT 4
+	#define FUNC_LIB_COUNT 4
 	static FuncLibrary sLib[FUNC_LIB_COUNT] = { 0 };
 	static LPTSTR winapi;
 
@@ -11368,6 +11413,12 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, ActionTyp
 			}
 			break;
 
+		case ACT_RETURN:
+			for (Line *parent = line->mParentLine; parent; parent = parent->mParentLine)
+				if (parent->mActionType == ACT_FINALLY)
+					return line->PreparseError(ERR_BAD_JUMP_INSIDE_FINALLY);
+			break;
+
 		case ACT_HOTKEY:
 #ifndef MINIDLL
 			if (!line->ArgHasDeref(1))
@@ -12354,15 +12405,24 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 		// Put operands into the postfix array immediately, then move on to the next infix item:
 		if (IS_OPERAND(infix_symbol))
 		{
-			if (infix_symbol == SYM_DYNAMIC && SYM_DYNAMIC_IS_WRITABLE(this_infix))
+			if (infix_symbol == SYM_DYNAMIC)
 			{
 				// IMPORTANT: VAR_CLIPBOARD is made into SYM_VAR here, but only for assignments.
 				// This allows built-in functions and other places in the code to treat SYM_VAR
 				// as though it's always VAR_NORMAL, which reduces code size and improves maintainability.
+				// Similarly, is_lvalue is set so that a dynamically resolved VAR_VIRTUAL or VAR_CLIPBOARD
+				// will yield SYM_VAR if it's the target of an assignment.
 				sym_prev = this_infix[1].symbol; // Resolve to help macro's code size and performance.
 				if (IS_ASSIGNMENT_OR_POST_OP(sym_prev) // Post-op must be checked for VAR_CLIPBOARD (by contrast, it seems unnecessary to check it for others; see comments below).
 					|| stack_symbol == SYM_PRE_INCREMENT || stack_symbol == SYM_PRE_DECREMENT) // Stack *not* infix.
-					this_infix->symbol = SYM_VAR; // Convert clipboard or environment variable into SYM_VAR.
+				{
+					if (SYM_DYNAMIC_IS_WRITABLE(this_infix))
+						this_infix->symbol = SYM_VAR; // Convert to SYM_VAR.
+					else
+						this_infix->is_lvalue = TRUE; // Mark this as the target of an assignment.
+				}
+				else
+					this_infix->is_lvalue = FALSE;
 				// Above logic might not be perfect because it doesn't check for parens such as (var):=x,
 				// and possibly other obscure types of assignments.
 			}
@@ -13440,6 +13500,8 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ResultToken *aResultToken, Line 
 				// Rather than having PerformLoop() handle LOOP_BREAK specifically, tell our caller to jump to
 				// the line *after* the loop's body. This is always a jump our caller must handle, unlike GOTO:
 				caller_jump_to_line = line->mRelatedLine->mRelatedLine;
+				if (caller_jump_to_line->mActionType == ACT_UNTIL)
+					caller_jump_to_line = caller_jump_to_line->mNextLine;
 			}
 			return LOOP_BREAK;
 
@@ -13723,16 +13785,15 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ResultToken *aResultToken, Line 
 			}
 			if (this_act == ACT_CATCH && line->mActionType == ACT_FINALLY)
 			{
-				if (!g.ThrownToken)
-				{
+				if (result == OK && !jump_to_line)
 					// Let the next iteration handle the finally block.
 					continue;
-				}
 
 				// An exception was thrown, and this try..(catch)..finally block didn't handle it.
 				// Therefore we must execute the finally block before returning.
-				ResultType res = line->ExecUntil(ONLY_ONE_LINE, NULL, &jump_to_line);
-				if (jump_to_line || res == LOOP_BREAK || res == LOOP_CONTINUE)
+				Line *invalid_jump; // Don't overwrite jump_to_line in case the try block used goto.
+				ResultType res = line->ExecUntil(ONLY_ONE_LINE, NULL, &invalid_jump);
+				if (invalid_jump || res == LOOP_BREAK || res == LOOP_CONTINUE || res == EARLY_RETURN)
 					return g_script.mCurrLine->LineError(ERR_BAD_JUMP_INSIDE_FINALLY);
 			}
 
@@ -13965,7 +14026,7 @@ ResultType Line::EvaluateHotCriterionExpression(LPTSTR aHotkeyName)
 	// Critical seems to improve reliability, either because the thread completes faster (i.e. before the timeout) or because we check for messages less often.
 	InitNewThread(0, false, true, ACT_CRITICAL);
 	ResultType result;
-	DEBUGGER_STACK_PUSH(this, _T("#If"))
+	DEBUGGER_STACK_PUSH(_T("#If"))
 
 #ifndef MINIDLL
 		// Update A_ThisHotkey, useful if #If calls a function to do its dirty work.
@@ -17324,7 +17385,7 @@ void Script::ScriptWarning(WarnMode warnMode, LPCTSTR aWarningText, LPCTSTR aExt
 	else
 		OutputDebugString(buf);
 #else
-		g_Debugger.FileAppendStdOut(buf);
+		g_Debugger.FileAppendStdOut(buf) || _fputts(buf, stdout);
 	else
 		g_Debugger.OutputDebug(buf);
 #endif

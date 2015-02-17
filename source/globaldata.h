@@ -187,8 +187,8 @@ EXTERN_SCRIPT;
 EXTERN_CLIPBOARD;
 EXTERN_OSVER;
 #ifndef MINIDLL
-extern int g_IconTray;
-extern int g_IconTraySuspend;
+extern HICON g_IconSmall;
+extern HICON g_IconLarge;
 #endif
 extern DWORD g_OriginalTimeout;
 

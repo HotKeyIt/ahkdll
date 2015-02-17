@@ -502,12 +502,22 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 	// CALL
 	if (IS_INVOKE_CALL)
 	{
-		if (field)
+		if (!field)
+			return INVOKE_NOT_HANDLED;
+		// v1.1.18: The following flag is set whenever a COM client invokes with METHOD|PROPERTYGET,
+		// such as X.Y in VBScript or C#.  Some convenience is gained at the expense of purity by treating
+		// it as METHOD if X.Y is a Func object or PROPERTYGET in any other case.
+		// v1.1.19: Handling this flag here rather than in CallField() has the following benefits:
+		//  - Reduces code duplication.
+		//  - Fixes X.__Call being returned instead of being called, if X.__Call is a string.
+		//  - Allows X.Y(Z) and similar to work like X.Y[Z], instead of ignoring the extra parameters.
+		if ( !(aFlags & IF_CALL_FUNC_ONLY) || (field->symbol == SYM_OBJECT && dynamic_cast<Func *>(field->object)) )
 			return CallField(field, aResultToken, aThisToken, aFlags, aParam, aParamCount);
+		aFlags = (aFlags & ~(IT_BITMASK | IF_CALL_FUNC_ONLY)) | IT_GET;
 	}
 
 	// MULTIPARAM[x,y] -- may be SET[x,y]:=z or GET[x,y], but always treated like GET[x].
-	else if (param_count_excluding_rvalue > 1)
+	if (param_count_excluding_rvalue > 1)
 	{
 		// This is something like this[x,y] or this[x,y]:=z.  Since it wasn't handled by a meta-mechanism above,
 		// handle only the "x" part (automatically creating and storing an object if this[x] didn't already exist
@@ -711,26 +721,17 @@ ResultType Object::CallField(FieldType *aField, ResultToken &aResultToken, ExprT
 {
 	if (aField->symbol == SYM_OBJECT)
 	{
-		ExprTokenType field_token(aField->object);
-		ExprTokenType *tmp = aParam[0];
-		// Something must be inserted into the parameter list to remove any ambiguity between an intentionally
-		// and directly called function of 'that' object and one of our parameters matching an existing name.
-		// Rather than inserting something like an empty string, it seems more useful to insert 'this' object,
-		// allowing 'that' to change (via __Call) the behaviour of a "function-call" which operates on 'this'.
-		// Consequently, if 'that[this]' contains a value, it is invoked; seems obscure but rare, and could
-		// also be of use (for instance, as a means to remove the 'this' parameter or replace it with 'that').
-		aParam[0] = &aThisToken;
-		ResultType r = aField->object->Invoke(aResultToken, field_token, IT_CALL | IF_FUNCOBJ, aParam, aParamCount);
-		aParam[0] = tmp;
-		return r;
-	}
-	if (aFlags & IF_CALL_FUNC_ONLY)
-	{
-		if (aField->symbol == SYM_STRING)
-			TokenSetResult(aResultToken, aField->string, aField->string.Length());
-		else
-			aField->Get(aResultToken);
-		return OK;
+		// Allocate a new array of param pointers that we can modify.
+		ExprTokenType **params = (ExprTokenType **)_alloca((aParamCount + 1) * sizeof(ExprTokenType *));
+		// Shallow copy; points to the same tokens.  Skip aParam[0], which contains
+		// the key used to find aField.  We want to invoke aField.Call(this, aParams*).
+		memcpy(params + 2, aParam + 1, (aParamCount - 1) * sizeof(ExprTokenType*));
+		// Where fn = this[key], call fn.call(this, params*).
+		ExprTokenType field_token(aField->object); // fn
+		ExprTokenType method_name(_T("call"), 4); // Works with JScript functions as well, unlike "Call".
+		params[0] = &method_name; // call
+		params[1] = &aThisToken; // this
+		return aField->object->Invoke(aResultToken, field_token, IT_CALL, params, aParamCount + 1);
 	}
 	if (aField->symbol == SYM_STRING)
 	{
@@ -1654,10 +1655,7 @@ ResultType STDMETHODCALLTYPE Func::Invoke(ResultToken &aResultToken, ExprTokenTy
 	LPTSTR member;
 
 	if (!aParamCount)
-	{
-		member = _T("");
 		aFlags |= IF_FUNCOBJ;
-	}
 	else
 		member = TokenToString(*aParam[0]);
 
@@ -1707,7 +1705,7 @@ ResultType STDMETHODCALLTYPE Func::Invoke(ResultToken &aResultToken, ExprTokenTy
 				_o_return(FALSE);
 			}
 		}
-		if (!TokenIsEmptyString(*aParam[0]))
+		if (_tcsicmp(member, _T("Call")))
 			return INVOKE_NOT_HANDLED; // Reserved.
 		// Called explicitly by script, such as by "%obj.funcref%()" or "x := obj.funcref, x.()"
 		// rather than implicitly, like "obj.funcref()".

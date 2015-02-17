@@ -190,10 +190,19 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 				// Check if it's a normal variable rather than a built-in variable.
 				switch (this_token.var->Type())
   				{
+				case VAR_CLIPBOARD:
+					if (!this_token.is_lvalue)
+						break;
+					// Otherwise, this is the target of an assignment, so must be SYM_VAR:
 				case VAR_NORMAL:
 					this_token.symbol = SYM_VAR; // The fact that a SYM_VAR operand is always VAR_NORMAL (with one limited exception) is relied upon in several places such as built-in functions.
 					goto push_this_token;
 				case VAR_VIRTUAL:
+					if (this_token.is_lvalue)
+					{
+						this_token.symbol = SYM_VAR;
+						goto push_this_token;
+					}
 					if (this_token.var->mVV->Get == BIV_LoopIndex) // v1.0.48.01: Improve performance of A_Index by treating it as an integer rather than a string in expressions (avoids conversions to/from strings).
 					{
 						this_token.SetValue(g->mLoopIteration);
@@ -225,6 +234,14 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 					// with the appropriate SYM_INTEGER value.
 					//
 					break; // case VAR_VIRTUAL
+				default:
+					if (this_token.is_lvalue)
+					{
+						// Having this check here allows us to display the variable name rather than its contents
+						// in the error message.
+						LineError(ERR_VAR_IS_READONLY, FAIL, this_token.var->mName);
+						goto abort;
+					}
   				}
 				// Otherwise, it's a built-in variable.
 				result_size = this_token.var->Get() + 1;
@@ -299,7 +316,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 						memmove(params + 1, params, actual_param_count * sizeof(ExprTokenType *));
 					// Insert an empty string:
 					params[0] = (ExprTokenType *)_alloca(sizeof(ExprTokenType));
-					params[0]->SetValue(_T(""), 0);
+					params[0]->SetValue(_T("Call"), 4);
 					params--; // Include the object, which is already in the right place.
 					actual_param_count += 2;
 					extern ExprOpFunc g_ObjCall;
@@ -1601,7 +1618,7 @@ bool Func::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCo
 		//  1) Allow CreateRuntimeException() to know which function is throwing an exception.
 		//  2) If a UDF is called before the BIF returns, it will show on the call stack.
 		//     e.g. DllCall(RegisterCallback("F")) will show DllCall while F is running.
-		DEBUGGER_STACK_PUSH(g_script.mCurrLine, this)
+		DEBUGGER_STACK_PUSH(this)
 
 		// CALL THE BUILT-IN FUNCTION:
 		mBIF(aResultToken, aParam, aParamCount);

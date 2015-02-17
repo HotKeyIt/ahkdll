@@ -1789,7 +1789,8 @@ ResultType GuiType::Create()
 		wc.lpszClassName = WINDOW_CLASS_GUI;
 		wc.hInstance = g_hInstance;
 		wc.lpfnWndProc = GuiWindowProc;
-		wc.hIcon = wc.hIconSm = (HICON)LoadImage(g_hInstance, MAKEINTRESOURCE(IDI_MAIN), IMAGE_ICON, 0, 0, LR_SHARED); // Use LR_SHARED to conserve memory (since the main icon is loaded for so many purposes).
+		wc.hIcon = g_IconLarge;
+		wc.hIconSm = g_IconSmall;
 		wc.style = CS_DBLCLKS; // v1.0.44.12: CS_DBLCLKS is accepted as a good default by nearly everyone.  It causes the window to receive WM_LBUTTONDBLCLK, WM_RBUTTONDBLCLK, and WM_MBUTTONDBLCLK (even without this, all windows receive WM_NCLBUTTONDBLCLK, WM_NCMBUTTONDBLCLK, and WM_NCRBUTTONDBLCLK).
 			// CS_HREDRAW and CS_VREDRAW are not included above because they cause extra flickering.  It's generally better for a window to manage its own redrawing when it's resized.
 		wc.hCursor = LoadCursor((HINSTANCE) NULL, IDC_ARROW);
@@ -1824,9 +1825,12 @@ ResultType GuiType::Create()
 		mIconEligibleForDestructionSmall = small_icon = g_script.mCustomIconSmall; // Should always be non-NULL if mCustomIcon is non-NULL.
 	}
 	else
-		big_icon = small_icon = (HICON)LoadImage(g_hInstance, MAKEINTRESOURCE(IDI_MAIN), IMAGE_ICON, 0, 0, LR_SHARED); // Use LR_SHARED to conserve memory (since the main icon is loaded for so many purposes).
-		// Unlike mCustomIcon, leave mIconEligibleForDestruction NULL because a shared HICON such as one
-		// loaded via LR_SHARED should never be destroyed.
+	{
+		big_icon = g_IconLarge;
+		small_icon = g_IconSmall;
+		// Unlike mCustomIcon, leave mIconEligibleForDestruction NULL because these
+		// icons are used for various other purposes and should never be destroyed.
+	}
 	// Setting the small icon puts it in the upper left corner of the dialog window.
 	// Setting the big icon makes the dialog show up correctly in the Alt-Tab menu (but big seems to
 	// have no effect unless the window is unowned, i.e. it has a button on the task bar).
@@ -7839,9 +7843,11 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 			case LVN_GETINFOTIPA: // in notifying the script because it would have no means of changing the tip (by altering the struct), except perhaps OnMessage.
 				return 0; // Return immediately to avoid calling Event() and DefDlgProc(). A return value of 0 is suitable for all of the above.
 
-			case 0xFFFFFF4F: // Couldn't find these in commctrl.h anywhere. They seem to occur when control is first created and once for each row in the first set of added rows.
-			case 0xFFFFFF5F:
-			case 0xFFFFFF5D: // Probably something to do with incremental search since it seems to happen only when items are present and the user types a visible-character key.
+			//case 0xFFFFFF4F: // Couldn't find these in commctrl.h anywhere. They seem to occur when control is first created and once for each row in the first set of added rows.
+			//case 0xFFFFFF5F:
+			//case 0xFFFFFF5D: // Probably something to do with incremental search since it seems to happen only when items are present and the user types a visible-character key.
+			default: // This covers the three above and any other events which aren't classified by this switch(),
+				// such as LVN_GETEMPTYMARKUP and any others invented after this switch() was first written.
 				is_actionable = false;
 				break; // Let default proc handle them since they might mean something to it.
 
@@ -9034,7 +9040,7 @@ int GuiType::CustomCtrlWmNotify(GuiIndexType aControlIndex, LPNMHDR aNmHdr)
 	ErrorLevel_Backup(ErrorLevel_saved);
 	InitNewThread(0, false, true, jumpToLine->mActionType);
 	g_ErrorLevel->Assign(ERRORLEVEL_NONE);
-	DEBUGGER_STACK_PUSH(jumpToLine, _T("GUI"))
+	DEBUGGER_STACK_PUSH(_T("Gui"))
 
 	AddRef();
 	AddRef();
