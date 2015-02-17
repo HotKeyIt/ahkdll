@@ -2927,7 +2927,6 @@ examine_line:
 				cp = hotkey_flag; // Set default, conditionally overridden below (v1.0.44.07).
 				// v1.0.40: Check if this is a remap rather than hotkey:
 				if (   *hotkey_flag // This hotkey's action is on the same line as its label.
-					&& (remap_source_vk = TextToVK(cp1 = Hotkey::TextToModifiers(buf, NULL)))
 					&& (remap_dest_vk = hotkey_flag[1] ? TextToVK(cp = Hotkey::TextToModifiers(hotkey_flag, NULL)) : 0xFF)   ) // And the action appears to be a remap destination rather than a command.
 					// For above:
 					// Fix for v1.0.44.07: Set remap_dest_vk to 0xFF if hotkey_flag's length is only 1 because:
@@ -2943,6 +2942,7 @@ examine_line:
 					// would trigger such a bug.
 				{
 					// These will be ignored in other stages if it turns out not to be a remap later below:
+					remap_source_vk = TextToVK(cp1 = Hotkey::TextToModifiers(buf, NULL)); // An earlier stage verified that it's a valid hotkey, though VK could be zero.
 					remap_source_is_mouse = IsMouseVK(remap_source_vk);
 					remap_dest_is_mouse = IsMouseVK(remap_dest_vk);
 					remap_keybd_to_mouse = !remap_source_is_mouse && remap_dest_is_mouse;
@@ -4462,7 +4462,6 @@ examine_line:
 				cp = hotkey_flag; // Set default, conditionally overridden below (v1.0.44.07).
 				// v1.0.40: Check if this is a remap rather than hotkey:
 				if (   *hotkey_flag // This hotkey's action is on the same line as its label.
-					&& ((remap_source_vk = TextToVK(cp1 = Hotkey::TextToModifiers(buf, NULL))) || !cp[1]) // Allow it through if !cp[1] so that it will give a more sensible warning (or two) about the keyboard layout instead of a generic error.
 					&& (remap_dest_vk = hotkey_flag[1] ? TextToVK(cp = Hotkey::TextToModifiers(hotkey_flag, NULL)) : 0xFF)   ) // And the action appears to be a remap destination rather than a command.
 					// For above:
 					// Fix for v1.0.44.07: Set remap_dest_vk to 0xFF if hotkey_flag's length is only 1 because:
@@ -4478,6 +4477,7 @@ examine_line:
 					// would trigger such a bug.
 				{
 					// These will be ignored in other stages if it turns out not to be a remap later below:
+					remap_source_vk = TextToVK(cp1 = Hotkey::TextToModifiers(buf, NULL)); // An earlier stage verified that it's a valid hotkey, though VK could be zero.
 					remap_source_is_mouse = IsMouseVK(remap_source_vk);
 					remap_dest_is_mouse = IsMouseVK(remap_dest_vk);
 					remap_keybd_to_mouse = !remap_source_is_mouse && remap_dest_is_mouse;
@@ -5136,7 +5136,7 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 				// Restore the working directory so that any ordinary #includes will work correctly.
 				SetCurrentDirectory(buf);
 				// If any file was included, consider it a success; i.e. allow #include <lib> and #include <lib_func>.
-				if (!error_was_shown && file_was_found || ignore_load_failure)
+				if (!error_was_shown && (file_was_found || ignore_load_failure))
 					return CONDITION_TRUE;
 				*parameter_end = '>'; // Restore '>' for display to the user.
 				return error_was_shown ? FAIL : ScriptError(_T("Function library not found."), aBuf);
@@ -14947,6 +14947,8 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 				// Rather than having PerformLoop() handle LOOP_BREAK specifically, tell our caller to jump to
 				// the line *after* the loop's body. This is always a jump our caller must handle, unlike GOTO:
 				caller_jump_to_line = line->mRelatedLine->mRelatedLine;
+				if (caller_jump_to_line->mActionType == ACT_UNTIL)
+					caller_jump_to_line = caller_jump_to_line->mNextLine;
 			}
 			return LOOP_BREAK;
 
@@ -16239,7 +16241,8 @@ ResultType Line::PerformLoopFor(ExprTokenType *aResultToken, bool &aContinueMain
 		}
 	}
 
-	LPTSTR our_buf_marker = sDerefBuf;
+	PRIVATIZE_S_DEREF_BUF;
+	LPTSTR our_buf_marker = our_deref_buf;
 	LPTSTR arg_deref[] = {0, 0}; // ExpandExpression checks these if it needs to expand the deref buffer.
 	ExprTokenType object_token;
 	object_token.symbol = SYM_INVALID; // Init in case ExpandExpression() resolves to a string, in which case it won't use enum_token.
@@ -16248,7 +16251,12 @@ ResultType Line::PerformLoopFor(ExprTokenType *aResultToken, bool &aContinueMain
 	// call ExpandExpression() directly and pass in a "result token" which will be used if the result is an
 	// object or number. Load-time pre-parsing has ensured there are really three args, but mArgc == 2 so
 	// this one hasn't been evaluated yet:
-	if (!ExpandExpression(2, result, &object_token, our_buf_marker, sDerefBuf, sDerefBufSize, arg_deref, 0))
+	if (ExpandExpression(2, result, &object_token, our_buf_marker, our_deref_buf, our_deref_buf_size, arg_deref, 0))
+		result = OK;
+	
+	DEPRIVATIZE_S_DEREF_BUF
+
+	if (result == FAIL || result == EARLY_EXIT)
 		// A script-function-call inside the expression returned EARLY_EXIT or FAIL.
 		return result;
 

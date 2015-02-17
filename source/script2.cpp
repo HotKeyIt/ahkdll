@@ -10821,7 +10821,7 @@ ResultType Line::FileGetSize(LPTSTR aFilespec, LPTSTR aGranularity)
 	if (!aFilespec || !*aFilespec)
 		return SetErrorsOrThrow(true, ERROR_INVALID_PARAMETER); // Let ErrorLevel indicate an error, since this is probably not what the user intended.
 	
-	BOOL got_file_size;
+	BOOL got_file_size = false;
 	__int64 size;
 
 	// Try CreateFile() and GetFileSizeEx() first, since they can be more accurate. 
@@ -17848,11 +17848,9 @@ BIF_DECL(BIF_MemoryLoadLibrary)
 	HMEMORYMODULE module = NULL;
 	unsigned char *data = NULL;
 	aResultToken.symbol = SYM_INTEGER;
+	aResultToken.value_int64 = 0;
 	if (TokenIsEmptyString(*aParam[0]))
-	{
-		aResultToken.value_int64 = 0;
 		return;
-	}
 	else if (!TokenIsPureNumeric(*aParam[0]))
 	{
 		FILE *fp;
