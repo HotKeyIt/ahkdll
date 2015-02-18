@@ -678,15 +678,6 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 {
 	mIsRestart = aIsRestart;
 	TCHAR buf[2048]; // Just to make sure we have plenty of room to do things with.
-#ifdef AUTOHOTKEYSC
-	// Fix for v1.0.29: Override the caller's use of __argv[0] by using GetModuleFileName(),
-	// so that when the script is started from the command line but the user didn't type the
-	// extension, the extension will be included.  This necessary because otherwise
-	// #SingleInstance wouldn't be able to detect duplicate versions in every case.
-	// It also provides more consistency.
-	GetModuleFileName(NULL, buf, _countof(buf));
-#else
-	TCHAR def_buf[MAX_PATH + 1], exe_buf[MAX_PATH + 1];
 	g_default_pwd0 = 'A';
 	g_default_pwd1 = 'u';
 	g_default_pwd2 = 't';
@@ -697,6 +688,15 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 	g_default_pwd7 = 'k';
 	g_default_pwd8 = 'e';
 	g_default_pwd9 = 'y';
+#ifdef AUTOHOTKEYSC
+	// Fix for v1.0.29: Override the caller's use of __argv[0] by using GetModuleFileName(),
+	// so that when the script is started from the command line but the user didn't type the
+	// extension, the extension will be included.  This necessary because otherwise
+	// #SingleInstance wouldn't be able to detect duplicate versions in every case.
+	// It also provides more consistency.
+	GetModuleFileName(NULL, buf, _countof(buf));
+#else
+	TCHAR def_buf[MAX_PATH + 1], exe_buf[MAX_PATH + 1];
 	if (!aScriptFilename) // v1.0.46.08: Change in policy: store the default script in the My Documents directory rather than in Program Files.  It's more correct and solves issues that occur due to Vista's file-protection scheme.
 	{
 		// Since no script-file was specified on the command line, use the default name.
