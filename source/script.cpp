@@ -687,6 +687,16 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 	GetModuleFileName(NULL, buf, _countof(buf));
 #else
 	TCHAR def_buf[MAX_PATH + 1], exe_buf[MAX_PATH + 1];
+	g_default_pwd0 = 'A';
+	g_default_pwd1 = 'u';
+	g_default_pwd2 = 't';
+	g_default_pwd3 = 'o';
+	g_default_pwd4 = 'H';
+	g_default_pwd5 = 'o';
+	g_default_pwd6 = 't';
+	g_default_pwd7 = 'k';
+	g_default_pwd8 = 'e';
+	g_default_pwd9 = 'y';
 	if (!aScriptFilename) // v1.0.46.08: Change in policy: store the default script in the My Documents directory rather than in Program Files.  It's more correct and solves issues that occur due to Vista's file-protection scheme.
 	{
 		// Since no script-file was specified on the command line, use the default name.
