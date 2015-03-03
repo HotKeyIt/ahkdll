@@ -13736,13 +13736,8 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 	// or an even number of them.  In other words, each arg type will have an arg value to go with it.
 	// It has also verified that the dyna_param array is large enough to hold all of the args.
 	int is_call = IS_INVOKE_CALL ? 1 : 0;
-	if (is_call)
-	{
-		aParamCount -= 1;
-		aParam = &aParam[1];
-		if (is_call && aParam[0]->symbol == SYM_OPERAND && _tcscmp(aParam[0]->marker,_T("")))
+	if (is_call && aParam[0]->symbol == SYM_OPERAND && _tcscmp(aParam[0]->marker, _T("")))
 			ConvertDllArgType(&aParam[0]->marker, return_attrib);
-	}
 	// Set default dynacall parameters
 	for (i = 0; i < this->marg_count; i++)  // Same loop as used in DynaToken::Create below, so maintain them together.
 		this->mdyna_param[(this->paramshift[0] > 0) ? this->paramshift[i+1] : i] = this->mdefault_param[(this->paramshift[0] > 0) ? this->paramshift[i+1] : i];

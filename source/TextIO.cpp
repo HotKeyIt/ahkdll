@@ -1085,6 +1085,8 @@ class FileObject : public ObjectBase // fincs: No longer allowing the script to 
 		case Close:
 			if (aParamCount == 0)
 				mFile.Close();
+			aResultToken.symbol = SYM_STRING;
+			aResultToken.marker = _T("");
 			return OK;
 		}
 		

@@ -299,17 +299,6 @@ Script::~Script() // Destructor.
 		if (*buf) // "playing" or "stopped"
 			mciSendString(_T("close ") SOUNDPLAY_ALIAS, NULL, 0, NULL);
 	}
-#ifndef MINIDLL
-	RemoveVectoredExceptionHandler(g_ExceptionHandler); // Exception handler to remove hooks to avoid system/mouse freeze
-#ifdef ENABLE_KEY_HISTORY_FILE
-	KeyHistoryToFile();  // Close the KeyHistory file if it's open.
-#endif
-#endif // MINIDLL
-#ifndef _USRDLL
-	DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
-	DeleteCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
-#endif
-	OleUninitialize();
 }
 
 
@@ -664,10 +653,21 @@ void Script::Destroy()
 #endif
 	SimpleHeap::DeleteAll();
 	mIsReadyToExecute = false;
-	ZeroMemory(&g_script,sizeof(g_script));
+	//ZeroMemory(&g_script, sizeof(g_script));
 #ifndef MINIDLL
 	mPriorHotkeyName = mThisHotkeyName = _T("");
 #endif
+#ifndef MINIDLL
+#ifdef ENABLE_KEY_HISTORY_FILE
+	KeyHistoryToFile();  // Close the KeyHistory file if it's open.
+#endif
+#endif // MINIDLL
+#ifndef _USRDLL
+	RemoveVectoredExceptionHandler(g_ExceptionHandler); // Exception handler to remove hooks to avoid system/mouse freeze
+	DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
+	DeleteCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
+#endif
+	OleUninitialize();
 }
 #endif
 
@@ -2034,6 +2034,7 @@ ResultType Script::LoadIncludedText(LPTSTR aScript,LPCTSTR aPathToShow)
 		else
 			Line::sSourceFile[source_file_index] = g_script.mOurEXE;
 	}
+	
 	// <buf> should be no larger than LINE_SIZE because some later functions rely upon that:
 	TCHAR msg_text[MAX_PATH + 256], buf1[LINE_SIZE], buf2[LINE_SIZE], suffix[16], pending_buf[LINE_SIZE] = _T("");
 	LPTSTR buf = buf1, next_buf = buf2; // Oscillate between bufs to improve performance (avoids memcpy from buf2 to buf1).
@@ -3445,7 +3446,6 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		// opening fails and aIgnoreLoadFailure==true.
 	}
 #endif
-
 	// <buf> should be no larger than LINE_SIZE because some later functions rely upon that:
 	TCHAR msg_text[MAX_PATH + 256], buf1[LINE_SIZE], buf2[LINE_SIZE], suffix[16], pending_buf[LINE_SIZE] = _T("");
 	LPTSTR buf = buf1, next_buf = buf2; // Oscillate between bufs to improve performance (avoids memcpy from buf2 to buf1).

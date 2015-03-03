@@ -3198,13 +3198,27 @@ DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf, TCHAR *pwd[]) // LiteZip 
 	return 0;
 }
 
-#ifndef MINIDLL
+
+#ifndef _USRDLL
 LONG WINAPI DisableHooksOnException(PEXCEPTION_POINTERS pExceptionPtrs)
 {
-	// Disable all hooks to avoid system/mouse freeze
-	if (pExceptionPtrs->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION
-		&& pExceptionPtrs->ExceptionRecord->ExceptionFlags == EXCEPTION_NONCONTINUABLE)
-		AddRemoveHooks(0);
+		if (pExceptionPtrs->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION)
+		//&& pExceptionPtrs->ExceptionRecord->ExceptionFlags == EXCEPTION_NONCONTINUABLE)
+	{
+		if (g_MainThreadID != GetCurrentThreadId())
+		{	// it is not our main process display error and exit current thread 
+			char aException[MAX_INTEGER_LENGTH + 207] = "Error: EXCEPTION_ACCESS_VIOLATION\n\n  -  Press yes to exit thread and continue execution.\n  -  Press no to raise exception (debug).\n  -  Press cancel to exit application.\n\nException was caused in thread id: ";
+			_itoa(GetCurrentThreadId(), aException + 206, 10);
+			int result = MessageBoxA(NULL, (LPSTR)aException, AHK_NAME, MB_ICONERROR | MB_YESNOCANCEL | MB_DEFBUTTON3 | MB_TOPMOST);
+			if (result == IDCANCEL)
+				ExitProcess(EXCEPTION_ACCESS_VIOLATION);
+			else if (result == IDNO)
+				return EXCEPTION_ACCESS_VIOLATION;
+			ExitThread(EXCEPTION_ACCESS_VIOLATION);
+		}
+		else if (pExceptionPtrs->ExceptionRecord->ExceptionFlags == EXCEPTION_NONCONTINUABLE)
+			AddRemoveHooks(0); // Disable all hooks to avoid system/mouse freeze
+	}
 	return EXCEPTION_CONTINUE_SEARCH;
 }
 #endif
