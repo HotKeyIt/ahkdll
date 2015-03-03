@@ -21,8 +21,11 @@ GNU General Public License for more details.
 #include "clipboard.h"  // For the global clipboard object
 #include "script.h" // For the global script object and g_ErrorLevel
 #include "os_version.h" // For the global OS_Version object
-
+#include "MemoryModule.h"
 #include "Debugger.h"
+#ifndef _USRDLL
+extern HCUSTOMMODULE g_hMSVCR;
+#endif
 #ifdef _USRDLL
 extern bool g_Reloading;
 extern bool g_Loading;
@@ -91,7 +94,7 @@ extern WarnMode g_Warn_UseUnsetLocal;
 extern WarnMode g_Warn_UseUnsetGlobal;
 extern WarnMode g_Warn_UseEnv;
 extern WarnMode g_Warn_LocalSameAsGlobal;
-#ifndef MINIDLL
+#ifndef _USRDLL
 extern PVOID g_ExceptionHandler;
 extern SingleInstanceType g_AllowOnlyOneInstance;
 #endif

@@ -21,6 +21,7 @@ GNU General Public License for more details.
 #include "window.h" // For MsgBox() & SetForegroundLockTimeout()
 #include "TextIO.h"
 #include "LiteUnzip.h"
+#include "MemoryModule.h"
 // General note:
 // The use of Sleep() should be avoided *anywhere* in the code.  Instead, call MsgSleep().
 // The reason for this is that if the keyboard or mouse hook is installed, a straight call
@@ -31,6 +32,18 @@ GNU General Public License for more details.
 
 int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdLine, int nCmdShow)
 {
+	HGLOBAL hResData;
+	if (g_hResource = FindResource(NULL, _T("MSVCR"), MAKEINTRESOURCE(RT_RCDATA)))
+		if (hResData = LoadResource(g_hInstance, g_hResource))
+		{
+			LPVOID aDataBuf;
+			SIZE_T aSizeDeCompressed = DecompressBuffer(LockResource(hResData), aDataBuf, g_default_pwd);
+			if (aSizeDeCompressed)
+			{
+				g_hMSVCR = (HCUSTOMMODULE)MemoryLoadLibrary(aDataBuf);
+				// VirtualFree(aDataBuf, aSizeDeCompressed, MEM_RELEASE);
+			}
+		}
 	// Init any globals not in "struct g" that need it:
 
 #ifdef _DEBUG

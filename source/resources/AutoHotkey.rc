@@ -250,10 +250,21 @@ END
 #ifndef AUTOHOTKEYSC
 WINAPI	RCDATA	".\\source\\resources\\WINAPI.zip"
 #endif
-// AutoHotkey debugging script
-#ifdef _DEBUG
 #ifndef _USRDLL
+	#ifdef _WIN64
+		MSVCR	RCDATA	".\\source\\resources\\msvcr64.zip"
+	#else
+		MSVCR	RCDATA	".\\source\\resources\\msvcr32.zip"
+	#endif
+#endif
+/*#else
+	#ifdef _WIN64
+	MSVCR	RCDATA	".\\source\\resources\\msvcr64d.zip"
+	#else
+	MSVCR	RCDATA	".\\source\\resources\\msvcr32d.zip"
+	#endif
+#endif*/
+#ifdef _DEBUG
 //AHK		RCDATA	".\\source\\resources\\AHK.zip"
 //AHK RCDATA "Test\\Test.ahk"
-#endif
 #endif
