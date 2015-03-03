@@ -20,7 +20,7 @@ GNU General Public License for more details.
 #include "clipboard.h"  // For the global clipboard object
 #include "script.h" // For the global script object and g_ErrorLevel
 #include "os_version.h" // For the global OS_Version object
-
+#include "MemoryModule.h"
 #include "Debugger.h"
 
 // Since at least some of some of these (e.g. g_modifiersLR_logical) should not
@@ -29,6 +29,9 @@ GNU General Public License for more details.
 // which are necessary to save and restore (even though it would clean
 // up the code and might make maintaining it easier):
 HRSRC g_hResource = NULL; // Set by WinMain()	// for compiled AutoHotkey.exe
+#ifndef _USRDLL
+HCUSTOMMODULE g_hMSVCR = NULL; // MSVR100.dll
+#endif
 #ifdef _USRDLL
 bool g_Reloading = false;
 bool g_Loading = false;
@@ -88,8 +91,10 @@ WarnMode g_Warn_UseUnsetLocal = WARNMODE_OFF;		// Used by #Warn directive.
 WarnMode g_Warn_UseUnsetGlobal = WARNMODE_OFF;		//
 WarnMode g_Warn_LocalSameAsGlobal = WARNMODE_OFF;	//
 SingleInstanceType g_AllowOnlyOneInstance = SINGLE_INSTANCE_PROMPT;
-#ifndef MINIDLL
+#ifndef _USRDLL
 PVOID g_ExceptionHandler = NULL;
+#endif
+#ifndef MINIDLL
 bool g_NoTrayIcon = false;
 #endif
 bool g_persistent = false;  // Whether the script should stay running even after the auto-exec section finishes.

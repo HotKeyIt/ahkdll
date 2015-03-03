@@ -21,10 +21,13 @@ GNU General Public License for more details.
 #include "clipboard.h"  // For the global clipboard object
 #include "script.h" // For the global script object and g_ErrorLevel
 #include "os_version.h" // For the global OS_Version object
-
+#include "MemoryModule.h"
 #include "Debugger.h"
 
 extern HRSRC g_hResource;		// for compiled AutoHotkey.exe
+#ifndef _USRDLL
+extern HCUSTOMMODULE g_hMSVCR;
+#endif
 #ifdef _USRDLL
 extern bool g_Reloading;
 extern bool g_Loading;
@@ -86,8 +89,10 @@ extern WarnMode g_Warn_UseUnsetLocal;
 extern WarnMode g_Warn_UseUnsetGlobal;
 extern WarnMode g_Warn_LocalSameAsGlobal;
 extern SingleInstanceType g_AllowOnlyOneInstance;
-#ifndef MINIDLL
+#ifndef _USRDLL
 extern PVOID g_ExceptionHandler;
+#endif
+#ifndef MINIDLL
 extern bool g_NoTrayIcon;
 #endif
 extern bool g_persistent;
