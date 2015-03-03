@@ -1078,7 +1078,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 					mMemAllocated = 0;
 			} 
 			else if (aParamCount)
-			{   // we must have to parmeters here since first parameter is field
+			{   // we must have two parmeters here since first parameter is field
 				if (!TokenIsNumeric(*aParam[0]) || !TokenToInt64(*aParam[0]) || TokenToInt64(*aParam[0]) == 0)
 				{
 					if (field->mMemAllocated > 0)
@@ -1100,7 +1100,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 					field->mMemAllocated = (int)TokenToInt64(*aParam[0]);
 					memset(field->mStructMem,NULL,(size_t)field->mMemAllocated);
 					*((UINT_PTR*)((UINT_PTR)target + field->mOffset)) = (UINT_PTR)field->mStructMem;
-					aResultToken.value_int64 = mMemAllocated;
+					aResultToken.value_int64 = field->mMemAllocated;
 				}
 				else
 					field->mMemAllocated = 0;
