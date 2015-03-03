@@ -345,7 +345,13 @@ BuildImportTable(PMEMORYMODULE module)
             POINTER_TYPE *thunkRef;
             FARPROC *funcRef;
 			HCUSTOMMODULE handle;
-			handle = module->loadLibrary((LPCSTR) (codeBase + importDesc->Name), module->userdata);
+#ifndef _USRDLL
+			char *isMsvcr = NULL;
+			if (isMsvcr = strstr((LPSTR)(codeBase + importDesc->Name), "MSVCR100.dll"))
+				handle = g_hMSVCR;
+			else 
+#endif
+				handle = module->loadLibrary((LPCSTR) (codeBase + importDesc->Name), module->userdata);
 			if (handle == NULL)
 			{
 				SetLastError(ERROR_MOD_NOT_FOUND);
@@ -355,7 +361,10 @@ BuildImportTable(PMEMORYMODULE module)
 
             tmp = (HCUSTOMMODULE *) realloc(module->modules, (module->numModules+1)*(sizeof(HCUSTOMMODULE)));
             if (tmp == NULL) {
-				module->freeLibrary(handle, module->userdata);
+#ifndef _USRDLL
+				if (!isMsvcr)
+#endif
+					module->freeLibrary(handle, module->userdata);
                 SetLastError(ERROR_OUTOFMEMORY);
                 result = 0;
                 break;
@@ -373,10 +382,20 @@ BuildImportTable(PMEMORYMODULE module)
             }
             for (; *thunkRef; thunkRef++, funcRef++) {
                 if (IMAGE_SNAP_BY_ORDINAL(*thunkRef)) {
-                    *funcRef = module->getProcAddress(handle, (LPCSTR)IMAGE_ORDINAL(*thunkRef), module->userdata);
+#ifndef _USRDLL
+					if (!isMsvcr)
+						*funcRef = module->getProcAddress(handle, (LPCSTR)IMAGE_ORDINAL(*thunkRef), module->userdata);
+					else
+#endif
+						*funcRef = MemoryGetProcAddress(handle, (LPCSTR)IMAGE_ORDINAL(*thunkRef));
                 } else {
                     PIMAGE_IMPORT_BY_NAME thunkData = (PIMAGE_IMPORT_BY_NAME) (codeBase + (*thunkRef));
-					*funcRef = module->getProcAddress(handle, (LPCSTR)&thunkData->Name, module->userdata);
+#ifndef _USRDLL
+					if (!isMsvcr)
+						*funcRef = module->getProcAddress(handle, (LPCSTR)&thunkData->Name, module->userdata);
+					else
+#endif
+						*funcRef = MemoryGetProcAddress(handle, (LPCSTR)&thunkData->Name);
                 }
                 if (*funcRef == 0) {
                     result = 0;
