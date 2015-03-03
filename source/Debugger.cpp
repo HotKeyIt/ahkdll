@@ -1609,6 +1609,7 @@ int Debugger::ParsePropertyName(const char *aFullName, int aVarScope, bool aVarM
 					break;
 				default:
 					criobj = NULL; strct = NULL;
+					sBaseField->string.Init();
 					sBaseField->Assign(aResultToken);
 					break;
 			}
