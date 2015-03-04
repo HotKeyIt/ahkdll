@@ -29,9 +29,7 @@ GNU General Public License for more details.
 // which are necessary to save and restore (even though it would clean
 // up the code and might make maintaining it easier):
 HRSRC g_hResource = NULL; // Set by WinMain()	// for compiled AutoHotkey.exe
-#ifndef _USRDLL
 HCUSTOMMODULE g_hMSVCR = NULL; // MSVR100.dll
-#endif
 #ifdef _USRDLL
 bool g_Reloading = false;
 bool g_Loading = false;
