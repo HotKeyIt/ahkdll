@@ -23,9 +23,7 @@ GNU General Public License for more details.
 #include "os_version.h" // For the global OS_Version object
 #include "MemoryModule.h"
 #include "Debugger.h"
-#ifndef _USRDLL
 extern HCUSTOMMODULE g_hMSVCR;
-#endif
 #ifdef _USRDLL
 extern bool g_Reloading;
 extern bool g_Loading;

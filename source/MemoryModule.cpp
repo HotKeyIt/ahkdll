@@ -340,18 +340,27 @@ BuildImportTable(PMEMORYMODULE module)
                 }
             }
         }
-        for (; !IsBadReadPtr(importDesc, sizeof(IMAGE_IMPORT_DESCRIPTOR)) && importDesc->Name; importDesc++) 
-        {
-            POINTER_TYPE *thunkRef;
-            FARPROC *funcRef;
+		for (; !IsBadReadPtr(importDesc, sizeof(IMAGE_IMPORT_DESCRIPTOR)) && importDesc->Name; importDesc++)
+		{
+			POINTER_TYPE *thunkRef;
+			FARPROC *funcRef;
 			HCUSTOMMODULE handle;
-#ifndef _USRDLL
 			char *isMsvcr = NULL;
-			if (isMsvcr = strstr((LPSTR)(codeBase + importDesc->Name), "MSVCR100.dll"))
+			if (g_hMSVCR != NULL && (isMsvcr = strstr((LPSTR)(codeBase + importDesc->Name), "MSVCR100.dll")))
+			{
 				handle = g_hMSVCR;
-			else 
-#endif
-				handle = module->loadLibrary((LPCSTR) (codeBase + importDesc->Name), module->userdata);
+				if (tmp == NULL)
+					tmp = (HCUSTOMMODULE *)malloc((sizeof(HCUSTOMMODULE)));
+				if (tmp == NULL) {
+					SetLastError(ERROR_OUTOFMEMORY);
+					result = 0;
+					break;
+				}
+				module->modules = tmp;
+				module->modules[0] = handle;
+			}
+			else
+				handle = module->loadLibrary((LPCSTR)(codeBase + importDesc->Name), module->userdata);
 			if (handle == NULL)
 			{
 				SetLastError(ERROR_MOD_NOT_FOUND);
@@ -359,19 +368,21 @@ BuildImportTable(PMEMORYMODULE module)
 				break;
 			}
 
-            tmp = (HCUSTOMMODULE *) realloc(module->modules, (module->numModules+1)*(sizeof(HCUSTOMMODULE)));
-            if (tmp == NULL) {
-#ifndef _USRDLL
-				if (!isMsvcr)
-#endif
+			if (!isMsvcr)
+			{
+				tmp = (HCUSTOMMODULE *)realloc(module->modules, (module->numModules + 1)*(sizeof(HCUSTOMMODULE)));
+				if (tmp == NULL) {
 					module->freeLibrary(handle, module->userdata);
-                SetLastError(ERROR_OUTOFMEMORY);
-                result = 0;
-                break;
-            }
-            module->modules = tmp;
+					SetLastError(ERROR_OUTOFMEMORY);
+					result = 0;
+					break;
+				}
+				module->modules = tmp;
+				if (module->numModules == 1)
+					module->modules[0] = NULL;
+				module->modules[module->numModules++] = handle;
+			}
 
-            module->modules[module->numModules++] = handle;
             if (importDesc->OriginalFirstThunk) {
                 thunkRef = (POINTER_TYPE *) (codeBase + importDesc->OriginalFirstThunk);
                 funcRef = (FARPROC *) (codeBase + importDesc->FirstThunk);
@@ -382,19 +393,15 @@ BuildImportTable(PMEMORYMODULE module)
             }
             for (; *thunkRef; thunkRef++, funcRef++) {
                 if (IMAGE_SNAP_BY_ORDINAL(*thunkRef)) {
-#ifndef _USRDLL
 					if (!isMsvcr)
 						*funcRef = module->getProcAddress(handle, (LPCSTR)IMAGE_ORDINAL(*thunkRef), module->userdata);
 					else
-#endif
 						*funcRef = MemoryGetProcAddress(handle, (LPCSTR)IMAGE_ORDINAL(*thunkRef));
                 } else {
                     PIMAGE_IMPORT_BY_NAME thunkData = (PIMAGE_IMPORT_BY_NAME) (codeBase + (*thunkRef));
-#ifndef _USRDLL
 					if (!isMsvcr)
 						*funcRef = module->getProcAddress(handle, (LPCSTR)&thunkData->Name, module->userdata);
 					else
-#endif
 						*funcRef = MemoryGetProcAddress(handle, (LPCSTR)&thunkData->Name);
                 }
                 if (*funcRef == 0) {
@@ -474,7 +481,7 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data,
     }
 
     result->codeBase = code;
-    result->numModules = 0;
+	result->numModules = 1; // g_hMSVCR is saved in 0
     result->modules = NULL;
     result->initialized = 0;
     result->loadLibrary = loadLibrary;
@@ -598,12 +605,12 @@ void MemoryFreeLibrary(HMEMORYMODULE mod)
 
         if (module->modules != NULL) {
             // free previously opened libraries
-            for (i=0; i<module->numModules; i++) {
+			// start at 1 because 0 contains g_hMSVCR
+            for (i=1; i<module->numModules; i++) {
                 if (module->modules[i] != NULL) {
                     module->freeLibrary(module->modules[i], module->userdata);
                 }
             }
-
             free(module->modules);
         }
 
