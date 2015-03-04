@@ -12,8 +12,8 @@ ahkthread(script:="",param:="",IsFile:=0,dll:="AutoHotkey.dll"){
     script.ahkterminate(script.timeout?script.timeout:0),MemoryFreeLibrary(script[""])
     return
   }
-  object:=IsObject(obj)?obj:{},object[""]:=ResourceLoadLibrary(dll)
-  If !object[""]
+  object:={(""):ResourceLoadLibrary(dll)}
+  If !object[""] ; ResourceLoadLibrary failed, try loading dll from disc
     object[""]:=MemoryLoadLibrary(dll)
   LoopParse,%functions%,|
   {
@@ -26,6 +26,6 @@ ahkthread(script:="",param:="",IsFile:=0,dll:="AutoHotkey.dll"){
   object.base:=base
   If !(Type(script)="Integer" || script=0)
     object.hThread:=object[IsFile?"ahkdll":"ahktextdll"](script,param)
-	objects:=ahkthread_free(true),objects[object]:=object ; keep dll loadded even if returned object is freed
+  objects:=ahkthread_free(true),objects[object] := object ; keep dll loadded even if returned object is freed
   return object
 }
