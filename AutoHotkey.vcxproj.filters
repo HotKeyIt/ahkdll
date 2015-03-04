@@ -275,6 +275,7 @@
     <None Include="ComServer.def">
       <Filter>Source Files</Filter>
     </None>
+    <None Include="ClassDiagram.cd" />
   </ItemGroup>
   <ItemGroup>
     <Midl Include="source\ComServer.idl">
