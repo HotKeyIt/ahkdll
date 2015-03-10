@@ -22,6 +22,7 @@ GNU General Public License for more details.
 #include "TextIO.h"
 #include "LiteUnzip.h"
 #include "MemoryModule.h"
+
 // General note:
 // The use of Sleep() should be avoided *anywhere* in the code.  Instead, call MsgSleep().
 // The reason for this is that if the keyboard or mouse hook is installed, a straight call
@@ -41,7 +42,7 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 			if (aSizeDeCompressed)
 			{
 				g_hMSVCR = (HCUSTOMMODULE)MemoryLoadLibrary(aDataBuf);
-				// VirtualFree(aDataBuf, aSizeDeCompressed, MEM_RELEASE);
+				VirtualFree(aDataBuf, aSizeDeCompressed, MEM_RELEASE);
 			}
 		}
 	// Init any globals not in "struct g" that need it:

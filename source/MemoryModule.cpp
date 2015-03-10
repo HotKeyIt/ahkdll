@@ -1,8 +1,8 @@
 /*
  * Memory DLL loading code
- * Version 0.0.3
+ * Version 0.0.4
  *
- * Copyright (c) 2004-2013 by Joachim Bauch / mail@joachim-bauch.de
+ * Copyright (c) 2004-2015 by Joachim Bauch / mail@joachim-bauch.de
  * http://www.joachim-bauch.de
  *
  * The contents of this file are subject to the Mozilla Public License Version
@@ -19,7 +19,7 @@
  *
  * The Initial Developer of the Original Code is Joachim Bauch.
  *
- * Portions created by Joachim Bauch are Copyright (C) 2004-2013
+ * Portions created by Joachim Bauch are Copyright (C) 2004-2015
  * Joachim Bauch. All Rights Reserved.
  *
  */
@@ -41,15 +41,29 @@
 
 #include <windows.h>
 #include <winnt.h>
+#include <stddef.h>
+#include <tchar.h>
+#include <winternl.h>
+
+//#include "MinHook/MinHook.h"
+
+#include "MemoryModule.h"
+#include "MinHook.h"
+
+#if defined _M_X64
+#pragma comment(lib, "libMinHook.x64.lib")
+#elif defined _M_IX86
+#pragma comment(lib, "libMinHook.x86.lib")
+#endif
+
+#ifdef DEBUG_OUTPUT
+#include <stdio.h>
+#endif
 
 #ifndef IMAGE_SIZEOF_BASE_RELOCATION
 // Vista SDKs no longer define IMAGE_SIZEOF_BASE_RELOCATION!?
 #define IMAGE_SIZEOF_BASE_RELOCATION (sizeof(IMAGE_BASE_RELOCATION))
 #endif
-
-#include "MemoryModule.h"
-
-typedef BOOL (WINAPI *DllEntryProc)(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved);
 
 typedef HANDLE (WINAPI * MyCreateActCtx)(PCACTCTXA);
 typedef HANDLE (WINAPI * MyDeactivateActCtx)(DWORD,ULONG_PTR);
@@ -58,7 +72,19 @@ HMODULE libkernel32 = LoadLibrary(_T("kernel32.dll"));
 MyCreateActCtx _CreateActCtxA = (MyCreateActCtx)GetProcAddress(libkernel32,"CreateActCtxA");
 MyDeactivateActCtx _DeactivateActCtx = (MyDeactivateActCtx)GetProcAddress(libkernel32,"DeactivateActCtx");
 MyActivateActCtx _ActivateActCtx = (MyActivateActCtx)GetProcAddress(libkernel32,"ActivateActCtx");
+// hook function and global vars for HookRtlPcToFileHeader
+typedef PVOID(*MyRtlPcToFileHeader)(PVOID PcValue, PVOID *BaseOfImage);
+MyRtlPcToFileHeader _RtlPcToFileHeader;
+HMEMORYMODULE currentModuleStart;
+PVOID currentModuleEnd;
 
+PVOID WINAPI HookRtlPcToFileHeader(PVOID PcValue, PVOID *BaseOfImage)
+{
+	if (PcValue >= currentModuleStart && PcValue < currentModuleEnd)
+		return *BaseOfImage = currentModuleStart;
+	else
+		return _RtlPcToFileHeader(PcValue, BaseOfImage);
+}
 
 #ifdef DEBUG_OUTPUT
 static void
@@ -75,8 +101,7 @@ OutputLastError(const char *msg)
     LocalFree(tmp);
 }
 #endif
-
-static void
+static BOOL
 CopySections(const unsigned char *data, PIMAGE_NT_HEADERS old_headers, PMEMORYMODULE module)
 {
     int i, size;
@@ -93,9 +118,15 @@ CopySections(const unsigned char *data, PIMAGE_NT_HEADERS old_headers, PMEMORYMO
                     size,
                     MEM_COMMIT,
                     PAGE_EXECUTE_READWRITE);
+				if (dest == NULL) {
+					return FALSE;
+				}
 
-				section->Misc.PhysicalAddress = ((DWORD)(((POINTER_TYPE)(dest)) & 0xffffffff));
-                memset(dest, 0, size);
+				// Always use position from file to support alignments smaller
+				// than page size.
+				dest = codeBase + section->VirtualAddress;
+				section->Misc.PhysicalAddress = (DWORD)(uintptr_t)dest;
+				memset(dest, 0, size);
             }
 
             // section is empty
@@ -107,9 +138,17 @@ CopySections(const unsigned char *data, PIMAGE_NT_HEADERS old_headers, PMEMORYMO
                             section->SizeOfRawData,
                             MEM_COMMIT,
                             PAGE_EXECUTE_READWRITE);
+		if (dest == NULL) {
+            return FALSE;
+        }
+
+        // Always use position from file to support alignments smaller
+        // than page size.
+		dest = codeBase + section->VirtualAddress;
         memcpy(dest, data + section->PointerToRawData, section->SizeOfRawData);
 		section->Misc.PhysicalAddress = ((DWORD)(((POINTER_TYPE)(dest)) & 0xffffffff));
     }
+	return TRUE;
 }
 
 // Protection flags for memory pages (Executable, Readable, Writeable)
@@ -125,298 +164,363 @@ static int ProtectionFlags[2][2][2] = {
     },
 };
 
-static void
+static DWORD
+GetRealSectionSize(PMEMORYMODULE module, PIMAGE_SECTION_HEADER section) {
+	DWORD size = section->SizeOfRawData;
+	if (size == 0) {
+		if (section->Characteristics & IMAGE_SCN_CNT_INITIALIZED_DATA) {
+			size = module->headers->OptionalHeader.SizeOfInitializedData;
+		}
+		else if (section->Characteristics & IMAGE_SCN_CNT_UNINITIALIZED_DATA) {
+			size = module->headers->OptionalHeader.SizeOfUninitializedData;
+		}
+	}
+	return size;
+}
+
+static BOOL
+FinalizeSection(PMEMORYMODULE module, PSECTIONFINALIZEDATA sectionData) {
+    DWORD protect, oldProtect;
+    BOOL executable;
+    BOOL readable;
+    BOOL writeable;
+
+    if (sectionData->size == 0) {
+        return TRUE;
+    }
+
+    if (sectionData->characteristics & IMAGE_SCN_MEM_DISCARDABLE) {
+        // section is not needed any more and can safely be freed
+        if (sectionData->address == sectionData->alignedAddress &&
+            (sectionData->last ||
+             module->headers->OptionalHeader.SectionAlignment == module->pageSize ||
+             (sectionData->size % module->pageSize) == 0)
+           ) {
+            // Only allowed to decommit whole pages
+            VirtualFree(sectionData->address, sectionData->size, MEM_DECOMMIT);
+        }
+        return TRUE;
+    }
+
+    // determine protection flags based on characteristics
+    executable = (sectionData->characteristics & IMAGE_SCN_MEM_EXECUTE) != 0;
+    readable =   (sectionData->characteristics & IMAGE_SCN_MEM_READ) != 0;
+    writeable =  (sectionData->characteristics & IMAGE_SCN_MEM_WRITE) != 0;
+    protect = ProtectionFlags[executable][readable][writeable];
+    if (sectionData->characteristics & IMAGE_SCN_MEM_NOT_CACHED) {
+        protect |= PAGE_NOCACHE;
+    }
+
+    // change memory access flags
+    if (VirtualProtect(sectionData->address, sectionData->size, protect, &oldProtect) == 0) {
+#ifdef DEBUG_OUTPUT
+		OutputLastError("Error protecting memory page")
+#endif
+		;
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+static BOOL
 FinalizeSections(PMEMORYMODULE module)
 {
     int i;
     PIMAGE_SECTION_HEADER section = IMAGE_FIRST_SECTION(module->headers);
 #ifdef _WIN64
-    POINTER_TYPE imageOffset = (module->headers->OptionalHeader.ImageBase & 0xffffffff00000000);
+    uintptr_t imageOffset = (module->headers->OptionalHeader.ImageBase & 0xffffffff00000000);
 #else
     #define imageOffset 0
 #endif
-    
-    // loop through all sections and change access flags
-    for (i=0; i<module->headers->FileHeader.NumberOfSections; i++, section++) {
-        DWORD protect, oldProtect, size;
-        int executable = (section->Characteristics & IMAGE_SCN_MEM_EXECUTE) != 0;
-        int readable =   (section->Characteristics & IMAGE_SCN_MEM_READ) != 0;
-        int writeable =  (section->Characteristics & IMAGE_SCN_MEM_WRITE) != 0;
+    SECTIONFINALIZEDATA sectionData;
+    sectionData.address = (LPVOID)((uintptr_t)section->Misc.PhysicalAddress | imageOffset);
+    sectionData.alignedAddress = ALIGN_DOWN(sectionData.address, module->pageSize);
+    sectionData.size = GetRealSectionSize(module, section);
+    sectionData.characteristics = section->Characteristics;
+    sectionData.last = FALSE;
+    section++;
 
-        if (section->Characteristics & IMAGE_SCN_MEM_DISCARDABLE) {
-            // section is not needed any more and can safely be freed
-            VirtualFree((LPVOID)((POINTER_TYPE)section->Misc.PhysicalAddress | imageOffset), section->SizeOfRawData, MEM_DECOMMIT);
+    // loop through all sections and change access flags
+    for (i=1; i<module->headers->FileHeader.NumberOfSections; i++, section++) {
+        LPVOID sectionAddress = (LPVOID)((uintptr_t)section->Misc.PhysicalAddress | imageOffset);
+        LPVOID alignedAddress = ALIGN_DOWN(sectionAddress, module->pageSize);
+        DWORD sectionSize = GetRealSectionSize(module, section);
+        // Combine access flags of all sections that share a page
+        // TODO(fancycode): We currently share flags of a trailing large section
+        //   with the page of a first small section. This should be optimized.
+        if (sectionData.alignedAddress == alignedAddress || (uintptr_t) sectionData.address + sectionData.size > (uintptr_t) alignedAddress) {
+            // Section shares page with previous
+            if ((section->Characteristics & IMAGE_SCN_MEM_DISCARDABLE) == 0 || (sectionData.characteristics & IMAGE_SCN_MEM_DISCARDABLE) == 0) {
+                sectionData.characteristics = (sectionData.characteristics | section->Characteristics) & ~IMAGE_SCN_MEM_DISCARDABLE;
+            } else {
+                sectionData.characteristics |= section->Characteristics;
+            }
+            sectionData.size = (DWORD)(((uintptr_t)sectionAddress) + sectionSize - (uintptr_t) sectionData.address);
             continue;
         }
 
-        // determine protection flags based on characteristics
-        protect = ProtectionFlags[executable][readable][writeable];
-        if (section->Characteristics & IMAGE_SCN_MEM_NOT_CACHED) {
-            protect |= PAGE_NOCACHE;
+        if (!FinalizeSection(module, &sectionData)) {
+            return FALSE;
         }
-
-        // determine size of region
-        size = section->SizeOfRawData;
-        if (size == 0) {
-            if (section->Characteristics & IMAGE_SCN_CNT_INITIALIZED_DATA) {
-                size = module->headers->OptionalHeader.SizeOfInitializedData;
-            } else if (section->Characteristics & IMAGE_SCN_CNT_UNINITIALIZED_DATA) {
-                size = module->headers->OptionalHeader.SizeOfUninitializedData;
-            }
-        }
-
-        if (size > 0) {
-            // change memory access flags
-#ifdef DEBUG_OUTPUT
-			if (VirtualProtect((LPVOID)((POINTER_TYPE)section->Misc.PhysicalAddress | imageOffset), size, protect, &oldProtect) == 0)
-                OutputLastError("Error protecting memory page");
-#else
-			VirtualProtect((LPVOID)((POINTER_TYPE)section->Misc.PhysicalAddress | imageOffset), size, protect, &oldProtect);
-#endif
-        }
+        sectionData.address = sectionAddress;
+        sectionData.alignedAddress = alignedAddress;
+        sectionData.size = sectionSize;
+        sectionData.characteristics = section->Characteristics;
+    }
+    sectionData.last = TRUE;
+    if (!FinalizeSection(module, &sectionData)) {
+        return FALSE;
     }
 #ifndef _WIN64
 #undef imageOffset
 #endif
+    return TRUE;
 }
 
-static void
-ExecuteTLS(PMEMORYMODULE module) 
+static BOOL
+ExecuteTLS(PMEMORYMODULE module)
 {
     unsigned char *codeBase = module->codeBase;
-    
+
     PIMAGE_DATA_DIRECTORY directory = GET_HEADER_DICTIONARY(module, IMAGE_DIRECTORY_ENTRY_TLS);
-    if (directory->VirtualAddress > 0) {
-        PIMAGE_TLS_DIRECTORY tls = (PIMAGE_TLS_DIRECTORY) (codeBase + directory->VirtualAddress);
-        PIMAGE_TLS_CALLBACK* callback = (PIMAGE_TLS_CALLBACK *) tls->AddressOfCallBacks;
-        if (callback) {
-            while (*callback) {
-                (*callback)((LPVOID) codeBase, DLL_PROCESS_ATTACH, NULL);
-                callback++;
-            }
-        }
+    if (directory->VirtualAddress == 0) {
+        return TRUE;
     }
+	
+    PIMAGE_TLS_DIRECTORY tls = (PIMAGE_TLS_DIRECTORY) (codeBase + directory->VirtualAddress);
+    PIMAGE_TLS_CALLBACK* callback = (PIMAGE_TLS_CALLBACK *) tls->AddressOfCallBacks;
+	if (callback)
+	{
+		while (*callback)
+			(*callback++)((LPVOID)codeBase, DLL_PROCESS_ATTACH, NULL);
+	}
+    return TRUE;
 }
 
-static void
+static BOOL
 PerformBaseRelocation(PMEMORYMODULE module, SIZE_T delta)
 {
-    DWORD i;
     unsigned char *codeBase = module->codeBase;
+    PIMAGE_BASE_RELOCATION relocation;
 
     PIMAGE_DATA_DIRECTORY directory = GET_HEADER_DICTIONARY(module, IMAGE_DIRECTORY_ENTRY_BASERELOC);
-    if (directory->Size > 0) {
-        PIMAGE_BASE_RELOCATION relocation = (PIMAGE_BASE_RELOCATION) (codeBase + directory->VirtualAddress);
-        for (; relocation->VirtualAddress > 0; ) {
-            unsigned char *dest = codeBase + relocation->VirtualAddress;
-            unsigned short *relInfo = (unsigned short *)((unsigned char *)relocation + IMAGE_SIZEOF_BASE_RELOCATION);
-            for (i=0; i<((relocation->SizeOfBlock-IMAGE_SIZEOF_BASE_RELOCATION) / 2); i++, relInfo++) {
-                DWORD *patchAddrHL;
-#ifdef _WIN64
-                ULONGLONG *patchAddr64;
-#endif
-                int type, offset;
-
-                // the upper 4 bits define the type of relocation
-                type = *relInfo >> 12;
-                // the lower 12 bits define the offset
-                offset = *relInfo & 0xfff;
-                
-                switch (type)
-                {
-                case IMAGE_REL_BASED_ABSOLUTE:
-                    // skip relocation
-                    break;
-
-                case IMAGE_REL_BASED_HIGHLOW:
-                    // change complete 32 bit address
-                    patchAddrHL = (DWORD *) (dest + offset);
-                    *patchAddrHL += (DWORD) delta;
-                    break;
-                
-#ifdef _WIN64
-                case IMAGE_REL_BASED_DIR64:
-                    patchAddr64 = (ULONGLONG *) (dest + offset);
-                    *patchAddr64 += (ULONGLONG) delta;
-                    break;
-#endif
-
-                default:
-                    //printf("Unknown relocation: %d\n", type);
-                    break;
-                }
-            }
-
-            // advance to next relocation block
-            relocation = (PIMAGE_BASE_RELOCATION) (((char *) relocation) + relocation->SizeOfBlock);
-        }
+    if (directory->Size == 0) {
+        return (delta == 0);
     }
-}
 
-static int
-BuildImportTable(PMEMORYMODULE module)
-{
-    int result=1;
-    unsigned char *codeBase = module->codeBase;
-    HCUSTOMMODULE *tmp;
-	ULONG_PTR lpCookie = NULL;
-
-    PIMAGE_DATA_DIRECTORY directory = GET_HEADER_DICTIONARY(module, IMAGE_DIRECTORY_ENTRY_IMPORT);
-    PIMAGE_DATA_DIRECTORY resource = GET_HEADER_DICTIONARY(module, IMAGE_DIRECTORY_ENTRY_RESOURCE);
-    if (directory->Size > 0) 
-    {
-        PIMAGE_IMPORT_DESCRIPTOR importDesc = (PIMAGE_IMPORT_DESCRIPTOR) (codeBase + directory->VirtualAddress);
-
-        // Following will be used to resolve manifest in module
-        if (resource->Size)
-        {
-            PIMAGE_RESOURCE_DIRECTORY resDir = (PIMAGE_RESOURCE_DIRECTORY)(codeBase + resource->VirtualAddress);
-            PIMAGE_RESOURCE_DIRECTORY resDirTemp;
-            PIMAGE_RESOURCE_DIRECTORY_ENTRY resDirEntry = (PIMAGE_RESOURCE_DIRECTORY_ENTRY) ((char*)resDir + sizeof(IMAGE_RESOURCE_DIRECTORY));
-            PIMAGE_RESOURCE_DIRECTORY_ENTRY resDirEntryTemp;
-            PIMAGE_RESOURCE_DATA_ENTRY resDataEntry;
-
-            // ACTCTX Structure, not used members must be set to 0!
-            ACTCTXA actctx ={0,0,0,0,0,0,0,0,0};
-            actctx.cbSize =  sizeof(actctx);
-            HANDLE hActCtx;
-        
-            // Path to temp directory + our temporary file name
-            CHAR buf[MAX_PATH];
-            DWORD tempPathLength = GetTempPathA(MAX_PATH, buf);
-            memcpy(buf + tempPathLength,"AutoHotkey.MemoryModule.temp.manifest",38);
-            actctx.lpSource = buf;
-
-            // Enumerate Resources
-            int i = 0;
-            if (_CreateActCtxA != NULL)
-            for (;i < resDir->NumberOfIdEntries + resDir->NumberOfNamedEntries;i++)
-            {
-                // Resolve current entry
-                resDirEntry = (PIMAGE_RESOURCE_DIRECTORY_ENTRY)((char*)resDir + sizeof(IMAGE_RESOURCE_DIRECTORY) + (i*sizeof(IMAGE_RESOURCE_DIRECTORY_ENTRY)));
-            
-                // If entry is directory and Id is 24 = RT_MANIFEST
-                if (resDirEntry->DataIsDirectory && resDirEntry->Id == 24)
-                {
-                    //resDirTemp = (PIMAGE_RESOURCE_DIRECTORY)((char*)resDir + (resDirEntry->OffsetToDirectory));
-                    resDirEntryTemp = (PIMAGE_RESOURCE_DIRECTORY_ENTRY)((char*)resDir + (resDirEntry->OffsetToDirectory) + sizeof(IMAGE_RESOURCE_DIRECTORY));
-                    resDirTemp = (PIMAGE_RESOURCE_DIRECTORY) ((char*)resDir + (resDirEntryTemp->OffsetToDirectory));
-                    resDirEntryTemp = (PIMAGE_RESOURCE_DIRECTORY_ENTRY)((char*)resDir + (resDirEntryTemp->OffsetToDirectory) + sizeof(IMAGE_RESOURCE_DIRECTORY));
-                    resDataEntry = (PIMAGE_RESOURCE_DATA_ENTRY) ((char*)resDir + (resDirEntryTemp->OffsetToData));
-                
-                    // Write manifest to temportary file
-                    // Using FILE_ATTRIBUTE_TEMPORARY will avoid writing it to disk
-                    // It will be deleted after CreateActCtx has been called.
-                    HANDLE hFile = CreateFileA(buf,GENERIC_WRITE,NULL,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_TEMPORARY,NULL);
-                    if (hFile == INVALID_HANDLE_VALUE)
-                    {
-    #if DEBUG_OUTPUT
-                        OutputDebugStringA("CreateFile failed.\n");
-    #endif
-                        break; //failed to create file, continue and try loading without CreateActCtx
-                    }
-                    DWORD byteswritten = 0;
-                    WriteFile(hFile,(codeBase + resDataEntry->OffsetToData),resDataEntry->Size,&byteswritten,NULL);
-                    CloseHandle(hFile);
-                    if (byteswritten == 0)
-                    {
-#if DEBUG_OUTPUT
-                        OutputDebugStringA("WriteFile failed.\n");
+    relocation = (PIMAGE_BASE_RELOCATION) (codeBase + directory->VirtualAddress);
+    for (; relocation->VirtualAddress > 0; ) {
+        DWORD i;
+        unsigned char *dest = codeBase + relocation->VirtualAddress;
+        unsigned short *relInfo = (unsigned short *)((unsigned char *)relocation + IMAGE_SIZEOF_BASE_RELOCATION);
+        for (i=0; i<((relocation->SizeOfBlock-IMAGE_SIZEOF_BASE_RELOCATION) / 2); i++, relInfo++) {
+            DWORD *patchAddrHL;
+#ifdef _WIN64
+            ULONGLONG *patchAddr64;
 #endif
-                        break; //failed to write data, continue and try loading
-                    }
-                
-                    hActCtx = _CreateActCtxA(&actctx);
+            int type, offset;
 
-                    // Open file and automatically delete on CloseHandle (FILE_FLAG_DELETE_ON_CLOSE)
-                    hFile = CreateFileA(buf,GENERIC_WRITE,FILE_SHARE_DELETE,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_TEMPORARY|FILE_FLAG_DELETE_ON_CLOSE,NULL);
-                    CloseHandle(hFile);
+            // the upper 4 bits define the type of relocation
+            type = *relInfo >> 12;
+            // the lower 12 bits define the offset
+            offset = *relInfo & 0xfff;
 
-                    if (hActCtx == INVALID_HANDLE_VALUE)
-                        break; //failed to create context, continue and try loading
+            switch (type)
+            {
+            case IMAGE_REL_BASED_ABSOLUTE:
+                // skip relocation
+                break;
 
-                    _ActivateActCtx(hActCtx,&lpCookie); // Don't care if this fails since we would countinue anyway
-                    break; // Break since a dll can have only 1 manifest
-                }
-            }
-        }
-		for (; !IsBadReadPtr(importDesc, sizeof(IMAGE_IMPORT_DESCRIPTOR)) && importDesc->Name; importDesc++)
-		{
-			POINTER_TYPE *thunkRef;
-			FARPROC *funcRef;
-			HCUSTOMMODULE handle;
-			char *isMsvcr = NULL;
-			if (g_hMSVCR != NULL && (isMsvcr = strstr((LPSTR)(codeBase + importDesc->Name), "MSVCR100.dll")))
-			{
-				handle = g_hMSVCR;
-				if (tmp == NULL)
-					tmp = (HCUSTOMMODULE *)malloc((sizeof(HCUSTOMMODULE)));
-				if (tmp == NULL) {
-					SetLastError(ERROR_OUTOFMEMORY);
-					result = 0;
-					break;
-				}
-				module->modules = tmp;
-				module->modules[0] = handle;
-			}
-			else
-				handle = module->loadLibrary((LPCSTR)(codeBase + importDesc->Name), module->userdata);
-			if (handle == NULL)
-			{
-				SetLastError(ERROR_MOD_NOT_FOUND);
-				result = 0;
-				break;
-			}
+            case IMAGE_REL_BASED_HIGHLOW:
+                // change complete 32 bit address
+                patchAddrHL = (DWORD *) (dest + offset);
+                *patchAddrHL += (DWORD) delta;
+                break;
 
-			if (!isMsvcr)
-			{
-				tmp = (HCUSTOMMODULE *)realloc(module->modules, (module->numModules + 1)*(sizeof(HCUSTOMMODULE)));
-				if (tmp == NULL) {
-					module->freeLibrary(handle, module->userdata);
-					SetLastError(ERROR_OUTOFMEMORY);
-					result = 0;
-					break;
-				}
-				module->modules = tmp;
-				if (module->numModules == 1)
-					module->modules[0] = NULL;
-				module->modules[module->numModules++] = handle;
-			}
+#ifdef _WIN64
+            case IMAGE_REL_BASED_DIR64:
+                patchAddr64 = (ULONGLONG *) (dest + offset);
+                *patchAddr64 += (ULONGLONG) delta;
+                break;
+#endif
 
-            if (importDesc->OriginalFirstThunk) {
-                thunkRef = (POINTER_TYPE *) (codeBase + importDesc->OriginalFirstThunk);
-                funcRef = (FARPROC *) (codeBase + importDesc->FirstThunk);
-            } else {
-                // no hint table
-                thunkRef = (POINTER_TYPE *) (codeBase + importDesc->FirstThunk);
-                funcRef = (FARPROC *) (codeBase + importDesc->FirstThunk);
-            }
-            for (; *thunkRef; thunkRef++, funcRef++) {
-                if (IMAGE_SNAP_BY_ORDINAL(*thunkRef)) {
-					if (!isMsvcr)
-						*funcRef = module->getProcAddress(handle, (LPCSTR)IMAGE_ORDINAL(*thunkRef), module->userdata);
-					else
-						*funcRef = MemoryGetProcAddress(handle, (LPCSTR)IMAGE_ORDINAL(*thunkRef));
-                } else {
-                    PIMAGE_IMPORT_BY_NAME thunkData = (PIMAGE_IMPORT_BY_NAME) (codeBase + (*thunkRef));
-					if (!isMsvcr)
-						*funcRef = module->getProcAddress(handle, (LPCSTR)&thunkData->Name, module->userdata);
-					else
-						*funcRef = MemoryGetProcAddress(handle, (LPCSTR)&thunkData->Name);
-                }
-                if (*funcRef == 0) {
-                    result = 0;
-                    break;
-                }
-            }
-
-            if (!result) {
-                module->freeLibrary(handle, module->userdata);
-                SetLastError(ERROR_PROC_NOT_FOUND);
+            default:
+                //printf("Unknown relocation: %d\n", type);
                 break;
             }
         }
+
+        // advance to next relocation block
+        relocation = (PIMAGE_BASE_RELOCATION) (((char *) relocation) + relocation->SizeOfBlock);
     }
+    return TRUE;
+}
+
+static BOOL
+BuildImportTable(PMEMORYMODULE module)
+{
+    unsigned char *codeBase = module->codeBase;
+	ULONG_PTR lpCookie = NULL;
+    BOOL result = TRUE;
+
+    PIMAGE_DATA_DIRECTORY directory = GET_HEADER_DICTIONARY(module, IMAGE_DIRECTORY_ENTRY_IMPORT);
+    if (directory->Size == 0){
+        return TRUE;
+    }
+    PIMAGE_DATA_DIRECTORY resource = GET_HEADER_DICTIONARY(module, IMAGE_DIRECTORY_ENTRY_RESOURCE);
+	if (directory->Size == 0){
+		return TRUE;
+	}
+    
+    PIMAGE_IMPORT_DESCRIPTOR importDesc = (PIMAGE_IMPORT_DESCRIPTOR) (codeBase + directory->VirtualAddress);
+    // Following will be used to resolve manifest in module
+    if (resource->Size)
+    {
+        PIMAGE_RESOURCE_DIRECTORY resDir = (PIMAGE_RESOURCE_DIRECTORY)(codeBase + resource->VirtualAddress);
+        PIMAGE_RESOURCE_DIRECTORY resDirTemp;
+        PIMAGE_RESOURCE_DIRECTORY_ENTRY resDirEntry = (PIMAGE_RESOURCE_DIRECTORY_ENTRY) ((char*)resDir + sizeof(IMAGE_RESOURCE_DIRECTORY));
+        PIMAGE_RESOURCE_DIRECTORY_ENTRY resDirEntryTemp;
+        PIMAGE_RESOURCE_DATA_ENTRY resDataEntry;
+
+        // ACTCTX Structure, not used members must be set to 0!
+        ACTCTXA actctx ={0,0,0,0,0,0,0,0,0};
+        actctx.cbSize =  sizeof(actctx);
+        HANDLE hActCtx;
+        
+        // Path to temp directory + our temporary file name
+        CHAR buf[MAX_PATH];
+        DWORD tempPathLength = GetTempPathA(MAX_PATH, buf);
+        memcpy(buf + tempPathLength,"AutoHotkey.MemoryModule.temp.manifest",38);
+        actctx.lpSource = buf;
+
+        // Enumerate Resources
+        int i = 0;
+        if (_CreateActCtxA != NULL)
+        for (;i < resDir->NumberOfIdEntries + resDir->NumberOfNamedEntries;i++)
+        {
+            // Resolve current entry
+            resDirEntry = (PIMAGE_RESOURCE_DIRECTORY_ENTRY)((char*)resDir + sizeof(IMAGE_RESOURCE_DIRECTORY) + (i*sizeof(IMAGE_RESOURCE_DIRECTORY_ENTRY)));
+            
+            // If entry is directory and Id is 24 = RT_MANIFEST
+            if (resDirEntry->DataIsDirectory && resDirEntry->Id == 24)
+            {
+                //resDirTemp = (PIMAGE_RESOURCE_DIRECTORY)((char*)resDir + (resDirEntry->OffsetToDirectory));
+                resDirEntryTemp = (PIMAGE_RESOURCE_DIRECTORY_ENTRY)((char*)resDir + (resDirEntry->OffsetToDirectory) + sizeof(IMAGE_RESOURCE_DIRECTORY));
+                resDirTemp = (PIMAGE_RESOURCE_DIRECTORY) ((char*)resDir + (resDirEntryTemp->OffsetToDirectory));
+                resDirEntryTemp = (PIMAGE_RESOURCE_DIRECTORY_ENTRY)((char*)resDir + (resDirEntryTemp->OffsetToDirectory) + sizeof(IMAGE_RESOURCE_DIRECTORY));
+                resDataEntry = (PIMAGE_RESOURCE_DATA_ENTRY) ((char*)resDir + (resDirEntryTemp->OffsetToData));
+                
+                // Write manifest to temportary file
+                // Using FILE_ATTRIBUTE_TEMPORARY will avoid writing it to disk
+                // It will be deleted after CreateActCtx has been called.
+                HANDLE hFile = CreateFileA(buf,GENERIC_WRITE,NULL,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_TEMPORARY,NULL);
+                if (hFile == INVALID_HANDLE_VALUE)
+                {
+#if DEBUG_OUTPUT
+                    OutputDebugStringA("CreateFile failed.\n");
+#endif
+                    break; //failed to create file, continue and try loading without CreateActCtx
+                }
+                DWORD byteswritten = 0;
+                WriteFile(hFile,(codeBase + resDataEntry->OffsetToData),resDataEntry->Size,&byteswritten,NULL);
+                CloseHandle(hFile);
+                if (byteswritten == 0)
+                {
+#if DEBUG_OUTPUT
+                    OutputDebugStringA("WriteFile failed.\n");
+#endif
+                    break; //failed to write data, continue and try loading
+                }
+                
+                hActCtx = _CreateActCtxA(&actctx);
+
+                // Open file and automatically delete on CloseHandle (FILE_FLAG_DELETE_ON_CLOSE)
+                hFile = CreateFileA(buf,GENERIC_WRITE,FILE_SHARE_DELETE,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_TEMPORARY|FILE_FLAG_DELETE_ON_CLOSE,NULL);
+                CloseHandle(hFile);
+
+                if (hActCtx == INVALID_HANDLE_VALUE)
+                    break; //failed to create context, continue and try loading
+
+                _ActivateActCtx(hActCtx,&lpCookie); // Don't care if this fails since we would countinue anyway
+                break; // Break since a dll can have only 1 manifest
+            }
+        }
+    }
+	for (; !IsBadReadPtr(importDesc, sizeof(IMAGE_IMPORT_DESCRIPTOR)) && importDesc->Name; importDesc++) {
+		uintptr_t *thunkRef;
+		FARPROC *funcRef;
+		HCUSTOMMODULE *tmp;
+		HCUSTOMMODULE handle = NULL;
+		char *isMsvcr = NULL;
+		if (g_hMSVCR != NULL && (isMsvcr = strstr((LPSTR)(codeBase + importDesc->Name), "MSVCR100.dll")))
+		{
+			handle = g_hMSVCR; //GetModuleHandle(_T("MSVCRT.dll"));
+			if (tmp == NULL)
+				tmp = (HCUSTOMMODULE *)malloc((sizeof(HCUSTOMMODULE)));
+			if (tmp == NULL) {
+				SetLastError(ERROR_OUTOFMEMORY);
+				result = 0;
+				break;
+			}
+			module->modules = tmp;
+			module->modules[0] = handle;
+		}
+		else
+			handle = module->loadLibrary((LPCSTR) (codeBase + importDesc->Name), module->userdata);
+		if (handle == NULL) {
+			SetLastError(ERROR_MOD_NOT_FOUND);
+			result = FALSE;
+			break;
+		}
+		if (!isMsvcr)
+		{
+			tmp = (HCUSTOMMODULE *)realloc(module->modules, (module->numModules + 1)*(sizeof(HCUSTOMMODULE)));
+			if (tmp == NULL) {
+				module->freeLibrary(handle, module->userdata);
+				SetLastError(ERROR_OUTOFMEMORY);
+				result = 0;
+				break;
+			}
+			module->modules = tmp;
+			if (module->numModules == 1)
+				module->modules[0] = NULL;
+			module->modules[module->numModules++] = handle;
+		}
+
+		if (importDesc->OriginalFirstThunk) {
+			thunkRef = (uintptr_t *) (codeBase + importDesc->OriginalFirstThunk);
+			funcRef = (FARPROC *) (codeBase + importDesc->FirstThunk);
+		} else {
+			// no hint table
+			thunkRef = (uintptr_t *) (codeBase + importDesc->FirstThunk);
+			funcRef = (FARPROC *) (codeBase + importDesc->FirstThunk);
+		}
+		for (; *thunkRef; thunkRef++, funcRef++) {
+			if (IMAGE_SNAP_BY_ORDINAL(*thunkRef)) {
+				if (!isMsvcr)
+					*funcRef = module->getProcAddress(handle, (LPCSTR)IMAGE_ORDINAL(*thunkRef), module->userdata);
+				else
+					*funcRef = MemoryGetProcAddress(handle, (LPCSTR)IMAGE_ORDINAL(*thunkRef));
+			} else {
+				PIMAGE_IMPORT_BY_NAME thunkData = (PIMAGE_IMPORT_BY_NAME) (codeBase + (*thunkRef));
+				if (!isMsvcr)
+					*funcRef = module->getProcAddress(handle, (LPCSTR)&thunkData->Name, module->userdata);
+				else
+					*funcRef = MemoryGetProcAddress(handle, (LPCSTR)&thunkData->Name);
+			}
+			if (*funcRef == 0) {
+				result = FALSE;
+				break;
+			}
+		}
+
+		if (!result) {
+			module->freeLibrary(handle, module->userdata);
+			SetLastError(ERROR_PROC_NOT_FOUND);
+			break;
+		}
+	}
 	if (_DeactivateActCtx && lpCookie)
 		_DeactivateActCtx(NULL,lpCookie);
     return result;
@@ -428,117 +532,158 @@ HMEMORYMODULE MemoryLoadLibrary(const void *data)
 }
 
 HMEMORYMODULE MemoryLoadLibraryEx(const void *data,
-    CustomLoadLibraryFunc loadLibrary,
-    CustomGetProcAddressFunc getProcAddress,
-    CustomFreeLibraryFunc freeLibrary,
-    void *userdata)
+	CustomLoadLibraryFunc loadLibrary,
+	CustomGetProcAddressFunc getProcAddress,
+	CustomFreeLibraryFunc freeLibrary,
+	void *userdata)
 {
-    PMEMORYMODULE result;
-    PIMAGE_DOS_HEADER dos_header;
-    PIMAGE_NT_HEADERS old_header;
-    unsigned char *code, *headers;
-    SIZE_T locationDelta;
-    DllEntryProc DllEntry;
-    BOOL successfull;
+	PMEMORYMODULE result;
+	PIMAGE_DOS_HEADER dos_header;
+	PIMAGE_NT_HEADERS old_header;
+	unsigned char *code, *headers;
+	SIZE_T locationDelta;
+	SYSTEM_INFO sysInfo;
 
-    dos_header = (PIMAGE_DOS_HEADER)data;
-    if (dos_header->e_magic != IMAGE_DOS_SIGNATURE) {
-        SetLastError(ERROR_BAD_EXE_FORMAT);
-        return NULL;
-    }
+	dos_header = (PIMAGE_DOS_HEADER)data;
+	if (dos_header->e_magic != IMAGE_DOS_SIGNATURE) {
+		SetLastError(ERROR_BAD_EXE_FORMAT);
+		return NULL;
+	}
 
-    old_header = (PIMAGE_NT_HEADERS)&((const unsigned char *)(data))[dos_header->e_lfanew];
-    if (old_header->Signature != IMAGE_NT_SIGNATURE) {
-        SetLastError(ERROR_BAD_EXE_FORMAT);
-        return NULL;
-    }
+	old_header = (PIMAGE_NT_HEADERS)&((const unsigned char *)(data))[dos_header->e_lfanew];
+	if (old_header->Signature != IMAGE_NT_SIGNATURE) {
+		SetLastError(ERROR_BAD_EXE_FORMAT);
+		return NULL;
+	}
 
-    // reserve memory for image of library
-    // XXX: is it correct to commit the complete memory region at once?
-    //      calling DllEntry raises an exception if we don't...
-    code = (unsigned char *)VirtualAlloc((LPVOID)(old_header->OptionalHeader.ImageBase),
-        old_header->OptionalHeader.SizeOfImage,
-        MEM_RESERVE | MEM_COMMIT,
-        PAGE_EXECUTE_READWRITE);
+#ifdef _WIN64
+	if (old_header->FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64) {
+#else
+	if (old_header->FileHeader.Machine != IMAGE_FILE_MACHINE_I386) {
+#endif
+		SetLastError(ERROR_BAD_EXE_FORMAT);
+		return NULL;
+	}
 
-    if (code == NULL) {
-        // try to allocate memory at arbitrary position
-        code = (unsigned char *)VirtualAlloc(NULL,
-            old_header->OptionalHeader.SizeOfImage,
-            MEM_RESERVE | MEM_COMMIT,
-            PAGE_EXECUTE_READWRITE);
-        if (code == NULL) {
-            SetLastError(ERROR_OUTOFMEMORY);
-            return NULL;
-        }
-    }
-    
-    result = (PMEMORYMODULE)HeapAlloc(GetProcessHeap(), 0, sizeof(MEMORYMODULE));
-    if (result == NULL) {
-        SetLastError(ERROR_OUTOFMEMORY);
-        VirtualFree(code, 0, MEM_RELEASE);
-        return NULL;
-    }
+	if (old_header->OptionalHeader.SectionAlignment & 1) {
+		// Only support section alignments that are a multiple of 2
+		SetLastError(ERROR_BAD_EXE_FORMAT);
+		return NULL;
+	}
 
-    result->codeBase = code;
+	// reserve memory for image of library
+	// XXX: is it correct to commit the complete memory region at once?
+	//      calling DllEntry raises an exception if we don't...
+	code = (unsigned char *)VirtualAlloc((LPVOID)(old_header->OptionalHeader.ImageBase),
+		old_header->OptionalHeader.SizeOfImage,
+		MEM_RESERVE | MEM_COMMIT,
+		PAGE_EXECUTE_READWRITE);
+
+	if (code == NULL) {
+		// try to allocate memory at arbitrary position
+		code = (unsigned char *)VirtualAlloc(NULL,
+			old_header->OptionalHeader.SizeOfImage,
+			MEM_RESERVE | MEM_COMMIT,
+			PAGE_EXECUTE_READWRITE);
+		if (code == NULL) {
+			SetLastError(ERROR_OUTOFMEMORY);
+			return NULL;
+		}
+	}
+
+	result = (PMEMORYMODULE)HeapAlloc(GetProcessHeap(), 0, sizeof(MEMORYMODULE));
+	if (result == NULL) {
+		SetLastError(ERROR_OUTOFMEMORY);
+		VirtualFree(code, 0, MEM_RELEASE);
+		return NULL;
+	}
+
+	result->codeBase = code;
 	result->numModules = 1; // g_hMSVCR is saved in 0
-    result->modules = NULL;
-    result->initialized = 0;
-    result->loadLibrary = loadLibrary;
-    result->getProcAddress = getProcAddress;
-    result->freeLibrary = freeLibrary;
-    result->userdata = userdata;
+	result->modules = NULL;
+	result->initialized = FALSE;
+	result->isDLL = (old_header->FileHeader.Characteristics & IMAGE_FILE_DLL) != 0;
+	result->loadLibrary = loadLibrary;
+	result->getProcAddress = getProcAddress;
+	result->freeLibrary = freeLibrary;
+	result->userdata = userdata;
 
-    // commit memory for headers
-    headers = (unsigned char *)VirtualAlloc(code,
-        old_header->OptionalHeader.SizeOfHeaders,
-        MEM_COMMIT,
-        PAGE_EXECUTE_READWRITE);
-    
-    // copy PE header to code
-    memcpy(headers, dos_header, old_header->OptionalHeader.SizeOfHeaders);
-    result->headers = (PIMAGE_NT_HEADERS)&((const unsigned char *)(headers))[dos_header->e_lfanew];
+	GetNativeSystemInfo(&sysInfo);
+	result->pageSize = sysInfo.dwPageSize;
 
-    // update position
-    result->headers->OptionalHeader.ImageBase = (POINTER_TYPE)code;
+	// commit memory for headers
+	headers = (unsigned char *)VirtualAlloc(code,
+		old_header->OptionalHeader.SizeOfHeaders,
+		MEM_COMMIT,
+		PAGE_EXECUTE_READWRITE);
 
-    // copy sections from DLL file block to new memory location
-    CopySections((const unsigned char*) data, old_header, result);
+	// copy PE header to code
+	memcpy(headers, dos_header, old_header->OptionalHeader.SizeOfHeaders);
+	result->headers = (PIMAGE_NT_HEADERS)&((const unsigned char *)(headers))[dos_header->e_lfanew];
 
-    // adjust base address of imported data
-    locationDelta = (SIZE_T)(code - old_header->OptionalHeader.ImageBase);
-    if (locationDelta != 0) {
-        PerformBaseRelocation(result, locationDelta);
-    }
+	// update position
+	result->headers->OptionalHeader.ImageBase = (uintptr_t)code;
 
-    // load required dlls and adjust function table of imports
-    if (!BuildImportTable(result)) {
-        goto error;
-    }
+	// copy sections from DLL file block to new memory location
+	if (!CopySections((const unsigned char *)data, old_header, result)) {
+		goto error;
+	}
 
-    // mark memory pages depending on section headers and release
-    // sections that are marked as "discardable"
-    FinalizeSections(result);
+	// adjust base address of imported data
+	locationDelta = (SIZE_T)(code - old_header->OptionalHeader.ImageBase);
+	if (locationDelta != 0) {
+		result->isRelocated = PerformBaseRelocation(result, locationDelta);
+	}
+	else {
+		result->isRelocated = TRUE;
+	}
+
+	// load required dlls and adjust function table of imports
+	if (!BuildImportTable(result)) {
+		goto error;
+	}
+
+	// mark memory pages depending on section headers and release
+	// sections that are marked as "discardable"
+	if (!FinalizeSections(result)) {
+		goto error;
+	}
 
 	// TLS callbacks are executed BEFORE the main loading
-    ExecuteTLS(result);
+	if (!ExecuteTLS(result)) {
+		goto error;
+	}
 
     // get entry point of loaded library
     if (result->headers->OptionalHeader.AddressOfEntryPoint != 0) {
-        DllEntry = (DllEntryProc) (code + result->headers->OptionalHeader.AddressOfEntryPoint);
-        // notify library about attaching to process
-        successfull = (*DllEntry)((HINSTANCE)code, DLL_PROCESS_ATTACH, result);
-        if (!successfull) {
-            SetLastError(ERROR_DLL_INIT_FAILED);
-            goto error;
+		if (result->isDLL) {
+			DllEntryProc DllEntry = (DllEntryProc)(code + result->headers->OptionalHeader.AddressOfEntryPoint);
+			// set start and end of memory for our module so HookRtlPcToFileHeader can report properly
+			currentModuleStart = result->codeBase;
+			currentModuleEnd = result->codeBase + result->headers->OptionalHeader.SizeOfImage;
+			HANDLE hHeap = NULL;
+
+			PHOOK_ENTRY pHook = MinHookEnable(GetProcAddress(GetModuleHandleA("ntdll.dll"), "RtlPcToFileHeader"), &HookRtlPcToFileHeader, &hHeap);
+			// notify library about attaching to process
+			BOOL successfull = (*DllEntry)((HINSTANCE)code, DLL_PROCESS_ATTACH, 0);
+			MinHookDisable(pHook);
+			HeapDestroy(hHeap);
+			
+			if (!successfull) {
+				SetLastError(ERROR_DLL_INIT_FAILED);
+				goto error;
+			}
+            result->initialized = TRUE;
+        } else {
+            result->exeEntry = (ExeEntryProc) (code + result->headers->OptionalHeader.AddressOfEntryPoint);
         }
-        result->initialized = 1;
+    } else {
+        result->exeEntry = NULL;
     }
-
-    return (HMEMORYMODULE)result;
-
+	return (HMEMORYMODULE)result;
+	
 error:
-    // cleanup
+	// cleanup
     MemoryFreeLibrary(result);
     return NULL;
 }
@@ -592,35 +737,46 @@ FARPROC MemoryGetProcAddress(HMEMORYMODULE module, LPCSTR name)
 
 void MemoryFreeLibrary(HMEMORYMODULE mod)
 {
-    int i;
     PMEMORYMODULE module = (PMEMORYMODULE)mod;
 
-    if (module != NULL) {
-        if (module->initialized != 0) {
-            // notify library about detaching from process
-            DllEntryProc DllEntry = (DllEntryProc) (module->codeBase + module->headers->OptionalHeader.AddressOfEntryPoint);
-            (*DllEntry)((HINSTANCE)module->codeBase, DLL_PROCESS_DETACH, 0);
-            module->initialized = 0;
-        }
-
-        if (module->modules != NULL) {
-            // free previously opened libraries
-			// start at 1 because 0 contains g_hMSVCR
-            for (i=1; i<module->numModules; i++) {
-                if (module->modules[i] != NULL) {
-                    module->freeLibrary(module->modules[i], module->userdata);
-                }
-            }
-            free(module->modules);
-        }
-
-        if (module->codeBase != NULL) {
-            // release memory of library
-            VirtualFree(module->codeBase, 0, MEM_RELEASE);
-        }
-
-        HeapFree(GetProcessHeap(), 0, module);
+    if (module == NULL) {
+        return;
     }
+    if (module->initialized) {
+        // notify library about detaching from process
+        DllEntryProc DllEntry = (DllEntryProc) (module->codeBase + module->headers->OptionalHeader.AddressOfEntryPoint);
+        (*DllEntry)((HINSTANCE)module->codeBase, DLL_PROCESS_DETACH, 0);
+    }
+
+    if (module->modules != NULL) {
+        // free previously opened libraries
+		// start at 1 because 0 contains g_hMSVCR
+        for (int i=1; i<module->numModules; i++) {
+            if (module->modules[i] != NULL) {
+                module->freeLibrary(module->modules[i], module->userdata);
+            }
+        }
+
+        free(module->modules);
+    }
+
+    if (module->codeBase != NULL) {
+        // release memory of library
+        VirtualFree(module->codeBase, 0, MEM_RELEASE);
+    }
+
+    HeapFree(GetProcessHeap(), 0, module);
+}
+
+int MemoryCallEntryPoint(HMEMORYMODULE mod)
+{
+    PMEMORYMODULE module = (PMEMORYMODULE)mod;
+
+    if (module == NULL || module->isDLL || module->exeEntry == NULL || !module->isRelocated) {
+        return -1;
+    }
+
+    return module->exeEntry();
 }
 
 #define DEFAULT_LANGUAGE        MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL)
@@ -640,7 +796,7 @@ static PIMAGE_RESOURCE_DIRECTORY_ENTRY _MemorySearchResourceEntry(
     DWORD start;
     DWORD end;
     DWORD middle;
-    
+
     if (!IS_INTRESOURCE(key) && key[0] == TEXT('#')) {
         // special case: resource id given as string
         TCHAR *endpos = NULL;
@@ -653,7 +809,7 @@ static PIMAGE_RESOURCE_DIRECTORY_ENTRY _MemorySearchResourceEntry(
             key = MAKEINTRESOURCE(tmpkey);
         }
     }
-    
+
     // entries are stored as ordered list of named entries,
     // followed by an ordered list of id entries - we can do
     // a binary search to find faster...
@@ -693,7 +849,7 @@ static PIMAGE_RESOURCE_DIRECTORY_ENTRY _MemorySearchResourceEntry(
                 if (tmp == NULL) {
                     break;
                 }
-                
+
                 searchKey = (char *) tmp;
             }
             wcstombs(searchKey, resourceString->NameString, resourceString->Length);
@@ -714,8 +870,8 @@ static PIMAGE_RESOURCE_DIRECTORY_ENTRY _MemorySearchResourceEntry(
         free(searchKey);
 #endif
     }
-    
-    
+
+
     return result;
 }
 
@@ -734,7 +890,7 @@ HMEMORYRSRC MemoryFindResourceEx(HMEMORYMODULE module, LPCTSTR name, LPCTSTR typ
         SetLastError(ERROR_RESOURCE_DATA_NOT_FOUND);
         return NULL;
     }
-    
+
     if (language == DEFAULT_LANGUAGE) {
         // use language from current thread
         language = LANGIDFROMLCID(GetThreadLocale());
@@ -750,32 +906,36 @@ HMEMORYRSRC MemoryFindResourceEx(HMEMORYMODULE module, LPCTSTR name, LPCTSTR typ
         SetLastError(ERROR_RESOURCE_TYPE_NOT_FOUND);
         return NULL;
     }
-    
+
     typeResources = (PIMAGE_RESOURCE_DIRECTORY) (codeBase + directory->VirtualAddress + (foundType->OffsetToData & 0x7fffffff));
     foundName = _MemorySearchResourceEntry(rootResources, typeResources, name);
     if (foundName == NULL) {
         SetLastError(ERROR_RESOURCE_NAME_NOT_FOUND);
         return NULL;
     }
-    
+
     nameResources = (PIMAGE_RESOURCE_DIRECTORY) (codeBase + directory->VirtualAddress + (foundName->OffsetToData & 0x7fffffff));
-    foundLanguage = _MemorySearchResourceEntry(rootResources, nameResources, (LPCTSTR) (POINTER_TYPE) language);
+    foundLanguage = _MemorySearchResourceEntry(rootResources, nameResources, (LPCTSTR) (uintptr_t) language);
     if (foundLanguage == NULL) {
         // requested language not found, use first available
         if (nameResources->NumberOfIdEntries == 0) {
             SetLastError(ERROR_RESOURCE_LANG_NOT_FOUND);
             return NULL;
         }
-        
+
         foundLanguage = (PIMAGE_RESOURCE_DIRECTORY_ENTRY) (nameResources + 1);
     }
+
     return (codeBase + directory->VirtualAddress + (foundLanguage->OffsetToData & 0x7fffffff));
 }
 
 DWORD MemorySizeOfResource(HMEMORYMODULE module, HMEMORYRSRC resource)
 {
     PIMAGE_RESOURCE_DATA_ENTRY entry = (PIMAGE_RESOURCE_DATA_ENTRY) resource;
-    
+    if (entry == NULL) {
+        return 0;
+    }
+
     return entry->Size;
 }
 
@@ -783,7 +943,10 @@ LPVOID MemoryLoadResource(HMEMORYMODULE module, HMEMORYRSRC resource)
 {
     unsigned char *codeBase = ((PMEMORYMODULE) module)->codeBase;
     PIMAGE_RESOURCE_DATA_ENTRY entry = (PIMAGE_RESOURCE_DATA_ENTRY) resource;
-    
+    if (entry == NULL) {
+        return NULL;
+    }
+
     return codeBase + entry->OffsetToData;
 }
 
@@ -800,13 +963,13 @@ LPVOID MemoryLoadStringEx(HMEMORYMODULE module, UINT id, LPTSTR buffer, int maxs
     if (buffer && maxsize == 0) {
         return 0;
     }
-    
+
     resource = MemoryFindResourceEx(module, MAKEINTRESOURCE((id >> 4) + 1), RT_STRING, language);
     if (resource == NULL) {
         buffer[0] = 0;
         return 0;
     }
-    
+
     data = (PIMAGE_RESOURCE_DIR_STRING_U) MemoryLoadResource(module, resource);
     id = id & 0x0f;
     while (id--) {
@@ -818,7 +981,7 @@ LPVOID MemoryLoadStringEx(HMEMORYMODULE module, UINT id, LPTSTR buffer, int maxs
         return 0;
     } else if (!buffer)
 		return data->NameString;
-    
+
     size = data->Length;
     if (size >= (DWORD) maxsize) {
         size = maxsize;

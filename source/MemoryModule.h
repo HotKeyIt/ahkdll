@@ -1,8 +1,8 @@
 /*
  * Memory DLL loading code
- * Version 0.0.3
+ * Version 0.0.4
  *
- * Copyright (c) 2004-2013 by Joachim Bauch / mail@joachim-bauch.de
+ * Copyright (c) 2004-2015 by Joachim Bauch / mail@joachim-bauch.de
  * http://www.joachim-bauch.de
  *
  * The contents of this file are subject to the Mozilla Public License Version
@@ -19,7 +19,7 @@
  *
  * The Initial Developer of the Original Code is Joachim Bauch.
  *
- * Portions created by Joachim Bauch are Copyright (C) 2004-2013
+ * Portions created by Joachim Bauch are Copyright (C) 2004-2015
  * Joachim Bauch. All Rights Reserved.
  *
  */
@@ -28,7 +28,7 @@
 #define __MEMORY_MODULE_HEADER
 
 #include <windows.h>
-
+#include <winternl.h>
 typedef void *HMEMORYMODULE;
 
 typedef void *HMEMORYRSRC;
@@ -39,46 +39,61 @@ typedef void *HCUSTOMMODULE;
 extern "C" {
 #endif
 
-#define GET_HEADER_DICTIONARY(module, idx)	&(module)->headers->OptionalHeader.DataDirectory[idx]
-
+#define GET_HEADER_DICTIONARY(module, idx)  &(module)->headers->OptionalHeader.DataDirectory[idx]
+#define ALIGN_DOWN(address, alignment)      (LPVOID)((uintptr_t)(address) & ~((alignment) - 1))
 typedef HCUSTOMMODULE (*CustomLoadLibraryFunc)(LPCSTR, void *);
 typedef FARPROC (*CustomGetProcAddressFunc)(HCUSTOMMODULE, LPCSTR, void *);
 typedef void (*CustomFreeLibraryFunc)(HCUSTOMMODULE, void *);
+typedef BOOL(WINAPI *DllEntryProc)(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved);
+typedef int (WINAPI *ExeEntryProc)(void);
 
 typedef struct {
-    PIMAGE_NT_HEADERS headers;
-    unsigned char *codeBase;
-    HCUSTOMMODULE *modules;
-    int numModules;
-    int initialized;
-    CustomLoadLibraryFunc loadLibrary;
-    CustomGetProcAddressFunc getProcAddress;
-    CustomFreeLibraryFunc freeLibrary;
-    void *userdata;
+	PIMAGE_NT_HEADERS headers;
+	unsigned char *codeBase;
+	HCUSTOMMODULE *modules;
+	int numModules;
+	BOOL initialized;
+	BOOL isDLL;
+	BOOL isRelocated;
+	CustomLoadLibraryFunc loadLibrary;
+	CustomGetProcAddressFunc getProcAddress;
+	CustomFreeLibraryFunc freeLibrary;
+	void *userdata;
+	ExeEntryProc exeEntry;
+	DWORD pageSize;
 } MEMORYMODULE, *PMEMORYMODULE;
+
+typedef struct {
+	LPVOID address;
+	LPVOID alignedAddress;
+	DWORD size;
+	DWORD characteristics;
+	BOOL last;
+} SECTIONFINALIZEDATA, *PSECTIONFINALIZEDATA;
+
 
 static HCUSTOMMODULE _LoadLibrary(LPCSTR filename, void *userdata)
 {
-	HMODULE result = LoadLibraryA(filename);
-	if (result == NULL) {
-		return NULL;
-	}
+    HMODULE result = LoadLibraryA(filename);
+    if (result == NULL) {
+        return NULL;
+    }
 
-	return (HCUSTOMMODULE)result;
+    return (HCUSTOMMODULE) result;
 }
 
 static FARPROC _GetProcAddress(HCUSTOMMODULE module, LPCSTR name, void *userdata)
 {
-	return (FARPROC)GetProcAddress((HMODULE)module, name);
+    return (FARPROC) GetProcAddress((HMODULE) module, name);
 }
 
 static void _FreeLibrary(HCUSTOMMODULE module, void *userdata)
 {
-	FreeLibrary((HMODULE)module);
+    FreeLibrary((HMODULE) module);
 }
 
 /**
- * Load DLL from memory location.
+ * Load EXE/DLL from memory location.
  *
  * All dependencies are resolved using default LoadLibrary/GetProcAddress
  * calls through the Windows API.
@@ -86,7 +101,7 @@ static void _FreeLibrary(HCUSTOMMODULE module, void *userdata)
 HMEMORYMODULE MemoryLoadLibrary(const void *);
 
 /**
- * Load DLL from memory location using custom dependency resolvers.
+ * Load EXE/DLL from memory location using custom dependency resolvers.
  *
  * Dependencies will be resolved using passed callback methods.
  */
@@ -102,9 +117,22 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *,
 FARPROC MemoryGetProcAddress(HMEMORYMODULE, LPCSTR);
 
 /**
- * Free previously loaded DLL.
+ * Free previously loaded EXE/DLL.
  */
 void MemoryFreeLibrary(HMEMORYMODULE);
+
+/**
+ * Execute entry point (EXE only). The entry point can only be executed
+ * if the EXE has been loaded to the correct base address or it could
+ * be relocated (i.e. relocation information have not been stripped by
+ * the linker).
+ *
+ * Important: calling this function will not return, i.e. once the loaded
+ * EXE finished running, the process will terminate.
+ *
+ * Returns a negative value if the entry point could not be executed.
+ */
+int MemoryCallEntryPoint(HMEMORYMODULE);
 
 /**
  * Find the location of a resource with the specified type and name.
