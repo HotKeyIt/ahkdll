@@ -71,7 +71,7 @@ Script::Script()
 	, mFirstMenu(NULL), mLastMenu(NULL), mMenuCount(0)
 #endif
 	, mVar(NULL), mVarCount(0), mVarCountMax(0), mLazyVar(NULL), mLazyVarCount(0)
-	, mCurrentFuncOpenBlockCount(0), mNextLineIsFunctionBody(false)
+	, mCurrentFuncOpenBlockCount(0), mNextLineIsFunctionBody(false), mNoUpdateLabels(false)
 	, mClassObjectCount(0), mUnresolvedClasses(NULL), mClassProperty(NULL), mClassPropertyDef(NULL)
 	, mCurrFileIndex(0), mCombinedLineNumber(0), mNoHotkeyLabels(true)
 #ifndef MINIDLL
@@ -249,6 +249,8 @@ Script::~Script() // Destructor.
 	if (g_hFontSplash) // The splash window itself should auto-destroyed, since it's owned by main.
 		DeleteObject(g_hFontSplash);
 #endif
+	if (mOnClipboardChangeLabel || mOnClipboardChange.Count()) // Remove from viewer chain.
+		EnableClipboardListener(false);
 	// We call DestroyWindow() because MainWindowProc() has left that up to us.
 	// DestroyWindow() will cause MainWindowProc() to immediately receive and process the
 	// WM_DESTROY msg, which should in turn result in any child windows being destroyed
@@ -282,11 +284,6 @@ Script::~Script() // Destructor.
 	}
 	if (g_hAccelTable)
 		DestroyAcceleratorTable(g_hAccelTable);
-	if (mOnClipboardChangeLabel) // Remove from viewer chain.
-		if (MyRemoveClipboardListener && MyAddClipboardListener)
-			MyRemoveClipboardListener(g_hWnd); // MyAddClipboardListener was used.
-		else
-			ChangeClipboardChain(g_hWnd, mNextClipboardViewer); // SetClipboardViewer was used.
 
 	// Close any open sound item to prevent hang-on-exit in certain operating systems or conditions.
 	// If there's any chance that a sound was played and not closed out, or that it is still playing,
@@ -487,10 +484,8 @@ void Script::Destroy()
 	mTempLine = NULL;
 
 	//reset count for OnMessage
-	if (g_MsgMonitor)
-		free(g_MsgMonitor);
-	g_MsgMonitorCount = 0;
-	g_MsgMonitor = NULL;
+	if (g_MsgMonitor.Count())
+		g_MsgMonitor.RemoveAll();
 
 	g_nMessageBoxes = 0;
 #ifndef MINIDLL
@@ -719,10 +714,22 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 			if (filespec_length + _tcslen(suffix) + 1 > _countof(def_buf))
 				return FAIL; // Very rare, so for simplicity just abort.
 			_tcscpy(aScriptFilename + filespec_length, suffix); // Append the filename: .ahk vs. .ini seems slightly better in terms of clarity and usefulness (e.g. the ability to double click the default script to launch it).
-			// Now everything is set up right because even if aScriptFilename is a nonexistent file, the
-			// user will be prompted to create it by a stage further below.
+			if (GetFileAttributes(aScriptFilename) == 0xFFFFFFFF)
+			{
+				_tcscpy(dot, _T(".chm")); // Replace the ".ahk" which was inserted earlier.
+				if (GetFileAttributes(exe_buf) != 0xFFFFFFFF) // Avoids hh.exe showing an error message if the file doesn't exist.
+				{
+					_sntprintf(buf, _countof(buf), _T("\"ms-its:%s::/docs/Welcome.htm\""), exe_buf);
+					if (ActionExec(_T("hh.exe"), buf, exe_buf, false, _T("Max")))
+						return FAIL;
+				}
+				// Since above didn't return, the help file is missing or failed to launch,
+				// so continue on and let the missing script file be reported as an error.
+				// This will happen for AutoHotkeyU32.exe because AutoHotkeyU32.chm doesn't
+				// exist (seems fine to just show an error message in such cases).
+			}
 		}
-		//else since the legacy .ini file exists, everything is now set up right. (The file might be a directory, but that isn't checked due to rarity.)
+		//else since the file exists, everything is now set up right. (The file might be a directory, but that isn't checked due to rarity.)
 	}
 	// In case the script is a relative filespec (relative to current working dir):
 	if (g_hResource || (hInstance != NULL && aIsText)) //It is a dll and script was given as text rather than file
@@ -1020,6 +1027,19 @@ ResultType Script::CreateWindows()
 		CreateTrayIcon();
 #endif
 	if (mOnClipboardChangeLabel)
+		EnableClipboardListener(true);
+
+	return OK;
+}
+
+
+
+void Script::EnableClipboardListener(bool aEnable)
+{
+	static bool sEnabled = false;
+	if (aEnable == sEnabled) // Simplifies BIF_OnExitOrClipboardChange.
+		return;
+	if (aEnable)
 	{
 		if (MyAddClipboardListener && MyRemoveClipboardListener) // Should be impossible for only one of these to be NULL, but check both anyway to be safe.
 		{
@@ -1029,13 +1049,30 @@ ResultType Script::CreateWindows()
 			// But this method doesn't appear to send an initial WM_CLIPBOARDUPDATE message.
 			// For consistency with the other method (below) and for backward compatibility,
 			// run the OnClipboardChange label once when the script first starts:
-			PostMessage(g_hWnd, AHK_CLIPBOARD_CHANGE, 0, 0);
+			if (!mIsReadyToExecute)
+			{
+				// Pass 1 for wParam so that MsgSleep() will call only the legacy OnClipboardChange label,
+				// not any functions which are registered between now and when the message is handled.
+				PostMessage(g_hWnd, AHK_CLIPBOARD_CHANGE, 1, 0);
+			}
 		}
 		else
+		{
 			mNextClipboardViewer = SetClipboardViewer(g_hWnd);
+			// SetClipboardViewer() sends a WM_DRAWCLIPBOARD message and causes MainWindowProc()
+			// to be called before returning.  MainWindowProc() posts an AHK_CLIPBOARD_CHANGE
+			// message only if an OnClipboardChange label exists, since mOnClipboardChange.Count()
+			// is always 0 at this point.  It also uses wParam for the reason described above.
+		}
 	}
-
-	return OK;
+	else
+	{
+		if (MyRemoveClipboardListener && MyAddClipboardListener)
+			MyRemoveClipboardListener(g_hWnd); // MyAddClipboardListener was used.
+		else
+			ChangeClipboardChain(g_hWnd, mNextClipboardViewer); // SetClipboardViewer was used.
+	}
+	sEnabled = aEnable;
 }
 
 
@@ -1325,31 +1362,34 @@ ResultType Script::ExitApp(ExitReasons aExitReason, LPTSTR aBuf, int aExitCode)
 		MessageBox(g_hWnd, buf, g_script.mFileSpec, MB_OK | MB_SETFOREGROUND | MB_APPLMODAL);
 		TerminateApp(aExitReason, CRITICAL_ERROR); // Only after the above.
 	}
-
-	// Otherwise, it's not a critical error.  Note that currently, mOnExitLabel can only be
-	// non-NULL if the script is in a runnable state (since registering an OnExit label requires
-	// that a script command has executed to do it).  If this ever changes, the !mIsReadyToExecute
-	// condition should be added to the below if statement:
-	static bool sExitLabelIsRunning = false;
-	if (!mOnExitLabel || sExitLabelIsRunning)  // || !mIsReadyToExecute
+	// Otherwise, it's not a critical error.
+	static bool sOnExitIsRunning = false, sExitAppShouldTerminate = true;
+	static int sExitCode;
+	if (sOnExitIsRunning || !mIsReadyToExecute)
 	{
-		// In the case of sExitLabelIsRunning == true:
-		// There is another instance of this function beneath us on the stack.  Since we have
-		// been called, this is a true exit condition and we exit immediately.
-		// MUST NOT create a new thread when sExitLabelIsRunning because g_array allows only one
-		// extra thread for ExitApp() (which allows it to run even when MAX_THREADS_EMERGENCY has
-		// been reached).  See TOTAL_ADDITIONAL_THREADS.
+		// There is another instance of this function beneath us on the stack, executing an
+		// OnExit subroutine or function.  If a legacy OnExit sub is running, we still need
+		// to execute any other OnExit callbacks before exiting.  Otherwise ExitApp should
+		// terminate the app.  Causes of script exit other than ExitApp are expected to
+		// terminate the app immediately even if OnExit is running.
 #ifdef _USRDLL
-		if (sExitLabelIsRunning && g_Reloading)
+		if (sExitAppShouldTerminate && g_Reloading)
 		{
-			sExitLabelIsRunning = false;
+			sExitAppShouldTerminate = false;
 			return EARLY_EXIT;
 		}
 #endif
-		g_AllowInterruption = FALSE; // In case TerminateApp releases objects and indirectly causes
-		g->IsPaused = false;		 // more script to be executed.
-		TerminateApp(aExitReason, aExitCode);
+		if (sExitAppShouldTerminate || aExitReason != EXIT_EXIT)
+			TerminateApp(aExitReason, aExitCode); // Exit early; don't run the OnExit callbacks (again).
+		if (*Line::sArgDeref[0]) // ExitApp with a parameter -- relies on the aExitReason check above.
+			sExitCode = aExitCode; // Override the previous exit code.
+		sExitAppShouldTerminate = true; // Signal our other instance that ExitApp was called.
+		return EARLY_EXIT; // Exit the thread (our other instance will call TerminateApp).
+		// MUST NOT create a new thread when sOnExitIsRunning because g_array allows only one
+		// extra thread for ExitApp() (which allows it to run even when MAX_THREADS_EMERGENCY
+		// has been reached).  See TOTAL_ADDITIONAL_THREADS for details.
 	}
+	sExitCode = aExitCode;
 
 	// Otherwise, the script contains the special RunOnExit label that we will run here instead
 	// of exiting.  And since it does, we know that the script is in a ready-to-execute state
@@ -1390,23 +1430,45 @@ ResultType Script::ExitApp(ExitReasons aExitReason, LPTSTR aBuf, int aExitCode)
 	BOOL g_AllowInterruption_prev = g_AllowInterruption;  // Save current setting.
 	g_AllowInterruption = FALSE; // Mark the thread just created above as permanently uninterruptible (i.e. until it finishes and is destroyed).
 
-	sExitLabelIsRunning = true;
+	sOnExitIsRunning = true;
 	DEBUGGER_STACK_PUSH(_T("OnExit"))
-	if (mOnExitLabel->Execute() == FAIL)
+
+	terminate_afterward = true; // Set default - see below for comments.
+	
+	// When a legacy OnExit label is present, the default behaviour is to exit the script only if
+	// it calls ExitApp.  Therefore to make OnExit() useful in a script which uses legacy OnExit,
+	// we need to prevent ExitApp from actually terminating the app:
+	sExitAppShouldTerminate = false;
+	// If the subroutine encounters a failure condition such as a runtime error, exit afterward.
+	// Otherwise, there will be no way to exit the script if the subroutine fails on each attempt.
+	if (mOnExitLabel && mOnExitLabel->Execute() && !sExitAppShouldTerminate)
 	{
-		// If the subroutine encounters a failure condition such as a runtime error, exit immediately.
-		// Otherwise, there will be no way to exit the script if the subroutine fails on each attempt.
-		TerminateApp(aExitReason, aExitCode);
+		// The subroutine completed normally and did not call ExitApp, so don't exit.
+		terminate_afterward = false;
+	}
+	sExitAppShouldTerminate = true;
+
+	// If an OnExit label was called and didn't call ExitApp, terminate_afterward was set to false,
+	// so the script isn't exiting.  Otherwise, call the chain of OnExit functions:
+	if (terminate_afterward)
+	{
+		ExprTokenType param[] = { GetExitReasonString(aExitReason), (__int64)sExitCode };
+		if (mOnExit.Call(param, _countof(param), mOnExitLabel ? 0 : 1) == CONDITION_TRUE)
+			terminate_afterward = false; // A handler returned true to prevent exit.
 	}
 #ifdef _USRDLL
 	if (aExitReason == EXIT_RELOAD)
 		return EARLY_EXIT;
 #endif
 	DEBUGGER_STACK_POP()
-	sExitLabelIsRunning = false;  // In case the user wanted the thread to end normally (see above).
+	sOnExitIsRunning = false;  // In case the user wanted the thread to end normally (see above).
 
 	if (terminate_afterward)
+	{
+		g_AllowInterruption = FALSE; // In case TerminateApp releases objects and indirectly causes
+		g->IsPaused = false;		 // more script to be executed.
 		TerminateApp(aExitReason, aExitCode);
+	}
 
 	// Otherwise:
 	ResumeUnderlyingThread(ErrorLevel_saved);
@@ -1505,53 +1567,15 @@ LineNumberType Script::LoadFromText(LPTSTR aScript,LPCTSTR aPathToShow, bool aCh
 		|| !AddLine(ACT_EXIT)) // Fix for v1.0.47.04: Add an Exit because otherwise, a script that ends in an IF-statement will crash in PreparseBlocks() because PreparseBlocks() expects every IF-statements mNextLine to be non-NULL (helps loading performance too).
 		return LOADING_FAILED;
 
-	// BELOW: Aside from setting up {} blocks, PreparseBlocks() resolves function references in expressions.
-	// Originally PreparseBlocks() resolved all function references in one sweep. Since func lib auto-inclusions
-	// are appended to the main script, they were automatically handled by a later iteration of the loop inside
-	// PreparseBlocks(). However, the introduction of #If and Static initializers bring some complications:
-	//   (a) Function-calls in the main script, #If expressions or Static initializers can cause auto-inclusions.
-	//   (b) Auto-inclusions can introduce more function-calls.
-	//   (c) Auto-inclusions can introduce more #If expressions or Static initializers.
-	// The loop below handles these potentially "recursive" cases.
-	Line *last_line_processed = NULL, *last_static_processed = NULL;
-	int expr_line_index = 0;
-	for (;;)
-	{
-		// Check for any unprocessed #if expressions:
-#ifndef MINIDLL
-#ifndef AUTOHOTKEYSC
-		if (aCheckIfExpr)
-#endif
-		for ( ; expr_line_index < g_HotExprLineCount; ++expr_line_index)
-		{
-			Line *line = g_HotExprLines[expr_line_index];
-			if (!PreparseBlocks(line))
-				return LOADING_FAILED;
-			// Search for "ACT_EXPRESSION will be changed to ACT_IFEXPR" for comments about the following line:
-			line->mActionType = ACT_IFEXPR;
-		}
-#endif
-		// Check for any unprocessed static initializers:
-		if (last_static_processed != mLastStaticLine)
-		{
-			if (!PreparseBlocks(last_static_processed ? last_static_processed->mNextLine : mFirstStaticLine))
-				return LOADING_FAILED;
-			last_static_processed = mLastStaticLine;
-		}
-		// Check for any unprocessed lines in the main script:
-		if (last_line_processed != mLastLine)
-		{
-			if (!PreparseBlocks(last_line_processed ? last_line_processed->mNextLine : mFirstLine))
-				return LOADING_FAILED; // Error was already displayed by the above call.
-			last_line_processed = mLastLine;
-		}
-		// Since #If expressions and Static initializers can't directly bring about more #If expressions or Static
-		// initializers, the fact that no new lines have been added to the script since the last iteration means
-		// all lines in the main script, all #If expressions and all Static initializers have been processed.
-		else break;
-	}
+	if (!PreparseExpressions(mFirstLine))
+		return LOADING_FAILED;
+
 	// ABOVE: In v1.0.47, the above may have auto-included additional files from the userlib/stdlib.
 	// That's why the above is done prior to adding the EXIT lines and other things below.
+
+	// Preparse static initializers and #if expressions.
+	PreparseStaticLines(mFirstLine);
+
 	if (mFirstStaticLine)
 	{
 		// Prepend all Static initializers to the beginning of the auto-execute section.
@@ -1625,7 +1649,8 @@ LineNumberType Script::LoadFromText(LPTSTR aScript,LPCTSTR aPathToShow, bool aCh
 		return LOADING_FAILED;
 	mPlaceholderLabel->mJumpToLine = mLastLine; // To follow the rule "all labels should have a non-NULL line before the script starts running".
 
-	if (!PreparseIfElse(mFirstLine))
+	if (!PreparseBlocks(mFirstLine)
+		|| !PreparseCommands(mFirstLine))
 		return LOADING_FAILED; // Error was already displayed by the above calls.
 
 	// Use FindOrAdd, not Add, because the user may already have added it simply by
@@ -1658,11 +1683,7 @@ LineNumberType Script::LoadFromText(LPTSTR aScript,LPCTSTR aPathToShow, bool aCh
 
 
 #endif
-#ifdef AUTOHOTKEYSC
 UINT Script::LoadFromFile()
-#else
-UINT Script::LoadFromFile(bool aScriptWasNotspecified, bool aCheckIfExpr)
-#endif
 // Returns the number of non-comment lines that were loaded, or LOADING_FAILED on error.
 {
 	mNoHotkeyLabels = true;  // Indicate that there are no hotkey labels, since we're (re)loading the entire file.
@@ -1677,72 +1698,8 @@ UINT Script::LoadFromFile(bool aScriptWasNotspecified, bool aCheckIfExpr)
 		return LOADING_FAILED;
 #endif
 		TCHAR buf[MAX_PATH + 256];
-		if (aScriptWasNotspecified) // v1.0.46.09: Give a more descriptive prompt to help users get started.
-		{
-			sntprintf(buf, _countof(buf),
-_T("To help you get started, would you like to create a sample script in the My Documents folder?\n")
-_T("\n")
-_T("Press YES to create and display the sample script.\n")
-_T("Press NO to exit.\n"));
-		}
-		else // Mostly for backward compatibility, also prompt to create if an explicitly specified script doesn't exist.
-			sntprintf(buf, _countof(buf), _T("The script file \"%s\" does not exist.  Create it now?"), mFileSpec);
-		int response = MsgBox(buf, MB_YESNO);
-		if (response != IDYES)
-			return 0;
-		FILE *fp2 = _tfopen(mFileSpec, _T("a"));
-		if (!fp2)
-		{
-			MsgBox(_T("Could not create file, perhaps because the current directory is read-only")
-				_T(" or has insufficient permissions."));
-			return LOADING_FAILED;
-		}
-		_fputts(
-_T("; IMPORTANT INFO ABOUT GETTING STARTED: Lines that start with a\n")
-_T("; semicolon, such as this one, are comments.  They are not executed.\n")
-_T("\n")
-_T("; This script has a special filename and path because it is automatically\n")
-_T("; launched when you run the program directly.  Also, any text file whose\n")
-_T("; name ends in .ahk is associated with the program, which means that it\n")
-_T("; can be launched simply by double-clicking it.  You can have as many .ahk\n")
-_T("; files as you want, located in any folder.  You can also run more than\n")
-_T("; one .ahk file simultaneously and each will get its own tray icon.\n")
-_T("\n")
-_T("; SAMPLE HOTKEYS: Below are two sample hotkeys.  The first is Win+Z and it\n")
-_T("; launches a web site in the default browser.  The second is Control+Alt+N\n")
-_T("; and it launches a new Notepad window (or activates an existing one).  To\n")
-_T("; try out these hotkeys, run AutoHotkey again, which will load this file.\n")
-_T("\n")
-_T("#z::Run http://ahkscript.org\n")
-_T("\n")
-_T("^!n::\n")
-_T("IfWinExist Untitled - Notepad\n")
-_T("\tWinActivate\n")
-_T("else\n")
-_T("\tRun Notepad\n")
-_T("return\n")
-_T("\n")
-_T("\n")
-_T("; Note: From now on whenever you run AutoHotkey directly, this script\n")
-_T("; will be loaded.  So feel free to customize it to suit your needs.\n")
-_T("\n")
-_T("; Please read the QUICK-START TUTORIAL near the top of the help file.\n")
-_T("; It explains how to perform common automation tasks such as sending\n")
-_T("; keystrokes and mouse clicks.  It also explains more about hotkeys.\n")
-, fp2);
-		fclose(fp2);
-		// One or both of the below would probably fail -- at least on Win95 -- if mFileSpec ever
-		// has spaces in it (since it's passed as the entire param string).  So enclose the filename
-		// in double quotes.  I don't believe the directory needs to be in double quotes since it's
-		// a separate field within the CreateProcess() and ShellExecute() structures:
-		sntprintf(buf, _countof(buf), _T("\"%s\""), mFileSpec);
-		if (!ActionExec(_T("edit"), buf, mFileDir, false))
-			if (!ActionExec(_T("notepad.exe"), buf, mFileDir, false))
-			{
-				MsgBox(_T("Can't open script.")); // Short msg since so rare.
-				return LOADING_FAILED;
-			}
-		// future: have it wait for the process to close, then try to open the script again:
+		sntprintf(buf, _countof(buf), _T("Script file not found:\n%s"), mFileSpec);
+		MsgBox(buf, MB_ICONHAND);
 		return 0;
 	}
 #endif
@@ -1760,56 +1717,17 @@ _T("; keystrokes and mouse clicks.  It also explains more about hotkeys.\n")
 
 	// Load the main script file.  This will also load any files it includes with #Include.
 	if (   LoadIncludedFile(g_RunStdIn ? _T("*") : mFileSpec, false, false) != OK
-		|| !AddLine(ACT_EXIT)) // Fix for v1.0.47.04: Add an Exit because otherwise, a script that ends in an IF-statement will crash in PreparseBlocks() because PreparseBlocks() expects every IF-statements mNextLine to be non-NULL (helps loading performance too).
+		|| !AddLine(ACT_EXIT)) // Add an Exit to ensure lib auto-includes aren't auto-executed, for backward compatibility.
 		return LOADING_FAILED;
 
-	// BELOW: Aside from setting up {} blocks, PreparseBlocks() resolves function references in expressions.
-	// Originally PreparseBlocks() resolved all function references in one sweep. Since func lib auto-inclusions
-	// are appended to the main script, they were automatically handled by a later iteration of the loop inside
-	// PreparseBlocks(). However, the introduction of #If and Static initializers bring some complications:
-	//   (a) Function-calls in the main script, #If expressions or Static initializers can cause auto-inclusions.
-	//   (b) Auto-inclusions can introduce more function-calls.
-	//   (c) Auto-inclusions can introduce more #If expressions or Static initializers.
-	// The loop below handles these potentially "recursive" cases.
-	Line *last_line_processed = NULL, *last_static_processed = NULL;
-	int expr_line_index = 0;
-	for (;;)
-	{
-		// Check for any unprocessed #if expressions:
-#ifndef MINIDLL
-#ifndef AUTOHOTKEYSC
-		if (aCheckIfExpr)
-#endif
-		for ( ; expr_line_index < g_HotExprLineCount; ++expr_line_index)
-		{
-			Line *line = g_HotExprLines[expr_line_index];
-			if (!PreparseBlocks(line))
-				return LOADING_FAILED;
-			// Search for "ACT_EXPRESSION will be changed to ACT_IFEXPR" for comments about the following line:
-			line->mActionType = ACT_IFEXPR;
-		}
-#endif
-		// Check for any unprocessed static initializers:
-		if (last_static_processed != mLastStaticLine)
-		{
-			if (!PreparseBlocks(last_static_processed ? last_static_processed->mNextLine : mFirstStaticLine))
-				return LOADING_FAILED;
-			last_static_processed = mLastStaticLine;
-		}
-		// Check for any unprocessed lines in the main script:
-		if (last_line_processed != mLastLine)
-		{
-			if (!PreparseBlocks(last_line_processed ? last_line_processed->mNextLine : mFirstLine))
-				return LOADING_FAILED; // Error was already displayed by the above call.
-			last_line_processed = mLastLine;
-		}
-		// Since #If expressions and Static initializers can't directly bring about more #If expressions or Static
-		// initializers, the fact that no new lines have been added to the script since the last iteration means
-		// all lines in the main script, all #If expressions and all Static initializers have been processed.
-		else break;
-	}
+	if (!PreparseExpressions(mFirstLine))
+		return LOADING_FAILED; // Error was already displayed by the above call.
+
 	// ABOVE: In v1.0.47, the above may have auto-included additional files from the userlib/stdlib.
 	// That's why the above is done prior to adding the EXIT lines and other things below.
+
+	// Preparse static initializers and #if expressions.
+	PreparseStaticLines(mFirstLine);
 	if (mFirstStaticLine)
 	{
 		// Prepend all Static initializers to the beginning of the auto-execute section.
@@ -1884,7 +1802,8 @@ _T("; keystrokes and mouse clicks.  It also explains more about hotkeys.\n")
 		return LOADING_FAILED;
 	mPlaceholderLabel->mJumpToLine = mLastLine; // To follow the rule "all labels should have a non-NULL line before the script starts running".
 
-	if (!PreparseIfElse(mFirstLine))
+	if (   !PreparseBlocks(mFirstLine)
+		|| !PreparseCommands(mFirstLine)   )
 		return LOADING_FAILED; // Error was already displayed by the above calls.
 
 	// Use FindOrAdd, not Add, because the user may already have added it simply by
@@ -4662,7 +4581,7 @@ examine_line:
 					}
 				}
 				else // No parent hotkey yet, so create it.
-					if (   !(hk = Hotkey::AddHotkey(mLastLabel, hook_action, NULL, suffix_has_tilde, false))   )
+					if (   !(hk = Hotkey::AddHotkey(mLastLabel, hook_action, mLastLabel->mName, suffix_has_tilde, false))   )
 					{
 						if (hotkey_validity != CONDITION_TRUE)
 							goto FAIL; // It already displayed the error.
@@ -5256,50 +5175,36 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 			g_HotExprIndex = -1;
 			return CONDITION_TRUE;
 		}
-
-		Func *currentFunc = g->CurrentFunc;
-		// Ensure variable references are global:
-		g->CurrentFunc = NULL;
-
-		ConvertEscapeSequences(parameter, g_EscapeChar, false); // Normally done in ParseAndAddLine().
-
-		// ACT_EXPRESSION will be changed to ACT_IFEXPR after PreparseBlocks() is called so that EvaluateCondition()
-		// can be used and because ACT_EXPRESSION is designed to discard its result (since it normally would not be
-		// used). This can't be done before PreparseBlocks() is called since this isn't really an IF (it has no body).
-		if (!AddLine(ACT_EXPRESSION, &parameter, UCHAR_MAX + 1)) // UCHAR_MAX signals AddLine to avoid pointing any pending labels or functions at the new line.
-			return FAIL; // Above already displayed the error message.
+		
+		Func *current_func = g->CurrentFunc;
+		g->CurrentFunc = NULL; // Use global scope.
+		mNoUpdateLabels = true; // Avoid pointing any pending labels at this line.
+		
+		if (!ParseAndAddLine(parameter, ACT_HOTKEY_IF, 0, _T(""))) // Pass non-NULL for aActionName.
+			return FAIL;
+		
+		mNoUpdateLabels = false;
+		g->CurrentFunc = current_func;
+		
 		Line *hot_expr_line = mLastLine;
-
-		// Remove the newly added line from the actual script.
-		if (mFirstLine == mLastLine)
-			mFirstLine = NULL;
-		mLastLine = mLastLine->mPrevLine;
-		if (mLastLine) // Will be NULL if no actual code precedes the #if.
-			mLastLine->mNextLine = NULL;
-		mCurrLine = mLastLine;
-
-		// Restore to previous value:
-		g->CurrentFunc = currentFunc;
 
 		// Set the new criterion.
 		g_HotCriterion = HOT_IF_EXPR;
 		// Use the expression text to identify hotkey variants.
 		g_HotWinTitle = hot_expr_line->mArg[0].text;
 		g_HotWinText = _T("");
-
 		if (g_HotExprLineCount + 1 > g_HotExprLineCountMax)
 		{	// Allocate or reallocate g_HotExprLines.
 			g_HotExprLineCountMax += 100;
 			g_HotExprLines = (Line**)realloc(g_HotExprLines, g_HotExprLineCountMax * sizeof(Line**));
+			if (!g_HotExprLines)
+				return ScriptError(ERR_OUTOFMEM);
 		}
 		g_HotExprIndex = g_HotExprLineCount++;
 		g_HotExprLines[g_HotExprIndex] = hot_expr_line;
-		// VicinityToText() assumes lines are linked both ways, so clear mPrevLine in case an error occurs when this line is validated.
-		hot_expr_line->mPrevLine = NULL;
-		// The lines could be linked to simplify function resolution (i.e. allow calling PreparseBlocks() for all lines instead of once for each line) -- However, this would cause confusing/irrelevant vicinity lines to be shown if an error occurs.
-
 		return CONDITION_TRUE;
 	}
+
 	// L4: Allow #if timeout to be adjusted.
 	if (IS_DIRECTIVE_MATCH(_T("#IfTimeout")))
 	{
@@ -5715,7 +5620,7 @@ void ScriptTimer::Disable()
 
 
 
-ResultType Script::UpdateOrCreateTimer(Label *aLabel, LPTSTR aPeriod, LPTSTR aPriority, bool aEnable
+ResultType Script::UpdateOrCreateTimer(IObject *aLabel, LPTSTR aPeriod, LPTSTR aPriority, bool aEnable
 	, bool aUpdatePriorityOnly)
 // Caller should specific a blank aPeriod to prevent the timer's period from being changed
 // (i.e. if caller just wants to turn on or off an existing timer).  But if it does this
@@ -5793,6 +5698,28 @@ ResultType Script::UpdateOrCreateTimer(Label *aLabel, LPTSTR aPeriod, LPTSTR aPr
 
 
 
+void Script::DeleteTimer(IObject *aLabel)
+{
+	ScriptTimer *timer, *previous = NULL;
+	for (timer = mFirstTimer; timer != NULL; previous = timer, timer = timer->mNextTimer)
+		if (timer->mLabel == aLabel) // Match found.
+		{
+			// Remove it from the list.
+			if (previous)
+				previous->mNextTimer = timer->mNextTimer;
+			else
+				mFirstTimer = timer->mNextTimer;
+			// Disable it.
+			if (timer->mEnabled)
+				timer->Disable(); // Keeps track of mTimerEnabledCount and whether the main timer is needed.
+			// Delete the timer, automatically releasing it's reference to the object.
+			delete timer;
+			break;
+		}
+}
+
+
+
 Label *Script::FindLabel(LPTSTR aLabelName)
 // Returns the first label whose name matches aLabelName, or NULL if not found.
 // v1.0.42: Since duplicates labels are now possible (to support #IfWin variants of a particular
@@ -5805,6 +5732,23 @@ Label *Script::FindLabel(LPTSTR aLabelName)
 		if (!_tcsicmp(label->mName, aLabelName)) // lstrcmpi() is not used: 1) avoids breaking existing scripts; 2) provides consistent behavior across multiple locales; 3) performance.
 			return label; // Match found.
 	return NULL; // No match found.
+}
+
+
+
+IObject *Script::FindCallable(LPTSTR aLabelName, Var *aVar, int aParamCount)
+{
+	if (aVar && aVar->HasObject())
+		return aVar->Object();
+	if (*aLabelName)
+	{
+		if (Label *label = FindLabel(aLabelName))
+			return label;
+		if (Func *func = FindFunc(aLabelName))
+			if (func->mMinParams <= aParamCount)
+				return func;
+	}
+	return NULL;
 }
 
 
@@ -5967,11 +5911,11 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType,
 			// Since above didn't break or return, a variable is being declared as an exception to the
 			// mode specified by mDefaultVarType.
 
-			bool open_brace_was_added, belongs_to_if_or_else_or_loop;
+			bool open_brace_was_added, belongs_to_line_above;
 			size_t var_name_length;
 			LPTSTR item;
 
-			for (belongs_to_if_or_else_or_loop = mLastLine && ACT_IS_IF_OR_ELSE_OR_LOOP(mLastLine->mActionType)
+			for (belongs_to_line_above = mLastLine && ACT_IS_LINE_PARENT(mLastLine->mActionType)
 				, open_brace_was_added = false, item = cp
 				; *item;) // FOR EACH COMMA-SEPARATED ITEM IN THE DECLARATION LIST.
 			{
@@ -6021,6 +5965,7 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType,
 
 				item_end = omit_leading_whitespace(item_end); // Move up to the next comma, assignment-op, or '\0'.
 
+				LPTSTR the_operator = item_end;
 				bool convert_the_operator;
 				switch(*item_end)
 				{
@@ -6046,7 +5991,6 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType,
 					// replaced with ".:=" and fail was up to chance.  (Testing showed it failed only in Debug mode.)
 					convert_the_operator = false;
 				}
-				LPTSTR right_side_of_operator = item_end; // Save for use by VAR_DECLARE_STATIC below.
 
 				// Since above didn't "continue", this declared variable also has an initializer.
 				// Add that initializer as a separate line to be executed at runtime. Separate lines
@@ -6068,101 +6012,52 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType,
 				TCHAR orig_char = *terminate_here;
 				*terminate_here = '\0'; // Temporarily terminate (it might already be the terminator, but that's harmless).
 
+				// PERFORMANCE: As of v1.0.48 (with cached binary numbers and pre-postfixed expressions),
+				// assignments of literal integers to variables are up to 10% slower when done as a combined
+				// (comma-separated) expression rather than each as a separate line.  However,  this slowness
+				// eventually disappears and may even reverse as more and more such expressions are combined
+				// into a single expression (e.g. the following is almost the same speed either way:
+				// x:=1,y:=22,z:=333,a:=4444,b:=55555).  By contrast, assigning a literal string, another
+				// variable, or a complex expression is the opposite: they are always faster when done via
+				// commas, and they continue to get faster and faster as more expressions are merged into a
+				// single comma-separated expression. In light of this, a future version could combine ONLY
+				// those declarations that have initializers into a single comma-separately expression rather
+				// than making a separate expression for each.  However, since it's not always faster to do
+				// so (e.g. x:=0,y:=1 is faster as separate statements), and since it is somewhat rare to
+				// have a long chain of initializers, and since these performance differences are documented,
+				// it might not be worth changing.
+				LPTSTR line_to_add;
+				TCHAR new_buf[LINE_SIZE]; // Declared outside the braces below so that it stays in scope long enough. Using so much stack space here and in caller seems unlikely to affect performance, so _alloca seems unlikely to help.
+				if (convert_the_operator) // Convert first '=' in item to be ":=".
+				{
+					// Prevent any chance of overflow by using new_buf (overflow might otherwise occur in cases
+					// such as this sub-statement being the very last one in the declaration list, and being
+					// at the limit of the buffer's capacity).
+					StrReplace(_tcscpy(new_buf, item), _T("="), _T(":="), SCS_SENSITIVE, 1); // Can't overflow because there's only one replacement and we know item's length can't be that close to the capacity limit.
+					line_to_add = new_buf;
+				}
+				else
+					line_to_add = item;
 				if (declare_type == VAR_DECLARE_STATIC)
 				{
-					LPTSTR args[] = {var->mName, ConvertEscapeSequences(omit_leading_whitespace(right_side_of_operator), g_EscapeChar, false)};
-					// UCHAR_MAX signals AddLine to avoid pointing any pending labels or functions at the new line.
-					// Otherwise, ParseAndAddLine could be used like in the section below to optimize simple
-					// assignments, but that would be nearly pointless for static initializers anyway:
-					if (!AddLine(ACT_ASSIGNEXPR, args, UCHAR_MAX + 2)) 
-						return FAIL; // Above already displayed the error.
-					mLastLine = mLastLine->mPrevLine; // Restore mLastLine to the last non-'static' line, but leave mCurrLine set to the new line.
-					mLastLine->mNextLine = NULL; // Remove the new line from the main script's linked list of lines. For maintainability: AddLine() unconditionally overwrites mLastLine->mNextLine anyway.
-					if (mLastStaticLine)
-						mLastStaticLine->mNextLine = mCurrLine;
-					else
-						mFirstStaticLine = mCurrLine;
-					mCurrLine->mPrevLine = mLastStaticLine; // Even if NULL. Must be set otherwise VicinityToText() will show the wrong line if this one or one "near" it has an error.
-					mLastStaticLine = mCurrLine;
-
-					// Some of the checks below could be used to "optimize" static initializers, but since they
-					// will only be executed once each anyway, it doesn't seem useful.  Making them expressions
-					// should be overall more consistent and saves worrying about cases like the following,
-					// which previously gave unexpected results:  static var := "literal" . "literal"
-					/*
-					// The following is similar to the code used to support default values for function parameters.
-					// So maybe maintain them together.
-					right_side_of_operator = omit_leading_whitespace(right_side_of_operator);
-					if (!_tcsicmp(right_side_of_operator, _T("false")))
-						var->Assign(_T("0"));
-					else if (!_tcsicmp(right_side_of_operator, _T("true")))
-						var->Assign(_T("1"));
-					else // The only other supported initializers are "string", integers, and floats.
-					{
-						// Vars could be supported here via FindVar(), but only globals ABOVE this point in
-						// the script would be supported (since other globals don't exist yet; in fact, even
-						// those that do exist don't have any contents yet, so it would be pointless). So it
-						// seems best to wait until full/comprehensive support for expressions is
-						// studied/designed for both statics and parameter-default-values.
-						if (*right_side_of_operator == '"' && terminate_here[-1] == '"') // Quoted/literal string.
-						{
-							++right_side_of_operator; // Omit the opening-quote from further consideration.
-							terminate_here[-1] = '\0'; // Remove the close-quote from further consideration.
-							ConvertEscapeSequences(right_side_of_operator, g_EscapeChar, false); // Raw escape sequences like `n haven't been converted yet, so do it now.
-							// Convert all pairs of quotes into single literal quotes:
-							StrReplace(right_side_of_operator, _T("\"\""), _T("\""), SCS_SENSITIVE);
-						}
-						else // It's not a quoted string (nor the empty string); or it has a missing ending quote (rare).
-						{
-							if (!IsPureNumeric(right_side_of_operator, true, false, true)) // It's not a number, and since we're here it's not a quoted/literal string either.
-								return ScriptError(_T("Unsupported static initializer."), right_side_of_operator);
-							//else it's an int or float, so just assign the numeric string itself (there
-							// doesn't seem to be any need to convert it to float/int first, though that would
-							// make things more consistent such as storing .1 as 0.1).
-						}
-						if (*right_side_of_operator) // It can be "" in cases such as "" being specified literally in the script, in which case nothing needs to be done because all variables start off as "".
-							var->Assign(right_side_of_operator);
-					}
-					*/
+					// Avoid pointing labels or the function's mJumpToLine at a static declaration.
+					mNoUpdateLabels = true;
 				}
-				else // A non-static initializer, so a line of code must be produced that will be executed at runtime every time the function is called.
+				else if (belongs_to_line_above && !open_brace_was_added) // v1.0.46.01: Put braces to allow initializers to work even directly under an IF/ELSE/LOOP.  Note that the braces aren't added or needed for static initializers.
 				{
-					// PERFORMANCE: As of v1.0.48 (with cached binary numbers and pre-postfixed expressions),
-					// assignments of literal integers to variables are up to 10% slower when done as a combined
-					// (comma-separated) expression rather than each as a separate line.  However,  this slowness
-					// eventually disappears and may even reverse as more and more such expressions are combined
-					// into a single expression (e.g. the following is almost the same speed either way:
-					// x:=1,y:=22,z:=333,a:=4444,b:=55555).  By contrast, assigning a literal string, another
-					// variable, or a complex expression is the opposite: they are always faster when done via
-					// commas, and they continue to get faster and faster as more expressions are merged into a
-					// single comma-separated expression. In light of this, a future version could combine ONLY
-					// those declarations that have initializers into a single comma-separately expression rather
-					// than making a separate expression for each.  However, since it's not always faster to do
-					// so (e.g. x:=0,y:=1 is faster as separate statements), and since it is somewhat rare to
-					// have a long chain of initializers, and since these performance differences are documented,
-					// it might not be worth changing.
-					LPTSTR line_to_add;
-					TCHAR new_buf[LINE_SIZE]; // Declared outside the braces below so that it stays in scope long enough. Using so much stack space here and in caller seems unlikely to affect performance, so _alloca seems unlikely to help.
-					if (convert_the_operator) // Convert first '=' in item to be ":=".
-					{
-						// Prevent any chance of overflow by using new_buf (overflow might otherwise occur in cases
-						// such as this sub-statement being the very last one in the declaration list, and being
-						// at the limit of the buffer's capacity).
-						StrReplace(_tcscpy(new_buf, item), _T("="), _T(":="), SCS_SENSITIVE, 1); // Can't overflow because there's only one replacement and we know item's length can't be that close to the capacity limit.
-						line_to_add = new_buf;
-					}
-					else
-						line_to_add = item;
-					if (belongs_to_if_or_else_or_loop && !open_brace_was_added) // v1.0.46.01: Put braces to allow initializers to work even directly under an IF/ELSE/LOOP.  Note that the braces aren't added or needed for static initializers.
-					{
-						if (!AddLine(ACT_BLOCK_BEGIN))
-							return FAIL;
-						open_brace_was_added = true;
-					}
-					// Call Parse() vs. AddLine() because it detects and optimizes simple assignments into
-					// non-expressions for faster runtime execution.
-					if (!ParseAndAddLine(line_to_add)) // For simplicity and maintainability, call self rather than trying to set things up properly to stay in self.
-						return FAIL; // Above already displayed the error.
+					if (!AddLine(ACT_BLOCK_BEGIN))
+						return FAIL;
+					open_brace_was_added = true;
+				}
+				// Call Parse() vs. AddLine() because it detects and optimizes simple assignments into
+				// non-expressions for faster runtime execution.
+				if (!ParseAndAddLine(line_to_add)) // For simplicity and maintainability, call self rather than trying to set things up properly to stay in self.
+					return FAIL; // Above already displayed the error.
+				if (declare_type == VAR_DECLARE_STATIC)
+				{
+					mNoUpdateLabels = false;
+					mLastLine->mAttribute = (AttributeType)mLastLine->mActionType;
+					mLastLine->mActionType = ACT_STATIC; // Mark this line for the preparser.
 				}
 
 				*terminate_here = orig_char; // Undo the temporary termination.
@@ -7330,7 +7225,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 		do_update_labels = false;
 	}
 	else
-		do_update_labels = true;
+		do_update_labels = !mNoUpdateLabels;
 
 	Var *target_var;
 	DerefType deref[MAX_DEREFS_PER_ARG];  // Will be used to temporarily store the var-deref locations in each arg.
@@ -8889,6 +8784,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 			case GUICONTROL_CMD_CONTENTS:
 			case GUICONTROL_CMD_TEXT:
 			case GUICONTROL_CMD_MOVEDRAW:
+			case GUICONTROL_CMD_OPTIONS:
 				break; // Do nothing for the above commands since Param3 is optional.
 			case GUICONTROL_CMD_MOVE:
 			case GUICONTROL_CMD_CHOOSE:
@@ -9191,8 +9087,6 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 	{
 		for (Label *label = mLastLabel; label != NULL && label->mJumpToLine == NULL; label = label->mPrevLabel)
 		{
-			if (line.mActionType == ACT_BLOCK_BEGIN && line.mAttribute == ATTR_TRUE) // Non-zero mAttribute signifies the open-brace of a function body.
-				return ScriptError(_T("A label must not point to a function."));
 			if (line.mActionType == ACT_ELSE || line.mActionType == ACT_UNTIL || line.mActionType == ACT_CATCH)
 				return ScriptError(_T("A label must not point to an ELSE or UNTIL or CATCH."));
 			// The following is inaccurate; each block-end is in fact owned by its block-begin
@@ -9524,7 +9418,48 @@ ResultType Script::DefineFunc(LPTSTR aBuf, Var *aFuncGlobalVar[])
 		memcpy(func.mParam, param, size);
 	}
 	//else leave func.mParam/mParamCount set to their NULL/0 defaults.
+#ifndef MINIDLL
+	if (mLastLabel && !mLastLabel->mJumpToLine)
+	{
+		// Check all variants of all hotkeys, since there might be multiple variants
+		// of various hotkeys defined in a row, such as:
+		// ^a::
+		// #IfWinActive B
+		// ^a::
+		// ^b::
+		//    somefunc(){ ...
+		for (int i = 0; i < Hotkey::sHotkeyCount; ++i)
+		{
+			for (HotkeyVariant *v = Hotkey::shk[i]->mFirstVariant; v; v = v->mNextVariant)
+			{
+				Label *label = v->mJumpToLabel->ToLabel(); // Might be a function.
+				if (label && !label->mJumpToLine) // This hotkey label is pointing at this function.
+				{
+					// Update the hotkey to use this function instead of the label.
+					v->mJumpToLabel = &func;
 
+					// Remove this hotkey label from the list.  Each label is removed as the corresponding
+					// hotkey variant is found so that any generic labels that might be mixed in are left
+					// in the list and detected as errors later.
+					if (label->mPrevLabel)
+						label->mPrevLabel->mNextLabel = label->mNextLabel;
+					else
+						mFirstLabel = label->mNextLabel;
+					if (label->mNextLabel)
+						label->mNextLabel->mPrevLabel = label->mPrevLabel;
+					else
+						mLastLabel = label->mPrevLabel;
+				}
+			}
+		}
+		if (mLastLabel && !mLastLabel->mJumpToLine)
+			// There are one or more non-hotkey labels pointing at this function.
+			return ScriptError(_T("A label must not point to a function."), mLastLabel->mName);
+		// Since above didn't return, the label or labels must have been hotkey labels.
+		if (func.mMinParams)
+			return ScriptError(_T("Parameters of hotkey functions must be optional."), aBuf);
+	}
+#endif
 	// Indicate success:
 	func.mGlobalVar = aFuncGlobalVar; // Give func.mGlobalVar its address, to be used for any var declarations inside this function's body.
 	return OK;
@@ -9796,12 +9731,7 @@ ResultType Script::DefineClassVars(LPTSTR aBuf, bool aStatic)
 		Line *block_end;
 		Func *init_func = NULL;
 		
-		if (aStatic)
-		{
-			mLastLine = mLastStaticLine;
-			mFirstLine = mFirstStaticLine;
-		}
-		else
+		if (!aStatic)
 		{
 			ExprTokenType token;
 			if (class_object->GetItem(token, _T("__Init")) && token.symbol == SYM_OBJECT
@@ -9839,18 +9769,15 @@ ResultType Script::DefineClassVars(LPTSTR aBuf, bool aStatic)
 			mCurrLine = NULL; // Fix for v1.1.09.02: Leaving this non-NULL at best causes error messages to show irrelevant vicinity lines, and at worst causes a crash because the linked list is in an inconsistent state.
 		}
 
-		LPTSTR arg[] = { ConvertEscapeSequences(buf, g_EscapeChar, false) };
-		if (!AddLine(ACT_EXPRESSION, arg, UCHAR_MAX + 1)) // v1.1.17: Avoid pointing labels at this line by passing UCHAR_MAX+ for aArgc.
+		mNoUpdateLabels = true;
+		if (!ParseAndAddLine(buf))
 			return FAIL; // Above already displayed the error.
+		mNoUpdateLabels = false;
 		
 		if (aStatic)
 		{
-			if (!mFirstStaticLine)
-				mFirstStaticLine = mLastLine;
-			mLastStaticLine = mLastLine;
-			// The following is necessary if there weren't any executable lines above this static
-			// initializer (i.e. mFirstLine was NULL and has been set to the newly created line):
-			mFirstLine = script_first_line;
+			mLastLine->mAttribute = (AttributeType)mLastLine->mActionType;
+			mLastLine->mActionType = ACT_STATIC; // Mark this line for the preparser.
 		}
 		else
 		{
@@ -9862,9 +9789,9 @@ ResultType Script::DefineClassVars(LPTSTR aBuf, bool aStatic)
 			// mFirstLine should be left as it is: if it was NULL, it now contains a pointer to our
 			// __init function's block-begin, which is now the very first executable line in the script.
 			g->CurrentFunc = NULL;
+			// Restore mLastLine so that any subsequent script lines are added at the correct point.
+			mLastLine = script_last_line;
 		}
-		// Restore mLastLine so that any subsequent script lines are added at the correct point.
-		mLastLine = script_last_line;
 	}
 	return OK;
 }
@@ -10943,6 +10870,11 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		// override the default set here.
 		g_persistent = true;
 	}
+	else if (!_tcsicmp(func_name, _T("OnExit")) || !_tcsicmp(func_name, _T("OnClipboardChange")))
+	{
+		bif = BIF_OnExitOrClipboard;
+		max_params = 2;
+	}
 #ifdef ENABLE_REGISTERCALLBACK
 	else if (!_tcsicmp(func_name, _T("RegisterCallback")))
 	{
@@ -10985,6 +10917,7 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		BIF_OBJ_CASE(GetAddress,	1, 1) // key
 		BIF_OBJ_CASE(NewEnum,		0, 0)
 		BIF_OBJ_CASE(Clone,			0, 0)
+		BIF_OBJ_CASE(BindMethod,	1, 10000) // obj, method [, param...]
 #undef BIF_OBJ_CASE
 		else if (!_tcsicmp(suffix, _T("AddRef")) || !_tcsicmp(suffix, _T("Release")))
 			bif = BIF_ObjAddRefRelease;
@@ -11150,6 +11083,7 @@ Func *Script::AddFunc(LPCTSTR aFuncName, size_t aFuncNameLength, bool aIsBuiltIn
 				ScriptError(ERR_OUTOFMEM);
 				return NULL;
 			}
+		aClassObject->AddRef(); // In case the script clears the class var.
 		the_new_func->mClass = aClassObject;
 		// Also add it to the script's list of functions, to support #Warn LocalSameAsGlobal
 		// and automatic cleanup of objects in static vars on program exit.
@@ -12241,31 +12175,11 @@ ResultType Script::AddGroup(LPTSTR aGroupName)
 
 
 
-Line *Script::PreparseBlocks(Line *aStartingLine, bool aFindBlockEnd, Line *aParentLine)
-// aFindBlockEnd should be true, only when this function is called
-// by itself.  The end of this function relies upon this definition.
-// Will return NULL to the top-level caller if there's an error, or if
-// mLastLine is NULL (i.e. the script is empty).
+ResultType Script::PreparseExpressions(Line *aStartingLine)
 {
-	// Not thread-safe, so this can only parse one script at a time.
-	// Not a problem for the foreseeable future:
-	static int nest_level; // Level zero is the outermost one: outside all blocks.
-	static bool abort;
-	if (!aParentLine)
-	{
-		// We were called from outside, not recursively, so init these.  This is
-		// very important if this function is ever to be called from outside
-		// more than once, even though it isn't currently:
-		nest_level = 0;
-		abort = false;
-	}
-
 	int i;
 	DerefType *deref;
-
-	// Don't check aStartingLine here at top: only do it at the bottom
-	// for its differing return values.
-	for (Line *line = aStartingLine; line;)
+	for (Line *line = aStartingLine; line; line = line->mNextLine)
 	{
 		// Check if any of each arg's derefs are function calls.  If so, do some validation and
 		// preprocessing to set things up for better runtime performance:
@@ -12276,7 +12190,7 @@ Line *Script::PreparseBlocks(Line *aStartingLine, bool aFindBlockEnd, Line *aPar
 			// be function calls:
 			if (!this_arg.is_expression) // For now, only expressions are capable of calling functions. If ever change this, might want to add a check here for this_arg.type != ARG_TYPE_NORMAL (for performance).
 				continue;
-			if (this_arg.deref) // No function-calls are present because the expression contains neither variables nor function calls.
+			if (this_arg.deref) // No derefs are present because the expression contains neither variables nor function calls.
 			{
 			for (deref = this_arg.deref; deref->marker; ++deref) // For each deref.
 			{
@@ -12288,14 +12202,12 @@ Line *Script::PreparseBlocks(Line *aStartingLine, bool aFindBlockEnd, Line *aPar
 					bool error_was_shown, file_was_found;
 					if (   !(deref->func = FindFuncInLibrary(deref->marker, deref->length, error_was_shown, file_was_found, true))   )
 					{
-						abort = true; // So that the caller doesn't also report an error.
 						// When above already displayed the proximate cause of the error, it's usually
 						// undesirable to show the cascade effects of that error in a second dialog:
-						return error_was_shown ? NULL : line->PreparseError(ERR_NONEXISTENT_FUNCTION, deref->marker);
+						return error_was_shown ? FAIL : line->LineError(ERR_NONEXISTENT_FUNCTION, FAIL, deref->marker);
 					}
 #else
-					abort = true;
-					return line->PreparseError(ERR_NONEXISTENT_FUNCTION, deref->marker);
+					return line->LineError(ERR_NONEXISTENT_FUNCTION, FAIL, deref->marker);
 #endif
 				}
 				// L31: Parameter counting and validation was previously done in this section,
@@ -12303,26 +12215,78 @@ Line *Script::PreparseBlocks(Line *aStartingLine, bool aFindBlockEnd, Line *aPar
 			} // for each deref of this arg
 			} // if (this_arg.deref)
 			if (!line->ExpressionToPostfix(this_arg)) // At this stage, this_arg.is_expression is known to be true. Doing this here, after the script has been loaded, might improve the compactness/adjacent-ness of the compiled expressions in memory, which might improve performance due to CPU caching.
-			{
-				abort = true; // So that the caller doesn't also report an error.
-				return NULL; // The function above already displayed the error msg.
-			}
+				return FAIL; // The function above already displayed the error msg.
 		} // for each arg of this line
+	} // for each line
+	return OK;
+}
 
-		// All lines in our recursion layer are assigned to the block that the caller specified:
-		if (line->mParentLine == NULL) // i.e. don't do it if it's already "owned" by an IF or ELSE.
-			line->mParentLine = aParentLine; // Can be NULL.
 
-#define ACT_IS_BLOCK_OWNER(act) (ACT_IS_IF_OR_ELSE_OR_LOOP(act) || (act) == ACT_TRY || (act) == ACT_CATCH || (act) == ACT_FINALLY)
-		if (ACT_IS_BLOCK_OWNER(line->mActionType))
+ResultType Script::PreparseStaticLines(Line *aStartingLine)
+// Combining this and PreparseExpressions() into one loop/function currently increases
+// code size enough to affect the final EXE size, contrary to expectation.
+{
+	// Remove static var initializers and #if expression lines from the main line list so
+	// that they won't be executed or interfere with PreparseBlocks().  This used to be done
+	// at an earlier stage, but that required multiple PreparseBlocks() calls to account for
+	// lines added by lib auto-includes.  Thus, it's now done after PreparseExpressions().
+	for (Line *next_line, *prev_line, *line = aStartingLine; line; line = next_line)
+	{
+		next_line = line->mNextLine; // Save these since may be overwritten below.
+		prev_line = line->mPrevLine; //
+
+		switch (line->mActionType)
 		{
-			// In this case, the loader should have already ensured that line->mNextLine is not NULL.
-			if (line->mNextLine->mActionType == ACT_BLOCK_BEGIN && line->mNextLine->mAttribute == ATTR_TRUE)
-			{
-				abort = true; // So that the caller doesn't also report an error.
-				return line->PreparseError(_T("Improper line below this.")); // Short message since so rare. A function must not be defined directly below an IF/ELSE/LOOP because runtime evaluation won't handle it properly.
-			}
+		case ACT_STATIC:
+			// Override mActionType so ACT_STATIC doesn't have to be handled at runtime:
+			line->mActionType = (ActionTypeType)line->mAttribute;
+			// Add this line to the list of static initializers, which will be inserted above
+			// the auto-execute section later.  The main line list will be corrected below.
+			line->mPrevLine = mLastStaticLine;
+			if (mLastStaticLine)
+				mLastStaticLine->mNextLine = line;
+			else
+				mFirstStaticLine = line;
+			mLastStaticLine = line;
+			break;
+		case ACT_HOTKEY_IF:
+			// It's already been added to g_HotExprLines[], so just remove it from the script (below).
+			// Override mActionType so ACT_HOTKEY_IF doesn't have to be handled by EvaluateCondition():
+			line->mActionType = ACT_IFEXPR;
+			break;
+		default:
+			continue;
+		}
+		// Since above didn't "continue", remove this line from the main script.
+		if (prev_line)
+			prev_line->mNextLine = next_line;
+		else // Must have been the first line; set the new first line.
+			mFirstLine = next_line;
+		if (next_line)
+			next_line->mPrevLine = prev_line;
+		else
+			mLastLine = prev_line;
+	}
+	return OK;
+}
 
+
+
+Line *Script::PreparseBlocks(Line *aStartingLine, ExecUntilMode aMode, Line *aParentLine, const AttributeType aLoopType)
+// Will return NULL to the top-level caller if there's an error, or if
+// mLastLine is NULL (i.e. the script is empty).
+{
+	Line *line_temp;
+
+	for (Line *line = aStartingLine; line != NULL;)
+	{
+		// All lines in our recursion layer are assigned to the line or block that the caller specified:
+		line->mParentLine = aParentLine; // Can be NULL.
+
+		if (ACT_IS_IF(line->mActionType) // IF but not ELSE, which is handled by its IF, or as an error below.
+			|| ACT_IS_LOOP(line->mActionType) // LOOP, WHILE or FOR.
+			|| line->mActionType == ACT_TRY) // CATCH and FINALLY are excluded so they're caught as errors below.
+		{
 			if (line->mActionType == ACT_FOR)
 			{
 				ASSERT(line->mArgc == 3);
@@ -12332,136 +12296,18 @@ Line *Script::PreparseBlocks(Line *aStartingLine, bool aFindBlockEnd, Line *aPar
 				line->mArgc--;
 			}
 
-
-			// Make the line immediately following each ELSE, IF or LOOP be enclosed by that stmt.
-			// This is done to make it illegal for a Goto or Gosub to jump into a deeper layer,
-			// such as in this example:
-			// #y::
-			// ifwinexist, pad
-			// {
-			//    goto, label1
-			//    ifwinexist, pad
-			//    label1:
-			//    ; With or without the enclosing block, the goto would still go to an illegal place
-			//    ; in the below, resulting in an "unexpected else" error:
-			//    {
-			//	     msgbox, ifaction
-			//    } ; not necessary to make this line enclosed by the if because labels can't point to it?
-			// else
-			//    msgbox, elseaction
-			// }
-			// return
-
-			line->mNextLine->mParentLine = line;
-			// Go onto the IF's or ELSE's action in case it too is an IF, rather than skipping over it:
-			line = line->mNextLine;
-			continue;
-		}
-
-		switch (line->mActionType)
-		{
-		case ACT_BLOCK_BEGIN:
-			// Some insane limit too large to ever likely be exceeded, yet small enough not
-			// to be a risk of stack overflow when recursing in ExecUntil().  Mostly, this is
-			// here to reduce the chance of a program crash if a binary file, a corrupted file,
-			// or something unexpected has been loaded as a script when it shouldn't have been.
-			// Update: Increased the limit from 100 to 1000 so that large "else if" ladders
-			// can be constructed.  Going much larger than 1000 seems unwise since ExecUntil()
-			// will have to recurse for each nest-level, possibly resulting in stack overflow
-			// if things get too deep:
-			if (nest_level > 1000)
-			{
-				abort = true; // So that the caller doesn't also report an error.
-				return line->PreparseError(_T("Nesting too deep.")); // Short msg since so rare.
-			}
-			// Since the current convention is to store the line *after* the
-			// BLOCK_END as the BLOCK_BEGIN's related line, that line can
-			// be legitimately NULL if this block's BLOCK_END is the last
-			// line in the script.  So it's up to the called function
-			// to report an error if it never finds a BLOCK_END for us.
-			// UPDATE: The design requires that we do it here instead:
-			++nest_level;
-			if (NULL == (line->mRelatedLine = PreparseBlocks(line->mNextLine, 1, line)))
-				if (abort) // the above call already reported the error.
-					return NULL;
-				else
-				{
-					abort = true; // So that the caller doesn't also report an error.
-					return line->PreparseError(ERR_MISSING_CLOSE_BRACE);
-				}
-			--nest_level;
-			// The convention is to have the BLOCK_BEGIN's related_line
-			// point to the line *after* the BLOCK_END.
-			line->mRelatedLine = line->mRelatedLine->mNextLine;  // Might be NULL now.
-			// Otherwise, since any blocks contained inside this one would already
-			// have been handled by the recursion in the above call, continue searching
-			// from the end of this block:
-			line = line->mRelatedLine; // If NULL, the loop-condition will catch it.
-			break;
-		case ACT_BLOCK_END:
-			// Return NULL (failure) if the end was found but we weren't looking for one
-			// (i.e. it's an orphan).  Otherwise return the line after the block_end line,
-			// which will become the caller's mRelatedLine.  UPDATE: Return the
-			// END_BLOCK line itself so that the caller can differentiate between
-			// a NULL due to end-of-script and a NULL caused by an error:
-			return aFindBlockEnd ? line  // Doesn't seem necessary to set abort to true.
-				: line->PreparseError(ERR_MISSING_OPEN_BRACE);
-		default: // Continue line-by-line.
-			line = line->mNextLine;
-		} // switch()
-	} // for each line
-
-	// End of script has been reached.  <line> is now NULL so don't attempt to dereference it.
-	// If we were still looking for an EndBlock to match up with a begin, that's an error.
-	// Don't report the error here because we don't know which begin-block is waiting
-	// for an end (the caller knows and must report the error).  UPDATE: Must report
-	// the error here (see comments further above for explanation).   UPDATE #2: Changed
-	// it again: Now we let the caller handle it again:
-	if (aFindBlockEnd)
-		//return mLastLine->PreparseError("The script ends while a block is still open (missing }).");
-		return NULL;
-	// If no error, return something non-NULL to indicate success to the top-level caller.
-	// We know we're returning to the top-level caller because aFindBlockEnd is only true
-	// when we're recursed, and in that case the above would have returned.  Thus,
-	// we're not recursed upon reaching this line:
-	return mLastLine;
-}
-
-
-
-Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, AttributeType aLoopType)
-// Zero is the default for aMode, otherwise:
-// Will return NULL to the top-level caller if there's an error, or if
-// mLastLine is NULL (i.e. the script is empty).
-// Note: This function should be called with aMode == ONLY_ONE_LINE
-// only when aStartingLine's ActionType is something recursable such
-// as IF and BEGIN_BLOCK.  Otherwise, it won't return after only one line.
-{
-	static BOOL sInFunctionBody = FALSE; // Improves loadtime performance by allowing IsOutsideAnyFunctionBody() to be called only when necessary.
-	// Don't check aStartingLine here at top: only do it at the bottom
-	// for it's differing return values.
-	Line *line_temp;
-	AttributeType loop_type = aLoopType;
-
-	for (Line *line = aStartingLine; line != NULL;)
-	{
-		if (   ACT_IS_IF(line->mActionType)
-			|| line->mActionType == ACT_LOOP
-			|| line->mActionType == ACT_WHILE
-			|| line->mActionType == ACT_FOR
-			|| line->mActionType == ACT_TRY   )
-		{
-			// ActionType is an IF or a LOOP or a TRY.
 			line_temp = line->mNextLine;  // line_temp is now this IF's or LOOP's or TRY's action-line.
-			// Update: Below is commented out because it's now impossible (since all scripts end in ACT_EXIT):
+			// The following is commented out because all scripts end in ACT_EXIT:
 			//if (line_temp == NULL) // This is an orphan IF/LOOP (has no action-line) at the end of the script.
 			//	return line->PreparseError(_T("Q")); // Placeholder. Formerly "This if-statement or loop has no action."
 
-			// Other things rely on this check having been done, such as "if (line->mRelatedLine != NULL)":
-#define IS_BAD_ACTION_LINE(l) ((l)->mActionType == ACT_ELSE || (l)->mActionType == ACT_BLOCK_END || (l)->mActionType == ACT_CATCH || (l)->mActionType == ACT_FINALLY)
-
-			if (IS_BAD_ACTION_LINE(line_temp))
-				return line->PreparseError(ERR_EXPECTED_BLOCK_OR_ACTION);
+			// Checks such as the following are omitted because any such errors are detected automatically
+			// by recursion into this function; i.e. if this IF/LOOP/TRY's action is an ELSE, it will be
+			// detected as having no associated IF.
+			//#define IS_BAD_ACTION_LINE_TYPE(act) ((act) == ACT_ELSE || (act) == ACT_BLOCK_END || (act) == ACT_CATCH || (act) == ACT_FINALLY)
+			//#define IS_BAD_ACTION_LINE(l) IS_BAD_ACTION_LINE_TYPE((l)->mActionType)
+			//if (IS_BAD_ACTION_LINE(line_temp))
+			//	return line->PreparseError(ERR_EXPECTED_BLOCK_OR_ACTION);
 
 			// Lexikos: This section once maintained separate variables for file-pattern, registry, file-reading
 			// and parsing loops. The intention seemed to be to validate certain commands such as FileAppend
@@ -12479,13 +12325,13 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 			//	}
 			//
 
-			// Check if the IF's action-line is something we want to recurse.  UPDATE: Always
-			// recurse because other line types, such as Goto and Gosub, need to be preparsed
-			// by this function even if they are the single-line actions of an IF or an ELSE.
-			// Recurse this line rather than the next because we want the called function to
-			// recurse again if this line is a ACT_BLOCK_BEGIN or is itself an IF.
-			line_temp = PreparseIfElse(line_temp, ONLY_ONE_LINE, line->mAttribute ? line->mAttribute : loop_type);
-			// If not end-of-script or error, line_temp is now either:
+			// Recurse to group the line or lines which are this line's action or body as a
+			// single entity and find the line below it.  This must be done even if line_temp
+			// isn't an IF/ELSE/LOOP/BLOCK_BEGIN because other line types, such as Goto and
+			// Gosub, need to be preparsed by this function even if they are the single-line
+			// actions of an IF or an ELSE.
+			line_temp = PreparseBlocks(line_temp, ONLY_ONE_LINE, line, line->mAttribute ? line->mAttribute : aLoopType);
+			// If not an error, line_temp is now either:
 			// 1) If this if's/loop's action was a BEGIN_BLOCK: The line after the end of the block.
 			// 2) If this if's/loop's action was another IF or LOOP:
 			//    a) the line after that if's else's action; or (if it doesn't have one):
@@ -12494,19 +12340,13 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 			// In all of the above cases, line_temp is now the line where we
 			// would expect to find an ELSE for this IF, if it has one.
 
-			// Now the above has ensured that line_temp is this line's else, if it has one.
-			// Note: line_temp will be NULL if the end of the script has been reached.
-			// UPDATE: That can't happen now because all scripts end in ACT_EXIT:
-			if (line_temp == NULL) // Error or end-of-script was reached.
-				return NULL;
+			// line_temp is NULL if an error occurred, but should never be NULL in any other
+			// case because all scripts end in ACT_EXIT:
+			if (line_temp == NULL)
+				return NULL; // Error.
 
-			// Seems best to keep this check for maintainability because changes to other checks can impact
-			// whether this check will ever be "true":
-			if (line->mRelatedLine != NULL)
-				return line->PreparseError(_T("Q")); // Placeholder since it shouldn't happen.  Formerly "This if-statement or LOOP unexpectedly already had an ELSE or end-point."
-			// Set it to the else's action, rather than the else itself, since the else itself
-			// is never needed during execution.  UPDATE: No, instead set it to the ELSE itself
-			// (if it has one) since we jump here at runtime when the IF is finished (whether
+			// Set this line's mRelatedLine to the line after its action/body.  For an IF,
+			// this is the line to which we jump at runtime when the IF is finished (whether
 			// it's condition was true or false), thus skipping over any nested IF's that
 			// aren't in blocks beneath it.  If there's no ELSE, the below value serves as
 			// the jumppoint we go to when the if-statement is finished.  Example:
@@ -12517,171 +12357,186 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 			//     else
 			//       action2
 			// action3
-			// x's jumppoint should be action3 so that all the nested if's
-			// under the first one can be skipped after the "if x" line is recursively
-			// evaluated.  Because of this behavior, all IFs will have a related line
-			// with the possibly exception of the very last if-statement in the script
-			// (which is possible only if the script doesn't end in a Return or Exit).
-			line->mRelatedLine = line_temp;  // Even if <line> is a LOOP and line_temp and else?
+			// x's jumppoint should be action3 so that all the nested if's under the
+			// first one can be skipped after the "if x" line is recursively evaluated.
+			// Because of this behavior (and the fact that all scripts end in ACT_EXIT),
+			// all IFs will have a related line.
+			line->mRelatedLine = line_temp;
 
 			// Even if aMode == ONLY_ONE_LINE, an IF and its ELSE count as a single
 			// statement (one line) due to its very nature (at least for this purpose),
-			// so always continue on to evaluate the IF's ELSE, if present:
-			if (line_temp->mActionType == ACT_ELSE)
+			// so always continue on to evaluate the IF's ELSE, if present.  This also
+			// applies to the CATCH or FINALLY belonging to a TRY or CATCH.
+			for (bool line_belongs;; )
 			{
-				if (line->mActionType == ACT_LOOP || line->mActionType == ACT_WHILE || line->mActionType == ACT_FOR || line->mActionType == ACT_TRY)
+				// Determine whether line_temp belongs to (is associated with) line.
+				// At this point, line is either an IF/LOOP/TRY from above, or an
+				// ELSE/CATCH/FINALLY handled by the previous iteration of this loop.
+				// line_temp is the line after line's action/body.
+				switch (line_temp->mActionType)
 				{
-					 // this can't be our else, so let the caller handle it.
-					if (aMode != ONLY_ONE_LINE)
-						// This ELSE was encountered while sequentially scanning the contents
-						// of a block or at the outermost nesting layer.  More thought is required
-						// to verify this is correct.  UPDATE: This check is very old and I haven't
-						// found a case that can produce it yet, but until proven otherwise its safer
-						// to assume it's possible.
-						return line_temp->PreparseError(ERR_ELSE_WITH_NO_IF);
-					// Let the caller handle this else, since it can't be ours:
-					return line_temp;
+				case ACT_ELSE: line_belongs = ACT_IS_IF(line->mActionType); break;
+				case ACT_CATCH: line_belongs = (line->mActionType == ACT_TRY); break;
+				case ACT_FINALLY: line_belongs = (line->mActionType == ACT_TRY || line->mActionType == ACT_CATCH); break;
+				default: line_belongs = false; break;
 				}
-				// Fix for v1.1.09: Correct the line hierarchy for ELSE nested in an IF/ELSE/LOOP
-				// without braces.  This is needed for named loops and perhaps other things.
+				if (!line_belongs)
+					break;
+				// Each line's mParentLine must be set appropriately for named loops to work.
 				line_temp->mParentLine = line->mParentLine;
-				// Now use line vs. line_temp to hold the new values, so that line_temp
-				// stays as a marker to the ELSE line itself:
-				line = line_temp->mNextLine;  // Set it to the else's action line.
-				// Update: The following is now impossible because all scripts end in ACT_EXIT.
+				// Set it up so that line is the ELSE/CATCH/FINALLY and line_temp is it's action.
+				// Later, line_temp will be the line after the action/body, and will be checked
+				// by the next iteration in case this is a TRY..CATCH and line_temp is FINALLY.
+				line = line_temp; // ELSE/CATCH/FINALLY
+				line_temp = line->mNextLine; // line's action/body.
+				// The following case should be impossible because all scripts end in ACT_EXIT.
 				// Thus, it's commented out:
-				//if (line == NULL) // An else with no action.
-				//	return line_temp->PreparseError(_T("Q")); // Placeholder since impossible. Formerly "This ELSE has no action."
-				if (IS_BAD_ACTION_LINE(line))
-					return line_temp->PreparseError(ERR_EXPECTED_BLOCK_OR_ACTION);
-				// Assign to line rather than line_temp:
-				line = PreparseIfElse(line, ONLY_ONE_LINE, aLoopType);
-				if (line == NULL)
-					return NULL; // Error or end-of-script.
-				// Set this ELSE's jumppoint.  This is similar to the jumppoint set for
-				// an ELSEless IF, so see related comments above:
-				line_temp->mRelatedLine = line;
+				//if (line_temp == NULL) // An else with no action.
+				//	return line->PreparseError(_T("This ELSE has no action."));
+				//if (IS_BAD_ACTION_LINE(line_temp)) // See "#define IS_BAD_ACTION_LINE" for comments.
+				//	return line->PreparseError(ERR_EXPECTED_BLOCK_OR_ACTION);
+				// Assign to line_temp rather than line:
+				line_temp = PreparseBlocks(line_temp, ONLY_ONE_LINE, line, aLoopType);
+				if (line_temp == NULL)
+					return NULL; // Error.
+				// Set this ELSE/CATCH/FINALLY's jumppoint.  This is similar to the jumppoint
+				// set for an IF/LOOP/TRY, so see related comments above:
+				line->mRelatedLine = line_temp;
 			}
-			else if (line_temp->mActionType == ACT_UNTIL)
+			if (line_temp->mActionType == ACT_UNTIL
+				&& (line->mActionType == ACT_LOOP || line->mActionType == ACT_FOR)) // WHILE is excluded because PerformLoopWhile() doesn't handle UNTIL, due to rarity of need.
 			{
-				if (line->mActionType != ACT_LOOP && line->mActionType != ACT_FOR) // Doesn't seem useful to allow it with WHILE?
-				{
-					// This is similar to the section above, so see there for comments.
-					if (aMode != ONLY_ONE_LINE)
-						return line_temp->PreparseError(ERR_UNTIL_WITH_NO_LOOP);
-					return line_temp;
-				}
+				// For consistency/maintainability:
+				line_temp->mParentLine = line->mParentLine;
 				// Continue processing *after* UNTIL.
 				line = line_temp->mNextLine;
 			}
-			else if (line_temp->mActionType == ACT_CATCH)
-			{
-				if (line->mActionType != ACT_TRY)
-				{
-					// Again, this is similar to the section above, so see there for comments.
-					if (aMode != ONLY_ONE_LINE)
-						return line_temp->PreparseError(ERR_CATCH_WITH_NO_TRY);
-					return line_temp;
-				}
-				line_temp->mParentLine = line->mParentLine;
-				line = line_temp->mNextLine;
-				if (IS_BAD_ACTION_LINE(line))
-					return line_temp->PreparseError(ERR_EXPECTED_BLOCK_OR_ACTION);
-				// Assign to line rather than line_temp:
-				line = PreparseIfElse(line, ONLY_ONE_LINE, aLoopType);
-				if (line == NULL)
-					return NULL; // Error or end-of-script.
-				// Set this CATCH's jumppoint.
-				line_temp->mRelatedLine = line;
-				// Detect and fix FINALLY.
-				if (line->mActionType == ACT_FINALLY)
-				{
-					line->mParentLine = line_temp->mParentLine;
-					Line* temp = line->mNextLine;
-					if (IS_BAD_ACTION_LINE(temp))
-						return line->PreparseError(ERR_EXPECTED_BLOCK_OR_ACTION);
-					// Preparse FINALLY block - obscure the loop type so that attempts to use
-					// break/continue to exit the FINALLY block are caught at load time.
-					line->mRelatedLine = PreparseIfElse(temp, ONLY_ONE_LINE, ATTR_OBSCURE(aLoopType));
-					if (!line->mRelatedLine)
-						return NULL; // Error or end-of-script.
-					line = line->mRelatedLine;
-				}
-			}
-			else if (line_temp->mActionType == ACT_FINALLY)
-			{
-				// This code section can only be triggered by try..finally (with no catch)
-				if (line->mActionType != ACT_TRY)
-				{
-					// Again, this is similar to the section above, so see there for comments.
-					if (aMode != ONLY_ONE_LINE)
-						return line_temp->PreparseError(ERR_FINALLY_WITH_NO_PRECEDENT);
-					return line_temp;
-				}
-				line_temp->mParentLine = line->mParentLine;
-				line = line_temp->mNextLine;
-				if (IS_BAD_ACTION_LINE(line))
-					return line_temp->PreparseError(ERR_EXPECTED_BLOCK_OR_ACTION);
-				// Assign to line rather than line_temp:
-				line = PreparseIfElse(line, ONLY_ONE_LINE, ATTR_OBSCURE(aLoopType)); // ATTR_OBSCURE: see above for more details.
-				if (line == NULL)
-					return NULL; // Error or end-of-script.
-				// Set this TRY's jumppoint.
-				line_temp->mRelatedLine = line;
-			}
-			else // line doesn't have an else, so just continue processing from line_temp's position
+			else // continue processing from line_temp's position
 				line = line_temp;
 
-			// Both cases above have ensured that line is now the first line beyond the
-			// scope of the if-statement and that of any ELSE it may have.
+			// All cases above have ensured that line is now the first line beyond the
+			// scope of the IF/LOOP/TRY and any associated statements.
 
 			if (aMode == ONLY_ONE_LINE) // Return the next unprocessed line to the caller.
 				return line;
 			// Otherwise, continue processing at line's new location:
 			continue;
-		} // ActionType is "IF".
+		} // ActionType is IF/LOOP/TRY.
 
 		// Since above didn't continue, do the switch:
-		LPTSTR line_raw_arg1 = LINE_RAW_ARG1; // Resolve only once to help reduce code size.
-		LPTSTR line_raw_arg2 = LINE_RAW_ARG2; //
-
 		switch (line->mActionType)
 		{
 		case ACT_BLOCK_BEGIN:
 			if (line->mAttribute == ATTR_TRUE) // This is the opening brace of a function definition.
-				sInFunctionBody = TRUE; // Must be set only for the above condition because functions can of course contain types of blocks other than the function's own block.
-			line = PreparseIfElse(line->mNextLine, UNTIL_BLOCK_END, line->mAttribute ? 0 : aLoopType); // mAttribute usage: don't consider a function's body to be inside the loop, since it can be called from outside.
+			{
+				if (aParentLine && ACT_IS_LINE_PARENT(aParentLine->mActionType))
+					// A function must not be defined directly below an IF/ELSE/LOOP because runtime evaluation won't handle it properly.
+					return line->PreparseError(_T("Unexpected function"));
+			}
+			line_temp = PreparseBlocks(line->mNextLine, UNTIL_BLOCK_END, line, line->mAttribute ? 0 : aLoopType); // mAttribute usage: don't consider a function's body to be inside the loop, since it can be called from outside.
 			// "line" is now either NULL due to an error, or the location of the END_BLOCK itself.
-			if (line == NULL)
+			if (line_temp == NULL)
 				return NULL; // Error.
+			// The BLOCK_BEGIN's mRelatedLine should point to the line *after* the BLOCK_END:
+			line->mRelatedLine = line_temp->mNextLine;
+			// Since any lines contained inside this block would already have been handled by
+			// the recursion in the above call, continue searching from the end of this block:
+			line = line_temp;
 			break;
 		case ACT_BLOCK_END:
-			if (line->mAttribute == ATTR_TRUE) // This is the closing brace of a function definition.
-				sInFunctionBody = FALSE; // Must be set only for the above condition because functions can of course contain types of blocks other than the function's own block.
-#ifdef _DEBUG
-			if (aMode == ONLY_ONE_LINE)
-				 // Syntax error.  The caller would never expect this single-line to be an
-				 // end-block.  UPDATE: I think this is impossible because callers only use
-				 // aMode == ONLY_ONE_LINE when aStartingLine's ActionType is already
-				 // known to be an IF or a BLOCK_BEGIN:
-				return line->PreparseError(_T("Q")); // Placeholder (see above). Formerly "Unexpected end-of-block (single)."
 			if (aMode == UNTIL_BLOCK_END)
-#endif
 				// Return line rather than line->mNextLine because, if we're at the end of
 				// the script, it's up to the caller to differentiate between that condition
 				// and the condition where NULL is an error indicator.
 				return line;
-#ifdef _DEBUG
-			// Otherwise, we found an end-block we weren't looking for.  This should be
-			// impossible since the block pre-parsing already balanced all the blocks?
-			return line->PreparseError(_T("Q")); // Placeholder (see above). Formerly "Unexpected end-of-block (multi)."
-#endif
+			// Otherwise, we found an end-block we weren't looking for.
+			return line->PreparseError(ERR_UNEXPECTED_CLOSE_BRACE);
 		case ACT_BREAK:
 		case ACT_CONTINUE:
+		case ACT_BREAKIF:
+		case ACT_CONTINUEIF:
 			if (!aLoopType)
 				return line->PreparseError(_T("Break/Continue must be enclosed by a Loop."));
 			if (aLoopType == ATTR_LOOP_OBSCURED)
 				return line->PreparseError(ERR_BAD_JUMP_INSIDE_FINALLY);
+			break;
+
+		case ACT_ELSE:
+			// This happens if there's an extra ELSE in this scope level that has no IF:
+			return line->PreparseError(ERR_ELSE_WITH_NO_IF);
+
+		case ACT_UNTIL:
+			// Similar to above.
+			return line->PreparseError(ERR_UNTIL_WITH_NO_LOOP);
+
+		case ACT_CATCH:
+			// Similar to above.
+			return line->PreparseError(ERR_CATCH_WITH_NO_TRY);
+
+		case ACT_FINALLY:
+			// Similar to above.
+			return line->PreparseError(ERR_FINALLY_WITH_NO_PRECEDENT);
+		} // switch()
+
+		line = line->mNextLine; // If NULL due to physical end-of-script, the for-loop's condition will catch it.
+		if (aMode == ONLY_ONE_LINE) // Return the next unprocessed line to the caller.
+			// In this case, line shouldn't be (and probably can't be?) NULL because the line after
+			// a single-line action shouldn't be the physical end of the script.  That's because
+			// the loader has ensured that all scripts now end in ACT_EXIT.  And that final
+			// ACT_EXIT should never be parsed here in ONLY_ONE_LINE mode because the only time
+			// that mode is used is for the action of an IF, an ELSE, or possibly a LOOP.
+			// In all of those cases, the final ACT_EXIT line in the script (which is explicitly
+			// inserted by the loader) cannot be the line that was just processed by the
+			// switch().  Therefore, the above assignment should not have set line to NULL
+			// (which is good because NULL would probably be construed as "failure" by our
+			// caller in this case):
+			return line;
+		// else just continue the for-loop at the new value of line.
+	} // for()
+
+	// End of script has been reached.  line is now NULL so don't dereference it.
+
+	// If we were still looking for an EndBlock to match up with a begin, that's an error.
+	// This indicates that at least one BLOCK_BEGIN is missing a BLOCK_END.  Let the error
+	// message point at the most recent BLOCK_BEGIN (aParentLine) rather than at mLastLine,
+	// which points to an EXIT which was added automatically by LoadFromFile().
+	if (aMode == UNTIL_BLOCK_END)
+		return aParentLine->PreparseError(ERR_MISSING_CLOSE_BRACE);
+
+	// If we were told to process a single line, we were recursed and it should have returned above,
+	// so it's an error here (can happen if we were called with aStartingLine == NULL?):
+	if (aMode == ONLY_ONE_LINE)
+		return mLastLine->PreparseError(_T("Q")); // Placeholder since probably impossible.  Formerly "The script ended while an action was still expected."
+
+	// Otherwise, return something non-NULL to indicate success to the top-level caller:
+	return mLastLine;
+}
+
+
+
+Line *Script::PreparseCommands(Line *aStartingLine)
+// Preparse any commands which might rely on blocks having been fully preparsed,
+// such as any command which has a jump target (label).
+{
+	bool in_function_body = false;
+
+	for (Line *line = aStartingLine; line; line = line->mNextLine)
+	{
+		LPTSTR line_raw_arg1 = LINE_RAW_ARG1; // Resolve only once to help reduce code size.
+		LPTSTR line_raw_arg2 = LINE_RAW_ARG2; //
+		
+		switch (line->mActionType)
+		{
+		case ACT_BLOCK_BEGIN:
+			if (line->mAttribute == ATTR_TRUE) // This is the opening brace of a function definition.
+				in_function_body = true; // Must be set only for mAttribute == ATTR_TRUE because functions can of course contain types of blocks other than the function's own block.
+			break;
+		case ACT_BLOCK_END:
+			if (line->mAttribute == ATTR_TRUE) // This is the closing brace of a function definition.
+				in_function_body = FALSE; // Must be set only for the above condition because functions can of course contain types of blocks other than the function's own block.
+			break;
+		case ACT_BREAK:
+		case ACT_CONTINUE:
 			if (line->mArgc)
 			{
 				if (line->ArgHasDeref(1) || line->mArg->is_expression)
@@ -12696,7 +12551,7 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 					int n = _ttoi(loop_name);
 					// Find the nth innermost loop which encloses this line:
 					for (loop_line = line->mParentLine; loop_line; loop_line = loop_line->mParentLine)
-						if (loop_line->mActionType >= ACT_LOOP && loop_line->mActionType <= ACT_WHILE) // i.e. LOOP, FOR or WHILE.
+						if (ACT_IS_LOOP(loop_line->mActionType)) // i.e. LOOP, FOR or WHILE.
 							if (--n < 1)
 								break;
 					if (!loop_line || n != 0)
@@ -12709,7 +12564,7 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 						return line->PreparseError(ERR_NO_LABEL, loop_name);
 					loop_line = loop_label->mJumpToLine;
 					// Ensure the label points to a Loop, For-loop or While-loop ...
-					if (   !(loop_line->mActionType >= ACT_LOOP && loop_line->mActionType <= ACT_WHILE)
+					if (   !ACT_IS_LOOP(loop_line->mActionType)
 						// ... which encloses this line.  Use line->mParentLine as the starting-point of
 						// the "jump" to ensure the target isn't at the same nesting level as this line:
 						|| !line->mParentLine->IsJumpValid(*loop_label, true)   )
@@ -12724,6 +12579,8 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 						loop_line = NULL;
 					}
 				}
+				if (in_function_body && loop_line->IsOutsideAnyFunctionBody())
+					return line->PreparseError(ERR_BAD_JUMP_OUT_OF_FUNCTION);
 				if (!line->CheckValidFinallyJump(loop_line))
 					return NULL; // Error already shown.
 				line->mRelatedLine = loop_line;
@@ -12732,8 +12589,6 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 
 		case ACT_BREAKIF:
 		case ACT_CONTINUEIF:
-			if (!aLoopType)
-				return line->PreparseError(_T("Break/Continue must be enclosed by a Loop."));
 			if (line->mArgc == 2)
 			{
 				if (line->ArgHasDeref(2) || line->mArg[1].is_expression)
@@ -12789,10 +12644,10 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 			{
 				if (!line->GetJumpTarget(false))
 					return NULL; // Error was already displayed by called function.
-				if (sInFunctionBody && ((Label *)(line->mRelatedLine))->mJumpToLine->IsOutsideAnyFunctionBody()) // Relies on above call to GetJumpTarget() having set line->mRelatedLine.
+				if (in_function_body && ((Label *)(line->mRelatedLine))->mJumpToLine->IsOutsideAnyFunctionBody()) // Relies on above call to GetJumpTarget() having set line->mRelatedLine.
 				{
 					if (line->mActionType == ACT_GOTO)
-						return line->PreparseError(_T("A Goto cannot jump from inside a function to outside."));
+						return line->PreparseError(ERR_BAD_JUMP_OUT_OF_FUNCTION);
 					// Since this Gosub and its target line are both inside a function, they must both
 					// be in the same function because otherwise GetJumpTarget() would have reported
 					// the target as invalid.
@@ -12809,7 +12664,7 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 				if (parent->mActionType == ACT_FINALLY)
 					return line->PreparseError(ERR_BAD_JUMP_INSIDE_FINALLY);
 			break;
-
+			
 		// These next 4 must also be done here (i.e. *after* all the script lines have been added),
 		// so that labels both above and below this line can be resolved:
 		case ACT_ONEXIT:
@@ -12854,7 +12709,7 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 					return line->PreparseError(ERR_PARAM1_INVALID);
 				}
 				if (*line_raw_arg2 && !line->ArgHasDeref(2))
-					if (   !(line->mAttribute = FindLabel(line_raw_arg2))   )
+					if (   !(line->mAttribute = FindCallable(line_raw_arg2))   )
 						if (!Hotkey::ConvertAltTab(line_raw_arg2, true))
 							return line->PreparseError(ERR_NO_LABEL);
 			}
@@ -12863,10 +12718,11 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 
 		case ACT_SETTIMER:
 			if (*line_raw_arg1 && !line->ArgHasDeref(1))
-				if (   !(line->mAttribute = FindLabel(line_raw_arg1))   )
+				if (   !(line->mAttribute = FindCallable(line_raw_arg1))   )
 					return line->PreparseError(ERR_NO_LABEL);
 			if (*line_raw_arg2 && !line->ArgHasDeref(2))
 				if (!Line::ConvertOnOff(line_raw_arg2) && !IsPureNumeric(line_raw_arg2, true) // v1.0.46.16: Allow negatives to support the new run-only-once mode.
+					&& _tcsicmp(line_raw_arg2, _T("Delete"))
 					&& !line->mArg[1].is_expression) // v1.0.46.10: Don't consider expressions THAT CONTAIN NO VARIABLES OR FUNCTION-CALLS like "% 2*500" to be a syntax error.
 					return line->PreparseError(ERR_PARAM2_INVALID);
 			break;
@@ -12888,61 +12744,9 @@ Line *Script::PreparseIfElse(Line *aStartingLine, ExecUntilMode aMode, Attribute
 				//return IsJumpValid(label->mJumpToLine);
 			}
 			break;
-
-		case ACT_ELSE:
-			// Should never happen because the part that handles the if's, above, should find
-			// all the elses and handle them.  UPDATE: This happens if there's
-			// an extra ELSE in this scope level that has no IF:
-			return line->PreparseError(ERR_ELSE_WITH_NO_IF);
-
-		case ACT_UNTIL:
-			// Similar to above.
-			return line->PreparseError(ERR_UNTIL_WITH_NO_LOOP);
-
-		case ACT_CATCH:
-			// Similar to above.
-			return line->PreparseError(ERR_CATCH_WITH_NO_TRY);
-
-		case ACT_FINALLY:
-			// Similar to above.
-			return line->PreparseError(ERR_FINALLY_WITH_NO_PRECEDENT);
-		} // switch()
-
-		line = line->mNextLine; // If NULL due to physical end-of-script, the for-loop's condition will catch it.
-		if (aMode == ONLY_ONE_LINE) // Return the next unprocessed line to the caller.
-			// In this case, line shouldn't be (and probably can't be?) NULL because the line after
-			// a single-line action shouldn't be the physical end of the script.  That's because
-			// the loader has ensured that all scripts now end in ACT_EXIT.  And that final
-			// ACT_EXIT should never be parsed here in ONLY_ONE_LINE mode because the only time
-			// that mode is used is for the action of an IF, an ELSE, or possibly a LOOP.
-			// In all of those cases, the final ACT_EXIT line in the script (which is explicitly
-			// inserted by the loader) cannot be the line that was just processed by the
-			// switch().  Therefore, the above assignment should not have set line to NULL
-			// (which is good because NULL would probably be construed as "failure" by our
-			// caller in this case):
-			return line;
-		// else just continue the for-loop at the new value of line.
+		}
 	} // for()
-
-	// End of script has been reached.  line is now NULL so don't dereference it.
-
-	// If we were still looking for an EndBlock to match up with a begin, that's an error.
-	// This indicates that the at least one BLOCK_BEGIN is missing a BLOCK_END.
-	// However, since the blocks were already balanced by the block pre-parsing function,
-	// this should be impossible unless the design of this function is flawed.
-	if (aMode == UNTIL_BLOCK_END)
-#ifdef _DEBUG
-		return mLastLine->PreparseError(_T("DEBUG: The script ended while a block was still open.")); // This is a bug because the preparser already verified all blocks are balanced.
-#else
-		return NULL; // Shouldn't happen, so just return failure.
-#endif
-
-	// If we were told to process a single line, we were recursed and it should have returned above,
-	// so it's an error here (can happen if we were called with aStartingLine == NULL?):
-	if (aMode == ONLY_ONE_LINE)
-		return mLastLine->PreparseError(_T("Q")); // Placeholder since probably impossible.  Formerly "The script ended while an action was still expected."
-
-	// Otherwise, return something non-NULL to indicate success to the top-level caller:
+	// Return something non-NULL to indicate success:
 	return mLastLine;
 }
 
@@ -13940,14 +13744,6 @@ double_deref: // Caller has set cp to be start and op_end to be the character af
 					// non-NULL, and that can only be the result of a previous SYM_OPAREN/BRACKET.
 					if (this_infix[-1].symbol == SYM_COMMA || this_infix[-1].symbol == stack_symbol)
 					{
-						// An empty param in something like {x:y,,w:z} is meaningless and likely to be an error.
-						// x[a,,b] could possibly be given meaning by __Set or __Get, but that doesn't seem useful
-						// enough to justify the added code for guarding against SYM_MISSING.  Ruling out empty
-						// params in x[] allows IObject::Invoke() implementations to assume that the first param
-						// (or param for IT_SET/IT_GET) is never SYM_MISSING.  However, [a,,b] is allowed as a way
-						// to create a sparse array.
-						if (stack_symbol == SYM_OBRACE || func && (int)func->mName < IT_CALL) // i.e. {} or x[]
-							return LineError(_T("Unexpected comma"), FAIL, in_param_list->marker);
 						// Also handle any missing params following this one, otherwise the this_infix[-1].symbol
 						// check would fail next iteration because we've changed it from SYM_COMMA to SYM_MISSING.
 						while (this_infix->symbol == SYM_COMMA) // For each missing parameter: (, or ,,
@@ -14035,8 +13831,17 @@ double_deref: // Caller has set cp to be start and op_end to be the character af
 					ASSERT(this_infix[1].symbol == SYM_OPAREN);
 					if (infix_symbol == SYM_CBRACE // i.e. {...}(), seems best to reserve this for now.
 						|| in_param_list->func != &g_ObjGet // i.e. it's something like x := [y,z]().
-						|| in_param_list->param_count != 2) // i.e. the target object plus the method name = 2.
+						|| in_param_list->param_count > 2) // i.e. x[y, ...]().
 						return LineError(_T("Unsupported method call syntax."), FAIL, in_param_list->marker); // Error message is a bit vague since this can be x[y,z]() or x.y[z]().
+					if (in_param_list->param_count == 1) // Just the target object; no method name: x[](...)
+					{
+						in_param_list->param_count++;
+						postfix[postfix_count] = this_infix;
+						postfix[postfix_count]->symbol = SYM_MISSING;
+						postfix[postfix_count]->marker = _T(""); // Simplify some cases by letting it be treated as SYM_STRING.
+						postfix[postfix_count]->circuit_token = NULL;
+						++postfix_count;
+					}
 					stack_top.deref->func = &g_ObjCall; // Override the default now that we know this is a method-call.
 					++this_infix; // Skip SYM_CBRACKET so this_infix points to SYM_OPAREN.
 					this_infix->buf = stack_top.buf; // This contains the old value of in_param_list.
@@ -15325,7 +15130,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 		case ACT_THROW:
 		{
 			if (!line->mArgc)
-				return line->ThrowRuntimeException(_T("An exception was thrown."));
+				return line->ThrowRuntimeException(ERR_EXCEPTION);
 
 			if (g.ThrownToken)
 			{
@@ -16344,7 +16149,7 @@ ResultType Line::PerformLoopFor(ExprTokenType *aResultToken, bool &aContinueMain
 			result_token.buf = NULL; // Indicate that this SYM_OPERAND token LACKS a pre-converted binary integer.
 		}
 
-		bool next_returned_true = TokenToBOOL(result_token, TokenIsPureNumeric(result_token));
+		bool next_returned_true = TokenToBOOL(result_token);
 
 		// Free any memory or object which may have been returned by Invoke:
 		if (result_token.mem_to_free)
@@ -17003,7 +16808,6 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 	size_t source_length; // For String commands.
 	SymbolType var_is_pure_numeric, value_is_pure_numeric; // For math operations.
 	vk_type vk; // For GetKeyState.
-	Label *target_label;  // For ACT_SETTIMER and ACT_HOTKEY
 	__int64 device_id;  // For sound commands.  __int64 helps avoid compiler warning for some conversions.
 	bool is_remote_registry; // For Registry commands.
 	HKEY root_key; // For Registry commands.
@@ -17643,27 +17447,34 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 		return OK;
 
 	case ACT_ONEXIT:
-		if (!*ARG1) // Reset to normal Exit behavior.
-		{
-			g_script.mOnExitLabel = NULL;
-			return OK;
-		}
+	{
+		Label *target_label;
 		// If it wasn't resolved at load-time, it must be a variable reference:
 		if (   !(target_label = (Label *)mAttribute)   )
-			if (   !(target_label = g_script.FindLabel(ARG1))   )
-				return LineError(ERR_NO_LABEL, FAIL, ARG1);
+			if (   *ARG1 && !(target_label = g_script.FindLabel(ARG1))   )
+					return LineError(ERR_NO_LABEL, FAIL, ARG1);
 		g_script.mOnExitLabel = target_label;
 		return OK;
+	}
 #ifndef MINIDLL
 	case ACT_HOTKEY:
+	{
+		IObject *target_label;
 		// mAttribute is the label resolved at loadtime, if available (for performance).
-		return Hotkey::Dynamic(THREE_ARGS, (Label *)mAttribute);
+		if (   !(target_label = (IObject *)mAttribute)   ) // Since it wasn't resolved at load-time, it must be a variable reference.
+			if (ARGVAR2 && ARGVAR2->HasObject()) // Allow: Hotkey %KeyName%, %VarWithObject%
+				target_label = ARGVAR2->Object(); // AddRef() will be called later, when it is stored.
+		return Hotkey::Dynamic(THREE_ARGS, target_label);
+	}
 #endif
 	case ACT_SETTIMER: // A timer is being created, changed, or enabled/disabled.
+	{
+		IObject *target_label;
 		// Note that only one timer per label is allowed because the label is the unique identifier
 		// that allows us to figure out whether to "update or create" when searching the list of timers.
-		if (   !(target_label = (Label *)mAttribute)   ) // Since it wasn't resolved at load-time, it must be a variable reference.
-			if (   !(target_label = (*ARG1 ? g_script.FindLabel(ARG1) : g.CurrentLabel))   )
+		if (   !(target_label = (IObject *)mAttribute)   ) // Since it wasn't resolved at load-time, it must be a variable reference.
+			if (   !(target_label = g_script.FindCallable(ARG1, ARGVAR1))
+				&& !(!*ARG1 && (target_label = g.CurrentLabel))   )
 				return LineError(ERR_NO_LABEL, FAIL, ARG1);
 		// And don't update mAttribute (leave it NULL) because we want ARG1 to be dynamically resolved
 		// every time the command is executed (in case the contents of the referenced variable change).
@@ -17678,7 +17489,14 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 		{
 			toggle = Line::ConvertOnOff(ARG2);
 			if (!toggle && !IsPureNumeric(ARG2, true, true, true)) // Allow it to be neg. or floating point at runtime.
+			{
+				if (!_tcsicmp(ARG2, _T("Delete")))
+				{
+					g_script.DeleteTimer(target_label);
+					return OK;
+				}
 				return LineError(ERR_PARAM2_INVALID, FAIL, ARG2);
+			}
 		}
 		else
 			toggle = TOGGLE_INVALID;
@@ -17694,6 +17512,7 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 		default: g_script.UpdateOrCreateTimer(target_label, ARG2, ARG3, true, !*ARG2 && *ARG3);
 		}
 		return OK;
+	}
 
 	case ACT_CRITICAL:
 	{
@@ -17766,7 +17585,7 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 		if (   !(group = (WinGroup *)mAttribute)   )
 			if (   !(group = g_script.FindGroup(ARG1, true))   )  // Last parameter -> create-if-not-found.
 				return FAIL;  // It already displayed the error for us.
-		target_label = NULL;
+		Label *target_label = NULL;
 		if (*ARG4)
 		{
 			if (   !(target_label = (Label *)mRelatedLine)   ) // Jump target hasn't been resolved yet, probably due to it being a deref.
@@ -18236,13 +18055,13 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 		return FormatTime(ARG2, ARG3);
 #ifndef MINIDLL
 	case ACT_MENU:
-		return g_script.PerformMenu(SIX_ARGS); // L17: Changed from FIVE_ARGS to access previously "reserved" arg (for use by Menu,,Icon).
+		return g_script.PerformMenu(SIX_ARGS, ARGVAR4); // L17: Changed from FIVE_ARGS to access previously "reserved" arg (for use by Menu,,Icon).
 
 	case ACT_GUI:
 		return g_script.PerformGui(FOUR_ARGS);
 
 	case ACT_GUICONTROL:
-		return GuiControl(THREE_ARGS);
+		return GuiControl(THREE_ARGS, ARGVAR3);
 
 	case ACT_GUICONTROLGET:
 		return GuiControlGet(ARG2, ARG3, ARG4);
@@ -19419,7 +19238,7 @@ void Script::ScriptWarning(WarnMode warnMode, LPCTSTR aWarningText, LPCTSTR aExt
 	else
 		OutputDebugString(buf);
 #else
-		g_Debugger.FileAppendStdOut(buf);
+		g_Debugger.FileAppendStdOut(buf) || _fputts(buf, stdout);
 	else
 		g_Debugger.OutputDebug(buf);
 #endif
@@ -19588,7 +19407,7 @@ LPTSTR Script::ListKeyHistory(LPTSTR aBuf, int aBufSize) // aBufSize should be a
 	TCHAR timer_list[128] = _T("");
 	for (ScriptTimer *timer = mFirstTimer; timer != NULL; timer = timer->mNextTimer)
 		if (timer->mEnabled)
-			sntprintfcat(timer_list, _countof(timer_list) - 3, _T("%s "), timer->mLabel->mName); // Allow room for "..."
+			sntprintfcat(timer_list, _countof(timer_list) - 3, _T("%s "), timer->mLabel->Name()); // Allow room for "..."
 	if (*timer_list)
 	{
 		size_t length = _tcslen(timer_list);

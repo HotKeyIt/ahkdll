@@ -256,6 +256,12 @@ struct DECLSPEC_NOVTABLE IDebugProperties
 #define IF_CALL_FUNC_ONLY	0x100000 // Used by IDispatch: call only if value is a function.
 
 
+// Helper function for event handlers and __Delete:
+ResultType CallMethod(IObject *aInvokee, IObject *aThis, LPTSTR aMethodName
+	, ExprTokenType *aParamValue = NULL, int aParamCount = 0, INT_PTR *aRetVal = NULL // For event handlers.
+	, int aExtraFlags = 0); // For Object.__Delete().
+
+
 struct DerefType; // Forward declarations for use below.
 class Var;        //
 struct ExprTokenType  // Something in the compiler hates the name TokenType, so using a different name.
@@ -296,6 +302,39 @@ struct ExprTokenType  // Something in the compiler hates the name TokenType, so 
 	// The above two probably need to be adjacent to each other to conserve memory due to 8-byte alignment,
 	// which is the default alignment (for performance reasons) in any struct that contains 8-byte members
 	// such as double and __int64.
+
+	ExprTokenType() {}
+	ExprTokenType(__int64 aValue) { SetValue(aValue); }
+	ExprTokenType(double aValue) { SetValue(aValue); }
+	ExprTokenType(IObject *aValue) { SetValue(aValue); }
+	ExprTokenType(LPTSTR aValue) { SetValue(aValue); }
+	
+	void SetValue(__int64 aValue)
+	{
+		symbol = SYM_INTEGER;
+		value_int64 = aValue;
+	}
+	void SetValue(int aValue) { SetValue((__int64)aValue); }
+	void SetValue(UINT aValue) { SetValue((__int64)aValue); }
+	void SetValue(UINT64 aValue) { SetValue((__int64)aValue); }
+	void SetValue(double aValue)
+	{
+		symbol = SYM_FLOAT;
+		value_double = aValue;
+	}
+	void SetValue(LPTSTR aValue)
+	{
+		ASSERT(aValue);
+		symbol = SYM_STRING;
+		marker = aValue;
+	}
+	void SetValue(IObject *aValue)
+	// Caller must AddRef() if appropriate.
+	{
+		ASSERT(aValue);
+		symbol = SYM_OBJECT;
+		object = aValue;
+	}
 };
 #define MAX_TOKENS 512 // Max number of operators/operands.  Seems enough to handle anything realistic, while conserving call-stack space.
 #define STACK_PUSH(token_ptr) stack[stack_count++] = token_ptr
@@ -312,6 +351,7 @@ enum enum_act {
 , ACT_ASSIGN, ACT_ASSIGNEXPR, ACT_EXPRESSION, ACT_ADD, ACT_SUB, ACT_MULT, ACT_DIV
 , ACT_ASSIGN_FIRST = ACT_ASSIGN, ACT_ASSIGN_LAST = ACT_DIV
 , ACT_ELSE   // Parsed at a lower level than most commands to support same-line ELSE-actions (e.g. "else if").
+, ACT_STATIC
 , ACT_IFIN, ACT_IFNOTIN, ACT_IFCONTAINS, ACT_IFNOTCONTAINS, ACT_IFIS, ACT_IFISNOT
 , ACT_IFBETWEEN, ACT_IFNOTBETWEEN
 , ACT_IFEXPR  // i.e. if (expr)
@@ -348,7 +388,7 @@ enum enum_act {
 , ACT_SLEEP, ACT_RANDOM
 , ACT_GOTO, ACT_GOSUB, ACT_ONEXIT, ACT_HOTKEY, ACT_SETTIMER, ACT_CRITICAL, ACT_THREAD, ACT_RETURN, ACT_EXIT
 , ACT_LOOP, ACT_FOR, ACT_WHILE, ACT_UNTIL, ACT_BREAK, ACT_BREAKIF, ACT_CONTINUE, ACT_CONTINUEIF // Keep LOOP, FOR, WHILE and UNTIL together and in this order for range checks in various places.
-, ACT_TRY, ACT_CATCH, ACT_THROW, ACT_FINALLY
+, ACT_TRY, ACT_CATCH, ACT_FINALLY, ACT_THROW // Keep TRY, CATCH and FINALLY together and in this order for range checks.
 , ACT_BLOCK_BEGIN, ACT_BLOCK_END
 , ACT_WINACTIVATE, ACT_WINACTIVATEBOTTOM
 , ACT_WINWAIT, ACT_WINWAITCLOSE, ACT_WINWAITACTIVE, ACT_WINWAITNOTACTIVE
@@ -382,6 +422,7 @@ enum enum_act {
 , ACT_EXITAPP
 , ACT_SHUTDOWN
 , ACT_FILEENCODING
+, ACT_HOTKEY_IF
 // Make these the last ones before the count so they will be less often processed.  This helps
 // performance because this one doesn't actually have a keyword so will never result
 // in a match anyway.  UPDATE: No longer used because Run/RunWait is now required, which greatly
@@ -419,8 +460,9 @@ enum enum_act_old {
 
 #define ACT_IS_ASSIGN(ActionType) (ActionType <= ACT_ASSIGN_LAST && ActionType >= ACT_ASSIGN_FIRST) // Ordered for short-circuit performance.
 #define ACT_IS_IF(ActionType) (ActionType >= ACT_FIRST_IF && ActionType <= ACT_LAST_IF)
-#define ACT_IS_IF_OR_ELSE_OR_LOOP(ActionType) (ACT_IS_IF(ActionType) || ActionType == ACT_ELSE \
-	|| ActionType == ACT_LOOP || ActionType == ACT_WHILE || ActionType == ACT_FOR)
+#define ACT_IS_LOOP(ActionType) (ActionType >= ACT_LOOP && ActionType <= ACT_WHILE)
+#define ACT_IS_LINE_PARENT(ActionType) (ACT_IS_IF(ActionType) || ActionType == ACT_ELSE \
+	|| ACT_IS_LOOP(ActionType) || (ActionType >= ACT_TRY && ActionType <= ACT_FINALLY))
 #define ACT_IS_IF_OLD(ActionType, OldActionType) (ActionType >= ACT_FIRST_IF_ALLOWING_SAME_LINE_ACTION && ActionType <= ACT_LAST_IF) \
 	&& (ActionType < ACT_IFEQUAL || ActionType > ACT_IFLESSOREQUAL || (OldActionType >= OLD_IFEQUAL && OldActionType <= OLD_IFLESSOREQUAL))
 	// All the checks above must be done so that cmds such as IfMsgBox (which are both "old" and "new")

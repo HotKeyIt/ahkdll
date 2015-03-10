@@ -322,7 +322,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 #ifdef AUTOHOTKEYSC
 	LineNumberType load_result = g_script.LoadFromFile();
 #else //HotKeyIt changed to load from Text in dll as well when file does not exist
-	LineNumberType load_result = (g_hResource || !nameHinstanceP.istext) ? g_script.LoadFromFile(script_filespec == NULL) : g_script.LoadFromText(script_filespec);
+	LineNumberType load_result = (g_hResource || !nameHinstanceP.istext) ? g_script.LoadFromFile() : g_script.LoadFromText(script_filespec);
 #endif
 	
 	if (load_result == LOADING_FAILED) // Error during load (was already displayed by the function call).
