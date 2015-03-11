@@ -386,7 +386,7 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute)
 	BACKUP_G_SCRIPT
 	LPTSTR oldFileSpec = g_script.mFileSpec;
 	g_script.mFileSpec = fileName;
-	if (g_script.LoadFromFile(false)!= OK) //fileName, aAllowDuplicateInclude, (bool) aIgnoreLoadFailure) != OK) || !g_script.PreparseBlocks(oldLastLine->mNextLine))
+	if (g_script.LoadFromFile()!= OK) //fileName, aAllowDuplicateInclude, (bool) aIgnoreLoadFailure) != OK) || !g_script.PreparseBlocks(oldLastLine->mNextLine))
 	{
 		g_script.mFileSpec = oldFileSpec;				// Restore script path
 		g->CurrentFunc = aCurrFunc;						// Restore current function
