@@ -434,6 +434,8 @@ Script::~Script() // Destructor.
 	if (mVarCount)
 		free(mVar);
 	mVar = NULL;
+	mVarCount = 0;
+	mVarCountMax = 0;
 	for (v = 0; v < mLazyVarCount; v++)
 	{
 		delete mLazyVar[v];
@@ -441,6 +443,7 @@ Script::~Script() // Destructor.
 	if (mLazyVarCount)
 		free(mLazyVar);
 	mLazyVar = NULL;
+	mLazyVarCount = NULL;
 	// delete static func vars first
 	for (i = 0; i < mFuncCount; i++)
 	{
@@ -481,7 +484,7 @@ Script::~Script() // Destructor.
 	if (mFuncCount)
 		free(mFunc);
 	mFunc = NULL;
-
+	mFuncCount = 0;
 	// Destroy Labels
 	for (Label *label = mFirstLabel, *nextLabel = NULL; label;)
 	{
