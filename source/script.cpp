@@ -10863,7 +10863,7 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 	else if (!_tcsicmp(func_name, _T("OnMessage")))
 	{
 		bif = BIF_OnMessage;
-		max_params = 3;  // Leave min at 1.
+		max_params = 4;  // Leave min at 1.
 		// By design, scripts that use OnMessage are persistent by default.  Doing this here
 		// also allows WinMain() to later detect whether this script should become #SingleInstance.
 		// Note: Don't directly change g_AllowOnlyOneInstance here in case the remainder of the
