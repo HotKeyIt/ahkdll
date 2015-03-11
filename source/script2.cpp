@@ -18423,7 +18423,7 @@ BIF_DECL(BIF_OnMessage)
 		if (!callback) // Delete or report function-name of a non-existent item.
 			return; // Yield the default return value set earlier (an empty string).
 		// From this point on, it is certain that an item will be added to the array.
-		if (  !(pmonitor = g_MsgMonitor.Add(specified_msg, specified_hwnd, callback, legacy_mode))  )
+		if (  !(pmonitor = g_MsgMonitor.Add(specified_msg, specified_hwnd, callback, legacy_mode, call_it_last))  )
 		{
 			if (!legacy_mode)
 				aResult = g_script.ScriptError(ERR_OUTOFMEM);
@@ -21147,8 +21147,12 @@ DWORD GetProcessName(DWORD aProcessID, LPTSTR aBuf, DWORD aBufSize, bool aGetNam
 		: GetModuleFileNameEx(hproc, NULL, aBuf, aBufSize);
 
 	typedef DWORD (WINAPI *MyGetName)(HANDLE, LPTSTR, DWORD);
+#ifdef CONFIG_WIN2K
 	// This must be loaded dynamically or the program will probably not launch at all on Win2k:
 	static MyGetName lpfnGetName = (MyGetName)GetProcAddress(GetModuleHandle(_T("psapi")), "GetProcessImageFileName" WINAPI_SUFFIX);;
+#else
+	static MyGetName lpfnGetName = &GetProcessImageFileName;
+#endif
 
 	if (!buf_length && lpfnGetName)
 	{

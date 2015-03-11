@@ -1760,11 +1760,10 @@ bool Func::Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aRe
 				ExprTokenType **param_list = (ExprTokenType **)(token + extra_params);
 				// Since built-in functions don't have variables we can directly assign to,
 				// we need to expand the param object's contents into an array of tokens:
-				if (!param_obj->ArrayToParams(token, param_list, extra_params, aParam, aParamCount))
+				param_obj->ArrayToParams(token, param_list, extra_params, aParam, aParamCount);
 				{
 					if (crisec)
 						LeaveCriticalSection(crisec);
-					return false; // Abort expression.
 				aParam = param_list;
 				aParamCount += extra_params;
 				}
