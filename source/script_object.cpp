@@ -100,9 +100,10 @@ Object *Object::Create(ExprTokenType *aParam[], int aParamCount)
 	return obj;
 }
 
-Object *Object::CreateArray(ExprTokenType *aValue[], int aValueCount)
+Object *Object::CreateArray(ExprTokenType *aValue[], int aValueCount, Object *obj)
 {
-	Object *obj = new Object();
+	if (!obj)
+		obj = new Object();
 	if (obj && aValueCount && !obj->InsertAt(0, 1, aValue, aValueCount))
 	{
 		obj->Release(); // InsertAt failed.
@@ -809,8 +810,6 @@ Object *Object::CreateFromArgV(LPTSTR *aArgV, int aArgC)
 	Object *args;
 	if (!(args = Create(NULL, 0)))
 		return NULL;
-	if (aArgC < 1)
-		return args;
 	ExprTokenType *token = (ExprTokenType *)_alloca(aArgC * sizeof(ExprTokenType));
 	ExprTokenType **param = (ExprTokenType **)_alloca(aArgC * sizeof(ExprTokenType*));
 	ResultToken aResult;
@@ -820,10 +819,10 @@ Object *Object::CreateFromArgV(LPTSTR *aArgV, int aArgC)
 	{
 		token[j].SetValue(aArgV[j]);
 		param[j] = &token[j];
-		if ( !((j+1) % 2) && _tcscmp(_T("0"),aArgV[j - 1]) && !ATOI64(aArgV[j - 1]) )
-			args->Invoke(aResult,thisToken,IT_SET,&param[j-1],2);
+		if (!((j + 1) % 2) && _tcscmp(_T("0"), aArgV[j - 1]) && !ATOI64(aArgV[j - 1]))
+			args->Invoke(aResult, thisToken, IT_SET, &param[j - 1], 2);
 	}
-	return CreateArray(param, aArgC);
+	return CreateArray(param, aArgC, args);
 }
 
 //
