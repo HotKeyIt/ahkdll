@@ -3174,7 +3174,7 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 					}
 				}
 				else // No parent hotkey yet, so create it.
-					if (!(hk = Hotkey::AddHotkey(mLastLabel, hook_action, NULL, suffix_has_tilde, false)))
+					if (!(hk = Hotkey::AddHotkey(mLastLabel, hook_action, mLastLabel->mName, suffix_has_tilde, false)))
 					{
 						if (hotkey_validity != CONDITION_TRUE)
 							return FAIL; // It already displayed the error.
