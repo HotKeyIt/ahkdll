@@ -333,6 +333,7 @@ void Script::Destroy()
 	}
 	free(mLazyVar);
 	mLazyVar = NULL;
+	mLazyVarCount = 0;
 	// delete static func vars first
 	for (i = 0; i < mFuncCount; i++)
 	{
@@ -383,12 +384,15 @@ void Script::Destroy()
 	}
 	free(mVar);
 	mVar = NULL;
+	mVarCount = 0;
+	mVarCountMax = 0;
 	for (v = 0; v < mLazyVarCount; v++)
 	{
 		delete mLazyVar[v];
 	}
 	free(mLazyVar);
 	mLazyVar = NULL;
+	mLazyVarCount = 0;
 	// delete static func vars first
 	for (i = 0; i < mFuncCount; i++)
 	{
@@ -2000,6 +2004,7 @@ ResultType Script::LoadIncludedText(LPTSTR aScript,LPCTSTR aPathToShow)
 #ifndef MINIDLL
 	HookActionType hook_action;
 	bool is_label, suffix_has_tilde, hook_is_mandatory, in_comment_section, hotstring_options_all_valid;
+	ResultType hotkey_validity;
 #else
 	bool is_label, in_comment_section;
 #endif
@@ -2821,8 +2826,20 @@ examine_line:
 				cp = omit_trailing_whitespace(buf, hotkey_flag); // For maintainability.
 				orig_char = *cp;
 				*cp = '\0'; // Temporarily terminate.
-				if (!Hotkey::TextInterpret(omit_leading_whitespace(buf), NULL, false)) // Passing NULL calls it in validate-only mode.
+				hotkey_validity = Hotkey::TextInterpret(omit_leading_whitespace(buf), NULL, false); // Passing NULL calls it in validate-only mode.
+				switch (hotkey_validity)
+				{
+				case FAIL:
 					hotkey_flag = NULL; // It's not a valid hotkey, so indicate that it's a command (i.e. one that contains a literal double-colon, which avoids the need to escape the double-colon).
+					break;
+				case CONDITION_FALSE:
+					return FAIL; // It's an invalid hotkey and above already displayed the error message.
+					//case CONDITION_TRUE:
+					// It's a key that doesn't exist on the current keyboard layout.  Leave hotkey_flag set
+					// so that the section below handles it as a hotkey.  This allows it to end the auto-exec
+					// section and register the appropriate label even though it won't be an active hotkey.
+				}
+
 				*cp = orig_char; // Undo the temp. termination above.
 			}
 		}
@@ -3040,8 +3057,20 @@ examine_line:
 					}
 				}
 				else // No parent hotkey yet, so create it.
-					if (   !(hk = Hotkey::AddHotkey(mLastLabel, hook_action, NULL, suffix_has_tilde, false))   )
-						return FAIL; // It already displayed the error.
+					if (!(hk = Hotkey::AddHotkey(mLastLabel, hook_action, mLastLabel->mName, suffix_has_tilde, false)))
+					{
+						if (hotkey_validity != CONDITION_TRUE)
+							return FAIL; // It already displayed the error.
+						// This hotkey uses a single-character key name, which could be valid on some other
+						// keyboard layout.  Allow the script to start, but warn the user about the problem.
+						// Note that this hotkey's label is still valid even though the hotkey wasn't created.
+						if (!mIncludeLibraryFunctionsThenExit) // Current keyboard layout is not relevant in /iLib mode.
+						{
+							sntprintf(msg_text, _countof(msg_text), _T("Note: The hotkey %s will not be active because it does not exist in the current keyboard layout."), buf);
+							MsgBox(msg_text);
+						}
+					}
+
 			}
 			goto continue_main_loop; // In lieu of "continue", for performance.
 		} // if (is_label = ...)
@@ -3062,7 +3091,8 @@ examine_line:
 					is_label = false;
 					break;
 				}
-			if (is_label) // It's a generic, non-hotkey/non-hotstring label.
+			if (is_label // It's a generic label, since valid hotkeys and hotstrings have already been handled.
+				&& !(buf[buf_length - 2] == ':' && buf_length > 2)) // i.e. allow "::" as a normal label, but consider anything else with double-colon to be an error (reported at a later stage).
 			{
 				// v1.0.44.04: Fixed this check by moving it after the above loop.
 				// Above has ensured buf_length>1, so it's safe to check for double-colon:
@@ -3073,12 +3103,11 @@ examine_line:
 				// have a "ä" key. Without this change, if such a hotkey appears at the top of the script,
 				// its subroutine would execute immediately as a normal label, which would be especially
 				// bad if the hotkey were something like the "Shutdown" command.
-				if (buf[buf_length - 2] == ':' && buf_length > 2) // i.e. allow "::" as a normal label, but consider anything else with double-colon to be a failed-hotkey label that terminates the auto-exec section.
-				{
-					//CHECK_mNoHotkeyLabels // Terminate the auto-execute section since this is a failed hotkey vs. a mere normal label.
-					sntprintf(msg_text, _countof(msg_text), _T("Note: The hotkey %s will not be active because it does not exist in the current keyboard layout."), buf);
-					MsgBox(msg_text);
-				}
+				// Update: Hotkeys with single-character names like ^!ä are now handled earlier, so that
+				// anything else with double-colon can be detected as an error.  The checks above prevent
+				// something like foo:: from being interpreted as a generic label, so when the line fails
+				// to resolve to a command or expression, an error message will be shown.
+
 				buf[--buf_length] = '\0';  // Remove the trailing colon.
 				rtrim(buf, buf_length); // Has already been ltrimmed.
 				if (!AddLabel(buf, false))
