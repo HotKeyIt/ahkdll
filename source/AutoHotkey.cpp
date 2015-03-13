@@ -33,7 +33,7 @@ GNU General Public License for more details.
 
 int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdLine, int nCmdShow)
 {
-	HGLOBAL hResData;
+	/*	HGLOBAL hResData;
 	if (g_hResource = FindResource(NULL, _T("MSVCR"), MAKEINTRESOURCE(RT_RCDATA)))
 		if (hResData = LoadResource(g_hInstance, g_hResource))
 		{
@@ -45,6 +45,7 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 				VirtualFree(aDataBuf, aSizeDeCompressed, MEM_RELEASE);
 			}
 		}
+	*/
 	// Init any globals not in "struct g" that need it:
 
 #ifdef _DEBUG
