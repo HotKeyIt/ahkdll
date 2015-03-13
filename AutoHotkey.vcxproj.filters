@@ -34,9 +34,6 @@
     <ClCompile Include="source\globaldata.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="source\hook.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="source\hotkey.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -122,6 +119,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="source\lowlevelbif.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="source\hook.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="source\MinHook.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -228,6 +231,9 @@
     <ClInclude Include="source\LiteUnzip.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="source\MinHook.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="source\resources\AutoHotkey.rc">
@@ -281,5 +287,13 @@
     <Midl Include="source\ComServer.idl">
       <Filter>Source Files</Filter>
     </Midl>
+  </ItemGroup>
+  <ItemGroup>
+    <Library Include="source\lib\libMinHook.x64.lib">
+      <Filter>Resource Files</Filter>
+    </Library>
+    <Library Include="source\lib\libMinHook.x86.lib">
+      <Filter>Resource Files</Filter>
+    </Library>
   </ItemGroup>
 </Project>
