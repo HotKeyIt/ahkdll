@@ -665,7 +665,7 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data,
 
 			PHOOK_ENTRY pHook = MinHookEnable(GetProcAddress(GetModuleHandleA("ntdll.dll"), "RtlPcToFileHeader"), &HookRtlPcToFileHeader, &hHeap);
 			// notify library about attaching to process
-			BOOL successfull = (*DllEntry)((HINSTANCE)code, DLL_PROCESS_ATTACH, 0);
+			BOOL successfull = (*DllEntry)((HINSTANCE)code, DLL_PROCESS_ATTACH, result);
 			MinHookDisable(pHook);
 			HeapDestroy(hHeap);
 			
