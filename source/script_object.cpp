@@ -205,7 +205,7 @@ Object *Object::Clone(ExprTokenType *aParam[], int aParamCount)
 				j--;
 				continue;
 			}
-			else if (aParamCount == 2 && aParam[1]->symbol != SYM_MISSING && TokenIsPureNumeric(*aParam[1],is_number) && TokenToInt64(*aParam[1]) > src.key.i)
+			else if (aParamCount == 2 && aParam[1]->symbol != SYM_MISSING && TokenIsPureNumeric(*aParam[1],is_number) && TokenToInt64(*aParam[1]) < src.key.i)
 			{
 				obj.mFieldCount = j;
 				obj.mKeyOffsetString = j;
