@@ -239,6 +239,8 @@ Script::~Script() // Destructor.
 		mFirstMenu->mNextMenu = NULL;
 		mLastMenu = mFirstMenu;
 	}
+	mTrayIconTip = NULL;
+	mPriorHotkeyStartTime = 0;
 #endif
 #endif // MINIDLL
 	// Since tooltip windows are unowned, they should be destroyed to avoid resource leak:
@@ -467,17 +469,7 @@ void Script::Destroy()
 	mCurrLine = NULL ;
 	mCurrFileIndex = 0 ;
 	mCombinedLineNumber = 0;
-#ifndef MINIDLL
-	for (UserMenu *menu = mFirstMenu;menu;)
-	{
-		menu->Destroy();
-		menu = menu->mNextMenu;
-	}
-	mFirstMenu = NULL;
-	mLastMenu = NULL;
-	mTrayIconTip = NULL;
-	mPriorHotkeyStartTime = 0;
-#endif
+
 	mFirstGroup = NULL;
 	mLastGroup = NULL;
 	mFirstTimer = NULL;
