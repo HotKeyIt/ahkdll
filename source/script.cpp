@@ -161,12 +161,14 @@ FuncEntry g_BIF[] =
 	BIF1(ObjRawSet, 3, 3, false),
 
 	BIFn(ObjInsertAt, 3, NA, false, BIF_ObjXXX),
-	BIFn(ObjRemove, 2, 3, true, BIF_ObjXXX),
+	BIFn(ObjDelete, 2, 3, true, BIF_ObjXXX),
 	BIFn(ObjRemoveAt, 2, 3, true, BIF_ObjXXX),
 	BIFn(ObjPush, 2, NA, false, BIF_ObjXXX),
 	BIFn(ObjPop, 1, 1, false, BIF_ObjXXX),
 	BIFn(ObjLength, 1, 1, true, BIF_ObjXXX),
 	BIFn(ObjCount, 1, 1, true, BIF_ObjXXX),
+	BIFn(ObjMaxIndex, 1, 1, true, BIF_ObjXXX),
+	BIFn(ObjMinIndex, 1, 1, true, BIF_ObjXXX),
 	BIFn(ObjHasKey, 2, 2, true, BIF_ObjXXX),
 	BIFn(ObjGetCapacity, 1, 2, true, BIF_ObjXXX),
 	BIFn(ObjSetCapacity, 2, 3, true, BIF_ObjXXX),
@@ -6938,7 +6940,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 			// Experimental v2 behaviour: Where function syntax could've been used but isn't, require %
 			// for expressions.  This doesn't include control flow statements such as IF, WHILE, FOR, etc.
 			// since we want those to always be expressions (and function syntax can't be used for those).
-			if (aActionType < ACT_FIRST_COMMAND // See above.
+			if (!this_new_arg.is_expression // It hasn't been explicitly % marked as an expression.
 				&& (np = g_act[aActionType].NumericParams)) // This command has at least one numeric parameter.
 			{
 				// As of v1.0.25, pure numeric parameters can optionally be numeric expressions, so check for that:
@@ -6947,12 +6949,18 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 				{
 					if (*np == i_plus_one) // This arg is enforced to be purely numeric.
 					{
-						//if (aActionType == ACT_WINMOVE)
-						//{
-						//	if (i < 2) // This is the first or second arg, which are title/text vs. X/Y when aArgc > 2.
-						//		if (aArgc > 2) // Title/text are not numeric/expressions.
-						//			break; // The loop is over because this arg was found in the list.
-						//}
+						if (aActionType == ACT_WINMOVE)
+						{
+							if (i < 2) // This is the first or second arg, which are title/text vs. X/Y when aArgc > 2.
+								if (aArgc > 2) // Title/text are not numeric.
+									break; // The loop is over because this arg was found in the list.
+						}
+						if (aActionType >= ACT_FIRST_COMMAND) // See above for comments.
+						{
+							if (!IsNumeric(this_aArg, true, true, true) && !_tcschr(this_aArg, g_DerefChar))
+								return ScriptError(_T("This parameter must be a number, %variable% or % expression."), this_aArg);
+							break;
+						}
 						// Otherwise, it is an expression.
 						this_new_arg.is_expression = true;
 						break; // The loop is over if this arg is found in the list of mandatory-numeric args.
@@ -8675,7 +8683,7 @@ ResultType Script::DefineClass(LPTSTR aBuf)
 		ResultToken result_token;
 		result_token.symbol = SYM_STRING; // Init for detecting SYM_OBJECT below.
 		// Search for class and simultaneously remove it from the unresolved list:
-		mUnresolvedClasses->_Remove(result_token, &param, 1); // result_token := mUnresolvedClasses.Remove(token)
+		mUnresolvedClasses->_Delete(result_token, &param, 1); // result_token := mUnresolvedClasses.Remove(token)
 		// If a field was found/removed, it can only be SYM_OBJECT.
 		if (result_token.symbol == SYM_OBJECT)
 		{
@@ -11333,7 +11341,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 		, 54, 54         // SYM_BITSHIFTLEFT, SYM_BITSHIFTRIGHT
 		, 58, 58         // SYM_ADD, SYM_SUBTRACT
 		, 62, 62, 62     // SYM_MULTIPLY, SYM_DIVIDE, SYM_FLOORDIVIDE
-		, 67, 67, 67, 67, 67 // SYM_NEGATIVE (unary minus), SYM_HIGHNOT (the high precedence "!" operator), SYM_BITNOT, SYM_ADDRESS, SYM_DEREF
+		, 67,67,67,67,67,67 // SYM_NEGATIVE (unary minus), SYM_POSITIVE (unary plus), SYM_HIGHNOT (the high precedence "!" operator), SYM_BITNOT, SYM_ADDRESS, SYM_DEREF
 		// NOTE: THE ABOVE MUST BE AN ODD NUMBER to indicate right-to-left evaluation order, which was added in v1.0.46 to support consecutive unary operators such as !*var !!var (!!var can be used to convert a value into a pure 1/0 boolean).
 		//		, 68             // THIS VALUE MUST BE LEFT UNUSED so that the one above can be promoted to it by the infix-to-postfix routine.
 		, 72             // SYM_POWER (see note below).  Associativity kept as left-to-right for backward compatibility (e.g. 2**2**3 is 4**3=64 not 2**8=256).
@@ -11455,8 +11463,8 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 							++cp; // An additional increment to have loop skip over the operator's second symbol.
 							this_infix_item.symbol = SYM_PRE_INCREMENT;
 						}
-						else // Remove unary pluses from consideration since they do not change the calculation.
-							--infix_count; // Counteract the loop's increment.
+						else // Unary plus.
+							this_infix_item.symbol = SYM_POSITIVE; // Added in v2 for symmetry with SYM_NEGATIVE; i.e. if -x produces NaN, so should +x.
 					}
 					break;
 				case '-':

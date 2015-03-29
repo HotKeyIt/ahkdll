@@ -11594,8 +11594,9 @@ BIF_DECL(BIF_DynaCall)
 	}
 	else
 	{
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		aResultToken.SetExitResult(FAIL);
+		//aResultToken.symbol = SYM_STRING;
+		//aResultToken.marker = _T("");
 	}
 }
 
@@ -11634,7 +11635,7 @@ DynaToken *DynaToken::Create(ExprTokenType *aParam[], int aParamCount)
 		{
 			if (IS_NUMERIC(aParam[1]->symbol)) // The return type should be a string, not something purely numeric.
 			{
-				g_ErrorLevel->Assign(_T("-2")); // Stage 2 error: Invalid return type or arg type.
+				g_script.ThrowRuntimeException(ERR_INVALID_ARG_TYPE, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 				return NULL;
 			}
 			// The return type can be an object, where first parameter must be a string
@@ -11647,7 +11648,7 @@ DynaToken *DynaToken::Create(ExprTokenType *aParam[], int aParamCount)
 					aParam[1]->var->mObject->Invoke(result_token,*aParam[1],IT_GET,param,1);
 				if (IS_NUMERIC(result_token.symbol) || result_token.symbol == SYM_OBJECT)
 				{
-					g_script.SetErrorLevelOrThrowInt(-2, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
+					g_script.ThrowRuntimeException(ERR_INVALID_ARG_TYPE, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 					return NULL;
 				}
 				token.CopyExprFrom(result_token);
@@ -11676,7 +11677,7 @@ DynaToken *DynaToken::Create(ExprTokenType *aParam[], int aParamCount)
 
 			if (obj->marg_count != ConvertDllArgTypes(return_type_string,dyna_param))
 			{
-				g_script.SetErrorLevelOrThrowInt(-2, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
+				g_script.ThrowRuntimeException(ERR_INVALID_ARG_TYPE, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 				return NULL;
 			}
 			// 64-bit note: The calling convention detection code is preserved here for script compatibility.
@@ -11725,7 +11726,7 @@ TEST_TYPE("W",	DLL_ARG_WSTR)
 #undef TEST_TYPE
 				else
 				{
-					g_script.SetErrorLevelOrThrowInt(-2, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
+					g_script.ThrowRuntimeException(ERR_INVALID_RETURN_TYPE, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 					return NULL;
 				}
 #ifdef WIN32_PLATFORM
@@ -11760,7 +11761,7 @@ TEST_TYPE("W",	DLL_ARG_WSTR)
 			obj->mfunction = GetDllProcAddress(TokenToString(*aParam[0]), NULL);
 		if (!obj->mfunction)
 		{
-			g_script.SetErrorLevelOrThrowInt(-4, _T("DynaCall")); // Stage 4 error: Function could not be found in the DLL(s).
+			g_script.ThrowRuntimeException(ERR_NONEXISTENT_FUNCTION, _T("DynaCall")); // Stage 4 error: Function could not be found in the DLL(s).
 			return NULL;
 		}
 		// allocate memory for parameters and default parameters
@@ -11809,7 +11810,7 @@ CStringW **pStr = (CStringW **)
 					}
 					else
 					{
-						g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
+						g_script.ThrowRuntimeException(ERR_INVALID_ARG_TYPE, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 						return NULL;
 					}
 				}
@@ -11874,7 +11875,7 @@ CStringW **pStr = (CStringW **)
 					}
 					else
 					{
-						g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
+						g_script.ThrowRuntimeException(ERR_INVALID_ARG_TYPE, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 						return NULL;
 					}
 				}
@@ -11898,7 +11899,7 @@ CStringW **pStr = (CStringW **)
 			case DLL_ARG_INVALID:
 				if (aParam[i]->symbol == SYM_VAR)
 					aParam[i]->var->MaybeWarnUninitialized();
-				g_script.SetErrorLevelOrThrowInt(-2, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
+				g_script.ThrowRuntimeException(ERR_INVALID_ARG_TYPE, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 				return NULL;
 
 			default: // Namely:
@@ -11961,7 +11962,7 @@ CStringW **pStr = (CStringW **)
 						paramobj->Invoke(result_token,*aParam[1],IT_GET,param,1);
 						if (!IS_NUMERIC(result_token.symbol))
 						{
-							g_script.SetErrorLevelOrThrowInt(-2, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
+							g_script.ThrowRuntimeException(ERR_INVALID_ARG_TYPE, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 							return NULL;
 						}
 						obj->paramshift[i+1] = (int)result_token.value_int64-1;
@@ -13251,7 +13252,11 @@ has_valid_return_type:
 	{
 		function = GetDllProcAddress(TokenToString(*aParam[0]), &hmodule_to_free);
 		if (!function)
+		{
+			// GetDllProcAddress has thrown the appropriate exception.
+			aResultToken.SetExitResult(FAIL);
 			goto end;
+		}
 	}
 
 	////////////////////////
@@ -16123,9 +16128,13 @@ BIF_DECL(BIF_UnZipRawMemory)
 	aResultToken.marker =_T("");
 }
 
+#define If_NaN_return_NaN(ParamIndex) \
+	if (!TokenIsNumeric(*aParam[(ParamIndex)])) \
+		_f_return(EXPR_NAN)
+
 BIF_DECL(BIF_Round)
-// For simplicity and backward compatibility, this always yields something numeric (or a string that's numeric).
-// Even Round(empty_or_unintialized_var) is zero rather than "".
+// For simplicity, this always yields something numeric (or a string that's numeric).
+// Even Round(empty_or_unintialized_var) is zero rather than "" or "NaN".
 {
 	// In the future, a string conversion algorithm might be better to avoid the loss
 	// of 64-bit integer precision that is currently caused by the use of doubles in
@@ -16134,6 +16143,7 @@ BIF_DECL(BIF_Round)
 	double multiplier;
 	if (aParamCount > 1)
 	{
+		If_NaN_return_NaN(1);
 		param2 = ParamIndexToInt(1);
 		multiplier = qmathPow(10, param2);
 	}
@@ -16142,6 +16152,7 @@ BIF_DECL(BIF_Round)
 		param2 = 0;
 		multiplier = 1;
 	}
+	If_NaN_return_NaN(0);
 	double value = ParamIndexToDouble(0);
 	value = (value >= 0.0 ? qmathFloor(value * multiplier + 0.5)
 		: qmathCeil(value * multiplier - 0.5)) / multiplier;
@@ -16200,6 +16211,7 @@ BIF_DECL(BIF_FloorCeil)
 // For simplicity and backward compatibility, a numeric result is always returned (even if the input
 // is non-numeric or an empty string).
 {
+	If_NaN_return_NaN(0);
 	// The qmath routines are used because Floor() and Ceil() are deceptively difficult to implement in a way
 	// that gives the correct result in all permutations of the following:
 	// 1) Negative vs. positive input.
@@ -16222,26 +16234,24 @@ BIF_DECL(BIF_Mod)
 	// Load-time validation has already ensured there are exactly two parameters.
 	// "Cast" each operand to Int64/Double depending on whether it has a decimal point.
 	ExprTokenType param0, param1;
-	if (!ParamIndexToNumber(0, param0) || !ParamIndexToNumber(1, param1)) // Non-operand or non-numeric string.
-		_f_return_empty;
-
-	if (param0.symbol == SYM_INTEGER && param1.symbol == SYM_INTEGER)
+	if (ParamIndexToNumber(0, param0) && ParamIndexToNumber(1, param1)) // Both are numeric.
 	{
-		if (!param1.value_int64) // Divide by zero.
-			_f_return_empty;
-		else
-			// For performance, % is used vs. qmath for integers.
-			_f_return_i(param0.value_int64 % param1.value_int64);
+		if (param0.symbol == SYM_INTEGER && param1.symbol == SYM_INTEGER) // Both are integers.
+		{
+			if (param1.value_int64) // Not divide by zero.
+				// For performance, % is used vs. qmath for integers.
+				_f_return_i(param0.value_int64 % param1.value_int64);
+		}
+		else // At least one is a floating point number.
+		{
+			double dividend = TokenToDouble(param0);
+			double divisor = TokenToDouble(param1);
+			if (divisor != 0.0) // Not divide by zero.
+				_f_return(qmathFmod(dividend, divisor));
+		}
 	}
-	else // At least one is a floating point number.
-	{
-		double dividend = TokenToDouble(param0);
-		double divisor = TokenToDouble(param1);
-		if (divisor == 0.0) // Divide by zero.
-			_f_return_empty;
-		else
-			_f_return(qmathFmod(dividend, divisor));
-	}
+	// Since above didn't return, one or both parameters were invalid.
+	_f_return_p(EXPR_NAN);
 }
 
 
@@ -16249,8 +16259,7 @@ BIF_DECL(BIF_Mod)
 BIF_DECL(BIF_Abs)
 {
 	if (!TokenToDoubleOrInt64(*aParam[0], aResultToken)) // "Cast" token to Int64/Double depending on whether it has a decimal point.
-		// Non-operand or non-numeric string. TokenToDoubleOrInt64() has already set the token to be an
-		// empty string for us.
+		// Non-operand or non-numeric string. TokenToDoubleOrInt64() has already set the result to "NaN".
 		return;
 	if (aResultToken.symbol == SYM_INTEGER)
 	{
@@ -16270,6 +16279,7 @@ BIF_DECL(BIF_Sin)
 // For simplicity and backward compatibility, a numeric result is always returned (even if the input
 // is non-numeric or an empty string).
 {
+	If_NaN_return_NaN(0);
 	_f_return(qmathSin(ParamIndexToDouble(0)));
 }
 
@@ -16279,6 +16289,7 @@ BIF_DECL(BIF_Cos)
 // For simplicity and backward compatibility, a numeric result is always returned (even if the input
 // is non-numeric or an empty string).
 {
+	If_NaN_return_NaN(0);
 	_f_return(qmathCos(ParamIndexToDouble(0)));
 }
 
@@ -16288,6 +16299,7 @@ BIF_DECL(BIF_Tan)
 // For simplicity and backward compatibility, a numeric result is always returned (even if the input
 // is non-numeric or an empty string).
 {
+	If_NaN_return_NaN(0);
 	_f_return(qmathTan(ParamIndexToDouble(0)));
 }
 
@@ -16295,16 +16307,16 @@ BIF_DECL(BIF_Tan)
 
 BIF_DECL(BIF_ASinACos)
 {
+	If_NaN_return_NaN(0);
 	double value = ParamIndexToDouble(0);
 	if (value > 1 || value < -1) // ASin and ACos aren't defined for such values.
 	{
-		_f_return_empty;
+		_f_return_p(EXPR_NAN);
 	}
 	else
 	{
 		// For simplicity and backward compatibility, a numeric result is always returned in this case (even if
 		// the input is non-numeric or an empty string).
-		// Below: marker contains either "ASin" or "ACos"
 		_f_return((_f_callee_id == FID_ASin) ? qmathAsin(value) : qmathAcos(value));
 	}
 }
@@ -16315,6 +16327,7 @@ BIF_DECL(BIF_ATan)
 // For simplicity and backward compatibility, a numeric result is always returned (even if the input
 // is non-numeric or an empty string).
 {
+	If_NaN_return_NaN(0);
 	_f_return(qmathAtan(ParamIndexToDouble(0)));
 }
 
@@ -16324,6 +16337,7 @@ BIF_DECL(BIF_Exp)
 // For simplicity and backward compatibility, a numeric result is always returned (even if the input
 // is non-numeric or an empty string).
 {
+	If_NaN_return_NaN(0);
 	_f_return(qmathExp(ParamIndexToDouble(0)));
 }
 
@@ -16331,10 +16345,11 @@ BIF_DECL(BIF_Exp)
 
 BIF_DECL(BIF_SqrtLogLn)
 {
+	If_NaN_return_NaN(0);
 	double value = ParamIndexToDouble(0);
-	if (value < 0) // Result is undefined in these cases, so make blank to indicate.
+	if (value < 0) // Result is undefined in these cases.
 	{
-		_f_return_empty;
+		_f_return_p(EXPR_NAN);
 	}
 	else
 	{
@@ -18813,7 +18828,7 @@ ResultType TokenToDoubleOrInt64(const ExprTokenType &aInput, ExprTokenType &aOut
 		//case SYM_MISSING:
 		default:
 			aOutput.symbol = SYM_STRING;
-			aOutput.marker = _T(""); // For completeness.  Some callers such as BIF_Abs() rely on this being done.
+			aOutput.marker = EXPR_NAN_STR; // For completeness.  Some callers such as BIF_Abs() rely on this being done.
 			return FAIL;
 	}
 	// Since above didn't return, interpret "str" as a number.
@@ -18826,7 +18841,7 @@ ResultType TokenToDoubleOrInt64(const ExprTokenType &aInput, ExprTokenType &aOut
 		aOutput.value_double = ATOF(str);
 		break;
 	default: // Not a pure number.
-		aOutput.marker = _T(""); // For completeness.  Some callers such as BIF_Abs() rely on this being done.
+		aOutput.marker = EXPR_NAN_STR; // For completeness.  Some callers such as BIF_Abs() rely on this being done.
 		return FAIL;
 	}
 	return OK; // Since above didn't return, indicate success.
