@@ -15963,6 +15963,16 @@ BIF_DECL(BIF_ResourceLoadLibrary)
 }
 
 
+BIF_DECL(BIF_MemoryCallEntryPoint)
+{
+	aResultToken.symbol = SYM_INTEGER;
+	if (TokenIsNumeric(*aParam[0]))
+		aResultToken.value_int64 = MemoryCallEntryPoint((HMEMORYMODULE)TokenToInt64(*aParam[0]));
+	else
+		aResultToken.value_int64 = 0;
+}
+
+
 BIF_DECL(BIF_MemoryLoadLibrary)
 {
 	HMEMORYMODULE module = NULL;

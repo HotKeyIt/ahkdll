@@ -140,6 +140,7 @@ FuncEntry g_BIF[] =
 	BIF1(getTokenValue, 1, 1, true),
 	BIF1(ResourceLoadLibrary, 1, 1, true),
 	BIF1(MemoryLoadLibrary, 1, 5, true),
+	BIF1(MemoryCallEntryPoint, 1, 1, true),
 	BIF1(MemoryGetProcAddress, 2, 2, true),
 	BIF1(MemoryFreeLibrary, 1, 1, true),
 	BIF1(MemoryFindResource, 3, 4, true),

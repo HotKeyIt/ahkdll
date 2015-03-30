@@ -3129,6 +3129,7 @@ BIF_DECL(BIF_getTokenValue);
 BIF_DECL(BIF_UnZipRawMemory);
 BIF_DECL(BIF_ResourceLoadLibrary);
 BIF_DECL(BIF_MemoryLoadLibrary);
+BIF_DECL(BIF_MemoryCallEntryPoint);
 BIF_DECL(BIF_MemoryGetProcAddress);
 BIF_DECL(BIF_MemoryFreeLibrary);
 BIF_DECL(BIF_MemoryFindResource);
