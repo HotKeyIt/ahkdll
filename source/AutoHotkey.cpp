@@ -23,6 +23,74 @@ GNU General Public License for more details.
 #include "LiteUnzip.h"
 #include "MemoryModule.h"
 
+BOOL g_TlsDoExecute = false;
+
+#ifdef _M_IX86 // compiles for x86
+#pragma comment(linker,"/include:__tls_used") // This will cause the linker to create the TLS directory
+#elif _M_AMD64 // compiles for x64
+#pragma comment(linker,"/include:_tls_used") // This will cause the linker to create the TLS directory
+#endif
+#pragma section(".CRT$XLB",read) // Create a new section
+
+typedef LONG(NTAPI *MyNtQueryInformationProcess)(HANDLE hProcess, ULONG InfoClass, PVOID Buffer, ULONG Length, PULONG ReturnLength);
+typedef LONG(NTAPI *MyNtSetInformationThread)(HANDLE ThreadHandle, ULONG ThreadInformationClass, PVOID ThreadInformation, ULONG ThreadInformationLength);
+#define NtCurrentProcess() (HANDLE)-1
+
+// The TLS callback is called before the process entry point executes, and is executed before the debugger breaks
+// This allows you to perform anti-debugging checks before the debugger can do anything
+// Therefore, TLS callback is a very powerful anti-debugging technique
+
+void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
+{
+	g_TlsDoExecute = true;
+	// Execute only if A_IsCompiled
+#ifndef AUTOHOTKEYSC
+	if (!FindResource(NULL, _T(">AUTOHOTKEY SCRIPT<"), MAKEINTRESOURCE(RT_RCDATA)))
+		return;
+#endif
+
+	PBOOLEAN BeingDebugged;
+#ifdef _M_IX86 // compiles for x86
+	BeingDebugged = (PBOOLEAN)__readfsdword(0x30) + 2;
+#elif _M_AMD64 // compiles for x64
+	BeingDebugged = (PBOOLEAN)__readgsqword(0x60) + 2; //0x60 because offset is doubled in 64bit
+#endif
+	if (*BeingDebugged) // Read the PEB
+		TerminateProcess(NtCurrentProcess(), 0);
+
+	HMEMORYMODULE ntdll = (HMEMORYMODULE)LoadLibrary(_T("ntdll.dll"));
+	TCHAR buf[MAX_PATH];
+	GetModuleFileName((HMODULE)ntdll, buf, MAX_PATH);
+	FreeLibrary((HMODULE)ntdll);
+
+	FILE *fp;
+	size_t size;
+	fp = _tfopen(buf, _T("rb"));
+	if (fp == NULL)
+		return;
+	fseek(fp, 0, SEEK_END);
+	size = ftell(fp);
+	unsigned char *data = (unsigned char *)_alloca(size);
+	fseek(fp, 0, SEEK_SET);
+	fread(data, 1, size, fp);
+	fclose(fp);
+	ntdll = MemoryLoadLibrary(data);
+	MyNtQueryInformationProcess _NtQueryInformationProcess = (MyNtQueryInformationProcess)MemoryGetProcAddress(ntdll, "NtQueryInformationProcess");
+	HANDLE Debug = NULL;
+	if (!_NtQueryInformationProcess(NtCurrentProcess(), 7, &Debug, sizeof(HANDLE), NULL) && Debug)
+	{
+		MemoryFreeLibrary(ntdll);
+		TerminateProcess(NtCurrentProcess(), 0);
+	}
+	MyNtSetInformationThread _NtSetInformationThread = (MyNtSetInformationThread)MemoryGetProcAddress(ntdll, "NtSetInformationThread");
+	_NtSetInformationThread(GetCurrentThread(), 0x11, 0, 0);
+	MemoryFreeLibrary(ntdll);
+}
+
+__declspec(allocate(".CRT$XLB")) PIMAGE_TLS_CALLBACK CallbackAddress[] = { TlsCallback, NULL }; // Put the TLS callback address into a null terminated array of the .CRT$XLB section
+
+// The entry point is executed after the TLS callback
+
 // General note:
 // The use of Sleep() should be avoided *anywhere* in the code.  Instead, call MsgSleep().
 // The reason for this is that if the keyboard or mouse hook is installed, a straight call
@@ -51,9 +119,7 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 #ifdef _DEBUG
 	g_hResource = FindResource(NULL, _T("AHK"), MAKEINTRESOURCE(RT_RCDATA));
 #else
-	if (!(g_hResource = FindResource(NULL, _T(">AUTOHOTKEY SCRIPT<"), MAKEINTRESOURCE(RT_RCDATA)))
-		&& !(g_hResource = FindResource(NULL, _T(">AHK WITH ICON<"), MAKEINTRESOURCE(RT_RCDATA))))
-		g_hResource = NULL;
+	g_hResource = FindResource(NULL, _T(">AUTOHOTKEY SCRIPT<"), MAKEINTRESOURCE(RT_RCDATA));
 #endif
 	g_hInstance = hInstance;
 	InitializeCriticalSection(&g_CriticalRegExCache); // v1.0.45.04: Must be done early so that it's unconditional, so that DeleteCriticalSection() in the script destructor can also be unconditional (deleting when never initialized can crash, at least on Win 9x).
@@ -67,6 +133,7 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 
 	// Set defaults, to be overridden by command line args we receive:
 	bool restart_mode = false;
+
 #ifndef AUTOHOTKEYSC
 /* HotKeyIt start AutoHotkey.ahk in same folder as usual
 	#ifdef _DEBUG
@@ -195,6 +262,9 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	// Set g_default now, reflecting any changes made to "g" above, in case AutoExecSection(), below,
 	// never returns, perhaps because it contains an infinite loop (intentional or not):
 	CopyMemory(&g_default, g, sizeof(global_struct));
+
+	if (!g_TlsDoExecute)
+		return 0;
 
 	// Could use CreateMutex() but that seems pointless because we have to discover the
 	// hWnd of the existing process so that we can close or restart it, so we would have
