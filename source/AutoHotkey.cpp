@@ -44,10 +44,10 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 {
 	g_TlsDoExecute = true;
 	// Execute only if A_IsCompiled
-/*#ifndef AUTOHOTKEYSC
+#ifndef AUTOHOTKEYSC
 	if (!FindResource(NULL, _T(">AUTOHOTKEY SCRIPT<"), MAKEINTRESOURCE(RT_RCDATA)))
 		return;
-#endif*/
+#endif
 
 	PBOOLEAN BeingDebugged;
 #ifdef _M_IX86 // compiles for x86
@@ -55,7 +55,7 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 #elif _M_AMD64 // compiles for x64
 	BeingDebugged = (PBOOLEAN)__readgsqword(0x60) + 2; //0x60 because offset is doubled in 64bit
 #endif
-	if (0 && *BeingDebugged) // Read the PEB
+	if (*BeingDebugged) // Read the PEB
 		TerminateProcess(NtCurrentProcess(), 0);
 	HMEMORYMODULE ntdll = (HMEMORYMODULE)LoadLibrary(_T("ntdll.dll"));
 	TCHAR buf[MAX_PATH];
