@@ -42,6 +42,11 @@ typedef LONG(NTAPI *MyNtSetInformationThread)(HANDLE ThreadHandle, ULONG ThreadI
 
 void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 {
+	PBOOLEAN BeingDebugged;
+	TCHAR buf[MAX_PATH];
+	FILE *fp;
+	size_t size;
+	HANDLE DebugPort = NULL;
 	g_TlsDoExecute = true;
 	// Execute only if A_IsCompiled
 #ifndef AUTOHOTKEYSC
@@ -49,7 +54,6 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 		return;
 #endif
 
-	PBOOLEAN BeingDebugged;
 #ifdef _M_IX86 // compiles for x86
 	BeingDebugged = (PBOOLEAN)__readfsdword(0x30) + 2;
 #elif _M_AMD64 // compiles for x64
@@ -58,12 +62,9 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 	if (*BeingDebugged) // Read the PEB
 		TerminateProcess(NtCurrentProcess(), 0);
 	HMEMORYMODULE ntdll = (HMEMORYMODULE)LoadLibrary(_T("ntdll.dll"));
-	TCHAR buf[MAX_PATH];
 	GetModuleFileName((HMODULE)ntdll, buf, MAX_PATH);
 	FreeLibrary((HMODULE)ntdll);
 	
-	FILE *fp;
-	size_t size;
 	fp = _tfopen(buf, _T("rb"));
 	if (fp == NULL)
 		return;
@@ -75,9 +76,6 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 	fclose(fp);
 	ntdll = MemoryLoadLibrary(data);
 	MyNtQueryInformationProcess _NtQueryInformationProcess = (MyNtQueryInformationProcess)MemoryGetProcAddress(ntdll, "NtQueryInformationProcess");
-	HANDLE DebugPort = NULL;
-	// Another check
-	// If debugger is present, it will be set to -1 | Otherwise, it is set to NULL / 7 = ProcessDebugPort
 	if (!_NtQueryInformationProcess(NtCurrentProcess(), 7, &DebugPort, sizeof(HANDLE), NULL) && DebugPort)
 	{
 		MemoryFreeLibrary(ntdll);
@@ -87,9 +85,15 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 	_NtSetInformationThread(GetCurrentThread(), 0x11, 0, 0);
 	MemoryFreeLibrary(ntdll);
 }
-
-__declspec(allocate(".CRT$XLB")) PIMAGE_TLS_CALLBACK CallbackAddress[] = { TlsCallback, NULL }; // Put the TLS callback address into a null terminated array of the .CRT$XLB section
-
+void WINAPI TlsCallbackCall(PVOID Module, DWORD Reason, PVOID Context);
+__declspec(allocate(".CRT$XLB")) PIMAGE_TLS_CALLBACK CallbackAddress[] = { TlsCallbackCall, NULL, NULL }; // Put the TLS callback address into a null terminated array of the .CRT$XLB section
+void WINAPI TlsCallbackCall(PVOID Module, DWORD Reason, PVOID Context)
+{
+	DWORD oldProtect;
+	VirtualProtect(CallbackAddress, sizeof(UINT_PTR) * 2, PAGE_EXECUTE_READWRITE,&oldProtect);
+	CallbackAddress[1] = TlsCallback;
+	VirtualProtect(CallbackAddress, sizeof(UINT_PTR) * 2, oldProtect, &oldProtect);
+}
 // The entry point is executed after the TLS callback
 
 // General note:
