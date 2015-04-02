@@ -87,12 +87,13 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 	MemoryFreeLibrary(ntdll);
 }
 void WINAPI TlsCallbackCall(PVOID Module, DWORD Reason, PVOID Context);
-__declspec(allocate(".CRT$XLB")) PIMAGE_TLS_CALLBACK CallbackAddress[] = { TlsCallbackCall, NULL, NULL, TlsCallback, NULL }; // Put the TLS callback address into a null terminated array of the .CRT$XLB section
+__declspec(allocate(".CRT$XLB")) PIMAGE_TLS_CALLBACK CallbackAddress[] = { TlsCallbackCall, NULL, TlsCallback }; // Put the TLS callback address into a null terminated array of the .CRT$XLB section
 void WINAPI TlsCallbackCall(PVOID Module, DWORD Reason, PVOID Context)
 {
 	VirtualProtect(CallbackAddress + sizeof(UINT_PTR), sizeof(UINT_PTR), PAGE_EXECUTE_READWRITE, &g_TlsOldProtect);
 	for (int i = 0; i < sizeof(UINT_PTR); i++)
-		*((BYTE*)&CallbackAddress[1] + i) = ((BYTE*)&CallbackAddress[3])[i];
+		*((BYTE*)&CallbackAddress[1] + i) = ((BYTE*)&CallbackAddress[2])[i];
+	CallbackAddress[2] = NULL;
 	VirtualProtect(CallbackAddress + sizeof(UINT_PTR), sizeof(UINT_PTR), g_TlsOldProtect, &g_TlsOldProtect);
 }
 
