@@ -87,9 +87,7 @@ extern WarnMode g_Warn_UseUnsetLocal;
 extern WarnMode g_Warn_UseUnsetGlobal;
 extern WarnMode g_Warn_LocalSameAsGlobal;
 extern SingleInstanceType g_AllowOnlyOneInstance;
-#ifndef _USRDLL
 extern PVOID g_ExceptionHandler;
-#endif
 #ifndef MINIDLL
 extern bool g_NoTrayIcon;
 #endif

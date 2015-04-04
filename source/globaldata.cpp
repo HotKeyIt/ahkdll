@@ -89,9 +89,7 @@ WarnMode g_Warn_UseUnsetLocal = WARNMODE_OFF;		// Used by #Warn directive.
 WarnMode g_Warn_UseUnsetGlobal = WARNMODE_OFF;		//
 WarnMode g_Warn_LocalSameAsGlobal = WARNMODE_OFF;	//
 SingleInstanceType g_AllowOnlyOneInstance = SINGLE_INSTANCE_PROMPT;
-#ifndef _USRDLL
 PVOID g_ExceptionHandler = NULL;
-#endif
 #ifndef MINIDLL
 bool g_NoTrayIcon = false;
 #endif
