@@ -12508,7 +12508,7 @@ BIF_DECL(BIF_DllImport)
 
 		ExprTokenType &this_param = *aParam[i];         // Resolved for performance and convenience.
 		DYNAPARM &this_dyna_param = dyna_param[i];  //
-		DYNAPARM &def_dyna_param = dyna_param_def[i];  //
+		// DYNAPARM &def_dyna_param = dyna_param_def[i];  //
 		if (this_param.symbol == SYM_MISSING)
 			continue;
 		SymbolType is_number;
@@ -12620,8 +12620,8 @@ BIF_DECL(BIF_DllImport)
 				else
 				{
 					// String needing translation: ASTR on Unicode build, WSTR on ANSI build.
-					pStr[arg_count] = new UorA(CStringCharFromWChar, CStringWCharFromChar)(TokenToString(this_param));
-					this_dyna_param.ptr = pStr[arg_count]->GetBuffer();
+					pStr[i] = new UorA(CStringCharFromWChar, CStringWCharFromChar)(TokenToString(this_param));
+					this_dyna_param.ptr = pStr[i]->GetBuffer();
 				}
 			}
 			break;
