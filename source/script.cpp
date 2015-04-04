@@ -653,11 +653,9 @@ void Script::Destroy()
 	KeyHistoryToFile();  // Close the KeyHistory file if it's open.
 #endif
 #endif // MINIDLL
-#ifndef _USRDLL
 	RemoveVectoredExceptionHandler(g_ExceptionHandler); // Exception handler to remove hooks to avoid system/mouse freeze
 	DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
 	DeleteCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
-#endif
 	OleUninitialize();
 }
 #endif

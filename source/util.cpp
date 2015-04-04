@@ -3225,8 +3225,8 @@ LONG WINAPI DisableHooksOnException(PEXCEPTION_POINTERS pExceptionPtrs)
 			AddRemoveHooks(0); // Disable all hooks to avoid system/mouse freeze
 #endif
 			RemoveVectoredExceptionHandler(g_ExceptionHandler);
-			TCHAR *aException = (LPTSTR)_alloca(sizeof(TCHAR) * (_tcslen(Line::sSourceFile[g_script.mCurrLine->mFileIndex]) + MAX_PATH));
-			_stprintf(aException, _T("Error: EXCEPTION_ACCESS_VIOLATION\n\n  -  Press yes to exit thread and continue execution.\n  -  Press no to raise exception (debug).\n  -  Press cancel to exit application.\n\nException was caused in thread id: %d\nLine: %d\nLineFile: %s"), GetCurrentThreadId(), g_script.mCurrLine->mLineNumber, Line::sSourceFile[g_script.mCurrLine->mFileIndex]);
+			TCHAR aException[sizeof(TCHAR) * 2 * MAX_PATH];
+			_stprintf(aException, _T("Error: EXCEPTION_ACCESS_VIOLATION\n\n  -  Press yes to exit thread and continue execution.\n  -  Press no to raise exception (debug).\n  -  Press cancel to exit application.\n\nException was caused in thread id: %d\nLine: %d\nLineFile: %.260s"), GetCurrentThreadId(), g_script.mCurrLine->mLineNumber, Line::sSourceFile[g_script.mCurrLine->mFileIndex]);
 			int result = MessageBox(NULL, aException, T_AHK_NAME, MB_ICONERROR | MB_YESNOCANCEL | MB_DEFBUTTON3 | MB_TOPMOST);
 			if (result == IDCANCEL)
 				ExitProcess(EXCEPTION_ACCESS_VIOLATION);
