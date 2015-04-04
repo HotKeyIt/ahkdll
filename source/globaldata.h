@@ -92,8 +92,8 @@ extern WarnMode g_Warn_UseUnsetLocal;
 extern WarnMode g_Warn_UseUnsetGlobal;
 extern WarnMode g_Warn_UseEnv;
 extern WarnMode g_Warn_LocalSameAsGlobal;
-#ifndef _USRDLL
 extern PVOID g_ExceptionHandler;
+#ifndef _USRDLL
 extern SingleInstanceType g_AllowOnlyOneInstance;
 #endif
 extern bool g_persistent;

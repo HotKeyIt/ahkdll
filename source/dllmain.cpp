@@ -462,7 +462,10 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	// also when dll will crash, it will only exit dll thread and try to destroy it, leaving the exe process running
 	g_ExceptionHandler = AddVectoredExceptionHandler(NULL,DisableHooksOnException);
 	*/
+	// set exception filter to disable hook before exception occures to avoid system/mouse freeze
+	g_ExceptionHandler = AddVectoredExceptionHandler(NULL,DisableHooksOnException);
 #ifndef MINIDLL
+
 	// Activate the hotkeys, hotstrings, and any hooks that are required prior to executing the
 	// top part (the auto-execute part) of the script so that they will be in effect even if the
 	// top part is something that's very involved and requires user interaction:
