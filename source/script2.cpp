@@ -14288,8 +14288,8 @@ BIF_DECL(BIF_DllImport)
 				return;
 			}
 			// String needing translation: ASTR on Unicode build, WSTR on ANSI build.
-			pStr[arg_count] = new UorA(CStringCharFromWChar, CStringWCharFromChar)(TokenToString(this_param));
-			this_dyna_param.ptr = pStr[arg_count]->GetBuffer();
+			pStr[i] = new UorA(CStringCharFromWChar, CStringWCharFromChar)(TokenToString(this_param));
+			this_dyna_param.ptr = pStr[i]->GetBuffer();
 			break;
 
 		case DLL_ARG_DOUBLE:
