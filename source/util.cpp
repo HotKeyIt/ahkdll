@@ -3180,6 +3180,12 @@ DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf, TCHAR *pwd[]) // LiteZip 
 				VirtualFree(aDataEncryptedString,aSizeEncrypted,MEM_RELEASE);
 				CryptDestroyKey(hKey);
 				CryptReleaseContext(hProv,0);
+				if (aSizeDeCompressed == aSizeCompressed)
+				{
+					memcpy(aDataBuf, aDataEncrypted, aSizeDeCompressed);
+					VirtualFree(aDataEncrypted, aSizeDataEncrypted, MEM_RELEASE);
+					return aSizeDeCompressed;
+				}
 				if (openArchive(&huz,(LPBYTE)aDataEncrypted, aSizeCompressed, ZIP_MEMORY|ZIP_RAW, 0))
 				{   // failed to open archive
 					closeArchive((TUNZIP *)huz);
@@ -3187,6 +3193,11 @@ DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf, TCHAR *pwd[]) // LiteZip 
 					VirtualFree(aDataEncrypted, aSizeDataEncrypted, MEM_RELEASE);
 					return 0;
 				}
+			}
+			else if (aSizeDeCompressed == aSizeCompressed)
+			{
+				memcpy(aDataBuf, (LPBYTE)aBuffer + hdrsz, aSizeDeCompressed);
+				return aSizeDeCompressed;
 			}
 			else if (openArchive(&huz,(LPBYTE)aBuffer + hdrsz, aSizeCompressed, ZIP_MEMORY|ZIP_RAW, 0))
 			{   // failed to open archive
