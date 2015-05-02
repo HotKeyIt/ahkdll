@@ -9206,7 +9206,6 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 			// HotKeyIt, override so resource can be tried too
 			if (current_func = FindFunc(aFuncName, aFuncNameLength))
 				return current_func;
-			continue;
 		} // for() each library directory.
 
 		// Now that the first iteration is done, set up for the second one that searches by class/prefix.
