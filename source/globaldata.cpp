@@ -101,6 +101,7 @@ SingleInstanceType g_AllowOnlyOneInstance = ALLOW_MULTI_INSTANCE;
 #endif
 bool g_persistent = false;  // Whether the script should stay running even after the auto-exec section finishes.
 #ifndef MINIDLL
+HookType g_ExceptionHooksToEnable = NULL;
 bool g_NoTrayIcon = false;
 #endif
 #ifdef AUTOHOTKEYSC

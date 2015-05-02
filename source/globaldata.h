@@ -98,6 +98,7 @@ extern SingleInstanceType g_AllowOnlyOneInstance;
 #endif
 extern bool g_persistent;
 #ifndef MINIDLL
+extern HookType g_ExceptionHooksToEnable;
 extern bool g_NoTrayIcon;
 #endif
 #ifdef AUTOHOTKEYSC

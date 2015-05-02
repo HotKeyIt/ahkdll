@@ -3225,30 +3225,45 @@ DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf, TCHAR *pwd[]) // LiteZip 
 }
 
 
+#ifndef MINIDLL
+VOID CALLBACK EnableHooksOnException(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime)
+{
+	AddRemoveHooks(g_ExceptionHooksToEnable);
+	KillTimer(hwnd, idEvent);
+}
+#endif
+
 LONG WINAPI DisableHooksOnException(PEXCEPTION_POINTERS pExceptionPtrs)
 {
 	if (pExceptionPtrs->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION)
-		//&& pExceptionPtrs->ExceptionRecord->ExceptionFlags == EXCEPTION_NONCONTINUABLE)
 	{
 		if (g_MainThreadID == GetCurrentThreadId())
 		{	// it is not our main process display error and exit current thread 
 #ifndef MINIDLL
+			g_ExceptionHooksToEnable = GetActiveHooks();
 			AddRemoveHooks(0); // Disable all hooks to avoid system/mouse freeze
 #endif
-			RemoveVectoredExceptionHandler(g_ExceptionHandler);
-			TCHAR aException[sizeof(TCHAR) * 2 * MAX_PATH];
-			_stprintf(aException, _T("Error: EXCEPTION_ACCESS_VIOLATION\n\n  -  Press yes to exit thread and continue execution.\n  -  Press no to continue thread (debug).\n  -  Press cancel to exit application.\n\nException was caused in thread id: %d\nLine: %d\nLineFile: %.260s"), GetCurrentThreadId(), g_script.mCurrLine->mLineNumber, Line::sSourceFile[g_script.mCurrLine->mFileIndex]);
+			TCHAR aException[sizeof(TCHAR) * 3 * MAX_PATH];
+			_stprintf(aException, _T("Error: %s EXCEPTION_ACCESS_VIOLATION\n\nMouse and Keyboard hooks have been disabled.\n\n  -  Press yes to exit thread and continue execution.\n  -  Press no to continue thread (debug).\n  -  Press cancel to exit application.\n\nException was caused in thread id: %d\nLine: %d\nLineFile: %.260s"), pExceptionPtrs->ExceptionRecord->ExceptionFlags == EXCEPTION_NONCONTINUABLE ? _T("NONCONTINUABLE") : _T("CONTINUABLE"), GetCurrentThreadId(), g_script.mCurrLine->mLineNumber, Line::sSourceFile[g_script.mCurrLine->mFileIndex]);
 			int result = MessageBox(NULL, aException, T_AHK_NAME, MB_ICONERROR | MB_YESNOCANCEL | MB_DEFBUTTON3 | MB_TOPMOST);
+			if (result == IDNO)
+			{
+#ifndef MINIDLL
+				if (g_ExceptionHooksToEnable)
+					SetTimer(NULL, 0, 1000, EnableHooksOnException);
+#endif
+				return EXCEPTION_ACCESS_VIOLATION;
+			}
+			RemoveVectoredExceptionHandler(g_ExceptionHandler);
 			if (result == IDCANCEL)
 				ExitProcess(EXCEPTION_ACCESS_VIOLATION);
-			else if (result == IDNO)
-				return EXCEPTION_ACCESS_VIOLATION;
 			ExitThread(EXCEPTION_ACCESS_VIOLATION);
 		}
-			
+
 	}
 	return EXCEPTION_CONTINUE_SEARCH;
 }
+
 
 
 #if defined(_MSC_VER) && defined(_DEBUG)
