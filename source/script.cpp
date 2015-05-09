@@ -370,7 +370,7 @@ Script::~Script() // Destructor.
 	int v;
 	for (v = 0; v < mVarCount; v++)
 	{
-		if (mVar[v]->mType == VAR_BUILTIN || mVar[v]->mType == VAR_CLIPBOARD || mVar[v]->mType == VAR_CLIPBOARDALL)
+		if (mVar[v]->mType == VAR_BUILTIN || mVar[v]->mType == VAR_VIRTUAL || mVar[v]->mType == VAR_CLIPBOARD || mVar[v]->mType == VAR_CLIPBOARDALL)
 			continue;
 		if (mVar[v]->mType == VAR_ALIAS && mVar[v]->HasObject())
 			mVar[v]->mObject->Release();
