@@ -155,7 +155,7 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 	Var *ahkvar = g_script.FindOrAddVar(name);
 	if (getVar != NULL)
 	{
-		if (ahkvar->mType == VAR_BUILTIN)
+		if (ahkvar->mType == VAR_BUILTIN || ahkvar->mType == VAR_VIRTUAL)
 			return _T("");
 		LPTSTR new_mem = (LPTSTR)realloc((LPTSTR )result_to_return_dll,MAX_INTEGER_LENGTH);
 		if (!new_mem)
@@ -188,6 +188,8 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 			else
 				ahkvar->mBIV(result_to_return_dll,name); //Hotkeyit 
 		}
+		else if ( ahkvar->mType == VAR_VIRTUAL)
+			ahkvar->mVV->Get(result_to_return_dll, name);
 		else if ( ahkvar->mType == VAR_ALIAS )
 			ITOA64(ahkvar->mAliasFor->mContentsInt64,result_to_return_dll);
 		else if ( ahkvar->mType == VAR_NORMAL )
@@ -195,7 +197,7 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 	}
 	else
 	{
-		LPTSTR new_mem = (LPTSTR )realloc((LPTSTR )result_to_return_dll,ahkvar->mType == VAR_BUILTIN ? ahkvar->mBIV(0,name) : ahkvar->mByteLength + sizeof(TCHAR));
+		LPTSTR new_mem = (LPTSTR)realloc((LPTSTR)result_to_return_dll, ahkvar->mType == VAR_BUILTIN ? ahkvar->mBIV(0, name) : (ahkvar->mType == VAR_VIRTUAL ? ahkvar->mVV->Get(0, name) : ahkvar->mByteLength + sizeof(TCHAR)));
 		if (!new_mem)
 		{
 			g_script.ScriptError(ERR_OUTOFMEM, name);
@@ -208,6 +210,8 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 			ahkvar->Get(result_to_return_dll);  // var.getText() added in V1.
 		else if ( ahkvar->mType == VAR_BUILTIN )
 			ahkvar->mBIV(result_to_return_dll,name); //Hotkeyit 
+		else if (ahkvar->mType == VAR_VIRTUAL)
+			ahkvar->mVV->Get(result_to_return_dll, name); //Hotkeyit 
 	}
 	return result_to_return_dll;
 }	
@@ -233,7 +237,7 @@ EXPORT UINT_PTR ahkExecuteLine(UINT_PTR line,unsigned int aMode,unsigned int wai
 	if (aMode)
 	{
 		if (wait)
-			MainWindowProc(g_hWnd, AHK_EXECUTE, (WPARAM)templine, (LPARAM)aMode);
+			SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)templine, (LPARAM)aMode);
 		else
 			PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)templine, (LPARAM)aMode);
 	}
@@ -257,7 +261,7 @@ EXPORT int ahkLabel(LPTSTR aLabelName, unsigned int nowait) // 0 = wait = defaul
 		if (nowait)
 			PostMessage(g_hWnd, AHK_EXECUTE_LABEL, (LPARAM)aLabel, (LPARAM)aLabel);
 		else
-			MainWindowProc(g_hWnd, AHK_EXECUTE_LABEL, (LPARAM)aLabel, (LPARAM)aLabel);
+			SendMessage(g_hWnd, AHK_EXECUTE_LABEL, (LPARAM)aLabel, (LPARAM)aLabel);
 		return 1;
 	}
 	else
@@ -415,7 +419,7 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute)
 		if (waitexecute == 1)
 		{
 			g_ReturnNotExit = true;
-			MainWindowProc(g_hWnd, AHK_EXECUTE, (WPARAM)g_script.mFirstLine, (LPARAM)NULL);
+			SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)g_script.mFirstLine, (LPARAM)NULL);
 			g_ReturnNotExit = false;
 		}
 		else
@@ -431,7 +435,7 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute)
 				tempstatic = g_script.mFirstStaticLine;
 			else
 				tempstatic = tempstatic->mNextLine;
-			MainWindowProc(g_hWnd, AHK_EXECUTE, (WPARAM)tempstatic, (LPARAM)ONLY_ONE_LINE);
+			SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)tempstatic, (LPARAM)ONLY_ONE_LINE);
 		}
 	}
 	Line *aTempLine = g_script.mFirstLine; // required for return
@@ -484,7 +488,7 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute)
 		if (waitexecute == 1)
 		{
 			g_ReturnNotExit = true;
-			MainWindowProc(g_hWnd, AHK_EXECUTE, (WPARAM)g_script.mFirstLine, (LPARAM)NULL);
+			SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)g_script.mFirstLine, (LPARAM)NULL);
 			g_ReturnNotExit = false;
 		}
 		else
@@ -499,7 +503,7 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute)
 				tempstatic = g_script.mFirstStaticLine;
 			else
 				tempstatic = tempstatic->mNextLine;
-			MainWindowProc(g_hWnd, AHK_EXECUTE, (WPARAM)tempstatic, (LPARAM)ONLY_ONE_LINE);
+			SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)tempstatic, (LPARAM)ONLY_ONE_LINE);
 		}
 	}
 	Line *aTempLine = g_script.mFirstLine;
@@ -551,7 +555,7 @@ EXPORT int ahkExec(LPTSTR script)
 	Line *aExecLine = g_script.mFirstLine;
 	RESTORE_G_SCRIPT
 	g_ReturnNotExit = true;
-	MainWindowProc(g_hWnd, AHK_EXECUTE, (WPARAM)aExecLine, (LPARAM)NULL);
+	SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)aExecLine, (LPARAM)NULL);
 	g_ReturnNotExit = false;
 	Line *prevLine = aTempLine->mPrevLine;
 	for(; prevLine; prevLine = prevLine->mPrevLine)
@@ -731,7 +735,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 				aFuncAndToken.param[i]->SetValue(new_buf);
 			}
 			aFuncAndToken.mFunc = aFunc ;
-			MainWindowProc(g_hWnd, AHK_EXECUTE_FUNCTION_DLL, (WPARAM)&aFuncAndToken, NULL);
+			SendMessage(g_hWnd, AHK_EXECUTE_FUNCTION_DLL, (WPARAM)&aFuncAndToken, NULL);
 			LeaveCriticalSection(&g_CriticalAhkFunction);
 			return aFuncAndToken.result_to_return_dll;
 		}
@@ -938,7 +942,7 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 			aFuncAndToken.mParamCount = aFunc->mParamCount < aParamsCount ? aFunc->mParamCount : aParamsCount;
 			if (sendOrPost == 1)
 			{
-				MainWindowProc(g_hWnd, AHK_EXECUTE_FUNCTION_VARIANT, (WPARAM)&aFuncAndToken, NULL);
+				SendMessage(g_hWnd, AHK_EXECUTE_FUNCTION_VARIANT, (WPARAM)&aFuncAndToken, NULL);
 				LeaveCriticalSection(&g_CriticalAhkFunction);
 				return aFuncAndToken.variant_to_return_dll;
 			}
