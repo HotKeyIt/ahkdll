@@ -668,16 +668,16 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 {
 	mIsRestart = aIsRestart;
 	TCHAR buf[2048]; // Just to make sure we have plenty of room to do things with.
-	g_default_pwd0 = 'A';
-	g_default_pwd1 = 'u';
-	g_default_pwd2 = 't';
-	g_default_pwd3 = 'o';
-	g_default_pwd4 = 'H';
-	g_default_pwd5 = 'o';
-	g_default_pwd6 = 't';
-	g_default_pwd7 = 'k';
-	g_default_pwd8 = 'e';
-	g_default_pwd9 = 'y';
+	g_default_pwd0 = L'A';
+	g_default_pwd1 = L'u';
+	g_default_pwd2 = L't';
+	g_default_pwd3 = L'o';
+	g_default_pwd4 = L'H';
+	g_default_pwd5 = L'o';
+	g_default_pwd6 = L't';
+	g_default_pwd7 = L'k';
+	g_default_pwd8 = L'e';
+	g_default_pwd9 = L'y';
 #ifdef AUTOHOTKEYSC
 	// Fix for v1.0.29: Override the caller's use of __argv[0] by using GetModuleFileName(),
 	// so that when the script is started from the command line but the user didn't type the

@@ -18091,11 +18091,16 @@ BIF_DECL(BIF_UnZipRawMemory)
 	if (TokenToInt64(*aParam[0]))
 	{
 		LPVOID aDataBuf = NULL;
-		TCHAR *pw[1024] = {};
+		WCHAR *pw[1024] = {};
 		if (!ParamIndexIsOmittedOrEmpty(2))
 		{
-			TCHAR *pwd = TokenToString(*aParam[2]);
 			size_t pwlen = _tcslen(TokenToString(*aParam[2]));
+#ifdef _UNICODE
+			WCHAR *pwd = TokenToString(*aParam[2]);
+#else
+			WCHAR *pwd = (WCHAR*)alloca((pwlen + 1) * sizeof(WCHAR));
+			MultiByteToWideChar(CP_ACP, 0, TokenToString(*aParam[2]), pwlen, pwd, (pwlen + 1) * sizeof(WCHAR));
+#endif
 			for(size_t i = 0;i <= pwlen;i++)
 				pw[i] = &pwd[i];
 		}

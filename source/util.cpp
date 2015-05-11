@@ -3128,13 +3128,13 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 }
 
 
-DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf, TCHAR *pwd[]) // LiteZip Raw compression
+DWORD DecompressBuffer(void *aBuffer, LPVOID &aDataBuf, WCHAR *pwd[]) // LiteZip Raw compression
 {
 	unsigned int hdrsz = 20;
-	TCHAR pw[1024] = {0};
+	WCHAR pw[1024] = {0};
 	if (pwd && pwd[0])
 		for(unsigned int i = 0;pwd[i];i++)
-			pw[i] = (TCHAR)*pwd[i];
+			pw[i] = (WCHAR)*pwd[i];
 	ULONG aSizeCompressed = *(ULONG*)((UINT_PTR)aBuffer + 8);
 	DWORD aSizeEncrypted = *(DWORD*)((UINT_PTR)aBuffer + 16);
 	DWORD hash;
@@ -3163,7 +3163,7 @@ DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf, TCHAR *pwd[]) // LiteZip 
 				HCRYPTHASH hHash;
 				CryptAcquireContext(&hProv,NULL,NULL,PROV_RSA_AES,CRYPT_VERIFYCONTEXT);
 				CryptCreateHash(hProv,CALG_SHA1,NULL,NULL,&hHash);
-				CryptHashData(hHash,(BYTE *) pw,(DWORD)_tcslen(pw) * sizeof(TCHAR),0);
+				CryptHashData(hHash, (BYTE *)pw, (DWORD)wcslen(pw) * sizeof(WCHAR), 0);
 				CryptDeriveKey(hProv,CALG_AES_256,hHash,256<<16,&hKey);
 				CryptDestroyHash(hHash);
 				memmove(aDataEncryptedString,(LPBYTE)aBuffer + hdrsz,aSizeEncrypted);

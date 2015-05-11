@@ -781,7 +781,7 @@ int CALLBACK FontEnumProc(ENUMLOGFONTEX *lpelfe, NEWTEXTMETRICEX *lpntme, DWORD 
 bool IsStringInList(LPTSTR aStr, LPTSTR aList, bool aFindExactMatch);
 LPTSTR InStrAny(LPTSTR aStr, LPTSTR aNeedle[], int aNeedleCount, size_t &aFoundLen);
 short IsDefaultType(LPTSTR aTypeDef);
-DWORD DecompressBuffer(void *buffer,LPVOID &aDataBuf, TCHAR *pwd[] = NULL);
+DWORD DecompressBuffer(void *buffer,LPVOID &aDataBuf, WCHAR *pwd[] = NULL);
 ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf);
 LONG WINAPI DisableHooksOnException(PEXCEPTION_POINTERS pExceptionPtrs);
 int ResourceIndexToId(HMODULE aModule, LPCTSTR aType, int aIndex); // L17: Find integer ID of resource from index. i.e. IconNumber -> resource ID.
