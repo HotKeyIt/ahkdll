@@ -16205,7 +16205,11 @@ BIF_DECL(BIF_PerformAction)
 		else
 		{
 			// Return the value of the output var if there is one, or ErrorLevel if there isn't:
-			if (!output_var->MoveMemToResultToken(aResultToken))
+			if (output_var->AllowMoveMemToResultToken(aResultToken))
+				// Caller has determined that this var's value won't be needed anymore, so avoid
+				// an extra malloc and copy by moving this var's memory block into aResultToken:
+				aResultToken.StealMem(output_var);
+			else
 				output_var->ToToken(aResultToken); // It's a number, object or Var::sEmptyString.
 		}
 	}

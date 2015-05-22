@@ -492,19 +492,12 @@ public:
 			aToken.object->AddRef();
 	}
 
-	bool MoveMemToResultToken(ResultToken &aResultToken)
+	bool AllowMoveMemToResultToken(ResultToken &aResultToken)
 	// Caller must ensure mType == VAR_NORMAL.
 	{
-		if (mHowAllocated == ALLOC_MALLOC // malloc() is our allocator...
-			&& ((mAttrib & (VAR_ATTRIB_IS_INT64 | VAR_ATTRIB_IS_DOUBLE | VAR_ATTRIB_IS_OBJECT | VAR_ATTRIB_UNINITIALIZED)) == 0)
-			&& mByteCapacity) // ...and we actually have memory allocated.
-		{
-			// Caller has determined that this var's value won't be needed anymore, so avoid
-			// an extra malloc and copy by moving this var's memory block into aResultToken:
-			aResultToken.StealMem(this);
-			return true;
-		}
-		return false;
+		return (mHowAllocated == ALLOC_MALLOC // malloc() is our allocator...
+				&& ((mAttrib & (VAR_ATTRIB_IS_INT64 | VAR_ATTRIB_IS_DOUBLE | VAR_ATTRIB_IS_OBJECT | VAR_ATTRIB_UNINITIALIZED)) == 0)
+				&& mByteCapacity); // ...and we actually have memory allocated.
 	}
 
 	bool ToReturnValue(ResultToken &aResultToken)
