@@ -492,12 +492,19 @@ public:
 			aToken.object->AddRef();
 	}
 
-	bool AllowMoveMemToResultToken(ResultToken &aResultToken)
+	bool MoveMemToResultToken(ResultToken &aResultToken)
 	// Caller must ensure mType == VAR_NORMAL.
 	{
-		return (mHowAllocated == ALLOC_MALLOC // malloc() is our allocator...
-				&& ((mAttrib & (VAR_ATTRIB_IS_INT64 | VAR_ATTRIB_IS_DOUBLE | VAR_ATTRIB_IS_OBJECT | VAR_ATTRIB_UNINITIALIZED)) == 0)
-				&& mByteCapacity); // ...and we actually have memory allocated.
+		if (mHowAllocated == ALLOC_MALLOC // malloc() is our allocator...
+			&& ((mAttrib & (VAR_ATTRIB_IS_INT64 | VAR_ATTRIB_IS_DOUBLE | VAR_ATTRIB_IS_OBJECT | VAR_ATTRIB_UNINITIALIZED)) == 0)
+			&& mByteCapacity) // ...and we actually have memory allocated.
+		{
+			// Caller has determined that this var's value won't be needed anymore, so avoid
+			// an extra malloc and copy by moving this var's memory block into aResultToken:
+			aResultToken.StealMem(this);
+			return true;
+		}
+		return false;
 	}
 
 	bool ToReturnValue(ResultToken &aResultToken)
@@ -956,7 +963,8 @@ public:
 inline void ResultToken::StealMem(Var *aVar)
 // Caller must ensure that aVar->mType == VAR_NORMAL and aVar->mHowAllocated == ALLOC_MALLOC.
 {
-	AcceptMem(aVar->StealMem(), aVar->Length());
+	VarSizeType length = aVar->Length();
+	AcceptMem(aVar->StealMem(), length);
 }
 
 #endif
