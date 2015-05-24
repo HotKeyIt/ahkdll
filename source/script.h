@@ -944,9 +944,10 @@ public:
 	#define IS_HOTSTRING_OPTION(chr) (cisalnum(chr) || _tcschr(_T("?*- \t"), chr))
 	// The characters below are ordered with most-often used ones first, for performance:
 	#define DEFINE_END_FLAGS \
-		TCHAR end_flags[] = {' ', g_delimiter, '(', '\t', '<', '>', ':', '=', '+', '-', '*', '/', '!', '~', '&', '|', '^', '[', '.', '?', '\0'}; // '\0' must be last.
+		TCHAR end_flags[] = {' ', g_delimiter, '(', '\t', '<', '>', ':', '=', '+', '-', '*', '/', '!', '~', '&', '|', '^', '[', '.', '?', '{', '\0'}; // '\0' must be last.
 		// L31: Added '[' for standalone ObjSet/Get to work as ACT_EXPRESSION.  "Get" is allowed for simplicity and for future use with functions-as-values (e.g. varContainingFunc[]).
 		// L34: Added '.' and changed dot handling to fix x.=y, improve support in other areas, catch more errors and give slightly better error messages.
+		// v1.1.22.01: Added '{' to simplify OTB handling for else/try/finally.
 
 	#define ArgLength(aArgNum) ArgIndexLength((aArgNum)-1)
 	#define ArgToDouble(aArgNum) ArgIndexToDouble((aArgNum)-1)
@@ -1199,24 +1200,19 @@ public:
 
 		LPTSTR key_name_pos = aBuf, computer_name_end = NULL;
 
-		if (aSyntax != REG_NEW_SYNTAX) // Legacy mode:  ComputerName:RootKey
+		// Check for a computer name, as in \\ComputerName\HKLM or \\ComputerName:HKLM.
+		if (*aBuf == '\\' && aBuf[1] == '\\')
 		{
-			if (computer_name_end = _tcsrchr(aBuf, ':'))
-			{
-				if ((computer_name_end - aBuf) >= COMPUTER_NAME_BUF_SIZE)
-					return NULL;
-				key_name_pos = omit_leading_whitespace(computer_name_end + 1);
-			}
-		}
-		if (aSyntax != REG_OLD_SYNTAX)
-		{
-			if (*aBuf == '\\' && aBuf[1] == '\\') // Something like \\ComputerName\HKLM.
-			{
-				if (  !(computer_name_end = _tcschr(aBuf + 2, '\\'))
-					|| (computer_name_end - aBuf) >= COMPUTER_NAME_BUF_SIZE  )
-					return NULL;
-				key_name_pos = computer_name_end + 1;
-			}
+			LPTSTR delim
+				= aSyntax == REG_NEW_SYNTAX ? _T("\\")
+				: aSyntax == REG_OLD_SYNTAX ? _T(":")
+				: _T("\\:"); // REG_EITHER_SYNTAX
+			if (  !(computer_name_end = StrChrAny(aBuf + 2, delim))
+				|| (computer_name_end - aBuf) >= COMPUTER_NAME_BUF_SIZE  )
+				return NULL;
+			key_name_pos = computer_name_end + 1;
+			if (*computer_name_end == ':') // For backward-compatibility:
+				key_name_pos = omit_leading_whitespace(key_name_pos);
 		}
 
 		// Copy root key name into temporary buffer for use by _tcsicmp().
