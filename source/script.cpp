@@ -2101,10 +2101,10 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 	// File is now open, read lines from it.
 
 #ifndef MINIDLL
-	LPTSTR hotkey_flag, cp, cp1, action_end, hotstring_start, hotstring_options;
+	LPTSTR hotkey_flag, cp, cp1, hotstring_start, hotstring_options;
 	Hotkey *hk;
 #else
-	LPTSTR hotkey_flag, cp, cp1, action_end;
+	LPTSTR hotkey_flag, cp, cp1;
 #endif
 	LineNumberType pending_buf_line_number, saved_line_number;
 #ifndef MINIDLL
@@ -3265,51 +3265,11 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 			}
 			goto continue_main_loop; // It's just a naked "{" or "}", so no more processing needed for this line.
 		}
-		// First do a little special handling to support actions on the same line as their
-		// ELSE or TRY, e.g.:
-		// else if x = 1
-		// try someFunction()
-		// This is done here rather than in ParseAndAddLine() because it's fairly
-		// complicated to do there (already tried it) mostly due to the fact that
-		// literal_map has to be properly passed in a recursive call to itself, as well
-		// as properly detecting special commands that don't have keywords such as
-		// IF comparisons, ACT_ASSIGNEXPR, +=, -=, etc.
-		// v1.0.41: '{' was added to the line below to support no spaces inside "}else{".
-		if (!(action_end = StrChrAny(buf, _T("\t ,{")))) // Position of first tab/space/comma/open-brace.  For simplicity, a non-standard g_delimiter is not supported.
-			action_end = buf + buf_length; // It's done this way so that ELSE can be fully handled here; i.e. that ELSE does not have to be in the list of commands recognizable by ParseAndAddLine().
-		// The following method ensures that words or variables that start with "Else", e.g. ElseAction, are not
-		// incorrectly detected as an Else command:
-		int try_cmp = 1, finally_cmp = 1;
-		if (tcslicmp(buf, _T("Else"), action_end - buf) // It's not an ELSE, a TRY or a FINALLY. ("Else"/"Try"/"Finally" is used vs. g_act[ACT_ELSE/TRY/FINALLY].Name for performance).
-			&& (try_cmp = tcslicmp(buf, _T("Try"), action_end - buf))
-			&& (finally_cmp = tcslicmp(buf, _T("Finally"), action_end - buf)))
-		{
-			if (!ParseAndAddLine(buf))
-				return FAIL;
-		}
-		else // This line is an ELSE, a TRY or a FINALLY, possibly with another command immediately after it (on the same line).
-		{
-			// Add the ELSE, TRY or FINALLY directly rather than calling ParseAndAddLine() because that function
-			// would resolve escape sequences throughout the entire length of <buf>, which we
-			// don't want because we wouldn't have access to the corresponding literal-map to
-			// figure out the proper use of escaped characters:
-			if (!AddLine(try_cmp ? (finally_cmp ? ACT_ELSE : ACT_FINALLY) : ACT_TRY))
-				return FAIL;
-			mCurrLine = NULL;  // To signify that we're in transition, trying to load a new one.
-			buf = omit_leading_whitespace(action_end); // Now buf is the word after the ELSE or TRY.
-			if (*buf == g_delimiter) // Allow "else, action", "try, action" and "finally, action"
-				buf = omit_leading_whitespace(buf + 1);
-			// Allow any command/action to the right of "else", "try" or "finally", including "{":
-			if (*buf)
-			{
-				// This is done rather than calling ParseAndAddLine() as it handles "{" in a way that
-				// anything to the right of it is considered an arg of that line and is basically ignored.
-				buf_length = _tcslen(buf); // Update.
-				mCurrLine = NULL;  // To signify that we're in transition, trying to load a new line.
-				goto examine_line; // Have the main loop process the contents of "buf" as though it came in from the script.
-			}
-			// Otherwise, there was either no same-line action, so do nothing.
-		}
+		// Parse the command, assignment or expression, including any same-line open brace or sub-action
+		// for ELSE, TRY, CATCH or FINALLY.  Unlike braces at the start of a line (processed above), this
+		// does not allow directives or labels to the right of the command.
+		if (!ParseAndAddLine(buf))
+			return FAIL;
 
 	continue_main_loop: // This method is used in lieu of "continue" for performance and code size reduction.
 #ifndef MINIDLL
@@ -3644,10 +3604,10 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 	// File is now open, read lines from it.
 
 #ifndef MINIDLL
-	LPTSTR hotkey_flag, cp, cp1, action_end, hotstring_start, hotstring_options;
+	LPTSTR hotkey_flag, cp, cp1, hotstring_start, hotstring_options;
 	Hotkey *hk;
 #else
-	LPTSTR hotkey_flag, cp, cp1, action_end;
+	LPTSTR hotkey_flag, cp, cp1;
 #endif
 	LineNumberType pending_buf_line_number, saved_line_number;
 #ifndef MINIDLL
@@ -4852,51 +4812,12 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			}
 			goto continue_main_loop; // It's just a naked "{" or "}", so no more processing needed for this line.
 		}
-		// First do a little special handling to support actions on the same line as their
-		// ELSE or TRY, e.g.:
-		// else if x = 1
-		// try someFunction()
-		// This is done here rather than in ParseAndAddLine() because it's fairly
-		// complicated to do there (already tried it) mostly due to the fact that
-		// literal_map has to be properly passed in a recursive call to itself, as well
-		// as properly detecting special commands that don't have keywords such as
-		// IF comparisons, ACT_ASSIGNEXPR, +=, -=, etc.
-		// v1.0.41: '{' was added to the line below to support no spaces inside "}else{".
-		if (!(action_end = StrChrAny(buf, _T("\t ,{")))) // Position of first tab/space/comma/open-brace.  For simplicity, a non-standard g_delimiter is not supported.
-			action_end = buf + buf_length; // It's done this way so that ELSE can be fully handled here; i.e. that ELSE does not have to be in the list of commands recognizable by ParseAndAddLine().
-		// The following method ensures that words or variables that start with "Else", e.g. ElseAction, are not
-		// incorrectly detected as an Else command:
-		int try_cmp = 1, finally_cmp = 1;
-		if (tcslicmp(buf, _T("Else"), action_end - buf) // It's not an ELSE, a TRY or a FINALLY. ("Else"/"Try"/"Finally" is used vs. g_act[ACT_ELSE/TRY/FINALLY].Name for performance).
-			&& (try_cmp = tcslicmp(buf, _T("Try"), action_end - buf))
-			&& (finally_cmp = tcslicmp(buf, _T("Finally"), action_end - buf)))
-		{
-			if (!ParseAndAddLine(buf))
-				goto FAIL;
-		}
-		else // This line is an ELSE, a TRY or a FINALLY, possibly with another command immediately after it (on the same line).
-		{
-			// Add the ELSE, TRY or FINALLY directly rather than calling ParseAndAddLine() because that function
-			// would resolve escape sequences throughout the entire length of <buf>, which we
-			// don't want because we wouldn't have access to the corresponding literal-map to
-			// figure out the proper use of escaped characters:
-			if (!AddLine(try_cmp ? (finally_cmp ? ACT_ELSE : ACT_FINALLY) : ACT_TRY))
-				goto FAIL;
-			mCurrLine = NULL;  // To signify that we're in transition, trying to load a new one.
-			buf = omit_leading_whitespace(action_end); // Now buf is the word after the ELSE or TRY.
-			if (*buf == g_delimiter) // Allow "else, action", "try, action" and "finally, action"
-				buf = omit_leading_whitespace(buf + 1);
-			// Allow any command/action to the right of "else", "try" or "finally", including "{":
-			if (*buf)
-			{
-				// This is done rather than calling ParseAndAddLine() as it handles "{" in a way that
-				// anything to the right of it is considered an arg of that line and is basically ignored.
-				buf_length = _tcslen(buf); // Update.
-				mCurrLine = NULL;  // To signify that we're in transition, trying to load a new line.
-				goto examine_line; // Have the main loop process the contents of "buf" as though it came in from the script.
-			}
-			// Otherwise, there was either no same-line action, so do nothing.
-		}
+
+		// Parse the command, assignment or expression, including any same-line open brace or sub-action
+		// for ELSE, TRY, CATCH or FINALLY.  Unlike braces at the start of a line (processed above), this
+		// does not allow directives or labels to the right of the command.
+		if (!ParseAndAddLine(buf))
+			goto FAIL;
 
 	continue_main_loop: // This method is used in lieu of "continue" for performance and code size reduction.
 #ifndef MINIDLL
@@ -5804,6 +5725,19 @@ void Script::DeleteTimer(IObject *aLabel)
 	for (timer = mFirstTimer; timer != NULL; previous = timer, timer = timer->mNextTimer)
 		if (timer->mLabel == aLabel) // Match found.
 		{
+			if (timer->mExistingThreads)
+			{
+				if (!aLabel) // Caller requested we delete a previously marked timer which
+					continue; // has now finished, but this one hasn't, so keep looking.
+				// In this case we can't delete the timer yet, so mark it for later deletion.
+				timer->mLabel = NULL;
+				// Clearing mLabel:
+				//  1) Marks the timer to be deleted after its last thread finishes.
+				//  2) Ensures any subsequently created timer will get default settings.
+				//  3) Allows the object to be freed before the timer subroutine returns
+				//     if all other references to it are released.
+				break;
+			}
 			// Remove it from the list.
 			if (previous)
 				previous->mNextTimer = timer->mNextTimer;
@@ -5812,7 +5746,7 @@ void Script::DeleteTimer(IObject *aLabel)
 			// Disable it.
 			if (timer->mEnabled)
 				timer->Disable(); // Keeps track of mTimerEnabledCount and whether the main timer is needed.
-			// Delete the timer, automatically releasing it's reference to the object.
+			// Delete the timer, automatically releasing its reference to the object.
 			delete timer;
 			break;
 		}
@@ -6170,8 +6104,7 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 		TCHAR end_char = *end_marker;
 		could_be_named_action = (end_char == g_delimiter || !end_char || IS_SPACE_OR_TAB(end_char)
 			// Allow If() and While() but something like MsgBox() should always be a function-call:
-			|| (end_char == '(' && (!_tcsicmp(action_name, _T("If")) || !_tcsicmp(action_name, _T("While"))))
-			|| (end_char == '{' && (!_tcsicmp(action_name, _T("Loop")) || !_tcsicmp(action_name, _T("Try")) || !_tcsicmp(action_name, _T("Catch"))))); // Supports OTB without a space, like Loop{.
+			|| (end_char == '(' && (!_tcsicmp(action_name, _T("If")) || !_tcsicmp(action_name, _T("While")))));
 	}
 	else
 	{
@@ -6350,7 +6283,26 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 
 	if (!aActionType) // Didn't find any action or command in this line.
 	{
-		if (_tcschr(EXPR_ALL_SYMBOLS, *action_args))
+		// v1.0.41: Support one-true brace style even if there's no space, but make it strict so that
+		// things like "Loop{ string" are reported as errors (in case user intended an object literal).
+		if (*action_args == '{')
+		{
+			switch (ActionTypeType otb_act = ConvertActionType(action_name))
+			{
+			case ACT_LOOP:
+				add_openbrace_afterward = true;
+				if (action_args[1]) // See above.
+					break;
+				//else fall through:
+			case ACT_ELSE:
+			case ACT_TRY:
+			case ACT_CATCH:
+			case ACT_FINALLY:
+				aActionType = otb_act;
+				break;
+			}
+		}
+		if (!aActionType && _tcschr(EXPR_ALL_SYMBOLS, *action_args))
 		{
 			LPTSTR question_mark;
 			if ((*action_args == '+' || *action_args == '-') && action_args[1] == *action_args) // Post-inc/dec. See comments further below.
@@ -6428,6 +6380,28 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 			}
 			action_args = omit_leading_whitespace(delim + 1);
 		}
+	}
+	switch (aActionType)
+	{
+	case ACT_CATCH:
+		if (*action_args != '{') // i.e. "Catch varname" must be handled a different way.
+			break;
+	case ACT_ELSE:
+	case ACT_TRY:
+	case ACT_FINALLY:
+		if (!AddLine(aActionType))
+			return FAIL;
+		if (*action_args == '{')
+		{
+			if (!AddLine(ACT_BLOCK_BEGIN))
+				return FAIL;
+			action_args = omit_leading_whitespace(action_args + 1);
+		}
+		if (!*action_args)
+			return OK;
+		// Call self recursively to parse the sub-action.
+		//mCurrLine = NULL; // Seems more useful to leave this set to the line added above.
+		return ParseAndAddLine(action_args);
 	}
 
 	Action &this_action = g_act[aActionType];
@@ -6584,13 +6558,12 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 	/////////////////////////////////////////////////////////////
 	// MaxParams has already been verified as being <= MAX_ARGS.
 	// Any g_delimiter-delimited items beyond MaxParams will be included in a lump inside the last param:
-	int nArgs, nArgs_plus_one;
+	int nArgs;
 	LPTSTR arg[MAX_ARGS], arg_map[MAX_ARGS];
 	TCHAR *subaction_start = NULL;
 	int max_params = max_params_override ? max_params_override : this_action.MaxParams;
 	int max_params_minus_one = max_params - 1;
 	bool is_expression;
-	ActionTypeType *np;
 
 	for (nArgs = mark = 0; action_args[mark] && nArgs < max_params; ++nArgs)
 	{
@@ -6626,23 +6599,21 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 			// Skip the "% " prefix.
 			mark += 2;
 		}
+		/*
+		// Since this part of the loop never executes for the last arg of a command (due to the 
+		// nArgs == max_params_minus_one check above) and currently all control flow statements
+		// accept expressions only in their last or only arg, the following block is not needed:
 		else if (aActionType < ACT_FIRST_COMMAND) // v2: Search for "NumericParams" for comments.
 		{
-			// v1.0.43.07: Fixed below to use this_action instead of g_act[aActionType] so that the
-			// numeric params of legacy commands like EnvAdd/Sub/LeftClick can be detected.  Without
-			// this fix, the last comma in a line like "EnvSub, var, Add(2, 3)" is seen as a parameter
-			// delimiter, which causes a loadtime syntax error.
-			if (np = this_action.NumericParams) // This command has at least one numeric parameter.
-			{
-				// As of v1.0.25, pure numeric parameters can optionally be numeric expressions, so check for that:
-				nArgs_plus_one = nArgs + 1;
-				for (; *np; ++np)
-					if (*np == nArgs_plus_one) // This arg is enforced to be purely numeric.
-						break;
-				if (*np) // Match found, so this is a purely numeric arg.
+			int nArgs_plus_one = nArgs + 1;
+			for (ActionTypeType *np = this_action.NumericParams; *np; ++np)
+				if (*np == nArgs_plus_one) // This arg is enforced to be purely numeric.
+				{
 					is_expression = true;
-			}
+					break;
+				}
 		}
+		*/
 
 		// Find the end of the above arg:
 		if (is_expression)
@@ -6936,12 +6907,14 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 			// Experimental v2 behaviour: Where function syntax could've been used but isn't, require %
 			// for expressions.  This doesn't include control flow statements such as IF, WHILE, FOR, etc.
 			// since we want those to always be expressions (and function syntax can't be used for those).
-			if (!this_new_arg.is_expression // It hasn't been explicitly % marked as an expression.
-				&& (np = g_act[aActionType].NumericParams)) // This command has at least one numeric parameter.
+			if (!this_new_arg.is_expression) // It hasn't been explicitly % marked as an expression.
 			{
-				// As of v1.0.25, pure numeric parameters can optionally be numeric expressions, so check for that:
+				// Check for parameters of control flow statements which are marked as expressions,
+				// and parameters of commands which are marked as numeric.  Since numeric parameters aren't
+				// expressions by default anymore, non-numeric values like 'some_variable' are flagged as
+				// errors to ease the transition from v1.
 				i_plus_one = i + 1;
-				for (; *np; ++np)
+				for (np = g_act[aActionType].NumericParams; *np; ++np)
 				{
 					if (*np == i_plus_one) // This arg is enforced to be purely numeric.
 					{
@@ -11282,8 +11255,8 @@ Line *Script::PreparseCommands(Line *aStartingLine)
 					return line->PreparseError(ERR_PARAM1_INVALID);
 				}
 				if (*line_raw_arg2 && !line->ArgHasDeref(2))
-					if (   !(line->mAttribute = FindCallable(line_raw_arg2))   )
-						if (!Hotkey::ConvertAltTab(line_raw_arg2, true))
+					if (!Hotkey::ConvertAltTab(line_raw_arg2, true))
+						if (   !(line->mAttribute = FindCallable(line_raw_arg2))   )
 							return line->PreparseError(ERR_NO_LABEL);
 			}
 #endif
