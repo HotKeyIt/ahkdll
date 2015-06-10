@@ -6599,7 +6599,7 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 			// Skip the "% " prefix.
 			mark += 2;
 		}
-		/*
+		
 		// Since this part of the loop never executes for the last arg of a command (due to the 
 		// nArgs == max_params_minus_one check above) and currently all control flow statements
 		// accept expressions only in their last or only arg, the following block is not needed:
@@ -6613,7 +6613,6 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 					break;
 				}
 		}
-		*/
 
 		// Find the end of the above arg:
 		if (is_expression)
