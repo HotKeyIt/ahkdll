@@ -6602,7 +6602,9 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 		
 		// Since this part of the loop never executes for the last arg of a command (due to the 
 		// nArgs == max_params_minus_one check above) and currently all control flow statements
-		// accept expressions only in their last or only arg, the following block is not needed:
+		// accept expressions only in their last or only arg, it's tempting to remove this block.
+		// However, it's actually needed for ACT_IF, where a second pseudo-arg is added for
+		// handling a same-line sub-action.  It might be needed for other commands in future.
 		else if (aActionType < ACT_FIRST_COMMAND) // v2: Search for "NumericParams" for comments.
 		{
 			int nArgs_plus_one = nArgs + 1;
