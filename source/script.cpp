@@ -836,7 +836,7 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 	GetModuleFileName(NULL, buf, _countof(buf));
 #else
 	TCHAR def_buf[MAX_PATH + 1], exe_buf[MAX_PATH + 1];
-	if (!aScriptFilename) // v1.0.46.08: Change in policy: store the default script in the My Documents directory rather than in Program Files.  It's more correct and solves issues that occur due to Vista's file-protection scheme.
+	if (!g_hResource && !aScriptFilename) // v1.0.46.08: Change in policy: store the default script in the My Documents directory rather than in Program Files.  It's more correct and solves issues that occur due to Vista's file-protection scheme.
 	{
 		// Since no script-file was specified on the command line, use the default name.
 		// For portability, first check if there's an <EXENAME>.ahk file in the current directory.
@@ -2854,8 +2854,8 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 		//    ++phys_line_number;
 		// 5) "mCurrLine = NULL": Probably not necessary since it's only for error reporting.  Worst thing
 		//    that could happen is that syntax errors would be thrown off, which testing shows isn't the case.
-	examine_line:
 #ifndef MINIDLL
+	examine_line:
 		// "::" alone isn't a hotstring, it's a label whose name is colon.
 		// Below relies on the fact that no valid hotkey can start with a colon, since
 		// ": & somekey" is not valid (since colon is a shifted key) and colon itself
@@ -4386,8 +4386,8 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		//    ++phys_line_number;
 		// 5) "mCurrLine = NULL": Probably not necessary since it's only for error reporting.  Worst thing
 		//    that could happen is that syntax errors would be thrown off, which testing shows isn't the case.
-	examine_line:
 #ifndef MINIDLL
+	examine_line:
 		// "::" alone isn't a hotstring, it's a label whose name is colon.
 		// Below relies on the fact that no valid hotkey can start with a colon, since
 		// ": & somekey" is not valid (since colon is a shifted key) and colon itself
@@ -15803,7 +15803,7 @@ ResultType Line::Perform()
 		// But only do so for short sleeps, for which the user has a greater expectation of
 		// accuracy.  UPDATE: Do not change the 25 below without also changing it in Critical's
 		// documentation.
-		if (g_MainThreadID != aThreadID || (sleep_time < 25 && sleep_time > 0 && g_os.IsWin9x())) // Ordered for short-circuit performance. v1.0.38.05: Added "sleep_time > 0" so that Sleep -1/0 will work the same on Win9x as it does on other OSes.
+		if ((g_MainThreadID != aThreadID && sleep_time > -1) || (sleep_time < 25 && sleep_time > 0 && g_os.IsWin9x())) // Ordered for short-circuit performance. v1.0.38.05: Added "sleep_time > 0" so that Sleep -1/0 will work the same on Win9x as it does on other OSes.
 			Sleep(sleep_time);
 		else
 			MsgSleep(sleep_time);
