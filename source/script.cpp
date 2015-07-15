@@ -836,7 +836,7 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 	GetModuleFileName(NULL, buf, _countof(buf));
 #else
 	TCHAR def_buf[MAX_PATH + 1], exe_buf[MAX_PATH + 1];
-	if (!g_hResource && !aScriptFilename) // v1.0.46.08: Change in policy: store the default script in the My Documents directory rather than in Program Files.  It's more correct and solves issues that occur due to Vista's file-protection scheme.
+	if (!aScriptFilename) // v1.0.46.08: Change in policy: store the default script in the My Documents directory rather than in Program Files.  It's more correct and solves issues that occur due to Vista's file-protection scheme.
 	{
 		// Since no script-file was specified on the command line, use the default name.
 		// For portability, first check if there's an <EXENAME>.ahk file in the current directory.
@@ -852,7 +852,7 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 			return FAIL;
 
 		aScriptFilename = exe_buf; // Use the entire path, including the exe's directory.
-		if (GetFileAttributes(aScriptFilename) == 0xFFFFFFFF) // File doesn't exist, so fall back to new method.
+		if (!g_hResource && GetFileAttributes(aScriptFilename) == 0xFFFFFFFF) // File doesn't exist, so fall back to new method.
 		{
 			aScriptFilename = def_buf;
 			VarSizeType filespec_length = BIV_MyDocuments(aScriptFilename, _T("")); // e.g. C:\Documents and Settings\Home\My Documents
