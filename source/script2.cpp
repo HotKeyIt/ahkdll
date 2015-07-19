@@ -15795,9 +15795,10 @@ BIF_DECL(BIF_VarSetCapacity)
 			{
 				BYTE *aBkpContents;
 				VarSizeType aBkpCapacity;
-				if (aParamCount < 3 && (aBkpCapacity = var.Capacity()) > 1)  // Third parameter is present and var has enough capacity to make memmove() meaningful.
+				if (aParamCount < 3 && var.mByteCapacity > 1)  // Third parameter is present and var has enough capacity to make memmove() meaningful.
 				{   // backup variables content to restore later
 					// usefull when size of a variable is changed without loosing its content, e.g. increase memory array
+					aBkpCapacity = var.mByteCapacity;
 					aBkpContents = (BYTE*)_alloca(aBkpCapacity);
 					memmove(aBkpContents,var.Contents(false),aBkpCapacity);
 				}
