@@ -10337,7 +10337,7 @@ winapi:
 			_tcscpy(aDest, _T(",,"));
 			aDest = aDest + 2;
 		}
-		*(aDest - 2) = L'\0';
+		memset(aDest - 2, 0, 2 * sizeof(TCHAR));
 		if (mIncludeLibraryFunctionsThenExit && aIsAutoInclude)
 		{
 			// For each auto-included library-file, write out two #Include lines:
