@@ -17786,10 +17786,9 @@ BIF_DECL(BIF_VarSetCapacity)
 			{
 				BYTE *aBkpContents;
 				VarSizeType aBkpCapacity = NULL;
-				if (aParamCount < 3 && var.mByteCapacity > 1)  // Third parameter is present and var has enough capacity to make memmove() meaningful.
+				if (aParamCount < 3 && (aBkpCapacity = var.ByteCapacity()) > 1)  // Third parameter is present and var has enough capacity to make memmove() meaningful.
 				{   // backup variables content to restore later
 					// usefull when size of a variable is changed without loosing its content, e.g. increase memory array
-					aBkpCapacity = var.mByteCapacity;
 					aBkpContents = (BYTE*)_alloca(aBkpCapacity);
 					memmove(aBkpContents, var.Contents(false), aBkpCapacity);
 				}
@@ -17812,8 +17811,8 @@ BIF_DECL(BIF_VarSetCapacity)
 				else
 				{
 					// restore variables content if FillMemory parameter is not used and the size is apropriate
-					if (aParamCount < 3 && aBkpCapacity > 1 && (var.Capacity()) > 1)
-						memmove(var.Contents(false),aBkpContents,var.Capacity() < aBkpCapacity ? var.Capacity() : aBkpCapacity);
+					if (aParamCount < 3 && aBkpCapacity > 1 && (var.ByteCapacity()) > 1)
+						memmove(var.Contents(false), aBkpContents, var.ByteCapacity() < aBkpCapacity ? var.ByteCapacity() : aBkpCapacity);
 					// By design, Assign() has already set the length of the variable to reflect new_capacity.
 					// This is not what is wanted in this case since it should be truly empty.
 					var.ByteLength() = 0;
@@ -17824,12 +17823,12 @@ BIF_DECL(BIF_VarSetCapacity)
 		} // if (aParamCount > 1)
 		//else
 		//{
-			// RequestedCapacity was omitted, so the var is not altered; instead, the current capacity
-			// is reported, which seems more intuitive/useful than having it do a Free(). In this case
-			// it's an input var rather than an output var, so check if it has been initialized:
-			// v1.1.11.01: Support VarSetCapacity(var) as a means for the script to check if it
-			// has initialized a var.  In other words, don't show a warning even in that case.
-			//var.MaybeWarnUninitialized();
+		// RequestedCapacity was omitted, so the var is not altered; instead, the current capacity
+		// is reported, which seems more intuitive/useful than having it do a Free(). In this case
+		// it's an input var rather than an output var, so check if it has been initialized:
+		// v1.1.11.01: Support VarSetCapacity(var) as a means for the script to check if it
+		// has initialized a var.  In other words, don't show a warning even in that case.
+		//var.MaybeWarnUninitialized();
 
 		//}
 
