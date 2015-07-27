@@ -15795,12 +15795,11 @@ BIF_DECL(BIF_VarSetCapacity)
 			{
 				BYTE *aBkpContents;
 				VarSizeType aBkpCapacity = NULL;
-				if (aParamCount < 3 && var.mByteCapacity > 1)  // Third parameter is present and var has enough capacity to make memmove() meaningful.
+				if (aParamCount < 3 && (aBkpCapacity = var.ByteCapacity()) > 1)  // Third parameter is present and var has enough capacity to make memmove() meaningful.
 				{   // backup variables content to restore later
 					// usefull when size of a variable is changed without loosing its content, e.g. increase memory array
-					aBkpCapacity = var.mByteCapacity;
 					aBkpContents = (BYTE*)_alloca(aBkpCapacity);
-					memmove(aBkpContents,var.Contents(false),aBkpCapacity);
+					memmove(aBkpContents, var.Contents(false), aBkpCapacity);
 				}
 				if (!var.SetCapacity(new_capacity, true)) // This also destroys the variables contents.
 				{
@@ -15824,8 +15823,8 @@ BIF_DECL(BIF_VarSetCapacity)
 				else
 				{
 					// restore variables content if FillMemory parameter is not used and the size is apropriate
-					if (aParamCount < 3 && aBkpCapacity > 1 && (var.Capacity()) > 1)
-						memmove(var.Contents(false),aBkpContents,var.Capacity() < aBkpCapacity ? var.Capacity() : aBkpCapacity);
+					if (aParamCount < 3 && aBkpCapacity > 1 && (var.ByteCapacity()) > 1)
+						memmove(var.Contents(false), aBkpContents, var.ByteCapacity() < aBkpCapacity ? var.ByteCapacity() : aBkpCapacity);
 					// By design, Assign() has already set the length of the variable to reflect new_capacity.
 					// This is not what is wanted in this case since it should be truly empty.
 					var.ByteLength() = 0;
