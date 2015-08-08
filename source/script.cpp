@@ -358,6 +358,11 @@ Script::~Script() // Destructor.
 	int i;
 #ifdef _USRDLL
 	// HotKeyIt H1 destroy script for ahkTerminate and ahkReload and ExitApp for dll
+
+	//reset count for OnMessage
+	if (g_MsgMonitor.Count())
+		g_MsgMonitor.RemoveAll();
+
 	// free Meta Object
 	g_MetaObject.Free();
 	// Disconnect Debugger
@@ -649,10 +654,6 @@ Script::~Script() // Destructor.
 	mTempFunc = NULL;
 	mTempLabel = NULL;
 	mTempLine = NULL;
-	//reset count for OnMessage
-	if (g_MsgMonitor.Count())
-		g_MsgMonitor.RemoveAll();
-
 
 	g_nMessageBoxes = 0;
 #ifndef MINIDLL
