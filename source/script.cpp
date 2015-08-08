@@ -305,6 +305,10 @@ Script::~Script() // Destructor.
 void Script::Destroy()
 // HotKeyIt H1 destroy script for ahkTerminate and ahkReload and ExitApp for dll
 {
+	//reset count for OnMessage
+	if (g_MsgMonitor.Count())
+		g_MsgMonitor.RemoveAll();
+
 	// free Meta Object
 	g_MetaObject.Free();
 	// Disconnect debugger
@@ -314,6 +318,7 @@ void Script::Destroy()
 		g_Debugger.Disconnect();
 	}
 	
+
 	// L31: Release objects stored in variables, where possible and delete vars.
 	int v, i;
 	
@@ -478,11 +483,7 @@ void Script::Destroy()
 	mTempFunc = NULL;
 	mTempLabel = NULL;
 	mTempLine = NULL;
-
-	//reset count for OnMessage
-	if (g_MsgMonitor.Count())
-		g_MsgMonitor.RemoveAll();
-
+	
 	g_nMessageBoxes = 0;
 #ifndef MINIDLL
 	g_nInputBoxes = 0;
