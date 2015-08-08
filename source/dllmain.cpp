@@ -112,6 +112,7 @@ switch(fwdReason)
 		 if (g_script.mTrayMenu)
 			 g_script.ScriptDeleteMenu(g_script.mTrayMenu);
 		 free(g_KeyHistory);
+		 g_MsgMonitor.Free();
 		 DeleteCriticalSection(&g_CriticalHeapBlocks); // g_CriticalHeapBlocks is used in simpleheap for thread-safety.
 		 DeleteCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
 		 DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.

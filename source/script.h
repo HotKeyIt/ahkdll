@@ -2267,7 +2267,10 @@ public:
 	MsgMonitorStruct *Find(UINT aMsg, HWND aHwnd, IObject *aCallback);
 	MsgMonitorStruct *Add(UINT aMsg, HWND aHwnd, IObject *aCallback, bool aAppend = TRUE);
 	void Remove(MsgMonitorStruct *aMonitor);
+#ifdef _USRDLL
 	void RemoveAll();
+	void Free();
+#endif
 	ResultType Call(ExprTokenType *aParamValue, int aParamCount, int aInitNewThreadIndex); // Used for OnExit and OnClipboardChange, but not OnMessage.
 
 	MsgMonitorStruct& operator[] (const int aIndex) { return mMonitor[aIndex]; }

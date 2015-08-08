@@ -16602,6 +16602,7 @@ MsgMonitorStruct *MsgMonitorList::Add(UINT aMsg, HWND aHwnd, IObject *aCallback,
 	return new_mon;
 }
 
+#ifdef _USRDLL
 void MsgMonitorList::RemoveAll()
 {
 	for (int i = 0; i <= mCount; ++i)
@@ -16624,11 +16625,17 @@ void MsgMonitorList::RemoveAll()
 			memmove(aMonitor, aMonitor + 1, (mCount - mon_index) * sizeof(MsgMonitorStruct));
 		release_me->Release(); // Must be called after the above in case it calls a __delete() meta-function.
 	}
-	free(mMonitor);
+	// free(mMonitor); // Do not free MsgMonitor when script is reloaded
 	mCountMax = 0;
 	mCount = 0;
 }
 
+void MsgMonitorList::Free()
+{
+	free(mMonitor);
+}
+
+#endif // _USRDLL
 
 void MsgMonitorList::Remove(MsgMonitorStruct *aMonitor)
 {
