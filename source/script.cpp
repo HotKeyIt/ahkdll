@@ -308,7 +308,7 @@ void Script::Destroy()
 	//reset count for OnMessage
 	if (g_MsgMonitor.Count())
 		g_MsgMonitor.RemoveAll();
-
+	
 	// free Meta Object
 	g_MetaObject.Free();
 	// Disconnect debugger
@@ -643,8 +643,9 @@ void Script::Destroy()
 #ifndef MINIDLL
 	free(g_input.match);
 #endif
+	Line::sLogNext = 0;
+	memset(Line::sLog,NULL,sizeof(Line*) * LINE_LOG_SIZE);
 	SimpleHeap::DeleteAll();
-	mIsReadyToExecute = false;
 	//ZeroMemory(&g_script, sizeof(g_script));
 #ifndef MINIDLL
 	mPriorHotkeyName = mThisHotkeyName = _T("");
@@ -659,6 +660,7 @@ void Script::Destroy()
 	// DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
 	// DeleteCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
 	OleUninitialize();
+	mIsReadyToExecute = false;
 }
 #endif
 
