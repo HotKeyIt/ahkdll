@@ -790,10 +790,11 @@ Script::~Script() // Destructor.
 	Hotstring::AllDestruct();
 #endif
 
+	Line::sLogNext = 0;
+	memset(Line::sLog,NULL,sizeof(Line*) * LINE_LOG_SIZE);
 	global_clear_state(*g);
 	//free(g_Debugger.mStack.mBottom);
 	SimpleHeap::DeleteAll();
-	mIsReadyToExecute = false;
 	//ZeroMemory(&g_script, sizeof(g_script));
 #ifndef MINIDLL
 	mPriorHotkeyName = mThisHotkeyName = _T("");
@@ -809,6 +810,7 @@ Script::~Script() // Destructor.
 	// DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
 	// DeleteCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
 	OleUninitialize();
+	mIsReadyToExecute = false;
 }
 
 ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestart, HINSTANCE hInstance, bool aIsText)

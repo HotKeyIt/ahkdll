@@ -40,7 +40,7 @@ bool MsgSleep(int aSleepDuration = INTERVAL_UNSPECIFIED, MessageMode aMode = RET
 #define SLEEP_WITHOUT_INTERRUPTION(aSleepTime) \
 {\
 	g_AllowInterruption = FALSE;\
-	if (g_MainThreadID == aThreadID)\
+	if (g_MainThreadID == aThreadID || aSleepTime < 0)\
 		MsgSleep(aSleepTime);\
 	else\
 		Sleep(aSleepTime);\

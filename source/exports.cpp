@@ -164,7 +164,7 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 			return _T("");
 		}
 		result_to_return_dll = new_mem;
-		return ITOA64((int)ahkvar,result_to_return_dll);
+		return ITOA64((UINT_PTR)ahkvar,result_to_return_dll);
 	}
 	if (ahkvar->mType != VAR_BUILTIN && !ahkvar->HasContents() )
 		return _T("");
