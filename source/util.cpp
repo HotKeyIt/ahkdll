@@ -3327,8 +3327,6 @@ LONG WINAPI DisableHooksOnException(PEXCEPTION_POINTERS pExceptionPtrs)
 {
 	if (pExceptionPtrs->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION)
 	{
-		if (!g_ExceptionWarnContinueAble && pExceptionPtrs->ExceptionRecord->ExceptionFlags == 0) // CONTINUABLE EXCEPTION
-			return EXCEPTION_ACCESS_VIOLATION;
 		if (g_MainThreadID == GetCurrentThreadId())
 		{	// it is not our main process display error and exit current thread 
 #ifndef MINIDLL
