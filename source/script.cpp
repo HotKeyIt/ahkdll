@@ -5556,9 +5556,9 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		return CONDITION_TRUE;
 	}
 
-	if (IS_DIRECTIVE_MATCH(_T("#WarnContinueableException")))
+	if (IS_DIRECTIVE_MATCH(_T("#WarnContinuableException")))
 	{
-		g_ExceptionWarnContinueAble = !parameter || _tcsicmp(parameter, _T("Off"));
+		g_ExceptionWarnContinuable = !parameter || _tcsicmp(parameter, _T("Off"));
 		return CONDITION_TRUE;
 	}
 
