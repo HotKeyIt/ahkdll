@@ -88,6 +88,7 @@ extern WarnMode g_Warn_UseUnsetGlobal;
 extern WarnMode g_Warn_LocalSameAsGlobal;
 extern SingleInstanceType g_AllowOnlyOneInstance;
 extern PVOID g_ExceptionHandler;
+extern bool g_ExceptionWarnContinueAble;
 #ifndef MINIDLL
 extern HookType g_ExceptionHooksToEnable;
 extern bool g_NoTrayIcon;
