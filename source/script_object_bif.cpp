@@ -837,4 +837,7 @@ BIF_DECL(BIF_ObjRawSet)
 	}
 	if (!obj->SetItem(*aParam[1], *aParam[2]))
 		aResult = g_script.ScriptError(ERR_OUTOFMEM);
+	
+	aResultToken.symbol = SYM_STRING;
+	aResultToken.marker = _T("");
 }
