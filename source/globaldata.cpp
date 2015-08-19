@@ -96,6 +96,7 @@ WarnMode g_Warn_UseUnsetGlobal = WARNMODE_OFF;		//
 WarnMode g_Warn_UseEnv = WARNMODE_OFF;				//
 WarnMode g_Warn_LocalSameAsGlobal = WARNMODE_OFF;	//
 PVOID g_ExceptionHandler = NULL;
+bool g_ExceptionWarnContinueAble = false;
 #ifndef _USRDLL
 SingleInstanceType g_AllowOnlyOneInstance = ALLOW_MULTI_INSTANCE;
 #endif

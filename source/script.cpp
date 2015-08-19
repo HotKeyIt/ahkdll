@@ -5469,6 +5469,13 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		g_InputLevel = group;
 		return CONDITION_TRUE;
 	}
+
+	if (IS_DIRECTIVE_MATCH(_T("#WarnContinueableException")))
+	{
+		g_ExceptionWarnContinueAble = !parameter || _tcsicmp(parameter, _T("Off"));
+		return CONDITION_TRUE;
+	}
+
 	if (IS_DIRECTIVE_MATCH(_T("#Warn")))
 	{
 		if (!parameter)
