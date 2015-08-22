@@ -161,7 +161,7 @@ Object *Object::Clone(ExprTokenType *aParam[], int aParamCount)
 		// Copy key.
 		if (j >= obj.mKeyOffsetString)
 		{
-			if (aParamCount)
+			if (aParam != NULL && aParamCount)
 			{
 				if (aParam[0]->symbol != SYM_MISSING && !TokenIsPureNumeric(*aParam[0],is_number) && 0 < _tcscmp(TokenToString(*aParam[0]),src.key.s))
 				{
@@ -188,7 +188,7 @@ Object *Object::Clone(ExprTokenType *aParam[], int aParamCount)
 		}
 		else if (j >= obj.mKeyOffsetObject)
 		{
-			if (aParamCount)
+			if (aParam != NULL && aParamCount)
 			{
 				obj.mFieldCount = obj.mFieldCount - (obj.mKeyOffsetString - obj.mKeyOffsetObject);
 				obj.mKeyOffsetString = obj.mKeyOffsetObject;
@@ -199,7 +199,7 @@ Object *Object::Clone(ExprTokenType *aParam[], int aParamCount)
 		}
 		else
 		{
-			if (aParamCount && aParam[0]->symbol != SYM_MISSING && TokenIsPureNumeric(*aParam[0],is_number) && TokenToInt64(*aParam[0]) > src.key.i)
+			if (aParam != NULL && aParamCount && aParam[0]->symbol != SYM_MISSING && TokenIsPureNumeric(*aParam[0], is_number) && TokenToInt64(*aParam[0]) > src.key.i)
 			{
 				obj.mFieldCount--;
 				obj.mKeyOffsetString--;
