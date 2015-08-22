@@ -123,7 +123,7 @@ Object *Object::Clone(ExprTokenType *aParam[], int aParamCount)
 // Creates an object and copies to it the fields at and after the given offset.
 {
 	SymbolType is_number;
-	IndexType aStartOffset = aParamCount && aParam[0]->symbol != SYM_MISSING && !TokenIsPureNumeric(*aParam[0],is_number) ? mKeyOffsetObject : 0;
+	IndexType aStartOffset = aParamCount && (aParam == NULL || (aParam[0]->symbol != SYM_MISSING && !TokenIsPureNumeric(*aParam[0],is_number))) ? mKeyOffsetObject : 0;
 	Object *objptr = new Object();
 	if (!objptr|| aStartOffset >= mFieldCount)
 		return objptr;
