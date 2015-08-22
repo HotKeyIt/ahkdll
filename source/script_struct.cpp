@@ -18,10 +18,10 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 	int offset = 0;					// also used to calculate total size of structure
 	int mod = 0;
 	int arraydef = 0;				// count arraysize to update offset
-	int unionoffset[16];			// backup offset before we enter union or structure
-	int unionsize[16];				// calculate unionsize
-	bool unionisstruct[16];			// updated to move offset for structure in structure
-	int structalign[16];			// keep track of struct alignment
+	int unionoffset[16] = { 0 };			// backup offset before we enter union or structure
+	int unionsize[16] = { 0 };				// calculate unionsize
+	bool unionisstruct[16] = { 0 };			// updated to move offset for structure in structure
+	int structalign[16] = { 0 };			// keep track of struct alignment
 	int totalunionsize = 0;			// total size of all unions and structures in structure
 	int uniondepth = 0;				// count how deep we are in union/structure
 	int ispointer = NULL;			// identify pointer and how deep it goes
