@@ -1526,11 +1526,9 @@ ResultType Script::ExitApp(ExitReasons aExitReason, LPTSTR aBuf, int aExitCode)
 		// extra thread for ExitApp() (which allows it to run even when MAX_THREADS_EMERGENCY has
 		// been reached).  See TOTAL_ADDITIONAL_THREADS.
 #ifdef _USRDLL
-		if (sOnExitIsRunning && g_Reloading)
-		{
-			sOnExitIsRunning = false;
+		sOnExitIsRunning = false;
+		if (g_Reloading)
 			return EARLY_EXIT;
-		}
 #endif
 		TerminateApp(aExitReason, aExitCode);
 	}

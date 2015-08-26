@@ -16625,14 +16625,11 @@ void MsgMonitorList::RemoveAll()
 			memmove(aMonitor, aMonitor + 1, (mCount - mon_index) * sizeof(MsgMonitorStruct));
 		release_me->Release(); // Must be called after the above in case it calls a __delete() meta-function.
 	}
-	// free(mMonitor); // Do not free MsgMonitor when script is reloaded
+	free(mMonitor);
+	mTop = NULL;
 	mCountMax = 0;
 	mCount = 0;
-}
-
-void MsgMonitorList::Free()
-{
-	free(mMonitor);
+	mMonitor = NULL;
 }
 
 #endif // _USRDLL
