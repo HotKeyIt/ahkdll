@@ -1,6 +1,5 @@
 errormessage(E:=0){ 
-     if !E
-          E:=A_LastError
-     VarSetCapacity(ES, 1024),DllCall("FormatMessage",UINT,0x00001000,UINT,0,UINT,e,UINT,0,Str,ES,UINT,1024,str,"")
-     return StrReplace(ES,"`r`n",A_Space)
+static es,i:=VarSetCapacity(ES,1024)
+FormatMessage(0x00001000,0,e?e:A_LastError,0,ES,1024),VarSetCapacity(ES,-1)
+return StrReplace(ES,"`r`n"," ")
 }

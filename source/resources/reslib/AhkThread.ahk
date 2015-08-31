@@ -7,7 +7,7 @@
 	else If objects.HasKey(obj)
 		objects.Remove(obj)
 }
-ahkthread(script:="",param:="",IsFile:=0,dll:="AutoHotkey.dll"){
+ahkthread(script:="",param:="",IsFile:=0,dll:="F903E44B8A904483A1732BA84EA6191F"){
   static base,functions
   if !base
     base:={__Delete:"ahkthread"},functions:="ahkFunction:s==sssssssssss|ahkPostFunction:i==sssssssssss|ahkdll:ut==ss|ahktextdll:ut==ss|ahkReady:|ahkReload:i==i|ahkTerminate:i==i|addFile:ut==sucuc|addScript:ut==si|ahkExec:ui==s|ahkassign:ui==ss|ahkExecuteLine:ut==utuiui|ahkFindFunc:ut==s|ahkFindLabel:ut==s|ahkgetvar:s==sui|ahkLabel:ui==sui|ahkPause:i==s|ahkIsUnicode:"
