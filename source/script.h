@@ -347,6 +347,13 @@ enum DerefTypeType : BYTE
 };
 
 class Func; // Forward declaration for use below.
+#ifndef AUTOHOTKEYSC
+struct FuncLibrary
+{
+	LPTSTR path;
+	DWORD_PTR length;
+};
+#endif
 struct DerefType
 {
 	LPTSTR marker;
@@ -3134,9 +3141,6 @@ BIF_DECL(BIF_MemoryFindResource);
 BIF_DECL(BIF_MemorySizeOfResource);
 BIF_DECL(BIF_MemoryLoadResource);
 BIF_DECL(BIF_MemoryLoadString);
-BIF_DECL(BIF_Lock);
-BIF_DECL(BIF_TryLock);
-BIF_DECL(BIF_UnLock);
 
 BIF_DECL(BIF_StrLen);
 BIF_DECL(BIF_SubStr);

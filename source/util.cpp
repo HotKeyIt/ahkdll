@@ -3197,7 +3197,7 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 	return CONDITION_TRUE;
 }
 
-DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf, TCHAR *pwd[]) // LiteZip Raw compression
+DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf,SIZE_T sz, TCHAR *pwd[]) // LiteZip Raw compression
 {
 	unsigned int hdrsz = 20;
 	TCHAR pw[1024] = {0};
@@ -3206,6 +3206,8 @@ DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf, TCHAR *pwd[]) // LiteZip 
 			pw[i] = (TCHAR)*pwd[i];
 	ULONG aSizeCompressed = *(ULONG*)((UINT_PTR)aBuffer + 8);
 	DWORD aSizeEncrypted = *(DWORD*)((UINT_PTR)aBuffer + 16);
+	if (sz < aSizeCompressed || sz < aSizeEncrypted)
+		return 0; // data is a normal zip file
 	DWORD hash;
 	BYTE *aDataEncrypted = NULL;
 	HashData((LPBYTE)aBuffer + hdrsz,aSizeEncrypted?aSizeEncrypted:aSizeCompressed,(LPBYTE)&hash,4);

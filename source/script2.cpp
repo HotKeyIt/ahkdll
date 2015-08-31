@@ -8288,7 +8288,7 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 		if (*(unsigned int*)res_lock == 0x04034b50)
 		{
 			LPVOID aDataBuf;
-			aSizeDeCompressed = DecompressBuffer(res_lock, aDataBuf, NULL);
+			aSizeDeCompressed = DecompressBuffer(res_lock, aDataBuf, SizeofResource(NULL, res), NULL);
 			if (aSizeDeCompressed)
 			{
 				success = WriteFile(hfile, aDataBuf, aSizeDeCompressed, &num_bytes_written, NULL);
@@ -8336,7 +8336,7 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 			if (*(unsigned int*)res_lock == 0x04034b50)
 			{
 				LPVOID aDataBuf;
-				aSizeDeCompressed = DecompressBuffer(res_lock, aDataBuf, NULL);
+				aSizeDeCompressed = DecompressBuffer(res_lock, aDataBuf, SizeofResource(NULL,res), NULL);
 				if (aSizeDeCompressed)
 				{
 					success = WriteFile(hfile, aDataBuf, aSizeDeCompressed, &num_bytes_written, NULL);
@@ -13497,25 +13497,6 @@ end:
 }
 
 #endif
-BIF_DECL(BIF_Lock)
-{
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = _T("");
-	EnterCriticalSection((LPCRITICAL_SECTION) TokenToInt64(*aParam[0]));
-}
-
-BIF_DECL(BIF_TryLock)
-{
-	aResultToken.symbol = SYM_INTEGER;
-	aResultToken.value_int64 = TryEnterCriticalSection((LPCRITICAL_SECTION) TokenToInt64(*aParam[0]));
-}
-
-BIF_DECL(BIF_UnLock)
-{
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = _T("");
-	LeaveCriticalSection((LPCRITICAL_SECTION) TokenToInt64(*aParam[0]));
-}
 
 BIF_DECL(BIF_StrLen)
 {
@@ -15940,7 +15921,7 @@ BIF_DECL(BIF_ResourceLoadLibrary)
 	if (*(unsigned int*)textbuf.mBuffer == 0x04034b50)
 	{
 		LPVOID aDataBuf;
-		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, NULL);
+		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength, NULL);
 		if (aSizeDeCompressed)
 		{
 			module = MemoryLoadLibrary( aDataBuf );
@@ -15970,11 +15951,9 @@ BIF_DECL(BIF_MemoryLoadLibrary)
 	HMEMORYMODULE module = NULL;
 	unsigned char *data = NULL;
 	aResultToken.symbol = SYM_INTEGER;
+	aResultToken.value_int64 = 0;
 	if (TokenIsEmptyString(*aParam[0]))
-	{
-		aResultToken.value_int64 = 0;
 		return;
-	}
 	else if (!TokenIsNumeric(*aParam[0]))
 	{
 		FILE *fp;
@@ -16099,26 +16078,26 @@ BIF_DECL(BIF_UnZipRawMemory)
 	{
 		LPVOID aDataBuf = NULL;
 		TCHAR *pw[1024] = {};
-		if (!ParamIndexIsOmittedOrEmpty(2))
+		if (!ParamIndexIsOmittedOrEmpty(3))
 		{
-			TCHAR *pwd = TokenToString(*aParam[2]);
-			size_t pwlen = _tcslen(TokenToString(*aParam[2]));
+			TCHAR *pwd = TokenToString(*aParam[3]);
+			size_t pwlen = _tcslen(TokenToString(*aParam[3]));
 			for(size_t i = 0;i <= pwlen;i++)
 				pw[i] = &pwd[i];
 		}
-		aResultToken.value_int64 = DecompressBuffer((void *)TokenToInt64(*aParam[0]), aDataBuf,pw);
+		aResultToken.value_int64 = DecompressBuffer((void *)TokenToInt64(*aParam[0]), aDataBuf, (SIZE_T)TokenToInt64(*aParam[1]), pw);
 		if (aResultToken.value_int64)
 		{
 			aResultToken.symbol = SYM_INTEGER;
-			if (!ParamIndexIsOmitted(1))
+			if (!ParamIndexIsOmitted(2))
 			{
-				if (aParam[1]->symbol == SYM_VAR)
+				if (aParam[2]->symbol == SYM_VAR)
 				{
-					aParam[1]->var->SetCapacity((VarSizeType)aResultToken.value_int64 + sizeof(TCHAR));
-					memmove(aParam[1]->var->mCharContents,aDataBuf,(SIZE_T)aResultToken.value_int64 + sizeof(TCHAR));
+					aParam[2]->var->SetCapacity((VarSizeType)aResultToken.value_int64 + sizeof(TCHAR));
+					memmove(aParam[2]->var->mCharContents,aDataBuf,(SIZE_T)aResultToken.value_int64 + sizeof(TCHAR));
 				}
-				else if (TokenToInt64(*aParam[1]) > 1024) // Assume address
-					memmove((void *)TokenToInt64(*aParam[1]),aDataBuf,(SIZE_T)aResultToken.value_int64);
+				else if (TokenToInt64(*aParam[2]) > 1024) // Assume address
+					memmove((void *)TokenToInt64(*aParam[2]),aDataBuf,(SIZE_T)aResultToken.value_int64);
 
 			}
 			SecureZeroMemory(aDataBuf, (size_t)aResultToken.value_int64);
@@ -16493,7 +16472,7 @@ BIF_DECL(BIF_OnMessage)
 	// ByRef or optional parameters.
 	// If the parameter is not an object or a valid function...
 	if (!callback || func && (func->mIsBuiltIn || func->mMinParams > 4))
-		_f_throw(ERR_PARAM2_INVALID);
+		_f_throw(specified_hwnd ? ERR_PARAM3_INVALID : ERR_PARAM2_INVALID);
 
 	// Check if this message already exists in the array:
 	MsgMonitorStruct *pmonitor = g_MsgMonitor.Find(specified_msg, specified_hwnd, callback);
