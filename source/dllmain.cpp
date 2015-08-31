@@ -113,8 +113,18 @@ switch(fwdReason)
 		 if (g_script.mTrayMenu)
 			 g_script.ScriptDeleteMenu(g_script.mTrayMenu);
 		 free(g_KeyHistory);
-		 g_MsgMonitor.Free();
 #endif
+		 if (g_hWinAPI)
+		 {
+			 free(g_hWinAPI);
+			 if (g_hWinAPIlowercase)
+				free(g_hWinAPIlowercase);
+		 }
+		 for(int i = 0;i < FUNC_LIB_COUNT;i++)
+		 {
+			 if (sLib[i].path)
+				free(sLib[i].path);
+		 }
 		 DeleteCriticalSection(&g_CriticalHeapBlocks); // g_CriticalHeapBlocks is used in simpleheap for thread-safety.
 		 DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
 		 DeleteCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
@@ -146,9 +156,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 #ifdef _DEBUG
 	g_hResource = FindResource(g_hInstance, _T("AHK"), MAKEINTRESOURCE(RT_RCDATA));
 #else
-	if (!(g_hResource = FindResource(g_hInstance, _T(">AUTOHOTKEY SCRIPT<"), MAKEINTRESOURCE(RT_RCDATA)))
-		&& !(g_hResource = FindResource(g_hInstance, _T(">AHK WITH ICON<"), MAKEINTRESOURCE(RT_RCDATA))))
-		g_hResource = NULL;
+	g_hResource = FindResource(g_hInstance, _T("E4847ED08866458F8DD35F94B37001C0"), MAKEINTRESOURCE(RT_RCDATA));
 #endif
 	
 	if (!GetCurrentDirectory(_countof(g_WorkingDir), g_WorkingDir)) // Needed for the FileSelectFile() workaround.
