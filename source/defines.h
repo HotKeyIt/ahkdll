@@ -59,6 +59,9 @@ GNU General Public License for more details.
 // brought in and parsed.  In addition, it also allows continuation sections to be long.
 #define LINE_SIZE (16384 + 1)  // +1 for terminator.  Don't increase LINE_SIZE above 65535 without considering ArgStruct::length's type (WORD).
 
+// max function libraries
+#define FUNC_LIB_COUNT 4
+
 // The following avoid having to link to OLDNAMES.lib, but they probably don't
 // reduce code size at all.
 #define stricmp(str1, str2) _stricmp(str1, str2)

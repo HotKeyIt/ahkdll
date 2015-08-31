@@ -480,6 +480,7 @@ void Script::Destroy()
 	mFirstTimer = NULL;
 	mOnExitLabel = NULL;
 	mOnClipboardChangeLabel = NULL;
+	
 	mTempFunc = NULL;
 	mTempLabel = NULL;
 	mTempLine = NULL;
@@ -1371,6 +1372,7 @@ ResultType Script::ExitApp(ExitReasons aExitReason, LPTSTR aBuf, int aExitCode)
 		// terminate the app.  Causes of script exit other than ExitApp are expected to
 		// terminate the app immediately even if OnExit is running.
 #ifdef _USRDLL
+		sOnExitIsRunning = false;
 		if (sExitAppShouldTerminate && g_Reloading)
 		{
 			sExitAppShouldTerminate = false;
@@ -1378,7 +1380,10 @@ ResultType Script::ExitApp(ExitReasons aExitReason, LPTSTR aBuf, int aExitCode)
 		}
 #endif
 		if (sExitAppShouldTerminate || aExitReason != EXIT_EXIT)
+		{
+			sExitAppShouldTerminate = false;
 			TerminateApp(aExitReason, aExitCode); // Exit early; don't run the OnExit callbacks (again).
+		}
 		if (*Line::sArgDeref[0]) // ExitApp with a parameter -- relies on the aExitReason check above.
 			sExitCode = aExitCode; // Override the previous exit code.
 		sExitAppShouldTerminate = true; // Signal our other instance that ExitApp was called.
@@ -3404,7 +3409,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		if (*(unsigned int*)textbuf.mBuffer == 0x04034b50)
 		{
 			LPVOID aDataBuf;
-			aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer,aDataBuf,g_default_pwd);
+			aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength, g_default_pwd);
 			if (aSizeDeCompressed)
 			{
 				LPVOID buff = _alloca(aSizeDeCompressed); // will be freed when function returns
@@ -3426,13 +3431,10 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 	HGLOBAL hResData;
 
 #ifdef _DEBUG
-	if (hRes = FindResource(NULL, _T("AHK"), MAKEINTRESOURCE(RT_RCDATA)))
+	hRes = FindResource(NULL, _T("AHK"), MAKEINTRESOURCE(RT_RCDATA));
 #else
-	if (hRes = FindResource(NULL, _T(">AUTOHOTKEY SCRIPT<"), MAKEINTRESOURCE(RT_RCDATA)))
+	hRes = FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), MAKEINTRESOURCE(RT_RCDATA));
 #endif
-	{}
-	else if (hRes = FindResource(NULL, _T(">AHK WITH ICON<"), MAKEINTRESOURCE(RT_RCDATA)))
-	{}
 	
 	if ( !( hRes 
 			&& (textbuf.mLength = SizeofResource(NULL, hRes))
@@ -3445,7 +3447,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 	if (*(unsigned int*)textbuf.mBuffer == 0x04034b50)
 	{
 		LPVOID aDataBuf;
-		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer,aDataBuf,g_default_pwd);
+		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength, g_default_pwd);
 		if (aSizeDeCompressed)
 		{
 			LPVOID buff = _alloca(aSizeDeCompressed); // will be freed when function returns
@@ -9866,12 +9868,6 @@ ResultType Script::ResolveClasses()
 
 
 #ifndef AUTOHOTKEYSC
-struct FuncLibrary
-{
-	LPTSTR path;
-	DWORD_PTR length;
-};
-
 Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &aErrorWasShown, bool &aFileWasFound, bool aIsAutoInclude)
 // Caller must ensure that aFuncName doesn't already exist as a defined function.
 // If aFuncNameLength is 0, the entire length of aFuncName is used.
@@ -9895,26 +9891,19 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	#define FUNC_STD_LIB _T("Lib\\") // Needs trailing but not leading backslash.
 	#define FUNC_STD_LIB_LENGTH (_countof(FUNC_STD_LIB) - 1)
 
-	#define FUNC_LIB_COUNT 4
-	static FuncLibrary sLib[FUNC_LIB_COUNT] = {0};
-	static LPTSTR winapi;
-
 	if (!sLib[0].path) // Allocate & discover paths only upon first use because many scripts won't use anything from the library. This saves a bit of memory and performance.
 	{
 		LPVOID aDataBuf;
-		HRSRC hResInfo = FindResource(g_hInstance, _T("WINAPI"), MAKEINTRESOURCE(10));
-		DecompressBuffer(LockResource(LoadResource(g_hInstance, hResInfo)), aDataBuf, NULL);
-#ifdef _UNICODE
-		winapi = UTF8ToWide((LPCSTR)aDataBuf);
-#else
-		winapi = (LPTSTR)aDataBuf;
-#endif
+		HRSRC hWinApi = FindResource(g_hInstance, _T("C974C3B7677A402D93B047DA402587C7"), MAKEINTRESOURCE(10));
+		DWORD szWinApi = DecompressBuffer(LockResource(LoadResource(g_hInstance, hWinApi)), aDataBuf, SizeofResource(g_hInstance, hWinApi), NULL);
+		g_hWinAPI = (LPSTR)malloc(szWinApi);
+		g_hWinAPIlowercase = (LPSTR)malloc(szWinApi);
+		memcpy(g_hWinAPI, aDataBuf, szWinApi);
+		memcpy(g_hWinAPIlowercase, aDataBuf, szWinApi);
+		VirtualFree(aDataBuf,szWinApi,MEM_RELEASE);
+		CharLowerA(g_hWinAPIlowercase);
 		for (i = 0; i < FUNC_LIB_COUNT; ++i)
-#ifdef _USRDLL
 			if (   !(sLib[i].path = tmalloc(MAX_PATH))   ) // When dll script is restarted, SimpleHeap is deleted and we don't want to delete static memberst
-#else
-			if (   !(sLib[i].path = (LPTSTR) SimpleHeap::Malloc(MAX_PATH * sizeof(TCHAR)))   ) // Need MAX_PATH for to allow room for appending each candidate file/function name.
-#endif
 				return NULL; // Due to rarity, simply pass the failure back to caller.
 
 		FuncLibrary *this_lib;
@@ -10170,7 +10159,7 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	if (*(unsigned int*)textbuf.mBuffer == 0x04034b50)
 	{
 		LPVOID aDataBuf;
-		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer,aDataBuf);
+		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength);
 		if (aSizeDeCompressed)
 		{
 			LPVOID buff = _alloca(aSizeDeCompressed); // will be freed when function returns
@@ -10230,40 +10219,80 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	g->CurrentFunc = current_func; // Restore.
 	return FindFunc(aFuncName, aFuncNameLength);
 winapi:
-	TCHAR parameter[1024] = { L'#', L'D', L'l', L'l', L'I', L'm', L'p', L'o', L'r', L't', L'\\' };
+	TCHAR parameter[512] = { L'#', L'D', L'l', L'l', L'I', L'm', L'p', L'o', L'r', L't', L'\\' }; // Should be enough room for any dll function definition
 	memmove(&parameter[11], aFuncName, aFuncNameLength*sizeof(TCHAR));
 	parameter[aFuncNameLength + 11] = L',';
-	parameter[aFuncNameLength + 12] = '\0';
-	LPTSTR found;
-	if (found = _tcsstr(winapi, (LPTSTR)&parameter[10]))
+	parameter[aFuncNameLength + 12] = L'\0';
+
+	// parameterlow is used to find the function definition
+	char parameterlowercase[MAX_PATH] = { '\\' };
+#ifdef UNICODE
+	WideCharToMultiByte(CP_ACP, 0, aFuncName, (int)aFuncNameLength, &parameterlowercase[1], (int)aFuncNameLength + 1, 0, 0);
+	parameterlowercase[aFuncNameLength + 1] = L',';
+	parameterlowercase[aFuncNameLength + 2] = L'\0';
+#else
+	_tcsncpy(&parameterlowercase[1], aFuncName, aFuncNameLength);
+	parameterlowercase[aFuncNameLength + 1] = ',';
+	parameterlowercase[aFuncNameLength + 2] = '\0';
+#endif
+	CharLowerA(parameterlowercase);
+	LPSTR found;
+	if (found = strstr(g_hWinAPIlowercase, parameterlowercase))
 	{
+#ifdef UNICODE
+		parameter[10] = L',';
+#else
+		parameter[10] = ',';
+#endif
+		found = g_hWinAPI + (found - g_hWinAPIlowercase);
 		parameter[10] = L',';
 		LPTSTR aDest = (LPTSTR)&parameter[aFuncNameLength + 12];
-		LPTSTR aDllName = _tcsstr(found, _T("\t")) + 1;
-		size_t aNameLen = _tcsstr(aDllName, _T("\\")) - aDllName + 1;
+		LPSTR aDllName = strstr(found, "\t") + 1;
+		size_t aNameLen = strstr(aDllName, "\\") - aDllName + 1;
+#ifdef UNICODE
+		MultiByteToWideChar(CP_UTF8, 0, aDllName, (int)aNameLen, aDest, (int)aNameLen * sizeof(TCHAR));
+#else
 		_tcsncpy(aDest, aDllName, aNameLen);
+#endif
 		aDest = aDest + aNameLen;
+#ifdef UNICODE
+		MultiByteToWideChar(CP_UTF8, 0, found + 1, (int)aFuncNameLength + 1, aDest, (int)aFuncNameLength * sizeof(TCHAR) + sizeof(TCHAR));
+#else
 		_tcsncpy(aDest, found + 1, aFuncNameLength + 1);
+#endif
 		// Override _ in the end of definition (ahk function like SendMessage, Sleep, Send, SendInput ...
+#ifdef UNICODE
+		if (*(aFuncName + aFuncNameLength - 1) == L'_')
+		{
+			*(aDest + aFuncNameLength - 1) = L',';
+			*(aDest + aFuncNameLength) = L'\0';
+			aDest = aDest + aFuncNameLength;
+		}
+#else
 		if (*(aFuncName + aFuncNameLength - 1) == '_')
 		{
 			*(aDest + aFuncNameLength - 1) = ',';
 			*(aDest + aFuncNameLength) = '\0';
 			aDest = aDest + aFuncNameLength;
 		}
+#endif
 		else
 		{
 			aDest = aDest + aFuncNameLength + 1;
 		}
-		for (found = _tcsstr(found, _T(",")) + 1; *found != L'\\'; found++)
+		for (found = strstr(found, ",") + 1; *found != '\\'; found++)
 		{
-			if (*found == L'U' || *found == L'u')
+			if (*found == 'U' || *found == 'u')
 			{
+#ifdef UNICODE
 				*aDest = L'U';
+#else
+				*aDest = 'U';
+#endif
 				aDest++;
 				continue;
 			}
-			else if (*found == L'z' || *found == L'Z')
+			else if (*found == 'z' || *found == 'Z')
 			{
 #ifdef _UNICODE
 				_tcscpy(aDest, _T("USHORT"));
@@ -10273,27 +10302,27 @@ winapi:
 				aDest = aDest + 5;
 #endif
 			}
-			else if (*found == L's' || *found == L'S')
+			else if (*found == 's' || *found == 'S')
 			{
 				_tcscpy(aDest, _T("STR"));
 				aDest = aDest + 3;
 			}
-			else if (*found == L't' || *found == L't')
+			else if (*found == 't' || *found == 't')
 			{
 				_tcscpy(aDest, _T("PTR"));
 				aDest = aDest + 3;
 			}
-			else if (*found == L'a' || *found == L'A')
+			else if (*found == 'a' || *found == 'A')
 			{
 				_tcscpy(aDest, _T("ASTR"));
 				aDest = aDest + 4;
 			}
-			else if (*found == L'w' || *found == L'W')
+			else if (*found == 'w' || *found == 'W')
 			{
 				_tcscpy(aDest, _T("WSTR"));
 				aDest = aDest + 4;
 			}
-			else if (*found == L'x' || *found == L'X') //TCHAR
+			else if (*found == 'x' || *found == 'X') //TCHAR
 			{
 #ifdef _UNICODE
 				_tcscpy(aDest, _T("USHORT"));
@@ -10303,15 +10332,15 @@ winapi:
 				aDest = aDest + 5;
 #endif
 			}
-			else if ((*found == L'i' || *found == L'I') && *(found + 1) == L'6')
+			else if ((*found == 'i' || *found == 'I') && *(found + 1) == '6')
 			{
 				_tcscpy(aDest, _T("INT64"));
 				aDest = aDest + 5;
 				found++;
 			}
-			else if (*found == L'i' || *found == L'I')
+			else if (*found == 'i' || *found == 'I')
 			{
-				if (*(found + 1) != L'\\' || *(aDest - 1) == 'u' || *(aDest - 1) == 'U')
+				if (*(found + 1) != '\\' || *(aDest - 1) == 'u' || *(aDest - 1) == 'U')
 				{	// Not default return type int, no need to define
 					_tcscpy(aDest, _T("INT"));
 					aDest = aDest + 3;
@@ -10321,30 +10350,30 @@ winapi:
 					aDest--;
 				}
 			}
-			else if (*found == L'h' || *found == L'H')
+			else if (*found == 'h' || *found == 'H')
 			{
 				_tcscpy(aDest, _T("SHORT"));
 				aDest = aDest + 5;
 			}
-			else if (*found == L'c' || *found == L'C')
+			else if (*found == 'c' || *found == 'C')
 			{
 				_tcscpy(aDest, _T("CHAR"));
 				aDest = aDest + 4;
 			}
-			else if (*found == L'f' || *found == L'F')
+			else if (*found == 'f' || *found == 'F')
 			{
 				_tcscpy(aDest, _T("FLOAT"));
 				aDest = aDest + 5;
 			}
-			else if (*found == L'd' || *found == L'D')
+			else if (*found == 'd' || *found == 'D')
 			{
 				_tcscpy(aDest, _T("DOUBLE"));
 				aDest = aDest + 6;
 			}
 
-			if (*(found + 1) == L'*' || *(found + 1) == L'p' || *(found + 1) == L'P')
+			if (*(found + 1) == '*' || *(found + 1) == 'p' || *(found + 1) == 'P')
 			{
-				*aDest = *found;
+				_tcscpy(aDest, _T("*"));
 				aDest++;
 			}
 			_tcscpy(aDest, _T(",,"));
@@ -10608,24 +10637,6 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		bif = BIF_CriticalObject;	
 		min_params = 0;
 		max_params = 2;
-	}
-	else if (!_tcsicmp(func_name, _T("Lock")))
-	{
-		bif = BIF_Lock;	
-		min_params = 1;
-		max_params = 1;
-	}
-	else if (!_tcsicmp(func_name, _T("TryLock")))
-	{
-		bif = BIF_TryLock;	
-		min_params = 1;
-		max_params = 1;
-	}
-	else if (!_tcsicmp(func_name, _T("UnLock")))
-	{
-		bif = BIF_UnLock;	
-		min_params = 1;
-		max_params = 1;
 	}
 	else if (!_tcsicmp(func_name, _T("FindFunc")))  // addFile() Naveen v8.
 	{

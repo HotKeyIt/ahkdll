@@ -248,7 +248,7 @@ END
 /////////////////////////////////////////////////////////////////////////////
 #endif    // not APSTUDIO_INVOKED
 #ifndef AUTOHOTKEYSC
-WINAPI	RCDATA	".\\source\\resources\\WINAPI.zip"
+C974C3B7677A402D93B047DA402587C7	RCDATA	".\\source\\resources\\WINAPI.zip"
 #endif
 /*
 #ifndef _USRDLL
@@ -260,6 +260,7 @@ WINAPI	RCDATA	".\\source\\resources\\WINAPI.zip"
 #endif
 */
 #ifdef _DEBUG
+#ifndef _USRDLL
 //AHK		RCDATA	".\\source\\resources\\AHK.zip"
 AHK RCDATA ".\\Test\\Test.ahk"
 #endif

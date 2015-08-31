@@ -23,6 +23,11 @@ GNU General Public License for more details.
 #include "os_version.h" // For the global OS_Version object
 #include "MemoryModule.h"
 #include "Debugger.h"
+
+#ifndef AUTOHOTKEYSC
+extern FuncLibrary sLib[FUNC_LIB_COUNT]; // function libraries
+extern LPSTR g_hWinAPI, g_hWinAPIlowercase; // loads WinAPI functions definitions from resource
+#endif
 extern HCUSTOMMODULE g_hMSVCR;
 #ifdef _USRDLL
 extern bool g_Reloading;
