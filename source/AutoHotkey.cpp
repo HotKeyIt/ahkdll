@@ -50,7 +50,7 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 	g_TlsDoExecute = true;
 	// Execute only if A_IsCompiled
 #ifndef AUTOHOTKEYSC
-	if (!FindResource(NULL, _T(">AUTOHOTKEY SCRIPT<"), MAKEINTRESOURCE(RT_RCDATA)))
+	if (!FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), MAKEINTRESOURCE(RT_RCDATA)))
 		return;
 #endif
 
@@ -110,10 +110,10 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	/*
 	HGLOBAL hResData;
 	if (g_hResource = FindResource(NULL, _T("MSVCR"), MAKEINTRESOURCE(RT_RCDATA)))
-		if (hResData = LoadResource(g_hInstance, g_hResource))
+		if (hResData = LoadResource(NULL, g_hResource))
 		{
 			LPVOID aDataBuf;
-			SIZE_T aSizeDeCompressed = DecompressBuffer(LockResource(hResData), aDataBuf, g_default_pwd);
+			SIZE_T aSizeDeCompressed = DecompressBuffer(LockResource(hResData), aDataBuf, SizeOfResource(NULL,g_hResource), g_default_pwd);
 			if (aSizeDeCompressed)
 			{
 				g_hMSVCR = (HCUSTOMMODULE)MemoryLoadLibrary(aDataBuf);
@@ -125,7 +125,7 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 #ifdef _DEBUG
 	g_hResource = FindResource(NULL, _T("AHK"), MAKEINTRESOURCE(RT_RCDATA));
 #else
-	g_hResource = FindResource(NULL, _T(">AUTOHOTKEY SCRIPT<"), MAKEINTRESOURCE(RT_RCDATA));
+	g_hResource = FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), MAKEINTRESOURCE(RT_RCDATA));
 #endif
 	g_hInstance = hInstance;
 	InitializeCriticalSection(&g_CriticalRegExCache); // v1.0.45.04: Must be done early so that it's unconditional, so that DeleteCriticalSection() in the script destructor can also be unconditional (deleting when never initialized can crash, at least on Win 9x).
