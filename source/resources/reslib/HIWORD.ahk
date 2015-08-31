@@ -1,3 +1,3 @@
 HIWORD(a){
-  return ToShort(a)>>16&0xffff
+  return ToInt(a)>>16&0xffff
 }

@@ -5,11 +5,11 @@ DllCall("oleaut32\SafeArrayAccessData","ptr",ComObjValue(arr),"ptr*",arr_data)
 return {ref:ComObject(0x4000|Type,arr_data),_:arr,base:base}
 }
 ComVarGet(cv,p*){
-if p.Length()=""
+if !p.Length()
 return cv._[0]
 }
 ComVarSet(cv,v,p*){
-if p.Length()=""
+if !p.Length()
 return cv._[0]:=v
 }
 ComVarDel(cv){

@@ -1,3 +1,3 @@
 HIBYTE(a){
-  return ToChar(a)>>8&0xff
+  return ToShort(a)>>8&0xff
 }

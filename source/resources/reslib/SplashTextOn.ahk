@@ -7,12 +7,13 @@
 	if (aWidth aHeight aTitle aText = ""){
 		if (g_hWndSplash && IsWindow(g_hWndSplash))
 			DestroyWindow(g_hWndSplash)
-		return g_hWndSplash := 0
+		g_hWndSplash := 0
+		return
 	}
 	; Add some caption and frame size to window:
-	aWidth += GetSystemMetrics(SM_CXFIXEDFRAME) * 2
+	aWidth := (aWidth?aWidth:200) + GetSystemMetrics(SM_CXFIXEDFRAME) * 2
 	min_height := GetSystemMetrics(SM_CYCAPTION) + GetSystemMetrics(SM_CXFIXEDFRAME) * 2
-	aHeight += min_height
+	aHeight := (aHeight?aHeight:0) + min_height
 
 	pt[] := CenterWindow(aWidth, aHeight) ; Determine how to center the window in the region that excludes the task bar.
 
@@ -72,5 +73,5 @@
 	Sleep,-1
 	; UpdateWindow() would probably achieve the same effect as the above, but it feels safer to do
 	; the above because it ensures that our message queue is empty prior to returning to our caller.
-	return 0
+	; return 0
 }
