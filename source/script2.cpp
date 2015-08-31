@@ -10309,7 +10309,7 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 		if (*(unsigned int*)res_lock == 0x04034b50)
 		{
 			LPVOID aDataBuf;
-			aSizeDeCompressed = DecompressBuffer(res_lock, aDataBuf, NULL);
+			aSizeDeCompressed = DecompressBuffer(res_lock, aDataBuf, SizeofResource(NULL,res), NULL);
 			if (aSizeDeCompressed)
 			{
 				success = WriteFile(hfile, aDataBuf, aSizeDeCompressed, &num_bytes_written, NULL);
@@ -10357,7 +10357,7 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 			if (*(unsigned int*)res_lock == 0x04034b50)
 			{
 				LPVOID aDataBuf;
-				aSizeDeCompressed = DecompressBuffer(res_lock, aDataBuf, NULL);
+				aSizeDeCompressed = DecompressBuffer(res_lock, aDataBuf, SizeofResource(NULL,res), NULL);
 				if (aSizeDeCompressed)
 				{
 					success = WriteFile(hfile, aDataBuf, aSizeDeCompressed, &num_bytes_written, NULL);
@@ -15241,25 +15241,6 @@ ResultType STDMETHODCALLTYPE CriticalObject::Invoke(
 	 return r;
 }
 
-BIF_DECL(BIF_Lock)
-{
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = _T("");
-	EnterCriticalSection((LPCRITICAL_SECTION) TokenToInt64(*aParam[0]));
-}
-
-BIF_DECL(BIF_TryLock)
-{
-	aResultToken.symbol = SYM_INTEGER;
-	aResultToken.value_int64 = TryEnterCriticalSection((LPCRITICAL_SECTION) TokenToInt64(*aParam[0]));
-}
-
-BIF_DECL(BIF_UnLock)
-{
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = _T("");
-	LeaveCriticalSection((LPCRITICAL_SECTION) TokenToInt64(*aParam[0]));
-}
 
 BIF_DECL(BIF_StrLen)
 // Caller has ensured that SYM_VAR's Type() is VAR_NORMAL and that it's either not an environment
@@ -17913,7 +17894,7 @@ BIF_DECL(BIF_ResourceLoadLibrary)
 	if (*(unsigned int*)textbuf.mBuffer == 0x04034b50)
 	{
 		LPVOID aDataBuf;
-		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer,aDataBuf);
+		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer,aDataBuf, textbuf.mLength);
 		if (aSizeDeCompressed)
 		{
 			module = MemoryLoadLibrary( aDataBuf );
@@ -18059,31 +18040,31 @@ BIF_DECL(BIF_UnZipRawMemory)
 	{
 		LPVOID aDataBuf = NULL;
 		WCHAR *pw[1024] = {};
-		if (!ParamIndexIsOmittedOrEmpty(2))
+		if (!ParamIndexIsOmittedOrEmpty(3))
 		{
-			size_t pwlen = _tcslen(TokenToString(*aParam[2]));
+			size_t pwlen = _tcslen(TokenToString(*aParam[3]));
 #ifdef _UNICODE
-			WCHAR *pwd = TokenToString(*aParam[2]);
+			WCHAR *pwd = TokenToString(*aParam[3]);
 #else
 			WCHAR *pwd = (WCHAR*)alloca((pwlen + 1) * sizeof(WCHAR));
-			MultiByteToWideChar(CP_ACP, 0, TokenToString(*aParam[2]), pwlen, pwd, (pwlen + 1) * sizeof(WCHAR));
+			MultiByteToWideChar(CP_ACP, 0, TokenToString(*aParam[3]), pwlen, pwd, (pwlen + 1) * sizeof(WCHAR));
 #endif
 			for(size_t i = 0;i <= pwlen;i++)
 				pw[i] = &pwd[i];
 		}
-		aResultToken.value_int64 = DecompressBuffer((void *)TokenToInt64(*aParam[0]), aDataBuf,pw);
+		aResultToken.value_int64 = DecompressBuffer((void *)TokenToInt64(*aParam[0]), aDataBuf, (SIZE_T)TokenToInt64(*aParam[1]), pw);
 		if (aResultToken.value_int64)
 		{
 			aResultToken.symbol = SYM_INTEGER;
-			if (!ParamIndexIsOmitted(1))
+			if (!ParamIndexIsOmitted(2))
 			{
-				if (aParam[1]->symbol == SYM_VAR)
+				if (aParam[2]->symbol == SYM_VAR)
 				{
-					aParam[1]->var->SetCapacity((VarSizeType)aResultToken.value_int64 + sizeof(TCHAR));
-					memmove(aParam[1]->var->mCharContents,aDataBuf,(SIZE_T)aResultToken.value_int64 + sizeof(TCHAR));
+					aParam[2]->var->SetCapacity((VarSizeType)aResultToken.value_int64 + sizeof(TCHAR));
+					memmove(aParam[2]->var->mCharContents,aDataBuf,(SIZE_T)aResultToken.value_int64 + sizeof(TCHAR));
 				}
-				else if (TokenToInt64(*aParam[1]) > 1024) // Assume address
-					memmove((void *)TokenToInt64(*aParam[1]),aDataBuf,(SIZE_T)aResultToken.value_int64);
+				else if (TokenToInt64(*aParam[2]) > 1024) // Assume address
+					memmove((void *)TokenToInt64(*aParam[2]),aDataBuf,(SIZE_T)aResultToken.value_int64);
 
 			}
 			SecureZeroMemory(aDataBuf, (size_t)aResultToken.value_int64);
@@ -18574,14 +18555,11 @@ void MsgMonitorList::RemoveAll()
 			memmove(aMonitor, aMonitor + 1, (mCount - mon_index) * sizeof(MsgMonitorStruct));
 		release_me->Release(); // Must be called after the above in case it calls a __delete() meta-function.
 	}
-	// free(mMonitor); // Do not free MsgMonitor when script is reloaded
+	free(mMonitor);
+	mTop = NULL;
 	mCountMax = 0;
 	mCount = 0;
-}
-
-void MsgMonitorList::Free()
-{
-	free(mMonitor);
+	mMonitor = NULL;
 }
 
 #endif // _USRDLL
