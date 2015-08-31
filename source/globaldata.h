@@ -24,6 +24,10 @@ GNU General Public License for more details.
 #include "MemoryModule.h"
 #include "Debugger.h"
 
+#ifndef AUTOHOTKEYSC
+extern FuncLibrary sLib[FUNC_LIB_COUNT]; // function libraries
+extern LPSTR g_hWinAPI, g_hWinAPIlowercase; // loads WinAPI functions definitions from resource
+#endif
 extern HRSRC g_hResource;		// for compiled AutoHotkey.exe
 extern HCUSTOMMODULE g_hMSVCR;
 #ifdef _USRDLL

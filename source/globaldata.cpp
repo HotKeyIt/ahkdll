@@ -28,6 +28,11 @@ GNU General Public License for more details.
 // state, don't keep anything in the global_struct except those things
 // which are necessary to save and restore (even though it would clean
 // up the code and might make maintaining it easier):
+
+#ifndef AUTOHOTKEYSC
+FuncLibrary sLib[FUNC_LIB_COUNT] = { 0 }; // function libraries
+LPSTR g_hWinAPI = NULL, g_hWinAPIlowercase = NULL;  // loads WinAPI functions definitions from resource
+#endif
 HRSRC g_hResource = NULL; // Set by WinMain()	// for compiled AutoHotkey.exe
 HCUSTOMMODULE g_hMSVCR = NULL; // MSVR100.dll
 #ifdef _USRDLL
