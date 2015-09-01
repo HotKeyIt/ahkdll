@@ -9315,7 +9315,7 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	g_MustDeclare = must_declare;
 	return FindFunc(aFuncName, aFuncNameLength);
 winapi:
-	TCHAR parameter[512] = { L'#', L'D', L'l', L'l', L'I', L'm', L'p', L'o', L'r', L't', L'\\' }; // Should be enough room for any dll function definition
+	TCHAR parameter[512] = { L'#', L'D', L'l', L'l', L'I', L'm', L'p', L'o', L'r', L't', L',' }; // Should be enough room for any dll function definition
 	memmove(&parameter[11], aFuncName, aFuncNameLength*sizeof(TCHAR));
 	parameter[aFuncNameLength + 11] = L',';
 	parameter[aFuncNameLength + 12] = L'\0';
@@ -9330,7 +9330,7 @@ winapi:
 	if (found = strstr(g_hWinAPIlowercase, parameterlowercase))
 	{
 		found = g_hWinAPI + (found - g_hWinAPIlowercase);
-		parameter[10] = L',';
+		//parameter[10] = L',';
 		LPTSTR aDest = (LPTSTR)&parameter[aFuncNameLength + 12];
 		LPSTR aDllName = strstr(found, "\t") + 1;
 		size_t aNameLen = strstr(aDllName, "\\") - aDllName + 1;
@@ -9346,6 +9346,7 @@ winapi:
 		}
 		else
 		{
+			*(aDest + aFuncNameLength) = L',';
 			aDest = aDest + aFuncNameLength + 1;
 		}
 		for (found = strstr(found, ",") + 1; *found != '\\'; found++)
