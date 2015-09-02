@@ -95,7 +95,7 @@ WarnMode g_Warn_UseUnsetGlobal = WARNMODE_OFF;		//
 WarnMode g_Warn_LocalSameAsGlobal = WARNMODE_OFF;	//
 SingleInstanceType g_AllowOnlyOneInstance = SINGLE_INSTANCE_PROMPT;
 PVOID g_ExceptionHandler = NULL;
-bool g_ExceptionWarnContinuable = false;
+bool g_ExceptionWarnContinuable = true;
 #ifndef MINIDLL
 HookType g_ExceptionHooksToEnable = NULL;
 bool g_NoTrayIcon = false;
