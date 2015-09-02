@@ -1339,7 +1339,7 @@ ResultType Script::Reload(bool aDisplayErrors)
 	WCHAR buf[MAX_PATH];
 	GetModuleFileNameW(NULL, buf, MAX_PATH);
 	int argc = 0;
-	LPWSTR *argv = CommandLineToArgvW(GetCommandLine(), &argc);
+	LPWSTR *argv = CommandLineToArgvW(GetCommandLineW(), &argc);
 	if (argc = 1 && !wcscmp(buf, argv[0]))
 	{
 		LocalFree(argv);
