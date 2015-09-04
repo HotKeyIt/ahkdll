@@ -10672,8 +10672,8 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 	else if (!_tcsicmp(func_name, _T("UnZipRawMemory")))  // lowlevel() Naveen v9.
 	{
 		bif = BIF_UnZipRawMemory;
-		min_params = 1;
-		max_params = 3;
+		min_params = 2;
+		max_params = 4;
 	}
 	else if (!_tcsicmp(func_name, _T("getTokenValue")))  // lowlevel() Naveen v9.
 	{
