@@ -135,7 +135,7 @@ FuncEntry g_BIF[] =
 	// AHK_H Functions
 	BIF1(Getvar, 1, 2, true),
 	BIF1(Alias, 1, 2, false),
-	BIF1(UnZipRawMemory, 1, 3, true),
+	BIF1(UnZipRawMemory, 2, 4, true),
 	BIF1(CacheEnable, 1, 1, true),
 	BIF1(getTokenValue, 1, 1, true),
 	BIF1(ResourceLoadLibrary, 1, 1, true),
