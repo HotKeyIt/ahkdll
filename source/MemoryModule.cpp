@@ -74,7 +74,7 @@ MyDeactivateActCtx _DeactivateActCtx = (MyDeactivateActCtx)GetProcAddress(libker
 MyActivateActCtx _ActivateActCtx = (MyActivateActCtx)GetProcAddress(libkernel32,"ActivateActCtx");
 // hook function and global vars for HookRtlPcToFileHeader
 typedef PVOID(*MyRtlPcToFileHeader)(PVOID PcValue, PVOID *BaseOfImage);
-MyRtlPcToFileHeader _RtlPcToFileHeader;
+MyRtlPcToFileHeader _RtlPcToFileHeader = (MyRtlPcToFileHeader)GetProcAddress(GetModuleHandleA("ntdll.dll"), "RtlPcToFileHeader");
 HMEMORYMODULE currentModuleStart;
 PVOID currentModuleEnd;
 
@@ -656,15 +656,23 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data,
     if (result->headers->OptionalHeader.AddressOfEntryPoint != 0) {
 		if (result->isDLL) {
 			DllEntryProc DllEntry = (DllEntryProc)(code + result->headers->OptionalHeader.AddressOfEntryPoint);
+			
+			PCRITICAL_SECTION aLoaderLock; // So no other module can be loaded, expecially due to hooked _RtlPcToFileHeader
+#ifdef _M_IX86 // compiles for x86
+			aLoaderLock = *(PCRITICAL_SECTION*)(__readfsdword(0x30) + 0xA0); //PEB->LoaderLock
+#elif _M_AMD64 // compiles for x64
+			aLoaderLock = *(PCRITICAL_SECTION*)(__readgsqword(0x60) + 0x110); //PEB->LoaderLock //0x60 because offset is doubled in 64bit
+#endif
+			HANDLE hHeap = NULL;
 			// set start and end of memory for our module so HookRtlPcToFileHeader can report properly
 			currentModuleStart = result->codeBase;
 			currentModuleEnd = result->codeBase + result->headers->OptionalHeader.SizeOfImage;
-			HANDLE hHeap = NULL;
-
-			PHOOK_ENTRY pHook = MinHookEnable(GetProcAddress(GetModuleHandleA("ntdll.dll"), "RtlPcToFileHeader"), &HookRtlPcToFileHeader, &hHeap);
+			EnterCriticalSection(aLoaderLock);
+			PHOOK_ENTRY pHook = MinHookEnable(_RtlPcToFileHeader, &HookRtlPcToFileHeader, &hHeap);
 			// notify library about attaching to process
 			BOOL successfull = (*DllEntry)((HINSTANCE)code, DLL_PROCESS_ATTACH, result);
 			MinHookDisable(pHook);
+			LeaveCriticalSection(aLoaderLock);
 			HeapDestroy(hHeap);
 			
 			if (!successfull) {
