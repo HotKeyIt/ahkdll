@@ -16095,7 +16095,7 @@ BIF_DECL(BIF_UnZipRawMemory)
 				{
 					aParam[2]->var->SetCapacity((VarSizeType)aResultToken.value_int64 + sizeof(char) * 2);
 					memmove(aParam[2]->var->mCharContents,aDataBuf,(SIZE_T)aResultToken.value_int64);
-					memset((char*)aParam[2]->var->mCharContents + sizeof(char), 0, 2);
+					memset((char*)aParam[2]->var->mCharContents + aResultToken.value_int64, 0, 2);
 				}
 				else if (TokenToInt64(*aParam[2]) > 1024) // Assume address
 					memmove((void *)TokenToInt64(*aParam[2]),aDataBuf,(SIZE_T)aResultToken.value_int64);
