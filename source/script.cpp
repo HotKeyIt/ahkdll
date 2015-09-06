@@ -3551,8 +3551,9 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength, g_default_pwd);
 			if (aSizeDeCompressed)
 			{
-				LPVOID buff = _alloca(aSizeDeCompressed); // will be freed when function returns
+				LPVOID buff = _alloca(aSizeDeCompressed + sizeof(TCHAR)); // will be freed when function returns
 				memmove(buff, aDataBuf, aSizeDeCompressed);
+				*((TCHAR*)buff + aSizeDeCompressed) = '\0';
 				SecureZeroMemory(aDataBuf, aSizeDeCompressed);
 				VirtualFree(aDataBuf, aSizeDeCompressed, MEM_RELEASE);
 				textbuf.mLength = aSizeDeCompressed;
@@ -3590,8 +3591,9 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength, g_default_pwd);
 		if (aSizeDeCompressed)
 		{
-			LPVOID buff = _alloca(aSizeDeCompressed); // will be freed when function returns
+			LPVOID buff = _alloca(aSizeDeCompressed + sizeof(TCHAR)); // will be freed when function returns
 			memmove(buff, aDataBuf, aSizeDeCompressed);
+			*((TCHAR*)buff + aSizeDeCompressed) = '\0';
 			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
 			VirtualFree(aDataBuf, aSizeDeCompressed, MEM_RELEASE);
 			textbuf.mLength = aSizeDeCompressed;
@@ -8998,12 +9000,18 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 		// Load WinApi library
 		LPVOID aDataBuf;
 		HRSRC hWinApi = FindResource(g_hInstance, _T("C974C3B7677A402D93B047DA402587C7"), MAKEINTRESOURCE(10));
-		DWORD szWinApi = DecompressBuffer(LockResource(LoadResource(g_hInstance, hWinApi)), aDataBuf, SizeofResource(g_hInstance, hWinApi), NULL);
-		g_hWinAPI = (LPSTR)malloc(szWinApi);
-		g_hWinAPIlowercase = (LPSTR)malloc(szWinApi);
-		memcpy(g_hWinAPI, aDataBuf, szWinApi);
-		memcpy(g_hWinAPIlowercase, aDataBuf, szWinApi);
+		DWORD szWinApi = DecompressBuffer(LockResource(LoadResource(g_hInstance, hWinApi)), aDataBuf, SizeofResource(g_hInstance, hWinApi));
+		// Allocate memory for WinAPI definitions
+		g_hWinAPI = (LPSTR)malloc(szWinApi + sizeof(char));
+		g_hWinAPIlowercase = (LPSTR)malloc(szWinApi + sizeof(char));
+		// copy definitions
+		memmove(g_hWinAPI, aDataBuf, szWinApi);
+		memmove(g_hWinAPIlowercase, aDataBuf, szWinApi);
 		VirtualFree(aDataBuf,szWinApi,MEM_RELEASE);
+		// terminate string
+		*(g_hWinAPI + szWinApi) = '\0';
+		*(g_hWinAPIlowercase + szWinApi) = '\0';
+		// we need lowercase so we can search for function case insensitive
 		CharLowerA(g_hWinAPIlowercase);
 		for (i = 0; i < FUNC_LIB_COUNT; ++i)
 			if (!(sLib[i].path = tmalloc(MAX_PATH))) // When dll script is restarted, SimpleHeap is deleted and we don't want to delete static members
@@ -9256,11 +9264,12 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	if (*(unsigned int*)textbuf.mBuffer == 0x04034b50)
 	{
 		LPVOID aDataBuf;
-		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength, NULL);
+		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength);
 		if (aSizeDeCompressed)
 		{
-			LPVOID buff = _alloca(aSizeDeCompressed); // will be freed when function returns
+			LPVOID buff = _alloca(aSizeDeCompressed + sizeof(TCHAR)); // will be freed when function returns
 			memmove(buff, aDataBuf, aSizeDeCompressed);
+			*((TCHAR*)buff + aSizeDeCompressed) = '\0';
 			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
 			VirtualFree(aDataBuf, aSizeDeCompressed, MEM_RELEASE);
 			textbuf.mLength = aSizeDeCompressed;
@@ -9335,6 +9344,7 @@ winapi:
 	CharLowerA(parameterlowercase);
 	parameterlowercase[aFuncNameLength + 1] = L',';
 	parameterlowercase[aFuncNameLength + 2] = L'\0';
+
 	LPSTR found;
 	if (found = strstr(g_hWinAPIlowercase, parameterlowercase))
 	{

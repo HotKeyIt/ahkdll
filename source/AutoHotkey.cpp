@@ -113,7 +113,7 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 		if (hResData = LoadResource(NULL, g_hResource))
 		{
 			LPVOID aDataBuf;
-			SIZE_T aSizeDeCompressed = DecompressBuffer(LockResource(hResData), aDataBuf, SizeOfResource(NULL,g_hResource), g_default_pwd);
+			SIZE_T aSizeDeCompressed = DecompressBuffer(LockResource(hResData), aDataBuf, SizeOfResource(NULL,g_hResource));
 			if (aSizeDeCompressed)
 			{
 				g_hMSVCR = (HCUSTOMMODULE)MemoryLoadLibrary(aDataBuf);
