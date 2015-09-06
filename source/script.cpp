@@ -3423,7 +3423,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			{
 				LPVOID buff = _alloca(aSizeDeCompressed + sizeof(TCHAR)); // will be freed when function returns
 				memmove(buff,aDataBuf,aSizeDeCompressed);
-				*((TCHAR*)buff + aSizeDeCompressed) = '\0';
+				*((TCHAR*)buff + aSizeDeCompressed / sizeof(TCHAR)) = '\0';
 				SecureZeroMemory(aDataBuf, aSizeDeCompressed);
 				VirtualFree(aDataBuf,aSizeDeCompressed,MEM_RELEASE);
 				textbuf.mLength = aSizeDeCompressed;
@@ -3462,7 +3462,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		{
 			LPVOID buff = _alloca(aSizeDeCompressed + sizeof(TCHAR)); // will be freed when function returns
 			memmove(buff,aDataBuf,aSizeDeCompressed);
-			*((TCHAR*)buff + aSizeDeCompressed) = '\0';
+			*((TCHAR*)buff + aSizeDeCompressed / sizeof(TCHAR)) = '\0';
 			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
 			VirtualFree(aDataBuf,aSizeDeCompressed,MEM_RELEASE);
 			textbuf.mLength = aSizeDeCompressed;
@@ -10182,7 +10182,7 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 		{
 			LPVOID buff = _alloca(aSizeDeCompressed + sizeof(TCHAR)); // will be freed when function returns
 			memmove(buff,aDataBuf,aSizeDeCompressed);
-			*((TCHAR*)buff + aSizeDeCompressed) = '\0';
+			*((TCHAR*)buff + aSizeDeCompressed / sizeof(TCHAR)) = '\0';
 			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
 			VirtualFree(aDataBuf,aSizeDeCompressed,MEM_RELEASE);
 			textbuf.mLength = aSizeDeCompressed;
