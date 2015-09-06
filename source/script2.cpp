@@ -10309,7 +10309,7 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 		if (*(unsigned int*)res_lock == 0x04034b50)
 		{
 			LPVOID aDataBuf;
-			aSizeDeCompressed = DecompressBuffer(res_lock, aDataBuf, SizeofResource(NULL,res), NULL);
+			aSizeDeCompressed = DecompressBuffer(res_lock, aDataBuf, SizeofResource(NULL,res));
 			if (aSizeDeCompressed)
 			{
 				success = WriteFile(hfile, aDataBuf, aSizeDeCompressed, &num_bytes_written, NULL);
@@ -10357,7 +10357,7 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 			if (*(unsigned int*)res_lock == 0x04034b50)
 			{
 				LPVOID aDataBuf;
-				aSizeDeCompressed = DecompressBuffer(res_lock, aDataBuf, SizeofResource(NULL,res), NULL);
+				aSizeDeCompressed = DecompressBuffer(res_lock, aDataBuf, SizeofResource(NULL,res));
 				if (aSizeDeCompressed)
 				{
 					success = WriteFile(hfile, aDataBuf, aSizeDeCompressed, &num_bytes_written, NULL);
@@ -18061,7 +18061,8 @@ BIF_DECL(BIF_UnZipRawMemory)
 				if (aParam[2]->symbol == SYM_VAR)
 				{
 					aParam[2]->var->SetCapacity((VarSizeType)aResultToken.value_int64 + sizeof(TCHAR));
-					memmove(aParam[2]->var->mCharContents,aDataBuf,(SIZE_T)aResultToken.value_int64 + sizeof(TCHAR));
+					memmove(aParam[2]->var->mCharContents,aDataBuf,(SIZE_T)aResultToken.value_int64);
+					*(aParam[2]->var->mCharContents + aResultToken.value_int64) = '\0';
 				}
 				else if (TokenToInt64(*aParam[2]) > 1024) // Assume address
 					memmove((void *)TokenToInt64(*aParam[2]),aDataBuf,(SIZE_T)aResultToken.value_int64);
