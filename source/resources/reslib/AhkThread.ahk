@@ -8,16 +8,14 @@
 		objects.Remove(obj)
 }
 ahkthread(script:="",param:="",IsFile:=0,dll:="F903E44B8A904483A1732BA84EA6191F"){
-  static base,functions
+  static base,ahkdll,functions,hRes:=DllCall("FindResource","PTR",0,"STR","F903E44B8A904483A1732BA84EA6191F","PTR",10,"PTR"),data:=LockResource(hResData:=LoadResource(0,hRes)),init1:=UnZipRawMemory(data,SizeofResource(0,hRes),ahkdll)
   if !base
     base:={__Delete:"ahkthread"},functions:="ahkFunction:s==sssssssssss|ahkPostFunction:i==sssssssssss|ahkdll:ut==ss|ahktextdll:ut==ss|ahkReady:|ahkReload:i==i|ahkTerminate:i==i|addFile:ut==sucuc|addScript:ut==si|ahkExec:ui==s|ahkassign:ui==ss|ahkExecuteLine:ut==utuiui|ahkFindFunc:ut==s|ahkFindLabel:ut==s|ahkgetvar:s==sui|ahkLabel:ui==sui|ahkPause:i==s|ahkIsUnicode:"
   If IsObject(script){
     script.ahkterminate(script.timeout?script.timeout:0),MemoryFreeLibrary(script[""])
     return
   }
-  object:={(""):ResourceLoadLibrary(dll)}
-  If !object[""] ; ResourceLoadLibrary failed, try loading dll from disc
-    object[""]:=MemoryLoadLibrary(dll)
+  object:={(""):MemoryLoadLibrary(dll+0?dll:dll="F903E44B8A904483A1732BA84EA6191F"?&ahkdll:dll)}
   Loop,Parse,functions,|
   {
     v:=StrSplit(A_LoopField,":"),object[v.1]:=DynaCall(MemoryGetProcAddress(object[""],v.1),v.2)
