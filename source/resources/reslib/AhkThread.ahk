@@ -6,26 +6,18 @@
 	else If objects.HasKey(obj)
 		objects.Remove(obj)
 }
-ahkthread(script:="",param:="",IsFile:=0,dll:="F903E44B8A904483A1732BA84EA6191F"){
-  static base,ahkdll,functions,hRes:=FindResourceW(0,"F903E44B8A904483A1732BA84EA6191F",10),data:=LockResource(hResData:=LoadResource(0,hRes)),init1:=UnZipRawMemory(data,SizeofResource(0,hRes),ahkdll)
+ahkthread_release(o){
+  o.ahkterminate(o.timeout?o.timeout:0),MemoryFreeLibrary(o[""])
+}
+ahkthread(s:="",p:="",IsFile:=0,dll:="F903E44B8A904483A1732BA84EA6191F"){
+  static ahkdll,base
   if !base
-    base:={__Delete:"ahkthread"},functions:="ahkFunction:s==sssssssssss|ahkPostFunction:i==sssssssssss|ahkdll:ut==ss|ahktextdll:ut==ss|ahkReady:|ahkReload:i==i|ahkTerminate:i==i|addFile:ut==sucuc|addScript:ut==si|ahkExec:ui==s|ahkassign:ui==ss|ahkExecuteLine:ut==utuiui|ahkFindFunc:ut==s|ahkFindLabel:ut==s|ahkgetvar:s==sui|ahkLabel:ui==sui|ahkPause:i==s|ahkIsUnicode:"
-  If IsObject(script){
-    script.ahkterminate(script.timeout?script.timeout:0),MemoryFreeLibrary(script[""])
-    return
-  }
-  object:={(""):MemoryLoadLibrary(dll+0?dll:dll="F903E44B8A904483A1732BA84EA6191F"?&ahkdll:dll)}
-  LoopParse,%functions%,|
-  {
-    v:=StrSplit(A_LoopField,":"),object[v.1]:=DynaCall(MemoryGetProcAddress(object[""],v.1),v.2)
-	If (v.1="ahkFunction")
-		object["_" v.1]:=DynaCall(MemoryGetProcAddress(object[""],v.1),"s==stttttttttt")
-	else if (v.1="ahkPostFunction")
-		object["_" v.1]:=DynaCall(MemoryGetProcAddress(object[""],v.1),"i==stttttttttt")
-  }
-  object.base:=base
-  If !(Type(script)="Integer" || script=0)
-    object.hThread:=object[IsFile?"ahkdll":"ahktextdll"](script,param)
-  objects:=ahkthread_free(true),objects[object] := object ; keep dll loadded even if returned object is freed
-  return object
+    base:={__Delete:"ahkthread_release"},UnZipRawMemory(LockResource(LoadResource(0,hRes:=FindResource(0,"F903E44B8A904483A1732BA84EA6191F",10))),SizeofResource(0,hRes),ahkdll)
+  obj:={(""):lib:=MemoryLoadLibrary(dll="F903E44B8A904483A1732BA84EA6191F"?&ahkdll:dll),base:base}
+  for k,v in {_ahkFunction:"s==stttttttttt",_ahkPostFunction:"i==stttttttttt",ahkFunction:"s==sssssssssss",ahkPostFunction:"i==sssssssssss",ahkdll:"ut==ss",ahktextdll:"ut==ss",ahkReady:"",ahkReload:"i==i",ahkTerminate:"i==i",addFile:"ut==sucuc",addScript:"ut==si",ahkExec:"ui==s",ahkassign:"ui==ss",ahkExecuteLine:"ut==utuiui",ahkFindFunc:"ut==s",ahkFindLabel:"ut==s",ahkgetvar:"s==sui",ahkLabel:"ui==sui",ahkPause:"i==s",ahkIsUnicode:""}
+    obj[k]:=DynaCall(MemoryGetProcAddress(lib,A_Index>2?k:SubStr(k,2)),v)
+  If !(s+0!="" || s=0)
+    obj.hThread:=obj[IsFile?"ahkdll":"ahktextdll"](s,p)
+  ahkthread_free(true)[obj]:=1 ; keep dll loadded even if returned object is freed
+  return obj
 }
