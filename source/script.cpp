@@ -3551,9 +3551,9 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength, g_default_pwd);
 			if (aSizeDeCompressed)
 			{
-				LPVOID buff = _alloca(aSizeDeCompressed + sizeof(TCHAR)); // will be freed when function returns
+				LPVOID buff = _alloca(aSizeDeCompressed + sizeof(char) * 2); // will be freed when function returns
 				memmove(buff, aDataBuf, aSizeDeCompressed);
-				*((TCHAR*)buff + aSizeDeCompressed / sizeof(TCHAR)) = '\0';
+				memset((char*)buff + sizeof(char), 0, 2);
 				SecureZeroMemory(aDataBuf, aSizeDeCompressed);
 				VirtualFree(aDataBuf, aSizeDeCompressed, MEM_RELEASE);
 				textbuf.mLength = aSizeDeCompressed;
@@ -3591,9 +3591,9 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength, g_default_pwd);
 		if (aSizeDeCompressed)
 		{
-			LPVOID buff = _alloca(aSizeDeCompressed + sizeof(TCHAR)); // will be freed when function returns
+			LPVOID buff = _alloca(aSizeDeCompressed + sizeof(char) * 2); // will be freed when function returns
 			memmove(buff, aDataBuf, aSizeDeCompressed);
-			*((TCHAR*)buff + aSizeDeCompressed / sizeof(TCHAR)) = '\0';
+			memset((char*)buff + sizeof(char), 0, 2);
 			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
 			VirtualFree(aDataBuf, aSizeDeCompressed, MEM_RELEASE);
 			textbuf.mLength = aSizeDeCompressed;
@@ -9267,9 +9267,9 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength);
 		if (aSizeDeCompressed)
 		{
-			LPVOID buff = _alloca(aSizeDeCompressed + sizeof(TCHAR)); // will be freed when function returns
+			LPVOID buff = _alloca(aSizeDeCompressed + sizeof(char) * 2); // will be freed when function returns
 			memmove(buff, aDataBuf, aSizeDeCompressed);
-			*((TCHAR*)buff + aSizeDeCompressed / sizeof(TCHAR)) = '\0';
+			memset((char*)buff + sizeof(char), 0, 2);
 			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
 			VirtualFree(aDataBuf, aSizeDeCompressed, MEM_RELEASE);
 			textbuf.mLength = aSizeDeCompressed;
