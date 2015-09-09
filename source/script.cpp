@@ -685,6 +685,8 @@ Script::~Script() // Destructor.
 	g_InputLevel = 0;
 #ifndef MINIDLL
 	g_FirstHotCriterion = NULL;
+	g_FirstHotExpr = NULL;
+	g_LastHotExpr = NULL;
 	g_LastHotCriterion = NULL;
 	g_HotExprTimeout = 1000; // Timeout for #if (expression) evaluation, in milliseconds.
 	g_HotExprLFW = NULL; // Last Found Window of last #if expression.
