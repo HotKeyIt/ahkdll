@@ -495,7 +495,7 @@ ResultType Script::PerformGui(LPTSTR aBuf, LPTSTR aParam2, LPTSTR aParam3, LPTST
 		if (*aParam2)
 		{
 			GuiIndexType control_index = gui.FindControl(aParam2); // Search on either the control's variable name or its ClassNN.
-			if (control_index != -1) // Must compare directly to -1 due to unsigned.
+			if (control_index < gui.mControlCount)
 			{
 				GuiControlType &control = gui.mControl[control_index]; // For maintainability, and might slightly reduce code size.
 				if (gui_command == GUI_CMD_LISTVIEW)
@@ -1724,6 +1724,7 @@ ResultType GuiType::Destroy(GuiType &gui)
 		}
 		else if (control.type == GUI_CONTROL_LISTVIEW) // It was ensured at an earlier stage that union_lv_attrib != NULL.
 			free(control.union_lv_attrib);
+		control.jump_to_label = NULL; // Release any user-defined object/BoundFunc used as a g-label.
 	}
 	HICON icon_eligible_for_destruction = gui.mIconEligibleForDestruction;
 	HICON icon_eligible_for_destruction_small = gui.mIconEligibleForDestructionSmall;
@@ -6794,6 +6795,11 @@ ResultType GuiType::Show(LPTSTR aOptions, LPTSTR aText)
 	case SW_SHOWNORMAL:
 	case SW_MAXIMIZE:
 	case SW_RESTORE:
+		if (GetAncestor(mHwnd, GA_ROOT) != mHwnd) // It's a child window, perhaps due to the +Parent option.
+			// Since this is a child window, SetForegroundWindowEx will fail and fall back to the "two-alts"
+			// method of forcing activation, which causes some messages to be discarded due to the temporary
+			// modal menu loop.  So don't even try it.
+			break;
 		if (mHwnd != GetForegroundWindow())
 			SetForegroundWindowEx(mHwnd);   // In the above modes, try to force it to the foreground as documented.
 		if (mFirstActivation)
@@ -6870,8 +6876,7 @@ ResultType GuiType::Show(LPTSTR aOptions, LPTSTR aText)
 	// a command that blocks (fully uses) the main thread such as "Drive Eject" immediately follows
 	// "Gui Show", the GUI window might not appear until afterward because our thread never had a
 	// chance to call its WindowProc with all the messages needed to actually show the window:
-	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
-	SLEEP_WITHOUT_INTERRUPTION(-1)
+	MsgSleep(-1);
 	// UpdateWindow() would probably achieve the same effect as the above, but it feels safer to do
 	// the above because it ensures that our message queue is empty prior to returning to our caller.
 
@@ -7412,7 +7417,7 @@ GuiIndexType GuiType::FindControl(LPTSTR aControlID)
 	{
 		// v1.1.04: Allow Gui controls to be referenced by HWND.  There is some risk of breaking
 		// scripts, but only if the text of one control contains the HWND of another control.
-		u = (GuiIndexType)FindControl((HWND)ATOI64(aControlID), true);
+		u = FindControlIndex((HWND)ATOI64(aControlID));
 		if (u < mControlCount)
 			return u;
 		// Otherwise: no match was found, so fall back to considering it as text.
@@ -7447,11 +7452,7 @@ GuiIndexType GuiType::FindControl(LPTSTR aControlID)
 	}
 	// Otherwise: No match found, so fall back to standard control class and/or text finding method.
 	HWND control_hwnd = ControlExist(mHwnd, aControlID);
-	u = (GuiIndexType)FindControl(control_hwnd, true);
-	if (u < mControlCount)
-		return u;  // Match found.
-	// Otherwise: No match found.
-	return -1;
+	return FindControlIndex(control_hwnd);
 }
 
 
@@ -8483,6 +8484,10 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 			break;
 		if (text_color_was_changed = (pcontrol->type != GUI_CONTROL_PIC && pcontrol->union_color != CLR_DEFAULT))
 			SetTextColor((HDC)wParam, pcontrol->union_color);
+		else
+			// Always set a text color in case a brush will be returned below.  If this isn't done and
+			// a brush is returned, the system will use whatever color was set before; probably black.
+			SetTextColor((HDC)wParam, GetSysColor(COLOR_WINDOWTEXT));
 
 		if (pcontrol->attrib & GUI_CONTROL_ATTRIB_BACKGROUND_TRANS)
 		{

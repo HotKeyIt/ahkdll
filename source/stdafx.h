@@ -27,6 +27,7 @@ GNU General Public License for more details.
 #define _CRT_SECURE_NO_DEPRECATE // Avoid compiler warnings in VC++ 8.x/2005 that urge the use of lower-performing C library functions that protect against buffer overruns.
 #define _CRT_NON_CONFORMING_SWPRINTFS // We don't want ISO version of swprintf, which has similar interface with snwprintf (different from sprintf)
 #define WIN32_LEAN_AND_MEAN		 // Exclude rarely-used stuff from Windows headers
+#define _WINSOCK_DEPRECATED_NO_WARNINGS // Primarily for WSAAsyncSelect, since the recommended replacement is inadequate.
 
 // Windows Header Files:
 // Necessary to do this prior to including windows.h so that NT functions are unlocked:
@@ -37,6 +38,7 @@ GNU General Public License for more details.
 // it makes available in the code, it seems best to stick with it and instead patch anything that needs it
 // (such as ToolTip).  Hopefully, ToolTip is the only thing in the current code base that needs patching
 // (perhaps the only reason it was broken in the first place was a bug or oversight by MS).
+// UPDATE v1.1.10.00: Using 0x0600 for Vista/7/8's audio APIs.
 // UPDATE v1.1.10.01: Using 0x0600 broke Process Close and who knows what else on Win XP.
 // Instead, use 0x0501 and redefine it to 0x0600 only for the specific APIs which we need.
 #define _WIN32_WINNT 0x0501

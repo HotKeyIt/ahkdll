@@ -3441,9 +3441,9 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 	HGLOBAL hResData;
 
 #ifdef _DEBUG
-	hRes = FindResource(NULL, _T("AHK"), MAKEINTRESOURCE(RT_RCDATA));
+	hRes = FindResource(NULL, _T("AHK"), RT_RCDATA);
 #else
-	hRes = FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), MAKEINTRESOURCE(RT_RCDATA));
+	hRes = FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), RT_RCDATA);
 #endif
 	
 	if ( !( hRes 
@@ -9717,7 +9717,7 @@ ResultType Script::DefineClassVars(LPTSTR aBuf, bool aStatic)
 
 		// Append "ClassNameOrThis.VarName := Initializer, " to the buffer.
 		int chars_written = _sntprintf(buf + buf_used, _countof(buf) - buf_used, _T("%s.%.*s := %.*s, ")
-			, aStatic ? mClassName : _T("this"), name_length, item, item_end - right_side_of_operator, right_side_of_operator);
+			, aStatic ? mClassName : _T("this"), (int)name_length, item, (int)(item_end - right_side_of_operator), right_side_of_operator);
 		if (chars_written < 0)
 			return ScriptError(_T("Declaration too long.")); // Short message since should be rare.
 		buf_used += chars_written;
@@ -12285,7 +12285,7 @@ ResultType Script::PreparseStaticLines(Line *aStartingLine)
 		{
 		case ACT_STATIC:
 			// Override mActionType so ACT_STATIC doesn't have to be handled at runtime:
-			line->mActionType = (ActionTypeType)line->mAttribute;
+			line->mActionType = (ActionTypeType)(UINT_PTR)line->mAttribute;
 			// Add this line to the list of static initializers, which will be inserted above
 			// the auto-execute section later.  The main line list will be corrected below.
 			line->mPrevLine = mLastStaticLine;
