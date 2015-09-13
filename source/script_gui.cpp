@@ -1,4 +1,4 @@
-/*
+﻿/*
 AutoHotkey
 
 Copyright 2003-2009 Chris Mallett (support@autohotkey.com)
@@ -2694,7 +2694,12 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 			if (style & WS_VSCROLL)
 				extra_width += GetSystemMetrics(SM_CXVSCROLL);
 			// DT_EDITCONTROL: "the average character width is calculated in the same manner as for an edit control"
-			// It might help some aspects of the estimate conducted below.
+			// Although it's hard to say exactly what the quote above means, DT_EDITCONTROL definitely
+			// affects the width of tab stops (making this consistent with Edit controls) and therefore
+			// must be included.  It also excludes the last line if it is empty, which is undesirable,
+			// so we need to compensate for that:
+			if (*aText && aText[_tcslen(aText)-1] == '\n')
+				extra_height += tm.tmHeight + tm.tmExternalLeading;
 			// Also include DT_EXPANDTABS under the assumption that if there are tabs present, the user
 			// intended for them to be there because a multiline edit would expand them (rather than trying
 			// to worry about whether this control *might* become auto-multiline after this point.
@@ -6224,11 +6229,14 @@ void GuiType::ControlAddContents(GuiControlType &aControl, LPTSTR aContent, int 
 		return;
 
 	UINT msg_add, msg_select;
+	int requested_index = 0;
 
 	switch (aControl.type)
 	{
-	case GUI_CONTROL_LISTVIEW:
 	case GUI_CONTROL_TAB: // These cases must be listed anyway to do a break vs. return, so might as well init conditionally rather than unconditionally.
+		requested_index = TabCtrl_GetItemCount(aControl.hwnd); // So that tabs are "appended at the end of the control's list", as documented for GuiControl.
+		// Fall through:
+	case GUI_CONTROL_LISTVIEW:
 		msg_add = 0;
 		msg_select = 0;
 		break;
@@ -6249,7 +6257,6 @@ void GuiType::ControlAddContents(GuiControlType &aControl, LPTSTR aContent, int 
 	bool temporarily_terminated;
 	LPTSTR this_field, next_field;
 	LRESULT item_index;
-	int requested_index = 0;
 
 	// For tab controls:
 	TCITEM tci;

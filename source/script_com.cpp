@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "globaldata.h"
 #include "script.h"
 #include "script_object.h"
@@ -44,7 +44,11 @@ BIF_DECL(BIF_ComObjCreate)
 			
 			// Return dispatchable object.
 			if ( !(aResultToken.object = new ComObject(pdisp)) )
+			{
+				pdisp->Release();
+				hr = E_OUTOFMEMORY;
 				break;
+			}
 			aResultToken.symbol = SYM_OBJECT;
 		}
 		return;
@@ -122,6 +126,7 @@ BIF_DECL(BIF_ComObjGet)
 			aResultToken.symbol = SYM_OBJECT;
 			return;
 		}
+		hr = E_OUTOFMEMORY;
 		pdisp->Release();
 	}
 	aResultToken.symbol = SYM_STRING;
@@ -229,18 +234,19 @@ BIF_DECL(BIF_ComObjActive)
 			if (SUCCEEDED(hr))
 			{
 				IDispatch *pdisp;
-				if (SUCCEEDED(punk->QueryInterface(IID_IDispatch, (void **)&pdisp)))
+				hr = punk->QueryInterface(IID_IDispatch, (void **)&pdisp);
+				punk->Release();
+				if (SUCCEEDED(hr))
 				{
 					if (obj = new ComObject(pdisp))
 					{
 						aResultToken.symbol = SYM_OBJECT;
 						aResultToken.object = obj;
+						return;
 					}
-					else
-						pdisp->Release();
+					hr = E_OUTOFMEMORY;
+					pdisp->Release();
 				}
-				punk->Release();
-				return;
 			}
 		}
 		ComError(hr);
@@ -519,7 +525,8 @@ BIF_DECL(BIF_ComObjArray)
 	VARTYPE vt = (VARTYPE)TokenToInt64(*aParam[0]);
 	SAFEARRAYBOUND bound[8]; // Same limit as ComObject::SafeArrayInvoke().
 	int dims = aParamCount - 1;
-	ASSERT(dims <= _countof(bound)); // Prior validation should ensure aParamCount-1 never exceeds 8.
+	if (dims > _countof(bound)) // Possible only for dynamic function calls.
+		dims = _countof(bound);
 	for (int i = 0; i < dims; ++i)
 	{
 		bound[i].cElements = (ULONG)TokenToInt64(*aParam[i + 1]);
