@@ -237,7 +237,13 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 			}
 			// For performance and simplicity, open/create the file unconditionally and keep it open until exit.
 			g_script.mIncludeLibraryFunctionsThenExit = new TextFile;
+#ifndef _UNICODE
+			param = (TCHAR *) _alloca(wcslen(dllargv[i])+1);
+			WideCharToMultiByte(CP_ACP,0,dllargv[i],-1,param,(wcslen(dllargv[i])+1),0,0);
 			if (!g_script.mIncludeLibraryFunctionsThenExit->Open(param, TextStream::WRITE | TextStream::EOL_CRLF | TextStream::BOM_UTF8, CP_UTF8)) // Can't open the temp file.
+#else
+			if (!g_script.mIncludeLibraryFunctionsThenExit->Open(dllargv[i], TextStream::WRITE | TextStream::EOL_CRLF | TextStream::BOM_UTF8, CP_UTF8)) // Can't open the temp file.
+#endif			
 			{
 				g_Reloading = false;
 				return CRITICAL_ERROR;
@@ -544,6 +550,7 @@ unsigned __stdcall runScript( void* pArguments )
 	OleInitialize(NULL);
 	int result = OldWinMain(nameHinstanceP.hInstanceP, 0, nameHinstanceP.name, 0);
 	g_script.Destroy();
+	hThread = NULL;
 	_endthreadex( result);  
     return 0;
 }
@@ -552,12 +559,12 @@ unsigned __stdcall runScript( void* pArguments )
 void WaitIsReadyToExecute()
 {
 	 int lpExitCode = 0;
-	 while (!g_script.mIsReadyToExecute && (lpExitCode == 0 || lpExitCode == 259))
+	 while (hThread && !g_script.mIsReadyToExecute && (lpExitCode == 0 || lpExitCode == 259))
 	 {
 		 Sleep(10);
 		 GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
 	 }
-	 if (!g_script.mIsReadyToExecute)
+	 if (hThread && !g_script.mIsReadyToExecute)
 	 {
 		 CloseHandle(hThread);
 		 hThread = NULL;
