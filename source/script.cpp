@@ -1489,7 +1489,7 @@ ResultType Script::Reload(bool aDisplayErrors)
 	GetModuleFileNameW(NULL, buf, MAX_PATH);
 	int argc = 0;
 	LPWSTR *argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-	if (argc = 1 && !wcscmp(buf, argv[0]))
+	if (argc == 1 && !wcscmp(buf, argv[0]))
 	{
 		LocalFree(argv);
 		return g_script.ActionExec(mOurEXE, _T("/restart"), g_WorkingDirOrig, aDisplayErrors);
