@@ -326,21 +326,19 @@ void Script::Destroy()
 	{
 		if (mVar[v]->mType == VAR_BUILTIN || mVar[v]->mType == VAR_CLIPBOARD ||mVar[v]->mType == VAR_CLIPBOARDALL)
 			continue;
-		if (mVar[v]->mType == VAR_ALIAS && mVar[v]->HasObject())
-			mVar[v]->mObject->Release();
-		mVar[v]->ConvertToNonAliasIfNecessary();
-		mVar[v]->Free();
+		if (mVar[v]->mType == VAR_ALIAS)
+			mVar[v]->ConvertToNonAliasIfNecessary();
+		else
+			mVar[v]->Free();
 	}
 	for (v = 0; v < mLazyVarCount; v++)
 	{
-		if (mLazyVar[v]->mType == VAR_ALIAS && mLazyVar[v]->HasObject())
-			mLazyVar[v]->mObject->Release();
-		mLazyVar[v]->ConvertToNonAliasIfNecessary();
-		mLazyVar[v]->Free();
+		if (mLazyVar[v]->mType == VAR_ALIAS)
+			mLazyVar[v]->ConvertToNonAliasIfNecessary();
+		else
+			mLazyVar[v]->Free();
 	}
-	free(mLazyVar);
-	mLazyVar = NULL;
-	mLazyVarCount = 0;
+
 	// delete static func vars first
 	for (i = 0; i < mFuncCount; i++)
 	{
@@ -360,24 +358,24 @@ void Script::Destroy()
 		}
 		for (v = 0; v < f.mStaticLazyVarCount; v++)
 		{
-			if (f.mStaticLazyVar[v]->mType == VAR_ALIAS && f.mStaticLazyVar[v]->HasObject())
-				f.mStaticLazyVar[v]->mObject->Release();
-			f.mStaticLazyVar[v]->ConvertToNonAliasIfNecessary();
-			f.mStaticLazyVar[v]->Free();
+			if (f.mStaticLazyVar[v]->mType == VAR_ALIAS)
+				f.mStaticLazyVar[v]->ConvertToNonAliasIfNecessary();
+			else
+				f.mStaticLazyVar[v]->Free();
 		}
 		for (v = 0; v < f.mVarCount; v++)
 		{
-			if (f.mVar[v]->mType == VAR_ALIAS && f.mVar[v]->HasObject())
-				f.mVar[v]->mObject->Release();
-			f.mVar[v]->ConvertToNonAliasIfNecessary();
-			f.mVar[v]->Free();
+			if (f.mVar[v]->mType == VAR_ALIAS)
+				f.mVar[v]->ConvertToNonAliasIfNecessary();
+			else
+				f.mVar[v]->Free();
 		}
 		for (v = 0; v < f.mLazyVarCount; v++)
 		{
-			if (f.mLazyVar[v]->mType == VAR_ALIAS && f.mLazyVar[v]->HasObject())
-				f.mLazyVar[v]->mObject->Release();
-			f.mLazyVar[v]->ConvertToNonAliasIfNecessary();
-			f.mLazyVar[v]->Free();
+			if (f.mLazyVar[v]->mType == VAR_ALIAS)
+				f.mLazyVar[v]->ConvertToNonAliasIfNecessary();
+			else
+				f.mLazyVar[v]->Free();
 		}
 	}
 
@@ -385,8 +383,8 @@ void Script::Destroy()
 	for (v = 0; v < mVarCount; v++)
 	{
 		// H19 fix not to delete Clipboard wars
-		if (mVar[v]->mType == VAR_BUILTIN || mVar[v]->mType == VAR_CLIPBOARD || mVar[v]->mType == VAR_CLIPBOARDALL)
-			continue;
+		//if (mVar[v]->mType == VAR_BUILTIN || mVar[v]->mType == VAR_CLIPBOARD || mVar[v]->mType == VAR_CLIPBOARDALL)
+			//continue;
 		delete mVar[v];
 	}
 	free(mVar);

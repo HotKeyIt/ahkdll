@@ -22,6 +22,7 @@ GNU General Public License for more details.
 #include "TextIO.h"
 #include "LiteUnzip.h"
 #include "MemoryModule.h"
+// #include "MinHook.h"
 
 BOOL g_TlsDoExecute = false;
 DWORD g_TlsOldProtect;
@@ -106,21 +107,79 @@ void WINAPI TlsCallbackCall(PVOID Module, DWORD Reason, PVOID Context)
 // (GetMessage() or PeekMessage()) is the only means by which events are ever sent to the
 // hook functions.
 
+//#define GET_HEADER_DICTIONARY(module, idx)  &(module)->headers->OptionalHeader.DataDirectory[idx]
 
 int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdLine, int nCmdShow)
 {
-	/*	HGLOBAL hResData;
-	if (g_hResource = FindResource(NULL, _T("MSVCR"), MAKEINTRESOURCE(RT_RCDATA)))
+	/*
+	HGLOBAL hResData;
+	if (g_hResource = FindResource(NULL, _T("EA80A44AA77E484295B1813BD4C12C28"), MAKEINTRESOURCE(RT_RCDATA)))
 		if (hResData = LoadResource(NULL, g_hResource))
 		{
 			LPVOID aDataBuf;
-			SIZE_T aSizeDeCompressed = DecompressBuffer(LockResource(hResData), aDataBuf, SizeOfResource(NULL,g_hResource));
+			SIZE_T aSizeDeCompressed = DecompressBuffer(LockResource(hResData), aDataBuf, SizeofResource(NULL,g_hResource));
 			if (aSizeDeCompressed)
 			{
 				g_hMSVCR = (HCUSTOMMODULE)MemoryLoadLibrary(aDataBuf);
 				VirtualFree(aDataBuf, aSizeDeCompressed, MEM_RELEASE);
+
+				HMODULE aMsvcrt = GetModuleHandle(_T("msvcrt.dll"));
+				HANDLE hHeapMalloc = NULL;
+				HANDLE hHeapFree = NULL;
+				// set start and end of memory for our module so HookRtlPcToFileHeader can report properly
+				//PHOOK_ENTRY pHookMalloc = MinHookEnable(GetProcAddress(aMsvcrt, "malloc"), MemoryGetProcAddress(g_hMSVCR, "mal
+				//MinHookEnable(GetProcAddress(aMsvcrt, "malloc"), MemoryGetProcAddress(g_hMSVCR, "malloc"), &hHeapMalloc);
+				//MinHookEnable(GetProcAddress(aMsvcrt, "free"), MemoryGetProcAddress(g_hMSVCR, "free"), &hHeapFree);
+				DWORD oldProtectMalloc, oldProtectFree;
+				VirtualProtect(&malloc, sizeof(FARPROC), PAGE_READWRITE, &oldProtectMalloc);
+				VirtualProtect(&free, sizeof(FARPROC), PAGE_READWRITE, &oldProtectFree);
+				MinHookEnable((FARPROC)&malloc, MemoryGetProcAddress(g_hMSVCR, "malloc"), &hHeapMalloc);
+				MinHookEnable((FARPROC)&free, MemoryGetProcAddress(g_hMSVCR, "free"), &hHeapFree);
+				VirtualProtect(&malloc, sizeof(FARPROC), oldProtectMalloc, &oldProtectMalloc);
+				VirtualProtect(&free, sizeof(FARPROC), oldProtectFree, &oldProtectFree);
+				PVOID test = malloc(10);
 			}
 		}
+	
+	
+	PIMAGE_DOS_HEADER dos_header = (PIMAGE_DOS_HEADER)hInstance;
+	if (dos_header->e_magic != IMAGE_DOS_SIGNATURE) {
+		SetLastError(ERROR_BAD_EXE_FORMAT);
+		return NULL;
+	}
+	PIMAGE_NT_HEADERS old_header;
+	old_header = (PIMAGE_NT_HEADERS)&((const unsigned char *)(hInstance))[dos_header->e_lfanew];
+	PIMAGE_DATA_DIRECTORY directory = GET_HEADER_DICTIONARY((PMEMORYMODULE)&old_header, IMAGE_DIRECTORY_ENTRY_IMPORT);
+	PIMAGE_IMPORT_DESCRIPTOR importDesc = (PIMAGE_IMPORT_DESCRIPTOR)(old_header->OptionalHeader.ImageBase + directory->VirtualAddress);
+	for (; !IsBadReadPtr(importDesc, sizeof(IMAGE_IMPORT_DESCRIPTOR)) && importDesc->Name; importDesc++) {
+		uintptr_t *thunkRef;
+		FARPROC *funcRef;
+		LPCSTR module = (LPSTR)(old_header->OptionalHeader.ImageBase + importDesc->Name);
+		if (strstr((LPSTR)(old_header->OptionalHeader.ImageBase + importDesc->Name), "msvcrt.dll"))
+		{
+			if (importDesc->OriginalFirstThunk) {
+				thunkRef = (uintptr_t *)(old_header->OptionalHeader.ImageBase + importDesc->OriginalFirstThunk);
+				funcRef = (FARPROC *)(old_header->OptionalHeader.ImageBase + importDesc->FirstThunk);
+			}
+			else {
+				// no hint table
+				thunkRef = (uintptr_t *)(old_header->OptionalHeader.ImageBase + importDesc->FirstThunk);
+				funcRef = (FARPROC *)(old_header->OptionalHeader.ImageBase + importDesc->FirstThunk);
+			}
+			for (; *thunkRef; thunkRef++, funcRef++) {
+				if (IMAGE_SNAP_BY_ORDINAL(*thunkRef)) {
+					*funcRef = MemoryGetProcAddress(g_hMSVCR, (LPCSTR)IMAGE_ORDINAL(*thunkRef));
+				}
+				else {
+					PIMAGE_IMPORT_BY_NAME thunkData = (PIMAGE_IMPORT_BY_NAME)(old_header->OptionalHeader.ImageBase + (*thunkRef));
+					*funcRef = MemoryGetProcAddress(g_hMSVCR, (LPCSTR)&thunkData->Name);
+				}
+				if (*funcRef == 0) {
+					break;
+				}
+			}
+		}
+	}
 	*/
 	// Init any globals not in "struct g" that need it:
 

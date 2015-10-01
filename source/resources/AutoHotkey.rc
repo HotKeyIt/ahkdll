@@ -253,14 +253,15 @@ C974C3B7677A402D93B047DA402587C7	RCDATA	".\\source\\resources\\WINAPI.zip"
 /*
 #ifndef _USRDLL
 	#ifdef _WIN64
-		MSVCR	RCDATA	".\\source\\resources\\msvcr64.zip"
+		EA80A44AA77E484295B1813BD4C12C28	RCDATA	".\\source\\resources\\msvcr64.zip"
 	#else
-		MSVCR	RCDATA	".\\source\\resources\\msvcr32.zip"
+		EA80A44AA77E484295B1813BD4C12C28	RCDATA	".\\source\\resources\\msvcr32.zip"
 	#endif
 #endif
 */
 #ifdef _DEBUG
 #ifndef _USRDLL
 //AHK		RCDATA	".\\source\\resources\\AHK.zip"
-AHK RCDATA ".\\Test\\Test.ahk"
+//AHK RCDATA ".\\Test\\Test.ahk"
+#endif
 #endif
