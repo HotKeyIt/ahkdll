@@ -4142,7 +4142,7 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 			if (bottom > mMaxExtentDownSection)
 				mMaxExtentDownSection = bottom;
 		}
-		
+
 		// Scroll has been already initialized and needs to be updated
 		if (mStyle & WS_HSCROLL && mHScroll)
 		{
@@ -4162,6 +4162,10 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 		control.mAHeight = opt.AHeight;
 		control.mAXReset = opt.AXReset;
 		control.mAYReset = opt.AYReset;
+		control.mAXAuto = opt.AXAuto;
+		control.mAYAuto = opt.AYAuto;
+		control.mAWAuto = opt.AWAuto;
+		control.mAHAuto = opt.AHAuto;
 
 		// Save default size of control
 		control.mX = opt.x;
@@ -5895,6 +5899,8 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 				{
 					if (ctoupper(*(next_option + 1)) == 'R')
 						aOpt.AXReset = true;
+					else if (ctoupper(*(next_option + 1)) == 'A')
+						aOpt.AXAuto = true;
 					else if (ctoupper(*(next_option + 1)) == 'P')
 						aOpt.AX = (float)0.000000000000000000000000000000000000000000001;
 					else if (*(next_option + 1) == '\0')
@@ -5913,6 +5919,8 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 				{
 					if (ctoupper(*(next_option + 1)) == 'R')
 						aOpt.AYReset = true;
+					else if (ctoupper(*(next_option + 1)) == 'A')
+						aOpt.AYAuto = true;
 					else if (ctoupper(*(next_option + 1)) == 'P')
 						aOpt.AY = (float)0.000000000000000000000000000000000000000000001;
 					else if (*(next_option + 1) == '\0')
@@ -5931,6 +5939,8 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 				{
 					if (ctoupper(*(next_option + 1)) == 'R')
 						aOpt.AXReset = true;
+					else if (ctoupper(*(next_option + 1)) == 'A')
+						aOpt.AWAuto = true;
 					else if (*(next_option + 1) == '\0')
 						aOpt.AWidth = 1;
 					else if (_tcschr(next_option + 1, '/') && *_tcschr(next_option + 1, '/') != '\0' && ATOI(_tcschr(next_option + 1, '/') + 1))
@@ -5947,6 +5957,8 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 				{
 					if (ctoupper(*(next_option + 1)) == 'R')
 						aOpt.AYReset = true;
+					else if (ctoupper(*(next_option + 1)) == 'A')
+						aOpt.AHAuto = true;
 					else if (*(next_option + 1) == '\0')
 						aOpt.AHeight = 1;
 					else if (_tcschr(next_option + 1, '/') && *_tcschr(next_option + 1, '/') != '\0' && ATOI(_tcschr(next_option + 1, '/') + 1))
@@ -8018,21 +8030,24 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 			// See its comments for why.
 		
 		if (pgui->mWidth != COORD_UNSPECIFIED) // also avoids compile error for variable initialization
-		{
-			// Calculate size difference of gui
+		{   // AutoSizePos
+			// calculate size difference of new client area
 			int addWidth = LOWORD(lParam) - pgui->mWidth, addHeight = HIWORD(lParam) - pgui->mHeight;
-			bool aHScrollVisible = pgui->mStyle & WS_HSCROLL && (int)pgui->mHScroll->nPage <= pgui->mHScroll->nMax;
-			bool aVScrollVisible = pgui->mStyle & WS_VSCROLL && (int)pgui->mVScroll->nPage <= pgui->mVScroll->nMax;
+			
+			// Required to update pgui->mMaxExtentRight and ...Down
 			bool aResizeWasDone = false;
-			int addedHeight = 0, addedWidth = 0;
+
+			// Calculate moved controls and add addWidth/Height to correctly position following controls
+			int addedHeight = 0, addedWidth = 0, autoX = 0, autoY = 0;
+			float autoW = 0, autoH = 0;
 			
-			// ignore Scrollbars
-			//if (aVScrollVisible)
-			//	addWidth -= GetSystemMetrics(SM_CYVSCROLL);
-			//if (aHScrollVisible)
-			//	addHeight -= GetSystemMetrics(SM_CYHSCROLL);
+			// Add Scrollbars to client area if they exist because we keep client area behind scrollbars
+			if (pgui->mStyle & WS_VSCROLL && (int)pgui->mVScroll->nPage <= pgui->mVScroll->nMax)
+				addWidth += GetSystemMetrics(SM_CYVSCROLL);
+			if (pgui->mStyle & WS_HSCROLL && (int)pgui->mHScroll->nPage <= pgui->mHScroll->nMax)
+				addHeight += GetSystemMetrics(SM_CYHSCROLL);
 			
-			// use original size of window if new size is smaller.
+			// use original size of window if new size is smaller so controls will newer be smaller than original size.
 			if (addHeight < 0)
 				addHeight = 0;
 			if (addWidth < 0)
@@ -8041,34 +8056,82 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 			for (GuiIndexType i = 0; i < pgui->mControlCount; i++)
 			{
 				GuiControlType *aControl = &pgui->mControl[i];
+
+				// Reset moved controls
+				if (aControl->mAYReset)
+				{
+					addedHeight = 0;
+					autoY = 0;
+				}
+				if (aControl->mAXReset)
+				{
+					addedWidth = 0;
+					autoX = 0;
+				}
+
 				// Check for autosize and autoposition options
-				if (!(aControl->mAX || aControl->mAY || aControl->mAWidth || aControl->mAHeight))
+				if (!(aControl->mAX || aControl->mAY || aControl->mAWidth || aControl->mAHeight || aControl->mAXAuto || aControl->mAYAuto || aControl->mAWAuto || aControl->mAHAuto))
 					continue;
+				
 				// Calculate new size and position for controls
 				RECT rect;
 				GetWindowRect(aControl->hwnd, &rect);
 				POINT pt = { rect.left, rect.top };
 				ScreenToClient(pgui->mHwnd, &pt);
 				int x = pt.x, y = pt.y, width = rect.right - rect.left, height = rect.bottom - rect.top;
-				if (aControl->mAYReset)
-					addedHeight = 0;
-				if (aControl->mAXReset)
-					addedWidth = 0;
 				
+				// calculate new x position
 				if (aControl->mAX)
 				{
 					x = aControl->mX + addedWidth + (int)(aControl->mAX * addWidth) - (pgui->mStyle & WS_HSCROLL ? pgui->mHScroll->nPos : 0);
 					addedWidth += (int)(aControl->mAX * addWidth);
 				}
+				else if (aControl->mAXAuto)
+				{
+					x = aControl->mX + addedWidth + autoX - (pgui->mStyle & WS_HSCROLL ? pgui->mHScroll->nPos : 0);
+					addedWidth += autoX;
+				}
+				// calculate new y position
 				if (aControl->mAY) {
 					y = aControl->mY + addedHeight + (int)(aControl->mAY * addHeight) - (pgui->mStyle & WS_VSCROLL ? pgui->mVScroll->nPos : 0);
 					addedHeight += (int)(aControl->mAY * addHeight);
 				}
+				else if (aControl->mAYAuto)
+				{
+					y = aControl->mY + addedHeight + autoY - (pgui->mStyle & WS_VSCROLL ? pgui->mVScroll->nPos : 0);
+					addedHeight += autoY;
+				}
+				// calculate new width
 				if (aControl->mAWidth)
+				{
 					width = aControl->mWidth + (int)(aControl->mAWidth * addWidth);
+					autoW = aControl->mAWidth;
+				}
+				else if (aControl->mAWAuto)
+				{
+					width = aControl->mWidth + (int)(autoW * addWidth);
+				}
+				// calculate new height
 				if (aControl->mAHeight)
+				{
 					height = aControl->mHeight + (int)(aControl->mAHeight * addHeight);
-
+					autoH = aControl->mAHeight;
+				}
+				else if (aControl->mAHAuto)
+				{
+					height = aControl->mHeight + (int)(autoH * addHeight);
+				}
+				
+				// Apply values used for axa and aya options in following controls
+				//int autoXnew = (aControl->mAX ? (int)(aControl->mAX * addWidth) : 0) + (aControl->mAWidth ? (int)(aControl->mAWidth * addWidth) : 0);
+				//int autoYnew = (aControl->mAY ? (int)(aControl->mAY * addHeight) : 0) + (aControl->mAHeight ? (int)(aControl->mAHeight * addHeight) : 0);
+				//if (autoX < autoXnew)
+				if (!aControl->mAWAuto)
+					autoX = (aControl->mAX ? (int)(aControl->mAX * addWidth) : 0) + (aControl->mAWidth ? (int)(aControl->mAWidth * addWidth) : 0);
+				//if (autoY < autoYnew)
+				if (!aControl->mAHAuto)
+					autoY = (aControl->mAY ? (int)(aControl->mAY * addHeight) : 0) + (aControl->mAHeight ? (int)(aControl->mAHeight * addHeight) : 0);
+				
 				// Continue if size of control was not changed
 				if (x == pt.x && y == pt.y && width == rect.right - rect.left && height == rect.bottom - rect.top)
 					continue;
@@ -8077,7 +8140,7 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 				aResizeWasDone = true;
 			}
 			
-			// Update client area for gui
+			// Update client area for gui if controls were moved
 			if (aResizeWasDone)
 			{
 				int aMaxWidth = 0, aMaxHeight = 0;
@@ -8097,46 +8160,51 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 					pgui->mMaxExtentRight = aMaxWidth;
 				if (aMaxHeight != pgui->mMaxExtentDown)
 					pgui->mMaxExtentDown = aMaxHeight;
-				RedrawWindow(pgui->mHwnd, NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_NOFRAME | RDW_ERASE | RDW_NOERASE | RDW_UPDATENOW | RDW_NOINTERNALPAINT);
+				RedrawWindow(pgui->mHwnd, NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_NOFRAME | RDW_ERASE | RDW_NOERASE | RDW_UPDATENOW | RDW_ERASENOW | RDW_NOINTERNALPAINT);
 			}
 		}
-		// Update Scroll
+
+		// Update Scrollbars
 		if (pgui->mStyle & WS_HSCROLL || pgui->mStyle & WS_VSCROLL)
 		{
 			SCROLLINFO *aHScroll = pgui->mHScroll, *aVScroll = pgui->mVScroll;
 
-			// Get new client area size
-			int client_right = LOWORD(lParam),client_bottom = HIWORD(lParam);
 			
-			// Update Scrollbars
+			// Update Scrollbar buttons
 			int xScroll = 0, yScroll = 0;
+
+			// check if Scrollbars are shown
 			bool aHScrollVisible = pgui->mStyle & WS_HSCROLL && (int)aHScroll->nPage <= aHScroll->nMax;
 			bool aVScrollVisible = pgui->mStyle & WS_VSCROLL && (int)aVScroll->nPage <= aVScroll->nMax;
-			bool aHScrollRequired = pgui->mStyle & WS_HSCROLL && client_right < pgui->mMaxExtentRight + pgui->mMarginX;
-			bool aVScrollRequired = pgui->mStyle & WS_VSCROLL && client_bottom < pgui->mMaxExtentDown + pgui->mMarginY;
-			if (aHScroll->nPage == 0 && aVScroll->nPage == 0
-				&& client_right + 1 + (aVScrollVisible ? GetSystemMetrics(SM_CYVSCROLL) : 0) > pgui->mMaxExtentRight + pgui->mMarginX
-				&& client_bottom + 1 + (aHScrollVisible ? GetSystemMetrics(SM_CYHSCROLL) : 0) > pgui->mMaxExtentDown + pgui->mMarginY)
-			{ // Scrollbars are shown but are not reqiured because without those client area is big enough
+			
+			// Get new client area and add Scrollbars to it
+			// If Scrollbars do not belong to client area AutoSizePos above would not work
+			// because controls would resize when scrollbar disappears
+			int client_right = LOWORD(lParam) + (aVScrollVisible ? GetSystemMetrics(SM_CYVSCROLL) : 0), client_bottom = HIWORD(lParam) + (aHScrollVisible ? GetSystemMetrics(SM_CYHSCROLL) : 0);
+			
+			// Check if Scrollbars are required
+			bool aHScrollRequired = pgui->mStyle & WS_HSCROLL && client_right - (aVScrollVisible ? GetSystemMetrics(SM_CYVSCROLL) : 0) < pgui->mMaxExtentRight + pgui->mMarginX;
+			bool aVScrollRequired = pgui->mStyle & WS_VSCROLL && client_bottom - (aHScrollVisible ? GetSystemMetrics(SM_CYHSCROLL) : 0) < pgui->mMaxExtentDown + pgui->mMarginY;
+			
+			// Scrollbars are shown but are not reqiured because without those client area is big enough
+			if (client_right + 1 > pgui->mMaxExtentRight + pgui->mMarginX
+				&& client_bottom + 1 > pgui->mMaxExtentDown + pgui->mMarginY)
 				aHScrollRequired = aVScrollRequired = false;
-			}
-			bool aSkipOver = false;  // return after SetScrollInfo as it will call WM_SIZE again
+
+			// Ignore following code after SetScrollInfo if it will cause new WM_SIZE
+			bool aSkipOver = false;
 			if (pgui->mStyle & WS_HSCROLL)
 			{
 				aHScroll->nMax = pgui->mMaxExtentRight + pgui->mMarginX;
 
 				if (aHScrollVisible && !aHScrollRequired || !aHScrollVisible && aHScrollRequired)
-					aSkipOver = true; // SetScrollInfo will trigger another WM_SIZE, don't process rest
+					aSkipOver = true; // SetScrollInfo will trigger another WM_SIZE, don't process code below
 
-				// VScroll is visible but will be disabled because it is not required
-				// therefore we need to add it to client area
-				if (aVScrollVisible && !aVScrollRequired && !aHScrollRequired)
-					client_right += GetSystemMetrics(SM_CYVSCROLL);
-				
-				// add 1 pixel because nPage = nMax triggers Scrollbar
-				aHScroll->nPage = client_right + 1;
+				// Subtract vertical Scrollbar and add 1 pixel because nPage = nMax triggers Scrollbar
+				aHScroll->nPage = client_right - (aVScrollVisible && aVScrollRequired ? GetSystemMetrics(SM_CYVSCROLL) : 0) + 1;
 				SetScrollInfo(pgui->mHwnd, SB_HORZ, aHScroll, true);
-				// By this point, both scrollbars have redrawn, and disappeared if not needed
+				
+				// By this point, both scrollbars have redrawn or disappeared
 				// SCROLLINFO and client_rect are current.
 				// Calculate the amount of pixels to scroll left for ScrollWindow
 				if (!aSkipOver)
@@ -8156,20 +8224,15 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 				aVScroll->nMax = pgui->mMaxExtentDown + pgui->mMarginY;
 
 				if (aVScrollVisible && !aVScrollRequired || !aVScrollVisible && aVScrollRequired)
-					aSkipOver = true; // SetScrollInfo will trigger another WM_SIZE, don't process rest
+					aSkipOver = true; // SetScrollInfo will trigger another WM_SIZE, don't process code below
 				
-				// HScroll is visible but will be disabled because it is not required
-				// therefore we need to add it to client area
-				if (aHScrollVisible && !aVScrollRequired && !aHScrollRequired)
-					client_bottom += GetSystemMetrics(SM_CYHSCROLL);
-				
-				// add 1 pixel because nPage = nMax triggers Scrollbar
-				aVScroll->nPage = client_bottom + 1;
+				// Subtract horizontal Scrollbar add 1 pixel because nPage = nMax triggers Scrollbar
+				aVScroll->nPage = client_bottom - (aHScrollVisible && aHScrollRequired ? GetSystemMetrics(SM_CYHSCROLL) : 0) + 1;
 				SetScrollInfo(pgui->mHwnd, SB_VERT, aVScroll, true);
 				
-				// By this point, both scrollbars have redrawn, and disappeared if not needed
+				// By this point, both scrollbars have redrawn or disappeared
 				// SCROLLINFO and client_rect are current.
-				// Calculate the amount of pixels to scroll up for ScrollWindow
+				// Calculate the amount of pixels to scroll left for ScrollWindow
 				if (!aSkipOver)
 				{
 					if (pgui->mStyle & WS_VSCROLL && aVScroll->nPos && aVScroll->nMax - aVScroll->nPos < client_bottom)
