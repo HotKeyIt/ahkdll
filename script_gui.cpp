@@ -2004,6 +2004,13 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 	GuiControlType &control = mControl[mControlCount];
 	ZeroMemory(&control, sizeof(GuiControlType));
 
+	GuiType *aGui = NULL;
+	
+	if (aControlType == GUI_CONTROL_GUI)
+	{
+		if (!(aGui = GuiType::FindGui(aText)))
+			aGui = GuiType::FindGui((HWND)ATOI64(aText));
+	}
 	if (aControlType == GUI_CONTROL_TAB2) // v1.0.47.05: Replace TAB2 with TAB at an early stage to simplify the code.  The only purpose of TAB2 is to flag this as the new type of tab that avoids redrawing issues but has a new z-order that would break some existing scripts.
 	{
 		aControlType = GUI_CONTROL_TAB;
@@ -2206,6 +2213,17 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 		// the keyboard on Win2k/XP, standalone MonthCal controls don't support it, except on Vista and later.
 		if (g_os.IsWinVistaOrLater())
 			opt.style_add |= WS_TABSTOP;
+		break;
+	case GUI_CONTROL_GUI:
+		if (aGui)
+		{
+			SetParent(aGui->mHwnd, mHwnd);
+			if (aGui->mStyle & WS_POPUP)
+				aGui->mStyle = aGui->mStyle & ~WS_POPUP | WS_CHILD;
+			SetWindowLong(aGui->mHwnd, GWL_STYLE, aGui->mStyle);
+			if (!IsWindowVisible(aGui->mHwnd))
+				aGui->Show(_T(""),_T(""));
+		}
 		break;
 	// Nothing extra for these currently:
 	//case GUI_CONTROL_RADIO: This one is handled separately above the switch().
@@ -2536,6 +2554,14 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 			break;
 		case GUI_CONTROL_TAB:
 			opt.row_count = 10;
+			break;
+		case GUI_CONTROL_GUI:
+			if (aGui)
+			{
+				RECT rc;
+				GetWindowRect(aGui->mHwnd, &rc);
+				opt.height = rc.bottom - rc.top;
+			}
 			break;
 		// Types not included
 		// ------------------
@@ -2958,6 +2984,14 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 			// are usually used to fill up the entire window.  Therefore, default them to the ability
 			// to hold two columns of standard-width controls:
 			opt.width = (2 * gui_standard_width) + (3 * mMarginX);  // 3 vs. 2 to allow space in between columns.
+			break;
+		case GUI_CONTROL_GUI:
+			if (aGui)
+			{
+				RECT rc;
+				GetWindowRect(aGui->mHwnd, &rc);
+				opt.width = rc.right - rc.left;
+			}
 			break;
 		// Types not included
 		// ------------------
@@ -3948,6 +3982,13 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 				SendMessage(mStatusBarHwnd, SB_SETBKCOLOR, 0, opt.color_bk);
 		}
 		break;
+	case GUI_CONTROL_GUI:
+		if (aGui)
+		{
+			control.hwnd = aGui->mHwnd;
+			MoveWindow(control.hwnd, opt.x, opt.y, opt.width, opt.height, true);
+		}
+		break;
 	} // switch() for control creation.
 
 	////////////////////////////////
@@ -4180,7 +4221,12 @@ ResultType GuiType::ParseOptions(LPTSTR aOptions, bool &aSetLastFoundWindow, Tog
 	{
 		// Since window already exists, its mStyle and mExStyle members might be out-of-date due to
 		// "WinSet Transparent", etc.  So update them:
+		bool aIsHScroll = mStyle & WS_HSCROLL, aIsVScroll = mStyle & WS_VSCROLL;
 		mStyle = GetWindowLong(mHwnd, GWL_STYLE);
+		if (aIsHScroll && !(mStyle & WS_HSCROLL))
+			mStyle |= WS_HSCROLL;
+		if (aIsVScroll && !(mStyle & WS_VSCROLL))
+			mStyle |= WS_VSCROLL;
 		mExStyle = GetWindowLong(mHwnd, GWL_EXSTYLE);
 	}
 	DWORD style_orig = mStyle;
@@ -7968,6 +8014,7 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 
 			aScrollInfo.nPos = new_pos;
 			SetScrollInfo(pgui->mHwnd, true, &aScrollInfo, true);
+			return 0;
 		}
 		break;
 	case WM_MOUSEHWHEEL:
@@ -7996,6 +8043,7 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 
 			aScrollInfo.nPos = new_pos;
 			SetScrollInfo(pgui->mHwnd, false, &aScrollInfo, true);
+			return 0;
 		}
 		break;
 
@@ -8043,6 +8091,9 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 			for (GuiIndexType i = 0; i < pgui->mControlCount; i++)
 			{
 				GuiControlType *aControl = &pgui->mControl[i];
+				
+				if (aControl->type == GUI_CONTROL_STATUSBAR)
+					continue;
 
 				// Reset moved controls
 				if (aControl->mAYReset)
@@ -8134,7 +8185,10 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 				for (GuiIndexType i = 0; i < pgui->mControlCount; i++)
 				{
 					RECT rect;
-					GetWindowRect(pgui->mControl[i].hwnd, &rect);
+					GuiControlType *aControl = &pgui->mControl[i];
+					if (aControl->type == GUI_CONTROL_STATUSBAR)
+						continue;
+					GetWindowRect(aControl->hwnd, &rect);
 					POINT pt = { rect.left, rect.top };
 					ScreenToClient(pgui->mHwnd, &pt);
 					int aWidth = pt.x + pgui->mHScroll->nPos + (rect.right - rect.left), aHeight = pt.y + pgui->mVScroll->nPos + (rect.bottom - rect.top);
