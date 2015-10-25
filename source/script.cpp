@@ -983,7 +983,7 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 			LPTSTR last_backslash = _tcsrchr(buf, '\\');
 			if (!last_backslash) // probably can't happen due to the nature of GetModuleFileName().
 				mOurEXEDir = _T("");
-			last_backslash[1] = '\0'; // i.e. keep the trailing backslash for convenience.
+			*last_backslash = '\0';
 			if (!(mOurEXEDir = SimpleHeap::Malloc(buf + 1))) // +1 to omit the leading double-quote.
 				return FAIL;  // It already displayed the error for us.
 		}
@@ -3571,9 +3571,9 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 	HGLOBAL hResData;
 
 #ifdef _DEBUG
-	hRes = FindResource(NULL, _T("AHK"), MAKEINTRESOURCE(RT_RCDATA));
+	hRes = FindResource(NULL, _T("AHK"), RT_RCDATA);
 #else
-	hRes = FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), MAKEINTRESOURCE(RT_RCDATA));
+	hRes = FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), RT_RCDATA);
 #endif
 
 	if (!(hRes
@@ -8512,6 +8512,9 @@ ResultType Script::DefineFunc(LPTSTR aBuf, Var *aFuncGlobalVar[])
 		// Above has ensured that param_start now points to the next parameter, or ')' if none.
 	} // for() each formal parameter.
 
+	if (param_start[1]) // Something follows the ')' other than OTB (which was handled at an earlier stage).
+		return ScriptError(ERR_INVALID_FUNCDECL, aBuf);
+
 	if (param_count)
 	{
 		// Allocate memory only for the actual number of parameters actually present.
@@ -8747,7 +8750,8 @@ ResultType Script::DefineClassVars(LPTSTR aBuf, bool aStatic)
 		orig_char = *item_end;
 		*item_end = '\0'; // Temporarily terminate.
 		bool item_exists = class_object->GetItem(temp_token, item);
-		if (orig_char == '.')
+		bool item_name_has_dot = (orig_char == '.');
+		if (item_name_has_dot)
 		{
 			*item_end = orig_char; // Undo termination.
 			// This is something like "object.key := 5", which is only valid if "object" was
@@ -8809,8 +8813,9 @@ ResultType Script::DefineClassVars(LPTSTR aBuf, bool aStatic)
 		item_end += FindExprDelim(item_end); // Find the next comma which is not part of the initializer (or find end of string).
 
 		// Append "ClassNameOrThis.VarName := Initializer, " to the buffer.
-		int chars_written = _sntprintf(buf + buf_used, _countof(buf) - buf_used, _T("ObjRawSet(%s,\"%.*s\",(%.*s)), ")
-			, aStatic ? mClassName : _T("this"), name_length, item, item_end - right_side_of_operator, right_side_of_operator);
+		LPCTSTR initializer = item_name_has_dot ? _T("%s.%.*s := %.*s, ") : _T("ObjRawSet(%s,\"%.*s\",(%.*s)), ");
+		int chars_written = _sntprintf(buf + buf_used, _countof(buf) - buf_used, initializer
+			, aStatic ? mClassName : _T("this"), (int)name_length, item, (int)(item_end - right_side_of_operator), right_side_of_operator);
 		if (chars_written < 0)
 			return ScriptError(_T("Declaration too long.")); // Short message since should be rare.
 		buf_used += chars_written;
@@ -10871,7 +10876,7 @@ ResultType Script::PreparseStaticLines(Line *aStartingLine)
 		{
 		case ACT_STATIC:
 			// Override mActionType so ACT_STATIC doesn't have to be handled at runtime:
-			line->mActionType = (ActionTypeType)line->mAttribute;
+			line->mActionType = (ActionTypeType)(UINT_PTR)line->mAttribute;
 			// Add this line to the list of static initializers, which will be inserted above
 			// the auto-execute section later.  The main line list will be corrected below.
 			line->mPrevLine = mLastStaticLine;
@@ -12832,7 +12837,7 @@ end_of_infix_to_postfix:
 				break;
 			}
 			aArg.is_expression = false;
-			if (!ACT_USES_SIMPLE_POSTFIX(mActionType) && !(mActionType == ACT_STATIC && (int)mAttribute == ACT_ASSIGNEXPR))
+			if (!ACT_USES_SIMPLE_POSTFIX(mActionType) && !(mActionType == ACT_STATIC && (int)(INT_PTR)mAttribute == ACT_ASSIGNEXPR))
 				return OK;
 			// Otherwise, continue on below to copy the postfix token into persistent memory.
 		}

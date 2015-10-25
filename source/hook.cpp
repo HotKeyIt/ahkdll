@@ -1,4 +1,4 @@
-/*
+ï»¿/*
 AutoHotkey
 
 Copyright 2003-2009 Chris Mallett (support@autohotkey.com)
@@ -453,12 +453,12 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 	// the notch count from pKeyHistoryCurr->sc.
 	if (aVK == VK_PACKET) // Win2k/XP: VK_PACKET is used to send Unicode characters as if they were keystrokes.  sc is a 16-bit character code in that case.
 	{
-		pKeyHistoryCurr->sc = (sc_type)((PKBDLLHOOKSTRUCT)lParam)->scanCode;
+		pKeyHistoryCurr->sc = aSC = (sc_type)((PKBDLLHOOKSTRUCT)lParam)->scanCode; // Get the full value; aSC was truncated by the caller.
 		pKeyHistoryCurr->event_type = 'U'; // Give it a unique identifier even though it can be distinguished by the 4-digit "SC".  'U' vs 'u' to avoid confusion with 'u'=up.
-		// Artificial character input via VK_PACKET isn't supported by hotkeys, hotstrings or Input and
-		// probably shouldn't do anything, so just return now to avoid confusing aSC for a real scancode.
-		//aSC = 0;
-		return 0;
+		// Artificial character input via VK_PACKET isn't supported by hotkeys, since they always work via
+		// keycode, but hotstrings and Input are supported via the macro below when #InputLevel is non-zero.
+		// Must return now to avoid misinterpreting aSC as an actual scancode in the code below.
+		return AllowKeyToGoToSystem;
 	}
 	//else: Use usual modified value.
 	pKeyHistoryCurr->sc = aSC; // Will be zero if our caller is the mouse hook (except for wheel notch count).
@@ -743,8 +743,7 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 	if (!this_key.used_as_prefix && !this_key.used_as_suffix)
 		return AllowKeyToGoToSystem;
 
-	bool is_explicit_key_up_hotkey = false;                // Set default.
-	HotkeyIDType hotkey_id_with_flags = HOTKEY_ID_INVALID; //
+	HotkeyIDType hotkey_id_with_flags = HOTKEY_ID_INVALID; // Set default.
 	HotkeyVariant *firing_is_certain = NULL;               //
 	HotkeyIDType hotkey_id_temp; // For informal/temp storage of the ID-without-flags.
 
@@ -760,7 +759,6 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 		if (this_key.hotkey_to_fire_upon_release != HOTKEY_ID_INVALID)
 		{
 			hotkey_id_with_flags = this_key.hotkey_to_fire_upon_release;
-			is_explicit_key_up_hotkey = true; // Can't rely on (hotkey_id_with_flags & HOTKEY_KEY_UP) because some key-up hotkeys (such as the hotkey_up array) might not be flagged that way.
 			// The line below is done even though the down-event also resets it in case it is ever
 			// possible for keys to generate multiple consecutive key-up events (faulty or unusual keyboards?)
 			this_key.hotkey_to_fire_upon_release = HOTKEY_ID_INVALID;
@@ -943,9 +941,19 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 			// If our caller is the mouse hook, both of the following will always be false:
 			// this_key.as_modifiersLR
 			// this_toggle_key_can_be_toggled
-			return (this_key.as_modifiersLR || (this_key.no_suppress & NO_SUPPRESS_PREFIX)
+			if (this_key.as_modifiersLR || (this_key.no_suppress & NO_SUPPRESS_PREFIX)
 				|| this_toggle_key_can_be_toggled || has_no_enabled_suffixes)
-				? AllowKeyToGoToSystem : SuppressThisKey;
+				return AllowKeyToGoToSystem;
+			// Mark this key as having been suppressed.  This currently doesn't have any known effect
+			// since the change to tilde (~) handling in v1.0.95 (commit 161162b8), but may in future.
+			// Search for "SEND_NOSUPPRESS_PREFIX_KEY_ON_RELEASE" for related comments.
+			//#define SEND_NOSUPPRESS_PREFIX_KEY_ON_RELEASE
+			// Without this next assignment, the following issues occur if the above line is uncommented:
+			//   1) ~prefixkey:: allows just a key-up to pass through, without first sending a key-down as
+			//      originally intended.
+			//   2) #if false .. ~prefixkey:: causes the key-up to pass through when it should be suppressed.
+			this_key.hotkey_down_was_suppressed = true;
+			return SuppressThisKey;
 		}
 		//else valid suffix hotkey has been found; this will now fall through to Case #4 by virtue of aKeyUp==false.
 	}
@@ -2073,6 +2081,17 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 			if (aHook == g_MouseHook)
 				return AllowKeyToGoToSystem;
 			// Otherwise, our caller is the keyboard hook.
+			
+			// The following section is currently disabled because it hasn't been working as intended
+			// for quite some time, and doesn't seem to be what users expect.  It also contains some
+			// contradictions; for instance, explicit key-up hotkeys such as the one in the example
+			// were excluded, apparently by design (since v1.0.36.02).  Explicit key-up hotkeys which
+			// are turned on after the key is pressed were erroneously included, but this has been
+			// fixed in the code below.  Implicit key-up hotkeys (which act on key-up because the key
+			// is used as a prefix key) did not work because this_key.hotkey_down_was_suppressed was
+			// not set when the prefix key was suppressed -- and later because it was not suppressed
+			// at all due to a change in v1.0.95 (commit 161162b8).
+			#ifdef SEND_NOSUPPRESS_PREFIX_KEY_ON_RELEASE
 			// Since this hotkey is firing on key-up but the user specified not to suppress its native
 			// function, send a down event to make up for the fact that the original down event was
 			// suppressed (since key-up hotkeys' down events are always suppressed because they
@@ -2097,7 +2116,7 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 			// Used as either a prefix for a hotkey or just a plain modifier for another key.
 			// ... && (*this_key.pForceToggle != NEUTRAL || this_key.was_just_used);
 			if (this_key.hotkey_down_was_suppressed // Down was suppressed.
-				&& !is_explicit_key_up_hotkey // v1.0.36.02: Prevents a hotkey such as "~5 up::" from generating double characters, regardless of whether it's paired with a "~5::" hotkey.
+				&& !(hotkey_id_with_flags & HOTKEY_KEY_UP) // v1.0.36.02: Prevents a hotkey such as "~5 up::" from generating double characters, regardless of whether it's paired with a "~5::" hotkey.
 				&& !suppress_to_prevent_toggle) // Mouse vs. keybd hook was already checked higher above.
 				KeyEvent(KEYDOWN, aVK, aSC); // Substitute this to make up for the suppression (a check higher above has already determined that no_supress==true).
 				// Now allow the up-event to go through.  The DOWN should always wind up taking effect
@@ -2105,6 +2124,13 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 				// it resulted in a recursive call to this function (using our hook-thread
 				// rather than our main thread or some other thread):
 			return suppress_to_prevent_toggle ? SuppressThisKey : AllowKeyToGoToSystem;
+			#else
+			// Although it seems more sensible to suppress the key-up if the key-down was suppressed,
+			// it probably does no harm to let the key-up pass through, and in this case, it's exactly
+			// what the script is asking to happen (by prefixing the key-up hotkey with '~').
+			// this_key.pForceToggle isn't checked because AllowIt() handles that.
+			return AllowKeyToGoToSystem;
+			#endif
 		} // No suppression.
 	}
 	else // Key Down
@@ -2534,7 +2560,7 @@ bool CollectInput(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type aSC,
 	bool do_input = g_input.status == INPUT_IN_PROGRESS && !(g_input.IgnoreAHKInput && aIsIgnored);
 
 	UCHAR end_key_attributes;
-	if (do_input)
+	if (do_input && aVK != VK_PACKET)
 	{
 		end_key_attributes = g_input.EndVK[aVK];
 		if (!end_key_attributes)
@@ -2653,6 +2679,7 @@ bool CollectInput(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type aSC,
 	}
 
 
+	int char_count;
 	TBYTE ch[3];
 	BYTE key_state[256];
 	memcpy(key_state, g_PhysicalKeyState, 256);
@@ -2670,9 +2697,24 @@ bool CollectInput(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type aSC,
 	// with more keyboard layouts under 2k/XP than ToAscii() does (though if true, there is no MSDN explanation). 
 	// UPDATE: In v1.0.44.03, need to use ToAsciiEx() anyway because of the adapt-to-active-window-layout feature.
 	Get_active_window_keybd_layout // Defines the variables active_window and active_window_keybd_layout for use below.
-	int char_count = ToUnicodeOrAsciiEx(aVK, aEvent.scanCode  // Uses the original scan code, not the adjusted "sc" one.
-		, key_state, ch, g_MenuIsVisible ? 1 : 0, active_window_keybd_layout);
-	if (!char_count) // No translation for this key.
+
+	if (aVK == VK_PACKET)
+	{
+		// VK_PACKET corresponds to a SendInput event with the KEYEVENTF_UNICODE flag.
+#ifdef UNICODE
+		char_count = 1; // SendInput only supports a single 16-bit character code.
+		ch[0] = (TBYTE)aSC; // No translation needed.
+#else
+		// Convert the Unicode character to ANSI, dropping any that can't be converted.
+		char_count = WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, (WCHAR *)&aSC, 1, (CHAR *)ch, _countof(ch), NULL, NULL);
+#endif
+	}
+	else
+	{
+		char_count = ToUnicodeOrAsciiEx(aVK, aEvent.scanCode  // Uses the original scan code, not the adjusted "sc" one.
+			, key_state, ch, g_MenuIsVisible ? 1 : 0, active_window_keybd_layout);
+	}
+	if (!char_count) // No translation for this key (or for VK_PACKET, this character).
 		return treat_as_visible;
 
 	// More notes about dead keys: The dead key behavior of Enter/Space/Backspace is already properly
@@ -2697,7 +2739,7 @@ bool CollectInput(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type aSC,
 	// (for which the dead key is pending): ToAsciiEx() consumes previous/pending dead key, which causes the
 	// active window's call of ToAsciiEx() to fail to see a dead key. So unless the program reinserts the dead key
 	// after the call to ToAsciiEx() but before allowing the dead key's successor key to pass through to the
-	// active window, that window would see a non-diacritic like "u" instead of û.  In other words, the program
+	// active window, that window would see a non-diacritic like "u" instead of Ã».  In other words, the program
 	// "uses up" the dead key to populate its own hotstring buffer, depriving the active window of the dead key.
 	//
 	// JAVA ISSUE: Hotstrings are known to disrupt dead keys in Java apps on some systems (though not my XP one).
@@ -2836,7 +2878,7 @@ bool CollectInput(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type aSC,
 				}
 				else // case insensitive
 					// v1.0.43.03: Using CharLower vs. tolower seems the best default behavior (even though slower)
-					// so that languages in which the higher ANSI characters are common will see "Ä" == "ä", etc.
+					// so that languages in which the higher ANSI characters are common will see "Ã„" == "Ã¤", etc.
 					for (; cphs >= hs.mString; --cpbuf, --cphs)
 						if (ltolower(*cpbuf) != ltolower(*cphs)) // v1.0.43.04: Fixed crash by properly casting to UCHAR (via macro).
 							break;
@@ -3048,9 +3090,9 @@ bool CollectInput(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type aSC,
 	// dead key reinserted below, which in turn would cause the hotstring's first backspace to fire
 	// the dead key (which kills the backspace, turning it into the dead key character itself).
 	// For example:
-	// :*:jsá::jsmith@somedomain.com
+	// :*:jsÃ¡::jsmith@somedomain.com
 	// On the Spanish (Mexico) keyboard layout, one would type accent (English left bracket) followed by
-	// the letter "a" to produce á.
+	// the letter "a" to produce Ã¡.
 	if (dead_key_sequence_complete)
 	{
 		vk_type vk_to_send = sPendingDeadKeyVK; // To facilitate early reset below.
@@ -3891,6 +3933,7 @@ void ChangeHookState(Hotkey *aHK[], int aHK_count, HookType aWhichHook, HookType
 					continue;
 				}
 			}
+			#ifndef SEND_NOSUPPRESS_PREFIX_KEY_ON_RELEASE // Search for this symbol for details.
 			else
 			{
 				// If this hotkey is a lone key with ~ prefix such as "~a::", the following ensures that
@@ -3899,6 +3942,7 @@ void ChangeHookState(Hotkey *aHK[], int aHK_count, HookType aWhichHook, HookType
 				if (!hk.mModifiersConsolidatedLR && (hk.mNoSuppress & AT_LEAST_ONE_VARIANT_HAS_TILDE))
 					pThisKey->no_suppress |= NO_SUPPRESS_PREFIX;
 			}
+			#endif
 		}
 
 		// At this point, since the above didn't "continue", this hotkey is one without a ModifierVK/SC.

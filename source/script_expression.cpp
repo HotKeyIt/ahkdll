@@ -1,4 +1,4 @@
-/*
+﻿/*
 AutoHotkey
 
 Copyright 2003-2009 Chris Mallett (support@autohotkey.com)
@@ -864,7 +864,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 					// because assigning it as a signed value would "convert" it into a 64-bit
 					// value, which in turn is caused by the fact that the script sees all negative
 					// numbers as 64-bit values (e.g. -1 is 0xFFFFFFFFFFFFFFFF).
-					this_token.value_int64 = (size_t)~(DWORD)right_int64; // Casting this way avoids compiler warning.
+					this_token.value_int64 = (size_t)(DWORD)~(DWORD)right_int64; // Casting this way avoids compiler warning.
 			}
 			else // SYM_DEREF
 			{
@@ -1572,7 +1572,7 @@ bool Func::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCo
 	if (aIsVariadic) // i.e. this is a variadic function call.
 	{
 		ExprTokenType *rvalue = NULL;
-		if (mName == (LPTSTR)IT_SET && aParamCount > 1) // x[y*]:=z
+		if (mBIF == &Op_ObjInvoke && mID == IT_SET && aParamCount > 1) // x[y*]:=z
 			rvalue = aParam[--aParamCount];
 
 		--aParamCount; // i.e. make aParamCount the count of normal params.

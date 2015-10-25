@@ -1,4 +1,4 @@
-/*
+﻿/*
 AutoHotkey
 
 Copyright 2003-2009 Chris Mallett (support@autohotkey.com)
@@ -496,7 +496,7 @@ ResultType Script::PerformGui(LPTSTR aBuf, LPTSTR aParam2, LPTSTR aParam3, LPTST
 		if (*aParam2)
 		{
 			GuiIndexType control_index = gui.FindControl(aParam2); // Search on either the control's variable name or its ClassNN.
-			if (control_index != -1) // Must compare directly to -1 due to unsigned.
+			if (control_index < gui.mControlCount)
 			{
 				GuiControlType &control = gui.mControl[control_index]; // For maintainability, and might slightly reduce code size.
 				if (gui_command == GUI_CMD_LISTVIEW)
@@ -1573,7 +1573,7 @@ ResultType Line::GuiControlGet(LPTSTR aCommand, LPTSTR aControlID, LPTSTR aParam
 	}
 
 	case GUICONTROLGET_CMD_ENABLED:
-		// See commment below.
+		// See comment below.
 		result = output_var.Assign(IsWindowEnabled(control.hwnd) ? 1 : 0); // Force pure boolean 0/1.
 		goto return_the_result;
 
@@ -1720,6 +1720,7 @@ ResultType GuiType::Destroy(GuiType &gui)
 		}
 		else if (control.type == GUI_CONTROL_LISTVIEW) // It was ensured at an earlier stage that union_lv_attrib != NULL.
 			free(control.union_lv_attrib);
+		control.jump_to_label = NULL; // Release any user-defined object/BoundFunc used as a g-label.
 	}
 	HICON icon_eligible_for_destruction = gui.mIconEligibleForDestruction;
 	HICON icon_eligible_for_destruction_small = gui.mIconEligibleForDestructionSmall;
@@ -2004,6 +2005,13 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 	GuiControlType &control = mControl[mControlCount];
 	ZeroMemory(&control, sizeof(GuiControlType));
 
+	GuiType *aGui = NULL;
+	
+	if (aControlType == GUI_CONTROL_GUI)
+	{
+		if (!(aGui = GuiType::FindGui(aText)))
+			aGui = GuiType::FindGui((HWND)ATOI64(aText));
+	}
 	if (aControlType == GUI_CONTROL_TAB2) // v1.0.47.05: Replace TAB2 with TAB at an early stage to simplify the code.  The only purpose of TAB2 is to flag this as the new type of tab that avoids redrawing issues but has a new z-order that would break some existing scripts.
 	{
 		aControlType = GUI_CONTROL_TAB;
@@ -2206,6 +2214,17 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 		// the keyboard on Win2k/XP, standalone MonthCal controls don't support it, except on Vista and later.
 		if (g_os.IsWinVistaOrLater())
 			opt.style_add |= WS_TABSTOP;
+		break;
+	case GUI_CONTROL_GUI:
+		if (aGui)
+		{
+			SetParent(aGui->mHwnd, mHwnd);
+			if (aGui->mStyle & WS_POPUP)
+				aGui->mStyle = aGui->mStyle & ~WS_POPUP | WS_CHILD;
+			SetWindowLong(aGui->mHwnd, GWL_STYLE, aGui->mStyle);
+			if (!IsWindowVisible(aGui->mHwnd))
+				aGui->Show(_T(""),_T(""));
+		}
 		break;
 	// Nothing extra for these currently:
 	//case GUI_CONTROL_RADIO: This one is handled separately above the switch().
@@ -2537,6 +2556,14 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 		case GUI_CONTROL_TAB:
 			opt.row_count = 10;
 			break;
+		case GUI_CONTROL_GUI:
+			if (aGui)
+			{
+				RECT rc;
+				GetWindowRect(aGui->mHwnd, &rc);
+				opt.height = rc.bottom - rc.top;
+			}
+			break;
 		// Types not included
 		// ------------------
 		//case GUI_CONTROL_TEXT:      Rows are based on control's contents.
@@ -2689,7 +2716,12 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 			if (style & WS_VSCROLL)
 				extra_width += GetSystemMetrics(SM_CXVSCROLL);
 			// DT_EDITCONTROL: "the average character width is calculated in the same manner as for an edit control"
-			// It might help some aspects of the estimate conducted below.
+			// Although it's hard to say exactly what the quote above means, DT_EDITCONTROL definitely
+			// affects the width of tab stops (making this consistent with Edit controls) and therefore
+			// must be included.  It also excludes the last line if it is empty, which is undesirable,
+			// so we need to compensate for that:
+			if (*aText && aText[_tcslen(aText)-1] == '\n')
+				extra_height += tm.tmHeight + tm.tmExternalLeading;
 			// Also include DT_EXPANDTABS under the assumption that if there are tabs present, the user
 			// intended for them to be there because a multiline edit would expand them (rather than trying
 			// to worry about whether this control *might* become auto-multiline after this point.
@@ -2958,6 +2990,14 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 			// are usually used to fill up the entire window.  Therefore, default them to the ability
 			// to hold two columns of standard-width controls:
 			opt.width = (2 * gui_standard_width) + (3 * mMarginX);  // 3 vs. 2 to allow space in between columns.
+			break;
+		case GUI_CONTROL_GUI:
+			if (aGui)
+			{
+				RECT rc;
+				GetWindowRect(aGui->mHwnd, &rc);
+				opt.width = rc.right - rc.left;
+			}
 			break;
 		// Types not included
 		// ------------------
@@ -3948,6 +3988,13 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 				SendMessage(mStatusBarHwnd, SB_SETBKCOLOR, 0, opt.color_bk);
 		}
 		break;
+	case GUI_CONTROL_GUI:
+		if (aGui)
+		{
+			control.hwnd = aGui->mHwnd;
+			MoveWindow(control.hwnd, opt.x, opt.y, opt.width, opt.height, true);
+		}
+		break;
 	} // switch() for control creation.
 
 	////////////////////////////////
@@ -4132,7 +4179,7 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 			if (bottom > mMaxExtentDownSection)
 				mMaxExtentDownSection = bottom;
 		}
-		
+
 		// Scroll has been already initialized and needs to be updated
 		if (mStyle & WS_HSCROLL && mHScroll)
 		{
@@ -4152,6 +4199,10 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 		control.mAHeight = opt.AHeight;
 		control.mAXReset = opt.AXReset;
 		control.mAYReset = opt.AYReset;
+		control.mAXAuto = opt.AXAuto;
+		control.mAYAuto = opt.AYAuto;
+		control.mAWAuto = opt.AWAuto;
+		control.mAHAuto = opt.AHAuto;
 
 		// Save default size of control
 		control.mX = opt.x;
@@ -4176,7 +4227,12 @@ ResultType GuiType::ParseOptions(LPTSTR aOptions, bool &aSetLastFoundWindow, Tog
 	{
 		// Since window already exists, its mStyle and mExStyle members might be out-of-date due to
 		// "WinSet Transparent", etc.  So update them:
+		bool aIsHScroll = mStyle & WS_HSCROLL, aIsVScroll = mStyle & WS_VSCROLL;
 		mStyle = GetWindowLong(mHwnd, GWL_STYLE);
+		if (aIsHScroll && !(mStyle & WS_HSCROLL))
+			mStyle |= WS_HSCROLL;
+		if (aIsVScroll && !(mStyle & WS_VSCROLL))
+			mStyle |= WS_VSCROLL;
 		mExStyle = GetWindowLong(mHwnd, GWL_EXSTYLE);
 	}
 	DWORD style_orig = mStyle;
@@ -5885,6 +5941,8 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 				{
 					if (ctoupper(*(next_option + 1)) == 'R')
 						aOpt.AXReset = true;
+					else if (ctoupper(*(next_option + 1)) == 'A')
+						aOpt.AXAuto = true;
 					else if (ctoupper(*(next_option + 1)) == 'P')
 						aOpt.AX = (float)0.000000000000000000000000000000000000000000001;
 					else if (*(next_option + 1) == '\0')
@@ -5903,6 +5961,8 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 				{
 					if (ctoupper(*(next_option + 1)) == 'R')
 						aOpt.AYReset = true;
+					else if (ctoupper(*(next_option + 1)) == 'A')
+						aOpt.AYAuto = true;
 					else if (ctoupper(*(next_option + 1)) == 'P')
 						aOpt.AY = (float)0.000000000000000000000000000000000000000000001;
 					else if (*(next_option + 1) == '\0')
@@ -5921,6 +5981,8 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 				{
 					if (ctoupper(*(next_option + 1)) == 'R')
 						aOpt.AXReset = true;
+					else if (ctoupper(*(next_option + 1)) == 'A')
+						aOpt.AWAuto = true;
 					else if (*(next_option + 1) == '\0')
 						aOpt.AWidth = 1;
 					else if (_tcschr(next_option + 1, '/') && *_tcschr(next_option + 1, '/') != '\0' && ATOI(_tcschr(next_option + 1, '/') + 1))
@@ -5937,6 +5999,8 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 				{
 					if (ctoupper(*(next_option + 1)) == 'R')
 						aOpt.AYReset = true;
+					else if (ctoupper(*(next_option + 1)) == 'A')
+						aOpt.AHAuto = true;
 					else if (*(next_option + 1) == '\0')
 						aOpt.AHeight = 1;
 					else if (_tcschr(next_option + 1, '/') && *_tcschr(next_option + 1, '/') != '\0' && ATOI(_tcschr(next_option + 1, '/') + 1))
@@ -6345,11 +6409,14 @@ void GuiType::ControlAddContents(GuiControlType &aControl, LPTSTR aContent, int 
 		return;
 
 	UINT msg_add, msg_select;
+	int requested_index = 0;
 
 	switch (aControl.type)
 	{
-	case GUI_CONTROL_LISTVIEW:
 	case GUI_CONTROL_TAB: // These cases must be listed anyway to do a break vs. return, so might as well init conditionally rather than unconditionally.
+		requested_index = TabCtrl_GetItemCount(aControl.hwnd); // So that tabs are "appended at the end of the control's list", as documented for GuiControl.
+		// Fall through:
+	case GUI_CONTROL_LISTVIEW:
 		msg_add = 0;
 		msg_select = 0;
 		break;
@@ -6370,7 +6437,6 @@ void GuiType::ControlAddContents(GuiControlType &aControl, LPTSTR aContent, int 
 	bool temporarily_terminated;
 	LPTSTR this_field, next_field;
 	LRESULT item_index;
-	int requested_index = 0;
 
 	// For tab controls:
 	TCITEM tci;
@@ -6943,6 +7009,11 @@ ResultType GuiType::Show(LPTSTR aOptions, LPTSTR aText)
 	case SW_SHOWNORMAL:
 	case SW_MAXIMIZE:
 	case SW_RESTORE:
+		if (GetAncestor(mHwnd, GA_ROOT) != mHwnd) // It's a child window, perhaps due to the +Parent option.
+			// Since this is a child window, SetForegroundWindowEx will fail and fall back to the "two-alts"
+			// method of forcing activation, which causes some messages to be discarded due to the temporary
+			// modal menu loop.  So don't even try it.
+			break;
 		if (mHwnd != GetForegroundWindow())
 			SetForegroundWindowEx(mHwnd);   // In the above modes, try to force it to the foreground as documented.
 		if (mFirstActivation)
@@ -7020,7 +7091,7 @@ ResultType GuiType::Show(LPTSTR aOptions, LPTSTR aText)
 	// If this weren't done, whenever a command that blocks (fully uses) the main thread such as "Drive Eject"
 	// immediately follows "Gui Show", the GUI window might not appear until afterward because our thread
 	// never had a chance to call its WindowProc with all the messages needed to actually show the window:
-	SLEEP_WITHOUT_INTERRUPTION(-1)
+	MsgSleep(-1);
 	// UpdateWindow() would probably achieve the same effect as the above, but it feels safer to do
 	// the above because it ensures that our message queue is empty prior to returning to our caller.
 
@@ -7560,7 +7631,7 @@ GuiIndexType GuiType::FindControl(LPTSTR aControlID)
 	{
 		// v1.1.04: Allow Gui controls to be referenced by HWND.  There is some risk of breaking
 		// scripts, but only if the text of one control contains the HWND of another control.
-		u = (GuiIndexType)FindControl((HWND)ATOI64(aControlID), true);
+		u = FindControlIndex((HWND)ATOI64(aControlID));
 		if (u < mControlCount)
 			return u;
 		// Otherwise: no match was found, so fall back to considering it as text.
@@ -7595,11 +7666,7 @@ GuiIndexType GuiType::FindControl(LPTSTR aControlID)
 	}
 	// Otherwise: No match found, so fall back to standard control class and/or text finding method.
 	HWND control_hwnd = ControlExist(mHwnd, aControlID);
-	u = (GuiIndexType)FindControl(control_hwnd, true);
-	if (u < mControlCount)
-		return u;  // Match found.
-	// Otherwise: No match found.
-	return -1;
+	return FindControlIndex(control_hwnd);
 }
 
 
@@ -7956,6 +8023,7 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 
 			aScrollInfo.nPos = new_pos;
 			SetScrollInfo(pgui->mHwnd, true, &aScrollInfo, true);
+			return 0;
 		}
 		break;
 	case WM_MOUSEHWHEEL:
@@ -7984,6 +8052,7 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 
 			aScrollInfo.nPos = new_pos;
 			SetScrollInfo(pgui->mHwnd, false, &aScrollInfo, true);
+			return 0;
 		}
 		break;
 
@@ -8005,21 +8074,24 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 			// See its comments for why.
 		
 		if (pgui->mWidth != COORD_UNSPECIFIED) // also avoids compile error for variable initialization
-		{
-			// Calculate size difference of gui
+		{   // AutoSizePos
+			// calculate size difference of new client area
 			int addWidth = LOWORD(lParam) - pgui->mWidth, addHeight = HIWORD(lParam) - pgui->mHeight;
-			bool aHScrollVisible = pgui->mStyle & WS_HSCROLL && (int)pgui->mHScroll->nPage <= pgui->mHScroll->nMax;
-			bool aVScrollVisible = pgui->mStyle & WS_VSCROLL && (int)pgui->mVScroll->nPage <= pgui->mVScroll->nMax;
+			
+			// Required to update pgui->mMaxExtentRight and ...Down
 			bool aResizeWasDone = false;
-			int addedHeight = 0, addedWidth = 0;
+
+			// Calculate moved controls and add addWidth/Height to correctly position following controls
+			int addedHeight = 0, addedWidth = 0, autoX = 0, autoY = 0;
+			float autoW = 0, autoH = 0;
 			
-			// ignore Scrollbars
-			//if (aVScrollVisible)
-			//	addWidth -= GetSystemMetrics(SM_CYVSCROLL);
-			//if (aHScrollVisible)
-			//	addHeight -= GetSystemMetrics(SM_CYHSCROLL);
+			// Add Scrollbars to client area if they exist because we keep client area behind scrollbars
+			if (pgui->mStyle & WS_VSCROLL && (int)pgui->mVScroll->nPage <= pgui->mVScroll->nMax)
+				addWidth += GetSystemMetrics(SM_CYVSCROLL);
+			if (pgui->mStyle & WS_HSCROLL && (int)pgui->mHScroll->nPage <= pgui->mHScroll->nMax)
+				addHeight += GetSystemMetrics(SM_CYHSCROLL);
 			
-			// use original size of window if new size is smaller.
+			// use original size of window if new size is smaller so controls will newer be smaller than original size.
 			if (addHeight < 0)
 				addHeight = 0;
 			if (addWidth < 0)
@@ -8028,34 +8100,85 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 			for (GuiIndexType i = 0; i < pgui->mControlCount; i++)
 			{
 				GuiControlType *aControl = &pgui->mControl[i];
-				// Check for autosize and autoposition options
-				if (!(aControl->mAX || aControl->mAY || aControl->mAWidth || aControl->mAHeight))
+				
+				if (aControl->type == GUI_CONTROL_STATUSBAR)
 					continue;
+
+				// Reset moved controls
+				if (aControl->mAYReset)
+				{
+					addedHeight = 0;
+					autoY = 0;
+				}
+				if (aControl->mAXReset)
+				{
+					addedWidth = 0;
+					autoX = 0;
+				}
+
+				// Check for autosize and autoposition options
+				if (!(aControl->mAX || aControl->mAY || aControl->mAWidth || aControl->mAHeight || aControl->mAXAuto || aControl->mAYAuto || aControl->mAWAuto || aControl->mAHAuto))
+					continue;
+				
 				// Calculate new size and position for controls
 				RECT rect;
 				GetWindowRect(aControl->hwnd, &rect);
 				POINT pt = { rect.left, rect.top };
 				ScreenToClient(pgui->mHwnd, &pt);
 				int x = pt.x, y = pt.y, width = rect.right - rect.left, height = rect.bottom - rect.top;
-				if (aControl->mAYReset)
-					addedHeight = 0;
-				if (aControl->mAXReset)
-					addedWidth = 0;
 				
+				// calculate new x position
 				if (aControl->mAX)
 				{
 					x = aControl->mX + addedWidth + (int)(aControl->mAX * addWidth) - (pgui->mStyle & WS_HSCROLL ? pgui->mHScroll->nPos : 0);
 					addedWidth += (int)(aControl->mAX * addWidth);
 				}
+				else if (aControl->mAXAuto)
+				{
+					x = aControl->mX + addedWidth + autoX - (pgui->mStyle & WS_HSCROLL ? pgui->mHScroll->nPos : 0);
+					addedWidth += autoX;
+				}
+				// calculate new y position
 				if (aControl->mAY) {
 					y = aControl->mY + addedHeight + (int)(aControl->mAY * addHeight) - (pgui->mStyle & WS_VSCROLL ? pgui->mVScroll->nPos : 0);
 					addedHeight += (int)(aControl->mAY * addHeight);
 				}
+				else if (aControl->mAYAuto)
+				{
+					y = aControl->mY + addedHeight + autoY - (pgui->mStyle & WS_VSCROLL ? pgui->mVScroll->nPos : 0);
+					addedHeight += autoY;
+				}
+				// calculate new width
 				if (aControl->mAWidth)
+				{
 					width = aControl->mWidth + (int)(aControl->mAWidth * addWidth);
+					autoW = aControl->mAWidth;
+				}
+				else if (aControl->mAWAuto)
+				{
+					width = aControl->mWidth + (int)(autoW * addWidth);
+				}
+				// calculate new height
 				if (aControl->mAHeight)
+				{
 					height = aControl->mHeight + (int)(aControl->mAHeight * addHeight);
-
+					autoH = aControl->mAHeight;
+				}
+				else if (aControl->mAHAuto)
+				{
+					height = aControl->mHeight + (int)(autoH * addHeight);
+				}
+				
+				// Apply values used for axa and aya options in following controls
+				//int autoXnew = (aControl->mAX ? (int)(aControl->mAX * addWidth) : 0) + (aControl->mAWidth ? (int)(aControl->mAWidth * addWidth) : 0);
+				//int autoYnew = (aControl->mAY ? (int)(aControl->mAY * addHeight) : 0) + (aControl->mAHeight ? (int)(aControl->mAHeight * addHeight) : 0);
+				//if (autoX < autoXnew)
+				if (!aControl->mAWAuto)
+					autoX = (aControl->mAX ? (int)(aControl->mAX * addWidth) : 0) + (aControl->mAWidth ? (int)(aControl->mAWidth * addWidth) : 0);
+				//if (autoY < autoYnew)
+				if (!aControl->mAHAuto)
+					autoY = (aControl->mAY ? (int)(aControl->mAY * addHeight) : 0) + (aControl->mAHeight ? (int)(aControl->mAHeight * addHeight) : 0);
+				
 				// Continue if size of control was not changed
 				if (x == pt.x && y == pt.y && width == rect.right - rect.left && height == rect.bottom - rect.top)
 					continue;
@@ -8064,14 +8187,17 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 				aResizeWasDone = true;
 			}
 			
-			// Update client area for gui
+			// Update client area for gui if controls were moved
 			if (aResizeWasDone)
 			{
 				int aMaxWidth = 0, aMaxHeight = 0;
 				for (GuiIndexType i = 0; i < pgui->mControlCount; i++)
 				{
 					RECT rect;
-					GetWindowRect(pgui->mControl[i].hwnd, &rect);
+					GuiControlType *aControl = &pgui->mControl[i];
+					if (aControl->type == GUI_CONTROL_STATUSBAR)
+						continue;
+					GetWindowRect(aControl->hwnd, &rect);
 					POINT pt = { rect.left, rect.top };
 					ScreenToClient(pgui->mHwnd, &pt);
 					int aWidth = pt.x + pgui->mHScroll->nPos + (rect.right - rect.left), aHeight = pt.y + pgui->mVScroll->nPos + (rect.bottom - rect.top);
@@ -8084,46 +8210,51 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 					pgui->mMaxExtentRight = aMaxWidth;
 				if (aMaxHeight != pgui->mMaxExtentDown)
 					pgui->mMaxExtentDown = aMaxHeight;
-				RedrawWindow(pgui->mHwnd, NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_NOFRAME | RDW_ERASE | RDW_NOERASE | RDW_UPDATENOW | RDW_NOINTERNALPAINT);
+				RedrawWindow(pgui->mHwnd, NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_NOFRAME | RDW_ERASE | RDW_NOERASE | RDW_UPDATENOW | RDW_ERASENOW | RDW_NOINTERNALPAINT);
 			}
 		}
-		// Update Scroll
+
+		// Update Scrollbars
 		if (pgui->mStyle & WS_HSCROLL || pgui->mStyle & WS_VSCROLL)
 		{
 			SCROLLINFO *aHScroll = pgui->mHScroll, *aVScroll = pgui->mVScroll;
 
-			// Get new client area size
-			int client_right = LOWORD(lParam),client_bottom = HIWORD(lParam);
 			
-			// Update Scrollbars
+			// Update Scrollbar buttons
 			int xScroll = 0, yScroll = 0;
+
+			// check if Scrollbars are shown
 			bool aHScrollVisible = pgui->mStyle & WS_HSCROLL && (int)aHScroll->nPage <= aHScroll->nMax;
 			bool aVScrollVisible = pgui->mStyle & WS_VSCROLL && (int)aVScroll->nPage <= aVScroll->nMax;
-			bool aHScrollRequired = pgui->mStyle & WS_HSCROLL && client_right < pgui->mMaxExtentRight + pgui->mMarginX;
-			bool aVScrollRequired = pgui->mStyle & WS_VSCROLL && client_bottom < pgui->mMaxExtentDown + pgui->mMarginY;
-			if (aHScroll->nPage == 0 && aVScroll->nPage == 0
-				&& client_right + 1 + (aVScrollVisible ? GetSystemMetrics(SM_CYVSCROLL) : 0) > pgui->mMaxExtentRight + pgui->mMarginX
-				&& client_bottom + 1 + (aHScrollVisible ? GetSystemMetrics(SM_CYHSCROLL) : 0) > pgui->mMaxExtentDown + pgui->mMarginY)
-			{ // Scrollbars are shown but are not reqiured because without those client area is big enough
+			
+			// Get new client area and add Scrollbars to it
+			// If Scrollbars do not belong to client area AutoSizePos above would not work
+			// because controls would resize when scrollbar disappears
+			int client_right = LOWORD(lParam) + (aVScrollVisible ? GetSystemMetrics(SM_CYVSCROLL) : 0), client_bottom = HIWORD(lParam) + (aHScrollVisible ? GetSystemMetrics(SM_CYHSCROLL) : 0);
+			
+			// Check if Scrollbars are required
+			bool aHScrollRequired = pgui->mStyle & WS_HSCROLL && client_right - (aVScrollVisible ? GetSystemMetrics(SM_CYVSCROLL) : 0) < pgui->mMaxExtentRight + pgui->mMarginX;
+			bool aVScrollRequired = pgui->mStyle & WS_VSCROLL && client_bottom - (aHScrollVisible ? GetSystemMetrics(SM_CYHSCROLL) : 0) < pgui->mMaxExtentDown + pgui->mMarginY;
+			
+			// Scrollbars are shown but are not reqiured because without those client area is big enough
+			if (client_right + 1 > pgui->mMaxExtentRight + pgui->mMarginX
+				&& client_bottom + 1 > pgui->mMaxExtentDown + pgui->mMarginY)
 				aHScrollRequired = aVScrollRequired = false;
-			}
-			bool aSkipOver = false;  // return after SetScrollInfo as it will call WM_SIZE again
+
+			// Ignore following code after SetScrollInfo if it will cause new WM_SIZE
+			bool aSkipOver = false;
 			if (pgui->mStyle & WS_HSCROLL)
 			{
 				aHScroll->nMax = pgui->mMaxExtentRight + pgui->mMarginX;
 
 				if (aHScrollVisible && !aHScrollRequired || !aHScrollVisible && aHScrollRequired)
-					aSkipOver = true; // SetScrollInfo will trigger another WM_SIZE, don't process rest
+					aSkipOver = true; // SetScrollInfo will trigger another WM_SIZE, don't process code below
 
-				// VScroll is visible but will be disabled because it is not required
-				// therefore we need to add it to client area
-				if (aVScrollVisible && !aVScrollRequired && !aHScrollRequired)
-					client_right += GetSystemMetrics(SM_CYVSCROLL);
-				
-				// add 1 pixel because nPage = nMax triggers Scrollbar
-				aHScroll->nPage = client_right + 1;
+				// Subtract vertical Scrollbar and add 1 pixel because nPage = nMax triggers Scrollbar
+				aHScroll->nPage = client_right - (aVScrollVisible && aVScrollRequired ? GetSystemMetrics(SM_CYVSCROLL) : 0) + 1;
 				SetScrollInfo(pgui->mHwnd, SB_HORZ, aHScroll, true);
-				// By this point, both scrollbars have redrawn, and disappeared if not needed
+				
+				// By this point, both scrollbars have redrawn or disappeared
 				// SCROLLINFO and client_rect are current.
 				// Calculate the amount of pixels to scroll left for ScrollWindow
 				if (!aSkipOver)
@@ -8143,20 +8274,15 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 				aVScroll->nMax = pgui->mMaxExtentDown + pgui->mMarginY;
 
 				if (aVScrollVisible && !aVScrollRequired || !aVScrollVisible && aVScrollRequired)
-					aSkipOver = true; // SetScrollInfo will trigger another WM_SIZE, don't process rest
+					aSkipOver = true; // SetScrollInfo will trigger another WM_SIZE, don't process code below
 				
-				// HScroll is visible but will be disabled because it is not required
-				// therefore we need to add it to client area
-				if (aHScrollVisible && !aVScrollRequired && !aHScrollRequired)
-					client_bottom += GetSystemMetrics(SM_CYHSCROLL);
-				
-				// add 1 pixel because nPage = nMax triggers Scrollbar
-				aVScroll->nPage = client_bottom + 1;
+				// Subtract horizontal Scrollbar add 1 pixel because nPage = nMax triggers Scrollbar
+				aVScroll->nPage = client_bottom - (aHScrollVisible && aHScrollRequired ? GetSystemMetrics(SM_CYHSCROLL) : 0) + 1;
 				SetScrollInfo(pgui->mHwnd, SB_VERT, aVScroll, true);
 				
-				// By this point, both scrollbars have redrawn, and disappeared if not needed
+				// By this point, both scrollbars have redrawn or disappeared
 				// SCROLLINFO and client_rect are current.
-				// Calculate the amount of pixels to scroll up for ScrollWindow
+				// Calculate the amount of pixels to scroll left for ScrollWindow
 				if (!aSkipOver)
 				{
 					if (pgui->mStyle & WS_VSCROLL && aVScroll->nPos && aVScroll->nMax - aVScroll->nPos < client_bottom)
@@ -8909,6 +9035,10 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 			break;
 		if (text_color_was_changed = (pcontrol->type != GUI_CONTROL_PIC && pcontrol->union_color != CLR_DEFAULT))
 			SetTextColor((HDC)wParam, pcontrol->union_color);
+		else
+			// Always set a text color in case a brush will be returned below.  If this isn't done and
+			// a brush is returned, the system will use whatever color was set before; probably black.
+			SetTextColor((HDC)wParam, GetSysColor(COLOR_WINDOWTEXT));
 
 		if (pcontrol->attrib & GUI_CONTROL_ATTRIB_BACKGROUND_TRANS)
 		{

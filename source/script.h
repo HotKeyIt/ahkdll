@@ -1,4 +1,4 @@
-/*
+﻿/*
 AutoHotkey
 
 Copyright 2003-2009 Chris Mallett (support@autohotkey.com)
@@ -202,6 +202,7 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_INVALID_DOT _T("Ambiguous or invalid use of \".\"")
 #define ERR_UNQUOTED_NON_ALNUM _T("Unquoted literals may only consist of alphanumeric characters/underscore.")
 #define ERR_DUPLICATE_DECLARATION _T("Duplicate declaration.")
+#define ERR_INVALID_FUNCDECL _T("Invalid function declaration.")
 #define ERR_INVALID_CLASS_VAR _T("Invalid class variable declaration.")
 #define ERR_INVALID_LINE_IN_CLASS_DEF _T("Not a valid method, class or property definition.")
 #define ERR_INVALID_LINE_IN_PROPERTY_DEF _T("Not a valid property getter/setter.")
@@ -611,7 +612,7 @@ enum GuiControlTypes {GUI_CONTROL_INVALID // GUI_CONTROL_INVALID must be zero du
 	, GUI_CONTROL_LISTBOX, GUI_CONTROL_LISTVIEW, GUI_CONTROL_TREEVIEW
 	, GUI_CONTROL_EDIT, GUI_CONTROL_DATETIME, GUI_CONTROL_MONTHCAL, GUI_CONTROL_HOTKEY
 	, GUI_CONTROL_UPDOWN, GUI_CONTROL_SLIDER, GUI_CONTROL_PROGRESS, GUI_CONTROL_TAB, GUI_CONTROL_TAB2
-	, GUI_CONTROL_ACTIVEX, GUI_CONTROL_LINK, GUI_CONTROL_CUSTOM, GUI_CONTROL_STATUSBAR}; // Kept last to reflect it being bottommost in switch()s (for perf), since not too often used.
+	, GUI_CONTROL_ACTIVEX, GUI_CONTROL_LINK, GUI_CONTROL_CUSTOM, GUI_CONTROL_STATUSBAR, GUI_CONTROL_GUI}; // Kept last to reflect it being bottommost in switch()s (for perf), since not too often used.
 #endif // MINIDLL
 enum ThreadCommands {THREAD_CMD_INVALID, THREAD_CMD_PRIORITY, THREAD_CMD_INTERRUPT, THREAD_CMD_NOTIMERS};
 
@@ -1487,6 +1488,7 @@ public:
 		if (!_tcsicmp(aBuf, _T("ActiveX"))) return GUI_CONTROL_ACTIVEX;
 		if (!_tcsicmp(aBuf, _T("Link"))) return GUI_CONTROL_LINK;
 		if (!_tcsicmp(aBuf, _T("Custom"))) return GUI_CONTROL_CUSTOM;
+		if (!_tcsicmp(aBuf, _T("Gui"))) return GUI_CONTROL_GUI;
 		return GUI_CONTROL_INVALID;
 	}
 #endif
@@ -2493,7 +2495,7 @@ struct GuiControlType
 	};
 	int mX, mY, mWidth, mHeight;
 	float mAX, mAY, mAWidth, mAHeight;
-	bool mAXReset, mAYReset;
+	bool mAXReset, mAYReset, mAXAuto, mAYAuto, mAWAuto, mAHAuto;
 	#define USES_FONT_AND_TEXT_COLOR(type) !(type == GUI_CONTROL_PIC || type == GUI_CONTROL_UPDOWN \
 		|| type == GUI_CONTROL_SLIDER || type == GUI_CONTROL_PROGRESS)
 };
@@ -2534,7 +2536,7 @@ struct GuiControlOptionsType
 	bool listview_no_auto_sort; // v1.0.44: More maintainable and frees up GUI_CONTROL_ATTRIB_ALTBEHAVIOR for other uses.
 	ATOM customClassAtom;
 	float AX, AY, AWidth, AHeight;
-	bool AXReset, AYReset;
+	bool AXReset, AYReset, AXAuto, AYAuto, AWAuto, AHAuto;
 };
 
 LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lParam);
@@ -2676,7 +2678,7 @@ public:
 	static GuiType *ValidGui(GuiType *&aGuiRef); // Updates aGuiRef if it points to a destroyed Gui.
 
 	GuiIndexType FindControl(LPTSTR aControlID);
-	GuiControlType *FindControl(HWND aHwnd, bool aRetrieveIndexInstead = false)
+	GuiIndexType FindControlIndex(HWND aHwnd)
 	{
 		GuiIndexType index = GUI_HWND_TO_INDEX(aHwnd); // Retrieves a small negative on failure, which will be out of bounds when converted to unsigned.
 		if (index >= mControlCount) // Not found yet; try again with parent.
@@ -2688,10 +2690,16 @@ public:
 				index = GUI_HWND_TO_INDEX(aHwnd); // Retrieves a small negative on failure, which will be out of bounds when converted to unsigned.
 		}
 		if (index < mControlCount && mControl[index].hwnd == aHwnd) // A match was found.  Fix for v1.1.09.03: Confirm it is actually one of our controls.
-			return aRetrieveIndexInstead ? (GuiControlType *)(size_t)index : mControl + index;
+			return index;
 		else // No match, so indicate failure.
-			return aRetrieveIndexInstead ? (GuiControlType *)NO_CONTROL_INDEX : NULL;
+			return NO_CONTROL_INDEX;
 	}
+	GuiControlType *FindControl(HWND aHwnd)
+	{
+		GuiIndexType index = FindControlIndex(aHwnd);
+		return index == NO_CONTROL_INDEX ? NULL : mControl + index;
+	}
+
 	int FindGroup(GuiIndexType aControlIndex, GuiIndexType &aGroupStart, GuiIndexType &aGroupEnd);
 
 	ResultType SetCurrentFont(LPTSTR aOptions, LPTSTR aFontName);

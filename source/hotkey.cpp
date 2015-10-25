@@ -1,4 +1,4 @@
-/*
+﻿/*
 AutoHotkey
 
 Copyright 2003-2009 Chris Mallett (support@autohotkey.com)
@@ -948,7 +948,7 @@ ResultType Hotkey::Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOption
 			return g_script.ScriptError(ERR_PARAM1_INVALID);
 		if (!SetHotkeyCriterion(hot_criterion, aLabelName, aOptions)) // Currently, it only fails upon out-of-memory.
 			return FAIL;
-		return g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
+		return OK;
 	}
 
 	// L4: Allow "Hotkey, If, exact-expression-text" to reference existing #if expressions.
@@ -978,7 +978,7 @@ ResultType Hotkey::Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOption
 				}
 			}
 		}
-		return g_ErrorLevel->Assign(ERRORLEVEL_NONE);
+		return OK;
 	}
 
 	// For maintainability (and script readability), don't support "U" as a substitute for "UseErrorLevel",
@@ -1713,7 +1713,7 @@ ResultType Hotkey::TextInterpret(LPTSTR aName, Hotkey *aThisHotkey, bool aUseErr
 	// TextToModifiers() anyway to use its output (for consistency).  The modifiers it sets
 	// are currently ignored because the mModifierVK takes precedence.
 	// UPDATE: Treat any modifier other than '~' as an error, since otherwise users expect
-	// hotkeys like "' & +e::Send �" to work.
+	// hotkeys like "' & +e::Send È" to work.
 	//term2 = TextToModifiers(term2, aThisHotkey);
 	if (*term2 == '~')
 		++term2; // Some other stage handles this modifier, so just ignore it here.

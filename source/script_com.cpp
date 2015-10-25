@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "globaldata.h"
 #include "script.h"
 #include "script_object.h"
@@ -45,7 +45,11 @@ BIF_DECL(BIF_ComObjCreate)
 			
 			// Return dispatchable object.
 			if ( !(aResultToken.object = new ComObject(pdisp)) )
-				_f_throw(ERR_OUTOFMEM);
+			{
+				pdisp->Release();
+				hr = E_OUTOFMEMORY;
+				break;
+			}
 			aResultToken.symbol = SYM_OBJECT;
 		}
 		return;
@@ -67,8 +71,8 @@ BIF_DECL(BIF_ComObjGet)
 			aResultToken.symbol = SYM_OBJECT;
 			return;
 		}
+		hr = E_OUTOFMEMORY;
 		pdisp->Release();
-		_f_throw(ERR_OUTOFMEM);
 	}
 	_f_set_retval_p(_T(""), 0);
 	ComError(hr, aResultToken);
@@ -223,17 +227,14 @@ BIF_DECL(BIF_ComObjActive)
 				{
 					aResultToken.symbol = SYM_OBJECT;
 					aResultToken.object = obj;
+					return;
 				}
-				else
-				{
-					pdisp->Release();
-					_f_throw(ERR_OUTOFMEM);
-				}
+				hr = E_OUTOFMEMORY;
+				pdisp->Release();
 			}
 		}
 	}
-	if (FAILED(hr))
-		ComError(hr, aResultToken);
+	ComError(hr, aResultToken);
 }
 
 
@@ -502,15 +503,22 @@ BIF_DECL(BIF_ComObjArray)
 	VARTYPE vt = (VARTYPE)TokenToInt64(*aParam[0]);
 	SAFEARRAYBOUND bound[8]; // Same limit as ComObject::SafeArrayInvoke().
 	int dims = aParamCount - 1;
-	ASSERT(dims <= _countof(bound)); // Prior validation should ensure aParamCount-1 never exceeds 8.
+	if (dims > _countof(bound)) // Possible only for dynamic function calls.
+		dims = _countof(bound);
 	for (int i = 0; i < dims; ++i)
 	{
 		bound[i].cElements = (ULONG)TokenToInt64(*aParam[i + 1]);
 		bound[i].lLbound = 0;
 	}
-	SAFEARRAY *psa = SafeArrayCreate(vt, dims, bound);
-	if (!SafeSetTokenObject(aResultToken, psa ? new ComObject((__int64)psa, VT_ARRAY | vt, ComObject::F_OWNVALUE) : NULL) && psa)
+	if (SAFEARRAY *psa = SafeArrayCreate(vt, dims, bound))
+	{
+		if (ComObject *obj = new ComObject((__int64)psa, VT_ARRAY | vt, ComObject::F_OWNVALUE))
+		{
+			_f_return(obj);
+		}
 		SafeArrayDestroy(psa);
+	}
+	_f_throw(!(vt > 1 && vt < 0x18 && vt != 0xF) ? ERR_PARAM1_INVALID : ERR_OUTOFMEM);
 }
 
 
@@ -1127,7 +1135,7 @@ ResultType STDMETHODCALLTYPE ComObject::Invoke(ResultToken &aResultToken, ExprTo
 		if ((mVarType & VT_ARRAY) // Not meaningful for SafeArrays.
 			|| IS_INVOKE_SET) // Wouldn't be handled correctly below and probably has no real-world use.
 		{
-			ComError(g->LastError = hr, aResultToken);
+			ComError(hr, aResultToken);
 			return aResultToken.Result();
 		}
 	}
@@ -1137,7 +1145,6 @@ ResultType STDMETHODCALLTYPE ComObject::Invoke(ResultToken &aResultToken, ExprTo
 		if (mVarType & VT_ARRAY)
 			return SafeArrayInvoke(aResultToken, aFlags, aParam, aParamCount);
 		// Otherwise: this object can't be invoked.
-		g->LastError = DISP_E_BADVARTYPE; // Seems more informative than -1.
 		ComError(-1, aResultToken);
 		return aResultToken.Result();
 	}
@@ -1260,7 +1267,6 @@ ResultType STDMETHODCALLTYPE ComObject::Invoke(ResultToken &aResultToken, ExprTo
 		VariantToToken(varResult, aResultToken, false);
 	}
 
-	g->LastError = hr;
 	return	aResultToken.Result();
 }
 
@@ -1304,7 +1310,6 @@ ResultType ComObject::SafeArrayInvoke(ResultToken &aResultToken, int aFlags, Exp
 				aResultToken.value_int64 = retval + !_tcsicmp(name, _T("Count"));
 			}
 		}
-		g->LastError = hr;
 		if (FAILED(hr))
 			ComError(hr, aResultToken);
 		return aResultToken.Result();
@@ -1315,7 +1320,7 @@ ResultType ComObject::SafeArrayInvoke(ResultToken &aResultToken, int aFlags, Exp
 	// Verify correct number of parameters/dimensions (maximum 8).
 	if (dims > _countof(index) || dims != (IS_INVOKE_SET ? aParamCount - 1 : aParamCount))
 	{
-		g->LastError = DISP_E_BADPARAMCOUNT;
+		ComError(DISP_E_BADPARAMCOUNT, aResultToken);
 		return OK;
 	}
 	// Build array of indices from parameters.
@@ -1323,7 +1328,7 @@ ResultType ComObject::SafeArrayInvoke(ResultToken &aResultToken, int aFlags, Exp
 	{
 		if (!TokenIsNumeric(*aParam[i]))
 		{
-			g->LastError = E_INVALIDARG;
+			ComError(DISP_E_BADINDEX, aResultToken);
 			return OK;
 		}
 		index[i] = (LONG)TokenToInt64(*aParam[i]);
@@ -1352,7 +1357,6 @@ ResultType ComObject::SafeArrayInvoke(ResultToken &aResultToken, int aFlags, Exp
 
 	SafeArrayUnlock(psa);
 
-	g->LastError = hr;
 	if (FAILED(hr))
 		ComError(hr, aResultToken);
 	return aResultToken.Result();

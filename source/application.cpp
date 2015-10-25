@@ -1,4 +1,4 @@
-/*
+﻿/*
 AutoHotkey
 
 Copyright 2003-2009 Chris Mallett (support@autohotkey.com)
@@ -21,6 +21,33 @@ GNU General Public License for more details.
 #include "util.h" // for strlcpy()
 #include "resources/resource.h"  // For ID_TRAY_OPEN.
 
+int CanScrollInDirection(HWND aHwnd, DWORD aMessage, DWORD aStyle, WPARAM wParam)
+{
+	if ((aMessage == WM_MOUSEWHEEL && !(aStyle & WS_VSCROLL))
+		|| (aMessage == WM_MOUSEHWHEEL && !(aStyle & WS_HSCROLL)))
+		return 0;
+	SHORT direction = HIWORD(wParam);
+	SCROLLINFO si = { sizeof(SCROLLINFO) };
+	si.fMask = SIF_POS|SIF_RANGE|SIF_PAGE;
+	if (!GetScrollInfo(aHwnd, aMessage == WM_MOUSEWHEEL ? SB_VERT : SB_HORZ, &si))
+		return 0; // cannot retrive scrollinfo
+	// Scrolbar is disabled
+	if (si.nMax == si.nMin)
+		return 0;
+	else if (aMessage == WM_MOUSEWHEEL)
+	{ // check if VScroll is at limit and we can't scroll further
+		if (direction > 0 && si.nPos == si.nMin
+			|| direction < 0 && si.nPos + si.nPage - 1 == si.nMax)
+			return 0;
+	}
+	else
+	{	// check if HScroll is at limit and we can't scroll further
+		if (direction < 0 && si.nPos == si.nMin
+			|| direction > 0 && si.nPos + si.nPage - 1 == si.nMax)
+			return 0;
+	}
+	return 1;
+}
 
 bool MsgSleep(int aSleepDuration, MessageMode aMode)
 // Returns true if it launched at least one thread, and false otherwise.
@@ -617,6 +644,37 @@ HWND fore_window;
 					}
 				}
 			} // if (keyboard message sent to GUI)
+			else if (msg.message == WM_MOUSEWHEEL || msg.message == WM_MOUSEHWHEEL)
+			{	// Scroll message send to Gui when control under mouse is not focused control
+				// If the window under the cursor is not the control that has focus...
+				HWND control_under_mouse = WindowFromPoint(msg.pt);
+				DWORD style_under_mouse = GetWindowLong(control_under_mouse, GWL_STYLE);
+
+				// first check if control under mouse is not focused control
+				// or it is one of AutoHotkey Guis has a scrollbar but it is disabled or reached max or min
+				if (GuiType::FindGui(GetParent(control_under_mouse)) && (control_under_mouse != msg.hwnd
+					|| !CanScrollInDirection(control_under_mouse, msg.message, style_under_mouse, msg.wParam))) {
+					// Check if control belongs to one of our Guis
+					if (control_under_mouse != msg.hwnd
+						&& CanScrollInDirection(control_under_mouse, msg.message, style_under_mouse, msg.wParam))
+					{
+						SendMessage(control_under_mouse, msg.message, msg.wParam, msg.lParam);
+						continue;
+					}
+				}
+				if (!CanScrollInDirection(msg.hwnd, msg.message, GetWindowLong(msg.hwnd, GWL_STYLE), msg.wParam))
+				{
+					// Keep getting the parent gui until we find one with scrollbars showing
+					pgui = GuiType::FindGui(GetParent(msg.hwnd));
+					while (pgui && !(pgui && CanScrollInDirection(pgui->mHwnd, msg.message, pgui->mStyle, msg.wParam)))
+						pgui = GuiType::FindGui(GetParent(pgui->mHwnd));
+					if (pgui)
+					{
+						SendMessage(pgui->mHwnd, msg.message, msg.wParam, msg.lParam);
+						continue;
+					}
+				}
+			}
 
 			for (i = 0, msg_was_handled = false; i < g_guiCount; ++i)
 			{
@@ -774,10 +832,31 @@ HWND fore_window;
 					event_is_control_generated = true; // As opposed to a drag-and-drop or context-menu event that targets a specific control.
 					// And leave pgui_event_is_running at its default of NULL because it doesn't apply to these.
 				} // switch(gui_action)
+				
+				if (pgui_event_is_running && *pgui_event_is_running) // GuiSize/Close/Escape/etc. These subroutines are currently limited to one thread each.
+					continue; // hdrop_to_free: Not necessary to check it because it's always NULL when pgui_event_is_running is non-NULL.
+				//else the check wasn't needed because it was done elsewhere (GUI_EVENT_DROPFILES) or the
+				// action is not thread-restricted (GUI_EVENT_CONTEXTMENU).  And since control-specific
+				// events were already checked for "already running" above, this event is now eligible
+				// to start a new thread.
+				priority = 0;  // Always use default for now.
 				// label_to_call has been set; above would already have discarded this message if there was no label.
 				break; // case AHK_GUI_ACTION
 
 			case AHK_USER_MENU: // user-defined menu item
+				if (msg.wParam) // Poster specified that this menu item was from a gui's menu bar (since wParam is unsigned, any incoming -1 is seen as greater than max).
+				{
+					// The menu type is passed with the message so that its value will be in sync with
+					// the timestamp of the message (in case this message has been stuck in the queue
+					// for a long time).
+					// msg.wParam is the HWND rather than a pointer to avoid any chance of problems with
+					// a gui object having been destroyed while the msg was waiting in the queue.
+					if (!(pgui = GuiType::FindGui((HWND)msg.wParam)) // Not a GUI's menu bar item...
+						&& msg.hwnd && msg.hwnd != g_hWnd) // ...and not a script menu item.
+						goto break_out_of_main_switch; // See "goto break_out_of_main_switch" higher above for complete explanation.
+				}
+				else
+					pgui = NULL; // Set for use in later sections.
 				if (   !(menu_item = g_script.FindMenuItemByID((UINT)msg.lParam))   ) // Item not found.
 					continue; // ignore the msg
 				// And just in case a menu item that lacks a label (such as a separator) is ever
@@ -786,6 +865,9 @@ HWND fore_window;
 				if (!menu_item->mLabel)
 					continue;
 				label_to_call = menu_item->mLabel;
+				// Ignore/discard a hotkey or custom menu item event if the current thread's priority
+				// is higher than it's:
+				priority = menu_item->mPriority;
 				break;
 
 			case AHK_HOTSTRING:
@@ -818,13 +900,17 @@ HWND fore_window;
 				// Otherwise, continue on and let a new thread be created to handle this hotstring.
 				// Since this isn't an auto-replace hotstring, set this value to support
 				// the built-in variable A_EndChar:
-				g_script.mEndChar = hs->mEndCharRequired ? (char)LOWORD(msg.lParam) : 0; // v1.0.48.04: Explicitly set 0 when hs->mEndCharRequired==false because LOWORD is used for something else in that case.
+				g_script.mEndChar = hs->mEndCharRequired ? (TCHAR)LOWORD(msg.lParam) : 0; // v1.0.48.04: Explicitly set 0 when hs->mEndCharRequired==false because LOWORD is used for something else in that case.
 				label_to_call = hs->mJumpToLabel;
+				priority = hs->mPriority;
 				break;
 
 			case AHK_CLIPBOARD_CHANGE: // Due to the registration of an OnClipboardChange function in the script.
+				if (g_script.mOnClipboardChangeIsRunning)
+					continue;
 				// Use the placeholder label to simplify the code.
 				label_to_call = g_script.mPlaceholderLabel;
+				priority = 0;  // Always use default for now.
 				break;
 
 			default: // hotkey
@@ -893,6 +979,22 @@ HWND fore_window;
 					continue; // No criterion is eligible, so ignore this hotkey event (see other comments).
 					// If this is AHK_HOOK_HOTKEY, criterion was eligible at time message was posted,
 					// but not now.  Seems best to abort (see other comments).
+				
+				// Due to the key-repeat feature and the fact that most scripts use a value of 1
+				// for their #MaxThreadsPerHotkey, this check will often help average performance
+				// by avoiding a lot of unnecessary overhead that would otherwise occur:
+				if (!hk->PerformIsAllowed(*variant))
+				{
+					// The key is buffered in this case to boost the responsiveness of hotkeys
+					// that are being held down by the user to activate the keyboard's key-repeat
+					// feature.  This way, there will always be one extra event waiting in the queue,
+					// which will be fired almost the instant the previous iteration of the subroutine
+					// finishes (this above description applies only when MaxThreadsPerHotkey is 1,
+					// which it usually is).
+					hk->RunAgainAfterFinished(*variant); // Wheel notch count (g->EventInfo below) should be okay because subsequent launches reuse the same thread attributes to do the repeats.
+					continue;
+				}
+
 				// Now that above has ensured variant is non-NULL:
 				HotkeyCriterion *hc = variant->mHotCriterion;
 				if (!hc || hc->Type == HOT_IF_NOT_ACTIVE || hc->Type == HOT_IF_NOT_EXIST)
@@ -901,6 +1003,7 @@ HWND fore_window;
 					criterion_found_hwnd = g_HotExprLFW; // For #if WinExist(WinTitle) and similar.
 
 				label_to_call = variant->mJumpToLabel;
+				priority = variant->mPriority;
 			} // switch(msg.message)
 
 			// label_to_call has been set to the label, function or object which is
@@ -934,62 +1037,6 @@ HWND fore_window;
 				}
 				// If the above "continued", it seems best not to re-queue/buffer the key since
 				// it might be a while before the number of threads drops back below the limit.
-			}
-
-			// Find out the new thread's priority will be so that it can be checked against the current thread's:
-			switch(msg.message)
-			{
-			case AHK_GUI_ACTION: // Listed first for performance.
-				if (pgui_event_is_running && *pgui_event_is_running) // GuiSize/Close/Escape/etc. These subroutines are currently limited to one thread each.
-					continue; // hdrop_to_free: Not necessary to check it because it's always NULL when pgui_event_is_running is non-NULL.
-				//else the check wasn't needed because it was done elsewhere (GUI_EVENT_DROPFILES) or the
-				// action is not thread-restricted (GUI_EVENT_CONTEXTMENU).
-				// And since control-specific events were already checked for "already running" higher above, this
-				// event is now eligible to start a new thread.
-				priority = 0;  // Always use default for now.
-				break;
-			case AHK_USER_MENU: // user-defined menu item
-				// Ignore/discard a hotkey or custom menu item event if the current thread's priority
-				// is higher than it's:
-				priority = menu_item->mPriority;
-				// Below: the menu type is passed with the message so that its value will be in sync
-				// with the timestamp of the message (in case this message has been stuck in the
-				// queue for a long time):
-				if (msg.wParam) // Poster specified that this menu item was from a gui's menu bar (since wParam is unsigned, any incoming -1 is seen as greater than max).
-				{
-					// msg.wParam is the HWND rather than a pointer to avoid any chance of problems with
-					// a gui object or its window having been destroyed while the msg was waiting in the queue.
-					if (!(pgui = GuiType::FindGui((HWND)msg.wParam)) // Not a GUI's menu bar item...
-						&& msg.hwnd && msg.hwnd != g_hWnd) // ...and not a script menu item.
-						goto break_out_of_main_switch; // See "goto break_out_of_main_switch" higher above for complete explanation.
-				}
-				else
-					pgui = NULL; // Set for use in later sections.
-				break;
-			case AHK_HOTSTRING:
-				priority = hs->mPriority;
-				break;
-			case AHK_CLIPBOARD_CHANGE: // Due to the registration of an OnClipboardChange function in the script.
-				if (g_script.mOnClipboardChangeIsRunning)
-					continue;
-				priority = 0;  // Always use default for now.
-				break;
-			default: // hotkey
-				// Due to the key-repeat feature and the fact that most scripts use a value of 1
-				// for their #MaxThreadsPerHotkey, this check will often help average performance
-				// by avoiding a lot of unnecessary overhead that would otherwise occur:
-				if (!hk->PerformIsAllowed(*variant))
-				{
-					// The key is buffered in this case to boost the responsiveness of hotkeys
-					// that are being held down by the user to activate the keyboard's key-repeat
-					// feature.  This way, there will always be one extra event waiting in the queue,
-					// which will be fired almost the instant the previous iteration of the subroutine
-					// finishes (this above descript applies only when MaxThreadsPerHotkey is 1,
-					// which it usually is).
-					hk->RunAgainAfterFinished(*variant); // Wheel notch count (g->EventInfo below) should be okay because subsequent launches reuse the same thread attributes to do the repeats.
-					continue;
-				}
-				priority = variant->mPriority;
 			}
 
 			// Discard the event if it's priority is lower than that of the current thread:
@@ -1884,7 +1931,7 @@ bool MsgMonitor(MsgMonitorInstance &aInstance, HWND aWnd, UINT aMsg, WPARAM awPa
 			pgui->AddRef(); //
 			g->GuiWindow = pgui;  // Update the built-in variable A_GUI.
 			g->GuiDefaultWindow = pgui; // Consider this a GUI thread; so it defaults to operating upon its own window.
-			GuiIndexType control_index = (GuiIndexType)(size_t)pgui->FindControl(aWnd, true); // v1.0.44.03: Call FindControl() vs. GUI_HWND_TO_INDEX so that a combobox's edit control is properly resolved to the combobox itself.
+			GuiIndexType control_index = pgui->FindControlIndex(aWnd); // v1.0.44.03: Call FindControlIndex() vs. GUI_HWND_TO_INDEX so that a combobox's edit control is properly resolved to the combobox itself.
 			if (control_index < pgui->mControlCount) // Match found (relies on unsigned for out-of-bounds detection).
 				g->GuiControlIndex = control_index;
 			//else leave it at its default, which was set when the new thread was initialized.
