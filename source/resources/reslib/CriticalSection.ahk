@@ -1,6 +1,7 @@
 ﻿CriticalSection(cs:=0){
   static 
-  static i:=0,crisec:={base:{__Delete:"criticalsection"}}
+  if !crisec
+    i:=0,crisec:={base:{__Delete:"criticalsection"}}
   if IsObject(cs){
     Loop i
       DeleteCriticalSection(&c%i%)

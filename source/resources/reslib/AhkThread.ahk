@@ -1,6 +1,7 @@
 ﻿ahkthread_free(obj:=""){
-	static objects:=[]
-	if obj="",objects:=[]
+	static objects
+  if !objects,  objects:=[]
+  if obj="",    objects:=[]
 	else if !IsObject(obj)
 		return objects
 	else If objects.HasKey(obj)
