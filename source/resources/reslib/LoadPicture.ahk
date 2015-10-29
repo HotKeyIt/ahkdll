@@ -13,14 +13,15 @@ LoadPicture(aFilespec, aWidth:=0, aHeight:=0, ByRef aImageType:="", aIconNumber:
 ; for either, the image's actual size will be used for that dimension.  If -1 is specified for one,
 ; that dimension will be kept proportional to the other dimension's size so that the original aspect
 ; ratio is retained.
-	static IMAGE_ICON:=1,IMAGE_BITMAP:=0,IMAGE_CURSOR:=2,LR_LOADFROMFILE:=16, LR_CREATEDIBSECTION:=8192
-				,GdiplusStartupInput :="UINT32 GdiplusVersion;PTR DebugEventCallback;BOOL SuppressBackgroundThread;BOOL SuppressExternalCodecs"
-				,gdi_input:=Struct(GdiplusStartupInput),CLR_DEFAULT:=4278190080,GENERIC_READ:=2147483648
-				,OPEN_EXISTING:=3,GMEM_MOVEABLE:=2,LR_COPYRETURNORG:=4
-				,bitmap:=Struct("LONG bmType;LONG bmWidth;LONG bmHeight;LONG bmWidthBytes;WORD bmPlanes;WORD bmBitsPixel;LPVOID bmBits") ;BITMAP
-        ,ii:=Struct("BOOL fIcon;DWORD xHotspot;DWORD yHotspot;HBITMAP hbmMask;HBITMAP hbmColor") ; ICONINFO
-				,LR_COPYDELETEORG:=8,INVALID_HANDLE_VALUE:=-1
-				,IID_IPicture,init1:=VarSetCapacity(IID_IPicture,16,0) CLSIDFromString("{7BF80980-BF32-101A-8BBB-00AA00300CAB}", &IID_IPicture)
+	static IMAGE_ICON,IMAGE_BITMAP,IMAGE_CURSOR,LR_LOADFROMFILE,LR_CREATEDIBSECTION,GdiplusStartupInput,gdi_input,CLR_DEFAULT,GENERIC_READ,OPEN_EXISTING,GMEM_MOVEABLE,LR_COPYRETURNORG,bitmap,ii,LR_COPYDELETEORG,INVALID_HANDLE_VALUE,IID_IPicture
+	if !IMAGE_ICON
+    IMAGE_ICON:=1,IMAGE_BITMAP:=0,IMAGE_CURSOR:=2,LR_LOADFROMFILE:=16, LR_CREATEDIBSECTION:=8192
+    ,GdiplusStartupInput :="UINT32 GdiplusVersion;PTR DebugEventCallback;BOOL SuppressBackgroundThread;BOOL SuppressExternalCodecs"
+    ,gdi_input:=Struct(GdiplusStartupInput),CLR_DEFAULT:=4278190080,GENERIC_READ:=2147483648
+    ,OPEN_EXISTING:=3,GMEM_MOVEABLE:=2,LR_COPYRETURNORG:=4
+    ,bitmap:=Struct("LONG bmType;LONG bmWidth;LONG bmHeight;LONG bmWidthBytes;WORD bmPlanes;WORD bmBitsPixel;LPVOID bmBits") ;BITMAP
+    ,ii:=Struct("BOOL fIcon;DWORD xHotspot;DWORD yHotspot;HBITMAP hbmMask;HBITMAP hbmColor") ; ICONINFO
+    ,LR_COPYDELETEORG:=8,INVALID_HANDLE_VALUE:=-1,VarSetCapacity(IID_IPicture,16,0) CLSIDFromString("{7BF80980-BF32-101A-8BBB-00AA00300CAB}", &IID_IPicture)
 	hbitmap := 0
 	,aImageType := -1 ; The type of image currently inside hbitmap.  Set default value for output parameter as "unknown".
 

@@ -1,5 +1,7 @@
 ﻿ahkthread_free(obj:=""){
-	static objects:=[]
+	static objects
+  if !objects
+    objects:=[]
 	if obj=""
       objects:=[]
 	else if !IsObject(obj)

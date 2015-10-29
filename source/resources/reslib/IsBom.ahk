@@ -1,4 +1,4 @@
-isbom(address,bom:="UTF-8"){
+﻿isbom(address,bom:="UTF-8"){
 if (bom="UTF-8")
 return 0xBFBBEF=NumGet(address+0,"UInt")&0xFFFFFF
 else if (bom="UTF-16")
