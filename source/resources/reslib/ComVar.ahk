@@ -1,6 +1,6 @@
 ﻿ComVar(Type:=0xC){
 static base
-if !
+if !base
 base:={__Get:"ComVarGet",__Set:"ComVarSet",__Delete:"ComVarDel"}
 arr:=ComObjArray(Type,1)
 DllCall("oleaut32\SafeArrayAccessData","ptr",ComObjValue(arr),"ptr*",arr_data)
