@@ -270,19 +270,23 @@ Script::~Script() // Destructor.
 			DestroyWindow(g_hWndSplash);
 		if (g_hFontSplash)
 			DeleteObject(g_hFontSplash);
+#endif // MINIDLL
 		// Unregister window class registered in Script::CreateWindows
 #ifdef UNICODE
 		if (g_ClassRegistered)
-			UnregisterClass((LPCWSTR)&WINDOW_CLASS_MAIN, g_hInstance);
+			UnregisterClass(WINDOW_CLASS_MAIN, g_hInstance);
+#ifndef MINIDLL
 		if (g_ClassSplashRegistered)
-			UnregisterClass((LPCWSTR)&WINDOW_CLASS_SPLASH, g_hInstance);
+			UnregisterClass(WINDOW_CLASS_SPLASH, g_hInstance);
+#endif // MINIDLL
 #else
 		if (g_ClassRegistered)
 			UnregisterClass((LPCSTR)&WINDOW_CLASS_MAIN, g_hInstance);
+#ifndef MINIDLL
 		if (g_ClassSplashRegistered)
 			UnregisterClass((LPCSTR)&WINDOW_CLASS_SPLASH, g_hInstance);
-#endif
 #endif // MINIDLL
+#endif // UNICODE
 	}
 	if (g_hAccelTable)
 		DestroyAcceleratorTable(g_hAccelTable);
@@ -877,29 +881,21 @@ ResultType Script::CreateWindows()
 	wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);  // Needed for ProgressBar. Old: (HBRUSH)GetStockObject(WHITE_BRUSH);
 	wc.lpszMenuName = MAKEINTRESOURCE(IDR_MENU_MAIN); // NULL; // "MainMenu";
 #endif
-#ifdef _USRDLL  //Ignore errors since mostly AutoHotkey.exe alredy registered the class
-	g_ClassRegistered = RegisterClassEx(&wc);
-#else
-	if (!RegisterClassEx(&wc))
+	if (!(g_ClassRegistered = RegisterClassEx(&wc)))
 	{
 		MsgBox(_T("RegClass")); // Short/generic msg since so rare.
 		return FAIL;
 	}
-#endif
 	// Register a second class for the splash window.  The only difference is that
 	// it doesn't have the menu bar:
 #ifndef MINIDLL
 	wc.lpszClassName = WINDOW_CLASS_SPLASH;
 	wc.lpszMenuName = NULL; // Override the non-NULL value set higher above.
-#ifdef _USRDLL  //Ignore errors since mostly AutoHotkey.exe alredy registered the class
-	g_ClassSplashRegistered = RegisterClassEx(&wc);
-#else
-	if (!RegisterClassEx(&wc))
+	if (!(g_ClassSplashRegistered = RegisterClassEx(&wc)))
 	{
 		MsgBox(_T("RegClass")); // Short/generic msg since so rare.
 		return FAIL;
 	}
-#endif // _USRDLL
 #endif // MINIDLL
 	TCHAR class_name[64];
 	HWND fore_win = GetForegroundWindow();
