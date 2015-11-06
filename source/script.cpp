@@ -562,7 +562,6 @@ Script::~Script() // Destructor.
 		// Above call should not return FAIL, since the only way FAIL can realistically happen is
 		// when a GUI window is still using the menu as its menu bar.  But all GUI windows are gone now.
 	}
-#ifdef _USRDLL
 	if (mFirstMenu != mTrayMenu)
 	{
 		mFirstMenu = NULL;
@@ -576,7 +575,7 @@ Script::~Script() // Destructor.
 	}
 	mTrayIconTip = NULL;
 	mPriorHotkeyStartTime = 0;
-
+#endif
 	// We call DestroyWindow() because MainWindowProc() has left that up to us.
 	// DestroyWindow() will cause MainWindowProc() to immediately receive and process the
 	// WM_DESTROY msg, which should in turn result in any child windows being destroyed
@@ -589,17 +588,13 @@ Script::~Script() // Destructor.
 		DestroyWindow(g_hWnd);
 		DestroyWindow(g_hWndEdit);
 		DeleteObject(g_hFontEdit);
-#ifndef MINIDLL
 		// Unregister window class if it was registered in Script::CreateWindows
 		if (g_ClassRegistered)
 			UnregisterClass((LPCWSTR)&WINDOW_CLASS_MAIN, g_hInstance);
 		g_ClassRegistered = 0;
-#endif
 	}
-#endif
 	if (g_hAccelTable)
 		DestroyAcceleratorTable(g_hAccelTable);
-#endif
 
 	// Since tooltip windows are unowned, they should be destroyed to avoid resource leak:
 	for (i = 0; i < MAX_TOOLTIPS; ++i)
@@ -1017,15 +1012,11 @@ ResultType Script::CreateWindows()
 	wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);  // Needed for ProgressBar. Old: (HBRUSH)GetStockObject(WHITE_BRUSH);
 	wc.lpszMenuName = MAKEINTRESOURCE(IDR_MENU_MAIN); // NULL; // "MainMenu";
 #endif // MINIDLL
-#ifdef _USRDLL  //Ignore errors since mostly AutoHotkey.exe alredy registered the class
-	g_ClassRegistered = RegisterClassEx(&wc);
-#else
-	if (!RegisterClassEx(&wc))
+	if (!(g_ClassRegistered = RegisterClassEx(&wc)))
 	{
 		MsgBox(_T("RegClass")); // Short/generic msg since so rare.
 		return FAIL;
 	}
-#endif
 	TCHAR class_name[64];
 	HWND fore_win = GetForegroundWindow();
 	bool do_minimize = !fore_win || (GetClassName(fore_win, class_name, _countof(class_name))
