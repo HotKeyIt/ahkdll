@@ -30,7 +30,7 @@ RawObject(obj,addr,buf:=0){
     If IsObject(v)
 			NumPut( 11,addr+0,"Char"),NumPut(sz:=RawObjectSize(v,buf),addr+1,"Int64"),RawObject(v,addr+9,buf),addr+=sz+9
     else if (v+0="")
-			NumPut( 10,addr+0,"Char"),NumPut(sz:=buf?obj.GetCapacity(k):StrPut(v)*(A_IsUnicode?2:1),addr+1,"Int64"),DllCall("RtlMoveMemory","PTR",addr+9,"PTR",&v,"PTR",sz),addr+=sz+9
+			NumPut( 10,addr+0,"Char"),NumPut(sz:=buf?obj.GetCapacity(k):StrPut(v)*(A_IsUnicode?2:1),addr+1,"Int64"),DllCall("RtlMoveMemory","PTR",addr+9,"PTR",buf?obj.GetAddress(k):&v,"PTR",sz),addr+=sz+9
     else 
 			NumPut(InStr(v,".")?9:v>4294967295?8:v>65535?6:v>255?4:v>-1?2:v>-129?1:v>-32769?3:v>-2147483649?5:7,addr+0,"Char")
         ,NumPut(v,addr+1,InStr(v,".")?"Double":v>4294967295?"UInt64":v>65535?"UInt":v>255?"UShort":v>-1?"UChar":v>-129?"Char":v>-32769?"Short":v>-2147483649?"Int":"Int64")
