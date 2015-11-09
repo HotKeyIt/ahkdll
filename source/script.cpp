@@ -13252,6 +13252,29 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ResultToken *aResultToken, Line 
 			// which is desirable *even* if aResultToken is NULL (i.e. the caller will be
 			// ignoring the return value) in case the return's expression calls a function
 			// which has side-effects.  For example, "return LogThisEvent()".
+			if (aResultToken && aResultToken->symbol == SYM_STRING) // L31: Caller wants the return value, but no result has been set since caller set this default. (ExpandExpression does not use aResultToken for string values.)
+			{
+				if (ARGVAR1 && ARGVAR1->HasObject())
+				{
+					// This is a plain variable reference (not an expression) and the variable
+					// contains an object.
+					ARGVAR1->ToReturnValue(*aResultToken);
+				}
+				else
+				{
+					// Even if this is a var containing a cached binary number, it also contains
+					// a string which may have special formatting.  (It is certain that any var
+					// at this point already contains a string, due to ExpandArgs() being called.)
+					// So for compatibility and generally intuitive behaviour, return the string.
+					aResultToken->symbol = SYM_STRING;
+					aResultToken->marker = ARG1; // This sets it to blank if this return lacks an arg.
+				}
+			}
+			//else the return value, if any, is discarded.
+			// Don't count returns against the total since they should be nearly instantaneous. UPDATE: even if
+			// the return called a function (e.g. return fn()), that function's lines would have been added
+			// to the total, so there doesn't seem much problem with not doing it here.
+			//++g_script.mLinesExecutedThisCycle;
 			if (aMode != UNTIL_RETURN)
 				// Tells the caller to return early if it's not the Gosub that directly
 				// brought us into this subroutine.  i.e. it allows us to escape from
