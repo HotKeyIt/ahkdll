@@ -26,7 +26,7 @@ void callFuncDll(FuncAndToken *aFuncAndToken);
 int initPlugins();
 
 #ifdef _USRDLL
-EXPORT UINT_PTR ahkdll(LPTSTR fileName,LPTSTR argv,LPTSTR args);
+EXPORT UINT_PTR ahkdll(LPTSTR fileName, LPTSTR argv, LPTSTR args);
 EXPORT UINT_PTR ahktextdll(LPTSTR fileName,LPTSTR argv,LPTSTR args);
 EXPORT int ahkTerminate(int timeout);
 EXPORT int com_ahkTerminate(int timeout);

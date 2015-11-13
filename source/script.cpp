@@ -5664,6 +5664,9 @@ void Script::DeleteTimer(IObject *aLabel)
 	for (timer = mFirstTimer; timer != NULL; previous = timer, timer = timer->mNextTimer)
 		if (timer->mLabel == aLabel) // Match found.
 		{
+			// Disable it, even if it's not technically being deleted yet.
+			if (timer->mEnabled)
+				timer->Disable(); // Keeps track of mTimerEnabledCount and whether the main timer is needed.
 			if (timer->mExistingThreads)
 			{
 				if (!aLabel) // Caller requested we delete a previously marked timer which
@@ -5682,9 +5685,9 @@ void Script::DeleteTimer(IObject *aLabel)
 				previous->mNextTimer = timer->mNextTimer;
 			else
 				mFirstTimer = timer->mNextTimer;
-			// Disable it.
-			if (timer->mEnabled)
-				timer->Disable(); // Keeps track of mTimerEnabledCount and whether the main timer is needed.
+			if (mLastTimer == timer)
+				mLastTimer = previous;
+			mTimerCount--;
 			// Delete the timer, automatically releasing its reference to the object.
 			delete timer;
 			break;
@@ -12435,7 +12438,8 @@ Line *Script::PreparseBlocks(Line *aStartingLine, ExecUntilMode aMode, Line *aPa
 				//if (IS_BAD_ACTION_LINE(line_temp)) // See "#define IS_BAD_ACTION_LINE" for comments.
 				//	return line->PreparseError(ERR_EXPECTED_BLOCK_OR_ACTION);
 				// Assign to line_temp rather than line:
-				line_temp = PreparseBlocks(line_temp, ONLY_ONE_LINE, line, aLoopType);
+				line_temp = PreparseBlocks(line_temp, ONLY_ONE_LINE, line
+					, line->mActionType == ACT_FINALLY ? ATTR_OBSCURE(aLoopType) : aLoopType);
 				if (line_temp == NULL)
 					return NULL; // Error.
 				// Set this ELSE/CATCH/FINALLY's jumppoint.  This is similar to the jumppoint
@@ -15171,15 +15175,32 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 			if (this_act == ACT_CATCH && line->mActionType == ACT_FINALLY)
 			{
 				if (result == OK && !jump_to_line)
-					// Let the next iteration handle the finally block.
+					// Execution is being allowed to flow normally into the finally block and
+					// then the line after.  Let the next iteration handle the finally block.
 					continue;
 
-				// An exception was thrown, and this try..(catch)..finally block didn't handle it.
-				// Therefore we must execute the finally block before returning.
+				// One of the following occurred:
+				//  - An exception was thrown, and this try..(catch)..finally block didn't handle it.
+				//  - A control flow statement such as break, continue or goto was used.
+				// Recursively execute the finally block before continuing.
+				ExprTokenType *thrown_token = g.ThrownToken;
+				g.ThrownToken = NULL; // Must clear this temporarily to avoid arbitrarily re-throwing it.
 				Line *invalid_jump; // Don't overwrite jump_to_line in case the try block used goto.
 				ResultType res = line->ExecUntil(ONLY_ONE_LINE, NULL, &invalid_jump);
-				if (invalid_jump || res == LOOP_BREAK || res == LOOP_CONTINUE || res == EARLY_RETURN)
+				if (res != OK || invalid_jump)
+				{
+					if (thrown_token) // The new error takes precedence over this one.
+						g_script.FreeExceptionToken(thrown_token);
+					if (res == FAIL || res == EARLY_EXIT)
+						// Above: It's borderline whether Exit should be valid here, but it's allowed for
+						// two reasons: 1) if the script was non-#Persistent it would have already terminated
+						// anyway, and 2) it's only a question of whether to show a message before exiting.
+						return res;
+					// The remaining cases are all invalid jumps/control flow statements.  All such cases
+					// should be detected at load time, but it seems best to keep this for maintainability:
 					return g_script.mCurrLine->LineError(ERR_BAD_JUMP_INSIDE_FINALLY);
+				}
+				g.ThrownToken = thrown_token; // If non-NULL, this was thrown within the try block.
 			}
 			
 			if (aMode == ONLY_ONE_LINE || result != OK)
@@ -16170,12 +16191,15 @@ ResultType Line::PerformLoopFor(ExprTokenType *aResultToken, bool &aContinueMain
 	param_tokens[0].symbol = SYM_STRING;
 	param_tokens[0].marker = _T("_NewEnum");
 
-	object_token.object->Invoke(enum_token, object_token, IT_CALL | IF_NEWENUM, params, 1);
+	result = object_token.object->Invoke(enum_token, object_token, IT_CALL | IF_NEWENUM, params, 1);
 	object_token.object->Release(); // This object reference is no longer needed.
 
 	if (enum_token.mem_to_free)
 		// Invoke returned memory for us to free.
 		free(enum_token.mem_to_free);
+	
+	if (result == FAIL || result == EARLY_EXIT)
+		return result;
 
 	if (enum_token.symbol != SYM_OBJECT)
 		// The object didn't return an enumerator, so nothing more we can do.
@@ -16212,7 +16236,9 @@ ResultType Line::PerformLoopFor(ExprTokenType *aResultToken, bool &aContinueMain
 		result_token.buf = buf;
 
 		// Call enumerator.Next(var1, var2)
-		enumerator.Invoke(result_token, enum_token, IT_CALL, params, param_count);
+		result = enumerator.Invoke(result_token, enum_token, IT_CALL, params, param_count);
+		if (result == FAIL || result == EARLY_EXIT)
+			break;
 
 		// Since any non-empty SYM_STRING is always considered "true", we need to change it to SYM_OPERAND
 		// before calling TokenToBOOL; otherwise "return false" and "return 0" will both evaluate to true

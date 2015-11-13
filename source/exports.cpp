@@ -755,7 +755,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 				_tcscpy(aFuncAndToken.param[i]->marker,*params[i]); // Assign parameters
 			}
 			aFuncAndToken.mFunc = aFunc ;
-			SendMessage(g_hWnd, AHK_EXECUTE_FUNCTION_DLL, (WPARAM)&aFuncAndToken,NULL);
+			SendMessage(g_hWnd, AHK_EXECUTE_FUNCTION_DLL, (WPARAM)&aFuncAndToken, NULL);
 			LeaveCriticalSection(&g_CriticalAhkFunction);
 			return aFuncAndToken.result_to_return_dll;
 		}
@@ -969,7 +969,7 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 			aFuncAndToken.mParamCount = aFunc->mParamCount < aParamsCount ? aFunc->mParamCount : aParamsCount;
 			if (sendOrPost == 1)
 			{
-				SendMessage(g_hWnd, AHK_EXECUTE_FUNCTION_VARIANT, (WPARAM)&aFuncAndToken,NULL);
+				SendMessage(g_hWnd, AHK_EXECUTE_FUNCTION_VARIANT, (WPARAM)&aFuncAndToken, NULL);
 				LeaveCriticalSection(&g_CriticalAhkFunction);
 				return aFuncAndToken.variant_to_return_dll;
 			}
