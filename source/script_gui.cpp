@@ -6950,8 +6950,20 @@ ResultType GuiType::Show(LPTSTR aOptions, LPTSTR aText)
 			// it might not be valid to reposition a maximized window without unmaximizing it?)
 			if (IsZoomed(mHwnd)) // Call IsZoomed() again in case above changed the state. No need to check IsIconic() because above already set default show-mode to SW_RESTORE for such windows.
 				ShowWindow(mHwnd, SW_RESTORE); // But restore isn't done for something like "Gui, Show, Center" because it's too obscure and might reduce flexibility (debatable).
-			MoveWindow(mHwnd, x == COORD_UNSPECIFIED ? old_rect.left : x, y == COORD_UNSPECIFIED ? old_rect.top : y
-				, width, height, is_visible);  // Do repaint if window is visible.
+
+			HWND aParent = GetParent(mHwnd);
+			if (aParent && !mGuiShowHasNeverBeenDone)
+			{
+				POINT pt = { 0 };
+				ClientToScreen(aParent, &pt);
+				MoveWindow(mHwnd, x == COORD_UNSPECIFIED ? old_rect.left - pt.x : x, y == COORD_UNSPECIFIED ? old_rect.top - pt.y : y
+					, width, height, is_visible);  // Do repaint if window is visible.
+			}
+			else
+			{
+				MoveWindow(mHwnd, x == COORD_UNSPECIFIED ? old_rect.left : x, y == COORD_UNSPECIFIED ? old_rect.top : y
+					, width, height, is_visible);  // Do repaint if window is visible.
+			}
 		}
 
 		// Added for v1.0.44.13:
