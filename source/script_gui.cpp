@@ -1185,6 +1185,10 @@ ResultType Line::GuiControl(LPTSTR aCommand, LPTSTR aControlID, LPTSTR aParam3, 
 			MapWindowPoints(NULL, gui.mHwnd, (LPPOINT)&rect, 2); // Convert rect to client coordinates (not the same as GetClientRect()).
 			InvalidateRect(gui.mHwnd, &rect, TRUE); // Seems safer to use TRUE, not knowing all possible overlaps, etc.
 		}
+		control.mX = xpos;
+		control.mY = ypos;
+		control.mHeight = height;
+		control.mWidth = width;
 		goto return_the_result;
 	}
 
