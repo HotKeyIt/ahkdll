@@ -1710,7 +1710,12 @@ ResultType GuiType::Destroy(GuiType &gui)
 		DeleteObject(gui.mBackgroundBrushCtl);
 	if (gui.mHdrop)
 		DragFinish(gui.mHdrop);
-
+	if (gui.mObjectVar)
+	{	// release the object associated with gui and replace by new object
+		if (gui.mObjectVar->HasObject())
+			gui.mObjectVar->mObject->Release();
+		gui.mObjectVar->Assign(Object::Create());
+	}
 	// It seems best to delete the bitmaps whenever the control changes to a new image or
 	// whenever the control is destroyed.  Otherwise, if a control or its parent window is
 	// destroyed and recreated many times, memory allocation would continue to grow from
@@ -1729,6 +1734,9 @@ ResultType GuiType::Destroy(GuiType &gui)
 		else if (control.type == GUI_CONTROL_LISTVIEW) // It was ensured at an earlier stage that union_lv_attrib != NULL.
 			free(control.union_lv_attrib);
 		control.jump_to_label = NULL; // Release any user-defined object/BoundFunc used as a g-label.
+		// free memory used for output key in mObjectVar
+		if (control.mObjectKey)
+			free(control.mObjectKey);
 	}
 	HICON icon_eligible_for_destruction = gui.mIconEligibleForDestruction;
 	HICON icon_eligible_for_destruction_small = gui.mIconEligibleForDestructionSmall;
@@ -4414,6 +4422,26 @@ ResultType GuiType::ParseOptions(LPTSTR aOptions, bool &aSetLastFoundWindow, Tog
 					ScrollWindow(mHwnd, 0, mVScroll->nPos - mVScroll->nMin, NULL, NULL);
 			}
 
+		else if (!_tcsnicmp(next_option, _T("ObjectVar"),9) && *next_option)
+			// The variable holding an object can contain Bound Functions for gFunc options {Func:BoundFunction}
+			// The same object will be used to output values when using vMyVar option -> object.MyVar
+			if (adding)
+			{
+				Var *aVar = g_script.FindOrAddVar(next_option + 9);
+				if (!aVar || aVar->IsNonStaticLocal()) // Note that an alias can point to a local vs. global var.)
+					return g_script.ScriptError(_T("The object associated with GUI must be in a global or static variable."), next_option + 9);
+				else if (!aVar->HasObject())
+				{
+					aVar->Free();
+					aVar->Assign(Object::Create());
+				}
+				mObjectVar = aVar;
+			}
+			else
+			{
+				mObjectVar = NULL;
+			}
+
 		else if (!_tcsicmp(next_option, _T("Caption")))
 			if (adding) mStyle |= WS_CAPTION; else mStyle = mStyle & ~WS_CAPTION;
 
@@ -5730,7 +5758,21 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 						: g_script.ScriptError(_T("This control type should not have an associated subroutine.")
 							, next_option - 1);
 				IObject *candidate_label;
-				if (   !(candidate_label = g_script.FindCallable(next_option, aParam3Var, 4))   )
+				// check if we have a key holding Bound function in mObjectVar
+				// if key exists and it is an object use it, otherwise fall back to label mode
+				if ( mObjectVar )
+				{
+					if (!mObjectVar->HasObject())
+						return g_script.ScriptError(_T("No object to invoke."), next_option - 1);
+					ExprTokenType aResult, param_token;
+					ExprTokenType aThisToken,*params[] = { &param_token };
+					aResult.object = NULL;
+					param_token.symbol = SYM_STRING;
+					param_token.marker = next_option;
+					mObjectVar->mObject->Invoke(aResult,aThisToken,IT_GET,params,1);
+					candidate_label = aResult.object;
+				}
+				if (   !candidate_label && !(candidate_label = g_script.FindCallable(next_option, aParam3Var, 4))   )
 				{
 					// If there is no explicit label, fall back to a special action if one is available
 					// for this keyword:
@@ -5761,6 +5803,25 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 				break;
 
 			case 'V': // Variable
+				// if Gui has mObjectVar assigned to it always use Object to output contents
+				if ( mObjectVar )
+				{
+					if (!mObjectVar->HasObject())
+						return g_script.ScriptError(_T("No object to invoke."), next_option - 1);
+					ExprTokenType aResult, param_token1, param_token2;
+					ExprTokenType aThisToken, *params[] = { &param_token1, &param_token2 };
+					param_token2.symbol = param_token1.symbol = SYM_STRING;
+					param_token1.marker = _T("HasKey");
+					param_token2.marker = next_option;
+					mObjectVar->mObject->Invoke(aResult, aThisToken, IT_CALL, params, 2);
+					if (aResult.value_int64)
+						return aControl.hwnd ? g_script.SetErrorLevelOrThrow()
+							: g_script.ScriptError(_T("The same variable cannot be used for more than one control.") // It used to say "one control per window" but that seems more confusing than it's worth.
+								, next_option - 1);
+					aControl.mObjectKey = (TCHAR*)malloc((_tcslen(next_option) + 1) * sizeof(TCHAR));
+					_tcscpy(aControl.mObjectKey, next_option);
+					break;
+				}
 				// It seems best to allow an input-control to lack a variable, in which case its contents will be
 				// lost when the form is closed (unless fetched beforehand with something like ControlGetText).
 				// This is because it allows layout editors and other script generators to omit the variable
@@ -7181,6 +7242,13 @@ ResultType GuiType::Submit(bool aHideIt)
 	for (u = 0; u < mControlCount; ++u)
 		if (mControl[u].output_var && mControl[u].type != GUI_CONTROL_RADIO)
 			ControlGetContents(*mControl[u].output_var, mControl[u], _T("Submit"));
+		else if (mControl[u].mObjectKey && mControl[u].type != GUI_CONTROL_RADIO)
+		{
+			if (!mObjectVar->HasObject())
+				g_script.ScriptError(_T("No object to invoke."));
+			else
+				ControlGetContentsToObject(mObjectVar->mObject, mControl[u]);
+		}
 
 	// Handle GUI_CONTROL_RADIO separately so that any radio group that has a single variable
 	// to share among all its members can be given special treatment:
@@ -7629,6 +7697,391 @@ ResultType GuiType::ControlGetContents(Var &aOutputVar, GuiControlType &aControl
 		aOutputVar.SetCharLength(_tcslen(aOutputVar.Contents()));
 	}
 	return aOutputVar.Close(); // Must be called after Assign(NULL, ...) or when Contents() has been altered because it updates the variable's attributes and properly handles VAR_CLIPBOARD.
+}
+
+ResultType GuiType::ControlGetContentsToObject(IObject *aObject, GuiControlType &aControl, LPTSTR aMode)
+{
+	LPTSTR cp;
+	TCHAR buf[1024]; // For various uses.
+	TCHAR *aBuf; // Used to receive content
+	bool submit_mode = !_tcsicmp(aMode, _T("Submit"));
+	LRESULT sel_count, i;  // LRESULT is a signed type (same as int/long).
+	SYSTEMTIME st[2];
+	ExprTokenType aResult, param_token1, param_token2;
+	ExprTokenType aThisToken, *params[] = { &param_token1, &param_token2 };
+	param_token1.symbol = SYM_STRING;
+	param_token1.marker = aControl.mObjectKey;
+	param_token2.symbol = SYM_INTEGER;
+	param_token2.marker = buf;
+	param_token2.marker_length = -1;
+	param_token2.value_int64 = 0;
+	// First handle any control types that behave the same regardless of aMode:
+	switch (aControl.type)
+	{
+	case GUI_CONTROL_UPDOWN: // Doesn't seem useful to ever retrieve the control's actual caption, which is invisible.
+							 // Any out of range or non-numeric value in the buddy is ignored since error reporting is
+							 // left up to the script, which can compare contents of buddy to those of UpDown to check
+							 // validity if it wants.
+		if (aControl.attrib & GUI_CONTROL_ATTRIB_ALTBEHAVIOR) // It has a 32-bit vs. 16-bit range.
+			param_token2.value_int64 = (int)SendMessage(aControl.hwnd, UDM_GETPOS32, 0, 0);
+		else // 16-bit.  Must cast to short to omit the error portion (see comment above).
+			param_token2.value_int64 = (short)SendMessage(aControl.hwnd, UDM_GETPOS, 0, 0);
+		return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+
+	case GUI_CONTROL_SLIDER: // Doesn't seem useful to ever retrieve the control's actual caption, which is invisible.
+		param_token2.value_int64 = ControlInvertSliderIfNeeded(aControl, (int)SendMessage(aControl.hwnd, TBM_GETPOS, 0, 0));
+		return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+		// Above assigns it as a signed value because testing shows a slider can have part or all of its
+		// available range consist of negative values.  32-bit values are supported if the range is set
+		// with the right messages.
+
+	case GUI_CONTROL_PROGRESS:
+		if (submit_mode)
+			return OK;
+		param_token2.value_int64 = (int)SendMessage(aControl.hwnd, PBM_GETPOS, 0, 0);
+		return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+		// Above does not save to control during submit mode, since progress bars do not receive
+		// user input so it seems wasteful 99% of the time.  "GuiControlGet, MyProgress" can be used instead.
+
+	case GUI_CONTROL_DATETIME:
+		param_token2.symbol = SYM_STRING;
+		param_token2.marker = DateTime_GetSystemtime(aControl.hwnd, st) == GDT_VALID
+			? SystemTimeToYYYYMMDD(buf, st[0]) : _T(""); // Blank string whenever GDT_NONE/GDT_ERROR.
+		return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+
+	case GUI_CONTROL_MONTHCAL:
+		param_token2.symbol = SYM_STRING;
+		if (GetWindowLong(aControl.hwnd, GWL_STYLE) & MCS_MULTISELECT)
+		{
+			// For code simplicity and due to the expected rarity of using the MonthCal control, much less
+			// in its range-select mode, the range is returned with a dash between the min and max rather
+			// than as an array or anything fancier.
+			MonthCal_GetSelRange(aControl.hwnd, st);
+			// Seems easier for script (due to consistency) to always return it in range format, even if
+			// only one day is selected.
+			SystemTimeToYYYYMMDD(buf, st[0]);
+			buf[8] = '-'; // Retain only the first 8 chars to omit the time portion, which is unreliable (not relevant anyway).
+			SystemTimeToYYYYMMDD(buf + 9, st[1]);
+			*(buf + 17) = '\0'; // Limit to 17 chars to omit the time portion of the second timestamp.
+			param_token2.marker_length = 17;
+			return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+		}
+		else
+		{
+			MonthCal_GetCurSel(aControl.hwnd, st);
+			SystemTimeToYYYYMMDD(buf, st[0]);
+			*(buf + 8) = '\0'; // Limit to 8 chars to omit the time portion, which is unreliable (not relevant anyway).
+			param_token2.marker_length = 8;
+			return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+		}
+
+	case GUI_CONTROL_HOTKEY:
+		// Testing shows that neither GetWindowText() nor WM_GETTEXT can pull anything out of a hotkey
+		// control, so the only type of retrieval that can be offered is the HKM_GETHOTKEY method:
+		HotkeyToText((WORD)SendMessage(aControl.hwnd, HKM_GETHOTKEY, 0, 0), buf);
+		param_token2.symbol = SYM_STRING;
+		return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+	} // switch (aControl.type)
+
+	if (_tcsicmp(aMode, _T("Text"))) // Non-text, i.e. don't unconditionally use the simple GetWindowText() method.
+	{
+		// The caller wants the contents of the control, which is often different from its
+		// caption/text.  Any control types not mentioned in the switch() below will fall through
+		// into the section at the bottom that applies the standard GetWindowText() method.
+
+		LRESULT index, length, item_length;
+
+		switch (aControl.type)
+		{
+		case GUI_CONTROL_CHECKBOX:
+		case GUI_CONTROL_RADIO:
+			// Submit() handles GUI_CONTROL_RADIO on its own, but other callers might need us to handle it.
+			// In addition, rather than handling multi-radio groups that share a single output variable
+			// in a special way, it's kept simple here because:
+			// 1) It's more flexible (there might be cases when the user wants to get the value of
+			//    a single radio in the group, not the group's currently-checked button).
+			// 2) The multi-radio handling seems too complex to be justified given how rarely users would
+			//    want such behavior (since "Submit, NoHide" can be used as a substitute).
+			switch (SendMessage(aControl.hwnd, BM_GETCHECK, 0, 0))
+			{
+			case BST_CHECKED:
+				param_token2.value_int64 = 1;
+				return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+			case BST_UNCHECKED:
+				return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+			case BST_INDETERMINATE:
+				// Seems better to use a value other than blank because blank might sometimes represent the
+				// state of an uninitialized or unfetched control.  In other words, a blank variable often
+				// has an external meaning that transcends the more specific meaning often desirable when
+				// retrieving the state of the control:
+				param_token2.value_int64 = -1;
+				return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+			}
+			return FAIL; // Shouldn't be reached since ZERO(BST_UNCHECKED) is returned on failure.
+
+		case GUI_CONTROL_DROPDOWNLIST:
+			if (aControl.attrib & GUI_CONTROL_ATTRIB_ALTSUBMIT) // Caller wanted the position, not the text retrieved.
+			{
+				index = SendMessage(aControl.hwnd, CB_GETCURSEL, 0, 0); // Get index of currently selected item.
+				if (index == CB_ERR) // Maybe happens only if DROPDOWNLIST has no items at all, so ErrorLevel is not changed.
+				{
+					param_token2.symbol = SYM_STRING;
+					return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+				}
+				param_token2.value_int64 = (int)index + 1;
+				return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+			}
+			break; // Fall through to the normal GetWindowText() method, which works for DDLs but not ComboBoxes.
+
+		case GUI_CONTROL_COMBOBOX:
+			index = SendMessage(aControl.hwnd, CB_GETCURSEL, 0, 0); // Get index of currently selected item.
+			if (index == CB_ERR) // There is no selection (or very rarely, some other type of problem).
+			{
+				// Fix for v1.0.40.08: It seems that any text put into a ComboBox's edit field via GuiControl or
+				// even the user typing/pasting it does not cause the box to update its current selection/position.
+				// Since this can be the reason for the CB_ERR retrieved above, check if the Edit field
+				// contains text that exactly matches one of the items in the drop-list.  If it does, that
+				// item's position should be retrieved in AltSubmit mode (even for non-AltSubmit mode, this
+				// should be done because the case of the item in the drop-list is usually preferable to any
+				// varying case the user may have manually typed).
+				if (GetWindowText(aControl.hwnd, buf, _countof(buf))) // Buf size should be enough for anything realistic.
+				{
+					index = SendMessage(aControl.hwnd, CB_FINDSTRINGEXACT, -1, (LPARAM)&buf); // It's not case sensitive.
+					if (index == CB_ERR)
+						break;  // Break out of the switch rather than returning so that the GetWindowText() method can be applied.
+				}
+				else // Failure of GetWindowText() in this case might be nearly impossible, so just fall through to default handling.
+					break; // Same comment as above.
+			}
+			if (aControl.attrib & GUI_CONTROL_ATTRIB_ALTSUBMIT) // Caller wanted the position, not the text retrieved.
+			{
+				param_token2.value_int64 = (int)index + 1;
+				return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+			}
+			length = SendMessage(aControl.hwnd, CB_GETLBTEXTLEN, (WPARAM)index, 0);
+			param_token2.symbol = SYM_STRING;
+			param_token2.marker = _T("");
+			if (length == CB_ERR) // Given the way it was called, this should be impossible based on MSDN docs.
+				return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+			// In unusual cases, MSDN says the indicated length might be longer than it actually winds up
+			// being when the item's text is retrieved.  This should be harmless, since there are many
+			// other precedents where a variable is sized to something larger than it winds up carrying.
+			// Set up the var, enlarging it if necessary.
+			if (!(aBuf = (TCHAR*)alloca((length + 1) * sizeof(TCHAR))))
+				return g_script.ScriptError(ERR_OUTOFMEM);;
+			length = SendMessage(aControl.hwnd, CB_GETLBTEXT, (WPARAM)index, (LPARAM)aBuf);
+			if (length == CB_ERR) // Given the way it was called, this should be impossible based on MSDN docs.
+				return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+			param_token2.marker = aBuf;
+			param_token2.marker_length = length;
+			return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+
+		case GUI_CONTROL_LISTBOX:
+			param_token2.symbol = SYM_STRING;
+			param_token2.marker = _T("");
+			if (GetWindowLong(aControl.hwnd, GWL_STYLE) & (LBS_EXTENDEDSEL | LBS_MULTIPLESEL))
+			{
+				sel_count = SendMessage(aControl.hwnd, LB_GETSELCOUNT, 0, 0);
+				if (sel_count < 1)  // <=0 to check for LB_ERR too (but it should be impossible in this case).
+					return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+				int *item = (int *)malloc(sel_count * sizeof(int)); // dynamic since there can be a very large number of items.
+				if (!item)
+					return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+				sel_count = SendMessage(aControl.hwnd, LB_GETSELITEMS, (WPARAM)sel_count, (LPARAM)item);
+				if (sel_count < 1)  // 0 or LB_ERR, but both these conditions should be impossible in this case.
+				{
+					free(item);
+					return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+				}
+				if (aControl.attrib & GUI_CONTROL_ATTRIB_ALTSUBMIT) // Caller wanted the positions, not the text retrieved.
+				{
+					// Accumulate the length of delimited list of positions.
+					// length is initialized to sel_count - 1 to account for all the delimiter
+					// characters in the list, one delim after each item except the last:
+					for (length = sel_count - 1, i = 0; i < sel_count; ++i)
+					{
+						_itot(item[i] + 1, buf, 10);  // +1 to convert from zero-based to 1-based.
+						length += _tcslen(buf);
+					}
+				}
+				else
+				{
+					// Accumulate the length of delimited list of selected items (not positions in this case).
+					// See above loop for more comments.
+					for (length = sel_count - 1, i = 0; i < sel_count; ++i)
+					{
+						item_length = SendMessage(aControl.hwnd, LB_GETTEXTLEN, (WPARAM)item[i], 0);
+						if (item_length == LB_ERR) // Realistically impossible based on MSDN.
+						{
+							free(item);
+							return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+						}
+						length += item_length;
+					}
+				}
+				// In unusual cases, MSDN says the indicated length might be longer than it actually winds up
+				// being when the item's text is retrieved.  This should be harmless, since there are many
+				// other precedents where a variable is sized to something larger than it winds up carrying.
+				// Set up the var, enlarging it if necessary.  If the output_var is of type VAR_CLIPBOARD,
+				// this call will set up the clipboard for writing:
+				if (!(aBuf = (TCHAR*)alloca((length + 1) * sizeof(TCHAR))))
+					return g_script.ScriptError(ERR_OUTOFMEM);
+				cp = aBuf; // Init for both of the loops below.
+				if (aControl.attrib & GUI_CONTROL_ATTRIB_ALTSUBMIT) // Caller wanted the positions, not the text retrieved.
+				{
+					// In this case, the original length estimate should be the same as the actual, so
+					// it is not re-accumulated.
+					// See above loop for more comments.
+					for (i = 0; i < sel_count; ++i)
+					{
+						if (i) // Serves to add delimiter after each item except the last (helps parsing loop).
+							*cp++ = mDelimiter;
+						_itot(item[i] + 1, cp, 10);  // +1 to convert from zero-based to 1-based.
+						cp += _tcslen(cp);  // Point it to the terminator in preparation for the next write.
+					}
+				}
+				else // Store item text vs. position.
+				{
+					// See above loop for more comments.
+					for (length = sel_count - 1, i = 0; i < sel_count; ++i)
+					{
+						if (i) // Serves to add delimiter after each item except the last (helps parsing loop).
+							*cp++ = mDelimiter;
+						// Above:
+						// A hard-coded pipe delimiter is used for now because it seems fairly easy to
+						// add an option later for a custom delimiter (such as '\n') via an Param4 of
+						// GuiControlGetText and/or an option-word in "Gui Add".  The reason pipe is
+						// used as a delimiter is that it allows the selection to be easily inserted
+						// into another ListBox because it's already in the right format with the
+						// right delimiter.  In addition, literal pipes should be rare since that is
+						// the delimiter used when inserting and appending entries into a ListBox.
+						item_length = SendMessage(aControl.hwnd, LB_GETTEXT, (WPARAM)item[i], (LPARAM)cp);
+						if (item_length > 0) // Given the way it was called, LB_ERR (-1) should be impossible based on MSDN docs.  But if it happens, just skip that field.
+						{
+							length += item_length; // Accumulate actual vs. estimated length.
+							cp += item_length;  // Point it to the terminator in preparation for the next write.
+						}
+					}
+				}
+				free(item);
+			}
+			else // Single-select ListBox style.
+			{
+				index = SendMessage(aControl.hwnd, LB_GETCURSEL, 0, 0); // Get index of currently selected item.
+				if (index == LB_ERR) // There is no selection (or very rarely, some other type of problem).
+					return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+				if (aControl.attrib & GUI_CONTROL_ATTRIB_ALTSUBMIT) // Caller wanted the position, not the text retrieved.
+				{
+					param_token2.symbol = SYM_INTEGER;
+					param_token2.value_int64 = (int)index + 1;
+					return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+				}
+				length = SendMessage(aControl.hwnd, LB_GETTEXTLEN, (WPARAM)index, 0);
+				if (length == LB_ERR) // Given the way it was called, this should be impossible based on MSDN docs.
+					return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+				// In unusual cases, MSDN says the indicated length might be longer than it actually winds up
+				// being when the item's text is retrieved.  This should be harmless, since there are many
+				// other precedents where a variable is sized to something larger than it winds up carrying.
+				// Set up the var, enlarging it if necessary.  If the output_var is of type VAR_CLIPBOARD,
+				// this call will set up the clipboard for writing:
+				if (!(aBuf = (TCHAR*)alloca((length + 1) * sizeof(TCHAR))))
+					return g_script.ScriptError(ERR_OUTOFMEM);;
+				length = SendMessage(aControl.hwnd, LB_GETTEXT, (WPARAM)index, (LPARAM)aBuf);
+				if (length == LB_ERR) // Given the way it was called, this should be impossible based on MSDN docs.
+					return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+			}
+			param_token2.marker = aBuf;
+			param_token2.marker_length = length;
+			return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+			
+		case GUI_CONTROL_TAB:
+			param_token2.symbol = SYM_STRING;
+			param_token2.marker = _T("");
+			index = TabCtrl_GetCurSel(aControl.hwnd); // Get index of currently selected item.
+			if (index == -1) // There is no selection (maybe happens only if it has no tabs at all), so ErrorLevel is not changed.
+				return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+			if (aControl.attrib & GUI_CONTROL_ATTRIB_ALTSUBMIT) // Caller wanted the index, not the text retrieved.
+			{
+				param_token2.symbol = SYM_INTEGER;
+				param_token2.value_int64 = (int)index + 1;
+				return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+			}
+			// Otherwise: Get the stored name/caption of this tab:
+			TCITEM tci;
+			tci.mask = TCIF_TEXT;
+			tci.pszText = buf;
+			tci.cchTextMax = _countof(buf) - 1; // MSDN example uses -1.
+			if (TabCtrl_GetItem(aControl.hwnd, index, &tci))
+			{
+				param_token2.marker = tci.pszText;
+				return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+			}
+			return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+
+		case GUI_CONTROL_ACTIVEX:
+			if (!submit_mode)
+			{
+				// Below returns a new ComObject wrapper, not the one originally stored in aControl.output_var:
+				if (IObject *activex_obj = ControlGetActiveX(aControl.hwnd))
+				{
+					param_token2.symbol = SYM_OBJECT;
+					param_token2.object = activex_obj;
+					return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+				}
+				param_token2.symbol = SYM_STRING;
+				param_token2.marker = _T("");
+				return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+			}
+			// Otherwise: Don't overwrite the var with a new wrapper object, since that would waste
+			// resources and cause any connected (ComObjConnect) event sinks to be disconnected.
+		case GUI_CONTROL_TEXT:
+		case GUI_CONTROL_LINK:
+		case GUI_CONTROL_PIC:
+		case GUI_CONTROL_GROUPBOX:
+		case GUI_CONTROL_BUTTON:
+		case GUI_CONTROL_PROGRESS:
+		case GUI_CONTROL_LISTVIEW: // LV and TV do not obey Submit. Instead, more flexible methods are available to the script.
+		case GUI_CONTROL_TREEVIEW: //
+								   //GUI_CONTROL_ACTIVEX: // May have fallen through from above.
+			if (submit_mode) // In submit mode, do not waste memory & cpu time to save the above.
+							 // There doesn't seem to be a strong/net advantage to setting the vars to be blank
+							 // because even if that were done, it seems it would not do much to reserve flexibility
+							 // for future features in which these associated variables are used for a purpose other
+							 // than uniquely identifying the control with GuiControl & GuiControlGet.
+				return OK;
+			//else an explicit Get was called on the control, so it seems best to try to get it's text (if any).
+			break;
+			// Types specifically not handled here.  They will be handled by the section below this switch():
+			//case GUI_CONTROL_EDIT:
+		} // switch()
+	} // if (!aGetText)
+
+	  // Since the above didn't return, at least one of the following is true:
+	  // 1) aGetText is true (the caller wanted the simple GetWindowText() method applied unconditionally).
+	  // 2) This control's type is not mentioned in the switch because it does not require special handling.
+	  //   e.g.  GUI_CONTROL_EDIT, GUI_CONTROL_DROPDOWNLIST, and others that use a simple GetWindowText().
+	  // 3) This control is a ComboBox, but it lacks a selected item, so any text entered by the user
+	  //    into the control's edit field is fetched instead.
+
+	  // Set up the var, enlarging it if necessary.  If the output_var is of type VAR_CLIPBOARD,
+	  // this call will set up the clipboard for writing:
+	int length = GetWindowTextLength(aControl.hwnd); // Might be zero, which is properly handled below.
+	if (!(aBuf = (TCHAR*)alloca((length + 1) * sizeof(TCHAR))))
+		return g_script.ScriptError(ERR_OUTOFMEM);
+	param_token2.symbol = SYM_STRING;
+	param_token2.marker = _T("");
+	if (!GetWindowText(aControl.hwnd, aBuf, (int)(length + 1)))
+		return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
+	else if (aControl.type == GUI_CONTROL_EDIT) // Auto-translate CRLF to LF for better compatibility with other script commands.
+	{
+		// Since edit controls tend to have many hard returns in them, use "true" for the last param to
+		// enhance performance.  This performance gain is extreme when the control contains thousands
+		// of CRLFs:
+		StrReplace(aBuf, _T("\r\n"), _T("\n"), SCS_SENSITIVE);
+	}
+	param_token2.marker = aBuf;
+	param_token2.marker_length = length;
+	return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
 }
 
 
@@ -8824,6 +9277,13 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 				// almost certainly just passes back a pointer to its self-maintained struct).
 				if (control.output_var) // Above already confirmed it has a jump_to_label (or at least an implicit cancel).
 					pgui->ControlGetContents(*control.output_var, control);
+				else if (control.mObjectKey)
+				{
+					if (!pgui->mObjectVar->HasObject())
+						g_script.ScriptError(_T("No object to invoke."));
+					else
+						pgui->ControlGetContentsToObject(pgui->mObjectVar->mObject, control);
+				}
 				// Both MonthCal's year spinner (when year is clicked on) and DateTime's drop-down calendar
 				// seem to start a new message pump.  This is one of the reason things were redesigned to
 				// avoid doing a MsgSleep(-1) after posting AHK_GUI_ACTION at the bottom of Event().
@@ -8864,6 +9324,13 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 			// Update output-var if that is called for:
 			if (control.output_var) // Above already confirmed it has a jump_to_label (or at least an implicit cancel).
 				pgui->ControlGetContents(*control.output_var, control);
+			else if (control.mObjectKey)
+			{
+				if (!pgui->mObjectVar->HasObject())
+					g_script.ScriptError(_T("No object to invoke."));
+				else
+					pgui->ControlGetContentsToObject(pgui->mObjectVar->mObject, control);
+			}
 			pgui->Event(control_index, nmhdr.code, gui_event);
 			return 0; // 0 is appropriate for all MONTHCAL notifications.
 
@@ -8886,6 +9353,13 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 			else if (nmhdr.code == TCN_SELCHANGING)
 				if (control.output_var && control.jump_to_label) // Set the variable's contents, for use when the corresponding TCN_SELCHANGE comes in to launch the label after this.
 					pgui->ControlGetContents(*control.output_var, control);
+				else if (control.mObjectKey && control.jump_to_label)
+				{
+					if (!pgui->mObjectVar->HasObject())
+						g_script.ScriptError(_T("No object to invoke."));
+					else
+						pgui->ControlGetContentsToObject(pgui->mObjectVar->mObject, control);
+				}
 			return 0; // 0 is appropriate for all TAB notifications.
 		case GUI_CONTROL_LINK:
 			if(nmhdr.code == NM_CLICK || nmhdr.code == NM_RETURN)
@@ -9521,6 +9995,13 @@ void GuiType::Event(GuiIndexType aControlIndex, UINT aNotifyCode, USHORT aGuiEve
 		case GUI_CONTROL_HOTKEY: // The only notification sent by the hotkey control is EN_CHANGE.
 			if (control.output_var) // Above already confirmed it has a jump_to_label (or at least an implicit cancel).
 				ControlGetContents(*control.output_var, control);
+			else if (control.mObjectKey)
+			{
+				if (!mObjectVar->HasObject())
+					g_script.ScriptError(_T("No object to invoke."));
+				else
+					ControlGetContentsToObject(mObjectVar->mObject, control);
+			}
 			break;
 
 		case GUI_CONTROL_TEXT:
@@ -9552,6 +10033,13 @@ void GuiType::Event(GuiIndexType aControlIndex, UINT aNotifyCode, USHORT aGuiEve
 				// User has pressed arrow keys or clicked down on the mouse on one of the arrows.
 				if (control.output_var) // Above already confirmed it has a jump_to_label (or at least an implicit cancel).
 					ControlGetContents(*control.output_var, control);
+				else if (control.mObjectKey)
+				{
+					if (!mObjectVar->HasObject())
+						g_script.ScriptError(_T("No object to invoke."));
+					else
+						ControlGetContentsToObject(mObjectVar->mObject, control);
+				}
 				break;
 			}
 			// Otherwise, ignore all others.  SB_ENDSCROLL is received when user has released mouse after
@@ -9590,6 +10078,13 @@ void GuiType::Event(GuiIndexType aControlIndex, UINT aNotifyCode, USHORT aGuiEve
 			}
 			if (control.output_var) // Above already confirmed it has a jump_to_label (or at least an implicit cancel).
 				ControlGetContents(*control.output_var, control);
+			else if (control.mObjectKey)
+			{
+				if (!mObjectVar->HasObject())
+					g_script.ScriptError(_T("No object to invoke."));
+				else
+					ControlGetContentsToObject(mObjectVar->mObject, control);
+			}
 			break;
 
 		// The following need no extra handling because their info is already ready to be posted as an event below:
@@ -10440,6 +10935,13 @@ ResultType GuiType::SelectAdjacentTab(GuiControlType &aTabControl, bool aMoveToR
 	// it's at the min or max and aWrapAround==false):
 	if (aTabControl.jump_to_label && aTabControl.output_var)
 		ControlGetContents(*aTabControl.output_var, aTabControl);
+	else if (aTabControl.jump_to_label && aTabControl.mObjectKey)
+	{
+		if (!mObjectVar->HasObject())
+			g_script.ScriptError(_T("No object to invoke."));
+		else
+			ControlGetContentsToObject(mObjectVar->mObject, aTabControl);
+	}
 
 	int selected_tab = TabCtrl_GetCurSel(aTabControl.hwnd);
 	if (selected_tab == -1) // Not sure how this can happen in this case (since it has at least one tab).
