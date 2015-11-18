@@ -5758,6 +5758,7 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 						: g_script.ScriptError(_T("This control type should not have an associated subroutine.")
 							, next_option - 1);
 				IObject *candidate_label;
+				candidate_label = NULL;
 				// check if we have a key holding Bound function in mObjectVar
 				// if key exists and it is an object use it, otherwise fall back to label mode
 				if ( mObjectVar )
@@ -5766,11 +5767,14 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 						return g_script.ScriptError(_T("No object to invoke."), next_option - 1);
 					ExprTokenType aResult, param_token;
 					ExprTokenType aThisToken,*params[] = { &param_token };
-					aResult.object = NULL;
+					TCHAR aBuf[512];
+					aResult.buf = aBuf;
 					param_token.symbol = SYM_STRING;
 					param_token.marker = next_option;
+					param_token.marker_length = _tcslen(next_option);
 					mObjectVar->mObject->Invoke(aResult,aThisToken,IT_GET,params,1);
-					candidate_label = aResult.object;
+					if (aResult.symbol == SYM_OBJECT)
+						candidate_label = aResult.object;
 				}
 				if (   !candidate_label && !(candidate_label = g_script.FindCallable(next_option, aParam3Var, 4))   )
 				{
@@ -5812,7 +5816,9 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 					ExprTokenType aThisToken, *params[] = { &param_token1, &param_token2 };
 					param_token2.symbol = param_token1.symbol = SYM_STRING;
 					param_token1.marker = _T("HasKey");
+					param_token1.marker_length = 6;
 					param_token2.marker = next_option;
+					param_token2.marker_length = _tcslen(next_option);
 					mObjectVar->mObject->Invoke(aResult, aThisToken, IT_CALL, params, 2);
 					if (aResult.value_int64)
 						return aControl.hwnd ? g_script.SetErrorLevelOrThrow()
@@ -7711,6 +7717,7 @@ ResultType GuiType::ControlGetContentsToObject(IObject *aObject, GuiControlType 
 	ExprTokenType aThisToken, *params[] = { &param_token1, &param_token2 };
 	param_token1.symbol = SYM_STRING;
 	param_token1.marker = aControl.mObjectKey;
+	param_token1.marker_length = _tcslen(aControl.mObjectKey);
 	param_token2.symbol = SYM_INTEGER;
 	param_token2.marker = buf;
 	param_token2.marker_length = -1;
