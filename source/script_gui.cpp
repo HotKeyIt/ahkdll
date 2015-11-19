@@ -5824,6 +5824,11 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 						return aControl.hwnd ? g_script.SetErrorLevelOrThrow()
 							: g_script.ScriptError(_T("The same variable cannot be used for more than one control.") // It used to say "one control per window" but that seems more confusing than it's worth.
 								, next_option - 1);
+					param_token1.marker = next_option;
+					param_token1.marker_length = _tcslen(next_option);
+					param_token2.marker = _T("");
+					param_token2.marker_length = 0;
+					mObjectVar->mObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
 					aControl.mObjectKey = (TCHAR*)malloc((_tcslen(next_option) + 1) * sizeof(TCHAR));
 					_tcscpy(aControl.mObjectKey, next_option);
 					break;
