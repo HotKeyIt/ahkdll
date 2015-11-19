@@ -4433,7 +4433,8 @@ ResultType GuiType::ParseOptions(LPTSTR aOptions, bool &aSetLastFoundWindow, Tog
 					ScrollWindow(mHwnd, 0, mVScroll->nPos - mVScroll->nMin, NULL, NULL);
 			}
 
-		else if (!_tcsnicmp(next_option, _T("Object"),6) && *next_option)
+		else if (!_tcsnicmp(next_option, _T("Object"), 6) && *next_option)
+		{
 			// The variable holding an object can contain Bound Functions for gFunc options {Func:BoundFunction}
 			// The same object will be used to output values when using vMyVar option -> object.MyVar
 			if (adding)
@@ -4456,7 +4457,7 @@ ResultType GuiType::ParseOptions(LPTSTR aOptions, bool &aSetLastFoundWindow, Tog
 				mObject->Release();
 				mObject = NULL;
 			}
-
+		}
 		else if (!_tcsicmp(next_option, _T("Caption")))
 			if (adding) mStyle |= WS_CAPTION; else mStyle = mStyle & ~WS_CAPTION;
 
