@@ -1189,6 +1189,36 @@ ResultType Line::GuiControl(LPTSTR aCommand, LPTSTR aControlID, LPTSTR aParam3, 
 		control.mY = ypos;
 		control.mHeight = height;
 		control.mWidth = width;
+		int aMaxWidth = 0, aMaxHeight = 0;
+		for (GuiIndexType i = 0; i < pgui->mControlCount; i++)
+		{
+			RECT rect;
+			GuiControlType *aControl = &pgui->mControl[i];
+			if (aControl->type == GUI_CONTROL_STATUSBAR)
+				continue;
+			GetWindowRect(aControl->hwnd, &rect);
+			POINT pt = { rect.left, rect.top };
+			ScreenToClient(pgui->mHwnd, &pt);
+			int aWidth = pt.x + pgui->mHScroll->nPos + (rect.right - rect.left), aHeight = pt.y + pgui->mVScroll->nPos + (rect.bottom - rect.top);
+			if (aWidth > aMaxWidth)
+				aMaxWidth = aWidth;
+			if (aHeight > aMaxHeight)
+				aMaxHeight = aHeight;
+		}
+		if (aMaxWidth != pgui->mMaxExtentRight)
+			pgui->mMaxExtentRight = aMaxWidth;
+		if (aMaxHeight != pgui->mMaxExtentDown)
+			pgui->mMaxExtentDown = aMaxHeight;
+		if (pgui->mStyle & WS_HSCROLL)
+		{
+			pgui->mHScroll->nMax = pgui->mMaxExtentRight + pgui->mMarginX;
+			SetScrollInfo(pgui->mHwnd, SB_HORZ, pgui->mHScroll, true);
+		}
+		if (pgui->mStyle & WS_VSCROLL)
+		{
+			pgui->mVScroll->nMax = pgui->mMaxExtentDown + pgui->mMarginY;
+			SetScrollInfo(pgui->mHwnd, SB_HORZ, pgui->mVScroll, true);
+		}
 		goto return_the_result;
 	}
 
