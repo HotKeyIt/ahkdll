@@ -22,6 +22,91 @@ GNU General Public License for more details.
 #include "window.h" // for SetForegroundWindowEx()
 #include "qmath.h" // for qmathLog()
 
+void UpdateScrollbars(GuiType *agui, int client_right, int client_bottom)
+{
+	SCROLLINFO *aHScroll = agui->mHScroll, *aVScroll = agui->mVScroll;
+
+	// Update Scrollbar buttons
+	int xScroll = 0, yScroll = 0;
+
+	// check if Scrollbars are shown
+	bool aHScrollVisible = agui->mStyle & WS_HSCROLL && (int)aHScroll->nPage <= aHScroll->nMax;
+	bool aVScrollVisible = agui->mStyle & WS_VSCROLL && (int)aVScroll->nPage <= aVScroll->nMax;
+
+	// Get new client area and add Scrollbars to it
+	// If Scrollbars do not belong to client area AutoSizePos above would not work
+	// because controls would resize when scrollbar disappears
+	client_right += (aVScrollVisible ? GetSystemMetrics(SM_CYVSCROLL) : 0), client_bottom += (aHScrollVisible ? GetSystemMetrics(SM_CYHSCROLL) : 0);
+
+	// Check if Scrollbars are required
+	bool aHScrollRequired = agui->mStyle & WS_HSCROLL && client_right - (aVScrollVisible ? GetSystemMetrics(SM_CYVSCROLL) : 0) < agui->mMaxExtentRight + agui->mMarginX;
+	bool aVScrollRequired = agui->mStyle & WS_VSCROLL && client_bottom - (aHScrollVisible ? GetSystemMetrics(SM_CYHSCROLL) : 0) < agui->mMaxExtentDown + agui->mMarginY;
+
+	// Scrollbars are shown but are not reqiured because without those client area is big enough
+	if (client_right + 1 > agui->mMaxExtentRight + agui->mMarginX
+		&& client_bottom + 1 > agui->mMaxExtentDown + agui->mMarginY)
+		aHScrollRequired = aVScrollRequired = false;
+
+	// Ignore following code after SetScrollInfo if it will cause new WM_SIZE
+	bool aSkipOver = false;
+	if (agui->mStyle & WS_HSCROLL)
+	{
+		aHScroll->nMax = agui->mMaxExtentRight + agui->mMarginX;
+
+		if (aHScrollVisible && !aHScrollRequired || !aHScrollVisible && aHScrollRequired)
+			aSkipOver = true; // SetScrollInfo will trigger another WM_SIZE, don't process code below
+
+							  // Subtract vertical Scrollbar and add 1 pixel because nPage = nMax triggers Scrollbar
+		aHScroll->nPage = client_right - (aVScrollVisible && aVScrollRequired ? GetSystemMetrics(SM_CYVSCROLL) : 0) + 1;
+		SetScrollInfo(agui->mHwnd, SB_HORZ, aHScroll, true);
+
+		// By this point, both scrollbars have redrawn or disappeared
+		// SCROLLINFO and client_rect are current.
+		// Calculate the amount of pixels to scroll left for ScrollWindow
+		if (!aSkipOver)
+		{
+			if (aHScroll->nPos && aHScroll->nMax - aHScroll->nPos < client_right)
+				if (aHScroll->nPos > client_right - (aHScroll->nMax - aHScroll->nPos))
+					xScroll = client_right - (aHScroll->nMax - aHScroll->nPos);
+				else
+					xScroll = aHScroll->nPos;
+
+			// update position of scroll button
+			aHScroll->nPos -= xScroll;
+		}
+	}
+	if (!aSkipOver && agui->mStyle & WS_VSCROLL)
+	{
+		aVScroll->nMax = agui->mMaxExtentDown + agui->mMarginY;
+
+		if (aVScrollVisible && !aVScrollRequired || !aVScrollVisible && aVScrollRequired)
+			aSkipOver = true; // SetScrollInfo will trigger another WM_SIZE, don't process code below
+
+							  // Subtract horizontal Scrollbar add 1 pixel because nPage = nMax triggers Scrollbar
+		aVScroll->nPage = client_bottom - (aHScrollVisible && aHScrollRequired ? GetSystemMetrics(SM_CYHSCROLL) : 0) + 1;
+		SetScrollInfo(agui->mHwnd, SB_VERT, aVScroll, true);
+
+		// By this point, both scrollbars have redrawn or disappeared
+		// SCROLLINFO and client_rect are current.
+		// Calculate the amount of pixels to scroll left for ScrollWindow
+		if (!aSkipOver)
+		{
+			if (aVScroll->nPos && aVScroll->nMax - aVScroll->nPos < client_bottom)
+				if (aVScroll->nPos > client_bottom - (aVScroll->nMax - aVScroll->nPos))
+					yScroll = client_bottom - (aVScroll->nMax - aVScroll->nPos);
+				else
+					yScroll = aVScroll->nPos;
+
+			// update position of scroll button
+			aVScroll->nPos -= yScroll;
+		}
+	}
+
+	// Scroll window if requiered
+	if (!aSkipOver && (xScroll || yScroll))
+		ScrollWindow(agui->mHwnd, xScroll, yScroll, NULL, NULL);
+}
+
 
 GuiType *Script::ResolveGui(LPTSTR aBuf, LPTSTR &aCommand, LPTSTR *aName, size_t *aNameLength, LPTSTR aControlID)
 {
@@ -1210,16 +1295,8 @@ ResultType Line::GuiControl(LPTSTR aCommand, LPTSTR aControlID, LPTSTR aParam3, 
 			pgui->mMaxExtentRight = aMaxWidth;
 		if (aMaxHeight != pgui->mMaxExtentDown)
 			pgui->mMaxExtentDown = aMaxHeight;
-		if (pgui->mStyle & WS_HSCROLL)
-		{
-			pgui->mHScroll->nMax = pgui->mMaxExtentRight + pgui->mMarginX;
-			SetScrollInfo(pgui->mHwnd, SB_HORZ, pgui->mHScroll, true);
-		}
-		if (pgui->mStyle & WS_VSCROLL)
-		{
-			pgui->mVScroll->nMax = pgui->mMaxExtentDown + pgui->mMarginY;
-			SetScrollInfo(pgui->mHwnd, SB_HORZ, pgui->mVScroll, true);
-		}
+		if (pgui->mStyle & WS_HSCROLL || pgui->mStyle & WS_VSCROLL)
+			UpdateScrollbars(pgui, aMaxWidth, aMaxHeight);
 		goto return_the_result;
 	}
 
@@ -8490,8 +8567,6 @@ int GuiType::FindFont(FontType &aFont)
 	return -1;  // Indicate failure.
 }
 
-
-
 LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lParam)
 {
 	// If a message pump other than our own is running -- such as that of a dialog like MsgBox -- it will
@@ -8750,91 +8825,7 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 
 		// Update Scrollbars
 		if (pgui->mStyle & WS_HSCROLL || pgui->mStyle & WS_VSCROLL)
-		{
-			SCROLLINFO *aHScroll = pgui->mHScroll, *aVScroll = pgui->mVScroll;
-
-			
-			// Update Scrollbar buttons
-			int xScroll = 0, yScroll = 0;
-
-			// check if Scrollbars are shown
-			bool aHScrollVisible = pgui->mStyle & WS_HSCROLL && (int)aHScroll->nPage <= aHScroll->nMax;
-			bool aVScrollVisible = pgui->mStyle & WS_VSCROLL && (int)aVScroll->nPage <= aVScroll->nMax;
-			
-			// Get new client area and add Scrollbars to it
-			// If Scrollbars do not belong to client area AutoSizePos above would not work
-			// because controls would resize when scrollbar disappears
-			int client_right = LOWORD(lParam) + (aVScrollVisible ? GetSystemMetrics(SM_CYVSCROLL) : 0), client_bottom = HIWORD(lParam) + (aHScrollVisible ? GetSystemMetrics(SM_CYHSCROLL) : 0);
-			
-			// Check if Scrollbars are required
-			bool aHScrollRequired = pgui->mStyle & WS_HSCROLL && client_right - (aVScrollVisible ? GetSystemMetrics(SM_CYVSCROLL) : 0) < pgui->mMaxExtentRight + pgui->mMarginX;
-			bool aVScrollRequired = pgui->mStyle & WS_VSCROLL && client_bottom - (aHScrollVisible ? GetSystemMetrics(SM_CYHSCROLL) : 0) < pgui->mMaxExtentDown + pgui->mMarginY;
-			
-			// Scrollbars are shown but are not reqiured because without those client area is big enough
-			if (client_right + 1 > pgui->mMaxExtentRight + pgui->mMarginX
-				&& client_bottom + 1 > pgui->mMaxExtentDown + pgui->mMarginY)
-				aHScrollRequired = aVScrollRequired = false;
-
-			// Ignore following code after SetScrollInfo if it will cause new WM_SIZE
-			bool aSkipOver = false;
-			if (pgui->mStyle & WS_HSCROLL)
-			{
-				aHScroll->nMax = pgui->mMaxExtentRight + pgui->mMarginX;
-
-				if (aHScrollVisible && !aHScrollRequired || !aHScrollVisible && aHScrollRequired)
-					aSkipOver = true; // SetScrollInfo will trigger another WM_SIZE, don't process code below
-
-				// Subtract vertical Scrollbar and add 1 pixel because nPage = nMax triggers Scrollbar
-				aHScroll->nPage = client_right - (aVScrollVisible && aVScrollRequired ? GetSystemMetrics(SM_CYVSCROLL) : 0) + 1;
-				SetScrollInfo(pgui->mHwnd, SB_HORZ, aHScroll, true);
-				
-				// By this point, both scrollbars have redrawn or disappeared
-				// SCROLLINFO and client_rect are current.
-				// Calculate the amount of pixels to scroll left for ScrollWindow
-				if (!aSkipOver)
-				{
-					if (pgui->mStyle & WS_HSCROLL && aHScroll->nPos && aHScroll->nMax - aHScroll->nPos < client_right)
-						if (aHScroll->nPos > client_right - (aHScroll->nMax - aHScroll->nPos))
-							xScroll = client_right - (aHScroll->nMax - aHScroll->nPos);
-						else
-							xScroll = aHScroll->nPos;
-
-					// update position of scroll button
-					aHScroll->nPos -= xScroll;
-				}
-			}
-			if (!aSkipOver && pgui->mStyle & WS_VSCROLL)
-			{
-				aVScroll->nMax = pgui->mMaxExtentDown + pgui->mMarginY;
-
-				if (aVScrollVisible && !aVScrollRequired || !aVScrollVisible && aVScrollRequired)
-					aSkipOver = true; // SetScrollInfo will trigger another WM_SIZE, don't process code below
-				
-				// Subtract horizontal Scrollbar add 1 pixel because nPage = nMax triggers Scrollbar
-				aVScroll->nPage = client_bottom - (aHScrollVisible && aHScrollRequired ? GetSystemMetrics(SM_CYHSCROLL) : 0) + 1;
-				SetScrollInfo(pgui->mHwnd, SB_VERT, aVScroll, true);
-				
-				// By this point, both scrollbars have redrawn or disappeared
-				// SCROLLINFO and client_rect are current.
-				// Calculate the amount of pixels to scroll left for ScrollWindow
-				if (!aSkipOver)
-				{
-					if (pgui->mStyle & WS_VSCROLL && aVScroll->nPos && aVScroll->nMax - aVScroll->nPos < client_bottom)
-						if (aVScroll->nPos > client_bottom - (aVScroll->nMax - aVScroll->nPos))
-							yScroll = client_bottom - (aVScroll->nMax - aVScroll->nPos);
-						else
-							yScroll = aVScroll->nPos;
-
-					// update position of scroll button
-					aVScroll->nPos -= yScroll;
-				}
-			}
-
-			// Scroll window if requiered
-			if (!aSkipOver && (xScroll || yScroll))
-				ScrollWindow(pgui->mHwnd, xScroll, yScroll, NULL, NULL);
-
-		}
+			UpdateScrollbars(pgui, LOWORD(lParam), HIWORD(lParam));
 		return 0; // "If an application processes this message, it should return zero."
 		// Testing shows that the window still resizes correctly (controls are revealed as the window
 		// is expanded) even if the event isn't passed on to the default proc.
