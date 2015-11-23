@@ -1295,7 +1295,7 @@ ResultType Line::GuiControl(LPTSTR aCommand, LPTSTR aControlID, LPTSTR aParam3, 
 		if (aMaxHeight != pgui->mMaxExtentDown)
 			pgui->mMaxExtentDown = aMaxHeight;
 		if (pgui->mStyle & WS_HSCROLL || pgui->mStyle & WS_VSCROLL)
-			UpdateScrollbars(pgui, aMaxWidth, aMaxHeight, false);
+			UpdateScrollbars(pgui, aMaxWidth + pgui->mMarginX, aMaxHeight + pgui->mMarginY, false);
 		goto return_the_result;
 	}
 
