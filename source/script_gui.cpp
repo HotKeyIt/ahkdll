@@ -22,7 +22,7 @@ GNU General Public License for more details.
 #include "window.h" // for SetForegroundWindowEx()
 #include "qmath.h" // for qmathLog()
 
-void UpdateScrollbars(GuiType *agui, int client_right, int client_bottom)
+void UpdateScrollbars(GuiType *agui, int client_right, int client_bottom,bool doSkipOver)
 {
 	SCROLLINFO *aHScroll = agui->mHScroll, *aVScroll = agui->mVScroll;
 
@@ -54,7 +54,7 @@ void UpdateScrollbars(GuiType *agui, int client_right, int client_bottom)
 		aHScroll->nMax = agui->mMaxExtentRight + agui->mMarginX;
 
 		if (aHScrollVisible && !aHScrollRequired || !aHScrollVisible && aHScrollRequired)
-			aSkipOver = true; // SetScrollInfo will trigger another WM_SIZE, don't process code below
+			aSkipOver = doSkipOver && true; // SetScrollInfo will trigger another WM_SIZE, don't process code below
 
 							  // Subtract vertical Scrollbar and add 1 pixel because nPage = nMax triggers Scrollbar
 		aHScroll->nPage = client_right - (aVScrollVisible && aVScrollRequired ? GetSystemMetrics(SM_CYVSCROLL) : 0) + 1;
@@ -80,7 +80,7 @@ void UpdateScrollbars(GuiType *agui, int client_right, int client_bottom)
 		aVScroll->nMax = agui->mMaxExtentDown + agui->mMarginY;
 
 		if (aVScrollVisible && !aVScrollRequired || !aVScrollVisible && aVScrollRequired)
-			aSkipOver = true; // SetScrollInfo will trigger another WM_SIZE, don't process code below
+			aSkipOver = doSkipOver && true; // SetScrollInfo will trigger another WM_SIZE, don't process code below
 
 							  // Subtract horizontal Scrollbar add 1 pixel because nPage = nMax triggers Scrollbar
 		aVScroll->nPage = client_bottom - (aHScrollVisible && aHScrollRequired ? GetSystemMetrics(SM_CYHSCROLL) : 0) + 1;
@@ -1296,7 +1296,7 @@ ResultType Line::GuiControl(LPTSTR aCommand, LPTSTR aControlID, LPTSTR aParam3, 
 		if (aMaxHeight != pgui->mMaxExtentDown)
 			pgui->mMaxExtentDown = aMaxHeight;
 		if (pgui->mStyle & WS_HSCROLL || pgui->mStyle & WS_VSCROLL)
-			UpdateScrollbars(pgui, aMaxWidth, aMaxHeight);
+			UpdateScrollbars(pgui, aMaxWidth, aMaxHeight, false);
 		goto return_the_result;
 	}
 
@@ -8825,7 +8825,7 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 
 		// Update Scrollbars
 		if (pgui->mStyle & WS_HSCROLL || pgui->mStyle & WS_VSCROLL)
-			UpdateScrollbars(pgui, LOWORD(lParam), HIWORD(lParam));
+			UpdateScrollbars(pgui, LOWORD(lParam), HIWORD(lParam), true);
 		return 0; // "If an application processes this message, it should return zero."
 		// Testing shows that the window still resizes correctly (controls are revealed as the window
 		// is expanded) even if the event isn't passed on to the default proc.
