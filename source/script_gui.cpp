@@ -56,7 +56,7 @@ void UpdateScrollbars(GuiType *agui, int client_right, int client_bottom,bool do
 		if (aHScrollVisible && !aHScrollRequired || !aHScrollVisible && aHScrollRequired)
 			aSkipOver = doSkipOver && true; // SetScrollInfo will trigger another WM_SIZE, don't process code below
 
-							  // Subtract vertical Scrollbar and add 1 pixel because nPage = nMax triggers Scrollbar
+		// Subtract vertical Scrollbar and add 1 pixel because nPage = nMax triggers Scrollbar
 		aHScroll->nPage = client_right - (aVScrollVisible && aVScrollRequired ? GetSystemMetrics(SM_CYVSCROLL) : 0) + 1;
 		SetScrollInfo(agui->mHwnd, SB_HORZ, aHScroll, true);
 
@@ -82,7 +82,7 @@ void UpdateScrollbars(GuiType *agui, int client_right, int client_bottom,bool do
 		if (aVScrollVisible && !aVScrollRequired || !aVScrollVisible && aVScrollRequired)
 			aSkipOver = doSkipOver && true; // SetScrollInfo will trigger another WM_SIZE, don't process code below
 
-							  // Subtract horizontal Scrollbar add 1 pixel because nPage = nMax triggers Scrollbar
+		// Subtract horizontal Scrollbar add 1 pixel because nPage = nMax triggers Scrollbar
 		aVScroll->nPage = client_bottom - (aHScrollVisible && aHScrollRequired ? GetSystemMetrics(SM_CYHSCROLL) : 0) + 1;
 		SetScrollInfo(agui->mHwnd, SB_VERT, aVScroll, true);
 
@@ -1296,7 +1296,7 @@ ResultType Line::GuiControl(LPTSTR aCommand, LPTSTR aControlID, LPTSTR aParam3, 
 		if (aMaxHeight != pgui->mMaxExtentDown)
 			pgui->mMaxExtentDown = aMaxHeight;
 		if (pgui->mStyle & WS_HSCROLL || pgui->mStyle & WS_VSCROLL)
-			UpdateScrollbars(pgui, aMaxWidth, aMaxHeight, false);
+			UpdateScrollbars(pgui, aMaxWidth + pgui->mMarginX, aMaxHeight + pgui->mMarginY, false);
 		goto return_the_result;
 	}
 
