@@ -17,8 +17,10 @@ void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar, BOOL aVarIsArg);
 #define FINALIZE_HOTKEYS \
 	if (Hotkey::sHotkeyCount > HotkeyCount)\
 	{\
-		Line::ToggleSuspendState();\
-		Line::ToggleSuspendState();\
+		Hotstring::SuspendAll(!g_IsSuspended);\
+		Hotkey::ManifestAllHotkeysHotstringsHooks();\
+		Hotstring::SuspendAll(g_IsSuspended);\
+		Hotkey::ManifestAllHotkeysHotstringsHooks();\
 	}
 #define RESTORE_IF_EXPR \
 	for (int expr_line_index = aHotExprLineCount ; expr_line_index < g_HotExprLineCount; ++expr_line_index)\
@@ -129,6 +131,8 @@ EXPORT int ahkPause(LPTSTR aChangeTo) //Change pause state of a running script
 
 EXPORT UINT_PTR ahkFindFunc(LPTSTR funcname)
 {
+	if (!g_script.mIsReadyToExecute)
+		return 0; // AutoHotkey needs to be running at this point //
 	return (UINT_PTR)g_script.FindFunc(funcname);
 }
 
@@ -156,7 +160,7 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 			return _T("");
 		}
 		result_to_return_dll = new_mem;
-		return ITOA64((int)ahkvar,result_to_return_dll);
+		return ITOA64((UINT_PTR)ahkvar,result_to_return_dll);
 	}
 	if (ahkvar->mType != VAR_BUILTIN && !ahkvar->HasContents() )
 		return _T("");
@@ -296,8 +300,7 @@ EXPORT int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR par
 			for (int i = 0;aFunc->mParamCount > i && aParamsCount>i;i++)
 			{
 				aFuncAndToken.param[i] = &aFuncAndToken.params[i];
-				aFuncAndToken.param[i]->symbol = SYM_STRING;
-				aFuncAndToken.params[i].marker = *params[i]; // Assign parameters
+				aFuncAndToken.param[i]->SetValue(*params[i]); // Assign parameters
 			}
 			aFuncAndToken.mToken.symbol = SYM_INTEGER;
 			LPTSTR new_buf = (LPTSTR)realloc(aFuncAndToken.buf,MAX_NUMBER_SIZE * sizeof(TCHAR));
@@ -339,7 +342,6 @@ EXPORT int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR par
 			for (int i = 0;(aFunc->mParamCount > i || aFunc->mIsVariadic) && aParamsCount>i;i++)
 			{
 				aFuncAndToken.param[i] = &aFuncAndToken.params[i];
-				aFuncAndToken.param[i]->symbol = SYM_STRING;
 				new_buf = (LPTSTR)realloc(aFuncAndToken.param[i]->marker,(_tcslen(*params[i])+1)*sizeof(TCHAR));
 				if (!new_buf)
 				{
@@ -347,8 +349,8 @@ EXPORT int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR par
 					LeaveCriticalSection(&g_CriticalAhkFunction);
 					return -1;
 				}
-				aFuncAndToken.param[i]->marker = new_buf;
-				_tcscpy(aFuncAndToken.param[i]->marker,*params[i]); // Assign parameters
+				_tcscpy(new_buf,*params[i]); // Assign parameters
+				aFuncAndToken.param[i]->SetValue(new_buf);
 			}
 			aFuncAndToken.mFunc = aFunc ;
 			PostMessage(g_hWnd, AHK_EXECUTE_FUNCTION_DLL, (WPARAM)&aFuncAndToken,NULL);
@@ -371,6 +373,10 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute)
 #ifndef MINIDLL
 	int HotkeyCount = Hotkey::sHotkeyCount;
 	int aHotExprLineCount = g_HotExprLineCount;
+	GuiType *aGuiDefaultWindow = g->GuiDefaultWindow;
+	g->GuiDefaultWindow = NULL;
+	int a_guiCount = g_guiCount;
+	g_guiCount = 0;
 #endif
 #ifdef _USRDLL
 	g_Loading = true;
@@ -384,6 +390,8 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute)
 		g->CurrentFunc = aCurrFunc;						// Restore current function
 		RESTORE_G_SCRIPT
 #ifndef MINIDLL
+		g->GuiDefaultWindow = aGuiDefaultWindow;
+		g_guiCount = a_guiCount;
 		RESTORE_IF_EXPR
 #endif
 		g_script.mIsReadyToExecute = true; // Set program to be ready for continuing previous script.
@@ -394,6 +402,8 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute)
 	}	
 	g_script.mFileSpec = oldFileSpec;
 #ifndef MINIDLL
+	g->GuiDefaultWindow = aGuiDefaultWindow;
+	g_guiCount = a_guiCount;
 	FINALIZE_HOTKEYS
 	RESTORE_IF_EXPR
 #endif
@@ -441,6 +451,10 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute)
 #ifndef MINIDLL
 	int HotkeyCount = Hotkey::sHotkeyCount;
 	int aHotExprLineCount = g_HotExprLineCount;
+	GuiType *aGuiDefaultWindow = g->GuiDefaultWindow;
+	g->GuiDefaultWindow = NULL;
+	int a_guiCount = g_guiCount;
+	g_guiCount = 0;
 #endif
 
 	LPCTSTR aPathToShow = g_script.mCurrLine->mArg ? g_script.mCurrLine->mArg->text : g_script.mFileSpec;
@@ -453,6 +467,8 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute)
 		g->CurrentFunc = aCurrFunc;
 		RESTORE_G_SCRIPT
 #ifndef MINIDLL
+		g->GuiDefaultWindow = aGuiDefaultWindow;
+		g_guiCount = a_guiCount;
 		RESTORE_IF_EXPR
 #endif
 		g_script.mIsReadyToExecute = true;
@@ -462,6 +478,8 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute)
 		return 0;  // LOADING_FAILED cant be used due to PTR return type
 	}
 #ifndef MINIDLL
+	g->GuiDefaultWindow = aGuiDefaultWindow;
+	g_guiCount = a_guiCount;
 	FINALIZE_HOTKEYS
 	RESTORE_IF_EXPR
 #endif
@@ -628,8 +646,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 			for (int i = 0;aFunc->mParamCount > i && aParamsCount>i;i++)
 			{
 				aFuncAndToken.param[i] = &aFuncAndToken.params[i];
-				aFuncAndToken.param[i]->symbol = SYM_STRING;
-				aFuncAndToken.params[i].marker = *params[i]; // Assign parameters
+				aFuncAndToken.param[i]->SetValue(*params[i]); // Assign parameters
 			}
 			aFuncAndToken.mToken.symbol = SYM_INTEGER;
 			LPTSTR new_buf = (LPTSTR)realloc(aFuncAndToken.buf,MAX_NUMBER_SIZE * sizeof(TCHAR));
@@ -743,7 +760,6 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 			for (int i = 0;(aFunc->mParamCount > i || aFunc->mIsVariadic) && aParamsCount>i;i++)
 			{
 				aFuncAndToken.param[i] = &aFuncAndToken.params[i];
-				aFuncAndToken.param[i]->symbol = SYM_STRING;
 				new_buf = (LPTSTR)realloc(aFuncAndToken.param[i]->marker,(_tcslen(*params[i])+1)*sizeof(TCHAR));
 				if (!new_buf)
 				{
@@ -751,8 +767,8 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 					LeaveCriticalSection(&g_CriticalAhkFunction);
 					return _T("");
 				}
-				aFuncAndToken.param[i]->marker = new_buf;
-				_tcscpy(aFuncAndToken.param[i]->marker,*params[i]); // Assign parameters
+				_tcscpy(new_buf,*params[i]); // Assign parameters
+				aFuncAndToken.param[i]->SetValue(new_buf);
 			}
 			aFuncAndToken.mFunc = aFunc ;
 			SendMessage(g_hWnd, AHK_EXECUTE_FUNCTION_DLL, (WPARAM)&aFuncAndToken, NULL);
@@ -942,7 +958,7 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 				aParam[i]->var->mAttrib = 0;
 				aParam[i]->var->mByteCapacity = 0;
 				aParam[i]->var->mHowAllocated = ALLOC_MALLOC;
-
+				
 				AssignVariant(*aParam[i]->var, *variants[i],false);
 			}
 			aResultToken.symbol = SYM_INTEGER;
