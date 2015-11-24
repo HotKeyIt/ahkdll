@@ -1275,9 +1275,9 @@ ResultType Line::GuiControl(LPTSTR aCommand, LPTSTR aControlID, LPTSTR aParam3, 
 		control.mHeight = height;
 		control.mWidth = width;
 		int aMaxWidth = 0, aMaxHeight = 0;
+		RECT rect;
 		for (GuiIndexType i = 0; i < pgui->mControlCount; i++)
 		{
-			RECT rect;
 			GuiControlType *aControl = &pgui->mControl[i];
 			if (aControl->type == GUI_CONTROL_STATUSBAR)
 				continue;
@@ -1295,7 +1295,10 @@ ResultType Line::GuiControl(LPTSTR aCommand, LPTSTR aControlID, LPTSTR aParam3, 
 		if (aMaxHeight != pgui->mMaxExtentDown)
 			pgui->mMaxExtentDown = aMaxHeight;
 		if (pgui->mStyle & WS_HSCROLL || pgui->mStyle & WS_VSCROLL)
-			UpdateScrollbars(pgui, aMaxWidth + pgui->mMarginX, aMaxHeight + pgui->mMarginY, false);
+		{
+			GetClientRect(pgui->mHwnd, &rect);
+			UpdateScrollbars(pgui, rect.right, rect.bottom, false);
+		}
 		goto return_the_result;
 	}
 
