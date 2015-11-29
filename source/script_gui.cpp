@@ -4110,6 +4110,9 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 		if (aGui)
 		{
 			control.hwnd = aGui->mHwnd;
+			// assign identifier of the gui control
+			// the first control seems to be always 3 so add it to mControlCount
+			SetWindowLong(control.hwnd, GWL_ID, mControlCount + 3);
 			MoveWindow(control.hwnd, opt.x - (mHScroll && mHScroll->nPos ? mHScroll->nPos : 0), opt.y - (mVScroll && mVScroll->nPos ? mVScroll->nPos : 0), opt.width, opt.height, true);
 		}
 		break;
@@ -7036,10 +7039,11 @@ ResultType GuiType::Show(LPTSTR aOptions, LPTSTR aText)
 			else
 			{
 				GetClientRect(mHwnd, &rect);
-				if (width == COORD_UNSPECIFIED) // Keep the current client width, as documented.
-					width = rect.right - rect.left;
-				if (height == COORD_UNSPECIFIED) // Keep the current client height, as documented.
-					height = rect.bottom - rect.top;
+
+				if (width == COORD_UNSPECIFIED) // Keep the current client width, as documented, including Scrollbar.
+					width = rect.right - rect.left + (((mStyle & WS_VSCROLL) && (int)mVScroll->nPage <= mVScroll->nMax) ? GetSystemMetrics(SM_CYVSCROLL) : 0);
+				if (height == COORD_UNSPECIFIED) // Keep the current client height, as documented, including Scrollbar.
+					height = rect.bottom - rect.top + (((mStyle & WS_HSCROLL) && (int)mHScroll->nPage <= mHScroll->nMax) ? GetSystemMetrics(SM_CYHSCROLL) : 0);
 			}
 		}
 
