@@ -7092,7 +7092,7 @@ ResultType GuiType::Show(LPTSTR aOptions, LPTSTR aText)
 		// If the window has a border or caption this also changes top & left *slightly* from zero.
 		RECT rect = {0, 0, width, height}; // left,top,right,bottom
 		LONG style = GetWindowLong(mHwnd, GWL_STYLE);
-		AdjustWindowRectEx(&rect, style, GetMenu(mHwnd) ? TRUE : FALSE
+		AdjustWindowRectEx(&rect, style, !GetParent(mHwnd) && GetMenu(mHwnd) ? TRUE : FALSE
 			, GetWindowLong(mHwnd, GWL_EXSTYLE));
 		width = rect.right - rect.left;  // rect.left might be slightly less than zero.
 		height = rect.bottom - rect.top; // rect.top might be slightly less than zero. A status bar is properly handled since it's inside the window's client area.
