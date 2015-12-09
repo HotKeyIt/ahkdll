@@ -123,6 +123,7 @@
     <ClCompile>
       <CompileAs>CompileAsC</CompileAs>
       <PreprocessorDefinitions>HAVE_CONFIG_H;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|x64'">true</MultiProcessorCompilation>
     </ClCompile>
     <Lib>
       <OutputFile>$(OutDir)lib_pcre.lib</OutputFile>
