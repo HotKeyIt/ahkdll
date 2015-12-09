@@ -1116,7 +1116,7 @@ STDAPI DllGetClassObject(const CLSID& clsid,
 		return CLASS_E_CLASSNOTAVAILABLE ;
 	}
 	TCHAR buf[MAX_PATH];
-#ifdef DEBUG
+#ifdef _DEBUG
 	if (0)  // for debugging com 
 #else
 	if (GetModuleFileName(g_hInstance, buf, MAX_PATH))
