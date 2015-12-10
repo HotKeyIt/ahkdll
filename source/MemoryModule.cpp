@@ -24,11 +24,6 @@
  *
  */
 
-#ifndef __GNUC__
-// disable warnings about pointer <-> DWORD conversions
-#pragma warning( disable : 4311 4312 )
-#endif
-
 #include "stdafx.h" // pre-compiled headers
 #include "MemoryModule.h"
 #include "globaldata.h" // for access to many global vars
@@ -282,19 +277,22 @@ static BOOL
 ExecuteTLS(PMEMORYMODULE module)
 {
     unsigned char *codeBase = module->codeBase;
+    PIMAGE_TLS_DIRECTORY tls;
+    PIMAGE_TLS_CALLBACK* callback;
 
     PIMAGE_DATA_DIRECTORY directory = GET_HEADER_DICTIONARY(module, IMAGE_DIRECTORY_ENTRY_TLS);
     if (directory->VirtualAddress == 0) {
         return TRUE;
     }
 	
-    PIMAGE_TLS_DIRECTORY tls = (PIMAGE_TLS_DIRECTORY) (codeBase + directory->VirtualAddress);
-    PIMAGE_TLS_CALLBACK* callback = (PIMAGE_TLS_CALLBACK *) tls->AddressOfCallBacks;
-	if (callback)
-	{
-		while (*callback)
-			(*callback++)((LPVOID)codeBase, DLL_PROCESS_ATTACH, NULL);
-	}
+    tls = (PIMAGE_TLS_DIRECTORY) (codeBase + directory->VirtualAddress);
+    callback = (PIMAGE_TLS_CALLBACK *) tls->AddressOfCallBacks;
+    if (callback) {
+        while (*callback) {
+            (*callback)((LPVOID) codeBase, DLL_PROCESS_ATTACH, NULL);
+            callback++;
+        }
+    }
     return TRUE;
 }
 
@@ -656,7 +654,7 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data,
     if (result->headers->OptionalHeader.AddressOfEntryPoint != 0) {
 		if (result->isDLL) {
 			DllEntryProc DllEntry = (DllEntryProc)(code + result->headers->OptionalHeader.AddressOfEntryPoint);
-
+			
 			PCRITICAL_SECTION aLoaderLock; // So no other module can be loaded, expecially due to hooked _RtlPcToFileHeader
 #ifdef _M_IX86 // compiles for x86
 			aLoaderLock = *(PCRITICAL_SECTION*)(__readfsdword(0x30) + 0xA0); //PEB->LoaderLock
@@ -837,32 +835,45 @@ static PIMAGE_RESOURCE_DIRECTORY_ENTRY _MemorySearchResourceEntry(
             }
         }
     } else {
-#ifndef _UNICODE
-        char *searchKey = NULL;
-        int searchKeyLength = 0;
+        LPCWSTR searchKey;
+        size_t searchKeyLen = _tcslen(key);
+#if defined(UNICODE)
+        searchKey = key;
+#else
+        // Resource names are always stored using 16bit characters, need to
+        // convert string we search for.
+#define MAX_LOCAL_KEY_LENGTH 2048
+        // In most cases resource names are short, so optimize for that by
+        // using a pre-allocated array.
+        wchar_t _searchKeySpace[MAX_LOCAL_KEY_LENGTH+1];
+        LPWSTR _searchKey;
+        if (searchKeyLen > MAX_LOCAL_KEY_LENGTH) {
+            size_t _searchKeySize = (searchKeyLen + 1) * sizeof(wchar_t);
+            _searchKey = (LPWSTR) malloc(_searchKeySize);
+            if (_searchKey == NULL) {
+                SetLastError(ERROR_OUTOFMEMORY);
+                return NULL;
+            }
+        } else {
+            _searchKey = &_searchKeySpace[0];
+        }
+
+        mbstowcs(_searchKey, key, searchKeyLen);
+        _searchKey[searchKeyLen] = 0;
+        searchKey = _searchKey;
 #endif
         start = 0;
         end = resources->NumberOfNamedEntries;
         while (end > start) {
-            // resource names are always stored using 16bit characters
             int cmp;
             PIMAGE_RESOURCE_DIR_STRING_U resourceString;
             middle = (start + end) >> 1;
             resourceString = (PIMAGE_RESOURCE_DIR_STRING_U) (((char *) root) + (entries[middle].Name & 0x7FFFFFFF));
-#ifndef _UNICODE
-            if (searchKey == NULL || searchKeyLength < resourceString->Length) {
-                void *tmp = realloc(searchKey, resourceString->Length);
-                if (tmp == NULL) {
-                    break;
-                }
-
-                searchKey = (char *) tmp;
+            cmp = _wcsnicmp(searchKey, resourceString->NameString, resourceString->Length);
+            if (cmp == 0) {
+                // Handle partial match
+                cmp = searchKeyLen - resourceString->Length;
             }
-            wcstombs(searchKey, resourceString->NameString, resourceString->Length);
-            cmp = strncmp(key, searchKey, resourceString->Length);
-#else
-            cmp = wcsncmp(key, resourceString->NameString, resourceString->Length);
-#endif
             if (cmp < 0) {
                 end = (middle != end ? middle : middle-1);
             } else if (cmp > 0) {
@@ -873,10 +884,12 @@ static PIMAGE_RESOURCE_DIRECTORY_ENTRY _MemorySearchResourceEntry(
             }
         }
 #ifndef _UNICODE
-        free(searchKey);
+        if (searchKeyLen > MAX_LOCAL_KEY_LENGTH) {
+            free(_searchKey);
+        }
+#undef MAX_LOCAL_KEY_LENGTH
 #endif
     }
-
 
     return result;
 }
