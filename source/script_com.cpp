@@ -881,7 +881,7 @@ HRESULT TokenToVarType(ExprTokenType &aToken, VARTYPE aVarType, void *apValue)
 #undef U
 
 	VARIANT src;
-	TokenToVariant(aToken, src, TRUE);
+	TokenToVariant(aToken, src, FALSE);
 	// Above may have set var.vt to VT_BSTR (a newly allocated string or one passed via ComObject),
 	// VT_DISPATCH or VT_UNKNOWN (in which case it called AddRef()).  The value is either freed by
 	// VariantChangeType() or moved into *apValue, so we don't free it except on failure.
