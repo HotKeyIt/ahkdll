@@ -21,6 +21,7 @@ GNU General Public License for more details.
 #include "window.h" // For MsgBox() & SetForegroundLockTimeout()
 #include "TextIO.h"
 
+#include "windows.h"  // N11
 #include "exports.h"  // N11
 #include <process.h>  // N11
 
@@ -43,7 +44,7 @@ GNU General Public License for more details.
 
 
 static LPTSTR aDefaultDllScript = _T("#Persistent\n#NoTrayIcon");
-static LPTSTR scriptstring;
+static LPTSTR scriptstring = NULL;
 // Naveen v1. HANDLE hThread
 // Todo: move this to struct nameHinstance
 static 	HANDLE hThread;
@@ -99,9 +100,9 @@ switch(fwdReason)
 		 }
 		 g_script.~Script();
 		 if (scriptstring)
-			 free(scriptstring);
+			free(scriptstring);
 		 if (Line::sMaxSourceFiles)
-			 free(Line::sSourceFile);
+			free(Line::sSourceFile);
 #ifdef _DEBUG
 		 free(g_Debugger.mStack.mBottom);
 #endif
@@ -478,7 +479,8 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	g_ExceptionHandler = AddVectoredExceptionHandler(NULL,DisableHooksOnException);
 	*/
 	// set exception filter to disable hook before exception occures to avoid system/mouse freeze
-	g_ExceptionHandler = AddVectoredExceptionHandler(NULL,DisableHooksOnException);
+	// specify 1 so dll handler runs before exe handler
+	g_ExceptionHandler = AddVectoredExceptionHandler(1,DisableHooksOnException);
 #ifndef MINIDLL
 
 	// Activate the hotkeys, hotstrings, and any hooks that are required prior to executing the
@@ -561,14 +563,14 @@ void WaitIsReadyToExecute()
 	 int lpExitCode = 0;
 	 while (hThread && !g_script.mIsReadyToExecute && (lpExitCode == 0 || lpExitCode == 259))
 	 {
-		 Sleep(10);
-		 GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
+		Sleep(10);
+		GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
 	 }
 	 if (hThread && !g_script.mIsReadyToExecute)
 	 {
-		 CloseHandle(hThread);
-		 hThread = NULL;
-		 SetLastError(lpExitCode);
+		CloseHandle(hThread);
+		hThread = NULL;
+		SetLastError(lpExitCode);
 	 }
 }
 
@@ -981,13 +983,13 @@ HRESULT CoCOMServer::LoadTypeInfo(ITypeInfo ** pptinfo, const CLSID &libid, cons
 	  else // MemoryModule, search troug g_ListOfMemoryModules and use temp file to extract and load TypeLib file
 	  {
 		  HMEMORYMODULE hmodule = (HMEMORYMODULE)(g_hMemoryModule);
-		  HMEMORYRSRC res = MemoryFindResource(hmodule,_T("TYPELIB"),MAKEINTRESOURCE(1));
+		  HMEMORYRSRC res = MemoryFindResource(hmodule, MAKEINTRESOURCE(1), _T("TYPELIB"));
 		  if (!res)
 			return TYPE_E_INVALIDSTATE;
 		  DWORD resSize = MemorySizeOfResource(hmodule,res);
 		  // Path to temp directory + our temporary file name
 		  DWORD tempPathLength = GetTempPathW(MAX_PATH, buf);
-		  wcscpy(buf + tempPathLength,L"AutoHotkey.MemoryModule.temp.tlb");
+		  wcscpy(buf + tempPathLength,L"67B97AD3FF574034A8C45CA0386AEE1A.tlb");
 		  // Write manifest to temportary file
 		  // Using FILE_ATTRIBUTE_TEMPORARY will avoid writing it to disk
 		  // It will be deleted after LoadTypeLib has been called.
