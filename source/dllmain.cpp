@@ -117,7 +117,7 @@ switch(fwdReason)
 		 {
 			 free(g_hWinAPI);
 			 if (g_hWinAPIlowercase)
-				 free(g_hWinAPIlowercase);
+				free(g_hWinAPIlowercase);
 		 }
 		 for(int i = 0;i < FUNC_LIB_COUNT;i++)
 		 {
@@ -917,13 +917,13 @@ HRESULT CoCOMServer::LoadTypeInfo(ITypeInfo ** pptinfo, const CLSID &libid, cons
 	  else // MemoryModule, search troug g_ListOfMemoryModules and use temp file to extract and load TypeLib file
 	  {
 		  HMEMORYMODULE hmodule = (HMEMORYMODULE)(g_hMemoryModule);
-		  HMEMORYRSRC res = MemoryFindResource(hmodule,_T("TYPELIB"),MAKEINTRESOURCE(1));
+		  HMEMORYRSRC res = MemoryFindResource(hmodule, MAKEINTRESOURCE(1), _T("TYPELIB"));
 		  if (!res)
 			return TYPE_E_INVALIDSTATE;
 		  DWORD resSize = MemorySizeOfResource(hmodule,res);
 		  // Path to temp directory + our temporary file name
 		  DWORD tempPathLength = GetTempPathW(MAX_PATH, buf);
-		  wcscpy(buf + tempPathLength,L"AutoHotkey.MemoryModule.temp.tlb");
+		  wcscpy(buf + tempPathLength,L"104298D07DAE41B08F867A3EC39903AC.tlb");
 		  // Write manifest to temportary file
 		  // Using FILE_ATTRIBUTE_TEMPORARY will avoid writing it to disk
 		  // It will be deleted after LoadTypeLib has been called.
