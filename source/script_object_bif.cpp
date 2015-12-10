@@ -635,7 +635,7 @@ BIF_DECL(Op_ObjNew)
 		// Either it wasn't handled (i.e. neither this class nor any of its super-classes define __New()),
 		// or there was no explicit "return", so just return the new object.
 		aResultToken.symbol = SYM_OBJECT;
-			aResultToken.object = this_token.object;
+		aResultToken.object = this_token.object;
 	}
 	aParam[0] = class_token;
 }
