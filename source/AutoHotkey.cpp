@@ -121,7 +121,7 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 			if (aSizeDeCompressed)
 			{
 				g_hMSVCR = (HCUSTOMMODULE)MemoryLoadLibrary(aDataBuf);
-				VirtualFree(aDataBuf, aSizeDeCompressed, MEM_RELEASE);
+				VirtualFree(aDataBuf, 0, MEM_RELEASE);
 
 				HMODULE aMsvcrt = GetModuleHandle(_T("msvcrt.dll"));
 				HANDLE hHeapMalloc = NULL;

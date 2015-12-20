@@ -116,7 +116,7 @@ size_t Clipboard::Get(LPTSTR aBuf)
 		}
 		else // clipboard_contains_files
 		{
-			if (file_count = DragQueryFile((HDROP)mClipMemNowLocked, 0xFFFFFFFF, _T(""), 0))
+			if (file_count = DragQueryFile((HDROP)mClipMemNowLocked, 0xFFFFFFFF, NULL, 0))
 			{
 				mLength = (file_count - 1) * 2;  // Init; -1 if don't want a newline after last file.
 				for (i = 0; i < file_count; ++i)
@@ -150,7 +150,7 @@ size_t Clipboard::Get(LPTSTR aBuf)
 	}
 	else // clipboard_contains_files
 	{
-		if (file_count = DragQueryFile((HDROP)mClipMemNowLocked, 0xFFFFFFFF, _T(""), 0))
+		if (file_count = DragQueryFile((HDROP)mClipMemNowLocked, 0xFFFFFFFF, NULL, 0))
 			for (i = 0; i < file_count; ++i)
 			{
 				// Caller has already ensured aBuf is large enough to hold them all:

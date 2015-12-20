@@ -493,6 +493,10 @@ void Script::Destroy()
 	g_nFileDialogs = 0;
 	g_nFolderDialogs = 0;
 	g_NoTrayIcon = false;
+	if (g_IconLarge)
+		DestroyIcon(g_IconLarge);
+	if (g_IconSmall)
+		DestroyIcon(g_IconSmall);
 #endif
 	
 	g_MainTimerExists = false;
@@ -3419,7 +3423,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 				memmove(buff,aDataBuf,aSizeDeCompressed);
 				memset((char*)buff + aSizeDeCompressed, 0, 2);
 				SecureZeroMemory(aDataBuf, aSizeDeCompressed);
-				VirtualFree(aDataBuf,aSizeDeCompressed,MEM_RELEASE);
+				VirtualFree(aDataBuf,0,MEM_RELEASE);
 				textbuf.mLength = aSizeDeCompressed;
 				textbuf.mBuffer = buff;
 			}
@@ -3458,7 +3462,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			memmove(buff,aDataBuf,aSizeDeCompressed);
 			memset((char*)buff + aSizeDeCompressed, 0, 2);
 			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
-			VirtualFree(aDataBuf,aSizeDeCompressed,MEM_RELEASE);
+			VirtualFree(aDataBuf,0,MEM_RELEASE);
 			textbuf.mLength = aSizeDeCompressed;
 			textbuf.mBuffer = buff;
 		}
@@ -9911,7 +9915,7 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 		// copy definitions and free memory allocated by DecompressBuffer
 		memmove(g_hWinAPI, aDataBuf, szWinApi);
 		memmove(g_hWinAPIlowercase, aDataBuf, szWinApi);
-		VirtualFree(aDataBuf, szWinApi, MEM_RELEASE);
+		VirtualFree(aDataBuf, 0, MEM_RELEASE);
 		// terminate string
 		*(g_hWinAPI + szWinApi) = '\0';
 		*(g_hWinAPIlowercase + szWinApi) = '\0';
@@ -10181,7 +10185,7 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 			memmove(buff,aDataBuf,aSizeDeCompressed);
 			memset((char*)buff + aSizeDeCompressed, 0, 2);
 			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
-			VirtualFree(aDataBuf,aSizeDeCompressed,MEM_RELEASE);
+			VirtualFree(aDataBuf,0,MEM_RELEASE);
 			textbuf.mLength = aSizeDeCompressed;
 			textbuf.mBuffer = buff;
 		}
@@ -10265,7 +10269,7 @@ winapi:
 		LPSTR aDllName = strstr(found, "\t") + 1;
 		size_t aNameLen = strstr(aDllName, "\\") - aDllName + 1;
 #ifdef UNICODE
-		MultiByteToWideChar(CP_UTF8, 0, aDllName, (int)aNameLen, aDest, (int)aNameLen * sizeof(TCHAR));
+		MultiByteToWideChar(CP_UTF8, 0, aDllName, (int)aNameLen, aDest, (int)aNameLen);
 #else
 		_tcsncpy(aDest, aDllName, aNameLen);
 #endif
@@ -10327,7 +10331,7 @@ winapi:
 				_tcscpy(aDest, _T("STR"));
 				aDest = aDest + 3;
 			}
-			else if (*found == 't' || *found == 't')
+			else if (*found == 't' || *found == 'T')
 			{
 				_tcscpy(aDest, _T("PTR"));
 				aDest = aDest + 3;

@@ -10316,7 +10316,7 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 			if (aSizeDeCompressed)
 			{
 				success = WriteFile(hfile, aDataBuf, aSizeDeCompressed, &num_bytes_written, NULL);
-				VirtualFree(aDataBuf,aSizeDeCompressed,MEM_RELEASE);
+				VirtualFree(aDataBuf,0,MEM_RELEASE);
 			}
 		}
 		if (!aSizeDeCompressed)
@@ -10364,7 +10364,7 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 				if (aSizeDeCompressed)
 				{
 					success = WriteFile(hfile, aDataBuf, aSizeDeCompressed, &num_bytes_written, NULL);
-					VirtualFree(aDataBuf,aSizeDeCompressed,MEM_RELEASE);
+					VirtualFree(aDataBuf,0,MEM_RELEASE);
 				}
 			}
 			if (!aSizeDeCompressed)
@@ -17902,7 +17902,7 @@ BIF_DECL(BIF_ResourceLoadLibrary)
 		{
 			module = MemoryLoadLibrary( aDataBuf );
 			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
-			VirtualFree(aDataBuf,aSizeDeCompressed,MEM_RELEASE);
+			VirtualFree(aDataBuf,0,MEM_RELEASE);
 		}
 	}
 	if (!aSizeDeCompressed)
@@ -18072,7 +18072,7 @@ BIF_DECL(BIF_UnZipRawMemory)
 
 			}
 			SecureZeroMemory(aDataBuf, (size_t)aResultToken.value_int64);
-			VirtualFree(aDataBuf,(size_t)aResultToken.value_int64,MEM_RELEASE);
+			VirtualFree(aDataBuf,0,MEM_RELEASE);
 			return;
 		}
 	}

@@ -993,7 +993,7 @@ HRESULT CoCOMServer::LoadTypeInfo(ITypeInfo ** pptinfo, const CLSID &libid, cons
 		  // Write manifest to temportary file
 		  // Using FILE_ATTRIBUTE_TEMPORARY will avoid writing it to disk
 		  // It will be deleted after LoadTypeLib has been called.
-		  HANDLE hFile = CreateFileW(buf,GENERIC_WRITE,NULL,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_TEMPORARY,NULL);
+		  HANDLE hFile = CreateFileW(buf,GENERIC_WRITE,NULL,NULL,OPEN_EXISTING,NULL,NULL);
 		  if (hFile == INVALID_HANDLE_VALUE)
 		  {
 #if DEBUG_OUTPUT
@@ -1013,9 +1013,6 @@ HRESULT CoCOMServer::LoadTypeInfo(ITypeInfo ** pptinfo, const CLSID &libid, cons
 		  }
                 
 		  hr = LoadTypeLibEx(buf,REGKIND_NONE,&ptlib);
-		  // Open file and automatically delete on CloseHandle (FILE_FLAG_DELETE_ON_CLOSE)
-		  hFile = CreateFileW(buf,GENERIC_WRITE,FILE_SHARE_DELETE,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_TEMPORARY|FILE_FLAG_DELETE_ON_CLOSE,NULL);
-		  CloseHandle(hFile);
 	  }
 	  if (FAILED(hr))
 		  return hr;

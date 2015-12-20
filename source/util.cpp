@@ -3176,26 +3176,26 @@ DWORD DecompressBuffer(void *aBuffer, LPVOID &aDataBuf,SIZE_T sz, WCHAR *pwd[]) 
 				CryptStringToBinaryA(aDataEncryptedString, NULL, CRYPT_STRING_BASE64, NULL, &aSizeEncryptedString, NULL, NULL);
 				if (aSizeEncryptedString == 0)
 				{   // incorrect password
-					VirtualFree(aDataBuf,aSizeDeCompressed,MEM_RELEASE);
-					VirtualFree(aDataEncryptedString, aSizeEncrypted, MEM_RELEASE);
+					VirtualFree(aDataBuf,0,MEM_RELEASE);
+					VirtualFree(aDataEncryptedString, 0, MEM_RELEASE);
 					return 0;
 				}
 				aDataEncrypted = (BYTE*)VirtualAlloc(NULL, aSizeDataEncrypted = aSizeEncryptedString, MEM_COMMIT, PAGE_READWRITE);
 				CryptStringToBinaryA(aDataEncryptedString, NULL, CRYPT_STRING_BASE64, aDataEncrypted, &aSizeEncryptedString, NULL, NULL);
-				VirtualFree(aDataEncryptedString,aSizeEncrypted,MEM_RELEASE);
+				VirtualFree(aDataEncryptedString,0,MEM_RELEASE);
 				CryptDestroyKey(hKey);
 				CryptReleaseContext(hProv,0);
 				if (aSizeDeCompressed == aSizeCompressed)
 				{
 					memcpy(aDataBuf, aDataEncrypted, aSizeDeCompressed);
-					VirtualFree(aDataEncrypted, aSizeDataEncrypted, MEM_RELEASE);
+					VirtualFree(aDataEncrypted, 0, MEM_RELEASE);
 					return aSizeDeCompressed;
 				}
 				if (openArchive(&huz,(LPBYTE)aDataEncrypted, aSizeCompressed, ZIP_MEMORY|ZIP_RAW, 0))
 				{   // failed to open archive
 					closeArchive((TUNZIP *)huz);
-					VirtualFree(aDataBuf,aSizeDeCompressed,MEM_RELEASE);
-					VirtualFree(aDataEncrypted, aSizeDataEncrypted, MEM_RELEASE);
+					VirtualFree(aDataBuf,0,MEM_RELEASE);
+					VirtualFree(aDataEncrypted, 0, MEM_RELEASE);
 					return 0;
 				}
 			}
@@ -3207,23 +3207,23 @@ DWORD DecompressBuffer(void *aBuffer, LPVOID &aDataBuf,SIZE_T sz, WCHAR *pwd[]) 
 			else if (openArchive(&huz,(LPBYTE)aBuffer + hdrsz, aSizeCompressed, ZIP_MEMORY|ZIP_RAW, 0))
 			{   // failed to open archive
 				closeArchive((TUNZIP *)huz);
-				VirtualFree(aDataBuf,aSizeDeCompressed,MEM_RELEASE);
+				VirtualFree(aDataBuf,0,MEM_RELEASE);
 				return 0;
 			}
 			ze.CompressedSize = aSizeDeCompressed;
 			ze.UncompressedSize = aSizeDeCompressed;
 			if ((result = unzipEntry((TUNZIP *)huz, aDataBuf, &ze, ZIP_MEMORY)))
-				VirtualFree(aDataBuf,aSizeDeCompressed,MEM_RELEASE);
+				VirtualFree(aDataBuf,0,MEM_RELEASE);
 			else
 			{
 				closeArchive((TUNZIP *)huz);
 				if (aDataEncrypted)
-					VirtualFree(aDataEncrypted, aSizeDataEncrypted, MEM_RELEASE);
+					VirtualFree(aDataEncrypted, 0, MEM_RELEASE);
 				return aSizeDeCompressed;
 			}
 			closeArchive((TUNZIP *)huz);
 			if (aDataEncrypted)
-				VirtualFree(aDataEncrypted, aSizeDataEncrypted, MEM_RELEASE);
+				VirtualFree(aDataEncrypted, 0, MEM_RELEASE);
 		}
 	}
 	return 0;
