@@ -651,6 +651,10 @@ Script::~Script() // Destructor.
 	g_nFileDialogs = 0;
 	g_nFolderDialogs = 0;
 	g_NoTrayIcon = false;
+	if (g_IconLarge)
+		DestroyIcon(g_IconLarge);
+	if (g_IconSmall)
+		DestroyIcon(g_IconSmall);
 #endif
 
 	g_MainTimerExists = false;
@@ -3546,7 +3550,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 				memmove(buff, aDataBuf, aSizeDeCompressed);
 				memset((char*)buff + aSizeDeCompressed, 0, 2);
 				SecureZeroMemory(aDataBuf, aSizeDeCompressed);
-				VirtualFree(aDataBuf, aSizeDeCompressed, MEM_RELEASE);
+				VirtualFree(aDataBuf, 0, MEM_RELEASE);
 				textbuf.mLength = aSizeDeCompressed;
 				textbuf.mBuffer = buff;
 			}
@@ -3586,7 +3590,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			memmove(buff, aDataBuf, aSizeDeCompressed);
 			memset((char*)buff + aSizeDeCompressed, 0, 2);
 			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
-			VirtualFree(aDataBuf, aSizeDeCompressed, MEM_RELEASE);
+			VirtualFree(aDataBuf, 0, MEM_RELEASE);
 			textbuf.mLength = aSizeDeCompressed;
 			textbuf.mBuffer = buff;
 		}
@@ -9003,7 +9007,7 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 		// copy definitions
 		memmove(g_hWinAPI, aDataBuf, szWinApi);
 		memmove(g_hWinAPIlowercase, aDataBuf, szWinApi);
-		VirtualFree(aDataBuf,szWinApi,MEM_RELEASE);
+		VirtualFree(aDataBuf,0,MEM_RELEASE);
 		// terminate string
 		*(g_hWinAPI + szWinApi) = '\0';
 		*(g_hWinAPIlowercase + szWinApi) = '\0';
@@ -9082,10 +9086,10 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 				if (SUCCEEDED(ppf->Load((const WCHAR*)wsz, 0)))
 #endif
 				{
-					TCHAR buf[MAX_PATH + 1];
-					psl->GetPath(buf, MAX_PATH, NULL, SLGP_UNCPRIORITY);
-					_tcscpy(this_lib->path, buf);
-					_tcscpy(this_lib->path + _tcslen(buf), _T("\\\0"));
+					TCHAR buff[MAX_PATH + 1];
+					psl->GetPath(buff, MAX_PATH, NULL, SLGP_UNCPRIORITY);
+					_tcscpy(this_lib->path, buff);
+					_tcscpy(this_lib->path + _tcslen(buff), _T("\\\0"));
 				}
 				ppf->Release();
 			}
@@ -9267,7 +9271,7 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 			memmove(buff, aDataBuf, aSizeDeCompressed);
 			memset((char*)buff + aSizeDeCompressed, 0, 2);
 			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
-			VirtualFree(aDataBuf, aSizeDeCompressed, MEM_RELEASE);
+			VirtualFree(aDataBuf, 0, MEM_RELEASE);
 			textbuf.mLength = aSizeDeCompressed;
 			textbuf.mBuffer = buff;
 		}
@@ -9349,7 +9353,7 @@ winapi:
 		LPTSTR aDest = (LPTSTR)&parameter[aFuncNameLength + 12];
 		LPSTR aDllName = strstr(found, "\t") + 1;
 		size_t aNameLen = strstr(aDllName, "\\") - aDllName + 1;
-		MultiByteToWideChar(CP_UTF8, 0, aDllName, (int)aNameLen, aDest, (int)aNameLen * sizeof(TCHAR));
+		MultiByteToWideChar(CP_UTF8, 0, aDllName, (int)aNameLen, aDest, (int)aNameLen);
 		aDest = aDest + aNameLen;
 		MultiByteToWideChar(CP_UTF8, 0, found + 1, (int)aFuncNameLength, aDest, (int)aFuncNameLength * sizeof(TCHAR) + sizeof(TCHAR));
 		// Override _ in the end of definition (ahk function like SendMessage, Sleep, Send, SendInput ...
@@ -9382,7 +9386,7 @@ winapi:
 				_tcscpy(aDest, _T("STR"));
 				aDest = aDest + 3;
 			}
-			else if (*found == 't' || *found == 't')
+			else if (*found == 't' || *found == 'T')
 			{
 				_tcscpy(aDest, _T("PTR"));
 				aDest = aDest + 3;
@@ -10213,8 +10217,8 @@ Var *Script::AddVar(LPTSTR aVarName, size_t aVarNameLength, int aInsertPos, int 
 			alloc_count = 100000;
 			// This is also the threshold beyond which the lazy list is used to accelerate performance.
 			// Create the permanent lazy list:
-			Var **&lazy_var = aIsStatic ? g->CurrentFunc->mStaticLazyVar : (aIsLocal ? g->CurrentFunc->mLazyVar : mLazyVar);
-			if (!(lazy_var = (Var **)malloc(MAX_LAZY_VARS * sizeof(Var *))))
+			Var **&alazy_var = aIsStatic ? g->CurrentFunc->mStaticLazyVar : (aIsLocal ? g->CurrentFunc->mLazyVar : mLazyVar);
+			if (!(alazy_var = (Var **)malloc(MAX_LAZY_VARS * sizeof(Var *))))
 			{
 				ScriptError(ERR_OUTOFMEM);
 				return NULL;
