@@ -3546,12 +3546,12 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength, g_default_pwd);
 			if (aSizeDeCompressed)
 			{
-				LPVOID buff = _alloca(aSizeDeCompressed + sizeof(char) * 2); // will be freed when function returns
+				LPVOID buff = _alloca(aSizeDeCompressed + 2); // +2 for terminator, will be freed when function returns
 				memmove(buff, aDataBuf, aSizeDeCompressed);
 				memset((char*)buff + aSizeDeCompressed, 0, 2);
 				SecureZeroMemory(aDataBuf, aSizeDeCompressed);
 				VirtualFree(aDataBuf, 0, MEM_RELEASE);
-				textbuf.mLength = aSizeDeCompressed;
+				textbuf.mLength = aSizeDeCompressed + 2;
 				textbuf.mBuffer = buff;
 			}
 		}
@@ -3586,12 +3586,12 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength, g_default_pwd);
 		if (aSizeDeCompressed)
 		{
-			LPVOID buff = _alloca(aSizeDeCompressed + sizeof(char) * 2); // will be freed when function returns
+			LPVOID buff = _alloca(aSizeDeCompressed + 2); // +2 for terminator, will be freed when function returns
 			memmove(buff, aDataBuf, aSizeDeCompressed);
 			memset((char*)buff + aSizeDeCompressed, 0, 2);
 			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
 			VirtualFree(aDataBuf, 0, MEM_RELEASE);
-			textbuf.mLength = aSizeDeCompressed;
+			textbuf.mLength = aSizeDeCompressed + 2;
 			textbuf.mBuffer = buff;
 		}
 	}
@@ -9267,18 +9267,18 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength);
 		if (aSizeDeCompressed)
 		{
-			LPVOID buff = _alloca(aSizeDeCompressed + sizeof(char) * 2); // will be freed when function returns
+			LPVOID buff = _alloca(aSizeDeCompressed + 2); // + 2 for terminator, memory will be freed when function returns
 			memmove(buff, aDataBuf, aSizeDeCompressed);
 			memset((char*)buff + aSizeDeCompressed, 0, 2);
 			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
 			VirtualFree(aDataBuf, 0, MEM_RELEASE);
-			textbuf.mLength = aSizeDeCompressed;
+			textbuf.mLength = aSizeDeCompressed + 2;
 			textbuf.mBuffer = buff;
 		}
 	}
 	aFileWasFound = true;
 	// NOTE: Ahk2Exe strips off the UTF-8 BOM.
-	LPTSTR resource_script = (LPTSTR)_alloca(textbuf.mLength);
+	LPTSTR resource_script = (LPTSTR)_alloca(textbuf.mLength * sizeof(TCHAR));
 	tmem.Open(textbuf, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR, CP_UTF8);
 	tmem.Read(resource_script, textbuf.mLength);
 
@@ -9318,7 +9318,7 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	{
 		if (aSizeDeCompressed)
 			SecureZeroMemory(textbuf.mBuffer, aSizeDeCompressed);
-		SecureZeroMemory(resource_script, textbuf.mLength);
+		SecureZeroMemory(resource_script, textbuf.mLength * sizeof(TCHAR));
 		g->CurrentFunc = current_func; // Restore.
 		aErrorWasShown = true; // Above has just displayed its error (e.g. syntax error in a line, failed to open the include file, etc).  So override the default set earlier.
 		return NULL;
@@ -9326,7 +9326,7 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 
 	if (aSizeDeCompressed)
 		SecureZeroMemory(textbuf.mBuffer, aSizeDeCompressed);
-	SecureZeroMemory(resource_script, textbuf.mLength);
+	SecureZeroMemory(resource_script, textbuf.mLength * sizeof(TCHAR));
 	g->CurrentFunc = current_func; // Restore.
 
 	// Restore setting as per the comment above.
