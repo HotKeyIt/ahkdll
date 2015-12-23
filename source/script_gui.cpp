@@ -1284,7 +1284,7 @@ ResultType Line::GuiControl(LPTSTR aCommand, LPTSTR aControlID, LPTSTR aParam3, 
 			GetWindowRect(aControl->hwnd, &rect);
 			POINT pt = { rect.left, rect.top };
 			ScreenToClient(pgui->mHwnd, &pt);
-			int aWidth = pt.x + pgui->mHScroll->nPos + (rect.right - rect.left), aHeight = pt.y + pgui->mVScroll->nPos + (rect.bottom - rect.top);
+			int aWidth = pt.x + (pgui->mHScroll ? pgui->mHScroll->nPos : 0) + (rect.right - rect.left), aHeight = pt.y + (pgui->mVScroll ? pgui->mVScroll->nPos : 0) + (rect.bottom - rect.top);
 			if (aWidth > aMaxWidth)
 				aMaxWidth = aWidth;
 			if (aHeight > aMaxHeight)
