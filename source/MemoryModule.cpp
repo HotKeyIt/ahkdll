@@ -872,7 +872,7 @@ static PIMAGE_RESOURCE_DIRECTORY_ENTRY _MemorySearchResourceEntry(
             cmp = _wcsnicmp(searchKey, resourceString->NameString, resourceString->Length);
             if (cmp == 0) {
                 // Handle partial match
-                cmp = searchKeyLen - resourceString->Length;
+                cmp = (int)searchKeyLen - resourceString->Length;
             }
             if (cmp < 0) {
                 end = (middle != end ? middle : middle-1);
