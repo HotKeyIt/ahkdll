@@ -1292,7 +1292,8 @@ ResultType Object::_GetAddress(ResultToken &aResultToken, ExprTokenType *aParam[
 
 ResultType Object::_NewEnum(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
-	_o_return_or_throw(new Enumerator(this));
+	IObject *newenum = new Enumerator(this);
+	_o_return_or_throw(newenum);
 }
 
 ResultType Object::_HasKey(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount)
