@@ -2139,7 +2139,9 @@ public:
 		// which seems to add flexibility without giving up anything.  This fix is necessary at least
 		// for a command that references A_Index in two of its args such as the following:
 		// ToolTip, O, ((cos(A_Index) * 500) + 500), A_Index
-		++mInstances;
+		
+		// HotKeyIt mInstances needs to be increased / decreased outside of this Call
+		//++mInstances;
 
 		ResultType result;
 		DEBUGGER_STACK_PUSH(this)
@@ -2164,7 +2166,9 @@ public:
 #endif
 		DEBUGGER_STACK_POP()
 
-		--mInstances;
+		// HotKeyIt mInstances needs to be increased / decreased outside of this Call
+		//--mInstances;
+
 		// Restore the original value in case this function is called from inside another function.
 		// Due to the synchronous nature of recursion and recursion-collapse, this should keep
 		// g->CurrentFunc accurate, even amidst the asynchronous saving and restoring of "g" itself:

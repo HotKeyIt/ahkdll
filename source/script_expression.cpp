@@ -1806,6 +1806,7 @@ bool Func::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCo
 		}
 		if (crisec)
 			LeaveCriticalSection(crisec);
+		++mInstances;
 		result = Call(&aResultToken); // Call the UDF.
 		
 		// Setting this unconditionally isn't likely to perform any worse than checking for EXIT/FAIL,
@@ -1834,6 +1835,7 @@ free_and_return:
 		//       of itself exist on the call stack.  In other words, it would be inconsistent to make
 		//       all variables blank for case #1 above but not do it here in case #2.
 		Var::FreeAndRestoreFunctionVars(*this, backup, backup_count);
+		--mInstances;
 	}
 	return !aResultToken.Exited(); // i.e. aResultToken.SetExitResult() or aResultToken.Error() was not called.
 }

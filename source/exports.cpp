@@ -997,11 +997,11 @@ void callFuncDllVariant(FuncAndToken *aFuncAndToken)
 	// Need to check if backup is needed in case script explicitly called the function rather than using
 	// it solely as a callback.  UPDATE: And now that max_instances is supported, also need it for that.
 	// See ExpandExpression() for detailed comments about the following section.
-	//VarBkp *var_backup = NULL;   // If needed, it will hold an array of VarBkp objects.
-	//int var_backup_count; // The number of items in the above array.
-	//if (func.mInstances > 0) // Backup is needed.
-		//if (!Var::BackupFunctionVars(func, var_backup, var_backup_count)) // Out of memory.
-			//return;
+	VarBkp *var_backup = NULL;   // If needed, it will hold an array of VarBkp objects.
+	int var_backup_count; // The number of items in the above array.
+	if (func.mInstances > 0) // Backup is needed.
+		if (!Var::BackupFunctionVars(func, var_backup, var_backup_count)) // Out of memory.
+			return;
 			// Since we're in the middle of processing messages, and since out-of-memory is so rare,
 			// it seems justifiable not to have any error reporting and instead just avoid launching
 			// the new thread.
@@ -1016,8 +1016,14 @@ void callFuncDllVariant(FuncAndToken *aFuncAndToken)
 	DEBUGGER_STACK_PUSH(&func)
 	// ExprTokenType aResultToken;
 	// ExprTokenType &aResultToken = aResultToken_to_return ;
+	++func.mInstances;
 	func.Call(&aResultToken); // Call the UDF.
+
 	TokenToVariant(aResultToken, aFuncAndToken->variant_to_return_dll, FALSE);
+
+	aResultToken.Free();
+	Var::FreeAndRestoreFunctionVars(func, var_backup, var_backup_count); // ABOVE must be done BEFORE this because return_value might be the contents of one of the function's local variables (which are about to be free'd).
+	--func.mInstances;
 
 	DEBUGGER_STACK_POP()
 	
