@@ -16814,8 +16814,8 @@ UINT_PTR CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address) // Used
 	
 	result_token.Free();
 	Var::FreeAndRestoreFunctionVars(func, var_backup, var_backup_count); // ABOVE must be done BEFORE this because return_value might be the contents of one of the function's local variables (which are about to be free'd).
-	--func.mInstances;
-	
+	--func.mInstances; // See comments in Func::Call.
+
 	if (cb.create_new_thread)
 	{
 		DEBUGGER_STACK_POP()
@@ -18582,14 +18582,14 @@ BOOL VarToBOOL(Var &aVar)
 	}
 	switch (aVar.IsNumeric())
 	{
-		case PURE_INTEGER:
-			return aVar.ToInt64() != 0;
-		case PURE_FLOAT:
-			return aVar.ToDouble() != 0.0;
-		default:
-			// Even a string containing all whitespace would be considered non-numeric since it's a non-blank string
-			// that isn't equal to 0.
-			return TRUE;
+	case PURE_INTEGER:
+		return aVar.ToInt64() != 0;
+	case PURE_FLOAT:
+		return aVar.ToDouble() != 0.0;
+	default:
+		// Even a string containing all whitespace would be considered non-numeric since it's a non-blank string
+		// that isn't equal to 0.
+		return TRUE;
 	}
 }
 

@@ -426,7 +426,6 @@ struct ArgStruct
 #define _f_return_retval		return  // Return the value set by _f_set_retval().
 #define _f_return_empty			_f_return_p(_T(""), 0)
 #define _o_return_empty			return OK  // Default return value for Invoke is "".
-#define _o_return_or_throw(p)	if (p) _o_return(p); else _o_throw(ERR_OUTOFMEM);
 #define _f_retval_buf			(aResultToken.buf)
 #define _f_retval_buf_size		MAX_NUMBER_SIZE
 #define _f_number_buf			_f_retval_buf  // An alias to show intended usage, and in case the buffer size is changed.
@@ -2139,9 +2138,6 @@ public:
 		// which seems to add flexibility without giving up anything.  This fix is necessary at least
 		// for a command that references A_Index in two of its args such as the following:
 		// ToolTip, O, ((cos(A_Index) * 500) + 500), A_Index
-		
-		// HotKeyIt mInstances needs to be increased / decreased outside of this Call
-		//++mInstances;
 
 		ResultType result;
 		DEBUGGER_STACK_PUSH(this)
@@ -2165,9 +2161,6 @@ public:
 		}
 #endif
 		DEBUGGER_STACK_POP()
-
-		// HotKeyIt mInstances needs to be increased / decreased outside of this Call
-		//--mInstances;
 
 		// Restore the original value in case this function is called from inside another function.
 		// Due to the synchronous nature of recursion and recursion-collapse, this should keep
