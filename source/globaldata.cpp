@@ -42,6 +42,11 @@ bool g_Loading = false;
 HINSTANCE g_hInstance = NULL; // Set by WinMain().
 HMODULE g_hMemoryModule = NULL; // Set by DllMain() used for COM 
 DWORD g_MainThreadID = GetCurrentThreadId();
+#ifdef _USRDLL
+HANDLE g_hThread = 0;
+#else
+HANDLE g_hThread = OpenThread(THREAD_ALL_ACCESS, FALSE, g_MainThreadID);
+#endif
 DWORD g_HookThreadID; // Not initialized by design because 0 itself might be a valid thread ID.
 ATOM g_ClassRegistered = 0;
 ATOM g_ClassSplashRegistered = 0;
