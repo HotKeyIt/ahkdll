@@ -44,9 +44,7 @@ GNU General Public License for more details.
 
 static LPTSTR aDefaultDllScript = _T("#NoTrayIcon\n#Persistent");
 static LPTSTR scriptstring = NULL;
-// Naveen v1. HANDLE hThread
-// Todo: move this to struct nameHinstance
-static 	HANDLE hThread;
+
 static struct nameHinstance
      {
        HINSTANCE hInstanceP;
@@ -89,12 +87,12 @@ switch(fwdReason)
 	 }
  case DLL_PROCESS_DETACH:
 	 {
-		 if (hThread)
+		 if (g_hThread)
 		 {
 			 int lpExitCode = 0;
-			 GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
+			 GetExitCodeThread(g_hThread,(LPDWORD)&lpExitCode);
 			 if ( lpExitCode == 259 )
-				CloseHandle( hThread );
+				CloseHandle(g_hThread);
 		 }
 		 g_script.~Script();
 		 if (scriptstring)
@@ -462,23 +460,23 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 EXPORT int ahkTerminate(int timeout = 0)
 {
 	DWORD lpExitCode = 0;
-	if (hThread == 0)
+	if (g_hThread == 0)
 		return 0;
 	g_AllowInterruption = FALSE;
-	GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
+	GetExitCodeThread(g_hThread,(LPDWORD)&lpExitCode);
 	DWORD tickstart = GetTickCount();
 	DWORD timetowait = timeout < 0 ? timeout * -1 : timeout;
-	for (;hThread && g_script.mIsReadyToExecute && (lpExitCode == 0 || lpExitCode == 259) && (timeout == 0 || timetowait > (GetTickCount()-tickstart));)
+	for (; g_hThread && g_script.mIsReadyToExecute && (lpExitCode == 0 || lpExitCode == 259) && (timeout == 0 || timetowait > (GetTickCount()-tickstart));)
 	{
 		SendMessageTimeout(g_hWnd, AHK_EXIT_BY_SINGLEINSTANCE, OK, 0,timeout < 0 ? SMTO_NORMAL : SMTO_NOTIMEOUTIFNOTHUNG,SLEEP_INTERVAL * 3,0);
 		Sleep(100); // give it a bit time to exit thread
 	}
-	if (g_script.mIsReadyToExecute || hThread)
+	if (g_script.mIsReadyToExecute || g_hThread)
 	{
 		g_script.~Script();
-		TerminateThread(hThread, (DWORD)EARLY_EXIT);
-		CloseHandle(hThread);
-		hThread = NULL;
+		TerminateThread(g_hThread, (DWORD)EARLY_EXIT);
+		CloseHandle(g_hThread);
+		g_hThread = NULL;
 	}
 	g_AllowInterruption = TRUE;
 	return 0;
@@ -490,7 +488,7 @@ unsigned __stdcall runScript( void* pArguments )
 	OleInitialize(NULL);
 	int result = OldWinMain(nameHinstanceP.hInstanceP, 0, nameHinstanceP.name, 0);
 	g_script.~Script();
-	hThread = NULL;
+	g_hThread = NULL;
 	_endthreadex( result );  
     return 0;
 }
@@ -499,15 +497,15 @@ unsigned __stdcall runScript( void* pArguments )
 void WaitIsReadyToExecute()
 {
 	 int lpExitCode = 0;
-	 while (hThread && !g_script.mIsReadyToExecute && (lpExitCode == 0 || lpExitCode == 259))
+	 while (g_hThread && !g_script.mIsReadyToExecute && (lpExitCode == 0 || lpExitCode == 259))
 	 {
 		Sleep(10);
-		GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
+		GetExitCodeThread(g_hThread,(LPDWORD)&lpExitCode);
 	 }
-	 if (hThread && !g_script.mIsReadyToExecute)
+	 if (g_hThread && !g_script.mIsReadyToExecute)
 	 {
-		CloseHandle(hThread);
-		hThread = NULL;
+		CloseHandle(g_hThread);
+		g_hThread = NULL;
 		SetLastError(lpExitCode);
 	 }
 }
@@ -515,19 +513,19 @@ void WaitIsReadyToExecute()
 
 unsigned runThread()
 {
-	if (hThread)
+	if (g_hThread)
 	{	// Small check to be done to make sure we do not start a new thread before the old is closed
 		Sleep(50); // make sure script is not in starting state
 		int lpExitCode = 0;
-		GetExitCodeThread(hThread,(LPDWORD)&lpExitCode);
+		GetExitCodeThread(g_hThread,(LPDWORD)&lpExitCode);
 		if ((lpExitCode == 0 || lpExitCode == 259) && g_script.mIsReadyToExecute)
 			Sleep(50); // make sure the script is not about to be terminated, because this might lead to problems
-		if (hThread && g_script.mIsReadyToExecute)
+		if (g_hThread && g_script.mIsReadyToExecute)
  			ahkTerminate(0);
 	}
-	hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, NULL, 0, 0 );
+	g_hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, NULL, 0, 0 );
 	WaitIsReadyToExecute();
-	return (unsigned int)hThread;
+	return (unsigned int)g_hThread;
 }
 
 int setscriptstrings(LPTSTR fileName, LPTSTR argv)
@@ -563,8 +561,8 @@ EXPORT UINT_PTR ahktextdll(LPTSTR fileName, LPTSTR argv)
 void reloadDll()
 {
 	g_script.~Script();
-	HANDLE oldThread = hThread;
-	hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, 0 );
+	HANDLE oldThread = g_hThread;
+	g_hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, 0 );
 	g_AllowInterruption = TRUE;
 	CloseHandle(oldThread);
 	_endthreadex( (DWORD)EARLY_RETURN );
@@ -574,8 +572,8 @@ ResultType terminateDll(int aExitCode)
 {
 	g_script.~Script();
 	g_AllowInterruption = TRUE;
-	CloseHandle(hThread);
-	hThread = NULL;
+	CloseHandle(g_hThread);
+	g_hThread = NULL;
 	_endthreadex( (DWORD)aExitCode );
 	return (ResultType)aExitCode;
 }
@@ -583,7 +581,7 @@ ResultType terminateDll(int aExitCode)
 EXPORT int ahkReload(int timeout = 0)
 {
 	ahkTerminate(timeout);
-	hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, 0 );
+	g_hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, 0 );
 	return 0;
 }
 

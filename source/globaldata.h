@@ -36,6 +36,7 @@ extern bool g_Loading;
 #endif
 extern HINSTANCE g_hInstance;
 extern HMODULE g_hMemoryModule;
+extern HANDLE g_hThread;
 EXPORT extern DWORD g_MainThreadID;
 extern DWORD g_HookThreadID;
 extern ATOM g_ClassRegistered;

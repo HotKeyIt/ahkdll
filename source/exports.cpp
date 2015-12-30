@@ -107,7 +107,7 @@ EXPORT int ahkPause(LPTSTR aChangeTo) //Change pause state of a running script
 #ifndef MINIDLL
 		Hotkey::ResetRunAgainAfterFinished();
 #endif
-		if ((int)aChangeTo == 0)
+		if ((int)aChangeTo == 0 || ((int)aChangeTo != 1 && (*aChangeTo == '0' || (*(aChangeTo + 1) == 'F' || *(aChangeTo + 1) == 'f'))))
 		{
 			g->IsPaused = false;
 			--g_nPausedThreads; // For this purpose the idle thread is counted as a paused thread.
@@ -152,28 +152,45 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 {
 	if (!g_script.mIsReadyToExecute)
 		return 0; // AutoHotkey needs to be running at this point //
+	DWORD thisThreadID = GetCurrentThreadId();
+	if (g_MainThreadID != thisThreadID)
+		SuspendThread(g_hThread);
 	Var *ahkvar = g_script.FindOrAddVar(name);
 	if (getVar != NULL)
 	{
 		if (ahkvar->mType == VAR_BUILTIN || ahkvar->mType == VAR_VIRTUAL)
+		{
+			if (g_MainThreadID != thisThreadID)
+				ResumeThread(g_hThread);
 			return _T("");
+		}
 		LPTSTR new_mem = (LPTSTR)realloc((LPTSTR )result_to_return_dll,MAX_INTEGER_LENGTH);
 		if (!new_mem)
 		{
 			g_script.ScriptError(ERR_OUTOFMEM, name);
+			if (g_MainThreadID != thisThreadID)
+				ResumeThread(g_hThread);
 			return _T("");
 		}
 		result_to_return_dll = new_mem;
+		if (g_MainThreadID != thisThreadID)
+			ResumeThread(g_hThread);
 		return ITOA64((UINT_PTR)ahkvar,result_to_return_dll);
 	}
 	if (ahkvar->mType != VAR_BUILTIN && !ahkvar->HasContents() )
+	{
+		if (g_MainThreadID != thisThreadID)
+			ResumeThread(g_hThread);
 		return _T("");
+	}
 	if (*ahkvar->mCharContents == '\0')
 	{
 		LPTSTR new_mem = (LPTSTR )realloc((LPTSTR )result_to_return_dll,(ahkvar->mType == VAR_BUILTIN ? ahkvar->mBIV(0,name) : ahkvar->mByteCapacity ? ahkvar->mByteCapacity : ahkvar->mByteLength) + MAX_NUMBER_LENGTH + sizeof(TCHAR));
 		if (!new_mem)
 		{
 			g_script.ScriptError(ERR_OUTOFMEM, name);
+			if (g_MainThreadID != thisThreadID)
+				ResumeThread(g_hThread);
 			return _T("");
 		}
 		result_to_return_dll = new_mem;
@@ -201,6 +218,8 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 		if (!new_mem)
 		{
 			g_script.ScriptError(ERR_OUTOFMEM, name);
+			if (g_MainThreadID != thisThreadID)
+				ResumeThread(g_hThread);
 			return _T("");
 		}
 		result_to_return_dll = new_mem;
@@ -213,6 +232,8 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 		else if (ahkvar->mType == VAR_VIRTUAL)
 			ahkvar->mVV->Get(result_to_return_dll, name); //Hotkeyit 
 	}
+	if (g_MainThreadID != thisThreadID)
+		ResumeThread(g_hThread);
 	return result_to_return_dll;
 }	
 
@@ -220,12 +241,22 @@ EXPORT int ahkassign(LPTSTR name, LPTSTR value) // ahkwine 0.1
 {
 	if (!g_script.mIsReadyToExecute)
 		return 0; // AutoHotkey needs to be running at this point //
+	DWORD thisThreadID = GetCurrentThreadId();
+	if (g_MainThreadID != thisThreadID)
+		SuspendThread(g_hThread);
 	Var *var;
-	if (   !(var = g_script.FindOrAddVar(name, _tcslen(name)))   )
+	if (!(var = g_script.FindOrAddVar(name, _tcslen(name))))
+	{
+		if (g_MainThreadID != thisThreadID)
+			ResumeThread(g_hThread);
 		return -1;  // Realistically should never happen.
+	}
 	var->Assign(value); 
+	if (g_MainThreadID != thisThreadID)
+		ResumeThread(g_hThread);
 	return 0; // success
 }
+
 //HotKeyIt ahkExecuteLine()
 EXPORT UINT_PTR ahkExecuteLine(UINT_PTR line,unsigned int aMode,unsigned int wait)
 {
@@ -242,12 +273,12 @@ EXPORT UINT_PTR ahkExecuteLine(UINT_PTR line,unsigned int aMode,unsigned int wai
 			PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)templine, (LPARAM)aMode);
 	}
 	if (templine = templine->mNextLine)
-	if (templine->mActionType == ACT_BLOCK_BEGIN && templine->mAttribute)
-	{
-		for(;!(templine->mActionType == ACT_BLOCK_END && templine->mAttribute);)
+		if (templine->mActionType == ACT_BLOCK_BEGIN && templine->mAttribute)
+		{
+			for(;!(templine->mActionType == ACT_BLOCK_END && templine->mAttribute);)
+				templine = templine->mNextLine;
 			templine = templine->mNextLine;
-		templine = templine->mNextLine;
-	} 
+		}
 	return (UINT_PTR) templine;
 }
 
