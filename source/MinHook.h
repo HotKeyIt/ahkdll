@@ -378,8 +378,8 @@ typedef struct _MEMORY_BLOCK
 // Size of each memory block. (= page size of VirtualAlloc)
 #define MEMORY_BLOCK_SIZE 0x1000
 
-// Max range for seeking a memory block. (= 32MB)
-#define MAX_MEMORY_RANGE 0x02000000
+// Max range for seeking a memory block. (= 1024MB)
+#define MAX_MEMORY_RANGE 0x40000000
 
 // Memory protection flags to check the executable address.
 #define PAGE_EXECUTE_FLAGS \
@@ -397,7 +397,7 @@ typedef struct _HOOK_ENTRY
 	BOOL   isEnabled : 1;     // Enabled.
 	BOOL   queueEnable : 1;     // Queued for enabling/disabling when != isEnabled.
 
-	UINT   nIP : 3;             // Count of the instruction boundaries.
+	UINT   nIP : 4;             // Count of the instruction boundaries.
 	UINT8  oldIPs[8];           // Instruction boundaries of the target function.
 	UINT8  newIPs[8];           // Instruction boundaries of the trampoline function.
 } HOOK_ENTRY, *PHOOK_ENTRY;

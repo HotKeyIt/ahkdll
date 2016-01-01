@@ -33,7 +33,6 @@
 
 #include "MinHook.h"
 
-
 //-------------------------------------------------------------------------
 // Global Variables:
 //-------------------------------------------------------------------------
@@ -62,23 +61,91 @@ VOID UninitializeBuffer(VOID)
 }
 
 //-------------------------------------------------------------------------
+
+#ifdef _M_X64
+static LPVOID FindPrevFreeRegion(LPVOID pAddress, LPVOID pMinAddr, DWORD dwAllocationGranularity)
+{
+	ULONG_PTR tryAddr = (ULONG_PTR)pAddress;
+
+	// Round down to the next allocation granularity.
+	tryAddr -= tryAddr % dwAllocationGranularity;
+
+	// Start from the previous allocation granularity multiply.
+	tryAddr -= dwAllocationGranularity;
+
+	while (tryAddr >= (ULONG_PTR)pMinAddr)
+	{
+		MEMORY_BASIC_INFORMATION mbi;
+		if (VirtualQuery((LPVOID)tryAddr, &mbi, sizeof(MEMORY_BASIC_INFORMATION)) == 0)
+			break;
+
+		if (mbi.State == MEM_FREE)
+			return (LPVOID)tryAddr;
+
+		if ((ULONG_PTR)mbi.AllocationBase < dwAllocationGranularity)
+			break;
+
+		tryAddr = (ULONG_PTR)mbi.AllocationBase - dwAllocationGranularity;
+	}
+
+	return NULL;
+}
+#endif
+
+//-------------------------------------------------------------------------
+#ifdef _M_X64
+static LPVOID FindNextFreeRegion(LPVOID pAddress, LPVOID pMaxAddr, DWORD dwAllocationGranularity)
+{
+	ULONG_PTR tryAddr = (ULONG_PTR)pAddress;
+
+	// Round down to the next allocation granularity.
+	tryAddr -= tryAddr % dwAllocationGranularity;
+
+	// Start from the next allocation granularity multiply.
+	tryAddr += dwAllocationGranularity;
+
+	while (tryAddr <= (ULONG_PTR)pMaxAddr)
+	{
+		MEMORY_BASIC_INFORMATION mbi;
+		if (VirtualQuery((LPVOID)tryAddr, &mbi, sizeof(MEMORY_BASIC_INFORMATION)) == 0)
+			break;
+
+		if (mbi.State == MEM_FREE)
+			return (LPVOID)tryAddr;
+
+		tryAddr = (ULONG_PTR)mbi.BaseAddress + mbi.RegionSize;
+
+		// Round up to the next allocation granularity.
+		tryAddr += dwAllocationGranularity - 1;
+		tryAddr -= tryAddr % dwAllocationGranularity;
+	}
+
+	return NULL;
+}
+#endif
+
+//-------------------------------------------------------------------------
 static PMEMORY_BLOCK GetMemoryBlock(LPVOID pOrigin)
 {
+	PMEMORY_BLOCK pBlock;
+#ifdef _M_X64
 	ULONG_PTR minAddr;
 	ULONG_PTR maxAddr;
-	PMEMORY_BLOCK pBlock;
 
 	SYSTEM_INFO si;
 	GetSystemInfo(&si);
 	minAddr = (ULONG_PTR)si.lpMinimumApplicationAddress;
 	maxAddr = (ULONG_PTR)si.lpMaximumApplicationAddress;
 
-#ifdef _M_X64
-	// pOrigin ± 16MB
-	if ((ULONG_PTR)pOrigin > MAX_MEMORY_RANGE)
-		minAddr = max(minAddr, (ULONG_PTR)pOrigin - MAX_MEMORY_RANGE);
+	// pOrigin ± 512MB
+	if ((ULONG_PTR)pOrigin > MAX_MEMORY_RANGE && minAddr < (ULONG_PTR)pOrigin - MAX_MEMORY_RANGE)
+		minAddr = (ULONG_PTR)pOrigin - MAX_MEMORY_RANGE;
 
-	maxAddr = min(maxAddr, (ULONG_PTR)pOrigin + MAX_MEMORY_RANGE);
+	if (maxAddr >(ULONG_PTR)pOrigin + MAX_MEMORY_RANGE)
+		maxAddr = (ULONG_PTR)pOrigin + MAX_MEMORY_RANGE;
+
+	// Make room for MEMORY_BLOCK_SIZE bytes.
+	maxAddr -= MEMORY_BLOCK_SIZE - 1;
 #endif
 
 	// Look the registered blocks for a reachable one.
@@ -94,28 +161,44 @@ static PMEMORY_BLOCK GetMemoryBlock(LPVOID pOrigin)
 			return pBlock;
 	}
 
-	// Alloc a new block if not found.
+#ifdef _M_X64
+	// Alloc a new block above if not found.
 	{
-		ULONG_PTR pStart = ((ULONG_PTR)pOrigin / MEMORY_BLOCK_SIZE) * MEMORY_BLOCK_SIZE;
-		ULONG_PTR pAlloc;
-		for (pAlloc = pStart - MEMORY_BLOCK_SIZE; pAlloc >= minAddr; pAlloc -= MEMORY_BLOCK_SIZE)
+		LPVOID pAlloc = pOrigin;
+		while ((ULONG_PTR)pAlloc >= minAddr)
 		{
+			pAlloc = FindPrevFreeRegion(pAlloc, (LPVOID)minAddr, si.dwAllocationGranularity);
+			if (pAlloc == NULL)
+				break;
+
 			pBlock = (PMEMORY_BLOCK)VirtualAlloc(
-				(LPVOID)pAlloc, MEMORY_BLOCK_SIZE, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+				pAlloc, MEMORY_BLOCK_SIZE, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
 			if (pBlock != NULL)
 				break;
 		}
-		if (pBlock == NULL)
+	}
+
+	// Alloc a new block below if not found.
+	if (pBlock == NULL)
+	{
+		LPVOID pAlloc = pOrigin;
+		while ((ULONG_PTR)pAlloc <= maxAddr)
 		{
-			for (pAlloc = pStart + MEMORY_BLOCK_SIZE; pAlloc < maxAddr; pAlloc += MEMORY_BLOCK_SIZE)
-			{
-				pBlock = (PMEMORY_BLOCK)VirtualAlloc(
-					(LPVOID)pAlloc, MEMORY_BLOCK_SIZE, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-				if (pBlock != NULL)
-					break;
-			}
+			pAlloc = FindNextFreeRegion(pAlloc, (LPVOID)maxAddr, si.dwAllocationGranularity);
+			if (pAlloc == NULL)
+				break;
+
+			pBlock = (PMEMORY_BLOCK)VirtualAlloc(
+				pAlloc, MEMORY_BLOCK_SIZE, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+			if (pBlock != NULL)
+				break;
 		}
 	}
+#else
+	// In x86 mode, a memory block can be placed anywhere.
+	pBlock = (PMEMORY_BLOCK)VirtualAlloc(
+		NULL, MEMORY_BLOCK_SIZE, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+#endif
 
 	if (pBlock != NULL)
 	{
@@ -136,6 +219,7 @@ static PMEMORY_BLOCK GetMemoryBlock(LPVOID pOrigin)
 
 	return pBlock;
 }
+
 
 //-------------------------------------------------------------------------
 LPVOID AllocateBuffer(LPVOID pOrigin)
@@ -287,6 +371,10 @@ PHOOK_ENTRY MinHookEnable(LPVOID pTarget, LPVOID pDetour, HANDLE *hHeap)
 	}
 
 	VirtualProtect(pPatchTarget, patchSize, oldProtect, &oldProtect);
+
+	// Just-in-case measure.
+	FlushInstructionCache(GetCurrentProcess(), pPatchTarget, patchSize);
+
 	return pHook;
 }
 
@@ -492,7 +580,7 @@ BOOL CreateTrampolineFunction(PTRAMPOLINE ct)
 			{
 				UINT8 cond = ((hs.opcode != 0x0F ? hs.opcode : hs.opcode2) & 0x0F);
 #ifdef _M_X64
-				// Invert the condition.
+				// Invert the condition in x64 mode to simplify the conditional jump logic.
 				jcc.opcode = 0x71 ^ cond;
 				jcc.address = dest;
 #else
@@ -515,9 +603,11 @@ BOOL CreateTrampolineFunction(PTRAMPOLINE ct)
 		if (pOldInst < jmpDest && copySize != hs.len)
 			return FALSE;
 
+		// Trampoline function is too large.
 		if ((newPos + copySize) > TRAMPOLINE_MAX_SIZE)
 			return FALSE;
 
+		// Trampoline function has too many instructions.
 		if (ct->nIP >= ARRAYSIZE(ct->oldIPs))
 			return FALSE;
 
