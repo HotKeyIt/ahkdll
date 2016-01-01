@@ -669,9 +669,12 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data,
 			PHOOK_ENTRY pHook = MinHookEnable(_RtlPcToFileHeader, &HookRtlPcToFileHeader, &hHeap);
 			// notify library about attaching to process
 			BOOL successfull = (*DllEntry)((HINSTANCE)code, DLL_PROCESS_ATTACH, result);
-			MinHookDisable(pHook);
+			// Disable hook if it was enabled before
+			if (pHook)
+				MinHookDisable(pHook);
+			if (hHeap)
+				HeapDestroy(hHeap);
 			LeaveCriticalSection(aLoaderLock);
-			HeapDestroy(hHeap);
 			
 			if (!successfull) {
 				SetLastError(ERROR_DLL_INIT_FAILED);
