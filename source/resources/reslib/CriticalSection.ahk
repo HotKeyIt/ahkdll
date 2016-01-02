@@ -2,7 +2,7 @@
 static 
 if !base
 count:=0,base:={base:{__Delete:"criticalsection"}}
-if cs==base.base{
+if (cs==base.base){
 Loop count
 DllCall("DeleteCriticalSection",PTR,&CriticalSection%count%),count:=0
 Return
