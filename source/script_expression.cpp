@@ -1747,7 +1747,12 @@ bool Func::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCo
 					// No value has been supplied for this REQUIRED parameter.
 					if (crisec)
 						LeaveCriticalSection(crisec);
-					aResultToken.Error(ERR_PARAM_REQUIRED, this_formal_param.var->mName); // Abort thread.
+					TCHAR *extraInfo = (TCHAR*)alloca((_tcslen(mName) + _tcslen(this_formal_param.var->mName) + 14) * sizeof(TCHAR));
+					TCHAR * dest = _tcscpy(extraInfo, this_formal_param.var->mName);
+					_tcscpy(extraInfo + _tcslen(this_formal_param.var->mName), _T(" in function "));
+					_tcscpy(extraInfo + _tcslen(this_formal_param.var->mName) + 13, mName);
+					*(extraInfo + _tcslen(mName) + _tcslen(this_formal_param.var->mName) + 13) = '\0';
+					aResultToken.Error(ERR_PARAM_REQUIRED, extraInfo); // Abort thread.
 					goto free_and_return;
 				}
 				continue;
