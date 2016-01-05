@@ -3341,7 +3341,7 @@ LONG WINAPI DisableHooksOnException(PEXCEPTION_POINTERS pExceptionPtrs)
 			AddRemoveHooks(0); // Disable all hooks to avoid system/mouse freeze
 #endif
 			TCHAR aException[sizeof(TCHAR) * 3 * MAX_PATH];
-			if (*g->ExcptDeref->marker)
+			if (g->ExcptDeref && *g->ExcptDeref->marker)
 				_stprintf(aException, _T("Error: %s EXCEPTION_ACCESS_VIOLATION\n\nMouse and Keyboard hooks have been disabled.\n\n  -  Press yes to exit thread and continue execution.\n  -  Press no to continue thread (debug).\n  -  Press cancel to exit application.\n\nException was caused in thread id: %d\nLine: %d\nSpecifically: %.260s\nLineFile: %.260s"), pExceptionPtrs->ExceptionRecord->ExceptionFlags == EXCEPTION_NONCONTINUABLE ? _T("NONCONTINUABLE") : _T("CONTINUABLE"), GetCurrentThreadId(), g_script.mCurrLine->mLineNumber, g->ExcptDeref->marker, Line::sSourceFile[g_script.mCurrLine->mFileIndex]);
 			else
 				_stprintf(aException, _T("Error: %s EXCEPTION_ACCESS_VIOLATION\n\nMouse and Keyboard hooks have been disabled.\n\n  -  Press yes to exit thread and continue execution.\n  -  Press no to continue thread (debug).\n  -  Press cancel to exit application.\n\nException was caused in thread id: %d\nLine: %d\nLineFile: %.260s"), pExceptionPtrs->ExceptionRecord->ExceptionFlags == EXCEPTION_NONCONTINUABLE ? _T("NONCONTINUABLE") : _T("CONTINUABLE"), GetCurrentThreadId(), g_script.mCurrLine->mLineNumber, Line::sSourceFile[g_script.mCurrLine->mFileIndex]);
