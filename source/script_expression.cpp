@@ -1814,7 +1814,6 @@ bool Func::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCo
 		}
 		if (crisec)
 			LeaveCriticalSection(crisec);
-		++mInstances;
 		result = Call(&aResultToken); // Call the UDF.
 		
 		// Setting this unconditionally isn't likely to perform any worse than checking for EXIT/FAIL,
