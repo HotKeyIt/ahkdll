@@ -7162,11 +7162,11 @@ ResultType GuiType::Show(LPTSTR aOptions, LPTSTR aText)
 			if (IsZoomed(mHwnd)) // Call IsZoomed() again in case above changed the state. No need to check IsIconic() because above already set default show-mode to SW_RESTORE for such windows.
 				ShowWindow(mHwnd, SW_RESTORE); // But restore isn't done for something like "Gui, Show, Center" because it's too obscure and might reduce flexibility (debatable).
 
-			HWND aParent = GetParent(mHwnd);
-			if (aParent && !mGuiShowHasNeverBeenDone)
+			GuiType *aParentGui = GuiType::FindGui(GetParent(mHwnd));
+			if (aParentGui && aParentGui->FindControl(mHwnd) && !mGuiShowHasNeverBeenDone)
 			{
 				POINT pt = { 0 };
-				ClientToScreen(aParent, &pt);
+				ClientToScreen(aParentGui->mHwnd, &pt);
 				MoveWindow(mHwnd, x == COORD_UNSPECIFIED ? old_rect.left - pt.x : x, y == COORD_UNSPECIFIED ? old_rect.top - pt.y : y
 					, width, height, is_visible);  // Do repaint if window is visible.
 			}
