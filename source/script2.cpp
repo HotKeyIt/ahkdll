@@ -4891,7 +4891,8 @@ ResultType Line::ImageSearch(int aLeft, int aTop, int aRight, int aBottom, LPTST
 	// So currently, only BMP and GIF seem to work reliably, though some of the other GDIPlus-supported
 	// formats might work too.
 	int image_type;
-	HBITMAP hbitmap_image = LoadPicture(aImageFile, width, height, image_type, icon_number, false);
+	bool no_delete_bitmap;
+	HBITMAP hbitmap_image = LoadPicture(aImageFile, width, height, image_type, icon_number, false, &no_delete_bitmap);
 	// The comment marked OBSOLETE below is no longer true because the elimination of the high-byte via
 	// 0x00FFFFFF seems to have fixed it.  But "true" is still not passed because that should increase
 	// consistency when GIF/BMP/ICO files are used by a script on both Win9x and other OSs (since the
@@ -4905,7 +4906,13 @@ ResultType Line::ImageSearch(int aLeft, int aTop, int aRight, int aBottom, LPTST
 	HDC hdc = GetDC(NULL);
 	if (!hdc)
 	{
-		DeleteObject(hbitmap_image);
+		if (!no_delete_bitmap)
+		{
+			if (image_type == IMAGE_ICON)
+				DestroyIcon((HICON)hbitmap_image);
+			else
+				DeleteObject(hbitmap_image);
+		}
 		goto error;
 	}
 
@@ -5132,7 +5139,8 @@ end:
 	// If found==false when execution reaches here, ErrorLevel is already set to the right value, so just
 	// clean up then return.
 	ReleaseDC(NULL, hdc);
-	DeleteObject(hbitmap_image);
+	if (!no_delete_bitmap)
+		DeleteObject(hbitmap_image);
 	if (sdc)
 	{
 		if (sdc_orig_select) // i.e. the original call to SelectObject() didn't fail.
@@ -5779,7 +5787,7 @@ bool HandleMenuItem(HWND aHwnd, WORD aMenuItemID, HWND aGuiHwnd)
 		return true;
 	case ID_TRAY_HELP:
 	case ID_HELP_USERMANUAL:
-		LaunchAutoHotkeyUtil(_T("AutoHotkey.chm"));
+		LaunchAutoHotkeyUtil(AHK_HELP_FILE);
 		return true;
 	case ID_TRAY_SUSPEND:
 	case ID_FILE_SUSPEND:
@@ -11311,35 +11319,44 @@ VarSizeType BIV_FormatFloat(LPTSTR aBuf, LPTSTR aVarName)
 	return (VarSizeType)_tcslen(aBuf); // Must return exact length when aBuf isn't NULL.
 }
 
-VarSizeType BIV_KeyDelay(LPTSTR aBuf, LPTSTR aVarName)
+VarSizeType BIV_xDelay(LPTSTR aBuf, LPTSTR aVarName)
 {
 	TCHAR buf[MAX_INTEGER_SIZE];
 	LPTSTR target_buf = aBuf ? aBuf : buf;
-	_itot(g->KeyDelay, target_buf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
-	return (VarSizeType)_tcslen(target_buf);
-}
-
-VarSizeType BIV_WinDelay(LPTSTR aBuf, LPTSTR aVarName)
-{
-	TCHAR buf[MAX_INTEGER_SIZE];
-	LPTSTR target_buf = aBuf ? aBuf : buf;
-	_itot(g->WinDelay, target_buf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
-	return (VarSizeType)_tcslen(target_buf);
-}
-
-VarSizeType BIV_ControlDelay(LPTSTR aBuf, LPTSTR aVarName)
-{
-	TCHAR buf[MAX_INTEGER_SIZE];
-	LPTSTR target_buf = aBuf ? aBuf : buf;
-	_itot(g->ControlDelay, target_buf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
-	return (VarSizeType)_tcslen(target_buf);
-}
-
-VarSizeType BIV_MouseDelay(LPTSTR aBuf, LPTSTR aVarName)
-{
-	TCHAR buf[MAX_INTEGER_SIZE];
-	LPTSTR target_buf = aBuf ? aBuf : buf;
-	_itot(g->MouseDelay, target_buf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
+	global_struct &g = *::g; // Reduces code size.
+	int result;
+	switch (ctoupper(aVarName[2])) // a_X...
+	{
+	case 'K':
+		if (ctolower(aVarName[6]) == 'e') // a_keydE...
+		{
+			if (aVarName[10]) // a_keydelayP...
+				result = g.KeyDelayPlay;
+			else
+				result = g.KeyDelay;
+		}
+		else // a_keydU...
+		{
+			if (aVarName[13]) // a_keydurationP...
+				result = g.PressDurationPlay;
+			else
+				result = g.PressDuration;
+		}
+		break;
+	case 'M':
+		if (aVarName[12]) // a_mousedelayP...
+			result = g.MouseDelayPlay;
+		else
+			result = g.MouseDelay;
+		break;
+	case 'W':
+		result = g.WinDelay;
+		break;
+	case 'C':
+		result = g.ControlDelay;
+		break;
+	}
+	_itot(result, target_buf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
 	return (VarSizeType)_tcslen(target_buf);
 }
 
@@ -11350,6 +11367,40 @@ VarSizeType BIV_DefaultMouseSpeed(LPTSTR aBuf, LPTSTR aVarName)
 	_itot(g->DefaultMouseSpeed, target_buf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
 	return (VarSizeType)_tcslen(target_buf);
 }
+
+VarSizeType BIV_CoordMode(LPTSTR aBuf, LPTSTR aVarName)
+{
+	static LPCTSTR sCoordModes[] = COORD_MODES;
+	LPCTSTR result = sCoordModes[(g->CoordMode >> Line::ConvertCoordModeCmd(aVarName + 11)) & COORD_MODE_MASK];
+	if (aBuf)
+		_tcscpy(aBuf, result);
+	return 6; // Currently all are 6 chars.
+}
+
+VarSizeType BIV_SendMode(LPTSTR aBuf, LPTSTR aVarName)
+{
+	static LPCTSTR sSendModes[] = SEND_MODES;
+	LPCTSTR result = sSendModes[g->SendMode];
+	if (aBuf)
+		_tcscpy(aBuf, result);
+	return (VarSizeType)_tcslen(result);
+}
+
+VarSizeType BIV_SendLevel(LPTSTR aBuf, LPTSTR aVarName)
+{
+	if (aBuf)
+		return (VarSizeType)_tcslen(_itot(g->SendLevel, aBuf, 10));  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
+	return 3; // Enough room for the maximum SendLevel (100).
+}
+
+VarSizeType BIV_StoreCapslockMode(LPTSTR aBuf, LPTSTR aVarName)
+{
+	return aBuf
+		? (VarSizeType)_tcslen(_tcscpy(aBuf, g->StoreCapslockMode ? _T("On") : _T("Off"))) // For backward compatibility (due to StringCaseSense), never change the case used here.
+		: 3; // Room for either On or Off (in the estimation phase).
+}
+
+
 
 VarSizeType BIV_IsPaused(LPTSTR aBuf, LPTSTR aVarName) // v1.0.48: Lexikos: Added BIV_IsPaused and BIV_IsCritical.
 {
@@ -11564,13 +11615,6 @@ VarSizeType BIV_IsMini(LPTSTR aBuf, LPTSTR aVarName)
 	return 1;
 }
 
-
-VarSizeType BIV_CoordMode(LPTSTR aBuf, LPTSTR aVarName)
-{
-	return aBuf
-		? (VarSizeType)_tcslen(ITOA64(((g->CoordMode >> Line::ConvertCoordModeCmd(aVarName + 11)) & COORD_MODE_MASK), aBuf))
-		: MAX_INTEGER_LENGTH;
-}
 
 VarSizeType BIV_PtrSize(LPTSTR aBuf, LPTSTR aVarName)
 {
@@ -12524,14 +12568,21 @@ VarSizeType BIV_ThisMenuItem(LPTSTR aBuf, LPTSTR aVarName)
 
 UINT Script::ThisMenuItemPos()
 {
-	// The menu item's position is discovered through this process -- rather than doing
-	// something higher performance such as storing the menu handle or pointer to menu/item
-	// object in g_script -- because those things tend to be volatile.  For example, a menu
-	// or menu item object might be destroyed between the time the user selects it and the
-	// time this variable is referenced in the script.  Thus, by definition, this variable
-	// contains the CURRENT position of the most recently selected menu item within its
-	// CURRENT menu.
 	UserMenu *menu = FindMenu(mThisMenuName);
+	// The menu item's address was stored so we can distinguish between multiple items
+	// which have the same text.  The volatility of the address is handled by clearing
+	// it in UserMenu::DeleteItem and UserMenu::DeleteAllItems.  An ID would also be
+	// volatile, since IDs can be re-used if the item is deleted.
+	if (mThisMenuItem)
+	{
+		UINT pos = 0;
+		for (UserMenuItem *mi = menu->mFirstMenuItem; mi; mi = mi->mNextMenuItem, ++pos)
+			if (mi == mThisMenuItem)
+				return pos;
+	}
+	// For backward-compatibility, fall back to the old method if the item/menu has been
+	// deleted.  So by definition, this variable contains the CURRENT position of the most
+	// recently selected menu item within its CURRENT menu:
 	return menu ? menu->GetItemPos(mThisMenuItemName) : UINT_MAX;
 }
 
@@ -12546,7 +12597,6 @@ VarSizeType BIV_ThisMenuItemPos(LPTSTR aBuf, LPTSTR aVarName)
 	*aBuf = '\0';
 	return 0;
 }
-
 
 VarSizeType BIV_ThisMenu(LPTSTR aBuf, LPTSTR aVarName)
 {
@@ -12726,6 +12776,56 @@ VarSizeType BIV_GuiEvent(LPTSTR aBuf, LPTSTR aVarName)
 	// Otherwise, this event is not GUI_EVENT_DROPFILES, so use standard modes of operation.
 	LPTSTR event_string = GuiType::ConvertEvent(g.GuiEvent);
 	return (VarSizeType)_tcslen(aBuf ? _tcscpy(aBuf, event_string) : event_string);
+}
+
+
+
+VarSizeType BIV_DefaultGui(LPTSTR aBuf, LPTSTR aVarName)
+// A_DefaultGui, A_DefaultListView, A_DefaultTreeView: Unlike BIV_Gui above, these
+// correspond to "Gui, x: Default", not necessarily the Gui which launched the thread.
+{
+	global_struct &g = *::g; // Reduces code size and may improve performance.
+	GuiType *gui = g.GuiDefaultWindowValid();
+	GuiControlType *control = NULL;
+	LPTSTR return_string = _T("");
+	HWND return_hwnd = NULL;
+	switch (ctoupper(aVarName[9]))
+	{
+	case 'G':
+		if (!gui)
+			gui = g.GuiDefaultWindow; // If non-NULL, it's a dummy struct containing just the Gui name.
+		if (!gui) // Either no default has been set, or the default was an anonymous Gui which has been destroyed.
+			return_string = _T("1");
+		else if (*gui->mName) // Not an anonymous GUI.
+			return_string = gui->mName;
+		else // implies gui->mHwnd != NULL
+			return_hwnd = gui->mHwnd;
+		break;
+	case 'L':
+		if (gui)
+			control = gui->mCurrentListView;
+		break;
+	case 'T':
+		if (gui)
+			control = gui->mCurrentTreeView;
+		break;
+	}
+	if (control)
+	{
+		if (control->output_var) // Return associated var name (more useful for debugging).
+			return_string = control->output_var->mName;
+		else // Return HWND.
+			return_hwnd = control->hwnd;
+	}
+	if (return_hwnd)
+	{
+		if (aBuf)
+			return (VarSizeType)_tcslen(HwndToString(return_hwnd, aBuf));
+		return MAX_INTEGER_LENGTH;
+	}
+	if (aBuf)
+		_tcscpy(aBuf, return_string);
+	return (VarSizeType)_tcslen(return_string);
 }
 
 #endif
@@ -18947,6 +19047,26 @@ BIF_DECL(BIF_RegisterCallback)
 #endif
 
 #ifndef MINIDLL
+
+BIF_DECL(BIF_MenuGet)
+{
+	if (ctoupper(aResultToken.marker[7]) == 'H') // MenuGetHandle
+	{
+		UserMenu *menu = g_script.FindMenu(ParamIndexToString(0, aResultToken.buf));
+		if (menu && !menu->mMenu)
+			menu->Create(); // On failure (rare), we just return 0.
+		aResultToken.value_int64 = menu ? (__int64)(UINT_PTR)menu->mMenu : 0;
+	}
+	else // MenuGetName
+	{
+		UserMenu *menu = g_script.FindMenu((HMENU)ParamIndexToInt64(0));
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = menu ? menu->mName : _T("");
+	}
+}
+
+
+
 BIF_DECL(BIF_StatusBar)
 {
 	TCHAR mode = ctoupper(aResultToken.marker[6]); // Union's marker initially contains the function name. SB_Set[T]ext.
@@ -20436,6 +20556,47 @@ BIF_DECL(BIF_IL_Add)
 		aResultToken.value_int64 = ImageList_AddIcon(himl, (HICON)hbitmap) + 1; // +1 to convert to one-based.
 		DestroyIcon((HICON)hbitmap); // Works on cursors too.  See notes in LoadPicture().
 	}
+}
+
+
+
+BIF_DECL(BIF_LoadPicture)
+{
+	// h := LoadPicture(filename [, options, ByRef image_type])
+	LPTSTR filename = ParamIndexToString(0, aResultToken.buf);
+	LPTSTR options = ParamIndexToOptionalString(1);
+	Var *image_type_var = ParamIndexToOptionalVar(2);
+
+	int width = -1;
+	int height = -1;
+	int icon_number = 0;
+	bool use_gdi_plus = false;
+
+	for (LPTSTR cp = options; cp; cp = StrChrAny(cp, _T(" \t")))
+	{
+		cp = omit_leading_whitespace(cp);
+		if (tolower(*cp) == 'w')
+			width = ATOI(cp + 1);
+		else if (tolower(*cp) == 'h')
+			height = ATOI(cp + 1);
+		else if (!_tcsnicmp(cp, _T("Icon"), 4))
+			icon_number = ATOI(cp + 4);
+		else if (!_tcsnicmp(cp, _T("GDI+"), 4))
+			// GDI+ or GDI+1 to enable, GDI+0 to disable.
+			use_gdi_plus = cp[4] != '0';
+	}
+
+	if (width == -1 && height == -1)
+		width = 0;
+
+	int image_type;
+	HBITMAP hbm = LoadPicture(filename, width, height, image_type, icon_number, use_gdi_plus);
+	if (image_type_var)
+		image_type_var->Assign(image_type);
+	else if (image_type != IMAGE_BITMAP && hbm)
+		// Always return a bitmap when the ImageType output var is omitted.
+		hbm = IconToBitmap32((HICON)hbm, true); // Also works for cursors.
+	aResultToken.value_int64 = (__int64)(UINT_PTR)hbm;
 }
 
 
