@@ -52,8 +52,8 @@ VarEntry g_BIV[] =
 	VF(ClipboardAll, (BuiltInVarType)VAR_CLIPBOARDALL),
 	VF(ComSpec, BIV_ComSpec), // Lacks an "A_" prefix for backward compatibility with pre-NoEnv scripts and also it's easier to type & remember.,
 	VF(False, BIV_True_False_Null),
-	VF(ProgramFiles, BIV_SpecialFolderPath), // v1.0.43.08: Added to ease the transition to #NoEnv.,
 	VF(Null, BIV_True_False_Null),
+	VF(ProgramFiles, BIV_SpecialFolderPath), // v1.0.43.08: Added to ease the transition to #NoEnv.,
 	VF(True, BIV_True_False_Null)
 };
 // g_BIV_A: All built-in vars beginning with "A_".  The prefix is omitted from each
