@@ -450,7 +450,13 @@ HANDLE Clipboard::GetClipboardDataTimeout(UINT uFormat, BOOL *aNullIsOkay)
 	return GetClipboardData(uFormat);
 #else
 	HANDLE h;
-	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
+
+#ifdef _WIN64
+	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#else
+	DWORD aThreadID = __readfsdword(0x24);
+#endif
+
 	for (DWORD start_time = GetTickCount();;)
 	{
 		// Known failure conditions:
@@ -491,7 +497,13 @@ ResultType Clipboard::Open()
 {
 	if (mIsOpen)
 		return OK;
-	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
+
+#ifdef _WIN64
+	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#else
+	DWORD aThreadID = __readfsdword(0x24);
+#endif
+
 	for (DWORD start_time = GetTickCount();;)
 	{
 		if (OpenClipboard(g_hWnd))

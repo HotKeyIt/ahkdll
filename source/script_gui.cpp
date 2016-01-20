@@ -7314,7 +7314,11 @@ ResultType GuiType::Show(LPTSTR aOptions, LPTSTR aText)
 	// subroutine that takes a long time to complete:
 	mShowIsInProgress = false;
 
-	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#ifdef _WIN64
+	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#else
+	DWORD aThreadID = __readfsdword(0x24);
+#endif
 
 	// Update for v1.0.25: The below is now done last to prevent the GuiSize label (if any) from launching
 	// while this function is still incomplete; in other words, don't allow the GuiSize label to launch

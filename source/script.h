@@ -802,14 +802,14 @@ public:
 		//else the original buffer is NULL, so keep any new sDerefBuf that might have been created (should
 		// help avg-case performance).
 
-	static LPTSTR sDerefBuf;  // Buffer to hold the values of any args that need to be dereferenced.
-	static size_t sDerefBufSize;
-	static int sLargeDerefBufs;
+	__declspec(thread) static LPTSTR sDerefBuf;  // Buffer to hold the values of any args that need to be dereferenced.
+	__declspec(thread) static size_t sDerefBufSize;
+	__declspec(thread) static int sLargeDerefBufs;
 
 	// Static because only one line can be Expanded at a time (not to mention the fact that we
 	// wouldn't want the size of each line to be expanded by this size):
-	static LPTSTR sArgDeref[MAX_ARGS];
-	static Var *sArgVar[MAX_ARGS];
+	__declspec(thread) static LPTSTR sArgDeref[MAX_ARGS];
+	__declspec(thread) static Var *sArgVar[MAX_ARGS];
 
 	// Keep any fields that aren't an even multiple of 4 adjacent to each other.  This conserves memory
 	// due to byte-alignment:

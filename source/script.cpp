@@ -12949,7 +12949,11 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ResultToken *aResultToken, Line 
 	LONG_OPERATION_INIT
 		global_struct &g = *::g; // Reduces code size and may improve performance. Eclipsing ::g with local g makes compiler remind/enforce the use of the right one.
 
-	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#ifdef _WIN64
+	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#else
+	DWORD aThreadID = __readfsdword(0x24);
+#endif
 
 	for (Line *line = this; line != NULL;)
 	{
@@ -14916,7 +14920,12 @@ ResultType Line::Perform()
 	HKEY root_key; // For Registry commands.
 	LPTSTR subkey; // For Registry commands.
 	ResultType result;  // General purpose.
-	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
+
+#ifdef _WIN64
+	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#else
+	DWORD aThreadID = __readfsdword(0x24);
+#endif
 
 	// Even though the loading-parser already checked, check again, for now,
 	// at least until testing raises confidence.  UPDATE: Don't do this because

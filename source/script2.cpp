@@ -595,8 +595,12 @@ ResultType Line::Input()
 	// of which quasi-thread is active, and it will end our input on schedule:
 	if (timeout > 0)
 		SET_INPUT_TIMER(timeout < 10 ? 10 : timeout)
-	
-	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
+
+#ifdef _WIN64
+		DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#else
+		DWORD aThreadID = __readfsdword(0x24);
+#endif
 	
 	//////////////////////////////////////////////////////////////////
 	// Wait for one of the following to terminate our input:
@@ -904,7 +908,11 @@ ResultType Line::PerformWait()
 		}
 	}
 
-	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#ifdef _WIN64
+	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#else
+	DWORD aThreadID = __readfsdword(0x24);
+#endif
 
 	for (start_time = GetTickCount();;) // start_time is initialized unconditionally for use with v1.0.30.02's new logging feature further below.
 	{ // Always do the first iteration so that at least one check is done.
@@ -2010,7 +2018,11 @@ BIF_DECL(BIF_Process)
 			sleep_duration = 0; // Just to catch any bugs.
 		}
 
-		DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#ifdef _WIN64
+		DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#else
+		DWORD aThreadID = __readfsdword(0x24);
+#endif
 
 		for (;;)
 		{ // Always do the first iteration so that at least one check is done.
@@ -7331,7 +7343,13 @@ ResultType Line::SoundPlay(LPTSTR aFilespec, bool aSleepUntilDone)
 	// Otherwise, caller wants us to wait until the file is done playing.  To allow our app to remain
 	// responsive during this time, use a loop that checks our message queue:
 	// Older method: "mciSendString("play " SOUNDPLAY_ALIAS " wait", NULL, 0, NULL)"
-	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
+
+#ifdef _WIN64
+	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#else
+	DWORD aThreadID = __readfsdword(0x24);
+#endif
+
 	for (;;)
 	{
 		mciSendString(_T("status ") SOUNDPLAY_ALIAS _T(" mode"), buf, _countof(buf), NULL);
@@ -8201,7 +8219,13 @@ ResultType Line::FileDelete()
 	size_t space_remaining = _countof(file_path) - file_path_length - 1; // Space left in file_path for the changing part.
 
 	g->LastError = 0; // Set default. Overridden only when a failure occurs.
-	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
+
+#ifdef _WIN64
+	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#else
+	DWORD aThreadID = __readfsdword(0x24);
+#endif
+
 	do
 	{
 		// Since other script threads can interrupt during LONG_OPERATION_UPDATE, it's important that
@@ -8449,7 +8473,13 @@ int Line::FileSetAttrib(LPTSTR aAttributes, LPTSTR aFilePattern, FileLoopModeTyp
 	int failure_count = 0;
 	WIN32_FIND_DATA current_file;
 	HANDLE file_search = FindFirstFile(file_pattern, &current_file);
-	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
+
+#ifdef _WIN64
+	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#else
+	DWORD aThreadID = __readfsdword(0x24);
+#endif
+
 
 	if (file_search != INVALID_HANDLE_VALUE)
 	{
@@ -8731,7 +8761,13 @@ int Line::FileSetTime(LPTSTR aYYYYMMDD, LPTSTR aFilePattern, TCHAR aWhichTime
 	int failure_count = 0;
 	WIN32_FIND_DATA current_file;
 	HANDLE file_search = FindFirstFile(file_pattern, &current_file);
-	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
+
+#ifdef _WIN64
+	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#else
+	DWORD aThreadID = __readfsdword(0x24);
+#endif
+
 	if (file_search != INVALID_HANDLE_VALUE)
 	{
 		do
@@ -11497,7 +11533,13 @@ CriticalObject *CriticalObject::Create(ExprTokenType *aParam[], int aParamCount)
 bool CriticalObject::Delete()
 {
 	// Avoid deadlocking the process so messages can still be processed
-	 DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
+
+#ifdef _WIN64
+	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#else
+	DWORD aThreadID = __readfsdword(0x24);
+#endif
+
 	// Check if we own the critical section and release it
 	while (!TryEnterCriticalSection(this->lpCriticalSection))
 		if (g_MainThreadID == aThreadID)
@@ -11519,7 +11561,11 @@ ResultType STDMETHODCALLTYPE CriticalObject::Invoke(
  {
 	 // Avoid deadlocking the process so messages can still be processed
 	 while (!TryEnterCriticalSection(this->lpCriticalSection))
-		 if (g_MainThreadID == GetCurrentThreadId())
+#ifdef _WIN64
+		 if (g_MainThreadID == __readgsdword(0x48)) // Used to identify if code is called from different thread (AutoHotkey.dll)
+#else
+		 if (g_MainThreadID == __readfsdword(0x24))
+#endif
 			 MsgSleep(-1);
 		 else
 			 Sleep(0);

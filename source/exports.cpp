@@ -152,15 +152,21 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 {
 	if (!g_script.mIsReadyToExecute)
 		return 0; // AutoHotkey needs to be running at this point //
-	DWORD thisThreadID = GetCurrentThreadId();
-	if (g_MainThreadID != thisThreadID)
+
+#ifdef _WIN64
+	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#else
+	DWORD aThreadID = __readfsdword(0x24);
+#endif
+
+	if (g_MainThreadID != aThreadID)
 		SuspendThread(g_hThread);
 	Var *ahkvar = g_script.FindOrAddVar(name);
 	if (getVar != NULL)
 	{
 		if (ahkvar->mType == VAR_BUILTIN || ahkvar->mType == VAR_VIRTUAL)
 		{
-			if (g_MainThreadID != thisThreadID)
+			if (g_MainThreadID != aThreadID)
 				ResumeThread(g_hThread);
 			return _T("");
 		}
@@ -168,18 +174,18 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 		if (!new_mem)
 		{
 			g_script.ScriptError(ERR_OUTOFMEM, name);
-			if (g_MainThreadID != thisThreadID)
+			if (g_MainThreadID != aThreadID)
 				ResumeThread(g_hThread);
 			return _T("");
 		}
 		result_to_return_dll = new_mem;
-		if (g_MainThreadID != thisThreadID)
+		if (g_MainThreadID != aThreadID)
 			ResumeThread(g_hThread);
 		return ITOA64((UINT_PTR)ahkvar,result_to_return_dll);
 	}
 	if (ahkvar->mType != VAR_BUILTIN && !ahkvar->HasContents() )
 	{
-		if (g_MainThreadID != thisThreadID)
+		if (g_MainThreadID != aThreadID)
 			ResumeThread(g_hThread);
 		return _T("");
 	}
@@ -189,7 +195,7 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 		if (!new_mem)
 		{
 			g_script.ScriptError(ERR_OUTOFMEM, name);
-			if (g_MainThreadID != thisThreadID)
+			if (g_MainThreadID != aThreadID)
 				ResumeThread(g_hThread);
 			return _T("");
 		}
@@ -218,7 +224,7 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 		if (!new_mem)
 		{
 			g_script.ScriptError(ERR_OUTOFMEM, name);
-			if (g_MainThreadID != thisThreadID)
+			if (g_MainThreadID != aThreadID)
 				ResumeThread(g_hThread);
 			return _T("");
 		}
@@ -232,7 +238,7 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 		else if (ahkvar->mType == VAR_VIRTUAL)
 			ahkvar->mVV->Get(result_to_return_dll, name); //Hotkeyit 
 	}
-	if (g_MainThreadID != thisThreadID)
+	if (g_MainThreadID != aThreadID)
 		ResumeThread(g_hThread);
 	return result_to_return_dll;
 }	
@@ -241,18 +247,24 @@ EXPORT int ahkassign(LPTSTR name, LPTSTR value) // ahkwine 0.1
 {
 	if (!g_script.mIsReadyToExecute)
 		return 0; // AutoHotkey needs to be running at this point //
-	DWORD thisThreadID = GetCurrentThreadId();
-	if (g_MainThreadID != thisThreadID)
+
+#ifdef _WIN64
+	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#else
+	DWORD aThreadID = __readfsdword(0x24);
+#endif
+
+	if (g_MainThreadID != aThreadID)
 		SuspendThread(g_hThread);
 	Var *var;
 	if (!(var = g_script.FindOrAddVar(name, _tcslen(name))))
 	{
-		if (g_MainThreadID != thisThreadID)
+		if (g_MainThreadID != aThreadID)
 			ResumeThread(g_hThread);
 		return -1;  // Realistically should never happen.
 	}
 	var->Assign(value); 
-	if (g_MainThreadID != thisThreadID)
+	if (g_MainThreadID != aThreadID)
 		ResumeThread(g_hThread);
 	return 0; // success
 }
