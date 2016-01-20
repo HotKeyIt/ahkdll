@@ -113,7 +113,13 @@ HWND AttemptSetForeground(HWND aTargetWindow, HWND aForeWindow)
 	// Note: Increasing the sleep time below did not help with occurrences of "indicated success
 	// even though it failed", at least with metapad.exe being activated while command prompt
 	// and/or AutoIt2's InputBox were active or present on the screen:
-	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
+
+#ifdef _WIN64
+	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#else
+	DWORD aThreadID = __readfsdword(0x24);
+#endif
+
 	SLEEP_WITHOUT_INTERRUPTION(SLEEP_INTERVAL); // Specify param so that it will try to specifically sleep that long.
 	HWND new_fore_window = GetForegroundWindow();
 	if (new_fore_window == aTargetWindow)
@@ -482,7 +488,13 @@ HWND WinClose(HWND aWnd, int aTimeToWaitForClose, bool aKillIfHung)
 	// to refer to those strings once MsgSleep() has been done, below:
 
 	// This is the same basic code used for ACT_WINWAITCLOSE and such:
-	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
+
+#ifdef _WIN64
+	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#else
+	DWORD aThreadID = __readfsdword(0x24);
+#endif
+
 	for (;;)
 	{
 		// Seems best to always do the first one regardless of the value 
@@ -808,7 +820,13 @@ ResultType StatusBarUtil(Var *aOutputVar, HWND aBarHwnd, int aPartNumber, LPTSTR
 	DWORD_PTR result, start_time;
 	--aPartNumber; // Convert to zero-based for use below.
 
-	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
+
+#ifdef _WIN64
+	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#else
+	DWORD aThreadID = __readfsdword(0x24);
+#endif
+
 
 	// Always do the first iteration so that at least one check is done.  Also,  start_time is initialized
 	// unconditionally in the name of code size reduction (it's a low overhead call):

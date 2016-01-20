@@ -148,7 +148,13 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 {
 	if (!g_script.mIsReadyToExecute)
 		return 0; // AutoHotkey needs to be running at this point //
-	DWORD thisThreadID = GetCurrentThreadId();
+
+#ifdef _WIN64
+	DWORD thisThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#else
+	DWORD thisThreadID = __readfsdword(0x24);
+#endif
+
 	if (g_MainThreadID != thisThreadID)
 		SuspendThread(g_hThread);
 	Var *ahkvar = g_script.FindOrAddVar(name);
@@ -233,7 +239,13 @@ EXPORT int ahkassign(LPTSTR name, LPTSTR value) // ahkwine 0.1
 {
 	if (!g_script.mIsReadyToExecute)
 		return 0; // AutoHotkey needs to be running at this point //
-	DWORD thisThreadID = GetCurrentThreadId();
+
+#ifdef _WIN64
+	DWORD thisThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#else
+	DWORD thisThreadID = __readfsdword(0x24);
+#endif
+
 	if (g_MainThreadID != thisThreadID)
 		SuspendThread(g_hThread);
 	Var *var;

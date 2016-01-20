@@ -1414,7 +1414,13 @@ ResultType UserMenu::Display(bool aForceToForeground, int aX, int aY)
 // resistance.  This is done because if the main window is *not* successfully activated prior to
 // displaying the menu, it might be impossible to dismiss the menu by clicking outside of it.
 {
-	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
+
+#ifdef _WIN64
+	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#else
+	DWORD aThreadID = __readfsdword(0x24);
+#endif
+
 	if (!mMenuItemCount && !mIncludeStandardItems)
 		return OK;  // Consider the display of an empty menu to be a success.
 	//if (!IsMenu(mMenu))

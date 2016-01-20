@@ -212,7 +212,13 @@ ResultType Line::PixelGetColor(int aX, int aY, LPTSTR aOptions)
 
 ResultType Line::SplashTextOn(int aWidth, int aHeight, LPTSTR aTitle, LPTSTR aText)
 {
-	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
+
+#ifdef _WIN64
+	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#else
+	DWORD aThreadID = __readfsdword(0x24);
+#endif
+
 	// Add some caption and frame size to window:
 	aWidth += GetSystemMetrics(SM_CXFIXEDFRAME) * 2;
 	int min_height = GetSystemMetrics(SM_CYCAPTION) + (GetSystemMetrics(SM_CXFIXEDFRAME) * 2);
@@ -422,7 +428,13 @@ ResultType Line::Control(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR aTi
 	vk_type vk;
 	int key_count;
 	TCHAR temp_buf[32];
-	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
+
+#ifdef _WIN64
+	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#else
+	DWORD aThreadID = __readfsdword(0x24);
+#endif
+
 
 	switch(control_cmd)
 	{
@@ -1073,7 +1085,13 @@ ResultType Line::URLDownloadToFile(LPTSTR aURL, LPTSTR aFilespec)
 	// having it return the moment there is any data in the buffer, the program is made more
 	// responsive, especially when the download is very slow and/or one of the hooks is installed:
 	BOOL result;
-	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
+
+#ifdef _WIN64
+	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#else
+	DWORD aThreadID = __readfsdword(0x24);
+#endif
+
 
 	if (*aURL == 'h' || *aURL == 'H')
 	{
@@ -1710,7 +1728,13 @@ int Line::Util_CopyFile(LPCTSTR szInputSource, LPCTSTR szInputDest, bool bOverwr
 
 	int failure_count = 0;
 	LONG_OPERATION_INIT
-	DWORD aThreadID = GetCurrentThreadId(); // Used to identify if code is called from different thread (AutoHotkey.dll)
+
+#ifdef _WIN64
+		DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#else
+		DWORD aThreadID = __readfsdword(0x24);
+#endif
+
 	do
 	{
 		// Since other script threads can interrupt during LONG_OPERATION_UPDATE, it's important that
