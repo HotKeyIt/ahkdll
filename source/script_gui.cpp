@@ -8272,7 +8272,7 @@ GuiIndexType GuiType::FindControl(LPTSTR aControlID)
 		// No need to do "var = var->ResolveAlias()" because the line above never finds locals, only globals.
 		// Similarly, there's no need to do confirm that var->IsLocal()==false.
 		for (u = 0; u < mControlCount; ++u)
-			if (mControl[u].output_var == var || !_tcsicmp(mControl[u].mObjectKey, var->mName))
+			if (mControl[u].output_var == var || (mControl[u].mObjectKey && !_tcsicmp(mControl[u].mObjectKey, var->mName)))
 				return u;  // Match found.
 	}
 	if (g->CurrentFunc // v1.0.46.15: Since above failed to match: if we're in a function (which is checked for performance reasons), search for a static or ByRef-that-points-to-a-global-or-static because both should be supported.
@@ -8283,7 +8283,7 @@ GuiIndexType GuiType::FindControl(LPTSTR aControlID)
 		var = var->ResolveAlias(); // Update it to its target if it's an alias because that's how control-var's are stored (i.e. pre-resolved, never aliases).
 		if (!var->IsNonStaticLocal()) // To be a valid control-var, it must be global, static, or a ByRef that points to a global or static.
 			for (u = 0; u < mControlCount; ++u)
-				if (mControl[u].output_var == var || !_tcsicmp(mControl[u].mObjectKey, var->mName))
+				if (mControl[u].output_var == var || (mControl[u].mObjectKey && !_tcsicmp(mControl[u].mObjectKey, var->mName)))
 					return u;  // Match found.
 	}
 	// Otherwise: No match found, so fall back to standard control class and/or text finding method.
