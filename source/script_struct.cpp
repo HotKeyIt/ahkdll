@@ -7,7 +7,6 @@
 
 #include "script_object.h"
 
-
 //
 // Struct::Create - Called by BIF_ObjCreate to create a new object, optionally passing key/value pairs to set.
 //
@@ -55,9 +54,13 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 	TCHAR defbuf[MAX_VAR_NAME_LENGTH * 2 + 40] = _T(" UInt "); // Set default UInt definition
 
 	TCHAR keybuf[MAX_VAR_NAME_LENGTH + 40];
-
 	// buffer for arraysize + 2 for bracket ] and terminating character
 	TCHAR intbuf[MAX_INTEGER_LENGTH + 2];
+
+	LPTSTR bitfield = NULL;
+	BYTE bitsize = 0;
+	BYTE bitsizetotal = 0;
+	LPTSTR isBit;
 
 	FieldType *field;				// used to define a field
 	// Structure object is saved in fixed order
@@ -97,10 +100,6 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 		}
 		return obj;
 	}
-
-	// Set initial capacity to avoid multiple expansions.
-	// For simplicity, failure is handled by the loop below.
-	obj->SetInternalCapacity(aParamCount >> 1);
 	
 	// Set buf to beginning of structure definition
 	buf = TokenToString(*aParam[0]);
@@ -135,6 +134,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			aligntotal = 0;
 			unionoffset[uniondepth] = offset; // backup offset
 			unionsize[uniondepth] = 0;
+			bitsizetotal = bitsize = 0;
 			// ignore even any wrong input here so it is even {mystructure...} for struct and  {anyother string...} for union
 			buf = _tcschr(buf,'{') + 1;
 			continue;
@@ -161,6 +161,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 					totalunionsize += (aligntotal - mod) % aligntotal;
 				offset += totalunionsize;
 			}
+			bitsizetotal = bitsize = 0;
 			buf++;
 			if (buf == StrChrAny(buf,_T(";,")))
 				buf++;
@@ -176,6 +177,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			if ((buf_size = _tcscspn(buf, _T("};,"))) > LINE_SIZE - 1)
 			{
 				obj->Release();
+				g_script.ScriptError(ERR_INVALID_STRUCT, buf);
 				return NULL;
 			}
 			_tcsncpy(tempbuf,buf,buf_size);
@@ -184,6 +186,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 		else if (_tcslen(buf) > LINE_SIZE - 1)
 		{
 			obj->Release();
+			g_script.ScriptError(ERR_INVALID_STRUCT, buf);
 			return NULL;
 		}
 		else
@@ -194,7 +197,15 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 
 		// Pointer
 		if (_tcschr(tempbuf, '*'))
+		{
+			if (_tcschr(tempbuf, ':'))
+			{
+				obj->Release();
+				g_script.ScriptError(ERR_INVALID_STRUCT_BIT_POINTER, tempbuf);
+				return NULL;
+			}
 			ispointer = StrReplace(tempbuf, _T("*"), _T(""), SCS_SENSITIVE, UINT_MAX, LINE_SIZE);
+		}
 		
 		// Array
 		if (_tcschr(tempbuf,'['))
@@ -214,21 +225,38 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			if ((buf_size = _tcscspn(tempbuf,_T("\t "))) > MAX_VAR_NAME_LENGTH*2 + 30)
 			{
 				obj->Release();
+				g_script.ScriptError(ERR_INVALID_STRUCT, tempbuf);
 				return NULL;
 			}
-			_tcsncpy(defbuf + 1,tempbuf,buf_size);
-			//_tcscpy(defbuf + 1 + _tcscspn(tempbuf,_T("\t ")),_T(" "));
-			defbuf[1 + buf_size] = ' ';
-			defbuf[2 + buf_size] = '\0';
-			if (StrChrAny(tempbuf, _T(" \t")))
+			isBit = StrChrAny(omit_leading_whitespace(tempbuf), _T(" \t"));
+			if (!isBit || *isBit != ':')
 			{
-				if (_tcslen(StrChrAny(tempbuf, _T(" \t"))) > MAX_VAR_NAME_LENGTH + 30)
+				if (_tcsnicmp(defbuf + 1, tempbuf,_tcslen(defbuf)-2))
+					bitsizetotal = bitsize = 0;
+				_tcsncpy(defbuf + 1, tempbuf, buf_size);
+				//_tcscpy(defbuf + 1 + _tcscspn(tempbuf,_T("\t ")),_T(" "));
+				defbuf[1 + buf_size] = ' ';
+				defbuf[2 + buf_size] = '\0';
+			}
+			if (StrChrAny(tempbuf, _T(" \t:")))
+			{
+				if (_tcslen(StrChrAny(tempbuf, _T(" \t:"))) > MAX_VAR_NAME_LENGTH + 30)
 				{
 					obj->Release();
+					g_script.ScriptError(ERR_INVALID_STRUCT, tempbuf);
 					return NULL;
 				}
-				_tcscpy(keybuf,StrChrAny(tempbuf, _T(" \t")) + 1);
-				ltrim(keybuf);
+				_tcscpy(keybuf, (!isBit || *isBit != ':') ? StrChrAny(tempbuf, _T(" \t:")) : tempbuf);
+				if (bitfield = _tcschr(keybuf, ':'))
+				{
+					*bitfield = '\0';
+					if (bitsizetotal/8 == thissize)
+						bitsizetotal = bitsize = 0;
+					bitsizetotal += bitsize = ATOI(bitfield + 1);
+				}
+				else
+					bitsizetotal = bitsize = 0;
+				trim(keybuf);
 			}
 			else 
 				keybuf[0] = '\0';
@@ -239,14 +267,18 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			// Note: separator , or ; can be still used but
 			// _tcscpy(defbuf,_T(" UInt "));
 			_tcscpy(keybuf,tempbuf);
+			if (bitfield = _tcschr(keybuf, ':'))
+			{
+				*bitfield = '\0';
+				bitsizetotal += bitsize = ATOI(bitfield + 1);
+			}
+			trim(keybuf);
 		}
 
 		// Now find size in default types array and create new field
 		// If Type not found, resolve type to variable and get size of struct defined in it
-		if ((thissize = IsDefaultType(defbuf)))
+		if ((!_tcscmp(defbuf, _T(" bool ")) && (thissize = 1)) || (thissize = IsDefaultType(defbuf)))
 		{
-			if (!_tcscmp(defbuf,_T(" bool ")))
-				thissize = 1;
 			// align offset
 			if (ispointer)
 			{
@@ -257,20 +289,21 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			}
 			else
 			{
-				if (mod = offset % thissize)
+				if ((!bitsize || bitsizetotal == bitsize) && (mod = offset % thissize))
 					offset += (thissize - mod) % thissize;
 				if (thissize > aligntotal)
 					aligntotal = thissize; // > ptrsize ? ptrsize : thissize;
 			}
-			if (!(field = obj->Insert(keybuf, insert_pos++,ispointer,offset,arraydef,NULL,thissize
+			if (!(field = obj->Insert(keybuf, insert_pos,ispointer, (offset == 0 || !bitsize || bitsizetotal == bitsize) ? offset : offset - thissize,arraydef,NULL,thissize
 						,ispointer ? true : !tcscasestr(_T(" FLOAT DOUBLE PFLOAT PDOUBLE "),defbuf)
-						,!tcscasestr(_T(" PTR SHORT INT INT64 CHAR VOID HALF_PTR BOOL INT32 LONG LONG32 LONGLONG LONG64 USN INT_PTR LONG_PTR POINTER_64 POINTER_SIGNED SSIZE_T WPARAM __int64 "),defbuf)
-						,tcscasestr(_T(" TCHAR LPTSTR LPCTSTR LPWSTR LPCWSTR WCHAR "),defbuf) ? 1200 : tcscasestr(_T(" CHAR LPSTR LPCSTR LPSTR UCHAR "),defbuf) ? 0 : -1)))
+						,!tcscasestr(_T(" PTR SHORT INT INT8 INT16 INT32 INT64 CHAR VOID HALF_PTR BOOL LONG LONG32 LONGLONG LONG64 USN INT_PTR LONG_PTR POINTER_64 POINTER_SIGNED SIGNED SSIZE_T WPARAM __int64 "),defbuf)
+						,tcscasestr(_T(" TCHAR LPTSTR LPCTSTR LPWSTR LPCWSTR WCHAR "),defbuf) ? 1200 : tcscasestr(_T(" CHAR LPSTR LPCSTR UCHAR "),defbuf) ? 0 : -1, bitsize, bitsizetotal - bitsize)))
 			{	// Out of memory.
 				obj->Release();
 				return NULL;
 			}
-			offset += (ispointer ? ptrsize : thissize) * (arraydef ? arraydef : 1);
+			if (!bitsize || bitsizetotal == bitsize)
+				offset += (ispointer ? ptrsize : thissize) * (arraydef ? arraydef : 1);
 		}
 		else // type was not found, check for user defined type in variables
 		{
@@ -294,6 +327,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 				{
 					g->CurrentFunc = bkpfunc;
 					obj->Release();
+					g_script.ScriptError(ERR_INVALID_STRUCT_IN_FUNC, defbuf);
 					return NULL;
 				}
 			}
@@ -371,9 +405,10 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 					if (ResultToken.symbol != SYM_INTEGER)
 					{	// could not resolve structure
 						obj->Release();
+						g_script.ScriptError(ERR_INVALID_STRUCT, defbuf);
 						return NULL;
 					}
-					if (mod = offset % aligntotal)
+					if ((!bitsize || bitsizetotal == bitsize) && (mod = offset % aligntotal))
 						offset += (aligntotal - mod) % aligntotal;
 				} 
 				else
@@ -383,6 +418,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 					if (ResultToken.symbol != SYM_INTEGER)
 					{	// could not resolve structure
 						obj->Release();
+						g_script.ScriptError(ERR_INVALID_STRUCT, defbuf);
 						return NULL;
 					}
 					if (mod = offset % ptrsize)
@@ -391,20 +427,21 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 						aligntotal = ptrsize;
 				}
 				// Insert new field in our structure
-				if (!(field = obj->Insert(keybuf, insert_pos++, ispointer, offset, arraydef, Var1.var, (int)ResultToken.value_int64,1,1,-1)))
+				if (!(field = obj->Insert(keybuf, insert_pos, ispointer, (offset == 0 || !bitsize || bitsizetotal == bitsize) ? offset : offset - thissize, arraydef, Var1.var, bitsize ? bitsize : (int)ResultToken.value_int64,1,1,-1, bitsize, bitsizetotal - bitsize)))
 				{	// Out of memory.
 					obj->Release();
 					return NULL;
 				}
 				if (ispointer)
 					offset += (int)ptrsize * (arraydef ? arraydef : 1);
-				else
+				else if (!bitsize || bitsizetotal == bitsize)
 				// sizeof was given an offset that it applied and aligned if necessary, so set offset =  and not +=
 					offset = (int)ResultToken.value_int64 + (arraydef ? ((arraydef - 1) * ((int)ResultToken.value_int64 - offset)) : 0);
 			}
 			else // No variable was found and it is not default type so we can't determine size.
 			{
 				obj->Release();
+				g_script.ScriptError(ERR_INVALID_STRUCT, defbuf);
 				return  NULL;
 			}
 		}
@@ -413,9 +450,13 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 		{
 			if ((maxsize = offset - unionoffset[uniondepth]) > unionsize[uniondepth])
 				unionsize[uniondepth] = maxsize;
-			// reset offset if in union and union is not a structure
 			if (!unionisstruct[uniondepth])
+			{
+				// reset offset if in union and union is not a structure
 				offset = unionoffset[uniondepth];
+				// reset bit offset and size
+				bitsize = bitsizetotal = 0;
+			}
 		}
 		// Move buffer pointer now
 		if (_tcschr(buf,'}') && (!StrChrAny(buf, _T(";,")) || _tcschr(buf,'}') < StrChrAny(buf, _T(";,"))))
@@ -436,6 +477,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 	if (!offset) // structure could not be build
 	{
 		obj->Release();
+		g_script.ScriptError(ERR_INVALID_STRUCT, buf);
 		return NULL;
 	}
 	
@@ -1533,49 +1575,101 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 		}
 		else // NumPut
 		{	 // code stolen from BIF_NumPut
-			switch(field->mSize)
+//#define BIT_MASK(n) (~( ((~0ull) << ((n)-1)) << 1 )) // this makro is included in setbits and getbits
+#define setbits(var, val, typesize, offset, size) (var |= ((val < 0 ? val + (2 << (size - 1)) : val) << offset) & (~( ((~0ull) << ((size)-1)) << 1 )))
+//#define setbits(var, val, typesize, offset, size) (var |= ((val < 0 ? val + (2 << (size - 1)) : val) << offset) & (~( ((~0ull) << ((size)-1)) << 1 )))
+#define clearbit(val, pos) ((val) &= ~(1 << (pos)))
+//#define getbits(val, typesize, offset, size) (((val >> offset) & (~( ((~0ull) << ((size)-1)) << 1 ))) - ((!!((val) & (1i64 << (offset + size - 1)))) ? (2 << (size - 1)) : 0))
+#define getbits(val, typesize, offset, size, isunsigned) (((val >> offset) & (~( ((~0ull) << ((size)-1)) << 1 ))) - ((!isunsigned && (!!((val) & (1i64 << (offset + size - 1))))) ? (2 << (size - 1)) : 0))
+			if (field->mBitSize)
 			{
-			case 4: // Listed first for performance.
-				if (field->mIsInteger)
-				{
-					*((unsigned int *)((UINT_PTR)target + field->mOffset)) = (unsigned int)TokenToInt64(*aParam[1]);
-					aResultToken.symbol = SYM_INTEGER;
-					aResultToken.value_int64 = *((unsigned int *)((UINT_PTR)target + field->mOffset));
-				}
-				else // Float (32-bit).
-				{
-					*((float *)((UINT_PTR)target + field->mOffset)) = (float)TokenToDouble(*aParam[1]);
-					aResultToken.symbol = SYM_FLOAT;
-					aResultToken.value_double = *((float *)((UINT_PTR)target + field->mOffset));
-				}
-				break;
-			case 8:
-				if (field->mIsInteger)
-				{
-					// v1.0.48: Support unsigned 64-bit integers like DllCall does:
-					*((__int64 *)((UINT_PTR)target + field->mOffset)) = (field->mIsUnsigned && !IS_NUMERIC(aParam[1]->symbol)) // Must not be numeric because those are already signed values, so should be written out as signed so that whoever uses them can interpret negatives as large unsigned values.
-						? (__int64)ATOU64(TokenToString(*aParam[1])) // For comments, search for ATOU64 in BIF_DllCall().
-						: TokenToInt64(*aParam[1]);
-					aResultToken.symbol = SYM_INTEGER;
-					aResultToken.value_int64 = TokenToInt64(*aParam[1]);
-				}
-				else // Double (64-bit).
-				{
-					*((double *)((UINT_PTR)target + field->mOffset)) = TokenToDouble(*aParam[1]);
-					aResultToken.symbol = SYM_FLOAT;
-					aResultToken.value_double = *((double *)((UINT_PTR)target + field->mOffset));
-				}
-				break;
-			case 2:
-				*((unsigned short *)((UINT_PTR)target + field->mOffset)) = (unsigned short)TokenToInt64(*aParam[1]);
 				aResultToken.symbol = SYM_INTEGER;
-				aResultToken.value_int64 = *((unsigned short *)((UINT_PTR)target + field->mOffset));
-				break;
-			default: // size 1
-				*((unsigned char *)((UINT_PTR)target + field->mOffset)) = (unsigned char)TokenToInt64(*aParam[1]);
-				aResultToken.symbol = SYM_INTEGER;
-				aResultToken.value_int64 = *((unsigned char *)((UINT_PTR)target + field->mOffset));
+				for (int i = 0; i < field->mBitSize;i++)
+					clearbit(*((UINT_PTR *)((UINT_PTR)target + field->mOffset)), field->mBitOffset + i);
+				if (TokenToInt64(*aParam[1]) == 0)
+					aResultToken.value_int64 = 0;
+				else
+				{
+					setbits(*((UINT_PTR *)((UINT_PTR)target + field->mOffset)), (field->mIsUnsigned && !IS_NUMERIC(aParam[1]->symbol)) ? ATOI64(TokenToString(*aParam[1])) : TokenToInt64(*aParam[1]), field->mSize, field->mBitOffset, field->mBitSize);
+					switch (field->mSize)
+					{
+					case 4: // Listed first for performance.
+						if (field->mIsInteger)
+						{
+							if (field->mIsUnsigned)
+								aResultToken.value_int64 = (unsigned int)getbits(*((UINT_PTR *)((UINT_PTR)target + field->mOffset)), field->mSize, field->mBitOffset, field->mBitSize, field->mIsUnsigned);
+							else
+								aResultToken.value_int64 = (int)getbits(*((UINT_PTR *)((UINT_PTR)target + field->mOffset)), field->mSize, field->mBitOffset, field->mBitSize, field->mIsUnsigned);
+						}
+						else // Float (32-bit).
+						{
+							aResultToken.symbol = SYM_FLOAT;
+							aResultToken.value_double = (float)getbits(*((UINT_PTR *)((UINT_PTR)target + field->mOffset)), field->mSize, field->mBitOffset, field->mBitSize, field->mIsUnsigned);
+						}
+						break;
+					case 8:
+						aResultToken.value_int64 = (__int64)getbits(*((UINT_PTR *)((UINT_PTR)target + field->mOffset)), field->mSize, field->mBitOffset, field->mBitSize, field->mIsUnsigned);
+						if (!field->mIsInteger) // Double (64-bit).
+							aResultToken.symbol = SYM_FLOAT;
+						break;
+					case 2:
+						if (field->mIsUnsigned)
+							aResultToken.value_int64 = (unsigned short)getbits(*((UINT_PTR *)((UINT_PTR)target + field->mOffset)), field->mSize, field->mBitOffset, field->mBitSize, field->mIsUnsigned);
+						else
+							aResultToken.value_int64 = (short)getbits(*((UINT_PTR *)((UINT_PTR)target + field->mOffset)), field->mSize, field->mBitOffset, field->mBitSize, field->mIsUnsigned);
+						break;
+					default: // size 1
+						if (field->mIsUnsigned)
+							aResultToken.value_int64 = (unsigned char)getbits(*((UINT_PTR *)((UINT_PTR)target + field->mOffset)), field->mSize, field->mBitOffset, field->mBitSize, field->mIsUnsigned);
+						else
+							aResultToken.value_int64 = (char)getbits(*((UINT_PTR *)((UINT_PTR)target + field->mOffset)), field->mSize, field->mBitOffset, field->mBitSize, field->mIsUnsigned);
+					}
+				}
 			}
+			else
+				switch(field->mSize)
+				{
+				case 4: // Listed first for performance.
+					if (field->mIsInteger)
+					{
+						*((unsigned int *)((UINT_PTR)target + field->mOffset)) = (unsigned int)TokenToInt64(*aParam[1]);
+						aResultToken.symbol = SYM_INTEGER;
+						aResultToken.value_int64 = *((unsigned int *)((UINT_PTR)target + field->mOffset));
+					}
+					else // Float (32-bit).
+					{
+						*((float *)((UINT_PTR)target + field->mOffset)) = (float)TokenToDouble(*aParam[1]);
+						aResultToken.symbol = SYM_FLOAT;
+						aResultToken.value_double = *((float *)((UINT_PTR)target + field->mOffset));
+					}
+					break;
+				case 8:
+					if (field->mIsInteger)
+					{
+						// v1.0.48: Support unsigned 64-bit integers like DllCall does:
+						*((__int64 *)((UINT_PTR)target + field->mOffset)) = (field->mIsUnsigned && !IS_NUMERIC(aParam[1]->symbol)) // Must not be numeric because those are already signed values, so should be written out as signed so that whoever uses them can interpret negatives as large unsigned values.
+							? (__int64)ATOU64(TokenToString(*aParam[1])) // For comments, search for ATOU64 in BIF_DllCall().
+							: TokenToInt64(*aParam[1]);
+						aResultToken.symbol = SYM_INTEGER;
+						aResultToken.value_int64 = TokenToInt64(*aParam[1]);
+					}
+					else // Double (64-bit).
+					{
+						*((double *)((UINT_PTR)target + field->mOffset)) = TokenToDouble(*aParam[1]);
+						aResultToken.symbol = SYM_FLOAT;
+						aResultToken.value_double = *((double *)((UINT_PTR)target + field->mOffset));
+					}
+					break;
+				case 2:
+					*((unsigned short *)((UINT_PTR)target + field->mOffset)) = (unsigned short)TokenToInt64(*aParam[1]);
+					aResultToken.symbol = SYM_INTEGER;
+					aResultToken.value_int64 = *((unsigned short *)((UINT_PTR)target + field->mOffset));
+					break;
+				default: // size 1
+					*((unsigned char *)((UINT_PTR)target + field->mOffset)) = (unsigned char)TokenToInt64(*aParam[1]);
+					aResultToken.symbol = SYM_INTEGER;
+					aResultToken.value_int64 = *((unsigned char *)((UINT_PTR)target + field->mOffset));
+				}
 		}
 		if (deletefield) // we created the field from a structure
 			delete field;
@@ -1730,24 +1824,36 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 			case 4: // Listed first for performance.
 				if (!field->mIsInteger)
 				{
-					aResultToken.value_double = *((float *)((UINT_PTR)target + field->mOffset));
+					if (field->mBitSize)
+						aResultToken.value_double = (float)getbits(*((UINT_PTR *)((UINT_PTR)target + field->mOffset)), field->mSize, field->mBitOffset, field->mBitSize, field->mIsUnsigned);
+					else
+						aResultToken.value_double = *((float *)((UINT_PTR)target + field->mOffset));
 					aResultToken.symbol = SYM_FLOAT;
 				}
 				else if (!field->mIsUnsigned)
 				{
-					aResultToken.value_int64 = *((int *)((UINT_PTR)target + field->mOffset)); // aResultToken.symbol was set to SYM_FLOAT or SYM_INTEGER higher above.
+					if (field->mBitSize)
+						aResultToken.value_int64 = (int)getbits(*((UINT_PTR *)((UINT_PTR)target + field->mOffset)), field->mSize, field->mBitOffset, field->mBitSize, field->mIsUnsigned);
+					else
+						aResultToken.value_int64 = *((int *)((UINT_PTR)target + field->mOffset)); // aResultToken.symbol was set to SYM_FLOAT or SYM_INTEGER higher above.
 					aResultToken.symbol = SYM_INTEGER;
 				}
 				else
 				{
-					aResultToken.value_int64 = *((unsigned int *)((UINT_PTR)target + field->mOffset));
+					if (field->mBitSize)
+						aResultToken.value_int64 = (unsigned int)getbits(*((UINT_PTR *)((UINT_PTR)target + field->mOffset)), field->mSize, field->mBitOffset, field->mBitSize, field->mIsUnsigned);
+					else
+						aResultToken.value_int64 = *((unsigned int *)((UINT_PTR)target + field->mOffset));
 					aResultToken.symbol = SYM_INTEGER;
 				}
 				break;
 			case 8:
 				// The below correctly copies both DOUBLE and INT64 into the union.
 				// Unsigned 64-bit integers aren't supported because variables/expressions can't support them.
-				aResultToken.value_int64 = *((__int64 *)((UINT_PTR)target + field->mOffset));
+				if (field->mBitSize)
+					aResultToken.value_int64 = (__int64)getbits(*((UINT_PTR *)((UINT_PTR)target + field->mOffset)), field->mSize, field->mBitOffset, field->mBitSize, field->mIsUnsigned);
+				else
+					aResultToken.value_int64 = *((__int64 *)((UINT_PTR)target + field->mOffset));
 				if (!field->mIsInteger)
 					aResultToken.symbol = SYM_FLOAT;
 				else
@@ -1755,16 +1861,36 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 				break;
 			case 2:
 				if (!field->mIsUnsigned) // Don't use ternary because that messes up type-casting.
-					aResultToken.value_int64 = *((short *)((UINT_PTR)target + field->mOffset));
+				{
+					if (field->mBitSize)
+						aResultToken.value_int64 = (short)getbits(*((UINT_PTR *)((UINT_PTR)target + field->mOffset)), field->mSize, field->mBitOffset, field->mBitSize, field->mIsUnsigned);
+					else
+						aResultToken.value_int64 = *((short *)((UINT_PTR)target + field->mOffset));
+				}
 				else
-					aResultToken.value_int64 = *((unsigned short *)((UINT_PTR)target + field->mOffset));
+				{
+					if (field->mBitSize)
+						aResultToken.value_int64 = (unsigned short)getbits(*((UINT_PTR *)((UINT_PTR)target + field->mOffset)), field->mSize, field->mBitOffset, field->mBitSize, field->mIsUnsigned);
+					else
+						aResultToken.value_int64 = *((unsigned short *)((UINT_PTR)target + field->mOffset));
+				}
 				aResultToken.symbol = SYM_INTEGER;
 				break;
 			default: // size 1
 				if (!field->mIsUnsigned) // Don't use ternary because that messes up type-casting.
-					aResultToken.value_int64 = *((char *)((UINT_PTR)target + field->mOffset));
+				{
+					if (field->mBitSize)
+						aResultToken.value_int64 = (char)getbits(*((UINT_PTR *)((UINT_PTR)target + field->mOffset)), field->mSize, field->mBitOffset, field->mBitSize, field->mIsUnsigned);
+					else
+						aResultToken.value_int64 = *((char *)((UINT_PTR)target + field->mOffset));
+				}
 				else
-					aResultToken.value_int64 = *((unsigned char *)((UINT_PTR)target + field->mOffset));
+				{
+					if (field->mBitSize)
+						aResultToken.value_int64 = (unsigned char)getbits(*((UINT_PTR *)((UINT_PTR)target + field->mOffset)), field->mSize, field->mBitOffset, field->mBitSize, field->mIsUnsigned);
+					else
+						aResultToken.value_int64 = *((unsigned char *)((UINT_PTR)target + field->mOffset));
+				}
 				aResultToken.symbol = SYM_INTEGER;
 			}
 		}
@@ -1882,7 +2008,7 @@ int Struct::Enumerator::Next(Var *aKey, Var *aVal)
 }
 
 
-Struct::FieldType *Struct::Insert(LPTSTR key, IndexType at,UCHAR aIspointer,int aOffset,int aArrsize,Var *variableref,int aFieldsize,bool aIsinteger,bool aIsunsigned,USHORT aEncoding)
+Struct::FieldType *Struct::Insert(LPTSTR key, IndexType &at,USHORT aIspointer,int aOffset,int aArrsize,Var *variableref,int aFieldsize,bool aIsinteger,bool aIsunsigned,USHORT aEncoding, BYTE aBitSize,BYTE aBitField )
 // Inserts a single field with the given key at the given offset.
 // Caller must ensure 'at' is the correct offset for this key.
 {
@@ -1898,14 +2024,20 @@ Struct::FieldType *Struct::Insert(LPTSTR key, IndexType at,UCHAR aIspointer,int 
 		mVarRef = variableref;
 		return (FieldType*)true;
 	}
+	if (this->FindField(key))
+	{
+		g_script.ScriptError(ERR_DUPLICATE_DECLARATION, key);
+		return NULL;
+	}
 	if (mFieldCount == mFieldCountMax && !Expand()  // Attempt to expand if at capacity.
 		|| !(key = _tcsdup(key)))  // Attempt to duplicate key-string.
 	{	// Out of memory.
+		g_script.ScriptError(ERR_OUTOFMEM);
 		return NULL;
 	}
 	// There is now definitely room in mFields for a new field.
 
-	FieldType &field = mFields[at];
+	FieldType &field = mFields[at++];
 	if (at < mFieldCount)
 		// Move existing fields to make room.
 		memmove(&field + 1, &field, (mFieldCount - at) * sizeof(FieldType));
@@ -1918,6 +2050,8 @@ Struct::FieldType *Struct::Insert(LPTSTR key, IndexType at,UCHAR aIspointer,int 
 	field.mArraySize = aArrsize;
 	field.mIsPointer = aIspointer;
 	field.mOffset = aOffset;
+	field.mBitSize = aBitSize;
+	field.mBitOffset = aBitField;
 	field.mIsInteger = aIsinteger;
 	field.mIsUnsigned = aIsunsigned;
 	field.mEncoding = aEncoding;

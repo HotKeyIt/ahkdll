@@ -503,7 +503,9 @@ protected:
 		UINT_PTR *mStructMem;	// Pointer to allocated memory
 		int mSize;				// Size of field
 		int mOffset;			// Offset for field	
-		int mIsPointer;			// Pointer depth
+		USHORT mIsPointer;		// Pointer depth (Pointer to Pointer...)
+		BYTE mBitOffset;		// Bit offset
+		BYTE mBitSize;			// Bit field size
 		bool mIsInteger;		// IsInteger for NumGet/NumPut
 		bool mIsUnsigned;		// IsUnsigned for NumGet/NumPut
 		USHORT mEncoding;		// Encoding for StrGet/StrPut
@@ -541,7 +543,7 @@ protected:
 	~Struct();
 
 	FieldType *FindField(LPTSTR val);
-	FieldType *Insert(LPTSTR key, IndexType at,UCHAR aIspointer,int aOffset,int aArrsize,Var *variableref,int aFieldsize,bool aIsinteger,bool aIsunsigned,USHORT aEncoding);
+	FieldType *Insert(LPTSTR key, IndexType &at,USHORT aIspointer,int aOffset,int aArrsize,Var *variableref,int aFieldsize,bool aIsinteger,bool aIsunsigned,USHORT aEncoding, BYTE aBitSize, BYTE aBitField);
 	bool SetInternalCapacity(IndexType new_capacity);
 	bool Expand()
 	// Expands mFields by at least one field.
@@ -553,7 +555,7 @@ public:
 	UINT_PTR *mStructMem;		// Pointer to allocated memory
 	bool mTypeOnly;				// Identify that structure has no fields
 	int mSize;					// Size of structure
-	int mIsPointer;				// Pointer depth
+	SHORT mIsPointer;			// Pointer depth
 	bool mIsInteger;			// IsInteger for NumGet/NumPut
 	bool mIsUnsigned;			// IsUnsigned for NumGet/NumPut
 	USHORT mEncoding;			// Encoding for StrGet/StrPut

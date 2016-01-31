@@ -219,6 +219,9 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_INVALID_LINE_IN_PROPERTY_DEF _T("Not a valid property getter/setter.")
 #define ERR_INVALID_GUI_NAME _T("Invalid Gui name.")
 #define ERR_INVALID_OPTION _T("Invalid option.") // Generic message used by Gui and GuiControl/Get.
+#define ERR_INVALID_STRUCT _T("Invalid structure definition.")
+#define ERR_INVALID_STRUCT_IN_FUNC _T("Variable was not found in function.")
+#define ERR_INVALID_STRUCT_BIT_POINTER _T("Bit field must not be a pointer")
 #define ERR_EXCEPTION _T("An exception was thrown.")
 #define ERR_MUST_INIT_STRUCT _T("Empty pointer, dynamic Structure fields must be initialized manually first.")
 

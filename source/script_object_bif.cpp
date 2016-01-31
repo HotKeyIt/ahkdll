@@ -15,13 +15,18 @@ BIF_DECL(BIF_Struct)
 	// At least the definition for structure must be given
 	if (!aParamCount)
 		return;
-	IObject *obj = Struct::Create(aParam,aParamCount);
+	IObject *obj = Struct::Create(aParam, aParamCount);
 	if (obj)
 	{
 		aResultToken.symbol = SYM_OBJECT;
 		aResultToken.object = obj;
 		return;
 		// DO NOT ADDREF: after we return, the only reference will be in aResultToken.
+	}
+	else
+	{
+		aResult = FAIL;
+		return;
 	}
 	// indicate error
 	aResultToken.symbol = SYM_STRING;
@@ -158,6 +163,11 @@ BIF_DECL(BIF_sizeof)
 	// buffer for arraysize + 2 for bracket ] and terminating character
 	TCHAR intbuf[MAX_INTEGER_LENGTH + 2];
 
+	LPTSTR bitfield = NULL;
+	BYTE bitsize = 0;
+	BYTE bitsizetotal = 0;
+	LPTSTR isBit;
+
 	// Set result to empty string to identify error
 	aResultToken.symbol = SYM_STRING;
 	aResultToken.marker = _T("");
@@ -258,12 +268,18 @@ BIF_DECL(BIF_sizeof)
 		if (StrChrAny(buf, _T("};,")))
 		{
 			if ((buf_size = _tcscspn(buf, _T("};,"))) > LINE_SIZE - 1)
+			{
+				g_script.ScriptError(ERR_INVALID_STRUCT, buf);
 				return;
+			}
 			_tcsncpy(tempbuf,buf,buf_size);
 			tempbuf[buf_size] = '\0';
 		}
 		else if (_tcslen(buf) > LINE_SIZE - 1)
+		{
+			g_script.ScriptError(ERR_INVALID_STRUCT, buf);
 			return;
+		}
 		else
 			_tcscpy(tempbuf,buf);
 		
@@ -283,6 +299,11 @@ BIF_DECL(BIF_sizeof)
 		// Pointer, while loop will continue here because we only need size
 		if (_tcschr(tempbuf,'*'))
 		{
+			if (_tcschr(tempbuf, ':'))
+			{
+				g_script.ScriptError(ERR_INVALID_STRUCT_BIT_POINTER, tempbuf);
+				return;
+			}
 			// align offset for pointer
 			if (mod = offset % ptrsize)
 				offset += (ptrsize - mod) % ptrsize;
@@ -313,23 +334,38 @@ BIF_DECL(BIF_sizeof)
 		if (StrChrAny(tempbuf, _T(" \t")) || StrChrAny(tempbuf,_T("};,")) || (!StrChrAny(buf,_T("};,")) && !offset))
 		{
 			if ((buf_size = _tcscspn(tempbuf,_T("\t ["))) > MAX_VAR_NAME_LENGTH*2 + 30)
+			{
+				g_script.ScriptError(ERR_INVALID_STRUCT, tempbuf);
 				return;
-			_tcsncpy(defbuf + 1,tempbuf,_tcscspn(tempbuf,_T("\t [")));
-			_tcscpy(defbuf + 1 + _tcscspn(tempbuf,_T("\t [")),_T(" "));
+			}
+			isBit = omit_leading_whitespace(StrChrAny(tempbuf, _T(" \t")));
+			if (*isBit != ':')
+			{
+				if (_tcsnicmp(defbuf + 1, tempbuf, _tcslen(defbuf) - 2))
+					bitsizetotal = bitsize = 0;
+				_tcsncpy(defbuf + 1, tempbuf, _tcscspn(tempbuf, _T("\t [")));
+				_tcscpy(defbuf + 1 + _tcscspn(tempbuf, _T("\t [")), _T(" "));
+			}
+			if (bitfield = _tcschr(tempbuf, ':'))
+			{
+				if (bitsizetotal / 8 == thissize)
+					bitsizetotal = bitsize = 0;
+				bitsizetotal += bitsize = ATOI(bitfield + 1);
+			}
+			else
+				bitsizetotal = bitsize = 0;
 		}
-		// else // Not 'TypeOnly' definition because there are more than one fields in array so use default type UInt
 			// _tcscpy(defbuf,_T(" UInt "));
 		
 		// Now find size in default types array and create new field
 		// If Type not found, resolve type to variable and get size of struct defined in it
-		if ((thissize = IsDefaultType(defbuf)))
+		if ((!_tcscmp(defbuf, _T(" bool ")) && (thissize = 1)) || (thissize = IsDefaultType(defbuf)))
 		{
-			if (!_tcscmp(defbuf,_T(" bool ")))
-				thissize = 1;
 			// align offset
-			if (thissize > 1 && (mod = offset % thissize))
+			if ((!bitsize || bitsizetotal == bitsize) && thissize > 1 && (mod = offset % thissize))
 				offset += (thissize - mod) % thissize;
-			offset += thissize * (arraydef ? arraydef : 1);
+			if (!bitsize || bitsizetotal == bitsize)
+				offset += thissize * (arraydef ? arraydef : 1);
 			if (thissize > *aligntotal)
 				*aligntotal = thissize; // > ptrsize ? ptrsize : thissize;
 		}
@@ -354,6 +390,7 @@ BIF_DECL(BIF_sizeof)
 				else // release object and return
 				{
 					g->CurrentFunc = bkpfunc;
+					g_script.ScriptError(ERR_INVALID_STRUCT_IN_FUNC, defbuf);
 					return;
 				}
 			}
@@ -369,24 +406,33 @@ BIF_DECL(BIF_sizeof)
 				BIF_sizeof(Result,ResultToken,param,3);
 				if (ResultToken.symbol != SYM_INTEGER)
 				{	// could not resolve structure
+					g_script.ScriptError(ERR_INVALID_STRUCT, defbuf);
 					return;
 				}
-				if (offset && (mod = offset % *aligntotal))
+				if ((!bitsize || bitsizetotal == bitsize) && offset && (mod = offset % *aligntotal))
 					offset += (*aligntotal - mod) % *aligntotal;
 				// sizeof was given an offset that it applied and aligned if necessary, so set offset =  and not +=
-				offset = (int)ResultToken.value_int64 + (arraydef ? ((arraydef - 1) * ((int)ResultToken.value_int64 - offset)) : 0);
+				if (!bitsize || bitsizetotal == bitsize)
+					offset = (int)ResultToken.value_int64 + (arraydef ? ((arraydef - 1) * ((int)ResultToken.value_int64 - offset)) : 0);
 			}
 			else // No variable was found and it is not default type so we can't determine size, return empty string.
+			{
+				g_script.ScriptError(ERR_INVALID_STRUCT, defbuf);
 				return;
+			}
 		}
 		// update union size
 		if (uniondepth)
 		{
 			if ((maxsize = offset - unionoffset[uniondepth]) > unionsize[uniondepth])
 				unionsize[uniondepth] = maxsize;
-			// reset offset if in union and union is not a structure
 			if (!unionisstruct[uniondepth])
+			{
+				// reset offset if in union and union is not a structure
 				offset = unionoffset[uniondepth];
+				// reset bit offset and size
+				bitsize = bitsizetotal = 0;
+			}
 		}
 		// Move buffer pointer now
 		if (_tcschr(buf,'}') && (!StrChrAny(buf, _T(";,")) || _tcschr(buf,'}') < StrChrAny(buf, _T(";,"))))
