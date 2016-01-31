@@ -30,8 +30,8 @@ void UpdateScrollbars(GuiType *agui, int client_right, int client_bottom,bool do
 	int xScroll = 0, yScroll = 0;
 
 	// check if Scrollbars are shown
-	bool aHScrollVisible = agui->mStyle & WS_HSCROLL && (int)aHScroll->nPage <= aHScroll->nMax;
-	bool aVScrollVisible = agui->mStyle & WS_VSCROLL && (int)aVScroll->nPage <= aVScroll->nMax;
+	bool aHScrollVisible = agui->mStyle & WS_HSCROLL && aHScroll && (int)aHScroll->nPage <= aHScroll->nMax;
+	bool aVScrollVisible = agui->mStyle & WS_VSCROLL && aVScroll && (int)aVScroll->nPage <= aVScroll->nMax;
 
 	// Get new client area and add Scrollbars to it
 	// If Scrollbars do not belong to client area AutoSizePos above would not work
@@ -49,7 +49,7 @@ void UpdateScrollbars(GuiType *agui, int client_right, int client_bottom,bool do
 
 	// Ignore following code after SetScrollInfo if it will cause new WM_SIZE
 	bool aSkipOver = false;
-	if (agui->mStyle & WS_HSCROLL)
+	if (aHScroll && agui->mStyle & WS_HSCROLL)
 	{
 		aHScroll->nMax = agui->mMaxExtentRight + agui->mMarginX;
 
@@ -75,7 +75,7 @@ void UpdateScrollbars(GuiType *agui, int client_right, int client_bottom,bool do
 			aHScroll->nPos -= xScroll;
 		}
 	}
-	if (!aSkipOver && agui->mStyle & WS_VSCROLL)
+	if (!aSkipOver && aVScroll && agui->mStyle & WS_VSCROLL)
 	{
 		aVScroll->nMax = agui->mMaxExtentDown + agui->mMarginY;
 
