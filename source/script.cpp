@@ -236,10 +236,225 @@ FuncEntry g_BIF[] =
 
 	BIFn(OnExit, 1, 2, false, BIF_OnExitOrClipboard),
 	BIFn(OnClipboardChange, 1, 2, false, BIF_OnExitOrClipboard),
+#ifndef MINIDLL
+	BIFn(MenuGetHandle, 1, 1, true, BIF_MenuGet),
+	BIFn(MenuGetName, 1, 1, true, BIF_MenuGet),
+#endif
+	BIF1(LoadPicture, 1, 3, true),
 };
 #undef NA
 #undef BIFn
 #undef BIF1
+
+
+#define VF(name, fn) { _T(#name), fn, NULL }
+#define A_x(name, fn) { _T(#name), fn, NULL }
+#define A_(name) A_x(name, BIV_##name)
+#define A_wx(name, fnget, fnset) { _T(#name), fnget, fnset }
+#define A_w(name) A_wx(name, BIV_##name, BIV_##name##_Set)
+// IMPORTANT: Both of the following arrays must be kept in alphabetical order
+// for binary search to work.  See Script::GetBuiltInVar for further comments.
+// g_BIV: All built-in vars not beginning with "A_".  Keeping these separate allows
+// the search to be limited to just these few whenever the var name does not begin
+// with "A_", as for most user-defined variables.  This helps average-case performance.
+VarEntry g_BIV[] =
+{
+	VF(Clipboard, (BuiltInVarType)VAR_CLIPBOARD),
+	VF(ClipboardAll, (BuiltInVarType)VAR_CLIPBOARDALL),
+	VF(False, BIV_True_False_Null),
+	VF(Null, BIV_True_False_Null),
+	VF(ProgramFiles, BIV_SpecialFolderPath), // v1.0.43.08: Added to ease the transition to #NoEnv.,
+	VF(True, BIV_True_False_Null)
+};
+// g_BIV_A: All built-in vars beginning with "A_".  The prefix is omitted from each
+// name to reduce code size and speed up the comparisons.
+VarEntry g_BIV_A[] =
+{
+	A_(AhkDir),
+	A_(AhkPath),
+	A_(AhkVersion),
+	A_x(AppData, BIV_SpecialFolderPath),
+	A_x(AppDataCommon, BIV_SpecialFolderPath),
+	A_x(CaretX, BIV_Caret),
+	A_x(CaretY, BIV_Caret),
+	A_x(ComputerName, BIV_UserName_ComputerName),
+	A_(ComSpec),
+	A_wx(ControlDelay, BIV_xDelay, BIV_xDelay_Set),
+	A_wx(CoordModeCaret, BIV_CoordMode, BIV_CoordMode_Set),
+	A_wx(CoordModeMenu, BIV_CoordMode, BIV_CoordMode_Set),
+	A_wx(CoordModeMouse, BIV_CoordMode, BIV_CoordMode_Set),
+	A_wx(CoordModePixel, BIV_CoordMode, BIV_CoordMode_Set),
+	A_wx(CoordModeToolTip, BIV_CoordMode, BIV_CoordMode_Set),
+	A_(Cursor),
+	A_x(DD, BIV_DateTime),
+	A_x(DDD, BIV_MMM_DDD),
+	A_x(DDDD, BIV_MMM_DDD),
+#ifndef MINIDLL
+	A_x(DefaultGui, BIV_DefaultGui),
+	A_x(DefaultListView, BIV_DefaultGui),
+	A_w(DefaultMouseSpeed),
+	A_x(DefaultTreeView, BIV_DefaultGui),
+#endif
+	A_x(Desktop, BIV_SpecialFolderPath),
+	A_x(DesktopCommon, BIV_SpecialFolderPath),
+	A_w(DetectHiddenText),
+	A_w(DetectHiddenWindows),
+	A_(DllDir),
+	A_(DllPath),
+#ifndef MINIDLL
+	A_(EndChar),
+#endif
+	A_w(EventInfo), // It's called "EventInfo" vs. "GuiEventInfo" because it applies to non-Gui events such as OnClipboardChange.,
+	A_w(FileEncoding),
+	A_(GlobalStruct),
+#ifndef MINIDLL
+	A_x(Gui, BIV_Gui),
+	A_(GuiControl),
+	A_x(GuiControlEvent, BIV_GuiEvent),
+	A_x(GuiEvent, BIV_GuiEvent), // v1.0.36: A_GuiEvent was added as a synonym for A_GuiControlEvent because it seems unlikely that A_GuiEvent will ever be needed for anything:,
+	A_x(GuiHeight, BIV_Gui),
+	A_x(GuiWidth, BIV_Gui),
+	A_x(GuiX, BIV_Gui), // Naming: Brevity seems more a benefit than would A_GuiEventX's improved clarity.,
+	A_x(GuiY, BIV_Gui), // These can be overloaded if a GuiMove label or similar is ever needed.,
+#endif
+	A_x(Hour, BIV_DateTime),
+#ifndef MINIDLL
+	A_(IconFile),
+	A_(IconHidden),
+	A_(IconNumber),
+	A_(IconTip),
+#endif
+	A_wx(Index, BIV_LoopIndex, BIV_LoopIndex_Set),
+	A_(InitialWorkingDir),
+	A_x(IPAddress1, BIV_IPAddress),
+	A_x(IPAddress2, BIV_IPAddress),
+	A_x(IPAddress3, BIV_IPAddress),
+	A_x(IPAddress4, BIV_IPAddress),
+	A_(Is64bitOS),
+	A_(IsAdmin),
+	A_(IsCompiled),
+	A_(IsCritical),
+	A_(IsDll),
+	A_(IsMini),
+	A_(IsPaused),
+#ifndef MINIDLL
+	A_(IsSuspended),
+#endif
+	A_(IsUnicode),
+	A_wx(KeyDelay, BIV_xDelay, BIV_xDelay_Set),
+	A_wx(KeyDelayPlay, BIV_xDelay, BIV_xDelay_Set),
+	A_wx(KeyDuration, BIV_xDelay, BIV_xDelay_Set),
+	A_wx(KeyDurationPlay, BIV_xDelay, BIV_xDelay_Set),
+	A_(Language),
+	A_w(LastError),
+	A_(LineFile),
+	A_(LineNumber),
+	A_(LoopField),
+	A_(LoopFileAttrib),
+	A_(LoopFileDir),
+	A_(LoopFileExt),
+	A_(LoopFileFullPath),
+	A_(LoopFileName),
+	A_(LoopFilePath),
+	A_(LoopFileShortName),
+	A_(LoopFileShortPath),
+	A_x(LoopFileSize, BIV_LoopFileSize),
+	A_x(LoopFileSizeKB, BIV_LoopFileSize),
+	A_x(LoopFileSizeMB, BIV_LoopFileSize),
+	A_x(LoopFileTimeAccessed, BIV_LoopFileTime),
+	A_x(LoopFileTimeCreated, BIV_LoopFileTime),
+	A_x(LoopFileTimeModified, BIV_LoopFileTime),
+	A_(LoopReadLine),
+	A_(LoopRegKey),
+	A_(LoopRegName),
+	A_(LoopRegSubKey),
+	A_(LoopRegTimeModified),
+	A_(LoopRegType),
+	A_x(MDay, BIV_DateTime),
+	A_(MemoryModule),
+	A_x(Min, BIV_DateTime),
+	A_x(MM, BIV_DateTime),
+	A_x(MMM, BIV_MMM_DDD),
+	A_x(MMMM, BIV_MMM_DDD),
+	A_(ModuleHandle),
+	A_x(Mon, BIV_DateTime),
+	A_wx(MouseDelay, BIV_xDelay, BIV_xDelay_Set),
+	A_wx(MouseDelayPlay, BIV_xDelay, BIV_xDelay_Set),
+	A_x(MSec, BIV_DateTime),
+	A_(MsgBoxResult),
+	A_(MyDocuments),
+	A_x(Now, BIV_Now),
+	A_x(NowUTC, BIV_Now),
+#ifdef CONFIG_WIN9X
+	A_(OSType),
+#endif
+	A_(OSVersion),
+#ifndef MINIDLL
+	A_(PriorHotkey),
+	A_(PriorKey),
+#endif
+	A_x(ProgramFiles, BIV_SpecialFolderPath),
+	A_x(Programs, BIV_SpecialFolderPath),
+	A_x(ProgramsCommon, BIV_SpecialFolderPath),
+	A_(PtrSize),
+	A_w(RegView),
+#ifndef MINIDLL
+	A_(ScreenDPI),
+#endif
+	A_x(ScreenHeight, BIV_ScreenWidth_Height),
+	A_x(ScreenWidth, BIV_ScreenWidth_Height),
+	A_(ScriptDir),
+	A_(ScriptFullPath),
+	A_(ScriptHwnd),
+	A_(ScriptName),
+	A_(ScriptStruct),
+	A_x(Sec, BIV_DateTime),
+	A_w(SendLevel),
+	A_w(SendMode),
+	A_x(Space, BIV_Space_Tab),
+	A_x(StartMenu, BIV_SpecialFolderPath),
+	A_x(StartMenuCommon, BIV_SpecialFolderPath),
+	A_x(Startup, BIV_SpecialFolderPath),
+	A_x(StartupCommon, BIV_SpecialFolderPath),
+	A_w(StoreCapslockMode),
+	A_w(StringCaseSense),
+	A_x(Tab, BIV_Space_Tab),
+	A_(Temp), // Debatably should be A_TempDir, but brevity seemed more popular with users, perhaps for heavy uses of the temp folder.,
+	A_(ThisFunc),
+#ifndef MINIDLL
+	A_(ThisHotkey),
+#endif
+	A_(ThisLabel),
+#ifndef MINIDLL
+	A_(ThisMenu),
+	A_(ThisMenuItem),
+	A_(ThisMenuItemPos),
+#endif
+	A_(TickCount),
+	A_(TimeIdle),
+	A_(TimeIdlePhysical),
+#ifndef MINIDLL
+	A_(TimeSincePriorHotkey),
+	A_(TimeSinceThisHotkey),
+#endif
+	A_w(TitleMatchMode),
+	A_wx(TitleMatchModeSpeed, BIV_TitleMatchModeSpeed, BIV_TitleMatchMode_Set),
+	A_x(UserName, BIV_UserName_ComputerName),
+	A_x(WDay, BIV_DateTime),
+	A_wx(WinDelay, BIV_xDelay, BIV_xDelay_Set),
+	A_(WinDir),
+	A_w(WorkingDir),
+	A_x(YDay, BIV_DateTime),
+	A_x(Year, BIV_DateTime),
+	A_x(YWeek, BIV_DateTime),
+	A_x(YYYY, BIV_DateTime)
+};
+#undef A_
+#undef A_x
+#undef A_w
+#undef A_wx
+#undef VF
+
 
 // See Script::CreateWindows() for details about the following:
 typedef BOOL(WINAPI* AddRemoveClipboardListenerType)(HWND);
@@ -271,7 +486,7 @@ Script::Script()
 	, mFunc(NULL), mFuncCount(0), mFuncCountMax(0)
 	, mFirstTimer(NULL), mLastTimer(NULL), mTimerEnabledCount(0), mTimerCount(0)
 #ifndef MINIDLL
-	, mFirstMenu(NULL), mLastMenu(NULL), mMenuCount(0)
+	, mFirstMenu(NULL), mLastMenu(NULL), mMenuCount(0), mThisMenuItem(NULL)
 #endif
 	, mVar(NULL), mVarCount(0), mVarCountMax(0), mLazyVar(NULL), mLazyVarCount(0)
 	, mCurrentFuncOpenBlockCount(0), mNextLineIsFunctionBody(false), mNoUpdateLabels(false)
@@ -834,16 +1049,22 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 	// It also provides more consistency.
 	GetModuleFileName(NULL, buf, _countof(buf));
 #else
-	TCHAR def_buf[MAX_PATH + 1], exe_buf[MAX_PATH + 1];
+	TCHAR def_buf[MAX_PATH + 1], exe_buf[MAX_PATH + 20]; // For simplicity, allow at least space for +2 (see below) and "AutoHotkey.chm".
 	if (!aScriptFilename) // v1.0.46.08: Change in policy: store the default script in the My Documents directory rather than in Program Files.  It's more correct and solves issues that occur due to Vista's file-protection scheme.
 	{
 		// Since no script-file was specified on the command line, use the default name.
 		// For portability, first check if there's an <EXENAME>.ahk file in the current directory.
 		LPTSTR suffix, dot;
-		GetModuleFileName(NULL, exe_buf, _countof(exe_buf));
+		DWORD exe_len = GetModuleFileName(NULL, exe_buf, MAX_PATH + 2);
+		// exe_len can be MAX_PATH+2 on Windows XP, in which case it is not null-terminated.
+		// MAX_PATH+1 could mean it was truncated.  Any path longer than MAX_PATH would be rare.
+		if (exe_len > MAX_PATH)
+			return FAIL; // Seems the safest option for this unlikely case.
 		if ((suffix = _tcsrchr(exe_buf, '\\')) // Find name part of path.
-			&& (dot = _tcsrchr(suffix, '.')) // Find extension part of name.
-			&& dot - exe_buf + 5 < _countof(exe_buf)) // Enough space in buffer?
+			&& (dot = _tcsrchr(suffix, '.'))  ) // Find extension part of name.
+			// Even if the extension is somehow zero characters, more than enough space was
+			// reserved in exe_buf to add "ahk":
+			//&& dot - exe_buf + 5 < _countof(exe_buf)  ) // Enough space in buffer?
 		{
 			_tcscpy(dot, EXT_AUTOHOTKEY);
 		}
@@ -860,7 +1081,7 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 			_tcscpy(aScriptFilename + filespec_length, suffix); // Append the filename: .ahk vs. .ini seems slightly better in terms of clarity and usefulness (e.g. the ability to double click the default script to launch it).
 			if (GetFileAttributes(aScriptFilename) == 0xFFFFFFFF)
 			{
-				_tcscpy(dot, _T(".chm")); // Replace the ".ahk" which was inserted earlier.
+				_tcscpy(suffix, _T("\\") AHK_HELP_FILE); // Replace the executable name.
 				if (GetFileAttributes(exe_buf) != 0xFFFFFFFF) // Avoids hh.exe showing an error message if the file doesn't exist.
 				{
 					_sntprintf(buf, _countof(buf), _T("\"ms-its:%s::/docs/Welcome.htm\""), exe_buf);
@@ -869,8 +1090,6 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 				}
 				// Since above didn't return, the help file is missing or failed to launch,
 				// so continue on and let the missing script file be reported as an error.
-				// This will happen for AutoHotkeyU32.exe because AutoHotkeyU32.chm doesn't
-				// exist (seems fine to just show an error message in such cases).
 			}
 		}
 		//else since the file exists, everything is now set up right. (The file might be a directory, but that isn't checked due to rarity.)
@@ -941,17 +1160,25 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 	// it might not find the dupe if the same script name is launched with different
 	// lowercase/uppercase letters:
 	ConvertFilespecToCorrectCase(buf); // This might change the length, e.g. due to expansion of 8.3 filename.
+	if (   !(mFileSpec = SimpleHeap::Malloc(buf))   )  // The full spec is stored for convenience, and it's relied upon by mIncludeLibraryFunctionsThenExit.
+		return FAIL;  // It already displayed the error for us.
 	LPTSTR filename_marker;
-	if (!(filename_marker = _tcsrchr(buf, '\\')))
-		filename_marker = buf;
-	else
+	if (filename_marker = _tcsrchr(buf, '\\'))
+	{
+		*filename_marker = '\0'; // Terminate buf in this position to divide the string.
+		if (   !(mFileDir = SimpleHeap::Malloc(buf))   )
+			return FAIL;  // It already displayed the error for us.
 		++filename_marker;
-	if (!(mFileSpec = SimpleHeap::Malloc(buf)))  // The full spec is stored for convenience, and it's relied upon by mIncludeLibraryFunctionsThenExit.
-		return FAIL;  // It already displayed the error for us.
-	filename_marker[-1] = '\0'; // Terminate buf in this position to divide the string.
-	if (!(mFileDir = SimpleHeap::Malloc(buf)))
-		return FAIL;  // It already displayed the error for us.
-	if (!(mFileName = SimpleHeap::Malloc(filename_marker)))
+	}
+	else
+	{
+		// The only known cause of this condition is a path being too long for GetFullPathName
+		// to expand it into buf, in which case buf and mFileSpec are now empty, and this will
+		// cause LoadFromFile() to fail and the program to exit.
+		//mFileDir = _T(""); // Already done by the constructor.
+		filename_marker = buf;
+	}
+	if (   !(mFileName = SimpleHeap::Malloc(filename_marker))   )
 		return FAIL;  // It already displayed the error for us.
 #ifdef AUTOHOTKEYSC
 	// Omit AutoHotkey from the window title, like AutoIt3 does for its compiled scripts.
@@ -961,7 +1188,7 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 #else
 	sntprintf(buf, _countof(buf), _T("%s\\%s - %s"), mFileDir, mFileName, T_AHK_NAME_VERSION);
 #endif
-	if (!(mMainWindowTitle = SimpleHeap::Malloc(buf)))
+	if (   !(mMainWindowTitle = SimpleHeap::Malloc(buf))   )
 		return FAIL;  // It already displayed the error for us.
 
 	// It may be better to get the module name this way rather than reading it from the registry
@@ -975,7 +1202,7 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 		size_t buf_length = _tcslen(buf);
 		buf[buf_length++] = '"';
 		buf[buf_length] = '\0';
-		if (!(mOurEXE = SimpleHeap::Malloc(buf)))
+		if (   !(mOurEXE = SimpleHeap::Malloc(buf))   )
 			return FAIL;  // It already displayed the error for us.
 		else
 		{
@@ -983,21 +1210,21 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 			if (!last_backslash) // probably can't happen due to the nature of GetModuleFileName().
 				mOurEXEDir = _T("");
 			*last_backslash = '\0';
-			if (!(mOurEXEDir = SimpleHeap::Malloc(buf + 1))) // +1 to omit the leading double-quote.
+			if (   !(mOurEXEDir = SimpleHeap::Malloc(buf + 1))   ) // +1 to omit the leading double-quote.
 				return FAIL;  // It already displayed the error for us.
 		}
 	}
 	return OK;
 }
 
-
+	
 
 ResultType Script::CreateWindows()
 // Returns OK or FAIL.
 {
 	if (!mMainWindowTitle || !*mMainWindowTitle) return FAIL;  // Init() must be called before this function.
 	// Register a window class for the main window:
-	WNDCLASSEX wc = { 0 };
+	WNDCLASSEX wc = {0};
 	wc.cbSize = sizeof(wc);
 	wc.lpszClassName = WINDOW_CLASS_MAIN;
 	wc.hInstance = g_hInstance;
@@ -5519,9 +5746,9 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 	if (IS_DIRECTIVE_MATCH(_T("#InputLevel")))
 	{
 		// All hotkeys declared after this directive are assigned the specified InputLevel.
-		// Input generated at a given SendLevel can only trigger hotkeys that belong to the
-		// same or lower InputLevel. Hotkeys at the lowest level (0) cannot be triggered by
-		// any generated input (the same behavior as AHK versions before this feature).
+		// Input generated at a given SendLevel can only trigger hotkeys that belong to a
+		// lower InputLevel. Hotkeys at the lowest level (0) cannot be triggered by any
+		// generated input (the same behavior as AHK versions before this feature).
 		// The default level is 0.
 
 		int group = parameter ? ATOI(parameter) : 0;
@@ -6899,7 +7126,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 						// just pass this information along by using a combination of NULL deref and
 						// ARG_TYPE_INPUT_VAR.  Otherwise (no variable was found and #MustDeclare is
 						// not in effect) let it be resolved later if appropriate.
-						if (this_new_arg.deref || (g_MustDeclare && GetVarType(this_aArg) == VAR_NORMAL)) // i.e. don't report a false #MustDeclare error if it's a built-in var.
+						if (this_new_arg.deref || (g_MustDeclare && !GetBuiltInVar(this_aArg))) // i.e. don't report a false #MustDeclare error if it's a built-in var.
 							this_new_arg.type = ARG_TYPE_INPUT_VAR;
 						// Store the text even if it was converted to an input var, since it might be
 						// converted back at a later stage.  Can't use Var::mName since it might have
@@ -7236,6 +7463,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 		break;
 
 	case ACT_REGDELETE:
+	case ACT_REGDELETEKEY:
 		if (*new_raw_arg1 && !line.ArgHasDeref(1) && !line.RegConvertKey(new_raw_arg1))
 			return ScriptError(ERR_PARAM1_INVALID, new_raw_arg1);
 		break;
@@ -10123,13 +10351,12 @@ Var *Script::AddVar(LPTSTR aVarName, size_t aVarNameLength, int aInsertPos, int 
 	// built-in vars in the global list for efficiency and to keep them out of ListVars.  Note that another
 	// section at loadtime displays an error for any attempt to explicitly declare built-in variables as
 	// either global or local.
-	VirtualVar biv;
-	VarTypes var_type = GetVarType(var_name, &biv);
-	if (var_type != VAR_NORMAL || !_tcsicmp(var_name, _T("ErrorLevel"))) // Attempt to create built-in variable as local.
+	VarEntry *builtin = GetBuiltInVar(var_name);
+	if (aIsLocal && (builtin || !_tcsicmp(var_name, _T("ErrorLevel")))) // Attempt to create built-in variable as local.
 	{
 		if (aIsLocal)
 		{
-			if (!(aScope & VAR_LOCAL_FUNCPARAM)) // It's not a UDF's parameter, so fall back to the global built-in variable of this name rather than displaying an error.
+			if (  !(aScope & VAR_LOCAL_FUNCPARAM)  ) // It's not a UDF's parameter, so fall back to the global built-in variable of this name rather than displaying an error.
 				return FindOrAddVar(var_name, aVarNameLength, FINDVAR_GLOBAL); // Force find-or-create of global.
 			else // (aIsLocal & VAR_LOCAL_FUNCPARAM), which means "this is a local variable and a function's parameter".
 			{
@@ -10161,7 +10388,7 @@ Var *Script::AddVar(LPTSTR aVarName, size_t aVarNameLength, int aInsertPos, int 
 		aScope |= VAR_LOCAL_STATIC;
 
 	bool aIsStatic = aIsLocal ? (aScope & VAR_LOCAL_STATIC) : false;
-	Var *the_new_var = new Var(new_name, var_type, &biv, aScope);
+	Var *the_new_var = new Var(new_name, builtin, aScope);
 	if (the_new_var == NULL)
 	{
 		ScriptError(ERR_OUTOFMEM);
@@ -10325,256 +10552,40 @@ Var *Script::AddVar(LPTSTR aVarName, size_t aVarNameLength, int aInsertPos, int 
 }
 
 
-VarTypes Script::GetVarType(LPTSTR aVarName, VirtualVar *aBIV)
+VarEntry *Script::GetBuiltInVar(LPTSTR aVarName)
 {
-	// Convert to lowercase to help performance a little (it typically only helps loadtime performance because
-	// this function is rarely called during script-runtime).
-	TCHAR lowercase[MAX_VAR_NAME_LENGTH + 1];
-	tcslcpy(lowercase, aVarName, _countof(lowercase)); // Caller should have ensured it fits, but call strlcpy() for maintainability.
-	CharLower(lowercase);
-	// Above: CharLower() is smaller in code size than strlwr(), but CharLower uses the OS locale and strlwr uses
-	// the setlocal() locale (which is always the same if setlocal() is never called).  However, locale
-	// differences shouldn't affect the cases checked below; some evidence of this is at MSDN:
-	// "CharLower always maps uppercase I to lowercase I, even when the current language is Turkish or Azeri."
-
-	if (lowercase[0] != 'a' || lowercase[1] != '_')  // This check helps average-case performance.
+	VarEntry *biv;
+	int count;
+	// This array approach saves about 9KB on code size over the old approach
+	// of a series of if's and _tcscmp calls, and performs about the same.
+	// Two arrays are used so that common dynamic vars (without "A_" prefix)
+	// don't require as long a search, and so that "A_" can be omitted from
+	// each var name in the array (to reduce code size).
+	if ((aVarName[0] == 'A' || aVarName[0] == 'a') && aVarName[1] == '_')
 	{
-		if ((lowercase[0] == 'f' && lowercase[1] == 'a' && lowercase[2] == 'l' && lowercase[3] == 's' && lowercase[4] == 'e' && lowercase[5] == '\0')
-			|| (lowercase[0] == 't' && lowercase[1] == 'r' && lowercase[2] == 'u' && lowercase[3] == 'e' && lowercase[4] == '\0')
-			|| (lowercase[0] == 'n' && lowercase[1] == 'u' && lowercase[2] == 'l' && lowercase[3] == 'l' && lowercase[4] == '\0'))
-		{
-			if (aBIV)
-			{
-				aBIV->Get = BIV_True_False_Null;
-				aBIV->Set = NULL;
-			}
-			return VAR_BUILTIN;
-		}
-		if (lowercase[0] == 'c' && lowercase[1] == 'l' && lowercase[2] == 'i' && lowercase[3] == 'p' && lowercase[4] == 'b'
-			&& lowercase[5] == 'o' && lowercase[6] == 'a' && lowercase[7] == 'r' && lowercase[8] == 'd')
-		{
-			if (lowercase[9] == '\0')
-				return VAR_CLIPBOARD;
-			else if (lowercase[9] == 'a' && lowercase[10] == 'l' && lowercase[11] == 'l' && lowercase[12] == '\0')
-				return VAR_CLIPBOARDALL;
-		}
-		// Otherwise:
-		return VAR_NORMAL;
+		aVarName += 2;
+		biv = g_BIV_A;
+		count = _countof(g_BIV_A);
 	}
-
-	BuiltInVarSetType bivs = NULL;
-	if (BuiltInVarType biv = GetVarType_BIV(lowercase, bivs))
+	else
 	{
-		if (aBIV)
-		{
-			aBIV->Get = biv;
-			aBIV->Set = bivs;
-		}
-		return bivs ? VAR_VIRTUAL : VAR_BUILTIN;
+		biv = g_BIV;
+		count = _countof(g_BIV);
 	}
-
-	return VAR_NORMAL;
-}
-
-BuiltInVarType Script::GetVarType_BIV(LPTSTR lowercase, BuiltInVarSetType &setter)
-{
-	// Otherwise, lowercase begins with "a_", so it's probably one of the built-in variables.
-	LPTSTR lower = lowercase + 2;
-
-	// Keeping the most common ones near the top helps performance a little.
-	if (!_tcscmp(lower, _T("index"))) { setter = BIV_LoopIndex_Set; return BIV_LoopIndex; }  // A short name since it's typed so often.
-
-	if (!_tcscmp(lower, _T("mmmm"))    // Long name of month.
-		|| !_tcscmp(lower, _T("mmm"))     // 3-char abbrev. month name.
-		|| !_tcscmp(lower, _T("dddd"))    // Name of weekday, e.g. Sunday
-		|| !_tcscmp(lower, _T("ddd"))) // Abbrev., e.g. Sun
-		return BIV_MMM_DDD;
-
-	if (!_tcscmp(lower, _T("yyyy"))
-		|| !_tcscmp(lower, _T("year")) // Same as above.
-		|| !_tcscmp(lower, _T("mm"))   // 01 thru 12
-		|| !_tcscmp(lower, _T("mon"))  // Same
-		|| !_tcscmp(lower, _T("dd"))   // 01 thru 31
-		|| !_tcscmp(lower, _T("mday")) // Same
-		|| !_tcscmp(lower, _T("wday"))
-		|| !_tcscmp(lower, _T("yday"))
-		|| !_tcscmp(lower, _T("yweek"))
-		|| !_tcscmp(lower, _T("hour"))
-		|| !_tcscmp(lower, _T("min"))
-		|| !_tcscmp(lower, _T("sec"))
-		|| !_tcscmp(lower, _T("msec")))
-		return BIV_DateTime;
-
-	if (!_tcscmp(lower, _T("tickcount"))) return BIV_TickCount;
-	if (!_tcscmp(lower, _T("now"))
-		|| !_tcscmp(lower, _T("nowutc"))) return BIV_Now;
-
-	if (!_tcscmp(lower, _T("workingdir"))) { setter = BIV_WorkingDir_Set; return BIV_WorkingDir; }
-	if (!_tcscmp(lower, _T("initialworkingdir"))) return BIV_InitialWorkingDir;
-	if (!_tcscmp(lower, _T("scriptname"))) return BIV_ScriptName;
-	if (!_tcscmp(lower, _T("scriptdir"))) return BIV_ScriptDir;
-	if (!_tcscmp(lower, _T("scriptfullpath"))) return BIV_ScriptFullPath;
-	if (!_tcscmp(lower, _T("scripthwnd"))) return BIV_ScriptHwnd;
-	if (!_tcscmp(lower, _T("linenumber"))) return BIV_LineNumber;
-	if (!_tcscmp(lower, _T("linefile"))) return BIV_LineFile;
-
-	if (!_tcscmp(lower, _T("iscompiled"))) return BIV_IsCompiled;
-	if (!_tcscmp(lower, _T("isunicode"))) return BIV_IsUnicode;
-	if (!_tcscmp(lower, _T("ptrsize"))) return BIV_PtrSize;
-
-	if (!_tcscmp(lower, _T("titlematchmode"))) { setter = BIV_TitleMatchMode_Set; return BIV_TitleMatchMode; }
-	if (!_tcscmp(lower, _T("titlematchmodespeed"))) { setter = BIV_TitleMatchMode_Set; return BIV_TitleMatchModeSpeed; }
-	if (!_tcscmp(lower, _T("detecthiddenwindows"))) { setter = BIV_DetectHiddenWindows_Set; return BIV_DetectHiddenWindows; }
-	if (!_tcscmp(lower, _T("detecthiddentext"))) { setter = BIV_DetectHiddenText_Set; return BIV_DetectHiddenText; }
-	if (!_tcscmp(lower, _T("stringcasesense"))) { setter = BIV_StringCaseSense_Set; return BIV_StringCaseSense; }
-	if (!_tcscmp(lower, _T("keydelay"))) { setter = BIV_KeyDelay_Set; return BIV_KeyDelay; }
-	if (!_tcscmp(lower, _T("windelay"))) { setter = BIV_WinDelay_Set; return BIV_WinDelay; }
-	if (!_tcscmp(lower, _T("controldelay"))) { setter = BIV_ControlDelay_Set; return BIV_ControlDelay; }
-	if (!_tcscmp(lower, _T("mousedelay"))) { setter = BIV_MouseDelay_Set; return BIV_MouseDelay; }
-	if (!_tcscmp(lower, _T("defaultmousespeed"))) { setter = BIV_DefaultMouseSpeed_Set; return BIV_DefaultMouseSpeed; }
-	if (!_tcscmp(lower, _T("ispaused"))) return BIV_IsPaused;
-	if (!_tcscmp(lower, _T("iscritical"))) return BIV_IsCritical;
-	if (!_tcscmp(lower, _T("fileencoding"))) { setter = BIV_FileEncoding_Set; return BIV_FileEncoding; }
-	if (!_tcscmp(lower, _T("msgboxresult"))) return BIV_MsgBoxResult;
-	if (!_tcscmp(lower, _T("regview"))) { setter = BIV_RegView_Set; return BIV_RegView; }
-#ifndef MINIDLL
-	if (!_tcscmp(lower, _T("issuspended"))) return BIV_IsSuspended;
-
-	if (!_tcscmp(lower, _T("iconhidden"))) return BIV_IconHidden;
-	if (!_tcscmp(lower, _T("icontip"))) return BIV_IconTip;
-	if (!_tcscmp(lower, _T("iconfile"))) return BIV_IconFile;
-	if (!_tcscmp(lower, _T("iconnumber"))) return BIV_IconNumber;
-#endif
-#ifdef CONFIG_WIN9X
-	if (!_tcscmp(lower, _T("ostype"))) return BIV_OSType;
-#endif
-	if (!_tcscmp(lower, _T("osversion"))) return BIV_OSVersion;
-	if (!_tcscmp(lower, _T("is64bitos"))) return BIV_Is64bitOS;
-	if (!_tcscmp(lower, _T("language"))) return BIV_Language;
-	if (!_tcscmp(lower, _T("computername"))
-		|| !_tcscmp(lower, _T("username"))) return BIV_UserName_ComputerName;
-
-	if (!_tcscmp(lower, _T("windir"))) return BIV_WinDir;
-	if (!_tcscmp(lower, _T("temp"))) return BIV_Temp; // Debatably should be A_TempDir, but brevity seemed more popular with users, perhaps for heavy uses of the temp folder.
-	if (!_tcscmp(lower, _T("mydocuments"))) return BIV_MyDocuments;
-
-	if (!_tcscmp(lower, _T("programfiles"))
-		|| !_tcscmp(lower, _T("appdata"))
-		|| !_tcscmp(lower, _T("appdatacommon"))
-		|| !_tcscmp(lower, _T("desktop"))
-		|| !_tcscmp(lower, _T("desktopcommon"))
-		|| !_tcscmp(lower, _T("startmenu"))
-		|| !_tcscmp(lower, _T("startmenucommon"))
-		|| !_tcscmp(lower, _T("programs"))
-		|| !_tcscmp(lower, _T("programscommon"))
-		|| !_tcscmp(lower, _T("startup"))
-		|| !_tcscmp(lower, _T("startupcommon")))
-		return BIV_SpecialFolderPath;
-
-	if (!_tcscmp(lower, _T("comspec"))) return BIV_ComSpec;
-
-	if (!_tcscmp(lower, _T("isadmin"))) return BIV_IsAdmin;
-	if (!_tcscmp(lower, _T("cursor"))) return BIV_Cursor;
-	if (!_tcscmp(lower, _T("caretx"))
-		|| !_tcscmp(lower, _T("carety"))) return BIV_Caret;
-	if (!_tcscmp(lower, _T("screenwidth"))
-		|| !_tcscmp(lower, _T("screenheight"))) return BIV_ScreenWidth_Height;
-
-	if (!_tcsncmp(lower, _T("ipaddress"), 9))
+	// Using binary search vs. linear search performs a bit better (notably for
+	// rare/contrived cases like A_x%index%) and doesn't affect code size much.
+	int left, right, mid, result;
+	for (left = 0, right = count - 1; left <= right;)
 	{
-		lower += 9;
-		return (*lower >= '1' && *lower <= '4'
-			&& !lower[1]) // Make sure has only one more character rather than none or several (e.g. A_IPAddress1abc should not be match).
-			? BIV_IPAddress
-			: NULL; // Otherwise it can't be a match for any built-in variable.
+		mid = (left + right) / 2;
+		result = _tcsicmp(aVarName, biv[mid].name);
+		if (result > 0)
+			left = mid + 1;
+		else if (result < 0)
+			right = mid - 1;
+		else // Match found.
+			return &biv[mid];
 	}
-
-	if (!_tcsncmp(lower, _T("loop"), 4))
-	{
-		lower += 4;
-		if (!_tcscmp(lower, _T("readline"))) return BIV_LoopReadLine;
-		if (!_tcscmp(lower, _T("field"))) return BIV_LoopField;
-
-		if (!_tcsncmp(lower, _T("file"), 4))
-		{
-			lower += 4;
-			if (!_tcscmp(lower, _T("name"))) return BIV_LoopFileName;
-			if (!_tcscmp(lower, _T("shortname"))) return BIV_LoopFileShortName;
-			if (!_tcscmp(lower, _T("ext"))) return BIV_LoopFileExt;
-			if (!_tcscmp(lower, _T("dir"))) return BIV_LoopFileDir;
-			if (!_tcscmp(lower, _T("path"))) return BIV_LoopFilePath;
-			if (!_tcscmp(lower, _T("fullpath"))) return BIV_LoopFileFullPath;
-			if (!_tcscmp(lower, _T("shortpath"))) return BIV_LoopFileShortPath;
-			if (!_tcscmp(lower, _T("attrib"))) return BIV_LoopFileAttrib;
-
-			if (!_tcscmp(lower, _T("timemodified"))
-				|| !_tcscmp(lower, _T("timecreated"))
-				|| !_tcscmp(lower, _T("timeaccessed"))) return BIV_LoopFileTime;
-			if (!_tcscmp(lower, _T("size"))
-				|| !_tcscmp(lower, _T("sizekb"))
-				|| !_tcscmp(lower, _T("sizemb"))) return BIV_LoopFileSize;
-			// Otherwise, it can't be a match for any built-in variable:
-			return NULL;
-		}
-
-		if (!_tcsncmp(lower, _T("reg"), 3))
-		{
-			lower += 3;
-			if (!_tcscmp(lower, _T("type"))) return BIV_LoopRegType;
-			if (!_tcscmp(lower, _T("key"))) return BIV_LoopRegKey;
-			if (!_tcscmp(lower, _T("subkey"))) return BIV_LoopRegSubKey;
-			if (!_tcscmp(lower, _T("name"))) return BIV_LoopRegName;
-			if (!_tcscmp(lower, _T("timemodified"))) return BIV_LoopRegTimeModified;
-			// Otherwise, it can't be a match for any built-in variable:
-			return NULL;
-		}
-	}
-
-	if (!_tcscmp(lower, _T("thisfunc"))) return BIV_ThisFunc;
-	if (!_tcscmp(lower, _T("thislabel"))) return BIV_ThisLabel;
-#ifndef MINIDLL
-	if (!_tcscmp(lower, _T("thismenuitem"))) return BIV_ThisMenuItem;
-	if (!_tcscmp(lower, _T("thismenuitempos"))) return BIV_ThisMenuItemPos;
-	if (!_tcscmp(lower, _T("thismenu"))) return BIV_ThisMenu;
-	if (!_tcscmp(lower, _T("thishotkey"))) return BIV_ThisHotkey;
-	if (!_tcscmp(lower, _T("priorhotkey"))) return BIV_PriorHotkey;
-	if (!_tcscmp(lower, _T("timesincethishotkey"))) return BIV_TimeSinceThisHotkey;
-	if (!_tcscmp(lower, _T("timesincepriorhotkey"))) return BIV_TimeSincePriorHotkey;
-	if (!_tcscmp(lower, _T("endchar"))) return BIV_EndChar;
-#endif
-	if (!_tcscmp(lower, _T("lasterror"))) { setter = BIV_LastError_Set; return BIV_LastError; }
-	if (!_tcscmp(lower, _T("globalstruct"))) return BIV_GlobalStruct;
-	if (!_tcscmp(lower, _T("scriptstruct"))) return BIV_ScriptStruct;
-	if (!_tcscmp(lower, _T("modulehandle"))) return BIV_ModuleHandle;
-	if (!_tcscmp(lower, _T("memorymodule"))) return BIV_MemoryModule;
-	if (!_tcscmp(lower, _T("isdll"))) return BIV_IsDll;
-	if (!_tcscmp(lower, _T("ismini"))) return BIV_IsMini;
-	if (!_tcsncmp(lower, _T("coordmode"), 9)) { setter = BIV_CoordMode_Set; return BIV_CoordMode; }
-
-	if (!_tcscmp(lower, _T("eventinfo"))) { setter = BIV_EventInfo_Set; return BIV_EventInfo; } // It's called "EventInfo" vs. "GuiEventInfo" because it applies to non-Gui events such as RegisterCallback().
-#ifndef MINIDLL
-	if (!_tcscmp(lower, _T("guicontrol"))) return BIV_GuiControl;
-
-	if (!_tcscmp(lower, _T("guicontrolevent")) // v1.0.36: A_GuiEvent was added as a synonym for A_GuiControlEvent because it seems unlikely that A_GuiEvent will ever be needed for anything:
-		|| !_tcscmp(lower, _T("guievent"))) return BIV_GuiEvent;
-
-	if (!_tcscmp(lower, _T("gui"))
-		|| !_tcscmp(lower, _T("guiwidth"))
-		|| !_tcscmp(lower, _T("guiheight"))
-		|| !_tcscmp(lower, _T("guix")) // Naming: Brevity seems more a benefit than would A_GuiEventX's improved clarity.
-		|| !_tcscmp(lower, _T("guiy"))) return BIV_Gui; // These can be overloaded if a GuiMove label or similar is ever needed.
-	if (!_tcscmp(lower, _T("priorkey"))) return BIV_PriorKey;
-	if (!_tcscmp(lower, _T("screendpi"))) return BIV_ScreenDPI;
-#endif
-	if (!_tcscmp(lower, _T("timeidle"))) return BIV_TimeIdle;
-	if (!_tcscmp(lower, _T("timeidlephysical"))) return BIV_TimeIdlePhysical;
-	if (!_tcscmp(lower, _T("space"))
-		|| !_tcscmp(lower, _T("tab"))) return BIV_Space_Tab;
-	if (!_tcscmp(lower, _T("ahkversion"))) return BIV_AhkVersion;
-	if (!_tcscmp(lower, _T("ahkpath"))) return BIV_AhkPath;
-	if (!_tcscmp(lower, _T("ahkdir"))) return BIV_AhkDir;
-	if (!_tcscmp(lower, _T("dllpath"))) return BIV_DllPath;
-	if (!_tcscmp(lower, _T("dlldir"))) return BIV_DllDir;
 	// Since above didn't return:
 	return NULL;
 }
@@ -14918,7 +14929,7 @@ ResultType Line::Perform()
 	vk_type vk; // For GetKeyState.
 	bool is_remote_registry; // For Registry commands.
 	HKEY root_key; // For Registry commands.
-	LPTSTR subkey; // For Registry commands.
+	LPTSTR subkey, value_name; // For Registry commands.
 	ResultType result;  // General purpose.
 
 #ifdef _WIN64
@@ -15673,14 +15684,7 @@ ResultType Line::Perform()
 		//////////////////////////////////////////////////////////////////////////
 #endif
 	case ACT_COORDMODE:
-	{
-		CoordModeType mode = ConvertCoordMode(ARG2);
-		CoordModeType shift = ConvertCoordModeCmd(ARG1);
-		if (shift != -1 && mode != -1) // Compare directly to -1 because unsigned.
-			g.CoordMode = (g.CoordMode & ~(COORD_MODE_MASK << shift)) | (mode << shift);
-		//else too rare to report an error, since load-time validation normally catches it.
-		return OK;
-	}
+		return Script::SetCoordMode(ARG1, ARG2);
 
 	case ACT_SETDEFAULTMOUSESPEED:
 		g.DefaultMouseSpeed = (UCHAR)ArgToInt(1);
@@ -15690,17 +15694,10 @@ ResultType Line::Perform()
 		return OK;
 
 	case ACT_SENDMODE:
-		g.SendMode = ConvertSendMode(ARG1, g.SendMode); // Leave value unchanged if ARG1 is invalid.
-		return OK;
+		return Script::SetSendMode(ARG1);
 
 	case ACT_SENDLEVEL:
-	{
-		int sendLevel = ArgToInt(1);
-		if (SendLevelIsValid(sendLevel))
-			g.SendLevel = sendLevel;
-
-		return OK;
-	}
+		return Script::SetSendLevel(ArgToInt(1), ARG1);
 
 	case ACT_SETKEYDELAY:
 		if (!_tcsicmp(ARG3, _T("Play")))
@@ -15732,9 +15729,7 @@ ResultType Line::Perform()
 		return OK;
 
 	case ACT_SETSTORECAPSLOCKMODE:
-		if ((toggle = ConvertOnOff(ARG1, NEUTRAL)) != NEUTRAL)
-			g.StoreCapslockMode = (toggle == TOGGLED_ON);
-		return OK;
+		return BIV_StoreCapslockMode_Set(ARG1, NULL);
 
 	case ACT_SETTITLEMATCHMODE:
 		return BIV_TitleMatchMode_Set(ARG1, NULL);
@@ -15901,6 +15896,7 @@ ResultType Line::Perform()
 			RegCloseKey(root_key);
 		return result;
 	case ACT_REGDELETE:
+	case ACT_REGDELETEKEY:
 		if (mArgc < 1 && g.mLoopRegItem) // Uses the registry loop's current item.
 		{
 			// In this case, if the current reg item is a value, just delete it normally.
@@ -15909,14 +15905,18 @@ ResultType Line::Perform()
 			if (g.mLoopRegItem->type == REG_SUBKEY)
 			{
 				sntprintf(buf_temp, _countof(buf_temp), _T("%s\\%s"), g.mLoopRegItem->subkey, g.mLoopRegItem->name);
-				return RegDelete(g.mLoopRegItem->root_key, buf_temp, _T(""));
+				return RegDelete(g.mLoopRegItem->root_key, buf_temp, NULL);
 			}
 			else
 				return RegDelete(g.mLoopRegItem->root_key, g.mLoopRegItem->subkey, g.mLoopRegItem->name);
 		}
 		// Otherwise:
 		root_key = RegConvertKey(ARG1, &subkey, &is_remote_registry);
-		result = RegDelete(root_key, subkey, ARG2);
+		if (mActionType == ACT_REGDELETEKEY)
+			value_name = NULL;
+		else
+			value_name = ARG2; // If omitted, it will be blank (delete the default value).
+		result = RegDelete(root_key, subkey, value_name);
 		if (is_remote_registry && root_key) // Never try to close local root keys, which the OS always keeps open.
 			RegCloseKey(root_key);
 		return result;
@@ -16099,7 +16099,7 @@ BIF_DECL(BIF_PerformAction)
 
 	TCHAR number_buf[MAX_ARGS * MAX_NUMBER_SIZE]; // Enough for worst case.
 	Var *output_var;
-	Var stack_var(_T(""), VAR_NORMAL, NULL, 0);
+	Var stack_var(_T(""), NULL, 0);
 	// Prevent the use of SimpleHeap::Malloc().  Otherwise, each call could allocate
 	// some memory which cannot be freed until the program exits.
 	stack_var.DisableSimpleMalloc();
@@ -16168,11 +16168,11 @@ BIF_DECL(BIF_PerformAction)
 			// can only happen for OUTPUT vars since the stack_var workaround above covers the
 			// INPUT var for all known commands.
 			sntprintf(aResultToken.buf, MAX_NUMBER_SIZE, _T("Parameter #%i of %s must be a variable.")
-				, i + 1, aResultToken.func->mName);
+				, i+1, aResultToken.func->mName);
 			stack_var.Free(VAR_ALWAYS_FREE); // It might've been used as an input var.
 			_f_throw(aResultToken.buf);
 		}
-
+		
 		arg[i].text = TokenToString(*aParam[i], number_buf + (i * MAX_NUMBER_SIZE));
 		arg[i].deref = NULL;
 		// Since this arg contains no derefs, a pointer to the text will be copied directly
@@ -16181,7 +16181,7 @@ BIF_DECL(BIF_PerformAction)
 		//arg[i].length = (ArgLengthType)_tcslen(arg[i].text);
 	}
 
-
+	
 	// Always have LineError() throw an exception.  If it reported an error immediately,
 	// the dialog would show our temporary line rather than the line which actually called
 	// this function (which is far more relevant).
@@ -16225,7 +16225,7 @@ BIF_DECL(BIF_PerformAction)
 
 	if (result == OK) // Can be OK, FAIL or EARLY_EXIT.
 	{
-		if (output_var == g_ErrorLevel
+		if (output_var == g_ErrorLevel 
 			&& !(act == ACT_RUNWAIT || act == ACT_SENDMESSAGE) // These two have a more useful return value.
 			&& output_var->HasContents()) // Commands which don't set ErrorLevel at all shouldn't return 1.
 		{
@@ -16299,7 +16299,7 @@ ResultType Line::Deref(Var *aOutputVar, LPTSTR aBuf)
 		else // First pass.
 			expanded_length = 0; // Init prior to accumulation.
 
-		for (cp = aBuf;;)
+		for (cp = aBuf; ; )
 		{
 			// Find the next escape char or deref symbol:
 			for (; *cp && *cp != g_EscapeChar && *cp != g_DerefChar; ++cp)
@@ -16319,14 +16319,14 @@ ResultType Line::Deref(Var *aOutputVar, LPTSTR aBuf)
 					switch (*cp1) // See ConvertEscapeSequences() for more details.
 					{
 						// Only lowercase is recognized for these:
-					case 'a': *dest = '\a'; break;  // alert (bell) character
-					case 'b': *dest = '\b'; break;  // backspace
-					case 'f': *dest = '\f'; break;  // formfeed
-					case 'n': *dest = '\n'; break;  // newline
-					case 'r': *dest = '\r'; break;  // carriage return
-					case 't': *dest = '\t'; break;  // horizontal tab
-					case 'v': *dest = '\v'; break;  // vertical tab
-					default:  *dest = *cp1; // These other characters are resolved just as they are, including '\0'.
+						case 'a': *dest = '\a'; break;  // alert (bell) character
+						case 'b': *dest = '\b'; break;  // backspace
+						case 'f': *dest = '\f'; break;  // formfeed
+						case 'n': *dest = '\n'; break;  // newline
+						case 'r': *dest = '\r'; break;  // carriage return
+						case 't': *dest = '\t'; break;  // horizontal tab
+						case 'v': *dest = '\v'; break;  // vertical tab
+						default:  *dest = *cp1; // These other characters are resolved just as they are, including '\0'.
 					}
 					++dest;
 				}
@@ -16348,7 +16348,7 @@ ResultType Line::Deref(Var *aOutputVar, LPTSTR aBuf)
 				tcslcpy(var_name, cp, var_name_length + 1);  // +1 to convert var_name_length to size.
 				// Fixed for v1.0.34: Use FindOrAddVar() vs. FindVar() so that environment or built-in
 				// variables that aren't directly referenced elsewhere in the script will still work:
-				if (!(var = g_script.FindOrAddVar(var_name, var_name_length)))
+				if (   !(var = g_script.FindOrAddVar(var_name, var_name_length))   )
 					return FAIL; // Above already displayed the error.
 				var = var->ResolveAlias();
 				// Don't allow the output variable to be read into itself this way because its contents
