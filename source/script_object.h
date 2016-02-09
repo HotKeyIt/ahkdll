@@ -589,7 +589,7 @@ public:
 	UINT_PTR *mStructMem;		// Pointer to allocated memory
 	bool mTypeOnly;				// Identify that structure has no fields
 	int mSize;					// Size of structure
-	SHORT mIsPointer;			// Pointer depth
+	USHORT mIsPointer;			// Pointer depth
 	bool mIsInteger;			// IsInteger for NumGet/NumPut
 	bool mIsUnsigned;			// IsUnsigned for NumGet/NumPut
 	USHORT mEncoding;			// Encoding for StrGet/StrPut

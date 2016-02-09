@@ -268,6 +268,8 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			if (bitfield = _tcschr(keybuf, ':'))
 			{
 				*bitfield = '\0';
+				if (bitsizetotal / 8 == thissize)
+					bitsizetotal = bitsize = 0;
 				bitsizetotal += bitsize = ATOI(bitfield + 1);
 			}
 			trim(keybuf);
@@ -715,6 +717,8 @@ Struct *Struct::Clone(bool aIsDynamic)
 		dst.mArraySize = src.mArraySize;
 		dst.mIsInteger = src.mIsInteger;
 		dst.mIsPointer = src.mIsPointer;
+		dst.mBitOffset = src.mBitOffset;
+		dst.mBitSize = src.mBitSize;
 		dst.mEncoding = src.mEncoding;
 		dst.mIsUnsigned = src.mIsUnsigned;
 		dst.mOffset = src.mOffset;
