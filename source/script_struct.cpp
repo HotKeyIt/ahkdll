@@ -266,6 +266,12 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			// Commented following line to keep previous definition like in c++, e.g. "Int x,y,Char a,b", 
 			// Note: separator , or ; can be still used but
 			// _tcscpy(defbuf,_T(" UInt "));
+			if (_tcslen(tempbuf) > _countof(keybuf))
+			{
+				obj->Release();
+				g_script.ScriptError(ERR_INVALID_STRUCT, tempbuf);
+				return NULL;
+			}
 			_tcscpy(keybuf,tempbuf);
 			if (bitfield = _tcschr(keybuf, ':'))
 			{
