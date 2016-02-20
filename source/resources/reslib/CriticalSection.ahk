@@ -1,13 +1,12 @@
-﻿criticalsection(cs:=0){
+﻿CriticalSection(cs:=0){
 static 
-if !base
-count:=0,base:={base:{__Delete:"criticalsection"}}
-if (cs==base.base){
-Loop count
-DllCall("DeleteCriticalSection",PTR,&CriticalSection%count%),count:=0
-Return
+static i:=0,crisec:={base:{__Delete:"criticalsection"}}
+if IsObject(cs){
+Loop i
+DeleteCriticalSection(&c%i%)
+Return i:=0
 } else if cs
-return DllCall("DeleteCriticalSection",PTR,cs)
-count++,VarSetCapacity(CriticalSection%count%,24),DllCall("InitializeCriticalSection",PTR,&CriticalSection%count%)
-Return &CriticalSection%count%
+return DeleteCriticalSection(cs),cs
+i++,VarSetCapacity(c%i%,24),InitializeCriticalSection(&c%i%)
+Return &c%i%
 }
