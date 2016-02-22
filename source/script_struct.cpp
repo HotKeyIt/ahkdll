@@ -1540,8 +1540,8 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 						((LPSTR)*(UINT_PTR*)((UINT_PTR)target + field->mOffset))[char_count] = '\0';
 				}
 			}
-			aResultToken.symbol = SYM_INTEGER;
-			aResultToken.value_int64 = char_count;
+			aResultToken.symbol = SYM_STRING;
+			aResultToken.marker = (LPTSTR)source_string;
 		}
 		else // NumPut
 		{	 // code taken from BIF_NumPut
