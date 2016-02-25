@@ -3413,6 +3413,8 @@ BIF_DECL(BIF_ObjArray);
 BIF_DECL(BIF_CriticalObject);
 BIF_DECL(BIF_sizeof);
 BIF_DECL(BIF_Struct);
+BIF_DECL(BIF_ObjLoad);
+BIF_DECL(BIF_ObjDump);
 BIF_DECL(BIF_ObjInvoke); // Pseudo-operator. See script_object.cpp for comments.
 BIF_DECL(BIF_ObjGetInPlace); // Pseudo-operator.
 BIF_DECL(BIF_ObjNew); // Pseudo-operator.

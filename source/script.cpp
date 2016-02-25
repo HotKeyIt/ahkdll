@@ -11187,6 +11187,18 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 			min_params = 3;
 			max_params = 3;
 		}
+		else if (!_tcsicmp(suffix, _T("Load")))
+		{
+			bif = BIF_ObjLoad;
+			min_params = 1;
+			max_params = 1;
+		}
+		else if (!_tcsicmp(suffix, _T("Dump")))
+		{
+			bif = BIF_ObjDump;
+			min_params = 1;
+			max_params = 3;
+		}
 		else return NULL;
 	}
 	else if (!_tcsicmp(func_name, _T("Array")))
