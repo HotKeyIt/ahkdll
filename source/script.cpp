@@ -151,6 +151,8 @@ FuncEntry g_BIF[] =
 	BIF1(CriticalObject, 0, 2, true),
 	BIF1(Struct, 1, 3, true),
 	BIF1(sizeof, 1, 2, true),
+	BIF1(ObjDump, 1, 3, true),
+	BIF1(ObjLoad, 1, 1, true),
 
 	BIF1(Object, 0, NA, true),
 	BIFn(ObjAddRef, 1, 1, true, BIF_ObjAddRefRelease),

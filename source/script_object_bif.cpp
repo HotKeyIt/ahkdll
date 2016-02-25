@@ -447,6 +447,827 @@ BIF_DECL(BIF_sizeof)
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = offset;
 }
+
+//
+// ObjRawSize()
+//
+
+__int64 ObjRawSize(IObject *aObject, bool aCopyBuffer, IObject *aObjects)
+{
+	ResultToken Result, this_token, enum_token, aCall, aKey, aValue;
+	ExprTokenType *params[] = { &aCall, &aKey, &aValue };
+	TCHAR defbuf[MAX_PATH], buf[MAX_PATH];
+	
+	// Set up enum_token the way Invoke expects:
+	enum_token.symbol = SYM_STRING;
+	enum_token.marker = _T("");
+	enum_token.mem_to_free = NULL;
+	enum_token.buf = defbuf;
+
+	// Prepare to call object._NewEnum():
+	aCall.symbol = SYM_STRING;
+	aCall.marker = _T("_NewEnum");
+
+	aObject->Invoke(enum_token, Result, IT_CALL, params, 1);
+
+	if (enum_token.mem_to_free)
+		// Invoke returned memory for us to free.
+		free(enum_token.mem_to_free);
+
+	// Check if object returned an enumerator, otherwise return
+	if (enum_token.symbol != SYM_OBJECT)
+		return 0;
+
+	// create variables to use in for loop / for enumeration
+	// these will be deleted afterwards
+
+	Var *var1 = (Var*)alloca(sizeof(Var));
+	Var *var2 = (Var*)alloca(sizeof(Var));
+	var1->mType = var2->mType = VAR_NORMAL;
+	var1->mAttrib = var2->mAttrib = 0;
+	var1->mByteCapacity = var2->mByteCapacity = 0;
+	var1->mHowAllocated = var2->mHowAllocated = ALLOC_MALLOC;
+
+	if (!aObjects)
+	{
+		aCall.symbol = SYM_OBJECT;
+		aCall.object = aObject;
+		aKey.symbol = SYM_STRING;
+		aKey.marker = _T("");
+		aKey.marker_length = 0;
+		aObjects = Object::Create(params, 2);
+	}
+	else
+	{
+		aCall.marker = _T("HasKey");
+		aKey.symbol = SYM_OBJECT;
+		aKey.object = aObject;
+		aObjects->Invoke(Result, this_token, IT_CALL, params, 2);
+		if (!Result.value_int64)
+		{
+			aCall.symbol = SYM_OBJECT;
+			aCall.object = aObject;
+			aKey.symbol = SYM_STRING;
+			aKey.marker = _T("");
+			aKey.marker_length = 0;
+			aObjects->Invoke(Result, this_token, IT_SET, params, 2);
+		}
+	}
+	// Prepare parameters for the loop below: enum.Next(var1 [, var2])
+	aCall.symbol = SYM_STRING;
+	aCall.marker = _T("Next");
+	aKey.symbol = SYM_VAR;
+	aKey.var = var1;
+	aKey.var->mCharContents = _T("");
+	aKey.mem_to_free = 0;
+	aValue.symbol = SYM_VAR;
+	aValue.var = var2;
+	aValue.var->mCharContents = _T("");
+	aValue.mem_to_free = 0;
+
+	ResultToken result_token;
+	IObject &enumerator = *enum_token.object; // Might perform better as a reference?
+	__int64 aSize = 0;
+	IObject *aIsObject;
+	__int64 aIsValue;
+	SymbolType aVarType;
+
+	for (;;)
+	{
+		// Set up result_token the way Invoke expects; each Invoke() will change some or all of these:
+		result_token.symbol = SYM_STRING;
+		result_token.marker = _T("");
+		result_token.mem_to_free = NULL;
+		result_token.buf = buf;
+
+		// Call enumerator.Next(var1, var2)
+		enumerator.Invoke(result_token, enum_token, IT_CALL, params, 3);
+
+		bool next_returned_true = TokenToBOOL(result_token);
+		if (!next_returned_true)
+			break;
+
+		if (aIsObject = TokenToObject(aKey))
+		{
+			aCall.marker = _T("HasKey");
+			aObjects->Invoke(Result, this_token, IT_CALL, params, 2);
+			if (Result.value_int64)
+				aSize += 9;
+			else
+				aSize += ObjRawSize(aIsObject, aCopyBuffer, aObjects) + 9;
+			aCall.marker = _T("Next");
+		}
+		else if ((aVarType = aKey.var->IsNumeric()) == SYM_STRING)
+			aSize += (aKey.var->ByteLength() ? aKey.var->ByteLength() + sizeof(TCHAR) : 0) + 9;
+		else
+			aSize += (aVarType == SYM_FLOAT || (aIsValue = TokenToInt64(aKey)) > 4294967295) ? 9 : aIsValue > 65535 ? 5 : aIsValue > 255 ? 3 : aIsValue > -129 ? 2 : aIsValue > -32769 ? 3 : aIsValue >= INT_MIN ? 5 : 9;
+
+		if (aIsObject = TokenToObject(aValue))
+		{
+			aCall.marker = _T("HasKey");
+			aKey.symbol = SYM_OBJECT;
+			aKey.object = aIsObject;
+			aObjects->Invoke(Result, this_token, IT_CALL, params, 2);
+			if (Result.value_int64)
+				aSize += 9;
+			else
+				aSize += ObjRawSize(aIsObject, aCopyBuffer, aObjects) + 9;
+			aCall.marker = _T("Next");
+		}
+		else if ((aVarType = aValue.var->IsNumeric()) == SYM_STRING)
+		{
+			if (aCopyBuffer)
+			{
+				aCall.marker = _T("GetCapacity");
+				aObject->Invoke(Result, this_token, IT_CALL, params, 2);
+				aSize += Result.value_int64 + 9;
+				aCall.marker = _T("Next");
+			}
+			else
+				aSize += (aValue.var->ByteLength() ? aValue.var->ByteLength() + sizeof(TCHAR) : 0) + 9;
+		}
+		else
+			aSize += aVarType == SYM_FLOAT || (aIsValue = TokenToInt64(aValue)) > 4294967295 ? 9 : aIsValue > 65535 ? 5 : aIsValue > 255 ? 3 : aIsValue > -129 ? 2 : aIsValue > -32769 ? 3 : aIsValue >= INT_MIN ? 5 : 9;
+
+		// release object if it was assigned prevoiously when calling enum.Next
+		if (var1->IsObject())
+			var1->ReleaseObject();
+		if (var2->IsObject())
+			var2->ReleaseObject();
+
+		// Free any memory or object which may have been returned by Invoke:
+		if (result_token.mem_to_free)
+			free(result_token.mem_to_free);
+		if (result_token.symbol == SYM_OBJECT)
+			result_token.object->Release();
+
+		aKey.symbol = SYM_VAR;
+		aKey.var = var1;
+		aValue.symbol = SYM_VAR;
+		aValue.var = var2;
+	}
+	// release enumerator and free vars
+	enumerator.Release();
+	var1->Free();
+	var2->Free();
+	return aSize;
+}
+
+//
+// ObjRawDump()
+//
+
+__int64 ObjRawDump(IObject *aObject, char *aBuffer, bool aCopyBuffer, IObject *aObjects, UINT &aObjCount)
+{
+	char *aThisBuffer = aBuffer;
+
+	ResultToken Result, this_token, enum_token, aCall, aKey, aValue;
+	ExprTokenType *params[] = { &aCall, &aKey, &aValue };
+	TCHAR defbuf[MAX_PATH], buf[MAX_PATH];
+
+	// Set up enum_token the way Invoke expects:
+	enum_token.symbol = SYM_STRING;
+	enum_token.marker = _T("");
+	enum_token.mem_to_free = NULL;
+	enum_token.buf = defbuf;
+
+	// Prepare to call object._NewEnum():
+	aCall.symbol = SYM_STRING;
+	aCall.marker = _T("_NewEnum");
+
+	aObject->Invoke(enum_token, Result, IT_CALL, params, 1);
+
+	if (enum_token.mem_to_free)
+		// Invoke returned memory for us to free.
+		free(enum_token.mem_to_free);
+
+	// Check if object returned an enumerator, otherwise return
+	if (enum_token.symbol != SYM_OBJECT)
+		return NULL;
+
+	// create variables to use in for loop / for enumeration
+	// these will be deleted afterwards
+
+	Var *var1 = (Var*)alloca(sizeof(Var));
+	Var *var2 = (Var*)alloca(sizeof(Var));
+	var1->mType = var2->mType = VAR_NORMAL;
+	var1->mAttrib = var2->mAttrib = 0;
+	var1->mByteCapacity = var2->mByteCapacity = 0;
+	var1->mHowAllocated = var2->mHowAllocated = ALLOC_MALLOC;
+
+	aCall.marker = _T("HasKey");
+	aKey.symbol = SYM_OBJECT;
+	aKey.object = aObject;
+	aObjects->Invoke(Result, this_token, IT_CALL, params, 2);
+	if (!Result.value_int64)
+	{
+		aCall.symbol = SYM_OBJECT;
+		aCall.object = aObject;
+		aKey.symbol = SYM_INTEGER;
+		aKey.value_int64 = aObjCount++;
+		aObjects->Invoke(Result, this_token, IT_SET, params, 2);
+	}
+
+	// Prepare parameters for the loop below: enum.Next(var1 [, var2])
+	aCall.symbol = SYM_STRING;
+	aCall.marker = _T("Next");
+	aKey.symbol = SYM_VAR;
+	aKey.var = var1;
+	aKey.var->mCharContents = _T("");
+	aKey.mem_to_free = 0;
+	aValue.symbol = SYM_VAR;
+	aValue.var = var2;
+	aValue.var->mCharContents = _T("");
+	aValue.mem_to_free = 0;
+
+	ResultToken result_token;
+	IObject &enumerator = *enum_token.object; // Might perform better as a reference?
+	IObject *aIsObject;
+	__int64 aIsValue;
+	__int64 aThisSize;
+	SymbolType aVarType;
+
+	for (;;)
+	{
+		// Set up result_token the way Invoke expects; each Invoke() will change some or all of these:
+		result_token.symbol = SYM_STRING;
+		result_token.marker = _T("");
+		result_token.mem_to_free = NULL;
+		result_token.buf = buf;
+
+		// Call enumerator.Next(var1, var2)
+		enumerator.Invoke(result_token, enum_token, IT_CALL, params, 3);
+
+		bool next_returned_true = TokenToBOOL(result_token);
+		if (!next_returned_true)
+			break;
+
+		// copy Key
+		if (aIsObject = TokenToObject(aKey))
+		{
+			aCall.marker = _T("HasKey");
+			aObjects->Invoke(Result, this_token, IT_CALL, params, 2);
+			aCall.marker = _T("Next");
+			if (Result.value_int64)
+			{
+				aObjects->Invoke(Result, this_token, IT_GET, params + 1, 1);
+				*aThisBuffer = (char)-12;
+				aThisBuffer += 1;
+				*(__int64*)aThisBuffer = Result.value_int64;
+				aThisBuffer += sizeof(__int64);
+			}
+			else
+			{
+				*aThisBuffer = (char)-11;
+				aThisBuffer += 1;
+				*(__int64*)aThisBuffer = aThisSize = ObjRawDump(aIsObject, aThisBuffer + sizeof(__int64), aCopyBuffer, aObjects, aObjCount);
+				if (!aThisSize)
+					return NULL;
+				aThisBuffer += aThisSize + sizeof(__int64);
+			}
+		}
+		else if ((aVarType = aKey.var->IsNumeric()) == SYM_STRING)
+		{
+			*aThisBuffer = (char)-10;
+			aThisBuffer += 1;
+			*(__int64*)aThisBuffer = aThisSize = (__int64)(aKey.var->ByteLength() ? aKey.var->ByteLength() + sizeof(TCHAR) : 0);
+			aThisBuffer += sizeof(__int64);
+			if (aThisSize)
+			{
+				memcpy(aThisBuffer, aKey.var->Contents(), (size_t)aThisSize);
+				aThisBuffer += aThisSize;
+			}
+		}
+		else if (aVarType == SYM_FLOAT)
+		{
+			*aThisBuffer = (char)-9;
+			aThisBuffer += 1;
+			*(double*)aThisBuffer = TokenToDouble(aKey);
+			aThisBuffer += sizeof(__int64);
+		}
+		else if ((aIsValue = TokenToInt64(aKey)) > 4294967295)
+		{
+			*aThisBuffer = (char)-8;
+			aThisBuffer += 1;
+			*(__int64*)aThisBuffer = aIsValue;
+			aThisBuffer += sizeof(__int64);
+		}
+		else if (aIsValue > 65535)
+		{
+			*aThisBuffer = (char)-6;
+			aThisBuffer += 1;
+			*(UINT*)aThisBuffer = (UINT)aIsValue;
+			aThisBuffer += sizeof(UINT);
+		}
+		else if (aIsValue > 255)
+		{
+			*aThisBuffer = (char)-4;
+			aThisBuffer += 1;
+			*(USHORT*)aThisBuffer = (USHORT)aIsValue;
+			aThisBuffer += sizeof(USHORT);
+		}
+		else if (aIsValue > -1)
+		{
+			*aThisBuffer = (char)-2;
+			aThisBuffer += 1;
+			*aThisBuffer = (BYTE)aIsValue;
+			aThisBuffer += sizeof(BYTE);
+		}
+		else if (aIsValue > -129)
+		{
+			*aThisBuffer = (char)-1;
+			aThisBuffer += 1;
+			*aThisBuffer = (char)aIsValue;
+			aThisBuffer += sizeof(char);
+		}
+		else if (aIsValue > -32769)
+		{
+			*aThisBuffer = (char)-3;
+			aThisBuffer += 1;
+			*(short*)aThisBuffer = (short)aIsValue;
+			aThisBuffer += sizeof(short);
+		}
+		else if (aIsValue >= INT_MIN)
+		{
+			*aThisBuffer = (char)-5;
+			aThisBuffer += 1;
+			*(int*)aThisBuffer = (int)aIsValue;
+			aThisBuffer += sizeof(int);
+		}
+		else
+		{
+			*aThisBuffer = (char)-7;
+			aThisBuffer += 1;
+			*(__int64*)aThisBuffer = (__int64)aIsValue;
+			aThisBuffer += sizeof(__int64);
+		}
+
+		// copy Value
+		if (aIsObject = TokenToObject(aValue))
+		{
+			aCall.marker = _T("HasKey");
+			aKey.symbol = SYM_OBJECT;
+			aKey.object = aIsObject;
+			aObjects->Invoke(Result, this_token, IT_CALL, params, 2);
+			aCall.marker = _T("Next");
+			if (Result.value_int64)
+			{
+				aObjects->Invoke(Result, this_token, IT_GET, params + 2, 1);
+				*aThisBuffer = (char)-12;
+				aThisBuffer += 1;
+				*(__int64*)aThisBuffer = Result.value_int64;
+				aThisBuffer += sizeof(__int64);
+			}
+			else
+			{
+				*aThisBuffer = (char)-11;
+				aThisBuffer += 1;
+				*(__int64*)aThisBuffer = aThisSize = ObjRawDump(aIsObject, aThisBuffer + sizeof(__int64), aCopyBuffer, aObjects, aObjCount);
+				if (!aThisSize)
+					return NULL;
+				aThisBuffer += aThisSize + sizeof(__int64);
+			}
+		}
+		else if ((aVarType = aValue.var->IsNumeric()) == SYM_STRING)
+		{
+			*aThisBuffer = (char)-10;
+			aThisBuffer += 1;
+			if (aCopyBuffer)
+			{
+				aCall.marker = _T("GetCapacity");
+				aObject->Invoke(Result, this_token, IT_CALL, params, 2);
+				*(__int64*)aThisBuffer = aThisSize = Result.value_int64;
+				aThisBuffer += sizeof(__int64);
+				if (aThisSize)
+				{
+					aCall.marker = _T("GetAddress");
+					aObject->Invoke(Result, this_token, IT_CALL, params, 2);
+					memcpy(aThisBuffer, (char*)Result.value_int64, (size_t)aThisSize);
+				}
+				aCall.marker = _T("Next");
+			}
+			else
+			{
+				*(__int64*)aThisBuffer = aThisSize = (__int64)(aValue.var->ByteLength() ? aValue.var->ByteLength() + sizeof(TCHAR) : 0);
+				aThisBuffer += sizeof(__int64);
+				if (aThisSize)
+					memcpy(aThisBuffer, aValue.var->Contents(), (size_t)aThisSize);
+			}
+			aThisBuffer += aThisSize;
+		}
+		else if (aVarType == SYM_FLOAT)
+		{
+			*aThisBuffer = (char)-9;
+			aThisBuffer += 1;
+			*(double*)aThisBuffer = TokenToDouble(aValue);
+			aThisBuffer += sizeof(double);
+		}
+		else if ((aIsValue = TokenToInt64(aValue)) > 4294967295)
+		{
+			*aThisBuffer = (char)-8;
+			aThisBuffer += 1;
+			*(__int64*)aThisBuffer = aIsValue;
+			aThisBuffer += sizeof(__int64);
+		}
+		else if (aIsValue > 65535)
+		{
+			*aThisBuffer = (char)-6;
+			aThisBuffer += 1;
+			*(UINT*)aThisBuffer = (UINT)aIsValue;
+			aThisBuffer += sizeof(UINT);
+		}
+		else if (aIsValue > 255)
+		{
+			*aThisBuffer = (char)-4;
+			aThisBuffer += 1;
+			*(USHORT*)aThisBuffer = (USHORT)aIsValue;
+			aThisBuffer += sizeof(USHORT);
+		}
+		else if (aIsValue > -1)
+		{
+			*aThisBuffer = (char)-2;
+			aThisBuffer += 1;
+			*aThisBuffer = (BYTE)aIsValue;
+			aThisBuffer += sizeof(BYTE);
+		}
+		else if (aIsValue > -129)
+		{
+			*aThisBuffer = (char)-1;
+			aThisBuffer += 1;
+			*aThisBuffer = (char)aIsValue;
+			aThisBuffer += sizeof(char);
+		}
+		else if (aIsValue > -32769)
+		{
+			*aThisBuffer = (char)-3;
+			aThisBuffer += 1;
+			*(short*)aThisBuffer = (short)aIsValue;
+			aThisBuffer += sizeof(short);
+		}
+		else if (aIsValue > INT_MIN)
+		{
+			*aThisBuffer = (char)-5;
+			aThisBuffer += 1;
+			*aThisBuffer = (int)aIsValue;
+			aThisBuffer += sizeof(int);
+		}
+		else
+		{
+			*aThisBuffer = (char)-7;
+			aThisBuffer += 1;
+			*(__int64*)aThisBuffer = (__int64)aIsValue;
+			aThisBuffer += sizeof(__int64);
+		}
+
+		// release object if it was assigned prevoiously when calling enum.Next
+		if (var1->IsObject())
+			var1->ReleaseObject();
+		if (var2->IsObject())
+			var2->ReleaseObject();
+
+		// Free any memory or object which may have been returned by Invoke:
+		if (result_token.mem_to_free)
+			free(result_token.mem_to_free);
+		if (result_token.symbol == SYM_OBJECT)
+			result_token.object->Release();
+
+		aKey.symbol = SYM_VAR;
+		aKey.var = var1;
+		aValue.symbol = SYM_VAR;
+		aValue.var = var2;
+	}
+	// release enumerator and free vars
+	enumerator.Release();
+	var1->Free();
+	var2->Free();
+	return aThisBuffer - aBuffer;
+}
+
+//
+// ObjDump()
+//
+
+BIF_DECL(BIF_ObjDump)
+{
+	aResultToken.symbol = SYM_INTEGER;
+	IObject *aObject;
+	if (!(aObject = TokenToObject(*aParam[1])) && !(aObject = TokenToObject(*aParam[0])))
+	{
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = _T("");
+		return;
+	}
+
+	size_t aSize = (size_t)(aResultToken.value_int64 = ObjRawSize(aObject, aParamCount > 2 ? TokenToBOOL(*aParam[2]) : false, NULL) + sizeof(__int64));
+	char *aBuffer = (char*)malloc(aSize);
+	memset(aBuffer, 0, aSize);
+	*(__int64*)aBuffer = aResultToken.value_int64;
+	IObject *aObjects = Object::Create();
+	UINT aObjCount = 0;
+	if (aSize - sizeof(__int64) != ObjRawDump(aObject, aBuffer + sizeof(__int64), aParamCount > 2 ? TokenToBOOL(*aParam[2]) : false, aObjects, aObjCount))
+	{
+		aObjects->Release();
+		free(aBuffer);
+		g_script.ScriptError(_T("Error dumping Object."));
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = _T("");
+		return;
+	}
+	aObjects->Release();
+	if (TokenToObject(*aParam[1]))
+	{ // FileWrite mode
+		FILE *hFile = _tfopen(TokenToString(*aParam[0]), _T("wb"));
+		if (!hFile)
+		{
+			aResultToken.symbol = SYM_STRING;
+			aResultToken.marker = _T("");
+			return;
+		}
+		fwrite(aBuffer, aSize, 1, hFile);
+		fclose(hFile);
+		free(aBuffer);
+	}
+	else if (aParam[1]->symbol == SYM_VAR)
+	{
+		Var &var = *(aParam[1]->var->mType == VAR_ALIAS ? aParam[1]->var->mAliasFor : aParam[1]->var);
+		if (var.mType != VAR_NORMAL) // i.e. VAR_CLIPBOARD or VAR_VIRTUAL.
+		{
+			g_script.ScriptError(ERR_VAR_IS_READONLY, var.mName);
+			aResultToken.symbol = SYM_STRING;
+			aResultToken.marker = _T("");
+			return;
+		}
+		var.Free(VAR_ALWAYS_FREE); // Release the variable's old memory. This also removes flags VAR_ATTRIB_OFTEN_REMOVED.
+		var.mHowAllocated = ALLOC_MALLOC; // Must always be this type to avoid complications and possible memory leaks.
+		var.mByteContents = aBuffer;
+		var.mByteLength = (VarSizeType)aResultToken.value_int64;
+	}
+}
+
+//
+// ObjRawLoad()
+//
+
+IObject* ObjRawLoad(char *aBuffer, IObject **aObjects, UINT &aObjCount, UINT &aObjSize)
+{
+	IObject *aObject = Object::Create();
+	if (aObjCount == aObjSize)
+	{
+		IObject **newObjects = (IObject**)malloc(aObjSize * 2 * sizeof(IObject**));
+		if (!newObjects)
+			return 0;
+		memcpy(newObjects, aObjects, aObjSize);
+		free(aObjects);
+		aObjects = newObjects;
+		aObjSize *= 2;
+	}
+	aObjects[aObjCount++] = aObject;
+	char *aThisBuffer = aBuffer + 8;
+
+	ResultToken Result, this_token, enum_token, aCall, aKey, aValue;
+	ExprTokenType *params[] = { &aCall, &aKey, &aValue };
+	aCall.symbol = SYM_STRING;
+	size_t aSize = (size_t)*(__int64*)aBuffer;
+	TCHAR buf[MAX_INTEGER_LENGTH];
+
+	for (char *end = aBuffer + aSize; aThisBuffer < end;)
+	{
+		char type = *(char*)aThisBuffer;
+		aThisBuffer += 1;
+		if (type == -12)
+		{
+			aKey.symbol = SYM_OBJECT;
+			aKey.object = aObjects[*(__int64*)aThisBuffer];
+			aThisBuffer += sizeof(__int64);
+		}
+		else if (type == -11)
+		{
+			aKey.symbol = SYM_OBJECT;
+			aKey.object = ObjRawLoad(aThisBuffer, aObjects, aObjCount, aObjSize);
+			aThisBuffer += sizeof(__int64) + *(__int64*)aThisBuffer;
+		}
+		else if (type == -10)
+		{
+			aKey.symbol = SYM_STRING;
+			__int64 aMarkerSize = *(__int64*)aThisBuffer;
+			aThisBuffer += sizeof(__int64);
+			if (aMarkerSize)
+			{
+				aKey.marker_length = (size_t)(aMarkerSize - sizeof(TCHAR)) / sizeof(TCHAR);
+				aKey.marker = (LPTSTR)aThisBuffer;
+				aThisBuffer += aMarkerSize;
+			}
+			else
+			{
+				aKey.marker = _T("");
+				aKey.marker_length = 0;
+			}
+		}
+		else if (type == -9)
+		{
+			aKey.symbol = SYM_STRING;
+			aKey.marker_length = FTOA(*(double*)aThisBuffer, buf, MAX_INTEGER_LENGTH);
+			aKey.marker = buf;
+			aThisBuffer += sizeof(__int64);
+		}
+		else
+		{
+			aKey.symbol = SYM_INTEGER;
+			if (type == -8)
+			{
+				aKey.value_int64 = *(__int64*)aThisBuffer;
+				aThisBuffer += sizeof(__int64);
+			}
+			else if (type == -6)
+			{
+				aKey.value_int64 = *(UINT*)aThisBuffer;
+				aThisBuffer += sizeof(UINT);
+			}
+			else if (type == -4)
+			{
+				aKey.value_int64 = *(USHORT*)aThisBuffer;
+				aThisBuffer += sizeof(USHORT);
+			}
+			else if (type == -2)
+			{
+				aKey.value_int64 = *(BYTE*)aThisBuffer;
+				aThisBuffer += sizeof(BYTE);
+			}
+			else if (type == -1)
+			{
+				aKey.value_int64 = *(char*)aThisBuffer;
+				aThisBuffer += sizeof(char);
+			}
+			else if (type == -3)
+			{
+				aKey.value_int64 = *(short*)aThisBuffer;
+				aThisBuffer += sizeof(short);
+			}
+			else if (type == -5)
+			{
+				aKey.value_int64 = *(int*)aThisBuffer;
+				aThisBuffer += sizeof(int);
+			}
+			else if (type == -7)
+			{
+				aKey.value_int64 = *(__int64*)aThisBuffer;
+				aThisBuffer += sizeof(__int64);
+			}
+			else
+				return NULL;
+		}
+
+		type = *(char*)aThisBuffer;
+		aThisBuffer += 1;
+		if (type == -12)
+		{
+			aValue.symbol = SYM_OBJECT;
+			aValue.object = aObjects[*(__int64*)aThisBuffer];
+			aThisBuffer += sizeof(__int64);
+		}
+		else if (type == -11)
+		{
+			aValue.symbol = SYM_OBJECT;
+			aValue.object = ObjRawLoad(aThisBuffer, aObjects, aObjCount, aObjSize);
+			aThisBuffer += sizeof(__int64) + *(__int64*)aThisBuffer;
+		}
+		else if (type == -9)
+		{
+			aValue.symbol = SYM_FLOAT;
+			aValue.value_double = *(double*)aThisBuffer;
+			aThisBuffer += sizeof(__int64);
+		}
+		else if (type != -10)
+		{
+			aValue.symbol = SYM_INTEGER;
+			if (type == -8)
+			{
+				aValue.value_int64 = *(__int64*)aThisBuffer;
+				aThisBuffer += sizeof(__int64);
+			}
+			else if (type == -6)
+			{
+				aValue.value_int64 = *(UINT*)aThisBuffer;
+				aThisBuffer += sizeof(UINT);
+			}
+			else if (type == -4)
+			{
+				aValue.value_int64 = *(USHORT*)aThisBuffer;
+				aThisBuffer += sizeof(USHORT);
+			}
+			else if (type == -2)
+			{
+				aValue.value_int64 = *(BYTE*)aThisBuffer;
+				aThisBuffer += sizeof(BYTE);
+			}
+			else if (type == -1)
+			{
+				aValue.value_int64 = *(char*)aThisBuffer;
+				aThisBuffer += sizeof(char);
+			}
+			else if (type == -3)
+			{
+				aValue.value_int64 = *(short*)aThisBuffer;
+				aThisBuffer += sizeof(short);
+			}
+			else if (type == -5)
+			{
+				aValue.value_int64 = *(int*)aThisBuffer;
+				aThisBuffer += sizeof(int);
+			}
+			else if (type == -7)
+			{
+				aValue.value_int64 = *(__int64*)aThisBuffer;
+				aThisBuffer += sizeof(__int64);
+			}
+			else
+				return NULL;
+		}
+		if (type == -10)
+		{
+			aValue.symbol = SYM_STRING;
+			__int64 aMarkerSize = *(__int64*)aThisBuffer;
+			aThisBuffer += sizeof(__int64);
+			if (aMarkerSize)
+			{
+				aValue.marker_length = (size_t)(aMarkerSize - sizeof(TCHAR)) / sizeof(TCHAR);
+				aValue.marker = (LPTSTR)aThisBuffer;
+				aObject->Invoke(Result, this_token, IT_SET, params + 1, 2);
+				aCall.marker = _T("SetCapacity");
+				aValue.symbol = SYM_INTEGER;
+				aValue.value_int64 = aMarkerSize;
+				aObject->Invoke(Result, this_token, IT_CALL, params, 3);
+				aCall.marker = _T("GetAddress");
+				aObject->Invoke(Result, this_token, IT_CALL, params, 2);
+				memcpy((char*)Result.value_int64, aThisBuffer, (size_t)aMarkerSize);
+				aThisBuffer += aMarkerSize;
+			}
+			else
+			{
+				aValue.marker = _T("");
+				aValue.marker_length = 0;
+				aObject->Invoke(Result, this_token, IT_SET, params + 1, 2);
+			}
+		}
+		else
+			aObject->Invoke(Result, this_token, IT_SET, params + 1, 2);
+	}
+	return aObject;
+}
+
+//
+// ObjLoad()
+//
+
+BIF_DECL(BIF_ObjLoad)
+{
+	aResultToken.symbol = SYM_OBJECT;
+	LPTSTR aPath = TokenToString(*aParam[0]);
+	char *aBuffer = (char *)TokenToInt64(*aParam[0]);
+	if (!aBuffer)
+	{ // FileRead Mode
+		if (GetFileAttributes(aPath) == 0xFFFFFFFF)
+		{
+			aResultToken.symbol = SYM_STRING;
+			aResultToken.marker = _T("");
+			return;
+		}
+		FILE *fp;
+		size_t size;
+
+		fp = _tfopen(aPath, _T("rb"));
+		if (fp == NULL)
+		{
+			aResultToken.symbol = SYM_STRING;
+			aResultToken.marker = _T("");
+			return;
+		}
+
+		fseek(fp, 0, SEEK_END);
+		size = ftell(fp);
+		aBuffer = (char *)malloc(size);
+		fseek(fp, 0, SEEK_SET);
+		fread(aBuffer, 1, size, fp);
+		fclose(fp);
+	}
+	UINT aObjCount = 0;
+	UINT aObjSize = 16;
+	IObject **aObjects = (IObject**)malloc(aObjSize + sizeof(IObject*));
+	if (!aObjects || !(aResultToken.object = ObjRawLoad(aBuffer, aObjects, aObjCount, aObjSize)))
+	{
+		if (!TokenToInt64(*aParam[0]))
+			free(aBuffer);
+		free(aObjects);
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = _T("");
+		g_script.ScriptError(ERR_OUTOFMEM);
+		return;
+	}
+	free(aObjects);
+	if (!TokenToInt64(*aParam[0]))
+		free(aBuffer);
+}
+
 //
 // Object()
 //
