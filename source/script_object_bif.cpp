@@ -721,8 +721,6 @@ __int64 ObjRawDump(IObject *aObject, char *aBuffer, bool aCopyBuffer, IObject *a
 				*aThisBuffer = (char)-11;
 				aThisBuffer += 1;
 				*(__int64*)aThisBuffer = aThisSize = ObjRawDump(aIsObject, aThisBuffer + sizeof(__int64), aCopyBuffer, aObjects, aObjCount);
-				if (!aThisSize)
-					return NULL;
 				aThisBuffer += aThisSize + sizeof(__int64);
 			}
 		}
@@ -813,24 +811,22 @@ __int64 ObjRawDump(IObject *aObject, char *aBuffer, bool aCopyBuffer, IObject *a
 			if (Result.value_int64)
 			{
 				aObjects->Invoke(Result, this_token, IT_GET, params + 2, 1);
-				*aThisBuffer = (char)-12;
+				*aThisBuffer = (char)12;
 				aThisBuffer += 1;
 				*(__int64*)aThisBuffer = Result.value_int64;
 				aThisBuffer += sizeof(__int64);
 			}
 			else
 			{
-				*aThisBuffer = (char)-11;
+				*aThisBuffer = (char)11;
 				aThisBuffer += 1;
 				*(__int64*)aThisBuffer = aThisSize = ObjRawDump(aIsObject, aThisBuffer + sizeof(__int64), aCopyBuffer, aObjects, aObjCount);
-				if (!aThisSize)
-					return NULL;
 				aThisBuffer += aThisSize + sizeof(__int64);
 			}
 		}
 		else if ((aVarType = aValue.var->IsNonBlankIntegerOrFloat()) == SYM_STRING)
 		{
-			*aThisBuffer = (char)-10;
+			*aThisBuffer = (char)10;
 			aThisBuffer += 1;
 			if (aCopyBuffer)
 			{
@@ -857,63 +853,63 @@ __int64 ObjRawDump(IObject *aObject, char *aBuffer, bool aCopyBuffer, IObject *a
 		}
 		else if (aVarType == SYM_FLOAT)
 		{
-			*aThisBuffer = (char)-9;
+			*aThisBuffer = (char)9;
 			aThisBuffer += 1;
 			*(double*)aThisBuffer = TokenToDouble(aValue);
 			aThisBuffer += sizeof(double);
 		}
 		else if ((aIsValue = TokenToInt64(aValue)) > 4294967295)
 		{
-			*aThisBuffer = (char)-8;
+			*aThisBuffer = (char)8;
 			aThisBuffer += 1;
 			*(__int64*)aThisBuffer = aIsValue;
 			aThisBuffer += sizeof(__int64);
 		}
 		else if (aIsValue > 65535)
 		{
-			*aThisBuffer = (char)-6;
+			*aThisBuffer = (char)6;
 			aThisBuffer += 1;
 			*(UINT*)aThisBuffer = (UINT)aIsValue;
 			aThisBuffer += sizeof(UINT);
 		}
 		else if (aIsValue > 255)
 		{
-			*aThisBuffer = (char)-4;
+			*aThisBuffer = (char)4;
 			aThisBuffer += 1;
 			*(USHORT*)aThisBuffer = (USHORT)aIsValue;
 			aThisBuffer += sizeof(USHORT);
 		}
 		else if (aIsValue > -1)
 		{
-			*aThisBuffer = (char)-2;
+			*aThisBuffer = (char)2;
 			aThisBuffer += 1;
 			*aThisBuffer = (BYTE)aIsValue;
 			aThisBuffer += sizeof(BYTE);
 		}
 		else if (aIsValue > -129)
 		{
-			*aThisBuffer = (char)-1;
+			*aThisBuffer = (char)1;
 			aThisBuffer += 1;
 			*aThisBuffer = (char)aIsValue;
 			aThisBuffer += sizeof(char);
 		}
 		else if (aIsValue > -32769)
 		{
-			*aThisBuffer = (char)-3;
+			*aThisBuffer = (char)3;
 			aThisBuffer += 1;
 			*(short*)aThisBuffer = (short)aIsValue;
 			aThisBuffer += sizeof(short);
 		}
 		else if (aIsValue > INT_MIN)
 		{
-			*aThisBuffer = (char)-5;
+			*aThisBuffer = (char)5;
 			aThisBuffer += 1;
 			*aThisBuffer = (int)aIsValue;
 			aThisBuffer += sizeof(int);
 		}
 		else
 		{
-			*aThisBuffer = (char)-7;
+			*aThisBuffer = (char)7;
 			aThisBuffer += 1;
 			*(__int64*)aThisBuffer = (__int64)aIsValue;
 			aThisBuffer += sizeof(__int64);
@@ -1008,7 +1004,7 @@ BIF_DECL(BIF_ObjDump)
 // ObjRawLoad()
 //
 
-IObject* ObjRawLoad(char *aBuffer, IObject **aObjects, UINT &aObjCount, UINT &aObjSize)
+IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &aObjSize)
 {
 	IObject *aObject = Object::Create();
 	if (aObjCount == aObjSize)
@@ -1134,63 +1130,63 @@ IObject* ObjRawLoad(char *aBuffer, IObject **aObjects, UINT &aObjCount, UINT &aO
 
 		type = *(char*)aThisBuffer;
 		aThisBuffer += 1;
-		if (type == -12)
+		if (type == 12)
 		{
 			aValue.symbol = SYM_OBJECT;
 			aValue.object = aObjects[*(__int64*)aThisBuffer];
 			aThisBuffer += sizeof(__int64);
 		}
-		else if (type == -11)
+		else if (type == 11)
 		{
 			aValue.symbol = SYM_OBJECT;
 			aValue.object = ObjRawLoad(aThisBuffer, aObjects, aObjCount, aObjSize);
 			aThisBuffer += sizeof(__int64) + *(__int64*)aThisBuffer;
 		}
-		else if (type == -9)
+		else if (type == 9)
 		{
 			aValue.symbol = SYM_FLOAT;
 			aValue.value_double = *(double*)aThisBuffer;
 			aThisBuffer += sizeof(__int64);
 		}
-		else if (type != -10)
+		else if (type != 10)
 		{
 			aValue.symbol = SYM_INTEGER;
-			if (type == -8)
+			if (type == 8)
 			{
 				aValue.value_int64 = *(__int64*)aThisBuffer;
 				aThisBuffer += sizeof(__int64);
 			}
-			else if (type == -6)
+			else if (type == 6)
 			{
 				aValue.value_int64 = *(UINT*)aThisBuffer;
 				aThisBuffer += sizeof(UINT);
 			}
-			else if (type == -4)
+			else if (type == 4)
 			{
 				aValue.value_int64 = *(USHORT*)aThisBuffer;
 				aThisBuffer += sizeof(USHORT);
 			}
-			else if (type == -2)
+			else if (type == 2)
 			{
 				aValue.value_int64 = *(BYTE*)aThisBuffer;
 				aThisBuffer += sizeof(BYTE);
 			}
-			else if (type == -1)
+			else if (type == 1)
 			{
 				aValue.value_int64 = *(char*)aThisBuffer;
 				aThisBuffer += sizeof(char);
 			}
-			else if (type == -3)
+			else if (type == 3)
 			{
 				aValue.value_int64 = *(short*)aThisBuffer;
 				aThisBuffer += sizeof(short);
 			}
-			else if (type == -5)
+			else if (type == 5)
 			{
 				aValue.value_int64 = *(int*)aThisBuffer;
 				aThisBuffer += sizeof(int);
 			}
-			else if (type == -7)
+			else if (type == 7)
 			{
 				aValue.value_int64 = *(__int64*)aThisBuffer;
 				aThisBuffer += sizeof(__int64);
@@ -1198,7 +1194,7 @@ IObject* ObjRawLoad(char *aBuffer, IObject **aObjects, UINT &aObjCount, UINT &aO
 			else
 				return NULL;
 		}
-		if (type == -10)
+		if (type == 10)
 		{
 			aValue.symbol = SYM_STRING;
 			__int64 aMarkerSize = *(__int64*)aThisBuffer;
@@ -1267,7 +1263,7 @@ BIF_DECL(BIF_ObjLoad)
 	}
 	UINT aObjCount = 0;
 	UINT aObjSize = 16;
-	IObject **aObjects = (IObject**)malloc(aObjSize + sizeof(IObject*));
+	IObject **aObjects = (IObject**)malloc(aObjSize * sizeof(IObject**));
 	if (!aObjects || !(aResultToken.object = ObjRawLoad(aBuffer, aObjects, aObjCount, aObjSize)))
 	{
 		if (!TokenToInt64(*aParam[0]))
