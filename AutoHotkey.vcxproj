@@ -203,7 +203,7 @@
     <ClCompile Include="source\hook.cpp" />
     <ClCompile Include="source\hotkey.cpp" />
     <ClCompile Include="source\keyboard_mouse.cpp" />
-    <ClCompile Include="source\LiteUnzip.c">
+    <ClCompile Include="source\LiteZip.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">NotUsing</PrecompiledHeader>
@@ -331,7 +331,7 @@
     <ClInclude Include="source\hotkey.h" />
     <ClInclude Include="source\keyboard_mouse.h" />
     <ClInclude Include="source\KuString.h" />
-    <ClInclude Include="source\LiteUnzip.h" />
+    <ClInclude Include="source\LiteZip.h" />
     <ClInclude Include="source\MemoryModule.h" />
     <ClInclude Include="source\MinHook.h" />
     <ClInclude Include="source\mt19937ar-cok.h" />
@@ -515,6 +515,8 @@
       <Driver Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">NotSet</Driver>
       <OptimizeReferences Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">true</OptimizeReferences>
       <LinkTimeCodeGeneration Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">Default</LinkTimeCodeGeneration>
+      <IgnoreSpecificDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">
+      </IgnoreSpecificDefaultLibraries>
     </Link>
     <Link>
       <ModuleDefinitionFile Condition="'$(Configuration)'=='ReleaseDll'">.\comserver.def</ModuleDefinitionFile>
@@ -547,6 +549,10 @@
       </IgnoreAllDefaultLibraries>
       <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</GenerateDebugInformation>
       <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">false</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">
+      </IgnoreSpecificDefaultLibraries>
+      <IgnoreSpecificDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+      </IgnoreSpecificDefaultLibraries>
     </Link>
     <Midl>
       <MkTypLibCompatible Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">true</MkTypLibCompatible>
@@ -601,8 +607,12 @@
       <RandomizedBaseAddress Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">false</RandomizedBaseAddress>
       <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">false</DataExecutionPrevention>
       <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">false</GenerateDebugInformation>
-      <MinimumRequiredVersion Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">5</MinimumRequiredVersion>
-      <MinimumRequiredVersion Condition="'$(Configuration)|$(Platform)'=='Release|x64'">5</MinimumRequiredVersion>
+      <MinimumRequiredVersion Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">5.02</MinimumRequiredVersion>
+      <MinimumRequiredVersion Condition="'$(Configuration)|$(Platform)'=='Release|x64'">5.02</MinimumRequiredVersion>
+      <IgnoreSpecificDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">
+      </IgnoreSpecificDefaultLibraries>
+      <IgnoreSpecificDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+      </IgnoreSpecificDefaultLibraries>
     </Link>
     <Manifest>
       <OutputManifestFile Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'" />
@@ -626,6 +636,8 @@
       <LinkTimeCodeGeneration Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">
       </LinkTimeCodeGeneration>
       <ImageHasSafeExceptionHandlers Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">false</ImageHasSafeExceptionHandlers>
+      <IgnoreSpecificDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">
+      </IgnoreSpecificDefaultLibraries>
     </Link>
     <Link>
       <RandomizedBaseAddress Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">false</RandomizedBaseAddress>
@@ -634,11 +646,13 @@
       <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">false</DataExecutionPrevention>
       <ImageHasSafeExceptionHandlers Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">false</ImageHasSafeExceptionHandlers>
       <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">false</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">
+      </IgnoreSpecificDefaultLibraries>
     </Link>
     <Link />
     <Link />
     <ClCompile>
-      <OmitFramePointers Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</OmitFramePointers>
+      <OmitFramePointers Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</OmitFramePointers>
       <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</MultiProcessorCompilation>
       <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">MultiThreadedDebugDLL</RuntimeLibrary>
       <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</MinimalRebuild>
@@ -738,7 +752,9 @@
       </IgnoreAllDefaultLibraries>
       <RandomizedBaseAddress Condition="'$(Configuration)|$(Platform)'=='Self-contained|x64'">false</RandomizedBaseAddress>
       <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='Self-contained|x64'">false</DataExecutionPrevention>
-      <MinimumRequiredVersion Condition="'$(Configuration)|$(Platform)'=='Self-contained|x64'">5</MinimumRequiredVersion>
+      <MinimumRequiredVersion Condition="'$(Configuration)|$(Platform)'=='Self-contained|x64'">5.02</MinimumRequiredVersion>
+      <IgnoreSpecificDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Self-contained|x64'">
+      </IgnoreSpecificDefaultLibraries>
     </Link>
     <Link />
     <Link />
@@ -777,13 +793,15 @@
     <Link>
       <ModuleDefinitionFile Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">.\comserver.def</ModuleDefinitionFile>
       <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">true</GenerateDebugInformation>
-      <MinimumRequiredVersion Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">5</MinimumRequiredVersion>
+      <MinimumRequiredVersion Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">5.02</MinimumRequiredVersion>
       <OptimizeReferences Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">
       </OptimizeReferences>
       <EnableCOMDATFolding Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">
       </EnableCOMDATFolding>
       <RandomizedBaseAddress Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">false</RandomizedBaseAddress>
       <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">false</DataExecutionPrevention>
+      <IgnoreSpecificDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">
+      </IgnoreSpecificDefaultLibraries>
     </Link>
     <ResourceCompile>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">_UNICODE;UNICODE;_WIN64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -802,7 +820,7 @@
     <ClCompile />
     <ClCompile />
     <ResourceCompile>
-      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">_WIN64;_USING_V110_SDK71_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">_DEBUG;_WIN64;_USING_V110_SDK71_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
     <ResourceCompile>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">_WIN64;_USING_V110_SDK71_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -811,10 +829,14 @@
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </Midl>
     <Link>
-      <MinimumRequiredVersion Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">5</MinimumRequiredVersion>
+      <MinimumRequiredVersion Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">5.02</MinimumRequiredVersion>
+      <IgnoreSpecificDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+      </IgnoreSpecificDefaultLibraries>
     </Link>
     <Link>
-      <MinimumRequiredVersion Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|x64'">5</MinimumRequiredVersion>
+      <MinimumRequiredVersion Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|x64'">5.02</MinimumRequiredVersion>
+      <IgnoreSpecificDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|x64'">
+      </IgnoreSpecificDefaultLibraries>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='ReleaseDll' OR '$(Configuration)'=='ReleaseDll(mbcs)'">
@@ -833,7 +855,9 @@
       <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">false</GenerateDebugInformation>
       <LinkTimeCodeGeneration Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">
       </LinkTimeCodeGeneration>
-      <MinimumRequiredVersion Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">5</MinimumRequiredVersion>
+      <MinimumRequiredVersion Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">5.02</MinimumRequiredVersion>
+      <IgnoreSpecificDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">
+      </IgnoreSpecificDefaultLibraries>
     </Link>
     <Manifest>
       <OutputManifestFile Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'" />
