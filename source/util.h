@@ -496,6 +496,7 @@ inline double ATOF(LPCTSTR buf)
 	return IsHex(buf) ? (double)_tcstoi64(buf, NULL, 16) : _tstof(buf);
 }
 
+int FTOA(double aValue, LPTSTR aBuf, int aBufSize);
 inline LPTSTR ITOA(int value, LPTSTR buf)
 {
 	if (g->FormatInt == 'D')
@@ -782,7 +783,9 @@ bool IsStringInList(LPTSTR aStr, LPTSTR aList, bool aFindExactMatch);
 LPTSTR InStrAny(LPTSTR aStr, LPTSTR aNeedle[], int aNeedleCount, size_t &aFoundLen);
 short IsDefaultType(LPTSTR aTypeDef);
 LPTSTR ResourceIndexToId(HMODULE aModule, LPCTSTR aType, int aIndex); // L17: Find integer ID of resource from index. i.e. IconNumber -> resource ID.
-DWORD DecompressBuffer(void *buffer,LPVOID &aDataBuf,SIZE_T sz, WCHAR *pwd[] = NULL);
+DWORD CryptAES(LPVOID lp, DWORD sz, TCHAR *pwd[], bool aEncrypt = true, DWORD aSID = 256);
+DWORD DecompressBuffer(void *buffer, LPVOID &aDataBuf, DWORD sz, TCHAR *pwd[] = NULL);
+DWORD CompressBuffer(BYTE *buffer, LPVOID &aDataBuf, DWORD sz, TCHAR *pwd[] = NULL);
 ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf);
 LONG WINAPI DisableHooksOnException(PEXCEPTION_POINTERS pExceptionPtrs);
 HICON ExtractIconFromExecutable(LPTSTR aFilespec, int aIconNumber, int aWidth, int aHeight); // L17: Extract icon of the appropriate size from an executable (or compatible) file.

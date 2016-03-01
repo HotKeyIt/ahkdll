@@ -20,7 +20,7 @@ GNU General Public License for more details.
 #include "application.h" // for MsgSleep()
 #include "window.h" // For MsgBox() & SetForegroundLockTimeout()
 #include "TextIO.h"
-#include "LiteUnzip.h"
+#include "LiteZip.h"
 #include "MemoryModule.h"
 // #include "MinHook.h"
 

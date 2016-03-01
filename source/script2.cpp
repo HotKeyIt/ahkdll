@@ -40,6 +40,7 @@ GNU General Public License for more details.
 #include "MemoryModule.h"
 #include "script_object.h"
 #include "script_func_impl.h"
+#include "LiteZip.h"
 
 
 
@@ -10350,7 +10351,7 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 		if (*(unsigned int*)res_lock == 0x04034b50)
 		{
 			LPVOID aDataBuf;
-			aSizeDeCompressed = DecompressBuffer(res_lock, aDataBuf, SizeofResource(NULL,res));
+			aSizeDeCompressed = DecompressBuffer(res_lock, aDataBuf, SizeofResource(NULL, res));
 			if (aSizeDeCompressed)
 			{
 				success = WriteFile(hfile, aDataBuf, aSizeDeCompressed, &num_bytes_written, NULL);
@@ -18190,25 +18191,557 @@ BIF_DECL(BIF_MemoryLoadString)
 	}
 }
 
+BIF_DECL(BIF_ZipCreateFile)
+{
+	DWORD aErrCode;
+	HZIP hz;
+	TCHAR	aMsg[100];
+	CStringA aPassword = aParamCount > 1 ? CStringCharFromTChar(TokenToString(*aParam[1])) : NULL;
+	if (aErrCode = ZipCreateFile(&hz, TokenToString(*aParam[0]), aPassword))
+	{
+		ZipFormatMessage(aErrCode, aMsg, sizeof(aMsg));
+		g_script.ScriptError(aMsg);
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = _T("");
+	}
+	aResultToken.symbol = SYM_INTEGER;
+	aResultToken.value_int64 = (__int64)hz;
+}
+
+BIF_DECL(BIF_ZipOptions)
+{
+	DWORD aErrCode;
+	HZIP hz;
+	TCHAR	aMsg[100];
+	if (aErrCode = ZipOptions(&hz, (DWORD)TokenToInt64(*aParam[0])))
+	{
+		ZipFormatMessage(aErrCode, aMsg, sizeof(aMsg));
+		g_script.ScriptError(aMsg);
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = _T("");
+	}
+	aResultToken.symbol = SYM_INTEGER;
+	aResultToken.value_int64 = 1;
+}
+
+BIF_DECL(BIF_ZipAddFile)
+{
+	DWORD aErrCode;
+	LPTSTR aSource = TokenToString(*aParam[1]);
+	LPTSTR aDestination;
+	if (aParamCount < 3) // no name for destination file name supplied, use source file name
+	{
+		if (!(aDestination = _tcsrchr(TokenToString(*aParam[1]), '\\')))
+			aDestination = aSource;
+		else
+			aDestination += 1;
+	}
+	else
+		aDestination = TokenToString(*aParam[2]);
+	if (!TokenToInt64(*aParam[0]))
+	{
+		g_script.ScriptError(ERR_PARAM1_INVALID);
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = _T("");
+	}
+	if (aErrCode = ZipAddFile((HZIP)TokenToInt64(*aParam[0]), aDestination, aSource))
+	{
+		TCHAR	aMsg[100];
+		ZipFormatMessage(aErrCode, aMsg, sizeof(aMsg));
+		g_script.ScriptError(aMsg);
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = _T("");
+	}
+	aResultToken.symbol = SYM_INTEGER;
+	aResultToken.value_int64 = 1;
+}
+
+BIF_DECL(BIF_ZipAddFolder)
+{
+	DWORD aErrCode;
+	if (!TokenToInt64(*aParam[0]))
+	{
+		g_script.ScriptError(ERR_PARAM1_INVALID);
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = _T("");
+	}
+	if (aErrCode = ZipAddFolder((HZIP)TokenToInt64(*aParam[0]), TokenToString(*aParam[1])))
+	{
+		TCHAR	aMsg[100];
+		ZipFormatMessage(aErrCode, aMsg, sizeof(aMsg));
+		g_script.ScriptError(aMsg);
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = _T("");
+	}
+	aResultToken.symbol = SYM_INTEGER;
+	aResultToken.value_int64 = 1;
+}
+
+BIF_DECL(BIF_ZipCloseFile)
+{
+	DWORD aErrCode;
+	TCHAR	aMsg[100];
+	if (aErrCode = ZipClose((HZIP)TokenToInt64(*aParam[0])))
+	{
+		ZipFormatMessage(aErrCode, aMsg, sizeof(aMsg));
+		g_script.ScriptError(aMsg);
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = _T("");
+	}
+	aResultToken.symbol = SYM_INTEGER;
+	aResultToken.value_int64 = 1;
+}
+
+BIF_DECL(BIF_ZipCreateBuffer)
+{
+	DWORD aErrCode;
+	HZIP hz;
+	TCHAR	aMsg[100];
+	CStringA aPassword = aParamCount > 1 ? CStringCharFromTChar(TokenToString(*aParam[1])) : NULL;
+	if (aErrCode = ZipCreateBuffer(&hz, 0, (DWORD)TokenToInt64(*aParam[0]), aPassword))
+	{
+		ZipFormatMessage(aErrCode, aMsg, sizeof(aMsg));
+		g_script.ScriptError(aMsg);
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = _T("");
+	}
+	aResultToken.symbol = SYM_INTEGER;
+	aResultToken.value_int64 = (__int64)hz;
+}
+
+BIF_DECL(BIF_ZipAddBuffer)
+{
+	DWORD aErrCode;
+	const void *aSource = (const void *)TokenToInt64(*aParam[1]);
+	LPTSTR aDestination = TokenToString(*aParam[3]);
+	if (!TokenToInt64(*aParam[0]))
+	{
+		g_script.ScriptError(ERR_PARAM1_INVALID);
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = _T("");
+	}
+	if (aErrCode = ZipAddBuffer((HZIP)TokenToInt64(*aParam[0]), aDestination, aSource, (DWORD)TokenToInt64(*aParam[2])))
+	{
+		TCHAR	aMsg[100];
+		ZipFormatMessage(aErrCode, aMsg, sizeof(aMsg));
+		g_script.ScriptError(aMsg);
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = _T("");
+	}
+	aResultToken.symbol = SYM_INTEGER;
+	aResultToken.value_int64 = 1;
+}
+
+BIF_DECL(BIF_ZipCloseBuffer)
+{
+	DWORD aErrCode;
+	TCHAR	aMsg[100];
+	unsigned char	*aBuffer;
+	DWORD			aLen;
+	HANDLE			aBase;
+	if (aParam[1]->symbol != SYM_VAR)
+	{
+		g_script.ScriptError(ERR_PARAM2_INVALID);
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = _T("");
+	}
+	if (aErrCode = ZipGetMemory((HZIP)TokenToInt64(*aParam[0]), (void **)&aBuffer, &aLen, &aBase))
+	{
+		ZipFormatMessage(aErrCode, aMsg, sizeof(aMsg));
+		g_script.ScriptError(aMsg);
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = _T("");
+	}
+	aResultToken.value_int64 = aLen;
+	aParam[1]->var->SetCapacity((VarSizeType)aResultToken.value_int64, true);
+	memmove(aParam[1]->var->mCharContents, aBuffer, (SIZE_T)aResultToken.value_int64);
+	memset((char*)aParam[1]->var->mCharContents + aResultToken.value_int64, 0, 2);
+	// Free the memory now that we're done with it.
+	UnmapViewOfFile(aBuffer);
+	CloseHandle(aBase);
+	aResultToken.symbol = SYM_INTEGER;
+	aResultToken.value_int64 = aLen;
+}
+
+BIF_DECL(BIF_ZipInfo)
+{
+	DWORD aErrCode;
+	HZIP huz;
+	TCHAR	aMsg[100];
+
+	ExprTokenType Result, this_token, aKey, aValue;
+	ExprTokenType *params[] = { &aKey, &aValue };
+
+	// CStringA aPassword = aParamCount > 4 ? CStringCharFromTChar(TokenToString(*aParam[4])) : NULL;
+	if (TokenIsPureNumeric(*aParam[0]))
+	{
+		if (!TokenIsPureNumeric(*aParam[1]))
+		{
+			g_script.ScriptError(ERR_PARAM2_INVALID);
+			aResultToken.symbol = SYM_STRING;
+			aResultToken.marker = _T("");
+		}
+		else if (aParamCount < 3)
+		{
+			g_script.ScriptError(ERR_PARAM3_REQUIRED);
+			aResultToken.symbol = SYM_STRING;
+			aResultToken.marker = _T("");
+		}
+		if (aErrCode = UnzipOpenBuffer(&huz, (void*)TokenToInt64(*aParam[0]), (DWORD)TokenToInt64(*aParam[1]), NULL))
+			goto error;
+	}
+	else if (aErrCode = UnzipOpenFile(&huz, TokenToString(*aParam[0]), NULL))
+	{
+		goto error;
+	}
+	UnzipSetBaseDir(huz, _T(""));
+
+	ZIPENTRY	ze;
+	DWORD		numitems;
+
+	IObject *aObject = Object::Create();
+
+	// Find out how many items are in the archive.
+	ze.Index = (DWORD)-1;
+	if ((aErrCode = UnzipGetItem(huz, &ze)))
+		goto errorclose;
+	numitems = ze.Index;
+
+	aKey.symbol = SYM_STRING;
+	aKey.marker_length = -1;
+
+	TCHAR aTimeBuf[MAX_INTEGER_LENGTH];
+	// Get info for all item(s).
+	for (ze.Index = 0; ze.Index < numitems; ze.Index++)
+	{
+		if ((aErrCode = UnzipGetItem(huz, &ze)))
+			goto errorclose;
+		IObject *aThisObject = Object::Create();
+		aKey.marker = _T("Name");
+		aValue.symbol = SYM_STRING;
+		aValue.marker_length = -1;
+		aValue.marker = ze.Name;
+		aThisObject->Invoke(Result, this_token, IT_SET, params, 2);
+
+		aKey.marker = _T("CreateTime");
+		aValue.marker = FileTimeToYYYYMMDD(aTimeBuf, ze.CreateTime, true);
+		aThisObject->Invoke(Result, this_token, IT_SET, params, 2);
+
+		aKey.marker = _T("ModifyTime");
+		aValue.marker = FileTimeToYYYYMMDD(aTimeBuf, ze.ModifyTime, true);
+		aThisObject->Invoke(Result, this_token, IT_SET, params, 2);
+
+		aKey.marker = _T("AccessTime");
+		aValue.marker = FileTimeToYYYYMMDD(aTimeBuf, ze.AccessTime, true);
+		aThisObject->Invoke(Result, this_token, IT_SET, params, 2);
+
+		aKey.marker = _T("Attributes");
+		aValue.marker = FileAttribToStr(aTimeBuf, ze.Attributes);
+		aThisObject->Invoke(Result, this_token, IT_SET, params, 2);
+
+
+		aKey.marker = _T("CompressedSize");
+		aValue.symbol = SYM_INTEGER;
+		aValue.value_int64 = ze.CompressedSize;
+		aThisObject->Invoke(Result, this_token, IT_SET, params, 2);
+
+
+		aKey.marker = _T("UncompressedSize");
+		aValue.value_int64 = ze.UncompressedSize;
+		aThisObject->Invoke(Result, this_token, IT_SET, params, 2);
+
+		aKey.marker = _T("Push");
+		aValue.symbol = SYM_OBJECT;
+		aValue.object = aThisObject;
+		aObject->Invoke(Result, this_token, IT_CALL, params, 2);
+		aThisObject->Release();
+	}
+
+	// Done unzipping files, so close the ZIP archive.
+	UnzipClose(huz);
+	aResultToken.symbol = SYM_OBJECT;
+	aResultToken.object = aObject;
+	return;
+errorclose:
+	UnzipClose(huz);
+	aObject->Release();
+error:
+	UnzipFormatMessage(aErrCode, aMsg, sizeof(aMsg));
+	g_script.ScriptError(aMsg);
+	aResultToken.symbol = SYM_STRING;
+	aResultToken.marker = _T("");
+}
+
+BIF_DECL(BIF_UnZip)
+{
+	DWORD aErrCode;
+	HZIP huz;
+	TCHAR	aMsg[100];
+	CStringA aPassword = aParamCount > 4 ? CStringCharFromTChar(TokenToString(*aParam[4])) : NULL;
+	if (TokenIsPureNumeric(*aParam[0]))
+	{
+		if (!TokenIsPureNumeric(*aParam[1]))
+		{
+			g_script.ScriptError(ERR_PARAM2_INVALID);
+			aResultToken.symbol = SYM_STRING;
+			aResultToken.marker = _T("");
+		}
+		else if (aParamCount < 3)
+		{
+			g_script.ScriptError(ERR_PARAM3_REQUIRED);
+			aResultToken.symbol = SYM_STRING;
+			aResultToken.marker = _T("");
+		}
+		if (aErrCode = UnzipOpenBuffer(&huz, (void*)TokenToInt64(*aParam[0]), (DWORD)TokenToInt64(*aParam[1]), aPassword))
+			goto error;
+		aParam++;
+		aParamCount--;
+	}
+	else if (aErrCode = UnzipOpenFile(&huz, TokenToString(*aParam[0]), aPassword))
+	{
+		goto error;
+	}
+	UnzipSetBaseDir(huz, _T(""));
+	ZIPENTRY	ze;
+
+	TCHAR aTargetDir[MAX_PATH] = { 0 };
+	SIZE_T aDirLen = 0;
+	LPTSTR aDir = TokenToString(*aParam[1]);
+	_tcscpy(aTargetDir, aDir);
+	aDirLen = _tcslen(aDir);
+	if (aDirLen && aTargetDir[aDirLen - 1] != '\\')
+		aTargetDir[aDirLen++] = '\\';
+	LPTSTR aTargetName;
+	if (aParamCount > 2 && TokenIsPureNumeric(*aParam[2]))
+	{
+		ze.Index = (DWORD)TokenToInt64(*aParam[2]);
+		if ((aErrCode = UnzipGetItem(huz, &ze)))
+			goto errorclose;
+		_tcscpy(aTargetDir + aDirLen, aParamCount > 3 ? TokenToString(*aParam[3]) : ze.Name + 1);
+		if (aErrCode = UnzipItemToFile(huz, aTargetDir, &ze))
+			goto errorclose;
+	}
+	else
+	{
+		DWORD		numitems;
+
+		// Find out how many items are in the archive.
+		ze.Index = (DWORD)-1;
+		if ((aErrCode = UnzipGetItem(huz, &ze)))
+			goto errorclose;
+		numitems = ze.Index;
+
+		LPTSTR aOnlyOneItem = aParamCount > 2 ? TokenToString(*aParam[2]) : NULL;
+		aTargetName = aParamCount > 3 && *aOnlyOneItem ? TokenToString(*aParam[3]) : NULL;
+		// Unzip item(s), using the name stored (in the zip) for that item.
+		for (ze.Index = 0; ze.Index < numitems; ze.Index++)
+		{
+			if ((aErrCode = UnzipGetItem(huz, &ze)))
+				goto errorclose;
+			if (aOnlyOneItem && _tcscmp(aOnlyOneItem, ze.Name + 1))
+				continue;
+			_tcscpy(aTargetDir + aDirLen, aTargetName ? aTargetName : ze.Name + 1);
+			if (aErrCode = UnzipItemToFile(huz, aTargetDir, &ze))
+				goto errorclose;
+			if (aOnlyOneItem)
+				break;
+		}
+	}
+
+	// Done unzipping files, so close the ZIP archive.
+	UnzipClose(huz);
+	aResultToken.symbol = SYM_INTEGER;
+	aResultToken.value_int64 = 1;
+	return;
+errorclose:
+	UnzipClose(huz);
+error:
+	UnzipFormatMessage(aErrCode, aMsg, sizeof(aMsg));
+	g_script.ScriptError(aMsg);
+	aResultToken.symbol = SYM_STRING;
+	aResultToken.marker = _T("");
+}
+
+BIF_DECL(BIF_UnZipBuffer)
+{
+	DWORD aErrCode;
+	HZIP huz;
+	TCHAR	aMsg[100];
+	CStringA aPassword = aParamCount > 4 ? CStringCharFromTChar(TokenToString(*aParam[4])) : NULL;
+	if (TokenIsPureNumeric(*aParam[0]))
+	{
+		if (!TokenIsPureNumeric(*aParam[1]))
+		{
+			g_script.ScriptError(ERR_PARAM2_INVALID);
+			aResultToken.symbol = SYM_STRING;
+			aResultToken.marker = _T("");
+		}
+		else if (aParamCount < 3)
+		{
+			g_script.ScriptError(ERR_PARAM3_REQUIRED);
+			aResultToken.symbol = SYM_STRING;
+			aResultToken.marker = _T("");
+		}
+		if (aErrCode = UnzipOpenBuffer(&huz, (void*)TokenToInt64(*aParam[0]), (DWORD)TokenToInt64(*aParam[1]), aPassword))
+			goto error;
+		aParam++;
+		aParamCount--;
+	}
+	else if (aErrCode = UnzipOpenFile(&huz, TokenToString(*aParam[0]), aPassword))
+	{
+		goto error;
+	}
+	UnzipSetBaseDir(huz, _T(""));
+
+	ZIPENTRY	ze;
+	unsigned char *aBuffer;
+
+	if (TokenIsPureNumeric(*aParam[2]))
+	{
+		ze.Index = (DWORD)TokenToInt64(*aParam[2]);
+		if ((aErrCode = UnzipGetItem(huz, &ze)))
+			goto errorclose;
+		aResultToken.value_int64 = ze.UncompressedSize;
+		if (aParamCount < 3 || aParam[2]->symbol != SYM_VAR)
+		{
+			UnzipClose(huz);
+			aResultToken.symbol = SYM_INTEGER;
+			return;
+		}
+		aBuffer = (unsigned char *)malloc(ze.UncompressedSize);
+		if (aErrCode = UnzipItemToBuffer(huz, aBuffer, ze.UncompressedSize, &ze))
+			goto errorclose;
+		aParam[2]->var->SetCapacity((VarSizeType)aResultToken.value_int64, true);
+		memmove(aParam[2]->var->mCharContents, aBuffer, (SIZE_T)aResultToken.value_int64);
+		memset((char*)aParam[2]->var->mCharContents + aResultToken.value_int64, 0, 2);
+		free(aBuffer);
+		UnzipClose(huz);
+		aResultToken.symbol = SYM_INTEGER;
+		return;
+	}
+	else
+	{
+		DWORD		numitems;
+		// Find out how many items are in the archive.
+		ze.Index = (DWORD)-1;
+		if ((aErrCode = UnzipGetItem(huz, &ze)))
+			goto errorclose;
+		numitems = ze.Index;
+		LPTSTR aSource = TokenToString(*aParam[1]);
+		// Unzip item(s), using the name stored (in the zip) for that item.
+		for (ze.Index = 0; ze.Index < numitems; ze.Index++)
+		{
+			if ((aErrCode = UnzipGetItem(huz, &ze)))
+				goto errorclose;
+			if (_tcscmp(aSource, ze.Name + 1))
+				continue;
+			aResultToken.value_int64 = ze.UncompressedSize;
+			if (aParam[2]->symbol != SYM_VAR)
+			{
+				UnzipClose(huz);
+				aResultToken.symbol = SYM_INTEGER;
+				return;
+			}
+			aBuffer = (unsigned char *)malloc(ze.UncompressedSize);
+			if (aErrCode = UnzipItemToBuffer(huz, aBuffer, ze.UncompressedSize, &ze))
+				goto errorclose;
+			aParam[2]->var->SetCapacity((VarSizeType)aResultToken.value_int64, true);
+			memmove(aParam[2]->var->mCharContents, aBuffer, (SIZE_T)aResultToken.value_int64);
+			memset((char*)aParam[2]->var->mCharContents + aResultToken.value_int64, 0, 2);
+			free(aBuffer);
+			UnzipClose(huz);
+			aResultToken.symbol = SYM_INTEGER;
+			return;
+		}
+	}
+
+	// Item not found, so close the ZIP archive.
+	UnzipClose(huz);
+	aResultToken.symbol = SYM_STRING;
+	aResultToken.marker = _T("");
+	return;
+errorclose:
+	UnzipClose(huz);
+error:
+	UnzipFormatMessage(aErrCode, aMsg, sizeof(aMsg));
+	g_script.ScriptError(aMsg);
+	aResultToken.symbol = SYM_STRING;
+	aResultToken.marker = _T("");
+}
+
+BIF_DECL(BIF_CryptAES)
+{
+	TCHAR *pw[1024] = {};
+	if (!ParamIndexIsOmittedOrEmpty(2))
+	{
+		TCHAR *pwd = TokenToString(*aParam[2]);
+		size_t pwlen = _tcslen(TokenToString(*aParam[2]));
+		for (size_t i = 0; i <= pwlen; i++)
+			pw[i] = &pwd[i];
+	}
+	if (aResultToken.value_int64 = CryptAES(aParam[0]->symbol == SYM_VAR ? (LPVOID)aParam[0]->var->mByteContents : (LPVOID)TokenToInt64(*aParam[0]),
+											(DWORD)TokenToInt64(*aParam[1]), pw, ParamIndexIsOmitted(3) ? true : TokenToBOOL(*aParam[3]),
+											ParamIndexIsOmitted(4) ? CALG_AES_256 : (DWORD)TokenToInt64(*aParam[4])))
+	{
+		aResultToken.symbol = SYM_INTEGER;
+	}
+	else
+	{
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = _T("");
+	}
+}
+
+BIF_DECL(BIF_ZipRawMemory)
+{
+	LPVOID aDataBuf = NULL;
+	TCHAR *pw[1024] = {};
+	if (!ParamIndexIsOmittedOrEmpty(3))
+	{
+		TCHAR *pwd = TokenToString(*aParam[3]);
+		size_t pwlen = _tcslen(TokenToString(*aParam[3]));
+		for (size_t i = 0; i <= pwlen; i++)
+			pw[i] = &pwd[i];
+	}
+	aResultToken.value_int64 = CompressBuffer(aParam[0]->symbol == SYM_VAR ? (BYTE*)aParam[0]->var->mByteContents : (BYTE*)TokenToInt64(*aParam[0]), aDataBuf,
+											  (DWORD)TokenToInt64(*aParam[1]), pw);
+	if (aResultToken.value_int64)
+	{
+		aResultToken.symbol = SYM_INTEGER;
+		if (!ParamIndexIsOmitted(2))
+		{
+			if (aParam[2]->symbol == SYM_VAR)
+			{
+				aParam[2]->var->SetCapacity((VarSizeType)aResultToken.value_int64 + sizeof(char) * 2);
+				memmove(aParam[2]->var->mCharContents, aDataBuf, (SIZE_T)aResultToken.value_int64);
+				memset((char*)aParam[2]->var->mCharContents + aResultToken.value_int64, 0, 2);
+			}
+			else if (TokenToInt64(*aParam[2]) > 1024) // Assume address
+				memmove((void *)TokenToInt64(*aParam[2]), aDataBuf, (SIZE_T)aResultToken.value_int64);
+
+		}
+		SecureZeroMemory(aDataBuf, (size_t)aResultToken.value_int64);
+		VirtualFree(aDataBuf, 0, MEM_RELEASE);
+		return;
+	}
+	aResultToken.symbol = SYM_STRING;
+	aResultToken.marker = _T("");
+}
+
 BIF_DECL(BIF_UnZipRawMemory)
 {
 	if (TokenToInt64(*aParam[0]))
 	{
 		LPVOID aDataBuf = NULL;
-		WCHAR *pw[1024] = {};
+		TCHAR *pw[1024] = {};
 		if (!ParamIndexIsOmittedOrEmpty(3))
 		{
-			size_t pwlen = _tcslen(TokenToString(*aParam[3]));
-#ifdef _UNICODE
-			WCHAR *pwd = TokenToString(*aParam[3]);
-#else
-			WCHAR *pwd = (WCHAR*)alloca((pwlen + 1) * sizeof(WCHAR));
-			MultiByteToWideChar(CP_ACP, 0, TokenToString(*aParam[3]), pwlen, pwd, (pwlen + 1) * sizeof(WCHAR));
-#endif
+			TCHAR *pwd = TokenToString(*aParam[3]);
+			size_t pwlen = _tcslen(pwd);
 			for(size_t i = 0;i <= pwlen;i++)
 				pw[i] = &pwd[i];
 		}
-		aResultToken.value_int64 = DecompressBuffer((void *)TokenToInt64(*aParam[0]), aDataBuf, (SIZE_T)TokenToInt64(*aParam[1]), pw);
+		aResultToken.value_int64 = DecompressBuffer((void *)TokenToInt64(*aParam[0]), aDataBuf, (DWORD)TokenToInt64(*aParam[1]), pw);
 		if (aResultToken.value_int64)
 		{
 			aResultToken.symbol = SYM_INTEGER;
@@ -18216,7 +18749,7 @@ BIF_DECL(BIF_UnZipRawMemory)
 			{
 				if (aParam[2]->symbol == SYM_VAR)
 				{
-					aParam[2]->var->SetCapacity((VarSizeType)aResultToken.value_int64 + sizeof(char)*2);
+					aParam[2]->var->SetCapacity((VarSizeType)aResultToken.value_int64 + sizeof(char) * 2);
 					memmove(aParam[2]->var->mCharContents,aDataBuf,(SIZE_T)aResultToken.value_int64);
 					memset((char*)aParam[2]->var->mCharContents + aResultToken.value_int64, 0, 2);
 				}

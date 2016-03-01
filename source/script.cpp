@@ -885,16 +885,16 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 {
 	mIsRestart = aIsRestart;
 	TCHAR buf[2048]; // Just to make sure we have plenty of room to do things with.
-	g_default_pwd0 = L'A';
-	g_default_pwd1 = L'u';
-	g_default_pwd2 = L't';
-	g_default_pwd3 = L'o';
-	g_default_pwd4 = L'H';
-	g_default_pwd5 = L'o';
-	g_default_pwd6 = L't';
-	g_default_pwd7 = L'k';
-	g_default_pwd8 = L'e';
-	g_default_pwd9 = L'y';
+	g_default_pwd0 = 'A';
+	g_default_pwd1 = 'u';
+	g_default_pwd2 = 't';
+	g_default_pwd3 = 'o';
+	g_default_pwd4 = 'H';
+	g_default_pwd5 = 'o';
+	g_default_pwd6 = 't';
+	g_default_pwd7 = 'k';
+	g_default_pwd8 = 'e';
+	g_default_pwd9 = 'y';
 #ifdef AUTOHOTKEYSC
 	// Fix for v1.0.29: Override the caller's use of __argv[0] by using GetModuleFileName(),
 	// so that when the script is started from the command line but the user didn't type the
@@ -10863,70 +10863,9 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		min_params = 2;
 		max_params = 3;
 	}
-	else if (!_tcsicmp(func_name, _T("Struct")))
-	{
-		bif = BIF_Struct;	
-		min_params = 1;
-		max_params = 3;
-	}
-	else if (!_tcsicmp(func_name, _T("Sizeof")))
-	{
-		bif = BIF_sizeof;	
-		min_params = 1;
-		max_params = 2;
-	}
-	else if (!_tcsicmp(func_name, _T("CriticalObject")))
-	{
-		bif = BIF_CriticalObject;	
-		min_params = 0;
-		max_params = 2;
-	}
-	else if (!_tcsicmp(func_name, _T("FindFunc")))  // addFile() Naveen v8.
-	{
-		bif = BIF_FindFunc;
-		min_params = 1;
-		max_params = 1;
-	}
-	else if (!_tcsicmp(func_name, _T("FindLabel")))  // HotKeyIt v1.1.02.00
-	{
-		bif = BIF_FindLabel;
-		min_params = 1;
-		max_params = 1;
-	}
-	else if (!_tcsicmp(func_name, _T("Alias")))  // lowlevel() Naveen v9.
-	{
-		bif = BIF_Alias;
-		min_params = 1;
-		max_params = 2;
-	}
-	else if (!_tcsicmp(func_name, _T("UnZipRawMemory")))  // lowlevel() Naveen v9.
-	{
-		bif = BIF_UnZipRawMemory;
-		min_params = 2;
-		max_params = 4;
-	}
-	else if (!_tcsicmp(func_name, _T("getTokenValue")))  // lowlevel() Naveen v9.
-	{
-		bif = BIF_getTokenValue;
-		min_params = 1;
-		max_params = 1;
-	}
-	else if (!_tcsicmp(func_name, _T("CacheEnable")))  // lowlevel() Naveen v9.
-	{
-		bif = BIF_CacheEnable;
-		min_params = 1;
-		max_params = 1;
-	}
-	else if (!_tcsicmp(func_name, _T("Getvar")))  // lowlevel() Naveen v9.
-	{
-		bif = BIF_Getvar;
-		min_params = 1;
-		max_params = 2;
-	}
 	else if (!_tcsicmp(func_name, _T("Trim")) || !_tcsicmp(func_name, _T("LTrim")) || !_tcsicmp(func_name, _T("RTrim"))) // L31
 	{
 		bif = BIF_Trim;
-		min_params = 1;
 		max_params = 2;
 	}
 	else if (!_tcsicmp(func_name, _T("InStr")))
@@ -10956,7 +10895,6 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 	else if (!_tcsicmp(func_name, _T("StrSplit")))
 	{
 		bif = BIF_StrSplit;
-		min_params = 1;
 		max_params = 3;
 	}
 	else if (!_tcsnicmp(func_name, _T("GetKey"), 6))
@@ -11017,16 +10955,55 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		max_params = 10000; // An arbitrarily high limit that will never realistically be reached.
 	}
 #endif
+	else if (!_tcsicmp(func_name, _T("Struct")))
+	{
+		bif = BIF_Struct;
+		max_params = 3;
+	}
+	else if (!_tcsicmp(func_name, _T("Sizeof")))
+	{
+		bif = BIF_sizeof;
+		max_params = 2;
+	}
+	else if (!_tcsicmp(func_name, _T("CriticalObject")))
+	{
+		bif = BIF_CriticalObject;	
+		min_params = 0;
+		max_params = 2;
+	}
+	else if (!_tcsicmp(func_name, _T("FindFunc")))  // addFile() Naveen v8.
+	{
+		bif = BIF_FindFunc;
+	}
+	else if (!_tcsicmp(func_name, _T("FindLabel")))  // HotKeyIt v1.1.02.00
+	{
+		bif = BIF_FindLabel;
+	}
+	else if (!_tcsicmp(func_name, _T("Alias")))  // lowlevel() Naveen v9.
+	{
+		bif = BIF_Alias;
+		max_params = 2;
+	}
+	else if (!_tcsicmp(func_name, _T("getTokenValue")))  // lowlevel() Naveen v9.
+	{
+		bif = BIF_getTokenValue;
+	}
+	else if (!_tcsicmp(func_name, _T("CacheEnable")))  // lowlevel() Naveen v9.
+	{
+		bif = BIF_CacheEnable;
+	}
+	else if (!_tcsicmp(func_name, _T("Getvar")))  // lowlevel() Naveen v9.
+	{
+		bif = BIF_Getvar;
+		max_params = 2;
+	}
 	else if (!_tcsicmp(func_name, _T("ResourceLoadLibrary")))
 	{
 		bif = BIF_ResourceLoadLibrary;
-		min_params = 1;
-		max_params = 1;
 	}
 	else if (!_tcsicmp(func_name, _T("MemoryLoadLibrary")))
 	{
 		bif = BIF_MemoryLoadLibrary;
-		min_params = 1;
 		max_params = 5;
 	}
 	else if (!_tcsicmp(func_name, _T("MemoryGetProcAddress")))
@@ -11038,8 +11015,6 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 	else if (!_tcsicmp(func_name, _T("MemoryFreeLibrary")))
 	{
 		bif = BIF_MemoryFreeLibrary;
-		min_params = 1;
-		max_params = 1;
 	}
 	else if (!_tcsicmp(func_name, _T("MemoryFindResource")))
 	{
@@ -11068,8 +11043,85 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 	else if (!_tcsicmp(func_name, _T("DynaCall")))
 	{
 		bif = BIF_DynaCall;
-		min_params = 0;
 		max_params = 10000; // An arbitrarily high limit that will never realistically be reached.
+	}
+	else if (!_tcsicmp(func_name, _T("CryptAES")))  // lowlevel() Naveen v9.
+	{
+		bif = BIF_CryptAES;
+		min_params = 3;
+		max_params = 5;
+	}
+	else if (!_tcsicmp(func_name, _T("ZipRawMemory")))  // lowlevel() Naveen v9.
+	{
+		bif = BIF_ZipRawMemory;
+		min_params = 2;
+		max_params = 4;
+	}
+	else if (!_tcsicmp(func_name, _T("UnZipRawMemory")))  // lowlevel() Naveen v9.
+	{
+		bif = BIF_UnZipRawMemory;
+		min_params = 2;
+		max_params = 4;
+	}
+	else if (!_tcsicmp(func_name, _T("ZipCreateFile")))  // lowlevel() Naveen v9.
+	{
+		bif = BIF_ZipCreateFile;
+		max_params = 2;
+	}
+	else if (!_tcsicmp(func_name, _T("ZipCreateBuffer")))  // lowlevel() Naveen v9.
+	{
+		bif = BIF_ZipCreateBuffer;
+		max_params = 2;
+	}
+	else if (!_tcsicmp(func_name, _T("ZipCloseFile")))  // lowlevel() Naveen v9.
+	{
+		bif = BIF_ZipCloseFile;
+	}
+	else if (!_tcsicmp(func_name, _T("ZipCloseBuffer")))  // lowlevel() Naveen v9.
+	{
+		bif = BIF_ZipCloseBuffer;
+		max_params = 2;
+	}
+	else if (!_tcsicmp(func_name, _T("ZipAddFile")))  // lowlevel() Naveen v9.
+	{
+		bif = BIF_ZipAddFile;
+		min_params = 2;
+		max_params = 3;
+	}
+	else if (!_tcsicmp(func_name, _T("ZipAddFolder")))  // lowlevel() Naveen v9.
+	{
+		bif = BIF_ZipAddFolder;
+		min_params = 2;
+		max_params = 2;
+	}
+	else if (!_tcsicmp(func_name, _T("ZipAddBuffer")))  // lowlevel() Naveen v9.
+	{
+		bif = BIF_ZipAddBuffer;
+		min_params = 4;
+		max_params = 4;
+	}
+	else if (!_tcsicmp(func_name, _T("ZipOptions")))  // lowlevel() Naveen v9.
+	{
+		bif = BIF_ZipOptions;
+		min_params = 2;
+		max_params = 2;
+	}
+	else if (!_tcsicmp(func_name, _T("ZipInfo")))  // lowlevel() Naveen v9.
+	{
+		bif = BIF_ZipInfo;
+		max_params = 2;
+	}
+	else if (!_tcsicmp(func_name, _T("UnZip")))  // lowlevel() Naveen v9.
+	{
+		bif = BIF_UnZip;
+		min_params = 2;
+		max_params = 6;
+	}
+	else if (!_tcsicmp(func_name, _T("UnZipBuffer")))  // lowlevel() Naveen v9.
+	{
+		bif = BIF_UnZipBuffer;
+		min_params = 2;
+		max_params = 5;
 	}
 	else if (!_tcsicmp(func_name, _T("VarSetCapacity")))
 	{
@@ -11190,14 +11242,12 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		else if (!_tcsicmp(suffix, _T("Load")))
 		{
 			bif = BIF_ObjLoad;
-			min_params = 1;
-			max_params = 1;
+			max_params = 2;
 		}
 		else if (!_tcsicmp(suffix, _T("Dump")))
 		{
 			bif = BIF_ObjDump;
-			min_params = 1;
-			max_params = 3;
+			max_params = 4;
 		}
 		else return NULL;
 	}

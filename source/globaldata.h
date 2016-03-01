@@ -259,17 +259,17 @@ extern bool g_KeyHistoryToFile;
 #endif
 #endif // MINIDLL
 
-extern WCHAR g_default_pwd0;
-extern WCHAR g_default_pwd1;
-extern WCHAR g_default_pwd2;
-extern WCHAR g_default_pwd3;
-extern WCHAR g_default_pwd4;
-extern WCHAR g_default_pwd5;
-extern WCHAR g_default_pwd6;
-extern WCHAR g_default_pwd7;
-extern WCHAR g_default_pwd8;
-extern WCHAR g_default_pwd9;
-extern WCHAR *g_default_pwd[];
+extern TCHAR g_default_pwd0;
+extern TCHAR g_default_pwd1;
+extern TCHAR g_default_pwd2;
+extern TCHAR g_default_pwd3;
+extern TCHAR g_default_pwd4;
+extern TCHAR g_default_pwd5;
+extern TCHAR g_default_pwd6;
+extern TCHAR g_default_pwd7;
+extern TCHAR g_default_pwd8;
+extern TCHAR g_default_pwd9;
+extern TCHAR *g_default_pwd[];
 
 // 9 might be better than 10 because if the granularity/timer is a little
 // off on certain systems, a Sleep(10) might really result in a Sleep(20),
