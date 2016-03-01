@@ -2,7 +2,7 @@
 #include "defines.h"
 #include "globaldata.h"
 #include "script.h"
-
+#include "script_func_impl.h"
 #include "script_object.h"
 
 
@@ -953,14 +953,21 @@ BIF_DECL(BIF_ObjDump)
 		aResultToken.marker = _T("");
 		return;
 	}
-
-	size_t aSize = (size_t)(aResultToken.value_int64 = ObjRawSize(aObject, aParamCount > 2 ? TokenToBOOL(*aParam[2]) : false, NULL) + sizeof(__int64));
+	INT aCopyBuffer = aParamCount > 2 ? (int)TokenToInt64(*aParam[2]) : 0;
+	DWORD aSize = (DWORD)(aResultToken.value_int64 = ObjRawSize(aObject, (aCopyBuffer == 1 || aCopyBuffer == 3), NULL) + sizeof(__int64));
 	char *aBuffer = (char*)malloc(aSize);
+	if (!aBuffer)
+	{
+		g_script.ScriptError(ERR_OUTOFMEM);
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = _T("");
+		return;
+	}
 	memset(aBuffer, 0, aSize);
 	*(__int64*)aBuffer = aResultToken.value_int64;
 	IObject *aObjects = Object::Create();
 	UINT aObjCount = 0;
-	if (aSize - sizeof(__int64) != ObjRawDump(aObject, aBuffer + sizeof(__int64), aParamCount > 2 ? TokenToBOOL(*aParam[2]) : false, aObjects, aObjCount))
+	if (aSize - sizeof(__int64) != ObjRawDump(aObject, aBuffer + sizeof(__int64), (aCopyBuffer == 1 || aCopyBuffer == 3), aObjects, aObjCount))
 	{
 		aObjects->Release();
 		free(aBuffer);
@@ -970,6 +977,33 @@ BIF_DECL(BIF_ObjDump)
 		return;
 	}
 	aObjects->Release();
+	if (aParamCount < 3 || TokenToInt64(*aParam[2]) < 2)
+	{
+		LPVOID aDataBuf;
+		TCHAR *pw[1024] = {};
+		if (!ParamIndexIsOmittedOrEmpty(3))
+		{
+			TCHAR *pwd = TokenToString(*aParam[3]);
+			size_t pwlen = _tcslen(TokenToString(*aParam[3]));
+			for (size_t i = 0; i <= pwlen; i++)
+				pw[i] = &pwd[i];
+		}
+		DWORD aCompressedSize = CompressBuffer((BYTE*)aBuffer, aDataBuf, aSize, pw);
+		if (aCompressedSize)
+		{
+			free(aBuffer);
+			aBuffer = (char*)malloc(aCompressedSize);
+			if (!aBuffer)
+			{
+				g_script.ScriptError(ERR_OUTOFMEM);
+				aResultToken.symbol = SYM_STRING;
+				aResultToken.marker = _T("");
+				return;
+			}
+			memcpy(aBuffer, aDataBuf, aSize = aCompressedSize);
+			aResultToken.value_int64 = aSize;
+		}
+	}
 	if (TokenToObject(*aParam[1]))
 	{ // FileWrite mode
 		FILE *hFile = _tfopen(TokenToString(*aParam[0]), _T("wb"));
@@ -1062,22 +1096,7 @@ IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &a
 		else if (type == -9)
 		{
 			aKey.symbol = SYM_STRING;
-			// FTOA(*(double*)aThisBuffer, buf, MAX_INTEGER_LENGTH);
-			aKey.marker_length = sntprintf(buf, MAX_INTEGER_LENGTH, _T("%0.17f"), *(double*)aThisBuffer);
-			for (int i = (int)aKey.marker_length; i > 0; --i)
-			{
-				if (buf[i - 1] != '0')
-				{
-					if (i < (int)aKey.marker_length)
-					{
-						if (buf[i - 1] == '.')
-							++i;
-						buf[i] = '\0';
-					}
-					aKey.marker_length = i;
-					break;
-				}
-			}
+			aKey.marker_length = FTOA(*(double*)aThisBuffer, buf, MAX_INTEGER_LENGTH);
 			aKey.marker = buf;
 			aThisBuffer += sizeof(__int64);
 		}
@@ -1201,7 +1220,7 @@ IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &a
 			aThisBuffer += sizeof(__int64);
 			if (aMarkerSize)
 			{
-				aValue.marker_length = (size_t)(aMarkerSize - sizeof(TCHAR)) / sizeof(TCHAR);
+				aValue.marker_length = -1;
 				aValue.marker = (LPTSTR)aThisBuffer;
 				aObject->Invoke(Result, this_token, IT_SET, params + 1, 2);
 				aCall.marker = _T("SetCapacity");
@@ -1233,6 +1252,8 @@ IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &a
 BIF_DECL(BIF_ObjLoad)
 {
 	aResultToken.symbol = SYM_OBJECT;
+	bool aFreeBuffer = false;
+	DWORD aSize = aParamCount > 1 ? (DWORD)TokenToInt64(*aParam[1]) : 0;
 	LPTSTR aPath = TokenToString(*aParam[0]);
 	char *aBuffer = (char *)TokenToInt64(*aParam[0]);
 	if (!aBuffer)
@@ -1244,7 +1265,6 @@ BIF_DECL(BIF_ObjLoad)
 			return;
 		}
 		FILE *fp;
-		size_t size;
 
 		fp = _tfopen(aPath, _T("rb"));
 		if (fp == NULL)
@@ -1255,11 +1275,41 @@ BIF_DECL(BIF_ObjLoad)
 		}
 
 		fseek(fp, 0, SEEK_END);
-		size = ftell(fp);
-		aBuffer = (char *)malloc(size);
+		aSize = ftell(fp);
+		aBuffer = (char *)malloc(aSize);
+		aFreeBuffer = true;
 		fseek(fp, 0, SEEK_SET);
-		fread(aBuffer, 1, size, fp);
+		fread(aBuffer, 1, aSize, fp);
 		fclose(fp);
+	}
+	if (*(unsigned int*)aBuffer == 0x04034b50)
+	{
+		if (!aSize)
+		{
+			g_script.ScriptError(ERR_PARAM2_REQUIRED);
+			aResultToken.symbol = SYM_STRING;
+			aResultToken.marker = _T("");
+			return;
+		}
+		LPVOID aDataBuf;
+		TCHAR *pw[1024] = {};
+		if (!ParamIndexIsOmittedOrEmpty(2))
+		{
+			TCHAR *pwd = TokenToString(*aParam[2]);
+			size_t pwlen = _tcslen(TokenToString(*aParam[2]));
+			for (size_t i = 0; i <= pwlen; i++)
+				pw[i] = &pwd[i];
+		}
+		DWORD aSizeDeCompressed = DecompressBuffer(aBuffer, aDataBuf, aSize, g_default_pwd);
+		if (aSizeDeCompressed)
+		{
+			LPVOID buff = malloc(aSizeDeCompressed);
+			aFreeBuffer = true;
+			memmove(buff, aDataBuf, aSizeDeCompressed);
+			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
+			VirtualFree(aDataBuf, 0, MEM_RELEASE);
+			aBuffer = (char*)buff;
+		}
 	}
 	UINT aObjCount = 0;
 	UINT aObjSize = 16;
@@ -1275,7 +1325,7 @@ BIF_DECL(BIF_ObjLoad)
 		return;
 	}
 	free(aObjects);
-	if (!TokenToInt64(*aParam[0]))
+	if (aFreeBuffer)
 		free(aBuffer);
 }
 
