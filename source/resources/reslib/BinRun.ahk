@@ -90,8 +90,7 @@ BinRun(pData,cmdLine:="",cmdLineScript:="",Hide:=0,ExeToUse:=""){
                               if DllCall("ResumeThread","PTR",pi.hThread){
                                 if (Script){ ; use pipe to pass script to new executable
                                    If IsObject(cmdLineScript){
-                                    Loop % sz:=ObjDump(cmdLineScript,dmp)
-                                      hex.=format("{1:02X}",NumGet(&dmp,A_Index-1,"UChar"))
+                                    sz:=ObjDump(cmdLineScript,dmp),hex:=BinToHex(&dmp,sz)
                                     While % _hex:=SubStr(Hex,1 + (A_Index-1)*16370,16370)
                                       _s.= "hex" (A_Index=1?":":".") "=""" _hex """`n"
                                     script:=StrReplace(h2o,"PLACEHOLDERB29C2D1CA2C24A57BC5E208EA09E162F",_s) "global A_Args:=B29C2D1CA2C24A57BC5E208EA09E162F()`n" script
