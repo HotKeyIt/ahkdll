@@ -115,9 +115,6 @@
     <ClCompile Include="source\script_struct.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="source\LiteUnzip.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="source\lowlevelbif.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -125,6 +122,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="source\MinHook.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="source\LiteZip.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -228,10 +228,10 @@
     <ClInclude Include="source\ahkversion.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="source\LiteUnzip.h">
+    <ClInclude Include="source\MinHook.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="source\MinHook.h">
+    <ClInclude Include="source\LiteZip.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
