@@ -977,7 +977,7 @@ BIF_DECL(BIF_ObjDump)
 		return;
 	}
 	aObjects->Release();
-	if (aParamCount > 2 || TokenToInt64(*aParam[2]) > 1)
+	if (aParamCount > 2 && TokenToInt64(*aParam[2]) > 1)
 	{
 		LPVOID aDataBuf;
 		TCHAR *pw[1024] = {};
