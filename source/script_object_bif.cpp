@@ -977,7 +977,7 @@ BIF_DECL(BIF_ObjDump)
 		return;
 	}
 	aObjects->Release();
-	if (aParamCount < 3 || TokenToInt64(*aParam[2]) < 2)
+	if (aParamCount > 2 || TokenToInt64(*aParam[2]) > 1)
 	{
 		LPVOID aDataBuf;
 		TCHAR *pw[1024] = {};
@@ -1282,15 +1282,8 @@ BIF_DECL(BIF_ObjLoad)
 		fread(aBuffer, 1, aSize, fp);
 		fclose(fp);
 	}
-	if (*(unsigned int*)aBuffer == 0x04034b50)
+	if (*(unsigned int*)aBuffer == 0x04034b50 && aSize)
 	{
-		if (!aSize)
-		{
-			g_script.ScriptError(ERR_PARAM2_REQUIRED);
-			aResultToken.symbol = SYM_STRING;
-			aResultToken.marker = _T("");
-			return;
-		}
 		LPVOID aDataBuf;
 		TCHAR *pw[1024] = {};
 		if (!ParamIndexIsOmittedOrEmpty(2))
