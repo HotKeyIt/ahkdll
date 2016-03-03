@@ -226,7 +226,7 @@
       <PreprocessorDefinitions>AUTOHOTKEYSC;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ResourceCompile>
-      <PreprocessorDefinitions>_WIN64;AUTOHOTKEYSC;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>AUTOHOTKEYSC;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PreprocessorDefinitions Condition="$(ConfigDebug)">_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
     <Link>
@@ -258,14 +258,17 @@
     <ClCompile Include="source\application.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\AutoHotkey.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\clipboard.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\Debugger.cpp">
       <FavorSizeOrSpeed Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">Speed</FavorSizeOrSpeed>
@@ -303,7 +306,7 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">NotUsing</PrecompiledHeader>
-      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|x64'">NotUsing</PrecompiledHeader>
@@ -320,26 +323,32 @@
     <ClCompile Include="source\dllmain.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\exports.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\globaldata.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\hook.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\hotkey.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\keyboard_mouse.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\LiteZip.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">NotUsing</PrecompiledHeader>
@@ -363,6 +372,7 @@
     <ClCompile Include="source\lowlevelbif.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\MemoryModule.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
@@ -442,14 +452,17 @@
     <ClCompile Include="source\MinHook.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\mt19937ar-cok.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\os_version.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\Registry.cpp">
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">_MBCS;MBCS;_USRDLL;AUTOCOMSERVER_EXPORTS;_STANDALONE;WIN32;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -463,54 +476,67 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\script.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\script2.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\script_autoit.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\script_com.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\script_expression.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\script_gui.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\script_menu.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\script_object.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\script_object_bif.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\script_registry.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\script_struct.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\SimpleHeap.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\stdafx.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
@@ -518,26 +544,32 @@
     <ClCompile Include="source\StringConv.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\TextIO.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\util.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\var.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\window.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\WinGroup.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -663,6 +695,9 @@
     <GenerateManifest>false</GenerateManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">
     <GenerateManifest>false</GenerateManifest>
   </PropertyGroup>
   <ItemDefinitionGroup>
@@ -1025,7 +1060,7 @@
     </ClCompile>
     <ClCompile>
       <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">false</MultiProcessorCompilation>
-      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">MultiThreadedDebug</RuntimeLibrary>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">MultiThreadedDebugDLL</RuntimeLibrary>
       <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">true</MinimalRebuild>
     </ClCompile>
     <ClCompile>
@@ -1058,7 +1093,7 @@
     </Link>
     <ResourceCompile>
       <Culture Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">0x0409</Culture>
-      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">_USING_V110_SDK71_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ResourceOutputFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)%(Filename).res</ResourceOutputFileName>
     </ResourceCompile>
     <Link>
