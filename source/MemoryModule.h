@@ -47,6 +47,7 @@ typedef void (*CustomFreeLibraryFunc)(HCUSTOMMODULE, void *);
 typedef BOOL(WINAPI *DllEntryProc)(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved);
 typedef int (WINAPI *ExeEntryProc)(void);
 
+
 typedef struct {
 	PIMAGE_NT_HEADERS headers;
 	unsigned char *codeBase;
