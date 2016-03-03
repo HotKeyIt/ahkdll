@@ -665,6 +665,8 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data,
 			// set start and end of memory for our module so HookRtlPcToFileHeader can report properly
 			currentModuleStart = result->codeBase;
 			currentModuleEnd = result->codeBase + result->headers->OptionalHeader.SizeOfImage;
+			if (!_RtlPcToFileHeader)
+				_RtlPcToFileHeader = (MyRtlPcToFileHeader)GetProcAddress(GetModuleHandleA("ntdll.dll"), "RtlPcToFileHeader");
 			EnterCriticalSection(aLoaderLock);
 			PHOOK_ENTRY pHook = MinHookEnable(_RtlPcToFileHeader, &HookRtlPcToFileHeader, &hHeap);
 			// notify library about attaching to process
@@ -675,7 +677,7 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data,
 			if (hHeap)
 				HeapDestroy(hHeap);
 			LeaveCriticalSection(aLoaderLock);
-			
+
 			if (!successfull) {
 				SetLastError(ERROR_DLL_INIT_FAILED);
 				goto error;
