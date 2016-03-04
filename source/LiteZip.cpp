@@ -20,7 +20,7 @@ typedef unsigned long	ULG;
 typedef unsigned long	lutime_t;	// define it ourselves since we don't include time.h
 
 #define UNZIP_MEMORY		0x01
-#define UNZIP_FILENAME	0x02
+#define UNZIP_FILENAME		0x02
 #define UNZIP_HANDLE		0x04
 #define UNZIP_RAW			0x08
 #define UNZIP_ALREADYINIT	0x40000000

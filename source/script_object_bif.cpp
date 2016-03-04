@@ -456,13 +456,13 @@ __int64 ObjRawSize(IObject *aObject, bool aCopyBuffer, IObject *aObjects)
 {
 	ExprTokenType Result, this_token, enum_token, aCall, aKey, aValue;
 	ExprTokenType *params[] = { &aCall, &aKey, &aValue };
-	TCHAR defbuf[MAX_PATH], buf[MAX_PATH];
+	TCHAR buf[MAX_PATH];
 	
 	// Set up enum_token the way Invoke expects:
 	enum_token.symbol = SYM_STRING;
 	enum_token.marker = _T("");
 	enum_token.mem_to_free = NULL;
-	enum_token.buf = defbuf;
+	enum_token.buf = buf;
 
 	// Prepare to call object._NewEnum():
 	aCall.symbol = SYM_STRING;
@@ -623,13 +623,13 @@ __int64 ObjRawDump(IObject *aObject, char *aBuffer, bool aCopyBuffer, IObject *a
 
 	ExprTokenType Result, this_token, enum_token, aCall, aKey, aValue;
 	ExprTokenType *params[] = { &aCall, &aKey, &aValue };
-	TCHAR defbuf[MAX_PATH], buf[MAX_PATH];
+	TCHAR buf[MAX_PATH];
 
 	// Set up enum_token the way Invoke expects:
 	enum_token.symbol = SYM_STRING;
 	enum_token.marker = _T("");
 	enum_token.mem_to_free = NULL;
-	enum_token.buf = defbuf;
+	enum_token.buf = buf;
 
 	// Prepare to call object._NewEnum():
 	aCall.symbol = SYM_STRING;
@@ -954,7 +954,7 @@ BIF_DECL(BIF_ObjDump)
 		return;
 	}
 	INT aCopyBuffer = aParamCount > 2 ? (int)TokenToInt64(*aParam[2]) : 0;
-	DWORD aSize = (DWORD)(aResultToken.value_int64 = ObjRawSize(aObject, (aCopyBuffer == 1 || aCopyBuffer == 3), NULL) + sizeof(__int64));
+	DWORD aSize = (DWORD)ObjRawSize(aObject, (aCopyBuffer == 1 || aCopyBuffer == 3), NULL);
 	char *aBuffer = (char*)malloc(aSize);
 	if (!aBuffer)
 	{
@@ -964,10 +964,10 @@ BIF_DECL(BIF_ObjDump)
 		return;
 	}
 	memset(aBuffer, 0, aSize);
-	*(__int64*)aBuffer = aResultToken.value_int64;
+	*(__int64*)aBuffer = aSize;
 	IObject *aObjects = Object::Create();
 	UINT aObjCount = 0;
-	if (aSize - sizeof(__int64) != ObjRawDump(aObject, aBuffer + sizeof(__int64), (aCopyBuffer == 1 || aCopyBuffer == 3), aObjects, aObjCount))
+	if (aSize != ObjRawDump(aObject, aBuffer + sizeof(__int64), (aCopyBuffer == 1 || aCopyBuffer == 3), aObjects, aObjCount))
 	{
 		aObjects->Release();
 		free(aBuffer);
@@ -976,6 +976,7 @@ BIF_DECL(BIF_ObjDump)
 		aResultToken.marker = _T("");
 		return;
 	}
+	aSize += sizeof(__int64);
 	aObjects->Release();
 	if (aParamCount > 2 && TokenToInt64(*aParam[2]) > 1)
 	{
@@ -1001,9 +1002,9 @@ BIF_DECL(BIF_ObjDump)
 				return;
 			}
 			memcpy(aBuffer, aDataBuf, aSize = aCompressedSize);
-			aResultToken.value_int64 = aSize;
 		}
 	}
+	aResultToken.value_int64 = aSize;
 	if (TokenToObject(*aParam[1]))
 	{ // FileWrite mode
 		FILE *hFile = _tfopen(TokenToString(*aParam[0]), _T("wb"));
@@ -1052,7 +1053,7 @@ IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &a
 		aObjSize *= 2;
 	}
 	aObjects[aObjCount++] = aObject;
-	char *aThisBuffer = aBuffer + 8;
+	char *aThisBuffer = aBuffer + sizeof(__int64);
 
 	ExprTokenType Result, this_token, enum_token, aCall, aKey, aValue;
 	ExprTokenType *params[] = { &aCall, &aKey, &aValue };
@@ -1060,7 +1061,7 @@ IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &a
 	size_t aSize = (size_t)*(__int64*)aBuffer;
 	TCHAR buf[MAX_INTEGER_LENGTH];
 
-	for (char *end = aBuffer + aSize; aThisBuffer < end;)
+	for (char *end = aThisBuffer + aSize; aThisBuffer < end;)
 	{
 		char type = *(char*)aThisBuffer;
 		aThisBuffer += 1;
