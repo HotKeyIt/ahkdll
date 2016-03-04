@@ -955,7 +955,7 @@ BIF_DECL(BIF_ObjDump)
 	}
 	INT aCopyBuffer = aParamCount > 2 ? (int)TokenToInt64(*aParam[2]) : 0;
 	DWORD aSize = (DWORD)ObjRawSize(aObject, (aCopyBuffer == 1 || aCopyBuffer == 3), NULL);
-	char *aBuffer = (char*)malloc(aSize);
+	char *aBuffer = (char*)malloc(aSize + sizeof(__int64));
 	if (!aBuffer)
 	{
 		g_script.ScriptError(ERR_OUTOFMEM);
