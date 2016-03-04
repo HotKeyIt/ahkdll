@@ -1,3 +1,4 @@
+#include "stdafx.h"
 #include "LiteZip.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -2398,12 +2399,8 @@ static DWORD readFromZip(TUNZIP *tunzip, void *ptr, DWORD toread)
 
 static unsigned char * reformat_short(unsigned char *ptr)
 {
-	register unsigned short	x;
-
-	x = (unsigned short)*ptr;
-	x |= (((unsigned short)*(ptr + 1)) << 8);
-	*((unsigned short *)ptr)++ = x;
-	return(ptr);
+	*(unsigned short *)ptr = ((unsigned short)*ptr) | (((unsigned short)*(ptr + 1)) << 8);
+	return (unsigned char *)((unsigned short *)ptr + 1);
 }
 
 // Reads a short in LSB order from the given file.
@@ -2418,14 +2415,8 @@ static unsigned short getArchiveShort(TUNZIP *tunzip)
 
 static unsigned char * reformat_long(unsigned char *ptr)
 {
-	register unsigned long	x;
-
-	x = (unsigned long)*ptr;
-	x |= (((unsigned long)*(ptr + 1)) << 8);
-	x |= (((unsigned long)*(ptr + 2)) << 16);
-	x |= (((unsigned long)*(ptr + 3)) << 24);
-	*((unsigned long *)ptr)++ = x;
-	return(ptr);
+	*(unsigned long *)ptr = ((unsigned long)*ptr) | (((unsigned long)*(ptr + 1)) << 8) | (((unsigned long)*(ptr + 2)) << 16) | (((unsigned long)*(ptr + 3)) << 24);
+	return (unsigned char *)((unsigned long *)ptr + 1);
 }
 
 // Reads a long in LSB order from the given file
@@ -3288,7 +3279,7 @@ static DWORD setCurrentEntry(register TUNZIP *tunzip, ZIPENTRY *ze, DWORD flags)
 		extra = 0;
 		if ((size = tunzip->CurrentEntryInfo.size_file_extra))
 		{
-			if (!(extra = GlobalAlloc(GMEM_FIXED, size)))
+			if (!(extra = (unsigned char*)GlobalAlloc(GMEM_FIXED, size)))
 			{
 				tunzip->LastErr = ZR_NOALLOC;
 				goto reterr;
@@ -3745,23 +3736,23 @@ out:
 
 DWORD WINAPI UnzipItemToHandle(HUNZIP tunzip, HANDLE h, ZIPENTRY *ze)
 {
-	return(unzipEntry(tunzip, (void *)h, ze, UNZIP_HANDLE));
+	return(unzipEntry((TUNZIP*)tunzip, (void *)h, ze, UNZIP_HANDLE));
 }
 
 DWORD WINAPI UnzipItemToFileA(HUNZIP tunzip, const char *fn, ZIPENTRY *ze)
 {
-	return(unzipEntry(tunzip, (void *)fn, ze, UNZIP_FILENAME));
+	return(unzipEntry((TUNZIP*)tunzip, (void *)fn, ze, UNZIP_FILENAME));
 }
 
 DWORD WINAPI UnzipItemToFileW(HUNZIP tunzip, const WCHAR *fn, ZIPENTRY *ze)
 {
-	return(unzipEntry(tunzip, (void *)fn, ze, UNZIP_FILENAME | UNZIP_UNICODE));
+	return(unzipEntry((TUNZIP*)tunzip, (void *)fn, ze, UNZIP_FILENAME | UNZIP_UNICODE));
 }
 
 DWORD WINAPI UnzipItemToBuffer(HUNZIP tunzip, void *z, DWORD len, ZIPENTRY *ze)
 {
 	ze->CompressedSize = len;
-	return(unzipEntry(tunzip, z, ze, UNZIP_MEMORY));
+	return(unzipEntry((TUNZIP*)tunzip, z, ze, UNZIP_MEMORY));
 }
 
 
@@ -3857,14 +3848,14 @@ DWORD WINAPI UnzipFindItemA(HUNZIP tunzip, ZIPENTRY *ze, BOOL ic)
 {
 	if (IsBadReadPtr(tunzip, 1))
 		return(ZR_ARGS);
-	return(findEntry(tunzip, ze, (DWORD)ic));
+	return(findEntry((TUNZIP*)tunzip, ze, (DWORD)ic));
 }
 
 DWORD WINAPI UnzipFindItemW(HUNZIP tunzip, ZIPENTRY *ze, BOOL ic)
 {
 	if (IsBadReadPtr(tunzip, 1))
 		return(ZR_ARGS);
-	return(findEntry(tunzip, ze, (DWORD)ic | UNZIP_UNICODE));
+	return(findEntry((TUNZIP*)tunzip, ze, (DWORD)ic | UNZIP_UNICODE));
 }
 
 
@@ -3969,7 +3960,7 @@ static DWORD openArchive(HANDLE *ptr, void *z, DWORD len, DWORD flags, const cha
 
 			// Load the ZIP archive, which is in our EXE's resources. It is an RT_RCDATA type
 			// of resource with an ID number of 'len'
-			if (!(hrsrc = FindResource(z, MAKEINTRESOURCE(len), RT_RCDATA)) || !(hglob = LoadResource(z, hrsrc)))
+			if (!(hrsrc = FindResource((HMODULE)z, MAKEINTRESOURCE(len), RT_RCDATA)) || !(hglob = LoadResource((HMODULE)z, hrsrc)))
 			{
 				flags = ZR_NOTFOUND;
 				goto bad2;
@@ -3977,7 +3968,7 @@ static DWORD openArchive(HANDLE *ptr, void *z, DWORD len, DWORD flags, const cha
 
 			// Get the size and ptr to the ZIP archive in memory
 			if (!(tunzip->ArchivePtr = LockResource(hglob))) goto memerr;
-			tunzip->ArchiveBufLen = SizeofResource(z, hrsrc);
+			tunzip->ArchiveBufLen = SizeofResource((HMODULE)z, hrsrc);
 		}
 
 		tunzip->Flags = TZIP_ARCMEMORY;
@@ -4118,7 +4109,7 @@ static DWORD openArchive(HANDLE *ptr, void *z, DWORD len, DWORD flags, const cha
 		//	tunzip->CentralDirPos = centralDirPos;
 	gotgzip:
 		// Set Rootdir to current directory. (Assume we unzip there)
-		if (!(centralDirPos = GetCurrentDirectoryA(MAX_PATH - 1, &tunzip->Rootdir[0])) ||
+		if (!(centralDirPos = GetCurrentDirectoryA(MAX_PATH - 1, (LPSTR)&tunzip->Rootdir[0])) ||
 			tunzip->Rootdir[centralDirPos - 1] != '\\')
 		{
 			tunzip->Rootdir[centralDirPos++] = DIRSLASH_CHAR;
@@ -4229,7 +4220,7 @@ static DWORD unzipSetBaseDir(TUNZIP *tunzip, const void *dir, DWORD isUnicode)
 		unsigned char	*lastchar;
 
 		if (isUnicode)
-			WideCharToMultiByte(CP_UTF8, 0, (const WCHAR *)dir, -1, &tunzip->Rootdir[0], MAX_PATH, 0, 0);
+			WideCharToMultiByte(CP_UTF8, 0, (const WCHAR *)dir, -1, (LPSTR)&tunzip->Rootdir[0], MAX_PATH, 0, 0);
 		else
 			lstrcpyA((char *)&tunzip->Rootdir[0], (const char *)dir);
 
@@ -4249,12 +4240,12 @@ static DWORD unzipSetBaseDir(TUNZIP *tunzip, const void *dir, DWORD isUnicode)
 
 DWORD WINAPI UnzipSetBaseDirA(HUNZIP tunzip, const char *dir)
 {
-	return(unzipSetBaseDir(tunzip, dir, 0));
+	return(unzipSetBaseDir((TUNZIP*)tunzip, dir, 0));
 }
 
 DWORD WINAPI UnzipSetBaseDirW(HUNZIP tunzip, const WCHAR *dir)
 {
-	return(unzipSetBaseDir(tunzip, dir, 1));
+	return(unzipSetBaseDir((TUNZIP*)tunzip, dir, 1));
 }
 
 
@@ -4808,8 +4799,6 @@ typedef struct _TZIP
 // settings, I add "/section:Shared,rws"
 
 #pragma data_seg("shared")
-
-static HINSTANCE	ThisInstance;
 
 static const int Extra_lbits[LENGTH_CODES] // extra bits for each length code
 = { 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0 };
@@ -7379,7 +7368,7 @@ static void istore(register TZIP *tzip)
 	if (tzip->flags & TZIP_SRCMEMORY)
 	{
 		cin = tzip->lenin;
-		writeDestination(tzip, tzip->source, cin);
+		writeDestination(tzip, (const char*)tzip->source, cin);
 		tzip->totalRead += cin;
 		tzip->crc = crc32(tzip->crc, (UCH *)tzip->source, cin);
 		tzip->posin += cin;
@@ -8138,7 +8127,7 @@ DWORD WINAPI ZipAddDirA(HZIP tzip, const char *destname, DWORD offset)
 	if ((data.nFileSizeHigh = replace_slashesA(&buffer[0], destname)) &&
 		buffer[data.nFileSizeHigh - 1] == '\\') buffer[--data.nFileSizeHigh] = 0;
 	if (offset == (DWORD)-1) offset = data.nFileSizeHigh + 1;
-	return(searchDirA((TZIP *)tzip, (void *)&buffer[0], data.nFileSizeHigh, offset, &data));
+	return(searchDirA((TZIP *)tzip, (char *)&buffer[0], data.nFileSizeHigh, offset, &data));
 }
 
 DWORD WINAPI ZipAddDirW(HZIP tzip, const WCHAR *destname, DWORD offset)
@@ -8148,10 +8137,10 @@ DWORD WINAPI ZipAddDirW(HZIP tzip, const WCHAR *destname, DWORD offset)
 	if (IsBadReadPtr(tzip, 1))	return(ZR_ARGS);
 
 	// Copy dir name to buffer[] and trim off any trailing backslash
-	if ((data.nFileSizeHigh = replace_slashesW(&buffer[0], destname)) &&
+	if ((data.nFileSizeHigh = replace_slashesW((short*)&buffer[0], (const short*)destname)) &&
 		buffer[data.nFileSizeHigh - 1] == '\\') buffer[--data.nFileSizeHigh] = 0;
 	if (offset == (DWORD)-1) offset = data.nFileSizeHigh + 1;
-	return(searchDirW((TZIP *)tzip, (void *)&buffer[0], data.nFileSizeHigh, offset, &data));
+	return(searchDirW((TZIP *)tzip, (WCHAR *)&buffer[0], data.nFileSizeHigh, offset, &data));
 }
 
 
