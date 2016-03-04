@@ -124,7 +124,7 @@
     <ClCompile Include="source\MinHook.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="source\LiteZip.c">
+    <ClCompile Include="source\LiteZip.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

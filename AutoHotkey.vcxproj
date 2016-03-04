@@ -203,21 +203,21 @@
     <ClCompile Include="source\hook.cpp" />
     <ClCompile Include="source\hotkey.cpp" />
     <ClCompile Include="source\keyboard_mouse.cpp" />
-    <ClCompile Include="source\LiteZip.c">
-      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
-      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">NotUsing</PrecompiledHeader>
-      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">NotUsing</PrecompiledHeader>
+    <ClCompile Include="source\LiteZip.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">NotUsing</PrecompiledHeader>
-      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">NotUsing</PrecompiledHeader>
-      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">NotUsing</PrecompiledHeader>
-      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
-      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained|x64'">NotUsing</PrecompiledHeader>
-      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|x64'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|x64'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\lowlevelbif.cpp" />
     <ClCompile Include="source\MemoryModule.cpp">
@@ -662,6 +662,7 @@
       <BasicRuntimeChecks Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">EnableFastChecks</BasicRuntimeChecks>
       <FavorSizeOrSpeed Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Neither</FavorSizeOrSpeed>
       <SmallerTypeCheck Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</SmallerTypeCheck>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Use</PrecompiledHeader>
     </ClCompile>
     <ProjectReference>
       <UseLibraryDependencyInputs Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">false</UseLibraryDependencyInputs>
@@ -789,6 +790,7 @@
       <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|x64'">false</MultiProcessorCompilation>
       <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|x64'">MultiThreadedDebugDLL</RuntimeLibrary>
       <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|x64'">true</MinimalRebuild>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|x64'">Use</PrecompiledHeader>
     </ClCompile>
     <Link>
       <ModuleDefinitionFile Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">.\comserver.def</ModuleDefinitionFile>
