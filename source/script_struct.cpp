@@ -1586,8 +1586,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 		else // NumPut
 		{	 // code stolen from BIF_NumPut
 //#define BIT_MASK(n) (~( ((~0ull) << ((n)-1)) << 1 )) // this makro is included in setbits and getbits
-#define setbits(var, val, typesize, offset, size) (var |= ((val < 0 ? val + (2 << (size - 1)) : val) << offset) & (~( ((~0ull) << ((size)-1)) << 1 )))
-//#define setbits(var, val, typesize, offset, size) (var |= ((val < 0 ? val + (2 << (size - 1)) : val) << offset) & (~( ((~0ull) << ((size)-1)) << 1 )))
+#define setbits(var, val, typesize, offset, size) (var |= ((val < 0 ? val + (2 << (size - 1)) : val) << offset) & (~( ((~0ull) << ((offset + size)-1)) << 1 )))
 #define clearbit(val, pos) ((val) &= ~(1 << (pos)))
 //#define getbits(val, typesize, offset, size) (((val >> offset) & (~( ((~0ull) << ((size)-1)) << 1 ))) - ((!!((val) & (1i64 << (offset + size - 1)))) ? (2 << (size - 1)) : 0))
 #define getbits(val, typesize, offset, size, isunsigned) (((val >> offset) & (~( ((~0ull) << ((size)-1)) << 1 ))) - ((!isunsigned && (!!((val) & (1i64 << (offset + size - 1))))) ? (2 << (size - 1)) : 0))
