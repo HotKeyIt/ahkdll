@@ -11680,15 +11680,23 @@ ResultType STDMETHODCALLTYPE CriticalObject::Invoke(
 	 // Avoid deadlocking the process so messages can still be processed
 	 while (!TryEnterCriticalSection(this->lpCriticalSection))
 #ifdef _WIN64
-		 if (g_MainThreadID == __readgsdword(0x48)) // Used to identify if code is called from different thread (AutoHotkey.dll)
+		if (g_MainThreadID == __readgsdword(0x48)) // Used to identify if code is called from different thread (AutoHotkey.dll)
 #else
-		 if (g_MainThreadID == __readfsdword(0x24))
+		if (g_MainThreadID == __readfsdword(0x24))
 #endif
-			 MsgSleep(-1);
-		 else
-			 Sleep(0);
+			MsgSleep(-1);
+		else
+			Sleep(0);
 	 // Invoke original object as if it was called
-	 ResultType r = this->object->Invoke(aResultToken,aThisToken,aFlags,aParam,aParamCount);
+	 ResultType r = this->object->Invoke(aResultToken, aThisToken, aFlags, aParam, aParamCount);
+	 if (aResultToken.symbol == SYM_OBJECT && dynamic_cast<EnumBase *>(aResultToken.object))
+	 {	// Result is an enumerator object enwrap enumerator into critical object
+		// using same LPCRITICAL_SECTION and update aResultToken
+		CriticalObject *new_object = new CriticalObject();
+		new_object->object = aResultToken.object;
+		new_object->lpCriticalSection = this->lpCriticalSection;
+		aResultToken.object = new_object;
+	 }
 	 LeaveCriticalSection(this->lpCriticalSection);
 	 return r;
 }
