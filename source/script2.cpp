@@ -15379,7 +15379,6 @@ ResultType STDMETHODCALLTYPE CriticalObject::Invoke(
                                             int aParamCount
                                             )
  {
-	 // Avoid deadlocking the process so messages can still be processed
 
 #ifdef _WIN64
 	 DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
@@ -15387,13 +15386,22 @@ ResultType STDMETHODCALLTYPE CriticalObject::Invoke(
 	 DWORD aThreadID = __readfsdword(0x24);
 #endif
 
+	 // Avoid deadlocking the process so messages can still be processed
 	 while (!TryEnterCriticalSection(this->lpCriticalSection))
-		 if (g_MainThreadID == aThreadID)
-			 MsgSleep(-1);
-		 else
-			 Sleep(0); 
+		if (g_MainThreadID == aThreadID)
+			MsgSleep(-1);
+		else
+			Sleep(0); 
 	 // Invoke original object as if it was called
 	 ResultType r = this->object->Invoke(aResultToken,aThisToken,aFlags,aParam,aParamCount);
+	 if (aResultToken.symbol == SYM_OBJECT && dynamic_cast<EnumBase *>(aResultToken.object))
+	 {	// Result is an enumerator object enwrap enumerator into critical object
+		// using same LPCRITICAL_SECTION and update aResultToken
+		CriticalObject *new_object = new CriticalObject();
+		new_object->object = aResultToken.object;
+		new_object->lpCriticalSection = this->lpCriticalSection;
+		aResultToken.object = new_object;
+	 }
 	 LeaveCriticalSection(this->lpCriticalSection);
 	 return r;
 }
