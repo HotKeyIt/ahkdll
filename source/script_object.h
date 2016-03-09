@@ -31,7 +31,7 @@ protected:
 public:
 	ULONG STDMETHODCALLTYPE AddRef()
 	{
-		return ++mRefCount;
+		return InterlockedIncrement(&mRefCount); // ++mRefCount;
 	}
 
 	ULONG STDMETHODCALLTYPE Release()
@@ -49,7 +49,7 @@ public:
 			// deletes the object and (erroneously) returns false, checking if mRefCount is still
 			// 1 may be just as unsafe as decrementing mRefCount as per usual.
 		}
-		return --mRefCount;
+		return InterlockedDecrement(&mRefCount); // --mRefCount;
 	}
 
 	ObjectBase() : mRefCount(1) {}
