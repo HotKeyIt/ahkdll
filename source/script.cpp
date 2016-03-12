@@ -8245,7 +8245,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 					if (   !(control_type = line.ConvertGuiControl(new_raw_arg2))   )
 						return ScriptError(ERR_PARAM2_INVALID, new_raw_arg2);
 					if (control_type == GUI_CONTROL_TREEVIEW && aArgc > 3) // Reserve it for future use such as a tab-indented continuation section that lists the tree hierarchy.
-						return ScriptError(ERR_PARAM4_OMIT, new_raw_arg4);
+						return ScriptError(ERR_PARAM4_MUST_BE_BLANK, new_raw_arg4);
 				}
 				break;
 			case GUI_CMD_CANCEL:
@@ -8799,7 +8799,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 			case TRANS_CMD_ATAN:
 			case TRANS_CMD_BITNOT:
 				if (*new_raw_arg4)
-					return ScriptError(ERR_PARAM4_OMIT, new_raw_arg4);
+					return ScriptError(ERR_PARAM4_MUST_BE_BLANK, new_raw_arg4);
 				break;
 
 			case TRANS_CMD_BITAND:
@@ -13888,6 +13888,7 @@ double_deref: // Caller has set cp to be start and op_end to be the character af
 					// non-NULL, and that can only be the result of a previous SYM_OPAREN/BRACKET.
 					if (this_infix[-1].symbol == SYM_COMMA || this_infix[-1].symbol == stack_symbol)
 					{
+						int num_blank_params = 0;
 						// Also handle any missing params following this one, otherwise the this_infix[-1].symbol
 						// check would fail next iteration because we've changed it from SYM_COMMA to SYM_MISSING.
 						while (this_infix->symbol == SYM_COMMA) // For each missing parameter: (, or ,,
@@ -13896,7 +13897,7 @@ double_deref: // Caller has set cp to be start and op_end to be the character af
 							postfix[postfix_count]->symbol = SYM_MISSING;
 							postfix[postfix_count]->marker = _T(""); // Simplify some cases by letting it be treated as SYM_STRING.
 							postfix[postfix_count]->circuit_token = NULL;
-							++in_param_list->param_count;
+							++num_blank_params;
 							++postfix_count;
 						}
 						// Below: Detects ,) and ,] as errors.  Since the loop above doesn't handle those cases,
@@ -13905,6 +13906,8 @@ double_deref: // Caller has set cp to be start and op_end to be the character af
 						if (IS_CPAREN_LIKE(this_infix->symbol) // End of the list.
 							|| func && in_param_list->param_count < func->mMinParams) // Omitted a required parameter.
 							return LineError(ERR_BLANK_PARAM, FAIL, in_param_list->marker);
+						// Now that we no longer need its old value, update param_count:
+						in_param_list->param_count += num_blank_params;
 						// Go back to the top to update the this_postfix ref.
 						continue;
 					}
@@ -18452,7 +18455,7 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 			if (g.mLoopRegItem->type == REG_SUBKEY)
 			{
 				sntprintf(buf_temp, _countof(buf_temp), _T("%s\\%s"), g.mLoopRegItem->subkey, g.mLoopRegItem->name);
-				return RegDelete(g.mLoopRegItem->root_key, buf_temp, _T(""));
+				return RegDelete(g.mLoopRegItem->root_key, buf_temp, NULL);
 			}
 			else
 				return RegDelete(g.mLoopRegItem->root_key, g.mLoopRegItem->subkey, g.mLoopRegItem->name);
@@ -18463,6 +18466,15 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 			subkey = ARG2, value_name = ARG3;
 		else // New syntax (root key combined with subkey).
 			value_name = ARG2;
+		// For backward-compatibility, the special phrase "ahk_default" indicates that the key's
+		// default value (displayed as "(Default)" by RegEdit) should be deleted, while a blank
+		// or omitted value deletes the entire subkey.  "RegDelete" without parameters needs to
+		// delete the current item even if that item is the default value (A_LoopRegName = "")
+		// or a value named "ahk_default", so the keyword is handled here, not in RegDelete():
+		if (!*value_name) // Blank or omitted: delete the entire subkey.
+			value_name = NULL;
+		else if (!_tcsicmp(value_name, _T("ahk_default"))) // Delete the key's default value.
+			value_name = _T("");
 		result = RegDelete(root_key, subkey, value_name);
 		if (is_remote_registry && root_key) // Never try to close local root keys, which the OS always keeps open.
 			RegCloseKey(root_key);
@@ -19749,8 +19761,8 @@ ResultType Script::ActionExec(LPTSTR aAction, LPTSTR aParams, LPTSTR aWorkingDir
 	// This is distinct from hprocess being non-NULL because the two aren't always the
 	// same.  For example, if the user does "Run, find D:\" or "RunWait, www.yahoo.com",
 	// no new process handle will be available even though the launch was successful:
-	bool success = false;
-	TCHAR system_error_text[512] = _T("");
+	bool success = false; // Separate from last_error for maintainability.
+	DWORD last_error = 0;
 
 	bool use_runas = aUseRunAs && (!mRunAsUser.IsEmpty() || !mRunAsPass.IsEmpty() || !mRunAsDomain.IsEmpty());
 	if (use_runas && shell_verb)
@@ -19801,8 +19813,8 @@ ResultType Script::ActionExec(LPTSTR aAction, LPTSTR aParams, LPTSTR aWorkingDir
 
 		if (use_runas)
 		{
-			if (!DoRunAs(command_line, aWorkingDir, aDisplayErrors, aUpdateLastError, si.wShowWindow  // wShowWindow (min/max/hide).
-				, aOutputVar, pi, success, hprocess, system_error_text)) // These are output parameters it will set for us.
+			if (!DoRunAs(command_line, aWorkingDir, aDisplayErrors, si.wShowWindow  // wShowWindow (min/max/hide).
+				, aOutputVar, pi, success, hprocess, last_error)) // These are output parameters it will set for us.
 				return FAIL; // It already displayed the error, if appropriate.
 		}
 		else
@@ -19833,21 +19845,15 @@ ResultType Script::ActionExec(LPTSTR aAction, LPTSTR aParams, LPTSTR aWorkingDir
 					aOutputVar->Assign(pi.dwProcessId);
 			}
 			else
-				GetLastErrorText(system_error_text, _countof(system_error_text), aUpdateLastError);
+				last_error = GetLastError();
 		}
 	}
 
-	if (!success) // Either the above wasn't attempted, or the attempt failed.  So try ShellExecute().
+	// Since CreateProcessWithLogonW() was either not attempted or did not work, it's probably
+	// best to display an error rather than trying to run it without the RunAs settings.
+	// This policy encourages users to have RunAs in effect only when necessary:
+	if (!success && !use_runas) // Either the above wasn't attempted, or the attempt failed.  So try ShellExecute().
 	{
-		if (use_runas)
-		{
-			// Since CreateProcessWithLogonW() was either not attempted or did not work, it's probably
-			// best to display an error rather than trying to run it without the RunAs settings.
-			// This policy encourages users to have RunAs in effect only when necessary:
-			if (aDisplayErrors)
-				ScriptError(_T("Launch Error (possibly related to RunAs)."), system_error_text);
-			return FAIL;
-		}
 		SHELLEXECUTEINFO sei = {0};
 		// sei.hwnd is left NULL to avoid potential side-effects with having a hidden window be the parent.
 		// However, doing so may result in the launched app appearing on a different monitor than the
@@ -19966,14 +19972,18 @@ ResultType Script::ActionExec(LPTSTR aAction, LPTSTR aParams, LPTSTR aWorkingDir
 			success = true;
 		}
 		else
-			GetLastErrorText(system_error_text, _countof(system_error_text), aUpdateLastError);
+			last_error = GetLastError();
 	}
 
 	if (!success) // The above attempt(s) to launch failed.
 	{
+		if (aUpdateLastError)
+			g->LastError = last_error;
+
 		if (aDisplayErrors)
 		{
-			TCHAR error_text[2048], verb_text[128];
+			TCHAR error_text[2048], verb_text[128], system_error_text[512];
+			GetWin32ErrorText(system_error_text, _countof(system_error_text), last_error);
 			if (shell_verb)
 				sntprintf(verb_text, _countof(verb_text), _T("\nVerb: <%s>"), shell_verb);
 			else // Don't bother showing it if it's just "open".
@@ -19983,10 +19993,10 @@ ResultType Script::ActionExec(LPTSTR aAction, LPTSTR aParams, LPTSTR aWorkingDir
 			// Use format specifier to make sure it doesn't get too big for the error
 			// function to display:
 			sntprintf(error_text, _countof(error_text)
-				, _T("Failed attempt to launch program or document:")
-				_T("\nAction: <%-0.400s%s>")
+				, _T("%s\nAction: <%-0.400s%s>")
 				_T("%s")
 				_T("\nParams: <%-0.400s%s>")
+				, use_runas ? _T("Launch Error (possibly related to RunAs):") : _T("Failed attempt to launch program or document:")
 				, shell_action, _tcslen(shell_action) > 400 ? _T("...") : _T("")
 				, verb_text
 				, shell_params, _tcslen(shell_params) > 400 ? _T("...") : _T("")
