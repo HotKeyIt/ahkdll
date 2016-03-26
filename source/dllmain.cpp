@@ -190,9 +190,10 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 
 	int dllargc = 0;
 #ifndef _UNICODE
-	LPWSTR wargv = (LPWSTR) _alloca((_tcslen(nameHinstanceP.args)+1)*sizeof(WCHAR));
+	LPWSTR wargv = (LPWSTR) _malloca((_tcslen(nameHinstanceP.args)+1)*sizeof(WCHAR));
 	MultiByteToWideChar(CP_UTF8,0,nameHinstanceP.args,-1,wargv,(_tcslen(nameHinstanceP.args)+1)*sizeof(WCHAR));
 	LPWSTR *dllargv = CommandLineToArgvW(wargv,&dllargc);
+	_freea(wargv);
 #else
 	LPWSTR *dllargv = CommandLineToArgvW(nameHinstanceP.args,&dllargc);
 #endif
@@ -1183,7 +1184,6 @@ STDAPI DllGetClassObject(const CLSID& clsid,
 #endif
 	{
 		FILE *fp;
-		unsigned char *data=NULL;
 		size_t size;
 		HMEMORYMODULE module;
 	
@@ -1195,12 +1195,13 @@ STDAPI DllGetClassObject(const CLSID& clsid,
 
 		fseek(fp, 0, SEEK_END);
 		size = ftell(fp);
-		data = (unsigned char *)_alloca(size);
+		unsigned char* data = (unsigned char*)malloc(size);
 		fseek(fp, 0, SEEK_SET);
 		fread(data, 1, size, fp);
 		fclose(fp);
-		if (data)
-			module = MemoryLoadLibrary(data);
+		module = MemoryLoadLibrary(data, size);
+		free(data);
+		_freea(data);
 		typedef HRESULT (__stdcall *pDllGetClassObject)(IN REFCLSID clsid,IN REFIID iid,OUT LPVOID FAR* ppv);
 		pDllGetClassObject GetClassObject = (pDllGetClassObject)::MemoryGetProcAddress(module,"DllGetClassObject");
 		return GetClassObject(clsid,iid,ppv);

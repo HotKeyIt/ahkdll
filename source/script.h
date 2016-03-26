@@ -110,6 +110,23 @@ enum VariableTypeType {VAR_TYPE_INVALID, VAR_TYPE_NUMBER, VAR_TYPE_INTEGER, VAR_
 	GetSystemTimeAsFileTime(&ft);\
 	init_genrand(ft.dwLowDateTime);\
 }
+
+class CAutoMallocAFree
+{
+public:
+	CAutoMallocAFree() : m_pMem(0) {};
+	~CAutoMallocAFree() { _freea(m_pMem); }
+	void Set(void *pMem){ m_pMem = pMem; }
+private:
+	void    *m_pMem;
+};
+
+#define AUTO_MALLOCA_DEFINE(Type, Var) \
+	Type Var; \
+	CAutoMallocAFree __MALLOCA_##Var;
+#define AUTO_MALLOCA( Var, Type, Size ) \
+    __MALLOCA_##Var.Set( (void *) (Var = (Type)( _malloca( Size ) ) ) );
+
 #ifndef MINIDLL
 #define IS_PERSISTENT (Hotkey::sHotkeyCount || Hotstring::sHotstringCount || g_KeybdHook || g_MouseHook || g_persistent)
 #else
@@ -3336,6 +3353,7 @@ BIF_DECL(BIF_Alias);
 BIF_DECL(BIF_CacheEnable);
 BIF_DECL(BIF_getTokenValue);
 BIF_DECL(BIF_ResourceLoadLibrary);
+BIF_DECL(BIF_MemoryCallEntryPoint);
 BIF_DECL(BIF_MemoryLoadLibrary);
 BIF_DECL(BIF_MemoryGetProcAddress);
 BIF_DECL(BIF_MemoryFreeLibrary);

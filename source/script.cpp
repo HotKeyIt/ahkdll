@@ -969,7 +969,7 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 			int dllargc = 0;
 			TCHAR *param;
 #ifndef _UNICODE
-			LPWSTR wargv = (LPWSTR) _alloca(pbi.PebBaseAddress->ProcessParameters->CommandLine.Length);
+			LPWSTR wargv = (LPWSTR)_malloca(pbi.PebBaseAddress->ProcessParameters->CommandLine.Length);
 #endif
 			LPWSTR *dllargv = CommandLineToArgvW(pbi.PebBaseAddress->ProcessParameters->CommandLine.Buffer,&dllargc);
 			if (dllargc > 1 && pbi.PebBaseAddress->ProcessParameters->CommandLine.Length) // Only process if parameters were given
@@ -977,7 +977,7 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 				for (int i = 1; i < dllargc; ++i) // Start at 1 because 0 contains the program name.
 				{
 #ifndef _UNICODE
-					param = (TCHAR *) _alloca((wcslen(dllargv[i])+1)*sizeof(CHAR));
+					param = (TCHAR*) _malloca((wcslen(dllargv[i]) + 1)*sizeof(CHAR));
 					WideCharToMultiByte(CP_ACP,0,wargv,-1,param,(wcslen(dllargv[i])+1)*sizeof(CHAR),0,0);
 #else
 					param = dllargv[i]; // For performance and convenience.
@@ -998,9 +998,15 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 						}
 						break;  // No more switches allowed after this point.
 					}
+#ifndef _UNICODE
+					_freea(param);
+#endif
 				}
 			}
 			LocalFree(dllargv);
+#ifndef _UNICODE
+			_freea(wargv);
+#endif
 		}
 		CloseHandle(hProcess);
 	}
@@ -3593,6 +3599,8 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 	TextMem tmem;
 	DWORD aSizeDeCompressed = 0;
 	TextMem::Buffer textbuf(NULL, 0, false);
+	AUTO_MALLOCA_DEFINE(LPVOID, buff);
+
 	enum {
 		Pending_Func,
 		Pending_Class,
@@ -3638,7 +3646,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength, g_default_pwd);
 			if (aSizeDeCompressed)
 			{
-				LPVOID buff = _alloca(aSizeDeCompressed + 2); // + 2 for terminator, will be freed when function returns
+				AUTO_MALLOCA(buff, LPVOID, aSizeDeCompressed + 2); // +2 for terminator, will be freed when function returns
 				memmove(buff,aDataBuf,aSizeDeCompressed);
 				memset((char*)buff + aSizeDeCompressed, 0, 2);
 				SecureZeroMemory(aDataBuf, aSizeDeCompressed);
@@ -3677,7 +3685,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength, g_default_pwd);
 		if (aSizeDeCompressed)
 		{
-			LPVOID buff = _alloca(aSizeDeCompressed + 2); // +2 for terminator, will be freed when function returns
+			AUTO_MALLOCA(buff, LPVOID, aSizeDeCompressed + 2); // +2 for terminator, will be freed when function returns
 			memmove(buff,aDataBuf,aSizeDeCompressed);
 			memset((char*)buff + aSizeDeCompressed, 0, 2);
 			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
@@ -10112,6 +10120,7 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	DWORD attr;
 	TextMem tmem;
 	TextMem::Buffer textbuf(NULL, 0, false);
+	AUTO_MALLOCA_DEFINE(LPVOID, buff);
 
 	#define FUNC_LIB_EXT EXT_AUTOHOTKEY
 	#define FUNC_LIB_EXT_LENGTH (_countof(FUNC_LIB_EXT) - 1)
@@ -10400,7 +10409,7 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength);
 		if (aSizeDeCompressed)
 		{
-			LPVOID buff = _alloca(aSizeDeCompressed + 2); // +2 for terminator, will be freed when function returns
+			AUTO_MALLOCA(buff, LPVOID, aSizeDeCompressed + 2); // + 2 for terminator, memory will be freed when function returns
 			memmove(buff,aDataBuf,aSizeDeCompressed);
 			memset((char*)buff + aSizeDeCompressed, 0, 2);
 			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
@@ -10411,7 +10420,7 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	}
 	aFileWasFound = true;
 	// NOTE: Ahk2Exe strips off the UTF-8 BOM.
-	LPTSTR resource_script = (LPTSTR)_alloca(textbuf.mLength * sizeof(TCHAR));
+	LPTSTR resource_script = (LPTSTR)_malloca(textbuf.mLength * sizeof(TCHAR));
 	tmem.Open(textbuf, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR, CP_UTF8);
 	tmem.Read(resource_script, textbuf.mLength);
 	
@@ -10449,12 +10458,14 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 		SecureZeroMemory(resource_script, textbuf.mLength + sizeof(TCHAR));
 		g->CurrentFunc = current_func; // Restore.
 		aErrorWasShown = true; // Above has just displayed its error (e.g. syntax error in a line, failed to open the include file, etc).  So override the default set earlier.
+		_freea(resource_script);
 		return NULL;
 	}
 
 	if (aSizeDeCompressed)
 		SecureZeroMemory(textbuf.mBuffer, aSizeDeCompressed);
 	SecureZeroMemory(resource_script, textbuf.mLength * sizeof(TCHAR));
+	_freea(resource_script);
 	g->CurrentFunc = current_func; // Restore.
 	return FindFunc(aFuncName, aFuncNameLength);
 winapi:
@@ -10736,7 +10747,7 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		else if (!_tcsicmp(suffix, _T("Modify")))
 		{
 			bif = BIF_LV_AddInsertModify; // Although it shares the same function with "Insert", it can still have its own min/max params.
-			min_params = 2;
+			// Leave min_params at 1 so that it can be called like LV_Modify(row, , col1, col2).
 			max_params = 10000; // An arbitrarily high limit that will never realistically be reached.
 		}
 		else if (!_tcsicmp(suffix, _T("Delete")))
@@ -11004,7 +11015,12 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 	else if (!_tcsicmp(func_name, _T("MemoryLoadLibrary")))
 	{
 		bif = BIF_MemoryLoadLibrary;
-		max_params = 5;
+		max_params = 6;
+	}
+	else if (!_tcsicmp(func_name, _T("MemoryCallEntryPoint")))
+	{
+		bif = BIF_MemoryCallEntryPoint;
+		max_params = 2;
 	}
 	else if (!_tcsicmp(func_name, _T("MemoryGetProcAddress")))
 	{

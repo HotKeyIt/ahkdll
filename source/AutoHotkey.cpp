@@ -47,7 +47,7 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 	TCHAR buf[MAX_PATH];
 	FILE *fp;
 	size_t size;
-	HANDLE Debug = NULL;
+	HANDLE DebugPort = NULL;
 	g_TlsDoExecute = true;
 	// Execute only if A_IsCompiled
 #ifndef AUTOHOTKEYSC
@@ -72,20 +72,24 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 		return;
 	fseek(fp, 0, SEEK_END);
 	size = ftell(fp);
-	unsigned char *data = (unsigned char *)_alloca(size);
+	unsigned char* data = (unsigned char*)malloc(size);
 	fseek(fp, 0, SEEK_SET);
 	fread(data, 1, size, fp);
 	fclose(fp);
-	ntdll = MemoryLoadLibrary(data);
+	ntdll = MemoryLoadLibrary(data, size);
+	_freea(data);
+	ntdll = MemoryLoadLibrary(data, size);
 	MyNtQueryInformationProcess _NtQueryInformationProcess = (MyNtQueryInformationProcess)MemoryGetProcAddress(ntdll, "NtQueryInformationProcess");
-	if (!_NtQueryInformationProcess(NtCurrentProcess(), 7, &Debug, sizeof(HANDLE), NULL) && Debug)
+	if (!_NtQueryInformationProcess(NtCurrentProcess(), 7, &DebugPort, sizeof(HANDLE), NULL) && DebugPort)
 	{
 		MemoryFreeLibrary(ntdll);
+		free(data);
 		TerminateProcess(NtCurrentProcess(), 0);
 	}
 	MyNtSetInformationThread _NtSetInformationThread = (MyNtSetInformationThread)MemoryGetProcAddress(ntdll, "NtSetInformationThread");
 	_NtSetInformationThread(GetCurrentThread(), 0x11, 0, 0);
 	MemoryFreeLibrary(ntdll);
+	free(data);
 }
 void WINAPI TlsCallbackCall(PVOID Module, DWORD Reason, PVOID Context);
 __declspec(allocate(".CRT$XLB")) PIMAGE_TLS_CALLBACK CallbackAddress[] = { TlsCallbackCall, NULL, TlsCallback }; // Put the TLS callback address into a null terminated array of the .CRT$XLB section

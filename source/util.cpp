@@ -2547,7 +2547,8 @@ HBITMAP IconToBitmap32(HICON ahIcon, bool aDestroyIcon)
 					if (!has_nonzero_alpha)
 					{
 						// Get bitmap data from the icon's mask.
-						UINT *mask_bits = (UINT*)_alloca(height*width*4);
+						AUTO_MALLOCA_DEFINE(UINT*, mask_bits);
+						AUTO_MALLOCA(mask_bits, UINT*, height*width * 4);
 						if (GetDIBits(hdc, icon_info.hbmMask, 0, height, (LPVOID)mask_bits, &bitmap_info, 0))
 						{
 							UINT *this_mask_pixel;
