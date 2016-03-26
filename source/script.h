@@ -99,6 +99,22 @@ enum VariableTypeType {VAR_TYPE_INVALID, VAR_TYPE_NUMBER, VAR_TYPE_INTEGER, VAR_
 	init_genrand(ft.dwLowDateTime);\
 }
 
+class CAutoMallocAFree
+{
+public:
+	CAutoMallocAFree() : m_pMem(0) {};
+	~CAutoMallocAFree() { _freea(m_pMem); }
+	void Set(void *pMem){ m_pMem = pMem; }
+private:
+	void    *m_pMem;
+};
+
+#define AUTO_MALLOCA_DEFINE(Type, Var) \
+	Type Var; \
+	CAutoMallocAFree __MALLOCA_##Var;
+#define AUTO_MALLOCA( Var, Type, Size ) \
+    __MALLOCA_##Var.Set( (void *) (Var = (Type)( _malloca( Size ) ) ) );
+
 // Since WM_COMMAND IDs must be shared among all menus and controls, they are carefully conserved,
 // especially since there are only 65,535 possible IDs.  In addition, they are assigned to ranges
 // to minimize the need that they will need to be changed in the future (changing the ID of a main

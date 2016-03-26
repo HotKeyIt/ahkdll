@@ -15916,12 +15916,12 @@ BIF_DECL(BIF_VarSetCapacity)
 			}
 			if (new_capacity)
 			{
-				BYTE *aBkpContents;
+				AUTO_MALLOCA_DEFINE(BYTE*, aBkpContents);
 				VarSizeType aBkpCapacity = NULL;
 				if (aParamCount < 3 && (aBkpCapacity = var.ByteCapacity()) > 1)  // Third parameter is present and var has enough capacity to make memmove() meaningful.
 				{   // backup variables content to restore later
 					// usefull when size of a variable is changed without loosing its content, e.g. increase memory array
-					aBkpContents = (BYTE*)_alloca(aBkpCapacity);
+					AUTO_MALLOCA(aBkpContents, BYTE*, aBkpCapacity);
 					memmove(aBkpContents, var.Contents(false), aBkpCapacity);
 				}
 				if (!var.SetCapacity(new_capacity, true)) // This also destroys the variables contents.
@@ -16066,13 +16066,13 @@ BIF_DECL(BIF_ResourceLoadLibrary)
 		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength);
 		if (aSizeDeCompressed)
 		{
-			module = MemoryLoadLibrary( aDataBuf );
+			module = MemoryLoadLibrary(aDataBuf, aSizeDeCompressed);
 			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
 			VirtualFree(aDataBuf,0,MEM_RELEASE);
 		}
 	}
 	if (!aSizeDeCompressed)
-		module = MemoryLoadLibrary( textbuf.mBuffer );
+		module = MemoryLoadLibrary(textbuf.mBuffer, textbuf.mLength);
 	
 	aResultToken.value_int64 = (UINT_PTR)module;
 }
@@ -16082,7 +16082,7 @@ BIF_DECL(BIF_MemoryCallEntryPoint)
 {
 	aResultToken.symbol = SYM_INTEGER;
 	if (TokenIsNumeric(*aParam[0]))
-		aResultToken.value_int64 = MemoryCallEntryPoint((HMEMORYMODULE)TokenToInt64(*aParam[0]));
+		aResultToken.value_int64 = (__int64) MemoryCallEntryPoint((HMEMORYMODULE)TokenToInt64(*aParam[0]), aParamCount > 1 ? TokenToString(*aParam[1]) : _T(""));
 	else
 		aResultToken.value_int64 = 0;
 }
@@ -16091,7 +16091,9 @@ BIF_DECL(BIF_MemoryCallEntryPoint)
 BIF_DECL(BIF_MemoryLoadLibrary)
 {
 	HMEMORYMODULE module = NULL;
-	unsigned char *data = NULL;
+	AUTO_MALLOCA_DEFINE(unsigned char*, data);
+	data = NULL;
+	size_t size = NULL;
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = 0;
 	if (TokenIsEmptyString(*aParam[0]))
@@ -16099,7 +16101,6 @@ BIF_DECL(BIF_MemoryLoadLibrary)
 	else if (!TokenIsNumeric(*aParam[0]))
 	{
 		FILE *fp;
-		size_t size;
 
 		fp = _tfopen(TokenToString(*aParam[0]), _T("rb"));
 		if (fp == NULL)
@@ -16107,7 +16108,7 @@ BIF_DECL(BIF_MemoryLoadLibrary)
 
 		fseek(fp, 0, SEEK_END);
 		size = ftell(fp);
-		data = (unsigned char *)_alloca(size);
+		AUTO_MALLOCA(data, unsigned char*, size);
 		fseek(fp, 0, SEEK_SET);
 		fread(data, 1, size, fp);
 		fclose(fp);
@@ -16115,11 +16116,11 @@ BIF_DECL(BIF_MemoryLoadLibrary)
 	else
 		data = (unsigned char*)TokenToInt64(*aParam[0]);
 	if (data)
-		module = MemoryLoadLibraryEx(data,
-									(CustomLoadLibraryFunc)(aParamCount > 1 ? (HCUSTOMMODULE)TokenToInt64(*aParam[1]) : _LoadLibrary),
-									(CustomGetProcAddressFunc)(aParamCount > 2 ? (HCUSTOMMODULE)TokenToInt64(*aParam[2]) : _GetProcAddress),
-									(CustomFreeLibraryFunc)(aParamCount > 3 ? (HCUSTOMMODULE)TokenToInt64(*aParam[3]) : _FreeLibrary),
-									(void*)(aParamCount > 4 ? TokenToInt64(*aParam[4]) : NULL));
+		module = MemoryLoadLibraryEx(data, size ? size : (size_t)TokenToInt64(*aParam[1]),
+									(CustomLoadLibraryFunc)(aParamCount > 2 ? (HCUSTOMMODULE)TokenToInt64(*aParam[2]) : MemoryDefaultLoadLibrary),
+									(CustomGetProcAddressFunc)(aParamCount > 3 ? (HCUSTOMMODULE)TokenToInt64(*aParam[3]) : MemoryDefaultGetProcAddress),
+									(CustomFreeLibraryFunc)(aParamCount > 4 ? (HCUSTOMMODULE)TokenToInt64(*aParam[4]) : MemoryDefaultFreeLibrary),
+									(void*)(aParamCount > 5 ? (size_t)TokenToInt64(*aParam[5]) : NULL));
 	aResultToken.value_int64 = (UINT_PTR)module;
 }
 
@@ -16222,7 +16223,7 @@ BIF_DECL(BIF_ZipCreateFile)
 	CStringA aPassword = aParamCount > 1 ? CStringCharFromTChar(TokenToString(*aParam[1])) : NULL;
 	if (aErrCode = ZipCreateFile(&hz, TokenToString(*aParam[0]), aPassword))
 	{
-		ZipFormatMessage(aErrCode, aMsg, sizeof(aMsg));
+		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
 		g_script.ScriptError(aMsg);
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
@@ -16238,7 +16239,7 @@ BIF_DECL(BIF_ZipOptions)
 	TCHAR	aMsg[100];
 	if (aErrCode = ZipOptions(&hz, (DWORD)TokenToInt64(*aParam[0])))
 	{
-		ZipFormatMessage(aErrCode, aMsg, sizeof(aMsg));
+		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
 		g_script.ScriptError(aMsg);
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
@@ -16270,7 +16271,7 @@ BIF_DECL(BIF_ZipAddFile)
 	if (aErrCode = ZipAddFile((HZIP)TokenToInt64(*aParam[0]), aDestination, aSource))
 	{
 		TCHAR	aMsg[100];
-		ZipFormatMessage(aErrCode, aMsg, sizeof(aMsg));
+		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
 		g_script.ScriptError(aMsg);
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
@@ -16291,7 +16292,7 @@ BIF_DECL(BIF_ZipAddFolder)
 	if (aErrCode = ZipAddFolder((HZIP)TokenToInt64(*aParam[0]), TokenToString(*aParam[1])))
 	{
 		TCHAR	aMsg[100];
-		ZipFormatMessage(aErrCode, aMsg, sizeof(aMsg));
+		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
 		g_script.ScriptError(aMsg);
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
@@ -16306,7 +16307,7 @@ BIF_DECL(BIF_ZipCloseFile)
 	TCHAR	aMsg[100];
 	if (aErrCode = ZipClose((HZIP)TokenToInt64(*aParam[0])))
 	{
-		ZipFormatMessage(aErrCode, aMsg, sizeof(aMsg));
+		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
 		g_script.ScriptError(aMsg);
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
@@ -16323,7 +16324,7 @@ BIF_DECL(BIF_ZipCreateBuffer)
 	CStringA aPassword = aParamCount > 1 ? CStringCharFromTChar(TokenToString(*aParam[1])) : NULL;
 	if (aErrCode = ZipCreateBuffer(&hz, 0, (DWORD)TokenToInt64(*aParam[0]), aPassword))
 	{
-		ZipFormatMessage(aErrCode, aMsg, sizeof(aMsg));
+		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
 		g_script.ScriptError(aMsg);
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
@@ -16346,7 +16347,7 @@ BIF_DECL(BIF_ZipAddBuffer)
 	if (aErrCode = ZipAddBuffer((HZIP)TokenToInt64(*aParam[0]), aDestination, aSource, (DWORD)TokenToInt64(*aParam[2])))
 	{
 		TCHAR	aMsg[100];
-		ZipFormatMessage(aErrCode, aMsg, sizeof(aMsg));
+		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
 		g_script.ScriptError(aMsg);
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
@@ -16370,7 +16371,7 @@ BIF_DECL(BIF_ZipCloseBuffer)
 	}
 	if (aErrCode = ZipGetMemory((HZIP)TokenToInt64(*aParam[0]), (void **)&aBuffer, &aLen, &aBase))
 	{
-		ZipFormatMessage(aErrCode, aMsg, sizeof(aMsg));
+		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
 		g_script.ScriptError(aMsg);
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
@@ -16489,7 +16490,7 @@ errorclose:
 	UnzipClose(huz);
 	aObject->Release();
 error:
-	UnzipFormatMessage(aErrCode, aMsg, sizeof(aMsg));
+	UnzipFormatMessage(aErrCode, aMsg, _countof(aMsg));
 	g_script.ScriptError(aMsg);
 	aResultToken.symbol = SYM_STRING;
 	aResultToken.marker = _T("");
@@ -16579,7 +16580,7 @@ BIF_DECL(BIF_UnZip)
 errorclose:
 	UnzipClose(huz);
 error:
-	UnzipFormatMessage(aErrCode, aMsg, sizeof(aMsg));
+	UnzipFormatMessage(aErrCode, aMsg, _countof(aMsg));
 	g_script.ScriptError(aMsg);
 	aResultToken.symbol = SYM_STRING;
 	aResultToken.marker = _T("");
@@ -16686,7 +16687,7 @@ BIF_DECL(BIF_UnZipBuffer)
 errorclose:
 	UnzipClose(huz);
 error:
-	UnzipFormatMessage(aErrCode, aMsg, sizeof(aMsg));
+	UnzipFormatMessage(aErrCode, aMsg, _countof(aMsg));
 	g_script.ScriptError(aMsg);
 	aResultToken.symbol = SYM_STRING;
 	aResultToken.marker = _T("");
