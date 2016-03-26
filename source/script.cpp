@@ -141,8 +141,8 @@ FuncEntry g_BIF[] =
 	BIF1(CacheEnable, 1, 1, true),
 	BIF1(getTokenValue, 1, 1, true),
 	BIF1(ResourceLoadLibrary, 1, 1, true),
-	BIF1(MemoryLoadLibrary, 1, 5, true),
-	BIF1(MemoryCallEntryPoint, 1, 1, true),
+	BIF1(MemoryLoadLibrary, 1, 6, true),
+	BIF1(MemoryCallEntryPoint, 1, 2, true),
 	BIF1(MemoryGetProcAddress, 2, 2, true),
 	BIF1(MemoryFreeLibrary, 1, 1, true),
 	BIF1(MemoryFindResource, 3, 4, true),
@@ -3726,6 +3726,8 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 	TextMem tmem;
 	DWORD aSizeDeCompressed = 0;
 	TextMem::Buffer textbuf(NULL, 0, false);
+	AUTO_MALLOCA_DEFINE(LPVOID, buff);
+
 	enum {
 		Pending_Func,
 		Pending_Class,
@@ -3788,7 +3790,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength, g_default_pwd);
 			if (aSizeDeCompressed)
 			{
-				LPVOID buff = _alloca(aSizeDeCompressed + 2); // +2 for terminator, will be freed when function returns
+				AUTO_MALLOCA(buff, LPVOID, aSizeDeCompressed + 2); // +2 for terminator, will be freed when function returns
 				memmove(buff, aDataBuf, aSizeDeCompressed);
 				memset((char*)buff + aSizeDeCompressed, 0, 2);
 				SecureZeroMemory(aDataBuf, aSizeDeCompressed);
@@ -3828,7 +3830,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength, g_default_pwd);
 		if (aSizeDeCompressed)
 		{
-			LPVOID buff = _alloca(aSizeDeCompressed + 2); // +2 for terminator, will be freed when function returns
+			AUTO_MALLOCA(buff, LPVOID, aSizeDeCompressed + 2); // +2 for terminator, will be freed when function returns
 			memmove(buff, aDataBuf, aSizeDeCompressed);
 			memset((char*)buff + aSizeDeCompressed, 0, 2);
 			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
@@ -9231,6 +9233,7 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	DWORD attr;
 	TextMem tmem;
 	TextMem::Buffer textbuf(NULL, 0, false);
+	AUTO_MALLOCA_DEFINE(LPVOID, buff);
 
 	#define FUNC_LIB_EXT EXT_AUTOHOTKEY
 	#define FUNC_LIB_EXT_LENGTH (_countof(FUNC_LIB_EXT) - 1)
@@ -9513,7 +9516,7 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength);
 		if (aSizeDeCompressed)
 		{
-			LPVOID buff = _alloca(aSizeDeCompressed + 2); // + 2 for terminator, memory will be freed when function returns
+			AUTO_MALLOCA(buff, LPVOID, aSizeDeCompressed + 2); // + 2 for terminator, memory will be freed when function returns
 			memmove(buff, aDataBuf, aSizeDeCompressed);
 			memset((char*)buff + aSizeDeCompressed, 0, 2);
 			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
@@ -9524,7 +9527,7 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	}
 	aFileWasFound = true;
 	// NOTE: Ahk2Exe strips off the UTF-8 BOM.
-	LPTSTR resource_script = (LPTSTR)_alloca(textbuf.mLength * sizeof(TCHAR));
+	LPTSTR resource_script = (LPTSTR)_malloca(textbuf.mLength * sizeof(TCHAR));
 	tmem.Open(textbuf, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR, CP_UTF8);
 	tmem.Read(resource_script, textbuf.mLength);
 
@@ -9567,12 +9570,14 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 		SecureZeroMemory(resource_script, textbuf.mLength * sizeof(TCHAR));
 		g->CurrentFunc = current_func; // Restore.
 		aErrorWasShown = true; // Above has just displayed its error (e.g. syntax error in a line, failed to open the include file, etc).  So override the default set earlier.
+		_freea(resource_script);
 		return NULL;
 	}
 
 	if (aSizeDeCompressed)
 		SecureZeroMemory(textbuf.mBuffer, aSizeDeCompressed);
 	SecureZeroMemory(resource_script, textbuf.mLength * sizeof(TCHAR));
+	_freea(resource_script);
 	g->CurrentFunc = current_func; // Restore.
 
 	// Restore setting as per the comment above.
