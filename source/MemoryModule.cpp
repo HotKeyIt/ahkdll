@@ -739,7 +739,7 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data, size_t size,
     }
 
     // TLS callbacks are executed BEFORE the main loading
-	if (old_header->OptionalHeader.ImageBase != (DWORD)g_hInstance && !ExecuteTLS(result)) {
+	if (old_header->OptionalHeader.ImageBase != (ULONGLONG)g_hInstance && !ExecuteTLS(result)) {
         goto error;
     }
 
@@ -890,7 +890,7 @@ HANDLE MemoryCallEntryPoint(HMEMORYMODULE mod, LPTSTR cmdLine)
 		return 0;
 	}
 	LPTSTR acmd = GetCommandLine();
-	LPTSTR bkpcmd = (LPTSTR)_malloca(_tcslen(acmd) * sizeof(TCHAR));
+	LPTSTR bkpcmd = (LPTSTR)_malloca((_tcslen(acmd) + 1) * sizeof(TCHAR));
 	_tcscpy(bkpcmd, acmd);
 	_tcscpy(acmd, cmdLine);
 	HANDLE hThread = (HANDLE)_beginthreadex(NULL, 0, (unsigned(__stdcall *)(void *)) module->exeEntry, NULL, 0, 0);
