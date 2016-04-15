@@ -358,6 +358,7 @@ Script::~Script() // Destructor.
 {
 	// MSDN: "Before terminating, an application must call the UnhookWindowsHookEx function to free
 	// system resources associated with the hook."
+	OleUninitialize();
 #ifndef MINIDLL
 	AddRemoveHooks(0); // Remove all hooks.
 	if (mNIC.hWnd) // Tray icon is installed.
@@ -401,8 +402,13 @@ Script::~Script() // Destructor.
 	// This is because one GUI window might get destroyed and take with it a menu bar that is still
 	// in use by an existing GUI window.  GuiType::Destroy() adheres to this philosophy by detaching
 	// its menu bar prior to destroying its window:
-	while (g_guiCount)
-		GuiType::Destroy(*g_gui[g_guiCount-1]); // Static method to avoid problems with object destroying itself.
+	if (g_guiCount)
+	{
+		while (g_guiCount)
+			GuiType::Destroy(*g_gui[g_guiCount - 1]); // Static method to avoid problems with object destroying itself.
+		free(g_gui);
+		g_gui = NULL;
+	}
 	
 	for (i = 0; i < GuiType::sFontCount; ++i) // Now that GUI windows are gone, delete all GUI fonts.
 		if (GuiType::sFont[i].hfont)
@@ -555,7 +561,18 @@ void Script::Destroy()
 	{
 		Func &f = *mFunc[i];
 		if (f.mIsBuiltIn)
+		{
+			if (f.mStaticVar && (f.mBIF = (BuiltInFunctionType)BIF_DllImport))
+			{
+				for (int i = 0; i < f.mParamCount; i++)
+				{
+					CStringA** pStr = ((CStringA**)f.mStaticVar);
+					if (pStr[i])
+						delete pStr[i];
+				}
+			}
 			continue;
+		}
 		// Since it doesn't seem feasible to release all var backups created by recursive function
 		// calls and all tokens in the 'stack' of each currently executing expression, currently
 		// only static and global variables are released.  It seems best for consistency to also
@@ -615,6 +632,8 @@ void Script::Destroy()
 		Func &f = *mFunc[i];
 		if (f.mIsBuiltIn)
 			continue;
+		else if (f.mClass)
+			f.mClass->Release();
 		// Since it doesn't seem feasible to release all var backups created by recursive function
 		// calls and all tokens in the 'stack' of each currently executing expression, currently
 		// only static and global variables are released.  It seems best for consistency to also
@@ -637,11 +656,11 @@ void Script::Destroy()
 		}
 		if (mFunc[i]->mStaticVar)
 			free(mFunc[i]->mStaticVar);
-		if (mFunc[i]->mStaticLazyVarCount)
+		if (mFunc[i]->mStaticLazyVar)
 			free(mFunc[i]->mStaticLazyVar);
-		if (mFunc[i]->mVarCount)
+		if (mFunc[i]->mVar)
 			free(mFunc[i]->mVar);
-		if (mFunc[i]->mLazyVarCount)
+		if (mFunc[i]->mLazyVar)
 			free(mFunc[i]->mLazyVar);
 		delete mFunc[i];
 	}
@@ -666,6 +685,11 @@ void Script::Destroy()
 		line->FreeDerefBufIfLarge();
 		delete line;
 		line = nextLine;
+	}
+	if (Line::sDerefBuf)
+	{
+		free(Line::sDerefBuf);
+		Line::sDerefBuf = NULL;
 	}
 	Script::~Script(); // destroy main script before resetting variables
 
@@ -829,9 +853,9 @@ void Script::Destroy()
 	g_MaxVarCapacity  =  64 * 1024 * 1024;
 #ifndef MINIDLL
 	//g_ScreenDPI  =  GetScreenDPI();
-	HDC hdc = GetDC(NULL);
-	g_ScreenDPI = GetDeviceCaps(hdc, LOGPIXELSX);
-	ReleaseDC(NULL, hdc);
+	//HDC hdc = GetDC(NULL);
+	//g_ScreenDPI = GetDeviceCaps(hdc, LOGPIXELSX);
+	//ReleaseDC(NULL, hdc);
 	g_guiCount = 0;
 #endif
 	g_delimiter  =  ',';
@@ -841,6 +865,7 @@ void Script::Destroy()
 
 	for(i=1;Line::sSourceFileCount>i;i++) // first include file must not be deleted
 		free(Line::sSourceFile[i]);
+	free(Line::sSourceFile);
 	Line::sSourceFileCount = 0;
 	//Line::sMaxSourceFiles = 0;
 	//SimpleHeap::Delete(Line::sSourceFile);
@@ -864,6 +889,7 @@ void Script::Destroy()
 #ifndef MINIDLL
 	mPriorHotkeyName = mThisHotkeyName = _T("");
 #endif
+	free_compiled_regex();
 #ifndef MINIDLL
 #ifdef ENABLE_KEY_HISTORY_FILE
 	KeyHistoryToFile();  // Close the KeyHistory file if it's open.
@@ -873,7 +899,6 @@ void Script::Destroy()
 	// done on DLL_PROCESS_DETACH
 	// DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
 	// DeleteCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
-	OleUninitialize();
 	mIsReadyToExecute = false;
 }
 #endif

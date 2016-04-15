@@ -14320,11 +14320,12 @@ BIF_DECL(BIF_DllImport)
 	DYNAPARM *dyna_param_def = (DYNAPARM*)func->mLazyVar;
 	DYNAPARM *return_attrib = (DYNAPARM*)func->mVar;
 #ifdef UNICODE
-	CStringA **pStr = (CStringA **)func->mStaticVar;
+	CStringA **pStr = (CStringA **)
 #else
-	CStringW **pStr = (CStringW **)func->mStaticVar;
+	CStringW **pStr = (CStringW **)
 #endif
-
+			_alloca(arg_count * sizeof(void*)); // _alloca vs malloc can make a significant difference to performance in some cases.
+	memcpy(pStr, func->mStaticVar, arg_count * sizeof(void*));
 #ifdef WIN32_PLATFORM
 	int dll_call_mode = func->mVarCount;
 #endif
@@ -14619,16 +14620,20 @@ BIF_DECL(BIF_DllImport)
 	// Store any output parameters back into the input variables.  This allows a function to change the
 	// contents of a variable for the following arg types: String and Pointer to <various number types>.
 
-	for (arg_count = 0, i = 1; i < aParamCount; ++arg_count, i += 2) // Same loop as used above, so maintain them together.
+	for (i = 1; i < aParamCount; i ++) // Same loop as used above, so maintain them together.
 	{
-		ExprTokenType &this_param = *aParam[arg_count];  // Resolved for performance and convenience.
+		ExprTokenType &this_param = *aParam[i];  // Resolved for performance and convenience.
 		if (this_param.symbol != SYM_VAR) // Output parameters are copied back only if its counterpart parameter is a naked variable.
 		{
-			if (pStr[arg_count]) // We don't need to copy it back, so delete it.
-				delete pStr[arg_count];
+#ifdef UNICODE
+			if (pStr[i] != ((CStringA**)func->mStaticVar)[i]) // We don't need to copy it back, so delete it.
+#else
+			if (pStr[i] != ((CStringW**)func->mStaticVar)[i]) // We don't need to copy it back, so delete it.
+#endif
+				delete pStr[i];
 			continue;
 		}
-		DYNAPARM &this_dyna_param = dyna_param[arg_count]; // Resolved for performance and convenience.
+		DYNAPARM &this_dyna_param = dyna_param[i]; // Resolved for performance and convenience.
 		Var &output_var = *this_param.var;                 //
 		if (this_dyna_param.type == DLL_ARG_STR) // Native string type for current build config.
 		{
@@ -14653,8 +14658,13 @@ BIF_DECL(BIF_DllImport)
 #else
 			output_var.AssignStringToCodePage(
 #endif
-				pStr[arg_count]->GetString());
-			delete pStr[arg_count];
+				pStr[i]->GetString());
+#ifdef UNICODE
+			if (pStr[i] != ((CStringA**)func->mStaticVar)[i])
+#else
+			if (pStr[i] != ((CStringW**)func->mStaticVar)[i])
+#endif
+				delete pStr[i];
 			continue;
 		}
 
@@ -16176,6 +16186,48 @@ int RegExCallout(pcret_callout_block *cb)
 	return number_to_return;
 }
 
+// SET UP THE CACHE.
+// This is a very crude cache for linear search. Of course, hashing would be better in the sense that it
+// would allow the cache to get much larger while still being fast (I believe PHP caches up to 4096 items).
+// Binary search might not be such a good idea in this case due to the time required to find the right spot
+// to insert a new cache item (however, items aren't inserted often, so it might perform quite well until
+// the cache contained thousands of RegEx's, which is unlikely to ever happen in most scripts).
+struct pcre_cache_entry
+{
+	// For simplicity (and thus performance), the entire RegEx pattern including its options is cached
+	// is stored in re_raw and that entire string becomes the RegEx's unique identifier for the purpose
+	// of finding an entry in the cache.  Technically, this isn't optimal because some options like Study
+	// and aGetPositionsNotSubstrings don't alter the nature of the compiled RegEx.  However, the CPU time
+	// required to strip off some options prior to doing a cache search seems likely to offset much of the
+	// cache's benefit.  So for this reason, as well as rarity and code size issues, this policy seems best.
+	LPTSTR re_raw;      // The RegEx's literal string pattern such as "abc.*123".
+	pcret *re_compiled; // The RegEx in compiled form.
+	pcret_extra *extra; // NULL unless a study() was done (and NULL even then if study() didn't find anything).
+	// int pcre_options; // Not currently needed in the cache since options are implicitly inside re_compiled.
+	int options_length; // Lexikos: See aOptionsLength comment at beginning of this function.
+	TCHAR output_mode;
+};
+
+#define PCRE_CACHE_SIZE 100 // Going too high would be counterproductive due to the slowness of linear search (and also the memory utilization of so many compiled RegEx's).
+static pcre_cache_entry sCache[PCRE_CACHE_SIZE] = { { 0 } };
+
+void free_compiled_regex()
+{
+	for (int i = 0; i < PCRE_CACHE_SIZE; i++)
+	{
+		pcre_cache_entry &this_entry = sCache[i]; // For performance and convenience.
+		if (this_entry.re_compiled) // An existing cache item is being overwritten, so free it's attributes.
+		{
+			// Free the old cache entry's attributes
+			free(this_entry.re_raw);           // Free the uncompiled pattern.
+			pcret_free(this_entry.re_compiled); // Free the compiled pattern.
+			if (this_entry.extra)
+				pcret_free_study(this_entry.extra);
+			this_entry.re_compiled = NULL;
+		}
+	}
+}
+
 pcret *get_compiled_regex(LPTSTR aRegEx, TCHAR &aOutputMode, pcret_extra *&aExtra
 	, int *aOptionsLength, ExprTokenType *aResultToken)
 // Returns the compiled RegEx, or NULL on failure.
@@ -16205,30 +16257,6 @@ pcret *get_compiled_regex(LPTSTR aRegEx, TCHAR &aOutputMode, pcret_extra *&aExtr
 	// so like performance, that's not a concern either.
 	EnterCriticalSection(&g_CriticalRegExCache); // Request ownership of the critical section. If another thread already owns it, this thread will block until the other thread finishes.
 
-	// SET UP THE CACHE.
-	// This is a very crude cache for linear search. Of course, hashing would be better in the sense that it
-	// would allow the cache to get much larger while still being fast (I believe PHP caches up to 4096 items).
-	// Binary search might not be such a good idea in this case due to the time required to find the right spot
-	// to insert a new cache item (however, items aren't inserted often, so it might perform quite well until
-	// the cache contained thousands of RegEx's, which is unlikely to ever happen in most scripts).
-	struct pcre_cache_entry
-	{
-		// For simplicity (and thus performance), the entire RegEx pattern including its options is cached
-		// is stored in re_raw and that entire string becomes the RegEx's unique identifier for the purpose
-		// of finding an entry in the cache.  Technically, this isn't optimal because some options like Study
-		// and aGetPositionsNotSubstrings don't alter the nature of the compiled RegEx.  However, the CPU time
-		// required to strip off some options prior to doing a cache search seems likely to offset much of the
-		// cache's benefit.  So for this reason, as well as rarity and code size issues, this policy seems best.
-		LPTSTR re_raw;      // The RegEx's literal string pattern such as "abc.*123".
-		pcret *re_compiled; // The RegEx in compiled form.
-		pcret_extra *extra; // NULL unless a study() was done (and NULL even then if study() didn't find anything).
-		// int pcre_options; // Not currently needed in the cache since options are implicitly inside re_compiled.
-		int options_length; // Lexikos: See aOptionsLength comment at beginning of this function.
-		TCHAR output_mode;
-	};
-
-	#define PCRE_CACHE_SIZE 100 // Going too high would be counterproductive due to the slowness of linear search (and also the memory utilization of so many compiled RegEx's).
-	static pcre_cache_entry sCache[PCRE_CACHE_SIZE] = {{0}};
 	static int sLastInsert, sLastFound = -1; // -1 indicates "cache empty".
 	int insert_pos; // v1.0.45.03: This is used to avoid updating sLastInsert until an insert actually occurs (it might not occur if a compile error occurs in the regex, or something else stops it early).
 

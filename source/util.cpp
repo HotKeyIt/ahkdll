@@ -3098,7 +3098,11 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 			if (ATOI64(this_param))
 				return CONDITION_FALSE;
 			// String needing translation: ASTR on Unicode build, WSTR on ANSI build.
+			if ((parm = _tcschr(this_param, ',')))
+				*parm = '\0';
 			pStr[arg_count] = new UorA(CStringCharFromWChar, CStringWCharFromChar)(this_param);
+			if (parm)
+				*parm = ',';
 			this_dyna_param.ptr = pStr[arg_count]->GetBuffer();
 			break;
 

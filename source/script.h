@@ -3514,5 +3514,6 @@ bool ScriptGetKeyState(vk_type aVK, KeyStateTypes aKeyStateType);
 double ScriptGetJoyState(JoyControls aJoy, int aJoystickID, ExprTokenType &aToken, bool aUseBoolForUpDown);
 LPTSTR GetExitReasonString(ExitReasons aExitReason);
 
+void free_compiled_regex();
 #endif
 

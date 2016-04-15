@@ -115,8 +115,7 @@ switch(fwdReason)
 		 if (g_hWinAPI)
 		 {
 			 free(g_hWinAPI);
-			 if (g_hWinAPIlowercase)
-				free(g_hWinAPIlowercase);
+			 free(g_hWinAPIlowercase);
 		 }
 		 for(int i = 0;i < FUNC_LIB_COUNT;i++)
 		 {
