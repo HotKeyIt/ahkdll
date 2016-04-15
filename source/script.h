@@ -3359,5 +3359,6 @@ HWND DetermineTargetWindow(ExprTokenType *aParam[], int aParamCount);
 
 LPTSTR GetExitReasonString(ExitReasons aExitReason);
 
+void free_compiled_regex();
 #endif
 

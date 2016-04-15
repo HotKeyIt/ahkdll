@@ -583,6 +583,7 @@ Script::Script()
 Script::~Script() // Destructor.
 {
 	int i;
+	OleUninitialize();
 #ifdef _USRDLL
 	// HotKeyIt H1 destroy script for ahkTerminate and ahkReload and ExitApp for dll
 
@@ -622,7 +623,18 @@ Script::~Script() // Destructor.
 	{
 		Func &f = *mFunc[i];
 		if (f.mIsBuiltIn)
+		{
+			if (f.mStaticVar && (f.mBIF = (BuiltInFunctionType)BIF_DllImport))
+			{
+				for (int i = 0; i < f.mParamCount; i++)
+				{
+					CStringA** pStr = ((CStringA**)f.mStaticVar);
+					if (pStr[i])
+						delete pStr[i];
+				}
+			}
 			continue;
+		}
 		// Since it doesn't seem feasible to release all var backups created by recursive function
 		// calls and all tokens in the 'stack' of each currently executing expression, currently
 		// only static and global variables are released.  It seems best for consistency to also
@@ -683,6 +695,8 @@ Script::~Script() // Destructor.
 		Func &f = *mFunc[i];
 		if (f.mIsBuiltIn)
 			continue;
+		else if (f.mClass)
+			f.mClass->Release();
 		// Since it doesn't seem feasible to release all var backups created by recursive function
 		// calls and all tokens in the 'stack' of each currently executing expression, currently
 		// only static and global variables are released.  It seems best for consistency to also
@@ -705,11 +719,11 @@ Script::~Script() // Destructor.
 		}
 		if (mFunc[i]->mStaticVar)
 			free(mFunc[i]->mStaticVar);
-		if (mFunc[i]->mStaticLazyVarCount)
+		if (mFunc[i]->mStaticLazyVar)
 			free(mFunc[i]->mStaticLazyVar);
-		if (mFunc[i]->mVarCount)
+		if (mFunc[i]->mVar)
 			free(mFunc[i]->mVar);
-		if (mFunc[i]->mLazyVarCount)
+		if (mFunc[i]->mLazyVar)
 			free(mFunc[i]->mLazyVar);
 		delete mFunc[i];
 	}
@@ -739,7 +753,11 @@ Script::~Script() // Destructor.
 		delete line;
 		line = nextLine;
 	}
-	
+	if (Line::sDerefBuf)
+	{
+		free(Line::sDerefBuf);
+		Line::sDerefBuf = NULL;
+	}
 #endif
 	// MSDN: "Before terminating, an application must call the UnhookWindowsHookEx function to free
 	// system resources associated with the hook."
@@ -752,8 +770,13 @@ Script::~Script() // Destructor.
 	// This is because one GUI window might get destroyed and take with it a menu bar that is still
 	// in use by an existing GUI window.  GuiType::Destroy() adheres to this philosophy by detaching
 	// its menu bar prior to destroying its window:
-	while (g_guiCount)
-		GuiType::Destroy(*g_gui[g_guiCount - 1]); // Static method to avoid problems with object destroying itself.
+	if (g_guiCount)
+	{
+		while (g_guiCount)
+			GuiType::Destroy(*g_gui[g_guiCount - 1]); // Static method to avoid problems with object destroying itself.
+		free(g_gui);
+		g_gui = NULL;
+	}
 
 	for (i = 0; i < GuiType::sFontCount; ++i) // Now that GUI windows are gone, delete all GUI fonts.
 		if (GuiType::sFont[i].hfont)
@@ -993,9 +1016,9 @@ Script::~Script() // Destructor.
 	// g_MaxVarCapacity is used to prevent a buggy script from consuming all available system RAM. It is defined = 
 #ifndef MINIDLL
 	//g_ScreenDPI  =  GetScreenDPI();
-	HDC hdc = GetDC(NULL);
-	g_ScreenDPI = GetDeviceCaps(hdc, LOGPIXELSX);
-	ReleaseDC(NULL, hdc);
+	//HDC hdc = GetDC(NULL);
+	//g_ScreenDPI = GetDeviceCaps(hdc, LOGPIXELSX);
+	//ReleaseDC(NULL, hdc);
 	g_guiCount = 0;
 #endif
 #ifndef MINIDLL
@@ -1004,6 +1027,7 @@ Script::~Script() // Destructor.
 
 	for (i = 1; Line::sSourceFileCount>i; i++) // first include file must not be deleted
 		free(Line::sSourceFile[i]);
+	free(Line::sSourceFile);
 	Line::sSourceFileCount = 0;
 	//Line::sMaxSourceFiles = 0;
 	//SimpleHeap::Delete(Line::sSourceFile);
@@ -1025,6 +1049,7 @@ Script::~Script() // Destructor.
 #ifndef MINIDLL
 	mPriorHotkeyName = mThisHotkeyName = _T("");
 #endif
+	free_compiled_regex();
 #endif
 #ifndef MINIDLL
 #ifdef ENABLE_KEY_HISTORY_FILE
@@ -1035,7 +1060,6 @@ Script::~Script() // Destructor.
 	// done on DLL_PROCESS_DETACH
 	// DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
 	// DeleteCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
-	OleUninitialize();
 	mIsReadyToExecute = false;
 }
 

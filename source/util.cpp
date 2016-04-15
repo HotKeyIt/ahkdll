@@ -3167,7 +3167,11 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 					this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
 			}
 			// String needing translation: ASTR on Unicode build, WSTR on ANSI build.
+			if ((parm = _tcschr(this_param, ',')))
+				*parm = '\0';
 			pStr[arg_count] = new UorA(CStringCharFromWChar, CStringWCharFromChar)(this_param);
+			if (parm)
+				*parm = ',';
 			this_dyna_param.ptr = pStr[arg_count]->GetBuffer();
 			break;
 
