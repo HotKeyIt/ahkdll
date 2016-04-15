@@ -1030,6 +1030,7 @@ Script::~Script() // Destructor.
 	free(Line::sSourceFile);
 	Line::sSourceFile = NULL;
 	Line::sSourceFileCount = 0;
+	Line::sMaxSourceFiles = 0;
 	//Line::sMaxSourceFiles = 0;
 	//SimpleHeap::Delete(Line::sSourceFile);
 	//Line::sSourceFile = 0;
