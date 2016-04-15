@@ -566,7 +566,11 @@ void Script::Destroy()
 			{
 				for (int i = 0; i < f.mParamCount; i++)
 				{
+#ifdef UNICODE
 					CStringA** pStr = ((CStringA**)f.mStaticVar);
+#else
+					CStringA** pStr = ((CStringA**)f.mStaticVar);
+#endif
 					if (pStr[i])
 						delete pStr[i];
 				}
@@ -632,7 +636,7 @@ void Script::Destroy()
 		Func &f = *mFunc[i];
 		if (f.mIsBuiltIn)
 			continue;
-		else if (f.mClass)
+		else if (f.mClass && _tcschr(f.mName,'.'))
 			f.mClass->Release();
 		// Since it doesn't seem feasible to release all var backups created by recursive function
 		// calls and all tokens in the 'stack' of each currently executing expression, currently
@@ -866,6 +870,7 @@ void Script::Destroy()
 	for(i=1;Line::sSourceFileCount>i;i++) // first include file must not be deleted
 		free(Line::sSourceFile[i]);
 	free(Line::sSourceFile);
+	Line::sSourceFile = NULL;
 	Line::sSourceFileCount = 0;
 	//Line::sMaxSourceFiles = 0;
 	//SimpleHeap::Delete(Line::sSourceFile);
