@@ -338,16 +338,13 @@ BIF_DECL(BIF_sizeof)
 				g_script.ScriptError(ERR_INVALID_STRUCT, tempbuf);
 				return;
 			}
-			if (StrChrAny(tempbuf, _T(" \t")))
+			isBit = StrChrAny(omit_leading_whitespace(tempbuf), _T(" \t"));
+			if (!isBit || *isBit != ':')
 			{
-				isBit = omit_leading_whitespace(StrChrAny(tempbuf, _T(" \t")));
-				if (*isBit != ':')
-				{
-					if (_tcsnicmp(defbuf + 1, tempbuf, _tcslen(defbuf) - 2))
-						bitsizetotal = bitsize = 0;
-					_tcsncpy(defbuf + 1, tempbuf, _tcscspn(tempbuf, _T("\t [")));
-					_tcscpy(defbuf + 1 + _tcscspn(tempbuf, _T("\t [")), _T(" "));
-				}
+				if (_tcsnicmp(defbuf + 1, tempbuf, _tcslen(defbuf) - 2))
+					bitsizetotal = bitsize = 0;
+				_tcsncpy(defbuf + 1, tempbuf, _tcscspn(tempbuf, _T("\t [")));
+				_tcscpy(defbuf + 1 + _tcscspn(tempbuf, _T("\t [")), _T(" "));
 			}
 			if (bitfield = _tcschr(tempbuf, ':'))
 			{
