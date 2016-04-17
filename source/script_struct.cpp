@@ -302,7 +302,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			}
 			if (!(field = obj->Insert(keybuf, insert_pos,ispointer, (offset == 0 || !bitsize || bitsizetotal == bitsize) ? offset : offset - thissize,arraydef,NULL,thissize
 						,ispointer ? true : !tcscasestr(_T(" FLOAT DOUBLE PFLOAT PDOUBLE "),defbuf)
-						,!tcscasestr(_T(" PTR SHORT INT INT8 INT16 INT32 INT64 CHAR VOID HALF_PTR BOOL LONG LONG32 LONGLONG LONG64 USN INT_PTR LONG_PTR POINTER_64 POINTER_SIGNED SIGNED SSIZE_T WPARAM __int64 "),defbuf)
+						,!tcscasestr(_T(" PTR SHORT INT INT8 INT16 INT32 INT64 CHAR ACCESS_MASK PVOID VOID HALF_PTR BOOL LONG LONG32 LONGLONG LONG64 USN INT_PTR LONG_PTR POINTER_64 POINTER_SIGNED SIGNED SSIZE_T WPARAM __int64 "),defbuf)
 						,tcscasestr(_T(" TCHAR LPTSTR LPCTSTR LPWSTR LPCWSTR WCHAR "),defbuf) ? 1200 : tcscasestr(_T(" CHAR LPSTR LPCSTR UCHAR "),defbuf) ? 0 : -1, bitsize, bitsizetotal - bitsize)))
 			{	// Out of memory.
 				obj->Release();
@@ -636,7 +636,7 @@ Struct::~Struct()
 UINT_PTR Struct::SetPointer(UINT_PTR aPointer,int aArrayItem)
 {
 	if (mIsPointer)
-		*((UINT_PTR*)(*mStructMem + (aArrayItem-1)*(mSize/(mArraySize ? mArraySize : 1)))) = aPointer;
+		*((UINT_PTR*)((UINT_PTR)mStructMem + (aArrayItem - 1)*sizeof(UINT_PTR))) = aPointer;
 	else
 		*((UINT_PTR*)((UINT_PTR)mStructMem + (aArrayItem-1)*(mSize/(mArraySize ? mArraySize : 1)))) = aPointer;
 	return aPointer;
