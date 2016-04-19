@@ -325,7 +325,7 @@ EXPORT int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR par
 				break;
 		if (aParamsCount < aFunc->mMinParams)
 		{
-			g_script.ScriptError(ERR_TOO_FEW_PARAMS);
+			g_script.ScriptError(ERR_TOO_FEW_PARAMS, func);
 			return -1;
 		}
 		if(aFunc->mIsBuiltIn)
@@ -643,7 +643,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 				break;
 		if (aParamsCount < aFunc->mMinParams)
 		{
-			g_script.ScriptError(ERR_TOO_FEW_PARAMS);
+			g_script.ScriptError(ERR_TOO_FEW_PARAMS, func);
 			return _T("");
 		}
 		if(aFunc->mIsBuiltIn)
