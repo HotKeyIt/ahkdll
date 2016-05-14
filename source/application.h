@@ -40,7 +40,7 @@ bool MsgSleep(int aSleepDuration = INTERVAL_UNSPECIFIED, MessageMode aMode = RET
 #define SLEEP_WITHOUT_INTERRUPTION(aSleepTime) \
 {\
 	g_AllowInterruption = FALSE;\
-	if (g_MainThreadID == aThreadID || aSleepTime < 0)\
+	if (g_ThreadID == aThreadID || aSleepTime < 0)\
 		MsgSleep(aSleepTime);\
 	else\
 		Sleep(aSleepTime);\
@@ -63,7 +63,7 @@ bool MsgSleep(int aSleepDuration = INTERVAL_UNSPECIFIED, MessageMode aMode = RET
 #define DoWinDelay \
 	if (::g->WinDelay > -1)\
 	{\
-		if (g_MainThreadID != GetCurrentThreadId() || (::g->WinDelay < 25 && g_os.IsWin9x()))\
+		if (g_ThreadID != GetCurrentThreadId() || (::g->WinDelay < 25 && g_os.IsWin9x()))\
 			Sleep(::g->WinDelay);\
 		else\
 			MsgSleep(::g->WinDelay);\
@@ -72,7 +72,7 @@ bool MsgSleep(int aSleepDuration = INTERVAL_UNSPECIFIED, MessageMode aMode = RET
 #define DoControlDelay \
 	if (g->ControlDelay > -1)\
 	{\
-		if (g_MainThreadID != GetCurrentThreadId() || (g->ControlDelay < 25 && g_os.IsWin9x()))\
+		if (g_ThreadID != GetCurrentThreadId() || (g->ControlDelay < 25 && g_os.IsWin9x()))\
 			Sleep(g->ControlDelay);\
 		else\
 			MsgSleep(g->ControlDelay);\
@@ -86,7 +86,7 @@ ResultType IsCycleComplete(int aSleepDuration, DWORD aStartTime, bool aAllowEarl
 // might then have queued messages that would be stuck in the queue (due to the possible absence
 // of the main timer) until the dialog's msg pump ended.
 bool CheckScriptTimers();
-#define CHECK_SCRIPT_TIMERS_IF_NEEDED if (g_script.mTimerEnabledCount && CheckScriptTimers()) return_value = true; // Change the existing value only if it returned true.
+#define CHECK_SCRIPT_TIMERS_IF_NEEDED if (g_script->mTimerEnabledCount && CheckScriptTimers()) return_value = true; // Change the existing value only if it returned true.
 #ifndef MINIDLL
 void PollJoysticks();
 #define POLL_JOYSTICK_IF_NEEDED if (Hotkey::sJoyHotkeyCount) PollJoysticks();
@@ -106,5 +106,20 @@ VOID CALLBACK UninterruptibleTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWO
 VOID CALLBACK InputTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime);
 #endif
 VOID CALLBACK RefreshInterruptibility(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime);
+#endif
+#if !defined (AUTOHOTKEYSC) && !defined(_USRDLL)
+typedef struct _CLIENT_ID
+{
+	PVOID UniqueProcess;
+	PVOID UniqueThread;
+} CLIENT_ID, *PCLIENT_ID;
 
+typedef struct _MYTEB
+{
+	NT_TIB NtTib;
+	PVOID EnvironmentPointer;
+	CLIENT_ID ClientId;
+	PVOID ActiveRpcHandle;
+	PVOID ThreadLocalStoragePointer;
+} MYTEB, *PMYTEB;
 #endif

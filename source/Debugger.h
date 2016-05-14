@@ -71,6 +71,9 @@ freely, without restriction.
 class Debugger;
 
 extern Debugger g_Debugger;
+#ifndef _USRDLL
+extern CRITICAL_SECTION g_CriticalDebugger;
+#endif
 // jackieku: modified to hold the buffer.
 extern CStringA g_DebuggerHost;
 extern CStringA g_DebuggerPort;
@@ -94,7 +97,7 @@ public:
 	}
 
 private:
-	static int sMaxId; // Highest used breakpoint ID.
+	_thread_local static int sMaxId; // Highest used breakpoint ID.
 };
 
 
@@ -110,6 +113,7 @@ struct DbgStack
 	struct Entry
 	{
 		Line *line;
+		LPTSTR *sourcefile;
 		union
 		{
 			TCHAR *desc; // SE_Thread -- "auto-exec", hotkey/hotstring name, "timer", etc.
@@ -161,8 +165,14 @@ struct DbgStack
 
 	void Pop()
 	{
+#ifndef _USRDLL
+		EnterCriticalSection(&g_CriticalDebugger);
+#endif
 		ASSERT(mTop >= mBottom);
 		--mTop;
+#ifndef _USRDLL
+		LeaveCriticalSection(&g_CriticalDebugger);
+#endif
 	}
 
 	void Push(TCHAR *aDesc);
@@ -271,6 +281,9 @@ public:
 	Debugger() : mSocket(INVALID_SOCKET), mInternalState(DIS_Starting)
 		, mMaxPropertyData(1024), mContinuationTransactionId(""), mStdErrMode(SR_Disabled), mStdOutMode(SR_Disabled)
 		, mMaxChildren(20), mMaxDepth(2)
+#ifndef _USRDLL
+		, mInterlockedExec(0), mCurrhWnd(NULL)
+#endif
 #ifndef MINIDLL
 		, mDisabledHooks(0)
 #endif
@@ -283,7 +296,12 @@ public:
 
 private:
 	SOCKET mSocket;
-	Line *mCurrLine; // Similar to g_script.mCurrLine, but may be different when breaking post-function-call, before continuing expression evaluation.
+#ifndef _USRDLL
+	LONG mInterlockedExec;
+	HWND mCurrhWnd;
+#endif
+	Line *mCurrLine; // Similar to g_script->mCurrLine, but may be different when breaking post-function-call, before continuing expression evaluation.
+	LPTSTR *mSourceFile;
 
 	class Buffer
 	{
@@ -389,8 +407,11 @@ private:
 
 	int EnterBreakState();
 	void ExitBreakState();
-
+#ifdef _USRDLL
 	int WriteBreakpointXml(Breakpoint *aBreakpoint, Line *aLine);
+#else
+	int WriteBreakpointXml(Breakpoint *aBreakpoint, Line *aLine, LPTSTR *aSourceFile);
+#endif
 
 	void AppendKeyName(CStringA &aNameBuf, size_t aParentNameLength, const char *aName);
 
@@ -411,7 +432,7 @@ private:
 	// Decode a file URI in-place.
 	void DecodeURI(char *aUri);
 	
-	static const char *sBase64Chars;
+	_thread_local static const char *sBase64Chars;
 	static size_t Base64Encode(char *aBuf, const char *aInput, size_t aInputSize = -1);
 	static size_t Base64Decode(char *aBuf, const char *aInput, size_t aInputSize = -1);
 
@@ -425,7 +446,7 @@ private:
 		CommandFunc mFunc;
 	};
 
-	static CommandDef sCommands[];
+	_thread_local static CommandDef sCommands[];
 	
 
 	// Debugger::ParseArgs

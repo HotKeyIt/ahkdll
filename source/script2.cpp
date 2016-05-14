@@ -26,6 +26,7 @@ GNU General Public License for more details.
 #include "resources/resource.h"  // For InputBox.
 #include "TextIO.h"
 #include <Psapi.h> // for GetModuleBaseName.
+#include <process.h>  // NewThread
 
 #undef _WIN32_WINNT // v1.1.10.01: Redefine this just for these APIs, to avoid breaking some other commands on Win XP (such as Process Close).
 #define _WIN32_WINNT 0x0600 // Windows Vista
@@ -613,7 +614,7 @@ ResultType Line::Input()
 	{
 		// Rather than monitoring the timeout here, just wait for the incoming WM_TIMER message
 		// to take effect as a TimerProc() call during the MsgSleep():
-		if (g_MainThreadID == aThreadID)
+		if (g_ThreadID == aThreadID)
 			MsgSleep();
 		else
 			Sleep(SLEEP_INTERVAL);
@@ -822,7 +823,7 @@ ResultType Line::PerformWait()
 	if (mActionType == ACT_RUNWAIT)
 	{
 		bool use_el = tcscasestr(ARG3, _T("UseErrorLevel"));
-		if (!g_script.ActionExec(ARG1, NULL, ARG2, !use_el, ARG3, &running_process, use_el, true, ARGVAR4)) // Load-time validation has ensured that the arg is a valid output variable (e.g. not a built-in var).
+		if (!g_script->ActionExec(ARG1, NULL, ARG2, !use_el, ARG3, &running_process, use_el, true, ARGVAR4)) // Load-time validation has ensured that the arg is a valid output variable (e.g. not a built-in var).
 			return use_el ? g_ErrorLevel->Assign(_T("ERROR")) : FAIL;
 		//else fall through to the waiting-phase of the operation.
 		// Above: The special string ERROR is used, rather than a number like 1, because currently
@@ -1000,7 +1001,7 @@ ResultType Line::PerformWait()
 		}
 
 		// Must cast to int or any negative result will be lost due to DWORD type:
-		if (g_MainThreadID == aThreadID && (wait_indefinitely || (int)(sleep_duration - (GetTickCount() - start_time)) > SLEEP_INTERVAL_HALF))
+		if (g_ThreadID == aThreadID && (wait_indefinitely || (int)(sleep_duration - (GetTickCount() - start_time)) > SLEEP_INTERVAL_HALF))
 		{
 			if (MsgSleep(INTERVAL_UNSPECIFIED)) // INTERVAL_UNSPECIFIED performs better.
 			{
@@ -2037,7 +2038,7 @@ BIF_DECL(BIF_Process)
 			// Must cast to int or any negative result will be lost due to DWORD type:
 			if (wait_indefinitely || (int)(sleep_duration - (GetTickCount() - start_time)) > SLEEP_INTERVAL_HALF)
 			{
-				if (g_MainThreadID == aThreadID)
+				if (g_ThreadID == aThreadID)
 					MsgSleep(100);  // For performance reasons, don't check as often as the WinWait family does.
 				else
 					Sleep(100);
@@ -3864,16 +3865,19 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 	// and beyond, since the feature was never properly implemented in Win95:
 	static UINT WM_TASKBARCREATED = RegisterWindowMessage(_T("TaskbarCreated"));
 
+#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+	if (iMsg == WM_ACTIVATEAPP) // && g_MainThreadID != g_ThreadID)
+		SleepEx(0, true); // used to exit thread
+#endif
 	// See GuiWindowProc() for details about this first section:
 	LRESULT msg_reply;
-	if (g_MsgMonitor.Count() // Count is checked here to avoid function-call overhead.
+	if (g_MsgMonitor && g_MsgMonitor->Count() // Count is checked here to avoid function-call overhead.
 		&& (!g->CalledByIsDialogMessageOrDispatch || g->CalledByIsDialogMessageOrDispatchMsg != iMsg) // v1.0.44.11: If called by IsDialog or Dispatch but they changed the message number, check if the script is monitoring that new number.
 		&& MsgMonitor(hWnd, iMsg, wParam, lParam, NULL, msg_reply))
 		return msg_reply; // MsgMonitor has returned "true", indicating that this message should be omitted from further processing.
 	g->CalledByIsDialogMessageOrDispatch = false; // v1.0.40.01.
 
 	TRANSLATE_AHK_MSG(iMsg, wParam)
-	
 	switch (iMsg)
 	{
 #ifndef MINIDLL
@@ -3890,18 +3894,18 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 // the lines most recently executed, and many people who compile scripts don't want their users
 // to see the contents of the script:
 		case WM_LBUTTONDOWN:
-			if (g_script.mTrayMenu->mClickCount != 1) // Activating tray menu's default item requires double-click.
+			if (g_script->mTrayMenu->mClickCount != 1) // Activating tray menu's default item requires double-click.
 				break; // Let default proc handle it (since that's what used to happen, it seems safest).
 			//else fall through to the next case.
 		case WM_LBUTTONDBLCLK:
-			if (g_script.mTrayMenu->mDefault)
-				POST_AHK_USER_MENU(hWnd, g_script.mTrayMenu->mDefault->mMenuID, NULL) // NULL flags it as a non-GUI menu item.
+			if (g_script->mTrayMenu->mDefault)
+				POST_AHK_USER_MENU(hWnd, g_script->mTrayMenu->mDefault->mMenuID, NULL) // NULL flags it as a non-GUI menu item.
 #ifdef AUTOHOTKEYSC
-			else if (g_script.mTrayMenu->mIncludeStandardItems && g_AllowMainWindow)
+			else if (g_script->mTrayMenu->mIncludeStandardItems && g_AllowMainWindow)
 				ShowMainWindow();
 			// else do nothing.
 #else
-			else if (g_script.mTrayMenu->mIncludeStandardItems)
+			else if (g_script->mTrayMenu->mIncludeStandardItems)
 				ShowMainWindow();
 			// else do nothing.
 #endif
@@ -3917,7 +3921,7 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 			// by the old open-tray-on-mouse-down method:
 			//MButton::Send {RButton down}
 			//MButton up::Send {RButton up}
-			g_script.mTrayMenu->Display(false);
+			g_script->mTrayMenu->Display(false);
 			return 0;
 		} // Inner switch()
 		break;
@@ -4008,7 +4012,7 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 		// *LCtrl up::Send {Blind}{Alt up}
 		PostMessage(NULL, iMsg, wParam, lParam);
 		if (IsInterruptible())
-			if (g_MainThreadID == GetCurrentThreadId())
+			if (g_ThreadID == GetCurrentThreadId())
 				MsgSleep(-1, RETURN_AFTER_MESSAGES_SPECIAL_FILTER);
 			else
 				Sleep(SLEEP_INTERVAL);
@@ -4091,7 +4095,7 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 			// DestroyWindow() upon termination so that the WM_DESTROY message winds up being
 			// received and process in this function (which is probably necessary for a clean
 			// termination of the app and all its windows):
-			g_script.ExitApp(EXIT_WM_CLOSE);
+			g_script->ExitApp(EXIT_WM_CLOSE);
 			return 0;  // Verified correct.
 		}
 		// Otherwise, some window of ours other than our main window was destroyed.
@@ -4100,16 +4104,16 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 
 	case WM_ENDSESSION: // MSDN: "A window receives this message through its WindowProc function."
 		if (wParam) // The session is being ended.
-			g_script.ExitApp((lParam & ENDSESSION_LOGOFF) ? EXIT_LOGOFF : EXIT_SHUTDOWN);
+			g_script->ExitApp((lParam & ENDSESSION_LOGOFF) ? EXIT_LOGOFF : EXIT_SHUTDOWN);
 		//else a prior WM_QUERYENDSESSION was aborted; i.e. the session really isn't ending.
 		return 0;  // Verified correct.
 
 	case AHK_EXIT_BY_RELOAD:
-		g_script.ExitApp(EXIT_RELOAD);
+		g_script->ExitApp(EXIT_RELOAD);
 		return 0; // Whether ExitApp() terminates depends on whether there's an OnExit function and what it does.
 
 	case AHK_EXIT_BY_SINGLEINSTANCE:
-		g_script.ExitApp(EXIT_SINGLEINSTANCE);
+		g_script->ExitApp(EXIT_SINGLEINSTANCE);
 		return 0; // Whether ExitApp() terminates depends on whether there's an OnExit function and what it does.
 
 	case WM_DESTROY:
@@ -4123,7 +4127,7 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 				// the OnExit function, if present, even without a main window (testing on an earlier
 				// versions shows that most commands work fine without the window). Pass the empty string
 				// to tell it to terminate after running the OnExit function:
-				g_script.ExitApp(EXIT_DESTROY, _T(""));
+				g_script->ExitApp(EXIT_DESTROY, _T(""));
 			// Do not do PostQuitMessage() here because we don't know the proper exit code.
 			// MSDN: "The exit value returned to the system must be the wParam parameter of
 			// the WM_QUIT message."
@@ -4164,19 +4168,19 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 
 	case WM_CLIPBOARDUPDATE: // For Vista and later.
 	case WM_DRAWCLIPBOARD:
-		if (g_script.mOnClipboardChange.Count()) // In case it's a bogus msg, it's our responsibility to avoid posting the msg if there's no function to call.
+		if (g_script->mOnClipboardChange.Count()) // In case it's a bogus msg, it's our responsibility to avoid posting the msg if there's no function to call.
 			PostMessage(g_hWnd, AHK_CLIPBOARD_CHANGE, 0, 0); // It's done this way to buffer it when the script is uninterruptible, etc.  v1.0.44: Post to g_hWnd vs. NULL so that notifications aren't lost when script is displaying a MsgBox or other dialog.
-		if (g_script.mNextClipboardViewer) // Will be NULL if there are no other windows in the chain, or if we're on Vista or later and used AddClipboardFormatListener instead of SetClipboardViewer (in which case iMsg should be WM_CLIPBOARDUPDATE).
-			SendMessageTimeout(g_script.mNextClipboardViewer, iMsg, wParam, lParam, SMTO_ABORTIFHUNG, 2000, &dwTemp);
+		if (g_script->mNextClipboardViewer) // Will be NULL if there are no other windows in the chain, or if we're on Vista or later and used AddClipboardFormatListener instead of SetClipboardViewer (in which case iMsg should be WM_CLIPBOARDUPDATE).
+			SendMessageTimeout(g_script->mNextClipboardViewer, iMsg, wParam, lParam, SMTO_ABORTIFHUNG, 2000, &dwTemp);
 		return 0;
 
 	case WM_CHANGECBCHAIN:
 		// MSDN: If the next window is closing, repair the chain. 
-		if ((HWND)wParam == g_script.mNextClipboardViewer)
-			g_script.mNextClipboardViewer = (HWND)lParam;
+		if ((HWND)wParam == g_script->mNextClipboardViewer)
+			g_script->mNextClipboardViewer = (HWND)lParam;
 		// MSDN: Otherwise, pass the message to the next link. 
-		else if (g_script.mNextClipboardViewer)
-			SendMessageTimeout(g_script.mNextClipboardViewer, iMsg, wParam, lParam, SMTO_ABORTIFHUNG, 2000, &dwTemp);
+		else if (g_script->mNextClipboardViewer)
+			SendMessageTimeout(g_script->mNextClipboardViewer, iMsg, wParam, lParam, SMTO_ABORTIFHUNG, 2000, &dwTemp);
 		return 0;
 #ifndef MINIDLL
 	case AHK_GETWINDOWTEXT:
@@ -4202,21 +4206,23 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 		return 0;
 #endif
 	case AHK_EXECUTE:   // sent from dll host # Naveen N9 
-		 g_script.mTempLine = (Line *)wParam ;
+		 g_script->mTempLine = (Line *)wParam ;
 		 if (lParam == ONLY_ONE_LINE)
-			g_script.mTempLine->ExecUntil(ONLY_ONE_LINE); //HotKeyIt H2 for ahkExecuteLine
+			g_script->mTempLine->ExecUntil(ONLY_ONE_LINE); //HotKeyIt H2 for ahkExecuteLine
 		 else if (lParam == UNTIL_BLOCK_END)
-			g_script.mTempLine->ExecUntil(UNTIL_BLOCK_END);  //HotKeyIt H2 for ahkExecuteLine
+			g_script->mTempLine->ExecUntil(UNTIL_BLOCK_END);  //HotKeyIt H2 for ahkExecuteLine
 		 else
-			g_script.mTempLine->ExecUntil(UNTIL_RETURN); 
+			g_script->mTempLine->ExecUntil(UNTIL_RETURN); 
 		 return 0;
 	case AHK_EXECUTE_LABEL: 
-		g_script.mTempLabel = (Label *)wParam ;
-		g_script.mTempLabel->Execute();
+		g_script->mTempLabel = (Label *)wParam ;
+		g_script->mTempLabel->Execute();
 		return 0;
+#ifdef _USRDLL
 	case AHK_EXECUTE_FUNCTION_VARIANT: 
 		callFuncDllVariant((FuncAndToken *) wParam);
 		return 0;
+#endif
 	case AHK_EXECUTE_FUNCTION_DLL: 
 		callFuncDll((FuncAndToken *) wParam);
 		return 0;
@@ -4256,8 +4262,8 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 		// The following iMsg can't be in the switch() since it's not constant:
 		if (iMsg == WM_TASKBARCREATED && !g_NoTrayIcon) // !g_NoTrayIcon --> the tray icon should be always visible.
 		{
-			g_script.CreateTrayIcon();
-			g_script.UpdateTrayIcon(true);  // Force the icon into the correct pause, suspend, or mIconFrozen state.
+			g_script->CreateTrayIcon();
+			g_script->UpdateTrayIcon(true);  // Force the icon into the correct pause, suspend, or mIconFrozen state.
 			// And now pass this iMsg on to DefWindowProc() in case it does anything with it.
 		}
 		
@@ -4303,10 +4309,10 @@ void LaunchAutoHotkeyUtil(LPTSTR aFile)
 	if (!GetAHKInstallDir(buf_temp + 1))
 		// Even if this is the self-contained version (AUTOHOTKEYSC), attempt to launch anyway in
 		// case the user has put a copy of the file in the same dir with the compiled script:
-		_tcscpy(buf_temp + 1, g_script.mOurEXEDir);
+		_tcscpy(buf_temp + 1, g_script->mOurEXEDir);
 	sntprintfcat(buf_temp, _countof(buf_temp), _T("\\%s\""), aFile);
 	// Attempt to run the file:
-	if (!g_script.ActionExec(buf_temp, _T(""), NULL, false)) // Use "" vs. NULL to specify that there are no params at all.
+	if (!g_script->ActionExec(buf_temp, _T(""), NULL, false)) // Use "" vs. NULL to specify that there are no params at all.
 		MsgBox(buf_temp, 0, _T("Could not launch file:"));
 }
 
@@ -4323,11 +4329,11 @@ bool HandleMenuItem(HWND aHwnd, WORD aMenuItemID, HWND aGuiHwnd)
 		return true;
 	case ID_TRAY_EDITSCRIPT:
 	case ID_FILE_EDITSCRIPT:
-		g_script.Edit();
+		g_script->Edit();
 		return true;
 	case ID_TRAY_RELOADSCRIPT:
 	case ID_FILE_RELOADSCRIPT:
-		if (!g_script.Reload(false))
+		if (!g_script->Reload(false))
 			MsgBox(_T("The script could not be reloaded."));
 		return true;
 	case ID_TRAY_WINDOWSPY:
@@ -4349,11 +4355,11 @@ bool HandleMenuItem(HWND aHwnd, WORD aMenuItemID, HWND aGuiHwnd)
 		else
 			++g_nPausedThreads; // For this purpose the idle thread is counted as a paused thread.
 		g->IsPaused = !g->IsPaused;
-		g_script.UpdateTrayIcon();
+		g_script->UpdateTrayIcon();
 		return true;
 	case ID_TRAY_EXIT:
 	case ID_FILE_EXIT:
-		g_script.ExitApp(EXIT_MENU);  // More reliable than PostQuitMessage(), which has been known to fail in rare cases.
+		g_script->ExitApp(EXIT_MENU);  // More reliable than PostQuitMessage(), which has been known to fail in rare cases.
 		return true; // If there is an OnExit function, the above might not actually exit.
 	case ID_VIEW_LINES:
 		ShowMainWindow(MAIN_MODE_LINES);
@@ -4371,15 +4377,15 @@ bool HandleMenuItem(HWND aHwnd, WORD aMenuItemID, HWND aGuiHwnd)
 		ShowMainWindow(MAIN_MODE_REFRESH);
 		return true;
 	case ID_HELP_WEBSITE:
-		if (!g_script.ActionExec(_T(AHK_WEBSITE), _T(""), NULL, false))
+		if (!g_script->ActionExec(_T(AHK_WEBSITE), _T(""), NULL, false))
 			MsgBox(_T("Could not open URL ") _T(AHK_WEBSITE) _T(" in default browser."));
 		return true;
 	default:
 		// See if this command ID is one of the user's custom menu items.  Due to the possibility
 		// that some items have been deleted from the menu, can't rely on comparing
-		// aMenuItemID to g_script.mMenuItemCount in any way.  Just look up the ID to make sure
+		// aMenuItemID to g_script->mMenuItemCount in any way.  Just look up the ID to make sure
 		// there really is a menu item for it:
-		if (!g_script.FindMenuItemByID(aMenuItemID)) // Do nothing, let caller try to handle it some other way.
+		if (!g_script->FindMenuItemByID(aMenuItemID)) // Do nothing, let caller try to handle it some other way.
 			return false;
 		// It seems best to treat the selection of a custom menu item in a way similar
 		// to how hotkeys are handled by the hook. See comments near the definition of
@@ -4431,7 +4437,7 @@ ResultType ShowMainWindow(MainWindowModes aMode, bool aRestricted)
 	// in Win9x:
 	TCHAR buf_temp[65534] = _T("");  // Formerly 32767.
 	bool jump_to_bottom = false;  // Set default behavior for edit control.
-	static MainWindowModes current_mode = MAIN_MODE_NO_CHANGE;
+	_thread_local static MainWindowModes current_mode = MAIN_MODE_NO_CHANGE;
 
 #ifdef AUTOHOTKEYSC
 	// If we were called from a restricted place, such as via the Tray Menu or the Main Menu,
@@ -4465,13 +4471,13 @@ ResultType ShowMainWindow(MainWindowModes aMode, bool aRestricted)
 		jump_to_bottom = true;
 		break;
 	case MAIN_MODE_VARS:
-		g_script.ListVars(buf_temp, _countof(buf_temp));
+		g_script->ListVars(buf_temp, _countof(buf_temp));
 		break;
 	case MAIN_MODE_HOTKEYS:
 		Hotkey::ListHotkeys(buf_temp, _countof(buf_temp));
 		break;
 	case MAIN_MODE_KEYHISTORY:
-		g_script.ListKeyHistory(buf_temp, _countof(buf_temp));
+		g_script->ListKeyHistory(buf_temp, _countof(buf_temp));
 		break;
 	case MAIN_MODE_REFRESH:
 		// Rather than do a recursive call to self, which might stress the stack if the script is heavily recursed:
@@ -4482,13 +4488,13 @@ ResultType ShowMainWindow(MainWindowModes aMode, bool aRestricted)
 			jump_to_bottom = true;
 			break;
 		case MAIN_MODE_VARS:
-			g_script.ListVars(buf_temp, _countof(buf_temp));
+			g_script->ListVars(buf_temp, _countof(buf_temp));
 			break;
 		case MAIN_MODE_HOTKEYS:
 			Hotkey::ListHotkeys(buf_temp, _countof(buf_temp));
 			break;
 		case MAIN_MODE_KEYHISTORY:
-			g_script.ListKeyHistory(buf_temp, _countof(buf_temp));
+			g_script->ListKeyHistory(buf_temp, _countof(buf_temp));
 			// Special mode for when user refreshes, so that new keys can be seen without having
 			// to scroll down again:
 			jump_to_bottom = true;
@@ -4582,7 +4588,7 @@ ResultType InputBoxParseOptions(LPTSTR aOptions, InputBoxType &aInputBox)
 				|| !IsNumeric(next_option + 1 // Or not a valid number.
 					, option_char == 'X' || option_char == 'Y' // Only X and Y allow negative numbers.
 					, FALSE, option_char == 'T')) // Only Timeout allows floating-point.
-				return g_script.ScriptError(ERR_INVALID_OPTION, next_option);
+				return g_script->ScriptError(ERR_INVALID_OPTION, next_option);
 
 			switch (ctoupper(*next_option))
 			{
@@ -4611,7 +4617,7 @@ ResultType InputBox(Var *aOutputVar, LPTSTR aTitle, LPTSTR aText, LPTSTR aOption
 	if (!*aTitle)
 		// If available, the script's filename seems a much better title in case the user has
 		// more than one script running:
-		aTitle = (g_script.mFileName && *g_script.mFileName) ? g_script.mFileName : T_AHK_NAME_VERSION;
+		aTitle = (g_script->mFileName && *g_script->mFileName) ? g_script->mFileName : T_AHK_NAME_VERSION;
 	// Limit the size of what we were given to prevent unreasonably huge strings from
 	// possibly causing a failure in CreateDialog().  This copying method is always done because:
 	// Make a copy of all string parameters, using the stack, because they may reside in the deref buffer
@@ -4683,7 +4689,7 @@ INT_PTR CALLBACK InputBoxProc(HWND hWndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 {
 	// See GuiWindowProc() for details about this first part:
 	LRESULT msg_reply;
-	if (g_MsgMonitor.Count() // Count is checked here to avoid function-call overhead.
+	if (g_MsgMonitor->Count() // Count is checked here to avoid function-call overhead.
 		&& (!g->CalledByIsDialogMessageOrDispatch || g->CalledByIsDialogMessageOrDispatchMsg != uMsg) // v1.0.44.11: If called by IsDialog or Dispatch but they changed the message number, check if the script is monitoring that new number.
 		&& MsgMonitor(hWndDlg, uMsg, wParam, lParam, NULL, msg_reply))
 		return (BOOL)msg_reply; // MsgMonitor has returned "true", indicating that this message should be omitted from further processing.
@@ -4761,10 +4767,10 @@ INT_PTR CALLBACK InputBoxProc(HWND hWndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 		
 		// L17: Use separate big/small icons for best results.
 		LPARAM big_icon, small_icon;
-		if (g_script.mCustomIcon)
+		if (g_script->mCustomIcon)
 		{
-			big_icon = (LPARAM)g_script.mCustomIcon;
-			small_icon = (LPARAM)g_script.mCustomIconSmall; // Should always be non-NULL when mCustomIcon is non-NULL.
+			big_icon = (LPARAM)g_script->mCustomIcon;
+			small_icon = (LPARAM)g_script->mCustomIconSmall; // Should always be non-NULL when mCustomIcon is non-NULL.
 		}
 		else
 		{
@@ -5036,7 +5042,7 @@ ResultType Script::SetCoordMode(LPTSTR aCommand, LPTSTR aMode)
 	CoordModeType mode = Line::ConvertCoordMode(aMode);
 	CoordModeType shift = Line::ConvertCoordModeCmd(aCommand);
 	if (shift == -1 || mode == -1) // Compare directly to -1 because unsigned.
-		return g_script.ScriptError(ERR_INVALID_VALUE, aMode);
+		return g_script->ScriptError(ERR_INVALID_VALUE, aMode);
 	g->CoordMode = (g->CoordMode & ~(COORD_MODE_MASK << shift)) | (mode << shift);
 	return OK;
 }
@@ -5051,7 +5057,7 @@ ResultType Script::SetSendLevel(int aValue, LPTSTR aValueStr)
 {
 	int sendLevel = aValue;
 	if (!SendLevelIsValid(sendLevel))
-		return g_script.ScriptError(ERR_INVALID_VALUE, aValueStr);
+		return g_script->ScriptError(ERR_INVALID_VALUE, aValueStr);
 	g->SendLevel = sendLevel;
 	return OK;
 }
@@ -5927,7 +5933,7 @@ int SortUDF(const void *a1, const void *a2)
 {
 	// The following isn't necessary because by definition, the current thread isn't paused because it's the
 	// thing that called the sort in the first place.
-	//g_script.UpdateTrayIcon();
+	//g_script->UpdateTrayIcon();
 
 	FuncResult result_token;
 
@@ -6012,7 +6018,7 @@ ResultType Line::PerformSort(LPTSTR aContents, LPTSTR aOptions)
 			cp = omit_leading_whitespace(cp + 1); // Point it to the function's name.
 			if (   !(cp_end = StrChrAny(cp, _T(" \t")))   ) // Find space or tab, if any.
 				cp_end = cp + _tcslen(cp); // Point it to the terminator instead.
-			if (   !(g_SortFunc = g_script.FindFunc(cp, cp_end - cp))   )
+			if (   !(g_SortFunc = g_script->FindFunc(cp, cp_end - cp))   )
 				goto end; // For simplicity, just abort the sort.
 			// To improve callback performance, ensure there are no ByRef parameters (for simplicity:
 			// not even ones that have default values) among the first two parameters.  This avoids the
@@ -7398,7 +7404,7 @@ ResultType Line::SoundPlay(LPTSTR aFilespec, bool aSleepUntilDone)
 		}
 		// Sleep a little longer than normal because I'm not sure how much overhead
 		// and CPU utilization the above incurs:
-		if (g_MainThreadID == aThreadID)
+		if (g_ThreadID == aThreadID)
 			MsgSleep(20);
 		else
 			Sleep(20);
@@ -7416,15 +7422,15 @@ void SetWorkingDir(LPTSTR aNewDir, bool aSetErrorLevel)
 {
 	if (!SetCurrentDirectory(aNewDir)) // Caused by nonexistent directory, permission denied, etc.
 	{
-		if (aSetErrorLevel && g_script.mIsReadyToExecute)
-			g_script.SetErrorLevelOrThrow();
+		if (aSetErrorLevel && g_script->mIsReadyToExecute)
+			g_script->SetErrorLevelOrThrow();
 		return;
 	}
 
 	// Otherwise, the change to the working directory *apparently* succeeded (but is confirmed below for root drives
 	// and also because we want the absolute path in cases where aNewDir is relative).
 	TCHAR buf[_countof(g_WorkingDir)];
-	LPTSTR actual_working_dir = g_script.mIsReadyToExecute ? g_WorkingDir : buf; // i.e. don't update g_WorkingDir when our caller is the #include directive.
+	LPTSTR actual_working_dir = g_script->mIsReadyToExecute ? g_WorkingDir : buf; // i.e. don't update g_WorkingDir when our caller is the #include directive.
 	// Other than during program startup, this should be the only place where the official
 	// working dir can change.  The exception is FileSelect(), which changes the working
 	// dir as the user navigates from folder to folder.  However, the whole purpose of
@@ -7465,7 +7471,7 @@ void SetWorkingDir(LPTSTR aNewDir, bool aSetErrorLevel)
 	}
 
 	// Since the above didn't return, it wants us to indicate success.
-	if (aSetErrorLevel && g_script.mIsReadyToExecute) // Callers want ErrorLevel changed only during script runtime.
+	if (aSetErrorLevel && g_script->mIsReadyToExecute) // Callers want ErrorLevel changed only during script runtime.
 		g_ErrorLevel->Assign(ERRORLEVEL_NONE);
 }
 
@@ -7544,7 +7550,7 @@ ResultType Line::FileSelect(LPTSTR aOptions, LPTSTR aWorkingDir, LPTSTR aGreetin
 	else
 		// Use a more specific title so that the dialogs of different scripts can be distinguished
 		// from one another, which may help script automation in rare cases:
-		sntprintf(greeting, _countof(greeting), _T("Select File - %s"), g_script.mFileName);
+		sntprintf(greeting, _countof(greeting), _T("Select File - %s"), g_script->mFileName);
 
 	// The filter must be terminated by two NULL characters.  One is explicit, the other automatic:
 	TCHAR filter[1024] = _T(""), pattern[1024] = _T("");  // Set default.
@@ -8403,7 +8409,7 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 		// be able to use that value if the script changes it while running.
 		TCHAR aDestPath[MAX_PATH];
 		GetFullPathName(aDest, MAX_PATH, aDestPath, NULL);
-		SetCurrentDirectory(g_script.mFileDir);
+		SetCurrentDirectory(g_script->mFileDir);
 		success = CopyFile(aSource, aDestPath, !allow_overwrite);
 		SetCurrentDirectory(g_WorkingDir); // Restore to proper value.
 	}
@@ -9099,7 +9105,7 @@ bool Line::FileIsFilteredOut(WIN32_FIND_DATA &aCurrentFile, FileLoopModeType aFi
 Label *Line::GetJumpTarget(bool aIsDereferenced)
 {
 	LPTSTR target_label = aIsDereferenced ? ARG1 : RAW_ARG1;
-	Label *label = g_script.FindLabel(target_label);
+	Label *label = g_script->FindLabel(target_label);
 	if (!label)
 	{
 		LineError(ERR_NO_LABEL, FAIL, target_label);
@@ -9215,8 +9221,8 @@ VarSizeType BIV_DateTime(LPTSTR aBuf, LPTSTR aVarName)
 	// sync with one another when they are used consecutively such as this example:
 	// Var = %A_Hour%:%A_Min%:%A_Sec%
 	// Using GetTickCount() because it's very low overhead compared to the other time functions:
-	static DWORD sLastUpdate = 0; // Static should be thread + recursion safe in this case.
-	static SYSTEMTIME sST = {0}; // Init to detect when it's empty.
+	_thread_local static DWORD sLastUpdate = 0; // Static should be thread + recursion safe in this case.
+	_thread_local static SYSTEMTIME sST = { 0 }; // Init to detect when it's empty.
 	BOOL is_msec = !_tcsicmp(aVarName, _T("MSec")); // Always refresh if it's milliseconds, for better accuracy.
 	DWORD now_tick = GetTickCount();
 	if (is_msec || now_tick - sLastUpdate > 50 || !sST.wYear) // See comments above.
@@ -9297,7 +9303,7 @@ BIV_DECL_W(BIV_TitleMatchMode_Set)
 	case FIND_FAST: g->TitleFindFast = true; break;
 	case FIND_SLOW: g->TitleFindFast = false; break;
 	default:
-		return g_script.ScriptError(ERR_INVALID_VALUE, aBuf);
+		return g_script->ScriptError(ERR_INVALID_VALUE, aBuf);
 	}
 	return OK;
 }
@@ -9322,7 +9328,7 @@ BIV_DECL_W(BIV_DetectHiddenWindows_Set)
 	if ( (toggle = Line::ConvertOnOff(aBuf, NEUTRAL)) != NEUTRAL )
 		g->DetectHiddenWindows = (toggle == TOGGLED_ON);
 	else
-		return g_script.ScriptError(ERR_INVALID_VALUE, aBuf);
+		return g_script->ScriptError(ERR_INVALID_VALUE, aBuf);
 	return OK;
 }
 
@@ -9339,7 +9345,7 @@ BIV_DECL_W(BIV_DetectHiddenText_Set)
 	if ( (toggle = Line::ConvertOnOff(aBuf, NEUTRAL)) != NEUTRAL )
 		g->DetectHiddenText = (toggle == TOGGLED_ON);
 	else
-		return g_script.ScriptError(ERR_INVALID_VALUE, aBuf);
+		return g_script->ScriptError(ERR_INVALID_VALUE, aBuf);
 	return OK;
 }
 
@@ -9357,7 +9363,7 @@ BIV_DECL_W(BIV_StringCaseSense_Set)
 	if ( (sense = Line::ConvertStringCaseSense(aBuf)) != SCS_INVALID )
 		g->StringCaseSense = sense;
 	else
-		return g_script.ScriptError(ERR_INVALID_VALUE, aBuf);
+		return g_script->ScriptError(ERR_INVALID_VALUE, aBuf);
 	return OK;
 }
 
@@ -9426,7 +9432,7 @@ BIV_DECL_W(BIV_DefaultMouseSpeed_Set)
 
 VarSizeType BIV_CoordMode(LPTSTR aBuf, LPTSTR aVarName)
 {
-	static LPCTSTR sCoordModes[] = COORD_MODES;
+	_thread_local static LPCTSTR sCoordModes[] = COORD_MODES;
 	LPCTSTR result = sCoordModes[(g->CoordMode >> Line::ConvertCoordModeCmd(aVarName + 11)) & COORD_MODE_MASK];
 	if (aBuf)
 		_tcscpy(aBuf, result);
@@ -9440,7 +9446,7 @@ BIV_DECL_W(BIV_CoordMode_Set)
 
 VarSizeType BIV_SendMode(LPTSTR aBuf, LPTSTR aVarName)
 {
-	static LPCTSTR sSendModes[] = SEND_MODES;
+	_thread_local static LPCTSTR sSendModes[] = SEND_MODES;
 	LPCTSTR result = sSendModes[g->SendMode];
 	if (aBuf)
 		_tcscpy(aBuf, result);
@@ -9475,7 +9481,7 @@ BIV_DECL_W(BIV_StoreCapslockMode_Set)
 {
 	ToggleValueType toggle = Line::ConvertOnOff(aBuf, NEUTRAL);
 	if (toggle == NEUTRAL)
-		return g_script.ScriptError(ERR_INVALID_VALUE, aBuf);
+		return g_script->ScriptError(ERR_INVALID_VALUE, aBuf);
 	g->StoreCapslockMode = (toggle == TOGGLED_ON);
 	return OK;
 }
@@ -9615,7 +9621,7 @@ BIV_DECL_W(BIV_FileEncoding_Set)
 {
 	UINT new_encoding = Line::ConvertFileEncoding(aBuf);
 	if (new_encoding == -1)
-		return g_script.ScriptError(ERR_INVALID_VALUE, aBuf);
+		return g_script->ScriptError(ERR_INVALID_VALUE, aBuf);
 	g->Encoding = new_encoding;
 	return OK;
 }
@@ -9670,7 +9676,7 @@ BIV_DECL_W(BIV_RegView_Set)
 	DWORD reg_view = Line::RegConvertView(aBuf);
 	// Validate the parameter even if it's not going to be used.
 	if (reg_view == -1)
-		return g_script.ScriptError(ERR_INVALID_VALUE, aBuf);
+		return g_script->ScriptError(ERR_INVALID_VALUE, aBuf);
 	// Since these flags cause the registry functions to fail on Win2k and have no effect on
 	// any later 32-bit OS, ignore this command when the OS is 32-bit.  Leave A_RegView blank.
 	if (IsOS64Bit())
@@ -9791,9 +9797,9 @@ VarSizeType BIV_IconHidden(LPTSTR aBuf, LPTSTR aVarName)
 VarSizeType BIV_IconTip(LPTSTR aBuf, LPTSTR aVarName)
 {
 	if (!aBuf)
-		return g_script.mTrayIconTip ? (VarSizeType)_tcslen(g_script.mTrayIconTip) : 0;
-	if (g_script.mTrayIconTip)
-		return (VarSizeType)_tcslen(_tcscpy(aBuf, g_script.mTrayIconTip));
+		return g_script->mTrayIconTip ? (VarSizeType)_tcslen(g_script->mTrayIconTip) : 0;
+	if (g_script->mTrayIconTip)
+		return (VarSizeType)_tcslen(_tcscpy(aBuf, g_script->mTrayIconTip));
 	else
 	{
 		*aBuf = '\0';
@@ -9804,9 +9810,9 @@ VarSizeType BIV_IconTip(LPTSTR aBuf, LPTSTR aVarName)
 VarSizeType BIV_IconFile(LPTSTR aBuf, LPTSTR aVarName)
 {
 	if (!aBuf)
-		return g_script.mCustomIconFile ? (VarSizeType)_tcslen(g_script.mCustomIconFile) : 0;
-	if (g_script.mCustomIconFile)
-		return (VarSizeType)_tcslen(_tcscpy(aBuf, g_script.mCustomIconFile));
+		return g_script->mCustomIconFile ? (VarSizeType)_tcslen(g_script->mCustomIconFile) : 0;
+	if (g_script->mCustomIconFile)
+		return (VarSizeType)_tcslen(_tcscpy(aBuf, g_script->mCustomIconFile));
 	else
 	{
 		*aBuf = '\0';
@@ -9818,12 +9824,12 @@ VarSizeType BIV_IconNumber(LPTSTR aBuf, LPTSTR aVarName)
 {
 	TCHAR buf[MAX_INTEGER_SIZE];
 	LPTSTR target_buf = aBuf ? aBuf : buf;
-	if (!g_script.mCustomIconNumber) // Yield an empty string rather than the digit "0".
+	if (!g_script->mCustomIconNumber) // Yield an empty string rather than the digit "0".
 	{
 		*target_buf = '\0';
 		return 0;
 	}
-	return (VarSizeType)_tcslen(UTOA(g_script.mCustomIconNumber, target_buf));
+	return (VarSizeType)_tcslen(UTOA(g_script->mCustomIconNumber, target_buf));
 }
 
 
@@ -10192,10 +10198,10 @@ VarSizeType BIV_Caret(LPTSTR aBuf, LPTSTR aVarName)
 	// separately by the script, and due to split second timing, they might otherwise not be accurate with
 	// respect to each other.  This method also helps performance since it avoids unnecessary calls to
 	// GetGUIThreadInfo().
-	static HWND sForeWinPrev = NULL;
+	_thread_local static HWND sForeWinPrev = NULL;
 	static DWORD sTimestamp = GetTickCount();
-	static POINT sPoint;
-	static BOOL sResult;
+	_thread_local static POINT sPoint;
+	_thread_local static BOOL sResult;
 
 	// I believe only the foreground window can have a caret position due to relationship with focused control.
 	HWND target_window = GetForegroundWindow(); // Variable must be named target_window for ATTACH_THREAD_INPUT.
@@ -10319,22 +10325,22 @@ VarSizeType BIV_ScreenWidth_Height(LPTSTR aBuf, LPTSTR aVarName)
 VarSizeType BIV_ScriptName(LPTSTR aBuf, LPTSTR aVarName)
 {
 	if (aBuf)
-		_tcscpy(aBuf, g_script.mFileName);
-	return (VarSizeType)_tcslen(g_script.mFileName);
+		_tcscpy(aBuf, g_script->mFileName);
+	return (VarSizeType)_tcslen(g_script->mFileName);
 }
 
 VarSizeType BIV_ScriptDir(LPTSTR aBuf, LPTSTR aVarName)
 {
 	if (aBuf)
-		_tcscpy(aBuf, g_script.mFileDir);
-	return _tcslen(g_script.mFileDir);
+		_tcscpy(aBuf, g_script->mFileDir);
+	return _tcslen(g_script->mFileDir);
 }
 
 VarSizeType BIV_ScriptFullPath(LPTSTR aBuf, LPTSTR aVarName)
 {
 	if (aBuf)
-		_tcscpy(aBuf, g_script.mFileSpec);
-	return _tcslen(g_script.mFileSpec);
+		_tcscpy(aBuf, g_script->mFileSpec);
+	return _tcslen(g_script->mFileSpec);
 }
 
 VarSizeType BIV_ScriptHwnd(LPTSTR aBuf, LPTSTR aVarName)
@@ -10347,19 +10353,19 @@ VarSizeType BIV_ScriptHwnd(LPTSTR aBuf, LPTSTR aVarName)
 }
 
 VarSizeType BIV_LineNumber(LPTSTR aBuf, LPTSTR aVarName)
-// Caller has ensured that g_script.mCurrLine is not NULL.
+// Caller has ensured that g_script->mCurrLine is not NULL.
 {
 	return aBuf
-		? (VarSizeType)_tcslen(ITOA(g_script.mCurrLine->mLineNumber, aBuf))
+		? (VarSizeType)_tcslen(ITOA(g_script->mCurrLine->mLineNumber, aBuf))
 		: MAX_INTEGER_LENGTH;
 }
 
 VarSizeType BIV_LineFile(LPTSTR aBuf, LPTSTR aVarName)
-// Caller has ensured that g_script.mCurrLine is not NULL.
+// Caller has ensured that g_script->mCurrLine is not NULL.
 {
 	if (aBuf)
-		_tcscpy(aBuf, Line::sSourceFile[g_script.mCurrLine->mFileIndex]);
-	return (VarSizeType)_tcslen(Line::sSourceFile[g_script.mCurrLine->mFileIndex]);
+		_tcscpy(aBuf, Line::sSourceFile[g_script->mCurrLine->mFileIndex]);
+	return (VarSizeType)_tcslen(Line::sSourceFile[g_script->mCurrLine->mFileIndex]);
 }
 
 
@@ -10667,8 +10673,8 @@ VarSizeType BIV_ThisLabel(LPTSTR aBuf, LPTSTR aVarName)
 VarSizeType BIV_ThisMenuItem(LPTSTR aBuf, LPTSTR aVarName)
 {
 	if (aBuf)
-		_tcscpy(aBuf, g_script.mThisMenuItemName);
-	return (VarSizeType)_tcslen(g_script.mThisMenuItemName);
+		_tcscpy(aBuf, g_script->mThisMenuItemName);
+	return (VarSizeType)_tcslen(g_script->mThisMenuItemName);
 }
 
 UINT Script::ThisMenuItemPos()
@@ -10695,7 +10701,7 @@ VarSizeType BIV_ThisMenuItemPos(LPTSTR aBuf, LPTSTR aVarName)
 {
 	if (!aBuf) // To avoid doing possibly high-overhead calls twice, merely return a conservative estimate for the first pass.
 		return MAX_INTEGER_LENGTH;
-	UINT menu_item_pos = g_script.ThisMenuItemPos();
+	UINT menu_item_pos = g_script->ThisMenuItemPos();
 	if (menu_item_pos < UINT_MAX) // Success
 		return (VarSizeType)_tcslen(UTOA(menu_item_pos + 1, aBuf)); // +1 to convert from zero-based to 1-based.
 	// Otherwise:
@@ -10706,22 +10712,22 @@ VarSizeType BIV_ThisMenuItemPos(LPTSTR aBuf, LPTSTR aVarName)
 VarSizeType BIV_ThisMenu(LPTSTR aBuf, LPTSTR aVarName)
 {
 	if (aBuf)
-		_tcscpy(aBuf, g_script.mThisMenuName);
-	return (VarSizeType)_tcslen(g_script.mThisMenuName);
+		_tcscpy(aBuf, g_script->mThisMenuName);
+	return (VarSizeType)_tcslen(g_script->mThisMenuName);
 }
 
 VarSizeType BIV_ThisHotkey(LPTSTR aBuf, LPTSTR aVarName)
 {
 	if (aBuf)
-		_tcscpy(aBuf, g_script.mThisHotkeyName);
-	return (VarSizeType)_tcslen(g_script.mThisHotkeyName);
+		_tcscpy(aBuf, g_script->mThisHotkeyName);
+	return (VarSizeType)_tcslen(g_script->mThisHotkeyName);
 }
 
 VarSizeType BIV_PriorHotkey(LPTSTR aBuf, LPTSTR aVarName)
 {
 	if (aBuf)
-		_tcscpy(aBuf, g_script.mPriorHotkeyName);
-	return (VarSizeType)_tcslen(g_script.mPriorHotkeyName);
+		_tcscpy(aBuf, g_script->mPriorHotkeyName);
+	return (VarSizeType)_tcslen(g_script->mPriorHotkeyName);
 }
 
 VarSizeType BIV_TimeSinceThisHotkey(LPTSTR aBuf, LPTSTR aVarName)
@@ -10731,13 +10737,13 @@ VarSizeType BIV_TimeSinceThisHotkey(LPTSTR aBuf, LPTSTR aVarName)
 	// It must be the type of hotkey that has a label because we want the TimeSinceThisHotkey
 	// value to be "in sync" with the value of ThisHotkey itself (i.e. use the same method
 	// to determine which hotkey is the "this" hotkey):
-	if (*g_script.mThisHotkeyName)
+	if (*g_script->mThisHotkeyName)
 		// Even if GetTickCount()'s TickCount has wrapped around to zero and the timestamp hasn't,
 		// DWORD subtraction still gives the right answer as long as the number of days between
 		// isn't greater than about 49.  See MyGetTickCount() for explanation of %d vs. %u.
 		// Update: Using 64-bit ints now, so above is obsolete:
-		//sntprintf(str, sizeof(str), "%d", (DWORD)(GetTickCount() - g_script.mThisHotkeyStartTime));
-		ITOA64((__int64)(GetTickCount() - g_script.mThisHotkeyStartTime), aBuf);
+		//sntprintf(str, sizeof(str), "%d", (DWORD)(GetTickCount() - g_script->mThisHotkeyStartTime));
+		ITOA64((__int64)(GetTickCount() - g_script->mThisHotkeyStartTime), aBuf);
 	else
 		_tcscpy(aBuf, _T("-1"));
 	return (VarSizeType)_tcslen(aBuf);
@@ -10747,10 +10753,10 @@ VarSizeType BIV_TimeSincePriorHotkey(LPTSTR aBuf, LPTSTR aVarName)
 {
 	if (!aBuf) // IMPORTANT: Conservative estimate because the time might change between 1st & 2nd calls.
 		return MAX_INTEGER_LENGTH;
-	if (*g_script.mPriorHotkeyName)
+	if (*g_script->mPriorHotkeyName)
 		// See MyGetTickCount() for explanation for explanation:
-		//sntprintf(str, sizeof(str), "%d", (DWORD)(GetTickCount() - g_script.mPriorHotkeyStartTime));
-		ITOA64((__int64)(GetTickCount() - g_script.mPriorHotkeyStartTime), aBuf);
+		//sntprintf(str, sizeof(str), "%d", (DWORD)(GetTickCount() - g_script->mPriorHotkeyStartTime));
+		ITOA64((__int64)(GetTickCount() - g_script->mPriorHotkeyStartTime), aBuf);
 	else
 		_tcscpy(aBuf, _T("-1"));
 	return (VarSizeType)_tcslen(aBuf);
@@ -10760,12 +10766,12 @@ VarSizeType BIV_EndChar(LPTSTR aBuf, LPTSTR aVarName)
 {
 	if (aBuf)
 	{
-		if (g_script.mEndChar)
-			*aBuf++ = g_script.mEndChar;
+		if (g_script->mEndChar)
+			*aBuf++ = g_script->mEndChar;
 		//else we returned 0 previously, so MUST WRITE ONLY ONE NULL-TERMINATOR.
 		*aBuf = '\0';
 	}
-	return g_script.mEndChar ? 1 : 0; // v1.0.48.04: Fixed to support a NULL char, which happens when the hotstring has the "no ending character required" option.
+	return g_script->mEndChar ? 1 : 0; // v1.0.48.04: Fixed to support a NULL char, which happens when the hotstring has the "no ending character required" option.
 }
 
 
@@ -11249,9 +11255,9 @@ DYNARESULT DynaCall(void *aFunction, DYNAPARM aParam[], int aParamCount, DWORD &
 	{
 		_itot(esp_delta, buf, 10);
 		if (esp_delta > 0)
-			g_script.ThrowRuntimeException(_T("Parameter list too large, or call requires CDecl."), _T("DllCall"), buf);
+			g_script->ThrowRuntimeException(_T("Parameter list too large, or call requires CDecl."), _T("DllCall"), buf);
 		else
-			g_script.ThrowRuntimeException(_T("Parameter list too small."), _T("DllCall"), buf);
+			g_script->ThrowRuntimeException(_T("Parameter list too small."), _T("DllCall"), buf);
 	}
 	else
 #endif
@@ -11263,7 +11269,7 @@ DYNARESULT DynaCall(void *aFunction, DYNAPARM aParam[], int aParamCount, DWORD &
 		buf[0] = '0';
 		buf[1] = 'x';
 		_ultot(aException, buf + 2, 16);
-		g_script.ThrowRuntimeException(ERR_EXCEPTION, _T("DllCall"), buf);
+		g_script->ThrowRuntimeException(ERR_EXCEPTION, _T("DllCall"), buf);
 	}
 
 	return Res;
@@ -11533,7 +11539,7 @@ void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free) // L31: 
 			if (   !hmodule_to_free  ||  !(hmodule = *hmodule_to_free = LoadLibrary(dll_name))   )
 			{
 				if (hmodule_to_free) // L31: BIF_DllCall wants us to set ErrorLevel.  ExpressionToPostfix passes NULL.
-					g_script.ThrowRuntimeException(_T("Failed to load DLL."), _T("DllCall"), dll_name);
+					g_script->ThrowRuntimeException(_T("Failed to load DLL."), _T("DllCall"), dll_name);
 				return NULL;
 			}
 		if (   !(function = (void *)GetProcAddress(hmodule, function_name))   )
@@ -11556,7 +11562,7 @@ void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free) // L31: 
 		// This must be done here since only we know for certain that the dll
 		// was loaded okay (if GetModuleHandle succeeded, nothing is passed
 		// back to the caller).
-		g_script.ThrowRuntimeException(ERR_NONEXISTENT_FUNCTION, _T("DllCall"), _tfunction_name);
+		g_script->ThrowRuntimeException(ERR_NONEXISTENT_FUNCTION, _T("DllCall"), _tfunction_name);
 	}
 
 	return function;
@@ -11622,7 +11628,7 @@ CriticalObject *CriticalObject::Create(ExprTokenType *aParam[], int aParamCount)
 	}
 	if (!obj)
 	{	
-		g_script.ScriptError(aParamCount == 0 ? ERR_OUTOFMEM : ERR_PARAM1_INVALID );
+		g_script->ScriptError(aParamCount == 0 ? ERR_OUTOFMEM : ERR_PARAM1_INVALID );
 		return NULL;
 	}
 	// create new critical object
@@ -11660,7 +11666,7 @@ bool CriticalObject::Delete()
 
 	// Check if we own the critical section and release it
 	while (!TryEnterCriticalSection(this->lpCriticalSection))
-		if (g_MainThreadID == aThreadID)
+		if (g_ThreadID == aThreadID)
 			MsgSleep(-1);
 		else
 			Sleep(0); 
@@ -11668,6 +11674,7 @@ bool CriticalObject::Delete()
 	LeaveCriticalSection(this->lpCriticalSection);
 	return ObjectBase::Delete();
 }
+
 
 ResultType STDMETHODCALLTYPE CriticalObject::Invoke(
                                             ResultToken &aResultToken,
@@ -11680,9 +11687,9 @@ ResultType STDMETHODCALLTYPE CriticalObject::Invoke(
 	 // Avoid deadlocking the process so messages can still be processed
 	 while (!TryEnterCriticalSection(this->lpCriticalSection))
 #ifdef _WIN64
-		if (g_MainThreadID == __readgsdword(0x48)) // Used to identify if code is called from different thread (AutoHotkey.dll)
+		 if (g_ThreadID == __readgsdword(0x48)) // Used to identify if code is called from different thread (AutoHotkey.dll)
 #else
-		if (g_MainThreadID == __readfsdword(0x24))
+		 if (g_ThreadID == __readfsdword(0x24))
 #endif
 			MsgSleep(-1);
 		else
@@ -11769,7 +11776,7 @@ DynaToken *DynaToken::Create(ExprTokenType *aParam[], int aParamCount)
 		{
 			if (IS_NUMERIC(aParam[1]->symbol)) // The return type should be a string, not something purely numeric.
 			{
-				g_script.ThrowRuntimeException(ERR_INVALID_ARG_TYPE, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
+				g_script->ThrowRuntimeException(ERR_INVALID_ARG_TYPE, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 				return NULL;
 			}
 			// The return type can be an object, where first parameter must be a string
@@ -11782,7 +11789,7 @@ DynaToken *DynaToken::Create(ExprTokenType *aParam[], int aParamCount)
 					aParam[1]->var->mObject->Invoke(result_token,*aParam[1],IT_GET,param,1);
 				if (IS_NUMERIC(result_token.symbol) || result_token.symbol == SYM_OBJECT)
 				{
-					g_script.ThrowRuntimeException(ERR_INVALID_ARG_TYPE, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
+					g_script->ThrowRuntimeException(ERR_INVALID_ARG_TYPE, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 					return NULL;
 				}
 				token.CopyExprFrom(result_token);
@@ -11811,7 +11818,7 @@ DynaToken *DynaToken::Create(ExprTokenType *aParam[], int aParamCount)
 
 			if (obj->marg_count != ConvertDllArgTypes(return_type_string,dyna_param))
 			{
-				g_script.ThrowRuntimeException(ERR_INVALID_ARG_TYPE, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
+				g_script->ThrowRuntimeException(ERR_INVALID_ARG_TYPE, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 				return NULL;
 			}
 			// 64-bit note: The calling convention detection code is preserved here for script compatibility.
@@ -11860,7 +11867,7 @@ TEST_TYPE("W",	DLL_ARG_WSTR)
 #undef TEST_TYPE
 				else
 				{
-					g_script.ThrowRuntimeException(ERR_INVALID_RETURN_TYPE, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
+					g_script->ThrowRuntimeException(ERR_INVALID_RETURN_TYPE, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 					return NULL;
 				}
 #ifdef WIN32_PLATFORM
@@ -11895,7 +11902,7 @@ TEST_TYPE("W",	DLL_ARG_WSTR)
 			obj->mfunction = GetDllProcAddress(TokenToString(*aParam[0]), NULL);
 		if (!obj->mfunction)
 		{
-			g_script.ThrowRuntimeException(ERR_NONEXISTENT_FUNCTION, _T("DynaCall")); // Stage 4 error: Function could not be found in the DLL(s).
+			g_script->ThrowRuntimeException(ERR_NONEXISTENT_FUNCTION, _T("DynaCall")); // Stage 4 error: Function could not be found in the DLL(s).
 			return NULL;
 		}
 		// allocate memory for parameters and default parameters
@@ -11944,7 +11951,7 @@ CStringW **pStr = (CStringW **)
 					}
 					else
 					{
-						g_script.ThrowRuntimeException(ERR_INVALID_ARG_TYPE, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
+						g_script->ThrowRuntimeException(ERR_INVALID_ARG_TYPE, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 						return NULL;
 					}
 				}
@@ -12009,7 +12016,7 @@ CStringW **pStr = (CStringW **)
 					}
 					else
 					{
-						g_script.ThrowRuntimeException(ERR_INVALID_ARG_TYPE, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
+						g_script->ThrowRuntimeException(ERR_INVALID_ARG_TYPE, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 						return NULL;
 					}
 				}
@@ -12033,7 +12040,7 @@ CStringW **pStr = (CStringW **)
 			case DLL_ARG_INVALID:
 				if (aParam[i]->symbol == SYM_VAR)
 					aParam[i]->var->MaybeWarnUninitialized();
-				g_script.ThrowRuntimeException(ERR_INVALID_ARG_TYPE, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
+				g_script->ThrowRuntimeException(ERR_INVALID_ARG_TYPE, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 				return NULL;
 
 			default: // Namely:
@@ -12096,7 +12103,7 @@ CStringW **pStr = (CStringW **)
 						paramobj->Invoke(result_token,*aParam[1],IT_GET,param,1);
 						if (!IS_NUMERIC(result_token.symbol))
 						{
-							g_script.ThrowRuntimeException(ERR_INVALID_ARG_TYPE, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
+							g_script->ThrowRuntimeException(ERR_INVALID_ARG_TYPE, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 							return NULL;
 						}
 						obj->paramshift[i+1] = (int)result_token.value_int64-1;
@@ -12232,7 +12239,7 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 				}
 				else
 				{
-					g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
+					g_script->SetErrorLevelOrThrowStr(_T("-2"), _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 					return OK;
 				}
 			}
@@ -12296,7 +12303,7 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 				}
 				else
 				{
-					g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
+					g_script->SetErrorLevelOrThrowStr(_T("-2"), _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 					return OK;
 				}
 			}
@@ -12331,7 +12338,7 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 		case DLL_ARG_INVALID:
 			if (aParam[i + is_call]->symbol == SYM_VAR)
 				aParam[i + is_call]->var->MaybeWarnUninitialized();
-			g_script.SetErrorLevelOrThrowInt(-2, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
+			g_script->SetErrorLevelOrThrowInt(-2, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
 			return OK;
 
 
@@ -12397,8 +12404,8 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 		// The OS almost certainly frees it upon termination anyway.
 		// Call ScriptErrror() so that the user knows *which* DllCall is at fault:
 		g->InTryBlock = false; // do not throw an exception
-		g_script.ScriptError(_T("This DynaCall requires a prior VarSetCapacity. The program is now unstable and will exit."));
-		g_script.ExitApp(EXIT_CRITICAL); // Called this way, it will run the OnExit routine, which is debatable because it could cause more good than harm, but might avoid loss of data if the OnExit routine does something important.
+		g_script->ScriptError(_T("This DynaCall requires a prior VarSetCapacity. The program is now unstable and will exit."));
+		g_script->ExitApp(EXIT_CRITICAL); // Called this way, it will run the OnExit routine, which is debatable because it could cause more good than harm, but might avoid loss of data if the OnExit routine does something important.
 	}
 
 	// It seems best to have the above take precedence over "exception_occurred" below.
@@ -12836,8 +12843,8 @@ BIF_DECL(BIF_DllImport)
 		// The OS almost certainly frees it upon termination anyway.
 		// Call ScriptErrror() so that the user knows *which* DllCall is at fault:
 		g->InTryBlock = false; // do not throw an exception
-		g_script.ScriptError(_T("This DllCall requires a prior VarSetCapacity. The program is now unstable and will exit."));
-		g_script.ExitApp(EXIT_CRITICAL); // Called this way, it will run the OnExit function, which is debatable because it could cause more good than harm, but might avoid loss of data if the OnExit function does something important.
+		g_script->ScriptError(_T("This DllCall requires a prior VarSetCapacity. The program is now unstable and will exit."));
+		g_script->ExitApp(EXIT_CRITICAL); // Called this way, it will run the OnExit function, which is debatable because it could cause more good than harm, but might avoid loss of data if the OnExit function does something important.
 	}
 
 	if (g->ThrownToken)
@@ -12978,7 +12985,7 @@ BIF_DECL(BIF_DllImport)
 
 	// Store any output parameters back into the input variables.  This allows a function to change the
 	// contents of a variable for the following arg types: String and Pointer to <various number types>.
-	for (int i = 1; i < aParamCount; i++) // Same loop as used above, so maintain them together.
+	for (int i = 0; i < aParamCount; i++) // Same loop as used above, so maintain them together.
 	{
 		ExprTokenType &this_param = *aParam[i];  // Resolved for performance and convenience.
 		// The following check applies to DLL_ARG_xSTR, which is "AStr" on Unicode builds and "WStr"
@@ -13419,8 +13426,8 @@ has_valid_return_type:
 		// The OS almost certainly frees it upon termination anyway.
 		// Call ScriptErrror() so that the user knows *which* DllCall is at fault:
 		g->InTryBlock = false; // do not throw an exception
-		g_script.ScriptError(_T("This DllCall requires a prior VarSetCapacity. The program is now unstable and will exit."));
-		g_script.ExitApp(EXIT_CRITICAL); // Called this way, it will run the OnExit function, which is debatable because it could cause more good than harm, but might avoid loss of data if the OnExit function does something important.
+		g_script->ScriptError(_T("This DllCall requires a prior VarSetCapacity. The program is now unstable and will exit."));
+		g_script->ExitApp(EXIT_CRITICAL); // Called this way, it will run the OnExit function, which is debatable because it could cause more good than harm, but might avoid loss of data if the OnExit function does something important.
 	}
 
 	if (g->ThrownToken)
@@ -14051,7 +14058,7 @@ void *pcret_resolve_user_callout(LPCTSTR aCalloutParam, int aCalloutParamLength)
 	// If no Func is found, pcre will handle the case where aCalloutParam is a pure integer.
 	// In that case, the callout param becomes an integer between 0 and 255. No valid pointer
 	// could be in this range, but we must take care to check (ptr>255) rather than (ptr!=NULL).
-	Func *callout_func = g_script.FindFunc(aCalloutParam, aCalloutParamLength);
+	Func *callout_func = g_script->FindFunc(aCalloutParam, aCalloutParamLength);
 	if (!callout_func || callout_func->mIsBuiltIn)
 		return NULL;
 	return (void *)callout_func;
@@ -14080,7 +14087,7 @@ int RegExCallout(pcret_callout_block *cb)
 	//		callouts to occur on the main thread.
 	//  - By contrast, if #IfWin DOES prevent the hotkey from firing, #IfWin will not be
 	//		reevaluated from the main thread, so callouts cannot occur.
-	if (GetCurrentThreadId() != g_MainThreadID)
+	if (GetCurrentThreadId() != g_ThreadID)
 		return 0;
 
 	if (!cb->callout_data)
@@ -14090,7 +14097,7 @@ int RegExCallout(pcret_callout_block *cb)
 	Func *callout_func = (Func *)cb->user_callout;
 	if (!callout_func)
 	{
-		Var *pcre_callout_var = g_script.FindVar(_T("pcre_callout"), 12); // This may be a local of the UDF which called RegExMatch/Replace().
+		Var *pcre_callout_var = g_script->FindVar(_T("pcre_callout"), 12); // This may be a local of the UDF which called RegExMatch/Replace().
 		if (!pcre_callout_var)
 			return 0; // Seems best to ignore the callout rather than aborting the match.
 		ExprTokenType token;
@@ -14187,6 +14194,8 @@ int RegExCallout(pcret_callout_block *cb)
 	return number_to_return;
 }
 
+
+
 // SET UP THE CACHE.
 // This is a very crude cache for linear search. Of course, hashing would be better in the sense that it
 // would allow the cache to get much larger while still being fast (I believe PHP caches up to 4096 items).
@@ -14209,7 +14218,7 @@ struct pcre_cache_entry
 };
 
 #define PCRE_CACHE_SIZE 100 // Going too high would be counterproductive due to the slowness of linear search (and also the memory utilization of so many compiled RegEx's).
-static pcre_cache_entry sCache[PCRE_CACHE_SIZE] = { { 0 } };
+_thread_local static pcre_cache_entry sCache[PCRE_CACHE_SIZE] = { { 0 } };
 
 void free_compiled_regex()
 {
@@ -14256,7 +14265,7 @@ pcret *get_compiled_regex(LPTSTR aRegEx, pcret_extra *&aExtra, int *aOptionsLeng
 	// so like performance, that's not a concern either.
 	EnterCriticalSection(&g_CriticalRegExCache); // Request ownership of the critical section. If another thread already owns it, this thread will block until the other thread finishes.
 
-	static int sLastInsert, sLastFound = -1; // -1 indicates "cache empty".
+	_thread_local static int sLastInsert, sLastFound = -1; // -1 indicates "cache empty".
 	int insert_pos; // v1.0.45.03: This is used to avoid updating sLastInsert until an insert actually occurs (it might not occur if a compile error occurs in the regex, or something else stops it early).
 
 	// CHECK IF THIS REGEX IS ALREADY IN THE CACHE.
@@ -15107,7 +15116,33 @@ BIF_DECL(BIF_Chr)
 	_f_return_p(cp, len);
 }
 
+#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+BIF_DECL(BIF_NewThread)
+{
+	LPTSTR aScript = TokenToString(*aParam[0]);
+	LPTSTR aCmdLine = NULL;
+	LPTSTR aTitle = NULL;
+	if (aParamCount > 1)
+		aCmdLine = TokenToString(*aParam[1]);
+	if (aParamCount > 2)
+		aTitle = TokenToString(*aParam[2]);
+	SIZE_T aParamLen = _tcslen(aScript) + (aParamCount > 1 ? _tcslen(aCmdLine) + 1 : 0) + (aParamCount > 2 ? _tcslen(aTitle) + 1 : 0) + 3;
+	LPTSTR aScriptCmdLine = tmalloc(aParamLen);
+	memset(aScriptCmdLine, 0, aParamLen * sizeof(TCHAR));
+	_tcscpy(aScriptCmdLine, aScript);
+	if (aParamCount > 1)
+		_tcscpy(aScriptCmdLine + _tcslen(aScript) + 1, aCmdLine);
+	if (aParamCount > 2)
+		_tcscpy(aScriptCmdLine + _tcslen(aScript) + _tcslen(aCmdLine) + 2, aTitle);
+	unsigned int ThreadID;
+	HANDLE hThread = (HANDLE)_beginthreadex(NULL, 0, (unsigned(__stdcall *)(void *))&ThreadMain, aScriptCmdLine, 0, &ThreadID);
+	if (hThread)
+		CloseHandle(hThread);
+	aResultToken.symbol = SYM_INTEGER;
+	aResultToken.value_int64 = (__int64)ThreadID;
 
+}
+#endif
 
 BIF_DECL(BIF_NumGet)
 {
@@ -15772,7 +15807,7 @@ BIF_DECL(BIF_IsLabel)
 // often performance sensitive), it might be better to add a second parameter that tells
 // IsLabel to look up the type of label, and return it as a number or letter.
 {
-	_f_return_b(g_script.FindLabel(ParamIndexToString(0, _f_number_buf)) ? 1 : 0);
+	_f_return_b(g_script->FindLabel(ParamIndexToString(0, _f_number_buf)) ? 1 : 0);
 }
 
 
@@ -16243,7 +16278,7 @@ BIF_DECL(BIF_ZipCreateFile)
 	if (aErrCode = ZipCreateFile(&hz, TokenToString(*aParam[0]), aPassword))
 	{
 		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-		g_script.ScriptError(aMsg);
+		g_script->ScriptError(aMsg);
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
 	}
@@ -16259,7 +16294,7 @@ BIF_DECL(BIF_ZipOptions)
 	if (aErrCode = ZipOptions(&hz, (DWORD)TokenToInt64(*aParam[0])))
 	{
 		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-		g_script.ScriptError(aMsg);
+		g_script->ScriptError(aMsg);
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
 	}
@@ -16283,7 +16318,7 @@ BIF_DECL(BIF_ZipAddFile)
 		aDestination = TokenToString(*aParam[2]);
 	if (!TokenToInt64(*aParam[0]))
 	{
-		g_script.ScriptError(ERR_PARAM1_INVALID);
+		g_script->ScriptError(ERR_PARAM1_INVALID);
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
 	}
@@ -16291,7 +16326,7 @@ BIF_DECL(BIF_ZipAddFile)
 	{
 		TCHAR	aMsg[100];
 		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-		g_script.ScriptError(aMsg);
+		g_script->ScriptError(aMsg);
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
 	}
@@ -16304,7 +16339,7 @@ BIF_DECL(BIF_ZipAddFolder)
 	DWORD aErrCode;
 	if (!TokenToInt64(*aParam[0]))
 	{
-		g_script.ScriptError(ERR_PARAM1_INVALID);
+		g_script->ScriptError(ERR_PARAM1_INVALID);
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
 	}
@@ -16312,7 +16347,7 @@ BIF_DECL(BIF_ZipAddFolder)
 	{
 		TCHAR	aMsg[100];
 		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-		g_script.ScriptError(aMsg);
+		g_script->ScriptError(aMsg);
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
 	}
@@ -16327,7 +16362,7 @@ BIF_DECL(BIF_ZipCloseFile)
 	if (aErrCode = ZipClose((HZIP)TokenToInt64(*aParam[0])))
 	{
 		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-		g_script.ScriptError(aMsg);
+		g_script->ScriptError(aMsg);
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
 	}
@@ -16344,7 +16379,7 @@ BIF_DECL(BIF_ZipCreateBuffer)
 	if (aErrCode = ZipCreateBuffer(&hz, 0, (DWORD)TokenToInt64(*aParam[0]), aPassword))
 	{
 		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-		g_script.ScriptError(aMsg);
+		g_script->ScriptError(aMsg);
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
 	}
@@ -16359,7 +16394,7 @@ BIF_DECL(BIF_ZipAddBuffer)
 	LPTSTR aDestination = TokenToString(*aParam[3]);
 	if (!TokenToInt64(*aParam[0]))
 	{
-		g_script.ScriptError(ERR_PARAM1_INVALID);
+		g_script->ScriptError(ERR_PARAM1_INVALID);
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
 	}
@@ -16367,7 +16402,7 @@ BIF_DECL(BIF_ZipAddBuffer)
 	{
 		TCHAR	aMsg[100];
 		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-		g_script.ScriptError(aMsg);
+		g_script->ScriptError(aMsg);
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
 	}
@@ -16384,14 +16419,14 @@ BIF_DECL(BIF_ZipCloseBuffer)
 	HANDLE			aBase;
 	if (aParam[1]->symbol != SYM_VAR)
 	{
-		g_script.ScriptError(ERR_PARAM2_INVALID);
+		g_script->ScriptError(ERR_PARAM2_INVALID);
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
 	}
 	if (aErrCode = ZipGetMemory((HZIP)TokenToInt64(*aParam[0]), (void **)&aBuffer, &aLen, &aBase))
 	{
 		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-		g_script.ScriptError(aMsg);
+		g_script->ScriptError(aMsg);
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
 	}
@@ -16420,13 +16455,13 @@ BIF_DECL(BIF_ZipInfo)
 	{
 		if (!TokenIsNumeric(*aParam[1]))
 		{
-			g_script.ScriptError(ERR_PARAM2_INVALID);
+			g_script->ScriptError(ERR_PARAM2_INVALID);
 			aResultToken.symbol = SYM_STRING;
 			aResultToken.marker = _T("");
 		}
 		else if (aParamCount < 3)
 		{
-			g_script.ScriptError(ERR_PARAM3_REQUIRED);
+			g_script->ScriptError(ERR_PARAM3_REQUIRED);
 			aResultToken.symbol = SYM_STRING;
 			aResultToken.marker = _T("");
 		}
@@ -16510,7 +16545,7 @@ errorclose:
 	aObject->Release();
 error:
 	UnzipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-	g_script.ScriptError(aMsg);
+	g_script->ScriptError(aMsg);
 	aResultToken.symbol = SYM_STRING;
 	aResultToken.marker = _T("");
 }
@@ -16525,13 +16560,13 @@ BIF_DECL(BIF_UnZip)
 	{
 		if (!TokenIsNumeric(*aParam[1]))
 		{
-			g_script.ScriptError(ERR_PARAM2_INVALID);
+			g_script->ScriptError(ERR_PARAM2_INVALID);
 			aResultToken.symbol = SYM_STRING;
 			aResultToken.marker = _T("");
 		}
 		else if (aParamCount < 3)
 		{
-			g_script.ScriptError(ERR_PARAM3_REQUIRED);
+			g_script->ScriptError(ERR_PARAM3_REQUIRED);
 			aResultToken.symbol = SYM_STRING;
 			aResultToken.marker = _T("");
 		}
@@ -16600,7 +16635,7 @@ errorclose:
 	UnzipClose(huz);
 error:
 	UnzipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-	g_script.ScriptError(aMsg);
+	g_script->ScriptError(aMsg);
 	aResultToken.symbol = SYM_STRING;
 	aResultToken.marker = _T("");
 }
@@ -16615,13 +16650,13 @@ BIF_DECL(BIF_UnZipBuffer)
 	{
 		if (!TokenIsNumeric(*aParam[1]))
 		{
-			g_script.ScriptError(ERR_PARAM2_INVALID);
+			g_script->ScriptError(ERR_PARAM2_INVALID);
 			aResultToken.symbol = SYM_STRING;
 			aResultToken.marker = _T("");
 		}
 		else if (aParamCount < 3)
 		{
-			g_script.ScriptError(ERR_PARAM3_REQUIRED);
+			g_script->ScriptError(ERR_PARAM3_REQUIRED);
 			aResultToken.symbol = SYM_STRING;
 			aResultToken.marker = _T("");
 		}
@@ -16707,7 +16742,7 @@ errorclose:
 	UnzipClose(huz);
 error:
 	UnzipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-	g_script.ScriptError(aMsg);
+	g_script->ScriptError(aMsg);
 	aResultToken.symbol = SYM_STRING;
 	aResultToken.marker = _T("");
 }
@@ -17162,7 +17197,7 @@ BIF_DECL(BIF_OnMessage)
 	if (callback = TokenToObject(*aParam[specified_hwnd ? 2 : 1]))
 		func = dynamic_cast<Func *>(callback);
 	else
-		callback = func = g_script.FindFunc(TokenToString(*aParam[specified_hwnd ? 2 : 1]));
+		callback = func = g_script->FindFunc(TokenToString(*aParam[specified_hwnd ? 2 : 1]));
 	// Notes about func validation: ByRef and optional parameters are allowed for flexibility.
 	// For example, a function may be called directly by the script to set static vars which
 	// are used when a message arrives.  Raising an error might help catch bugs, but only in
@@ -17173,14 +17208,14 @@ BIF_DECL(BIF_OnMessage)
 		_f_throw(specified_hwnd ? ERR_PARAM3_INVALID : ERR_PARAM2_INVALID);
 
 	// Check if this message already exists in the array:
-	MsgMonitorStruct *pmonitor = g_MsgMonitor.Find(specified_msg, specified_hwnd, callback);
+	MsgMonitorStruct *pmonitor = g_MsgMonitor->Find(specified_msg, specified_hwnd, callback);
 	bool item_already_exists = (pmonitor != NULL);
 	if (!item_already_exists)
 	{
 		if (mode_is_delete) // Delete a non-existent item.
 			_f_return_retval; // Yield the default return value set earlier (an empty string).
 		// From this point on, it is certain that an item will be added to the array.
-		if (!(pmonitor = g_MsgMonitor.Add(specified_msg, specified_hwnd, callback, call_it_last)))
+		if (!(pmonitor = g_MsgMonitor->Add(specified_msg, specified_hwnd, callback, call_it_last)))
 			_f_throw(ERR_OUTOFMEM);
 	}
 
@@ -17200,7 +17235,7 @@ BIF_DECL(BIF_OnMessage)
 			// The main disadvantage to deleting message filters from the array is that the deletion might
 			// occur while the monitor is currently running, which requires more complex handling within
 			// MsgMonitor() (see its comments for details).
-			g_MsgMonitor.Remove(pmonitor);
+			g_MsgMonitor->Remove(pmonitor);
 			_f_return_retval;
 		}
 		if (aParamCount < (specified_hwnd ? 3 : 2)) // Single-parameter mode: Report existing item's function name.
@@ -17279,7 +17314,7 @@ MsgMonitorStruct *MsgMonitorList::Add(UINT aMsg, HWND aHwnd, IObject *aCallback,
 	return new_mon;
 }
 
-#ifdef _USRDLL
+//#ifdef _USRDLL
 void MsgMonitorList::RemoveAll()
 {
 	for (int i = 0; i <= mCount; ++i)
@@ -17309,7 +17344,7 @@ void MsgMonitorList::RemoveAll()
 	mMonitor = NULL;
 }
 
-#endif // _USRDLL
+//#endif // _USRDLL
 
 void MsgMonitorList::Remove(MsgMonitorStruct *aMonitor)
 {
@@ -17338,7 +17373,7 @@ BIF_DECL(BIF_OnExitOrClipboard)
 {
 	bool is_onexit = _f_callee_id == FID_OnExit;
 	_f_set_retval_p(_T("")); // In all cases there is no return value.
-	MsgMonitorList &handlers = is_onexit ? g_script.mOnExit : g_script.mOnClipboardChange;
+	MsgMonitorList &handlers = is_onexit ? g_script->mOnExit : g_script->mOnClipboardChange;
 
 	IObject *callback;
 	if (callback = TokenToFunc(*aParam[0]))
@@ -17369,7 +17404,7 @@ BIF_DECL(BIF_OnExitOrClipboard)
 			// Do this before adding the handler so that it won't be called as a result of the
 			// SetClipboardViewer() call on Windows XP.  This won't cause existing handlers to
 			// be called because in that case the clipboard listener is already enabled.
-			g_script.EnableClipboardListener(true);
+			g_script->EnableClipboardListener(true);
 		}
 		if (!handlers.Add(0, 0, callback, mode == 1))
 			_f_throw(ERR_OUTOFMEM);
@@ -17384,7 +17419,7 @@ BIF_DECL(BIF_OnExitOrClipboard)
 	// In case the above enabled the clipboard listener but failed to add the handler,
 	// do this even if mode != 0:
 	if (!is_onexit && !handlers.Count())
-		g_script.EnableClipboardListener(false);
+		g_script->EnableClipboardListener(false);
 }
 
 
@@ -17483,7 +17518,7 @@ UINT_PTR CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address) // Used
 			// this whole situation is very rare, and the documentation advises against doing it.
 		}
 		//else the current thread wasn't paused, which is usually the case.
-		// TRAY ICON: g_script.UpdateTrayIcon() is not called because it's already in the right state
+		// TRAY ICON: g_script->UpdateTrayIcon() is not called because it's already in the right state
 		// except when pause_after_execute==true, in which case it seems best not to change the icon
 		// because it's likely to hurt any callback that's performance-sensitive.
 	}
@@ -17531,7 +17566,7 @@ UINT_PTR CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address) // Used
 		}
 	}
 
-	g_script.mLastPeekTime = GetTickCount(); // Somewhat debatable, but might help minimize interruptions when the callback is called via message (e.g. subclassing a control; overriding a WindowProc).
+	g_script->mLastPeekTime = GetTickCount(); // Somewhat debatable, but might help minimize interruptions when the callback is called via message (e.g. subclassing a control; overriding a WindowProc).
 
 	FuncResult result_token;
 	++func.mInstances;
@@ -17551,7 +17586,7 @@ UINT_PTR CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address) // Used
 	else
 	{
 		g->EventInfo = EventInfo_saved;
-		if (g == g_array && !g_script.mAutoExecSectionIsRunning)
+		if (g == g_array && !g_script->mAutoExecSectionIsRunning)
 			// If the function just called used thread #0 and the AutoExec section isn't running, that means
 			// the AutoExec section definitely didn't launch or control the callback (even if it is running,
 			// it's not 100% certain it launched the callback). This can happen when a fast-mode callback has
@@ -17691,14 +17726,14 @@ BIF_DECL(BIF_MenuGet)
 {
 	if (_f_callee_id == FID_MenuGetHandle)
 	{
-		UserMenu *menu = g_script.FindMenu(ParamIndexToString(0, aResultToken.buf));
+		UserMenu *menu = g_script->FindMenu(ParamIndexToString(0, aResultToken.buf));
 		if (menu && !menu->mMenu)
 			menu->Create(); // On failure (rare), we just return 0.
 		_f_return_i(menu ? (__int64)(UINT_PTR)menu->mMenu : 0);
 	}
 	else // MenuGetName
 	{
-		UserMenu *menu = g_script.FindMenu((HMENU)ParamIndexToInt64(0));
+		UserMenu *menu = g_script->FindMenu((HMENU)ParamIndexToInt64(0));
 		_f_return(menu ? menu->mName : _T(""));
 	}
 }
@@ -19275,7 +19310,7 @@ BIF_DECL(BIF_Exception)
 
 	if (ParamIndexIsOmitted(1)) // "What"
 	{
-		line = g_script.mCurrLine;
+		line = g_script->mCurrLine;
 		// Using the current function seems preferable even if g->CurrentLabel is a sub
 		// within the function, since the sub is internal (local) to the function.
 		if (g->CurrentFunc)
@@ -19309,7 +19344,7 @@ BIF_DECL(BIF_Exception)
 #endif
 		if (!what)
 		{
-			line = g_script.mCurrLine;
+			line = g_script->mCurrLine;
 			what = ParamIndexToString(1, what_buf);
 		}
 	}
@@ -19619,7 +19654,7 @@ Func *TokenToFunc(ExprTokenType &aToken)
 		// emulating a function.  The check works because TokenToString() returns ""
 		// when aToken is an object (or a pure number, since no buffer was passed).
 		if (*func_name)
-			func = g_script.FindFunc(func_name);
+			func = g_script->FindFunc(func_name);
 	}
 	return func;
 }
@@ -19729,11 +19764,11 @@ bool ScriptGetKeyState(vk_type aVK, KeyStateTypes aKeyStateType)
 		//{
 		//	DWORD fore_thread = GetWindowThreadProcessId(GetForegroundWindow(), NULL);
 		//	bool is_attached_my_to_fore = false;
-		//	if (fore_thread && fore_thread != g_MainThreadID)
-		//		is_attached_my_to_fore = AttachThreadInput(g_MainThreadID, fore_thread, TRUE) != 0;
+		//	if (fore_thread && fore_thread != g_ThreadID)
+		//		is_attached_my_to_fore = AttachThreadInput(g_ThreadID, fore_thread, TRUE) != 0;
 		//	output_var->Assign(IsKeyToggledOn(aVK) ? "D" : "U");
 		//	if (is_attached_my_to_fore)
-		//		AttachThreadInput(g_MainThreadID, fore_thread, FALSE);
+		//		AttachThreadInput(g_ThreadID, fore_thread, FALSE);
 		//	return OK;
 		//}
 		//else

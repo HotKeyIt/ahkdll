@@ -20,7 +20,7 @@ GNU General Public License for more details.
 #include "application.h" // for MsgSleep()
 #include "window.h" // For MsgBox() & SetForegroundLockTimeout()
 #include "TextIO.h"
-
+#include "SimpleHeap.h"
 #include "windows.h"  // N11
 #include "exports.h"  // N11
 #include <process.h>  // N11
@@ -74,7 +74,13 @@ switch(fwdReason)
 		InitializeCriticalSection(&g_CriticalHeapBlocks); // used to block memory freeing in case of timeout in ahkTerminate so no corruption happens when both threads try to free Heap.
 		InitializeCriticalSection(&g_CriticalRegExCache); // v1.0.45.04: Must be done early so that it's unconditional, so that DeleteCriticalSection() in the script destructor can also be unconditional (deleting when never initialized can crash, at least on Win 9x).
 		InitializeCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
-
+#ifndef MINIDLL
+		HDC hdc = GetDC(NULL);
+		g_ScreenDPI = GetDeviceCaps(hdc, LOGPIXELSX);
+		ReleaseDC(NULL, hdc);
+		g_HistoryTickPrev = GetTickCount();
+#endif
+		g_TimeLastInputPhysical = GetTickCount();
 		//ahkdll(_T(""),_T(""));
 #ifdef AUTODLL
 	ahkdll("autoload.ahk", "");	  // used for remoteinjection of dll 
@@ -94,7 +100,6 @@ switch(fwdReason)
 			 if ( lpExitCode == 259 )
 				CloseHandle(g_hThread);
 		 }
-		 g_script.~Script();
 		 if (scriptstring)
 			 free(scriptstring);
 		 if (Line::sMaxSourceFiles)
@@ -107,20 +112,20 @@ switch(fwdReason)
 		 {
 			 free(g_input.match);
 		 }
-		 if (g_script.mTrayMenu)
-			 g_script.ScriptDeleteMenu(g_script.mTrayMenu);
 		 free(g_KeyHistory);
 #endif
 		 if (g_hWinAPI)
 		 {
 			 free(g_hWinAPI);
-			 free(g_hWinAPIlowercase);
+			 if (g_hWinAPIlowercase)
+				free(g_hWinAPIlowercase);
 		 }
 		 for(int i = 0;i < FUNC_LIB_COUNT;i++)
 		 {
 			 if (sLib[i].path)
 				 free(sLib[i].path);
 		 }
+		 free(g_array);
 		 DeleteCriticalSection(&g_CriticalHeapBlocks); // g_CriticalHeapBlocks is used in simpleheap for thread-safety.
 		 DeleteCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
 		 DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
@@ -148,20 +153,14 @@ LPWSTR *ahkdll_argv;
 int ahkdll_i;
 int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdLine, int nCmdShow)
 {
-#ifndef MINIDLL
-	// Lastly (after the above have been initialized), anything that can fail:
-	if ( !g_script.mTrayMenu && !(g_script.mTrayMenu = g_script.AddMenu(_T("Tray")))   ) // realistically never happens
-	{
-		g_script.ScriptError(_T("No tray mem"));
-		g_script.ExitApp(EXIT_CRITICAL);
-	}
-	else
-		g_script.mTrayMenu->mIncludeStandardItems = true;
-#endif
+	OleInitialize(NULL);
 	// Init any globals not in "struct g" that need it:
 	g_MainThreadID = GetCurrentThreadId();
-
-
+	g_script = new Script();
+	g_clip = new Clipboard();
+	g_MsgMonitor = new MsgMonitorList();
+	g_MetaObject = new MetaObject();
+	g_SimpleHeap = new SimpleHeap();
 #ifdef _DEBUG
 	g_hResource = FindResource(g_hInstance, _T("AHK"), MAKEINTRESOURCE(RT_RCDATA));
 #else
@@ -173,7 +172,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	// Unlike the below, the above must not be Malloc'd because the contents can later change to something
 	// as large as MAX_PATH by means of the SetWorkingDir command.
 
-	g_WorkingDirOrig = SimpleHeap::Malloc(g_WorkingDir); // Needed by the Reload command.
+	g_WorkingDirOrig = g_SimpleHeap->Malloc(g_WorkingDir); // Needed by the Reload command.
 
 	// Set defaults, to be overridden by command line args we receive:
 	ahkdll_restart_mode = false;
@@ -217,7 +216,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 #endif
 			//if (switch_processing_is_complete) // All args are now considered to be input parameters for the script.
 			//{
-			//	if (   !(var = g_script.FindOrAddVar(var_name, _stprintf(var_name, _T("%d"), script_param_num)))   )
+			//	if (   !(var = g_script->FindOrAddVar(var_name, _stprintf(var_name, _T("%d"), script_param_num)))   )
 			//		return CRITICAL_ERROR;  // Realistically should never happen.
 			//	var->Assign(param);
 			//	++script_param_num;
@@ -231,7 +230,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 			else if (!_tcsicmp(ahkdll_param, _T("/F")) || !_tcsicmp(ahkdll_param, _T("/force")))
 				g_ForceLaunch = true;
 			else if (!_tcsicmp(ahkdll_param, _T("/ErrorStdOut")))
-				g_script.mErrorStdOut = true;
+				g_script->mErrorStdOut = true;
 			else if (!_tcsicmp(ahkdll_param, _T("/iLib"))) // v1.0.47: Build an include-file so that ahk2exe can include library functions called by the script.
 			{
 				++ahkdll_i; // Consume the next parameter too, because it's associated with this one.
@@ -241,8 +240,8 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 					return CRITICAL_ERROR;
 				}
 				// For performance and simplicity, open/create the file unconditionally and keep it open until exit.
-				g_script.mIncludeLibraryFunctionsThenExit = new TextFile;
-				if (!g_script.mIncludeLibraryFunctionsThenExit->Open(ahkdll_argv[ahkdll_i], TextStream::WRITE | TextStream::EOL_CRLF | TextStream::BOM_UTF8, CP_UTF8)) // Can't open the temp file.
+				g_script->mIncludeLibraryFunctionsThenExit = new TextFile;
+				if (!g_script->mIncludeLibraryFunctionsThenExit->Open(ahkdll_argv[ahkdll_i], TextStream::WRITE | TextStream::EOL_CRLF | TextStream::BOM_UTF8, CP_UTF8)) // Can't open the temp file.
 				{
 					g_Reloading = false;
 					return CRITICAL_ERROR;
@@ -292,7 +291,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 			}
 		}
 
-	if (Var *var = g_script.FindOrAddVar(_T("A_Args"), 6, VAR_DECLARE_SUPER_GLOBAL))
+	if (Var *var = g_script->FindOrAddVar(_T("A_Args"), 6, VAR_DECLARE_SUPER_GLOBAL))
 	{
 		// Store the remaining args in an array and assign it to "A_Args".
 		// If there are no args, assign an empty array so that A_Args[1]
@@ -315,7 +314,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	global_init(*g);  // Set defaults prior to the below, since below might override them for AutoIt2 scripts.
 
 	// Set up the basics of the script:
-	if (g_script.Init(*g, ahkdll_script_filespec, ahkdll_restart_mode,hInstance,g_hResource ? 0 : (bool)nameHinstanceP.istext) != OK)  // Set up the basics of the script, using the above.
+	if (g_script->Init(*g, ahkdll_script_filespec, ahkdll_restart_mode,hInstance,g_hResource ? 0 : (bool)nameHinstanceP.istext) != OK)  // Set up the basics of the script, using the above.
 	{
 		g_Reloading = false;
 		return CRITICAL_ERROR;
@@ -325,7 +324,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	CopyMemory(&g_default, g, sizeof(global_struct));
 
 	// Use FindOrAdd vs Add for maintainability, although it shouldn't already exist:
-	if (   !(g_ErrorLevel = g_script.FindOrAddVar(_T("ErrorLevel")))   )
+	if (   !(g_ErrorLevel = g_script->FindOrAddVar(_T("ErrorLevel")))   )
 	{
 		g_Reloading = false;
 		return CRITICAL_ERROR; // Error.  Above already displayed it for us.
@@ -334,7 +333,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	g_ErrorLevel->Assign(ERRORLEVEL_NONE);
 
 	//if (nameHinstanceP.istext)
-	//	GetCurrentDirectory(MAX_PATH, g_script.mFileDir);
+	//	GetCurrentDirectory(MAX_PATH, g_script->mFileDir);
 	// Could use CreateMutex() but that seems pointless because we have to discover the
 	// hWnd of the existing process so that we can close or restart it, so we would have
 	// to do this check anyway, which serves both purposes.  Alt method is this:
@@ -346,15 +345,15 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	//if (!g_ForceLaunch && !restart_mode && GetLastError() == ERROR_ALREADY_EXISTS)
 
 #ifdef AUTOHOTKEYSC
-	LineNumberType load_result = g_script.LoadFromFile();
+	LineNumberType load_result = g_script->LoadFromFile();
 #else //HotKeyIt changed to load from Text in dll as well when file does not exist
-	LineNumberType load_result = (g_hResource || !nameHinstanceP.istext) ? g_script.LoadFromFile() : g_script.LoadFromText(ahkdll_script_filespec);
+	LineNumberType load_result = (g_hResource || !nameHinstanceP.istext) ? g_script->LoadFromFile() : g_script->LoadFromText(ahkdll_script_filespec);
 #endif
 	if (load_result == LOADING_FAILED) // Error during load (was already displayed by the function call).
 	{
 		g_Reloading = false;
-		if (g_script.mIncludeLibraryFunctionsThenExit)
-			g_script.mIncludeLibraryFunctionsThenExit->Close(); // Flush its buffer to disk.
+		if (g_script->mIncludeLibraryFunctionsThenExit)
+			g_script->mIncludeLibraryFunctionsThenExit->Close(); // Flush its buffer to disk.
 		return CRITICAL_ERROR;  // Should return this value because PostQuitMessage() also uses it.
 	}
 	if (!load_result) // LoadFromFile() relies upon us to do this check.  No lines were loaded, so we're done.
@@ -365,7 +364,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 
 	// Create all our windows and the tray icon.  This is done after all other chances
 	// to return early due to an error have passed, above.
-	if (g_script.CreateWindows() != OK)
+	if (g_script->CreateWindows() != OK)
 	{
 		g_Reloading = false;
 		return CRITICAL_ERROR;
@@ -434,15 +433,15 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	//if (Hotkey::sHotkeyCount > 0 || Hotstring::sHotstringCount > 0)
 	//	AddRemoveHooks(3);
 #endif
-	g_script.mIsReadyToExecute = true; // This is done only after the above to support error reporting in Hotkey.cpp.
+	g_script->mIsReadyToExecute = true; // This is done only after the above to support error reporting in Hotkey.cpp.
 	Sleep(20);
 	g_Reloading = false;
 	//free(nameHinstanceP.name);
 
-	Var *clipboard_var = g_script.FindOrAddVar(_T("Clipboard")); // Add it if it doesn't exist, in case the script accesses "Clipboard" via a dynamic variable.
+	Var *clipboard_var = g_script->FindOrAddVar(_T("Clipboard")); // Add it if it doesn't exist, in case the script accesses "Clipboard" via a dynamic variable.
 	
 	// Run the auto-execute part at the top of the script (this call might never return):
-	if (!g_script.AutoExecSection()) // Can't run script at all. Due to rarity, just abort.
+	if (!g_script->AutoExecSection()) // Can't run script at all. Due to rarity, just abort.
 		return CRITICAL_ERROR;
 	// REMEMBER: The call above will never return if one of the following happens:
 	// 1) The AutoExec section never finishes (e.g. infinite loop).
@@ -465,16 +464,20 @@ EXPORT int ahkTerminate(int timeout = 0)
 	GetExitCodeThread(g_hThread,(LPDWORD)&lpExitCode);
 	DWORD tickstart = GetTickCount();
 	DWORD timetowait = timeout < 0 ? timeout * -1 : timeout;
-	for (; g_hThread && g_script.mIsReadyToExecute && (lpExitCode == 0 || lpExitCode == 259) && (timeout == 0 || timetowait > (GetTickCount()-tickstart));)
+	SendMessageTimeout(g_hWnd, AHK_EXIT_BY_SINGLEINSTANCE, OK, 0,timeout < 0 ? SMTO_NORMAL : SMTO_NOTIMEOUTIFNOTHUNG,SLEEP_INTERVAL * 3,0);
+	for (; g_hThread && g_script && g_script->mIsReadyToExecute && (lpExitCode == 0 || lpExitCode == 259) && (timeout == 0 || timetowait > (GetTickCount()-tickstart));)
 	{
-		SendMessageTimeout(g_hWnd, AHK_EXIT_BY_SINGLEINSTANCE, OK, 0,timeout < 0 ? SMTO_NORMAL : SMTO_NOTIMEOUTIFNOTHUNG,SLEEP_INTERVAL * 3,0);
 		Sleep(100); // give it a bit time to exit thread
 	}
-	if (g_script.mIsReadyToExecute || g_hThread)
+	if ((g_script && g_script->mIsReadyToExecute) || g_hThread)
 	{
-		g_script.~Script();
-		TerminateThread(g_hThread, (DWORD)EARLY_EXIT);
+		SuspendThread(g_hThread);
+		delete g_clip;
+		g_clip = NULL;
+		//delete g_script; // disabled as it migth cause a crash
+		g_script = NULL;
 		CloseHandle(g_hThread);
+		TerminateThread(g_hThread, (DWORD)EARLY_EXIT);
 		g_hThread = NULL;
 	}
 	g_AllowInterruption = TRUE;
@@ -484,9 +487,11 @@ EXPORT int ahkTerminate(int timeout = 0)
 // Naveen: v1. runscript() - runs the script in a separate thread compared to host application.
 unsigned __stdcall runScript( void* pArguments )
 {
-	OleInitialize(NULL);
 	int result = OldWinMain(nameHinstanceP.hInstanceP, 0, nameHinstanceP.name, 0);
-	g_script.~Script();
+	delete g_script;
+	g_script = NULL;
+	delete g_clip;
+	g_clip = NULL;
 	g_hThread = NULL;
 	_endthreadex( result );  
     return 0;
@@ -496,12 +501,12 @@ unsigned __stdcall runScript( void* pArguments )
 void WaitIsReadyToExecute()
 {
 	 int lpExitCode = 0;
-	 while (g_hThread && !g_script.mIsReadyToExecute && (lpExitCode == 0 || lpExitCode == 259))
+	 while (!g_script || (g_hThread && !g_script->mIsReadyToExecute && (lpExitCode == 0 || lpExitCode == 259)))
 	 {
 		Sleep(10);
 		GetExitCodeThread(g_hThread,(LPDWORD)&lpExitCode);
 	 }
-	 if (g_hThread && !g_script.mIsReadyToExecute)
+	 if (g_hThread && (!g_script || !g_script->mIsReadyToExecute))
 	 {
 		CloseHandle(g_hThread);
 		g_hThread = NULL;
@@ -517,9 +522,9 @@ unsigned runThread()
 		Sleep(50); // make sure script is not in starting state
 		int lpExitCode = 0;
 		GetExitCodeThread(g_hThread,(LPDWORD)&lpExitCode);
-		if ((lpExitCode == 0 || lpExitCode == 259) && g_script.mIsReadyToExecute)
+		if ((lpExitCode == 0 || lpExitCode == 259) && (g_script && g_script->mIsReadyToExecute))
 			Sleep(50); // make sure the script is not about to be terminated, because this might lead to problems
-		if (g_hThread && g_script.mIsReadyToExecute)
+		if (g_hThread && (g_script && g_script->mIsReadyToExecute))
  			ahkTerminate(0);
 	}
 	g_hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, NULL, 0, 0 );
@@ -559,19 +564,22 @@ EXPORT UINT_PTR ahktextdll(LPTSTR fileName, LPTSTR argv)
 
 void reloadDll()
 {
-	g_script.~Script();
-	HANDLE oldThread = g_hThread;
+	delete g_script;
+	g_script = NULL;
+	delete g_clip;
+	g_clip = NULL;
 	g_hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, 0 );
 	g_AllowInterruption = TRUE;
-	CloseHandle(oldThread);
 	_endthreadex( (DWORD)EARLY_RETURN );
 }
 
 ResultType terminateDll(int aExitCode)
 {
-	g_script.~Script();
+	delete g_script;
+	g_script = NULL;
+	delete g_clip;
+	g_clip = NULL;
 	g_AllowInterruption = TRUE;
-	CloseHandle(g_hThread);
 	g_hThread = NULL;
 	_endthreadex( (DWORD)aExitCode );
 	return (ResultType)aExitCode;
@@ -582,11 +590,6 @@ EXPORT int ahkReload(int timeout = 0)
 	ahkTerminate(timeout);
 	g_hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, &nameHinstanceP, 0, 0 );
 	return 0;
-}
-
-EXPORT int ahkReady() // HotKeyIt check if dll is ready to execute
-{
-	return g_script.mIsReadyToExecute || g_Reloading || g_Loading;
 }
 
 #ifndef MINIDLL
@@ -775,7 +778,7 @@ HRESULT __stdcall CoCOMServer::ahkgetvar(/*in*/VARIANT name,/*[in,optional]*/ VA
 	Var *var;
 	ExprTokenType aToken ;
 	
-	var = g_script.FindVar(name.vt == VT_BSTR ? OLE2T(name.bstrVal) : Variant2T(name,buf)) ;
+	var = g_script->FindVar(name.vt == VT_BSTR ? OLE2T(name.bstrVal) : Variant2T(name,buf)) ;
 	var->ToToken(aToken) ;
     VariantInit(result);
    // CComVariant b ;
@@ -795,7 +798,7 @@ HRESULT __stdcall CoCOMServer::ahkassign(/*in*/VARIANT name, /*in*/VARIANT value
       return ERROR_INVALID_PARAMETER;
    TCHAR namebuf[MAX_INTEGER_SIZE];
    Var *var;
-   if (   !(var = g_script.FindOrAddVar(name.vt == VT_BSTR ? OLE2T(name.bstrVal) : Variant2T(name,namebuf)))   )
+   if (   !(var = g_script->FindOrAddVar(name.vt == VT_BSTR ? OLE2T(name.bstrVal) : Variant2T(name,namebuf)))   )
       return ERROR_INVALID_PARAMETER;  // Realistically should never happen.
    AssignVariant(*var, value, false);
 	return S_OK;

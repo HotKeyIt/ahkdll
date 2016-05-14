@@ -21,9 +21,9 @@ GNU General Public License for more details.
 #include "application.h" // for DoWinDelay's MsgSleep()
 
 // Define static members data:
-WinGroup *WinGroup::sGroupLastUsed = NULL;
-HWND *WinGroup::sAlreadyVisited = NULL;
-int WinGroup::sAlreadyVisitedCount = 0;
+_thread_local WinGroup *WinGroup::sGroupLastUsed = NULL;
+_thread_local HWND *WinGroup::sAlreadyVisited = NULL;
+_thread_local int WinGroup::sAlreadyVisitedCount = 0;
 
 
 ResultType WinGroup::AddWindow(LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LPTSTR aExcludeText)
@@ -53,20 +53,20 @@ ResultType WinGroup::AddWindow(LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle
 				&& !_tcscmp(win->mExcludeTitle, aExcludeTitle) && !_tcscmp(win->mExcludeText, aExcludeText))
 				return OK;
 
-	// SimpleHeap::Malloc() will set these new vars to the constant empty string if their
+	// g_SimpleHeap->Malloc() will set these new vars to the constant empty string if their
 	// corresponding params are blank:
 	LPTSTR new_title, new_text, new_exclude_title, new_exclude_text;
-	if (!(new_title = SimpleHeap::Malloc(aTitle))) return FAIL; // It already displayed the error for us.
-	if (!(new_text = SimpleHeap::Malloc(aText)))return FAIL;
-	if (!(new_exclude_title = SimpleHeap::Malloc(aExcludeTitle))) return FAIL;
-	if (!(new_exclude_text = SimpleHeap::Malloc(aExcludeText)))   return FAIL;
+	if (!(new_title = g_SimpleHeap->Malloc(aTitle))) return FAIL; // It already displayed the error for us.
+	if (!(new_text = g_SimpleHeap->Malloc(aText)))return FAIL;
+	if (!(new_exclude_title = g_SimpleHeap->Malloc(aExcludeTitle))) return FAIL;
+	if (!(new_exclude_text = g_SimpleHeap->Malloc(aExcludeText)))   return FAIL;
 
 	// The precise method by which the follows steps are done should be thread-safe even if
 	// some other thread calls IsMember() in the middle of the operation.  But any changes
 	// must be carefully reviewed:
 	WindowSpec *the_new_win = new WindowSpec(new_title, new_text, new_exclude_title, new_exclude_text);
 	if (the_new_win == NULL)
-		return g_script.ScriptError(ERR_OUTOFMEM);
+		return g_script->ScriptError(ERR_OUTOFMEM);
 	if (mFirstWindow == NULL)
 		mFirstWindow = the_new_win;
 	else
@@ -360,7 +360,7 @@ inline ResultType WinGroup::Update(bool aIsModeActivate)
 		// Getting it from SimpleHeap reduces overhead for the avg. case (i.e. the first
 		// block of SimpleHeap is usually never fully used, and this array won't even
 		// be allocated for short scripts that don't even using window groups.
-		if (   !(sAlreadyVisited = (HWND *)SimpleHeap::Malloc(MAX_ALREADY_VISITED * sizeof(HWND)))   )
+		if (   !(sAlreadyVisited = (HWND *)g_SimpleHeap->Malloc(MAX_ALREADY_VISITED * sizeof(HWND)))   )
 			return FAIL;  // It already displayed the error for us.
 	return OK;
 }

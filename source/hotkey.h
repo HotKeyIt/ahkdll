@@ -19,7 +19,7 @@ GNU General Public License for more details.
 
 #include "keyboard_mouse.h"
 #include "script.h"  // For which label (and in turn which line) in the script to jump to.
-EXTERN_SCRIPT;  // For g_script.
+EXTERN_SCRIPT;  // For g_script->
 
 // Due to control/alt/shift modifiers, quite a lot of hotkey combinations are possible, so support any
 // conceivable use.  Note: Increasing this value will increase the memory required (i.e. any arrays
@@ -132,10 +132,10 @@ private:
 	ResultType Register();
 	ResultType Unregister();
 
-	void *operator new(size_t aBytes) {return SimpleHeap::Malloc(aBytes);}
-	void *operator new[](size_t aBytes) {return SimpleHeap::Malloc(aBytes);}
-	void operator delete(void *aPtr) {SimpleHeap::Delete(aPtr);}  // Deletes aPtr if it was the most recently allocated.
-	void operator delete[](void *aPtr) {SimpleHeap::Delete(aPtr);}
+	void *operator new(size_t aBytes){ return malloc(aBytes); }
+	void *operator new[](size_t aBytes) {return malloc(aBytes); }
+	void operator delete(void *aPtr) { free(aPtr); }  // Deletes aPtr if it was the most recently allocated.
+	void operator delete[](void *aPtr) { free(aPtr); }
 
 	// For now, constructor & destructor are private so that only static methods can create new
 	// objects.  This allow proper tracking of which OS hotkey IDs have been used.
@@ -144,6 +144,7 @@ private:
 
 public:
 	static Hotkey *shk[MAX_HOTKEYS];
+	DWORD mThreadID;
 	HotkeyIDType mID;  // Must be unique for each hotkey of a given thread.
 	HookActionType mHookAction;
 
@@ -332,6 +333,7 @@ public:
 	static HotstringIDType sHotstringCountMax;
 	static bool mAtLeastOneEnabled; // v1.0.44.08: For performance, such as avoiding calling ToAsciiEx() in the hook.
 
+	DWORD mThreadID;
 	Label *mJumpToLabel;
 	LPTSTR mString, mReplacement;
 	HotkeyCriterion *mHotCriterion;
@@ -360,10 +362,10 @@ public:
 	Hotstring(Label *aJumpToLabel, LPTSTR aOptions, LPTSTR aHotstring, LPTSTR aReplacement, bool aHasContinuationSection);
 	~Hotstring() {}  // Note that mReplacement is sometimes malloc'd, sometimes from SimpleHeap, and sometimes the empty string.
 
-	void *operator new(size_t aBytes) {return SimpleHeap::Malloc(aBytes);}
-	void *operator new[](size_t aBytes) {return SimpleHeap::Malloc(aBytes);}
-	void operator delete(void *aPtr) {SimpleHeap::Delete(aPtr);}  // Deletes aPtr if it was the most recently allocated.
-	void operator delete[](void *aPtr) {SimpleHeap::Delete(aPtr);}
+	void *operator new(size_t aBytes){ return malloc(aBytes); }
+	void *operator new[](size_t aBytes) {return malloc(aBytes); }
+	void operator delete(void *aPtr) { free(aPtr); }  // Deletes aPtr if it was the most recently allocated.
+	void operator delete[](void *aPtr) { free(aPtr); }
 };
 
 

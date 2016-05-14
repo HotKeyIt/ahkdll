@@ -959,7 +959,7 @@ void ComError(HRESULT hr, ResultToken &aResultToken, LPTSTR name, EXCEPINFO* pei
 			error_text = buf;
 		}
 
-		if (g_script.mCurrLine->LineError(error_text, EARLY_EXIT, name) == FAIL)
+		if (g_script->mCurrLine->LineError(error_text, EARLY_EXIT, name) == FAIL)
 			aResultToken.SetExitResult(FAIL); // An exception was thrown.
 	}
 
@@ -1039,7 +1039,7 @@ STDMETHODIMP ComEvent::Invoke(DISPID dispIdMember, REFIID riid, LCID lcid, WORD 
 		TCHAR funcName[256];
 		sntprintf(funcName, _countof(funcName), _T("%s%ws"), mPrefix, memberName);
 		// Find the script function:
-		func = g_script.FindFunc(funcName);
+		func = g_script->FindFunc(funcName);
 		dispid = DISPID_VALUE;
 		hr = func ? S_OK : DISP_E_MEMBERNOTFOUND;
 	}
@@ -1208,7 +1208,7 @@ ResultType STDMETHODCALLTYPE ComObject::Invoke(ResultToken &aResultToken, ExprTo
 			aParamCount = 0; // Skip parameter conversion and cleanup.
 	}
 	
-	static DISPID dispidParam = DISPID_PROPERTYPUT;
+	_thread_local static DISPID dispidParam = DISPID_PROPERTYPUT;
 	DISPPARAMS dispparams = {NULL, NULL, 0, 0};
 	VARIANTARG *rgvarg;
 	EXCEPINFO excepinfo = {0};
@@ -1443,7 +1443,7 @@ int ComArrayEnum::Next(Var *aOutput, Var *aOutputType)
 IObject *GuiType::ControlGetActiveX(HWND aWnd)
 {
 	typedef HRESULT (WINAPI *MyAtlAxGetControl)(HWND h, IUnknown **p);
-	static MyAtlAxGetControl fnAtlAxGetControl = NULL;
+	_thread_local static MyAtlAxGetControl fnAtlAxGetControl = NULL;
 	if (!fnAtlAxGetControl)
 		if (HMODULE hmodAtl = GetModuleHandle(_T("atl"))) // GuiType::AddControl should have already permanently loaded it.
 			fnAtlAxGetControl = (MyAtlAxGetControl)GetProcAddress(hmodAtl, "AtlAxGetControl");
@@ -1500,8 +1500,8 @@ STDMETHODIMP IObjectComCompatible::GetTypeInfo(UINT itinfo, LCID lcid, ITypeInfo
 	return E_NOTIMPL;
 }
 
-static Object *g_IdToName;
-static Object *g_NameToId;
+_thread_local static Object *g_IdToName;
+_thread_local static Object *g_NameToId;
 
 STDMETHODIMP IObjectComCompatible::GetIDsOfNames(REFIID riid, LPOLESTR *rgszNames, UINT cNames, LCID lcid, DISPID *rgDispId)
 {
@@ -1636,7 +1636,7 @@ STDMETHODIMP IObjectComCompatible::Invoke(DISPID dispIdMember, REFIID riid, LCID
 					if (obj->GetItem(token, _T("Line")))
 						pExcepInfo->dwHelpContext = (DWORD)TokenToInt64(token);
 				}
-				g_script.FreeExceptionToken(g->ThrownToken);
+				g_script->FreeExceptionToken(g->ThrownToken);
 			}
 			break;
 		case INVOKE_NOT_HANDLED:
@@ -1673,9 +1673,9 @@ void WriteComObjType(IDebugProperties *aDebugger, ComObject *aObject, LPCSTR aNa
 {
 	TCHAR buf[_f_retval_buf_size];
 	ResultToken resultToken;
-	static Func *ComObjType = NULL;
+	_thread_local static Func *ComObjType = NULL;
 	if (!ComObjType)
-		ComObjType = g_script.FindFunc(_T("ComObjType")); // FIXME: Probably better to split ComObjType and ComObjValue.
+		ComObjType = g_script->FindFunc(_T("ComObjType")); // FIXME: Probably better to split ComObjType and ComObjValue.
 	resultToken.func = ComObjType;
 	resultToken.symbol = SYM_INTEGER;
 	resultToken.marker_length = -1;

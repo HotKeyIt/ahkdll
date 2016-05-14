@@ -60,7 +60,7 @@ ResultType Script::PerformMenu(LPTSTR aMenu, LPTSTR aCommand, LPTSTR aParam3, LP
 		if (*aParam3)
 		{
 			if (!mTrayIconTip)
-				mTrayIconTip = (LPTSTR) SimpleHeap::Malloc(sizeof(mNIC.szTip)); // SimpleHeap improves avg. case mem load.
+				mTrayIconTip = (LPTSTR)g_SimpleHeap->Malloc(sizeof(mNIC.szTip)); // SimpleHeap improves avg. case mem load.
 			if (mTrayIconTip)
 				tcslcpy(mTrayIconTip, aParam3, _countof(mNIC.szTip));
 		}
@@ -167,7 +167,7 @@ ResultType Script::PerformMenu(LPTSTR aMenu, LPTSTR aCommand, LPTSTR aParam3, LP
 				// Allocate the full MAX_PATH in case the contents grow longer later.
 				// SimpleHeap improves avg. case mem load:
 				if (!mCustomIconFile)
-					mCustomIconFile = (LPTSTR) SimpleHeap::Malloc(MAX_PATH * sizeof(TCHAR));
+					mCustomIconFile = (LPTSTR)g_SimpleHeap->Malloc(MAX_PATH * sizeof(TCHAR));
 				if (mCustomIconFile)
 				{
 					// Get the full path in case it's a relative path.  This is documented and it's done in case
@@ -573,7 +573,7 @@ UINT Script::GetFreeMenuItemID()
 	// delete code, however, and it would reduce the overall maintainability.  So it definitely
 	// doesn't seem worth it, especially since Windows XP seems to have trouble even displaying
 	// menus larger than around 15000-25000 items.
-	static UINT sLastFreeID = ID_USER_FIRST - 1;
+	_thread_local static UINT sLastFreeID = ID_USER_FIRST - 1;
 	// Increment by one for each new search, both due to the above line and because the
 	// last-found free ID has a high likelihood of still being in use:
 	++sLastFreeID;
@@ -647,7 +647,7 @@ UserMenuItem *UserMenu::FindItem(LPTSTR aNameOrPos, UserMenuItem *&aPrevItem, bo
 	{\
 		if (mMenu)\
 		{\
-			if (this == g_script.mTrayMenu)\
+			if (this == g_script->mTrayMenu)\
 				SetMenuDefaultItem(mMenu, mIncludeStandardItems && g_AllowMainWindow ? ID_TRAY_OPEN : -1, FALSE);\
 			else\
 				SetMenuDefaultItem(mMenu, -1, FALSE);\
@@ -660,7 +660,7 @@ UserMenuItem *UserMenu::FindItem(LPTSTR aNameOrPos, UserMenuItem *&aPrevItem, bo
 	{\
 		if (mMenu)\
 		{\
-			if (this == g_script.mTrayMenu)\
+			if (this == g_script->mTrayMenu)\
 				SetMenuDefaultItem(mMenu, mIncludeStandardItems ? ID_TRAY_OPEN : -1, FALSE);\
 			else\
 				SetMenuDefaultItem(mMenu, -1, FALSE);\
@@ -789,8 +789,8 @@ ResultType UserMenu::DeleteItem(UserMenuItem *aMenuItem, UserMenuItem *aMenuItem
 	else // aMenuItem was the first one in the list.
 		mFirstMenuItem = aMenuItem->mNextMenuItem; // Can be NULL if the list will now be empty.
 	CHANGE_DEFAULT_IF_NEEDED  // Should do this before freeing aMenuItem's memory.
-	if (g_script.mThisMenuItem == aMenuItem)
-		g_script.mThisMenuItem = NULL;
+	if (g_script->mThisMenuItem == aMenuItem)
+		g_script->mThisMenuItem = NULL;
 	if (mMenu) // Delete the item from the menu.
 		RemoveMenu(mMenu, aMenuItem_ID, aMenuItem_MF_BY); // v1.0.48: Lexikos: DeleteMenu() destroys any sub-menu handle associated with the item, so use RemoveMenu. Otherwise the submenu handle stored somewhere else in memory would suddenly become invalid.
 	RemoveItemIcon(aMenuItem); // L17: Free icon or bitmap.
@@ -828,8 +828,8 @@ ResultType UserMenu::DeleteAllItems()
 	{
 		menu_item_to_delete = mi;
 		mi = mi->mNextMenuItem;
-		if (g_script.mThisMenuItem == menu_item_to_delete)
-			g_script.mThisMenuItem = NULL;
+		if (g_script->mThisMenuItem == menu_item_to_delete)
+			g_script->mThisMenuItem = NULL;
 		RemoveItemIcon(menu_item_to_delete); // L26: Free icon or bitmap!
 		if (menu_item_to_delete->mName != Var::sEmptyString)
 			delete menu_item_to_delete->mName; // Since it was separately allocated.
@@ -1143,7 +1143,7 @@ ResultType UserMenu::SetDefault(UserMenuItem *aMenuItem)
 		// Otherwise, a user-defined item that was previously the default is no longer the default.
 		// Provide a new default if this is the tray menu, the standard items are present, and a default
 		// action is called for:
-		if (this == g_script.mTrayMenu) // Necessary for proper operation of the self-contained version:
+		if (this == g_script->mTrayMenu) // Necessary for proper operation of the self-contained version:
 #ifdef AUTOHOTKEYSC
 			SetMenuDefaultItem(mMenu, g_AllowMainWindow && mIncludeStandardItems ? ID_TRAY_OPEN : -1, FALSE);
 #else
@@ -1305,7 +1305,7 @@ ResultType UserMenu::AppendStandardItems()
 	if (g_AllowMainWindow)
 	{
 		AppendMenu(mMenu, MF_STRING, ID_TRAY_OPEN, _T("&Open"));
-		if (this == g_script.mTrayMenu && !mDefault) // No user-defined default menu item, so use the standard one.
+		if (this == g_script->mTrayMenu && !mDefault) // No user-defined default menu item, so use the standard one.
 			SetMenuDefaultItem(mMenu, ID_TRAY_OPEN, FALSE); // Seems to have no function other than appearance.
 	}
 #else
@@ -1316,7 +1316,7 @@ ResultType UserMenu::AppendStandardItems()
 	AppendMenu(mMenu, MF_STRING, ID_TRAY_RELOADSCRIPT, _T("&Reload This Script"));
 	AppendMenu(mMenu, MF_STRING, ID_TRAY_EDITSCRIPT, _T("&Edit This Script"));
 	AppendMenu(mMenu, MF_SEPARATOR, 0, NULL);
-	if (this == g_script.mTrayMenu && !mDefault) // No user-defined default menu item, so use the standard one.
+	if (this == g_script->mTrayMenu && !mDefault) // No user-defined default menu item, so use the standard one.
 		SetMenuDefaultItem(mMenu, ID_TRAY_OPEN, FALSE); // Seems to have no function other than appearance.
 #endif
 	AppendMenu(mMenu, MF_STRING, ID_TRAY_SUSPEND, _T("&Suspend Hotkeys"));
@@ -1378,7 +1378,7 @@ ResultType UserMenu::Destroy()
 	// time we display it.  Another drawback to DeleteMenu() is that it would change the
 	// order of the menu items to something other than what the user originally specified
 	// unless InsertMenu() was woven in during the update:
-	for (UserMenu *m = g_script.mFirstMenu; m; m = m->mNextMenu)
+	for (UserMenu *m = g_script->mFirstMenu; m; m = m->mNextMenu)
 		if (m->mMenu)
 			for (mi = m->mFirstMenuItem; mi; mi = mi->mNextMenuItem)
 				if (mi->mSubmenu == this)
@@ -1428,7 +1428,7 @@ ResultType UserMenu::Display(bool aForceToForeground, int aX, int aY)
 	if (!mMenu) // i.e. because this is the first time the user has opened the menu.
 		if (!Create()) // no error msg since so rare
 			return FAIL;
-	if (this == g_script.mTrayMenu)
+	if (this == g_script->mTrayMenu)
 	{
 		// These are okay even if the menu items don't exist (perhaps because the user customized the menu):
 		CheckMenuItem(mMenu, ID_TRAY_SUSPEND, g_IsSuspended ? MF_CHECKED : MF_UNCHECKED);
@@ -1461,7 +1461,7 @@ ResultType UserMenu::Display(bool aForceToForeground, int aX, int aY)
 	// 2) It would probably have other side effects for other uses of popup menus.
 	HWND fore_win = GetForegroundWindow();
 	bool change_fore;
-	if (change_fore = (!fore_win || GetWindowThreadProcessId(fore_win, NULL) != g_MainThreadID))
+	if (change_fore = (!fore_win || GetWindowThreadProcessId(fore_win, NULL) != g_ThreadID))
 	{
 		// Always bring main window to foreground right before TrackPopupMenu(), even if window is hidden.
 		// UPDATE: This is a problem because SetForegroundWindowEx() will restore the window if it's hidden,
@@ -1514,7 +1514,7 @@ ResultType UserMenu::Display(bool aForceToForeground, int aX, int aY)
 	// MSDN recommends this to prevent menu from closing on 2nd click.  MSDN also says that it's only
 	// necessary to do this "for a notification icon". So to to avoid unnecessary launches of MsgSleep(),
 	// its done only for the tray menu in v1.0.35.12:
-	if (this == g_script.mTrayMenu)
+	if (this == g_script->mTrayMenu)
 		PostMessage(g_hWnd, WM_NULL, 0, 0);
 	else // Seems best to avoid the following for the tray menu since it doesn't seem work and might produce side-effects in some cases.
 	{
@@ -1540,7 +1540,7 @@ ResultType UserMenu::Display(bool aForceToForeground, int aX, int aY)
 	// Fix for v1.0.38.05: If the current thread is interruptible (which it should be since a menu was just
 	// displayed, which almost certainly timed out the default Thread Interrupt setting), the following
 	// MsgSleep() will launch the selected menu item's subroutine.  This fix is needed because of a change
-	// in v1.0.38.04, namely the line "g_script.mLastPeekTime = tick_now;" in IsCycleComplete().
+	// in v1.0.38.04, namely the line "g_script->mLastPeekTime = tick_now;" in IsCycleComplete().
 	// The root problem here is that it would not be intuitive to allow the command after
 	// "Menu, MyMenu, Show" should to run before the menu item's subroutine launches as a new thread.
 	// 
@@ -1613,7 +1613,7 @@ void UserMenu::UpdateAccelerators()
 	else
 	{
 		// This menu isn't a menu bar, but perhaps it is contained by one.
-		for (UserMenu *menu = g_script.mFirstMenu; menu; menu = menu->mNextMenu)
+		for (UserMenu *menu = g_script->mFirstMenu; menu; menu = menu->mNextMenu)
 			if (menu->mMenuType == MENU_TYPE_BAR && menu->ContainsMenu(this))
 			{
 				menu->UpdateAccelerators();
@@ -1734,9 +1734,9 @@ ResultType UserMenu::RemoveItemIcon(UserMenuItem *aMenuItem)
 
 BOOL UserMenu::OwnerMeasureItem(LPMEASUREITEMSTRUCT aParam)
 {
-	UserMenuItem *menu_item = g_script.FindMenuItemByID(aParam->itemID);
+	UserMenuItem *menu_item = g_script->FindMenuItemByID(aParam->itemID);
 	if (!menu_item) // L26: Check if the menu item is one with a submenu.
-		menu_item = g_script.FindMenuItemBySubmenu((HMENU)(UINT_PTR)aParam->itemID); // Extra cast avoids warning C4312.
+		menu_item = g_script->FindMenuItemBySubmenu((HMENU)(UINT_PTR)aParam->itemID); // Extra cast avoids warning C4312.
 
 	if (!menu_item || !menu_item->mIcon)
 		return FALSE;
@@ -1762,9 +1762,9 @@ BOOL UserMenu::OwnerMeasureItem(LPMEASUREITEMSTRUCT aParam)
 
 BOOL UserMenu::OwnerDrawItem(LPDRAWITEMSTRUCT aParam)
 {
-	UserMenuItem *menu_item = g_script.FindMenuItemByID(aParam->itemID);
+	UserMenuItem *menu_item = g_script->FindMenuItemByID(aParam->itemID);
 	if (!menu_item) // L26: Check if the menu item is one with a submenu.
-		menu_item = g_script.FindMenuItemBySubmenu((HMENU)(UINT_PTR)aParam->itemID); // Extra cast avoids warning C4312.
+		menu_item = g_script->FindMenuItemBySubmenu((HMENU)(UINT_PTR)aParam->itemID); // Extra cast avoids warning C4312.
 
 	if (!menu_item || !menu_item->mIcon)
 		return FALSE;

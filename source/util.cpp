@@ -265,7 +265,7 @@ __int64 YYYYMMDDSecondsUntil(LPTSTR aYYYYMMDDStart, LPTSTR aYYYYMMDDEnd, bool &a
 	{
 		if (!YYYYMMDDToFileTime(aYYYYMMDDStart, ftStart))
 		{
-			g_script.ScriptError(ERR_PARAM2_INVALID);
+			g_script->ScriptError(ERR_PARAM2_INVALID);
 			return 0;
 		}
 	}
@@ -278,7 +278,7 @@ __int64 YYYYMMDDSecondsUntil(LPTSTR aYYYYMMDDStart, LPTSTR aYYYYMMDDEnd, bool &a
 	{
 		if (!YYYYMMDDToFileTime(aYYYYMMDDEnd, ftEnd))
 		{
-			g_script.ScriptError(ERR_PARAM1_INVALID);
+			g_script->ScriptError(ERR_PARAM1_INVALID);
 			return 0;
 		}
 	}
@@ -2897,20 +2897,20 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 {
 	LPTSTR aFuncName = omit_leading_whitespace(parameter);
 	// backup current function
-	// Func currentfunc = **g_script.mFunc;
+	// Func currentfunc = **g_script->mFunc;
 	if (!(parameter = _tcschr(parameter, ',')) || !*parameter)
-		return g_script.ScriptError(ERR_PARAM2_REQUIRED, aBuf);
+		return g_script->ScriptError(ERR_PARAM2_REQUIRED, aBuf);
 	else
 		parameter++;
 	if (_tcschr(aFuncName, ','))
 		*(_tcschr(aFuncName, ',')) = '\0';
 	ltrim(parameter);
 	int insert_pos;
-	Func *found_func = g_script.FindFunc(aFuncName, _tcslen(aFuncName), &insert_pos);
+	Func *found_func = g_script->FindFunc(aFuncName, _tcslen(aFuncName), &insert_pos);
 	if (found_func)
-		return g_script.ScriptError(_T("Duplicate function definition."), aFuncName); // Seems more descriptive than "Function already defined."
+		return g_script->ScriptError(_T("Duplicate function definition."), aFuncName); // Seems more descriptive than "Function already defined."
 	else
-		if (!(found_func = g_script.AddFunc(aFuncName, _tcslen(aFuncName), false, insert_pos)))
+		if (!(found_func = g_script->AddFunc(aFuncName, _tcslen(aFuncName), false, insert_pos)))
 			return FAIL; // It already displayed the error.
 	void *function = NULL; // Will hold the address of the function to be called.
 
@@ -2958,7 +2958,7 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 	}
 	if (_tcschr(parameter, '%'))
 	{
-		return g_script.ScriptError(_T("Reference not allowed here, use & where possible. Only %A_AhkPath% %A_AhkDir% %A_DllPath% %A_DllDir% %A_ScriptDir% %A_AppData[Common]% can be used here."), parameter);
+		return g_script->ScriptError(_T("Reference not allowed here, use & where possible. Only %A_AhkPath% %A_AhkDir% %A_DllPath% %A_DllDir% %A_ScriptDir% %A_AppData[Common]% can be used here."), parameter);
 	}
 	// terminate dll\function name, find it and jump to next parameter
 	if (_tcschr(parameter, ','))
@@ -2975,10 +2975,10 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 			end = (int)(_tcschr(parameter, ':') - parameter);
 		else
 			end = (int)_tcslen(parameter);
-		if (!(function = (void*)SimpleHeap::Malloc(end / 2)))
-			return g_script.ScriptError(ERR_OUTOFMEM, parameter);
+		if (!(function = (void*)g_SimpleHeap->Malloc(end / 2)))
+			return g_script->ScriptError(ERR_OUTOFMEM, parameter);
 		if (!VirtualAlloc(function, end / 2, MEM_COMMIT, PAGE_EXECUTE_READWRITE))
-			return g_script.ScriptError(_T("Could not commit memory for DllImport."), parameter);
+			return g_script->ScriptError(_T("Could not commit memory for DllImport."), parameter);
 		for (int i = 0; i < end; i += 2)
 		{
 			_tcsncpy(&hex[2], parameter + i, 2);
@@ -3000,10 +3000,10 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 		function = (void*)GetDllProcAddress(parameter);
 	}
 	if (!function)
-		return g_script.ScriptError(ERR_NONEXISTENT_FUNCTION, parameter);
+		return g_script->ScriptError(ERR_NONEXISTENT_FUNCTION, parameter);
 	parameter = parameter + _tcslen(parameter) + 1;
 
-	LPTSTR parm = SimpleHeap::Malloc(parameter);
+	LPTSTR parm = g_SimpleHeap->Malloc(parameter);
 	bool has_return = false;
 	int aParamCount = !*parm||ATOI(parm) ? 0 : 1;
 	if (*parm)
@@ -3013,12 +3013,12 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 			parameter++;
 		}
 	if (*parm && aParamCount < 1)
-		return g_script.ScriptError(ERR_PARAM3_REQUIRED, aBuf);
+		return g_script->ScriptError(ERR_PARAM3_REQUIRED, aBuf);
 
 	// Determine the type of return value.
-	DYNAPARM *return_attrib = (DYNAPARM*)SimpleHeap::Malloc(sizeof(DYNAPARM));
+	DYNAPARM *return_attrib = (DYNAPARM*)g_SimpleHeap->Malloc(sizeof(DYNAPARM));
 	if (!return_attrib)
-		return g_script.ScriptError(ERR_OUTOFMEM);
+		return g_script->ScriptError(ERR_OUTOFMEM);
 	memset(return_attrib, 0, sizeof(DYNAPARM)); // Init all to default in case ConvertDllArgType() isn't called below. This struct holds the type and other attributes of the function's return value.
 #ifdef WIN32_PLATFORM
 	int dll_call_mode = DC_CALL_STD; // Set default.  Can be overridden to DC_CALL_CDECL and flags can be OR'd into it.
@@ -3067,10 +3067,10 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 
 	// Using stack memory, create an array of dll args large enough to hold the actual number of args present.
 	int arg_count = aParamCount / 2; // Might provide one extra due to first/last params, which is inconsequential.
-	DYNAPARM *dyna_param_def = arg_count ? (DYNAPARM *)SimpleHeap::Malloc(arg_count * sizeof(DYNAPARM)) : NULL;
-	DYNAPARM *dyna_param = arg_count ? (DYNAPARM *)SimpleHeap::Malloc(arg_count * sizeof(DYNAPARM)) : NULL;
+	DYNAPARM *dyna_param_def = arg_count ? (DYNAPARM *)g_SimpleHeap->Malloc(arg_count * sizeof(DYNAPARM)) : NULL;
+	DYNAPARM *dyna_param = arg_count ? (DYNAPARM *)g_SimpleHeap->Malloc(arg_count * sizeof(DYNAPARM)) : NULL;
 	if (arg_count && (!dyna_param_def || !dyna_param))
-		return g_script.ScriptError(ERR_OUTOFMEM);
+		return g_script->ScriptError(ERR_OUTOFMEM);
 	// Above: _alloca() has been checked for code-bloat and it doesn't appear to be an issue.
 	// Above: Fix for v1.0.36.07: According to MSDN, on failure, this implementation of _alloca() generates a
 	// stack overflow exception rather than returning a NULL value.  Therefore, NULL is no longer checked,
@@ -3086,9 +3086,9 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 #else
 	CStringW **pStr = (CStringW **)
 #endif
-		SimpleHeap::Malloc(i); // _alloca vs malloc can make a significant difference to performance in some cases.
+		g_SimpleHeap->Malloc(i); // _alloca vs malloc can make a significant difference to performance in some cases.
 	if (i && !pStr)
-		return g_script.ScriptError(ERR_OUTOFMEM);
+		return g_script->ScriptError(ERR_OUTOFMEM);
 	memset(pStr, 0, i);
 
 	// Above has already ensured that after the first parameter, there are either zero additional parameters
@@ -3433,7 +3433,7 @@ LONG WINAPI DisableHooksOnException(PEXCEPTION_POINTERS pExceptionPtrs)
 	{
 		if (!g_ExceptionWarnContinuable && pExceptionPtrs->ExceptionRecord->ExceptionFlags == 0) // CONTINUABLE EXCEPTION
 			return EXCEPTION_ACCESS_VIOLATION;
-		if (g_MainThreadID == GetCurrentThreadId())
+		if (g_ThreadID == GetCurrentThreadId())
 		{	// it is not our main process display error and exit current thread 
 #ifndef MINIDLL
 			g_ExceptionHooksToEnable = GetActiveHooks();
@@ -3441,9 +3441,9 @@ LONG WINAPI DisableHooksOnException(PEXCEPTION_POINTERS pExceptionPtrs)
 #endif
 			TCHAR aException[sizeof(TCHAR) * 3 * MAX_PATH];
 			if (g->ExcptDeref && *g->ExcptDeref->marker)
-				_stprintf(aException, _T("Error: %s EXCEPTION_ACCESS_VIOLATION\n\nMouse and Keyboard hooks have been disabled.\n\n  -  Press yes to exit thread and continue execution.\n  -  Press no to continue thread (debug).\n  -  Press cancel to exit application.\n\nException was caused in thread id: %d\nLine: %d\nSpecifically: %.260s\nLineFile: %.260s"), pExceptionPtrs->ExceptionRecord->ExceptionFlags == EXCEPTION_NONCONTINUABLE ? _T("NONCONTINUABLE") : _T("CONTINUABLE"), GetCurrentThreadId(), g_script.mCurrLine->mLineNumber, g->ExcptDeref->marker, Line::sSourceFile[g_script.mCurrLine->mFileIndex]);
+				_stprintf(aException, _T("Error: %s EXCEPTION_ACCESS_VIOLATION\n\nMouse and Keyboard hooks have been disabled.\n\n  -  Press yes to exit thread and continue execution.\n  -  Press no to continue thread (debug).\n  -  Press cancel to exit application.\n\nException was caused in thread id: %d\nLine: %d\nSpecifically: %.260s\nLineFile: %.260s"), pExceptionPtrs->ExceptionRecord->ExceptionFlags == EXCEPTION_NONCONTINUABLE ? _T("NONCONTINUABLE") : _T("CONTINUABLE"), GetCurrentThreadId(), g_script->mCurrLine->mLineNumber, g->ExcptDeref->marker, Line::sSourceFile[g_script->mCurrLine->mFileIndex]);
 			else
-				_stprintf(aException, _T("Error: %s EXCEPTION_ACCESS_VIOLATION\n\nMouse and Keyboard hooks have been disabled.\n\n  -  Press yes to exit thread and continue execution.\n  -  Press no to continue thread (debug).\n  -  Press cancel to exit application.\n\nException was caused in thread id: %d\nLine: %d\nLineFile: %.260s"), pExceptionPtrs->ExceptionRecord->ExceptionFlags == EXCEPTION_NONCONTINUABLE ? _T("NONCONTINUABLE") : _T("CONTINUABLE"), GetCurrentThreadId(), g_script.mCurrLine->mLineNumber, Line::sSourceFile[g_script.mCurrLine->mFileIndex]);
+				_stprintf(aException, _T("Error: %s EXCEPTION_ACCESS_VIOLATION\n\nMouse and Keyboard hooks have been disabled.\n\n  -  Press yes to exit thread and continue execution.\n  -  Press no to continue thread (debug).\n  -  Press cancel to exit application.\n\nException was caused in thread id: %d\nLine: %d\nLineFile: %.260s"), pExceptionPtrs->ExceptionRecord->ExceptionFlags == EXCEPTION_NONCONTINUABLE ? _T("NONCONTINUABLE") : _T("CONTINUABLE"), GetCurrentThreadId(), g_script->mCurrLine->mLineNumber, Line::sSourceFile[g_script->mCurrLine->mFileIndex]);
 			int result = MessageBox(NULL, aException, T_AHK_NAME, MB_ICONERROR | MB_YESNOCANCEL | MB_DEFBUTTON3 | MB_TOPMOST);
 			if (result == IDNO)
 			{

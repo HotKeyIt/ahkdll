@@ -175,7 +175,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			if ((buf_size = _tcscspn(buf, _T("};,"))) > LINE_SIZE - 1)
 			{
 				obj->Release();
-				g_script.ScriptError(ERR_INVALID_STRUCT, buf);
+				g_script->ScriptError(ERR_INVALID_STRUCT, buf);
 				return NULL;
 			}
 			_tcsncpy(tempbuf,buf,buf_size);
@@ -184,7 +184,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 		else if (_tcslen(buf) > LINE_SIZE - 1)
 		{
 			obj->Release();
-			g_script.ScriptError(ERR_INVALID_STRUCT, buf);
+			g_script->ScriptError(ERR_INVALID_STRUCT, buf);
 			return NULL;
 		}
 		else
@@ -199,7 +199,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			if (_tcschr(tempbuf, ':'))
 			{
 				obj->Release();
-				g_script.ScriptError(ERR_INVALID_STRUCT_BIT_POINTER, tempbuf);
+				g_script->ScriptError(ERR_INVALID_STRUCT_BIT_POINTER, tempbuf);
 				return NULL;
 			}
 			ispointer = StrReplace(tempbuf, _T("*"), _T(""), SCS_SENSITIVE, UINT_MAX, LINE_SIZE);
@@ -223,7 +223,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			if ((buf_size = _tcscspn(tempbuf,_T("\t "))) > MAX_VAR_NAME_LENGTH*2 + 30)
 			{
 				obj->Release();
-				g_script.ScriptError(ERR_INVALID_STRUCT, tempbuf);
+				g_script->ScriptError(ERR_INVALID_STRUCT, tempbuf);
 				return NULL;
 			}
 			isBit = StrChrAny(omit_leading_whitespace(tempbuf), _T(" \t"));
@@ -241,7 +241,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 				if (_tcslen(StrChrAny(tempbuf, _T(" \t:"))) > MAX_VAR_NAME_LENGTH + 30)
 				{
 					obj->Release();
-					g_script.ScriptError(ERR_INVALID_STRUCT, tempbuf);
+					g_script->ScriptError(ERR_INVALID_STRUCT, tempbuf);
 					return NULL;
 				}
 				_tcscpy(keybuf, (!isBit || *isBit != ':') ? StrChrAny(tempbuf, _T(" \t:")) : tempbuf);
@@ -267,7 +267,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			if (_tcslen(tempbuf) > _countof(keybuf))
 			{
 				obj->Release();
-				g_script.ScriptError(ERR_INVALID_STRUCT, tempbuf);
+				g_script->ScriptError(ERR_INVALID_STRUCT, tempbuf);
 				return NULL;
 			}
 			_tcscpy(keybuf,tempbuf);
@@ -320,25 +320,25 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			if (_tcschr(defbuf,'('))
 			{
 				bkpfunc = g->CurrentFunc; // don't bother checking, just backup and restore later
-				g->CurrentFunc = g_script.FindFunc(defbuf + 1,_tcscspn(defbuf,_T("(")) - 1);
+				g->CurrentFunc = g_script->FindFunc(defbuf + 1,_tcscspn(defbuf,_T("(")) - 1);
 				if (g->CurrentFunc) // break if not found to identify error
 				{
-					Var1.var = g_script.FindVar(defbuf + _tcscspn(defbuf,_T("(")) + 1,_tcslen(defbuf) - _tcscspn(defbuf,_T("(")) - 3,NULL,FINDVAR_LOCAL,NULL);
+					Var1.var = g_script->FindVar(defbuf + _tcscspn(defbuf,_T("(")) + 1,_tcslen(defbuf) - _tcscspn(defbuf,_T("(")) - 3,NULL,FINDVAR_LOCAL,NULL);
 					g->CurrentFunc = bkpfunc;
 				}
 				else // release object and return
 				{
 					g->CurrentFunc = bkpfunc;
 					obj->Release();
-					g_script.ScriptError(ERR_INVALID_STRUCT_IN_FUNC, defbuf);
+					g_script->ScriptError(ERR_INVALID_STRUCT_IN_FUNC, defbuf);
 					return NULL;
 				}
 			}
 			else if (g->CurrentFunc) // try to find local variable first
-				Var1.var = g_script.FindVar(defbuf + 1,_tcslen(defbuf) - 2,NULL,FINDVAR_LOCAL,NULL);
+				Var1.var = g_script->FindVar(defbuf + 1,_tcslen(defbuf) - 2,NULL,FINDVAR_LOCAL,NULL);
 			// try to find global variable if local was not found or we are not in func
 			if (Var1.var == NULL)
-				Var1.var = g_script.FindVar(defbuf + 1,_tcslen(defbuf) - 2,NULL,FINDVAR_GLOBAL,NULL);
+				Var1.var = g_script->FindVar(defbuf + 1,_tcslen(defbuf) - 2,NULL,FINDVAR_GLOBAL,NULL);
 			// variable found
 			if (Var1.var != NULL)
 			{
@@ -408,7 +408,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 					if (ResultToken.symbol != SYM_INTEGER)
 					{	// could not resolve structure
 						obj->Release();
-						g_script.ScriptError(ERR_INVALID_STRUCT, defbuf);
+						g_script->ScriptError(ERR_INVALID_STRUCT, defbuf);
 						return NULL;
 					}
 					if ((!bitsize || bitsizetotal == bitsize) && (mod = offset % aligntotal))
@@ -421,7 +421,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 					if (ResultToken.symbol != SYM_INTEGER)
 					{	// could not resolve structure
 						obj->Release();
-						g_script.ScriptError(ERR_INVALID_STRUCT, defbuf);
+						g_script->ScriptError(ERR_INVALID_STRUCT, defbuf);
 						return NULL;
 					}
 					if (mod = offset % ptrsize)
@@ -444,7 +444,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			else // No variable was found and it is not default type so we can't determine size.
 			{
 				obj->Release();
-				g_script.ScriptError(ERR_INVALID_STRUCT, defbuf);
+				g_script->ScriptError(ERR_INVALID_STRUCT, defbuf);
 				return  NULL;
 			}
 		}
@@ -480,7 +480,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 	if (!offset) // structure could not be build
 	{
 		obj->Release();
-		g_script.ScriptError(ERR_INVALID_STRUCT, buf);
+		g_script->ScriptError(ERR_INVALID_STRUCT, buf);
 		return NULL;
 	}
 	
@@ -1481,7 +1481,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 						delete field;
 					if (releaseobj)
 						objclone->Release();
-					return g_script.ScriptError(ERR_MUST_INIT_STRUCT);
+					return g_script->ScriptError(ERR_MUST_INIT_STRUCT);
 				}
 				else if (field->mMemAllocated > 0)  // free previously allocated memory
 					free(field->mStructMem);
@@ -1964,13 +1964,13 @@ Struct::FieldType *Struct::Insert(LPTSTR key, IndexType &at,USHORT aIspointer,in
 	}
 	if (this->FindField(key))
 	{
-		g_script.ScriptError(ERR_DUPLICATE_DECLARATION, key);
+		g_script->ScriptError(ERR_DUPLICATE_DECLARATION, key);
 		return NULL;
 	}
 	if (mFieldCount == mFieldCountMax && !Expand()  // Attempt to expand if at capacity.
 		|| !(key = _tcsdup(key)))  // Attempt to duplicate key-string.
 	{	// Out of memory.
-		g_script.ScriptError(ERR_OUTOFMEM);
+		g_script->ScriptError(ERR_OUTOFMEM);
 		return NULL;
 	}
 	// There is now definitely room in mFields for a new field.

@@ -29,6 +29,7 @@ protected:
 	}
 
 public:
+
 	ULONG STDMETHODCALLTYPE AddRef()
 	{
 		return InterlockedIncrement(&mRefCount); // ++mRefCount;
@@ -51,7 +52,6 @@ public:
 		}
 		return InterlockedDecrement(&mRefCount); // --mRefCount;
 	}
-
 	ObjectBase() : mRefCount(1) {}
 
 	// Declare a virtual destructor for correct 'delete this' behaviour in Delete(),
@@ -208,7 +208,7 @@ protected:
 	// mKeyOffsetObject should be set to mKeyOffsetInt + the number of int keys.
 	// mKeyOffsetString should be set to mKeyOffsetObject + the number of object keys.
 	// mKeyOffsetObject-1, mKeyOffsetString-1 and mFieldCount-1 indicate the last index of each prior type.
-	static const IndexType mKeyOffsetInt = 0;
+	_thread_local static const IndexType mKeyOffsetInt = 0;
 	IndexType mKeyOffsetObject, mKeyOffsetString;
 
 #ifdef CONFIG_DEBUGGER
@@ -378,7 +378,7 @@ public:
 	ResultType _HasKey(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount);
 	ResultType _Clone(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount);
 
-	static LPTSTR sMetaFuncName[];
+	_thread_local static LPTSTR sMetaFuncName[];
 
 #ifdef CONFIG_DEBUGGER
 	void DebugWriteProperty(IDebugProperties *, int aPage, int aPageSize, int aDepth);
@@ -398,7 +398,7 @@ public:
 	ULONG STDMETHODCALLTYPE AddRef() { return 1; }
 	ULONG STDMETHODCALLTYPE Release() { return 1; }
 	bool Delete() { return false; }
-#ifdef _USRDLL
+//#ifdef _USRDLL
 	void Free()
 	{
 		if (mFields)
@@ -421,11 +421,9 @@ public:
 			mFieldCountMax = 0;
 		}
 	}
-#endif
+//#endif
 	ResultType STDMETHODCALLTYPE Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
 };
-
-extern MetaObject g_MetaObject;		// Defines "object" behaviour for non-object values.
 
 
 //

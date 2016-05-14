@@ -162,7 +162,7 @@ HWND SetForegroundWindowEx(HWND aTargetWindow)
 	// solves a crash that is not fully understood, nor is it easily reproduced (it occurs only in release mode,
 	// not debug mode).  It's likely a bug in the API's IsHungAppWindow(), but that is far from confirmed.
 	DWORD target_thread = GetWindowThreadProcessId(aTargetWindow, NULL);
-	if (target_thread != g_MainThreadID && IsWindowHung(aTargetWindow)) // Calls to IsWindowHung should probably be avoided if the window belongs to our thread.  Relies upon short-circuit boolean order.
+	if (target_thread != g_ThreadID && IsWindowHung(aTargetWindow)) // Calls to IsWindowHung should probably be avoided if the window belongs to our thread.  Relies upon short-circuit boolean order.
 		return NULL;
 
 #ifdef _DEBUG_WINACTIVATE
@@ -258,10 +258,10 @@ HWND SetForegroundWindowEx(HWND aTargetWindow)
 		// Therefore, idAttachTo cannot equal idAttach.  Update: It appears that of the three,
 		// this first call does not offer any additional benefit, at least on XP, so not
 		// using it for now:
-		//if (g_MainThreadID != target_thread) // Don't attempt the call otherwise.
-		//	AttachThreadInput(g_MainThreadID, target_thread, TRUE);
-		if (fore_thread && g_MainThreadID != fore_thread && !IsWindowHung(orig_foreground_wnd))
-			is_attached_my_to_fore = AttachThreadInput(g_MainThreadID, fore_thread, TRUE) != 0;
+		//if (g_ThreadID != target_thread) // Don't attempt the call otherwise.
+		//	AttachThreadInput(g_ThreadID, target_thread, TRUE);
+		if (fore_thread && g_ThreadID != fore_thread && !IsWindowHung(orig_foreground_wnd))
+			is_attached_my_to_fore = AttachThreadInput(g_ThreadID, fore_thread, TRUE) != 0;
 		if (fore_thread && target_thread && fore_thread != target_thread) // IsWindowHung(aTargetWindow) was called earlier.
 			is_attached_fore_to_target = AttachThreadInput(fore_thread, target_thread, TRUE) != 0;
 	}
@@ -355,7 +355,7 @@ HWND SetForegroundWindowEx(HWND aTargetWindow)
 	// for these particular windows may result in a hung thread or other
 	// undesirable effect:
 	if (is_attached_my_to_fore)
-		AttachThreadInput(g_MainThreadID, fore_thread, FALSE);
+		AttachThreadInput(g_ThreadID, fore_thread, FALSE);
 	if (is_attached_fore_to_target)
 		AttachThreadInput(fore_thread, target_thread, FALSE);
 
@@ -499,7 +499,7 @@ HWND WinClose(HWND aWnd, int aTimeToWaitForClose, bool aKillIfHung)
 	{
 		// Seems best to always do the first one regardless of the value 
 		// of aTimeToWaitForClose:
-		if (g_MainThreadID == aThreadID)
+		if (g_ThreadID == aThreadID)
 			MsgSleep(INTERVAL_UNSPECIFIED);
 		else
 			Sleep(SLEEP_INTERVAL);
@@ -873,7 +873,7 @@ ResultType StatusBarUtil(Var *aOutputVar, HWND aBarHwnd, int aPartNumber, LPTSTR
 		// Since above didn't break, we're in "wait" mode (more than one iteration).
 		// In the following, must cast to int or any negative result will be lost due to DWORD type.
 		// Note: A negative aWaitTime means we're waiting indefinitely for a match to appear.
-		if (g_MainThreadID == aThreadID && (aWaitTime < 0 || (int)(aWaitTime - (GetTickCount() - start_time)) > SLEEP_INTERVAL_HALF))
+		if (g_ThreadID == aThreadID && (aWaitTime < 0 || (int)(aWaitTime - (GetTickCount() - start_time)) > SLEEP_INTERVAL_HALF))
 			MsgSleep(aCheckInterval);
 		else if (aWaitTime < 0 || (int)(aWaitTime - (GetTickCount() - start_time)) > SLEEP_INTERVAL_HALF)
 			Sleep(aCheckInterval);
@@ -893,7 +893,7 @@ ResultType StatusBarUtil(Var *aOutputVar, HWND aBarHwnd, int aPartNumber, LPTSTR
 	return result_to_return;
 
 error:
-	return g_script.SetErrorLevelOrThrowInt(aOutputVar ? ERRORLEVEL_ERROR : ERRORLEVEL_ERROR2);
+	return g_script->SetErrorLevelOrThrowInt(aOutputVar ? ERRORLEVEL_ERROR : ERRORLEVEL_ERROR2);
 }
 
 
@@ -1055,7 +1055,7 @@ int MsgBox(LPCTSTR aText, UINT uType, LPTSTR aTitle, double aTimeout, HWND aOwne
 	if (!aTitle || !*aTitle)
 		// If available, the script's filename seems a much better title in case the user has
 		// more than one script running:
-		aTitle = (g_script.mFileName && *g_script.mFileName) ? g_script.mFileName : T_AHK_NAME_VERSION;
+		aTitle = (g_script->mFileName && *g_script->mFileName) ? g_script->mFileName : T_AHK_NAME_VERSION;
 
 	// It doesn't feel safe to modify the contents of the caller's aText and aTitle,
 	// even if the caller were to tell us it is modifiable.  This is because the text
@@ -1607,7 +1607,7 @@ ResultType WindowSearch::SetCriteria(global_struct &aSettings, LPTSTR aTitle, LP
 			tcslcpy(buf, omit_leading_whitespace(cp), _countof(buf));
 			if (cp = StrChrAny(buf, _T(" \t"))) // Group names can't contain spaces, so terminate at the first one to exclude any "ahk_" criteria that come afterward.
 				*cp = '\0';
-			if (   !(mCriterionGroup = g_script.FindGroup(buf))   )
+			if (   !(mCriterionGroup = g_script->FindGroup(buf))   )
 				return FAIL; // No such group: Inform caller of invalid criteria.  No need to do anything else further below.
 		}
 		else

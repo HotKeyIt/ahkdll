@@ -3,7 +3,6 @@
 #include "application.h"
 #include "globaldata.h"
 #include "script.h"
-#include "application.h"
 
 #include "script_object.h"
 #include "script_func_impl.h"
@@ -339,7 +338,7 @@ bool Object::Delete()
 		{
 			if (g->ThrownToken)
 				// Let the original exception take precedence over this secondary exception.
-				g_script.FreeExceptionToken(g->ThrownToken);
+				g_script->FreeExceptionToken(g->ThrownToken);
 			g->ThrownToken = exc;
 		}
 
@@ -380,7 +379,6 @@ Object::~Object()
 	}
 }
 
-
 //
 // Object::Invoke
 //
@@ -395,6 +393,16 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 // L40: Revised base mechanism for flexibility and to simplify some aspects.
 //		obj[] -> obj.base.__Get -> obj.base[] -> obj.base.__Get etc.
 {
+#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+	PMYTEB curr_teb = NULL;
+	PVOID tls = NULL;
+	if (!g)
+	{
+		curr_teb = (PMYTEB)NtCurrentTeb();
+		tls = curr_teb->ThreadLocalStoragePointer;
+		curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[0][6];
+	}
+#endif
 	SymbolType key_type;
 	KeyType key;
     FieldType *field, *prop_field;
@@ -415,15 +423,21 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 			// identified the field (or in this case an empty space) to replace with aThisToken when appropriate.
 			memcpy(meta_params + 1, aParam, aParamCount * sizeof(ExprTokenType*));
 
-			Line *curr_line = g_script.mCurrLine;
+			Line *curr_line = g_script->mCurrLine;
 			ResultType r = CallField(field, aResultToken, aThisToken, aFlags, meta_params, aParamCount + 1);
-			g_script.mCurrLine = curr_line; // Allows exceptions thrown by later meta-functions to report a more appropriate line.
+			g_script->mCurrLine = curr_line; // Allows exceptions thrown by later meta-functions to report a more appropriate line.
 			//if (r == EARLY_RETURN)
 				// Propagate EARLY_RETURN in case this was the __Call meta-function of a
 				// "function object" which is used as a meta-function of some other object.
 				//return EARLY_RETURN; // TODO: Detection of 'return' vs 'return empty_value'.
 			if (r != OK) // Likely EARLY_RETURN, FAIL or EARLY_EXIT.
+			{
+#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+				if (curr_teb)
+					curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 				return r;
+			}
 		}
 	}
 	
@@ -471,6 +485,10 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 				// but since Property::Invoke doesn't use it, we pass our aThisToken for simplicity.
 				ResultType result = prop->Invoke(aResultToken, aThisToken, aFlags | IF_FUNCOBJ, aParam, aParamCount);
 				aParam[0] = name_token;
+#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+				if (curr_teb)
+					curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 				return result == EARLY_RETURN ? OK : result;
 			}
 			// The property was missing get/set (whichever this invocation is), so continue as
@@ -499,7 +517,13 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 			ResultType r = mBase->Invoke(aResultToken, aThisToken, aFlags | (IS_INVOKE_META ? 0 : IF_META), aParam, aParamCount);
 			if (r != INVOKE_NOT_HANDLED // Base handled it.
 				|| key_type == SYM_INVALID) // Nothing left to do in this case.
+			{
+#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+				if (curr_teb)
+					curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 				return r;
+			}
 
 			// Since the above may have inserted or removed fields (including the specified one),
 			// insert_pos may no longer be correct or safe.  Updating field also allows a meta-function
@@ -522,7 +546,12 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 			if (IS_INVOKE_CALL)
 			{
 				// Since above has not handled this call and no field exists, check for built-in methods.
-				return CallBuiltin(GetBuiltinID(key.s), aResultToken, aParam + 1, aParamCount - 1); // +/- 1 to exclude the method identifier.
+				ResultType result = CallBuiltin(GetBuiltinID(key.s), aResultToken, aParam + 1, aParamCount - 1); // +/- 1 to exclude the method identifier.
+#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+				if (curr_teb)
+					curr_teb->ThreadLocalStoragePointer = tls;
+#endif
+				return result;
 			}
 			//
 			// BUILT-IN "BASE" PROPERTY
@@ -540,7 +569,10 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 							mBase->Release();
 						mBase = obj; // May be NULL.
 					}
-	
+#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+					if (curr_teb)
+						curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 					if (mBase)
 					{
 						mBase->AddRef();
@@ -561,7 +593,13 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 	if (IS_INVOKE_CALL)
 	{
 		if (!field)
+		{
+#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+			if (curr_teb)
+				curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 			return INVOKE_NOT_HANDLED;
+		}
 		// v1.1.18: The following flag is set whenever a COM client invokes with METHOD|PROPERTYGET,
 		// such as X.Y in VBScript or C#.  Some convenience is gained at the expense of purity by treating
 		// it as METHOD if X.Y is a Func object or PROPERTYGET in any other case.
@@ -570,7 +608,14 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 		//  - Fixes X.__Call being returned instead of being called, if X.__Call is a string.
 		//  - Allows X.Y(Z) and similar to work like X.Y[Z], instead of ignoring the extra parameters.
 		if ( !(aFlags & IF_CALL_FUNC_ONLY) || (field->symbol == SYM_OBJECT && dynamic_cast<Func *>(field->object)) )
-			return CallField(field, aResultToken, aThisToken, aFlags, aParam, aParamCount);
+		{
+			ResultType result = CallField(field, aResultToken, aThisToken, aFlags, aParam, aParamCount);
+#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+			if (curr_teb)
+				curr_teb->ThreadLocalStoragePointer = tls;
+#endif
+			return result;
+		}
 		aFlags = (aFlags & ~(IT_BITMASK | IF_CALL_FUNC_ONLY)) | IT_GET;
 	}
 
@@ -590,7 +635,13 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 				// AddRef not used.  See below.
 				obj = field->object;
 			else if (!IS_INVOKE_META)
+			{
+#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+				if (curr_teb)
+					curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 				_o_throw(ERR_ARRAY_NOT_MULTIDIM);
+			}
 		}
 		else if (!IS_INVOKE_META)
 		{
@@ -623,13 +674,23 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 					}
 				}
 				if (!new_obj)
+				{
+#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+					if (curr_teb)
+						curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 					_o_throw(ERR_OUTOFMEM);
+				}
 			}
 			else if (IS_INVOKE_GET)
 			{
 				// Treat x[y,z] like x[y] when x[y] is not set: just return "", don't throw an exception.
 				// On the other hand, if x[y] is set to something which is not an object, the "if (field)"
 				// section above raises an error.
+#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+				if (curr_teb)
+					curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 				_o_return_empty;
 			}
 		}
@@ -641,7 +702,12 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 			// need to be called before returning, and accessing obj after calling Invoke() would not be safe
 			// since it could Release() the object (by overwriting our field via script) as a side-effect.
 			// Recursively invoke obj, passing remaining parameters; remove IF_META to correctly treat obj as target:
-			return obj->Invoke(aResultToken, obj_token, aFlags & ~IF_META, aParam + 1, aParamCount - 1);
+			ResultType result = obj->Invoke(aResultToken, obj_token, aFlags & ~IF_META, aParam + 1, aParamCount - 1);
+#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+			if (curr_teb)
+				curr_teb->ThreadLocalStoragePointer = tls;
+#endif
+			return result;
 			// Above may return INVOKE_NOT_HANDLED in cases such as obj[a,b] where obj[a] exists but obj[a][b] does not.
 		}
 	} // MULTIPARAM[x,y]
@@ -658,8 +724,16 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 			{
 				// See the similar call below for comments.
 				field->Get(aResultToken);
+#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+				if (curr_teb)
+					curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 				return OK;
 			}
+#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+			if (curr_teb)
+				curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 			_o_throw(ERR_OUTOFMEM);
 		}
 	}
@@ -678,14 +752,27 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 			// deref buf (as of commit d1ab199).  For #2, the value is copied immediately after we return,
 			// because the result of any BIF is assumed to be volatile if expression eval isn't finished.
 			field->Get(aResultToken);
+#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+			if (curr_teb)
+				curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 			return OK;
 		}
 		// If 'this' is the target object (not its base), produce OK so that something like if(!foo.bar) is
 		// considered valid even when foo.bar has not been set.
 		if (!IS_INVOKE_META && aParamCount)
+		{
+#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+			if (curr_teb)
+				curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 			_o_return_empty;
+		}
 	}
-
+#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+	if (curr_teb)
+		curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 	// Fell through from one of the sections above: invocation was not handled.
 	return INVOKE_NOT_HANDLED;
 }
@@ -799,7 +886,7 @@ ResultType Object::CallField(FieldType *aField, ResultToken &aResultToken, ExprT
 	}
 	if (aField->symbol == SYM_STRING)
 	{
-		Func *func = g_script.FindFunc(aField->string, aField->string.Length());
+		Func *func = g_script->FindFunc(aField->string, aField->string.Length());
 		if (func)
 		{
 			ExprTokenType *tmp = aParam[0];
@@ -1937,7 +2024,7 @@ LabelPtr::CallableType LabelPtr::getType(IObject *aObject)
 	static const Func sFunc(NULL, false);
 	// Comparing [[vfptr]] produces smaller code and is perhaps 10% faster than dynamic_cast<>.
 	void *vfptr = *(void **)aObject;
-	if (vfptr == *(void **)g_script.mPlaceholderLabel)
+	if (vfptr == *(void **)g_script->mPlaceholderLabel)
 		return Callable_Label;
 	if (vfptr == *(void **)&sFunc)
 		return Callable_Func;
@@ -2011,8 +2098,6 @@ ResultType MsgMonitorList::Call(ExprTokenType *aParamValue, int aParamCount, int
 //
 // MetaObject - Defines behaviour of object syntax when used on a non-object value.
 //
-
-MetaObject g_MetaObject;
 
 LPTSTR Object::sMetaFuncName[] = { _T("__Get"), _T("__Set"), _T("__Call") };
 

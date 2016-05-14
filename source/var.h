@@ -253,7 +253,7 @@ public:
 	// The biggest offender of buffer overflow in sEmptyString is DllCall, which happens most frequently
 	// when a script forgets to call VarSetCapacity before passing a buffer to some function that writes a
 	// string to it.  There is now some code there that tries to detect when that happens.
-	static TCHAR sEmptyString[1]; // See above.
+	_thread_local static TCHAR sEmptyString[1]; // See above.
 
 	VarSizeType Get(LPTSTR aBuf = NULL);
 	ResultType AssignHWND(HWND aWnd);
@@ -705,7 +705,7 @@ public:
 		// Fix for v1.0.37: Callers want the clipboard's capacity returned, if it has a capacity.  This is
 		// because Capacity() is defined as being the size available in Contents(), which for the clipboard
 		// would be a pointer to the clipboard-buffer-to-be-written (or zero if none).
-		return var.mType == VAR_CLIPBOARD ? g_clip.mCapacity : var.mByteCapacity;
+		return var.mType == VAR_CLIPBOARD ? g_clip->mCapacity : var.mByteCapacity;
 	}
 
 	VarSizeType CharCapacity()
@@ -822,7 +822,7 @@ public:
 			// The returned value will be a writable mem area if clipboard is open for write.
 			// Otherwise, the clipboard will be opened physically, if it isn't already, and
 			// a pointer to its contents returned to the caller:
-			return g_clip.Contents();
+			return g_clip->Contents();
 		return sEmptyString; // For reserved vars (but this method should probably never be called for them).
 	}
 
@@ -887,8 +887,8 @@ public:
 	{
 		// Relies on the fact that aliases can't point to other aliases (enforced by UpdateAlias()).
 		Var &var = *(mType == VAR_ALIAS ? mAliasFor : this);
-		if (var.mType == VAR_CLIPBOARD && g_clip.IsReadyForWrite())
-			return g_clip.Commit(); // Writes the new clipboard contents to the clipboard and closes it.
+		if (var.mType == VAR_CLIPBOARD && g_clip->IsReadyForWrite())
+			return g_clip->Commit(); // Writes the new clipboard contents to the clipboard and closes it.
 		if (var.mType == VAR_VIRTUAL)
 		{
 			// Commit the value in our temporary buffer.
@@ -942,10 +942,10 @@ public:
 			mAttrib = 0; // Any vars that aren't VAR_NORMAL are considered initialized, by definition.
 	}
 
-	void *operator new(size_t aBytes) {return SimpleHeap::Malloc(aBytes);}
-	void *operator new[](size_t aBytes) {return SimpleHeap::Malloc(aBytes);}
-	void operator delete(void *aPtr) {}
-	void operator delete[](void *aPtr) {}
+	void *operator new(size_t aBytes){ return malloc(aBytes); }
+	void *operator new[](size_t aBytes) {return malloc(aBytes); }
+	void operator delete(void *aPtr) { free(aPtr); }
+	void operator delete[](void *aPtr) { free(aPtr); }
 
 
 	__forceinline bool IsUninitializedNormalVar()

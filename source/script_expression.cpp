@@ -160,7 +160,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 					// since it seems relatively harmless to create a blank variable in something like var := Array%i%
 					// (though it will produce a runtime error if the double resolves to an illegal variable name such
 					// as one containing spaces).
-					if (   !(temp_var = g_script.FindOrAddVar(right_string, right_length))   )
+					if (   !(temp_var = g_script->FindOrAddVar(right_string, right_length))   )
 					{
 						// Above already displayed the error.  As of v1.0.31, this type of error is displayed and
 						// causes the current thread to terminate, which seems more useful than the old behavior
@@ -366,7 +366,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 			if (g_Debugger.IsConnected())
 				g_Debugger.PostExecFunctionCall(this);
 #endif
-			g_script.mCurrLine = this; // For error-reporting.
+			g_script->mCurrLine = this; // For error-reporting.
 
 			if (result_token.symbol != SYM_STRING)
 			{

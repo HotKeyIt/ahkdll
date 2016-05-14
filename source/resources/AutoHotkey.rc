@@ -260,7 +260,10 @@ C974C3B7677A402D93B047DA402587C7	RCDATA	".\\source\\resources\\WINAPI.zip"
 #endif
 */
 #ifdef _DEBUG
+//F903E44B8A904483A1732BA84EA6191F	RCDATA	".\\bin\\x64w\\AutoHotkey.zip"
+//FC2328B39C194A4788051A3B01B1E7D5	RCDATA	".\\bin\\Win32w\\AutoHotkeyMini.zip"
 //AHK		RCDATA	".\\source\\resources\\AHK.zip"
 //AutoHotkey	RCDATA	".\\source\\resources\\AutoHotkey.zip"
-AHK	RCDATA	".\\Test\\test.ahk"
+//AHK	RCDATA	".\\Test\\test.ahk"
+//AHKTHREAD.AHK	LIB		".\\source\\resources\\reslib\\AhkThread.ahk"
 #endif

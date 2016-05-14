@@ -296,7 +296,7 @@ void InitEventArray(void *aMem, UINT aMaxEvents, modLR_type aModifiersLR);
 void SendEventArray(int &aFinalKeyDelay, modLR_type aModsDuringSend);
 void CleanupEventArray(int aFinalKeyDelay);
 
-extern SendModes sSendMode;
+_thread_local extern SendModes sSendMode;
 void DoKeyDelay(int aDelay = (sSendMode == SM_PLAY) ? g->KeyDelayPlay : g->KeyDelay);
 void DoMouseDelay();
 #ifndef MINIDLL

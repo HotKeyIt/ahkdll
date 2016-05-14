@@ -7,7 +7,7 @@
 BIF_DECL(BIF_Getvar)
 {
 	if (aParam[0]->symbol == SYM_STRING && !(TokenToInt64(*aParam[0])))
-		aResultToken.value_int64 = (__int64)g_script.FindOrAddVar(aParam[0]->marker);
+		aResultToken.value_int64 = (__int64)g_script->FindOrAddVar(aParam[0]->marker);
 	else if (aParam[0]->symbol == SYM_VAR)
 	{
 		if (aParam[0]->var->mType == VAR_ALIAS && aParamCount > 1 && TokenToInt64(*aParam[1]))

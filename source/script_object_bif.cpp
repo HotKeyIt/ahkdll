@@ -264,7 +264,7 @@ BIF_DECL(BIF_sizeof)
 		{
 			if ((buf_size = _tcscspn(buf, _T("};,"))) > LINE_SIZE - 1)
 			{
-				g_script.ScriptError(ERR_INVALID_STRUCT, buf);
+				g_script->ScriptError(ERR_INVALID_STRUCT, buf);
 				return;
 			}
 			_tcsncpy(tempbuf,buf,buf_size);
@@ -272,7 +272,7 @@ BIF_DECL(BIF_sizeof)
 		}
 		else if (_tcslen(buf) > LINE_SIZE - 1)
 		{
-			g_script.ScriptError(ERR_INVALID_STRUCT, buf);
+			g_script->ScriptError(ERR_INVALID_STRUCT, buf);
 			return;
 		}
 		else
@@ -296,7 +296,7 @@ BIF_DECL(BIF_sizeof)
 		{
 			if (_tcschr(tempbuf, ':'))
 			{
-				g_script.ScriptError(ERR_INVALID_STRUCT_BIT_POINTER, tempbuf);
+				g_script->ScriptError(ERR_INVALID_STRUCT_BIT_POINTER, tempbuf);
 				return;
 			}
 			// align offset for pointer
@@ -330,7 +330,7 @@ BIF_DECL(BIF_sizeof)
 		{
 			if ((buf_size = _tcscspn(tempbuf,_T("\t ["))) > MAX_VAR_NAME_LENGTH*2 + 30)
 			{
-				g_script.ScriptError(ERR_INVALID_STRUCT, tempbuf);
+				g_script->ScriptError(ERR_INVALID_STRUCT, tempbuf);
 				return;
 			}
 			isBit = StrChrAny(omit_leading_whitespace(tempbuf), _T(" \t"));
@@ -378,27 +378,27 @@ BIF_DECL(BIF_sizeof)
 			if (_tcschr(defbuf,'('))
 			{
 				bkpfunc = g->CurrentFunc; // don't bother checking, just backup and restore later
-				g->CurrentFunc = g_script.FindFunc(defbuf + 1,_tcscspn(defbuf,_T("(")) - 1);
+				g->CurrentFunc = g_script->FindFunc(defbuf + 1,_tcscspn(defbuf,_T("(")) - 1);
 				if (g->CurrentFunc) // break if not found to identify error
 				{
 					_tcscpy(tempbuf,defbuf + 1);
 					_tcscpy(defbuf + 1,tempbuf + _tcscspn(tempbuf,_T("(")) + 1); //,_tcschr(tempbuf,')') - _tcschr(tempbuf,'('));
 					_tcscpy(_tcschr(defbuf,')'),_T(" \0"));
-					Var1.var = g_script.FindVar(defbuf + 1,_tcslen(defbuf) - 2,NULL,FINDVAR_LOCAL,NULL);
+					Var1.var = g_script->FindVar(defbuf + 1,_tcslen(defbuf) - 2,NULL,FINDVAR_LOCAL,NULL);
 					g->CurrentFunc = bkpfunc;
 				}
 				else // release object and return
 				{
 					g->CurrentFunc = bkpfunc;
-					g_script.ScriptError(ERR_INVALID_STRUCT_IN_FUNC, defbuf);
+					g_script->ScriptError(ERR_INVALID_STRUCT_IN_FUNC, defbuf);
 					return;
 				}
 			}
 			else if (g->CurrentFunc) // try to find local variable first
-				Var1.var = g_script.FindVar(defbuf + 1,_tcslen(defbuf) - 2,NULL,FINDVAR_LOCAL,NULL);
+				Var1.var = g_script->FindVar(defbuf + 1,_tcslen(defbuf) - 2,NULL,FINDVAR_LOCAL,NULL);
 			// try to find global variable if local was not found or we are not in func
 			if (Var1.var == NULL)
-				Var1.var = g_script.FindVar(defbuf + 1,_tcslen(defbuf) - 2,NULL,FINDVAR_GLOBAL,NULL);
+				Var1.var = g_script->FindVar(defbuf + 1,_tcslen(defbuf) - 2,NULL,FINDVAR_GLOBAL,NULL);
 			if (Var1.var != NULL)
 			{
 				// Call BIF_sizeof passing offset in second parameter to align if necessary
@@ -406,7 +406,7 @@ BIF_DECL(BIF_sizeof)
 				BIF_sizeof(ResultToken,param,3);
 				if (ResultToken.symbol != SYM_INTEGER)
 				{	// could not resolve structure
-					g_script.ScriptError(ERR_INVALID_STRUCT, defbuf);
+					g_script->ScriptError(ERR_INVALID_STRUCT, defbuf);
 					return;
 				}
 				if ((!bitsize || bitsizetotal == bitsize) && offset && (mod = offset % *aligntotal))
@@ -417,7 +417,7 @@ BIF_DECL(BIF_sizeof)
 			}
 			else // No variable was found and it is not default type so we can't determine size, return empty string.
 			{
-				g_script.ScriptError(ERR_INVALID_STRUCT, defbuf);
+				g_script->ScriptError(ERR_INVALID_STRUCT, defbuf);
 				return;
 			}
 		}
@@ -958,7 +958,7 @@ BIF_DECL(BIF_ObjDump)
 	char *aBuffer = (char*)malloc(aSize + sizeof(__int64));
 	if (!aBuffer)
 	{
-		g_script.ScriptError(ERR_OUTOFMEM);
+		g_script->ScriptError(ERR_OUTOFMEM);
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
 		return;
@@ -970,7 +970,7 @@ BIF_DECL(BIF_ObjDump)
 	{
 		aObjects->Release();
 		free(aBuffer);
-		g_script.ScriptError(_T("Error dumping Object."));
+		g_script->ScriptError(_T("Error dumping Object."));
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
 		return;
@@ -995,7 +995,7 @@ BIF_DECL(BIF_ObjDump)
 			aBuffer = (char*)malloc(aCompressedSize);
 			if (!aBuffer)
 			{
-				g_script.ScriptError(ERR_OUTOFMEM);
+				g_script->ScriptError(ERR_OUTOFMEM);
 				aResultToken.symbol = SYM_STRING;
 				aResultToken.marker = _T("");
 				return;
@@ -1022,7 +1022,7 @@ BIF_DECL(BIF_ObjDump)
 		Var &var = *(aParam[1]->var->mType == VAR_ALIAS ? aParam[1]->var->mAliasFor : aParam[1]->var);
 		if (var.mType != VAR_NORMAL) // i.e. VAR_CLIPBOARD or VAR_VIRTUAL.
 		{
-			g_script.ScriptError(ERR_VAR_IS_READONLY, var.mName);
+			g_script->ScriptError(ERR_VAR_IS_READONLY, var.mName);
 			aResultToken.symbol = SYM_STRING;
 			aResultToken.marker = _T("");
 			return;
@@ -1314,7 +1314,7 @@ BIF_DECL(BIF_ObjLoad)
 		free(aObjects);
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
-		g_script.ScriptError(ERR_OUTOFMEM);
+		g_script->ScriptError(ERR_OUTOFMEM);
 		return;
 	}
 	free(aObjects);
@@ -1376,7 +1376,7 @@ BIF_DECL(BIF_IsObject)
 	for (i = 0; i < aParamCount && TokenToObject(*aParam[i]); ++i);
 	_f_return_b(i == aParamCount); // TRUE if all are objects.  Caller has ensured aParamCount > 0.
 }
-	
+
 
 //
 // Op_ObjInvoke - Handles the object operators: x.y, x[y], x.y(), x.y := z, etc.
@@ -1417,8 +1417,8 @@ BIF_DECL(Op_ObjInvoke)
 		if (param_is_var)
 			obj->Release();
 	}
-	// Invoke meta-functions of g_MetaObject.
-	else if (INVOKE_NOT_HANDLED == (result = g_MetaObject.Invoke(aResultToken, *obj_param, invoke_type | IF_META, aParam, aParamCount)))
+	// Invoke meta-functions of g_MetaObject->
+	else if (INVOKE_NOT_HANDLED == (result = g_MetaObject->Invoke(aResultToken, *obj_param, invoke_type | IF_META, aParam, aParamCount)))
 	{
 		// Since above did not handle it, check for attempts to access .base of non-object value (g_MetaObject itself).
 		if (   invoke_type != IT_CALL // Exclude things like "".base().
@@ -1430,14 +1430,14 @@ BIF_DECL(Op_ObjInvoke)
 				// Re-invoke g_MetaObject without meta flag or "base" param.
 				ExprTokenType base_token;
 				base_token.symbol = SYM_OBJECT;
-				base_token.object = &g_MetaObject;
-				result = g_MetaObject.Invoke(aResultToken, base_token, invoke_type, aParam + 1, aParamCount - 1);
+				base_token.object = g_MetaObject;
+				result = g_MetaObject->Invoke(aResultToken, base_token, invoke_type, aParam + 1, aParamCount - 1);
 			}
 			else					// "".base
 			{
-				// Return a reference to g_MetaObject.  No need to AddRef as g_MetaObject ignores it.
+				// Return a reference to g_MetaObject->  No need to AddRef as g_MetaObject ignores it.
 				aResultToken.symbol = SYM_OBJECT;
-				aResultToken.object = &g_MetaObject;
+				aResultToken.object = g_MetaObject;
 				result = OK;
 			}
 		}

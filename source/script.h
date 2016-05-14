@@ -31,6 +31,7 @@ GNU General Public License for more details.
 #include "os_version.h" // For the global OS_Version object
 
 #include "Winternl.h"
+
 EXTERN_OSVER; // For the access to the g_os version object without having to include globaldata.h
 EXTERN_G;
 
@@ -48,6 +49,12 @@ EXTERN_G;
 // 2) g_array[0].IsPaused indicates whether the script is in a paused state while idle.
 // In addition, it probably simplifies the code not to reclaim g_array[0]; e.g. ++g and --g can be done
 // unconditionally when creating new threads.
+
+// maximal simultaneously running autohotkey threads started via NewThread, tests shown that max is around 900 at /STACK:"4194304" but 2048 should not harm a lot
+#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#define MAX_AHK_THREADS 1024
+unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine);
+#endif
 
 enum ExecUntilMode {NORMAL_MODE, UNTIL_RETURN, UNTIL_BLOCK_END, ONLY_ONE_LINE};
 
@@ -74,8 +81,8 @@ enum VariableTypeType {VAR_TYPE_INVALID, VAR_TYPE_NUMBER, VAR_TYPE_INTEGER, VAR_
 #define ATTACH_THREAD_INPUT \
 	bool threads_are_attached = false;\
 	DWORD target_thread = GetWindowThreadProcessId(target_window, NULL);\
-	if (target_thread && target_thread != g_MainThreadID && !IsWindowHung(target_window))\
-		threads_are_attached = AttachThreadInput(g_MainThreadID, target_thread, TRUE) != 0;
+	if (target_thread && target_thread != g_ThreadID && !IsWindowHung(target_window))\
+		threads_are_attached = AttachThreadInput(g_ThreadID, target_thread, TRUE) != 0;
 // BELOW IS SAME AS ABOVE except it checks do_activate and also does a SetActiveWindow():
 #define ATTACH_THREAD_INPUT_AND_SETACTIVEWINDOW_IF_DO_ACTIVATE \
 	bool threads_are_attached = false;\
@@ -83,14 +90,14 @@ enum VariableTypeType {VAR_TYPE_INVALID, VAR_TYPE_NUMBER, VAR_TYPE_INTEGER, VAR_
 	if (do_activate)\
 	{\
 		target_thread = GetWindowThreadProcessId(target_window, NULL);\
-		if (target_thread && target_thread != g_MainThreadID && !IsWindowHung(target_window))\
-			threads_are_attached = AttachThreadInput(g_MainThreadID, target_thread, TRUE) != 0;\
+		if (target_thread && target_thread != g_ThreadID && !IsWindowHung(target_window))\
+			threads_are_attached = AttachThreadInput(g_ThreadID, target_thread, TRUE) != 0;\
 		SetActiveWindow(target_window);\
 	}
 
 #define DETACH_THREAD_INPUT \
 	if (threads_are_attached)\
-		AttachThreadInput(g_MainThreadID, target_thread, FALSE);
+		AttachThreadInput(g_ThreadID, target_thread, FALSE);
 
 #define RESEED_RANDOM_GENERATOR \
 {\
@@ -822,14 +829,14 @@ public:
 		//else the original buffer is NULL, so keep any new sDerefBuf that might have been created (should
 		// help avg-case performance).
 
-	static LPTSTR sDerefBuf;  // Buffer to hold the values of any args that need to be dereferenced.
-	static size_t sDerefBufSize;
-	static int sLargeDerefBufs;
+	_thread_local static LPTSTR sDerefBuf;  // Buffer to hold the values of any args that need to be dereferenced.
+	_thread_local static size_t sDerefBufSize;
+	_thread_local static int sLargeDerefBufs;
 
 	// Static because only one line can be Expanded at a time (not to mention the fact that we
 	// wouldn't want the size of each line to be expanded by this size):
-	static LPTSTR sArgDeref[MAX_ARGS];
-	static Var *sArgVar[MAX_ARGS];
+	_thread_local static LPTSTR sArgDeref[MAX_ARGS];
+	_thread_local static Var *sArgVar[MAX_ARGS];
 
 	// Keep any fields that aren't an even multiple of 4 adjacent to each other.  This conserves memory
 	// due to byte-alignment:
@@ -947,17 +954,17 @@ public:
 	// the vast majority of scripts, so 400 seems unlikely to exceed the buffer size.  Even in the
 	// worst case where the buffer size is exceeded, the text is simply truncated, so it's not too bad:
 	#define LINE_LOG_SIZE 400  // See above.
-	static Line *sLog[LINE_LOG_SIZE];
-	static DWORD sLogTick[LINE_LOG_SIZE];
-	static int sLogNext;
+	_thread_local static Line *sLog[LINE_LOG_SIZE];
+	_thread_local static DWORD sLogTick[LINE_LOG_SIZE];
+	_thread_local static int sLogNext;
 
 #ifdef AUTOHOTKEYSC  // Reduces code size to omit things that are unused, and helps catch bugs at compile-time.
-	static LPTSTR sSourceFile[1]; // Only need to be able to hold the main script since compiled scripts don't support dynamic including.
+	_thread_local static LPTSTR sSourceFile[1]; // Only need to be able to hold the main script since compiled scripts don't support dynamic including.
 #else
-	static LPTSTR *sSourceFile;   // Will hold an array of strings.
-	static int sMaxSourceFiles;  // Maximum number of items it can currently hold.
+	_thread_local static LPTSTR *sSourceFile;   // Will hold an array of strings.
+	_thread_local static int sMaxSourceFiles;  // Maximum number of items it can currently hold.
 #endif
-	static int sSourceFileCount; // Number of items in the above array.
+	_thread_local static int sSourceFileCount; // Number of items in the above array.
 
 	static void FreeDerefBufIfLarge();
 
@@ -1850,10 +1857,10 @@ public:
 		, mBreakpoint(NULL)
 #endif
 		{}
-	void *operator new(size_t aBytes) {return SimpleHeap::Malloc(aBytes);}
-	void *operator new[](size_t aBytes) {return SimpleHeap::Malloc(aBytes);}
-	void operator delete(void *aPtr) {}  // Intentionally does nothing because we're using SimpleHeap for everything.
-	void operator delete[](void *aPtr) {}
+	void *operator new(size_t aBytes){ return malloc(aBytes); }
+	void *operator new[](size_t aBytes) {return malloc(aBytes); }
+	void operator delete(void *aPtr) { free(aPtr); }  // Intentionally does nothing because we're using SimpleHeap for everything.
+	void operator delete[](void *aPtr) { free(aPtr); }
 
 	// AutoIt3 functions:
 	static bool Util_CopyDir(LPCTSTR szInputSource, LPCTSTR szInputDest, bool bOverwrite);
@@ -1905,10 +1912,10 @@ public:
 		, mJumpToLine(NULL)
 		, mPrevLabel(NULL), mNextLabel(NULL)
 	{}
-	void *operator new(size_t aBytes) {return SimpleHeap::Malloc(aBytes);}
-	void *operator new[](size_t aBytes) {return SimpleHeap::Malloc(aBytes);}
-	void operator delete(void *aPtr) {}
-	void operator delete[](void *aPtr) {}
+	void *operator new(size_t aBytes){ return malloc(aBytes); }
+	void *operator new[](size_t aBytes) {return malloc(aBytes); }
+	void operator delete(void *aPtr) { free(aPtr); }
+	void operator delete[](void *aPtr) { free(aPtr); }
 
 	// IObject.
 	ResultType STDMETHODCALLTYPE Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
@@ -2213,10 +2220,10 @@ public:
 		, mIsVariadic(false)
 		, mHasReturn(false)
 	{}
-	void *operator new(size_t aBytes) {return SimpleHeap::Malloc(aBytes);}
-	void *operator new[](size_t aBytes) {return SimpleHeap::Malloc(aBytes);}
-	void operator delete(void *aPtr) {}
-	void operator delete[](void *aPtr) {}
+	void *operator new(size_t aBytes){ return malloc(aBytes); }
+	void *operator new[](size_t aBytes) {return malloc(aBytes); }
+	void operator delete(void *aPtr) { free(aPtr); }
+	void operator delete[](void *aPtr) { free(aPtr); }
 };
 
 
@@ -2277,7 +2284,7 @@ struct MsgMonitorStruct
 	HWND hwnd;
 	UINT msg;
 	// Keep any members smaller than 4 bytes adjacent to save memory:
-	static const UCHAR MAX_INSTANCES = MAX_THREADS_LIMIT; // For maintainability.  Causes a compiler warning if MAX_THREADS_LIMIT > MAX_UCHAR.
+	_thread_local static const UCHAR MAX_INSTANCES = MAX_THREADS_LIMIT; // For maintainability.  Causes a compiler warning if MAX_THREADS_LIMIT > MAX_UCHAR.
 	UCHAR instance_count; // Distinct from func.mInstances because the script might have called the function explicitly.
 	UCHAR max_instances; // v1.0.47: Support more than one thread.
 };
@@ -2296,16 +2303,16 @@ public:
 	MsgMonitorStruct *Find(UINT aMsg, HWND aHwnd, IObject *aCallback);
 	MsgMonitorStruct *Add(UINT aMsg, HWND aHwnd, IObject *aCallback, bool aAppend = TRUE);
 	void Remove(MsgMonitorStruct *aMonitor);
-#ifdef _USRDLL
+//#ifdef _USRDLL
 	void RemoveAll();
 	void Free();
-#endif
+//#endif
 	ResultType Call(ExprTokenType *aParamValue, int aParamCount, int aInitNewThreadIndex); // Used for OnExit and OnClipboardChange, but not OnMessage.
 
 	MsgMonitorStruct& operator[] (const int aIndex) { return mMonitor[aIndex]; }
 	int Count() { return mCount; }
 
-	MsgMonitorList() : mCount(0), mCountMax(0), mMonitor(NULL) {}
+	MsgMonitorList() : mCount(0), mCountMax(0), mMonitor(NULL), mTop(NULL) {}
 };
 
 
@@ -2619,9 +2626,9 @@ public:
 	SCROLLINFO *mVScroll, *mHScroll;
 	IObject *mObject; // Variable with object for g and v Options, used as input for gFunc -> {Func:BoundFunction} and output vMyVar -> object.MyVar
 	#define MAX_GUI_FONTS 200  // v1.0.44.14: Increased from 100 to 200 due to feedback that 100 wasn't enough.  But to alleviate memory usage, the array is now allocated upon first use.
-	static FontType *sFont; // An array of structs, allocated upon first use.
-	static int sFontCount;
-	static HWND sTreeWithEditInProgress; // Needed because TreeView's edit control for label-editing conflicts with IDOK (default button).
+	_thread_local static FontType *sFont; // An array of structs, allocated upon first use.
+	_thread_local static int sFontCount;
+	_thread_local static HWND sTreeWithEditInProgress; // Needed because TreeView's edit control for label-editing conflicts with IDOK (default button).
 
 	// Don't overload new and delete operators in this case since we want to use real dynamic memory
 	// (since GUIs can be destroyed and recreated, over and over).
@@ -2929,10 +2936,8 @@ public:
 	ResultType ExitApp(ExitReasons aExitReason, LPTSTR aBuf = NULL, int ExitCode = 0);
 	void TerminateApp(ExitReasons aExitReason, int aExitCode); // L31: Added aExitReason. See script.cpp.
 	LineNumberType LoadFromFile();
-#ifndef AUTOHOTKEYSC
 	LineNumberType LoadFromText(LPTSTR aScript,LPCTSTR aPathToShow = NULL); // HotKeyIt H1 load text instead file ahktextdll
 	ResultType LoadIncludedText(LPTSTR aScript,LPCTSTR aPathToShow = NULL); //New read text
-#endif
 	ResultType LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure);
 	ResultType UpdateOrCreateTimer(IObject *aLabel, LPTSTR aPeriod, LPTSTR aPriority, bool aEnable
 		, bool aUpdatePriorityOnly);
@@ -3218,6 +3223,9 @@ BIF_DECL(BIF_RegEx);
 BIF_DECL(BIF_Ord);
 BIF_DECL(BIF_Chr);
 BIF_DECL(BIF_Format);
+#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+BIF_DECL(BIF_NewThread);
+#endif
 BIF_DECL(BIF_NumGet);
 BIF_DECL(BIF_NumPut);
 BIF_DECL(BIF_StrGetPut);
@@ -3358,6 +3366,10 @@ bool ScriptGetJoyState(JoyControls aJoy, int aJoystickID, ExprTokenType &aToken,
 HWND DetermineTargetWindow(ExprTokenType *aParam[], int aParamCount);
 
 LPTSTR GetExitReasonString(ExitReasons aExitReason);
+
+#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+VOID CALLBACK ThreadExitApp(ULONG_PTR dwParam);
+#endif
 
 void free_compiled_regex();
 #endif

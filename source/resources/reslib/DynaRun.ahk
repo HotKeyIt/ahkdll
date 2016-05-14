@@ -1,7 +1,7 @@
 DynaRun(s,pn:="",pr:="",exe:=""){
 static AhkPath,h2o
 if !AhkPath
-AhkPath:="`"" A_AhkPath "`"" (A_IsCompiled||(A_IsDll&&DllCall(A_AhkPath "\ahkgetvar","Str","A_IsCompiled","CDecl"))?" /E":"")
+AhkPath:="`"" A_AhkPath "`"" (A_IsCompiled||(A_IsDll&&DllCall(A_AhkPath "\ahkgetvar","Str","A_IsCompiled","Uint",0,"Uint",0,"CDecl"))?" /E":"")
 ,h2o:="B29C2D1CA2C24A57BC5E208EA09E162F(){`nPLACEHOLDERB29C2D1CA2C24A57BC5E208EA09E162FVarSetCapacity(dmp,sz:=StrLen(hex)//2,0)`nLoopParse,`%hex`%`nIf (`"`"!=h.=A_LoopField) && !Mod(A_Index,2)`nNumPut(`"0x`" h,&dmp,A_Index/2-1,`"UChar`"),h:=`"`"`nreturn ObjLoad(&dmp)`n}`n"
 if (-1=p1:=DllCall("CreateNamedPipe","str",pf:="\\.\pipe\" (pn!=""?pn:"AHK" A_TickCount),"uint",2,"uint",0,"uint",255,"uint",0,"uint",0,"Ptr",0,"Ptr",0))
 || (-1=p2:=DllCall("CreateNamedPipe","str",pf,"uint",2,"uint",0,"uint",255,"uint",0,"uint",0,"Ptr",0,"Ptr",0))

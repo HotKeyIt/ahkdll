@@ -25,46 +25,56 @@ GNU General Public License for more details.
 #include "Debugger.h"
 
 #ifndef AUTOHOTKEYSC
-extern FuncLibrary sLib[FUNC_LIB_COUNT]; // function libraries
+_thread_local extern FuncLibrary sLib[FUNC_LIB_COUNT]; // function libraries
 extern LPSTR g_hWinAPI, g_hWinAPIlowercase; // loads WinAPI functions definitions from resource
 #endif
+_thread_local extern SimpleHeap *g_SimpleHeap;
 extern HRSRC g_hResource;		// for compiled AutoHotkey.exe
-extern HCUSTOMMODULE g_hMSVCR;
+EXPORT extern HCUSTOMMODULE g_hMSVCR;
 #ifdef _USRDLL
-extern bool g_Reloading;
-extern bool g_Loading;
+_thread_local extern bool g_Reloading;
+_thread_local extern bool g_Loading;
 #endif
+#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+EXPORT FARPROC g_ThreadExitApp;
+extern UINT_PTR g_ahkThreads[MAX_AHK_THREADS][7];
+#endif
+_thread_local extern MetaObject *g_MetaObject; // Defines "object" behaviour for non-object values.
 extern HINSTANCE g_hInstance;
-extern HMODULE g_hMemoryModule;
-extern HANDLE g_hThread;
+_thread_local extern HMODULE g_hMemoryModule;
+_thread_local extern HANDLE g_hThread;
+_thread_local extern DWORD g_ThreadID;
 EXPORT extern DWORD g_MainThreadID;
 extern DWORD g_HookThreadID;
+#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+_thread_local extern LPTSTR g_lpScript;
+#endif
 extern ATOM g_ClassRegistered;
-extern CRITICAL_SECTION g_CriticalRegExCache;
+_thread_local extern CRITICAL_SECTION g_CriticalRegExCache;
 #ifdef _USRDLL
-extern CRITICAL_SECTION g_CriticalHeapBlocks;
+_thread_local extern CRITICAL_SECTION g_CriticalHeapBlocks;
 #endif
 extern CRITICAL_SECTION g_CriticalAhkFunction;
 
-extern UINT g_DefaultScriptCodepage;
+_thread_local extern UINT g_DefaultScriptCodepage;
 
-extern bool g_ReturnNotExit;	// for ahkExec/addScript/addFile
-extern bool g_DestroyWindowCalled;
-extern HWND g_hWnd;  // The main window
-extern HWND g_hWndEdit;  // The edit window, child of main.
-extern HFONT g_hFontEdit;
-extern HACCEL g_hAccelTable; // Accelerator table for main menu shortcut keys.
+_thread_local extern bool g_ReturnNotExit;	// for ahkExec/addScript/addFile
+_thread_local extern bool g_DestroyWindowCalled;
+_thread_local extern HWND g_hWnd;  // The main window
+_thread_local extern HWND g_hWndEdit;  // The edit window, child of main.
+_thread_local extern HFONT g_hFontEdit;
+_thread_local extern HACCEL g_hAccelTable; // Accelerator table for main menu shortcut keys.
 
 typedef int (WINAPI *StrCmpLogicalW_type)(LPCWSTR, LPCWSTR);
-extern StrCmpLogicalW_type g_StrCmpLogicalW;
-extern WNDPROC g_TabClassProc;
+_thread_local extern StrCmpLogicalW_type g_StrCmpLogicalW;
+_thread_local extern WNDPROC g_TabClassProc;
 
 extern modLR_type g_modifiersLR_logical;   // Tracked by hook (if hook is active).
 extern modLR_type g_modifiersLR_logical_non_ignored;
 extern modLR_type g_modifiersLR_physical;  // Same as above except it's which modifiers are PHYSICALLY down.
 
 #ifdef FUTURE_USE_MOUSE_BUTTONS_LOGICAL
-extern WORD g_mouse_buttons_logical; // A bitwise combination of MK_LBUTTON, etc.
+_thread_local extern WORD g_mouse_buttons_logical; // A bitwise combination of MK_LBUTTON, etc.
 #endif
 
 #define STATE_DOWN 0x80
@@ -79,58 +89,59 @@ extern BYTE g_MenuMaskKey; // L38: See #MenuMaskKey.
 
 // If a SendKeys() operation takes longer than this, hotkey's modifiers won't be pressed back down:
 extern int g_HotkeyModifierTimeout;
-extern int g_ClipboardTimeout;
+_thread_local extern int g_ClipboardTimeout;
 
 extern HHOOK g_KeybdHook;
 extern HHOOK g_MouseHook;
 extern HHOOK g_PlaybackHook;
-extern bool g_ForceLaunch;
-extern bool g_WinActivateForce;
-extern bool g_MustDeclare;
-extern bool g_RunStdIn;
-extern WarnMode g_Warn_UseUnsetLocal;
-extern WarnMode g_Warn_UseUnsetGlobal;
-extern WarnMode g_Warn_LocalSameAsGlobal;
-extern SingleInstanceType g_AllowOnlyOneInstance;
-extern PVOID g_ExceptionHandler;
-extern bool g_ExceptionWarnContinuable;
+_thread_local extern bool g_ForceLaunch;
+_thread_local extern bool g_WinActivateForce;
+_thread_local extern bool g_MustDeclare;
+_thread_local extern bool g_RunStdIn;
+_thread_local extern WarnMode g_Warn_UseUnsetLocal;
+_thread_local extern WarnMode g_Warn_UseUnsetGlobal;
+_thread_local extern WarnMode g_Warn_LocalSameAsGlobal;
+_thread_local extern SingleInstanceType g_AllowOnlyOneInstance;
+_thread_local extern PVOID g_ExceptionHandler;
+_thread_local extern bool g_ExceptionWarnContinuable;
 #ifndef MINIDLL
 extern HookType g_ExceptionHooksToEnable;
-extern bool g_NoTrayIcon;
+_thread_local extern bool g_NoTrayIcon;
 #endif
-extern bool g_persistent;
+_thread_local extern bool g_persistent;
 #ifdef AUTOHOTKEYSC
-	extern bool g_AllowMainWindow;
+_thread_local extern bool g_AllowMainWindow;
 #endif
-extern bool g_DeferMessagesForUnderlyingPump;
-extern bool g_MainTimerExists;
-extern bool g_AutoExecTimerExists;
+_thread_local extern bool g_DeferMessagesForUnderlyingPump;
+_thread_local extern bool g_MainTimerExists;
+_thread_local extern bool g_AutoExecTimerExists;
 #ifndef MINIDLL
-extern bool g_InputTimerExists;
+_thread_local extern bool g_InputTimerExists;
 #endif
-extern bool g_DerefTimerExists;
-extern bool g_SoundWasPlayed;
+_thread_local extern bool g_DerefTimerExists;
+_thread_local extern bool g_SoundWasPlayed;
 #ifndef MINIDLL
 extern bool g_IsSuspended;
 #endif
-EXPORT extern BOOL g_AllowInterruption;
-extern int g_nLayersNeedingTimer;
-extern int g_nThreads;
-extern int g_nPausedThreads;
+_thread_local extern BOOL g_AllowInterruption;
+_thread_local extern int g_nLayersNeedingTimer;
+_thread_local extern int g_nThreads;
+_thread_local extern int g_nPausedThreads;
 #ifndef MINIDLL
-extern int g_MaxHistoryKeys;
+_thread_local extern int g_MaxHistoryKeys;
 #endif
 
 #ifndef MINIDLL
-extern UCHAR g_MaxThreadsPerHotkey;
+_thread_local extern UCHAR g_MaxThreadsPerHotkey;
 #endif
-extern int g_MaxThreadsTotal;
+_thread_local extern int g_MaxThreadsTotal;
 #ifndef MINIDLL
 extern int g_MaxHotkeysPerInterval;
 extern int g_HotkeyThrottleInterval;
 #endif
-extern bool g_MaxThreadsBuffer;
-extern SendLevelType g_InputLevel;
+_thread_local extern bool g_MaxThreadsBuffer;
+_thread_local extern SendLevelType g_InputLevel;
+
 #ifndef MINIDLL
 extern HotkeyCriterion *g_FirstHotCriterion, *g_LastHotCriterion;
 
@@ -142,23 +153,23 @@ extern HotkeyCriterion *g_FirstHotExpr, *g_LastHotExpr;
 extern int g_ScreenDPI;
 extern MenuTypeType g_MenuIsVisible;
 #endif
-extern int g_nMessageBoxes;
+_thread_local extern int g_nMessageBoxes;
 #ifndef MINIDLL
-extern int g_nInputBoxes;
-extern int g_nFileDialogs;
-extern int g_nFolderDialogs;
-extern InputBoxType g_InputBox[MAX_INPUTBOXES];
-extern GuiType **g_gui;
-extern int g_guiCount, g_guiCountMax;
+_thread_local extern int g_nInputBoxes;
+_thread_local extern int g_nFileDialogs;
+_thread_local extern int g_nFolderDialogs;
+_thread_local extern InputBoxType g_InputBox[MAX_INPUTBOXES];
+_thread_local extern GuiType **g_gui;
+_thread_local extern int g_guiCount, g_guiCountMax;
 #endif
-extern HWND g_hWndToolTip[MAX_TOOLTIPS];
-extern MsgMonitorList g_MsgMonitor;
+_thread_local extern HWND g_hWndToolTip[MAX_TOOLTIPS];
+_thread_local extern MsgMonitorList *g_MsgMonitor;
 
-extern UCHAR g_SortCaseSensitive;
-extern bool g_SortNumeric;
-extern bool g_SortReverse;
-extern int g_SortColumnOffset;
-extern Func *g_SortFunc;
+_thread_local extern UCHAR g_SortCaseSensitive;
+_thread_local extern bool g_SortNumeric;
+_thread_local extern bool g_SortReverse;
+_thread_local extern int g_SortColumnOffset;
+_thread_local extern Func *g_SortFunc;
 
 #define g_DerefChar   '%' // As of v2 these are constant, so even more parts of the code assume they
 #define g_EscapeChar  '`' // are at their usual default values to reduce code size/complexity.
@@ -186,7 +197,7 @@ extern bool g_HSResetUponMouseClick;
 extern TCHAR g_EndChars[HS_MAX_END_CHARS + 1];
 #endif
 // Global objects:
-extern Var *g_ErrorLevel;
+_thread_local extern Var *g_ErrorLevel;
 #ifndef MINIDLL
 extern input_type g_input;
 #endif
@@ -197,13 +208,13 @@ EXTERN_OSVER;
 extern HICON g_IconSmall;
 extern HICON g_IconLarge;
 #endif
-extern DWORD g_OriginalTimeout;
+_thread_local extern DWORD g_OriginalTimeout;
 
 EXTERN_G;
-extern global_struct g_default, *g_array;
+_thread_local extern global_struct g_default, g_startup, *g_array;
 
-extern TCHAR g_WorkingDir[MAX_PATH];  // Explicit size needed here in .h file for use with sizeof().
-extern LPTSTR g_WorkingDirOrig;
+_thread_local extern TCHAR g_WorkingDir[MAX_PATH];  // Explicit size needed here in .h file for use with sizeof().
+_thread_local extern LPTSTR g_WorkingDirOrig;
 
 extern bool g_ForceKeybdHook;
 extern ToggleValueType g_ForceNumLock;

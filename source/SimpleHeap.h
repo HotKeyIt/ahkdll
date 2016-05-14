@@ -39,24 +39,23 @@ GNU General Public License for more details.
 
 class SimpleHeap
 {
-private:
-
-	SimpleHeap();  // Private constructor, since we want only the static methods to be able to create new objects.
 public:
-	~SimpleHeap();
-	static SimpleHeap *CreateBlock();
+	SimpleHeap *CreateBlock();
 	char *mBlock; // This object's memory block.  Although private, its contents are public.
 	char *mFreeMarker;  // Address inside the above block of the first unused byte.
 	size_t mSpaceAvailable;
-	static UINT sBlockCount;
-	static SimpleHeap *sFirst, *sLast;  // The first and last objects in the linked list.
-	static char *sMostRecentlyAllocated; // For use with Delete().
+	UINT mBlockCount;
+	SimpleHeap *mFirst, *mLast;  // The first and last objects in the linked list.
+	char *mMostRecentlyAllocated; // For use with Delete().
+	SimpleHeap **mBlocks;
 	SimpleHeap *mNextBlock;  // The object after this one in the linked list; NULL if none.
-//	static UINT GetBlockCount() {return sBlockCount;}
-	static LPTSTR Malloc(LPTSTR aBuf, size_t aLength = -1); // Return a block of memory to the caller and copy aBuf into it.
-	static void* Malloc(size_t aSize); // Return a block of memory to the caller.
-	static void Delete(void *aPtr);
-	static void DeleteAll();
+//	static UINT GetBlockCount() {return mBlockCount;}
+	LPTSTR Malloc(LPTSTR aBuf, size_t aLength = -1); // Return a block of memory to the caller and copy aBuf into it.
+	void* Malloc(size_t aSize); // Return a block of memory to the caller.
+	void Delete(void *aPtr);
+	void DeleteAll();
+	SimpleHeap() : mFirst(NULL), mLast(NULL), mBlocks(NULL), mMostRecentlyAllocated(NULL), mNextBlock(NULL), mBlock(NULL), mBlockCount(0) {}
+	~SimpleHeap();
 };
 
 #endif

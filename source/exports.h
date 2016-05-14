@@ -2,6 +2,7 @@
 #ifndef exports_h
 #define exports_h
 
+#ifdef _USRDLL
 EXPORT int ahkPause(LPTSTR aChangeTo);
 EXPORT UINT_PTR ahkFindLabel(LPTSTR aLabelName);
 EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar = 0);
@@ -17,7 +18,24 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute = 0);
 EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute = 0);
 EXPORT int ahkExec(LPTSTR script);
 #endif
+#else
+EXPORT int ahkPause(LPTSTR aChangeTo, DWORD aThreadID = 0);
+EXPORT UINT_PTR ahkFindLabel(LPTSTR aLabelName, DWORD aThreadID = 0);
+EXPORT LPTSTR ahkgetvar(LPTSTR name, unsigned int getVar = 0, DWORD aThreadID = 0);
+EXPORT int ahkassign(LPTSTR name, LPTSTR value, DWORD aThreadID = 0);
+EXPORT UINT_PTR ahkExecuteLine(UINT_PTR line, unsigned int aMode, unsigned int wait, DWORD aThreadID = 0);
+EXPORT int ahkLabel(LPTSTR aLabelName, unsigned int nowait = 0, DWORD aThreadID = 0);
+EXPORT UINT_PTR ahkFindFunc(LPTSTR funcname, DWORD aThreadID = 0);
+EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1 = _T(""), LPTSTR param2 = _T(""), LPTSTR param3 = _T(""), LPTSTR param4 = _T(""), LPTSTR param5 = _T(""), LPTSTR param6 = _T(""), LPTSTR param7 = _T(""), LPTSTR param8 = _T(""), LPTSTR param9 = _T(""), LPTSTR param10 = _T(""), DWORD aThreadID = 0);
+EXPORT int ahkPostFunction(LPTSTR func, LPTSTR param1 = _T(""), LPTSTR param2 = _T(""), LPTSTR param3 = _T(""), LPTSTR param4 = _T(""), LPTSTR param5 = _T(""), LPTSTR param6 = _T(""), LPTSTR param7 = _T(""), LPTSTR param8 = _T(""), LPTSTR param9 = _T(""), LPTSTR param10 = _T(""), DWORD aThreadID = 0);
 
+#ifndef AUTOHOTKEYSC
+EXPORT int ahkReady(DWORD aThreadID = 0);
+EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute = 0, DWORD aThreadID = 0);
+EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute = 0, DWORD aThreadID = 0);
+EXPORT int ahkExec(LPTSTR script, DWORD aThreadID = 0);
+#endif
+#endif
 void callFuncDllVariant(FuncAndToken *aFuncAndToken); 
 void callFuncDll(FuncAndToken *aFuncAndToken); 
 
@@ -35,7 +53,7 @@ EXPORT int com_ahkTerminate(int timeout);
 void reloadDll();
 ResultType terminateDll(int aExitReason);
 EXPORT int ahkIsUnicode();
-#endif
+
 
 #ifndef MINIDLL
 //COM virtual functions declaration
@@ -53,7 +71,7 @@ UINT_PTR com_addScript(LPTSTR script, int aExecute);
 int com_ahkExec(LPTSTR script);
 UINT_PTR com_addFile(LPTSTR fileName, int waitexecute);
 #endif
-#ifdef _USRDLL
+
 UINT_PTR com_ahkdll(LPTSTR fileName,LPTSTR argv);
 UINT_PTR com_ahktextdll(LPTSTR fileName,LPTSTR argv);
 int com_ahkTerminate(int timeout);

@@ -34,7 +34,7 @@ for k,v in RCData
       ExitApp
     }
   }
-Loop 2 {
+Loop 1 {
   idx:=A_Index
   for k,o in RCData
   {

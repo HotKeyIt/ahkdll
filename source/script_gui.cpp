@@ -531,7 +531,7 @@ ResultType Script::PerformGui(LPTSTR aBuf, LPTSTR aParam2, LPTSTR aParam3, LPTST
 			// By design, the below will give a slightly misleading error if the specified menu is the
 			// TRAY menu, since it should be obvious that it cannot be used as a menu bar (since it
 			// must always be of the popup type):
-			if (   !(menu = FindMenu(aParam2)) || menu == g_script.mTrayMenu   ) // Relies on short-circuit boolean.
+			if (   !(menu = FindMenu(aParam2)) || menu == g_script->mTrayMenu   ) // Relies on short-circuit boolean.
 			{
 				result = ScriptError(ERR_MENU, aParam2);
 				goto return_the_result;
@@ -1587,28 +1587,28 @@ ResultType Line::GuiControlGet(LPTSTR aCommand, LPTSTR aControlID, LPTSTR aParam
 		// var names that are too long:
 		TCHAR var_name[MAX_VAR_NAME_LENGTH + 20];
 		Var *var;
-		if (   !(var = g_script.FindOrAddVar(var_name
+		if (   !(var = g_script->FindOrAddVar(var_name
 			, sntprintf(var_name, _countof(var_name), _T("%sX"), output_var.mName)))   )
 		{
 			result = FAIL; // It will have already displayed the error.
 			goto return_the_result;
 		}
 		var->Assign(gui.Unscale(pt.x));
-		if (   !(var = g_script.FindOrAddVar(var_name
+		if (   !(var = g_script->FindOrAddVar(var_name
 			, sntprintf(var_name, _countof(var_name), _T("%sY"), output_var.mName)))   )
 		{
 			result = FAIL; // It will have already displayed the error.
 			goto return_the_result;
 		}
 		var->Assign(gui.Unscale(pt.y));
-		if (   !(var = g_script.FindOrAddVar(var_name
+		if (   !(var = g_script->FindOrAddVar(var_name
 			, sntprintf(var_name, _countof(var_name), _T("%sW"), output_var.mName)))   )
 		{
 			result = FAIL; // It will have already displayed the error.
 			goto return_the_result;
 		}
 		var->Assign(gui.Unscale(rect.right - rect.left));
-		if (   !(var = g_script.FindOrAddVar(var_name
+		if (   !(var = g_script->FindOrAddVar(var_name
 			, sntprintf(var_name, _countof(var_name), _T("%sH"), output_var.mName)))   )
 		{
 			result = FAIL; // It will have already displayed the error.
@@ -1665,9 +1665,9 @@ error:
 /////////////////
 // Static members
 /////////////////
-FontType *GuiType::sFont = NULL; // An array of structs, allocated upon first use.
-int GuiType::sFontCount = 0;
-HWND GuiType::sTreeWithEditInProgress = NULL;
+_thread_local FontType *GuiType::sFont = NULL; // An array of structs, allocated upon first use.
+_thread_local int GuiType::sFontCount = 0;
+_thread_local HWND GuiType::sTreeWithEditInProgress = NULL;
 
 
 
@@ -1774,7 +1774,7 @@ ResultType GuiType::Destroy(GuiType &gui)
 	}
 	HICON icon_eligible_for_destruction = gui.mIconEligibleForDestruction;
 	HICON icon_eligible_for_destruction_small = gui.mIconEligibleForDestructionSmall;
-	if (icon_eligible_for_destruction && icon_eligible_for_destruction != g_script.mCustomIcon) // v1.0.37.07.
+	if (icon_eligible_for_destruction && icon_eligible_for_destruction != g_script->mCustomIcon) // v1.0.37.07.
 		DestroyIconsIfUnused(icon_eligible_for_destruction, icon_eligible_for_destruction_small); // Must be done only after removal from g_gui.
 	// For simplicity and performance, any fonts used *solely* by a destroyed window are destroyed
 	// only when the program terminates.  Another reason for this is that sometimes a destroyed window
@@ -1785,7 +1785,7 @@ ResultType GuiType::Destroy(GuiType &gui)
 	free(gui.mControl); // Free the control array, which was previously malloc'd.
 	gui.Release(); // After this, the var "gui" is invalid so should not be referenced.
 	// If this Gui was the last thing keeping the script running, exit the script:
-	g_script.ExitIfNotPersistent(EXIT_DESTROY);
+	g_script->ExitIfNotPersistent(EXIT_DESTROY);
 	return OK;
 }
 
@@ -1860,8 +1860,12 @@ ResultType GuiType::Create()
 #else
 		if (!RegisterClassEx(&wc))
 		{
-			MsgBox(_T("RegClass")); // Short/generic msg since so rare.
-			return FAIL;
+			// ignore error if it is not our main thread
+			if (g_MainThreadID == g_ThreadID)
+			{
+				MsgBox(_T("RegClass")); // Short/generic msg since so rare.
+				return FAIL;
+			}
 		}
 #endif
 		sGuiInitialized = true;
@@ -1872,16 +1876,16 @@ ResultType GuiType::Create()
 	// The above is done prior to creating the window so that mLabelForDropFiles can determine
 	// whether to add the WS_EX_ACCEPTFILES style.
 
-	if (   !(mHwnd = CreateWindowEx(mExStyle, WINDOW_CLASS_GUI, g_script.mFileName, mStyle, 0, 0, 0, 0
+	if (   !(mHwnd = CreateWindowEx(mExStyle, WINDOW_CLASS_GUI, g_script->mFileName, mStyle, 0, 0, 0, 0
 		, mOwner, NULL, g_hInstance, NULL))   )
 		return FAIL;
 
 	// L17: Use separate big/small icons for best results.
 	HICON big_icon, small_icon;
-	if (g_script.mCustomIcon)
+	if (g_script->mCustomIcon)
 	{
-		mIconEligibleForDestruction = big_icon = g_script.mCustomIcon;
-		mIconEligibleForDestructionSmall = small_icon = g_script.mCustomIconSmall; // Should always be non-NULL if mCustomIcon is non-NULL.
+		mIconEligibleForDestruction = big_icon = g_script->mCustomIcon;
+		mIconEligibleForDestructionSmall = small_icon = g_script->mCustomIconSmall; // Should always be non-NULL if mCustomIcon is non-NULL.
 	}
 	else
 	{
@@ -1913,8 +1917,8 @@ ResultType GuiType::Create()
 
 LPTSTR GuiType::ConvertEvent(GuiEventType evt)
 {
-	static LPTSTR sNames[] = GUI_EVENT_NAMES;
-	static TCHAR sBuf[2] = { 0, 0 };
+	_thread_local static LPTSTR sNames[] = GUI_EVENT_NAMES;
+	_thread_local static TCHAR sBuf[2] = { 0, 0 };
 
 	if (evt < GUI_EVENT_FIRST_UNNAMED)
 		return sNames[evt];
@@ -1973,23 +1977,23 @@ void GuiType::SetLabels(LPTSTR aLabelPrefix)
 
 	// Find the label to run automatically when the form closes (if any):
 	_tcscpy(label_suffix, _T("Close"));
-	mLabelForClose = g_script.FindCallable(label_name, NULL, 1);  // OK if NULL (closing the window is the same as "gui, cancel").
+	mLabelForClose = g_script->FindCallable(label_name, NULL, 1);  // OK if NULL (closing the window is the same as "gui, cancel").
 
 	// Find the label to run automatically when the user presses Escape (if any):
 	_tcscpy(label_suffix, _T("Escape"));
-	mLabelForEscape = g_script.FindCallable(label_name, NULL, 1);  // OK if NULL (pressing ESCAPE does nothing).
+	mLabelForEscape = g_script->FindCallable(label_name, NULL, 1);  // OK if NULL (pressing ESCAPE does nothing).
 
 	// Find the label to run automatically when the user resizes the window (if any):
 	_tcscpy(label_suffix, _T("Size"));
-	mLabelForSize = g_script.FindCallable(label_name, NULL, 4);  // OK if NULL.
+	mLabelForSize = g_script->FindCallable(label_name, NULL, 4);  // OK if NULL.
 
 	// Find the label to run automatically when the user invokes context menu via AppsKey, Rightclick, or Shift-F10:
 	_tcscpy(label_suffix, _T("ContextMenu"));
-	mLabelForContextMenu = g_script.FindCallable(label_name, NULL, 6);  // OK if NULL (leaves context menu unhandled).
+	mLabelForContextMenu = g_script->FindCallable(label_name, NULL, 6);  // OK if NULL (leaves context menu unhandled).
 
 	// Find the label to run automatically when files are dropped onto the window:
 	_tcscpy(label_suffix, _T("DropFiles"));
-	if ((mLabelForDropFiles = g_script.FindCallable(label_name, NULL, 5))  // OK if NULL (dropping files is disallowed).
+	if ((mLabelForDropFiles = g_script->FindCallable(label_name, NULL, 5))  // OK if NULL (dropping files is disallowed).
 		&& !mHdrop) // i.e. don't allow user to visibly drop files onto window if a drop is already queued or running.
 		mExStyle |= WS_EX_ACCEPTFILES; // Makes the window accept drops. Otherwise, the WM_DROPFILES msg is not received.
 	else
@@ -2035,7 +2039,7 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 {
 	#define TOO_MANY_CONTROLS _T("Too many controls.") // Short msg since so rare.
 	if (mControlCount >= MAX_CONTROLS_PER_GUI)
-		return g_script.ScriptError(TOO_MANY_CONTROLS);
+		return g_script->ScriptError(TOO_MANY_CONTROLS);
 	if (mControlCount >= mControlCapacity) // The section below on the above check already having been done.
 	{
 		// realloc() to keep the array contiguous, which allows better-performing methods to be
@@ -2044,7 +2048,7 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 		GuiControlType *realloc_temp;  // Needed since realloc returns NULL on failure but leaves original block allocated.
 		if (   !(realloc_temp = (GuiControlType *)realloc(mControl  // If passed NULL, realloc() will do a malloc().
 			, (mControlCapacity + GUI_CONTROL_BLOCK_SIZE) * sizeof(GuiControlType)))   ) 
-			return g_script.ScriptError(TOO_MANY_CONTROLS); // A non-specific msg since this error is so rare.
+			return g_script->ScriptError(TOO_MANY_CONTROLS); // A non-specific msg since this error is so rare.
 		mControl = realloc_temp;
 		mControlCapacity += GUI_CONTROL_BLOCK_SIZE;
 	}
@@ -2070,7 +2074,7 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 	if (aControlType == GUI_CONTROL_TAB)
 	{
 		if (mTabControlCount == MAX_TAB_CONTROLS)
-			return g_script.ScriptError(_T("Too many tab controls.")); // Short msg since so rare.
+			return g_script->ScriptError(_T("Too many tab controls.")); // Short msg since so rare.
 		// For now, don't allow a tab control to be create inside another tab control because it raises
 		// doubt and probably would create complications.  If it ever is allowed, note that
 		// control.tab_index stores this tab control's index (0 for the first tab control, 1 for the
@@ -2081,7 +2085,7 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 	else if (aControlType == GUI_CONTROL_STATUSBAR)
 	{
 		if (mStatusBarHwnd)
-			return g_script.ScriptError(_T("Too many status bars.")); // Short msg since so rare.
+			return g_script->ScriptError(_T("Too many status bars.")); // Short msg since so rare.
 		control.tab_control_index = MAX_TAB_CONTROLS; // Indicate that bar isn't owned by any tab control.
 		// No need to do the following because ZeroMem did it:
 		//control.tab_index = 0; // Ignored but set for maintainability/consistency.
@@ -2466,7 +2470,7 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 		//LPTSTR string_list[] = {_T("\r"), _T("\n"), _T(" "), _T("\t"), _T("&"), _T("`"), NULL}; // \r is separate from \n in case they're ever unpaired. Last char must be NULL to terminate the list.
 		//for (LPTSTR *cp = string_list; *cp; ++cp)
 		//	StrReplace(label_name, *cp, _T(""), SCS_SENSITIVE);
-		control.jump_to_label = g_script.FindCallable(label_name, NULL, 4);  // OK if NULL (the button will do nothing).
+		control.jump_to_label = g_script->FindCallable(label_name, NULL, 4);  // OK if NULL (the button will do nothing).
 	}
 
 	// The below will yield NULL for GUI_CONTROL_STATUSBAR because control.tab_control_index==OutOfBounds for it.
@@ -3956,7 +3960,7 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 		
 	case GUI_CONTROL_ACTIVEX:
 	{
-		static bool sAtlAxInitialized = false;
+		_thread_local static bool sAtlAxInitialized = false;
 		if (!sAtlAxInitialized)
 		{
 			typedef BOOL (WINAPI *MyAtlAxWinInit)();
@@ -3991,7 +3995,7 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 
 	case GUI_CONTROL_CUSTOM:
 		if (opt.customClassAtom == 0)
-			return g_script.ScriptError(_T("A window class is required."));
+			return g_script->ScriptError(_T("A window class is required."));
 		control.hwnd = CreateWindowEx(exstyle, MAKEINTATOM(opt.customClassAtom), aText, style
 			, opt.x - (mHScroll && mHScroll->nPos ? mHScroll->nPos : 0), opt.y - (mVScroll && mVScroll->nPos ? mVScroll->nPos : 0), opt.width, opt.height, mHwnd, control_id, g_hInstance, NULL);
 		break;
@@ -4032,7 +4036,7 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 
 	// Below also serves as a bug check, i.e. GUI_CONTROL_INVALID or some unknown type.
 	if (!control.hwnd)
-		return g_script.ScriptError(_T("Can't create control."));
+		return g_script->ScriptError(_T("Can't create control."));
 	// Otherwise the above control creation succeeded.
 	++mControlCount;
 	mControlWidthWasSetByContents = control_width_was_set_by_contents; // Set for use by next control, if any.
@@ -4344,7 +4348,7 @@ ResultType GuiType::ParseOptions(LPTSTR aOptions, bool &aSetLastFoundWindow, Tog
 					if (new_owner && new_owner != mHwnd) // Window can't own itself!
 						mOwner = new_owner;
 					else
-						return g_script.ScriptError(_T("Invalid or nonexistent owner or parent window."), next_option);
+						return g_script->ScriptError(_T("Invalid or nonexistent owner or parent window."), next_option);
 				}
 				else
 					mOwner = g_hWnd; // Make a window owned (by script's main window) omits its taskbar button.
@@ -4446,15 +4450,15 @@ ResultType GuiType::ParseOptions(LPTSTR aOptions, bool &aSetLastFoundWindow, Tog
 			// The same object will be used to output values when using vMyVar option -> object.MyVar
 			if (adding)
 			{
-				Var *aVar = g_script.FindOrAddVar(next_option + 6);
+				Var *aVar = g_script->FindOrAddVar(next_option + 6);
 				if (!aVar)
-					return g_script.ScriptError(ERR_MISSING_OUTPUT_VAR, next_option + 6);
+					return g_script->ScriptError(ERR_MISSING_OUTPUT_VAR, next_option + 6);
 				if (mObject) // output existing object into given variable
 					aVar->Assign(mObject);
 				else
 				{	// no object is assigned yet, assign now
 					if (!aVar->HasObject())
-						return g_script.ScriptError(ERR_NO_OBJECT, next_option + 6);
+						return g_script->ScriptError(ERR_NO_OBJECT, next_option + 6);
 					mObject = aVar->mObject;
 					mObject->AddRef();
 				}
@@ -4498,7 +4502,7 @@ ResultType GuiType::ParseOptions(LPTSTR aOptions, bool &aSetLastFoundWindow, Tog
 		}
 		
 		else if (!_tcsnicmp(next_option, _T("Hwnd"), 4))
-			aHwndVar = g_script.FindOrAddVar(next_option + 4);
+			aHwndVar = g_script->FindOrAddVar(next_option + 4);
 
 		else if (!_tcsnicmp(next_option, _T("Label"), 5)) // v1.0.44.09: Allow custom label prefix for the reasons described in SetLabels().
 		{
@@ -4634,7 +4638,7 @@ ResultType GuiType::ParseOptions(LPTSTR aOptions, bool &aSetLastFoundWindow, Tog
 					mStyle &= ~given_style;
 			}
 			else // v1.1.04: Validate Gui options.
-				return g_script.ScriptError(ERR_INVALID_OPTION, next_option);
+				return g_script->ScriptError(ERR_INVALID_OPTION, next_option);
 		}
 
 		*option_end = orig_char; // Undo the temporary termination because the caller needs aOptions to be unaltered.
@@ -5056,7 +5060,7 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 				param2.SetValue(next_option + 4);
 				mObject->Invoke(aResult, aThisToken, IT_CALL, params, 2);
 				if (aResult.value_int64)
-					return g_script.ScriptError(_T("The same variable cannot be used for more than one control.") // It used to say "one control per window" but that seems more confusing than it's worth.
+					return g_script->ScriptError(_T("The same variable cannot be used for more than one control.") // It used to say "one control per window" but that seems more confusing than it's worth.
 						 , next_option - 1);
 				param1.SetValue(next_option + 4);
 				param2.SetValue(_T(""));
@@ -5066,7 +5070,7 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 			} 
 			else
 			{
-				aOpt.hwnd_output_var = g_script.FindOrAddVar(next_option + 4);
+				aOpt.hwnd_output_var = g_script->FindOrAddVar(next_option + 4);
 			}
 		}
 
@@ -5361,7 +5365,7 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 					++next_option; // Now it should point to the variable name of the buddy control.
 					// Check if there's an existing *global* variable of this name.  It must be global
 					// because the variable of a control can never be a local variable:
-					Var *var = g_script.FindVar(next_option, 0, NULL, FINDVAR_GLOBAL); // Search globals only.
+					Var *var = g_script->FindVar(next_option, 0, NULL, FINDVAR_GLOBAL); // Search globals only.
 					if (var)
 					{
 						var = var->ResolveAlias(); // Update it to its target if it's an alias.
@@ -5455,7 +5459,7 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 			// Retrieve the class atom (http://blogs.msdn.com/b/oldnewthing/archive/2004/10/11/240744.aspx)
 			aOpt.customClassAtom = (ATOM) GetClassInfoEx(g_hInstance, className, &wc);
 			if (aOpt.customClassAtom == 0)
-				return g_script.ScriptError(_T("Unregistered window class."), className);
+				return g_script->ScriptError(_T("Unregistered window class."), className);
 		}
 
 		// Styles (alignment/justification):
@@ -5782,7 +5786,7 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 					break;
 				default:
 					// v1.1.04: Validate Gui options.
-					return g_script.ScriptError(ERR_INVALID_OPTION, next_option-1);
+					return g_script->ScriptError(ERR_INVALID_OPTION, next_option-1);
 				}
 				*option_end = orig_char; // Undo the temporary termination because the caller needs aOptions to be unaltered.
 				continue;
@@ -5799,8 +5803,8 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 				if (aControl.type == GUI_CONTROL_GROUPBOX || aControl.type == GUI_CONTROL_PROGRESS)
 					// If control's hwnd exists, we were called from a caller who wants ErrorLevel set
 					// instead of a message displayed:
-					return aControl.hwnd ? g_script.SetErrorLevelOrThrow()
-						: g_script.ScriptError(_T("This control type should not have an associated subroutine.")
+					return aControl.hwnd ? g_script->SetErrorLevelOrThrow()
+						: g_script->ScriptError(_T("This control type should not have an associated subroutine.")
 							, next_option - 1);
 				IObject *candidate_label;
 				candidate_label = NULL;
@@ -5818,7 +5822,7 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 					if (aResult.symbol == SYM_OBJECT)
 						candidate_label = aResult.object;
 				}
-				if (   !candidate_label && !(candidate_label = g_script.FindCallable(next_option, aParam3Var, 4))   )
+				if (   !candidate_label && !(candidate_label = g_script->FindCallable(next_option, aParam3Var, 4))   )
 				{
 					// If there is no explicit label, fall back to a special action if one is available
 					// for this keyword:
@@ -5830,8 +5834,8 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 					//else if (!_tcsicmp(label_name, "Clear")) -->
 					//	control.options |= GUI_CONTROL_ATTRIB_IMPLICIT_CLEAR;
 					else // Since a non-special label was explicitly specified, it's an error that it can't be found.
-						return aControl.hwnd ? g_script.SetErrorLevelOrThrow()
-							: g_script.ScriptError(ERR_NO_LABEL, next_option - 1);
+						return aControl.hwnd ? g_script->SetErrorLevelOrThrow()
+							: g_script->ScriptError(ERR_NO_LABEL, next_option - 1);
 				}
 				if (aControl.type == GUI_CONTROL_TEXT || aControl.type == GUI_CONTROL_PIC)
 					// Apply the SS_NOTIFY style *only* if the control actually has an associated action.
@@ -5859,8 +5863,8 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 					param2.SetValue(next_option);
 					mObject->Invoke(aResult, aThisToken, IT_CALL, params, 2);
 					if (aResult.value_int64)
-						return aControl.hwnd ? g_script.SetErrorLevelOrThrow()
-							: g_script.ScriptError(_T("The same variable cannot be used for more than one control.") // It used to say "one control per window" but that seems more confusing than it's worth.
+						return aControl.hwnd ? g_script->SetErrorLevelOrThrow()
+							: g_script->ScriptError(_T("The same variable cannot be used for more than one control.") // It used to say "one control per window" but that seems more confusing than it's worth.
 								, next_option - 1);
 					param1.SetValue(next_option);
 					param2.SetValue(_T(""));
@@ -5874,7 +5878,7 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 				// This is because it allows layout editors and other script generators to omit the variable
 				// and yet still be able to generate a runnable script.
 				Var *candidate_var;
-				if (   !(candidate_var = g_script.FindOrAddVar(next_option))   ) // Find local or global, see below.
+				if (   !(candidate_var = g_script->FindOrAddVar(next_option))   ) // Find local or global, see below.
 					// For now, this is always a critical error that stops the current quasi-thread rather
 					// than setting ErrorLevel (if ErrorLevel is called for).  This is because adding a
 					// variable can cause one of any number of different errors to be displayed, and changing
@@ -5895,7 +5899,7 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 				// that they point to the global instead.  But that is pretty ugly and doesn't seem worth it.
 				candidate_var = candidate_var->ResolveAlias(); // Update it to its target if it's an alias.  This might be relied upon by Gui::FindControl() and other things, and also the section below.
 				if (candidate_var->IsNonStaticLocal()) // Note that an alias can point to a local vs. global var.
-					return g_script.ScriptError(_T("A control's variable must be global or static."), next_option - 1);
+					return g_script->ScriptError(_T("A control's variable must be global or static."), next_option - 1);
 				// Another reason that the above always resolves aliases is because it allows the next
 				// check below to find true duplicates, even if different aliases are used to create the
 				// controls (i.e. if two alias both point to the same global).
@@ -5909,8 +5913,8 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 				GuiIndexType u;
 				for (u = 0; u < mControlCount; ++u)
 					if (mControl[u].output_var == candidate_var)
-						return aControl.hwnd ? g_script.SetErrorLevelOrThrow()
-							: g_script.ScriptError(_T("The same variable cannot be used for more than one control.") // It used to say "one control per window" but that seems more confusing than it's worth.
+						return aControl.hwnd ? g_script->SetErrorLevelOrThrow()
+							: g_script->ScriptError(_T("The same variable cannot be used for more than one control.") // It used to say "one control per window" but that seems more confusing than it's worth.
 								, next_option - 1);
 				aControl.output_var = candidate_var;
 				break;
@@ -6150,7 +6154,7 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 					break;
 				}
 				// v1.1.04: Validate Gui options.
-				return g_script.ScriptError(ERR_INVALID_OPTION, next_option-1);
+				return g_script->ScriptError(ERR_INVALID_OPTION, next_option-1);
 			} // switch()
 		} // Final "else" in the "else if" ladder.
 
@@ -6484,7 +6488,7 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 			InvalidateRect(aControl.hwnd, NULL, TRUE); // Assume there's text in the control.
 
 		if (style_needed_changing && !style_change_ok) // Override the default errorlevel set by our caller, GuiControl().
-			g_script.SetErrorLevelOrThrow();
+			g_script->SetErrorLevelOrThrow();
 	} // aControl.hwnd is not NULL
 
 	return OK;
@@ -6958,7 +6962,7 @@ ResultType GuiType::Show(LPTSTR aOptions, LPTSTR aText)
 			break;
 		} // switch()
 		if (cp_end == cp)
-			return g_script.ScriptError(ERR_INVALID_OPTION, cp);
+			return g_script->ScriptError(ERR_INVALID_OPTION, cp);
 	} // for()
 
 	int width_orig = width;
@@ -7368,7 +7372,7 @@ ResultType GuiType::Cancel()
 	if (mHwnd)
 		ShowWindow(mHwnd, SW_HIDE);
 	// If this Gui was the last thing keeping the script running, exit the script:
-	g_script.ExitIfNotPersistent(EXIT_WM_CLOSE);
+	g_script->ExitIfNotPersistent(EXIT_WM_CLOSE);
 	return OK;
 }
 
@@ -7421,7 +7425,7 @@ ResultType GuiType::Submit(bool aHideIt)
 		else if (mControl[u].mObjectKey && mControl[u].type != GUI_CONTROL_RADIO)
 		{
 			if (!mObject)
-				g_script.ScriptError(ERR_NO_OBJECT);
+				g_script->ScriptError(ERR_NO_OBJECT);
 			else
 				ControlGetContentsToObject(mObject, mControl[u]);
 		}
@@ -8039,7 +8043,7 @@ ResultType GuiType::ControlGetContentsToObject(IObject *aObject, GuiControlType 
 			// other precedents where a variable is sized to something larger than it winds up carrying.
 			// Set up the var, enlarging it if necessary.
 			if (!(aBuf = (TCHAR*)alloca((length + 1) * sizeof(TCHAR))))
-				return g_script.ScriptError(ERR_OUTOFMEM);;
+				return g_script->ScriptError(ERR_OUTOFMEM);;
 			length = SendMessage(aControl.hwnd, CB_GETLBTEXT, (WPARAM)index, (LPARAM)aBuf);
 			if (length == CB_ERR) // Given the way it was called, this should be impossible based on MSDN docs.
 				return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
@@ -8095,7 +8099,7 @@ ResultType GuiType::ControlGetContentsToObject(IObject *aObject, GuiControlType 
 				// Set up the var, enlarging it if necessary.  If the output_var is of type VAR_CLIPBOARD,
 				// this call will set up the clipboard for writing:
 				if (!(aBuf = (TCHAR*)alloca((length + 1) * sizeof(TCHAR))))
-					return g_script.ScriptError(ERR_OUTOFMEM);
+					return g_script->ScriptError(ERR_OUTOFMEM);
 				cp = aBuf; // Init for both of the loops below.
 				if (aControl.attrib & GUI_CONTROL_ATTRIB_ALTSUBMIT) // Caller wanted the positions, not the text retrieved.
 				{
@@ -8155,7 +8159,7 @@ ResultType GuiType::ControlGetContentsToObject(IObject *aObject, GuiControlType 
 				// Set up the var, enlarging it if necessary.  If the output_var is of type VAR_CLIPBOARD,
 				// this call will set up the clipboard for writing:
 				if (!(aBuf = (TCHAR*)alloca((length + 1) * sizeof(TCHAR))))
-					return g_script.ScriptError(ERR_OUTOFMEM);;
+					return g_script->ScriptError(ERR_OUTOFMEM);;
 				length = SendMessage(aControl.hwnd, LB_GETTEXT, (WPARAM)index, (LPARAM)aBuf);
 				if (length == LB_ERR) // Given the way it was called, this should be impossible based on MSDN docs.
 					return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
@@ -8236,7 +8240,7 @@ ResultType GuiType::ControlGetContentsToObject(IObject *aObject, GuiControlType 
 	  // this call will set up the clipboard for writing:
 	int length = GetWindowTextLength(aControl.hwnd); // Might be zero, which is properly handled below.
 	if (!(aBuf = (TCHAR*)alloca((length + 1) * sizeof(TCHAR))))
-		return g_script.ScriptError(ERR_OUTOFMEM);
+		return g_script->ScriptError(ERR_OUTOFMEM);
 	param2.SetValue(_T(""));
 	if (!GetWindowText(aControl.hwnd, aBuf, (int)(length + 1)))
 		return aObject->Invoke(aResult, aThisToken, IT_SET, params, 2);
@@ -8286,7 +8290,7 @@ GuiIndexType GuiType::FindControl(LPTSTR aControlID)
 	// improved by skipping the first loop entirely when aControlID doesn't exist as a global
 	// variable (GUI controls always have global variables, not locals).
 	Var *var;
-	if (var = g_script.FindVar(aControlID, 0, NULL, FINDVAR_GLOBAL)) // First search globals only because for backward compatibility, a GUI control whose Var* is identical to that of a global should be given precedence over a static that matches some other control.  Furthermore, since most GUI variables are global, doing this check before the static check improves avg-case performance.
+	if (var = g_script->FindVar(aControlID, 0, NULL, FINDVAR_GLOBAL)) // First search globals only because for backward compatibility, a GUI control whose Var* is identical to that of a global should be given precedence over a static that matches some other control.  Furthermore, since most GUI variables are global, doing this check before the static check improves avg-case performance.
 	{
 		// No need to do "var = var->ResolveAlias()" because the line above never finds locals, only globals.
 		// Similarly, there's no need to do confirm that var->IsLocal()==false.
@@ -8295,7 +8299,7 @@ GuiIndexType GuiType::FindControl(LPTSTR aControlID)
 				return u;  // Match found.
 	}
 	if (g->CurrentFunc // v1.0.46.15: Since above failed to match: if we're in a function (which is checked for performance reasons), search for a static or ByRef-that-points-to-a-global-or-static because both should be supported.
-		&& (var = g_script.FindVar(aControlID, 0, NULL, FINDVAR_LOCAL))) // will also find any static var refference
+		&& (var = g_script->FindVar(aControlID, 0, NULL, FINDVAR_LOCAL))) // will also find any static var refference
 	{
 		// No need to do "var = var->ResolveAlias()" because the line above never finds locals, only globals.
 		// Similarly, there's no need to do confirm that var->IsLocal()==false.
@@ -8394,7 +8398,7 @@ int GuiType::FindOrCreateFont(LPTSTR aOptions, LPTSTR aFontName, FontType *aFoun
 			// (GUI constructor relies on at least one font existing in the array).
 			if (!sFont) // v1.0.44.14: Created upon first use to conserve ~14 KB memory in non-GUI scripts.
 				if (   !(sFont = (FontType *)malloc(sizeof(FontType) * MAX_GUI_FONTS))   )
-					g_script.ExitApp(EXIT_CRITICAL, ERR_OUTOFMEM); // Since this condition is so rare, just abort to avoid the need to add extra logic in several places to detect a failed/NULL array.
+					g_script->ExitApp(EXIT_CRITICAL, ERR_OUTOFMEM); // Since this condition is so rare, just abort to avoid the need to add extra logic in several places to detect a failed/NULL array.
 			// Doesn't seem likely that DEFAULT_GUI_FONT face/size will change while a script is running,
 			// or even while the system is running for that matter.  I think it's always an 8 or 9 point
 			// font regardless of desktop's appearance/theme settings.
@@ -8562,7 +8566,7 @@ int GuiType::FindOrCreateFont(LPTSTR aOptions, LPTSTR aFontName, FontType *aFoun
 	// Since above didn't return, create the font if there's room.
 	if (sFontCount >= MAX_GUI_FONTS)
 	{
-		g_script.ScriptError(_T("Too many fonts."));  // Short msg since so rare.
+		g_script->ScriptError(_T("Too many fonts."));  // Short msg since so rare.
 		return -1;
 	}
 
@@ -8573,7 +8577,7 @@ int GuiType::FindOrCreateFont(LPTSTR aOptions, LPTSTR aFontName, FontType *aFoun
 		, DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS, font.quality, FF_DONTCARE, font.name))   )
 		// OUT_DEFAULT_PRECIS/OUT_TT_PRECIS ... DEFAULT_QUALITY/PROOF_QUALITY
 	{
-		g_script.ScriptError(_T("Can't create font."));  // Short msg since so rare.
+		g_script->ScriptError(_T("Can't create font."));  // Short msg since so rare.
 		return -1;
 	}
 
@@ -8613,7 +8617,7 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 	// CalledByIsDialogMessageOrDispatch for any threads beneath it.  Although this may technically be
 	// unnecessary, it adds maintainability.
 	LRESULT msg_reply;
-	if (g_MsgMonitor.Count() // Count is checked here to avoid function-call overhead.
+	if (g_MsgMonitor && g_MsgMonitor->Count() // Count is checked here to avoid function-call overhead.
 		&& (!g->CalledByIsDialogMessageOrDispatch || g->CalledByIsDialogMessageOrDispatchMsg != iMsg) // v1.0.44.11: If called by IsDialog or Dispatch but they changed the message number, check if the script is monitoring that new number.
 		&& MsgMonitor(hWnd, iMsg, wParam, lParam, NULL, msg_reply))
 		return msg_reply; // MsgMonitor has returned "true", indicating that this message should be omitted from further processing.
@@ -8643,7 +8647,7 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 			break; // Let default proc handle it.
 		if (pgui->mStyle & WS_VSCROLL)
 		{
-			static SCROLLINFO aScrollInfo = { sizeof(SCROLLINFO), SIF_ALL };
+			_thread_local static SCROLLINFO aScrollInfo = { sizeof(SCROLLINFO), SIF_ALL };
 
 			GetScrollInfo(pgui->mHwnd, true, &aScrollInfo);
 			short scrolllines = ((short)HIWORD(wParam)) / 120 * -1 * SCROLL_STEP;
@@ -8670,7 +8674,7 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 			break; // Let default proc handle it.
 		if (pgui->mStyle & WS_HSCROLL)
 		{
-			static SCROLLINFO aScrollInfo = { sizeof(SCROLLINFO), SIF_ALL };
+			_thread_local static SCROLLINFO aScrollInfo = { sizeof(SCROLLINFO), SIF_ALL };
 
 			GetScrollInfo(pgui->mHwnd, false, &aScrollInfo);
 			short scrolllines = ((short)HIWORD(wParam)) / 120 * SCROLL_STEP;
@@ -9362,7 +9366,7 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 				else if (control.mObjectKey)
 				{
 					if (!pgui->mObject)
-						g_script.ScriptError(ERR_NO_OBJECT);
+						g_script->ScriptError(ERR_NO_OBJECT);
 					else
 						pgui->ControlGetContentsToObject(pgui->mObject, control);
 				}
@@ -9409,7 +9413,7 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 			else if (control.mObjectKey)
 			{
 				if (!pgui->mObject)
-					g_script.ScriptError(ERR_NO_OBJECT);
+					g_script->ScriptError(ERR_NO_OBJECT);
 				else
 					pgui->ControlGetContentsToObject(pgui->mObject, control);
 			}
@@ -9438,7 +9442,7 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 				else if (control.mObjectKey && control.jump_to_label)
 				{
 					if (!pgui->mObject)
-						g_script.ScriptError(ERR_NO_OBJECT);
+						g_script->ScriptError(ERR_NO_OBJECT);
 					else
 						pgui->ControlGetContentsToObject(pgui->mObject, control);
 				}
@@ -9449,7 +9453,7 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 				NMLINK &nmLink = *(PNMLINK)lParam;
 				LITEM item = nmLink.item;
 				//Link control tries to execute the link URL if href property is set. Otherwise, it will execute a g-label if it exists.
-				if (!*item.szUrl || !g_script.ActionExec((LPTSTR)(LPCTSTR)CStringTCharFromWCharIfNeeded(item.szUrl), NULL, NULL, false))
+				if (!*item.szUrl || !g_script->ActionExec((LPTSTR)(LPCTSTR)CStringTCharFromWCharIfNeeded(item.szUrl), NULL, NULL, false))
 					pgui->Event(control_index, nmhdr.code, GUI_EVENT_NORMAL, item.iLink + 1); // Link control uses 1-based index for g-labels
 			}
 			return 0;
@@ -9497,7 +9501,7 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 			pgui->Event(GUI_HWND_TO_INDEX((HWND)lParam), LOWORD(wParam));
 		else
 		{
-			static SCROLLINFO aScrollInfo = { sizeof(SCROLLINFO), SIF_ALL };
+			_thread_local static SCROLLINFO aScrollInfo = { sizeof(SCROLLINFO), SIF_ALL };
 			bool bar = iMsg == WM_VSCROLL;
 
 			GetScrollInfo(pgui->mHwnd, bar, &aScrollInfo);
@@ -10080,7 +10084,7 @@ void GuiType::Event(GuiIndexType aControlIndex, UINT aNotifyCode, USHORT aGuiEve
 			else if (control.mObjectKey)
 			{
 				if (!mObject)
-					g_script.ScriptError(ERR_NO_OBJECT);
+					g_script->ScriptError(ERR_NO_OBJECT);
 				else
 					ControlGetContentsToObject(mObject, control);
 			}
@@ -10118,7 +10122,7 @@ void GuiType::Event(GuiIndexType aControlIndex, UINT aNotifyCode, USHORT aGuiEve
 				else if (control.mObjectKey)
 				{
 					if (!mObject)
-						g_script.ScriptError(ERR_NO_OBJECT);
+						g_script->ScriptError(ERR_NO_OBJECT);
 					else
 						ControlGetContentsToObject(mObject, control);
 				}
@@ -10163,7 +10167,7 @@ void GuiType::Event(GuiIndexType aControlIndex, UINT aNotifyCode, USHORT aGuiEve
 			else if (control.mObjectKey)
 			{
 				if (!mObject)
-					g_script.ScriptError(ERR_NO_OBJECT);
+					g_script->ScriptError(ERR_NO_OBJECT);
 				else
 					ControlGetContentsToObject(mObject, control);
 			}
@@ -10303,7 +10307,7 @@ LRESULT GuiType::CustomCtrlWmNotify(GuiIndexType aControlIndex, LPNMHDR aNmHdr)
 	g->GuiControlIndex = aControlIndex;
 	g->GuiEvent = 'N';
 	g->EventInfo = (DWORD_PTR) aNmHdr;
-	g_script.mLastPeekTime = GetTickCount();
+	g_script->mLastPeekTime = GetTickCount();
 
 	ExprTokenType param[3];
 	param[0].SetValue((size_t)aControl.hwnd);
@@ -11020,7 +11024,7 @@ ResultType GuiType::SelectAdjacentTab(GuiControlType &aTabControl, bool aMoveToR
 	else if (aTabControl.jump_to_label && aTabControl.mObjectKey)
 	{
 		if (!mObject)
-			g_script.ScriptError(ERR_NO_OBJECT);
+			g_script->ScriptError(ERR_NO_OBJECT);
 		else
 			ControlGetContentsToObject(mObject, aTabControl);
 	}

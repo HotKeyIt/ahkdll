@@ -98,6 +98,12 @@ GNU General Public License for more details.
 #define GET_BIT(buf,n) (((buf) & (1 << (n))) >> (n))
 #define SET_BIT(buf,n,val) ((val) ? ((buf) |= (1<<(n))) : (buf &= ~(1<<(n))))
 
+#ifndef _USRDLL
+#define _thread_local __declspec(thread)
+#else
+#define _thread_local
+#endif
+
 // FAIL = 0 to remind that FAIL should have the value zero instead of something arbitrary
 // because some callers may simply evaluate the return result as true or false
 // (and false is a failure):
@@ -629,11 +635,11 @@ typedef UCHAR HookType;
 #define HOOK_FAIL  0xFF
 #endif
 
-#define EXTERN_G extern global_struct *g
+#define EXTERN_G _thread_local extern global_struct *g
 #define EXTERN_OSVER extern OS_Version g_os
-#define EXTERN_CLIPBOARD extern Clipboard g_clip
-#define EXTERN_SCRIPT extern Script g_script
-#define CLOSE_CLIPBOARD_IF_OPEN	if (g_clip.mIsOpen) g_clip.Close()
+#define EXTERN_CLIPBOARD _thread_local extern Clipboard *g_clip
+#define EXTERN_SCRIPT _thread_local extern Script *g_script
+#define CLOSE_CLIPBOARD_IF_OPEN	if (g_clip->mIsOpen) g_clip->Close()
 #define CLIPBOARD_CONTAINS_ONLY_FILES (!IsClipboardFormatAvailable(CF_NATIVETEXT) && IsClipboardFormatAvailable(CF_HDROP))
 
 
@@ -674,17 +680,17 @@ typedef UCHAR HookType;
 // Therefore, must update tick_now again (its value is used by macro and possibly by its caller)
 // to avoid having to Peek() immediately after the next iteration.
 // ...
-// The code might bench faster when "g_script.mLastPeekTime = tick_now" is a separate operation rather
+// The code might bench faster when "g_script->mLastPeekTime = tick_now" is a separate operation rather
 // than combined in a chained assignment statement.
 #define LONG_OPERATION_UPDATE \
 {\
 	tick_now = GetTickCount();\
-	if (tick_now - g_script.mLastPeekTime > ::g->PeekFrequency)\
+	if (tick_now - g_script->mLastPeekTime > ::g->PeekFrequency)\
 	{\
-		if (PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE) && g_MainThreadID == aThreadID)\
+		if (PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE) && g_ThreadID == aThreadID)\
 			MsgSleep(-1);\
 		tick_now = GetTickCount();\
-		g_script.mLastPeekTime = tick_now;\
+		g_script->mLastPeekTime = tick_now;\
 	}\
 }
 
@@ -692,12 +698,12 @@ typedef UCHAR HookType;
 #define LONG_OPERATION_UPDATE_FOR_SENDKEYS \
 {\
 	tick_now = GetTickCount();\
-	if (tick_now - g_script.mLastPeekTime > ::g->PeekFrequency)\
+	if (tick_now - g_script->mLastPeekTime > ::g->PeekFrequency)\
 	{\
 		if (PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE))\
 			SLEEP_WITHOUT_INTERRUPTION(-1) \
 		tick_now = GetTickCount();\
-		g_script.mLastPeekTime = tick_now;\
+		g_script->mLastPeekTime = tick_now;\
 	}\
 }
 
@@ -859,7 +865,7 @@ struct global_struct
 	SendModes SendMode;
 	DWORD PeekFrequency; // DWORD vs. UCHAR might improve performance a little since it's checked so often.
 	DWORD ThreadStartTime;
-	int UninterruptibleDuration; // Must be int to preserve negative values found in g_script.mUninterruptibleTime.
+	int UninterruptibleDuration; // Must be int to preserve negative values found in g_script->mUninterruptibleTime.
 	DWORD CalledByIsDialogMessageOrDispatchMsg; // Detects that fact that some messages (like WM_KEYDOWN->WM_NOTIFY for UpDown controls) are translated to different message numbers by IsDialogMessage (and maybe Dispatch too).
 	bool CalledByIsDialogMessageOrDispatch; // Helps avoid launching a monitor function twice for the same message.  This would probably be okay if it were a normal global rather than in the g-struct, but due to messaging complexity, this lends peace of mind and robustness.
 	bool TitleFindFast; // Whether to use the fast mode of searching window text, or the more thorough slow mode.

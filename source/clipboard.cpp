@@ -16,7 +16,7 @@ GNU General Public License for more details.
 
 #include "stdafx.h" // pre-compiled headers
 #include "clipboard.h"
-#include "globaldata.h"  // for g_script.ScriptError() and g_ClipboardTimeout
+#include "globaldata.h"  // for g_script->ScriptError() and g_ClipboardTimeout
 #include "application.h" // for MsgSleep()
 #include "util.h" // for strlcpy()
 
@@ -70,7 +70,7 @@ size_t Clipboard::Get(LPTSTR aBuf)
 			Close(CANT_OPEN_CLIPBOARD_READ);
 			return CLIPBOARD_FAILURE;
 		}
-		if (   !(mClipMemNow = g_clip.GetClipboardDataTimeout(clipboard_contains_text ? CF_NATIVETEXT : CF_HDROP))   )
+		if (   !(mClipMemNow = g_clip->GetClipboardDataTimeout(clipboard_contains_text ? CF_NATIVETEXT : CF_HDROP))   )
 		{
 			// v1.0.47.04: Commented out the following that had been in effect when clipboard_contains_files==false:
 			//    Close("GetClipboardData"); // Short error message since so rare.
@@ -222,13 +222,13 @@ LPTSTR Clipboard::PrepareForWrite(size_t aAllocSize)
 	// with 16-bit Windows. They are ignored.": GMEM_DDESHARE
 	if (   !(mClipMemNew = GlobalAlloc(GMEM_MOVEABLE, aAllocSize * sizeof(TCHAR)))   )
 	{
-		g_script.ScriptError(_T("GlobalAlloc"));  // Short error message since so rare.
+		g_script->ScriptError(_T("GlobalAlloc"));  // Short error message since so rare.
 		return NULL;
 	}
 	if (   !(mClipMemNewLocked = (LPTSTR)GlobalLock(mClipMemNew))   )
 	{
 		mClipMemNew = GlobalFree(mClipMemNew);  // This keeps mClipMemNew in sync with its state.
-		g_script.ScriptError(_T("GlobalLock")); // Short error message since so rare.
+		g_script->ScriptError(_T("GlobalLock")); // Short error message since so rare.
 		return NULL;
 	}
 	mCapacity = (UINT)aAllocSize; // Keep mCapacity in sync with the state of mClipMemNewLocked.
@@ -313,7 +313,7 @@ ResultType Clipboard::AbortWrite(LPTSTR aErrorMessage)
 	if (mClipMemNew)
 		mClipMemNew = GlobalFree(mClipMemNew);
 	// Caller needs us to always return FAIL:
-	return *aErrorMessage ? g_script.ScriptError(aErrorMessage) : FAIL;
+	return *aErrorMessage ? g_script->ScriptError(aErrorMessage) : FAIL;
 }
 
 
@@ -350,7 +350,7 @@ ResultType Clipboard::Close(LPTSTR aErrorMessage)
 	//	mClipMemNew = GlobalFree(mClipMemNew);
 	if (aErrorMessage && *aErrorMessage)
 		// Caller needs us to always return FAIL if an error was displayed:
-		return g_script.ScriptError(aErrorMessage);
+		return g_script->ScriptError(aErrorMessage);
 
 	// Seems best not to reset mLength.  But it will quickly become out of date once
 	// the clipboard has been closed and other apps can use it.
@@ -437,7 +437,7 @@ HANDLE Clipboard::GetClipboardDataTimeout(UINT uFormat, BOOL *aNullIsOkay)
 #ifndef ENABLE_CLIPBOARDGETDATA_TIMEOUT
 	// v1.1.16: The timeout and retry behaviour of this function is currently disabled, since it does more
 	// harm than good.  It previously did NO GOOD WHATSOEVER, because SLEEP_WITHOUT_INTERRUPTION indirectly
-	// calls g_clip.Close() via CLOSE_CLIPBOARD_IF_OPEN, so any subsequent attempts to retrieve data by us
+	// calls g_clip->Close() via CLOSE_CLIPBOARD_IF_OPEN, so any subsequent attempts to retrieve data by us
 	// or our caller always fail.  The main point of failure where retrying helps is OpenClipboard(), when
 	// another program has the clipboard open -- and that's handled elsewhere.  If the timeout is re-enabled
 	// for this function, the following format will need to be excluded to prevent unnecessary delays:

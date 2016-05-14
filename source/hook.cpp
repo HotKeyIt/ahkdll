@@ -20,6 +20,7 @@ GNU General Public License for more details.
 #include "util.h" // for snprintfcat()
 #include "window.h" // for MsgBox()
 #include "application.h" // For MsgSleep().
+#include "hotkey.h"
 
 // Declare static variables (global to only this file/module, i.e. no external linkage):
 static HANDLE sKeybdMutex = NULL;
@@ -697,7 +698,7 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 		HWND menu_hwnd;
 		if (   (aVK == VK_LBUTTON || aVK == VK_RBUTTON) && (g_MenuIsVisible // Ordered for short-circuit performance.
 				|| ((menu_hwnd = FindWindow(_T("#32768"), NULL))
-					&& GetWindowThreadProcessId(menu_hwnd, NULL) == g_MainThreadID))   ) // Don't call GetCurrentThreadId() because our thread is different than main's.
+				&& GetWindowThreadProcessId(menu_hwnd, NULL) == g_ThreadID))) // Don't call GetCurrentThreadId() because our thread is different than main's.
 		{
 			// Bug-fix for v1.0.22: If "LControl & LButton::" (and perhaps similar combinations)
 			// is a hotkey, the foreground window would think that the mouse is stuck down, at least
@@ -2275,16 +2276,16 @@ LRESULT SuppressThisKeyFunc(const HHOOK aHook, LPARAM lParam, const vk_type aVK,
 	// system settings of the same ilk as "favor background processes").
 	if (aHotkeyIDToPost != HOTKEY_ID_INVALID)
 	{
-		PostMessage(g_hWnd, AHK_HOOK_HOTKEY, aHotkeyIDToPost, pKeyHistoryCurr->sc); // v1.0.43.03: sc is posted currently only to support the number of wheel turns (to store in A_EventInfo).
+		PostThreadMessage(Hotkey::shk[aHotkeyIDToPost & HOTKEY_ID_MASK]->mThreadID, AHK_HOOK_HOTKEY, aHotkeyIDToPost, pKeyHistoryCurr->sc); // v1.0.43.03: sc is posted currently only to support the number of wheel turns (to store in A_EventInfo).
 		if (aKeyUp && hotkey_up[aHotkeyIDToPost & HOTKEY_ID_MASK] != HOTKEY_ID_INVALID)
 		{
 			// This is a key-down hotkey being triggered by releasing a prefix key.
 			// There's also a corresponding key-up hotkey, so fire it too:
-    		PostMessage(g_hWnd, AHK_HOOK_HOTKEY, hotkey_up[aHotkeyIDToPost & HOTKEY_ID_MASK], pKeyHistoryCurr->sc);
+			PostThreadMessage(Hotkey::shk[aHotkeyIDToPost & HOTKEY_ID_MASK]->mThreadID, AHK_HOOK_HOTKEY, hotkey_up[aHotkeyIDToPost & HOTKEY_ID_MASK], pKeyHistoryCurr->sc);
 		}
 	}
 	if (aHSwParamToPost != HOTSTRING_INDEX_INVALID)
-		PostMessage(g_hWnd, AHK_HOTSTRING, aHSwParamToPost, aHSlParamToPost);
+		PostThreadMessage(Hotstring::shs[aHSwParamToPost]->mThreadID, AHK_HOTSTRING, aHSwParamToPost, aHSlParamToPost);
 	return 1;
 }
 
@@ -2515,16 +2516,16 @@ LRESULT AllowIt(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lParam, cons
 	LRESULT result_to_return = CallNextHookEx(aHook, aCode, wParam, lParam);
 	if (aHotkeyIDToPost != HOTKEY_ID_INVALID)
 	{
-		PostMessage(g_hWnd, AHK_HOOK_HOTKEY, aHotkeyIDToPost, pKeyHistoryCurr->sc); // v1.0.43.03: sc is posted currently only to support the number of wheel turns (to store in A_EventInfo).
+		PostThreadMessage(Hotkey::shk[aHotkeyIDToPost & HOTKEY_ID_MASK]->mThreadID, AHK_HOOK_HOTKEY, aHotkeyIDToPost, pKeyHistoryCurr->sc); // v1.0.43.03: sc is posted currently only to support the number of wheel turns (to store in A_EventInfo).
 		if (aKeyUp && hotkey_up[aHotkeyIDToPost & HOTKEY_ID_MASK] != HOTKEY_ID_INVALID)
 		{
 			// This is a key-down hotkey being triggered by releasing a prefix key.
 			// There's also a corresponding key-up hotkey, so fire it too:
-    		PostMessage(g_hWnd, AHK_HOOK_HOTKEY, hotkey_up[aHotkeyIDToPost & HOTKEY_ID_MASK], pKeyHistoryCurr->sc);
+			PostThreadMessage(Hotkey::shk[aHotkeyIDToPost & HOTKEY_ID_MASK]->mThreadID, AHK_HOOK_HOTKEY, hotkey_up[aHotkeyIDToPost & HOTKEY_ID_MASK], pKeyHistoryCurr->sc);
 		}
 	}
 	if (hs_wparam_to_post != HOTSTRING_INDEX_INVALID)
-		PostMessage(g_hWnd, AHK_HOTSTRING, hs_wparam_to_post, hs_lparam_to_post);
+		PostThreadMessage(Hotstring::shs[hs_wparam_to_post]->mThreadID, AHK_HOTSTRING, hs_wparam_to_post, hs_lparam_to_post);
 	return result_to_return;
 }
 

@@ -1113,7 +1113,11 @@ public:
 	{ Init(); LoadString(nID); }
 #endif
 private:
+#ifndef _USRDLL
+	__declspec(thread) static const T m_sNULL;
+#else
 	static const T m_sNULL;
+#endif
 	CKuStringDataT *m_pData;
 	bool m_bDirty;
 };

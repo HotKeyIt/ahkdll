@@ -23,38 +23,38 @@ GNU General Public License for more details.
 
 
 // Added for v1.0.25.  Search on sPrevEventType for more comments:
-static KeyEventTypes sPrevEventType;
-static vk_type sPrevVK = 0;
+_thread_local static KeyEventTypes sPrevEventType;
+_thread_local static vk_type sPrevVK = 0;
 // For v1.0.25, the below is static to track it in between sends, so that the below will continue
 // to work:
 // Send {LWinDown}
 // Send {LWinUp}  ; Should still open the Start Menu even though it's a separate Send.
-static vk_type sPrevEventModifierDown = 0;
-static modLR_type sModifiersLR_persistent = 0; // Tracks this script's own lifetime/persistent modifiers (the ones it caused to be persistent and thus is responsible for tracking).
+_thread_local static vk_type sPrevEventModifierDown = 0;
+_thread_local static modLR_type sModifiersLR_persistent = 0; // Tracks this script's own lifetime/persistent modifiers (the ones it caused to be persistent and thus is responsible for tracking).
 
 // v1.0.44.03: Below supports multiple keyboard layouts better by having script adapt to active window's layout.
 #define MAX_CACHED_LAYOUTS 10  // Hard to imagine anyone using more languages/layouts than this, but even if they do it will still work; performance would just be a little worse due to being uncached.
-static CachedLayoutType sCachedLayout[MAX_CACHED_LAYOUTS] = {{0}};
-static HKL sTargetKeybdLayout;           // Set by SendKeys() for use by the functions it calls directly and indirectly.
-static ResultType sTargetLayoutHasAltGr; //
+_thread_local static CachedLayoutType sCachedLayout[MAX_CACHED_LAYOUTS] = { { 0 } };
+_thread_local static HKL sTargetKeybdLayout;           // Set by SendKeys() for use by the functions it calls directly and indirectly.
+_thread_local static ResultType sTargetLayoutHasAltGr; //
 
 // v1.0.43: Support for SendInput() and journal-playback hook:
 #define MAX_INITIAL_EVENTS_SI 500UL  // sizeof(INPUT) == 28 as of 2006. Since Send is called so often, and since most Sends are short, reducing the load on the stack is also a deciding factor for these.
 #define MAX_INITIAL_EVENTS_PB 1500UL // sizeof(PlaybackEvent) == 8, so more events are justified before resorting to malloc().
-static LPINPUT sEventSI;        // No init necessary.  An array that's allocated/deallocated by SendKeys().
-static PlaybackEvent *&sEventPB = (PlaybackEvent *&)sEventSI;
-static UINT sEventCount, sMaxEvents; // Number of items in the above arrays and the current array capacity.
-static UINT sCurrentEvent;
-static modLR_type sEventModifiersLR; // Tracks the modifier state to following the progress/building of the SendInput array.
-static POINT sSendInputCursorPos;    // Tracks/predicts cursor position as SendInput array is built.
+_thread_local static LPINPUT sEventSI;        // No init necessary.  An array that's allocated/deallocated by SendKeys().
+static PlaybackEvent *sEventPB;
+_thread_local static UINT sEventCount, sMaxEvents; // Number of items in the above arrays and the current array capacity.
+_thread_local static UINT sCurrentEvent;
+_thread_local static modLR_type sEventModifiersLR; // Tracks the modifier state to following the progress/building of the SendInput array.
+_thread_local static POINT sSendInputCursorPos;    // Tracks/predicts cursor position as SendInput array is built.
 #ifndef MINIDLL
 static HookType sHooksToRemoveDuringSendInput;
 #endif
 static SendModes sSendMode = SM_EVENT; // Whether a SendInput or Hook array is currently being constructed.
-static bool sAbortArraySend;         // No init needed.
-static bool sFirstCallForThisEvent;  //
-static bool sInBlindMode;            //
-static DWORD sThisEventTime;         //
+_thread_local static bool sAbortArraySend;         // No init needed.
+_thread_local static bool sFirstCallForThisEvent;  //
+_thread_local static bool sInBlindMode;            //
+_thread_local static DWORD sThisEventTime;         //
 
 // Dynamically resolve SendInput() because otherwise the app won't launch at all on Windows 95/NT-pre-SP3:
 typedef UINT (WINAPI *MySendInputType)(UINT, LPINPUT, int);
@@ -228,9 +228,9 @@ void SendKeys(LPTSTR aKeys, bool aSendRaw, SendModes aSendModeOrig, HWND aTarget
 	if (aTargetWindow) // Caller has ensured this is NULL for SendInput and SendPlay modes.
 	{
 		if ((target_thread = GetWindowThreadProcessId(aTargetWindow, NULL)) // Assign.
-			&& target_thread != g_MainThreadID && !IsWindowHung(aTargetWindow))
+			&& target_thread != g_ThreadID && !IsWindowHung(aTargetWindow))
 		{
-			threads_are_attached = AttachThreadInput(g_MainThreadID, target_thread, TRUE) != 0;
+			threads_are_attached = AttachThreadInput(g_ThreadID, target_thread, TRUE) != 0;
 			keybd_layout_thread = target_thread; // Testing shows that ControlSend benefits from the adapt-to-layout technique too.
 		}
 		//else no target thread, or it's our thread, or it's hung; so keep keybd_layout_thread at its default.
@@ -244,14 +244,14 @@ void SendKeys(LPTSTR aKeys, bool aSendRaw, SendModes aSendModeOrig, HWND aTarget
 		// effect for all Sends because waiting for an "L" keystroke to be sent would be too late since the
 		// Windows would have already been artificially released by then, so IsKeyDownAsync() wouldn't be
 		// able to detect when the user physically releases the key.
-		if (   (g_script.mThisHotkeyModifiersLR & (MOD_LWIN|MOD_RWIN)) // Limit the scope to only those hotkeys that have a Win modifier, since anything outside that scope hasn't been fully analyzed.
+		if (   (g_script->mThisHotkeyModifiersLR & (MOD_LWIN|MOD_RWIN)) // Limit the scope to only those hotkeys that have a Win modifier, since anything outside that scope hasn't been fully analyzed.
 #ifndef MINIDLL
-			&& (GetTickCount() - g_script.mThisHotkeyStartTime) < (DWORD)50 // Ensure g_script.mThisHotkeyModifiersLR is up-to-date enough to be reliable.
+			&& (GetTickCount() - g_script->mThisHotkeyStartTime) < (DWORD)50 // Ensure g_script->mThisHotkeyModifiersLR is up-to-date enough to be reliable.
 #endif
 			&& aSendModeOrig != SM_PLAY // SM_PLAY is reported to be incapable of locking the computer.
 			&& !sInBlindMode // The philosophy of blind-mode is that the script should have full control, so don't do any waiting during blind mode.
 			&& g_os.IsWinVistaOrLater() // Only Vista (and presumably later OSes) check the physical state of the Windows key for Win+L.
-			&& aThreadID == g_MainThreadID // Exclude the hook thread because it isn't allowed to call anything like MsgSleep, nor are any calls from the hook thread within the understood/analyzed scope of this workaround.
+			&& aThreadID == g_ThreadID // Exclude the hook thread because it isn't allowed to call anything like MsgSleep, nor are any calls from the hook thread within the understood/analyzed scope of this workaround.
 			)
 		{
 			bool wait_for_win_key_release;
@@ -327,10 +327,10 @@ void SendKeys(LPTSTR aKeys, bool aSendRaw, SendModes aSendModeOrig, HWND aTarget
 	else // Use best-guess instead.
 	{
 		// Even if TickCount has wrapped due to system being up more than about 49 days,
-		// DWORD subtraction still gives the right answer as long as g_script.mThisHotkeyStartTime
+		// DWORD subtraction still gives the right answer as long as g_script->mThisHotkeyStartTime
 		// itself isn't more than about 49 days ago:
-		if ((GetTickCount() - g_script.mThisHotkeyStartTime) < (DWORD)g_HotkeyModifierTimeout) // Elapsed time < timeout-value
-			mods_down_physically_orig = mods_current & g_script.mThisHotkeyModifiersLR; // Bitwise AND is set intersection.
+		if ((GetTickCount() - g_script->mThisHotkeyStartTime) < (DWORD)g_HotkeyModifierTimeout) // Elapsed time < timeout-value
+			mods_down_physically_orig = mods_current & g_script->mThisHotkeyModifiersLR; // Bitwise AND is set intersection.
 		else
 			// Since too much time as passed since the user pressed the hotkey, it seems best,
 			// based on the action that will occur below, to assume that no hotkey modifiers
@@ -838,7 +838,7 @@ brace_case_end: // This label is used to simplify the code without sacrificing p
 			// times out; i.e. elapsed time < timeout-value; DWORD subtraction gives the right answer even if
 			// tick-count has wrapped around).
 			mods_down_physically = (g_HotkeyModifierTimeout < 0 // It never times out or...
-				|| (GetTickCount() - g_script.mThisHotkeyStartTime) < (DWORD)g_HotkeyModifierTimeout) // It didn't time out.
+				|| (GetTickCount() - g_script->mThisHotkeyStartTime) < (DWORD)g_HotkeyModifierTimeout) // It didn't time out.
 				? mods_down_physically_orig : 0;
 
 		// Restore the state of the modifiers to be those the user is physically holding down right now.
@@ -927,7 +927,7 @@ brace_case_end: // This label is used to simplify the code without sacrificing p
 	// Might be better to do this after changing capslock state, since having the threads attached
 	// tends to help with updating the global state of keys (perhaps only under Win9x in this case):
 	if (threads_are_attached)
-		AttachThreadInput(g_MainThreadID, target_thread, FALSE);
+		AttachThreadInput(g_ThreadID, target_thread, FALSE);
 
 	if (do_selective_blockinput && !blockinput_prev) // Turn it back off only if it was off before we started.
 		Line::ScriptBlockInput(false);
@@ -943,7 +943,7 @@ brace_case_end: // This label is used to simplify the code without sacrificing p
 	// This fix does not apply to the SendPlay or SendEvent modes, the former due to the fact that it sleeps
 	// a lot while the playback is running, and the latter due to key-delay and because testing has never shown
 	// a need for it.
-	if (aSendModeOrig == SM_INPUT && GetWindowThreadProcessId(GetForegroundWindow(), NULL) == g_MainThreadID) // GetWindowThreadProcessId() tolerates a NULL hwnd.
+	if (aSendModeOrig == SM_INPUT && GetWindowThreadProcessId(GetForegroundWindow(), NULL) == g_ThreadID) // GetWindowThreadProcessId() tolerates a NULL hwnd.
 		SLEEP_WITHOUT_INTERRUPTION(-1);
 
 	// v1.0.43.08: Restore the original thread key-delay values in case above temporarily overrode them.
@@ -1272,7 +1272,7 @@ void SendASC(LPCTSTR aAscii)
 LRESULT CALLBACK PlaybackProc(int aCode, WPARAM wParam, LPARAM lParam)
 // Journal playback hook.
 {
-	static bool sThisEventHasBeenLogged, sThisEventIsScreenCoord;
+	_thread_local static bool sThisEventHasBeenLogged, sThisEventIsScreenCoord;
 
 	switch (aCode)
 	{
@@ -2231,8 +2231,8 @@ void MouseClick(vk_type aVK, int aX, int aY, int aRepeatCount, int aSpeed, KeyEv
 	// 2) Even if that isn't true, the serialized nature of simulated mouse clicks makes it likely that
 	//    the statics will produce the correct behavior anyway.
 	// 3) Even if that isn't true, the consequences of incorrect behavior seem minimal in this case.
-	static vk_type sWorkaroundVK = 0;
-	static LRESULT sWorkaroundHitTest; // Not initialized because the above will be the sole signal of whether the workaround is in progress.
+	_thread_local static vk_type sWorkaroundVK = 0;
+	_thread_local static LRESULT sWorkaroundHitTest; // Not initialized because the above will be the sole signal of whether the workaround is in progress.
 	DWORD event_down, event_up, event_data = 0; // Set default.
 	// MSDN: If [event_flags] is not MOUSEEVENTF_WHEEL, MOUSEEVENTF_XDOWN, or MOUSEEVENTF_XUP, then [event_data]
 	// should be zero. 
@@ -2316,7 +2316,7 @@ void MouseClick(vk_type aVK, int aX, int aY, int aRepeatCount, int aSpeed, KeyEv
 			HWND child_under_cursor, parent_under_cursor;
 			if (   (child_under_cursor = WindowFromPoint(point))
 				&& (parent_under_cursor = GetNonChildParent(child_under_cursor)) // WM_NCHITTEST below probably requires parent vs. child.
-				&& GetWindowThreadProcessId(parent_under_cursor, NULL) == g_MainThreadID   ) // It's one of our thread's windows.
+				&& GetWindowThreadProcessId(parent_under_cursor, NULL) == g_ThreadID) // It's one of our thread's windows.
 			{
 				LRESULT hit_test = SendMessage(parent_under_cursor, WM_NCHITTEST, 0, MAKELPARAM(point.x, point.y));
 				if (   aVK == VK_LBUTTON && (hit_test == HTCLOSE || hit_test == HTMAXBUTTON // Title bar buttons: Close, Maximize.
@@ -2746,7 +2746,7 @@ ResultType ExpandEventArray()
 		free(sEventSI); // Previous block was malloc'd vs. _alloc'd, so free it.
 	if (sAbortArraySend)
 		return FAIL;
-	sEventSI = (LPINPUT)new_mem; // Note that sEventSI and sEventPB are different views of the same variable.
+	sEventPB = (PlaybackEvent*) (sEventSI = (LPINPUT)new_mem); // Note that sEventSI and sEventPB are different views of the same variable.
 	sMaxEvents *= EVENT_EXPANSION_MULTIPLIER;
 	return OK;
 }
@@ -2755,7 +2755,7 @@ ResultType ExpandEventArray()
 
 void InitEventArray(void *aMem, UINT aMaxEvents, modLR_type aModifiersLR)
 {
-	sEventPB = (PlaybackEvent *)aMem; // Sets sEventSI too, since both are the same.
+	sEventSI = (LPINPUT) (sEventPB = (PlaybackEvent *)aMem); // Sets sEventSI too, since both are the same.
 	sMaxEvents = aMaxEvents;
 	sEventModifiersLR = aModifiersLR;
 	sSendInputCursorPos.x = COORD_UNSPECIFIED;
@@ -3125,7 +3125,7 @@ ToggleValueType ToggleKeyState(vk_type aVK, ToggleValueType aToggleValue)
 	DWORD aThreadID = __readfsdword(0x24);
 #endif
 
-	if (our_thread_is_foreground = (GetWindowThreadProcessId(GetForegroundWindow(), NULL) == g_MainThreadID)) // GetWindowThreadProcessId() tolerates a NULL hwnd.
+	if (our_thread_is_foreground = (GetWindowThreadProcessId(GetForegroundWindow(), NULL) == g_ThreadID)) // GetWindowThreadProcessId() tolerates a NULL hwnd.
 		SLEEP_WITHOUT_INTERRUPTION(-1);
 	if (aVK == VK_CAPITAL && aToggleValue == TOGGLED_OFF && IsKeyToggledOn(aVK))
 	{
@@ -3503,7 +3503,7 @@ void SetModifierLRState(modLR_type aModifiersLRnew, modLR_type aModifiersLRnow, 
 	// The g_KeybdHook check must come first (it should take precedence if both conditions are true).
 	// -1 has been verified to be insufficient, at least for the very first letter sent if it is
 	// supposed to be capitalized.
-	// g_MainThreadID is the only thread of our process that owns any windows.
+	// g_ThreadID is the thread of our process that owns any windows.
 
 	int press_duration = (sSendMode == SM_PLAY) ? g->PressDurationPlay : g->PressDuration;
 	if (press_duration > -1) // SM_PLAY does use DoKeyDelay() to store a delay item in the event array.
@@ -3547,7 +3547,7 @@ void SetModifierLRState(modLR_type aModifiersLRnew, modLR_type aModifiersLRnow, 
 
 			if (g_KeybdHook)
 				SLEEP_WITHOUT_INTERRUPTION(0) // Don't use ternary operator to combine this with next due to "else if".
-			else if (GetWindowThreadProcessId(aTargetWindow, NULL) == g_MainThreadID)
+			else if (GetWindowThreadProcessId(aTargetWindow, NULL) == g_ThreadID)
 				SLEEP_WITHOUT_INTERRUPTION(-1)
 		}
 	}
@@ -4227,9 +4227,9 @@ vk_type TextToSpecial(LPTSTR aText, size_t aTextLength, KeyEventTypes &aEventTyp
 #ifdef ENABLE_KEY_HISTORY_FILE
 ResultType KeyHistoryToFile(LPTSTR aFilespec, char aType, bool aKeyUp, vk_type aVK, sc_type aSC)
 {
-	static TCHAR sTargetFilespec[MAX_PATH] = _T("");
-	static FILE *fp = NULL;
-	static HWND last_foreground_window = NULL;
+	_thread_local static TCHAR sTargetFilespec[MAX_PATH] = _T("");
+	_thread_local static FILE *fp = NULL;
+	_thread_local static HWND last_foreground_window = NULL;
 	static DWORD last_tickcount = GetTickCount();
 
 	if (!g_KeyHistory) // Since key history is disabled, keys are not being tracked by the hook, so there's nothing to log.

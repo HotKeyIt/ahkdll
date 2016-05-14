@@ -23,8 +23,9 @@ GNU General Public License for more details.
 #include "application.h" // for MsgSleep()
 #include "exports.h" // Naveen v8
 #include "TextIO.h"
-
 #include "MemoryModule.h"
+#include "process.h"
+#include "TlHelp32.h"
 
 // Globals that are for only this module (mostly):
 static ExprOpFunc g_ObjGetInPlace(Op_ObjGetInPlace, IT_GET);
@@ -99,6 +100,9 @@ FuncEntry g_BIF[] =
 	BIF1(Chr, 1, 1, true),
 	BIFn(StrGet, 1, 3, true, BIF_StrGetPut),
 	BIFn(StrPut, 1, 4, true, BIF_StrGetPut),
+#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+	BIF1(NewThread, 1, 3, true),
+#endif
 	BIF1(NumGet, 1, 3, true),
 	BIF1(NumPut, 2, 4, true),
 	BIF1(IsLabel, 1, 1, true),
@@ -497,7 +501,7 @@ Script::Script()
 	, mEndChar(0), mThisHotkeyModifiersLR(0)
 #endif
 	, mNextClipboardViewer(NULL), mOnClipboardChangeIsRunning(false), mExitReason(EXIT_NONE)
-	, mFirstLabel(NULL), mLastLabel(NULL)
+	, mFirstLabel(NULL), mLastLabel(NULL), mFirstGroup(NULL)
 	, mFunc(NULL), mFuncCount(0), mFuncCountMax(0)
 	, mFirstTimer(NULL), mLastTimer(NULL), mTimerEnabledCount(0), mTimerCount(0)
 #ifndef MINIDLL
@@ -529,6 +533,9 @@ Script::Script()
 #ifndef MINIDLL
 	*mThisMenuItemName = *mThisMenuName = '\0';
 #endif
+	g_ThreadID = GetCurrentThreadId();
+	g_hThread = OpenThread(THREAD_ALL_ACCESS, TRUE, g_ThreadID);
+	g = &g_startup;
 	ZeroMemory(&mNIC, sizeof(mNIC));  // Constructor initializes this, to be safe.
 	mNIC.hWnd = NULL;  // Set this as an indicator that it tray icon is not installed.
 #ifndef MINIDLL
@@ -583,22 +590,93 @@ Script::Script()
 Script::~Script() // Destructor.
 {
 	int i;
-	OleUninitialize();
-#ifdef _USRDLL
+
+	if (g_MainThreadID == g_ThreadID)
+		OleUninitialize();
+	else
+		CoUninitialize();
+//#ifdef _USRDLL
 	// HotKeyIt H1 destroy script for ahkTerminate and ahkReload and ExitApp for dll
 
 	//reset count for OnMessage
-	if (g_MsgMonitor.Count())
-		g_MsgMonitor.RemoveAll();
-
+	if (g_MsgMonitor->Count())
+		g_MsgMonitor->RemoveAll();
+	delete g_MsgMonitor;
+	g_MsgMonitor = NULL;
+	if (mOnExit.Count())
+		mOnExit.RemoveAll();
+	if (mOnClipboardChange.Count())
+		mOnClipboardChange.RemoveAll();
 	// free Meta Object
-	g_MetaObject.Free();
+	if (g_MetaObject)
+		g_MetaObject->Free();
+#ifdef _USRDLL
 	// Disconnect Debugger
 	if (!g_DebuggerHost.IsEmpty())
 	{
 		g_DebuggerHost.Empty();
 		g_Debugger.Disconnect();
 	}
+#endif
+#ifndef MINIDLL
+	if (mNIC.hWnd) // Tray icon is installed.
+		Shell_NotifyIcon(NIM_DELETE, &mNIC); // Remove it.
+
+	// It is safer/easier to destroy the GUI windows prior to the menus (especially the menu bars).
+	// This is because one GUI window might get destroyed and take with it a menu bar that is still
+	// in use by an existing GUI window.  GuiType::Destroy() adheres to this philosophy by detaching
+	// its menu bar prior to destroying its window:
+	if (g_guiCount)
+	{
+		while (g_guiCount)
+			GuiType::Destroy(*g_gui[g_guiCount - 1]); // Static method to avoid problems with object destroying itself.
+		free(g_gui);
+		g_gui = NULL;
+	}
+	for (i = 0; i < GuiType::sFontCount; ++i) // Now that GUI windows are gone, delete all GUI fonts.
+		if (GuiType::sFont[i].hfont)
+			DeleteObject(GuiType::sFont[i].hfont);
+
+	if (GuiType::sFontCount)
+	{
+		GuiType::sFontCount = 0;
+		GuiType::sFont = NULL;
+	}
+
+	// The above might attempt to delete an HFONT from GetStockObject(DEFAULT_GUI_FONT), etc.
+	// But that should be harmless:
+	// MSDN: "It is not necessary (but it is not harmful) to delete stock objects by calling DeleteObject."
+
+	// Above: Probably best to have removed icon from tray and destroyed any Gui windows that were
+	// using it prior to getting rid of the script's custom icon below:
+	if (mCustomIcon)
+	{
+		DestroyIcon(mCustomIcon);
+		DestroyIcon(mCustomIconSmall); // Should always be non-NULL if mCustomIcon is non-NULL.
+	}
+
+	// Since they're not associated with a window, we must free the resources for all popup menus.
+	// Update: Even if a menu is being used as a GUI window's menu bar, see note above for why menu
+	// destruction is done AFTER the GUI windows are destroyed:
+	UserMenu *menu_to_delete;
+	for (UserMenu *m = mFirstMenu; m;)
+	{
+		menu_to_delete = m;
+		m = m->mNextMenu;
+		ScriptDeleteMenu(menu_to_delete);
+		// Above call should not return FAIL, since the only way FAIL can realistically happen is
+		// when a GUI window is still using the menu as its menu bar.  But all GUI windows are gone now.
+	}
+	mFirstMenu = NULL;
+	mLastMenu = NULL;
+	mTrayMenu = NULL;
+	/*else if (mFirstMenu)
+	{
+	mFirstMenu->mNextMenu = NULL;
+	mLastMenu = mFirstMenu;
+	}
+	mTrayIconTip = NULL;*/
+#endif
 	// L31: Release objects stored in variables, where possible.
 	int v;
 	for (v = 0; v < mVarCount; v++)
@@ -635,6 +713,7 @@ Script::~Script() // Destructor.
 			}
 			continue;
 		}
+
 		// Since it doesn't seem feasible to release all var backups created by recursive function
 		// calls and all tokens in the 'stack' of each currently executing expression, currently
 		// only static and global variables are released.  It seems best for consistency to also
@@ -695,8 +774,17 @@ Script::~Script() // Destructor.
 		Func &f = *mFunc[i];
 		if (f.mIsBuiltIn)
 			continue;
-		else if (f.mClass && _tcschr(f.mName,'.'))
+		else if (f.mClass && _tcschr(f.mName, '.'))
 			f.mClass->Release();
+	}
+	for (i = 0; i < mFuncCount; i++)
+	{
+		Func &f = *mFunc[i];
+		if (f.mIsBuiltIn)
+		{
+			delete mFunc[i];
+			continue;
+		}
 		// Since it doesn't seem feasible to release all var backups created by recursive function
 		// calls and all tokens in the 'stack' of each currently executing expression, currently
 		// only static and global variables are released.  It seems best for consistency to also
@@ -746,106 +834,50 @@ Script::~Script() // Destructor.
 		delete group;
 		group = nextGroup;
 	}
-	for (Line *line = g_script.mLastLine, *nextLine = NULL; line;)
+	for (Line *line = g_script->mLastLine, *nextLine = NULL; line;)
 	{
 		nextLine = line->mPrevLine;
 		line->FreeDerefBufIfLarge();
 		delete line;
 		line = nextLine;
 	}
+	if (mPlaceholderLabel)
+		delete mPlaceholderLabel;
 	if (Line::sDerefBuf)
 	{
 		free(Line::sDerefBuf);
 		Line::sDerefBuf = NULL;
 	}
-#endif
+//#endif
 	// MSDN: "Before terminating, an application must call the UnhookWindowsHookEx function to free
 	// system resources associated with the hook."
 #ifndef MINIDLL
-	AddRemoveHooks(0); // Remove all hooks.
-	if (mNIC.hWnd) // Tray icon is installed.
-		Shell_NotifyIcon(NIM_DELETE, &mNIC); // Remove it.
-
-	// It is safer/easier to destroy the GUI windows prior to the menus (especially the menu bars).
-	// This is because one GUI window might get destroyed and take with it a menu bar that is still
-	// in use by an existing GUI window.  GuiType::Destroy() adheres to this philosophy by detaching
-	// its menu bar prior to destroying its window:
-	if (g_guiCount)
-	{
-		while (g_guiCount)
-			GuiType::Destroy(*g_gui[g_guiCount - 1]); // Static method to avoid problems with object destroying itself.
-		free(g_gui);
-		g_gui = NULL;
-	}
-
-	for (i = 0; i < GuiType::sFontCount; ++i) // Now that GUI windows are gone, delete all GUI fonts.
-		if (GuiType::sFont[i].hfont)
-			DeleteObject(GuiType::sFont[i].hfont);
-
-	if (GuiType::sFontCount)
-	{
-		GuiType::sFontCount = 0;
-		GuiType::sFont = NULL;
-	}
-
-	// The above might attempt to delete an HFONT from GetStockObject(DEFAULT_GUI_FONT), etc.
-	// But that should be harmless:
-	// MSDN: "It is not necessary (but it is not harmful) to delete stock objects by calling DeleteObject."
-
-	// Above: Probably best to have removed icon from tray and destroyed any Gui windows that were
-	// using it prior to getting rid of the script's custom icon below:
-	if (mCustomIcon)
-	{
-		DestroyIcon(mCustomIcon);
-		DestroyIcon(mCustomIconSmall); // Should always be non-NULL if mCustomIcon is non-NULL.
-	}
-
-	// Since they're not associated with a window, we must free the resources for all popup menus.
-	// Update: Even if a menu is being used as a GUI window's menu bar, see note above for why menu
-	// destruction is done AFTER the GUI windows are destroyed:
-	UserMenu *menu_to_delete;
-	for (UserMenu *m = mFirstMenu; m;)
-	{
-		menu_to_delete = m;
-		m = m->mNextMenu;
-#ifdef _USRDLL
-		if (menu_to_delete != mTrayMenu)
-#endif
-			ScriptDeleteMenu(menu_to_delete);
-		// Above call should not return FAIL, since the only way FAIL can realistically happen is
-		// when a GUI window is still using the menu as its menu bar.  But all GUI windows are gone now.
-	}
-	if (mFirstMenu != mTrayMenu)
-	{
-		mFirstMenu = NULL;
-		mLastMenu = NULL;
-		mTrayMenu = NULL;
-	}
-	else if (mFirstMenu)
-	{
-		mFirstMenu->mNextMenu = NULL;
-		mLastMenu = mFirstMenu;
-	}
-	mTrayIconTip = NULL;
+	if (g_MainThreadID == g_ThreadID || (Hotkey::sHotkeyCount == 0 && Hotstring::sHotstringCount == 0))
+		AddRemoveHooks(0); // Remove all hooks.
 	mPriorHotkeyStartTime = 0;
 #endif
+	free_compiled_regex();
 	// We call DestroyWindow() because MainWindowProc() has left that up to us.
 	// DestroyWindow() will cause MainWindowProc() to immediately receive and process the
 	// WM_DESTROY msg, which should in turn result in any child windows being destroyed
 	// and other cleanup being done:
 	KILL_AUTOEXEC_TIMER
 	KILL_MAIN_TIMER
-	if (IsWindow(g_hWnd)) // Adds peace of mind in case WM_DESTROY was already received in some unusual way.
-	{
+	//if (g_MainThreadID == g_ThreadID && IsWindow(g_hWnd)) // Adds peace of mind in case WM_DESTROY was already received in some unusual way.
+	//{
 		g_DestroyWindowCalled = true;
 		DestroyWindow(g_hWnd);
 		DestroyWindow(g_hWndEdit);
 		DeleteObject(g_hFontEdit);
 		// Unregister window class if it was registered in Script::CreateWindows
-		if (g_ClassRegistered)
+#ifndef _USRDLL
+		if (g_MainThreadID == g_ThreadID && g_ClassRegistered)
+		{
 			UnregisterClass((LPCWSTR)&WINDOW_CLASS_MAIN, g_hInstance);
-		g_ClassRegistered = 0;
-	}
+			g_ClassRegistered = 0;
+		}
+#endif
+	//}
 	if (g_hAccelTable)
 		DestroyAcceleratorTable(g_hAccelTable);
 
@@ -890,10 +922,6 @@ Script::~Script() // Destructor.
 	mLastGroup = NULL;
 
 	mFirstTimer = NULL;
-	if (mOnExit.Count())
-		mOnExit.RemoveAll();
-	if (mOnClipboardChange.Count())
-		mOnClipboardChange.RemoveAll();
 	mTempFunc = NULL;
 	mTempLabel = NULL;
 	mTempLine = NULL;
@@ -1019,12 +1047,13 @@ Script::~Script() // Destructor.
 	//HDC hdc = GetDC(NULL);
 	//g_ScreenDPI = GetDeviceCaps(hdc, LOGPIXELSX);
 	//ReleaseDC(NULL, hdc);
-	g_guiCount = 0;
+	//g_guiCount = 0;
 #endif
 #ifndef MINIDLL
 	_tcscpy(g_EndChars, _T("-()[]{}:;'\"/\\,.?!\n \t"));  // Hotstring default end chars, including a space.
 #endif
-
+#endif
+#ifndef AUTOHOTKEYSC
 	for (i = 1; Line::sSourceFileCount>i; i++) // first include file must not be deleted
 		free(Line::sSourceFile[i]);
 	free(Line::sSourceFile);
@@ -1032,26 +1061,39 @@ Script::~Script() // Destructor.
 	Line::sSourceFileCount = 0;
 	Line::sMaxSourceFiles = 0;
 	//Line::sMaxSourceFiles = 0;
-	//SimpleHeap::Delete(Line::sSourceFile);
+	//g_SimpleHeap->Delete(Line::sSourceFile);
 	//Line::sSourceFile = 0;
 	// free(Line::sSourceFile);
-
+#endif
+#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+	for (i = 0; i < FUNC_LIB_COUNT; i++)
+		if (sLib[i].path)
+		{
+			free(sLib[i].path);
+			sLib[i].path = NULL;
+		}
+#endif
+#ifdef _USRDLL
+#endif
 #ifndef MINIDLL
 	// AddRemoveHooks(0); // done in ~Script
 	Hotkey::AllDestruct();
 	Hotstring::AllDestruct();
 #endif
-
+#ifdef _USRDLL
 	Line::sLogNext = 0;
 	memset(Line::sLog,NULL,sizeof(Line*) * LINE_LOG_SIZE);
+#endif
 	global_clear_state(*g);
 	//free(g_Debugger.mStack.mBottom);
-	SimpleHeap::DeleteAll();
+	delete g_MetaObject;
+	g_SimpleHeap->DeleteAll();
+	delete g_SimpleHeap;
+#ifdef _USRDLL
 	//ZeroMemory(&g_script, sizeof(g_script));
 #ifndef MINIDLL
 	mPriorHotkeyName = mThisHotkeyName = _T("");
 #endif
-	free_compiled_regex();
 #endif
 #ifndef MINIDLL
 #ifdef ENABLE_KEY_HISTORY_FILE
@@ -1062,6 +1104,7 @@ Script::~Script() // Destructor.
 	// done on DLL_PROCESS_DETACH
 	// DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
 	// DeleteCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
+	CloseHandle(g_hThread);
 	mIsReadyToExecute = false;
 }
 
@@ -1201,13 +1244,13 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 	// it might not find the dupe if the same script name is launched with different
 	// lowercase/uppercase letters:
 	ConvertFilespecToCorrectCase(buf); // This might change the length, e.g. due to expansion of 8.3 filename.
-	if (   !(mFileSpec = SimpleHeap::Malloc(buf))   )  // The full spec is stored for convenience, and it's relied upon by mIncludeLibraryFunctionsThenExit.
+	if (   !(mFileSpec = g_SimpleHeap->Malloc(buf))   )  // The full spec is stored for convenience, and it's relied upon by mIncludeLibraryFunctionsThenExit.
 		return FAIL;  // It already displayed the error for us.
 	LPTSTR filename_marker;
 	if (filename_marker = _tcsrchr(buf, '\\'))
 	{
 		*filename_marker = '\0'; // Terminate buf in this position to divide the string.
-		if (   !(mFileDir = SimpleHeap::Malloc(buf))   )
+		if (   !(mFileDir = g_SimpleHeap->Malloc(buf))   )
 			return FAIL;  // It already displayed the error for us.
 		++filename_marker;
 	}
@@ -1219,7 +1262,7 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 		//mFileDir = _T(""); // Already done by the constructor.
 		filename_marker = buf;
 	}
-	if (   !(mFileName = SimpleHeap::Malloc(filename_marker))   )
+	if (   !(mFileName = g_SimpleHeap->Malloc(filename_marker))   )
 		return FAIL;  // It already displayed the error for us.
 #ifdef AUTOHOTKEYSC
 	// Omit AutoHotkey from the window title, like AutoIt3 does for its compiled scripts.
@@ -1227,9 +1270,12 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 	// with the program:
 	sntprintf(buf, _countof(buf), _T("%s\\%s"), mFileDir, mFileName);
 #else
-	sntprintf(buf, _countof(buf), _T("%s\\%s - %s"), mFileDir, mFileName, T_AHK_NAME_VERSION);
+	if (g_MainThreadID == g_ThreadID)
+		sntprintf(buf, _countof(buf), _T("%s\\%s - %s"), mFileDir, mFileName, T_AHK_NAME_VERSION);
+	else
+		sntprintf(buf, _countof(buf), _T("%s\\%s - %s - %d"), mFileDir, mFileName, T_AHK_NAME_VERSION, g_ThreadID);
 #endif
-	if (   !(mMainWindowTitle = SimpleHeap::Malloc(buf))   )
+	if (   !(mMainWindowTitle = g_SimpleHeap->Malloc(buf))   )
 		return FAIL;  // It already displayed the error for us.
 
 	// It may be better to get the module name this way rather than reading it from the registry
@@ -1243,7 +1289,7 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 		size_t buf_length = _tcslen(buf);
 		buf[buf_length++] = '"';
 		buf[buf_length] = '\0';
-		if (   !(mOurEXE = SimpleHeap::Malloc(buf))   )
+		if (   !(mOurEXE = g_SimpleHeap->Malloc(buf))   )
 			return FAIL;  // It already displayed the error for us.
 		else
 		{
@@ -1251,7 +1297,7 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 			if (!last_backslash) // probably can't happen due to the nature of GetModuleFileName().
 				mOurEXEDir = _T("");
 			*last_backslash = '\0';
-			if (   !(mOurEXEDir = SimpleHeap::Malloc(buf + 1))   ) // +1 to omit the leading double-quote.
+			if (   !(mOurEXEDir = g_SimpleHeap->Malloc(buf + 1))   ) // +1 to omit the leading double-quote.
 				return FAIL;  // It already displayed the error for us.
 		}
 	}
@@ -1276,19 +1322,18 @@ ResultType Script::CreateWindows()
 	//wc.cbWndExtra = 0;
 #ifndef MINIDLL
 	// Load the main icon in the two sizes needed throughout the program:
-	g_IconLarge = ExtractIconFromExecutable(NULL, -IDI_MAIN, 0, 0);
-	g_IconSmall = ExtractIconFromExecutable(NULL, -IDI_MAIN, GetSystemMetrics(SM_CXSMICON), 0);
+	if (!g_IconLarge)
+	{
+		g_IconLarge = ExtractIconFromExecutable(NULL, -IDI_MAIN, 0, 0);
+		g_IconSmall = ExtractIconFromExecutable(NULL, -IDI_MAIN, GetSystemMetrics(SM_CXSMICON), 0);
+	}
 	wc.hIcon = g_IconLarge;
 	wc.hIconSm = g_IconSmall;
 	wc.hCursor = LoadCursor((HINSTANCE)NULL, IDC_ARROW);
 	wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);  // Needed for ProgressBar. Old: (HBRUSH)GetStockObject(WHITE_BRUSH);
 	wc.lpszMenuName = MAKEINTRESOURCE(IDR_MENU_MAIN); // NULL; // "MainMenu";
 #endif // MINIDLL
-	if (!(g_ClassRegistered = RegisterClassEx(&wc)))
-	{
-		MsgBox(_T("RegClass")); // Short/generic msg since so rare.
-		return FAIL;
-	}
+	g_ClassRegistered = RegisterClassEx(&wc);
 	TCHAR class_name[64];
 	HWND fore_win = GetForegroundWindow();
 	bool do_minimize = !fore_win || (GetClassName(fore_win, class_name, _countof(class_name))
@@ -1296,7 +1341,7 @@ ResultType Script::CreateWindows()
 
 	// Note: the title below must be constructed the same was as is done by our
 	// WinMain() (so that we can detect whether this script is already running)
-	// which is why it's standardized in g_script.mMainWindowTitle.
+	// which is why it's standardized in g_script->mMainWindowTitle.
 	// Create the main window.  Prevent momentary disruption of Start Menu, which
 	// some users understandably don't like, by omitting the taskbar button temporarily.
 	// This is done because testing shows that minimizing the window further below, even
@@ -1318,6 +1363,7 @@ ResultType Script::CreateWindows()
 		, g_hInstance // passed into WinMain
 		, NULL))) // lpParam
 	{
+		DWORD err = GetLastError();
 		MsgBox(_T("CreateWindow")); // Short msg since so rare.
 		return FAIL;
 	}
@@ -1418,7 +1464,7 @@ ResultType Script::CreateWindows()
 
 void Script::EnableClipboardListener(bool aEnable)
 {
-	static bool sEnabled = false;
+	_thread_local static bool sEnabled = false;
 	if (aEnable == sEnabled) // Simplifies BIF_OnExitOrClipboard.
 		return;
 	if (aEnable)
@@ -1483,8 +1529,8 @@ void Script::UpdateTrayIcon(bool aForceUpdate)
 {
 	if (!mNIC.hWnd) // tray icon is not installed
 		return;
-	static bool icon_shows_paused = false;
-	static bool icon_shows_suspended = false;
+	_thread_local static bool icon_shows_paused = false;
+	_thread_local static bool icon_shows_suspended = false;
 	if (!aForceUpdate && (mIconFrozen || (g->IsPaused == icon_shows_paused && g_IsSuspended == icon_shows_suspended)))
 		return; // it's already in the right state
 	int icon;
@@ -1536,8 +1582,8 @@ ResultType Script::AutoExecSection()
 	//      IsInterrupt() is never called (except by RefreshInterruptibility()) for 50+ days.
 	//      (above is currently unlikely because MSG_FILTER_MAX calls IsInterruptible())
 	// In either case, RefreshInterruptibility() has prevented the uninterruptibility duration from being
-	// wrongly extended by up to 100% of g_script.mUninterruptibleTime.  This isn't a big deal if
-	// g_script.mUninterruptibleTime is low (like it almost always is); but if it's fairly large, say an hour,
+	// wrongly extended by up to 100% of g_script->mUninterruptibleTime.  This isn't a big deal if
+	// g_script->mUninterruptibleTime is low (like it almost always is); but if it's fairly large, say an hour,
 	// this can prevent an unwanted extension of up to 1 hour.
 	// Although any call frequency less than 49.7 days should work, currently calling once per 23 hours
 	// in case any older operating systems have a SetTimer() limit of less than 0x7FFFFFFF (and also to make
@@ -1582,11 +1628,11 @@ ResultType Script::AutoExecSection()
 		DEBUGGER_STACK_PUSH(_T("Auto-execute"))
 			ExecUntil_result = mFirstLine->ExecUntil(UNTIL_RETURN); // Might never return (e.g. infinite loop or ExitApp).
 		DEBUGGER_STACK_POP()
-			--g_nThreads;
+		--g_nThreads;
 		// Our caller will take care of setting g_default properly.
 
 		KILL_AUTOEXEC_TIMER // See also: AutoExecSectionTimeout().
-			mAutoExecSectionIsRunning = false;
+		mAutoExecSectionIsRunning = false;
 	}
 	// REMEMBER: The ExecUntil() call above will never return if the AutoExec section never finishes
 	// (e.g. infinite loop) or it uses Exit/ExitApp.
@@ -1594,7 +1640,7 @@ ResultType Script::AutoExecSection()
 	// Check if an exception has been thrown
 	if (g->ThrownToken)
 		// Display an error message
-		ExecUntil_result = g_script.UnhandledException(g->ThrownToken, g->ExcptLine);
+		ExecUntil_result = g_script->UnhandledException(g->ThrownToken, g->ExcptLine);
 
 	// The below is done even if AutoExecSectionTimeout() already set the values once.
 	// This is because when the AutoExecute section finally does finish, by definition it's
@@ -1629,12 +1675,14 @@ ResultType Script::AutoExecSection()
 	// of ErrorLevel set by another).  This reset was also done by LoadFromFile(), but it is done again
 	// here in case the auto-execute section changed it:
 	g_ErrorLevel->Assign(ERRORLEVEL_NONE);
+	if (g_MainThreadID != g_ThreadID && ExecUntil_result == EXIT_RELOAD)
+		return ExecUntil_result;
 
 	// BEFORE DOING THE BELOW, "g" and "g_default" should be set up properly in case there's an OnExit
 	// function (even non-persistent scripts can have one).
 	// See Script::IsPersistent() for a list of conditions that cause the program to continue running.
-	if (!g_script.IsPersistent())
-		g_script.ExitApp(ExecUntil_result == FAIL ? EXIT_ERROR : EXIT_EXIT);
+	if (!g_script->IsPersistent())
+		g_script->ExitApp(ExecUntil_result == FAIL ? EXIT_ERROR : EXIT_EXIT);
 
 	return OK;
 }
@@ -1644,19 +1692,31 @@ ResultType Script::AutoExecSection()
 bool Script::IsPersistent()
 {
 #ifdef MINIDLL
-	if (g_script.mTimerEnabledCount // At least one script timer is currently enabled.
+	if (g_script->mTimerEnabledCount // At least one script timer is currently enabled.
 		|| g_persistent // #Persistent has been used somewhere in the script.
-		|| g_MsgMonitor.Count()) // At least one message monitor is active (installed by OnMessage).
+		|| g_MsgMonitor->Count()) // At least one message monitor is active (installed by OnMessage).
 		return true;
 	return false;
 #else
+	UINT aHotstringCount = 0, aHotkeyCount = 0;
+	for (UINT i = 0; i < Hotstring::sHotstringCount; ++i)
+	{
+		if (Hotstring::shs[i]->mThreadID == g_ThreadID)
+			aHotstringCount++;
+	}
+	for (UINT i = 0; i < Hotkey::sHotkeyCount; ++i)
+	{
+		if (Hotkey::shk[i]->mThreadID == g_ThreadID)
+			aHotkeyCount++;
+	}
+	// Consi
 	// Consider the script "persistent" if any of the following conditions are true:
-	if (Hotkey::sHotkeyCount || Hotstring::sHotstringCount // At least one hotkey or hotstring exists.
+	if (aHotkeyCount || aHotstringCount // At least one hotkey or hotstring exists.
 		// No attempt is made to determine if the hotkeys/hotstrings are enabled, since even if they
 		// are, it's impossible to detect whether #If/#IfWin will allow them to ever execute.
 		|| g_persistent // #Persistent has been used somewhere in the script.
-		|| g_script.mTimerEnabledCount // At least one script timer is currently enabled.
-		|| g_MsgMonitor.Count() // At least one message monitor is active (installed by OnMessage).
+		|| g_script->mTimerEnabledCount // At least one script timer is currently enabled.
+		|| g_MsgMonitor->Count() // At least one message monitor is active (installed by OnMessage).
 		|| mOnClipboardChange.Count() // The script is monitoring clipboard changes.
 		// The following isn't checked because there has to be at least one script thread
 		// running for it to be true, in which case we shouldn't have been called:
@@ -1678,7 +1738,7 @@ void Script::ExitIfNotPersistent(ExitReasons aExitReason)
 {
 	if (g_nThreads || IsPersistent())
 		return;
-	g_script.ExitApp(aExitReason);
+	g_script->ExitApp(aExitReason);
 }
 
 
@@ -1744,8 +1804,10 @@ ResultType Script::Reload(bool aDisplayErrors)
 #ifdef AUTOHOTKEYSC
 	// This is here in case a compiled script ever uses the Reload command.  Since the "Reload This
 	// Script" menu item is not available for compiled scripts, it can't be called from there.
-	return g_script.ActionExec(mOurEXE, _T("/restart"), g_WorkingDirOrig, aDisplayErrors);
+	return g_script->ActionExec(mOurEXE, _T("/restart"), g_WorkingDirOrig, aDisplayErrors);
 #else
+	if (g_MainThreadID != g_ThreadID)
+		return (ResultType)EXIT_RELOAD;
 	WCHAR buf[MAX_PATH];
 	GetModuleFileNameW(NULL, buf, MAX_PATH);
 	int argc = 0;
@@ -1753,11 +1815,11 @@ ResultType Script::Reload(bool aDisplayErrors)
 	if (argc == 1 && !wcscmp(buf, argv[0]))
 	{
 		LocalFree(argv);
-		return g_script.ActionExec(mOurEXE, _T("/restart"), g_WorkingDirOrig, aDisplayErrors);
+		return g_script->ActionExec(mOurEXE, _T("/restart"), g_WorkingDirOrig, aDisplayErrors);
 	}
 	TCHAR arg_string[MAX_PATH + 512];
 	sntprintf(arg_string, _countof(arg_string), _T("/restart \"%s\""), mFileSpec);
-	return g_script.ActionExec(mOurEXE, arg_string, g_WorkingDirOrig, aDisplayErrors);
+	return g_script->ActionExec(mOurEXE, arg_string, g_WorkingDirOrig, aDisplayErrors);
 #endif // AUTOHOTKEYSC
 #endif // _USRDLL
 }
@@ -1777,7 +1839,7 @@ ResultType Script::ExitApp(ExitReasons aExitReason, LPTSTR aBuf, int aExitCode)
 		// No more than size-1 chars will be written and string will be terminated:
 		sntprintf(buf, _countof(buf), _T("Critical Error: %s\n\n") WILL_EXIT, aBuf);
 		// To avoid chance of more errors, don't use MsgBox():
-		MessageBox(g_hWnd, buf, g_script.mFileSpec, MB_OK | MB_SETFOREGROUND | MB_APPLMODAL);
+		MessageBox(g_hWnd, buf, g_script->mFileSpec, MB_OK | MB_SETFOREGROUND | MB_APPLMODAL);
 		TerminateApp(aExitReason, CRITICAL_ERROR); // Only after the above.
 	}
 
@@ -1785,7 +1847,7 @@ ResultType Script::ExitApp(ExitReasons aExitReason, LPTSTR aBuf, int aExitCode)
 	// non-zero if the script is in a runnable state (since registering an OnExit function requires
 	// that a script command has executed to do it).  If this ever changes, the !mIsReadyToExecute
 	// condition should be added to the below if statement:
-	static bool sOnExitIsRunning = false;
+	_thread_local static bool sOnExitIsRunning = false;
 	if (!mOnExit.Count() || sOnExitIsRunning)  // || !mIsReadyToExecute
 	{
 		// In the case of sOnExitIsRunning == true:
@@ -1826,7 +1888,7 @@ ResultType Script::ExitApp(ExitReasons aExitReason, LPTSTR aBuf, int aExitCode)
 	// occurring in a timely fashion.  An option can be added via the FutureUse param to make it
 	// interruptible if there is ever a demand for that.
 	// UPDATE: g_AllowInterruption is now used instead of g->AllowThreadToBeInterrupted for two reasons:
-	// 1) It avoids the need to do "int mUninterruptedLineCountMax_prev = g_script.mUninterruptedLineCountMax;"
+	// 1) It avoids the need to do "int mUninterruptedLineCountMax_prev = g_script->mUninterruptedLineCountMax;"
 	//    (Disable this item so that ExecUntil() won't automatically make our new thread uninterruptible
 	//    after it has executed a certain number of lines).
 	// 2) Mostly obsolete: If the thread we're interrupting is uninterruptible, the uninterruptible timer
@@ -1867,6 +1929,17 @@ ResultType Script::ExitApp(ExitReasons aExitReason, LPTSTR aBuf, int aExitCode)
 }
 
 
+#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+BOOL CALLBACK ThreadWindowsCloseCallback(HWND ahWnd, LPARAM aThreadID)
+{	// close all windows that are open for thread so we can exit the thread properly
+	TCHAR WinClass[MAX_CLASS_NAME];
+	GetClassName(ahWnd, WinClass, MAX_CLASS_NAME);
+	if (!_tcscmp(WinClass, WINDOW_CLASS_GUI) || !_tcscmp(WinClass, _T("#32770")))
+		PostMessage(ahWnd, WM_CLOSE, 0, 0);
+	return true;
+
+}
+#endif
 
 void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 // Note that g_script's destructor takes care of most other cleanup work, such as destroying
@@ -1875,55 +1948,73 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 #ifdef _USRDLL
 	terminateDll(aExitCode);
 #else
-	// L31: Release objects stored in variables, where possible.
-	if (aExitCode != CRITICAL_ERROR) // i.e. Avoid making matters worse if CRITICAL_ERROR.
+#ifndef AUTOHOTKEYSC
+	if (g_MainThreadID == g_ThreadID)
 	{
-		// Ensure the current thread is not paused and can't be interrupted
-		// in case one or more objects need to call a __delete meta-function.
-		g_AllowInterruption = FALSE;
-		g->IsPaused = false;
-
-		int v, i;
-		for (v = 0; v < mVarCount; ++v)
-			if (mVar[v]->IsObject())
-				mVar[v]->ReleaseObject(); // ReleaseObject() vs Free() for performance (though probably not important at this point).
-		// Otherwise, maybe best not to free it in case an object's __Delete meta-function uses it?
-		for (v = 0; v < mLazyVarCount; ++v)
-			if (mLazyVar[v]->IsObject())
-				mLazyVar[v]->ReleaseObject();
-		for (i = 0; i < mFuncCount; ++i)
+		for (int i = 1; i < MAX_AHK_THREADS; i++)
 		{
-			Func &f = *mFunc[i];
-			if (f.mIsBuiltIn)
-				continue;
-			// Since it doesn't seem feasible to release all var backups created by recursive function
-			// calls and all tokens in the 'stack' of each currently executing expression, currently
-			// only static and global variables are released.  It seems best for consistency to also
-			// avoid releasing top-level non-static local variables (i.e. which aren't in var backups).
-
-			// For consistency, only free static vars (see above).
-
-			for (v = 0; v < f.mStaticVarCount; ++v)
-				if (f.mStaticVar[v]->IsObject())
-					f.mStaticVar[v]->ReleaseObject();
-
-			for (v = 0; v < f.mStaticLazyVarCount; ++v)
-				if (f.mStaticLazyVar[v]->IsObject())
-					f.mStaticLazyVar[v]->ReleaseObject();
-
-			// so no need to run below since static vars are in a separate array
-			//for (v = 0; v < f.mVarCount; ++v)
-			//	if (f.mVbar[v]->IsStatic() && f.mVar[v]->IsObject()) 
-			//		f.mVar[v]->ReleaseObject();
-			//for (v = 0; v < f.mLazyVarCount; ++v)
-			//	if (f.mLazyVar[v]->IsStatic() && f.mLazyVar[v]->IsObject())
-			//		f.mLazyVar[v]->ReleaseObject();
+			HWND hWnd = 0;
+			if ((hWnd = (HWND)g_ahkThreads[i][0]) && IsWindow(hWnd))
+			{
+				DWORD ThreadID = 0;
+				HANDLE hThread = OpenThread(THREAD_ALL_ACCESS, TRUE, ThreadID = (DWORD)g_ahkThreads[i][5]);
+				if (hThread)
+				{
+					QueueUserAPC(&ThreadExitApp, hThread, 0);
+					CloseHandle(hThread);
+					PostThreadMessage(ThreadID, WM_NULL, 0, 0); // bump GetMessage in the other thread
+					EnumThreadWindows((DWORD)ThreadID, &ThreadWindowsCloseCallback, NULL);
+				}
+			}
+		}
+		BOOL ThreadIsRunning = true;
+		for (int i = 0; i < 100 && ThreadIsRunning; i++)
+		{
+			MsgSleep(50);
+			ThreadIsRunning = false;
+			for (int i = 1; i < MAX_AHK_THREADS; i++)
+			{
+				HWND hWnd;
+				if ((hWnd = (HWND)g_ahkThreads[i][0]) && IsWindow(hWnd))
+				{
+					EnumThreadWindows((DWORD)g_ahkThreads[i][5], &ThreadWindowsCloseCallback, NULL);
+					ThreadIsRunning = true;
+					break;
+				}
+			}
 		}
 	}
-#ifdef CONFIG_DEBUGGER // L34: Exit debugger *after* the above to allow debugging of any invoked __Delete handlers.
-	g_Debugger.Exit(aExitReason);
 #endif
 
+	g_AllowInterruption = FALSE;
+	g->IsPaused = false;
+#ifdef CONFIG_DEBUGGER // L34: Exit debugger *after* the above to allow debugging of any invoked __Delete handlers.
+	if (g_MainThreadID == g_ThreadID)
+		g_Debugger.Exit(aExitReason);
+#endif
+
+#ifndef AUTOHOTKEYSC
+	if (g_MainThreadID != g_ThreadID)
+	{
+		for (int i = 0; i < MAX_AHK_THREADS; i++)
+		{
+			if (g_hWnd == (HWND)g_ahkThreads[i][0])
+			{
+				memset(g_ahkThreads[i], NULL, sizeof(void*) * 7);
+				break;
+			}
+		}
+		free(g_lpScript);
+		delete g_script;
+		delete g_clip;
+		free(g_array);
+		DeleteCriticalSection(&g_CriticalRegExCache);
+		for (int i = 0;; i++)
+			if (!TlsFree(i))
+				break;
+		_endthreadex(aExitCode);
+	}
+#endif
 	// We call DestroyWindow() because MainWindowProc() has left that up to us.
 	// DestroyWindow() will cause MainWindowProc() to immediately receive and process the
 	// WM_DESTROY msg, which should in turn result in any child windows being destroyed
@@ -1933,6 +2024,20 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 		g_DestroyWindowCalled = true;
 		DestroyWindow(g_hWnd);
 	}
+	delete g_script;
+	delete g_clip;
+	free(g_array);
+	if (g_KeyHistory)
+		free(g_KeyHistory);
+#ifndef AUTOHOTKEYSC
+	if (g_hWinAPI)
+	{
+		free(g_hWinAPI);
+		free(g_hWinAPIlowercase);
+	}
+	if (g_Debugger.mStack.mBottom)
+		free(g_Debugger.mStack.mBottom);
+#endif
 	Hotkey::AllDestructAndExit(aExitCode);
 #endif
 }
@@ -2330,7 +2435,7 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 			_tcscpy(Line::sSourceFile[source_file_index], aPathToShow);
 		}
 		else
-			Line::sSourceFile[source_file_index] = g_script.mOurEXE;
+			Line::sSourceFile[source_file_index] = g_script->mOurEXE;
 	}
 	
 #ifndef MINIDLL
@@ -3791,7 +3896,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		// This is done only after the file has been successfully opened in case aIgnoreLoadFailure==true:
 		if (source_file_index > 0)
 		{
-			Line::sSourceFile[source_file_index] = tmalloc(_tcslen(full_path) + 1); //SimpleHeap::Malloc(full_path);
+			Line::sSourceFile[source_file_index] = tmalloc(_tcslen(full_path) + 1); //g_SimpleHeap->Malloc(full_path);
 			if (Line::sSourceFile[source_file_index] == 0)
 			{
 				ScriptError(ERR_OUTOFMEM);
@@ -5557,7 +5662,7 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		Line *hot_expr_line = mLastLine;
 
 		// Set the new criterion.
-		if (!(g->HotCriterion = (HotkeyCriterion *)SimpleHeap::Malloc(sizeof(HotkeyCriterion))))
+		if (!(g->HotCriterion = (HotkeyCriterion *)g_SimpleHeap->Malloc(sizeof(HotkeyCriterion))))
 			return ScriptError(ERR_OUTOFMEM);
 		g->HotCriterion->Type = HOT_IF_EXPR;
 		g->HotCriterion->ExprLine = hot_expr_line;
@@ -5894,11 +5999,11 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 void ScriptTimer::Disable()
 {
 	mEnabled = false;
-	--g_script.mTimerEnabledCount;
+	--g_script->mTimerEnabledCount;
 #ifndef MINIDLL
-	if (!g_script.mTimerEnabledCount && !g_nLayersNeedingTimer && !Hotkey::sJoyHotkeyCount)
+	if (!g_script->mTimerEnabledCount && !g_nLayersNeedingTimer && !Hotkey::sJoyHotkeyCount)
 #else
-	if (!g_script.mTimerEnabledCount && !g_nLayersNeedingTimer)
+	if (!g_script->mTimerEnabledCount && !g_nLayersNeedingTimer)
 #endif
 		KILL_MAIN_TIMER
 		// Above: If there are now no enabled timed subroutines, kill the main timer since there's no other
@@ -6091,7 +6196,7 @@ ResultType Script::AddLabel(LPTSTR aLabelName, bool aAllowDupe)
 				// return
 				return ScriptError(_T("Duplicate label."), aLabelName);
 	}
-	LPTSTR new_name = SimpleHeap::Malloc(aLabelName);
+	LPTSTR new_name = g_SimpleHeap->Malloc(aLabelName);
 	if (!new_name)
 		return FAIL;  // It already displayed the error for us.
 	Label *the_new_label = new Label(new_name); // Pass it the dynamic memory area we created.
@@ -7073,7 +7178,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 		new_arg = NULL;  // Just need an empty array in this case.
 	else
 	{
-		if (!(new_arg = (ArgStruct *)SimpleHeap::Malloc(aArgc * sizeof(ArgStruct))))
+		if (!(new_arg = (ArgStruct *)g_SimpleHeap->Malloc(aArgc * sizeof(ArgStruct))))
 			return ScriptError(ERR_OUTOFMEM);
 
 		int i, j, i_plus_one;
@@ -7174,7 +7279,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 						// Store the text even if it was converted to an input var, since it might be
 						// converted back at a later stage.  Can't use Var::mName since it might have
 						// different case ("var" vs "Var").
-						if (!(this_new_arg.text = SimpleHeap::Malloc(this_aArg)))
+						if (!(this_new_arg.text = g_SimpleHeap->Malloc(this_aArg)))
 							return FAIL;
 						this_new_arg.length = (ArgLengthType)_tcslen(this_aArg);
 						continue;
@@ -7240,7 +7345,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 			this_new_arg.length = (ArgLengthType)_tcslen(this_aArg);
 
 			// Allocate memory for arg text.
-			if (!(this_new_arg.text = (LPTSTR)SimpleHeap::Malloc((this_new_arg.length + 1) * sizeof(TCHAR))))
+			if (!(this_new_arg.text = (LPTSTR)g_SimpleHeap->Malloc((this_new_arg.length + 1) * sizeof(TCHAR))))
 				return FAIL;  // It already displayed the error for us.
 			// Copy arg text to persistent memory.
 			tmemcpy(this_new_arg.text, this_aArg, this_new_arg.length + 1); // +1 for null terminator.
@@ -7286,7 +7391,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 				int extra = 1
 					// and +1 if this arg might need to be converted to a double-deref:
 					+ (aActionType == ACT_FUNC && !this_new_arg.is_expression);
-				if (!(this_new_arg.deref = (DerefType *)SimpleHeap::Malloc((deref_count + extra) * sizeof(DerefType))))
+				if (!(this_new_arg.deref = (DerefType *)g_SimpleHeap->Malloc((deref_count + extra) * sizeof(DerefType))))
 					return ScriptError(ERR_OUTOFMEM);
 				memcpy(this_new_arg.deref, deref, deref_count * sizeof(DerefType));
 				// Terminate the list of derefs with a deref that has a NULL marker:
@@ -8114,7 +8219,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 			{
 				// Now that there can be no more "global" declarations, copy the list into persistent memory.
 				Var **global_vars;
-				if (!(global_vars = (Var **)SimpleHeap::Malloc(func.mGlobalVarCount * sizeof(Var *))))
+				if (!(global_vars = (Var **)g_SimpleHeap->Malloc(func.mGlobalVarCount * sizeof(Var *))))
 					return ScriptError(ERR_OUTOFMEM);
 				memcpy(global_vars, func.mGlobalVar, func.mGlobalVarCount * sizeof(Var *));
 				func.mGlobalVar = global_vars;
@@ -8712,7 +8817,7 @@ ResultType Script::DefineFunc(LPTSTR aBuf, Var *aFuncGlobalVar[])
 				// The above has also set param_end for use near the bottom of the loop.
 				ConvertEscapeSequences(buf, NULL); // Raw escape sequences like `n haven't been converted yet, so do it now.
 				this_param.default_type = PARAM_DEFAULT_STR;
-				this_param.default_str = *buf ? SimpleHeap::Malloc(buf, target - buf) : _T("");
+				this_param.default_str = *buf ? g_SimpleHeap->Malloc(buf, target - buf) : _T("");
 			}
 			else // A default value other than a quoted/literal string.
 			{
@@ -8788,7 +8893,7 @@ ResultType Script::DefineFunc(LPTSTR aBuf, Var *aFuncGlobalVar[])
 	{
 		// Allocate memory only for the actual number of parameters actually present.
 		size_t size = param_count * sizeof(param[0]);
-		if (!(func.mParam = (FuncParam *)SimpleHeap::Malloc(size)))
+		if (!(func.mParam = (FuncParam *)g_SimpleHeap->Malloc(size)))
 			return ScriptError(ERR_OUTOFMEM);
 		func.mParamCount = param_count - func.mIsVariadic; // i.e. don't count the final "param*" of a variadic function.
 		memcpy(func.mParam, param, size);
@@ -9274,20 +9379,25 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	{
 		// Load WinApi library
 		LPVOID aDataBuf;
-		HRSRC hWinApi = FindResource(g_hInstance, _T("C974C3B7677A402D93B047DA402587C7"), MAKEINTRESOURCE(10));
-		DWORD szWinApi = DecompressBuffer(LockResource(LoadResource(g_hInstance, hWinApi)), aDataBuf, SizeofResource(g_hInstance, hWinApi));
-		// Allocate memory for WinAPI definitions
-		g_hWinAPI = (LPSTR)malloc(szWinApi + sizeof(char));
-		g_hWinAPIlowercase = (LPSTR)malloc(szWinApi + sizeof(char));
-		// copy definitions
-		memmove(g_hWinAPI, aDataBuf, szWinApi);
-		memmove(g_hWinAPIlowercase, aDataBuf, szWinApi);
-		VirtualFree(aDataBuf,0,MEM_RELEASE);
-		// terminate string
-		*(g_hWinAPI + szWinApi) = '\0';
-		*(g_hWinAPIlowercase + szWinApi) = '\0';
-		// we need lowercase so we can search for function case insensitive
-		CharLowerA(g_hWinAPIlowercase);
+		HRSRC hWinApi;
+		DWORD szWinApi;
+		if (!g_hWinAPI)
+		{
+			hWinApi = FindResource(g_hInstance, _T("C974C3B7677A402D93B047DA402587C7"), MAKEINTRESOURCE(10));
+			szWinApi = DecompressBuffer(LockResource(LoadResource(g_hInstance, hWinApi)), aDataBuf, SizeofResource(g_hInstance, hWinApi));
+			// Allocate memory for WinAPI definitions
+			g_hWinAPI = (LPSTR)malloc(szWinApi + sizeof(char));
+			g_hWinAPIlowercase = (LPSTR)malloc(szWinApi + sizeof(char));
+			// copy definitions
+			memmove(g_hWinAPI, aDataBuf, szWinApi);
+			memmove(g_hWinAPIlowercase, aDataBuf, szWinApi);
+			VirtualFree(aDataBuf, 0, MEM_RELEASE);
+			// terminate string
+			*(g_hWinAPI + szWinApi) = '\0';
+			*(g_hWinAPIlowercase + szWinApi) = '\0';
+			// we need lowercase so we can search for function case insensitive
+			CharLowerA(g_hWinAPIlowercase);
+		}
 		for (i = 0; i < FUNC_LIB_COUNT; ++i)
 			if (!(sLib[i].path = tmalloc(MAX_PATH))) // When dll script is restarted, SimpleHeap is deleted and we don't want to delete static members
 				return NULL; // Due to rarity, simply pass the failure back to caller.
@@ -9838,7 +9948,7 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		// For performance, the action and arg types are "precalculated" and stored in Func::mOutputVars,
 		// which should never be used for its other purpose because the ActionType appropriate for this
 		// command should be used instead of ACT_FUNC -> BIF_PerformAction -> ActionType.
-		bif_output_vars = (UCHAR *)SimpleHeap::Malloc(bif.mMaxParams + 1);
+		bif_output_vars = (UCHAR *)g_SimpleHeap->Malloc(bif.mMaxParams + 1);
 		if (!bif_output_vars)
 			return NULL;
 		// Store the action type:
@@ -9892,7 +10002,7 @@ Func *Script::AddFunc(LPCTSTR aFuncName, size_t aFuncNameLength, bool aIsBuiltIn
 		// ValidateName requires that the name be null-terminated, but it isn't in this case.
 		// Doing this first saves doing tcslcpy() into a temporary buffer, and won't leak memory
 		// since the script currently always exits if an error occurs anywhere below:
-		new_name = SimpleHeap::Malloc((LPTSTR)aFuncName, aFuncNameLength);
+		new_name = g_SimpleHeap->Malloc((LPTSTR)aFuncName, aFuncNameLength);
 		if (!new_name)
 			return NULL; // Above already displayed the error for us.
 
@@ -10392,7 +10502,10 @@ Var *Script::AddVar(LPTSTR aVarName, size_t aVarNameLength, int aInsertPos, int 
 		return NULL;
 
 	bool aIsLocal = (aScope & VAR_LOCAL);
-
+#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+	if (!g)
+		g = (global_struct*)g_ahkThreads[0][4];
+#endif
 	// Not necessary or desirable to add built-in variables to a function's list of locals.  Always keep
 	// built-in vars in the global list for efficiency and to keep them out of ListVars.  Note that another
 	// section at loadtime displays an error for any attempt to explicitly declare built-in variables as
@@ -10421,7 +10534,7 @@ Var *Script::AddVar(LPTSTR aVarName, size_t aVarNameLength, int aInsertPos, int 
 	}
 
 	// Allocate some dynamic memory to pass to the constructor:
-	LPTSTR new_name = SimpleHeap::Malloc(var_name, aVarNameLength);
+	LPTSTR new_name = g_SimpleHeap->Malloc(var_name, aVarNameLength);
 	if (!new_name)
 		// It already displayed the error for us.
 		return NULL;
@@ -10677,7 +10790,7 @@ ResultType Script::AddGroup(LPTSTR aGroupName)
 	if (!Var::ValidateName(aGroupName, DISPLAY_NO_ERROR)) // Seems best to use same validation as var names.
 		return ScriptError(_T("Illegal group name."), aGroupName);
 
-	LPTSTR new_name = SimpleHeap::Malloc(aGroupName, aGroupName_length);
+	LPTSTR new_name = g_SimpleHeap->Malloc(aGroupName, aGroupName_length);
 	if (!new_name)
 		return FAIL;  // It already displayed the error for us.
 
@@ -10875,7 +10988,7 @@ ResultType Script::PreparseExpressions(Line *aStartingLine)
 				if (ACT_USES_SIMPLE_POSTFIX(line->mActionType))
 				{
 					// This ensures ExpandArgs() always sets aResultTokens[i].marker.
-					this_arg.postfix = (ExprTokenType *)SimpleHeap::Malloc(sizeof(ExprTokenType));
+					this_arg.postfix = (ExprTokenType *)g_SimpleHeap->Malloc(sizeof(ExprTokenType));
 					this_arg.postfix->symbol = SYM_STRING;
 					this_arg.postfix->marker = this_arg.text;
 					this_arg.postfix->marker_length = this_arg.length;
@@ -11681,11 +11794,11 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 					}
 					else
 					{
-						if (!(deref_new = (DerefType *)SimpleHeap::Malloc(sizeof(DerefType))))
+						if (!(deref_new = (DerefType *)g_SimpleHeap->Malloc(sizeof(DerefType))))
 							return LineError(ERR_OUTOFMEM);
 						if (!(infix_count && YIELDS_AN_OPERAND(infix[infix_count - 1].symbol)))
 						{	// Array constructor; e.g. x := [1,2,3]
-							deref_new->func = g_script.FindFunc(_T("Array"));
+							deref_new->func = g_script->FindFunc(_T("Array"));
 							deref_new->param_count = 0;
 						}
 						else
@@ -11710,9 +11823,9 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 				case '{':
 					if (infix_count && YIELDS_AN_OPERAND(infix[infix_count - 1].symbol))
 						return LineError(_T("Unexpected \"{\""));
-					if (!(deref_new = (DerefType *)SimpleHeap::Malloc(sizeof(DerefType))))
+					if (!(deref_new = (DerefType *)g_SimpleHeap->Malloc(sizeof(DerefType))))
 						return LineError(ERR_OUTOFMEM);
-					deref_new->func = g_script.FindFunc(_T("Object"));
+					deref_new->func = g_script->FindFunc(_T("Object"));
 					deref_new->type = DT_FUNC;
 					deref_new->param_count = 0;
 					deref_new->marker = cp; // For error-reporting.
@@ -11827,9 +11940,9 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 					if (cp1 == '=')
 					{
 						++cp;
-						if (!(this_infix_item.deref = (DerefType *)SimpleHeap::Malloc(sizeof(DerefType))))
+						if (!(this_infix_item.deref = (DerefType *)g_SimpleHeap->Malloc(sizeof(DerefType))))
 							return LineError(ERR_OUTOFMEM);
-						this_infix_item.deref->func = g_script.FindFunc(_T("RegExMatch"));
+						this_infix_item.deref->func = g_script->FindFunc(_T("RegExMatch"));
 						this_infix_item.deref->type = DT_FUNC;
 						this_infix_item.deref->param_count = 2;
 						this_infix_item.symbol = SYM_REGEXMATCH;
@@ -11930,7 +12043,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 							}
 							else
 							{
-								LPTSTR str = SimpleHeap::Malloc(cp, op_end - cp);
+								LPTSTR str = g_SimpleHeap->Malloc(cp, op_end - cp);
 								if (!str)
 									return FAIL; // Malloc already displayed an error message.
 								infix[infix_count].SetValue(str, op_end - cp);
@@ -11940,7 +12053,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 
 							SymbolType new_symbol; // Type of token: SYM_FUNC or SYM_DOT (which must be treated differently as it doesn't have parentheses).
 							DerefType *new_deref; // Holds a reference to the appropriate function, and parameter count.
-							if (!(new_deref = (DerefType *)SimpleHeap::Malloc(sizeof(DerefType))))
+							if (!(new_deref = (DerefType *)g_SimpleHeap->Malloc(sizeof(DerefType))))
 								return LineError(ERR_OUTOFMEM);
 							new_deref->marker = cp - 1; // Not typically needed, set for error-reporting.
 							new_deref->param_count = 2; // Initially two parameters: the object and identifier.
@@ -12018,7 +12131,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 						break;
 					default:
 						// SYM_STRING: either the "key" in "{key: value}" or a syntax error (might be impossible).
-						LPTSTR str = SimpleHeap::Malloc(cp, op_end - cp);
+						LPTSTR str = g_SimpleHeap->Malloc(cp, op_end - cp);
 						if (!str)
 							return FAIL; // Malloc already displayed an error message.
 						infix[infix_count].SetValue(str, op_end - cp);
@@ -12102,7 +12215,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 
 			if (!can_be_optimized_out)
 			{
-				LPTSTR str = SimpleHeap::Malloc(this_deref_ref.marker, this_deref_ref.length);
+				LPTSTR str = g_SimpleHeap->Malloc(this_deref_ref.marker, this_deref_ref.length);
 				if (!str)
 					return LineError(ERR_OUTOFMEM);
 				infix[infix_count].SetValue(str, this_deref_ref.length);
@@ -12718,7 +12831,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 						ExprTokenType *&that_postfix = postfix[postfix_count]; // In case above did postfix_count++.
 						that_postfix = (ExprTokenType *)_alloca(sizeof(ExprTokenType));
 						that_postfix->symbol = SYM_FUNC;
-						if (!(that_postfix->deref = (DerefType *)SimpleHeap::Malloc(sizeof(DerefType)))) // Must be persistent memory, unlike that_postfix itself.
+						if (!(that_postfix->deref = (DerefType *)g_SimpleHeap->Malloc(sizeof(DerefType)))) // Must be persistent memory, unlike that_postfix itself.
 							return LineError(ERR_OUTOFMEM);
 						that_postfix->deref->func = &g_ObjGetInPlace;
 						that_postfix->deref->type = DT_FUNC;
@@ -12871,7 +12984,7 @@ end_of_infix_to_postfix:
 			case SYM_FLOAT:
 				// Convert this numeric literal back into a string to ensure the format is consistent.
 				// This also ensures parentheses are not present in the output, for cases like MsgBox % (1.0).
-				if (!(aArg.text = SimpleHeap::Malloc(TokenToString(only_token, number_buf))))
+				if (!(aArg.text = g_SimpleHeap->Malloc(TokenToString(only_token, number_buf))))
 					return LineError(ERR_OUTOFMEM);
 				break;
 			case SYM_VAR: // SYM_VAR can only be VAR_NORMAL in this case.
@@ -12900,7 +13013,7 @@ end_of_infix_to_postfix:
 	}
 
 	// Create a new postfix array and attach it to this arg of this line.
-	if (!(aArg.postfix = (ExprTokenType *)SimpleHeap::Malloc((postfix_count + 1)*sizeof(ExprTokenType)))) // +1 for the terminator item added below.
+	if (!(aArg.postfix = (ExprTokenType *)g_SimpleHeap->Malloc((postfix_count + 1)*sizeof(ExprTokenType)))) // +1 for the terminator item added below.
 		return LineError(ERR_OUTOFMEM);
 
 	int i, j;
@@ -12923,23 +13036,23 @@ end_of_infix_to_postfix:
 //-------------------------------------------------------------------------------------
 
 // Init static vars:
-Line *Line::sLog[] = { NULL };  // Initialize all the array elements.
-DWORD Line::sLogTick[]; // No initialization needed.
-int Line::sLogNext = 0;  // Start at the first element.
+_thread_local Line *Line::sLog[] = { NULL };  // Initialize all the array elements.
+_thread_local DWORD Line::sLogTick[]; // No initialization needed.
+_thread_local int Line::sLogNext = 0;  // Start at the first element.
 
 #ifdef AUTOHOTKEYSC  // Reduces code size to omit things that are unused, and helps catch bugs at compile-time.
 LPTSTR Line::sSourceFile[1]; // No init needed.
 #else
-LPTSTR *Line::sSourceFile = NULL; // Init to NULL for use with realloc() and for maintainability.
-int Line::sMaxSourceFiles = 0;
+_thread_local LPTSTR *Line::sSourceFile = NULL; // Init to NULL for use with realloc() and for maintainability.
+_thread_local int Line::sMaxSourceFiles = 0;
 #endif
-int Line::sSourceFileCount = 0; // Zero source files initially.  The main script will be the first.
+_thread_local int Line::sSourceFileCount = 0; // Zero source files initially.  The main script will be the first.
 
-LPTSTR Line::sDerefBuf = NULL;  // Buffer to hold the values of any args that need to be dereferenced.
-size_t Line::sDerefBufSize = 0;
-int Line::sLargeDerefBufs = 0; // Keeps track of how many large bufs exist on the call-stack, for the purpose of determining when to stop the buffer-freeing timer.
-LPTSTR Line::sArgDeref[MAX_ARGS]; // No init needed.
-Var *Line::sArgVar[MAX_ARGS]; // Same.
+_thread_local LPTSTR Line::sDerefBuf = NULL;  // Buffer to hold the values of any args that need to be dereferenced.
+_thread_local size_t Line::sDerefBufSize = 0;
+_thread_local int Line::sLargeDerefBufs = 0; // Keeps track of how many large bufs exist on the call-stack, for the purpose of determining when to stop the buffer-freeing timer.
+_thread_local LPTSTR Line::sArgDeref[MAX_ARGS]; // No init needed.
+_thread_local Var *Line::sArgVar[MAX_ARGS]; // Same.
 
 
 void Line::FreeDerefBufIfLarge()
@@ -13004,7 +13117,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ResultToken *aResultToken, Line 
 	BOOL jumping_from_inside_function_to_outside;
 	ResultType if_condition, result;
 	LONG_OPERATION_INIT
-		global_struct &g = *::g; // Reduces code size and may improve performance. Eclipsing ::g with local g makes compiler remind/enforce the use of the right one.
+	global_struct &g = *::g; // Reduces code size and may improve performance. Eclipsing ::g with local g makes compiler remind/enforce the use of the right one.
 
 #ifdef _WIN64
 	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
@@ -13048,16 +13161,16 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ResultToken *aResultToken, Line 
 			// bother checking because this quasi-thread will stay non-interruptible until it finishes.
 			// v1.0.38.04: If g.ThreadIsCritical==true, no need to check or accumulate g.UninterruptedLineCount
 			// because the script is now in charge of this thread's interruptibility.
-			if (!g.AllowThreadToBeInterrupted && !g.ThreadIsCritical && g_script.mUninterruptedLineCountMax > -1) // Ordered for short-circuit performance.
+			if (!g.AllowThreadToBeInterrupted && !g.ThreadIsCritical && g_script->mUninterruptedLineCountMax > -1) // Ordered for short-circuit performance.
 			{
 			// To preserve backward compatibility, ExecUntil() must be the one to check
 			// g.UninterruptedLineCount and update g.AllowThreadToBeInterrupted, rather than doing
 			// those things on-demand in IsInterruptible().  If those checks were moved to
 			// IsInterruptible(), they might compare against a different/changed value of
-			// g_script.mUninterruptedLineCountMax because IsInterruptible() is called only upon demand.
+			// g_script->mUninterruptedLineCountMax because IsInterruptible() is called only upon demand.
 			// THIS SECTION DOES NOT CHECK g.ThreadStartTime because that only needs to be
 			// checked on demand by callers of IsInterruptible().
-			if (g.UninterruptedLineCount > g_script.mUninterruptedLineCountMax) // See above.
+			if (g.UninterruptedLineCount > g_script->mUninterruptedLineCountMax) // See above.
 				g.AllowThreadToBeInterrupted = true;
 			else
 				// Incrementing this unconditionally makes it a relatively crude measure,
@@ -13068,7 +13181,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ResultToken *aResultToken, Line 
 		// At this point, a pause may have been triggered either by the above MsgSleep()
 		// or due to the action of a command (e.g. Pause, or perhaps tray menu "pause" was selected during Sleep):
 		while (g.IsPaused) // An initial "if (g.IsPaused)" prior to the loop doesn't make it any faster.
-			if (g_MainThreadID == aThreadID)
+			if (g_ThreadID == aThreadID)
 				MsgSleep(INTERVAL_UNSPECIFIED);  // Must check often to periodically run timed subroutines.
 			else
 				Sleep(SLEEP_INTERVAL);
@@ -13076,7 +13189,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ResultToken *aResultToken, Line 
 		// Do these only after the above has had its opportunity to spend a significant amount
 		// of time doing what it needed to do.  i.e. do these immediately before the line will actually
 		// be run so that the time it takes to run will be reflected in the ListLines log.
-		g_script.mCurrLine = line;  // Simplifies error reporting when we get deep into function calls.
+		g_script->mCurrLine = line;  // Simplifies error reporting when we get deep into function calls.
 
 		if (g.ListLinesIsEnabled)
 			LOG_LINE(line)
@@ -13572,11 +13685,11 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ResultToken *aResultToken, Line 
 					// message (since an error message has already been shown, and it probably
 					// indicated the thread will exit).
 					if (!g.InTryBlock)
-						g_script.FreeExceptionToken(g.ThrownToken);
+						g_script->FreeExceptionToken(g.ThrownToken);
 					return FAIL;
 				}
 
-				g_script.FreeExceptionToken(g.ThrownToken);
+				g_script->FreeExceptionToken(g.ThrownToken);
 			}
 			else // (this_act == ACT_TRY)
 				g.InTryBlock = true;
@@ -13623,7 +13736,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ResultToken *aResultToken, Line 
 				{
 					// An exception was thrown, but no 'catch' nor 'finally' is present.
 					// In this case 'try' acts as a catch-all.
-					g_script.FreeExceptionToken(g.ThrownToken);
+					g_script->FreeExceptionToken(g.ThrownToken);
 					result = OK;
 				}
 			}
@@ -13645,7 +13758,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ResultToken *aResultToken, Line 
 				if (res != OK || invalid_jump)
 				{
 					if (thrown_token) // The new error takes precedence over this one.
-						g_script.FreeExceptionToken(thrown_token);
+						g_script->FreeExceptionToken(thrown_token);
 					if (res == FAIL || res == EARLY_EXIT)
 						// Above: It's borderline whether Exit should be valid here, but it's allowed for
 						// two reasons: 1) if the script was non-#Persistent it would have already terminated
@@ -13653,7 +13766,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ResultToken *aResultToken, Line 
 						return res;
 					// The remaining cases are all invalid jumps/control flow statements.  All such cases
 					// should be detected at load time, but it seems best to keep this for maintainability:
-					return g_script.mCurrLine->LineError(ERR_BAD_JUMP_INSIDE_FINALLY);
+					return g_script->mCurrLine->LineError(ERR_BAD_JUMP_INSIDE_FINALLY);
 				}
 				g.ThrownToken = thrown_token; // If non-NULL, this was thrown within the try block.
 			}
@@ -13685,7 +13798,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ResultToken *aResultToken, Line 
 			if (g.ThrownToken)
 			{
 				// This may happen if the catch is executed inside a finally block.
-				g_script.FreeExceptionToken(g.ThrownToken);
+				g_script->FreeExceptionToken(g.ThrownToken);
 			}
 
 			ResultToken* token = new ResultToken;
@@ -13891,15 +14004,15 @@ ResultType Line::EvaluateHotCriterionExpression(LPTSTR aHotkeyName)
 
 #ifndef MINIDLL
 		// Update A_ThisHotkey, useful if #If calls a function to do its dirty work.
-		LPTSTR prior_hotkey_name[] = { g_script.mThisHotkeyName, g_script.mPriorHotkeyName };
-	DWORD prior_hotkey_time[] = { g_script.mThisHotkeyStartTime, g_script.mPriorHotkeyStartTime };
-	g_script.mPriorHotkeyName = g_script.mThisHotkeyName;			// For consistency
-	g_script.mPriorHotkeyStartTime = g_script.mThisHotkeyStartTime; //
-	g_script.mThisHotkeyName = aHotkeyName;
-	g_script.mThisHotkeyStartTime = // Updated for consistency.
-		g_script.mLastPeekTime = GetTickCount();
+		LPTSTR prior_hotkey_name[] = { g_script->mThisHotkeyName, g_script->mPriorHotkeyName };
+	DWORD prior_hotkey_time[] = { g_script->mThisHotkeyStartTime, g_script->mPriorHotkeyStartTime };
+	g_script->mPriorHotkeyName = g_script->mThisHotkeyName;			// For consistency
+	g_script->mPriorHotkeyStartTime = g_script->mThisHotkeyStartTime; //
+	g_script->mThisHotkeyName = aHotkeyName;
+	g_script->mThisHotkeyStartTime = // Updated for consistency.
+		g_script->mLastPeekTime = GetTickCount();
 #endif
-	g_script.mCurrLine = this; // Added in v1.1.16 to fix A_LineFile and A_LineNumber.
+	g_script->mCurrLine = this; // Added in v1.1.16 to fix A_LineFile and A_LineNumber.
 
 	if (g->ListLinesIsEnabled)
 		LOG_LINE(this)
@@ -13918,10 +14031,10 @@ ResultType Line::EvaluateHotCriterionExpression(LPTSTR aHotkeyName)
 	g_HotExprLFW = g->hWndLastUsed; // Even if above failed, for simplicity.
 
 	// A_ThisHotkey must be restored else A_PriorHotkey will get an incorrect value later.
-	g_script.mThisHotkeyName = prior_hotkey_name[0];
-	g_script.mThisHotkeyStartTime = prior_hotkey_time[0];
-	g_script.mPriorHotkeyName = prior_hotkey_name[1];
-	g_script.mPriorHotkeyStartTime = prior_hotkey_time[1];
+	g_script->mThisHotkeyName = prior_hotkey_name[0];
+	g_script->mThisHotkeyStartTime = prior_hotkey_time[0];
+	g_script->mPriorHotkeyName = prior_hotkey_name[1];
+	g_script->mPriorHotkeyStartTime = prior_hotkey_time[1];
 #endif
 
 	DEBUGGER_STACK_POP()
@@ -14016,7 +14129,7 @@ ResultType Line::PerformLoopWhile(ResultToken *aResultToken, bool &aContinueMain
 
 	for (;; ++g.mLoopIteration)
 	{
-		g_script.mCurrLine = this; // For error-reporting purposes.
+		g_script->mCurrLine = this; // For error-reporting purposes.
 #ifdef CONFIG_DEBUGGER
 		// L31: Let the debugger break at the 'While' line each iteration. Before this change,
 		// a While loop with empty body such as While FuncWithSideEffect() {} would be "hit"
@@ -14115,7 +14228,7 @@ ResultType Line::IncludeFiles(bool aAllowDuplicateInclude, bool aIgnoreLoadFailu
 		// Other types of loops leave g.mLoopFile unchanged so that a file-loop can enclose some other type of
 		// inner loop, and that inner loop will still have access to the outer loop's current file.
 		// MessageBox(NULL, file_path, g.mLoopFile->cFileName, 0); 
-		if (!g_script.LoadIncludedFile(g.mLoopFile->cFileName, false, false)) // Fix for v1.0.47.05: Pass false for allow-dupe because otherwise, it's possible for a stdlib file to attempt to include itself (especially via the LibNamePrefix_ method) and thus give a misleading "duplicate function" vs. "func does not exist" error message.  Obsolete: For performance, pass true for allow-dupe so that it doesn't have to check for a duplicate file (seems too rare to worry about duplicates since by definition, the function doesn't yet exist so it's file shouldn't yet be included).
+		if (!g_script->LoadIncludedFile(g.mLoopFile->cFileName, false, false)) // Fix for v1.0.47.05: Pass false for allow-dupe because otherwise, it's possible for a stdlib file to attempt to include itself (especially via the LibNamePrefix_ method) and thus give a misleading "duplicate function" vs. "func does not exist" error message.  Obsolete: For performance, pass true for allow-dupe so that it doesn't have to check for a duplicate file (seems too rare to worry about duplicates since by definition, the function doesn't yet exist so it's file shouldn't yet be included).
 		{
 			//   aErrorWasShown = true; // Above has just displayed its error (e.g. syntax error in a line, failed to open the include file, etc).  So override the default set earlier.
 			return FAIL;
@@ -14195,7 +14308,7 @@ ResultType Line::IncludeFiles(bool aAllowDuplicateInclude, bool aIgnoreLoadFailu
 
 bool Line::EvaluateLoopUntil(ResultType &aResult)
 {
-	g_script.mCurrLine = this; // For error-reporting purposes.
+	g_script->mCurrLine = this; // For error-reporting purposes.
 	if (g->ListLinesIsEnabled)
 		LOG_LINE(this);
 #ifdef CONFIG_DEBUGGER
@@ -15185,7 +15298,7 @@ ResultType Line::Perform()
 			if (*ARG3)
 				is_ahk_group = false;  // Override the default.
 		// Act upon all members of this group (WinText/ExcludeTitle/ExcludeText are ignored in this mode).
-		if (is_ahk_group && (group = g_script.FindGroup(omit_leading_whitespace(ARG1 + 9)))) // Assign.
+		if (is_ahk_group && (group = g_script->FindGroup(omit_leading_whitespace(ARG1 + 9)))) // Assign.
 			return group->ActUponAll(mActionType, wait_time); // It will do DoWinDelay if appropriate.
 		//else try to act upon it as though "ahk_group something" is a literal window title.
 
@@ -15223,15 +15336,15 @@ ResultType Line::Perform()
 	case ACT_RUNAS:
 		if (!g_os.IsWin2000orLater()) // Do nothing if the OS doesn't support it.
 			return OK;
-		StringTCharToWChar(ARG1, g_script.mRunAsUser);
-		StringTCharToWChar(ARG2, g_script.mRunAsPass);
-		StringTCharToWChar(ARG3, g_script.mRunAsDomain);
+		StringTCharToWChar(ARG1, g_script->mRunAsUser);
+		StringTCharToWChar(ARG2, g_script->mRunAsPass);
+		StringTCharToWChar(ARG3, g_script->mRunAsDomain);
 		return OK;
 
 	case ACT_RUN:
 	{
 		bool use_el = tcscasestr(ARG3, _T("UseErrorLevel"));
-		result = g_script.ActionExec(ARG1, NULL, ARG2, !use_el, ARG3, NULL, use_el, true, ARGVAR4); // Be sure to pass NULL for 2nd param.
+		result = g_script->ActionExec(ARG1, NULL, ARG2, !use_el, ARG3, NULL, use_el, true, ARGVAR4); // Be sure to pass NULL for 2nd param.
 		if (use_el)
 			// The special string ERROR is used, rather than a number like 1, because currently
 			// RunWait might in the future be able to return any value, including 259 (STATUS_PENDING).
@@ -15327,7 +15440,7 @@ ResultType Line::Perform()
 		// Note that only one timer per label is allowed because the label is the unique identifier
 		// that allows us to figure out whether to "update or create" when searching the list of timers.
 		if (   !(target_label = (IObject *)mAttribute)   ) // Since it wasn't resolved at load-time, it must be a variable reference.
-			if (   !(target_label = g_script.FindCallable(ARG1, ARGVAR1))
+			if (   !(target_label = g_script->FindCallable(ARG1, ARGVAR1))
 				&& !(!*ARG1 && (target_label = g.CurrentLabel))   )
 				return LineError(ERR_NO_LABEL, FAIL, ARG1);
 		// And don't update mAttribute (leave it NULL) because we want ARG1 to be dynamically resolved
@@ -15346,7 +15459,7 @@ ResultType Line::Perform()
 			{
 				if (!_tcsicmp(ARG2, _T("Delete")))
 				{
-					g_script.DeleteTimer(target_label);
+					g_script->DeleteTimer(target_label);
 					return OK;
 				}
 				return LineError(ERR_PARAM2_INVALID, FAIL, ARG2);
@@ -15360,10 +15473,10 @@ ResultType Line::Perform()
 		switch (toggle)
 		{
 		case TOGGLED_ON:
-		case TOGGLED_OFF: g_script.UpdateOrCreateTimer(target_label, _T(""), ARG3, toggle == TOGGLED_ON, false); break;
+		case TOGGLED_OFF: g_script->UpdateOrCreateTimer(target_label, _T(""), ARG3, toggle == TOGGLED_ON, false); break;
 			// Timer is always (re)enabled when ARG2 specifies a numeric period or is blank + there's no ARG3.
 			// If ARG2 is blank but ARG3 (priority) isn't, tell it to update only the priority and nothing else:
-		default: g_script.UpdateOrCreateTimer(target_label, ARG2, ARG3, true, !*ARG2 && *ARG3);
+		default: g_script->UpdateOrCreateTimer(target_label, ARG2, ARG3, true, !*ARG2 && *ARG3);
 		}
 		return OK;
 	}
@@ -15420,9 +15533,9 @@ ResultType Line::Perform()
 		case THREAD_CMD_INTERRUPT:
 			// If either one is blank, leave that setting as it was before.
 			if (*ARG1)
-				g_script.mUninterruptibleTime = ArgToInt(2);  // 32-bit (for compatibility with DWORDs returned by GetTickCount).
+				g_script->mUninterruptibleTime = ArgToInt(2);  // 32-bit (for compatibility with DWORDs returned by GetTickCount).
 			if (*ARG2)
-				g_script.mUninterruptedLineCountMax = ArgToInt(3);  // 32-bit also, to help performance (since huge values seem unnecessary).
+				g_script->mUninterruptedLineCountMax = ArgToInt(3);  // 32-bit also, to help performance (since huge values seem unnecessary).
 			break;
 		case THREAD_CMD_NOTIMERS:
 			g.AllowTimers = (*ARG2 && ArgToInt64(2) == 0);
@@ -15435,20 +15548,20 @@ ResultType Line::Perform()
 	case ACT_GROUPADD: // Adding a WindowSpec *to* a group, not adding a group.
 	{
 		if (!(group = (WinGroup *)mAttribute))
-			if (!(group = g_script.FindGroup(ARG1, true)))  // Last parameter -> create-if-not-found.
+			if (!(group = g_script->FindGroup(ARG1, true)))  // Last parameter -> create-if-not-found.
 				return FAIL;  // It already displayed the error for us.
 		return group->AddWindow(ARG2, ARG3, ARG4, ARG5);
 	}
 
 	case ACT_GROUPACTIVATE:
 		if (!(group = (WinGroup *)mAttribute))
-			group = g_script.FindGroup(ARG1);
+			group = g_script->FindGroup(ARG1);
 		// Note: This will take care of DoWinDelay if needed:
 		return SetErrorLevelOrThrowBool(!group || !group->Activate(*ARG2 && !_tcsicmp(ARG2, _T("R"))));
 
 	case ACT_GROUPDEACTIVATE:
 		if (!(group = (WinGroup *)mAttribute))
-			group = g_script.FindGroup(ARG1);
+			group = g_script->FindGroup(ARG1);
 		if (group)
 			group->Deactivate(*ARG2 && !_tcsicmp(ARG2, _T("R")));  // Note: It will take care of DoWinDelay if needed.
 		//else nonexistent group: By design, do nothing.
@@ -15456,7 +15569,7 @@ ResultType Line::Perform()
 
 	case ACT_GROUPCLOSE:
 		if (!(group = (WinGroup *)mAttribute))
-			group = g_script.FindGroup(ARG1);
+			group = g_script->FindGroup(ARG1);
 		if (group)
 			if (*ARG2 && !_tcsicmp(ARG2, _T("A")))
 				group->ActUponAll(ACT_WINCLOSE, 0);  // Note: It will take care of DoWinDelay if needed.
@@ -15784,10 +15897,10 @@ ResultType Line::Perform()
 		return FormatTime(ARG2, ARG3);
 #ifndef MINIDLL
 	case ACT_MENU:
-		return g_script.PerformMenu(SIX_ARGS, ARGVAR4); // L17: Changed from FIVE_ARGS to access previously "reserved" arg (for use by Menu,,Icon).
+		return g_script->PerformMenu(SIX_ARGS, ARGVAR4); // L17: Changed from FIVE_ARGS to access previously "reserved" arg (for use by Menu,,Icon).
 
 	case ACT_GUI:
-		return g_script.PerformGui(FOUR_ARGS);
+		return g_script->PerformGui(FOUR_ARGS);
 
 	case ACT_GUICONTROL:
 		return GuiControl(THREE_ARGS, ARGVAR3);
@@ -15875,11 +15988,15 @@ ResultType Line::Perform()
 
 #ifndef MINIDLL
 	case ACT_EDIT:
-		g_script.Edit();
+		g_script->Edit();
 		return OK;
 #endif
 	case ACT_RELOAD:
-		g_script.Reload(true);
+#if !defined (AUTOHOTKEYSC) && !defined(_USRDLL)
+		if (g_MainThreadID != g_ThreadID)
+			return g_script->Reload(true);
+#endif
+		g_script->Reload(true);
 		// Even if the reload failed, it seems best to return OK anyway.  That way,
 		// the script can take some follow-on action, e.g. it can sleep for 1000
 		// after issuing the reload command and then take action under the assumption
@@ -15899,7 +16016,7 @@ ResultType Line::Perform()
 		// But only do so for short sleeps, for which the user has a greater expectation of
 		// accuracy.  UPDATE: Do not change the 25 below without also changing it in Critical's
 		// documentation.
-		if ((g_MainThreadID != aThreadID && sleep_time > -1) || (sleep_time < 25 && sleep_time > 0 && g_os.IsWin9x())) // Ordered for short-circuit performance. v1.0.38.05: Added "sleep_time > 0" so that Sleep -1/0 will work the same on Win9x as it does on other OSes.
+		if ((g_ThreadID != aThreadID && sleep_time > -1) || (sleep_time < 25 && sleep_time > 0 && g_os.IsWin9x())) // Ordered for short-circuit performance. v1.0.38.05: Added "sleep_time > 0" so that Sleep -1/0 will work the same on Win9x as it does on other OSes.
 			Sleep(sleep_time);
 		else
 			MsgSleep(sleep_time);
@@ -16103,14 +16220,14 @@ ResultType Line::Perform()
 		// be allowed to complete normally.  This is especially important in v2 because a persistent
 		// script can become non-persistent by disabling a timer, closing a GUI, etc.  So if there
 		// are any threads below this one, only exit this thread:
-		if (g_ReturnNotExit == true || g_nThreads > 1 || g_script.IsPersistent())
+		if (g_ReturnNotExit == true || g_nThreads > 1 || g_script->IsPersistent())
 			return EARLY_EXIT; // EARLY_EXIT needs to be distinct from FAIL for ExitApp() and AutoExecSection().
 		// Otherwise, this is the last thread in a non-persistent script.
 		// FALL THROUGH TO BELOW (this is the only time Exit's ExitCode is used):
 	case ACT_EXITAPP: // Unconditional exit.
 		// This has been tested and it does yield to the OS the error code indicated in ARG1,
 		// if present (otherwise it returns 0, naturally) as expected:
-		return g_script.ExitApp(EXIT_EXIT, NULL, (int)ArgIndexToInt64(0));
+		return g_script->ExitApp(EXIT_EXIT, NULL, (int)ArgIndexToInt64(0));
 
 	} // switch()
 
@@ -16146,7 +16263,7 @@ BIF_DECL(BIF_PerformAction)
 	TCHAR number_buf[MAX_ARGS * MAX_NUMBER_SIZE]; // Enough for worst case.
 	Var *output_var;
 	Var stack_var(_T(""), NULL, 0);
-	// Prevent the use of SimpleHeap::Malloc().  Otherwise, each call could allocate
+	// Prevent the use of g_SimpleHeap->Malloc().  Otherwise, each call could allocate
 	// some memory which cannot be freed until the program exits.
 	stack_var.DisableSimpleMalloc();
 
@@ -16236,11 +16353,11 @@ BIF_DECL(BIF_PerformAction)
 
 	FileIndexType line_file = 0;
 	LineNumberType line_num = 0;
-	if (g_script.mCurrLine)
+	if (g_script->mCurrLine)
 	{
 		// These are used by CreateRuntimeException().
-		line_file = g_script.mCurrLine->mFileIndex;
-		line_num = g_script.mCurrLine->mLineNumber;
+		line_file = g_script->mCurrLine->mFileIndex;
+		line_num = g_script->mCurrLine->mLineNumber;
 	}
 
 	// Construct a Line containing the required context for ExpandArgs() and Perform().
@@ -16250,7 +16367,7 @@ BIF_DECL(BIF_PerformAction)
 	if (!line.ExpandArgs())
 	{
 		// On failure, ExpandArgs() has called LineError(), which has thrown an exception.
-		g->ExcptLine = g_script.mCurrLine; // See comments under Perform().
+		g->ExcptLine = g_script->mCurrLine; // See comments under Perform().
 		g->InTryBlock = in_try;
 		stack_var.Free(VAR_ALWAYS_FREE); // It might've been used as an input var.
 		return;
@@ -16291,7 +16408,7 @@ BIF_DECL(BIF_PerformAction)
 			// LineError() was called and it threw an exception.  Update ExcptLine to point
 			// to the current script line.  This is done for reasons mentioned in an earlier
 			// comment and also because our line exists only until this function returns.
-			g->ExcptLine = g_script.mCurrLine;
+			g->ExcptLine = g_script->mCurrLine;
 		}
 		// Pass back the result code (FAIL or EARLY_EXIT).
 		aResultToken.SetExitResult(result);
@@ -16394,7 +16511,7 @@ ResultType Line::Deref(Var *aOutputVar, LPTSTR aBuf)
 				tcslcpy(var_name, cp, var_name_length + 1);  // +1 to convert var_name_length to size.
 				// Fixed for v1.0.34: Use FindOrAddVar() vs. FindVar() so that environment or built-in
 				// variables that aren't directly referenced elsewhere in the script will still work:
-				if (   !(var = g_script.FindOrAddVar(var_name, var_name_length))   )
+				if (   !(var = g_script->FindOrAddVar(var_name, var_name_length))   )
 					return FAIL; // Above already displayed the error.
 				var = var->ResolveAlias();
 				// Don't allow the output variable to be read into itself this way because its contents
@@ -16664,7 +16781,7 @@ void Line::ToggleSuspendState()
 	g_IsSuspended = !g_IsSuspended;
 	Hotstring::SuspendAll(g_IsSuspended);  // Must do this prior to ManifestAllHotkeysHotstringsHooks() to avoid incorrect removal of hook.
 	Hotkey::ManifestAllHotkeysHotstringsHooks(); // Update the state of all hotkeys based on the complex interdependencies hotkeys have with each another.
-	g_script.UpdateTrayIcon();
+	g_script->UpdateTrayIcon();
 	CheckMenuItem(GetMenu(g_hWnd), ID_FILE_SUSPEND, g_IsSuspended ? MF_CHECKED : MF_UNCHECKED);
 }
 #endif
@@ -16745,7 +16862,7 @@ ResultType Line::ChangePauseState(ToggleValueType aChangeTo, bool aAlwaysOperate
 	g->IsPaused = true;
 	++g_nPausedThreads; // For this purpose the idle thread is counted as a paused thread.
 #ifndef MINIDLL
-	g_script.UpdateTrayIcon();
+	g_script->UpdateTrayIcon();
 #endif
 	return OK;
 }
@@ -16824,7 +16941,7 @@ ResultType Line::ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat, LPCTST
 	// in other extreme cases. In such a case, just free the old token. If this
 	// line is CATCH, it won't handle the new exception; an outer TRY/CATCH will.
 	if (g->ThrownToken)
-		g_script.FreeExceptionToken(g->ThrownToken);
+		g_script->FreeExceptionToken(g->ThrownToken);
 
 	ResultToken *token;
 	if (!(token = new ResultToken)
@@ -16853,7 +16970,7 @@ ResultType Line::ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat, LPCTST
 
 ResultType Script::ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat, LPCTSTR aExtraInfo)
 {
-	return g_script.mCurrLine->ThrowRuntimeException(aErrorText, aWhat, aExtraInfo);
+	return g_script->mCurrLine->ThrowRuntimeException(aErrorText, aWhat, aExtraInfo);
 }
 
 
@@ -16888,7 +17005,7 @@ ResultType Line::SetErrorLevelOrThrowInt(int aErrorValue)
 }
 
 // Logic from the above functions is duplicated in the below functions rather than calling
-// g_script.mCurrLine->SetErrorLevelOrThrow() to squeeze out a little extra performance for
+// g_script->mCurrLine->SetErrorLevelOrThrow() to squeeze out a little extra performance for
 // "success" cases.
 
 ResultType Script::SetErrorLevelOrThrowBool(bool aError)
@@ -16939,7 +17056,7 @@ ResultType Line::LineError(LPCTSTR aErrorText, ResultType aErrorType, LPCTSTR aE
 	if (g->InTryBlock && (aErrorType == FAIL || aErrorType == EARLY_EXIT)) // FAIL is most common, but EARLY_EXIT is used by ComError(). WARN and CRITICAL_ERROR are excluded.
 		return ThrowRuntimeException(aErrorText, NULL, aExtraInfo);
 
-	if (g_script.mErrorStdOut && !g_script.mIsReadyToExecute && aErrorType != WARN) // i.e. runtime errors are always displayed via dialog.
+	if (g_script->mErrorStdOut && !g_script->mIsReadyToExecute && aErrorType != WARN) // i.e. runtime errors are always displayed via dialog.
 	{
 		// JdeB said:
 		// Just tested it in Textpad, Crimson and Scite. they all recognise the output and jump
@@ -16978,12 +17095,12 @@ ResultType Line::LineError(LPCTSTR aErrorText, ResultType aErrorType, LPCTSTR aE
 		TCHAR buf[MSGBOX_TEXT_SIZE];
 		FormatError(buf, _countof(buf), aErrorType, aErrorText, aExtraInfo, this
 			// The last parameter determines the final line of the message:
-			, (aErrorType == FAIL && g_script.mIsReadyToExecute) ? ERR_ABORT_NO_SPACES
-			: (aErrorType == CRITICAL_ERROR || aErrorType == FAIL) ? (g_script.mIsRestart ? OLD_STILL_IN_EFFECT : WILL_EXIT)
+			, (aErrorType == FAIL && g_script->mIsReadyToExecute) ? ERR_ABORT_NO_SPACES
+			: (aErrorType == CRITICAL_ERROR || aErrorType == FAIL) ? (g_script->mIsRestart ? OLD_STILL_IN_EFFECT : WILL_EXIT)
 			: (aErrorType == EARLY_EXIT) ? _T("Continue running the script?")
 			: _T("For more details, read the documentation for #Warn."));
 
-		g_script.mCurrLine = this;  // This needs to be set in some cases where the caller didn't.
+		g_script->mCurrLine = this;  // This needs to be set in some cases where the caller didn't.
 
 #ifdef CONFIG_DEBUGGER
 		if (g_Debugger.HasStdErrHook())
@@ -16994,7 +17111,7 @@ ResultType Line::LineError(LPCTSTR aErrorText, ResultType aErrorType, LPCTSTR aE
 				aErrorType = CRITICAL_ERROR;
 	}
 
-	if (aErrorType == CRITICAL_ERROR && g_script.mIsReadyToExecute)
+	if (aErrorType == CRITICAL_ERROR && g_script->mIsReadyToExecute)
 		// Also ask the main message loop function to quit and announce to the system that
 		// we expect it to quit.  In most cases, this is unnecessary because all functions
 		// called to get to this point will take note of the CRITICAL_ERROR and thus keep
@@ -17006,7 +17123,7 @@ ResultType Line::LineError(LPCTSTR aErrorText, ResultType aErrorType, LPCTSTR aE
 		//PostQuitMessage(CRITICAL_ERROR);
 		// This will attempt to run the OnExit function, which should be okay since that function
 		// will terminate the script if it encounters another runtime error:
-		g_script.ExitApp(EXIT_ERROR);
+		g_script->ExitApp(EXIT_ERROR);
 
 	return aErrorType; // The caller told us whether it should be a critical error or not.
 }
@@ -17065,7 +17182,7 @@ ResultType Script::ScriptError(LPCTSTR aErrorText, LPCTSTR aExtraInfo) //, Resul
 	if (!aExtraInfo) // In case the caller explicitly called it with NULL.
 		aExtraInfo = _T("");
 
-	if (g_script.mErrorStdOut && !g_script.mIsReadyToExecute) // i.e. runtime errors are always displayed via dialog.
+	if (g_script->mErrorStdOut && !g_script->mIsReadyToExecute) // i.e. runtime errors are always displayed via dialog.
 	{
 #ifdef _USRDLL
 		// terminate source file if it contains new lines
@@ -17144,7 +17261,7 @@ ResultType ResultToken::Error(LPCTSTR aErrorText, LPCTSTR aExtraInfo)
 	// isn't expecting a value, or they might be freed twice (if the callee already freed it).
 	//ASSERT(!mem_to_free); // At least one caller frees it after calling this function.
 	ASSERT(symbol != SYM_OBJECT);
-	return SetExitResult(g_script.ScriptError(aErrorText, aExtraInfo));
+	return SetExitResult(g_script->ScriptError(aErrorText, aExtraInfo));
 }
 
 
@@ -17176,7 +17293,7 @@ ResultType Script::UnhandledException(ResultToken*& aToken, Line* aLine)
 					if (!_tcsicmp(file, Line::sSourceFile[file_index]))
 						break;
 				Line *line;
-				for (line = g_script.mFirstLine;
+				for (line = g_script->mFirstLine;
 					line && (line->mLineNumber != line_no || line->mFileIndex != file_index);
 					line = line->mNextLine);
 				if (line)
@@ -17452,7 +17569,7 @@ LPTSTR Script::ListKeyHistory(LPTSTR aBuf, int aBufSize) // aBufSize should be a
 		_T("\r\nModifiers (GetKeyState() now) = %s")
 		_T("\r\n")
 		, win_title
-		//, SimpleHeap::GetBlockCount()
+		//, g_SimpleHeap->GetBlockCount()
 		, g_KeybdHook == NULL ? _T("no") : _T("yes")
 		, g_MouseHook == NULL ? _T("no") : _T("yes")
 		, mTimerEnabledCount, mTimerCount, timer_list
