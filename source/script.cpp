@@ -46,7 +46,6 @@ ExprOpFunc g_ObjGet(Op_ObjInvoke, IT_GET), g_ObjSet(Op_ObjInvoke, IT_SET); // Al
 // (passing the function's name) in an attempt to reduce code size and improve readability.
 FuncEntry g_BIF[] =
 {
-#ifndef MINIDLL
 	BIFn(LV_GetNext, 0, 2, true, BIF_LV_GetNextOrCount),
 	BIFn(LV_GetCount, 0, 1, true, BIF_LV_GetNextOrCount),
 	BIF1(LV_GetText, 2, 3, true, { 1 }),
@@ -79,7 +78,6 @@ FuncEntry g_BIF[] =
 	BIFn(SB_SetText, 1, 3, true, BIF_StatusBar),
 	BIFn(SB_SetParts, 0, 255, true, BIF_StatusBar),
 	BIFn(SB_SetIcon, 1, 3, true, BIF_StatusBar),
-#endif
 	BIF1(StrLen, 1, 1, true),
 	BIF1(SubStr, 2, 3, true),
 	BIFn(Trim, 1, 2, true, BIF_Trim),
@@ -100,7 +98,7 @@ FuncEntry g_BIF[] =
 	BIF1(Chr, 1, 1, true),
 	BIFn(StrGet, 1, 3, true, BIF_StrGetPut),
 	BIFn(StrPut, 1, 4, true, BIF_StrGetPut),
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 	BIF1(NewThread, 1, 3, true),
 #endif
 	BIF1(NumGet, 1, 3, true),
@@ -255,10 +253,8 @@ FuncEntry g_BIF[] =
 
 	BIFn(OnExit, 1, 2, false, BIF_OnExitOrClipboard),
 	BIFn(OnClipboardChange, 1, 2, false, BIF_OnExitOrClipboard),
-#ifndef MINIDLL
 	BIFn(MenuGetHandle, 1, 1, true, BIF_MenuGet),
 	BIFn(MenuGetName, 1, 1, true, BIF_MenuGet),
-#endif
 	BIF1(LoadPicture, 1, 3, true),
 };
 #undef NA
@@ -308,25 +304,20 @@ VarEntry g_BIV_A[] =
 	A_x(DD, BIV_DateTime),
 	A_x(DDD, BIV_MMM_DDD),
 	A_x(DDDD, BIV_MMM_DDD),
-#ifndef MINIDLL
 	A_x(DefaultGui, BIV_DefaultGui),
 	A_x(DefaultListView, BIV_DefaultGui),
 	A_w(DefaultMouseSpeed),
 	A_x(DefaultTreeView, BIV_DefaultGui),
-#endif
 	A_x(Desktop, BIV_SpecialFolderPath),
 	A_x(DesktopCommon, BIV_SpecialFolderPath),
 	A_w(DetectHiddenText),
 	A_w(DetectHiddenWindows),
 	A_(DllDir),
 	A_(DllPath),
-#ifndef MINIDLL
 	A_(EndChar),
-#endif
 	A_w(EventInfo), // It's called "EventInfo" vs. "GuiEventInfo" because it applies to non-Gui events such as OnClipboardChange.,
 	A_w(FileEncoding),
 	A_(GlobalStruct),
-#ifndef MINIDLL
 	A_x(Gui, BIV_Gui),
 	A_(GuiControl),
 	A_x(GuiControlEvent, BIV_GuiEvent),
@@ -335,14 +326,11 @@ VarEntry g_BIV_A[] =
 	A_x(GuiWidth, BIV_Gui),
 	A_x(GuiX, BIV_Gui), // Naming: Brevity seems more a benefit than would A_GuiEventX's improved clarity.,
 	A_x(GuiY, BIV_Gui), // These can be overloaded if a GuiMove label or similar is ever needed.,
-#endif
 	A_x(Hour, BIV_DateTime),
-#ifndef MINIDLL
 	A_(IconFile),
 	A_(IconHidden),
 	A_(IconNumber),
 	A_(IconTip),
-#endif
 	A_wx(Index, BIV_LoopIndex, BIV_LoopIndex_Set),
 	A_(InitialWorkingDir),
 	A_x(IPAddress1, BIV_IPAddress),
@@ -354,11 +342,8 @@ VarEntry g_BIV_A[] =
 	A_(IsCompiled),
 	A_(IsCritical),
 	A_(IsDll),
-	A_(IsMini),
 	A_(IsPaused),
-#ifndef MINIDLL
 	A_(IsSuspended),
-#endif
 	A_(IsUnicode),
 	A_wx(KeyDelay, BIV_xDelay, BIV_xDelay_Set),
 	A_wx(KeyDelayPlay, BIV_xDelay, BIV_xDelay_Set),
@@ -408,18 +393,14 @@ VarEntry g_BIV_A[] =
 	A_(OSType),
 #endif
 	A_(OSVersion),
-#ifndef MINIDLL
 	A_(PriorHotkey),
 	A_(PriorKey),
-#endif
 	A_x(ProgramFiles, BIV_SpecialFolderPath),
 	A_x(Programs, BIV_SpecialFolderPath),
 	A_x(ProgramsCommon, BIV_SpecialFolderPath),
 	A_(PtrSize),
 	A_w(RegView),
-#ifndef MINIDLL
 	A_(ScreenDPI),
-#endif
 	A_x(ScreenHeight, BIV_ScreenWidth_Height),
 	A_x(ScreenWidth, BIV_ScreenWidth_Height),
 	A_(ScriptDir),
@@ -440,22 +421,16 @@ VarEntry g_BIV_A[] =
 	A_x(Tab, BIV_Space_Tab),
 	A_(Temp), // Debatably should be A_TempDir, but brevity seemed more popular with users, perhaps for heavy uses of the temp folder.,
 	A_(ThisFunc),
-#ifndef MINIDLL
 	A_(ThisHotkey),
-#endif
 	A_(ThisLabel),
-#ifndef MINIDLL
 	A_(ThisMenu),
 	A_(ThisMenuItem),
 	A_(ThisMenuItemPos),
-#endif
 	A_(TickCount),
 	A_(TimeIdle),
 	A_(TimeIdlePhysical),
-#ifndef MINIDLL
 	A_(TimeSincePriorHotkey),
 	A_(TimeSinceThisHotkey),
-#endif
 	A_w(TitleMatchMode),
 	A_wx(TitleMatchModeSpeed, BIV_TitleMatchModeSpeed, BIV_TitleMatchMode_Set),
 	A_x(UserName, BIV_UserName_ComputerName),
@@ -496,49 +471,36 @@ static TextMem::Buffer includedtextbuf; //HotKeyIt for dll to read script from m
 
 Script::Script()
 	: mFirstLine(NULL), mLastLine(NULL), mCurrLine(NULL), mPlaceholderLabel(NULL), mFirstStaticLine(NULL), mLastStaticLine(NULL)
-#ifndef MINIDLL
 	, mThisHotkeyName(_T("")), mPriorHotkeyName(_T("")), mThisHotkeyStartTime(0), mPriorHotkeyStartTime(0)
 	, mEndChar(0), mThisHotkeyModifiersLR(0)
-#endif
 	, mNextClipboardViewer(NULL), mOnClipboardChangeIsRunning(false), mExitReason(EXIT_NONE)
 	, mFirstLabel(NULL), mLastLabel(NULL), mFirstGroup(NULL)
 	, mFunc(NULL), mFuncCount(0), mFuncCountMax(0)
 	, mFirstTimer(NULL), mLastTimer(NULL), mTimerEnabledCount(0), mTimerCount(0)
-#ifndef MINIDLL
 	, mFirstMenu(NULL), mLastMenu(NULL), mMenuCount(0), mThisMenuItem(NULL)
-#endif
 	, mVar(NULL), mVarCount(0), mVarCountMax(0), mLazyVar(NULL), mLazyVarCount(0)
 	, mCurrentFuncOpenBlockCount(0), mNextLineIsFunctionBody(false), mNoUpdateLabels(false)
 	, mClassObjectCount(0), mUnresolvedClasses(NULL), mClassProperty(NULL), mClassPropertyDef(NULL)
 	, mCurrFileIndex(0), mCombinedLineNumber(0), mNoHotkeyLabels(true)
-#ifndef MINIDLL
 	, mMenuUseErrorLevel(false)
-#endif
 	, mFileSpec(_T("")), mFileDir(_T("")), mFileName(_T("")), mOurEXE(_T("")), mOurEXEDir(_T("")), mMainWindowTitle(_T(""))
 	, mIsReadyToExecute(false), mAutoExecSectionIsRunning(false)
 	, mIsRestart(false), mErrorStdOut(false)
-#ifndef AUTOHOTKEYSC
 	, mIncludeLibraryFunctionsThenExit(NULL)
-#endif
 	, mUninterruptedLineCountMax(1000), mUninterruptibleTime(15)
-#ifndef MINIDLL
 	, mCustomIcon(NULL), mCustomIconSmall(NULL) // Normally NULL unless there's a custom tray icon loaded dynamically.
 	, mCustomIconFile(NULL), mIconFrozen(false), mTrayIconTip(NULL) // Allocated on first use.
 	, mCustomIconNumber(0)
-#endif
 {
 	// v1.0.25: mLastScriptRest (removed in v2) and mLastPeekTime are now initialized
 	// right before the auto-exec section of the script is launched, which avoids an
 	// initial Sleep(10) in ExecUntil that would otherwise occur.
-#ifndef MINIDLL
 	*mThisMenuItemName = *mThisMenuName = '\0';
-#endif
 	g_ThreadID = GetCurrentThreadId();
 	g_hThread = OpenThread(THREAD_ALL_ACCESS, TRUE, g_ThreadID);
 	g = &g_startup;
 	ZeroMemory(&mNIC, sizeof(mNIC));  // Constructor initializes this, to be safe.
 	mNIC.hWnd = NULL;  // Set this as an indicator that it tray icon is not installed.
-#ifndef MINIDLL
 	// Lastly (after the above have been initialized), anything that can fail:
 	if (!(mTrayMenu = AddMenu(_T("Tray")))) // realistically never happens
 	{
@@ -547,7 +509,6 @@ Script::Script()
 	}
 	else
 		mTrayMenu->mIncludeStandardItems = true;
-#endif
 #ifdef _DEBUG
 	if (ID_FILE_EXIT < ID_MAIN_FIRST) // Not a very thorough check.
 		ScriptError(_T("DEBUG: ID_FILE_EXIT is too large (conflicts with IDs reserved via ID_USER_FIRST)."));
@@ -618,7 +579,6 @@ Script::~Script() // Destructor.
 		g_Debugger.Disconnect();
 	}
 #endif
-#ifndef MINIDLL
 	if (mNIC.hWnd) // Tray icon is installed.
 		Shell_NotifyIcon(NIM_DELETE, &mNIC); // Remove it.
 
@@ -676,7 +636,6 @@ Script::~Script() // Destructor.
 	mLastMenu = mFirstMenu;
 	}
 	mTrayIconTip = NULL;*/
-#endif
 	// L31: Release objects stored in variables, where possible.
 	int v;
 	for (v = 0; v < mVarCount; v++)
@@ -851,11 +810,9 @@ Script::~Script() // Destructor.
 //#endif
 	// MSDN: "Before terminating, an application must call the UnhookWindowsHookEx function to free
 	// system resources associated with the hook."
-#ifndef MINIDLL
 	if (g_MainThreadID == g_ThreadID || (Hotkey::sHotkeyCount == 0 && Hotstring::sHotstringCount == 0))
 		AddRemoveHooks(0); // Remove all hooks.
 	mPriorHotkeyStartTime = 0;
-#endif
 	free_compiled_regex();
 	// We call DestroyWindow() because MainWindowProc() has left that up to us.
 	// DestroyWindow() will cause MainWindowProc() to immediately receive and process the
@@ -927,7 +884,6 @@ Script::~Script() // Destructor.
 	mTempLine = NULL;
 
 	g_nMessageBoxes = 0;
-#ifndef MINIDLL
 	g_nInputBoxes = 0;
 	g_nFileDialogs = 0;
 	g_nFolderDialogs = 0;
@@ -936,32 +892,24 @@ Script::~Script() // Destructor.
 		DestroyIcon(g_IconLarge);
 	if (g_IconSmall)
 		DestroyIcon(g_IconSmall);
-#endif
 
 	g_MainTimerExists = false;
 	g_AutoExecTimerExists = false;
-#ifndef MINIDLL
 	g_InputTimerExists = false;
-#endif
 	g_DerefTimerExists = false;
 	g_SoundWasPlayed = false;
-#ifndef MINIDLL
 	g_IsSuspended = false;  // Make this separate from g_AllowInterruption since that is frequently turned off & on.
-#endif
 	g_DeferMessagesForUnderlyingPump = false;
 	g_nLayersNeedingTimer = 0;
 	g_nThreads = 0;
 	g_nPausedThreads = 0;
 	g_MaxThreadsTotal = MAX_THREADS_DEFAULT;
-#ifndef MINIDLL
 	g_MaxHistoryKeys = 40;
 	g_MaxThreadsPerHotkey = 1;
 	g_MaxHotkeysPerInterval = 70; // Increased to 70 because 60 was still causing the warning dialog for repeating keys sometimes.  Increased from 50 to 60 for v1.0.31.02 since 50 would be triggered by keyboard auto-repeat when it is set to its fastest.
 	g_HotkeyThrottleInterval = 2000; // Milliseconds.
-#endif
 	g_MaxThreadsBuffer = false;  // This feature usually does more harm than good, so it defaults to OFF.
 	g_InputLevel = 0;
-#ifndef MINIDLL
 	g_FirstHotCriterion = NULL;
 	g_FirstHotExpr = NULL;
 	g_LastHotExpr = NULL;
@@ -971,7 +919,6 @@ Script::~Script() // Destructor.
 	g_MenuIsVisible = MENU_TYPE_NONE;
 	g_guiCount = 0;
 	// g_guiCountMax = 0; no need because we use realloc for g_gui
-#ifndef MINIDLL
 	g_HSPriority = 0;  // default priority is always 0
 	g_HSKeyDelay = 0;  // Fast sends are much nicer for auto-replace and auto-backspace.
 	g_HSSendMode = SM_INPUT; // v1.0.43: New default for more reliable hotstrings.
@@ -984,12 +931,9 @@ Script::~Script() // Destructor.
 	g_HSDetectWhenInsideWord = false;
 	g_HSDoReset = false;
 	g_HSResetUponMouseClick = true;
-#endif
 	g_ErrorLevel = NULL; // Allows us (in addition to the user) to set this var to indicate success/failure.
 
-#ifndef MINIDLL
 	g_ForceKeybdHook = false;
-#endif
 	g_ForceNumLock = NEUTRAL;
 	g_ForceCapsLock = NEUTRAL;
 	g_ForceScrollLock = NEUTRAL;
@@ -998,8 +942,6 @@ Script::~Script() // Destructor.
 	g_BlockInput = false;
 	g_BlockMouseMove = false;
 #endif
-
-#ifndef MINIDLL
 	g_KeyHistoryNext = 0;
 
 #ifdef ENABLE_KEY_HISTORY_FILE
@@ -1009,7 +951,6 @@ Script::~Script() // Destructor.
 	g_HistoryTickNow = 0;
 	g_HistoryTickPrev = GetTickCount();  // So that the first logged key doesn't have a huge elapsed time.
 	g_HistoryHwndPrev = NULL;
-#endif
 
 	g_DefaultScriptCodepage = CP_ACP;
 	g_DestroyWindowCalled = false;
@@ -1042,18 +983,12 @@ Script::~Script() // Destructor.
 	g_AllowOnlyOneInstance = SINGLE_INSTANCE_PROMPT;
 	g_AllowInterruption = TRUE;         //
 	// g_MaxVarCapacity is used to prevent a buggy script from consuming all available system RAM. It is defined = 
-#ifndef MINIDLL
 	//g_ScreenDPI  =  GetScreenDPI();
 	//HDC hdc = GetDC(NULL);
 	//g_ScreenDPI = GetDeviceCaps(hdc, LOGPIXELSX);
 	//ReleaseDC(NULL, hdc);
 	//g_guiCount = 0;
-#endif
-#ifndef MINIDLL
 	_tcscpy(g_EndChars, _T("-()[]{}:;'\"/\\,.?!\n \t"));  // Hotstring default end chars, including a space.
-#endif
-#endif
-#ifndef AUTOHOTKEYSC
 	for (i = 1; Line::sSourceFileCount>i; i++) // first include file must not be deleted
 		free(Line::sSourceFile[i]);
 	free(Line::sSourceFile);
@@ -1064,8 +999,7 @@ Script::~Script() // Destructor.
 	//g_SimpleHeap->Delete(Line::sSourceFile);
 	//Line::sSourceFile = 0;
 	// free(Line::sSourceFile);
-#endif
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 	for (i = 0; i < FUNC_LIB_COUNT; i++)
 		if (sLib[i].path)
 		{
@@ -1075,11 +1009,9 @@ Script::~Script() // Destructor.
 #endif
 #ifdef _USRDLL
 #endif
-#ifndef MINIDLL
 	// AddRemoveHooks(0); // done in ~Script
 	Hotkey::AllDestruct();
 	Hotstring::AllDestruct();
-#endif
 #ifdef _USRDLL
 	Line::sLogNext = 0;
 	memset(Line::sLog,NULL,sizeof(Line*) * LINE_LOG_SIZE);
@@ -1091,15 +1023,11 @@ Script::~Script() // Destructor.
 	delete g_SimpleHeap;
 #ifdef _USRDLL
 	//ZeroMemory(&g_script, sizeof(g_script));
-#ifndef MINIDLL
 	mPriorHotkeyName = mThisHotkeyName = _T("");
 #endif
-#endif
-#ifndef MINIDLL
 #ifdef ENABLE_KEY_HISTORY_FILE
 	KeyHistoryToFile();  // Close the KeyHistory file if it's open.
 #endif
-#endif // MINIDLL
 	RemoveVectoredExceptionHandler(g_ExceptionHandler); // Exception handler to remove hooks to avoid system/mouse freeze
 	// done on DLL_PROCESS_DETACH
 	// DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
@@ -1125,14 +1053,6 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 	g_default_pwd7 = 'k';
 	g_default_pwd8 = 'e';
 	g_default_pwd9 = 'y';
-#ifdef AUTOHOTKEYSC
-	// Fix for v1.0.29: Override the caller's use of __argv[0] by using GetModuleFileName(),
-	// so that when the script is started from the command line but the user didn't type the
-	// extension, the extension will be included.  This necessary because otherwise
-	// #SingleInstance wouldn't be able to detect duplicate versions in every case.
-	// It also provides more consistency.
-	GetModuleFileName(NULL, buf, _countof(buf));
-#else
 	TCHAR def_buf[MAX_PATH + 1], exe_buf[MAX_PATH + 20]; // For simplicity, allow at least space for +2 (see below) and "AutoHotkey.chm".
 	if (!aScriptFilename) // v1.0.46.08: Change in policy: store the default script in the My Documents directory rather than in Program Files.  It's more correct and solves issues that occur due to Vista's file-protection scheme.
 	{
@@ -1232,7 +1152,6 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 	}
 	else if (!GetFullPathName(aScriptFilename, _countof(buf), buf, NULL)) // This is also relied upon by mIncludeLibraryFunctionsThenExit.  Succeeds even on nonexistent files.
 		return FAIL; // Due to rarity, no error msg, just abort.
-#endif
 	if (g_RunStdIn = (*aScriptFilename == '*' && !aScriptFilename[1])) // v1.1.17: Read script from stdin.
 	{
 		// Seems best to disable #SingleInstance for stdin scripts.
@@ -1264,17 +1183,10 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 	}
 	if (   !(mFileName = g_SimpleHeap->Malloc(filename_marker))   )
 		return FAIL;  // It already displayed the error for us.
-#ifdef AUTOHOTKEYSC
-	// Omit AutoHotkey from the window title, like AutoIt3 does for its compiled scripts.
-	// One reason for this is to reduce backlash if evil-doers create viruses and such
-	// with the program:
-	sntprintf(buf, _countof(buf), _T("%s\\%s"), mFileDir, mFileName);
-#else
 	if (g_MainThreadID == g_ThreadID)
 		sntprintf(buf, _countof(buf), _T("%s\\%s - %s"), mFileDir, mFileName, T_AHK_NAME_VERSION);
 	else
 		sntprintf(buf, _countof(buf), _T("%s\\%s - %s - %d"), mFileDir, mFileName, T_AHK_NAME_VERSION, g_ThreadID);
-#endif
 	if (   !(mMainWindowTitle = g_SimpleHeap->Malloc(buf))   )
 		return FAIL;  // It already displayed the error for us.
 
@@ -1320,7 +1232,6 @@ ResultType Script::CreateWindows()
 	//wc.style = 0;  // CS_HREDRAW | CS_VREDRAW
 	//wc.cbClsExtra = 0;
 	//wc.cbWndExtra = 0;
-#ifndef MINIDLL
 	// Load the main icon in the two sizes needed throughout the program:
 	if (!g_IconLarge)
 	{
@@ -1332,7 +1243,6 @@ ResultType Script::CreateWindows()
 	wc.hCursor = LoadCursor((HINSTANCE)NULL, IDC_ARROW);
 	wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);  // Needed for ProgressBar. Old: (HBRUSH)GetStockObject(WHITE_BRUSH);
 	wc.lpszMenuName = MAKEINTRESOURCE(IDR_MENU_MAIN); // NULL; // "MainMenu";
-#endif // MINIDLL
 	g_ClassRegistered = RegisterClassEx(&wc);
 	TCHAR class_name[64];
 	HWND fore_win = GetForegroundWindow();
@@ -1367,14 +1277,6 @@ ResultType Script::CreateWindows()
 		MsgBox(_T("CreateWindow")); // Short msg since so rare.
 		return FAIL;
 	}
-#ifdef AUTOHOTKEYSC
-	HMENU menu = GetMenu(g_hWnd);
-	// Disable the Edit menu item, since it does nothing for a compiled script:
-	EnableMenuItem(menu, ID_FILE_EDITSCRIPT, MF_DISABLED | MF_GRAYED);
-	EnableOrDisableViewMenuItems(menu, MF_DISABLED | MF_GRAYED); // Fix for v1.0.47.06: No point in checking g_AllowMainWindow because the script hasn't starting running yet, so it will always be false.
-	// But leave the ID_VIEW_REFRESH menu item enabled because if the script contains a
-	// command such as ListLines in it, Refresh can be validly used.
-#endif
 
 	if (!(g_hWndEdit = CreateWindow(_T("edit"), NULL, WS_CHILD | WS_VISIBLE | WS_BORDER
 		| ES_LEFT | ES_MULTILINE | ES_READONLY | WS_VSCROLL // | WS_HSCROLL (saves space)
@@ -1446,17 +1348,13 @@ ResultType Script::CreateWindows()
 	// discussed further above) significantly increases the actual memory load on the system.
 
 	g_hAccelTable = LoadAccelerators(g_hInstance, MAKEINTRESOURCE(IDR_ACCELERATOR1));
-#ifndef MINIDLL
 	if (g_NoTrayIcon)
-#endif
 		mNIC.hWnd = NULL;  // Set this as an indicator that tray icon is not installed.
-#ifndef MINIDLL
 	else
 		// Even if the below fails, don't return FAIL in case the user is using a different shell
 		// or something.  In other words, it is expected to fail under certain circumstances and
 		// we want to tolerate that:
 		CreateTrayIcon();
-#endif
 	return OK;
 }
 
@@ -1487,7 +1385,6 @@ void Script::EnableClipboardListener(bool aEnable)
 }
 
 
-#ifndef MINIDLL
 void Script::EnableOrDisableViewMenuItems(HMENU aMenu, UINT aFlags)
 {
 	EnableMenuItem(aMenu, ID_VIEW_KEYHISTORY, aFlags);
@@ -1555,7 +1452,6 @@ void Script::UpdateTrayIcon(bool aForceUpdate)
 }
 
 
-#endif
 ResultType Script::AutoExecSection()
 // Returns FAIL if can't run due to critical error.  Otherwise returns OK.
 {
@@ -1691,13 +1587,6 @@ ResultType Script::AutoExecSection()
 
 bool Script::IsPersistent()
 {
-#ifdef MINIDLL
-	if (g_script->mTimerEnabledCount // At least one script timer is currently enabled.
-		|| g_persistent // #Persistent has been used somewhere in the script.
-		|| g_MsgMonitor->Count()) // At least one message monitor is active (installed by OnMessage).
-		return true;
-	return false;
-#else
 	UINT aHotstringCount = 0, aHotkeyCount = 0;
 	for (UINT i = 0; i < Hotstring::sHotstringCount; ++i)
 	{
@@ -1729,7 +1618,6 @@ bool Script::IsPersistent()
 	// Otherwise, none of the above conditions are true; but there might still be
 	// one or more script threads running.  Caller is responsible for checking that.
 	return false;
-#endif
 }
 
 
@@ -1742,12 +1630,8 @@ void Script::ExitIfNotPersistent(ExitReasons aExitReason)
 }
 
 
-#ifndef MINIDLL
 ResultType Script::Edit()
 {
-#ifdef AUTOHOTKEYSC
-	return OK; // Do nothing.
-#else
 	// This is here in case a compiled script ever uses the Edit command.  Since the "Edit This
 	// Script" menu item is not available for compiled scripts, it can't be called from there.
 	TitleMatchModes old_mode = g->TitleMatchMode;
@@ -1787,9 +1671,7 @@ ResultType Script::Edit()
 		}
 	}
 	return OK;
-#endif
 }
-#endif // MINIDLL
 
 ResultType Script::Reload(bool aDisplayErrors)
 {
@@ -1800,11 +1682,6 @@ ResultType Script::Reload(bool aDisplayErrors)
 	//ExitApp(EXIT_RELOAD);
 	reloadDll();
 	return EARLY_RETURN;
-#else
-#ifdef AUTOHOTKEYSC
-	// This is here in case a compiled script ever uses the Reload command.  Since the "Reload This
-	// Script" menu item is not available for compiled scripts, it can't be called from there.
-	return g_script->ActionExec(mOurEXE, _T("/restart"), g_WorkingDirOrig, aDisplayErrors);
 #else
 	if (g_MainThreadID != g_ThreadID)
 		return (ResultType)EXIT_RELOAD;
@@ -1820,7 +1697,6 @@ ResultType Script::Reload(bool aDisplayErrors)
 	TCHAR arg_string[MAX_PATH + 512];
 	sntprintf(arg_string, _countof(arg_string), _T("/restart \"%s\""), mFileSpec);
 	return g_script->ActionExec(mOurEXE, arg_string, g_WorkingDirOrig, aDisplayErrors);
-#endif // AUTOHOTKEYSC
 #endif // _USRDLL
 }
 
@@ -1929,7 +1805,7 @@ ResultType Script::ExitApp(ExitReasons aExitReason, LPTSTR aBuf, int aExitCode)
 }
 
 
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 BOOL CALLBACK ThreadWindowsCloseCallback(HWND ahWnd, LPARAM aThreadID)
 {	// close all windows that are open for thread so we can exit the thread properly
 	TCHAR WinClass[MAX_CLASS_NAME];
@@ -1948,7 +1824,6 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 #ifdef _USRDLL
 	terminateDll(aExitCode);
 #else
-#ifndef AUTOHOTKEYSC
 	if (g_MainThreadID == g_ThreadID)
 	{
 		for (int i = 1; i < MAX_AHK_THREADS; i++)
@@ -1984,7 +1859,6 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 			}
 		}
 	}
-#endif
 
 	g_AllowInterruption = FALSE;
 	g->IsPaused = false;
@@ -1993,7 +1867,6 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 		g_Debugger.Exit(aExitReason);
 #endif
 
-#ifndef AUTOHOTKEYSC
 	if (g_MainThreadID != g_ThreadID)
 	{
 		for (int i = 0; i < MAX_AHK_THREADS; i++)
@@ -2014,7 +1887,6 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 				break;
 		_endthreadex(aExitCode);
 	}
-#endif
 	// We call DestroyWindow() because MainWindowProc() has left that up to us.
 	// DestroyWindow() will cause MainWindowProc() to immediately receive and process the
 	// WM_DESTROY msg, which should in turn result in any child windows being destroyed
@@ -2029,7 +1901,6 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 	free(g_array);
 	if (g_KeyHistory)
 		free(g_KeyHistory);
-#ifndef AUTOHOTKEYSC
 	if (g_hWinAPI)
 	{
 		free(g_hWinAPI);
@@ -2037,12 +1908,10 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 	}
 	if (g_Debugger.mStack.mBottom)
 		free(g_Debugger.mStack.mBottom);
-#endif
 	Hotkey::AllDestructAndExit(aExitCode);
 #endif
 }
 
-#ifndef AUTOHOTKEYSC
 LineNumberType Script::LoadFromText(LPTSTR aScript, LPCTSTR aPathToShow)
 // HotKeyIt H1 LoadFromText() for text instead LoadFromFile()
 // Returns the number of non-comment lines that were loaded, or LOADING_FAILED on error.
@@ -2113,13 +1982,11 @@ LineNumberType Script::LoadFromText(LPTSTR aScript, LPCTSTR aPathToShow)
 		mUnresolvedClasses->Release();
 		mUnresolvedClasses = NULL;
 	}
-#ifndef AUTOHOTKEYSC
 	if (mIncludeLibraryFunctionsThenExit)
 	{
 		delete mIncludeLibraryFunctionsThenExit;
 		return 0; // Tell our caller to do a normal exit.
 	}
-#endif
 
 	// Set the working directory to the script's directory.  This must be done after the above
 	// since the working dir may have been changed by the script's use of "#Include C:\Scripts".
@@ -2169,8 +2036,6 @@ LineNumberType Script::LoadFromText(LPTSTR aScript, LPCTSTR aPathToShow)
 	// OBSOLETE: mLineCount was always non-zero at this point since above did AddLine().
 	//return mLineCount; // The count of runnable lines that were loaded, which might be zero.
 }
-#endif
-
 
 
 
@@ -2182,19 +2047,15 @@ UINT Script::LoadFromFile()
 	mNoHotkeyLabels = true;  // Indicate that there are no hotkey labels, since we're (re)loading the entire file.
 	mIsReadyToExecute = mAutoExecSectionIsRunning = false;
 	if (!mFileSpec || !*mFileSpec) return LOADING_FAILED;
-#ifndef AUTOHOTKEYSC  // When not in stand-alone mode, read an external script file.
 	DWORD attr = g_RunStdIn ? 0 : GetFileAttributes(mFileSpec); // v1.1.17: Don't check if reading script from stdin.
 	if (attr == MAXDWORD && !g_hResource) // File does not exist or lacking the authorization to get its attributes.
 	{
-#ifdef MINIDLL
 		return LOADING_FAILED;
-#endif
 		TCHAR buf[MAX_PATH + 256];
 		sntprintf(buf, _countof(buf), _T("Script file not found:\n%s"), mFileSpec);
 		MsgBox(buf, MB_ICONHAND);
 		return 0;
 	}
-#endif
 
 	// v1.0.42: Placeholder to use in place of a NULL label to simplify code in some places.
 	// This must be created before loading the script because it's relied upon when creating
@@ -2257,13 +2118,11 @@ UINT Script::LoadFromFile()
 		mUnresolvedClasses = NULL;
 	}
 
-#ifndef AUTOHOTKEYSC
 	if (mIncludeLibraryFunctionsThenExit)
 	{
 		delete mIncludeLibraryFunctionsThenExit;
 		return 0; // Tell our caller to do a normal exit.
 	}
-#endif
 
 	// Set the working directory to the script's directory.  This must be done after the above
 	// since the working dir may have been changed by the script's use of "#Include C:\Scripts".
@@ -2384,7 +2243,6 @@ inline LPTSTR IsClassDefinition(LPTSTR aBuf, bool &aHasOTB)
 }
 
 
-#ifndef AUTOHOTKEYSC
 ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 // Returns OK or FAIL.
 // Below: Use double-colon as delimiter to set these apart from normal labels.
@@ -2438,9 +2296,7 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 			Line::sSourceFile[source_file_index] = g_script->mOurEXE;
 	}
 	
-#ifndef MINIDLL
 	TCHAR msg_text[MAX_PATH + 256];
-#endif
 	// <buf> should be no larger than LINE_SIZE because some later functions rely upon that:
 	TCHAR buf1[LINE_SIZE], buf2[LINE_SIZE], suffix[16], pending_buf[LINE_SIZE] = _T("");
 	LPTSTR buf = buf1, next_buf = buf2; // Oscillate between bufs to improve performance (avoids memcpy from buf2 to buf1).
@@ -2475,29 +2331,19 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 		);
 	// File is now open, read lines from it.
 
-#ifndef MINIDLL
 	LPTSTR hotkey_flag, cp, cp1, hotstring_start, hotstring_options;
 	Hotkey *hk;
-#else
-	LPTSTR hotkey_flag, cp, cp1;
-#endif
 	LineNumberType pending_buf_line_number, saved_line_number;
-#ifndef MINIDLL
 	HookActionType hook_action;
 	bool is_label, suffix_has_tilde, hook_is_mandatory, in_comment_section, hotstring_options_all_valid;
 	ResultType hotkey_validity;
-#else
-	bool is_label, in_comment_section;
-#endif
 
-#ifndef MINIDLL
 	// For the remap mechanism, e.g. a::b
 	int remap_stage;
 	vk_type remap_source_vk, remap_dest_vk = 0; // Only dest is initialized to enforce the fact that it is the flag/signal to indicate whether remapping is in progress.
 	TCHAR remap_source[32], remap_dest[32], remap_dest_modifiers[8]; // Must fit the longest key name (currently Browser_Favorites [17]), but buffer overflow is checked just in case.
 	LPTSTR extra_event;
 	bool remap_source_is_mouse, remap_dest_is_mouse, remap_keybd_to_mouse;
-#endif
 	// For the line continuation mechanism:
 	bool do_rtrim, literal_escapes, literal_derefs, literal_delimiters, literal_quotes
 		, has_continuation_section, is_continuation_line;
@@ -2675,7 +2521,6 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 							is_continuation_line = true; // Override the default set earlier.
 							break;
 						}
-#ifndef MINIDLL
 						if (*next_buf == ':') // First char is ':', so it's more likely a hotstring than a hotkey.
 						{
 							// Remember that hotstrings can contain what *appear* to be quoted literal strings,
@@ -2692,7 +2537,6 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 							//else it's not a hotstring but it might still be a hotkey such as ": & x::".
 							// So continue checking below.
 						}
-#endif
 						// Since above didn't "break", this line isn't a hotstring but it is probably a hotkey
 						// because above already discovered that it contains "::" somewhere. So try to find out
 						// if there's anything that disqualifies this from being a hotkey, such as some
@@ -2705,10 +2549,8 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 							// this comma.  Normal (single-colon) labels can't contain commas, so only hotkey
 							// labels are sources of ambiguity.  In addition, normal labels and hotstrings have
 							// already been checked for, higher above.
-#ifndef MINIDLL
 							if (_tcsncmp(cp, HOTKEY_FLAG, HOTKEY_FLAG_LENGTH) // It's not a hotkey such as ",::action".
 								&& _tcsncmp(cp - 1, COMPOSITE_DELIMITER, COMPOSITE_DELIMITER_LENGTH)) // ...and it's not a hotkey such as ", & y::action".
-#endif
 								is_continuation_line = true; // Override the default set earlier.
 						}
 						else // First symbol in line isn't a comma but some other operator symbol.
@@ -3229,7 +3071,6 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 		//    ++phys_line_number;
 		// 5) "mCurrLine = NULL": Probably not necessary since it's only for error reporting.  Worst thing
 		//    that could happen is that syntax errors would be thrown off, which testing shows isn't the case.
-#ifndef MINIDLL
 	examine_line:
 		// "::" alone isn't a hotstring, it's a label whose name is colon.
 		// Below relies on the fact that no valid hotkey can start with a colon, since
@@ -3565,7 +3406,6 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 			}
 			goto continue_main_loop; // In lieu of "continue", for performance.
 		} // if (is_label = ...)
-#endif
 		// Otherwise, not a hotkey or hotstring.  Check if it's a generic, non-hotkey label:
 		if (buf[buf_length - 1] == ':') // Labels must end in a colon (buf was previously rtrimmed).
 		{
@@ -3647,7 +3487,6 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 			return FAIL;
 
 	continue_main_loop: // This method is used in lieu of "continue" for performance and code size reduction.
-#ifndef MINIDLL
 		if (remap_dest_vk)
 		{
 			// For remapping, decided to use a "macro expansion" approach because I think it's considerably
@@ -3742,7 +3581,6 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 				break; // Fall through to the next section so that script loading can resume at the next line.
 			}
 		} // if (remap_dest_vk)
-#endif
 		// Since above didn't "continue", resume loading script line by line:
 		buf = next_buf;
 		buf_length = next_buf_length;
@@ -3782,8 +3620,6 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 
 
 
-
-#endif
 ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure)
 // Returns OK or FAIL.
 // Below: Use double-colon as delimiter to set these apart from normal labels.
@@ -3796,7 +3632,6 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 {
 	if (!aFileSpec || !*aFileSpec) return FAIL;
 
-#ifndef AUTOHOTKEYSC
 	if (Line::sSourceFileCount >= Line::sMaxSourceFiles)
 	{
 		if (Line::sSourceFileCount >= ABSOLUTE_MAX_SOURCE_FILES)
@@ -3820,7 +3655,6 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 	}
 
 	TCHAR full_path[MAX_PATH];
-#endif
 
 	// Keep this var on the stack due to recursion, which allows newly created lines to be given the
 	// correct file number even when some #include's have been encountered in the middle of the script:
@@ -3830,7 +3664,6 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		// Since this is the first source file, it must be the main script file.  Just point it to the
 		// location of the filespec already dynamically allocated:
 		Line::sSourceFile[source_file_index] = mFileSpec;
-#ifndef AUTOHOTKEYSC  // The "else" part below should never execute for compiled scripts since they never include anything (other than the main/combined script).
 	else
 	{
 		// Get the full path in case aFileSpec has a relative path.  This is done so that duplicates
@@ -3846,7 +3679,6 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		// The file is added to the list further below, after the file has been opened, in case the
 		// opening fails and aIgnoreLoadFailure==true.
 	}
-#endif
 	// <buf> should be no larger than LINE_SIZE because some later functions rely upon that:
 	TCHAR msg_text[MAX_PATH + 256], buf1[LINE_SIZE], buf2[LINE_SIZE], suffix[16], pending_buf[LINE_SIZE] = _T("");
 	LPTSTR buf = buf1, next_buf = buf2; // Oscillate between bufs to improve performance (avoids memcpy from buf2 to buf1).
@@ -3864,7 +3696,6 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		Pending_Class,
 		Pending_Property
 	} pending_buf_type;
-#ifndef AUTOHOTKEYSC
 	if (!g_hResource || Line::sSourceFileCount) // It is not a compiled exe or main script was already loaded
 	{
 		if (!tfile.Open(aFileSpec, DEFAULT_READ_FLAGS, g_DefaultScriptCodepage))
@@ -3936,72 +3767,23 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 	}
 	//else the first file was already taken care of by another means.
 
-#else // Stand-alone mode (there are no include files in this mode since all of them were merged into the main script at the time of compiling).
-	HRSRC hRes;
-	HGLOBAL hResData;
-
-#ifdef _DEBUG
-	hRes = FindResource(NULL, _T("AHK"), RT_RCDATA);
-#else
-	hRes = FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), RT_RCDATA);
-#endif
-
-	if (!(hRes
-		&& (textbuf.mLength = SizeofResource(NULL, hRes))
-		&& (hResData = LoadResource(NULL, hRes))
-		&& (textbuf.mBuffer = LockResource(hResData))))
-	{
-		MsgBox(_T("Could not extract script from EXE."), 0, aFileSpec);
-		return FAIL;
-	}
-
-	if (*(unsigned int*)textbuf.mBuffer == 0x04034b50)
-	{
-		LPVOID aDataBuf;
-		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength, g_default_pwd);
-		if (aSizeDeCompressed)
-		{
-			AUTO_MALLOCA(buff, LPVOID, aSizeDeCompressed + 2); // +2 for terminator, will be freed when function returns
-			memmove(buff, aDataBuf, aSizeDeCompressed);
-			memset((char*)buff + aSizeDeCompressed, 0, 2);
-			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
-			VirtualFree(aDataBuf, 0, MEM_RELEASE);
-			textbuf.mLength = aSizeDeCompressed + 2;
-			textbuf.mBuffer = buff;
-		}
-	}
-	fp = &tmem;
-	// NOTE: Ahk2Exe strips off the UTF-8 BOM.
-	tmem.Open(textbuf, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR, CP_UTF8);
-#endif
-
 	++Line::sSourceFileCount;
 
 	// File is now open, read lines from it.
 
-#ifndef MINIDLL
 	LPTSTR hotkey_flag, cp, cp1, hotstring_start, hotstring_options;
 	Hotkey *hk;
-#else
-	LPTSTR hotkey_flag, cp, cp1;
-#endif
 	LineNumberType pending_buf_line_number, saved_line_number;
-#ifndef MINIDLL
 	HookActionType hook_action;
 	bool is_label, suffix_has_tilde, hook_is_mandatory, in_comment_section, hotstring_options_all_valid;
 	ResultType hotkey_validity;
-#else
-	bool is_label, in_comment_section;
-#endif
 
-#ifndef MINIDLL
 	// For the remap mechanism, e.g. a::b
 	int remap_stage;
 	vk_type remap_source_vk, remap_dest_vk = 0; // Only dest is initialized to enforce the fact that it is the flag/signal to indicate whether remapping is in progress.
 	TCHAR remap_source[32], remap_dest[32], remap_dest_modifiers[8]; // Must fit the longest key name (currently Browser_Favorites [17]), but buffer overflow is checked just in case.
 	LPTSTR extra_event;
 	bool remap_source_is_mouse, remap_dest_is_mouse, remap_keybd_to_mouse;
-#endif
 	// For the line continuation mechanism:
 	bool do_rtrim, literal_escapes, literal_derefs, literal_delimiters, literal_quotes
 		, has_continuation_section, is_continuation_line;
@@ -4023,13 +3805,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 	// Init both for main file and any included files loaded by this function:
 	mCurrFileIndex = source_file_index;  // source_file_index is kept on the stack due to recursion (from #include).
 
-#ifdef AUTOHOTKEYSC
-	// -1 (MAX_UINT in this case) to compensate for the fact that there is a comment containing
-	// the version number added to the top of each compiled script:
-	LineNumberType phys_line_number = -1;
-#else
 	LineNumberType phys_line_number = 0;
-#endif
 	buf_length = GetLine(buf, LINE_SIZE - 1, 0, fp);
 
 	if (in_comment_section = !_tcsncmp(buf, _T("/*"), 2))
@@ -4183,7 +3959,6 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 							is_continuation_line = true; // Override the default set earlier.
 							break;
 						}
-#ifndef MINIDLL
 						if (*next_buf == ':') // First char is ':', so it's more likely a hotstring than a hotkey.
 						{
 							// Remember that hotstrings can contain what *appear* to be quoted literal strings,
@@ -4200,7 +3975,6 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 							//else it's not a hotstring but it might still be a hotkey such as ": & x::".
 							// So continue checking below.
 						}
-#endif
 						// Since above didn't "break", this line isn't a hotstring but it is probably a hotkey
 						// because above already discovered that it contains "::" somewhere. So try to find out
 						// if there's anything that disqualifies this from being a hotkey, such as some
@@ -4213,10 +3987,8 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 							// this comma.  Normal (single-colon) labels can't contain commas, so only hotkey
 							// labels are sources of ambiguity.  In addition, normal labels and hotstrings have
 							// already been checked for, higher above.
-#ifndef MINIDLL
 							if (_tcsncmp(cp, HOTKEY_FLAG, HOTKEY_FLAG_LENGTH) // It's not a hotkey such as ",::action".
 								&& _tcsncmp(cp - 1, COMPOSITE_DELIMITER, COMPOSITE_DELIMITER_LENGTH)) // ...and it's not a hotkey such as ", & y::action".
-#endif
 								is_continuation_line = true; // Override the default set earlier.
 						}
 						else // First symbol in line isn't a comma but some other operator symbol.
@@ -4762,7 +4534,6 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		//    ++phys_line_number;
 		// 5) "mCurrLine = NULL": Probably not necessary since it's only for error reporting.  Worst thing
 		//    that could happen is that syntax errors would be thrown off, which testing shows isn't the case.
-#ifndef MINIDLL
 	examine_line:
 		// "::" alone isn't a hotstring, it's a label whose name is colon.
 		// Below relies on the fact that no valid hotkey can start with a colon, since
@@ -5099,9 +4870,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 						// This hotkey uses a single-character key name, which could be valid on some other
 						// keyboard layout.  Allow the script to start, but warn the user about the problem.
 						// Note that this hotkey's label is still valid even though the hotkey wasn't created.
-#ifndef AUTOHOTKEYSC
 						if (!mIncludeLibraryFunctionsThenExit) // Current keyboard layout is not relevant in /iLib mode.
-#endif
 						{
 							sntprintf(msg_text, _countof(msg_text), _T("Note: The hotkey %s will not be active because it does not exist in the current keyboard layout."), buf);
 							MsgBox(msg_text);
@@ -5110,7 +4879,6 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			}
 			goto continue_main_loop; // In lieu of "continue", for performance.
 		} // if (is_label = ...)
-#endif
 		// Otherwise, not a hotkey or hotstring.  Check if it's a generic, non-hotkey label:
 		if (buf[buf_length - 1] == ':') // Labels must end in a colon (buf was previously rtrimmed).
 		{
@@ -5196,7 +4964,6 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			goto FAIL;
 
 	continue_main_loop: // This method is used in lieu of "continue" for performance and code size reduction.
-#ifndef MINIDLL
 		if (remap_dest_vk)
 		{
 			// For remapping, decided to use a "macro expansion" approach because I think it's considerably
@@ -5291,7 +5058,6 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 				break; // Fall through to the next section so that script loading can resume at the next line.
 			}
 		} // if (remap_dest_vk)
-#endif
 		// Since above didn't "continue", resume loading script line by line:
 		buf = next_buf;
 		buf_length = next_buf_length;
@@ -5499,9 +5265,6 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		// Standalone EXEs ignore this directive since the included files were already merged in
 		// with the main file when the script was compiled.  These should have been removed
 		// or commented out by Ahk2Exe, but just in case, it's safest to ignore them:
-#ifdef AUTOHOTKEYSC
-		return CONDITION_TRUE;
-#else
 		// If the below decision is ever changed, be sure to update ahk2exe with the same change:
 		// "parameter" is checked rather than parameter_raw for backward compatibility with earlier versions,
 		// in which a leading comma is not considered part of the filename.  Although this behavior is incorrect
@@ -5581,14 +5344,11 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		// Restore the working directory.
 		SetCurrentDirectory(buf);
 		return result ? CONDITION_TRUE : FAIL;
-#endif
 	}
 
 	if (IS_DIRECTIVE_MATCH(_T("#NoTrayIcon")))
 	{
-#ifndef MINIDLL
 		g_NoTrayIcon = true;
-#endif
 		return CONDITION_TRUE;
 	}
 	if (IS_DIRECTIVE_MATCH(_T("#Persistent")))
@@ -5598,7 +5358,6 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 	}
 	if (IS_DIRECTIVE_MATCH(_T("#SingleInstance")))
 	{
-#ifndef MINIDLL
 		// Since "Prompt" is the default mode when #SingleInstance is not present, make #SingleInstance
 		// on its own activate "Force" mode.  But also allow "Force" and "Prompt" explicitly, since it
 		// might help clarity (and may be useful for overriding an #include?).
@@ -5612,10 +5371,8 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 			g_AllowOnlyOneInstance = SINGLE_INSTANCE_OFF;
 		else // Since it could be a typo like "Of", alert the user:
 			return ScriptError(ERR_PARAM1_INVALID, aBuf);
-#endif
 		return CONDITION_TRUE;
 	}
-#ifndef MINIDLL
 	if (IS_DIRECTIVE_MATCH(_T("#InstallKeybdHook")))
 	{
 		// It seems best not to report this warning because a user may want to use partial functionality
@@ -5823,7 +5580,6 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		}
 		return CONDITION_TRUE;
 	}
-#endif
 	if (IS_DIRECTIVE_MATCH(_T("#MaxThreadsBuffer")))
 	{
 		g_MaxThreadsBuffer = !parameter || Line::ConvertOnOff(parameter) != TOGGLED_OFF;
@@ -5860,7 +5616,6 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		mErrorStdOut = true;
 		return CONDITION_TRUE;
 	}
-#ifndef MINIDLL
 	if (IS_DIRECTIVE_MATCH(_T("#KeyHistory")))
 	{
 		if (parameter)
@@ -5880,7 +5635,6 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		}
 		return CONDITION_TRUE;
 	}
-#endif
 
 	if (IS_DIRECTIVE_MATCH(_T("#MenuMaskKey")))
 	{
@@ -6000,11 +5754,7 @@ void ScriptTimer::Disable()
 {
 	mEnabled = false;
 	--g_script->mTimerEnabledCount;
-#ifndef MINIDLL
 	if (!g_script->mTimerEnabledCount && !g_nLayersNeedingTimer && !Hotkey::sJoyHotkeyCount)
-#else
-	if (!g_script->mTimerEnabledCount && !g_nLayersNeedingTimer)
-#endif
 		KILL_MAIN_TIMER
 		// Above: If there are now no enabled timed subroutines, kill the main timer since there's no other
 		// reason for it to exist if we're here.   This is because or direct or indirect caller is
@@ -7424,11 +7174,9 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 	///////////////////////////////////////////////////////////////////
 	// Do any post-add validation & handling for specific action types.
 	///////////////////////////////////////////////////////////////////
-#ifndef AUTOHOTKEYSC // For v1.0.35.01, some syntax checking is removed in compiled scripts to reduce their size.
 	int value;    // For temp use during validation.
 	double value_float;
 	SYSTEMTIME st;  // same.
-#endif
 	// v1.0.38: The following should help reduce code size, and for some commands helps load-time
 	// performance by avoiding multiple resolutions of a given macro:
 	LPTSTR new_raw_arg1 = NEW_RAW_ARG1;
@@ -7470,16 +7218,12 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 		{
 			if (g->CurrentFunc)
 				g->CurrentFunc->mHasReturn = true;
-#ifndef AUTOHOTKEYSC
 			else
 				return ScriptError(_T("Return's parameter should be blank except inside a function."));
-#endif
 		}
 		break;
 
 
-#ifndef AUTOHOTKEYSC // For v1.0.35.01, some syntax checking is removed in compiled scripts to reduce their size.
-#ifndef MINIDLL		
 	case ACT_GUI:
 		if (aArgc > 0 && !line.ArgHasDeref(1))
 		{
@@ -7532,7 +7276,6 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 			}
 		}
 		break;
-#endif
 
 	case ACT_LOOP_FILE:
 	case ACT_LOOP_REG:
@@ -7552,12 +7295,10 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 			return ScriptError(ERR_PARAM1_INVALID, new_raw_arg1);
 		break;
 
-#ifndef MINIDLL
 	case ACT_SUSPEND:
 		if (aArgc > 0 && !line.ArgHasDeref(1) && !line.ConvertOnOffTogglePermit(new_raw_arg1))
 			return ScriptError(ERR_PARAM1_INVALID, new_raw_arg1);
 		break;
-#endif
 	case ACT_BLOCKINPUT:
 		if (aArgc > 0 && !line.ArgHasDeref(1) && !line.ConvertBlockInput(new_raw_arg1))
 			return ScriptError(ERR_PARAM1_INVALID, new_raw_arg1);
@@ -7574,9 +7315,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 		break;
 
 	case ACT_PAUSE:
-#ifndef MINIDLL
 	case ACT_KEYHISTORY:
-#endif
 		if (aArgc > 0 && !line.ArgHasDeref(1) && !line.ConvertOnOffToggle(new_raw_arg1))
 			return ScriptError(ERR_PARAM1_INVALID, new_raw_arg1);
 		break;
@@ -7637,7 +7376,6 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 			return ScriptError(ERR_PARAM2_INVALID, new_raw_arg2);
 		break;
 
-#ifndef MINIDLL
 	case ACT_PIXELSEARCH:
 	case ACT_IMAGESEARCH:
 		if (!*new_raw_arg3 || !*new_raw_arg4 || !*NEW_RAW_ARG5 || !*NEW_RAW_ARG6 || !*NEW_RAW_ARG7)
@@ -7654,7 +7392,6 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 			}
 		}
 		break;
-#endif
 	case ACT_COORDMODE:
 		if (*new_raw_arg1 && !line.ArgHasDeref(1) && line.ConvertCoordModeCmd(new_raw_arg1) == -1)
 			return ScriptError(ERR_PARAM1_INVALID, new_raw_arg1);
@@ -7749,9 +7486,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 				return ScriptError(ERR_PARAM4_INVALID, new_raw_arg4);
 		break;
 
-#ifndef MINIDLL
 	case ACT_FILEINSTALL:
-#endif
 	case ACT_FILECOPY:
 	case ACT_FILEMOVE:
 	case ACT_DIRCOPY:
@@ -7837,7 +7572,6 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 			return ScriptError(ERR_PARAM1_INVALID, new_raw_arg1);
 		break;
 
-#ifndef MINIDLL
 	case ACT_MENU:
 		if (aArgc > 1 && !line.ArgHasDeref(2))
 		{
@@ -7916,7 +7650,6 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 			}
 		}
 		break;
-#endif
 	case ACT_THREAD:
 		if (aArgc > 0 && !line.ArgHasDeref(1) && !line.ConvertThreadCommand(new_raw_arg1))
 			return ScriptError(ERR_PARAM1_INVALID, new_raw_arg1);
@@ -7971,7 +7704,6 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 		}
 		break;
 
-#ifndef MINIDLL
 	case ACT_GUICONTROL:
 		if (!*new_raw_arg2) // ControlID
 			return ScriptError(ERR_PARAM2_REQUIRED);
@@ -8034,7 +7766,6 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 			// ControlID also.
 		}
 		break;
-#endif
 	case ACT_DRIVE:
 		if (aArgc > 0 && !line.ArgHasDeref(1))
 		{
@@ -8119,7 +7850,6 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 		if (aArgc > 0 && !line.ArgHasDeref(1) && line.ConvertFileEncoding(new_raw_arg1) == -1)
 			return ScriptError(ERR_PARAM1_INVALID, new_raw_arg1);
 		break;
-#endif  // The above section is in place only if when not AUTOHOTKEYSC.
 	}
 
 	if (mNextLineIsFunctionBody && do_update_labels) // do_update_labels: false for '#if expr' and 'static var:=expr', neither of which should be treated as part of the function's body.
@@ -8902,7 +8632,6 @@ ResultType Script::DefineFunc(LPTSTR aBuf, Var *aFuncGlobalVar[])
 
 	if (!g_MustDeclare)
 		func.mDefaultVarType = VAR_DECLARE_LOCAL; // Set default.
-#ifndef MINIDLL
 	if (mLastLabel && !mLastLabel->mJumpToLine)
 	{
 		// Check all variants of all hotkeys, since there might be multiple variants
@@ -8943,7 +8672,6 @@ ResultType Script::DefineFunc(LPTSTR aBuf, Var *aFuncGlobalVar[])
 		if (func.mMinParams)
 			return ScriptError(_T("Parameters of hotkey functions must be optional."), aBuf);
 	}
-#endif
 	// Indicate success:
 	func.mGlobalVar = aFuncGlobalVar; // Give func.mGlobalVar its address, to be used for any var declarations inside this function's body.
 	return OK;
@@ -9350,7 +9078,6 @@ ResultType Script::ResolveClasses()
 
 
 
-#ifndef AUTOHOTKEYSC
 Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &aErrorWasShown, bool &aFileWasFound, bool aIsAutoInclude)
 // Caller must ensure that aFuncName doesn't already exist as a defined function.
 // If aFuncNameLength is 0, the entire length of aFuncName is used.
@@ -9866,7 +9593,6 @@ winapi:
 	}
 	return NULL;
 }
-#endif
 
 
 
@@ -10502,7 +10228,7 @@ Var *Script::AddVar(LPTSTR aVarName, size_t aVarNameLength, int aInsertPos, int 
 		return NULL;
 
 	bool aIsLocal = (aScope & VAR_LOCAL);
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 	if (!g)
 		g = (global_struct*)g_ahkThreads[0][4];
 #endif
@@ -10845,7 +10571,6 @@ ResultType Script::PreparseExpressions(Line *aStartingLine)
 				func = FindFunc(first_arg.text);
 				if (!func)
 				{
-#ifndef AUTOHOTKEYSC
 					bool error_was_shown, file_was_found;
 					if (!(func = FindFuncInLibrary(first_arg.text, first_arg.length, error_was_shown, file_was_found, true)))
 					{
@@ -10856,10 +10581,6 @@ ResultType Script::PreparseExpressions(Line *aStartingLine)
 						return line->LineError(*first_arg.text == '#' ? ERR_UNRECOGNIZED_DIRECTIVE // Give a more sensible error message for something like "#NoEnv".
 							: ERR_NONEXISTENT_FUNCTION, FAIL, first_arg.text);
 					}
-#else
-					return line->LineError(*first_arg.text == '#' ? ERR_UNRECOGNIZED_DIRECTIVE // Give a more sensible error message for something like "#NoEnv".
-						: ERR_NONEXISTENT_FUNCTION, FAIL, first_arg.text);
-#endif
 				}
 				has_output_var = func->mHasReturn; // Does it need an output var?
 				if (param_count // There are parameters; i.e. the next line won't produce a negative count if the output var is omitted.
@@ -11005,7 +10726,6 @@ ResultType Script::PreparseExpressions(Line *aStartingLine)
 						continue;
 					if (!(deref->func = FindFunc(deref->marker, deref->length)))
 					{
-#ifndef AUTOHOTKEYSC
 						bool error_was_shown, file_was_found;
 						if (!(deref->func = FindFuncInLibrary(deref->marker, deref->length, error_was_shown, file_was_found, true)))
 						{
@@ -11013,9 +10733,6 @@ ResultType Script::PreparseExpressions(Line *aStartingLine)
 							// undesirable to show the cascade effects of that error in a second dialog:
 						return error_was_shown ? FAIL : line->LineError(ERR_NONEXISTENT_FUNCTION, FAIL, deref->marker);
 						}
-#else
-					return line->LineError(ERR_NONEXISTENT_FUNCTION, FAIL, deref->marker);
-#endif
 					}
 				} // for each deref of this arg
 			} // if (this_arg.deref)
@@ -11375,10 +11092,13 @@ Line *Script::PreparseCommands(Line *aStartingLine)
 						loop_line = NULL;
 					}
 				}
-				if (g->CurrentFunc && loop_line->IsOutsideAnyFunctionBody())
-					return line->PreparseError(ERR_BAD_JUMP_OUT_OF_FUNCTION);
-				if (!line->CheckValidFinallyJump(loop_line))
-					return NULL; // Error already shown.
+				if (loop_line) // i.e. it wasn't determined to be this line's direct parent, which is always valid.
+				{
+					if (g->CurrentFunc && loop_line->IsOutsideAnyFunctionBody())
+						return line->PreparseError(ERR_BAD_JUMP_OUT_OF_FUNCTION);
+					if (!line->CheckValidFinallyJump(loop_line))
+						return NULL; // Error already shown.
+				}
 				line->mRelatedLine = loop_line;
 			}
 			break;
@@ -11414,7 +11134,6 @@ Line *Script::PreparseCommands(Line *aStartingLine)
 			break;
 			
 		case ACT_HOTKEY:
-#ifndef MINIDLL
 			if (!line->ArgHasDeref(1))
 			{
 				if (!_tcsnicmp(line_raw_arg1, _T("If"), 2))
@@ -11454,7 +11173,6 @@ Line *Script::PreparseCommands(Line *aStartingLine)
 						if (   !(line->mAttribute = FindCallable(line_raw_arg2))   )
 							return line->PreparseError(ERR_NO_LABEL);
 			}
-#endif
 			break;
 
 		case ACT_SETTIMER:
@@ -13040,12 +12758,8 @@ _thread_local Line *Line::sLog[] = { NULL };  // Initialize all the array elemen
 _thread_local DWORD Line::sLogTick[]; // No initialization needed.
 _thread_local int Line::sLogNext = 0;  // Start at the first element.
 
-#ifdef AUTOHOTKEYSC  // Reduces code size to omit things that are unused, and helps catch bugs at compile-time.
-LPTSTR Line::sSourceFile[1]; // No init needed.
-#else
 _thread_local LPTSTR *Line::sSourceFile = NULL; // Init to NULL for use with realloc() and for maintainability.
 _thread_local int Line::sMaxSourceFiles = 0;
-#endif
 _thread_local int Line::sSourceFileCount = 0; // Zero source files initially.  The main script will be the first.
 
 _thread_local LPTSTR Line::sDerefBuf = NULL;  // Buffer to hold the values of any args that need to be dereferenced.
@@ -14002,16 +13716,14 @@ ResultType Line::EvaluateHotCriterionExpression(LPTSTR aHotkeyName)
 	ResultType result;
 	DEBUGGER_STACK_PUSH(_T("#If"))
 
-#ifndef MINIDLL
-		// Update A_ThisHotkey, useful if #If calls a function to do its dirty work.
-		LPTSTR prior_hotkey_name[] = { g_script->mThisHotkeyName, g_script->mPriorHotkeyName };
+	// Update A_ThisHotkey, useful if #If calls a function to do its dirty work.
+	LPTSTR prior_hotkey_name[] = { g_script->mThisHotkeyName, g_script->mPriorHotkeyName };
 	DWORD prior_hotkey_time[] = { g_script->mThisHotkeyStartTime, g_script->mPriorHotkeyStartTime };
 	g_script->mPriorHotkeyName = g_script->mThisHotkeyName;			// For consistency
 	g_script->mPriorHotkeyStartTime = g_script->mThisHotkeyStartTime; //
 	g_script->mThisHotkeyName = aHotkeyName;
 	g_script->mThisHotkeyStartTime = // Updated for consistency.
 		g_script->mLastPeekTime = GetTickCount();
-#endif
 	g_script->mCurrLine = this; // Added in v1.1.16 to fix A_LineFile and A_LineNumber.
 
 	if (g->ListLinesIsEnabled)
@@ -14022,7 +13734,6 @@ ResultType Line::EvaluateHotCriterionExpression(LPTSTR aHotkeyName)
 	if (result == OK)
 		result = EvaluateCondition();
 
-#ifndef MINIDLL
 	// The following allows the expression to set the Last Found Window for the
 	// hotkey subroutine, so that #if WinActive(T) and similar behave like #IfWin.
 	// There may be some rare cases where the wrong hotkey gets this HWND (perhaps
@@ -14035,7 +13746,6 @@ ResultType Line::EvaluateHotCriterionExpression(LPTSTR aHotkeyName)
 	g_script->mThisHotkeyStartTime = prior_hotkey_time[0];
 	g_script->mPriorHotkeyName = prior_hotkey_name[1];
 	g_script->mPriorHotkeyStartTime = prior_hotkey_time[1];
-#endif
 
 	DEBUGGER_STACK_POP()
 		ResumeUnderlyingThread(ErrorLevel_saved);
@@ -15210,7 +14920,6 @@ ResultType Line::Perform()
 	case ACT_SORT:
 		return PerformSort(ARG2, ARG3);
 
-#ifndef MINIDLL
 	case ACT_PIXELSEARCH:
 		// ArgToInt() works on ARG7 (the color) because any valid BGR or RGB color has 0x00 in the high order byte:
 		return PixelSearch(ArgToInt(3), ArgToInt(4), ArgToInt(5), ArgToInt(6), ArgToInt(7), ArgToInt(8), ARG9, false);
@@ -15219,7 +14928,6 @@ ResultType Line::Perform()
 	case ACT_PIXELGETCOLOR:
 		return PixelGetColor(ArgToInt(2), ArgToInt(3), ARG4);
 
-#endif
 	case ACT_SEND:
 	case ACT_SENDRAW:
 		SendKeys(ARG1, mActionType == ACT_SENDRAW, g.SendMode);
@@ -15423,7 +15131,6 @@ ResultType Line::Perform()
 		DoWinDelay;
 		return OK;
 
-#ifndef MINIDLL
 	case ACT_HOTKEY:
 	{
 		IObject *target_label;
@@ -15433,7 +15140,6 @@ ResultType Line::Perform()
 				target_label = ARGVAR2->Object(); // AddRef() will be called later, when it is stored.
 		return Hotkey::Dynamic(THREE_ARGS, target_label);
 	}
-#endif
 	case ACT_SETTIMER: // A timer is being created, changed, or enabled/disabled.
 	{
 		IObject *target_label;
@@ -15660,10 +15366,8 @@ ResultType Line::Perform()
 
 	case ACT_FILERECYCLEEMPTY:
 		return FileRecycleEmpty(ARG1);
-#ifndef MINIDLL
 	case ACT_FILEINSTALL:
 		return FileInstall(THREE_ARGS);
-#endif
 	case ACT_FILECOPY:
 	{
 		int error_count = Util_CopyFile(ARG1, ARG2, ArgToInt(3) == 1, false, g.LastError);
@@ -15719,18 +15423,15 @@ ResultType Line::Perform()
 	case ACT_SETWORKINGDIR:
 		SetWorkingDir(ARG1);
 		return !g.ThrownToken ? OK : FAIL;
-#ifndef MINIDLL
 	case ACT_FILESELECT:
 		return FileSelect(ARG2, ARG3, ARG4, ARG5);
 
 	case ACT_DIRSELECT:
 		return DirSelect(ARG2, ARG3, ARG4);
-#endif
 	case ACT_FILEGETSHORTCUT:
 		return FileGetShortcut(ARG1);
 	case ACT_FILECREATESHORTCUT:
 		return FileCreateShortcut(NINE_ARGS);
-#ifndef MINIDLL
 	case ACT_KEYHISTORY:
 #ifdef ENABLE_KEY_HISTORY_FILE
 		if (*ARG1 || *ARG2)
@@ -15784,15 +15485,10 @@ ResultType Line::Perform()
 		return ShowMainWindow(MAIN_MODE_VARS, false); // Pass "unrestricted" when the command is explicitly used in the script.
 	case ACT_LISTHOTKEYS:
 		return ShowMainWindow(MAIN_MODE_HOTKEYS, false); // Pass "unrestricted" when the command is explicitly used in the script.
-#endif // MINIDLL
 	case ACT_MSGBOX:
 	{
 		int result;
-#ifndef MINIDLL
 		HWND dialog_owner = THREAD_DIALOG_OWNER; // Resolve macro only once to reduce code size.
-#else
-		HWND dialog_owner = NULL;
-#endif
 		// If the MsgBox window can't be displayed for any reason, always return FAIL to
 		// the caller because it would be unsafe to proceed with the execution of the
 		// current script subroutine.  For example, if the script contains an IfMsgBox after,
@@ -15825,14 +15521,11 @@ ResultType Line::Perform()
 			return LineError(ERR_PARAM1_INVALID, FAIL, ARG1);
 		return result ? OK : FAIL;
 	}
-#ifndef MINIDLL
 	case ACT_INPUTBOX:
 		return InputBox(output_var, ARG2, ARG3, ARG4, ARG5);
-#endif
 	case ACT_TOOLTIP:
 		return ToolTip(FOUR_ARGS);
 
-#ifndef MINIDLL
 	case ACT_TRAYTIP:
 		return TrayTip(FOUR_ARGS);
 
@@ -15841,7 +15534,6 @@ ResultType Line::Perform()
 
 
 		//////////////////////////////////////////////////////////////////////////
-#endif
 	case ACT_COORDMODE:
 		return Script::SetCoordMode(ARG1, ARG2);
 
@@ -15895,7 +15587,6 @@ ResultType Line::Perform()
 
 	case ACT_FORMATTIME:
 		return FormatTime(ARG2, ARG3);
-#ifndef MINIDLL
 	case ACT_MENU:
 		return g_script->PerformMenu(SIX_ARGS, ARGVAR4); // L17: Changed from FIVE_ARGS to access previously "reserved" arg (for use by Menu,,Icon).
 
@@ -15937,7 +15628,6 @@ ResultType Line::Perform()
 			return LineError(ERR_PARAM1_INVALID, FAIL, ARG1);
 		}
 		return OK;
-#endif //MINIDLL
 	case ACT_PAUSE:
 		return ChangePauseState(ConvertOnOffToggle(ARG1), (bool)ArgToInt(2));
 	case ACT_STRINGCASESENSE:
@@ -15961,7 +15651,6 @@ ResultType Line::Perform()
 		case TOGGLE_DEFAULT:
 			g_BlockInputMode = toggle;
 			break;
-#ifndef MINIDLL
 		case TOGGLE_MOUSEMOVE:
 			g_BlockMouseMove = true;
 			Hotkey::InstallMouseHook();
@@ -15969,7 +15658,6 @@ ResultType Line::Perform()
 		case TOGGLE_MOUSEMOVEOFF:
 			g_BlockMouseMove = false; // But the mouse hook is left installed because it might be needed by other things. This approach is similar to that used by the Input command.
 			break;
-#endif
 			// default (NEUTRAL or TOGGLE_INVALID): do nothing.
 		}
 		return OK;
@@ -15986,13 +15674,11 @@ ResultType Line::Perform()
 	case ACT_SETSCROLLLOCKSTATE:
 		return SetToggleState(VK_SCROLL, g_ForceScrollLock, ARG1);
 
-#ifndef MINIDLL
 	case ACT_EDIT:
 		g_script->Edit();
 		return OK;
-#endif
 	case ACT_RELOAD:
-#if !defined (AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 		if (g_MainThreadID != g_ThreadID)
 			return g_script->Reload(true);
 #endif
@@ -16096,29 +15782,6 @@ ResultType Line::Perform()
 
 	case ACT_SHUTDOWN:
 		return Util_Shutdown(ArgToInt(1)) ? OK : FAIL; // Range of ARG1 is not validated in case other values are supported in the future.
-#ifdef MINIDLL
-	case ACT_IMAGESEARCH:
-	case ACT_PIXELGETCOLOR:
-	case ACT_HOTKEY:
-	case ACT_FILEINSTALL:
-	case ACT_FILESELECT:
-	case ACT_DIRSELECT:
-	case ACT_KEYHISTORY:
-	case ACT_LISTLINES:
-	case ACT_LISTVARS:
-	case ACT_LISTHOTKEYS:
-	case ACT_INPUTBOX:
-	case ACT_TRAYTIP:
-	case ACT_INPUT:
-	case ACT_MENU:
-	case ACT_GUI:
-	case ACT_GUICONTROL:
-	case ACT_GUICONTROLGET:
-	case ACT_SUSPEND:
-	case ACT_EDIT:
-		return LineError(_T("Command is not supported by AutoHotkeyMini.dll\n\nThe current Thread will exit."));
-		//return OK; //do not show error for not supported commands
-#endif
 	case ACT_FILEENCODING:
 		return BIV_FileEncoding_Set(ARG1, NULL);
 
@@ -16552,9 +16215,7 @@ LPTSTR Line::LogToText(LPTSTR aBuf, int aBufSize) // aBufSize should be an int t
 		_T(" the right (if not 0).  The bottommost line's elapsed time is the number of seconds since it executed.\r\n\r\n"));
 
 	int i, lines_to_show, line_index, line_index2, space_remaining; // space_remaining must be an int to detect negatives.
-#ifndef AUTOHOTKEYSC
 	int last_file_index = -1;
-#endif
 	DWORD elapsed;
 	bool this_item_is_special, next_item_is_special;
 
@@ -16604,7 +16265,6 @@ LPTSTR Line::LogToText(LPTSTR aBuf, int aBufSize) // aBufSize should be an int t
 			}
 			else // This is the last line (whether special or not), so compare it's time against the current time instead.
 				elapsed = GetTickCount() - sLogTick[line_index];
-#ifndef AUTOHOTKEYSC
 			// If the this line and the previous line are in different files, display the filename:
 			if (last_file_index != sLog[line_index]->mFileIndex)
 			{
@@ -16627,7 +16287,6 @@ LPTSTR Line::LogToText(LPTSTR aBuf, int aBufSize) // aBufSize should be an int t
 					*new_line_pos = new_line_char;
 #endif
 			}
-#endif
 			space_remaining = BUF_SPACE_REMAINING;  // Resolve macro only once for performance.
 			// Truncate really huge lines so that the Edit control's size is less likely to be exhausted.
 			// In v1.0.30.02, this is even more likely due to having increased the line-buf's capacity from
@@ -16678,14 +16337,6 @@ LPTSTR Line::VicinityToText(LPTSTR aBuf, int aBufSize) // aBufSize should be an 
 	for (i = 0, line_end = this
 		; i < LINES_ABOVE_AND_BELOW && line_end->mNextLine != NULL
 		; ++i, line_end = line_end->mNextLine);
-
-#ifdef AUTOHOTKEYSC
-	if (!g_AllowMainWindow) // Override the above to show only a single line, to conceal the script's source code.
-	{
-		line_start = this;
-		line_end = this;
-	}
-#endif
 
 	// Now line_start and line_end are the first and last lines of the range
 	// we want to convert to text, and they're non-NULL.
@@ -16771,7 +16422,6 @@ LPTSTR Line::ToText(LPTSTR aBuf, int aBufSize, bool aCRLF, DWORD aElapsed, bool 
 }
 
 
-#ifndef MINIDLL
 void Line::ToggleSuspendState()
 {
 	// If suspension is being turned on:
@@ -16784,7 +16434,6 @@ void Line::ToggleSuspendState()
 	g_script->UpdateTrayIcon();
 	CheckMenuItem(GetMenu(g_hWnd), ID_FILE_SUSPEND, g_IsSuspended ? MF_CHECKED : MF_UNCHECKED);
 }
-#endif
 void Line::PauseUnderlyingThread(bool aTrueForPauseFalseForUnpause)
 {
 	if (g <= g_array) // Guard against underflow. This condition can occur when the script thread that called us is the AutoExec section or a callback running in the idle/0 thread.
@@ -16856,14 +16505,10 @@ ResultType Line::ChangePauseState(ToggleValueType aChangeTo, bool aAlwaysOperate
 	// quasi-thread.  Thus, it seems best to reset all the mRunAgainAfterFinished flags
 	// in case we are in a hotkey subroutine and in case this hotkey has a buffered repeat-again
 	// action pending, which the user probably wouldn't want to happen after the script is unpaused:
-#ifndef MINIDLL
 	Hotkey::ResetRunAgainAfterFinished();
-#endif
 	g->IsPaused = true;
 	++g_nPausedThreads; // For this purpose the idle thread is counted as a paused thread.
-#ifndef MINIDLL
 	g_script->UpdateTrayIcon();
-#endif
 	return OK;
 }
 
@@ -17483,7 +17128,6 @@ void Script::PreprocessLocalVars(Func &aFunc, Var **aVarList, int &aVarCount)
 }
 
 
-#ifndef MINIDLL
 LPTSTR Script::ListVars(LPTSTR aBuf, int aBufSize) // aBufSize should be an int to preserve negatives from caller (caller relies on this).
 // aBufSize is an int so that any negative values passed in from caller are not lost.
 // Translates this script's list of variables into text equivalent, putting the result
@@ -17587,7 +17231,6 @@ LPTSTR Script::ListKeyHistory(LPTSTR aBuf, int aBufSize) // aBufSize should be a
 
 
 
-#endif
 ResultType Script::ActionExec(LPTSTR aAction, LPTSTR aParams, LPTSTR aWorkingDir, bool aDisplayErrors
 	, LPTSTR aRunShowMode, HANDLE *aProcess, bool aUpdateLastError, bool aUseRunAs, Var *aOutputVar)
 	// Caller should specify NULL for aParams if it wants us to attempt to parse out params from

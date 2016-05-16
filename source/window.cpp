@@ -636,11 +636,7 @@ HWND GetValidLastUsedWindow(global_struct &aSettings)
 	// Otherwise, DetectHiddenWindows is OFF and the window is not visible.  Return NULL
 	// unless this is a GUI window belonging to this particular script, in which case
 	// the setting of DetectHiddenWindows is ignored (as of v1.0.25.13).
-#ifndef MINIDLL
 	return GuiType::FindGui(aSettings.hWndLastUsed) ? aSettings.hWndLastUsed : NULL;
-#else
-	return NULL;
-#endif
 }
 
 

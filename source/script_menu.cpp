@@ -15,7 +15,6 @@ GNU General Public License for more details.
 */
 
 #include "stdafx.h" // pre-compiled headers
-#ifndef MINIDLL
 #include "script.h"
 #include "globaldata.h" // for a lot of things
 #include "application.h" // for MsgSleep()
@@ -215,37 +214,10 @@ ResultType Script::PerformMenu(LPTSTR aMenu, LPTSTR aCommand, LPTSTR aParam3, LP
 
 	case MENU_CMD_MAINWINDOW:
 		RETURN_IF_NOT_TRAY;
-#ifdef AUTOHOTKEYSC
-		if (!g_AllowMainWindow)
-		{
-			g_AllowMainWindow = true;
-			EnableOrDisableViewMenuItems(GetMenu(g_hWnd), MF_ENABLED); // Added as a fix in v1.0.47.06.
-			// Rather than using InsertMenu() to insert the item in the right position,
-			// which makes the code rather unmaintainable, it seems best just to recreate
-			// the entire menu.  This will result in the standard menu items going back
-			// up to the top of the menu if the user previously had them at the bottom,
-			// but it seems too rare to worry about, especially since it's easy to
-			// work around that:
-			if (mTrayMenu->mIncludeStandardItems)
-				mTrayMenu->Destroy(); // It will be recreated automatically the next time the user displays it.
-			// else there's no need.
-		}
-#endif
         return OK;
 
 	case MENU_CMD_NOMAINWINDOW:
 		RETURN_IF_NOT_TRAY;
-#ifdef AUTOHOTKEYSC
-		if (g_AllowMainWindow)
-		{
-			g_AllowMainWindow = false;
-			EnableOrDisableViewMenuItems(GetMenu(g_hWnd), MF_DISABLED | MF_GRAYED); // Added as a fix in v1.0.47.06.
-			// See comments in the prior case above for why it's done this way vs. using DeleteMenu():
-			if (mTrayMenu->mIncludeStandardItems)
-				mTrayMenu->Destroy(); // It will be recreated automatically the next time the user displays it.
-			// else there's no need.
-		}
-#endif
 		return OK;
 	} // switch()
 
@@ -641,20 +613,6 @@ UserMenuItem *UserMenu::FindItem(LPTSTR aNameOrPos, UserMenuItem *&aPrevItem, bo
 		GuiType::UpdateMenuBars(hmenu); // Above: If it's not a popup, it's probably a menu bar.
 
 
-#ifdef AUTOHOTKEYSC
-#define CHANGE_DEFAULT_IF_NEEDED \
-	if (mDefault == aMenuItem)\
-	{\
-		if (mMenu)\
-		{\
-			if (this == g_script->mTrayMenu)\
-				SetMenuDefaultItem(mMenu, mIncludeStandardItems && g_AllowMainWindow ? ID_TRAY_OPEN : -1, FALSE);\
-			else\
-				SetMenuDefaultItem(mMenu, -1, FALSE);\
-		}\
-		mDefault = NULL;\
-	}
-#else
 #define CHANGE_DEFAULT_IF_NEEDED \
 	if (mDefault == aMenuItem)\
 	{\
@@ -667,8 +625,6 @@ UserMenuItem *UserMenu::FindItem(LPTSTR aNameOrPos, UserMenuItem *&aPrevItem, bo
 		}\
 		mDefault = NULL;\
 	}
-#endif
-
 
 
 ResultType UserMenu::AddItem(LPTSTR aName, UINT aMenuID, IObject *aLabel, UserMenu *aSubmenu, LPTSTR aOptions
@@ -1144,11 +1100,7 @@ ResultType UserMenu::SetDefault(UserMenuItem *aMenuItem)
 		// Provide a new default if this is the tray menu, the standard items are present, and a default
 		// action is called for:
 		if (this == g_script->mTrayMenu) // Necessary for proper operation of the self-contained version:
-#ifdef AUTOHOTKEYSC
-			SetMenuDefaultItem(mMenu, g_AllowMainWindow && mIncludeStandardItems ? ID_TRAY_OPEN : -1, FALSE);
-#else
 			SetMenuDefaultItem(mMenu, mIncludeStandardItems ? ID_TRAY_OPEN : -1, FALSE);
-#endif
 		else
 			SetMenuDefaultItem(mMenu, -1, FALSE);
 	}
@@ -1301,14 +1253,6 @@ ResultType UserMenu::AppendStandardItems()
 	mIncludeStandardItems = true; // even if the menu doesn't exist.
 	if (!mMenu)
 		return OK;
-#ifdef AUTOHOTKEYSC
-	if (g_AllowMainWindow)
-	{
-		AppendMenu(mMenu, MF_STRING, ID_TRAY_OPEN, _T("&Open"));
-		if (this == g_script->mTrayMenu && !mDefault) // No user-defined default menu item, so use the standard one.
-			SetMenuDefaultItem(mMenu, ID_TRAY_OPEN, FALSE); // Seems to have no function other than appearance.
-	}
-#else
 	AppendMenu(mMenu, MF_STRING, ID_TRAY_OPEN, _T("&Open"));
 	AppendMenu(mMenu, MF_STRING, ID_TRAY_HELP, _T("&Help"));
 	AppendMenu(mMenu, MF_SEPARATOR, 0, NULL);
@@ -1318,7 +1262,6 @@ ResultType UserMenu::AppendStandardItems()
 	AppendMenu(mMenu, MF_SEPARATOR, 0, NULL);
 	if (this == g_script->mTrayMenu && !mDefault) // No user-defined default menu item, so use the standard one.
 		SetMenuDefaultItem(mMenu, ID_TRAY_OPEN, FALSE); // Seems to have no function other than appearance.
-#endif
 	AppendMenu(mMenu, MF_STRING, ID_TRAY_SUSPEND, _T("&Suspend Hotkeys"));
 	AppendMenu(mMenu, MF_STRING, ID_TRAY_PAUSE, _T("&Pause Script"));
 	AppendMenu(mMenu, MF_STRING, ID_TRAY_EXIT, _T("E&xit"));
@@ -1774,5 +1717,3 @@ BOOL UserMenu::OwnerDrawItem(LPDRAWITEMSTRUCT aParam)
 				, aParam->rcItem.left, aParam->rcItem.top
 				, menu_item->mIcon, 0, 0, 0, NULL, DI_NORMAL);
 }
-
-#endif // MINIDLL

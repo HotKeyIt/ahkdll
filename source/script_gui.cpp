@@ -15,7 +15,6 @@ GNU General Public License for more details.
 */
 
 #include "stdafx.h" // pre-compiled headers
-#ifndef MINIDLL
 #include "script.h"
 #include "globaldata.h" // for a lot of things
 #include "application.h" // for MsgSleep()
@@ -11516,5 +11515,3 @@ bool GuiType::ConvertAccelerator(LPTSTR aString, ACCEL &aAccel)
 
 	return aAccel.key; // i.e. false if not a valid key name.
 }
-
-#endif // MINIDLL

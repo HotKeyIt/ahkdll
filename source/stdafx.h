@@ -19,7 +19,7 @@ GNU General Public License for more details.
 // are changed infrequently
 //
 #if !defined(AFX_STDAFX_H__35DF5079_0252_4D5A_98BD_71AEE0407B97__INCLUDED_)
-#if defined(_USRDLL) && !defined(MINIDLL)
+#ifdef _USRDLL
 #define AFX_STDAFX_H__35DF5079_0252_4D5A_98BD_71AEE0407B97__INCLUDED_
 #endif
 #pragma once

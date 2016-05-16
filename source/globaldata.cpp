@@ -29,10 +29,8 @@ GNU General Public License for more details.
 // which are necessary to save and restore (even though it would clean
 // up the code and might make maintaining it easier):
 
-#ifndef AUTOHOTKEYSC
 _thread_local FuncLibrary sLib[FUNC_LIB_COUNT] = { 0 }; // function libraries
 LPSTR g_hWinAPI = NULL, g_hWinAPIlowercase = NULL;  // loads WinAPI functions definitions from resource
-#endif
 _thread_local SimpleHeap *g_SimpleHeap = NULL;
 HRSRC g_hResource = NULL; // Set by WinMain()	// for compiled AutoHotkey.exe
 EXPORT HCUSTOMMODULE g_hMSVCR = NULL; // MSVR100.dll
@@ -40,7 +38,7 @@ EXPORT HCUSTOMMODULE g_hMSVCR = NULL; // MSVR100.dll
 _thread_local bool g_Reloading = false;
 _thread_local bool g_Loading = false;
 #endif
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 EXPORT FARPROC g_ThreadExitApp = (FARPROC)&ThreadExitApp;
 UINT_PTR g_ahkThreads[MAX_AHK_THREADS][7];
 #endif
@@ -51,7 +49,7 @@ EXPORT DWORD g_MainThreadID = GetCurrentThreadId();
 _thread_local HANDLE g_hThread = 0;
 _thread_local DWORD g_ThreadID = 0;
 DWORD g_HookThreadID; // Not initialized by design because 0 itself might be a valid thread ID.
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 _thread_local LPTSTR g_lpScript = 0;
 #endif
 ATOM g_ClassRegistered = 0;
@@ -108,32 +106,21 @@ _thread_local WarnMode g_Warn_LocalSameAsGlobal = WARNMODE_OFF;	//
 _thread_local SingleInstanceType g_AllowOnlyOneInstance = SINGLE_INSTANCE_PROMPT;
 _thread_local PVOID g_ExceptionHandler = NULL;
 _thread_local bool g_ExceptionWarnContinuable = true;
-#ifndef MINIDLL
 HookType g_ExceptionHooksToEnable = NULL;
 _thread_local bool g_NoTrayIcon = false;
-#endif
 _thread_local bool g_persistent = false;  // Whether the script should stay running even after the auto-exec section finishes.
-#ifdef AUTOHOTKEYSC
-_thread_local bool g_AllowMainWindow = false;
-#endif
 _thread_local bool g_MainTimerExists = false;
 _thread_local bool g_AutoExecTimerExists = false;
-#ifndef MINIDLL
 _thread_local bool g_InputTimerExists = false;
-#endif
 _thread_local bool g_DerefTimerExists = false;
 _thread_local bool g_SoundWasPlayed = false;
-#ifndef MINIDLL
 bool g_IsSuspended = false;  // Make this separate from g_AllowInterruption since that is frequently turned off & on.
-#endif
 _thread_local bool g_DeferMessagesForUnderlyingPump = false;
 _thread_local BOOL g_AllowInterruption = TRUE;  // BOOL vs. bool might improve performance a little for frequently-accessed variables.
 _thread_local int g_nLayersNeedingTimer = 0;
 _thread_local int g_nThreads = 0;
 _thread_local int g_nPausedThreads = 0;
-#ifndef MINIDLL
 _thread_local int g_MaxHistoryKeys = 40;
-#endif
 // g_MaxVarCapacity is used to prevent a buggy script from consuming all available system RAM. It is defined
 // as the maximum memory size of a variable, including the string's zero terminator.
 // The chosen default seems big enough to be flexible, yet small enough to not be a problem on 99% of systems:
@@ -144,14 +131,11 @@ _thread_local int g_MaxThreadsTotal = MAX_THREADS_DEFAULT;
 // key auto-repeat feature to work on most systems without triggering the warning dialog.
 // In any case, using auto-repeat with a hotkey is pretty rare for most people, so it's best
 // to keep these values conservative:
-#ifndef MINIDLL
 int g_MaxHotkeysPerInterval = 70; // Increased to 70 because 60 was still causing the warning dialog for repeating keys sometimes.  Increased from 50 to 60 for v1.0.31.02 since 50 would be triggered by keyboard auto-repeat when it is set to its fastest.
 int g_HotkeyThrottleInterval = 2000; // Milliseconds.
-#endif
 _thread_local bool g_MaxThreadsBuffer = false;  // This feature usually does more harm than good, so it defaults to OFF.
 _thread_local SendLevelType g_InputLevel = 0;
 
-#ifndef MINIDLL
 HotkeyCriterion *g_FirstHotCriterion = NULL, *g_LastHotCriterion = NULL;
 
 // Global variables for #if (expression).
@@ -171,16 +155,13 @@ static int GetScreenDPI()
 }
 int g_ScreenDPI = GetScreenDPI();
 MenuTypeType g_MenuIsVisible = MENU_TYPE_NONE;
-#endif
 _thread_local int g_nMessageBoxes = 0;
-#ifndef MINIDLL
 _thread_local int g_nInputBoxes = 0;
 _thread_local int g_nFileDialogs = 0;
 _thread_local int g_nFolderDialogs = 0;
 _thread_local InputBoxType g_InputBox[MAX_INPUTBOXES];
 _thread_local GuiType **g_gui = NULL;
 _thread_local int g_guiCount = 0, g_guiCountMax = 0;
-#endif
 _thread_local HWND g_hWndToolTip[MAX_TOOLTIPS] = { NULL };
 _thread_local MsgMonitorList *g_MsgMonitor;
 // Init not needed for these:
@@ -190,7 +171,6 @@ _thread_local bool g_SortReverse;
 _thread_local int g_SortColumnOffset;
 _thread_local Func *g_SortFunc;
 
-#ifndef MINIDLL
 // Hot-string vars (initialized when ResetHook() is first called):
 TCHAR g_HSBuf[HS_BUF_SIZE];
 int g_HSBufLength;
@@ -214,12 +194,9 @@ TCHAR g_EndChars[HS_MAX_END_CHARS + 1] = _T("-()[]{}:;'\"/\\,.?!\n \t");  // Hot
 // Although dash/hyphen is used for multiple purposes, it seems to me that it is best (on average) to include it.
 // Jay D. Novak suggested ([{/ for things such as fl/nj or fl(nj) which might resolve to USA state names.
 // i.e. word(synonym) and/or word/synonym
-#endif
 // Global objects:
 _thread_local Var *g_ErrorLevel = NULL; // Allows us (in addition to the user) to set this var to indicate success/failure.
-#ifndef MINIDLL
 input_type g_input;
-#endif
 _thread_local Script *g_script;
 // This made global for performance reasons (determining size of clipboard data then
 // copying contents in or out without having to close & reopen the clipboard in between):
@@ -227,8 +204,6 @@ _thread_local Clipboard *g_clip;
 OS_Version g_os;  // OS version object, courtesy of AutoIt3.
 HICON g_IconSmall = NULL;
 HICON g_IconLarge = NULL;
-#ifndef MINIDLL
-#endif
 _thread_local DWORD g_OriginalTimeout;
 
 _thread_local global_struct g_default, g_startup, *g_array;
@@ -242,9 +217,7 @@ _thread_local global_struct *g; // g_startup provides a non-NULL placeholder dur
 _thread_local TCHAR g_WorkingDir[MAX_PATH] = _T("");
 _thread_local TCHAR *g_WorkingDirOrig = NULL;  // Assigned a value in WinMain().
 
-#ifndef MINIDLL
 bool g_ForceKeybdHook = false;
-#endif
 ToggleValueType g_ForceNumLock = NEUTRAL;
 ToggleValueType g_ForceCapsLock = NEUTRAL;
 ToggleValueType g_ForceScrollLock = NEUTRAL;
@@ -747,7 +720,6 @@ key_to_sc_type g_key_to_sc[] =
 // Can calc the counts only after the arrays are initialized above:
 int g_key_to_vk_count = _countof(g_key_to_vk);
 int g_key_to_sc_count = _countof(g_key_to_sc);
-#ifndef MINIDLL
 KeyHistoryItem *g_KeyHistory = NULL; // Array is allocated during startup.
 int g_KeyHistoryNext = 0;
 
@@ -762,6 +734,5 @@ _thread_local bool g_KeyHistoryToFile = false;
 DWORD g_HistoryTickNow = 0;
 DWORD g_HistoryTickPrev = 0;  // So that the first logged key doesn't have a huge elapsed time.
 HWND g_HistoryHwndPrev = NULL;
-#endif
 // Also hook related:
 DWORD g_TimeLastInputPhysical = 0;

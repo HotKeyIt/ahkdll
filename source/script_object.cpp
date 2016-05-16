@@ -359,7 +359,6 @@ Object::~Object()
 {
 	if (mBase)
 		mBase->Release();
-
 	if (mFields)
 	{
 		if (mFieldCount)
@@ -393,7 +392,7 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 // L40: Revised base mechanism for flexibility and to simplify some aspects.
 //		obj[] -> obj.base.__Get -> obj.base[] -> obj.base.__Get etc.
 {
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 	PMYTEB curr_teb = NULL;
 	PVOID tls = NULL;
 	if (!g)
@@ -432,7 +431,7 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 				//return EARLY_RETURN; // TODO: Detection of 'return' vs 'return empty_value'.
 			if (r != OK) // Likely EARLY_RETURN, FAIL or EARLY_EXIT.
 			{
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 				if (curr_teb)
 					curr_teb->ThreadLocalStoragePointer = tls;
 #endif
@@ -485,7 +484,7 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 				// but since Property::Invoke doesn't use it, we pass our aThisToken for simplicity.
 				ResultType result = prop->Invoke(aResultToken, aThisToken, aFlags | IF_FUNCOBJ, aParam, aParamCount);
 				aParam[0] = name_token;
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 				if (curr_teb)
 					curr_teb->ThreadLocalStoragePointer = tls;
 #endif
@@ -518,7 +517,7 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 			if (r != INVOKE_NOT_HANDLED // Base handled it.
 				|| key_type == SYM_INVALID) // Nothing left to do in this case.
 			{
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 				if (curr_teb)
 					curr_teb->ThreadLocalStoragePointer = tls;
 #endif
@@ -547,7 +546,7 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 			{
 				// Since above has not handled this call and no field exists, check for built-in methods.
 				ResultType result = CallBuiltin(GetBuiltinID(key.s), aResultToken, aParam + 1, aParamCount - 1); // +/- 1 to exclude the method identifier.
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 				if (curr_teb)
 					curr_teb->ThreadLocalStoragePointer = tls;
 #endif
@@ -569,7 +568,7 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 							mBase->Release();
 						mBase = obj; // May be NULL.
 					}
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 					if (curr_teb)
 						curr_teb->ThreadLocalStoragePointer = tls;
 #endif
@@ -594,7 +593,7 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 	{
 		if (!field)
 		{
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 			if (curr_teb)
 				curr_teb->ThreadLocalStoragePointer = tls;
 #endif
@@ -610,7 +609,7 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 		if ( !(aFlags & IF_CALL_FUNC_ONLY) || (field->symbol == SYM_OBJECT && dynamic_cast<Func *>(field->object)) )
 		{
 			ResultType result = CallField(field, aResultToken, aThisToken, aFlags, aParam, aParamCount);
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 			if (curr_teb)
 				curr_teb->ThreadLocalStoragePointer = tls;
 #endif
@@ -636,7 +635,7 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 				obj = field->object;
 			else if (!IS_INVOKE_META)
 			{
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 				if (curr_teb)
 					curr_teb->ThreadLocalStoragePointer = tls;
 #endif
@@ -675,7 +674,7 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 				}
 				if (!new_obj)
 				{
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 					if (curr_teb)
 						curr_teb->ThreadLocalStoragePointer = tls;
 #endif
@@ -687,7 +686,7 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 				// Treat x[y,z] like x[y] when x[y] is not set: just return "", don't throw an exception.
 				// On the other hand, if x[y] is set to something which is not an object, the "if (field)"
 				// section above raises an error.
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 				if (curr_teb)
 					curr_teb->ThreadLocalStoragePointer = tls;
 #endif
@@ -703,7 +702,7 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 			// since it could Release() the object (by overwriting our field via script) as a side-effect.
 			// Recursively invoke obj, passing remaining parameters; remove IF_META to correctly treat obj as target:
 			ResultType result = obj->Invoke(aResultToken, obj_token, aFlags & ~IF_META, aParam + 1, aParamCount - 1);
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 			if (curr_teb)
 				curr_teb->ThreadLocalStoragePointer = tls;
 #endif
@@ -724,13 +723,13 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 			{
 				// See the similar call below for comments.
 				field->Get(aResultToken);
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 				if (curr_teb)
 					curr_teb->ThreadLocalStoragePointer = tls;
 #endif
 				return OK;
 			}
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 			if (curr_teb)
 				curr_teb->ThreadLocalStoragePointer = tls;
 #endif
@@ -752,7 +751,7 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 			// deref buf (as of commit d1ab199).  For #2, the value is copied immediately after we return,
 			// because the result of any BIF is assumed to be volatile if expression eval isn't finished.
 			field->Get(aResultToken);
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 			if (curr_teb)
 				curr_teb->ThreadLocalStoragePointer = tls;
 #endif
@@ -762,14 +761,14 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 		// considered valid even when foo.bar has not been set.
 		if (!IS_INVOKE_META && aParamCount)
 		{
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 			if (curr_teb)
 				curr_teb->ThreadLocalStoragePointer = tls;
 #endif
 			_o_return_empty;
 		}
 	}
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 	if (curr_teb)
 		curr_teb->ThreadLocalStoragePointer = tls;
 #endif

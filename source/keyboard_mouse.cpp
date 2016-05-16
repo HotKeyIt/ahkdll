@@ -47,9 +47,7 @@ _thread_local static UINT sEventCount, sMaxEvents; // Number of items in the abo
 _thread_local static UINT sCurrentEvent;
 _thread_local static modLR_type sEventModifiersLR; // Tracks the modifier state to following the progress/building of the SendInput array.
 _thread_local static POINT sSendInputCursorPos;    // Tracks/predicts cursor position as SendInput array is built.
-#ifndef MINIDLL
 static HookType sHooksToRemoveDuringSendInput;
-#endif
 static SendModes sSendMode = SM_EVENT; // Whether a SendInput or Hook array is currently being constructed.
 _thread_local static bool sAbortArraySend;         // No init needed.
 _thread_local static bool sFirstCallForThisEvent;  //
@@ -245,9 +243,7 @@ void SendKeys(LPTSTR aKeys, bool aSendRaw, SendModes aSendModeOrig, HWND aTarget
 		// Windows would have already been artificially released by then, so IsKeyDownAsync() wouldn't be
 		// able to detect when the user physically releases the key.
 		if (   (g_script->mThisHotkeyModifiersLR & (MOD_LWIN|MOD_RWIN)) // Limit the scope to only those hotkeys that have a Win modifier, since anything outside that scope hasn't been fully analyzed.
-#ifndef MINIDLL
 			&& (GetTickCount() - g_script->mThisHotkeyStartTime) < (DWORD)50 // Ensure g_script->mThisHotkeyModifiersLR is up-to-date enough to be reliable.
-#endif
 			&& aSendModeOrig != SM_PLAY // SM_PLAY is reported to be incapable of locking the computer.
 			&& !sInBlindMode // The philosophy of blind-mode is that the script should have full control, so don't do any waiting during blind mode.
 			&& g_os.IsWinVistaOrLater() // Only Vista (and presumably later OSes) check the physical state of the Windows key for Win+L.
@@ -1404,10 +1400,8 @@ LRESULT CALLBACK PlaybackProc(int aCode, WPARAM wParam, LPARAM lParam)
 			// The event is logged here rather than higher above so that its timestamp is accurate.
 			// It's also so that events aren't logged if the user cancel's the operation in the middle
 			// (by pressing Ctrl-Alt-Del or Ctrl-Esc).
-#ifndef MINIDLL
 			UpdateKeyEventHistory(source_event.message == WM_KEYUP || source_event.message == WM_SYSKEYUP
 				, source_event.vk, source_event.sc);
-#endif
 			sThisEventHasBeenLogged = true;
 		}
 		return 0; // No CallNextHookEx(). See comments further below.
@@ -1825,10 +1819,8 @@ void KeyEvent(KeyEventTypes aEventType, vk_type aVK, sc_type aSC, HWND aTargetWi
 				ToggleNumlockWin9x();
 #endif
 
-#ifndef MINIDLL
 			if (do_key_history)
 				UpdateKeyEventHistory(false, aVK, aSC); // Should be thread-safe since if no hook means only one thread ever sends keystrokes (with possible exception of mouse hook, but that seems too rare).
-#endif
 		}
 		// The press-duration delay is done only when this is a down-and-up because otherwise,
 		// the normal g->KeyDelay will be in effect.  In other words, it seems undesirable in
@@ -1863,10 +1855,8 @@ void KeyEvent(KeyEventTypes aEventType, vk_type aVK, sc_type aSC, HWND aTargetWi
 			if (target_layout_has_altgr && aSC == SC_RALT)
 				sEventModifiersLR &= ~MOD_LCONTROL;
 
-#ifndef MINIDLL
 			if (do_key_history)
 				UpdateKeyEventHistory(true, aVK, aSC);
-#endif
 		}
 
 		if (we_turned_blockinput_off)  // Already made thread-safe by action higher above.
@@ -2607,9 +2597,7 @@ void PutKeybdEventIntoArray(modLR_type aKeyAsModifiersLR, vk_type aVK, sc_type a
 		this_event.ki.dwFlags = aEventFlags;
 		this_event.ki.dwExtraInfo = aExtraInfo; // Although our hook won't be installed (or won't detect, in the case of playback), that of other scripts might be, so set this for them.
 		this_event.ki.time = 0; // Let the system provide its own timestamp, which might be more accurate for individual events if this will be a very long SendInput.
-#ifndef MINIDLL
 		sHooksToRemoveDuringSendInput |= HOOK_KEYBD; // Presence of keyboard hook defeats uninterruptibility of keystrokes.
-#endif
 	}
 	else // Playback hook.
 	{
@@ -2674,9 +2662,7 @@ void PutMouseEventIntoArray(DWORD aEventFlags, DWORD aData, DWORD aX, DWORD aY)
 		this_event.mi.mouseData = aData;
 		this_event.mi.dwExtraInfo = KEY_IGNORE_LEVEL(g->SendLevel); // Although our hook won't be installed (or won't detect, in the case of playback), that of other scripts might be, so set this for them.
 		this_event.mi.time = 0; // Let the system provide its own timestamp, which might be more accurate for individual events if this will be a very long SendInput.
-#ifndef MINIDLL
 		sHooksToRemoveDuringSendInput |= HOOK_MOUSE; // Presence of mouse hook defeats uninterruptibility of mouse clicks/moves.
-#endif
 	}
 	else // Playback hook.
 	{
@@ -2760,9 +2746,7 @@ void InitEventArray(void *aMem, UINT aMaxEvents, modLR_type aModifiersLR)
 	sEventModifiersLR = aModifiersLR;
 	sSendInputCursorPos.x = COORD_UNSPECIFIED;
 	sSendInputCursorPos.y = COORD_UNSPECIFIED;
-#ifndef MINIDLL
 	sHooksToRemoveDuringSendInput = 0;
-#endif
 	sEventCount = 0;
 	sAbortArraySend = false; // If KeyEvent() ever sets it to true, that allows us to send nothing at all rather than a partial send.
 	sFirstCallForThisEvent = true;
@@ -2800,11 +2784,9 @@ void SendEventArray(int &aFinalKeyDelay, modLR_type aModsDuringSend)
 		// Rather than removing both hooks unconditionally, it's better to
 		// remove only those that actually have corresponding events in the array.  This avoids temporarily
 		// losing visibility of physical key states (especially when the keyboard hook is removed).
-#ifndef MINIDLL
 		HookType active_hooks;
 		if (active_hooks = GetActiveHooks())
 			AddRemoveHooks(active_hooks & ~sHooksToRemoveDuringSendInput, true);
-#endif
 		// Caller has ensured that sMySendInput isn't NULL.
 		// Following is done to support Sleep in Send e.g. Send, abc{100}def
 		unsigned int aLastEventCount = 0;
@@ -2837,7 +2819,6 @@ void SendEventArray(int &aFinalKeyDelay, modLR_type aModsDuringSend)
 		// SendInput, testing shows that such events are in effect immediately when SendInput returns
 		// to its caller, perhaps because SendInput clears out any backlog of physical keystrokes prior to
 		// returning, or perhaps because the part of the OS that updates key states is a very high priority.
-#ifndef MINIDLL
 		if (active_hooks)
 		{
 			if (active_hooks & sHooksToRemoveDuringSendInput & HOOK_KEYBD) // Keyboard hook was actually removed during SendInput.
@@ -2861,7 +2842,6 @@ void SendEventArray(int &aFinalKeyDelay, modLR_type aModsDuringSend)
 			}
 			AddRemoveHooks(active_hooks, true); // Restore the hooks that were active before the SendInput.
 		}
-#endif
 		return;
 	}
 
@@ -3036,7 +3016,6 @@ void DoMouseDelay() // Helper function for the mouse functions below.
 }
 
 
-#ifndef MINIDLL
 void UpdateKeyEventHistory(bool aKeyUp, vk_type aVK, sc_type aSC)
 {
 	if (!g_KeyHistory) // Don't access the array if it doesn't exist (i.e. key history is disabled).
@@ -3065,7 +3044,6 @@ void UpdateKeyEventHistory(bool aKeyUp, vk_type aVK, sc_type aSC)
 
 
 
-#endif
 ToggleValueType ToggleKeyState(vk_type aVK, ToggleValueType aToggleValue)
 // Toggle the given aVK into another state.  For performance, it is the caller's responsibility to
 // ensure that aVK is a toggleable key such as capslock, numlock, insert, or scrolllock.

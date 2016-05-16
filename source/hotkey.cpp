@@ -15,7 +15,6 @@ GNU General Public License for more details.
 */
 
 #include "stdafx.h" // pre-compiled headers
-#ifndef MINIDLL
 #include "hotkey.h"
 #include "globaldata.h"  // For g_os and other global vars.
 #include "window.h" // For MsgBox()
@@ -58,7 +57,7 @@ HWND HotCriterionAllowsFiring(HotkeyCriterion *aCriterion, LPTSTR aHotkeyName)
 	case HOT_IF_EXPR:
 		// Expression evaluation must be done in the main thread. If the message times out, the hotkey/hotstring is not allowed to fire.
 		DWORD_PTR res;
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 		return (SendMessageTimeout((HWND) g_ahkThreads[0][0], AHK_HOT_IF_EXPR, (WPARAM)aCriterion, (LPARAM)aHotkeyName, SMTO_BLOCK | SMTO_ABORTIFHUNG, g_HotExprTimeout, &res) && res == CONDITION_TRUE) ? (HWND)1 : NULL;
 #else
 		return (SendMessageTimeout(g_hWnd, AHK_HOT_IF_EXPR, (WPARAM)aCriterion, (LPARAM)aHotkeyName, SMTO_BLOCK | SMTO_ABORTIFHUNG, g_HotExprTimeout, &res) && res == CONDITION_TRUE) ? (HWND)1 : NULL;
@@ -2759,4 +2758,3 @@ void Hotstring::ParseOptions(LPTSTR aOptions, int &aPriority, int &aKeyDelay, Se
 		}
 	}
 }
-#endif

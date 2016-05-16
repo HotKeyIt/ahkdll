@@ -284,9 +284,7 @@ public:
 #ifndef _USRDLL
 		, mInterlockedExec(0), mCurrhWnd(NULL)
 #endif
-#ifndef MINIDLL
 		, mDisabledHooks(0)
-#endif
 	{
 	}
 
@@ -348,9 +346,7 @@ private:
 	CStringA mContinuationTransactionId; // transaction_id of last continuation command.
 
 	int mMaxPropertyData, mMaxChildren, mMaxDepth;
-#ifndef MINIDLL
 	HookType mDisabledHooks;
-#endif
 	
 	struct PropertyWriter : public IDebugProperties
 	{

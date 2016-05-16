@@ -51,7 +51,7 @@ EXTERN_G;
 // unconditionally when creating new threads.
 
 // maximal simultaneously running autohotkey threads started via NewThread, tests shown that max is around 900 at /STACK:"4194304" but 2048 should not harm a lot
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 #define MAX_AHK_THREADS 1024
 unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine);
 #endif
@@ -143,11 +143,9 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 	, ID_TRAY_EDITSCRIPT, ID_TRAY_SUSPEND, ID_TRAY_PAUSE, ID_TRAY_EXIT
 	, ID_TRAY_LAST = ID_TRAY_EXIT // But this value should never hit the below. There is debug code to enforce.
 	, ID_MAIN_FIRST = 65400, ID_MAIN_LAST = 65534}; // These should match the range used by resource.h
-#ifndef MINIDLL
 #define GUI_INDEX_TO_ID(index) (index + CONTROL_ID_FIRST)
 #define GUI_ID_TO_INDEX(id) (id - CONTROL_ID_FIRST) // Returns a small negative if "id" is invalid, such as 0.
 #define GUI_HWND_TO_INDEX(hwnd) GUI_ID_TO_INDEX(GetDlgCtrlID(hwnd)) // Returns a small negative on failure (e.g. HWND not found).
-#endif
 // Notes about above:
 // 1) Callers should call GuiType::FindControl() instead of GUI_HWND_TO_INDEX() if the hwnd might be a combobox's
 //    edit control.
@@ -287,7 +285,6 @@ enum MainWindowModes {MAIN_MODE_NO_CHANGE, MAIN_MODE_LINES, MAIN_MODE_VARS
 ResultType ShowMainWindow(MainWindowModes aMode = MAIN_MODE_NO_CHANGE, bool aRestricted = true);
 DWORD GetAHKInstallDir(LPTSTR aBuf);
 
-#ifndef MINIDLL
 struct InputBoxType
 {
 	LPTSTR title;
@@ -335,7 +332,6 @@ ResultType InputBoxParseOptions(LPTSTR aOptions, InputBoxType &aInputBox);
 ResultType InputBox(Var *aOutputVar, LPTSTR aTitle, LPTSTR aText, LPTSTR aOptions, LPTSTR aDefault);
 INT_PTR CALLBACK InputBoxProc(HWND hWndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam);
 VOID CALLBACK InputBoxTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime);
-#endif
 VOID CALLBACK DerefTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime);
 BOOL CALLBACK EnumChildFindSeqNum(HWND aWnd, LPARAM lParam);
 BOOL CALLBACK EnumChildFindPoint(HWND aWnd, LPARAM lParam);
@@ -375,13 +371,11 @@ enum DerefTypeType : BYTE
 };
 
 class Func; // Forward declaration for use below.
-#ifndef AUTOHOTKEYSC
 struct FuncLibrary
 {
 	LPTSTR path;
 	DWORD_PTR length;
 };
-#endif
 struct DerefType
 {
 	LPTSTR marker;
@@ -553,7 +547,6 @@ enum JoyControls {JOYCTRL_INVALID, JOYCTRL_XPOS, JOYCTRL_YPOS, JOYCTRL_ZPOS
 };
 #define IS_JOYSTICK_BUTTON(joy) (joy >= JOYCTRL_1 && joy <= JOYCTRL_BUTTON_MAX)
 
-#ifndef MINIDLL
 enum MenuCommands {MENU_CMD_INVALID, MENU_CMD_SHOW, MENU_CMD_USEERRORLEVEL
 	, MENU_CMD_ADD, MENU_CMD_RENAME, MENU_CMD_INSERT
 	, MENU_CMD_CHECK, MENU_CMD_UNCHECK, MENU_CMD_TOGGLECHECK
@@ -562,13 +555,11 @@ enum MenuCommands {MENU_CMD_INVALID, MENU_CMD_SHOW, MENU_CMD_USEERRORLEVEL
 	, MENU_CMD_DELETE, MENU_CMD_DELETEALL, MENU_CMD_TIP, MENU_CMD_ICON, MENU_CMD_NOICON
 	, MENU_CMD_CLICK, MENU_CMD_MAINWINDOW, MENU_CMD_NOMAINWINDOW
 };
-#endif //MINIDLL
 // Each line in the enumeration below corresponds to a group of built-in functions (defined
 // in g_BIF) which are implemented using a single C++ function.  These IDs are passed to the
 // C++ function to tell it which function is being called.  Each group starts at ID 0 in case
 // it helps the compiler to reduce code size.
 enum BuiltInFunctionID {
-#ifndef MINIDLL
 	FID_LV_GetNext = 0, FID_LV_GetCount,
 	FID_LV_Add = 0, FID_LV_Insert, FID_LV_Modify,
 	FID_LV_InsertCol = 0, FID_LV_ModifyCol, FID_LV_DeleteCol,
@@ -576,7 +567,6 @@ enum BuiltInFunctionID {
 	FID_TV_GetNext = 0, FID_TV_GetPrev, FID_TV_GetParent, FID_TV_GetChild, FID_TV_GetSelection, FID_TV_GetCount,
 	FID_TV_Get = 0, FID_TV_GetText,
 	FID_SB_SetText = 0, FID_SB_SetParts, FID_SB_SetIcon,
-#endif
 	FID_Trim = 0, FID_LTrim, FID_RTrim,
 	FID_RegExMatch = 0, FID_RegExReplace,
 	FID_GetKeyName = 0, FID_GetKeyVK = 1, FID_GetKeySC,
@@ -598,7 +588,6 @@ enum BuiltInFunctionID {
 	FID_MenuGetHandle = 0, FID_MenuGetName,
 };
 
-#ifndef MINIDLL
 #define AHK_LV_SELECT       0x0100
 #define AHK_LV_DESELECT     0x0200
 #define AHK_LV_FOCUS        0x0400
@@ -639,7 +628,6 @@ enum GuiControlTypes {GUI_CONTROL_INVALID // GUI_CONTROL_INVALID must be zero du
 	, GUI_CONTROL_EDIT, GUI_CONTROL_DATETIME, GUI_CONTROL_MONTHCAL, GUI_CONTROL_HOTKEY
 	, GUI_CONTROL_UPDOWN, GUI_CONTROL_SLIDER, GUI_CONTROL_PROGRESS, GUI_CONTROL_TAB, GUI_CONTROL_TAB2
 	, GUI_CONTROL_ACTIVEX, GUI_CONTROL_LINK, GUI_CONTROL_CUSTOM, GUI_CONTROL_STATUSBAR, GUI_CONTROL_GUI}; // Kept last to reflect it being bottommost in switch()s (for perf), since not too often used.
-#endif // MINIDLL
 enum ThreadCommands {THREAD_CMD_INVALID, THREAD_CMD_PRIORITY, THREAD_CMD_INTERRUPT, THREAD_CMD_NOTIMERS};
 
 #define PROCESS_PRIORITY_LETTERS _T("LBNAHR")
@@ -742,10 +730,8 @@ private:
 	ResultType SetRegView(LPTSTR aView);
 
 	ResultType ToolTip(LPTSTR aText, LPTSTR aX, LPTSTR aY, LPTSTR aID);
-#ifndef MINIDLL
 	ResultType TrayTip(LPTSTR aTitle, LPTSTR aText, LPTSTR aTimeout, LPTSTR aOptions);
 	ResultType Input(); // The Input command.
-#endif
 	#define SW_NONE -1
 	ResultType PerformShowWindow(ActionTypeType aActionType, LPTSTR aTitle = _T(""), LPTSTR aText = _T("")
 		, LPTSTR aExcludeTitle = _T(""), LPTSTR aExcludeText = _T(""));
@@ -775,10 +761,8 @@ private:
 		, LPTSTR aExcludeTitle, LPTSTR aExcludeText);
 	ResultType ControlGet(LPTSTR aCommand, LPTSTR aValue, LPTSTR aControl, LPTSTR aTitle, LPTSTR aText
 		, LPTSTR aExcludeTitle, LPTSTR aExcludeText);
-#ifndef MINIDLL
 	ResultType GuiControl(LPTSTR aCommand, LPTSTR aControlID, LPTSTR aParam3, Var *aParam3Var);
 	ResultType GuiControlGet(LPTSTR aCommand, LPTSTR aControlID, LPTSTR aParam3);
-#endif
 	ResultType StatusBarGetText(LPTSTR aPart, LPTSTR aTitle, LPTSTR aText
 		, LPTSTR aExcludeTitle, LPTSTR aExcludeText);
 	ResultType StatusBarWait(LPTSTR aTextToWaitFor, LPTSTR aSeconds, LPTSTR aPart, LPTSTR aTitle, LPTSTR aText
@@ -791,12 +775,10 @@ private:
 	ResultType WinGetText(LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LPTSTR aExcludeText);
 	ResultType WinGetPos(LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LPTSTR aExcludeText);
 	ResultType EnvGet(LPTSTR aEnvVarName);
-#ifndef MINIDLL
 	ResultType PixelSearch(int aLeft, int aTop, int aRight, int aBottom, COLORREF aColorBGR, int aVariation
 		, LPTSTR aOptions, bool aIsPixelGetColor);
 	ResultType ImageSearch(int aLeft, int aTop, int aRight, int aBottom, LPTSTR aImageFile);
 	ResultType PixelGetColor(int aX, int aY, LPTSTR aOptions);
-#endif
 	static ResultType SetToggleState(vk_type aVK, ToggleValueType &ForceLock, LPTSTR aToggleText);
 
 public:
@@ -958,12 +940,8 @@ public:
 	_thread_local static DWORD sLogTick[LINE_LOG_SIZE];
 	_thread_local static int sLogNext;
 
-#ifdef AUTOHOTKEYSC  // Reduces code size to omit things that are unused, and helps catch bugs at compile-time.
-	_thread_local static LPTSTR sSourceFile[1]; // Only need to be able to hold the main script since compiled scripts don't support dynamic including.
-#else
 	_thread_local static LPTSTR *sSourceFile;   // Will hold an array of strings.
 	_thread_local static int sMaxSourceFiles;  // Maximum number of items it can currently hold.
-#endif
 	_thread_local static int sSourceFileCount; // Number of items in the above array.
 
 	static void FreeDerefBufIfLarge();
@@ -1047,9 +1025,7 @@ public:
 			case ACT_CONTROLGET:
 			case ACT_GUICONTROLGET:
 			case ACT_STATUSBARGETTEXT:
-#ifndef MINIDLL
 			case ACT_INPUTBOX:
-#endif			
 			case ACT_RANDOM:
 			case ACT_INIREAD:
 			case ACT_REGREAD:
@@ -1070,12 +1046,10 @@ public:
 			case ACT_SYSGET:
 			case ACT_ENVGET:
 			case ACT_CONTROLGETPOS:
-#ifndef MINIDLL
 			case ACT_PIXELGETCOLOR:
 			case ACT_PIXELSEARCH:
 			case ACT_IMAGESEARCH:
 			case ACT_INPUT:
-#endif
 			case ACT_FORMATTIME:
 			case ACT_FOR:
 			case ACT_CATCH:
@@ -1090,10 +1064,8 @@ public:
 			case ACT_MOUSEGETPOS:
 			case ACT_WINGETPOS:
 			case ACT_CONTROLGETPOS:
-#ifndef MINIDLL
 			case ACT_PIXELSEARCH:
 			case ACT_IMAGESEARCH:
-#endif
 			case ACT_SPLITPATH:
 			case ACT_FILEGETSHORTCUT:
 			case ACT_FOR:
@@ -1352,7 +1324,6 @@ public:
 		return MATCHMODE_INVALID;
 	}
 
-#ifndef MINIDLL
 	static MenuCommands ConvertMenuCommand(LPTSTR aBuf)
 	{
 		if (!aBuf || !*aBuf) return MENU_CMD_INVALID;
@@ -1518,7 +1489,6 @@ public:
 		if (!_tcsicmp(aBuf, _T("Gui"))) return GUI_CONTROL_GUI;
 		return GUI_CONTROL_INVALID;
 	}
-#endif
 
 	static ThreadCommands ConvertThreadCommand(LPTSTR aBuf)
 	{
@@ -1761,15 +1731,11 @@ public:
 	static CoordModeType ConvertCoordModeCmd(LPTSTR aBuf)
 	{
 		if (!aBuf || !*aBuf) return -1;
-#ifndef MINIDLL
 		if (!_tcsicmp(aBuf, _T("Pixel"))) return COORD_MODE_PIXEL;
-#endif
 		if (!_tcsicmp(aBuf, _T("Mouse"))) return COORD_MODE_MOUSE;
 		if (!_tcsicmp(aBuf, _T("ToolTip"))) return COORD_MODE_TOOLTIP;
 		if (!_tcsicmp(aBuf, _T("Caret"))) return COORD_MODE_CARET;
-#ifndef MINIDLL
 		if (!_tcsicmp(aBuf, _T("Menu"))) return COORD_MODE_MENU;
-#endif
 		return -1;
 	}
 
@@ -1884,13 +1850,11 @@ public:
 	LPTSTR mName;
 	Line *mJumpToLine;
 	Label *mPrevLabel, *mNextLabel;  // Prev & Next items in linked list.
-#ifndef MINIDLL
 	bool IsExemptFromSuspend()
 	{
 		// See Line::IsExemptFromSuspend() for comments.
 		return mJumpToLine->IsExemptFromSuspend();
 	}
-#endif
 	ResultType Execute()
 	// This function was added in v1.0.46.16 to support A_ThisLabel.
 	{
@@ -2336,7 +2300,6 @@ struct MsgMonitorInstance
 };
 
 
-#ifndef MINIDLL
 #define MAX_MENU_NAME_LENGTH MAX_PATH // For both menu and menu item names.
 class UserMenuItem;  // Forward declaration since classes use each other (i.e. a menu *item* can have a submenu).
 class UserMenu
@@ -2463,12 +2426,9 @@ struct FontType
 	HFONT hfont;
 };
 
-#endif
-
 #define	LV_REMOTE_BUF_SIZE 1024  // 8192 (below) seems too large in hindsight, given that an LV can only display the first 260 chars in a field.
 #define LV_TEXT_BUF_SIZE 8192  // Max amount of text in a ListView sub-item.  Somewhat arbitrary: not sure what the real limit is, if any.
 
-#ifndef MINIDLL
 enum LVColTypes {LV_COL_TEXT, LV_COL_INTEGER, LV_COL_FLOAT}; // LV_COL_TEXT must be zero so that it's the default with ZeroMemory.
 struct lv_col_type
 {
@@ -2780,7 +2740,6 @@ public:
 	// The following is a workaround for the "w-1" and "h-1" options:
 	int ScaleSize(int x) { return mUsesDPIScaling && x != -1 ? DPIScale(x) : x; }
 };
-#endif // MINIDLL
 
 typedef NTSTATUS (NTAPI *PFN_NT_QUERY_INFORMATION_PROCESS) (
     HANDLE ProcessHandle,
@@ -2793,9 +2752,7 @@ typedef NTSTATUS (NTAPI *PFN_NT_QUERY_INFORMATION_PROCESS) (
 class Script
 {
 private:
-#ifndef MINIDLL
 	friend class Hotkey;
-#endif
 #ifdef CONFIG_DEBUGGER
 	friend class Debugger;
 #endif
@@ -2825,9 +2782,7 @@ public:
 	LineNumberType mCombinedLineNumber; // In the case of a continuation section/line(s), this is always the top line.
 
 	bool mNoHotkeyLabels;
-#ifndef MINIDLL
 	bool mMenuUseErrorLevel;  // Whether runtime errors should be displayed by the Menu command, vs. ErrorLevel.
-#endif
 
 	#define UPDATE_TIP_FIELD tcslcpy(mNIC.szTip, (mTrayIconTip && *mTrayIconTip) ? mTrayIconTip \
 		: (mFileName ? mFileName : T_AHK_NAME), _countof(mNIC.szTip));
@@ -2866,12 +2821,10 @@ public:
 	// Naveen moved above from private
 	Line *mCurrLine;     // Seems better to make this public than make Line our friend.
 	Label *mPlaceholderLabel; // Used in place of a NULL label to simplify code.
-#ifndef MINIDLL
 	UserMenuItem *mThisMenuItem;
 	TCHAR mThisMenuItemName[MAX_MENU_NAME_LENGTH + 1];
 	TCHAR mThisMenuName[MAX_MENU_NAME_LENGTH + 1];
 	LPTSTR mThisHotkeyName, mPriorHotkeyName;
-#endif
 	MsgMonitorList mOnExit, mOnClipboardChange; // Lists of event handlers for OnExit() and OnClipboardChange().
 	HWND mNextClipboardViewer;
 	bool mOnClipboardChangeIsRunning;
@@ -2879,14 +2832,10 @@ public:
 
 	ScriptTimer *mFirstTimer, *mLastTimer;  // The first and last script timers in the linked list.
 	UINT mTimerCount, mTimerEnabledCount;
-#ifndef MINIDLL
 	UserMenu *mFirstMenu, *mLastMenu;
 	UINT mMenuCount;
-#endif
 	DWORD mThisHotkeyStartTime, mPriorHotkeyStartTime;  // Tickcount timestamp of when its subroutine began.
-#ifndef MINIDLL
 	TCHAR mEndChar;  // The ending character pressed to trigger the most recent non-auto-replace hotstring.
-#endif
 	modLR_type mThisHotkeyModifiersLR;
 	LPTSTR mFileSpec; // Will hold the full filespec, for convenience.
 	LPTSTR mFileDir;  // Will hold the directory containing the script file.
@@ -2898,15 +2847,12 @@ public:
 	bool mAutoExecSectionIsRunning;
 	bool mIsRestart; // The app is restarting rather than starting from scratch.
 	bool mErrorStdOut; // true if load-time syntax errors should be sent to stdout vs. a MsgBox.
-#ifndef AUTOHOTKEYSC
 	TextStream *mIncludeLibraryFunctionsThenExit;
-#endif
 	int mUninterruptedLineCountMax; // 32-bit for performance (since huge values seem unnecessary here).
 	int mUninterruptibleTime;
 	DWORD mLastPeekTime;
 
 	CStringW mRunAsUser, mRunAsPass, mRunAsDomain;
-#ifndef MINIDLL
 
 	HICON mCustomIcon;  // NULL unless the script has loaded a custom icon during its runtime.
 	HICON mCustomIconSmall; // L17: Use separate big/small icons for best results.
@@ -2916,20 +2862,15 @@ public:
 	UINT mCustomIconNumber; // The number of the icon inside the above file.
 
 	UserMenu *mTrayMenu; // Our tray menu, which should be destroyed upon exiting the program.
-#endif
 	ResultType Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestart, HINSTANCE hInstance,bool aIsText);
 	// ResultType InitDll(global_struct &g,HINSTANCE hInstance); // HotKeyIt init dll from text
 	ResultType CreateWindows();
 	void EnableClipboardListener(bool aEnable);
-#ifndef MINIDLL
 	void EnableOrDisableViewMenuItems(HMENU aMenu, UINT aFlags);
 	void CreateTrayIcon();
 	void UpdateTrayIcon(bool aForceUpdate = false);
-#endif
 	ResultType AutoExecSection();
-#ifndef MINIDLL
 	ResultType Edit();
-#endif
 	bool IsPersistent();
 	void ExitIfNotPersistent(ExitReasons aExitReason);
 	ResultType Reload(bool aDisplayErrors);
@@ -2944,9 +2885,7 @@ public:
 	void DeleteTimer(IObject *aLabel);
 
 	ResultType DefineFunc(LPTSTR aBuf, Var *aFuncGlobalVar[]);
-#ifndef AUTOHOTKEYSC
 	Func *FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &aErrorWasShown, bool &aFileWasFound, bool aIsAutoInclude);
-#endif
 	Func *FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength = 0, int *apInsertPos = NULL);
 	Func *AddFunc(LPCTSTR aFuncName, size_t aFuncNameLength, bool aIsBuiltIn, int aInsertPos, Object *aClassObject = NULL);
 
@@ -2978,7 +2917,6 @@ public:
 	ResultType ActionExec(LPTSTR aAction, LPTSTR aParams = NULL, LPTSTR aWorkingDir = NULL
 		, bool aDisplayErrors = true, LPTSTR aRunShowMode = NULL, HANDLE *aProcess = NULL
 		, bool aUpdateLastError = false, bool aUseRunAs = false, Var *aOutputVar = NULL);
-#ifndef MINIDLL
 	LPTSTR ListVars(LPTSTR aBuf, int aBufSize);
 	LPTSTR ListKeyHistory(LPTSTR aBuf, int aBufSize);
 
@@ -3011,7 +2949,6 @@ public:
 
 	ResultType PerformGui(LPTSTR aBuf, LPTSTR aControlType, LPTSTR aOptions, LPTSTR aParam4);
 	static GuiType *ResolveGui(LPTSTR aBuf, LPTSTR &aCommand, LPTSTR *aName = NULL, size_t *aNameLength = NULL, LPTSTR aControlID = NULL);
-#endif
 	static ResultType SetCoordMode(LPTSTR aCommand, LPTSTR aMode);
 	static ResultType SetSendMode(LPTSTR aValue);
 	static ResultType SetSendLevel(int aValue, LPTSTR aValueStr);
@@ -3074,9 +3011,7 @@ BIV_DECL_RW(BIV_SendLevel);
 BIV_DECL_RW(BIV_StoreCapslockMode);
 BIV_DECL_R (BIV_IsPaused);
 BIV_DECL_R (BIV_IsCritical);
-#ifndef MINIDLL
 BIV_DECL_R (BIV_IsSuspended);
-#endif
 BIV_DECL_R (BIV_IsCompiled);
 BIV_DECL_R (BIV_IsUnicode);
 BIV_DECL_RW(BIV_FileEncoding);
@@ -3088,14 +3023,11 @@ BIV_DECL_R (BIV_ScriptStruct);
 BIV_DECL_R (BIV_ModuleHandle);
 BIV_DECL_R (BIV_MemoryModule);
 BIV_DECL_R (BIV_IsDll);
-BIV_DECL_R (BIV_IsMini);
 BIV_DECL_RW(BIV_CoordMode);
-#ifndef MINIDLL
 BIV_DECL_R (BIV_IconHidden);
 BIV_DECL_R (BIV_IconTip);
 BIV_DECL_R (BIV_IconFile);
 BIV_DECL_R (BIV_IconNumber);
-#endif
 BIV_DECL_R (BIV_Space_Tab);
 BIV_DECL_R (BIV_AhkVersion);
 BIV_DECL_R (BIV_AhkPath);
@@ -3147,7 +3079,6 @@ BIV_DECL_R (BIV_LoopField);
 BIV_DECL_RW(BIV_LoopIndex);
 BIV_DECL_R (BIV_ThisFunc);
 BIV_DECL_R (BIV_ThisLabel);
-#ifndef MINIDLL
 BIV_DECL_R (BIV_ThisMenuItem);
 BIV_DECL_R (BIV_ThisMenuItemPos);
 BIV_DECL_R (BIV_ThisMenu);
@@ -3161,16 +3092,13 @@ BIV_DECL_R (BIV_GuiControl);
 BIV_DECL_R (BIV_GuiEvent);
 BIV_DECL_R (BIV_DefaultGui);
 BIV_DECL_R (BIV_ScreenDPI);
-#endif
 BIV_DECL_RW(BIV_EventInfo);
 BIV_DECL_R (BIV_TimeIdle);
 BIV_DECL_R (BIV_TimeIdlePhysical);
 BIV_DECL_R (BIV_IPAddress);
 BIV_DECL_R (BIV_IsAdmin);
 BIV_DECL_R (BIV_PtrSize);
-#ifndef MINIDLL
 BIV_DECL_R (BIV_PriorKey);
-#endif
 
 ////////////////////////
 // BUILT-IN FUNCTIONS //
@@ -3223,7 +3151,7 @@ BIF_DECL(BIF_RegEx);
 BIF_DECL(BIF_Ord);
 BIF_DECL(BIF_Chr);
 BIF_DECL(BIF_Format);
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 BIF_DECL(BIF_NewThread);
 #endif
 BIF_DECL(BIF_NumGet);
@@ -3259,7 +3187,6 @@ BIF_DECL(BIF_OnExitOrClipboard);
 BIF_DECL(BIF_RegisterCallback);
 #endif
 
-#ifndef MINIDLL
 BIF_DECL(BIF_MenuGet);
 
 BIF_DECL(BIF_StatusBar);
@@ -3279,7 +3206,6 @@ BIF_DECL(BIF_TV_SetImageList);
 BIF_DECL(BIF_IL_Create);
 BIF_DECL(BIF_IL_Destroy);
 BIF_DECL(BIF_IL_Add);
-#endif
 BIF_DECL(BIF_LoadPicture);
 BIF_DECL(BIF_Trim); // L31: Also handles LTrim and RTrim.
 
@@ -3367,7 +3293,7 @@ HWND DetermineTargetWindow(ExprTokenType *aParam[], int aParamCount);
 
 LPTSTR GetExitReasonString(ExitReasons aExitReason);
 
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 VOID CALLBACK ThreadExitApp(ULONG_PTR dwParam);
 #endif
 

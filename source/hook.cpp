@@ -28,7 +28,6 @@ static HANDLE sMouseMutex = NULL;
 #define KEYBD_MUTEX_NAME _T("AHK Keybd")
 #define MOUSE_MUTEX_NAME _T("AHK Mouse")
 
-#ifndef MINIDLL
 // Whether to disguise the next up-event for lwin/rwin to suppress Start Menu.
 // These are made global, rather than static inside the hook function, so that
 // we can ensure they are initialized by the keyboard init function every
@@ -4351,7 +4350,6 @@ void AddRemoveHooks(HookType aHooksToBeActive, bool aChangeIsTemporary)
 		g_AllowInterruption = TRUE;
 	}
 }
-#endif
 
 
 bool SystemHasAnotherKeybdHook()
@@ -4387,7 +4385,6 @@ bool SystemHasAnotherMouseHook()
 }
 
 
-#ifndef MINIDLL
 DWORD WINAPI HookThreadProc(LPVOID aUnused)
 // The creator of this thread relies on the fact that this function always exits its thread
 // when both hooks are deactivated.
@@ -4696,4 +4693,3 @@ void GetHookStatus(LPTSTR aBuf, int aBufSize)
 		}
 	}
 }
-#endif // MINIDLL

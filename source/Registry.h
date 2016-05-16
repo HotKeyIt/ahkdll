@@ -1,7 +1,6 @@
 
 #pragma once
 #ifdef _USRDLL
-#ifndef MINIDLL
 //
 // Registry.h
 //   - Helper functions registering and unregistering a component.
@@ -35,5 +34,4 @@ void UnregisterInterface(const IID &iid);
 HRESULT RegisterTypeLib(HINSTANCE hInstTypeLib, LPCOLESTR lpszIndex);
 HRESULT UnRegisterTypeLib(HINSTANCE hInstTypeLib, LPCOLESTR lpszIndex);
 
-#endif
 #endif

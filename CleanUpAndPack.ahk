@@ -18,7 +18,7 @@ for t1,dir in dirs
 		If subs.HasKey(SubStr(A_LoopFileDir,InStr(A_LoopFileDir,"\",1,-1)+1))
 			FileMove,% A_LoopFileFullPath,% RegExReplace(A_LoopFileFullPath,"i)AutoHotkeyDll\.dll","AutoHotkey.dll"),1
 
-RCData:={("bin\Win32w"):["AUTOHOTKEY.DLL","AUTOHOTKEYMINI.DLL"],("bin\x64w"):["AUTOHOTKEY.DLL","AUTOHOTKEYMINI.DLL"]}
+RCData:={("bin\Win32w"):["AUTOHOTKEY.DLL"],("bin\x64w"):["AUTOHOTKEY.DLL"]}
 
 for k,v in RCData
   LoopFiles % A_ScriptDir "\" k "\*.dll"
@@ -50,7 +50,7 @@ Loop 1 {
 	  FileRead, data,% "*c " sourcedir "\" v
 	  FileGetSize, sz,% sourcedir "\" v
 	  sz:=ZipRawMemory(&data, sz, var)
-      vres:=v="AutoHotkey.dll"?"F903E44B8A904483A1732BA84EA6191F":v="AutoHotkeyMini.dll"?"FC2328B39C194A4788051A3B01B1E7D5":StrUpper(v)
+      vres:=v="AutoHotkey.dll"?"F903E44B8A904483A1732BA84EA6191F":StrUpper(v)
       if FindResource(hUpdate,10,vres)
         If !UpdateResource(hUpdate,10,vres,1033)
           MsgBox % "Delete: " v "-" ErrMsg()

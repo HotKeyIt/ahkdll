@@ -4,7 +4,6 @@
 
 #include "stdafx.h"
 #ifdef _USRDLL
-#ifndef MINIDLL
 #include <shlwapi.h>
 #include <objbase.h> // ATL base
 #include <atlbase.h>
@@ -493,5 +492,4 @@ HRESULT UnRegisterTypeLib(HINSTANCE hInstTypeLib, LPCOLESTR lpszIndex)
 	return hr;
 }
 
-#endif
 #endif

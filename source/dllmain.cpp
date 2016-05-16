@@ -74,12 +74,10 @@ switch(fwdReason)
 		InitializeCriticalSection(&g_CriticalHeapBlocks); // used to block memory freeing in case of timeout in ahkTerminate so no corruption happens when both threads try to free Heap.
 		InitializeCriticalSection(&g_CriticalRegExCache); // v1.0.45.04: Must be done early so that it's unconditional, so that DeleteCriticalSection() in the script destructor can also be unconditional (deleting when never initialized can crash, at least on Win 9x).
 		InitializeCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
-#ifndef MINIDLL
 		HDC hdc = GetDC(NULL);
 		g_ScreenDPI = GetDeviceCaps(hdc, LOGPIXELSX);
 		ReleaseDC(NULL, hdc);
 		g_HistoryTickPrev = GetTickCount();
-#endif
 		g_TimeLastInputPhysical = GetTickCount();
 		//ahkdll(_T(""),_T(""));
 #ifdef AUTODLL
@@ -107,13 +105,11 @@ switch(fwdReason)
 #ifdef _DEBUG
 		free(g_Debugger.mStack.mBottom);
 #endif
-#ifndef MINIDLL
 		 if (g_input.MatchCount)
 		 {
 			 free(g_input.match);
 		 }
 		 free(g_KeyHistory);
-#endif
 		 if (g_hWinAPI)
 		 {
 			 free(g_hWinAPI);
@@ -344,11 +340,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	//CreateMutex(NULL, FALSE, script_filespec); // script_filespec seems a good choice for uniqueness.
 	//if (!g_ForceLaunch && !restart_mode && GetLastError() == ERROR_ALREADY_EXISTS)
 
-#ifdef AUTOHOTKEYSC
-	LineNumberType load_result = g_script->LoadFromFile();
-#else //HotKeyIt changed to load from Text in dll as well when file does not exist
 	LineNumberType load_result = (g_hResource || !nameHinstanceP.istext) ? g_script->LoadFromFile() : g_script->LoadFromText(ahkdll_script_filespec);
-#endif
 	if (load_result == LOADING_FAILED) // Error during load (was already displayed by the function call).
 	{
 		g_Reloading = false;
@@ -379,11 +371,9 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	// and it seems like it should execute very quickly.  Code size seems to be about 75 bytes.
 	setvbuf(stdout, NULL, _IONBF, 0); // Must be done PRIOR to writing anything to stdout.
 	
-#ifndef MINIDLL
 	if (g_MaxHistoryKeys && (g_KeyHistory = (KeyHistoryItem *)realloc(g_KeyHistory,g_MaxHistoryKeys * sizeof(KeyHistoryItem))))
 		ZeroMemory(g_KeyHistory, g_MaxHistoryKeys * sizeof(KeyHistoryItem)); // Must be zeroed.
 	//else leave it NULL as it was initialized in globaldata.
-#endif
 	// MSDN: "Windows XP: If a manifest is used, InitCommonControlsEx is not required."
 	// Therefore, in case it's a high overhead call, it's not done on XP or later:
 	if (!g_os.IsWinXPorLater())
@@ -422,8 +412,6 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	// set exception filter to disable hook before exception occures to avoid system/mouse freeze
 	g_ExceptionHandler = AddVectoredExceptionHandler(NULL,DisableHooksOnException);
 
-#ifndef MINIDLL
-	
 	// Activate the hotkeys, hotstrings, and any hooks that are required prior to executing the
 	// top part (the auto-execute part) of the script so that they will be in effect even if the
 	// top part is something that's very involved and requires user interaction:
@@ -432,7 +420,6 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	//Hotkey::InstallMouseHook();
 	//if (Hotkey::sHotkeyCount > 0 || Hotstring::sHotstringCount > 0)
 	//	AddRemoveHooks(3);
-#endif
 	g_script->mIsReadyToExecute = true; // This is done only after the above to support error reporting in Hotkey.cpp.
 	Sleep(20);
 	g_Reloading = false;
@@ -592,7 +579,6 @@ EXPORT int ahkReload(int timeout = 0)
 	return 0;
 }
 
-#ifndef MINIDLL
 
 // COM Implementation //
 static long g_cComponents = 0 ;     // Count of active components
@@ -1201,5 +1187,4 @@ STDAPI DllUnregisterServer()
 	}
 	return hr;
 }
-#endif
 #endif

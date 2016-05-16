@@ -24,10 +24,8 @@
 #endif
 #endif
 
-#ifndef AUTOHOTKEYSC
 // DBGp
 #define CONFIG_DEBUGGER
-#endif
 
 // Generates warnings to help we check whether the codes are ready to handle Unicode or not.
 //#define CONFIG_UNICODE_CHECK

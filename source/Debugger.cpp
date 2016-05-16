@@ -183,11 +183,9 @@ int Debugger::EnterBreakState()
 		// Send a response for the previous continuation command.
 		if (int err = SendContinuationResponse())
 			return err;
-#ifndef MINIDLL
 	// Remove keyboard/mouse hooks.
 	if (mDisabledHooks = GetActiveHooks())
 		AddRemoveHooks(0, true);
-#endif
 	// Set break state.
 	mInternalState = DIS_Break;
 	return DEBUGGER_E_OK;
@@ -196,14 +194,12 @@ int Debugger::EnterBreakState()
 
 void Debugger::ExitBreakState()
 {
-#ifndef MINIDLL
 	// Restore keyboard/mouse hooks if they were previously removed.
 	if (mDisabledHooks)
 	{
 		AddRemoveHooks(mDisabledHooks, true);
 		mDisabledHooks = 0;
 	}
-#endif
 }
 
 

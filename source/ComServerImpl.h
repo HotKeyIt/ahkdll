@@ -1,5 +1,4 @@
 #ifdef _USRDLL
-#ifndef MINIDLL
 
 #pragma once
 
@@ -93,5 +92,4 @@ public:
 private:
 	long m_cRef ;
 } ;
-#endif
 #endif

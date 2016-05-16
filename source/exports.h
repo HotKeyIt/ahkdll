@@ -13,11 +13,9 @@ EXPORT UINT_PTR ahkFindFunc(LPTSTR funcname) ;
 EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1 = _T(""), LPTSTR param2 = _T(""), LPTSTR param3 = _T(""), LPTSTR param4 = _T(""), LPTSTR param5 = _T(""), LPTSTR param6 = _T(""), LPTSTR param7 = _T(""), LPTSTR param8 = _T(""), LPTSTR param9 = _T(""), LPTSTR param10 = _T(""));
 EXPORT int ahkPostFunction(LPTSTR func, LPTSTR param1 = _T(""), LPTSTR param2 = _T(""), LPTSTR param3 = _T(""), LPTSTR param4 = _T(""), LPTSTR param5 = _T(""), LPTSTR param6 = _T(""), LPTSTR param7 = _T(""), LPTSTR param8 = _T(""), LPTSTR param9 = _T(""), LPTSTR param10 = _T(""));
 
-#ifndef AUTOHOTKEYSC
 EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute = 0);
 EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute = 0);
 EXPORT int ahkExec(LPTSTR script);
-#endif
 #else
 EXPORT int ahkPause(LPTSTR aChangeTo, DWORD aThreadID = 0);
 EXPORT UINT_PTR ahkFindLabel(LPTSTR aLabelName, DWORD aThreadID = 0);
@@ -29,12 +27,10 @@ EXPORT UINT_PTR ahkFindFunc(LPTSTR funcname, DWORD aThreadID = 0);
 EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1 = _T(""), LPTSTR param2 = _T(""), LPTSTR param3 = _T(""), LPTSTR param4 = _T(""), LPTSTR param5 = _T(""), LPTSTR param6 = _T(""), LPTSTR param7 = _T(""), LPTSTR param8 = _T(""), LPTSTR param9 = _T(""), LPTSTR param10 = _T(""), DWORD aThreadID = 0);
 EXPORT int ahkPostFunction(LPTSTR func, LPTSTR param1 = _T(""), LPTSTR param2 = _T(""), LPTSTR param3 = _T(""), LPTSTR param4 = _T(""), LPTSTR param5 = _T(""), LPTSTR param6 = _T(""), LPTSTR param7 = _T(""), LPTSTR param8 = _T(""), LPTSTR param9 = _T(""), LPTSTR param10 = _T(""), DWORD aThreadID = 0);
 
-#ifndef AUTOHOTKEYSC
 EXPORT int ahkReady(DWORD aThreadID = 0);
 EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute = 0, DWORD aThreadID = 0);
 EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute = 0, DWORD aThreadID = 0);
 EXPORT int ahkExec(LPTSTR script, DWORD aThreadID = 0);
-#endif
 #endif
 void callFuncDllVariant(FuncAndToken *aFuncAndToken); 
 void callFuncDll(FuncAndToken *aFuncAndToken); 
@@ -55,7 +51,6 @@ ResultType terminateDll(int aExitReason);
 EXPORT int ahkIsUnicode();
 
 
-#ifndef MINIDLL
 //COM virtual functions declaration
 int com_ahkPause(LPTSTR aChangeTo);
 UINT_PTR com_ahkFindLabel(LPTSTR aLabelName);
@@ -66,11 +61,9 @@ int com_ahkLabel(LPTSTR aLabelName, unsigned int nowait);
 UINT_PTR com_ahkFindFunc(LPTSTR funcname);
 // LPTSTR com_ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10);
 unsigned int com_ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10);
-#ifndef AUTOHOTKEYSC
 UINT_PTR com_addScript(LPTSTR script, int aExecute);
 int com_ahkExec(LPTSTR script);
 UINT_PTR com_addFile(LPTSTR fileName, int waitexecute);
-#endif
 
 UINT_PTR com_ahkdll(LPTSTR fileName,LPTSTR argv);
 UINT_PTR com_ahktextdll(LPTSTR fileName,LPTSTR argv);
@@ -81,10 +74,8 @@ int com_ahkIsUnicode();
 #endif
 #endif
 
-#endif
 // Additional exports of all exported functions
 #ifndef _WIN64
-#ifndef AUTOHOTKEYSC
 #pragma comment(linker, "/export:ADDFILE=_addFile")
 #pragma comment(linker, "/export:AddFile=_addFile")
 #pragma comment(linker, "/export:Addfile=_addFile")
@@ -93,7 +84,6 @@ int com_ahkIsUnicode();
 #pragma comment(linker, "/export:AddScript=_addScript")
 #pragma comment(linker, "/export:Addscript=_addScript")
 #pragma comment(linker, "/export:addscript=_addScript")
-#endif
 #pragma comment(linker, "/export:AHKASSIGN=_ahkassign")
 #pragma comment(linker, "/export:AhkAssign=_ahkassign")
 #pragma comment(linker, "/export:Ahkassign=_ahkassign")
@@ -104,12 +94,10 @@ int com_ahkIsUnicode();
 #pragma comment(linker, "/export:ahkDll=_ahkdll")
 #pragma comment(linker, "/export:Ahkdll=_ahkdll")
 #endif
-#ifndef AUTOHOTKEYSC
 #pragma comment(linker, "/export:AHKEXEC=_ahkExec")
 #pragma comment(linker, "/export:AhkExec=_ahkExec")
 #pragma comment(linker, "/export:Ahkexec=_ahkExec")
 #pragma comment(linker, "/export:ahkexec=_ahkExec")
-#endif
 #pragma comment(linker, "/export:AHKEXECUTELINE=_ahkExecuteLine")
 #pragma comment(linker, "/export:AhkExecuteLine=_ahkExecuteLine")
 #pragma comment(linker, "/export:AhkExecuteline=_ahkExecuteLine")
@@ -193,7 +181,6 @@ int com_ahkIsUnicode();
 #pragma comment(linker, "/export:ahktextDll=_ahktextdll")
 #endif
 #else // #ifndef _WIN64
-#ifndef AUTOHOTKEYSC
 #pragma comment(linker, "/export:ADDFILE=addFile")
 #pragma comment(linker, "/export:AddFile=addFile")
 #pragma comment(linker, "/export:Addfile=addFile")
@@ -202,7 +189,6 @@ int com_ahkIsUnicode();
 #pragma comment(linker, "/export:AddScript=addScript")
 #pragma comment(linker, "/export:Addscript=addScript")
 #pragma comment(linker, "/export:addscript=addScript")
-#endif
 #pragma comment(linker, "/export:AHKASSIGN=ahkassign")
 #pragma comment(linker, "/export:AhkAssign=ahkassign")
 #pragma comment(linker, "/export:Ahkassign=ahkassign")
@@ -213,12 +199,10 @@ int com_ahkIsUnicode();
 #pragma comment(linker, "/export:ahkDll=ahkdll")
 #pragma comment(linker, "/export:Ahkdll=ahkdll")
 #endif
-#ifndef AUTOHOTKEYSC
 #pragma comment(linker, "/export:AHKEXEC=ahkExec")
 #pragma comment(linker, "/export:AhkExec=ahkExec")
 #pragma comment(linker, "/export:Ahkexec=ahkExec")
 #pragma comment(linker, "/export:ahkexec=ahkExec")
-#endif
 #pragma comment(linker, "/export:AHKEXECUTELINE=ahkExecuteLine")
 #pragma comment(linker, "/export:AhkExecuteLine=ahkExecuteLine")
 #pragma comment(linker, "/export:AhkExecuteline=ahkExecuteLine")

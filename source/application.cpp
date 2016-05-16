@@ -21,13 +21,11 @@ GNU General Public License for more details.
 #include "util.h" // for strlcpy()
 #include "resources/resource.h"  // For ID_TRAY_OPEN.
 
-#ifndef AUTOHOTKEYSC
 #ifndef _USRDLL
 VOID CALLBACK ThreadExitApp(ULONG_PTR dwParam)
 {
 	g_script->ExitApp(EXIT_WM_CLOSE);
 }
-#endif
 #endif
 
 int CanScrollInDirection(HWND aHwnd, DWORD aMessage, DWORD aStyle, WPARAM wParam)
@@ -135,9 +133,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 	// Never static because we could be recursed (e.g. when one hotkey interrupts
 	// a hotkey that has already been interrupted) and each recursion layer should
 	// have it's own value for this:
-#ifndef MINIDLL
 	VarBkp ErrorLevel_saved;
-#endif
 	// Decided to support a true Sleep(0) for aSleepDuration == 0, as well
 	// as no delay at all if aSleepDuration < 0.  This is needed to implement
 	// "SetKeyDelay, 0" and possibly other things.  I believe a Sleep(0)
@@ -192,9 +188,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 	// Note that ExecUntil() no longer needs to call us solely for prevention of lag
 	// caused by the keyboard & mouse hooks, so checking the timers early, rather than
 	// immediately going into the GetMessage() state, should not be a problem:
-#ifndef MINIDLL
 	POLL_JOYSTICK_IF_NEEDED  // Do this first since it's much faster.
-#endif
 	bool return_value = false; //  Set default.  Also, this is used by the macro below.
 	CHECK_SCRIPT_TIMERS_IF_NEEDED
 
@@ -243,19 +237,10 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 	bool sleep0_was_done = false;
 	bool empty_the_queue_via_peek = false;
 	int messages_received = 0; // This is used to ensure we Sleep() at least a minimal amount if no messages are received.
-#ifndef MINIDLL
 	int i;
 	bool msg_was_handled;
 	HWND fore_window, focused_control, focused_parent, criterion_found_hwnd;
-#else
-HWND fore_window;
-#endif
-#ifndef MINIDLL
 	TCHAR wnd_class_name[32], gui_action_extra[16], *walk;
-#else
-	TCHAR wnd_class_name[32];
-#endif
-#ifndef MINIDLL
 	UserMenuItem *menu_item;
 	HotkeyIDType hk_id;
 	Hotkey *hk;
@@ -274,7 +259,6 @@ HWND fore_window;
 	int gui_event_arg_count;
 	INT_PTR gui_event_ret;
 	HDROP hdrop_to_free;
-#endif
 	LRESULT msg_reply;
 	BOOL peek_result;
 	MSG msg;
@@ -294,7 +278,7 @@ HWND fore_window;
 			// (if they're installed).  Otherwise, there's greater risk of keyboard/mouse lag.
 			// PeekMessage(), depending on how, and how often it's called, will also do this, but
 			// I'm not as confident in it.
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 			SleepEx(0, true); // used to exit thread
 #endif
 			if (GetMessage(&msg, NULL, 0, MSG_FILTER_MAX) == -1) // -1 is an error, 0 means WM_QUIT
@@ -310,7 +294,6 @@ HWND fore_window;
 				&& GetWindowThreadProcessId(fore_window, NULL) == g_ThreadID) // And it belongs to our main thread (the main thread is the only one that owns any windows).
 			{
 				do_special_msg_filter = false; // Set default.
-#ifndef MINIDLL
                 if (g_nFileDialogs) // v1.0.44.12: Also do the special Peek/msg filter below for FileSelect because testing shows that frequently-running timers disrupt the ability to double-click.
 				{
 					GetClassName(fore_window, wnd_class_name, _countof(wnd_class_name));
@@ -322,7 +305,6 @@ HWND fore_window;
 					do_special_msg_filter = !_tcsicmp(wnd_class_name, _T("SysTreeView32")) // A TreeView owned by our thread has focus (includes DirSelect's TreeView).
 						|| !_tcsicmp(wnd_class_name, _T("SysListView32"));
 				}
-#endif
 				if (do_special_msg_filter)
 				{
 					// v1.0.48.03: Below now applies to SysListView32 because otherwise a timer that runs
@@ -469,7 +451,6 @@ HWND fore_window;
 				// "we_turned_on_defer" is necessary to prevent us from turning it off if some other
 				// instance of MsgSleep beneath us on the calls stack turned it on.  Only it should
 				// turn it off because it might still need the "true" value for further processing.
-#ifndef MINIDLL
 				#define RETURN_FROM_MSGSLEEP \
 				{\
 					if (we_turned_on_defer)\
@@ -482,20 +463,6 @@ HWND fore_window;
 					}\
 					return return_value;\
 				}
-#else
-				#define RETURN_FROM_MSGSLEEP \
-				{\
-					if (we_turned_on_defer)\
-						g_DeferMessagesForUnderlyingPump = false;\
-					if (this_layer_needs_timer)\
-					{\
-						--g_nLayersNeedingTimer;\
-						if (aSleepDuration > 0 && !g_nLayersNeedingTimer && !g_script->mTimerEnabledCount)\
-							KILL_MAIN_TIMER \
-					}\
-					return return_value;\
-				}
-#endif
 				// IsCycleComplete should always return OK in this case.  Also, was_interrupted
 				// will always be false because if this "aSleepDuration < 1" call really
 				// was interrupted, it would already have returned in the hotkey cases
@@ -545,7 +512,6 @@ HWND fore_window;
 		// because they're >= WM_USER.  The exception is AHK_GUI_ACTION should always be handled
 		// here rather than by IsDialogMessage().  Note: g_guiCount is checked first to help
 		// performance, since all messages must come through this bottleneck.
-#ifndef MINIDLL
 		if (g_guiCount && msg.hwnd && msg.hwnd != g_hWnd && !(msg.message == AHK_GUI_ACTION || msg.message == AHK_USER_MENU))
 		{
 			// Relies heavily on short-circuit boolean order:
@@ -723,7 +689,6 @@ HWND fore_window;
 			if (msg_was_handled) // This message was handled by IsDialogMessage() above.
 				continue; // Continue with the main message loop.
 		}
-#endif
 		// v1.0.44: There's no reason to call TRANSLATE_AHK_MSG here because all WM_COMMNOTIFY messages
 		// are sent to g_hWnd. Thus, our call to DispatchMessage() later below will route such messages to
 		// MainWindowProc(), which will then call TRANSLATE_AHK_MSG().
@@ -733,10 +698,8 @@ HWND fore_window;
 		{
 		// MSG_FILTER_MAX should prevent us from receiving this first group of messages whenever g_AllowInterruption or
 		// g->AllowThreadToBeInterrupted is false.
-#ifndef MINIDLL
 		case AHK_HOOK_HOTKEY:  // Sent from this app's keyboard or mouse hook.
 		case AHK_HOTSTRING:    // Sent from keybd hook to activate a non-auto-replace hotstring.
-#endif
 		case AHK_CLIPBOARD_CHANGE:
 			// This extra handling is present because common controls and perhaps other OS features tend
 			// to use WM_USER+NN messages, a practice that will probably be even more common in the future.
@@ -746,7 +709,6 @@ HWND fore_window;
 			if (msg.hwnd && msg.hwnd != g_hWnd) // v1.0.44: It's wasn't sent by our code; perhaps by a common control's code.
 				break; // Dispatch it vs. discarding it, in case it's for a control.
 			//ELSE FALL THROUGH:
-#ifndef MINIDLL
 		case AHK_GUI_ACTION:   // The user pressed a button on a GUI window, or some other actionable event. Listed before the below for performance.
 		case WM_HOTKEY:        // As a result of this app having previously called RegisterHotkey(), or from TriggerJoyHotkeys().
 		case AHK_USER_MENU:    // The user selected a custom menu item.
@@ -1474,7 +1436,6 @@ HWND fore_window;
 			// has expired.
 			continue;
 		} // End of cases that launch new threads, such as hotkeys and GUI events.
-#endif
 		case WM_TIMER:
 			if (msg.lParam // This WM_TIMER is intended for a TimerProc...
 				|| msg.hwnd != g_hWnd) // ...or it's intended for a window other than the main window, which implies that it doesn't belong to program internals (i.e. the script is probably using it). This fix was added in v1.0.47.02 and it also fixes the ES_NUMBER balloon bug.
@@ -1484,9 +1445,7 @@ HWND fore_window;
 			// longer before we get a timeslice again and that is a long time to be away from the poll
 			// (a fast button press-and-release might occur in less than 50ms, which could be missed if
 			// the polling frequency is too low):
-#ifndef MINIDLL
 			POLL_JOYSTICK_IF_NEEDED // Do this first since it's much faster.
-#endif
 			CHECK_SCRIPT_TIMERS_IF_NEEDED
 			if (aMode == WAIT_FOR_MESSAGES)
 				// Timer should have already been killed if we're in this state.
@@ -1518,7 +1477,6 @@ HWND fore_window;
 				RETURN_FROM_MSGSLEEP
 			// Otherwise, stay in the blessed GetMessage() state until the time has expired:
 			continue;
-#ifndef MINIDLL
 		case WM_CANCELJOURNAL:
 			// IMPORTANT: It's tempting to believe that WM_CANCELJOURNAL might be lost/dropped if the script
 			// is displaying a MsgBox or other dialog that has its own msg pump (since such a pump would
@@ -1534,7 +1492,6 @@ HWND fore_window;
 			// Above is set to so that we return faster, since our caller should be SendKeys() whenever
 			// WM_CANCELJOURNAL is received, and SendKeys() benefits from a faster return.
 			continue;
-#endif
 		case WM_KEYDOWN:
 			if (msg.hwnd == g_hWndEdit && msg.wParam == VK_ESCAPE)
 			{
@@ -1558,9 +1515,7 @@ HWND fore_window;
 			g_script->ExitApp(EXIT_WM_QUIT);
 			continue; // Since ExitApp() won't necessarily exit.
 		} // switch()
-#ifndef MINIDLL
 break_out_of_main_switch:
-#endif
 		// If a "continue" statement wasn't encountered somewhere in the switch(), we want to
 		// process this message in a more generic way.
 		// This little part is from the Miranda source code.  But it doesn't seem
@@ -1599,7 +1554,6 @@ break_out_of_main_switch:
 					// unless the below is done.  This is not a complete fix since if
 					// a message pump other than this one is running (e.g. that of a
 					// MessageBox()), these messages will not be detected:
-#ifndef MINIDLL	
 					if (g_nFileDialogs) // See MsgSleep() for comments on this.
 						// The below two messages that are likely connected with a user
 						// navigating to a different folder within the FileSelect dialog.
@@ -1611,7 +1565,6 @@ break_out_of_main_switch:
 						// is not a very high overhead call when it is called many times here:
 						//if (msg.message == WM_ERASEBKGND || msg.message == WM_DELETEITEM)
 						SetCurrentDirectory(g_WorkingDir);
-#endif
 					g->CalledByIsDialogMessageOrDispatch = false;
 					continue;  // This message is done, so start a new iteration to get another msg.
 				}
@@ -1812,7 +1765,6 @@ bool CheckScriptTimers()
 }
 
 
-#ifndef MINIDLL
 void PollJoysticks()
 // It's best to call this function only directly from MsgSleep() or when there is an instance of
 // MsgSleep() closer on the call stack than the nearest dialog's message pump (e.g. MsgBox).
@@ -1856,7 +1808,6 @@ void PollJoysticks()
 		Hotkey::TriggerJoyHotkeys(i, buttons_newly_down);
 	}
 }
-#endif
 
 
 inline bool MsgMonitor(MsgMonitorInstance &aInstance, HWND aWnd, UINT aMsg, WPARAM awParam, LPARAM alParam, MSG *apMsg, LRESULT &aMsgReply);
@@ -1942,7 +1893,6 @@ bool MsgMonitor(MsgMonitorInstance &aInstance, HWND aWnd, UINT aMsg, WPARAM awPa
 	InitNewThread(0, false, true, type_of_first_line);
 	DEBUGGER_STACK_PUSH(_T("OnMessage")) // Push a "thread" onto the debugger's stack.  For simplicity and performance, use the function name vs something like "message 0x123".
 
-#ifndef MINIDLL
 	GuiType *pgui = NULL;
 	
 	// Set last found window (as documented).  Can be NULL.
@@ -1968,7 +1918,6 @@ bool MsgMonitor(MsgMonitorInstance &aInstance, HWND aWnd, UINT aMsg, WPARAM awPa
 		g->GuiPoint = apMsg->pt;
 		g->EventInfo = apMsg->time;
 	}
-#endif
 	//else leave them at their init-thread defaults.
 	
 	// v1.0.38.04: Below was added to maximize responsiveness to incoming messages.  The reasoning
@@ -1998,13 +1947,11 @@ bool MsgMonitor(MsgMonitorInstance &aInstance, HWND aWnd, UINT aMsg, WPARAM awPa
 	// to ignore aMsgReply.
 
 	DEBUGGER_STACK_POP()
-#ifndef MINIDLL
 	if (pgui) // i.e. we set g->GuiWindow and g->GuiDefaultWindow above.
 	{
 		pgui->Release(); // g->GuiWindow
 		//g->GuiDefaultWindow->Release(); // This is done by ResumeUnderlyingThread().
 	}
-#endif
 	ResumeUnderlyingThread(ErrorLevel_saved);
 
 	// Check that the msg monitor still exists (it may have been deleted during the thread that just finished,
@@ -2065,13 +2012,10 @@ void InitNewThread(int aPriority, bool aSkipUninterruptible, bool aIncrementThre
 	// If the current quasi-thread is paused, the thread we're about to launch will not be, so the tray icon
 	// needs to be checked unless the caller said it wasn't needed.  In any case, if the tray icon is already
 	// in the right state (which it usually, since paused threads are rare), UpdateTrayIcon() is a very fast call.
-#ifndef MINIDLL
 	if (aIncrementThreadCountAndUpdateTrayIcon)
 		g_script->UpdateTrayIcon(); // Must be done ONLY AFTER updating "g" (e.g, ++g) and/or g->IsPaused.
-#endif
 	// For performance reasons, ErrorLevel isn't reset.  See similar line in WinMain() for other reasons.
 	//g_ErrorLevel->Assign(ERRORLEVEL_NONE);
-#ifndef MINIDLL
 	if (g_nFileDialogs)
 		// Since there is a quasi-thread with an open file dialog underneath the one
 		// we're about to launch, set the current directory to be the one the user
@@ -2090,7 +2034,6 @@ void InitNewThread(int aPriority, bool aSkipUninterruptible, bool aIncrementThre
 		// does not seem to care that its changing of the directory as the user
 		// navigates is "undone" here:
 		SetCurrentDirectory(g_WorkingDir);
-#endif
 	if (aSkipUninterruptible)
 		return;
 
@@ -2130,13 +2073,11 @@ void InitNewThread(int aPriority, bool aSkipUninterruptible, bool aIncrementThre
 
 void ResumeUnderlyingThread(VarBkp &aSavedErrorLevel)
 {
-#ifndef MINIDLL
 	// These two may be set by any thread, so must be released here:
 	if (g->GuiDefaultWindow)
 		g->GuiDefaultWindow->Release();
 	if (g->DialogOwner)
 		g->DialogOwner->Release();
-#endif
 	// Check if somebody has thrown an exception and it's not been caught yet
 	if (g->ThrownToken)
 		// Display an error message
@@ -2160,9 +2101,7 @@ void ResumeUnderlyingThread(VarBkp &aSavedErrorLevel)
 	// we're about to resume is different from our previous paused state.  Do this even
 	// when the macro is used by CheckScriptTimers(), which although it might not technically
 	// need it, lends maintainability and peace of mind.
-#ifndef MINIDLL
 	g_script->UpdateTrayIcon();
-#endif
 	// UPDATE v1.0.48: The following no longer seems necessary because the whole point of it
 	// was to protect against SET_UNINTERRUPTIBLE_TIMER firing for the interrupting thread rather
 	// than the thread that's about to be resumed. That is no longer possible due to the way
@@ -2305,7 +2244,6 @@ VOID CALLBACK AutoExecSectionTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWO
 
 
 
-#ifndef MINIDLL
 VOID CALLBACK InputTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime)
 {
 	KILL_INPUT_TIMER
@@ -2314,7 +2252,6 @@ VOID CALLBACK InputTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime)
 
 
 
-#endif
 VOID CALLBACK RefreshInterruptibility(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime)
 {
 	IsInterruptible(); // Search on RefreshInterruptibility for comments.

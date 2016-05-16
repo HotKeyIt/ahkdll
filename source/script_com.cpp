@@ -1439,7 +1439,6 @@ int ComArrayEnum::Next(Var *aOutput, Var *aOutputType)
 	return false;
 }
 
-#ifndef MINIDLL
 IObject *GuiType::ControlGetActiveX(HWND aWnd)
 {
 	typedef HRESULT (WINAPI *MyAtlAxGetControl)(HWND h, IUnknown **p);
@@ -1470,7 +1469,6 @@ IObject *GuiType::ControlGetActiveX(HWND aWnd)
 	}
 	return NULL;
 }
-#endif
 
 STDMETHODIMP IObjectComCompatible::QueryInterface(REFIID riid, void **ppv)
 {

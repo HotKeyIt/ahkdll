@@ -24,10 +24,8 @@ GNU General Public License for more details.
 #include "MemoryModule.h"
 #include "Debugger.h"
 
-#ifndef AUTOHOTKEYSC
 _thread_local extern FuncLibrary sLib[FUNC_LIB_COUNT]; // function libraries
 extern LPSTR g_hWinAPI, g_hWinAPIlowercase; // loads WinAPI functions definitions from resource
-#endif
 _thread_local extern SimpleHeap *g_SimpleHeap;
 extern HRSRC g_hResource;		// for compiled AutoHotkey.exe
 EXPORT extern HCUSTOMMODULE g_hMSVCR;
@@ -35,7 +33,7 @@ EXPORT extern HCUSTOMMODULE g_hMSVCR;
 _thread_local extern bool g_Reloading;
 _thread_local extern bool g_Loading;
 #endif
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 EXPORT FARPROC g_ThreadExitApp;
 extern UINT_PTR g_ahkThreads[MAX_AHK_THREADS][7];
 #endif
@@ -46,7 +44,7 @@ _thread_local extern HANDLE g_hThread;
 _thread_local extern DWORD g_ThreadID;
 EXPORT extern DWORD g_MainThreadID;
 extern DWORD g_HookThreadID;
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 _thread_local extern LPTSTR g_lpScript;
 #endif
 extern ATOM g_ClassRegistered;
@@ -104,45 +102,29 @@ _thread_local extern WarnMode g_Warn_LocalSameAsGlobal;
 _thread_local extern SingleInstanceType g_AllowOnlyOneInstance;
 _thread_local extern PVOID g_ExceptionHandler;
 _thread_local extern bool g_ExceptionWarnContinuable;
-#ifndef MINIDLL
 extern HookType g_ExceptionHooksToEnable;
 _thread_local extern bool g_NoTrayIcon;
-#endif
 _thread_local extern bool g_persistent;
-#ifdef AUTOHOTKEYSC
-_thread_local extern bool g_AllowMainWindow;
-#endif
 _thread_local extern bool g_DeferMessagesForUnderlyingPump;
 _thread_local extern bool g_MainTimerExists;
 _thread_local extern bool g_AutoExecTimerExists;
-#ifndef MINIDLL
 _thread_local extern bool g_InputTimerExists;
-#endif
 _thread_local extern bool g_DerefTimerExists;
 _thread_local extern bool g_SoundWasPlayed;
-#ifndef MINIDLL
 extern bool g_IsSuspended;
-#endif
 _thread_local extern BOOL g_AllowInterruption;
 _thread_local extern int g_nLayersNeedingTimer;
 _thread_local extern int g_nThreads;
 _thread_local extern int g_nPausedThreads;
-#ifndef MINIDLL
 _thread_local extern int g_MaxHistoryKeys;
-#endif
 
-#ifndef MINIDLL
 _thread_local extern UCHAR g_MaxThreadsPerHotkey;
-#endif
 _thread_local extern int g_MaxThreadsTotal;
-#ifndef MINIDLL
 extern int g_MaxHotkeysPerInterval;
 extern int g_HotkeyThrottleInterval;
-#endif
 _thread_local extern bool g_MaxThreadsBuffer;
 _thread_local extern SendLevelType g_InputLevel;
 
-#ifndef MINIDLL
 extern HotkeyCriterion *g_FirstHotCriterion, *g_LastHotCriterion;
 
 // Global variables for #if (expression). See globaldata.cpp for comments.
@@ -152,16 +134,13 @@ extern HotkeyCriterion *g_FirstHotExpr, *g_LastHotExpr;
 
 extern int g_ScreenDPI;
 extern MenuTypeType g_MenuIsVisible;
-#endif
 _thread_local extern int g_nMessageBoxes;
-#ifndef MINIDLL
 _thread_local extern int g_nInputBoxes;
 _thread_local extern int g_nFileDialogs;
 _thread_local extern int g_nFolderDialogs;
 _thread_local extern InputBoxType g_InputBox[MAX_INPUTBOXES];
 _thread_local extern GuiType **g_gui;
 _thread_local extern int g_guiCount, g_guiCountMax;
-#endif
 _thread_local extern HWND g_hWndToolTip[MAX_TOOLTIPS];
 _thread_local extern MsgMonitorList *g_MsgMonitor;
 
@@ -175,7 +154,6 @@ _thread_local extern Func *g_SortFunc;
 #define g_EscapeChar  '`' // are at their usual default values to reduce code size/complexity.
 #define g_delimiter   ',' // Also, g_delimiter was never used in expressions (i.e. for SYM_COMMA).
 #define g_CommentChar ';'
-#ifndef MINIDLL
 // Hot-string vars:
 extern TCHAR g_HSBuf[HS_BUF_SIZE];
 extern int g_HSBufLength;
@@ -195,19 +173,14 @@ extern bool g_HSDetectWhenInsideWord;
 extern bool g_HSDoReset;
 extern bool g_HSResetUponMouseClick;
 extern TCHAR g_EndChars[HS_MAX_END_CHARS + 1];
-#endif
 // Global objects:
 _thread_local extern Var *g_ErrorLevel;
-#ifndef MINIDLL
 extern input_type g_input;
-#endif
 EXTERN_SCRIPT;
 EXTERN_CLIPBOARD;
 EXTERN_OSVER;
-#ifndef MINIDLL
 extern HICON g_IconSmall;
 extern HICON g_IconLarge;
-#endif
 _thread_local extern DWORD g_OriginalTimeout;
 
 EXTERN_G;
@@ -235,19 +208,15 @@ extern key_to_sc_type g_key_to_sc[];
 extern int g_key_to_vk_count;
 extern int g_key_to_sc_count;
 
-#ifndef MINIDLL
 extern KeyHistoryItem *g_KeyHistory;
 extern int g_KeyHistoryNext;
 extern DWORD g_HistoryTickNow;
 extern DWORD g_HistoryTickPrev;
 extern HWND g_HistoryHwndPrev;
-#endif
 extern DWORD g_TimeLastInputPhysical;
-#ifndef MINIDLL
 #ifdef ENABLE_KEY_HISTORY_FILE
 extern bool g_KeyHistoryToFile;
 #endif
-#endif // MINIDLL
 
 extern TCHAR g_default_pwd0;
 extern TCHAR g_default_pwd1;
@@ -338,11 +307,9 @@ if (!g_MainTimerExists)\
 	if (!g_AutoExecTimerExists)\
 		g_AutoExecTimerExists = SetTimer(g_hWnd, TIMER_ID_AUTOEXEC, aTimeoutValue, AutoExecSectionTimeout);\
 } // v1.0.39 for above: Removed the call to ExitApp() upon failure.  See SET_MAIN_TIMER for details.
-#ifndef MINIDLL
 #define SET_INPUT_TIMER(aTimeoutValue) \
 if (!g_InputTimerExists)\
 	g_InputTimerExists = SetTimer(g_hWnd, TIMER_ID_INPUT, aTimeoutValue, InputTimeout);
-#endif
 // For this one, SetTimer() is called unconditionally because our caller wants the timer reset
 // (as though it were killed and recreated) unconditionally.  MSDN's comments are a little vague
 // about this, but testing shows that calling SetTimer() against an existing timer does completely
@@ -361,11 +328,9 @@ if (g_MainTimerExists && KillTimer(g_hWnd, TIMER_ID_MAIN))\
 	if (g_AutoExecTimerExists && KillTimer(g_hWnd, TIMER_ID_AUTOEXEC))\
 		g_AutoExecTimerExists = false;\
 }
-#ifndef MINIDLL
 #define KILL_INPUT_TIMER \
 if (g_InputTimerExists && KillTimer(g_hWnd, TIMER_ID_INPUT))\
 	g_InputTimerExists = false;
-#endif
 #define KILL_DEREF_TIMER \
 if (g_DerefTimerExists && KillTimer(g_hWnd, TIMER_ID_DEREF))\
 	g_DerefTimerExists = false;

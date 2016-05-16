@@ -53,11 +53,7 @@ bool MsgSleep(int aSleepDuration = INTERVAL_UNSPECIFIED, MessageMode aMode = RET
 // MS made WM_HOTKEY have a very high value, so filtering in this way should not exclude
 // any other important types of messages:
 #define MSG_FILTER_MAX (IsInterruptible() ? 0 : WM_HOTKEY - 1)
-#ifndef MINIDLL
 #define INTERRUPTIBLE_IN_EMERGENCY (g_AllowInterruption && !g_MenuIsVisible)
-#else
-#define INTERRUPTIBLE_IN_EMERGENCY (g_AllowInterruption)
-#endif
 // Do a true Sleep() for short sleeps on Win9x because it is much more accurate than the MsgSleep()
 // method on that OS, at least for when short sleeps are done on Win98SE:
 #define DoWinDelay \
@@ -87,10 +83,8 @@ ResultType IsCycleComplete(int aSleepDuration, DWORD aStartTime, bool aAllowEarl
 // of the main timer) until the dialog's msg pump ended.
 bool CheckScriptTimers();
 #define CHECK_SCRIPT_TIMERS_IF_NEEDED if (g_script->mTimerEnabledCount && CheckScriptTimers()) return_value = true; // Change the existing value only if it returned true.
-#ifndef MINIDLL
 void PollJoysticks();
 #define POLL_JOYSTICK_IF_NEEDED if (Hotkey::sJoyHotkeyCount) PollJoysticks();
-#endif
 bool MsgMonitor(HWND aWnd, UINT aMsg, WPARAM awParam, LPARAM alParam, MSG *apMsg, LRESULT &aMsgReply);
 
 void InitNewThread(int aPriority, bool aSkipUninterruptible, bool aIncrementThreadCountAndUpdateTrayIcon
@@ -102,12 +96,10 @@ BOOL IsInterruptible();
 VOID CALLBACK MsgBoxTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime);
 VOID CALLBACK AutoExecSectionTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime);
 VOID CALLBACK UninterruptibleTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime);
-#ifndef MINIDLL
 VOID CALLBACK InputTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime);
-#endif
 VOID CALLBACK RefreshInterruptibility(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime);
 #endif
-#if !defined (AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 typedef struct _CLIENT_ID
 {
 	PVOID UniqueProcess;

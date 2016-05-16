@@ -49,9 +49,7 @@ GNU General Public License for more details.
 // the same process. Also, because class names occupy space in the system's private atom table, you
 // should keep class name strings as short a possible:
 #define WINDOW_CLASS_MAIN _T("AutoHotkey")
-#ifndef MINIDLL
 #define WINDOW_CLASS_GUI _T("AutoHotkeyGUI") // There's a section in Script::Edit() that relies on these all starting with "AutoHotkey".
-#endif
 #define EXT_AUTOHOTKEY _T(".ahk")
 #define AHK_HELP_FILE _T("AutoHotkey.chm")
 
@@ -130,10 +128,8 @@ enum WarnMode {WARNMODE_OFF, WARNMODE_OUTPUTDEBUG, WARNMODE_MSGBOX, WARNMODE_STD
 
 enum SingleInstanceType {SINGLE_INSTANCE_OFF, SINGLE_INSTANCE_PROMPT, SINGLE_INSTANCE_REPLACE
 	, SINGLE_INSTANCE_IGNORE }; // SINGLE_INSTANCE_OFF must be zero.
-#ifndef MINIDLL
 enum MenuTypeType {MENU_TYPE_NONE, MENU_TYPE_POPUP, MENU_TYPE_BAR}; // NONE must be zero.
 
-#endif // MINIDLL
 // These are used for things that can be turned on, off, or left at a
 // neutral default value that is neither on nor off.  INVALID must
 // be zero:
@@ -567,14 +563,9 @@ enum enum_act {
 // may be using it as "Pause, off/toggle", but it seems best to support PAUSE because otherwise
 // hotkey such as "#z::pause" would not be able to unpause the script if its MaxThreadsPerHotkey
 // was 1 (the default).
-#ifndef MINIDLL
 #define ACT_IS_ALWAYS_ALLOWED(ActionType) (ActionType == ACT_EXITAPP || ActionType == ACT_PAUSE \
 	|| ActionType == ACT_EDIT || ActionType == ACT_RELOAD || ActionType == ACT_KEYHISTORY \
 	|| ActionType == ACT_LISTLINES || ActionType == ACT_LISTVARS || ActionType == ACT_LISTHOTKEYS)
-#else
-#define ACT_IS_ALWAYS_ALLOWED(ActionType) (ActionType == ACT_EXITAPP || ActionType == ACT_PAUSE \
-	|| ActionType == ACT_RELOAD)
-#endif
 #define ACT_IS_CONTROL_FLOW(ActionType) (ActionType <= ACT_LAST_CONTROL_FLOW && ActionType >= ACT_FIRST_CONTROL_FLOW)
 #define ACT_IS_IF(ActionType) (ActionType == ACT_IF)
 #define ACT_IS_LOOP(ActionType) (ActionType >= ACT_LOOP && ActionType <= ACT_WHILE)
@@ -593,9 +584,7 @@ enum enum_act {
 #define AHK_TIMEOUT -2
 // And these to prevent mutual dependency problem between window.h and globaldata.h:
 #define MAX_MSGBOXES 7 // Probably best not to change this because it's used by OurTimers to set the timer IDs, which should probably be kept the same for backward compatibility.
-#ifndef MINIDLL
 #define MAX_INPUTBOXES 4
-#endif
 #define MAX_MSG_MONITORS 500
 
 // IMPORTANT: Before ever changing the below, note that it will impact the IDs of menu items created
@@ -603,24 +592,19 @@ enum enum_act {
 // 65500-11000=54500). See comments at ID_USER_FIRST for details:
 #define GUI_CONTROL_BLOCK_SIZE 1000
 #define MAX_CONTROLS_PER_GUI (GUI_CONTROL_BLOCK_SIZE * 11) // Some things rely on this being less than 0xFFFF and an even multiple of GUI_CONTROL_BLOCK_SIZE.
-#ifndef MINIDLL
 #define NO_CONTROL_INDEX MAX_CONTROLS_PER_GUI // Must be 0xFFFF or less.
-#endif
 #define NO_EVENT_INFO 0 // For backward compatibility with documented contents of A_EventInfo, this should be kept as 0 vs. something more special like UINT_MAX.
 
 #define MAX_TOOLTIPS 20
 #define MAX_TOOLTIPS_STR _T("20")   // Keep this in sync with above.
-#ifndef MINIDLL
 #define MAX_FILEDIALOGS 4
 #define MAX_FOLDERDIALOGS 4
-#endif
 
 #define MAX_NUMBER_LENGTH 255                   // Large enough to allow custom zero or space-padding via %10.2f, etc.
 #define MAX_NUMBER_SIZE (MAX_NUMBER_LENGTH + 1) // But not too large because some things might rely on this being fairly small.
 #define MAX_INTEGER_LENGTH 20                     // Max length of a 64-bit number when expressed as decimal or
 #define MAX_INTEGER_SIZE (MAX_INTEGER_LENGTH + 1) // hex string; e.g. -9223372036854775808 or (unsigned) 18446744073709551616 or (hex) -0xFFFFFFFFFFFFFFFF.
 
-#ifndef MINIDLL
 // Hot-strings:
 // memmove() and proper detection of long hotstrings rely on buf being at least this large:
 #define HS_BUF_SIZE (MAX_HOTSTRING_LENGTH * 2 + 10)
@@ -633,7 +617,6 @@ typedef UCHAR HookType;
 #define HOOK_KEYBD 0x01
 #define HOOK_MOUSE 0x02
 #define HOOK_FAIL  0xFF
-#endif
 
 #define EXTERN_G _thread_local extern global_struct *g
 #define EXTERN_OSVER extern OS_Version g_os
@@ -733,7 +716,6 @@ struct Action
 // TitleMatchModes:
 enum TitleMatchModes {MATCHMODE_INVALID = FAIL, FIND_IN_LEADING_PART = 1, FIND_ANYWHERE = 2, FIND_EXACT = 3, FIND_REGEX, FIND_FAST, FIND_SLOW};
 
-#ifndef MINIDLL
 typedef UINT GuiIndexType; // Some things rely on it being unsigned to avoid the need to check for less-than-zero.
 typedef UINT GuiEventType; // Made a UINT vs. enum so that illegal/underflow/overflow values are easier to detect.
 
@@ -746,19 +728,14 @@ enum GuiEventTypes {GUI_EVENT_NONE  // NONE must be zero for any uses of ZeroMem
 	, GUI_EVENT_DROPFILES = GUI_EVENT_FIRST_UNNAMED
 	, GUI_EVENT_CLOSE, GUI_EVENT_ESCAPE, GUI_EVENT_RESIZE, GUI_EVENT_CONTEXTMENU
 	, GUI_EVENT_DIGIT_0 = 48}; // Here just as a reminder that this value and higher are reserved so that a single printable character or digit (mnemonic) can be sent, and also so that ListView's "I" notification can add extra data into the high-byte (which lies just to the left of the "I" character in the bitfield).
-#endif
 typedef USHORT CoordModeType;
 
 // Bit-field offsets:
-#ifndef MINIDLL
 #define COORD_MODE_PIXEL   0
-#endif
 #define COORD_MODE_MOUSE   2
 #define COORD_MODE_TOOLTIP 4
 #define COORD_MODE_CARET   6
-#ifndef MINIDLL
 #define COORD_MODE_MENU    8
-#endif
 #define COORD_MODE_CLIENT  0
 #define COORD_MODE_WINDOW  1
 #define COORD_MODE_SCREEN  2
@@ -812,9 +789,7 @@ struct FuncAndToken {
 class Label;                //
 struct RegItemStruct;       //
 struct LoopReadFileStruct;  //
-#ifndef MINIDLL
 class GuiType;				//
-#endif
 struct global_struct
 {
 	// 8-byte items are listed first, which might improve alignment for 64-bit processors (dubious).
@@ -831,11 +806,8 @@ struct global_struct
 	int UninterruptedLineCount; // Stored as a g-struct attribute in case OnExit func interrupts it while uninterruptible.
 	int Priority;  // This thread's priority relative to others.
 	DWORD LastError; // The result of GetLastError() after the most recent DllCall or Run.
-#ifndef MINIDLL
 	GuiEventType GuiEvent; // This thread's triggering event, e.g. DblClk vs. normal click.
-#endif
 	EventInfoType EventInfo; // Not named "GuiEventInfo" because it applies to non-GUI events such as clipboard.
-#ifndef MINIDLL
 	POINT GuiPoint; // The position of GuiEvent. Stored as a thread vs. window attribute so that underlying threads see their original values when resumed.
 	GuiType *GuiWindow; // The GUI window that launched this thread.
 	GuiType *GuiDefaultWindow; // This thread's default GUI window, used except when specified "Gui, 2:Add, ..."
@@ -843,7 +815,6 @@ struct global_struct
 	GuiType *DialogOwner; // This thread's GUI owner, if any.
 	GuiIndexType GuiControlIndex; // The GUI control index that launched this thread.
 	#define THREAD_DIALOG_OWNER (GuiType::ValidGui(::g->DialogOwner) ? ::g->DialogOwner->mHwnd : NULL)
-#endif
 	int WinDelay;  // negative values may be used as special flags.
 	int ControlDelay; // negative values may be used as special flags.
 	int KeyDelay;     //
@@ -912,13 +883,9 @@ inline void global_clear_state(global_struct &g)
 	g.MsgBoxResult = 0;
 	g.IsPaused = false;
 	g.UninterruptedLineCount = 0;
-#ifndef MINIDLL
 	g.DialogOwner = NULL;
-#endif
 	g.CalledByIsDialogMessageOrDispatch = false; // CalledByIsDialogMessageOrDispatchMsg doesn't need to be cleared because it's value is only considered relevant when CalledByIsDialogMessageOrDispatch==true.
-#ifndef MINIDLL
 	g.GuiDefaultWindow = NULL;
-#endif
 	// Above line is done because allowing it to be permanently changed by the auto-exec section
 	// seems like it would cause more confusion that it's worth.  A change to the global default
 	// or even an override/always-use-this-window-number mode can be added if there is ever a
@@ -955,11 +922,8 @@ inline void global_init(global_struct &g)
 	g.ThreadIsCritical = false;
 	g.Priority = 0;
 	g.LastError = 0;
-#ifndef MINIDLL
 	g.GuiEvent = GUI_EVENT_NONE;
-#endif
 	g.EventInfo = NO_EVENT_INFO;
-#ifndef MINIDLL
 	g.GuiPoint.x = COORD_UNSPECIFIED;
 	g.GuiPoint.y = COORD_UNSPECIFIED;
 	// For these, indexes rather than pointers are stored because handles can become invalid during the
@@ -967,7 +931,6 @@ inline void global_init(global_struct &g)
 	g.GuiWindow = NULL;
 	g.GuiControlIndex = NO_CONTROL_INDEX; // Default to out-of-bounds.
 	g.GuiDefaultWindow = NULL;
-#endif
 	g.WinDelay = 100;
 	g.ControlDelay = 20;
 	g.KeyDelay = 10;

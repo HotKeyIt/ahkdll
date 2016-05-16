@@ -213,7 +213,6 @@ ResultType Line::ToolTip(LPTSTR aText, LPTSTR aX, LPTSTR aY, LPTSTR aID)
 }
 
 
-#ifndef MINIDLL
 ResultType Line::TrayTip(LPTSTR aTitle, LPTSTR aText, LPTSTR aTimeout, LPTSTR aOptions)
 {
 	if (!g_os.IsWin2000orLater()) // Older OSes do not support it, so do nothing.
@@ -230,11 +229,9 @@ ResultType Line::TrayTip(LPTSTR aTitle, LPTSTR aText, LPTSTR aTimeout, LPTSTR aO
 	Shell_NotifyIcon(NIM_MODIFY, &nic);
 	return OK; // i.e. never a critical error if it fails.
 }
-#endif
 
 
 
-#ifndef MINIDLL
 ResultType Line::Input()
 // OVERVIEW:
 // Although a script can have many concurrent quasi-threads, there can only be one input
@@ -715,7 +712,6 @@ ResultType Line::Input()
 		return OK;
 	}
 }
-#endif
 
 
 
@@ -3078,7 +3074,6 @@ BOOL CALLBACK EnumMonitorProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMoni
 
 
 
-#ifndef MINIDLL
 LPCOLORREF getbits(HBITMAP ahImage, HDC hdc, LONG &aWidth, LONG &aHeight, bool &aIs16Bit, int aMinColorDepth = 8)
 // Helper function used by PixelSearch below.
 // Returns an array of pixels to the caller, which it must free when done.  Returns NULL on failure,
@@ -3856,7 +3851,6 @@ error:
 /////////////////
 // Main Window //
 /////////////////
-#endif
 LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lParam)
 {
 	DWORD_PTR dwTemp;
@@ -3865,7 +3859,7 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 	// and beyond, since the feature was never properly implemented in Win95:
 	static UINT WM_TASKBARCREATED = RegisterWindowMessage(_T("TaskbarCreated"));
 
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 	if (iMsg == WM_ACTIVATEAPP) // && g_MainThreadID != g_ThreadID)
 		SleepEx(0, true); // used to exit thread
 #endif
@@ -3880,7 +3874,6 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 	TRANSLATE_AHK_MSG(iMsg, wParam)
 	switch (iMsg)
 	{
-#ifndef MINIDLL
 	case WM_COMMAND:
 		if (HandleMenuItem(hWnd, LOWORD(wParam), NULL)) // It was handled fully. NULL flags it as a non-GUI menu item such as a tray menu or popup menu.
 			return 0; // If an application processes this message, it should return zero.
@@ -3900,15 +3893,9 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 		case WM_LBUTTONDBLCLK:
 			if (g_script->mTrayMenu->mDefault)
 				POST_AHK_USER_MENU(hWnd, g_script->mTrayMenu->mDefault->mMenuID, NULL) // NULL flags it as a non-GUI menu item.
-#ifdef AUTOHOTKEYSC
-			else if (g_script->mTrayMenu->mIncludeStandardItems && g_AllowMainWindow)
-				ShowMainWindow();
-			// else do nothing.
-#else
 			else if (g_script->mTrayMenu->mIncludeStandardItems)
 				ShowMainWindow();
 			// else do nothing.
-#endif
 			return 0;
 		case WM_RBUTTONUP:
 			// v1.0.30.03:
@@ -3926,7 +3913,6 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 		} // Inner switch()
 		break;
 	} // case AHK_NOTIFYICON
-#endif
 	case AHK_DIALOG:  // User defined msg sent from our functions MsgBox() or FileSelect().
 	{
 		// Always call this to close the clipboard if it was open (e.g. due to a script
@@ -3973,7 +3959,6 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 		// else: if !top_box: no error reporting currently.
 		return 0;
 	}
-#ifndef MINIDLL
 	case AHK_USER_MENU:
 		// Search for AHK_USER_MENU in GuiWindowProc() for comments about why this is done:
 		PostMessage(hWnd, iMsg, wParam, lParam);
@@ -3983,7 +3968,6 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 	case WM_HOTKEY: // As a result of this app having previously called RegisterHotkey().
 	case AHK_HOOK_HOTKEY:  // Sent from this app's keyboard or mouse hook.
 	case AHK_HOTSTRING: // Added for v1.0.36.02 so that hotstrings work even while an InputBox or other non-standard msg pump is running.
-#endif
 	case AHK_CLIPBOARD_CHANGE: // Added for v1.0.44 so that clipboard notifications aren't lost while the script is displaying a MsgBox or other dialog.
 		// If the following facts are ever confirmed, there would be no need to post the message in cases where
 		// the MsgSleep() won't be done:
@@ -4059,9 +4043,7 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 		// that took a long time to run might keep us away from the "menu loop", which would result
 		// in the menu becoming temporarily unresponsive while the user is in it (and probably other
 		// undesired effects).
-#ifndef MINIDLL
 		if (!g_MenuIsVisible)
-#endif
 			MsgSleep(-1, RETURN_AFTER_MESSAGES_SPECIAL_FILTER);
 		return 0;
 
@@ -4182,7 +4164,6 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 		else if (g_script->mNextClipboardViewer)
 			SendMessageTimeout(g_script->mNextClipboardViewer, iMsg, wParam, lParam, SMTO_ABORTIFHUNG, 2000, &dwTemp);
 		return 0;
-#ifndef MINIDLL
 	case AHK_GETWINDOWTEXT:
 		// It's best to handle this msg here rather than in the main event loop in case a non-standard message
 		// pump is running (such as MsgBox's), in which case this msg would be dispatched directly here.
@@ -4196,15 +4177,12 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 		// such as when/if it yields our timeslice upon returning FALSE (uncertain/unlikely, but in any case
 		// it might do more harm than good).
 		return 0;
-#endif
-#ifndef MINIDLL
 	case AHK_HOT_IF_EXPR: // L4: HotCriterionAllowsFiring uses this to ensure expressions are evaluated only on the main thread.
 		// Ensure wParam is a valid criterion (might prevent shatter attacks):
 		for (HotkeyCriterion *cp = g_FirstHotExpr; cp; cp = cp->NextCriterion)
 			if ((WPARAM)cp == wParam)
 				return cp->ExprLine->EvaluateHotCriterionExpression((LPTSTR)lParam);
 		return 0;
-#endif
 	case AHK_EXECUTE:   // sent from dll host # Naveen N9 
 		 g_script->mTempLine = (Line *)wParam ;
 		 if (lParam == ONLY_ONE_LINE)
@@ -4226,7 +4204,6 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 	case AHK_EXECUTE_FUNCTION_DLL: 
 		callFuncDll((FuncAndToken *) wParam);
 		return 0;
-#ifndef MINIDLL
 	case WM_MEASUREITEM: // L17: Measure menu icon. Not used on Windows Vista or later.
 		if (hWnd == g_hWnd && wParam == 0 && !g_os.IsWinVistaOrLater())
 			if (UserMenu::OwnerMeasureItem((LPMEASUREITEMSTRUCT)lParam))
@@ -4247,7 +4224,6 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 	case WM_EXITMENULOOP:
 		g_MenuIsVisible = MENU_TYPE_NONE; // See comments in similar code in GuiWindowProc().
 		break;
-#endif
 #ifdef CONFIG_DEBUGGER
 	case AHK_CHECK_DEBUGGER:
 		// This message is sent when data arrives on the debugger's socket.  It allows the
@@ -4257,7 +4233,6 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 			g_Debugger.ProcessCommands();
 		break;
 #endif
-#ifndef MINIDLL
 	default:
 		// The following iMsg can't be in the switch() since it's not constant:
 		if (iMsg == WM_TASKBARCREATED && !g_NoTrayIcon) // !g_NoTrayIcon --> the tray icon should be always visible.
@@ -4267,7 +4242,6 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 			// And now pass this iMsg on to DefWindowProc() in case it does anything with it.
 		}
 		
-#endif
 #ifdef CONFIG_DEBUGGER
 		static UINT sAttachDebuggerMessage = RegisterWindowMessage(_T("AHK_ATTACH_DEBUGGER"));
 		if (iMsg == sAttachDebuggerMessage && !g_Debugger.IsConnected())
@@ -4298,7 +4272,6 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 }
 
 
-#ifndef MINIDLL
 void LaunchAutoHotkeyUtil(LPTSTR aFile)
 {
     TCHAR buf_temp[2048];
@@ -4439,24 +4412,6 @@ ResultType ShowMainWindow(MainWindowModes aMode, bool aRestricted)
 	bool jump_to_bottom = false;  // Set default behavior for edit control.
 	_thread_local static MainWindowModes current_mode = MAIN_MODE_NO_CHANGE;
 
-#ifdef AUTOHOTKEYSC
-	// If we were called from a restricted place, such as via the Tray Menu or the Main Menu,
-	// don't allow potentially sensitive info such as script lines and variables to be shown.
-	// This is done so that scripts can be compiled more securely, making it difficult for anyone
-	// to use ListLines to see the author's source code.  Rather than make exceptions for things
-	// like KeyHistory, it seems best to forbid all information reporting except in cases where
-	// existing info in the main window -- which must have gotten their via an allowed command
-	// such as ListLines encountered in the script -- is being refreshed.  This is because in
-	// that case, the script author has given de facto permission for that loophole (and it's
-	// a pretty small one, not easy to exploit):
-	if (aRestricted && !g_AllowMainWindow && (current_mode == MAIN_MODE_NO_CHANGE || aMode != MAIN_MODE_REFRESH))
-	{
-		SendMessage(g_hWndEdit, WM_SETTEXT, 0, (LPARAM)
-			_T("Script info will not be shown because the \"Menu, Tray, MainWindow\"\r\n")
-			_T("command option was not enabled in the original script."));
-		return OK;
-	}
-#endif
 
 	// If the window is empty, caller wants us to default it to showing the most recently
 	// executed script lines:
@@ -5029,7 +4984,6 @@ VOID CALLBACK InputBoxTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTi
 
 
 
-#endif
 VOID CALLBACK DerefTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime)
 {
 	Line::FreeDerefBufIfLarge(); // It will also kill the timer, if appropriate.
@@ -7475,8 +7429,6 @@ void SetWorkingDir(LPTSTR aNewDir, bool aSetErrorLevel)
 		g_ErrorLevel->Assign(ERRORLEVEL_NONE);
 }
 
-#ifndef MINIDLL
-
 ResultType Line::FileSelect(LPTSTR aOptions, LPTSTR aWorkingDir, LPTSTR aGreeting, LPTSTR aFilter)
 // Since other script threads can interrupt this command while it's running, it's important that
 // this command not refer to sArgDeref[] and sArgVar[] anytime after an interruption becomes possible.
@@ -7735,8 +7687,6 @@ ResultType Line::FileSelect(LPTSTR aOptions, LPTSTR aWorkingDir, LPTSTR aGreetin
 	}
 	return output_var.Assign(file_buf);
 }
-
-#endif
 
 
 ResultType Line::FileCreateDir(LPTSTR aDirSpec)
@@ -8300,61 +8250,10 @@ ResultType Line::FileDelete()
 }
 
 
-#ifndef MINIDLL
 ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 {
 	bool success;
 	bool allow_overwrite = (ATOI(aFlag) == 1);
-#ifdef AUTOHOTKEYSC
-	if (!allow_overwrite && Util_DoesFileExist(aDest))
-		return SetErrorLevelOrThrow();
-
-	// Open the file first since it's the most likely to fail:
-	HANDLE hfile = CreateFile(aDest, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
-	if (hfile == INVALID_HANDLE_VALUE)
-		return SetErrorLevelOrThrow();
-
-	// Create a temporary copy of aSource to ensure it is the correct case (upper-case).
-	// Ahk2Exe converts it to upper-case before adding the resource. My testing showed that
-	// using lower or mixed case in some instances prevented the resource from being found.
-	// Since file paths are case-insensitive, it certainly doesn't seem harmful to do this:
-	TCHAR source[MAX_PATH];
-	size_t source_length = _tcslen(aSource);
-	if (source_length >= _countof(source))
-		// Probably can't happen; for simplicity, truncate it.
-		source_length = _countof(source) - 1;
-	tmemcpy(source, aSource, source_length + 1);
-	_tcsupr(source);
-
-	// Find and load the resource.
-	HRSRC res;
-	HGLOBAL res_load;
-	LPVOID res_lock;
-	if ( (res = FindResource(NULL, source, RT_RCDATA))
-	  && (res_load = LoadResource(NULL, res))
-	  && (res_lock = LockResource(res_load))  )
-	{
-		DWORD num_bytes_written;
-		DWORD aSizeDeCompressed = NULL;
-		// Write the resource data to file.
-		if (*(unsigned int*)res_lock == 0x04034b50)
-		{
-			LPVOID aDataBuf;
-			aSizeDeCompressed = DecompressBuffer(res_lock, aDataBuf, SizeofResource(NULL, res));
-			if (aSizeDeCompressed)
-			{
-				success = WriteFile(hfile, aDataBuf, aSizeDeCompressed, &num_bytes_written, NULL);
-				VirtualFree(aDataBuf,0,MEM_RELEASE);
-			}
-		}
-		if (!aSizeDeCompressed)
-			success = WriteFile(hfile, res_lock, SizeofResource(NULL, res), &num_bytes_written, NULL);
-	}
-	else
-		success = false;
-	CloseHandle(hfile);
-
-#else // AUTOHOTKEYSC not defined:
 	if (g_hResource)
 	{
 		// Open the file first since it's the most likely to fail:
@@ -8413,11 +8312,8 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 		success = CopyFile(aSource, aDestPath, !allow_overwrite);
 		SetCurrentDirectory(g_WorkingDir); // Restore to proper value.
 	}
-#endif
-
 	return SetErrorLevelOrThrowBool(!success);
 }
-#endif
 
 
 
@@ -9015,7 +8911,6 @@ ResultType Line::SetToggleState(vk_type aVK, ToggleValueType &ForceLock, LPTSTR 
 		ForceLock = NEUTRAL;
 		ToggleKeyState(aVK, toggle);
 		break;
-#ifndef MINIDLL
 	case ALWAYS_ON:
 	case ALWAYS_OFF:
 		ForceLock = (toggle == ALWAYS_ON) ? TOGGLED_ON : TOGGLED_OFF; // Must do this first.
@@ -9025,7 +8920,6 @@ ResultType Line::SetToggleState(vk_type aVK, ToggleValueType &ForceLock, LPTSTR 
 		// that may introduce quite a bit of complexity):
 		Hotkey::InstallKeybdHook();
 		break;
-#endif
 	case NEUTRAL:
 		// Note: No attempt is made to detect whether the keybd hook should be deinstalled
 		// because it's no longer needed due to this change.  That would require some 
@@ -9523,7 +9417,6 @@ VarSizeType BIV_IsCritical(LPTSTR aBuf, LPTSTR aVarName) // v1.0.48: Lexikos: Ad
 	return 1; // Caller might rely on receiving actual length when aBuf!=NULL.
 }
 
-#ifndef MINIDLL
 VarSizeType BIV_IsSuspended(LPTSTR aBuf, LPTSTR aVarName)
 {
 	if (aBuf)
@@ -9534,17 +9427,8 @@ VarSizeType BIV_IsSuspended(LPTSTR aBuf, LPTSTR aVarName)
 	return 1;
 }
 
-#endif
 VarSizeType BIV_IsCompiled(LPTSTR aBuf, LPTSTR aVarName)
 {
-#ifdef AUTOHOTKEYSC
-	if (aBuf)
-	{
-		*aBuf++ = '1';
-		*aBuf = '\0';
-	}
-	return 1;
-#else
 	if (!g_hResource)
 	{
 		if (aBuf)
@@ -9557,7 +9441,6 @@ VarSizeType BIV_IsCompiled(LPTSTR aBuf, LPTSTR aVarName)
 		*aBuf = '\0';
 	}
 	return 1;
-#endif
 }
 
 
@@ -9747,21 +9630,6 @@ VarSizeType BIV_IsDll(LPTSTR aBuf, LPTSTR aVarName)
 }
 
 
-VarSizeType BIV_IsMini(LPTSTR aBuf, LPTSTR aVarName)
-{
-	if (aBuf)
-	{
-#ifdef MINIDLL
-		*aBuf++ = '1';
-#else
-		*aBuf++ = '0';
-#endif
-		*aBuf = '\0';
-	}
-	return 1;
-}
-
-
 VarSizeType BIV_PtrSize(LPTSTR aBuf, LPTSTR aVarName)
 {
 	if (aBuf)
@@ -9774,7 +9642,6 @@ VarSizeType BIV_PtrSize(LPTSTR aBuf, LPTSTR aVarName)
 }
 
 
-#ifndef MINIDLL
 VarSizeType BIV_ScreenDPI(LPTSTR aBuf, LPTSTR aVarName)
 {
 	if (aBuf)
@@ -9862,7 +9729,6 @@ VarSizeType BIV_PriorKey(LPTSTR aBuf, LPTSTR aVarName)
 	return (VarSizeType)_tcslen(aBuf);
 }
 
-#endif
 
 LPTSTR GetExitReasonString(ExitReasons aExitReason)
 {
@@ -9914,42 +9780,15 @@ VarSizeType BIV_AhkVersion(LPTSTR aBuf, LPTSTR aVarName)
 
 VarSizeType BIV_AhkPath(LPTSTR aBuf, LPTSTR aVarName) // v1.0.41.
 {
-#ifdef AUTOHOTKEYSC
-	if (aBuf)
-	{
-		size_t length;
-		if (length = GetAHKInstallDir(aBuf))
-			// Name "AutoHotkey.exe" is assumed for code size reduction and because it's not stored in the registry:
-			tcslcpy(aBuf + length, _T("\\AutoHotkey.exe"), MAX_PATH - length); // strlcpy() in case registry has a path that is too close to MAX_PATH to fit AutoHotkey.exe
-		//else leave it blank as documented.
-		return (VarSizeType)_tcslen(aBuf);
-	}
-	// Otherwise: Always return an estimate of MAX_PATH in case the registry entry changes between the
-	// first call and the second.  This is also relied upon by strlcpy() above, which zero-fills the tail
-	// of the destination up through the limit of its capacity (due to calling strncpy, which does this).
-	return MAX_PATH;
-#else
 	TCHAR buf[MAX_PATH];
 	VarSizeType length = (VarSizeType)GetModuleFileName(NULL, buf, MAX_PATH);
 	if (aBuf)
 		_tcscpy(aBuf, buf); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string). This is true for ReadRegString()'s API call and may be true for other API calls like this one.
 	return length;
-#endif
 }
 
 VarSizeType BIV_AhkDir(LPTSTR aBuf, LPTSTR aVarName) // v1.0.41.
 {
-#ifdef AUTOHOTKEYSC
-	if (aBuf)
-	{
-		GetAHKInstallDir(aBuf);
-		return (VarSizeType)_tcslen(aBuf);
-	}
-	// Otherwise: Always return an estimate of MAX_PATH in case the registry entry changes between the
-	// first call and the second.  This is also relied upon by strlcpy() above, which zero-fills the tail
-	// of the destination up through the limit of its capacity (due to calling strncpy, which does this).
-	return MAX_PATH;
-#else
 	TCHAR buf[MAX_PATH];
 	GetModuleFileName(NULL, buf, MAX_PATH);
 	VarSizeType length = (_tcsrchr(buf, L'\\') - buf);
@@ -9959,7 +9798,6 @@ VarSizeType BIV_AhkDir(LPTSTR aBuf, LPTSTR aVarName) // v1.0.41.
 		*(aBuf + length) = L'\0';
 	}
 	return length;
-#endif
 }
 
 VarSizeType BIV_DllPath(LPTSTR aBuf, LPTSTR aVarName) // HotKeyIt H1 path of loaded dll
@@ -10669,7 +10507,6 @@ VarSizeType BIV_ThisLabel(LPTSTR aBuf, LPTSTR aVarName)
 	return (VarSizeType)_tcslen(name);
 }
 
-#ifndef MINIDLL
 VarSizeType BIV_ThisMenuItem(LPTSTR aBuf, LPTSTR aVarName)
 {
 	if (aBuf)
@@ -10937,7 +10774,6 @@ VarSizeType BIV_DefaultGui(LPTSTR aBuf, LPTSTR aVarName)
 		_tcscpy(aBuf, return_string);
 	return (VarSizeType)_tcslen(return_string);
 }
-#endif
 
 
 VarSizeType BIV_EventInfo(LPTSTR aBuf, LPTSTR aVarName)
@@ -10996,15 +10832,11 @@ VarSizeType BIV_TimeIdlePhysical(LPTSTR aBuf, LPTSTR aVarName)
 // mutual dependency issues.
 {
 	// If neither hook is active, default this to the same as the regular idle time:
-#ifndef MINIDLL
 	if (!(g_KeybdHook || g_MouseHook))
 		return BIV_TimeIdle(aBuf, _T(""));
 	if (!aBuf)
 		return MAX_INTEGER_LENGTH; // IMPORTANT: Conservative estimate because tick might change between 1st & 2nd calls.
 	return (VarSizeType)_tcslen(ITOA64(GetTickCount() - g_TimeLastInputPhysical, aBuf)); // Switching keyboard layouts/languages sometimes sees to throw off the timestamps of the incoming events in the hook.
-#else
-	return BIV_TimeIdle(aBuf, _T(""));
-#endif
 }
 
 
@@ -15116,7 +14948,7 @@ BIF_DECL(BIF_Chr)
 	_f_return_p(cp, len);
 }
 
-#if !defined(AUTOHOTKEYSC) && !defined(_USRDLL)
+#ifndef _USRDLL
 BIF_DECL(BIF_NewThread)
 {
 	LPTSTR aScript = TokenToString(*aParam[0]);
@@ -17721,7 +17553,6 @@ BIF_DECL(BIF_RegisterCallback)
 
 #endif
 
-#ifndef MINIDLL
 BIF_DECL(BIF_MenuGet)
 {
 	if (_f_callee_id == FID_MenuGetHandle)
@@ -19186,7 +19017,6 @@ BIF_DECL(BIF_IL_Add)
 	}
 	_f_return_i(index);
 }
-#endif
 
 
 BIF_DECL(BIF_LoadPicture)
@@ -19776,16 +19606,13 @@ bool ScriptGetKeyState(vk_type aVK, KeyStateTypes aKeyStateType)
 	case KEYSTATE_PHYSICAL: // Physical state of key.
 		if (IsMouseVK(aVK)) // mouse button
 		{
-#ifndef MINIDLL
 			if (g_MouseHook) // mouse hook is installed, so use it's tracking of physical state.
 				return g_PhysicalKeyState[aVK] & STATE_DOWN;
 			else // Even for Win9x/NT, it seems slightly better to call this rather than IsKeyDown9xNT():
-#endif
 				return IsKeyDownAsync(aVK);
 		}
 		else // keyboard
 		{
-#ifndef MINIDLL
 			if (g_KeybdHook)
 			{
 				// Since the hook is installed, use its value rather than that from
@@ -19797,7 +19624,6 @@ bool ScriptGetKeyState(vk_type aVK, KeyStateTypes aKeyStateType)
 				return g_PhysicalKeyState[aVK] & STATE_DOWN;
 			}
 			else // Even for Win9x/NT, it seems slightly better to call this rather than IsKeyDown9xNT():
-#endif
 				return IsKeyDownAsync(aVK);
 		}
 	} // switch()

@@ -17,12 +17,8 @@ GNU General Public License for more details.
 #ifndef hook_h
 #define hook_h
 
-#ifndef MINIDLL
 #include "hotkey.h" // Use here and also by hook.cpp for ChangeHookState(), which reads from static Hotkey class vars.
 
-#else
-#include "script.h"
-#endif
 // WM_USER is the lowest number that can be a user-defined message.  Anything above that is also valid.
 // NOTE: Any msg about WM_USER will be kept buffered (unreplied-to) whenever the script is uninterruptible.
 // If this is a problem, try making the msg have an ID less than WM_USER via a technique such as that used
@@ -85,11 +81,9 @@ enum UserMessages {AHK_HOOK_HOTKEY = WM_USER, AHK_HOTSTRING, AHK_USER_MENU, AHK_
 // This is done because it's good way to pass the info, but also so that its value will be in sync with the
 // timestamp of the message (in case the message is stuck in the queue for a long time).  No pointer is
 // passed in this case since they might become invalid between the time the msg is posted vs. processed.
-#ifndef MINIDLL
 #define POST_AHK_USER_MENU(hwnd, menu, gui_hwnd) PostMessage(hwnd, AHK_USER_MENU, gui_hwnd, menu);
 #define POST_AHK_GUI_ACTION(hwnd, control_index, gui_event, event_info) PostMessage(hwnd, AHK_GUI_ACTION \
 	, (WPARAM)(((control_index) << 16) | (gui_event)), (LPARAM)(event_info)); // Caller must ensure that gui_event is less than 0xFFFF.
-#endif
 // POST_AHK_DIALOG:
 // Post a special msg that will attempt to force it to the foreground after it has been displayed,
 // since the dialog often will flash in the task bar instead of becoming foreground.
@@ -113,7 +107,6 @@ enum UserMessages {AHK_HOOK_HOTKEY = WM_USER, AHK_HOTSTRING, AHK_USER_MENU, AHK_
 // inefficient because have to look up the right prefix in a loop.  But most suffixes probably won't
 // have more than one ModifierVK/SC anyway, so the lookup will usually find a match on the first
 // iteration.
-#ifndef MINIDLL
 struct vk_hotkey
 {
 	vk_type vk;
@@ -176,12 +169,10 @@ struct key_type
 	item.no_suppress &= NO_SUPPRESS_STATES;\
 	item.sc_takes_precedence = false;\
 }
-#endif
 // Since index zero is a placeholder for the invalid virtual key or scan code, add one to each MAX value
 // to compute the number of elements actually needed to accommodate 0 up to and including VK_MAX or SC_MAX:
 #define VK_ARRAY_COUNT (VK_MAX + 1)
 #define SC_ARRAY_COUNT (SC_MAX + 1)
-#ifndef MINIDLL
 #define INPUT_BUFFER_SIZE 16384
 
 enum InputStatusType {INPUT_OFF, INPUT_IN_PROGRESS, INPUT_TIMED_OUT, INPUT_TERMINATED_BY_MATCH
@@ -274,10 +265,8 @@ bool IsDualStateNumpadKey(const vk_type aVK, const sc_type aSC);
 
 void ChangeHookState(Hotkey *aHK[], int aHK_count, HookType aWhichHook, HookType aWhichHookAlways);
 void AddRemoveHooks(HookType aHooksToBeActive, bool aChangeIsTemporary = false);
-#endif
 bool SystemHasAnotherKeybdHook();
 bool SystemHasAnotherMouseHook();
-#ifndef MINIDLL
 DWORD WINAPI HookThreadProc(LPVOID aUnused);
 
 void ResetHook(bool aAllModifiersUp = false, HookType aWhichHook = (HOOK_KEYBD | HOOK_MOUSE)
@@ -286,5 +275,4 @@ HookType GetActiveHooks();
 void FreeHookMem();
 void ResetKeyTypeState(key_type &key);
 void GetHookStatus(LPTSTR aBuf, int aBufSize);
-#endif // MINIDLL
 #endif

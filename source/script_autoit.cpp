@@ -175,7 +175,6 @@ VarSizeType BIV_IsAdmin(LPTSTR aBuf, LPTSTR aVarName)
 }
 
 
-#ifndef MINIDLL
 ResultType Line::PixelGetColor(int aX, int aY, LPTSTR aOptions)
 {
 	if (tcscasestr(aOptions, _T("Slow"))) // New mode for v1.0.43.10.  Takes precedence over Alt mode.
@@ -207,7 +206,7 @@ ResultType Line::PixelGetColor(int aX, int aY, LPTSTR aOptions)
 	g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
 	return output_var.Assign(buf);
 }
-#endif
+
 ResultType Line::MenuSelect(LPTSTR aTitle, LPTSTR aText, LPTSTR aMenu1, LPTSTR aMenu2
 	, LPTSTR aMenu3, LPTSTR aMenu4, LPTSTR aMenu5, LPTSTR aMenu6, LPTSTR aMenu7
 	, LPTSTR aExcludeTitle, LPTSTR aExcludeText)
@@ -1043,7 +1042,6 @@ ResultType Line::Download(LPTSTR aURL, LPTSTR aFilespec)
 }
 
 
-#ifndef MINIDLL
 int CALLBACK FileSelectFolderCallback(HWND hwnd, UINT uMsg, LPARAM lParam, LPARAM lpData)
 {
 	if (uMsg == BFFM_INITIALIZED) // Caller has ensured that lpData isn't NULL by having set a valid lParam value.
@@ -1172,7 +1170,7 @@ ResultType Line::DirSelect(LPTSTR aRootDir, LPTSTR aOptions, LPTSTR aGreeting)
 	g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
 	return output_var.Assign(Result);
 }
-#endif
+
 ResultType Line::FileGetShortcut(LPTSTR aShortcutFile) // Credited to Holger <Holger.Kotsch at GMX de>.
 {
 	Var *output_var_target = ARGVAR2; // These might be omitted in the parameter list, so it's okay if 
@@ -2010,10 +2008,8 @@ flags can be a combination of:
 BOOL Util_ShutdownHandler(HWND hwnd, DWORD lParam)
 {
 	// if the window is me, don't terminate!
-#ifndef MINIDLL
 	if (hwnd != g_hWnd)
 		Util_WinKill(hwnd);
-#endif
 	// Continue the enumeration.
 	return TRUE;
 

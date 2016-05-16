@@ -52,10 +52,8 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 	HANDLE DebugPort = NULL;
 	g_TlsDoExecute = true;
 	// Execute only if A_IsCompiled
-#ifndef AUTOHOTKEYSC
 	if (!FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), MAKEINTRESOURCE(RT_RCDATA)))
 		return;
-#endif
 
 #ifdef _M_IX86 // compiles for x86
 	BeingDebugged = (PBOOLEAN)__readfsdword(0x30) + 2;
@@ -130,13 +128,11 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	InitializeCriticalSection(&g_CriticalRegExCache); // v1.0.45.04: Must be done early so that it's unconditional, so that DeleteCriticalSection() in the script destructor can also be unconditional (deleting when never initialized can crash, at least on Win 9x).
 	InitializeCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
 
-#ifndef AUTOHOTKEYSC
 	InitializeCriticalSection(&g_CriticalDebugger);
 	g_ahkThreads[0][1] = (UINT_PTR)g_script;
 	g_ahkThreads[0][4] = (UINT_PTR)&g_startup;
 	g_ahkThreads[0][5] = (UINT_PTR)g_ThreadID;
 	g_ahkThreads[0][6] = (UINT_PTR)((PMYTEB)NtCurrentTeb())->ThreadLocalStoragePointer;
-#endif
 	// v1.1.22+: This is done unconditionally, on startup, so that any attempts to read a drive
 	// that has no media (and possibly other errors) won't cause the system to display an error
 	// dialog that the script can't suppress.  This is known to affect floppy drives and some
@@ -154,13 +150,11 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 
 	// Set defaults, to be overridden by command line args we receive:
 	bool restart_mode = false;
-#ifndef AUTOHOTKEYSC
 	#ifdef _DEBUG				// HotKeyIt, debugger will launch AutoHotkey.ahk as normal AutoHotkey.exe does
 		TCHAR *script_filespec = _T("Test\\Test.ahk");
 	#else
 		TCHAR *script_filespec = NULL; // Set default as "unspecified/omitted".
 	#endif
-#endif
 
 	// The problem of some command line parameters such as /r being "reserved" is a design flaw (one that
 	// can't be fixed without breaking existing scripts).  Fortunately, I think it affects only compiled
@@ -188,7 +182,6 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 			g_ForceLaunch = true;
 		else if (!_tcsicmp(param, _T("/ErrorStdOut")))
 			g_script->mErrorStdOut = true;
-#ifndef AUTOHOTKEYSC // i.e. the following switch is recognized only by AutoHotkey.exe (especially since recognizing new switches in compiled scripts can break them, unlike AutoHotkey.exe).
 		else if (!_tcsicmp(param, _T("/iLib"))) // v1.0.47: Build an include-file so that ahk2exe can include library functions called by the script.
 		{
 			++i; // Consume the next parameter too, because it's associated with this one.
@@ -208,7 +201,6 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 			// Default codepage for the script file, NOT the default for commands used by it.
 			g_DefaultScriptCodepage = ATOU(param + 3);
 		}
-#endif
 #ifdef CONFIG_DEBUGGER
 		// Allow a debug session to be initiated by command-line.
 		else if (!g_Debugger.IsConnected() && !_tcsnicmp(param, _T("/Debug"), 6) && (param[6] == '\0' || param[6] == '='))
@@ -240,13 +232,11 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 #endif
 		else // since this is not a recognized switch, the end of the [Switches] section has been reached (by design).
 		{
-#ifndef AUTOHOTKEYSC
 			if (!g_hResource) // Only apply if it is not a compiled AutoHotkey.exe
 			{
 				script_filespec = param;  // The first unrecognized switch must be the script filespec, by design.
 				++i; // Omit this from the "args" array.
 			}
-#endif
 			break; // No more switches allowed after this point.
 		}
 	}
@@ -267,11 +257,7 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	global_init(*g);  // Set defaults.
 
 // Set up the basics of the script:
-#ifdef AUTOHOTKEYSC
-	if (g_script->Init(*g, _T(""), restart_mode,0,false) != OK) 
-#else
 	if (g_script->Init(*g, script_filespec, restart_mode,0,false) != OK)  // Set up the basics of the script, using the above.
-#endif
 		return CRITICAL_ERROR;
 
 	// Set g_default now, reflecting any changes made to "g" above, in case AutoExecSection(), below,
@@ -300,18 +286,14 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	UINT load_result = g_script->LoadFromFile();
 	if (load_result == LOADING_FAILED) // Error during load (was already displayed by the function call).
 	{
-#ifndef AUTOHOTKEYSC
 		if (g_script->mIncludeLibraryFunctionsThenExit)
 			g_script->mIncludeLibraryFunctionsThenExit->Close(); // Flush its buffer to disk.
-#endif
 		return CRITICAL_ERROR;  // Should return this value because PostQuitMessage() also uses it.
 	}
 	if (!load_result) // LoadFromFile() relies upon us to do this check.  No script was loaded or we're in /iLib mode, so nothing more to do.
 		return 0;
-#ifndef AUTOHOTKEYSC
 	g_ahkThreads[0][2] = (UINT_PTR)Line::sSourceFile;
 	g_ahkThreads[0][3] = (UINT_PTR)Line::sSourceFileCount;
-#endif
 	HWND w_existing = NULL;
 	UserMessages reason_to_close_prior = (UserMessages)0;
 	if (g_AllowOnlyOneInstance && !restart_mode && !g_ForceLaunch)
@@ -376,11 +358,8 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	if (g_script->CreateWindows() != OK)
 		return CRITICAL_ERROR;
 
-#ifndef AUTOHOTKEYSC
 	// store main thread window as first item
 	g_ahkThreads[0][0] = (UINT_PTR)g_hWnd;
-
-#endif
 
 	// At this point, it is nearly certain that the script will be executed.
 
@@ -457,7 +436,6 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	return 0; // Never executed; avoids compiler warning.
 }
 
-#ifndef AUTOHOTKEYSC
 unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 {
 	g = &g_startup;
@@ -742,5 +720,4 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 	}
 	return 0; // Never executed; avoids compiler warning.
 }
-#endif // AUTOHOTKEYSC
 #endif // _USRDLL
