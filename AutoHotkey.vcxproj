@@ -165,7 +165,12 @@
     <ClCompile Include="source\clipboard.cpp" />
     <ClCompile Include="source\Debugger.cpp" />
     <ClCompile Include="source\dllmain.cpp" />
-    <ClCompile Include="source\exports.cpp" />
+    <ClCompile Include="source\exports.cpp">
+      <Optimization Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Disabled</Optimization>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
+      <Optimization Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Disabled</Optimization>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="source\globaldata.cpp" />
     <ClCompile Include="source\hook.cpp" />
     <ClCompile Include="source\hotkey.cpp" />
@@ -467,7 +472,7 @@
       <ModuleDefinitionFile Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">.\comserver.def</ModuleDefinitionFile>
       <IgnoreAllDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
       </IgnoreAllDefaultLibraries>
-      <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</GenerateDebugInformation>
+      <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</GenerateDebugInformation>
       <RandomizedBaseAddress Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</RandomizedBaseAddress>
       <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</DataExecutionPrevention>
       <MinimumRequiredVersion Condition="'$(Configuration)|$(Platform)'=='Release|x64'">5.02</MinimumRequiredVersion>
