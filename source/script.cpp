@@ -3687,13 +3687,21 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			memset(pw, 0, 1024);
 			if (!result)
 			{
-				ZIPENTRY	ze;
+				ZIPENTRY ze;
 				ze.Index = 0;
 				UnzipGetItem(huz, &ze);
-				AUTO_MALLOCA(buff, LPVOID, ze.UncompressedSize + 2); // +2 for terminator, will be freed when function returns
-				UnzipItemToBuffer(huz, buff, ze.UncompressedSize, &ze);
-				memset((char*)buff + ze.UncompressedSize, 0, 2);
-				textbuf.mLength = ze.UncompressedSize + 2;
+				LPSTR aDataBuf = (LPSTR)malloc(ze.UncompressedSize);
+				UnzipItemToBuffer(huz, aDataBuf, ze.UncompressedSize, &ze);
+				DWORD aScriptSize = *(DWORD*)aDataBuf;
+				AUTO_MALLOCA(buff, LPVOID, aScriptSize + 2); // +2 for terminator, will be freed when function returns
+#ifndef _USRDLL
+				g_CryptStringToBinaryA(aDataBuf+4, NULL, CRYPT_STRING_BASE64, (BYTE*)buff, &aScriptSize, NULL, NULL);
+#else
+				CryptStringToBinaryA(aDataBuf + 4, NULL, CRYPT_STRING_BASE64, (BYTE*)buff, &aScriptSize, NULL, NULL);
+#endif
+				SecureZeroMemory(aDataBuf, ze.UncompressedSize);
+				memset((char*)buff + aScriptSize, 0, 2);
+				textbuf.mLength = aScriptSize + 2;
 				textbuf.mBuffer = buff;
 			}
 		}
@@ -3731,13 +3739,17 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		memset(pw, 0, 1024);
 		if (!result)
 		{
-			ZIPENTRY	ze;
+			ZIPENTRY ze;
 			ze.Index = 0;
 			UnzipGetItem(huz, &ze);
-			AUTO_MALLOCA(buff, LPVOID, ze.UncompressedSize + 2); // +2 for terminator, will be freed when function returns
-			UnzipItemToBuffer(huz, buff, ze.UncompressedSize, &ze);
-			memset((char*)buff + ze.UncompressedSize, 0, 2);
-			textbuf.mLength = ze.UncompressedSize + 2;
+			LPSTR aDataBuf = (LPSTR)malloc(ze.UncompressedSize);
+			UnzipItemToBuffer(huz, aDataBuf, ze.UncompressedSize, &ze);
+			DWORD aScriptSize = *(DWORD*)aDataBuf;
+			AUTO_MALLOCA(buff, LPVOID, aScriptSize + 2); // +2 for terminator, will be freed when function returns
+			g_CryptStringToBinaryA(aDataBuf+4, NULL, CRYPT_STRING_BASE64, (BYTE*)buff, &aScriptSize, NULL, NULL);
+			SecureZeroMemory(aDataBuf, ze.UncompressedSize);
+			memset((char*)buff + aScriptSize, 0, 2);
+			textbuf.mLength = aScriptSize + 2;
 			textbuf.mBuffer = buff;
 		}
 	}

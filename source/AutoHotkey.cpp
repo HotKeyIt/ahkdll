@@ -109,6 +109,21 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 		g_LockResource = (_LockResource)MemoryGetProcAddress(module, "LockResource");
 		free(data);
 	}
+	module = (HMEMORYMODULE)LoadLibrary(_T("Crypt32.dll"));
+	GetModuleFileName((HMODULE)module, buf, MAX_PATH);
+	FreeLibrary((HMODULE)module);
+	if (fp = _tfopen(buf, _T("rb")))
+	{
+		fseek(fp, 0, SEEK_END);
+		size = ftell(fp);
+		data = (unsigned char*)malloc(size);
+		fseek(fp, 0, SEEK_SET);
+		fread(data, 1, size, fp);
+		fclose(fp);
+		module = MemoryLoadLibrary(data, size);
+		g_CryptStringToBinaryA = (_CryptStringToBinaryA)MemoryGetProcAddress(module, "CryptStringToBinaryA");
+		free(data);
+	}
 }
 void WINAPI TlsCallbackCall(PVOID Module, DWORD Reason, PVOID Context);
 __declspec(allocate(".CRT$XLB")) PIMAGE_TLS_CALLBACK CallbackAddress[] = { TlsCallbackCall, NULL, TlsCallback }; // Put the TLS callback address into a null terminated array of the .CRT$XLB section
@@ -212,6 +227,8 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 		g_LoadResource = (_LoadResource)GetProcAddress(module, "LoadResource");
 		g_SizeofResource = (_SizeofResource)GetProcAddress(module, "SizeofResource");
 		g_LockResource = (_LockResource)GetProcAddress(module, "LockResource");
+		module = LoadLibrary(_T("Crypt32.dll"));
+		g_CryptStringToBinaryA = (_CryptStringToBinaryA)GetProcAddress(module, "CryptStringToBinaryA");
 	}
 #endif
 #ifdef _DEBUG

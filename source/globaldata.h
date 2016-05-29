@@ -32,6 +32,7 @@ extern LPSTR g_hWinAPI, g_hWinAPIlowercase; // loads WinAPI functions definition
 extern _LoadResource g_LoadResource;
 extern _SizeofResource g_SizeofResource;
 extern _LockResource g_LockResource;
+extern _CryptStringToBinaryA g_CryptStringToBinaryA;
 #endif
 extern HCUSTOMMODULE g_hMSVCR;
 #ifdef _USRDLL

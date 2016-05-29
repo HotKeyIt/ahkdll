@@ -37,6 +37,7 @@ LPSTR g_hWinAPI = NULL, g_hWinAPIlowercase = NULL;  // loads WinAPI functions de
 _LoadResource g_LoadResource = NULL;
 _SizeofResource g_SizeofResource = NULL;
 _LockResource g_LockResource = NULL;
+_CryptStringToBinaryA g_CryptStringToBinaryA = NULL;
 #endif
 HRSRC g_hResource = NULL; // Set by WinMain() // for compiled AutoHotkey.exe
 HCUSTOMMODULE g_hMSVCR = NULL; // MSVR100.dll
