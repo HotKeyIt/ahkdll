@@ -33,6 +33,7 @@ EXPORT extern HCUSTOMMODULE g_hMSVCR;
 extern _LoadResource g_LoadResource;
 extern _SizeofResource g_SizeofResource;
 extern _LockResource g_LockResource;
+extern _CryptStringToBinaryA g_CryptStringToBinaryA;
 #endif
 #ifdef _USRDLL
 _thread_local extern bool g_Reloading;

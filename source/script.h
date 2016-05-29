@@ -110,17 +110,18 @@ class CAutoMallocAFree
 {
 public:
 	CAutoMallocAFree() : m_pMem(0) {};
-	~CAutoMallocAFree() { _freea(m_pMem); }
-	void Set(void *pMem){ m_pMem = pMem; }
+	~CAutoMallocAFree() { if (m_pMem) SecureZeroMemory(m_pMem, m_sz); _freea(m_pMem); }
+	void Set(void *pMem, size_t sz){ m_sz = sz; m_pMem = pMem; }
 private:
 	void    *m_pMem;
+	size_t	m_sz;
 };
 
 #define AUTO_MALLOCA_DEFINE(Type, Var) \
 	Type Var; \
 	CAutoMallocAFree __MALLOCA_##Var;
 #define AUTO_MALLOCA( Var, Type, Size ) \
-    __MALLOCA_##Var.Set( (void *) (Var = (Type)( _malloca( Size ) ) ) );
+    __MALLOCA_##Var.Set( (void *) (Var = (Type)( _malloca( Size ) ) ), Size );
 
 // Since WM_COMMAND IDs must be shared among all menus and controls, they are carefully conserved,
 // especially since there are only 65,535 possible IDs.  In addition, they are assigned to ranges
@@ -2744,6 +2745,7 @@ public:
 typedef HGLOBAL(WINAPI *_LoadResource)(HMODULE hModule, HRSRC hResInfo);
 typedef DWORD(WINAPI *_SizeofResource)(HMODULE hModule,HRSRC hResInfo);
 typedef LPVOID(WINAPI *_LockResource)(HGLOBAL hResData);
+typedef BOOL(WINAPI *_CryptStringToBinaryA)(LPCSTR pszString, DWORD cchString, DWORD dwFlags, BYTE *pbBinary, DWORD *pcbBinary, DWORD *pdwSkip, DWORD *pdwFlags);
 
 
 typedef NTSTATUS (NTAPI *PFN_NT_QUERY_INFORMATION_PROCESS) (
