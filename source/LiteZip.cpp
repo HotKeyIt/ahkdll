@@ -2982,7 +2982,7 @@ DWORD readEntry(register TUNZIP *tunzip, void *buf, DWORD len)
 				char	bufcrc;
 
 				bufcrc = tunzip->EntryReadVars.stream.next_in[uDoEncHead - 1];
-				tunzip->EntryReadVars.RemainingUncompressed -= uDoEncHead;
+				// tunzip->EntryReadVars.RemainingUncompressed -= uDoEncHead;
 				tunzip->EntryReadVars.stream.avail_in -= uDoEncHead;
 				tunzip->EntryReadVars.stream.next_in += uDoEncHead;
 				tunzip->EntryReadVars.RemainingEncrypt -= uDoEncHead;

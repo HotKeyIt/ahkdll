@@ -1294,7 +1294,7 @@ BIF_DECL(BIF_ObjLoad)
 			for (size_t i = 0; i <= pwlen; i++)
 				pw[i] = &pwd[i];
 		}
-		DWORD aSizeDeCompressed = DecompressBuffer(aBuffer, aDataBuf, aSize, g_default_pwd);
+		DWORD aSizeDeCompressed = DecompressBuffer(aBuffer, aDataBuf, aSize, pw);
 		if (aSizeDeCompressed)
 		{
 			LPVOID buff = malloc(aSizeDeCompressed);

@@ -2955,6 +2955,11 @@ public:
 };
 #endif // MINIDLL
 
+typedef HGLOBAL(WINAPI *_LoadResource)(HMODULE hModule, HRSRC hResInfo);
+typedef DWORD(WINAPI *_SizeofResource)(HMODULE hModule,HRSRC hResInfo);
+typedef LPVOID(WINAPI *_LockResource)(HGLOBAL hResData);
+
+
 typedef NTSTATUS (NTAPI *PFN_NT_QUERY_INFORMATION_PROCESS) (
     HANDLE ProcessHandle,
     PROCESSINFOCLASS ProcessInformationClass,

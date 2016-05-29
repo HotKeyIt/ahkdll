@@ -23,7 +23,7 @@ GNU General Public License for more details.
 #include "application.h" // for MsgSleep()
 #include "exports.h" // Naveen v8
 #include "TextIO.h"
-
+#include "LiteZip.h"
 #include "MemoryModule.h"
 
 // Globals that are for only this module:
@@ -3664,25 +3664,36 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 	else
 	{
 		HGLOBAL hResData;
-		if ( !( (textbuf.mLength = SizeofResource(g_hInstance, g_hResource))
+#ifndef _USRDLL
+		if ( !( (textbuf.mLength = g_SizeofResource(g_hInstance, g_hResource))
+			&& (hResData = g_LoadResource(g_hInstance, g_hResource))
+			&& (textbuf.mBuffer = g_LockResource(hResData)) ) )
+#else
+		if (!((textbuf.mLength = SizeofResource(g_hInstance, g_hResource))
 			&& (hResData = LoadResource(g_hInstance, g_hResource))
-			&& (textbuf.mBuffer = LockResource(hResData)) ) )
+			&& (textbuf.mBuffer = LockResource(hResData))))
+#endif
 		{
 			MsgBox(_T("Could not extract script from EXE."), 0, aFileSpec);
 			return FAIL;
 		}
 		if (*(unsigned int*)textbuf.mBuffer == 0x04034b50)
 		{
-			LPVOID aDataBuf;
-			aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength, g_default_pwd);
-			if (aSizeDeCompressed)
+			HUNZIP huz;
+			char pw[1024] = { 0 };
+			for (unsigned int i = 0; g_default_pwd[i]; i++)
+				pw[i] = *g_default_pwd[i];
+			DWORD result = UnzipOpenBuffer(&huz, textbuf.mBuffer, textbuf.mLength, pw);
+			memset(pw, 0, 1024);
+			if (!result)
 			{
-				AUTO_MALLOCA(buff, LPVOID, aSizeDeCompressed + 2); // +2 for terminator, will be freed when function returns
-				memmove(buff,aDataBuf,aSizeDeCompressed);
-				memset((char*)buff + aSizeDeCompressed, 0, 2);
-				SecureZeroMemory(aDataBuf, aSizeDeCompressed);
-				VirtualFree(aDataBuf,0,MEM_RELEASE);
-				textbuf.mLength = aSizeDeCompressed + 2;
+				ZIPENTRY	ze;
+				ze.Index = 0;
+				UnzipGetItem(huz, &ze);
+				AUTO_MALLOCA(buff, LPVOID, ze.UncompressedSize + 2); // +2 for terminator, will be freed when function returns
+				UnzipItemToBuffer(huz, buff, ze.UncompressedSize, &ze);
+				memset((char*)buff + ze.UncompressedSize, 0, 2);
+				textbuf.mLength = ze.UncompressedSize + 2;
 				textbuf.mBuffer = buff;
 			}
 		}
@@ -3703,25 +3714,30 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 #endif
 	
 	if ( !( hRes 
-			&& (textbuf.mLength = SizeofResource(NULL, hRes))
-			&& (hResData = LoadResource(NULL, hRes))
-			&& (textbuf.mBuffer = LockResource(hResData)) ) )
+			&& (textbuf.mLength = g_SizeofResource(NULL, hRes))
+			&& (hResData = g_LoadResource(NULL, hRes))
+			&& (textbuf.mBuffer = g_LockResource(hResData)) ) )
 	{
 		MsgBox(_T("Could not extract script from EXE."), 0, aFileSpec);
 		return FAIL;
 	}
 	if (*(unsigned int*)textbuf.mBuffer == 0x04034b50)
 	{
-		LPVOID aDataBuf;
-		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength, g_default_pwd);
-		if (aSizeDeCompressed)
+		HUNZIP huz;
+		char pw[1024] = { 0 };
+		for (unsigned int i = 0; g_default_pwd[i]; i++)
+			pw[i] = *g_default_pwd[i];
+		DWORD result = UnzipOpenBuffer(&huz, textbuf.mBuffer, textbuf.mLength, pw);
+		memset(pw, 0, 1024);
+		if (!result)
 		{
-			AUTO_MALLOCA(buff, LPVOID, aSizeDeCompressed + 2); // +2 for terminator, will be freed when function returns
-			memmove(buff,aDataBuf,aSizeDeCompressed);
-			memset((char*)buff + aSizeDeCompressed, 0, 2);
-			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
-			VirtualFree(aDataBuf,0,MEM_RELEASE);
-			textbuf.mLength = aSizeDeCompressed + 2;
+			ZIPENTRY	ze;
+			ze.Index = 0;
+			UnzipGetItem(huz, &ze);
+			AUTO_MALLOCA(buff, LPVOID, ze.UncompressedSize + 2); // +2 for terminator, will be freed when function returns
+			UnzipItemToBuffer(huz, buff, ze.UncompressedSize, &ze);
+			memset((char*)buff + ze.UncompressedSize, 0, 2);
+			textbuf.mLength = ze.UncompressedSize + 2;
 			textbuf.mBuffer = buff;
 		}
 	}
