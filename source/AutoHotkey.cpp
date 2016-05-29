@@ -51,7 +51,10 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 	size_t size;
 	HANDLE DebugPort = NULL;
 	g_TlsDoExecute = true;
+	HMEMORYMODULE module;
+	unsigned char* data;
 	// Execute only if A_IsCompiled
+#ifndef _DEBUG
 	if (!FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), MAKEINTRESOURCE(RT_RCDATA)))
 		return;
 
@@ -62,31 +65,49 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 #endif
 	if (*BeingDebugged) // Read the PEB
 		TerminateProcess(NtCurrentProcess(), 0);
-	HMEMORYMODULE ntdll = (HMEMORYMODULE)LoadLibrary(_T("ntdll.dll"));
-	GetModuleFileName((HMODULE)ntdll, buf, MAX_PATH);
-	FreeLibrary((HMODULE)ntdll);
+	module = (HMEMORYMODULE)LoadLibrary(_T("ntdll.dll"));
+	GetModuleFileName((HMODULE)module, buf, MAX_PATH);
+	FreeLibrary((HMODULE)module);
 	
 	fp = _tfopen(buf, _T("rb"));
 	if (fp == NULL)
 		return;
 	fseek(fp, 0, SEEK_END);
 	size = ftell(fp);
-	unsigned char* data = (unsigned char*)malloc(size);
+	data = (unsigned char*)malloc(size);
 	fseek(fp, 0, SEEK_SET);
 	fread(data, 1, size, fp);
 	fclose(fp);
-	ntdll = MemoryLoadLibrary(data, size);
-	MyNtQueryInformationProcess _NtQueryInformationProcess = (MyNtQueryInformationProcess)MemoryGetProcAddress(ntdll, "NtQueryInformationProcess");
+	module = MemoryLoadLibrary(data, size);
+	MyNtQueryInformationProcess _NtQueryInformationProcess = (MyNtQueryInformationProcess)MemoryGetProcAddress(module, "NtQueryInformationProcess");
 	if (!_NtQueryInformationProcess(NtCurrentProcess(), 7, &DebugPort, sizeof(HANDLE), NULL) && DebugPort)
 	{
-		MemoryFreeLibrary(ntdll);
+		MemoryFreeLibrary(module);
 		free(data);
 		TerminateProcess(NtCurrentProcess(), 0);
 	}
-	MyNtSetInformationThread _NtSetInformationThread = (MyNtSetInformationThread)MemoryGetProcAddress(ntdll, "NtSetInformationThread");
+	MyNtSetInformationThread _NtSetInformationThread = (MyNtSetInformationThread)MemoryGetProcAddress(module, "NtSetInformationThread");
 	_NtSetInformationThread(GetCurrentThread(), 0x11, 0, 0);
-	MemoryFreeLibrary(ntdll);
+	MemoryFreeLibrary(module);
 	free(data);
+#endif
+	module = (HMEMORYMODULE)LoadLibrary(_T("kernel32.dll"));
+	GetModuleFileName((HMODULE)module, buf, MAX_PATH);
+	FreeLibrary((HMODULE)module);
+	if (fp = _tfopen(buf, _T("rb")))
+	{
+		fseek(fp, 0, SEEK_END);
+		size = ftell(fp);
+		data = (unsigned char*)malloc(size);
+		fseek(fp, 0, SEEK_SET);
+		fread(data, 1, size, fp);
+		fclose(fp);
+		module = MemoryLoadLibrary(data, size);
+		g_LoadResource = (_LoadResource)MemoryGetProcAddress(module, "LoadResource");
+		g_SizeofResource = (_SizeofResource)MemoryGetProcAddress(module, "SizeofResource");
+		g_LockResource = (_LockResource)MemoryGetProcAddress(module, "LockResource");
+		free(data);
+	}
 }
 void WINAPI TlsCallbackCall(PVOID Module, DWORD Reason, PVOID Context);
 __declspec(allocate(".CRT$XLB")) PIMAGE_TLS_CALLBACK CallbackAddress[] = { TlsCallbackCall, NULL, TlsCallback }; // Put the TLS callback address into a null terminated array of the .CRT$XLB section
@@ -113,9 +134,19 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 {
 	// Init any globals not in "struct g" that need it:
 #ifdef _DEBUG
+	if (!g_LoadResource)
+	{
+		HMODULE module = LoadLibrary(_T("kernel32.dll"));
+		g_LoadResource = (_LoadResource)GetProcAddress(module, "LoadResource");
+		g_SizeofResource = (_SizeofResource)GetProcAddress(module, "SizeofResource");
+		g_LockResource = (_LockResource)GetProcAddress(module, "LockResource");
+	}
+#endif
+#ifdef _DEBUG
 	g_hResource = FindResource(NULL, _T("AHK"), MAKEINTRESOURCE(RT_RCDATA));
 #else
-	g_hResource = FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), MAKEINTRESOURCE(RT_RCDATA));
+	if (g_LoadResource)
+		g_hResource = FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), MAKEINTRESOURCE(RT_RCDATA));
 #endif
 	g_hInstance = hInstance;
 	g_HistoryTickPrev = GetTickCount();

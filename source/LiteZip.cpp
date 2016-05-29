@@ -20,7 +20,7 @@ typedef unsigned long	ULG;
 typedef unsigned long	lutime_t;	// define it ourselves since we don't include time.h
 
 #define UNZIP_MEMORY		0x01
-#define UNZIP_FILENAME	0x02
+#define UNZIP_FILENAME		0x02
 #define UNZIP_HANDLE		0x04
 #define UNZIP_RAW			0x08
 #define UNZIP_ALREADYINIT	0x40000000
@@ -629,26 +629,26 @@ static const uInt CpDExt[30] = { // Extra bits for distance codes
 // Error messages
 static const char UnknownErr[] = "Unknown zip result code";
 static const char ErrorMsgs[] = "Success\0\
-																Can't create/open file\0\
-																								Failed to allocate memory\0\
-																																Error writing to file\0\
-																																								Entry not found in the zip archive\0\
-																																																Still more data to unzip\0\
-																																																								Zip archive is corrupt or not a zip archive\0\
-																																																																Error reading file\0\
-																																																																								The entry is in a format that can't be decompressed by this Unzip add-on\0\
-																																																																																Faulty arguments\0\
-																																																																																								Can get memory only of a memory-mapped zip\0\
-																																																																																																Not enough space allocated for memory zip\0\
-																																																																																																								There was a previous error\0\
-																																																																																																																Additions to the zip have already been ended\0\
-																																																																																																																								The anticipated size turned out wrong\0\
-																																																																																																																																Mixing creation and opening of zip\0\
-																																																																																																																																								Trying to seek the unseekable\0\
-																																																																																																																																																Tried to change mind, but not allowed\0\
-																																																																																																																																																								An internal error during flation\0\
-																																																																																																																																																																Password is incorrect\0\
-																																																																																																																																																																								Aborted\0";
+								Can't create/open file\0\
+								Failed to allocate memory\0\
+								Error writing to file\0\
+								Entry not found in the zip archive\0\
+								Still more data to unzip\0\
+								Zip archive is corrupt or not a zip archive\0\
+								Error reading file\0\
+								The entry is in a format that can't be decompressed by this Unzip add-on\0\
+								Faulty arguments\0\
+								Can get memory only of a memory-mapped zip\0\
+								Not enough space allocated for memory zip\0\
+								There was a previous error\0\
+								Additions to the zip have already been ended\0\
+								The anticipated size turned out wrong\0\
+								Mixing creation and opening of zip\0\
+								Trying to seek the unseekable\0\
+								Tried to change mind, but not allowed\0\
+								An internal error during flation\0\
+								Password is incorrect\0\
+								Aborted\0";
 
 #pragma data_seg()
 
@@ -2982,7 +2982,7 @@ DWORD readEntry(register TUNZIP *tunzip, void *buf, DWORD len)
 				char	bufcrc;
 
 				bufcrc = tunzip->EntryReadVars.stream.next_in[uDoEncHead - 1];
-				tunzip->EntryReadVars.RemainingUncompressed -= uDoEncHead;
+				// tunzip->EntryReadVars.RemainingUncompressed -= uDoEncHead;
 				tunzip->EntryReadVars.stream.avail_in -= uDoEncHead;
 				tunzip->EntryReadVars.stream.next_in += uDoEncHead;
 				tunzip->EntryReadVars.RemainingEncrypt -= uDoEncHead;
@@ -4887,13 +4887,13 @@ static const ULG CrcTable[256] = {
 };
 
 static const char ZipSuffixes[] = { ".z\0\
-																											.zip\0\
-																																																						.zoo\0\
-																																																																																										.arc\0\
-																																																																																																																																							.lzh\0\
-																																																																																																																																																																																													.arj\0\
-																																																																																																																																																																																																																																																												.gz\0\
-																																																																																																																																																																																																																																																																																																																																				.tgz\0" };
+																		.zip\0\
+																											.zoo\0\
+																																				.arc\0\
+																																													.lzh\0\
+																																																						.arj\0\
+																																																															.gz\0\
+																																																																								.tgz\0" };
 
 // The lengths of the bit length codes are sent in order of decreasing
 // probability, to avoid transmitting the lengths for unused bit length codes.

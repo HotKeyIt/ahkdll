@@ -637,6 +637,7 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data, size_t size,
     if (size && !CheckSize(size, sizeof(IMAGE_DOS_HEADER))) {
         return NULL;
     }
+
     dos_header = (PIMAGE_DOS_HEADER)data;
     if (dos_header->e_magic != IMAGE_DOS_SIGNATURE) {
         SetLastError(ERROR_BAD_EXE_FORMAT);
@@ -682,10 +683,10 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data, size_t size,
             lastSectionEnd = endOfSection;
         }
     }
-
+	
     GetNativeSystemInfo(&sysInfo);
     alignedImageSize = ALIGN_VALUE_UP(old_header->OptionalHeader.SizeOfImage, sysInfo.dwPageSize);
-    if (alignedImageSize != ALIGN_VALUE_UP(lastSectionEnd, sysInfo.dwPageSize)) {
+    if (alignedImageSize < ALIGN_VALUE_UP(lastSectionEnd, sysInfo.dwPageSize)) {
         SetLastError(ERROR_BAD_EXE_FORMAT);
         return NULL;
     }

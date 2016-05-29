@@ -16477,7 +16477,14 @@ BIF_DECL(BIF_UnZipBuffer)
 	DWORD aErrCode;
 	HZIP huz;
 	TCHAR	aMsg[100];
-	CStringA aPassword = aParamCount > 4 ? CStringCharFromTChar(TokenToString(*aParam[4])) : NULL;
+	char aPassword[1024] = { 0 };
+	if (aParamCount > 4)
+#ifndef _UNICODE
+		_tcscpy(aPassword, TokenToString(*aParam[4]));
+#else
+		WideCharToMultiByte(CP_ACP, 0, TokenToString(*aParam[4]), -1, aPassword, 1024, 0, 0);
+#endif
+	//CStringA aPassword = aParamCount > 4 ? CStringCharFromTChar(TokenToString(*aParam[4])) : NULL;
 	if (TokenIsNumeric(*aParam[0]))
 	{
 		if (!TokenIsNumeric(*aParam[1]))
@@ -16552,13 +16559,13 @@ BIF_DECL(BIF_UnZipBuffer)
 				aResultToken.symbol = SYM_INTEGER;
 				return;
 			}
-			aBuffer = (unsigned char *)malloc(ze.UncompressedSize);
+			aBuffer = (unsigned char *)GlobalAlloc(GMEM_FIXED, ze.UncompressedSize);
 			if (aErrCode = UnzipItemToBuffer(huz, aBuffer, ze.UncompressedSize, &ze))
 				goto errorclose;
 			aParam[2]->var->SetCapacity((VarSizeType)aResultToken.value_int64, true);
 			memmove(aParam[2]->var->mCharContents, aBuffer, (SIZE_T)aResultToken.value_int64);
 			memset((char*)aParam[2]->var->mCharContents + aResultToken.value_int64, 0, 2);
-			free(aBuffer);
+			GlobalFree(aBuffer);
 			UnzipClose(huz);
 			aResultToken.symbol = SYM_INTEGER;
 			return;
@@ -16609,7 +16616,7 @@ BIF_DECL(BIF_ZipRawMemory)
 	if (!ParamIndexIsOmittedOrEmpty(3))
 	{
 		TCHAR *pwd = TokenToString(*aParam[3]);
-		size_t pwlen = _tcslen(TokenToString(*aParam[3]));
+		size_t pwlen = _tcslen(pwd);
 		for (size_t i = 0; i <= pwlen; i++)
 			pw[i] = &pwd[i];
 	}

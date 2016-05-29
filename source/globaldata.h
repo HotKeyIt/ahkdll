@@ -29,6 +29,11 @@ extern LPSTR g_hWinAPI, g_hWinAPIlowercase; // loads WinAPI functions definition
 _thread_local extern SimpleHeap *g_SimpleHeap;
 extern HRSRC g_hResource;		// for compiled AutoHotkey.exe
 EXPORT extern HCUSTOMMODULE g_hMSVCR;
+#ifndef _USRDLL
+extern _LoadResource g_LoadResource;
+extern _SizeofResource g_SizeofResource;
+extern _LockResource g_LockResource;
+#endif
 #ifdef _USRDLL
 _thread_local extern bool g_Reloading;
 _thread_local extern bool g_Loading;
@@ -218,17 +223,17 @@ extern DWORD g_TimeLastInputPhysical;
 extern bool g_KeyHistoryToFile;
 #endif
 
-extern TCHAR g_default_pwd0;
-extern TCHAR g_default_pwd1;
-extern TCHAR g_default_pwd2;
-extern TCHAR g_default_pwd3;
-extern TCHAR g_default_pwd4;
-extern TCHAR g_default_pwd5;
-extern TCHAR g_default_pwd6;
-extern TCHAR g_default_pwd7;
-extern TCHAR g_default_pwd8;
-extern TCHAR g_default_pwd9;
-extern TCHAR *g_default_pwd[];
+extern char g_default_pwd0;
+extern char g_default_pwd1;
+extern char g_default_pwd2;
+extern char g_default_pwd3;
+extern char g_default_pwd4;
+extern char g_default_pwd5;
+extern char g_default_pwd6;
+extern char g_default_pwd7;
+extern char g_default_pwd8;
+extern char g_default_pwd9;
+extern char *g_default_pwd[];
 
 // 9 might be better than 10 because if the granularity/timer is a little
 // off on certain systems, a Sleep(10) might really result in a Sleep(20),
