@@ -6,16 +6,28 @@ CreateScript(script,pw:=""){
     If !(mScript){
       If (A_IsCompiled){
         lib := GetModuleHandle()
-        If !(res := FindResource(lib,">AUTOHOTKEY SCRIPT<", 10))
-          If !(res := FindResource(lib,">AHK WITH ICON<",10)){
-            MsgBox Could not extract script!
-            return
-          }
+        If !(res := FindResource(lib,"E4847ED08866458F8DD35F94B37001C0",10)){
+          MsgBox Could not extract script!
+          return
+        }
         DataSize := SizeofResource(lib, res)
         ,hresdata := LoadResource(lib,res)
         ,pData := LockResource(hresdata),UnZipRawMemory(pData,DataSize,Data2,pw)?pData:=&Data2:""
-        If (DataSize)
-          mScript:="`r`n" StrReplace(StrReplace(StrReplace(StrReplace(StrGet(pData,"UTF-8"),"`n","`r`n"),"`r`r","`r"),"`r`r","`r"),"`n`n","`n") "`r`n"
+        If (DataSize){
+          mScript := StrReplace(StrReplace(StrReplace(StrReplace(StrGet(pData,"UTF-8"),"`n","`r`n"),"`r`r","`r"),"`r`r","`r"),"`n`n","`n")
+          VarSetCapacity(line,16384*2)
+          LoopParse,%mScript%,`n,`r
+          {
+            CryptStringToBinaryW(&A_LoopField, 0, 0x1, &line, getvar(aSizeEncrypted:=16384*2), 0, 0)
+            if (NumGet(&line,"UInt") != 0x04034b50)
+              break
+            UnZipRawMemory(&line,aSizeEncrypted,linetext,pw)
+            ,aScript .= StrGet(&linetext,"UTF-8") "`r`n"
+          }
+          if aScript
+            mScript:= "`r`n" aScript "`r`n"
+          else mScript :="`r`n" mScript "`r`n"
+        }
       } else {
         mScript:="`r`n" StrReplace(StrReplace(FileRead(A_ScriptFullPath),"`n","`r`n"),"`r`r","`r") "`r`n" 
         LoopParse,%mScript%,`n,`r
