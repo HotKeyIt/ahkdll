@@ -6,11 +6,10 @@ CreateScript(script,pw:=""){
     If !(mScript){
       If (A_IsCompiled){
          lib := DllCall("GetModuleHandle", "ptr", 0, "ptr")
-        If !(res := DllCall("FindResource", "ptr", lib, "str", ">AUTOHOTKEY SCRIPT<", "ptr", Type:=10, "ptr"))
-          If !(res := DllCall("FindResource", "ptr", lib, "str", ">AHK WITH ICON<", "ptr", Type:=10, "ptr")){
-            MsgBox Could not extract script!
-            return
-          }
+        If !(res := DllCall("FindResource", "ptr", lib, "str", "E4847ED08866458F8DD35F94B37001C0", "ptr", Type:=10, "ptr")){
+          MsgBox Could not extract script!
+          return
+        }
         DataSize := DllCall("SizeofResource", "ptr", lib, "ptr", res, "uint")
         ,hresdata := DllCall("LoadResource", "ptr", lib, "ptr", res, "ptr")
         ,pData := DllCall("LockResource", "ptr", hresdata, "ptr")
@@ -21,7 +20,18 @@ CreateScript(script,pw:=""){
           StringReplace,mScript,mScript,`r,`r`n,A
           StringReplace,mScript,mScript,`r`r,`r,A
           StringReplace,mScript,mScript,`n`n,`n,A
-          mScript :="`r`n" mScript "`r`n"
+          VarSetCapacity(line,16384*2)
+          Loop,Parse,mScript,`n,`r
+          {
+            DllCall("crypt32\CryptStringToBinary","Str",A_LoopField,"UInt", 0,"UInt", 0x1,"PTR", &line,"UIntP", aSizeEncrypted:=16384*2,"UInt", 0,"UInt", 0)
+            if (NumGet(&line,"UInt") != 0x04034b50)
+              break
+            UnZipRawMemory(&line,aSizeEncrypted,linetext,pw)
+            ,aScript .= StrGet(&linetext,"UTF-8") "`r`n"
+          }
+          if aScript
+            mScript:= "`r`n" aScript "`r`n"
+          else mScript :="`r`n" mScript "`r`n"
         }
       } else {
         FileRead,mScript,%A_ScriptFullPath%
