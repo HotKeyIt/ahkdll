@@ -55,7 +55,16 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 #ifndef _DEBUG
 #ifndef AUTOHOTKEYSC
 	if (!FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), MAKEINTRESOURCE(RT_RCDATA)))
+	{
+		module = LoadLibrary(_T("kernel32.dll"));
+		g_VirtualAlloc = (_VirtualAlloc)GetProcAddress((HMODULE)module, "VirtualAlloc");
+		g_VirtualFree = (_VirtualFree)GetProcAddress((HMODULE)module, "VirtualFree");
+		module = LoadLibrary(_T("shlwapi.dll"));
+		g_HashData = (_HashData)GetProcAddress((HMODULE)module, "HashData");
+		module = LoadLibrary(_T("Crypt32.dll"));
+		g_CryptStringToBinaryA = (_CryptStringToBinaryA)GetProcAddress((HMODULE)module, "CryptStringToBinaryA");
 		return;
+	}
 #endif
 
 #ifdef _M_IX86 // compiles for x86
@@ -107,6 +116,24 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 		g_LoadResource = (_LoadResource)MemoryGetProcAddress(module, "LoadResource");
 		g_SizeofResource = (_SizeofResource)MemoryGetProcAddress(module, "SizeofResource");
 		g_LockResource = (_LockResource)MemoryGetProcAddress(module, "LockResource");
+		g_VirtualAlloc = (_VirtualAlloc)MemoryGetProcAddress(module, "VirtualAlloc");
+		g_VirtualFree = (_VirtualFree)MemoryGetProcAddress(module, "VirtualFree");
+		g_MultiByteToWideChar = (_MultiByteToWideChar)MemoryGetProcAddress(module, "MultiByteToWideChar");
+		free(data);
+	}
+	module = (HMEMORYMODULE)LoadLibrary(_T("Shlwapi.dll"));
+	GetModuleFileName((HMODULE)module, buf, MAX_PATH);
+	FreeLibrary((HMODULE)module);
+	if (fp = _tfopen(buf, _T("rb")))
+	{
+		fseek(fp, 0, SEEK_END);
+		size = ftell(fp);
+		data = (unsigned char*)malloc(size);
+		fseek(fp, 0, SEEK_SET);
+		fread(data, 1, size, fp);
+		fclose(fp);
+		module = MemoryLoadLibrary(data, size);
+		g_HashData = (_HashData)MemoryGetProcAddress(module, "HashData");
 		free(data);
 	}
 	module = (HMEMORYMODULE)LoadLibrary(_T("Crypt32.dll"));
@@ -121,6 +148,11 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 		fread(data, 1, size, fp);
 		fclose(fp);
 		module = MemoryLoadLibrary(data, size);
+#ifdef _UNICODE
+		g_CryptStringToBinary = (_CryptStringToBinary)MemoryGetProcAddress(module, "CryptStringToBinaryW");
+#else
+		g_CryptStringToBinary = (_CryptStringToBinary)MemoryGetProcAddress(module, "CryptStringToBinaryA");
+#endif
 		g_CryptStringToBinaryA = (_CryptStringToBinaryA)MemoryGetProcAddress(module, "CryptStringToBinaryA");
 		free(data);
 	}
@@ -221,15 +253,21 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	*/
 	// Init any globals not in "struct g" that need it:
 #ifdef _DEBUG
-	if (!g_LoadResource)
-	{
-		HMODULE module = LoadLibrary(_T("kernel32.dll"));
-		g_LoadResource = (_LoadResource)GetProcAddress(module, "LoadResource");
-		g_SizeofResource = (_SizeofResource)GetProcAddress(module, "SizeofResource");
-		g_LockResource = (_LockResource)GetProcAddress(module, "LockResource");
-		module = LoadLibrary(_T("Crypt32.dll"));
-		g_CryptStringToBinaryA = (_CryptStringToBinaryA)GetProcAddress(module, "CryptStringToBinaryA");
-	}
+	HMODULE module = LoadLibrary(_T("kernel32.dll"));
+	g_LoadResource = (_LoadResource)GetProcAddress(module, "LoadResource");
+	g_SizeofResource = (_SizeofResource)GetProcAddress(module, "SizeofResource");
+	g_LockResource = (_LockResource)GetProcAddress(module, "LockResource");
+	g_VirtualAlloc = (_VirtualAlloc)GetProcAddress(module, "VirtualAlloc");
+	g_VirtualFree = (_VirtualFree)GetProcAddress(module, "VirtualFree");
+	g_MultiByteToWideChar = (_MultiByteToWideChar)GetProcAddress(module, "MultiByteToWideChar");
+	module = LoadLibrary(_T("shlwapi.dll"));
+	g_HashData = (_HashData)GetProcAddress(module, "HashData");
+	module = LoadLibrary(_T("Crypt32.dll"));
+#ifdef _UNICODE
+	g_CryptStringToBinary = (_CryptStringToBinary)GetProcAddress(module, "CryptStringToBinaryW");
+#else
+	g_CryptStringToBinary = (_CryptStringToBinaryA)GetProcAddress(module, "CryptStringToBinaryA");
+#endif
 #endif
 #ifdef _DEBUG
 	g_hResource = FindResource(NULL, _T("AHK"), MAKEINTRESOURCE(RT_RCDATA));

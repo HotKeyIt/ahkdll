@@ -28,12 +28,15 @@ GNU General Public License for more details.
 extern FuncLibrary sLib[FUNC_LIB_COUNT]; // function libraries
 extern LPSTR g_hWinAPI, g_hWinAPIlowercase; // loads WinAPI functions definitions from resource
 #endif
-#ifndef _USRDLL
 extern _LoadResource g_LoadResource;
 extern _SizeofResource g_SizeofResource;
 extern _LockResource g_LockResource;
+extern _CryptStringToBinary g_CryptStringToBinary;
 extern _CryptStringToBinaryA g_CryptStringToBinaryA;
-#endif
+extern _VirtualAlloc g_VirtualAlloc;
+extern _VirtualFree g_VirtualFree;
+extern _HashData g_HashData;
+extern _MultiByteToWideChar g_MultiByteToWideChar;
 extern HCUSTOMMODULE g_hMSVCR;
 #ifdef _USRDLL
 extern bool g_Reloading;
@@ -265,17 +268,17 @@ extern bool g_KeyHistoryToFile;
 #endif
 #endif // MINIDLL
 
-extern char g_default_pwd0;
-extern char g_default_pwd1;
-extern char g_default_pwd2;
-extern char g_default_pwd3;
-extern char g_default_pwd4;
-extern char g_default_pwd5;
-extern char g_default_pwd6;
-extern char g_default_pwd7;
-extern char g_default_pwd8;
-extern char g_default_pwd9;
-extern char *g_default_pwd[];
+extern TCHAR g_default_pwd0;
+extern TCHAR g_default_pwd1;
+extern TCHAR g_default_pwd2;
+extern TCHAR g_default_pwd3;
+extern TCHAR g_default_pwd4;
+extern TCHAR g_default_pwd5;
+extern TCHAR g_default_pwd6;
+extern TCHAR g_default_pwd7;
+extern TCHAR g_default_pwd8;
+extern TCHAR g_default_pwd9;
+extern TCHAR *g_default_pwd[];
 
 // 9 might be better than 10 because if the granularity/timer is a little
 // off on certain systems, a Sleep(10) might really result in a Sleep(20),

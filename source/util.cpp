@@ -3213,7 +3213,7 @@ DWORD CompressBuffer(BYTE *aBuffer, LPVOID &aDataBuf, DWORD sz, TCHAR *pwd[]) //
 	DWORD aSizeEncoded;
 	BYTE *aBufferMem;
 	ZipGetMemory(hz, (void**)&aBufferMem, &aSize, &aBase);
-	if (aSize > sz)
+	if (aSize >= sz)
 	{
 		aSize = sz;
 		UnmapViewOfFile(aDataBuf);
@@ -3222,7 +3222,7 @@ DWORD CompressBuffer(BYTE *aBuffer, LPVOID &aDataBuf, DWORD sz, TCHAR *pwd[]) //
 	}
 	CryptBinaryToStringA(aBufferMem, aSize, 0x1, NULL, &aSizeEncoded);
 	LPTSTR aDataCompressed = (LPTSTR)VirtualAlloc(NULL, aSizeEncoded + 16, MEM_COMMIT, PAGE_READWRITE);
-	CryptBinaryToStringA(aBufferMem, aSize, 0x1, (LPSTR)aDataCompressed, &aSizeEncoded);
+	CryptBinaryToStringA(aBufferMem, aSize, CRYPT_STRING_BASE64, (LPSTR)aDataCompressed, &aSizeEncoded);
 	LPVOID aBufferPtr;
 	if (pwd && pwd[0])
 	{
@@ -3263,38 +3263,35 @@ DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf,DWORD sz, TCHAR *pwd[]) //
 		return 0; // data is a normal zip file
 	DWORD hash;
 	BYTE *aDataEncrypted = NULL;
-	HashData((LPBYTE)aBuffer + hdrsz,aSizeEncrypted?aSizeEncrypted:aSizeCompressed,(LPBYTE)&hash,4);
+	g_HashData((LPBYTE)aBuffer + hdrsz,aSizeEncrypted?aSizeEncrypted:aSizeCompressed,(LPBYTE)&hash,4);
 	if (0x04034b50 == *(ULONG*)(UINT_PTR)aBuffer && hash == *(ULONG*)((UINT_PTR)aBuffer + 4))
 	{
 		HUNZIP		huz;
 		ZIPENTRY	ze;
 		DWORD		result;
 		ULONG aSizeDeCompressed = *(ULONG*)((UINT_PTR)aBuffer + 12);
-		aDataBuf = VirtualAlloc(NULL, aSizeDeCompressed, MEM_COMMIT, PAGE_READWRITE);
+		aDataBuf = g_VirtualAlloc(NULL, aSizeDeCompressed, MEM_COMMIT, PAGE_READWRITE);
 		if (aDataBuf)
 		{
 			if (aSizeEncrypted)
 			{
 				DWORD aSizeDataEncrypted = aSizeEncrypted;
-				typedef BOOL (_stdcall *MyDecrypt)(HCRYPTKEY,HCRYPTHASH,BOOL,DWORD,BYTE*,DWORD*);
-				HMODULE advapi32 = LoadLibrary(_T("advapi32.dll"));
-				MyDecrypt Decrypt = (MyDecrypt)GetProcAddress(advapi32,"CryptDecrypt");
-				LPSTR aDataEncryptedString = (LPSTR)VirtualAlloc(NULL, aSizeEncrypted, MEM_COMMIT, PAGE_READWRITE);
+				LPSTR aDataEncryptedString = (LPSTR)g_VirtualAlloc(NULL, aSizeEncrypted, MEM_COMMIT, PAGE_READWRITE);
 				memmove(aDataEncryptedString, (LPBYTE)aBuffer + hdrsz, aSizeEncrypted);
 				CryptAES(aDataEncryptedString, aSizeEncrypted, pwd, false);
-				aDataEncrypted = (BYTE*)VirtualAlloc(NULL, aSizeDataEncrypted, MEM_COMMIT, PAGE_READWRITE);
-				CryptStringToBinaryA(aDataEncryptedString, NULL, CRYPT_STRING_BASE64, aDataEncrypted, &aSizeEncrypted, NULL, NULL);
+				aDataEncrypted = (BYTE*)g_VirtualAlloc(NULL, aSizeDataEncrypted, MEM_COMMIT, PAGE_READWRITE);
+				g_CryptStringToBinaryA(aDataEncryptedString, NULL, CRYPT_STRING_BASE64, aDataEncrypted, &aSizeEncrypted, NULL, NULL);
 				if (aSizeDeCompressed == aSizeCompressed)
 				{
 					memcpy(aDataBuf, aDataEncrypted, aSizeDeCompressed);
-					VirtualFree(aDataEncrypted, 0, MEM_RELEASE);
+					g_VirtualFree(aDataEncrypted, 0, MEM_RELEASE);
 					return aSizeDeCompressed;
 				}
 				if (UnzipOpenBufferRaw(&huz, (LPBYTE)aDataEncrypted, aSizeCompressed, 0))
 				{   // failed to open archive
 					UnzipClose(huz);
-					VirtualFree(aDataBuf,0,MEM_RELEASE);
-					VirtualFree(aDataEncrypted, 0, MEM_RELEASE);
+					g_VirtualFree(aDataBuf,0,MEM_RELEASE);
+					g_VirtualFree(aDataEncrypted, 0, MEM_RELEASE);
 					return 0;
 				}
 			}
@@ -3306,23 +3303,23 @@ DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf,DWORD sz, TCHAR *pwd[]) //
 			else if (UnzipOpenBufferRaw(&huz, (LPBYTE)aBuffer + hdrsz, aSizeCompressed, 0))
 			{   // failed to open archive
 				UnzipClose(huz);
-				VirtualFree(aDataBuf,0,MEM_RELEASE);
+				g_VirtualFree(aDataBuf, 0, MEM_RELEASE);
 				return 0;
 			}
 			ze.CompressedSize = aSizeDeCompressed;
 			ze.UncompressedSize = aSizeDeCompressed;
 			if ((result = UnzipItemToBuffer(huz, aDataBuf, aSizeDeCompressed, &ze)))
-				VirtualFree(aDataBuf,0,MEM_RELEASE);
+				g_VirtualFree(aDataBuf, 0, MEM_RELEASE);
 			else
 			{
 				UnzipClose(huz);
 				if (aDataEncrypted)
-					VirtualFree(aDataEncrypted, 0, MEM_RELEASE);
+					g_VirtualFree(aDataEncrypted, 0, MEM_RELEASE);
 				return aSizeDeCompressed;
 			}
 			UnzipClose(huz);
 			if (aDataEncrypted)
-				VirtualFree(aDataEncrypted, 0, MEM_RELEASE);
+				g_VirtualFree(aDataEncrypted, 0, MEM_RELEASE);
 		}
 	}
 	return 0;
