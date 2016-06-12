@@ -157,6 +157,24 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	g_MsgMonitor = new MsgMonitorList();
 	g_MetaObject = new MetaObject();
 	g_SimpleHeap = new SimpleHeap();
+	
+	HMODULE module = LoadLibrary(_T("kernel32.dll"));
+	g_LoadResource = (_LoadResource)GetProcAddress(module, "LoadResource");
+	g_SizeofResource = (_SizeofResource)GetProcAddress(module, "SizeofResource");
+	g_LockResource = (_LockResource)GetProcAddress(module, "LockResource");
+	g_VirtualAlloc = (_VirtualAlloc)GetProcAddress(module, "VirtualAlloc");
+	g_VirtualFree = (_VirtualFree)GetProcAddress(module, "VirtualFree");
+	g_MultiByteToWideChar = (_MultiByteToWideChar)GetProcAddress(module, "MultiByteToWideChar");
+	module = LoadLibrary(_T("shlwapi.dll"));
+	g_HashData = (_HashData)GetProcAddress(module, "HashData");
+	module = LoadLibrary(_T("Crypt32.dll"));
+#ifdef _UNICODE
+	g_CryptStringToBinary = (_CryptStringToBinary)GetProcAddress(module, "CryptStringToBinaryW");
+#else
+	g_CryptStringToBinary = (_CryptStringToBinaryA)GetProcAddress(module, "CryptStringToBinaryA");
+#endif
+	g_CryptStringToBinaryA = (_CryptStringToBinaryA)GetProcAddress(module, "CryptStringToBinaryA");
+
 #ifdef _DEBUG
 	g_hResource = FindResource(g_hInstance, _T("AHK"), MAKEINTRESOURCE(RT_RCDATA));
 #else

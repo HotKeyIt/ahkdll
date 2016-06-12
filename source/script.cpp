@@ -973,9 +973,9 @@ Script::~Script() // Destructor.
 	g_MenuMaskKey = VK_CONTROL; // L38: See #MenuMaskKey.
 	g_HotkeyModifierTimeout = 50;  // Reduced from 100, which was a little too large for fast typists.
 	g_ClipboardTimeout = 1000; // v1.0.31
-	g_KeybdHook = NULL;
-	g_MouseHook = NULL;
-	g_PlaybackHook = NULL;
+	//g_KeybdHook = NULL;
+	//g_MouseHook = NULL;
+	//g_PlaybackHook = NULL;
 	g_ForceLaunch = false;
 	g_WinActivateForce = false;
 	g_Warn_UseUnsetLocal = WARNMODE_OFF;
@@ -3740,44 +3740,25 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 	else
 	{
 		HGLOBAL hResData;
-#ifndef _USRDLL
 		if ( !( (textbuf.mLength = g_SizeofResource(g_hInstance, g_hResource))
 			&& (hResData = g_LoadResource(g_hInstance, g_hResource))
 			&& (textbuf.mBuffer = g_LockResource(hResData)) ) )
-#else
-		if (!((textbuf.mLength = SizeofResource(g_hInstance, g_hResource))
-			&& (hResData = LoadResource(g_hInstance, g_hResource))
-			&& (textbuf.mBuffer = LockResource(hResData))))
-#endif
 		{
 			MsgBox(_T("Could not extract script from EXE."), 0, aFileSpec);
 			return FAIL;
 		}
 		if (*(unsigned int*)textbuf.mBuffer == 0x04034b50)
 		{
-			HUNZIP huz;
-			char pw[1024] = { 0 };
-			for (unsigned int i = 0; g_default_pwd[i]; i++)
-				pw[i] = *g_default_pwd[i];
-			DWORD result = UnzipOpenBuffer(&huz, textbuf.mBuffer, textbuf.mLength, pw);
-			memset(pw, 0, 1024);
-			if (!result)
+			LPVOID aDataBuf;
+			aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength, g_default_pwd);
+			if (aSizeDeCompressed)
 			{
-				ZIPENTRY ze;
-				ze.Index = 0;
-				UnzipGetItem(huz, &ze);
-				LPSTR aDataBuf = (LPSTR)malloc(ze.UncompressedSize);
-				UnzipItemToBuffer(huz, aDataBuf, ze.UncompressedSize, &ze);
-				DWORD aScriptSize = *(DWORD*)aDataBuf;
-				AUTO_MALLOCA(buff, LPVOID, aScriptSize + 2); // +2 for terminator, will be freed when function returns
-#ifndef _USRDLL
-				g_CryptStringToBinaryA(aDataBuf+4, NULL, CRYPT_STRING_BASE64, (BYTE*)buff, &aScriptSize, NULL, NULL);
-#else
-				CryptStringToBinaryA(aDataBuf + 4, NULL, CRYPT_STRING_BASE64, (BYTE*)buff, &aScriptSize, NULL, NULL);
-#endif
-				SecureZeroMemory(aDataBuf, ze.UncompressedSize);
-				memset((char*)buff + aScriptSize, 0, 2);
-				textbuf.mLength = aScriptSize + 2;
+				AUTO_MALLOCA(buff, LPVOID, aSizeDeCompressed + 2); // +2 for terminator, will be freed when function returns
+				memmove(buff, aDataBuf, aSizeDeCompressed);
+				memset((char*)buff + aSizeDeCompressed, 0, 2);
+				SecureZeroMemory(aDataBuf, aSizeDeCompressed);
+				g_VirtualFree(aDataBuf, 0, MEM_RELEASE);
+				textbuf.mLength = aSizeDeCompressed + 2;
 				textbuf.mBuffer = buff;
 			}
 		}
@@ -3826,6 +3807,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 	mCurrFileIndex = source_file_index;  // source_file_index is kept on the stack due to recursion (from #include).
 
 	LineNumberType phys_line_number = 0;
+
 	buf_length = GetLine(buf, LINE_SIZE - 1, 0, fp);
 
 	if (in_comment_section = !_tcsncmp(buf, _T("/*"), 2))
@@ -3856,6 +3838,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			// This increment relies on the fact that this loop always has at least one iteration:
 			++phys_line_number; // Tracks phys. line number in *this* file (independent of any recursion caused by #Include).
 			next_buf_length = GetLine(next_buf, LINE_SIZE - 1, in_continuation_section, fp);
+			
 			if (next_buf_length && next_buf_length != -1 // Prevents infinite loop when file ends with an unclosed "/*" section.  Compare directly to -1 since length is unsigned.
 				&& !in_continuation_section) // Multi-line comments can't be used in continuation sections. This line fixes '*/' being discarded in continuation sections (broken by L54).
 			{
@@ -5140,6 +5123,29 @@ size_t Script::GetLine(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSect
 	if (aBuf[aBuf_length - 1] == '\n')
 		--aBuf_length;
 	aBuf[aBuf_length] = '\0';
+	if (g_hResource)
+	{
+		DWORD aSizeEncrypted = LINE_SIZE * sizeof(TCHAR);
+		LPVOID data = (LPVOID)alloca(LINE_SIZE * sizeof(TCHAR));
+		g_CryptStringToBinary(aBuf, NULL, CRYPT_STRING_BASE64, (BYTE*)data, &aSizeEncrypted, NULL, NULL);
+		LPVOID aDataBuf;
+		if (*(unsigned int*)data == 0x04034b50)
+		{
+			if (aSizeEncrypted = DecompressBuffer(data, aDataBuf, aSizeEncrypted, g_default_pwd))
+			{
+#ifdef _UNICODE
+				aBuf_length = g_MultiByteToWideChar(CP_UTF8, 0, (LPCSTR)aDataBuf, -1, aBuf, aMaxCharsToRead) - 1;
+#else
+				_tcscpy(aBuf, (LPTSTR)aDataBuf);
+				aBuf_length = _tcslen(aBuf);
+#endif
+				SecureZeroMemory(aDataBuf, aSizeEncrypted);
+				g_VirtualFree(aDataBuf, aSizeEncrypted, MEM_RELEASE);
+			}
+			else
+				return -1;
+		}
+	}
 
 	if (aInContinuationSection)
 	{

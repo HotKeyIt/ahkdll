@@ -32,12 +32,15 @@ GNU General Public License for more details.
 _thread_local FuncLibrary sLib[FUNC_LIB_COUNT] = { 0 }; // function libraries
 LPSTR g_hWinAPI = NULL, g_hWinAPIlowercase = NULL;  // loads WinAPI functions definitions from resource
 _thread_local SimpleHeap *g_SimpleHeap = NULL;
-#ifndef _USRDLL
 _LoadResource g_LoadResource = NULL;
 _SizeofResource g_SizeofResource = NULL;
 _LockResource g_LockResource = NULL;
+_CryptStringToBinary g_CryptStringToBinary = NULL;
 _CryptStringToBinaryA g_CryptStringToBinaryA = NULL;
-#endif
+_VirtualAlloc g_VirtualAlloc = NULL;
+_VirtualFree g_VirtualFree = NULL;
+_HashData g_HashData = NULL;
+_MultiByteToWideChar g_MultiByteToWideChar = NULL;
 HRSRC g_hResource = NULL; // Set by WinMain()	// for compiled AutoHotkey.exe
 EXPORT HCUSTOMMODULE g_hMSVCR = NULL; // MSVR100.dll
 #ifdef _USRDLL
@@ -232,17 +235,17 @@ ToggleValueType g_BlockInputMode = TOGGLE_DEFAULT;
 bool g_BlockInput = false;
 bool g_BlockMouseMove = false;
 
-char g_default_pwd0;
-char g_default_pwd1;
-char g_default_pwd2;
-char g_default_pwd3;
-char g_default_pwd4;
-char g_default_pwd5;
-char g_default_pwd6;
-char g_default_pwd7;
-char g_default_pwd8;
-char g_default_pwd9;
-char *g_default_pwd[] = { &g_default_pwd0, &g_default_pwd1, &g_default_pwd2, &g_default_pwd3, &g_default_pwd4, &g_default_pwd5, &g_default_pwd6, &g_default_pwd7, &g_default_pwd8, &g_default_pwd9, 0, 0 };
+TCHAR g_default_pwd0;
+TCHAR g_default_pwd1;
+TCHAR g_default_pwd2;
+TCHAR g_default_pwd3;
+TCHAR g_default_pwd4;
+TCHAR g_default_pwd5;
+TCHAR g_default_pwd6;
+TCHAR g_default_pwd7;
+TCHAR g_default_pwd8;
+TCHAR g_default_pwd9;
+TCHAR *g_default_pwd[] = { &g_default_pwd0, &g_default_pwd1, &g_default_pwd2, &g_default_pwd3, &g_default_pwd4, &g_default_pwd5, &g_default_pwd6, &g_default_pwd7, &g_default_pwd8, &g_default_pwd9, 0, 0 };
 
 // The order of initialization here must match the order in the enum contained in script.h
 // It's in there rather than in globaldata.h so that the action-type constants can be referred
