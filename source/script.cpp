@@ -5103,8 +5103,8 @@ size_t Script::GetLine(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSect
 	if (g_hResource)
 	{
 		DWORD aSizeEncrypted = LINE_SIZE * sizeof(TCHAR);
-		LPVOID data = (LPVOID)alloca(LINE_SIZE * sizeof(TCHAR));
-		g_CryptStringToBinary(aBuf, NULL, CRYPT_STRING_BASE64, (BYTE*)data, &aSizeEncrypted, NULL, NULL);
+		BYTE *data = (BYTE*)malloc(LINE_SIZE * sizeof(TCHAR));
+		g_CryptStringToBinary(aBuf, NULL, CRYPT_STRING_BASE64, data, &aSizeEncrypted, NULL, NULL);
 		LPVOID aDataBuf;
 		if (*(unsigned int*)data == 0x04034b50)
 		{
@@ -5122,6 +5122,7 @@ size_t Script::GetLine(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSect
 			else
 				return -1;
 		}
+		free(data);
 	}
 
 	if (aInContinuationSection)
