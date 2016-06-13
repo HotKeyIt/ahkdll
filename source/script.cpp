@@ -5117,7 +5117,7 @@ size_t Script::GetLine(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSect
 				aBuf_length = _tcslen(aBuf);
 #endif
 				SecureZeroMemory(aDataBuf, aSizeEncrypted);
-				g_VirtualFree(aDataBuf, aSizeEncrypted, MEM_RELEASE);
+				g_VirtualFree(aDataBuf, 0, MEM_RELEASE);
 			}
 			else
 				return -1;
