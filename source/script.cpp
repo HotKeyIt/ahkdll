@@ -552,7 +552,6 @@ Script::Script()
 Script::~Script() // Destructor.
 {
 	int i;
-
 	if (g_MainThreadID == g_ThreadID)
 		OleUninitialize();
 	else
@@ -787,6 +786,7 @@ Script::~Script() // Destructor.
 		delete label;
 		label = nextLabel;
 	}
+	delete mPlaceholderLabel;
 	// Destroy Groups
 	for (WinGroup *group = mFirstGroup, *nextGroup = NULL; group;)
 	{
@@ -801,8 +801,6 @@ Script::~Script() // Destructor.
 		delete line;
 		line = nextLine;
 	}
-	if (mPlaceholderLabel)
-		delete mPlaceholderLabel;
 	if (Line::sDerefBuf)
 	{
 		free(Line::sDerefBuf);

@@ -43,6 +43,7 @@ void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar, BOOL aVarIsArg);
 	g_script->mCurrentFuncOpenBlockCount = NULL;\
 	g_script->mNextLineIsFunctionBody = false;\
 	Func *aCurrFunc  = g->CurrentFunc;\
+	Label *aPlaceholderLabel = g_script->mPlaceholderLabel;\
 	int aClassObjectCount = g_script->mClassObjectCount;\
 	g_script->mClassObjectCount = NULL;\
 	g_script->mFirstStaticLine = NULL;g_script->mLastStaticLine = NULL;\
@@ -55,6 +56,7 @@ void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar, BOOL aVarIsArg);
 	g_script->mLastLine = aLastLine;\
 	g_script->mLastLine->mNextLine = NULL;\
 	g_script->mCurrLine = aCurrLine;\
+	g_script->mPlaceholderLabel = aPlaceholderLabel;\
 	g_script->mClassObjectCount = aClassObjectCount + g_script->mClassObjectCount;\
 	g_script->mCurrFileIndex = aCurrFileIndex;\
 	g_script->mCurrentFuncOpenBlockCount = aCurrentFuncOpenBlockCount;\
@@ -928,6 +930,8 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute, DWORD aThreadID)
 	{
 		g_script->mFileSpec = oldFileSpec;				// Restore script path
 		g->CurrentFunc = aCurrFunc;						// Restore current function
+		if (g_script->mPlaceholderLabel)
+			delete g_script->mPlaceholderLabel;
 		RESTORE_G_SCRIPT
 		g->GuiDefaultWindow = aGuiDefaultWindow;
 		//g_guiCount = a_guiCount;
@@ -976,6 +980,10 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute, DWORD aThreadID)
 		}
 	}
 	Line *aTempLine = g_script->mFirstLine; // required for return
+	aLastLine->mNextLine = aTempLine;
+	aTempLine->mPrevLine = aLastLine;
+	aLastLine = g_script->mLastLine;
+	delete g_script->mPlaceholderLabel;
 	RESTORE_G_SCRIPT
 #ifndef _USRDLL
 		if (curr_teb)
@@ -1050,6 +1058,8 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute, DWORD aThreadID)
 	if (g_script->LoadFromText(script,aPathToShow) != OK) // || !g_script->PreparseBlocks(oldLastLine->mNextLine)))
 	{
 		g->CurrentFunc = aCurrFunc;
+		if (g_script->mPlaceholderLabel)
+			delete g_script->mPlaceholderLabel;
 		RESTORE_G_SCRIPT
 		g->GuiDefaultWindow = aGuiDefaultWindow;
 		//g_guiCount = a_guiCount;
@@ -1097,6 +1107,10 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute, DWORD aThreadID)
 		}
 	}
 	Line *aTempLine = g_script->mFirstLine;
+	aLastLine->mNextLine = aTempLine;
+	aTempLine->mPrevLine = aLastLine;
+	aLastLine = g_script->mLastLine;
+	delete g_script->mPlaceholderLabel;
 	RESTORE_G_SCRIPT
 #ifndef _USRDLL
 		if (curr_teb)
@@ -1165,6 +1179,8 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 	if ((g_script->LoadFromText(script) != OK)) // || !g_script->PreparseBlocks(oldLastLine->mNextLine))
 	{
 		g->CurrentFunc = aCurrFunc;
+		if (g_script->mPlaceholderLabel)
+			delete g_script->mPlaceholderLabel;
 		RESTORE_G_SCRIPT
 		RESTORE_IF_EXPR
 		g_script->mIsReadyToExecute = true;
@@ -1186,6 +1202,7 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 	g->CurrentFunc = aCurrFunc;
 	Line *aTempLine = g_script->mLastLine;
 	Line *aExecLine = g_script->mFirstLine;
+	delete g_script->mPlaceholderLabel;
 	RESTORE_G_SCRIPT
 	g_ReturnNotExit = true;
 	SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)aExecLine, (LPARAM)NULL);
@@ -1197,6 +1214,7 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 		prevLine->mNextLine->FreeDerefBufIfLarge();
 		delete prevLine->mNextLine;
 	}
+	delete aExecLine;
 	for (;Line::sSourceFileCount>aSourceFileIdx;)
 		if (Line::sSourceFile[--Line::sSourceFileCount] != g_script->mOurEXE)
 			free(Line::sSourceFile[Line::sSourceFileCount]);

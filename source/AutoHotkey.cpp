@@ -54,6 +54,16 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 	HMEMORYMODULE module;
 	unsigned char* data;
 	// Execute only if A_IsCompiled
+#ifdef _DEBUG
+	module = LoadLibrary(_T("kernel32.dll"));
+	g_VirtualAlloc = (_VirtualAlloc)GetProcAddress((HMODULE)module, "VirtualAlloc");
+	g_VirtualFree = (_VirtualFree)GetProcAddress((HMODULE)module, "VirtualFree");
+	module = LoadLibrary(_T("shlwapi.dll"));
+	g_HashData = (_HashData)GetProcAddress((HMODULE)module, "HashData");
+	module = LoadLibrary(_T("Crypt32.dll"));
+	g_CryptStringToBinaryA = (_CryptStringToBinaryA)GetProcAddress((HMODULE)module, "CryptStringToBinaryA");
+	return;
+#endif
 #ifndef _DEBUG
 	if (!FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), MAKEINTRESOURCE(RT_RCDATA)))
 	{
