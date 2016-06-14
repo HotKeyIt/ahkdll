@@ -1,11 +1,11 @@
-﻿exethread(s:="",p:="",t:=""){
+﻿exethread(s:="",p:="",t:="",w:=0){
   static lib
   if !lib
     lib:=GetModuleHandle(),ahkFunction:=GetProcAddress(lib,"ahkFunction"),ahkPostFunction:=GetProcAddress(lib,"ahkPostFunction"),addFile:=GetProcAddress(lib,"addFile"),addScript:=GetProcAddress(lib,"addScript")
         ,ahkExec:=GetProcAddress(lib,"ahkExec"),ahkExecuteLine:=GetProcAddress(lib,"ahkExecuteLine"),ahkFindFunc:=GetProcAddress(lib,"ahkFindFunc"),ahkFindLabel:=GetProcAddress(lib,"ahkFindLabel")
         ,ahkgetvar:=GetProcAddress(lib,"ahkgetvar"),ahkassign:=GetProcAddress(lib,"ahkassign"),ahkLabel:=GetProcAddress(lib,"ahkLabel"),ahkPause:=GetProcAddress(lib,"ahkPause")
 		,ahkIsUnicode:=GetProcAddress(lib,"ahkIsUnicode"),ahkReady:=GetProcAddress(lib,"ahkReady")
-	thread:={(""):ThreadID:=s=""?p:NewThread(s,p,t)
+	thread:={(""):ThreadID:=s=""?p:NewThread((w?"SetEvent(" hEvent:=CreateEvent() ")`n":"") s,p,t)
 	  ,_ahkFunction:DynaCall(ahkFunction,"s==sttttttttttui","",0,0,0,0,0,0,0,0,0,0,ThreadID)
 	  ,_ahkPostFunction:DynaCall(ahkPostFunction,"i==sttttttttttui","",0,0,0,0,0,0,0,0,0,0,ThreadID)
 	  ,ahkFunction:DynaCall(ahkFunction,"s==sssssssssssui","","","","","","","","","","","",ThreadID)
@@ -23,6 +23,8 @@
 	  ,ahkIsUnicode:DynaCall(ahkIsUnicode,"ui==")
 	  ,ahkReady:DynaCall(ahkReady,"ui==ui",ThreadID)}
 	thread.ahkterminate:=Func("Exethread_exit").Bind(ThreadID)
+	if w
+		WaitForSingleObject(hEvent,w),CloseHandle(hEvent)
 	return thread
 }
 Exethread_exit(ThreadID){
