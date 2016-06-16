@@ -68,6 +68,7 @@ struct HotkeyVariant
 	HotkeyCriterion *mHotCriterion;
 	HotkeyVariant *mNextVariant;
 	DWORD mRunAgainTime;
+	DWORD mThreadID;
 	int mPriority;
 	// Keep members that are less than 32-bit adjacent to each other to conserve memory in with the default
 	// 4-byte alignment:

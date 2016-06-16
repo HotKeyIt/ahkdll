@@ -980,7 +980,11 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 					hk->RunAgainAfterFinished(*variant); // Wheel notch count (g->EventInfo below) should be okay because subsequent launches reuse the same thread attributes to do the repeats.
 					continue;
 				}
-
+				if (variant->mThreadID != g_ThreadID)
+				{
+					PostThreadMessage(variant->mThreadID, msg.message, msg.wParam, msg.lParam);
+					continue;
+				}
 				// Now that above has ensured variant is non-NULL:
 				HotkeyCriterion *hc = variant->mHotCriterion;
 				if (!hc || hc->Type == HOT_IF_NOT_ACTIVE || hc->Type == HOT_IF_NOT_EXIST)

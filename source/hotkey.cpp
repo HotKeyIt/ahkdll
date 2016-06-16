@@ -506,7 +506,35 @@ void Hotkey::AllDestruct()
 	{
 		Hotkey &hk = *shk[i];
 		if (g_MainThreadID != g_ThreadID && hk.mThreadID != g_ThreadID)
+		{
+			for (HotkeyVariant *v = hk.mFirstVariant; v; v = v->mNextVariant)
+			{
+				if (v->mNextVariant && v->mNextVariant->mThreadID == g_ThreadID)
+				{
+					if (v->mNextVariant == hk.mLastVariant)
+					{
+						v->mNextVariant = NULL;
+						hk.mLastVariant = v;
+						break;
+					}
+					else
+					{
+						if (v->mNextVariant->mNextVariant == NULL)
+						{
+							hk.mLastVariant = v->mNextVariant;
+							break;
+						}
+						else
+						{
+							v->mNextVariant->mNextVariant->mIndex = v->mNextVariant->mIndex;
+							v->mNextVariant = v->mNextVariant->mNextVariant;
+							for (HotkeyVariant *vn = v->mNextVariant; vn && vn->mNextVariant; vn->mNextVariant->mIndex = vn->mIndex + 1, vn = vn->mNextVariant);
+						}
+					}
+				}
+			}
 			continue;
+		}
 		hk.sJoyHotkeyCount = NULL;
 		hk.mFirstVariant = NULL;
 		hk.mAllowExtraModifiers = NULL;
@@ -1678,6 +1706,7 @@ HotkeyVariant *Hotkey::AddVariant(IObject *aJumpToLabel, bool aSuffixHasTilde)
 	v.mInputLevel = g_InputLevel;
 	v.mHotCriterion = g->HotCriterion; // If this hotkey is an alt-tab one (mHookAction), this is stored but ignored until/unless the Hotkey command converts it into a non-alt-tab hotkey.
 	v.mEnabled = true;
+	v.mThreadID = g_ThreadID;
 	if (v.mInputLevel > 0)
 	{
 		// A non-zero InputLevel only works when using the hook

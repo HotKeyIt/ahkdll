@@ -767,6 +767,7 @@ struct HotkeyCriterion
 	Line *ExprLine;
 	LPTSTR WinTitle, WinText;
 	HotkeyCriterion *NextCriterion;
+	DWORD ThreadID;
 };
 
 

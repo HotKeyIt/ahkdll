@@ -832,6 +832,15 @@ Script::~Script() // Destructor.
 			UnregisterClass((LPCWSTR)&WINDOW_CLASS_MAIN, g_hInstance);
 			g_ClassRegistered = 0;
 		}
+		while (g_FirstHotExpr && g_FirstHotExpr->ThreadID == g_ThreadID)
+			g_FirstHotExpr = g_FirstHotExpr->NextCriterion;
+		if (g_LastHotExpr && g_LastHotExpr->ThreadID == g_ThreadID)
+			g_LastHotExpr = g_FirstHotExpr;
+		for (HotkeyCriterion *cp = g_FirstHotExpr;cp; cp = cp->NextCriterion)
+		{
+			if (cp->NextCriterion && cp->NextCriterion->ThreadID == g_ThreadID)
+				cp->NextCriterion = cp->NextCriterion->NextCriterion;
+		}
 #endif
 	//}
 	if (g_hAccelTable)
@@ -1586,23 +1595,31 @@ ResultType Script::AutoExecSection()
 
 bool Script::IsPersistent()
 {
-	UINT aHotstringCount = 0, aHotkeyCount = 0;
+	// If at least one hotkey or hotstring exists,
+	// no attempt is made to determine if the hotkeys/hotstrings are enabled, since even if they
+	// are, it's impossible to detect whether #If/#IfWin will allow them to ever execute.
 	for (UINT i = 0; i < Hotstring::sHotstringCount; ++i)
 	{
 		if (Hotstring::shs[i]->mThreadID == g_ThreadID)
-			aHotstringCount++;
+			return true;
 	}
 	for (UINT i = 0; i < Hotkey::sHotkeyCount; ++i)
 	{
 		if (Hotkey::shk[i]->mThreadID == g_ThreadID)
-			aHotkeyCount++;
+		{
+			return true;
+		}
+		else
+		{
+			for (HotkeyVariant *v = Hotkey::shk[i]->mFirstVariant; v; v = v->mNextVariant)
+			{
+				if (v->mThreadID == g_ThreadID)
+					return true;
+			}
+		}
 	}
-	// Consi
-	// Consider the script "persistent" if any of the following conditions are true:
-	if (aHotkeyCount || aHotstringCount // At least one hotkey or hotstring exists.
-		// No attempt is made to determine if the hotkeys/hotstrings are enabled, since even if they
-		// are, it's impossible to detect whether #If/#IfWin will allow them to ever execute.
-		|| g_persistent // #Persistent has been used somewhere in the script.
+	// Consider the script also "persistent" if any of the following conditions are true:
+	if (g_persistent // #Persistent has been used somewhere in the script.
 		|| g_script->mTimerEnabledCount // At least one script timer is currently enabled.
 		|| g_MsgMonitor->Count() // At least one message monitor is active (installed by OnMessage).
 		|| mOnClipboardChange.Count() // The script is monitoring clipboard changes.
@@ -5451,6 +5468,7 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		g->HotCriterion->WinTitle = hot_expr_line->mArg[0].text;
 		g->HotCriterion->WinText = _T("");
 		g->HotCriterion->NextCriterion = NULL;
+		g->HotCriterion->ThreadID = g_ThreadID;
 		if (g_LastHotExpr)
 			g_LastHotExpr->NextCriterion = g->HotCriterion;
 		else
