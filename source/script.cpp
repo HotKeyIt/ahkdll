@@ -900,7 +900,8 @@ Script::~Script() // Destructor.
 		DestroyIcon(g_IconLarge);
 	if (g_IconSmall)
 		DestroyIcon(g_IconSmall);
-
+	g_IconLarge = NULL;
+	g_IconSmall = NULL;
 	g_MainTimerExists = false;
 	g_AutoExecTimerExists = false;
 	g_InputTimerExists = false;
