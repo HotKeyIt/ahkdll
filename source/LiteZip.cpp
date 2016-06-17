@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <tchar.h>
+#include "globaldata.h"
 #define IDS_OK        20
 #define IDS_UNKNOWN   21
 #define DIRSLASH_CHAR	'\\'
@@ -3347,7 +3348,7 @@ static DWORD setCurrentEntry(register TUNZIP *tunzip, ZIPENTRY *ze, DWORD flags)
 
 		if (flags & UNZIP_UNICODE)
 		{
-			MultiByteToWideChar(CP_UTF8, 0, &fn[0], -1, (WCHAR *)&ze->Name[0], MAX_PATH);
+			g_MultiByteToWideChar(CP_UTF8, 0, &fn[0], -1, (WCHAR *)&ze->Name[0], MAX_PATH);
 		}
 		else
 			lstrcpyA((char *)&ze->Name[0], &fn[0]);
