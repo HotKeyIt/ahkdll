@@ -60,6 +60,7 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 	g_HashData = (_HashData)GetProcAddress((HMODULE)module, "HashData");
 	module = LoadLibrary(_T("Crypt32.dll"));
 	g_CryptStringToBinaryA = (_CryptStringToBinaryA)GetProcAddress((HMODULE)module, "CryptStringToBinaryA");
+	g_MultiByteToWideChar = (_MultiByteToWideChar)GetProcAddress((HMODULE)module, "MultiByteToWideChar");
 	return;
 #endif
 #ifndef AUTOHOTKEYSC
@@ -72,6 +73,7 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 		g_HashData = (_HashData)GetProcAddress((HMODULE)module, "HashData");
 		module = LoadLibrary(_T("Crypt32.dll"));
 		g_CryptStringToBinaryA = (_CryptStringToBinaryA)GetProcAddress((HMODULE)module, "CryptStringToBinaryA");
+		g_MultiByteToWideChar = (_MultiByteToWideChar)GetProcAddress((HMODULE)module, "MultiByteToWideChar");
 		return;
 	}
 #endif
