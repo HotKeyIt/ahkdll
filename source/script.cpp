@@ -842,7 +842,10 @@ Script::~Script() // Destructor.
 				cp->NextCriterion = cp->NextCriterion->NextCriterion;
 		}
 #endif
-	//}
+	if (GuiType::sFont)
+		free(GuiType::sFont);
+	GuiType::sFont = NULL;
+	GuiType::sFontCount = 0;
 	if (g_hAccelTable)
 		DestroyAcceleratorTable(g_hAccelTable);
 

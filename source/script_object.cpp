@@ -326,7 +326,16 @@ bool Object::Delete()
 		// not actually call any script functions) because this function is probably executed much
 		// less often in most cases.
 		PRIVATIZE_S_DEREF_BUF;
-
+#ifndef _USRDLL
+		PMYTEB curr_teb = NULL;
+		PVOID tls = NULL;
+		if (!g)
+		{
+			curr_teb = (PMYTEB)NtCurrentTeb();
+			tls = curr_teb->ThreadLocalStoragePointer;
+			curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[0][6];
+		}
+#endif
 		// If an exception has been thrown, temporarily clear it for execution of __Delete.
 		ResultToken *exc = g->ThrownToken;
 		g->ThrownToken = NULL;
@@ -341,7 +350,10 @@ bool Object::Delete()
 				g_script->FreeExceptionToken(g->ThrownToken);
 			g->ThrownToken = exc;
 		}
-
+#ifndef _USRDLL
+		if (tls)
+			curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 		DEPRIVATIZE_S_DEREF_BUF; // L33: See above.
 
 		// Above may pass the script a reference to this object to allow cleanup routines to free any
