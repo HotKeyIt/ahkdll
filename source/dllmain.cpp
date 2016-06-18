@@ -155,7 +155,6 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	g_LockResource = (_LockResource)GetProcAddress(module, "LockResource");
 	g_VirtualAlloc = (_VirtualAlloc)GetProcAddress(module, "VirtualAlloc");
 	g_VirtualFree = (_VirtualFree)GetProcAddress(module, "VirtualFree");
-	g_MultiByteToWideChar = (_MultiByteToWideChar)GetProcAddress(module, "MultiByteToWideChar");
 	module = LoadLibrary(_T("shlwapi.dll"));
 	g_HashData = (_HashData)GetProcAddress(module, "HashData");
 	module = LoadLibrary(_T("Crypt32.dll"));

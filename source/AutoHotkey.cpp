@@ -56,7 +56,6 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 	module = LoadLibrary(_T("kernel32.dll"));
 	g_VirtualAlloc = (_VirtualAlloc)GetProcAddress((HMODULE)module, "VirtualAlloc");
 	g_VirtualFree = (_VirtualFree)GetProcAddress((HMODULE)module, "VirtualFree");
-	g_MultiByteToWideChar = (_MultiByteToWideChar)GetProcAddress((HMODULE)module, "MultiByteToWideChar");
 	module = LoadLibrary(_T("shlwapi.dll"));
 	g_HashData = (_HashData)GetProcAddress((HMODULE)module, "HashData");
 	module = LoadLibrary(_T("Crypt32.dll"));
@@ -69,7 +68,6 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 		module = LoadLibrary(_T("kernel32.dll"));
 		g_VirtualAlloc = (_VirtualAlloc)GetProcAddress((HMODULE)module, "VirtualAlloc");
 		g_VirtualFree = (_VirtualFree)GetProcAddress((HMODULE)module, "VirtualFree");
-		g_MultiByteToWideChar = (_MultiByteToWideChar)GetProcAddress((HMODULE)module, "MultiByteToWideChar");
 		module = LoadLibrary(_T("shlwapi.dll"));
 		g_HashData = (_HashData)GetProcAddress((HMODULE)module, "HashData");
 		module = LoadLibrary(_T("Crypt32.dll"));
@@ -128,7 +126,6 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 		g_LockResource = (_LockResource)MemoryGetProcAddress(module, "LockResource");
 		g_VirtualAlloc = (_VirtualAlloc)MemoryGetProcAddress(module, "VirtualAlloc");
 		g_VirtualFree = (_VirtualFree)MemoryGetProcAddress(module, "VirtualFree");
-		g_MultiByteToWideChar = (_MultiByteToWideChar)MemoryGetProcAddress(module, "MultiByteToWideChar");
 		free(data);
 	}
 	module = (HMEMORYMODULE)LoadLibrary(_T("Shlwapi.dll"));
@@ -269,7 +266,6 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	g_LockResource = (_LockResource)GetProcAddress(module, "LockResource");
 	g_VirtualAlloc = (_VirtualAlloc)GetProcAddress(module, "VirtualAlloc");
 	g_VirtualFree = (_VirtualFree)GetProcAddress(module, "VirtualFree");
-	g_MultiByteToWideChar = (_MultiByteToWideChar)GetProcAddress(module, "MultiByteToWideChar");
 	module = LoadLibrary(_T("shlwapi.dll"));
 	g_HashData = (_HashData)GetProcAddress(module, "HashData");
 	module = LoadLibrary(_T("Crypt32.dll"));

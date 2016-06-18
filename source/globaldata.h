@@ -36,7 +36,6 @@ extern _CryptStringToBinaryA g_CryptStringToBinaryA;
 extern _VirtualAlloc g_VirtualAlloc;
 extern _VirtualFree g_VirtualFree;
 extern _HashData g_HashData;
-extern _MultiByteToWideChar g_MultiByteToWideChar;
 extern HCUSTOMMODULE g_hMSVCR;
 #ifdef _USRDLL
 extern bool g_Reloading;

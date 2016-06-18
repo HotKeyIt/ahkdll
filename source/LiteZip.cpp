@@ -3348,7 +3348,7 @@ static DWORD setCurrentEntry(register TUNZIP *tunzip, ZIPENTRY *ze, DWORD flags)
 
 		if (flags & UNZIP_UNICODE)
 		{
-			g_MultiByteToWideChar(CP_UTF8, 0, &fn[0], -1, (WCHAR *)&ze->Name[0], MAX_PATH);
+			MultiByteToWideChar(CP_UTF8, 0, &fn[0], -1, (WCHAR *)&ze->Name[0], MAX_PATH);
 		}
 		else
 			lstrcpyA((char *)&ze->Name[0], &fn[0]);
