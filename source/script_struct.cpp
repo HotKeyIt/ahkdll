@@ -1379,7 +1379,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 				if (param_count_excluding_rvalue < 3)
 				{   // set simple pointer
 					*((UINT_PTR*)((UINT_PTR)target + field->mOffset)) = (UINT_PTR)TokenToInt64(*aParam[2]);
-					aResultToken.value_int64 = (UINT_PTR)*(target + field->mOffset);
+					aResultToken.value_int64 = *(UINT_PTR*)((UINT_PTR)target + field->mOffset);
 				}
 				else // set pointer to pointer
 				{
