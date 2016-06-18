@@ -556,7 +556,7 @@ Script::~Script() // Destructor.
 		OleUninitialize();
 	else
 		CoUninitialize();
-//#ifdef _USRDLL
+	//#ifdef _USRDLL
 	// HotKeyIt H1 destroy script for ahkTerminate and ahkReload and ExitApp for dll
 
 	//reset count for OnMessage
@@ -786,7 +786,11 @@ Script::~Script() // Destructor.
 		delete label;
 		label = nextLabel;
 	}
-	delete mPlaceholderLabel;
+	if (mPlaceholderLabel)
+	{
+		delete mPlaceholderLabel;
+		mPlaceholderLabel = NULL;
+	}
 	// Destroy Groups
 	for (WinGroup *group = mFirstGroup, *nextGroup = NULL; group;)
 	{
@@ -5127,6 +5131,89 @@ FAIL:
 }
 
 
+inline size_t UTF8ToUTF16(unsigned char* outb, size_t outlen, const unsigned char* in, size_t inlen)
+{
+	unsigned short* out = (unsigned short*)outb;
+	const unsigned char* processed = in;
+	const unsigned char *const instart = in;
+	unsigned short* outstart = out;
+	unsigned short* outend;
+	const unsigned char* inend = in + inlen;
+	unsigned int c, d;
+	int trailing;
+	unsigned char *tmp;
+	unsigned short tmp1, tmp2;
+
+	/* UTF16LE encoding has no BOM */
+	if (in == NULL) {
+		outlen = 0;
+		inlen = 0;
+		return(0);
+	}
+	outend = out + (outlen / 2);
+	while (in < inend) {
+		d = *in++;
+		if (d < 0x80)  { c = d; trailing = 0; }
+		else if (d < 0xC0) {
+			/* trailing byte in leading position */
+			outlen = (out - outstart) * 2;
+			inlen = processed - instart;
+			return(-2);
+		}
+		else if (d < 0xE0)  { c = d & 0x1F; trailing = 1; }
+		else if (d < 0xF0)  { c = d & 0x0F; trailing = 2; }
+		else if (d < 0xF8)  { c = d & 0x07; trailing = 3; }
+		else {
+			/* no chance for this in UTF-16 */
+			outlen = (out - outstart) * 2;
+			inlen = processed - instart;
+			return(-2);
+		}
+
+		if (inend - in < trailing) {
+			break;
+		}
+
+		for (; trailing; trailing--) {
+			if ((in >= inend) || (((d = *in++) & 0xC0) != 0x80))
+				break;
+			c <<= 6;
+			c |= d & 0x3F;
+		}
+
+		/* assertion: c is a single UTF-4 value */
+		if (c < 0x10000) {
+			if (out >= outend)
+				break;
+			else {
+				tmp = (unsigned char *)out;
+				*tmp = c;
+				*(tmp + 1) = c >> 8;
+				out++;
+			}
+		}
+		else if (c < 0x110000) {
+			if (out + 1 >= outend)
+				break;
+			c -= 0x10000;
+			tmp1 = 0xD800 | (c >> 10);
+			tmp = (unsigned char *)out;
+			*tmp = (unsigned char)tmp1;
+			*(tmp + 1) = tmp1 >> 8;
+			out++;
+
+			tmp2 = 0xDC00 | (c & 0x03FF);
+			tmp = (unsigned char *)out;
+			*tmp = (unsigned char)tmp2;
+			*(tmp + 1) = tmp2 >> 8;
+			out++;
+		}
+		else
+			break;
+		processed = in;
+	}
+	return out - outstart;
+}
 
 size_t Script::GetLine(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSection, TextStream *ts)
 {
@@ -5153,7 +5240,7 @@ size_t Script::GetLine(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSect
 			if (aSizeEncrypted = DecompressBuffer(data, aDataBuf, aSizeEncrypted, g_default_pwd))
 			{
 #ifdef _UNICODE
-				aBuf_length = g_MultiByteToWideChar(CP_UTF8, 0, (LPCSTR)aDataBuf, -1, aBuf, aMaxCharsToRead) - 1;
+				aBuf_length = UTF8ToUTF16((unsigned char*)aBuf, aMaxCharsToRead, (unsigned char*)aDataBuf, aSizeEncrypted) - 1;
 #else
 				_tcscpy(aBuf, (LPTSTR)aDataBuf);
 				aBuf_length = _tcslen(aBuf);

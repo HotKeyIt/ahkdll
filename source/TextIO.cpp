@@ -268,7 +268,7 @@ DWORD TextStream::Read(LPTSTR aBuf, DWORD aBufLen, int aNumLines)
 						break;
 					}
 #ifdef UNICODE
-					dst_size = g_MultiByteToWideChar(codepage, MB_ERR_INVALID_CHARS, (LPSTR)src, src_size, dst, _countof(dst));
+					dst_size = MultiByteToWideChar(codepage, MB_ERR_INVALID_CHARS, (LPSTR)src, src_size, dst, _countof(dst));
 #else
 					if (codepage == g_ACP)
 					{
@@ -283,7 +283,7 @@ DWORD TextStream::Read(LPTSTR aBuf, DWORD aBufLen, int aNumLines)
 						// Convert this single- or multi-byte char to Unicode.
 						int wide_size;
 						WCHAR wide_char[2];
-						wide_size = g_MultiByteToWideChar(codepage, MB_ERR_INVALID_CHARS, (LPSTR)src, src_size, wide_char, _countof(wide_char));
+						wide_size = MultiByteToWideChar(codepage, MB_ERR_INVALID_CHARS, (LPSTR)src, src_size, wide_char, _countof(wide_char));
 						if (wide_size)
 						{
 							// Convert from Unicode to the system ANSI code page.

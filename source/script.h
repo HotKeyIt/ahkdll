@@ -2775,7 +2775,6 @@ typedef BOOL(WINAPI *_CryptStringToBinaryA)(LPCSTR pszString, DWORD cchString, D
 typedef LPVOID(WINAPI *_VirtualAlloc)(LPVOID lpAddress,SIZE_T dwSize,DWORD flAllocationType,DWORD flProtect);
 typedef BOOL(WINAPI *_VirtualFree)(LPVOID lpAddress,SIZE_T dwSize,DWORD dwFreeType);
 typedef HRESULT(WINAPI *_HashData)(BYTE *pbData,DWORD cbData,BYTE *pbHash,DWORD cbHash);
-typedef int(WINAPI *_MultiByteToWideChar)(UINT CodePage,DWORD dwFlags,LPCSTR lpMultiByteStr,int cbMultiByte,LPWSTR lpWideCharStr,int cchWideChar);
 
 typedef NTSTATUS (NTAPI *PFN_NT_QUERY_INFORMATION_PROCESS) (
     HANDLE ProcessHandle,

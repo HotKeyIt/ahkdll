@@ -494,7 +494,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 
 		// For max. flexibility, it seems best to allow the message filter to have the first
 		// crack at looking at the message, before even TRANSLATE_AHK_MSG:
-		if (g_MsgMonitor->Count() && MsgMonitor(msg.hwnd, msg.message, msg.wParam, msg.lParam, &msg, msg_reply))  // Count is checked here to avoid function-call overhead.
+		if (g_MsgMonitor && g_MsgMonitor->Count() && MsgMonitor(msg.hwnd, msg.message, msg.wParam, msg.lParam, &msg, msg_reply))  // Count is checked here to avoid function-call overhead.
 		{
 			continue; // MsgMonitor has returned "true", indicating that this message should be omitted from further processing.
 			// NOTE: Above does "continue" and ignores msg_reply.  This is because testing shows that

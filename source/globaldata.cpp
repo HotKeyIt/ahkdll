@@ -40,7 +40,6 @@ _CryptStringToBinaryA g_CryptStringToBinaryA = NULL;
 _VirtualAlloc g_VirtualAlloc = NULL;
 _VirtualFree g_VirtualFree = NULL;
 _HashData g_HashData = NULL;
-_MultiByteToWideChar g_MultiByteToWideChar = NULL;
 HRSRC g_hResource = NULL; // Set by WinMain()	// for compiled AutoHotkey.exe
 EXPORT HCUSTOMMODULE g_hMSVCR = NULL; // MSVR100.dll
 #ifdef _USRDLL

@@ -37,7 +37,6 @@ extern _CryptStringToBinaryA g_CryptStringToBinaryA;
 extern _VirtualAlloc g_VirtualAlloc;
 extern _VirtualFree g_VirtualFree;
 extern _HashData g_HashData;
-extern _MultiByteToWideChar g_MultiByteToWideChar;
 #ifdef _USRDLL
 _thread_local extern bool g_Reloading;
 _thread_local extern bool g_Loading;
