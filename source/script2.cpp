@@ -10878,7 +10878,23 @@ DYNARESULT DynaCall(void *aFunction, DYNAPARM aParam[], int aParamCount, DWORD &
 // return value processing.
 {
 	aException = 0;  // Set default output parameter for caller.
+#ifndef _USRDLL
+	PMYTEB curr_teb = NULL;
+	PVOID tls = NULL;
+	if (!g)
+	{
+		curr_teb = (PMYTEB)NtCurrentTeb();
+		tls = curr_teb->ThreadLocalStoragePointer;
+		curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[0][6];
+	}
+#endif
+
 	SetLastError(g->LastError); // v1.0.46.07: In case the function about to be called doesn't change last-error, this line serves to retain the script's previous last-error rather than some arbitrary one produced by AutoHotkey's own internal API calls.  This line has no measurable impact on performance.
+
+#ifndef _USRDLL
+	if (tls)
+		curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 
     DYNARESULT Res = {0}; // This struct is to be returned to caller by value.
 
@@ -11046,8 +11062,21 @@ DYNARESULT DynaCall(void *aFunction, DYNAPARM aParam[], int aParamCount, DWORD &
 	// call GetLastError() because: Even if we could avoid calling any API function that resets LastError
 	// (which seems unlikely) it would be difficult to maintain (and thus a source of bugs) as revisions are
 	// made in the future.
+
+#ifndef _USRDLL
+	if (!g)
+	{
+		curr_teb = (PMYTEB)NtCurrentTeb();
+		tls = curr_teb->ThreadLocalStoragePointer;
+		curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[0][6];
+	}
+#endif
 	g->LastError = GetLastError();
 
+#ifndef _USRDLL
+	if (tls)
+		curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 	TCHAR buf[32];
 
 #ifdef WIN32_PLATFORM
