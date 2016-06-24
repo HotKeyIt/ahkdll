@@ -358,7 +358,6 @@ Script::~Script() // Destructor.
 {
 	// MSDN: "Before terminating, an application must call the UnhookWindowsHookEx function to free
 	// system resources associated with the hook."
-	OleUninitialize();
 #ifndef MINIDLL
 	AddRemoveHooks(0); // Remove all hooks.
 	if (mNIC.hWnd) // Tray icon is installed.
@@ -905,6 +904,7 @@ void Script::Destroy()
 	// done on DLL_PROCESS_DETACH
 	// DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
 	// DeleteCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
+	OleUninitialize();
 	mIsReadyToExecute = false;
 }
 #endif
