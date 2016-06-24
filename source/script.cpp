@@ -552,10 +552,6 @@ Script::Script()
 Script::~Script() // Destructor.
 {
 	int i;
-	if (g_MainThreadID == g_ThreadID)
-		OleUninitialize();
-	else
-		CoUninitialize();
 	//#ifdef _USRDLL
 	// HotKeyIt H1 destroy script for ahkTerminate and ahkReload and ExitApp for dll
 
@@ -1049,6 +1045,10 @@ Script::~Script() // Destructor.
 	// DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
 	// DeleteCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
 	CloseHandle(g_hThread);
+	if (g_MainThreadID == g_ThreadID)
+		OleUninitialize();
+	else
+		CoUninitialize();
 	mIsReadyToExecute = false;
 }
 
