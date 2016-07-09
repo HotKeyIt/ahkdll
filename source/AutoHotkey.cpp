@@ -22,7 +22,7 @@ GNU General Public License for more details.
 #include "LiteZip.h"
 #include "MemoryModule.h"
 #include <process.h>
-// #include <vld.h> // find memory leaks
+//#include <vld.h> // find memory leaks
 
 #ifndef _USRDLL
 
@@ -45,7 +45,6 @@ typedef LONG(NTAPI *MyNtSetInformationThread)(HANDLE ThreadHandle, ULONG ThreadI
 
 void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 {
-	PBOOLEAN BeingDebugged;
 	TCHAR buf[MAX_PATH];
 	FILE *fp;
 	size_t size;
@@ -65,6 +64,7 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 	return;
 #endif
 #ifndef _DEBUG
+	PBOOLEAN BeingDebugged;
 	if (!FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), MAKEINTRESOURCE(RT_RCDATA)))
 	{
 		module = LoadLibrary(_T("kernel32.dll"));

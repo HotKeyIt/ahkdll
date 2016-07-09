@@ -42,7 +42,7 @@ _thread_local static ResultType sTargetLayoutHasAltGr; //
 #define MAX_INITIAL_EVENTS_SI 500UL  // sizeof(INPUT) == 28 as of 2006. Since Send is called so often, and since most Sends are short, reducing the load on the stack is also a deciding factor for these.
 #define MAX_INITIAL_EVENTS_PB 1500UL // sizeof(PlaybackEvent) == 8, so more events are justified before resorting to malloc().
 _thread_local static LPINPUT sEventSI;        // No init necessary.  An array that's allocated/deallocated by SendKeys().
-static PlaybackEvent *sEventPB;
+_thread_local static PlaybackEvent *sEventPB;
 _thread_local static UINT sEventCount, sMaxEvents; // Number of items in the above arrays and the current array capacity.
 _thread_local static UINT sCurrentEvent;
 _thread_local static modLR_type sEventModifiersLR; // Tracks the modifier state to following the progress/building of the SendInput array.

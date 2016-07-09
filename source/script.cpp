@@ -1906,9 +1906,9 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 		delete g_clip;
 		free(g_array);
 		DeleteCriticalSection(&g_CriticalRegExCache);
-		for (int i = 0;; i++)
-			if (!TlsFree(i))
-				break;
+		//for (int i = 0;; i++)
+		//	if (!TlsFree(i))
+		//		break;
 		_endthreadex(aExitCode);
 	}
 	// We call DestroyWindow() because MainWindowProc() has left that up to us.
