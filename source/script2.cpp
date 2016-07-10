@@ -14970,7 +14970,7 @@ BIF_DECL(BIF_NewThread)
 		CloseHandle(hThread);
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = (__int64)ThreadID;
-
+	Sleep(1); // give the thread little time to allocate memory to avoid std::bad_alloc that might happen when you run newthread in a loop
 }
 #endif
 
