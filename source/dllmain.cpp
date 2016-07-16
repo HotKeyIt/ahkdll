@@ -505,7 +505,7 @@ unsigned __stdcall runScript( void* pArguments )
 void WaitIsReadyToExecute()
 {
 	 int lpExitCode = 0;
-	 while (!g_script || (g_hThread && !g_script->mIsReadyToExecute && (lpExitCode == 0 || lpExitCode == 259)))
+	 while ((!g_script && g_hThread) || (g_hThread && !g_script->mIsReadyToExecute && (lpExitCode == 0 || lpExitCode == 259)))
 	 {
 		Sleep(10);
 		GetExitCodeThread(g_hThread,(LPDWORD)&lpExitCode);
