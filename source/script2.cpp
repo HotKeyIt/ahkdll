@@ -14055,6 +14055,7 @@ struct pcre_cache_entry
 
 #define PCRE_CACHE_SIZE 100 // Going too high would be counterproductive due to the slowness of linear search (and also the memory utilization of so many compiled RegEx's).
 _thread_local static pcre_cache_entry sCache[PCRE_CACHE_SIZE] = { { 0 } };
+_thread_local static int sLastInsert, sLastFound = -1; // -1 indicates "cache empty".
 
 void free_compiled_regex()
 {
@@ -14069,8 +14070,11 @@ void free_compiled_regex()
 			if (this_entry.extra)
 				pcret_free_study(this_entry.extra);
 			this_entry.re_compiled = NULL;
+			this_entry.re_raw = NULL;
+			this_entry.options_length = 0;
 		}
 	}
+	sLastFound = -1;
 }
 
 pcret *get_compiled_regex(LPTSTR aRegEx, pcret_extra *&aExtra, int *aOptionsLength, ResultToken *aResultToken)
@@ -14101,7 +14105,6 @@ pcret *get_compiled_regex(LPTSTR aRegEx, pcret_extra *&aExtra, int *aOptionsLeng
 	// so like performance, that's not a concern either.
 	EnterCriticalSection(&g_CriticalRegExCache); // Request ownership of the critical section. If another thread already owns it, this thread will block until the other thread finishes.
 
-	_thread_local static int sLastInsert, sLastFound = -1; // -1 indicates "cache empty".
 	int insert_pos; // v1.0.45.03: This is used to avoid updating sLastInsert until an insert actually occurs (it might not occur if a compile error occurs in the regex, or something else stops it early).
 
 	// CHECK IF THIS REGEX IS ALREADY IN THE CACHE.
