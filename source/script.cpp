@@ -427,6 +427,7 @@ VarEntry g_BIV_A[] =
 	A_(ThisMenu),
 	A_(ThisMenuItem),
 	A_(ThisMenuItemPos),
+	A_(ThreadID),
 	A_(TickCount),
 	A_(TimeIdle),
 	A_(TimeIdlePhysical),
@@ -585,9 +586,11 @@ Script::~Script() // Destructor.
 	if (g_guiCount)
 	{
 		while (g_guiCount)
-			GuiType::Destroy(*g_gui[g_guiCount - 1]); // Static method to avoid problems with object destroying itself.
+			GuiType::Destroy(*g_gui[g_guiCount - 1], false); // Static method to avoid problems with object destroying itself.
 		free(g_gui);
 		g_gui = NULL;
+		g_guiCountMax = 0;
+		g_guiCount = 0;
 	}
 	for (i = 0; i < GuiType::sFontCount; ++i) // Now that GUI windows are gone, delete all GUI fonts.
 		if (GuiType::sFont[i].hfont)
@@ -1629,7 +1632,7 @@ bool Script::IsPersistent()
 	// Consider the script also "persistent" if any of the following conditions are true:
 	if (g_persistent // #Persistent has been used somewhere in the script.
 		|| g_script->mTimerEnabledCount // At least one script timer is currently enabled.
-		|| g_MsgMonitor->Count() // At least one message monitor is active (installed by OnMessage).
+		|| (g_MsgMonitor && g_MsgMonitor->Count()) // At least one message monitor is active (installed by OnMessage).
 		|| mOnClipboardChange.Count() // The script is monitoring clipboard changes.
 		// The following isn't checked because there has to be at least one script thread
 		// running for it to be true, in which case we shouldn't have been called:
@@ -5143,6 +5146,7 @@ inline size_t UTF8ToUTF16(unsigned char* outb, size_t outlen, const unsigned cha
 	int trailing;
 	unsigned char *tmp;
 	unsigned short tmp1, tmp2;
+	int count = 0;
 
 	/* UTF16LE encoding has no BOM */
 	if (in == NULL) {
@@ -5190,6 +5194,7 @@ inline size_t UTF8ToUTF16(unsigned char* outb, size_t outlen, const unsigned cha
 				*tmp = c;
 				*(tmp + 1) = c >> 8;
 				out++;
+				count++;
 			}
 		}
 		else if (c < 0x110000) {
@@ -5207,12 +5212,13 @@ inline size_t UTF8ToUTF16(unsigned char* outb, size_t outlen, const unsigned cha
 			*tmp = (unsigned char)tmp2;
 			*(tmp + 1) = tmp2 >> 8;
 			out++;
+			count++;
 		}
 		else
 			break;
 		processed = in;
 	}
-	return out - outstart;
+	return count;
 }
 
 size_t Script::GetLine(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSection, TextStream *ts)

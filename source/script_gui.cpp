@@ -1698,7 +1698,7 @@ _thread_local HWND GuiType::sTreeWithEditInProgress = NULL;
 
 
 
-ResultType GuiType::Destroy(GuiType &gui)
+ResultType GuiType::Destroy(GuiType &gui, bool aExitIfNotPersistent)
 // Rather than deal with the confusion of an object destroying itself, this method is static
 // and designed to deal with one particular window index in the g_gui array.
 {
@@ -1812,7 +1812,8 @@ ResultType GuiType::Destroy(GuiType &gui)
 	free(gui.mControl); // Free the control array, which was previously malloc'd.
 	gui.Release(); // After this, the var "gui" is invalid so should not be referenced.
 	// If this Gui was the last thing keeping the script running, exit the script:
-	g_script->ExitIfNotPersistent(EXIT_DESTROY);
+	if (aExitIfNotPersistent)
+		g_script->ExitIfNotPersistent(EXIT_DESTROY);
 	return OK;
 }
 

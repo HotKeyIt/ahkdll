@@ -10759,7 +10759,13 @@ BIV_DECL_W(BIV_EventInfo_Set)
 	return OK;
 }
 
-
+VarSizeType BIV_ThreadID(LPTSTR aBuf, LPTSTR aVarName)
+// We're returning the length of the var's contents, not the size.
+{
+	return aBuf
+		? (VarSizeType)_tcslen(UTOA(g_MainThreadID, aBuf)) // Must return exact length when aBuf isn't NULL.
+		: MAX_INTEGER_LENGTH;
+}
 
 VarSizeType BIV_TimeIdle(LPTSTR aBuf, LPTSTR aVarName) // Called by multiple callers.
 {

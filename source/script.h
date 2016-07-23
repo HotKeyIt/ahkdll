@@ -2657,7 +2657,7 @@ public:
 		//ZeroMemory(mControl, sizeof(mControl));
 	}
 
-	static ResultType Destroy(GuiType &gui);
+	static ResultType Destroy(GuiType &gui, bool aExitIfNotPersistent = true);
 	static void DestroyIconsIfUnused(HICON ahIcon, HICON ahIconSmall); // L17: Renamed function and added parameter to also handle the window's small icon.
 	ResultType Create();
 	void AddRef();
@@ -3069,6 +3069,7 @@ BIV_DECL_R (BIV_AhkPath);
 BIV_DECL_R (BIV_AhkDir);
 BIV_DECL_R (BIV_DllPath);
 BIV_DECL_R (BIV_DllDir);
+BIV_DECL_R (BIV_ThreadID);
 BIV_DECL_R (BIV_TickCount);
 BIV_DECL_R (BIV_Now);
 #ifdef CONFIG_WIN9X

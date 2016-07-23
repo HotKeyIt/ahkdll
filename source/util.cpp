@@ -2956,9 +2956,14 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 		BIV_DllPath(buf, _T("A_DllPath"));
 		StrReplace(parameter, _T("%A_DllPath%"), buf, SCS_INSENSITIVE, 1, space_remaining);
 	}
+	if (tcscasestr(parameter, _T("%A_ThreadID%"))) // v1.0.45.04.
+	{
+		BIV_ThreadID(buf, _T("A_ThreadID"));
+		StrReplace(parameter, _T("%A_ThreadID%"), buf, SCS_INSENSITIVE, 1, space_remaining);
+	}
 	if (_tcschr(parameter, '%'))
 	{
-		return g_script->ScriptError(_T("Reference not allowed here, use & where possible. Only %A_AhkPath% %A_AhkDir% %A_DllPath% %A_DllDir% %A_ScriptDir% %A_AppData[Common]% can be used here."), parameter);
+		return g_script->ScriptError(_T("Reference not allowed here, use & where possible. Only %A_AhkPath% %A_AhkDir% %A_DllPath% %A_DllDir% %A_ScriptDir% %A_AppData[Common]% %A_ThreadID% can be used here."), parameter);
 	}
 	// terminate dll\function name, find it and jump to next parameter
 	if (_tcschr(parameter, ','))

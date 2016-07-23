@@ -55,12 +55,16 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 	// Execute only if A_IsCompiled
 #ifdef _DEBUG
 	module = LoadLibrary(_T("kernel32.dll"));
+	g_LoadResource = (_LoadResource)GetProcAddress((HMODULE)module, "LoadResource");
+	g_SizeofResource = (_SizeofResource)GetProcAddress((HMODULE)module, "SizeofResource");
+	g_LockResource = (_LockResource)GetProcAddress((HMODULE)module, "LockResource");
 	g_VirtualAlloc = (_VirtualAlloc)GetProcAddress((HMODULE)module, "VirtualAlloc");
 	g_VirtualFree = (_VirtualFree)GetProcAddress((HMODULE)module, "VirtualFree");
 	module = LoadLibrary(_T("shlwapi.dll"));
 	g_HashData = (_HashData)GetProcAddress((HMODULE)module, "HashData");
 	module = LoadLibrary(_T("Crypt32.dll"));
 	g_CryptStringToBinaryA = (_CryptStringToBinaryA)GetProcAddress((HMODULE)module, "CryptStringToBinaryA");
+	g_CryptStringToBinary = (_CryptStringToBinary)GetProcAddress((HMODULE)module, "CryptStringToBinaryW");
 	return;
 #endif
 #ifndef _DEBUG
