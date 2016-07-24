@@ -180,7 +180,7 @@ EXPORT int ahkPause(LPTSTR aChangeTo, DWORD aThreadID) //Change pause state of a
 		}
 	}
 #endif
-	if (!g_script->mIsReadyToExecute)
+	if (!g_script || !g_script->mIsReadyToExecute)
 	{
 #ifndef _USRDLL
 		if (curr_teb)
@@ -256,7 +256,7 @@ EXPORT UINT_PTR ahkFindFunc(LPTSTR funcname, DWORD aThreadID)
 		}
 	}
 #endif
-	if (!g_script->mIsReadyToExecute)
+	if (!g_script || !g_script->mIsReadyToExecute)
 	{
 #ifndef _USRDLL
 		if (curr_teb)
@@ -311,7 +311,7 @@ EXPORT UINT_PTR ahkFindLabel(LPTSTR aLabelName, DWORD aThreadID)
 		}
 	}
 #endif
-	if (!g_script->mIsReadyToExecute)
+	if (!g_script || !g_script->mIsReadyToExecute)
 	{
 #ifndef _USRDLL
 		if (curr_teb)
@@ -367,7 +367,7 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name, unsigned int getVar, DWORD aThreadID)
 		}
 	}
 #endif
-	if (!g_script->mIsReadyToExecute)
+	if (!g_script || !g_script->mIsReadyToExecute)
 	{
 #ifndef _USRDLL
 		if (curr_teb)
@@ -527,7 +527,7 @@ EXPORT int ahkassign(LPTSTR name, LPTSTR value, DWORD aThreadID) // ahkwine 0.1
 		}
 	}
 #endif
-	if (!g_script->mIsReadyToExecute)
+	if (!g_script || !g_script->mIsReadyToExecute)
 	{
 #ifndef _USRDLL
 		if (curr_teb)
@@ -599,7 +599,7 @@ EXPORT UINT_PTR ahkExecuteLine(UINT_PTR line, unsigned int aMode, unsigned int w
 		}
 	}
 #endif
-	if (!g_script->mIsReadyToExecute)
+	if (!g_script || !g_script->mIsReadyToExecute)
 	{
 #ifndef _USRDLL
 		if (curr_teb)
@@ -679,7 +679,7 @@ EXPORT int ahkLabel(LPTSTR aLabelName, unsigned int nowait, DWORD aThreadID) // 
 		}
 	}
 #endif
-	if (!g_script->mIsReadyToExecute)
+	if (!g_script || !g_script->mIsReadyToExecute)
 	{
 #ifndef _USRDLL
 		if (curr_teb)
@@ -758,7 +758,7 @@ EXPORT int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR par
 		}
 	}
 #endif
-	if (!script->mIsReadyToExecute)
+	if (!g_script || !script->mIsReadyToExecute)
 	{
 		return -1; // AutoHotkey needs to be running at this point //
 	}
@@ -905,7 +905,7 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute, DWORD aThreadID)
 		}
 	}
 #endif
-	if (!g_script->mIsReadyToExecute)
+	if (!g_script || !g_script->mIsReadyToExecute)
 	{
 #ifndef _USRDLL
 		if (curr_teb)
@@ -1034,7 +1034,7 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute, DWORD aThreadID)
 		}
 	}
 #endif
-	if (!g_script->mIsReadyToExecute)
+	if (!g_script || !g_script->mIsReadyToExecute)
 	{
 #ifndef _USRDLL
 		if (curr_teb)
@@ -1160,7 +1160,7 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 		}
 	}
 #endif
-	if (!g_script->mIsReadyToExecute)
+	if (!g_script || !g_script->mIsReadyToExecute)
 	{
 #ifndef _USRDLL
 		if (curr_teb)
@@ -1296,7 +1296,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 		}
 	}
 #endif
-	if (!script->mIsReadyToExecute)
+	if (!g_script || !script->mIsReadyToExecute)
 	{
 		return 0; // AutoHotkey needs to be running at this point //
 	}
