@@ -278,9 +278,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 			// (if they're installed).  Otherwise, there's greater risk of keyboard/mouse lag.
 			// PeekMessage(), depending on how, and how often it's called, will also do this, but
 			// I'm not as confident in it.
-#ifndef _USRDLL
 			SleepEx(0, true); // used to exit thread
-#endif
 			if (GetMessage(&msg, NULL, 0, MSG_FILTER_MAX) == -1) // -1 is an error, 0 means WM_QUIT
 				continue; // Error probably happens only when bad parameters were passed to GetMessage().
 			//else let any WM_QUIT be handled below.
@@ -371,11 +369,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 				// did a Sleep(0).
 				if (aSleepDuration == 0 && !sleep0_was_done)
 				{
-#ifndef _USRDLL
 					SleepEx(0, true);
-#else
-					Sleep(0);
-#endif
 					sleep0_was_done = true;
 					// Now start a new iteration of the loop that will see if we
 					// received any messages during the up-to-20ms delay (perhaps even more)
@@ -414,11 +408,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 					// when SendInput is unavailable).  Note that if aSleepDuration == 0, Sleep(0)
 					// was already called above or by a prior iteration.
 					if (aSleepDuration > 0)
-#ifndef _USRDLL
 						SleepEx(5, true); // This is a somewhat arbitrary value: the intent of a value below 10 is to avoid yielding more than one timeslice on all systems even if they have unusual timeslice sizes / system timers.
-#else
-						Sleep(5);
-#endif
 					++messages_received; // Don't repeat this section.
 					continue;
 				}
@@ -478,11 +468,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 					// 1) aSleepDuration > 0
 					// 2) !empty_the_queue_via_peek
 					// 3) The above two combined with logic above means that g_DeferMessagesForUnderlyingPump==true.
-#ifndef _USRDLL
 					SleepEx(5, true); // Since Peek() didn't find a message, avoid maxing the CPU.  This is a somewhat arbitrary value: the intent of a value below 10 is to avoid yielding more than one timeslice on all systems even if they have unusual timeslice sizes / system timers.
-#else
-					Sleep(5);
-#endif
 				continue;
 			}
 			// else Peek() found a message, so process it below.
