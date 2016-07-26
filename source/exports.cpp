@@ -1178,9 +1178,9 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 	int aSourceFileIdx = Line::sSourceFileCount;
 
 	// Backup SimpleHeap to restore later
-	SimpleHeap *aSimpleHeap = new SimpleHeap(*g_SimpleHeap);
-	g_SimpleHeap->mLast->mNextBlock = g_SimpleHeap->CreateBlock();
-	g_SimpleHeap->mMostRecentlyAllocated = g_SimpleHeap->mLast->mFreeMarker;
+	SimpleHeap *aSimpleHeap = new SimpleHeap();
+	SimpleHeap *bkpSimpleHeap = g_SimpleHeap;
+	g_SimpleHeap = aSimpleHeap;
 
 	if ((g_script->LoadFromText(script) != OK)) // || !g_script->PreparseBlocks(oldLastLine->mNextLine))
 	{
@@ -1188,13 +1188,8 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 		if (g_script->mPlaceholderLabel)
 			delete g_script->mPlaceholderLabel;
 		// Delete used and restore SimpleHeap
-		for (; g_SimpleHeap->mBlockCount > aSimpleHeap->mBlockCount;)
-		{
-			if (g_SimpleHeap->mBlocks[--g_SimpleHeap->mBlockCount])
-				delete g_SimpleHeap->mBlocks[g_SimpleHeap->mBlockCount];
-			g_SimpleHeap->mBlocks[g_SimpleHeap->mBlockCount] = NULL;
-		}
-		*g_SimpleHeap = *aSimpleHeap;
+		g_SimpleHeap = bkpSimpleHeap;
+		aSimpleHeap->DeleteAll();
 		delete aSimpleHeap;
 		RESTORE_G_SCRIPT
 		RESTORE_IF_EXPR
@@ -1220,6 +1215,8 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 	delete g_script->mPlaceholderLabel;
 	RESTORE_G_SCRIPT
 	g_ReturnNotExit = true;
+	// Restore SimpleHeap so functions will use correct memory
+	g_SimpleHeap = bkpSimpleHeap;
 	SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)aExecLine, (LPARAM)NULL);
 	
 	g_ReturnNotExit = false;
@@ -1234,13 +1231,7 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 		if (Line::sSourceFile[--Line::sSourceFileCount] != g_script->mOurEXE)
 			free(Line::sSourceFile[Line::sSourceFileCount]);
 	// Delete used and restore SimpleHeap
-	for (; g_SimpleHeap->mBlockCount > aSimpleHeap->mBlockCount;)
-	{
-		if (g_SimpleHeap->mBlocks[--g_SimpleHeap->mBlockCount])
-			delete g_SimpleHeap->mBlocks[g_SimpleHeap->mBlockCount];
-		g_SimpleHeap->mBlocks[g_SimpleHeap->mBlockCount] = NULL;
-	}
-	*g_SimpleHeap = *aSimpleHeap;
+	aSimpleHeap->DeleteAll();
 	delete aSimpleHeap;
 #ifndef _USRDLL
 	if (curr_teb)
