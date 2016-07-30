@@ -50,6 +50,7 @@ static struct nameHinstance
        HINSTANCE hInstanceP;
 	   LPTSTR name ;
 	   LPTSTR argv;
+	   LPTSTR title;
 	   int istext;
      } nameHinstanceP ;
 unsigned __stdcall runScript( void* pArguments );
@@ -371,6 +372,8 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 		return 0;
 	}
 
+	if (*nameHinstanceP.title)
+		g_script->mFileName = nameHinstanceP.title;
 	// Create all our windows and the tray icon.  This is done after all other chances
 	// to return early due to an error have passed, above.
 	if (g_script->CreateWindows() != OK)
@@ -536,31 +539,33 @@ unsigned runThread()
 	return (unsigned int)g_hThread;
 }
 
-int setscriptstrings(LPTSTR fileName, LPTSTR argv)
+int setscriptstrings(LPTSTR fileName, LPTSTR argv, LPTSTR title)
 {
-	LPTSTR newstring = (LPTSTR)realloc(scriptstring,(_tcslen(fileName)+_tcslen(argv)+2)*sizeof(TCHAR));
+	LPTSTR newstring = (LPTSTR)realloc(scriptstring,(_tcslen(fileName) + _tcslen(argv) + _tcslen(title) + 3) * sizeof(TCHAR));
 	if (!newstring)
 		return 1;
 	scriptstring = newstring;
 	_tcscpy(scriptstring,fileName);
 	_tcscpy(scriptstring + _tcslen(fileName) + 1,argv);
+	_tcscpy(scriptstring + _tcslen(fileName) + _tcslen(argv) + 1,title);
 	nameHinstanceP.name = scriptstring;
 	nameHinstanceP.argv = scriptstring + _tcslen(fileName) + 1 ;
+	nameHinstanceP.title = scriptstring + _tcslen(fileName) + _tcslen(argv) + 1 ;
 	return 0;
 }
 
-EXPORT UINT_PTR ahkdll(LPTSTR fileName, LPTSTR argv)
+EXPORT UINT_PTR ahkdll(LPTSTR fileName, LPTSTR argv, LPTSTR title)
 {
-	if (setscriptstrings(fileName && !IsBadReadPtr(fileName,1) && *fileName ? fileName : aDefaultDllScript, argv && !IsBadReadPtr(argv,1) && *argv ? argv : _T("")))
+	if (setscriptstrings(fileName && !IsBadReadPtr(fileName,1) && *fileName ? fileName : aDefaultDllScript, argv && !IsBadReadPtr(argv,1) && *argv ? argv : _T(""), title && !IsBadReadPtr(title,1) && *title ? title : _T("")))
 		return 0;
 	nameHinstanceP.istext = *fileName ? 0 : 1;
 	return runThread();
 }
 
 // HotKeyIt ahktextdll
-EXPORT UINT_PTR ahktextdll(LPTSTR fileName, LPTSTR argv)
+EXPORT UINT_PTR ahktextdll(LPTSTR fileName, LPTSTR argv, LPTSTR title)
 {
-	if (setscriptstrings(fileName && !IsBadReadPtr(fileName,1) && *fileName ? fileName : aDefaultDllScript, argv && !IsBadReadPtr(argv,1) && *argv ? argv : _T("")))
+	if (setscriptstrings(fileName && !IsBadReadPtr(fileName,1) && *fileName ? fileName : aDefaultDllScript, argv && !IsBadReadPtr(argv,1) && *argv ? argv : _T(""), title && !IsBadReadPtr(title,1) && *title ? title : _T("")))
 		return 0;
 	nameHinstanceP.istext = 1;
 	return runThread();
@@ -715,25 +720,27 @@ unsigned int Variant2I(VARIANT var)
 		return var.uintVal;
 }
 
-HRESULT __stdcall CoCOMServer::ahktextdll(/*in,optional*/VARIANT script,/*in,optional*/VARIANT params,/*out*/UINT_PTR* hThread)
+HRESULT __stdcall CoCOMServer::ahktextdll(/*in,optional*/VARIANT script,/*in,optional*/VARIANT params,/*in,optional*/VARIANT title,/*out*/UINT_PTR* hThread)
 {
 	USES_CONVERSION;
 	TCHAR buf1[MAX_INTEGER_SIZE],buf2[MAX_INTEGER_SIZE];
 	if (hThread==NULL)
 		return ERROR_INVALID_PARAMETER;
 	*hThread = com_ahktextdll(script.vt == VT_BSTR ? OLE2T(script.bstrVal) : Variant2T(script,buf1)
-							,params.vt == VT_BSTR ? OLE2T(params.bstrVal) : Variant2T(params,buf2));
+							,params.vt == VT_BSTR ? OLE2T(params.bstrVal) : Variant2T(params,buf2)
+							,title.vt == VT_BSTR ? OLE2T(title.bstrVal) : Variant2T(title,buf2));
 	return S_OK;
 }
 
-HRESULT __stdcall CoCOMServer::ahkdll(/*in,optional*/VARIANT filepath,/*in,optional*/VARIANT params,/*out*/UINT_PTR* hThread)
+HRESULT __stdcall CoCOMServer::ahkdll(/*in,optional*/VARIANT filepath,/*in,optional*/VARIANT params,/*in,optional*/VARIANT title,/*out*/UINT_PTR* hThread)
 {
 	USES_CONVERSION;
 	TCHAR buf1[MAX_INTEGER_SIZE],buf2[MAX_INTEGER_SIZE];
 	if (hThread==NULL)
 		return ERROR_INVALID_PARAMETER;
 	*hThread = com_ahkdll(filepath.vt == VT_BSTR ? OLE2T(filepath.bstrVal) : Variant2T(filepath,buf1)
-							,params.vt == VT_BSTR ? OLE2T(params.bstrVal) : Variant2T(params,buf2));
+							,params.vt == VT_BSTR ? OLE2T(params.bstrVal) : Variant2T(params,buf2)
+							,title.vt == VT_BSTR ? OLE2T(title.bstrVal) : Variant2T(title,buf2));
 	return S_OK;
 }
 HRESULT __stdcall CoCOMServer::ahkPause(/*in,optional*/VARIANT aChangeTo,/*out*/int* paused)

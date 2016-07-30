@@ -76,8 +76,8 @@ UINT_PTR com_ahkFindFunc(LPTSTR funcname){return ahkFindFunc(funcname);}
 UINT_PTR com_addScript(LPTSTR script, int waitexecute){return addScript(script,waitexecute);}
 int com_ahkExec(LPTSTR script){return ahkExec(script);}
 UINT_PTR com_addFile(LPTSTR fileName, int waitexecute){return addFile(fileName,waitexecute);}
-UINT_PTR com_ahkdll(LPTSTR fileName,LPTSTR argv){return ahkdll(fileName,argv);}
-UINT_PTR com_ahktextdll(LPTSTR script,LPTSTR argv){return ahktextdll(script,argv);}
+UINT_PTR com_ahkdll(LPTSTR fileName,LPTSTR argv, LPTSTR title){return ahkdll(fileName,argv, title);}
+UINT_PTR com_ahktextdll(LPTSTR script,LPTSTR argv, LPTSTR title){return ahktextdll(script,argv, title);}
 int com_ahkTerminate(int timeout){return ahkTerminate(timeout);}
 int com_ahkReady(){return ahkReady();}
 int com_ahkIsUnicode(){return ahkIsUnicode();}

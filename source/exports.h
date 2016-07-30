@@ -38,8 +38,8 @@ void callFuncDll(FuncAndToken *aFuncAndToken);
 int initPlugins();
 
 #ifdef _USRDLL
-EXPORT UINT_PTR ahkdll(LPTSTR fileName,LPTSTR argv);
-EXPORT UINT_PTR ahktextdll(LPTSTR fileName,LPTSTR argv);
+EXPORT UINT_PTR ahkdll(LPTSTR fileName,LPTSTR argv, LPTSTR title);
+EXPORT UINT_PTR ahktextdll(LPTSTR fileName, LPTSTR argv, LPTSTR title);
 EXPORT int ahkReady();
 EXPORT int ahkReload(int timeout);
 EXPORT int ahkTerminate(int timeout);
@@ -65,8 +65,8 @@ UINT_PTR com_addScript(LPTSTR script, int aExecute);
 int com_ahkExec(LPTSTR script);
 UINT_PTR com_addFile(LPTSTR fileName, int waitexecute);
 
-UINT_PTR com_ahkdll(LPTSTR fileName,LPTSTR argv);
-UINT_PTR com_ahktextdll(LPTSTR fileName,LPTSTR argv);
+UINT_PTR com_ahkdll(LPTSTR fileName, LPTSTR argv, LPTSTR title);
+UINT_PTR com_ahktextdll(LPTSTR fileName, LPTSTR argv, LPTSTR title);
 int com_ahkTerminate(int timeout);
 int com_ahkReady();
 int com_ahkReload(int timeout);
