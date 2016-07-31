@@ -3825,10 +3825,9 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 	// and beyond, since the feature was never properly implemented in Win95:
 	static UINT WM_TASKBARCREATED = RegisterWindowMessage(_T("TaskbarCreated"));
 
-#ifndef _USRDLL
-	if (iMsg == WM_ACTIVATEAPP) // && g_MainThreadID != g_ThreadID)
+	if (iMsg == WM_NULL) // && g_MainThreadID != g_ThreadID)
 		SleepEx(0, true); // used to exit thread
-#endif
+
 	// See GuiWindowProc() for details about this first section:
 	LRESULT msg_reply;
 	if (g_MsgMonitor && g_MsgMonitor->Count() // Count is checked here to avoid function-call overhead.
