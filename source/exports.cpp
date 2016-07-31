@@ -1230,6 +1230,7 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 	for (;Line::sSourceFileCount>aSourceFileIdx;)
 		if (Line::sSourceFile[--Line::sSourceFileCount] != g_script->mOurEXE)
 			free(Line::sSourceFile[Line::sSourceFileCount]);
+	Line::sSourceFileCount = aSourceFileIdx;
 	// Delete used and restore SimpleHeap
 	aSimpleHeap->DeleteAll();
 	delete aSimpleHeap;
