@@ -16026,7 +16026,7 @@ BIF_DECL(BIF_MemoryLoadLibrary)
 	else
 		data = (unsigned char*)TokenToInt64(*aParam[0]);
 	if (data)
-		module = MemoryLoadLibraryEx(data, size ? size : (size_t)TokenToInt64(*aParam[1]),
+		module = MemoryLoadLibraryEx(data, size ? size : aParamCount > 1 ? (size_t)TokenToInt64(*aParam[1]) : 0,
 									(CustomLoadLibraryFunc)(aParamCount > 2 ? (HCUSTOMMODULE)TokenToInt64(*aParam[2]) : MemoryDefaultLoadLibrary),
 									(CustomGetProcAddressFunc)(aParamCount > 3 ? (HCUSTOMMODULE)TokenToInt64(*aParam[3]) : MemoryDefaultGetProcAddress),
 									(CustomFreeLibraryFunc)(aParamCount > 4 ? (HCUSTOMMODULE)TokenToInt64(*aParam[4]) : MemoryDefaultFreeLibrary),
