@@ -10762,6 +10762,14 @@ VarSizeType BIV_ThreadID(LPTSTR aBuf, LPTSTR aVarName)
 // We're returning the length of the var's contents, not the size.
 {
 	return aBuf
+		? (VarSizeType)_tcslen(UTOA(g_ThreadID, aBuf)) // Must return exact length when aBuf isn't NULL.
+		: MAX_INTEGER_LENGTH;
+}
+
+VarSizeType BIV_MainThreadID(LPTSTR aBuf, LPTSTR aVarName)
+// We're returning the length of the var's contents, not the size.
+{
+	return aBuf
 		? (VarSizeType)_tcslen(UTOA(g_MainThreadID, aBuf)) // Must return exact length when aBuf isn't NULL.
 		: MAX_INTEGER_LENGTH;
 }

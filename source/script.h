@@ -3068,8 +3068,9 @@ BIV_DECL_R (BIV_AhkVersion);
 BIV_DECL_R (BIV_AhkPath);
 BIV_DECL_R (BIV_AhkDir);
 BIV_DECL_R (BIV_DllPath);
-BIV_DECL_R (BIV_DllDir);
-BIV_DECL_R (BIV_ThreadID);
+BIV_DECL_R(BIV_DllDir);
+BIV_DECL_R(BIV_ThreadID);
+BIV_DECL_R(BIV_MainThreadID);
 BIV_DECL_R (BIV_TickCount);
 BIV_DECL_R (BIV_Now);
 #ifdef CONFIG_WIN9X

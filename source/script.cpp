@@ -375,6 +375,7 @@ VarEntry g_BIV_A[] =
 	A_(LoopRegSubKey),
 	A_(LoopRegTimeModified),
 	A_(LoopRegType),
+	A_(MainThreadID),
 	A_x(MDay, BIV_DateTime),
 	A_(MemoryModule),
 	A_x(Min, BIV_DateTime),
