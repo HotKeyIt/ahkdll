@@ -71,7 +71,7 @@ CreateScript(script,pw:=""){
       } else if RegExMatch(A_LoopField,"^[^\{}\s]+\{}$")
         label := SubStr(A_LoopField,1,-2),script .= SubStr(mScript
           , h:=RegExMatch(mScript,"i)\n" label "\([^\\)\n]*\)\n?\s*\{")
-          , RegExMatch(mScript,"\n}\s*\n\K",1,h)-h) . "`r`n"
+          , RegExMatch(mScript,"\n}\s*\n\K",,h)-h) . "`r`n"
       else script .= A_LoopField "`r`n"
     }
   }
