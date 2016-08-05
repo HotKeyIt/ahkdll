@@ -407,6 +407,8 @@ Script::~Script() // Destructor.
 			GuiType::Destroy(*g_gui[g_guiCount - 1]); // Static method to avoid problems with object destroying itself.
 		free(g_gui);
 		g_gui = NULL;
+		g_guiCount = 0;
+		g_guiCountMax = 0;
 	}
 	
 	for (i = 0; i < GuiType::sFontCount; ++i) // Now that GUI windows are gone, delete all GUI fonts.
@@ -5084,8 +5086,14 @@ FAIL:
 	return FAIL;
 }
 
-
-inline __int64 UTF8ToUTF16(unsigned char* outb, __int64 outlen, const unsigned char* in, __int64 inlen)
+/*
+	adapted from https://dev.w3.org/XML/encoding.c
+	Copyright © World Wide Web Consortium,
+	(Massachusetts Institute of Technology, Institut National de Recherche
+	en Informatique et en Automatique, Keio University).All Rights Reserved.
+*/
+#ifdef _UNICODE
+inline size_t UTF8ToUTF16(unsigned char* outb, size_t outlen, const unsigned char* in, size_t inlen)
 {
 	unsigned short* out = (unsigned short*)outb;
 	const unsigned char* processed = in;
@@ -5097,6 +5105,7 @@ inline __int64 UTF8ToUTF16(unsigned char* outb, __int64 outlen, const unsigned c
 	int trailing;
 	unsigned char *tmp;
 	unsigned short tmp1, tmp2;
+	int count = 0;
 
 	/* UTF16LE encoding has no BOM */
 	if (in == NULL) {
@@ -5144,6 +5153,7 @@ inline __int64 UTF8ToUTF16(unsigned char* outb, __int64 outlen, const unsigned c
 				*tmp = c;
 				*(tmp + 1) = c >> 8;
 				out++;
+				count++;
 			}
 		}
 		else if (c < 0x110000) {
@@ -5161,13 +5171,88 @@ inline __int64 UTF8ToUTF16(unsigned char* outb, __int64 outlen, const unsigned c
 			*tmp = (unsigned char)tmp2;
 			*(tmp + 1) = tmp2 >> 8;
 			out++;
+			count++;
 		}
 		else
 			break;
 		processed = in;
 	}
-	return out - outstart;
+	return count;
 }
+#else
+int
+UTF8ToASCII(unsigned char* out, size_t outlen,const unsigned char* in, size_t inlen) {
+	const unsigned char* processed = in;
+	const unsigned char* outend;
+	const unsigned char* outstart = out;
+	const unsigned char* instart = in;
+	const unsigned char* inend;
+	unsigned int c, d;
+	int trailing;
+	int count = 0;
+
+	if (in == NULL) {
+		/*
+		* initialization nothing to do
+		*/
+		outlen = 0;
+		inlen = 0;
+		return(0);
+	}
+	inend = in + (inlen);
+	outend = out + (outlen);
+	while (in < inend) {
+		d = *in++;
+		if (d < 0x80)  { c = d; trailing = 0; }
+		else if (d < 0xC0) {
+			/* trailing byte in leading position */
+			outlen = out - outstart;
+			inlen = processed - instart;
+			return(-2);
+		}
+		else if (d < 0xE0)  { c = d & 0x1F; trailing = 1; }
+		else if (d < 0xF0)  { c = d & 0x0F; trailing = 2; }
+		else if (d < 0xF8)  { c = d & 0x07; trailing = 3; }
+		else {
+			/* no chance for this in Ascii */
+			outlen = out - outstart;
+			inlen = processed - instart;
+			return(-2);
+		}
+
+		if (inend - in < trailing) {
+			break;
+		}
+
+		for (; trailing; trailing--) {
+			if ((in >= inend) || (((d = *in++) & 0xC0) != 0x80))
+				break;
+			c <<= 6;
+			c |= d & 0x3F;
+		}
+
+		/* assertion: c is a single UTF-4 value */
+		if (c < 0x80) {
+			if (out >= outend)
+				break;
+			*out++ = c;
+			count++;
+		}
+		else {
+			/* no chance for this in Ascii */
+			outlen = out - outstart;
+			inlen = processed - instart;
+			*out++ = '?';
+			count++;
+			//return(-2);
+		}
+		processed = in;
+	}
+	outlen = out - outstart;
+	inlen = processed - instart;
+	return count;
+}
+#endif
 
 size_t Script::GetLine(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSection, TextStream *ts)
 {
@@ -5196,8 +5281,7 @@ size_t Script::GetLine(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSect
 #ifdef _UNICODE
 				aBuf_length = UTF8ToUTF16((unsigned char*)aBuf, aMaxCharsToRead, (unsigned char*)aDataBuf, aSizeEncrypted) - 1;
 #else
-				_tcscpy(aBuf, (LPTSTR)aDataBuf);
-				aBuf_length = _tcslen(aBuf);
+				aBuf_length = UTF8ToASCII((unsigned char*)aBuf, aMaxCharsToRead, (unsigned char*)aDataBuf, aSizeEncrypted) - 1;
 #endif
 				SecureZeroMemory(aDataBuf, aSizeEncrypted);
 				g_VirtualFree(aDataBuf, 0, MEM_RELEASE);
