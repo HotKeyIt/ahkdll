@@ -1006,7 +1006,8 @@ Script::~Script() // Destructor.
 	//g_guiCount = 0;
 	_tcscpy(g_EndChars, _T("-()[]{}:;'\"/\\,.?!\n \t"));  // Hotstring default end chars, including a space.
 	for (i = 1; Line::sSourceFileCount>i; i++) // first include file must not be deleted
-		free(Line::sSourceFile[i]);
+		if (Line::sSourceFile[i] != g_script->mOurEXE) // g_script->mOurEXE is used by ahkExec...
+			free(Line::sSourceFile[i]);
 	free(Line::sSourceFile);
 	Line::sSourceFile = NULL;
 	Line::sSourceFileCount = 0;
@@ -5134,7 +5135,12 @@ FAIL:
 	return FAIL;
 }
 
-
+/*
+adapted from https://dev.w3.org/XML/encoding.c
+Copyright © World Wide Web Consortium,
+(Massachusetts Institute of Technology, Institut National de Recherche
+en Informatique et en Automatique, Keio University).All Rights Reserved.
+*/
 inline size_t UTF8ToUTF16(unsigned char* outb, size_t outlen, const unsigned char* in, size_t inlen)
 {
 	unsigned short* out = (unsigned short*)outb;
