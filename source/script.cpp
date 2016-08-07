@@ -998,12 +998,7 @@ Script::~Script() // Destructor.
 	g_Warn_LocalSameAsGlobal = WARNMODE_OFF;
 	g_AllowOnlyOneInstance = SINGLE_INSTANCE_PROMPT;
 	g_AllowInterruption = TRUE;         //
-	// g_MaxVarCapacity is used to prevent a buggy script from consuming all available system RAM. It is defined = 
-	//g_ScreenDPI  =  GetScreenDPI();
-	//HDC hdc = GetDC(NULL);
-	//g_ScreenDPI = GetDeviceCaps(hdc, LOGPIXELSX);
-	//ReleaseDC(NULL, hdc);
-	//g_guiCount = 0;
+
 	_tcscpy(g_EndChars, _T("-()[]{}:;'\"/\\,.?!\n \t"));  // Hotstring default end chars, including a space.
 	for (i = 1; Line::sSourceFileCount>i; i++) // first include file must not be deleted
 		if (Line::sSourceFile[i] != g_script->mOurEXE) // g_script->mOurEXE is used by ahkExec...
@@ -1012,10 +1007,6 @@ Script::~Script() // Destructor.
 	Line::sSourceFile = NULL;
 	Line::sSourceFileCount = 0;
 	Line::sMaxSourceFiles = 0;
-	//Line::sMaxSourceFiles = 0;
-	//g_SimpleHeap->Delete(Line::sSourceFile);
-	//Line::sSourceFile = 0;
-	// free(Line::sSourceFile);
 #ifndef _USRDLL
 	for (i = 0; i < FUNC_LIB_COUNT; i++)
 		if (sLib[i].path)
@@ -1874,7 +1865,7 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 		BOOL ThreadIsRunning = true;
 		for (int i = 0; i < 100 && ThreadIsRunning; i++)
 		{
-			MsgSleep(50);
+			MsgSleep(20);
 			ThreadIsRunning = false;
 			for (int i = 1; i < MAX_AHK_THREADS; i++)
 			{
