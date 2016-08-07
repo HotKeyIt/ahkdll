@@ -442,7 +442,7 @@ BIF_DECL(BIF_sizeof)
 		else
 			buf += _tcslen(buf);
 	}
-	if (aParamCount < 2 && *aligntotal && (mod = offset % *aligntotal)) // align only if offset was not given
+	if (*aligntotal && (mod = offset % *aligntotal)) // align even if offset was given e.g. for _NMHDR:="HWND hwndFrom,UINT_PTR idFrom,UINT code", _NMTVGETINFOTIP: = "_NMHDR hdr,UINT uFlags,UInt link"
 		offset += (*aligntotal - mod) % *aligntotal;
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = offset;
