@@ -2614,7 +2614,7 @@ static void getEntryInfo(register TUNZIP *tunzip)
 				CopyMemory((void *)&tunzip->CurrentEntryInfo.crc, (unsigned char *)tunzip->ArchivePtr + tunzip->ArchiveBufLen - 8, 4);
 				reformat_long((unsigned char *)&tunzip->CurrentEntryInfo.crc);
 				CopyMemory((void *)&tunzip->CurrentEntryInfo.uncompressed_size, (unsigned char *)tunzip->ArchivePtr + tunzip->ArchiveBufLen - 4, 4);
-				reformat_long((unsigned char *)&tunzip->CurrentEntryInfo.uncompressed_size);
+ 				reformat_long((unsigned char *)&tunzip->CurrentEntryInfo.uncompressed_size);
 			}
 
 			// Seek to name offset upon return
