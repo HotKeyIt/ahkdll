@@ -1216,7 +1216,6 @@ STDAPI DllGetClassObject(const CLSID& clsid,
 		fclose(fp);
 		module = MemoryLoadLibrary(data, size);
 		free(data);
-		_freea(data);
 		typedef HRESULT (__stdcall *pDllGetClassObject)(IN REFCLSID clsid,IN REFIID iid,OUT LPVOID FAR* ppv);
 		pDllGetClassObject GetClassObject = (pDllGetClassObject)::MemoryGetProcAddress(module,"DllGetClassObject");
 		return GetClassObject(clsid,iid,ppv);
