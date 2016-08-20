@@ -225,12 +225,23 @@
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">_MBCS;MBCS;_USRDLL;AUTOCOMSERVER_EXPORTS;_STANDALONE;WIN32;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">NotUsing</PrecompiledHeader>
-      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">_MBCS;MBCS;_USRDLL;AUTOCOMSERVER_EXPORTS;_STANDALONE;WIN32;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">_MBCS;MBCS;_USRDLL;AUTOCOMSERVER_EXPORTS;WIN32;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">NotUsing</PrecompiledHeader>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">_MBCS;MBCS;_USRDLL;AUTOCOMSERVER_EXPORTS;_WIN64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">_UNICODE;UNICODE</UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+      </UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+      </UndefinePreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">_MBCS;MBCS;_USRDLL;AUTOCOMSERVER_EXPORTS;WIN32;_WIN64;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">_MBCS;MBCS;AUTOCOMSERVER_EXPORTS;_STANDALONE;WIN32;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">_MBCS;MBCS;AUTOCOMSERVER_EXPORTS;_STANDALONE;WIN32;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="source\script.cpp" />
     <ClCompile Include="source\script2.cpp" />
@@ -762,9 +773,12 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <TargetEnvironment Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">X64</TargetEnvironment>
-      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">_WIN64</PreprocessorDefinitions>
+      <TargetEnvironment Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">Win32</TargetEnvironment>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">
+      </PreprocessorDefinitions>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">
+      </ExcludedFromBuild>
     </Midl>
   </ItemGroup>
   <ItemGroup>
