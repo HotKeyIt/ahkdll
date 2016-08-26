@@ -775,7 +775,8 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 		Var *clipboard_var = g_script->FindOrAddVar(_T("Clipboard")); // Add it if it doesn't exist, in case the script accesses "Clipboard" via a dynamic variable.
 
 		g_script->mIsReadyToExecute = true; // This is done only after the above to support error reporting in Hotkey.cpp.
-		Sleep(20);
+		
+		//Sleep(20);
 
 		// Run the auto-execute part at the top of the script (this call might never return):
 		ResultType result = g_script->AutoExecSection();
