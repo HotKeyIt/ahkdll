@@ -3666,9 +3666,11 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 	else
 	{
 		HGLOBAL hResData;
-		if ( !( (textbuf.mLength = g_SizeofResource(g_hInstance, g_hResource))
+		if ((!g_hMemoryModule && !( (textbuf.mLength = g_SizeofResource(g_hInstance, g_hResource))
 			&& (hResData = g_LoadResource(g_hInstance, g_hResource))
 			&& (textbuf.mBuffer = g_LockResource(hResData)) ) )
+			|| (g_hMemoryModule && !((textbuf.mLength = MemorySizeOfResource(g_hMemoryModule, g_hResource))
+			&& (textbuf.mBuffer = MemoryLoadResource(g_hMemoryModule, g_hResource))) ) )
 		{
 			MsgBox(_T("Could not extract script from EXE."), 0, aFileSpec);
 			return FAIL;
