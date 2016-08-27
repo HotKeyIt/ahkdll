@@ -3216,7 +3216,7 @@ DWORD CompressBuffer(BYTE *aBuffer, LPVOID &aDataBuf, DWORD sz, TCHAR *pwd[]) //
 	if (aSize >= sz)
 	{
 		aSize = sz;
-		UnmapViewOfFile(aDataBuf);
+		UnmapViewOfFile(aBufferMem);
 		CloseHandle(aBase);
 		aBufferMem = aBuffer;
 	}
