@@ -1002,6 +1002,7 @@ BIF_DECL(BIF_ObjDump)
 				return;
 			}
 			memcpy(aBuffer, aDataBuf, aSize = aCompressedSize);
+			VirtualFree(aDataBuf, 0, MEM_RELEASE);
 		}
 	}
 	aResultToken.value_int64 = aSize;
