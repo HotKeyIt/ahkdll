@@ -3355,6 +3355,7 @@ DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf,DWORD sz, TCHAR *pwd[]) //
 				CryptAES(aDataEncryptedString, aSizeEncrypted, pwd, false);
 				aDataEncrypted = (BYTE*)g_VirtualAlloc(NULL, aSizeDataEncrypted, MEM_COMMIT, PAGE_READWRITE);
 				g_CryptStringToBinaryA(aDataEncryptedString, NULL, CRYPT_STRING_BASE64, aDataEncrypted, &aSizeEncrypted, NULL, NULL);
+				g_VirtualFree(aDataEncryptedString, 0, MEM_RELEASE);
 				if (aSizeDeCompressed == aSizeCompressed)
 				{
 					memcpy(aDataBuf, aDataEncrypted, aSizeDeCompressed);
