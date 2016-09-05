@@ -423,11 +423,9 @@ SplashImage(aImageFile,aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFon
   {
     use_gdi_plus := false
     while (A_Index=1 || use_gdi_plus:=true){ 
-      splash.pic_bmp := LoadPicture(image_filename
-          ,splash.object_width == COORD_UNSPECIFIED ? 0 : splash.object_width
-          ,splash.object_height == COORD_UNSPECIFIED ? 0 : splash.object_height
-          ,temp_pic_type, 0, use_gdi_plus)
-      splash.pic_type:=temp_pic_type
+      splash.pic_bmp := LoadPicture(image_filename,(splash.object_width == COORD_UNSPECIFIED ? "" : "w" splash.object_width)
+                                                 . (splash.object_height == COORD_UNSPECIFIED ? "" : " h" splash.object_height) 
+                                                 . (use_gdi_plus?" GDI+":""))
       if (splash.pic_bmp || use_gdi_plus)
         break
         ;  Re-attempt with GDI+. The first attempt is made without it for backward compatibility.
