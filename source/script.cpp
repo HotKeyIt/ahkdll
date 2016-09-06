@@ -5234,7 +5234,7 @@ UTF8ToASCII(unsigned char* out, size_t outlen,const unsigned char* in, size_t in
 		}
 
 		/* assertion: c is a single UTF-4 value */
-		if (c < 0x80) {
+		if (c < 0x100) { // changed from 0x80 to 0x100 to allow all 256 characters
 			if (out >= outend)
 				break;
 			*out++ = c;
