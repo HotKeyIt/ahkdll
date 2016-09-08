@@ -358,7 +358,7 @@ EXPORT int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR par
 			aFuncAndToken.mToken.buf = aFuncAndToken.buf;
 			aFuncAndToken.mToken.marker = aFunc->mName;
 			
-			aFunc->mBIF(aResult,aFuncAndToken.mToken,aFuncAndToken.param,aParamsCount);
+			aFunc->mBIF(aResult, aFuncAndToken.mToken, aFuncAndToken.param, aFunc->mParamCount < aParamsCount ? aFunc->mParamCount : aParamsCount);
 			LeaveCriticalSection(&g_CriticalAhkFunction);
 			return 0;
 		}
@@ -720,7 +720,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 			aFuncAndToken.mToken.buf = aFuncAndToken.buf;
 			aFuncAndToken.mToken.marker = aFunc->mName;
 			
-			aFunc->mBIF(aResult,aFuncAndToken.mToken,aFuncAndToken.param,aParamsCount);
+			aFunc->mBIF(aResult, aFuncAndToken.mToken, aFuncAndToken.param, aFunc->mParamCount < aParamsCount ? aFunc->mParamCount : aParamsCount);
 			
 			switch (aFuncAndToken.mToken.symbol)
 			{
@@ -1024,7 +1024,7 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 			aResultToken.symbol = SYM_INTEGER;
 			aResultToken.marker = aFunc->mName;
 			
-			aFunc->mBIF(aResult,aResultToken,aParam,aParamsCount);
+			aFunc->mBIF(aResult, aResultToken, aParam, aFunc->mParamCount < aParamsCount ? aFunc->mParamCount : aParamsCount);
 
 			// free all variables in case memory was allocated
 			for (int i = 0;i < aParamsCount;i++)
