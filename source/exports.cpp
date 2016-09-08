@@ -817,9 +817,10 @@ EXPORT int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR par
 			aFuncAndToken.mToken.func = aFunc;
 			aFuncAndToken.mToken.marker = aFunc->mName;
 			
-			aFunc->mBIF(aFuncAndToken.mToken,aFuncAndToken.param,aParamsCount);
+			aFunc->mBIF(aFuncAndToken.mToken, aFuncAndToken.param, aFunc->mParamCount < aParamsCount ? aFunc->mParamCount : aParamsCount);
 #ifndef _USRDLL
-			curr_teb->ThreadLocalStoragePointer = tls;
+			if (tls)
+				curr_teb->ThreadLocalStoragePointer = tls;
 #endif
 			LeaveCriticalSection(&g_CriticalAhkFunction);
 			return 0;
@@ -1360,10 +1361,11 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 			aFuncAndToken.mToken.func = aFunc;
 			aFuncAndToken.mToken.marker = aFunc->mName;
 			
-			aFunc->mBIF(aFuncAndToken.mToken,aFuncAndToken.param,aParamsCount);
+			aFunc->mBIF(aFuncAndToken.mToken, aFuncAndToken.param, aFunc->mParamCount < aParamsCount ? aFunc->mParamCount : aParamsCount);
 
 #ifndef _USRDLL
-			curr_teb->ThreadLocalStoragePointer = tls;
+			if (tls)
+				curr_teb->ThreadLocalStoragePointer = tls;
 #endif
 			switch (aFuncAndToken.mToken.symbol)
 			{
@@ -1665,7 +1667,7 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 			aResultToken.symbol = SYM_INTEGER;
 			aResultToken.marker = aFunc->mName;
 			
-			aFunc->mBIF(aResultToken,aParam,aParamsCount);
+			aFunc->mBIF(aResultToken,aParam,aFunc->mParamCount < aParamsCount ? aFunc->mParamCount : aParamsCount);
 
 			// free all variables in case memory was allocated
 			for (int i = 0;i < aParamsCount;i++)
