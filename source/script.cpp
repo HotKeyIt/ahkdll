@@ -5184,7 +5184,8 @@ inline size_t UTF8ToUTF16(unsigned char* outb, size_t outlen, const unsigned cha
 #else
 int
 UTF8ToASCII(unsigned char* out, size_t outlen,const unsigned char* in, size_t inlen) {
-	static char aLocale[131072] = { '?' };
+	static BYTE aUtC[131072] = { 0 };
+	static WORD aMaxCharSize = 1;
 	static bool aUseLocale = false;
 	const unsigned char* processed = in;
 	const unsigned char* outend;
@@ -5195,7 +5196,7 @@ UTF8ToASCII(unsigned char* out, size_t outlen,const unsigned char* in, size_t in
 	int trailing;
 	int count = 0;
 
-	if (!aUseLocale && *aLocale == '?')
+	if (!aUseLocale && aUtC[0] == 0)
 	{
 		DWORD aACP = GetACP();
 		char aACPBuf[MAX_INTEGER_LENGTH] = { 0 };
@@ -5206,19 +5207,24 @@ UTF8ToASCII(unsigned char* out, size_t outlen,const unsigned char* in, size_t in
 		HANDLE hLocaleFile = CreateFile(aLocalePath, GENERIC_READ, FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, NULL, NULL);
 		if (hLocaleFile != INVALID_HANDLE_VALUE)
 		{
-			DWORD aBytesRead = 0;
-			SetFilePointer(hLocaleFile, 28, NULL, FILE_CURRENT);
-			ReadFile(hLocaleFile, aLocale, 131072, &aBytesRead, NULL);
+			typedef struct {
+				WORD wSize, CodePage, MaxCharSize;
+				BYTE DefaultChar[2];
+				WORD UnicodeDefaultChar, unknown1, unknown2;
+				BYTE LeadByte[MAX_LEADBYTES];
+				WORD offsetUtC;
+			} NLSFILEHEADER;
+			NLSFILEHEADER aLocaleStruct = { 0 };
+			SetFilePointer(hLocaleFile, 0, NULL, FILE_BEGIN);
+			ReadFile(hLocaleFile, &aLocaleStruct, sizeof(NLSFILEHEADER), NULL, NULL);
+			aMaxCharSize = aLocaleStruct.MaxCharSize;
+			SetFilePointer(hLocaleFile, (aLocaleStruct.offsetUtC + aLocaleStruct.wSize + 1) * 2, NULL, FILE_BEGIN);
+			ReadFile(hLocaleFile, &aUtC, 65536 * 2, NULL, NULL);
 			CloseHandle(hLocaleFile);
-			if (aBytesRead != 131072)
-				*aLocale = '\0';
-			else
-				aUseLocale = true;
+			aUseLocale = true;
 		}
 		else
-		{
-			*aLocale = '\0';
-		}
+			aUtC[0] = 1;
 	}
 
 	if (in == NULL) {
@@ -5264,22 +5270,25 @@ UTF8ToASCII(unsigned char* out, size_t outlen,const unsigned char* in, size_t in
 		if (out >= outend)
 			break;
 		/* assertion: c is a single UTF-4 value */
-		if (!aUseLocale)
+		if (c < 0x80) // changed from 0x80 to 0x100 to allow all 256 characters
 		{
-			if (c < 0x100) // changed from 0x80 to 0x100 to allow all 256 characters
-			{
-				*out++ = c;
-			}
-			else
-			{	/* no chance for this in Ascii */
-				outlen = out - outstart;
-				inlen = processed - instart;
-				*out++ = '?';
-				//return(-2);
-			}
+			*out++ = c;
 		}
-		else {
-			*out++ = aLocale[c*2];
+		else if (!aUseLocale)
+		{	/* no chance for this in Ascii */
+			outlen = out - outstart;
+			inlen = processed - instart;
+			*out++ = '?';
+			//return(-2);
+		}
+		else 
+		{
+			if (aMaxCharSize == 2 && aUtC[c * aMaxCharSize + 1] != 0)
+			{
+				*out++ = aUtC[c * aMaxCharSize + 1];
+				count++;
+			}
+			*out++ = aUtC[c * aMaxCharSize];
 		}
 		count++;
 		processed = in;
