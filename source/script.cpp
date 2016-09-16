@@ -1015,11 +1015,13 @@ Script::~Script() // Destructor.
 			sLib[i].path = NULL;
 		}
 #endif
-#ifdef _USRDLL
-#endif
 	// AddRemoveHooks(0); // done in ~Script
 	Hotkey::AllDestruct();
 	Hotstring::AllDestruct();
+#ifndef _USRDLL
+	if (g_MainThreadID != g_ThreadID)
+		Hotkey::ManifestAllHotkeysHotstringsHooks();
+#endif
 #ifdef _USRDLL
 	Line::sLogNext = 0;
 	memset(Line::sLog,NULL,sizeof(Line*) * LINE_LOG_SIZE);
