@@ -9563,7 +9563,7 @@ VarSizeType BIV_GlobalStruct(LPTSTR aBuf, LPTSTR aVarName)
 VarSizeType BIV_ScriptStruct(LPTSTR aBuf, LPTSTR aVarName)
 {
 	return aBuf
-		? (VarSizeType)_tcslen(ITOA64((LONGLONG)&g_script, aBuf))
+		? (VarSizeType)_tcslen(ITOA64((LONGLONG)g_script, aBuf))
 		: MAX_INTEGER_LENGTH;
 }
 
