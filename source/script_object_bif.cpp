@@ -189,7 +189,7 @@ BIF_DECL(BIF_sizeof)
 	if (aParamCount > 2 && TokenIsNumeric(*aParam[2]))
 	{   // a pointer was given to return memory to align
 		aligntotal = (int*)TokenToInt64(*aParam[2]);
-		Var3.value_int64 = (__int64)aligntotal;
+		Var3.value_int64 = (__int64)*aligntotal;
 	}
 	// Set buf to beginning of structure definition
 	buf = TokenToString(*aParam[0]);
@@ -238,7 +238,7 @@ BIF_DECL(BIF_sizeof)
 			}
 			else
 				offset = unionoffset[uniondepth];
-			if (unionisstruct[uniondepth] && structalign[uniondepth] > *aligntotal)
+			if (structalign[uniondepth] > *aligntotal)
 				*aligntotal = structalign[uniondepth];
 			if (unionsize[uniondepth]>totalunionsize)
 				totalunionsize = unionsize[uniondepth];
