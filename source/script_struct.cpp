@@ -149,7 +149,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			}
 			else
 				offset = unionoffset[uniondepth];
-			if (unionisstruct[uniondepth] && structalign[uniondepth] > aligntotal)
+			if (structalign[uniondepth] > aligntotal)
 				aligntotal = structalign[uniondepth];
 			if (unionsize[uniondepth]>totalunionsize)
 				totalunionsize = unionsize[uniondepth];
