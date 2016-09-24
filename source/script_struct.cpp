@@ -156,9 +156,10 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			// last item in union or structure, update offset now if not struct, for struct offset is up to date
 			if (--uniondepth == 0)
 			{
-				// end of structure, align it
-				if (mod = totalunionsize % aligntotal)
-					totalunionsize += (aligntotal - mod) % aligntotal;
+				// EDIT, no need to align here, next item will be aligned if necessary
+				// end of structure, align it. 
+				//if (mod = totalunionsize % aligntotal)
+				//	totalunionsize += (aligntotal - mod) % aligntotal;
 				offset += totalunionsize;
 			}
 			bitsizetotal = bitsize = 0;
