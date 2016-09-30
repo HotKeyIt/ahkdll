@@ -25,7 +25,6 @@ GNU General Public License for more details.
 #include "exports.h"  // N11
 #include <process.h>  // N11
 
-
 #include <objbase.h> // COM
 #include "ComServer_i.h"
 #include "ComServer_i.c"
@@ -103,9 +102,8 @@ switch(fwdReason)
 			 free(scriptstring);
 		 if (Line::sMaxSourceFiles)
 			free(Line::sSourceFile);
-#ifdef _DEBUG
-		free(g_Debugger.mStack.mBottom);
-#endif
+		 if (g_Debugger.mStack.mSize)
+			free(g_Debugger.mStack.mBottom);
 		 if (g_input.MatchCount)
 		 {
 			 free(g_input.match);

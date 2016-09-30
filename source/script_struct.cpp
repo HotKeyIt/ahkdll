@@ -271,7 +271,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 				g_script->ScriptError(ERR_INVALID_STRUCT, tempbuf);
 				return NULL;
 			}
-			_tcscpy(keybuf,tempbuf);
+			_tcsncpy(keybuf,tempbuf, _countof(keybuf));
 			if (bitfield = _tcschr(keybuf, ':'))
 			{
 				*bitfield = '\0';
