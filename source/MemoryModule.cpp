@@ -765,10 +765,12 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data, size_t size,
             // notify library about attaching to process
             BOOL successfull = (*DllEntry)((HINSTANCE)code, DLL_PROCESS_ATTACH, result);
             // Disable hook if it was enabled before
-            if (pHook)
-                MinHookDisable(pHook);
-            if (hHeap)
-                HeapDestroy(hHeap);
+			if (pHook)
+			{
+				MinHookDisable(pHook);
+				HeapFree(hHeap, 0, pHook);
+				HeapDestroy(hHeap);
+			}
             LeaveCriticalSection(aLoaderLock);
 
             if (!successfull) {
