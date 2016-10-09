@@ -762,7 +762,8 @@ EXPORT int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR par
 	if (!g_script || !script->mIsReadyToExecute)
 	{
 #ifndef _USRDLL
-		curr_teb->ThreadLocalStoragePointer = tls;
+		if (curr_teb)
+			curr_teb->ThreadLocalStoragePointer = tls;
 #endif
 		return -1; // AutoHotkey needs to be running at this point //
 	}
@@ -828,7 +829,8 @@ EXPORT int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR par
 		else
 		{
 #ifndef _USRDLL
-			curr_teb->ThreadLocalStoragePointer = tls;
+			if (curr_teb)
+				curr_teb->ThreadLocalStoragePointer = tls;
 #endif
 			EnterCriticalSection(&g_CriticalAhkFunction);
 			if (++returnCount > 9)
@@ -871,7 +873,8 @@ EXPORT int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR par
 	else // Function not found
 	{
 #ifndef _USRDLL
-		curr_teb->ThreadLocalStoragePointer = tls;
+		if (curr_teb)
+			curr_teb->ThreadLocalStoragePointer = tls;
 #endif
 		return -1;
 	}
@@ -1306,7 +1309,8 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 	if (!g_script || !script->mIsReadyToExecute)
 	{
 #ifndef _USRDLL
-		curr_teb->ThreadLocalStoragePointer = tls;
+		if (curr_teb)
+			curr_teb->ThreadLocalStoragePointer = tls;
 #endif
 		return 0; // AutoHotkey needs to be running at this point //
 	}
@@ -1364,7 +1368,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 			aFunc->mBIF(aFuncAndToken.mToken, aFuncAndToken.param, aFunc->mParamCount < aParamsCount ? aFunc->mParamCount : aParamsCount);
 
 #ifndef _USRDLL
-			if (tls)
+			if (curr_teb)
 				curr_teb->ThreadLocalStoragePointer = tls;
 #endif
 			switch (aFuncAndToken.mToken.symbol)
@@ -1441,7 +1445,8 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 		else // UDF
 		{
 #ifndef _USRDLL
-			curr_teb->ThreadLocalStoragePointer = tls;
+			if (curr_teb)
+				curr_teb->ThreadLocalStoragePointer = tls;
 #endif
 			//for (;aFunc->mParamCount > aParamCount && aParamsCount>aParamCount;aParamCount++)
 			//	aFunc->mParam[aParamCount].var->AssignString(*params[aParamCount]);
@@ -1486,7 +1491,8 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 	else // Function not found
 	{
 #ifndef _USRDLL
-		curr_teb->ThreadLocalStoragePointer = tls;
+		if (curr_teb)
+			curr_teb->ThreadLocalStoragePointer = tls;
 #endif
 		return _T("");
 	}
