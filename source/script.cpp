@@ -173,14 +173,14 @@ FuncEntry g_BIF[] =
 	BIF1(Object, 0, NA, true),
 	BIFn(ObjAddRef, 1, 1, true, BIF_ObjAddRefRelease),
 	BIFn(ObjRelease, 1, 1, true, BIF_ObjAddRefRelease),
-	BIF1(ObjBindMethod, 1, NA, false),
+	BIF1(ObjBindMethod, 1, NA, true),
 	BIF1(ObjRawSet, 3, 3, false),
 
 	BIFn(ObjInsertAt, 3, NA, false, BIF_ObjXXX),
 	BIFn(ObjDelete, 2, 3, true, BIF_ObjXXX),
 	BIFn(ObjRemoveAt, 2, 3, true, BIF_ObjXXX),
-	BIFn(ObjPush, 2, NA, false, BIF_ObjXXX),
-	BIFn(ObjPop, 1, 1, false, BIF_ObjXXX),
+	BIFn(ObjPush, 2, NA, true, BIF_ObjXXX),
+	BIFn(ObjPop, 1, 1, true, BIF_ObjXXX),
 	BIFn(ObjLength, 1, 1, true, BIF_ObjXXX),
 	BIFn(ObjCount, 1, 1, true, BIF_ObjXXX),
 	BIFn(ObjMaxIndex, 1, 1, true, BIF_ObjXXX),
@@ -408,7 +408,7 @@ VarEntry g_BIV_A[] =
 	A_(ScriptDir),
 	A_(ScriptFullPath),
 	A_(ScriptHwnd),
-	A_(ScriptName),
+	A_w(ScriptName),
 	A_(ScriptStruct),
 	A_x(Sec, BIV_DateTime),
 	A_w(SendLevel),
@@ -487,6 +487,7 @@ Script::Script()
 	, mCurrFileIndex(0), mCombinedLineNumber(0), mNoHotkeyLabels(true)
 	, mMenuUseErrorLevel(false)
 	, mFileSpec(_T("")), mFileDir(_T("")), mFileName(_T("")), mOurEXE(_T("")), mOurEXEDir(_T("")), mMainWindowTitle(_T(""))
+	, mScriptName(NULL)
 	, mIsReadyToExecute(false), mAutoExecSectionIsRunning(false)
 	, mIsRestart(false), mErrorStdOut(false)
 	, mIncludeLibraryFunctionsThenExit(NULL)
@@ -2197,6 +2198,24 @@ UINT Script::LoadFromFile()
 
 
 
+bool IsFlowFunction(LPTSTR aBuf, size_t aBufLen = -1)
+{
+	static LPTSTR sControlFlow[] = {
+		// Allowed because they accept an expression by default:
+		_T("If"), _T("While"), _T("Until"), _T("Return"),
+		// Allowed because () is supported to force all parameters to be expressions:
+		_T("Loop"), _T("LoopFiles"), _T("LoopReg"), _T("LoopRead"), _T("LoopParse")
+	};
+	if (aBufLen == -1)
+		aBufLen = _tcslen(aBuf);
+	for (int i = 0; i < _countof(sControlFlow); ++i)
+		if (!tcslicmp(aBuf, sControlFlow[i], aBufLen))
+			return true;
+	return false;
+}
+
+
+
 bool IsFunction(LPTSTR aBuf, bool *aPendingFunctionHasBrace = NULL)
 // Helper function for LoadIncludedFile().
 // Caller passes in an aBuf containing a candidate line such as "function(x, y)"
@@ -2223,9 +2242,8 @@ bool IsFunction(LPTSTR aBuf, bool *aPendingFunctionHasBrace = NULL)
 	// opening parenthesis to occur after a legitimate/quoted colon or double-colon in its parameters.
 	// v1.0.40.04: Added condition "action_end != aBuf" to allow a hotkey or remap or hotkey such as
 	// such as "(::" to work even if it ends in a close-parenthesis such as "(::)" or "(::MsgBox )"
-	if (!(action_end && *action_end == '(' && action_end != aBuf
-		&& tcslicmp(aBuf, _T("IF"), action_end - aBuf)
-		&& tcslicmp(aBuf, _T("WHILE"), action_end - aBuf)) // v1.0.48.04: Recognize While() as loop rather than a function because many programmers are in the habit of writing while() and if().
+	if (   !(action_end && *action_end == '(' && action_end != aBuf)
+		|| IsFlowFunction(aBuf, action_end - aBuf) // Control flow statement such as if(expression).
 		|| action_end[1] == ':') // v1.0.44.07: This prevents "$(::fn_call()" from being seen as a function-call vs. hotkey-with-call.  For simplicity and due to rarity, omit_leading_whitespace() isn't called; i.e. assumes that the colon immediate follows the '('.
 		return false;
 	LPTSTR aBuf_last_char = action_end + _tcslen(action_end) - 1; // Above has already ensured that action_end is "(...".
@@ -6394,7 +6412,7 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 		TCHAR end_char = *end_marker;
 		could_be_named_action = (end_char == g_delimiter || !end_char || IS_SPACE_OR_TAB(end_char)
 			// Allow If() and While() but something like MsgBox() should always be a function-call:
-			|| (end_char == '(' && (!_tcsicmp(action_name, _T("If")) || !_tcsicmp(action_name, _T("While")))));
+			|| (end_char == '(' && IsFlowFunction(action_name)));
 	}
 	else
 	{
@@ -6405,6 +6423,7 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 	// Now action_args is either the first delimiter or the first parameter (if the optional first
 	// delimiter was omitted).
 	bool add_openbrace_afterward = false; // v1.0.41: Set default for use in supporting brace in "if (expr) {" and "Loop {".
+	bool all_args_are_expressions = false;
 
 	if (!aActionType) // i.e. the caller hasn't yet determined this line's action type.
 	{
@@ -6673,6 +6692,33 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 	}
 	switch (aActionType)
 	{
+	case ACT_LOOP:
+	case ACT_LOOP_FILE:
+	case ACT_LOOP_REG:
+	case ACT_LOOP_READ:
+	case ACT_LOOP_PARSE:
+		if (end_marker && *end_marker == '(')
+		{
+			LPTSTR last_char = end_marker + _tcslen(end_marker) - 1;
+			if (*last_char == '{')
+			{
+				// Allow OTB if valid: Loop Parse(...) {
+				last_char = omit_trailing_whitespace(end_marker, last_char - 1);
+				if (*last_char == ')')
+					add_openbrace_afterward = true;
+			}
+			if (*last_char == ')')
+			{
+				// Remove the parentheses (and possible open brace) and trailing space.
+				ASSERT(action_args == end_marker);
+				++action_args;
+				last_char = omit_trailing_whitespace(end_marker, last_char - 1);
+				last_char[1] = '\0';
+				// Treat this like a function call: all parameters are sub-expressions.
+				all_args_are_expressions = true;
+			}
+		}
+		break;
 	case ACT_CATCH:
 		if (*action_args != '{') // i.e. "Catch varname" must be handled a different way.
 			break;
@@ -6880,22 +6926,29 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 		// The above does not need the in_quotes and in_parens checks because commas in the last arg
 		// are always literal, so there's no problem even in expressions.
 
-		// The following implements the "% " prefix as a means of forcing an expression:
-		is_expression = *arg[nArgs] == g_DerefChar && !*arg_map[nArgs] // It's a non-literal deref character.
-			&& IS_SPACE_OR_TAB(arg[nArgs][1]); // Followed by a space or tab.
-
-		if (is_expression)
+		if (all_args_are_expressions)
 		{
-			// Skip the "% " prefix.
-			mark += 2;
+			// This is a pseudo-function-call to a control flow statement, such as Loop Parse(string, delim) {}.
+			is_expression = true;
 		}
-		
+		else
+		{
+			// The following implements the "% " prefix as a means of forcing an expression:
+			is_expression = *arg[nArgs] == g_DerefChar && !*arg_map[nArgs] // It's a non-literal deref character.
+				&& IS_SPACE_OR_TAB(arg[nArgs][1]); // Followed by a space or tab.
+
+			if (is_expression)
+			{
+				// Skip the "% " prefix.
+				mark += 2;
+			}
+		}
 		// Since this part of the loop never executes for the last arg of a command (due to the 
 		// nArgs == max_params_minus_one check above) and currently all control flow statements
 		// accept expressions only in their last or only arg, it's tempting to remove this block.
 		// However, it's actually needed for ACT_IF, where a second pseudo-arg is added for
 		// handling a same-line sub-action.  It might be needed for other commands in future.
-		else if (aActionType < ACT_FIRST_COMMAND) // v2: Search for "NumericParams" for comments.
+		if (!is_expression && aActionType < ACT_FIRST_COMMAND) // v2: Search for "NumericParams" for comments.
 		{
 			int nArgs_plus_one = nArgs + 1;
 			for (ActionTypeType *np = this_action.NumericParams; *np; ++np)
@@ -6990,7 +7043,7 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 		}
 	}
 
-	if (!AddLine(aActionType, arg, nArgs, arg_map))
+	if (!AddLine(aActionType, arg, nArgs, arg_map, all_args_are_expressions))
 		return FAIL;
 	if (add_openbrace_afterward)
 		if (!AddLine(ACT_BLOCK_BEGIN))
@@ -7047,7 +7100,7 @@ inline ActionTypeType Script::ConvertActionType(LPTSTR aActionTypeString)
 
 
 
-ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc, LPTSTR aArgMap[])
+ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc, LPTSTR aArgMap[], bool aAllArgsAreExpressions)
 // aArg must be a collection of pointers to memory areas that are modifiable, and there
 // must be at least aArgc number of pointers in the aArg array.  In v1.0.40, a caller (namely
 // the "macro expansion" for remappings such as "a::b") is allowed to pass a non-NULL value for
@@ -7149,6 +7202,11 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 			}
 			else // this_new_arg.type == ARG_TYPE_NORMAL (excluding those input/output_vars that were converted to normal because they were blank, above).
 			{
+				if (aAllArgsAreExpressions)
+				{
+					// For pseudo-function-calls to control flow statements, such as Loop Parse(string, delim) {}.
+					this_new_arg.is_expression = true;
+				}
 				// v1.0.29: Allow expressions in any parameter that starts with % followed by a space
 				// or tab. This should be unambiguous because spaces and tabs are illegal in variable names.
 				// Since there's little if any benefit to allowing input and output variables to be
@@ -7156,7 +7214,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 				// need to review other sections to ensure they will tolerate it.  Also, the following
 				// would probably need revision to get it to be detected as an output-variable:
 				// % Array%i% = value
-				if (*this_aArg == g_DerefChar && !(this_aArgMap && *this_aArgMap) // It's a non-literal deref character.
+				else if (*this_aArg == g_DerefChar && !(this_aArgMap && *this_aArgMap) // It's a non-literal deref character.
 					&& IS_SPACE_OR_TAB(this_aArg[1])) // Followed by a space or tab.
 				{
 					this_new_arg.is_expression = true;
@@ -8881,8 +8939,8 @@ ResultType Script::DefineClass(LPTSTR aBuf)
 	}
 
 	// Validate the name even if this is a nested definition, for consistency.
-	if (!Var::ValidateName(class_name, DISPLAY_NO_ERROR))
-		return ScriptError(_T("Invalid class name."), class_name);
+	if (!Var::ValidateName(class_name, DISPLAY_CLASS_ERROR))
+		return FAIL;
 
 	class_object = NULL; // This initializes the entry in the mClassObject array.
 
@@ -10668,8 +10726,8 @@ ResultType Script::AddGroup(LPTSTR aGroupName)
 	size_t aGroupName_length = _tcslen(aGroupName);
 	if (aGroupName_length > MAX_VAR_NAME_LENGTH)
 		return ScriptError(_T("Group name too long."), aGroupName);
-	if (!Var::ValidateName(aGroupName, DISPLAY_NO_ERROR)) // Seems best to use same validation as var names.
-		return ScriptError(_T("Illegal group name."), aGroupName);
+	if (!Var::ValidateName(aGroupName, DISPLAY_GROUP_ERROR)) // Seems best to use same validation as var names.
+		return FAIL;
 
 	LPTSTR new_name = g_SimpleHeap->Malloc(aGroupName, aGroupName_length);
 	if (!new_name)
@@ -11073,7 +11131,7 @@ Line *Script::PreparseBlocks(Line *aStartingLine, ExecUntilMode aMode, Line *aPa
 				line->mRelatedLine = line_temp;
 			}
 			if (line_temp->mActionType == ACT_UNTIL
-				&& (line->mActionType == ACT_LOOP || line->mActionType == ACT_FOR)) // WHILE is excluded because PerformLoopWhile() doesn't handle UNTIL, due to rarity of need.
+				&& ACT_IS_LOOP_EXCLUDING_WHILE(line->mActionType)) // WHILE is excluded because PerformLoopWhile() doesn't handle UNTIL, due to rarity of need.
 			{
 				// For consistency/maintainability:
 				line_temp->mParentLine = line->mParentLine;
@@ -11296,6 +11354,8 @@ Line *Script::PreparseCommands(Line *aStartingLine)
 					LPTSTR cp = line_raw_arg1 + 2;
 					if (!*cp) // Just "If"
 					{
+						if (line->mArgc > 2)
+							return line->PreparseError(ERR_PARAM3_MUST_BE_BLANK);
 						if (*line_raw_arg2 && !line->ArgHasDeref(2))
 						{
 							// Hotkey, If, Expression: Ensure the expression matches exactly an existing #If,

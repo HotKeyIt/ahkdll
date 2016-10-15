@@ -679,11 +679,6 @@ ResultType Line::Input()
 		{
 			g_input.EndedBySC ? SCtoKeyName(g_input.EndingSC, key_name + 7, _countof(key_name) - 7)
 				: VKtoKeyName(g_input.EndingVK, key_name + 7, _countof(key_name) - 7);
-			// For partial backward-compatibility, keys A-Z are upper-cased when handled by VK,
-			// but only if they actually correspond to those characters.  If this wasn't done,
-			// the character would always be lowercase since the shift state is not considered.
-			if (key_name[7] >= 'a' && key_name[7] <= 'z')
-				key_name[7] -= 32;
 		}
 		g_ErrorLevel->Assign(key_name);
 		break;
@@ -4479,6 +4474,18 @@ DWORD GetAHKInstallDir(LPTSTR aBuf)
 
 
 
+LPTSTR Script::DefaultDialogTitle()
+{
+	// If the script has set A_ScriptName, use that:
+	if (mScriptName)
+		return mScriptName;
+	// If available, the script's filename seems a much better title than the program name
+	// in case the user has more than one script running:
+	return (mFileName && *mFileName) ? mFileName : T_AHK_NAME_VERSION;
+}
+
+
+
 //////////////
 // InputBox //
 //////////////
@@ -4535,9 +4542,7 @@ ResultType InputBox(Var *aOutputVar, LPTSTR aTitle, LPTSTR aText, LPTSTR aOption
 	}
 	if (!aOutputVar) return FAIL;
 	if (!*aTitle)
-		// If available, the script's filename seems a much better title in case the user has
-		// more than one script running:
-		aTitle = (g_script->mFileName && *g_script->mFileName) ? g_script->mFileName : T_AHK_NAME_VERSION;
+		aTitle = g_script->DefaultDialogTitle();
 	// Limit the size of what we were given to prevent unreasonably huge strings from
 	// possibly causing a failure in CreateDialog().  This copying method is always done because:
 	// Make a copy of all string parameters, using the stack, because they may reside in the deref buffer
@@ -5858,7 +5863,7 @@ int SortUDF(const void *a1, const void *a2)
 
 	LPTSTR aStr1 = *(LPTSTR *)a1;
 	LPTSTR aStr2 = *(LPTSTR *)a2;
-	bool returned = g_SortFunc->Call(result_token, 2, FUNC_ARG_STR(aStr1), FUNC_ARG_STR(aStr2), FUNC_ARG_INT(aStr2 - aStr1));
+	bool returned = g_SortFunc->Call(result_token, 3, FUNC_ARG_STR(aStr1), FUNC_ARG_STR(aStr2), FUNC_ARG_INT(aStr2 - aStr1));
 
 	// MUST handle return_value BEFORE calling FreeAndRestoreFunctionVars() because return_value might be
 	// the contents of one of the function's local variables (which are about to be free'd).
@@ -7467,7 +7472,7 @@ ResultType Line::FileSelect(LPTSTR aOptions, LPTSTR aWorkingDir, LPTSTR aGreetin
 	else
 		// Use a more specific title so that the dialogs of different scripts can be distinguished
 		// from one another, which may help script automation in rare cases:
-		sntprintf(greeting, _countof(greeting), _T("Select File - %s"), g_script->mFileName);
+		sntprintf(greeting, _countof(greeting), _T("Select File - %s"), g_script->DefaultDialogTitle());
 
 	// The filter must be terminated by two NULL characters.  One is explicit, the other automatic:
 	TCHAR filter[1024] = _T(""), pattern[1024] = _T("");  // Set default.
@@ -10130,9 +10135,21 @@ VarSizeType BIV_ScreenWidth_Height(LPTSTR aBuf, LPTSTR aVarName)
 
 VarSizeType BIV_ScriptName(LPTSTR aBuf, LPTSTR aVarName)
 {
+	LPTSTR script_name = g_script->mScriptName ? g_script->mScriptName : g_script->mFileName;
 	if (aBuf)
-		_tcscpy(aBuf, g_script->mFileName);
-	return (VarSizeType)_tcslen(g_script->mFileName);
+		_tcscpy(aBuf, script_name);
+	return (VarSizeType)_tcslen(script_name);
+}
+
+BIV_DECL_W(BIV_ScriptName_Set)
+{
+	// For simplicity, a new buffer is allocated each time.  It is not expected to be set frequently.
+	LPTSTR script_name = _tcsdup(aBuf);
+	if (!script_name)
+		return g_script->ScriptError(ERR_OUTOFMEM);
+	free(g_script->mScriptName);
+	g_script->mScriptName = script_name;
+	return OK;
 }
 
 VarSizeType BIV_ScriptDir(LPTSTR aBuf, LPTSTR aVarName)
@@ -18147,6 +18164,7 @@ BIF_DECL(BIF_LV_InsertModifyDeleteCol)
 	GuiType &gui = *g->GuiDefaultWindow; // Always operate on thread's default window to simplify the syntax.
 	GuiControlType &control = *gui.mCurrentListView;
 	lv_attrib_type &lv_attrib = *control.union_lv_attrib;
+	DWORD view_mode = mode != 'D' ? GuiType::ControlGetListViewMode(control.hwnd) : 0;
 
 	int index;
 	if (!ParamIndexIsOmitted(0))
@@ -18155,7 +18173,7 @@ BIF_DECL(BIF_LV_InsertModifyDeleteCol)
 	{
 		if (mode == FID_LV_ModifyCol)
 		{
-			if (GuiType::ControlGetListViewMode(control.hwnd) != LVS_REPORT)
+			if (view_mode != LVS_REPORT)
 				_f_return_retval; // Return 0 to indicate failure.
 			// Otherwise:
 			// v1.0.36.03: Don't attempt to auto-size the columns while the view is not report-view because
@@ -18193,7 +18211,7 @@ BIF_DECL(BIF_LV_InsertModifyDeleteCol)
 	{
 		// v1.0.36.03: Don't attempt to auto-size the columns while the view is not report-view because
 		// that causes any subsequent switch to the "list" view to be corrupted (invisible icons and items):
-		if (GuiType::ControlGetListViewMode(control.hwnd) == LVS_REPORT)
+		if (view_mode == LVS_REPORT)
 			_f_set_retval_i(ListView_SetColumnWidth(control.hwnd, index, LVSCW_AUTOSIZE));
 		//else leave retval set to 0.
 		_f_return_retval;
@@ -18361,9 +18379,22 @@ BIF_DECL(BIF_LV_InsertModifyDeleteCol)
 			// v1.0.37: Fixed to allow floating point (although ATOI below will convert it to integer).
 			if (IsNumeric(next_option, true, false, true)) // Above has already verified that *next_option can't be whitespace.
 			{
-				do_auto_size = 0; // Turn off any auto-sizing that may have been put into effect by default (such as for insertion).
 				lvc.mask |= LVCF_WIDTH;
-				lvc.cx = gui.Scale(ATOI(next_option));
+				int width = gui.Scale(ATOI(next_option));
+				// Specifying a width when the column is initially added prevents the scrollbar from
+				// updating on Windows 7 and 10 (but not XP).  As a workaround, initialise the width
+				// to 0 and then resize it afterward.  do_auto_size is overloaded for this purpose
+				// since it's already passed to ListView_SetColumnWidth().
+				if (mode == 'I' && view_mode == LVS_REPORT)
+				{
+					lvc.cx = 0; // Must be zero; if width is zero, ListView_SetColumnWidth() won't be called.
+					do_auto_size = width; // If non-zero, this is passed to ListView_SetColumnWidth().
+				}
+				else
+				{
+					lvc.cx = width;
+					do_auto_size = 0; // Turn off any auto-sizing that may have been put into effect (explicitly or by default).
+				}
 			}
 			else
 			{
@@ -18428,7 +18459,8 @@ BIF_DECL(BIF_LV_InsertModifyDeleteCol)
 
 	// Auto-size is done only at this late a stage, in case column was just created above.
 	// Note that ListView_SetColumn() apparently does not support LVSCW_AUTOSIZE_USEHEADER for it's "cx" member.
-	if (do_auto_size && GuiType::ControlGetListViewMode(control.hwnd) == LVS_REPORT)
+	// do_auto_size contains the actual column width if mode == 'I' and a width was passed by the caller.
+	if (do_auto_size && view_mode == LVS_REPORT)
 		ListView_SetColumnWidth(control.hwnd, index, do_auto_size); // retval was previously set to the more important result above.
 	//else v1.0.36.03: Don't attempt to auto-size the columns while the view is not report-view because
 	// that causes any subsequent switch to the "list" view to be corrupted (invisible icons and items).

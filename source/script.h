@@ -1368,7 +1368,7 @@ public:
 	{
 		LPTSTR colon_pos;
 		// Check for '+' and '-' to avoid ambiguity with something like "gui +Delimiter:".
-		if (*aBuf == '+' || *aBuf == '-' || !(colon_pos = _tcschr(aBuf, ':'))) // Assignment.
+		if (*aBuf == '+' || !(colon_pos = _tcschr(aBuf, ':'))) // Assignment.
 		{
 			aCommand = aBuf;
 			// Name not specified, so leave it at the default set by caller.
@@ -1376,6 +1376,25 @@ public:
 		}
 
 		size_t name_length = colon_pos - aBuf;
+		
+		// Fix for v1.1.24.02: Support trailing spaces as in v1.1.02.03 and earlier:
+		while (name_length && IS_SPACE_OR_TAB(aBuf[name_length-1]))
+			--name_length;
+
+		if (*aBuf == '-') // Fix for v1.1.24.02: Support negative integers for HWND.
+		{
+			TCHAR number_buf[MAX_INTEGER_SIZE + 1];
+			if (name_length >= _countof(number_buf))
+				*number_buf = '\0'; // A non-numeric value (with third parameter FALSE below).
+			else
+				tcslcpy(number_buf, aBuf, name_length + 1);
+			if (!IsNumeric(number_buf, TRUE, FALSE))
+			{
+				// This is an option rather than a HWND.
+				aCommand = aBuf;
+				return;
+			}
+		}
 	
 		// For backward compatibility, "01" to "09" must be treated as "1" to "9".
 		if (name_length == 2 && *aBuf == '0' && aBuf[1] >= '1' && aBuf[1] <= '9')
@@ -2833,7 +2852,7 @@ public:
 	LPTSTR ParseActionType(LPTSTR aBufTarget, LPTSTR aBufSource, bool aDisplayErrors);
 	static ActionTypeType ConvertActionType(LPTSTR aActionTypeString);
 	ResultType AddLabel(LPTSTR aLabelName, bool aAllowDupe);
-	ResultType AddLine(ActionTypeType aActionType, LPTSTR aArg[] = NULL, int aArgc = 0, LPTSTR aArgMap[] = NULL);
+	ResultType AddLine(ActionTypeType aActionType, LPTSTR aArg[] = NULL, int aArgc = 0, LPTSTR aArgMap[] = NULL, bool aAllArgsAreExpressions = false);
 
 	// These aren't in the Line class because I think they're easier to implement
 	// if aStartingLine is allowed to be NULL (for recursive calls).  If they
@@ -2875,6 +2894,7 @@ public:
 	LPTSTR mFileSpec; // Will hold the full filespec, for convenience.
 	LPTSTR mFileDir;  // Will hold the directory containing the script file.
 	LPTSTR mFileName; // Will hold the script's naked file name.
+	LPTSTR mScriptName; // Value of A_ScriptName; defaults to mFileName if NULL. See also DefaultDialogTitle().
 	LPTSTR mOurEXE; // Will hold this app's module name (e.g. C:\Program Files\AutoHotkey\AutoHotkey.exe).
 	LPTSTR mOurEXEDir;  // Same as above but just the containing directory (for convenience).
 	LPTSTR mMainWindowTitle; // Will hold our main window's title, for consistency & convenience.
@@ -2918,6 +2938,7 @@ public:
 	ResultType UpdateOrCreateTimer(IObject *aLabel, LPTSTR aPeriod, LPTSTR aPriority, bool aEnable
 		, bool aUpdatePriorityOnly);
 	void DeleteTimer(IObject *aLabel);
+	LPTSTR DefaultDialogTitle();
 
 	ResultType DefineFunc(LPTSTR aBuf, Var *aFuncGlobalVar[]);
 	Func *FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &aErrorWasShown, bool &aFileWasFound, bool aIsAutoInclude);
@@ -3090,7 +3111,7 @@ BIV_DECL_R (BIV_MyDocuments);
 BIV_DECL_R (BIV_Caret);
 BIV_DECL_R (BIV_Cursor);
 BIV_DECL_R (BIV_ScreenWidth_Height);
-BIV_DECL_R (BIV_ScriptName);
+BIV_DECL_RW(BIV_ScriptName);
 BIV_DECL_R (BIV_ScriptDir);
 BIV_DECL_R (BIV_ScriptFullPath);
 BIV_DECL_R (BIV_ScriptHwnd);
