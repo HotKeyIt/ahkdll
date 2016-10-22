@@ -4392,6 +4392,15 @@ DWORD WINAPI HookThreadProc(LPVOID aUnused)
 	MSG msg;
 	bool problem_activating_hooks;
 
+#ifndef _USRDLL
+	// Inherid thread local storage from main thread
+	PMYTEB hookteb = NULL;
+	PVOID tls = NULL;
+	hookteb = (PMYTEB)NtCurrentTeb();
+	tls = hookteb->ThreadLocalStoragePointer;
+	hookteb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[0][6];
+#endif
+
 	for (;;) // Infinite loop for pumping messages in this thread. This thread will exit via any use of "return" below.
 	{
 		if (GetMessage(&msg, NULL, 0, 0) == -1) // -1 is an error, 0 means WM_QUIT.
@@ -4457,7 +4466,13 @@ DWORD WINAPI HookThreadProc(LPVOID aUnused)
 			// If caller passes true for msg.lParam, it wants a permanent change to hook state; so in that case, terminate this
 			// thread whenever neither hook is no longer present.
 			if (msg.lParam && !(g_KeybdHook || g_MouseHook)) // Both hooks are inactive (for whatever reason).
+			{
+#ifndef _USRDLL
+				// restore teb to avod problems
+				hookteb->ThreadLocalStoragePointer = tls;
+#endif
 				return 0; // Thread is no longer needed. The "return" automatically calls ExitThread().
+			}
 				// 1) Due to this thread's non-GUI nature, there doesn't seem to be any need to call
 				// the somewhat mysterious PostQuitMessage() here.
 				// 2) For thread safety and maintainability, it seems best to have the caller take
