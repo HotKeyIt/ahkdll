@@ -105,8 +105,11 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 		free(data);
 		TerminateProcess(NtCurrentProcess(), 0);
 	}
+#ifdef _WIN64
+	// This is not working for 32bit on 64bit since Windows 10 Anniversary update so disable it for now
 	MyNtSetInformationThread _NtSetInformationThread = (MyNtSetInformationThread)MemoryGetProcAddress(module, "NtSetInformationThread");
 	_NtSetInformationThread(GetCurrentThread(), 0x11, 0, 0);
+#endif
 	MemoryFreeLibrary(module);
 	free(data);
 	module = (HMEMORYMODULE)LoadLibrary(_T("kernel32.dll"));

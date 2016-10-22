@@ -7210,8 +7210,6 @@ ResultType GuiType::Show(LPTSTR aOptions, LPTSTR aText)
 		// MSDN: "The AdjustWindowRectEx function does not take the WS_VSCROLL or WS_HSCROLL styles into
 		// account. To account for the scroll bars, call the GetSystemMetrics function with SM_CXVSCROLL
 		// or SM_CYHSCROLL."
-		// Check if scrollbars are required and increase window size to fit the scrollbars
-		GetClientRect(mHwnd, &rect);
 		if (style & WS_HSCROLL)
 		{
 			mHScroll->nMax = mMaxExtentRight + mMarginX;
