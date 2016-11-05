@@ -4063,6 +4063,8 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 		if (aGui)
 		{
 			control.hwnd = aGui->mHwnd;
+			aGui->mWidth = opt.width;
+			aGui->mHeight = opt.height;
 			// assign identifier of the gui control
 			// the first control seems to be always 3 so add it to mControlCount
 			SetWindowLong(control.hwnd, GWL_ID, mControlCount + 3);
