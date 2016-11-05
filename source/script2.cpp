@@ -14652,7 +14652,7 @@ BIF_DECL(BIF_DllImport)
 		}
 		if (this_dyna_param.type == DLL_ARG_xSTR) // String needing translation: ASTR on Unicode build, WSTR on ANSI build.
 		{
-			pStr[arg_count]->ReleaseBuffer();
+			pStr[i]->ReleaseBuffer();
 #ifdef UNICODE
 			output_var.AssignStringFromCodePage(
 #else
