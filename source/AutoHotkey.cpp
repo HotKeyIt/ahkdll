@@ -195,8 +195,6 @@ void WINAPI TlsCallbackCall(PVOID Module, DWORD Reason, PVOID Context)
 #include <iphlpapi.h>
 int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdLine, int nCmdShow)
 {
-	IP_ADAPTER_ADDRESSES ip;
-	SIZE_T sz = sizeof(ip);
 	// Init any globals not in "struct g" that need it:
 #ifdef _DEBUG
 	g_hResource = FindResource(NULL, _T("AHK"), MAKEINTRESOURCE(RT_RCDATA));

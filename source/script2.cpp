@@ -11937,68 +11937,71 @@ CStringW **pStr = (CStringW **)
 					this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
 			} // switch (this_dyna_param.type)
 		} // for() each arg.
+		// Set the length of array containing shift info for parameters
+		obj->paramshift = (int*)malloc((obj->marg_count + 1) * sizeof(int));
 		if (aParamCount > 1 && (aParam[1]->symbol == SYM_OBJECT || (aParam[1]->symbol == SYM_VAR && aParam[1]->var->HasObject())))
 		{
 			// Find out the length of array containing the definition and shift info for parameters
 			IObject *paramobj = ((aParam[1]->symbol == SYM_OBJECT) ? aParam[1]->object : aParam[1]->var->mObject); 
 			oParam.SetValue(_T("Length"));
 			paramobj->Invoke(result_token,token,IT_CALL,param,1);
+			int aArrayLen = (int)result_token.value_int64;
 			oParam.symbol = PURE_INTEGER;
-			// Set the length of array containing shift info for parameters, -1 for definition in first item.
-			if (result_token.value_int64 < 2)
+			if (aArrayLen < 2)
 			{
-				obj->paramshift = (int*)malloc(sizeof(int));
-				obj->paramshift[0] = NULL;
+				for (i = 0; i < obj->marg_count; i++)
+					obj->paramshift[i] = i;
 			}
 			else
 			{
-				obj->paramshift = (int*)malloc((obj->marg_count + 1) * sizeof(int));
-				obj->paramshift[0] = (int)result_token.value_int64 - 1;
-				for (i=0;i < obj->marg_count;i++)
+				// Set shift info for parameters, -1 for definition in first item.
+				memset(obj->paramshift, -1, (obj->marg_count + 1) * sizeof(int));
+				oParam.value_int64 = 2;
+				paramobj->Invoke(result_token, *aParam[1], IT_GET, param, 1);
+				if (!IS_NUMERIC(result_token.symbol))
 				{
-					// Set shift info for parameters
-					if (i < obj->paramshift[0])
+					g_script->ThrowRuntimeException(ERR_INVALID_ARG_TYPE, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
+					return NULL;
+				}
+				obj->paramshift[0] = (int)result_token.value_int64 - 1;
+				for (i = 1; i < aArrayLen - 1; i++)
+				{
+					oParam.value_int64 = i + 2;
+					paramobj->Invoke(result_token, *aParam[1], IT_GET, param, 1);
+					obj->paramshift[i] = (int)result_token.value_int64 - 1;
+				}
+				for (;i <= obj->marg_count;i++)
+				{
+					// Find next (not yet used) parameter
+					int oNextParam = 0;
+					for (;;)
 					{
-						oParam.value_int64 = i+2;
-						paramobj->Invoke(result_token,*aParam[1],IT_GET,param,1);
-						if (!IS_NUMERIC(result_token.symbol))
+						bool aFound = true;
+						for (int v = 0;v < obj->marg_count;v++)
 						{
-							g_script->ThrowRuntimeException(ERR_INVALID_ARG_TYPE, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
-							return NULL;
-						}
-						obj->paramshift[i+1] = (int)result_token.value_int64-1;
-					}
-					else
-					{   // Find next (not yet used) parameter
-						int oNextParam = 0;
-						for (int f = 1;;f = 1)
-						{
-							for (int v = 0;v <= obj->paramshift[0];v++)
+							if (obj->paramshift[v] == oNextParam)
 							{
-								if (obj->paramshift[v+1] == oNextParam)
-								{
-									oNextParam++;
-									f = 0;
-									break;
-								}
-							}
-							if (f)
+								oNextParam++;
+								aFound = false;
 								break;
+							}
 						}
-						obj->paramshift[i+1] = oNextParam;
+						if (aFound)
+							break;
 					}
+					obj->paramshift[i] = oNextParam;
 				}
 			}
 		}
 		else
 		{
-			obj->paramshift = (int*)malloc(sizeof(int));
-			obj->paramshift[0] = NULL;
+			for (i = 0; i < obj->marg_count; i++)
+				obj->paramshift[i] = i;
 		}
 		for (i=0;i < obj->marg_count;i++)
 		{
 			obj->mdefault_param[i] = dyna_param[i];
-			obj->mdyna_param[i] = dyna_param[i];
+			//obj->mdyna_param[i] = dyna_param[i];
 		}
 	}
 	return obj;
@@ -12062,15 +12065,15 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 			ConvertDllArgType(&aParam[0]->marker, return_attrib);
 	}
 	// Set default dynacall parameters
-	for (i = 0; i < this->marg_count; i++)  // Same loop as used in DynaToken::Create below, so maintain them together.
-		this->mdyna_param[(this->paramshift[0] > 0) ? this->paramshift[i+1] : i] = this->mdefault_param[(this->paramshift[0] > 0) ? this->paramshift[i+1] : i];
+	for (i = 0; i < this->marg_count; i++)
+		this->mdyna_param[i] = this->mdefault_param[i];
 
 	for (i = 0; i < this->marg_count; i++)  // Same loop as used in DynaToken::Create below, so maintain them together.
 	{
 		if (i >= aParamCount - is_call)
 			break;
 		ExprTokenType &this_param = *aParam[i + is_call];
-		DYNAPARM &this_dyna_param = this->mdyna_param[(this->paramshift[0] > 0) ? this->paramshift[i+1] : i];
+		DYNAPARM &this_dyna_param = this->mdyna_param[this->paramshift[i]];
 		SymbolType is_number;
 		switch (this_dyna_param.type)
 		{
