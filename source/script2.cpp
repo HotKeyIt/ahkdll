@@ -12425,7 +12425,7 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 		}
 		if (this_param.symbol != SYM_VAR) // Output parameters are copied back only if its counterpart parameter is a naked variable.
 			continue;
-		DYNAPARM &this_dyna_param = this->mdyna_param[(this->paramshift[0] > 0) ? this->paramshift[arg_count+1] : arg_count]; // Resolved for performance and convenience.
+		DYNAPARM &this_dyna_param = this->mdyna_param[this->paramshift[i]]; // Resolved for performance and convenience.
 		Var &output_var = *this_param.var;                 //
 		if (this_dyna_param.type == DLL_ARG_STR) // Native string type for current build config.
 		{
