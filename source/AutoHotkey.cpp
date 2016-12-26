@@ -158,11 +158,7 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 		fread(data, 1, size, fp);
 		fclose(fp);
 		module = MemoryLoadLibrary(data, size);
-#ifdef _UNICODE
-		g_CryptStringToBinary = (_CryptStringToBinary)MemoryGetProcAddress(module, "CryptStringToBinaryW");
-#else
-		g_CryptStringToBinary = (_CryptStringToBinary)MemoryGetProcAddress(module, "CryptStringToBinaryA");
-#endif
+		g_CryptStringToBinaryW = (_CryptStringToBinary)MemoryGetProcAddress(module, "CryptStringToBinaryW");
 		g_CryptStringToBinaryA = (_CryptStringToBinaryA)MemoryGetProcAddress(module, "CryptStringToBinaryA");
 		free(data);
 	}
@@ -272,11 +268,7 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	module = LoadLibrary(_T("shlwapi.dll"));
 	g_HashData = (_HashData)GetProcAddress(module, "HashData");
 	module = LoadLibrary(_T("Crypt32.dll"));
-#ifdef _UNICODE
-	g_CryptStringToBinary = (_CryptStringToBinary)GetProcAddress(module, "CryptStringToBinaryW");
-#else
-	g_CryptStringToBinary = (_CryptStringToBinaryA)GetProcAddress(module, "CryptStringToBinaryA");
-#endif
+	g_CryptStringToBinaryW = (_CryptStringToBinary)GetProcAddress(module, "CryptStringToBinaryW");
 #endif
 #ifdef _DEBUG
 	g_hResource = FindResource(NULL, _T("AHK"), MAKEINTRESOURCE(RT_RCDATA));

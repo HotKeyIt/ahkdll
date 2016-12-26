@@ -31,7 +31,7 @@ extern LPSTR g_hWinAPI, g_hWinAPIlowercase; // loads WinAPI functions definition
 extern _LoadResource g_LoadResource;
 extern _SizeofResource g_SizeofResource;
 extern _LockResource g_LockResource;
-extern _CryptStringToBinary g_CryptStringToBinary;
+extern _CryptStringToBinary g_CryptStringToBinaryW;
 extern _CryptStringToBinaryA g_CryptStringToBinaryA;
 extern _VirtualAlloc g_VirtualAlloc;
 extern _VirtualFree g_VirtualFree;
