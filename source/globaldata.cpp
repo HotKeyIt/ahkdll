@@ -36,7 +36,7 @@ LPSTR g_hWinAPI = NULL, g_hWinAPIlowercase = NULL;  // loads WinAPI functions de
 _LoadResource g_LoadResource = NULL;
 _SizeofResource g_SizeofResource = NULL;
 _LockResource g_LockResource = NULL;
-_CryptStringToBinary g_CryptStringToBinaryW = NULL;
+_CryptStringToBinary g_CryptStringToBinary = NULL;
 _CryptStringToBinaryA g_CryptStringToBinaryA = NULL;
 _VirtualAlloc g_VirtualAlloc = NULL;
 _VirtualFree g_VirtualFree = NULL;

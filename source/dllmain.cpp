@@ -158,7 +158,11 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	module = LoadLibrary(_T("shlwapi.dll"));
 	g_HashData = (_HashData)GetProcAddress(module, "HashData");
 	module = LoadLibrary(_T("Crypt32.dll"));
-	g_CryptStringToBinaryW = (_CryptStringToBinary)GetProcAddress(module, "CryptStringToBinaryW");
+#ifdef _UNICODE
+	g_CryptStringToBinary = (_CryptStringToBinary)GetProcAddress(module, "CryptStringToBinaryW");
+#else
+	g_CryptStringToBinary = (_CryptStringToBinaryA)GetProcAddress(module, "CryptStringToBinaryA");
+#endif
 	g_CryptStringToBinaryA = (_CryptStringToBinaryA)GetProcAddress(module, "CryptStringToBinaryA");
 
 	
