@@ -5216,10 +5216,11 @@ UTF8ToASCII(unsigned char* out, size_t outlen,const unsigned char* in, size_t in
 			} NLSFILEHEADER;
 			NLSFILEHEADER aLocaleStruct = { 0 };
 			SetFilePointer(hLocaleFile, 0, NULL, FILE_BEGIN);
-			ReadFile(hLocaleFile, &aLocaleStruct, sizeof(NLSFILEHEADER), NULL, NULL);
+			DWORD bytesread;
+			ReadFile(hLocaleFile, &aLocaleStruct, sizeof(NLSFILEHEADER), &bytesread, NULL);
 			aMaxCharSize = aLocaleStruct.MaxCharSize;
 			SetFilePointer(hLocaleFile, (aLocaleStruct.offsetUtC + aLocaleStruct.wSize + 1) * 2, NULL, FILE_BEGIN);
-			ReadFile(hLocaleFile, &aUtC, 65536 * 2, NULL, NULL);
+			ReadFile(hLocaleFile, &aUtC, 65536 * 2, &bytesread, NULL);
 			CloseHandle(hLocaleFile);
 			aUseLocale = true;
 		}
