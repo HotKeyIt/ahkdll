@@ -712,6 +712,45 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">
     <GenerateManifest>false</GenerateManifest>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|Win32'">
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|Win32'">
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'">
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|x64'">
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|x64'">
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Self-contained|x64'">
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|x64'">
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|x64'">
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
   <ItemDefinitionGroup>
     <CustomBuild>
       <Command>$(Masm) /Cx /Fo"$(SolutionDir)temp\$(Platform)\%(Filename).obj" /c "%(FullPath)"</Command>
@@ -892,7 +931,7 @@
       <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">false</DataExecutionPrevention>
       <IgnoreSpecificDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">
       </IgnoreSpecificDefaultLibraries>
-      <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">false</GenerateDebugInformation>
+      <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">true</GenerateDebugInformation>
     </Link>
     <Link>
       <RandomizedBaseAddress Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|Win32'">false</RandomizedBaseAddress>
@@ -1024,6 +1063,7 @@
       <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">false</MinimalRebuild>
       <Optimization Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">MaxSpeed</Optimization>
       <FavorSizeOrSpeed Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">Speed</FavorSizeOrSpeed>
+      <EnableFiberSafeOptimizations Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">false</EnableFiberSafeOptimizations>
     </ClCompile>
     <ClCompile>
       <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">MultiThreadedDLL</RuntimeLibrary>
