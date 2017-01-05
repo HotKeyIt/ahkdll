@@ -14241,7 +14241,7 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 				delete pStr[arg_count];
 			continue;
 		}
-		DYNAPARM &this_dyna_param = this->mdyna_param[this->paramshift[i]]; // Resolved for performance and convenience.
+		DYNAPARM &this_dyna_param = this->mdyna_param[this->paramshift[i - is_call]]; // Resolved for performance and convenience.
 		Var &output_var = *this_param.var;                 //
 		if (this_dyna_param.type == DLL_ARG_STR) // Native string type for current build config.
 		{
