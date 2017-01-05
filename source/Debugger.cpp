@@ -898,7 +898,7 @@ DEBUGGER_COMMAND(Debugger::context_names)
 		return DEBUGGER_E_INVALID_OPTIONS;
 
 	return mResponseBuf.WriteF(
-		"<response command=\"context_names\" transaction_id=\"%e\"><context name=\"Local\" id=\"0\"/><context name=\"Global\" id=\"1\"/></response>"
+		"<response command=\"context_names\" transaction_id=\"%e\"><context name=\"Local\" id=\"0\"/><context name=\"Static\" id=\"1\"/><context name=\"Global\" id=\"2\"/></response>"
 		, aTransactionId);
 }
 
