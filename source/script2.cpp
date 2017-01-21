@@ -10355,7 +10355,7 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 			if (aSizeDeCompressed)
 			{
 				success = WriteFile(hfile, aDataBuf, aSizeDeCompressed, &num_bytes_written, NULL);
-				VirtualFree(aDataBuf,0,MEM_RELEASE);
+				free(aDataBuf);
 			}
 		}
 		if (!aSizeDeCompressed)
@@ -10403,7 +10403,7 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 				if (aSizeDeCompressed)
 				{
 					success = WriteFile(hfile, aDataBuf, aSizeDeCompressed, &num_bytes_written, NULL);
-					VirtualFree(aDataBuf,0,MEM_RELEASE);
+					free(aDataBuf);
 				}
 			}
 			if (!aSizeDeCompressed)
@@ -13711,7 +13711,7 @@ CStringA **pStr = (CStringA **)
 CStringW **pStr = (CStringW **)
 #endif
 		_alloca(i); // _alloca vs malloc can make a significant difference to performance in some cases.
-		memset(pStr, 0, i);
+		g_memset(pStr, 0, i);
 		for (i = 0; i < obj->marg_count; i++)  // Same loop as used in DynaToken::Create below, so maintain them together.
 		{
 			ExprTokenType &this_param = ((aParamCount-2) > i) ? *aParam[i + 2] : *aParam[i]; // *aParam[i] will not be used
@@ -13839,7 +13839,7 @@ CStringW **pStr = (CStringW **)
 			else
 			{
 				// Set shift info for parameters, -1 for definition in first item.
-				memset(obj->paramshift, -1, (obj->marg_count + 1) * sizeof(int));
+				g_memset(obj->paramshift, -1, (obj->marg_count + 1) * sizeof(int));
 				oParam.value_int64 = 2;
 				paramobj->Invoke(result_token, *aParam[1], IT_GET, param, 1);
 				if (!IS_NUMERIC(result_token.symbol))
@@ -13935,7 +13935,7 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 	CStringW **pStr = (CStringW **)
 #endif
 		_alloca(i); // _alloca vs malloc can make a significant difference to performance in some cases.
-	memset(pStr, 0, i);
+	g_memset(pStr, 0, i);
 	
 	// Above has already ensured that after the first parameter, there are either zero additional parameters
 	// or an even number of them.  In other words, each arg type will have an arg value to go with it.
@@ -14885,7 +14885,7 @@ has_valid_return_type:
 	CStringW **pStr = (CStringW **)
 #endif
 		_alloca(i); // _alloca vs malloc can make a significant difference to performance in some cases.
-	memset(pStr, 0, i);
+	g_memset(pStr, 0, i);
 
 	// Above has already ensured that after the first parameter, there are either zero additional parameters
 	// or an even number of them.  In other words, each arg type will have an arg value to go with it.
@@ -17970,7 +17970,7 @@ BIF_DECL(BIF_VarSetCapacity)
 				{   // backup variables content to restore later
 					// usefull when size of a variable is changed without loosing its content, e.g. increase memory array
 					AUTO_MALLOCA(aBkpContents, BYTE*, aBkpCapacity);
-					memmove(aBkpContents, var.Contents(false), aBkpCapacity);
+					memcpy(aBkpContents, var.Contents(false), aBkpCapacity);
 				}
 				var.SetCapacity(new_capacity, true, false); // This also destroys the variables contents.
 				// in characters
@@ -17992,7 +17992,7 @@ BIF_DECL(BIF_VarSetCapacity)
 				{
 					// restore variables content if FillMemory parameter is not used and the size is apropriate
 					if (aParamCount < 3 && aBkpCapacity > 1 && (var.ByteCapacity()) > 1)
-						memmove(var.Contents(false), aBkpContents, var.ByteCapacity() < aBkpCapacity ? var.ByteCapacity() : aBkpCapacity);
+						memcpy(var.Contents(false), aBkpContents, var.ByteCapacity() < aBkpCapacity ? var.ByteCapacity() : aBkpCapacity);
 					// By design, Assign() has already set the length of the variable to reflect new_capacity.
 					// This is not what is wanted in this case since it should be truly empty.
 					var.ByteLength() = 0;
@@ -18097,8 +18097,8 @@ BIF_DECL(BIF_ResourceLoadLibrary)
 		if (aSizeDeCompressed)
 		{
 			module = MemoryLoadLibrary(aDataBuf, aSizeDeCompressed);
-			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
-			VirtualFree(aDataBuf,0,MEM_RELEASE);
+			g_memset(aDataBuf, 0, aSizeDeCompressed);
+			free(aDataBuf);
 		}
 	}
 	if (!aSizeDeCompressed)
@@ -18406,8 +18406,8 @@ BIF_DECL(BIF_ZipCloseBuffer)
 	}
 	aResultToken.value_int64 = aLen;
 	aParam[1]->var->SetCapacity((VarSizeType)aResultToken.value_int64, true);
-	memmove(aParam[1]->var->mCharContents, aBuffer, (SIZE_T)aResultToken.value_int64);
-	memset((char*)aParam[1]->var->mCharContents + aResultToken.value_int64, 0, 2);
+	memcpy(aParam[1]->var->mCharContents, aBuffer, (SIZE_T)aResultToken.value_int64);
+	g_memset((char*)aParam[1]->var->mCharContents + aResultToken.value_int64, 0, 2);
 	// Free the memory now that we're done with it.
 	UnmapViewOfFile(aBuffer);
 	CloseHandle(aBase);
@@ -18670,8 +18670,8 @@ BIF_DECL(BIF_UnZipBuffer)
 		if (aErrCode = UnzipItemToBuffer(huz, aBuffer, ze.UncompressedSize, &ze))
 			goto errorclose;
 		aParam[2]->var->SetCapacity((VarSizeType)aResultToken.value_int64, true);
-		memmove(aParam[2]->var->mCharContents, aBuffer, (SIZE_T)aResultToken.value_int64);
-		memset((char*)aParam[2]->var->mCharContents + aResultToken.value_int64, 0, 2);
+		memcpy(aParam[2]->var->mCharContents, aBuffer, (SIZE_T)aResultToken.value_int64);
+		g_memset((char*)aParam[2]->var->mCharContents + aResultToken.value_int64, 0, 2);
 		free(aBuffer);
 		UnzipClose(huz);
 		aResultToken.symbol = SYM_INTEGER;
@@ -18704,8 +18704,8 @@ BIF_DECL(BIF_UnZipBuffer)
 			if (aErrCode = UnzipItemToBuffer(huz, aBuffer, ze.UncompressedSize, &ze))
 				goto errorclose;
 			aParam[2]->var->SetCapacity((VarSizeType)aResultToken.value_int64, true);
-			memmove(aParam[2]->var->mCharContents, aBuffer, (SIZE_T)aResultToken.value_int64);
-			memset((char*)aParam[2]->var->mCharContents + aResultToken.value_int64, 0, 2);
+			memcpy(aParam[2]->var->mCharContents, aBuffer, (SIZE_T)aResultToken.value_int64);
+			g_memset((char*)aParam[2]->var->mCharContents + aResultToken.value_int64, 0, 2);
 			GlobalFree(aBuffer);
 			UnzipClose(huz);
 			aResultToken.symbol = SYM_INTEGER;
@@ -18771,15 +18771,15 @@ BIF_DECL(BIF_ZipRawMemory)
 			if (aParam[2]->symbol == SYM_VAR)
 			{
 				aParam[2]->var->SetCapacity((VarSizeType)aResultToken.value_int64 + sizeof(char) * 2);
-				memmove(aParam[2]->var->mCharContents, aDataBuf, (SIZE_T)aResultToken.value_int64);
-				memset((char*)aParam[2]->var->mCharContents + aResultToken.value_int64, 0, 2);
+				memcpy(aParam[2]->var->mCharContents, aDataBuf, (SIZE_T)aResultToken.value_int64);
+				g_memset((char*)aParam[2]->var->mCharContents + aResultToken.value_int64, 0, 2);
 			}
 			else if (TokenToInt64(*aParam[2]) > 1024) // Assume address
-				memmove((void *)TokenToInt64(*aParam[2]), aDataBuf, (SIZE_T)aResultToken.value_int64);
+				memcpy((void *)TokenToInt64(*aParam[2]), aDataBuf, (SIZE_T)aResultToken.value_int64);
 
 		}
-		SecureZeroMemory(aDataBuf, (size_t)aResultToken.value_int64);
-		VirtualFree(aDataBuf, 0, MEM_RELEASE);
+		g_memset(aDataBuf, 0, (size_t)aResultToken.value_int64);
+		free(aDataBuf);
 		return;
 	}
 	aResultToken.symbol = SYM_STRING;
@@ -18808,15 +18808,15 @@ BIF_DECL(BIF_UnZipRawMemory)
 				if (aParam[2]->symbol == SYM_VAR)
 				{
 					aParam[2]->var->SetCapacity((VarSizeType)aResultToken.value_int64 + sizeof(char) * 2);
-					memmove(aParam[2]->var->mCharContents,aDataBuf,(SIZE_T)aResultToken.value_int64);
-					memset((char*)aParam[2]->var->mCharContents + aResultToken.value_int64, 0, 2);
+					memcpy(aParam[2]->var->mCharContents,aDataBuf,(SIZE_T)aResultToken.value_int64);
+					g_memset((char*)aParam[2]->var->mCharContents + aResultToken.value_int64, 0, 2);
 				}
 				else if (TokenToInt64(*aParam[2]) > 1024) // Assume address
-					memmove((void *)TokenToInt64(*aParam[2]),aDataBuf,(SIZE_T)aResultToken.value_int64);
+					memcpy((void *)TokenToInt64(*aParam[2]),aDataBuf,(SIZE_T)aResultToken.value_int64);
 
 			}
-			SecureZeroMemory(aDataBuf, (size_t)aResultToken.value_int64);
-			VirtualFree(aDataBuf,0,MEM_RELEASE);
+			g_memset(aDataBuf, 0, (size_t)aResultToken.value_int64);
+			free(aDataBuf);
 			return;
 		}
 	}

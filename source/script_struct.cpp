@@ -86,7 +86,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			{
 				obj->mStructMem = (UINT_PTR *)malloc(obj->mSize);
 				obj->mMemAllocated = obj->mSize;
-				memset(obj->mStructMem,NULL,offset);
+				g_memset(obj->mStructMem,NULL,offset);
 				obj->ObjectToStruct(TokenToObject(*aParam[1]));
 			}
 			else
@@ -96,7 +96,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 		{
 			obj->mStructMem = (UINT_PTR *)malloc(obj->mSize);
 			obj->mMemAllocated = obj->mSize;
-			memset(obj->mStructMem,NULL,obj->mSize);
+			g_memset(obj->mStructMem, NULL, obj->mSize);
 		}
 		return obj;
 	}
@@ -358,7 +358,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 							obj = ((Struct *)TokenToObject(*param[0]))->Clone();
 							obj->mStructMem = (UINT_PTR *)malloc(obj->mSize);
 							obj->mMemAllocated = obj->mSize;
-							memset(obj->mStructMem,NULL,obj->mSize);
+							g_memset(obj->mStructMem, NULL, obj->mSize);
 							return obj;
 						}
 						// else create structure from string definition
@@ -394,7 +394,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 						{
 							obj->mStructMem = (UINT_PTR *)malloc(obj->mSize);
 							obj->mMemAllocated = obj->mSize;
-							memset(obj->mStructMem,NULL,obj->mSize);
+							g_memset(obj->mStructMem, NULL, obj->mSize);
 							obj->ObjectToStruct(TokenToObject(*aParam[1]));
 						}
 						else
@@ -500,7 +500,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 	{	// setting the memory after parsing definition saves a call to BIF_sizeof
 		obj->mStructMem = (UINT_PTR *)malloc(offset);
 		obj->mMemAllocated = offset;
-		memset(obj->mStructMem,NULL,offset);
+		g_memset(obj->mStructMem, NULL, offset);
 	}
 
 	// an object was passed to initialize fields
@@ -1124,7 +1124,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 				if (mStructMem = (UINT_PTR*)malloc((size_t)TokenToInt64(*aParam[0])))
 				{
 					mMemAllocated = (int)TokenToInt64(*aParam[0]);
-					memset(mStructMem,NULL,(size_t)mMemAllocated);
+					g_memset(mStructMem, NULL, (size_t)mMemAllocated);
 					aResultToken.value_int64 = mMemAllocated;
 				}
 				else
@@ -1151,7 +1151,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 				if (field->mStructMem = (UINT_PTR*)malloc((size_t)TokenToInt64(*aParam[0])))
 				{
 					field->mMemAllocated = (int)TokenToInt64(*aParam[0]);
-					memset(field->mStructMem,NULL,(size_t)field->mMemAllocated);
+					g_memset(field->mStructMem, NULL, (size_t)field->mMemAllocated);
 					*((UINT_PTR*)((UINT_PTR)target + field->mOffset)) = (UINT_PTR)field->mStructMem;
 					aResultToken.value_int64 = field->mMemAllocated;
 				}
@@ -1235,11 +1235,11 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 			if (!field) // only allow to fill main structure
 			{
 				if (aParamCount && TokenIsPureNumeric(*aParam[0]))
-					memset(objclone ? objclone->mStructMem : mStructMem,TokenIsPureNumeric(*aParam[0]),mSize);
+					g_memset(objclone ? objclone->mStructMem : mStructMem, TokenIsPureNumeric(*aParam[0]), mSize);
 				else if (aParamCount && *TokenToString(*aParam[0]))
-					memset(objclone ? objclone->mStructMem : mStructMem,*TokenToString(*aParam[0]),mSize);
+					g_memset(objclone ? objclone->mStructMem : mStructMem, *TokenToString(*aParam[0]), mSize);
 				else
-					memset(objclone ? objclone->mStructMem : mStructMem,NULL,mSize);
+					g_memset(objclone ? objclone->mStructMem : mStructMem, NULL, mSize);
 			}
 			if (deletefield) // we created the field from a structure
 				delete field;
@@ -1325,7 +1325,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 				{
 					objclone->mStructMem = (UINT_PTR*)malloc(objclone->mSize);
 					objclone->mMemAllocated = objclone->mSize;
-					memset(objclone->mStructMem,NULL,objclone->mSize);
+					g_memset(objclone->mStructMem, NULL, objclone->mSize);
 					objclone->ObjectToStruct(TokenToObject(*aParam[0]));
 				}
 			}
@@ -1333,7 +1333,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 			{
 				objclone->mStructMem = (UINT_PTR*)malloc(objclone->mSize);
 				objclone->mMemAllocated = objclone->mSize;
-				memset(objclone->mStructMem,NULL,objclone->mSize);
+				g_memset(objclone->mStructMem, NULL, objclone->mSize);
 			}
 			// small fix for _New to work properly because aThisToken contains the new object
 			if (!_tcsicmp(name, _T("_New")))

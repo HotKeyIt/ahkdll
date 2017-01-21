@@ -4,7 +4,7 @@
 #include "script.h"
 #include "script_func_impl.h"
 #include "script_object.h"
-
+#include "application.h"
 
 //
 // BIF_Struct - Create structure
@@ -963,7 +963,6 @@ BIF_DECL(BIF_ObjDump)
 		aResultToken.marker = _T("");
 		return;
 	}
-	memset(aBuffer, 0, aSize);
 	*(__int64*)aBuffer = aSize;
 	IObject *aObjects = Object::Create();
 	UINT aObjCount = 0;
@@ -1300,9 +1299,9 @@ BIF_DECL(BIF_ObjLoad)
 		{
 			LPVOID buff = malloc(aSizeDeCompressed);
 			aFreeBuffer = true;
-			memmove(buff, aDataBuf, aSizeDeCompressed);
-			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
-			VirtualFree(aDataBuf, 0, MEM_RELEASE);
+			memcpy(buff, aDataBuf, aSizeDeCompressed);
+			g_memset(aDataBuf, 0, aSizeDeCompressed);
+			free(aDataBuf);
 			aBuffer = (char*)buff;
 		}
 	}

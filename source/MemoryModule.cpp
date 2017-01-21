@@ -152,7 +152,7 @@ CopySections(const unsigned char *data, size_t size, PIMAGE_NT_HEADERS old_heade
                 // than page size.
                 dest = codeBase + section->VirtualAddress;
                 section->Misc.PhysicalAddress = (DWORD) (uintptr_t) dest;
-                memset(dest, 0, section_size);
+                g_memset(dest, 0, section_size);
             }
 
             // section is empty
@@ -401,13 +401,10 @@ BuildImportTable(PMEMORYMODULE module)
         return TRUE;
     }
     PIMAGE_DATA_DIRECTORY resource = GET_HEADER_DICTIONARY(module, IMAGE_DIRECTORY_ENTRY_RESOURCE);
-    if (directory->Size == 0){
-        return TRUE;
-    }
     
     PIMAGE_IMPORT_DESCRIPTOR importDesc = (PIMAGE_IMPORT_DESCRIPTOR) (codeBase + directory->VirtualAddress);
     // Following will be used to resolve manifest in module
-    if (resource->Size)
+    if (resource && resource->Size)
     {
         PIMAGE_RESOURCE_DIRECTORY resDir = (PIMAGE_RESOURCE_DIRECTORY)(codeBase + resource->VirtualAddress);
         PIMAGE_RESOURCE_DIRECTORY resDirTemp;
@@ -485,7 +482,7 @@ BuildImportTable(PMEMORYMODULE module)
         HCUSTOMMODULE *tmp;
         HCUSTOMMODULE handle = NULL;
         char *isMsvcr = NULL;
-        if (g_hMSVCR != NULL && (isMsvcr = strstr((LPSTR)(codeBase + importDesc->Name), "MSVCR100.dll")))
+        /*if (g_hMSVCR != NULL && (isMsvcr = strstr((LPSTR)(codeBase + importDesc->Name), "MSVCR100.dll")))
         {
             handle = g_hMSVCR; //GetModuleHandle(_T("MSVCRT.dll"));
             if (tmp == NULL)
@@ -498,7 +495,7 @@ BuildImportTable(PMEMORYMODULE module)
             module->modules = tmp;
             module->modules[0] = handle;
         }
-        else
+        else*/
             handle = module->loadLibrary((LPCSTR) (codeBase + importDesc->Name), module->userdata);
 
         if (handle == NULL) {

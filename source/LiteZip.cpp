@@ -2712,7 +2712,7 @@ static void inflateEnd(register ENTRYREADVARS *entryReadVars)
 		case IBM_DTREE:
 			if ((ptr = entryReadVars->stream.state->blocks.sub.trees.blens))
 			{
-				SecureZeroMemory(ptr, GlobalSize(ptr));
+				g_memset(ptr, 0, GlobalSize(ptr));
 				GlobalFree(ptr);
 			}
 			break;
@@ -2720,22 +2720,22 @@ static void inflateEnd(register ENTRYREADVARS *entryReadVars)
 		case IBM_CODES:
 			if ((ptr = entryReadVars->stream.state->blocks.sub.decode.codes))
 			{
-				SecureZeroMemory(ptr, GlobalSize(ptr));
+				g_memset(ptr, 0, GlobalSize(ptr));
 				GlobalFree(ptr);
 			}
 		}
 
 		if ((ptr = entryReadVars->stream.state->blocks.window))
 		{
-			SecureZeroMemory(ptr, GlobalSize(ptr));
+			g_memset(ptr, 0, GlobalSize(ptr));
 			GlobalFree(ptr);
 		}
 		if ((ptr = entryReadVars->stream.state->blocks.hufts))
 		{
-			SecureZeroMemory(ptr, GlobalSize(ptr));
+			g_memset(ptr, 0, GlobalSize(ptr));
 			GlobalFree(ptr);
 		}
-		SecureZeroMemory(entryReadVars->stream.state, GlobalSize(entryReadVars->stream.state));
+		g_memset(entryReadVars->stream.state, 0, GlobalSize(entryReadVars->stream.state));
 		GlobalFree(entryReadVars->stream.state);
 
 #ifndef NDEBUG
@@ -2759,7 +2759,7 @@ static void cleanupEntry(register TUNZIP * tunzip)
 	// Free the input buffer
 	if (tunzip->EntryReadVars.InputBuffer)
 	{
-		SecureZeroMemory(tunzip->EntryReadVars.InputBuffer, GlobalSize(tunzip->EntryReadVars.InputBuffer));
+		g_memset(tunzip->EntryReadVars.InputBuffer, 0, GlobalSize(tunzip->EntryReadVars.InputBuffer));
 		GlobalFree(tunzip->EntryReadVars.InputBuffer);
 	}
 	tunzip->EntryReadVars.InputBuffer = 0;
@@ -3794,14 +3794,14 @@ static void closeArchive(register TUNZIP *tunzip)
 	if (tunzip->Flags & TZIP_ARCCLOSEFH)
 		CloseHandle(tunzip->ArchivePtr);
 	if (tunzip->Password){
-		SecureZeroMemory(tunzip->Password, GlobalSize(tunzip->Password));
+		g_memset(tunzip->Password, 0, GlobalSize(tunzip->Password));
 		GlobalFree(tunzip->Password);
 	}
 	if (tunzip->OutBuffer){
-		SecureZeroMemory(tunzip->OutBuffer, GlobalSize(tunzip->OutBuffer));
+		g_memset(tunzip->OutBuffer, 0, GlobalSize(tunzip->OutBuffer));
 		GlobalFree(tunzip->OutBuffer);
 	}
-	SecureZeroMemory(tunzip, GlobalSize(tunzip));
+	g_memset(tunzip, 0, GlobalSize(tunzip));
 	GlobalFree(tunzip);
 }
 

@@ -7108,8 +7108,8 @@ ResultType GuiType::Show(LPTSTR aOptions, LPTSTR aText)
 	{
 		mHScroll = new SCROLLINFO;
 		mVScroll = new SCROLLINFO;
-		memset(mHScroll, 0, sizeof(SCROLLINFO));
-		memset(mVScroll, 0, sizeof(SCROLLINFO));
+		g_memset(mHScroll, 0, sizeof(SCROLLINFO));
+		g_memset(mVScroll, 0, sizeof(SCROLLINFO));
 		mHScroll->cbSize = mVScroll->cbSize = sizeof(SCROLLINFO);
 		mHScroll->fMask = mVScroll->fMask = SIF_RANGE | SIF_PAGE;
 	}

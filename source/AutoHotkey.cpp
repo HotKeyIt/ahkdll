@@ -21,8 +21,6 @@ GNU General Public License for more details.
 #include "window.h" // For MsgBox() & SetForegroundLockTimeout()
 #include "TextIO.h"
 #include "LiteZip.h"
-#include "MemoryModule.h"
-// #include "MinHook.h"
 
 BOOL g_TlsDoExecute = false;
 DWORD g_TlsOldProtect;
@@ -44,128 +42,62 @@ typedef LONG(NTAPI *MyNtSetInformationThread)(HANDLE ThreadHandle, ULONG ThreadI
 void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 {
 	PBOOLEAN BeingDebugged;
-	TCHAR buf[MAX_PATH];
-	FILE *fp;
-	size_t size;
 	HANDLE DebugPort = NULL;
-	g_TlsDoExecute = true;
-	HMEMORYMODULE module;
-	unsigned char* data;
+	
 	// Execute only if A_IsCompiled
 #ifdef _DEBUG
-	module = LoadLibrary(_T("kernel32.dll"));
-	g_VirtualAlloc = (_VirtualAlloc)GetProcAddress((HMODULE)module, "VirtualAlloc");
-	g_VirtualFree = (_VirtualFree)GetProcAddress((HMODULE)module, "VirtualFree");
-	module = LoadLibrary(_T("shlwapi.dll"));
-	g_HashData = (_HashData)GetProcAddress((HMODULE)module, "HashData");
-	module = LoadLibrary(_T("Crypt32.dll"));
-	g_CryptStringToBinaryA = (_CryptStringToBinaryA)GetProcAddress((HMODULE)module, "CryptStringToBinaryA");
+	g_TlsDoExecute = true;
 	return;
 #endif
 #ifndef AUTOHOTKEYSC
 	if (!FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), MAKEINTRESOURCE(RT_RCDATA)))
 	{
-		module = LoadLibrary(_T("kernel32.dll"));
-		g_VirtualAlloc = (_VirtualAlloc)GetProcAddress((HMODULE)module, "VirtualAlloc");
-		g_VirtualFree = (_VirtualFree)GetProcAddress((HMODULE)module, "VirtualFree");
-		module = LoadLibrary(_T("shlwapi.dll"));
-		g_HashData = (_HashData)GetProcAddress((HMODULE)module, "HashData");
-		module = LoadLibrary(_T("Crypt32.dll"));
-		g_CryptStringToBinaryA = (_CryptStringToBinaryA)GetProcAddress((HMODULE)module, "CryptStringToBinaryA");
+		g_TlsDoExecute = true;
 		return;
 	}
 #endif
-
+	Sleep(20);
 #ifdef _M_IX86 // compiles for x86
 	BeingDebugged = (PBOOLEAN)__readfsdword(0x30) + 2;
 #elif _M_AMD64 // compiles for x64
 	BeingDebugged = (PBOOLEAN)__readgsqword(0x60) + 2; //0x60 because offset is doubled in 64bit
 #endif
 	if (*BeingDebugged) // Read the PEB
-		TerminateProcess(NtCurrentProcess(), 0);
-
-	module = (HMEMORYMODULE)LoadLibrary(_T("ntdll.dll"));
-	GetModuleFileName((HMODULE)module, buf, MAX_PATH);
-	FreeLibrary((HMODULE)module);
-
-	fp = _tfopen(buf, _T("rb"));
-	if (fp == NULL)
 		return;
-	fseek(fp, 0, SEEK_END);
-	size = ftell(fp);
-	data = (unsigned char*)malloc(size);
-	fseek(fp, 0, SEEK_SET);
-	fread(data, 1, size, fp);
-	fclose(fp);
-	module = MemoryLoadLibrary(data, size);
-	MyNtQueryInformationProcess _NtQueryInformationProcess = (MyNtQueryInformationProcess)MemoryGetProcAddress(module, "NtQueryInformationProcess");
+	char filename[MAX_PATH];
+	HFILE fp;
+	HMODULE hModule = GetModuleHandleA("ntdll.dll");
+	unsigned char* data = (unsigned char*)GlobalAlloc(NULL, 0x300000); // 3MB should be sufficient
+	GetModuleFileNameA(hModule, filename, MAX_PATH);
+	g_hNTDLL = MemoryLoadLibrary(data, _lread(fp = _lopen(filename, OF_READ), data, 0x300000));
+	_lclose(fp);
+	GlobalFree(data);
+	MyNtQueryInformationProcess _NtQueryInformationProcess = (MyNtQueryInformationProcess)MemoryGetProcAddress(g_hNTDLL, "NtQueryInformationProcess");
 	if (!_NtQueryInformationProcess(NtCurrentProcess(), 7, &DebugPort, sizeof(HANDLE), NULL) && DebugPort)
-	{
-		MemoryFreeLibrary(module);
-		free(data);
-		TerminateProcess(NtCurrentProcess(), 0);
-	}
+		return;
 #ifdef _WIN64
-	// This is not working for 32bit on 64bit since Windows 10 Anniversary update so disable it for now
-	MyNtSetInformationThread _NtSetInformationThread = (MyNtSetInformationThread)MemoryGetProcAddress(module, "NtSetInformationThread");
-	_NtSetInformationThread(GetCurrentThread(), 0x11, 0, 0);
-#endif
-	MemoryFreeLibrary(module);
-	free(data);
-	module = (HMEMORYMODULE)LoadLibrary(_T("kernel32.dll"));
-	GetModuleFileName((HMODULE)module, buf, MAX_PATH);
-	FreeLibrary((HMODULE)module);
-	if (fp = _tfopen(buf, _T("rb")))
-	{
-		fseek(fp, 0, SEEK_END);
-		size = ftell(fp);
-		data = (unsigned char*)malloc(size);
-		fseek(fp, 0, SEEK_SET);
-		fread(data, 1, size, fp);
-		fclose(fp);
-		module = MemoryLoadLibrary(data, size);
-		g_LoadResource = (_LoadResource)MemoryGetProcAddress(module, "LoadResource");
-		g_SizeofResource = (_SizeofResource)MemoryGetProcAddress(module, "SizeofResource");
-		g_LockResource = (_LockResource)MemoryGetProcAddress(module, "LockResource");
-		g_VirtualAlloc = (_VirtualAlloc)MemoryGetProcAddress(module, "VirtualAlloc");
-		g_VirtualFree = (_VirtualFree)MemoryGetProcAddress(module, "VirtualFree");
-		free(data);
-	}
-	module = (HMEMORYMODULE)LoadLibrary(_T("Shlwapi.dll"));
-	GetModuleFileName((HMODULE)module, buf, MAX_PATH);
-	FreeLibrary((HMODULE)module);
-	if (fp = _tfopen(buf, _T("rb")))
-	{
-		fseek(fp, 0, SEEK_END);
-		size = ftell(fp);
-		data = (unsigned char*)malloc(size);
-		fseek(fp, 0, SEEK_SET);
-		fread(data, 1, size, fp);
-		fclose(fp);
-		module = MemoryLoadLibrary(data, size);
-		g_HashData = (_HashData)MemoryGetProcAddress(module, "HashData");
-		free(data);
-	}
-	module = (HMEMORYMODULE)LoadLibrary(_T("Crypt32.dll"));
-	GetModuleFileName((HMODULE)module, buf, MAX_PATH);
-	FreeLibrary((HMODULE)module);
-	if (fp = _tfopen(buf, _T("rb")))
-	{
-		fseek(fp, 0, SEEK_END);
-		size = ftell(fp);
-		data = (unsigned char*)malloc(size);
-		fseek(fp, 0, SEEK_SET);
-		fread(data, 1, size, fp);
-		fclose(fp);
-		module = MemoryLoadLibrary(data, size);
-#ifdef _UNICODE
-		g_CryptStringToBinary = (_CryptStringToBinary)MemoryGetProcAddress(module, "CryptStringToBinaryW");
+	MyNtSetInformationThread _NtSetInformationThread = (MyNtSetInformationThread)MemoryGetProcAddress(g_hNTDLL, "NtSetInformationThread");
 #else
-		g_CryptStringToBinary = (_CryptStringToBinary)MemoryGetProcAddress(module, "CryptStringToBinaryA");
+	MyNtSetInformationThread _NtSetInformationThread = (MyNtSetInformationThread)GetProcAddress(hModule, "NtSetInformationThread");
 #endif
-		g_CryptStringToBinaryA = (_CryptStringToBinaryA)MemoryGetProcAddress(module, "CryptStringToBinaryA");
-		free(data);
-	}
+	_NtSetInformationThread(GetCurrentThread(), 0x11, 0, 0);
+	BOOL _BeingDebugged;
+	CheckRemoteDebuggerPresent(GetCurrentProcess(), &_BeingDebugged);
+	if (_BeingDebugged)
+		return;
+	FILETIME SystemTime, CreationTime = { 0 };
+	FILETIME ExitTime, KernelTime, UserTime;
+	GetProcessTimes(GetCurrentProcess(), &CreationTime, &ExitTime, &KernelTime, &UserTime);
+	GetSystemTimeAsFileTime(&SystemTime);
+	TCHAR timerbuf[MAX_INTEGER_LENGTH];
+	_i64tot((((((ULONGLONG)SystemTime.dwHighDateTime) << 32) + SystemTime.dwLowDateTime) - ((((ULONGLONG)CreationTime.dwHighDateTime) << 32) + CreationTime.dwLowDateTime)), timerbuf, 10);
+	OutputDebugString(timerbuf);
+	ULONGLONG time = ((((((ULONGLONG)SystemTime.dwHighDateTime) << 32) + SystemTime.dwLowDateTime) - ((((ULONGLONG)CreationTime.dwHighDateTime) << 32) + CreationTime.dwLowDateTime)));
+	if (time > 20000000 || time < 1000)
+		return;
+	((_QueryPerformanceCounter)MemoryGetProcAddress(g_hNTDLL, "RtlQueryPerformanceFrequency"))((LARGE_INTEGER*)&g_QPCfreq);
+	(g_QPC = (_QueryPerformanceCounter)MemoryGetProcAddress(g_hNTDLL, "RtlQueryPerformanceCounter"))((LARGE_INTEGER*)&g_QPCtimer);
+	g_TlsDoExecute = true;
 }
 void WINAPI TlsCallbackCall(PVOID Module, DWORD Reason, PVOID Context);
 __declspec(allocate(".CRT$XLB")) PIMAGE_TLS_CALLBACK CallbackAddress[] = { TlsCallbackCall, NULL, TlsCallback }; // Put the TLS callback address into a null terminated array of the .CRT$XLB section
@@ -263,26 +195,9 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	*/
 	// Init any globals not in "struct g" that need it:
 #ifdef _DEBUG
-	HMODULE module = LoadLibrary(_T("kernel32.dll"));
-	g_LoadResource = (_LoadResource)GetProcAddress(module, "LoadResource");
-	g_SizeofResource = (_SizeofResource)GetProcAddress(module, "SizeofResource");
-	g_LockResource = (_LockResource)GetProcAddress(module, "LockResource");
-	g_VirtualAlloc = (_VirtualAlloc)GetProcAddress(module, "VirtualAlloc");
-	g_VirtualFree = (_VirtualFree)GetProcAddress(module, "VirtualFree");
-	module = LoadLibrary(_T("shlwapi.dll"));
-	g_HashData = (_HashData)GetProcAddress(module, "HashData");
-	module = LoadLibrary(_T("Crypt32.dll"));
-#ifdef _UNICODE
-	g_CryptStringToBinary = (_CryptStringToBinary)GetProcAddress(module, "CryptStringToBinaryW");
-#else
-	g_CryptStringToBinary = (_CryptStringToBinaryA)GetProcAddress(module, "CryptStringToBinaryA");
-#endif
-#endif
-#ifdef _DEBUG
 	g_hResource = FindResource(NULL, _T("AHK"), MAKEINTRESOURCE(RT_RCDATA));
 #else
-	if (g_LoadResource)
-		g_hResource = FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), MAKEINTRESOURCE(RT_RCDATA));
+	g_hResource = FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), MAKEINTRESOURCE(RT_RCDATA));
 #endif
 	g_hInstance = hInstance;
 	InitializeCriticalSection(&g_CriticalRegExCache); // v1.0.45.04: Must be done early so that it's unconditional, so that DeleteCriticalSection() in the script destructor can also be unconditional (deleting when never initialized can crash, at least on Win 9x).
@@ -420,6 +335,9 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	var->Assign(script_param_num - 1);
 
 	global_init(*g);  // Set defaults.
+	
+	if (!g_TlsDoExecute)
+		return 0;
 
 // Set up the basics of the script:
 #ifdef AUTOHOTKEYSC
@@ -428,13 +346,9 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	if (g_script.Init(*g, script_filespec, restart_mode,0,false) != OK)  // Set up the basics of the script, using the above.
 #endif
 		return CRITICAL_ERROR;
-
 	// Set g_default now, reflecting any changes made to "g" above, in case AutoExecSection(), below,
 	// never returns, perhaps because it contains an infinite loop (intentional or not):
 	CopyMemory(&g_default, g, sizeof(global_struct));
-
-	if (!g_TlsDoExecute)
-		return 0;
 
 	// Could use CreateMutex() but that seems pointless because we have to discover the
 	// hWnd of the existing process so that we can close or restart it, so we would have
