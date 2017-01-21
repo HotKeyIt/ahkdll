@@ -73,7 +73,7 @@
   <!-- platform: win32 & x64 (common) -->
   <ItemDefinitionGroup Condition="'$(Platform)'=='Win32' OR '$(Platform)'=='x64'">
     <ClCompile>
-      <PreprocessorDefinitions>WIN32;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>CONFIG_WIN2K;WIN32;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -112,7 +112,7 @@
     <ClCompile>
       <PrecompiledHeader Condition="!$(ConfigDebug)">Use</PrecompiledHeader>
       <PreprocessorDefinitions Condition="'$(Configuration)'=='ReleaseDllMini(mbcs)' OR '$(Configuration)'=='ReleaseDllMini'">AHKV2;_USRDLL;MINIDLL;WIN32;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <PreprocessorDefinitions Condition="'$(Configuration)'=='ReleaseDll(mbcs)' OR '$(Configuration)'=='ReleaseDll' OR '$(Configuration)'=='DebugDll'">AHKV2;_USRDLL;AUTOCOMSERVER_EXPORTS;WIN32;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)'=='ReleaseDll(mbcs)' OR '$(Configuration)'=='ReleaseDll' OR '$(Configuration)'=='DebugDll'">CONFIG_WIN2K;AHKV2;_USRDLL;AUTOCOMSERVER_EXPORTS;WIN32;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>

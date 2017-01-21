@@ -28,15 +28,10 @@ _thread_local extern FuncLibrary sLib[FUNC_LIB_COUNT]; // function libraries
 extern LPSTR g_hWinAPI, g_hWinAPIlowercase; // loads WinAPI functions definitions from resource
 _thread_local extern SimpleHeap *g_SimpleHeap;
 extern HRSRC g_hResource;		// for compiled AutoHotkey.exe
-EXPORT extern HCUSTOMMODULE g_hMSVCR;
-extern _LoadResource g_LoadResource;
-extern _SizeofResource g_SizeofResource;
-extern _LockResource g_LockResource;
-extern _CryptStringToBinary g_CryptStringToBinary;
-extern _CryptStringToBinaryA g_CryptStringToBinaryA;
-extern _VirtualAlloc g_VirtualAlloc;
-extern _VirtualFree g_VirtualFree;
-extern _HashData g_HashData;
+extern HCUSTOMMODULE g_hNTDLL;
+extern _QueryPerformanceCounter g_QPC;
+extern double g_QPCtimer;
+extern double g_QPCfreq;
 #ifdef _USRDLL
 _thread_local extern bool g_Reloading;
 _thread_local extern bool g_Loading;

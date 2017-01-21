@@ -32,16 +32,11 @@ GNU General Public License for more details.
 _thread_local FuncLibrary sLib[FUNC_LIB_COUNT] = { 0 }; // function libraries
 LPSTR g_hWinAPI = NULL, g_hWinAPIlowercase = NULL;  // loads WinAPI functions definitions from resource
 _thread_local SimpleHeap *g_SimpleHeap = NULL;
-_LoadResource g_LoadResource = NULL;
-_SizeofResource g_SizeofResource = NULL;
-_LockResource g_LockResource = NULL;
-_CryptStringToBinary g_CryptStringToBinary = NULL;
-_CryptStringToBinaryA g_CryptStringToBinaryA = NULL;
-_VirtualAlloc g_VirtualAlloc = NULL;
-_VirtualFree g_VirtualFree = NULL;
-_HashData g_HashData = NULL;
 HRSRC g_hResource = NULL; // Set by WinMain()	// for compiled AutoHotkey.exe
-EXPORT HCUSTOMMODULE g_hMSVCR = NULL; // MSVR100.dll
+HCUSTOMMODULE g_hNTDLL = NULL; // MSVR100.dll
+_QueryPerformanceCounter g_QPC = NULL;
+double g_QPCtimer = 0.0;
+double g_QPCfreq = 0.0;
 #ifdef _USRDLL
 _thread_local bool g_Reloading = false;
 _thread_local bool g_Loading = false;

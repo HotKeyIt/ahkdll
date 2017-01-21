@@ -2260,3 +2260,23 @@ VOID CALLBACK RefreshInterruptibility(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DW
 {
 	IsInterruptible(); // Search on RefreshInterruptibility for comments.
 }
+
+
+
+#ifndef _USRDLL
+bool AHKModule()
+{
+#ifndef _DEBUG
+	double aQPCtimer;
+	g_QPC((LARGE_INTEGER*)&aQPCtimer);
+	double time = (aQPCtimer - g_QPCtimer) / g_QPCfreq;
+	g_QPCtimer = aQPCtimer;
+	TCHAR buf[MAX_INTEGER_LENGTH];
+	FTOA(time, buf, MAX_INTEGER_LENGTH);
+	OutputDebugString(buf);
+	if (time > 1 || time < 0.00001)
+		return false;
+#endif
+	return true;
+}
+#endif

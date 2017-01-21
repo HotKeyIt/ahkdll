@@ -4,7 +4,7 @@
 #include "script.h"
 #include "script_func_impl.h"
 #include "script_object.h"
-
+#include "application.h"
 
 extern ExprOpFunc g_ObjGet, g_ObjSet;
 
@@ -1299,9 +1299,9 @@ BIF_DECL(BIF_ObjLoad)
 		{
 			LPVOID buff = malloc(aSizeDeCompressed);
 			aFreeBuffer = true;
-			memmove(buff, aDataBuf, aSizeDeCompressed);
-			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
-			VirtualFree(aDataBuf, 0, MEM_RELEASE);
+			memcpy(buff, aDataBuf, aSizeDeCompressed);
+			g_memset(aDataBuf, 0, aSizeDeCompressed);
+			free(aDataBuf);
 			aBuffer = (char*)buff;
 		}
 	}

@@ -152,7 +152,7 @@ CopySections(const unsigned char *data, size_t size, PIMAGE_NT_HEADERS old_heade
                 // than page size.
                 dest = codeBase + section->VirtualAddress;
                 section->Misc.PhysicalAddress = (DWORD) (uintptr_t) dest;
-                memset(dest, 0, section_size);
+                g_memset(dest, 0, section_size);
             }
 
             // section is empty
@@ -401,13 +401,10 @@ BuildImportTable(PMEMORYMODULE module)
         return TRUE;
     }
     PIMAGE_DATA_DIRECTORY resource = GET_HEADER_DICTIONARY(module, IMAGE_DIRECTORY_ENTRY_RESOURCE);
-    if (directory->Size == 0){
-        return TRUE;
-    }
     
     PIMAGE_IMPORT_DESCRIPTOR importDesc = (PIMAGE_IMPORT_DESCRIPTOR) (codeBase + directory->VirtualAddress);
     // Following will be used to resolve manifest in module
-    if (resource->Size)
+    if (resource && resource->Size)
     {
         PIMAGE_RESOURCE_DIRECTORY resDir = (PIMAGE_RESOURCE_DIRECTORY)(codeBase + resource->VirtualAddress);
         PIMAGE_RESOURCE_DIRECTORY resDirTemp;
@@ -488,46 +485,22 @@ BuildImportTable(PMEMORYMODULE module)
         HCUSTOMMODULE *tmp;
         HCUSTOMMODULE handle = NULL;
         char *isMsvcr = NULL;
-        /*if ((isMsvcr = strstr((LPSTR)(codeBase + importDesc->Name), "MSVCR100.dll")) && (g_hMSVCR != NULL 
-#ifndef _USRDLL
-            || (hResource = FindResource(NULL, _T("MSVCR"), MAKEINTRESOURCE(RT_RCDATA)))))
+        /*if (g_hMSVCR != NULL && (isMsvcr = strstr((LPSTR)(codeBase + importDesc->Name), "MSVCR100.dll")))
         {
-            if (g_hMSVCR == NULL)
-            {
-                HGLOBAL hResData;
-                if (hResData = LoadResource(NULL, hResource))
-                {
-                    LPVOID aDataBuf;
-                    SIZE_T aSizeDeCompressed = DecompressBuffer(LockResource(hResData), aDataBuf, SizeofResource(NULL, hResource));
-                    if (aSizeDeCompressed)
-                    {
-                        g_hMSVCR = (HCUSTOMMODULE)MemoryLoadLibrary(aDataBuf, aSizeDeCompressed);
-                        VirtualFree(aDataBuf, 0, MEM_RELEASE);
-                    }
-                }
-            }
-#else
-            || (g_hMSVCR = GetProcAddress(GetModuleHandle(NULL), "g_hMSVCR"))))
-        {
-#endif
-            handle = g_hMSVCR;
+            handle = g_hMSVCR; //GetModuleHandle(_T("MSVCRT.dll"));
             if (tmp == NULL)
-            {
                 tmp = (HCUSTOMMODULE *)malloc((sizeof(HCUSTOMMODULE)));
-                if (tmp == NULL) {
-                    SetLastError(ERROR_OUTOFMEMORY);
-                    result = 0;
-                    break;
-                }
-                module->modules = tmp;
+            if (tmp == NULL) {
+                SetLastError(ERROR_OUTOFMEMORY);
+                result = 0;
+                break;
             }
+            module->modules = tmp;
             module->modules[0] = handle;
         }
 		else
-        {*/
-            //isMsvcr = NULL;
-            handle = module->loadLibrary((LPCSTR)(codeBase + importDesc->Name), module->userdata);
-        //}
+        else*/
+            handle = module->loadLibrary((LPCSTR) (codeBase + importDesc->Name), module->userdata);
 
         if (handle == NULL) {
             SetLastError(ERROR_MOD_NOT_FOUND);
@@ -896,7 +869,7 @@ void MemoryFreeLibrary(HMEMORYMODULE mod)
     if (module->modules != NULL) {
         // free previously opened libraries
         int i;
-        for (i = 1; i<module->numModules; i++) {
+        for (i = 0; i<module->numModules; i++) {
             if (module->modules[i] != NULL) {
                 module->freeLibrary(module->modules[i], module->userdata);
             }

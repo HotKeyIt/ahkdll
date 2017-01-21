@@ -115,3 +115,4 @@ typedef struct _MYTEB
 	PVOID ThreadLocalStoragePointer;
 } MYTEB, *PMYTEB;
 #endif
+bool AHKModule();

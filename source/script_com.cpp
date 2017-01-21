@@ -447,14 +447,7 @@ BIF_DECL(BIF_ComObjTypeOrValue)
 					if (SUCCEEDED(ptinfo->GetTypeAttr(&typeattr)))
 					{
 						aResultToken.marker = aResultToken.buf;
-#ifdef UNICODE
 						aResultToken.marker_length = StringFromGUID2(typeattr->guid, aResultToken.marker, MAX_NUMBER_SIZE);
-#else
-						WCHAR cnvbuf[MAX_NUMBER_SIZE];
-						StringFromGUID2(typeattr->guid, cnvbuf, MAX_NUMBER_SIZE);
-						CStringCharFromWChar cnvstring(cnvbuf);
-						memcpy(aResultToken.marker, cnvstring.GetBuffer(), aResultToken.marker_length = cnvstring.GetLength());
-#endif
 						ptinfo->ReleaseTypeAttr(typeattr);
 					}
 				}

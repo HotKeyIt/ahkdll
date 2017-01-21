@@ -981,4 +981,15 @@ UNICODE_CHECK inline size_t CHECK_SIZEOF(size_t n) { return n; }
 #define UNICODE_CHECK
 #endif
 
+
+// removed return value as it is not used
+__inline void g_memset(void *_S, int _C, size_t _N)
+{
+	unsigned char *_Su = (unsigned char*)_S;
+	for (; 0 < _N; ++_Su, --_N)
+	{
+		*_Su = (unsigned char)_C;
+	}
+}
+
 #endif

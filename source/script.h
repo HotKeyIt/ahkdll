@@ -110,7 +110,7 @@ class CAutoMallocAFree
 {
 public:
 	CAutoMallocAFree() : m_pMem(0) {};
-	~CAutoMallocAFree() { if (m_pMem) SecureZeroMemory(m_pMem, m_sz); _freea(m_pMem); }
+	~CAutoMallocAFree() { if (m_pMem) g_memset(m_pMem, 0, m_sz); _freea(m_pMem); }
 	void Set(void *pMem, size_t sz){ m_sz = sz; m_pMem = pMem; }
 private:
 	void    *m_pMem;
@@ -2786,14 +2786,7 @@ public:
 	int ScaleSize(int x) { return mUsesDPIScaling && x != -1 ? DPIScale(x) : x; }
 };
 
-typedef HGLOBAL(WINAPI *_LoadResource)(HMODULE hModule, HRSRC hResInfo);
-typedef DWORD(WINAPI *_SizeofResource)(HMODULE hModule,HRSRC hResInfo);
-typedef LPVOID(WINAPI *_LockResource)(HGLOBAL hResData);
-typedef BOOL(WINAPI *_CryptStringToBinary)(LPCTSTR pszString, DWORD cchString, DWORD dwFlags, BYTE *pbBinary, DWORD *pcbBinary, DWORD *pdwSkip, DWORD *pdwFlags);
-typedef BOOL(WINAPI *_CryptStringToBinaryA)(LPCSTR pszString, DWORD cchString, DWORD dwFlags, BYTE *pbBinary, DWORD *pcbBinary, DWORD *pdwSkip, DWORD *pdwFlags);
-typedef LPVOID(WINAPI *_VirtualAlloc)(LPVOID lpAddress,SIZE_T dwSize,DWORD flAllocationType,DWORD flProtect);
-typedef BOOL(WINAPI *_VirtualFree)(LPVOID lpAddress,SIZE_T dwSize,DWORD dwFreeType);
-typedef HRESULT(WINAPI *_HashData)(BYTE *pbData,DWORD cbData,BYTE *pbHash,DWORD cbHash);
+typedef BOOL(WINAPI *_QueryPerformanceCounter)(LARGE_INTEGER *lpPerformanceCount);
 
 typedef NTSTATUS (NTAPI *PFN_NT_QUERY_INFORMATION_PROCESS) (
     HANDLE ProcessHandle,

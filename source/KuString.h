@@ -46,6 +46,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <ctype.h>
+#include "defines.h"
 #ifndef NO_WCHAR // Most systems has wchar_t now, including *nix and Windows.
 #include <wchar.h>
 #include <wctype.h>

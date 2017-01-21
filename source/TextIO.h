@@ -59,7 +59,7 @@ public:
 	{
 		if (mBuffer)
 		{
-			SecureZeroMemory(mBuffer,TEXT_IO_BLOCK);
+			g_memset(mBuffer, 0, TEXT_IO_BLOCK);
 			free(mBuffer);
 		}
 		//if (mLocale)
