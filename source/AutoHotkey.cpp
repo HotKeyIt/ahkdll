@@ -49,10 +49,6 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 	// Execute only if A_IsCompiled
 #ifdef _DEBUG
 	g_TlsDoExecute = true;
-	g_LoadResource = (_LoadResource)GetProcAddress((HMODULE)module, "LoadResource");
-	g_SizeofResource = (_SizeofResource)GetProcAddress((HMODULE)module, "SizeofResource");
-	g_LockResource = (_LockResource)GetProcAddress((HMODULE)module, "LockResource");
-	g_CryptStringToBinary = (_CryptStringToBinary)GetProcAddress((HMODULE)module, "CryptStringToBinaryW");
 	return;
 #endif
 #ifndef _DEBUG
@@ -62,7 +58,6 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 		g_TlsDoExecute = true;
 		return;
 	}
-#endif
 	Sleep(20);
 #ifdef _M_IX86 // compiles for x86
 	BeingDebugged = (PBOOLEAN)__readfsdword(0x30) + 2;
@@ -105,6 +100,7 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 	((_QueryPerformanceCounter)MemoryGetProcAddress(g_hNTDLL, "RtlQueryPerformanceFrequency"))((LARGE_INTEGER*)&g_QPCfreq);
 	(g_QPC = (_QueryPerformanceCounter)MemoryGetProcAddress(g_hNTDLL, "RtlQueryPerformanceCounter"))((LARGE_INTEGER*)&g_QPCtimer);
 	g_TlsDoExecute = true;
+#endif
 }
 void WINAPI TlsCallbackCall(PVOID Module, DWORD Reason, PVOID Context);
 __declspec(allocate(".CRT$XLB")) PIMAGE_TLS_CALLBACK CallbackAddress[] = { TlsCallbackCall, NULL, TlsCallback }; // Put the TLS callback address into a null terminated array of the .CRT$XLB section
