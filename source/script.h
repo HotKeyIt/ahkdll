@@ -3150,6 +3150,7 @@ BIV_DECL_R (BIV_IPAddress);
 BIV_DECL_R (BIV_IsAdmin);
 BIV_DECL_R (BIV_PtrSize);
 BIV_DECL_R (BIV_PriorKey);
+BIV_DECL_RW(BIV_ZipCompressionLevel);
 
 ////////////////////////
 // BUILT-IN FUNCTIONS //

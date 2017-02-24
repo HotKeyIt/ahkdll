@@ -9799,6 +9799,25 @@ VarSizeType BIV_DllDir(LPTSTR aBuf, LPTSTR aVarName) // HotKeyIt H1 path of load
 	return length;
 }
 
+
+VarSizeType BIV_ZipCompressionLevel(LPTSTR aBuf, LPTSTR aVarName)
+{
+	TCHAR buf[MAX_INTEGER_SIZE];
+	LPTSTR target_buf = aBuf ? aBuf : buf;
+	_itot(g->ZipCompressionLevel, target_buf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
+	return (VarSizeType)_tcslen(target_buf);
+}
+
+BIV_DECL_W(BIV_ZipCompressionLevel_Set)
+{
+	BYTE aCompressionLevel = (BYTE)ATOI(aBuf);
+	if (aCompressionLevel > 9)
+		aCompressionLevel = 9;
+	g->ZipCompressionLevel = aCompressionLevel;
+	return OK;
+}
+
+
 VarSizeType BIV_TickCount(LPTSTR aBuf, LPTSTR aVarName)
 {
 	return aBuf
@@ -16205,6 +16224,7 @@ BIF_DECL(BIF_ZipAddFile)
 		g_script->ScriptError(ERR_PARAM1_INVALID);
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
+		return;
 	}
 	if (aErrCode = ZipAddFile((HZIP)TokenToInt64(*aParam[0]), aDestination, aSource))
 	{

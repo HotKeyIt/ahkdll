@@ -862,6 +862,7 @@ struct global_struct
 	Line* ExcptLine;
 	DerefType* ExcptDeref;
 	bool InTryBlock;
+	BYTE ZipCompressionLevel;
 };
 
 inline void global_maximize_interruptibility(global_struct &g)
@@ -952,6 +953,7 @@ inline void global_init(global_struct &g)
 	g.SendLevel = 0;
 	g.ListLinesIsEnabled = false;
 	g.Encoding = CP_ACP;
+	g.ZipCompressionLevel = 5;
 }
 
 #ifdef UNICODE

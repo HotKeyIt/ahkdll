@@ -444,7 +444,8 @@ VarEntry g_BIV_A[] =
 	A_x(YDay, BIV_DateTime),
 	A_x(Year, BIV_DateTime),
 	A_x(YWeek, BIV_DateTime),
-	A_x(YYYY, BIV_DateTime)
+	A_x(YYYY, BIV_DateTime),
+	A_w(ZipCompressionLevel)
 };
 #undef A_
 #undef A_x
