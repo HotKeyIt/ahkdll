@@ -7612,6 +7612,8 @@ static DWORD addSrc(register TZIP *tzip, const void *destname, const void *src, 
 	if (flags & ZIP_UNICODE)
 	{
 		zfi->nam = WideCharToMultiByte(CP_UTF8, 0, (const WCHAR *)destname, -1, zfi->iname, MAX_PATH, 0, 0);
+		if (zfi->nam)
+			zfi->nam--;
 	}
 	else
 	{
