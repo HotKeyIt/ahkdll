@@ -18296,6 +18296,7 @@ BIF_DECL(BIF_ZipAddFile)
 		g_script.ScriptError(ERR_PARAM1_INVALID);
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
+		return;
 	}
 	if (aErrCode = ZipAddFile((HZIP)TokenToInt64(*aParam[0]), aDestination, aSource))
 	{
