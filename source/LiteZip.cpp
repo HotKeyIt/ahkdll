@@ -253,7 +253,7 @@ typedef struct {
 	UCH	*		next_out;	// next output byte should be put there
 	DWORD		avail_out;	// remaining free space at next_out
 	DWORD		total_out;	// total # of bytes output so far
-#ifndef NDEBUG
+#ifdef _DEBUG
 	char *		msg;		// last error message, NULL if no error
 #endif
 	INTERNAL_STATE *state;
@@ -342,7 +342,7 @@ typedef struct
 // ======================== Function Declarations ======================
 
 // Diagnostic functions
-#ifndef NDEBUG
+#ifdef _DEBUG
 #define LuAssert(cond,msg)
 #define LuTrace(x)
 #define LuTracev(x)
@@ -792,7 +792,7 @@ static INFLATE_CODES_STATE *inflate_codes_new(uInt bl, uInt bd, const INFLATE_HU
 		c->dbits = (UCH)bd;
 		c->ltree = tl;
 		c->dtree = td;
-#ifndef NDEBUG
+#ifdef _DEBUG
 		LuTracev((stderr, "inflate:       codes new\n"));
 #endif
 	}
@@ -854,7 +854,7 @@ static int inflate_codes(INFLATE_BLOCKS_STATE *s, Z_STREAM * z, int r)
 				if (e == 0)               // literal 
 				{
 					c->sub.lit = t->base;
-#ifndef NDEBUG
+#ifdef _DEBUG
 					LuTracevv((stderr, t->base >= 0x20 && t->base < 0x7f ? "inflate:         literal '%c'\n" : "inflate:         literal 0x%02x\n", t->base));
 #endif
 					c->mode = LIT;
@@ -878,7 +878,7 @@ static int inflate_codes(INFLATE_BLOCKS_STATE *s, Z_STREAM * z, int r)
 
 				if (e & 32)               // end of block 
 				{
-#ifndef NDEBUG
+#ifdef _DEBUG
 					LuTracevv((stderr, "inflate:         end of block\n"));
 #endif
 					c->mode = WASH;
@@ -886,7 +886,7 @@ static int inflate_codes(INFLATE_BLOCKS_STATE *s, Z_STREAM * z, int r)
 				}
 
 				c->mode = BADCODE;        // invalid code 
-#ifndef NDEBUG
+#ifdef _DEBUG
 				z->msg = (char*)"invalid literal/length code";
 #endif
 				r = Z_DATA_ERROR;
@@ -900,7 +900,7 @@ static int inflate_codes(INFLATE_BLOCKS_STATE *s, Z_STREAM * z, int r)
 				DUMPBITS(j)
 					c->sub.code.need = c->dbits;
 				c->sub.code.tree = c->dtree;
-#ifndef NDEBUG
+#ifdef _DEBUG
 				LuTracevv((stderr, "inflate:         length %u\n", c->len));
 #endif
 				c->mode = DIST;
@@ -928,7 +928,7 @@ static int inflate_codes(INFLATE_BLOCKS_STATE *s, Z_STREAM * z, int r)
 				}
 
 				c->mode = BADCODE;        // invalid code 
-#ifndef NDEBUG
+#ifdef _DEBUG
 				z->msg = (char*)"invalid distance code";
 #endif
 				r = Z_DATA_ERROR;
@@ -940,7 +940,7 @@ static int inflate_codes(INFLATE_BLOCKS_STATE *s, Z_STREAM * z, int r)
 				NEEDBITS(j)
 					c->sub.copy.dist += (uInt)b & inflate_mask[j];
 				DUMPBITS(j)
-#ifndef NDEBUG
+#ifdef _DEBUG
 					LuTracevv((stderr, "inflate:         distance %u\n", c->sub.copy.dist));
 #endif
 				c->mode = COPY;
@@ -1070,7 +1070,7 @@ static void inflate_blocks_reset(Z_STREAM *z)
 	s->bitk = s->bitb = 0;
 	s->read = s->write = s->window;
 	//	if (!z->state->nowrap) z->adler = s->check = adler32(0, 0, 0);
-#ifndef NDEBUG
+#ifdef _DEBUG
 	LuTracev((stderr, "inflate:   blocks reset\n"));
 #endif
 }
@@ -1110,7 +1110,7 @@ static int inflate_blocks(Z_STREAM * z, int r)
 					// Stored
 				case 0:
 				{
-#ifndef NDEBUG
+#ifdef _DEBUG
 					LuTracev((stderr, "inflate:     stored block%s\n", s->last ? " (last)" : ""));
 #endif
 					DUMPBITS(3)
@@ -1126,7 +1126,7 @@ static int inflate_blocks(Z_STREAM * z, int r)
 					uInt bl, bd;
 					const INFLATE_HUFT *tl, *td;
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 					LuTracev((stderr, "inflate:     fixed codes block%s\n", s->last ? " (last)" : ""));
 #endif
 					bl = Fixed_bl;
@@ -1148,7 +1148,7 @@ static int inflate_blocks(Z_STREAM * z, int r)
 				// Dynamic
 				case 2:
 				{
-#ifndef NDEBUG
+#ifdef _DEBUG
 					LuTracev((stderr, "inflate:     dynamic codes block%s\n", s->last ? " (last)" : ""));
 #endif
 					DUMPBITS(3)
@@ -1161,7 +1161,7 @@ static int inflate_blocks(Z_STREAM * z, int r)
 				{
 					DUMPBITS(3)
 						s->mode = IBM_BAD;
-#ifndef NDEBUG
+#ifdef _DEBUG
 					z->msg = (char*)"invalid block type";
 #endif
 					r = Z_DATA_ERROR;
@@ -1178,7 +1178,7 @@ static int inflate_blocks(Z_STREAM * z, int r)
 					if ((((~b) >> 16) & 0xffff) != (b & 0xffff))
 					{
 						s->mode = IBM_BAD;
-#ifndef NDEBUG
+#ifdef _DEBUG
 						z->msg = (char*)"invalid stored block lengths";
 #endif
 						r = Z_DATA_ERROR;
@@ -1187,7 +1187,7 @@ static int inflate_blocks(Z_STREAM * z, int r)
 
 				s->sub.left = (uInt)b & 0xffff;
 				b = k = 0;                      // dump bits 
-#ifndef NDEBUG
+#ifdef _DEBUG
 				LuTracev((stderr, "inflate:       stored length %u\n", s->sub.left));
 #endif
 				s->mode = s->sub.left ? IBM_STORED : (s->last ? IBM_DRY : IBM_TYPE);
@@ -1207,7 +1207,7 @@ static int inflate_blocks(Z_STREAM * z, int r)
 				q += t;  m -= t;
 				if ((s->sub.left -= t) != 0)
 					break;
-#ifndef NDEBUG
+#ifdef _DEBUG
 				LuTracev((stderr, "inflate:       stored end, %lu total out\n", z->total_out + (q >= s->read ? q - s->read : (s->end - s->read) + (q - s->window))));
 #endif
 				s->mode = s->last ? IBM_DRY : IBM_TYPE;
@@ -1222,7 +1222,7 @@ static int inflate_blocks(Z_STREAM * z, int r)
 				if ((t & 0x1f) > 29 || ((t >> 5) & 0x1f) > 29)
 				{
 					s->mode = IBM_BAD;
-#ifndef NDEBUG
+#ifdef _DEBUG
 					z->msg = (char*)"too many length or distance symbols";
 #endif
 					r = Z_DATA_ERROR;
@@ -1239,7 +1239,7 @@ static int inflate_blocks(Z_STREAM * z, int r)
 
 				DUMPBITS(14)
 					s->sub.trees.index = 0;
-#ifndef NDEBUG
+#ifdef _DEBUG
 				LuTracev((stderr, "inflate:       table sizes ok\n"));
 #endif
 				s->mode = IBM_BTREE;
@@ -1271,7 +1271,7 @@ static int inflate_blocks(Z_STREAM * z, int r)
 				}
 
 				s->sub.trees.index = 0;
-#ifndef NDEBUG
+#ifdef _DEBUG
 				LuTracev((stderr, "inflate:       bits tree ok\n"));
 #endif
 				s->mode = IBM_DTREE;
@@ -1308,7 +1308,7 @@ static int inflate_blocks(Z_STREAM * z, int r)
 						{
 							GlobalFree(s->sub.trees.blens);
 							s->mode = IBM_BAD;
-#ifndef NDEBUG
+#ifdef _DEBUG
 							z->msg = (char*)"invalid bit length repeat";
 #endif
 							r = Z_DATA_ERROR;
@@ -1344,7 +1344,7 @@ static int inflate_blocks(Z_STREAM * z, int r)
 						r = t;
 						LEAVE
 					}
-#ifndef NDEBUG
+#ifdef _DEBUG
 					LuTracev((stderr, "inflate:       trees ok\n"));
 #endif
 					if ((c = inflate_codes_new(bl, bd, tl, td, z)) == 0)
@@ -1367,7 +1367,7 @@ static int inflate_blocks(Z_STREAM * z, int r)
 				r = Z_OK;
 				GlobalFree(s->sub.decode.codes);
 				LOAD
-#ifndef NDEBUG
+#ifdef _DEBUG
 					LuTracev((stderr, "inflate:       codes end, %lu total out\n", z->total_out + (q >= s->read ? q - s->read : (s->end - s->read) + (q - s->window))));
 #endif
 				if (!s->last)
@@ -1675,7 +1675,7 @@ static int inflate_trees_bits(uInt *c, uInt *bb, INFLATE_HUFT * *tb, INFLATE_HUF
 
 	hn = 0;
 	r = huft_build(c, 19, 19, 0, 0, tb, bb, hp, &hn, v);
-#ifndef NDEBUG
+#ifdef _DEBUG
 	if (r == Z_DATA_ERROR)
 		z->msg = (char*)"oversubscribed dynamic bit lengths tree";
 	else if (r == Z_BUF_ERROR || *bb == 0)
@@ -1719,7 +1719,7 @@ static int inflate_trees_dynamic(
 	r = huft_build(c, nl, 257, CpLens, CpLExt, tl, bl, hp, &hn, v);
 	if (r != Z_OK || *bl == 0)
 	{
-#ifndef NDEBUG
+#ifdef _DEBUG
 		if (r == Z_DATA_ERROR)
 			z->msg = (char *)"oversubscribed literal/length tree";
 		else if (r != Z_MEM_ERROR)
@@ -1737,7 +1737,7 @@ static int inflate_trees_dynamic(
 	r = huft_build(c + nl, nd, 0, CpDist, CpDExt, td, bd, hp, &hn, v);
 	if (r != Z_OK || (*bd == 0 && nl > 257))
 	{
-#ifndef NDEBUG
+#ifdef _DEBUG
 		if (r == Z_DATA_ERROR)
 			z->msg = (char*)"oversubscribed distance tree";
 		else if (r == Z_BUF_ERROR)
@@ -1814,7 +1814,7 @@ static int inflate_fast(uInt bl, uInt bd, const INFLATE_HUFT *tl, const INFLATE_
 			if ((e = (t = tl + ((uInt)b & ml))->word.what.Exop) == 0)
 			{
 				DUMPBITS(t->word.what.Bits)
-#ifndef NDEBUG
+#ifdef _DEBUG
 					LuTracevv((stderr, t->base >= 0x20 && t->base < 0x7f ? "inflate:         * literal '%c'\n" : "inflate:         * literal 0x%02x\n", t->base));
 #endif
 				*q++ = (UCH)t->base;
@@ -1831,7 +1831,7 @@ static int inflate_fast(uInt bl, uInt bd, const INFLATE_HUFT *tl, const INFLATE_
 					e &= 15;
 					c = t->base + ((uInt)b & inflate_mask[e]);
 					DUMPBITS(e)
-#ifndef NDEBUG
+#ifdef _DEBUG
 						LuTracevv((stderr, "inflate:         * length %u\n", c));
 #endif
 					// decode distance base of block to copy 
@@ -1847,7 +1847,7 @@ static int inflate_fast(uInt bl, uInt bd, const INFLATE_HUFT *tl, const INFLATE_
 								GRABBITS(e)         // get extra bits (up to 13) 
 									d = t->base + ((uInt)b & inflate_mask[e]);
 								DUMPBITS(e)
-#ifndef NDEBUG
+#ifdef _DEBUG
 									LuTracevv((stderr, "inflate:         * distance %u\n", d));
 #endif
 								// do the copy
@@ -1902,7 +1902,7 @@ static int inflate_fast(uInt bl, uInt bd, const INFLATE_HUFT *tl, const INFLATE_
 							}
 							else
 							{
-#ifndef NDEBUG
+#ifdef _DEBUG
 								z->msg = (char*)"invalid distance code";
 #endif
 								UNGRAB
@@ -1920,7 +1920,7 @@ static int inflate_fast(uInt bl, uInt bd, const INFLATE_HUFT *tl, const INFLATE_
 				if ((e = (t += ((uInt)b & inflate_mask[e]))->word.what.Exop) == 0)
 				{
 					DUMPBITS(t->word.what.Bits)
-#ifndef NDEBUG
+#ifdef _DEBUG
 						LuTracevv((stderr, t->base >= 0x20 && t->base < 0x7f ? "inflate:         * literal '%c'\n" : "inflate:         * literal 0x%02x\n", t->base));
 #endif
 					*q++ = (UCH)t->base;
@@ -1930,7 +1930,7 @@ static int inflate_fast(uInt bl, uInt bd, const INFLATE_HUFT *tl, const INFLATE_
 			}
 			else if (e & 32)
 			{
-#ifndef NDEBUG
+#ifdef _DEBUG
 				LuTracevv((stderr, "inflate:         * end of block\n"));
 #endif
 				UNGRAB
@@ -1939,7 +1939,7 @@ static int inflate_fast(uInt bl, uInt bd, const INFLATE_HUFT *tl, const INFLATE_
 			}
 			else
 			{
-#ifndef NDEBUG
+#ifdef _DEBUG
 				z->msg = (char*)"invalid literal/length code";
 #endif
 				UNGRAB
@@ -2168,7 +2168,7 @@ static int inflate(Z_STREAM * z, int f)
 				if (((z->state->sub.method = IM_NEXTBYTE) & 0xf) != Z_DEFLATED)
 				{
 					z->state->mode = IM_BAD;
-#ifndef NDEBUG
+#ifdef _DEBUG
 					z->msg = (char*)"unknown compression method";
 #endif
 					z->state->sub.marker = 5;       // can't try inflateSync
@@ -2178,7 +2178,7 @@ static int inflate(Z_STREAM * z, int f)
 			if ((z->state->sub.method >> 4) + 8 > z->state->wbits)
 			{
 				z->state->mode = IM_BAD;
-#ifndef NDEBUG
+#ifdef _DEBUG
 				z->msg = (char*)"invalid window size";
 #endif
 				z->state->sub.marker = 5;       // can't try inflateSync
@@ -2194,13 +2194,13 @@ static int inflate(Z_STREAM * z, int f)
 			if (((z->state->sub.method << 8) + b) % 31)
 			{
 				z->state->mode = IM_BAD;
-#ifndef NDEBUG
+#ifdef _DEBUG
 				z->msg = (char*)"incorrect header check";
 #endif
 				z->state->sub.marker = 5;       // can't try inflateSync 
 				break;
 			}
-#ifndef NDEBUG
+#ifdef _DEBUG
 			LuTracev((stderr, "inflate: zlib header ok\n"));
 #endif
 			if (!(b & PRESET_DICT))
@@ -2244,7 +2244,7 @@ static int inflate(Z_STREAM * z, int f)
 		case IM_DICT0:
 		{
 			z->state->mode = IM_BAD;
-#ifndef NDEBUG
+#ifdef _DEBUG
 			z->msg = (char*)"need dictionary";
 #endif
 			z->state->sub.marker = 0;       // can try inflateSync 
@@ -2303,14 +2303,14 @@ static int inflate(Z_STREAM * z, int f)
 			if (z->state->sub.check.was != z->state->sub.check.need)
 			{
 				z->state->mode = IM_BAD;
-#ifndef NDEBUG
+#ifdef _DEBUG
 				z->msg = (char*)"incorrect data check";
 #endif
 				z->state->sub.marker = 5;       // can't try inflateSync 
 				break;
 			}
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 			LuTracev((stderr, "inflate: zlib check ok\n"));
 #endif
 			z->state->mode = IM_DONE;
@@ -2738,7 +2738,7 @@ static void inflateEnd(register ENTRYREADVARS *entryReadVars)
 		g_memset(entryReadVars->stream.state, 0, GlobalSize(entryReadVars->stream.state));
 		GlobalFree(entryReadVars->stream.state);
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 		LuTracev((stderr, "inflate: freed\n"));
 #endif
 	}
@@ -2822,7 +2822,7 @@ static void initEntry(register TUNZIP *tunzip, ZIPENTRY *ze)
 		tunzip->EntryReadVars.stream.state->blocks.end = tunzip->EntryReadVars.stream.state->blocks.window + (1 << 15);
 		tunzip->EntryReadVars.stream.state->blocks.read = tunzip->EntryReadVars.stream.state->blocks.write = tunzip->EntryReadVars.stream.state->blocks.window;
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 		LuTracev((stderr, "inflate: allocated\n"));
 #endif
 	}
@@ -4617,7 +4617,7 @@ typedef struct
 
 	USH			*file_type;			// pointer to UNKNOWN, BINARY or ASCII
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 	// input_len is for debugging only since we can't get it by other means.
 	ULG			input_len;			// total byte length of source file
 #endif
@@ -4632,7 +4632,7 @@ typedef struct
 	char		*out_buf;		// Current output buffer.
 	DWORD		out_offset;		// Current offset in output buffer
 	DWORD		out_size;		// Size of current output buffer
-#ifndef NDEBUG
+#ifdef _DEBUG
 	ULG			bits_sent;		// bit length of the compressed data  only needed for debugging
 #endif
 } TBITSTATE;
@@ -4699,7 +4699,7 @@ typedef struct
 	TTREESTATE		ts;
 	TBITSTATE		bs;
 	TDEFLATESTATE	ds;
-#ifndef NDEBUG
+#ifdef _DEBUG
 	const char		*err;
 #endif
 	unsigned char	level;		// compression level
@@ -5072,7 +5072,7 @@ static DWORD getFileInfo(TZIP *tzip, IZTIMES *times)
 
 // ==================== DEBUG STUFF ====================
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 static void Assert(TSTATE *state, BOOL cond, const char *msg)
 {
 	if (!cond) state->err = msg;
@@ -5150,7 +5150,7 @@ static void ct_init(register TSTATE *state, USH *attr)
 	state->ts.file_type = attr;
 
 	state->ts.cmpr_bytelen = state->ts.cmpr_len_bits = 0;
-#ifndef NDEBUG
+#ifdef _DEBUG
 	state->ts.input_len = 0;
 #endif
 
@@ -5336,7 +5336,7 @@ static void gen_bitlen(register TSTATE *state, TREE_DESC *desc)
 	}
 	if (overflow == 0) return;
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 	Trace("\nbit length overflow\n");
 #endif
 	// This happens for example on obj2 and pic of the Calgary corpus
@@ -5367,7 +5367,7 @@ static void gen_bitlen(register TSTATE *state, TREE_DESC *desc)
 			if (m > max_code) continue;
 			if (tree[m].dl.len != (USH)bits)
 			{
-#ifndef NDEBUG
+#ifdef _DEBUG
 				Trace("code %d bits %d->%d\n", m, tree[m].dl.len, bits);
 #endif
 				state->ts.opt_len += ((long)bits - (long)tree[m].dl.len)*(long)tree[m].fc.freq;
@@ -5407,7 +5407,7 @@ static void gen_codes(register TSTATE *state, CT_DATA *tree, int max_code)
 
 		// Check that the bit counts in bl_count are consistent. The last code
 		// must be all ones
-#ifndef NDEBUG
+#ifdef _DEBUG
 		Assert(state, code + state->ts.bl_count[MAX_BITS] - 1 == (1 << ((USH)MAX_BITS)) - 1, "inconsistent bit counts");
 		Trace("\ngen_codes: max_code %d ", max_code);
 #endif
@@ -5650,7 +5650,7 @@ static BOOL send_tree(register TSTATE *state, CT_DATA *tree, int max_code)
 				if (!send_code(state, curlen, state->ts.bl_tree)) goto out;
 				--count;
 			}
-#ifndef NDEBUG
+#ifdef _DEBUG
 			Assert(state, count >= 3 && count <= 6, " 3_6?");
 #endif
 			if (!send_code(state, REP_3_6, state->ts.bl_tree) || !send_bits(state, count - 3, 2)) goto out;
@@ -5722,7 +5722,7 @@ static int build_bl_tree(register TSTATE *state)
 
 		// Update opt_len to include the bit length tree and counts
 		state->ts.opt_len += 3 * (max_blindex + 1) + 5 + 5 + 4;
-#ifndef NDEBUG
+#ifdef _DEBUG
 		Trace("\ndyn trees: dyn %ld, stat %ld", state->ts.opt_len, state->ts.static_len);
 #endif
 	}
@@ -5751,7 +5751,7 @@ static BOOL send_all_trees(register TSTATE *state, int lcodes, int dcodes, int b
 {
 	int		rank;	// index into BL_order[]
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 	Assert(state, lcodes >= 257 && dcodes >= 1 && blcodes >= 4, "not enough codes");
 	Assert(state, lcodes <= L_CODES && dcodes <= D_CODES && blcodes <= BL_CODES, "too many codes");
 	Trace("\nbl counts: ");
@@ -5763,25 +5763,25 @@ static BOOL send_all_trees(register TSTATE *state, int lcodes, int dcodes, int b
 	{
 		for (rank = 0; rank < blcodes; rank++)
 		{
-#ifndef NDEBUG
+#ifdef _DEBUG
 			Trace("\nbl code %2d ", BL_order[rank]);
 #endif
 			if ((state->tzip->flags & TZIP_OPTION_ABORT) || !send_bits(state, state->ts.bl_tree[BL_order[rank]].dl.len, 3)) goto out;
 		}
-#ifndef NDEBUG
+#ifdef _DEBUG
 		Trace("\nbl tree: sent %ld", state->bs.bits_sent);
 #endif
 
 		// Send the literal tree
 		if (send_tree(state, (CT_DATA *)state->ts.dyn_ltree, lcodes - 1))
 		{
-#ifndef NDEBUG
+#ifdef _DEBUG
 			Trace("\nlit tree: sent %ld", state->bs.bits_sent);
 #endif
 			// Send the distance tree
 			if (send_tree(state, state->ts.dyn_dtree, dcodes - 1))
 			{
-#ifndef NDEBUG
+#ifdef _DEBUG
 				Trace("\ndist tree: sent %ld", state->bs.bits_sent);
 #endif
 				return(1);
@@ -5847,12 +5847,12 @@ static void flush_block(register TSTATE *state, char *buf, ULG stored_len, DWORD
 	build_tree(state, (TREE_DESC *)(&state->ts.l_desc));
 	if (!(state->tzip->flags & TZIP_OPTION_ABORT))
 	{
-#ifndef NDEBUG
+#ifdef _DEBUG
 		Trace("\nlit data: dyn %ld, stat %ld", state->ts.opt_len, state->ts.static_len);
 #endif
 
 		build_tree(state, (TREE_DESC *)(&state->ts.d_desc));
-#ifndef NDEBUG
+#ifdef _DEBUG
 		Trace("\ndist data: dyn %ld, stat %ld", state->ts.opt_len, state->ts.static_len);
 #endif
 		if (!(state->tzip->flags & TZIP_OPTION_ABORT))
@@ -5869,7 +5869,7 @@ static void flush_block(register TSTATE *state, char *buf, ULG stored_len, DWORD
 				opt_lenb = (state->ts.opt_len + 3 + 7) >> 3;
 				static_lenb = (state->ts.static_len + 3 + 7) >> 3;
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 				state->ts.input_len += stored_len;
 				Trace("\nopt %lu(%lu) stat %lu(%lu) stored %lu lit %u dist %u ", opt_lenb, state->ts.opt_len, static_lenb, state->ts.static_len, stored_len, state->ts.last_lit, state->ts.last_dist);
 #endif
@@ -5907,7 +5907,7 @@ static void flush_block(register TSTATE *state, char *buf, ULG stored_len, DWORD
 				upd:				state->ts.cmpr_bytelen += state->ts.cmpr_len_bits >> 3;
 					state->ts.cmpr_len_bits &= 7;
 				}
-#ifndef NDEBUG
+#ifdef _DEBUG
 				Assert(state, ((state->ts.cmpr_bytelen << 3) + state->ts.cmpr_len_bits) == state->bs.bits_sent, "bad compressed size");
 #endif
 				if (!state->tzip->lasterr)
@@ -5919,7 +5919,7 @@ static void flush_block(register TSTATE *state, char *buf, ULG stored_len, DWORD
 						bi_windup(state);
 						state->ts.cmpr_len_bits += 7;	// align on byte boundary
 					}
-#ifndef NDEBUG
+#ifdef _DEBUG
 					Trace("\n");
 #endif
 					// Set compressed size so far
@@ -5952,7 +5952,7 @@ static unsigned char ct_tally(register TSTATE *state, int dist, int lc)
 	{
 		// Here, lc is the match length - MIN_MATCH
 		--dist;				// dist = match distance - 1
-#ifndef NDEBUG
+#ifdef _DEBUG
 		Assert(state, (USH)dist < (USH)MAX_DIST && (USH)lc <= (USH)(MAX_MATCH - MIN_MATCH) && (USH)d_code(dist) < (USH)D_CODES, "ct_tally: bad match");
 #endif
 		state->ts.dyn_ltree[state->ts.length_code[lc] + LITERALS + 1].fc.freq++;
@@ -5984,7 +5984,7 @@ static unsigned char ct_tally(register TSTATE *state, int dist, int lc)
 		while (dcode--) out_length += (ULG)state->ts.dyn_dtree[dcode].fc.freq * (5L + Extra_dbits[dcode]);
 		out_length >>= 3;
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 		Trace("\nlast_lit %u, last_dist %u, in %ld, out ~%ld(%ld%%) ", state->ts.last_lit, state->ts.last_dist, in_length, out_length, 100L - out_length * 100L / in_length);
 #endif
 		// Should we stop the block here?
@@ -6054,7 +6054,7 @@ static void compress_block(register TSTATE *state, CT_DATA *ltree, CT_DATA *dtre
 
 				// send the distance code
 				code = d_code(dist);
-#ifndef NDEBUG
+#ifdef _DEBUG
 				Assert(state, code < D_CODES, "bad d_code");
 #endif
 				if (!send_code(state, code, dtree)) goto out;
@@ -6089,7 +6089,7 @@ static void compress_block(register TSTATE *state, CT_DATA *ltree, CT_DATA *dtre
 
 static BOOL send_bits(register TSTATE *state, int value, int length)
 {
-#ifndef NDEBUG
+#ifdef _DEBUG
 	Assert(state, length > 0 && length <= 15, "invalid length");
 	state->bs.bits_sent += (ULG)length;
 #endif
@@ -6185,7 +6185,7 @@ static void bi_windup(register TSTATE *state)
 	// Flush the buffer to the ZIP archive
 	writeDestination(state->tzip, state->bs.out_buf, state->bs.out_offset);
 	state->bs.bi_buf = state->bs.out_offset = state->bs.bi_valid = 0;
-#ifndef NDEBUG
+#ifdef _DEBUG
 	state->bs.bits_sent = (state->bs.bits_sent + 7) & ~7;
 #endif
 }
@@ -6228,7 +6228,7 @@ static void copy_block(register TSTATE *state, char *block, DWORD len, DWORD hea
 		state->bs.out_offset = 0;
 
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 		state->bs.bits_sent += (2 * 16);
 #endif
 	}
@@ -6236,7 +6236,7 @@ static void copy_block(register TSTATE *state, char *block, DWORD len, DWORD hea
 	// Write out the block
 	writeDestination(state->tzip, block, len);
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 	state->bs.bits_sent += (ULG)len << 3;
 #endif
 }
@@ -6362,7 +6362,7 @@ static int longest_match(register TSTATE *state, unsigned cur_match)
 
 	// The code is optimized for HASH_BITS >= 8 and MAX_MATCH-2 multiple of 16.
 	// It is easy to get rid of this optimization if necessary.
-#ifndef NDEBUG
+#ifdef _DEBUG
 	Assert(state, HASH_BITS >= 8 && MAX_MATCH == 258, "Code too clever");
 #endif
 
@@ -6373,13 +6373,13 @@ static int longest_match(register TSTATE *state, unsigned cur_match)
 	// Do not waste too much time if we already have a good match:
 	if (state->ds.prev_length >= state->ds.good_match) chain_length >>= 2;
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 	Assert(state, state->ds.strstart <= state->ds.window_size - MIN_LOOKAHEAD, "insufficient lookahead");
 #endif
 
 	do
 	{
-#ifndef NDEBUG
+#ifdef _DEBUG
 		Assert(state, cur_match < state->ds.strstart, "no future");
 #endif
 		match = state->ds.window + cur_match;
@@ -6408,7 +6408,7 @@ static int longest_match(register TSTATE *state, unsigned cur_match)
 			*++scan == *++match && *++scan == *++match &&
 			scan < strend);
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 		Assert(state, scan <= state->ds.window + (unsigned)(state->ds.window_size - 1), "wild scan");
 #endif
 
@@ -6513,7 +6513,7 @@ static void fill_window(register TSTATE *state)
 		//   strstart + lookahead <= input_size => more >= MIN_LOOKAHEAD.
 		// Otherwise, window_size == 2*WSIZE so more >= 2.
 		// If there was sliding, more >= WSIZE. So in all cases, more >= 2.
-#ifndef NDEBUG
+#ifdef _DEBUG
 		Assert(state, more >= 2, "more < 2");
 #endif
 		if (!(n = readFromSource(state->tzip, (char *)(state->ds.window + state->ds.strstart + state->ds.lookahead), more)))
@@ -6599,7 +6599,7 @@ static void deflate_fast(register TSTATE *state)
 				match_length = 0;
 				state->ds.ins_h = state->ds.window[state->ds.strstart];
 				UPDATE_HASH(state->ds.ins_h, state->ds.window[state->ds.strstart + 1]);
-#ifndef NDEBUG
+#ifdef _DEBUG
 				Assert(state, MIN_MATCH == 3, "Call UPDATE_HASH() MIN_MATCH-3 more times");
 #endif
 			}
@@ -7335,7 +7335,7 @@ static void ideflate(TZIP *tzip, TZIPFILEINFO *zfi)
 		//		state->ds.window_size =
 		state->ts.last_lit = state->ts.last_dist = state->ts.last_flags =
 			state->bs.out_offset = state->bs.bi_buf = state->bs.bi_valid = 0;
-#ifndef NDEBUG
+#ifdef _DEBUG
 		state->bs.bits_sent = 0;
 #endif
 		ct_init(state, &zfi->att);
