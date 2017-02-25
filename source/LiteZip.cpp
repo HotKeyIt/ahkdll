@@ -3920,9 +3920,9 @@ static DWORD openArchive(HANDLE *ptr, void *z, DWORD len, DWORD flags, const cha
 	case UNZIP_FILENAME:
 	{
 		if (flags & UNZIP_UNICODE)
-			tunzip->ArchivePtr = CreateFileW((const WCHAR *)z, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+			tunzip->ArchivePtr = CreateFileW((const WCHAR *)z, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
 		else
-			tunzip->ArchivePtr = CreateFileA((const char *)z, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+			tunzip->ArchivePtr = CreateFileA((const char *)z, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
 		if (tunzip->ArchivePtr == INVALID_HANDLE_VALUE)
 		{
 			flags = ZR_NOFILE;
@@ -7513,9 +7513,9 @@ static DWORD addSrc(register TZIP *tzip, const void *destname, const void *src, 
 	{
 		if (!src) goto badargs;
 		if (flags & ZIP_UNICODE)
-			tzip->source = CreateFileW((const WCHAR *)src, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
+			tzip->source = CreateFileW((const WCHAR *)src, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 0, OPEN_EXISTING, 0, 0);
 		else
-			tzip->source = CreateFileA((const char *)src, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
+			tzip->source = CreateFileA((const char *)src, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 0, OPEN_EXISTING, 0, 0);
 		if (tzip->source == INVALID_HANDLE_VALUE)
 			passex = ZR_NOFILE;
 		else
