@@ -18253,9 +18253,8 @@ BIF_DECL(BIF_ZipCreateFile)
 	if (aErrCode = ZipCreateFile(&hz, TokenToString(*aParam[0]), aPassword))
 	{
 		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-		g_script.ScriptError(aMsg);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		g_script.ThrowRuntimeException(aMsg);
+		return;
 	}
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = (__int64)hz;
@@ -18269,9 +18268,8 @@ BIF_DECL(BIF_ZipOptions)
 	if (aErrCode = ZipOptions(&hz, (DWORD)TokenToInt64(*aParam[0])))
 	{
 		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-		g_script.ScriptError(aMsg);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		g_script.ThrowRuntimeException(aMsg);
+		return;
 	}
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = 1;
@@ -18293,18 +18291,15 @@ BIF_DECL(BIF_ZipAddFile)
 		aDestination = TokenToString(*aParam[2]);
 	if (!TokenToInt64(*aParam[0]))
 	{
-		g_script.ScriptError(ERR_PARAM1_INVALID);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		g_script.ThrowRuntimeException(ERR_PARAM1_INVALID);
 		return;
 	}
 	if (aErrCode = ZipAddFile((HZIP)TokenToInt64(*aParam[0]), aDestination, aSource))
 	{
 		TCHAR	aMsg[100];
 		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-		g_script.ScriptError(aMsg);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		g_script.ThrowRuntimeException(aMsg);
+		return;
 	}
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = 1;
@@ -18315,17 +18310,15 @@ BIF_DECL(BIF_ZipAddFolder)
 	DWORD aErrCode;
 	if (!TokenToInt64(*aParam[0]))
 	{
-		g_script.ScriptError(ERR_PARAM1_INVALID);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		g_script.ThrowRuntimeException(ERR_PARAM1_INVALID);
+		return;
 	}
 	if (aErrCode = ZipAddFolder((HZIP)TokenToInt64(*aParam[0]), TokenToString(*aParam[1])))
 	{
 		TCHAR	aMsg[100];
 		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-		g_script.ScriptError(aMsg);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		g_script.ThrowRuntimeException(aMsg);
+		return;
 	}
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = 1;
@@ -18338,9 +18331,8 @@ BIF_DECL(BIF_ZipCloseFile)
 	if (aErrCode = ZipClose((HZIP)TokenToInt64(*aParam[0])))
 	{
 		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-		g_script.ScriptError(aMsg);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		g_script.ThrowRuntimeException(aMsg);
+		return;
 	}
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = 1;
@@ -18355,9 +18347,8 @@ BIF_DECL(BIF_ZipCreateBuffer)
 	if (aErrCode = ZipCreateBuffer(&hz, 0, (DWORD)TokenToInt64(*aParam[0]), aPassword))
 	{
 		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-		g_script.ScriptError(aMsg);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		g_script.ThrowRuntimeException(aMsg);
+		return;
 	}
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = (__int64)hz;
@@ -18370,17 +18361,15 @@ BIF_DECL(BIF_ZipAddBuffer)
 	LPTSTR aDestination = TokenToString(*aParam[3]);
 	if (!TokenToInt64(*aParam[0]))
 	{
-		g_script.ScriptError(ERR_PARAM1_INVALID);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		g_script.ThrowRuntimeException(ERR_PARAM1_INVALID);
+		return;
 	}
 	if (aErrCode = ZipAddBuffer((HZIP)TokenToInt64(*aParam[0]), aDestination, aSource, (DWORD)TokenToInt64(*aParam[2])))
 	{
 		TCHAR	aMsg[100];
 		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-		g_script.ScriptError(aMsg);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		g_script.ThrowRuntimeException(aMsg);
+		return;
 	}
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = 1;
@@ -18395,16 +18384,14 @@ BIF_DECL(BIF_ZipCloseBuffer)
 	HANDLE			aBase;
 	if (aParam[1]->symbol != SYM_VAR)
 	{
-		g_script.ScriptError(ERR_PARAM2_INVALID);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		g_script.ThrowRuntimeException(ERR_PARAM2_INVALID);
+		return;
 	}
 	if (aErrCode = ZipGetMemory((HZIP)TokenToInt64(*aParam[0]), (void **)&aBuffer, &aLen, &aBase))
 	{
 		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-		g_script.ScriptError(aMsg);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		g_script.ThrowRuntimeException(aMsg);
+		return;
 	}
 	aResultToken.value_int64 = aLen;
 	aParam[1]->var->SetCapacity((VarSizeType)aResultToken.value_int64, true);
@@ -18431,15 +18418,13 @@ BIF_DECL(BIF_ZipInfo)
 	{
 		if (!TokenIsPureNumeric(*aParam[1]))
 		{
-			g_script.ScriptError(ERR_PARAM2_INVALID);
-			aResultToken.symbol = SYM_STRING;
-			aResultToken.marker = _T("");
+			g_script.ThrowRuntimeException(ERR_PARAM2_INVALID);
+			return;
 		}
 		else if (aParamCount < 3)
 		{
-			g_script.ScriptError(ERR_PARAM3_REQUIRED);
-			aResultToken.symbol = SYM_STRING;
-			aResultToken.marker = _T("");
+			g_script.ThrowRuntimeException(ERR_PARAM3_REQUIRED);
+			return;
 		}
 		if (aErrCode = UnzipOpenBuffer(&huz, (void*)TokenToInt64(*aParam[0]), (DWORD)TokenToInt64(*aParam[1]), NULL))
 			goto error;
@@ -18521,9 +18506,7 @@ errorclose:
 	aObject->Release();
 error:
 	UnzipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-	g_script.ScriptError(aMsg);
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = _T("");
+	g_script.ThrowRuntimeException(aMsg);
 }
 
 BIF_DECL(BIF_UnZip)
@@ -18536,15 +18519,13 @@ BIF_DECL(BIF_UnZip)
 	{
 		if (!TokenIsPureNumeric(*aParam[1]))
 		{
-			g_script.ScriptError(ERR_PARAM2_INVALID);
-			aResultToken.symbol = SYM_STRING;
-			aResultToken.marker = _T("");
+			g_script.ThrowRuntimeException(ERR_PARAM2_INVALID);
+			return;
 		}
 		else if (aParamCount < 3)
 		{
-			g_script.ScriptError(ERR_PARAM3_REQUIRED);
-			aResultToken.symbol = SYM_STRING;
-			aResultToken.marker = _T("");
+			g_script.ThrowRuntimeException(ERR_PARAM3_REQUIRED);
+			return;
 		}
 		if (aErrCode = UnzipOpenBuffer(&huz, (void*)TokenToInt64(*aParam[0]), (DWORD)TokenToInt64(*aParam[1]), aPassword))
 			goto error;
@@ -18611,9 +18592,7 @@ errorclose:
 	UnzipClose(huz);
 error:
 	UnzipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-	g_script.ScriptError(aMsg);
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = _T("");
+	g_script.ThrowRuntimeException(aMsg);
 }
 
 BIF_DECL(BIF_UnZipBuffer)
@@ -18632,15 +18611,13 @@ BIF_DECL(BIF_UnZipBuffer)
 	{
 		if (!TokenIsPureNumeric(*aParam[1]))
 		{
-			g_script.ScriptError(ERR_PARAM2_INVALID);
-			aResultToken.symbol = SYM_STRING;
-			aResultToken.marker = _T("");
+			g_script.ThrowRuntimeException(ERR_PARAM2_INVALID);
+			return;
 		}
 		else if (aParamCount < 3)
 		{
-			g_script.ScriptError(ERR_PARAM3_REQUIRED);
-			aResultToken.symbol = SYM_STRING;
-			aResultToken.marker = _T("");
+			g_script.ThrowRuntimeException(ERR_PARAM3_REQUIRED);
+			return;
 		}
 		if (aErrCode = UnzipOpenBuffer(&huz, (void*)TokenToInt64(*aParam[0]), (DWORD)TokenToInt64(*aParam[1]), aPassword))
 			goto error;
@@ -18724,9 +18701,7 @@ errorclose:
 	UnzipClose(huz);
 error:
 	UnzipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-	g_script.ScriptError(aMsg);
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = _T("");
+	g_script.ThrowRuntimeException(aMsg);
 }
 
 BIF_DECL(BIF_CryptAES)
