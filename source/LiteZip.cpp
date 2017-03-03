@@ -6973,7 +6973,7 @@ static void putlocal(TZIPFILEINFO *z, TZIP *tzip)
 	{
 		writeDestShort(tzip, LOCSIG);
 		writeDestShort(tzip, LOCSIG >> 16);
-		writeDestShort(tzip, (USH)20);		// Needs PKUNZIP 2.0 to unzip it
+		writeDestShort(tzip, (USH)45);		// Needs PKUNZIP 4.5 to unzip it
 		writeDestShort(tzip, z->lflg);
 		writeDestShort(tzip, z->how);
 		//putpartial(z, tzip);
@@ -7029,8 +7029,8 @@ static void addCentral(register TZIP *tzip)
 				// Write this TZIPFILEINFO entry to the Central directory
 				writeDestShort(tzip, CENSIG);
 				writeDestShort(tzip, CENSIG >> 16);
-				writeDestShort(tzip, (USH)0x0B17);		// 0x0B00 is win32 os-code. 0x17 is 23 in decimal: zip 2.3
-				writeDestShort(tzip, (USH)20);			// Needs PKUNZIP 2.0 to unzip it
+				writeDestShort(tzip, (USH)45);		// zip 4.5
+				writeDestShort(tzip, (USH)45);			// Needs PKUNZIP 4.5 to unzip it
 				writeDestShort(tzip, zfi->flg);
 				writeDestShort(tzip, zfi->how);
 				putpartial(zfi, tzip);
@@ -7104,8 +7104,8 @@ static void addCentral(register TZIP *tzip)
 			writeDestShort(tzip, 0);
 			writeDestShort(tzip, 0);
 			writeDestShort(tzip, 0);
-			writeDestShort(tzip, (USH)20);
-			writeDestShort(tzip, (USH)20);
+			writeDestShort(tzip, (USH)45);
+			writeDestShort(tzip, (USH)45);
 			writeDestShort(tzip, 0);
 			writeDestShort(tzip, 0);
 			writeDestShort(tzip, 0);
