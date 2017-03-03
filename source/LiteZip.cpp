@@ -2610,6 +2610,7 @@ static void getEntryInfo(register TUNZIP *tunzip)
 			if (!(tunzip->Flags & TZIP_ARCMEMORY))
 			{
 				LARGE_INTEGER aOffset;
+				aOffset.QuadPart = 0;
 				SetFilePointerEx(tunzip->ArchivePtr, aOffset, &aOffset, FILE_CURRENT);
 				uSizeRead = aOffset.QuadPart;
 			}
@@ -7494,6 +7495,7 @@ static DWORD srcHandleInfo(TZIP *tzip, ULONGLONG len, IZTIMES *times)
 {
 	DWORD	res;
 	LARGE_INTEGER aOffset;
+	aOffset.QuadPart = 0;
 	if (SetFilePointerEx(tzip->source, aOffset, &aOffset, FILE_CURRENT))
 	{
 		tzip->ooffset = aOffset.QuadPart;
