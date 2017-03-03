@@ -27,21 +27,23 @@ extern "C" {
 #ifdef UNICODE
 	typedef struct
 	{
-		DWORD			Index;					// index of this entry within the zip archive
+		ULONGLONG		Index;					// index of this entry within the zip archive
 		DWORD			Attributes;				// attributes, as in GetFileAttributes.
 		FILETIME		AccessTime, CreateTime, ModifyTime;	// access, create, modify filetimes
-		unsigned long	CompressedSize;			// sizes of entry, compressed and uncompressed. These
-		unsigned long	UncompressedSize;		// may be -1 if not yet known (e.g. being streamed in)
+		ULONGLONG		CompressedSize;			// sizes of entry, compressed and uncompressed. These
+		ULONGLONG		UncompressedSize;		// may be -1 if not yet known (e.g. being streamed in)
+		ULONGLONG		offset;
 		WCHAR			Name[MAX_PATH];			// entry name
 	} ZIPENTRY;
 #else
 	typedef struct
 	{
-		DWORD			Index;
+		ULONGLONG			Index;
 		DWORD			Attributes;
 		FILETIME		AccessTime, CreateTime, ModifyTime;	// access, create, modify filetimes
-		unsigned long	CompressedSize;
-		unsigned long	UncompressedSize;
+		ULONGLONG		CompressedSize;
+		ULONGLONG		UncompressedSize;
+		ULONGLONG		offset;
 		char			Name[MAX_PATH];
 	} ZIPENTRY;
 #endif

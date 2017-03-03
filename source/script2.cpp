@@ -18436,7 +18436,7 @@ BIF_DECL(BIF_ZipInfo)
 	UnzipSetBaseDir(huz, _T(""));
 
 	ZIPENTRY	ze;
-	DWORD		numitems;
+	ULONGLONG	numitems;
 
 	IObject *aObject = Object::Create();
 
@@ -18558,10 +18558,10 @@ BIF_DECL(BIF_UnZip)
 	}
 	else
 	{
-		DWORD		numitems;
+		ULONGLONG	numitems;
 
 		// Find out how many items are in the archive.
-		ze.Index = (DWORD)-1;
+		ze.Index = (ULONGLONG)-1;
 		if ((aErrCode = UnzipGetItem(huz, &ze)))
 			goto errorclose;
 		numitems = ze.Index;
@@ -18645,8 +18645,8 @@ BIF_DECL(BIF_UnZipBuffer)
 			aResultToken.symbol = SYM_INTEGER;
 			return;
 		}
-		aBuffer = (unsigned char *)malloc(ze.UncompressedSize);
-		if (aErrCode = UnzipItemToBuffer(huz, aBuffer, ze.UncompressedSize, &ze))
+		aBuffer = (unsigned char *)malloc((DWORD)ze.UncompressedSize);
+		if (aErrCode = UnzipItemToBuffer(huz, aBuffer, (DWORD)ze.UncompressedSize, &ze))
 			goto errorclose;
 		aParam[2]->var->SetCapacity((VarSizeType)aResultToken.value_int64, true);
 		memcpy(aParam[2]->var->mCharContents, aBuffer, (SIZE_T)aResultToken.value_int64);
@@ -18658,7 +18658,7 @@ BIF_DECL(BIF_UnZipBuffer)
 	}
 	else
 	{
-		DWORD		numitems;
+		ULONGLONG	numitems;
 		// Find out how many items are in the archive.
 		ze.Index = (DWORD)-1;
 		if ((aErrCode = UnzipGetItem(huz, &ze)))
@@ -18679,8 +18679,8 @@ BIF_DECL(BIF_UnZipBuffer)
 				aResultToken.symbol = SYM_INTEGER;
 				return;
 			}
-			aBuffer = (unsigned char *)GlobalAlloc(GMEM_FIXED, ze.UncompressedSize);
-			if (aErrCode = UnzipItemToBuffer(huz, aBuffer, ze.UncompressedSize, &ze))
+			aBuffer = (unsigned char *)GlobalAlloc(GMEM_FIXED, (DWORD)ze.UncompressedSize);
+			if (aErrCode = UnzipItemToBuffer(huz, aBuffer, (DWORD)ze.UncompressedSize, &ze))
 				goto errorclose;
 			aParam[2]->var->SetCapacity((VarSizeType)aResultToken.value_int64, true);
 			memcpy(aParam[2]->var->mCharContents, aBuffer, (SIZE_T)aResultToken.value_int64);
