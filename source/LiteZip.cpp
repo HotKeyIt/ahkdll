@@ -6220,7 +6220,7 @@ static BOOL send_bits(register TSTATE *state, int value, int length)
 
 		// Store the short in Intel-order
 		state->bs.out_buf[state->bs.out_offset++] = (char)((state->bs.bi_buf) & 0xff);
-		state->bs.out_buf[state->bs.out_offset++] = (char)((USH)(state->bs.bi_buf) >> 8);
+		state->bs.out_buf[state->bs.out_offset++] = (char)((USH)((state->bs.bi_buf) & 0xFFFF) >> 8);
 
 		state->bs.bi_valid -= ZIP_BUF_SIZE;
 		state->bs.bi_buf = (unsigned)value >> (length - state->bs.bi_valid);
@@ -6276,7 +6276,7 @@ static void bi_windup(register TSTATE *state)
 
 		// Store the short in Intel-order
 		state->bs.out_buf[state->bs.out_offset++] = (char)((state->bs.bi_buf) & 0xff);
-		state->bs.out_buf[state->bs.out_offset++] = (char)((USH)(state->bs.bi_buf) >> 8);
+		state->bs.out_buf[state->bs.out_offset++] = (char)((USH)((state->bs.bi_buf) & 0xFFFF) >> 8);
 	}
 	else if (state->bs.bi_valid > 0)
 	{
@@ -6288,7 +6288,7 @@ static void bi_windup(register TSTATE *state)
 		}
 
 		// Store the byte
-		state->bs.out_buf[state->bs.out_offset++] = (char)state->bs.bi_buf;
+		state->bs.out_buf[state->bs.out_offset++] = (char)state->bs.bi_buf & 0xFF;
 	}
 
 	// Flush the buffer to the ZIP archive
@@ -6325,11 +6325,11 @@ static void copy_block(register TSTATE *state, char *block, DWORD len, DWORD hea
 
 		// Store the short in Intel-order
 		state->bs.out_buf[state->bs.out_offset++] = (char)((len)& 0xff);
-		state->bs.out_buf[state->bs.out_offset++] = (char)((USH)(len) >> 8);
+		state->bs.out_buf[state->bs.out_offset++] = (char)((USH)(len & 0xFFFF) >> 8);
 
 		// Store one's complement
 		state->bs.out_buf[state->bs.out_offset++] = (char)((~len) & 0xff);
-		state->bs.out_buf[state->bs.out_offset++] = (char)((USH)(~len) >> 8);
+		state->bs.out_buf[state->bs.out_offset++] = (char)((USH)((~len) & 0xFF) >> 8);
 
 		// Flush the 2 shorts now (because we're going to flush the block
 		// which is in a different memory buffer)
@@ -6992,11 +6992,11 @@ static void putlocal(TZIPFILEINFO *z, TZIP *tzip)
 		writeDestShort(tzip, 1);
 		writeDestShort(tzip, 16);
 		writeDestShort(tzip, (DWORD)z->len & 0xFFFFFFFF);
-		writeDestShort(tzip, (DWORD)(z->len >> 16));
+		writeDestShort(tzip, (DWORD)((z->len >> 16) & 0xFFFFFFFF));
 		writeDestShort(tzip, (DWORD)(z->len >> 32));
 		writeDestShort(tzip, (DWORD)(z->len >> 48));
 		writeDestShort(tzip, (DWORD)z->siz & 0xFFFFFFFF);
-		writeDestShort(tzip, (DWORD)(z->siz >> 16));
+		writeDestShort(tzip, (DWORD)((z->siz >> 16) & 0xFFFFFFFF));
 		writeDestShort(tzip, (DWORD)(z->siz >> 32));
 		writeDestShort(tzip, (DWORD)(z->siz >> 48));
 		if (z->ext) writeDestination(tzip, z->extra, z->ext);
@@ -7314,7 +7314,7 @@ static void writeDestShort(register TZIP *tzip, DWORD data)
 	if (!tzip->lasterr)
 	{
 		bytes[0] = (unsigned char)(data & 0xff);
-		bytes[1] = (unsigned char)(data >> 8);
+		bytes[1] = (unsigned char)((data >> 8) & 0xFF);
 
 		// Encrypting data?
 		if (tzip->flags & TZIP_ENCRYPT)
@@ -7962,17 +7962,17 @@ static DWORD addSrc(register TZIP *tzip, const void *destname, const void *src, 
 		xloc[2] = EB_UT_LEN(3);       // length of data part of e.f.
 		xloc[3] = 0;
 		xloc[4] = EB_UT_FL_MTIME | EB_UT_FL_ATIME | EB_UT_FL_CTIME;
-		xloc[5] = (char)(times.mtime);
-		xloc[6] = (char)(times.mtime >> 8);
-		xloc[7] = (char)(times.mtime >> 16);
+		xloc[5] = (char)(times.mtime & 0xFF);
+		xloc[6] = (char)((times.mtime >> 8) & 0xFF);
+		xloc[7] = (char)((times.mtime >> 16) & 0xFF);
 		xloc[8] = (char)(times.mtime >> 24);
-		xloc[9] = (char)(times.atime);
-		xloc[10] = (char)(times.atime >> 8);
-		xloc[11] = (char)(times.atime >> 16);
+		xloc[9] = (char)(times.atime & 0xFF);
+		xloc[10] = (char)((times.atime >> 8) & 0xFF);
+		xloc[11] = (char)((times.atime >> 16) & 0xFF);
 		xloc[12] = (char)(times.atime >> 24);
-		xloc[13] = (char)(times.ctime);
-		xloc[14] = (char)(times.ctime >> 8);
-		xloc[15] = (char)(times.ctime >> 16);
+		xloc[13] = (char)(times.ctime & 0xFF);
+		xloc[14] = (char)((times.ctime >> 8) & 0xFF);
+		xloc[15] = (char)((times.ctime >> 16) & 0xFF);
 		xloc[16] = (char)(times.ctime >> 24);
 		CopyMemory(zfi->cextra, zfi->extra, EB_C_UT_SIZE);
 		zfi->cextra[EB_LEN] = EB_UT_LEN(1);
