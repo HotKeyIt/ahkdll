@@ -43,6 +43,7 @@ extern "C" {
 		FILETIME		AccessTime, CreateTime, ModifyTime;	// access, create, modify filetimes
 		ULONGLONG		CompressedSize;
 		ULONGLONG		UncompressedSize;
+		ULONGLONG		offset;
 		char			Name[MAX_PATH];
 	} ZIPENTRY;
 #endif
