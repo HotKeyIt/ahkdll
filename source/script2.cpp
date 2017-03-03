@@ -16385,7 +16385,7 @@ BIF_DECL(BIF_ZipInfo)
 	IObject *aObject = Object::Create();
 
 	// Find out how many items are in the archive.
-	ze.Index = (DWORD)-1;
+	ze.Index = (ULONGLONG)-1;
 	if ((aErrCode = UnzipGetItem(huz, &ze)))
 		goto errorclose;
 	numitems = ze.Index;
@@ -16496,7 +16496,7 @@ BIF_DECL(BIF_UnZip)
 	LPTSTR aTargetName;
 	if (aParamCount > 2 && TokenIsNumeric(*aParam[2]))
 	{
-		ze.Index = (DWORD)TokenToInt64(*aParam[2]);
+		ze.Index = (ULONGLONG)TokenToInt64(*aParam[2]);
 		if ((aErrCode = UnzipGetItem(huz, &ze)))
 			goto errorclose;
 		_tcscpy(aTargetDir + aDirLen, aParamCount > 3 ? TokenToString(*aParam[3]) : ze.Name + 1);
@@ -16587,7 +16587,7 @@ BIF_DECL(BIF_UnZipBuffer)
 
 	if (TokenIsNumeric(*aParam[2]))
 	{
-		ze.Index = (DWORD)TokenToInt64(*aParam[2]);
+		ze.Index = (ULONGLONG)TokenToInt64(*aParam[2]);
 		if ((aErrCode = UnzipGetItem(huz, &ze)))
 			goto errorclose;
 		aResultToken.value_int64 = ze.UncompressedSize;
@@ -16612,7 +16612,7 @@ BIF_DECL(BIF_UnZipBuffer)
 	{
 		ULONGLONG	numitems;
 		// Find out how many items are in the archive.
-		ze.Index = (DWORD)-1;
+		ze.Index = (ULONGLONG)-1;
 		if ((aErrCode = UnzipGetItem(huz, &ze)))
 			goto errorclose;
 		numitems = ze.Index;
