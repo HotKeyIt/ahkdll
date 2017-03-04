@@ -160,18 +160,13 @@ int g_HotkeyThrottleInterval = 2000; // Milliseconds.
 bool g_MaxThreadsBuffer = false;  // This feature usually does more harm than good, so it defaults to OFF.
 SendLevelType g_InputLevel = 0;
 #ifndef MINIDLL
-HotCriterionType g_HotCriterion = HOT_NO_CRITERION;
-LPTSTR g_HotWinTitle = _T(""); // In spite of the above being the primary indicator,
-LPTSTR g_HotWinText = _T("");  // these are initialized for maintainability.
+HotkeyCriterion *g_HotCriterion = NULL; // The current criterion for new hotkeys.
 HotkeyCriterion *g_FirstHotCriterion = NULL, *g_LastHotCriterion = NULL;
 
 // Global variables for #if (expression).
-int g_HotExprIndex = -1; // The index of the Line containing the expression defined by the most recent #if (expression) directive.
-Line **g_HotExprLines = NULL; // Array of pointers to expression lines, allocated when needed.
-int g_HotExprLineCount = 0; // Number of expression lines currently present.
-int g_HotExprLineCountMax = 0; // Current capacity of g_HotExprLines.
 UINT g_HotExprTimeout = 1000; // Timeout for #if (expression) evaluation, in milliseconds.
 HWND g_HotExprLFW = NULL; // Last Found Window of last #if expression.
+HotkeyCriterion *g_FirstHotExpr = NULL, *g_LastHotExpr = NULL;
 
 static int GetScreenDPI()
 {

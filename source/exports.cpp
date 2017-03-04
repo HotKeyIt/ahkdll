@@ -22,15 +22,6 @@ void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar, BOOL aVarIsArg);
 		Hotstring::SuspendAll(g_IsSuspended);\
 		Hotkey::ManifestAllHotkeysHotstringsHooks();\
 	}
-#define RESTORE_IF_EXPR \
-	for (int expr_line_index = aHotExprLineCount ; expr_line_index < g_HotExprLineCount; ++expr_line_index)\
-	{\
-		Line *line = g_HotExprLines[expr_line_index];\
-		if (!g_script.PreparseBlocks(line))\
-			return NULL;\
-		line->mActionType = ACT_IFEXPR;\
-	}\
-	g_HotExprLineCount = g_HotExprLineCount + aHotExprLineCount;
 #endif
 // AutoHotkey needs to be running at this point
 #define BACKUP_G_SCRIPT \
@@ -416,7 +407,6 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute)
 		return 0; // AutoHotkey needs to be running at this point // LOADING_FAILED cant be used due to PTR return type
 #ifndef MINIDLL
 	int HotkeyCount = Hotkey::sHotkeyCount;
-	int aHotExprLineCount = g_HotExprLineCount;
 	GuiType *aGuiDefaultWindow = g->GuiDefaultWindow;
 	g->GuiDefaultWindow = NULL;
 	int a_guiCount = g_guiCount;
@@ -438,7 +428,6 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute)
 #ifndef MINIDLL
 		g->GuiDefaultWindow = aGuiDefaultWindow;
 		g_guiCount = a_guiCount;
-		RESTORE_IF_EXPR
 #endif
 		g_script.mIsReadyToExecute = true; // Set program to be ready for continuing previous script.
 #ifdef _USRDLL
@@ -451,7 +440,6 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute)
 	g->GuiDefaultWindow = aGuiDefaultWindow;
 	g_guiCount = a_guiCount;
 	FINALIZE_HOTKEYS
-	RESTORE_IF_EXPR
 #endif
 	g_script.mIsReadyToExecute = true;
 #ifdef _USRDLL
@@ -500,7 +488,6 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute)
 		return 0; // AutoHotkey needs to be running at this point // LOADING_FAILED cant be used due to PTR return type
 #ifndef MINIDLL
 	int HotkeyCount = Hotkey::sHotkeyCount;
-	int aHotExprLineCount = g_HotExprLineCount;
 	GuiType *aGuiDefaultWindow = g->GuiDefaultWindow;
 	g->GuiDefaultWindow = NULL;
 	int a_guiCount = g_guiCount;
@@ -521,7 +508,6 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute)
 #ifndef MINIDLL
 		g->GuiDefaultWindow = aGuiDefaultWindow;
 		g_guiCount = a_guiCount;
-		RESTORE_IF_EXPR
 #endif
 		g_script.mIsReadyToExecute = true;
 #ifdef _USRDLL
@@ -533,7 +519,6 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute)
 	g->GuiDefaultWindow = aGuiDefaultWindow;
 	g_guiCount = a_guiCount;
 	FINALIZE_HOTKEYS
-	RESTORE_IF_EXPR
 #endif
 	g_script.mIsReadyToExecute = true;
 #ifdef _USRDLL
@@ -582,7 +567,6 @@ EXPORT int ahkExec(LPTSTR script)
 		return 0; // AutoHotkey needs to be running at this point // LOADING_FAILED cant be used due to PTR return type.
 #ifndef MINIDLL
 	int HotkeyCount = Hotkey::sHotkeyCount;
-	int aHotExprLineCount = g_HotExprLineCount;
 #endif
 #ifdef _USRDLL
 	g_Loading = true;
@@ -595,9 +579,6 @@ EXPORT int ahkExec(LPTSTR script)
 		if (g_script.mPlaceholderLabel)
 			delete g_script.mPlaceholderLabel;
 		RESTORE_G_SCRIPT
-#ifndef MINIDLL
-		RESTORE_IF_EXPR
-#endif
 		g_script.mIsReadyToExecute = true;
 #ifdef _USRDLL
 		g_Loading = false;
@@ -606,7 +587,6 @@ EXPORT int ahkExec(LPTSTR script)
 	}
 #ifndef MINIDLL
 	FINALIZE_HOTKEYS
-	RESTORE_IF_EXPR
 #endif
 	g_script.mIsReadyToExecute = true;
 #ifdef _USRDLL

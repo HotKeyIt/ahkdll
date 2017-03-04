@@ -33,7 +33,7 @@ GNU General Public License for more details.
 
 #define AHK_NAME "AutoHotkey"
 #include "ahkversion.h"
-#define AHK_WEBSITE "http://ahkscript.org"
+#define AHK_WEBSITE "https://autohotkey.com"
 
 #define T_AHK_NAME			_T(AHK_NAME)
 #define T_AHK_VERSION		_T(AHK_VERSION)
@@ -686,8 +686,26 @@ const SendLevelType SendLevelMax = 100;
 inline bool SendLevelIsValid(int level) { return level >= 0 && level <= SendLevelMax; }
 
 
-// Same reason as above struct.  It's best to keep this struct as small as possible
-// because it's used as a local (stack) var by at least one recursive function:
+class Line; // Forward declaration.
+typedef UCHAR HotCriterionType;
+enum HotCriterionEnum {HOT_NO_CRITERION, HOT_IF_ACTIVE, HOT_IF_NOT_ACTIVE, HOT_IF_EXIST, HOT_IF_NOT_EXIST // HOT_NO_CRITERION must be zero.
+	, HOT_IF_EXPR, HOT_IF_CALLBACK}; // Keep the last two in this order for the macro below.
+#define HOT_IF_REQUIRES_EVAL(type) ((type) >= HOT_IF_EXPR)
+struct HotkeyCriterion
+{
+	HotCriterionType Type;
+	LPTSTR WinTitle, WinText;
+	union
+	{
+		Line *ExprLine;
+		IObject *Callback;
+	};
+	HotkeyCriterion *NextCriterion;
+
+	ResultType Eval(LPTSTR aHotkeyName); // For HOT_IF_EXPR and HOT_IF_CALLBACK.
+};
+
+
 // Each instance of this struct generally corresponds to a quasi-thread.  The function that creates
 // a new thread typically saves the old thread's struct values on its stack so that they can later
 // be copied back into the g struct when the thread is resumed:
@@ -705,7 +723,6 @@ struct FuncAndToken {
 };
 
 class Label;                //
-class Line;                 //
 struct RegItemStruct;       //
 struct LoopReadFileStruct;  //
 #ifndef MINIDLL
