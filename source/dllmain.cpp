@@ -152,6 +152,9 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	// Init any globals not in "struct g" that need it:
 	g_MainThreadID = GetCurrentThreadId();
 
+	HMODULE advapi32 = LoadLibrary(_T("advapi32.dll"));
+	g_CryptEncrypt = (MyCryptEncrypt)GetProcAddress(advapi32, "CryptEncrypt");
+	g_CryptDecrypt = (MyCryptDecrypt)GetProcAddress(advapi32, "CryptDecrypt");
 #ifdef _DEBUG
 	g_hResource = FindResource(g_hInstance, _T("AHK"), MAKEINTRESOURCE(RT_RCDATA));
 #else

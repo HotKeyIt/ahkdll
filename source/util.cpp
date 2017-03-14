@@ -3192,17 +3192,12 @@ DWORD CryptAES(LPVOID lp, DWORD sz, TCHAR *pwd[], bool aEncrypt, DWORD aSID){
 	HCRYPTHASH phHash;
 	HCRYPTKEY phKey;
 	TCHAR pw[1024] = { 0 };
-	typedef BOOL(_stdcall *MyCryptEncrypt)(HCRYPTKEY, HCRYPTHASH, BOOL, DWORD, BYTE *, DWORD *, DWORD);
-	typedef BOOL(_stdcall *MyCryptDecrypt)(HCRYPTKEY, HCRYPTHASH, BOOL, DWORD, BYTE *, DWORD *);
-	static HMODULE advapi32 = LoadLibrary(_T("advapi32.dll"));
-	static MyCryptEncrypt _CryptEncrypt = (MyCryptEncrypt)GetProcAddress(advapi32, "CryptEncrypt");
-	static MyCryptDecrypt _CryptDecrypt = (MyCryptDecrypt)GetProcAddress(advapi32, "CryptDecrypt");
 	if (!(CryptAcquireContext(&phProv, NULL, NULL, PROV_RSA_AES, CRYPT_VERIFYCONTEXT))
 		|| !(CryptCreateHash(phProv, CALG_SHA1, 0, 0, &phHash)))
 		return 0;
 	if (pwd && pwd[0])
 		for (unsigned int i = 0; pwd[i]; i++)
-			pw[i] = (TCHAR)*pwd[i];
+			pw[i] = pwd == g_default_pwd ? (TCHAR) _T("AfakeufaketfakeofakeHfakeofaketfakekfakeefakeyfake")[i*5] : (TCHAR)*pwd[i];
 	if (!(CryptHashData(phHash, (BYTE*)pw, (DWORD)_tcslen(pw) * sizeof(TCHAR), 0)))
 	{
 		g_memset(pw, 0, 1024 * sizeof(TCHAR));
@@ -3213,9 +3208,9 @@ DWORD CryptAES(LPVOID lp, DWORD sz, TCHAR *pwd[], bool aEncrypt, DWORD aSID){
 		|| !(CryptDestroyHash(phHash)))
 		return 0;
 	if (aEncrypt)
-		_CryptEncrypt(phKey, 0, 1, 0, (BYTE*)lp, &sz, sz + 16);
+		g_CryptEncrypt(phKey, 0, 1, 0, (BYTE*)lp, &sz, sz + 16);
 	else
-		_CryptDecrypt(phKey, 0, 1, 0, (BYTE*)lp, &sz);
+		g_CryptDecrypt(phKey, 0, 1, 0, (BYTE*)lp, &sz);
 	CryptDestroyKey(phKey), CryptReleaseContext(phProv, 0);
 	return sz;
 }
@@ -3274,7 +3269,6 @@ DWORD CompressBuffer(BYTE *aBuffer, LPVOID &aDataBuf, DWORD sz, TCHAR *pwd[]) //
 DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf,DWORD sz, TCHAR *pwd[]) // LiteZip Raw decompression
 {
 	unsigned int hdrsz = 20;
-	TCHAR pw[1024] = {0};
 	ULONG aSizeCompressed = *(ULONG*)((UINT_PTR)aBuffer + 8);
 	DWORD aSizeEncrypted = *(DWORD*)((UINT_PTR)aBuffer + 16);
 	if (sz < aSizeCompressed || sz < aSizeEncrypted)

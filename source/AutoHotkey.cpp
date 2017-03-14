@@ -339,6 +339,9 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	if (!g_TlsDoExecute)
 		return 0;
 
+	HMODULE advapi32 = LoadLibrary(_T("advapi32.dll"));
+	g_CryptEncrypt = (MyCryptEncrypt)GetProcAddress(advapi32, "CryptEncrypt");
+	g_CryptDecrypt = (MyCryptDecrypt)GetProcAddress(advapi32, "CryptDecrypt");
 // Set up the basics of the script:
 #ifdef AUTOHOTKEYSC
 	if (g_script.Init(*g, _T(""), restart_mode,0,false) != OK) 

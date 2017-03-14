@@ -2989,6 +2989,9 @@ typedef int (* ahkx_int_str)(LPTSTR ahkx_str); // ahkx N11
 typedef int (* ahkx_int_str_str)(LPTSTR ahkx_str, LPTSTR ahkx_str2); // ahkx N11
 
 
+typedef BOOL(_stdcall *MyCryptEncrypt)(HCRYPTKEY, HCRYPTHASH, BOOL, DWORD, BYTE *, DWORD *, DWORD);
+typedef BOOL(_stdcall *MyCryptDecrypt)(HCRYPTKEY, HCRYPTHASH, BOOL, DWORD, BYTE *, DWORD *);
+
 class Script
 {
 private:
