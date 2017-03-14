@@ -1059,16 +1059,6 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 {
 	mIsRestart = aIsRestart;
 	TCHAR buf[2048]; // Just to make sure we have plenty of room to do things with.
-	g_default_pwd0 = 'A';
-	g_default_pwd1 = 'u';
-	g_default_pwd2 = 't';
-	g_default_pwd3 = 'o';
-	g_default_pwd4 = 'H';
-	g_default_pwd5 = 'o';
-	g_default_pwd6 = 't';
-	g_default_pwd7 = 'k';
-	g_default_pwd8 = 'e';
-	g_default_pwd9 = 'y';
 	TCHAR def_buf[MAX_PATH + 1], exe_buf[MAX_PATH + 20]; // For simplicity, allow at least space for +2 (see below) and "AutoHotkey.chm".
 	if (!aScriptFilename) // v1.0.46.08: Change in policy: store the default script in the My Documents directory rather than in Program Files.  It's more correct and solves issues that occur due to Vista's file-protection scheme.
 	{
@@ -3796,6 +3786,8 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 				return FAIL;
 #endif
 			LPVOID aDataBuf;
+			for (int i = 0; i < 10; i++)
+				*g_default_pwd[i] = i + 1;
 			aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength, g_default_pwd);
 			if (aSizeDeCompressed)
 			{

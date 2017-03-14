@@ -273,6 +273,9 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	if (!g_TlsDoExecute)
 		return 0;
 
+	HMODULE advapi32 = LoadLibrary(_T("advapi32.dll"));
+	g_CryptEncrypt = (MyCryptEncrypt)GetProcAddress(advapi32, "CryptEncrypt");
+	g_CryptDecrypt = (MyCryptDecrypt)GetProcAddress(advapi32, "CryptDecrypt");
 // Set up the basics of the script:
 	if (g_script->Init(*g, script_filespec, restart_mode,0,false) != OK)  // Set up the basics of the script, using the above.
 		return CRITICAL_ERROR;

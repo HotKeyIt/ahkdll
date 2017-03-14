@@ -241,6 +241,8 @@ TCHAR g_default_pwd8;
 TCHAR g_default_pwd9;
 TCHAR *g_default_pwd[] = { &g_default_pwd0, &g_default_pwd1, &g_default_pwd2, &g_default_pwd3, &g_default_pwd4, &g_default_pwd5, &g_default_pwd6, &g_default_pwd7, &g_default_pwd8, &g_default_pwd9, 0, 0 };
 
+MyCryptEncrypt g_CryptEncrypt = NULL;
+MyCryptDecrypt g_CryptDecrypt = NULL;
 // The order of initialization here must match the order in the enum contained in script.h
 // It's in there rather than in globaldata.h so that the action-type constants can be referred
 // to without having access to the global array itself (i.e. it avoids having to include

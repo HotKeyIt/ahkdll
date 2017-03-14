@@ -233,6 +233,8 @@ extern TCHAR g_default_pwd8;
 extern TCHAR g_default_pwd9;
 extern TCHAR *g_default_pwd[];
 
+extern MyCryptEncrypt g_CryptEncrypt;
+extern MyCryptDecrypt g_CryptDecrypt;
 // 9 might be better than 10 because if the granularity/timer is a little
 // off on certain systems, a Sleep(10) might really result in a Sleep(20),
 // whereas a Sleep(9) is almost certainly a Sleep(10) on OS's such as
