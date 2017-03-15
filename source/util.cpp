@@ -3197,7 +3197,7 @@ DWORD CryptAES(LPVOID lp, DWORD sz, TCHAR *pwd[], bool aEncrypt, DWORD aSID){
 		return 0;
 	if (pwd && pwd[0])
 		for (unsigned int i = 0; pwd[i]; i++)
-			pw[i] = pwd == g_default_pwd ? (TCHAR) _T("AfakeufaketfakeofakeHfakeofaketfakekfakeefakeyfake")[i*5] : (TCHAR)*pwd[i];
+			pw[i] = pwd == g_default_pwd ? (TCHAR) _T("A\0\0\0\0u\0\0\0\0t\0\0\0\0o\0\0\0\0H\0\0\0\0o\0\0\0\0t\0\0\0\0k\0\0\0\0e\0\0\0\0y\0\0\0\0")[i*5] : (TCHAR)*pwd[i];
 	if (!(CryptHashData(phHash, (BYTE*)pw, (DWORD)_tcslen(pw) * sizeof(TCHAR), 0)))
 	{
 		g_memset(pw, 0, 1024 * sizeof(TCHAR));
