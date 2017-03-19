@@ -90,6 +90,8 @@ FuncEntry g_BIF[] =
 	BIFn(RegExReplace, 2, 6, true, BIF_RegEx, { 4 }),
 	BIF1(Format, 1, NA, true),
 
+	BIF1(MsgBox, 0, 4, false, {4}),
+
 	BIF1(GetKeyState, 1, 2, true),
 	BIFn(GetKeyName, 1, 1, true, BIF_GetKeyName),
 	BIFn(GetKeyVK, 1, 1, true, BIF_GetKeyName),
@@ -387,7 +389,6 @@ VarEntry g_BIV_A[] =
 	A_wx(MouseDelay, BIV_xDelay, BIV_xDelay_Set),
 	A_wx(MouseDelayPlay, BIV_xDelay, BIV_xDelay_Set),
 	A_x(MSec, BIV_DateTime),
-	A_(MsgBoxResult),
 	A_(MyDocuments),
 	A_x(Now, BIV_Now),
 	A_x(NowUTC, BIV_Now),
@@ -5566,6 +5567,13 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 			g->HotCriterion = NULL; // Indicate that no criteria are in effect for subsequent hotkeys.
 			return CONDITION_TRUE;
 		}
+
+		// Check for a duplicate #If expression;
+		//  - Prevents duplicate hotkeys under separate copies of the same expression.
+		//  - Hotkey,If would only be able to select the first expression with the given source code.
+		//  - Conserves memory.
+		if (g->HotCriterion = FindHotkeyIfExpr(parameter))
+			return CONDITION_TRUE;
 		
 		Func *current_func = g->CurrentFunc;
 		g->CurrentFunc = NULL; // Use global scope.
@@ -5580,19 +5588,13 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		Line *hot_expr_line = mLastLine;
 
 		// Set the new criterion.
-		if (!(g->HotCriterion = (HotkeyCriterion *)g_SimpleHeap->Malloc(sizeof(HotkeyCriterion))))
-			return ScriptError(ERR_OUTOFMEM);
+		if (  !(g->HotCriterion = AddHotkeyIfExpr())  )
+			return FAIL;
 		g->HotCriterion->Type = HOT_IF_EXPR;
 		g->HotCriterion->ExprLine = hot_expr_line;
 		g->HotCriterion->WinTitle = hot_expr_line->mArg[0].text;
 		g->HotCriterion->WinText = _T("");
-		g->HotCriterion->NextCriterion = NULL;
 		g->HotCriterion->ThreadID = g_ThreadID;
-		if (g_LastHotExpr)
-			g_LastHotExpr->NextCriterion = g->HotCriterion;
-		else
-			g_FirstHotExpr = g->HotCriterion;
-		g_LastHotExpr = g->HotCriterion;
 		return CONDITION_TRUE;
 	}
 
@@ -6439,6 +6441,18 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 		//    MsgBox :=  ; i.e. it is intended to be the first parameter, not an operator.
 		// In the above case, the user can provide the optional comma to avoid the ambiguity:
 		//    MsgBox, :=
+
+		if (*aLineText == '"' || *aLineText == '\'')
+		{
+			action_args = aLineText + FindTextDelim(aLineText, *aLineText, 1, aLiteralMap);
+			if (*action_args)
+			{
+				action_args = omit_leading_whitespace(action_args + 1);
+				if (*action_args != '.') // Don't treat "" := x as valid.
+					action_args = aLineText;
+			}
+		}
+
 		TCHAR action_args_2nd_char = action_args[1];
 
 		switch (*action_args)
@@ -6779,82 +6793,8 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 		ConvertEscapeSequences(action_args, literal_map);
 	}
 
-	////////////////////////////////////////////////////////////////////////////////////////
-	// Do some special preparsing of the MsgBox command, since it is so frequently used and
-	// it is also the source of problem areas going from AutoIt2 to 3 and also due to the
-	// new numeric parameter at the end.  Whenever possible, we want to avoid the need for
-	// the user to have to escape commas that are intended to be literal.
-	///////////////////////////////////////////////////////////////////////////////////////
 	int mark, max_params_override = 0; // Set default.
-	if (aActionType == ACT_MSGBOX)
-	{
-		for (int next, mark = 0, arg = 1; action_args[mark]; mark = next, ++arg)
-		{
-			if (arg > 1)
-				mark++; // Skip the delimiter...
-			while (IS_SPACE_OR_TAB(action_args[mark]))
-				mark++; // ...and any leading whitespace.
-
-			if (action_args[mark] == g_DerefChar && !literal_map[mark] && IS_SPACE_OR_TAB(action_args[mark + 1]))
-			{
-				// Since this parameter is an expression, commas inside it can't be intended to be
-				// literal/displayed by the user unless they're enclosed in quotes; but in that case,
-				// the smartness below isn't needed because it's provided by the parameter-parsing
-				// logic in a later section.
-				if (arg >= 3) // Text or Timeout
-					break;
-				// Otherwise, just jump to the next parameter so we can check it too:
-				next = FindExprDelim(action_args, g_delimiter, mark + 2, literal_map);
-				continue;
-			}
-
-			// Find the next non-literal delimiter:
-			for (next = mark; action_args[next]; ++next)
-				if (action_args[next] == g_delimiter && !literal_map[next])
-					break;
-
-			if (arg == 1) // Options (or Text in single-arg mode)
-			{
-				if (!action_args[next]) // Below relies on this check.
-					break; // There's only one parameter, so no further checks are required.
-				// It has more than one apparent param, but is the first param even numeric?
-				action_args[next] = '\0'; // Temporarily terminate action_args at the first delimiter.
-				// Note: If it's a number inside a variable reference, it's still considered 1-parameter
-				// mode to avoid ambiguity (unlike the deref check for param #4 in the section below,
-				// there seems to be too much ambiguity in this case to justify trying to figure out
-				// if the first parameter is a pure deref, and thus that the command should use
-				// 3-param or 4-param mode instead).
-				if (!IsNumeric(action_args + mark)) // No floats allowed.
-					max_params_override = 1;
-				action_args[next] = g_delimiter; // Restore the string.
-				if (max_params_override)
-					break;
-			}
-			else if (arg == 4) // Timeout (or part of Text)
-			{
-				// If the 4th parameter isn't blank or pure numeric, assume the user didn't intend it
-				// to be the MsgBox timeout (since that feature is rarely used), instead intending it
-				// to be part of parameter #3.
-				if (!IsNumeric(action_args + mark, false, true, true))
-				{
-					// Not blank and not a int or float.  Update for v1.0.20: Check if it's a single
-					// deref.  If so, assume that deref contains the timeout and thus 4-param mode is
-					// in effect.  This allows the timeout to be contained in a variable, which was
-					// requested by one user.  Update for v1.1.06: Do some additional checking to
-					// exclude things like "%x% marks the spot" but not "%Timeout%.500".
-					LPTSTR deref_end;
-					if (action_args[next] // There are too many delimiters (there appears to be another arg after this one).
-						|| action_args[mark] != g_DerefChar || literal_map[mark] // Not a proper deref char.
-						|| !(deref_end = _tcschr(action_args + mark + 1, g_DerefChar)) // No deref end char (this syntax error will be handled later).
-						|| !IsNumeric(deref_end + 1, false, true, true)) // There is something non-numeric following the deref (things like %Timeout%.500 are allowed for flexibility and backward-compatibility).
-						max_params_override = 3;
-				}
-				break;
-			}
-		}
-	} // end of special handling for MsgBox.
-
-	else if (aActionType == ACT_FOR)
+	if (aActionType == ACT_FOR)
 	{
 		// Validate "For" syntax and translate to conventional command syntax.
 		// "For x,y in z" -> "For x,y, z"
@@ -8039,17 +7979,6 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 	case ACT_SYSGET:
 		if (!line.ArgHasDeref(2) && !IsNumeric(new_raw_arg2, FALSE, FALSE, FALSE))
 			return ScriptError(ERR_PARAM2_INVALID, new_raw_arg2);
-		break;
-
-	case ACT_MSGBOX:
-		if (aArgc > 1) // i.e. this MsgBox is using the 3-param or 4-param style.
-			if (!line.mArg[0].is_expression && !line.ArgHasDeref(1)) // i.e. if it's an expression (or an expression which was converted into a simple deref), we won't try to validate it now.
-				if (!IsNumeric(new_raw_arg1)) // Allow it to be entirely whitespace to indicate 0, like Aut2.
-					return ScriptError(ERR_PARAM1_INVALID, new_raw_arg1);
-		if (aArgc > 3)
-			if (!line.mArg[3].is_expression && !line.ArgHasDeref(4)) // i.e. if it's an expression or deref, we won't try to validate it now.
-				if (!IsNumeric(new_raw_arg4, false, true, true))
-					return ScriptError(ERR_PARAM4_INVALID, new_raw_arg4);
 		break;
 
 	case ACT_KEYWAIT: // v1.0.44.03: See comment above.
@@ -10987,7 +10916,7 @@ ResultType Script::PreparseStaticLines(Line *aStartingLine)
 			mLastStaticLine = line;
 			break;
 		case ACT_HOTKEY_IF:
-			// It's already been added to the hot-expression list, so just remove it from the script (below).
+			// It's already been added to the hot-expr list, so just remove it from the script (below).
 			// Override mActionType so ACT_HOTKEY_IF doesn't have to be handled by EvaluateCondition():
 			line->mActionType = ACT_IF;
 			break;
@@ -13919,9 +13848,26 @@ ResultType Line::EvaluateCondition()
 	return if_condition ? CONDITION_TRUE : CONDITION_FALSE;
 }
 
-// L4: Evaluate an expression used to define #if hotkey variant criterion.
-//	This is called by MainWindowProc when it receives an AHK_HOT_IF_EXPR message.
-ResultType Line::EvaluateHotCriterionExpression(LPTSTR aHotkeyName)
+
+// Evaluate an #If expression (in a thread created by the caller).
+ResultType Line::EvaluateHotCriterionExpression()
+{
+	g_script->mCurrLine = this; // Added in v1.1.16 to fix A_LineFile and A_LineNumber.
+
+	if (g->ListLinesIsEnabled)
+		LOG_LINE(this)
+
+	ResultType result = ExpandArgs();
+	if (result == OK)
+		result = EvaluateCondition();
+
+	return result;
+}
+
+
+// Evaluate an #If expression or callback function.
+// This is called by MainWindowProc when it receives an AHK_HOT_IF_EVAL message.
+ResultType HotkeyCriterion::Eval(LPTSTR aHotkeyName)
 {
 	// Initialize a new quasi-thread to evaluate the expression. This may not be necessary for simple
 	// expressions, but expressions which call user-defined functions may otherwise interfere with
@@ -13938,7 +13884,6 @@ ResultType Line::EvaluateHotCriterionExpression(LPTSTR aHotkeyName)
 	// Critical seems to improve reliability, either because the thread completes faster (i.e. before the timeout) or because we check for messages less often.
 	InitNewThread(0, false, true, ACT_CRITICAL);
 	ResultType result;
-	DEBUGGER_STACK_PUSH(_T("#If"))
 
 	// Update A_ThisHotkey, useful if #If calls a function to do its dirty work.
 	LPTSTR prior_hotkey_name[] = { g_script->mThisHotkeyName, g_script->mPriorHotkeyName };
@@ -13947,16 +13892,23 @@ ResultType Line::EvaluateHotCriterionExpression(LPTSTR aHotkeyName)
 	g_script->mPriorHotkeyStartTime = g_script->mThisHotkeyStartTime; //
 	g_script->mThisHotkeyName = aHotkeyName;
 	g_script->mThisHotkeyStartTime = // Updated for consistency.
-		g_script->mLastPeekTime = GetTickCount();
-	g_script->mCurrLine = this; // Added in v1.1.16 to fix A_LineFile and A_LineNumber.
+	g_script->mLastPeekTime = GetTickCount();
 
-	if (g->ListLinesIsEnabled)
-		LOG_LINE(this)
-
-		// EVALUATE THE EXPRESSION
-		result = ExpandArgs();
-	if (result == OK)
-		result = EvaluateCondition();
+	// EVALUATE THE EXPRESSION OR CALL THE CALLBACK
+	if (Type == HOT_IF_EXPR)
+	{
+		DEBUGGER_STACK_PUSH(_T("#If"))
+		result = ExprLine->EvaluateHotCriterionExpression();
+		DEBUGGER_STACK_POP()
+	}
+	else
+	{
+		ExprTokenType param = aHotkeyName;
+		INT_PTR retval;
+		result = LabelPtr(Callback)->ExecuteInNewThread(_T("#If"), &param, 1, &retval);
+		if (result != FAIL)
+			result = retval ? CONDITION_TRUE : CONDITION_FALSE;
+	}
 
 	// The following allows the expression to set the Last Found Window for the
 	// hotkey subroutine, so that #if WinActive(T) and similar behave like #IfWin.
@@ -13971,7 +13923,6 @@ ResultType Line::EvaluateHotCriterionExpression(LPTSTR aHotkeyName)
 	g_script->mPriorHotkeyName = prior_hotkey_name[1];
 	g_script->mPriorHotkeyStartTime = prior_hotkey_time[1];
 
-	DEBUGGER_STACK_POP()
 		ResumeUnderlyingThread(ErrorLevel_saved);
 
 	return result;
@@ -15742,49 +15693,13 @@ ResultType Line::Perform()
 		return ShowMainWindow(MAIN_MODE_VARS, false); // Pass "unrestricted" when the command is explicitly used in the script.
 	case ACT_LISTHOTKEYS:
 		return ShowMainWindow(MAIN_MODE_HOTKEYS, false); // Pass "unrestricted" when the command is explicitly used in the script.
-	case ACT_MSGBOX:
-	{
-		int result;
-		HWND dialog_owner = THREAD_DIALOG_OWNER; // Resolve macro only once to reduce code size.
-		// If the MsgBox window can't be displayed for any reason, always return FAIL to
-		// the caller because it would be unsafe to proceed with the execution of the
-		// current script subroutine.  For example, if the script contains an IfMsgBox after,
-		// this line, it's result would be unpredictable and might cause the subroutine to perform
-		// the opposite action from what was intended (e.g. Delete vs. don't delete a file).
-		if (!mArgc) // When called explicitly with zero params, it displays this default msg.
-			result = MsgBox(_T("Press OK to continue."), MSGBOX_NORMAL, NULL, 0, dialog_owner);
-		else if (mArgc == 1) // In the special 1-parameter mode, the first param is the prompt.
-			result = MsgBox(ARG1, MSGBOX_NORMAL, NULL, 0, dialog_owner);
-		else
-			result = MsgBox(ARG3, ArgToInt(1), ARG2, ArgToDouble(4), dialog_owner); // dialog_owner passed via parameter to avoid internally-displayed MsgBoxes from being affected by script-thread's owner setting.
-		// Above allows backward compatibility with AutoIt2's param ordering while still
-		// permitting the new method of allowing only a single param.
-		// v1.0.40.01: Rather than displaying another MsgBox in response to a failed attempt to display
-		// a MsgBox, it seems better (less likely to cause trouble) just to abort the thread.  This also
-		// solves a double-msgbox issue when the maximum number of MsgBoxes is reached.  In addition, the
-		// max-msgbox limit is the most common reason for failure, in which case a warning dialog has
-		// already been displayed, so there is no need to display another:
-		//if (!result)
-		//	// It will fail if the text is too large (say, over 150K or so on XP), but that
-		//	// has since been fixed by limiting how much it tries to display.
-		//	// If there were too many message boxes displayed, it will already have notified
-		//	// the user of this via a final MessageBox dialog, so our call here will
-		//	// not have any effect.  The below only takes effect if MsgBox()'s call to
-		//	// MessageBox() failed in some unexpected way:
-		//	LineError("The MsgBox could not be displayed.");
-		// v1.1.09.02: If the MsgBox failed due to invalid options, it seems better to display
-		// an error dialog than to silently exit the thread:
-		if (!result && GetLastError() == ERROR_INVALID_MSGBOX_STYLE)
-			return LineError(ERR_PARAM1_INVALID, FAIL, ARG1);
-		return result ? OK : FAIL;
-	}
 	case ACT_INPUTBOX:
 		return InputBox(output_var, ARG2, ARG3, ARG4, ARG5);
 	case ACT_TOOLTIP:
 		return ToolTip(FOUR_ARGS);
 
 	case ACT_TRAYTIP:
-		return TrayTip(FOUR_ARGS);
+		return TrayTip(THREE_ARGS);
 
 	case ACT_INPUT:
 		return Input();

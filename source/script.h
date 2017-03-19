@@ -336,7 +336,7 @@ static inline int DPIUnscale(int x)
 
 #define INPUTBOX_DEFAULT INT_MIN
 ResultType InputBoxParseOptions(LPTSTR aOptions, InputBoxType &aInputBox);
-ResultType InputBox(Var *aOutputVar, LPTSTR aTitle, LPTSTR aText, LPTSTR aOptions, LPTSTR aDefault);
+ResultType InputBox(Var *aOutputVar, LPTSTR aText, LPTSTR aTitle, LPTSTR aOptions, LPTSTR aDefault);
 INT_PTR CALLBACK InputBoxProc(HWND hWndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam);
 VOID CALLBACK InputBoxTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime);
 VOID CALLBACK DerefTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime);
@@ -740,7 +740,7 @@ private:
 	ResultType SetRegView(LPTSTR aView);
 
 	ResultType ToolTip(LPTSTR aText, LPTSTR aX, LPTSTR aY, LPTSTR aID);
-	ResultType TrayTip(LPTSTR aTitle, LPTSTR aText, LPTSTR aTimeout, LPTSTR aOptions);
+	ResultType TrayTip(LPTSTR aText, LPTSTR aTitle, LPTSTR aOptions);
 	ResultType Input(); // The Input command.
 	#define SW_NONE -1
 	ResultType PerformShowWindow(ActionTypeType aActionType, LPTSTR aTitle = _T(""), LPTSTR aText = _T("")
@@ -996,7 +996,7 @@ public:
 		, LPTSTR &aTarget, LPTSTR &aDerefBuf, size_t &aDerefBufSize, LPTSTR aArgDeref[], size_t aExtraSize
 		, Var **aArgVar = NULL);
 	ResultType ExpressionToPostfix(ArgStruct &aArg);
-	ResultType EvaluateHotCriterionExpression(LPTSTR aHotkeyName); // L4: Called by MainWindowProc to handle an AHK_HOT_IF_EXPR message.
+	ResultType EvaluateHotCriterionExpression(); // Called by HotkeyCriterion::Eval().
 
 	ResultType ValueIsType(ExprTokenType &aResultToken, ExprTokenType &aValue, LPTSTR aValueStr, ExprTokenType &aType, LPTSTR aTypeStr);
 
@@ -3067,7 +3067,6 @@ BIV_DECL_R (BIV_IsSuspended);
 BIV_DECL_R (BIV_IsCompiled);
 BIV_DECL_R (BIV_IsUnicode);
 BIV_DECL_RW(BIV_FileEncoding);
-BIV_DECL_R (BIV_MsgBoxResult);
 BIV_DECL_RW(BIV_RegView);
 BIV_DECL_RW(BIV_LastError);
 BIV_DECL_R (BIV_GlobalStruct);
@@ -3243,6 +3242,8 @@ BIF_DECL(BIF_RegisterCallback);
 #endif
 
 BIF_DECL(BIF_MenuGet);
+
+BIF_DECL(BIF_MsgBox);
 
 BIF_DECL(BIF_StatusBar);
 

@@ -325,10 +325,9 @@ Action g_act[] =
 	, {_T("Exit"), 0, 1, false, {1, 0}} // ExitCode
 	, {_T("ExitApp"), 0, 1, false, {1, 0}} // ExitCode
 
-	, {_T("MsgBox"), 0, 4, false, NULL} // Text (if only 1 param) or: Mode-flag, Title, Text, Timeout.
-	, {_T("InputBox"), 1, 5, true, NULL} // OutputVar, Title, Prompt, Options, Default
+	, {_T("InputBox"), 1, 5, true, NULL} // OutputVar, Text, Title, Options, Default
 	, {_T("ToolTip"), 0, 4, false, {2, 3, 4, 0}}  // Text, X, Y, ID.  If Text is omitted, the Tooltip is turned off.
-	, {_T("TrayTip"), 0, 4, false, {3, 4, 0}}  // Title, Text, Timeout, Options
+	, {_T("TrayTip"), 0, 3, false, NULL}  // Text, Title, Options
 
 	, {_T("Input"), 0, 4, true, NULL}  // OutputVar, Options, EndKeys, MatchList.
 

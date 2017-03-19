@@ -75,7 +75,6 @@ END
 
 #endif    // APSTUDIO_INVOKED
 
-#ifndef MINIDLL
 /////////////////////////////////////////////////////////////////////////////
 //
 // Menu
@@ -122,11 +121,7 @@ IDI_MAIN                ICON                    "icon_main.ico"
 IDI_SUSPEND             ICON                    "icon_suspend.ico"
 IDI_PAUSE               ICON                    "icon_pause.ico"
 IDI_PAUSE_SUSPEND       ICON                    "icon_pause_suspend.ico"
-#ifdef AUTOHOTKEYSC
-IDI_FILETYPE            ICON                    "icon_filetype_small.ico"
-#else
 IDI_FILETYPE            ICON                    "icon_filetype.ico"
-#endif
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -163,7 +158,6 @@ BEGIN
     "E",            ID_FILE_EDITSCRIPT,     VIRTKEY, CONTROL, NOINVERT
     "R",            ID_FILE_RELOADSCRIPT,   VIRTKEY, CONTROL, NOINVERT
 END
-#endif
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -200,31 +194,17 @@ BEGIN
     BEGIN
         BLOCK "040904b0"
         BEGIN
-#ifdef AUTOHOTKEYSC
-            VALUE "FileDescription", ""
-            VALUE "FileVersion", AHK_VERSION
-            VALUE "InternalName", ""
-            VALUE "LegalCopyright", ""
-            VALUE "OriginalFilename", ""
-            VALUE "ProductName", ""
-            VALUE "ProductVersion", AHK_VERSION
-#else
             VALUE "FileDescription", "AutoHotkey_H " AHK_ENC " " AHK_BIT
             VALUE "FileVersion", AHK_VERSION
             VALUE "InternalName", "AutoHotkey_H"
             VALUE "LegalCopyright", "Copyright (C) 2003-2014"
 #ifdef USRDLL
-	#ifdef MINIDLL
-			VALUE "OriginalFilename", "AutoHotkeyMini.dll"
-	#else
 			VALUE "OriginalFilename", "AutoHotkey.dll"
-	#endif
 #else
             VALUE "OriginalFilename", "AutoHotkey.exe"
 #endif
             VALUE "ProductName", "AutoHotkey_H"
             VALUE "ProductVersion", AHK_VERSION
-#endif
         END
     END
     BLOCK "VarFileInfo"
@@ -247,9 +227,7 @@ END
 
 /////////////////////////////////////////////////////////////////////////////
 #endif    // not APSTUDIO_INVOKED
-#ifndef AUTOHOTKEYSC
 C974C3B7677A402D93B047DA402587C7	RCDATA	".\\source\\resources\\WINAPI.zip"
-#endif
 /*
 #ifndef _USRDLL
 	#ifdef _WIN64
@@ -260,10 +238,5 @@ C974C3B7677A402D93B047DA402587C7	RCDATA	".\\source\\resources\\WINAPI.zip"
 #endif
 */
 #ifdef _DEBUG
-//F903E44B8A904483A1732BA84EA6191F	RCDATA	".\\bin\\x64w\\AutoHotkey.zip"
-//FC2328B39C194A4788051A3B01B1E7D5	RCDATA	".\\bin\\Win32w\\AutoHotkeyMini.zip"
-//AHK		RCDATA	".\\source\\resources\\AHK.zip"
-//AutoHotkey	RCDATA	".\\source\\resources\\AutoHotkey.zip"
-//AHK	RCDATA	".\\Test\\test.ahk"
-//AHKTHREAD.AHK	LIB		".\\source\\resources\\reslib\\AhkThread.ahk"
+
 #endif

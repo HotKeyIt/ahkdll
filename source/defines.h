@@ -34,7 +34,7 @@ GNU General Public License for more details.
 
 #define AHK_NAME "AutoHotkey"
 #include "ahkversion.h"
-#define AHK_WEBSITE "http://ahkscript.org"
+#define AHK_WEBSITE "https://autohotkey.com"
 
 #define T_AHK_NAME			_T(AHK_NAME)
 #define T_AHK_VERSION		_T(AHK_VERSION)
@@ -503,7 +503,6 @@ enum enum_act {
 , ACT_TRY, ACT_CATCH, ACT_FINALLY, ACT_THROW // Keep TRY, CATCH and FINALLY together and in this order for range checks.
 , ACT_FIRST_CONTROL_FLOW = ACT_BLOCK_BEGIN, ACT_LAST_CONTROL_FLOW = ACT_THROW
 , ACT_FIRST_COMMAND, ACT_EXIT = ACT_FIRST_COMMAND, ACT_EXITAPP // Excluded from the "CONTROL_FLOW" range above because they can be safely wrapped into a Func.
-, ACT_MSGBOX
 , ACT_INPUTBOX, ACT_TOOLTIP, ACT_TRAYTIP, ACT_INPUT
 , ACT_DEREF, ACT_STRINGLOWER, ACT_STRINGUPPER
 , ACT_STRINGREPLACE, ACT_SPLITPATH, ACT_SORT
@@ -761,14 +760,22 @@ inline bool SendLevelIsValid(int level) { return level >= 0 && level <= SendLeve
 
 class Line; // Forward declaration.
 typedef UCHAR HotCriterionType;
-enum HotCriterionEnum {HOT_NO_CRITERION, HOT_IF_ACTIVE, HOT_IF_NOT_ACTIVE, HOT_IF_EXIST, HOT_IF_NOT_EXIST, HOT_IF_EXPR}; // HOT_NO_CRITERION must be zero.
+enum HotCriterionEnum {HOT_NO_CRITERION, HOT_IF_ACTIVE, HOT_IF_NOT_ACTIVE, HOT_IF_EXIST, HOT_IF_NOT_EXIST // HOT_NO_CRITERION must be zero.
+	, HOT_IF_EXPR, HOT_IF_CALLBACK}; // Keep the last two in this order for the macro below.
+#define HOT_IF_REQUIRES_EVAL(type) ((type) >= HOT_IF_EXPR)
 struct HotkeyCriterion
 {
 	HotCriterionType Type;
-	Line *ExprLine;
 	LPTSTR WinTitle, WinText;
+	union
+	{
+		Line *ExprLine;
+		IObject *Callback;
+	};
 	HotkeyCriterion *NextCriterion;
 	DWORD ThreadID;
+
+	ResultType Eval(LPTSTR aHotkeyName); // For HOT_IF_EXPR and HOT_IF_CALLBACK.
 };
 
 
@@ -832,7 +839,6 @@ struct global_struct
 	ScriptTimer *CurrentTimer; // The timer that launched this thread (if any).
 	HWND hWndLastUsed;  // In many cases, it's better to use GetValidLastUsedWindow() when referring to this.
 	//HWND hWndToRestore;
-	int MsgBoxResult;  // Which button was pressed in the most recent MsgBox.
 	HWND DialogHWND;
 	DWORD RegView;
 
@@ -885,7 +891,6 @@ inline void global_clear_state(global_struct &g)
 	g.CurrentLabel = NULL;
 	g.hWndLastUsed = NULL;
 	//g.hWndToRestore = NULL;
-	g.MsgBoxResult = 0;
 	g.IsPaused = false;
 	g.UninterruptedLineCount = 0;
 	g.DialogOwner = NULL;
