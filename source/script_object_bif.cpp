@@ -105,8 +105,6 @@ BYTE sizeof_maxsize(TCHAR *buf)
 				if (max < align)
 					max = (BYTE)align;
 			}
-			else if (max < 4)
-				max = 4;
 		}
 	}
 	return max;
@@ -235,6 +233,9 @@ BIF_DECL(BIF_sizeof)
 		} 
 		else if (*buf == '}')
 		{	// update union
+			// update size of union in case it was not updated below (e.g. last item was a union or struct)
+			if ((maxsize = offset - unionoffset[uniondepth]) > unionsize[uniondepth])
+				unionsize[uniondepth] = maxsize;
 			// now restore or correct offset even if we had a structure in structure
 			if (uniondepth > 1 && unionisstruct[uniondepth - 1])
 			{

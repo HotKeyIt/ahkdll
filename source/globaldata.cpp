@@ -274,16 +274,16 @@ ToggleValueType g_BlockInputMode = TOGGLE_DEFAULT;
 bool g_BlockInput = false;
 bool g_BlockMouseMove = false;
 
-TCHAR g_default_pwd0;
-TCHAR g_default_pwd1;
-TCHAR g_default_pwd2;
-TCHAR g_default_pwd3;
-TCHAR g_default_pwd4;
-TCHAR g_default_pwd5;
-TCHAR g_default_pwd6;
-TCHAR g_default_pwd7;
-TCHAR g_default_pwd8;
-TCHAR g_default_pwd9;
+TCHAR g_default_pwd0 = 0;
+TCHAR g_default_pwd1 = 0;
+TCHAR g_default_pwd2 = 0;
+TCHAR g_default_pwd3 = 0;
+TCHAR g_default_pwd4 = 0;
+TCHAR g_default_pwd5 = 0;
+TCHAR g_default_pwd6 = 0;
+TCHAR g_default_pwd7 = 0;
+TCHAR g_default_pwd8 = 0;
+TCHAR g_default_pwd9 = 0;
 TCHAR *g_default_pwd[] = { &g_default_pwd0, &g_default_pwd1, &g_default_pwd2, &g_default_pwd3, &g_default_pwd4, &g_default_pwd5, &g_default_pwd6, &g_default_pwd7, &g_default_pwd8, &g_default_pwd9, 0, 0 };
 
 MyCryptEncrypt g_CryptEncrypt = NULL;
