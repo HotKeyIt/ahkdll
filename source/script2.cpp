@@ -16557,15 +16557,15 @@ BIF_DECL(BIF_ZipInfo)
 	// CStringA aPassword = aParamCount > 4 ? CStringCharFromTChar(TokenToString(*aParam[4])) : NULL;
 	if (TokenIsNumeric(*aParam[0]))
 	{
-		if (!TokenIsNumeric(*aParam[1]))
+		if (aParamCount < 2)
 		{
-			g_script->ScriptError(ERR_PARAM2_INVALID);
+			g_script->ScriptError(ERR_PARAM2_REQUIRED);
 			aResultToken.SetExitResult(FAIL);
 			return;
 		}
-		else if (aParamCount < 3)
+		else if (!TokenIsNumeric(*aParam[1]))
 		{
-			g_script->ScriptError(ERR_PARAM3_REQUIRED);
+			g_script->ScriptError(ERR_PARAM2_INVALID);
 			aResultToken.SetExitResult(FAIL);
 			return;
 		}
