@@ -18418,16 +18418,17 @@ BIF_DECL(BIF_ZipInfo)
 	// CStringA aPassword = aParamCount > 4 ? CStringCharFromTChar(TokenToString(*aParam[4])) : NULL;
 	if (TokenIsPureNumeric(*aParam[0]))
 	{
-		if (!TokenIsPureNumeric(*aParam[1]))
+		if (aParamCount < 2)
+		{
+			g_script.ThrowRuntimeException(ERR_PARAM2_REQUIRED);
+			return;
+		}
+		else if (!TokenIsPureNumeric(*aParam[1]))
 		{
 			g_script.ThrowRuntimeException(ERR_PARAM2_INVALID);
 			return;
 		}
-		else if (aParamCount < 3)
-		{
-			g_script.ThrowRuntimeException(ERR_PARAM3_REQUIRED);
-			return;
-		}
+
 		if (aErrCode = UnzipOpenBuffer(&huz, (void*)TokenToInt64(*aParam[0]), (DWORD)TokenToInt64(*aParam[1]), NULL))
 			goto error;
 	}
