@@ -18636,9 +18636,9 @@ BIF_DECL(BIF_UnZipBuffer)
 	ZIPENTRY	ze;
 	unsigned char *aBuffer;
 
-	if (TokenIsPureNumeric(*aParam[2]))
+	if (ParamIndexIsOmitted(1) || TokenIsPureNumeric(*aParam[1]))
 	{
-		ze.Index = (ULONGLONG)TokenToInt64(*aParam[2]);
+		ze.Index = ParamIndexIsOmitted(1) ? 0 : (ULONGLONG)TokenToInt64(*aParam[1]);
 		if ((aErrCode = UnzipGetItem(huz, &ze)))
 			goto errorclose;
 		aResultToken.value_int64 = ze.UncompressedSize;
