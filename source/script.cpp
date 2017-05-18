@@ -1046,6 +1046,11 @@ Script::~Script() // Destructor.
 	// DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
 	// DeleteCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
 	CloseHandle(g_hThread);
+
+	// PeekMessage is required to make sure that Ole/CoUninitialize does not hang
+	MSG msg;
+	PeekMessage(&msg, NULL, 0, 0, PM_REMOVE);
+
 	if (g_MainThreadID == g_ThreadID)
 		OleUninitialize();
 	else
