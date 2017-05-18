@@ -907,6 +907,10 @@ void Script::Destroy()
 	// done on DLL_PROCESS_DETACH
 	// DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
 	// DeleteCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
+	
+	// PeekMessage is required to make sure that OleUninitialize does not hang
+	MSG msg;
+	PeekMessage(&msg, NULL, 0, 0, PM_REMOVE);
 	OleUninitialize();
 	mIsReadyToExecute = false;
 }
