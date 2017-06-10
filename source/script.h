@@ -689,10 +689,15 @@ private:
 	ResultType FileReadLine(LPTSTR aFilespec, LPTSTR aLineNumber);
 	ResultType FileAppend(LPTSTR aFilespec, LPTSTR aBuf, LoopReadFileStruct *aCurrentReadFile);
 	ResultType WriteClipboardToFile(LPTSTR aFilespec, Var *aBinaryClipVar = NULL);
-	ResultType FileDelete();
+	ResultType FileDelete(LPTSTR aFilePattern);
 	ResultType FileRecycle(LPTSTR aFilePattern);
 	ResultType FileRecycleEmpty(LPTSTR aDriveLetter);
 	ResultType FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag);
+
+	typedef BOOL (* FilePatternCallback)(LPTSTR aFilename, WIN32_FIND_DATA &aFile, void *aCallbackData);
+	int FilePatternApply(LPTSTR aFilePattern, FileLoopModeType aOperateOnFolders
+		, bool aDoRecurse, FilePatternCallback aCallback, void *aCallbackData
+		, bool aCalledRecursively = false);
 
 	ResultType FileGetAttrib(LPTSTR aFilespec);
 	int FileSetAttrib(LPTSTR aAttributes, LPTSTR aFilePattern, FileLoopModeType aOperateOnFolders
@@ -2141,6 +2146,7 @@ public:
 	ResultType STDMETHODCALLTYPE Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	ULONG STDMETHODCALLTYPE AddRef() { return 1; }
 	ULONG STDMETHODCALLTYPE Release() { return 1; }
+	IObject_Type_Impl("Label") // Currently never called since Label isn't accessible to script.
 #ifdef CONFIG_DEBUGGER
 	void DebugWriteProperty(IDebugProperties *, int aPage, int aPageSize, int aDepth) {}
 #endif
@@ -2400,6 +2406,7 @@ public:
 	ResultType STDMETHODCALLTYPE Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	ULONG STDMETHODCALLTYPE AddRef() { return 1; }
 	ULONG STDMETHODCALLTYPE Release() { return 1; }
+	IObject_Type_Impl("Func")
 #ifdef CONFIG_DEBUGGER
 	void DebugWriteProperty(IDebugProperties *, int aPage, int aPageSize, int aDepth);
 #endif

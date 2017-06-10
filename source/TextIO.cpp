@@ -1111,6 +1111,8 @@ class FileObject : public ObjectBase // fincs: No longer allowing the script to 
 		return OK;
 	}
 
+	IObject_Type_Impl("File")
+
 	TextFile mFile;
 	
 public:
