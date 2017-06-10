@@ -12768,6 +12768,7 @@ protected:
 public:
 	static DynaToken *Create(ExprTokenType *aParam[], int aParamCount);
 	ResultType STDMETHODCALLTYPE Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	IObject_Type_Impl("DynaCall")
 };
 
 #ifdef _WIN64

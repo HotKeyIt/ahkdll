@@ -493,6 +493,7 @@ public:
 	}
 	static CriticalObject *Create(ExprTokenType *aParam[], int aParamCount);
 	ResultType STDMETHODCALLTYPE Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	IObject_Type_Impl("CriticalObject")
 };
 
 //
@@ -532,6 +533,7 @@ protected:
 		Enumerator(Struct *aObject) : mObject(aObject), mOffset(-1) { mObject->AddRef(); }
 		~Enumerator() { mObject->Release(); }
 		int Next(Var *aKey, Var *aVal);
+		IObject_Type_Impl("Struct.Enumerator")
 	};
 
 #ifdef CONFIG_DEBUGGER
@@ -576,6 +578,7 @@ public:
 	void ObjectToStruct(IObject *objfrom);
 	ResultType _NewEnum(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount);
 	ResultType STDMETHODCALLTYPE Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	IObject_Type_Impl("Struct")
 
 #ifdef CONFIG_DEBUGGER
 	void DebugWriteProperty(IDebugProperties *, int aPage, int aPageSize, int aDepth);
