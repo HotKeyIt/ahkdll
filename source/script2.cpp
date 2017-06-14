@@ -10301,6 +10301,8 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 #else // AUTOHOTKEYSC not defined:
 	if (g_hResource)
 	{
+		if (!allow_overwrite && Util_DoesFileExist(aDest))
+			return SetErrorLevelOrThrow();
 		// Open the file first since it's the most likely to fail:
 		HANDLE hfile = CreateFile(aDest, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
 		if (hfile == INVALID_HANDLE_VALUE)
