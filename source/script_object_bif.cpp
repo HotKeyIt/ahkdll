@@ -106,6 +106,8 @@ BYTE sizeof_maxsize(TCHAR *buf)
 				if (max < align)
 					max = (BYTE)align;
 			}
+			else if (max < 4)
+				max = 4;
 		}
 	}
 	return max;
@@ -228,9 +230,6 @@ BIF_DECL(BIF_sizeof)
 		} 
 		else if (*buf == '}')
 		{	// update union
-			// update size of union in case it was not updated below (e.g. last item was a union or struct)
-			if ((maxsize = offset - unionoffset[uniondepth]) > unionsize[uniondepth])
-				unionsize[uniondepth] = maxsize;
 			// now restore or correct offset even if we had a structure in structure
 			if (uniondepth > 1 && unionisstruct[uniondepth - 1])
 			{
@@ -1519,21 +1518,18 @@ BIF_DECL(Op_ObjNew)
 	result = class_object->Invoke(aResultToken, this_token, IT_CALL | IF_METAOBJ, aParam, 1);
 	if (result != INVOKE_NOT_HANDLED)
 	{
-		if (result != OK)
+		// It's possible that __Init is user-defined (despite recommendations in the
+		// documentation) or built-in, so make sure the return value, if any, is freed:
+		aResultToken.Free();
+		// Reset to defaults for __New, invoked below.
+		aResultToken.InitResult(buf);
+		if (result == FAIL || result == EARLY_EXIT) // Checked only after Free() and InitResult() as caller might expect mem_to_free == NULL.
 		{
 			new_object->Release();
 			aParam[0] = class_token; // Restore it to original caller-supplied value.
 			aResultToken.SetExitResult(result);
 			return;
 		}
-		// See similar section below for comments.
-		aResultToken.Free();
-		// Reset to defaults for __New, invoked below.
-		aResultToken.mem_to_free = NULL;
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
-		aResultToken.marker_length = -1;
-		aResultToken.buf = buf;
 	}
 	
 	// __New may be defined by the script for custom initialization code.
@@ -1550,7 +1546,7 @@ BIF_DECL(Op_ObjNew)
 	}
 	else if (result == FAIL || result == EARLY_EXIT)
 	{
-		// An error was raised within __New() or while trying to call it.
+		// An error was raised within __New() or while trying to call it, or Exit was called.
 		new_object->Release();
 		aResultToken.SetExitResult(result);
 	}

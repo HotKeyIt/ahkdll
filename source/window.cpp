@@ -594,7 +594,7 @@ HWND WinExist(global_struct &aSettings, LPTSTR aTitle, LPTSTR aText, LPTSTR aExc
 	if (ws.mCriteria & CRITERION_ID) // "ahk_id" will be satisfied if that HWND still exists and is valid.
 	{
 		// Explicitly allow HWND_BROADCAST for all commands that use WinExist (which is just about all
-		// window commands), even though it's only valid with ScriptPostSendMessage().
+		// window commands), even though it's only valid with BIF_PostSendMessage().
 		// This is because HWND_BROADCAST is probably never used as the HWND for a real window, so there
 		// should be no danger of any reasonable script ever passing that value in as a real target window,
 		// which should thus minimize the chance of a crash due to calling various API functions
@@ -770,14 +770,14 @@ BOOL CALLBACK EnumChildFind(HWND aWnd, LPARAM lParam)
 
 
 
-ResultType StatusBarUtil(Var *aOutputVar, HWND aBarHwnd, int aPartNumber, LPTSTR aTextToWaitFor
-	, int aWaitTime, int aCheckInterval)
+ResultType StatusBarUtil(ResultToken *apResultToken, HWND aBarHwnd, int aPartNumber
+	, LPTSTR aTextToWaitFor, int aWaitTime, int aCheckInterval)
 // aOutputVar is allowed to be NULL if aTextToWaitFor isn't NULL or blank. aBarHwnd is allowed
 // to be NULL because in that case, the caller wants us to set ErrorLevel appropriately and also
 // make aOutputVar empty.
 {
-	if (aOutputVar)
-		aOutputVar->Assign(); // Init to blank in case of early return.
+	if (apResultToken)
+		apResultToken->ReturnPtr(_T(""), 0); // Init to blank in case of early return.
 
 	// Legacy: Waiting 500ms in place of a "0" seems more useful than a true zero, which doesn't need
 	// to be supported because it's the same thing as something like "IfWinExist":
@@ -863,7 +863,7 @@ ResultType StatusBarUtil(Var *aOutputVar, HWND aBarHwnd, int aPartNumber, LPTSTR
 		// the checking above would already have done a "break" because of aTextToWaitFor being blank when
 		// passed to IsTextMatch()].  Also, don't continue to wait if the status bar no longer exists
 		// (which is usually caused by the parent window having been destroyed):
-		if (aOutputVar || !IsWindow(aBarHwnd))
+		if (apResultToken || !IsWindow(aBarHwnd))
 			break; // Leave ErrorLevel at its default to indicate bar text retrieval problem in both cases.
 
 		// Since above didn't break, we're in "wait" mode (more than one iteration).
@@ -884,12 +884,12 @@ ResultType StatusBarUtil(Var *aOutputVar, HWND aBarHwnd, int aPartNumber, LPTSTR
 	// or the status bar didn't have the part number provided, unless the below fails.
 	// Note we use a temp buf rather than writing directly to the var contents above, because
 	// we don't know how long the text will be until after the above operation finishes.
-	ResultType result_to_return = aOutputVar ? aOutputVar->Assign(local_buf) : OK;
+	ResultType result_to_return = apResultToken ? apResultToken->Return(local_buf) : OK;
 	FreeInterProcMem(handle, remote_buf);
 	return result_to_return;
 
 error:
-	return g_script->SetErrorLevelOrThrowInt(aOutputVar ? ERRORLEVEL_ERROR : ERRORLEVEL_ERROR2);
+	return g_ErrorLevel->Assign(apResultToken ? ERRORLEVEL_ERROR : ERRORLEVEL_ERROR2);
 }
 
 
@@ -1045,10 +1045,9 @@ int MsgBox(LPCTSTR aText, UINT uType, LPTSTR aTitle, double aTimeout, HWND aOwne
 		return 0;
 	}
 
-	// Set these in case the caller explicitly called it with a NULL, overriding the default:
-	if (!aText)
+	if (!aText) // In case the caller explicitly called it with a NULL, overriding the default.
 		aText = _T("");
-	if (!aTitle || !*aTitle)
+	if (!aTitle) // Caller omitted it or explicitly requested the default.
 		aTitle = g_script->DefaultDialogTitle();
 
 	// It doesn't feel safe to modify the contents of the caller's aText and aTitle,

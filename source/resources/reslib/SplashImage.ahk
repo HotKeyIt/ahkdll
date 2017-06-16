@@ -152,7 +152,7 @@ SplashImage(aImageFile,aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFon
             image_filename := image_filename_omit_leading_whitespace
           window_index := window_number_str
           if (window_index < 0 || window_index >= MAX_SPLASHIMAGE_WINDOWS){
-            MsgBox,0,Error in Function %A_ThisFunc%,% "Max window number is " MAX_SPLASHIMAGE_WINDOWS "."
+            MsgBox,% "Max window number is " MAX_SPLASHIMAGE_WINDOWS ".",Error in Function %A_ThisFunc%,0
             ErrorLevel:=-1
             return
           }

@@ -142,6 +142,7 @@ public:
 	Property() : mGet(NULL), mSet(NULL) { }
 	
 	ResultType STDMETHODCALLTYPE Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	IObject_Type_Impl("Property")
 };
 
 
@@ -195,6 +196,7 @@ protected:
 		Enumerator(Object *aObject) : mObject(aObject), mOffset(-1) { mObject->AddRef(); }
 		~Enumerator() { mObject->Release(); }
 		int Next(Var *aKey, Var *aVal);
+		IObject_Type_Impl("Object.Enumerator")
 	};
 	
 	IObject *mBase;
@@ -346,6 +348,7 @@ public:
 		return mBase; // Callers only want to call Invoke(), so no AddRef is done.
 	}
 
+	LPTSTR Type();
 	bool IsDerivedFrom(IObject *aBase);
 	
 	// Used by Object::_Insert() and Func::Call():
@@ -444,6 +447,7 @@ public:
 	~BoundFunc();
 
 	ResultType STDMETHODCALLTYPE Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	IObject_Type_Impl("BoundFunc")
 };
 
 
@@ -485,11 +489,32 @@ public:
 		, int aPatternCount, int aCapturedPatternCount, LPCTSTR aMark, IObject *&aNewObject);
 	
 	ResultType STDMETHODCALLTYPE Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	IObject_Type_Impl("RegExMatch")
 
 #ifdef CONFIG_DEBUGGER
 	void DebugWriteProperty(IDebugProperties *, int aPage, int aPageSize, int aDepth);
 #endif
 };
+
+
+//
+// ClipboardAll: Represents a blob of clipboard data (all formats retrieved from clipboard).
+//
+
+class ClipboardAll : public ObjectBase
+{
+	void *mData;
+	size_t mSize;
+
+public:
+	void *Data() { return mData; }
+	size_t Size() { return mSize; }
+	ClipboardAll(void *aData, size_t aSize) : mData(aData), mSize(aSize) {}
+	~ClipboardAll() { free(mData); }
+	ResultType STDMETHODCALLTYPE Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	IObject_Type_Impl("ClipboardAll")
+};
+
 
 
 //
@@ -520,6 +545,7 @@ public:
 	}
 	static CriticalObject *Create(ExprTokenType *aParam[], int aParamCount);
 	ResultType STDMETHODCALLTYPE Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	IObject_Type_Impl("CriticalObject")
 };
 
 //
@@ -559,6 +585,7 @@ protected:
 		Enumerator(Struct *aObject) : mObject(aObject), mOffset(-1) { mObject->AddRef(); }
 		~Enumerator() { mObject->Release(); }
 		int Next(Var *aKey, Var *aVal);
+		IObject_Type_Impl("Struct.Enumerator")
 	};
 
 #ifdef CONFIG_DEBUGGER
@@ -603,6 +630,7 @@ public:
 	void ObjectToStruct(IObject *objfrom);
 	ResultType _NewEnum(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount);
 	ResultType STDMETHODCALLTYPE Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	IObject_Type_Impl("Struct")
 
 #ifdef CONFIG_DEBUGGER
 	void DebugWriteProperty(IDebugProperties *, int aPage, int aPageSize, int aDepth);

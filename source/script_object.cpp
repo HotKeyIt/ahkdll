@@ -1018,6 +1018,25 @@ bool Object::IsDerivedFrom(IObject *aBase)
 	
 
 //
+// Object::Type() - Returns the object's type/class name.
+//
+
+LPTSTR Object::Type()
+{
+	IObject *ibase;
+	Object *base;
+	ExprTokenType value;
+	if (GetItem(value, _T("__Class")))
+		return _T("Class"); // This object is a class.
+	for (ibase = mBase; base = dynamic_cast<Object *>(ibase); ibase = base->mBase)
+		if (base->GetItem(value, _T("__Class")))
+			return TokenToString(value); // This object is an instance of base.
+	return _T("Object"); // This is an Object of undetermined type, like Object(), {} or [].
+}
+
+	
+
+//
 // Object:: Built-in Methods
 //
 
@@ -2113,6 +2132,41 @@ ResultType MsgMonitorList::Call(ExprTokenType *aParamValue, int aParamCount, int
 
 
 
+ResultType MsgMonitorList::Call(ExprTokenType *aParamValue, int aParamCount, UINT aMsg, UCHAR aMsgType, GuiType *aGui, INT_PTR *aRetVal)
+{
+	ResultType result = OK;
+	INT_PTR retval = 0;
+	BOOL thread_used = FALSE;
+	
+	for (MsgMonitorInstance inst (*this); inst.index < inst.count; ++inst.index)
+	{
+		MsgMonitorStruct &mon = mMonitor[inst.index];
+		if (mon.msg != aMsg || mon.msg_type != aMsgType)
+			continue;
+
+		IObject *func = mon.is_method ? aGui->mEventSink : mon.func; // is_method == true implies the GUI has an event sink object.
+		LPTSTR method_name = mon.is_method ? mon.method_name : _T("call");
+
+		if (thread_used) // Re-initialize the thread.
+			InitNewThread(0, true, false, ACT_INVALID);
+		
+		// Set last found window (as documented).
+		g->hWndLastUsed = aGui->mHwnd;
+		
+		result = CallMethod(func, func, method_name, aParamValue, aParamCount, &retval);
+		if (result == FAIL) // Callback encountered an error.
+			break;
+		if (result == EARLY_RETURN) // Callback returned a non-empty value.
+			break;
+		thread_used = TRUE;
+	}
+	if (aRetVal)
+		*aRetVal = retval;
+	return result;
+}
+
+
+
 //
 // MetaObject - Defines behaviour of object syntax when used on a non-object value.
 //
@@ -2145,6 +2199,79 @@ ResultType STDMETHODCALLTYPE MetaObject::Invoke(ResultToken &aResultToken, ExprT
 	// Allow script-defined meta-functions to override the default behaviour:
 	return Object::Invoke(aResultToken, aThisToken, aFlags, aParam, aParamCount);
 }
+
+
+
+ResultType ClipboardAll::Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount)
+{
+	if (IS_INVOKE_GET && aParamCount)
+	{
+		LPTSTR name = ParamIndexToString(0);
+		if (!_tcsicmp(name, _T("Ptr")))
+			_o_return((size_t)mData);
+		if (!_tcsicmp(name, _T("Size")))
+			_o_return(mSize);
+		if (!_tcsicmp(name, _T("Data")))
+			// Return the data as a binary string, which can be passed to FileAppend().
+			_o_return_p((LPTSTR)mData, mSize / sizeof(TCHAR));
+	}
+	return INVOKE_NOT_HANDLED;
+}
+
+
+BIF_DECL(BIF_ClipboardAll)
+{
+	void *data;
+	size_t size;
+	if (!aParamCount)
+	{
+		// Retrieve clipboard contents.
+		if (!Var::GetClipboardAll(&data, &size))
+			_f_return_FAIL;
+	}
+	else
+	{
+		// Use caller-supplied data.
+		void *caller_data;
+		if (TokenIsPureNumeric(*aParam[0]))
+		{
+			// Caller supplied an address.
+			caller_data = (void *)ParamIndexToIntPtr(0);
+			if ((size_t)caller_data < 65536) // Basic check to catch incoming raw addresses that are zero or blank.  On Win32, the first 64KB of address space is always invalid.
+				_f_throw(ERR_PARAM1_INVALID);
+			size = -1;
+		}
+		else
+		{
+			// Caller supplied a binary string or variable, such as from File.RawRead(var, n).
+			caller_data = ParamIndexToString(0, NULL, &size);
+			size *= sizeof(TCHAR);
+		}
+		if (!ParamIndexIsOmitted(1))
+			size = (size_t)ParamIndexToIntPtr(1);
+		else if (size == -1) // i.e. it can be omitted when size != -1 (a string was passed).
+			_f_throw(ERR_PARAM2_MUST_NOT_BE_BLANK);
+		size_t extra = sizeof(TCHAR); // For an additional null-terminator in case the caller passed invalid data.
+		#ifdef UNICODE
+		if (size & 1) // Odd; not a multiple of sizeof(WCHAR).
+			++extra; // Align the null-terminator.
+		#endif
+		if (  !(data = malloc(size + extra))  ) // More likely to be due to invalid parameter than out of memory.
+			_f_throw(ERR_OUTOFMEM);
+		memcpy(data, caller_data, size);
+		// Although data returned by GetClipboardAll() should already be terminated with
+		// a null UINT, the caller may have passed invalid data.  So align the data to a
+		// multiple of sizeof(TCHAR) and terminate with a proper null character in case
+		// `this.Data` is used with something expecting a null-terminated string.
+		#ifdef UNICODE
+		if (size & 1)
+			((LPBYTE)data)[size++] = 0; // Size is rounded up so that `this.Data` will not truncate the last byte.
+		#endif
+		((LPTSTR)data)[size] = '\0';
+	}
+	_f_return(new ClipboardAll(data, size));
+}
+
 
 
 #ifdef CONFIG_DEBUGGER

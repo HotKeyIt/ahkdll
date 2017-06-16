@@ -933,8 +933,6 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute, DWORD aThreadID)
 	int HotkeyCount = Hotkey::sHotkeyCount;
 	HotkeyCriterion *aFirstHotExpr = g_FirstHotExpr,*aLastHotExpr = g_LastHotExpr;
 	g_FirstHotExpr = NULL;g_LastHotExpr = NULL;
-	GuiType *aGuiDefaultWindow = g->GuiDefaultWindow;
-	g->GuiDefaultWindow = NULL;
 	//int a_guiCount = g_guiCount;
 	//g_guiCount = 0;
 #ifdef _USRDLL
@@ -950,7 +948,6 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute, DWORD aThreadID)
 		if (g_script->mPlaceholderLabel)
 			delete g_script->mPlaceholderLabel;
 		RESTORE_G_SCRIPT
-		g->GuiDefaultWindow = aGuiDefaultWindow;
 		//g_guiCount = a_guiCount;
 		RESTORE_IF_EXPR
 		g_script->mIsReadyToExecute = true; // Set program to be ready for continuing previous script.
@@ -964,7 +961,6 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute, DWORD aThreadID)
 		return 0; // LOADING_FAILED cant be used due to PTR return type
 	}	
 	g_script->mFileSpec = oldFileSpec;
-	g->GuiDefaultWindow = aGuiDefaultWindow;
 	//g_guiCount = a_guiCount;
 	FINALIZE_HOTKEYS
 	RESTORE_IF_EXPR
@@ -1062,8 +1058,6 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute, DWORD aThreadID)
 	int HotkeyCount = Hotkey::sHotkeyCount;
 	HotkeyCriterion *aFirstHotExpr = g_FirstHotExpr,*aLastHotExpr = g_LastHotExpr;
 	g_FirstHotExpr = NULL;g_LastHotExpr = NULL;
-	GuiType *aGuiDefaultWindow = g->GuiDefaultWindow;
-	g->GuiDefaultWindow = NULL;
 	//int a_guiCount = g_guiCount;
 	//g_guiCount = 0;
 
@@ -1078,7 +1072,6 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute, DWORD aThreadID)
 		if (g_script->mPlaceholderLabel)
 			delete g_script->mPlaceholderLabel;
 		RESTORE_G_SCRIPT
-		g->GuiDefaultWindow = aGuiDefaultWindow;
 		//g_guiCount = a_guiCount;
 		RESTORE_IF_EXPR
 		g_script->mIsReadyToExecute = true;
@@ -1091,7 +1084,6 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute, DWORD aThreadID)
 #endif
 		return 0;  // LOADING_FAILED cant be used due to PTR return type
 	}
-	g->GuiDefaultWindow = aGuiDefaultWindow;
 	//g_guiCount = a_guiCount;
 	FINALIZE_HOTKEYS
 	RESTORE_IF_EXPR

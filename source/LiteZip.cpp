@@ -6330,7 +6330,7 @@ static void copy_block(register TSTATE *state, char *block, DWORD len, DWORD hea
 
 		// Store one's complement
 		state->bs.out_buf[state->bs.out_offset++] = (char)((~len) & 0xff);
-		state->bs.out_buf[state->bs.out_offset++] = (char)((USH)((~len) & 0xFF) >> 8);
+		state->bs.out_buf[state->bs.out_offset++] = (char)((USH)((~len) & 0xFFFF) >> 8);
 
 		// Flush the 2 shorts now (because we're going to flush the block
 		// which is in a different memory buffer)

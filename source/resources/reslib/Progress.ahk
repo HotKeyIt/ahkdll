@@ -141,7 +141,7 @@ Progress(aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFontName:=""){
   {
     window_index := SubStr(aOptions,1,InStr(aOptions,":")-1)
     if (window_index < 0 || window_index >= MAX_PROGRESS_WINDOWS){
-      MsgBox,0,Error in Function %A_ThisFunc%,% "Max window number is " MAX_PROGRESS_WINDOWS "."
+      MsgBox,% "Max window number is " MAX_PROGRESS_WINDOWS ".", Error in Function %A_ThisFunc%,0
       ErrorLevel:=-1
       return
     }

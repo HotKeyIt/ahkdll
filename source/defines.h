@@ -144,8 +144,8 @@ enum StringCaseSenseType {SCS_INSENSITIVE, SCS_SENSITIVE, SCS_INSENSITIVE_LOCALE
 enum SymbolType // For use with ExpandExpression() and IsNumeric().
 {
 	// The sPrecedence array in ExpandExpression() must be kept in sync with any additions, removals,
-	// or re-ordering of the below.  Also, IS_OPERAND() relies on all operand types being at the
-	// beginning of the list:
+	// or re-ordering of the below.  When reordering or adding new symbols, take care not to break
+	// the range checks in the various macros defined below.
 	 PURE_NOT_NUMERIC // Must be zero/false because callers rely on that.
 	, PURE_INTEGER, PURE_FLOAT
 	, SYM_STRING = PURE_NOT_NUMERIC, SYM_INTEGER = PURE_INTEGER, SYM_FLOAT = PURE_FLOAT // Specific operand types.
@@ -158,6 +158,7 @@ enum SymbolType // For use with ExpandExpression() and IsNumeric().
 	, SYM_BEGIN = SYM_OPERAND_END  // SYM_BEGIN is a special marker to simplify the code.
 #define IS_OPERAND(symbol) ((symbol) < SYM_OPERAND_END)
 	, SYM_POST_INCREMENT, SYM_POST_DECREMENT // Kept in this position for use by YIELDS_AN_OPERAND() [helps performance].
+#define IS_POSTFIX_OPERATOR(symbol) ((symbol) == SYM_POST_INCREMENT || (symbol) == SYM_POST_DECREMENT)
 	, SYM_DOT // DOT must precede SYM_OPAREN so YIELDS_AN_OPERAND(SYM_GET) == TRUE, allowing auto-concat to work for it even though it is positioned after its second operand.
 	, SYM_CPAREN, SYM_CBRACKET, SYM_CBRACE, SYM_OPAREN, SYM_OBRACKET, SYM_OBRACE, SYM_COMMA  // CPAREN (close-paren)/CBRACKET/CBRACE must come right before OPAREN for YIELDS_AN_OPERAND.
 #define IS_OPAREN_LIKE(symbol) ((symbol) <= SYM_OBRACE && (symbol) >= SYM_OPAREN)
@@ -172,26 +173,32 @@ enum SymbolType // For use with ExpandExpression() and IsNumeric().
 #define IS_ASSIGNMENT_EXCEPT_POST_AND_PRE(symbol) (symbol <= SYM_ASSIGN_CONCAT && symbol >= SYM_ASSIGN) // Check upper bound first for short-circuit performance.
 #define IS_ASSIGNMENT_OR_POST_OP(symbol) (IS_ASSIGNMENT_EXCEPT_POST_AND_PRE(symbol) || symbol == SYM_POST_INCREMENT || symbol == SYM_POST_DECREMENT)
 	, SYM_IFF_ELSE, SYM_IFF_THEN // THESE TERNARY OPERATORS MUST BE KEPT IN THIS ORDER AND ADJACENT TO THE BELOW.
-	, SYM_OR, SYM_AND // MUST BE KEPT IN THIS ORDER AND ADJACENT TO THE ABOVE because infix-to-postfix is optimized to check a range rather than a series of equalities.
+	, SYM_OR, SYM_AND // MUST BE KEPT IN THIS ORDER AND ADJACENT TO THE ABOVE for the range checks below.
+#define IS_SHORT_CIRCUIT_OPERATOR(symbol) ((symbol) <= SYM_AND && (symbol) >= SYM_IFF_THEN) // Excludes SYM_IFF_ELSE, which acts as a simple jump after the THEN branch is evaluated.
+#define SYM_USES_CIRCUIT_TOKEN(symbol) ((symbol) <= SYM_AND && (symbol) >= SYM_IFF_ELSE)
 	, SYM_LOWNOT  // LOWNOT is the word "not", the low precedence counterpart of !
+	, SYM_IS, SYM_IN, SYM_CONTAINS
 	, SYM_EQUAL, SYM_EQUALCASE, SYM_NOTEQUAL // =, ==, <> ... Keep this in sync with IS_RELATIONAL_OPERATOR() below.
 	, SYM_GT, SYM_LT, SYM_GTOE, SYM_LTOE  // >, <, >=, <= ... Keep this in sync with IS_RELATIONAL_OPERATOR() below.
 #define IS_RELATIONAL_OPERATOR(symbol) (symbol >= SYM_EQUAL && symbol <= SYM_LTOE)
+	, SYM_REGEXMATCH // ~=, equivalent to a RegExMatch call in two-parameter mode.
 	, SYM_CONCAT
 	, SYM_LOW_CONCAT // Zero-precedence concat, used so that "x%y=z%" is equivalent to "x%(y=z)%".
 	, SYM_BITOR // Seems more intuitive to have these higher in prec. than the above, unlike C and Perl, but like Python.
 	, SYM_BITXOR // SYM_BITOR (ABOVE) MUST BE KEPT FIRST AMONG THE BIT OPERATORS BECAUSE IT'S USED IN A RANGE-CHECK.
 	, SYM_BITAND
 	, SYM_BITSHIFTLEFT, SYM_BITSHIFTRIGHT // << >>  ALSO: SYM_BITSHIFTRIGHT MUST BE KEPT LAST AMONG THE BIT OPERATORS BECAUSE IT'S USED IN A RANGE-CHECK.
+#define IS_BIT_OPERATOR(symbol) ((symbol) <= SYM_BITSHIFTRIGHT && (symbol) >= SYM_BITOR) // Check upper bound first for short-circuit performance (because operators like +-*/ are much more frequently used).
 	, SYM_ADD, SYM_SUBTRACT
 	, SYM_MULTIPLY, SYM_DIVIDE, SYM_FLOORDIVIDE
-	, SYM_NEGATIVE, SYM_POSITIVE, SYM_HIGHNOT, SYM_BITNOT, SYM_ADDRESS, SYM_DEREF  // Don't change position or order of these because Infix-to-postfix converter's special handling for SYM_POWER relies on them being adjacent to each other.
-	, SYM_POWER    // See comments near precedence array for why this takes precedence over SYM_NEGATIVE.
+	, SYM_POWER
+	, SYM_NEGATIVE, SYM_POSITIVE, SYM_HIGHNOT, SYM_BITNOT, SYM_ADDRESS  // Don't change position or order of these because Infix-to-postfix converter's special handling for SYM_POWER relies on them being adjacent to each other.
+#define SYM_OVERRIDES_POWER_ON_STACK(symbol) (((symbol) >= SYM_NEGATIVE && (symbol) <= SYM_ADDRESS) || (symbol) == SYM_LOWNOT) // Check lower bound first for short-circuit performance.
 	, SYM_PRE_INCREMENT, SYM_PRE_DECREMENT // Must be kept after the post-ops and in this order relative to each other due to a range check in the code.
-	, SYM_FUNC     // A call to a function.
+#define SYM_INCREMENT_OR_DECREMENT_IS_PRE(symbol) ((symbol) >= SYM_PRE_INCREMENT) // Caller has verified symbol is an INCREMENT or DECREMENT operator.
 	, SYM_NEW      // new Class()
-	, SYM_REGEXMATCH // L31: Experimental ~= RegExMatch operator, equivalent to a RegExMatch call in two-parameter mode.
-	, SYM_IS, SYM_IN, SYM_CONTAINS
+#define IS_PREFIX_OPERATOR(symbol) ((symbol) >= SYM_NEGATIVE && (symbol) <= SYM_NEW)
+	, SYM_FUNC     // A call to a function.
 	, SYM_COUNT    // Must be last because it's the total symbol count for everything above.
 	, SYM_INVALID = SYM_COUNT // Some callers may rely on YIELDS_AN_OPERAND(SYM_INVALID)==false.
 };
@@ -214,6 +221,9 @@ struct DECLSPEC_NOVTABLE IObject // L31: Abstract interface for "objects".
 {
 	// See script_object.cpp for comments.
 	virtual ResultType STDMETHODCALLTYPE Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount) = 0;
+	virtual LPTSTR Type() = 0;
+	#define IObject_Type_Impl(name) \
+		LPTSTR Type() { return _T(name); }
 	
 #ifdef CONFIG_DEBUGGER
 	virtual void DebugWriteProperty(IDebugProperties *, int aPage, int aPageSize, int aMaxDepth) = 0;
@@ -298,6 +308,7 @@ struct ExprTokenType  // Something in the compiler hates the name TokenType, so 
 			union // Due to the outermost union, this doesn't increase the total size of the struct on x86 builds (but it does on x64).
 			{
 				DerefType *outer_deref; // Used by ExpressionToPostfix().
+				LPTSTR error_reporting_marker; // Used by ExpressionToPostfix() for binary and unary operators.
 				size_t marker_length;
 				BOOL is_lvalue;		// for SYM_DYNAMIC
 			};
@@ -307,6 +318,7 @@ struct ExprTokenType  // Something in the compiler hates the name TokenType, so 
 
 
 	ExprTokenType() {}
+	ExprTokenType(int aValue) { SetValue(aValue); }
 	ExprTokenType(__int64 aValue) { SetValue(aValue); }
 	ExprTokenType(double aValue) { SetValue(aValue); }
 	ExprTokenType(IObject *aValue) { SetValue(aValue); }
@@ -368,6 +380,7 @@ private: // Force code to use one of the CopyFrom() methods, for clarity.
 #define STACK_POP stack[--stack_count]  // To be used as the r-value for an assignment.
 
 class Func;
+enum BuiltInFunctionID;
 struct ResultToken : public ExprTokenType
 {
 	LPTSTR buf; // Points to a buffer of _f_retval_buf_size characters for returning short strings and misc purposes.
@@ -499,24 +512,23 @@ enum enum_act {
 , ACT_LOOP, ACT_LOOP_FILE, ACT_LOOP_REG, ACT_LOOP_READ, ACT_LOOP_PARSE
 , ACT_FOR, ACT_WHILE, ACT_UNTIL // Keep LOOP, FOR, WHILE and UNTIL together and in this order for range checks in various places.
 , ACT_BREAK, ACT_CONTINUE
-, ACT_GOTO, ACT_GOSUB, ACT_RETURN
+, ACT_GOTO, ACT_GOSUB
+, ACT_FIRST_JUMP = ACT_BREAK, ACT_LAST_JUMP = ACT_GOSUB // Actions which accept a label name.
+, ACT_RETURN
 , ACT_TRY, ACT_CATCH, ACT_FINALLY, ACT_THROW // Keep TRY, CATCH and FINALLY together and in this order for range checks.
 , ACT_FIRST_CONTROL_FLOW = ACT_BLOCK_BEGIN, ACT_LAST_CONTROL_FLOW = ACT_THROW
 , ACT_FIRST_COMMAND, ACT_EXIT = ACT_FIRST_COMMAND, ACT_EXITAPP // Excluded from the "CONTROL_FLOW" range above because they can be safely wrapped into a Func.
-, ACT_INPUTBOX, ACT_TOOLTIP, ACT_TRAYTIP, ACT_INPUT
-, ACT_DEREF, ACT_STRINGLOWER, ACT_STRINGUPPER
-, ACT_STRINGREPLACE, ACT_SPLITPATH, ACT_SORT
-, ACT_ENVGET, ACT_ENVSET
+, ACT_TOOLTIP, ACT_TRAYTIP
+, ACT_SPLITPATH
 , ACT_RUNAS, ACT_RUN, ACT_RUNWAIT, ACT_DOWNLOAD
 , ACT_SEND, ACT_SENDRAW, ACT_SENDINPUT, ACT_SENDPLAY, ACT_SENDEVENT
 , ACT_CONTROLSEND, ACT_CONTROLSENDRAW, ACT_CONTROLCLICK, ACT_CONTROLMOVE, ACT_CONTROLGETPOS, ACT_CONTROLFOCUS
-, ACT_CONTROLGETFOCUS, ACT_CONTROLSETTEXT, ACT_CONTROLGETTEXT, ACT_CONTROL, ACT_CONTROLGET
+, ACT_CONTROLSETTEXT, ACT_CONTROL
 , ACT_SENDMODE, ACT_SENDLEVEL, ACT_COORDMODE, ACT_SETDEFAULTMOUSESPEED
 , ACT_CLICK, ACT_MOUSEMOVE, ACT_MOUSECLICK, ACT_MOUSECLICKDRAG, ACT_MOUSEGETPOS
-, ACT_STATUSBARGETTEXT
 , ACT_STATUSBARWAIT
 , ACT_CLIPWAIT, ACT_KEYWAIT
-, ACT_SLEEP, ACT_RANDOM
+, ACT_SLEEP
 , ACT_HOTKEY, ACT_SETTIMER, ACT_CRITICAL, ACT_THREAD
 , ACT_WINACTIVATE, ACT_WINACTIVATEBOTTOM
 , ACT_WINWAIT, ACT_WINWAITCLOSE, ACT_WINWAITACTIVE, ACT_WINWAITNOTACTIVE
@@ -524,29 +536,26 @@ enum enum_act {
 , ACT_WINHIDE, ACT_WINSHOW
 , ACT_WINMINIMIZEALL, ACT_WINMINIMIZEALLUNDO
 , ACT_WINCLOSE, ACT_WINKILL, ACT_WINMOVE, ACT_MENUSELECT
-, ACT_WINSETTITLE, ACT_WINGETTITLE, ACT_WINGETCLASS, ACT_WINGETPOS, ACT_WINGETTEXT
-, ACT_SYSGET, ACT_POSTMESSAGE, ACT_SENDMESSAGE
+, ACT_WINSETTITLE, ACT_WINGETPOS
 // Keep rarely used actions near the bottom for parsing/performance reasons:
-, ACT_PIXELGETCOLOR, ACT_PIXELSEARCH, ACT_IMAGESEARCH
+, ACT_PIXELSEARCH, ACT_IMAGESEARCH
 , ACT_GROUPADD, ACT_GROUPACTIVATE, ACT_GROUPDEACTIVATE, ACT_GROUPCLOSE
-, ACT_DRIVE, ACT_DRIVEGET
-, ACT_SOUNDGET, ACT_SOUNDSET, ACT_SOUNDBEEP, ACT_SOUNDPLAY
-, ACT_FILEAPPEND, ACT_FILEREAD, ACT_FILEDELETE, ACT_FILERECYCLE, ACT_FILERECYCLEEMPTY
+, ACT_SOUNDBEEP, ACT_SOUNDPLAY
+, ACT_FILEDELETE, ACT_FILERECYCLE, ACT_FILERECYCLEEMPTY
 , ACT_FILEINSTALL, ACT_FILECOPY, ACT_FILEMOVE, ACT_DIRCOPY, ACT_DIRMOVE
 , ACT_DIRCREATE, ACT_DIRDELETE
-, ACT_FILEGETATTRIB, ACT_FILESETATTRIB, ACT_FILEGETTIME, ACT_FILESETTIME
-, ACT_FILEGETSIZE, ACT_FILEGETVERSION
-, ACT_SETWORKINGDIR, ACT_FILESELECT, ACT_DIRSELECT, ACT_FILEGETSHORTCUT, ACT_FILECREATESHORTCUT
-, ACT_INIREAD, ACT_INIWRITE, ACT_INIDELETE
-, ACT_REGREAD, ACT_REGWRITE, ACT_REGDELETE, ACT_REGDELETEKEY, ACT_SETREGVIEW
+, ACT_FILESETATTRIB, ACT_FILESETTIME
+, ACT_SETWORKINGDIR, ACT_FILEGETSHORTCUT, ACT_FILECREATESHORTCUT
+, ACT_INIWRITE, ACT_INIDELETE
+, ACT_SETREGVIEW
 , ACT_OUTPUTDEBUG
 , ACT_SETKEYDELAY, ACT_SETMOUSEDELAY, ACT_SETWINDELAY, ACT_SETCONTROLDELAY
-, ACT_SETTITLEMATCHMODE, ACT_FORMATTIME
+, ACT_SETTITLEMATCHMODE
 , ACT_SUSPEND, ACT_PAUSE
 , ACT_STRINGCASESENSE, ACT_DETECTHIDDENWINDOWS, ACT_DETECTHIDDENTEXT, ACT_BLOCKINPUT
 , ACT_SETNUMLOCKSTATE, ACT_SETSCROLLLOCKSTATE, ACT_SETCAPSLOCKSTATE, ACT_SETSTORECAPSLOCKMODE
 , ACT_KEYHISTORY, ACT_LISTLINES, ACT_LISTVARS, ACT_LISTHOTKEYS
-, ACT_EDIT, ACT_RELOAD, ACT_MENU, ACT_GUI, ACT_GUICONTROL, ACT_GUICONTROLGET
+, ACT_EDIT, ACT_RELOAD, ACT_MENU
 , ACT_SHUTDOWN
 , ACT_FILEENCODING
 // It's safer to use g_ActionCount, which is calculated immediately after the array is declared
@@ -720,14 +729,29 @@ typedef UINT GuiIndexType; // Some things rely on it being unsigned to avoid the
 typedef UINT GuiEventType; // Made a UINT vs. enum so that illegal/underflow/overflow values are easier to detect.
 
 // The following array and enum must be kept in sync with each other:
-#define GUI_EVENT_NAMES {_T(""), _T("Normal"), _T("DoubleClick"), _T("RightClick"), _T("ColClick")}
+#define GUI_EVENT_NAMES { _T("") \
+	, _T("DropFiles"), _T("Close"), _T("Escape"), _T("Size"), _T("ContextMenu") \
+	, _T("Change") \
+	, _T("Click"), _T("DoubleClick"), _T("ColClick") \
+	, _T("ItemCheck"), _T("ItemSelect"), _T("ItemFocus"), _T("ItemExpand") \
+	, _T("ItemEdit") \
+	, _T("Focus"), _T("LoseFocus") \
+}
 enum GuiEventTypes {GUI_EVENT_NONE  // NONE must be zero for any uses of ZeroMemory(), synonymous with false, etc.
-	, GUI_EVENT_NORMAL, GUI_EVENT_DBLCLK // Try to avoid changing this and the other common ones in case anyone automates a script via SendMessage (though that does seem very unlikely).
-	, GUI_EVENT_RCLK, GUI_EVENT_COLCLK
-	, GUI_EVENT_FIRST_UNNAMED  // This item must always be 1 greater than the last item that has a name in the GUI_EVENT_NAMES array below.
-	, GUI_EVENT_DROPFILES = GUI_EVENT_FIRST_UNNAMED
-	, GUI_EVENT_CLOSE, GUI_EVENT_ESCAPE, GUI_EVENT_RESIZE, GUI_EVENT_CONTEXTMENU
-	, GUI_EVENT_DIGIT_0 = 48}; // Here just as a reminder that this value and higher are reserved so that a single printable character or digit (mnemonic) can be sent, and also so that ListView's "I" notification can add extra data into the high-byte (which lies just to the left of the "I" character in the bitfield).
+	, GUI_EVENT_DROPFILES, GUI_EVENT_CLOSE, GUI_EVENT_ESCAPE, GUI_EVENT_RESIZE, GUI_EVENT_CONTEXTMENU
+	, GUI_EVENT_WINDOW_FIRST = GUI_EVENT_DROPFILES, GUI_EVENT_WINDOW_LAST = GUI_EVENT_CONTEXTMENU
+	, GUI_EVENT_CONTROL_FIRST
+	, GUI_EVENT_CHANGE = GUI_EVENT_CONTROL_FIRST
+	, GUI_EVENT_CLICK, GUI_EVENT_DBLCLK, GUI_EVENT_COLCLK
+	, GUI_EVENT_ITEMCHECK, GUI_EVENT_ITEMSELECT, GUI_EVENT_ITEMFOCUS, GUI_EVENT_ITEMEXPAND
+	, GUI_EVENT_ITEMEDIT
+	, GUI_EVENT_FOCUS, GUI_EVENT_LOSEFOCUS
+	// The rest don't have explicit names in GUI_EVENT_NAMES:
+	, GUI_EVENT_WM_COMMAND
+	, GUI_EVENT_DIGIT_0 = 48 // Here just as a reminder that from this value up to 0xFF are reserved so that a single printable character or digit (mnemonic) can be sent.
+};
+
+enum GuiEventKinds {GUI_EVENTKIND_EVENT = 0, GUI_EVENTKIND_NOTIFY, GUI_EVENTKIND_COMMAND};
 typedef USHORT CoordModeType;
 
 // Bit-field offsets:
@@ -816,15 +840,9 @@ struct global_struct
 	int UninterruptedLineCount; // Stored as a g-struct attribute in case OnExit func interrupts it while uninterruptible.
 	int Priority;  // This thread's priority relative to others.
 	DWORD LastError; // The result of GetLastError() after the most recent DllCall or Run.
-	GuiEventType GuiEvent; // This thread's triggering event, e.g. DblClk vs. normal click.
 	EventInfoType EventInfo; // Not named "GuiEventInfo" because it applies to non-GUI events such as clipboard.
-	POINT GuiPoint; // The position of GuiEvent. Stored as a thread vs. window attribute so that underlying threads see their original values when resumed.
-	GuiType *GuiWindow; // The GUI window that launched this thread.
-	GuiType *GuiDefaultWindow; // This thread's default GUI window, used except when specified "Gui, 2:Add, ..."
-	GuiType *GuiDefaultWindowValid(); // Updates and returns GuiDefaultWindow in case "Gui, Name: Default" wasn't used or the Gui has been destroyed; returns NULL if GuiDefaultWindow is invalid.
-	GuiType *DialogOwner; // This thread's GUI owner, if any.
-	GuiIndexType GuiControlIndex; // The GUI control index that launched this thread.
-	#define THREAD_DIALOG_OWNER (GuiType::ValidGui(::g->DialogOwner) ? ::g->DialogOwner->mHwnd : NULL)
+	HWND DialogOwner; // This thread's dialog owner, if any.
+	#define THREAD_DIALOG_OWNER (IsWindow(::g->DialogOwner) ? ::g->DialogOwner : NULL)
 	int WinDelay;  // negative values may be used as special flags.
 	int ControlDelay; // negative values may be used as special flags.
 	int KeyDelay;     //
@@ -895,7 +913,6 @@ inline void global_clear_state(global_struct &g)
 	g.UninterruptedLineCount = 0;
 	g.DialogOwner = NULL;
 	g.CalledByIsDialogMessageOrDispatch = false; // CalledByIsDialogMessageOrDispatchMsg doesn't need to be cleared because it's value is only considered relevant when CalledByIsDialogMessageOrDispatch==true.
-	g.GuiDefaultWindow = NULL;
 	// Above line is done because allowing it to be permanently changed by the auto-exec section
 	// seems like it would cause more confusion that it's worth.  A change to the global default
 	// or even an override/always-use-this-window-number mode can be added if there is ever a
@@ -932,15 +949,7 @@ inline void global_init(global_struct &g)
 	g.ThreadIsCritical = false;
 	g.Priority = 0;
 	g.LastError = 0;
-	g.GuiEvent = GUI_EVENT_NONE;
 	g.EventInfo = NO_EVENT_INFO;
-	g.GuiPoint.x = COORD_UNSPECIFIED;
-	g.GuiPoint.y = COORD_UNSPECIFIED;
-	// For these, indexes rather than pointers are stored because handles can become invalid during the
-	// lifetime of a thread (while it's suspended, or if it destroys the control or window that created itself):
-	g.GuiWindow = NULL;
-	g.GuiControlIndex = NO_CONTROL_INDEX; // Default to out-of-bounds.
-	g.GuiDefaultWindow = NULL;
 	g.WinDelay = 100;
 	g.ControlDelay = 20;
 	g.KeyDelay = 10;
@@ -956,7 +965,7 @@ inline void global_init(global_struct &g)
 	g.StringCaseSense = SCS_INSENSITIVE;  // AutoIt2 default, and it does seem best.
 	g.StoreCapslockMode = true;  // AutoIt2 (and probably 3's) default, and it makes a lot of sense.
 	g.SendLevel = 0;
-	g.ListLinesIsEnabled = false;
+	g.ListLinesIsEnabled = true;
 	g.Encoding = CP_ACP;
 	g.ZipCompressionLevel = 5;
 }

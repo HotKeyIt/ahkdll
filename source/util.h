@@ -656,7 +656,7 @@ UINT StrReplace(LPTSTR aHaystack, LPTSTR aOld, LPTSTR aNew, StringCaseSenseType 
 size_t PredictReplacementSize(ptrdiff_t aLengthDelta, int aReplacementCount, int aLimit, size_t aHaystackLength
 	, size_t aCurrentLength, size_t aEndOffsetOfCurrMatch);
 LPTSTR TranslateLFtoCRLF(LPTSTR aString);
-bool DoesFilePatternExist(LPTSTR aFilePattern, DWORD *aFileAttr = NULL);
+bool DoesFilePatternExist(LPTSTR aFilePattern, DWORD *aFileAttr = NULL, DWORD aRequiredAttr = 0);
 #ifdef _DEBUG
 	ResultType FileAppend(LPTSTR aFilespec, LPTSTR aLine, bool aAppendNewline = true);
 #endif
@@ -664,12 +664,13 @@ LPTSTR ConvertFilespecToCorrectCase(LPTSTR aFullFileSpec);
 LPTSTR FileAttribToStr(LPTSTR aBuf, DWORD aAttr);
 unsigned __int64 GetFileSize64(HANDLE aFileHandle);
 LPTSTR GetWin32ErrorText(LPTSTR aBuf, DWORD aBufSize, DWORD aError);
-void AssignColor(LPTSTR aColorName, COLORREF &aColor, HBRUSH &aBrush);
+void AssignColor(LPTSTR aNewColorName, COLORREF &aColor, HBRUSH &aBrush);
+void AssignColor(COLORREF aNewColorValue, COLORREF &aColor, HBRUSH &aBrush);
 COLORREF ColorNameToBGR(LPTSTR aColorName);
 HRESULT MySetWindowTheme(HWND hwnd, LPCWSTR pszSubAppName, LPCWSTR pszSubIdList);
 HRESULT MyEnableThemeDialogTexture(HWND hwnd, DWORD dwFlags);
 BOOL MyIsAppThemed();
-LPTSTR ConvertEscapeSequences(LPTSTR aBuf, LPTSTR aLiteralMap, bool aAllowEscapedSpace = false);
+LPTSTR ConvertEscapeSequences(LPTSTR aBuf, LPTSTR aLiteralMap);
 int FindExprDelim(LPCTSTR aBuf, TCHAR aDelimiter = ',', int aStartIndex = 0, LPCTSTR aLiteralMap = NULL);
 int FindTextDelim(LPCTSTR aBuf, TCHAR aDelimiter = ',', int aStartIndex = 0, LPCTSTR aLiteralMap = NULL);
 POINT CenterWindow(int aWidth, int aHeight);

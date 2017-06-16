@@ -1282,7 +1282,7 @@ LPTSTR TranslateLFtoCRLF(LPTSTR aString)
 
 
 
-bool DoesFilePatternExist(LPTSTR aFilePattern, DWORD *aFileAttr)
+bool DoesFilePatternExist(LPTSTR aFilePattern, DWORD *aFileAttr, DWORD aRequiredAttr)
 // Returns true if the file/folder exists or false otherwise.
 // If non-NULL, aFileAttr's DWORD is set to the attributes of the file/folder if a match is found.
 // If there is no match, its contents are undefined.
@@ -1299,6 +1299,17 @@ bool DoesFilePatternExist(LPTSTR aFilePattern, DWORD *aFileAttr)
 		HANDLE hFile = FindFirstFile(aFilePattern, &wfd);
 		if (hFile == INVALID_HANDLE_VALUE)
 			return false;
+		// Skip . and .., which appear to always be listed first (for dir\* and dir\*.*).
+		while (wfd.cFileName[0] == '.' && (!wfd.cFileName[1] || wfd.cFileName[1] == '.' && !wfd.cFileName[2]))
+			if (!FindNextFile(hFile, &wfd))
+				return false;
+		if (aRequiredAttr) // Caller wants to check for a file/folder with specific attributes.
+		{
+			while ((wfd.dwFileAttributes & aRequiredAttr) != aRequiredAttr)
+				if (!FindNextFile(hFile, &wfd))
+					return false;
+			// Since above didn't return, a file/folder with the required attribute was found.
+		}
 		FindClose(hFile);
 		if (aFileAttr)
 			*aFileAttr = wfd.dwFileAttributes;
@@ -1484,6 +1495,11 @@ void AssignColor(LPTSTR aColorName, COLORREF &aColor, HBRUSH &aBrush)
 			// if aColorName does not contain something hex-numeric, black (0x00) will be assumed,
 			// which seems okay given how rare such a problem would be.
 	}
+	AssignColor(color, aColor, aBrush);
+}
+
+void AssignColor(COLORREF color, COLORREF &aColor, HBRUSH &aBrush)
+{
 	if (color != aColor) // It's not already the right color.
 	{
 		aColor = color; // Set default.  v1.0.44.09: Added this line to fix the inability to change to a previously selected color after having changed to the default color.
@@ -2658,7 +2674,7 @@ BOOL MyIsAppThemed()
 
 
 
-LPTSTR ConvertEscapeSequences(LPTSTR aBuf, LPTSTR aLiteralMap, bool aAllowEscapedSpace)
+LPTSTR ConvertEscapeSequences(LPTSTR aBuf, LPTSTR aLiteralMap)
 // Replaces any escape sequences in aBuf with their reduced equivalent.  For example, if aEscapeChar
 // is accent, Each `n would become a literal linefeed.  aBuf's length should always be the same or
 // lower than when the process started, so there is no chance of overflow.
@@ -2680,11 +2696,7 @@ LPTSTR ConvertEscapeSequences(LPTSTR aBuf, LPTSTR aLiteralMap, bool aAllowEscape
 			case 'r': *cp1 = '\r'; break;  // carriage return
 			case 't': *cp1 = '\t'; break;  // horizontal tab
 			case 'v': *cp1 = '\v'; break;  // vertical tab
-			case 's': // space (not always allowed for backward compatibility reasons).
-				if (aAllowEscapedSpace)
-					*cp1 = ' ';
-				//else do nothing extra, just let the standard action for unrecognized escape sequences.
-				break;
+			case 's': *cp1 = ' '; break;   // space
 		}
 		// Replace escape-sequence with its single-char value.  This is done even if the pair isn't
 		// a recognizable escape sequence (e.g. `? becomes ?), which is the Microsoft approach and
@@ -2706,16 +2718,7 @@ int FindExprDelim(LPCTSTR aBuf, TCHAR aDelimiter, int aStartIndex, LPCTSTR aLite
 	for (int mark = aStartIndex; ; ++mark)
 	{
 		if (aBuf[mark] == aDelimiter)
-		{
-			// Escaping a comma is allowed in case it has some utility.  An escaped comma
-			// acts as the multi-statement operator instead of as a delimiter, which also
-			// means that commas in continuation sections act as multi-statement by default.
-			// aDelimiter is checked in case this is a recursive call -- escaping ')', ']'
-			// or '}' should have no effect.
-			if (aDelimiter == g_delimiter && aLiteralMap && aLiteralMap[mark])
-				continue;
 			return mark;
-		}
 		switch (aBuf[mark])
 		{
 		case '\0':
@@ -2723,6 +2726,7 @@ int FindExprDelim(LPCTSTR aBuf, TCHAR aDelimiter, int aStartIndex, LPCTSTR aLite
 			// index of the null-terminator since that's typically what the caller wants.
 			return mark;
 		default:
+		//case '`': // May indicate an attempt to escape something when aLiteralMap==NULL, but has escape has no meaning here.
 			// Not a meaningful character; just have the loop skip over it.
 			continue;
 		case '"': 
@@ -2730,11 +2734,6 @@ int FindExprDelim(LPCTSTR aBuf, TCHAR aDelimiter, int aStartIndex, LPCTSTR aLite
 			mark = FindTextDelim(aBuf, aBuf[mark], mark + 1, aLiteralMap);
 			if (!aBuf[mark]) // i.e. it isn't safe to do ++mark.
 				return mark; // See case '\0' for comments.
-			continue;
-		case '`':
-			// See comments at the top of the loop.
-			if (!aLiteralMap && aBuf[mark+1] == g_delimiter)
-				mark++;
 			continue;
 		//case ')':
 		//case ']':
@@ -2776,6 +2775,7 @@ int FindTextDelim(LPCTSTR aBuf, TCHAR aDelimiter, int aStartIndex, LPCTSTR aLite
 			// Reached the end of the string without finding a delimiter.  Return the
 			// index of the null-terminator since that's typically what the caller wants.
 			return mark;
+#ifdef ENABLE_TEXT_DEREFS
 		case g_DerefChar:
 			if (!aLiteralMap || !aLiteralMap[mark])
 			{
@@ -2785,6 +2785,7 @@ int FindTextDelim(LPCTSTR aBuf, TCHAR aDelimiter, int aStartIndex, LPCTSTR aLite
 					return mark; // See case '\0' for comments.
 			}
 			continue;
+#endif
 		case '`':
 			// This allows g_DerefChar or aDelimiter to be escaped, but since every other non-null
 			// character has no meaning here, it doesn't need to check which character it is skipping.
@@ -2934,7 +2935,6 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 
 	found_func->mBIF = (BuiltInFunctionType)BIF_DllImport;
 	found_func->mIsBuiltIn = true;
-	found_func->mHasReturn = true;
 	found_func->mMinParams = 0;
 
 	TCHAR buf[MAX_PATH];

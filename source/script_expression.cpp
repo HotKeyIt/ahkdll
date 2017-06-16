@@ -729,7 +729,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 		case SYM_PRE_DECREMENT:  // unique among all the operators in that it pushes an operand before the evaluation.
 			if (right.symbol != SYM_VAR) // Syntax error.
 				goto abort_with_exception;
-			is_pre_op = (this_token.symbol >= SYM_PRE_INCREMENT); // Store this early because its symbol will soon be overwritten.
+			is_pre_op = SYM_INCREMENT_OR_DECREMENT_IS_PRE(this_token.symbol); // Store this early because its symbol will soon be overwritten.
 			if (!*right.var->Contents()) // It's empty (this also serves to display a warning if applicable).
 			{
 				// For convenience, treat an empty variable as zero for ++ and --.
@@ -842,7 +842,6 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 				goto abort_with_exception;
 			break;
 
-		case SYM_DEREF:   // Dereference an address to retrieve a single byte.
 		case SYM_BITNOT:  // The tilde (~) operator.
 			if (right_is_number == PURE_NOT_NUMERIC) // String.  Seems best to consider the application of '*' or '~' to a non-numeric string to be a failure.
 			{
@@ -851,44 +850,18 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 			}
 			// Since above didn't "break": right_is_number is PURE_INTEGER or PURE_FLOAT.
 			right_int64 = TokenToInt64(right); // Although PURE_FLOAT can't be hex, for simplicity and due to the rarity of encountering a PURE_FLOAT in this case, the slight performance reduction of calling TokenToInt64() is done for both PURE_FLOAT and PURE_INTEGER.
-			if (this_token.symbol == SYM_BITNOT)
-			{
-				// Note that it is not legal to perform ~, &, |, or ^ on doubles.  Because of this,
-				// any floating point operand is truncated to an integer above.
-				if (right_int64 < 0 || right_int64 > UINT_MAX)
-					// Treat it as a 64-bit signed value, since no other aspects of the program
-					// (e.g. IfEqual) will recognize an unsigned 64 bit number.
-					this_token.value_int64 = ~right_int64;
-				else
-					// Treat it as a 32-bit unsigned value when inverting and assigning.  This is
-					// because assigning it as a signed value would "convert" it into a 64-bit
-					// value, which in turn is caused by the fact that the script sees all negative
-					// numbers as 64-bit values (e.g. -1 is 0xFFFFFFFFFFFFFFFF).
-					this_token.value_int64 = (size_t)(DWORD)~(DWORD)right_int64; // Casting this way avoids compiler warning.
-			}
-			else // SYM_DEREF
-			{
-				// Reasons for resolving *Var to a number rather than a single-char string:
-				// 1) More consistent with future uses of * that might operate on the address of 2-byte,
-				//    4-byte, and 8-byte targets.
-				// 2) Performs better in things like ExtractInteger() that would otherwise have to call Asc().
-				// 3) Converting it to a one-char string would add no value beyond convenience because script
-				//    could do "if (*var = 65)" if it's concerned with avoiding a Chr() call for performance
-				//    reasons.  Also, it seems somewhat rare that a script will access a string's characters
-				//    one-by-one via the * method because that a parsing loop can already do that more easily.
-				// 4) Reduces code size and improves performance (however, the single-char string method would
-				//    use _alloca(2) to get some temporary memory, so it wouldn't be too bad in performance).
-				//
-				// The following does a basic bounds check to prevent crashes due to dereferencing addresses
-				// that are obviously bad.  In terms of percentage impact on performance, this seems quite
-				// justified.  In the future, could also put a __try/__except block around this (like DllCall
-				// uses) to prevent buggy scripts from crashing.  In addition to ruling out the dereferencing of
-				// a NULL address, the >255 check also rules out common-bug addresses (I don't think addresses
-				// this low can realistically ever be legitimate, but it would be nice to get confirmation).
-				// For simplicity and due to rarity, a zero is yielded in such cases rather than an empty string.
-				this_token.value_int64 = ((size_t)right_int64 < 4096)
-					? 0 : *(UCHAR *)right_int64; // Dereference to extract one unsigned character, just like Asc().
-			}
+			// Note that it is not legal to perform ~, &, |, or ^ on doubles.  Because of this,
+			// any floating point operand is truncated to an integer above.
+			if (right_int64 < 0 || right_int64 > UINT_MAX)
+				// Treat it as a 64-bit signed value, since no other aspects of the program
+				// (e.g. IfEqual) will recognize an unsigned 64 bit number.
+				this_token.value_int64 = ~right_int64;
+			else
+				// Treat it as a 32-bit unsigned value when inverting and assigning.  This is
+				// because assigning it as a signed value would "convert" it into a 64-bit
+				// value, which in turn is caused by the fact that the script sees all negative
+				// numbers as 64-bit values (e.g. -1 is 0xFFFFFFFFFFFFFFFF).
+				this_token.value_int64 = (size_t)(DWORD)~(DWORD)right_int64; // Casting this way avoids compiler warning.
 			this_token.symbol = SYM_INTEGER; // Must be done only after its old value was used above. v1.0.36.07: Fixed to be SYM_INTEGER vs. right_is_number for SYM_BITNOT.
 			break;
 
@@ -910,7 +883,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 				case SYM_ASSIGN: // Listed first for performance (it's probably the most common because things like ++ and += aren't expressions when they're by themselves on a line).
 					if (!left.var->Assign(right)) // left.var can be VAR_CLIPBOARD in this case.
 						goto abort;
-					if (left.var->Type() == VAR_CLIPBOARD) // v1.0.46.01: Clipboard is present as SYM_VAR, but only for assign-to-clipboard so that built-in functions and other code sections don't need handling for VAR_CLIPBOARD.
+					if (left.var->Type() != VAR_NORMAL) // Could be VAR_CLIPBOARD or VAR_VIRTUAL, which should not yield SYM_VAR (as some sections of the code wouldn't handle it correctly).
 					{
 						this_token.CopyValueFrom(right); // Doing it this way is more maintainable than other methods, and is unlikely to perform much worse.
 					}
@@ -1166,7 +1139,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 			}
 
 			else if (right_is_number == PURE_INTEGER && left_is_number == PURE_INTEGER && this_token.symbol != SYM_DIVIDE
-				|| this_token.symbol <= SYM_BITSHIFTRIGHT && this_token.symbol >= SYM_BITOR) // Check upper bound first for short-circuit performance (because operators like +-*/ are much more frequently used).
+				|| IS_BIT_OPERATOR(this_token.symbol))
 			{
 				// Because both are integers and the operation isn't division, the result is integer.
 				// The result is also an integer for the bitwise operations listed in the if-statement
@@ -1430,7 +1403,7 @@ push_this_token:
 		if (result_token.symbol == SYM_VAR)
 		{
 			result = result_token.var->Contents();
-			result_size = result_token.var->LengthIgnoreBinaryClip() + 1; // Ignore binary clipboard for anything other than ACT_ASSIGNEXPR (i.e. output_var!=NULL) because it's documented that except for certain features, binary clipboard variables are seen only up to the first binary zero (mostly to simplify the code).
+			result_size = result_token.var->Length() + 1;
 		}
 		else
 		{
@@ -2268,8 +2241,6 @@ ResultType Line::ArgMustBeDereferenced(Var *aVar, int aArgIndex, Var *aArgVar[])
 // There are some other functions like ArgLength() that have procedures similar to this one, so
 // maintain them together.
 {
-	if (mActionType == ACT_SORT) // See PerformSort() for why it's always dereferenced.
-		return CONDITION_TRUE;
 	aVar = aVar->ResolveAlias(); // Helps performance, but also necessary to accurately detect a match further below.
 	VarTypeType aVar_type = aVar->Type();
 	if (aVar_type == VAR_CLIPBOARD)

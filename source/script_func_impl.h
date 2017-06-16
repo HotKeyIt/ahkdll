@@ -21,8 +21,17 @@
 #define ParamIndexToOptionalIntPtr(index, def)		ParamIndexToOptionalType(IntPtr, index, def)
 #define ParamIndexToOptionalDouble(index, def)		ParamIndexToOptionalType(Double, index, def)
 #define ParamIndexToOptionalInt64(index, def)		ParamIndexToOptionalType(Int64, index, def)
+#define ParamIndexToOptionalBOOL(index, def)		ParamIndexToOptionalType(BOOL, index, def)
 #define ParamIndexToOptionalVar(index)				(((index) < aParamCount && aParam[index]->symbol == SYM_VAR) ? aParam[index]->var : NULL)
 
+#define ParamIndexToOptionalStringDef(index, def, ...)	(ParamIndexIsOmitted(index) ? (def) : ParamIndexToString(index, __VA_ARGS__))
 // The macro below defaults to "", since that is by far the most common default.
 // This allows it to skip the check for SYM_MISSING, which always has marker == _T("").
 #define ParamIndexToOptionalString(index, ...)		(((index) < aParamCount) ? ParamIndexToString(index, __VA_ARGS__) : _T(""))
+
+#define _f_param_string(name, index, ...) \
+	TCHAR name##_buf[MAX_NUMBER_SIZE], *name = ParamIndexToString(index, name##_buf, __VA_ARGS__)
+#define _f_param_string_opt(name, index, ...) \
+	TCHAR name##_buf[MAX_NUMBER_SIZE], *name = ParamIndexToOptionalString(index, name##_buf, __VA_ARGS__)
+#define _f_param_string_opt_def(name, index, def, ...) \
+	TCHAR name##_buf[MAX_NUMBER_SIZE], *name = ParamIndexToOptionalStringDef(index, def, name##_buf, __VA_ARGS__)

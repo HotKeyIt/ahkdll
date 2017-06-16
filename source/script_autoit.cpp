@@ -24,6 +24,7 @@
 #include "globaldata.h" // for g_ErrorLevel and probably other globals.
 #include "window.h" // For ControlExist().
 #include "application.h" // For SLEEP_WITHOUT_INTERRUPTION and MsgSleep().
+#include "script_func_impl.h"
 
 
 ResultType Script::DoRunAs(LPTSTR aCommandLine, LPTSTR aWorkingDir, bool aDisplayErrors, WORD aShowWindow
@@ -175,20 +176,29 @@ VarSizeType BIV_IsAdmin(LPTSTR aBuf, LPTSTR aVarName)
 }
 
 
-ResultType Line::PixelGetColor(int aX, int aY, LPTSTR aOptions)
+BIF_DECL(BIF_PixelGetColor)
 {
-	if (tcscasestr(aOptions, _T("Slow"))) // New mode for v1.0.43.10.  Takes precedence over Alt mode.
-		return PixelSearch(aX, aY, aX, aY, 0, 0, aOptions, true); // It takes care of setting ErrorLevel and the output-var.
+	_f_set_retval_p(_f_retval_buf, 0); // PixelSearch() below relies on this.
+	*aResultToken.marker = '\0'; // Set default.
+	int aX = ParamIndexToInt(0);
+	int aY = ParamIndexToInt(1);
+	_f_param_string_opt(aOptions, 2);
 
-	Var &output_var = *OUTPUT_VAR;
-	output_var.Assign(); // Init to empty string regardless of whether we succeed here.
+	if (tcscasestr(aOptions, _T("Slow"))) // New mode for v1.0.43.10.  Takes precedence over Alt mode.
+	{
+		PixelSearch(NULL, NULL, aX, aY, aX, aY, 0, 0, aOptions, &aResultToken); // It takes care of setting ErrorLevel and the return value.
+		_f_return_retval;
+	}
 
 	CoordToScreen(aX, aY, COORD_MODE_PIXEL);
 	
 	bool use_alt_mode = tcscasestr(aOptions, _T("Alt")) != NULL; // New mode for v1.0.43.10: Two users reported that CreateDC works better in certain windows such as SciTE, at least one some systems.
 	HDC hdc = use_alt_mode ? CreateDC(_T("DISPLAY"), NULL, NULL, NULL) : GetDC(NULL);
 	if (!hdc)
-		return SetErrorLevelOrThrow();
+	{
+		g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
+		_f_return_retval;
+	}
 
 	// Assign the value as an 32-bit int to match Window Spy reports color values.
 	// Update for v1.0.21: Assigning in hex format seems much better, since it's easy to
@@ -201,10 +211,9 @@ ResultType Line::PixelGetColor(int aX, int aY, LPTSTR aOptions)
 	else
 		ReleaseDC(NULL, hdc);
 
-	TCHAR buf[32];
-	_stprintf(buf, _T("0x%06X"), bgr_to_rgb(color));
 	g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
-	return output_var.Assign(buf);
+	aResultToken.marker_length = _stprintf(aResultToken.marker, _T("0x%06X"), bgr_to_rgb(color));
+	_f_return_retval;
 }
 
 ResultType Line::MenuSelect(LPTSTR aTitle, LPTSTR aText, LPTSTR aMenu1, LPTSTR aMenu2
@@ -313,20 +322,55 @@ error:
 
 
 
-ResultType Line::Control(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR aTitle, LPTSTR aText
-	, LPTSTR aExcludeTitle, LPTSTR aExcludeText)
+BIF_DECL(BIF_Control)
 // ATTACH_THREAD_INPUT has been tested to see if they help any of these work with controls
 // in MSIE (whose Internet Explorer_TridentCmboBx2 does not respond to "Control Choose" but
 // does respond to "Control Focus").  But it didn't help.
 {
-	ControlCmds control_cmd = ConvertControlCmd(aCmd);
-	// Since command names are validated at load-time, this only happens if the command name
-	// was contained in a variable reference.  Since that is very rare, just set ErrorLevel
-	// and return:
-	if (control_cmd == CONTROL_CMD_INVALID)
-		goto error;
+	BuiltInFunctionID control_cmd = _f_callee_id;
 
-	HWND target_window = DetermineTargetWindow(aTitle, aText, aExcludeTitle, aExcludeText);
+	// Retrieve and exclude the value parameter, if any.
+	ToggleValueType aToggle;
+	LPTSTR aValue;
+	int aNumber;
+	switch (control_cmd)
+	{
+	// Boolean parameter:
+	case FID_ControlSetChecked:
+	case FID_ControlSetEnabled:
+		aToggle = Line::ConvertOnOffToggle(ParamIndexToString(0, _f_number_buf));
+		++aParam;
+		--aParamCount;
+		break;
+	// String parameter:
+	case FID_ControlSetStyle: // String for +/-/^ prefix.
+	case FID_ControlSetExStyle: // As above.
+	case FID_ControlAddItem:
+	case FID_ControlChooseString:
+	case FID_ControlEditPaste:
+		aValue = ParamIndexToString(0, _f_number_buf);
+		++aParam;
+		--aParamCount;
+		break;
+	// Integer parameter:
+	case FID_ControlSetTab:
+	case FID_ControlDeleteItem:
+	case FID_ControlChoose:
+		aNumber = ParamIndexToInt(0);
+		++aParam;
+		--aParamCount;
+		break;
+	// No parameter:
+	//case FID_ControlShow:
+	//case FID_ControlHide:
+	//case FID_ControlShowDropDown:
+	//case FID_ControlHideDropDown:
+	}
+
+	TCHAR control_buf[MAX_NUMBER_SIZE];
+	LPTSTR aControl = ParamIndexToString(0, control_buf);
+
+	HWND target_window = DetermineTargetWindow(aParam + 1, aParamCount - 1);
 	if (!target_window)
 		goto error;
 	HWND control_window = ControlExist(target_window, aControl); // This can return target_window itself for cases such as ahk_id %ControlHWND%.
@@ -339,9 +383,6 @@ ResultType Line::Control(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR aTi
 	UINT msg, x_msg, y_msg;
 	RECT rect;
 	LPARAM lparam;
-	vk_type vk;
-	int key_count;
-	TCHAR temp_buf[32];
 
 #ifdef _WIN64
 	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
@@ -352,14 +393,16 @@ ResultType Line::Control(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR aTi
 
 	switch(control_cmd)
 	{
-	case CONTROL_CMD_CHECK: // au3: Must be a Button
-	case CONTROL_CMD_UNCHECK:
+	case FID_ControlSetChecked: // au3: Must be a Button
 	{ // Need braces for ATTACH_THREAD_INPUT macro.
-		new_button_state = (control_cmd == CONTROL_CMD_CHECK) ? BST_CHECKED : BST_UNCHECKED;
-		if (!SendMessageTimeout(control_window, BM_GETCHECK, 0, 0, SMTO_ABORTIFHUNG, 2000, &dwResult))
-			goto error;
-		if (dwResult == new_button_state) // It's already in the right state, so don't press it.
-			break;
+		if (aToggle != TOGGLE)
+		{
+			new_button_state = aToggle == TOGGLED_ON ? BST_CHECKED : BST_UNCHECKED;
+			if (!SendMessageTimeout(control_window, BM_GETCHECK, 0, 0, SMTO_ABORTIFHUNG, 2000, &dwResult))
+				goto error;
+			if (dwResult == new_button_state) // It's already in the right state, so don't press it.
+				break;
+		}
 		// MSDN docs for BM_CLICK (and au3 author says it applies to this situation also):
 		// "If the button is in a dialog box and the dialog box is not active, the BM_CLICK message
 		// might fail. To ensure success in this situation, call the SetActiveWindow function to activate
@@ -375,31 +418,27 @@ ResultType Line::Control(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR aTi
 		break;
 	}
 
-	case CONTROL_CMD_ENABLE:
-		EnableWindow(control_window, TRUE);
+	case FID_ControlSetEnabled:
+		EnableWindow(control_window, aToggle == TOGGLE ? !IsWindowEnabled(control_window) : aToggle == TOGGLED_ON);
 		break;
 
-	case CONTROL_CMD_DISABLE:
-		EnableWindow(control_window, FALSE);
-		break;
-
-	case CONTROL_CMD_SHOW:
+	case FID_ControlShow:
 		ShowWindow(control_window, SW_SHOWNOACTIVATE); // SW_SHOWNOACTIVATE has been seen in some example code for this purpose.
 		break;
 
-	case CONTROL_CMD_HIDE:
+	case FID_ControlHide:
 		ShowWindow(control_window, SW_HIDE);
 		break;
 
-	case CONTROL_CMD_STYLE:
-	case CONTROL_CMD_EXSTYLE:
+	case FID_ControlSetStyle:
+	case FID_ControlSetExStyle:
 	{
 		if (!*aValue)
-			return OK; // Seems best not to treat an explicit blank as zero.  Let ErrorLevel tell the story. 
-		int style_index = (control_cmd == CONTROL_CMD_STYLE) ? GWL_STYLE : GWL_EXSTYLE;
+			_f_throw(ERR_PARAM1_MUST_NOT_BE_BLANK); // Seems best not to treat an explicit blank as zero.
+		int style_index = (control_cmd == FID_ControlSetStyle) ? GWL_STYLE : GWL_EXSTYLE;
 		DWORD new_style, orig_style = GetWindowLong(control_window, style_index);
 		// +/-/^ are used instead of |&^ because the latter is confusing, namely that & really means &=~style, etc.
-		if (!_tcschr(_T("+-^"), *aValue))  // | and & are used instead of +/- to allow +/- to have their native function.
+		if (!_tcschr(_T("+-^"), *aValue))
 			new_style = ATOU(aValue); // No prefix, so this new style will entirely replace the current style.
 		else
 		{
@@ -413,7 +452,7 @@ ResultType Line::Control(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR aTi
 			}
 		}
 		if (new_style == orig_style) // v1.0.45.04: Ask for an unnecessary change (i.e. one that is already in effect) should not be considered an error.
-			return g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
+			goto success; // As documented, DoControlDelay is not done for these.
 		// Currently, BM_SETSTYLE is not done when GetClassName() says that the control is a button/checkbox/groupbox.
 		// This is because the docs for BM_SETSTYLE don't contain much, if anything, that anyone would ever
 		// want to change.
@@ -424,42 +463,34 @@ ResultType Line::Control(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR aTi
 			if (GetWindowLong(control_window, style_index) != orig_style) // Even a partial change counts as a success.
 			{
 				InvalidateRect(control_window, NULL, TRUE); // Quite a few styles require this to become visibly manifest.
-				return g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
+				goto success;
 			}
 		}
 		goto error; // As documented, DoControlDelay is not done for these.
 	}
 
-	case CONTROL_CMD_SHOWDROPDOWN:
-	case CONTROL_CMD_HIDEDROPDOWN:
+	case FID_ControlShowDropDown:
+	case FID_ControlHideDropDown:
 		// CB_SHOWDROPDOWN: Although the return value (dwResult) is always TRUE, SendMessageTimeout()
 		// will return failure if it times out:
 		if (!SendMessageTimeout(control_window, CB_SHOWDROPDOWN
-			, (WPARAM)(control_cmd == CONTROL_CMD_SHOWDROPDOWN)
+			, (WPARAM)(control_cmd == FID_ControlShowDropDown)
 			, 0, SMTO_ABORTIFHUNG, 2000, &dwResult))
 			goto error;
 		break;
 
-	case CONTROL_CMD_TABLEFT:
-	case CONTROL_CMD_TABRIGHT: // must be a Tab Control
-		key_count = *aValue ? ATOI(aValue) : 1;
-		vk = (control_cmd == CONTROL_CMD_TABLEFT) ? VK_LEFT : VK_RIGHT;
-		lparam = (LPARAM)(vk_to_sc(vk) << 16);
-		for (int i = 0; i < key_count; ++i)
-		{
-			// DoControlDelay isn't done for every iteration because it seems likely that
-			// the Sleep(0) will take care of things.
-			PostMessage(control_window, WM_KEYDOWN, vk, lparam | 0x00000001);
-			SLEEP_WITHOUT_INTERRUPTION(0); // Au3 uses a Sleep(0).
-			PostMessage(control_window, WM_KEYUP, vk, lparam | 0xC0000001);
-		}
+	case FID_ControlSetTab: // Must be a Tab Control
+		if (aNumber < 1)
+			_f_throw(ERR_PARAM1_INVALID);
+		if (!ControlSetTab(aResultToken, control_window, (DWORD)aNumber - 1))
+			goto error;
 		break;
 
-	case CONTROL_CMD_ADD:
+	case FID_ControlAddItem:
 		if (!*aControl) // Fix for v1.0.46.11: If aControl is blank, the control ID came in via a WinTitle of "ahk_id xxx".
 		{
-			GetClassName(control_window, temp_buf, _countof(temp_buf));
-			aControl = temp_buf;
+			GetClassName(control_window, control_buf, _countof(control_buf));
+			aControl = control_buf;
 		}
 		if (tcscasestr(aControl, _T("Combo"))) // v1.0.42: Changed to strcasestr vs. !strnicmp for TListBox/TComboBox.
 			msg = CB_ADDSTRING;
@@ -472,18 +503,17 @@ ResultType Line::Control(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR aTi
 		if (dwResult == CB_ERR || dwResult == CB_ERRSPACE) // General error or insufficient space to store it.
 			// CB_ERR == LB_ERR
 			goto error;
-		break;
+		g_ErrorLevel->Assign(ERRORLEVEL_NONE);
+		_f_return(dwResult + 1); // Return the one-based index of the new item.
 
-	case CONTROL_CMD_DELETE:
-		if (!*aValue)
-			goto error;
-		control_index = ATOI(aValue) - 1;
+	case FID_ControlDeleteItem:
+		control_index = aNumber - 1;
 		if (control_index < 0)
-			goto error;
+			_f_throw(ERR_PARAM1_INVALID);
 		if (!*aControl) // Fix for v1.0.46.11: If aControl is blank, the control ID came in via a WinTitle of "ahk_id xxx".
 		{
-			GetClassName(control_window, temp_buf, _countof(temp_buf));
-			aControl = temp_buf;
+			GetClassName(control_window, control_buf, _countof(control_buf));
+			aControl = control_buf;
 		}
 		if (tcscasestr(aControl, _T("Combo"))) // v1.0.42: Changed to strcasestr vs. strnicmp for TListBox/TComboBox.
 			msg = CB_DELETESTRING;
@@ -497,16 +527,14 @@ ResultType Line::Control(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR aTi
 			goto error;
 		break;
 
-	case CONTROL_CMD_CHOOSE:
-		if (!*aValue)
-			goto error;
-		control_index = ATOI(aValue) - 1;
-		if (control_index < 0)
-			goto error;
+	case FID_ControlChoose:
+		control_index = aNumber - 1;
+		if (control_index < -1)
+			_f_throw(ERR_PARAM1_INVALID);
 		if (!*aControl) // Fix for v1.0.46.11: If aControl is blank, the control ID came in via a WinTitle of "ahk_id xxx".
 		{
-			GetClassName(control_window, temp_buf, _countof(temp_buf));
-			aControl = temp_buf;
+			GetClassName(control_window, control_buf, _countof(control_buf));
+			aControl = control_buf;
 		}
 		if (tcscasestr(aControl, _T("Combo"))) // v1.0.42: Changed to strcasestr vs. strnicmp for TListBox/TComboBox.
 		{
@@ -527,13 +555,13 @@ ResultType Line::Control(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR aTi
 			goto error;
 		if (msg == LB_SETSEL) // Multi-select, so use the cumulative method.
 		{
-			if (!SendMessageTimeout(control_window, msg, TRUE, control_index, SMTO_ABORTIFHUNG, 2000, &dwResult))
+			if (!SendMessageTimeout(control_window, msg, control_index != -1, control_index, SMTO_ABORTIFHUNG, 2000, &dwResult))
 				goto error;
 		}
 		else // ComboBox or single-select ListBox.
 			if (!SendMessageTimeout(control_window, msg, control_index, 0, SMTO_ABORTIFHUNG, 2000, &dwResult))
 				goto error;
-		if (dwResult == CB_ERR)  // CB_ERR == LB_ERR
+		if (dwResult == CB_ERR && control_index != -1)  // CB_ERR == LB_ERR
 			goto error;
 		if (   !(immediate_parent = GetParent(control_window))   )
 			goto error;
@@ -548,11 +576,11 @@ ResultType Line::Control(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR aTi
 		// Otherwise break and do the end-function processing.
 		break;
 
-	case CONTROL_CMD_CHOOSESTRING:
+	case FID_ControlChooseString:
 		if (!*aControl) // Fix for v1.0.46.11: If aControl is blank, the control ID came in via a WinTitle of "ahk_id xxx".
 		{
-			GetClassName(control_window, temp_buf, _countof(temp_buf));
-			aControl = temp_buf;
+			GetClassName(control_window, control_buf, _countof(control_buf));
+			aControl = control_buf;
 		}
 		if (tcscasestr(aControl, _T("Combo"))) // v1.0.42: Changed to strcasestr vs. strnicmp for TListBox/TComboBox.
 		{
@@ -571,9 +599,9 @@ ResultType Line::Control(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR aTi
 		}
 		else
 			goto error;  // Must be ComboBox or ListBox.
+		DWORD_PTR item_index;
 		if (msg == LB_FINDSTRING) // Multi-select ListBox (LB_SELECTSTRING is not supported by these).
 		{
-			DWORD_PTR item_index;
 			if (!SendMessageTimeout(control_window, msg, -1, (LPARAM)aValue, SMTO_ABORTIFHUNG, 2000, &item_index)
 				|| item_index == LB_ERR
 				|| !SendMessageTimeout(control_window, LB_SETSEL, TRUE, item_index, SMTO_ABORTIFHUNG, 2000, &dwResult)
@@ -581,8 +609,8 @@ ResultType Line::Control(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR aTi
 				goto error;
 		}
 		else // ComboBox or single-select ListBox.
-			if (!SendMessageTimeout(control_window, msg, 1, (LPARAM)aValue, SMTO_ABORTIFHUNG, 2000, &dwResult)
-				|| dwResult == CB_ERR) // CB_ERR == LB_ERR
+			if (!SendMessageTimeout(control_window, msg, 1, (LPARAM)aValue, SMTO_ABORTIFHUNG, 2000, &item_index)
+				|| item_index == CB_ERR) // CB_ERR == LB_ERR
 				goto error;
 		if (   !(immediate_parent = GetParent(control_window))   )
 			goto error;
@@ -594,10 +622,10 @@ ResultType Line::Control(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR aTi
 		if (!SendMessageTimeout(immediate_parent, WM_COMMAND, (WPARAM)MAKELONG(control_id, y_msg)
 			, (LPARAM)control_window, SMTO_ABORTIFHUNG, 2000, &dwResult))
 			goto error;
-		// Otherwise break and do the end-function processing.
-		break;
+		g_ErrorLevel->Assign(ERRORLEVEL_NONE);
+		_f_return(item_index + 1); // Return the index chosen.  Might have some use if the string was ambiguous.
 
-	case CONTROL_CMD_EDITPASTE:
+	case FID_ControlEditPaste:
 		if (!SendMessageTimeout(control_window, EM_REPLACESEL, TRUE, (LPARAM)aValue, SMTO_ABORTIFHUNG, 2000, &dwResult))
 			goto error;
 		// Note: dwResult is not used by EM_REPLACESEL since it doesn't return a value.
@@ -605,26 +633,49 @@ ResultType Line::Control(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR aTi
 	} // switch()
 
 	DoControlDelay;  // Seems safest to do this for all of these commands.
-	return g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
+success:
+	g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
+	_f_return_b(TRUE);
 
 error:
-	return SetErrorLevelOrThrow();
+	g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
+	_f_return_b(FALSE);
 }
 
 
 
-ResultType Line::ControlGet(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR aTitle, LPTSTR aText
-	, LPTSTR aExcludeTitle, LPTSTR aExcludeText)
+BIF_DECL(BIF_ControlGet)
 {
-	Var &output_var = *OUTPUT_VAR;
-	ControlGetCmds control_cmd = ConvertControlGetCmd(aCmd);
-	// Since command names are validated at load-time, this only happens if the command name
-	// was contained in a variable reference.  Since that is very rare, just set ErrorLevel
-	// and return:
-	if (control_cmd == CONTROLGET_CMD_INVALID)
-		goto error;
+	BuiltInFunctionID control_cmd = _f_callee_id;
 
-	HWND target_window = DetermineTargetWindow(aTitle, aText, aExcludeTitle, aExcludeText);
+	// Retrieve and exclude the first parameter, if any.
+	LPTSTR aString;
+	int aNumber;
+	switch (control_cmd)
+	{
+	case FID_ControlFindItem: // String (required).
+	case FID_ControlGetList: // Options (optional).
+		if (aParamCount)
+		{
+			aString = ParamIndexToString(0, _f_number_buf);
+			++aParam;
+			--aParamCount;
+		}
+		else
+			aString = _T("");
+		break;
+	case FID_ControlGetLine: // Line number (required).
+		// Load-time validation ensures aParamCount > 0.
+		aNumber = ParamIndexToInt(0);
+		++aParam;
+		--aParamCount;
+		break;
+	}
+
+	TCHAR control_buf[MAX_NUMBER_SIZE];
+	LPTSTR aControl = ParamIndexToOptionalString(0, control_buf);
+
+	HWND target_window = DetermineTargetWindow(aParam + 1, aParamCount - 1); // It can handle a negative param count.
 	if (!target_window)
 		goto error;
 	HWND control_window = ControlExist(target_window, aControl); // This can return target_window itself for cases such as ahk_id %ControlHWND%.
@@ -635,35 +686,33 @@ ResultType Line::ControlGet(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR 
 	DWORD start, end;
 	UINT msg, x_msg, y_msg;
 	int control_index;
-	TCHAR *cp, *dyn_buf, temp_buf[32];
+	TCHAR *cp, *dyn_buf;
+
+	g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Set default.
 
 	switch(control_cmd)
 	{
-	case CONTROLGET_CMD_CHECKED: //Must be a Button
+	case FID_ControlGetChecked: //Must be a Button
 		if (!SendMessageTimeout(control_window, BM_GETCHECK, 0, 0, SMTO_ABORTIFHUNG, 2000, &dwResult))
 			goto error;
-		output_var.Assign(dwResult == BST_CHECKED);
-		break;
+		_f_return(dwResult == BST_CHECKED);
 
-	case CONTROLGET_CMD_ENABLED:
-		output_var.Assign(IsWindowEnabled(control_window) ? 1 : 0); // Force pure boolean 0/1.
-		break;
+	case FID_ControlGetEnabled:
+		_f_return(IsWindowEnabled(control_window) ? 1 : 0); // Force pure boolean 0/1.
 
-	case CONTROLGET_CMD_VISIBLE:
-		output_var.Assign(IsWindowVisible(control_window) ? 1 : 0); // Force pure boolean 0/1.
-		break;
+	case FID_ControlGetVisible:
+		_f_return(IsWindowVisible(control_window) ? 1 : 0); // Force pure boolean 0/1.
 
-	case CONTROLGET_CMD_TAB: // must be a Tab Control
-		if (!SendMessageTimeout(control_window, TCM_GETCURSEL, 0, 0, SMTO_ABORTIFHUNG, 2000, &index) || index == -1) // Relies on short-circuit boolean order.
+	case FID_ControlGetTab: // must be a Tab Control
+		if (!SendMessageTimeout(control_window, TCM_GETCURSEL, 0, 0, SMTO_ABORTIFHUNG, 2000, &index))
 			goto error;
-		output_var.Assign(index + 1);
-		break;
+		_f_return(index + 1);
 
-	case CONTROLGET_CMD_FINDSTRING:
+	case FID_ControlFindItem:
 		if (!*aControl) // Fix for v1.0.46.11: If aControl is blank, the control ID came in via a WinTitle of "ahk_id xxx".
 		{
-			GetClassName(control_window, temp_buf, _countof(temp_buf));
-			aControl = temp_buf;
+			GetClassName(control_window, control_buf, _countof(control_buf));
+			aControl = control_buf;
 		}
 		if (tcscasestr(aControl, _T("Combo"))) // v1.0.42: Changed to strcasestr vs. strnicmp for TListBox/TComboBox.
 			msg = CB_FINDSTRINGEXACT;
@@ -671,17 +720,16 @@ ResultType Line::ControlGet(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR 
 			msg = LB_FINDSTRINGEXACT;
 		else // Must be ComboBox or ListBox
 			goto error;
-		if (!SendMessageTimeout(control_window, msg, 1, (LPARAM)aValue, SMTO_ABORTIFHUNG, 2000, &index)
+		if (!SendMessageTimeout(control_window, msg, 1, (LPARAM)aString, SMTO_ABORTIFHUNG, 2000, &index)
 			|| index == CB_ERR) // CB_ERR == LB_ERR
 			goto error;
-		output_var.Assign(index + 1);
-		break;
+		_f_return(index + 1);
 
-	case CONTROLGET_CMD_CHOICE:
+	case FID_ControlGetChoice:
 		if (!*aControl) // Fix for v1.0.46.11: If aControl is blank, the control ID came in via a WinTitle of "ahk_id xxx".
 		{
-			GetClassName(control_window, temp_buf, _countof(temp_buf));
-			aControl = temp_buf;
+			GetClassName(control_window, control_buf, _countof(control_buf));
+			aControl = control_buf;
 		}
 		if (tcscasestr(aControl, _T("Combo"))) // v1.0.42: Changed to strcasestr vs. strnicmp for TListBox/TComboBox.
 		{
@@ -696,7 +744,7 @@ ResultType Line::ControlGet(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR 
 			y_msg = LB_GETTEXT;
 		}
 		else // Must be ComboBox or ListBox
-			return output_var.Assign();  // Let ErrorLevel tell the story.
+			goto error;
 		if (!SendMessageTimeout(control_window, msg, 0, 0, SMTO_ABORTIFHUNG, 2000, &index)
 			|| index == CB_ERR  // CB_ERR == LB_ERR.  There is no selection (or very rarely, some other type of problem).
 			|| !SendMessageTimeout(control_window, x_msg, (WPARAM)index, 0, SMTO_ABORTIFHUNG, 2000, &length)
@@ -705,30 +753,27 @@ ResultType Line::ControlGet(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR 
 		// In unusual cases, MSDN says the indicated length might be longer than it actually winds up
 		// being when the item's text is retrieved.  This should be harmless, since there are many
 		// other precedents where a variable is sized to something larger than it winds up carrying.
-		// Set up the var, enlarging it if necessary.  If the output_var is of type VAR_CLIPBOARD,
-		// this call will set up the clipboard for writing:
-		if (output_var.AssignString(NULL, (VarSizeType)length) != OK) // It already displayed the error.
-			return FAIL;
-		if (!SendMessageTimeout(control_window, y_msg, (WPARAM)index, (LPARAM)output_var.Contents()
+		if (!TokenSetResult(aResultToken, NULL, length)) // It already displayed the error.
+			return;
+		aResultToken.symbol = SYM_STRING;
+		if (!SendMessageTimeout(control_window, y_msg, (WPARAM)index, (LPARAM)aResultToken.marker
 			, SMTO_ABORTIFHUNG, 2000, &length)
 			|| length == CB_ERR) // Probably impossible given the way it was called above.  Also, CB_ERR == LB_ERR. Relies on short-circuit boolean order.
 		{
-			output_var.Close();
 			goto error;
 		}
-		output_var.Close(); // Must be called after Assign(NULL, ...) or when Contents() has been altered because it updates the variable's attributes and properly handles VAR_CLIPBOARD.
-		output_var.SetCharLength(length);  // Update to actual vs. estimated length.
-		break;
+		aResultToken.marker_length = length;  // Update to actual vs. estimated length.
+		return;
 
-	case CONTROLGET_CMD_LIST:
+	case FID_ControlGetList:
 		if (!*aControl) // Fix for v1.0.46.11: If aControl is blank, the control ID came in via a WinTitle of "ahk_id xxx".
 		{
-			GetClassName(control_window, temp_buf, _countof(temp_buf));
-			aControl = temp_buf;
+			GetClassName(control_window, control_buf, _countof(control_buf));
+			aControl = control_buf;
 		}
 		//if (!_tcsnicmp(aControl, _T("SysListView32"), 13)) // Tried strcasestr(aControl, "ListView") to get it to work with IZArc's Delphi TListView1, but none of the modes or options worked.
 		if (tcscasestr(aControl, _T("SysListView32"))) // Some users said this works with "WindowsForms10.SysListView32"
-			return ControlGetListView(output_var, control_window, aValue); // It will also set ErrorLevel to "success" if successful.
+			return ControlGetListView(aResultToken, control_window, aString); // It will also set ErrorLevel to "success" if successful.
 		// This is done here as the special LIST sub-command rather than just being built into
 		// ControlGetText because ControlGetText already has a function for ComboBoxes: it fetches
 		// the current selection.  Although ListBox does not have such a function, it seem best
@@ -756,7 +801,7 @@ ResultType Line::ControlGet(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR 
 		{
 			if (!SendMessageTimeout(control_window, x_msg, u, 0, SMTO_ABORTIFHUNG, 5000, &item_length)
 				|| item_length == LB_ERR) // Note that item_length is legitimately zero for a blank item in the list.
-				return output_var.Assign();  // Let ErrorLevel tell the story.
+				goto error;
 			length += item_length;
 		}
 		// In unusual cases, MSDN says the indicated length might be longer than it actually winds up
@@ -764,9 +809,10 @@ ResultType Line::ControlGet(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR 
 		// other precedents where a variable is sized to something larger than it winds up carrying.
 		// Set up the var, enlarging it if necessary.  If the output_var is of type VAR_CLIPBOARD,
 		// this call will set up the clipboard for writing:
-		if (output_var.AssignString(NULL, (VarSizeType)length, true) != OK)
-			return FAIL;  // It already displayed the error.
-		for (cp = output_var.Contents(), length = item_count - 1, u = 0; u < item_count; ++u)
+		if (!TokenSetResult(aResultToken, NULL, length))
+			return;  // It already displayed the error.
+		aResultToken.symbol = SYM_STRING;
+		for (cp = aResultToken.marker, length = item_count - 1, u = 0; u < item_count; ++u)
 		{
 			if (SendMessageTimeout(control_window, y_msg, (WPARAM)u, (LPARAM)cp, SMTO_ABORTIFHUNG, 5000, &item_length)
 				&& item_length != LB_ERR)
@@ -780,24 +826,21 @@ ResultType Line::ControlGet(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR 
 			// Above: In this case, seems better to use \n rather than pipe as default delimiter in case
 			// the listbox/combobox contains any real pipes.
 		}
-		output_var.Close(); // Must be called after Assign(NULL, ...) or when Contents() has been altered because it updates the variable's attributes and properly handles VAR_CLIPBOARD.
-		output_var.SetCharLength(length);  // Update it to the actual length, which can vary from the estimate.
-		break;
+		aResultToken.marker_length = length;  // Update it to the actual length, which can vary from the estimate.
+		return;
 
-	case CONTROLGET_CMD_LINECOUNT:  //Must be an Edit
+	case FID_ControlGetLineCount:  // Must be an Edit
 		// MSDN: "If the control has no text, the return value is 1. The return value will never be less than 1."
 		if (!SendMessageTimeout(control_window, EM_GETLINECOUNT, 0, 0, SMTO_ABORTIFHUNG, 2000, &dwResult))
 			goto error;
-		output_var.Assign(dwResult);
-		break;
+		_f_return(dwResult);
 
-	case CONTROLGET_CMD_CURRENTLINE:
+	case FID_ControlGetCurrentLine:
 		if (!SendMessageTimeout(control_window, EM_LINEFROMCHAR, -1, 0, SMTO_ABORTIFHUNG, 2000, &dwResult))
 			goto error;
-		output_var.Assign(dwResult + 1);
-		break;
+		_f_return(dwResult + 1);
 
-	case CONTROLGET_CMD_CURRENTCOL:
+	case FID_ControlGetCurrentCol:
 	{
 		DWORD_PTR line_number;
 		// The dwResult from the first msg below is not useful and is not checked.
@@ -805,42 +848,33 @@ ResultType Line::ControlGet(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR 
 			|| !SendMessageTimeout(control_window, EM_LINEFROMCHAR, (WPARAM)start, 0, SMTO_ABORTIFHUNG, 2000, &line_number)   )
 			goto error;
 		if (!line_number) // Since we're on line zero, the column number is simply start+1.
-		{
-			output_var.Assign(start + 1);  // +1 to convert from zero based.
-			break; // Fall out of the switch so that ErrorLevel will be set to 0 (no error).
-		}
-		// Au3: Decrement the character index until the row changes.  Difference between this
-		// char index and original is the column:
-		DWORD_PTR start_orig = start;  // Au3: the character index
-		for (;;)
-		{
-			if (!SendMessageTimeout(control_window, EM_LINEFROMCHAR, (WPARAM)start, 0, SMTO_ABORTIFHUNG, 2000, &dwResult))
-				goto error;
-			if (dwResult != line_number)
-				break;
-			--start;
-		}
-		output_var.Assign((int)(start_orig - start));
-		break;
+			_f_return(start + 1);  // +1 to convert from zero based.
+		// The original Au3 function repeatedly decremented the character index and called EM_LINEFROMCHAR
+		// until the row changed. Don't know why; the EM_LINEINDEX method is MUCH faster for long lines and
+		// probably has been available since the dawn of time, though I've only tested it on Windows 10.
+		DWORD_PTR line_start;
+		if (!SendMessageTimeout(control_window, EM_LINEINDEX, (WPARAM)line_number, 0, SMTO_ABORTIFHUNG, 2000, &line_start))
+			goto error;
+		_f_return(start - line_start + 1);
 	}
 
-	case CONTROLGET_CMD_LINE:
-		if (!*aValue)
-			goto error;
-		control_index = ATOI(aValue) - 1;
+	case FID_ControlGetLine:
+	{
+		control_index = aNumber - 1;
 		if (control_index < 0)
-			goto error;
+			_f_throw(ERR_PARAM1_INVALID);
+		// Lexikos: Not sure if the following comment is relevant (does the OS multiply by sizeof(wchar_t)?).
 		// jackieku: 32768 * sizeof(wchar_t) = 65536, which can not be stored in a unsigned 16bit integer.
-		dyn_buf = (LPTSTR)talloca(32767); // 32768 is the size Au3 uses for GETLINE and such.
-		*(LPWORD)dyn_buf = 32767; // EM_GETLINE requires first word of string to be set to its size.
-		if (   !SendMessageTimeout(control_window, EM_GETLINE, (WPARAM)control_index, (LPARAM)dyn_buf, SMTO_ABORTIFHUNG, 2000, &dwResult)
+		TCHAR line_buf[32767];
+		*(LPWORD)line_buf = 32767; // EM_GETLINE requires first word of string to be set to its size.
+		if (   !SendMessageTimeout(control_window, EM_GETLINE, (WPARAM)control_index, (LPARAM)line_buf, SMTO_ABORTIFHUNG, 2000, &dwResult)
 			|| !dwResult   ) // due to the specified line number being greater than the number of lines in the edit control.
 			goto error;
-		dyn_buf[dwResult] = '\0'; // Ensure terminated since the API might not do it in some cases.
-		output_var.Assign(dyn_buf);
-		break;
+		line_buf[dwResult] = '\0'; // Ensure terminated since the API might not do it in some cases.
+		_f_return(line_buf);
+	}
 
-	case CONTROLGET_CMD_SELECTED: // Must be an Edit.
+	case FID_ControlGetSelected: // Must be an Edit.
 		// Note: The RichEdit controls of certain apps such as Metapad don't return the right selection
 		// with this technique.  Au3 has the same problem with them, so for now it's just documented here
 		// as a limitation.
@@ -850,10 +884,7 @@ ResultType Line::ControlGet(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR 
 		// If there is no selection, start and end will be equal, at least in the edit controls I tried it with.
 		// The dwResult from the above is not useful and is not checked.
 		if (start == end) // Unlike Au3, it seems best to consider a blank selection to be a non-error.
-		{
-			output_var.Assign();
-			break; // Fall out of the switch so that ErrorLevel will be set to 0 (no error).
-		}
+			_f_return_empty;
 		// Dynamic memory is used because must get all the control's text so that just the selected region
 		// can be cropped out and assigned to the output variable.  Otherwise, output_var might
 		// have to be sized much larger than it would need to be:
@@ -872,36 +903,29 @@ ResultType Line::ControlGet(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR 
 			goto error;
 		}
 		dyn_buf[end] = '\0'; // Terminate the string at the end of the selection.
-		output_var.Assign(dyn_buf + start);
+		if (TokenSetResult(aResultToken, dyn_buf + start, end - start))
+			aResultToken.symbol = SYM_STRING;
+		//else: it already called Error().
 		free(dyn_buf);
-		break;
+		return;
 
-	case CONTROLGET_CMD_STYLE:
-		// Seems best to always format as hex, since it has more human-readable meaning then:
-		_stprintf(temp_buf, _T("0x%08X"), GetWindowLong(control_window, GWL_STYLE));
-		output_var.Assign(temp_buf);
-		break;
+	case FID_ControlGetStyle:
+		_f_return(GetWindowLong(control_window, GWL_STYLE));
 
-	case CONTROLGET_CMD_EXSTYLE:
-		// Seems best to always format as hex, since it has more human-readable meaning then:
-		_stprintf(temp_buf, _T("0x%08X"), GetWindowLong(control_window, GWL_EXSTYLE));
-		output_var.Assign(temp_buf);
-		break;
+	case FID_ControlGetExStyle:
+		_f_return(GetWindowLong(control_window, GWL_EXSTYLE));
 
-	case CONTROLGET_CMD_HWND:
+	case FID_ControlGetHwnd:
 		// The terminology "HWND" was chosen rather than "ID" to avoid confusion with a control's
 		// dialog ID (as retrieved by GetDlgCtrlID).  This also reserves the word ID for possible
 		// use with the control's Dialog ID in future versions.
-		output_var.AssignHWND(control_window);
-		break;
+		_f_return((size_t)control_window);
 	}
-
-	// Note that ControlDelay is not done for the Get type commands, because it seems unnecessary.
-	return g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
+	ASSERT(FALSE && "Should have returned");
 
 error:
-	output_var.Assign();
-	return SetErrorLevelOrThrow();
+	g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
+	_f_return_empty;
 }
 
 
@@ -1057,24 +1081,24 @@ int CALLBACK FileSelectFolderCallback(HWND hwnd, UINT uMsg, LPARAM lParam, LPARA
 
 
 
-ResultType Line::DirSelect(LPTSTR aRootDir, LPTSTR aOptions, LPTSTR aGreeting)
+BIF_DECL(BIF_DirSelect)
 // Since other script threads can interrupt this command while it's running, it's important that
 // the command not refer to sArgDeref[] and sArgVar[] anytime after an interruption becomes possible.
 // This is because an interrupting thread usually changes the values to something inappropriate for this thread.
 {
-	Var &output_var = *OUTPUT_VAR; // Must be resolved early.  See comment above.
-	if (!output_var.Assign())  // Initialize the output variable.
-		return FAIL;
+	_f_param_string_opt(aRootDir, 0);
+	_f_param_string_opt(aOptions, 1);
+	_f_param_string_opt(aGreeting, 2);
 
 	if (g_nFolderDialogs >= MAX_FOLDERDIALOGS)
 	{
 		// Have a maximum to help prevent runaway hotkeys due to key-repeat feature, etc.
-		return LineError(_T("The maximum number of Folder Dialogs has been reached."));
+		_f_throw(_T("The maximum number of Folder Dialogs has been reached."));
 	}
 
 	LPMALLOC pMalloc;
     if (SHGetMalloc(&pMalloc) != NOERROR)	// Initialize
-		return SetErrorLevelOrThrow();
+		_f_throw(_T("SHGetMalloc")); // Short message since it probably never happens.
 
 	// v1.0.36.03: Support initial folder, which is different than the root folder because the root only
 	// controls the origin point (above which the control cannot navigate).
@@ -1138,6 +1162,10 @@ ResultType Line::DirSelect(LPTSTR aRootDir, LPTSTR aOptions, LPTSTR aGreeting)
 		sntprintf(greeting, _countof(greeting), _T("Select Folder - %s"), g_script->DefaultDialogTitle());
 	bi.lpszTitle = greeting;
 
+	// Bitwise flags:
+	#define FSF_ALLOW_CREATE 0x01
+	#define FSF_EDITBOX      0x02
+	#define FSF_NONEWDIALOG  0x04
 	DWORD options = *aOptions ? ATOI(aOptions) : FSF_ALLOW_CREATE;
 	bi.ulFlags =
 		  ((options & FSF_NONEWDIALOG)    ? 0           : BIF_NEWDIALOGSTYLE) // v1.0.48: Added to support BartPE/WinPE.
@@ -1157,18 +1185,21 @@ ResultType Line::DirSelect(LPTSTR aRootDir, LPTSTR aOptions, LPTSTR aGreeting)
 
 	DIALOG_END
 	if (!lpItemIDList)
+	{
 		// Due to rarity and because there doesn't seem to be any way to detect it,
 		// no exception is thrown when the function fails.  Instead, we just assume
 		// that the user pressed CANCEL (which should not be treated as an error):
-		return g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
+		g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
+		_f_return_empty;
+	}
 
-	*Result = '\0';  // Reuse this var, this time to old the result of the below:
+	*Result = '\0';  // Reuse this var, this time to hold the result of the below:
 	SHGetPathFromIDList(lpItemIDList, Result);
 	pMalloc->Free(lpItemIDList);
 	pMalloc->Release();
 
 	g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
-	return output_var.Assign(Result);
+	_f_return(Result);
 }
 
 ResultType Line::FileGetShortcut(LPTSTR aShortcutFile) // Credited to Holger <Holger.Kotsch at GMX de>.
@@ -1379,16 +1410,19 @@ ResultType Line::FileRecycleEmpty(LPTSTR aDriveLetter)
 
 
 
-ResultType Line::FileGetVersion(LPTSTR aFilespec)
+BIF_DECL(BIF_FileGetVersion)
 {
-	OUTPUT_VAR->Assign(); // Init to be blank, in case of failure.
+	_f_param_string_opt_def(aFilespec, 0, (g->mLoopFile ? g->mLoopFile->cFileName : _T("")));
 
-	if (!aFilespec || !*aFilespec)
-		return LineError(ERR_PARAM1_REQUIRED);  // Since this is probably not what the user intended.
+	if (!*aFilespec)
+		_f_throw(ERR_PARAM1_MUST_NOT_BE_BLANK);  // Since this is probably not what the user intended.
 
 	DWORD dwUnused, dwSize;
 	if (   !(dwSize = GetFileVersionInfoSize(aFilespec, &dwUnused))   )  // No documented limit on how large it can be, so don't use _alloca().
-		return SetErrorsOrThrow(true);
+	{
+		Script::SetErrorLevels(true);
+		_f_return_empty;
+	}
 
 	BYTE *pInfo = (BYTE*)malloc(dwSize);  // Allocate the size retrieved by the above.
 	VS_FIXEDFILEINFO *pFFI;
@@ -1401,20 +1435,20 @@ ResultType Line::FileGetVersion(LPTSTR aFilespec)
 	{
 		g->LastError = GetLastError();
 		free(pInfo);
-		return SetErrorLevelOrThrow();
+		g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
+		_f_return_empty;
 	}
 
 	// extract the fields you want from pFFI
 	UINT iFileMS = (UINT)pFFI->dwFileVersionMS;
 	UINT iFileLS = (UINT)pFFI->dwFileVersionLS;
-	TCHAR version_string[128];  // AutoIt3: 43+1 is the maximum size, but leave a little room to increase confidence.
-	sntprintf(version_string, _countof(version_string), _T("%u.%u.%u.%u")
+	sntprintf(_f_retval_buf, _f_retval_buf_size, _T("%u.%u.%u.%u")
 		, (iFileMS >> 16), (iFileMS & 0xFFFF), (iFileLS >> 16), (iFileLS & 0xFFFF));
 
 	free(pInfo);
 
-	SetErrorsOrThrow(false, 0); // Indicate success.
-	return OUTPUT_VAR->Assign(version_string);
+	Script::SetErrorLevels(false, 0); // Indicate success.
+	_f_return_p(_f_retval_buf);
 }
 
 
