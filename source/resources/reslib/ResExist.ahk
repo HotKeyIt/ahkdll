@@ -7,9 +7,12 @@ If (hSnap:=CreateToolhelp32Snapshot(TH32CS_SNAPMODULE,GetCurrentProcessId())) &&
   while (A_Index=1 || Module32NextW(hSnap,me32[]))
     if StrGet(me32.szExePath[""])=dll && hModule:= me32.modBaseAddr["",""]
       break
-if hSnap,CloseHandle(hSnap)
-if !hModule && !hModule:=LoadLibrary(fullpath),  return 0
+if hSnap
+  CloseHandle(hSnap)
+if !hModule && !hModule:=LoadLibrary(fullpath)
+  return 0
 hResource:=lang=""?FindResourceW(hModule,name,type):FindResourceExW(hModule,name,type,lang)
-if (hModule != me32.modBaseAddr["",""]),FreeLibrary(hModule)
+if (hModule != me32.modBaseAddr["",""])
+  FreeLibrary(hModule)
 return !!hResource
 }

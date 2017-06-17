@@ -1,5 +1,6 @@
 ﻿EnvUpdate(){
 	static HWND_BROADCAST,WM_SETTINGCHANGE
-	if !HWND_BROADCAST,  HWND_BROADCAST:=0xFFFF,WM_SETTINGCHANGE:=0x001A,Environment:="Environment"
-	SendMessage % WM_SETTINGCHANGE, 0,% &Environment,, ahk_id %HWND_BROADCAST%
+	if !HWND_BROADCAST
+    HWND_BROADCAST:=0xFFFF,WM_SETTINGCHANGE:=0x001A,Environment:="Environment"
+	SendMessage WM_SETTINGCHANGE, 0, &Environment,, "ahk_id " HWND_BROADCAST
 }

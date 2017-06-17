@@ -121,6 +121,7 @@ GuiControls GuiControlType::ConvertTypeName(LPTSTR aTypeName)
 			return (GuiControls)i;
 	if (!_tcsicmp(aTypeName, _T("DropDownList"))) return GUI_CONTROL_DROPDOWNLIST;
 	if (!_tcsicmp(aTypeName, _T("Picture"))) return GUI_CONTROL_PIC;
+	if (!_tcsicmp(aTypeName, _T("Gui"))) return GUI_CONTROL_GUI;
 	return GUI_CONTROL_INVALID;
 }
 

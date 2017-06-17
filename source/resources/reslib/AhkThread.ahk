@@ -1,11 +1,13 @@
 ﻿ahkthread_free(obj:=""){
   static objects
-  if !objects,  objects:=[]
-  if obj="",    objects:=[]
+  if !objects
+    objects:=[]
+  if obj=""
+    objects:=[]
   else if !IsObject(obj)
-	return objects
+    return objects
   else If objects.HasKey(obj)
-	objects.Remove(obj)
+    objects.Remove(obj)
 }
 ahkthread_release(o){
   o.ahkterminate(o.timeout?o.timeout:0),MemoryFreeLibrary(o[""])

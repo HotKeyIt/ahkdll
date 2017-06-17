@@ -21,7 +21,7 @@ var:=Struct("ObjByRef(_AhkVar)")
 If !this.HasKey("`a" key){
 If !IsByRef(value)
 return
-else return var[]:=getvar(value),ObjRawSet(this,"`a" key,var.AliasFor["",""]),""
+else return (var[]:=getvar(value),ObjRawSet(this,"`a" key,var.AliasFor["",""]),"")
 }
 Alias(thisvar,this["`a" key])
 return thisvar:=value

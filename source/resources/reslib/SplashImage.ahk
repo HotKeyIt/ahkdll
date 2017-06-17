@@ -26,7 +26,7 @@ SplashImage_OnMessage(wParam,lParam,msg,hwnd){
     ,Purple:=0x800080,Fuchsia:=0xFF00FF,Green:=0x008000,Lime:=0x00FF00,Olive:=0x008080
     ,Yellow:=0x00FFFF,Navy:=0x800000,Blue:=0xFF0000,Teal:=0x808000,Aqua:=0xFFFF00,Default:=CLR_DEFAULT
     ,g_SplashImage:=SplashImage_Struct(),RECT:="LONG left,LONG top,LONG right,LONG bottom",client_rect:=Struct(RECT), draw_rect:=Struct(RECT), main_rect:=Struct(RECT), work_rect:=Struct(RECT)
-  Loop % MAX_SPLASHIMAGE_WINDOWS
+  Loop MAX_SPLASHIMAGE_WINDOWS
     if (g_SplashImage[i:=A_Index].hwnd == hwnd)
       break
   if (i == MAX_SPLASHIMAGE_WINDOWS){ ; It's not a progress window either.
@@ -128,7 +128,7 @@ SplashImage(aImageFile,aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFon
         ,iconinfo:=Struct("BOOL fIcon;DWORD xHotspot;DWORD yHotspot;HBITMAP hbmMask;HBITMAP hbmColor") ;ICONINFO
         ,RECT:="LONG left,LONG top,LONG right,LONG bottom",client_rect:=Struct(RECT), draw_rect:=Struct(RECT), main_rect:=Struct(RECT), work_rect:=Struct(RECT)
         ,bmp:=Struct("LONG bmType;LONG bmWidth;LONG bmHeight;LONG bmWidthBytes;WORD bmPlanes;WORD bmBitsPixel;LPVOID bmBits") ;BITMAP
-        ,initGui:=Gui("SPLASH_GUI_Init:Show","HIDE") Gui("SPLASH_GUI_Init:Destroy") ; required to init ahk_class AutoHotkeyGUI
+        ,initGui:=GuiCreate(),initGuiDestroy:=initGui.Destroy() ; required to init ahk_class AutoHotkeyGUI
         ,_ttoi:=DynaCall("msvcrt\_wtoi","t==t")
   ErrorLevel := 0    ; Set default
   window_index := 1  ;  Set the default window to operate upon (the first).
@@ -152,7 +152,7 @@ SplashImage(aImageFile,aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFon
             image_filename := image_filename_omit_leading_whitespace
           window_index := window_number_str
           if (window_index < 0 || window_index >= MAX_SPLASHIMAGE_WINDOWS){
-            MsgBox,% "Max window number is " MAX_SPLASHIMAGE_WINDOWS ".",Error in Function %A_ThisFunc%,0
+            MsgBox("Max window number is " MAX_SPLASHIMAGE_WINDOWS ".","Error in Function " A_ThisFunc,0)
             ErrorLevel:=-1
             return
           }

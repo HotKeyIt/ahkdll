@@ -6,7 +6,7 @@
     ,WS_CHILD:=1073741824,WS_VISIBLE:=268435456,SS_CENTER:=1,FW_NORMAL:=400,DEFAULT_GUI_FONT:=17,LOGPIXELSY:=90,DEFAULT_CHARSET:=1
     ,OUT_TT_PRECIS:=4,CLIP_DEFAULT_PRECIS:=0,PROOF_QUALITY:=2,FF_DONTCARE:=0,WM_SETFONT:=48,SW_SHOWNOACTIVATE:=4
     ,g_hWndSplash,g_hFontSplash,pt:=Struct("x,y"),rect:=Struct("left,top,right,bottom")
-    ,Gui("Splash_GUI_Init:Show","HIDE") ; required to init ahk_class AutoHotkeyGUI
+    ,GuiCreate().Destroy() ; required to init ahk_class AutoHotkeyGUI
 	if (aWidth aHeight aTitle aText = ""){
 		if (g_hWndSplash && IsWindow(g_hWndSplash))
 			DestroyWindow(g_hWndSplash)
@@ -73,7 +73,7 @@
 	; my system.  Update: Might as well do it since it's a little nicer this way
 	; (the text appears more quickly when the command after the splash is something
 	; that might keep our thread tied up and unable to check messages).
-	Sleep,-1
+	Sleep(-1)
 	; UpdateWindow() would probably achieve the same effect as the above, but it feels safer to do
 	; the above because it ensures that our message queue is empty prior to returning to our caller.
 	; return 0

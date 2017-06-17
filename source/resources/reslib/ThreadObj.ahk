@@ -24,10 +24,10 @@ Class _ThreadClass {
 	PostCall(func,p*){
 		static postcall,params
 		postcall:=func,params:=p
-		SetTimer,PostCall,-1
+		SetTimer "PostCall",-1
 		return
 		PostCall:
-			MsgBox % %postcall%(params*)
+			MsgBox %postcall%(params*)
 		return
 	}
 	Call(func,p*){
@@ -48,20 +48,20 @@ Class _ThreadClass {
 	AddFile(file, execute := 0){
 		return addFile(file, execute)
 	}
-	GoTo(label){
+	GoToLabel(label){
 		if !IsLabel(label)
 			return 0
-		SetTimer % label,-1
+		SetTimer label,-1
 		Return 1
 	}
-	GoSub(label){
+	GoSubLabel(label){
 		if !IsLabel(label)
 			return 0
-		GoSub % label
+		GoSub(label)
 		return 1
 	}
 	ExitApp(){
-		SetTimer,ExitApp,-1
+		SetTimer "ExitApp",-1
 		Return
 		ExitApp:
 		ExitApp

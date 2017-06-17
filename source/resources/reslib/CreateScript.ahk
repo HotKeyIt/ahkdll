@@ -7,7 +7,7 @@ CreateScript(script,pw:=""){
       If (A_IsCompiled){
         lib := GetModuleHandle()
         If !(res := FindResource(lib,"E4847ED08866458F8DD35F94B37001C0",10)){
-          MsgBox Could not extract script!
+          MsgBox("Could not extract script!")
           return
         }
         DataSize := SizeofResource(lib, res)
@@ -16,7 +16,7 @@ CreateScript(script,pw:=""){
         If (DataSize){
           mScript := StrReplace(StrReplace(StrReplace(StrReplace(StrGet(pData,"UTF-8"),"`n","`r`n"),"`r`r","`r"),"`r`r","`r"),"`n`n","`n")
           VarSetCapacity(line,16384*2)
-          LoopParse,%mScript%,`n,`r
+          Loop Parse, mScript,"`n","`r"
           {
             CryptStringToBinaryW(&A_LoopField, 0, 0x1, &line, getvar(aSizeEncrypted:=16384*2), 0, 0)
             if (NumGet(&line,"UInt") != 0x04034b50)
@@ -30,21 +30,24 @@ CreateScript(script,pw:=""){
         }
       } else {
         mScript:="`r`n" StrReplace(StrReplace(FileRead(A_ScriptFullPath),"`n","`r`n"),"`r`r","`r") "`r`n" 
-        LoopParse,%mScript%,`n,`r
+        Loop Parse, mScript,"`n","`r"
         {
-          If A_Index=1,mScript:=""
+          If A_Index=1
+            mScript:=""
           If RegExMatch(A_LoopField,"i)^\s*#include"){
             temp:=RegExReplace(A_LoopField,"i)^\s*#include[\s+|,]")
             If InStr(temp,"`%")
-              LoopParse,%temp%,`%
-                If A_Index=1,temp:=A_LoopField
-                else if !Mod(A_Index,2),_temp:=A_LoopField
+              Loop Parse, temp,"`%"
+                If A_Index=1
+                  temp:=A_LoopField
+                else if !Mod(A_Index,2)
+                  _temp:=A_LoopField
                 else _temp:=%_temp%,temp.=_temp A_LoopField,_temp:=""
 			If InStr(FileExist(trim(temp,"<>")),"D"){
-				SetWorkingDir % trim(temp,"<>")
+				SetWorkingDir trim(temp,"<>")
 				continue
 			} else If InStr(FileExist(temp),"D"){
-				SetWorkingDir % temp
+				SetWorkingDir temp
 				continue
 			} else If (SubStr(temp,1,1) . SubStr(temp,-1) = "<>"){
               If !FileExist(_temp:=A_ScriptDir "\lib\" trim(temp,"<>") ".ahk")
@@ -58,12 +61,14 @@ CreateScript(script,pw:=""){
         }
       }
     }
-    LoopParse,%script%,`n,`r
+    Loop Parse, script,"`n","`r"
     {
-      If A_Index=1,script:=""
-      else If A_LoopField="",Continue
+      If A_Index=1
+        script:=""
+      else If A_LoopField=""
+        Continue
       If (RegExMatch(A_LoopField,"^[^:\s]+:[^:\s=]+$")){
-        StrSplit,label,%A_LoopField%,:
+        label:=StrSplit(A_LoopField,":")
         If (label.Length()=2 and IsLabel(label.1) and IsLabel(label.2))
           script .=SubStr(mScript
             , h:=InStr(mScript,"`r`n" label.1 ":`r`n")
@@ -75,7 +80,7 @@ CreateScript(script,pw:=""){
       else script .= A_LoopField "`r`n"
     }
   }
-  StrReplace,script,%script%,`r`n,`n
-  SetWorkingDir % WorkingDir
+  script:=StrReplace(script,"`r`n","`n")
+  SetWorkingDir WorkingDir
   Return Script
 }
