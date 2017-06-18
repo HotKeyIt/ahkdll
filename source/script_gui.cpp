@@ -2484,7 +2484,7 @@ ResultType GuiType::Create(LPTSTR aTitle)
 		wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
 		wc.cbWndExtra = DLGWINDOWEXTRA;  // So that it will be the type that uses DefDlgProc() vs. DefWindowProc().
 #ifdef _USRDLL  //Ignore errors since mostly AutoHotkey.exe alredy registered the class
-		RegisterClassEx(&wc);
+		sGuiWinClass = RegisterClassEx(&wc);
 #else
 		sGuiWinClass = RegisterClassEx(&wc);
 		if (!sGuiWinClass && g_MainThreadID == g_ThreadID)

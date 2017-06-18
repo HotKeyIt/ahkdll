@@ -613,7 +613,7 @@ Script::~Script() // Destructor.
 	// HotKeyIt H1 destroy script for ahkTerminate and ahkReload and ExitApp for dll
 
 	//reset count for OnMessage
-	if (g_MsgMonitor->Count())
+	if (g_MsgMonitor  && g_MsgMonitor->Count())
 		g_MsgMonitor->RemoveAll();
 	delete g_MsgMonitor;
 	g_MsgMonitor = NULL;
