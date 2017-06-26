@@ -5222,7 +5222,10 @@ UTF8ToASCII(unsigned char* out, size_t outlen,const unsigned char* in, size_t in
 		_tcscpy(aLocalePath + GetSystemDirectory(aLocalePath, MAX_PATH), "\\C_");
 		_tcscpy(aLocalePath + _tcslen(aLocalePath), ITOA(aACP, aACPBuf));
 		_tcscpy(aLocalePath + _tcslen(aLocalePath), ".NLS");
+		PVOID oldValue;
+		Wow64DisableWow64FsRedirection(&oldValue);
 		HANDLE hLocaleFile = CreateFile(aLocalePath, GENERIC_READ, FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, NULL, NULL);
+		Wow64RevertWow64FsRedirection(oldValue);
 		if (hLocaleFile != INVALID_HANDLE_VALUE)
 		{
 			typedef struct {
