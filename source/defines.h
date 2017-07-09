@@ -887,6 +887,7 @@ struct global_struct
 	DerefType* ExcptDeref;
 	bool InTryBlock;
 	BYTE ZipCompressionLevel;
+	Func* CurrentMacro;
 };
 
 inline void global_maximize_interruptibility(global_struct &g)
@@ -924,6 +925,7 @@ inline void global_clear_state(global_struct &g)
 	g.mLoopField = NULL;
 	g.ThrownToken = NULL;
 	g.InTryBlock = false;
+	g.CurrentMacro = NULL;
 }
 
 inline void global_init(global_struct &g)

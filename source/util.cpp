@@ -2925,6 +2925,8 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 		*(_tcschr(aFuncName, ',')) = '\0';
 	ltrim(parameter);
 	int insert_pos;
+	if (!*aFuncName)
+		return g_script->ScriptError(_T("Empty function name, make sure to use space after #DllImport not ','."), parameter); // Seems more descriptive than "Function already defined."
 	Func *found_func = g_script->FindFunc(aFuncName, _tcslen(aFuncName), &insert_pos);
 	if (found_func)
 		return g_script->ScriptError(_T("Duplicate function definition."), aFuncName); // Seems more descriptive than "Function already defined."

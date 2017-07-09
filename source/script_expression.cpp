@@ -280,6 +280,17 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 				this_token.marker_length = result_length;
 				this_token.symbol = SYM_STRING;
 			} // if (this_token.symbol == SYM_DYNAMIC)
+			else if (this_token.symbol == SYM_VAR && g->CurrentMacro)
+			{
+				bool aVarIsParam = false;
+				LPTSTR aVarName = this_token.var->mName;
+				FuncParam *aFuncParam = g->CurrentMacro->mParam;
+				for (int aParamIndex = g->CurrentMacro->mParamCount; aParamIndex; aParamIndex--)
+					if (!_tcscmp(aVarName, aFuncParam[aParamIndex - 1].var->mName) && (aVarIsParam = true))
+						break;
+				if (!aVarIsParam)
+					this_token.var = g_script->FindOrAddVar(this_token.var->mName);
+			}
 			goto push_this_token;
 		} // if (IS_OPERAND(this_token.symbol))
 
@@ -2205,14 +2216,40 @@ VarSizeType Line::GetExpandedArgSize(Var *aArgVar[])
 			// Pre-resolved output vars should never be included in the space calculation,
 			// but we do need to store the var reference in aArgVar for our caller.
 			ASSERT(!*this_arg.text);
-			aArgVar[i] = VAR(this_arg);
+			if (g->CurrentMacro)
+			{
+				bool aVarIsParam = false;
+				LPTSTR aVarName = VAR(mArg[0])->mName;
+				FuncParam *aFuncParam = g->CurrentMacro->mParam;
+				for (int aParamIndex = g->CurrentMacro->mParamCount; aParamIndex; aParamIndex--)
+					if (!_tcscmp(aVarName, aFuncParam[aParamIndex - 1].var->mName) && (aVarIsParam = true))
+						break;
+				aArgVar[i] = !aVarIsParam ? g_script->FindOrAddVar(aVarName) : VAR(this_arg);
+			}
+			else
+			{
+				aArgVar[i] = VAR(this_arg);
+			}
 			continue;
 		}
 
 		if (this_arg.type == ARG_TYPE_INPUT_VAR)
 		{
 			ASSERT(!*this_arg.text);
-			the_only_var_of_this_arg = VAR(this_arg);
+			if (g->CurrentMacro)
+			{
+				bool aVarIsParam = false;
+				LPTSTR aVarName = VAR(mArg[0])->mName;
+				FuncParam *aFuncParam = g->CurrentMacro->mParam;
+				for (int aParamIndex = g->CurrentMacro->mParamCount; aParamIndex; aParamIndex--)
+					if (!_tcscmp(aVarName, aFuncParam[aParamIndex - 1].var->mName) && (aVarIsParam = true))
+						break;
+				the_only_var_of_this_arg = !aVarIsParam ? g_script->FindOrAddVar(aVarName) : VAR(this_arg);
+			}
+			else
+			{
+				the_only_var_of_this_arg = VAR(this_arg);
+			}
 			aArgVar[i] = the_only_var_of_this_arg; // For now, this is done regardless of whether it must be dereferenced.
 			if (   !(result = ArgMustBeDereferenced(the_only_var_of_this_arg, i, aArgVar))   )
 				return VARSIZE_ERROR;
@@ -2274,6 +2311,20 @@ ResultType Line::ArgMustBeDereferenced(Var *aVar, int aArgIndex, Var *aArgVar[])
 	for (int i = 0; i < mArgc; ++i)
 		if (mArg[i].type == ARG_TYPE_OUTPUT_VAR) // Implies i != aArgIndex, since this function is not called for output vars.
 		{
+			if (g->CurrentMacro)
+			{
+				bool aVarIsParam = false;
+				LPTSTR aVarName = VAR(mArg[0])->mName;
+				FuncParam *aFuncParam = g->CurrentMacro->mParam;
+				for (int aParamIndex = g->CurrentMacro->mParamCount; aParamIndex; aParamIndex--)
+					if (!_tcscmp(aVarName, aFuncParam[aParamIndex - 1].var->mName) && (aVarIsParam = true))
+						break;
+				output_var = (i < aArgIndex) ? aArgVar[i] : mArg[i].is_expression ? NULL : (!aVarIsParam ? g_script->FindOrAddVar(VAR(mArg[i])->mName) : VAR(mArg[i])); // aArgVar: See top of this function for comments.
+			}
+			else
+			{
+				output_var = VAR(mArg[0]);
+			}
 			output_var = (i < aArgIndex) ? aArgVar[i] : mArg[i].is_expression ? NULL : VAR(mArg[i]); // aArgVar: See top of this function for comments.
 			if (!output_var) // Var hasn't been resolved yet.  To be safe, we must assume deref is required.
 				return CONDITION_TRUE;

@@ -2282,7 +2282,7 @@ _thread_local HWND GuiType::sTreeWithEditInProgress = NULL;
 
 
 
-void GuiType::Destroy()
+void GuiType::Destroy(bool aExitIfNotPersistent)
 // Destroys the window and performs related cleanup which is only necessary for
 // a successfully constructed Gui, then calls Dispose() for the remaining cleanup.
 {
@@ -2365,7 +2365,8 @@ void GuiType::Destroy()
 	// IT IS NOW UNSAFE TO REFER TO ANY NON-STATIC MEMBERS OF THIS OBJECT.
 
 	// If this Gui was the last thing keeping the script running, exit the script:
-	g_script->ExitIfNotPersistent(EXIT_DESTROY);
+	if (aExitIfNotPersistent)
+		g_script->ExitIfNotPersistent(EXIT_DESTROY);
 }
 
 void GuiType::Dispose()

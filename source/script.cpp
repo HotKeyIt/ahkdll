@@ -643,7 +643,7 @@ Script::~Script() // Destructor.
 	{
 		GuiType* gui;
 		while (gui = g_firstGui) // Destroy any remaining GUI windows (due to e.g. circular references). Also: assignment.
-			gui->Destroy();
+			gui->Destroy(false);
 		g_firstGui = NULL;
 		g_lastGui = NULL;
 	}
@@ -2273,6 +2273,11 @@ bool IsFunction(LPTSTR aBuf, bool *aPendingFunctionHasBrace = NULL)
 // *aPendingFunctionHasBrace is set to true if a brace is present at the end, or false otherwise.
 // In addition, any open-brace is removed from aBuf in this mode.
 {
+	if (!_tcsnicmp(aBuf, _T("macro "), 6))
+	{
+		aBuf += 6;
+	}
+
 	LPTSTR action_end = StrChrAny(aBuf, EXPR_ALL_SYMBOLS EXPR_ILLEGAL_CHARS);
 	// Can't be a function definition or call without an open-parenthesis as first char found by the above.
 	// In addition, if action_end isn't NULL, that confirms that the string in aBuf prior to action_end contains
@@ -6211,6 +6216,8 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 			}
 			else if (!_tcsnicmp(aLineText, _T("Global"), 6))
 			{
+				if (g->CurrentFunc && g->CurrentFunc->mIsMacro)
+					return ScriptError(_T("Global variables are not supported for macros."), aLineText); // Vague error since so rare.
 				cp = aLineText + 6; // The character after the declaration word.
 				declare_type = g->CurrentFunc ? VAR_DECLARE_GLOBAL : VAR_DECLARE_SUPER_GLOBAL;
 			}
@@ -6223,6 +6230,8 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 				}
 				else if (!_tcsnicmp(aLineText, _T("Static"), 6)) // Static also implies local (for functions that default to global).
 				{
+					if (g->CurrentFunc && g->CurrentFunc->mIsMacro)
+						return ScriptError(_T("Static variables are not supported for macros."), aLineText); // Vague error since so rare.
 					cp = aLineText + 6; // The character after the declaration word.
 					declare_type = VAR_DECLARE_STATIC;
 				}
@@ -9052,6 +9061,12 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 	if (!aFuncNameLength) // Caller didn't specify, so use the entire string.
 		aFuncNameLength = _tcslen(aFuncName);
 
+	if (!_tcsnicmp(aFuncName, _T("macro "), 6))
+	{
+		aFuncName += 6;
+		aFuncNameLength -= 6;
+	}
+
 	if (apInsertPos) // L27: Set default for maintainability.
 		*apInsertPos = -1;
 
@@ -9161,8 +9176,21 @@ Func *Script::AddFunc(LPCTSTR aFuncName, size_t aFuncNameLength, bool aIsBuiltIn
 // Returns the address of the new function or NULL on failure.
 // The caller must already have verified that this isn't a duplicate function.
 {
+	bool aIsMacro = false;
 	if (!aFuncNameLength) // Caller didn't specify, so use the entire string.
 		aFuncNameLength = _tcslen(aFuncName);
+
+	if (!_tcsnicmp(aFuncName, _T("macro "), 6))
+	{
+		if (aClassObject)
+		{
+			ScriptError(_T("Macro is not supported for Methods."), aFuncName);
+			return NULL;
+		}
+		aIsMacro = true;
+		aFuncName += 6;
+		aFuncNameLength -= 6;
+	}
 
 	if (aFuncNameLength > MAX_VAR_NAME_LENGTH) // FindFunc(), BIF_OnMessage() and perhaps others rely on this limit being enforced.
 	{
@@ -9225,6 +9253,9 @@ Func *Script::AddFunc(LPCTSTR aFuncName, size_t aFuncNameLength, bool aIsBuiltIn
 		// Also add it to the script's list of functions, to support #Warn LocalSameAsGlobal
 		// and automatic cleanup of objects in static vars on program exit.
 	}
+	
+	if (aIsMacro)
+		the_new_func->mIsMacro = true;
 
 	if (mFuncCount == mFuncCountMax)
 	{
@@ -14266,7 +14297,20 @@ ResultType Line::Perform()
 			//		x := "quoted literal string"
 			//		x := normal_var
 			ASSERT(!*mArg[0].text); // Pre-resolved.  Dynamic assignments are handled as ACT_EXPRESSION.
-			output_var = VAR(mArg[0]);
+			if (g.CurrentMacro)
+			{
+				bool aVarIsParam = false;
+				LPTSTR aVarName = VAR(mArg[0])->mName;
+				FuncParam *aFuncParam = g.CurrentMacro->mParam;
+				for (int aParamIndex = g.CurrentMacro->mParamCount; aParamIndex; aParamIndex--)
+					if (!_tcscmp(aVarName, aFuncParam[aParamIndex - 1].var->mName) && (aVarIsParam = true))
+						break;
+				output_var = !aVarIsParam ? g_script->FindOrAddVar(VAR(mArg[0])->mName) : VAR(mArg[0]);
+			}
+			else
+			{
+				output_var = VAR(mArg[0]);
+			}
 			// HotKeyIt override routine for manually added BuildIn variables
 			// if (!(mArg[1].postfix->symbol == SYM_VAR && (mArg[1].postfix->var->mType == VAR_BUILTIN)))
 			return output_var->Assign(*mArg[1].postfix);
