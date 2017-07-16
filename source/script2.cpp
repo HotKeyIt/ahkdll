@@ -1053,12 +1053,18 @@ ResultType Line::PerformWait()
 				// currently active thread is the one that's still waiting for the window).
 				if (g->ListLinesIsEnabled)
 				{
-					sLog[sLogNext] = this;
-					sLogTick[sLogNext++] = start_time; // Store a special value so that Line::LogToText() can report that its "still waiting" from earlier.
-					if (sLogNext >= LINE_LOG_SIZE)
-						sLogNext = 0;
-					// The lines above are the similar to those used in ExecUntil(), so the two should be
-					// maintained together.
+					// ListLines is enabled in this thread, but if it was disabled in the interrupting thread,
+					// the very last log entry will be ours.  In that case, we don't want to duplicate it.
+					int previous_log_index = (sLogNext ? sLogNext : LINE_LOG_SIZE) - 1; // Wrap around if needed (the entry can be NULL in that case).
+					if (sLog[previous_log_index] != this || sLogTick[previous_log_index] != start_time) // The previously logged line was not this one, or it was added by the interrupting thread (different start_time).
+					{
+						sLog[sLogNext] = this;
+						sLogTick[sLogNext++] = start_time; // Store a special value so that Line::LogToText() can report that its "still waiting" from earlier.
+						if (sLogNext >= LINE_LOG_SIZE)
+							sLogNext = 0;
+						// The lines above are the similar to those used in ExecUntil(), so the two should be
+						// maintained together.
+					}
 				}
 			}
 		}
@@ -19099,21 +19105,23 @@ BIF_DECL(BIF_Exception)
 	{
 #ifdef CONFIG_DEBUGGER
 		int offset = TokenIsNumeric(*aParam[1]) ? ParamIndexToInt(1) : 0;
-		if (offset < 0 && offset >= (g_Debugger.mStack.mBottom - g_Debugger.mStack.mTop)) // (mBottom - mTop) is safe against overflow, unlike (se >= mBottom). 
+		DbgStack::Entry *se = g_Debugger.mStack.mTop;
+		while (--se >= g_Debugger.mStack.mBottom)
 		{
-			DbgStack::Entry *se = g_Debugger.mStack.mTop + offset;
-			// Self-contained loop to ensure the entry belongs to the current thread
-			// (below also relies on this loop to verify se[1].type != SE_Thread):
-			while (++offset <= 0 && g_Debugger.mStack.mTop[offset].type != DbgStack::SE_Thread); // Relies on short-circuit evaluation.
-			if (offset == 1)
+			if (se->type == DbgStack::SE_Thread)
+				break; // Never return stack locations in other threads.
+			if (se->type == DbgStack::SE_Func && se->func->mIsBuiltIn)
+				continue; // Skip built-in functions such as Op_ObjInvoke (common).
+			if (++offset == 0)
 			{
-				line = se->line;
+				line = se > g_Debugger.mStack.mBottom ? se[-1].line : se->line;
 				// se->line contains the line at the given offset from the top of the stack.
 				// Rather than returning the name of the function or sub which contains that
 				// line, return the name of the function or sub which that line called.
 				// In other words, an offset of -1 gives the name of the current function and
 				// the file and number of the line which it was called from.
-				what = se[1].type == DbgStack::SE_Func ? se[1].func->mName : se[1].sub->mName;
+				what = se->type == DbgStack::SE_Func ? se->func->mName : se->sub->mName;
+				break;
 			}
 		}
 #endif

@@ -1318,6 +1318,8 @@ bool DoesFilePatternExist(LPTSTR aFilePattern, DWORD *aFileAttr, DWORD aRequired
     else
 	{
 		DWORD attr = GetFileAttributes(aFilePattern);
+		if (aRequiredAttr && (attr & aRequiredAttr) != aRequiredAttr)
+			return false;
 		if (aFileAttr)
 			*aFileAttr = attr;
 		return attr != 0xFFFFFFFF;

@@ -7671,21 +7671,22 @@ ResultType Script::ParseOperands(LPTSTR aArgText, LPTSTR aArgMap, DerefType *aDe
 			{
 				// v1.0.46.11: This item appears to be a scientific-notation literal with the OPTIONAL +/- sign PRESENT on the exponent (e.g. 1.0e+001), so check that before checking if it's a variable name.
 				*op_end = orig_char; // Undo the temporary termination.
+				TCHAR *n_end = op_end; // Don't change op_end yet because it might be something like "e+f" rather than a number.
 				do // Skip over the sign and its exponent; e.g. the "+1" in "1.0e+1".  There must be a sign in this particular sci-notation number or we would never have arrived here.
-					++op_end;
-				while (*op_end >= '0' && *op_end <= '9'); // Avoid isdigit() because it sometimes causes a debug assertion failure at: (unsigned)(c + 1) <= 256 (probably only in debug mode), and maybe only when bad data got in it due to some other bug.
-				// No need to do the following because a number can't validly be followed by the ".=" operator:
-				//if (*op_end == '=' && op_end[-1] == '.') // v1.0.46.01: Support .=, but not any use of '.' because that is reserved as a struct/member operator.
-				//	--op_end;
+					++n_end;
+				while (*n_end >= '0' && *n_end <= '9'); // Avoid isdigit() because it sometimes causes a debug assertion failure at: (unsigned)(c + 1) <= 256 (probably only in debug mode), and maybe only when bad data got in it due to some other bug.
 
 				// Double-check it really is a floating-point literal with signed exponent.
-				orig_char = *op_end;
-				*op_end = '\0';
+				TCHAR n_orig_char = *n_end; // Don't change orig_char because it might be needed below if !IsNumeric().
+				*n_end = '\0';
 				if (IsNumeric(op_begin, true, false, true))
 				{
-					*op_end = orig_char;
+					*n_end = n_orig_char;
+					op_end = n_end;
 					continue; // Pure number, which doesn't need any processing at this stage.
 				}
+				*n_end = n_orig_char;
+				*op_end = '\0'; // Temporarily terminate again.
 			}
 			// Since above did not "continue", this is NOT a scientific-notation literal
 			// with +/- sign present, but maybe it's an object access operation such as "x.y".
@@ -10604,7 +10605,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 		//		, 12             // THIS VALUE MUST BE LEFT UNUSED so that the one above can be promoted to it by the infix-to-postfix routine.
 		, 16             // SYM_OR
 		, 20             // SYM_AND
-		, 25             // SYM_LOWNOT (the word "NOT": the low precedence version of logical-not).  HAS AN ODD NUMBER to indicate right-to-left evaluation order so that things like "not not var" are supports (which can be used to convert a variable into a pure 1/0 boolean value).
+//		, 25             // Reserved for SYM_LOWNOT.
 		//		, 26             // THIS VALUE MUST BE LEFT UNUSED so that the one above can be promoted to it by the infix-to-postfix routine.
 		, 28, 28, 28	 // SYM_IS, SYM_IN, SYM_CONTAINS
 		, 30, 30, 30     // SYM_EQUAL, SYM_EQUALCASE, SYM_NOTEQUAL (lower prec. than the below so that "x < 5 = var" means "result of comparison is the boolean value in var".
@@ -10619,6 +10620,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 		, 58, 58         // SYM_ADD, SYM_SUBTRACT
 		, 62, 62, 62     // SYM_MULTIPLY, SYM_DIVIDE, SYM_FLOORDIVIDE
 		, 72             // SYM_POWER (see note below).  Associativity kept as left-to-right for backward compatibility (e.g. 2**2**3 is 4**3=64 not 2**8=256).
+		, 25             // SYM_LOWNOT (the word "NOT": the low precedence version of logical-not).  HAS AN ODD NUMBER to indicate right-to-left evaluation order so that things like "not not var" are supports (which can be used to convert a variable into a pure 1/0 boolean value).
 		, 67,67,67,67,67 // SYM_NEGATIVE (unary minus), SYM_POSITIVE (unary plus), SYM_HIGHNOT (the high precedence "!" operator), SYM_BITNOT, SYM_ADDRESS
 		// NOTE: THE ABOVE MUST BE AN ODD NUMBER to indicate right-to-left evaluation order, which was added in v1.0.46 to support consecutive unary operators such as !*var !!var (!!var can be used to convert a value into a pure 1/0 boolean).
 		//		, 68             // THIS VALUE MUST BE LEFT UNUSED so that the one above can be promoted to it by the infix-to-postfix routine.
@@ -11234,6 +11236,8 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 						infix[infix_count].value_double = ATOF(number_buf);
 						break;
 					default:
+						if (*cp == '.')
+							return LineError(ERR_INVALID_DOT, FAIL, cp);
 						// SYM_STRING: either the "key" in "{key: value}" or a syntax error (might be impossible).
 						LPTSTR str = g_SimpleHeap->Malloc(cp, op_end - cp);
 						if (!str)
