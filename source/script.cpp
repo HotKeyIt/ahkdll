@@ -136,6 +136,7 @@ FuncEntry g_BIF[] =
 	BIF1(ZipRawMemory, 2, 4, true),
 	BIF1(UnZipRawMemory, 2, 4, true),
 	BIF1(CacheEnable, 1, 1, true),
+	BIF1(Cast, 3, 3, true),
 	BIF1(getTokenValue, 1, 1, true),
 	BIF1(ResourceLoadLibrary, 1, 1, true),
 	BIF1(MemoryLoadLibrary, 1, 6, true),

@@ -3216,6 +3216,7 @@ BIF_DECL(BIF_LoadPicture);
 BIF_DECL(BIF_Trim); // L31: Also handles LTrim and RTrim.
 
 BIF_DECL(BIF_Type);
+BIF_DECL(BIF_Cast);
 
 
 BIF_DECL(BIF_IsObject);

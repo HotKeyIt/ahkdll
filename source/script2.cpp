@@ -19053,6 +19053,127 @@ BIF_DECL(BIF_Trim) // L31
 
 
 
+BIF_DECL(BIF_Cast)
+{
+	__int64 aValue = 0;
+	ExprTokenType &token_to_write = *aParam[0];
+
+	size_t target = (size_t)&aValue; // Don't make target a pointer-type because the integer offset might not be a multiple of 4 (i.e. the below increments "target" directly by "offset" and we don't want that to use pointer math).
+
+	size_t size = sizeof(DWORD_PTR); // Set defaults.
+	BOOL is_integer = TRUE;   //
+	BOOL is_unsigned = (aParamCount > 3) ? FALSE : TRUE; // This one was added v1.0.48 to support unsigned __int64 the way DllCall does.
+
+	LPTSTR type = TokenToString(*aParam[1]); // No need to pass aBuf since any numeric value would not be recognized anyway.
+	if (ctoupper(*type) == 'U') // Unsigned; but in the case of NumPut, it matters only for UInt64.
+	{
+		is_unsigned = TRUE;
+		++type; // Remove the first character from further consideration.
+	}
+
+	switch (ctoupper(*type)) // Override "size" and is_integer if type warrants it. Note that the above has omitted the leading "U", if present, leaving type as "Int" vs. "Uint", etc.
+	{
+	case 'P': is_unsigned = TRUE; break; // Ptr.
+	case 'I':
+		if (_tcschr(type, '6')) // Int64. It's checked this way for performance, and to avoid access violation if string is bogus and too short such as "i64".
+			size = 8;
+		else
+			size = 4;
+		//else keep "size" at its default set earlier.
+		break;
+	case 'S': size = 2; break; // Short.
+	case 'C': size = 1; break; // Char.
+
+	case 'D': size = 8; is_integer = FALSE; break; // Double.
+	case 'F': size = 4; is_integer = FALSE; break; // Float.
+
+		// default: For any unrecognized values, keep "size" and is_integer at their defaults set earlier
+		// (for simplicity).
+	}
+
+	switch (size)
+	{
+	case 4: // Listed first for performance.
+		if (is_integer)
+			*(unsigned int *)target = (unsigned int)TokenToInt64(token_to_write);
+		else // Float (32-bit).
+			*(float *)target = (float)TokenToDouble(token_to_write);
+		break;
+	case 8:
+		if (is_integer)
+			// v1.0.48: Support unsigned 64-bit integers like DllCall does:
+			*(__int64 *)target = (is_unsigned && !IS_NUMERIC(token_to_write.symbol)) // Must not be numeric because those are already signed values, so should be written out as signed so that whoever uses them can interpret negatives as large unsigned values.
+			? (__int64)ATOU64(TokenToString(token_to_write)) // For comments, search for ATOU64 in BIF_DllCall().
+			: TokenToInt64(token_to_write);
+		else // Double (64-bit).
+			*(double *)target = TokenToDouble(token_to_write);
+		break;
+	case 2:
+		*(unsigned short *)target = (unsigned short)TokenToInt64(token_to_write);
+		break;
+	default: // size 1
+		*(unsigned char *)target = (unsigned char)TokenToInt64(token_to_write);
+	}
+
+	type = TokenToString(*aParam[2]); // No need to pass aBuf since any numeric value would not be recognized anyway.
+	if (ctoupper(*type) == 'U') // Unsigned.
+	{
+		++type; // Remove the first character from further consideration.
+		is_unsigned = TRUE;
+	}
+	else
+		is_unsigned = FALSE;
+
+	switch (ctoupper(*type)) // Override "size" and aResultToken.symbol if type warrants it. Note that the above has omitted the leading "U", if present, leaving type as "Int" vs. "Uint", etc.
+	{
+		//case 'P': // Nothing extra needed in this case.
+		case 'I':
+			if (_tcschr(type, '6')) // Int64. It's checked this way for performance, and to avoid access violation if string is bogus and too short such as "i64".
+				size = 8;
+			else
+				size = 4;
+			break;
+		case 'S': size = 2; break; // Short.
+		case 'C': size = 1; break; // Char.
+
+		case 'D': size = 8; aResultToken.symbol = SYM_FLOAT; break; // Double.
+		case 'F': size = 4; aResultToken.symbol = SYM_FLOAT; break; // Float.
+
+			// default: For any unrecognized values, keep "size" and aResultToken.symbol at their defaults set earlier
+			// (for simplicity).
+	}
+
+	switch (size)
+	{
+	case 4: // Listed first for performance.
+		if (aResultToken.symbol == SYM_FLOAT)
+			aResultToken.value_double = *(float *)target;
+		else if (!is_unsigned)
+			aResultToken.value_int64 = *(int *)target; // aResultToken.symbol was set to SYM_FLOAT or SYM_INTEGER higher above.
+		else
+			aResultToken.value_int64 = *(unsigned int *)target;
+		break;
+	case 8:
+		// The below correctly copies both DOUBLE and INT64 into the union.
+		// Unsigned 64-bit integers aren't supported because variables/expressions can't support them.
+		aResultToken.value_int64 = *(__int64 *)target;
+		break;
+	case 2:
+		if (!is_unsigned) // Don't use ternary because that messes up type-casting.
+			aResultToken.value_int64 = *(short *)target;
+		else
+			aResultToken.value_int64 = *(unsigned short *)target;
+		break;
+	default: // size 1
+		if (!is_unsigned) // Don't use ternary because that messes up type-casting.
+			aResultToken.value_int64 = *(char *)target;
+		else
+			aResultToken.value_int64 = *(unsigned char *)target;
+	}
+}
+
+
+
 BIF_DECL(BIF_Type)
 // Returns the pure type of the given value.
 {
