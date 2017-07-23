@@ -19056,7 +19056,7 @@ BIF_DECL(BIF_Trim) // L31
 BIF_DECL(BIF_Cast)
 {
 	__int64 aValue = 0;
-	ExprTokenType &token_to_write = *aParam[0];
+	ExprTokenType &token_to_write = *aParam[1];
 
 	size_t target = (size_t)&aValue; // Don't make target a pointer-type because the integer offset might not be a multiple of 4 (i.e. the below increments "target" directly by "offset" and we don't want that to use pointer math).
 
@@ -19064,7 +19064,7 @@ BIF_DECL(BIF_Cast)
 	BOOL is_integer = TRUE;   //
 	BOOL is_unsigned = (aParamCount > 3) ? FALSE : TRUE; // This one was added v1.0.48 to support unsigned __int64 the way DllCall does.
 
-	LPTSTR type = TokenToString(*aParam[1]); // No need to pass aBuf since any numeric value would not be recognized anyway.
+	LPTSTR type = TokenToString(*aParam[0]); // No need to pass aBuf since any numeric value would not be recognized anyway.
 	if (ctoupper(*type) == 'U') // Unsigned; but in the case of NumPut, it matters only for UInt64.
 	{
 		is_unsigned = TRUE;
