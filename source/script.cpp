@@ -1061,6 +1061,13 @@ Script::~Script() // Destructor.
 	Line::sSourceFile = NULL;
 	Line::sSourceFileCount = 0;
 	Line::sMaxSourceFiles = 0;
+	Line::sDerefBufSize = 0;
+	if (Line::sDerefBuf)
+	{
+		free(Line::sDerefBuf);
+		Line::sDerefBuf = NULL;
+	}
+	Line::sLargeDerefBufs = 0;
 #ifndef _USRDLL
 	for (i = 0; i < FUNC_LIB_COUNT; i++)
 		if (sLib[i].path)
