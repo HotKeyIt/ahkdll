@@ -27,6 +27,7 @@ GNU General Public License for more details.
 _thread_local extern FuncLibrary sLib[FUNC_LIB_COUNT]; // function libraries
 extern LPSTR g_hWinAPI, g_hWinAPIlowercase; // loads WinAPI functions definitions from resource
 _thread_local extern SimpleHeap *g_SimpleHeap;
+_thread_local extern SimpleHeap *g_SimpleHeapVar;
 extern HRSRC g_hResource;		// for compiled AutoHotkey.exe
 extern HCUSTOMMODULE g_hNTDLL;
 extern _QueryPerformanceCounter g_QPC;

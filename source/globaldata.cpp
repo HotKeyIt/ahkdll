@@ -32,6 +32,7 @@ GNU General Public License for more details.
 _thread_local FuncLibrary sLib[FUNC_LIB_COUNT] = { 0 }; // function libraries
 LPSTR g_hWinAPI = NULL, g_hWinAPIlowercase = NULL;  // loads WinAPI functions definitions from resource
 _thread_local SimpleHeap *g_SimpleHeap = NULL;
+_thread_local SimpleHeap *g_SimpleHeapVar = NULL;
 HRSRC g_hResource = NULL; // Set by WinMain()	// for compiled AutoHotkey.exe
 HCUSTOMMODULE g_hNTDLL = NULL; // MSVR100.dll
 _QueryPerformanceCounter g_QPC = NULL;

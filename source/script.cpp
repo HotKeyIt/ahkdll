@@ -9745,7 +9745,7 @@ Var *Script::AddVar(LPTSTR aVarName, size_t aVarNameLength, int aInsertPos, int 
 	}
 
 	// Allocate some dynamic memory to pass to the constructor:
-	LPTSTR new_name = g_SimpleHeap->Malloc(var_name, aVarNameLength);
+	LPTSTR new_name = g_SimpleHeapVar->Malloc(var_name, aVarNameLength);
 	if (!new_name)
 		// It already displayed the error for us.
 		return NULL;

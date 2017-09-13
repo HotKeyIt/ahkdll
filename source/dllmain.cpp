@@ -159,6 +159,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	g_MsgMonitor = new MsgMonitorList();
 	g_MetaObject = new MetaObject();
 	g_SimpleHeap = new SimpleHeap();
+	g_SimpleHeapVar = g_SimpleHeap;
 	
 	HMODULE advapi32 = LoadLibrary(_T("advapi32.dll"));
 	g_CryptEncrypt = (MyCryptEncrypt)GetProcAddress(advapi32, "CryptEncrypt");
