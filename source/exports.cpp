@@ -52,6 +52,7 @@ void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar, BOOL aVarIsArg);
 	g->CurrentFunc = NULL;
 
 #define RESTORE_G_SCRIPT \
+	g_script->mFuncCount = aFuncCount;\
 	g_script->mFirstLine = aFirstLine;\
 	g_script->mLastLine = aLastLine;\
 	g_script->mLastLine->mNextLine = NULL;\
@@ -1184,6 +1185,11 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 	g_Loading = true;
 #endif
 	BACKUP_G_SCRIPT
+	Func **aFunc = (Func**)malloc(g_script->mFuncCount*sizeof(Func));
+	for (int i = 0; i < g_script->mFuncCount; i++)
+	{
+		aFunc[i] = g_script->mFunc[i];
+	}
 	int aSourceFileIdx = Line::sSourceFileCount;
 
 	// Backup SimpleHeap to restore later
@@ -1200,6 +1206,11 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 		g_SimpleHeap = bkpSimpleHeap;
 		aSimpleHeap->DeleteAll();
 		delete aSimpleHeap;
+		for (int i = 0; i < g_script->mFuncCount; i++)
+		{
+			g_script->mFunc[i] = aFuncCount < i ? NULL : aFunc[i];
+		}
+		free(aFunc);
 		RESTORE_G_SCRIPT
 		RESTORE_IF_EXPR
 		g_script->mIsReadyToExecute = true;
@@ -1222,6 +1233,11 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 	Line *aTempLine = g_script->mLastLine;
 	Line *aExecLine = g_script->mFirstLine;
 	delete g_script->mPlaceholderLabel;
+	for (int i = 0; i < g_script->mFuncCount; i++)
+	{
+		g_script->mFunc[i] = aFuncCount<i ? NULL : aFunc[i];
+	}
+	free(aFunc);
 	RESTORE_G_SCRIPT
 	g_ReturnNotExit = true;
 	// Restore SimpleHeap so functions will use correct memory
