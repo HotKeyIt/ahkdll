@@ -8082,7 +8082,7 @@ BIF_DECL(BIF_FileRead)
 		return;
 	}
 
-	LPBYTE output_buf = (LPBYTE)malloc(size_t(bytes_to_read + sizeof(wchar_t)));
+	LPBYTE output_buf = (LPBYTE)malloc(size_t(bytes_to_read + (bytes_to_read & 1) + sizeof(wchar_t)));
 	if (!output_buf)
 	{
 		CloseHandle(hfile);
@@ -16158,22 +16158,22 @@ BIF_DECL(BIF_ZipInfo)
 	// CStringA aPassword = aParamCount > 4 ? CStringCharFromTChar(TokenToString(*aParam[4])) : NULL;
 	if (TokenIsNumeric(*aParam[0]))
 	{
-		if (!TokenIsNumeric(*aParam[1]))
+		if (aParamCount < 2)
+		{
+			g_script->ScriptError(ERR_PARAM2_REQUIRED);
+			aResultToken.SetExitResult(FAIL);
+			return;
+		}
+		else if (!TokenIsNumeric(*aParam[1]))
 		{
 			g_script->ScriptError(ERR_PARAM2_INVALID);
 			aResultToken.SetExitResult(FAIL);
 			return;
 		}
-		else if (aParamCount < 3)
-		{
-			g_script->ScriptError(ERR_PARAM3_REQUIRED);
-			aResultToken.SetExitResult(FAIL);
-			return;
-		}
-		if (aErrCode = UnzipOpenBuffer(&huz, (void*)TokenToInt64(*aParam[0]), (DWORD)TokenToInt64(*aParam[1]), NULL))
+		if (aErrCode = UnzipOpenBuffer(&huz, (void*)TokenToInt64(*aParam[0]), (DWORD)TokenToInt64(*aParam[1]), (const char*)(aParamCount == 2 ? NULL : TokenToString(*aParam[2]))))
 			goto error;
 	}
-	else if (aErrCode = UnzipOpenFile(&huz, TokenToString(*aParam[0]), NULL))
+	else if (aErrCode = UnzipOpenFile(&huz, TokenToString(*aParam[0]), (const char*)(aParamCount == 1 ? NULL : TokenToString(*aParam[1]))))
 	{
 		goto error;
 	}

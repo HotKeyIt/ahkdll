@@ -161,7 +161,7 @@ FuncEntry g_BIF[] =
 	BIF1(ZipAddFolder, 2, 2, true),
 	BIF1(ZipAddBuffer, 4, 4, true),
 	BIF1(ZipOptions, 2, 2, true),
-	BIF1(ZipInfo, 1, 2, true),
+	BIF1(ZipInfo, 1, 3, true),
 	BIF1(UnZip, 2, 6, true),
 	BIF1(UnZipBuffer, 2, 5, true),
 
