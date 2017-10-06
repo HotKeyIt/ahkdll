@@ -36,7 +36,6 @@ void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar, BOOL aVarIsArg);
 	}
 // AutoHotkey needs to be running at this point
 #define BACKUP_G_SCRIPT \
-	int aFuncCount = g_script->mFuncCount;\
 	int aCurrFileIndex = g_script->mCurrFileIndex, aCombinedLineNumber = g_script->mCombinedLineNumber, aCurrentFuncOpenBlockCount = g_script->mCurrentFuncOpenBlockCount;\
 	bool aNextLineIsFunctionBody = g_script->mNextLineIsFunctionBody;\
 	Line *aFirstLine = g_script->mFirstLine,*aLastLine = g_script->mLastLine,*aCurrLine = g_script->mCurrLine,*aFirstStaticLine = g_script->mFirstStaticLine,*aLastStaticLine = g_script->mLastStaticLine;\
@@ -52,7 +51,6 @@ void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar, BOOL aVarIsArg);
 	g->CurrentFunc = NULL;
 
 #define RESTORE_G_SCRIPT \
-	g_script->mFuncCount = aFuncCount;\
 	g_script->mFirstLine = aFirstLine;\
 	g_script->mLastLine = aLastLine;\
 	g_script->mLastLine->mNextLine = NULL;\
@@ -1185,6 +1183,7 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 	g_Loading = true;
 #endif
 	BACKUP_G_SCRIPT
+	int aFuncCount = g_script->mFuncCount; 
 	Func **aFunc = (Func**)malloc(g_script->mFuncCount*sizeof(Func));
 	for (int i = 0; i < g_script->mFuncCount; i++)
 	{
@@ -1213,6 +1212,7 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 		free(aFunc);
 		RESTORE_G_SCRIPT
 		RESTORE_IF_EXPR
+		g_script->mFuncCount = aFuncCount;
 		g_script->mIsReadyToExecute = true;
 #ifdef _USRDLL
 		g_Loading = false;
@@ -1239,6 +1239,7 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 	}
 	free(aFunc);
 	RESTORE_G_SCRIPT
+	g_script->mFuncCount = aFuncCount;
 	g_ReturnNotExit = true;
 	// Restore SimpleHeap so functions will use correct memory
 	g_SimpleHeap = bkpSimpleHeap;
