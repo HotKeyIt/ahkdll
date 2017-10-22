@@ -403,6 +403,11 @@ BIF_DECL(BIF_sizeof)
 			if (Var1.var != NULL)
 			{
 				// Call BIF_sizeof passing offset in second parameter to align if necessary
+				int newaligntotal = sizeof_maxsize(TokenToString(Var1));
+				if (newaligntotal > *aligntotal)
+					*aligntotal = newaligntotal;
+				if ((!bitsize || bitsizetotal == bitsize) && offset && (mod = offset % *aligntotal))
+					offset += (*aligntotal - mod) % *aligntotal;
 				param[1]->value_int64 = (__int64)offset;
 				BIF_sizeof(Result,ResultToken,param,3);
 				if (ResultToken.symbol != SYM_INTEGER)
@@ -410,8 +415,6 @@ BIF_DECL(BIF_sizeof)
 					g_script.ScriptError(ERR_INVALID_STRUCT, defbuf);
 					return;
 				}
-				if ((!bitsize || bitsizetotal == bitsize) && offset && (mod = offset % *aligntotal))
-					offset += (*aligntotal - mod) % *aligntotal;
 				// sizeof was given an offset that it applied and aligned if necessary, so set offset =  and not +=
 				if (!bitsize || bitsizetotal == bitsize)
 					offset = (int)ResultToken.value_int64 + (arraydef ? ((arraydef - 1) * ((int)ResultToken.value_int64 - offset)) : 0);

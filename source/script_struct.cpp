@@ -411,6 +411,11 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 				// if field is a pointer we will need its size only
 				if (!ispointer)
 				{
+					int newaligntotal = sizeof_maxsize(TokenToString(Var1));
+					if (newaligntotal > aligntotal)
+						aligntotal = newaligntotal;
+					if ((!bitsize || bitsizetotal == bitsize) && offset && (mod = offset % aligntotal))
+						offset += (aligntotal - mod) % aligntotal;
 					param[1]->value_int64 = (__int64)ispointer ? 0 : offset;
 					param[2]->value_int64 = (__int64)&aligntotal;
 					BIF_sizeof(Result,ResultToken,param,ispointer ? 1 : 3);
