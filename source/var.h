@@ -586,7 +586,7 @@ public:
 	#define VALIDATENAME_SUBJECTS { _T("variable"), _T("function"), _T("class"), _T("group") }
 	static ResultType ValidateName(LPCTSTR aName, int aDisplayError = DISPLAY_VAR_ERROR);
 
-	LPTSTR ObjectToText(LPTSTR aBuf, int aBufSize);
+	LPTSTR ObjectToText(LPTSTR aName, LPTSTR aBuf, int aBufSize);
 	LPTSTR ToText(LPTSTR aBuf, int aBufSize, bool aAppendNewline)
 	// Caller must ensure that Type() == VAR_NORMAL.
 	// aBufSize is an int so that any negative values passed in from caller are not lost.
@@ -609,7 +609,7 @@ public:
 			aBuf += sntprintf(aBuf, aBufSize, _T("%s: %s"), mName, var.mCharContents);
 			break;
 		case VAR_ATTRIB_IS_OBJECT:
-			aBuf = ObjectToText(aBuf, aBufSize);
+			aBuf = var.ObjectToText(this->mName, aBuf, aBufSize);
 			break;
 		default:
 			aBuf += sntprintf(aBuf, BUF_SPACE_REMAINING, _T("%s[%Iu of %Iu]: %-1.60s%s"), mName // mName not var.mName (see comment above).
