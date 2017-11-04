@@ -297,6 +297,10 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 			}
 		}
 
+	// used to monitor Input
+	if (!g_script->FindOrAddVar(_T("A_Input"), 7, VAR_DECLARE_SUPER_GLOBAL))
+		return CRITICAL_ERROR;
+
 	if (Var *var = g_script->FindOrAddVar(_T("A_Args"), 6, VAR_DECLARE_SUPER_GLOBAL))
 	{
 		// Store the remaining args in an array and assign it to "A_Args".

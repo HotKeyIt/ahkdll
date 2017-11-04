@@ -337,7 +337,7 @@ BIF_DECL(BIF_Input)
 	*prev_buf = '\0';
 	g_input.buffer = input_buf;
 	g_input.BufferLength = 0;
-	Var *A_Input = g_script->FindOrAddVar(_T("A_Input"), 7, VAR_DECLARE_SUPER_GLOBAL);
+	Var *A_Input = g_script->FindOrAddVar(_T("A_Input"));
 	for (LPTSTR cp = aOptions; *cp; ++cp)
 	{
 		switch(ctoupper(*cp))
