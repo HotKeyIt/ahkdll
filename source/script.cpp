@@ -1227,7 +1227,8 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 		// Seems best to disable #SingleInstance for stdin scripts.
 		g_AllowOnlyOneInstance = SINGLE_INSTANCE_OFF;
 	}
-	else // i.e. don't call the following function for stdin.
+	//else // i.e. don't call the following function for stdin.
+
 	// Using the correct case not only makes it look better in title bar & tray tool tip,
 	// it also helps with the detection of "this script already running" since otherwise
 	// it might not find the dupe if the same script name is launched with different
@@ -10024,7 +10025,7 @@ ResultType Script::AddGroup(LPTSTR aGroupName)
 
 ResultType Script::PreparseExpressions(Line *aStartingLine)
 {
-	int i;
+	int i = 0;
 	DerefType *deref;
 	for (Line *line = aStartingLine; line; line = line->mNextLine)
 	{

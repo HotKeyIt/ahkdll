@@ -132,7 +132,7 @@ BIF_DECL(BIF_sizeof)
 	int uniondepth = 0;				// count how deep we are in union/structure
 	int align = 0;
 	int *aligntotal = &align;		// pointer alignment for total structure
-	int thissize;					// used to save size returned from IsDefaultType
+	int thissize = 0;					// used to save size returned from IsDefaultType
 	int maxsize = 0;				// max size of union or struct
 
 	// following are used to find variable and also get size of a structure defined in variable
@@ -1013,6 +1013,7 @@ BIF_DECL(BIF_ObjDump)
 		FILE *hFile = _tfopen(TokenToString(*aParam[0]), _T("wb"));
 		if (!hFile)
 		{
+			free(aBuffer);
 			aResultToken.symbol = SYM_STRING;
 			aResultToken.marker = _T("");
 			return;

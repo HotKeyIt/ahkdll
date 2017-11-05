@@ -622,7 +622,10 @@ BIF_DECL(BIF_GuiCreate)
 			gui->mEventSink->AddRef();
 		}
 		else
+		{
+			delete gui;
 			_f_throw(ERR_PARAM3_INVALID);
+		}
 	}
 	
 	LPTSTR title;
@@ -3053,7 +3056,7 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 		// Avoiding this problem seems to outweigh the breaking of old scripts that use GroupBoxes with more than
 		// one line of text (which are likely to be very rare).
 		//opt.style_add |= BS_MULTILINE;
-		break;
+		//break;
 	}
 
 	/////////////////////////////

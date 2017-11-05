@@ -8325,12 +8325,6 @@ ResultType Line::FileDelete(LPTSTR aFilePattern)
 	// Otherwise aFilePattern contains wildcards, so we'll search for all matches and delete them.
 	FilePatternApply(aFilePattern, FILE_LOOP_FILES_ONLY, false, FileDeleteCallback, NULL);
 	return OK;
-#ifdef _WIN64
-	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
-#else
-	DWORD aThreadID = __readfsdword(0x24);
-#endif
-
 }
 
 
@@ -11513,7 +11507,7 @@ DynaToken *DynaToken::Create(ExprTokenType *aParam[], int aParamCount)
 				int c = 0;
 				for (i = 0, c = 0;_tcschr(return_type_string + c + 1,'=');c++)
 				{
-					if (return_type_string[c] != ' ' && return_type_string[c] != '/t')
+					if (return_type_string[c] != ' ' && return_type_string[c] != '\t')
 						return_type_arg[i++] = return_type_string[c];
 				}
 				return_type_arg[i] = '\0';
@@ -14806,8 +14800,8 @@ BIF_DECL(BIF_Chr)
 BIF_DECL(BIF_NewThread)
 {
 	LPTSTR aScript = TokenToString(*aParam[0]);
-	LPTSTR aCmdLine = NULL;
-	LPTSTR aTitle = NULL;
+	LPTSTR aCmdLine = _T("");
+	LPTSTR aTitle = _T("");
 	if (aParamCount > 1)
 		aCmdLine = TokenToString(*aParam[1]);
 	if (aParamCount > 2)

@@ -468,7 +468,11 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 		lenScript += _tcslen(lpScriptCmdLine + lenScript + 1);
 	if (*(lpScriptCmdLine + lenScript + 2))
 		lenScript += _tcslen(lpScriptCmdLine + lenScript + 2);
-	g_lpScript = tmalloc(lenScript + 3);
+	if (!(g_lpScript = tmalloc(lenScript + 3)))
+	{
+		_endthreadex(CRITICAL_ERROR);
+		return CRITICAL_ERROR;
+	}
 	memcpy(g_lpScript, lpScriptCmdLine, (lenScript + 3) * sizeof(TCHAR));
 	if (*(g_lpScript + _tcslen(g_lpScript) + 1))
 		lpCmdLine = g_lpScript + _tcslen(g_lpScript) + 1;
@@ -533,7 +537,7 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 		// The above rules effectively make it impossible to autostart AutoHotkey.ini with parameters
 		// unless the filename is explicitly given (shouldn't be an issue for 99.9% of people).
 		int i;
-		for (i = 0; i < argc; ++i) // Start at 1 because 0 contains the program name.
+		for (i = 0; i < argc; ++i) // Start at 0 it does not contain the program name.
 		{
 			LPTSTR param = argv[i]; // For performance and convenience.
 			// Insist that switches be an exact match for the allowed values to cut down on ambiguity.
@@ -548,7 +552,7 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 					return CRITICAL_ERROR;
 				// For performance and simplicity, open/create the file unconditionally and keep it open until exit.
 				g_script->mIncludeLibraryFunctionsThenExit = new TextFile;
-				if (!g_script->mIncludeLibraryFunctionsThenExit->Open(argv[i], TextStream::WRITE | TextStream::EOL_CRLF | TextStream::BOM_UTF8, CP_UTF8)) // Can't open the temp file.
+				if (!g_script->mIncludeLibraryFunctionsThenExit->Open(param, TextStream::WRITE | TextStream::EOL_CRLF | TextStream::BOM_UTF8, CP_UTF8)) // Can't open the temp file.
 					return CRITICAL_ERROR;
 			}
 			else // since this is not a recognized switch, the end of the [Switches] section has been reached (by design).
@@ -639,8 +643,13 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 		}
 
 		// save g_hWnd in threads global array used for exiting threads, debugger and probably more
-		for (int i = 1; i < MAX_AHK_THREADS; i++)
+		for (int i = 1;; i++)
 		{
+			if (i == MAX_AHK_THREADS)
+			{
+				_endthreadex(CRITICAL_ERROR);
+				return CRITICAL_ERROR;
+			}
 			if (!IsWindow((HWND)g_ahkThreads[i][0]))
 			{
 				g_ahkThreads[i][0] = (UINT_PTR)g_hWnd;
@@ -651,11 +660,6 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 				g_ahkThreads[i][5] = (UINT_PTR)g_ThreadID;
 				g_ahkThreads[i][6] = (UINT_PTR)((PMYTEB)NtCurrentTeb())->ThreadLocalStoragePointer;
 				break;
-			}
-			if (i == MAX_AHK_THREADS)
-			{
-				_endthreadex(CRITICAL_ERROR);
-				return CRITICAL_ERROR;
 			}
 		}
 		// Set AutoHotkey.dll its main window (ahk_class AutoHotkey) bottom so it does not receive Reload or ExitApp Message send e.g. when Reload message is sent.

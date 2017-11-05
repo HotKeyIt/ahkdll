@@ -188,22 +188,14 @@ EXPORT int ahkPause(LPTSTR aChangeTo, DWORD aThreadID) //Change pause state of a
 		return 0; // AutoHotkey needs to be running at this point //
 	}
 
-	if ( (((int)aChangeTo == 1 || (int)aChangeTo == 0) || (*aChangeTo == 'O' || *aChangeTo == 'o') && ( *(aChangeTo+1) == 'N' || *(aChangeTo+1) == 'n' ) ) || *aChangeTo == '1')
+	if (!g->IsPaused && ((int)aChangeTo == 1 || *aChangeTo == '1' || ((*aChangeTo == 'O' || *aChangeTo == 'o') && (*(aChangeTo + 1) == 'N' || *(aChangeTo + 1) == 'n'))))
 	{
 		Hotkey::ResetRunAgainAfterFinished();
-		if ((int)aChangeTo == 0 || ((int)aChangeTo != 1 && (*aChangeTo == '0' || (*(aChangeTo + 1) == 'F' || *(aChangeTo + 1) == 'f'))))
-		{
-			g->IsPaused = false;
-			--g_nPausedThreads; // For this purpose the idle thread is counted as a paused thread.
-		}
-		else
-		{
-			g->IsPaused = true;
-			++g_nPausedThreads; // For this purpose the idle thread is counted as a paused thread.
-		}
+		g->IsPaused = false;
+		--g_nPausedThreads; // For this purpose the idle thread is counted as a paused thread.
 		g_script->UpdateTrayIcon();
 	}
-	else if (*aChangeTo != '\0')
+	else if (g->IsPaused)
 	{
 		g->IsPaused = false;
 		--g_nPausedThreads; // For this purpose the idle thread is counted as a paused thread.

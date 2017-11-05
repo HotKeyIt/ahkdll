@@ -25,7 +25,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 	int uniondepth = 0;				// count how deep we are in union/structure
 	int ispointer = NULL;			// identify pointer and how deep it goes
 	int aligntotal = 0;				// pointer alignment for total structure
-	int thissize;					// used to check if type was found in above array.
+	int thissize = 0;					// used to check if type was found in above array.
 	int maxsize = 0;				// max size of union or struct
 
 	// following are used to find variable and also get size of a structure defined in variable
@@ -665,7 +665,7 @@ Struct *Struct::CloneField(FieldType *field,bool aIsDynamic)
 	
 	Struct &obj = *objptr;
 	// if field is an array, set correct size
-	if (obj.mArraySize = field->mArraySize)
+	if (obj.mArraySize == field->mArraySize)
 		obj.mSize = field->mSize*obj.mArraySize;
 	else
 		obj.mSize = field->mSize;
@@ -748,6 +748,7 @@ Struct *Struct::Clone(bool aIsDynamic)
 		// indication rather than an incomplete copy.  Now that the loop above has finished,
 		// the object's contents are at least valid and it is safe to free the object:
 		obj.Release();
+		delete objptr;
 		return NULL;
 	}
 	return &obj;
@@ -1514,7 +1515,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 			else
 			{
 				if (TokenIsEmptyString(*aParam[1]))
-					*((LPSTR)(field->mSize > 2 ? *(UINT_PTR*)((UINT_PTR)target + field->mOffset) : *(UINT_PTR*)((UINT_PTR)target + field->mOffset))) = '\0';
+					*((LPSTR)(field->mSize > 2 ? *(UINT_PTR*)((UINT_PTR)target + field->mOffset) : (UINT_PTR)target + field->mOffset)) = '\0';
 				else
 				{
 					char_count = WideCharToMultiByte(field->mEncoding, WC_NO_BEST_FIT_CHARS, (LPCWSTR)source_string, source_length, NULL, 0, NULL, NULL);
