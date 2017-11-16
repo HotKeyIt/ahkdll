@@ -966,7 +966,7 @@ BIF_DECL(BIF_ObjDump)
 {
 	aResultToken.symbol = SYM_INTEGER;
 	IObject *aObject;
-	if (!(aObject = TokenToObject(*aParam[1])) && !(aObject = TokenToObject(*aParam[0])))
+	if (!(aObject = TokenToObject(*aParam[0])) && !(aObject = TokenToObject(*aParam[1])))
 	{
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
@@ -1024,7 +1024,7 @@ BIF_DECL(BIF_ObjDump)
 		}
 	}
 	aResultToken.value_int64 = aSize;
-	if (TokenToObject(*aParam[1]))
+	if (!TokenToObject(*aParam[0]) && TokenToObject(*aParam[1]))
 	{ // FileWrite mode
 		FILE *hFile = _tfopen(TokenToString(*aParam[0]), _T("wb"));
 		if (!hFile)
