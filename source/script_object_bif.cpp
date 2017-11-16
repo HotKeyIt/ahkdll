@@ -560,10 +560,14 @@ __int64 ObjRawSize(IObject *aObject, bool aCopyBuffer, IObject *aObjects)
 				aSize += ObjRawSize(aIsObject, aCopyBuffer, aObjects) + 9;
 			aCall.marker = _T("Next");
 		}
-		else if ((aVarType = aKey.var->IsNumeric()) == SYM_STRING)
-			aSize += (aKey.var->ByteLength() ? aKey.var->ByteLength() + sizeof(TCHAR) : 0) + 9;
-		else
-			aSize += (aVarType == SYM_FLOAT || (aIsValue = TokenToInt64(aKey)) > 4294967295) ? 9 : aIsValue > 65535 ? 5 : aIsValue > 255 ? 3 : aIsValue > -129 ? 2 : aIsValue > -32769 ? 3 : aIsValue >= INT_MIN ? 5 : 9;
+		else 
+		{
+			aKey.var->ToTokenSkipAddRef(aKey);
+			if ((aVarType = aKey.symbol) == SYM_STRING)
+				aSize += (aKey.marker_length ? (aKey.marker_length + 1) * sizeof(TCHAR) : 0) + 9;
+			else
+				aSize += (aVarType == SYM_FLOAT || (aIsValue = TokenToInt64(aKey)) > 4294967295) ? 9 : aIsValue > 65535 ? 5 : aIsValue > 255 ? 3 : aIsValue > -129 ? 2 : aIsValue > -32769 ? 3 : aIsValue >= INT_MIN ? 5 : 9;
+		}
 
 		if (aIsObject = TokenToObject(aValue))
 		{
@@ -577,20 +581,24 @@ __int64 ObjRawSize(IObject *aObject, bool aCopyBuffer, IObject *aObjects)
 				aSize += ObjRawSize(aIsObject, aCopyBuffer, aObjects) + 9;
 			aCall.marker = _T("Next");
 		}
-		else if ((aVarType = aValue.var->IsNumeric()) == SYM_STRING)
+		else
 		{
-			if (aCopyBuffer)
+			aValue.var->ToTokenSkipAddRef(aValue);
+			if ((aVarType = aValue.symbol) == SYM_STRING)
 			{
-				aCall.marker = _T("GetCapacity");
-				aObject->Invoke(Result, this_token, IT_CALL, params, 2);
-				aSize += Result.value_int64 + 9;
-				aCall.marker = _T("Next");
+				if (aCopyBuffer)
+				{
+					aCall.marker = _T("GetCapacity");
+					aObject->Invoke(Result, this_token, IT_CALL, params, 2);
+					aSize += Result.value_int64 + 9;
+					aCall.marker = _T("Next");
+				}
+				else
+					aSize += (aValue.marker_length ? (aValue.marker_length + 1) * sizeof(TCHAR) : 0) + 9;
 			}
 			else
-				aSize += (aValue.var->ByteLength() ? aValue.var->ByteLength() + sizeof(TCHAR) : 0) + 9;
+				aSize += aVarType == SYM_FLOAT || (aIsValue = TokenToInt64(aValue)) > 4294967295 ? 9 : aIsValue > 65535 ? 5 : aIsValue > 255 ? 3 : aIsValue > -129 ? 2 : aIsValue > -32769 ? 3 : aIsValue >= INT_MIN ? 5 : 9;
 		}
-		else
-			aSize += aVarType == SYM_FLOAT || (aIsValue = TokenToInt64(aValue)) > 4294967295 ? 9 : aIsValue > 65535 ? 5 : aIsValue > 255 ? 3 : aIsValue > -129 ? 2 : aIsValue > -32769 ? 3 : aIsValue >= INT_MIN ? 5 : 9;
 
 		// release object if it was assigned prevoiously when calling enum.Next
 		if (var1->IsObject())
@@ -727,80 +735,84 @@ __int64 ObjRawDump(IObject *aObject, char *aBuffer, bool aCopyBuffer, IObject *a
 				aThisBuffer += aThisSize + sizeof(__int64);
 			}
 		}
-		else if ((aVarType = aKey.var->IsNumeric()) == SYM_STRING)
-		{
-			*aThisBuffer = (char)-10;
-			aThisBuffer += 1;
-			*(__int64*)aThisBuffer = aThisSize = (__int64)(aKey.var->ByteLength() ? aKey.var->ByteLength() + sizeof(TCHAR) : 0);
-			aThisBuffer += sizeof(__int64);
-			if (aThisSize)
-			{
-				memcpy(aThisBuffer, aKey.var->Contents(), (size_t)aThisSize);
-				aThisBuffer += aThisSize;
-			}
-		}
-		else if (aVarType == SYM_FLOAT)
-		{
-			*aThisBuffer = (char)-9;
-			aThisBuffer += 1;
-			*(double*)aThisBuffer = TokenToDouble(aKey);
-			aThisBuffer += sizeof(__int64);
-		}
-		else if ((aIsValue = TokenToInt64(aKey)) > 4294967295)
-		{
-			*aThisBuffer = (char)-8;
-			aThisBuffer += 1;
-			*(__int64*)aThisBuffer = aIsValue;
-			aThisBuffer += sizeof(__int64);
-		}
-		else if (aIsValue > 65535)
-		{
-			*aThisBuffer = (char)-6;
-			aThisBuffer += 1;
-			*(UINT*)aThisBuffer = (UINT)aIsValue;
-			aThisBuffer += sizeof(UINT);
-		}
-		else if (aIsValue > 255)
-		{
-			*aThisBuffer = (char)-4;
-			aThisBuffer += 1;
-			*(USHORT*)aThisBuffer = (USHORT)aIsValue;
-			aThisBuffer += sizeof(USHORT);
-		}
-		else if (aIsValue > -1)
-		{
-			*aThisBuffer = (char)-2;
-			aThisBuffer += 1;
-			*aThisBuffer = (BYTE)aIsValue;
-			aThisBuffer += sizeof(BYTE);
-		}
-		else if (aIsValue > -129)
-		{
-			*aThisBuffer = (char)-1;
-			aThisBuffer += 1;
-			*aThisBuffer = (char)aIsValue;
-			aThisBuffer += sizeof(char);
-		}
-		else if (aIsValue > -32769)
-		{
-			*aThisBuffer = (char)-3;
-			aThisBuffer += 1;
-			*(short*)aThisBuffer = (short)aIsValue;
-			aThisBuffer += sizeof(short);
-		}
-		else if (aIsValue >= INT_MIN)
-		{
-			*aThisBuffer = (char)-5;
-			aThisBuffer += 1;
-			*(int*)aThisBuffer = (int)aIsValue;
-			aThisBuffer += sizeof(int);
-		}
 		else
 		{
-			*aThisBuffer = (char)-7;
-			aThisBuffer += 1;
-			*(__int64*)aThisBuffer = (__int64)aIsValue;
-			aThisBuffer += sizeof(__int64);
+			aKey.var->ToTokenSkipAddRef(aKey);
+			if ((aVarType = aKey.symbol) == SYM_STRING)
+			{
+				*aThisBuffer = (char)-10;
+				aThisBuffer += 1;
+				*(__int64*)aThisBuffer = aThisSize = (__int64)(aKey.marker_length ? (aKey.marker_length + 1) * sizeof(TCHAR) : 0);
+				aThisBuffer += sizeof(__int64);
+				if (aThisSize)
+				{
+					memcpy(aThisBuffer, aKey.marker, (size_t)aThisSize);
+					aThisBuffer += aThisSize;
+				}
+			}
+			else if (aVarType == SYM_FLOAT)
+			{
+				*aThisBuffer = (char)-9;
+				aThisBuffer += 1;
+				*(double*)aThisBuffer = TokenToDouble(aKey);
+				aThisBuffer += sizeof(__int64);
+			}
+			else if ((aIsValue = TokenToInt64(aKey)) > 4294967295)
+			{
+				*aThisBuffer = (char)-8;
+				aThisBuffer += 1;
+				*(__int64*)aThisBuffer = aIsValue;
+				aThisBuffer += sizeof(__int64);
+			}
+			else if (aIsValue > 65535)
+			{
+				*aThisBuffer = (char)-6;
+				aThisBuffer += 1;
+				*(UINT*)aThisBuffer = (UINT)aIsValue;
+				aThisBuffer += sizeof(UINT);
+			}
+			else if (aIsValue > 255)
+			{
+				*aThisBuffer = (char)-4;
+				aThisBuffer += 1;
+				*(USHORT*)aThisBuffer = (USHORT)aIsValue;
+				aThisBuffer += sizeof(USHORT);
+			}
+			else if (aIsValue > -1)
+			{
+				*aThisBuffer = (char)-2;
+				aThisBuffer += 1;
+				*aThisBuffer = (BYTE)aIsValue;
+				aThisBuffer += sizeof(BYTE);
+			}
+			else if (aIsValue > -129)
+			{
+				*aThisBuffer = (char)-1;
+				aThisBuffer += 1;
+				*aThisBuffer = (char)aIsValue;
+				aThisBuffer += sizeof(char);
+			}
+			else if (aIsValue > -32769)
+			{
+				*aThisBuffer = (char)-3;
+				aThisBuffer += 1;
+				*(short*)aThisBuffer = (short)aIsValue;
+				aThisBuffer += sizeof(short);
+			}
+			else if (aIsValue >= INT_MIN)
+			{
+				*aThisBuffer = (char)-5;
+				aThisBuffer += 1;
+				*(int*)aThisBuffer = (int)aIsValue;
+				aThisBuffer += sizeof(int);
+			}
+			else
+			{
+				*aThisBuffer = (char)-7;
+				aThisBuffer += 1;
+				*(__int64*)aThisBuffer = (__int64)aIsValue;
+				aThisBuffer += sizeof(__int64);
+			}
 		}
 
 		// copy Value
@@ -827,95 +839,99 @@ __int64 ObjRawDump(IObject *aObject, char *aBuffer, bool aCopyBuffer, IObject *a
 				aThisBuffer += aThisSize + sizeof(__int64);
 			}
 		}
-		else if ((aVarType = aValue.var->IsNumeric()) == SYM_STRING)
+		else
 		{
-			*aThisBuffer = (char)10;
-			aThisBuffer += 1;
-			if (aCopyBuffer)
+			aValue.var->ToTokenSkipAddRef(aValue);
+			if ((aVarType = aValue.symbol) == SYM_STRING)
 			{
-				aCall.marker = _T("GetCapacity");
-				aObject->Invoke(Result, this_token, IT_CALL, params, 2);
-				*(__int64*)aThisBuffer = aThisSize = Result.value_int64;
-				aThisBuffer += sizeof(__int64);
-				if (aThisSize)
+				*aThisBuffer = (char)10;
+				aThisBuffer += 1;
+				if (aCopyBuffer)
 				{
-					aCall.marker = _T("GetAddress");
+					aCall.marker = _T("GetCapacity");
 					aObject->Invoke(Result, this_token, IT_CALL, params, 2);
-					memcpy(aThisBuffer, (char*)Result.value_int64, (size_t)aThisSize);
+					*(__int64*)aThisBuffer = aThisSize = Result.value_int64;
+					aThisBuffer += sizeof(__int64);
+					if (aThisSize)
+					{
+						aCall.marker = _T("GetAddress");
+						aObject->Invoke(Result, this_token, IT_CALL, params, 2);
+						memcpy(aThisBuffer, (char*)Result.value_int64, (size_t)aThisSize);
+					}
+					aCall.marker = _T("Next");
 				}
-				aCall.marker = _T("Next");
+				else
+				{
+					*(__int64*)aThisBuffer = aThisSize = (__int64)(aValue.marker_length ? (aValue.marker_length + 1) * sizeof(TCHAR) : 0);
+					aThisBuffer += sizeof(__int64);
+					if (aThisSize)
+						memcpy(aThisBuffer, aValue.marker, (size_t)aThisSize);
+				}
+				aThisBuffer += aThisSize;
+			}
+			else if (aVarType == SYM_FLOAT)
+			{
+				*aThisBuffer = (char)9;
+				aThisBuffer += 1;
+				*(double*)aThisBuffer = TokenToDouble(aValue);
+				aThisBuffer += sizeof(double);
+			}
+			else if ((aIsValue = TokenToInt64(aValue)) > 4294967295)
+			{
+				*aThisBuffer = (char)8;
+				aThisBuffer += 1;
+				*(__int64*)aThisBuffer = aIsValue;
+				aThisBuffer += sizeof(__int64);
+			}
+			else if (aIsValue > 65535)
+			{
+				*aThisBuffer = (char)6;
+				aThisBuffer += 1;
+				*(UINT*)aThisBuffer = (UINT)aIsValue;
+				aThisBuffer += sizeof(UINT);
+			}
+			else if (aIsValue > 255)
+			{
+				*aThisBuffer = (char)4;
+				aThisBuffer += 1;
+				*(USHORT*)aThisBuffer = (USHORT)aIsValue;
+				aThisBuffer += sizeof(USHORT);
+			}
+			else if (aIsValue > -1)
+			{
+				*aThisBuffer = (char)2;
+				aThisBuffer += 1;
+				*aThisBuffer = (BYTE)aIsValue;
+				aThisBuffer += sizeof(BYTE);
+			}
+			else if (aIsValue > -129)
+			{
+				*aThisBuffer = (char)1;
+				aThisBuffer += 1;
+				*aThisBuffer = (char)aIsValue;
+				aThisBuffer += sizeof(char);
+			}
+			else if (aIsValue > -32769)
+			{
+				*aThisBuffer = (char)3;
+				aThisBuffer += 1;
+				*(short*)aThisBuffer = (short)aIsValue;
+				aThisBuffer += sizeof(short);
+			}
+			else if (aIsValue > INT_MIN)
+			{
+				*aThisBuffer = (char)5;
+				aThisBuffer += 1;
+				*aThisBuffer = (int)aIsValue;
+				aThisBuffer += sizeof(int);
 			}
 			else
 			{
-				*(__int64*)aThisBuffer = aThisSize = (__int64)(aValue.var->ByteLength() ? aValue.var->ByteLength() + sizeof(TCHAR) : 0);
+				*aThisBuffer = (char)7;
+				aThisBuffer += 1;
+				*(__int64*)aThisBuffer = (__int64)aIsValue;
 				aThisBuffer += sizeof(__int64);
-				if (aThisSize)
-					memcpy(aThisBuffer, aValue.var->Contents(), (size_t)aThisSize);
 			}
-			aThisBuffer += aThisSize;
-		}
-		else if (aVarType == SYM_FLOAT)
-		{
-			*aThisBuffer = (char)9;
-			aThisBuffer += 1;
-			*(double*)aThisBuffer = TokenToDouble(aValue);
-			aThisBuffer += sizeof(double);
-		}
-		else if ((aIsValue = TokenToInt64(aValue)) > 4294967295)
-		{
-			*aThisBuffer = (char)8;
-			aThisBuffer += 1;
-			*(__int64*)aThisBuffer = aIsValue;
-			aThisBuffer += sizeof(__int64);
-		}
-		else if (aIsValue > 65535)
-		{
-			*aThisBuffer = (char)6;
-			aThisBuffer += 1;
-			*(UINT*)aThisBuffer = (UINT)aIsValue;
-			aThisBuffer += sizeof(UINT);
-		}
-		else if (aIsValue > 255)
-		{
-			*aThisBuffer = (char)4;
-			aThisBuffer += 1;
-			*(USHORT*)aThisBuffer = (USHORT)aIsValue;
-			aThisBuffer += sizeof(USHORT);
-		}
-		else if (aIsValue > -1)
-		{
-			*aThisBuffer = (char)2;
-			aThisBuffer += 1;
-			*aThisBuffer = (BYTE)aIsValue;
-			aThisBuffer += sizeof(BYTE);
-		}
-		else if (aIsValue > -129)
-		{
-			*aThisBuffer = (char)1;
-			aThisBuffer += 1;
-			*aThisBuffer = (char)aIsValue;
-			aThisBuffer += sizeof(char);
-		}
-		else if (aIsValue > -32769)
-		{
-			*aThisBuffer = (char)3;
-			aThisBuffer += 1;
-			*(short*)aThisBuffer = (short)aIsValue;
-			aThisBuffer += sizeof(short);
-		}
-		else if (aIsValue > INT_MIN)
-		{
-			*aThisBuffer = (char)5;
-			aThisBuffer += 1;
-			*aThisBuffer = (int)aIsValue;
-			aThisBuffer += sizeof(int);
-		}
-		else
-		{
-			*aThisBuffer = (char)7;
-			aThisBuffer += 1;
-			*(__int64*)aThisBuffer = (__int64)aIsValue;
-			aThisBuffer += sizeof(__int64);
 		}
 
 		// release object if it was assigned prevoiously when calling enum.Next
