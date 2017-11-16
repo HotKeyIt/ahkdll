@@ -561,7 +561,7 @@ __int64 ObjRawSize(IObject *aObject, bool aCopyBuffer, IObject *aObjects)
 				aSize += ObjRawSize(aIsObject, aCopyBuffer, aObjects) + 9;
 			aCall.marker = _T("Next");
 		}
-		else if ((aVarType = aKey.var->IsNonBlankIntegerOrFloat()) == SYM_STRING)
+		else if (RegExMatch(aKey.var->Contents(),_T("\\s")) || (aVarType = aKey.var->IsNonBlankIntegerOrFloat()) == SYM_STRING)
 			aSize += (aKey.var->ByteLength() ? aKey.var->ByteLength() + sizeof(TCHAR) : 0) + 9;
 		else
 			aSize += (aVarType == SYM_FLOAT || (aIsValue = TokenToInt64(aKey)) > 4294967295) ? 9 : aIsValue > 65535 ? 5 : aIsValue > 255 ? 3 : aIsValue > -129 ? 2 : aIsValue > -32769 ? 3 : aIsValue >= INT_MIN ? 5 : 9;
@@ -578,7 +578,7 @@ __int64 ObjRawSize(IObject *aObject, bool aCopyBuffer, IObject *aObjects)
 				aSize += ObjRawSize(aIsObject, aCopyBuffer, aObjects) + 9;
 			aCall.marker = _T("Next");
 		}
-		else if ((aVarType = aValue.var->IsNonBlankIntegerOrFloat()) == SYM_STRING)
+		else if (RegExMatch(aValue.var->Contents(), _T("\\s")) || (aVarType = aValue.var->IsNonBlankIntegerOrFloat()) == SYM_STRING)
 		{
 			if (aCopyBuffer)
 			{
@@ -728,7 +728,7 @@ __int64 ObjRawDump(IObject *aObject, char *aBuffer, bool aCopyBuffer, IObject *a
 				aThisBuffer += aThisSize + sizeof(__int64);
 			}
 		}
-		else if ((aVarType = aKey.var->IsNonBlankIntegerOrFloat()) == SYM_STRING)
+		else if (RegExMatch(aKey.var->Contents(), _T("\\s")) || (aVarType = aKey.var->IsNonBlankIntegerOrFloat()) == SYM_STRING)
 		{
 			*aThisBuffer = (char)-10;
 			aThisBuffer += 1;
@@ -828,7 +828,7 @@ __int64 ObjRawDump(IObject *aObject, char *aBuffer, bool aCopyBuffer, IObject *a
 				aThisBuffer += aThisSize + sizeof(__int64);
 			}
 		}
-		else if ((aVarType = aValue.var->IsNonBlankIntegerOrFloat()) == SYM_STRING)
+		else if (RegExMatch(aValue.var->Contents(), _T("\\s")) || (aVarType = aValue.var->IsNonBlankIntegerOrFloat()) == SYM_STRING)
 		{
 			*aThisBuffer = (char)10;
 			aThisBuffer += 1;
