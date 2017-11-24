@@ -901,6 +901,10 @@ Script::~Script() // Destructor.
 				cp->NextCriterion = cp->NextCriterion->NextCriterion;
 		}
 #endif
+#ifdef _USRDLL
+		if (g_ClassRegistered)
+			UnregisterClass((LPCWSTR)&WINDOW_CLASS_MAIN, g_hInstance);
+#endif
 	if (GuiType::sFont)
 		free(GuiType::sFont);
 	GuiType::sFont = NULL;

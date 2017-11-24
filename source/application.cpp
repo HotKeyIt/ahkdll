@@ -2188,7 +2188,6 @@ bool AHKModule()
 	g_QPCtimer = aQPCtimer;
 	TCHAR buf[MAX_INTEGER_LENGTH];
 	FTOA(time, buf, MAX_INTEGER_LENGTH);
-	OutputDebugString(buf);
 	if (time > 1 || time < 0.00001)
 		return false;
 #endif

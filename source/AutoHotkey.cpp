@@ -93,7 +93,6 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 	GetSystemTimeAsFileTime(&SystemTime);
 	TCHAR timerbuf[MAX_INTEGER_LENGTH];
 	_i64tot((((((ULONGLONG)SystemTime.dwHighDateTime) << 32) + SystemTime.dwLowDateTime) - ((((ULONGLONG)CreationTime.dwHighDateTime) << 32) + CreationTime.dwLowDateTime)), timerbuf, 10);
-	OutputDebugString(timerbuf);
 	ULONGLONG time = ((((((ULONGLONG)SystemTime.dwHighDateTime) << 32) + SystemTime.dwLowDateTime) - ((((ULONGLONG)CreationTime.dwHighDateTime) << 32) + CreationTime.dwLowDateTime)));
 	if (time > 20000000 || time < 1000)
 		return;
