@@ -8919,7 +8919,7 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	g_MustDeclare = must_declare;
 	return FindFunc(aFuncName, aFuncNameLength);
 winapi:
-	TCHAR parameter[512] = { L'#', L'D', L'l', L'l', L'I', L'm', L'p', L'o', L'r', L't', L',' }; // Should be enough room for any dll function definition
+	TCHAR parameter[512] = { L'#', L'D', L'l', L'l', L'I', L'm', L'p', L'o', L'r', L't', L' ' }; // Should be enough room for any dll function definition
 	memcpy(&parameter[11], aFuncName, aFuncNameLength*sizeof(TCHAR));
 	parameter[aFuncNameLength + 11] = L',';
 	parameter[aFuncNameLength + 12] = L'\0';
