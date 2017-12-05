@@ -8921,7 +8921,7 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 winapi:
 	TCHAR parameter[512] = { L'#', L'D', L'l', L'l', L'I', L'm', L'p', L'o', L'r', L't', L' ' }; // Should be enough room for any dll function definition
 	memcpy(&parameter[11], aFuncName, aFuncNameLength*sizeof(TCHAR));
-	parameter[aFuncNameLength + 11] = L' ';
+	parameter[aFuncNameLength + 11] = L',';
 	parameter[aFuncNameLength + 12] = L'\0';
 
 	// parameterlow is used to find the function definition
@@ -9060,7 +9060,7 @@ winapi:
 				, _tcslen(parameter), parameter);
 			// Now continue on normally so that our caller can continue looking for syntax errors.
 		}
-		LoadDllFunction(_tcschr(parameter, L',') + 1, parameter);
+		LoadDllFunction(_tcschr(parameter, L' ') + 1, parameter);
 		return FindFunc(aFuncName, aFuncNameLength);
 	}
 	return NULL;
