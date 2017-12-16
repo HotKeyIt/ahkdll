@@ -11874,9 +11874,16 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 	if (is_call)
 	{
 		aParamCount -= 1;
-		aParam = &aParam[1];
-		if (is_call && aParam[0]->symbol == SYM_STRING && _tcscmp(aParam[0]->marker,_T("")))
-			ConvertDllArgType(&aParam[0]->marker, return_attrib);
+		if (aParamCount == 0)
+		{
+			aParam = NULL;
+		}
+		else
+		{
+			aParam = &aParam[1];
+			if (aParam[0]->symbol == SYM_STRING && _tcscmp(aParam[0]->marker, _T("")))
+				ConvertDllArgType(&aParam[0]->marker, return_attrib);
+		}
 	}
 	// Set default dynacall parameters
 	for (i = 0; i < this->marg_count; i++)
