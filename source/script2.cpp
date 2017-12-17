@@ -13748,7 +13748,16 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 	// It has also verified that the dyna_param array is large enough to hold all of the args.
 	int is_call = IS_INVOKE_CALL ? 1 : 0;
 	if (is_call && aParam[0]->symbol == SYM_OPERAND && _tcscmp(aParam[0]->marker, _T("")))
-			ConvertDllArgType(&aParam[0]->marker, return_attrib);
+	{
+		LPTSTR return_type_string[2] = { 0 };
+		return_type_string[0] = aParam[0]->marker;
+		ConvertDllArgType(return_type_string, return_attrib);
+		if (return_attrib.type == DLL_ARG_INVALID)
+		{
+			g_script.ScriptError(_T("Invalid return type.")); // Stage 2 error: Invalid return type or arg type.
+			return FAIL;
+		}
+	}
 	// Set default dynacall parameters
 	for (i = 0; i < this->marg_count; i++)
 		this->mdyna_param[i] = this->mdefault_param[i];
@@ -13771,8 +13780,8 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 				// to be stack memory, which would be invalid memory upon return to the caller).
 				// The complexity of this doesn't seem worth the rarity of the need, so this will be
 				// documented in the help file.
-				g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DllCall")); // Stage 2 error: Invalid return type or arg type.
-				return OK;
+				g_script.ScriptError(ERR_INVALID_VALUE); // Stage 2 error: Invalid return type or arg type.
+				return FAIL;
 			}
 			// Otherwise, it's a supported type of string.
 			this_dyna_param.ptr = TokenToString(this_param); // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
@@ -13806,8 +13815,8 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 		case DLL_ARG_xSTR: // See the section above for comments.
 			if (IS_NUMERIC(this_param.symbol))
 			{
-				g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DllCall"));
-				return OK;
+				g_script.ScriptError(ERR_INVALID_VALUE); // Stage 2 error: Invalid return type or arg type.
+				return FAIL;
 			}
 			// String needing translation: ASTR on Unicode build, WSTR on ANSI build.
 			pStr[i] = new UorA(CStringCharFromWChar,CStringWCharFromChar)(TokenToString(this_param));
@@ -13824,8 +13833,8 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 			break;
 
 		case DLL_ARG_INVALID:
-			g_script.SetErrorLevelOrThrowStr(_T("-2"), _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
-			return OK;
+			g_script.ScriptError(ERR_INVALID_VALUE); // Stage 2 error: Invalid return type or arg type.
+			return FAIL;
 
 
 		default: // Namely:
