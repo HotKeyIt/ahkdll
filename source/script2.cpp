@@ -11870,19 +11870,31 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 	// Above has already ensured that after the first parameter, there are either zero additional parameters
 	// or an even number of them.  In other words, each arg type will have an arg value to go with it.
 	// It has also verified that the dyna_param array is large enough to hold all of the args.
-	int is_call = IS_INVOKE_CALL ? 1 : 0;
-	if (is_call)
+	if (IS_INVOKE_CALL)
 	{
-		aParamCount -= 1;
-		if (aParamCount == 0)
+		if (aParamCount > 1 && aParam[1]->symbol == SYM_VAR && aParam[1]->var->HasObject())
 		{
-			aParam = NULL;
-		}
+			aParamCount -= 2;
+			if (aParamCount == 0)
+				aParam = NULL;
+			else
+				aParam = &aParam[2];
+		} 
 		else
 		{
-			aParam = &aParam[1];
 			if (aParam[0]->symbol == SYM_STRING && _tcscmp(aParam[0]->marker, _T("")))
-				ConvertDllArgType(&aParam[0]->marker, return_attrib);
+			{
+				LPTSTR return_type_string[2] = { 0 };
+				return_type_string[0] = aParam[0]->marker;
+				ConvertDllArgType(return_type_string, return_attrib);
+				if (return_attrib.type == DLL_ARG_INVALID)
+					_o_throw(ERR_INVALID_RETURN_TYPE);
+			}
+			aParamCount -= 1;
+			if (aParamCount == 0)
+				aParam = NULL;
+			else
+				aParam = &aParam[1];
 		}
 	}
 	// Set default dynacall parameters
@@ -11891,9 +11903,9 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 
 	for (i = 0; i < this->marg_count; i++)  // Same loop as used in DynaToken::Create below, so maintain them together.
 	{
-		if (i >= aParamCount - is_call)
+		if (i >= aParamCount)
 			break;
-		ExprTokenType &this_param = *aParam[i + is_call];
+		ExprTokenType &this_param = *aParam[i];
 		DYNAPARM &this_dyna_param = this->mdyna_param[this->paramshift[i]];
 		SymbolType is_number;
 		switch (this_dyna_param.type)
@@ -11923,8 +11935,7 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 				}
 				else
 				{
-					g_script->SetErrorLevelOrThrowStr(_T("-2"), _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
-					return OK;
+					_o_throw(ERR_INVALID_ARG_TYPE);
 				}
 			}
 			else
@@ -11987,8 +11998,7 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 				}
 				else
 				{
-					g_script->SetErrorLevelOrThrowStr(_T("-2"), _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
-					return OK;
+					_o_throw(ERR_INVALID_ARG_TYPE);
 				}
 			}
 			else if (this_param.symbol == SYM_VAR && TokenIsPureNumeric(this_param,is_number))
@@ -12020,10 +12030,9 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 			break;
 
 		case DLL_ARG_INVALID:
-			if (aParam[i + is_call]->symbol == SYM_VAR)
-				aParam[i + is_call]->var->MaybeWarnUninitialized();
-			g_script->SetErrorLevelOrThrowInt(-2, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
-			return OK;
+			if (aParam[i]->symbol == SYM_VAR)
+				aParam[i]->var->MaybeWarnUninitialized();
+			_o_throw(ERR_INVALID_ARG_TYPE);
 
 
 		default: // Namely:
@@ -12232,7 +12241,7 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 
 	// Store any output parameters back into the input variables.  This allows a function to change the
 	// contents of a variable for the following arg types: String and Pointer to <various number types>.
-	for (arg_count = 0, i = is_call; i < aParamCount; ++arg_count, i += 1) // Same loop as used in above, so maintain them together.
+	for (arg_count = 0, i = 0; i < aParamCount; ++arg_count, i += 1) // Same loop as used in above, so maintain them together.
 	{
 		ExprTokenType &this_param = *aParam[i];  // Resolved for performance and convenience.
 		// The following check applies to DLL_ARG_xSTR, which is "AStr" on Unicode builds and "WStr"
@@ -12246,7 +12255,7 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 		}
 		if (this_param.symbol != SYM_VAR) // Output parameters are copied back only if its counterpart parameter is a naked variable.
 			continue;
-		DYNAPARM &this_dyna_param = this->mdyna_param[this->paramshift[i - is_call]]; // Resolved for performance and convenience.
+		DYNAPARM &this_dyna_param = this->mdyna_param[this->paramshift[i]]; // Resolved for performance and convenience.
 		Var &output_var = *this_param.var;                 //
 		if (this_dyna_param.type == DLL_ARG_STR) // Native string type for current build config.
 		{
