@@ -11872,7 +11872,7 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 	// It has also verified that the dyna_param array is large enough to hold all of the args.
 	if (IS_INVOKE_CALL)
 	{
-		if (aParamCount > 1 && aParam[1]->symbol == SYM_VAR && aParam[1]->var->HasObject())
+		if (aParamCount > 1 && ((aParam[1]->symbol == SYM_VAR && aParam[1]->var->HasObject()) || aParam[1]->symbol == SYM_OBJECT))
 		{
 			aParamCount -= 2;
 			if (aParamCount == 0)
