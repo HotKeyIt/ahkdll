@@ -13747,7 +13747,7 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 	// or an even number of them.  In other words, each arg type will have an arg value to go with it.
 	// It has also verified that the dyna_param array is large enough to hold all of the args.
 	int is_call = IS_INVOKE_CALL ? 1 : 0;
-	if (is_call && aParam[0]->symbol == SYM_OPERAND && _tcscmp(aParam[0]->marker, _T("")))
+	if (is_call && (aParam[0]->symbol == SYM_OPERAND || aParam[0]->symbol == SYM_STRING) && _tcscmp(aParam[0]->marker, _T("")))
 	{
 		LPTSTR return_type_string[2] = { 0 };
 		return_type_string[0] = aParam[0]->marker;
