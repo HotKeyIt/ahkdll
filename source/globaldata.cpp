@@ -107,6 +107,7 @@ _thread_local bool g_RunStdIn = false;
 _thread_local WarnMode g_Warn_UseUnsetLocal = WARNMODE_OFF;		// Used by #Warn directive.
 _thread_local WarnMode g_Warn_UseUnsetGlobal = WARNMODE_OFF;		//
 _thread_local WarnMode g_Warn_LocalSameAsGlobal = WARNMODE_OFF;	//
+_thread_local WarnMode g_Warn_ClassOverwrite = WARNMODE_OFF;		//
 _thread_local SingleInstanceType g_AllowOnlyOneInstance = SINGLE_INSTANCE_PROMPT;
 _thread_local PVOID g_ExceptionHandler = NULL;
 _thread_local bool g_ExceptionWarnContinuable = true;
@@ -182,11 +183,11 @@ HWND g_HShwnd;
 int g_HSPriority = 0;  // default priority is always 0
 int g_HSKeyDelay = 0;  // Fast sends are much nicer for auto-replace and auto-backspace.
 SendModes g_HSSendMode = SM_INPUT; // v1.0.43: New default for more reliable hotstrings.
+SendRawType g_HSSendRaw = SCM_NOT_RAW;
 bool g_HSCaseSensitive = false;
 bool g_HSConformToCase = true;
 bool g_HSDoBackspace = true;
 bool g_HSOmitEndChar = false;
-bool g_HSSendRaw = false;
 bool g_HSEndCharRequired = true;
 bool g_HSDetectWhenInsideWord = false;
 bool g_HSDoReset = false;
@@ -369,8 +370,6 @@ Action g_act[] =
 
 	, {_T("Sleep"), 1, 1, false, {1, 0}} // Sleep time in ms (numeric)
 
-	, {_T("Hotkey"), 1, 3, false, NULL}  // Mod+Keys, Label/Action (blank to avoid changing curr. label), Options
-	, {_T("SetTimer"), 0, 3, false, {3, 0}}  // Label (or dereference that resolves to a label), period (or ON/OFF), Priority
 	, {_T("Critical"), 0, 1, false, NULL}  // On|Off
 	, {_T("Thread"), 1, 3, false, {2, 3, 0}}  // Command, value1 (can be blank for interrupt), value2
 
@@ -455,7 +454,6 @@ Action g_act[] =
 
 	, {_T("Edit"), 0, 0, false, NULL}
 	, {_T("Reload"), 0, 0, false, NULL}
-	, {_T("Menu"), 2, 6, false, NULL}  // tray, add, name, label, options, future use
 
 	, {_T("Shutdown"), 1, 1, false, {1, 0}} // Seems best to make the first param (the flag/code) mandatory.
 

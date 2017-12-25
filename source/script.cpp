@@ -123,8 +123,12 @@ FuncEntry g_BIF[] =
 	BIFn(Sqrt, 1, 1, true, BIF_SqrtLogLn),
 	BIFn(Log, 1, 1, true, BIF_SqrtLogLn),
 	BIFn(Ln, 1, 1, true, BIF_SqrtLogLn),
+	BIFn(Min, 1, NA, true, BIF_MinMax),
+	BIFn(Max, 1, NA, true, BIF_MinMax),
 	BIF1(DateAdd, 3, 3, true),
 	BIF1(DateDiff, 3, 3, true),
+	BIF1(Hotkey, 1, 3, false),
+	BIF1(SetTimer, 0, 3, false),
 	BIF1(OnMessage, 2, 4, false),
 	BIF1(RegisterCallback, 1, 4, true),
 	BIF1(Type, 1, 1, true),
@@ -275,6 +279,7 @@ FuncEntry g_BIF[] =
 	BIFn(SoundGet, 0, 3, true, BIF_Sound),
 	BIFn(SoundSet, 1, 4, false, BIF_Sound),
 	BIF1(StatusBarGetText, 0, 5, true),
+	BIF1(CaretGetPos, 0, 2, false, {1, 2}),
 
 	BIF1(WinGetClass, 0, 4, true),
 	BIF1(WinGetText, 0, 4, true),
@@ -322,8 +327,9 @@ FuncEntry g_BIF[] =
 
 	BIFn(OnExit, 1, 2, false, BIF_OnExitOrClipboard),
 	BIFn(OnClipboardChange, 1, 2, false, BIF_OnExitOrClipboard),
-	BIFn(MenuGetHandle, 1, 1, true, BIF_MenuGet),
-	BIFn(MenuGetName, 1, 1, true, BIF_MenuGet),
+	BIFn(MenuCreate, 0, 0, true, BIF_Menu),
+	BIFn(MenuFromHandle, 1, 1, true, BIF_Menu),
+	BIF1(TraySetIcon, 0, 3, false),
 	BIF1(LoadPicture, 1, 3, true),
 };
 #undef NA
@@ -356,10 +362,9 @@ VarEntry g_BIV_A[] =
 	A_(AhkDir),
 	A_(AhkPath),
 	A_(AhkVersion),
+	A_w(AllowMainWindow),
 	A_x(AppData, BIV_SpecialFolderPath),
 	A_x(AppDataCommon, BIV_SpecialFolderPath),
-	A_x(CaretX, BIV_Caret),
-	A_x(CaretY, BIV_Caret),
 	A_x(ComputerName, BIV_UserName_ComputerName),
 	A_(ComSpec),
 	A_wx(ControlDelay, BIV_xDelay, BIV_xDelay_Set),
@@ -385,9 +390,9 @@ VarEntry g_BIV_A[] =
 	A_(GlobalStruct),
 	A_x(Hour, BIV_DateTime),
 	A_(IconFile),
-	A_(IconHidden),
+	A_w(IconHidden),
 	A_(IconNumber),
-	A_(IconTip),
+	A_w(IconTip),
 	A_wx(Index, BIV_LoopIndex, BIV_LoopIndex_Set),
 	A_(InitialWorkingDir),
 	A_x(IPAddress1, BIV_IPAddress),
@@ -479,9 +484,6 @@ VarEntry g_BIV_A[] =
 	A_(ThisFunc),
 	A_(ThisHotkey),
 	A_(ThisLabel),
-	A_(ThisMenu),
-	A_(ThisMenuItem),
-	A_(ThisMenuItemPos),
 	A_(ThreadID),
 	A_(TickCount),
 	A_(TimeIdle),
@@ -490,6 +492,7 @@ VarEntry g_BIV_A[] =
 	A_(TimeSinceThisHotkey),
 	A_w(TitleMatchMode),
 	A_wx(TitleMatchModeSpeed, BIV_TitleMatchModeSpeed, BIV_TitleMatchMode_Set),
+	A_(TrayMenu),
 	A_x(UserName, BIV_UserName_ComputerName),
 	A_x(WDay, BIV_DateTime),
 	A_wx(WinDelay, BIV_xDelay, BIV_xDelay_Set),
@@ -535,12 +538,11 @@ Script::Script()
 	, mFirstLabel(NULL), mLastLabel(NULL), mFirstGroup(NULL)
 	, mFunc(NULL), mFuncCount(0), mFuncCountMax(0)
 	, mFirstTimer(NULL), mLastTimer(NULL), mTimerEnabledCount(0), mTimerCount(0)
-	, mFirstMenu(NULL), mLastMenu(NULL), mMenuCount(0), mThisMenuItem(NULL)
+	, mFirstMenu(NULL), mLastMenu(NULL), mMenuCount(0)
 	, mVar(NULL), mVarCount(0), mVarCountMax(0), mLazyVar(NULL), mLazyVarCount(0)
 	, mCurrentFuncOpenBlockCount(0), mNextLineIsFunctionBody(false), mNoUpdateLabels(false)
 	, mClassObjectCount(0), mUnresolvedClasses(NULL), mClassProperty(NULL), mClassPropertyDef(NULL)
 	, mCurrFileIndex(0), mCombinedLineNumber(0), mNoHotkeyLabels(true)
-	, mMenuUseErrorLevel(false)
 	, mFileSpec(_T("")), mFileDir(_T("")), mFileName(_T("")), mOurEXE(_T("")), mOurEXEDir(_T("")), mMainWindowTitle(_T(""))
 	, mScriptName(NULL)
 	, mIsReadyToExecute(false), mAutoExecSectionIsRunning(false)
@@ -554,14 +556,13 @@ Script::Script()
 	// v1.0.25: mLastScriptRest (removed in v2) and mLastPeekTime are now initialized
 	// right before the auto-exec section of the script is launched, which avoids an
 	// initial Sleep(10) in ExecUntil that would otherwise occur.
-	*mThisMenuItemName = *mThisMenuName = '\0';
 	g_ThreadID = GetCurrentThreadId();
 	g_hThread = OpenThread(THREAD_ALL_ACCESS, TRUE, g_ThreadID);
 	g = &g_startup;
 	ZeroMemory(&mNIC, sizeof(mNIC));  // Constructor initializes this, to be safe.
 	mNIC.hWnd = NULL;  // Set this as an indicator that it tray icon is not installed.
 	// Lastly (after the above have been initialized), anything that can fail:
-	if (!(mTrayMenu = AddMenu(_T("Tray")))) // realistically never happens
+	if (   !(mTrayMenu = AddMenu())   ) // realistically never happens
 	{
 		ScriptError(_T("No tray mem"));
 		ExitApp(EXIT_CRITICAL);
@@ -673,15 +674,8 @@ Script::~Script() // Destructor.
 	// Since they're not associated with a window, we must free the resources for all popup menus.
 	// Update: Even if a menu is being used as a GUI window's menu bar, see note above for why menu
 	// destruction is done AFTER the GUI windows are destroyed:
-	UserMenu *menu_to_delete;
-	for (UserMenu *m = mFirstMenu; m;)
-	{
-		menu_to_delete = m;
-		m = m->mNextMenu;
-		ScriptDeleteMenu(menu_to_delete);
-		// Above call should not return FAIL, since the only way FAIL can realistically happen is
-		// when a GUI window is still using the menu as its menu bar.  But all GUI windows are gone now.
-	}
+	for (UserMenu *m = mFirstMenu; m; m = m->mNextMenu)
+		m->Dispose();
 	mFirstMenu = NULL;
 	mLastMenu = NULL;
 	mTrayMenu = NULL;
@@ -1460,6 +1454,36 @@ void Script::EnableClipboardListener(bool aEnable)
 }
 
 
+#ifdef AUTOHOTKEYSC
+
+void Script::AllowMainWindow(bool aAllow)
+{
+	if (g_AllowMainWindow == aAllow)
+		return;
+	g_AllowMainWindow = aAllow;
+	if (aAllow)
+	{
+		EnableOrDisableViewMenuItems(GetMenu(g_hWnd), MF_ENABLED); // Added as a fix in v1.0.47.06.
+		// Rather than using InsertMenu() to insert the item in the right position,
+		// which makes the code rather unmaintainable, it seems best just to recreate
+		// the entire menu.  This will result in the standard menu items going back
+		// up to the top of the menu if the user previously had them at the bottom,
+		// but it seems too rare to worry about, especially since it's easy to
+		// work around that:
+		if (mTrayMenu->mIncludeStandardItems)
+			mTrayMenu->Destroy(); // It will be recreated automatically the next time the user displays it.
+		// else there's no need.
+	}
+	else
+	{
+		EnableOrDisableViewMenuItems(GetMenu(g_hWnd), MF_DISABLED | MF_GRAYED); // Added as a fix in v1.0.47.06.
+		// See comments above for why it's done this way vs. using DeleteMenu():
+		if (mTrayMenu->mIncludeStandardItems)
+			mTrayMenu->Destroy(); // It will be recreated automatically the next time the user displays it.
+		// else there's no need.
+	}
+}
+
 void Script::EnableOrDisableViewMenuItems(HMENU aMenu, UINT aFlags)
 {
 	EnableMenuItem(aMenu, ID_VIEW_KEYHISTORY, aFlags);
@@ -1467,6 +1491,8 @@ void Script::EnableOrDisableViewMenuItems(HMENU aMenu, UINT aFlags)
 	EnableMenuItem(aMenu, ID_VIEW_VARIABLES, aFlags);
 	EnableMenuItem(aMenu, ID_VIEW_HOTKEYS, aFlags);
 }
+
+#endif
 
 
 
@@ -1525,6 +1551,95 @@ void Script::UpdateTrayIcon(bool aForceUpdate)
 	}
 	// else do nothing, just leave it in the same state.
 }
+
+
+ResultType Script::SetTrayIcon(LPTSTR aIconFile, int aIconNumber, ToggleValueType aFreezeIcon)
+{
+	bool force_update = false;
+
+	if (aFreezeIcon != NEUTRAL) // i.e. if it's blank, don't change the current setting of mIconFrozen.
+	{
+		if (mIconFrozen != (aFreezeIcon == TOGGLED_ON)) // It needs to be toggled.
+		{
+			mIconFrozen = !mIconFrozen;
+			force_update = true; // Ensure the icon correctly reflects the current setting and suspend/pause status.
+		}
+	}
+	
+	if (*aIconFile == '*' && !aIconFile[1]) // Restore the standard icon.
+	{
+		if (mCustomIcon)
+		{
+			GuiType::DestroyIconsIfUnused(mCustomIcon, mCustomIconSmall); // v1.0.37.07: Solves reports of Gui windows losing their icons.
+			// If the above doesn't destroy the icon, the GUI window(s) still using it are responsible for
+			// destroying it later.
+			mCustomIcon = NULL;  // To indicate that there is no custom icon.
+			mCustomIconSmall = NULL;
+			if (mCustomIconFile)
+				*mCustomIconFile = '\0';
+			mCustomIconNumber = 0;
+			force_update = true;
+		}
+		aIconFile = _T(""); // Handle this like TraySetIcon(,,n) in case n was specified.
+	}
+	
+	if (!*aIconFile) // No icon specified, or it was already reset to default above.
+	{
+		if (force_update)
+			UpdateTrayIcon(true);
+		return OK; // We were called just to freeze/unfreeze the icon.
+	}
+
+	// v1.0.43.03: Load via LoadPicture() vs. ExtractIcon() because ExtractIcon harms the quality
+	// of 16x16 icons inside .ico files by first scaling them to 32x32 (which then has to be scaled
+	// back to 16x16 for the tray and for the SysMenu icon). I've visually confirmed that the
+	// distortion occurs at least when a 16x16 icon is loaded by ExtractIcon() then put into the
+	// tray.  It might not be the scaling itself that distorts the icon: the pixels are all in the
+	// right places, it's just that some are the wrong color/shade. This implies that some kind of
+	// unwanted interpolation or color tweaking is being done by ExtractIcon (and probably LoadIcon),
+	// but not by LoadImage.
+	// Also, load the icon at actual size so that when/if this icon is used for a GUI window, its
+	// appearance in the alt-tab menu won't be unexpectedly poor due to having been scaled from its
+	// native size down to 16x16.
+	
+	if (aIconNumber == 0) // Must validate for use in two places below.
+		aIconNumber = 1; // Must be != 0 to tell LoadPicture that "icon must be loaded, never a bitmap".
+
+	int image_type;
+	// L17: For best results, load separate small and large icons.
+	HICON new_icon_small;
+	HICON new_icon = NULL; // Initialize to detect failure to load either icon.
+	if ( new_icon_small = (HICON)LoadPicture(aIconFile, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), image_type, aIconNumber, false) ) // Called with icon_number > 0, it guarantees return of an HICON/HCURSOR, never an HBITMAP.
+		if ( !(new_icon = (HICON)LoadPicture(aIconFile, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), image_type, aIconNumber, false)) )
+			DestroyIcon(new_icon_small);
+	if ( !new_icon )
+		return g_script->ScriptError(_T("Can't load icon."), aIconFile);
+
+	GuiType::DestroyIconsIfUnused(mCustomIcon, mCustomIconSmall); // This destroys it if non-NULL and it's not used by an GUI windows.
+
+	mCustomIcon = new_icon;
+	mCustomIconSmall = new_icon_small;
+	mCustomIconNumber = aIconNumber;
+	// Allocate the full MAX_PATH in case the contents grow longer later.
+	// SimpleHeap improves avg. case mem load:
+	if (!mCustomIconFile)
+		mCustomIconFile = (LPTSTR) g_SimpleHeap->Malloc(MAX_PATH * sizeof(TCHAR));
+	if (mCustomIconFile)
+	{
+		// Get the full path in case it's a relative path.  This is documented and it's done in case
+		// the script ever changes its working directory:
+		TCHAR full_path[MAX_PATH], *filename_marker;
+		if (GetFullPathName(aIconFile, _countof(full_path) - 1, full_path, &filename_marker))
+			tcslcpy(mCustomIconFile, full_path, MAX_PATH);
+		else
+			tcslcpy(mCustomIconFile, aIconFile, MAX_PATH);
+	}
+
+	if (!g_NoTrayIcon)
+		UpdateTrayIcon(true);  // Need to use true in this case too.
+	return OK;
+}
+
 
 
 ResultType Script::AutoExecSection()
@@ -2048,7 +2163,7 @@ LineNumberType Script::LoadFromText(LPTSTR aScript, LPCTSTR aPathToShow)
 	for (int i = 0; i < mFuncCount; ++i)
 	{
 		Func &func = *mFunc[i];
-		if (!func.mIsBuiltIn)
+		if (!func.mIsBuiltIn && !(func.mDefaultVarType & VAR_FORCE_LOCAL))
 		{
 			PreprocessLocalVars(func, func.mVar, func.mVarCount);
 			PreprocessLocalVars(func, func.mStaticVar, func.mStaticVarCount);
@@ -2065,6 +2180,11 @@ LineNumberType Script::LoadFromText(LPTSTR aScript, LPCTSTR aPathToShow)
 		mUnresolvedClasses->Release();
 		mUnresolvedClasses = NULL;
 	}
+
+	// Check for classes potentially being overwritten.
+	if (g_Warn_ClassOverwrite)
+		CheckForClassOverwrite();
+
 	if (mIncludeLibraryFunctionsThenExit)
 	{
 		delete mIncludeLibraryFunctionsThenExit;
@@ -2183,7 +2303,7 @@ UINT Script::LoadFromFile()
 	for (int i = 0; i < mFuncCount; ++i)
 	{
 		Func &func = *mFunc[i];
-		if (!func.mIsBuiltIn)
+		if (!func.mIsBuiltIn && !(func.mDefaultVarType & VAR_FORCE_LOCAL))
 		{
 			PreprocessLocalVars(func, func.mVar, func.mVarCount);
 			PreprocessLocalVars(func, func.mStaticVar, func.mStaticVarCount);
@@ -2200,6 +2320,10 @@ UINT Script::LoadFromFile()
 		mUnresolvedClasses->Release();
 		mUnresolvedClasses = NULL;
 	}
+
+	// Check for classes potentially being overwritten.
+	if (g_Warn_ClassOverwrite)
+		CheckForClassOverwrite();
 
 	if (mIncludeLibraryFunctionsThenExit)
 	{
@@ -3662,7 +3786,7 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 					break;
 				}
 				mCurrLine = NULL; // v1.0.40.04: Prevents showing misleading vicinity lines for a syntax-error such as %::%
-				_stprintf(buf, _T("{Blind}%s%s{%s DownTemp}"), extra_event, remap_dest_modifiers, remap_dest); // v1.0.44.05: DownTemp vs. Down. See Send's DownTemp handler for details.
+				_stprintf(buf, _T("{Blind}%s%s{%s DownR}"), extra_event, remap_dest_modifiers, remap_dest); // v1.0.44.05: DownTemp vs. Down. See Send's DownTemp handler for details.
 				if (!AddLine(ACT_SEND, &buf, 1, NULL)) // v1.0.40.04: Check for failure due to bad remaps such as %::%.
 					return FAIL;
 				AddLine(ACT_RETURN);
@@ -5147,7 +5271,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 					break;
 				}
 				mCurrLine = NULL; // v1.0.40.04: Prevents showing misleading vicinity lines for a syntax-error such as %::%
-				_stprintf(buf, _T("{Blind}%s%s{%s DownTemp}"), extra_event, remap_dest_modifiers, remap_dest); // v1.0.44.05: DownTemp vs. Down. See Send's DownTemp handler for details.
+				_stprintf(buf, _T("{Blind}%s%s{%s DownR}"), extra_event, remap_dest_modifiers, remap_dest); // v1.0.44.05: DownTemp vs. Down. See Send's DownTemp handler for details.
 				if (!AddLine(ACT_SEND, &buf, 1, NULL)) // v1.0.40.04: Check for failure due to bad remaps such as %::%.
 					goto FAIL;
 				AddLine(ACT_RETURN);
@@ -5928,6 +6052,8 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 			warnType = WARN_USE_UNSET_GLOBAL;
 		else if (IS_PARAM1_MATCH(_T("LocalSameAsGlobal")))
 			warnType = WARN_LOCAL_SAME_AS_GLOBAL;
+		else if (IS_PARAM1_MATCH(_T("ClassOverwrite")))
+			warnType = WARN_CLASS_OVERWRITE;
 		else
 			return ScriptError(ERR_PARAM1_INVALID, aBuf);
 
@@ -5953,6 +6079,9 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 
 		if (warnType == WARN_LOCAL_SAME_AS_GLOBAL || warnType == WARN_ALL)
 			g_Warn_LocalSameAsGlobal = warnMode;
+
+		if (warnType == WARN_CLASS_OVERWRITE || warnType == WARN_ALL)
+			g_Warn_ClassOverwrite = warnMode;
 
 		return CONDITION_TRUE;
 	}
@@ -6118,6 +6247,8 @@ Label *Script::FindLabel(LPTSTR aLabelName)
 	for (label = mFirstLabel; label != NULL; label = label->mNextLabel)
 		if (!_tcsicmp(label->mName, aLabelName)) // lstrcmpi() is not used: 1) avoids breaking existing scripts; 2) provides consistent behavior across multiple locales; 3) performance.
 			return label; // Match found.
+	// if (g->CurrentLabel && !_tcsicmp(g->CurrentLabel->mName, aLabelName)) // function local label to find itself (e.g. SetTimer), rejected by lexikos
+		// return g->CurrentLabel;
 	return NULL; // No match found.
 }
 
@@ -6268,18 +6399,28 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType
 				if (!result) // It's probably operator, e.g. local = %var%
 					break;
 			}
-			else // It's the word "global", "local", "static" by itself.  But only global or static is valid that way (when it's the first line in the function body).
+			else // It's the word "global", "local", "static" by itself.
 			{
 				// Any combination of declarations is allowed here for simplicity, but only declarations can
 				// appear above this line:
 				if (mNextLineIsFunctionBody)
 				{
-					g->CurrentFunc->mDefaultVarType = declare_type;
-					// No further action is required for the word "global" or "static" by itself.
-					return OK;
+					if (g->CurrentFunc->mDefaultVarType == VAR_DECLARE_NONE)
+					{
+						if (declare_type == VAR_DECLARE_LOCAL)
+							declare_type |= VAR_FORCE_LOCAL; // v1.1.27: "local" by itself restricts globals to only those declared inside the function.
+						g->CurrentFunc->mDefaultVarType = declare_type;
+						// No further action is required.
+						return OK;
+					}
+					// v1.1.27: Allow "local" and "static" to be combined, leaving the restrictions on globals in place.
+					else if (g->CurrentFunc->mDefaultVarType == (VAR_DECLARE_LOCAL | VAR_FORCE_LOCAL) && declare_type == VAR_DECLARE_STATIC)
+					{
+						g->CurrentFunc->mDefaultVarType = (VAR_DECLARE_STATIC | VAR_FORCE_LOCAL);
+						return OK;
+					}
 				}
-				// Otherwise, it's the word "local" by itself (which isn't allowed since it's the default),
-				// or it's the word global or static by itself, but it occurs too far down in the body.
+				// Otherwise, it occurs too far down in the body.
 				return ScriptError(ERR_UNRECOGNIZED_ACTION, aLineText); // Vague error since so rare.
 			}
 
@@ -9679,6 +9820,8 @@ Var *Script::FindVar(LPTSTR aVarName, size_t aVarNameLength, int *apInsertPos, i
 		for (int i = 0; i < g.CurrentFunc->mGlobalVarCount; ++i)
 			if (!_tcsicmp(var_name, g.CurrentFunc->mGlobalVar[i]->mName)) // lstrcmpi() is not used: 1) avoids breaking existing scripts; 2) provides consistent behavior across multiple locales; 3) performance.
 				return g.CurrentFunc->mGlobalVar[i];
+		if (g.CurrentFunc->mDefaultVarType & VAR_FORCE_LOCAL)
+			return NULL;
 		// As a last resort, check for a super-global:
 		Var *gvar = FindVar(aVarName, aVarNameLength, NULL, FINDVAR_GLOBAL, NULL);
 		if (gvar && gvar->IsSuperGlobal())
@@ -9758,7 +9901,7 @@ Var *Script::AddVar(LPTSTR aVarName, size_t aVarNameLength, int aInsertPos, int 
 	//   VAR_LOCAL_FUNCPARAM should not be made static.
 	//   VAR_LOCAL_STATIC is already static.
 	//   VAR_DECLARED indicates mDefaultVarType is irrelevant.
-	if (aScope == VAR_LOCAL && g->CurrentFunc->mDefaultVarType == VAR_DECLARE_STATIC)
+	if (aScope == VAR_LOCAL && (g->CurrentFunc->mDefaultVarType & VAR_LOCAL_STATIC))
 		// v1.0.48: Lexikos: Current function is assume-static, so set static attribute.
 		aScope |= VAR_LOCAL_STATIC;
 
@@ -10050,9 +10193,7 @@ ResultType Script::PreparseExpressions(Line *aStartingLine)
 		{
 			// Get the function name from the first arg and eliminate it from further consideration:
 			ArgStruct &first_arg = line->mArg[0];
-			--line->mArgc;
-			++line->mArg;
-			int param_count = line->mArgc; // This is not the final parameter count since it includes the output var (if present).
+			int param_count = line->mArgc - 1; // This is not the final parameter count since it includes the output var (if present).
 			// Now that function declarations have been processed, resolve this line's function.
 			Func *func = NULL;
 			// Dynamic calling wouldn't be this simple, since a line beginning with a double-deref
@@ -10095,7 +10236,11 @@ ResultType Script::PreparseExpressions(Line *aStartingLine)
 				if (func && func->mIsBuiltIn && *arg.text && func->ArgIsOutputVar(param_index))
 					arg.type = ARG_TYPE_OUTPUT_VAR; // See comments above.
 			}
+			// Convert the function reference to an attribute and exclude from the parameter list.
+			// Line::ToText() requires that the arg be excluded only when mAttribute is non-NULL.
 			line->mAttribute = func;
+			--line->mArgc;
+			++line->mArg;
 			break;
 		}
 		} // switch (line->mActionType)
@@ -10534,62 +10679,6 @@ Line *Script::PreparseCommands(Line *aStartingLine)
 				if (parent->mActionType == ACT_FINALLY)
 					return line->PreparseError(ERR_BAD_JUMP_INSIDE_FINALLY);
 			break;
-			
-		case ACT_HOTKEY:
-			if (!line->ArgHasDeref(1))
-			{
-				if (!_tcsnicmp(line_raw_arg1, _T("If"), 2))
-				{
-					LPTSTR cp = line_raw_arg1 + 2;
-					if (!*cp) // Just "If"
-					{
-						if (line->mArgc > 2)
-							return line->PreparseError(ERR_PARAM3_MUST_BE_BLANK);
-						if (*line_raw_arg2 && !line->ArgHasDeref(2))
-						{
-							// Hotkey, If, Expression: Ensure the expression matches exactly an existing #If,
-							// as required by the Hotkey command.  This seems worth doing since the current
-							// behaviour might be unexpected (despite being documented), and because typos
-							// are likely due to the fact that case and whitespace matter.
-							for (HotkeyCriterion *cp = g_FirstHotExpr;; cp = cp->NextCriterion)
-							{
-								if (!cp)
-									return line->PreparseError(ERR_HOTKEY_IF_EXPR);
-								if (!_tcscmp(line_raw_arg2, cp->WinTitle))
-									break;
-							}
-						}
-						break;
-					}
-					if (!_tcsnicmp(cp, _T("Win"), 3))
-					{
-						cp += 3;
-						if (!_tcsnicmp(cp, _T("Not"), 3))
-							cp += 3;
-						if (!_tcsicmp(cp, _T("Active")) || !_tcsicmp(cp, _T("Exist")))
-							break;
-					}
-					// Since above didn't break, it's something invalid starting with "If".
-					return line->PreparseError(ERR_PARAM1_INVALID);
-				}
-				if (*line_raw_arg2 && !line->ArgHasDeref(2))
-					if (!Hotkey::ConvertAltTab(line_raw_arg2, true))
-						if (   !(line->mAttribute = FindCallable(line_raw_arg2))   )
-							return line->PreparseError(ERR_NO_LABEL);
-			}
-			break;
-
-		case ACT_SETTIMER:
-			if (*line_raw_arg1 && !line->ArgHasDeref(1))
-				if (   !(line->mAttribute = FindCallable(line_raw_arg1))   )
-					return line->PreparseError(ERR_NO_LABEL);
-			if (*line_raw_arg2 && !line->ArgHasDeref(2))
-				if (!Line::ConvertOnOff(line_raw_arg2) && !IsNumeric(line_raw_arg2, true) // v1.0.46.16: Allow negatives to support the new run-only-once mode.
-					&& _tcsicmp(line_raw_arg2, _T("Delete"))
-					&& !line->mArg[1].is_expression) // v1.0.46.10: Don't consider expressions THAT CONTAIN NO VARIABLES OR FUNCTION-CALLS like "% 2*500" to be a syntax error.
-					return line->PreparseError(ERR_PARAM2_INVALID);
-			break;
-
 		}
 	} // for()
 	// Return something non-NULL to indicate success:
@@ -11408,6 +11497,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 				// DllCall() and possibly others rely on this having been done to support changing the
 				// value of a parameter (similar to by-ref).
 				infix[infix_count].symbol = SYM_VAR; // Type() is VAR_NORMAL as verified above; but SYM_VAR can be the clipboard in the case of expression lvalues.  Search for VAR_CLIPBOARD further below for details.
+				infix[infix_count].is_lvalue = FALSE;
 			}
 			else // It's a built-in variable (including clipboard).
 			{
@@ -11457,7 +11547,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 	token_begin.symbol = SYM_BEGIN;
 	STACK_PUSH(&token_begin);
 
-	SymbolType stack_symbol, infix_symbol, sym_prev;
+	SymbolType stack_symbol, infix_symbol, sym_prev, sym_next;
 	ExprTokenType *this_infix = infix;
 	DerefType *in_param_list = NULL; // While processing the parameter list of a function-call, this points to its deref (for parameter counting and as an indicator).
 
@@ -11487,8 +11577,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 							return LineError(ERR_VAR_IS_READONLY, FAIL, this_infix->var->mName);
 						this_infix->symbol = SYM_VAR; // Convert to SYM_VAR.
 					}
-					else
-						this_infix->is_lvalue = TRUE; // Mark this as the target of an assignment.
+					this_infix->is_lvalue = TRUE; // Mark this as the target of an assignment.
 				}
 				else
 					this_infix->is_lvalue = FALSE;
@@ -11813,6 +11902,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 		default: // This infix symbol is an operator, so act according to its precedence.
 			// Perform some rough checks to detect most syntax errors:
 			sym_prev = this_infix > infix ? this_infix[-1].symbol : SYM_INVALID;
+			sym_next = this_infix[1].symbol; // It will be SYM_INVALID if there are no more.
 			if (IS_ASSIGNMENT_OR_POST_OP(infix_symbol))
 			{
 				// Assignment and postfix operators must be preceded by a variable, except for
@@ -11824,6 +11914,11 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 					|| this_infix->deref          // Object property.
 					|| sym_prev == SYM_CPAREN)  ) // (x ? y : z) := v is valid.
 					return LineError(ERR_INVALID_ASSIGNMENT, FAIL, this_infix->error_reporting_marker);
+				// Mark SYM_VAR as an l-value, for validation after all files have loaded.
+				// Without this, the validation code would need to determine which postfix token
+				// corresponds to an assignment's l-value, which would require larger code.
+				if (sym_prev == SYM_VAR)
+					this_infix[-1].is_lvalue = TRUE;
 			}
 			else
 			{
@@ -11832,11 +11927,16 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 				// If sym_prev == SYM_FUNC, that can only be the result of SYM_DOT (x.y).
 				if ((YIELDS_AN_OPERAND(sym_prev) || sym_prev == SYM_FUNC) == IS_PREFIX_OPERATOR(infix_symbol))
 					return LineError(ERR_EXPR_SYNTAX, FAIL, this_infix->error_reporting_marker);
+				if (infix_symbol == SYM_PRE_INCREMENT || infix_symbol == SYM_PRE_DECREMENT)
+				{
+					// Same as other assignments (above), but in the other direction.
+					if (sym_next == SYM_VAR)
+						this_infix[1].is_lvalue = TRUE;
+				}
 			}
 			if (!IS_POSTFIX_OPERATOR(infix_symbol))
 			{
 				// Prefix and binary operators must be followed by an operand.
-				SymbolType sym_next = this_infix[1].symbol; // It will be SYM_INVALID if there are no more.
 				if (  !(IS_OPERAND(sym_next)
 					 || sym_next == SYM_FUNC
 					 || IS_OPAREN_LIKE(sym_next)
@@ -12124,7 +12224,8 @@ end_of_infix_to_postfix:
 						return LineError(ERR_VAR_IS_READONLY, FAIL, aArg.text);
 				}
 				else if ( !(only_token.var->mType == VAR_VIRTUAL
-					&& (only_token.var->mVV->Get == BIV_LoopIndex || only_token.var->mVV->Get == BIV_EventInfo)))
+					&& (only_token.var->mVV->Get == BIV_LoopIndex || only_token.var->mVV->Get == BIV_EventInfo))
+					&& !(only_token.var->mType == VAR_BUILTIN && only_token.var->mBIV == BIV_TrayMenu) ) // This exception is required for A_TrayMenu to return an object.
 				{
 					aArg.type = ARG_TYPE_INPUT_VAR;
 				}
@@ -12178,7 +12279,10 @@ end_of_infix_to_postfix:
 				// commands which ordinarily expect expressions might still look wrong in ListLines,
 				// but that seems too rare and inconsequential to worry about.
 				if (!(mActionType == ACT_ASSIGNEXPR || mActionType == ACT_RETURN))
+				{
 					aArg.text = only_token.marker;
+					aArg.deref = NULL; // Discard deref array (let ArgIndexHasDeref() know there are none).
+				}
 				break;
 			}
 			aArg.is_expression = false;
@@ -12978,6 +13082,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ResultToken *aResultToken, Line 
 				return line->LineError(ERR_OUTOFMEM);
 
 			token->symbol = SYM_STRING; // Set default. ExpandArgs() mightn't set it.
+					delete token;
 			token->mem_to_free = NULL;
 			token->marker_length = -1;
 
@@ -14375,16 +14480,16 @@ ResultType Line::Perform()
 
 	case ACT_SEND:
 	case ACT_SENDRAW:
-		SendKeys(ARG1, mActionType == ACT_SENDRAW, g.SendMode);
+		SendKeys(ARG1, mActionType == ACT_SENDRAW ? SCM_RAW : SCM_NOT_RAW, g.SendMode);
 		return OK;
 	case ACT_SENDINPUT: // Raw mode is supported via {Raw} in ARG1.
-		SendKeys(ARG1, false, g.SendMode == SM_INPUT_FALLBACK_TO_PLAY ? SM_INPUT_FALLBACK_TO_PLAY : SM_INPUT);
+		SendKeys(ARG1, SCM_NOT_RAW, g.SendMode == SM_INPUT_FALLBACK_TO_PLAY ? SM_INPUT_FALLBACK_TO_PLAY : SM_INPUT);
 		return OK;
 	case ACT_SENDPLAY: // Raw mode is supported via {Raw} in ARG1.
-		SendKeys(ARG1, false, SM_PLAY);
+		SendKeys(ARG1, SCM_NOT_RAW, SM_PLAY);
 		return OK;
 	case ACT_SENDEVENT:
-		SendKeys(ARG1, false, SM_EVENT);
+		SendKeys(ARG1, SCM_NOT_RAW, SM_EVENT);
 		return OK;
 
 	case ACT_CLICK:
@@ -14506,7 +14611,7 @@ ResultType Line::Perform()
 
 	case ACT_CONTROLSEND:
 	case ACT_CONTROLSENDRAW:
-		return ControlSend(SIX_ARGS, mActionType == ACT_CONTROLSENDRAW);
+		return ControlSend(SIX_ARGS, mActionType == ACT_CONTROLSENDRAW ? SCM_RAW : SCM_NOT_RAW);
 
 	case ACT_CONTROLCLICK:
 		if (!(vk = ConvertMouseButton(ARG4))) // Treats blank as "Left".
@@ -14536,95 +14641,6 @@ ResultType Line::Perform()
 		PostMessage(FindWindow(_T("Shell_TrayWnd"), NULL), WM_COMMAND, 416, 0);
 		DoWinDelay;
 		return OK;
-
-	case ACT_HOTKEY:
-		// mAttribute is the label resolved at loadtime, if available (for performance).
-		return Hotkey::Dynamic(THREE_ARGS, (IObject *)mAttribute, ARGVAR2);
-	case ACT_SETTIMER: // A timer is being created, changed, or enabled/disabled.
-	{
-		IObject *target_label;
-		// Note that only one timer per label is allowed because the label is the unique identifier
-		// that allows us to figure out whether to "update or create" when searching the list of timers.
-		if (   !(target_label = (IObject *)mAttribute)   ) // Since it wasn't resolved at load-time, it must be a variable reference.
-		{
-			if (   !(target_label = g_script->FindCallable(ARG1, ARGVAR1))   )
-			{
-				if (*ARG1)
-					// ARG1 is a non-empty string and not the name of an existing label or function.
-					return LineError(ERR_NO_LABEL, FAIL, ARG1);
-				// Possible cases not ruled out by the above check:
-				//   1) Label was omitted.
-				//   2) Label was a single variable or non-expression which produced an empty value.
-				//   3) Label was a single variable containing an incompatible function.
-				//   4) Label was an expression which produced an empty value.
-				//   5) Label was an expression which produced an object.
-				// Case 3 is always an error.
-				// Case 2 is arguably more likely to be an error (not intended to be empty) than meant as
-				// an indicator to use the current label, so it seems safest to treat it as an error (and
-				// also more consistent with Case 3).
-				// Case 5 is currently not supported; the object reference was converted to an empty string
-				// at an earlier stage, so it is indistinguishable from Case 4.  It seems rare that someone
-				// would have a legitimate need for Case 4, so both cases are treated as an error.  This
-				// covers cases like:
-				//   SetTimer, % Func(a).Bind(b), xxx  ; Unsupported.
-				//   SetTimer, % this.myTimerFunc, xxx  ; Unsupported (where myTimerFunc is an object).
-				//   SetTimer, % this.MyMethod, xxx  ; Additional error: failing to bind "this" to MyMethod.
-				// The following could be used to show "must not be blank" for Case 2, but it seems best
-				// to reserve that message for when the parameter is really blank, not an empty variable:
-				//if (mArgc > 0 && (mArg[0].is_expression /* Cases 4 & 5 */ || ARGVAR1 && ARGVAR1->HasObject() /* Case 3 */))
-				if (*RAW_ARG1)
-					return LineError(ERR_PARAM1_INVALID);
-				if (g.CurrentLabel)
-					// For backward-compatibility, use A_ThisLabel if set.  This can differ from CurrentTimer
-					// when goto/gosub is used.  Some scripts apparently use this with subroutines that are
-					// called both directly and by a timer.  The down side is that if a timer function uses
-					// goto/gosub, A_ThisLabel must take predence; that may or may not be the user's intention.
-					target_label = g.CurrentLabel;
-				else if (g.CurrentTimer)
-					// Default to the timer which launched the current thread.
-					target_label = g.CurrentTimer->mLabel.ToObject();
-				if (!target_label)
-					// Either the thread was not launched by a timer or the timer has been deleted.
-					return LineError(ERR_PARAM1_MUST_NOT_BE_BLANK);
-			}
-		}
-		// And don't update mAttribute (leave it NULL) because we want ARG1 to be dynamically resolved
-		// every time the command is executed (in case the contents of the referenced variable change).
-		// In the data structure that holds the timers, we store the target label rather than the target
-		// line so that a label can be registered independently as a timer even if there is another label
-		// that points to the same line such as in this example:
-		// Label1:
-		// Label2:
-		// ...
-		// return
-		if (!IsNumeric(ARG2, true, true, true)) // Allow it to be neg. or floating point at runtime.
-		{
-			toggle = Line::ConvertOnOff(ARG2);
-			if (!toggle)
-			{
-				if (!_tcsicmp(ARG2, _T("Delete")))
-				{
-					g_script->DeleteTimer(target_label);
-					return OK;
-				}
-				return LineError(ERR_PARAM2_INVALID, FAIL, ARG2);
-			}
-		}
-		else
-			toggle = TOGGLE_INVALID;
-		// Below relies on distinguishing a true empty string from one that is sent to the function
-		// as empty as a signal.  Don't change it without a full understanding because it's likely
-		// to break compatibility or something else:
-		switch (toggle)
-		{
-		case TOGGLED_ON:
-		case TOGGLED_OFF: g_script->UpdateOrCreateTimer(target_label, _T(""), ARG3, toggle == TOGGLED_ON, false); break;
-			// Timer is always (re)enabled when ARG2 specifies a numeric period or is blank + there's no ARG3.
-			// If ARG2 is blank but ARG3 (priority) isn't, tell it to update only the priority and nothing else:
-		default: g_script->UpdateOrCreateTimer(target_label, ARG2, ARG3, true, !*ARG2 && *ARG3);
-		}
-		return OK;
-	}
 
 	case ACT_CRITICAL:
 	{
@@ -14904,9 +14920,6 @@ ResultType Line::Perform()
 
 	case ACT_SETTITLEMATCHMODE:
 		return BIV_TitleMatchMode_Set(ARG1, NULL);
-
-	case ACT_MENU:
-		return g_script->PerformMenu(SIX_ARGS, ARGVAR4, ARGVAR5);
 
 		////////////////////////////////////////////////////////////////////////////////////////
 		// For these, it seems best not to report an error during runtime if there's
@@ -16255,6 +16268,36 @@ void Script::PreprocessLocalVars(Func &aFunc, Var **aVarList, int &aVarCount)
 			// Since this undeclared local variable has the same name as a global, there's
 			// a chance the user intended it to be global. So consider warning the user:
 			MaybeWarnLocalSameAsGlobal(aFunc, var);
+	}
+}
+
+
+
+void Script::CheckForClassOverwrite()
+{
+	for (Line *line = mFirstLine; line; line = line->mNextLine)
+	{
+		for (int a = 0; a < line->mArgc; ++a)
+		{
+			ArgStruct &arg = line->mArg[a];
+			if (arg.type == ARG_TYPE_OUTPUT_VAR)
+			{
+				if (!*arg.text) // The arg's variable is not one that needs to be dynamically resolved.
+				{
+					Var *target_var = VAR(arg);
+					if (target_var->HasObject()) // At this stage, all variables are empty except class variables.
+						ScriptWarning(g_Warn_ClassOverwrite, WARNING_CLASS_OVERWRITE, target_var->mName, line);
+				}
+			}
+			else if (arg.is_expression)
+			{
+				for (ExprTokenType *token = arg.postfix; token->symbol != SYM_INVALID; ++token)
+				{
+					if (token->symbol == SYM_VAR && token->is_lvalue && token->var->HasObject())
+						ScriptWarning(g_Warn_ClassOverwrite, WARNING_CLASS_OVERWRITE, token->var->mName, line);
+				}
+			}
+		}
 	}
 }
 

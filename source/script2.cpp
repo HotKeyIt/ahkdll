@@ -283,6 +283,18 @@ ResultType Line::TrayTip(LPTSTR aText, LPTSTR aTitle, LPTSTR aOptions)
 
 
 
+BIF_DECL(BIF_TraySetIcon)
+{
+	if (!g_script->SetTrayIcon(
+		ParamIndexToOptionalString(0, _f_number_buf) // buf is provided for error-reporting purposes.
+		, ParamIndexToOptionalInt(1, 1)
+		, ParamIndexIsOmitted(2) ? NEUTRAL : ParamIndexToBOOL(2) ? TOGGLED_ON : TOGGLED_OFF))
+		_f_return_FAIL;
+	_f_return_empty;
+}
+
+
+
 BIF_DECL(BIF_Input)
 // OVERVIEW:
 // Although a script can have many concurrent quasi-threads, there can only be one input
@@ -1101,7 +1113,7 @@ ResultType Line::WinMove(LPTSTR aX, LPTSTR aY, LPTSTR aWidth, LPTSTR aHeight
 
 
 ResultType Line::ControlSend(LPTSTR aKeysToSend, LPTSTR aControl, LPTSTR aTitle, LPTSTR aText
-	, LPTSTR aExcludeTitle, LPTSTR aExcludeText, bool aSendRaw)
+	, LPTSTR aExcludeTitle, LPTSTR aExcludeText, SendRawModes aSendRaw)
 {
 	HWND target_window = DetermineTargetWindow(aTitle, aText, aExcludeTitle, aExcludeText);
 	if (!target_window)
@@ -4359,21 +4371,71 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 }
 
 
-void LaunchAutoHotkeyUtil(LPTSTR aFile)
+bool FindAutoHotkeyUtilSub(LPTSTR aBuf, int aBufSize, LPTSTR aFile, LPTSTR aDir)
 {
-    TCHAR buf_temp[2048];
+	int len = sntprintf(aBuf, aBufSize, _T("\"%s\\%s"), aDir, aFile);
+	if (len + 1 > aBufSize // Too long. Should realistically never happen.
+		|| GetFileAttributes(aBuf + 1) == INVALID_FILE_ATTRIBUTES) // File not found.
+		return false;
+	aBuf[len++] = '"';
+	aBuf[len] = '\0';
+	return true;
+}
+
+bool FindAutoHotkeyUtil(LPTSTR aBuf, int aBufSize, LPTSTR aFile, LPTSTR aInstallDirBuf, LPTSTR &aUtilDir)
+{
+	// Always try our directory first, in case it has different utils to the installed version.
 	// ActionExec()'s CreateProcess() is currently done in a way that prefers enclosing double quotes:
-	*buf_temp = '"';
-	// Try GetAHKInstallDir() first so that compiled scripts running on machines that happen
-	// to have AHK installed will still be able to fetch the help file and Window Spy:
-	if (!GetAHKInstallDir(buf_temp + 1))
-		// Even if this is the self-contained version (AUTOHOTKEYSC), attempt to launch anyway in
-		// case the user has put a copy of the file in the same dir with the compiled script:
-		_tcscpy(buf_temp + 1, g_script->mOurEXEDir);
-	sntprintfcat(buf_temp, _countof(buf_temp), _T("\\%s\""), aFile);
+	if (!FindAutoHotkeyUtilSub(aBuf, aBufSize, aFile, g_script->mOurEXEDir))
+	{
+		// Try GetAHKInstallDir() so that compiled scripts running on machines that happen
+		// to have AHK installed will still be able to fetch the help file and Window Spy:
+		if (   !GetAHKInstallDir(aInstallDirBuf)
+			|| !FindAutoHotkeyUtilSub(aBuf, aBufSize, aFile, aInstallDirBuf)   )
+			return false;
+		aUtilDir = aInstallDirBuf;
+	}
+	else
+		aUtilDir = g_script->mOurEXEDir;
+	return true;
+}
+
+bool LaunchAutoHotkeyUtil(LPTSTR aFile, bool aIsScript)
+{
+	TCHAR buf_file[2048], buf_exe[2048], installdir[MAX_PATH];
+	LPTSTR utildir, file = buf_file, args = _T(""); // Use "" vs. NULL to specify that there are no params at all.
+	if (!FindAutoHotkeyUtil(buf_file, _countof(buf_file), aFile, installdir, utildir))
+		return false;
+	if (aIsScript)
+	{
+		// Always try AutoHotkey.exe in the same directory as the util first, if present,
+		// since mOurEXE could be a different version of AutoHotkey (or a compiled script).
+		if (FindAutoHotkeyUtilSub(buf_exe, _countof(buf_exe), _T("AutoHotkey.exe"), utildir))
+			file = buf_exe, args = buf_file;
+#ifndef AUTOHOTKEYSC
+		else if (utildir == g_script->mOurEXEDir)
+			// Use our EXE only if the util was found in our directory.
+			file = g_script->mOurEXE, args = buf_file;
+#endif
+		//else: AutoHotkey appears to be installed but missing AutoHotkey.exe.
+		// Try running the .ahk file directly in the off chance that it is registered
+		// with some other EXE name.
+	}
 	// Attempt to run the file:
-	if (!g_script->ActionExec(buf_temp, _T(""), NULL, false)) // Use "" vs. NULL to specify that there are no params at all.
-		MsgBox(buf_temp, 0, _T("Could not launch file:"));
+	return g_script->ActionExec(file, args, NULL, false) != FAIL;
+}
+
+void LaunchWindowSpy()
+{
+	if (   !LaunchAutoHotkeyUtil(_T("WindowSpy.ahk"), true)
+		&& !LaunchAutoHotkeyUtil(_T("AU3_Spy.exe"), false)   )
+		MsgBox(_T("Could not launch WindowSpy.ahk or AU3_Spy.exe"), MB_ICONERROR);
+}
+
+void LaunchAutoHotkeyHelp()
+{
+	if (   !LaunchAutoHotkeyUtil(AHK_HELP_FILE, false)   )
+		MsgBox(_T("Could not launch ") AHK_HELP_FILE, MB_ICONERROR);
 }
 
 bool HandleMenuItem(HWND aHwnd, WORD aMenuItemID, HWND aGuiHwnd)
@@ -4398,11 +4460,11 @@ bool HandleMenuItem(HWND aHwnd, WORD aMenuItemID, HWND aGuiHwnd)
 		return true;
 	case ID_TRAY_WINDOWSPY:
 	case ID_FILE_WINDOWSPY:
-		LaunchAutoHotkeyUtil(_T("AU3_Spy.exe"));
+		LaunchWindowSpy();
 		return true;
 	case ID_TRAY_HELP:
 	case ID_HELP_USERMANUAL:
-		LaunchAutoHotkeyUtil(AHK_HELP_FILE);
+		LaunchAutoHotkeyHelp();
 		return true;
 	case ID_TRAY_SUSPEND:
 	case ID_FILE_SUSPEND:
@@ -6277,11 +6339,14 @@ BIF_DECL(BIF_Sort)
 			sort_by_naked_filename = true;
 		}
 	}
-
+	
 	// Check for early return only after parsing options in case an option that sets ErrorLevel is present:
-	if (!*aContents) // Input is empty, nothing to sort.
+	if (!*aContents) // Input is empty, nothing to sort, return empty string.
+	{
+		result_to_return = aResultToken.Return(_T(""), 0);
 		goto end;
-
+	}
+	
 	// size_t helps performance and should be plenty of capacity for many years of advancement.
 	// In addition, things like realloc() can't accept anything larger than size_t anyway,
 	// so there's no point making this 64-bit until size_t itself becomes 64-bit (it already is on some compilers?).
@@ -6339,8 +6404,10 @@ BIF_DECL(BIF_Sort)
 	// v1.0.47.05: It simplifies the code a lot to allocate and/or improves understandability to allocate
 	// memory for trailing_crlf_added_temporarily even though technically it's done only to make room to
 	// append the extra CRLF at the end.
-	if (g_SortFunc || trailing_crlf_added_temporarily) // Do this here rather than earlier with the options parsing in case the function-option is present twice (unlikely, but it would be a memory leak due to strdup below).  Doing it here also avoids allocating if it isn't necessary.
+	// v2.0: Never modify the caller's aContents, since it may be a quoted literal string or variable.
+	//if (g_SortFunc || trailing_crlf_added_temporarily) // Do this here rather than earlier with the options parsing in case the function-option is present twice (unlikely, but it would be a memory leak due to strdup below).  Doing it here also avoids allocating if it isn't necessary.
 	{
+		// Comment is obsolete because if aContents is in a deref buffer, it has been privatized by ExpandArgs():
 		// When g_SortFunc!=NULL, the copy of the string is needed because aContents may be in the deref buffer,
 		// and that deref buffer is about to be overwritten by the execution of the script's UDF body.
 		if (   !(mem_to_free = tmalloc(aContents_length + 3))   ) // +1 for terminator and +2 in case of trailing_crlf_added_temporarily.
@@ -9580,6 +9647,47 @@ VarSizeType BIV_ScreenDPI(LPTSTR aBuf, LPTSTR aVarName)
 
 
 
+BIV_DECL_R(BIV_TrayMenu)
+{
+	// The actual value (an object) is resolved in ExpandExpression,
+	// to work around the limitations of the current BIV interface.
+	if (aBuf)
+		*aBuf = '\0';
+	return 0;
+}
+
+
+
+BIV_DECL_R(BIV_AllowMainWindow)
+{
+	if (aBuf)
+	{
+#ifdef AUTOHOTKEYSC
+		*aBuf++ = g_AllowMainWindow ? '1' : '0';
+#else
+		*aBuf++ = '1';
+#endif
+		*aBuf = '\0';
+	}
+	return 1;  // Length is always 1.
+}
+
+BIV_DECL_W(BIV_AllowMainWindow_Set)
+{
+#ifdef AUTOHOTKEYSC
+	g_script->AllowMainWindow(ResultToBOOL(aBuf));
+#else
+	// It seems best to allow `A_AllowMainWindow := true`, since a script
+	// which is only sometimes compiled may execute it unconditionally.
+	// For code size, false values are ignored instead of throwing an exception.
+	//if (!ResultToBOOL(aBuf))
+	//	return g_script->ScriptError(ERR_INVALID_VALUE, aBuf);
+#endif
+	return OK;
+}
+
+
+
 VarSizeType BIV_IconHidden(LPTSTR aBuf, LPTSTR aVarName)
 {
 	if (aBuf)
@@ -9590,16 +9698,65 @@ VarSizeType BIV_IconHidden(LPTSTR aBuf, LPTSTR aVarName)
 	return 1;  // Length is always 1.
 }
 
-VarSizeType BIV_IconTip(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_W(BIV_IconHidden_Set)
 {
-	if (!aBuf)
-		return g_script->mTrayIconTip ? (VarSizeType)_tcslen(g_script->mTrayIconTip) : 0;
-	if (g_script->mTrayIconTip)
-		return (VarSizeType)_tcslen(_tcscpy(aBuf, g_script->mTrayIconTip));
+	g_script->ShowTrayIcon(!ResultToBOOL(aBuf));
+	return OK;
+}
+
+void Script::ShowTrayIcon(bool aShow)
+{
+	if (g_NoTrayIcon = !aShow) // Assign.
+	{
+		if (mNIC.hWnd) // Since it exists, destroy it.
+		{
+			Shell_NotifyIcon(NIM_DELETE, &mNIC); // Remove it.
+			mNIC.hWnd = NULL;  // Set this as an indicator that tray icon is not installed.
+			// but don't do DestroyMenu() on mTrayMenu->mMenu (if non-NULL) since it may have been
+			// changed by the user to have the custom items on top of the standard items,
+			// for example, and we don't want to lose that ordering in case the script turns
+			// the icon back on at some future time during this session.  Also, the script
+			// may provide some other means of displaying the tray menu.
+		}
+	}
 	else
 	{
-		*aBuf = '\0';
-		return 0;
+		if (!mNIC.hWnd) // The icon doesn't exist, so create it.
+		{
+			CreateTrayIcon();
+			UpdateTrayIcon(true);  // Force the icon into the correct pause/suspend state.
+		}
+	}
+}
+
+VarSizeType BIV_IconTip(LPTSTR aBuf, LPTSTR aVarName)
+{
+	// Return the custom tip if any, otherwise the default tip.
+	LPTSTR icontip = g_script->mTrayIconTip ? g_script->mTrayIconTip : g_script->mFileName;
+	if (!aBuf)
+		return (VarSizeType)_tcslen(icontip);
+	return (VarSizeType)_tcslen(_tcscpy(aBuf, icontip));
+}
+
+BIV_DECL_W(BIV_IconTip_Set)
+{
+	g_script->SetTrayTip(aBuf);
+	return OK;
+}
+
+void Script::SetTrayTip(LPTSTR aText)
+{
+	// Allocate mTrayIconTip on first use even if aText is empty, so that
+	// it will override the use of mFileName as the tray tip text.
+	// This allows the script to completely disable the tray tooltip.
+	if (!mTrayIconTip)
+		mTrayIconTip = (LPTSTR) g_SimpleHeap->Malloc(sizeof(mNIC.szTip)); // SimpleHeap improves avg. case mem load.
+	if (mTrayIconTip)
+		tcslcpy(mTrayIconTip, aText, _countof(mNIC.szTip));
+	if (mNIC.hWnd) // i.e. only update the tip if the tray icon exists (can't work otherwise).
+	{
+		UPDATE_TIP_FIELD
+		Shell_NotifyIcon(NIM_MODIFY, &mNIC);  // Currently not checking its result (e.g. in case a shell other than Explorer is running).
 	}
 }
 
@@ -9976,67 +10133,52 @@ VarSizeType BIV_MyDocuments(LPTSTR aBuf, LPTSTR aVarName) // Called by multiple 
 }
 
 
-VarSizeType BIV_Caret(LPTSTR aBuf, LPTSTR aVarName)
+BIF_DECL(BIF_CaretGetPos)
 {
-	if (!aBuf)
-		return MAX_INTEGER_LENGTH; // Conservative, both for performance and in case the value changes between first and second call.
-
-	// These static variables are used to keep the X and Y coordinates in sync with each other, as a snapshot
-	// of where the caret was at one precise instant in time.  This is because the X and Y vars are resolved
-	// separately by the script, and due to split second timing, they might otherwise not be accurate with
-	// respect to each other.  This method also helps performance since it avoids unnecessary calls to
-	// GetGUIThreadInfo().
-	_thread_local static HWND sForeWinPrev = NULL;
-	static DWORD sTimestamp = GetTickCount();
-	_thread_local static POINT sPoint;
-	_thread_local static BOOL sResult;
-
+	Var *varX = ParamIndexToOptionalVar(0);
+	Var *varY = ParamIndexToOptionalVar(1);
+	
 	// I believe only the foreground window can have a caret position due to relationship with focused control.
 	HWND target_window = GetForegroundWindow(); // Variable must be named target_window for ATTACH_THREAD_INPUT.
 	if (!target_window) // No window is in the foreground, report blank coordinate.
 	{
-		*aBuf = '\0';
-		return 0;
+		if (varX)
+			varX->Assign();
+		if (varY)
+			varY->Assign();
+		_f_return_i(FALSE);
 	}
 
 	DWORD now_tick = GetTickCount();
 
-	if (target_window != sForeWinPrev || now_tick - sTimestamp > 5) // Different window or too much time has passed.
+	GUITHREADINFO info;
+	info.cbSize = sizeof(GUITHREADINFO);
+	BOOL result = GetGUIThreadInfo(GetWindowThreadProcessId(target_window, NULL), &info) // Got info okay...
+		&& info.hwndCaret; // ...and there is a caret.
+	if (!result)
 	{
-		// Otherwise:
-		GUITHREADINFO info;
-		info.cbSize = sizeof(GUITHREADINFO);
-		sResult = GetGUIThreadInfo(GetWindowThreadProcessId(target_window, NULL), &info) // Got info okay...
-			&& info.hwndCaret; // ...and there is a caret.
-		if (!sResult)
-		{
-			*aBuf = '\0';
-			return 0;
-		}
-		sPoint.x = info.rcCaret.left;
-		sPoint.y = info.rcCaret.top;
-		// Unconditionally convert to screen coordinates, for simplicity.
-		ClientToScreen(info.hwndCaret, &sPoint);
-		// Now convert back to whatever is expected for the current mode.
-		POINT origin = {0};
-		CoordToScreen(origin, COORD_MODE_CARET);
-		sPoint.x -= origin.x;
-		sPoint.y -= origin.y;
-		// Now that all failure conditions have been checked, update static variables for the next caller:
-		sForeWinPrev = target_window;
-		sTimestamp = now_tick;
+		if (varX)
+			varX->Assign();
+		if (varY)
+			varY->Assign();
+		_f_return_i(FALSE);
 	}
-	else // Same window and recent enough, but did prior call fail?  If so, provide a blank result like the prior.
-	{
-		if (!sResult)
-		{
-			*aBuf = '\0';
-			return 0;
-		}
-	}
-	// Now the above has ensured that sPoint contains valid coordinates that are up-to-date enough to be used.
-	_itot(ctoupper(aVarName[7]) == 'X' ? sPoint.x : sPoint.y, aBuf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
-	return (VarSizeType)_tcslen(aBuf);
+	POINT pt;
+	pt.x = info.rcCaret.left;
+	pt.y = info.rcCaret.top;
+	// Unconditionally convert to screen coordinates, for simplicity.
+	ClientToScreen(info.hwndCaret, &pt);
+	// Now convert back to whatever is expected for the current mode.
+	POINT origin = {0};
+	CoordToScreen(origin, COORD_MODE_CARET);
+	pt.x -= origin.x;
+	pt.y -= origin.y;
+	
+	if (varX)
+		varX->Assign(pt.x);
+	if (varY)
+		varY->Assign(pt.y);
+	_f_return_i(TRUE);
 }
 
 
@@ -10466,52 +10608,6 @@ VarSizeType BIV_ThisLabel(LPTSTR aBuf, LPTSTR aVarName)
 	if (aBuf)
 		_tcscpy(aBuf, name);
 	return (VarSizeType)_tcslen(name);
-}
-
-VarSizeType BIV_ThisMenuItem(LPTSTR aBuf, LPTSTR aVarName)
-{
-	if (aBuf)
-		_tcscpy(aBuf, g_script->mThisMenuItemName);
-	return (VarSizeType)_tcslen(g_script->mThisMenuItemName);
-}
-
-UINT Script::ThisMenuItemPos()
-{
-	UserMenu *menu = FindMenu(mThisMenuName);
-	// The menu item's address was stored so we can distinguish between multiple items
-	// which have the same text.  The volatility of the address is handled by clearing
-	// it in UserMenu::DeleteItem and UserMenu::DeleteAllItems.  An ID would also be
-	// volatile, since IDs can be re-used if the item is deleted.
-	if (mThisMenuItem)
-	{
-		UINT pos = 0;
-		for (UserMenuItem *mi = menu->mFirstMenuItem; mi; mi = mi->mNextMenuItem, ++pos)
-			if (mi == mThisMenuItem)
-				return pos;
-	}
-	// For backward-compatibility, fall back to the old method if the item/menu has been
-	// deleted.  So by definition, this variable contains the CURRENT position of the most
-	// recently selected menu item within its CURRENT menu:
-	return menu ? menu->GetItemPos(mThisMenuItemName) : UINT_MAX;
-}
-
-VarSizeType BIV_ThisMenuItemPos(LPTSTR aBuf, LPTSTR aVarName)
-{
-	if (!aBuf) // To avoid doing possibly high-overhead calls twice, merely return a conservative estimate for the first pass.
-		return MAX_INTEGER_LENGTH;
-	UINT menu_item_pos = g_script->ThisMenuItemPos();
-	if (menu_item_pos < UINT_MAX) // Success
-		return (VarSizeType)_tcslen(UTOA(menu_item_pos + 1, aBuf)); // +1 to convert from zero-based to 1-based.
-	// Otherwise:
-	*aBuf = '\0';
-	return 0;
-}
-
-VarSizeType BIV_ThisMenu(LPTSTR aBuf, LPTSTR aVarName)
-{
-	if (aBuf)
-		_tcscpy(aBuf, g_script->mThisMenuName);
-	return (VarSizeType)_tcslen(g_script->mThisMenuName);
 }
 
 VarSizeType BIV_ThisHotkey(LPTSTR aBuf, LPTSTR aVarName)
@@ -16692,6 +16788,51 @@ BIF_DECL(BIF_Mod)
 
 
 
+BIF_DECL(BIF_MinMax)
+{
+	// Supports one or more parameters.
+	// Load-time validation has already ensured there is at least one parameter.
+	ExprTokenType param;
+	int index, ib_index = 0, db_index = 0;
+	bool isMin = _f_callee_id == FID_Min;
+	__int64 ia, ib = 0; double da, db = 0;
+	bool ib_empty = TRUE, db_empty = TRUE;
+	for (int i = 0; i < aParamCount; ++i)
+	{
+		ParamIndexToNumber(i, param);
+		switch (param.symbol)
+		{
+			case SYM_INTEGER: // Compare only integers.
+				ia = param.value_int64;
+				if ((ib_empty) || (isMin ? ia < ib : ia > ib))
+				{
+					ib_empty = FALSE;
+					ib = ia;
+					ib_index = i;
+				}
+				break;
+			case SYM_FLOAT: // Compare only floats.
+				da = param.value_double;
+				if ((db_empty) || (isMin ? da < db : da > db))
+				{
+					db_empty = FALSE;
+					db = da;
+					db_index = i;
+				}
+				break;
+			default: // Non-operand or non-numeric string.
+				_f_return(EXPR_NAN); // Return a blank value to indicate the problem.
+		}
+	}
+	// Compare found integer with found float:
+	index = (db_empty || !ib_empty && (isMin ? ib < db : ib > db)) ? ib_index : db_index;
+	ParamIndexToNumber(index, param);
+	aResultToken.symbol = param.symbol;
+	aResultToken.value_int64 = param.value_int64;
+}
+
+
+
 BIF_DECL(BIF_Abs)
 {
 	if (!TokenToDoubleOrInt64(*aParam[0], aResultToken)) // "Cast" token to Int64/Double depending on whether it has a decimal point.
@@ -16916,6 +17057,71 @@ BIF_DECL(BIF_DateDiff)
 		_f_throw(ERR_PARAM3_INVALID);
 	}
 	_f_return_i(time_until);
+}
+
+
+
+BIF_DECL(BIF_Hotkey)
+{
+	_f_param_string(aHotkeyName, 0);
+	_f_param_string_opt(aLabelName, 1);
+	_f_param_string_opt(aOptions, 2);
+	IObject *aLabelObject = ParamIndexToOptionalObject(1);
+	Hotkey::Dynamic(aHotkeyName, aLabelName, aOptions, aLabelObject);
+	_f_return_empty;
+}
+
+
+
+BIF_DECL(BIF_SetTimer)
+{
+	IObject *target_label;
+	// Note that only one timer per label/function is allowed because the label is the unique identifier
+	// that allows us to figure out whether to "update or create" when searching the list of timers.
+	if (ParamIndexIsOmitted(0)) // Fully omitted, not an empty string.
+	{
+		if (g->CurrentTimer)
+			// Default to the timer which launched the current thread.
+			target_label = g->CurrentTimer->mLabel.ToObject();
+		else
+			target_label = NULL;
+		if (!target_label)
+			// Either the thread was not launched by a timer or the timer has been deleted.
+			_f_throw(ERR_PARAM1_MUST_NOT_BE_BLANK);
+	}
+	else if (  !(target_label = ParamIndexToObject(0))  )
+	{
+		LPTSTR arg1 = ParamIndexToString(0, _f_number_buf);
+		if (!(target_label = g_script->FindCallable(arg1)))
+			_f_throw(ERR_NO_LABEL, arg1);
+	}
+	ToggleValueType toggle;
+	_f_param_string_opt(arg2, 1);
+	_f_param_string_opt(arg3, 2);
+	if (!IsNumeric(arg2, true, true, true)) // Allow it to be neg. or floating point at runtime.
+	{
+		toggle = Line::ConvertOnOff(arg2);
+		if (!toggle)
+		{
+			if (!_tcsicmp(arg2, _T("Delete")))
+			{
+				g_script->DeleteTimer(target_label);
+				_f_return_empty;
+			}
+			_f_throw(ERR_PARAM2_INVALID, arg2);
+		}
+	}
+	else
+		toggle = TOGGLE_INVALID;
+	switch(toggle)
+	{
+	case TOGGLED_ON:
+	case TOGGLED_OFF: g_script->UpdateOrCreateTimer(target_label, _T(""), arg3, toggle == TOGGLED_ON, false); break;
+	// Timer is always (re)enabled when ARG2 specifies a numeric period or is blank + there's no ARG3.
+	// If ARG2 is blank but ARG3 (priority) isn't, tell it to update only the priority and nothing else:
+	default: g_script->UpdateOrCreateTimer(target_label, arg2, arg3, true, !*arg2 && *arg3);
+	}
+	_f_return_empty;
 }
 
 
@@ -17580,20 +17786,25 @@ BIF_DECL(BIF_RegisterCallback)
 
 #endif
 
-BIF_DECL(BIF_MenuGet)
+BIF_DECL(BIF_Menu)
 {
-	if (_f_callee_id == FID_MenuGetHandle)
+	UserMenu *menu;
+	switch (_f_callee_id)
 	{
-		UserMenu *menu = g_script->FindMenu(ParamIndexToString(0, aResultToken.buf));
-		if (menu && !menu->mMenu)
-			menu->Create(); // On failure (rare), we just return 0.
-		_f_return_i(menu ? (__int64)(UINT_PTR)menu->mMenu : 0);
+	case FID_MenuCreate:
+		if (  !(menu = g_script->AddMenu())  )
+			_f_throw(ERR_OUTOFMEM);
+		break;
+	case FID_MenuFromHandle:
+		menu = g_script->FindMenu((HMENU)ParamIndexToInt64(0));
+		break;
 	}
-	else // MenuGetName
+	if (menu)
 	{
-		UserMenu *menu = g_script->FindMenu((HMENU)ParamIndexToInt64(0));
-		_f_return(menu ? menu->mName : _T(""));
+		menu->AddRef();
+		_f_return(menu);
 	}
+	_f_return_empty;
 }
 
 

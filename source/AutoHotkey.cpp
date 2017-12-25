@@ -432,6 +432,8 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	}
 #endif
 
+	FillLayoutHasAltGrCache();
+
 	// set exception filter to disable hook before exception occures to avoid system/mouse freeze
 	g_ExceptionHandler = AddVectoredExceptionHandler(NULL,DisableHooksOnException);
 	// Activate the hotkeys, hotstrings, and any hooks that are required prior to executing the

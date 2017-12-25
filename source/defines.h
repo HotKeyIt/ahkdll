@@ -119,10 +119,13 @@ enum SendModes {SM_EVENT, SM_INPUT, SM_PLAY, SM_INPUT_FALLBACK_TO_PLAY, SM_INVAL
 // SM_INPUT_FALLBACK_TO_PLAY falls back to the SendPlay mode.  SendInput has this extra fallback behavior
 // because it's likely to become the most popular sending method.
 
+enum SendRawModes {SCM_NOT_RAW = FALSE, SCM_RAW, SCM_RAW_TEXT};
+typedef UCHAR SendRawType;
+
 enum ExitReasons {EXIT_NONE, EXIT_CRITICAL, EXIT_ERROR, EXIT_DESTROY, EXIT_LOGOFF, EXIT_SHUTDOWN
 	, EXIT_WM_QUIT, EXIT_WM_CLOSE, EXIT_MENU, EXIT_EXIT, EXIT_RELOAD, EXIT_SINGLEINSTANCE};
 
-enum WarnType {WARN_USE_UNSET_LOCAL, WARN_USE_UNSET_GLOBAL, WARN_LOCAL_SAME_AS_GLOBAL, WARN_ALL};
+enum WarnType {WARN_USE_UNSET_LOCAL, WARN_USE_UNSET_GLOBAL, WARN_LOCAL_SAME_AS_GLOBAL, WARN_CLASS_OVERWRITE, WARN_ALL};
 
 enum WarnMode {WARNMODE_OFF, WARNMODE_OUTPUTDEBUG, WARNMODE_MSGBOX, WARNMODE_STDOUT};	// WARNMODE_OFF must be zero.
 
@@ -300,7 +303,7 @@ struct ExprTokenType  // Something in the compiler hates the name TokenType, so 
 			union // These nested structs and unions minimize the token size by overlapping data.
 			{
 				IObject *object;
-				DerefType *deref;  // for SYM_FUNC
+				DerefType *deref;  // for SYM_FUNC, and (while parsing) SYM_ASSIGN etc.
 				Var *var;          // for SYM_VAR and SYM_DYNAMIC
 				LPTSTR marker;     // for SYM_STRING
 				ExprTokenType *circuit_token; // for short-circuit operators
@@ -310,7 +313,7 @@ struct ExprTokenType  // Something in the compiler hates the name TokenType, so 
 				DerefType *outer_deref; // Used by ExpressionToPostfix().
 				LPTSTR error_reporting_marker; // Used by ExpressionToPostfix() for binary and unary operators.
 				size_t marker_length;
-				BOOL is_lvalue;		// for SYM_DYNAMIC
+				BOOL is_lvalue;		// for SYM_DYNAMIC and SYM_VAR (at load time)
 			};
 		};  
 	};
@@ -529,7 +532,7 @@ enum enum_act {
 , ACT_STATUSBARWAIT
 , ACT_CLIPWAIT, ACT_KEYWAIT
 , ACT_SLEEP
-, ACT_HOTKEY, ACT_SETTIMER, ACT_CRITICAL, ACT_THREAD
+, ACT_CRITICAL, ACT_THREAD
 , ACT_WINACTIVATE, ACT_WINACTIVATEBOTTOM
 , ACT_WINWAIT, ACT_WINWAITCLOSE, ACT_WINWAITACTIVE, ACT_WINWAITNOTACTIVE
 , ACT_WINMINIMIZE, ACT_WINMAXIMIZE, ACT_WINRESTORE
@@ -555,7 +558,7 @@ enum enum_act {
 , ACT_STRINGCASESENSE, ACT_DETECTHIDDENWINDOWS, ACT_DETECTHIDDENTEXT, ACT_BLOCKINPUT
 , ACT_SETNUMLOCKSTATE, ACT_SETSCROLLLOCKSTATE, ACT_SETCAPSLOCKSTATE, ACT_SETSTORECAPSLOCKMODE
 , ACT_KEYHISTORY, ACT_LISTLINES, ACT_LISTVARS, ACT_LISTHOTKEYS
-, ACT_EDIT, ACT_RELOAD, ACT_MENU
+, ACT_EDIT, ACT_RELOAD
 , ACT_SHUTDOWN
 , ACT_FILEENCODING
 // It's safer to use g_ActionCount, which is calculated immediately after the array is declared
