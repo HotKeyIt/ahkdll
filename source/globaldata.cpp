@@ -108,6 +108,7 @@ WarnMode g_Warn_UseUnsetLocal = WARNMODE_OFF;		// Used by #Warn directive.
 WarnMode g_Warn_UseUnsetGlobal = WARNMODE_OFF;		//
 WarnMode g_Warn_UseEnv = WARNMODE_OFF;				//
 WarnMode g_Warn_LocalSameAsGlobal = WARNMODE_OFF;	//
+WarnMode g_Warn_ClassOverwrite = WARNMODE_OFF;		//
 PVOID g_ExceptionHandler = NULL;
 bool g_ExceptionWarnContinuable = true;
 #ifndef _USRDLL
@@ -218,11 +219,11 @@ HWND g_HShwnd;
 int g_HSPriority = 0;  // default priority is always 0
 int g_HSKeyDelay = 0;  // Fast sends are much nicer for auto-replace and auto-backspace.
 SendModes g_HSSendMode = SM_INPUT; // v1.1.7.03: New default for more reliable hotstrings and best performance.
+SendRawType g_HSSendRaw = SCM_NOT_RAW;
 bool g_HSCaseSensitive = false;
 bool g_HSConformToCase = true;
 bool g_HSDoBackspace = true;
 bool g_HSOmitEndChar = false;
-bool g_HSSendRaw = false;
 bool g_HSEndCharRequired = true;
 bool g_HSDetectWhenInsideWord = false;
 bool g_HSDoReset = false;

@@ -1860,7 +1860,7 @@ LineNumberType Script::LoadFromText(LPTSTR aScript,LPCTSTR aPathToShow, bool aCh
 	for (int i = 0; i < mFuncCount; ++i)
 	{
 		Func &func = *mFunc[i];
-		if (!func.mIsBuiltIn)
+		if (!func.mIsBuiltIn && !(func.mDefaultVarType & VAR_FORCE_LOCAL))
 		{
 			PreprocessLocalVars(func, func.mVar, func.mVarCount);
 			PreprocessLocalVars(func, func.mStaticVar, func.mStaticVarCount);
@@ -1877,6 +1877,11 @@ LineNumberType Script::LoadFromText(LPTSTR aScript,LPCTSTR aPathToShow, bool aCh
 		mUnresolvedClasses->Release();
 		mUnresolvedClasses = NULL;
 	}
+
+	// Check for classes potentially being overwritten.
+	if (g_Warn_ClassOverwrite)
+		CheckForClassOverwrite();
+
 #ifndef AUTOHOTKEYSC
 	if (mIncludeLibraryFunctionsThenExit)
 	{
@@ -2012,7 +2017,7 @@ UINT Script::LoadFromFile()
 	for (int i = 0; i < mFuncCount; ++i)
 	{
 		Func &func = *mFunc[i];
-		if (!func.mIsBuiltIn)
+		if (!func.mIsBuiltIn && !(func.mDefaultVarType & VAR_FORCE_LOCAL))
 		{
 			PreprocessLocalVars(func, func.mVar, func.mVarCount);
 			PreprocessLocalVars(func, func.mStaticVar, func.mStaticVarCount);
@@ -2029,6 +2034,10 @@ UINT Script::LoadFromFile()
 		mUnresolvedClasses->Release();
 		mUnresolvedClasses = NULL;
 	}
+
+	// Check for classes potentially being overwritten.
+	if (g_Warn_ClassOverwrite)
+		CheckForClassOverwrite();
 
 #ifndef AUTOHOTKEYSC
 	if (mIncludeLibraryFunctionsThenExit)
@@ -3496,7 +3505,7 @@ continue_main_loop: // This method is used in lieu of "continue" for performance
 					break;
 				}
 				mCurrLine = NULL; // v1.0.40.04: Prevents showing misleading vicinity lines for a syntax-error such as %::%
-				_stprintf(buf, _T("{Blind}%s%s{%s DownTemp}"), extra_event, remap_dest_modifiers, remap_dest); // v1.0.44.05: DownTemp vs. Down. See Send's DownTemp handler for details.
+				_stprintf(buf, _T("{Blind}%s%s{%s DownR}"), extra_event, remap_dest_modifiers, remap_dest); // v1.0.44.05: DownTemp vs. Down. See Send's DownTemp handler for details.
 				if (!AddLine(ACT_SEND, &buf, 1, NULL)) // v1.0.40.04: Check for failure due to bad remaps such as %::%.
 					return FAIL;
 				AddLine(ACT_RETURN);
@@ -5040,7 +5049,7 @@ continue_main_loop: // This method is used in lieu of "continue" for performance
 					break;
 				}
 				mCurrLine = NULL; // v1.0.40.04: Prevents showing misleading vicinity lines for a syntax-error such as %::%
-				_stprintf(buf, _T("{Blind}%s%s{%s DownTemp}"), extra_event, remap_dest_modifiers, remap_dest); // v1.0.44.05: DownTemp vs. Down. See Send's DownTemp handler for details.
+				_stprintf(buf, _T("{Blind}%s%s{%s DownR}"), extra_event, remap_dest_modifiers, remap_dest); // v1.0.44.05: DownTemp vs. Down. See Send's DownTemp handler for details.
 				if (!AddLine(ACT_SEND, &buf, 1, NULL)) // v1.0.40.04: Check for failure due to bad remaps such as %::%.
 					goto FAIL;
 				AddLine(ACT_RETURN);
@@ -6028,6 +6037,8 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 			warnType = WARN_USE_ENV;
 		else if (IS_PARAM1_MATCH(_T("LocalSameAsGlobal")))
 			warnType = WARN_LOCAL_SAME_AS_GLOBAL;
+		else if (IS_PARAM1_MATCH(_T("ClassOverwrite")))
+			warnType = WARN_CLASS_OVERWRITE;
 		else
 			return ScriptError(ERR_PARAM1_INVALID, aBuf);
 
@@ -6056,6 +6067,9 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 
 		if (warnType == WARN_LOCAL_SAME_AS_GLOBAL || warnType == WARN_ALL)
 			g_Warn_LocalSameAsGlobal = warnMode;
+
+		if (warnType == WARN_CLASS_OVERWRITE || warnType == WARN_ALL)
+			g_Warn_ClassOverwrite = warnMode;
 
 		return CONDITION_TRUE;
 	}
@@ -6360,7 +6374,7 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType,
 				if (!result) // It's probably operator, e.g. local = %var%
 					break;
 			}
-			else // It's the word "global", "local", "static" by itself.  But only global or static is valid that way (when it's the first line in the function body).
+			else // It's the word "global", "local", "static" by itself.
 			{
 				// All of the following must be checked to catch back-to-back conflicting declarations such
 				// as these:
@@ -6368,15 +6382,24 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType,
 				//    global  ; Should be an error because global vars are implied/automatic.
 				// v1.0.48: Lexikos: Added assume-static mode. For now, this requires "static" to be
 				// placed above local or global variable declarations.
-				if (declare_type != VAR_DECLARE_LOCAL  // i.e. VAR_DECLARE_GLOBAL or VAR_DECLARE_STATIC (can't due be VAR_DECLARE_NONE due to checks higher above).
-					&& mNextLineIsFunctionBody && g->CurrentFunc->mDefaultVarType == VAR_DECLARE_NONE)
+				if (mNextLineIsFunctionBody)
 				{
-					g->CurrentFunc->mDefaultVarType = declare_type;
-					// No further action is required for the word "global" or "static" by itself.
-					return OK;
+					if (g->CurrentFunc->mDefaultVarType == VAR_DECLARE_NONE)
+					{
+						if (declare_type == VAR_DECLARE_LOCAL)
+							declare_type |= VAR_FORCE_LOCAL; // v1.1.27: "local" by itself restricts globals to only those declared inside the function.
+						g->CurrentFunc->mDefaultVarType = declare_type;
+						// No further action is required.
+						return OK;
+					}
+					// v1.1.27: Allow "local" and "static" to be combined, leaving the restrictions on globals in place.
+					else if (g->CurrentFunc->mDefaultVarType == (VAR_DECLARE_LOCAL | VAR_FORCE_LOCAL) && declare_type == VAR_DECLARE_STATIC)
+					{
+						g->CurrentFunc->mDefaultVarType = (VAR_DECLARE_STATIC | VAR_FORCE_LOCAL);
+						return OK;
+					}
 				}
-				// Otherwise, it's the word "local" by itself (which isn't allowed since it's the default),
-				// or it's the word global or static by itself, but it occurs too far down in the body.
+				// Otherwise, it occurs too far down in the body.
 				return ScriptError(ERR_UNRECOGNIZED_ACTION, aLineText); // Vague error since so rare.
 			}
 			if (mNextLineIsFunctionBody && g->CurrentFunc->mDefaultVarType == VAR_DECLARE_NONE)
@@ -9585,13 +9608,23 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 		if (g->CurrentFunc && !mCurrentFuncOpenBlockCount) // Any negative mCurrentFuncOpenBlockCount is caught by a different stage.
 		{
 			Func &func = *g->CurrentFunc;
-			// v1: mGlobalVar isn't used after this point. In v2 it is used to prevent dynamic
-			// variable references from resolving to globals which aren't declared in this
-			// function, but doing that in v1 would break numerous scripts. It could be moved
-			// from Func to Script to reduce memory usage, but v2 needs it in Func, so it's
-			// left there for maintainability.
-			func.mGlobalVarCount = 0; // For maintainability; shouldn't be used at run-time.
-			func.mGlobalVar = NULL;   // For maintainability; shouldn't be used when count is 0.
+			// After this point, mGlobalVar is used to prevent dynamic variable references from
+			// resolving to globals which aren't declared in this function (though in v1, this is
+			// only done in force-local functions, added in v1.1.27).
+			if (func.mGlobalVarCount && (func.mDefaultVarType & VAR_FORCE_LOCAL))
+			{
+				// Now that there can be no more "global" declarations, copy the list into persistent memory.
+				Var **global_vars;
+				if (  !(global_vars = (Var **)SimpleHeap::Malloc(func.mGlobalVarCount * sizeof(Var *)))  )
+					return ScriptError(ERR_OUTOFMEM);
+				memcpy(global_vars, func.mGlobalVar, func.mGlobalVarCount * sizeof(Var *));
+				func.mGlobalVar = global_vars;
+			}
+			else
+			{
+				func.mGlobalVarCount = 0;
+				func.mGlobalVar = NULL;
+			}
 			line.mAttribute = ATTR_TRUE;  // Flag this ACT_BLOCK_END as the ending brace of a function's body.
 			g->CurrentFunc = NULL;
 		}
@@ -11464,6 +11497,11 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		min_params = 2;
 		max_params = 2;
 	}
+	else if (!_tcsicmp(func_name, _T("Min")) || !_tcsicmp(func_name, _T("Max")))
+	{
+		bif = BIF_MinMax;
+		max_params = 10000; // An arbitrarily high limit that will never realistically be reached.
+	}
 	else if (!_tcsicmp(func_name, _T("Abs")))
 		bif = BIF_Abs;
 	else if (!_tcsicmp(func_name, _T("Sin")))
@@ -12291,12 +12329,15 @@ Var *Script::FindVar(LPTSTR aVarName, size_t aVarNameLength, int *apInsertPos, i
 		if (g.CurrentFunc->mDefaultVarType == VAR_DECLARE_GLOBAL)
 			return FindVar(aVarName, aVarNameLength, apInsertPos, FINDVAR_GLOBAL, apIsLocal);
 		// v1: Each *dynamic* variable reference may resolve to a global if one exists.
-		if (mIsReadyToExecute)
+		bool force_local = g.CurrentFunc->mDefaultVarType & VAR_FORCE_LOCAL;
+		if (mIsReadyToExecute && !force_local)
 			return FindVar(aVarName, aVarNameLength, NULL, FINDVAR_GLOBAL);
 		// Otherwise, caller only wants globals which are declared in *this* function:
 		for (int i = 0; i < g.CurrentFunc->mGlobalVarCount; ++i)
 			if (!_tcsicmp(var_name, g.CurrentFunc->mGlobalVar[i]->mName)) // lstrcmpi() is not used: 1) avoids breaking existing scripts; 2) provides consistent behavior across multiple locales; 3) performance.
 				return g.CurrentFunc->mGlobalVar[i];
+		if (force_local)
+			return NULL;
 		// As a last resort, check for a super-global:
 		Var *gvar = FindVar(aVarName, aVarNameLength, NULL, FINDVAR_GLOBAL, NULL);
 		if (gvar && gvar->IsSuperGlobal())
@@ -12363,7 +12404,7 @@ Var *Script::AddVar(LPTSTR aVarName, size_t aVarNameLength, int aInsertPos, int 
 	//   VAR_LOCAL_FUNCPARAM should not be made static.
 	//   VAR_LOCAL_STATIC is already static.
 	//   VAR_DECLARED indicates mDefaultVarType is irrelevant.
-	if (aScope == VAR_LOCAL && g->CurrentFunc->mDefaultVarType == VAR_DECLARE_STATIC)
+	if (aScope == VAR_LOCAL && (g->CurrentFunc->mDefaultVarType & VAR_LOCAL_STATIC))
 		// v1.0.48: Lexikos: Current function is assume-static, so set static attribute.
 		aScope |= VAR_LOCAL_STATIC;
 
@@ -13322,6 +13363,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 
 				ExprTokenType &this_infix_item = infix[infix_count]; // Might help reduce code size since it's referenced many places below.
 				this_infix_item.deref = NULL; // Init needed for SYM_ASSIGN and related; a non-NULL deref means it should be converted to an object-assignment.
+				this_infix_item.is_lvalue = FALSE; // Init needed for SYM_VAR; simplifies #Warn ClassOverwrite (vs. storing it in the assignment token).
 
 				// CHECK IF THIS CHARACTER IS AN OPERATOR.
 				cp1 = cp[1]; // Improves performance by nearly 5% and appreciably reduces code size (at the expense of being less maintainable).
@@ -14468,6 +14510,25 @@ double_deref: // Caller has set cp to be start and op_end to be the character af
 			// DO NOT BREAK: FALL THROUGH TO BELOW
 
 		default: // This infix symbol is an operator, so act according to its precedence.
+			if (IS_ASSIGNMENT_OR_POST_OP(infix_symbol))
+			{
+				// Resolve the variable now, for validation after all files have been loaded.
+				// Without this, the valdiation code would need to determine which postfix token
+				// corresponds to an assignment's l-value, which would require larger code.
+				if (this_infix > infix) // Must be checked, although always true in valid expressions.
+				{
+					if (this_infix[-1].symbol == SYM_VAR)
+						this_infix[-1].is_lvalue = TRUE;
+				}
+			}
+			else if (infix_symbol == SYM_PRE_INCREMENT || infix_symbol == SYM_PRE_DECREMENT)
+			{
+				// Same as other assignments (above), but need to check SYM_DYNAMIC as well since
+				// the target won't have been converted to SYM_VAR yet (not applicable with #NoEnv).
+				if (this_infix[1].symbol == SYM_VAR
+					|| this_infix[1].symbol == SYM_DYNAMIC && !SYM_DYNAMIC_IS_DOUBLE_DEREF(this_infix[1]))
+					this_infix[1].is_lvalue = TRUE;
+			}
 			// If the symbol waiting on the stack has a lower precedence than the current symbol, push the
 			// current symbol onto the stack so that it will be processed sooner than the waiting one.
 			// Otherwise, pop waiting items off the stack (by means of i not being incremented) until their
@@ -15675,6 +15736,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 				if ( !(sDerefBuf = tmalloc(sDerefBufSize)) )
 				{
 					sDerefBufSize = 0;
+					delete token;
 					return line->LineError(ERR_OUTOFMEM);
 				}
 			}
@@ -17790,16 +17852,16 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 #endif
 	case ACT_SEND:
 	case ACT_SENDRAW:
-		SendKeys(ARG1, mActionType == ACT_SENDRAW, g.SendMode);
+		SendKeys(ARG1, mActionType == ACT_SENDRAW ? SCM_RAW : SCM_NOT_RAW, g.SendMode);
 		return OK;
 	case ACT_SENDINPUT: // Raw mode is supported via {Raw} in ARG1.
-		SendKeys(ARG1, false, g.SendMode == SM_INPUT_FALLBACK_TO_PLAY ? SM_INPUT_FALLBACK_TO_PLAY : SM_INPUT);
+		SendKeys(ARG1, SCM_NOT_RAW, g.SendMode == SM_INPUT_FALLBACK_TO_PLAY ? SM_INPUT_FALLBACK_TO_PLAY : SM_INPUT);
 		return OK;
 	case ACT_SENDPLAY: // Raw mode is supported via {Raw} in ARG1.
-		SendKeys(ARG1, false, SM_PLAY);
+		SendKeys(ARG1, SCM_NOT_RAW, SM_PLAY);
 		return OK;
 	case ACT_SENDEVENT:
-		SendKeys(ARG1, false, SM_EVENT);
+		SendKeys(ARG1, SCM_NOT_RAW, SM_EVENT);
 		return OK;
 
 	case ACT_CLICK:
@@ -17944,7 +18006,7 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 
 	case ACT_CONTROLSEND:
 	case ACT_CONTROLSENDRAW:
-		return ControlSend(SIX_ARGS, mActionType == ACT_CONTROLSENDRAW);
+		return ControlSend(SIX_ARGS, mActionType == ACT_CONTROLSENDRAW ? SCM_RAW : SCM_NOT_RAW);
 
 	case ACT_CONTROLCLICK:
 		if (   !(vk = ConvertMouseButton(ARG4))   ) // Treats blank as "Left".
@@ -19960,6 +20022,36 @@ void Script::PreprocessLocalVars(Func &aFunc, Var **aVarList, int &aVarCount)
 		// Since this undeclared local variable has the same name as a global, there's
 		// a chance the user intended it to be global. So consider warning the user:
 		MaybeWarnLocalSameAsGlobal(aFunc, var);
+	}
+}
+
+
+
+void Script::CheckForClassOverwrite()
+{
+	for (Line *line = mFirstLine; line; line = line->mNextLine)
+	{
+		for (int a = 0; a < line->mArgc; ++a)
+		{
+			ArgStruct &arg = line->mArg[a];
+			if (arg.type == ARG_TYPE_OUTPUT_VAR)
+			{
+				if (!*arg.text) // The arg's variable is not one that needs to be dynamically resolved.
+				{
+					Var *target_var = VAR(arg);
+					if (target_var->HasObject()) // At this stage, all variables are empty except class variables.
+						ScriptWarning(g_Warn_ClassOverwrite, WARNING_CLASS_OVERWRITE, target_var->mName, line);
+				}
+			}
+			else if (arg.is_expression)
+			{
+				for (ExprTokenType *token = arg.postfix; token->symbol != SYM_INVALID; ++token)
+				{
+					if (token->symbol == SYM_VAR && token->is_lvalue && token->var->HasObject())
+						ScriptWarning(g_Warn_ClassOverwrite, WARNING_CLASS_OVERWRITE, token->var->mName, line);
+				}
+			}
+		}
 	}
 }
 

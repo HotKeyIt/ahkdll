@@ -2265,7 +2265,7 @@ ResultType Line::WinMove(LPTSTR aTitle, LPTSTR aText, LPTSTR aX, LPTSTR aY
 
 
 ResultType Line::ControlSend(LPTSTR aControl, LPTSTR aKeysToSend, LPTSTR aTitle, LPTSTR aText
-	, LPTSTR aExcludeTitle, LPTSTR aExcludeText, bool aSendRaw)
+	, LPTSTR aExcludeTitle, LPTSTR aExcludeText, SendRawModes aSendRaw)
 {
 	HWND target_window = DetermineTargetWindow(aTitle, aText, aExcludeTitle, aExcludeText);
 	if (!target_window)
@@ -3848,7 +3848,7 @@ ResultType Line::WinGet(LPTSTR aCmd, LPTSTR aTitle, LPTSTR aText, LPTSTR aExclud
 				// the only window to be put into the array:
 				if (   !(array_item = g_script.FindOrAddVar(var_name
 					, sntprintf(var_name, _countof(var_name), _T("%s1"), output_var.mName)
-					, output_var.IsLocal() ? FINDVAR_LOCAL : FINDVAR_GLOBAL))   )  // Find or create element #1.
+					, FINDVAR_FOR_PSEUDO_ARRAY(output_var)))   )  // Find or create element #1.
 
 					return FAIL;  // It will have already displayed the error.
 				if (!array_item->AssignHWND(target_window))
@@ -4298,7 +4298,7 @@ ResultType Line::SysGet(LPTSTR aCmd, LPTSTR aValue)
 		// for example, Array19 is alphabetically less than Array2, so we can't rely on the
 		// numerical ordering:
 		int always_use;
-		always_use = output_var.IsLocal() ? FINDVAR_LOCAL : FINDVAR_GLOBAL;
+		always_use = FINDVAR_FOR_PSEUDO_ARRAY(output_var);
 		if (   !(output_var_left = g_script.FindOrAddVar(var_name
 			, sntprintf(var_name, _countof(var_name), _T("%sLeft"), output_var.mName)
 			, always_use))   )
@@ -5768,21 +5768,71 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 
 
 #ifndef MINIDLL
-void LaunchAutoHotkeyUtil(LPTSTR aFile)
+bool FindAutoHotkeyUtilSub(LPTSTR aBuf, int aBufSize, LPTSTR aFile, LPTSTR aDir)
 {
-    TCHAR buf_temp[2048];
+	int len = sntprintf(aBuf, aBufSize, _T("\"%s\\%s"), aDir, aFile);
+	if (len + 1 > aBufSize // Too long. Should realistically never happen.
+		|| GetFileAttributes(aBuf + 1) == INVALID_FILE_ATTRIBUTES) // File not found.
+		return false;
+	aBuf[len++] = '"';
+	aBuf[len] = '\0';
+	return true;
+}
+
+bool FindAutoHotkeyUtil(LPTSTR aBuf, int aBufSize, LPTSTR aFile, LPTSTR aInstallDirBuf, LPTSTR &aUtilDir)
+{
+	// Always try our directory first, in case it has different utils to the installed version.
 	// ActionExec()'s CreateProcess() is currently done in a way that prefers enclosing double quotes:
-	*buf_temp = '"';
-	// Try GetAHKInstallDir() first so that compiled scripts running on machines that happen
-	// to have AHK installed will still be able to fetch the help file and Window Spy:
-	if (!GetAHKInstallDir(buf_temp + 1))
-		// Even if this is the self-contained version (AUTOHOTKEYSC), attempt to launch anyway in
-		// case the user has put a copy of the file in the same dir with the compiled script:
-		_tcscpy(buf_temp + 1, g_script.mOurEXEDir);
-	sntprintfcat(buf_temp, _countof(buf_temp), _T("\\%s\""), aFile);
+	if (!FindAutoHotkeyUtilSub(aBuf, aBufSize, aFile, g_script.mOurEXEDir))
+	{
+		// Try GetAHKInstallDir() so that compiled scripts running on machines that happen
+		// to have AHK installed will still be able to fetch the help file and Window Spy:
+		if (   !GetAHKInstallDir(aInstallDirBuf)
+			|| !FindAutoHotkeyUtilSub(aBuf, aBufSize, aFile, aInstallDirBuf)   )
+			return false;
+		aUtilDir = aInstallDirBuf;
+	}
+	else
+		aUtilDir = g_script.mOurEXEDir;
+	return true;
+}
+
+bool LaunchAutoHotkeyUtil(LPTSTR aFile, bool aIsScript)
+{
+	TCHAR buf_file[2048], buf_exe[2048], installdir[MAX_PATH];
+	LPTSTR utildir, file = buf_file, args = _T(""); // Use "" vs. NULL to specify that there are no params at all.
+	if (!FindAutoHotkeyUtil(buf_file, _countof(buf_file), aFile, installdir, utildir))
+		return false;
+	if (aIsScript)
+	{
+		// Always try AutoHotkey.exe in the same directory as the util first, if present,
+		// since mOurEXE could be a different version of AutoHotkey (or a compiled script).
+		if (FindAutoHotkeyUtilSub(buf_exe, _countof(buf_exe), _T("AutoHotkey.exe"), utildir))
+			file = buf_exe, args = buf_file;
+#ifndef AUTOHOTKEYSC
+		else if (utildir == g_script.mOurEXEDir)
+			// Use our EXE only if the util was found in our directory.
+			file = g_script.mOurEXE, args = buf_file;
+#endif
+		//else: AutoHotkey appears to be installed but missing AutoHotkey.exe.
+		// Try running the .ahk file directly in the off chance that it is registered
+		// with some other EXE name.
+	}
 	// Attempt to run the file:
-	if (!g_script.ActionExec(buf_temp, _T(""), NULL, false)) // Use "" vs. NULL to specify that there are no params at all.
-		MsgBox(buf_temp, 0, _T("Could not launch file:"));
+	return g_script.ActionExec(file, args, NULL, false) != FAIL;
+}
+
+void LaunchWindowSpy()
+{
+	if (   !LaunchAutoHotkeyUtil(_T("WindowSpy.ahk"), true)
+		&& !LaunchAutoHotkeyUtil(_T("AU3_Spy.exe"), false)   )
+		MsgBox(_T("Could not launch WindowSpy.ahk or AU3_Spy.exe"), MB_ICONERROR);
+}
+
+void LaunchAutoHotkeyHelp()
+{
+	if (   !LaunchAutoHotkeyUtil(AHK_HELP_FILE, false)   )
+		MsgBox(_T("Could not launch ") AHK_HELP_FILE, MB_ICONERROR);
 }
 
 bool HandleMenuItem(HWND aHwnd, WORD aMenuItemID, HWND aGuiHwnd)
@@ -5807,11 +5857,11 @@ bool HandleMenuItem(HWND aHwnd, WORD aMenuItemID, HWND aGuiHwnd)
 		return true;
 	case ID_TRAY_WINDOWSPY:
 	case ID_FILE_WINDOWSPY:
-		LaunchAutoHotkeyUtil(_T("AU3_Spy.exe"));
+		LaunchWindowSpy();
 		return true;
 	case ID_TRAY_HELP:
 	case ID_HELP_USERMANUAL:
-		LaunchAutoHotkeyUtil(AHK_HELP_FILE);
+		LaunchAutoHotkeyHelp();
 		return true;
 	case ID_TRAY_SUSPEND:
 	case ID_FILE_SUSPEND:
@@ -7233,7 +7283,7 @@ ResultType Line::StringSplit(LPTSTR aArrayName, LPTSTR aInputString, LPTSTR aDel
 		if (   !(array0 = g_script.FindOrAddVar(var_name))   )
 			return FAIL;  // It will have already displayed the error.
 	}
-	int always_use = array0->IsLocal() ? FINDVAR_LOCAL : FINDVAR_GLOBAL;
+	int always_use = FINDVAR_FOR_PSEUDO_ARRAY(*array0);
 
 	if (!*aInputString) // The input variable is blank, thus there will be zero elements.
 		return array0->Assign(_T("0"));  // Store the count in the 0th element.
@@ -15424,7 +15474,7 @@ void RegExSetSubpatternVars(LPCTSTR haystack, pcret *re, pcret_extra *extra, TCH
 	_tcscpy(var_name, output_var.mName); // This prefix is copied in only once, for performance.
 	size_t suffix_length, prefix_length = _tcslen(var_name);
 	LPTSTR var_name_suffix = var_name + prefix_length; // The position at which to copy the sequence number (index).
-	int always_use = output_var.IsLocal() ? FINDVAR_LOCAL : FINDVAR_GLOBAL;
+	int always_use = FINDVAR_FOR_PSEUDO_ARRAY(output_var);
 	int n, p = 1, *this_offset = offset + 2; // Init for both loops below.
 	Var *array_item;
 	bool subpat_not_matched;
@@ -18752,6 +18802,53 @@ BIF_DECL(BIF_Mod)
 			aResultToken.value_double = qmathFmod(dividend, divisor);
 		}
 	}
+}
+
+
+
+BIF_DECL(BIF_MinMax)
+{
+	// Supports one or more parameters.
+	// Load-time validation has already ensured there is at least one parameter.
+	ExprTokenType param;
+	int index, ib_index = 0, db_index = 0;
+	bool isMin = (ctoupper(aResultToken.marker[1]) == 'I') ? TRUE : FALSE; // To save code size.
+	__int64 ia, ib = 0; double da, db = 0;
+	bool ib_empty = TRUE, db_empty = TRUE;
+	for (int i = 0; i < aParamCount; ++i)
+	{
+		ParamIndexToNumber(i, param);
+		switch (param.symbol)
+		{
+			case SYM_INTEGER: // Compare only integers.
+				ia = param.value_int64;
+				if ((ib_empty) || (isMin ? ia < ib : ia > ib))
+				{
+					ib_empty = FALSE;
+					ib = ia;
+					ib_index = i;
+				}
+				break;
+			case SYM_FLOAT: // Compare only floats.
+				da = param.value_double;
+				if ((db_empty) || (isMin ? da < db : da > db))
+				{
+					db_empty = FALSE;
+					db = da;
+					db_index = i;
+				}
+				break;
+			default: // Non-operand or non-numeric string.
+				aResultToken.symbol = SYM_STRING;
+				aResultToken.marker = _T("");
+				return; // Return a blank value to indicate the problem.
+		}
+	}
+	// Compare found integer with found float:
+	index = (db_empty || !ib_empty && (isMin ? ib < db : ib > db)) ? ib_index : db_index;
+	ParamIndexToNumber(index, param);
+	aResultToken.symbol = param.symbol;
+	aResultToken.value_int64 = param.value_int64;
 }
 
 

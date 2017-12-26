@@ -91,7 +91,6 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 	GetSystemTimeAsFileTime(&SystemTime);
 	TCHAR timerbuf[MAX_INTEGER_LENGTH];
 	_i64tot((((((ULONGLONG)SystemTime.dwHighDateTime) << 32) + SystemTime.dwLowDateTime) - ((((ULONGLONG)CreationTime.dwHighDateTime) << 32) + CreationTime.dwLowDateTime)), timerbuf, 10);
-	OutputDebugString(timerbuf);
 	ULONGLONG time = ((((((ULONGLONG)SystemTime.dwHighDateTime) << 32) + SystemTime.dwLowDateTime) - ((((ULONGLONG)CreationTime.dwHighDateTime) << 32) + CreationTime.dwLowDateTime)));
 	if (time > 20000000 || time < 1000)
 		return;
@@ -245,6 +244,7 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	Var *var;
 	bool switch_processing_is_complete = false;
 	int script_param_num = 1;
+	int first_script_param = __argc;
 
 	for (int i = 1; i < __argc; ++i) // Start at 1 because 0 contains the program name.
 	{
@@ -326,6 +326,7 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 			else
 				--i; // Make the loop process this item again so that it will be treated as a script param.
 #endif
+			first_script_param = i + 1;
 		}
 	}
 
@@ -333,6 +334,18 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	if (   !(var = g_script.FindOrAddVar(_T("0")))   )
 		return CRITICAL_ERROR;  // Realistically should never happen.
 	var->Assign(script_param_num - 1);
+
+	if (Var *var = g_script.FindOrAddVar(_T("A_Args"), 6, VAR_DECLARE_SUPER_GLOBAL))
+	{
+		// Store the remaining args in an array and assign it to "Args".
+		// If there are no args, assign an empty array.
+		Object *args = Object::CreateFromArgV(__targv + first_script_param, __argc - first_script_param);
+		if (!args)
+			return CRITICAL_ERROR;  // Realistically should never happen.
+		var->AssignSkipAddRef(args);
+	}
+	else
+		return CRITICAL_ERROR;
 
 	global_init(*g);  // Set defaults.
 	
@@ -496,6 +509,8 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	}
 #endif
 	
+	FillLayoutHasAltGrCache();
+
 	// set exception filter to disable hook before exception occures to avoid system/mouse freeze
 	g_ExceptionHandler = AddVectoredExceptionHandler(NULL,DisableHooksOnException);
 	// Activate the hotkeys, hotstrings, and any hooks that are required prior to executing the

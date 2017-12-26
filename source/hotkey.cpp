@@ -176,6 +176,11 @@ void Hotkey::ManifestAllHotkeysHotstringsHooks()
 	// a hotkey processed earlier in the second pass might have been registered when in fact it
 	// should have become a hook hotkey due to something learned only later in the second pass.
 	// Doing these types of things in the first pass resolves such situations.
+	// Update for v1.1.27: Doing the above in the first pass doesn't work correctly, as mType is
+	// reset to default during the first pass (even if a previous iteration might has set it to
+	// HK_KEYBD_HOOK, such as when it is eclipsed by a wildcard hotkey).  One workaround would
+	// be to set mKeybdHookMandatory = true, but that would prevent the hotkey from reverting to
+	// HK_NORMAL when it no longer needs the hook.  Instead, there are now three passes.
 	bool vk_is_prefix[VK_ARRAY_COUNT] = {false};
 	bool hk_is_inactive[MAX_HOTKEYS]; // No init needed.
 	bool is_win9x = g_os.IsWin9x(); // Might help performance a little by avoiding calls in loops.
@@ -205,7 +210,7 @@ void Hotkey::ManifestAllHotkeysHotstringsHooks()
 
 		if (hot.mKeybdHookMandatory)
 		{
-			// v1.0.44: The following Relies upon by some things like the Hotkey constructor and the tilde prefix
+			// v1.0.44: The following is relied upon by some things like the Hotkey constructor and the tilde prefix
 			// (the latter can set mKeybdHookMandatory for a hotkey sometime after the first variant is added [such
 			// as for a subsequent variant]).  This practice also improves maintainability.
 			if (HK_TYPE_CAN_BECOME_KEYBD_HOOK(hot.mType)) // To ensure it hasn't since become a joystick/mouse/mouse-and-keyboard hotkey.
@@ -232,6 +237,16 @@ void Hotkey::ManifestAllHotkeysHotstringsHooks()
 
 		if (hot.mModifierVK)
 			vk_is_prefix[hot.mModifierVK] = true;
+	} // End of first pass loop.
+	
+	// SECOND PASS THROUGH THE HOTKEYS:
+	// Check for hotkeys that can affect other hotkeys, such as wildcard or key-up hotkeys.
+	// This is separate to the other passes for reasons described at the top of the function.
+	for (i = 0; i < sHotkeyCount; ++i)
+	{
+		if (hk_is_inactive[i])
+			continue;
+		Hotkey &hot = *shk[i]; // For performance and convenience.
 
 		if (hot.mKeyUp && hot.mVK) // No need to do the below for mSC hotkeys since their down hotkeys would already be handled by the hook.
 		{
@@ -260,7 +275,6 @@ void Hotkey::ManifestAllHotkeysHotstringsHooks()
 					&& shk[j]->mModifiersConsolidatedLR == hot.mModifiersConsolidatedLR)
 				{
 					shk[j]->mType = HK_KEYBD_HOOK; // Done even for Win9x (see comments above).
-					shk[j]->mKeybdHookMandatory = true; // Fix for v1.1.07.03: Prevent it from reverting back to HK_NORMAL, which would otherwise happen if j > i (i.e. the key-up hotkey is defined first).
 					// And if it's currently registered, it will be unregistered later below.
 				}
 			}
@@ -297,16 +311,18 @@ void Hotkey::ManifestAllHotkeysHotstringsHooks()
 				// not EITHER. In other words, mModifiersLR can never in effect contain a neutral modifier.
 				if (shk[j]->mVK == hot.mVK && HK_TYPE_CAN_BECOME_KEYBD_HOOK(shk[j]->mType) // Ordered for short-circuit performance.
 					&& (hot.mModifiers & shk[j]->mModifiers) == hot.mModifiers)
+				{
 					// Note: No need to check mModifiersLR because it would already be a hook hotkey in that case;
 					// that is, the check of shk[j]->mType precludes it.  It also precludes the possibility
 					// of shk[j] being a key-up hotkey, wildcard hotkey, etc.
 					shk[j]->mType = HK_KEYBD_HOOK;
 					// And if it's currently registered, it will be unregistered later below.
+				}
 			}
 		}
-	} // End of first pass loop.
+	} // End of second pass loop.
 
-	// SECOND PASS THROUGH THE HOTKEYS:
+	// THIRD PASS THROUGH THE HOTKEYS:
 	// v1.0.42: Reset sWhichHookNeeded because it's now possible that the hook was on before but no longer
 	// needed due to changing of a hotkey from hook to registered (for various reasons described above):
 	// v1.0.91: Make sure to leave the keyboard hook active if the script needs it for collecting input.
@@ -351,7 +367,7 @@ void Hotkey::ManifestAllHotkeysHotstringsHooks()
 						&& (!g_IsSuspended || vp->mJumpToLabel->IsExemptFromSuspend())   )
 						// ... and this variant isn't suspended (we already know IsCompletelyDisabled()==false from an earlier check).
 					{
-						hot.mType = HK_NORMAL; // Override the default.  Hook not needed.
+						hot.mType = HK_NORMAL; // Reset back to how it was before this loop started.  Hook not needed.
 						break;
 					}
 				}
@@ -793,6 +809,15 @@ HotkeyVariant *Hotkey::CriterionFiringIsCertainHelper(HotkeyIDType &aHotkeyIDwit
 	if (aSingleChar)
 		*aSingleChar = '#'; // '#' in KeyHistory to indicate this hotkey is disabled due to #IfWin criterion.
 	return NULL;
+}
+
+
+
+modLR_type Hotkey::HotkeyRequiresModLR(HotkeyIDType aHotkeyID, modLR_type aModLR)
+{
+	if (aHotkeyID >= sHotkeyCount)
+		return 0;
+	return shk[aHotkeyID]->mModifiersConsolidatedLR & aModLR;
 }
 
 
@@ -2542,8 +2567,13 @@ void Hotstring::DoReplace(LPARAM alParam)
 			TCHAR end_char;
 			if (mEndCharRequired && (end_char = (TCHAR)LOWORD(alParam))) // Must now check mEndCharRequired because LOWORD has been overloaded with context-sensitive meanings.
 			{
-				start_of_replacement += _tcslen(start_of_replacement);
-				_stprintf(start_of_replacement, _T("%s%c"), mSendRaw ? _T("") : _T("{Raw}"), end_char); // v1.0.43.02: Don't send "{Raw}" if already in raw mode!
+				LPTSTR end = start_of_replacement + _tcslen(start_of_replacement);
+				// v1.0.43.02: Don't send "{Raw}" if already in raw mode!
+				// v1.1.27: Avoid adding {Raw} if it gets switched on within the replacement text.
+				if (mSendRaw || tcscasestr(start_of_replacement, _T("{Raw}")) || tcscasestr(start_of_replacement, _T("{Text}")))
+					*end++ = end_char, *end = '\0';
+				else
+					_stprintf(end, _T("%s%c"), _T("{Raw}"), end_char);
 			}
 		}
 	}
@@ -2578,7 +2608,7 @@ void Hotstring::DoReplace(LPARAM alParam)
 	if (!(mDoBackspace || mOmitEndChar) && mSendMode != SM_EVENT) // The final character of the abbreviation (or its EndChar) was not suppressed by the hook.
 		Sleep(0);
 
-	SendKeys(SendBuf, mSendRaw, mSendMode); // Send the backspaces and/or replacement.
+	SendKeys(SendBuf, (SendRawModes)mSendRaw, mSendMode); // Send the backspaces and/or replacement.
 
 	// Restore original values.
 	g.KeyDelay = old_delay;
@@ -2689,7 +2719,7 @@ Hotstring::Hotstring(Label *aJumpToLabel, LPTSTR aOptions, LPTSTR aHotstring, LP
 
 
 void Hotstring::ParseOptions(LPTSTR aOptions, int &aPriority, int &aKeyDelay, SendModes &aSendMode
-	, bool &aCaseSensitive, bool &aConformToCase, bool &aDoBackspace, bool &aOmitEndChar, bool &aSendRaw
+	, bool &aCaseSensitive, bool &aConformToCase, bool &aDoBackspace, bool &aOmitEndChar, SendRawType &aSendRaw
 	, bool &aEndCharRequired, bool &aDetectWhenInsideWord, bool &aDoReset)
 {
 	// In this case, colon rather than zero marks the end of the string.  However, the string
@@ -2739,7 +2769,10 @@ void Hotstring::ParseOptions(LPTSTR aOptions, int &aPriority, int &aKeyDelay, Se
 			aPriority = _ttoi(cp1);
 			break;
 		case 'R':
-			aSendRaw = (*cp1 != '0');
+			aSendRaw = (*cp1 != '0') ? SCM_RAW : SCM_NOT_RAW;
+			break;
+		case 'T':
+			aSendRaw = (*cp1 != '0') ? SCM_RAW_TEXT : SCM_NOT_RAW;
 			break;
 		case 'S':
 			if (*cp1)

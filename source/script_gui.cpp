@@ -1613,7 +1613,7 @@ ResultType Line::GuiControlGet(LPTSTR aCommand, LPTSTR aControlID, LPTSTR aParam
 		// var names that are too long:
 		TCHAR var_name[MAX_VAR_NAME_LENGTH + 20];
 		Var *var;
-		int always_use = output_var.IsLocal() ? FINDVAR_LOCAL : FINDVAR_GLOBAL;
+		int always_use = FINDVAR_FOR_PSEUDO_ARRAY(output_var);
 		if (   !(var = g_script.FindOrAddVar(var_name
 			, sntprintf(var_name, _countof(var_name), _T("%sX"), output_var.mName)
 			, always_use))   )
@@ -10559,13 +10559,17 @@ LPTSTR GuiType::HotkeyToText(WORD aHotkey, LPTSTR aBuf)
 		// rather than SC.  Otherwise, Numlock will wind up being SC145 and NumpadDiv something similar.
 		// If a hotkey control could capture AppsKey, PrintScreen, Ctrl-Break (VK_CANCEL), which it can't, this
 		// would also apply to them.
-		sc_type sc1 = vk_to_sc(vk); // Primary scan code for this virtual key.
+		// Fix for v1.1.26.02: Check sc2 != 0, not sc1 != sc2, otherwise the fix described above doesn't work.
 		sc_type sc2 = vk_to_sc(vk, true); // Secondary scan code (will be the same as above if the VK has only one SC).
-		sc_type sc = (sc2 & 0x100) ? sc2 : sc1;
-		if ((sc & 0x100) && sc1 != sc2) // "sc" is both non-zero and extended, and this isn't a single-scan-code VK.
+		if (sc2) // Non-zero means this key has two scan codes.
 		{
-			SCtoKeyName(sc, cp, 100);
-			return aBuf;
+			sc_type sc1 = vk_to_sc(vk); // Primary scan code for this virtual key.
+			sc_type sc = (sc2 & 0x100) ? sc2 : sc1;
+			if (sc & 0x100)
+			{
+				SCtoKeyName(sc, cp, 100);
+				return aBuf;
+			}
 		}
 	}
 	// Since above didn't return, use a simple lookup on VK, since it gives preference to non-extended keys.

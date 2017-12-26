@@ -194,6 +194,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	Var *var;
 	bool switch_processing_is_complete = false;
 	int script_param_num = 1;
+	int first_script_param = __argc;
 
 	int dllargc = 0;
 #ifndef _UNICODE
@@ -298,6 +299,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 			switch_processing_is_complete = true;  // No more switches allowed after this point.
 			--i; // Make the loop process this item again so that it will be treated as a script param.
 		}
+		first_script_param = i + 1;
 	}
 	
 	LocalFree(dllargv); // free memory allocated by CommandLineToArgvW
@@ -309,6 +311,18 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 		return CRITICAL_ERROR;  // Realistically should never happen.
 	}
 	var->Assign(script_param_num - 1);
+
+	if (Var *var = g_script.FindOrAddVar(_T("A_Args"), 6, VAR_DECLARE_SUPER_GLOBAL))
+	{
+		// Store the remaining args in an array and assign it to "Args".
+		// If there are no args, assign an empty array.
+		Object *args = Object::CreateFromArgV(__targv + first_script_param, __argc - first_script_param);
+		if (!args)
+			return CRITICAL_ERROR;  // Realistically should never happen.
+		var->AssignSkipAddRef(args);
+	}
+	else
+		return CRITICAL_ERROR;
 
 	// N11 
 
@@ -483,6 +497,9 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	// also when dll will crash, it will only exit dll thread and try to destroy it, leaving the exe process running
 	g_ExceptionHandler = AddVectoredExceptionHandler(NULL,DisableHooksOnException);
 	*/
+
+	FillLayoutHasAltGrCache();
+
 	// set exception filter to disable hook before exception occures to avoid system/mouse freeze
 	// specify 1 so dll handler runs before exe handler
 	g_ExceptionHandler = AddVectoredExceptionHandler(1,DisableHooksOnException);

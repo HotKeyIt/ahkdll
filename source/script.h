@@ -251,6 +251,7 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define WARNING_USE_UNSET_VARIABLE _T("This variable has not been assigned a value.")
 #define WARNING_LOCAL_SAME_AS_GLOBAL _T("This local variable has the same name as a global variable.")
 #define WARNING_USE_ENV_VARIABLE _T("An environment variable is being accessed; see #NoEnv.")
+#define WARNING_CLASS_OVERWRITE _T("Class may be overwritten.")
 
 //----------------------------------------------------------------------------------
 
@@ -745,7 +746,7 @@ private:
 		, LPTSTR aMenu3, LPTSTR aMenu4, LPTSTR aMenu5, LPTSTR aMenu6, LPTSTR aMenu7
 		, LPTSTR aExcludeTitle, LPTSTR aExcludeText);
 	ResultType ControlSend(LPTSTR aControl, LPTSTR aKeysToSend, LPTSTR aTitle, LPTSTR aText
-		, LPTSTR aExcludeTitle, LPTSTR aExcludeText, bool aSendRaw);
+		, LPTSTR aExcludeTitle, LPTSTR aExcludeText, SendRawModes aSendRaw);
 	ResultType ControlClick(vk_type aVK, int aClickCount, LPTSTR aOptions, LPTSTR aControl
 		, LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LPTSTR aExcludeText);
 	ResultType ControlMove(LPTSTR aControl, LPTSTR aX, LPTSTR aY, LPTSTR aWidth, LPTSTR aHeight
@@ -2324,6 +2325,7 @@ public:
 	#define VAR_DECLARE_SUPER_GLOBAL (VAR_DECLARE_GLOBAL | VAR_SUPER_GLOBAL)
 	#define VAR_DECLARE_LOCAL  (VAR_DECLARED | VAR_LOCAL)
 	#define VAR_DECLARE_STATIC (VAR_DECLARED | VAR_LOCAL | VAR_LOCAL_STATIC)
+	// The last two may be combined (bitwise-OR) with VAR_FORCE_LOCAL.
 
 	bool mIsBuiltIn; // Determines contents of union. Keep this member adjacent/contiguous with the above.
 	// Note that it's possible for a built-in function such as WinExist() to become a normal/UDF via
@@ -3180,6 +3182,11 @@ public:
 	#define FINDVAR_GLOBAL   VAR_GLOBAL
 	#define FINDVAR_LOCAL    VAR_LOCAL
 	#define FINDVAR_STATIC    (VAR_LOCAL | VAR_LOCAL_STATIC)
+	// For pseudo-arrays, force-local mode overrides the legacy behaviour (a common source of
+	// confusion) and resolves the array elements individually, consistent with double-derefs:
+	#define FINDVAR_FOR_PSEUDO_ARRAY(array_start_var) \
+		((g->CurrentFunc && (g->CurrentFunc->mDefaultVarType & VAR_FORCE_LOCAL)) ? FINDVAR_DEFAULT \
+		: (array_start_var).IsLocal() ? FINDVAR_LOCAL : FINDVAR_GLOBAL)
 	Var *FindOrAddVar(LPTSTR aVarName, size_t aVarNameLength = 0, int aScope = FINDVAR_DEFAULT);
 	Var *FindVar(LPTSTR aVarName, size_t aVarNameLength = 0, int *apInsertPos = NULL
 		, int aScope = FINDVAR_DEFAULT
@@ -3238,6 +3245,7 @@ public:
 	void MaybeWarnLocalSameAsGlobal(Func &func, Var &var);
 
 	void PreprocessLocalVars(Func &aFunc, Var **aVarList, int &aVarCount);
+	void CheckForClassOverwrite();
 
 	static ResultType UnhandledException(ExprTokenType*& aToken, Line* aLine);
 	static ResultType SetErrorLevelOrThrow() { return SetErrorLevelOrThrowBool(true); }
@@ -3465,6 +3473,7 @@ BIF_DECL(BIF_ASinACos);
 BIF_DECL(BIF_ATan);
 BIF_DECL(BIF_Exp);
 BIF_DECL(BIF_SqrtLogLn);
+BIF_DECL(BIF_MinMax);
 
 BIF_DECL(BIF_OnMessage);
 BIF_DECL(BIF_OnExitOrClipboard);

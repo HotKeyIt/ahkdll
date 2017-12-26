@@ -138,6 +138,7 @@ EXTERN_G;
 #define SC_RWIN 0x15C
 
 #define SC_APPSKEY 0x15D
+#define SC_PRINTSCREEN 0x137
 
 // UPDATE for v1.0.39: Changed sc_type to USHORT vs. UINT to save memory in structs such as sc_hotkey.
 // This saves 60K of memory in one place, and possibly there are other large savings too.
@@ -196,11 +197,11 @@ struct key_to_sc_type // Map key names to scan codes.
 enum KeyStateTypes {KEYSTATE_LOGICAL, KEYSTATE_PHYSICAL, KEYSTATE_TOGGLE}; // For use with GetKeyJoyState(), etc.
 enum KeyEventTypes {KEYDOWN, KEYUP, KEYDOWNANDUP};
 
-void SendKeys(LPTSTR aKeys, bool aSendRaw, SendModes aSendModeOrig, HWND aTargetWindow = NULL);
+void SendKeys(LPTSTR aKeys, SendRawModes aSendRaw, SendModes aSendModeOrig, HWND aTargetWindow = NULL);
 void SendKey(vk_type aVK, sc_type aSC, modLR_type aModifiersLR, modLR_type aModifiersLRPersistent
 	, int aRepeatCount, KeyEventTypes aEventType, modLR_type aKeyAsModifiersLR, HWND aTargetWindow
 	, int aX = COORD_UNSPECIFIED, int aY = COORD_UNSPECIFIED, bool aMoveOffset = false);
-void SendKeySpecial(TCHAR aChar, int aRepeatCount);
+void SendKeySpecial(TCHAR aChar, int aRepeatCount, modLR_type aModifiersLR);
 void SendASC(LPCTSTR aAscii);
 
 struct PlaybackEvent
@@ -340,6 +341,7 @@ LPTSTR ModifiersLRToText(modLR_type aModifiersLR, LPTSTR aBuf);
 #define LAYOUT_UNDETERMINED FAIL
 bool ActiveWindowLayoutHasAltGr();
 ResultType LayoutHasAltGr(HKL aLayout, ResultType aHasAltGr = LAYOUT_UNDETERMINED);
+void FillLayoutHasAltGrCache();
 
 //---------------------------------------------------------------------
 
@@ -353,9 +355,9 @@ vk_type TextToVK(LPTSTR aText, modLR_type *pModifiersLR = NULL, bool aExcludeTho
 	, bool aAllowExplicitVK = true, HKL aKeybdLayout = g_HKL); // ahkmingw
 #else
 vk_type TextToVK(LPTSTR aText, modLR_type *pModifiersLR = NULL, bool aExcludeThoseHandledByScanCode = false
-	, bool aAllowExplicitVK = true, HKL aKeybdLayout = GetKeyboardLayout(0));
+	, bool aAllowExplicitVK = true, HKL aKeybdLayout = GetKeyboardLayout(0), bool aEnableAZFallback = true);
 #endif
-vk_type CharToVKAndModifiers(TCHAR aChar, modLR_type *pModifiersLR, HKL aKeybdLayout);
+vk_type CharToVKAndModifiers(TCHAR aChar, modLR_type *pModifiersLR, HKL aKeybdLayout, bool aEnableAZFallback = true);
 vk_type TextToSpecial(LPTSTR aText, size_t aTextLength, KeyEventTypes &aEventTypem, modLR_type &aModifiersLR
 	, bool aUpdatePersistent);
 

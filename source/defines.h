@@ -116,10 +116,13 @@ enum SendModes {SM_EVENT, SM_INPUT, SM_PLAY, SM_INPUT_FALLBACK_TO_PLAY, SM_INVAL
 // SM_INPUT_FALLBACK_TO_PLAY falls back to the SendPlay mode.  SendInput has this extra fallback behavior
 // because it's likely to become the most popular sending method.
 
+enum SendRawModes {SCM_NOT_RAW = FALSE, SCM_RAW, SCM_RAW_TEXT};
+typedef UCHAR SendRawType;
+
 enum ExitReasons {EXIT_NONE, EXIT_CRITICAL, EXIT_ERROR, EXIT_DESTROY, EXIT_LOGOFF, EXIT_SHUTDOWN
 	, EXIT_WM_QUIT, EXIT_WM_CLOSE, EXIT_MENU, EXIT_EXIT, EXIT_RELOAD, EXIT_SINGLEINSTANCE};
 
-enum WarnType {WARN_USE_UNSET_LOCAL, WARN_USE_UNSET_GLOBAL, WARN_LOCAL_SAME_AS_GLOBAL, WARN_USE_ENV, WARN_ALL};
+enum WarnType {WARN_USE_UNSET_LOCAL, WARN_USE_UNSET_GLOBAL, WARN_LOCAL_SAME_AS_GLOBAL, WARN_USE_ENV, WARN_CLASS_OVERWRITE, WARN_ALL};
 
 enum WarnMode {WARNMODE_OFF, WARNMODE_OUTPUTDEBUG, WARNMODE_MSGBOX, WARNMODE_STDOUT};	// WARNMODE_OFF must be zero.
 
@@ -288,7 +291,7 @@ struct ExprTokenType  // Something in the compiler hates the name TokenType, so 
 			union // These nested structs and unions minimize the token size by overlapping data.
 			{
 				IObject *object;
-				DerefType *deref; // for SYM_FUNC
+				DerefType *deref; // for SYM_FUNC, and (while parsing) SYM_ASSIGN etc.
 				Var *var;         // for SYM_VAR
 				LPTSTR marker;     // for SYM_STRING and SYM_OPERAND.
 			};
@@ -296,6 +299,7 @@ struct ExprTokenType  // Something in the compiler hates the name TokenType, so 
 			{
 				LPTSTR buf;
 				size_t marker_length; // Used only with aResultToken. TODO: Move into separate ResultTokenType struct.
+				BOOL is_lvalue;   // for SYM_VAR
 			};
 		};  
 	};
