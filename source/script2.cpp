@@ -1883,7 +1883,7 @@ ResultType Line::Input()
 			// For partial backward-compatibility, keys A-Z are upper-cased when handled by VK,
 			// but only if they actually correspond to those characters.  If this wasn't done,
 			// the character would always be lowercase since the shift state is not considered.
-			if (key_name[7] >= 'a' && key_name[7] <= 'z')
+			if (key_name[7] >= 'a' && key_name[7] <= 'z' && !key_name[8])
 				key_name[7] -= 32;
 		}
 		g_ErrorLevel->Assign(key_name);
@@ -17771,7 +17771,7 @@ BIF_DECL(BIF_GetKeyName)
 	{
 		LPTSTR cp;
 		if (  (cp = tcscasestr(key, _T("SC"))) // TextToSC() supports SCxxx but not VKxxSCyyy.
-			&& isdigit(cp[2])  ) // Fixed in v1.1.25.03 to rule out key names containng "sc", like "Esc".
+			&& isxdigit(cp[2])  ) // v1.1.26.00: Rule out key names containing "sc", like "Esc".  v1.1.27.01: Use isxdigit() vs isdigit() for "scF" and similar.
 			sc = (sc_type)_tcstoul(cp + 2, NULL, 16);
 		else
 			sc = vk_to_sc(vk);
@@ -18984,7 +18984,7 @@ BIF_DECL(BIF_OnMessage)
 // Parameters:
 // 1: Message number to monitor.
 // 2: Name of the function that will monitor the message.
-// 3: (FUTURE): A flex-list of space-delimited option words/letters.
+// 3: Maximum threads and "register first" flag.
 {
 	LPTSTR buf = aResultToken.buf; // Must be saved early since below overwrites the union (better maintainability too).
 	// Set default result in case of early return; a blank value:

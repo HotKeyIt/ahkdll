@@ -2287,7 +2287,7 @@ ResultType Script::LoadIncludedText(LPTSTR aScript,LPCTSTR aPathToShow)
 	vk_type remap_source_vk, remap_dest_vk = 0; // Only dest is initialized to enforce the fact that it is the flag/signal to indicate whether remapping is in progress.
 	TCHAR remap_source[32], remap_dest[32], remap_dest_modifiers[8]; // Must fit the longest key name (currently Browser_Favorites [17]), but buffer overflow is checked just in case.
 	LPTSTR extra_event;
-	bool remap_source_is_mouse, remap_dest_is_mouse, remap_keybd_to_mouse;
+	bool remap_source_is_combo, remap_source_is_mouse, remap_dest_is_mouse, remap_keybd_to_mouse;
 #endif
 	// For the line continuation mechanism:
 	bool do_ltrim, do_rtrim, literal_escapes, literal_derefs, literal_delimiters
@@ -3163,10 +3163,12 @@ examine_line:
 				{
 					// These will be ignored in other stages if it turns out not to be a remap later below:
 					remap_source_vk = TextToVK(cp1 = Hotkey::TextToModifiers(buf, NULL)); // An earlier stage verified that it's a valid hotkey, though VK could be zero.
+					remap_source_is_combo = _tcsstr(cp1, COMPOSITE_DELIMITER);
 					remap_source_is_mouse = IsMouseVK(remap_source_vk);
 					remap_dest_is_mouse = IsMouseVK(remap_dest_vk);
 					remap_keybd_to_mouse = !remap_source_is_mouse && remap_dest_is_mouse;
-					sntprintf(remap_source, _countof(remap_source), _T("%s%s")
+					sntprintf(remap_source, _countof(remap_source), _T("%s%s%s")
+						, remap_source_is_combo ? _T("") : _T("*") // v1.1.27.01: Omit * when the remap source is a custom combo.
 						, _tcslen(cp1) == 1 && IsCharUpper(*cp1) ? _T("+") : _T("")  // Allow A::b to be different than a::b.
 						, buf); // Include any modifiers too, e.g. ^b::c.
 					tcslcpy(remap_dest, cp, _countof(remap_dest));      // But exclude modifiers here; they're wanted separately.
@@ -3446,7 +3448,7 @@ continue_main_loop: // This method is used in lieu of "continue" for performance
 			switch (++remap_stage)
 			{
 			case 1: // Stage 1: Add key-down hotkey label, e.g. *LButton::
-				buf_length = _stprintf(buf, _T("*%s::"), remap_source); // Should be no risk of buffer overflow due to prior validation.
+				buf_length = _stprintf(buf, _T("%s::"), remap_source); // Should be no risk of buffer overflow due to prior validation.
 				goto examine_line; // Have the main loop process the contents of "buf" as though it came in from the script.
 			case 2: // Stage 2.
 				// Copied into a writable buffer for maintainability: AddLine() might rely on this.
@@ -3510,7 +3512,7 @@ continue_main_loop: // This method is used in lieu of "continue" for performance
 					return FAIL;
 				AddLine(ACT_RETURN);
 				// Add key-up hotkey label, e.g. *LButton up::
-				buf_length = _stprintf(buf, _T("*%s up::"), remap_source); // Should be no risk of buffer overflow due to prior validation.
+				buf_length = _stprintf(buf, _T("%s up::"), remap_source); // Should be no risk of buffer overflow due to prior validation.
 				remap_stage = 2; // Adjust to hit stage 3 next time (in case this is stage 10).
 				goto examine_line; // Have the main loop process the contents of "buf" as though it came in from the script.
 			case 3: // Stage 3.
@@ -3786,7 +3788,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 	vk_type remap_source_vk, remap_dest_vk = 0; // Only dest is initialized to enforce the fact that it is the flag/signal to indicate whether remapping is in progress.
 	TCHAR remap_source[32], remap_dest[32], remap_dest_modifiers[8]; // Must fit the longest key name (currently Browser_Favorites [17]), but buffer overflow is checked just in case.
 	LPTSTR extra_event;
-	bool remap_source_is_mouse, remap_dest_is_mouse, remap_keybd_to_mouse;
+	bool remap_source_is_combo, remap_source_is_mouse, remap_dest_is_mouse, remap_keybd_to_mouse;
 #endif
 	// For the line continuation mechanism:
 	bool do_ltrim, do_rtrim, literal_escapes, literal_derefs, literal_delimiters
@@ -4694,10 +4696,12 @@ examine_line:
 				{
 					// These will be ignored in other stages if it turns out not to be a remap later below:
 					remap_source_vk = TextToVK(cp1 = Hotkey::TextToModifiers(buf, NULL)); // An earlier stage verified that it's a valid hotkey, though VK could be zero.
+					remap_source_is_combo = _tcsstr(cp1, COMPOSITE_DELIMITER);
 					remap_source_is_mouse = IsMouseVK(remap_source_vk);
 					remap_dest_is_mouse = IsMouseVK(remap_dest_vk);
 					remap_keybd_to_mouse = !remap_source_is_mouse && remap_dest_is_mouse;
-					sntprintf(remap_source, _countof(remap_source), _T("%s%s")
+					sntprintf(remap_source, _countof(remap_source), _T("%s%s%s")
+						, remap_source_is_combo ? _T("") : _T("*") // v1.1.27.01: Omit * when the remap source is a custom combo.
 						, _tcslen(cp1) == 1 && IsCharUpper(*cp1) ? _T("+") : _T("")  // Allow A::b to be different than a::b.
 						, buf); // Include any modifiers too, e.g. ^b::c.
 					tcslcpy(remap_dest, cp, _countof(remap_dest));      // But exclude modifiers here; they're wanted separately.
@@ -4990,7 +4994,7 @@ continue_main_loop: // This method is used in lieu of "continue" for performance
 			switch (++remap_stage)
 			{
 			case 1: // Stage 1: Add key-down hotkey label, e.g. *LButton::
-				buf_length = _stprintf(buf, _T("*%s::"), remap_source); // Should be no risk of buffer overflow due to prior validation.
+				buf_length = _stprintf(buf, _T("%s::"), remap_source); // Should be no risk of buffer overflow due to prior validation.
 				goto examine_line; // Have the main loop process the contents of "buf" as though it came in from the script.
 			case 2: // Stage 2.
 				// Copied into a writable buffer for maintainability: AddLine() might rely on this.
@@ -5054,7 +5058,7 @@ continue_main_loop: // This method is used in lieu of "continue" for performance
 					goto FAIL;
 				AddLine(ACT_RETURN);
 				// Add key-up hotkey label, e.g. *LButton up::
-				buf_length = _stprintf(buf, _T("*%s up::"), remap_source); // Should be no risk of buffer overflow due to prior validation.
+				buf_length = _stprintf(buf, _T("%s up::"), remap_source); // Should be no risk of buffer overflow due to prior validation.
 				remap_stage = 2; // Adjust to hit stage 3 next time (in case this is stage 10).
 				goto examine_line; // Have the main loop process the contents of "buf" as though it came in from the script.
 			case 3: // Stage 3.
@@ -9522,16 +9526,6 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 			return ScriptError(_T("Parameter #9 must be blank."), NEW_RAW_ARG9);
 		break;
 #endif
-	case ACT_MSGBOX:
-		if (aArgc > 1) // i.e. this MsgBox is using the 3-param or 4-param style.
-			if (!line.mArg[0].is_expression && !line.ArgHasDeref(1)) // i.e. if it's an expression (or an expression which was converted into a simple deref), we won't try to validate it now.
-				if (!IsPureNumeric(new_raw_arg1)) // Allow it to be entirely whitespace to indicate 0, like Aut2.
-					return ScriptError(ERR_PARAM1_INVALID, new_raw_arg1);
-		if (aArgc > 3)
-			if (!line.mArg[3].is_expression && !line.ArgHasDeref(4)) // i.e. if it's an expression or deref, we won't try to validate it now.
-				if (!IsPureNumeric(new_raw_arg4, false, true, true))
-					return ScriptError(ERR_PARAM4_INVALID, new_raw_arg4);
-		break;
 
 	case ACT_IFMSGBOX:
 		if (aArgc > 0 && !line.ArgHasDeref(1) && !line.ConvertMsgBoxResult(new_raw_arg1))
