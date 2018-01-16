@@ -777,7 +777,7 @@ DWORD GetEnvVarReliable(LPCTSTR aEnvVarName, LPTSTR aBuf);
 DWORD ReadRegString(HKEY aRootKey, LPTSTR aSubkey, LPTSTR aValueName, LPTSTR aBuf, DWORD aBufSize, DWORD aFlag = 0);
 
 HBITMAP LoadPicture(LPTSTR aFilespec, int aWidth, int aHeight, int &aImageType, int aIconNumber
-	, bool aUseGDIPlusIfAvailable, bool *apNoDelete = NULL);
+	, bool aUseGDIPlusIfAvailable, bool *apNoDelete = NULL, HMODULE *apModule = NULL);
 HBITMAP IconToBitmap(HICON ahIcon, bool aDestroyIcon);
 HBITMAP IconToBitmap32(HICON aIcon, bool aDestroyIcon); // Lexikos: Used for menu icons on Vista+. Creates a 32-bit (ARGB) device-independent bitmap from an icon.
 int CALLBACK FontEnumProc(ENUMLOGFONTEX *lpelfe, NEWTEXTMETRICEX *lpntme, DWORD FontType, LPARAM lParam);
@@ -785,12 +785,13 @@ bool IsStringInList(LPTSTR aStr, LPTSTR aList, bool aFindExactMatch);
 LPTSTR InStrAny(LPTSTR aStr, LPTSTR aNeedle[], int aNeedleCount, size_t &aFoundLen);
 short IsDefaultType(LPTSTR aTypeDef);
 LPTSTR ResourceIndexToId(HMODULE aModule, LPCTSTR aType, int aIndex); // L17: Find integer ID of resource from index. i.e. IconNumber -> resource ID.
+HICON ExtractIconFromExecutable(LPTSTR aFilespec, int aIconNumber, int aWidth, int aHeight // L17: Extract icon of the appropriate size from an executable (or compatible) file.
+	, HMODULE *apModule = NULL);
 DWORD CryptAES(LPVOID lp, DWORD sz, TCHAR *pwd[], bool aEncrypt = true, DWORD aSID = 256);
 DWORD DecompressBuffer(void *buffer, LPVOID &aDataBuf, DWORD sz, TCHAR *pwd[] = NULL);
 DWORD CompressBuffer(BYTE *buffer, LPVOID &aDataBuf, DWORD sz, TCHAR *pwd[] = NULL);
 ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf);
 LONG WINAPI DisableHooksOnException(PEXCEPTION_POINTERS pExceptionPtrs);
-HICON ExtractIconFromExecutable(LPTSTR aFilespec, int aIconNumber, int aWidth, int aHeight); // L17: Extract icon of the appropriate size from an executable (or compatible) file.
 
 #if defined(_MSC_VER) && defined(_DEBUG)
 void OutputDebugStringFormat(LPCTSTR fmt, ...); // put debug message to the "Output" panel of Visual Studio.
