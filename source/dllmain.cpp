@@ -205,7 +205,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 #else
 	LPWSTR *dllargv = CommandLineToArgvW(nameHinstanceP.args,&dllargc);
 #endif
-	int i, ahkdll_i = 0;
+	int i;
 	if (*nameHinstanceP.args) // Only process if parameters were given
 	for (i = 0; i < dllargc; ++i) // Start at 1 because 0 contains the program name.
 	{
@@ -217,7 +217,6 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 #endif
 		if (switch_processing_is_complete) // All args are now considered to be input parameters for the script.
 		{
-			ahkdll_i = i - 1;
 			if (   !(var = g_script.FindOrAddVar(var_name, _stprintf(var_name, _T("%d"), script_param_num)))   )
 			{
 				g_Reloading = false;
@@ -299,8 +298,8 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 		{
 			switch_processing_is_complete = true;  // No more switches allowed after this point.
 			--i; // Make the loop process this item again so that it will be treated as a script param.
+			first_script_param = i + 1;
 		}
-		first_script_param = i + 1;
 	}
 	
 	
@@ -317,9 +316,9 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 		// Store the remaining args in an array and assign it to "Args".
 		// If there are no args, assign an empty array.
 #ifndef _UNICODE
-		Object *args = Object::CreateFromArgVW(dllargv + ahkdll_i, dllargc - ahkdll_i);
+		Object *args = Object::CreateFromArgVW(dllargv + first_script_param, dllargc - first_script_param);
 #else
-		Object *args = Object::CreateFromArgV(dllargv + ahkdll_i, dllargc - ahkdll_i);
+		Object *args = Object::CreateFromArgV(dllargv + first_script_param, dllargc - first_script_param);
 #endif
 		if (!args)
 			return CRITICAL_ERROR;  // Realistically should never happen.
