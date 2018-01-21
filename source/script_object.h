@@ -206,6 +206,9 @@ public:
 	static Object *Create(ExprTokenType *aParam[] = NULL, int aParamCount = 0);
 	static Object *CreateArray(ExprTokenType *aValue[] = NULL, int aValueCount = 0);
 	static Object *CreateFromArgV(LPTSTR *aArgV, int aArgC);
+#ifndef _UNICODE
+	static Object *CreateFromArgVW(LPWSTR *aArgV, int aArgC);
+#endif
 
 	bool Append(LPTSTR aValue, size_t aValueLength = -1);
 

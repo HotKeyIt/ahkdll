@@ -840,6 +840,22 @@ Object *Object::CreateFromArgV(LPTSTR *aArgV, int aArgC)
 	return CreateArray(param, aArgC);
 }
 
+#ifndef _UNICODE
+Object *Object::CreateFromArgVW(LPWSTR *aArgV, int aArgC)
+{
+	ExprTokenType *token = (ExprTokenType *)_alloca(aArgC * sizeof(ExprTokenType));
+	ExprTokenType **param = (ExprTokenType **)_alloca(aArgC * sizeof(ExprTokenType*));
+	TCHAR *aString;
+	for (int j = 0; j < aArgC; ++j)
+	{
+		aString = (TCHAR *)_alloca(wcslen(aArgV[j]) + 1);
+		WideCharToMultiByte(CP_ACP, 0, aArgV[j], -1, aString, (wcslen(aArgV[j]) + 1), 0, 0);
+		token[j].SetValue(aString);
+		param[j] = &token[j];
+	}
+	return CreateArray(param, aArgC);
+}
+#endif
 
 //
 // Internal: Object::CallField - Used by Object::Invoke to call a function/method stored in this object.

@@ -205,7 +205,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 #else
 	LPWSTR *dllargv = CommandLineToArgvW(nameHinstanceP.args,&dllargc);
 #endif
-	int i;
+	int i, ahkdll_i = 0;
 	if (*nameHinstanceP.args) // Only process if parameters were given
 	for (i = 0; i < dllargc; ++i) // Start at 1 because 0 contains the program name.
 	{
@@ -217,6 +217,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 #endif
 		if (switch_processing_is_complete) // All args are now considered to be input parameters for the script.
 		{
+			ahkdll_i = i - 1;
 			if (   !(var = g_script.FindOrAddVar(var_name, _stprintf(var_name, _T("%d"), script_param_num)))   )
 			{
 				g_Reloading = false;
@@ -302,7 +303,6 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 		first_script_param = i + 1;
 	}
 	
-	LocalFree(dllargv); // free memory allocated by CommandLineToArgvW
 	
 	// Like AutoIt2, store the number of script parameters in the script variable %0%, even if it's zero:
 	if (   !(var = g_script.FindOrAddVar(_T("0")))   )
@@ -316,13 +316,19 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	{
 		// Store the remaining args in an array and assign it to "Args".
 		// If there are no args, assign an empty array.
-		Object *args = Object::CreateFromArgV(__targv + first_script_param, __argc - first_script_param);
+#ifndef _UNICODE
+		Object *args = Object::CreateFromArgVW(dllargv + ahkdll_i, dllargc - ahkdll_i);
+#else
+		Object *args = Object::CreateFromArgV(dllargv + ahkdll_i, dllargc - ahkdll_i);
+#endif
 		if (!args)
 			return CRITICAL_ERROR;  // Realistically should never happen.
 		var->AssignSkipAddRef(args);
 	}
 	else
 		return CRITICAL_ERROR;
+
+	LocalFree(dllargv); // free memory allocated by CommandLineToArgvW
 
 	// N11 
 
