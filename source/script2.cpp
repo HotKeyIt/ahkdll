@@ -2951,63 +2951,40 @@ BOOL CALLBACK EnumChildGetText(HWND aWnd, LPARAM lParam)
 
 
 
-ResultType Line::WinGetPos(LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LPTSTR aExcludeText)
+BIF_DECL(BIF_WinGetPos)
 {
-	Var *output_var_x = ARGVAR1;  // Ok if NULL. Load-time validation has ensured that these are valid output variables (e.g. not built-in vars).
-	Var *output_var_y = ARGVAR2;  // Ok if NULL.
-	Var *output_var_width = ARGVAR3;  // Ok if NULL.
-	Var *output_var_height = ARGVAR4;  // Ok if NULL.
-
-	HWND target_window = DetermineTargetWindow(aTitle, aText, aExcludeTitle, aExcludeText);
+	HWND target_window = DetermineTargetWindow(aParam + 4, aParamCount - 4);
 	// Even if target_window is NULL, we want to continue on so that the output
 	// variables are set to be the empty string, which is the proper thing to do
 	// rather than leaving whatever was in there before.
 	RECT rect;
 	if (target_window)
-		GetWindowRect(target_window, &rect);
-	else // ensure it's initialized for possible later use:
-		rect.bottom = rect.left = rect.right = rect.top = 0;
+	{
+		if (_f_callee_id == FID_WinGetPos)
+		{
+			GetWindowRect(target_window, &rect);
+			rect.right -= rect.left; // Convert right to width.
+			rect.bottom -= rect.top; // Convert bottom to height.
+		}
+		else // FID_WinGetClientPos
+		{
+			GetClientRect(target_window, &rect); // Get client pos relative to client (position is always 0,0).
+			MapWindowPoints(target_window, NULL, (LPPOINT)&rect, 2); // Convert to screen coordinates.
+		}
+	}
 
-	ResultType result = OK; // Set default;
-
-	if (output_var_x)
+	for (int i = 0; i < 4; ++i)
+	{
+		Var *var = ParamIndexToOptionalVar(i);
+		if (!var)
+			continue;
 		if (target_window)
-		{
-			if (!output_var_x->Assign(rect.left))  // X position
-				result = FAIL;
-		}
+			var->Assign(((int *)(&rect))[i]); // Always succeeds.
 		else
-			if (!output_var_x->Assign(_T("")))
-				result = FAIL;
-	if (output_var_y)
-		if (target_window)
-		{
-			if (!output_var_y->Assign(rect.top))  // Y position
-				result = FAIL;
-		}
-		else
-			if (!output_var_y->Assign(_T("")))
-				result = FAIL;
-	if (output_var_width) // else user didn't want this value saved to an output param
-		if (target_window)
-		{
-			if (!output_var_width->Assign(rect.right - rect.left))  // Width
-				result = FAIL;
-		}
-		else
-			if (!output_var_width->Assign(_T(""))) // Set it to be empty to signal the user that the window wasn't found.
-				result = FAIL;
-	if (output_var_height)
-		if (target_window)
-		{
-			if (!output_var_height->Assign(rect.bottom - rect.top))  // Height
-				result = FAIL;
-		}
-		else
-			if (!output_var_height->Assign(_T("")))
-				result = FAIL;
-
-	return result;
+			if (!var->Assign(_T(""))) // Failure would be very unusual, but can occur for Clipboard and other built-in variables.
+				aResultToken.SetExitResult(FAIL);
+	}
+	_f_return((__int64)(size_t)target_window); // Return the HWND to indicate success/failure.
 }
 
 
@@ -9649,11 +9626,15 @@ VarSizeType BIV_ScreenDPI(LPTSTR aBuf, LPTSTR aVarName)
 
 BIV_DECL_R(BIV_TrayMenu)
 {
-	// The actual value (an object) is resolved in ExpandExpression,
-	// to work around the limitations of the current BIV interface.
+	// The actual value (an object) is resolved in ExpandExpression, to work around the
+	// limitations of the current BIV interface.  The current implementation requires that
+	// this function has a unique address, which would not be the case if COMDAT folding
+	// caused it to be "folded" with an identical function (such as A_IsCompiled, which
+	// also just returns an empty string ifndef AUTOHOTKEYSC).  So to ensure it gets a
+	// unique address, we check aVarName.
 	if (aBuf)
 		*aBuf = '\0';
-	return 0;
+	return !_tcsicmp(aVarName, _T("A_TrayMenu")) ? 0 : 1;
 }
 
 
@@ -14350,7 +14331,7 @@ void RegExReplace(ResultToken &aResultToken, ExprTokenType *aParam[], int aParam
 	// as the haystack, needle, or replacement (i.e. the same memory), don't set output_var_count until
 	// immediately prior to returning.  Otherwise, haystack, needle, or replacement would corrupted while
 	// it's still being used here.
-	Var *output_var_count = ParamIndexToOptionalVar(3); // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
+	Var *output_var_count = ParamIndexToOptionalVar(3);
 	int replacement_count = 0; // This value will be stored in output_var_count, but only at the very end due to the reason above.
 
 	// Get the replacement text (if any) from the incoming parameters.  If it was omitted, treat it as "".
@@ -14845,7 +14826,7 @@ BIF_DECL(BIF_RegEx)
 	if (aParamCount < 3 || aParam[2]->symbol != SYM_VAR) // No output var, so nothing more to do.
 		return;
 
-	Var &output_var = *aParam[2]->var; // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
+	Var &output_var = *aParam[2]->var;
 	
 	IObject *match_object;
 	if (!RegExCreateMatchArray(haystack, re, extra, offset, pattern_count, captured_pattern_count, match_object))
@@ -15710,26 +15691,16 @@ BIF_DECL(BIF_GetKeyName)
 	// Key names are allowed even for GetKeyName() for simplicity and so that it can be
 	// used to normalise a key name; e.g. GetKeyName("Esc") returns "Escape".
 	LPTSTR key = ParamIndexToString(0, _f_number_buf);
-	vk_type vk = TextToVK(key, NULL, true); // Pass true for the third parameter to avoid it calling TextToSC(), in case this is something like vk23sc14F.
-	sc_type sc = TextToSC(key);
-	if (!sc)
-	{
-		LPTSTR cp;
-		if (  (cp = tcscasestr(key, _T("SC"))) // TextToSC() supports SCxxx but not VKxxSCyyy.
-			&& isdigit(cp[2])  ) // Fixed in v1.1.25.03 to rule out key names containng "sc", like "Esc".
-			sc = (sc_type)_tcstoul(cp + 2, NULL, 16);
-		else
-			sc = vk_to_sc(vk);
-	}
-	else if (!vk)
-		vk = sc_to_vk(sc);
+	vk_type vk;
+	sc_type sc;
+	TextToVKandSC(key, vk, sc);
 
 	switch (_f_callee_id)
 	{
 	case FID_GetKeyVK:
-		_f_return_i(vk);
+		_f_return_i(vk ? vk : sc_to_vk(sc));
 	case FID_GetKeySC:
-		_f_return_i(sc);
+		_f_return_i(sc ? sc : vk_to_sc(vk));
 	//case FID_GetKeyName:
 	default:
 		_f_return_p(GetKeyName(vk, sc, _f_retval_buf, _f_retval_buf_size, _T("")));
@@ -15747,9 +15718,9 @@ BIF_DECL(BIF_VarSetCapacity)
 {
 	// Caller has set aResultToken.symbol to a default of SYM_INTEGER, so no need to set it here.
 	aResultToken.value_int64 = 0; // Set default. In spite of being ambiguous with the result of Free(), 0 seems a little better than -1 since it indicates "no capacity" and is also equal to "false" for easy use in expressions.
-	if (aParam[0]->symbol == SYM_VAR) // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
+	if (aParam[0]->symbol == SYM_VAR && aParam[0]->var->Type() == VAR_NORMAL)
 	{
-		Var &var = *aParam[0]->var; // For performance and convenience. SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
+		Var &var = *aParam[0]->var; // For performance and convenience.
 		if (aParamCount > 1) // Second parameter is present.
 		{
 			__int64 param1 = TokenToInt64(*aParam[1]);
@@ -15851,7 +15822,7 @@ BIF_DECL(BIF_VarSetCapacity)
 
 		if (aResultToken.value_int64 = var.ByteCapacity()) // Don't subtract 1 here in lieu doing it below (avoids underflow).
 			aResultToken.value_int64 -= sizeof(TCHAR); // Omit the room for the zero terminator since script capacity is defined as length vs. size.
-	} // (aParam[0]->symbol == SYM_VAR)
+	} // (aParam[0]->symbol == SYM_VAR && aParam[0]->var->Type() == VAR_NORMAL)
 	else
 		_f_throw(ERR_PARAM1_INVALID);
 }
@@ -17131,7 +17102,7 @@ BIF_DECL(BIF_OnMessage)
 // Parameters:
 // 1: Message number to monitor.
 // 2: Name of the function that will monitor the message.
-// 3: (FUTURE): A flex-list of space-delimited option words/letters.
+// 3: Maximum threads and "register first" flag.
 {
 	// Currently OnMessage (in v2) has no return value.
 	_f_set_retval_p(_T(""), 0);

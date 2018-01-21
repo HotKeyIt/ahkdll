@@ -426,6 +426,11 @@ inline bool IsHex(LPCTSTR aBuf) // 10/17/2006: __forceinline worsens performance
 
 __int64 tcstoi64_o(LPCTSTR buf, LPCTSTR *endptr, int base);
 
+inline __int64 tcstoi64_o(LPTSTR buf, LPTSTR *endptr, int base)
+{
+	return tcstoi64_o(buf, const_cast<LPCTSTR *>(endptr), base);
+}
+
 // As of v1.0.30, ATOI(), ITOA() and the other related functions below are no longer macros
 // because there are too many places where something like ATOI(++cp) is done, which would be a
 // bug if not caught since cp would be incremented more than once if the macro referred to that
@@ -468,7 +473,12 @@ inline int ATOI(LPCTSTR buf)
 	// Below has been updated because values with leading zeros were being interpreted as
 	// octal, which is undesirable.
 	// Formerly: #define ATOI(buf) strtol(buf, NULL, 0) // Use zero as last param to support both hex & dec.
-	return IsHex(buf) ? _tcstol(buf, NULL, 16) : _ttoi(buf); // atoi() has superior performance, so use it when possible.
+	//return IsHex(buf) ? _tcstol(buf, NULL, 16) : _ttoi(buf); // atoi() has superior performance, so use it when possible.
+	// Update: ATOI() is mostly used in places where other factors have a much bigger impact
+	// on performance; still, this method benchmarks slightly faster and produces smaller code
+	// than the older version above.  It is also behaves more consistently with ATOI64() for
+	// very large out of range values.
+	return (int)tcstoi64_o(buf, NULL, 0);
 }
 
 // v1.0.38.01: Make ATOU a macro that refers to ATOI64() to improve performance (takes advantage of _atoi64()
@@ -629,10 +639,11 @@ inline LPTSTR UTF8ToWide(LPCSTR str){
 // seems best to use the same approach to avoid calling ToAsciiEx() more than once in cases where a
 // script has hotstrings and also uses the Input command. Calling ToAsciiEx() twice in such a case would
 // be likely to aggravate its side effects with dead keys as described at length in the hook/Input code).
+// v1.1.27.01: Retrieve the layout of the thread which owns the focused control, not the active window.
+// This fixes UWP apps such as Microsoft Edge, where the top-level window is owned by a different process.
 #define Get_active_window_keybd_layout \
-	HWND active_window;\
-	HKL active_window_keybd_layout = GetKeyboardLayout((active_window = GetForegroundWindow())\
-		? GetWindowThreadProcessId(active_window, NULL) : 0); // When no foreground window, the script's own layout seems like the safest default.
+	HWND active_window = GetForegroundWindow();\
+	HKL active_window_keybd_layout = GetFocusedKeybdLayout(active_window);
 
 #define FONT_POINT(hdc, p) (-MulDiv(p, GetDeviceCaps(hdc, LOGPIXELSY), 72))
 #define DATE_FORMAT_LENGTH 14 // "YYYYMMDDHHMISS"
@@ -704,7 +715,7 @@ DWORD GetEnvVarReliable(LPCTSTR aEnvVarName, LPTSTR aBuf);
 DWORD ReadRegString(HKEY aRootKey, LPTSTR aSubkey, LPTSTR aValueName, LPTSTR aBuf, DWORD aBufSize, DWORD aFlag = 0);
 
 HBITMAP LoadPicture(LPTSTR aFilespec, int aWidth, int aHeight, int &aImageType, int aIconNumber
-	, bool aUseGDIPlusIfAvailable, bool *apNoDelete = NULL);
+	, bool aUseGDIPlusIfAvailable, bool *apNoDelete = NULL, HMODULE *apModule = NULL);
 HBITMAP IconToBitmap(HICON ahIcon, bool aDestroyIcon);
 HBITMAP IconToBitmap32(HICON aIcon, bool aDestroyIcon); // Lexikos: Used for menu icons on Vista+. Creates a 32-bit (ARGB) device-independent bitmap from an icon.
 int CALLBACK FontEnumProc(ENUMLOGFONTEX *lpelfe, NEWTEXTMETRICEX *lpntme, DWORD FontType, LPARAM lParam);
@@ -712,12 +723,13 @@ bool IsStringInList(LPTSTR aStr, LPTSTR aList, bool aFindExactMatch);
 LPTSTR InStrAny(LPTSTR aStr, LPTSTR aNeedle[], int aNeedleCount, size_t &aFoundLen);
 short IsDefaultType(LPTSTR aTypeDef);
 LPTSTR ResourceIndexToId(HMODULE aModule, LPCTSTR aType, int aIndex); // L17: Find integer ID of resource from index. i.e. IconNumber -> resource ID.
+HICON ExtractIconFromExecutable(LPTSTR aFilespec, int aIconNumber, int aWidth, int aHeight // L17: Extract icon of the appropriate size from an executable (or compatible) file.
+	, HMODULE *apModule = NULL);
 DWORD CryptAES(LPVOID lp, DWORD sz, TCHAR *pwd[], bool aEncrypt = true, DWORD aSID = 256);
 DWORD DecompressBuffer(void *buffer, LPVOID &aDataBuf, DWORD sz, TCHAR *pwd[] = NULL);
 DWORD CompressBuffer(BYTE *buffer, LPVOID &aDataBuf, DWORD sz, TCHAR *pwd[] = NULL);
 ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf);
 LONG WINAPI DisableHooksOnException(PEXCEPTION_POINTERS pExceptionPtrs);
-HICON ExtractIconFromExecutable(LPTSTR aFilespec, int aIconNumber, int aWidth, int aHeight); // L17: Extract icon of the appropriate size from an executable (or compatible) file.
 
 #if defined(_MSC_VER) && defined(_DEBUG)
 void OutputDebugStringFormat(LPCTSTR fmt, ...); // put debug message to the "Output" panel of Visual Studio.

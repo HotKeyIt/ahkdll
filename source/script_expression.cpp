@@ -195,7 +195,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 						break;
 					// Otherwise, this is the target of an assignment, so must be SYM_VAR:
 				case VAR_NORMAL:
-					this_token.symbol = SYM_VAR; // The fact that a SYM_VAR operand is always VAR_NORMAL (with one limited exception) is relied upon in several places such as built-in functions.
+					this_token.symbol = SYM_VAR; // The fact that a SYM_VAR operand is always VAR_NORMAL (with limited exceptions) is relied upon in several places such as built-in functions.
 					goto push_this_token;
 				case VAR_VIRTUAL:
 					if (this_token.is_lvalue)
@@ -746,15 +746,9 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 			if (right.symbol != SYM_VAR) // Syntax error.
 				goto abort_with_exception;
 			is_pre_op = SYM_INCREMENT_OR_DECREMENT_IS_PRE(this_token.symbol); // Store this early because its symbol will soon be overwritten.
-			if (!*right.var->Contents()) // It's empty (this also serves to display a warning if applicable).
+			if (right_is_number == PURE_NOT_NUMERIC) // Not empty and not numeric: invalid operation.
 			{
-				// For convenience, treat an empty variable as zero for ++ and --.
-				// Consistent with v1 ++/-- when not combined with another expression.
-				right.var->Assign(0);
-				right_is_number = PURE_INTEGER;
-			}
-			else if (right_is_number == PURE_NOT_NUMERIC) // Not empty and not numeric: invalid operation.
-			{
+				right.var->MaybeWarnUninitialized();
 				right.var->Assign(EXPR_NAN); // Clipboard is also supported here.
 				if (is_pre_op)
 				{
@@ -917,14 +911,6 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 				// Since above didn't goto or break out of the outer loop, this is an assignment other than
 				// SYM_ASSIGN, so it needs further evaluation later below before the assignment will actually be made.
 				sym_assign_var = left.var; // This tells the bottom of this switch() to do extra steps for this assignment.
-				if ((this_token.symbol == SYM_ADD || this_token.symbol == SYM_SUBTRACT)
-					&& !*sym_assign_var->Contents()) // It's empty (this also serves to display a warning if applicable).
-				{
-					// For convenience, treat an empty variable as zero for += and -=.
-					// Consistent with v1 EnvAdd/EnvSub or +=/-= when not combined with another expression.
-					left.symbol = SYM_INTEGER;
-					left.value_int64 = 0;
-				}
 			}
 
 			// The following section needs done even for assignments such as += because the type of value
@@ -1342,12 +1328,6 @@ push_this_token:
 				result_token.object->AddRef();
 			goto normal_end_skip_output_var; // result_to_return is left at its default of "".
 		case SYM_VAR:
-			// This check must be done first to allow a variable containing a number or object to be passed ByRef:
-			if (mActionType == ACT_FUNC || mActionType == ACT_METHOD)
-			{
-				aArgVar[aArgIndex] = result_token.var; // Let the command refer to this variable directly.
-				goto normal_end_skip_output_var; // result_to_return is left at its default of "", though its value doesn't matter as long as it isn't NULL.
-			}
 			if (result_token.var->IsPureNumericOrObject())
 			{
 				result_token.var->ToToken(*aResultToken);
@@ -1391,8 +1371,7 @@ push_this_token:
 		aTarget += FTOA(result_token.value_double, aTarget, MAX_NUMBER_SIZE) + 1; // +1 because that's what callers want; i.e. the position after the terminator.
 		goto normal_end_skip_output_var; // output_var was already checked higher above, so no need to consider it again.
 	case SYM_VAR:
-		// SYM_VAR is somewhat unusual at this late a stage.  Dynamic output vars were already handled by the
-		// SYM_DYNAMIC code, while ACT_FUNC and ACT_METHOD were handled above.
+		// SYM_VAR is somewhat unusual at this late a stage.  Dynamic output vars were already handled by the SYM_DYNAMIC code.
 		// It is tempting to simply return now and let ExpandArgs() decide whether the var needs to be dereferenced.
 		// However, the var's length might not fit within the amount calculated by GetExpandedArgSize(), and in that
 		// case would overflow the deref buffer.  The var can be safely returned if it won't be dereferenced, but it

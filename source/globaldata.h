@@ -98,7 +98,6 @@ extern HHOOK g_MouseHook;
 extern HHOOK g_PlaybackHook;
 _thread_local extern bool g_ForceLaunch;
 _thread_local extern bool g_WinActivateForce;
-_thread_local extern bool g_MustDeclare;
 _thread_local extern bool g_RunStdIn;
 _thread_local extern WarnMode g_Warn_UseUnsetLocal;
 _thread_local extern WarnMode g_Warn_UseUnsetGlobal;

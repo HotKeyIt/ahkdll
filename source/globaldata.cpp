@@ -102,7 +102,6 @@ HHOOK g_MouseHook = NULL;
 HHOOK g_PlaybackHook = NULL;
 _thread_local bool g_ForceLaunch = false;
 _thread_local bool g_WinActivateForce = false;
-_thread_local bool g_MustDeclare = false; // Used by #MustDeclare.
 _thread_local bool g_RunStdIn = false;
 _thread_local WarnMode g_Warn_UseUnsetLocal = WARNMODE_OFF;		// Used by #Warn directive.
 _thread_local WarnMode g_Warn_UseUnsetGlobal = WARNMODE_OFF;		//
@@ -293,8 +292,6 @@ Action g_act[] =
 	// ASSIGNEXPR: Give it a name for Line::ToText().
 	// 1st param is the target, 2nd (optional) is the value:
 	, {_T(":="), 2, 2, false, {2, 0}} // Same, though param #2 is flagged as numeric so that expression detection is automatic.
-	, {_T(""), 1, MAX_ARGS, true, {1, 0}} // Command-style method-call (ACT_METHOD).
-	, {_T(""), 1, MAX_ARGS, true, NULL} // Command-style function-call (ACT_FUNC).
 
 	// ACT_EXPRESSION, which is a stand-alone expression outside of any IF or assignment-command;
 	// e.g. fn1(123, fn2(y)) or x&=3
@@ -390,7 +387,6 @@ Action g_act[] =
 	, {_T("MenuSelect"), 0, 11, false, NULL} // WinTitle, WinText, Menu name, 6 optional sub-menu names, ExcludeTitle/Text
 
 	, {_T("WinSetTitle"), 1, 5, false, NULL} // newtitle, title, text, exclude-title, exclude-text
-	, {_T("WinGetPos"), 0, 8, true, NULL} // Four optional output vars: xpos, ypos, width, height.  Std. 4 window params.
 
 	, {_T("PixelSearch"), 0, 9, true, {3, 4, 5, 6, 7, 8, 0}} // OutputX, OutputY, left, top, right, bottom, Color, Variation [, RGB]
 	, {_T("ImageSearch"), 0, 7, true, {3, 4, 5, 6, 0}} // OutputX, OutputY, left, top, right, bottom, ImageFile

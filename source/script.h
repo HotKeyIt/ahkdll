@@ -142,7 +142,7 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 	, ID_TRAY_FIRST, ID_TRAY_OPEN = ID_TRAY_FIRST
 	, ID_TRAY_HELP, ID_TRAY_WINDOWSPY, ID_TRAY_RELOADSCRIPT
 	, ID_TRAY_EDITSCRIPT, ID_TRAY_SUSPEND, ID_TRAY_PAUSE, ID_TRAY_EXIT
-	, ID_TRAY_LAST = ID_TRAY_EXIT // But this value should never hit the below. There is debug code to enforce.
+	, ID_TRAY_SEP1, ID_TRAY_SEP2, ID_TRAY_LAST = ID_TRAY_SEP2 // But this value should never hit the below. There is debug code to enforce.
 	, ID_MAIN_FIRST = 65400, ID_MAIN_LAST = 65534}; // These should match the range used by resource.h
 #define GUI_INDEX_TO_ID(index) (index + CONTROL_ID_FIRST)
 #define GUI_ID_TO_INDEX(id) (id - CONTROL_ID_FIRST) // Returns a small negative if "id" is invalid, such as 0.
@@ -160,6 +160,7 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_ABORT _T("  ") ERR_ABORT_NO_SPACES
 #define WILL_EXIT _T("The program will exit.")
 #define OLD_STILL_IN_EFFECT _T("The script was not reloaded; the old version will remain in effect.")
+#define ERR_LINE_TOO_LONG _T("Line too long.")
 #define ERR_CONTINUATION_SECTION_TOO_LONG _T("Continuation section too long.")
 #define ERR_UNRECOGNIZED_ACTION _T("This line does not contain a recognized action.")
 #define ERR_NONEXISTENT_HOTKEY _T("Nonexistent hotkey.")
@@ -428,7 +429,7 @@ struct ArgStruct
 	ArgLengthType length; // Keep adjacent to above so that it uses no extra memory. This member was added in v1.0.44.14 to improve runtime performance.
 	LPTSTR text;
 	DerefType *deref;  // Will hold a NULL-terminated array of operands/word-operators pre-parsed by ParseDerefs()/ParseOperands().
-	ExprTokenType *postfix;  // An array of tokens in postfix order. Also used for ACT_(NOT)BETWEEN to store pre-converted binary integers.
+	ExprTokenType *postfix;  // An array of tokens in postfix order.
 };
 
 #define BIF_DECL_PARAMS ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount
@@ -597,6 +598,7 @@ enum BuiltInFunctionID {
 	FID_ObjInsertAt = 0, FID_ObjDelete, FID_ObjRemoveAt, FID_ObjPush, FID_ObjPop, FID_ObjLength, FID_ObjMaxIndex, FID_ObjMinIndex, FID_ObjHasKey, FID_ObjGetCapacity, FID_ObjSetCapacity, FID_ObjGetAddress, FID_ObjClone, FID_ObjNewEnum, FID_ObjCount,
 	FID_ComObjType = 0, FID_ComObjValue,
 	FID_WinGetID = 0, FID_WinGetIDLast, FID_WinGetPID, FID_WinGetProcessName, FID_WinGetProcessPath, FID_WinGetCount, FID_WinGetList, FID_WinGetMinMax, FID_WinGetControls, FID_WinGetControlsHwnd, FID_WinGetTransparent, FID_WinGetTransColor, FID_WinGetStyle, FID_WinGetExStyle,
+	FID_WinGetPos = 0, FID_WinGetClientPos,
 	FID_WinSetTransparent = 0, FID_WinSetTransColor, FID_WinSetAlwaysOnTop, FID_WinSetStyle, FID_WinSetExStyle, FID_WinSetEnabled, FID_WinSetRegion,
 	FID_WinMoveBottom = 0, FID_WinMoveTop,
 	FID_ProcessExist = 0, FID_ProcessClose, FID_ProcessWait, FID_ProcessWaitClose, 
@@ -652,6 +654,7 @@ private:
 	ResultType PerformLoopReadFile(ResultToken *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil, TextStream *aReadFile, LPTSTR aWriteFileName);
 	ResultType PerformLoopWhile(ResultToken *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine); // Lexikos: ACT_WHILE.
 	ResultType PerformLoopFor(ResultToken *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil); // Lexikos: ACT_FOR.
+	ResultType PerformAssign();
 	ResultType Perform();
 	friend BIF_DECL(BIF_PerformAction);
 
@@ -709,7 +712,6 @@ private:
 		, LPTSTR aInterval, LPTSTR aExcludeTitle, LPTSTR aExcludeText);
 	ResultType WinSetTitle(LPTSTR aTitle, LPTSTR aText, LPTSTR aNewTitle
 		, LPTSTR aExcludeTitle = _T(""), LPTSTR aExcludeText = _T(""));
-	ResultType WinGetPos(LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LPTSTR aExcludeText);
 	ResultType ImageSearch(int aLeft, int aTop, int aRight, int aBottom, LPTSTR aImageFile);
 	static ResultType SetToggleState(vk_type aVK, ToggleValueType &ForceLock, LPTSTR aToggleText);
 
@@ -880,18 +882,14 @@ public:
 
 	ResultType ExecUntil(ExecUntilMode aMode, ResultToken *aResultToken = NULL, Line **apJumpToLine = NULL);
 
-	// The following are characters that can't legally occur after an AND or OR.  It excludes all unary operators
+	// The following are characters that can't legally occur after a binary operator.  It excludes all unary operators
 	// "!~*&-+" as well as the parentheses chars "()":
-	#define EXPR_CORE _T("<>=/|^,:")
-	// The characters common to both EXPR_TELLTALES and EXPR_OPERAND_TERMINATORS:
+	#define EXPR_CORE _T("<>=/|^,?:")
+	// The characters common to both EXPR_TELLTALES (obsolete) and EXPR_OPERAND_TERMINATORS:
 	#define EXPR_COMMON _T(" \t") EXPR_CORE _T("*&~!()[]{}")  // Space and Tab are included at the beginning for performance.  L31: Added [] for array-like syntax.
-	#define CONTINUATION_LINE_SYMBOLS EXPR_CORE _T(".+-*&!?~") // v1.0.46.
-	// Characters whose presence in a mandatory-numeric param make it an expression for certain.
-	// + and - are not included here because legacy numeric parameters can contain unary plus or minus,
-	// e.g. WinMove, -%x%, -%y%:
-	#define EXPR_TELLTALES EXPR_COMMON _T("\"")
+	#define CONTINUATION_LINE_SYMBOLS EXPR_CORE _T(".+-*&!~") // v1.0.46.
 	// Characters that mark the end of an operand inside an expression.  Double-quote must not be included:
-	#define EXPR_OPERAND_TERMINATORS_EX_DOT EXPR_COMMON _T("%+-?\n") // L31: Used in a few places where '.' needs special treatment.
+	#define EXPR_OPERAND_TERMINATORS_EX_DOT EXPR_COMMON _T("%+-\n") // L31: Used in a few places where '.' needs special treatment.
 	#define EXPR_OPERAND_TERMINATORS EXPR_OPERAND_TERMINATORS_EX_DOT _T(".") // L31: Used in expressions where '.' is always an operator.
 	#define EXPR_ALL_SYMBOLS EXPR_OPERAND_TERMINATORS _T("\"'")
 	#define EXPR_ILLEGAL_CHARS _T("\\;`@#$") // Characters illegal in an expression.
@@ -947,7 +945,6 @@ public:
 			{
 			case ACT_ASSIGNEXPR:
 			case ACT_MOUSEGETPOS:
-			case ACT_WINGETPOS:
 			case ACT_CONTROLGETPOS:
 			case ACT_PIXELSEARCH:
 			case ACT_IMAGESEARCH:
@@ -961,7 +958,6 @@ public:
 			switch(aActionType)
 			{
 			case ACT_MOUSEGETPOS:
-			case ACT_WINGETPOS:
 			case ACT_CONTROLGETPOS:
 			case ACT_PIXELSEARCH:
 			case ACT_IMAGESEARCH:
@@ -975,7 +971,6 @@ public:
 		case 2:  // Arg #3
 			switch(aActionType)
 			{
-			case ACT_WINGETPOS:
 			case ACT_CONTROLGETPOS:
 			case ACT_MOUSEGETPOS:
 			case ACT_SPLITPATH:
@@ -987,7 +982,6 @@ public:
 		case 3:  // Arg #4
 			switch(aActionType)
 			{
-			case ACT_WINGETPOS:
 			case ACT_CONTROLGETPOS:
 			case ACT_MOUSEGETPOS:
 			case ACT_SPLITPATH:
@@ -1705,7 +1699,7 @@ public:
 		};
 		struct { // Built-in functions.
 			BuiltInFunctionType mBIF;
-			UCHAR *mOutputVars; // String of indices indicating which params are output vars (for ACT_FUNC and BIF_PerformAction).
+			UCHAR *mOutputVars; // String of indices indicating which params are output vars (for BIF_PerformAction).
 			BuiltInFunctionID mID; // For code sharing: this function's ID in the group of functions which share the same C++ function.
 		};
 	};
@@ -1721,7 +1715,6 @@ public:
 
 	// Keep small members adjacent to each other to save space and improve perf. due to byte alignment:
 	UCHAR mDefaultVarType;
-	#define VAR_DECLARE_NONE   0
 	#define VAR_DECLARE_GLOBAL (VAR_DECLARED | VAR_GLOBAL)
 	#define VAR_DECLARE_SUPER_GLOBAL (VAR_DECLARE_GLOBAL | VAR_SUPER_GLOBAL)
 	#define VAR_DECLARE_LOCAL  (VAR_DECLARED | VAR_LOCAL)
@@ -1738,11 +1731,15 @@ public:
 #define MAX_FUNC_OUTPUT_VAR 7
 	bool ArgIsOutputVar(int aIndex)
 	{
+		// Since this function is used only to determine whether a parameter requires a writable var,
+		// ByRef parameters are not considered to be OutputVars:
 		if (!mIsBuiltIn)
-			return aIndex <= mParamCount && mParam[aIndex].is_byref;
+			return false;
 		if (!mOutputVars)
 			return false;
 		++aIndex; // Convert to one-based.
+		if (mBIF == &BIF_PerformAction)
+			return mOutputVars[aIndex] == ARG_TYPE_OUTPUT_VAR;
 		for (int i = 0; i < MAX_FUNC_OUTPUT_VAR && mOutputVars[i]; ++i)
 			if (mOutputVars[i] == aIndex)
 				return true;
@@ -1844,7 +1841,7 @@ public:
 		, mStaticVar(NULL), mStaticVarCount(0), mStaticVarCountMax(0), mStaticLazyVar(NULL), mStaticLazyVarCount(0)
 		, mGlobalVar(NULL), mGlobalVarCount(0)
 		, mInstances(0)
-		, mDefaultVarType(VAR_DECLARE_NONE)
+		, mDefaultVarType(VAR_DECLARE_LOCAL)
 		, mIsBuiltIn(aIsBuiltIn)
 		, mIsVariadic(false)
 		, mIsMacro(false)
@@ -2777,13 +2774,13 @@ public:
 
 	size_t GetLine(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSection, bool aInBlockComment, TextStream *ts);
 	ResultType IsDirective(LPTSTR aBuf);
-	ResultType ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType = ACT_INVALID
+	ResultType ParseAndAddLine(LPTSTR aLineText, int aBufSize = 0, ActionTypeType aActionType = ACT_INVALID
 		, LPTSTR aLiteralMap = NULL, size_t aLiteralMapLength = 0);
 	ResultType ParseDerefs(LPTSTR aArgText, LPTSTR aArgMap, DerefType *aDeref, int &aDerefCount, int *aPos = NULL, TCHAR aEndChar = 0);
 	ResultType ParseOperands(LPTSTR aArgText, LPTSTR aArgMap, DerefType *aDeref, int &aDerefCount, int *aPos = NULL, TCHAR aEndChar = 0);
 	ResultType ParseDoubleDeref(LPTSTR aArgText, LPTSTR aArgMap, DerefType *aDeref, int &aDerefCount, int *aPos);
 	LPTSTR ParseActionType(LPTSTR aBufTarget, LPTSTR aBufSource, bool aDisplayErrors);
-	static ActionTypeType ConvertActionType(LPTSTR aActionTypeString);
+	static ActionTypeType ConvertActionType(LPTSTR aActionTypeString, int aFirstAction, int aLastActionPlus1);
 	ResultType AddLabel(LPTSTR aLabelName, bool aAllowDupe);
 	ResultType AddLine(ActionTypeType aActionType, LPTSTR aArg[] = NULL, int aArgc = 0, LPTSTR aArgMap[] = NULL, bool aAllArgsAreExpressions = false);
 
@@ -2887,7 +2884,9 @@ public:
 	Object *FindClass(LPCTSTR aClassName, size_t aClassNameLength = 0);
 	ResultType ResolveClasses();
 
+	static SymbolType ConvertWordOperator(LPCTSTR aWord, size_t aLength);
 	int AddBIF(LPTSTR aFuncName, BuiltInFunctionType bif, size_t minparams, size_t maxparams); // N10 added for dynamic BIFs
+
 	#define FINDVAR_DEFAULT  (VAR_LOCAL | VAR_GLOBAL)
 	#define FINDVAR_GLOBAL   VAR_GLOBAL
 	#define FINDVAR_LOCAL    VAR_LOCAL
@@ -3284,6 +3283,7 @@ BIF_DECL(BIF_CaretGetPos);
 BIF_DECL(BIF_WinGetClass);
 BIF_DECL(BIF_WinGetText);
 BIF_DECL(BIF_WinGetTitle);
+BIF_DECL(BIF_WinGetPos);
 BIF_DECL(BIF_WinGet);
 BIF_DECL(BIF_WinSet);
 BIF_DECL(BIF_WinRedraw);

@@ -336,6 +336,9 @@ modLR_type ConvertModifiers(mod_type aModifiers);
 mod_type ConvertModifiersLR(modLR_type aModifiersLR);
 LPTSTR ModifiersLRToText(modLR_type aModifiersLR, LPTSTR aBuf);
 
+DWORD GetFocusedThread(HWND aWindow = GetForegroundWindow());
+HKL GetFocusedKeybdLayout(HWND aWindow = GetForegroundWindow());
+
 #define LAYOUT_UNDETERMINED FAIL
 bool ActiveWindowLayoutHasAltGr();
 ResultType LayoutHasAltGr(HKL aLayout, ResultType aHasAltGr = LAYOUT_UNDETERMINED);
@@ -353,9 +356,10 @@ vk_type TextToVK(LPTSTR aText, modLR_type *pModifiersLR = NULL, bool aExcludeTho
 	, bool aAllowExplicitVK = true, HKL aKeybdLayout = g_HKL); // ahkmingw
 #else
 vk_type TextToVK(LPTSTR aText, modLR_type *pModifiersLR = NULL, bool aExcludeThoseHandledByScanCode = false
-	, bool aAllowExplicitVK = true, HKL aKeybdLayout = GetKeyboardLayout(0), bool aEnableAZFallback = true);
+	, bool aAllowExplicitVK = true, HKL aKeybdLayout = GetKeyboardLayout(0));
 #endif
 vk_type CharToVKAndModifiers(TCHAR aChar, modLR_type *pModifiersLR, HKL aKeybdLayout, bool aEnableAZFallback = true);
+bool TextToVKandSC(LPTSTR aText, vk_type &aVK, sc_type &aSC, modLR_type *pModifiersLR = NULL, HKL aKeybdLayout = GetKeyboardLayout(0));
 vk_type TextToSpecial(LPTSTR aText, size_t aTextLength, KeyEventTypes &aEventTypem, modLR_type &aModifiersLR
 	, bool aUpdatePersistent);
 

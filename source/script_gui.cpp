@@ -6500,12 +6500,14 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 				continue;
 			}
 
-			++next_option;  // Above has already verified that next_option isn't the empty string.
-			if (!*next_option)
+			TCHAR option_char = ctoupper(*next_option);
+			LPTSTR option_value = next_option + 1; // Above has already verified that next_option isn't the empty string.
+
+			if (!*option_value)
 			{
 				// The option word consists of only one character, so consider it valid only if it doesn't
 				// require an arg.  Example: An isolated "H" should not cause the height to be set to zero.
-				switch (ctoupper(next_option[-1]))
+				switch (option_char)
 				{
 				case 'C':
 					if (!adding)
@@ -6516,54 +6518,103 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 					break;
 				default:
 					// Anything else is invalid.
-					--next_option;
 					error_message = ERR_INVALID_OPTION;
 					goto return_error;
 				}
 				*option_end = orig_char; // Undo the temporary termination because the caller needs aOptions to be unaltered.
 				continue;
 			}
-
 			// Since above didn't "continue", there is text after the option letter, so take action accordingly.
-			switch (ctoupper(next_option[-1]))
+
+			LPTSTR endptr;
+			int option_int; // Only valid for [XYWHTER].
+			float option_float; // Only valid for R.
+			TCHAR option_char2; // Only valid for [XYWH].
+			bool use_margin_offset; // Only valid for [XY].
+
+			if (_tcschr(_T("XYWHTER"), option_char))
+			{
+				option_char2 = ctoupper(*option_value);
+				switch (option_char)
+				{
+				case 'W':
+				case 'H':
+					if (option_char2 == 'P')
+						++option_value;
+					break;
+				case 'X':
+				case 'Y':
+					if (use_margin_offset = (*option_value == '+' && 'M' == ctoupper(option_value[1]))) // x+m or y+m.
+						option_value += 2;
+					else if (_tcschr(_T("MPS"), option_char2)) // Any other non-digit char should be picked up as an error via *endptr.
+						++option_value;
+					break;
+				}
+				// Parse the option's number as integer first, since that's most common.  If that fails,
+				// parse as floating-point (e.g. "w" A_ScreenWidth/4 or "R1.5").
+				option_int = (int)tcstoi64_o(option_value, &endptr, 0); // 'E' depends on this supporting the full range of DWORD.
+				if (*endptr) // It wasn't blank or a valid integer.
+				{
+					// It's done this way rather than checking for and discarding any fractional part
+					// in case it's something unusual like "w1.0e3" or "w1e3", and to update endptr
+					// and support "R1.5".
+					option_int = (int)(option_float = (float)_tcstod(option_value, &endptr));
+					if (*endptr) // Still invalid.
+						option_char = 0; // Mark it as invalid for switch() below.
+				}
+				else
+					option_float = (float)option_int;
+				if ((option_char == 'X' || option_char == 'Y')
+					|| (option_char == 'W' || option_char == 'H') && (option_int != -1 || option_char2 == 'P')) // Scale W/H unless it's W-1 or H-1.
+					option_int = Scale(option_int);
+			}
+
+			switch (option_char)
 			{
 			case 'T': // Tabstop (the kind that exists inside a multi-line edit control or ListBox).
 				if (aOpt.tabstop_count < GUI_MAX_TABSTOPS)
-					aOpt.tabstop[aOpt.tabstop_count++] = ATOU(next_option);
+					aOpt.tabstop[aOpt.tabstop_count++] = (UINT)option_int;
 				//else ignore ones beyond the maximum.
 				break;
 
 			case 'V': // Name (originally: Variable)
-				ControlSetName(aControl, next_option);
+				ControlSetName(aControl, option_value);
 				break;
 
 			case 'C':  // Color
-				aOpt.color = ColorNameToBGR(next_option);
+				aOpt.color = ColorNameToBGR(option_value);
 				if (aOpt.color == CLR_NONE) // A matching color name was not found, so assume it's in hex format.
-					// It seems _tcstol() automatically handles the optional leading "0x" if present:
-					aOpt.color = rgb_to_bgr(_tcstol(next_option, NULL, 16));
-					// if next_option did not contain something hex-numeric, black (0x00) will be assumed,
+				{
+					// _tcstol() automatically handles the optional leading "0x" if present:
+					aOpt.color = rgb_to_bgr(_tcstol(option_value, &endptr, 16));
+					if (*endptr)
+					{
+						error_message = ERR_INVALID_OPTION;
+						goto return_error;
+					}
+					// if option_value did not contain something hex-numeric, black (0x00) will be assumed,
 					// which seems okay given how rare such a problem would be.
+				}
 				break;
 
 			case 'W':
-				if (ctoupper(*next_option) == 'P') // Use the previous control's value.
-					aOpt.width = mPrevWidth + Scale(ATOI(next_option + 1));
+				if (option_char2 == 'P') // Use the previous control's value.
+					aOpt.width = mPrevWidth + option_int;
 				else
-					aOpt.width = ScaleSize(ATOI(next_option));
+					aOpt.width = option_int;
 				break;
 
 			case 'H':
-				if (ctoupper(*next_option) == 'P') // Use the previous control's value.
-					aOpt.height = mPrevHeight + Scale(ATOI(next_option + 1));
+				if (option_char2 == 'P') // Use the previous control's value.
+					aOpt.height = mPrevHeight + option_int;
 				else
-					aOpt.height = ScaleSize(ATOI(next_option));
+					aOpt.height = option_int;
 				break;
 
 			case 'X':
-				if (*next_option == '+')
+				if (option_char2 == '+')
 				{
-					int offset = (ctoupper(next_option[1]) == 'M') ? mMarginX : Scale(ATOI(next_option + 1));
+					int offset = (use_margin_offset ? mMarginX : 0) + option_int;
 					if (tab_control = FindTabControl(aControl.tab_control_index)) // Assign.
 					{
 						// Since this control belongs to a tab control and that tab control already exists,
@@ -6584,39 +6635,40 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 					if (aOpt.y == COORD_UNSPECIFIED) // Not yet explicitly set, so use default.
 						aOpt.y = mPrevY;  // Since moving in the X direction, retain the same Y as previous control.
 				}
-				// For the M and P sub-options, not that the +/- prefix is optional.  The number is simply
+				// For the M and P sub-options, note that the +/- prefix is optional.  The number is simply
 				// read in as-is (though the use of + is more self-documenting in this case than omitting
 				// the sign entirely).
-				else if (ctoupper(*next_option) == 'M') // Use the X margin
+				else if (option_char2 == 'M') // Use the X margin
 				{
-					aOpt.x = mMarginX + Scale(ATOI(next_option + 1));
+					aOpt.x = mMarginX + option_int;
 					if (aOpt.y == COORD_UNSPECIFIED) // Not yet explicitly set, so use default.
 						aOpt.y = mMaxExtentDown + mMarginY;
 				}
-				else if (ctoupper(*next_option) == 'P') // Use the previous control's X position.
+				else if (option_char2 == 'P') // Use the previous control's X position.
 				{
-					aOpt.x = mPrevX + Scale(ATOI(next_option + 1));
+					aOpt.x = mPrevX + option_int;
 					if (aOpt.y == COORD_UNSPECIFIED) // Not yet explicitly set, so use default.
-						aOpt.y = mPrevY;  // Since moving in the X direction, retain the same Y as previous control.
+						aOpt.y = aOpt.x != mPrevX ? mPrevY  // Since moving in the X direction, retain the same Y as previous control.
+							: mPrevY + mPrevHeight + mMarginY; // Same X, so default to below the previous control.
 				}
-				else if (ctoupper(*next_option) == 'S') // Use the saved X position
+				else if (option_char2 == 'S') // Use the saved X position
 				{
-					aOpt.x = mSectionX + Scale(ATOI(next_option + 1));
+					aOpt.x = mSectionX + option_int;
 					if (aOpt.y == COORD_UNSPECIFIED) // Not yet explicitly set, so use default.
 						aOpt.y = mMaxExtentDownSection + mMarginY;  // In this case, mMarginY is the padding between controls.
 				}
 				else
 				{
-					aOpt.x = Scale(ATOI(next_option));
+					aOpt.x = option_int;
 					if (aOpt.y == COORD_UNSPECIFIED) // Not yet explicitly set, so use default.
 						aOpt.y = mMaxExtentDown + mMarginY;
 				}
 				break;
 
 			case 'Y':
-				if (*next_option == '+')
+				if (option_char2 == '+')
 				{
-					int offset = (ctoupper(next_option[1]) == 'M') ? mMarginY : Scale(ATOI(next_option + 1));
+					int offset = (use_margin_offset ? mMarginY : 0) + option_int;
 					if (tab_control = FindTabControl(aControl.tab_control_index)) // Assign.
 					{
 						// Since this control belongs to a tab control and that tab control already exists,
@@ -6640,32 +6692,35 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 				// For the M and P sub-options, not that the +/- prefix is optional.  The number is simply
 				// read in as-is (though the use of + is more self-documenting in this case than omitting
 				// the sign entirely).
-				else if (ctoupper(*next_option) == 'M') // Use the Y margin
+				else if (option_char2 == 'M') // Use the Y margin
 				{
-					aOpt.y = mMarginY + Scale(ATOI(next_option + 1));
+					aOpt.y = mMarginY + option_int;
 					if (aOpt.x == COORD_UNSPECIFIED) // Not yet explicitly set, so use default.
 						aOpt.x = mMaxExtentRight + mMarginX;
 				}
-				else if (ctoupper(*next_option) == 'P') // Use the previous control's Y position.
+				else if (option_char2 == 'P') // Use the previous control's Y position.
 				{
-					aOpt.y = mPrevY + Scale(ATOI(next_option + 1));
+					aOpt.y = mPrevY + option_int;
 					if (aOpt.x == COORD_UNSPECIFIED) // Not yet explicitly set, so use default.
-						aOpt.x = mPrevX;  // Since moving in the Y direction, retain the same X as previous control.
+						aOpt.x = aOpt.y != mPrevY ? mPrevX  // Since moving in the Y direction, retain the same X as previous control.
+							: mPrevX + mPrevWidth + mMarginY; // Same Y, so default to below the previous control.
 				}
-				else if (ctoupper(*next_option) == 'S') // Use the saved Y position
+				else if (option_char2 == 'S') // Use the saved Y position
 				{
-					aOpt.y = mSectionY + Scale(ATOI(next_option + 1));
+					aOpt.y = mSectionY + option_int;
 					if (aOpt.x == COORD_UNSPECIFIED) // Not yet explicitly set, so use default.
 						aOpt.x = mMaxExtentRightSection + mMarginX; // In this case, mMarginX is the padding between controls.
 				}
 				else
 				{
-					aOpt.y = Scale(ATOI(next_option));
+					aOpt.y = option_int;
 					if (aOpt.x == COORD_UNSPECIFIED) // Not yet explicitly set, so use default.
 						aOpt.x = mMaxExtentRight + mMarginX;
 				}
 				break;
 
+			case 'R': // The number of rows desired in the control (can be fractional).
+				aOpt.row_count = option_float;
 			case 'A': // AutoSize and AutoPos options
 				if (ctoupper(*next_option) == 'X')
 				{
@@ -6744,27 +6799,17 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 					}
 				}
 				break;
-			case 'R': // The number of rows desired in the control.  Use ATOF() so that fractional rows are allowed.
-				aOpt.row_count = (float)ATOF(next_option); // Don't need double precision.
+				break;
+
+			case 'E': // Extended style additions or removals.
+				if (adding)
+					aOpt.exstyle_add |= (DWORD)option_int;
+				else
+					aOpt.exstyle_remove |= (DWORD)option_int;
 				break;
 
 			default:
-				// Extended style is handled here so that something like +ection is detected as an error.
-				// However, the options above don't get the same treatment:
-				//  G/V: Already validated -- must be followed by a a valid label/variable name.
-				//  T/C/W/H/X/Y/R: If not followed by a valid letter (e.g. "XP"), it's assumed to be
-				//  a number; if it isn't numeric, it will be treated as 0, which will probably be
-				//  easy to detect. Cases like the following are ignored for simplicity and due to
-				//  rarity: xpp (trailing p is ignored) y100abc (abc is ignored).
-				if (ctoupper(next_option[-1]) == 'E' && IsNumeric(next_option, false, false)) // Disallow whitespace in case option string ends in naked "E".
-				{
-					// Pure numbers are assumed to be style additions or removals:
-					DWORD given_exstyle = ATOU(next_option); // ATOU() for unsigned.
-					if (adding) aOpt.exstyle_add |= given_exstyle; else aOpt.exstyle_remove |= given_exstyle;
-					break;
-				}
 				// Anything not already handled above is invalid.
-				--next_option;
 				error_message = ERR_INVALID_OPTION;
 				goto return_error;
 			} // switch()
@@ -7793,14 +7838,18 @@ ResultType GuiType::Show(LPTSTR aOptions)
 		height = rect.bottom - rect.top; // rect.top might be slightly less than zero. A status bar is properly handled since it's inside the window's client area.
 
 		RECT work_rect;
-		SystemParametersInfo(SPI_GETWORKAREA, 0, &work_rect, 0);  // Get desktop rect excluding task bar.
+		bool is_child_window = mOwner && (style & WS_CHILD);
+		if (is_child_window)
+			GetClientRect(mOwner, &work_rect); // Center within parent window (our position is set relative to mOwner's client area, not in screen coordinates).
+		else
+			SystemParametersInfo(SPI_GETWORKAREA, 0, &work_rect, 0);  // Get desktop rect excluding task bar.
 		int work_width = work_rect.right - work_rect.left;  // Note that "left" won't be zero if task bar is on left!
 		int work_height = work_rect.bottom - work_rect.top; // Note that "top" won't be zero if task bar is on top!
 
 		// Seems best to restrict window size to the size of the desktop whenever explicit sizes
 		// weren't given, since most users would probably want that.  But only on first use of
 		// "Gui Show" (even "Gui, Show, Hide"):
-		if (mGuiShowHasNeverBeenDone)
+		if (mGuiShowHasNeverBeenDone && !is_child_window)
 		{
 			if (width_orig == COORD_UNSPECIFIED && width > work_width)
 				width = work_width;
@@ -7810,12 +7859,8 @@ ResultType GuiType::Show(LPTSTR aOptions)
 
 		if (x == COORD_CENTERED || y == COORD_CENTERED) // Center it, based on its dimensions determined above.
 		{
-			// This does not currently handle multi-monitor systems explicitly, since those calculations
-			// require API functions that don't exist in Win95/NT (and thus would have to be loaded
-			// dynamically to allow the program to launch).  Therefore, windows will likely wind up
-			// being centered across the total dimensions of all monitors, which usually results in
-			// half being on one monitor and half in the other.  This doesn't seem too terrible and
-			// might even be what the user wants in some cases (i.e. for really big windows).
+			// This does not handle multi-monitor systems explicitly, and has no need to do so since
+			// SPI_GETWORKAREA "Retrieves the size of the work area on the primary display monitor".
 			if (x == COORD_CENTERED)
 				x = work_rect.left + ((work_width - width) / 2);
 			if (y == COORD_CENTERED)
@@ -10901,8 +10946,15 @@ void GuiType::ControlUpdateCurrentTab(GuiControlType &aTabControl, bool aFocusFi
 	// ShowWindow(), EnableWindow() apparently does not cause a repaint to occur.
 	// Fix for v1.0.25.14: Don't send the message below (and its counterpart later on) because that
 	// sometimes or always, as a side-effect, shows the window if it's hidden:
+	// Fix for v1.1.27.07: WM_SETREDRAW appears to have the effect of clearing the update region
+	// (causing any pending redraw, such as by a previous call to this function for a different tab
+	// control, to be discarded).  To work around this, save the current update region.
+	RECT update_rect = {0}; // For simplicity, use GetUpdateRect() vs GetUpdateRgn().
 	if (parent_is_visible_and_not_minimized)
+	{
+		GetUpdateRect(mHwnd, &update_rect, FALSE);
 		SendMessage(mHwnd, WM_SETREDRAW, FALSE, 0);
+	}
 	bool invalidate_entire_parent = false; // Set default.
 
 	// Even if mHwnd is hidden, set styles to Show/Hide and Enable/Disable any controls that need it.
@@ -11015,6 +11067,12 @@ void GuiType::ControlUpdateCurrentTab(GuiControlType &aTabControl, bool aFocusFi
 			InvalidateRect(mHwnd, NULL, TRUE); // TRUE seems safer.
 		else
 		{
+			if (update_rect.left != update_rect.right)
+				// Reset the window's update region, which was likely cleared by WM_SETREDRAW.
+				// Doing this separately to tab_rect might perform better than using UnionRect(),
+				// which could cover a much larger area than necessary.  The system should handle
+				// the case where the two rects overlap (i.e. there won't be redundant repainting).
+				InvalidateRect(mHwnd, &update_rect, TRUE);
 			MapWindowPoints(NULL, mHwnd, (LPPOINT)&tab_rect, 2); // Convert rect to client coordinates (not the same as GetClientRect()).
 			InvalidateRect(mHwnd, &tab_rect, TRUE); // Seems safer to use TRUE, not knowing all possible overlaps, etc.
 		}

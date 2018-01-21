@@ -209,6 +209,12 @@ enum SymbolType // For use with ExpandExpression() and IsNumeric().
 #define SYM_DYNAMIC_IS_DOUBLE_DEREF(token) (!(token).var) // SYM_DYNAMICs are either double-derefs or built-in vars.
 #define SYM_DYNAMIC_IS_WRITABLE(token) ((token)->var && (token)->var->Type() <= VAR_LAST_WRITABLE) // i.e. it's the clipboard, not a built-in variable or double-deref.
 
+// This should include all operators which can produce SYM_VAR for a subsequent assignment:
+#define IS_OPERATOR_VALID_LVALUE(sym) \
+	(IS_ASSIGNMENT_EXCEPT_POST_AND_PRE(sym) \
+		|| sym == SYM_PRE_INCREMENT || sym == SYM_PRE_DECREMENT \
+		|| sym == SYM_IFF_ELSE)
+
 #define EXPR_NAN_STR	_T("")
 #define EXPR_NAN_LEN	0
 #define EXPR_NAN		EXPR_NAN_STR, EXPR_NAN_LEN
@@ -491,7 +497,7 @@ private:
 	// need the EARLY_RETURN result *and* return value passed back.  However,
 	// probably best to keep it separate for code size and maintainability.
 	// Struct size is a non-issue since there is only one ResultToken per
-	// function call on the stack (or MAX_ARGS for ACT_FUNC/ACT_METHOD).
+	// function call on the stack.
 	ResultType result;
 };
 
@@ -503,7 +509,7 @@ enum enum_act {
 // Seems best to make ACT_INVALID zero so that it will be the ZeroMemory() default within
 // any POD structures that contain an action_type field:
   ACT_INVALID = FAIL  // These should both be zero for initialization and function-return-value purposes.
-, ACT_ASSIGNEXPR, ACT_METHOD, ACT_FUNC
+, ACT_ASSIGNEXPR
 // Actions above this line take care of calling ExpandArgs() for themselves (ACT_EXPANDS_ITS_OWN_ARGS).
 , ACT_EXPRESSION
 // Keep ACT_BLOCK_BEGIN as the first "control flow" action, for range checks with ACT_FIRST_CONTROL_FLOW:
@@ -539,7 +545,7 @@ enum enum_act {
 , ACT_WINHIDE, ACT_WINSHOW
 , ACT_WINMINIMIZEALL, ACT_WINMINIMIZEALLUNDO
 , ACT_WINCLOSE, ACT_WINKILL, ACT_WINMOVE, ACT_MENUSELECT
-, ACT_WINSETTITLE, ACT_WINGETPOS
+, ACT_WINSETTITLE
 // Keep rarely used actions near the bottom for parsing/performance reasons:
 , ACT_PIXELSEARCH, ACT_IMAGESEARCH
 , ACT_GROUPADD, ACT_GROUPACTIVATE, ACT_GROUPDEACTIVATE, ACT_GROUPCLOSE
@@ -583,8 +589,8 @@ enum enum_act {
 #define ACT_IS_LOOP_EXCLUDING_WHILE(ActionType) (ActionType >= ACT_LOOP && ActionType <= ACT_FOR)
 #define ACT_IS_LINE_PARENT(ActionType) (ACT_IS_IF(ActionType) || ActionType == ACT_ELSE \
 	|| ACT_IS_LOOP(ActionType) || (ActionType >= ACT_TRY && ActionType <= ACT_FINALLY))
-#define ACT_EXPANDS_ITS_OWN_ARGS(ActionType) (ActionType <= ACT_FUNC || ActionType == ACT_WHILE || ActionType == ACT_FOR || ActionType == ACT_THROW)
-#define ACT_USES_SIMPLE_POSTFIX(ActionType) (ActionType <= ACT_FUNC || ActionType == ACT_RETURN) // Actions which are optimized to use arg.postfix when is_expression == false, via the "only_token" optimization.
+#define ACT_EXPANDS_ITS_OWN_ARGS(ActionType) (ActionType == ACT_ASSIGNEXPR || ActionType == ACT_WHILE || ActionType == ACT_FOR || ActionType == ACT_THROW)
+#define ACT_USES_SIMPLE_POSTFIX(ActionType) (ActionType == ACT_ASSIGNEXPR || ActionType == ACT_RETURN) // Actions which are optimized to use arg.postfix when is_expression == false, via the "only_token" optimization.
 
 // For convenience in many places.  Must cast to int to avoid loss of negative values.
 #define BUF_SPACE_REMAINING ((int)(aBufSize - (aBuf - aBuf_orig)))
