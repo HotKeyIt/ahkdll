@@ -11429,7 +11429,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 					}
 					else
 					{
-						if (func && func->ArgIsOutputVar(in_param_list->param_count))
+						if (func && (func->mBIF != &BIF_DllImport) &&func->ArgIsOutputVar(in_param_list->param_count))
 						{
 							ExprTokenType &param1 = *postfix[postfix_count-1];
 							if (param1.symbol == SYM_VAR)
