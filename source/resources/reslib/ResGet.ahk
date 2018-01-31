@@ -10,8 +10,8 @@ static TH32CS_SNAPMODULE,MODULEENTRY32,me32,fullpath
         break
   if hSnap
 	CloseHandle(hSnap)
-  if !hModule && !hModule:=LoadLibrary(fullpath),
-	return 0
+  if !hModule && !hModule:=LoadLibrary(fullpath)
+    return 0
   if (hResource:=lang=""?FindResourceW(hModule,name,type):FindResourceExW(hModule,name,type,lang))
       && pdata:=LockResource(hResData:=LoadResource(hModule,hResource))
       VarsetCapacity(data,sz:=SizeofResource(hModule,hResource)),RtlMoveMemory(&data,pData,sz)
