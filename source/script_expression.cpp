@@ -2192,7 +2192,6 @@ VarSizeType Line::GetExpandedArgSize(Var *aArgVar[])
 		{
 			// Pre-resolved output vars should never be included in the space calculation,
 			// but we do need to store the var reference in aArgVar for our caller.
-			ASSERT(!*this_arg.text);
 			if (g->CurrentMacro)
 			{
 				bool aVarIsParam = false;
@@ -2212,7 +2211,6 @@ VarSizeType Line::GetExpandedArgSize(Var *aArgVar[])
 
 		if (this_arg.type == ARG_TYPE_INPUT_VAR)
 		{
-			ASSERT(!*this_arg.text);
 			if (g->CurrentMacro)
 			{
 				bool aVarIsParam = false;

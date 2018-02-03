@@ -384,6 +384,8 @@ inline size_t strip_trailing_backslash(LPTSTR aPath)
 
 
 
+// If this is ever changed to allow symbols which are also valid hotkey modifiers,
+// be sure to update IsFunction() to allow for cases like "$(::fn_call()":
 #define IS_IDENTIFIER_CHAR(c) (cisalnum(c) || (c) == '_' || ((UINT)(c) > 0x7F))
 template<typename T> inline T find_identifier_end(T aBuf)
 // Locates the next character which is not valid in an identifier (var, func, or obj.key name).
@@ -700,6 +702,7 @@ BOOL MyIsAppThemed();
 LPTSTR ConvertEscapeSequences(LPTSTR aBuf, LPTSTR aLiteralMap);
 int FindExprDelim(LPCTSTR aBuf, TCHAR aDelimiter = ',', int aStartIndex = 0, LPCTSTR aLiteralMap = NULL);
 int FindTextDelim(LPCTSTR aBuf, TCHAR aDelimiter = ',', int aStartIndex = 0, LPCTSTR aLiteralMap = NULL);
+int BalanceExpr(LPCTSTR aBuf, int aStartBalance);
 POINT CenterWindow(int aWidth, int aHeight);
 bool FontExist(HDC aHdc, LPCTSTR aTypeface);
 void ScreenToWindow(POINT &aPoint, HWND aHwnd);

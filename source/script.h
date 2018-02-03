@@ -194,6 +194,7 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_MISSING_CLOSE_PAREN _T("Missing \")\"")
 #define ERR_MISSING_CLOSE_BRACE _T("Missing \"}\"")
 #define ERR_MISSING_CLOSE_BRACKET _T("Missing \"]\"") // L31
+#define ERR_UNEXPECTED_OPEN_BRACE _T("Unexpected \"{\"")
 #define ERR_UNEXPECTED_CLOSE_PAREN _T("Unexpected \")\"")
 #define ERR_UNEXPECTED_CLOSE_BRACKET _T("Unexpected \"]\"")
 #define ERR_UNEXPECTED_CLOSE_BRACE _T("Unexpected \"}\"")
@@ -888,6 +889,7 @@ public:
 	// The characters common to both EXPR_TELLTALES (obsolete) and EXPR_OPERAND_TERMINATORS:
 	#define EXPR_COMMON _T(" \t") EXPR_CORE _T("*&~!()[]{}")  // Space and Tab are included at the beginning for performance.  L31: Added [] for array-like syntax.
 	#define CONTINUATION_LINE_SYMBOLS EXPR_CORE _T(".+-*&!~") // v1.0.46.
+	#define EXPR_OPERATOR_SYMBOLS CONTINUATION_LINE_SYMBOLS  // The set of operator symbols which can't appear at the end of a valid expression, plus '+' and '-' (which are valid for ++/--).
 	// Characters that mark the end of an operand inside an expression.  Double-quote must not be included:
 	#define EXPR_OPERAND_TERMINATORS_EX_DOT EXPR_COMMON _T("%+-\n") // L31: Used in a few places where '.' needs special treatment.
 	#define EXPR_OPERAND_TERMINATORS EXPR_OPERAND_TERMINATORS_EX_DOT _T(".") // L31: Used in expressions where '.' is always an operator.
@@ -2773,6 +2775,11 @@ public:
 	NOTIFYICONDATA mNIC; // For ease of adding and deleting our tray icon.
 
 	size_t GetLine(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSection, bool aInBlockComment, TextStream *ts);
+	ResultType GetLineContinuation(TextStream *ts, LPTSTR aBuf, size_t &aBufLength, LPTSTR aNextBuf, size_t &aNextBufLength
+		, LineNumberType &aPhysLineNumber, bool &aHasContinuationSection, int aExprBalance = 0);
+	ResultType GetLineContExpr(TextStream *ts, LPTSTR aBuf, size_t &aBufLength, LPTSTR aNextBuf, size_t &aNextBufLength
+		, LineNumberType &aPhysLineNumber, bool &aHasContinuationSection);
+	static bool IsFunction(LPTSTR aBuf, bool *aPendingFunctionHasBrace = NULL);
 	ResultType IsDirective(LPTSTR aBuf);
 	ResultType ParseAndAddLine(LPTSTR aLineText, int aBufSize = 0, ActionTypeType aActionType = ACT_INVALID
 		, LPTSTR aLiteralMap = NULL, size_t aLiteralMapLength = 0);
@@ -2790,6 +2797,7 @@ public:
 	// be done before dereferencing any line's mNextLine, for example:
 	ResultType PreparseExpressions(Line *aStartingLine);
 	ResultType PreparseStaticLines(Line *aStartingLine);
+	void PreparseHotkeyIfExpr(Line *aLine);
 	Line *PreparseBlocks(Line *aStartingLine, ExecUntilMode aMode = NORMAL_MODE, Line *aParentLine = NULL, const ActionTypeType aLoopType = ACT_INVALID);
 	Line *PreparseCommands(Line *aStartingLine);
 
@@ -2885,6 +2893,7 @@ public:
 	ResultType ResolveClasses();
 
 	static SymbolType ConvertWordOperator(LPCTSTR aWord, size_t aLength);
+	static bool EndsWithOperator(LPTSTR aBuf, LPTSTR aBuf_marker);
 	int AddBIF(LPTSTR aFuncName, BuiltInFunctionType bif, size_t minparams, size_t maxparams); // N10 added for dynamic BIFs
 
 	#define FINDVAR_DEFAULT  (VAR_LOCAL | VAR_GLOBAL)
