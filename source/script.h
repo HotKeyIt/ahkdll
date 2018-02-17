@@ -438,6 +438,20 @@ struct ArgStruct
 // The following macro is used for definitions and declarations of built-in functions:
 #define BIF_DECL(name) void name(BIF_DECL_PARAMS)
 
+// NOTE FOR v1: The following macros currently aren't used much; they're for use in new code
+// to facilitate merging into the v2 branch, which uses its own versions of these macros heavily.
+// This is just the subset of the macros that don't rely on other changes.
+#define _f__oneline(act)		do { act } while (0)		// Make the macro safe to use like a function, under if(), etc.
+#define _f__ret(act)			_f__oneline( aResult = (act); return; )	// BIFs have no return value.
+#define _o__ret(act)			return (act)				// IObject::Invoke() returns ResultType.
+#define _f_throw(...)			_f__ret(g_script.ScriptError(__VA_ARGS__))
+#define _o_throw(...)			_o__ret(g_script.ScriptError(__VA_ARGS__))
+#define _f_return_FAIL			_f__ret(FAIL)
+#define _o_return_FAIL			_o__ret(FAIL)
+#define _f_retval_buf			(aResultToken.buf)
+#define _f_retval_buf_size		MAX_NUMBER_SIZE
+#define _f_number_buf			_f_retval_buf  // An alias to show intended usage, and in case the buffer size is changed.
+
 
 // Some of these lengths and such are based on the MSDN example at
 // http://msdn.microsoft.com/library/default.asp?url=/library/en-us/sysinfo/base/enumerating_registry_subkeys.asp:
@@ -2197,10 +2211,14 @@ public:
 };
 
 // LabelPtr with automatic reference-counting, for storing an object safely,
-// such as in a HotkeyVariant, UserMenuItem, etc.  In future, this could be
-// replaced with a more general smart pointer class.
+// such as in a HotkeyVariant, UserMenuItem, etc.  Its specific purpose is to
+// work with old code that wasn't concerned with reference counting.
 class LabelRef : public LabelPtr
 {
+private:
+	LabelRef(const LabelRef &); // Disable default copy constructor.
+	LabelRef & operator = (const LabelRef &); // ...and copy assignment.
+
 public:
 	LabelRef() : LabelPtr() {}
 	LabelRef(IObject *object) : LabelPtr(object)
@@ -2221,6 +2239,10 @@ public:
 			mObject->Release();
 		mObject = object;
 		return *this;
+	}
+	LabelRef & operator = (const LabelPtr &other)
+	{
+		return *this = other.ToObject();
 	}
 	~LabelRef()
 	{
@@ -3054,6 +3076,7 @@ public:
 	static ActionTypeType ConvertActionType(LPTSTR aActionTypeString);
 	static ActionTypeType ConvertOldActionType(LPTSTR aActionTypeString);
 	ResultType AddLabel(LPTSTR aLabelName, bool aAllowDupe);
+	void RemoveLabel(Label *aLabel);
 	ResultType AddLine(ActionTypeType aActionType, LPTSTR aArg[] = NULL, int aArgc = 0, LPTSTR aArgMap[] = NULL);
 
 	// These aren't in the Line class because I think they're easier to implement
@@ -3160,6 +3183,9 @@ public:
 	ResultType LoadIncludedText(LPTSTR aScript,LPCTSTR aPathToShow = NULL); //New read text
 #endif
 	ResultType LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure);
+	LineNumberType CurrentLine();
+	LPTSTR CurrentFile();
+
 	ResultType UpdateOrCreateTimer(IObject *aLabel, LPTSTR aPeriod, LPTSTR aPriority, bool aEnable
 		, bool aUpdatePriorityOnly);
 	void DeleteTimer(IObject *aLabel);
@@ -3193,6 +3219,8 @@ public:
 		, bool *apIsLocal = NULL);
 	Var *AddVar(LPTSTR aVarName, size_t aVarNameLength, int aInsertPos, int aScope);
 	static VarEntry *GetBuiltInVar(LPTSTR aVarName);
+
+	ResultType DerefInclude(LPTSTR &aOutput, LPTSTR aBuf);
 
 	WinGroup *FindGroup(LPTSTR aGroupName, bool aCreateIfNotFound = false);
 	ResultType AddGroup(LPTSTR aGroupName);
@@ -3247,7 +3275,7 @@ public:
 	void PreprocessLocalVars(Func &aFunc, Var **aVarList, int &aVarCount);
 	void CheckForClassOverwrite();
 
-	static ResultType UnhandledException(ExprTokenType*& aToken, Line* aLine);
+	static ResultType UnhandledException(ExprTokenType*& aToken, Line* aLine, LPTSTR aFooter = _T("The thread has exited."));
 	static ResultType SetErrorLevelOrThrow() { return SetErrorLevelOrThrowBool(true); }
 	static ResultType SetErrorLevelOrThrowBool(bool aError);
 	static ResultType SetErrorLevelOrThrowInt(int aErrorValue, LPCTSTR aWhat);
@@ -3279,6 +3307,7 @@ BIV_DECL_R (BIV_True_False_Null);
 BIV_DECL_R (BIV_MMM_DDD);
 BIV_DECL_R (BIV_DateTime);
 BIV_DECL_R (BIV_BatchLines);
+BIV_DECL_R (BIV_ListLines);
 BIV_DECL_R (BIV_TitleMatchMode);
 BIV_DECL_R (BIV_TitleMatchModeSpeed);
 BIV_DECL_R (BIV_DetectHiddenWindows);
@@ -3505,6 +3534,8 @@ BIF_DECL(BIF_IL_Add);
 BIF_DECL(BIF_LoadPicture);
 #endif
 BIF_DECL(BIF_Trim); // L31: Also handles LTrim and RTrim.
+
+BIF_DECL(BIF_Hotstring);
 
 
 BIF_DECL(BIF_IsObject);

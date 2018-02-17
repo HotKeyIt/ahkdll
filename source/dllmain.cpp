@@ -503,7 +503,6 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	g_ExceptionHandler = AddVectoredExceptionHandler(NULL,DisableHooksOnException);
 	*/
 
-	FillLayoutHasAltGrCache();
 
 	// set exception filter to disable hook before exception occures to avoid system/mouse freeze
 	// specify 1 so dll handler runs before exe handler
@@ -518,6 +517,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	//Hotkey::InstallMouseHook();
 	//if (Hotkey::sHotkeyCount > 0 || Hotstring::sHotstringCount > 0)
 	//	AddRemoveHooks(3);
+	g_HSSameLineAction = false; // `#Hotstring E` should not affect Hotstring().
 #endif
 	
 	g_script.mIsReadyToExecute = true; // This is done only after the above to support error reporting in Hotkey.cpp.
