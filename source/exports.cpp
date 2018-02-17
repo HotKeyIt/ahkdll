@@ -25,7 +25,7 @@ void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar, BOOL aVarIsArg);
 	if (g_FirstHotExpr)\
 	{\
 		if (aLastHotExpr)\
-			aLastHotExpr->NextCriterion = g_FirstHotExpr;\
+			aLastHotExpr->NextExpr = g_FirstHotExpr;\
 		if (aFirstHotExpr)\
 			g_FirstHotExpr = aFirstHotExpr;\
 	}\

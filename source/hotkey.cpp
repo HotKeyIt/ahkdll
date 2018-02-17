@@ -1109,7 +1109,7 @@ ResultType Hotkey::Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOption
 		if (aJumpToLabel)
 		{
 			HotkeyCriterion *cp;
-			for (cp = g_FirstHotExpr; ; cp = cp->NextCriterion)
+			for (cp = g_FirstHotExpr; ; cp = cp->NextExpr)
 			{
 				if (!cp) // End of the list and it wasn't found.
 				{

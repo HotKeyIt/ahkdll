@@ -888,13 +888,13 @@ Script::~Script() // Destructor.
 			g_ClassRegistered = 0;
 		}
 		while (g_FirstHotExpr && g_FirstHotExpr->ThreadID == g_ThreadID)
-			g_FirstHotExpr = g_FirstHotExpr->NextCriterion;
+			g_FirstHotExpr = g_FirstHotExpr->NextExpr;
 		if (g_LastHotExpr && g_LastHotExpr->ThreadID == g_ThreadID)
 			g_LastHotExpr = g_FirstHotExpr;
-		for (HotkeyCriterion *cp = g_FirstHotExpr;cp; cp = cp->NextCriterion)
+		for (HotkeyCriterion *cp = g_FirstHotExpr;cp; cp = cp->NextExpr)
 		{
-			if (cp->NextCriterion && cp->NextCriterion->ThreadID == g_ThreadID)
-				cp->NextCriterion = cp->NextCriterion->NextCriterion;
+			if (cp->NextExpr && cp->NextExpr->ThreadID == g_ThreadID)
+				cp->NextExpr = cp->NextExpr->NextExpr;
 		}
 #endif
 #ifdef _USRDLL
