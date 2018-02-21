@@ -1593,6 +1593,8 @@ ResultType Script::Reload(bool aDisplayErrors)
 	// Script" menu item is not available for compiled scripts, it can't be called from there.
 	return g_script.ActionExec(mOurEXE, _T("/restart"), g_WorkingDirOrig, aDisplayErrors);
 #else
+	if (g_hResource)
+		return g_script.ActionExec(mOurEXE, _T("/restart"), g_WorkingDirOrig, aDisplayErrors);
 	WCHAR buf[MAX_PATH];
 	GetModuleFileNameW(NULL, buf, MAX_PATH);
 	int argc = 0;
