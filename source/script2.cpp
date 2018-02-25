@@ -12812,8 +12812,8 @@ VarSizeType BIV_TimeIdlePhysical(LPTSTR aBuf, LPTSTR aVarName)
 // hotkey.h and globaldata.h, which can't be easily included in script.h due to
 // mutual dependency issues.
 {
-	DWORD time_last_input;
 #ifndef MINIDLL
+	DWORD time_last_input;
 	switch (toupper(aVarName[10]))
 	{
 	case 'M': time_last_input = g_MouseHook ? g_TimeLastInputMouse : 0; break;

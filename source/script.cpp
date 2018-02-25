@@ -3725,6 +3725,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 				if (!AHKModule())
 					return FAIL;
 				MemoryFreeLibrary(g_hNTDLL);
+				MemoryFreeLibrary(g_hKERNEL32);
 #endif
 			}
 		}
@@ -3774,6 +3775,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			if (!AHKModule())
 				return FAIL;
 			MemoryFreeLibrary(g_hNTDLL);
+			MemoryFreeLibrary(g_hKERNEL32);
 #endif
 		}
 	}

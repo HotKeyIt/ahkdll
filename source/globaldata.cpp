@@ -34,7 +34,8 @@ FuncLibrary sLib[FUNC_LIB_COUNT] = { 0 }; // function libraries
 LPSTR g_hWinAPI = NULL, g_hWinAPIlowercase = NULL;  // loads WinAPI functions definitions from resource
 #endif
 HRSRC g_hResource = NULL; // Set by WinMain() // for compiled AutoHotkey.exe
-HCUSTOMMODULE g_hNTDLL = NULL; // MSVR100.dll
+HCUSTOMMODULE g_hNTDLL = NULL;
+HCUSTOMMODULE g_hKERNEL32 = NULL;
 _QueryPerformanceCounter g_QPC = NULL;
 double g_QPCtimer = 0.0;
 double g_QPCfreq = 0.0;

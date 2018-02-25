@@ -30,6 +30,7 @@ extern LPSTR g_hWinAPI, g_hWinAPIlowercase; // loads WinAPI functions definition
 #endif
 
 extern HCUSTOMMODULE g_hNTDLL;
+extern HCUSTOMMODULE g_hKERNEL32;
 extern _QueryPerformanceCounter g_QPC;
 extern double g_QPCtimer;
 extern double g_QPCfreq;
