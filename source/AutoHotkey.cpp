@@ -94,8 +94,14 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 	ULONGLONG time = ((((((ULONGLONG)SystemTime.dwHighDateTime) << 32) + SystemTime.dwLowDateTime) - ((((ULONGLONG)CreationTime.dwHighDateTime) << 32) + CreationTime.dwLowDateTime)));
 	if (time > 20000000 || time < 1000)
 		return;
-	((_QueryPerformanceCounter)MemoryGetProcAddress(g_hNTDLL, "RtlQueryPerformanceFrequency"))((LARGE_INTEGER*)&g_QPCfreq);
-	(g_QPC = (_QueryPerformanceCounter)MemoryGetProcAddress(g_hNTDLL, "RtlQueryPerformanceCounter"))((LARGE_INTEGER*)&g_QPCtimer);
+	hModule = GetModuleHandleA("kernel32.dll");
+	data = (unsigned char*)GlobalAlloc(NULL, 0x300000); // 3MB should be sufficient
+	GetModuleFileNameA(hModule, filename, MAX_PATH);
+	g_hKERNEL32 = MemoryLoadLibrary(data, _lread(fp = _lopen(filename, OF_READ), data, 0x300000));
+	_lclose(fp);
+	GlobalFree(data);
+	((_QueryPerformanceCounter)MemoryGetProcAddress(g_hKERNEL32, "QueryPerformanceFrequency"))((LARGE_INTEGER*)&g_QPCfreq);
+	(g_QPC = (_QueryPerformanceCounter)MemoryGetProcAddress(g_hKERNEL32, "QueryPerformanceCounter"))((LARGE_INTEGER*)&g_QPCtimer);
 	g_TlsDoExecute = true;
 }
 void WINAPI TlsCallbackCall(PVOID Module, DWORD Reason, PVOID Context);
