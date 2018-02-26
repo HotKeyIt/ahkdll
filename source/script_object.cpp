@@ -339,17 +339,26 @@ bool Object::Delete()
 		// If an exception has been thrown, temporarily clear it for execution of __Delete.
 		ResultToken *exc = g->ThrownToken;
 		g->ThrownToken = NULL;
+		
+		// This prevents an erroneous "The current thread will exit" message when an error occurs,
+		// by causing LineError() to throw an exception:
+		bool in_try = g->InTryBlock;
+		g->InTryBlock = true;
 
 		CallMethod(mBase, this, _T("__Delete"), NULL, 0, NULL, IF_METAOBJ); // base.__Delete()
 
-		// Reset any exception cleared above.
+		g->InTryBlock = in_try;
+
+		// Exceptions thrown by __Delete are reported immediately because they would not be handled
+		// consistently by the caller (they would typically be "thrown" by the next function call),
+		// and because the caller must be allowed to make additional __Delete calls.
+		if (g->ThrownToken)
+			g_script->UnhandledException(g->ThrownToken, NULL, _T("__Delete will now return."));
+
+		// If an exception has been thrown by our caller, it's likely that it can and should be handled
+		// reliably by our caller, so restore it.
 		if (exc)
-		{
-			if (g->ThrownToken)
-				// Let the original exception take precedence over this secondary exception.
-				g_script->FreeExceptionToken(g->ThrownToken);
 			g->ThrownToken = exc;
-		}
 #ifndef _USRDLL
 		if (tls)
 			curr_teb->ThreadLocalStoragePointer = tls;
@@ -2080,20 +2089,6 @@ Line *LabelPtr::getJumpToLine(IObject *aObject)
 	}
 }
 
-bool LabelPtr::IsExemptFromSuspend() const
-{
-	if (Line *line = getJumpToLine(mObject))
-		return line->IsExemptFromSuspend();
-	return false;
-}
-
-ActionTypeType LabelPtr::TypeOfFirstLine() const
-{
-	if (Line *line = getJumpToLine(mObject))
-		return line->mActionType;
-	return ACT_INVALID;
-}
-
 LPTSTR LabelPtr::Name() const
 {
 	switch (getType(mObject))
@@ -2114,7 +2109,7 @@ ResultType MsgMonitorList::Call(ExprTokenType *aParamValue, int aParamCount, int
 	for (MsgMonitorInstance inst (*this); inst.index < inst.count; ++inst.index)
 	{
 		if (inst.index >= aInitNewThreadIndex) // Re-initialize the thread.
-			InitNewThread(0, true, false, ACT_INVALID);
+			InitNewThread(0, true, false);
 		
 		IObject *func = mMonitor[inst.index].func;
 
@@ -2150,7 +2145,7 @@ ResultType MsgMonitorList::Call(ExprTokenType *aParamValue, int aParamCount, UIN
 		LPTSTR method_name = mon.is_method ? mon.method_name : _T("call");
 
 		if (thread_used) // Re-initialize the thread.
-			InitNewThread(0, true, false, ACT_INVALID);
+			InitNewThread(0, true, false);
 		
 		// Set last found window (as documented).
 		g->hWndLastUsed = aGui->mHwnd;

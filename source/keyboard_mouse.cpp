@@ -87,7 +87,7 @@ void DisguiseWinAltIfNeeded(vk_type aVK)
 		// unwanted effects in certain games):
 		&& ((aVK == VK_LWIN || aVK == VK_RWIN) && (sPrevVK == VK_LWIN || sPrevVK == VK_RWIN) && sSendMode != SM_PLAY
 			|| (aVK == VK_LMENU || (aVK == VK_RMENU && sTargetLayoutHasAltGr != CONDITION_TRUE)) && (sPrevVK == VK_LMENU || sPrevVK == VK_RMENU)))
-		KeyEvent(KEYDOWNANDUP, g_MenuMaskKey); // Disguise it to suppress Start Menu or prevent activation of active window's menu bar.
+		KeyEventMenuMask(KEYDOWNANDUP); // Disguise it to suppress Start Menu or prevent activation of active window's menu bar.
 }
 
 
@@ -158,14 +158,27 @@ void SendKeys(LPTSTR aKeys, SendRawModes aSendRaw, SendModes aSendModeOrig, HWND
 
 	// For performance and also to reserve future flexibility, recognize {Blind} only when it's the first item
 	// in the string.
-	if (sInBlindMode = !aSendRaw && !_tcsnicmp(aKeys, _T("{Blind}"), 7)) // Don't allow {Blind} while in raw mode due to slight chance {Blind} is intended to be sent as a literal string.
+	modLR_type mods_excluded_from_blind = 0;
+	if (sInBlindMode = !aSendRaw && !_tcsnicmp(aKeys, _T("{Blind"), 6)) // Don't allow {Blind} while in raw mode due to slight chance {Blind} is intended to be sent as a literal string.
+	{
 		// Blind Mode (since this seems too obscure to document, it's mentioned here):  Blind Mode relies
 		// on modifiers already down for something like ^c because ^c is saying "manifest a ^c", which will
 		// happen if ctrl is already down.  By contrast, Blind does not release shift to produce lowercase
 		// letters because avoiding that adds flexibility that couldn't be achieved otherwise.
 		// Thus, ^c::Send {Blind}c produces the same result when ^c is substituted for the final c.
 		// But Send {Blind}{LControl down} will generate the extra events even if ctrl already down.
-		aKeys += 7; // Remove "{Blind}" from further consideration.
+		for (aKeys += 6; *aKeys != '}'; ++aKeys)
+		{
+			switch (*aKeys)
+			{
+			case '^': mods_excluded_from_blind |= MOD_LCONTROL|MOD_RCONTROL; break;
+			case '+': mods_excluded_from_blind |= MOD_LSHIFT|MOD_RSHIFT; break;
+			case '!': mods_excluded_from_blind |= MOD_LALT|MOD_RALT; break;
+			case '#': mods_excluded_from_blind |= MOD_LWIN|MOD_RWIN; break;
+			case '\0': return; // Just ignore the error.
+			}
+		}
+	}
 
 	int orig_key_delay = g.KeyDelay;
 	int orig_press_duration = g.PressDuration;
@@ -286,7 +299,7 @@ void SendKeys(LPTSTR aKeys, SendRawModes aSendRaw, SendModes aSendModeOrig, HWND
 		// the active window, its thread, and its layout are retrieved only once for each Send rather than once
 		// for each keystroke.
 		// v1.1.27.01: Use the thread of the focused control, which may differ from the active window.
-		keybd_layout_thread = GetFocusedThread();
+		keybd_layout_thread = GetFocusedCtrlThread();
 	}
 #ifdef AHKX
 	sTargetKeybdLayout = g_HKL; // If keybd_layout_thread==0, this will get our thread's own layout, which seems like the best/safest default.
@@ -352,7 +365,8 @@ void SendKeys(LPTSTR aKeys, SendRawModes aSendRaw, SendModes aSendModeOrig, HWND
 	// to enforce it as "always-down" during the send operation.  Thus, the key would
 	// basically get stuck down even after the send was over:
 	sModifiersLR_persistent &= mods_current & ~mods_down_physically_and_logically;
-	modLR_type persistent_modifiers_for_this_SendKeys, extra_persistent_modifiers_for_blind_mode;
+	modLR_type persistent_modifiers_for_this_SendKeys;
+	modLR_type mods_released_for_selective_blind = 0;
 	if (sInBlindMode)
 	{
 		// The following value is usually zero unless the user is currently holding down
@@ -360,12 +374,15 @@ void SendKeys(LPTSTR aKeys, SendRawModes aSendRaw, SendModes aSendModeOrig, HWND
 		// this send operation (along with all its calls to SendKey and similar) should
 		// consider to be down for the duration of the Send (unless they go up via an
 		// explicit {LWin up}, etc.)
-		extra_persistent_modifiers_for_blind_mode = mods_current & ~sModifiersLR_persistent;
 		persistent_modifiers_for_this_SendKeys = mods_current;
+		if (mods_excluded_from_blind) // Caller specified modifiers to exclude from Blind treatment.
+		{
+			persistent_modifiers_for_this_SendKeys &= ~mods_excluded_from_blind;
+			mods_released_for_selective_blind = mods_current ^ persistent_modifiers_for_this_SendKeys;
+		}
 	}
 	else
 	{
-		extra_persistent_modifiers_for_blind_mode = 0;
 		persistent_modifiers_for_this_SendKeys = sModifiersLR_persistent;
 	}
 	// Above:
@@ -609,16 +626,10 @@ void SendKeys(LPTSTR aKeys, SendRawModes aSendRaw, SendModes aSendModeOrig, HWND
 								DisguiseWinAltIfNeeded(vk);
 								sModifiersLR_persistent &= ~key_as_modifiersLR;
 								sModifiersLR_remapped &= ~key_as_modifiersLR;
-								// By contrast with KEYDOWN, KEYUP should also remove this modifier
-								// from extra_persistent_modifiers_for_blind_mode if it happens to be
-								// in there.  For example, if "#i::Send {LWin Up}" is a hotkey,
-								// LWin should become persistently up in every respect.
-								extra_persistent_modifiers_for_blind_mode &= ~key_as_modifiersLR;
+								persistent_modifiers_for_this_SendKeys &= ~key_as_modifiersLR;
 								// Fix for v1.0.43: Also remove LControl if this key happens to be AltGr.
 								if (vk == VK_RMENU && sTargetLayoutHasAltGr == CONDITION_TRUE) // It is AltGr.
-									extra_persistent_modifiers_for_blind_mode &= ~MOD_LCONTROL;
-								// Since key_as_modifiersLR isn't 0, update to reflect any changes made above:
-								persistent_modifiers_for_this_SendKeys = sModifiersLR_persistent | extra_persistent_modifiers_for_blind_mode;
+									persistent_modifiers_for_this_SendKeys &= ~MOD_LCONTROL;
 							}
 							// else must never change sModifiersLR_persistent in response to KEYDOWNANDUP
 							// because that would break existing scripts.  This is because that same
@@ -852,7 +863,8 @@ brace_case_end: // This label is used to simplify the code without sacrificing p
 			//    they know there are other LL hooks in the system.  In any case, there's no known solution
 			//    for it, so nothing can be done.
 			mods_to_set = persistent_modifiers_for_this_SendKeys
-				| (sInBlindMode ? 0 : (mods_down_physically_orig & ~mods_down_physically_but_not_logically_orig)); // The last item is usually 0.
+				| (sInBlindMode ? mods_released_for_selective_blind
+					: (mods_down_physically_orig & ~mods_down_physically_but_not_logically_orig)); // The last item is usually 0.
 			// Above: When in blind mode, don't restore physical modifiers.  This is done to allow a hotkey
 			// such as the following to release Shift:
 			//    +space::SendInput/Play {Blind}{Shift up}
@@ -899,6 +911,11 @@ brace_case_end: // This label is used to simplify the code without sacrificing p
 		mods_to_set = persistent_modifiers_for_this_SendKeys; // Set default.
 		if (sInBlindMode) // This section is not needed for the array-sending modes because they exploit uninterruptibility to perform a more reliable restoration.
 		{
+			// For selective {Blind!#^+}, restore any modifiers that were automatically released at the
+			// start, such as for *^1::Send "{Blind^}2" when Ctrl+Alt+1 is pressed (Ctrl is released).
+			// But do this before the below so that if the key was physically down at the start and has
+			// since been released, it won't be pushed back down.
+			mods_to_set |= mods_released_for_selective_blind;
 			// At the end of a blind-mode send, modifiers are restored differently than normal. One
 			// reason for this is to support the explicit ability for a Send to turn off a hotkey's
 			// modifiers even if the user is still physically holding them down.  For example:
@@ -1931,6 +1948,15 @@ void KeyEvent(KeyEventTypes aEventType, vk_type aVK, sc_type aSC, HWND aTargetWi
 	if (aDoKeyDelay) // SM_PLAY also uses DoKeyDelay(): it stores the delay item in the event array.
 		DoKeyDelay(); // Thread-safe because only called by main thread in this mode.  See notes above.
 }
+
+
+
+void KeyEventMenuMask(KeyEventTypes aEventType, DWORD aExtraInfo)
+// Send a menu masking key event (use of this function reduces code size).
+{
+	KeyEvent(aEventType, g_MenuMaskKeyVK, g_MenuMaskKeySC, NULL, false, aExtraInfo);
+}
+
 
 
 ///////////////////
@@ -3354,7 +3380,7 @@ void SetModifierLRState(modLR_type aModifiersLRnew, modLR_type aModifiersLRnow, 
 			// to trigger the language switch.
 			if (ctrl_nor_shift_nor_alt_down && aDisguiseUpWinAlt // Nor will they be pushed down later below, otherwise defer_win_release would have been true and we couldn't get to this point.
 				&& sSendMode != SM_PLAY) // SendPlay can't display Start Menu, so disguise not needed (also, disguise might mess up some games).
-				KeyEvent(KEYDOWNANDUP, g_MenuMaskKey, 0, NULL, false, aExtraInfo); // Disguise key release to suppress Start Menu.
+				KeyEventMenuMask(KEYDOWNANDUP, aExtraInfo); // Disguise key release to suppress Start Menu.
 				// The above event is safe because if we're here, it means VK_CONTROL will not be
 				// pressed down further below.  In other words, we're not defeating the job
 				// of this function by sending these disguise keystrokes.
@@ -3365,10 +3391,10 @@ void SetModifierLRState(modLR_type aModifiersLRnew, modLR_type aModifiersLRnow, 
 	else if (!(aModifiersLRnow & MOD_LWIN) && (aModifiersLRnew & MOD_LWIN)) // Press down LWin.
 	{
 		if (disguise_win_down)
-			KeyEvent(KEYDOWN, g_MenuMaskKey, 0, NULL, false, aExtraInfo); // Ensures that the Start Menu does not appear.
+			KeyEventMenuMask(KEYDOWN, aExtraInfo); // Ensures that the Start Menu does not appear.
 		KeyEvent(KEYDOWN, VK_LWIN, 0, NULL, false, aExtraInfo);
 		if (disguise_win_down)
-			KeyEvent(KEYUP, g_MenuMaskKey, 0, NULL, false, aExtraInfo); // Ensures that the Start Menu does not appear.
+			KeyEventMenuMask(KEYUP, aExtraInfo); // Ensures that the Start Menu does not appear.
 	}
 
 	if (release_rwin)
@@ -3376,7 +3402,7 @@ void SetModifierLRState(modLR_type aModifiersLRnew, modLR_type aModifiersLRnow, 
 		if (!defer_win_release)
 		{
 			if (ctrl_nor_shift_nor_alt_down && aDisguiseUpWinAlt && sSendMode != SM_PLAY)
-				KeyEvent(KEYDOWNANDUP, g_MenuMaskKey, 0, NULL, false, aExtraInfo); // Disguise key release to suppress Start Menu.
+				KeyEventMenuMask(KEYDOWNANDUP, aExtraInfo); // Disguise key release to suppress Start Menu.
 			KeyEvent(KEYUP, VK_RWIN, 0, NULL, false, aExtraInfo);
 		}
 		// else release it only after the normal operation of the function pushes down the disguise keys.
@@ -3384,10 +3410,10 @@ void SetModifierLRState(modLR_type aModifiersLRnew, modLR_type aModifiersLRnow, 
 	else if (!(aModifiersLRnow & MOD_RWIN) && (aModifiersLRnew & MOD_RWIN)) // Press down RWin.
 	{
 		if (disguise_win_down)
-			KeyEvent(KEYDOWN, g_MenuMaskKey, 0, NULL, false, aExtraInfo); // Ensures that the Start Menu does not appear.
+			KeyEventMenuMask(KEYDOWN, aExtraInfo); // Ensures that the Start Menu does not appear.
 		KeyEvent(KEYDOWN, VK_RWIN, 0, NULL, false, aExtraInfo);
 		if (disguise_win_down)
-			KeyEvent(KEYUP, g_MenuMaskKey, 0, NULL, false, aExtraInfo); // Ensures that the Start Menu does not appear.
+			KeyEventMenuMask(KEYUP, aExtraInfo); // Ensures that the Start Menu does not appear.
 	}
 
 	// ** SHIFT (PART 1 OF 2)
@@ -3405,17 +3431,17 @@ void SetModifierLRState(modLR_type aModifiersLRnew, modLR_type aModifiersLRnow, 
 		if (!defer_alt_release)
 		{
 			if (ctrl_not_down && aDisguiseUpWinAlt)
-				KeyEvent(KEYDOWNANDUP, g_MenuMaskKey, 0, NULL, false, aExtraInfo); // Disguise key release to suppress menu activation.
+				KeyEventMenuMask(KEYDOWNANDUP, aExtraInfo); // Disguise key release to suppress menu activation.
 			KeyEvent(KEYUP, VK_LMENU, 0, NULL, false, aExtraInfo);
 		}
 	}
 	else if (!(aModifiersLRnow & MOD_LALT) && (aModifiersLRnew & MOD_LALT))
 	{
 		if (disguise_alt_down)
-			KeyEvent(KEYDOWN, g_MenuMaskKey, 0, NULL, false, aExtraInfo); // Ensures that menu bar is not activated.
+			KeyEventMenuMask(KEYDOWN, aExtraInfo); // Ensures that menu bar is not activated.
 		KeyEvent(KEYDOWN, VK_LMENU, 0, NULL, false, aExtraInfo);
 		if (disguise_alt_down)
-			KeyEvent(KEYUP, g_MenuMaskKey, 0, NULL, false, aExtraInfo);
+			KeyEventMenuMask(KEYUP, aExtraInfo);
 	}
 
 	if (release_ralt)
@@ -3436,7 +3462,7 @@ void SetModifierLRState(modLR_type aModifiersLRnew, modLR_type aModifiersLRnow, 
 			}
 			else // No AltGr, so check if disguise is necessary (AltGr itself never needs disguise).
 				if (ctrl_not_down && aDisguiseUpWinAlt)
-					KeyEvent(KEYDOWNANDUP, g_MenuMaskKey, 0, NULL, false, aExtraInfo); // Disguise key release to suppress menu activation.
+					KeyEventMenuMask(KEYDOWNANDUP, aExtraInfo); // Disguise key release to suppress menu activation.
 			KeyEvent(KEYUP, VK_RMENU, 0, NULL, false, aExtraInfo);
 		}
 	}
@@ -3447,9 +3473,9 @@ void SetModifierLRState(modLR_type aModifiersLRnew, modLR_type aModifiersLRnow, 
 		// disguise_alt_key also applies to the left alt key.
 		if (disguise_alt_down && sTargetLayoutHasAltGr != CONDITION_TRUE)
 		{
-			KeyEvent(KEYDOWN, g_MenuMaskKey, 0, NULL, false, aExtraInfo); // Ensures that menu bar is not activated.
+			KeyEventMenuMask(KEYDOWN, aExtraInfo); // Ensures that menu bar is not activated.
 			KeyEvent(KEYDOWN, VK_RMENU, 0, NULL, false, aExtraInfo);
-			KeyEvent(KEYUP, g_MenuMaskKey, 0, NULL, false, aExtraInfo);
+			KeyEventMenuMask(KEYUP, aExtraInfo);
 		}
 		else // No disguise needed.
 		{
@@ -3894,7 +3920,7 @@ LPTSTR ModifiersLRToText(modLR_type aModifiersLR, LPTSTR aBuf)
 
 
 
-DWORD GetFocusedThread(HWND aWindow)
+DWORD GetFocusedCtrlThread(HWND *apControl, HWND aWindow)
 {
 	// Determine the thread for which we want the keyboard layout.
 	// When no foreground window, the script's own layout seems like the safest default.
@@ -3915,6 +3941,8 @@ DWORD GetFocusedThread(HWND aWindow)
 			{
 				// Use the focused control's thread.
 				thread_id = GetWindowThreadProcessId(thread_info.hwndFocus, NULL);
+				if (apControl)
+					*apControl = thread_info.hwndFocus;
 			}
 		}
 	}
@@ -3925,7 +3953,7 @@ DWORD GetFocusedThread(HWND aWindow)
 
 HKL GetFocusedKeybdLayout(HWND aWindow)
 {
-	return GetKeyboardLayout(GetFocusedThread(aWindow));
+	return GetKeyboardLayout(GetFocusedCtrlThread(NULL, aWindow));
 }
 
 
@@ -3935,6 +3963,79 @@ bool ActiveWindowLayoutHasAltGr()
 {
 	Get_active_window_keybd_layout // Defines the variable active_window_keybd_layout for use below.
 	return LayoutHasAltGr(active_window_keybd_layout) == CONDITION_TRUE; // i.e caller wants both CONDITION_FALSE and LAYOUT_UNDETERMINED to be considered non-AltGr.
+}
+
+
+
+HMODULE LoadKeyboardLayoutModule(HKL aLayout)
+// Loads a keyboard layout DLL and returns its handle.
+// Activates the layout as a side-effect, but reverts it if !aSideEffectsOK.
+{
+	HMODULE hmod = NULL;
+	// Unfortunately activating the layout seems to be the only way to retrieve it's name.
+	// This may have side-effects in general (such as the language selector flickering),
+	// but shouldn't have any in our case since we're only changing layouts for our thread,
+	// and only if some other window is active (because if our window was active, aLayout
+	// is already the current layout).
+	if (HKL old_layout = ActivateKeyboardLayout(aLayout, 0))
+	{
+		#define KEYBOARD_LAYOUTS_REG_KEY _T("SYSTEM\\CurrentControlSet\\Control\\Keyboard Layouts\\")
+		const size_t prefix_length = _countof(KEYBOARD_LAYOUTS_REG_KEY) - 1;
+		TCHAR keyname[prefix_length + KL_NAMELENGTH];
+		_tcscpy(keyname, KEYBOARD_LAYOUTS_REG_KEY);
+		if (GetKeyboardLayoutName(keyname + prefix_length))
+		{
+			TCHAR layout_file[MAX_PATH]; // It's probably much smaller (like "KBDUSX.dll"), but who knows what whacky custom layouts exist?
+			if (ReadRegString(HKEY_LOCAL_MACHINE, keyname, _T("Layout File"), layout_file, _countof(layout_file)))
+			{
+				hmod = LoadLibrary(layout_file);
+			}
+		}
+		if (aLayout != old_layout)
+			ActivateKeyboardLayout(old_layout, 0); // Nothing we can do if it fails.
+	}
+	return hmod;
+}
+
+
+
+ResultType LayoutHasAltGrDirect(HKL aLayout)
+// Loads and reads the keyboard layout DLL to determine if it has AltGr.
+// Activates the layout as a side-effect, but reverts it if !aSideEffectsOK.
+// This is fast enough that there's no need to cache these values on startup.
+{
+	// This abbreviated definition is based on the actual definition in kbd.h (Windows DDK):
+	typedef struct tagKbdLayer {
+		PVOID pCharModifiers;
+		PVOID pVkToWcharTable;
+		PVOID pDeadKey;
+		PVOID pKeyNames;
+		PVOID pKeyNamesExt;
+		WCHAR **pKeyNamesDead;
+		USHORT  *pusVSCtoVK;
+		BYTE    bMaxVSCtoVK;
+		PVOID   pVSCtoVK_E0;
+		PVOID   pVSCtoVK_E1;
+		// This is the one we want:
+		DWORD fLocaleFlags;
+		// Struct definition truncated.
+	} KBDTABLES, *PKBDTABLES;
+	#define KLLF_ALTGR 0x0001 // Also defined in kbd.h.
+	typedef PKBDTABLES (* KbdLayerDescriptorType)();
+
+	ResultType result = LAYOUT_UNDETERMINED;
+
+	if (HMODULE hmod = LoadKeyboardLayoutModule(aLayout))
+	{
+		KbdLayerDescriptorType kbdLayerDescriptor = (KbdLayerDescriptorType)GetProcAddress(hmod, "KbdLayerDescriptor");
+		if (kbdLayerDescriptor)
+		{
+			PKBDTABLES kl = kbdLayerDescriptor();
+			result = (kl->fLocaleFlags & KLLF_ALTGR) ? CONDITION_TRUE : CONDITION_FALSE;
+		}
+		FreeLibrary(hmod);
+	}
+	return result;
 }
 
 
@@ -3975,7 +4076,19 @@ ResultType LayoutHasAltGr(HKL aLayout, ResultType aHasAltGr)
 	// a keyboard hook catch and block it.  If the layout has altgr, the hook would see a driver-generated LCtrl
 	// keystroke immediately prior to RAlt.
 	// Performance: This loop is quite fast. Doing this section 1000 times only takes about 160ms
-	// on a 2gHz system (0.16ms per call).
+	// on a 2gHz system (0.16ms per call).  UPDATE: In theory, it can be 256 (that is, around WCHAR_MAX/UCHAR_MAX)
+	// times slower on Unicode builds, so an alternative method is used there.
+#ifdef _UNICODE
+	// Read the AltGr value directly from the keyboard layout DLL.
+	// This method has been compared to the VkKeyScanEx method and another one using Send and hotkeys,
+	// and was found to have 100% accuracy for the 203 standard layouts on Windows 10, whereas the
+	// VkKeyScanEx method failed for two layouts:
+	//   - N'Ko has AltGr but does not appear to use it for anything.
+	//   - Ukrainian has AltGr but only uses it for one character, which is also assigned to a naked
+	//     VK (so VkKeyScanEx returns that one).  Likely the key in question is absent from some keyboards.
+	cl.has_altgr = LayoutHasAltGrDirect(aLayout);
+#else
+	// Use the old VkKeyScanEx method on ANSI builds since it is faster and has smaller code size.
 	SHORT s;
 	for (cl.has_altgr = LAYOUT_UNDETERMINED, i = 32; i <= UorA(WCHAR_MAX,UCHAR_MAX); ++i) // Include Spacebar up through final ANSI character (i.e. include 255 but not 256).
 	{
@@ -3988,25 +4101,11 @@ ResultType LayoutHasAltGr(HKL aLayout, ResultType aHasAltGr)
 			break;
 		}
 	}
-
+#endif
 	// If loop didn't break, leave cl.has_altgr as LAYOUT_UNDETERMINED because we can't be sure whether AltGr is
 	// present (see other comments for details).
 	cl.hkl = aLayout; // This is done here (immediately after has_altgr was set in the loop above) rather than earlier to minimize the consequences of not being fully thread-safe.
 	return cl.has_altgr;
-}
-
-
-
-void FillLayoutHasAltGrCache()
-// This is called on startup to improve the odds that LayoutHasAltGr() will return
-// a cached value the first time Send is called.  This fixes an oddity with "reg"
-// hotkeys which Send, such as ^m::Send x, where the very first Send does not put
-// Ctrl back into effect because LayoutHasAltGr() exceeds g_HotkeyModifierTimeout.
-{
-	HKL active_layouts[MAX_CACHED_LAYOUTS];
-	int n = GetKeyboardLayoutList(MAX_CACHED_LAYOUTS, active_layouts);
-	for (int i = 0; i < n; ++i)
-		LayoutHasAltGr(active_layouts[i]);
 }
 
 

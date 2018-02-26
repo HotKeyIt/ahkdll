@@ -126,8 +126,10 @@ enum ExitReasons {EXIT_NONE, EXIT_CRITICAL, EXIT_ERROR, EXIT_DESTROY, EXIT_LOGOF
 	, EXIT_WM_QUIT, EXIT_WM_CLOSE, EXIT_MENU, EXIT_EXIT, EXIT_RELOAD, EXIT_SINGLEINSTANCE};
 
 enum WarnType {WARN_USE_UNSET_LOCAL, WARN_USE_UNSET_GLOBAL, WARN_LOCAL_SAME_AS_GLOBAL, WARN_CLASS_OVERWRITE, WARN_ALL};
+#define WARN_TYPE_STRINGS _T("UseUnsetLocal"), _T("UseUnsetGlobal"), _T("LocalSameAsGlobal"), _T("ClassOverwrite"), _T("All")
 
 enum WarnMode {WARNMODE_OFF, WARNMODE_OUTPUTDEBUG, WARNMODE_MSGBOX, WARNMODE_STDOUT};	// WARNMODE_OFF must be zero.
+#define WARN_MODE_STRINGS _T("Off"), _T("OutputDebug"), _T("MsgBox"), _T("StdOut")
 
 enum SingleInstanceType {SINGLE_INSTANCE_OFF, SINGLE_INSTANCE_PROMPT, SINGLE_INSTANCE_REPLACE
 	, SINGLE_INSTANCE_IGNORE }; // SINGLE_INSTANCE_OFF must be zero.
@@ -137,7 +139,7 @@ enum MenuTypeType {MENU_TYPE_NONE, MENU_TYPE_POPUP, MENU_TYPE_BAR}; // NONE must
 // neutral default value that is neither on nor off.  INVALID must
 // be zero:
 enum ToggleValueType {TOGGLE_INVALID = 0, TOGGLED_ON, TOGGLED_OFF, ALWAYS_ON, ALWAYS_OFF, TOGGLE
-	, TOGGLE_PERMIT, NEUTRAL, TOGGLE_SEND, TOGGLE_MOUSE, TOGGLE_SENDANDMOUSE, TOGGLE_DEFAULT
+	, NEUTRAL, TOGGLE_SEND, TOGGLE_MOUSE, TOGGLE_SENDANDMOUSE, TOGGLE_DEFAULT
 	, TOGGLE_MOUSEMOVE, TOGGLE_MOUSEMOVEOFF};
 
 // Some things (such as ListView sorting) rely on SCS_INSENSITIVE being zero.
@@ -575,14 +577,6 @@ enum enum_act {
 #endif
 };
 
-// It seems best not to include ACT_SUSPEND in the below, since the user may have marked
-// a large number of subroutines as "Suspend, Permit".  Even PAUSE is iffy, since the user
-// may be using it as "Pause, off/toggle", but it seems best to support PAUSE because otherwise
-// hotkey such as "#z::pause" would not be able to unpause the script if its MaxThreadsPerHotkey
-// was 1 (the default).
-#define ACT_IS_ALWAYS_ALLOWED(ActionType) (ActionType == ACT_EXITAPP || ActionType == ACT_PAUSE \
-	|| ActionType == ACT_EDIT || ActionType == ACT_RELOAD || ActionType == ACT_KEYHISTORY \
-	|| ActionType == ACT_LISTLINES || ActionType == ACT_LISTVARS || ActionType == ACT_LISTHOTKEYS)
 #define ACT_IS_CONTROL_FLOW(ActionType) (ActionType <= ACT_LAST_CONTROL_FLOW && ActionType >= ACT_FIRST_CONTROL_FLOW)
 #define ACT_IS_IF(ActionType) (ActionType == ACT_IF)
 #define ACT_IS_LOOP(ActionType) (ActionType >= ACT_LOOP && ActionType <= ACT_WHILE)

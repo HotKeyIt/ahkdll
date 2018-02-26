@@ -37,11 +37,9 @@ EXTERN_G;
 
 #define MAX_THREADS_LIMIT UCHAR_MAX // Uses UCHAR_MAX (255) because some variables that store a thread count are UCHARs.
 #define MAX_THREADS_DEFAULT 10 // Must not be higher than above.
-#define EMERGENCY_THREADS 2 // This is the number of extra threads available after g_MaxThreadsTotal has been reached for the following to launch: hotkeys/etc. whose first line is something important like ExitApp or Pause. (see #MaxThreads documentation).
-#define MAX_THREADS_EMERGENCY (g_MaxThreadsTotal + EMERGENCY_THREADS)
-#define TOTAL_ADDITIONAL_THREADS (EMERGENCY_THREADS + 2) // See below.
-// Must allow two beyond EMERGENCY_THREADS: One for the AutoExec/idle thread and one so that ExitApp()
-// can run even when MAX_THREADS_EMERGENCY has been reached.
+#define TOTAL_ADDITIONAL_THREADS 2 // See below.
+// Must allow two additional threads: One for the AutoExec/idle thread and one so that ExitApp()
+// can run even when #MaxThreads has been reached.
 // Explanation: If/when AutoExec() finishes, although it no longer needs g_array[0] (not even
 // AutoExecSectionTimeout() needs it because it either won't be called or it will return early),
 // at least the following might still use g_array[0]:
@@ -1260,15 +1258,6 @@ public:
 		return SCS_INVALID;
 	}
 
-	static ToggleValueType ConvertOnOffTogglePermit(LPTSTR aBuf, ToggleValueType aDefault = TOGGLE_INVALID)
-	// Returns aDefault if aBuf isn't either ON, OFF, TOGGLE, PERMIT, or blank.
-	{
-		if (ToggleValueType toggle = ConvertOnOffToggle(aBuf))
-			return toggle;
-		if (!_tcsicmp(aBuf, _T("Permit"))) return TOGGLE_PERMIT;
-		return aDefault;
-	}
-
 	static ToggleValueType ConvertBlockInput(LPTSTR aBuf)
 	{
 		if (ToggleValueType toggle = ConvertOnOff(aBuf))
@@ -1430,14 +1419,6 @@ public:
 		return (!*aX && !*aY) || (*aX && *aY) ? OK : FAIL;
 	}
 
-	bool IsExemptFromSuspend()
-	{
-		// Hotkey and Hotstring subroutines whose first line is the Suspend command are exempt from
-		// being suspended themselves except when their first parameter is the literal
-		// word "on":
-		return mActionType == ACT_SUSPEND && (!mArgc || ArgHasDeref(1) || _tcsicmp(mArg[0].text, _T("On")));
-	}
-
 	static LPTSTR LogToText(LPTSTR aBuf, int aBufSize);
 	LPTSTR VicinityToText(LPTSTR aBuf, int aBufSize);
 	LPTSTR ToText(LPTSTR aBuf, int aBufSize, bool aCRLF, DWORD aElapsed = 0, bool aLineWasResumed = false);
@@ -1496,11 +1477,6 @@ public:
 	LPTSTR mName;
 	Line *mJumpToLine;
 	Label *mPrevLabel, *mNextLabel;  // Prev & Next items in linked list.
-	bool IsExemptFromSuspend()
-	{
-		// See Line::IsExemptFromSuspend() for comments.
-		return mJumpToLine->IsExemptFromSuspend();
-	}
 	ResultType Execute()
 	// This function was added in v1.0.46.16 to support A_ThisLabel.
 	{
@@ -1575,16 +1551,18 @@ public:
 	bool IsLiveObject() const { return mObject && getType(mObject) == Callable_Object; }
 	
 	// Helper methods for legacy code which deals with Labels.
-	bool IsExemptFromSuspend() const;
-	ActionTypeType TypeOfFirstLine() const;
 	LPTSTR Name() const;
 };
 
 // LabelPtr with automatic reference-counting, for storing an object safely,
-// such as in a HotkeyVariant, UserMenuItem, etc.  In future, this could be
-// replaced with a more general smart pointer class.
+// such as in a HotkeyVariant, UserMenuItem, etc.  Its specific purpose is to
+// work with old code that wasn't concerned with reference counting.
 class LabelRef : public LabelPtr
 {
+private:
+	LabelRef(const LabelRef &); // Disable default copy constructor.
+	LabelRef & operator = (const LabelRef &); // ...and copy assignment.
+
 public:
 	LabelRef() : LabelPtr() {}
 	LabelRef(IObject *object) : LabelPtr(object)
@@ -1605,6 +1583,10 @@ public:
 			mObject->Release();
 		mObject = object;
 		return *this;
+	}
+	LabelRef & operator = (const LabelPtr &other)
+	{
+		return *this = other.ToObject();
 	}
 	~LabelRef()
 	{
@@ -2781,6 +2763,7 @@ public:
 		, LineNumberType &aPhysLineNumber, bool &aHasContinuationSection);
 	static bool IsFunction(LPTSTR aBuf, bool *aPendingFunctionHasBrace = NULL);
 	ResultType IsDirective(LPTSTR aBuf);
+	ResultType ConvertDirectiveBool(LPTSTR aBuf, bool &aResult, bool aDefault);
 	ResultType ParseAndAddLine(LPTSTR aLineText, int aBufSize = 0, ActionTypeType aActionType = ACT_INVALID
 		, LPTSTR aLiteralMap = NULL, size_t aLiteralMapLength = 0);
 	ResultType ParseDerefs(LPTSTR aArgText, LPTSTR aArgMap, DerefType *aDeref, int &aDerefCount, int *aPos = NULL, TCHAR aEndChar = 0);
@@ -2789,6 +2772,7 @@ public:
 	LPTSTR ParseActionType(LPTSTR aBufTarget, LPTSTR aBufSource, bool aDisplayErrors);
 	static ActionTypeType ConvertActionType(LPTSTR aActionTypeString, int aFirstAction, int aLastActionPlus1);
 	ResultType AddLabel(LPTSTR aLabelName, bool aAllowDupe);
+	void RemoveLabel(Label *aLabel);
 	ResultType AddLine(ActionTypeType aActionType, LPTSTR aArg[] = NULL, int aArgc = 0, LPTSTR aArgMap[] = NULL, bool aAllArgsAreExpressions = false);
 
 	// These aren't in the Line class because I think they're easier to implement
@@ -2876,6 +2860,9 @@ public:
 	LineNumberType LoadFromText(LPTSTR aScript,LPCTSTR aPathToShow = NULL); // HotKeyIt H1 load text instead file ahktextdll
 	ResultType LoadIncludedText(LPTSTR aScript,LPCTSTR aPathToShow = NULL); //New read text
 	ResultType LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure);
+	LineNumberType CurrentLine();
+	LPTSTR CurrentFile();
+
 	ResultType UpdateOrCreateTimer(IObject *aLabel, LPTSTR aPeriod, LPTSTR aPriority, bool aEnable
 		, bool aUpdatePriorityOnly);
 	void DeleteTimer(IObject *aLabel);
@@ -2906,6 +2893,8 @@ public:
 		, bool *apIsLocal = NULL);
 	Var *AddVar(LPTSTR aVarName, size_t aVarNameLength, int aInsertPos, int aScope);
 	static VarEntry *GetBuiltInVar(LPTSTR aVarName);
+
+	ResultType DerefInclude(LPTSTR &aOutput, LPTSTR aBuf);
 
 	WinGroup *FindGroup(LPTSTR aGroupName, bool aCreateIfNotFound = false);
 	ResultType AddGroup(LPTSTR aGroupName);
@@ -2956,7 +2945,7 @@ public:
 	void PreprocessLocalVars(Func &aFunc, Var **aVarList, int &aVarCount);
 	void CheckForClassOverwrite();
 
-	static ResultType UnhandledException(ResultToken*& aToken, Line* aLine);
+	static ResultType UnhandledException(ResultToken*& aToken, Line* aLine, LPTSTR aFooter = _T("The thread has exited."));
 	static ResultType SetErrorLevelOrThrow() { return SetErrorLevelOrThrowBool(true); }
 	static ResultType SetErrorLevelOrThrowBool(bool aError);
 	static ResultType SetErrorLevelOrThrowInt(int aErrorValue, LPCTSTR aWhat = NULL);
@@ -2996,6 +2985,7 @@ class MallocHeap; // forward declaration for export.cpp
 BIV_DECL_R (BIV_True_False_Null);
 BIV_DECL_R (BIV_MMM_DDD);
 BIV_DECL_R (BIV_DateTime);
+BIV_DECL_RW(BIV_ListLines);
 BIV_DECL_RW(BIV_TitleMatchMode);
 BIV_DECL_R (BIV_TitleMatchModeSpeed); // Write is handled by BIV_TitleMatchMode_Set.
 BIV_DECL_RW(BIV_DetectHiddenWindows);
@@ -3223,6 +3213,8 @@ BIF_DECL(BIF_IL_Destroy);
 BIF_DECL(BIF_IL_Add);
 BIF_DECL(BIF_LoadPicture);
 BIF_DECL(BIF_Trim); // L31: Also handles LTrim and RTrim.
+
+BIF_DECL(BIF_Hotstring);
 
 BIF_DECL(BIF_Type);
 BIF_DECL(BIF_Cast);

@@ -687,8 +687,6 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 		case WM_HOTKEY:        // As a result of this app having previously called RegisterHotkey(), or from TriggerJoyHotkeys().
 		case AHK_USER_MENU:    // The user selected a custom menu item.
 		{
-			LabelPtr label_to_call;
-
 			hdrop_to_free = NULL;  // Set default for this message's processing (simplifies code).
 			switch(msg.message)
 			{
@@ -800,7 +798,6 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 				// the menu):
 				if (!menu_item->mLabel)
 					continue;
-				label_to_call = menu_item->mLabel;
 				// Ignore/discard a hotkey or custom menu item event if the current thread's priority
 				// is higher than it's:
 				priority = menu_item->mPriority;
@@ -813,7 +810,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 				if (hs->mHotCriterion)
 				{
 					// For details, see comments in the hotkey section of this switch().
-					if (   !(criterion_found_hwnd = HotCriterionAllowsFiring(hs->mHotCriterion, hs->mJumpToLabel ? hs->mJumpToLabel->mName : _T("")))   )
+					if (   !(criterion_found_hwnd = HotCriterionAllowsFiring(hs->mHotCriterion, hs->mName))   )
 						// Hotstring is no longer eligible to fire even though it was when the hook sent us
 						// the message.  Abort the firing even though the hook may have already started
 						// executing the hotstring by suppressing the final end-character or other actions.
@@ -831,13 +828,12 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 				// below.  But also do the backspacing (if specified) for a non-autoreplace hotstring,
 				// even if it can't launch due to MaxThreads, MaxThreadsPerHotkey, or some other reason:
 				hs->DoReplace(msg.lParam);  // Does only the backspacing if it's not an auto-replace hotstring.
-				if (*hs->mReplacement) // Fully handled by the above; i.e. it's an auto-replace hotstring.
+				if (hs->mReplacement) // Fully handled by the above; i.e. it's an auto-replace hotstring.
 					continue;
 				// Otherwise, continue on and let a new thread be created to handle this hotstring.
 				// Since this isn't an auto-replace hotstring, set this value to support
 				// the built-in variable A_EndChar:
 				g_script->mEndChar = hs->mEndCharRequired ? (TCHAR)LOWORD(msg.lParam) : 0; // v1.0.48.04: Explicitly set 0 when hs->mEndCharRequired==false because LOWORD is used for something else in that case.
-				label_to_call = hs->mJumpToLabel;
 				priority = hs->mPriority;
 				break;
 
@@ -940,39 +936,26 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 				else if (HOT_IF_REQUIRES_EVAL(hc->Type))
 					criterion_found_hwnd = g_HotExprLFW; // For #if WinExist(WinTitle) and similar.
 
-				label_to_call = variant->mJumpToLabel;
 				priority = variant->mPriority;
 			} // switch(msg.message)
 
-			// label_to_call has been set to the label, function or object which is
-			// about to be called, though it might not be called via label_to_call.
-			ActionTypeType type_of_first_line = label_to_call ? label_to_call->TypeOfFirstLine() : ACT_INVALID;
-
 			if (g_nThreads >= g_MaxThreadsTotal)
 			{
-				// The below allows 1 thread beyond the limit in case the script's configured
-				// #MaxThreads is exactly equal to the absolute limit.  This is because we want
-				// subroutines whose first line is something like ExitApp to take effect even
-				// when we're at the absolute limit:
-				if (g_nThreads >= MAX_THREADS_EMERGENCY // To avoid array overflow, this limit must by obeyed except where otherwise documented.
-					|| !ACT_IS_ALWAYS_ALLOWED(type_of_first_line))
+				// Allow only a limited number of recursion levels to avoid any chance of
+				// stack overflow.  So ignore this message.  Later, can devise some way
+				// to support "queuing up" these launch-thread events for use later when
+				// there is "room" to run them, but that might cause complications because
+				// in some cases, the user didn't intend to hit the key twice (e.g. due to
+				// "fat fingers") and would have preferred to have it ignored.  Doing such
+				// might also make "infinite key loops" harder to catch because the rate
+				// of incoming hotkeys would be slowed down to prevent the subroutines from
+				// running concurrently.
+				if (hdrop_to_free) // This is only non-NULL when pgui is non-NULL and gui_action==GUI_EVENT_DROPFILES
 				{
-					// Allow only a limited number of recursion levels to avoid any chance of
-					// stack overflow.  So ignore this message.  Later, can devise some way
-					// to support "queuing up" these launch-thread events for use later when
-					// there is "room" to run them, but that might cause complications because
-					// in some cases, the user didn't intend to hit the key twice (e.g. due to
-					// "fat fingers") and would have preferred to have it ignored.  Doing such
-					// might also make "infinite key loops" harder to catch because the rate
-					// of incoming hotkeys would be slowed down to prevent the subroutines from
-					// running concurrently.
-					if (hdrop_to_free) // This is only non-NULL when pgui is non-NULL and gui_action==GUI_EVENT_DROPFILES
-					{
-						DragFinish(hdrop_to_free); // Since the drop-thread will not be launched, free the memory.
-						pgui->mHdrop = NULL; // Indicate that this GUI window is ready for another drop.
-					}
-					continue;
+					DragFinish(hdrop_to_free); // Since the drop-thread will not be launched, free the memory.
+					pgui->mHdrop = NULL; // Indicate that this GUI window is ready for another drop.
 				}
+				continue;
 				// If the above "continued", it seems best not to re-queue/buffer the key since
 				// it might be a while before the number of threads drops back below the limit.
 			}
@@ -1026,7 +1009,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 				// Unlike hotkeys -- which can have a name independent of their label by being created or updated
 				// with the HOTKEY command -- a hot string's unique name is always its label since that includes
 				// the options that distinguish between (for example) :c:ahk:: and ::ahk::
-				g_script->mThisHotkeyName = (msg.message == AHK_HOTSTRING) ? hs->mJumpToLabel->mName : hk->mName;
+				g_script->mThisHotkeyName = (msg.message == AHK_HOTSTRING) ? hs->mName : hk->mName;
 				g_script->mThisHotkeyStartTime = GetTickCount(); // Fixed for v1.0.35.10 to not happen for GUI threads.
 			}
 
@@ -1037,7 +1020,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 			// However, we do not set ErrorLevel to anything special here (except for GUI threads, later
 			// below) because it's more flexible that way (i.e. the user may want one hotkey subroutine
 			// to use the value of ErrorLevel set by another):
-			InitNewThread(priority, false, true, type_of_first_line);
+			InitNewThread(priority, false, true);
 			global_struct &g = *::g; // ONLY AFTER above is it safe to "lock in". Reduces code size a bit (31 bytes currently) and may improve performance.  Eclipsing ::g with local g makes compiler remind/enforce the use of the right one.
 
 			// Do this nearly last, right before launching the thread:
@@ -1289,7 +1272,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 					(__int64)(menu_item->Pos() + 1), // +1 to convert zero-based to one-based.
 					menu
 				};
-				label_to_call->ExecuteInNewThread(_T("Menu"), param, _countof(param));
+				menu_item->mLabel->ExecuteInNewThread(_T("Menu"), param, _countof(param));
 				menu->Release();
 				if (pgui)
 					pgui->Release();
@@ -1659,7 +1642,7 @@ bool CheckScriptTimers()
 		// Pass false as 3rd param below because ++g_nThreads should be done only once rather than
 		// for each Init(), and also it's not necessary to call update the tray icon since timers
 		// won't run if there is any paused thread, thus the icon can't currently be showing "paused".
-		InitNewThread(timer.mPriority, false, false, timer.mLabel->TypeOfFirstLine());
+		InitNewThread(timer.mPriority, false, false);
 
 		// This is used to determine which timer SetTimer,,xxx acts on:
 		g->CurrentTimer = &timer;
@@ -1805,17 +1788,11 @@ bool MsgMonitor(MsgMonitorInstance &aInstance, HWND aWnd, UINT aMsg, WPARAM awPa
 {
 	MsgMonitorStruct *monitor = &(*g_MsgMonitor)[aInstance.index];
 	IObject *func = monitor->func; // In case monitor item gets deleted while the function is running (e.g. by the function itself).
-	ActionTypeType type_of_first_line = LabelPtr(func)->TypeOfFirstLine();
 
 	// Many of the things done below are similar to the thread-launch procedure used in MsgSleep(),
 	// so maintain them together and see MsgSleep() for more detailed comments.
 	if (g_nThreads >= g_MaxThreadsTotal)
-		// Below: Only a subset of ACT_IS_ALWAYS_ALLOWED is done here because:
-		// 1) The omitted action types seem too obscure to grant always-run permission for msg-monitor events.
-		// 2) Reduction in code size.
-		if (g_nThreads >= MAX_THREADS_EMERGENCY // To avoid array overflow, this limit must by obeyed except where otherwise documented.
-			|| type_of_first_line != ACT_EXITAPP && type_of_first_line != ACT_RELOAD)
-			return false;
+		return false;
 	if (monitor->instance_count >= monitor->max_instances || g->Priority > 0) // Monitor is already running more than the max number of instances, or existing thread's priority is too high to be interrupted.
 		return false;
 	// Since above didn't return, the launch of the new thread is now considered unavoidable.
@@ -1823,7 +1800,7 @@ bool MsgMonitor(MsgMonitorInstance &aInstance, HWND aWnd, UINT aMsg, WPARAM awPa
 	// See MsgSleep() for comments about the following section.
 	VarBkp ErrorLevel_saved;
 	ErrorLevel_Backup(ErrorLevel_saved);
-	InitNewThread(0, false, true, type_of_first_line);
+	InitNewThread(0, false, true);
 	DEBUGGER_STACK_PUSH(_T("OnMessage")) // Push a "thread" onto the debugger's stack.  For simplicity and performance, use the function name vs something like "message 0x123".
 
 	GuiType *pgui = NULL;
@@ -1907,8 +1884,8 @@ bool MsgMonitor(MsgMonitorInstance &aInstance, HWND aWnd, UINT aMsg, WPARAM awPa
 
 
 void InitNewThread(int aPriority, bool aSkipUninterruptible, bool aIncrementThreadCountAndUpdateTrayIcon
-	, ActionTypeType aTypeOfFirstLine)
-// The value of aTypeOfFirstLine is ignored when aSkipUninterruptible==true.
+	, bool aIsCritical)
+// The value of aIsCritical is ignored when aSkipUninterruptible==true.
 // To reduce the expectation that a newly launched hotkey or timed subroutine will
 // be immediately interrupted by a timed subroutine or hotkey, interruptions are
 // forbidden for a short time (user-configurable).  If the subroutine is a quick one --
@@ -1959,12 +1936,8 @@ void InitNewThread(int aPriority, bool aSkipUninterruptible, bool aIncrementThre
 	if (aSkipUninterruptible)
 		return;
 
-	// v1.0.38.04: When a thread's first line is ACT_CRITICAL, mark the thread critical before launching
-	// it to avoid any chance that some other thread can interrupt it before it can execute its first line.
-	// This also helps performance by causing some of the code further below to be skipped.
-	if (!g.ThreadIsCritical) // If the thread default isn't "critical", make this thread critical only if it's explicitly marked that way.
-		g.ThreadIsCritical = (aTypeOfFirstLine == ACT_CRITICAL); // Historically this is done even for "Critical Off". Maybe it was considered too rare for that to be the first line; plus performance considerations.  Plus when the first line actually executes, OFF will take effect instantly, so maybe it's inconsequential.
-	//else it's already critical, so leave it that way until "Critical Off" (which may be the very first line) is encountered at runtime.
+	if (!g.ThreadIsCritical)
+		g.ThreadIsCritical = aIsCritical;
 
 	if (g_script->mUninterruptibleTime && g_script->mUninterruptedLineCountMax // Both components must be non-zero to start off uninterruptible.
 		|| g.ThreadIsCritical) // v1.0.38.04.
@@ -2070,16 +2043,21 @@ BOOL IsInterruptible()
 	//     (currently unlikely since MSG_FILTER_MAX calls it).  This could cause a TickCount to get too
 	//     stale and have the same consequences as described in #2 above.
 	// OVERALL: Although the method used here can wrongly extend the uninterruptibility of a thread by as
-	// much as 100%, since g_script->mUninterruptible time defaults to 15 milliseconds (and in practice is
+	// much as 100%, since g_script->mUninterruptible time defaults to 17 milliseconds (and in practice is
 	// rarely raised beyond 1000) it doesn't matter much in those cases. Even when g_script->mUninterruptible
 	// is large such as 20 days, this method can be off by no more than 20 days, which isn't too bad
 	// in percentage terms compared to the alternative, which could cause a timeout of 15 milliseconds to
 	// increase to 24 days.  Windows Vista and beyond have a 64-bit tickcount available, so that may be of
 	// use in future versions (hopefully it performs nearly as well as GetTickCount()).
+	// v2.0: g->UninterruptedLineCount is checked to ensure that each thread is allowed to execute at least
+	// one line before being interrupted.  This was proven necessary for g->UninterruptibleDuration <= 16
+	// because GetTickCount() updates in increments of 15 or 16 and therefore 16 can be virtually no time
+	// at all.  It might also be needed for larger values if the system is busy.
 	if (   !g->AllowThreadToBeInterrupted // Those who check whether g->AllowThreadToBeInterrupted==false should then check whether it should be made true.
 		&& !g->ThreadIsCritical // Must take precedence over the checks below.
 		&& g->UninterruptibleDuration > -1 // Must take precedence over the below. For backward compatibility, g_script->mUninterruptibleTime is not checked because it's supposed to go into effect during thread creation, not after the thread is running and has possibly changed the timeout via "Thread Interrupt".
 		&& (DWORD)(GetTickCount()- g->ThreadStartTime) >= (DWORD)g->UninterruptibleDuration // See big comment section above.
+		&& g->UninterruptedLineCount // In case of "Critical" on the first line.  See v2.0 comment above.
 		)
 		// Once the thread becomes interruptible by any means, g->ThreadStartTime/UninterruptibleDuration
 		// can never matter anymore because only Critical (never "Thread Interrupt") can turn off the

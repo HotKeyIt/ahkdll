@@ -425,7 +425,6 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	// specify 1 so dll handler runs before exe handler
 	g_ExceptionHandler = AddVectoredExceptionHandler(1,DisableHooksOnException);
 	*/
-	FillLayoutHasAltGrCache();
 
 	// set exception filter to disable hook before exception occures to avoid system/mouse freeze
 	g_ExceptionHandler = AddVectoredExceptionHandler(NULL,DisableHooksOnException);

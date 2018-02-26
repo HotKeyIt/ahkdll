@@ -38,6 +38,7 @@ enum UserMessages {AHK_HOOK_HOTKEY = WM_USER, AHK_HOTSTRING, AHK_USER_MENU, AHK_
 	// unlikely to be used by OS features.
 	, AHK_CLIPBOARD_CHANGE, AHK_HOOK_TEST_MSG, AHK_CHANGE_HOOK_STATE, AHK_GETWINDOWTEXT
 	, AHK_HOT_IF_EVAL	// HotCriterionAllowsFiring uses this to ensure expressions are evaluated only on the main thread.
+	, AHK_HOOK_SYNC // For WaitHookIdle().
 	, AHK_EXECUTE  // Naveen N9: enable running ahk code from another os thread 
 #ifdef _USRDLL
 	, AHK_EXECUTE_FUNCTION_VARIANT
@@ -275,4 +276,6 @@ HookType GetActiveHooks();
 void FreeHookMem();
 void ResetKeyTypeState(key_type &key);
 void GetHookStatus(LPTSTR aBuf, int aBufSize);
+
+void WaitHookIdle();
 #endif

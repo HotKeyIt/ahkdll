@@ -84,6 +84,7 @@ struct HotkeyVariant
 	bool mMaxThreadsBuffer;
 	bool mRunAgainAfterFinished;
 	bool mEnabled; // Whether this variant has been disabled via the Hotkey command.
+	bool mSuspendExempt;
 };
 
 
@@ -247,9 +248,7 @@ public:
 		// the number of currently active threads drops below the max.  But doing such
 		// might make "infinite key loops" harder to catch because the rate of incoming hotkeys
 		// would be slowed down to prevent the subroutines from running concurrently:
-		ActionTypeType act = aVariant.mJumpToLabel->TypeOfFirstLine();
-		return aVariant.mExistingThreads < aVariant.mMaxThreads || (ACT_IS_ALWAYS_ALLOWED(act)); // See below.
-		// Although our caller may have already called ACT_IS_ALWAYS_ALLOWED(), it was for a different reason.
+		return aVariant.mExistingThreads < aVariant.mMaxThreads;
 	}
 
 	bool IsExemptFromSuspend() // A hotkey is considered exempt if even one of its variants is exempt.
@@ -258,7 +257,7 @@ public:
 		if (mHookAction) // An alt-tab hotkey (which overrides all its variants) is never exempt.
 			return false;
 		for (HotkeyVariant *vp = mFirstVariant; vp; vp = vp->mNextVariant)
-			if (vp->mJumpToLabel->IsExemptFromSuspend()) // If it has no label, it's never exempt.
+			if (vp->mSuspendExempt)
 				return true; // Even a single exempt variant makes the entire hotkey exempt.
 		// Otherwise, since the above didn't find any exempt variants, the entire hotkey is non-exempt:
 		return false;
@@ -337,10 +336,11 @@ public:
 	static Hotstring **shs;  // An array to be allocated on first use (performs better than linked list).
 	static HotstringIDType sHotstringCount;
 	static HotstringIDType sHotstringCountMax;
-	static bool mAtLeastOneEnabled; // v1.0.44.08: For performance, such as avoiding calling ToAsciiEx() in the hook.
+	static UINT sEnabledCount; // v1.1.28.00: For performance, such as avoiding calling ToAsciiEx() in the hook.
 
 	DWORD mThreadID;
-	Label *mJumpToLabel;
+	LabelRef mJumpToLabel;
+	LPTSTR mName;
 	LPTSTR mString, mReplacement;
 	HotkeyCriterion *mHotCriterion;
 	int mPriority, mKeyDelay;
@@ -350,23 +350,29 @@ public:
 	SendRawType mSendRaw;
 	SendLevelType mInputLevel;
 	UCHAR mStringLength;
-	bool mSuspended;
+	UCHAR mSuspended; // FALSE or a combination of one of the following:
+	#define HS_SUSPENDED 0x01
+	#define HS_TURNED_OFF 0x02
+	#define HS_TEMPORARILY_DISABLED 0x04
 	UCHAR mExistingThreads, mMaxThreads;
 	bool mCaseSensitive, mConformToCase, mDoBackspace, mOmitEndChar, mEndCharRequired
-		, mDetectWhenInsideWord, mDoReset, mConstructedOK;
+		, mDetectWhenInsideWord, mDoReset, mExecuteAction, mSuspendExempt, mConstructedOK;
 
 	static void SuspendAll(bool aSuspend);
 	static void AllDestruct(); // HotKeyIt H1 destroy all HotStrings
 	ResultType PerformInNewThreadMadeByCaller();
 	void DoReplace(LPARAM alParam);
-	static ResultType AddHotstring(Label *aJumpToLabel, LPTSTR aOptions, LPTSTR aHotstring, LPTSTR aReplacement
-		, bool aHasContinuationSection);
+	static Hotstring *FindHotstring(LPTSTR aHotstring, bool aCaseSensitive, bool aDetectWhenInsideWord, HotkeyCriterion *aHotCriterion);
+	static ResultType AddHotstring(LPTSTR aName, LabelPtr aJumpToLabel, LPTSTR aOptions, LPTSTR aHotstring
+		, LPTSTR aReplacement, bool aHasContinuationSection, UCHAR aSuspend = FALSE);
 	static void ParseOptions(LPTSTR aOptions, int &aPriority, int &aKeyDelay, SendModes &aSendMode
 		, bool &aCaseSensitive, bool &aConformToCase, bool &aDoBackspace, bool &aOmitEndChar, SendRawType &aSendRaw
-		, bool &aEndCharRequired, bool &aDetectWhenInsideWord, bool &aDoReset);
+		, bool &aEndCharRequired, bool &aDetectWhenInsideWord, bool &aDoReset, bool &aExecuteAction);
+	void ParseOptions(LPTSTR aOptions);
 
 	// Constructor & destructor:
-	Hotstring(Label *aJumpToLabel, LPTSTR aOptions, LPTSTR aHotstring, LPTSTR aReplacement, bool aHasContinuationSection);
+	Hotstring(LPTSTR aName, LabelPtr aJumpToLabel, LPTSTR aOptions, LPTSTR aHotstring, LPTSTR aReplacement
+		, bool aHasContinuationSection, UCHAR aSuspend);
 	~Hotstring() {}  // Note that mReplacement is sometimes malloc'd, sometimes from SimpleHeap, and sometimes the empty string.
 
 	void *operator new(size_t aBytes){ return malloc(aBytes); }

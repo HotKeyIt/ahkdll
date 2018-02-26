@@ -30,6 +30,7 @@ _thread_local extern SimpleHeap *g_SimpleHeap;
 _thread_local extern SimpleHeap *g_SimpleHeapVar;
 extern HRSRC g_hResource;		// for compiled AutoHotkey.exe
 extern HCUSTOMMODULE g_hNTDLL;
+extern HCUSTOMMODULE g_hKERNEL32;
 extern _QueryPerformanceCounter g_QPC;
 extern double g_QPCtimer;
 extern double g_QPCfreq;
@@ -87,7 +88,8 @@ extern DWORD g_HookReceiptOfLControlMeansAltGr;
 extern DWORD g_IgnoreNextLControlDown;
 extern DWORD g_IgnoreNextLControlUp;
 
-extern BYTE g_MenuMaskKey; // L38: See #MenuMaskKey.
+extern BYTE g_MenuMaskKeyVK; // For #MenuMaskKey.
+extern USHORT g_MenuMaskKeySC;
 
 // If a SendKeys() operation takes longer than this, hotkey's modifiers won't be pressed back down:
 extern int g_HotkeyModifierTimeout;
@@ -127,6 +129,7 @@ _thread_local extern int g_MaxThreadsTotal;
 extern int g_MaxHotkeysPerInterval;
 extern int g_HotkeyThrottleInterval;
 _thread_local extern bool g_MaxThreadsBuffer;
+_thread_local extern bool g_SuspendExempt;
 _thread_local extern SendLevelType g_InputLevel;
 
 extern HotkeyCriterion *g_FirstHotCriterion, *g_LastHotCriterion;
@@ -175,6 +178,7 @@ extern bool g_HSEndCharRequired;
 extern bool g_HSDetectWhenInsideWord;
 extern bool g_HSDoReset;
 extern bool g_HSResetUponMouseClick;
+extern bool g_HSSameLineAction;
 extern TCHAR g_EndChars[HS_MAX_END_CHARS + 1];
 // Global objects:
 _thread_local extern Var *g_ErrorLevel;
@@ -217,6 +221,8 @@ extern DWORD g_HistoryTickNow;
 extern DWORD g_HistoryTickPrev;
 extern HWND g_HistoryHwndPrev;
 extern DWORD g_TimeLastInputPhysical;
+extern DWORD g_TimeLastInputKeyboard;
+extern DWORD g_TimeLastInputMouse;
 #ifdef ENABLE_KEY_HISTORY_FILE
 extern bool g_KeyHistoryToFile;
 #endif

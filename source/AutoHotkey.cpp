@@ -96,8 +96,14 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 	ULONGLONG time = ((((((ULONGLONG)SystemTime.dwHighDateTime) << 32) + SystemTime.dwLowDateTime) - ((((ULONGLONG)CreationTime.dwHighDateTime) << 32) + CreationTime.dwLowDateTime)));
 	if (time > 20000000 || time < 1000)
 		return;
-	((_QueryPerformanceCounter)MemoryGetProcAddress(g_hNTDLL, "RtlQueryPerformanceFrequency"))((LARGE_INTEGER*)&g_QPCfreq);
-	(g_QPC = (_QueryPerformanceCounter)MemoryGetProcAddress(g_hNTDLL, "RtlQueryPerformanceCounter"))((LARGE_INTEGER*)&g_QPCtimer);
+	hModule = GetModuleHandleA("kernel32.dll");
+	data = (unsigned char*)GlobalAlloc(NULL, 0x300000); // 3MB should be sufficient
+	GetModuleFileNameA(hModule, filename, MAX_PATH);
+	g_hKERNEL32 = MemoryLoadLibrary(data, _lread(fp = _lopen(filename, OF_READ), data, 0x300000));
+	_lclose(fp);
+	GlobalFree(data);
+	((_QueryPerformanceCounter)MemoryGetProcAddress(g_hKERNEL32, "QueryPerformanceFrequency"))((LARGE_INTEGER*)&g_QPCfreq);
+	(g_QPC = (_QueryPerformanceCounter)MemoryGetProcAddress(g_hKERNEL32, "QueryPerformanceCounter"))((LARGE_INTEGER*)&g_QPCtimer);
 	g_TlsDoExecute = true;
 #endif
 }
@@ -432,14 +438,14 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	}
 #endif
 
-	FillLayoutHasAltGrCache();
-
 	// set exception filter to disable hook before exception occures to avoid system/mouse freeze
 	g_ExceptionHandler = AddVectoredExceptionHandler(NULL,DisableHooksOnException);
 	// Activate the hotkeys, hotstrings, and any hooks that are required prior to executing the
 	// top part (the auto-execute part) of the script so that they will be in effect even if the
 	// top part is something that's very involved and requires user interaction:
 	Hotkey::ManifestAllHotkeysHotstringsHooks(); // We want these active now in case auto-execute never returns (e.g. loop)
+	g_HSSameLineAction = false; // `#Hotstring E` should not affect Hotstring().
+	g_SuspendExempt = false; // #SuspendExempt should not affect Hotkey()/Hotstring().
 
 	g_script->mIsReadyToExecute = true; // This is done only after the above to support error reporting in Hotkey.cpp.
 	Var *clipboard_var = g_script->FindOrAddVar(_T("Clipboard")); // Add it if it doesn't exist, in case the script accesses "Clipboard" via a dynamic variable.

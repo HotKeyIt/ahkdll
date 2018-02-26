@@ -1508,11 +1508,6 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 	if (!INTERRUPTIBLE_IN_EMERGENCY)
 		return;
 	if (g_nThreads >= g_MaxThreadsTotal)
-		// Below: Only a subset of ACT_IS_ALWAYS_ALLOWED is done here because:
-		// 1) The omitted action types seem too obscure to grant always-run permission for msg-monitor events.
-		// 2) Reduction in code size.
-		if (g_nThreads >= MAX_THREADS_EMERGENCY // To avoid array overflow, this limit must by obeyed except where otherwise documented.
-			|| func.mJumpToLine->mActionType != ACT_EXITAPP && func.mJumpToLine->mActionType != ACT_RELOAD)
 			return;
 
 	// Need to check if backup is needed in case script explicitly called the function rather than using
@@ -1724,11 +1719,6 @@ void callFuncDllVariant(FuncAndToken *aFuncAndToken)
 	if (!INTERRUPTIBLE_IN_EMERGENCY)
 		return;
 	if (g_nThreads >= g_MaxThreadsTotal)
-		// Below: Only a subset of ACT_IS_ALWAYS_ALLOWED is done here because:
-		// 1) The omitted action types seem too obscure to grant always-run permission for msg-monitor events.
-		// 2) Reduction in code size.
-		if (g_nThreads >= MAX_THREADS_EMERGENCY // To avoid array overflow, this limit must by obeyed except where otherwise documented.
-			|| func.mJumpToLine->mActionType != ACT_EXITAPP && func.mJumpToLine->mActionType != ACT_RELOAD)
 			return;
 
 	// Need to check if backup is needed in case script explicitly called the function rather than using

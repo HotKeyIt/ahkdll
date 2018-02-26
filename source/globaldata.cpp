@@ -34,7 +34,8 @@ LPSTR g_hWinAPI = NULL, g_hWinAPIlowercase = NULL;  // loads WinAPI functions de
 _thread_local SimpleHeap *g_SimpleHeap = NULL;
 _thread_local SimpleHeap *g_SimpleHeapVar = NULL;
 HRSRC g_hResource = NULL; // Set by WinMain()	// for compiled AutoHotkey.exe
-HCUSTOMMODULE g_hNTDLL = NULL; // MSVR100.dll
+HCUSTOMMODULE g_hNTDLL = NULL;
+HCUSTOMMODULE g_hKERNEL32 = NULL;
 _QueryPerformanceCounter g_QPC = NULL;
 double g_QPCtimer = 0.0;
 double g_QPCfreq = 0.0;
@@ -92,7 +93,8 @@ bool g_BlockWinKeys = false;
 DWORD g_HookReceiptOfLControlMeansAltGr = 0; // In these cases, zero is used as a false value, any others are true.
 DWORD g_IgnoreNextLControlDown = 0;          //
 DWORD g_IgnoreNextLControlUp = 0;            //
-BYTE g_MenuMaskKey = VK_CONTROL; // L38: See #MenuMaskKey.
+BYTE g_MenuMaskKeyVK = VK_CONTROL; // For #MenuMaskKey.
+USHORT g_MenuMaskKeySC = SC_LCONTROL;
 
 int g_HotkeyModifierTimeout = 50;  // Reduced from 100, which was a little too large for fast typists.
 _thread_local int g_ClipboardTimeout = 1000; // v1.0.31
@@ -138,6 +140,7 @@ _thread_local int g_MaxThreadsTotal = MAX_THREADS_DEFAULT;
 int g_MaxHotkeysPerInterval = 70; // Increased to 70 because 60 was still causing the warning dialog for repeating keys sometimes.  Increased from 50 to 60 for v1.0.31.02 since 50 would be triggered by keyboard auto-repeat when it is set to its fastest.
 int g_HotkeyThrottleInterval = 2000; // Milliseconds.
 _thread_local bool g_MaxThreadsBuffer = false;  // This feature usually does more harm than good, so it defaults to OFF.
+_thread_local bool g_SuspendExempt = false;
 _thread_local SendLevelType g_InputLevel = 0;
 
 HotkeyCriterion *g_FirstHotCriterion = NULL, *g_LastHotCriterion = NULL;
@@ -191,6 +194,7 @@ bool g_HSEndCharRequired = true;
 bool g_HSDetectWhenInsideWord = false;
 bool g_HSDoReset = false;
 bool g_HSResetUponMouseClick = true;
+bool g_HSSameLineAction = false;
 TCHAR g_EndChars[HS_MAX_END_CHARS + 1] = _T("-()[]{}:;'\"/\\,.?!\n \t");  // Hotstring default end chars, including a space.
 // The following were considered but seemed too rare and/or too likely to result in undesirable replacements
 // (such as while programming or scripting, or in usernames or passwords): <>*+=_%^&|@#$|
@@ -677,3 +681,5 @@ DWORD g_HistoryTickPrev = 0;  // So that the first logged key doesn't have a hug
 HWND g_HistoryHwndPrev = NULL;
 // Also hook related:
 DWORD g_TimeLastInputPhysical = 0;
+DWORD g_TimeLastInputKeyboard = g_TimeLastInputPhysical;
+DWORD g_TimeLastInputMouse = g_TimeLastInputPhysical;

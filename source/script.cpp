@@ -61,7 +61,7 @@ FuncEntry g_BIF[] =
 	BIFn(LTrim, 1, 2, true, BIF_Trim),
 	BIFn(RTrim, 1, 2, true, BIF_Trim),
 	BIF1(InStr, 2, 5, true),
-	BIF1(StrSplit, 1, 3, true),
+	BIF1(StrSplit, 1, 4, true),
 	BIFn(StrLower, 1, 2, true, BIF_StrCase),
 	BIFn(StrUpper, 1, 2, true, BIF_StrCase),
 	BIF1(StrReplace, 2, 5, true, {4}),
@@ -417,6 +417,7 @@ VarEntry g_BIV_A[] =
 	A_w(LastError),
 	A_(LineFile),
 	A_(LineNumber),
+	A_w(ListLines),
 	A_(LoopField),
 	A_(LoopFileAttrib),
 	A_(LoopFileDir),
@@ -489,6 +490,8 @@ VarEntry g_BIV_A[] =
 	A_(ThreadID),
 	A_(TickCount),
 	A_(TimeIdle),
+	A_x(TimeIdleKeyboard, BIV_TimeIdlePhysical),
+	A_x(TimeIdleMouse, BIV_TimeIdlePhysical),
 	A_(TimeIdlePhysical),
 	A_(TimeSincePriorHotkey),
 	A_(TimeSinceThisHotkey),
@@ -550,7 +553,7 @@ Script::Script()
 	, mIsReadyToExecute(false), mAutoExecSectionIsRunning(false)
 	, mIsRestart(false), mErrorStdOut(false)
 	, mIncludeLibraryFunctionsThenExit(NULL)
-	, mUninterruptedLineCountMax(1000), mUninterruptibleTime(15)
+	, mUninterruptedLineCountMax(1000), mUninterruptibleTime(17)
 	, mCustomIcon(NULL), mCustomIconSmall(NULL) // Normally NULL unless there's a custom tray icon loaded dynamically.
 	, mCustomIconFile(NULL), mIconFrozen(false), mTrayIconTip(NULL) // Allocated on first use.
 	, mCustomIconNumber(0)
@@ -1039,7 +1042,6 @@ Script::~Script() // Destructor.
 	g_HookReceiptOfLControlMeansAltGr = 0; // In these cases, zero is used as a false value, any others are true.
 	g_IgnoreNextLControlDown = 0;          //
 	g_IgnoreNextLControlUp = 0;            //
-	g_MenuMaskKey = VK_CONTROL; // L38: See #MenuMaskKey.
 	g_HotkeyModifierTimeout = 50;  // Reduced from 100, which was a little too large for fast typists.
 	g_ClipboardTimeout = 1000; // v1.0.31
 	//g_KeybdHook = NULL;
@@ -1168,7 +1170,7 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 		}
 		//else since the file exists, everything is now set up right. (The file might be a directory, but that isn't checked due to rarity.)
 	}
-	// In case the script is a relative filespec (relative to current working dir):
+	
 	if (g_hResource || (hInstance != NULL && aIsText)) //It is a dll and script was given as text rather than file
 	{
 		if (!GetModuleFileName(hInstance, buf, _countof(buf))) //Get dll path in front to make sure we have a valid path anyway
@@ -1220,42 +1222,56 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 		}
 		CloseHandle(hProcess);
 	}
-	else if (!GetFullPathName(aScriptFilename, _countof(buf), buf, NULL)) // This is also relied upon by mIncludeLibraryFunctionsThenExit.  Succeeds even on nonexistent files.
-		return FAIL; // Due to rarity, no error msg, just abort.
-	if (g_RunStdIn = (*aScriptFilename == '*' && !aScriptFilename[1])) // v1.1.17: Read script from stdin.
+	else
 	{
-		// Seems best to disable #SingleInstance for stdin scripts.
-		g_AllowOnlyOneInstance = SINGLE_INSTANCE_OFF;
-	}
-	//else // i.e. don't call the following function for stdin.
+		if (*aScriptFilename == '*' && !aScriptFilename[1]) // Read script from stdin.
+		{
+			g_RunStdIn = true;
+			buf[0] = '*';
+			buf[1] = '\0';
+			// Seems best to disable #SingleInstance for stdin scripts.
+			g_AllowOnlyOneInstance = SINGLE_INSTANCE_OFF;
+		}
+		else
+		{
+			// In case the script is a relative filespec (relative to current working dir):
+			if (!GetFullPathName(aScriptFilename, _countof(buf), buf, NULL)) // This is also relied upon by mIncludeLibraryFunctionsThenExit.  Succeeds even on nonexistent files.
+				return FAIL; // Due to rarity, no error msg, just abort.
+		}
 
-	// Using the correct case not only makes it look better in title bar & tray tool tip,
-	// it also helps with the detection of "this script already running" since otherwise
-	// it might not find the dupe if the same script name is launched with different
-	// lowercase/uppercase letters:
-	ConvertFilespecToCorrectCase(buf); // This might change the length, e.g. due to expansion of 8.3 filename.
+		if (!g_RunStdIn)
+		{
+
+			// Using the correct case not only makes it look better in title bar & tray tool tip,
+			// it also helps with the detection of "this script already running" since otherwise
+			// it might not find the dupe if the same script name is launched with different
+			// lowercase/uppercase letters:
+			ConvertFilespecToCorrectCase(buf); // This might change the length, e.g. due to expansion of 8.3 filename.
+		}
+	}
+
 	if (   !(mFileSpec = g_SimpleHeap->Malloc(buf))   )  // The full spec is stored for convenience, and it's relied upon by mIncludeLibraryFunctionsThenExit.
 		return FAIL;  // It already displayed the error for us.
 	LPTSTR filename_marker;
 	if (filename_marker = _tcsrchr(buf, '\\'))
 	{
-		*filename_marker = '\0'; // Terminate buf in this position to divide the string.
-		if (   !(mFileDir = g_SimpleHeap->Malloc(buf))   )
+		if (   !(mFileDir =g_SimpleHeap->Malloc(buf, filename_marker - buf))   )
 			return FAIL;  // It already displayed the error for us.
 		++filename_marker;
 	}
 	else
 	{
-		// The only known cause of this condition is a path being too long for GetFullPathName
-		// to expand it into buf, in which case buf and mFileSpec are now empty, and this will
-		// cause LoadFromFile() to fail and the program to exit.
+		// There is no slash in "*" (i.e. g_RunStdIn).  The only other known cause of this
+		// condition is a path being too long for GetFullPathName to expand it into buf,
+		// in which case buf and mFileSpec are now empty, and this will cause LoadFromFile()
+		// to fail and the program to exit.
 		//mFileDir = _T(""); // Already done by the constructor.
 		filename_marker = buf;
 	}
 	if (   !(mFileName = g_SimpleHeap->Malloc(filename_marker))   )
 		return FAIL;  // It already displayed the error for us.
 	if (g_MainThreadID == g_ThreadID)
-		sntprintf(buf, _countof(buf), _T("%s\\%s - %s"), mFileDir, mFileName, T_AHK_NAME_VERSION);
+	sntprintfcat(buf, _countof(buf), _T(" - %s"), T_AHK_NAME_VERSION);
 	else
 		sntprintf(buf, _countof(buf), _T("%s\\%s - %s - %d"), mFileDir, mFileName, T_AHK_NAME_VERSION, g_ThreadID);
 	if (   !(mMainWindowTitle = g_SimpleHeap->Malloc(buf))   )
@@ -1612,7 +1628,16 @@ ResultType Script::SetTrayIcon(LPTSTR aIconFile, int aIconNumber, ToggleValueTyp
 	HICON new_icon_small;
 	HICON new_icon = NULL; // Initialize to detect failure to load either icon.
 	HMODULE icon_module = NULL; // Must initialize because it's not always set by LoadPicture().
-	if ( new_icon_small = (HICON)LoadPicture(aIconFile, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), image_type, aIconNumber, false) ) // Called with icon_number > 0, it guarantees return of an HICON/HCURSOR, never an HBITMAP.
+	if (!_tcsnicmp(aIconFile, _T("HICON:"), 6) && aIconFile[6] != '*')
+	{
+		// Handle this here rather than in LoadPicture() because the first call would destroy the
+		// original icon (due to specifying the width and height), causing the second call to fail.
+		// Keep the original size for both icons since that sometimes produces better results than
+		// CopyImage(), and it keeps the code smaller.
+		new_icon_small = (HICON)(UINT_PTR)ATOI64(aIconFile + 6);
+		new_icon = new_icon_small; // DestroyIconsIfUnused() handles this case by calling DestroyIcon() only once.
+	}
+	else if ( new_icon_small = (HICON)LoadPicture(aIconFile, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), image_type, aIconNumber, false) ) // Called with icon_number > 0, it guarantees return of an HICON/HCURSOR, never an HBITMAP.
 		if ( !(new_icon = (HICON)LoadPicture(aIconFile, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), image_type, aIconNumber, false, NULL, &icon_module)) )
 			DestroyIcon(new_icon_small);
 	if ( !new_icon )
@@ -1959,7 +1984,7 @@ ResultType Script::ExitApp(ExitReasons aExitReason, LPTSTR aBuf, int aExitCode)
 	// to returning to our caller:
 	VarBkp ErrorLevel_saved;
 	ErrorLevel_Backup(ErrorLevel_saved); // Save caller's errorlevel.
-	InitNewThread(0, true, true, ACT_INVALID); // Uninterruptibility is handled below. Since this special thread should always run, no checking of g_MaxThreadsTotal is done before calling this.
+	InitNewThread(0, true, true); // Uninterruptibility is handled below. Since this special thread should always run, no checking of g_MaxThreadsTotal is done before calling this.
 
 	// Turn on uninterruptibility to forbid any hotkeys, timers, or user defined menu items
 	// to interrupt.  This is mainly done for peace-of-mind (since possible interactions due to
@@ -2915,7 +2940,7 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 						// hotstrings are less commonly used and also because it requires more code to find
 						// hotstring duplicates (and performs a lot worse if a script has thousands of
 						// hotstrings) because of all the hotstring options.
-						if (!Hotstring::AddHotstring(mLastLabel, hotstring_options ? hotstring_options : _T("")
+						if (!Hotstring::AddHotstring(mLastLabel->mName, mLastLabel, hotstring_options ? hotstring_options : _T("")
 							, hotstring_start, hotkey_flag, has_continuation_section))
 							return FAIL;
 					}
@@ -2978,7 +3003,7 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 					{
 						// Don't add AltTab or similar as a line, since it has no meaning as a script command.
 						// But do put in the Return regardless, in case this label is ever jumped to via Goto/Gosub:
-						if (!hotstring_start && !hook_action)
+						if (hotstring_start ? Hotstring::shs[Hotstring::sHotstringCount - 1]->mExecuteAction : !hook_action)
 						{
 							// Remove the hotkey from buf.
 							buf_length -= hotkey_flag - buf;
@@ -3251,6 +3276,15 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 						}
 						// Otherwise, remap_keybd_to_mouse==false.
 
+						TCHAR blind_mods[5], *next_blind_mod = blind_mods, *this_mod, *found_mod;
+						for (this_mod = _T("!#^+"); *this_mod; ++this_mod)
+						{
+							found_mod = _tcschr(remap_source, *this_mod);
+							if (found_mod && found_mod[1]) // Exclude the last char for !:: and similar.
+								*next_blind_mod++ = *this_mod;
+						}
+						*next_blind_mod = '\0';
+
 						extra_event = _T(""); // Set default.
 						switch (remap_dest_vk)
 						{
@@ -3281,13 +3315,13 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 							break;
 						}
 						_stprintf(cp
-							, _T("Send(\"{Blind}%s%s{%s DownR}\")\n") // DownR vs. Down. See Send's DownR handler for details.
+							, _T("Send(\"{Blind%s}%s%s{%s DownR}\")\n") // DownR vs. Down. See Send's DownR handler for details.
 							_T("Return\n")
 							_T("%s up::\n") // Key-up hotkey label, e.g. *LButton up::
 							_T("Set%sDelay(-1)\n")
 							_T("Send(\"{Blind}{%s Up}\")\n") // Unlike the down-event above, remap_dest_modifiers is not included for the up-event; e.g. ^{b up} is inappropriate.
 							_T("Return\n") // Last line must end with \n to simplify the code.
-							, extra_event, remap_dest_modifiers, remap_dest
+							, blind_mods, extra_event, remap_dest_modifiers, remap_dest
 							, remap_source
 							, remap_dest_is_mouse ? _T("Mouse") : _T("Key")
 							, remap_dest
@@ -3476,6 +3510,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 				if (!AHKModule())
 					return FAIL;
 				MemoryFreeLibrary(g_hNTDLL);
+				MemoryFreeLibrary(g_hKERNEL32);
 #endif
 			}
 		}
@@ -3820,7 +3855,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 				// :c:abc::
 				if (!AddLabel(buf, true)) // Always add a label before adding the first line of its section.
 					goto FAIL;
-
+			
 			if (hotstring_start)
 			{
 				if (!*hotstring_start)
@@ -3842,7 +3877,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 				// hotstrings are less commonly used and also because it requires more code to find
 				// hotstring duplicates (and performs a lot worse if a script has thousands of
 				// hotstrings) because of all the hotstring options.
-				if (!Hotstring::AddHotstring(mLastLabel, hotstring_options ? hotstring_options : _T("")
+				if (!Hotstring::AddHotstring(mLastLabel->mName, mLastLabel, hotstring_options ? hotstring_options : _T("")
 					, hotstring_start, hotkey_flag, has_continuation_section))
 					goto FAIL;
 			}
@@ -3909,7 +3944,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			{
 				// Don't add AltTab or similar as a line, since it has no meaning as a script command.
 				// But do put in the Return regardless, in case this label is ever jumped to via Goto/Gosub:
-				if (!hotstring_start && !hook_action)
+				if (hotstring_start ? Hotstring::shs[Hotstring::sHotstringCount - 1]->mExecuteAction : !hook_action)
 				{
 					// Remove the hotkey from buf.
 					buf_length -= hotkey_flag - buf;
@@ -4184,6 +4219,15 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 				}
 				// Otherwise, remap_keybd_to_mouse==false.
 
+				TCHAR blind_mods[5], *next_blind_mod = blind_mods, *this_mod, *found_mod;
+				for (this_mod = _T("!#^+"); *this_mod; ++this_mod)
+				{
+					found_mod = _tcschr(remap_source, *this_mod);
+					if (found_mod && found_mod[1]) // Exclude the last char for !:: and similar.
+						*next_blind_mod++ = *this_mod;
+				}
+				*next_blind_mod = '\0';
+
 				extra_event = _T(""); // Set default.
 				switch (remap_dest_vk)
 				{
@@ -4214,13 +4258,13 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 					break;
 				}
 				_stprintf(cp
-					, _T("Send(\"{Blind}%s%s{%s DownR}\")\n") // DownR vs. Down. See Send's DownR handler for details.
+					, _T("Send(\"{Blind%s}%s%s{%s DownR}\")\n") // DownR vs. Down. See Send's DownR handler for details.
 					  _T("Return\n")
 					  _T("%s up::\n") // Key-up hotkey label, e.g. *LButton up::
 					  _T("Set%sDelay(-1)\n")
 					  _T("Send(\"{Blind}{%s Up}\")\n") // Unlike the down-event above, remap_dest_modifiers is not included for the up-event; e.g. ^{b up} is inappropriate.
 					  _T("Return\n") // Last line must end with \n to simplify the code.
-					, extra_event, remap_dest_modifiers, remap_dest
+					, blind_mods, extra_event, remap_dest_modifiers, remap_dest
 					, remap_source
 					, remap_dest_is_mouse ? _T("Mouse") : _T("Key")
 					, remap_dest
@@ -4427,7 +4471,11 @@ ResultType Script::GetLineContExpr(TextStream *fp, LPTSTR buf, size_t &buf_lengt
 	{
 		// Before appending each line, check whether the last line ended with OTB '{'.
 		// It can't be OTB if balance > 1 since that would mean another unclosed (/[/{.
-		if (balance == 1 && buf[buf_length - 1] == '{' && buf_length > 3)
+		// balance == 1 implies buf_length >= 1, but below requires buf_length >= 2.
+		// The shortest valid OTB is for the property "p{".  Finding '{' usually implies
+		// buf_length >= 2 because '{' at the start of buf is usually handled by the
+		// caller, but that isn't always the case (e.g. for one-line hotkeys).
+		if (balance == 1 && buf[buf_length - 1] == '{' && buf_length >= 2)
 		{
 			// Some common OTB constructs:
 			//   myfn() {
@@ -5168,21 +5216,11 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 			//else invalid syntax; treat it as a regular #include which will almost certainly fail.
 		}
 
-		size_t space_remaining = LINE_SIZE - (parameter - aBuf);
-		StrReplace(parameter, _T("%A_ScriptDir%"), mFileDir, SCS_INSENSITIVE, 1, space_remaining); // v1.0.35.11.  Caller has ensured string is writable.
-		StrReplace(parameter, _T("%A_LineFile%"), Line::sSourceFile[mCurrFileIndex], SCS_INSENSITIVE, 1, space_remaining); // v1.1.11: Support A_LineFile to allow paths relative to current file regardless of working dir; e.g. %A_LineFile%\..\fileinsamedir.ahk.
-		if (tcscasestr(parameter, _T("%A_AppData%"))) // v1.0.45.04: This and the next were requested by Tekl to make it easier to customize scripts on a per-user basis.
-		{
-			BIV_SpecialFolderPath(buf, _T("A_AppData"));
-			StrReplace(parameter, _T("%A_AppData%"), buf, SCS_INSENSITIVE, 1, space_remaining);
-		}
-		if (tcscasestr(parameter, _T("%A_AppDataCommon%"))) // v1.0.45.04.
-		{
-			BIV_SpecialFolderPath(buf, _T("A_AppDataCommon"));
-			StrReplace(parameter, _T("%A_AppDataCommon%"), buf, SCS_INSENSITIVE, 1, space_remaining);
-		}
+		LPTSTR include_path;
+		if (!DerefInclude(include_path, parameter))
+			return FAIL;
 
-		DWORD attr = GetFileAttributes(parameter);
+		DWORD attr = GetFileAttributes(include_path);
 		if (attr != 0xFFFFFFFF && (attr & FILE_ATTRIBUTE_DIRECTORY)) // File exists and its a directory (possibly A_ScriptDir or A_AppData set above).
 		{
 			// v1.0.35.11 allow changing of load-time directory to increase flexibility.  This feature has
@@ -5191,7 +5229,8 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 			// that would not work.  But that seems too rare to worry about.
 			// v1.0.45.01: Call SetWorkingDir() vs. SetCurrentDirectory() so that it succeeds even for a root
 			// drive like C: that lacks a backslash (see SetWorkingDir() for details).
-			SetWorkingDir(parameter);
+			SetWorkingDir(include_path);
+			free(include_path);
 			return CONDITION_TRUE;
 		}
 		// Save the working directory because LoadIncludedFile() changes it, and we want to retain any directory
@@ -5200,10 +5239,11 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 			*buf = '\0';
 		// Since above didn't return, it's a file (or non-existent file, in which case the below will display
 		// the error).  This will also display any other errors that occur:
-		ResultType result = LoadIncludedFile(parameter, is_include_again, ignore_load_failure);
+		ResultType result = LoadIncludedFile(include_path, is_include_again, ignore_load_failure) ? CONDITION_TRUE : FAIL;
 		// Restore the working directory.
 		SetCurrentDirectory(buf);
-		return result ? CONDITION_TRUE : FAIL;
+		free(include_path);
+		return result;
 	}
 
 	if (IS_DIRECTIVE_MATCH(_T("#NoTrayIcon")))
@@ -5331,7 +5371,7 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 			// other caller, it will stop at end-of-string or ':', whichever comes first.
 			Hotstring::ParseOptions(parameter, g_HSPriority, g_HSKeyDelay, g_HSSendMode, g_HSCaseSensitive
 				, g_HSConformToCase, g_HSDoBackspace, g_HSOmitEndChar, g_HSSendRaw, g_HSEndCharRequired
-				, g_HSDetectWhenInsideWord, g_HSDoReset);
+				, g_HSDetectWhenInsideWord, g_HSDoReset, g_HSSameLineAction);
 		}
 		return CONDITION_TRUE;
 	}
@@ -5395,6 +5435,13 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		return CONDITION_TRUE;
 	}
 
+	if (IS_DIRECTIVE_MATCH(_T("#SuspendExempt")))
+	{
+		if (!ConvertDirectiveBool(parameter, g_SuspendExempt, true))
+			return ScriptError(ERR_PARAM1_INVALID, aBuf);
+		return CONDITION_TRUE;
+	}
+
 	if (IS_DIRECTIVE_MATCH(_T("#ClipboardTimeout")))
 	{
 		if (parameter)
@@ -5435,10 +5482,18 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 	if (IS_DIRECTIVE_MATCH(_T("#MenuMaskKey")))
 	{
 		// L38: Allow scripts to specify an alternate "masking" key in place of VK_CONTROL.
-		if (parameter && (g_MenuMaskKey = (BYTE)TextToVK(parameter, NULL, true, true)))
-			return CONDITION_TRUE;
-		else
-			return ScriptError(parameter ? ERR_PARAM1_INVALID : ERR_PARAM1_REQUIRED, aBuf);
+		if (parameter)
+		{
+			// Testing shows that sending an event with zero VK but non-zero SC fails to suppress
+			// the Start menu (although it does suppress the window menu).  However, checking the
+			// validity of the key seems more correct than requiring g_MenuMaskKeyVK != 0, and
+			// adds flexibility at very little cost.  Note that this use of TextToVKandSC()'s
+			// return value (vs. checking VK|SC) allows vk00sc000 to turn off masking altogether.
+			if (TextToVKandSC(parameter, g_MenuMaskKeyVK, g_MenuMaskKeySC))
+				return CONDITION_TRUE;
+			//else: It's okay that above modified our variables since we're about to exit.
+		}
+		return ScriptError(parameter ? ERR_PARAM1_INVALID : ERR_PARAM1_REQUIRED, aBuf);
 	}
 
 	if (IS_DIRECTIVE_MATCH(_T("#InputLevel")))
@@ -5469,47 +5524,49 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 	if (IS_DIRECTIVE_MATCH(_T("#Warn")))
 	{
 		if (!parameter)
-			parameter = _T("All");
+			parameter = _T("");
 
 		LPTSTR param1_end = _tcschr(parameter, g_delimiter);
-		size_t param1_length = -1;
 		LPTSTR param2 = _T("");
 		if (param1_end)
 		{
 			param2 = omit_leading_whitespace(param1_end + 1);
 			param1_end = omit_trailing_whitespace(parameter, param1_end - 1);
-			param1_length = param1_end - parameter + 1;
+			param1_end[1] = '\0';
 		}
 
-#define IS_PARAM1_MATCH(value) (!tcslicmp(parameter, value, param1_length))
+		int i;
 
-		WarnType warnType;
-		if (IS_PARAM1_MATCH(_T("All")) || !param1_length)
-			warnType = WARN_ALL;
-		else if (IS_PARAM1_MATCH(_T("UseUnsetLocal")))
-			warnType = WARN_USE_UNSET_LOCAL;
-		else if (IS_PARAM1_MATCH(_T("UseUnsetGlobal")))
-			warnType = WARN_USE_UNSET_GLOBAL;
-		else if (IS_PARAM1_MATCH(_T("LocalSameAsGlobal")))
-			warnType = WARN_LOCAL_SAME_AS_GLOBAL;
-		else if (IS_PARAM1_MATCH(_T("ClassOverwrite")))
-			warnType = WARN_CLASS_OVERWRITE;
-		else
-			return ScriptError(ERR_PARAM1_INVALID, aBuf);
+		static LPTSTR sWarnTypes[] = { WARN_TYPE_STRINGS };
+		WarnType warnType = WARN_ALL; // Set default.
+		if (*parameter)
+		{
+			for (i = 0; ; ++i)
+			{
+				if (i == _countof(sWarnTypes))
+					return ScriptError(ERR_PARAM1_INVALID, aBuf);
+				if (!_tcsicmp(parameter, sWarnTypes[i]))
+					break;
+			}
+			warnType = (WarnType)i;
+		}
 
-		WarnMode warnMode;
-		if (!*param2)
-			warnMode = WARNMODE_MSGBOX;	// omitted mode parameter implies "MsgBox" mode
-		else if (!_tcsicmp(param2, _T("MsgBox")))
-			warnMode = WARNMODE_MSGBOX;
-		else if (!_tcsicmp(param2, _T("OutputDebug")))
-			warnMode = WARNMODE_OUTPUTDEBUG;
-		else if (!_tcsicmp(param2, _T("StdOut")))
-			warnMode = WARNMODE_STDOUT;
-		else if (!_tcsicmp(param2, _T("Off")))
-			warnMode = WARNMODE_OFF;
-		else
-			return ScriptError(ERR_PARAM2_INVALID, aBuf);
+		static LPTSTR sWarnModes[] = { WARN_MODE_STRINGS };
+		WarnMode warnMode = WARNMODE_MSGBOX; // Set default.
+		if (*param2)
+		{
+			for (i = 0; ; ++i)
+			{
+				if (i == _countof(sWarnModes))
+					return ScriptError(ERR_PARAM2_INVALID, param2);
+				if (!_tcsicmp(param2, sWarnModes[i]))
+					break;
+			}
+			warnMode = (WarnMode)i;
+		}
+
+		// The following series of "if" statements was confirmed to produce smaller code
+		// than a switch() with a final case WARN_ALL that duplicates all of the assignments:
 
 		if (warnType == WARN_USE_UNSET_LOCAL || warnType == WARN_ALL)
 			g_Warn_UseUnsetLocal = warnMode;
@@ -5528,6 +5585,21 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 
 	// Otherwise, report that this line isn't a directive:
 	return CONDITION_FALSE;
+}
+
+
+
+ResultType Script::ConvertDirectiveBool(LPTSTR aBuf, bool &aResult, bool aDefault)
+{
+	if (!aBuf || !*aBuf)
+		aResult = aDefault;
+	else if (!_tcsicmp(aBuf, _T("true")) || *aBuf == '1' && !aBuf[1])
+		aResult = true;
+	else if (!_tcsicmp(aBuf, _T("false")) || *aBuf == '0' && !aBuf[1])
+		aResult = false;
+	else
+		return FAIL;
+	return OK;
 }
 
 
@@ -5757,6 +5829,22 @@ ResultType Script::AddLabel(LPTSTR aLabelName, bool aAllowDupe)
 	// This must be done after the above:
 	last_label = the_new_label;
 	return OK;
+}
+
+
+
+void Script::RemoveLabel(Label *aLabel)
+// Remove a label from the linked list.
+// Used by DefineFunc to implement hotkey/hotstring functions.
+{
+	if (aLabel->mPrevLabel)
+		aLabel->mPrevLabel->mNextLabel = aLabel->mNextLabel;
+	else
+		mFirstLabel = aLabel->mNextLabel;
+	if (aLabel->mNextLabel)
+		aLabel->mNextLabel->mPrevLabel = aLabel->mPrevLabel;
+	else
+		mLastLabel = aLabel->mPrevLabel;
 }
 
 
@@ -7584,16 +7672,22 @@ ResultType Script::DefineFunc(LPTSTR aBuf, Var *aFuncGlobalVar[])
 					// Remove this hotkey label from the list.  Each label is removed as the corresponding
 					// hotkey variant is found so that any generic labels that might be mixed in are left
 					// in the list and detected as errors later.
-					if (label->mPrevLabel)
-						label->mPrevLabel->mNextLabel = label->mNextLabel;
-					else
-						mFirstLabel = label->mNextLabel;
-					if (label->mNextLabel)
-						label->mNextLabel->mPrevLabel = label->mPrevLabel;
-					else
-						mLastLabel = label->mPrevLabel;
+					RemoveLabel(label);
 				}
 			}
+		}
+		// Check hotstrings as well (even if a hotkey was found):
+		for (int i = Hotstring::sHotstringCount - 1; i >= 0; --i) // Start with the last one defined, for performance.
+		{
+			Label *label = Hotstring::shs[i]->mJumpToLabel->ToLabel(); // Might be a function.
+			if (!label || label->mJumpToLine)
+				// This hotstring has a function or a label which has already been resolved.
+				// Since hotstrings are listed in order of definition and we're iterating in
+				// the reverse order, there's no need to continue.
+				break;
+			// See hotkey section above for comments.
+			Hotstring::shs[i]->mJumpToLabel = &func;
+			RemoveLabel(label);
 		}
 		if (mLastLabel && !mLastLabel->mJumpToLine)
 			// There are one or more non-hotkey labels pointing at this function.
@@ -10852,18 +10946,20 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 					// Accessing this_infix[-1] here is necessarily safe since in_param_list is
 					// non-NULL, and that can only be the result of a previous SYM_OPAREN/BRACKET.
 					SymbolType prev_sym = this_infix[-1].symbol;
-					if (prev_sym == SYM_COMMA || prev_sym == stack_symbol || prev_sym == SYM_MISSING) // Empty parameter.
+					if (prev_sym == SYM_COMMA || prev_sym == stack_symbol) // Empty parameter.
 					{
 						if (func && in_param_list->param_count < func->mMinParams) // Is this parameter mandatory?
 							return LineError(ERR_PARAM_REQUIRED);
 						if (infix_symbol == SYM_COMMA)
 						{
-							this_postfix = this_infix++;
+							// Using _alloca() vs. this_infix simplifies checks in other places
+							// which rely on this_infix being identified as SYM_COMMA:
+							this_postfix = (ExprTokenType *)_alloca(sizeof(ExprTokenType));
 							this_postfix->symbol = SYM_MISSING;
 							this_postfix->marker = _T(""); // Simplify some cases by letting it be treated as SYM_STRING.
-							this_postfix->circuit_token = NULL;
 							++in_param_list->param_count;
 							++postfix_count;
+							++this_infix;
 							continue; // Must do this to update this_postfix ref.
 						}
 						// Otherwise: it's something like ,) or ,] -- just do nothing at this point, so that the end
@@ -10974,7 +11070,6 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 						postfix[postfix_count] = this_infix;
 						postfix[postfix_count]->symbol = SYM_MISSING;
 						postfix[postfix_count]->marker = _T(""); // Simplify some cases by letting it be treated as SYM_STRING.
-						postfix[postfix_count]->circuit_token = NULL;
 						++postfix_count;
 					}
 					stack_top.deref->func = &g_ObjCall; // Override the default now that we know this is a method-call.
@@ -11056,8 +11151,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 			}
 			else if (infix_symbol == SYM_FUNC)
 				in_param_list = this_infix[-1].deref; // Store this SYM_FUNC's deref.
-			else if (this_infix > infix && YIELDS_AN_OPERAND(this_infix[-1].symbol)
-				&& this_infix[-1].symbol != SYM_MISSING) // Workaround for X(,(something)), where SYM_COMMA has been replaced with SYM_MISSING.
+			else if (this_infix > infix && YIELDS_AN_OPERAND(this_infix[-1].symbol))
 				return LineError(_T("Missing operator or space before \"(\"."));
 			else
 				in_param_list = NULL; // Allow multi-statement commas, even in cases like Func((x,y)).
@@ -11699,12 +11793,15 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ResultToken *aResultToken, Line 
 
 			// If interruptions are currently forbidden, it's our responsibility to check if the number
 			// of lines that have been run since this quasi-thread started now indicate that
-			// interruptibility should be reenabled.  But if UninterruptedLineCountMax is negative, don't
-			// bother checking because this quasi-thread will stay non-interruptible until it finishes.
+		// interruptibility should be reenabled.  g.UninterruptedLineCount must also be tracked
+		// for IsInterruptible() to detect execution of the thread's first line.
 			// v1.0.38.04: If g.ThreadIsCritical==true, no need to check or accumulate g.UninterruptedLineCount
 			// because the script is now in charge of this thread's interruptibility.
-			if (!g.AllowThreadToBeInterrupted && !g.ThreadIsCritical && g_script->mUninterruptedLineCountMax > -1) // Ordered for short-circuit performance.
+		if (!g.AllowThreadToBeInterrupted && !g.ThreadIsCritical) // Ordered for short-circuit performance.
 			{
+			// Incrementing this unconditionally makes it a relatively crude measure,
+			// but it seems okay to be less accurate for this purpose:
+			++g.UninterruptedLineCount;
 			// To preserve backward compatibility, ExecUntil() must be the one to check
 			// g.UninterruptedLineCount and update g.AllowThreadToBeInterrupted, rather than doing
 			// those things on-demand in IsInterruptible().  If those checks were moved to
@@ -11712,12 +11809,9 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ResultToken *aResultToken, Line 
 			// g_script->mUninterruptedLineCountMax because IsInterruptible() is called only upon demand.
 			// THIS SECTION DOES NOT CHECK g.ThreadStartTime because that only needs to be
 			// checked on demand by callers of IsInterruptible().
-			if (g.UninterruptedLineCount > g_script->mUninterruptedLineCountMax) // See above.
+			if (g.UninterruptedLineCount > g_script->mUninterruptedLineCountMax // See above.
+				&& g_script->mUninterruptedLineCountMax > -1)
 				g.AllowThreadToBeInterrupted = true;
-			else
-				// Incrementing this unconditionally makes it a relatively crude measure,
-				// but it seems okay to be less accurate for this purpose:
-				++g.UninterruptedLineCount;
 			}
 
 		// At this point, a pause may have been triggered either by the above MsgSleep()
@@ -12571,7 +12665,7 @@ ResultType HotkeyCriterion::Eval(LPTSTR aHotkeyName)
 	VarBkp ErrorLevel_saved;
 	ErrorLevel_Backup(ErrorLevel_saved);
 	// Critical seems to improve reliability, either because the thread completes faster (i.e. before the timeout) or because we check for messages less often.
-	InitNewThread(0, false, true, ACT_CRITICAL);
+	InitNewThread(0, false, true, true);
 	ResultType result;
 
 	// Update A_ThisHotkey, useful if #If calls a function to do its dirty work.
@@ -14200,13 +14294,8 @@ ResultType Line::Perform()
 	case ACT_SETTITLEMATCHMODE:
 		return BIV_TitleMatchMode_Set(ARG1, NULL);
 
-		////////////////////////////////////////////////////////////////////////////////////////
-		// For these, it seems best not to report an error during runtime if there's
-		// an invalid value (e.g. something other than On/Off/Blank) in a param containing
-		// a dereferenced variable, since settings are global and affect all subroutines,
-		// not just the one that we would otherwise report failure for:
 	case ACT_SUSPEND:
-		switch (ConvertOnOffTogglePermit(ARG1))
+		switch (ConvertOnOffToggle(ARG1))
 		{
 		case NEUTRAL:
 		case TOGGLE:
@@ -14220,11 +14309,6 @@ ResultType Line::Perform()
 			if (g_IsSuspended)
 				ToggleSuspendState();
 			break;
-		case TOGGLE_PERMIT:
-			// In this case do nothing.  The user is just using this command as a flag to indicate that
-			// this subroutine should not be suspended.
-			break;
-			// We know it's a variable because otherwise the loading validation would have caught it earlier:
 		case TOGGLE_INVALID:
 			return LineError(ERR_PARAM1_INVALID, FAIL, ARG1);
 		}
@@ -14541,6 +14625,74 @@ BIF_DECL(BIF_PerformAction)
 	}
 	// Free the stack variable (which may have been used as an output and/or input variable).
 	stack_var.Free(VAR_ALWAYS_FREE);
+}
+
+
+
+ResultType Script::DerefInclude(LPTSTR &aOutput, LPTSTR aBuf)
+// For #Include and #IncludeAgain.
+// Based on Line::Deref above, but with a few differences for backward-compatibility:
+//  1) Percent signs that aren't part of a valid deref are not omitted.
+//  2) Escape sequences aren't recognized (`; is handled elsewhere).
+//  3) It is restricted to built-in vars to reduce the risk of breaking any scripts
+//     that use percent sign literally in a filename.  Most other vars are empty anyway.
+{
+	aOutput = NULL; // Set default.
+
+	TCHAR var_name[MAX_VAR_NAME_LENGTH + 1];
+	VarSizeType expanded_length;
+	size_t var_name_length;
+	LPTSTR cp, cp1, dest;
+
+	// Do two passes:
+	// #1: Calculate the space needed.
+	// #2: Expand the contents of aBuf into aOutput.
+
+	for (int which_pass = 0; which_pass < 2; ++which_pass)
+	{
+		if (which_pass) // Starting second pass.
+		{
+			// Allocate a buffer to contain the result:
+			if (  !(aOutput = tmalloc(expanded_length+1))  )
+				return FAIL;
+			dest = aOutput;
+		}
+		else // First pass.
+			expanded_length = 0; // Init prior to accumulation.
+
+		for (cp = aBuf; *cp; ++cp)  // Increment to skip over the deref/escape just found by the inner for().
+		{
+			if (*cp == g_DerefChar)
+			{
+				// It's a dereference symbol, so calculate the size of that variable's contents and add
+				// that to expanded_length (or copy the contents into aOutputVar if this is the second pass).
+				for (cp1 = cp + 1; *cp1 && *cp1 != g_DerefChar; ++cp1); // Find the reference's ending symbol.
+				var_name_length = cp1 - cp - 1;
+				if (*cp1 && var_name_length && var_name_length <= MAX_VAR_NAME_LENGTH)
+				{
+					tcslcpy(var_name, cp + 1, var_name_length + 1);  // +1 to convert var_name_length to size.
+					VarEntry *biv = GetBuiltInVar(var_name);  // Only get built-in vars.
+					if (biv)
+					{
+						if (which_pass) // 2nd pass
+							dest += biv->type.Get(dest, var_name);
+						else
+							expanded_length += biv->type.Get(NULL, var_name);
+						cp = cp1; // For the next loop iteration, continue at the char after this reference's final deref symbol.
+						continue;
+					}
+				}
+				// Since it wasn't a supported deref, copy the deref char into the output:
+			}
+			if (which_pass) // 2nd pass
+				*dest++ = *cp;  // Copy all non-variable-ref characters literally.
+			else // just accumulate the length
+				++expanded_length;
+		} // for()
+	} // for() (first and second passes)
+
+	*dest = '\0';  // Terminate the output variable.
+	return OK;
 }
 
 
@@ -15265,7 +15417,7 @@ ResultType ResultToken::Error(LPCTSTR aErrorText, LPCTSTR aExtraInfo)
 
 
 
-ResultType Script::UnhandledException(ResultToken*& aToken, Line* aLine)
+ResultType Script::UnhandledException(ResultToken*& aToken, Line* aLine, LPTSTR aFooter)
 {
 	LPCTSTR message = _T(""), extra = _T("");
 	TCHAR extra_buf[MAX_NUMBER_SIZE], message_buf[MAX_NUMBER_SIZE];
@@ -15314,7 +15466,7 @@ ResultType Script::UnhandledException(ResultToken*& aToken, Line* aLine)
 	}
 
 	TCHAR buf[MSGBOX_TEXT_SIZE];
-	Line::FormatError(buf, _countof(buf), FAIL, message, extra, aLine, _T("The thread has exited."));
+	Line::FormatError(buf, _countof(buf), FAIL, message, extra, aLine, aFooter);
 	MsgBox(buf);
 
 	FreeExceptionToken(aToken);
