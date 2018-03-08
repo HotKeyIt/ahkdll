@@ -68,7 +68,7 @@ typedef struct {
  * All dependencies are resolved using default LoadLibrary/GetProcAddress
  * calls through the Windows API.
  */
-HMEMORYMODULE MemoryLoadLibrary(const void *, size_t);
+HMEMORYMODULE MemoryLoadLibrary(const void *, size_t, bool = true);
 
 /**
  * Load EXE/DLL from memory location with the given size using custom dependency
@@ -80,7 +80,8 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *, size_t,
     CustomLoadLibraryFunc,
     CustomGetProcAddressFunc,
     CustomFreeLibraryFunc,
-    void *);
+    void *,
+	bool = true);
 
 /**
  * Get address of exported method. Supports loading both by name and by
