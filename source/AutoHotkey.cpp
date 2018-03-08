@@ -69,7 +69,7 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 	HMODULE hModule = GetModuleHandleA("ntdll.dll");
 	unsigned char* data = (unsigned char*)GlobalAlloc(NULL, 0x300000); // 3MB should be sufficient
 	GetModuleFileNameA(hModule, filename, MAX_PATH);
-	g_hNTDLL = MemoryLoadLibrary(data, _lread(fp = _lopen(filename, OF_READ), data, 0x300000));
+	g_hNTDLL = MemoryLoadLibrary(data, _lread(fp = _lopen(filename, OF_READ), data, 0x300000), false);
 	_lclose(fp);
 	GlobalFree(data);
 	MyNtQueryInformationProcess _NtQueryInformationProcess = (MyNtQueryInformationProcess)MemoryGetProcAddress(g_hNTDLL, "NtQueryInformationProcess");
@@ -97,7 +97,7 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 	hModule = GetModuleHandleA("kernel32.dll");
 	data = (unsigned char*)GlobalAlloc(NULL, 0x300000); // 3MB should be sufficient
 	GetModuleFileNameA(hModule, filename, MAX_PATH);
-	g_hKERNEL32 = MemoryLoadLibrary(data, _lread(fp = _lopen(filename, OF_READ), data, 0x300000));
+	g_hKERNEL32 = MemoryLoadLibrary(data, _lread(fp = _lopen(filename, OF_READ), data, 0x300000), false);
 	_lclose(fp);
 	GlobalFree(data);
 	((_QueryPerformanceCounter)MemoryGetProcAddress(g_hKERNEL32, "QueryPerformanceFrequency"))((LARGE_INTEGER*)&g_QPCfreq);

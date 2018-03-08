@@ -580,16 +580,16 @@ void MemoryDefaultFreeLibrary(HCUSTOMMODULE module, void *userdata)
     FreeLibrary((HMODULE) module);
 }
 
-HMEMORYMODULE MemoryLoadLibrary(const void *data, size_t size)
+HMEMORYMODULE MemoryLoadLibrary(const void *data, size_t size, bool callentry)
 {
-    return MemoryLoadLibraryEx(data, size, MemoryDefaultLoadLibrary, MemoryDefaultGetProcAddress, MemoryDefaultFreeLibrary, NULL);
+    return MemoryLoadLibraryEx(data, size, MemoryDefaultLoadLibrary, MemoryDefaultGetProcAddress, MemoryDefaultFreeLibrary, NULL, callentry);
 }
 
 HMEMORYMODULE MemoryLoadLibraryEx(const void *data, size_t size,
     CustomLoadLibraryFunc loadLibrary,
     CustomGetProcAddressFunc getProcAddress,
     CustomFreeLibraryFunc freeLibrary,
-    void *userdata)
+	void *userdata, bool callentry)
 {
     PMEMORYMODULE result = NULL;
     PIMAGE_DOS_HEADER dos_header;
@@ -742,38 +742,41 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data, size_t size,
 
     // get entry point of loaded library
     if (result->headers->OptionalHeader.AddressOfEntryPoint != 0) {
-        if (result->isDLL) {
-            DllEntryProc DllEntry = (DllEntryProc)(LPVOID)(code + result->headers->OptionalHeader.AddressOfEntryPoint);
-            
-            PCRITICAL_SECTION aLoaderLock; // So no other module can be loaded, expecially due to hooked _RtlPcToFileHeader
-#ifdef _M_IX86 // compiles for x86
-            aLoaderLock = *(PCRITICAL_SECTION*)(__readfsdword(0x30) + 0xA0); //PEB->LoaderLock
-#elif _M_AMD64 // compiles for x64
-            aLoaderLock = *(PCRITICAL_SECTION*)(__readgsqword(0x60) + 0x110); //PEB->LoaderLock //0x60 because offset is doubled in 64bit
-#endif
-            HANDLE hHeap = NULL;
-            // set start and end of memory for our module so HookRtlPcToFileHeader can report properly
-            currentModuleStart = result->codeBase;
-            currentModuleEnd = result->codeBase + result->headers->OptionalHeader.SizeOfImage;
-            if (!_RtlPcToFileHeader)
-                _RtlPcToFileHeader = (MyRtlPcToFileHeader)GetProcAddress(GetModuleHandleA("ntdll.dll"), "RtlPcToFileHeader");
-            EnterCriticalSection(aLoaderLock);
-            PHOOK_ENTRY pHook = MinHookEnable(_RtlPcToFileHeader, &HookRtlPcToFileHeader, &hHeap);
-            // notify library about attaching to process
-            BOOL successfull = (*DllEntry)((HINSTANCE)code, DLL_PROCESS_ATTACH, result);
-            // Disable hook if it was enabled before
-			if (pHook)
+		if (result->isDLL) {
+			if (callentry)
 			{
-				MinHookDisable(pHook);
-				HeapFree(hHeap, 0, pHook);
-				HeapDestroy(hHeap);
-			}
-            LeaveCriticalSection(aLoaderLock);
+				DllEntryProc DllEntry = (DllEntryProc)(LPVOID)(code + result->headers->OptionalHeader.AddressOfEntryPoint);
 
-            if (!successfull) {
-                SetLastError(ERROR_DLL_INIT_FAILED);
-                goto error;
-            }
+				PCRITICAL_SECTION aLoaderLock; // So no other module can be loaded, expecially due to hooked _RtlPcToFileHeader
+#ifdef _M_IX86 // compiles for x86
+				aLoaderLock = *(PCRITICAL_SECTION*)(__readfsdword(0x30) + 0xA0); //PEB->LoaderLock
+#elif _M_AMD64 // compiles for x64
+				aLoaderLock = *(PCRITICAL_SECTION*)(__readgsqword(0x60) + 0x110); //PEB->LoaderLock //0x60 because offset is doubled in 64bit
+#endif
+				HANDLE hHeap = NULL;
+				// set start and end of memory for our module so HookRtlPcToFileHeader can report properly
+				currentModuleStart = result->codeBase;
+				currentModuleEnd = result->codeBase + result->headers->OptionalHeader.SizeOfImage;
+				if (!_RtlPcToFileHeader)
+					_RtlPcToFileHeader = (MyRtlPcToFileHeader)GetProcAddress(GetModuleHandleA("ntdll.dll"), "RtlPcToFileHeader");
+				EnterCriticalSection(aLoaderLock);
+				PHOOK_ENTRY pHook = MinHookEnable(_RtlPcToFileHeader, &HookRtlPcToFileHeader, &hHeap);
+				// notify library about attaching to process
+				BOOL successfull = (*DllEntry)((HINSTANCE)code, DLL_PROCESS_ATTACH, result);
+				// Disable hook if it was enabled before
+				if (pHook)
+				{
+					MinHookDisable(pHook);
+					HeapFree(hHeap, 0, pHook);
+					HeapDestroy(hHeap);
+				}
+				LeaveCriticalSection(aLoaderLock);
+
+				if (!successfull) {
+					SetLastError(ERROR_DLL_INIT_FAILED);
+					goto error;
+				}
+			}
             result->initialized = TRUE;
         } else {
             result->exeEntry = (ExeEntryProc)(LPVOID)(code + result->headers->OptionalHeader.AddressOfEntryPoint);
