@@ -14,7 +14,8 @@
 		return 0
   if (hResource:=lang=""?DllCall("FindResource","PTR",hModule,name+0=""?"Str":"PTR",name,type+0=""?"Str":"PTR",type,"PTR"):DllCall("FindResourceEx","PTR",hModule,name+0=""?"Str":"PTR",name,type+0=""?"Str":"PTR",type,"Uint",lang,"PTR"))
       && pdata:=LockResource(hResData:=LoadResource(hModule,hResource))
-      VarsetCapacity(data,sz:=SizeofResource(hModule,hResource)),RtlMoveMemory(&data,pData,sz)
-	if (hModule != me32.modBaseAddr["",""]),FreeLibrary(hModule)
+      VarsetCapacity(data,2+sz:=SizeofResource(hModule,hResource),0),RtlMoveMemory(&data,pData,sz)
+	if (hModule != me32.modBaseAddr["",""])
+		FreeLibrary(hModule)
 	return sz
 }
