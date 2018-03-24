@@ -5248,6 +5248,10 @@ inline size_t UTF8ToUTF16(unsigned char* outb, size_t outlen, const unsigned cha
 #else
 int
 UTF8ToASCII(unsigned char* out, size_t outlen,const unsigned char* in, size_t inlen) {
+	typedef BOOL WINAPI _Wow64DisableWow64FsRedirection(PVOID*);
+	typedef BOOL WINAPI _Wow64RevertWow64FsRedirection(PVOID);
+	static _Wow64DisableWow64FsRedirection *MyWow64DisableWow64FsRedirection = (_Wow64DisableWow64FsRedirection*)GetProcAddress(GetModuleHandleA("kernel32.dll"), "Wow64DisableWow64FsRedirection");
+	static _Wow64RevertWow64FsRedirection *MyWow64RevertWow64FsRedirection = (_Wow64RevertWow64FsRedirection*)GetProcAddress(GetModuleHandleA("kernel32.dll"), "Wow64RevertWow64FsRedirection");
 	static BYTE aUtC[131072] = { 0 };
 	static WORD aMaxCharSize = 1;
 	static bool aUseLocale = false;
@@ -5269,9 +5273,13 @@ UTF8ToASCII(unsigned char* out, size_t outlen,const unsigned char* in, size_t in
 		_tcscpy(aLocalePath + _tcslen(aLocalePath), ITOA(aACP, aACPBuf));
 		_tcscpy(aLocalePath + _tcslen(aLocalePath), ".NLS");
 		PVOID oldValue;
-		Wow64DisableWow64FsRedirection(&oldValue);
+		if (MyWow64DisableWow64FsRedirection) {
+			(*MyWow64DisableWow64FsRedirection)(&oldValue);
+		}
 		HANDLE hLocaleFile = CreateFile(aLocalePath, GENERIC_READ, FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, NULL, NULL);
-		Wow64RevertWow64FsRedirection(oldValue);
+		if (MyWow64DisableWow64FsRedirection) {
+			(*MyWow64RevertWow64FsRedirection)(oldValue);
+		}
 		if (hLocaleFile != INVALID_HANDLE_VALUE)
 		{
 			typedef struct {
