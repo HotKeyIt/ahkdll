@@ -14,8 +14,8 @@ static TH32CS_SNAPMODULE,MODULEENTRY32,me32,fullpath
     return 0
   if (hResource:=lang=""?FindResourceW(hModule,name,type):FindResourceExW(hModule,name,type,lang))
       && pdata:=LockResource(hResData:=LoadResource(hModule,hResource))
-      VarsetCapacity(data,sz:=SizeofResource(hModule,hResource)),RtlMoveMemory(&data,pData,sz)
+      VarsetCapacity(data,2+sz:=SizeofResource(hModule,hResource),0),RtlMoveMemory(&data,pData,sz)
 	if (hModule != me32.modBaseAddr["",""])
-    FreeLibrary(hModule)
+		FreeLibrary(hModule)
 	return sz
 }
