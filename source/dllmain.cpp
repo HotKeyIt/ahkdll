@@ -194,7 +194,6 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	Var *var;
 	bool switch_processing_is_complete = false;
 	int script_param_num = 1;
-	int first_script_param = __argc;
 
 	int dllargc = 0;
 #ifndef _UNICODE
@@ -205,6 +204,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 #else
 	LPWSTR *dllargv = CommandLineToArgvW(nameHinstanceP.args,&dllargc);
 #endif
+	int first_script_param = dllargc;
 	int i;
 	if (*nameHinstanceP.args) // Only process if parameters were given
 	for (i = 0; i < dllargc; ++i) // Start at 1 because 0 contains the program name.
