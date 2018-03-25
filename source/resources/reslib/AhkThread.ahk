@@ -2,7 +2,7 @@
   static objects
   if !objects
     objects:=[]
-  if obj=""
+  if (obj="")
       objects:=[]
   else if !IsObject(obj)
 	return objects
