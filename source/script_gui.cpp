@@ -304,6 +304,7 @@ ResultType Script::PerformGui(LPTSTR aBuf, LPTSTR aParam2, LPTSTR aParam3, LPTST
 			// a full GuiType structure is constructed.  We can't actually create the Gui yet,
 			// since that would prevent +Owner%N% from working and possibly break other scripts
 			// which rely on the old behaviour.
+			if (  (GuiType::sFont || (GuiType::sFont = (FontType *)malloc(sizeof(FontType) * MAX_GUI_FONTS)))  ) // See similar line below for comments regarding sFont.
 			if (pgui = new GuiType())
 			{
 				if (pgui->mName = tmalloc(name_length + 1))
@@ -403,6 +404,11 @@ ResultType Script::PerformGui(LPTSTR aBuf, LPTSTR aParam2, LPTSTR aParam3, LPTST
 		// Otherwise: Create the object and (later) its window, since all the other sub-commands below need it:
 		for (;;) // For break, to reduce repetition of cleanup-on-failure code.
 		{
+			// v1.0.44.14: sFont is created upon first use to conserve ~14 KB memory in non-GUI scripts.
+			// v1.1.29.00: sFont is created here rather than in FindOrCreateFont(), which is called by
+			// the constructor below, to avoid the need to add extra logic in several places to detect
+			// a failed/NULL array.  Previously that was done by simply terminating the script.
+			if (  (GuiType::sFont || (GuiType::sFont = (FontType *)malloc(sizeof(FontType) * MAX_GUI_FONTS)))  )
 			if (pgui = new GuiType())
 			{
 				if (pgui->mControl = (GuiControlType *)malloc(GUI_CONTROL_BLOCK_SIZE * sizeof(GuiControlType)))
@@ -419,7 +425,7 @@ ResultType Script::PerformGui(LPTSTR aBuf, LPTSTR aParam2, LPTSTR aParam3, LPTST
 				}
 				delete pgui;
 			}
-			result = FAIL; // No error displayed since extremely rare.
+			result = ScriptError(ERR_OUTOFMEM);
 			goto return_the_result;
 		}
 	}
@@ -8527,9 +8533,6 @@ int GuiType::FindOrCreateFont(LPTSTR aOptions, LPTSTR aFontName, FontType *aFoun
 		{
 			// For simplifying other code sections, create an entry in the array for the default font
 			// (GUI constructor relies on at least one font existing in the array).
-			if (!sFont) // v1.0.44.14: Created upon first use to conserve ~14 KB memory in non-GUI scripts.
-				if (   !(sFont = (FontType *)malloc(sizeof(FontType) * MAX_GUI_FONTS))   )
-					g_script.ExitApp(EXIT_CRITICAL, ERR_OUTOFMEM); // Since this condition is so rare, just abort to avoid the need to add extra logic in several places to detect a failed/NULL array.
 			// Doesn't seem likely that DEFAULT_GUI_FONT face/size will change while a script is running,
 			// or even while the system is running for that matter.  I think it's always an 8 or 9 point
 			// font regardless of desktop's appearance/theme settings.
@@ -10469,6 +10472,7 @@ LRESULT GuiType::CustomCtrlWmNotify(GuiIndexType aControlIndex, LPNMHDR aNmHdr)
 		returnValue = (INT_PTR)g_ErrorLevel->ToInt64(FALSE);
 
 	Release();
+	g->GuiWindow = NULL;
 	ResumeUnderlyingThread(ErrorLevel_saved);
 
 	return returnValue;

@@ -334,18 +334,18 @@ bool Object::Delete()
 		
 		// This prevents an erroneous "The current thread will exit" message when an error occurs,
 		// by causing LineError() to throw an exception:
-		bool in_try = g->InTryBlock;
-		g->InTryBlock = true;
+		int outer_excptmode = g->ExcptMode;
+		g->ExcptMode |= EXCPTMODE_DELETE;
 
 		CallMethod(mBase, this, sMetaFuncName[3], NULL, 0, NULL, IF_METAOBJ); // base.__Delete()
 
-		g->InTryBlock = in_try;
+		g->ExcptMode = outer_excptmode;
 
 		// Exceptions thrown by __Delete are reported immediately because they would not be handled
 		// consistently by the caller (they would typically be "thrown" by the next function call),
 		// and because the caller must be allowed to make additional __Delete calls.
 		if (g->ThrownToken)
-			g_script.UnhandledException(g->ThrownToken, NULL, _T("__Delete will now return."));
+			g_script.FreeExceptionToken(g->ThrownToken);
 
 		// If an exception has been thrown by our caller, it's likely that it can and should be handled
 		// reliably by our caller, so restore it.
@@ -750,6 +750,9 @@ int Object::GetBuiltinID(LPCTSTR aName)
 	case 'D':
 		if (!_tcsicmp(aName, _T("Delete")))
 			return FID_ObjDelete;
+	case 'C':
+		if (!_tcsicmp(aName, _T("Count")))
+			return FID_ObjCount;
 		break;
 	}
 	// Older methods which support the _ prefix:
@@ -778,8 +781,6 @@ int Object::GetBuiltinID(LPCTSTR aName)
 	case 'C':
 		if (!_tcsicmp(aName, _T("Clone")))
 			return FID_ObjClone;
-		if (!_tcsicmp(aName, _T("Count")))
-			return FID_ObjCount;
 		break;
 	case 'M':
 		if (!_tcsicmp(aName, _T("MaxIndex")))
@@ -818,12 +819,12 @@ ResultType Object::CallBuiltin(int aID, ExprTokenType &aResultToken, ExprTokenTy
 	case_method(InsertAt);
 	case_method(RemoveAt);
 	case_method(Delete);
+	case_method(Count);
 	case_method(MinIndex);
 	case_method(GetAddress);
 	case_method(SetCapacity);
 	case_method(GetCapacity);
 	case_method(Clone);
-	case_method(Count);
 	// Deprecated methods:
 	case_method(Insert);
 	case_method(Remove);
@@ -1310,6 +1311,12 @@ ResultType Object::_MinIndex(ExprTokenType &aResultToken, ExprTokenType *aParam[
 	return OK;
 }
 
+ResultType Object::_Count(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
+{
+	aResultToken.SetValue((__int64)mFieldCount);
+	return OK;
+}
+
 ResultType Object::_Length(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
 	IntKeyType max_index = mKeyOffsetObject ? mFields[mKeyOffsetObject - 1].key.i : 0;
@@ -1329,16 +1336,6 @@ ResultType Object::_MaxIndex(ExprTokenType &aResultToken, ExprTokenType *aParam[
 		aResultToken.symbol = SYM_INTEGER;
 		aResultToken.value_int64 = (__int64)mFields[mKeyOffsetObject - 1].key.i;
 	}
-	// else no integer keys; leave aResultToken at default, empty string.
-	return OK;
-}
-
-ResultType Object::_Count(ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount)
-{
-	if (aParamCount)
-		return OK;
-	aResultToken.symbol = SYM_INTEGER;
-	aResultToken.value_int64 = (__int64)mFieldCount;
 	// else no integer keys; leave aResultToken at default, empty string.
 	return OK;
 }

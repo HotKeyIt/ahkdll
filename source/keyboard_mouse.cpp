@@ -169,6 +169,13 @@ void SendKeys(LPTSTR aKeys, SendRawModes aSendRaw, SendModes aSendModeOrig, HWND
 		// But Send {Blind}{LControl down} will generate the extra events even if ctrl already down.
 		aKeys += 7; // Remove "{Blind}" from further consideration.
 
+	if (!aSendRaw && !_tcsnicmp(aKeys, _T("{Text}"), 6))
+	{
+		// Setting this early allows CapsLock and the Win+L workaround to be skipped:
+		aSendRaw = SCM_RAW_TEXT;
+		aKeys += 6;
+	}
+
 	int orig_key_delay = g.KeyDelay;
 	int orig_press_duration = g.PressDuration;
 	if (aSendModeOrig == SM_INPUT || aSendModeOrig == SM_INPUT_FALLBACK_TO_PLAY) // Caller has ensured aTargetWindow==NULL for SendInput and SendPlay modes.
@@ -246,6 +253,7 @@ void SendKeys(LPTSTR aKeys, SendRawModes aSendRaw, SendModes aSendModeOrig, HWND
 #endif
 			&& aSendModeOrig != SM_PLAY // SM_PLAY is reported to be incapable of locking the computer.
 			&& !sInBlindMode // The philosophy of blind-mode is that the script should have full control, so don't do any waiting during blind mode.
+			&& aSendRaw != SCM_RAW_TEXT // {Text} mode does not trigger Win+L.
 			&& g_os.IsWinVistaOrLater() // Only Vista (and presumably later OSes) check the physical state of the Windows key for Win+L.
 			&& aThreadID == g_MainThreadID // Exclude the hook thread because it isn't allowed to call anything like MsgSleep, nor are any calls from the hook thread within the understood/analyzed scope of this workaround.
 			)
@@ -392,7 +400,7 @@ void SendKeys(LPTSTR aKeys, SendRawModes aSendRaw, SendModes aSendModeOrig, HWND
 		// Only under either of the above conditions can the state of Capslock be reliably
 		// retrieved and changed.  Remember that apps like MS Word have an auto-correct feature that
 		// might make it wrongly seem that the turning off of Capslock below needs a Sleep(0) to take effect.
-		prior_capslock_state = g.StoreCapslockMode && !sInBlindMode
+		prior_capslock_state = g.StoreCapslockMode && !sInBlindMode && aSendRaw != SCM_RAW_TEXT
 			? ToggleKeyState(VK_CAPITAL, TOGGLED_OFF)
 			: TOGGLE_INVALID; // In blind mode, don't do store capslock (helps remapping and also adds flexibility).
 	}

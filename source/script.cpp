@@ -1293,7 +1293,7 @@ ResultType Script::CreateWindows()
 void Script::EnableClipboardListener(bool aEnable)
 {
 	static bool sEnabled = false;
-	if (aEnable == sEnabled) // Simplifies BIF_OnExitOrClipboard.
+	if (aEnable == sEnabled) // Simplifies BIF_On.
 		return;
 	if (aEnable)
 	{
@@ -1479,8 +1479,7 @@ ResultType Script::AutoExecSection()
 
 	// Check if an exception has been thrown
 	if (g->ThrownToken)
-		// Display an error message
-		ExecUntil_result = g_script.UnhandledException(g->ThrownToken, g->ExcptLine);
+		g_script.FreeExceptionToken(g->ThrownToken);
 
 	// The below is done even if AutoExecSectionTimeout() already set the values once.
 	// This is because when the AutoExecute section finally does finish, by definition it's
@@ -1613,23 +1612,12 @@ ResultType Script::Reload(bool aDisplayErrors)
 
 
 
-ResultType Script::ExitApp(ExitReasons aExitReason, LPTSTR aBuf, int aExitCode)
+ResultType Script::ExitApp(ExitReasons aExitReason, int aExitCode)
 // Normal exit (if aBuf is NULL), or a way to exit immediately on error (which is mostly
 // for times when it would be unsafe to call MsgBox() due to the possibility that it would
 // make the situation even worse).
 {
 	mExitReason = aExitReason;
-	bool caller_requested_termination = aBuf && !*aBuf;
-	if (aBuf && *aBuf)
-	{
-		TCHAR buf[1024];
-		// No more than size-1 chars will be written and string will be terminated:
-		sntprintf(buf, _countof(buf), _T("Critical Error: %s\n\n") WILL_EXIT, aBuf);
-		// To avoid chance of more errors, don't use MsgBox():
-		MessageBox(g_hWnd, buf, g_script.mFileSpec, MB_OK | MB_SETFOREGROUND | MB_APPLMODAL);
-		TerminateApp(aExitReason, CRITICAL_ERROR); // Only after the above.
-	}
-	// Otherwise, it's not a critical error.
 	static bool sOnExitIsRunning = false, sExitAppShouldTerminate = true;
 	static int sExitCode;
 	if (sOnExitIsRunning || !mIsReadyToExecute)
@@ -1734,7 +1722,7 @@ ResultType Script::ExitApp(ExitReasons aExitReason, LPTSTR aBuf, int aExitCode)
 	DEBUGGER_STACK_POP()
 	sOnExitIsRunning = false;  // In case the user wanted the thread to end normally (see above).
 
-	if (terminate_afterward || caller_requested_termination)
+	if (terminate_afterward || aExitReason == EXIT_DESTROY)
 		TerminateApp(aExitReason, aExitCode);
 
 	// Otherwise:
@@ -7403,7 +7391,7 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType,
 	/////////////////////////////////////////////////////////////
 	// MaxParams has already been verified as being <= MAX_ARGS.
 	// Any g_delimiter-delimited items beyond MaxParams will be included in a lump inside the last param:
-	int nArgs, nArgs_plus_one;
+	int nArgs;
 	LPTSTR arg[MAX_ARGS], arg_map[MAX_ARGS];
 	ActionTypeType subaction_type = ACT_INVALID; // Must init these.
 	ActionTypeType suboldaction_type = OLD_INVALID;
@@ -7411,7 +7399,6 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType,
 	int max_params = max_params_override ? max_params_override : this_action.MaxParams;
 	int max_params_minus_one = max_params - 1;
 	bool is_expression;
-	ActionTypeType *np;
 
 	for (nArgs = mark = 0; action_args[mark] && nArgs < max_params; ++nArgs)
 	{
@@ -7455,59 +7442,12 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType,
 
 		if (!is_expression)
 		{
-			if (aActionType == ACT_TRANSFORM && (nArgs == 2 || nArgs == 3)) // i.e. the 3rd or 4th arg is about to be added.
-			{
-				// Somewhat inefficient since it has to be called for both Arg#2 and Arg#3, but seems
-				// worth the benefit in terms of code simplification.  Note that the following might
-				// return TRANS_CMD_INVALID just because the sub-command is contained in a variable
-				// reference.  That is why TRANS_CMD_INVALID does not produce an error at this stage,
-				// but only later when the line has been constructed far enough to call ArgHasDeref():
-				// i.e. Not the first param, only the third and fourth, which currently are either both numeric or both non-numeric for all cases.
-				switch(Line::ConvertTransformCmd(arg[1])) // arg[1] is the second arg.
-				{
-				// See comment above for why TRANS_CMD_INVALID isn't yet reported as an error:
-#ifdef UNICODE
-				#define TRANS_CMD_UNICODE_CASES
-#else
-				#define TRANS_CMD_UNICODE_CASES \
-				case TRANS_CMD_UNICODE:
-#endif
-				#define TRANSFORM_NON_EXPRESSION_CASES \
-				case TRANS_CMD_INVALID:\
-				case TRANS_CMD_ASC:\
-				TRANS_CMD_UNICODE_CASES\
-				case TRANS_CMD_DEREF:\
-				case TRANS_CMD_HTML:\
-					break; // Do nothing.  Leave is_expression set to its default of false.
-
-				TRANSFORM_NON_EXPRESSION_CASES
-				default:
-					// For all other sub-commands, Arg #3 and #4 are expression-capable.  It doesn't
-					// seem necessary to call LegacyArgIsExpression() because is_expression is only
-					// used below to avoid misinterpreting commas in quoted strings and parentheses;
-					// i.e. detecting those legacy cases wouldn't affect the outcome.
-					is_expression = true;
-					break;
-				}
-			}
-			else
-			{
-				// v1.0.43.07: Fixed below to use this_action instead of g_act[aActionType] so that the
-				// numeric params of legacy commands like EnvAdd/Sub/LeftClick can be detected.  Without
-				// this fix, the last comma in a line like "EnvSub, var, Add(2, 3)" is seen as a parameter
-				// delimiter, which causes a loadtime syntax error.
-				if (np = this_action.NumericParams) // This command has at least one numeric parameter.
-				{
-					// As of v1.0.25, pure numeric parameters can optionally be numeric expressions, so check for that:
-					nArgs_plus_one = nArgs + 1;
-					for (; *np; ++np)
-						if (*np == nArgs_plus_one) // This arg is enforced to be purely numeric.
-							break;
-					if (*np) // Match found, so this is a purely numeric arg.
-						is_expression = true;
-				}
-			}
-		} // if (!is_expression)
+			// v1.0.43.07: Fixed below to use this_action instead of g_act[aActionType] so that the
+			// numeric params of legacy commands like EnvAdd/Sub/LeftClick can be detected.  Without
+			// this fix, the last comma in a line like "EnvSub, var, Add(2, 3)" is seen as a parameter
+			// delimiter, which causes a loadtime syntax error.
+			is_expression = ArgIsNumeric(aActionType, this_action.NumericParams, arg, nArgs);
+		}
 
 		// Find the end of the above arg:
 		if (is_expression)
@@ -7789,6 +7729,60 @@ inline ActionTypeType Script::ConvertOldActionType(LPTSTR aActionTypeString)
 
 
 
+bool Script::ArgIsNumeric(ActionTypeType aActionType, ActionTypeType *np, LPTSTR arg[], int nArgs, int aArgCount)
+{
+	// As of v1.0.25, pure numeric parameters can optionally be numeric expressions, so check for that:
+	int nArgs_plus_one = nArgs + 1;
+	for (; *np; ++np)
+		if (*np == nArgs_plus_one) // This arg is enforced to be purely numeric.
+			break;
+	if (*np) // Match found, so this is a purely numeric arg.
+	{
+		if (aActionType == ACT_WINMOVE)
+		{
+			if (nArgs > 1)
+			{
+				// i indicates this is Arg #3 or beyond, which is one of the args that is
+				// either the word "default" or a number/expression.
+				if (!_tcsicmp(arg[nArgs], _T("default"))) // It's not an expression.
+					return false;
+			}
+			else // This is the first or second arg, which are title/text vs. X/Y when aArgCount > 2.
+				if (aArgCount > 2) // Title/text are not numeric/expressions.
+					return false;
+		}
+		return true;
+	}
+	if (aActionType == ACT_TRANSFORM && (nArgs == 2 || nArgs == 3)) // i.e. the 3rd or 4th arg is about to be added.
+	{
+		// Somewhat inefficient since it has to be called for both Arg#2 and Arg#3, but seems
+		// worth the benefit in terms of code simplification.  Note that the following might
+		// return TRANS_CMD_INVALID just because the sub-command is contained in a variable
+		// reference.  That is why TRANS_CMD_INVALID does not produce an error at this stage,
+		// but only later when the line has been constructed far enough to call ArgHasDeref():
+		// i.e. Not the first param, only the third and fourth, which currently are either both numeric or both non-numeric for all cases.
+		switch (Line::ConvertTransformCmd(arg[1])) // arg[1] is the second arg.
+		{
+		// See comment above for why TRANS_CMD_INVALID isn't yet reported as an error:
+		case TRANS_CMD_INVALID:
+		case TRANS_CMD_ASC:
+#ifndef UNICODE
+		case TRANS_CMD_UNICODE:
+#endif
+		case TRANS_CMD_DEREF:
+		case TRANS_CMD_HTML:
+			break; // Do nothing.  Return default of false.
+
+		default:
+			// For all other sub-commands, Arg #3 and #4 are expression-capable.
+			return true;
+		}
+	}
+	return false;
+}
+
+
+
 bool LegacyArgIsExpression(LPTSTR aArgText, LPTSTR aArgMap)
 // Helper function for AddLine
 {
@@ -7845,8 +7839,6 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 	TCHAR orig_char;
 	LPTSTR op_begin, op_end;
 	LPTSTR this_aArgMap, this_aArg, cp;
-	ActionTypeType *np;
-	TransformCmds trans_cmd;
 	bool is_function, pending_function_is_new_op = false;
 
 	//////////////////////////////////////////////////////////
@@ -7860,7 +7852,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 		if (   !(new_arg = (ArgStruct *)SimpleHeap::Malloc(aArgc * sizeof(ArgStruct)))   )
 			return ScriptError(ERR_OUTOFMEM);
 
-		int i, j, i_plus_one;
+		int i, j;
 
 		for (i = 0; i < aArgc; ++i)
 		{
@@ -7871,28 +7863,6 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 			this_aArgMap = aArgMap ? aArgMap[i] : NULL; // Same.
 			ArgStruct &this_new_arg = new_arg[i];       // Same.
 			this_new_arg.is_expression = false;         // Set default early, for maintainability.
-
-			if (aActionType == ACT_TRANSFORM)
-			{
-				if (i == 1) // The second parameter (since the first is the OutputVar).
-					// Note that the following might return TRANS_CMD_INVALID just because the sub-command
-					// is contained in a variable reference.  That is why TRANS_CMD_INVALID does not
-					// produce an error at this stage, but only later when the line has been constructed
-					// far enough to call ArgHasDeref():
-					trans_cmd = Line::ConvertTransformCmd(this_aArg);
-					// The value of trans_cmd is also used by the syntax checker further below.
-				else if (i > 1) // i.e. Not the first param, only the third and fourth, which currently are either both numeric or both non-numeric for all cases.
-				{
-					switch(trans_cmd)
-					{
-					TRANSFORM_NON_EXPRESSION_CASES
-					default:
-						// For all other sub-commands, Arg #3 and #4 are expression-capable and will be made so
-						// if they pass the following check:
-						this_new_arg.is_expression = LegacyArgIsExpression(this_aArg, this_aArgMap);
-					}
-				}
-			}
 
 			// Before allocating memory for this Arg's text, first check if it's a pure
 			// variable.  If it is, we store it differently (and there's no need to resolve
@@ -8005,48 +7975,29 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 			// memory:
 			deref_count = 0;  // Init for each arg.
 
-			if (np = g_act[aActionType].NumericParams) // This command has at least one numeric parameter.
+			// As of v1.0.25, pure numeric parameters can optionally be numeric expressions, so check for that:
+			if (*this_new_arg.text // Not omitted.
+				&& ArgIsNumeric(aActionType, g_act[aActionType].NumericParams, aArg, i, aArgc))
 			{
-				// As of v1.0.25, pure numeric parameters can optionally be numeric expressions, so check for that:
-				i_plus_one = i + 1;
-				for (; *np; ++np)
-				{
-					if (*np == i_plus_one) // This arg is enforced to be purely numeric.
-					{
-						if (aActionType == ACT_WINMOVE)
-						{
-							if (i > 1)
-							{
-								// i indicates this is Arg #3 or beyond, which is one of the args that is
-								// either the word "default" or a number/expression.
-								if (!_tcsicmp(this_new_arg.text, _T("default"))) // It's not an expression.
-									break; // The loop is over because this arg was found in the list.
-							}
-							else // This is the first or second arg, which are title/text vs. X/Y when aArgc > 2.
-								if (aArgc > 2) // Title/text are not numeric/expressions.
-									break; // The loop is over because this arg was found in the list.
-						}
-						// Otherwise, it might be an expression so do the final checks.
-						// Override the original false default of is_expression unless an exception applies.
-						// Since ACT_ASSIGNEXPR, WHILE, FOR and UNTIL aren't legacy commands, don't call
-						// LegacyArgIsExpression() for them because that would cause things like x:=%y% and
-						// "while %x%" to behave the same as x:=y and "while x:, which would be inconsistent
-						// with how expressions are supposed to work. ACT_RETURN should have been excluded
-						// too; but it was left out for so long that it was thought best to document and keep
-						// the unexpected behavior of "return %x%".
-						// For other commands, if any telltale character is present it's definitely an
-						// expression because this is an arg that's marked as a number-or-expression.
-						// So telltales avoid the need for the complex check further below.
-						if (aActionType == ACT_ASSIGNEXPR || aActionType >= ACT_FOR && aActionType <= ACT_UNTIL // i.e. FOR, WHILE or UNTIL
-							|| aActionType == ACT_THROW
-							|| StrChrAny(this_new_arg.text, EXPR_TELLTALES)) // See above.
-							this_new_arg.is_expression = true;
-						else
-							this_new_arg.is_expression = LegacyArgIsExpression(this_new_arg.text, this_aArgMap);
-						break; // The loop is over if this arg is found in the list of mandatory-numeric args.
-					} // i is a mandatory-numeric arg
-				} // for each mandatory-numeric arg of this command, see if this arg matches its number.
-			} // this command has a list of mandatory numeric-args.
+				// It might be an expression so do the final checks.
+				// Override the original false default of is_expression unless an exception applies.
+				// Since ACT_ASSIGNEXPR, WHILE, FOR and UNTIL aren't legacy commands, don't call
+				// LegacyArgIsExpression() for them because that would cause things like x:=%y% and
+				// "while %x%" to behave the same as x:=y and "while x:, which would be inconsistent
+				// with how expressions are supposed to work. ACT_RETURN should have been excluded
+				// too; but it was left out for so long that it was thought best to document and keep
+				// the unexpected behavior of "return %x%".
+				// For other commands, if any telltale character is present it's definitely an
+				// expression because this is an arg that's marked as a number-or-expression.
+				// So telltales avoid the need for the complex check further below.
+				if (aActionType == ACT_ASSIGNEXPR || aActionType >= ACT_FOR && aActionType <= ACT_UNTIL // i.e. FOR, WHILE or UNTIL
+					|| aActionType == ACT_THROW
+					|| StrChrAny(this_new_arg.text, EXPR_TELLTALES)) // See above.
+					this_new_arg.is_expression = true;
+				// For backward-compatibility, ignore the previous value if this isn't Transform:
+				else if (  !(aActionType == ACT_TRANSFORM && this_new_arg.is_expression)  )
+					this_new_arg.is_expression = LegacyArgIsExpression(this_new_arg.text, this_aArgMap);
+			} // i is a mandatory-numeric arg
 
 			// To help runtime performance, the below changes args to non-expressions if they contain
 			// only a single numeric literal (or are entirely blank). At runtime, such args are expanded
@@ -9092,9 +9043,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 	case ACT_TRANSFORM:
 		if (aArgc > 1 && !line.ArgHasDeref(2))
 		{
-			// The value of trans_cmd was already set at an earlier stage, but only here can the error
-			// for new_raw_arg3 be displayed because only here was it finally possible to call
-			// ArgHasDeref() [above].
+			TransformCmds trans_cmd = Line::ConvertTransformCmd(new_raw_arg2);
 			if (trans_cmd == TRANS_CMD_INVALID)
 				return ScriptError(ERR_PARAM2_INVALID, new_raw_arg2);
 #ifndef UNICODE
@@ -11586,9 +11535,11 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		// override the default set here.
 		g_persistent = true;
 	}
-	else if (!_tcsicmp(func_name, _T("OnExit")) || !_tcsicmp(func_name, _T("OnClipboardChange")))
+	else if (!_tcsicmp(func_name, _T("OnExit"))
+		|| !_tcsicmp(func_name, _T("OnClipboardChange"))
+		|| !_tcsicmp(func_name, _T("OnError")))
 	{
-		bif = BIF_OnExitOrClipboard;
+		bif = BIF_On;
 		max_params = 2;
 	}
 #ifdef ENABLE_REGISTERCALLBACK
@@ -11629,6 +11580,7 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		BIF_OBJ_CASE(Remove, 		0, 2) // [min_key, max_key]
 		BIF_OBJ_CASE(RemoveAt,      1, 2) // position [, count]
 		BIF_OBJ_CASE(Pop,			0, 0)
+		BIF_OBJ_CASE(Count, 		0, 0)
 		BIF_OBJ_CASE(Length, 		0, 0)
 		BIF_OBJ_CASE(MinIndex, 		0, 0)
 		BIF_OBJ_CASE(MaxIndex, 		0, 0)
@@ -11645,9 +11597,23 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 			bif = BIF_ObjAddRefRelease;
 		else if (!_tcsicmp(suffix, _T("RawSet")))
 		{
-			bif = BIF_ObjRawSet;
+			bif = BIF_ObjRaw;
 			min_params = 3;
 			max_params = 3;
+		}
+		else if (!_tcsicmp(suffix, _T("RawGet")))
+		{
+			bif = BIF_ObjRaw;
+			min_params = 2;
+			max_params = 2;
+		}
+		else if (!_tcsicmp(suffix, _T("GetBase")))
+			bif = BIF_ObjBase;
+		else if (!_tcsicmp(suffix, _T("SetBase")))
+		{
+			bif = BIF_ObjBase;
+			min_params = 2;
+			max_params = 2;
 		}
 		else if (!_tcsicmp(suffix, _T("Load")))
 		{
@@ -13108,41 +13074,41 @@ Line *Script::PreparseCommands(Line *aStartingLine)
 				LPTSTR loop_name = line->mArg[0].text;
 				Label *loop_label;
 				Line *loop_line;
-				if (IsPureNumeric(loop_name))
-				{
-					int n = _ttoi(loop_name);
-					// Find the nth innermost loop which encloses this line:
-					for (loop_line = line->mParentLine; loop_line; loop_line = loop_line->mParentLine)
-						if (ACT_IS_LOOP(loop_line->mActionType)) // i.e. LOOP, FOR or WHILE.
-							if (--n < 1)
-								break;
-					if (!loop_line || n != 0)
-						return line->PreparseError(ERR_PARAM1_INVALID);
-				}
-				else
+				bool is_numeric = IsPureNumeric(loop_name);
+				// If loop_name is a label, find the innermost loop (#1) for validation purposes:
+				int n = is_numeric ? _ttoi(loop_name) : 1;
+				// Find the nth innermost loop which encloses this line:
+				for (loop_line = line->mParentLine; loop_line; loop_line = loop_line->mParentLine)
+					if (ACT_IS_LOOP(loop_line->mActionType)) // i.e. LOOP, FOR or WHILE.
+						if (--n < 1)
+							break;
+				if (!loop_line || n != 0)
+					return line->PreparseError(ERR_PARAM1_INVALID);
+				if (!is_numeric)
 				{
 					// Target is a named loop.
 					if ( !(loop_label = FindLabel(loop_name)) )
 						return line->PreparseError(ERR_NO_LABEL, loop_name);
+					Line *innermost_loop = loop_line;
 					loop_line = loop_label->mJumpToLine;
-					// Ensure the label points to a Loop, For-loop or While-loop ...
+					// Ensure the label points to a LOOP, FOR or WHILE which encloses this line.
+					// Use innermost_loop as the starting-point of the "jump" to ensure the target
+					// isn't a loop *inside* the current loop:
 					if (   !ACT_IS_LOOP(loop_line->mActionType)
-						// ... which encloses this line.  Use line->mParentLine as the starting-point of
-						// the "jump" to ensure the target isn't at the same nesting level as this line:
-						|| !line->mParentLine->IsJumpValid(*loop_label, true)   )
+						|| !innermost_loop->IsJumpValid(*loop_label, true)   )
 						return line->PreparseError(ERR_PARAM1_INVALID); //_T("Target label does not point to an appropriate Loop."));
-					// Although we've validated that it points to a loop, we can't resolve the line
-					// after the loop's body as that (mRelatedLine) hasn't been determined yet.
-					if (loop_line == line->mParentLine
-						// line->mParentLine must be non-NULL because above verified this line is enclosed by a Loop:
-						|| line->mParentLine->mActionType == ACT_BLOCK_BEGIN && loop_line == line->mParentLine->mParentLine)
-					{
-						// Set mRelatedLine to NULL since the target loop directly encloses this line.
-						loop_line = NULL;
-					}
+					if (loop_line == innermost_loop)
+						loop_line = NULL; // Since a normal break/continue will work in this case.
 				}
 				if (loop_line) // i.e. it wasn't determined to be this line's direct parent, which is always valid.
 				{
+					if (line->mActionType == ACT_BREAK)
+					{
+						// Find the line to which we'll actually jump when the loop breaks.
+						loop_line = loop_line->mRelatedLine; // From LOOP itself to the line after the LOOP's body.
+						if (loop_line->mActionType == ACT_UNTIL)
+							loop_line = loop_line->mNextLine;
+					}
 					if (in_function_body && loop_line->IsOutsideAnyFunctionBody())
 						return line->PreparseError(ERR_BAD_JUMP_OUT_OF_FUNCTION);
 					if (!line->CheckValidFinallyJump(loop_line))
@@ -15367,9 +15333,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 			{
 				// Rather than having PerformLoop() handle LOOP_BREAK specifically, tell our caller to jump to
 				// the line *after* the loop's body. This is always a jump our caller must handle, unlike GOTO:
-				caller_jump_to_line = line->mRelatedLine->mRelatedLine;
-				if (caller_jump_to_line->mActionType == ACT_UNTIL)
-					caller_jump_to_line = caller_jump_to_line->mNextLine;
+				caller_jump_to_line = line->mRelatedLine;
 				// Return OK instead of LOOP_BREAK to handle it like GOTO.  Returning LOOP_BREAK would
 				// cause the following to behave incorrectly (as described in the comments):
 				// If (True)  ; LOOP_BREAK takes precedence, causing this ExecUntil() layer to return.
@@ -15661,7 +15625,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 		case ACT_CATCH:
 		{
 			ActionTypeType this_act = line->mActionType;
-			bool bSavedInTryBlock = g.InTryBlock;
+			int outer_excptmode = g.ExcptMode;
 
 			if (this_act == ACT_CATCH)
 			{
@@ -15670,24 +15634,21 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 				//	return line->LineError(_T("Attempt to catch nothing!"), CRITICAL_ERROR);
 
 				Var* catch_var = ARGVARRAW1;
+				ExprTokenType *our_token = g.ThrownToken;
+				g.ThrownToken = NULL; // Assign() may cause script to execute via __Delete, so this must be cleared first.
 
 				// Assign the thrown token to the variable if provided.
-				if (catch_var && !catch_var->Assign(*g.ThrownToken))
-				{
-					// If this TRY/CATCH is inside some other TRY, Assign() has indirectly freed
-					// our token and possibly created a new one. So in that case, let someone else
-					// handle the token. Otherwise, free our token to avoid an "Unhandled" error
-					// message (since an error message has already been shown, and it probably
-					// indicated the thread will exit).
-					if (!g.InTryBlock)
-						g_script.FreeExceptionToken(g.ThrownToken);
+				result = catch_var ? catch_var->Assign(*our_token) : OK;
+				g_script.FreeExceptionToken(our_token);
+				if (!result)
 					return FAIL;
-				}
-
-				g_script.FreeExceptionToken(g.ThrownToken);
 			}
 			else // (this_act == ACT_TRY)
-				g.InTryBlock = true;
+			{
+				g.ExcptMode |= EXCPTMODE_TRY; // Must use |= rather than = to avoid removing EXCPTMODE_CATCH, if present.
+				if (line->mRelatedLine->mActionType != ACT_FINALLY) // Try without Catch/Finally acts like it has an empty Catch.
+					g.ExcptMode |= EXCPTMODE_CATCH;
+			}
 
 			// The following section is similar to ACT_IF.
 			jump_to_line = NULL;
@@ -15705,8 +15666,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 
 			if (this_act == ACT_TRY)
 			{
-				// Restore the previous InTryBlock value.
-				g.InTryBlock = bSavedInTryBlock;
+				g.ExcptMode = outer_excptmode;
 				bool bHasCatch = false;
 
 				if (line->mActionType == ACT_CATCH)
@@ -15790,11 +15750,9 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 			if (!line->mArgc)
 				return line->ThrowRuntimeException(ERR_EXCEPTION);
 
-			if (g.ThrownToken)
-			{
-				// This may happen if the catch is executed inside a finally block.
-				g_script.FreeExceptionToken(g.ThrownToken);
-			}
+			// ThrownToken should only be non-NULL while control is being passed up the
+			// stack, which implies no script code can be executing.
+			ASSERT(!g.ThrownToken);
 
 			ExprTokenType* token = new ExprTokenType;
 			if (!token) // Unlikely.
@@ -15843,8 +15801,9 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 			}
 
 			// Throw the newly-created token
-			g.ExcptLine = line;
 			g.ThrownToken = token;
+			if (!(g.ExcptMode & EXCPTMODE_CATCH))
+				g_script.UnhandledException(line);
 			return FAIL;
 		}
 
@@ -15867,7 +15826,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 		case ACT_EXITAPP: // Unconditional exit.
 			// This has been tested and it does yield to the OS the error code indicated in ARG1,
 			// if present (otherwise it returns 0, naturally) as expected:
-			return g_script.ExitApp(EXIT_EXIT, NULL, (int)line->ArgIndexToInt64(0));
+			return g_script.ExitApp(EXIT_EXIT, (int)line->ArgIndexToInt64(0));
 
 		case ACT_BLOCK_BEGIN:
 			if (line->mAttribute == ATTR_TRUE) // This is the ACT_BLOCK_BEGIN that starts a function's body.
@@ -18291,9 +18250,9 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 			break;
 		case THREAD_CMD_INTERRUPT:
 			// If either one is blank, leave that setting as it was before.
-			if (*ARG1)
-				g_script.mUninterruptibleTime = ArgToInt(2);  // 32-bit (for compatibility with DWORDs returned by GetTickCount).
 			if (*ARG2)
+				g_script.mUninterruptibleTime = ArgToInt(2);  // 32-bit (for compatibility with DWORDs returned by GetTickCount).
+			if (*ARG3)
 				g_script.mUninterruptedLineCountMax = ArgToInt(3);  // 32-bit also, to help performance (since huge values seem unnecessary).
 			break;
 		case THREAD_CMD_NOTIMERS:
@@ -19635,11 +19594,9 @@ IObject *Line::CreateRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat, LPCTSTR
 
 ResultType Line::ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat, LPCTSTR aExtraInfo)
 {
-	// ThrownToken may already exist if Assign() fails in ACT_CATCH, or possibly
-	// in other extreme cases. In such a case, just free the old token. If this
-	// line is CATCH, it won't handle the new exception; an outer TRY/CATCH will.
-	if (g->ThrownToken)
-		g_script.FreeExceptionToken(g->ThrownToken);
+	// ThrownToken should only be non-NULL while control is being passed up the
+	// stack, which implies no script code can be executing.
+	ASSERT(!g->ThrownToken);
 
 	ExprTokenType *token;
 	if (   !(token = new ExprTokenType)
@@ -19659,7 +19616,8 @@ ResultType Line::ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat, LPCTST
 	token->mem_to_free = NULL;
 
 	g->ThrownToken = token;
-	g->ExcptLine = this;
+	if (!(g->ExcptMode & EXCPTMODE_CATCH))
+		g_script.UnhandledException(this);
 
 	// Returning FAIL causes each caller to also return FAIL, until either the
 	// thread has fully exited or the recursion layer handling ACT_TRY is reached:
@@ -19676,7 +19634,7 @@ ResultType Line::SetErrorLevelOrThrowBool(bool aError)
 {
 	if (!aError)
 		return g_ErrorLevel->Assign(ERRORLEVEL_NONE);
-	if (!g->InTryBlock)
+	if (!g->InTryBlock())
 		return g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
 	// Otherwise, an error occurred and there is a try block, so throw an exception:
 	return ThrowRuntimeException(ERRORLEVEL_ERROR);
@@ -19684,7 +19642,7 @@ ResultType Line::SetErrorLevelOrThrowBool(bool aError)
 
 ResultType Line::SetErrorLevelOrThrowStr(LPCTSTR aErrorValue)
 {
-	if ((*aErrorValue == '0' && !aErrorValue[1]) || !g->InTryBlock)
+	if ((*aErrorValue == '0' && !aErrorValue[1]) || !g->InTryBlock())
 		return g_ErrorLevel->Assign(aErrorValue);
 	// Otherwise, an error occurred and there is a try block, so throw an exception:
 	return ThrowRuntimeException(aErrorValue);
@@ -19692,7 +19650,7 @@ ResultType Line::SetErrorLevelOrThrowStr(LPCTSTR aErrorValue)
 
 ResultType Line::SetErrorLevelOrThrowInt(int aErrorValue)
 {
-	if (!aErrorValue || !g->InTryBlock)
+	if (!aErrorValue || !g->InTryBlock())
 		return g_ErrorLevel->Assign(aErrorValue);
 	TCHAR buf[12];
 	// Otherwise, an error occurred and there is a try block, so throw an exception:
@@ -19709,7 +19667,7 @@ ResultType Script::SetErrorLevelOrThrowBool(bool aError)
 {
 	if (!aError)
 		return g_ErrorLevel->Assign(ERRORLEVEL_NONE);
-	if (!g->InTryBlock)
+	if (!g->InTryBlock())
 		return g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
 	// Otherwise, an error occurred and there is a try block, so throw an exception:
 	return ThrowRuntimeException(ERRORLEVEL_ERROR);
@@ -19717,7 +19675,7 @@ ResultType Script::SetErrorLevelOrThrowBool(bool aError)
 
 ResultType Script::SetErrorLevelOrThrowStr(LPCTSTR aErrorValue, LPCTSTR aWhat)
 {
-	if ((*aErrorValue == '0' && !aErrorValue[1]) || !g->InTryBlock)
+	if ((*aErrorValue == '0' && !aErrorValue[1]) || !g->InTryBlock())
 		return g_ErrorLevel->Assign(aErrorValue);
 	// Otherwise, an error occurred and there is a try block, so throw an exception:
 	return ThrowRuntimeException(aErrorValue, aWhat);
@@ -19725,7 +19683,7 @@ ResultType Script::SetErrorLevelOrThrowStr(LPCTSTR aErrorValue, LPCTSTR aWhat)
 
 ResultType Script::SetErrorLevelOrThrowInt(int aErrorValue, LPCTSTR aWhat)
 {
-	if (!aErrorValue || !g->InTryBlock)
+	if (!aErrorValue || !g->InTryBlock())
 		return g_ErrorLevel->Assign(aErrorValue);
 	TCHAR buf[12];
 	// Otherwise, an error occurred and there is a try block, so throw an exception:
@@ -19750,7 +19708,8 @@ ResultType Line::LineError(LPCTSTR aErrorText, ResultType aErrorType, LPCTSTR aE
 	if (!aExtraInfo)
 		aExtraInfo = _T("");
 
-	if (g->InTryBlock && (aErrorType == FAIL || aErrorType == EARLY_EXIT)) // FAIL is most common, but EARLY_EXIT is used by ComError(). WARN and CRITICAL_ERROR are excluded.
+	if ((g->ExcptMode || g_script.mOnError.Count()) // OnError also needs an exception object.
+		&& (aErrorType == FAIL || aErrorType == EARLY_EXIT)) // FAIL is most common, but EARLY_EXIT is used by ComError(). WARN and CRITICAL_ERROR are excluded.
 		return ThrowRuntimeException(aErrorText, NULL, aExtraInfo);
 
 	if (g_script.mErrorStdOut && !g_script.mIsReadyToExecute && aErrorType != WARN) // i.e. runtime errors are always displayed via dialog.
@@ -19942,12 +19901,39 @@ ResultType Script::ScriptError(LPCTSTR aErrorText, LPCTSTR aExtraInfo) //, Resul
 
 
 
-ResultType Script::UnhandledException(ExprTokenType*& aToken, Line* aLine, LPTSTR aFooter)
+ResultType Script::UnhandledException(Line* aLine)
 {
 	LPCTSTR message = _T(""), extra = _T("");
 	TCHAR extra_buf[MAX_NUMBER_SIZE], message_buf[MAX_NUMBER_SIZE];
 
-	if (Object *ex = dynamic_cast<Object *>(TokenToObject(*aToken)))
+	global_struct &g = *::g;
+
+	// OnError: Allow the script to handle it via a global callback.
+	static bool sOnErrorRunning = false;
+	if (g_script.mOnError.Count() && !sOnErrorRunning)
+	{
+		ExprTokenType *token = g.ThrownToken;
+		g.ThrownToken = NULL; // Allow the callback to execute correctly.
+		sOnErrorRunning = true;
+		bool returned_true = g_script.mOnError.Call(token, 1, INT_MAX) == CONDITION_TRUE;
+		sOnErrorRunning = false;
+		if (g.ThrownToken) // An exception was thrown by the callback.
+		{
+			// UnhandledException() has already been called recursively for g.ThrownToken,
+			// so don't show a second error message.  This allows `throw param1` to mean
+			// "abort all OnError callbacks and show default message now".
+			FreeExceptionToken(token);
+			return FAIL;
+		}
+		// Some callers rely on g.ThrownToken!=NULL to unwind the stack, so it is restored
+		// rather than freeing it immediately.  If the exception object has __Delete, it
+		// will be called after the stack unwinds.
+		g.ThrownToken = token;
+		if (returned_true)
+			return FAIL;
+	}
+
+	if (Object *ex = dynamic_cast<Object *>(TokenToObject(*g.ThrownToken)))
 	{
 		// For simplicity and safety, we call into the Object directly rather than via Invoke().
 		ExprTokenType t;
@@ -19979,7 +19965,7 @@ ResultType Script::UnhandledException(ExprTokenType*& aToken, Line* aLine, LPTST
 	else
 	{
 		// Assume it's a string or number.
-		message = TokenToString(*aToken, message_buf);
+		message = TokenToString(*g.ThrownToken, message_buf);
 	}
 
 	// If message is empty or numeric, display a default message for clarity.
@@ -19990,10 +19976,9 @@ ResultType Script::UnhandledException(ExprTokenType*& aToken, Line* aLine, LPTST
 	}	
 
 	TCHAR buf[MSGBOX_TEXT_SIZE];
-	Line::FormatError(buf, _countof(buf), FAIL, message, extra, aLine, aFooter);
+	Line::FormatError(buf, _countof(buf), FAIL, message, extra, aLine
+		, (g.ExcptMode & EXCPTMODE_DELETE) ? ERR_ABORT_DELETE : ERR_ABORT_NO_SPACES);
 	MsgBox(buf);
-	
-	FreeExceptionToken(aToken);
 
 	return FAIL;
 }
@@ -20165,6 +20150,11 @@ void Script::PreprocessLocalVars(Func &aFunc, Var **aVarList, int &aVarCount)
 
 void Script::CheckForClassOverwrite()
 {
+	// Aside from class variables, A_Args is the only variable which can contain an object
+	// at this stage.  Excluding it this way produces smaller code than checking for the
+	// "__class" key within whatever object is found.
+	Var *a_args = FindVar(_T("A_Args"));
+
 	for (Line *line = mFirstLine; line; line = line->mNextLine)
 	{
 		for (int a = 0; a < line->mArgc; ++a)
@@ -20175,7 +20165,7 @@ void Script::CheckForClassOverwrite()
 				if (!*arg.text) // The arg's variable is not one that needs to be dynamically resolved.
 				{
 					Var *target_var = VAR(arg);
-					if (target_var->HasObject()) // At this stage, all variables are empty except class variables.
+					if (target_var->HasObject() && target_var != a_args)
 						ScriptWarning(g_Warn_ClassOverwrite, WARNING_CLASS_OVERWRITE, target_var->mName, line);
 				}
 			}
@@ -20183,7 +20173,7 @@ void Script::CheckForClassOverwrite()
 			{
 				for (ExprTokenType *token = arg.postfix; token->symbol != SYM_INVALID; ++token)
 				{
-					if (token->symbol == SYM_VAR && token->is_lvalue && token->var->HasObject())
+					if (token->symbol == SYM_VAR && token->is_lvalue && token->var->HasObject() && token->var != a_args)
 						ScriptWarning(g_Warn_ClassOverwrite, WARNING_CLASS_OVERWRITE, token->var->mName, line);
 				}
 			}

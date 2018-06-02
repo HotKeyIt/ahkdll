@@ -890,7 +890,7 @@ class FileObject : public ObjectBase // fincs: No longer allowing the script to 
 					}
 					
 					DWORD bytes_written = mFile.Write(&buf, size);
-					if (!bytes_written && g->InTryBlock)
+					if (!bytes_written && g->InTryBlock())
 						break; // Throw an exception.
 					// Otherwise, we should return bytes_written even if it is 0:
 					aResultToken.value_int64 = bytes_written;
@@ -947,7 +947,7 @@ class FileObject : public ObjectBase // fincs: No longer allowing the script to 
 					bytes_written += mFile.Write(_T("\n"), 1);
 				}
 				// If no data was written and some should have been, consider it a failure:
-				if (!bytes_written && chars_to_write && g->InTryBlock)
+				if (!bytes_written && chars_to_write && g->InTryBlock())
 					break; // Throw an exception.
 				// Otherwise, some data was written (partial writes are considered successful),
 				// no data was requested to be written, or no TRY block is active, so we need to
@@ -973,7 +973,7 @@ class FileObject : public ObjectBase // fincs: No longer allowing the script to 
 						// Too small: expand the target variable if reading; abort otherwise.
 						&& (!reading || !target_token.var->SetCapacity(size, false, false)) ) // Relies on short-circuit order.
 					{
-						if (g->InTryBlock)
+						if (g->InTryBlock())
 							break; // Throw an exception.
 						aResultToken.value_int64 = 0;
 						return OK;
@@ -990,7 +990,7 @@ class FileObject : public ObjectBase // fincs: No longer allowing the script to 
 					result = mFile.Read(target, size);
 				else
 					result = mFile.Write(target, size);
-				if (!result && size && g->InTryBlock)
+				if (!result && size && g->InTryBlock())
 					break; // Throw an exception.
 				// Otherwise, it was a complete or partial success, or no TRY block is active.
 				aResultToken.value_int64 = result;
@@ -1015,7 +1015,7 @@ class FileObject : public ObjectBase // fincs: No longer allowing the script to 
 
 				if (!mFile.Seek(distance, origin))
 				{
-					if (g->InTryBlock)
+					if (g->InTryBlock())
 						break; // Throw an exception.
 					aResultToken.value_int64 = 0;
 				}
@@ -1105,7 +1105,7 @@ class FileObject : public ObjectBase // fincs: No longer allowing the script to 
 		// Since above didn't return, an error must've occurred.
 		aResultToken.symbol = SYM_STRING;
 		// marker should already be set to "".
-		if (g->InTryBlock)
+		if (g->InTryBlock())
 			// For simplicity, don't attempt to identify what kind of error occurred:
 			Script::ThrowRuntimeException(ERRORLEVEL_ERROR, _T("FileObject"));
 		return OK;
@@ -1233,7 +1233,7 @@ BIF_DECL(BIF_FileOpen)
 	if (!aResultToken.object)
 	{
 		aResultToken.value_int64 = 0; // and symbol is already SYM_INTEGER.
-		if (g->InTryBlock)
+		if (g->InTryBlock())
 			Script::ThrowRuntimeException(_T("Failed to open file."), _T("FileOpen"));
 	}
 
@@ -1242,7 +1242,7 @@ BIF_DECL(BIF_FileOpen)
 invalid_param:
 	aResultToken.value_int64 = 0;
 	g->LastError = ERROR_INVALID_PARAMETER; // For consistency.
-	if (g->InTryBlock)
+	if (g->InTryBlock())
 		Script::ThrowRuntimeException(ERR_PARAM2_INVALID, _T("FileOpen"));
 }
 

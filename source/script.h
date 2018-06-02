@@ -172,6 +172,7 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_ABORT _T("  ") ERR_ABORT_NO_SPACES
 #define WILL_EXIT _T("The program will exit.")
 #define OLD_STILL_IN_EFFECT _T("The script was not reloaded; the old version will remain in effect.")
+#define ERR_ABORT_DELETE _T("__Delete will now return.")
 #define ERR_CONTINUATION_SECTION_TOO_LONG _T("Continuation section too long.")
 #define ERR_UNRECOGNIZED_ACTION _T("This line does not contain a recognized action.")
 #define ERR_NONEXISTENT_HOTKEY _T("Nonexistent hotkey.")
@@ -1300,13 +1301,8 @@ public:
 		if (aIsRemoteRegistry)
 			*aIsRemoteRegistry = (computer_name_end != NULL);
 
-		HKEY root_key;
-		if (!_tcsicmp(key_name, _T("HKLM")) || !_tcsicmp(key_name, _T("HKEY_LOCAL_MACHINE")))       root_key = HKEY_LOCAL_MACHINE;
-		else if (!_tcsicmp(key_name, _T("HKCR")) || !_tcsicmp(key_name, _T("HKEY_CLASSES_ROOT")))   root_key = HKEY_CLASSES_ROOT;
-		else if (!_tcsicmp(key_name, _T("HKCC")) || !_tcsicmp(key_name, _T("HKEY_CURRENT_CONFIG"))) root_key = HKEY_CURRENT_CONFIG;
-		else if (!_tcsicmp(key_name, _T("HKCU")) || !_tcsicmp(key_name, _T("HKEY_CURRENT_USER")))   root_key = HKEY_CURRENT_USER;
-		else if (!_tcsicmp(key_name, _T("HKU")) || !_tcsicmp(key_name, _T("HKEY_USERS")))           root_key = HKEY_USERS;
-		else // Invalid or unsupported root key name.
+		HKEY root_key = RegConvertRootKeyType(key_name);
+		if (!root_key) // Invalid or unsupported root key name.
 			return NULL;
 
 		if (!aIsRemoteRegistry || !computer_name_end) // Either caller didn't want it opened, or it doesn't need to be.
@@ -1321,19 +1317,10 @@ public:
 		HKEY remote_key;
 		return (RegConnectRegistry(computer_name, root_key, &remote_key) == ERROR_SUCCESS) ? remote_key : NULL;
 	}
-	static LPTSTR RegConvertRootKey(LPTSTR aBuf, size_t aBufSize, HKEY aRootKey)
-	{
-		// switch() doesn't directly support expression of type HKEY:
-		if (aRootKey == HKEY_LOCAL_MACHINE)       tcslcpy(aBuf, _T("HKEY_LOCAL_MACHINE"), aBufSize);
-		else if (aRootKey == HKEY_CLASSES_ROOT)   tcslcpy(aBuf, _T("HKEY_CLASSES_ROOT"), aBufSize);
-		else if (aRootKey == HKEY_CURRENT_CONFIG) tcslcpy(aBuf, _T("HKEY_CURRENT_CONFIG"), aBufSize);
-		else if (aRootKey == HKEY_CURRENT_USER)   tcslcpy(aBuf, _T("HKEY_CURRENT_USER"), aBufSize);
-		else if (aRootKey == HKEY_USERS)          tcslcpy(aBuf, _T("HKEY_USERS"), aBufSize);
-		else if (aBufSize)                        *aBuf = '\0'; // Make it be the empty string for anything else.
-		// These are either unused or so rarely used (DYN_DATA on Win9x) that they aren't supported:
-		// HKEY_PERFORMANCE_DATA, HKEY_PERFORMANCE_TEXT, HKEY_PERFORMANCE_NLSTEXT, HKEY_DYN_DATA
-		return aBuf;
-	}
+
+	static HKEY RegConvertRootKeyType(LPTSTR aName);
+	static LPTSTR RegConvertRootKeyType(HKEY aKey);
+
 	static int RegConvertValueType(LPTSTR aValueType)
 	{
 		if (!_tcsicmp(aValueType, _T("REG_SZ"))) return REG_SZ;
@@ -1343,23 +1330,23 @@ public:
 		if (!_tcsicmp(aValueType, _T("REG_BINARY"))) return REG_BINARY;
 		return REG_NONE; // Unknown or unsupported type.
 	}
-	static LPTSTR RegConvertValueType(LPTSTR aBuf, size_t aBufSize, DWORD aValueType)
+	static LPTSTR RegConvertValueType(DWORD aValueType)
 	{
 		switch(aValueType)
 		{
-		case REG_SZ: tcslcpy(aBuf, _T("REG_SZ"), aBufSize); return aBuf;
-		case REG_EXPAND_SZ: tcslcpy(aBuf, _T("REG_EXPAND_SZ"), aBufSize); return aBuf;
-		case REG_BINARY: tcslcpy(aBuf, _T("REG_BINARY"), aBufSize); return aBuf;
-		case REG_DWORD: tcslcpy(aBuf, _T("REG_DWORD"), aBufSize); return aBuf;
-		case REG_DWORD_BIG_ENDIAN: tcslcpy(aBuf, _T("REG_DWORD_BIG_ENDIAN"), aBufSize); return aBuf;
-		case REG_LINK: tcslcpy(aBuf, _T("REG_LINK"), aBufSize); return aBuf;
-		case REG_MULTI_SZ: tcslcpy(aBuf, _T("REG_MULTI_SZ"), aBufSize); return aBuf;
-		case REG_RESOURCE_LIST: tcslcpy(aBuf, _T("REG_RESOURCE_LIST"), aBufSize); return aBuf;
-		case REG_FULL_RESOURCE_DESCRIPTOR: tcslcpy(aBuf, _T("REG_FULL_RESOURCE_DESCRIPTOR"), aBufSize); return aBuf;
-		case REG_RESOURCE_REQUIREMENTS_LIST: tcslcpy(aBuf, _T("REG_RESOURCE_REQUIREMENTS_LIST"), aBufSize); return aBuf;
-		case REG_QWORD: tcslcpy(aBuf, _T("REG_QWORD"), aBufSize); return aBuf;
-		case REG_SUBKEY: tcslcpy(aBuf, _T("KEY"), aBufSize); return aBuf;  // Custom (non-standard) type.
-		default: if (aBufSize) *aBuf = '\0'; return aBuf;  // Make it be the empty string for REG_NONE and anything else.
+		case REG_SZ: return _T("REG_SZ");
+		case REG_EXPAND_SZ: return _T("REG_EXPAND_SZ");
+		case REG_BINARY: return _T("REG_BINARY");
+		case REG_DWORD: return _T("REG_DWORD");
+		case REG_DWORD_BIG_ENDIAN: return _T("REG_DWORD_BIG_ENDIAN");
+		case REG_LINK: return _T("REG_LINK");
+		case REG_MULTI_SZ: return _T("REG_MULTI_SZ");
+		case REG_RESOURCE_LIST: return _T("REG_RESOURCE_LIST");
+		case REG_FULL_RESOURCE_DESCRIPTOR: return _T("REG_FULL_RESOURCE_DESCRIPTOR");
+		case REG_RESOURCE_REQUIREMENTS_LIST: return _T("REG_RESOURCE_REQUIREMENTS_LIST");
+		case REG_QWORD: return _T("REG_QWORD");
+		case REG_SUBKEY: return _T("KEY");  // Custom (non-standard) type.
+		default: return _T("");  // Make it be the empty string for REG_NONE and anything else.
 		}
 	}
 	static DWORD RegConvertView(LPTSTR aBuf)
@@ -2872,7 +2859,7 @@ public:
 		, mStyle(WS_POPUP|WS_CLIPSIBLINGS|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX) // WS_CLIPCHILDREN (doesn't seem helpful currently)
 		, mExStyle(0) // This and the above should not be used once the window has been created since they might get out of date.
 		, mInRadioGroup(false), mUseTheme(true), mOwner(NULL), mDelimiter('|')
-		, mCurrentFontIndex(FindOrCreateFont()) // Must call this in constructor to ensure sFont array is never NULL while a GUI object exists.  Omit params to tell it to find or create DEFAULT_GUI_FONT.
+		, mCurrentFontIndex(FindOrCreateFont()) // Must call this in constructor to ensure sFont array is never empty while a GUI object exists.  Omit params to tell it to find or create DEFAULT_GUI_FONT.
 		, mCurrentListView(NULL), mCurrentTreeView(NULL)
 		, mTabControlCount(0), mCurrentTabControlIndex(MAX_TAB_CONTROLS), mCurrentTabIndex(0)
 		, mCurrentColor(CLR_DEFAULT)
@@ -3075,6 +3062,7 @@ public:
 	LPTSTR ParseActionType(LPTSTR aBufTarget, LPTSTR aBufSource, bool aDisplayErrors);
 	static ActionTypeType ConvertActionType(LPTSTR aActionTypeString);
 	static ActionTypeType ConvertOldActionType(LPTSTR aActionTypeString);
+	static bool ArgIsNumeric(ActionTypeType aActionType, ActionTypeType *np, LPTSTR arg[], int aArgIndex, int aArgCount = -1);
 	ResultType AddLabel(LPTSTR aLabelName, bool aAllowDupe);
 	void RemoveLabel(Label *aLabel);
 	ResultType AddLine(ActionTypeType aActionType, LPTSTR aArg[] = NULL, int aArgc = 0, LPTSTR aArgMap[] = NULL);
@@ -3110,7 +3098,7 @@ public:
 	TCHAR mThisMenuName[MAX_MENU_NAME_LENGTH + 1];
 	LPTSTR mThisHotkeyName, mPriorHotkeyName;
 #endif
-	MsgMonitorList mOnExit, mOnClipboardChange; // Lists of event handlers for OnExit() and OnClipboardChange().
+	MsgMonitorList mOnExit, mOnClipboardChange, mOnError; // Event handlers for OnExit(), OnClipboardChange() and OnError().
 	Label *mOnClipboardChangeLabel; // Separate from mOnClipboardChange for backward-compatibility reasons.
 	Label *mOnExitLabel;  // The label to run when the script terminates (NULL if none).
 	HWND mNextClipboardViewer;
@@ -3175,7 +3163,7 @@ public:
 	ResultType Edit();
 #endif
 	ResultType Reload(bool aDisplayErrors);
-	ResultType ExitApp(ExitReasons aExitReason, LPTSTR aBuf = NULL, int ExitCode = 0);
+	ResultType ExitApp(ExitReasons aExitReason, int aExitCode = 0);
 	void TerminateApp(ExitReasons aExitReason, int aExitCode); // L31: Added aExitReason. See script.cpp.
 	LineNumberType LoadFromFile();
 #ifndef AUTOHOTKEYSC
@@ -3268,6 +3256,7 @@ public:
 #endif
 	// Call this SciptError to avoid confusion with Line's error-displaying functions:
 	ResultType ScriptError(LPCTSTR aErrorText, LPCTSTR aExtraInfo = _T("")); // , ResultType aErrorType = FAIL);
+
 	void ScriptWarning(WarnMode warnMode, LPCTSTR aWarningText, LPCTSTR aExtraInfo = _T(""), Line *line = NULL);
 	void WarnUninitializedVar(Var *var);
 	void MaybeWarnLocalSameAsGlobal(Func &func, Var &var);
@@ -3275,7 +3264,7 @@ public:
 	void PreprocessLocalVars(Func &aFunc, Var **aVarList, int &aVarCount);
 	void CheckForClassOverwrite();
 
-	static ResultType UnhandledException(ExprTokenType*& aToken, Line* aLine, LPTSTR aFooter = _T("The thread has exited."));
+	static ResultType UnhandledException(Line* aLine);
 	static ResultType SetErrorLevelOrThrow() { return SetErrorLevelOrThrowBool(true); }
 	static ResultType SetErrorLevelOrThrowBool(bool aError);
 	static ResultType SetErrorLevelOrThrowInt(int aErrorValue, LPCTSTR aWhat);
@@ -3505,7 +3494,7 @@ BIF_DECL(BIF_SqrtLogLn);
 BIF_DECL(BIF_MinMax);
 
 BIF_DECL(BIF_OnMessage);
-BIF_DECL(BIF_OnExitOrClipboard);
+BIF_DECL(BIF_On);
 
 #ifdef ENABLE_REGISTERCALLBACK
 BIF_DECL(BIF_RegisterCallback);
@@ -3552,7 +3541,8 @@ BIF_DECL(BIF_ObjNew); // Pseudo-operator.
 BIF_DECL(BIF_ObjIncDec); // Pseudo-operator.
 BIF_DECL(BIF_ObjAddRefRelease);
 BIF_DECL(BIF_ObjBindMethod);
-BIF_DECL(BIF_ObjRawSet);
+BIF_DECL(BIF_ObjRaw);
+BIF_DECL(BIF_ObjBase);
 // Built-ins also available as methods -- these are available as functions for use primarily by overridden methods (i.e. where using the built-in methods isn't possible as they're no longer accessible).
 BIF_DECL(BIF_ObjInsert);
 BIF_DECL(BIF_ObjInsertAt);
@@ -3564,6 +3554,7 @@ BIF_DECL(BIF_ObjRemoveAt);
 BIF_DECL(BIF_ObjGetCapacity);
 BIF_DECL(BIF_ObjSetCapacity);
 BIF_DECL(BIF_ObjGetAddress);
+BIF_DECL(BIF_ObjCount);
 BIF_DECL(BIF_ObjLength);
 BIF_DECL(BIF_ObjMaxIndex);
 BIF_DECL(BIF_ObjMinIndex);
