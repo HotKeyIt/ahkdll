@@ -402,7 +402,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 				if (messages_received == 0 && allow_early_return)
 				{
 					// Fix for v1.1.05.04: Since Peek() didn't find a message, avoid maxing the CPU.
-					// This specific section is needed for PerformWait() when an underlying thread
+					// This specific section is needed for BIF_Wait() when an underlying thread
 					// is displaying a dialog, and perhaps in other cases.
 					// Fix for v1.1.07.00: Avoid Sleep() if caller specified a duration of zero;
 					// otherwise SendEvent with a key delay of 0 will be slower than expected.
@@ -796,7 +796,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 				// And just in case a menu item that lacks a label (such as a separator) is ever
 				// somehow selected (perhaps via someone sending direct messages to us, bypassing
 				// the menu):
-				if (!menu_item->mLabel)
+				if (!menu_item->mCallback)
 					continue;
 				// Ignore/discard a hotkey or custom menu item event if the current thread's priority
 				// is higher than it's:
@@ -1228,7 +1228,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 					case GUI_EVENT_CLOSE:
 						// If the return value is false/unspecified, hide/destroy the Gui.
 						if (!retval)
-							pgui->CancelOrDestroy(2); // The '2' is needed because we earlier used AddRef().
+							pgui->Cancel();
 						break;
 					case GUI_EVENT_DROPFILES:
 						if (pgui->IsMonitoring(gui_action)) // Reapply the style only if we're still monitoring this event.
@@ -1272,7 +1272,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 					(__int64)(menu_item->Pos() + 1), // +1 to convert zero-based to one-based.
 					menu
 				};
-				menu_item->mLabel->ExecuteInNewThread(_T("Menu"), param, _countof(param));
+				menu_item->mCallback->ExecuteInNewThread(_T("Menu"), param, _countof(param));
 				menu->Release();
 				if (pgui)
 					pgui->Release();
@@ -1648,7 +1648,7 @@ bool CheckScriptTimers()
 		g->CurrentTimer = &timer;
 
 		++timer.mExistingThreads;
-		timer.mLabel->ExecuteInNewThread(_T("Timer"));
+		timer.mCallback->ExecuteInNewThread(_T("Timer"));
 		--timer.mExistingThreads;
 
 		// Resolve the next timer only now, in case other timers were created or deleted while
@@ -1663,12 +1663,12 @@ bool CheckScriptTimers()
 		// but that would only work if the script releases its last reference to the object
 		// *before* the timer expires.
 		// mEnabled is checked in case the timer re-enabled itself.
-		if (timer.mRunOnlyOnce && !timer.mEnabled && timer.mLabel.IsLiveObject())
-			timer.mLabel = NULL;
-		// If the script attempted to delete this timer while it was executing, mLabel was set
+		if (timer.mRunOnlyOnce && !timer.mEnabled && timer.mCallback.IsLiveObject())
+			timer.mCallback = NULL;
+		// If the script attempted to delete this timer while it was executing, mCallback was set
 		// to NULL and it is now time to delete the timer.  mExistingThreads == 0 is implied
 		// at this point since timers are only allowed one thread.
-		if (timer.mLabel == NULL)
+		if (timer.mCallback == NULL)
 			g_script->DeleteTimer(NULL);
 	} // for() each timer.
 
@@ -2001,7 +2001,7 @@ void ResumeUnderlyingThread(VarBkp &aSavedErrorLevel)
 	// such an emergency interruption, a critical thread should be uninterruptible again.
 	//g->AllowThreadToBeInterrupted = !g->ThreadIsCritical;
 	// ABOVE: if g==g_array now, g->ThreadIsCritical==true should be possible only when the AutoExec
-	// section is still running (and it has turned on Critical), or if a threadless RegisterCallback()
+	// section is still running (and it has turned on Critical), or if a threadless CallbackCreate()
 	// function is running in the idle thread (the docs discourage that).
 
 	// If this was the last running thread and the script has nothing keeping it open (hotkeys, Gui,

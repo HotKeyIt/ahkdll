@@ -16,7 +16,7 @@ GNU General Public License for more details.
 
 #include "stdafx.h" // pre-compiled headers
 #include "var.h"
-#include "globaldata.h" // for g_script
+#include "globaldata.h" // for g_script->
 
 
 // Init static vars:

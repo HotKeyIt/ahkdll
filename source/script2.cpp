@@ -848,7 +848,7 @@ ResultType Line::PerformShowWindow(ActionTypeType aActionType, LPTSTR aTitle, LP
 
 
 
-ResultType Line::PerformWait()
+BIF_DECL(BIF_Wait)
 // Since other script threads can interrupt these commands while they're running, it's important that
 // these commands not refer to sArgDeref[] and sArgVar[] anytime after an interruption becomes possible.
 // This is because an interrupting thread usually changes the values to something inappropriate for this thread.
@@ -862,40 +862,45 @@ ResultType Line::PerformWait()
 	HANDLE running_process; // For RUNWAIT
 	DWORD exit_code; // For RUNWAIT
 
-	// For ACT_KEYWAIT:
+	// For FID_KeyWait:
 	bool wait_for_keydown;
 	KeyStateTypes key_state_type;
 	JoyControls joy;
 	int joystick_id;
 	ExprTokenType token;
-	TCHAR buf[LINE_SIZE];
 
-	if (mActionType == ACT_RUNWAIT)
+	Line *waiting_line = g_script->mCurrLine;
+
+	_f_param_string_opt(arg1, 0);
+	_f_param_string_opt(arg2, 1);
+	_f_param_string_opt(arg3, 2);
+	_f_param_string_opt(arg4, 3);
+	_f_param_string_opt(arg5, 4);
+
+	if (_f_callee_id == FID_RunWait)
 	{
-		bool use_el = tcscasestr(ARG3, _T("UseErrorLevel"));
-		if (!g_script->ActionExec(ARG1, NULL, ARG2, !use_el, ARG3, &running_process, use_el, true, ARGVAR4)) // Load-time validation has ensured that the arg is a valid output variable (e.g. not a built-in var).
-			return use_el ? g_ErrorLevel->Assign(_T("ERROR")) : FAIL;
+		if (!g_script->ActionExec(arg1, NULL, arg2, true, arg3, &running_process, true, true
+			, ParamIndexToOptionalVar(4-1)))
+			_f_return_FAIL;
 		//else fall through to the waiting-phase of the operation.
-		// Above: The special string ERROR is used, rather than a number like 1, because currently
-		// RunWait might in the future be able to return any value, including 259 (STATUS_PENDING).
 	}
 	
 	// Must NOT use ELSE-IF in line below due to ELSE further down needing to execute for RunWait.
-	if (mActionType == ACT_KEYWAIT)
+	if (_f_callee_id == FID_KeyWait)
 	{
-		if (   !(vk = TextToVK(ARG1))   )
+		if (   !(vk = TextToVK(arg1))   )
 		{
-			joy = (JoyControls)ConvertJoy(ARG1, &joystick_id);
+			joy = (JoyControls)ConvertJoy(arg1, &joystick_id);
 			if (!IS_JOYSTICK_BUTTON(joy)) // Currently, only buttons are supported.
 				// It's either an invalid key name or an unsupported Joy-something.
-				return LineError(ERR_PARAM1_INVALID, FAIL, ARG1);
+				_f_throw(ERR_PARAM1_INVALID, arg1);
 		}
 		// Set defaults:
 		wait_for_keydown = false;  // The default is to wait for the key to be released.
 		key_state_type = KEYSTATE_PHYSICAL;  // Since physical is more often used.
 		wait_indefinitely = true;
 		sleep_duration = 0;
-		for (LPTSTR cp = ARG2; *cp; ++cp)
+		for (LPTSTR cp = arg2; *cp; ++cp)
 		{
 			switch(ctoupper(*cp))
 			{
@@ -915,13 +920,13 @@ ResultType Line::PerformWait()
 			}
 		}
 	}
-	else if (   (mActionType != ACT_RUNWAIT && mActionType != ACT_CLIPWAIT && *ARG3)
-		|| (mActionType == ACT_CLIPWAIT && *ARG1)   )
+	else if (   (_f_callee_id != FID_RunWait && _f_callee_id != FID_ClipWait && *arg3)
+		|| (_f_callee_id == FID_ClipWait && *arg1)   )
 	{
 		// Since the param containing the timeout value isn't blank, it must be numeric,
 		// otherwise, the loading validation would have prevented the script from loading.
 		wait_indefinitely = false;
-		sleep_duration = (int)(ATOF(mActionType == ACT_CLIPWAIT ? ARG1 : ARG3) * 1000); // Can be zero.
+		sleep_duration = (int)(ATOF(_f_callee_id == FID_ClipWait ? arg1 : arg3) * 1000); // Can be zero.
 		if (sleep_duration < 1)
 			// Waiting 500ms in place of a "0" seems more useful than a true zero, which
 			// doesn't need to be supported because it's the same thing as something like
@@ -936,29 +941,9 @@ ResultType Line::PerformWait()
 		sleep_duration = 0; // Just to catch any bugs.
 	}
 
-	if (mActionType != ACT_RUNWAIT)
-		g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Set default ErrorLevel to be possibly overridden later on.
+	_f_set_retval_i(TRUE); // Set default return value to be possibly overridden later on.
 
-	bool any_clipboard_format = (mActionType == ACT_CLIPWAIT && ArgToInt(2) == 1);
-
-	// Right before starting the wait-loop, make a copy of our args using the stack
-	// space in our recursion layer.  This is done in case other hotkey subroutine(s)
-	// are launched while we're waiting here, which might cause our args to be overwritten
-	// if any of them happen to be in the Deref buffer:
-	LPTSTR arg[MAX_ARGS], marker;
-	int i, space_remaining;
-	for (i = 0, space_remaining = LINE_SIZE, marker = buf; i < mArgc; ++i)
-	{
-		if (!space_remaining) // Realistically, should never happen.
-			arg[i] = _T("");
-		else
-		{
-			arg[i] = marker;  // Point it to its place in the buffer.
-			tcslcpy(marker, sArgDeref[i], space_remaining); // Make the copy.
-			marker += _tcslen(marker) + 1;  // +1 for the zero terminator of each arg.
-			space_remaining = (int)(LINE_SIZE - (marker - buf));
-		}
-	}
+	bool any_clipboard_format = (_f_callee_id == FID_ClipWait && ATOI(arg2) == 1);
 
 #ifdef _WIN64
 	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
@@ -968,62 +953,63 @@ ResultType Line::PerformWait()
 
 	for (start_time = GetTickCount();;) // start_time is initialized unconditionally for use with v1.0.30.02's new logging feature further below.
 	{ // Always do the first iteration so that at least one check is done.
-		switch(mActionType)
+		switch(_f_callee_id)
 		{
-		case ACT_WINWAIT:
-			#define SAVED_WIN_ARGS SAVED_ARG1, SAVED_ARG2, SAVED_ARG4, SAVED_ARG5
-			if (WinExist(*g, SAVED_WIN_ARGS, false, true))
+		case FID_WinWait:
+			#define SAVED_WIN_ARGS arg1, arg2, arg4, arg5
+			if (HWND found = WinExist(*g, SAVED_WIN_ARGS, false, true))
 			{
 				DoWinDelay;
-				return OK;
+				_f_return_i((size_t)found);
 			}
 			break;
-		case ACT_WINWAITCLOSE:
-			if (!WinExist(*g, SAVED_WIN_ARGS))
+		case FID_WinWaitClose:
+			if (!WinExist(*g, SAVED_WIN_ARGS, false, true))
 			{
 				DoWinDelay;
-				return OK;
+				_f_return_retval;
 			}
 			break;
-		case ACT_WINWAITACTIVE:
-			if (WinActive(*g, SAVED_WIN_ARGS, true))
+		case FID_WinWaitActive:
+			if (HWND found = WinActive(*g, SAVED_WIN_ARGS, true))
 			{
 				DoWinDelay;
-				return OK;
+				_f_return_i((size_t)found);
 			}
 			break;
-		case ACT_WINWAITNOTACTIVE:
+		case FID_WinWaitNotActive:
 			if (!WinActive(*g, SAVED_WIN_ARGS, true))
 			{
 				DoWinDelay;
-				return OK;
+				_f_return_retval;
 			}
 			break;
-		case ACT_CLIPWAIT:
+		case FID_ClipWait:
 			// Seems best to consider CF_HDROP to be a non-empty clipboard, since we
 			// support the implicit conversion of that format to text:
 			if (any_clipboard_format)
 			{
 				if (CountClipboardFormats())
-					return OK;
+					_f_return_retval;
 			}
 			else
 				if (IsClipboardFormatAvailable(CF_NATIVETEXT) || IsClipboardFormatAvailable(CF_HDROP))
-					return OK;
+					_f_return_retval;
 			break;
-		case ACT_KEYWAIT:
+		case FID_KeyWait:
 			if (vk) // Waiting for key or mouse button, not joystick.
 			{
 				if (ScriptGetKeyState(vk, key_state_type) == wait_for_keydown)
-					return OK;
+					_f_return_retval;
 			}
 			else // Waiting for joystick button
 			{
-				if (ScriptGetJoyState(joy, joystick_id, token, buf) == wait_for_keydown)
-					return OK;
+				TCHAR unused[32];
+				if (ScriptGetJoyState(joy, joystick_id, token, unused) == wait_for_keydown)
+					_f_return_retval;
 			}
 			break;
-		case ACT_RUNWAIT:
+		case FID_RunWait:
 			// Pretty nasty, but for now, nothing is done to prevent an infinite loop.
 			// In the future, maybe OpenProcess() can be used to detect if a process still
 			// exists (is there any other way?):
@@ -1045,7 +1031,7 @@ ResultType Line::PerformWait()
 				// to check against a return value of -1, for example, which I suspect many apps
 				// return.  AutoIt3 (and probably 2) use a signed int as well, so that is another
 				// reason to keep it this way:
-				return g_ErrorLevel->Assign((int)exit_code);
+				_f_return_i((int)exit_code);
 			}
 			break;
 		}
@@ -1067,13 +1053,13 @@ ResultType Line::PerformWait()
 				{
 					// ListLines is enabled in this thread, but if it was disabled in the interrupting thread,
 					// the very last log entry will be ours.  In that case, we don't want to duplicate it.
-					int previous_log_index = (sLogNext ? sLogNext : LINE_LOG_SIZE) - 1; // Wrap around if needed (the entry can be NULL in that case).
-					if (sLog[previous_log_index] != this || sLogTick[previous_log_index] != start_time) // The previously logged line was not this one, or it was added by the interrupting thread (different start_time).
+					int previous_log_index = (Line::sLogNext ? Line::sLogNext : LINE_LOG_SIZE) - 1; // Wrap around if needed (the entry can be NULL in that case).
+					if (Line::sLog[previous_log_index] != waiting_line || Line::sLogTick[previous_log_index] != start_time) // The previously logged line was not this one, or it was added by the interrupting thread (different start_time).
 					{
-						sLog[sLogNext] = this;
-						sLogTick[sLogNext++] = start_time; // Store a special value so that Line::LogToText() can report that its "still waiting" from earlier.
-						if (sLogNext >= LINE_LOG_SIZE)
-							sLogNext = 0;
+						Line::sLog[Line::sLogNext] = waiting_line;
+						Line::sLogTick[Line::sLogNext++] = start_time; // Store a special value so that Line::LogToText() can report that its "still waiting" from earlier.
+						if (Line::sLogNext >= LINE_LOG_SIZE)
+							Line::sLogNext = 0;
 						// The lines above are the similar to those used in ExecUntil(), so the two should be
 						// maintained together.
 					}
@@ -1083,7 +1069,7 @@ ResultType Line::PerformWait()
 		else if (wait_indefinitely || (int)(sleep_duration - (GetTickCount() - start_time)) > SLEEP_INTERVAL_HALF)
 			Sleep(SLEEP_INTERVAL);
 		else // Done waiting.
-			return g_ErrorLevel->Assign(ERRORLEVEL_ERROR); // Since it timed out, we override the default with this.
+			_f_return_i(FALSE); // Since it timed out, we override the default with this.
 	} // for()
 }
 
@@ -2049,7 +2035,6 @@ BIF_DECL(BIF_PostSendMessage)
 	// member after sending the message in case the receiver of the message wrote something to the buffer.
 	// This is similar to the way "Str" parameters work in DllCall.
 	INT_PTR param[2] = { 0, 0 };
-	Var *var_to_update[2] = { 0, 0 };
 	int i;
 	for (i = 1; i < 3; ++i) // Two iterations: wParam and lParam.
 	{
@@ -2057,21 +2042,19 @@ BIF_DECL(BIF_PostSendMessage)
 			continue;
 		ExprTokenType &this_param = *aParam[i];
 		if (this_param.symbol == SYM_VAR)
-		{
-			Var *var = this_param.var;
-			var->ToTokenSkipAddRef(this_param);
-			if (this_param.symbol == SYM_STRING)
-				var_to_update[i-1] = var; // Not this_param.var, which was overwritten.
-		}
+			this_param.var->ToTokenSkipAddRef(this_param);
 		switch (this_param.symbol)
 		{
 		case SYM_INTEGER:
 			param[i-1] = (INT_PTR)this_param.value_int64;
-			var_to_update[i-1] = NULL;
 			break;
 		case SYM_STRING:
-			param[i-1] = (INT_PTR)this_param.marker;
-			break;
+			LPTSTR error_marker;
+			param[i-1] = (INT_PTR)tcstoi64_o(this_param.marker, &error_marker, 0);
+			if (!*error_marker) // Valid number or empty string.
+				break;
+			//else: It's a non-numeric string; maybe the caller forgot the &address-of operator.
+			// Note that an empty string would satisfy the check above.
 		default:
 			// SYM_FLOAT: Seems best to treat it as an error rather than truncating the value.
 			// SYM_OBJECT: Reserve for future use (user-defined conversion meta-functions?).
@@ -2085,10 +2068,6 @@ BIF_DECL(BIF_PostSendMessage)
 		successful = SendMessageTimeout(control_window, msg, (WPARAM)param[0], (LPARAM)param[1], SMTO_ABORTIFHUNG, timeout, &dwResult);
 	else
 		successful = PostMessage(control_window, msg, (WPARAM)param[0], (LPARAM)param[1]);
-
-	for (i = 0; i < 2; ++i) // Two iterations: wParam and lParam.
-		if (var_to_update[i])
-			var_to_update[i]->SetLengthFromContents();
 
 	g_ErrorLevel->Assign(successful ? ERRORLEVEL_NONE : ERRORLEVEL_ERROR);
 	if (aUseSend && successful)
@@ -3969,10 +3948,7 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 			//else fall through to the next case.
 		case WM_LBUTTONDBLCLK:
 			if (g_script->mTrayMenu->mDefault)
-				POST_AHK_USER_MENU(hWnd, g_script->mTrayMenu->mDefault->mMenuID, NULL) // NULL flags it as a non-GUI menu item.
-			else if (g_script->mTrayMenu->mIncludeStandardItems)
-				ShowMainWindow();
-			// else do nothing.
+				PostMessage(hWnd, WM_COMMAND, g_script->mTrayMenu->mDefault->mMenuID, 0); // WM_COMMAND vs POST_AHK_USER_MENU to support the Standard menu items.
 			return 0;
 		case WM_RBUTTONUP:
 			// v1.0.30.03:
@@ -9669,16 +9645,11 @@ BIV_DECL_R(BIV_TrayMenu)
 }
 
 
-
 BIV_DECL_R(BIV_AllowMainWindow)
 {
 	if (aBuf)
 	{
-#ifdef AUTOHOTKEYSC
-		*aBuf++ = g_AllowMainWindow ? '1' : '0';
-#else
 		*aBuf++ = '1';
-#endif
 		*aBuf = '\0';
 	}
 	return 1;  // Length is always 1.
@@ -9686,19 +9657,13 @@ BIV_DECL_R(BIV_AllowMainWindow)
 
 BIV_DECL_W(BIV_AllowMainWindow_Set)
 {
-#ifdef AUTOHOTKEYSC
-	g_script->AllowMainWindow(ResultToBOOL(aBuf));
-#else
 	// It seems best to allow `A_AllowMainWindow := true`, since a script
 	// which is only sometimes compiled may execute it unconditionally.
 	// For code size, false values are ignored instead of throwing an exception.
 	//if (!ResultToBOOL(aBuf))
-	//	return g_script->ScriptError(ERR_INVALID_VALUE, aBuf);
-#endif
+	//	return g_script.ScriptError(ERR_INVALID_VALUE, aBuf);
 	return OK;
 }
-
-
 
 VarSizeType BIV_IconHidden(LPTSTR aBuf, LPTSTR aVarName)
 {
@@ -10536,13 +10501,10 @@ VarSizeType BIV_LoopFileSize(LPTSTR aBuf, LPTSTR aVarName)
 
 VarSizeType BIV_LoopRegType(LPTSTR aBuf, LPTSTR aVarName)
 {
-	TCHAR buf[MAX_PATH];
-	*buf = '\0'; // Set default.
-	if (g->mLoopRegItem)
-		Line::RegConvertValueType(buf, MAX_PATH, g->mLoopRegItem->type);
+	LPTSTR value = g->mLoopRegItem ? Line::RegConvertValueType(g->mLoopRegItem->type) : _T("");
 	if (aBuf)
-		_tcscpy(aBuf, buf); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that due to the zero-the-unused-part behavior of strlcpy/strncpy.
-	return (VarSizeType)_tcslen(buf);
+		_tcscpy(aBuf, value);
+	return (VarSizeType)_tcslen(value);
 }
 
 VarSizeType BIV_LoopRegKey(LPTSTR aBuf, LPTSTR aVarName)
@@ -10552,7 +10514,7 @@ VarSizeType BIV_LoopRegKey(LPTSTR aBuf, LPTSTR aVarName)
 	if (g->mLoopRegItem)
 	{
 		// Use root_key_type, not root_key (which might be a remote vs. local HKEY):
-		rootkey = Line::RegConvertRootKey(g->mLoopRegItem->root_key_type);
+		rootkey = Line::RegConvertRootKeyType(g->mLoopRegItem->root_key_type);
 		subkey = g->mLoopRegItem->subkey;
 	}
 	if (aBuf)
@@ -12887,9 +12849,6 @@ BIF_DECL(BIF_DllCall)
 // It has also ensured that the array has exactly aParamCount items in it.
 // Author: Marcus Sonntag (Ultra)
 {
-	// Set default result in case of early return; a blank value:
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = _T("");
 	HMODULE hmodule_to_free = NULL; // Set default in case of early goto; mostly for maintainability.
 	void *function; // Will hold the address of the function to be called.
 
@@ -13308,7 +13267,7 @@ has_valid_return_type:
 		switch(return_attrib.type)
 		{
 		case DLL_ARG_INT: // Listed first for performance. If the function has a void return value (formerly DLL_ARG_NONE), the value assigned here is undefined and inconsequential since the script should be designed to ignore it.
-			aResultToken.symbol = SYM_INTEGER;
+			ASSERT(aResultToken.symbol == SYM_INTEGER);
 			if (return_attrib.is_unsigned)
 				aResultToken.value_int64 = (UINT)return_value.Int; // Preserve unsigned nature upon promotion to signed 64-bit.
 			else // Signed.
@@ -13319,7 +13278,7 @@ has_valid_return_type:
 			// that will vanish when we return to our caller.  As long as every string that went into the
 			// function isn't on our stack (which is the case), there should be no way for what comes out to be
 			// on the stack either.
-			//aResultToken.symbol = SYM_STRING; // This is the default.
+			aResultToken.symbol = SYM_STRING;
 			aResultToken.marker = (LPTSTR)(return_value.Pointer ? return_value.Pointer : _T(""));
 			// Above: Fix for v1.0.33.01: Don't allow marker to be set to NULL, which prevents crash
 			// with something like the following, which in this case probably happens because the inner
@@ -13346,20 +13305,23 @@ has_valid_return_type:
 					// Now attempt to take ownership of the malloc'd memory, to return to our caller.
 					if (aResultToken.mem_to_free = result_buf.DetachBuffer())
 						aResultToken.marker = aResultToken.mem_to_free;
-					//else mem_to_free is NULL, so marker_length should be ignored.  See next comment below.
+					else
+						aResultToken.marker = _T("");
 				}
-				//else leave aResultToken as it was set at the top of this function: an empty string.
+				else
+					aResultToken.marker = _T("");
+				aResultToken.symbol = SYM_STRING;
 			}
 			break;
 		case DLL_ARG_SHORT:
-			aResultToken.symbol = SYM_INTEGER;
+			ASSERT(aResultToken.symbol == SYM_INTEGER);
 			if (return_attrib.is_unsigned)
 				aResultToken.value_int64 = return_value.Int & 0x0000FFFF; // This also forces the value into the unsigned domain of a signed int.
 			else // Signed.
 				aResultToken.value_int64 = (SHORT)(WORD)return_value.Int; // These casts properly preserve negatives.
 			break;
 		case DLL_ARG_CHAR:
-			aResultToken.symbol = SYM_INTEGER;
+			ASSERT(aResultToken.symbol == SYM_INTEGER);
 			if (return_attrib.is_unsigned)
 				aResultToken.value_int64 = return_value.Int & 0x000000FF; // This also forces the value into the unsigned domain of a signed int.
 			else // Signed.
@@ -13369,7 +13331,7 @@ has_valid_return_type:
 			// Even for unsigned 64-bit values, it seems best both for simplicity and consistency to write
 			// them back out to the script as signed values because script internals are not currently
 			// equipped to handle unsigned 64-bit values.  This has been documented.
-			aResultToken.symbol = SYM_INTEGER;
+			ASSERT(aResultToken.symbol == SYM_INTEGER);
 			aResultToken.value_int64 = return_value.Int64;
 			break;
 		case DLL_ARG_FLOAT:
@@ -13467,6 +13429,66 @@ end:
 }
 
 #endif
+
+void ObjectToString(ResultToken &aResultToken, ExprTokenType &aThisToken, IObject *aObject)
+{
+	// Something like this should be done for every TokenToString() call or
+	// equivalent, but major changes are needed before that will be feasible.
+	// For now, String(anytype) provides a limited workaround.
+	ExprTokenType method_name = _T("ToString");
+	ExprTokenType *params = &method_name;
+	switch (aObject->Invoke(aResultToken, aThisToken, IT_CALL, &params, 1))
+	{
+	case INVOKE_NOT_HANDLED:
+		aResultToken.Error(ERR_UNKNOWN_METHOD, _T("ToString"));
+		break;
+	case FAIL:
+		aResultToken.SetExitResult(FAIL);
+		break;
+	}
+}
+
+
+BIF_DECL(BIF_String)
+{
+	aResultToken.symbol = SYM_STRING;
+	switch (aParam[0]->symbol)
+	{
+	case SYM_STRING:
+		aResultToken.marker = aParam[0]->marker;
+		aResultToken.marker_length = aParam[0]->marker_length;
+		break;
+	case SYM_VAR:
+		if (aParam[0]->var->HasObject())
+		{
+			ObjectToString(aResultToken, *aParam[0], aParam[0]->var->Object());
+			break;
+		}
+		aResultToken.marker = aParam[0]->var->Contents();
+		aResultToken.marker_length = aParam[0]->var->CharLength();
+		break;
+	case SYM_INTEGER:
+		aResultToken.marker = ITOA64(aParam[0]->value_int64, _f_retval_buf);
+		break;
+	case SYM_FLOAT:
+		aResultToken.marker = _f_retval_buf;
+		aResultToken.marker_length = FTOA(aParam[0]->value_double, aResultToken.marker, _f_retval_buf_size);
+		break;
+	case SYM_OBJECT:
+		ObjectToString(aResultToken, *aParam[0], aParam[0]->object);
+		break;
+	case SYM_MISSING:
+		_f_throw(ERR_PARAM1_REQUIRED);
+		break;
+#ifdef _DEBUG
+	default:
+		MsgBox(_T("DEBUG: type not handled"));
+		_f_return_FAIL;
+#endif
+	}
+}
+
+
 
 BIF_DECL(BIF_StrLen)
 {
@@ -15654,20 +15676,15 @@ BIF_DECL(BIF_IsLabel)
 
 
 BIF_DECL(BIF_IsFunc) // Lexikos: Added for use with dynamic function calls.
-// Although it's tempting to return an integer like 0x8000000_min_max, where min/max are the function's
-// minimum and maximum number of parameters stored in the low-order DWORD, it would be more friendly and
-// readable to implement those outputs as optional ByRef parameters;
-//     e.g. IsFunc(FunctionName, ByRef Minparameters, ByRef Maxparameters)
-// It's also tempting to return something like 1+func.mInstances; but mInstances is tracked only due to
-// the nature of the current implementation of function-recursion; it might not be something that would
-// be tracked in future versions, and its value to the script is questionable.  Finally, a pointer to
-// the Func struct itself could be returns so that the script could use NumGet() to retrieve function
-// attributes.  However, that would expose implementation details that might be likely to change in the
-// future, plus it would be cumbersome to use.  Therefore, something simple seems best; and since a
-// dynamic function-call fails when too few parameters are passed (but not too many), it seems best to
-// indicate to the caller not only that the function exists, but also how many parameters are required.
+// Returns a non-zero value if the function exists in the current scope.  Since a dynamic function-call
+// fails when too few parameters are passed (but not too many), the return value indicates to the caller
+// not only that the function exists, but also how many parameters are required.  Although this may seem
+// redundant due to Func().MinParams, it has the benefit of not creating a new closure if the function
+// is a nested one with upvalues.
 {
-	Func *func = TokenToFunc(*aParam[0]);
+	if (ParamIndexToObject(0))
+		_f_throw(ERR_PARAM1_INVALID); // Seems worthwhile to avoid confusion.
+	Func *func = g_script->FindFunc(ParamIndexToString(0));
 	_f_return_i(func ? (__int64)func->mMinParams+1 : 0);
 }
 
@@ -15675,12 +15692,34 @@ BIF_DECL(BIF_IsFunc) // Lexikos: Added for use with dynamic function calls.
 
 BIF_DECL(BIF_Func)
 // Returns a reference to an existing user-defined or built-in function, as an object.
+// Returns a new closure if the function has upvalues.
 {
-	Func *func = TokenToFunc(*aParam[0]);
+	Func *func;
+	if (_f_callee_id == FID_Func)
+	{
+		if (ParamIndexToObject(0))
+			_f_throw(ERR_PARAM1_INVALID); // For consistency with IsFunc().
+		func = g_script->FindFunc(ParamIndexToString(0));
+	}
+	else // FID_FuncClose (internal).
+		func = (Func *)aParam[0]->object; // No type-checking needed because this is a private/internal function.
 	if (func)
-		_f_return(func);
+		_f_return(func->CloseIfNeeded());
 	else
 		_f_return_empty;
+}
+
+
+IObject *Func::CloseIfNeeded()
+{
+	FreeVars *fv = (mOuterFunc && sFreeVars) ? sFreeVars->ForFunc(mOuterFunc) : NULL;
+	if (!fv)
+		// Standard practice would require AddRef() here, but we have the inside
+		// knowledge that Func ignores it (since it's allocated with SimpleHeap).
+		return this;
+	Closure *cl = new Closure(this, fv);
+	fv->AddRef();
+	return cl;
 }
 
 
@@ -15693,8 +15732,15 @@ BIF_DECL(BIF_IsByRef)
 	}
 	else
 	{
-		// Return true if the var is an alias for another var.
-		_f_return_b(aParam[0]->var->ResolveAlias() != aParam[0]->var);
+		// Return true if the var is a function parameter which currently holds an alias for
+		// another var, unless it is a downvar (an alias for a free variable, rather than one
+		// passed by the caller).  The current implementation does not allow ByRef parameters
+		// to be downvars; if that is changed, this will need to differentiate between an alias
+		// to one of this function's own free variables and an alias to any other variable
+		// (including free variables from another function, or another instance of this function).
+		Var &var = *aParam[0]->var;
+		_f_return_b(var.ResolveAlias() != &var
+			&& (var.Scope() & (VAR_LOCAL_FUNCPARAM | VAR_DOWNVAR)) == VAR_LOCAL_FUNCPARAM);
 	}
 }
 
@@ -16681,9 +16727,9 @@ BIF_DECL(BIF_UnZipRawMemory)
 	aResultToken.marker =_T("");
 }
 
-#define If_NaN_return_NaN(ParamIndex) \
+#define Throw_if_Param_NaN(ParamIndex) \
 	if (!TokenIsNumeric(*aParam[(ParamIndex)])) \
-		_f_return(EXPR_NAN)
+		_f_throw(ERR_TYPE_MISMATCH)
 
 BIF_DECL(BIF_Round)
 // For simplicity, this always yields something numeric (or a string that's numeric).
@@ -16696,7 +16742,7 @@ BIF_DECL(BIF_Round)
 	double multiplier;
 	if (aParamCount > 1)
 	{
-		If_NaN_return_NaN(1);
+		Throw_if_Param_NaN(1);
 		param2 = ParamIndexToInt(1);
 		multiplier = qmathPow(10, param2);
 	}
@@ -16705,7 +16751,7 @@ BIF_DECL(BIF_Round)
 		param2 = 0;
 		multiplier = 1;
 	}
-	If_NaN_return_NaN(0);
+	Throw_if_Param_NaN(0);
 	double value = ParamIndexToDouble(0);
 	value = (value >= 0.0 ? qmathFloor(value * multiplier + 0.5)
 		: qmathCeil(value * multiplier - 0.5)) / multiplier;
@@ -16764,7 +16810,7 @@ BIF_DECL(BIF_FloorCeil)
 // For simplicity and backward compatibility, a numeric result is always returned (even if the input
 // is non-numeric or an empty string).
 {
-	If_NaN_return_NaN(0);
+	Throw_if_Param_NaN(0);
 	// The qmath routines are used because Floor() and Ceil() are deceptively difficult to implement in a way
 	// that gives the correct result in all permutations of the following:
 	// 1) Negative vs. positive input.
@@ -16782,6 +16828,22 @@ BIF_DECL(BIF_FloorCeil)
 
 
 
+BIF_DECL(BIF_Integer)
+{
+	Throw_if_Param_NaN(0);
+	_f_return_i(ParamIndexToInt64(0));
+}
+
+
+
+BIF_DECL(BIF_Float)
+{
+	Throw_if_Param_NaN(0);
+	_f_return(ParamIndexToDouble(0));
+}
+
+
+
 BIF_DECL(BIF_Mod)
 {
 	// Load-time validation has already ensured there are exactly two parameters.
@@ -16791,20 +16853,22 @@ BIF_DECL(BIF_Mod)
 	{
 		if (param0.symbol == SYM_INTEGER && param1.symbol == SYM_INTEGER) // Both are integers.
 		{
-			if (param1.value_int64) // Not divide by zero.
-				// For performance, % is used vs. qmath for integers.
-				_f_return_i(param0.value_int64 % param1.value_int64);
+			if (param1.value_int64 == 0)
+				_f_throw(ERR_DIVIDEBYZERO);
+			// For performance, % is used vs. qmath for integers.
+			_f_return_i(param0.value_int64 % param1.value_int64);
 		}
 		else // At least one is a floating point number.
 		{
 			double dividend = TokenToDouble(param0);
 			double divisor = TokenToDouble(param1);
-			if (divisor != 0.0) // Not divide by zero.
-				_f_return(qmathFmod(dividend, divisor));
+			if (divisor == 0.0)
+				_f_throw(ERR_DIVIDEBYZERO);
+			_f_return(qmathFmod(dividend, divisor));
 		}
 	}
 	// Since above didn't return, one or both parameters were invalid.
-	_f_return_p(EXPR_NAN);
+	_f_throw(ERR_PARAM_INVALID);
 }
 
 
@@ -16842,7 +16906,7 @@ BIF_DECL(BIF_MinMax)
 				}
 				break;
 			default: // Non-operand or non-numeric string.
-				_f_return(EXPR_NAN); // Return a blank value to indicate the problem.
+				_f_throw(ERR_PARAM_INVALID);
 		}
 	}
 	// Compare found integer with found float:
@@ -16857,8 +16921,7 @@ BIF_DECL(BIF_MinMax)
 BIF_DECL(BIF_Abs)
 {
 	if (!TokenToDoubleOrInt64(*aParam[0], aResultToken)) // "Cast" token to Int64/Double depending on whether it has a decimal point.
-		// Non-operand or non-numeric string. TokenToDoubleOrInt64() has already set the result to "NaN".
-		return;
+		_f_throw(ERR_PARAM1_INVALID); // Non-operand or non-numeric string.
 	if (aResultToken.symbol == SYM_INTEGER)
 	{
 		// The following method is used instead of __abs64() to allow linking against the multi-threaded
@@ -16877,7 +16940,7 @@ BIF_DECL(BIF_Sin)
 // For simplicity and backward compatibility, a numeric result is always returned (even if the input
 // is non-numeric or an empty string).
 {
-	If_NaN_return_NaN(0);
+	Throw_if_Param_NaN(0);
 	_f_return(qmathSin(ParamIndexToDouble(0)));
 }
 
@@ -16887,7 +16950,7 @@ BIF_DECL(BIF_Cos)
 // For simplicity and backward compatibility, a numeric result is always returned (even if the input
 // is non-numeric or an empty string).
 {
-	If_NaN_return_NaN(0);
+	Throw_if_Param_NaN(0);
 	_f_return(qmathCos(ParamIndexToDouble(0)));
 }
 
@@ -16897,7 +16960,7 @@ BIF_DECL(BIF_Tan)
 // For simplicity and backward compatibility, a numeric result is always returned (even if the input
 // is non-numeric or an empty string).
 {
-	If_NaN_return_NaN(0);
+	Throw_if_Param_NaN(0);
 	_f_return(qmathTan(ParamIndexToDouble(0)));
 }
 
@@ -16905,11 +16968,11 @@ BIF_DECL(BIF_Tan)
 
 BIF_DECL(BIF_ASinACos)
 {
-	If_NaN_return_NaN(0);
+	Throw_if_Param_NaN(0);
 	double value = ParamIndexToDouble(0);
 	if (value > 1 || value < -1) // ASin and ACos aren't defined for such values.
 	{
-		_f_return_p(EXPR_NAN);
+		_f_throw(ERR_PARAM1_INVALID);
 	}
 	else
 	{
@@ -16925,7 +16988,7 @@ BIF_DECL(BIF_ATan)
 // For simplicity and backward compatibility, a numeric result is always returned (even if the input
 // is non-numeric or an empty string).
 {
-	If_NaN_return_NaN(0);
+	Throw_if_Param_NaN(0);
 	_f_return(qmathAtan(ParamIndexToDouble(0)));
 }
 
@@ -16933,7 +16996,7 @@ BIF_DECL(BIF_ATan)
 
 BIF_DECL(BIF_Exp)
 {
-	If_NaN_return_NaN(0);
+	Throw_if_Param_NaN(0);
 	_f_return(qmathExp(ParamIndexToDouble(0)));
 }
 
@@ -16941,11 +17004,11 @@ BIF_DECL(BIF_Exp)
 
 BIF_DECL(BIF_SqrtLogLn)
 {
-	If_NaN_return_NaN(0);
+	Throw_if_Param_NaN(0);
 	double value = ParamIndexToDouble(0);
 	if (value < 0) // Result is undefined in these cases.
 	{
-		_f_return_p(EXPR_NAN);
+		_f_throw(ERR_PARAM1_INVALID);
 	}
 	else
 	{
@@ -17084,11 +17147,40 @@ BIF_DECL(BIF_DateDiff)
 
 BIF_DECL(BIF_Hotkey)
 {
-	_f_param_string(aHotkeyName, 0);
-	_f_param_string_opt(aLabelName, 1);
-	_f_param_string_opt(aOptions, 2);
-	IObject *aLabelObject = ParamIndexToOptionalObject(1);
-	if (!Hotkey::Dynamic(aHotkeyName, aLabelName, aOptions, aLabelObject))
+	_f_param_string(aParam0, 0);
+	_f_param_string_opt(aParam1, 1);
+	_f_param_string_opt(aParam2, 2);
+	
+	ResultType result;
+	IObject *functor = NULL;
+	
+	if (!_tcsnicmp(aParam0, _T("IfWin"), 5)) // Seems reasonable to assume that anything starting with "IfWin" can't be the name of a hotkey.
+	{
+		result = Hotkey::IfWin(aParam0, aParam1, aParam2);
+	}
+	else if (!_tcsicmp(aParam0, _T("If")))
+	{
+		if (!ParamIndexIsOmitted(1))
+			functor = TokenToFunctor(*aParam[1]);
+		result = Hotkey::IfExpr(aParam1, functor);
+	}
+	else
+	{
+		HookActionType hook_action = 0;
+		if (!ParamIndexIsOmitted(1))
+		{
+			if (functor = TokenToObject(*aParam[1]))
+				functor->AddRef();
+			else if (  !(hook_action = Hotkey::ConvertAltTab(aParam1, true))  )
+				functor = StringToLabelOrFunctor(aParam1);
+		}
+		result = Hotkey::Dynamic(aParam0, aParam1, aParam2, functor, hook_action);
+	}
+	
+	if (functor)
+		functor->Release();
+
+	if (!result)
 		_f_return_FAIL;
 	_f_return_empty;
 }
@@ -17097,25 +17189,29 @@ BIF_DECL(BIF_Hotkey)
 
 BIF_DECL(BIF_SetTimer)
 {
-	IObject *target_label;
-	// Note that only one timer per label/function is allowed because the label is the unique identifier
+	IObject *callback;
+	// Note that only one timer per callback is allowed because the callback is the unique identifier
 	// that allows us to figure out whether to "update or create" when searching the list of timers.
 	if (ParamIndexIsOmitted(0)) // Fully omitted, not an empty string.
 	{
 		if (g->CurrentTimer)
 			// Default to the timer which launched the current thread.
-			target_label = g->CurrentTimer->mLabel.ToObject();
+			callback = g->CurrentTimer->mCallback.ToObject();
 		else
-			target_label = NULL;
-		if (!target_label)
+			callback = NULL;
+		if (!callback)
 			// Either the thread was not launched by a timer or the timer has been deleted.
 			_f_throw(ERR_PARAM1_MUST_NOT_BE_BLANK);
 	}
-	else if (  !(target_label = ParamIndexToObject(0))  )
+	else
+		callback = ParamIndexToObject(0);
+	if (callback)
+		callback->AddRef();
+	else
 	{
 		LPTSTR arg1 = ParamIndexToString(0, _f_number_buf);
-		if (!(target_label = g_script->FindCallable(arg1)))
-			_f_throw(ERR_NO_LABEL, arg1);
+		if (  !(callback = StringToFunctor(arg1))  )
+			_f_throw(ERR_PARAM1_INVALID, arg1);
 	}
 	ToggleValueType toggle;
 	_f_param_string_opt(arg2, 1);
@@ -17127,9 +17223,11 @@ BIF_DECL(BIF_SetTimer)
 		{
 			if (!_tcsicmp(arg2, _T("Delete")))
 			{
-				g_script->DeleteTimer(target_label);
+				g_script->DeleteTimer(callback);
+				callback->Release();
 				_f_return_empty;
 			}
+			callback->Release();
 			_f_throw(ERR_PARAM2_INVALID, arg2);
 		}
 	}
@@ -17138,11 +17236,12 @@ BIF_DECL(BIF_SetTimer)
 	switch(toggle)
 	{
 	case TOGGLED_ON:
-	case TOGGLED_OFF: g_script->UpdateOrCreateTimer(target_label, _T(""), arg3, toggle == TOGGLED_ON, false); break;
+	case TOGGLED_OFF: g_script->UpdateOrCreateTimer(callback, _T(""), arg3, toggle == TOGGLED_ON, false); break;
 	// Timer is always (re)enabled when ARG2 specifies a numeric period or is blank + there's no ARG3.
 	// If ARG2 is blank but ARG3 (priority) isn't, tell it to update only the priority and nothing else:
-	default: g_script->UpdateOrCreateTimer(target_label, arg2, arg3, true, !*arg2 && *arg3);
+	default: g_script->UpdateOrCreateTimer(callback, arg2, arg3, true, !*arg2 && *arg3);
 	}
+	callback->Release();
 	_f_return_empty;
 }
 
@@ -17210,7 +17309,12 @@ BIF_DECL(BIF_OnMessage)
 		if (mode_is_delete) // Delete a non-existent item.
 			_f_return_retval; // Yield the default return value set earlier (an empty string).
 		// From this point on, it is certain that an item will be added to the array.
-		if (!(pmonitor = g_MsgMonitor->Add(specified_msg, specified_hwnd, callback, call_it_last)))
+		if (func)
+			callback = func->CloseIfNeeded();
+		pmonitor = g_MsgMonitor->Add(specified_msg, specified_hwnd, callback, call_it_last);
+		if (func && func != callback)
+			callback->Release();
+		if (!pmonitor)
 			_f_throw(ERR_OUTOFMEM);
 	}
 
@@ -17245,16 +17349,7 @@ BIF_DECL(BIF_OnMessage)
 		// Continue on to the update-or-create logic below.
 	}
 
-	// Since above didn't return, above has ensured that msg_index is the index of the existing or new
-	// MsgMonitorStruct in the array.  In addition, it has set the proper return value for us.
 	// Update those struct attributes that get the same treatment regardless of whether this is an update or creation.
-	if (callback && callback != monitor.func) // Callback is being registered or changed.
-	{
-		callback->AddRef(); // Keep the object alive while it's in g_MsgMonitor.
-		if (monitor.func)
-			monitor.func->Release();
-		monitor.func = callback;
-	}
 	if (!item_already_exists || !ParamIndexIsOmitted(specified_hwnd ? 3 : 2))
 		monitor.max_instances = max_instances;
 	// Otherwise, the parameter was omitted so leave max_instances at its current value.
@@ -17463,14 +17558,16 @@ BIF_DECL(BIF_OnExitOrClipboard)
 	MsgMonitorList &handlers = is_onexit ? g_script->mOnExit : g_script->mOnClipboardChange;
 
 	IObject *callback;
-	if (callback = TokenToFunc(*aParam[0]))
+	if (callback = TokenToFunctor(*aParam[0]))
 	{
-		// Ensure this function is a valid one.
-		if (((Func *)callback)->mMinParams > 2)
-			callback = NULL;
+		// Ensure this function is a valid one (if possible).
+		if (Func *func = dynamic_cast<Func *>(callback))
+			if (func->mMinParams > 2)
+			{
+				callback->Release();
+				callback = NULL;
+			}
 	}
-	else
-		callback = TokenToObject(*aParam[0]);
 	if (!callback)
 		_f_throw(ERR_PARAM1_INVALID);
 	
@@ -17485,7 +17582,10 @@ BIF_DECL(BIF_OnExitOrClipboard)
 	case  1:
 	case -1:
 		if (existing)
+		{
+			callback->Release();
 			return;
+		}
 		if (!is_onexit)
 		{
 			// Do this before adding the handler so that it won't be called as a result of the
@@ -17494,24 +17594,29 @@ BIF_DECL(BIF_OnExitOrClipboard)
 			g_script->EnableClipboardListener(true);
 		}
 		if (!handlers.Add(0, 0, callback, mode == 1))
+		{
+			callback->Release();
 			_f_throw(ERR_OUTOFMEM);
+		}
 		break;
 	case  0:
 		if (existing)
 			handlers.Remove(existing);
 		break;
 	default:
+		callback->Release();
 		_f_throw(ERR_PARAM2_INVALID);
 	}
 	// In case the above enabled the clipboard listener but failed to add the handler,
 	// do this even if mode != 0:
 	if (!is_onexit && !handlers.Count())
 		g_script->EnableClipboardListener(false);
+	callback->Release();
 }
 
 
 #ifdef ENABLE_REGISTERCALLBACK
-struct RCCallbackFunc // Used by BIF_RegisterCallback() and related.
+struct RCCallbackFunc // Used by BIF_CallbackCreate() and related.
 {
 #ifdef WIN32_PLATFORM
 	ULONG data1;	//E8 00 00 00
@@ -17529,9 +17634,10 @@ struct RCCallbackFunc // Used by BIF_RegisterCallback() and related.
 #endif
 	//code ends
 	UCHAR actual_param_count; // This is the actual (not formal) number of parameters passed from the caller to the callback. Kept adjacent to the USHORT above to conserve memory due to 4-byte struct alignment.
-	bool create_new_thread; // Kept adjacent to above to conserve memory due to 4-byte struct alignment.
-	EventInfoType event_info; // A_EventInfo
-	Func *func; // The UDF to be called whenever the callback's caller calls callfuncptr.
+#define CBF_CREATE_NEW_THREAD	1
+#define CBF_PASS_PARAMS_POINTER	2
+	UCHAR flags; // Kept adjacent to above to conserve memory due to 4-byte struct alignment in 32-bit builds.
+	IObject *func; // The function object to be called whenever the callback's caller calls callfuncptr.
 };
 
 #ifdef _WIN64
@@ -17546,17 +17652,13 @@ UINT_PTR CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address) // Used
 // convention assumes that the parameter size equals the pointer size. 64 integers on Win32 are passed on
 // pointers, or as two 32 bit halves for some functions...
 {
-	#define DEFAULT_CB_RETURN_VALUE 0  // The value returned to the callback's caller if script doesn't provide one.
-
 #ifdef WIN32_PLATFORM
 	RCCallbackFunc &cb = *((RCCallbackFunc*)(address-5)); //second instruction is 5 bytes after start (return address pushed by call)
 #else
 	RCCallbackFunc &cb = *((RCCallbackFunc*) address);
 #endif
-	Func &func = *cb.func; // For performance and convenience.
 
 	VarBkp ErrorLevel_saved;
-	EventInfoType EventInfo_saved;
 	BOOL pause_after_execute;
 
 	// NOTES ABOUT INTERRUPTIONS / CRITICAL:
@@ -17576,18 +17678,17 @@ UINT_PTR CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address) // Used
 	// Of course, a callback can also be triggered through explicit script action such as a DllCall of
 	// EnumWindows, in which case the script would want to be interrupted unconditionally to make the call.
 	// However, in those cases it's hard to imagine that INTERRUPTIBLE_IN_EMERGENCY wouldn't be true anyway.
-	if (cb.create_new_thread)
+	if (cb.flags & CBF_CREATE_NEW_THREAD)
 	{
 		if (g_nThreads >= g_MaxThreadsTotal) // To avoid array overflow, g_MaxThreadsTotal must not be exceeded except where otherwise documented.
-			return DEFAULT_CB_RETURN_VALUE;
+			return 0;
 		// See MsgSleep() for comments about the following section.
 		ErrorLevel_Backup(ErrorLevel_saved);
 		InitNewThread(0, false, true);
 		DEBUGGER_STACK_PUSH(_T("Callback"))
 	}
-	else // Backup/restore only A_EventInfo. This avoids callbacks changing A_EventInfo for the current thread/context (that would be counterintuitive and a source of script bugs).
+	else
 	{
-		EventInfo_saved = g->EventInfo;
 		if (pause_after_execute = g->IsPaused) // Assign.
 		{
 			// v1.0.48: If the current thread is paused, this threadless callback would get stuck in
@@ -17610,69 +17711,37 @@ UINT_PTR CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address) // Used
 		// because it's likely to hurt any callback that's performance-sensitive.
 	}
 
-	g->EventInfo = cb.event_info; // This is the means to identify which caller called the callback (if the script assigned more than one caller to this callback).
-
-	// For performance and to preserve stack space, the indirect method of calling a function via the new
-	// Func::Call overload is not used here.  Using it would only be necessary to support variadic functions,
-	// which have very limited use as callbacks; instead, we pass such functions a pointer to surplus params.
-
-	// Need to check if backup of function's variables is needed in case:
-	// 1) The UDF is assigned to more than one callback, in which case the UDF could be running more than once
-	//    simultaneously.
-	// 2) The callback is intended to be reentrant (e.g. a subclass/WindowProc that doesn't use Critical).
-	// 3) Script explicitly calls the UDF in addition to using it as a callback.
-	//
-	// See ExpandExpression() for detailed comments about the following section.
-	VarBkp *var_backup = NULL;  // If needed, it will hold an array of VarBkp objects.
-	int var_backup_count; // The number of items in the above array.
-	if (func.mInstances > 0) // Backup is needed (see above for explanation).
-		if (!Var::BackupFunctionVars(func, var_backup, var_backup_count)) // Out of memory.
-			return DEFAULT_CB_RETURN_VALUE; // Since out-of-memory is so rare, it seems justifiable not to have any error reporting and instead just avoid calling the function.
-
-	// The following section is similar to the one in ExpandExpression().  See it for detailed comments.
-	int i, j = cb.actual_param_count < func.mParamCount ? cb.actual_param_count : func.mParamCount;
-	for (i = 0; i < j; ++i)  // For each formal parameter that has a matching actual.
-		func.mParam[i].var->Assign((UINT_PTR)params[i]); // All parameters are passed "by value" because an earlier stage ensured there are no ByRef parameters.
-	if (func.mIsVariadic)
-		// See the performance note further above.  Rather than having the "variadic" param remain empty,
-		// pass it a pointer to the first actual parameter which wasn't assigned to a formal parameter:
-		func.mParam[func.mParamCount].var->Assign((UINT_PTR)(params + i));
-	for (; i < func.mParamCount; ++i) // For each remaining formal (i.e. those that lack actuals), apply a default value (an earlier stage verified that all such parameters have a default-value available).
-	{
-		FuncParam &this_formal_param = func.mParam[i]; // For performance and convenience.
-		// The following isn't necessary because an earlier stage has already ensured that there
-		// are no ByRef parameters in a callback:
-		//if (this_formal_param.is_byref)
-		//	this_formal_param.var->ConvertToNonAliasIfNecessary();
-		switch(this_formal_param.default_type)
-		{
-		case PARAM_DEFAULT_STR:   this_formal_param.var->Assign(this_formal_param.default_str);    break;
-		case PARAM_DEFAULT_INT:   this_formal_param.var->Assign(this_formal_param.default_int64);  break;
-		case PARAM_DEFAULT_FLOAT: this_formal_param.var->Assign(this_formal_param.default_double); break;
-		//case PARAM_DEFAULT_NONE: Not possible due to validation at an earlier stage.
-		}
-	}
-
 	g_script->mLastPeekTime = GetTickCount(); // Somewhat debatable, but might help minimize interruptions when the callback is called via message (e.g. subclassing a control; overriding a WindowProc).
 
+	INT_PTR number_to_return;
 	FuncResult result_token;
-	++func.mInstances;
-	func.Call(&result_token); // Call the UDF.  Call()'s own return value (e.g. EARLY_EXIT or FAIL) is ignored because it wouldn't affect the handling below.
+	ExprTokenType *param, one_param;
+	int param_count;
 
-	UINT_PTR number_to_return = (UINT_PTR)TokenToInt64(result_token); // L31: For simplicity, DEFAULT_CB_RETURN_VALUE is not used - DEFAULT_CB_RETURN_VALUE is 0, which TokenToInt64 will return if the token is empty.
+	if (cb.flags & CBF_PASS_PARAMS_POINTER)
+	{
+		param_count = 1;
+		param = &one_param;
+		one_param.SetValue((UINT_PTR)params);
+	}
+	else
+	{
+		param_count = cb.actual_param_count;
+		param = (ExprTokenType *)_alloca(param_count * sizeof(ExprTokenType));
+		for (int i = 0; i < param_count; ++i)
+			param[i].SetValue((UINT_PTR)params[i]);
+	}
 	
-	result_token.Free();
-	Var::FreeAndRestoreFunctionVars(func, var_backup, var_backup_count); // ABOVE must be done BEFORE this because return_value might be the contents of one of the function's local variables (which are about to be free'd).
-	--func.mInstances; // See comments in Func::Call.
-
-	if (cb.create_new_thread)
+	CallMethod(cb.func, cb.func, _T("call"), param, param_count, &number_to_return);
+	// CallMethod()'s own return value is ignored because it wouldn't affect the handling below.
+	
+	if (cb.flags & CBF_CREATE_NEW_THREAD)
 	{
 		DEBUGGER_STACK_POP()
 		ResumeUnderlyingThread(ErrorLevel_saved);
 	}
 	else
 	{
-		g->EventInfo = EventInfo_saved;
 		if (g == g_array && !g_script->mAutoExecSectionIsRunning)
 			// If the function just called used thread #0 and the AutoExec section isn't running, that means
 			// the AutoExec section definitely didn't launch or control the callback (even if it is running,
@@ -17693,50 +17762,70 @@ UINT_PTR CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address) // Used
 
 
 
-BIF_DECL(BIF_RegisterCallback)
+BIF_DECL(BIF_CallbackCreate)
 // Returns: Address of callback procedure, or empty string on failure.
 // Parameters:
 // 1: Name of the function to be called when the callback routine is executed.
 // 2: Options.
 // 3: Number of parameters of callback.
-// 4: EventInfo: a DWORD set for use by UDF to identify the caller (in case more than one caller).
 //
-// Author: RegisterCallback() was created by Jonathan Rennison (JGR).
+// Author: Original x86 RegisterCallback() was created by Jonathan Rennison (JGR).
+//   x64 support by fincs.  Various changes by Lexikos.
 {
-	// Loadtime validation has ensured that at least 1 parameter is present.
-	Func *func;
-	if (  !(func = TokenToFunc(*aParam[0])) || func->mIsBuiltIn  )  // Not a valid user-defined function.
+	IObject *func = TokenToFunctor(*aParam[0]);
+	if (!func)
 		_f_throw(ERR_PARAM1_INVALID);
 
+	// Get func.MinParams (if present) for validation and default parameter count.
+	ResultToken rt;
+	rt.InitResult(_f_retval_buf);
+	ExprTokenType pt(_T("MinParams"), 9);
+	ExprTokenType *pp = &pt;
+	ResultType result = func->Invoke(rt, ExprTokenType(func), IT_GET, &pp, 1);
+	rt.Free();
+	if (!result)
+	{
+		func->Release();
+		_f_return_FAIL;
+	}
+	bool has_minparams = TokenIsPureNumeric(rt);
+	int minparams = has_minparams ? (int)TokenToInt64(rt) : 0;
+
 	LPTSTR options = ParamIndexToOptionalString(1);
+	bool pass_params_pointer = _tcschr(options, '&'); // Callback wants the address of the parameter list instead of their values.
+#ifdef WIN32_PLATFORM
+	bool use_cdecl = StrChrAny(options, _T("Cc")); // Recognize "C" as the "CDecl" option.
+	bool require_param_count = !use_cdecl; // Param count must be specified for x86 stdcall.
+#else
+	bool require_param_count = false;
+#endif
+
 	int actual_param_count;
 	if (!ParamIndexIsOmittedOrEmpty(2)) // A parameter count was specified.
 	{
 		actual_param_count = ParamIndexToInt(2);
-		if (   actual_param_count > func->mParamCount    // The function doesn't have enough formals to cover the specified number of actuals.
-				&& !func->mIsVariadic					 // ...and the function isn't designed to accept parameters via an array (or in this case, a pointer).
-			|| actual_param_count < func->mMinParams   ) // ...or the function has too many mandatory formals (caller specified insufficient actuals to cover them all).
+		if (  actual_param_count < 0 // Invalid.
+			|| has_minparams && (pass_params_pointer ? 1 : actual_param_count) < minparams  ) // Too many mandatory parameters.
 		{
+			func->Release();
 			_f_throw(ERR_PARAM3_INVALID);
 		}
 	}
+	else if (!has_minparams || pass_params_pointer && require_param_count)
+	{
+		func->Release();
+		_f_throw(ERR_PARAM3_MUST_NOT_BE_BLANK);
+	}
 	else // Default to the number of mandatory formal parameters in the function's definition.
-		actual_param_count = func->mMinParams;
+		actual_param_count = minparams;
 
 #ifdef WIN32_PLATFORM
-	bool use_cdecl = StrChrAny(options, _T("Cc")); // Recognize "C" as the "CDecl" option.
 	if (!use_cdecl && actual_param_count > 31) // The ASM instruction currently used limits parameters to 31 (which should be plenty for any realistic use).
 	{
+		func->Release();
 		_f_throw(ERR_PARAM3_INVALID);
 	}
 #endif
-
-	// To improve callback performance, ensure there are no ByRef parameters (for simplicity: not even ones that
-	// have default values).  This avoids the need to ensure formal parameters are non-aliases each time the
-	// callback is called.
-	for (int i = 0; i < func->mParamCount; ++i)
-		if (func->mParam[i].is_byref)
-			_f_throw(ERR_PARAM1_INVALID); // Incompatible function (param #1).
 
 	// GlobalAlloc() and dynamically-built code is the means by which a script can have an unlimited number of
 	// distinct callbacks. On Win32, GlobalAlloc is the same function as LocalAlloc: they both point to
@@ -17751,7 +17840,10 @@ BIF_DECL(BIF_RegisterCallback)
 	//						memory and the VirtualProtect function to grant PAGE_EXECUTE access."
 	RCCallbackFunc *callbackfunc=(RCCallbackFunc*) GlobalAlloc(GMEM_FIXED,sizeof(RCCallbackFunc));	//allocate structure off process heap, automatically RWE and fixed.
 	if (!callbackfunc)
+	{
+		func->Release();
 		_f_throw(ERR_OUTOFMEM);
+	}
 	RCCallbackFunc &cb = *callbackfunc; // For convenience and possible code-size reduction.
 
 #ifdef WIN32_PLATFORM
@@ -17793,10 +17885,13 @@ BIF_DECL(BIF_RegisterCallback)
 	cb.callfuncptr = RegisterCallbackCStub;
 #endif
 
-	cb.event_info = (EventInfoType)ParamIndexToOptionalInt64(3, (size_t)callbackfunc);
 	cb.func = func;
 	cb.actual_param_count = actual_param_count;
-	cb.create_new_thread = !StrChrAny(options, _T("Ff")); // Recognize "F" as the "fast" mode that avoids creating a new thread.
+	cb.flags = 0;
+	if (!StrChrAny(options, _T("Ff"))) // Recognize "F" as the "fast" mode that avoids creating a new thread.
+		cb.flags |= CBF_CREATE_NEW_THREAD;
+	if (pass_params_pointer)
+		cb.flags |= CBF_PASS_PARAMS_POINTER;
 
 	// If DEP is enabled (and sometimes when DEP is apparently "disabled"), we must change the
 	// protection of the page of memory in which the callback resides to allow it to execute:
@@ -17806,6 +17901,15 @@ BIF_DECL(BIF_RegisterCallback)
 	_f_return_i((__int64)callbackfunc); // Yield the callable address as the result.
 }
 
+BIF_DECL(BIF_CallbackFree)
+{
+	RCCallbackFunc *callbackfunc = (RCCallbackFunc *)ParamIndexToIntPtr(0);
+	callbackfunc->func->Release();
+	callbackfunc->func = NULL; // To help detect bugs.
+	GlobalFree(callbackfunc);
+	_f_return_empty;
+}
+
 #endif
 
 BIF_DECL(BIF_Menu)
@@ -17813,19 +17917,20 @@ BIF_DECL(BIF_Menu)
 	UserMenu *menu;
 	switch (_f_callee_id)
 	{
-	case FID_MenuCreate:
-		if (  !(menu = g_script->AddMenu())  )
+	default:
+	//case FID_MenuCreate:
+	//case FID_MenuBarCreate:
+		if (  !(menu = g_script->AddMenu(_f_callee_id == FID_MenuCreate ? MENU_TYPE_POPUP : MENU_TYPE_BAR))  )
 			_f_throw(ERR_OUTOFMEM);
 		break;
 	case FID_MenuFromHandle:
 		menu = g_script->FindMenu((HMENU)ParamIndexToInt64(0));
+		if (menu)
+			menu->AddRef();
 		break;
 	}
 	if (menu)
-	{
-		menu->AddRef();
 		_f_return(menu);
-	}
 	_f_return_empty;
 }
 
@@ -19768,8 +19873,6 @@ ResultType TokenToDoubleOrInt64(const ExprTokenType &aInput, ExprTokenType &aOut
 		//case SYM_OBJECT: // L31: Treat objects as empty strings (or TRUE where appropriate).
 		//case SYM_MISSING:
 		default:
-			aOutput.symbol = SYM_STRING;
-			aOutput.marker = EXPR_NAN_STR; // For completeness.  Some callers such as BIF_Abs() rely on this being done.
 			return FAIL;
 	}
 	// Since above didn't return, interpret "str" as a number.
@@ -19782,7 +19885,6 @@ ResultType TokenToDoubleOrInt64(const ExprTokenType &aInput, ExprTokenType &aOut
 		aOutput.value_double = ATOF(str);
 		break;
 	default: // Not a pure number.
-		aOutput.marker = EXPR_NAN_STR; // For completeness.  Some callers such as BIF_Abs() rely on this being done.
 		return FAIL;
 	}
 	return OK; // Since above didn't return, indicate success.
@@ -19821,6 +19923,40 @@ Func *TokenToFunc(ExprTokenType &aToken)
 			func = g_script->FindFunc(func_name);
 	}
 	return func;
+}
+
+
+
+IObject *TokenToFunctor(ExprTokenType &aToken)
+// Returns an object if aToken contains an object or function name.
+// Reference is counted so CALLER MUST Release() WHEN APPROPRIATE.
+// For nested functions with upvalues, this returns a Closure, whereas TokenToFunc
+// returns the base Func (which can't be called after the outer function returns).
+{
+	if (IObject *obj = TokenToObject(aToken))
+	{
+		obj->AddRef();
+		return obj;
+	}
+	return StringToFunctor(TokenToString(aToken)); // No need for buf (see TokenToFunc).
+}
+
+
+IObject *StringToLabelOrFunctor(LPTSTR aStr)
+// Reference is counted so CALLER MUST Release() WHEN APPROPRIATE.
+{
+	if (Label *lbl = g_script->FindLabel(aStr, false))
+		return lbl;
+	return StringToFunctor(aStr);
+}
+
+
+
+IObject *StringToFunctor(LPTSTR aStr)
+// Reference is counted so CALLER MUST Release() WHEN APPROPRIATE.
+{
+	Func *func = g_script->FindFunc(aStr);
+	return func ? func->CloseIfNeeded() : NULL;
 }
 
 

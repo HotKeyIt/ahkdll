@@ -36,10 +36,9 @@ void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar, BOOL aVarIsArg);
 	}
 // AutoHotkey needs to be running at this point
 #define BACKUP_G_SCRIPT \
-	int aCurrFileIndex = g_script->mCurrFileIndex, aCombinedLineNumber = g_script->mCombinedLineNumber, aCurrentFuncOpenBlockCount = g_script->mCurrentFuncOpenBlockCount;\
+	int aCurrFileIndex = g_script->mCurrFileIndex, aCombinedLineNumber = g_script->mCombinedLineNumber;\
 	bool aNextLineIsFunctionBody = g_script->mNextLineIsFunctionBody;\
 	Line *aFirstLine = g_script->mFirstLine,*aLastLine = g_script->mLastLine,*aCurrLine = g_script->mCurrLine,*aFirstStaticLine = g_script->mFirstStaticLine,*aLastStaticLine = g_script->mLastStaticLine;\
-	g_script->mCurrentFuncOpenBlockCount = NULL;\
 	g_script->mNextLineIsFunctionBody = false;\
 	Func *aCurrFunc  = g->CurrentFunc;\
 	Label *aPlaceholderLabel = g_script->mPlaceholderLabel;\
@@ -58,7 +57,6 @@ void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar, BOOL aVarIsArg);
 	g_script->mPlaceholderLabel = aPlaceholderLabel;\
 	g_script->mClassObjectCount = aClassObjectCount + g_script->mClassObjectCount;\
 	g_script->mCurrFileIndex = aCurrFileIndex;\
-	g_script->mCurrentFuncOpenBlockCount = aCurrentFuncOpenBlockCount;\
 	g_script->mNextLineIsFunctionBody = aNextLineIsFunctionBody;\
 	g_script->mCombinedLineNumber = aCombinedLineNumber;
 #ifdef _USRDLL

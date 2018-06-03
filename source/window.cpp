@@ -176,9 +176,9 @@ HWND SetForegroundWindowEx(HWND aTargetWindow)
 	if (!orig_foreground_wnd)
 		orig_foreground_wnd = FindWindow(_T("Shell_TrayWnd"), NULL);
 
-	if (aTargetWindow == orig_foreground_wnd) // It's already the active window.
-		return aTargetWindow;
-
+	// Fix for v1.1.28.02: Restore the window *before* checking if it is already active.
+	// This was supposed to be done in v1.1.20, but was only done for WinTitle = "A".
+	// See "IsIconic" in WinActivate() for comments.
 	if (IsIconic(aTargetWindow))
 		// This might never return if aTargetWindow is a hung window.  But it seems better
 		// to do it this way than to use the PostMessage() method, which might not work
@@ -189,6 +189,9 @@ HWND SetForegroundWindowEx(HWND aTargetWindow)
 		// has been acted on prior to trying to activate the window (and all Async()
 		// does is post a message to its queue):
 		ShowWindow(aTargetWindow, SW_RESTORE);
+
+	if (aTargetWindow == orig_foreground_wnd) // It's already the active window.
+		return aTargetWindow;
 
 	// This causes more trouble than it's worth.  In fact, the AutoIt author said that
 	// he didn't think it even helped with the IE 5.5 related issue it was originally
@@ -487,7 +490,7 @@ HWND WinClose(HWND aWnd, int aTimeToWaitForClose, bool aKillIfHung)
 	// the values our params, some of which may be in the deref buffer.  So be sure not
 	// to refer to those strings once MsgSleep() has been done, below:
 
-	// This is the same basic code used for ACT_WINWAITCLOSE and such:
+	// This is the same basic code used for WinWaitClose and such:
 
 #ifdef _WIN64
 	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)

@@ -208,7 +208,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 						this_token.SetValue(g->mLoopIteration);
 						goto push_this_token;
 					}
-					if (this_token.var->mVV->Get == BIV_EventInfo) // v1.0.48.02: A_EventInfo is used often enough in performance-sensitive numeric contexts to seem worth special treatment like A_Index; e.g. LV_GetText(RowText, A_EventInfo) or RegisterCallback()'s A_EventInfo.
+					if (this_token.var->mVV->Get == BIV_EventInfo) // Not really useful for performance anymore, but allows it to have the correct "Integer" type.
 					{
 						this_token.SetValue(g->EventInfo);
 						goto push_this_token;
@@ -322,7 +322,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 					// This isn't a function name or reference, but it could be an object emulating
 					// a function reference.  Additionally, we want something like %emptyvar%() to
 					// invoke g_MetaObject, so this part is done even if stack[stack_count] is not
-					// an object.  To "call" the object/value, we need to insert an empty method
+					// an object.  To "call" the object/value, we need to insert the "call" method
 					// name between the object/value and the parameter list.  There should always
 					// be room for this since the maximum number of operands at any one time <=
 					// postfix token count < infix token count < MAX_TOKENS == _countof(stack).
@@ -722,12 +722,8 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 				this_token.value_int64 = -TokenToInt64(right);
 			else if (right_is_number == PURE_FLOAT)
 				this_token.value_double = -TokenToDouble(right, FALSE); // Pass FALSE for aCheckForHex since PURE_FLOAT is never hex.
-			else // String.
-			{
-				// Seems best to consider the application of unary minus to a string to be a failure.
-				this_token.SetValue(EXPR_NAN);
-				break;
-			}
+			else // String.  Seems best to consider the application of unary minus to a string to be a failure.
+				goto type_mismatch;
 			// Since above didn't "break":
 			this_token.symbol = right_is_number;
 			break;
@@ -736,7 +732,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 			if (right_is_number)
 				TokenToDoubleOrInt64(right, this_token);
 			else
-				this_token.SetValue(EXPR_NAN); // For consistency with unary minus (see above).
+				goto type_mismatch; // For consistency with unary minus (see above).
 			break;
 
 		case SYM_POST_INCREMENT: // These were added in v1.0.46.  It doesn't seem worth translating them into
@@ -746,29 +742,8 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 			if (right.symbol != SYM_VAR) // Syntax error.
 				goto abort_with_exception;
 			is_pre_op = SYM_INCREMENT_OR_DECREMENT_IS_PRE(this_token.symbol); // Store this early because its symbol will soon be overwritten.
-			if (right_is_number == PURE_NOT_NUMERIC) // Not empty and not numeric: invalid operation.
-			{
-				right.var->MaybeWarnUninitialized();
-				right.var->Assign(EXPR_NAN); // Clipboard is also supported here.
-				if (is_pre_op)
-				{
-					// v1.0.46.01: For consistency, it seems best to make the result of a pre-op be a
-					// variable whenever a variable came in.  This allows its address to be taken, and it
-					// to be passed by reference, and other SYM_VAR behaviors, even if the operation itself
-					// produces a blank value.
-					if (right.var->Type() == VAR_NORMAL)
-					{
-						this_token.var = right.var;  // Make the result a variable rather than a normal operand so that its
-						this_token.symbol = SYM_VAR; // address can be taken, and it can be passed ByRef. e.g. &(++x)
-						break;
-					}
-					//else VAR_CLIPBOARD, which is allowed in only when it's the lvalue of an assignment or
-					// inc/dec.  So fall through to make the result blank because clipboard isn't allowed as
-					// SYM_VAR beyond this point (to simplify the code and improve maintainability).
-				}
-				this_token.SetValue(EXPR_NAN); // Indicate invalid operation (increment/decrement a non-number).
-				break;
-			} // end of "invalid operation" block.
+			if (right_is_number == PURE_NOT_NUMERIC) // Not numeric: invalid operation.
+				goto type_mismatch;
 
 			// DUE TO CODE SIZE AND PERFORMANCE decided not to support things like the following:
 			// -> ++++i ; This one actually works because pre-ops produce a variable (usable by future pre-ops).
@@ -854,10 +829,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 
 		case SYM_BITNOT:  // The tilde (~) operator.
 			if (right_is_number == PURE_NOT_NUMERIC) // String.  Seems best to consider the application of '*' or '~' to a non-numeric string to be a failure.
-			{
-				this_token.SetValue(EXPR_NAN);
-				break;
-			}
+				goto type_mismatch;
 			// Since above didn't "break": right_is_number is PURE_INTEGER or PURE_FLOAT.
 			right_int64 = TokenToInt64(right); // Although PURE_FLOAT can't be hex, for simplicity and due to the rarity of encountering a PURE_FLOAT in this case, the slight performance reduction of calling TokenToInt64() is done for both PURE_FLOAT and PURE_INTEGER.
 			// Note that it is not legal to perform ~, &, |, or ^ on doubles.  Because of this,
@@ -1125,10 +1097,8 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 					break;
 
 				default:
-					// Other operators do not support non-numeric operands, so the result is NaN (not a number).
-					this_token.marker = EXPR_NAN_STR;
-					this_token.marker_length = EXPR_NAN_LEN;
-					result_symbol = SYM_STRING;
+					// All other operators do not support non-numeric operands.
+					goto type_mismatch;
 				}
 				this_token.symbol = result_symbol; // Must be done only after the switch() above.
 			}
@@ -1167,14 +1137,9 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 					// Since it's integer division, no need for explicit floor() of the result.
 					// Also, performance is much higher for integer vs. float division, which is part
 					// of the justification for a separate operator.
-					if (right_int64 == 0) // Divide by zero produces "not a number".
-					{
-						this_token.marker = EXPR_NAN_STR;
-						this_token.marker_length = EXPR_NAN_LEN;
-						result_symbol = SYM_STRING;
-					}
-					else
-						this_token.value_int64 = left_int64 / right_int64;
+					if (right_int64 == 0)
+						goto divide_by_zero;
+					this_token.value_int64 = left_int64 / right_int64;
 					break;
 				case SYM_POWER:
 					// Note: The function pow() in math.h adds about 28 KB of code size (uncompressed)!
@@ -1182,10 +1147,8 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 					// v1.0.44.11: With Laszlo's help, negative integer bases are now supported.
 					if (!left_int64 && right_int64 < 0) // In essence, this is divide-by-zero.
 					{
-						// Return a consistent result rather than something that varies:
-						this_token.marker = EXPR_NAN_STR;
-						this_token.marker_length = EXPR_NAN_LEN;
-						result_symbol = SYM_STRING;
+						// Throw an exception rather than returning something undefined:
+						goto divide_by_zero;
 					}
 					else // We have a valid base and exponent and both are integers, so the calculation will always have a defined result.
 					{
@@ -1216,18 +1179,11 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 				case SYM_MULTIPLY: this_token.value_double = left_double * right_double; break;
 				case SYM_DIVIDE:
 				case SYM_FLOORDIVIDE:
-					if (right_double == 0.0) // Divide by zero produces "not a number".
-					{
-						this_token.marker = EXPR_NAN_STR;
-						this_token.marker_length = EXPR_NAN_LEN;
-						result_symbol = SYM_STRING;
-					}
-					else
-					{
-						this_token.value_double = left_double / right_double;
-						if (this_token.symbol == SYM_FLOORDIVIDE) // Like Python, the result is floor()'d, moving to the nearest integer to the left on the number line.
-							this_token.value_double = qmathFloor(this_token.value_double); // Result is always a double when at least one of the inputs was a double.
-					}
+					if (right_double == 0.0)
+						goto divide_by_zero;
+					this_token.value_double = left_double / right_double;
+					if (this_token.symbol == SYM_FLOORDIVIDE) // Like Python, the result is floor()'d, moving to the nearest integer to the left on the number line.
+						this_token.value_double = qmathFloor(this_token.value_double); // Result is always a double when at least one of the inputs was a double.
 					break;
 				case SYM_EQUALCASE: // Same behavior as SYM_EQUAL for numeric operands.
 				case SYM_EQUAL:    this_token.value_int64 = left_double == right_double; break;
@@ -1240,21 +1196,15 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 					// v1.0.44.11: With Laszlo's help, negative bases are now supported as long as the exponent is not fractional.
 					// See the other SYM_POWER higher above for more details about below.
 					left_was_negative = (left_double < 0);
-					if (left_double == 0.0 && right_double < 0  // In essence, this is divide-by-zero.
-						|| left_was_negative && qmathFmod(right_double, 1.0) != 0.0) // Negative base, but exponent isn't close enough to being an integer: unsupported (to simplify code).
-					{
-						this_token.marker = EXPR_NAN_STR;
-						this_token.marker_length = EXPR_NAN_LEN;
-						result_symbol = SYM_STRING;
-					}
-					else
-					{
-						if (left_was_negative)
-							left_double = -left_double; // Force a positive due to the limitations of qmathPow().
-						this_token.value_double = qmathPow(left_double, right_double);
-						if (left_was_negative && qmathFabs(qmathFmod(right_double, 2.0)) == 1.0) // Negative base and exactly-odd exponent (otherwise, it can only be zero or even because if not it would have returned higher above).
-							this_token.value_double = -this_token.value_double;
-					}
+					if (left_double == 0.0 && right_double < 0)  // In essence, this is divide-by-zero.
+						goto divide_by_zero;
+					if (left_was_negative && qmathFmod(right_double, 1.0) != 0.0) // Negative base, but exponent isn't close enough to being an integer: unsupported (to simplify code).
+						goto abort_with_exception;
+					if (left_was_negative)
+						left_double = -left_double; // Force a positive due to the limitations of qmathPow().
+					this_token.value_double = qmathPow(left_double, right_double);
+					if (left_was_negative && qmathFabs(qmathFmod(right_double, 2.0)) == 1.0) // Negative base and exactly-odd exponent (otherwise, it can only be zero or even because if not it would have returned higher above).
+						this_token.value_double = -this_token.value_double;
 					break;
 				} // switch(this_token.symbol)
 				this_token.symbol = result_symbol; // Must be done only after the switch() above.
@@ -1500,6 +1450,13 @@ abort:
 	aResult = FAIL; // Indicate reason to caller.
 	goto normal_end_skip_output_var; // output_var is skipped as part of standard abort behavior.
 
+type_mismatch:
+	LineError(ERR_TYPE_MISMATCH);
+	goto abort;
+divide_by_zero:
+	LineError(ERR_DIVIDEBYZERO);
+	goto abort;
+
 //abnormal_end: // Currently the same as normal_end; it's separate to improve readability.  When this happens, result_to_return is typically "" (unless the caller overrode that default).
 //normal_end: // This isn't currently used, but is available for future-use and readability.
 	// v1.0.45: ACT_ASSIGNEXPR relies on us to set the output_var (i.e. whenever it's ARG1's is_expression==true).
@@ -1524,7 +1481,7 @@ normal_end_skip_output_var:
 
 
 
-bool Func::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, bool aIsVariadic)
+bool Func::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, bool aIsVariadic, FreeVars *aUpVars)
 {
 
 	Object *param_obj = NULL;
@@ -1679,6 +1636,47 @@ bool Func::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCo
 
 		// From this point on, mInstances must be decremented before returning, even on error:
 		++mInstances;
+		
+		FreeVars *caller_free_vars = sFreeVars;
+		if (sFreeVars && mOuterFunc && !aUpVars)
+			aUpVars = sFreeVars->ForFunc(mOuterFunc);
+
+		if (mDownVarCount || aUpVars)
+		{
+			// These local vars need to persist after the function returns (and be independent of
+			// any other instances of this function).  Since we really only have one set of local
+			// vars for the lifetime of the script, make them aliases for newly allocated vars:
+			sFreeVars = FreeVars::Alloc(*this, mDownVarCount, aUpVars);
+			for (int i = 0; i < mDownVarCount; ++i)
+				mDownVar[i]->UpdateAlias(sFreeVars->mVar + i);
+		}
+		else
+			sFreeVars = NULL;
+		
+		if (mUpVarCount)
+		{
+			if (!aUpVars)
+			{
+				// No aUpVars, so it must be a direct call, and mOuterFunc wasn't found in the sFreeVars
+				// linked list, so it's probably a direct call from something which doesn't support closures,
+				// occurring after mOuterFunc returned.
+				aResultToken.Error(_T("Func out of scope."), mName); // Keep it short since this shouldn't be possible once the implementation is complete.
+				goto free_and_return;
+			}
+			for (int i = 0; i < mUpVarCount; ++i)
+			{
+				Var *outer_free_var = aUpVars->mVar + mUpVarIndex[i];
+				if (mUpVar[i]->Scope() & VAR_DOWNVAR) // This is both an upvar and a downvar.
+				{
+					Var *inner_free_var = mUpVar[i]->ResolveAlias(); // Retrieve the alias which was just set above.
+					inner_free_var->UpdateAlias(outer_free_var); // Point the free var of our layer to the outer one for use by closures within this function.
+					// mUpVar[i] is now a two-level alias (mUpVar[i] -> inner_free_var -> outer_free_var),
+					// but that will be corrected below.  Technically outer_free_var might also be an alias,
+					// in which case inner_free_var is now an alias for outer_free_var->mAliasFor.
+				}
+				mUpVar[i]->UpdateAlias(outer_free_var);
+			}
+		}
 
 		for (j = 0; j < mParamCount; ++j) // For each formal parameter.
 		{
@@ -1807,9 +1805,15 @@ free_and_return:
 		// mInstances must remain non-zero until this point to ensure that any recursive calls by an
 		// object's __Delete meta-function receive fresh variables, and none partially-destructed.
 		--mInstances;
+
+		if (sFreeVars)
+			sFreeVars->Release();
+		sFreeVars = caller_free_vars;
 	}
 	return !aResultToken.Exited(); // i.e. aResultToken.SetExitResult() or aResultToken.Error() was not called.
 }
+
+FreeVars *Func::sFreeVars = NULL;
 
 
 bool Func::Call(ResultToken &aResultToken, int aParamCount, ...)

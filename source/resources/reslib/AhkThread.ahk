@@ -7,7 +7,7 @@
   else if !IsObject(obj)
     return objects
   else If objects.HasKey(obj)
-    objects.Remove(obj)
+    objects.Delete(obj)
 }
 ahkthread_release(o){
   o.ahkterminate(o.timeout?o.timeout:0),MemoryFreeLibrary(o[""])

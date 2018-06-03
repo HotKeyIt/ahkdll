@@ -2803,7 +2803,7 @@ int FindExprDelim(LPCTSTR aBuf, TCHAR aDelimiter, int aStartIndex, LPCTSTR aLite
 	TCHAR close_char;
 	for (int mark = aStartIndex; ; ++mark)
 	{
-		if (aBuf[mark] == aDelimiter)
+		if (aBuf[mark] == aDelimiter && (aDelimiter != ':' || aBuf[mark+1] != '='))
 			return mark;
 		switch (aBuf[mark])
 		{
@@ -2821,11 +2821,30 @@ int FindExprDelim(LPCTSTR aBuf, TCHAR aDelimiter, int aStartIndex, LPCTSTR aLite
 			if (!aBuf[mark]) // i.e. it isn't safe to do ++mark.
 				return mark; // See case '\0' for comments.
 			continue;
-		//case ')':
-		//case ']':
-		//case '}':
-			// Unbalanced parentheses etc are caught at a later stage.
-			//continue;
+		case ')':
+		case ']':
+		case '}':
+		case g_delimiter:
+			if (aDelimiter && aDelimiter != ':') // Caller wants to find a specific symbol and it's not this one.
+				continue; // Unbalanced parentheses etc are caught at a later stage.
+			return mark;
+		case ':':
+			if (aDelimiter // See above.
+				|| aBuf[mark + 1] == '=')
+				continue;
+			// Since aDelimiter is zero, this colon doesn't belong to a ternary expression
+			// or object literal which is part of this sub-expression, so should effectively
+			// terminate the sub-expression (likely a fat arrow function).
+			return mark;
+		case '?':
+			if (aDelimiter && aDelimiter != ':')
+				continue; // The following isn't needed in this case.
+			// Scan for the corresponding ':' (or some other closing symbol if that's missing)
+			// so that it won't terminate the sub-expression.
+			mark = FindExprDelim(aBuf, ':', mark + 1, aLiteralMap);
+			if (!aBuf[mark]) // i.e. it isn't safe to do ++mark.
+				return mark; // See case '\0' for comments.
+			continue; // The colon is also skipped via the loop's increment.
 		case g_DerefChar:
 			// Since the check at the top of the loop didn't "return", this is the beginning
 			// of a double-deref, not the end.
@@ -2884,8 +2903,9 @@ int FindTextDelim(LPCTSTR aBuf, TCHAR aDelimiter, int aStartIndex, LPCTSTR aLite
 
 
 
-int BalanceExpr(LPCTSTR aBuf, int aStartBalance)
+int BalanceExpr(LPCTSTR aBuf, int aStartBalance, TCHAR aExpect[])
 {
+	TCHAR quote;
 	for (int balance = aStartBalance, mark = 0;; ++mark)
 	{
 		switch (aBuf[mark])
@@ -2899,18 +2919,32 @@ int BalanceExpr(LPCTSTR aBuf, int aStartBalance)
 			break;
 		case '"': 
 		case '\'':
-			mark = FindTextDelim(aBuf, aBuf[mark], mark + 1);
+			quote = aBuf[mark];
+			mark = FindTextDelim(aBuf, quote, mark + 1);
 			if (!aBuf[mark]) // i.e. it isn't safe to do ++mark.
+			{
+				aExpect[0] = quote; // Expected
+				aExpect[1] = 0; // Found
 				return -1; // Since this quote is missing its close-quote, abort the continuation loop.
+			}
 			break;
 		case ')':
 		case ']':
 		case '}':
 			--balance;
+			if (balance < 0
+				|| balance < MAX_BALANCEEXPR_DEPTH && aBuf[mark] != aExpect[balance])
+			{
+				aExpect[0] = balance < 0 ? 0 : aExpect[balance]; // Expected
+				aExpect[1] = aBuf[mark]; // Found
+				return -1;
+			}
 			break;
 		case '(':
 		case '[':
 		case '{':
+			if (balance < MAX_BALANCEEXPR_DEPTH)
+				aExpect[balance] = (aBuf[mark] == '(' ? ')' : aBuf[mark] + 2);
 			++balance;
 			break;
 		}

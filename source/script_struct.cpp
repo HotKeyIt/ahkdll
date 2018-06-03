@@ -1373,7 +1373,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 		if (releaseobj)
 			objclone->Release();
 		// The structure doesn't handle this method/property.
-		_o_throw(ERR_NO_MEMBER, aParamCount && *TokenToString(*aParam[0]) ? TokenToString(*aParam[0]) : g->ExcptDeref ? g->ExcptDeref->marker : _T(""));
+		_o_throw(ERR_UNKNOWN_PROPERTY, aParamCount && *TokenToString(*aParam[0]) ? TokenToString(*aParam[0]) : g->ExcptDeref ? g->ExcptDeref->marker : _T(""));
 		return INVOKE_NOT_HANDLED;
 	}
 
@@ -1854,7 +1854,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 	if (releaseobj)
 		objclone->Release();
 	// The structure doesn't handle this method/property.
-	_o_throw(ERR_NO_MEMBER, aParamCount && *TokenToString(*aParam[0]) ? TokenToString(*aParam[0]) : g->ExcptDeref ? g->ExcptDeref->marker : _T(""));
+	_o_throw(ERR_UNKNOWN_PROPERTY, aParamCount && *TokenToString(*aParam[0]) ? TokenToString(*aParam[0]) : g->ExcptDeref ? g->ExcptDeref->marker : _T(""));
 	return INVOKE_NOT_HANDLED;
 }
 

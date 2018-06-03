@@ -16,7 +16,7 @@ GNU General Public License for more details.
 
 #include "stdafx.h" // pre-compiled headers
 #include "SimpleHeap.h"
-#include "globaldata.h" // for g_script, so that errors can be centrally reported here.
+#include "globaldata.h" // for g_script-> so that errors can be centrally reported here.
 
 LPTSTR SimpleHeap::Malloc(LPTSTR aBuf, size_t aLength)
 // v1.0.44.14: Added aLength to improve performance in cases where callers already know the length.

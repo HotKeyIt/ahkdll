@@ -1476,7 +1476,8 @@ BIF_DECL(Op_ObjInvoke)
 		if (!obj)
 			_f_throw(ERR_NO_OBJECT, g->ExcptDeref ? g->ExcptDeref->marker : _T(""));
 		else
-			_f_throw(ERR_NO_MEMBER, aParamCount && *TokenToString(*aParam[0]) ? TokenToString(*aParam[0]) : g->ExcptDeref ? g->ExcptDeref->marker : _T(""));
+			_f_throw(invoke_type == IT_CALL ? ERR_UNKNOWN_METHOD : ERR_UNKNOWN_PROPERTY
+				, aParamCount ? TokenToString(*aParam[0]) : _T(""));
 	}
 	else if (result == FAIL || result == EARLY_EXIT) // For maintainability: SetExitResult() might not have been called.
 	{
@@ -1709,12 +1710,13 @@ BIF_DECL(BIF_ObjAddRefRelease)
 BIF_DECL(BIF_ObjBindMethod)
 {
 	IObject *func, *bound_func;
-	if (  !(func = TokenToObject(*aParam[0]))
-		&& !(func = TokenToFunc(*aParam[0]))  )
+	if (  !(func = TokenToFunctor(*aParam[0]))  )
 	{
 		_f_throw(ERR_PARAM1_INVALID);
 	}
-	if (  !(bound_func = BoundFunc::Bind(func, aParam + 1, aParamCount - 1, IT_CALL))  )
+	bound_func = BoundFunc::Bind(func, aParam + 1, aParamCount - 1, IT_CALL);
+	func->Release();
+	if (!bound_func)
 		_f_throw(ERR_OUTOFMEM);
 	_f_return(bound_func);
 }

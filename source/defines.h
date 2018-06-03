@@ -217,14 +217,13 @@ enum SymbolType // For use with ExpandExpression() and IsNumeric().
 		|| sym == SYM_PRE_INCREMENT || sym == SYM_PRE_DECREMENT \
 		|| sym == SYM_IFF_ELSE)
 
-#define EXPR_NAN_STR	_T("")
-#define EXPR_NAN_LEN	0
-#define EXPR_NAN		EXPR_NAN_STR, EXPR_NAN_LEN
-
 
 struct ExprTokenType; // Forward declarations for use below.
 struct ResultToken;
 struct IDebugProperties;
+
+
+typedef __int64 IntKeyType;
 
 
 struct DECLSPEC_NOVTABLE IObject // L31: Abstract interface for "objects".
@@ -266,7 +265,7 @@ struct DECLSPEC_NOVTABLE IDebugProperties
 	virtual void WriteProperty(LPCSTR aName, __int64 aValue) = 0;
 	virtual void WriteProperty(LPCSTR aName, IObject *aValue) = 0;
 	virtual void WriteProperty(LPCSTR aName, ExprTokenType &aValue) = 0;
-	virtual void WriteProperty(INT_PTR aKey, ExprTokenType &aValue) = 0;
+	virtual void WriteProperty(IntKeyType aKey, ExprTokenType &aValue) = 0;
 	virtual void WriteProperty(IObject *aKey, ExprTokenType &aValue) = 0;
 	virtual void BeginProperty(LPCSTR aName, LPCSTR aType, int aNumChildren, DebugCookie &aCookie) = 0;
 	virtual void EndProperty(DebugCookie aCookie) = 0;
@@ -531,18 +530,16 @@ enum enum_act {
 , ACT_FIRST_COMMAND, ACT_EXIT = ACT_FIRST_COMMAND, ACT_EXITAPP // Excluded from the "CONTROL_FLOW" range above because they can be safely wrapped into a Func.
 , ACT_TOOLTIP, ACT_TRAYTIP
 , ACT_SPLITPATH
-, ACT_RUNAS, ACT_RUN, ACT_RUNWAIT, ACT_DOWNLOAD
-, ACT_SEND, ACT_SENDRAW, ACT_SENDINPUT, ACT_SENDPLAY, ACT_SENDEVENT
-, ACT_CONTROLSEND, ACT_CONTROLSENDRAW, ACT_CONTROLCLICK, ACT_CONTROLMOVE, ACT_CONTROLGETPOS, ACT_CONTROLFOCUS
+, ACT_RUNAS, ACT_RUN, ACT_DOWNLOAD
+, ACT_SEND, ACT_SENDTEXT, ACT_SENDINPUT, ACT_SENDPLAY, ACT_SENDEVENT
+, ACT_CONTROLSEND, ACT_CONTROLSENDTEXT, ACT_CONTROLCLICK, ACT_CONTROLMOVE, ACT_CONTROLGETPOS, ACT_CONTROLFOCUS
 , ACT_CONTROLSETTEXT, ACT_CONTROL
 , ACT_SENDMODE, ACT_SENDLEVEL, ACT_COORDMODE, ACT_SETDEFAULTMOUSESPEED
 , ACT_CLICK, ACT_MOUSEMOVE, ACT_MOUSECLICK, ACT_MOUSECLICKDRAG, ACT_MOUSEGETPOS
 , ACT_STATUSBARWAIT
-, ACT_CLIPWAIT, ACT_KEYWAIT
 , ACT_SLEEP
 , ACT_CRITICAL, ACT_THREAD
 , ACT_WINACTIVATE, ACT_WINACTIVATEBOTTOM
-, ACT_WINWAIT, ACT_WINWAITCLOSE, ACT_WINWAITACTIVE, ACT_WINWAITNOTACTIVE
 , ACT_WINMINIMIZE, ACT_WINMAXIMIZE, ACT_WINRESTORE
 , ACT_WINHIDE, ACT_WINSHOW
 , ACT_WINMINIMIZEALL, ACT_WINMINIMIZEALLUNDO
@@ -633,7 +630,7 @@ typedef UCHAR HookType;
 #define EXTERN_G _thread_local extern global_struct *g
 #define EXTERN_OSVER extern OS_Version g_os
 #define EXTERN_CLIPBOARD _thread_local extern Clipboard *g_clip
-#define EXTERN_SCRIPT _thread_local extern Script *g_script
+#define EXTERN_SCRIPT _thread_local extern Script *g_script;
 #define CLOSE_CLIPBOARD_IF_OPEN	if (g_clip->mIsOpen) g_clip->Close()
 #define CLIPBOARD_CONTAINS_ONLY_FILES (!IsClipboardFormatAvailable(CF_NATIVETEXT) && IsClipboardFormatAvailable(CF_HDROP))
 

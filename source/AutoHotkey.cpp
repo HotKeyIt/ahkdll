@@ -444,7 +444,7 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	// top part (the auto-execute part) of the script so that they will be in effect even if the
 	// top part is something that's very involved and requires user interaction:
 	Hotkey::ManifestAllHotkeysHotstringsHooks(); // We want these active now in case auto-execute never returns (e.g. loop)
-	g_HSSameLineAction = false; // `#Hotstring E` should not affect Hotstring().
+	g_HSSameLineAction = false; // `#Hotstring X` should not affect Hotstring().
 	g_SuspendExempt = false; // #SuspendExempt should not affect Hotkey()/Hotstring().
 
 	g_script->mIsReadyToExecute = true; // This is done only after the above to support error reporting in Hotkey.cpp.

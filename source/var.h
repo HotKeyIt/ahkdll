@@ -165,6 +165,7 @@ public:
 	#define VAR_GLOBAL			0x01
 	#define VAR_LOCAL			0x02
 	#define VAR_FORCE_LOCAL		0x04 // Flag reserved for force-local mode in functions (not used in Var::mScope).
+	#define VAR_DOWNVAR			0x08 // This var is captured by a nested function/closure (it's in Func::mDownVar).
 	#define VAR_LOCAL_FUNCPARAM	0x10 // Indicates this local var is a function's parameter.  VAR_LOCAL_DECLARED should also be set.
 	#define VAR_LOCAL_STATIC	0x20 // Indicates this local var retains its value between function calls.
 	#define VAR_DECLARED		0x40 // Indicates this var was declared somehow, not automatic.
@@ -456,8 +457,6 @@ public:
 			aToken.value_double = var.ToDouble();
 			break;
 		default: // Not a pure number.
-			aToken.marker = EXPR_NAN_STR; // For completeness.  Some callers such as BIF_Abs() rely on this being done.
-			aToken.marker_length = EXPR_NAN_LEN;
 			return FAIL;
 		}
 		return OK; // Since above didn't return, indicate success.
@@ -542,12 +541,6 @@ public:
 			aResultToken.marker_length = var.mByteLength / sizeof(TCHAR);
 		}
 		return true;
-	}
-
-	void DisableSimpleMalloc()
-	// Caller must ensure that mType == VAR_NORMAL and mByteCapacity == 0.
-	{
-		mHowAllocated = ALLOC_MALLOC;
 	}
 
 	LPTSTR StealMem()
@@ -656,10 +649,10 @@ public:
 		return (mScope & (VAR_LOCAL|VAR_LOCAL_STATIC)) == VAR_LOCAL;
 	}
 
-	//__forceinline bool IsFuncParam()
-	//{
-	//	return (mScope & VAR_LOCAL_FUNCPARAM);
-	//}
+	__forceinline bool IsFuncParam()
+	{
+		return (mScope & VAR_LOCAL_FUNCPARAM);
+	}
 
 	__forceinline bool IsDeclared()
 	// Returns true if this is a declared var, such as "local var", "static var" or a func param.
@@ -917,6 +910,25 @@ public:
 			mByteCapacity = 0; // This also initializes mBIV within the same union.
 		if (mType != VAR_NORMAL)
 			mAttrib = 0; // Any vars that aren't VAR_NORMAL are considered initialized, by definition.
+	}
+
+	Var()
+		//: Var(_T(""), NULL, 0) // Not supported by Visual C++ 2010.
+		// Initialized as above:
+		: mCharContents(sEmptyString)
+		, mByteLength(0)
+		, mAttrib(VAR_ATTRIB_UNINITIALIZED)
+		// For anonymous/temporary variables:
+		, mScope(VAR_LOCAL)
+		, mName(_T(""))
+		// Normally set as a result of !aBuiltIn:
+		, mType(VAR_NORMAL)
+		, mByteCapacity(0)
+		// Vars constructed this way are for temporary use, and therefore must have mHowAllocated set
+		// as below to prevent the use of SimpleHeap::Malloc().  Otherwise, each Var could allocate
+		// some memory which cannot be freed until the program exits.
+		, mHowAllocated(ALLOC_MALLOC)
+	{
 	}
 
 	void *operator new(size_t aBytes){ return malloc(aBytes); }

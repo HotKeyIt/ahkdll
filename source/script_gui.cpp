@@ -345,7 +345,7 @@ ResultType STDMETHODCALLTYPE GuiType::Invoke(ResultToken &aResultToken, ExprToke
 	if_member("Title", P_Title)
 	if_member("Control", P_Control)
 	if_member("FocusedCtrl", P_FocusedCtrl)
-	if_member("Menu", P_Menu)
+	if_member("MenuBar", P_MenuBar)
 	if_member("MarginX", P_MarginX)
 	if_member("MarginY", P_MarginY)
 	if_member("BackColor", P_BackColor)
@@ -472,7 +472,7 @@ ResultType STDMETHODCALLTYPE GuiType::Invoke(ResultToken &aResultToken, ExprToke
 				return OK;
 			}
 		}
-		case P_Menu:
+		case P_MenuBar:
 		{
 			if (IS_INVOKE_SET)
 			{
@@ -480,7 +480,12 @@ ResultType STDMETHODCALLTYPE GuiType::Invoke(ResultToken &aResultToken, ExprToke
 				if (result != OK)
 					return result; // Already displayed error.
 			}
-			_o_return_empty; // TODO
+			if (mMenu)
+			{
+				mMenu->AddRef();
+				_o_return(mMenu);
+			}
+			_o_return_empty;
 		}
 		case P_Control:
 		{
@@ -600,14 +605,14 @@ BIF_DECL(BIF_GuiCreate)
 	ToggleValueType own_dialogs = TOGGLE_INVALID;
 	if (*options && !gui->ParseOptions(options, set_last_found_window, own_dialogs))
 	{
-		delete gui;
+		gui->Release();
 		_f_return_FAIL; // ParseOptions() already displayed the error.
 	}
 
 	gui->mControl = (GuiControlType **)malloc(GUI_CONTROL_BLOCK_SIZE * sizeof(GuiControlType*));
 	if (!gui->mControl)
 	{
-		delete gui;
+		gui->Release();
 		_f_throw(ERR_OUTOFMEM); // Short msg since so rare.
 	}
 
@@ -637,7 +642,7 @@ BIF_DECL(BIF_GuiCreate)
 	// Create the Gui, now that we're past all other failure points.
 	if (!gui->Create(title))
 	{
-		delete gui;
+		gui->Release();
 		_f_throw(_T("Could not create Gui.")); // Short msg since so rare.
 	}
 
@@ -1129,9 +1134,9 @@ ResultType GuiType::SetMenu(ExprTokenType &aParam)
 	if (!TokenIsEmptyString(aParam))
 	{
 		menu = dynamic_cast<UserMenu *>(TokenToObject(aParam));
-		if (!menu || menu == g_script->mTrayMenu)
+		if (!menu || menu->mMenuType != MENU_TYPE_BAR)
 			return g_script->ScriptError(ERR_INVALID_VALUE);
-		menu->Create(MENU_TYPE_BAR);  // Ensure the menu physically exists and is the "non-popup" type (for a menu bar).
+		menu->Create(); // Ensure the menu bar physically exists.
 		menu->AddRef();
 	}
 	if (mMenu)
@@ -2288,7 +2293,25 @@ _thread_local HWND GuiType::sTreeWithEditInProgress = NULL;
 
 
 
-void GuiType::Destroy(bool aExitIfNotPersistent)
+bool GuiType::Delete() // IObject::Delete()
+{
+	// Delete() should only be called when the script releases its last reference to the
+	// object, or when the user closes the window while the script has no references.
+	// See VisibilityChanged() for details.
+	if (mHwnd)
+		Destroy();
+	else
+		Dispose();
+	// OnMessage() or perhaps some other callback may enable the script to regain a ref.
+	// Although the object is now unusable, for program stability we must `delete this`
+	// only if mRefCount is still 1 (it's never decremented to 0).
+	if (mRefCount > 1)
+		return false;
+	return ObjectBase::Delete();
+}
+
+
+void GuiType::Destroy()
 // Destroys the window and performs related cleanup which is only necessary for
 // a successfully constructed Gui, then calls Dispose() for the remaining cleanup.
 {
@@ -2364,16 +2387,17 @@ void GuiType::Destroy(bool aExitIfNotPersistent)
 	// Clean up final resources.
 	Dispose();
 
-	// This is done here on behalf of RemoveGuiFromList(), as the reference which was
-	// just removed from the list might be the last one, in which case releasing it
-	// will cause 'this' to be deleted.
-	Release();
+	// The following might release the final reference to this object, thereby causing 'this'
+	// to be deleted.  See VisibilityChanged() for details.
+	if (mVisibleRefCounted)
+		Release();
 	// IT IS NOW UNSAFE TO REFER TO ANY NON-STATIC MEMBERS OF THIS OBJECT.
 
 	// If this Gui was the last thing keeping the script running, exit the script:
-	if (aExitIfNotPersistent)
-		g_script->ExitIfNotPersistent(EXIT_DESTROY);
+	g_script->ExitIfNotPersistent(EXIT_DESTROY);
 }
+
+
 
 void GuiType::Dispose()
 // Cleans up resources managed separately to the window.  This is separate from Destroy()
@@ -2551,8 +2575,10 @@ ResultType GuiType::NameToEventHandler(LPTSTR aName, IObject *&aObject)
 		return FAIL;
 	if (!mEventSink)
 	{
-		if (  !(aObject = g_script->FindFunc(aName))  )
+		Func *func = g_script->FindFunc(aName);
+		if (!func)
 			return FAIL;
+		aObject = func->CloseIfNeeded();
 		return OK;
 	}
 	aObject = NULL;
@@ -2575,12 +2601,15 @@ ResultType GuiType::OnEvent(GuiControlType *aControl, UINT aEvent, UCHAR aEventK
 	TCHAR nbuf[MAX_NUMBER_SIZE];
 	IObject *func = TokenToObject(*aParam[1]);
 	LPTSTR name = func ? NULL : TokenToString(*aParam[1], nbuf);
-	if (!func)
-	{
+	if (func)
+		func->AddRef();
+	else
 		if (!NameToEventHandler(name, func))
 			_o_throw(ERR_PARAM2_INVALID, name);
-	}
-	if (!OnEvent(aControl, aEvent, aEventKind, func, name, max_threads))
+	ResultType result = OnEvent(aControl, aEvent, aEventKind, func, name, max_threads);
+	if (func)
+		func->Release();
+	if (!result)
 		_o_throw(ERR_OUTOFMEM);
 	return OK;
 }
@@ -7226,7 +7255,8 @@ void GuiType::ControlAddContents(GuiControlType &aControl, LPTSTR aContent, int 
 	LPTSTR this_field, next_field;
 	LRESULT item_index;
 	TCHAR num_buf[MAX_NUMBER_SIZE];
-	INT_PTR obj_off = -1, obj_key = 0;
+	INT_PTR obj_off = -1;
+	IntKeyType obj_key = 0;
 
 	// For tab controls:
 	TCITEM tci;
@@ -7950,10 +7980,11 @@ ResultType GuiType::Show(LPTSTR aOptions)
 		} // if (mGuiShowHasNeverBeenDone)
 	} // if (allow_move_window)
 
-	// Note that for SW_MINIMIZE and SW_MAXIMZE, the MoveWindow() above should be done prior to ShowWindow()
+	// Note that for SW_MINIMIZE and SW_MAXIMIZE, the MoveWindow() above should be done prior to ShowWindow()
 	// so that the window will "remember" its new size upon being restored later.
 	if (!show_was_done)
 		ShowWindow(mHwnd, show_mode);
+	VisibilityChanged(); // AddRef() to keep the object alive while the window is visible.
 
 	bool we_did_the_first_activation = false; // Set default.
 
@@ -8061,7 +8092,10 @@ ResultType GuiType::Show(LPTSTR aOptions)
 void GuiType::Cancel()
 {
 	if (mHwnd)
+	{
 		ShowWindow(mHwnd, SW_HIDE);
+		VisibilityChanged(); // This may Release() and indirectly Destroy() the Gui.
+	}
 	// If this Gui was the last thing keeping the script running, exit the script:
 	g_script->ExitIfNotPersistent(EXIT_WM_CLOSE);
 }
@@ -8072,10 +8106,10 @@ void GuiType::Close()
 // If there is an OnClose event handler defined, launch it as a new thread.
 // In this case, don't close or hide the window.  It's up to the handler to do that
 // if it wants to.
-// If there is no handler, treat it the same as Destroy().
+// If there is no handler, treat it the same as Cancel().
 {
 	if (!IsMonitoring(GUI_EVENT_CLOSE))
-		return CancelOrDestroy();
+		return Cancel();
 	POST_AHK_GUI_ACTION(mHwnd, NO_CONTROL_INDEX, GUI_EVENT_CLOSE, NO_EVENT_INFO);
 	// MsgSleep() is not done because "case AHK_GUI_ACTION" in GuiWindowProc() takes care of it.
 	// See its comments for why.
@@ -8085,9 +8119,6 @@ void GuiType::Close()
 
 void GuiType::Escape() // Similar to close, except typically called when the user presses ESCAPE.
 // If there is an OnEscape event handler defined, launch it as a new thread.
-// In this case, don't close or hide the window.  It's up to the handler to do that
-// if it wants to.
-// If there is no label, treat it the same as Cancel().
 {
 	if (!IsMonitoring(GUI_EVENT_ESCAPE)) // The user preference (via votes on forum poll) is to do nothing by default.
 		return;
@@ -8095,6 +8126,28 @@ void GuiType::Escape() // Similar to close, except typically called when the use
 	POST_AHK_GUI_ACTION(mHwnd, NO_CONTROL_INDEX, GUI_EVENT_ESCAPE, NO_EVENT_INFO);
 	// MsgSleep() is not done because "case AHK_GUI_ACTION" in GuiWindowProc() takes care of it.
 	// See its comments for why.
+}
+
+
+
+void GuiType::VisibilityChanged()
+{
+	// Adjust the ref count to reflect the fact that the user has a "reference" to the GUI;
+	// that is, the user can interact with it, raising events which may cause callbacks into
+	// script.  The script doesn't need any other references to the GUI, since one will be
+	// provided in the event callback.
+	// In other words, the script is not required to keep a reference to the object while the
+	// GUI is visible, but also isn't required to Destroy() it explicitly.  Destroy() will be
+	// called automatically when the last reference is released (which may be below).
+	bool visible = IsWindowVisible(mHwnd);
+	if (visible != mVisibleRefCounted) // Visibility really has changed.
+	{
+		mVisibleRefCounted = visible; // Change this first in case of recursion.
+		if (visible)
+			AddRef();
+		else
+			Release();
+	}
 }
 
 
@@ -8195,7 +8248,7 @@ ResultType GuiType::Submit(ResultToken &aResultToken, bool aHideIt)
 	} // for()
 
 	if (aHideIt)
-		ShowWindow(mHwnd, SW_HIDE);
+		Cancel();
 	_o_return(ret);
 
 outofmem:

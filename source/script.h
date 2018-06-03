@@ -217,12 +217,11 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_EXPR_TOO_LONG _T("Expression too complex")
 #define ERR_TOO_MANY_REFS ERR_EXPR_TOO_LONG // No longer applies to just var/func refs. Old message: "Too many var/func refs."
 #define ERR_NO_LABEL _T("Target label does not exist.")
-#define ERR_MENU _T("Menu does not exist.")
-#define ERR_SUBMENU _T("Submenu does not exist.")
+#define ERR_INVALID_MENU_TYPE _T("Invalid menu type.")
+#define ERR_INVALID_SUBMENU _T("Invalid submenu.")
 #define ERR_WINDOW_PARAM _T("Requires at least one of its window parameters.")
-#define ERR_MENUTRAY _T("Supported only for the tray menu")
 #define ERR_MOUSE_COORD _T("X & Y must be either both absent or both present.")
-#define ERR_DIVIDEBYZERO _T("Divide by zero")
+#define ERR_DIVIDEBYZERO _T("Divide by zero.")
 #define ERR_VAR_IS_READONLY _T("Not allowed as an output variable.")
 #define ERR_INVALID_CHAR _T("This character is not allowed here.")
 #define ERR_INVALID_DOT _T("Ambiguous or invalid use of \".\"")
@@ -249,8 +248,10 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_EXPR_EVAL _T("Error evaluating expression.")
 #define ERR_EXPR_SYNTAX _T("Syntax error.")
 #define ERR_EXPR_MISSING_OPERAND _T("Missing operand.")
+#define ERR_TYPE_MISMATCH _T("Type mismatch.")
 #define ERR_NO_OBJECT _T("No object to invoke.")
-#define ERR_NO_MEMBER _T("Unknown property or method.")
+#define ERR_UNKNOWN_PROPERTY _T("Unknown property.")
+#define ERR_UNKNOWN_METHOD _T("Unknown method.")
 #define ERR_NO_GUI _T("No default GUI.")
 #define ERR_NO_STATUSBAR _T("No StatusBar.")
 #define ERR_NO_LISTVIEW _T("No ListView.")
@@ -382,6 +383,7 @@ enum DerefTypeType : BYTE
 	DT_STRING,		// Segment of text in a text arg (delimited by '%').
 	DT_QSTRING,		// Segment of text in a quoted string (delimited by '%').
 	DT_WORDOP,		// Word operator: and, or, not, new.
+	DT_FUNCREF,		// Reference to function (for fat arrow functions).
 	// DerefType::is_function() requires that these are last:
 	DT_FUNC,		// Function call.
 	DT_VARIADIC		// Variadic function call.
@@ -573,6 +575,7 @@ enum JoyControls {JOYCTRL_INVALID, JOYCTRL_XPOS, JOYCTRL_YPOS, JOYCTRL_ZPOS
 // C++ function to tell it which function is being called.  Each group starts at ID 0 in case
 // it helps the compiler to reduce code size.
 enum BuiltInFunctionID {
+	FID_Func = 0, FID_FuncClose,
 	FID_LV_GetNext = 0, FID_LV_GetCount,
 	FID_LV_Add = 0, FID_LV_Insert, FID_LV_Modify,
 	FID_LV_InsertCol = 0, FID_LV_ModifyCol, FID_LV_DeleteCol,
@@ -603,7 +606,7 @@ enum BuiltInFunctionID {
 	FID_ProcessExist = 0, FID_ProcessClose, FID_ProcessWait, FID_ProcessWaitClose, 
 	FID_MonitorGet = 0, FID_MonitorGetWorkArea, FID_MonitorGetCount, FID_MonitorGetPrimary, FID_MonitorGetName, 
 	FID_OnExit = 0, FID_OnClipboardChange,
-	FID_MenuCreate = 0, FID_MenuFromHandle,
+	FID_MenuCreate = 0, FID_MenuBarCreate, FID_MenuFromHandle,
 	FID_ControlGetChecked = 0, FID_ControlGetEnabled, FID_ControlGetVisible, FID_ControlGetTab, FID_ControlFindItem, FID_ControlGetChoice, FID_ControlGetList, FID_ControlGetLineCount, FID_ControlGetCurrentLine, FID_ControlGetCurrentCol, FID_ControlGetLine, FID_ControlGetSelected, FID_ControlGetStyle, FID_ControlGetExStyle, FID_ControlGetHwnd,
 	FID_ControlSetChecked = 0, FID_ControlSetEnabled, FID_ControlShow, FID_ControlHide, FID_ControlSetStyle, FID_ControlSetExStyle, FID_ControlShowDropDown, FID_ControlHideDropDown, FID_ControlSetTab, FID_ControlAddItem, FID_ControlDeleteItem, FID_ControlChoose, FID_ControlChooseString, FID_ControlEditPaste,
 	FID_DriveEject = 0, FID_DriveLock, FID_DriveUnlock, FID_DriveSetLabel,
@@ -611,7 +614,8 @@ enum BuiltInFunctionID {
 	FID_EnvGet = 0, FID_EnvSet,
 	FID_PostMessage = 0, FID_SendMessage,
 	FID_RegRead = 0, FID_RegWrite, FID_RegDelete, FID_RegDeleteKey,
-	FID_SoundGet = 0, FID_SoundSet
+	FID_SoundGet = 0, FID_SoundSet,
+	FID_RunWait = 0, FID_ClipWait, FID_KeyWait, FID_WinWait, FID_WinWaitClose, FID_WinWaitActive, FID_WinWaitNotActive
 };
 
 
@@ -689,7 +693,6 @@ private:
 	#define SW_NONE -1
 	ResultType PerformShowWindow(ActionTypeType aActionType, LPTSTR aTitle = _T(""), LPTSTR aText = _T("")
 		, LPTSTR aExcludeTitle = _T(""), LPTSTR aExcludeText = _T(""));
-	ResultType PerformWait();
 
 	ResultType WinMove(LPTSTR aTitle, LPTSTR aText, LPTSTR aX, LPTSTR aY
 		, LPTSTR aWidth = _T(""), LPTSTR aHeight = _T(""), LPTSTR aExcludeTitle = _T(""), LPTSTR aExcludeText = _T(""));
@@ -987,7 +990,6 @@ public:
 			case ACT_SPLITPATH:
 			case ACT_FILEGETSHORTCUT:
 			case ACT_RUN:
-			case ACT_RUNWAIT:
 				return ARG_TYPE_OUTPUT_VAR;
 			}
 			break;
@@ -1067,13 +1069,8 @@ public:
 		if (aIsRemoteRegistry)
 			*aIsRemoteRegistry = (computer_name_end != NULL);
 
-		HKEY root_key;
-		if (!_tcsicmp(key_name, _T("HKLM")) || !_tcsicmp(key_name, _T("HKEY_LOCAL_MACHINE")))       root_key = HKEY_LOCAL_MACHINE;
-		else if (!_tcsicmp(key_name, _T("HKCR")) || !_tcsicmp(key_name, _T("HKEY_CLASSES_ROOT")))   root_key = HKEY_CLASSES_ROOT;
-		else if (!_tcsicmp(key_name, _T("HKCC")) || !_tcsicmp(key_name, _T("HKEY_CURRENT_CONFIG"))) root_key = HKEY_CURRENT_CONFIG;
-		else if (!_tcsicmp(key_name, _T("HKCU")) || !_tcsicmp(key_name, _T("HKEY_CURRENT_USER")))   root_key = HKEY_CURRENT_USER;
-		else if (!_tcsicmp(key_name, _T("HKU")) || !_tcsicmp(key_name, _T("HKEY_USERS")))           root_key = HKEY_USERS;
-		else // Invalid or unsupported root key name.
+		HKEY root_key = RegConvertRootKeyType(key_name);
+		if (!root_key) // Invalid or unsupported root key name.
 			return NULL;
 
 		if (!aIsRemoteRegistry || !computer_name_end) // Either caller didn't want it opened, or it doesn't need to be.
@@ -1089,18 +1086,9 @@ public:
 		return (RegConnectRegistry(computer_name, root_key, &remote_key) == ERROR_SUCCESS) ? remote_key : NULL;
 	}
 
-	static LPTSTR RegConvertRootKey(HKEY aRootKey)
-	{
-		// switch() doesn't directly support expression of type HKEY:
-		if (aRootKey == HKEY_LOCAL_MACHINE)       return _T("HKEY_LOCAL_MACHINE");
-		else if (aRootKey == HKEY_CLASSES_ROOT)   return _T("HKEY_CLASSES_ROOT");
-		else if (aRootKey == HKEY_CURRENT_CONFIG) return _T("HKEY_CURRENT_CONFIG");
-		else if (aRootKey == HKEY_CURRENT_USER)   return _T("HKEY_CURRENT_USER");
-		else if (aRootKey == HKEY_USERS)          return _T("HKEY_USERS");
-		// These are either unused or so rarely used (DYN_DATA on Win9x) that they aren't supported:
-		// HKEY_PERFORMANCE_DATA, HKEY_PERFORMANCE_TEXT, HKEY_PERFORMANCE_NLSTEXT, HKEY_DYN_DATA
-		return _T(""); // Make it be the empty string for anything else.
-	}
+	static HKEY RegConvertRootKeyType(LPTSTR aName);
+	static LPTSTR RegConvertRootKeyType(HKEY aKey);
+
 	static int RegConvertValueType(LPTSTR aValueType)
 	{
 		if (!_tcsicmp(aValueType, _T("REG_SZ"))) return REG_SZ;
@@ -1110,23 +1098,23 @@ public:
 		if (!_tcsicmp(aValueType, _T("REG_BINARY"))) return REG_BINARY;
 		return REG_NONE; // Unknown or unsupported type.
 	}
-	static LPTSTR RegConvertValueType(LPTSTR aBuf, size_t aBufSize, DWORD aValueType)
+	static LPTSTR RegConvertValueType(DWORD aValueType)
 	{
 		switch(aValueType)
 		{
-		case REG_SZ: tcslcpy(aBuf, _T("REG_SZ"), aBufSize); return aBuf;
-		case REG_EXPAND_SZ: tcslcpy(aBuf, _T("REG_EXPAND_SZ"), aBufSize); return aBuf;
-		case REG_BINARY: tcslcpy(aBuf, _T("REG_BINARY"), aBufSize); return aBuf;
-		case REG_DWORD: tcslcpy(aBuf, _T("REG_DWORD"), aBufSize); return aBuf;
-		case REG_DWORD_BIG_ENDIAN: tcslcpy(aBuf, _T("REG_DWORD_BIG_ENDIAN"), aBufSize); return aBuf;
-		case REG_LINK: tcslcpy(aBuf, _T("REG_LINK"), aBufSize); return aBuf;
-		case REG_MULTI_SZ: tcslcpy(aBuf, _T("REG_MULTI_SZ"), aBufSize); return aBuf;
-		case REG_RESOURCE_LIST: tcslcpy(aBuf, _T("REG_RESOURCE_LIST"), aBufSize); return aBuf;
-		case REG_FULL_RESOURCE_DESCRIPTOR: tcslcpy(aBuf, _T("REG_FULL_RESOURCE_DESCRIPTOR"), aBufSize); return aBuf;
-		case REG_RESOURCE_REQUIREMENTS_LIST: tcslcpy(aBuf, _T("REG_RESOURCE_REQUIREMENTS_LIST"), aBufSize); return aBuf;
-		case REG_QWORD: tcslcpy(aBuf, _T("REG_QWORD"), aBufSize); return aBuf;
-		case REG_SUBKEY: tcslcpy(aBuf, _T("KEY"), aBufSize); return aBuf;  // Custom (non-standard) type.
-		default: if (aBufSize) *aBuf = '\0'; return aBuf;  // Make it be the empty string for REG_NONE and anything else.
+		case REG_SZ: return _T("REG_SZ");
+		case REG_EXPAND_SZ: return _T("REG_EXPAND_SZ");
+		case REG_BINARY: return _T("REG_BINARY");
+		case REG_DWORD: return _T("REG_DWORD");
+		case REG_DWORD_BIG_ENDIAN: return _T("REG_DWORD_BIG_ENDIAN");
+		case REG_LINK: return _T("REG_LINK");
+		case REG_MULTI_SZ: return _T("REG_MULTI_SZ");
+		case REG_RESOURCE_LIST: return _T("REG_RESOURCE_LIST");
+		case REG_FULL_RESOURCE_DESCRIPTOR: return _T("REG_FULL_RESOURCE_DESCRIPTOR");
+		case REG_RESOURCE_REQUIREMENTS_LIST: return _T("REG_RESOURCE_REQUIREMENTS_LIST");
+		case REG_QWORD: return _T("REG_QWORD");
+		case REG_SUBKEY: return _T("KEY");  // Custom (non-standard) type.
+		default: return _T("");  // Make it be the empty string for REG_NONE and anything else.
 		}
 	}
 	static DWORD RegConvertView(LPTSTR aBuf)
@@ -1669,7 +1657,80 @@ struct FuncResult : public ResultToken
 };
 
 
+class Func;
+struct FuncList
+{
+	Func **mItem;
+	int mCount, mCountMax;
+
+	Func *Find(LPCTSTR aName, int *apInsertPos);
+	ResultType Insert(Func *aFunc, int aInsertPos);
+	ResultType Alloc(int aAllocCount);
+
+	FuncList() : mItem(NULL), mCount(0), mCountMax(0) {}
+};
+
+
+struct FreeVars
+{
+	int mRefCount, mVarCount;
+	Var *mVar;
+	Func *mFunc;
+	FreeVars *mOuterVars;
+
+	void AddRef()
+	{
+		++mRefCount;
+	}
+
+	void Release()
+	{
+		if (mRefCount == 1)
+			delete this;
+		else
+			--mRefCount;
+	}
+
+	FreeVars *ForFunc(Func *aFunc)
+	{
+		FreeVars *fv = this;
+		do
+		{
+			if (fv->mFunc == aFunc)
+				return fv;
+		}
+		while (fv = fv->mOuterVars);
+		return NULL;
+	}
+
+	static FreeVars *Alloc(Func &aFunc, int aVarCount, FreeVars *aOuterVars)
+	{
+		Var *v = aVarCount ? ::new Var[aVarCount] : NULL;
+		return new FreeVars(v, aFunc, aVarCount, aOuterVars); // Must use :: to avoid SimpleHeap.
+	}
+
+private:
+	FreeVars(Var *aVars, Func &aFunc, int aVarCount, FreeVars *aOuterVars)
+		: mVar(aVars), mVarCount(aVarCount), mRefCount(1)
+		, mFunc(&aFunc), mOuterVars(aOuterVars)
+	{
+		if (aOuterVars)
+			aOuterVars->AddRef();
+	}
+
+	~FreeVars()
+	{
+		if (mOuterVars)
+			mOuterVars->Release();
+		for (int i = 0; i < mVarCount; ++i)
+			mVar[i].Free(VAR_ALWAYS_FREE, true); // Pass "true" to exclude aliases, since their targets should not be freed (they don't belong to this function).
+		::delete[] mVar; // Must use :: to avoid SimpleHeap.
+	}
+};
+
+
 typedef BIF_DECL((* BuiltInFunctionType));
+
 
 class Func : public IObjectComCompatible
 {
@@ -1691,10 +1752,17 @@ public:
 	int mMinParams;  // The number of mandatory parameters (populated for both UDFs and built-in's).
 	Label *mFirstLabel, *mLastLabel; // Linked list of private labels.
 	Var **mGlobalVar; // Array of global declarations
+	Func *mOuterFunc; // Func which contains this Func (usually NULL).
+	FuncList mFuncs; // List of nested functions (usually empty).
 	Var **mVar, **mLazyVar; // Array of pointers-to-variable, allocated upon first use and later expanded as needed.
 	Var **mStaticVar, **mStaticLazyVar;
+	Var **mDownVar, **mUpVar;
+	int *mUpVarIndex;
 	// Count of items in the above array as well as the maximum capacity.
 	int mGlobalVarCount, mVarCount, mVarCountMax, mLazyVarCount, mStaticVarCount, mStaticVarCountMax, mStaticLazyVarCount; 
+	static FreeVars *sFreeVars;
+	#define MAX_FUNC_UP_VARS 1000
+	int mDownVarCount, mUpVarCount;
 	int mInstances; // How many instances currently exist on the call stack (due to recursion or thread interruption).  Future use: Might be used to limit how deep recursion can go to help prevent stack overflow.
 
 	// Keep small members adjacent to each other to save space and improve perf. due to byte alignment:
@@ -1705,12 +1773,23 @@ public:
 	#define VAR_DECLARE_STATIC (VAR_DECLARED | VAR_LOCAL | VAR_LOCAL_STATIC)
 	// The last two may be combined (bitwise-OR) with VAR_FORCE_LOCAL.
 
+	bool AllowSuperGlobals()
+	{
+		// A function allows super-globals unless it is force-local or contained by another
+		// function which is force-local (i.e. a nested function should inherit the rules and
+		// declarations of the scope which encloses it).
+		if (mDefaultVarType & VAR_FORCE_LOCAL)
+			return false;
+		return mOuterFunc ? mOuterFunc->AllowSuperGlobals() : true;
+	}
+
 	bool mIsBuiltIn; // Determines contents of union. Keep this member adjacent/contiguous with the above.
 	// Note that it's possible for a built-in function such as WinExist() to become a normal/UDF via
 	// override in the script.  So mIsBuiltIn should always be used to determine whether the function
 	// is truly built-in, not its name.
 	bool mIsVariadic;
 	bool mIsMacro;
+	bool mIsFatArrow;
 
 #define MAX_FUNC_OUTPUT_VAR 7
 	bool ArgIsOutputVar(int aIndex)
@@ -1731,7 +1810,7 @@ public:
 	}
 
 	// bool result indicates whether aResultToken contains a value (i.e. false for FAIL/EARLY_EXIT).
-	bool Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, bool aIsVariadic = false);
+	bool Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, bool aIsVariadic = false, FreeVars *aUpVars = NULL);
 	bool Call(ResultToken &aResultToken, int aParamCount, ...);
 
 // Macros for specifying arguments in Func::Call(aResultToken, aParamCount, ...)
@@ -1763,7 +1842,7 @@ public:
 		//    back into the function body belongs to the Gosub and not the function itself.
 		// 3) More difficult to maintain because we have handle jump_to_line the same way ExecUntil() does,
 		//    checking aResult the same way it does, then checking jump_to_line the same way it does, etc.
-		// Fix for v1.0.31.05: g->mLoopFile and the other g_script members that follow it are
+		// Fix for v1.0.31.05: g->mLoopFile and the other g_script->members that follow it are
 		// now passed to ExecUntil() for two reasons (update for v1.0.44.14: now they're implicitly "passed"
 		// because they're done via parameter anymore):
 		// 1) To fix the fact that any function call in one parameter of a command would reset
@@ -1786,10 +1865,10 @@ public:
 				// Find the end of this function.
 				//Line *line;
 				//for (line = mJumpToLine; line && (line->mActionType != ACT_BLOCK_END || !line->mAttribute); line = line->mNextLine);
-				// Since mJumpToLine points at the first line *inside* the body, mJumpToLine->mPrevLine
+				// Since mJumpToLine points at the first line *inside* the body, mJumpToLine->mParentLine
 				// is the block-begin.  That line's mRelatedLine is the line *after* the block-end, so
 				// use it's mPrevLine.  mRelatedLine is guaranteed to be non-NULL by load-time logic.
-				Line *line = mJumpToLine->mPrevLine->mRelatedLine->mPrevLine;
+				Line *line = mJumpToLine->mParentLine->mRelatedLine->mPrevLine;
 				// Give user the opportunity to inspect variables before returning.
 				if (line)
 					g_Debugger.PreExecLine(line);
@@ -1806,6 +1885,8 @@ public:
 		return result;
 	}
 
+	IObject *CloseIfNeeded(); // Returns this Func or (if mUpVarCount != 0) a Closure.
+
 	// IObject.
 	ResultType STDMETHODCALLTYPE Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	ULONG STDMETHODCALLTYPE AddRef() { return 1; }
@@ -1819,16 +1900,19 @@ public:
 		: mName(aFuncName) // Caller gave us a pointer to dynamic memory for this.
 		, mBIF(NULL) // Also initializes mJumpToLine via union.
 		, mParam(NULL), mParamCount(0), mMinParams(0) // Also initializes mOutputVar via union (mParam).
+		, mOuterFunc(NULL)
 		, mFirstLabel(NULL), mLastLabel(NULL)
 		, mClass(NULL) // Also initializes mID via union.
 		, mVar(NULL), mVarCount(0), mVarCountMax(0), mLazyVar(NULL), mLazyVarCount(0)
 		, mStaticVar(NULL), mStaticVarCount(0), mStaticVarCountMax(0), mStaticLazyVar(NULL), mStaticLazyVarCount(0)
 		, mGlobalVar(NULL), mGlobalVarCount(0)
+		, mDownVar(NULL), mDownVarCount(0), mUpVar(NULL), mUpVarCount(0), mUpVarIndex(NULL)
 		, mInstances(0)
 		, mDefaultVarType(VAR_DECLARE_LOCAL)
 		, mIsBuiltIn(aIsBuiltIn)
 		, mIsVariadic(false)
 		, mIsMacro(false)
+		, mIsFatArrow(false)
 	{}
 	void *operator new(size_t aBytes){ return malloc(aBytes); }
 	void *operator new[](size_t aBytes) {return malloc(aBytes); }
@@ -1859,7 +1943,6 @@ struct FuncEntry
 	LPCTSTR mName;
 	BuiltInFunctionType mBIF;
 	UCHAR mMinParams, mMaxParams;
-	bool mHasReturn;
 	UCHAR mID;
 	UCHAR mOutputVars[MAX_FUNC_OUTPUT_VAR];
 };
@@ -1869,7 +1952,7 @@ struct FuncEntry
 class ScriptTimer
 {
 public:
-	LabelRef mLabel;
+	LabelRef mCallback;
 	DWORD mPeriod; // v1.0.36.33: Changed from int to DWORD to double its capacity.
 	DWORD mTimeLastRun;  // TickCount
 	int mPriority;  // Thread priority relative to other threads, default 0.
@@ -1880,7 +1963,7 @@ public:
 	void ScriptTimer::Disable();
 	ScriptTimer(IObject *aLabel)
 		#define DEFAULT_TIMER_PERIOD 250
-		: mLabel(aLabel), mPeriod(DEFAULT_TIMER_PERIOD), mPriority(0) // Default is always 0.
+		: mCallback(aLabel), mPeriod(DEFAULT_TIMER_PERIOD), mPriority(0) // Default is always 0.
 		, mExistingThreads(0), mTimeLastRun(0)
 		, mEnabled(false), mRunOnlyOnce(false), mNextTimer(NULL)  // Note that mEnabled must default to false for the counts to be right.
 	{}
@@ -1986,24 +2069,23 @@ class UserMenu : public ObjectBase
 {
 public:
 	UserMenuItem *mFirstMenuItem, *mLastMenuItem, *mDefault;
+	UserMenu *mNextMenu;  // Next item in linked list
 	// Keep any fields that aren't an even multiple of 4 adjacent to each other.  This conserves memory
 	// due to byte-alignment:
-	bool mIncludeStandardItems;
 	int mClickCount; // How many clicks it takes to trigger the default menu item.  2 = double-click
 	UINT mMenuItemCount;  // The count of user-defined menu items (doesn't include the standard items, if present).
-	UserMenu *mNextMenu;  // Next item in linked list
-	HMENU mMenu;
 	MenuTypeType mMenuType; // MENU_TYPE_POPUP (via CreatePopupMenu) vs. MENU_TYPE_BAR (via CreateMenu).
+	HMENU mMenu;
 	HBRUSH mBrush;   // Background color to apply to menu.
 	COLORREF mColor; // The color that corresponds to the above.
 
 	// Don't overload new and delete operators in this case since we want to use real dynamic memory
 	// (since menus can be read in from a file, destroyed and recreated, over and over).
 
-	UserMenu() // Constructor
+	UserMenu(MenuTypeType aMenuType) // Constructor
 		: mFirstMenuItem(NULL), mLastMenuItem(NULL), mDefault(NULL)
-		, mIncludeStandardItems(false), mClickCount(2), mMenuItemCount(0), mNextMenu(NULL), mMenu(NULL)
-		, mMenuType(MENU_TYPE_POPUP) // The MENU_TYPE_NONE flag is not used in this context.  Default = POPUP.
+		, mClickCount(2), mMenuItemCount(0), mNextMenu(NULL), mMenu(NULL)
+		, mMenuType(aMenuType)
 		, mBrush(NULL), mColor(CLR_DEFAULT)
 	{
 	}
@@ -2017,6 +2099,7 @@ public:
 
 		// Methods
 		M_Add,
+		M_AddStandard,
 		M_Insert,
 		M_Delete,
 		M_Rename,
@@ -2033,19 +2116,19 @@ public:
 
 		// Properties
 		P_Default,
-		P_Standard,
 		P_Handle,
 		P_ClickCount,
 	};
 	
-	IObject_Type_Impl("Menu")
+	//IObject_Type_Impl("Menu")
+	LPTSTR Type() { return mMenuType == MENU_TYPE_BAR ? _T("MenuBar") : _T("Menu"); }
 	ResultType STDMETHODCALLTYPE Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
 
-	ResultType AddItem(LPTSTR aName, UINT aMenuID, IObject *aLabel, UserMenu *aSubmenu, LPTSTR aOptions, UserMenuItem **aInsertAt);
+	ResultType AddItem(LPTSTR aName, UINT aMenuID, IObject *aCallback, UserMenu *aSubmenu, LPTSTR aOptions, UserMenuItem **aInsertAt);
 	ResultType InternalAppendMenu(UserMenuItem *aMenuItem, UserMenuItem *aInsertBefore = NULL);
-	ResultType DeleteItem(UserMenuItem *aMenuItem, UserMenuItem *aMenuItemPrev);
+	ResultType DeleteItem(UserMenuItem *aMenuItem, UserMenuItem *aMenuItemPrev, bool aUpdateGuiMenuBars = true);
 	ResultType DeleteAllItems();
-	ResultType ModifyItem(UserMenuItem *aMenuItem, IObject *aLabel, UserMenu *aSubmenu, LPTSTR aOptions);
+	ResultType ModifyItem(UserMenuItem *aMenuItem, IObject *aCallback, UserMenu *aSubmenu, LPTSTR aOptions);
 	void UpdateOptions(UserMenuItem *aMenuItem, LPTSTR aOptions);
 	ResultType RenameItem(UserMenuItem *aMenuItem, LPTSTR aNewName);
 	ResultType UpdateName(UserMenuItem *aMenuItem, LPTSTR aNewName);
@@ -2056,17 +2139,18 @@ public:
 	ResultType EnableItem(UserMenuItem *aMenuItem);
 	ResultType DisableItem(UserMenuItem *aMenuItem);
 	ResultType ToggleEnableItem(UserMenuItem *aMenuItem);
-	ResultType SetDefault(UserMenuItem *aMenuItem = NULL);
-	ResultType IncludeStandardItems();
-	ResultType ExcludeStandardItems();
-	ResultType Create(MenuTypeType aMenuType = MENU_TYPE_NONE); // NONE means UNSPECIFIED in this context.
+	ResultType SetDefault(UserMenuItem *aMenuItem = NULL, bool aUpdateGuiMenuBars = true);
+	ResultType Create();
 	void SetColor(ExprTokenType &aColor, bool aApplyToSubmenus);
 	void ApplyColor(bool aApplyToSubmenus);
 	ResultType AppendStandardItems();
-	ResultType Destroy();
+	ResultType EnableStandardOpenItem(bool aEnable);
+	void Destroy();
 	ResultType Display(bool aForceToForeground = true, int aX = COORD_UNSPECIFIED, int aY = COORD_UNSPECIFIED);
 	UserMenuItem *FindItem(LPTSTR aNameOrPos, UserMenuItem *&aPrevItem, bool &aByPos);
+	UserMenuItem *FindItemByID(UINT aID);
 	bool ContainsMenu(UserMenu *aMenu);
+	bool ContainsCustomItems();
 	void UpdateAccelerators();
 	// L17: Functions for menu icons.
 	ResultType SetItemIcon(UserMenuItem *aMenuItem, LPTSTR aFilename, int aIconNumber, int aWidth);
@@ -2083,7 +2167,7 @@ class UserMenuItem
 public:
 	LPTSTR mName;  // Dynamically allocated.
 	size_t mNameCapacity;
-	LabelRef mLabel;
+	LabelRef mCallback;
 	UserMenu *mSubmenu;
 	UserMenu *mMenu;  // The menu to which this item belongs.  Needed to support script var A_ThisMenu.
 	UINT mMenuID;
@@ -2112,8 +2196,8 @@ public:
 		HBITMAP mBitmap;
 	};
 
-	// Constructor:
-	UserMenuItem(LPTSTR aName, size_t aNameCapacity, UINT aMenuID, IObject *aLabel, UserMenu *aSubmenu, UserMenu *aMenu);
+	UserMenuItem(LPTSTR aName, size_t aNameCapacity, UINT aMenuID, IObject *aCallback, UserMenu *aSubmenu, UserMenu *aMenu);
+	~UserMenuItem();
 
 	// Don't overload new and delete operators in this case since we want to use real dynamic memory
 	// (since menus can be read in from a file, destroyed and recreated, over and over).
@@ -2437,6 +2521,7 @@ public:
 	bool mControlWidthWasSetByContents; // Whether the most recently added control was auto-width'd to fit its contents.
 	bool mUsesDPIScaling; // Whether the GUI uses DPI scaling.
 	bool mDisposed; // Simplifies Dispose().
+	bool mVisibleRefCounted; // Whether AddRef() has been done as a result of the window being shown.
 
 	SCROLLINFO *mVScroll, *mHScroll;
 	IObject *mObject; // Variable with object for g and v Options, used as input for gFunc -> {Func:BoundFunction} and output vMyVar -> object.MyVar
@@ -2478,7 +2563,7 @@ public:
 		P_BackColor,
 		P_MarginX,
 		P_MarginY,
-		P_Menu,
+		P_MenuBar,
 		P_Pos,
 		P_ClientPos,
 	};
@@ -2518,21 +2603,11 @@ public:
 		, mDestroyWindowHasBeenCalled(false), mControlWidthWasSetByContents(false)
 		, mUsesDPIScaling(true)
 		, mDisposed(false)
+		, mVisibleRefCounted(false)
 	{
 	}
 
-	~GuiType()
-	{
-		// Since the program itself retains a reference to the Gui until the window is
-		// destroyed, the destructor should never be called without Destroy() having been
-		// called first, unless GuiCreate() aborted due to an error.  mHwnd != NULL would
-		// indicate a bug in the program or script (calling Release() too many times).
-		//Destroy();
-		ASSERT(!mHwnd);
-		Dispose();
-	}
-
-	void Destroy(bool aExitIfNotPersistent = true);
+	void Destroy();
 	void Dispose();
 	static void DestroyIconsIfUnused(HICON ahIcon, HICON ahIconSmall); // L17: Renamed function and added parameter to also handle the window's small icon.
 	IObject_Type_Impl("Gui")
@@ -2575,15 +2650,9 @@ public:
 	ResultType ControlLoadPicture(GuiControlType &aControl, LPTSTR aFilename, int aWidth, int aHeight, int aIconNumber);
 	ResultType Show(LPTSTR aOptions);
 	void Cancel();
-	void CancelOrDestroy(ULONG minRefCount = 1)
-	{
-		// If there is only one reference left to the Gui (i.e. due to the global Gui list),
-		// destroy the Gui instead of hiding it. The extra minRefCount parameter is necessary
-		// because MsgSleep() increases the reference count of the Gui.
-		return mRefCount > minRefCount ? Cancel() : Destroy();
-	}
 	void Close(); // Due to SC_CLOSE, etc.
 	void Escape(); // Similar to close, except typically called when the user presses ESCAPE.
+	void VisibilityChanged();
 	ResultType Submit(ResultToken &aResultToken, bool aHideIt);
 	ResultType ControlGetContentsToObject(IObject *aObject, GuiControlType &aControl, LPTSTR aMode = _T(""));
 
@@ -2703,6 +2772,9 @@ public:
 	int Unscale(int x) { return mUsesDPIScaling ? DPIUnscale(x) : x; }
 	// The following is a workaround for the "w-1" and "h-1" options:
 	int ScaleSize(int x) { return mUsesDPIScaling && x != -1 ? DPIScale(x) : x; }
+
+protected:
+	bool Delete();
 };
 
 typedef BOOL(WINAPI *_QueryPerformanceCounter)(LARGE_INTEGER *lpPerformanceCount);
@@ -2727,10 +2799,12 @@ private:
 #endif
 
 public:	
+	FuncList mFuncs;
 	Var **mVar, **mLazyVar; // Array of pointers-to-variable, allocated upon first use and later expanded as needed.
 	int mVarCount, mVarCountMax, mLazyVarCount; // Count of items in the above array as well as the maximum capacity.
+	int mGlobalVarCountMax; // While loading the script, the maximum number of global declarations allowed for the current function.
 	WinGroup *mFirstGroup, *mLastGroup;  // The first and last variables in the linked list.
-	int mCurrentFuncOpenBlockCount; // While loading the script, this is how many blocks are currently open in the current function's body.
+	Line *mOpenBlock; // While loading the script, this is the beginning of a block which is currently open.
 	bool mNextLineIsFunctionBody; // Whether the very next line to be added will be the first one of the body.
 	bool mNoUpdateLabels;
 	
@@ -2761,6 +2835,7 @@ public:
 		, LineNumberType &aPhysLineNumber, bool &aHasContinuationSection, int aExprBalance = 0);
 	ResultType GetLineContExpr(TextStream *ts, LPTSTR aBuf, size_t &aBufLength, LPTSTR aNextBuf, size_t &aNextBufLength
 		, LineNumberType &aPhysLineNumber, bool &aHasContinuationSection);
+	ResultType BalanceExprError(int aBalance, TCHAR aExpect[], LPTSTR aLineText);
 	static bool IsFunction(LPTSTR aBuf, bool *aPendingFunctionHasBrace = NULL);
 	ResultType IsDirective(LPTSTR aBuf);
 	ResultType ConvertDirectiveBool(LPTSTR aBuf, bool &aResult, bool aDefault);
@@ -2769,6 +2844,9 @@ public:
 	ResultType ParseDerefs(LPTSTR aArgText, LPTSTR aArgMap, DerefType *aDeref, int &aDerefCount, int *aPos = NULL, TCHAR aEndChar = 0);
 	ResultType ParseOperands(LPTSTR aArgText, LPTSTR aArgMap, DerefType *aDeref, int &aDerefCount, int *aPos = NULL, TCHAR aEndChar = 0);
 	ResultType ParseDoubleDeref(LPTSTR aArgText, LPTSTR aArgMap, DerefType *aDeref, int &aDerefCount, int *aPos);
+	ResultType ParseFatArrow(LPTSTR aArgText, LPTSTR aArgMap, DerefType *aDeref, int &aDerefCount
+		, LPTSTR aPrmStart, LPTSTR aPrmEnd, LPTSTR aExpr, LPTSTR &aExprEnd);
+	ResultType ParseFatArrow(DerefType &aDeref, LPTSTR aPrmStart, LPTSTR aPrmEnd, LPTSTR aExpr, LPTSTR aExprEnd, LPTSTR aExprMap);
 	LPTSTR ParseActionType(LPTSTR aBufTarget, LPTSTR aBufSource, bool aDisplayErrors);
 	static ActionTypeType ConvertActionType(LPTSTR aActionTypeString, int aFirstAction, int aLastActionPlus1);
 	ResultType AddLabel(LPTSTR aLabelName, bool aAllowDupe);
@@ -2783,6 +2861,7 @@ public:
 	ResultType PreparseStaticLines(Line *aStartingLine);
 	void PreparseHotkeyIfExpr(Line *aLine);
 	Line *PreparseBlocks(Line *aStartingLine, ExecUntilMode aMode = NORMAL_MODE, Line *aParentLine = NULL, const ActionTypeType aLoopType = ACT_INVALID);
+	Line *PreparseBlocksStmtBody(Line *aStartingLine, Line *aParentLine = NULL, const ActionTypeType aLoopType = ACT_INVALID);
 	Line *PreparseCommands(Line *aStartingLine);
 
 	Line *mFirstLine, *mLastLine;     // The first and last lines in the linked list.
@@ -2868,9 +2947,10 @@ public:
 	void DeleteTimer(IObject *aLabel);
 	LPTSTR DefaultDialogTitle();
 
-	ResultType DefineFunc(LPTSTR aBuf, Var *aFuncGlobalVar[]);
+	ResultType DefineFunc(LPTSTR aBuf, Var *aFuncGlobalVar[], bool aIsFatArrow = false);
 	Func *FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &aErrorWasShown, bool &aFileWasFound, bool aIsAutoInclude);
-	Func *FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength = 0, int *apInsertPos = NULL);
+	Func *FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength = -1, int *apInsertPos = NULL);
+	FuncEntry *FindBuiltInFunc(LPTSTR aFuncName);
 	Func *AddFunc(LPCTSTR aFuncName, size_t aFuncNameLength, bool aIsBuiltIn, int aInsertPos, Object *aClassObject = NULL);
 
 	ResultType DefineClass(LPTSTR aBuf);
@@ -2898,8 +2978,7 @@ public:
 
 	WinGroup *FindGroup(LPTSTR aGroupName, bool aCreateIfNotFound = false);
 	ResultType AddGroup(LPTSTR aGroupName);
-	Label *FindLabel(LPTSTR aLabelName);
-	IObject *FindCallable(LPTSTR aLabelName, Var *aVar = NULL, int aParamCount = 0);
+	Label *FindLabel(LPTSTR aLabelName, bool aSearchLocal = true);
 
 	ResultType DoRunAs(LPTSTR aCommandLine, LPTSTR aWorkingDir, bool aDisplayErrors, WORD aShowWindow
 		, Var *aOutputVar, PROCESS_INFORMATION &aPI, bool &aSuccess, HANDLE &aNewProcess, DWORD &aLastError);
@@ -2911,15 +2990,13 @@ public:
 
 	UINT GetFreeMenuItemID();
 	UserMenu *FindMenu(HMENU aMenuHandle);
-	UserMenu *AddMenu();
+	UserMenu *AddMenu(MenuTypeType aMenuType);
 	ResultType ScriptDeleteMenu(UserMenu *aMenu);
 	UserMenuItem *FindMenuItemByID(UINT aID)
 	{
-		UserMenuItem *mi;
 		for (UserMenu *m = mFirstMenu; m; m = m->mNextMenu)
-			for (mi = m->mFirstMenuItem; mi; mi = mi->mNextMenuItem)
-				if (mi->mMenuID == aID)
-					return mi;
+			if (UserMenuItem *mi = m->FindItemByID(aID))
+				return mi;
 		return NULL;
 	}
 	UserMenuItem *FindMenuItemBySubmenu(HMENU aSubmenu) // L26: Used by WM_MEASUREITEM/WM_DRAWITEM to find the menu item with an associated submenu. Fixes icons on such items when owner-drawn menus are in use.
@@ -2942,7 +3019,10 @@ public:
 	void WarnUninitializedVar(Var *var);
 	void MaybeWarnLocalSameAsGlobal(Func &func, Var &var);
 
-	void PreprocessLocalVars(Func &aFunc, Var **aVarList, int &aVarCount);
+	ResultType PreprocessLocalVars(FuncList &aFuncs);
+	ResultType PreprocessLocalVars(Func &aFunc, Var **aVarList, int &aVarCount);
+	ResultType PreprocessFindUpVar(LPTSTR aName, Func &aOuter, Func &aInner, Var *&aFound, Var *aLocal);
+	void ConvertLocalToAlias(Var &aLocal, Var *aAliasFor, int aPos, Var **aVarList, int &aVarCount);
 	void CheckForClassOverwrite();
 
 	static ResultType UnhandledException(ResultToken*& aToken, Line* aLine, LPTSTR aFooter = _T("The thread has exited."));
@@ -3096,6 +3176,7 @@ BIF_DECL(BIF_DllImport);
 BIF_DECL(BIF_DynaCall);
 #endif
 
+BIF_DECL(BIF_String);
 BIF_DECL(BIF_Struct);
 BIF_DECL(BIF_sizeof);
 
@@ -3156,6 +3237,8 @@ BIF_DECL(BIF_FileExist);
 BIF_DECL(BIF_WinExistActive);
 BIF_DECL(BIF_Round);
 BIF_DECL(BIF_FloorCeil);
+BIF_DECL(BIF_Integer);
+BIF_DECL(BIF_Float);
 BIF_DECL(BIF_Mod);
 BIF_DECL(BIF_Abs);
 BIF_DECL(BIF_Sin);
@@ -3178,7 +3261,8 @@ BIF_DECL(BIF_OnExitOrClipboard);
 BIF_DECL(BIF_ClipboardAll);
 
 #ifdef ENABLE_REGISTERCALLBACK
-BIF_DECL(BIF_RegisterCallback);
+BIF_DECL(BIF_CallbackCreate);
+BIF_DECL(BIF_CallbackFree);
 #endif
 
 BIF_DECL(BIF_Input);
@@ -3292,6 +3376,7 @@ BIF_DECL(BIF_WinMoveTopBottom);
 BIF_DECL(BIF_Process);
 BIF_DECL(BIF_ProcessSetPriority);
 BIF_DECL(BIF_MonitorGet);
+BIF_DECL(BIF_Wait);
 
 BIF_DECL(BIF_PerformAction);
 
@@ -3310,6 +3395,10 @@ LPTSTR TokenToString(ExprTokenType &aToken, LPTSTR aBuf = NULL, size_t *aLength 
 ResultType TokenToDoubleOrInt64(const ExprTokenType &aInput, ExprTokenType &aOutput);
 IObject *TokenToObject(ExprTokenType &aToken); // L31
 Func *TokenToFunc(ExprTokenType &aToken);
+IObject *TokenToFunctor(ExprTokenType &aToken);
+IObject *TokenToLabelOrFunctor(ExprTokenType &aToken);
+IObject *StringToLabelOrFunctor(LPTSTR aStr);
+IObject *StringToFunctor(LPTSTR aStr);
 ResultType TokenSetResult(ResultToken &aResultToken, LPCTSTR aValue, size_t aLength = -1);
 
 LPTSTR RegExMatch(LPTSTR aHaystack, LPTSTR aNeedleRegEx);

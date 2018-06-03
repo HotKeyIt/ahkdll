@@ -36,6 +36,7 @@ ResultType STDMETHODCALLTYPE UserMenu::Invoke(ResultToken &aResultToken, ExprTok
 	if (0) {}
 #define if_member(s,e)	else if (!_tcsicmp(name, _T(s))) member = e;
 	if_member("Add", M_Add)
+	if_member("AddStandard", M_AddStandard)
 	if_member("Insert", M_Insert)
 	if_member("Delete", M_Delete)
 	if_member("Rename", M_Rename)
@@ -49,7 +50,6 @@ ResultType STDMETHODCALLTYPE UserMenu::Invoke(ResultToken &aResultToken, ExprTok
 	if_member("Show", M_Show)
 	if_member("SetColor", M_SetColor)
 	if_member("Default", P_Default)
-	if_member("Standard", P_Standard)
 	if_member("Handle", P_Handle)
 	if_member("ClickCount", P_ClickCount)
 #undef if_member
@@ -103,9 +103,7 @@ ResultType STDMETHODCALLTYPE UserMenu::Invoke(ResultToken &aResultToken, ExprTok
 	case M_Add:
 		if (*param1) // Since a menu item name was given, it's not a separator line.
 			break; // Let a later switch() handle it.
-		if (!AddItem(_T(""), g_script->GetFreeMenuItemID(), NULL, NULL, _T(""), insert_at)) // Even separators get an ID, so that they can be modified later using the position& notation.
-			_o_throw(ERR_OUTOFMEM);  // Out of mem should be the only possibility in this case.
-		return OK;
+		return AddItem(_T(""), g_script->GetFreeMenuItemID(), NULL, NULL, _T(""), insert_at); // Even separators get an ID, so that they can be modified later using the position& notation.
 
 	case M_Delete:
 		if (aParamCount) // Since a menu item name was given, an item is being deleted, not the whole menu.
@@ -125,15 +123,8 @@ ResultType STDMETHODCALLTYPE UserMenu::Invoke(ResultToken &aResultToken, ExprTok
 		}
 		_o_return(mDefault ? mDefault->mName : _T(""));
 
-	case P_Standard:
-		if (IS_INVOKE_SET)
-		{
-			if (ParamIndexToBOOL(0))
-				IncludeStandardItems();
-			else
-				ExcludeStandardItems();
-		}
-		_o_return(mIncludeStandardItems);
+	case M_AddStandard:
+		return AppendStandardItems();
 
 	case M_SetColor:
 	{
@@ -182,47 +173,63 @@ ResultType STDMETHODCALLTYPE UserMenu::Invoke(ResultToken &aResultToken, ExprTok
 	if (!ignore_existing_items) // i.e. Insert always inserts a new item.
 		menu_item = FindItem(param1, menu_item_prev, search_by_pos);
 
-	// Whether an existing menu item's options should be updated without updating its submenu or label:
+	// Whether an existing menu item's options should be updated without updating its submenu or callback:
 	bool update_exiting_item_options = (member == M_Add && menu_item && !*param2 && *aOptions);
 
-	IObject *target_label = NULL;  // Set default.
+	ResultType result;
+	IObject *callback = NULL;  // Set default.
 	UserMenu *submenu = NULL;    // Set default.
-	if (member == M_Add && !update_exiting_item_options) // Labels and submenus are only used in conjunction with the ADD command.
+	if (member == M_Add && !update_exiting_item_options) // Callbacks and submenus are only used in conjunction with the ADD command.
 	{
-		target_label = ParamIndexToOptionalObject(1);
-		submenu = dynamic_cast<UserMenu *>(target_label);
+		callback = ParamIndexToOptionalObject(1);
+		submenu = dynamic_cast<UserMenu *>(callback);
 		if (submenu) // Param #2 is a Menu object.
 		{
 			// Before going further: since a submenu has been specified, make sure that the parent
 			// menu is not included anywhere in the nested hierarchy of that submenu's submenus.
-			// The OS doesn't seem to like that, creating empty or strange menus if it's attempted:
-			if (submenu == this || submenu->ContainsMenu(this))
-				_o_throw(_T("Submenu must not contain its parent menu."));
+			// The OS doesn't seem to like that, creating empty or strange menus if it's attempted.
+			// Although adding a menu bar as a submenu appears to work, displaying it does strange
+			// things to the actual menu bar on any GUI it is assigned to.
+			if (submenu == this || submenu->ContainsMenu(this)
+				|| submenu->mMenuType != MENU_TYPE_POPUP)
+				_o_throw(ERR_PARAM2_INVALID);
+			callback = NULL;
 		}
-		else if (!target_label) // Param #2 is not an object of any kind; must be a label/function name.
+		else if (callback) 
+			callback->AddRef();
+		else // Param #2 is not an object of any kind; must be a function name.
 		{
-			if (!*param2) // Allow the label to default to the menu item name.
+			if (!*param2) // Allow the function name to default to the menu item name.
 				param2 = param1;
-			if (!(target_label = g_script->FindCallable(param2, NULL, 3)))
-				_o_throw(ERR_NO_LABEL, param2);
+			if (  !(callback = StringToFunctor(param2))  )
+				_o_throw(ERR_PARAM2_INVALID, param2);
 		}
 	}
 
 	if (!menu_item)  // menu item doesn't exist, so create it (but only if the command is ADD).
 	{
 		if (member != M_Add || search_by_pos)
+		{
+			if (callback)
+				callback->Release();
 			// Seems best not to create menu items on-demand like this because they might get put into
-			// an incorrect position (i.e. it seems better than menu changes be kept separate from
+			// an incorrect position (i.e. it seems better that menu changes be kept separate from
 			// menu additions):
 			_o_throw(_T("Nonexistent menu item."), param1);
+		}
 
 		// Otherwise: Adding a new item that doesn't yet exist.
 		UINT item_id = g_script->GetFreeMenuItemID();
 		if (!item_id) // All ~64000 IDs are in use!
+		{
+			if (callback)
+				callback->Release();
 			_o_throw(_T("Too many menu items."), param1); // Short msg since so rare.
-		if (!AddItem(param1, item_id, target_label, submenu, aOptions, insert_at))
-			_o_throw(_T("Menu item name too long."), param1); // Can also happen due to out-of-mem, but that's too rare to display.
-		return OK;  // Item has been successfully added with the correct properties.
+		}
+		result = AddItem(param1, item_id, callback, submenu, aOptions, insert_at);
+		if (callback)
+			callback->Release();
+		return result;
 	} // if (!menu_item)
 
 	// Above has found the correct menu_item to operate upon (it already returned if
@@ -233,10 +240,13 @@ ResultType STDMETHODCALLTYPE UserMenu::Invoke(ResultToken &aResultToken, ExprTok
 	switch (member)
 	{
 	case M_Add:
-		// This is only reached if the ADD command is being used to update the label, submenu, or
+		// This is only reached if the ADD command is being used to update the callback, submenu, or
 		// options of an existing menu item (since it would have returned above if the item was
 		// just newly created).
-		return ModifyItem(menu_item, target_label, submenu, aOptions);
+		result = ModifyItem(menu_item, callback, submenu, aOptions);
+		if (callback)
+			callback->Release();
+		return result;
 	case M_Rename:
 		if (!RenameItem(menu_item, param2))
 			_o_throw(_T("Rename failed (name too long?)."), param2);
@@ -279,10 +289,10 @@ UserMenu *Script::FindMenu(HMENU aMenuHandle)
 
 
 
-UserMenu *Script::AddMenu()
+UserMenu *Script::AddMenu(MenuTypeType aMenuType)
 // Returns the newly created UserMenu object.
 {
-	UserMenu *menu = new UserMenu();
+	UserMenu *menu = new UserMenu(aMenuType);
 	if (!menu)
 		return NULL;  // Caller should show error if desired.
 	if (!mFirstMenu)
@@ -448,6 +458,16 @@ UserMenuItem *UserMenu::FindItem(LPTSTR aNameOrPos, UserMenuItem *&aPrevItem, bo
 
 
 
+UserMenuItem *UserMenu::FindItemByID(UINT aID)
+{
+	for (UserMenuItem *mi = mFirstMenuItem; mi; mi = mi->mNextMenuItem)
+		if (mi->mMenuID == aID)
+			return mi;
+	return NULL;
+}
+
+
+
 // Macros for use with the below methods (in previous versions, submenus were identified by position):
 #define aMenuItem_ID		aMenuItem->mMenuID
 #define aMenuItem_MF_BY		MF_BYCOMMAND
@@ -456,44 +476,31 @@ UserMenuItem *UserMenu::FindItem(LPTSTR aNameOrPos, UserMenuItem *&aPrevItem, bo
 		GuiType::UpdateMenuBars(hmenu); // Above: If it's not a popup, it's probably a menu bar.
 
 
-#define CHANGE_DEFAULT_IF_NEEDED \
-	if (mDefault == aMenuItem)\
-	{\
-		if (mMenu)\
-		{\
-			if (this == g_script->mTrayMenu)\
-				SetMenuDefaultItem(mMenu, mIncludeStandardItems ? ID_TRAY_OPEN : -1, FALSE);\
-			else\
-				SetMenuDefaultItem(mMenu, -1, FALSE);\
-		}\
-		mDefault = NULL;\
-	}
 
-
-ResultType UserMenu::AddItem(LPTSTR aName, UINT aMenuID, IObject *aLabel, UserMenu *aSubmenu, LPTSTR aOptions
+ResultType UserMenu::AddItem(LPTSTR aName, UINT aMenuID, IObject *aCallback, UserMenu *aSubmenu, LPTSTR aOptions
 	, UserMenuItem **aInsertAt)
 // Caller must have already ensured that aName does not yet exist as a user-defined menu item
 // in this->mMenu.
 {
 	size_t length = _tcslen(aName);
 	if (length > MAX_MENU_NAME_LENGTH)
-		return FAIL;  // Caller should show error if desired.
+		return g_script->ScriptError(_T("Menu item name too long."), aName);
 	// After mem is allocated, the object takes charge of its later deletion:
 	LPTSTR name_dynamic;
 	if (length)
 	{
 		if (   !(name_dynamic = tmalloc(length + 1))   )  // +1 for terminator.
-			return FAIL;  // Caller should show error if desired.
+			return g_script->ScriptError(ERR_OUTOFMEM);
 		_tcscpy(name_dynamic, aName);
 	}
 	else
 		name_dynamic = Var::sEmptyString; // So that it can be detected as a non-allocated empty string.
-	UserMenuItem *menu_item = new UserMenuItem(name_dynamic, length + 1, aMenuID, aLabel, aSubmenu, this);
+	UserMenuItem *menu_item = new UserMenuItem(name_dynamic, length + 1, aMenuID, aCallback, aSubmenu, this);
 	if (!menu_item) // Should also be very rare.
 	{
 		if (name_dynamic != Var::sEmptyString)
 			free(name_dynamic);
-		return FAIL;  // Caller should show error if desired.
+		return g_script->ScriptError(ERR_OUTOFMEM);
 	}
 	if (mMenu)
 	{
@@ -566,19 +573,21 @@ ResultType UserMenu::InternalAppendMenu(UserMenuItem *mi, UserMenuItem *aInsertB
 
 
 
-UserMenuItem::UserMenuItem(LPTSTR aName, size_t aNameCapacity, UINT aMenuID, IObject *aLabel, UserMenu *aSubmenu, UserMenu *aMenu)
+UserMenuItem::UserMenuItem(LPTSTR aName, size_t aNameCapacity, UINT aMenuID, IObject *aCallback, UserMenu *aSubmenu, UserMenu *aMenu)
 // UserMenuItem Constructor.
-	: mName(aName), mNameCapacity(aNameCapacity), mMenuID(aMenuID), mLabel(aLabel), mSubmenu(aSubmenu), mMenu(aMenu)
+	: mName(aName), mNameCapacity(aNameCapacity), mMenuID(aMenuID), mCallback(aCallback), mSubmenu(aSubmenu), mMenu(aMenu)
 	, mPriority(0) // default priority = 0
 	, mMenuState(MFS_ENABLED | MFS_UNCHECKED), mMenuType(*aName ? MFT_STRING : MFT_SEPARATOR)
 	, mNextMenuItem(NULL)
 	, mIcon(NULL) // L17: Initialize mIcon/mBitmap union.
 {
+	if (aSubmenu)
+		aSubmenu->AddRef();
 }
 
 
 
-ResultType UserMenu::DeleteItem(UserMenuItem *aMenuItem, UserMenuItem *aMenuItemPrev)
+ResultType UserMenu::DeleteItem(UserMenuItem *aMenuItem, UserMenuItem *aMenuItemPrev, bool aUpdateGuiMenuBars)
 {
 	// Remove this menu item from the linked list:
 	if (aMenuItem == mLastMenuItem)
@@ -587,17 +596,13 @@ ResultType UserMenu::DeleteItem(UserMenuItem *aMenuItem, UserMenuItem *aMenuItem
 		aMenuItemPrev->mNextMenuItem = aMenuItem->mNextMenuItem; // Can be NULL if aMenuItem was the last one.
 	else // aMenuItem was the first one in the list.
 		mFirstMenuItem = aMenuItem->mNextMenuItem; // Can be NULL if the list will now be empty.
-	CHANGE_DEFAULT_IF_NEEDED  // Should do this before freeing aMenuItem's memory.
 	if (mMenu) // Delete the item from the menu.
 		RemoveMenu(mMenu, aMenuItem_ID, aMenuItem_MF_BY); // v1.0.48: Lexikos: DeleteMenu() destroys any sub-menu handle associated with the item, so use RemoveMenu. Otherwise the submenu handle stored somewhere else in memory would suddenly become invalid.
 	RemoveItemIcon(aMenuItem); // L17: Free icon or bitmap.
-	if (aMenuItem->mName != Var::sEmptyString)
-		free(aMenuItem->mName); // Since it was separately allocated.
-	if (aMenuItem->mSubmenu)
-		aMenuItem->mSubmenu->Release();
 	delete aMenuItem; // Do this last when its contents are no longer needed.
 	--mMenuItemCount;
-	UPDATE_GUI_MENU_BARS(mMenuType, mMenu)  // Verified as being necessary.
+	if (aUpdateGuiMenuBars)
+		UPDATE_GUI_MENU_BARS(mMenuType, mMenu)  // Verified as being necessary.
 	return OK;
 }
 
@@ -621,8 +626,6 @@ ResultType UserMenu::DeleteAllItems()
 		menu_item_to_delete = mi;
 		mi = mi->mNextMenuItem;
 		RemoveItemIcon(menu_item_to_delete); // L26: Free icon or bitmap!
-		if (menu_item_to_delete->mName != Var::sEmptyString)
-			delete menu_item_to_delete->mName; // Since it was separately allocated.
 		delete menu_item_to_delete;
 	}
 	mFirstMenuItem = mLastMenuItem = NULL;
@@ -634,69 +637,61 @@ ResultType UserMenu::DeleteAllItems()
 
 
 
-ResultType UserMenu::ModifyItem(UserMenuItem *aMenuItem, IObject *aLabel, UserMenu *aSubmenu, LPTSTR aOptions)
-// Modify the label, submenu, or options of a menu item (exactly one of these should be NULL and the
+UserMenuItem::~UserMenuItem()
+{
+	if (mName != Var::sEmptyString)
+		free(mName);
+	// mCallback is handled by ~LabelRef().
+	if (mSubmenu)
+		mSubmenu->Release();
+}
+
+
+
+ResultType UserMenu::ModifyItem(UserMenuItem *aMenuItem, IObject *aCallback, UserMenu *aSubmenu, LPTSTR aOptions)
+// Modify the callback, submenu, or options of a menu item (exactly one of these should be NULL and the
 // other not except when updating only the options).
 // If a menu item becomes a submenu, we don't relinquish its ID in case it's ever made a normal item
 // again (avoids the need to re-lookup a unique ID).
 {
 	if (*aOptions)
 		UpdateOptions(aMenuItem, aOptions);
-	if (!aLabel && !aSubmenu) // We were called only to update this item's options.
+	if (!aCallback && !aSubmenu) // We were called only to update this item's options.
 		return OK;
 
-	aMenuItem->mLabel = aLabel;  // This will be NULL if this menu item is a separator or submenu.
-	if (aMenuItem->mSubmenu == aSubmenu) // Below relies on this check.
-		return OK;
-	if (!mMenu)
+	if (aMenuItem->mMenuID >= ID_TRAY_FIRST && aCallback)
 	{
-		if (aSubmenu)
-			aSubmenu->AddRef();
-		if (aMenuItem->mSubmenu)
-			aMenuItem->mSubmenu->Release();
-		aMenuItem->mSubmenu = aSubmenu;  // Just set the indicator for when the menu is later created.
-		return OK;
+		// For a custom label to work for this item, it must have a different ID.
+		MENUITEMINFO mii;
+		mii.cbSize = sizeof(mii);
+		mii.fMask = MIIM_ID;
+		mii.wID = g_script->GetFreeMenuItemID();
+		if (mMenu)
+			SetMenuItemInfo(mMenu, aMenuItem->mMenuID, FALSE, &mii);
+		aMenuItem->mMenuID = mii.wID;
 	}
 
+	aMenuItem->mCallback = aCallback;  // This will be NULL if this menu item is a separator or submenu.
+	if (aMenuItem->mSubmenu == aSubmenu) // Below relies on this check.
+		return OK;
+
+	if (aSubmenu)
+		aSubmenu->AddRef();
+	if (aMenuItem->mSubmenu)
+		aMenuItem->mSubmenu->Release();
+	aMenuItem->mSubmenu = aSubmenu;
+
+	if (!mMenu)
+		return OK;
 	// Otherwise, since the OS menu exists, one of these is to be done to aMenuItem in it:
 	// 1) Change a submenu to point to a different menu.
 	// 2) Change a submenu so that it becomes a normal menu item.
 	// 3) Change a normal menu item into a submenu.
-
-	if (aSubmenu)
-		if (!aSubmenu->Create()) // Create if needed.  No error msg since so rare.
-			return FAIL;
-
-	MENUITEMINFO mii;
-	mii.cbSize = sizeof(mii);
-	mii.fMask = MIIM_SUBMENU;
-	mii.hSubMenu = aSubmenu ? aSubmenu->mMenu : NULL;
-	if (SetMenuItemInfo(mMenu, aMenuItem->mMenuID, FALSE, &mii))
-	{
-		if (aSubmenu)
-			aSubmenu->AddRef();
-		UserMenu *old_submenu = aMenuItem->mSubmenu;
-		aMenuItem->mSubmenu = aSubmenu; // Should be done before the below so that Destroy() sees the change.
-		if (old_submenu)
-		{
-			// Submenu was just made into a different submenu or converted into a normal menu item.
-			// Since the OS (as an undocumented side effect) sometimes destroys the menu itself when
-			// a submenu is changed in this way, update our state to indicate that the menu handle
-			// is no longer valid:
-			if (old_submenu->mMenu && !IsMenu(old_submenu->mMenu))
-			{
-				// The following shouldn't fail because submenus are popup menus, and popup menus can't be
-				// menu bars. Update: Even if it does fail due to causing a cascade-destroy upward toward any
-				// menu bar that happens to own it, it seems okay because the real purpose here is simply to
-				// update that fact that "temp" was already destroyed indirectly by the OS, as evidenced by
-				// the fact that IsMenu() returned FALSE above.
-				old_submenu->Destroy();
-			}
-			old_submenu->Release();
-		}
-	}
-	// else no error msg and return OK so that the thread will continue.  This may help catch
-	// bugs in the course of normal use of this feature.
+	// Replacing or removing a submenu is known to destroy the old submenu as a side-effect,
+	// so instead of changing the submenu directly, remove the item and add it back with the
+	// correct properties.
+	RemoveMenu(mMenu, aMenuItem->mMenuID, MF_BYCOMMAND);
+	InternalAppendMenu(aMenuItem, aMenuItem->mNextMenuItem);
 	return OK;
 }
 
@@ -802,9 +797,6 @@ ResultType UserMenu::RenameItem(UserMenuItem *aMenuItem, LPTSTR aNewName)
 	}
 	else // converting into a separator
 	{
-		// Notes about the below macro:
-		// ID_TRAY_OPEN is not set to be the default for the self-contained version, since it lacks that menu item.
-		CHANGE_DEFAULT_IF_NEEDED
 		// Testing shows that if an item is converted into a separator and back into a
 		// normal item, it retains its submenu.  So don't set the submenu to NULL, since
 		// it's not necessary and would result in the OS destroying the submenu:
@@ -926,7 +918,7 @@ ResultType UserMenu::ToggleEnableItem(UserMenuItem *aMenuItem)
 
 
 
-ResultType UserMenu::SetDefault(UserMenuItem *aMenuItem)
+ResultType UserMenu::SetDefault(UserMenuItem *aMenuItem, bool aUpdateGuiMenuBars)
 {
 	if (mDefault == aMenuItem)
 		return OK;
@@ -936,96 +928,37 @@ ResultType UserMenu::SetDefault(UserMenuItem *aMenuItem)
 	if (aMenuItem) // A user-defined menu item is being made the default.
 		SetMenuDefaultItem(mMenu, aMenuItem->mMenuID, FALSE); // This also ensures that only one is default at a time.
 	else
-	{
-		// Otherwise, a user-defined item that was previously the default is no longer the default.
-		// Provide a new default if this is the tray menu, the standard items are present, and a default
-		// action is called for:
-		if (this == g_script->mTrayMenu) // Necessary for proper operation of the self-contained version:
-			SetMenuDefaultItem(mMenu, mIncludeStandardItems ? ID_TRAY_OPEN : -1, FALSE);
-		else
-			SetMenuDefaultItem(mMenu, -1, FALSE);
-	}
-	UPDATE_GUI_MENU_BARS(mMenuType, mMenu)  // Testing shows that menu bars themselves can have default items, and that this is necessary.
+		SetMenuDefaultItem(mMenu, -1, FALSE);
+	if (aUpdateGuiMenuBars)
+		UPDATE_GUI_MENU_BARS(mMenuType, mMenu)  // Testing shows that menu bars themselves can have default items, and that this is necessary.
 	return OK;
 }
 
 
 
-ResultType UserMenu::IncludeStandardItems()
-{
-	if (mIncludeStandardItems)
-		return OK;
-	// In this case, immediately create the menu to support having the standard menu items on the
-	// bottom or middle rather than at the top (which is the default). Older comment: Only do
-	// this if it was false beforehand so that the standard menu items will be appended to whatever
-	// the user has already added to the tray menu (increases flexibility).
-	if (!Create()) // It may already exist, in which case this returns OK.
-		return FAIL; // No error msg since so rare.
-	return AppendStandardItems();
-}
-
-
-
-ResultType UserMenu::ExcludeStandardItems()
-{
-	if (!mIncludeStandardItems)
-		return OK;
-	mIncludeStandardItems = false;
-	// This method isn't used because it fails on sub-menus of a menu bar:
-	//return Destroy(); // It will be recreated automatically the next time the user displays it.
-	if (mMenu)
-	{
-		for (UINT i = ID_TRAY_FIRST; i <= ID_TRAY_LAST; ++i)
-			RemoveMenu(mMenu, i, MF_BYCOMMAND);
-		UPDATE_GUI_MENU_BARS(mMenuType, mMenu)  // Verified as being necessary (though it's unusual to put the standard items on a menu bar).
-	}
-	return OK;
-}
-
-
-
-ResultType UserMenu::Create(MenuTypeType aMenuType)
+ResultType UserMenu::Create()
 // Menu bars require non-popup menus (CreateMenu vs. CreatePopupMenu).  Rather than maintain two
 // different types of HMENUs on the rare chance that a script might try to use a menu both as
 // a popup and a menu bar, it seems best to have only one type to keep the code simple and reduce
-// resources used for the menu.  This has been documented in the help file.
-// Note that a menu bar's submenus can be (perhaps must be) of the popup type, so we only need
-// to worry about the distinction for the menu bar itself.  The caller tells us which is which.
+// resources used for the menu.  This is reflected in MenuCreate() and MenuBarCreate(), which
+// create the UserMenu with the appropriate value for mMenuType.
 {
 	if (mMenu)
-	{
-		// Since menu already exists, check if it's the right type.  If caller left the type unspecified,
-		// assume it is the right type:
-		if (aMenuType == MENU_TYPE_NONE || aMenuType == mMenuType)
-			return OK;
-		else // It exists but it's the wrong type.  Destroy and recreate it (but keep TRAY always as popup type).
-			if (!Destroy()) // Could not be destroyed, perhaps because it is attached to a window as a menu bar.
-				return FAIL;
-	}
-	if (aMenuType == MENU_TYPE_NONE) // Since caller didn't specify and it's about to be (re)created, assume popup.
-		aMenuType = MENU_TYPE_POPUP;
-	if (   !(mMenu = (aMenuType == MENU_TYPE_BAR) ? CreateMenu() : CreatePopupMenu())   )
+		return OK;
+	if (   !(mMenu = (mMenuType == MENU_TYPE_BAR) ? CreateMenu() : CreatePopupMenu())   )
 		// Failure is rare, so no error msg here (caller can, if it wants).
 		return FAIL;
 
-	mMenuType = aMenuType;  // We have to track its type since I don't think there's any way to find out via API.
-
 	// It seems best not to have a mandatory EXIT item added to the bottom of the tray menu
-	// for these reasons:
-	// 1) Allows the tray icon to be shown even at time when the user wants it to have no menu at all
-	//    (i.e. avoids the need for #NoTrayIcon just to disable the showing of the menu).
-	// 2) Avoids complexity because there would be a 3rd state: Standard, NoStandard, and
-	//    NoStandardWithExit.  This might be inconsequential, but would require testing.
-	//if (!mIncludeStandardItems && !mMenuItemCount)
+	// because omitting it allows the tray icon to be shown even when the user wants it to
+	// have no menu at all (i.e. avoids the need for #NoTrayIcon just to disable the showing
+	// of the menu).  If it was done, it should not be done here because calling Menu.Handle
+	// prior to adding items would have the effect of inserting EXIT at the top.
+	//if (!mMenuItemCount)
 	//{
 	//	AppendMenu(mTrayMenu->mMenu, MF_STRING, ID_TRAY_EXIT, "E&xit");
 	//	return OK;
 	//}
-
-	// By default, the standard menu items are added first, since the users would probably want
-	// their own user defined menus at the bottom where they're easier to reach:
-	if (mIncludeStandardItems)
-		AppendStandardItems();
 
 	// Now append all of the user defined items:
 	UserMenuItem *mi;
@@ -1099,100 +1032,104 @@ void UserMenu::ApplyColor(bool aApplyToSubmenus)
 ResultType UserMenu::AppendStandardItems()
 // Caller must ensure that this->mMenu exists if it wants the items to be added immediately.
 {
-	mIncludeStandardItems = true; // even if the menu doesn't exist.
-	if (!mMenu)
-		return OK;
-	AppendMenu(mMenu, MF_STRING, ID_TRAY_OPEN, _T("&Open"));
-	AppendMenu(mMenu, MF_STRING, ID_TRAY_HELP, _T("&Help"));
-	AppendMenu(mMenu, MF_SEPARATOR, ID_TRAY_SEP1, NULL); // The separators are given IDs to simplify removal.
-	AppendMenu(mMenu, MF_STRING, ID_TRAY_WINDOWSPY, _T("&Window Spy"));
-	AppendMenu(mMenu, MF_STRING, ID_TRAY_RELOADSCRIPT, _T("&Reload This Script"));
-	AppendMenu(mMenu, MF_STRING, ID_TRAY_EDITSCRIPT, _T("&Edit This Script"));
-	AppendMenu(mMenu, MF_SEPARATOR, ID_TRAY_SEP2, NULL);
-	if (this == g_script->mTrayMenu && !mDefault) // No user-defined default menu item, so use the standard one.
-		SetMenuDefaultItem(mMenu, ID_TRAY_OPEN, FALSE); // Seems to have no function other than appearance.
-	AppendMenu(mMenu, MF_STRING, ID_TRAY_SUSPEND, _T("&Suspend Hotkeys"));
-	AppendMenu(mMenu, MF_STRING, ID_TRAY_PAUSE, _T("&Pause Script"));
-	AppendMenu(mMenu, MF_STRING, ID_TRAY_EXIT, _T("E&xit"));
-	UPDATE_GUI_MENU_BARS(mMenuType, mMenu)  // Verified as being necessary (though it would be rare anyone would want the menu bar containing the std items).
+	struct StandardItem
+	{
+		LPTSTR name;
+		UINT id;
+	};
+	static StandardItem sItems[] =
+	{
+		_T("&Open"), ID_TRAY_OPEN,
+		_T("&Help"), ID_TRAY_HELP,
+		_T(""), ID_TRAY_SEP1,
+		_T("&Window Spy"), ID_TRAY_WINDOWSPY,
+		_T("&Reload This Script"), ID_TRAY_RELOADSCRIPT,
+		_T("&Edit This Script"), ID_TRAY_EDITSCRIPT,
+		_T(""), ID_TRAY_SEP2,
+
+	_T("&Suspend Hotkeys"), ID_TRAY_SUSPEND,
+		_T("&Pause Script"), ID_TRAY_PAUSE,
+		_T("E&xit"), ID_TRAY_EXIT
+	};
+	UserMenuItem *&first_new_item = mLastMenuItem ? mLastMenuItem->mNextMenuItem : mFirstMenuItem;
+	int i = 0;
+	for (; i < _countof(sItems); ++i)
+	{
+		if (!FindItemByID(sItems[i].id)) // Avoid duplicating items, but add any missing ones.
+			if (!AddItem(sItems[i].name, sItems[i].id, NULL, NULL, _T(""), NULL))
+				return FAIL;
+	}
+	if (this == g_script->mTrayMenu && !mDefault && first_new_item
+		&& first_new_item->mMenuID == ID_TRAY_OPEN)
+	{
+		// No user-defined default menu item, so use the standard one.
+		SetDefault(first_new_item, false);
+	}
+	UPDATE_GUI_MENU_BARS(mMenuType, mMenu)  // Verified as being necessary (though it would be rare anyone would want a menu bar to contain the std items).
 	return OK;  // For caller convenience.
 }
 
 
 
-ResultType UserMenu::Destroy()
-// Returns OK upon complete success or FAIL otherwise.  For example, even if this's menu
-// is successfully destroyed, if the indirect destructions resulting from it don't succeed, this
-// method returns FAIL.
+#ifdef AUTOHOTKEYSC
+
+ResultType UserMenu::EnableStandardOpenItem(bool aEnable)
+{
+	for (UserMenuItem *mi_prev = NULL, *mi = mFirstMenuItem; mi; mi_prev = mi, mi = mi->mNextMenuItem)
+	{
+		if (mi->mMenuID >= ID_TRAY_FIRST)
+		{
+			bool is_enabled = mi->mMenuID == ID_TRAY_OPEN;
+			if (is_enabled != aEnable)
+			{
+				if (aEnable)
+				{
+					UserMenuItem **p = mi_prev ? &mi_prev->mNextMenuItem : &mFirstMenuItem;
+					if (!AddItem(_T("&Open"), ID_TRAY_OPEN, NULL, NULL, _T(""), p))
+						return FAIL;
+					if (this == g_script->mTrayMenu && !mDefault)
+						SetDefault(*p);
+					return OK;
+				}
+				return DeleteItem(mi, mi_prev);
+			}
+			break;
+		}
+	}
+	return OK;
+}
+
+#endif
+
+
+
+void UserMenu::Destroy()
+// Destroys the Win32 menu or marks it NULL if it has already been destroyed externally.
+// This should be called only when the UserMenu is being deleted (or the script is exiting),
+// otherwise any parent menus would still refer to the old Win32 menu.  If the UserMenu is
+// being deleted, that implies that its reference count is zero, meaning it isn't in use as
+// a submenu or menu bar.
 {
 	if (!mMenu)  // For performance.
-		return OK;
-	// I think DestroyMenu() can fail if an attempt is made to destroy the menu while it is being
-	// displayed (but even if it doesn't fail, it seems very bad to try to destroy it then, which
-	// is why g_MenuIsVisible is checked just to be sure).
-	// But this all should be impossible in our case because the script is in an uninterruptible state
-	// while the menu is displayed, which in addition to pausing the current thread (which happens
-	// anyway), no new timed or hotkey subroutines can be launched.  Thus, this should rarely if
-	// ever happen, which is why no error message is given here:
+		return;
+	// Testing on Windows 10 shows that DestroyMenu() is able to destroy a menu even while it is
+	// being displayed, causing only temporary cosmetic issues.  Previous testing with menu bars
+	// showed similar results.  There wouldn't be much point in checking the following because the
+	// script is in an uninterruptible state while the menu is displayed, which in addition to
+	// pausing the current thread (which happens anyway), no new threads can be launched:
 	//if (g_MenuIsVisible)
 	//	return FAIL;
 
-	// DestroyMenu fails (GetLastError() == ERROR_INVALID_MENU_HANDLE) if a parent menu that contained
-	// mMenu as one of its submenus was destroyed above.  This seems to indicate that submenus are
-	// destroyed whenever a parent menu is destroyed.  Therefore, don't check failure on the below,
-	// just assume that afterward, the menu is gone.  IsMenu() is checked because the handle can be
-	// invalid if the OS already destroyed it behind-the-scenes (this happens to a submenu whenever
-	// its parent menu is destroyed, or whenever a submenu is converted back into a normal menu item):
-	if (IsMenu(mMenu))
-	{
-		// As a precaution, don't allow a menu to be destroyed if a window is using it as its
-		// menu bar. That might have bad side-effects on some OSes, especially older ones:
-		if (mMenuType == MENU_TYPE_BAR)
-			for (GuiType* gui = g_firstGui; gui; gui = gui->mNextGui)
-				if (GetMenu(gui->mHwnd) == mMenu) // mHwnd is always non-NULL for any item in g_gui.
-					return FAIL; // A GUI window is using this menu, so don't destroy the menu.
-		if (!DestroyMenu(mMenu)) // v1.0.30.01: Doesn't seem to be a reason *not* to check the return value and return FAIL if it failed.
-			return FAIL;
-	}
-	mMenu = NULL; // This must be done immediately after destroying the menu to prevent recursion problems below.
-	
-	ResultType result = OK;
-	UserMenuItem *mi;
+	// MSDN: "DestroyMenu is recursive, that is, it will destroy the menu and all its submenus."
+	// Therefore remove all submenus before destroying the menu, in case the script is using them.
+	// If the script is not using them, they will be destroyed automatically as they are released
+	// by ~UserMenuItem().
+	for (UserMenuItem *mi = mFirstMenuItem; mi ; mi = mi->mNextMenuItem)
+		if (mi->mSubmenu)
+			RemoveMenu(mMenu, mi->mMenuID, MF_BYCOMMAND);
 
-	// Destroy any menu that contains this menu as a submenu.  This is done so that such
-	// menus will be automatically recreated the next time they are used, which is necessary
-	// because otherwise when such a menu is displayed the next time, the OS will show its
-	// old contents even though the menu is gone.  Thus, those old menu items will be
-	// selectable but will have no effect.  In addition, sometimes our caller plans to
-	// recreate this->mMenu (or have it recreated automatically upon first use) and thus
-	// we don't want to use DeleteMenu() because that would require having to detect whether
-	// the menu needs updating (to reflect whether the submenu has been recreated) every
-	// time we display it.  Another drawback to DeleteMenu() is that it would change the
-	// order of the menu items to something other than what the user originally specified
-	// unless InsertMenu() was woven in during the update:
-	for (UserMenu *m = g_script->mFirstMenu; m; m = m->mNextMenu)
-		if (m->mMenu)
-			for (mi = m->mFirstMenuItem; mi; mi = mi->mNextMenuItem)
-				if (mi->mSubmenu == this)
-					if (!m->Destroy())  // Attempt to destroy any menu that contains this menu as a submenu (will fail if m is a menu bar).
-						result = FAIL; // Seems best to consider even one failure is considered a total failure.
-
-	// Bug-fix for v1.1.23: Destroying sub-menus after (rather than before) the parent menu appears
-	// to solve an issue where a sub-menu was not marked as destroyed because IsMenu() returned TRUE
-	// after its parent was destroyed but only until its grandparent was destroyed.
-	// Bug-fix for v1.0.19: The below is now done OUTSIDE the above block because the moment a
-	// parent menu is deleted all its submenus AND SUB-SUB-SUB...MENUS become invalid menu handles.
-	// But even though the OS has done this, Destroy() must still be called recursively from here
-	// so that the menu handles will be set to NULL.  This is because other functions -- such as
-	// Display() -- do not do the IsMenu() check, relying instead on whether the handle is NULL to
-	// determine whether the menu physically exists.
-	// The moment the above is done, any submenus that were attached to mMenu are also destroyed
-	// by the OS.  So mark them as destroyed in our bookkeeping also:
-	for (mi = mFirstMenuItem; mi ; mi = mi->mNextMenuItem)
-		if (mi->mSubmenu && mi->mSubmenu->mMenu && !IsMenu(mi->mSubmenu->mMenu))
-			mi->mSubmenu->Destroy(); // Its return value isn't checked since there doesn't seem to be anything that can/should be done if it fails.
-
-	return result;
+	DestroyMenu(mMenu);
+	mMenu = NULL;
 }
 
 
@@ -1206,6 +1143,10 @@ ResultType UserMenu::Display(bool aForceToForeground, int aX, int aY)
 // resistance.  This is done because if the main window is *not* successfully activated prior to
 // displaying the menu, it might be impossible to dismiss the menu by clicking outside of it.
 {
+	if (mMenuType != MENU_TYPE_POPUP)
+		return g_script->ScriptError(ERR_INVALID_MENU_TYPE);
+	if (!mMenuItemCount)
+		return OK;  // Consider the display of an empty menu to be a success.
 
 #ifdef _WIN64
 	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
@@ -1213,13 +1154,10 @@ ResultType UserMenu::Display(bool aForceToForeground, int aX, int aY)
 	DWORD aThreadID = __readfsdword(0x24);
 #endif
 
-	if (!mMenuItemCount && !mIncludeStandardItems)
-		return OK;  // Consider the display of an empty menu to be a success.
+	if (!Create()) // Create if needed.  No error msg since so rare.
+		return FAIL;
 	//if (!IsMenu(mMenu))
 	//	mMenu = NULL;
-	if (!mMenu) // i.e. because this is the first time the user has opened the menu.
-		if (!Create()) // no error msg since so rare
-			return FAIL;
 	if (this == g_script->mTrayMenu)
 	{
 		// These are okay even if the menu items don't exist (perhaps because the user customized the menu):
@@ -1374,6 +1312,17 @@ bool UserMenu::ContainsMenu(UserMenu *aMenu)
 			if (mi->mSubmenu == aMenu || mi->mSubmenu->ContainsMenu(aMenu)) // recursive
 				return true;
 			//else keep searching
+	return false;
+}
+
+
+
+bool UserMenu::ContainsCustomItems()
+// Returns true if the menu contains items other than the standard items.
+{
+	for (UserMenuItem *mi = mFirstMenuItem; mi; mi = mi->mNextMenuItem)
+		if (mi->mMenuID <= ID_USER_LAST)
+			return true;
 	return false;
 }
 
