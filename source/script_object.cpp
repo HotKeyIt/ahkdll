@@ -343,18 +343,18 @@ bool Object::Delete()
 		
 		// This prevents an erroneous "The current thread will exit" message when an error occurs,
 		// by causing LineError() to throw an exception:
-		bool in_try = g->InTryBlock;
-		g->InTryBlock = true;
+		int outer_excptmode = g->ExcptMode;
+		g->ExcptMode |= EXCPTMODE_DELETE;
 
 		CallMethod(mBase, this, _T("__Delete"), NULL, 0, NULL, IF_METAOBJ); // base.__Delete()
 
-		g->InTryBlock = in_try;
+		g->ExcptMode = outer_excptmode;
 
 		// Exceptions thrown by __Delete are reported immediately because they would not be handled
 		// consistently by the caller (they would typically be "thrown" by the next function call),
 		// and because the caller must be allowed to make additional __Delete calls.
 		if (g->ThrownToken)
-			g_script->UnhandledException(g->ThrownToken, NULL, _T("__Delete will now return."));
+			g_script->FreeExceptionToken(g->ThrownToken);
 
 		// If an exception has been thrown by our caller, it's likely that it can and should be handled
 		// reliably by our caller, so restore it.
@@ -821,7 +821,6 @@ int Object::GetBuiltinID(LPCTSTR aName)
 	case 'D':
 		if (!_tcsicmp(aName, _T("Delete")))
 			return FID_ObjDelete;
-		break;
 	case 'P':
 		if (!_tcsicmp(aName, _T("Push")))
 			return FID_ObjPush;
@@ -1292,12 +1291,9 @@ ResultType Object::_Pop(ResultToken &aResultToken, ExprTokenType *aParam[], int 
 	return _Remove_impl(aResultToken, NULL, 0, RM_Pop);
 }
 
-
 ResultType Object::_Count(ResultToken &aResultToken)
 {
-	aResultToken.symbol = SYM_INTEGER;
-	aResultToken.value_int64 = mFieldCount;
-	return OK;
+	_o_return((__int64)mFieldCount);
 }
 
 ResultType Object::_MaxIndex(ResultToken &aResultToken)

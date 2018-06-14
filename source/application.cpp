@@ -24,7 +24,7 @@ GNU General Public License for more details.
 #ifndef _USRDLL
 VOID CALLBACK ThreadExitApp(ULONG_PTR dwParam)
 {
-	g_script->ExitApp(EXIT_WM_CLOSE);
+	g_script->ExitApp(EXIT_CLOSE);
 }
 #endif
 
@@ -1803,8 +1803,6 @@ bool MsgMonitor(MsgMonitorInstance &aInstance, HWND aWnd, UINT aMsg, WPARAM awPa
 	InitNewThread(0, false, true);
 	DEBUGGER_STACK_PUSH(_T("OnMessage")) // Push a "thread" onto the debugger's stack.  For simplicity and performance, use the function name vs something like "message 0x123".
 
-	GuiType *pgui = NULL;
-	
 	// Set last found window (as documented).  Can be NULL.
 	// Nested controls like ComboBoxes require more than a simple call to GetParent().
 	g->hWndLastUsed = GetNonChildParent(aWnd); // Assign parent window as the last found window (it's ok if it's hidden).
@@ -1841,11 +1839,6 @@ bool MsgMonitor(MsgMonitorInstance &aInstance, HWND aWnd, UINT aMsg, WPARAM awPa
 	// to ignore aMsgReply.
 
 	DEBUGGER_STACK_POP()
-	if (pgui) // i.e. we set g->GuiWindow and g->GuiDefaultWindow above.
-	{
-		pgui->Release(); // g->GuiWindow
-		//g->GuiDefaultWindow->Release(); // This is done by ResumeUnderlyingThread().
-	}
 	ResumeUnderlyingThread(ErrorLevel_saved);
 
 	// Check that the msg monitor still exists (it may have been deleted during the thread that just finished,
@@ -1968,10 +1961,9 @@ void InitNewThread(int aPriority, bool aSkipUninterruptible, bool aIncrementThre
 
 void ResumeUnderlyingThread(VarBkp &aSavedErrorLevel)
 {
-	// Check if somebody has thrown an exception and it's not been caught yet
 	if (g->ThrownToken)
-		// Display an error message
-		g_script->UnhandledException(g->ThrownToken, g->ExcptLine);
+		g_script->FreeExceptionToken(g->ThrownToken);
+
 
 	// The following section handles the switch-over to the former/underlying "g" item:
 	--g_nThreads; // Other sections below might rely on this having been done early.
