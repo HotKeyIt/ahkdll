@@ -1173,11 +1173,11 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 	g_Loading = true;
 #endif
 	BACKUP_G_SCRIPT
-	int aFuncCount = g_script->mFuncCount; 
-	Func **aFunc = (Func**)malloc(g_script->mFuncCount*sizeof(Func));
-	for (int i = 0; i < g_script->mFuncCount; i++)
+	int aFuncCount = g_script->mFuncs.mCount; 
+	Func **aFunc = (Func**)malloc(g_script->mFuncs.mCount*sizeof(Func));
+	for (int i = 0; i < g_script->mFuncs.mCount; i++)
 	{
-		aFunc[i] = g_script->mFunc[i];
+		aFunc[i] = g_script->mFuncs.mItem[i];
 	}
 	int aSourceFileIdx = Line::sSourceFileCount;
 
@@ -1195,14 +1195,14 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 		g_SimpleHeap = bkpSimpleHeap;
 		aSimpleHeap->DeleteAll();
 		delete aSimpleHeap;
-		for (int i = 0; i < g_script->mFuncCount; i++)
+		for (int i = 0; i < g_script->mFuncs.mCount; i++)
 		{
-			g_script->mFunc[i] = aFuncCount < i ? NULL : aFunc[i];
+			g_script->mFuncs.mItem[i] = aFuncCount < i ? NULL : aFunc[i];
 		}
 		free(aFunc);
 		RESTORE_G_SCRIPT
 		RESTORE_IF_EXPR
-		g_script->mFuncCount = aFuncCount;
+		g_script->mFuncs.mCount = aFuncCount;
 		g_script->mIsReadyToExecute = true;
 #ifdef _USRDLL
 		g_Loading = false;
@@ -1223,13 +1223,13 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 	Line *aTempLine = g_script->mLastLine;
 	Line *aExecLine = g_script->mFirstLine;
 	delete g_script->mPlaceholderLabel;
-	for (int i = 0; i < g_script->mFuncCount; i++)
+	for (int i = 0; i < g_script->mFuncs.mCount; i++)
 	{
-		g_script->mFunc[i] = aFuncCount<i ? NULL : aFunc[i];
+		g_script->mFuncs.mItem[i] = aFuncCount<i ? NULL : aFunc[i];
 	}
 	free(aFunc);
 	RESTORE_G_SCRIPT
-	g_script->mFuncCount = aFuncCount;
+	g_script->mFuncs.mCount = aFuncCount;
 	g_ReturnNotExit = true;
 	// Restore SimpleHeap so functions will use correct memory
 	g_SimpleHeap = bkpSimpleHeap;

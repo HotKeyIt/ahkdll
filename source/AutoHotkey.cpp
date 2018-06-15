@@ -140,6 +140,7 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	g_HistoryTickPrev = GetTickCount();
 	g_TimeLastInputPhysical = GetTickCount();
 	g_script = new Script();
+	g_script->Construct();
 	g_clip = new Clipboard();
 	g_MsgMonitor = new MsgMonitorList();
 	g_MetaObject = new MetaObject();
@@ -491,6 +492,7 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 	for (;;)
 	{
 		g_script = new Script();
+		g_script->Construct();
 		g_MsgMonitor = new MsgMonitorList();
 		g_MetaObject = new MetaObject();
 		g_SimpleHeap = new SimpleHeap();

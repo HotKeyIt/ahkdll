@@ -48,12 +48,15 @@ FuncEntry g_BIF[] =
 {
 	BIF1(Abs, 1, 1),
 	BIFn(ACos, 1, 1, BIF_ASinACos),
+	BIF1(Alias, 1, 2, false),
 	BIF1(Array, 0, NA),
 	BIFn(ASin, 1, 1, BIF_ASinACos),
 	BIF1(ATan, 1, 1),
+	BIF1(CacheEnable, 1, 1, true),
 	BIF1(CallbackCreate, 1, 3),
 	BIF1(CallbackFree, 1, 1),
 	BIF1(CaretGetPos, 0, 2, {1, 2}),
+	BIF1(Cast, 3, 3, true),
 	BIFn(Ceil, 1, 1, BIF_FloorCeil),
 	BIF1(Chr, 1, 1),
 	BIF1(ClipboardAll, 0, 2),
@@ -62,6 +65,7 @@ FuncEntry g_BIF[] =
 	BIF1(ComObjArray, 2, 9),
 	BIF1(ComObjConnect, 1, 2),
 	BIF1(ComObjCreate, 1, 2),
+	BIF1(ComObjDll, 2, 2, true),
 	BIF1(ComObject, 1, 3),
 	BIF1(ComObjError, 0, 1),
 	BIF1(ComObjFlags, 1, 3),
@@ -95,15 +99,14 @@ FuncEntry g_BIF[] =
 	BIFn(ControlHideDropDown, 0, 5, BIF_Control),
 	BIFn(ControlSetChecked, 1, 6, BIF_Control),
 	BIFn(ControlSetEnabled, 1, 6, BIF_Control),
-#ifndef _USRDLL
-	BIF1(NewThread, 1, 3, true),
-#endif
 	BIFn(ControlSetExStyle, 1, 6, BIF_Control),
 	BIFn(ControlSetStyle, 1, 6, BIF_Control),
 	BIFn(ControlSetTab, 1, 6, BIF_Control),
 	BIFn(ControlShow, 0, 5, BIF_Control),
 	BIFn(ControlShowDropDown, 0, 5, BIF_Control),
 	BIF1(Cos, 1, 1),
+	BIF1(CriticalObject, 0, 2, true),
+	BIF1(CryptAES, 3, 5, true),
 	BIF1(DateAdd, 3, 3),
 	BIF1(DateDiff, 3, 3),
 	BIFn(DirExist, 1, 1, BIF_FileExist),
@@ -122,6 +125,7 @@ FuncEntry g_BIF[] =
 	BIFn(DriveLock, 1, 1, BIF_Drive),
 	BIFn(DriveSetLabel, 1, 2, BIF_Drive),
 	BIFn(DriveUnlock, 1, 1, BIF_Drive),
+	BIF1(DynaCall, 0, NA, true),
 	BIFn(EnvGet, 1, 1, BIF_Env),
 	BIFn(EnvSet, 1, 2, BIF_Env),
 	BIF1(Exception, 1, 3),
@@ -144,6 +148,8 @@ FuncEntry g_BIF[] =
 	BIFn(GetKeySC, 1, 1, BIF_GetKeyName),
 	BIF1(GetKeyState, 1, 2),
 	BIFn(GetKeyVK, 1, 1, BIF_GetKeyName),
+	BIF1(getTokenValue, 1, 1, true),
+	BIF1(Getvar, 1, 2, true),
 	BIF1(GuiCreate, 0, 3),
 	BIF1(GuiCtrlFromHwnd, 1, 1),
 	BIF1(GuiFromHwnd, 1, 2),
@@ -168,43 +174,16 @@ FuncEntry g_BIF[] =
 	BIFn(Log, 1, 1, BIF_SqrtLogLn),
 	BIFn(LTrim, 1, 2, BIF_Trim),
 	BIFn(Max, 1, NA, BIF_MinMax),
-	BIFn(MenuBarCreate, 0, 0, BIF_Menu),
-	BIFn(MenuCreate, 0, 0, BIF_Menu),
-	// AHK_H Functions
-	BIF1(Getvar, 1, 2, true),
-	BIF1(Alias, 1, 2, false),
-	BIF1(CryptAES, 3, 5, true),
-	BIF1(ZipRawMemory, 2, 4, true),
-	BIF1(UnZipRawMemory, 2, 4, true),
-	BIF1(CacheEnable, 1, 1, true),
-	BIF1(Cast, 3, 3, true),
-	BIF1(getTokenValue, 1, 1, true),
-	BIF1(ResourceLoadLibrary, 1, 1, true),
-	BIF1(MemoryLoadLibrary, 1, 6, true),
 	BIF1(MemoryCallEntryPoint, 1, 2, true),
-	BIF1(MemoryGetProcAddress, 2, 2, true),
-	BIF1(MemoryFreeLibrary, 1, 1, true),
 	BIF1(MemoryFindResource, 3, 4, true),
-	BIF1(MemorySizeOfResource, 2, 2, true),
+	BIF1(MemoryFreeLibrary, 1, 1, true),
+	BIF1(MemoryGetProcAddress, 2, 2, true),
+	BIF1(MemoryLoadLibrary, 1, 6, true),
 	BIF1(MemoryLoadResource, 2, 2, true),
 	BIF1(MemoryLoadString, 2, 5, true),
-	BIF1(DynaCall, 0, NA, true),
-	BIF1(CriticalObject, 0, 2, true),
-	BIF1(Struct, 1, 3, true),
-	BIF1(sizeof, 1, 2, true),
-	BIF1(ObjDump, 1, 4, true),
-	BIF1(ObjLoad, 1, 2, true),
-	BIF1(ZipCreateFile, 1, 2, true),
-	BIF1(ZipCreateBuffer, 1, 2, true),
-	BIF1(ZipCloseFile, 1, 1, true),
-	BIF1(ZipCloseBuffer, 1, 2, true),
-	BIF1(ZipAddFile, 2, 3, true),
-	BIF1(ZipAddFolder, 2, 2, true),
-	BIF1(ZipAddBuffer, 4, 4, true),
-	BIF1(ZipOptions, 2, 2, true),
-	BIF1(ZipInfo, 1, 3, true),
-	BIF1(UnZip, 2, 6, true),
-	BIF1(UnZipBuffer, 2, 5, true),
+	BIF1(MemorySizeOfResource, 2, 2, true),
+	BIFn(MenuBarCreate, 0, 0, BIF_Menu),
+	BIFn(MenuCreate, 0, 0, BIF_Menu),
 	BIFn(MenuFromHandle, 1, 1, BIF_Menu),
 	BIFn(Min, 1, NA, BIF_MinMax),
 	BIF1(Mod, 2, 2),
@@ -214,12 +193,16 @@ FuncEntry g_BIF[] =
 	BIFn(MonitorGetPrimary, 0, 0, BIF_MonitorGet),
 	BIFn(MonitorGetWorkArea, 0, 5, BIF_MonitorGet, {2, 3, 4, 5}),
 	BIF1(MsgBox, 0, 3),
+#ifndef _USRDLL
+	BIF1(NewThread, 1, 3, true),
+#endif
 	BIF1(NumGet, 1, 3),
 	BIF1(NumPut, 2, 4),
 	BIFn(ObjAddRef, 1, 1, BIF_ObjAddRefRelease),
 	BIF1(ObjBindMethod, 1, NA),
 	BIFn(ObjClone, 1, 3, BIF_ObjXXX),
 	BIFn(ObjDelete, 2, 3, BIF_ObjXXX),
+	BIF1(ObjDump, 1, 4, true),
 	BIF1(Object, 0, NA),
 	BIFn(ObjGetAddress, 2, 2, BIF_ObjXXX),
 	BIFn(ObjGetBase, 1, 1, BIF_ObjBase),
@@ -227,6 +210,7 @@ FuncEntry g_BIF[] =
 	BIFn(ObjHasKey, 2, 2, BIF_ObjXXX),
 	BIFn(ObjInsertAt, 3, NA, BIF_ObjXXX),
 	BIFn(ObjLength, 1, 1, BIF_ObjXXX),
+	BIF1(ObjLoad, 1, 2, true),
 	BIFn(ObjMaxIndex, 1, 1, BIF_ObjXXX),
 	BIFn(ObjMinIndex, 1, 1, BIF_ObjXXX),
 	BIFn(ObjNewEnum, 1, 1, BIF_ObjXXX),
@@ -240,7 +224,6 @@ FuncEntry g_BIF[] =
 	BIFn(ObjSetCapacity, 2, 3, BIF_ObjXXX),
 	BIFn(OnClipboardChange, 1, 2, BIF_On),
 	BIFn(OnError, 1, 2, BIF_On),
-	BIF1(ComObjDll, 2, 2, true),
 	BIFn(OnExit, 1, 2, BIF_On),
 	BIF1(OnMessage, 2, 3),
 	BIF1(Ord, 1, 1),
@@ -259,12 +242,14 @@ FuncEntry g_BIF[] =
 	BIFn(RegExReplace, 2, 6, BIF_RegEx, {4}),
 	BIFn(RegRead, 0, 2, BIF_Reg),
 	BIFn(RegWrite, 0, 4, BIF_Reg),
+	BIF1(ResourceLoadLibrary, 1, 1, true),
 	BIF1(Round, 1, 2),
 	BIFn(RTrim, 1, 2, BIF_Trim),
 	BIFn(RunWait, 1, 4, BIF_Wait, {4}),
 	BIFn(SendMessage, 1, 9, BIF_PostSendMessage),
 	BIF1(SetTimer, 0, 3),
 	BIF1(Sin, 1, 1),
+	BIF1(sizeof, 1, 2, true),
 	BIF1(Sort, 1, 2),
 	BIFn(SoundGet, 0, 3, BIF_Sound),
 	BIFn(SoundSet, 1, 4, BIF_Sound),
@@ -277,6 +262,7 @@ FuncEntry g_BIF[] =
 	BIFn(StrPut, 1, 4, BIF_StrGetPut),
 	BIF1(StrReplace, 2, 5, {4}),
 	BIF1(StrSplit, 1, 4),
+	BIF1(Struct, 1, 3, true),
 	BIFn(StrUpper, 1, 2, BIF_StrCase),
 	BIF1(SubStr, 2, 3),
 	BIF1(SysGet, 1, 1),
@@ -284,6 +270,9 @@ FuncEntry g_BIF[] =
 	BIF1(TraySetIcon, 0, 3),
 	BIFn(Trim, 1, 2, BIF_Trim),
 	BIF1(Type, 1, 1),
+	BIF1(UnZip, 2, 6, true),
+	BIF1(UnZipBuffer, 2, 5, true),
+	BIF1(UnZipRawMemory, 2, 4, true),
 	BIF1(VarSetCapacity, 1, 3, {1}),
 	BIFn(WinActive, 0, 4, BIF_WinExistActive),
 	BIFn(WinExist, 0, 4, BIF_WinExistActive),
@@ -320,6 +309,16 @@ FuncEntry g_BIF[] =
 	BIFn(WinWaitActive, 0, 5, BIF_Wait),
 	BIFn(WinWaitClose, 0, 5, BIF_Wait),
 	BIFn(WinWaitNotActive, 0, 5, BIF_Wait),
+	BIF1(ZipAddBuffer, 4, 4, true),
+	BIF1(ZipAddFile, 2, 3, true),
+	BIF1(ZipAddFolder, 2, 2, true),
+	BIF1(ZipCloseBuffer, 1, 2, true),
+	BIF1(ZipCloseFile, 1, 1, true),
+	BIF1(ZipCreateBuffer, 1, 2, true),
+	BIF1(ZipCreateFile, 1, 2, true),
+	BIF1(ZipInfo, 1, 3, true),
+	BIF1(ZipOptions, 2, 2, true),
+	BIF1(ZipRawMemory, 2, 4, true)
 };
 #undef NA
 #undef BIFn
@@ -543,6 +542,9 @@ Script::Script()
 	, mCustomIcon(NULL), mCustomIconSmall(NULL) // Normally NULL unless there's a custom tray icon loaded dynamically.
 	, mCustomIconFile(NULL), mIconFrozen(false), mTrayIconTip(NULL) // Allocated on first use.
 	, mCustomIconNumber(0)
+{}
+
+void Script::Construct()  // Constructor.
 {
 	// v1.0.25: mLastScriptRest (removed in v2) and mLastPeekTime are now initialized
 	// right before the auto-exec section of the script is launched, which avoids an
@@ -553,7 +555,7 @@ Script::Script()
 	ZeroMemory(&mNIC, sizeof(mNIC));  // Constructor initializes this, to be safe.
 	mNIC.hWnd = NULL;  // Set this as an indicator that it tray icon is not installed.
 	// Lastly (after the above have been initialized), anything that can fail:
-	if (   !(mTrayMenu = AddMenu(MENU_TYPE_POPUP))   ) // realistically never happens
+	if (!(mTrayMenu = AddMenu(MENU_TYPE_POPUP))) // realistically never happens
 	{
 		ScriptError(_T("No tray mem"));
 		ExitApp(EXIT_CRITICAL);
@@ -593,20 +595,19 @@ Script::Script()
 		_T(" typedef must be changed."));
 	// Ensure binary-search arrays are sorted correctly:
 	for (int i = 1; i < _countof(g_BIF); ++i)
-		if (_tcsicmp(g_BIF[i-1].mName, g_BIF[i].mName) >= 0)
+		if (_tcsicmp(g_BIF[i - 1].mName, g_BIF[i].mName) >= 0)
 			ScriptError(_T("DEBUG: g_BIF out of order."), g_BIF[i].mName);
 	for (int i = 1; i < _countof(g_BIV); ++i)
-		if (_tcsicmp(g_BIV[i-1].name, g_BIV[i].name) >= 0)
+		if (_tcsicmp(g_BIV[i - 1].name, g_BIV[i].name) >= 0)
 			ScriptError(_T("DEBUG: g_BIV out of order."), g_BIV[i].name);
 	for (int i = 1; i < _countof(g_BIV_A); ++i)
-		if (_tcsicmp(g_BIV_A[i-1].name, g_BIV_A[i].name) >= 0)
+		if (_tcsicmp(g_BIV_A[i - 1].name, g_BIV_A[i].name) >= 0)
 			ScriptError(_T("DEBUG: g_BIV_A out of order."), g_BIV_A[i].name);
 #endif
 #ifndef _USRDLL
 	OleInitialize(NULL);
 #endif
 }
-
 
 
 Script::~Script() // Destructor.
@@ -706,9 +707,9 @@ Script::~Script() // Destructor.
 	}
 
 	// delete static func vars first
-	for (i = 0; i < mFuncCount; i++)
+	for (i = 0; i < mFuncs.mCount; i++)
 	{
-		Func &f = *mFunc[i];
+		Func &f = *mFuncs.mItem[i];
 		if (f.mIsBuiltIn)
 		{
 			if (f.mStaticVar && (f.mBIF = (BuiltInFunctionType)BIF_DllImport))
@@ -778,20 +779,20 @@ Script::~Script() // Destructor.
 	mLazyVar = NULL;
 	mLazyVarCount = NULL;
 	// delete static func vars first
-	for (i = 0; i < mFuncCount; i++)
+	for (i = 0; i < mFuncs.mCount; i++)
 	{
-		Func &f = *mFunc[i];
+		Func &f = *mFuncs.mItem[i];
 		if (f.mIsBuiltIn)
 			continue;
 		else if (f.mClass && _tcschr(f.mName, '.'))
 			f.mClass->Release();
 	}
-	for (i = 0; i < mFuncCount; i++)
+	for (i = 0; i < mFuncs.mCount; i++)
 	{
-		Func &f = *mFunc[i];
+		Func &f = *mFuncs.mItem[i];
 		if (f.mIsBuiltIn)
 		{
-			delete mFunc[i];
+			delete mFuncs.mItem[i];
 			continue;
 		}
 		// Since it doesn't seem feasible to release all var backups created by recursive function
@@ -814,21 +815,21 @@ Script::~Script() // Destructor.
 		{
 			delete f.mLazyVar[v];
 		}
-		if (mFunc[i]->mStaticVar)
-			free(mFunc[i]->mStaticVar);
-		if (mFunc[i]->mStaticLazyVar)
-			free(mFunc[i]->mStaticLazyVar);
-		if (mFunc[i]->mVar)
-			free(mFunc[i]->mVar);
-		if (mFunc[i]->mLazyVar)
-			free(mFunc[i]->mLazyVar);
-		delete mFunc[i];
+		if (f.mStaticVar)
+			free(f.mStaticVar);
+		if (f.mStaticLazyVar)
+			free(f.mStaticLazyVar);
+		if (f.mVar)
+			free(f.mVar);
+		if (f.mLazyVar)
+			free(f.mLazyVar);
+		delete mFuncs.mItem[i];
 	}
 
-	if (mFuncCount)
-		free(mFunc);
-	mFunc = NULL;
-	mFuncCount = 0;
+	if (mFuncs.mCount)
+		free(mFuncs.mItem);
+	mFuncs.mCount = 0;
+	mFuncs.mCountMax = 0;
 	// Destroy Labels
 	for (Label *label = mFirstLabel, *nextLabel = NULL; label;)
 	{
@@ -932,8 +933,6 @@ Script::~Script() // Destructor.
 	mVarCount = 0;
 	mVarCountMax = 0;
 	mLazyVarCount = 0;
-	mFuncCount = 0;
-	mFuncCountMax = 0;
 	mFirstLabel = NULL;
 	mLastLabel = NULL;
 	mFirstStaticLine = 0;
@@ -948,7 +947,6 @@ Script::~Script() // Destructor.
 	mLastGroup = NULL;
 
 	mFirstTimer = NULL;
-	mTempFunc = NULL;
 	mTempLabel = NULL;
 	mTempLine = NULL;
 
@@ -2199,17 +2197,9 @@ LineNumberType Script::LoadFromText(LPTSTR aScript, LPCTSTR aPathToShow)
 	//
 	//  2) Warn the user (if appropriate) since they probably meant it to be global.
 	//
-	for (int i = 0; i < mFuncCount; ++i)
-	{
-		Func &func = *mFunc[i];
-		if (!func.mIsBuiltIn && !(func.mDefaultVarType & VAR_FORCE_LOCAL))
-		{
-			PreprocessLocalVars(func, func.mVar, func.mVarCount);
-			PreprocessLocalVars(func, func.mStaticVar, func.mStaticVarCount);
-			PreprocessLocalVars(func, func.mLazyVar, func.mLazyVarCount);
-			PreprocessLocalVars(func, func.mStaticLazyVar, func.mStaticLazyVarCount);
-		}
-	}
+	if (!PreprocessLocalVars(mFuncs))
+		return LOADING_FAILED;
+
 
 	// Resolve any unresolved base classes.
 	if (mUnresolvedClasses)
@@ -15875,7 +15865,9 @@ ResultType Script::PreprocessLocalVars(FuncList &aFuncs)
 			// misleading (and both cases seem better than using the script's very last line).
 			mCurrLine = func.mJumpToLine->mPrevLine;
 			// Preprocess this function's local variables.
-			if (   !PreprocessLocalVars(func, func.mStaticVar, func.mStaticVarCount)
+			if (!PreprocessLocalVars(func, func.mVar, func.mVarCount)
+				|| !PreprocessLocalVars(func, func.mStaticVar, func.mStaticVarCount)
+				|| !PreprocessLocalVars(func, func.mLazyVar, func.mLazyVarCount)
 				|| !PreprocessLocalVars(func, func.mStaticLazyVar, func.mStaticLazyVarCount)   )
 				return FAIL; // Script will exit, so OK to leave mUpVar in an invalid state.
 		}

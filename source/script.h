@@ -2871,11 +2871,9 @@ public:
 	Line *mFirstLine, *mLastLine;     // The first and last lines in the linked list.
 	Line *mFirstStaticLine, *mLastStaticLine; // The first and last static var initializer.
 	Label *mFirstLabel, *mLastLabel;  // The first and last labels in the linked list.
-	Func **mFunc;  // Binary-searchable array of functions.
-	int mFuncCount, mFuncCountMax;
+
 	Line *mTempLine; // for use with dll Execute # Naveen N9
 	Label *mTempLabel; // for use with dll Execute # Naveen N9
-	Func *mTempFunc; // for use with dll Execute # Naveen N9
 
 	// Naveen moved above from private
 	Line *mCurrLine;     // Seems better to make this public than make Line our friend.
@@ -3044,6 +3042,7 @@ public:
 	#define SOUNDPLAY_ALIAS _T("AHK_PlayMe")  // Used by destructor and SoundPlay().
 
 	Script();
+	void Construct();
 	~Script();
 	// Note that the anchors to any linked lists will be lost when this
 	// object goes away, so for now, be sure the destructor is only called

@@ -155,6 +155,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	// Init any globals not in "struct g" that need it:
 	g_MainThreadID = GetCurrentThreadId();
 	g_script = new Script();
+	g_script->Construct();
 	g_clip = new Clipboard();
 	g_MsgMonitor = new MsgMonitorList();
 	g_MetaObject = new MetaObject();
