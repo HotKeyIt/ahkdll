@@ -20,7 +20,7 @@ ahkthread(s:="",p:="",t:="",IsFile:=0,dll:=""){
   obj:={(""):lib:=MemoryLoadLibrary(dll=""?&ahkdll:dll),base:base}
   for k,v in functions
     obj[k]:=DynaCall(MemoryGetProcAddress(lib,A_Index>2?k:SubStr(k,2)),v)
-  If !(s+0!="" || s=0)
+  If Type(s)="String" and s!=""
     obj.hThread:=obj[IsFile?"ahkdll":"ahktextdll"](s,p,t)
   ahkthread_free(true)[obj]:=1 ; keep dll loadded even if returned object is freed
   return obj
