@@ -701,14 +701,7 @@ void Script::Destroy()
 		free(Line::sDerefBuf);
 		Line::sDerefBuf = NULL;
 	}
-#ifndef MINIDLL
-	for (HotkeyCriterion *expr = g_FirstHotCriterion, *nextexpr; expr;)
-	{
-		nextexpr = expr->NextCriterion;
-		free(expr);
-		expr = nextexpr;
-	}
-#endif
+	
 	Script::~Script(); // destroy main script before resetting variables
 
 	mVarCount = 0;
