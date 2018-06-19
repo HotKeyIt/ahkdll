@@ -3167,9 +3167,6 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 					// Open brace means this is a function definition. NOTE: Both bufs were already ltrimmed by GetLine().
 					if (buf_has_brace || *next_buf == '{')
 					{
-						if (g->CurrentFunc)
-							// This is prohibited until it becomes feasible to implement closures.
-							return ScriptError(_T("Functions cannot contain functions."), buf);
 						if (!DefineFunc(buf, func_global_var))
 							return FAIL;
 						if (buf_has_brace && !AddLine(ACT_BLOCK_BEGIN))
