@@ -201,6 +201,7 @@ FuncEntry g_BIF[] =
 	BIFn(ObjAddRef, 1, 1, BIF_ObjAddRefRelease),
 	BIF1(ObjBindMethod, 1, NA),
 	BIFn(ObjClone, 1, 3, BIF_ObjXXX),
+	BIFn(ObjCount, 1, 1, BIF_ObjXXX),
 	BIFn(ObjDelete, 2, 3, BIF_ObjXXX),
 	BIF1(ObjDump, 1, 4),
 	BIF1(Object, 0, NA),
@@ -2411,11 +2412,11 @@ bool Script::IsFunction(LPTSTR aBuf, bool *aPendingFunctionHasBrace)
 // *aPendingFunctionHasBrace is set to true if a brace is present at the end, or false otherwise.
 // In addition, any open-brace is removed from aBuf in this mode.
 {
-	LPTSTR action_end = find_identifier_end(aBuf);
 	if (!_tcsnicmp(aBuf, _T("macro "), 6))
 	{
 		aBuf += 6;
 	}
+	LPTSTR action_end = find_identifier_end(aBuf);
 
 	// Can't be a function definition or call without an open-parenthesis as first char found by the above.
 	// In addition, if action_end isn't NULL, that confirms that the string in aBuf prior to action_end contains
@@ -2462,7 +2463,7 @@ inline LPTSTR IsClassDefinition(LPTSTR aBuf)
 	if (_tcsnicmp(aBuf, _T("Class"), 5) || !IS_SPACE_OR_TAB(aBuf[5])) // i.e. it's not "Class" followed by a space or tab.
 		return NULL;
 	LPTSTR class_name = omit_leading_whitespace(aBuf + 6);
-	if (_tcschr(EXPR_ALL_SYMBOLS EXPR_ILLEGAL_CHARS, *class_name))
+	if (_tcschr(EXPR_ALL_SYMBOLS, *class_name))
 		// It's probably something like "Class := GetClass()".
 		return NULL;
 	// Validation of the name is left up to the caller, for simplicity.
@@ -3174,7 +3175,8 @@ ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
 						goto continue_main_loop;
 					}
 				}
-				else if (mClassObjectCount && !g->CurrentFunc) // Inside a class definition (and not inside a method).
+				
+				if (mClassObjectCount && !g->CurrentFunc) // Inside a class definition (and not inside a method).
 				{
 					// Check for assignment first, in case of something like "Static := 123".
 					for (cp = buf; IS_IDENTIFIER_CHAR(*cp) || *cp == '.'; ++cp);
@@ -4114,7 +4116,8 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 				goto continue_main_loop;
 			}
 		}
-		else if (mClassObjectCount && !g->CurrentFunc) // Inside a class definition (and not inside a method).
+
+		if (mClassObjectCount && !g->CurrentFunc) // Inside a class definition (and not inside a method).
 		{
 			// Check for assignment first, in case of something like "Static := 123".
 			for (cp = buf; IS_IDENTIFIER_CHAR(*cp) || *cp == '.'; ++cp);
@@ -7076,7 +7079,6 @@ ResultType Script::ParseOperands(LPTSTR aArgText, LPTSTR aArgMap, DerefType *aDe
 	bool is_double_deref;
 	SymbolType wordop;
 
-#define ERR_EXP_ILLEGAL_CHAR _T("The leftmost character above is illegal in an expression.") // "above" refers to the layout of the error dialog.
 	// ParseDerefs() won't consider escaped percent signs to be illegal, but in this case
 	// they should be since they have no meaning in expressions.  UPDATE for v1.0.44.11: The following
 	// is now commented out because it causes false positives (and fixing that probably isn't worth the
@@ -7209,14 +7211,25 @@ ResultType Script::ParseOperands(LPTSTR aArgText, LPTSTR aArgMap, DerefType *aDe
 
 		if (*op_begin <= '9' && *op_begin >= '0') // Numeric literal.  Numbers starting with a decimal point are handled under "case '.'".
 		{
-			if (IsHex(op_begin))
-				tcstoi64_o(op_begin, &op_end, 16);
-			else
-				_tcstod(op_begin, &op_end); // Handles both decimal integers and floating-point numbers.
-			if (_tcschr(EXPR_OPERAND_TERMINATORS_EX_DOT, *op_end)) // '\0' is included in the search.
+			// Behaviour here should match the similar section in ExpressionToPostfix().
+			tcstoi64_o(op_begin, &op_end, 0);
+			if (!IS_HEX(op_begin)) // This check is probably only needed on VC++ 2015 and later, where _tcstod allows hex.
 			{
-				pending_op_is_class = false; // Must be cleared for `new 123` to be interpreted correctly.
-				continue; // Do nothing further since pure numbers don't need any processing at this stage.
+				LPTSTR d_end;
+				_tcstod(op_begin, &d_end);
+				if (op_end < d_end && _tcschr(EXPR_OPERAND_TERMINATORS, *d_end))
+				{
+					op_end = d_end;
+					pending_op_is_class = false; // Must be reset for subsequent operands.
+					continue;
+				}
+			}
+			if (_tcschr(EXPR_OPERAND_TERMINATORS, *op_end))
+			{
+				pending_op_is_class = false; // Must be reset for subsequent operands.
+				// Do nothing further since pure numbers don't need any processing at this stage.
+				// If this number has a fractional part, it is handled by "case '.'" above.
+				continue;
 			}
 			//else: It's not valid, but let it pass through to Var::ValidateName() to generate an error message.
 		}
@@ -7226,14 +7239,6 @@ ResultType Script::ParseOperands(LPTSTR aArgText, LPTSTR aArgMap, DerefType *aDe
 		// Now op_end marks the end of this operand.  The end might be the zero terminator, an operator, etc.
 		operand_length = op_end - op_begin;
 
-		// Check for characters which are either illegal in expressions or reserved for future use.
-		// Illegal characters are legal when enclosed in double quotes.  So the following is
-		// done only after the above has ensured this operand is not one enclosed entirely in
-		// double quotes.  Only *op_end needs to be checked since find_identifier_end() ends at
-		// the first non-identifier character, which may be op_begin itself.
-		if (*op_end && _tcschr(EXPR_ILLEGAL_CHARS, *op_end))
-			return ScriptError(ERR_EXP_ILLEGAL_CHAR, op_end);
-
 		if (is_double_deref = (*op_end == g_DerefChar && aEndChar != g_DerefChar))
 		{
 			// This operand is the leading literal part of a double dereference.
@@ -7242,6 +7247,15 @@ ResultType Script::ParseOperands(LPTSTR aArgText, LPTSTR aArgMap, DerefType *aDe
 				return FAIL;
 			op_end = aArgText + j;
 			is_function = *op_end == '('; // Dynamic function call.
+		}
+		else if (!operand_length) // Found an illegal char.
+		{
+			// Due to other checks above, this should be possible only when *op_end is an illegal
+			// character (since it is not null, an operand terminator or identifier character).
+			// All characters are permitted in quoted strings, which were already handled above.
+			// An invalid identifier such as "bad\01" is processed as a valid var "bad" followed
+			// by a zero-length operand (triggering this section).
+			return ScriptError(ERR_EXP_ILLEGAL_CHAR, op_end);
 		}
 		else
 		{
@@ -10235,7 +10249,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 //		, 25             // Reserved for SYM_LOWNOT.
 		//		, 26             // THIS VALUE MUST BE LEFT UNUSED so that the one above can be promoted to it by the infix-to-postfix routine.
 		, 28, 28, 28	 // SYM_IS, SYM_IN, SYM_CONTAINS
-		, 30, 30, 30     // SYM_EQUAL, SYM_EQUALCASE, SYM_NOTEQUAL (lower prec. than the below so that "x < 5 = var" means "result of comparison is the boolean value in var".
+		, 30, 30, 30, 30 // SYM_EQUAL, SYM_EQUALCASE, SYM_NOTEQUAL, SYM_NOTEQUALCASE (lower prec. than the below so that "x < 5 = var" means "result of comparison is the boolean value in var".
 		, 34, 34, 34, 34 // SYM_GT, SYM_LT, SYM_GTOE, SYM_LTOE
 		, 36             // SYM_REGEXMATCH
 		, 38             // SYM_CONCAT
@@ -10486,11 +10500,11 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 					}
 					break;
 				case '!':
-					if (cp1 == '=') // i.e. != is synonymous with <>, which is also already supported by legacy.
-					{
-						++cp; // An additional increment to have loop skip over the '=' too.
-						this_infix_item.symbol = SYM_NOTEQUAL;
-					}
+					if (cp1 == '=') // i.e. !=
+						// An additional increment for each '=' to have loop skip over the '=' too.
+						++cp, this_infix_item.symbol	= cp[1] == '=' // note, cp[1] is not equal to cp1 here due to ++cp
+														? (++cp, SYM_NOTEQUALCASE)	// !==
+														: SYM_NOTEQUAL;				// != 
 					else
 						// If what lies to its left is a CPARAN or OPERAND, SYM_CONCAT is not auto-inserted because:
 						// 1) Allows ! and ~ to potentially be overloaded to become binary and unary operators in the future.
@@ -10606,10 +10620,6 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 					case '=':
 						++cp; // An additional increment to have loop skip over the '=' too.
 						this_infix_item.symbol = SYM_LTOE;
-						break;
-					case '>':
-						++cp; // An additional increment to have loop skip over the '>' too.
-						this_infix_item.symbol = SYM_NOTEQUAL;
 						break;
 					case '<':
 						if (cp[2] == '=')
@@ -10729,7 +10739,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 						if (IS_SPACE_OR_TAB(cp1))
 						{
 							if (!infix_count || !IS_SPACE_OR_TAB(cp[-1])) // L31: Disallow things like "obj. name" since it seems ambiguous.  Checking infix_count ensures cp is not the beginning of the string (". " at the beginning of an expression would also be invalid).  Checking IS_SPACE_OR_TAB seems more appropriate than looking in EXPR_OPERAND_TERMINATORS; it enforces the previously unenforced but documented rule that concat-dot requires a space on either side.
-								return LineError(ERR_INVALID_DOT, FAIL, cp);
+								return LineError(ERR_EXPR_SYNTAX, FAIL, cp);
 							this_infix_item.symbol = SYM_CONCAT;
 							break;
 						}
@@ -10758,10 +10768,10 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 							// Find the end of the operand (".operand"):
 							op_end = find_identifier_end(cp);
 							if (!_tcschr(EXPR_OPERAND_TERMINATORS, *op_end))
-								return LineError(ERR_INVALID_CHAR, FAIL, op_end);
+								return LineError(ERR_EXP_ILLEGAL_CHAR, FAIL, op_end);
 
 							if (op_end == cp) // Missing identifier.
-								return LineError(ERR_INVALID_DOT, FAIL, cp - 1); // Intentionally vague since the user's intention isn't clear.
+								return LineError(ERR_EXPR_SYNTAX, FAIL, cp-1); // Intentionally vague since the user's intention isn't clear.
 
 							// Output an operand for the text following '.'
 							if (op_end - cp < MAX_NUMBER_SIZE)
@@ -10815,62 +10825,57 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 						}
 					}
 
-					// Find the end of this operand or keyword, even if that end extended into the next deref.
-					// StrChrAny() is not used because if *op_end is '\0', the strchr() below will find it too:
-					for (op_end = cp + 1; !_tcschr(EXPR_OPERAND_TERMINATORS, *op_end); ++op_end);
-					// Now op_end marks the end of this operand or keyword.  That end might be the zero terminator
-					// or the next operator in the expression, or just a whitespace.
-					if (*op_end == '.') // i.e. it's a floating-point literal.
-					{
-						// Update op_end to include the decimal portion of the operand:
-						do ++op_end; while (!_tcschr(EXPR_OPERAND_TERMINATORS, *op_end));
-					}
-
 				unquoted_literal:
 					// This operand is a normal raw numeric-literal, or an unquoted literal string/key in
 					// an object literal, such as "{key: value}".  Word operators such as AND/OR/NOT/NEW
 					// and variable/function references don't reach this point as they are pre-parsed by
 					// ParseOperands() and placed into the "deref" array.  Unrecognized symbols should be
 					// impossible at this stage because prior validation would have caught them.
-					if ((*op_end == '-' || *op_end == '+') && ctoupper(op_end[-1]) == 'E' // v1.0.46.11: It looks like scientific notation...
-						&& !(cp[0] == '0' && ctoupper(cp[1]) == 'X') // ...and it's not a hex number (this check avoids falsely detecting hex numbers that end in 'E' as exponents). This line fixed in v1.0.46.12.
-						&& !(cp[0] == '-' && cp[1] == '0' && ctoupper(cp[2]) == 'X') // ...and it's not a negative hex number (this check avoids falsely detecting hex numbers that end in 'E' as exponents). This line added as a fix in v1.0.47.03.
-						)
-					{
-						// Since op_end[-1] is the 'E' or an exponent, the only valid things for op_end[0] to be
-						// are + or - (it can't be a digit because the loop above would never have stopped op_end
-						// at a digit).  If it isn't + or -, it's some kind of syntax error, so doing the following
-						// seems harmless in any case:
-						do // Skip over the sign and its exponent; e.g. the "+1" in "1.0e+1".  There must be a sign in this particular sci-notation number or we would never have arrived here.
-							++op_end;
-						while (*op_end >= '0' && *op_end <= '9'); // Avoid isdigit() because it sometimes causes a debug assertion failure at: (unsigned)(c + 1) <= 256 (probably only in debug mode), and maybe only when bad data got in it due to some other bug.
-						if (!_tcschr(EXPR_OPERAND_TERMINATORS_EX_DOT, *op_end))
-							return LineError(_T("Bad numeric literal."), FAIL, cp);
-					}
 					CHECK_AUTO_CONCAT;
 					// MUST NOT REFER TO this_infix_item IN CASE ABOVE DID ++infix_count:
-					// Now determine what type of literal this is: integer, floating-point or unquoted string.
-					if (op_end - cp < MAX_NUMBER_SIZE)
-						tcslcpy(number_buf, cp, op_end - cp + 1); // +1 for null terminator.
-					else
-						*number_buf = '\0'; // For simplicity; IsNumeric() should yield the correct result.
-					switch (infix[infix_count].symbol = IsNumeric(number_buf, true, false, true))
+					ExprTokenType &this_literal = infix[infix_count];
+
+					if (*cp <= '9' && (*cp >= '0' || *cp == '+' || *cp == '-' || *cp == '.'))
 					{
-					case SYM_INTEGER:
-						infix[infix_count].value_int64 = ATOI64(number_buf);
-						break;
-					case SYM_FLOAT:
-						infix[infix_count].value_double = ATOF(number_buf);
-						break;
-					default:
-						if (*cp == '.')
-							return LineError(ERR_INVALID_DOT, FAIL, cp);
-						// SYM_STRING: either the "key" in "{key: value}" or a syntax error (might be impossible).
-						LPTSTR str = g_SimpleHeap->Malloc(cp, op_end - cp);
-						if (!str)
-							return FAIL; // Malloc already displayed an error message.
-						infix[infix_count].SetValue(str, op_end - cp);
+						// Looks like a number.  The checks above and IsHex() below rule out the strings
+						// "inf", "infinity", "nan" and "nanxxx", and hexadecimal floating-point numbers,
+						// which would otherwise be interpreted as valid if supported by the compiler
+						// (VC++ 2015 and later).  This is done because we don't support those values
+						// elsewhere in the code, such as in IsNumeric().
+						LPTSTR i_end, d_end;
+						__int64 i;
+						if (IsHex(cp))
+						{
+							i = tcstoi64_o(cp, &i_end, 16);
+						}
+						else
+						{
+							i = tcstoi64_o(cp, &i_end, 10);
+							double d = _tcstod(cp, &d_end);
+							if (d_end > i_end && _tcschr(EXPR_OPERAND_TERMINATORS, *d_end))
+							{
+								this_literal.symbol = SYM_FLOAT;
+								this_literal.value_double = d;
+								cp = d_end; // Have the loop process whatever lies at d_end and beyond.
+								continue;
+							}
+						}
+						if (*cp == '.') // Must be checked to avoid `(.foo)` being interpreted as `((0).foo)`.
+							return LineError(ERR_EXPR_SYNTAX, FAIL, cp);
+						if (_tcschr(EXPR_OPERAND_TERMINATORS, *i_end))
+						{
+							this_literal.symbol = SYM_INTEGER;
+							this_literal.value_int64 = i;
+							cp = i_end; // Have the loop process whatever lies at i_end and beyond.
+							continue;
+						}
 					}
+					op_end = find_identifier_end(cp);
+					// SYM_STRING: either the "key" in "{key: value}" or a syntax error (might be impossible).
+					LPTSTR str = g_SimpleHeap->Malloc(cp, op_end - cp);
+					if (!str)
+						return FAIL; // Malloc already displayed an error message.
+					this_literal.SetValue(str, op_end - cp);
 					cp = op_end; // Have the loop process whatever lies at op_end and beyond.
 					continue; // "Continue" to avoid the ++cp at the bottom.
 				} // switch() for type of symbol/operand.

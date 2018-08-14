@@ -7152,7 +7152,7 @@ ResultType SoundSetGet2kXP(ResultToken &aResultToken, LPTSTR aSetting
 	g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
 
 	if (control_type_is_boolean)
-		return aResultToken.ReturnPtr(mcdMeter.dwValue ? _T("On") : _T("Off"), -1);
+		return aResultToken.Return(mcdMeter.dwValue ? TRUE : FALSE);
 	else // For all others, assume the control can have more than just ON/OFF as its allowed states.
 		// The MSDN docs imply that values fetched via the above method do not distinguish between
 		// left and right volume levels, unlike waveOutGetVolume():
@@ -7580,7 +7580,7 @@ control_fail:
 		return OK;
 
 	if (control_type_is_boolean)
-		return aResultToken.ReturnPtr(result_bool ? _T("On") : _T("Off"), -1);
+		return aResultToken.Return(result_bool);
 	else
 		return aResultToken.Return(result_float);
 }
@@ -9227,9 +9227,12 @@ VarSizeType BIV_TitleMatchModeSpeed(LPTSTR aBuf, LPTSTR aVarName)
 
 VarSizeType BIV_DetectHiddenWindows(LPTSTR aBuf, LPTSTR aVarName)
 {
-	return aBuf
-		? (VarSizeType)_tcslen(_tcscpy(aBuf, g->DetectHiddenWindows ? _T("On") : _T("Off"))) // For backward compatibility (due to StringCaseSense), never change the case used here.  Fixed in v1.0.42.01 to return exact length (required).
-		: 3; // Room for either On or Off (in the estimation phase).
+	if (aBuf)
+	{
+		*aBuf++ = g->DetectHiddenWindows ? '1' : '0';
+		*aBuf = '\0';
+	}
+	return 1;
 }
 
 BIV_DECL_W(BIV_DetectHiddenWindows_Set)
@@ -9244,9 +9247,12 @@ BIV_DECL_W(BIV_DetectHiddenWindows_Set)
 
 VarSizeType BIV_DetectHiddenText(LPTSTR aBuf, LPTSTR aVarName)
 {
-	return aBuf
-		? (VarSizeType)_tcslen(_tcscpy(aBuf, g->DetectHiddenText ? _T("On") : _T("Off"))) // For backward compatibility (due to StringCaseSense), never change the case used here. Fixed in v1.0.42.01 to return exact length (required).
-		: 3; // Room for either On or Off (in the estimation phase).
+	if (aBuf)
+	{
+		*aBuf++ = g->DetectHiddenText ? '1' : '0';
+		*aBuf = '\0';
+	}
+	return 1;
 }
 
 BIV_DECL_W(BIV_DetectHiddenText_Set)
@@ -9382,9 +9388,12 @@ BIV_DECL_W(BIV_SendLevel_Set)
 
 VarSizeType BIV_StoreCapslockMode(LPTSTR aBuf, LPTSTR aVarName)
 {
-	return aBuf
-		? (VarSizeType)_tcslen(_tcscpy(aBuf, g->StoreCapslockMode ? _T("On") : _T("Off"))) // For backward compatibility (due to StringCaseSense), never change the case used here.
-		: 3; // Room for either On or Off (in the estimation phase).
+	if (aBuf)
+	{
+		*aBuf++ = g->StoreCapslockMode ? '1' : '0';
+		*aBuf = '\0';
+	}
+	return 1;
 }
 
 BIV_DECL_W(BIV_StoreCapslockMode_Set)
@@ -14935,14 +14944,12 @@ BIF_DECL(BIF_Ord)
 
 BIF_DECL(BIF_Chr)
 {
+	Throw_if_Param_NaN(0);
 	int param1 = ParamIndexToInt(0); // Convert to INT vs. UINT so that negatives can be detected.
 	LPTSTR cp = _f_retval_buf; // If necessary, it will be moved to a persistent memory location by our caller.
 	int len;
 	if (param1 < 0 || param1 > UorA(0x10FFFF, UCHAR_MAX))
-	{
-		*cp = '\0'; // Empty string indicates both Chr(0) and an out-of-bounds param1.
-		len = 0;
-	}
+		_f_throw(ERR_PARAM1_INVALID);
 #ifdef UNICODE
 	else if (param1 >= 0x10000)
 	{
@@ -16730,10 +16737,6 @@ BIF_DECL(BIF_UnZipRawMemory)
 	aResultToken.marker =_T("");
 }
 
-#define Throw_if_Param_NaN(ParamIndex) \
-	if (!TokenIsNumeric(*aParam[(ParamIndex)])) \
-		_f_throw(ERR_TYPE_MISMATCH)
-
 BIF_DECL(BIF_Round)
 // For simplicity, this always yields something numeric (or a string that's numeric).
 // Even Round(empty_or_unintialized_var) is zero rather than "" or "NaN".
@@ -17914,7 +17917,10 @@ BIF_DECL(BIF_CallbackCreate)
 
 BIF_DECL(BIF_CallbackFree)
 {
-	RCCallbackFunc *callbackfunc = (RCCallbackFunc *)ParamIndexToIntPtr(0);
+	INT_PTR address = ParamIndexToIntPtr(0);
+	if (address < 65536 && address >= 0) // Basic sanity check to catch incoming raw addresses that are zero or blank.  On Win32, the first 64KB of address space is always invalid.
+		_f_throw(ERR_PARAM1_INVALID);
+	RCCallbackFunc *callbackfunc = (RCCallbackFunc *)address;
 	callbackfunc->func->Release();
 	callbackfunc->func = NULL; // To help detect bugs.
 	GlobalFree(callbackfunc);
