@@ -12422,9 +12422,9 @@ BIF_DECL(BIF_DllImport)
 // All parameters are pre-defined in func-> structure and are used to call the Dll function via DllCall
 {
 	Func *func = aResultToken.func;
-	void *function = (void*)func->mClass;
+	void *function = (void*)func->mDllImportFunction;
 	int arg_count = func->mParamCount;
-	DYNAPARM *dyna_param = (DYNAPARM*)func->mParam;
+	DYNAPARM *dyna_param = (DYNAPARM*)func->mdyna_param;
 	DYNAPARM *dyna_param_def = (DYNAPARM*)func->mLazyVar;
 	DYNAPARM *return_attrib = (DYNAPARM*)func->mVar;
 	CStringA **pStr = (CStringA **)_alloca(arg_count * sizeof(void*)); // _alloca vs malloc can make a significant difference to performance in some cases.

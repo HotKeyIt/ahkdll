@@ -1790,8 +1790,11 @@ public:
 	// override in the script.  So mIsBuiltIn should always be used to determine whether the function
 	// is truly built-in, not its name.
 	bool mIsVariadic;
-	bool mIsMacro;
 	bool mIsFatArrow;
+	bool mIsMacro;
+	// DynaCall related
+	void *mDllImportFunction;
+	DYNAPARM *mdyna_param;
 
 #define MAX_FUNC_OUTPUT_VAR 7
 	bool ArgIsOutputVar(int aIndex)

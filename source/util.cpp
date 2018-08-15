@@ -3136,9 +3136,14 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 		BIV_ThreadID(buf, _T("A_ThreadID"));
 		StrReplace(parameter, _T("%A_ThreadID%"), buf, SCS_INSENSITIVE, 1, space_remaining);
 	}
+	if (tcscasestr(parameter, _T("%A_PtrSize%"))) // v1.0.45.04.
+	{
+		BIV_ThreadID(buf, _T("A_PtrSize"));
+		StrReplace(parameter, _T("%A_PtrSize%"), buf, SCS_INSENSITIVE, 1, space_remaining);
+	}
 	if (_tcschr(parameter, '%'))
 	{
-		return g_script->ScriptError(_T("Reference not allowed here, use & where possible. Only %A_AhkPath% %A_AhkDir% %A_DllPath% %A_DllDir% %A_ScriptDir% %A_AppData[Common]% %A_ThreadID% can be used here."), parameter);
+		return g_script->ScriptError(_T("Reference not allowed here, use & where possible. Only %A_AhkPath% %A_AhkDir% %A_DllPath% %A_DllDir% %A_ScriptDir% %A_AppData[Common]% %A_ThreadID% %A_PtrSize% can be used here."), parameter);
 	}
 	// terminate dll\function name, find it and jump to next parameter
 	if (_tcschr(parameter, ','))
@@ -3406,12 +3411,12 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 	if (has_return && aParamCount)
 		*(this_param) = '\0';
 
-	found_func->mClass = (Object*)function;
+	found_func->mDllImportFunction = function;
 	found_func->mParamCount = arg_count;
 	found_func->mVar = (Var**)return_attrib;
 	found_func->mStaticVar = (Var**)pStr;
 	found_func->mLazyVar = (Var**)dyna_param_def;
-	found_func->mParam = (FuncParam*)dyna_param;
+	found_func->mdyna_param = dyna_param;
 #ifdef WIN32_PLATFORM
 	found_func->mVarCount = dll_call_mode;
 #endif
