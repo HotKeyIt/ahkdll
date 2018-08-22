@@ -2350,7 +2350,7 @@ void Func::DebugWriteProperty(IDebugProperties *aDebugger, int aPage, int aPageS
 	DebugCookie cookie;
 	aDebugger->BeginProperty(NULL, "object", 1, cookie);
 	if (aPage == 0)
-		aDebugger->WriteProperty("Name", mName);
+		aDebugger->WriteProperty("Name", ExprTokenType(mName));
 	aDebugger->EndProperty(cookie);
 }
 

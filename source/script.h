@@ -1242,8 +1242,8 @@ public:
 
 	static StringCaseSenseType ConvertStringCaseSense(LPTSTR aBuf)
 	{
-		if (!_tcsicmp(aBuf, _T("On"))) return SCS_SENSITIVE;
-		if (!_tcsicmp(aBuf, _T("Off"))) return SCS_INSENSITIVE;
+		if (!_tcsicmp(aBuf, _T("On")) || !_tcscmp(aBuf, _T("1"))) return SCS_SENSITIVE;
+		if (!_tcsicmp(aBuf, _T("Off")) || !_tcscmp(aBuf, _T("0"))) return SCS_INSENSITIVE;
 		if (!_tcsicmp(aBuf, _T("Locale"))) return SCS_INSENSITIVE_LOCALE;
 		return SCS_INVALID;
 	}
@@ -1731,6 +1731,15 @@ private:
 };
 
 
+struct UDFCallInfo
+{
+	Func *func;
+	VarBkp *backup; // Backup of previous instance's local vars.  NULL if no previous instance or no vars.
+	int backup_count; // Number of previous instance's local vars.  0 if no previous instance or no vars.
+	UDFCallInfo(Func *f) : func(f), backup(NULL), backup_count(0) {}
+};
+
+
 typedef BIF_DECL((* BuiltInFunctionType));
 
 
@@ -1795,6 +1804,7 @@ public:
 	// DynaCall related
 	void *mDllImportFunction;
 	DYNAPARM *mdyna_param;
+	bool mPreprocessLocalVarsDone;
 
 #define MAX_FUNC_OUTPUT_VAR 7
 	bool ArgIsOutputVar(int aIndex)
@@ -1860,7 +1870,6 @@ public:
 		// ToolTip, O, ((cos(A_Index) * 500) + 500), A_Index
 
 		ResultType result;
-		DEBUGGER_STACK_PUSH(this)
 		result = mJumpToLine->ExecUntil(UNTIL_BLOCK_END, aResultToken);
 #ifdef CONFIG_DEBUGGER
 		if (g_Debugger.IsConnected())
@@ -1880,7 +1889,6 @@ public:
 			}
 		}
 #endif
-		DEBUGGER_STACK_POP()
 
 		// Restore the original value in case this function is called from inside another function.
 		// Due to the synchronous nature of recursion and recursion-collapse, this should keep
@@ -1918,6 +1926,7 @@ public:
 		, mIsVariadic(false)
 		, mIsMacro(false)
 		, mIsFatArrow(false)
+		, mPreprocessLocalVarsDone(false)
 	{}
 	void *operator new(size_t aBytes){ return malloc(aBytes); }
 	void *operator new[](size_t aBytes) {return malloc(aBytes); }

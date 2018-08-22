@@ -15853,8 +15853,10 @@ ResultType Script::PreprocessLocalVars(FuncList &aFuncs)
 	for (int i = 0; i < aFuncs.mCount; ++i)
 	{
 		Func &func = *aFuncs.mItem[i];
-		if (func.mIsBuiltIn)
+		if (func.mIsBuiltIn || func.mPreprocessLocalVarsDone)
 			continue;
+		// HotKeyIt: set flag so function does not need to be processed again
+		func.mPreprocessLocalVarsDone = true;
 		// Set temporary buffers for use processing this func and nested functions:
 		func.mUpVar = upvar;
 		func.mUpVarIndex = upvarindex;

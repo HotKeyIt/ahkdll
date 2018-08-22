@@ -1587,8 +1587,7 @@ bool Func::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCo
 	else // It's not a built-in function, or it's a built-in that was overridden with a custom function.
 	{
 		ResultType result;
-		VarBkp *backup = NULL;
-		int backup_count;
+		UDFCallInfo recurse(this);
 
 		int j, count_of_actuals_that_have_formals;
 		count_of_actuals_that_have_formals = (aParamCount > mParamCount)
@@ -1643,7 +1642,7 @@ bool Func::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCo
 			// if that parameter or local var is assigned a value by any other means during our call
 			// to it, new memory will be allocated to hold that value rather than overwriting the
 			// underlying recursed/interrupted instance's memory, which it will need intact when it's resumed.
-			if (!Var::BackupFunctionVars(*this, backup, backup_count)) // Out of memory.
+			if (!Var::BackupFunctionVars(*this, recurse.backup, recurse.backup_count)) // Out of memory.
 			{
 				aResultToken.Error(ERR_OUTOFMEM, mName);
 				if (crisec)
@@ -1797,7 +1796,11 @@ bool Func::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCo
 		}
 		if (crisec)
 			LeaveCriticalSection(crisec);
+		DEBUGGER_STACK_PUSH(&recurse)
+
 		result = Call(&aResultToken); // Call the UDF.
+
+		DEBUGGER_STACK_POP()
 		
 		// Setting this unconditionally isn't likely to perform any worse than checking for EXIT/FAIL,
 		// and likely produces smaller code.  Currently EARLY_RETURN results are possible and must be
@@ -1824,7 +1827,7 @@ free_and_return:
 		//    c) To yield results consistent with when the same function is called while other instances
 		//       of itself exist on the call stack.  In other words, it would be inconsistent to make
 		//       all variables blank for case #1 above but not do it here in case #2.
-		Var::FreeAndRestoreFunctionVars(*this, backup, backup_count);
+		Var::FreeAndRestoreFunctionVars(*this, recurse.backup, recurse.backup_count);
 
 		// mInstances must remain non-zero until this point to ensure that any recursive calls by an
 		// object's __Delete meta-function receive fresh variables, and none partially-destructed.
