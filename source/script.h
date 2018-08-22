@@ -1806,17 +1806,16 @@ public:
 	// Returns aDefault if aBuf isn't either ON, OFF, or blank.
 	{
 		if (!aBuf || !*aBuf) return NEUTRAL;
-		if (!_tcsicmp(aBuf, _T("ON"))) return TOGGLED_ON;
-		if (!_tcsicmp(aBuf, _T("OFF"))) return TOGGLED_OFF;
+		if (!_tcsicmp(aBuf, _T("On")) || !_tcscmp(aBuf, _T("1"))) return TOGGLED_ON;
+		if (!_tcsicmp(aBuf, _T("Off")) || !_tcscmp(aBuf, _T("0"))) return TOGGLED_OFF;
 		return aDefault;
 	}
 
 	static ToggleValueType ConvertOnOffAlways(LPTSTR aBuf, ToggleValueType aDefault = TOGGLE_INVALID)
 	// Returns aDefault if aBuf isn't either ON, OFF, ALWAYSON, ALWAYSOFF, or blank.
 	{
-		if (!aBuf || !*aBuf) return NEUTRAL;
-		if (!_tcsicmp(aBuf, _T("On"))) return TOGGLED_ON;
-		if (!_tcsicmp(aBuf, _T("Off"))) return TOGGLED_OFF;
+		if (ToggleValueType toggle = ConvertOnOff(aBuf))
+			return toggle;
 		if (!_tcsicmp(aBuf, _T("AlwaysOn"))) return ALWAYS_ON;
 		if (!_tcsicmp(aBuf, _T("AlwaysOff"))) return ALWAYS_OFF;
 		return aDefault;
@@ -1825,17 +1824,16 @@ public:
 	static ToggleValueType ConvertOnOffToggle(LPTSTR aBuf, ToggleValueType aDefault = TOGGLE_INVALID)
 	// Returns aDefault if aBuf isn't either ON, OFF, TOGGLE, or blank.
 	{
-		if (!aBuf || !*aBuf) return NEUTRAL;
-		if (!_tcsicmp(aBuf, _T("On"))) return TOGGLED_ON;
-		if (!_tcsicmp(aBuf, _T("Off"))) return TOGGLED_OFF;
-		if (!_tcsicmp(aBuf, _T("Toggle"))) return TOGGLE;
+		if (ToggleValueType toggle = ConvertOnOff(aBuf))
+			return toggle;
+		if (!_tcsicmp(aBuf, _T("Toggle")) || !_tcscmp(aBuf, _T("-1"))) return TOGGLE;
 		return aDefault;
 	}
 
 	static StringCaseSenseType ConvertStringCaseSense(LPTSTR aBuf)
 	{
-		if (!_tcsicmp(aBuf, _T("On"))) return SCS_SENSITIVE;
-		if (!_tcsicmp(aBuf, _T("Off"))) return SCS_INSENSITIVE;
+		if (!_tcsicmp(aBuf, _T("On")) || !_tcscmp(aBuf, _T("1"))) return SCS_SENSITIVE;
+		if (!_tcsicmp(aBuf, _T("Off")) || !_tcscmp(aBuf, _T("0"))) return SCS_INSENSITIVE;
 		if (!_tcsicmp(aBuf, _T("Locale"))) return SCS_INSENSITIVE_LOCALE;
 		return SCS_INVALID;
 	}
@@ -1843,19 +1841,16 @@ public:
 	static ToggleValueType ConvertOnOffTogglePermit(LPTSTR aBuf, ToggleValueType aDefault = TOGGLE_INVALID)
 	// Returns aDefault if aBuf isn't either ON, OFF, TOGGLE, PERMIT, or blank.
 	{
-		if (!aBuf || !*aBuf) return NEUTRAL;
-		if (!_tcsicmp(aBuf, _T("On"))) return TOGGLED_ON;
-		if (!_tcsicmp(aBuf, _T("Off"))) return TOGGLED_OFF;
-		if (!_tcsicmp(aBuf, _T("Toggle"))) return TOGGLE;
+		if (ToggleValueType toggle = ConvertOnOffToggle(aBuf))
+			return toggle;
 		if (!_tcsicmp(aBuf, _T("Permit"))) return TOGGLE_PERMIT;
 		return aDefault;
 	}
 
 	static ToggleValueType ConvertBlockInput(LPTSTR aBuf)
 	{
-		if (!aBuf || !*aBuf) return NEUTRAL;  // For backward compatibility, blank is not considered INVALID.
-		if (!_tcsicmp(aBuf, _T("On"))) return TOGGLED_ON;
-		if (!_tcsicmp(aBuf, _T("Off"))) return TOGGLED_OFF;
+		if (ToggleValueType toggle = ConvertOnOff(aBuf))
+			return toggle;
 		if (!_tcsicmp(aBuf, _T("Send"))) return TOGGLE_SEND;
 		if (!_tcsicmp(aBuf, _T("Mouse"))) return TOGGLE_MOUSE;
 		if (!_tcsicmp(aBuf, _T("SendAndMouse"))) return TOGGLE_SENDANDMOUSE;
@@ -2300,14 +2295,15 @@ struct FuncParam
 	union {LPTSTR default_str; __int64 default_int64; double default_double;};
 };
 
-struct FuncCallData
+struct UDFCallInfo
 {
-	Func *mFunc; // If non-NULL, indicates this is a UDF whose vars will need to be freed/restored later.
-	VarBkp *mBackup; // For UDFs.
-	int mBackupCount;
-	FuncCallData() : mFunc(NULL), mBackup(NULL), mBackupCount(0) { }
-	~FuncCallData();
+	Func *func; // If non-NULL, indicates this is a UDF whose vars will need to be freed/restored later.
+	VarBkp *backup; // Backup of previous instance's local vars.  NULL if no previous instance or no vars.
+	int backup_count; // Number of previous instance's local vars.  0 if no previous instance or no vars.
+	UDFCallInfo() : func(NULL), backup(NULL), backup_count(0) {}
+	~UDFCallInfo();
 };
+
 
 typedef BIF_DECL((* BuiltInFunctionType));
 
@@ -2341,8 +2337,9 @@ public:
 	// override in the script.  So mIsBuiltIn should always be used to determine whether the function
 	// is truly built-in, not its name.
 	bool mIsVariadic;
+	bool mPreprocessLocalVarsDone;
 
-	bool Call(FuncCallData &aFuncCall, ResultType &aResult, ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount, bool aIsVariadic = false);
+	bool Call(UDFCallInfo &aFuncCall, ResultType &aResult, ExprTokenType &aResultToken, ExprTokenType *aParam[], int aParamCount, bool aIsVariadic = false);
 
 	ResultType Call(ExprTokenType *aResultToken) // Making this a function vs. inline doesn't measurably impact performance.
 	{
@@ -2383,7 +2380,6 @@ public:
 		++mInstances;
 
 		ResultType result;
-		DEBUGGER_STACK_PUSH(this)
 		result = mJumpToLine->ExecUntil(UNTIL_BLOCK_END, aResultToken);
 #ifdef CONFIG_DEBUGGER
 		if (g_Debugger.IsConnected())
@@ -2403,7 +2399,6 @@ public:
 			}
 		}
 #endif
-		DEBUGGER_STACK_POP()
 
 		--mInstances;
 		// Restore the original value in case this function is called from inside another function.
@@ -2434,6 +2429,7 @@ public:
 		, mDefaultVarType(VAR_DECLARE_NONE)
 		, mIsBuiltIn(aIsBuiltIn)
 		, mIsVariadic(false)
+		, mPreprocessLocalVarsDone(false)
 	{}
 
 	void *operator new(size_t aBytes) {return SimpleHeap::Malloc(aBytes);}

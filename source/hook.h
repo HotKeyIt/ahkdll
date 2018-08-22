@@ -266,6 +266,7 @@ bool IsDualStateNumpadKey(const vk_type aVK, const sc_type aSC);
 
 void ChangeHookState(Hotkey *aHK[], int aHK_count, HookType aWhichHook, HookType aWhichHookAlways);
 void AddRemoveHooks(HookType aHooksToBeActive, bool aChangeIsTemporary = false);
+bool HookAdjustMaxHotkeys(Hotkey **&aHK, int &aCurrentMax, int aNewMax);
 #endif
 bool SystemHasAnotherKeybdHook();
 bool SystemHasAnotherMouseHook();

@@ -872,7 +872,7 @@ HRESULT __stdcall CoCOMServer::ahkgetvar(/*in*/VARIANT name,/*[in,optional]*/ VA
 	ExprTokenType aToken ;
 	
 	var = g_script.FindVar(name.vt == VT_BSTR ? OLE2T(name.bstrVal) : Variant2T(name,buf)) ;
-	var->TokenToContents(aToken) ;
+	var->ToTokenSkipAddRef(aToken);
     VariantInit(result);
    // CComVariant b ;
 	VARIANT b ; 

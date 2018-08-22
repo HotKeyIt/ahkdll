@@ -1849,8 +1849,9 @@ LineNumberType Script::LoadFromText(LPTSTR aScript,LPCTSTR aPathToShow, bool aCh
 	for (int i = 0; i < mFuncCount; ++i)
 	{
 		Func &func = *mFunc[i];
-		if (!func.mIsBuiltIn && !(func.mDefaultVarType & VAR_FORCE_LOCAL))
+		if (!func.mIsBuiltIn && !(func.mDefaultVarType & VAR_FORCE_LOCAL) && !(func.mPreprocessLocalVarsDone))
 		{
+			func.mPreprocessLocalVarsDone = true;
 			PreprocessLocalVars(func, func.mVar, func.mVarCount);
 			PreprocessLocalVars(func, func.mStaticVar, func.mStaticVarCount);
 			PreprocessLocalVars(func, func.mLazyVar, func.mLazyVarCount);
@@ -15295,7 +15296,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 				{
 					// This is a plain variable reference (not an expression) and the variable
 					// contains an object.
-					ARGVAR1->TokenToContents(*aResultToken);
+					ARGVAR1->ToToken(*aResultToken);
 				}
 				else
 				{
@@ -18161,10 +18162,10 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 		// Label2:
 		// ...
 		// return
-		if (*ARG2)
+		if (!IsPureNumeric(ARG2, true, true, true)) // Allow it to be neg. or floating point at runtime.
 		{
 			toggle = Line::ConvertOnOff(ARG2);
-			if (!toggle && !IsPureNumeric(ARG2, true, true, true)) // Allow it to be neg. or floating point at runtime.
+			if (!toggle)
 			{
 				if (!_tcsicmp(ARG2, _T("Delete")))
 				{
