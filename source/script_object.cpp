@@ -425,7 +425,7 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 	}
 #endif
 	SymbolType key_type;
-	KeyType key;
+	KeyType key = { 0 };
     FieldType *field, *prop_field;
 	IndexType insert_pos;
 	Property *prop = NULL; // Set default.
