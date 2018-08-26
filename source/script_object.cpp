@@ -186,35 +186,41 @@ Object *Object::Clone(ExprTokenType *aParam[], int aParamCount)
 				++failure_count;
 			}
 		}
-		else if (j >= obj.mKeyOffsetObject)
-		{
-			if (aParam != NULL && aParamCount)
-			{
-				obj.mFieldCount = obj.mFieldCount - (obj.mKeyOffsetString - obj.mKeyOffsetObject);
-				obj.mKeyOffsetString = obj.mKeyOffsetObject;
-				j--;
-				continue;
-			}
-			(dst.key.p = src.key.p)->AddRef();
-		}
 		else
 		{
-			if (aParam != NULL && aParamCount && aParam[0]->symbol != SYM_MISSING && TokenIsPureNumeric(*aParam[0], is_number) && TokenToInt64(*aParam[0]) > src.key.i)
+			if (j >= obj.mKeyOffsetObject)
 			{
-				obj.mFieldCount--;
-				obj.mKeyOffsetString--;
-				obj.mKeyOffsetObject--;
-				j--;
-				continue;
+				if (aParam != NULL && aParamCount)
+				{
+					obj.mFieldCount = obj.mFieldCount - (obj.mKeyOffsetString - obj.mKeyOffsetObject);
+					obj.mKeyOffsetString = obj.mKeyOffsetObject;
+					j--;
+					continue;
+				}
+				// Copy whole key; search "(IntKeyType)(INT_PTR)" for comments.
+				dst.key = src.key;
+				(dst.key.p = src.key.p)->AddRef();
 			}
-			else if (aParamCount == 2 && aParam[1]->symbol != SYM_MISSING && TokenIsPureNumeric(*aParam[1],is_number) && TokenToInt64(*aParam[1]) < src.key.i)
+			else
 			{
-				obj.mFieldCount = j;
-				obj.mKeyOffsetString = j;
-				obj.mKeyOffsetObject = j;
-				break;
+				if (aParam != NULL && aParamCount && aParam[0]->symbol != SYM_MISSING && TokenIsPureNumeric(*aParam[0], is_number) && TokenToInt64(*aParam[0]) > src.key.i)
+				{
+					obj.mFieldCount--;
+					obj.mKeyOffsetString--;
+					obj.mKeyOffsetObject--;
+					j--;
+					continue;
+				}
+				else if (aParamCount == 2 && aParam[1]->symbol != SYM_MISSING && TokenIsPureNumeric(*aParam[1], is_number) && TokenToInt64(*aParam[1]) < src.key.i)
+				{
+					obj.mFieldCount = j;
+					obj.mKeyOffsetString = j;
+					obj.mKeyOffsetObject = j;
+					break;
+				}
+				// Copy whole key; search "(IntKeyType)(INT_PTR)" for comments.
+				dst.key = src.key;
 			}
-			dst.key.i = src.key.i;
 		}
 
 		// Copy value.
@@ -425,7 +431,7 @@ ResultType STDMETHODCALLTYPE Object::Invoke(
 	}
 #endif
 	SymbolType key_type;
-	KeyType key = { 0 };
+	KeyType key;
     FieldType *field, *prop_field;
 	IndexType insert_pos;
 	Property *prop = NULL; // Set default.
@@ -1740,26 +1746,23 @@ Object::FieldType *Object::FindField(SymbolType key_type, KeyType key, IndexType
 {
 	IndexType left, right;
 
-	if (key_type == SYM_STRING)
+	switch (key_type)
 	{
+	case SYM_STRING:
 		left = mKeyOffsetString;
 		right = mFieldCount - 1; // String keys are last in the mFields array.
-
 		return FindField(key.s, left, right, insert_pos);
-	}
-	else // key_type == SYM_INTEGER || key_type == SYM_OBJECT
-	{
-		if (key_type == SYM_INTEGER)
-		{
-			left = mKeyOffsetInt;
-			right = mKeyOffsetObject - 1; // Int keys end where Object keys begin.
-		}
-		else
-		{
-			left = mKeyOffsetObject;
-			right = mKeyOffsetString - 1; // Object keys end where String keys begin.
-		}
-		// Both may be treated as integer since left/right exclude keys of an incorrect type:
+	case SYM_OBJECT:
+		left = mKeyOffsetObject;
+		right = mKeyOffsetString - 1; // Object keys end where String keys begin.
+		// left and right restrict the search to just the portion with object keys.
+		// Reuse the integer search function to reduce code size.  On 32-bit builds,
+		// this requires that the upper 32 bits of each key have been initialized.
+		return FindField((IntKeyType)(INT_PTR)key.p, left, right, insert_pos);
+	//case SYM_INTEGER:
+	default:
+		left = mKeyOffsetInt;
+		right = mKeyOffsetObject - 1; // Int keys end where Object keys begin.
 		return FindField(key.i, left, right, insert_pos);
 	}
 }
@@ -1785,7 +1788,9 @@ void Object::ConvertKey(ExprTokenType &key_token, LPTSTR buf, SymbolType &key_ty
 	if (inner_type == SYM_OBJECT)
 	{
 		key_type = SYM_OBJECT;
-		key.p = TokenToObject(key_token);
+		// Set i to support the way FindField() is used.  Otherwise on 32-bit builds the
+		// upper 32 bits would be potentially uninitialized, and searches could fail.
+		key.i = (IntKeyType)(INT_PTR)TokenToObject(key_token);
 		return;
 	}
 	if (inner_type == SYM_INTEGER)
