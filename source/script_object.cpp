@@ -186,41 +186,37 @@ Object *Object::Clone(ExprTokenType *aParam[], int aParamCount)
 				++failure_count;
 			}
 		}
+		else if (j >= obj.mKeyOffsetObject)
+		{
+			if (aParam != NULL && aParamCount)
+			{
+				obj.mFieldCount = obj.mFieldCount - (obj.mKeyOffsetString - obj.mKeyOffsetObject);
+				obj.mKeyOffsetString = obj.mKeyOffsetObject;
+				j--;
+				continue;
+			}
+			// Copy whole key; search "(IntKeyType)(INT_PTR)" for comments.
+			(dst.key = src.key).p->AddRef();
+		}
 		else
 		{
-			if (j >= obj.mKeyOffsetObject)
+			if (aParam != NULL && aParamCount && aParam[0]->symbol != SYM_MISSING && TokenIsPureNumeric(*aParam[0], is_number) && TokenToInt64(*aParam[0]) > src.key.i)
 			{
-				if (aParam != NULL && aParamCount)
-				{
-					obj.mFieldCount = obj.mFieldCount - (obj.mKeyOffsetString - obj.mKeyOffsetObject);
-					obj.mKeyOffsetString = obj.mKeyOffsetObject;
-					j--;
-					continue;
-				}
-				// Copy whole key; search "(IntKeyType)(INT_PTR)" for comments.
-				dst.key = src.key;
-				(dst.key.p = src.key.p)->AddRef();
+				obj.mFieldCount--;
+				obj.mKeyOffsetString--;
+				obj.mKeyOffsetObject--;
+				j--;
+				continue;
 			}
-			else
+			else if (aParamCount == 2 && aParam[1]->symbol != SYM_MISSING && TokenIsPureNumeric(*aParam[1], is_number) && TokenToInt64(*aParam[1]) < src.key.i)
 			{
-				if (aParam != NULL && aParamCount && aParam[0]->symbol != SYM_MISSING && TokenIsPureNumeric(*aParam[0], is_number) && TokenToInt64(*aParam[0]) > src.key.i)
-				{
-					obj.mFieldCount--;
-					obj.mKeyOffsetString--;
-					obj.mKeyOffsetObject--;
-					j--;
-					continue;
-				}
-				else if (aParamCount == 2 && aParam[1]->symbol != SYM_MISSING && TokenIsPureNumeric(*aParam[1], is_number) && TokenToInt64(*aParam[1]) < src.key.i)
-				{
-					obj.mFieldCount = j;
-					obj.mKeyOffsetString = j;
-					obj.mKeyOffsetObject = j;
-					break;
-				}
-				// Copy whole key; search "(IntKeyType)(INT_PTR)" for comments.
-				dst.key = src.key;
+				obj.mFieldCount = j;
+				obj.mKeyOffsetString = j;
+				obj.mKeyOffsetObject = j;
+				break;
 			}
+			// Copy whole key; search "(IntKeyType)(INT_PTR)" for comments.
+			dst.key = src.key;
 		}
 
 		// Copy value.

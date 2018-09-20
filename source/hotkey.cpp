@@ -2833,6 +2833,7 @@ Hotstring::Hotstring(LPTSTR aName, LabelPtr aJumpToLabel, LPTSTR aOptions, LPTST
 		aReplacement = _T(""); // LoadIncludedFile() requires this (but BIF_Hotstring has its own handling of 'E').
 	
 	// To avoid memory leak, this is done only when it is certain the hotstring will be created:
+	if (!(mString = g_SimpleHeap->Malloc(aHotstring)))
 		return; // ScriptError() was already called by Malloc().
 	if (   g_script->mIsReadyToExecute && !(mName = g_SimpleHeap->Malloc(aName))   ) // mName already contains persistent memory when we're called at load time.
 	{
