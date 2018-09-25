@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<Project DefaultTargets="Build" ToolsVersion="12.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
     <ProjectGuid>{31335317-2533-40F5-ACD8-361075C7C4CC}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
@@ -111,49 +111,50 @@
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectName>AutoHotkey</ProjectName>
+    <WindowsTargetPlatformVersion>10.0.17134.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <!-- x64 toolset: must precede the import below -->
   <PropertyGroup Label="Configuration" Condition="'$(Platform)'=='x64'">
-    <PlatformToolset>v100</PlatformToolset>
+    <PlatformToolset>v141_xp</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <PlatformToolset>v100</PlatformToolset>
+    <PlatformToolset>v141_xp</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'" Label="Configuration">
-    <PlatformToolset>v100</PlatformToolset>
+    <PlatformToolset>v141_xp</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'" Label="Configuration">
-    <PlatformToolset>v100</PlatformToolset>
+    <PlatformToolset>v141_xp</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'" Label="Configuration">
-    <PlatformToolset>v100</PlatformToolset>
+    <PlatformToolset>v141_xp</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
-    <PlatformToolset>v100</PlatformToolset>
+    <PlatformToolset>v141_xp</PlatformToolset>
     <UseOfMfc>false</UseOfMfc>
     <UseOfAtl>false</UseOfAtl>
     <CharacterSet />
   </PropertyGroup>
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|Win32'">
-    <PlatformToolset>v100</PlatformToolset>
+    <PlatformToolset>v141_xp</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|Win32'" Label="Configuration">
-    <PlatformToolset>v100</PlatformToolset>
+    <PlatformToolset>v141_xp</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">
-    <PlatformToolset>v100</PlatformToolset>
+    <PlatformToolset>v141_xp</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">
-    <PlatformToolset>v100</PlatformToolset>
+    <PlatformToolset>v141_xp</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">
-    <PlatformToolset>v100</PlatformToolset>
+    <PlatformToolset>v141_xp</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">
-    <PlatformToolset>v100</PlatformToolset>
+    <PlatformToolset>v141_xp</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">
-    <PlatformToolset>v100</PlatformToolset>
+    <PlatformToolset>v141_xp</PlatformToolset>
   </PropertyGroup>
   <!-- import common config -->
   <Import Project="Config.vcxproj" />
@@ -234,7 +235,7 @@
     </Link>
     <PostBuildEvent>
       <Message>Removing CheckSum from $(TargetFileName) so Ahk2Exe doesn't complain</Message>
-      <Command>"$(ProjectDir)PostBuildSC.ahk" "$(TargetPath)"</Command>
+      <Command>"$(ProjectDir)\PostBuildSC.ahk" "$(TargetPath)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <!-- upx compression: Release -->
@@ -631,64 +632,64 @@
     <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">false</LinkIncremental>
     <IgnoreImportLibrary Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">false</IgnoreImportLibrary>
     <ExecutablePath Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ExecutablePath);$(WindowsSdkMSBuildTools);$(SystemRoot)\SysWow64;$(FxCopDir);$(PATH);</ExecutablePath>
-    <IncludePath Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IncludePath);$(VCInstallDir)atlmfc\include</IncludePath>
+    <IncludePath Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IncludePath);$(VCInstallDir)atlmfc\include;$(IncludePath)</IncludePath>
     <ReferencePath Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     </ReferencePath>
     <LibraryPath Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(LibraryPath);$(VSInstallDir);$(VSInstallDir)lib</LibraryPath>
     <ExcludePath Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(WindowsSdkDir)include;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkMSBuildTools);$(VCInstallDir)atlmfc\lib;$(VCInstallDir)lib</ExcludePath>
     <ExecutablePath Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">$(ExecutablePath);$(WindowsSdkMSBuildTools);$(SystemRoot)\SysWow64;$(FxCopDir);$(PATH);</ExecutablePath>
-    <IncludePath Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">$(IncludePath);$(VCInstallDir)atlmfc\include</IncludePath>
+    <IncludePath Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">$(IncludePath);$(VCInstallDir)atlmfc\include;$(IncludePath)</IncludePath>
     <ReferencePath Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'" />
     <LibraryPath Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">$(LibraryPath);$(VSInstallDir);$(VSInstallDir)lib</LibraryPath>
     <ExcludePath Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">$(WindowsSdkDir)include;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkMSBuildTools);$(VCInstallDir)atlmfc\lib;$(VCInstallDir)lib</ExcludePath>
     <ExecutablePath Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">$(ExecutablePath);$(WindowsSdkMSBuildTools);$(SystemRoot)\SysWow64;$(FxCopDir);$(PATH);</ExecutablePath>
-    <IncludePath Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">$(IncludePath);$(VCInstallDir)atlmfc\include</IncludePath>
+    <IncludePath Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">$(IncludePath);$(VCInstallDir)atlmfc\include;$(IncludePath)</IncludePath>
     <ReferencePath Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'" />
     <LibraryPath Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">$(LibraryPath);$(VSInstallDir);$(VSInstallDir)lib</LibraryPath>
     <ExcludePath Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">$(WindowsSdkDir)include;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkMSBuildTools);$(VCInstallDir)atlmfc\lib;$(VCInstallDir)lib</ExcludePath>
     <ExecutablePath Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|Win32'">$(ExecutablePath);$(WindowsSdkMSBuildTools);$(SystemRoot)\SysWow64;$(FxCopDir);$(PATH);</ExecutablePath>
-    <IncludePath Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|Win32'">$(IncludePath);$(VCInstallDir)atlmfc\include</IncludePath>
+    <IncludePath Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|Win32'">$(IncludePath);$(VCInstallDir)atlmfc\include;$(IncludePath)</IncludePath>
     <ReferencePath Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|Win32'" />
     <LibraryPath Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|Win32'">$(LibraryPath);$(VSInstallDir);$(VSInstallDir)lib</LibraryPath>
     <ExcludePath Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|Win32'">$(WindowsSdkDir)include;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkMSBuildTools);$(VCInstallDir)atlmfc\lib;$(VCInstallDir)lib</ExcludePath>
     <ExecutablePath Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'">$(ExecutablePath);$(WindowsSdkMSBuildTools);$(SystemRoot)\SysWow64;$(FxCopDir);$(PATH);</ExecutablePath>
-    <IncludePath Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'">$(IncludePath);$(VCInstallDir)atlmfc\include</IncludePath>
+    <IncludePath Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'">$(IncludePath);$(VCInstallDir)atlmfc\include;$(IncludePath)</IncludePath>
     <ReferencePath Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'" />
     <LibraryPath Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'">$(LibraryPath);$(VSInstallDir);$(VSInstallDir)lib</LibraryPath>
     <ExcludePath Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'">$(WindowsSdkDir)include;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkMSBuildTools);$(VCInstallDir)atlmfc\lib;$(VCInstallDir)lib</ExcludePath>
     <ExecutablePath Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">$(ExecutablePath);$(WindowsSdkMSBuildTools);$(SystemRoot)\SysWow64;$(FxCopDir);$(PATH);</ExecutablePath>
-    <IncludePath Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">$(IncludePath);$(VCInstallDir)atlmfc\include</IncludePath>
+    <IncludePath Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">$(IncludePath);$(VCInstallDir)atlmfc\include;$(IncludePath)</IncludePath>
     <ReferencePath Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'" />
     <LibraryPath Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">$(LibraryPath);$(VSInstallDir);$(VSInstallDir)lib</LibraryPath>
     <ExcludePath Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">$(WindowsSdkDir)include;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkMSBuildTools);$(VCInstallDir)atlmfc\lib;$(VCInstallDir)lib</ExcludePath>
     <ExecutablePath Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">$(ExecutablePath);$(WindowsSdkMSBuildTools);$(SystemRoot)\SysWow64;$(FxCopDir);$(PATH);</ExecutablePath>
-    <IncludePath Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkDir)include;$(FrameworkSDKDir)\include;</IncludePath>
+    <IncludePath Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkDir)include;$(FrameworkSDKDir)\include;$(IncludePath)</IncludePath>
     <ReferencePath Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">$(VCInstallDir)atlmfc\lib;$(VCInstallDir)lib</ReferencePath>
-    <LibraryPath Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">$(VCInstallDir)lib;$(VCInstallDir)atlmfc\lib;$(WindowsSdkDir)lib;$(FrameworkSDKDir)\lib</LibraryPath>
+    <LibraryPath Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">$(VCInstallDir)lib;$(VCInstallDir)atlmfc\lib;$(WindowsSdkDir)lib;$(FrameworkSDKDir)\lib;$(LibraryPath)</LibraryPath>
     <ExcludePath Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">$(ExcludePath);$(MSBuildFrameworkToolsPath);$(MSBuildFrameworkToolsPath32);</ExcludePath>
     <ExecutablePath Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ExecutablePath);$(WindowsSdkMSBuildTools);$(SystemRoot)\SysWow64;$(FxCopDir);$(PATH);</ExecutablePath>
-    <IncludePath Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IncludePath);$(VCInstallDir)atlmfc\include</IncludePath>
+    <IncludePath Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IncludePath);$(VCInstallDir)atlmfc\include;$(IncludePath)</IncludePath>
     <ReferencePath Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     </ReferencePath>
     <LibraryPath Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(LibraryPath);$(VSInstallDir);$(VSInstallDir)lib</LibraryPath>
     <ExcludePath Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkDir)include;$(FrameworkSDKDir)\include;$(MSBuildToolsPath32);$(VCInstallDir)atlmfc\lib;$(VCInstallDir)lib;</ExcludePath>
     <ExecutablePath Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|Win32'">$(ExecutablePath);$(WindowsSdkMSBuildTools);$(SystemRoot)\SysWow64;$(FxCopDir);$(PATH);</ExecutablePath>
-    <IncludePath Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|Win32'">$(IncludePath);$(VCInstallDir)atlmfc\include</IncludePath>
+    <IncludePath Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|Win32'">$(IncludePath);$(VCInstallDir)atlmfc\include;$(IncludePath)</IncludePath>
     <ReferencePath Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|Win32'" />
     <LibraryPath Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|Win32'">$(LibraryPath);$(VSInstallDir);$(VSInstallDir)lib</LibraryPath>
     <ExcludePath Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|Win32'">$(WindowsSdkDir)include;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkMSBuildTools);$(VCInstallDir)atlmfc\lib;$(VCInstallDir)lib</ExcludePath>
     <ExecutablePath Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">$(ExecutablePath);$(WindowsSdkMSBuildTools);$(SystemRoot)\SysWow64;$(FxCopDir);$(PATH);</ExecutablePath>
-    <IncludePath Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">$(IncludePath);$(VCInstallDir)atlmfc\include</IncludePath>
+    <IncludePath Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">$(IncludePath);$(VCInstallDir)atlmfc\include;$(IncludePath)</IncludePath>
     <ReferencePath Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'" />
     <LibraryPath Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">$(LibraryPath);$(VSInstallDir);$(VSInstallDir)lib</LibraryPath>
     <ExcludePath Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">$(WindowsSdkDir)include;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkMSBuildTools);$(VCInstallDir)atlmfc\lib;$(VCInstallDir)lib</ExcludePath>
     <ExecutablePath Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">$(ExecutablePath);$(WindowsSdkMSBuildTools);$(SystemRoot)\SysWow64;$(FxCopDir);$(PATH);</ExecutablePath>
-    <IncludePath Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">$(IncludePath);$(VCInstallDir)atlmfc\include</IncludePath>
+    <IncludePath Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">$(IncludePath);$(VCInstallDir)atlmfc\include;$(IncludePath)</IncludePath>
     <ReferencePath Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'" />
     <LibraryPath Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">$(LibraryPath);$(VSInstallDir);$(VSInstallDir)lib</LibraryPath>
     <ExcludePath Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">$(WindowsSdkDir)include;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkMSBuildTools);$(VCInstallDir)atlmfc\lib;$(VCInstallDir)lib</ExcludePath>
     <ExecutablePath Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">$(ExecutablePath);$(WindowsSdkMSBuildTools);$(SystemRoot)\SysWow64;$(FxCopDir);$(PATH);</ExecutablePath>
-    <IncludePath Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">$(IncludePath);$(VCInstallDir)atlmfc\include</IncludePath>
+    <IncludePath Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">$(IncludePath);$(VCInstallDir)atlmfc\include;$(IncludePath)</IncludePath>
     <ReferencePath Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'" />
     <LibraryPath Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">$(LibraryPath);$(VSInstallDir);$(VSInstallDir)lib</LibraryPath>
     <ExcludePath Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">$(WindowsSdkDir)include;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkMSBuildTools);$(VCInstallDir)atlmfc\lib;$(VCInstallDir)lib</ExcludePath>
@@ -711,6 +712,7 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">
     <GenerateManifest>false</GenerateManifest>
+    <PostBuildEventUseInBuild>true</PostBuildEventUseInBuild>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">
     <GenerateManifest>false</GenerateManifest>
@@ -791,6 +793,8 @@
       </CreateHotpatchableImage>
       <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">false</MultiProcessorCompilation>
       <SmallerTypeCheck Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">false</SmallerTypeCheck>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">
+      </UndefinePreprocessorDefinitions>
     </ClCompile>
     <Link>
       <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">true</GenerateDebugInformation>
@@ -969,6 +973,8 @@
       <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">false</GenerateDebugInformation>
       <IgnoreSpecificDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">
       </IgnoreSpecificDefaultLibraries>
+      <ImageHasSafeExceptionHandlers Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">
+      </ImageHasSafeExceptionHandlers>
     </Link>
     <Link>
       <RandomizedBaseAddress Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">false</RandomizedBaseAddress>
@@ -1079,6 +1085,8 @@
       <Optimization Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">MaxSpeed</Optimization>
       <FavorSizeOrSpeed Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">Speed</FavorSizeOrSpeed>
       <EnableFiberSafeOptimizations Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">false</EnableFiberSafeOptimizations>
+      <IntrinsicFunctions Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">false</IntrinsicFunctions>
+      <WholeProgramOptimization Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">false</WholeProgramOptimization>
     </ClCompile>
     <ClCompile>
       <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">MultiThreadedDLL</RuntimeLibrary>
@@ -1220,7 +1228,7 @@
       </IgnoreAllDefaultLibraries>
       <RandomizedBaseAddress Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">false</RandomizedBaseAddress>
       <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">false</DataExecutionPrevention>
-      <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">false</GenerateDebugInformation>
+      <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">true</GenerateDebugInformation>
       <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">false</GenerateDebugInformation>
       <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|x64'">false</GenerateDebugInformation>
       <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|Win32'">false</GenerateDebugInformation>
