@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<Project DefaultTargets="Build" ToolsVersion="12.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
     <ProjectGuid>{31335317-2533-40F5-ACD8-361075C7C4CC}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
@@ -47,26 +47,26 @@
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectName>AutoHotkey</ProjectName>
-    <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.17134.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <!-- x64 toolset: must precede the import below -->
   <PropertyGroup Label="Configuration" Condition="'$(Platform)'=='x64'">
-    <PlatformToolset>v100</PlatformToolset>
+    <PlatformToolset>v141_xp</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <PlatformToolset>v100</PlatformToolset>
+    <PlatformToolset>v141_xp</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'" Label="Configuration">
-    <PlatformToolset>v100</PlatformToolset>
+    <PlatformToolset>v141_xp</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
-    <PlatformToolset>v100</PlatformToolset>
+    <PlatformToolset>v141_xp</PlatformToolset>
     <UseOfMfc>false</UseOfMfc>
     <UseOfAtl>false</UseOfAtl>
     <CharacterSet />
   </PropertyGroup>
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">
-    <PlatformToolset>v100</PlatformToolset>
+    <PlatformToolset>v141_xp</PlatformToolset>
   </PropertyGroup>
   <!-- import common config -->
   <Import Project="Config.vcxproj" />
@@ -312,54 +312,54 @@
     <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">false</LinkIncremental>
     <IgnoreImportLibrary Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">false</IgnoreImportLibrary>
     <ExecutablePath Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ExecutablePath);$(MSBuildFrameworkToolsPath32)</ExecutablePath>
-    <IncludePath Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">C:\Program Files (x86)\Visual Leak Detector\include;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkDir)include;$(FrameworkSDKDir)\include;</IncludePath>
+    <IncludePath Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">C:\Program Files (x86)\Visual Leak Detector\include;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkDir)include;$(FrameworkSDKDir)\include;;$(IncludePath)</IncludePath>
     <ReferencePath Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(VCInstallDir)atlmfc\lib;$(VCInstallDir)lib</ReferencePath>
-    <LibraryPath Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">C:\Program Files (x86)\Visual Leak Detector\lib\Win32;$(VCInstallDir)lib;$(VCInstallDir)atlmfc\lib;$(WindowsSdkDir)lib;$(FrameworkSDKDir)\lib</LibraryPath>
+    <LibraryPath Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">C:\Program Files (x86)\Visual Leak Detector\lib\Win32;$(VCInstallDir)lib;$(VCInstallDir)atlmfc\lib;$(WindowsSdkDir)lib;$(FrameworkSDKDir)\lib;$(LibraryPath)</LibraryPath>
     <ExcludePath Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ExcludePath);$(MSBuildFrameworkToolsPath);$(MSBuildFrameworkToolsPath32);</ExcludePath>
     <ExecutablePath Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">$(ExecutablePath);$(MSBuildFrameworkToolsPath32)</ExecutablePath>
-    <IncludePath Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkDir)include;$(FrameworkSDKDir)\include;</IncludePath>
+    <IncludePath Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkDir)include;$(FrameworkSDKDir)\include;;$(IncludePath)</IncludePath>
     <ReferencePath Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">$(VCInstallDir)atlmfc\lib;$(VCInstallDir)lib</ReferencePath>
-    <LibraryPath Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">$(VCInstallDir)lib;$(VCInstallDir)atlmfc\lib;$(WindowsSdkDir)lib;$(FrameworkSDKDir)\lib</LibraryPath>
+    <LibraryPath Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">$(VCInstallDir)lib;$(VCInstallDir)atlmfc\lib;$(WindowsSdkDir)lib;$(FrameworkSDKDir)\lib;$(LibraryPath)</LibraryPath>
     <ExcludePath Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">$(ExcludePath);$(MSBuildFrameworkToolsPath);$(MSBuildFrameworkToolsPath32);</ExcludePath>
     <ExecutablePath Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">$(ExecutablePath);$(MSBuildFrameworkToolsPath32)</ExecutablePath>
-    <IncludePath Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkDir)include;$(FrameworkSDKDir)\include;</IncludePath>
+    <IncludePath Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkDir)include;$(FrameworkSDKDir)\include;;$(IncludePath)</IncludePath>
     <ReferencePath Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">$(VCInstallDir)atlmfc\lib;$(VCInstallDir)lib</ReferencePath>
-    <LibraryPath Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">$(VCInstallDir)lib;$(VCInstallDir)atlmfc\lib;$(WindowsSdkDir)lib;$(FrameworkSDKDir)\lib</LibraryPath>
+    <LibraryPath Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">$(VCInstallDir)lib;$(VCInstallDir)atlmfc\lib;$(WindowsSdkDir)lib;$(FrameworkSDKDir)\lib;$(LibraryPath)</LibraryPath>
     <ExcludePath Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">$(ExcludePath);$(MSBuildFrameworkToolsPath);$(MSBuildFrameworkToolsPath32);</ExcludePath>
     <ExecutablePath Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ExecutablePath);$(MSBuildFrameworkToolsPath32)</ExecutablePath>
-    <IncludePath Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkDir)include;$(FrameworkSDKDir)\include;</IncludePath>
+    <IncludePath Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkDir)include;$(FrameworkSDKDir)\include;;$(IncludePath)</IncludePath>
     <ReferencePath Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(VCInstallDir)atlmfc\lib;$(VCInstallDir)lib</ReferencePath>
-    <LibraryPath Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(VCInstallDir)lib;$(VCInstallDir)atlmfc\lib;$(WindowsSdkDir)lib;$(FrameworkSDKDir)\lib</LibraryPath>
+    <LibraryPath Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(VCInstallDir)lib;$(VCInstallDir)atlmfc\lib;$(WindowsSdkDir)lib;$(FrameworkSDKDir)\lib;$(LibraryPath)</LibraryPath>
     <ExcludePath Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ExcludePath);$(MSBuildFrameworkToolsPath);$(MSBuildFrameworkToolsPath32);</ExcludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <IncludePath>C:\Program Files (x86)\Visual Leak Detector\include;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkDir)include;$(FrameworkSDKDir)\include;</IncludePath>
-    <LibraryPath>C:\Program Files (x86)\Visual Leak Detector\lib\Win64;$(VCInstallDir)lib\amd64;$(VCInstallDir)atlmfc\lib\amd64;$(WindowsSdkDir)lib\x64</LibraryPath>
+    <IncludePath>C:\Program Files (x86)\Visual Leak Detector\include;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkDir)include;$(FrameworkSDKDir)\include;;$(IncludePath)</IncludePath>
+    <LibraryPath>C:\Program Files (x86)\Visual Leak Detector\lib\Win64;$(VCInstallDir)lib\amd64;$(VCInstallDir)atlmfc\lib\amd64;$(WindowsSdkDir)lib\x64;$(LibraryPath)</LibraryPath>
     <ExecutablePath>$(ExecutablePath);$(MSBuildFrameworkToolsPath32)</ExecutablePath>
     <ReferencePath>$(VCInstallDir)atlmfc\lib\amd64;$(VCInstallDir)lib\amd64</ReferencePath>
     <ExcludePath>$(ExcludePath);$(MSBuildFrameworkToolsPath);$(MSBuildFrameworkToolsPath32);</ExcludePath>
     <GenerateManifest>false</GenerateManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <LibraryPath>$(VCInstallDir)lib\amd64;$(VCInstallDir)atlmfc\lib\amd64;$(WindowsSdkDir)lib\x64</LibraryPath>
+    <LibraryPath>$(VCInstallDir)lib\amd64;$(VCInstallDir)atlmfc\lib\amd64;$(WindowsSdkDir)lib\x64;$(LibraryPath)</LibraryPath>
     <ExecutablePath>$(ExecutablePath);$(MSBuildFrameworkToolsPath32)</ExecutablePath>
-    <IncludePath>$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkDir)include;$(FrameworkSDKDir)\include</IncludePath>
+    <IncludePath>$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkDir)include;$(FrameworkSDKDir)\include;$(IncludePath)</IncludePath>
     <ReferencePath>$(VCInstallDir)atlmfc\lib\amd64;$(VCInstallDir)lib\amd64</ReferencePath>
     <ExcludePath>$(ExcludePath);$(MSBuildFrameworkToolsPath);$(MSBuildFrameworkToolsPath32);</ExcludePath>
     <GenerateManifest>false</GenerateManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">
-    <LibraryPath>$(VCInstallDir)lib\amd64;$(VCInstallDir)atlmfc\lib\amd64;$(WindowsSdkDir)lib\x64</LibraryPath>
+    <LibraryPath>$(VCInstallDir)lib\amd64;$(VCInstallDir)atlmfc\lib\amd64;$(WindowsSdkDir)lib\x64;$(LibraryPath)</LibraryPath>
     <ExecutablePath>$(ExecutablePath);$(MSBuildFrameworkToolsPath32)</ExecutablePath>
-    <IncludePath>$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkDir)include;$(FrameworkSDKDir)\include;</IncludePath>
+    <IncludePath>$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkDir)include;$(FrameworkSDKDir)\include;;$(IncludePath)</IncludePath>
     <ReferencePath>$(VCInstallDir)atlmfc\lib\amd64;$(VCInstallDir)lib\amd64</ReferencePath>
     <ExcludePath>$(ExcludePath);$(MSBuildFrameworkToolsPath);$(MSBuildFrameworkToolsPath32);</ExcludePath>
     <GenerateManifest>false</GenerateManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">
-    <LibraryPath>$(VCInstallDir)lib\amd64;$(VCInstallDir)atlmfc\lib\amd64;$(WindowsSdkDir)lib\x64</LibraryPath>
+    <LibraryPath>$(VCInstallDir)lib\amd64;$(VCInstallDir)atlmfc\lib\amd64;$(WindowsSdkDir)lib\x64;$(LibraryPath)</LibraryPath>
     <ExecutablePath>$(ExecutablePath);$(MSBuildFrameworkToolsPath32)</ExecutablePath>
-    <IncludePath>$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkDir)include;$(FrameworkSDKDir)\include;</IncludePath>
+    <IncludePath>$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkDir)include;$(FrameworkSDKDir)\include;;$(IncludePath)</IncludePath>
     <ReferencePath>$(VCInstallDir)atlmfc\lib\amd64;$(VCInstallDir)lib\amd64</ReferencePath>
     <ExcludePath>$(ExcludePath);$(MSBuildFrameworkToolsPath);$(MSBuildFrameworkToolsPath32);</ExcludePath>
     <GenerateManifest>false</GenerateManifest>
@@ -543,6 +543,7 @@
       <SmallerTypeCheck Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</SmallerTypeCheck>
       <IntrinsicFunctions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</IntrinsicFunctions>
       <EnableFiberSafeOptimizations Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</EnableFiberSafeOptimizations>
+      <StringPooling Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</StringPooling>
     </ClCompile>
     <ClCompile />
     <ClCompile />
@@ -704,7 +705,8 @@
       </IgnoreSpecificDefaultLibraries>
       <AddModuleNamesToAssembly>
       </AddModuleNamesToAssembly>
-      <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
+      <ImageHasSafeExceptionHandlers>
+      </ImageHasSafeExceptionHandlers>
       <FixedBaseAddress>
       </FixedBaseAddress>
     </Link>
@@ -714,7 +716,8 @@
       <MultiProcessorCompilation>false</MultiProcessorCompilation>
       <MinimalRebuild>true</MinimalRebuild>
       <ExceptionHandling>Sync</ExceptionHandling>
-      <StringPooling>true</StringPooling>
+      <StringPooling>
+      </StringPooling>
       <BufferSecurityCheck>true</BufferSecurityCheck>
       <Optimization>Disabled</Optimization>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
