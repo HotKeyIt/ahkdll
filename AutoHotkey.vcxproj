@@ -47,7 +47,7 @@
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectName>AutoHotkey</ProjectName>
-    <WindowsTargetPlatformVersion>10.0.17134.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>7.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <!-- x64 toolset: must precede the import below -->
   <PropertyGroup Label="Configuration" Condition="'$(Platform)'=='x64'">
@@ -401,6 +401,9 @@
       <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">false</MultiProcessorCompilation>
       <ExceptionHandling Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">Sync</ExceptionHandling>
       <SmallerTypeCheck Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">false</SmallerTypeCheck>
+      <CompileAsWinRT Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">
+      </CompileAsWinRT>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">/Zc:threadSafeInit- %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">true</GenerateDebugInformation>
@@ -415,6 +418,7 @@
       <LinkTimeCodeGeneration Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">Default</LinkTimeCodeGeneration>
       <IgnoreSpecificDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">
       </IgnoreSpecificDefaultLibraries>
+      <ImageHasSafeExceptionHandlers Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'" />
     </Link>
     <Link>
       <ModuleDefinitionFile Condition="'$(Configuration)'=='ReleaseDll'">.\comserver.def</ModuleDefinitionFile>
@@ -662,6 +666,7 @@
       <FixedBaseAddress Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">
       </FixedBaseAddress>
       <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">false</GenerateDebugInformation>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">/Zc:threadSafeInit- %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <Manifest>
       <OutputManifestFile Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'" />
@@ -692,6 +697,7 @@
       <BasicRuntimeChecks Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">Default</BasicRuntimeChecks>
       <BufferSecurityCheck Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">false</BufferSecurityCheck>
       <EnableFiberSafeOptimizations Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">false</EnableFiberSafeOptimizations>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">/Zc:threadSafeInit- %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <ClCompile />
     <ClCompile />
