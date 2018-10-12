@@ -1098,33 +1098,32 @@ ResultType Line::WinMove(LPTSTR aX, LPTSTR aY, LPTSTR aWidth, LPTSTR aHeight
 
 
 
-ResultType Line::ControlSend(LPTSTR aKeysToSend, LPTSTR aControl, LPTSTR aTitle, LPTSTR aText
-	, LPTSTR aExcludeTitle, LPTSTR aExcludeText, SendRawModes aSendRaw)
+BIF_DECL(BIF_ControlSend) // ControlSend and ControlSendText.
 {
-	HWND target_window = DetermineTargetWindow(aTitle, aText, aExcludeTitle, aExcludeText);
-	if (!target_window)
-		goto error;
-	HWND control_window = _tcsicmp(aControl, _T("ahk_parent"))
-		? ControlExist(target_window, aControl) // This can return target_window itself for cases such as ahk_id %ControlHWND%.
-		: target_window;
-	if (!control_window)
-		goto error;
-	SendKeys(aKeysToSend, aSendRaw, SM_EVENT, control_window);
+	DETERMINE_TARGET_CONTROL(1);
+
+	_f_param_string(aKeysToSend, 0);
+	SendKeys(aKeysToSend, (SendRawModes)_f_callee_id, SM_EVENT, control_window);
 	// But don't do WinDelay because KeyDelay should have been in effect for the above.
-	return g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
+	g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
+	_f_return_b(TRUE);
 
 error:
-	return SetErrorLevelOrThrow();
+	g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
+	_f_return_b(FALSE);
 }
 
 
 
-ResultType Line::ControlClick(vk_type aVK, int aClickCount, LPTSTR aOptions, LPTSTR aControl
-	, LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LPTSTR aExcludeText)
+BIF_DECL(BIF_ControlClick)
 {
-	HWND target_window = DetermineTargetWindow(aTitle, aText, aExcludeTitle, aExcludeText);
-	if (!target_window)
-		goto error;
+	_f_param_string_opt(aControl, 0);
+	_f_param_string_opt(aWhichButton, 3);
+	int aVK = Line::ConvertMouseButton(aWhichButton);
+	if (!aVK)
+		_f_throw(ERR_PARAM4_INVALID, aWhichButton);
+	int aClickCount = ParamIndexToOptionalInt(4, 1);
+	_f_param_string_opt(aOptions, 5);
 
 	// Set the defaults that will be in effect unless overridden by options:
 	KeyEventTypes event_type = KEYDOWNANDUP;
@@ -1179,12 +1178,35 @@ ResultType Line::ControlClick(vk_type aVK, int aClickCount, LPTSTR aOptions, LPT
 			break;
 		}
 	}
+	
+	// Consolidate the control and window parameters.
+	ExprTokenType *param[5];
+	int param_count = 0;
+	for (int i = 0; i < aParamCount; ++i)
+	{
+		param[param_count++] = aParam[i];
+		if (i == 2) i += 3; // Skip WhichButton, ClickCount, Options.
+	}
+	HWND target_window, control_window;
+	if (position_mode)
+	{
+		// Determine target window only.  Control will be found by position below.
+		target_window = DetermineTargetWindow(param + 1, param_count - 1);
+		control_window = NULL;
+	}
+	else
+	{
+		// Determine target window and control.
+		if (!DetermineTargetControl(control_window, target_window, aResultToken, param, param_count))
+			return; // aResultToken.SetExitResult() or Error() was already called.
+	}
+	if (!target_window)
+		goto error;
 
 	// It's debatable, but might be best for flexibility (and backward compatibility) to allow target_window to itself
 	// be a control (at least for the position_mode handler below).  For example, the script may have called SetParent
 	// to make a top-level window the child of some other window, in which case this policy allows it to be seen like
 	// a non-child.
-	HWND control_window = position_mode ? NULL : ControlExist(target_window, aControl); // This can return target_window itself for cases such as ahk_id %ControlHWND%.
 	if (!control_window) // Even if position_mode is false, the below is still attempted, as documented.
 	{
 		// New section for v1.0.24.  But only after the above fails to find a control do we consider
@@ -1227,10 +1249,13 @@ ResultType Line::ControlClick(vk_type aVK, int aClickCount, LPTSTR aOptions, LPT
 	// This is done this late because it seems better to set an ErrorLevel of 1 (above) whenever the
 	// target window or control isn't found, or any other error condition occurs above:
 	if (aClickCount < 1)
+	{
 		// Allow this to simply "do nothing", because it increases flexibility
 		// in the case where the number of clicks is a dereferenced script variable
 		// that may sometimes (by intent) resolve to zero or negative:
-		return g_ErrorLevel->Assign(ERRORLEVEL_NONE);
+		g_ErrorLevel->Assign(ERRORLEVEL_NONE);
+		_f_return_b(TRUE);
+	}
 
 	RECT rect;
 	if (click.x == COORD_UNSPECIFIED || click.y == COORD_UNSPECIFIED)
@@ -1354,23 +1379,19 @@ ResultType Line::ControlClick(vk_type aVK, int aClickCount, LPTSTR aOptions, LPT
 
 	DETACH_THREAD_INPUT  // Also takes into account do_activate, indirectly.
 
-	return g_ErrorLevel->Assign(ERRORLEVEL_NONE);} // Indicate success.
+	g_ErrorLevel->Assign(ERRORLEVEL_NONE);} // Indicate success.
+	_f_return_b(TRUE);
 
 error:
-	return SetErrorLevelOrThrow();
+	g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
+	_f_return_b(FALSE);
 }
 
 
 
-ResultType Line::ControlMove(LPTSTR aX, LPTSTR aY, LPTSTR aWidth, LPTSTR aHeight
-	, LPTSTR aControl, LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LPTSTR aExcludeText)
+BIF_DECL(BIF_ControlMove)
 {
-	HWND target_window = DetermineTargetWindow(aTitle, aText, aExcludeTitle, aExcludeText);
-	if (!target_window)
-		goto error;
-	HWND control_window = ControlExist(target_window, aControl); // This can return target_window itself for cases such as ahk_id %ControlHWND%.
-	if (!control_window)
-		goto error;
+	DETERMINE_TARGET_CONTROL(4);
 	
 	// The following macro is used to keep ControlMove and ControlGetPos in sync:
 	#define CONTROL_COORD_PARENT(target, control) \
@@ -1387,8 +1408,8 @@ ResultType Line::ControlMove(LPTSTR aX, LPTSTR aY, LPTSTR aWidth, LPTSTR aHeight
 		goto error;
 	
 	POINT point;
-	point.x = *aX ? ATOI(aX) : control_rect.left;
-	point.y = *aY ? ATOI(aY) : control_rect.top;
+	point.x = ParamIndexToOptionalInt(0, control_rect.left);
+	point.y = ParamIndexToOptionalInt(1, control_rect.top);
 
 	// MoveWindow accepts coordinates relative to the control's immediate parent, which might
 	// be different to coord_parent since controls can themselves have child controls.  So if
@@ -1400,40 +1421,29 @@ ResultType Line::ControlMove(LPTSTR aX, LPTSTR aY, LPTSTR aWidth, LPTSTR aHeight
 	MoveWindow(control_window
 		, point.x
 		, point.y
-		, *aWidth ? ATOI(aWidth) : control_rect.right - control_rect.left
-		, *aHeight ? ATOI(aHeight) : control_rect.bottom - control_rect.top
+		, ParamIndexToOptionalInt(2, control_rect.right - control_rect.left)
+		, ParamIndexToOptionalInt(3, control_rect.bottom - control_rect.top)
 		, TRUE);  // Do repaint.
 
 	DoControlDelay
-	return g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
+	g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
+	_f_return_b(TRUE);
 
 error:
-	return SetErrorLevelOrThrow();
+	g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
+	_f_return_b(FALSE);
 }
 
 
 
-ResultType Line::ControlGetPos(LPTSTR aControl, LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LPTSTR aExcludeText)
+BIF_DECL(BIF_ControlGetPos)
 {
-	Var *output_var_x = ARGVAR1;  // Ok if NULL. Load-time validation has ensured that these are valid output variables (e.g. not built-in vars).
-	Var *output_var_y = ARGVAR2;  // Ok if NULL.
-	Var *output_var_width = ARGVAR3;  // Ok if NULL.
-	Var *output_var_height = ARGVAR4;  // Ok if NULL.
+	Var *output_var_x = ParamIndexToOptionalVar(0);
+	Var *output_var_y = ParamIndexToOptionalVar(1);
+	Var *output_var_width = ParamIndexToOptionalVar(2);
+	Var *output_var_height = ParamIndexToOptionalVar(3);
 
-	HWND target_window = DetermineTargetWindow(aTitle, aText, aExcludeTitle, aExcludeText);
-	HWND control_window = target_window ? ControlExist(target_window, aControl) : NULL; // This can return target_window itself for cases such as ahk_id %ControlHWND%.
-	if (!control_window)
-	{
-		if (output_var_x)
-			output_var_x->Assign();
-		if (output_var_y)
-			output_var_y->Assign();
-		if (output_var_width)
-			output_var_width->Assign();
-		if (output_var_height)
-			output_var_height->Assign();
-		return OK;
-	}
+	DETERMINE_TARGET_CONTROL(4);
 
 	// Determine which window the returned coordinates should be relative to:
 	HWND coord_parent = CONTROL_COORD_PARENT(target_window, control_window);
@@ -1445,16 +1455,18 @@ ResultType Line::ControlGetPos(LPTSTR aControl, LPTSTR aTitle, LPTSTR aText, LPT
 	// Map the screen coordinates returned by GetWindowRect to the client area of coord_parent.
 	MapWindowPoints(NULL, coord_parent, (LPPOINT)&child_rect, 2);
 
-	if (output_var_x && !output_var_x->Assign(child_rect.left))
-		return FAIL;
-	if (output_var_y && !output_var_y->Assign(child_rect.top))
-		return FAIL;
-	if (output_var_width && !output_var_width->Assign(child_rect.right - child_rect.left))
-		return FAIL;
-	if (output_var_height && !output_var_height->Assign(child_rect.bottom - child_rect.top))
-		return FAIL;
+	output_var_x && output_var_x->Assign(child_rect.left);
+	output_var_y && output_var_y->Assign(child_rect.top);
+	output_var_width && output_var_width->Assign(child_rect.right - child_rect.left);
+	output_var_height && output_var_height->Assign(child_rect.bottom - child_rect.top);
+	_f_return_b(TRUE);
 
-	return OK;
+error:
+	output_var_x && output_var_x->Assign();
+	output_var_y && output_var_y->Assign();
+	output_var_width && output_var_width->Assign();
+	output_var_height && output_var_height->Assign();
+	_f_return_b(FALSE);
 }
 
 
@@ -1470,14 +1482,32 @@ BIF_DECL(BIF_ControlGetFocus)
 	if (!GetGUIThreadInfo(GetWindowThreadProcessId(target_window, NULL), &guithreadInfo))
 		goto error;
 
+	// At this point, even an answer of "no focused control" is not an error:
+	g_ErrorLevel->Assign(ERRORLEVEL_NONE);
+	// Use IsChild() to ensure the focused control actually belongs to this window.
+	// Otherwise, a HWND will be returned if any window in the same thread has focus,
+	// including the target window itself (typically when it has no controls).
+	if (!IsChild(target_window, guithreadInfo.hwndFocus))
+		_f_return_i(0); // As documented, if "none of the target window's controls has focus, the return value is 0".
+	_f_return_i((UINT_PTR)guithreadInfo.hwndFocus);
+
+error:
+	g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
+	_f_return_i(0);
+}
+
+
+
+BIF_DECL(BIF_ControlGetClassNN)
+{
+	DETERMINE_TARGET_CONTROL(0);
+
+	if (target_window == control_window)
+		target_window = GetNonChildParent(control_window);
+
 	class_and_hwnd_type cah;
 	TCHAR class_name[WINDOW_CLASS_SIZE];
-	cah.hwnd = guithreadInfo.hwndFocus;
-	if (!cah.hwnd) // Not an error; it's valid (though rare) to have no focus.
-	{
-		g_ErrorLevel->Assign(ERRORLEVEL_NONE);
-		_f_return_empty;
-	}
+	cah.hwnd = control_window;
 	cah.class_name = class_name;
 	if (!GetClassName(cah.hwnd, class_name, _countof(class_name) - 5)) // -5 to allow room for sequence number.
 		goto error;
@@ -1487,13 +1517,11 @@ BIF_DECL(BIF_ControlGetFocus)
 	EnumChildWindows(target_window, EnumChildFindSeqNum, (LPARAM)&cah);
 	if (!cah.is_found)
 		goto error;
-	// Append the class sequence number onto the class name set the output param to be that value:
+	// Append the class sequence number onto the class name:
 	sntprintfcat(class_name, _countof(class_name), _T("%d"), cah.class_count);
-	g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
 	_f_return(class_name);
 
 error:
-	g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
 	_f_return_empty;
 }
 
@@ -1519,22 +1547,18 @@ BOOL CALLBACK EnumChildFindSeqNum(HWND aWnd, LPARAM lParam)
 
 
 
-ResultType Line::ControlFocus(LPTSTR aControl, LPTSTR aTitle, LPTSTR aText
-	, LPTSTR aExcludeTitle, LPTSTR aExcludeText)
+BIF_DECL(BIF_ControlFocus)
 {
-	HWND target_window = DetermineTargetWindow(aTitle, aText, aExcludeTitle, aExcludeText);
-	if (!target_window)
-		goto error;
-	HWND control_window = ControlExist(target_window, aControl); // This can return target_window itself for cases such as ahk_id %ControlHWND%.
-	if (!control_window)
-		goto error;
+	bool success = false;
+
+	DETERMINE_TARGET_CONTROL(0);
 
 	// Unlike many of the other Control commands, this one requires AttachThreadInput()
 	// to have any realistic chance of success (though sometimes it may work by pure
 	// chance even without it):
 	ATTACH_THREAD_INPUT
 
-	bool success = SetFocus(control_window) != NULL;
+	success = SetFocus(control_window) != NULL;
 	DoControlDelay; // Done unconditionally for simplicity, and in case SetFocus() had some effect despite indicating failure.
 	// Call GetFocus() in case focus was previously NULL, since that would cause SetFocus() to return NULL even if it succeeded:
 	if (!success && GetFocus() == control_window)
@@ -1546,23 +1570,18 @@ ResultType Line::ControlFocus(LPTSTR aControl, LPTSTR aTitle, LPTSTR aText
 	// undesirable effect:
 	DETACH_THREAD_INPUT
 
-	return SetErrorLevelOrThrowBool(!success);
-
 error:
-	return SetErrorLevelOrThrow();
+	g_ErrorLevel->Assign(!success);
+	_f_return_b(success);
 }
 
 
 
-ResultType Line::ControlSetText(LPTSTR aNewText, LPTSTR aControl, LPTSTR aTitle, LPTSTR aText
-	, LPTSTR aExcludeTitle, LPTSTR aExcludeText)
+BIF_DECL(BIF_ControlSetText)
 {
-	HWND target_window = DetermineTargetWindow(aTitle, aText, aExcludeTitle, aExcludeText);
-	if (!target_window)
-		goto error;
-	HWND control_window = ControlExist(target_window, aControl); // This can return target_window itself for cases such as ahk_id %ControlHWND%.
-	if (!control_window)
-		goto error;
+	DETERMINE_TARGET_CONTROL(1);
+
+	_f_param_string(aNewText, 0);
 	// SendMessage must be used, not PostMessage(), at least for some (probably most) apps.
 	// Also: No need to call IsWindowHung() because SendMessageTimeout() should return
 	// immediately if the OS already "knows" the window is hung:
@@ -1570,23 +1589,19 @@ ResultType Line::ControlSetText(LPTSTR aNewText, LPTSTR aControl, LPTSTR aTitle,
 	SendMessageTimeout(control_window, WM_SETTEXT, (WPARAM)0, (LPARAM)aNewText
 		, SMTO_ABORTIFHUNG, 5000, &result);
 	DoControlDelay;
-	return g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
+	g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
+	_f_return_b(TRUE);
 
 error:
-	return SetErrorLevelOrThrow();
+	g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
+	_f_return_b(FALSE);
 }
 
 
 
 BIF_DECL(BIF_ControlGetText)
 {
-	HWND target_window = DetermineTargetWindow(aParam + 1, aParamCount - 1); // It can handle a negative param count.
-	if (!target_window)
-		goto error;
-	_f_param_string_opt(aControl, 0);
-	HWND control_window = ControlExist(target_window, aControl); // This can return target_window itself for cases such as ahk_id %ControlHWND%.
-	if (!control_window)
-		goto error;
+	DETERMINE_TARGET_CONTROL(0);
 
 	// Even if control_window is NULL, we want to continue on so that the output
 	// param is set to be the empty string, which is the proper thing to do
@@ -1594,7 +1609,7 @@ BIF_DECL(BIF_ControlGetText)
 
 	// Handle the output parameter.  Note: Using GetWindowTextTimeout() vs. GetWindowText()
 	// because it is able to get text from more types of controls (e.g. large edit controls):
-	VarSizeType space_needed = control_window ? GetWindowTextTimeout(control_window) + 1 : 1; // 1 for terminator.
+	VarSizeType space_needed = GetWindowTextTimeout(control_window) + 1; // 1 for terminator.
 
 	// Set up the var, enlarging it if necessary.  If the output_var is of type VAR_CLIPBOARD,
 	// this call will set up the clipboard for writing:
@@ -1605,18 +1620,10 @@ BIF_DECL(BIF_ControlGetText)
 	// in case actual size written was off from the estimated size (since
 	// GetWindowTextLength() can return more space that will actually be required
 	// in certain circumstances, see MS docs):
-	if (control_window)
-	{
-		aResultToken.marker_length = GetWindowTextTimeout(control_window, aResultToken.marker, space_needed);
-		if (!aResultToken.marker_length) // There was no text to get or GetWindowTextTimeout() failed.
-			*aResultToken.marker = '\0';
-	}
-	else
-	{
+	aResultToken.marker_length = GetWindowTextTimeout(control_window, aResultToken.marker, space_needed);
+	if (!aResultToken.marker_length) // There was no text to get or GetWindowTextTimeout() failed.
 		*aResultToken.marker = '\0';
-		aResultToken.marker_length = 0;
-	}
-	g_ErrorLevel->Assign(!control_window);
+	g_ErrorLevel->Assign(ERRORLEVEL_NONE);
 	return;
 
 error:
@@ -2011,14 +2018,9 @@ BIF_DECL(BIF_PostSendMessage)
 // sArgDeref[8]: Timeout
 {
 	bool aUseSend = _f_callee_id == FID_SendMessage;
-	_f_param_string_opt(aControl, 3);
-	HWND target_window, control_window;
-	if (   !(target_window = DetermineTargetWindow(aParam + 4, aParamCount - 4)) // It can handle a negative param count.
-		|| !(control_window = *aControl ? ControlExist(target_window, aControl) : target_window)   ) // Relies on short-circuit boolean order.
-	{
-		g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
-		_f_return_empty;
-	}
+	bool successful = false;
+
+	DETERMINE_TARGET_CONTROL(3);
 
 	UINT msg = ParamIndexToInt(0);
 	// Timeout increased from 2000 to 5000 in v1.0.27:
@@ -2062,13 +2064,13 @@ BIF_DECL(BIF_PostSendMessage)
 		}
 	}
 
-	bool successful;
 	DWORD_PTR dwResult;
 	if (aUseSend)
 		successful = SendMessageTimeout(control_window, msg, (WPARAM)param[0], (LPARAM)param[1], SMTO_ABORTIFHUNG, timeout, &dwResult);
 	else
 		successful = PostMessage(control_window, msg, (WPARAM)param[0], (LPARAM)param[1]);
 
+error:
 	g_ErrorLevel->Assign(successful ? ERRORLEVEL_NONE : ERRORLEVEL_ERROR);
 	if (aUseSend && successful)
 		_f_return_i((__int64)dwResult);
@@ -3249,22 +3251,24 @@ end:
 
 
 
-ResultType PixelSearch(Var *output_var_x, Var *output_var_y
+void PixelSearch(Var *output_var_x, Var *output_var_y
 	, int aLeft, int aTop, int aRight, int aBottom, COLORREF aColorRGB
-	, int aVariation, LPTSTR aOptions, ResultToken *aIsPixelGetColor)
+	, int aVariation, LPTSTR aOptions, bool aIsPixelGetColor
+	, ResultToken &aResultToken)
 // Author: The fast-mode PixelSearch was created by Aurelian Maga.
 {
 	// For maintainability, get options and RGB/BGR conversion out of the way early.
-	bool fast_mode = aIsPixelGetColor || tcscasestr(aOptions, _T("Fast"));
+	bool fast_mode = aIsPixelGetColor || !tcscasestr(aOptions, _T("Slow"));
 	COLORREF aColorBGR = rgb_to_bgr(aColorRGB);
 
 	// Many of the following sections are similar to those in ImageSearch(), so they should be
 	// maintained together.
 
-	if (output_var_x)
+	if (!aIsPixelGetColor)
+	{
 		output_var_x->Assign();  // Init to empty string regardless of whether we succeed here.
-	if (output_var_y)
 		output_var_y->Assign();  // Same.
+	}
 
 	POINT origin = {0};
 	CoordToScreen(origin, COORD_MODE_PIXEL);
@@ -3347,8 +3351,7 @@ ResultType PixelSearch(Var *output_var_x, Var *output_var_y
 		if (aIsPixelGetColor)
 		{
 			COLORREF color = screen_pixel[0] & 0x00FFFFFF; // See other 0x00FFFFFF below for explanation.
-			aIsPixelGetColor->marker_length = _stprintf(aIsPixelGetColor->marker, _T("0x%06X"), color);
-			found = true; // ErrorLevel will be set to 0 further below.
+			aResultToken.marker_length = _stprintf(aResultToken.marker, _T("0x%06X"), color);
 		}
 		else if (aVariation < 1) // Caller wants an exact match on one particular color.
 		{
@@ -3408,8 +3411,6 @@ ResultType PixelSearch(Var *output_var_x, Var *output_var_y
 		}
 
 fast_end:
-		// If found==false when execution reaches here, ErrorLevel is already set to the right value, so just
-		// clean up then return.
 		ReleaseDC(NULL, hdc);
 		if (sdc)
 		{
@@ -3424,18 +3425,18 @@ fast_end:
 		else // One of the GDI calls failed and the search wasn't carried out.
 			goto error;
 
+		if (aIsPixelGetColor)
+			return; // Return value was already set.
+
 		// Otherwise, success.  Calculate xpos and ypos of where the match was found and adjust
 		// coords to make them relative to the position of the target window (rect will contain
 		// zeroes if this doesn't need to be done):
-		if (!aIsPixelGetColor && found)
+		if (found)
 		{
-			if (output_var_x && !output_var_x->Assign((aLeft + i%screen_width) - origin.x))
-				return FAIL;
-			if (output_var_y && !output_var_y->Assign((aTop + i/screen_width) - origin.y))
-				return FAIL;
+			output_var_x->Assign((aLeft + i%screen_width) - origin.x);
+			output_var_y->Assign((aTop + i/screen_width) - origin.y);
 		}
-
-		return g_ErrorLevel->Assign(found ? ERRORLEVEL_NONE : ERRORLEVEL_ERROR); // "0" indicates success; "1" indicates search completed okay, but didn't find it.
+		_f_return_b(found);
 	}
 
 	// Otherwise (since above didn't return): fast_mode==false
@@ -3492,39 +3493,60 @@ fast_end:
 
 	ReleaseDC(NULL, hdc);
 
-	if (!found)
-		return g_ErrorLevel->Assign(ERRORLEVEL_ERROR); // This value indicates "color not found".
-
-	// Otherwise, this pixel matches one of the specified color(s).
-	// Adjust coords to make them relative to the position of the target window
-	// (rect will contain zeroes if this doesn't need to be done):
-	if (output_var_x && !output_var_x->Assign(xpos - origin.x))
-		return FAIL;
-	if (output_var_y && !output_var_y->Assign(ypos - origin.y))
-		return FAIL;
-	// Since above didn't return:
-	return g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
+	if (found)
+	{
+		// This pixel matches one of the specified color(s).
+		// Adjust coords to make them relative to the position of the target window
+		// (rect will contain zeroes if this doesn't need to be done):
+		output_var_x->Assign(xpos - origin.x);
+		output_var_y->Assign(ypos - origin.y);
+	}
+	_f_return_b(found);
 
 error:
-	return Script::SetErrorLevelOrThrowInt(aIsPixelGetColor ? ERRORLEVEL_ERROR : ERRORLEVEL_ERROR2); // 2 means error other than "color not found".
+	_f_throw(ERR_INTERNAL_CALL);
 }
 
 
 
-ResultType Line::ImageSearch(int aLeft, int aTop, int aRight, int aBottom, LPTSTR aImageFile)
+BIF_DECL(BIF_PixelSearch)
+{
+	if (aParam[0]->symbol != SYM_VAR)
+		_f_throw(ERR_PARAM1_INVALID);
+	if (aParam[1]->symbol != SYM_VAR)
+		_f_throw(ERR_PARAM2_INVALID);
+	PixelSearch(aParam[0]->var, aParam[1]->var
+		, ParamIndexToInt(2), ParamIndexToInt(3), ParamIndexToInt(4), ParamIndexToInt(5)
+		, ParamIndexToInt(6), ParamIndexToOptionalInt(7, 0), ParamIndexToOptionalString(8)
+		, false, aResultToken);
+}
+
+
+
+//ResultType Line::ImageSearch(int aLeft, int aTop, int aRight, int aBottom, LPTSTR aImageFile)
+BIF_DECL(BIF_ImageSearch)
 // Author: ImageSearch was created by Aurelian Maga.
 {
 	// Many of the following sections are similar to those in PixelSearch(), so they should be
 	// maintained together.
-	Var *output_var_x = ARGVAR1;  // Ok if NULL. RAW wouldn't be safe because load-time validation actually
-	Var *output_var_y = ARGVAR2;  // requires a minimum of zero parameters so that the output-vars can be optional. Also:
-	// Load-time validation has ensured that these are valid output variables (e.g. not built-in vars).
+
+	if (aParam[0]->symbol != SYM_VAR)
+		_f_throw(ERR_PARAM1_INVALID);
+	if (aParam[1]->symbol != SYM_VAR)
+		_f_throw(ERR_PARAM2_INVALID);
+	Var *output_var_x = aParam[0]->var;
+	Var *output_var_y = aParam[1]->var;
+
+	int aLeft = ParamIndexToInt(2);
+	int aTop = ParamIndexToInt(3);
+	int aRight = ParamIndexToInt(4);
+	int aBottom = ParamIndexToInt(5);
+
+	_f_param_string(aImageFile, 6);
 
 	// Set default results (output variables), in case of early return:
-	if (output_var_x)
-		output_var_x->Assign();  // Init to empty string regardless of whether we succeed here.
-	if (output_var_y)
-		output_var_y->Assign(); // Same.
+	output_var_x->Assign();  // Init to empty string regardless of whether we succeed here.
+	output_var_y->Assign();  // Same.
 
 	POINT origin = {0};
 	CoordToScreen(origin, COORD_MODE_PIXEL);
@@ -3860,12 +3882,7 @@ ResultType Line::ImageSearch(int aLeft, int aTop, int aRight, int aBottom, LPTST
 		}
 	}
 
-	if (!found) // Must override ErrorLevel to its new value prior to the label below.
-		g_ErrorLevel->Assign(ERRORLEVEL_ERROR); // "1" indicates search completed okay, but didn't find it.
-
 end:
-	// If found==false when execution reaches here, ErrorLevel is already set to the right value, so just
-	// clean up then return.
 	ReleaseDC(NULL, hdc);
 	if (!no_delete_bitmap && hbitmap_image)
 		DeleteObject(hbitmap_image);
@@ -3886,24 +3903,21 @@ end:
 	else // One of the GDI calls failed.
 		goto error;
 
-	if (!found) // Let ErrorLevel, which is either "1" or "2" as set earlier, tell the story.
-		return OK;
-
-	// Otherwise, success.  Calculate xpos and ypos of where the match was found and adjust
-	// coords to make them relative to the position of the target window (rect will contain
-	// zeroes if this doesn't need to be done):
-	if (output_var_x && !output_var_x->Assign((aLeft + i%screen_width) - origin.x))
-		return FAIL;
-	if (output_var_y && !output_var_y->Assign((aTop + i/screen_width) - origin.y))
-		return FAIL;
-
-	return g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
+	if (found)
+	{
+		// Calculate xpos and ypos of where the match was found and adjust coords to
+		// make them relative to the position of the target window (rect will contain
+		// zeroes if this doesn't need to be done):
+		output_var_x->Assign((aLeft + i%screen_width) - origin.x);
+		output_var_y->Assign((aTop + i/screen_width) - origin.y);
+	}
+	_f_return_b(found);
 
 arg7_error:
-	return LineError(ERR_PARAM7_INVALID, FAIL, aImageFile);
+	_f_throw(ERR_PARAM7_INVALID, aImageFile);
 
 error:
-	return LineError(ERR_INTERNAL_CALL);
+	_f_throw(ERR_INTERNAL_CALL);
 }
 
 
@@ -5264,7 +5278,7 @@ ResultType Script::SetCoordMode(LPTSTR aCommand, LPTSTR aMode)
 {
 	SHORT mode = Line::ConvertCoordMode(aMode); // CoordModeType is USHORT so can't compare to -1
 	SHORT shift = Line::ConvertCoordModeCmd(aCommand); // CoordModeType is USHORT so can't compare to -1
-	if (shift == -1 || mode == -1) // Compare directly to -1 because signed.
+	if (shift == COORD_MODE_INVALID || mode == COORD_MODE_INVALID)
 		return g_script->ScriptError(ERR_INVALID_VALUE, aMode);
 	g->CoordMode = (g->CoordMode & ~(COORD_MODE_MASK << shift)) | (mode << shift);
 	return OK;
@@ -8948,6 +8962,31 @@ HWND Line::DetermineTargetWindow(LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTit
 	return WinExist(*g, aTitle, aText, aExcludeTitle, aExcludeText);
 }
 
+
+ResultType GetObjectHwnd(IObject *aObject, HWND &aHwnd, ResultToken &aResultToken)
+{
+	FuncResult result_token;
+	ExprTokenType hwnd_token = _T("Hwnd");
+	ExprTokenType this_token = aObject;
+	ExprTokenType *param = &hwnd_token;
+			
+	auto result = aObject->Invoke(result_token, this_token, IT_GET, &param, 1);
+
+	if (result_token.symbol != SYM_INTEGER)
+	{
+		result_token.Free();
+		if (result == FAIL)
+			return aResultToken.SetExitResult(FAIL);
+		if (result == INVOKE_NOT_HANDLED)
+			return aResultToken.Error(ERR_UNKNOWN_PROPERTY, _T("Hwnd"));
+		return aResultToken.Error(ERR_INVALID_HWND);
+	}
+
+	aHwnd = (HWND)(UINT_PTR)result_token.value_int64;
+	return OK;
+}
+
+
 HWND DetermineTargetWindow(ExprTokenType *aParam[], int aParamCount)
 {
 	TCHAR number_buf[4][MAX_NUMBER_SIZE];
@@ -8955,6 +8994,44 @@ HWND DetermineTargetWindow(ExprTokenType *aParam[], int aParamCount)
 	for (int i = 0; i < 4; i++)
 		param[i] = i < aParamCount ? TokenToString(*aParam[i], number_buf[i]) : _T("");
 	return Line::DetermineTargetWindow(param[0], param[1], param[2], param[3]);
+}
+
+
+ResultType DetermineTargetControl(HWND &aControl, HWND &aWindow, ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount)
+{
+	aWindow = aControl = NULL;
+
+	if (ParamIndexIsOmitted(0))
+	{
+		// Only functions which can operate on top-level windows allow Control to be
+		// omitted (and a select few other functions with more optional parameters).
+		// This replaces the old "ahk_parent" string used with ControlSend, but is
+		// also used by SendMessage.
+		aControl = aWindow = DetermineTargetWindow(aParam + 1, aParamCount - 1);
+		return OK;
+	}
+
+	HWND hwnd;
+	if (IObject *obj = ParamIndexToObject(0))
+	{
+		if (!GetObjectHwnd(obj, hwnd, aResultToken))
+			return FAIL;
+	}
+	else if (TokenIsPureNumeric(*aParam[0]) == PURE_INTEGER)
+	{
+		hwnd = (HWND)(UINT_PTR)ParamIndexToInt64(0);
+	}
+	else
+	{
+		_f_param_string(control_spec, 0);
+		aWindow = DetermineTargetWindow(aParam + 1, aParamCount - 1);
+		aControl = ControlExist(aWindow, control_spec);
+		return OK;
+	}
+	// Set both aControl and aWindow, as if ahk_id was used.
+	if (IsWindow(hwnd))
+		aWindow = aControl = hwnd;
+	return OK;
 }
 
 
@@ -15451,7 +15528,7 @@ BIF_DECL(BIF_StrGetPut)
 					else
 						length_is_max_size = true; // Limit to this, but stop at the first null char.
 				}
-				else if (length < 0)
+				else if (length <= 0)
 					_f_throw(ERR_INVALID_LENGTH);
 				++aParam; // Let encoding be the next param, if present.
 			}
@@ -15526,7 +15603,7 @@ BIF_DECL(BIF_StrGetPut)
 				}
 				else
 					// For consistency with the sections below, don't truncate the string.
-					char_count = 0;
+					_f_throw(ERR_INVALID_LENGTH);
 			}
 			//else: Caller just wants the the required buffer size (char_count), which will be returned below.
 			//	Note that although this seems equivalent to StrLen(), the caller might have explicitly
@@ -15577,11 +15654,7 @@ BIF_DECL(BIF_StrGetPut)
 							char_count = WideCharToMultiByte(encoding, flags, (LPCWSTR)source_string, source_length, NULL, 0, NULL, NULL);
 						}
 						if (!char_count)
-						{
-							aResultToken.symbol = SYM_STRING;
-							// aResultToken.marker is already set to "".
-							return;
-						}
+							_f_throw(ERR_INTERNAL_CALL);
 					}
 					++char_count; // + 1 for null-terminator (source_length causes it to be excluded from char_count).
 					if (length == 0) // Caller just wants the required buffer size.
@@ -15603,6 +15676,8 @@ BIF_DECL(BIF_StrGetPut)
 #ifndef UNICODE
 			}
 #endif
+			if (!char_count)
+				_f_throw(ERR_INTERNAL_CALL);
 		}
 		// Return the number of characters copied.
 		aResultToken.value_int64 = char_count;
@@ -15624,6 +15699,9 @@ BIF_DECL(BIF_StrGetPut)
 		{
 			// Conversion is required.
 			int conv_length;
+			// MS docs: "Note that, if cbMultiByte is 0, the function fails."
+			if (!length)
+				_f_return_empty;
 #ifdef UNICODE
 			// Convert multi-byte encoded string to UTF-16.
 			conv_length = MultiByteToWideChar(encoding, 0, (LPCSTR)address, length, NULL, 0);
@@ -15649,6 +15727,8 @@ BIF_DECL(BIF_StrGetPut)
 			}
 			conv_length = WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, (LPCWSTR)address, length, aResultToken.marker, conv_length, NULL, NULL);
 #endif
+			if (!conv_length) // This can only be failure, since ... (see below)
+				_f_throw(ERR_INTERNAL_CALL);
 			if (length == -1) // conv_length includes a null-terminator in this case.
 				--conv_length;
 			else

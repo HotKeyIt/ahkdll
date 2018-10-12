@@ -158,6 +158,7 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_ABORT _T("  ") ERR_ABORT_NO_SPACES
 #define WILL_EXIT _T("The program will exit.")
 #define OLD_STILL_IN_EFFECT _T("The script was not reloaded; the old version will remain in effect.")
+#define ERR_SCRIPT_NOT_FOUND _T("Script file not found.")
 #define ERR_ABORT_DELETE _T("__Delete will now return.")
 #define ERR_LINE_TOO_LONG _T("Line too long.")
 #define ERR_CONTINUATION_SECTION_TOO_LONG _T("Continuation section too long.")
@@ -263,6 +264,7 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_INVALID_RETURN_TYPE _T("Invalid return type.")
 #define ERR_INVALID_LENGTH _T("Invalid Length.")
 #define ERR_INVALID_ENCODING _T("Invalid Encoding.")
+#define ERR_INVALID_HWND _T("Invalid HWND.")
 #define ERR_INVALID_USAGE _T("Invalid usage.")
 #define ERR_INTERNAL_CALL _T("An internal function call failed.")
 
@@ -612,6 +614,7 @@ enum BuiltInFunctionID {
 	FID_MenuCreate = 0, FID_MenuBarCreate, FID_MenuFromHandle,
 	FID_ControlGetChecked = 0, FID_ControlGetEnabled, FID_ControlGetVisible, FID_ControlGetTab, FID_ControlFindItem, FID_ControlGetChoice, FID_ControlGetList, FID_ControlGetLineCount, FID_ControlGetCurrentLine, FID_ControlGetCurrentCol, FID_ControlGetLine, FID_ControlGetSelected, FID_ControlGetStyle, FID_ControlGetExStyle, FID_ControlGetHwnd,
 	FID_ControlSetChecked = 0, FID_ControlSetEnabled, FID_ControlShow, FID_ControlHide, FID_ControlSetStyle, FID_ControlSetExStyle, FID_ControlShowDropDown, FID_ControlHideDropDown, FID_ControlSetTab, FID_ControlAddItem, FID_ControlDeleteItem, FID_ControlChoose, FID_ControlChooseString, FID_ControlEditPaste,
+	FID_ControlSend = SCM_NOT_RAW, FID_ControlSendText = SCM_RAW_TEXT,
 	FID_DriveEject = 0, FID_DriveLock, FID_DriveUnlock, FID_DriveSetLabel,
 	FID_DriveGetList = 0, FID_DriveGetFilesystem, FID_DriveGetLabel, FID_DriveGetSerial, FID_DriveGetType, FID_DriveGetStatus, FID_DriveGetStatusCD, FID_DriveGetCapacity, FID_DriveGetSpaceFree,
 	FID_EnvGet = 0, FID_EnvSet,
@@ -702,22 +705,10 @@ private:
 	ResultType MenuSelect(LPTSTR aTitle, LPTSTR aText, LPTSTR aMenu1, LPTSTR aMenu2
 		, LPTSTR aMenu3, LPTSTR aMenu4, LPTSTR aMenu5, LPTSTR aMenu6, LPTSTR aMenu7
 		, LPTSTR aExcludeTitle, LPTSTR aExcludeText);
-	ResultType ControlSend(LPTSTR aControl, LPTSTR aKeysToSend, LPTSTR aTitle, LPTSTR aText
-		, LPTSTR aExcludeTitle, LPTSTR aExcludeText, SendRawModes aSendRaw);
-	ResultType ControlClick(vk_type aVK, int aClickCount, LPTSTR aOptions, LPTSTR aControl
-		, LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LPTSTR aExcludeText);
-	ResultType ControlMove(LPTSTR aControl, LPTSTR aX, LPTSTR aY, LPTSTR aWidth, LPTSTR aHeight
-		, LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LPTSTR aExcludeText);
-	ResultType ControlGetPos(LPTSTR aControl, LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LPTSTR aExcludeText);
-	ResultType ControlFocus(LPTSTR aControl, LPTSTR aTitle, LPTSTR aText
-		, LPTSTR aExcludeTitle, LPTSTR aExcludeText);
-	ResultType ControlSetText(LPTSTR aControl, LPTSTR aNewText, LPTSTR aTitle, LPTSTR aText
-		, LPTSTR aExcludeTitle, LPTSTR aExcludeText);
 	ResultType StatusBarWait(LPTSTR aTextToWaitFor, LPTSTR aSeconds, LPTSTR aPart, LPTSTR aTitle, LPTSTR aText
 		, LPTSTR aInterval, LPTSTR aExcludeTitle, LPTSTR aExcludeText);
 	ResultType WinSetTitle(LPTSTR aTitle, LPTSTR aText, LPTSTR aNewTitle
 		, LPTSTR aExcludeTitle = _T(""), LPTSTR aExcludeText = _T(""));
-	ResultType ImageSearch(int aLeft, int aTop, int aRight, int aBottom, LPTSTR aImageFile);
 	static ResultType SetToggleState(vk_type aVK, ToggleValueType &ForceLock, LPTSTR aToggleText);
 
 public:
@@ -950,9 +941,6 @@ public:
 			{
 			case ACT_ASSIGNEXPR:
 			case ACT_MOUSEGETPOS:
-			case ACT_CONTROLGETPOS:
-			case ACT_PIXELSEARCH:
-			case ACT_IMAGESEARCH:
 			case ACT_FOR:
 			case ACT_CATCH:
 				return ARG_TYPE_OUTPUT_VAR;
@@ -963,9 +951,6 @@ public:
 			switch(aActionType)
 			{
 			case ACT_MOUSEGETPOS:
-			case ACT_CONTROLGETPOS:
-			case ACT_PIXELSEARCH:
-			case ACT_IMAGESEARCH:
 			case ACT_SPLITPATH:
 			case ACT_FILEGETSHORTCUT:
 			case ACT_FOR:
@@ -976,7 +961,6 @@ public:
 		case 2:  // Arg #3
 			switch(aActionType)
 			{
-			case ACT_CONTROLGETPOS:
 			case ACT_MOUSEGETPOS:
 			case ACT_SPLITPATH:
 			case ACT_FILEGETSHORTCUT:
@@ -987,7 +971,6 @@ public:
 		case 3:  // Arg #4
 			switch(aActionType)
 			{
-			case ACT_CONTROLGETPOS:
 			case ACT_MOUSEGETPOS:
 			case ACT_SPLITPATH:
 			case ACT_FILEGETSHORTCUT:
@@ -1344,24 +1327,23 @@ public:
 
 	static CoordModeType ConvertCoordMode(LPTSTR aBuf)
 	{
-		if (!aBuf || !*aBuf || !_tcsicmp(aBuf, _T("Screen")))
+		if (!_tcsicmp(aBuf, _T("Screen")))
 			return COORD_MODE_SCREEN;
 		else if (!_tcsicmp(aBuf, _T("Relative")) || !_tcsicmp(aBuf, _T("Window")))
 			return COORD_MODE_WINDOW;
 		else if (!_tcsicmp(aBuf, _T("Client")))
 			return COORD_MODE_CLIENT;
-		return -1;
+		return COORD_MODE_INVALID;
 	}
 
 	static CoordModeType ConvertCoordModeCmd(LPTSTR aBuf)
 	{
-		if (!aBuf || !*aBuf) return -1;
 		if (!_tcsicmp(aBuf, _T("Pixel"))) return COORD_MODE_PIXEL;
 		if (!_tcsicmp(aBuf, _T("Mouse"))) return COORD_MODE_MOUSE;
 		if (!_tcsicmp(aBuf, _T("ToolTip"))) return COORD_MODE_TOOLTIP;
 		if (!_tcsicmp(aBuf, _T("Caret"))) return COORD_MODE_CARET;
 		if (!_tcsicmp(aBuf, _T("Menu"))) return COORD_MODE_MENU;
-		return -1;
+		return COORD_MODE_INVALID;
 	}
 
 	static VariableTypeType ConvertVariableTypeName(LPTSTR aBuf)
@@ -3267,6 +3249,7 @@ BIF_DECL(BIF_DateAdd);
 BIF_DECL(BIF_DateDiff);
 BIF_DECL(BIF_Env);
 BIF_DECL(BIF_SysGet);
+BIF_DECL(BIF_SysGetIPAddresses);
 BIF_DECL(BIF_PostSendMessage);
 BIF_DECL(BIF_Hotkey);
 BIF_DECL(BIF_SetTimer);
@@ -3360,9 +3343,16 @@ BIF_DECL(BIF_Exception);
 
 
 BIF_DECL(BIF_Control);
+BIF_DECL(BIF_ControlClick);
+BIF_DECL(BIF_ControlFocus);
 BIF_DECL(BIF_ControlGet);
+BIF_DECL(BIF_ControlGetClassNN);
 BIF_DECL(BIF_ControlGetFocus);
+BIF_DECL(BIF_ControlGetPos);
 BIF_DECL(BIF_ControlGetText);
+BIF_DECL(BIF_ControlMove);
+BIF_DECL(BIF_ControlSend);
+BIF_DECL(BIF_ControlSetText);
 BIF_DECL(BIF_DirSelect);
 BIF_DECL(BIF_Drive);
 BIF_DECL(BIF_DriveGet);
@@ -3373,8 +3363,10 @@ BIF_DECL(BIF_FileGetTime);
 BIF_DECL(BIF_FileGetVersion);
 BIF_DECL(BIF_FileRead);
 BIF_DECL(BIF_FileSelect);
+BIF_DECL(BIF_ImageSearch);
 BIF_DECL(BIF_IniRead);
 BIF_DECL(BIF_PixelGetColor);
+BIF_DECL(BIF_PixelSearch);
 BIF_DECL(BIF_Reg);
 BIF_DECL(BIF_Random);
 BIF_DECL(BIF_Sound);
@@ -3423,15 +3415,23 @@ bool ScriptGetKeyState(vk_type aVK, KeyStateTypes aKeyStateType);
 bool ScriptGetJoyState(JoyControls aJoy, int aJoystickID, ExprTokenType &aToken, LPTSTR aBuf);
 
 HWND DetermineTargetWindow(ExprTokenType *aParam[], int aParamCount);
+ResultType DetermineTargetControl(HWND &aControl, HWND &aWindow, ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount);
+#define DETERMINE_TARGET_CONTROL(param_offset) \
+	HWND target_window, control_window; \
+	if (!DetermineTargetControl(control_window, target_window, aResultToken, aParam + param_offset, aParamCount - param_offset)) \
+		return; \
+	if (!target_window || !control_window) \
+		goto error
 
 LPTSTR GetExitReasonString(ExitReasons aExitReason);
 
 void ControlGetListView(ResultToken &aResultToken, HWND aHwnd, LPTSTR aOptions);
 bool ControlSetTab(ResultToken &aResultToken, HWND aHwnd, DWORD aTabIndex);
 
-ResultType PixelSearch(Var *aOutputVarX, Var *aOutputVarY
+void PixelSearch(Var *aOutputVarX, Var *aOutputVarY
 	, int aLeft, int aTop, int aRight, int aBottom, COLORREF aColorRGB
-	, int aVariation, LPTSTR aOptions, ResultToken *aIsPixelGetColor);
+	, int aVariation, LPTSTR aOptions, bool aIsPixelGetColor
+	, ResultToken &aResultToken);
 
 ResultType SoundSetGet2kXP(ResultToken &aResultToken, LPTSTR aSetting
 	, DWORD aComponentType, int aComponentInstance, DWORD aControlType, LPTSTR aDevice);

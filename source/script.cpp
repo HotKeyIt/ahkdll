@@ -73,37 +73,45 @@ FuncEntry g_BIF[] =
 	BIF1(ComObjQuery, 2, 3),
 	BIFn(ComObjType, 1, 2, BIF_ComObjTypeOrValue),
 	BIFn(ComObjValue, 1, 1, BIF_ComObjTypeOrValue),
-	BIFn(ControlAddItem, 1, 6, BIF_Control),
-	BIFn(ControlChoose, 1, 6, BIF_Control),
-	BIFn(ControlChooseString, 1, 6, BIF_Control),
-	BIFn(ControlDeleteItem, 1, 6, BIF_Control),
-	BIFn(ControlEditPaste, 1, 6, BIF_Control),
-	BIFn(ControlFindItem, 1, 6, BIF_ControlGet),
-	BIFn(ControlGetChecked, 0, 5, BIF_ControlGet),
-	BIFn(ControlGetChoice, 0, 5, BIF_ControlGet),
-	BIFn(ControlGetCurrentCol, 0, 5, BIF_ControlGet),
-	BIFn(ControlGetCurrentLine, 0, 5, BIF_ControlGet),
-	BIFn(ControlGetEnabled, 0, 5, BIF_ControlGet),
-	BIFn(ControlGetExStyle, 0, 5, BIF_ControlGet),
+	BIFn(ControlAddItem, 2, 6, BIF_Control),
+	BIFn(ControlChoose, 2, 6, BIF_Control),
+	BIFn(ControlChooseString, 2, 6, BIF_Control),
+	BIF1(ControlClick, 0, 8),
+	BIFn(ControlDeleteItem, 2, 6, BIF_Control),
+	BIFn(ControlEditPaste, 2, 6, BIF_Control),
+	BIFn(ControlFindItem, 2, 6, BIF_ControlGet),
+	BIF1(ControlFocus, 1, 5),
+	BIFn(ControlGetChecked, 1, 5, BIF_ControlGet),
+	BIFn(ControlGetChoice, 1, 5, BIF_ControlGet),
+	BIF1(ControlGetClassNN, 1, 5),
+	BIFn(ControlGetCurrentCol, 1, 5, BIF_ControlGet),
+	BIFn(ControlGetCurrentLine, 1, 5, BIF_ControlGet),
+	BIFn(ControlGetEnabled, 1, 5, BIF_ControlGet),
+	BIFn(ControlGetExStyle, 1, 5, BIF_ControlGet),
 	BIF1(ControlGetFocus, 0, 4),
-	BIFn(ControlGetHwnd, 0, 5, BIF_ControlGet),
-	BIFn(ControlGetLine, 1, 6, BIF_ControlGet),
-	BIFn(ControlGetLineCount, 0, 5, BIF_ControlGet),
+	BIFn(ControlGetHwnd, 1, 5, BIF_ControlGet),
+	BIFn(ControlGetLine, 2, 6, BIF_ControlGet),
+	BIFn(ControlGetLineCount, 1, 5, BIF_ControlGet),
 	BIFn(ControlGetList, 0, 6, BIF_ControlGet),
-	BIFn(ControlGetSelected, 0, 5, BIF_ControlGet),
-	BIFn(ControlGetStyle, 0, 5, BIF_ControlGet),
-	BIFn(ControlGetTab, 0, 5, BIF_ControlGet),
-	BIF1(ControlGetText, 0, 5),
-	BIFn(ControlGetVisible, 0, 5, BIF_ControlGet),
-	BIFn(ControlHide, 0, 5, BIF_Control),
-	BIFn(ControlHideDropDown, 0, 5, BIF_Control),
-	BIFn(ControlSetChecked, 1, 6, BIF_Control),
-	BIFn(ControlSetEnabled, 1, 6, BIF_Control),
-	BIFn(ControlSetExStyle, 1, 6, BIF_Control),
-	BIFn(ControlSetStyle, 1, 6, BIF_Control),
-	BIFn(ControlSetTab, 1, 6, BIF_Control),
-	BIFn(ControlShow, 0, 5, BIF_Control),
-	BIFn(ControlShowDropDown, 0, 5, BIF_Control),
+	BIF1(ControlGetPos, 0, 9, {1, 2, 3, 4}),
+	BIFn(ControlGetSelected, 1, 5, BIF_ControlGet),
+	BIFn(ControlGetStyle, 1, 5, BIF_ControlGet),
+	BIFn(ControlGetTab, 1, 5, BIF_ControlGet),
+	BIF1(ControlGetText, 1, 5),
+	BIFn(ControlGetVisible, 1, 5, BIF_ControlGet),
+	BIFn(ControlHide, 1, 5, BIF_Control),
+	BIFn(ControlHideDropDown, 1, 5, BIF_Control),
+	BIF1(ControlMove, 0, 9),
+	BIFn(ControlSend, 1, 6, BIF_ControlSend),
+	BIFn(ControlSendText, 1, 6, BIF_ControlSend),
+	BIFn(ControlSetChecked, 2, 6, BIF_Control),
+	BIFn(ControlSetEnabled, 2, 6, BIF_Control),
+	BIFn(ControlSetExStyle, 2, 6, BIF_Control),
+	BIFn(ControlSetStyle, 2, 6, BIF_Control),
+	BIFn(ControlSetTab, 2, 6, BIF_Control),
+	BIF1(ControlSetText, 2, 6),
+	BIFn(ControlShow, 1, 5, BIF_Control),
+	BIFn(ControlShowDropDown, 1, 5, BIF_Control),
 	BIF1(Cos, 1, 1),
 	BIF1(CriticalObject, 0, 2),
 	BIF1(CryptAES, 3, 5),
@@ -158,6 +166,7 @@ FuncEntry g_BIF[] =
 	BIF1(IL_Add, 2, 4),
 	BIF1(IL_Create, 0, 3),
 	BIF1(IL_Destroy, 1, 1),
+	BIF1(ImageSearch, 7, 7, {1, 2}),
 	BIF1(IniRead, 1, 4),
 	BIFn(Input, 0, 3, BIF_Input),
 	BIF1(InputBox, 0, 4),
@@ -229,6 +238,7 @@ FuncEntry g_BIF[] =
 	BIF1(OnMessage, 2, 4),
 	BIF1(Ord, 1, 1),
 	BIF1(PixelGetColor, 2, 3),
+	BIF1(PixelSearch, 7, 9, {1, 2}),
 	BIFn(PostMessage, 1, 8, BIF_PostSendMessage),
 	BIFn(ProcessClose, 1, 1, BIF_Process),
 	BIFn(ProcessExist, 0, 1, BIF_Process),
@@ -267,6 +277,7 @@ FuncEntry g_BIF[] =
 	BIFn(StrUpper, 1, 2, BIF_StrCase),
 	BIF1(SubStr, 2, 3),
 	BIF1(SysGet, 1, 1),
+	BIF1(SysGetIPAddresses, 0, 0),
 	BIF1(Tan, 1, 1),
 	BIF1(TraySetIcon, 0, 3),
 	BIFn(Trim, 1, 2, BIF_Trim),
@@ -384,10 +395,6 @@ VarEntry g_BIV_A[] =
 	A_w(IconTip),
 	A_wx(Index, BIV_LoopIndex, BIV_LoopIndex_Set),
 	A_(InitialWorkingDir),
-	A_x(IPAddress1, BIV_IPAddress),
-	A_x(IPAddress2, BIV_IPAddress),
-	A_x(IPAddress3, BIV_IPAddress),
-	A_x(IPAddress4, BIV_IPAddress),
 	A_(Is64bitOS),
 	A_(IsAdmin),
 	A_(IsCompiled),
@@ -1260,7 +1267,7 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 		// condition is a path being too long for GetFullPathName to expand it into buf,
 		// in which case buf and mFileSpec are now empty, and this will cause LoadFromFile()
 		// to fail and the program to exit.
-		//mFileDir = _T(""); // Already done by the constructor.
+		mFileDir = g_WorkingDirOrig;
 		filename_marker = buf;
 	}
 	if (   !(mFileName = g_SimpleHeap->Malloc(filename_marker))   )
@@ -2283,11 +2290,18 @@ UINT Script::LoadFromFile()
 	DWORD attr = g_RunStdIn ? 0 : GetFileAttributes(mFileSpec); // v1.1.17: Don't check if reading script from stdin.
 	if (attr == MAXDWORD && !g_hResource) // File does not exist or lacking the authorization to get its attributes.
 	{
+		if (!g_script->mErrorStdOut)
+		{
+			TCHAR buf[MAX_PATH + 256];
+			sntprintf(buf, _countof(buf), _T("%s\n%s"), ERR_SCRIPT_NOT_FOUND, mFileSpec);
+			MsgBox(buf, MB_ICONHAND);
+		}
+		else
+		{
+			Line::sSourceFile = &mFileSpec;
+			ScriptError(ERR_SCRIPT_NOT_FOUND);
+		}
 		return LOADING_FAILED;
-		TCHAR buf[MAX_PATH + 256];
-		sntprintf(buf, _countof(buf), _T("Script file not found:\n%s"), mFileSpec);
-		MsgBox(buf, MB_ICONHAND);
-		return 0;
 	}
 
 	// v1.0.42: Placeholder to use in place of a NULL label to simplify code in some places.
@@ -14110,8 +14124,6 @@ ResultType Line::Perform()
 	Var *output_var = OUTPUT_VAR; // Okay if NULL. Users of it should only consider it valid if their first arg is actually an output_variable.
 	global_struct &g = *::g; // Reduces code size due to replacing so many g-> with g. Eclipsing ::g with local g makes compiler remind/enforce the use of the right one.
 	ToggleValueType toggle;  // For commands that use on/off/neutral.
-	// Use signed values for these in case they're really given an explicit negative value:
-	vk_type vk; // For GetKeyState.
 
 	// Even though the loading-parser already checked, check again, for now,
 	// at least until testing raises confidence.  UPDATE: Don't do this because
@@ -14123,12 +14135,6 @@ ResultType Line::Perform()
 	{
 	case ACT_SPLITPATH:
 		return SplitPath(ARG1);
-
-	case ACT_PIXELSEARCH:
-		// ArgToInt() works on ARG7 (the color) because any valid BGR or RGB color has 0x00 in the high order byte:
-		return PixelSearch(ARGVAR1, ARGVAR2, ArgToInt(3), ArgToInt(4), ArgToInt(5), ArgToInt(6), ArgToInt(7), ArgToInt(8), ARG9, false);
-	case ACT_IMAGESEARCH:
-		return ImageSearch(ArgToInt(3), ArgToInt(4), ArgToInt(5), ArgToInt(6), ARG7);
 
 	case ACT_SEND:
 	case ACT_SENDTEXT:
@@ -14243,23 +14249,6 @@ ResultType Line::Perform()
 	case ACT_MENUSELECT:
 		return MenuSelect(ELEVEN_ARGS);
 
-	case ACT_CONTROLSEND:
-	case ACT_CONTROLSENDTEXT:
-		return ControlSend(SIX_ARGS, mActionType == ACT_CONTROLSENDTEXT ? SCM_RAW_TEXT : SCM_NOT_RAW);
-
-	case ACT_CONTROLCLICK:
-		if (!(vk = ConvertMouseButton(ARG4))) // Treats blank as "Left".
-			return LineError(ERR_PARAM4_INVALID, FAIL, ARG4);
-		return ControlClick(vk, *ARG5 ? ArgToInt(5) : 1, ARG6, ARG1, ARG2, ARG3, ARG7, ARG8);
-
-	case ACT_CONTROLMOVE:
-		return ControlMove(NINE_ARGS);
-	case ACT_CONTROLGETPOS:
-		return ControlGetPos(ARG5, ARG6, ARG7, ARG8, ARG9);
-	case ACT_CONTROLFOCUS:
-		return ControlFocus(FIVE_ARGS);
-	case ACT_CONTROLSETTEXT:
-		return ControlSetText(SIX_ARGS);
 	case ACT_STATUSBARWAIT:
 		return StatusBarWait(EIGHT_ARGS);
 	case ACT_WINSETTITLE:
@@ -14502,7 +14491,7 @@ ResultType Line::Perform()
 
 		//////////////////////////////////////////////////////////////////////////
 	case ACT_COORDMODE:
-		return Script::SetCoordMode(ARG1, ARG2);
+		return Script::SetCoordMode(ARG1, *ARG2 ? ARG2 : _T("Screen"));
 
 	case ACT_SETDEFAULTMOUSESPEED:
 		g.DefaultMouseSpeed = (UCHAR)ArgToInt(1);

@@ -341,19 +341,6 @@ Action g_act[] =
 	, {_T("SendPlay"), 1, 1, false, NULL}     //
 	, {_T("SendEvent"), 1, 1, false, NULL}    // (due to rarity, there is no raw counterpart for this one)
 
-	// For these, the "control" param can be blank.  The window's first visible control will
-	// be used.  For this first one, allow a minimum of zero, otherwise, the first param (control)
-	// would be considered mandatory-non-blank by default.  It's easier to make all the params
-	// optional and validate elsewhere that the 2nd one specifically isn't blank:
-	, {_T("ControlSend"), 1, 6, false, NULL} // Chars-to-Send, Control, std. 4 window params.
-	, {_T("ControlSendText"), 1, 6, false, NULL} // Chars-to-Send, Control, std. 4 window params.
-	, {_T("ControlClick"), 0, 8, false, {5, 0}} // Control, WinTitle, WinText, WhichButton, ClickCount, Hold/Release, ExcludeTitle, ExcludeText
-	, {_T("ControlMove"), 0, 9, false, {1, 2, 3, 4, 0}} // x, y, w, h, Control, WinTitle, WinText, ExcludeTitle, ExcludeText
-	, {_T("ControlGetPos"), 0, 9, true, NULL} // Four optional output vars: xpos, ypos, width, height, control, std. 4 window params.
-	, {_T("ControlFocus"), 0, 5, false, NULL}     // Control, std. 4 window params
-	, {_T("ControlSetText"), 1, 6, false, NULL}   // new text, Control, std. 4 window params
-	, {_T("Control"), 1, 7, false, NULL}   // Command, Value, Control, std. 4 window params
-
 	, {_T("SendMode"), 1, 1, false, NULL}
 	, {_T("SendLevel"), 1, 1, false, {1, 0}}
 	, {_T("CoordMode"), 1, 2, false, NULL} // Attribute, screen|relative
@@ -383,10 +370,6 @@ Action g_act[] =
 	, {_T("MenuSelect"), 0, 11, false, NULL} // WinTitle, WinText, Menu name, 6 optional sub-menu names, ExcludeTitle/Text
 
 	, {_T("WinSetTitle"), 1, 5, false, NULL} // newtitle, title, text, exclude-title, exclude-text
-
-	, {_T("PixelSearch"), 0, 9, true, {3, 4, 5, 6, 7, 8, 0}} // OutputX, OutputY, left, top, right, bottom, Color, Variation [, RGB]
-	, {_T("ImageSearch"), 0, 7, true, {3, 4, 5, 6, 0}} // OutputX, OutputY, left, top, right, bottom, ImageFile
-	// NOTE FOR THE ABOVE: 0 min args so that the output vars can be optional.
 
 	// See above for why minimum is 1 vs. 2:
 	, {_T("GroupAdd"), 1, 5, false, NULL} // Group name, WinTitle, WinText, exclude-title/text

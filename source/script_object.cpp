@@ -329,7 +329,9 @@ bool Object::Delete()
 		// not actually call any script functions) because this function is probably executed much
 		// less often in most cases.
 		PRIVATIZE_S_DEREF_BUF;
+		Line *curr_line = g_script->mCurrLine;
 #ifndef _USRDLL
+
 		PMYTEB curr_teb = NULL;
 		PVOID tls = NULL;
 		if (!g)
@@ -362,6 +364,8 @@ bool Object::Delete()
 		// reliably by our caller, so restore it.
 		if (exc)
 			g->ThrownToken = exc;
+		g_script->mCurrLine = curr_line; // Prevent misleading error reports/Exception() stack trace.
+
 #ifndef _USRDLL
 		if (tls)
 			curr_teb->ThreadLocalStoragePointer = tls;
@@ -1993,7 +1997,7 @@ ResultType STDMETHODCALLTYPE Func::Invoke(ResultToken &aResultToken, ExprTokenTy
 				if (param > 0 && (param <= mParamCount || mIsVariadic))
 					_o_return(param > mMinParams);
 				else
-					_o_return_empty;
+					_o_throw(ERR_PARAM2_INVALID);
 			}
 			else
 				_o_return(mMinParams != mParamCount || mIsVariadic); // True if any params are optional.
@@ -2006,7 +2010,7 @@ ResultType STDMETHODCALLTYPE Func::Invoke(ResultToken &aResultToken, ExprTokenTy
 				if (param > 0 && (param <= mParamCount || mIsVariadic))
 					_o_return(param <= mParamCount && mParam[param-1].is_byref);
 				else
-					_o_return_empty;
+					_o_throw(ERR_PARAM2_INVALID);
 			}
 			else
 			{
