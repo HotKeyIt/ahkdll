@@ -446,18 +446,10 @@ Script::~Script() // Destructor.
 		// Above call should not return FAIL, since the only way FAIL can realistically happen is
 		// when a GUI window is still using the menu as its menu bar.  But all GUI windows are gone now.
 	}
+	mFirstMenu = NULL;
+	mLastMenu = NULL;
+	mTrayMenu = NULL;
 #ifdef _USRDLL
-	if (mFirstMenu != mTrayMenu)
-	{
-		mFirstMenu = NULL;
-		mLastMenu = NULL;
-		mTrayMenu = NULL;
-	}
-	else if (mFirstMenu)
-	{
-		mFirstMenu->mNextMenu = NULL;
-		mLastMenu = mFirstMenu;
-	}
 	mTrayIconTip = NULL;
 	mPriorHotkeyStartTime = 0;
 #endif
