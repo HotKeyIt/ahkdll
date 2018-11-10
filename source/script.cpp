@@ -2258,7 +2258,7 @@ ResultType Script::LoadIncludedText(LPTSTR aScript,LPCTSTR aPathToShow)
 	LineNumberType pending_buf_line_number, saved_line_number;
 #ifndef MINIDLL
 	HookActionType hook_action;
-	bool is_label, suffix_has_tilde, hook_is_mandatory, in_comment_section, hotstring_options_all_valid;
+	bool is_label, suffix_has_tilde, hook_is_mandatory, in_comment_section, hotstring_options_all_valid, hotstring_execute;
 	ResultType hotkey_validity;
 #else
 	bool is_label, in_comment_section;
@@ -2993,13 +2993,12 @@ examine_line:
 		// ": & somekey" is not valid (since colon is a shifted key) and colon itself
 		// should instead be defined as "+;::".  It also relies on short-circuit boolean:
 		hotstring_start = NULL;
-		hotstring_options = NULL; // Set default as "no options were specified for this hotstring".
 		hotkey_flag = NULL;
 		if (buf[0] == ':' && buf[1])
 		{
+			hotstring_options = buf + 1; // Point it to the hotstring's option letters, if any.
 			if (buf[1] != ':')
 			{
-				hotstring_options = buf + 1; // Point it to the hotstring's option letters.
 				// The following relies on the fact that options should never contain a literal colon.
 				// ALSO, the following doesn't use IS_HOTSTRING_OPTION() for backward compatibility,
 				// performance, and because it seems seldom if ever necessary at this late a stage.
@@ -3010,11 +3009,19 @@ examine_line:
 			}
 			else // Double-colon, so it's a hotstring if there's more after this (but this means no options are present).
 				if (buf[2])
-					hotstring_start = buf + 2; // And leave hotstring_options at its default of NULL to indicate no options.
+					hotstring_start = buf + 2;
 				//else it's just a naked "::", which is considered to be an ordinary label whose name is colon.
 		}
 		if (hotstring_start)
 		{
+			// Check for 'X' option early since escape sequence processing depends on it.
+			hotstring_execute = g_HSSameLineAction;
+			for (cp = hotstring_options; cp < hotstring_start; ++cp)
+				if (ctoupper(*cp) == 'X')
+				{
+					hotstring_execute = cp[1] != '0';
+					break;
+				}
 			// Find the hotstring's final double-colon by considering escape sequences from left to right.
 			// This is necessary for to handles cases such as the following:
 			// ::abc```::::Replacement String
@@ -3031,7 +3038,9 @@ examine_line:
 					if (*cp1 == ':') // Found a non-escaped double-colon, so this is the right one.
 					{
 						hotkey_flag = cp++;  // Increment to have loop skip over both colons.
-						// and the continue with the loop so that escape sequences in the replacement
+						if (hotstring_execute)
+							break; // Let ParseAndAddLine() properly handle any escape sequences.
+						// else continue with the loop so that escape sequences in the replacement
 						// text (if there is replacement text) are also translated.
 					}
 					// else just a single colon, or the second colon of an escaped pair (`::), so continue.
@@ -3248,26 +3257,25 @@ examine_line:
 					return ScriptError(_T("This hotstring is missing its abbreviation."), buf); // Display buf vs. hotkey_flag in case the line is simply "::::".
 				}
 				// In the case of hotstrings, hotstring_start is the beginning of the hotstring itself,
-				// i.e. the character after the second colon.  hotstring_options is NULL if no options,
-				// otherwise it's the first character in the options list (option string is not terminated,
-				// but instead ends in a colon).  hotkey_flag is blank if it's not an auto-replace
-				// hotstring, otherwise it contains the auto-replace text.
+				// i.e. the character after the second colon.  hotstring_options is the first character
+				// in the options list (which is terminated by a colon).  hotkey_flag is blank or the
+				// hotstring's auto-replace text or same-line action.
 				// v1.0.42: Unlike hotkeys, duplicate hotstrings are not detected.  This is because
 				// hotstrings are less commonly used and also because it requires more code to find
 				// hotstring duplicates (and performs a lot worse if a script has thousands of
 				// hotstrings) because of all the hotstring options.
-				if (!Hotstring::AddHotstring(mLastLabel->mName, mLastLabel, hotstring_options ? hotstring_options : _T("")
-					, hotstring_start, hotkey_flag, has_continuation_section))
+				if (!Hotstring::AddHotstring(mLastLabel->mName, mLastLabel, hotstring_options
+					, hotstring_start, hotstring_execute ? _T("") : hotkey_flag, has_continuation_section))
 					return FAIL;
 				// The following section is similar to the one for hotkeys below, but is done after
 				// parsing the hotstring's options. An attempt at combining the two sections actually
 				// increased the final code size, so they're left separate.
 				if (*hotkey_flag)
 				{
-					if (Hotstring::shs[Hotstring::sHotstringCount - 1]->mExecuteAction)
+					if (hotstring_execute)
 						if (!ParseAndAddLine(hotkey_flag))
 							return FAIL;
-					// This is done for hotstrings with same-line action via 'E' and also auto-replace
+					// This is done for hotstrings with same-line action via 'X' and also auto-replace
 					// hotstrings in case gosub/goto is ever used to jump to their labels:
 					if (!AddLine(ACT_RETURN))
 						return FAIL;
@@ -3772,7 +3780,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 	LineNumberType pending_buf_line_number, saved_line_number;
 #ifndef MINIDLL
 	HookActionType hook_action;
-	bool is_label, suffix_has_tilde, hook_is_mandatory, in_comment_section, hotstring_options_all_valid;
+	bool is_label, suffix_has_tilde, hook_is_mandatory, in_comment_section, hotstring_options_all_valid, hotstring_execute;
 	ResultType hotkey_validity;
 #else
 	bool is_label, in_comment_section;
@@ -4536,13 +4544,12 @@ examine_line:
 		// ": & somekey" is not valid (since colon is a shifted key) and colon itself
 		// should instead be defined as "+;::".  It also relies on short-circuit boolean:
 		hotstring_start = NULL;
-		hotstring_options = NULL; // Set default as "no options were specified for this hotstring".
 		hotkey_flag = NULL;
 		if (buf[0] == ':' && buf[1])
 		{
+			hotstring_options = buf + 1; // Point it to the hotstring's option letters, if any.
 			if (buf[1] != ':')
 			{
-				hotstring_options = buf + 1; // Point it to the hotstring's option letters.
 				// The following relies on the fact that options should never contain a literal colon.
 				// ALSO, the following doesn't use IS_HOTSTRING_OPTION() for backward compatibility,
 				// performance, and because it seems seldom if ever necessary at this late a stage.
@@ -4553,11 +4560,19 @@ examine_line:
 			}
 			else // Double-colon, so it's a hotstring if there's more after this (but this means no options are present).
 				if (buf[2])
-					hotstring_start = buf + 2; // And leave hotstring_options at its default of NULL to indicate no options.
+					hotstring_start = buf + 2;
 				//else it's just a naked "::", which is considered to be an ordinary label whose name is colon.
 		}
 		if (hotstring_start)
 		{
+			// Check for 'X' option early since escape sequence processing depends on it.
+			hotstring_execute = g_HSSameLineAction;
+			for (cp = hotstring_options; cp < hotstring_start; ++cp)
+				if (ctoupper(*cp) == 'X')
+				{
+					hotstring_execute = cp[1] != '0';
+					break;
+				}
 			// Find the hotstring's final double-colon by considering escape sequences from left to right.
 			// This is necessary for to handles cases such as the following:
 			// ::abc```::::Replacement String
@@ -4574,7 +4589,9 @@ examine_line:
 					if (*cp1 == ':') // Found a non-escaped double-colon, so this is the right one.
 					{
 						hotkey_flag = cp++;  // Increment to have loop skip over both colons.
-						// and the continue with the loop so that escape sequences in the replacement
+						if (hotstring_execute)
+							break; // Let ParseAndAddLine() properly handle any escape sequences.
+						// else continue with the loop so that escape sequences in the replacement
 						// text (if there is replacement text) are also translated.
 					}
 					// else just a single colon, or the second colon of an escaped pair (`::), so continue.
@@ -4797,26 +4814,25 @@ examine_line:
 					return ScriptError(_T("This hotstring is missing its abbreviation."), buf); // Display buf vs. hotkey_flag in case the line is simply "::::".
 				}
 				// In the case of hotstrings, hotstring_start is the beginning of the hotstring itself,
-				// i.e. the character after the second colon.  hotstring_options is NULL if no options,
-				// otherwise it's the first character in the options list (option string is not terminated,
-				// but instead ends in a colon).  hotkey_flag is blank if it's not an auto-replace
-				// hotstring, otherwise it contains the auto-replace text.
+				// i.e. the character after the second colon.  hotstring_options is the first character
+				// in the options list (which is terminated by a colon).  hotkey_flag is blank or the
+				// hotstring's auto-replace text or same-line action.
 				// v1.0.42: Unlike hotkeys, duplicate hotstrings are not detected.  This is because
 				// hotstrings are less commonly used and also because it requires more code to find
 				// hotstring duplicates (and performs a lot worse if a script has thousands of
 				// hotstrings) because of all the hotstring options.
-				if (!Hotstring::AddHotstring(mLastLabel->mName, mLastLabel, hotstring_options ? hotstring_options : _T("")
-					, hotstring_start, hotkey_flag, has_continuation_section))
+				if (!Hotstring::AddHotstring(mLastLabel->mName, mLastLabel, hotstring_options
+					, hotstring_start, hotstring_execute ? _T("") : hotkey_flag, has_continuation_section))
 					goto FAIL;
 				// The following section is similar to the one for hotkeys below, but is done after
 				// parsing the hotstring's options. An attempt at combining the two sections actually
 				// increased the final code size, so they're left separate.
 				if (*hotkey_flag)
 				{
-					if (Hotstring::shs[Hotstring::sHotstringCount - 1]->mExecuteAction)
+					if (hotstring_execute)
 						if (!ParseAndAddLine(hotkey_flag))
 							return FAIL;
-					// This is done for hotstrings with same-line action via 'E' and also auto-replace
+					// This is done for hotstrings with same-line action via 'X' and also auto-replace
 					// hotstrings in case gosub/goto is ever used to jump to their labels:
 					if (!AddLine(ACT_RETURN))
 						return FAIL;
@@ -5461,7 +5477,12 @@ size_t Script::GetLine(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSect
 			break; // Once the first valid comment-flag is found, nothing after it can matter.
 		}
 		else // No whitespace to the left.
-			if (*prevp == g_EscapeChar) // Remove the escape char.
+		{
+			// The following is done here, at this early stage, to support escaping the comment flag in
+			// hotkeys and directives (the latter is mostly for backward-compatibility).
+			LPTSTR p;
+			for (p = prevp; p > aBuf && *p == g_EscapeChar && p[-1] == g_EscapeChar; p -= 2);
+			if (p >= aBuf && *p == g_EscapeChar) // Odd number of escape chars: remove the final escape char.
 			{
 				// The following isn't exactly correct because it prevents an include filename from ever
 				// containing the literal string "`;".  This is because attempts to escape the accent via
@@ -5475,6 +5496,7 @@ size_t Script::GetLine(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSect
 			}
 			// else there wasn't any whitespace to its left, so keep looking in case there's
 			// another further on in the line.
+		}
 	} // for()
 
 	return aBuf_length; // The above is responsible for keeping aBufLength up-to-date with any changes to aBuf.
@@ -15696,7 +15718,9 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ExprTokenType *aResultToken, Lin
 				ExprTokenType *thrown_token = g.ThrownToken;
 				g.ThrownToken = NULL; // Must clear this temporarily to avoid arbitrarily re-throwing it.
 				Line *invalid_jump; // Don't overwrite jump_to_line in case the try block used goto.
+				PRIVATIZE_S_DEREF_BUF; // In case return was used and is returning the contents of the deref buf.
 				ResultType res = line->ExecUntil(ONLY_ONE_LINE, NULL, &invalid_jump);
+				DEPRIVATIZE_S_DEREF_BUF;
 				if (res != OK || invalid_jump)
 				{
 					if (thrown_token) // The new error takes precedence over this one.
