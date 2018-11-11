@@ -189,8 +189,8 @@ EXPORT int ahkPause(LPTSTR aChangeTo, DWORD aThreadID) //Change pause state of a
 	if (!g->IsPaused && ((int)aChangeTo == 1 || *aChangeTo == '1' || ((*aChangeTo == 'O' || *aChangeTo == 'o') && (*(aChangeTo + 1) == 'N' || *(aChangeTo + 1) == 'n'))))
 	{
 		Hotkey::ResetRunAgainAfterFinished();
-		g->IsPaused = false;
-		--g_nPausedThreads; // For this purpose the idle thread is counted as a paused thread.
+		g->IsPaused = true;
+		++g_nPausedThreads; // For this purpose the idle thread is counted as a paused thread.
 		g_script->UpdateTrayIcon();
 	}
 	else if (g->IsPaused)
