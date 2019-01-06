@@ -28,7 +28,7 @@
 	return thread
 }
 Exethread_exit(ThreadID){
-	static pExitApp:=NumGet(GetProcAddress(0,"g_ThreadExitApp"),"PTR"),Exethread_CloseWindows:=RegisterCallback("Exethread_CloseWindows")
+	static pExitApp:=NumGet(GetProcAddress(0,"g_ThreadExitApp"),"PTR"),Exethread_CloseWindows:=CallbackCreate("Exethread_CloseWindows")
 	if hThread:=OpenThread(THREAD_ALL_ACCESS:=2032639,true,ThreadID)
 		success:=QueueUserAPC(pExitApp,hThread,0),CloseHandle(hThread),PostThreadMessage(ThreadID, 0, 0, 0),EnumThreadWindows(ThreadID,Exethread_CloseWindows,0)
 	return success
