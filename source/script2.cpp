@@ -11326,8 +11326,6 @@ bool IsDllArgTypeName(LPTSTR name)
 	return param.type != DLL_ARG_INVALID;
 }
 
-
-
 void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free) // L31: Contains code extracted from BIF_DllCall for reuse in ExpressionToPostfix.
 {
 	int i;
@@ -11336,12 +11334,6 @@ void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free) // L31: 
 #ifndef UNICODE
 	char *function_name;
 #endif
-
-	// Define the standard libraries here. If they reside in %SYSTEMROOT%\system32 it is not
-	// necessary to specify the full path (it wouldn't make sense anyway).
-	static HMODULE sStdModule[] = {GetModuleHandle(_T("user32")), GetModuleHandle(_T("kernel32"))
-		, GetModuleHandle(_T("comctl32")), GetModuleHandle(_T("gdi32"))}; // user32 is listed first for performance.
-	static const int sStdModule_count = _countof(sStdModule);
 
 	// Make a modifiable copy of param1 so that the DLL name and function name can be parsed out easily, and so that "A" or "W" can be appended if necessary (e.g. MessageBoxA):
 	tcslcpy(param1_buf, aDllFileFunc, _countof(param1_buf) - 1); // -1 to reserve space for the "A" or "W" suffix later below.
@@ -11356,8 +11348,8 @@ void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free) // L31: 
 #endif
 
 		// Since no DLL was specified, search for the specified function among the standard modules.
-		for (i = 0; i < sStdModule_count; ++i)
-			if (   sStdModule[i] && (function = (void *)GetProcAddress(sStdModule[i], function_name))   )
+		for (i = 0; i < g_StdModule_count; ++i)
+			if (   g_StdModule[i] && (function = (void *)GetProcAddress(g_StdModule[i], function_name))   )
 				break;
 		if (!function)
 		{
@@ -11366,8 +11358,8 @@ void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free) // L31: 
 			// function) seems unacceptably high in a custom DLL.  For example, a custom DLL might have
 			// function called "AA" but not one called "A".
 			strcat(function_name, WINAPI_SUFFIX); // 1 byte of memory was already reserved above for the 'A'.
-			for (i = 0; i < sStdModule_count; ++i)
-				if (   sStdModule[i] && (function = (void *)GetProcAddress(sStdModule[i], function_name))   )
+			for (i = 0; i < g_StdModule_count; ++i)
+				if (   g_StdModule[i] && (function = (void *)GetProcAddress(g_StdModule[i], function_name))   )
 					break;
 		}
 	}
@@ -11399,8 +11391,8 @@ void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free) // L31: 
 			// v1.0.34: If it's one of the standard libraries, try the "A" suffix.
 			// jackieku: Try it anyway, there are many other DLLs that use this naming scheme, and it doesn't seem expensive.
 			// If an user really cares he or she can always work around it by editing the script.
-			//for (i = 0; i < sStdModule_count; ++i)
-			//	if (hmodule == sStdModule[i]) // Match found.
+			//for (i = 0; i < g_StdModule_count; ++i)
+			//	if (hmodule == g_StdModule[i]) // Match found.
 			//	{
 					strcat(function_name, WINAPI_SUFFIX); // 1 byte of memory was already reserved above for the 'A'.
 					function = (void *)GetProcAddress(hmodule, function_name);
@@ -16138,7 +16130,7 @@ BIF_DECL(BIF_MemoryLoadLibrary)
 	else
 		data = (unsigned char*)TokenToInt64(*aParam[0]);
 	if (data)
-		module = MemoryLoadLibraryEx(data, size ? size : aParamCount > 1 ? (size_t)TokenToInt64(*aParam[1]) : 0,
+		module = MemoryLoadLibraryEx(data, size ? size : aParamCount > 1 ? (size_t)TokenToInt64(*aParam[1]) : 0, MemoryDefaultAlloc, MemoryDefaultFree,
 									(CustomLoadLibraryFunc)(aParamCount > 2 ? (HCUSTOMMODULE)TokenToInt64(*aParam[2]) : MemoryDefaultLoadLibrary),
 									(CustomGetProcAddressFunc)(aParamCount > 3 ? (HCUSTOMMODULE)TokenToInt64(*aParam[3]) : MemoryDefaultGetProcAddress),
 									(CustomFreeLibraryFunc)(aParamCount > 4 ? (HCUSTOMMODULE)TokenToInt64(*aParam[4]) : MemoryDefaultFreeLibrary),
@@ -16220,7 +16212,7 @@ BIF_DECL(BIF_MemoryLoadString)
 	aResultToken.marker = _T("");
 	if (!TokenToInt64(*aParam[0]))
 		return;
-	LPVOID result;
+	int result;
 	if (ParamIndexIsOmitted(2) || TokenToInt64(*aParam[2]) == 0 )
 		result = MemoryLoadStringEx((HMEMORYMODULE)TokenToInt64(*aParam[0]),(UINT)TokenToInt64(*aParam[1]),0,0,ParamIndexIsOmitted(4) ? 0 : (WORD)TokenToInt64(*aParam[4]));
 	else
