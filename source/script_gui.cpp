@@ -9798,9 +9798,13 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 
 	case WM_VSCROLL: // These two should only be received for sliders and up-downs.
 	case WM_HSCROLL:
+		GuiIndexType aControlIndex;
 		if (   !(pgui = GuiType::FindGui(hWnd))   )
 			break; // Let default proc handle it.
-		else
+		aControlIndex = GUI_HWND_TO_INDEX((HWND)lParam);
+		if (aControlIndex >= pgui->mControlCount 
+			|| (pgui->mControl[aControlIndex]->type != GUI_CONTROL_UPDOWN 
+				&& pgui->mControl[aControlIndex]->type != GUI_CONTROL_SLIDER))
 		{
 			_thread_local static SCROLLINFO aScrollInfo = { sizeof(SCROLLINFO), SIF_ALL };
 			bool bar = iMsg == WM_VSCROLL;
@@ -9850,6 +9854,7 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 
 			aScrollInfo.nPos = new_pos;
 			SetScrollInfo(pgui->mHwnd, bar, &aScrollInfo, true);
+			return 0;
 		}
 		pgui->Event(GUI_HWND_TO_INDEX((HWND)lParam), LOWORD(wParam), GUI_EVENT_NONE, HIWORD(wParam));
 		return 0; // "If an application processes this message, it should return zero."
