@@ -542,13 +542,14 @@ int setscriptstrings(LPTSTR fileName, LPTSTR argv, LPTSTR title)
 	LPTSTR newstring = (LPTSTR)realloc(scriptstring,(_tcslen(fileName) + _tcslen(argv) + _tcslen(title) + 3) * sizeof(TCHAR));
 	if (!newstring)
 		return 1;
+	memset(newstring, 0, (_tcslen(fileName) + _tcslen(argv) + _tcslen(title) + 3) * sizeof(TCHAR));
 	scriptstring = newstring;
 	_tcscpy(scriptstring,fileName);
 	_tcscpy(scriptstring + _tcslen(fileName) + 1,argv);
-	_tcscpy(scriptstring + _tcslen(fileName) + _tcslen(argv) + 1,title);
+	_tcscpy(scriptstring + _tcslen(fileName) + _tcslen(argv) + 2,title);
 	nameHinstanceP.name = scriptstring;
 	nameHinstanceP.argv = scriptstring + _tcslen(fileName) + 1 ;
-	nameHinstanceP.title = scriptstring + _tcslen(fileName) + _tcslen(argv) + 1 ;
+	nameHinstanceP.title = scriptstring + _tcslen(fileName) + _tcslen(argv) + 2 ;
 	return 0;
 }
 
