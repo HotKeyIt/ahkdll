@@ -34,6 +34,11 @@ extern HCUSTOMMODULE g_hKERNEL32;
 extern _QueryPerformanceCounter g_QPC;
 extern double g_QPCtimer;
 extern double g_QPCfreq;
+
+// Define the standard libraries here. If they reside in %SYSTEMROOT%\system32 it is not
+// necessary to specify the full path (it wouldn't make sense anyway).
+extern HMODULE g_StdModule[];
+extern int g_StdModule_count;
 #ifdef _USRDLL
 extern bool g_Reloading;
 extern bool g_Loading;
