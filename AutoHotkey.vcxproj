@@ -668,7 +668,7 @@
     <LibraryPath Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">$(VCInstallDir)lib;$(VCInstallDir)atlmfc\lib;$(WindowsSdkDir)lib;$(FrameworkSDKDir)\lib;$(LibraryPath)</LibraryPath>
     <ExcludePath Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">$(ExcludePath);$(MSBuildFrameworkToolsPath);$(MSBuildFrameworkToolsPath32);</ExcludePath>
     <ExecutablePath Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ExecutablePath);$(WindowsSdkMSBuildTools);$(SystemRoot)\SysWow64;$(FxCopDir);$(PATH);</ExecutablePath>
-    <IncludePath Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IncludePath);$(VCInstallDir)atlmfc\include;$(IncludePath)</IncludePath>
+    <IncludePath Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IncludePath);$(VCInstallDir)atlmfc\include</IncludePath>
     <ReferencePath Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     </ReferencePath>
     <LibraryPath Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(LibraryPath);$(VSInstallDir);$(VSInstallDir)lib</LibraryPath>
@@ -679,7 +679,7 @@
     <LibraryPath Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|Win32'">$(LibraryPath);$(VSInstallDir);$(VSInstallDir)lib</LibraryPath>
     <ExcludePath Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|Win32'">$(WindowsSdkDir)include;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkMSBuildTools);$(VCInstallDir)atlmfc\lib;$(VCInstallDir)lib</ExcludePath>
     <ExecutablePath Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">$(ExecutablePath);$(WindowsSdkMSBuildTools);$(SystemRoot)\SysWow64;$(FxCopDir);$(PATH);</ExecutablePath>
-    <IncludePath Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">$(IncludePath);$(VCInstallDir)atlmfc\include;$(IncludePath)</IncludePath>
+    <IncludePath Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">$(IncludePath);$(VCInstallDir)atlmfc\include</IncludePath>
     <ReferencePath Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'" />
     <LibraryPath Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">$(LibraryPath);$(VSInstallDir);$(VSInstallDir)lib</LibraryPath>
     <ExcludePath Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">$(WindowsSdkDir)include;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSdkMSBuildTools);$(VCInstallDir)atlmfc\lib;$(VCInstallDir)lib</ExcludePath>
@@ -709,6 +709,8 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <GenerateManifest>false</GenerateManifest>
+    <IncludePath>$(IncludePath);$(VCInstallDir)atlmfc\include</IncludePath>
+    <LibraryPath>$(VSInstallDir);$(VSInstallDir)lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">
     <GenerateManifest>false</GenerateManifest>
@@ -746,6 +748,8 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Self-contained|x64'">
     <GenerateManifest>false</GenerateManifest>
+    <IncludePath>$(VC_IncludePath);$(WindowsSdk_71A_IncludePath);$(IncludePath);$(VCInstallDir)atlmfc\include</IncludePath>
+    <LibraryPath>$(VSInstallDir);$(VSInstallDir)lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|x64'">
     <GenerateManifest>false</GenerateManifest>
@@ -795,6 +799,7 @@
       <SmallerTypeCheck Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">false</SmallerTypeCheck>
       <UndefinePreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">
       </UndefinePreprocessorDefinitions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">/Zc:threadSafeInit- %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">true</GenerateDebugInformation>
@@ -932,6 +937,10 @@
       <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</DataExecutionPrevention>
       <MinimumRequiredVersion Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">5.02</MinimumRequiredVersion>
       <MinimumRequiredVersion Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|x64'">5.02</MinimumRequiredVersion>
+      <RandomizedBaseAddress Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">false</RandomizedBaseAddress>
+      <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">false</DataExecutionPrevention>
+      <RandomizedBaseAddress Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|x64'">false</RandomizedBaseAddress>
+      <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|x64'">false</DataExecutionPrevention>
     </Link>
     <Manifest>
       <OutputManifestFile Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">
@@ -1046,7 +1055,7 @@
       <FavorSizeOrSpeed Condition="'$(Configuration)|$(Platform)'=='Self-contained|x64'">Speed</FavorSizeOrSpeed>
     </ClCompile>
     <ClCompile>
-      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">MultiThreaded</RuntimeLibrary>
       <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</MultiProcessorCompilation>
       <TreatWarningAsError Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</TreatWarningAsError>
       <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</MinimalRebuild>
@@ -1168,15 +1177,18 @@
       <IgnoreSpecificDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">
       </IgnoreSpecificDefaultLibraries>
       <MinimumRequiredVersion Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">5.02</MinimumRequiredVersion>
+      <RandomizedBaseAddress Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">false</RandomizedBaseAddress>
+      <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">false</DataExecutionPrevention>
     </Link>
     <Link>
       <ImageHasSafeExceptionHandlers Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ImageHasSafeExceptionHandlers>
-      <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</DataExecutionPrevention>
+      <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</DataExecutionPrevention>
       <IgnoreSpecificDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
       </IgnoreSpecificDefaultLibraries>
       <StackCommitSize Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
       </StackCommitSize>
       <MinimumRequiredVersion Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">5.02</MinimumRequiredVersion>
+      <RandomizedBaseAddress Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</RandomizedBaseAddress>
     </Link>
     <ResourceCompile>
       <Culture Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">0x0409</Culture>
@@ -1188,28 +1200,38 @@
       <IgnoreSpecificDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|x64'">
       </IgnoreSpecificDefaultLibraries>
       <MinimumRequiredVersion Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|x64'">5.02</MinimumRequiredVersion>
+      <RandomizedBaseAddress Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|x64'">false</RandomizedBaseAddress>
+      <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|x64'">false</DataExecutionPrevention>
     </Link>
     <Link>
       <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|x64'">false</GenerateDebugInformation>
       <IgnoreSpecificDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|x64'">
       </IgnoreSpecificDefaultLibraries>
       <MinimumRequiredVersion Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|x64'">5.02</MinimumRequiredVersion>
+      <RandomizedBaseAddress Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|x64'">false</RandomizedBaseAddress>
+      <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|x64'">false</DataExecutionPrevention>
     </Link>
     <Link>
       <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='Self-contained|x64'">false</GenerateDebugInformation>
       <IgnoreSpecificDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Self-contained|x64'">
       </IgnoreSpecificDefaultLibraries>
       <MinimumRequiredVersion Condition="'$(Configuration)|$(Platform)'=='Self-contained|x64'">5.02</MinimumRequiredVersion>
+      <RandomizedBaseAddress Condition="'$(Configuration)|$(Platform)'=='Self-contained|x64'">false</RandomizedBaseAddress>
+      <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='Self-contained|x64'">false</DataExecutionPrevention>
     </Link>
     <Link>
       <IgnoreSpecificDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|x64'">
       </IgnoreSpecificDefaultLibraries>
       <MinimumRequiredVersion Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|x64'">5.02</MinimumRequiredVersion>
+      <RandomizedBaseAddress Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|x64'">false</RandomizedBaseAddress>
+      <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|x64'">false</DataExecutionPrevention>
     </Link>
     <Link>
       <IgnoreSpecificDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|x64'">
       </IgnoreSpecificDefaultLibraries>
       <MinimumRequiredVersion Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|x64'">5.02</MinimumRequiredVersion>
+      <RandomizedBaseAddress Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|x64'">false</RandomizedBaseAddress>
+      <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|x64'">false</DataExecutionPrevention>
     </Link>
     <ResourceCompile>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -1242,6 +1264,9 @@
       </IgnoreSpecificDefaultLibraries>
       <MinimumRequiredVersion Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">5.02</MinimumRequiredVersion>
       <MinimumRequiredVersion Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|x64'">5.02</MinimumRequiredVersion>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">/Zc:threadSafeInit- %(AdditionalOptions)</AdditionalOptions>
+      <RandomizedBaseAddress Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|x64'">false</RandomizedBaseAddress>
+      <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|x64'">false</DataExecutionPrevention>
     </Link>
     <Manifest>
       <OutputManifestFile Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">
@@ -1273,6 +1298,7 @@
       <WholeProgramOptimization Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">false</WholeProgramOptimization>
       <Optimization Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">MaxSpeed</Optimization>
       <FavorSizeOrSpeed Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">Speed</FavorSizeOrSpeed>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">/Zc:threadSafeInit- %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Midl>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">_WIN64</PreprocessorDefinitions>
