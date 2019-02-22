@@ -1303,17 +1303,20 @@ BIF_DECL(BIF_ObjLoad)
 		fread(aBuffer, 1, aSize, fp);
 		fclose(fp);
 	}
-	if (*(unsigned int*)aBuffer == 0x04034b50 && aSize)
+	if (*(unsigned int*)aBuffer == 0x04034b50)
 	{
 		LPVOID aDataBuf;
 		TCHAR *pw[1024] = {};
-		if (!ParamIndexIsOmittedOrEmpty(2))
+		if (!ParamIndexIsOmittedOrEmpty(1))
 		{
-			TCHAR *pwd = TokenToString(*aParam[2]);
-			size_t pwlen = _tcslen(TokenToString(*aParam[2]));
+			TCHAR *pwd = TokenToString(*aParam[1]);
+			size_t pwlen = _tcslen(TokenToString(*aParam[1]));
 			for (size_t i = 0; i <= pwlen; i++)
 				pw[i] = &pwd[i];
 		}
+		aSize = *(ULONG*)((UINT_PTR)aBuffer + 8);
+		if (*(ULONG*)((UINT_PTR)aBuffer + 16) > aSize)
+			aSize = *(ULONG*)((UINT_PTR)aBuffer + 16);
 		DWORD aSizeDeCompressed = DecompressBuffer(aBuffer, aDataBuf, aSize, pw);
 		if (aSizeDeCompressed)
 		{
