@@ -720,9 +720,9 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data, size_t size,
         }
     }
 
-    GetNativeSystemInfo(&sysInfo);
-    alignedImageSize = AlignValueUp(old_header->OptionalHeader.SizeOfImage, sysInfo.dwPageSize);
-    if (alignedImageSize != AlignValueUp(lastSectionEnd, sysInfo.dwPageSize)) {
+    // GetNativeSystemInfo(&sysInfo); // HotKeyIt replace sysInfo.dwPageSize by SectionAlignment
+    alignedImageSize = AlignValueUp(old_header->OptionalHeader.SizeOfImage, old_header->OptionalHeader.SectionAlignment);
+    if (alignedImageSize != AlignValueUp(lastSectionEnd, old_header->OptionalHeader.SectionAlignment)) {
         SetLastError(ERROR_BAD_EXE_FORMAT);
         return NULL;
     }
