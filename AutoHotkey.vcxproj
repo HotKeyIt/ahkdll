@@ -363,6 +363,7 @@
     <ReferencePath>$(VCInstallDir)atlmfc\lib\amd64;$(VCInstallDir)lib\amd64</ReferencePath>
     <ExcludePath>$(ExcludePath);$(MSBuildFrameworkToolsPath);$(MSBuildFrameworkToolsPath32);</ExcludePath>
     <GenerateManifest>false</GenerateManifest>
+    <LinkIncremental>false</LinkIncremental>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <GenerateManifest>false</GenerateManifest>
@@ -514,16 +515,17 @@
     <Link />
     <Link />
     <ClCompile>
-      <OmitFramePointers Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</OmitFramePointers>
+      <OmitFramePointers Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</OmitFramePointers>
       <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</MultiProcessorCompilation>
       <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">MultiThreadedDebugDLL</RuntimeLibrary>
       <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</MinimalRebuild>
-      <StringPooling Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</StringPooling>
+      <StringPooling Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+      </StringPooling>
       <BufferSecurityCheck Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</BufferSecurityCheck>
       <Optimization Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Disabled</Optimization>
       <BasicRuntimeChecks Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">EnableFastChecks</BasicRuntimeChecks>
       <FavorSizeOrSpeed Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Neither</FavorSizeOrSpeed>
-      <SmallerTypeCheck Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</SmallerTypeCheck>
+      <SmallerTypeCheck Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</SmallerTypeCheck>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Use</PrecompiledHeader>
     </ClCompile>
     <ProjectReference>
@@ -592,8 +594,7 @@
       <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">true</MinimalRebuild>
       <BasicRuntimeChecks Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">EnableFastChecks</BasicRuntimeChecks>
       <BufferSecurityCheck Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">true</BufferSecurityCheck>
-      <StringPooling Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">
-      </StringPooling>
+      <StringPooling Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">true</StringPooling>
       <ExceptionHandling Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">Sync</ExceptionHandling>
       <Optimization Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">Disabled</Optimization>
       <FavorSizeOrSpeed Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">Neither</FavorSizeOrSpeed>
@@ -605,14 +606,22 @@
       <ModuleDefinitionFile Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">.\comserver.def</ModuleDefinitionFile>
       <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">true</GenerateDebugInformation>
       <MinimumRequiredVersion Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">5.02</MinimumRequiredVersion>
-      <OptimizeReferences Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">
-      </OptimizeReferences>
-      <EnableCOMDATFolding Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">
-      </EnableCOMDATFolding>
+      <OptimizeReferences Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">true</OptimizeReferences>
+      <EnableCOMDATFolding Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">true</EnableCOMDATFolding>
       <RandomizedBaseAddress Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">false</RandomizedBaseAddress>
       <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">false</DataExecutionPrevention>
       <IgnoreSpecificDefaultLibraries Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">
       </IgnoreSpecificDefaultLibraries>
+      <AddModuleNamesToAssembly Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">
+      </AddModuleNamesToAssembly>
+      <ForceSymbolReferences Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">
+      </ForceSymbolReferences>
+      <DelayLoadDLLs Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">
+      </DelayLoadDLLs>
+      <ImportLibrary Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'" />
+      <LinkTimeCodeGeneration Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">Default</LinkTimeCodeGeneration>
+      <ImageHasSafeExceptionHandlers Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">
+      </ImageHasSafeExceptionHandlers>
     </Link>
     <ResourceCompile>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">_UNICODE;UNICODE;_WIN64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -628,7 +637,7 @@
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">_DEBUG;_WIN64;_USING_V110_SDK71_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
     <ResourceCompile>
-      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">_WIN64;_USING_V110_SDK71_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">_USRDLL;_WIN64;_USING_V110_SDK71_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
     <Midl>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -639,8 +648,13 @@
       </IgnoreSpecificDefaultLibraries>
       <FixedBaseAddress Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
       </FixedBaseAddress>
+      <RandomizedBaseAddress Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</RandomizedBaseAddress>
+      <DataExecutionPrevention Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</DataExecutionPrevention>
     </Link>
     <Link />
+    <ProjectReference>
+      <UseLibraryDependencyInputs Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">false</UseLibraryDependencyInputs>
+    </ProjectReference>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='ReleaseDll' OR '$(Configuration)'=='ReleaseDll(mbcs)'">
     <Link>
