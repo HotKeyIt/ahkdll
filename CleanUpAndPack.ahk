@@ -28,7 +28,6 @@ for k,v in RCData
       MsgBox % "Error Begin: " A_LoopFileFullPath "`n" ErrMsg()
       ExitApp
     }
-    ChangeVersionInfo(A_LoopFileFullPath, hUpdate, {version: version "-H" H_version})
     If !EndUpdateResource(hUpdate,0)
     {
       MsgBox % "End: " ErrMsg()
