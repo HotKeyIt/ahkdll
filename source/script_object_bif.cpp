@@ -1327,6 +1327,13 @@ BIF_DECL(BIF_ObjLoad)
 			free(aDataBuf);
 			aBuffer = (char*)buff;
 		}
+		else
+		{
+			aResultToken.symbol = SYM_STRING;
+			aResultToken.marker = _T("");
+			g_script->ScriptError(_T("ObjLoad: Password mismatch."));
+			return;
+		}
 	}
 	UINT aObjCount = 0;
 	UINT aObjSize = 16;
