@@ -6,7 +6,7 @@ If (InStr(A_AhkVersion,"1")=1) {
 SetWorkingDir,% A_ScriptDir
 
 dirs:=[A_ScriptDir "\bin"]
-subs:={"Win32w":1,"x64w":1}
+subs:={"Win32w":1,"x64w":1,"Win32w_MT":1,"x64w_MT":1}
 exts:=["lib","exp","pdb","iobj","ipdb"]
 for t1,dir in dirs
 	for t2,ext in exts
@@ -18,7 +18,7 @@ for t1,dir in dirs
 		If subs.HasKey(SubStr(A_LoopFileDir,InStr(A_LoopFileDir,"\",1,-1)+1))
 			FileMove,% A_LoopFileFullPath,% RegExReplace(A_LoopFileFullPath,"i)AutoHotkeyDll\.dll","AutoHotkey.dll"),1
 
-RCData:={("bin\Win32w"):["AUTOHOTKEY.DLL"],("bin\x64w"):["AUTOHOTKEY.DLL"]}
+RCData:={("bin\Win32w"):["AUTOHOTKEY.DLL"],("bin\x64w"):["AUTOHOTKEY.DLL"],("bin\Win32w_MT"):["AUTOHOTKEY.DLL"],("bin\x64w_MT"):["AUTOHOTKEY.DLL"]}
 
 for k,v in RCData
   LoopFiles % A_ScriptDir "\" k "\*.dll"
