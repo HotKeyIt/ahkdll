@@ -39,29 +39,57 @@ typedef void *HCUSTOMMODULE;
 extern "C" {
 #endif
 
+typedef LPVOID (*CustomAllocFunc)(LPVOID, SIZE_T, DWORD, DWORD, void*);
+typedef BOOL (*CustomFreeFunc)(LPVOID, SIZE_T, DWORD, void*);
 typedef HCUSTOMMODULE (*CustomLoadLibraryFunc)(LPCSTR, void *);
 typedef FARPROC (*CustomGetProcAddressFunc)(HCUSTOMMODULE, LPCSTR, void *);
 typedef void (*CustomFreeLibraryFunc)(HCUSTOMMODULE, void *);
 
-typedef BOOL(WINAPI *DllEntryProc)(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved);
-typedef int (WINAPI *ExeEntryProc)(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdLine, int nCmdShow);
+struct ExportNameEntry {
+    LPCSTR name;
+    WORD idx;
+};
+
+typedef BOOL (WINAPI *DllEntryProc)(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved);
+typedef int (WINAPI *ExeEntryProc)(void);
+
+#ifdef _WIN64
+typedef struct POINTER_LIST {
+    struct POINTER_LIST *next;
+    void *address;
+} POINTER_LIST;
+#endif
 
 typedef struct {
-	PIMAGE_NT_HEADERS headers;
-	unsigned char *codeBase;
-	HCUSTOMMODULE *modules;
-	int numModules;
-	BOOL initialized;
-	BOOL isDLL;
-	BOOL isRelocated;
-	CustomLoadLibraryFunc loadLibrary;
-	CustomGetProcAddressFunc getProcAddress;
-	CustomFreeLibraryFunc freeLibrary;
-	void *userdata;
-	ExeEntryProc exeEntry;
-	DWORD pageSize;
+    PIMAGE_NT_HEADERS headers;
+    unsigned char *codeBase;
+    HCUSTOMMODULE *modules;
+	HANDLE heapmodules;
+    int numModules;
+    BOOL initialized;
+    BOOL isDLL;
+    BOOL isRelocated;
+    CustomAllocFunc alloc;
+    CustomFreeFunc free;
+    CustomLoadLibraryFunc loadLibrary;
+    CustomGetProcAddressFunc getProcAddress;
+    CustomFreeLibraryFunc freeLibrary;
+    struct ExportNameEntry *nameExportsTable;
+    void *userdata;
+    ExeEntryProc exeEntry;
+    DWORD pageSize;
+#ifdef _WIN64
+    POINTER_LIST *blockedMemory;
+#endif
 } MEMORYMODULE, *PMEMORYMODULE;
 
+typedef struct {
+    LPVOID address;
+    LPVOID alignedAddress;
+    SIZE_T size;
+    DWORD characteristics;
+    BOOL last;
+} SECTIONFINALIZEDATA, *PSECTIONFINALIZEDATA;
 /**
  * Load EXE/DLL from memory location with the given size.
  *
@@ -77,6 +105,8 @@ HMEMORYMODULE MemoryLoadLibrary(const void *, size_t, bool = true);
  * Dependencies will be resolved using passed callback methods.
  */
 HMEMORYMODULE MemoryLoadLibraryEx(const void *, size_t,
+    CustomAllocFunc,
+    CustomFreeFunc,
     CustomLoadLibraryFunc,
     CustomGetProcAddressFunc,
     CustomFreeLibraryFunc,
@@ -105,7 +135,7 @@ void MemoryFreeLibrary(HMEMORYMODULE);
  *
  * Returns a negative value if the entry point could not be executed.
  */
-HANDLE MemoryCallEntryPoint(HMEMORYMODULE, LPTSTR);
+HANDLE MemoryCallEntryPoint(HMEMORYMODULE mod, LPTSTR cmdLine);
 
 /**
  * Find the location of a resource with the specified type and name.
@@ -130,12 +160,28 @@ LPVOID MemoryLoadResource(HMEMORYMODULE, HMEMORYRSRC);
 /**
  * Load a string resource.
  */
-LPVOID MemoryLoadString(HMEMORYMODULE, UINT, LPTSTR, int);
+int MemoryLoadString(HMEMORYMODULE, UINT, LPTSTR, int);
 
 /**
  * Load a string resource with a given language.
  */
-LPVOID MemoryLoadStringEx(HMEMORYMODULE, UINT, LPTSTR, int, WORD);
+int MemoryLoadStringEx(HMEMORYMODULE, UINT, LPTSTR, int, WORD);
+
+/**
+* Default implementation of CustomAllocFunc that calls VirtualAlloc
+* internally to allocate memory for a library
+*
+* This is the default as used by MemoryLoadLibrary.
+*/
+LPVOID MemoryDefaultAlloc(LPVOID, SIZE_T, DWORD, DWORD, void *);
+
+/**
+* Default implementation of CustomFreeFunc that calls VirtualFree
+* internally to free the memory used by a library
+*
+* This is the default as used by MemoryLoadLibrary.
+*/
+BOOL MemoryDefaultFree(LPVOID, SIZE_T, DWORD, void *);
 
 /**
  * Default implementation of CustomLoadLibraryFunc that calls LoadLibraryA
