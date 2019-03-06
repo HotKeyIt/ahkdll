@@ -39,9 +39,6 @@ HCUSTOMMODULE g_hKERNEL32 = NULL;
 _QueryPerformanceCounter g_QPC = NULL;
 double g_QPCtimer = 0.0;
 double g_QPCfreq = 0.0;
-HMODULE g_StdModule[] = { GetModuleHandle(_T("user32")), GetModuleHandle(_T("kernel32"))
-	, GetModuleHandle(_T("comctl32")), GetModuleHandle(_T("gdi32")) }; // user32 is listed first for performance.
-int g_StdModule_count = _countof(g_StdModule);
 #ifdef _USRDLL
 bool g_Reloading = false;
 bool g_Loading = false;
