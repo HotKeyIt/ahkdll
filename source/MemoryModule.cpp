@@ -54,9 +54,17 @@
 #include "MinHook.h"
 
 #if defined _M_X64
+#ifdef STATICLIBRARY
+#pragma comment(lib, "MT_libMinHook.x64.lib")
+#else
 #pragma comment(lib, "libMinHook.x64.lib")
+#endif
 #elif defined _M_IX86
+#ifdef STATICLIBRARY
+#pragma comment(lib, "MT_libMinHook.x86.lib")
+#else
 #pragma comment(lib, "libMinHook.x86.lib")
+#endif
 #endif
 
 #ifdef DEBUG_OUTPUT
@@ -560,7 +568,10 @@ BuildImportTable(PMEMORYMODULE module)
         }
         if (!isMsvcr)
         {
-            tmp = (HCUSTOMMODULE *)realloc(module->modules, (module->numModules + 1)*(sizeof(HCUSTOMMODULE)));
+			if (module->numModules == 0)
+				tmp = (HCUSTOMMODULE *)HeapAlloc(module->heapmodules, 0, sizeof(HCUSTOMMODULE));
+			else
+				tmp = (HCUSTOMMODULE *)HeapReAlloc(module->heapmodules, 0, module->modules, (module->numModules + 1)*(sizeof(HCUSTOMMODULE)));
             if (tmp == NULL) {
                 module->freeLibrary(handle, module->userdata);
                 SetLastError(ERROR_OUTOFMEMORY);
@@ -568,8 +579,8 @@ BuildImportTable(PMEMORYMODULE module)
                 break;
             }
             module->modules = tmp;
-            if (module->numModules == 1)
-                module->modules[0] = NULL;
+            //if (module->numModules == 1)
+            //    module->modules[0] = NULL;
             module->modules[module->numModules++] = handle;
         }
 
@@ -665,7 +676,7 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data, size_t size,
     PIMAGE_NT_HEADERS old_header;
     unsigned char *code, *headers;
     ptrdiff_t locationDelta;
-    SYSTEM_INFO sysInfo;
+    // SYSTEM_INFO sysInfo;
     PIMAGE_SECTION_HEADER section;
     DWORD i;
     size_t optionalSectionSize;
@@ -787,6 +798,7 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data, size_t size,
         return NULL;
     }
 
+	result->heapmodules = HeapCreate(HEAP_ZERO_MEMORY, sizeof(HCUSTOMMODULE), 0); // used for various things
     result->codeBase = code;
     result->isDLL = (old_header->FileHeader.Characteristics & IMAGE_FILE_DLL) != 0;
     result->alloc = allocMemory;
@@ -795,7 +807,7 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data, size_t size,
     result->getProcAddress = getProcAddress;
     result->freeLibrary = freeLibrary;
     result->userdata = userdata;
-    result->pageSize = sysInfo.dwPageSize;
+	result->pageSize = old_header->OptionalHeader.SectionAlignment; // sysInfo.dwPageSize;
 #ifdef _WIN64
     result->blockedMemory = blockedMemory;
 #endif
@@ -853,7 +865,7 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data, size_t size,
 			if (callentry)
 			{
 				DllEntryProc DllEntry = (DllEntryProc)(LPVOID)(code + result->headers->OptionalHeader.AddressOfEntryPoint);
-            
+
 				PCRITICAL_SECTION aLoaderLock; // So no other module can be loaded, expecially due to hooked _RtlPcToFileHeader
 #ifdef _M_IX86 // compiles for x86
 				aLoaderLock = *(PCRITICAL_SECTION*)(__readfsdword(0x30) + 0xA0); //PEB->LoaderLock
@@ -874,7 +886,7 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data, size_t size,
 				if (pHook)
 				{
 					MinHookDisable(pHook);
-					HeapFree(hHeap,0,pHook);
+					HeapFree(hHeap, 0, pHook);
 					HeapDestroy(hHeap);
 				}
 				LeaveCriticalSection(aLoaderLock);
@@ -953,7 +965,7 @@ FARPROC MemoryGetProcAddress(HMEMORYMODULE mod, LPCSTR name)
             DWORD i;
             DWORD *nameRef = (DWORD *) (codeBase + exports->AddressOfNames);
             WORD *ordinal = (WORD *) (codeBase + exports->AddressOfNameOrdinals);
-            struct ExportNameEntry *entry = (struct ExportNameEntry*) malloc(exports->NumberOfNames * sizeof(struct ExportNameEntry));
+			struct ExportNameEntry *entry = (struct ExportNameEntry*) HeapAlloc(module->heapmodules, HEAP_ZERO_MEMORY, exports->NumberOfNames * sizeof(struct ExportNameEntry));
             module->nameExportsTable = entry;
             if (!entry) {
                 SetLastError(ERROR_OUTOFMEMORY);
@@ -1005,18 +1017,20 @@ void MemoryFreeLibrary(HMEMORYMODULE mod)
         (*DllEntry)((HINSTANCE)module->codeBase, DLL_PROCESS_DETACH, 0);
     }
 
-    free(module->nameExportsTable);
-    if (module->modules != NULL) {
-        // free previously opened libraries
-        int i;
-        for (i=0; i<module->numModules; i++) {
-            if (module->modules[i] != NULL) {
-                module->freeLibrary(module->modules[i], module->userdata);
-            }
-        }
+	if (module->nameExportsTable != NULL)
+		HeapFree(module->heapmodules, 0, module->nameExportsTable);
+	if (module->modules != NULL) {
+		// free previously opened libraries
+		int i;
+		for (i = 0; i < module->numModules; i++) {
+			if (module->modules[i] != NULL) {
+				module->freeLibrary(module->modules[i], module->userdata);
+			}
+		}
+		HeapFree(module->heapmodules, 0, module->modules);
+	}
+	HeapDestroy(module->heapmodules);
 
-        free(module->modules);
-    }
 
     if (module->codeBase != NULL) {
         // release memory of library

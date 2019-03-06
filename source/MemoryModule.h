@@ -64,6 +64,7 @@ typedef struct {
     PIMAGE_NT_HEADERS headers;
     unsigned char *codeBase;
     HCUSTOMMODULE *modules;
+	HANDLE heapmodules;
     int numModules;
     BOOL initialized;
     BOOL isDLL;
