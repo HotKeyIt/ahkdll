@@ -276,6 +276,12 @@
     <Link>
       <GenerateDebugInformation Condition="$(ConfigDebug)">true</GenerateDebugInformation>
     </Link>
+    <ClCompile>
+      <IntrinsicFunctions Condition="$(ConfigRelease) OR $(ConfigReleaseDll)">true</IntrinsicFunctions>
+    </ClCompile>
+    <ClCompile>
+      <EnableFiberSafeOptimizations Condition="$(ConfigRelease)">true</EnableFiberSafeOptimizations>
+    </ClCompile>
   </ItemDefinitionGroup>
   <!--Dll-->
   <ItemDefinitionGroup Condition="$(ConfigReleaseDll)">
