@@ -1530,13 +1530,13 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 	//for (int aParamCount = 0;func.mParamCount > aParamCount && aFuncAndToken->mParamCount > aParamCount;aParamCount++)
 	//	func.mParam[aParamCount].var->AssignString(aFuncAndToken->param[aParamCount]);
 
-	DEBUGGER_STACK_PUSH(&func)
+	// DEBUGGER_STACK_PUSH(&func) //HotKeyIt, AFAIK this is not necessary since it is done in func.Call internally
 	FuncResult func_call;
 	// func_call.CopyExprFrom(aResultToken);
 	// ExprTokenType &aResultToken = aResultToken_to_return ;
 	bool result = func.Call(func_call,aFuncAndToken->param,(int) aFuncAndToken->mParamCount,false); // Call the UDF.
 
-	DEBUGGER_STACK_POP()
+	// DEBUGGER_STACK_POP() //HotKeyIt, AFAIK this is not necessary since it is done in func.Call internally
 	LPTSTR new_buf;
 	if (result)
 	{
@@ -1737,8 +1737,8 @@ void callFuncDllVariant(FuncAndToken *aFuncAndToken)
 	VarBkp ErrorLevel_saved;
 	g_ErrorLevel->Backup(ErrorLevel_saved);
 	InitNewThread(0, false, true, func.mJumpToLine->mActionType);
-
-	DEBUGGER_STACK_PUSH(&func)
+	UDFCallInfo recurse(&func);
+	DEBUGGER_STACK_PUSH(&recurse)
 	// ExprTokenType aResultToken;
 	// ExprTokenType &aResultToken = aResultToken_to_return ;
 	++func.mInstances;
