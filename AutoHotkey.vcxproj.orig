@@ -201,11 +201,6 @@
       <PreprocessorDefinitions>_USRDLL;AUTOCOMSERVER_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
   </ItemDefinitionGroup>
-  <ItemDefinitionGroup Condition="$(ConfigDebugDll)">
-    <ClCompile>
-      <PreprocessorDefinitions>_USRDLL;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-    </ClCompile>
-  </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="$(ConfigReleaseDllMini)">
     <ClCompile>
       <PreprocessorDefinitions>_USRDLL;_MINIDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -218,7 +213,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup>
     <ClCompile>
-      <PrecompiledHeader Condition="!$(ConfigDebug) AND !$(ConfigDebugDll)">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="!$(ConfigDebug)">Use</PrecompiledHeader>
     </ClCompile>
     <Manifest>
       <AdditionalManifestFiles>source\resources\AutoHotkey.exe.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles>
@@ -239,7 +234,7 @@
     </Link>
     <PostBuildEvent>
       <Message>Removing CheckSum from $(TargetFileName) so Ahk2Exe doesn't complain</Message>
-      <Command>"$(ProjectDir)PostBuildSC.ahk" "$(TargetPath)"</Command>
+      <Command>"$(ProjectDir)\PostBuildSC.ahk" "$(TargetPath)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <!-- platform: win32 -->
@@ -272,7 +267,7 @@
   <PropertyGroup Condition="$(ConfigDebug) OR $(ConfigRelease)">
     <TargetExt>.exe</TargetExt>
   </PropertyGroup>
-  <PropertyGroup Condition="$(ConfigDebugDll)">
+  <PropertyGroup Condition="'$(Configuration)'=='DebugDll'">
     <TargetExt>.dll</TargetExt>
   </PropertyGroup>
   <PropertyGroup Condition="$(ConfigReleaseDll)">
@@ -402,7 +397,7 @@
   </ItemDefinitionGroup>
   <!--ResourceCompile-->
   <ItemDefinitionGroup>
-    <ResourceCompile Condition="$(ConfigDebug) OR $(ConfigDebugDll)">
+    <ResourceCompile Condition="$(ConfigDebug)">
       <PreprocessorDefinitions>_DEBUG;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
     <ResourceCompile Condition="'$(Configuration)'=='Release(mbcs)' OR '$(Configuration)'=='ReleaseDll(mbcs)' OR '$(Configuration)'=='ReleaseDllMini(mbcs)' OR '$(Configuration)'=='Self-contained(mbcs)' OR '$(Configuration)'=='MT_Release(mbcs)' OR '$(Configuration)'=='MT_ReleaseDll(mbcs)' OR '$(Configuration)'=='MT_ReleaseDllMini(mbcs)' OR '$(Configuration)'=='MT_Self-contained(mbcs)'">
@@ -414,7 +409,7 @@
     <ResourceCompile Condition="'$(Configuration)'=='Release' OR '$(Configuration)'=='ReleaseDll' OR '$(Configuration)'=='ReleaseDllMini' OR '$(Configuration)'=='Self-contained' OR '$(Configuration)'=='MT_Release' OR '$(Configuration)'=='MT_ReleaseDll' OR '$(Configuration)'=='MT_ReleaseDllMini' OR '$(Configuration)'=='MT_Self-contained'">
       <PreprocessorDefinitions>_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
-    <ResourceCompile Condition="$(ConfigReleaseDll) OR $(ConfigDebugDll)">
+    <ResourceCompile Condition="$(ConfigReleaseDll)">
       <PreprocessorDefinitions>_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
     <ResourceCompile Condition="'$(Platform)'=='x64'">
@@ -429,9 +424,6 @@
     <Link>
       <GenerateDebugInformation Condition="$(ConfigDebug)">true</GenerateDebugInformation>
     </Link>
-    <ClCompile>
-      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">Use</PrecompiledHeader>
-    </ClCompile>
   </ItemDefinitionGroup>
   <!--Dll-->
   <ItemDefinitionGroup Condition="$(ConfigReleaseDll) OR $(ConfigReleaseDllMini)">

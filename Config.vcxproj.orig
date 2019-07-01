@@ -6,14 +6,12 @@
     <ConfigReleaseDll>false</ConfigReleaseDll>
     <ConfigReleaseDllMini>false</ConfigReleaseDllMini>
     <ConfigDebug>false</ConfigDebug>
-    <ConfigDebugDll>false</ConfigDebugDll>
     <ConfigSC>false</ConfigSC>
     <ConfigRelease Condition="'$(Configuration)'=='Release' OR '$(Configuration)'=='Release(mbcs)' OR '$(Configuration)'=='MT_Release' OR '$(Configuration)'=='MT_Release(mbcs)'">true</ConfigRelease>
     <ConfigRelease Condition="'$(Configuration)'=='Release' OR '$(Configuration)'=='Release(mbcs)' OR '$(Configuration)'=='MT_Release' OR '$(Configuration)'=='MT_Release(mbcs)'">true</ConfigRelease>
     <ConfigReleaseDll Condition="'$(Configuration)'=='ReleaseDll' OR '$(Configuration)'=='ReleaseDll(mbcs)' OR '$(Configuration)'=='MT_ReleaseDll' OR '$(Configuration)'=='MT_ReleaseDll(mbcs)'">true</ConfigReleaseDll>
     <ConfigReleaseDllMini Condition="'$(Configuration)'=='ReleaseDllMini' OR '$(Configuration)'=='ReleaseDllMini(mbcs)' OR '$(Configuration)'=='MT_ReleaseDllMini' OR '$(Configuration)'=='MT_ReleaseDllMini(mbcs)'">true</ConfigReleaseDllMini>
     <ConfigDebug Condition="'$(Configuration)'=='Debug' OR '$(Configuration)'=='Debug(mbcs)' OR '$(Configuration)'=='Self-contained(debug)'">true</ConfigDebug>
-    <ConfigDebugDll Condition="'$(Configuration)'=='DebugDll'">true</ConfigDebugDll>
     <ConfigSC Condition="'$(Configuration)'=='Self-contained' OR '$(Configuration)'=='Self-contained(mbcs)' OR '$(Configuration)'=='Self-contained(debug)' OR '$(Configuration)'=='MT_Self-contained' OR '$(Configuration)'=='MT_Self-contained(mbcs)' OR '$(Configuration)'=='MT_Self-contained(debug)'">true</ConfigSC>
     <!-- CharacterSet may be set on command-line:
       MSBuild AutoHotkeyx.sln /p:Configuration=Release;CharacterSet=MultiByte -->
@@ -21,14 +19,13 @@
     <!-- Set default for '(mbcs)' configurations. Can also be overridden on command-line, but that wouldn't make sense. -->
     <CharacterSet Condition="'$(Configuration)'=='Debug(mbcs)' OR '$(Configuration)'=='Release(mbcs)' OR '$(Configuration)'=='ReleaseDll(mbcs)' OR '$(Configuration)'=='ReleaseDllMini(mbcs)' OR '$(Configuration)'=='Self-contained(mbcs)' OR '$(Configuration)'=='MT_Debug(mbcs)' OR '$(Configuration)'=='MT_Release(mbcs)' OR '$(Configuration)'=='MT_ReleaseDll(mbcs)' OR '$(Configuration)'=='MT_ReleaseDllMini(mbcs)' OR '$(Configuration)'=='MT_Self-contained(mbcs)'">MultiByte</CharacterSet>
     <!-- global setting -->
-    <WholeProgramOptimization Condition="!$(ConfigDebug) AND !$(ConfigDebugDll)">true</WholeProgramOptimization>
+    <WholeProgramOptimization Condition="!$(ConfigDebug)">true</WholeProgramOptimization>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
       <!-- pre-processor definition: NDEBUG/_DEBUG -->
-      <PreprocessorDefinitions Condition="!$(ConfigDebug) AND !$(ConfigDebugDll)">NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <PreprocessorDefinitions Condition=" $(ConfigDebug) OR $(ConfigDebugDll)">_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <PreprocessorDefinitions Condition=" $(ConfigDebugDll)">_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="!$(ConfigDebug)">NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition=" $(ConfigDebug)">_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <!-- global setting -->
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <WarningLevel>Level3</WarningLevel>
@@ -38,7 +35,7 @@
     </ClCompile>
   </ItemDefinitionGroup>
   <!-- misc optimizations -->
-  <ItemDefinitionGroup Condition="!$(ConfigDebug) AND !$(ConfigDebugDll)">
+  <ItemDefinitionGroup Condition="!$(ConfigDebug)">
     <ClCompile>
       <Optimization>MaxSpeed</Optimization>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
@@ -62,12 +59,12 @@
     <LinkIncremental>false</LinkIncremental>
   </PropertyGroup>
   <!-- debug settings, defined last to override things set above -->
-  <ItemDefinitionGroup Condition="$(ConfigDebug) OR $(ConfigDebugDll)">
+  <ItemDefinitionGroup Condition="$(ConfigDebug)">
     <ClCompile>
       <Optimization>Disabled</Optimization>
       <MinimalRebuild>true</MinimalRebuild>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
-      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
     <Link>

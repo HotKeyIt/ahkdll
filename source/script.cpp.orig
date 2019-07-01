@@ -888,8 +888,6 @@ void Script::Destroy()
 	//ZeroMemory(&g_script, sizeof(g_script));
 #ifndef MINIDLL
 	mPriorHotkeyName = mThisHotkeyName = _T("");
-	g_FirstHotExpr = NULL;
-	g_LastHotExpr = NULL;
 #endif
 	free_compiled_regex();
 #ifndef MINIDLL
