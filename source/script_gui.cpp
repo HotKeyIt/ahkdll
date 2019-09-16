@@ -6567,6 +6567,7 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 			int option_int; // Only valid for [XYWHTER].
 			float option_float; // Only valid for R.
 			TCHAR option_char2; // Only valid for [XYWH].
+			TCHAR option_char3; // Only for AutoSizing
 			bool use_margin_offset; // Only valid for [XY].
 
 			if (_tcschr(_T("XYWHTER"), option_char))
@@ -6758,84 +6759,86 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 
 			case 'R': // The number of rows desired in the control (can be fractional).
 				aOpt.row_count = option_float;
-			case 'A': // AutoSize and AutoPos options
-				if (ctoupper(*next_option) == 'X')
-				{
-					if (ctoupper(*(next_option + 1)) == 'R')
-						aOpt.AXReset = true;
-					else if (ctoupper(*(next_option + 1)) == 'A')
-						aOpt.AXAuto = true;
-					else if (ctoupper(*(next_option + 1)) == 'P')
-						aOpt.AX = (float)0.000000000000000000000000000000000000000000001;
-					else if (*(next_option + 1) == '\0')
-						aOpt.AX = 1;
-					else if (_tcschr(next_option + 1, '/') && *_tcschr(next_option + 1, '/') != '\0' && ATOI(_tcschr(next_option + 1, '/') + 1))
-					{
-						if (!(aOpt.AX = (float)ATOI(next_option + 1) / ATOI(_tcschr(next_option + 1, '/') + 1)))
-							aOpt.AX = (float)ATOF(next_option + 1);
-					}
-					else
-					{
-						aOpt.AX = (float)ATOF(next_option + 1);
-					}
-				}
-				else if (ctoupper(*next_option) == 'Y')
-				{
-					if (ctoupper(*(next_option + 1)) == 'R')
-						aOpt.AYReset = true;
-					else if (ctoupper(*(next_option + 1)) == 'A')
-						aOpt.AYAuto = true;
-					else if (ctoupper(*(next_option + 1)) == 'P')
-						aOpt.AY = (float)0.000000000000000000000000000000000000000000001;
-					else if (*(next_option + 1) == '\0')
-						aOpt.AY = 1;
-					else if (_tcschr(next_option + 1, '/') && *_tcschr(next_option + 1, '/') != '\0' && ATOI(_tcschr(next_option + 1, '/') + 1))
-					{
-						if (!(aOpt.AY = (float)ATOI(next_option + 1) / ATOI(_tcschr(next_option + 1, '/') + 1)))
-							aOpt.AY = (float)ATOF(next_option + 1);
-					}
-					else
-					{
-						aOpt.AY = (float)ATOF(next_option + 1);
-					}
-				}
-				else if (ctoupper(*next_option) == 'W')
-				{
-					if (ctoupper(*(next_option + 1)) == 'R')
-						aOpt.AXReset = true;
-					else if (ctoupper(*(next_option + 1)) == 'A')
-						aOpt.AWAuto = true;
-					else if (*(next_option + 1) == '\0')
-						aOpt.AWidth = 1;
-					else if (_tcschr(next_option + 1, '/') && *_tcschr(next_option + 1, '/') != '\0' && ATOI(_tcschr(next_option + 1, '/') + 1))
-					{
-						if (!(aOpt.AWidth = (float)ATOI(next_option + 1) / ATOI(_tcschr(next_option + 1, '/') + 1)))
-							aOpt.AWidth = (float)ATOF(next_option + 1);
-					}
-					else
-					{
-						aOpt.AWidth = (float)ATOF(next_option + 1);
-					}
-				}
-				else if (ctoupper(*next_option) == 'H')
-				{
-					if (ctoupper(*(next_option + 1)) == 'R')
-						aOpt.AYReset = true;
-					else if (ctoupper(*(next_option + 1)) == 'A')
-						aOpt.AHAuto = true;
-					else if (*(next_option + 1) == '\0')
-						aOpt.AHeight = 1;
-					else if (_tcschr(next_option + 1, '/') && *_tcschr(next_option + 1, '/') != '\0' && ATOI(_tcschr(next_option + 1, '/') + 1))
-					{
-						if (!(aOpt.AHeight = (float)ATOI(next_option + 1) / ATOI(_tcschr(next_option + 1, '/') + 1)))
-							aOpt.AHeight = (float)ATOF(next_option + 1);
-					}
-					else
-					{
-						aOpt.AHeight = (float)ATOF(next_option + 1);
-					}
-				}
 				break;
+			case 'A': // AutoSize and AutoPos options
+				option_char3 = ctoupper(*(option_value + 1));
+				option_char2 = ctoupper(*option_value);
+				if (option_char2 == 'X')
+				{
+					if (option_char3 == 'R')
+						aOpt.AXReset = true;
+					else if (option_char3 == 'A')
+						aOpt.AXAuto = true;
+					else if (option_char3 == 'P')
+						aOpt.AX = (float)0.000000000000000000000000000000000000000000001;
+					else if (option_char3 == '\0')
+						aOpt.AX = 1;
+					else if (_tcschr(next_option + 2, '/') && *_tcschr(next_option + 2, '/') != '\0' && ATOI(_tcschr(next_option + 2, '/') + 1))
+					{
+						if (!(aOpt.AX = (float)ATOI(next_option + 2) / ATOI(_tcschr(next_option + 2, '/') + 1)))
+							aOpt.AX = (float)ATOF(next_option + 2);
+					}
+					else
+					{
+						aOpt.AX = (float)ATOF(next_option + 2);
+					}
+				}
+				else if (option_char2 == 'Y')
+				{
+					if (option_char3 == 'R')
+						aOpt.AYReset = true;
+					else if (option_char3 == 'A')
+						aOpt.AYAuto = true;
+					else if (option_char3 == 'P')
+						aOpt.AY = (float)0.000000000000000000000000000000000000000000001;
+					else if (option_char3 == '\0')
+						aOpt.AY = 1;
+					else if (_tcschr(next_option + 2, '/') && *_tcschr(next_option + 2, '/') != '\0' && ATOI(_tcschr(next_option + 2, '/') + 1))
+					{
+						if (!(aOpt.AY = (float)ATOI(next_option + 2) / ATOI(_tcschr(next_option + 1, '/') + 2)))
+							aOpt.AY = (float)ATOF(next_option + 2);
+					}
+					else
+					{
+						aOpt.AY = (float)ATOF(next_option + 2);
+					}
+				}
+				else if (option_char2 == 'W')
+				{
+					if (option_char3 == 'R')
+						aOpt.AXReset = true;
+					else if (option_char3 == 'A')
+						aOpt.AWAuto = true;
+					else if (option_char3 == '\0')
+						aOpt.AWidth = 1;
+					else if (_tcschr(next_option + 2, '/') && *_tcschr(next_option + 2, '/') != '\0' && ATOI(_tcschr(next_option + 2, '/') + 1))
+					{
+						if (!(aOpt.AWidth = (float)ATOI(next_option + 2) / ATOI(_tcschr(next_option + 2, '/') + 1)))
+							aOpt.AWidth = (float)ATOF(next_option + 2);
+					}
+					else
+					{
+						aOpt.AWidth = (float)ATOF(next_option + 2);
+					}
+				}
+				else if (option_char2 == 'H')
+				{
+					if (option_char3 == 'R')
+						aOpt.AYReset = true;
+					else if (option_char3 == 'A')
+						aOpt.AHAuto = true;
+					else if (option_char3 == '\0')
+						aOpt.AHeight = 1;
+					else if (_tcschr(next_option + 2, '/') && *_tcschr(next_option + 2, '/') != '\0' && ATOI(_tcschr(next_option + 2, '/') + 1))
+					{
+						if (!(aOpt.AHeight = (float)ATOI(next_option + 2) / ATOI(_tcschr(next_option + 2, '/') + 1)))
+							aOpt.AHeight = (float)ATOF(next_option + 2);
+					}
+					else
+					{
+						aOpt.AHeight = (float)ATOF(next_option + 2);
+					}
+				}
 				break;
 
 			case 'E': // Extended style additions or removals.
