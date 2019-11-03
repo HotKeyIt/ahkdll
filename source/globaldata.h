@@ -75,6 +75,9 @@ extern WNDPROC g_TabClassProc;
 extern modLR_type g_modifiersLR_logical;   // Tracked by hook (if hook is active).
 extern modLR_type g_modifiersLR_logical_non_ignored;
 extern modLR_type g_modifiersLR_physical;  // Same as above except it's which modifiers are PHYSICALLY down.
+extern modLR_type g_modifiersLR_numpad_mask;  // Shift keys temporarily released by Numpad.
+
+extern key_type *pPrefixKey;
 
 #ifdef FUTURE_USE_MOUSE_BUTTONS_LOGICAL
 extern WORD g_mouse_buttons_logical; // A bitwise combination of MK_LBUTTON, etc.
@@ -139,6 +142,7 @@ extern int g_nThreads;
 extern int g_nPausedThreads;
 #ifndef MINIDLL
 extern int g_MaxHistoryKeys;
+extern DWORD g_InputTimeoutAt;
 #endif
 
 extern VarSizeType g_MaxVarCapacity;
@@ -212,7 +216,7 @@ extern TCHAR g_EndChars[HS_MAX_END_CHARS + 1];
 // Global objects:
 extern Var *g_ErrorLevel;
 #ifndef MINIDLL
-extern input_type g_input;
+extern input_type *g_input;
 #endif
 EXTERN_SCRIPT;
 EXTERN_CLIPBOARD;
@@ -226,7 +230,7 @@ extern DWORD g_OriginalTimeout;
 EXTERN_G;
 extern global_struct g_default, *g_array;
 
-extern TCHAR g_WorkingDir[MAX_PATH];  // Explicit size needed here in .h file for use with sizeof().
+extern CString g_WorkingDir;
 extern LPTSTR g_WorkingDirOrig;
 
 extern bool g_ContinuationLTrim;
@@ -357,10 +361,13 @@ if (!g_MainTimerExists)\
 		g_AutoExecTimerExists = SetTimer(g_hWnd, TIMER_ID_AUTOEXEC, aTimeoutValue, AutoExecSectionTimeout);\
 } // v1.0.39 for above: Removed the call to ExitApp() upon failure.  See SET_MAIN_TIMER for details.
 #ifndef MINIDLL
-#define SET_INPUT_TIMER(aTimeoutValue) \
-if (!g_InputTimerExists)\
-	g_InputTimerExists = SetTimer(g_hWnd, TIMER_ID_INPUT, aTimeoutValue, InputTimeout);
+#define SET_INPUT_TIMER(aTimeoutValue, aTimeoutAt) \
+{ \
+g_InputTimeoutAt = aTimeoutAt; \
+g_InputTimerExists = SetTimer(g_hWnd, TIMER_ID_INPUT, aTimeoutValue, InputTimeout); \
+}
 #endif
+
 // For this one, SetTimer() is called unconditionally because our caller wants the timer reset
 // (as though it were killed and recreated) unconditionally.  MSDN's comments are a little vague
 // about this, but testing shows that calling SetTimer() against an existing timer does completely

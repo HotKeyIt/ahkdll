@@ -43,6 +43,13 @@ EXTERN_SCRIPT;  // For g_script.
 #define HOTKEY_ID_TOGGLE               0x03
 #define IS_ALT_TAB(id) (id > HOTKEY_ID_MAX && id < HOTKEY_ID_INVALID)
 
+// Below: Use double-colon as delimiter to set these apart from normal labels.
+// The main reason for this is that otherwise the user would have to worry
+// about a normal label being unintentionally valid as a hotkey, e.g. "Shift:"
+// might be a legitimate label that the user forgot is also a valid hotkey:
+#define HOTKEY_FLAG _T("::")
+#define HOTKEY_FLAG_LENGTH 2
+
 #define COMPOSITE_DELIMITER _T(" & ")
 #define COMPOSITE_DELIMITER_LENGTH 3
 
@@ -155,7 +162,7 @@ public:
 	HookActionType mHookAction;
 	sc_type mSC; // Scan code.  All vk's have a scan code, but not vice versa.
 	sc_type mModifierSC; // If mModifierVK is zero, this scan code, if non-zero, will be used as the modifier.
-	HotkeyIDType mNextCustomCombo; // ID of the next custom combo with the same suffix as this one (initialized by the hook, but only for combos).
+	HotkeyIDType mNextHotkey; // ID of the next hotkey with the same suffix as this one (initialized by the hook).
 
 	// Keep single-byte attributes adjacent to each other to conserve memory within byte-aligned class/struct:
 	modLR_type mModifiersLR;  // Left-right centric versions of the above.
@@ -219,6 +226,7 @@ public:
 	void PerformInNewThreadMadeByCaller(HotkeyVariant &aVariant);
 	static void ManifestAllHotkeysHotstringsHooks();
 	static void RequireHook(HookType aWhichHook) {sWhichHookAlways |= aWhichHook;}
+	static void MaybeUninstallHook();
 	static ResultType TextInterpret(LPTSTR aName, Hotkey *aThisHotkey, bool aUseErrorLevel);
 
 	struct HotkeyProperties // Struct used by TextToModifiers() and its callers.

@@ -63,6 +63,14 @@ GNU General Public License for more details.
 // max function libraries
 #define FUNC_LIB_COUNT 4
 
+// Maximum length of a Unicode file path, plus null-terminator.
+#define MAX_WIDE_PATH 32768
+#ifdef UNICODE
+#define T_MAX_PATH MAX_WIDE_PATH
+#else
+#define T_MAX_PATH MAX_PATH
+#endif
+
 // The following avoid having to link to OLDNAMES.lib, but they probably don't
 // reduce code size at all.
 #define stricmp(str1, str2) _stricmp(str1, str2)
@@ -124,8 +132,8 @@ enum SendModes {SM_EVENT, SM_INPUT, SM_PLAY, SM_INPUT_FALLBACK_TO_PLAY, SM_INVAL
 enum SendRawModes {SCM_NOT_RAW = FALSE, SCM_RAW, SCM_RAW_TEXT};
 typedef UCHAR SendRawType;
 
-enum ExitReasons {EXIT_NONE, EXIT_CRITICAL, EXIT_ERROR, EXIT_DESTROY, EXIT_LOGOFF, EXIT_SHUTDOWN
-	, EXIT_WM_QUIT, EXIT_CLOSE, EXIT_MENU, EXIT_EXIT, EXIT_RELOAD, EXIT_SINGLEINSTANCE};
+enum ExitReasons {EXIT_NONE, EXIT_ERROR, EXIT_DESTROY, EXIT_LOGOFF, EXIT_SHUTDOWN
+	, EXIT_CLOSE, EXIT_MENU, EXIT_EXIT, EXIT_RELOAD, EXIT_SINGLEINSTANCE};
 
 enum WarnType {WARN_USE_UNSET_LOCAL, WARN_USE_UNSET_GLOBAL, WARN_LOCAL_SAME_AS_GLOBAL, WARN_USE_ENV, WARN_CLASS_OVERWRITE, WARN_ALL};
 #define WARN_TYPE_STRINGS _T("UseUnsetLocal"), _T("UseUnsetGlobal"), _T("LocalSameAsGlobal"), _T("UseEnv"), _T("ClassOverwrite"), _T("All")
@@ -417,6 +425,7 @@ enum enum_act {
 , ACT_GOTO, ACT_GOSUB, ACT_ONEXIT, ACT_HOTKEY, ACT_SETTIMER, ACT_CRITICAL, ACT_THREAD, ACT_RETURN, ACT_EXIT
 , ACT_LOOP, ACT_FOR, ACT_WHILE, ACT_UNTIL, ACT_BREAK, ACT_BREAKIF, ACT_CONTINUE, ACT_CONTINUEIF // Keep LOOP, FOR, WHILE and UNTIL together and in this order for range checks in various places.
 , ACT_TRY, ACT_CATCH, ACT_FINALLY, ACT_THROW // Keep TRY, CATCH and FINALLY together and in this order for range checks.
+, ACT_SWITCH, ACT_CASE
 , ACT_BLOCK_BEGIN, ACT_BLOCK_END
 , ACT_WINACTIVATE, ACT_WINACTIVATEBOTTOM
 , ACT_WINWAIT, ACT_WINWAITCLOSE, ACT_WINWAITACTIVE, ACT_WINWAITNOTACTIVE
@@ -498,6 +507,23 @@ enum enum_act_old {
 	// IfMsgBox, No, Gosub, XXX
 	// IfMsgBox, No
 	//     Gosub, XXX
+
+// Cases where arg.is_expression should always be true.
+// ACT_WHILE performs less than 4% faster as a non-expression in some cases, slower
+// in some other cases, and keeping it as an expression avoids an extra check in a
+// performance-sensitive spot of ExpandArgs (near mActionType <= ACT_LAST_OPTIMIZED_IF).
+// ACT_UNTIL is given the same treatment but wasn't tested extensively as a non-expression.
+// Additionally, FOR, THROW, SWITCH and CASE are kept as expressions in all cases to
+// simplify the code (which works around ExpandArgs() lack of support for objects).
+// ACT_EXPRESSION is excluded since `Saved := ClipboardAll` must be non-expression.
+#define ACT_IS_ALWAYS_EXPRESSION(ActionType) \
+	((ActionType >= ACT_FOR && ActionType <= ACT_UNTIL) \
+	|| (ActionType >= ACT_THROW && ActionType <= ACT_CASE))
+
+// Cases where the legacy rules for "numeric" params should not be applied; that is,
+// LegacyArgIsExpression() should not be called because ActionType is not legacy.
+#define ACT_NO_LEGACY_EXPRESSION(ActionType) \
+	(ActionType == ACT_ASSIGNEXPR || ACT_IS_ALWAYS_EXPRESSION(ActionType))
 
 // For convenience in many places.  Must cast to int to avoid loss of negative values.
 #define BUF_SPACE_REMAINING ((int)(aBufSize - (aBuf - aBuf_orig)))
@@ -745,6 +771,7 @@ struct FuncAndToken {
 
 class Label;                //
 struct RegItemStruct;       //
+struct LoopFilesStruct;
 struct LoopReadFileStruct;  //
 #ifndef MINIDLL
 class GuiType;				//
@@ -755,7 +782,7 @@ struct global_struct
 	// 8-byte items are listed first, which might improve alignment for 64-bit processors (dubious).
 	__int64 LinesPerCycle; // Use 64-bits for this so that user can specify really large values.
 	__int64 mLoopIteration; // Signed, since script/ITOA64 aren't designed to handle unsigned.
-	WIN32_FIND_DATA *mLoopFile;  // The file of the current file-loop, if applicable.
+	LoopFilesStruct *mLoopFile;  // The file of the current file-loop, if applicable.
 	RegItemStruct *mLoopRegItem; // The registry subkey or value of the current registry enumeration loop.
 	LoopReadFileStruct *mLoopReadFile;  // The file whose contents are currently being read by a File-Read Loop.
 	LPTSTR mLoopField;  // The field of the current string-parsing loop.

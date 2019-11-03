@@ -68,12 +68,12 @@ extern "C" {
 #define UNZIPOPENFILERAWNAME "UnzipOpenFileRawA"
 	typedef DWORD WINAPI UnzipOpenFileRawPtr(HUNZIP *, const char *, const char *);
 #endif
-	DWORD WINAPI UnzipOpenBuffer(HUNZIP *, void *, DWORD, const char *);
+	DWORD WINAPI UnzipOpenBuffer(HUNZIP *, void *, ULONGLONG, const char *);
 #define UNZIPOPENBUFFERNAME "UnzipOpenBuffer"
-	typedef DWORD WINAPI UnzipOpenBufferPtr(HUNZIP *, void *, DWORD, const char *);
-	DWORD WINAPI UnzipOpenBufferRaw(HUNZIP *, void *, DWORD, const char *);
+	typedef DWORD WINAPI UnzipOpenBufferPtr(HUNZIP *, void *, ULONGLONG, const char *);
+	DWORD WINAPI UnzipOpenBufferRaw(HUNZIP *, void *, ULONGLONG, const char *);
 #define UNZIPOPENBUFFERRAWNAME "UnzipOpenBufferRaw"
-	typedef DWORD WINAPI UnzipOpenBufferRawPtr(HUNZIP *, void *, DWORD, const char *);
+	typedef DWORD WINAPI UnzipOpenBufferRawPtr(HUNZIP *, void *, ULONGLONG, const char *);
 	DWORD WINAPI UnzipOpenHandle(HUNZIP *, HANDLE, const char *);
 #define UNZIPOPENHANDLENAME "UnzipOpenHandle"
 	typedef DWORD WINAPI UnzipOpenHandlePtr(HUNZIP *, HANDLE, const char *);
@@ -121,9 +121,9 @@ extern "C" {
 #define UNZIPITEMTOHANDLENAME "UnzipItemToHandle"
 	typedef DWORD WINAPI UnzipItemToHandlePtr(HUNZIP, HANDLE, ZIPENTRY *);
 
-	DWORD WINAPI UnzipItemToBuffer(HUNZIP, void *, DWORD, ZIPENTRY *);
+	DWORD WINAPI UnzipItemToBuffer(HUNZIP, void *, ULONGLONG, ZIPENTRY *);
 #define UNZIPITEMTOBUFFERNAME "UnzipItemToBuffer"
-	typedef DWORD WINAPI UnzipItemToBufferPtr(HUNZIP, void *, DWORD, ZIPENTRY *);
+	typedef DWORD WINAPI UnzipItemToBufferPtr(HUNZIP, void *, ULONGLONG, ZIPENTRY *);
 
 	// Function to set the base directory
 	DWORD WINAPI UnzipSetBaseDirW(HUNZIP, const WCHAR *);
@@ -334,9 +334,9 @@ extern "C" {
 #define ZIPCREATEFILENAME "ZipCreateFileA"
 	typedef DWORD WINAPI ZipCreateFilePtr(HZIP *, const char *, const char *);
 #endif
-	DWORD WINAPI ZipCreateBuffer(HZIP *, void *, DWORD, const char *);
+	DWORD WINAPI ZipCreateBuffer(HZIP *, void *, ULONGLONG, const char *);
 #define ZIPCREATEBUFFERNAME "ZipCreateBuffer"
-	typedef DWORD WINAPI ZipCreateBufferPtr(HZIP *, void *, DWORD, const char *);
+	typedef DWORD WINAPI ZipCreateBufferPtr(HZIP *, void *, ULONGLONG, const char *);
 	DWORD WINAPI ZipCreateHandle(HZIP *, HANDLE, const char *);
 #define ZIPCREATEHANDLENAME "ZipCreateHandle"
 	typedef DWORD WINAPI ZipCreateHandlePtr(HZIP *, HANDLE, const char *);
@@ -377,35 +377,35 @@ extern "C" {
 #define ZIPADDHANDLERAWNAME "ZipAddHandleRaw"
 	typedef DWORD WINAPI ZipAddHandleRawPtr(HZIP, HANDLE);
 
-	DWORD WINAPI ZipAddPipeW(HZIP, const WCHAR *, HANDLE, DWORD);
-	DWORD WINAPI ZipAddPipeA(HZIP, const char *, HANDLE, DWORD);
+	DWORD WINAPI ZipAddPipeW(HZIP, const WCHAR *, HANDLE, ULONGLONG);
+	DWORD WINAPI ZipAddPipeA(HZIP, const char *, HANDLE, ULONGLONG);
 #ifdef UNICODE
 #define ZipAddPipe ZipAddPipeW
 #define ZIPADDPIPENAME "ZipAddPipeW"
-	typedef DWORD WINAPI ZipAddPipePtr(HZIP, const WCHAR *, HANDLE, DWORD);
+	typedef DWORD WINAPI ZipAddPipePtr(HZIP, const WCHAR *, HANDLE, ULONGLONG);
 #else
 #define ZipAddPipe ZipAddPipeA
 #define ZIPADDPIPENAME "ZipAddPipeA"
-	typedef DWORD WINAPI ZipAddPipePtr(HZIP, const char *, HANDLE, DWORD);
+	typedef DWORD WINAPI ZipAddPipePtr(HZIP, const char *, HANDLE, ULONGLONG);
 #endif
-	DWORD WINAPI ZipAddPipeRaw(HZIP, HANDLE, DWORD);
+	DWORD WINAPI ZipAddPipeRaw(HZIP, HANDLE, ULONGLONG);
 #define ZIPADDPIPERAWNAME "ZipAddPipeRaw"
-	typedef DWORD WINAPI ZipAddPipeRawPtr(HZIP, HANDLE, DWORD);
+	typedef DWORD WINAPI ZipAddPipeRawPtr(HZIP, HANDLE, ULONGLONG);
 
-	DWORD WINAPI ZipAddBufferW(HZIP, const WCHAR *, const void *, DWORD);
-	DWORD WINAPI ZipAddBufferA(HZIP, const char *, const void *, DWORD);
+	DWORD WINAPI ZipAddBufferW(HZIP, const WCHAR *, const void *, ULONGLONG);
+	DWORD WINAPI ZipAddBufferA(HZIP, const char *, const void *, ULONGLONG);
 #ifdef UNICODE
 #define ZipAddBuffer ZipAddBufferW
 #define ZIPADDBUFFERNAME "ZipAddFolderW"
-	typedef DWORD WINAPI ZipAddBufferPtr(HZIP, const WCHAR *, const void *, DWORD);
+	typedef DWORD WINAPI ZipAddBufferPtr(HZIP, const WCHAR *, const void *, ULONGLONG);
 #else
 #define ZipAddBuffer ZipAddBufferA
 #define ZIPADDBUFFERNAME "ZipAddBufferA"
-	typedef DWORD WINAPI ZipAddBufferPtr(HZIP, const char *, const void *, DWORD);
+	typedef DWORD WINAPI ZipAddBufferPtr(HZIP, const char *, const void *, ULONGLONG);
 #endif
-	DWORD WINAPI ZipAddBufferRaw(HZIP, const void *, DWORD);
+	DWORD WINAPI ZipAddBufferRaw(HZIP, const void *, ULONGLONG);
 #define ZIPADDBUFFERRAWNAME "ZipAddBufferRaw"
-	typedef DWORD WINAPI ZipAddBufferRawPtr(HZIP, const void *, DWORD);
+	typedef DWORD WINAPI ZipAddBufferRawPtr(HZIP, const void *, ULONGLONG);
 
 
 	DWORD WINAPI ZipAddFolderW(HZIP, const WCHAR *);
@@ -421,9 +421,9 @@ extern "C" {
 #endif
 
 	// Function to get a pointer to the ZIP archive created in memory by ZipCreateBuffer(0, len)
-	DWORD WINAPI ZipGetMemory(HZIP, void **, unsigned long *, HANDLE *);
+	DWORD WINAPI ZipGetMemory(HZIP, void **, ULONGLONG *, HANDLE *);
 #define ZIPGETMEMORYNAME "ZipGetMemory"
-	typedef DWORD WINAPI ZipGetMemoryPtr(HZIP, void **, DWORD *, HANDLE *);
+	typedef DWORD WINAPI ZipGetMemoryPtr(HZIP, void **, ULONGLONG *, HANDLE *);
 
 	// Function to reset a memory-buffer ZIP archive to compress a new ZIP archive
 	DWORD WINAPI ZipResetMemory(HZIP);

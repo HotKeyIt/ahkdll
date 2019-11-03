@@ -573,7 +573,7 @@ EXPORT int ahkExec(LPTSTR script)
 #endif
 	BACKUP_G_SCRIPT
 	int aSourceFileIdx = Line::sSourceFileCount;
-	if ((g_script.LoadFromText(script, NULL, false) != OK)) // || !g_script.PreparseBlocks(oldLastLine->mNextLine))
+	if ((g_script.LoadFromText(script, _T(""), false) != OK)) // || !g_script.PreparseBlocks(oldLastLine->mNextLine))
 	{
 		g->CurrentFunc = aCurrFunc;
 		if (g_script.mPlaceholderLabel)

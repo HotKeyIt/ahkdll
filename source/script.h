@@ -171,12 +171,14 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_ABORT_NO_SPACES _T("The current thread will exit.")
 #define ERR_ABORT _T("  ") ERR_ABORT_NO_SPACES
 #define WILL_EXIT _T("The program will exit.")
+#define UNSTABLE_WILL_EXIT _T("The program is now unstable and will exit.")
 #define OLD_STILL_IN_EFFECT _T("The script was not reloaded; the old version will remain in effect.")
 #define ERR_ABORT_DELETE _T("__Delete will now return.")
 #define ERR_CONTINUATION_SECTION_TOO_LONG _T("Continuation section too long.")
 #define ERR_UNRECOGNIZED_ACTION _T("This line does not contain a recognized action.")
 #define ERR_NONEXISTENT_HOTKEY _T("Nonexistent hotkey.")
 #define ERR_NONEXISTENT_VARIANT _T("Nonexistent hotkey variant (IfWin).")
+#define ERR_INVALID_SINGLELINE_HOT _T("Invalid single-line hotkey/hotstring.")
 #define ERR_NONEXISTENT_FUNCTION _T("Call to nonexistent function.")
 #define ERR_EXE_CORRUPTED _T("EXE corrupted")
 #define ERR_INVALID_VALUE _T("Invalid value.")
@@ -209,6 +211,7 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_UNEXPECTED_CLOSE_BRACE _T("Unexpected \"}\"")
 #define ERR_MISSING_CLOSE_QUOTE _T("Missing close-quote") // No period after short phrases.
 #define ERR_MISSING_COMMA _T("Missing comma")             //
+#define ERR_MISSING_COLON _T("Missing \":\"")             //
 #define ERR_BLANK_PARAM _T("Blank parameter")             //
 #define ERR_TOO_MANY_PARAMS _T("Too many parameters passed to function.") // L31
 #define ERR_TOO_FEW_PARAMS _T("Too few parameters passed to function.") // L31
@@ -220,6 +223,8 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_FINALLY_WITH_NO_PRECEDENT _T("FINALLY with no matching TRY or CATCH")
 #define ERR_BAD_JUMP_INSIDE_FINALLY _T("Jumps cannot exit a FINALLY block.")
 #define ERR_BAD_JUMP_OUT_OF_FUNCTION _T("Cannot jump from inside a function to outside.")
+#define ERR_UNEXPECTED_CASE _T("Case/Default must be enclosed by a Switch.")
+#define ERR_TOO_MANY_CASE_VALUES _T("Too many case values.")
 #define ERR_EXPECTED_BLOCK_OR_ACTION _T("Expected \"{\" or single-line action.")
 #define ERR_OUTOFMEM _T("Out of memory.")  // Used by RegEx too, so don't change it without also changing RegEx to keep the former string.
 #define ERR_EXPR_TOO_LONG _T("Expression too long")
@@ -247,6 +252,7 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_INVALID_STRUCT_IN_FUNC _T("Variable was not found in function.")
 #define ERR_INVALID_STRUCT_BIT_POINTER _T("Bit field must not be a pointer")
 #define ERR_EXCEPTION _T("An exception was thrown.")
+#define ERR_INVALID_USAGE _T("Invalid usage.")
 #define ERR_MUST_INIT_STRUCT _T("Empty pointer, dynamic Structure fields must be initialized manually first.")
 
 #define WARNING_USE_UNSET_VARIABLE _T("This variable has not been assigned a value.")
@@ -297,6 +303,7 @@ struct InputBoxType
 	DWORD timeout;
 	HWND hwnd;
 	HFONT font;
+	bool locale;
 };
 
 struct SplashType
@@ -361,7 +368,7 @@ static inline int DPIUnscale(int x)
 
 #define INPUTBOX_DEFAULT INT_MIN
 ResultType InputBox(Var *aOutputVar, LPTSTR aTitle, LPTSTR aText, bool aHideInput
-	, int aWidth, int aHeight, int aX, int aY, double aTimeout, LPTSTR aDefault);
+	, int aWidth, int aHeight, int aX, int aY, bool aLocale, double aTimeout, LPTSTR aDefault);
 INT_PTR CALLBACK InputBoxProc(HWND hWndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam);
 VOID CALLBACK InputBoxTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime);
 #endif
@@ -454,6 +461,45 @@ struct ArgStruct
 #define _f_number_buf			_f_retval_buf  // An alias to show intended usage, and in case the buffer size is changed.
 
 
+struct LoopFilesStruct : WIN32_FIND_DATA
+{
+	// Note that using fixed buffer sizes significantly reduces code size vs. using CString
+	// or probably any other method of dynamically allocating/expanding the buffers.  It also
+	// performs marginally better, but file system performance has a much bigger impact.
+	// Unicode builds allow for the maximum path size supported by Win32 as of 2018, although
+	// in some cases the script might need to use the \\?\ prefix to go beyond MAX_PATH.
+	// On Windows 10 v1607+, MAX_PATH limits can be lifted by opting-in to long path support
+	// via the application's manifest and LongPathsEnabled registry setting.  In any case,
+	// ANSI APIs are still limited to MAX_PATH, but MAX_PATH*2 allows for the longest path
+	// supported by FindFirstFile() concatenated with the longest filename it can return.
+	// This preserves backward-compatibility under the following set of conditions:
+	//  1) the absolute path and pattern fits within MAX_PATH;
+	//  2) the relative path and filename fits within MAX_PATH; and
+	//  3) the absolute path and filename exceeds MAX_PATH.
+	static const size_t BUF_SIZE = UorA(MAX_WIDE_PATH, MAX_PATH*2);
+	// file_path contains the full path of the directory being looped, with trailing slash.
+	// Temporarily also contains the pattern for FindFirstFile(), which is either a copy of
+	// 'pattern' or "*" for scanning sub-directories.
+	// During execution of the loop body, it contains the full path of the file.
+	TCHAR file_path[BUF_SIZE];
+	TCHAR pattern[MAX_PATH]; // Naked filename or pattern.  Allows max NTFS filename length plus a few chars.
+	TCHAR short_path[BUF_SIZE]; // Short name version of orig_dir.
+	TCHAR *file_path_suffix; // The dynamic part of file_path (used by A_LoopFilePath).
+	TCHAR *orig_dir; // Initial directory as specified by caller (used by A_LoopFilePath).
+	TCHAR *long_dir; // Full/long path of initial directory (used by A_LoopFileLongPath).
+	size_t file_path_length, pattern_length, short_path_length, orig_dir_length, long_dir_length
+		, dir_length; // Portion of file_path which is the directory, used by BIVs.
+
+	LoopFilesStruct() : orig_dir_length(0), long_dir(NULL) {}
+	~LoopFilesStruct()
+	{
+		if (orig_dir_length)
+			free(orig_dir);
+		//else: orig_dir is the constant _T("").
+		free(long_dir);
+	}
+};
+
 // Some of these lengths and such are based on the MSDN example at
 // http://msdn.microsoft.com/library/default.asp?url=/library/en-us/sysinfo/base/enumerating_registry_subkeys.asp:
 // FIX FOR v1.0.48: 
@@ -498,15 +544,18 @@ class TextStream; // TextIO
 struct LoopReadFileStruct
 {
 	TextStream *mReadFile, *mWriteFile;
-	TCHAR mWriteFileName[MAX_PATH];
+	LPTSTR mWriteFileName;
 	#define READ_FILE_LINE_SIZE (64 * 1024)  // This is also used by FileReadLine().
 	TCHAR mCurrentLine[READ_FILE_LINE_SIZE];
 	LoopReadFileStruct(TextStream *aReadFile, LPTSTR aWriteFileName)
 		: mReadFile(aReadFile), mWriteFile(NULL) // mWriteFile is opened by FileAppend() only upon first use.
+		, mWriteFileName(aWriteFileName) // Caller has passed the result of _tcsdup() for us to take over.
 	{
-		// Use our own buffer because caller's is volatile due to possibly being in the deref buffer:
-		tcslcpy(mWriteFileName, aWriteFileName, _countof(mWriteFileName));
 		*mCurrentLine = '\0';
+	}
+	~LoopReadFileStruct()
+	{
+		free(mWriteFileName);
 	}
 };
 
@@ -657,8 +706,11 @@ private:
 	bool EvaluateLoopUntil(ResultType &aResult);
 	ResultType Line::PerformLoop(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
 		, __int64 aIterationLimit, bool aIsInfinite);
-	ResultType Line::PerformLoopFilePattern(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
+	ResultType PerformLoopFilePattern(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
 		, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, LPTSTR aFilePattern);
+	bool ParseLoopFilePattern(LPTSTR aFilePattern, LoopFilesStruct &lfs, ResultType &aResult);
+	ResultType PerformLoopFilePattern(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
+		, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, LoopFilesStruct &lfs);
 	ResultType PerformLoopReg(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
 		, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, HKEY aRootKeyType, HKEY aRootKey, LPTSTR aRegSubkey);
 	ResultType PerformLoopParse(ExprTokenType *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil);
@@ -700,7 +752,7 @@ private:
 	ResultType FileGetShortcut(LPTSTR aShortcutFile);
 	ResultType FileCreateShortcut(LPTSTR aTargetFile, LPTSTR aShortcutFile, LPTSTR aWorkingDir, LPTSTR aArgs
 		, LPTSTR aDescription, LPTSTR aIconFile, LPTSTR aHotkey, LPTSTR aIconNumber, LPTSTR aRunState);
-	ResultType FileCreateDir(LPTSTR aDirSpec);
+	static bool FileCreateDir(LPTSTR aDirSpec, LPTSTR aCanModifyDirSpec = NULL);
 	ResultType FileRead(LPTSTR aFilespec);
 	ResultType FileReadLine(LPTSTR aFilespec, LPTSTR aLineNumber);
 	ResultType FileAppend(LPTSTR aFilespec, LPTSTR aBuf, LoopReadFileStruct *aCurrentReadFile);
@@ -711,16 +763,27 @@ private:
 	ResultType FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag);
 
 	typedef BOOL (* FilePatternCallback)(LPTSTR aFilename, WIN32_FIND_DATA &aFile, void *aCallbackData);
-	int FilePatternApply(LPTSTR aFilePattern, FileLoopModeType aOperateOnFolders
-		, bool aDoRecurse, FilePatternCallback aCallback, void *aCallbackData
-		, bool aCalledRecursively = false);
+	struct FilePatternStruct
+	{
+		TCHAR path[T_MAX_PATH]; // Directory and naked filename or pattern.
+		TCHAR pattern[MAX_PATH]; // Naked filename or pattern.
+		size_t dir_length, pattern_length;
+		FilePatternCallback aCallback;
+		void *aCallbackData;
+		FileLoopModeType aOperateOnFolders;
+		bool aDoRecurse;
+		int failure_count;
+	};
+	ResultType FilePatternApply(LPTSTR aFilePattern, FileLoopModeType aOperateOnFolders
+		, bool aDoRecurse, FilePatternCallback aCallback, void *aCallbackData);
+	void FilePatternApply(FilePatternStruct &);
 
 	ResultType FileGetAttrib(LPTSTR aFilespec);
-	int FileSetAttrib(LPTSTR aAttributes, LPTSTR aFilePattern, FileLoopModeType aOperateOnFolders
-		, bool aDoRecurse, bool aCalledRecursively = false);
+	ResultType FileSetAttrib(LPTSTR aAttributes, LPTSTR aFilePattern
+		, FileLoopModeType aOperateOnFolders, bool aDoRecurse);
 	ResultType FileGetTime(LPTSTR aFilespec, TCHAR aWhichTime);
-	int FileSetTime(LPTSTR aYYYYMMDD, LPTSTR aFilePattern, TCHAR aWhichTime
-		, FileLoopModeType aOperateOnFolders, bool aDoRecurse, bool aCalledRecursively = false);
+	ResultType FileSetTime(LPTSTR aYYYYMMDD, LPTSTR aFilePattern, TCHAR aWhichTime
+		, FileLoopModeType aOperateOnFolders, bool aDoRecurse);
 	ResultType FileGetSize(LPTSTR aFilespec, LPTSTR aGranularity);
 	ResultType FileGetVersion(LPTSTR aFilespec);
 
@@ -811,7 +874,6 @@ private:
 	static ResultType SetToggleState(vk_type aVK, ToggleValueType &ForceLock, LPTSTR aToggleText);
 
 public:
-	static ResultType Line::IncludeFiles(bool aAllowDuplicateInclude, bool aIgnoreLoadFailure, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, LPTSTR aFilePattern);
 	#define SET_S_DEREF_BUF(ptr, size) Line::sDerefBuf = ptr, Line::sDerefBufSize = size
 
 	#define NULLIFY_S_DEREF_BUF \
@@ -1025,13 +1087,13 @@ public:
 	LPTSTR ExpandArg(LPTSTR aBuf, int aArgIndex, Var *aArgVar = NULL);
 	LPTSTR ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType *aResultToken
 		, LPTSTR &aTarget, LPTSTR &aDerefBuf, size_t &aDerefBufSize, LPTSTR aArgDeref[], size_t aExtraSize);
+	ResultType ExpandSingleArg(int aArgIndex, ExprTokenType &aResultToken, LPTSTR &aDerefBuf, size_t &aDerefBufSize);
 	ResultType ExpressionToPostfix(ArgStruct &aArg);
 	ResultType EvaluateHotCriterionExpression(); // Called by HotkeyCriterion::Eval().
 
 	ResultType Deref(Var *aOutputVar, LPTSTR aBuf);
 
-	static bool FileIsFilteredOut(WIN32_FIND_DATA &aCurrentFile, FileLoopModeType aFileLoopMode
-		, LPTSTR aFilePath, size_t aFilePathLength);
+	static bool FileIsFilteredOut(LoopFilesStruct &aCurrentFile, FileLoopModeType aFileLoopMode);
 
 	Label *GetJumpTarget(bool aIsDereferenced);
 	Label *IsJumpValid(Label &aTargetLabel, bool aSilent = false);
@@ -2085,17 +2147,15 @@ public:
 	void operator delete[](void *aPtr) {}
 
 	// AutoIt3 functions:
-	static bool Util_CopyDir(LPCTSTR szInputSource, LPCTSTR szInputDest, bool bOverwrite);
-	static bool Util_MoveDir(LPCTSTR szInputSource, LPCTSTR szInputDest, int OverwriteMode);
+	static bool Util_CopyDir(LPCTSTR szInputSource, LPCTSTR szInputDest, int OverwriteMode, bool bMove);
 	static bool Util_RemoveDir(LPCTSTR szInputSource, bool bRecurse);
 	static int Util_CopyFile(LPCTSTR szInputSource, LPCTSTR szInputDest, bool bOverwrite, bool bMove, DWORD &aLastError);
 	static void Util_ExpandFilenameWildcard(LPCTSTR szSource, LPCTSTR szDest, LPTSTR szExpandedDest);
 	static void Util_ExpandFilenameWildcardPart(LPCTSTR szSource, LPCTSTR szDest, LPTSTR szExpandedDest);
-	static bool Util_CreateDir(LPCTSTR szDirName);
 	static bool Util_DoesFileExist(LPCTSTR szFilename);
 	static bool Util_IsDir(LPCTSTR szPath);
 	static void Util_GetFullPathName(LPCTSTR szIn, LPTSTR szOut);
-	static bool Util_IsDifferentVolumes(LPCTSTR szPath1, LPCTSTR szPath2);
+	static void Util_GetFullPathName(LPCTSTR szIn, LPTSTR szOut, DWORD aBufSize);
 };
 
 
@@ -2762,6 +2822,7 @@ struct GuiControlOptionsType
 	TCHAR password_char; // When zeroed, indicates "use default password" for an edit control with the password style.
 	bool range_changed;
 	bool color_changed; // To discern when a control has been put back to the default color. [v1.0.26]
+	bool tick_interval_changed, tick_interval_specified;
 	bool start_new_section;
 	bool use_theme; // v1.0.32: Provides the means for the window's current setting of mUseTheme to be overridden.
 	bool listview_no_auto_sort; // v1.0.44: More maintainable and frees up GUI_CONTROL_ATTRIB_ALTBEHAVIOR for other uses.
@@ -3020,6 +3081,7 @@ public:
 	Var **mVar, **mLazyVar; // Array of pointers-to-variable, allocated upon first use and later expanded as needed.
 	int mVarCount, mVarCountMax, mLazyVarCount; // Count of items in the above array as well as the maximum capacity.
 	WinGroup *mFirstGroup, *mLastGroup;  // The first and last variables in the linked list.
+	Line *mOpenBlock; // While loading the script, this is the beginning of a block which is currently open.
 	int mCurrentFuncOpenBlockCount; // While loading the script, this is how many blocks are currently open in the current function's body.
 	bool mNextLineIsFunctionBody; // Whether the very next line to be added will be the first one of the body.
 	bool mNoUpdateLabels;
@@ -3163,10 +3225,12 @@ public:
 	void TerminateApp(ExitReasons aExitReason, int aExitCode); // L31: Added aExitReason. See script.cpp.
 	LineNumberType LoadFromFile();
 #ifndef AUTOHOTKEYSC
-	LineNumberType LoadFromText(LPTSTR aScript,LPCTSTR aPathToShow = NULL, bool aCheckIfExpr = true); // HotKeyIt H1 load text instead file ahktextdll
-	ResultType LoadIncludedText(LPTSTR aScript,LPCTSTR aPathToShow = NULL); //New read text
+	LineNumberType LoadFromText(LPTSTR aScript,LPCTSTR aPathToShow = _T(""), bool aCheckIfExpr = true); // HotKeyIt H1 load text instead file ahktextdll
+	ResultType LoadIncludedText(LPTSTR aScript,LPCTSTR aPathToShow = _T("")); //New read text
 #endif
 	ResultType LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure);
+	ResultType LoadIncludedFile(TextStream *fp);
+	ResultType OpenIncludedFile(TextStream &ts, LPTSTR aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure, LPCTSTR aPathToShow = NULL);
 	LineNumberType CurrentLine();
 	LPTSTR CurrentFile();
 
@@ -3176,6 +3240,8 @@ public:
 
 	ResultType DefineFunc(LPTSTR aBuf, Var *aFuncGlobalVar[]);
 #ifndef AUTOHOTKEYSC
+	void InitFuncLibraries(FuncLibrary aLibs[]);
+	void InitFuncLibrary(FuncLibrary &aLib, LPTSTR aPathBase, LPTSTR aPathSuffix);
 	Func *FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &aErrorWasShown, bool &aFileWasFound, bool aIsAutoInclude);
 #endif
 	Func *FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength = 0, int *apInsertPos = NULL);
@@ -3252,6 +3318,7 @@ public:
 #endif
 	// Call this SciptError to avoid confusion with Line's error-displaying functions:
 	ResultType ScriptError(LPCTSTR aErrorText, LPCTSTR aExtraInfo = _T("")); // , ResultType aErrorType = FAIL);
+	ResultType CriticalError(LPCTSTR aErrorText, LPCTSTR aExtraInfo = _T(""));
 
 	void ScriptWarning(WarnMode warnMode, LPCTSTR aWarningText, LPCTSTR aExtraInfo = _T(""), Line *line = NULL);
 	void WarnUninitializedVar(Var *var);
@@ -3359,10 +3426,9 @@ BIV_DECL_R (BIV_ScriptHwnd);
 BIV_DECL_R (BIV_LineNumber);
 BIV_DECL_R (BIV_LineFile);
 BIV_DECL_R (BIV_LoopFileName);
-BIV_DECL_R (BIV_LoopFileShortName);
 BIV_DECL_R (BIV_LoopFileExt);
 BIV_DECL_R (BIV_LoopFileDir);
-BIV_DECL_R (BIV_LoopFileFullPath);
+BIV_DECL_R (BIV_LoopFilePath);
 BIV_DECL_R (BIV_LoopFileLongPath);
 BIV_DECL_R (BIV_LoopFileShortPath);
 BIV_DECL_R (BIV_LoopFileTime);
@@ -3521,6 +3587,7 @@ BIF_DECL(BIF_LoadPicture);
 BIF_DECL(BIF_Trim); // L31: Also handles LTrim and RTrim.
 
 BIF_DECL(BIF_Hotstring);
+BIF_DECL(BIF_InputHook);
 
 
 BIF_DECL(BIF_IsObject);
@@ -3590,9 +3657,12 @@ ResultType TokenToDoubleOrInt64(const ExprTokenType &aInput, ExprTokenType &aOut
 IObject *TokenToObject(ExprTokenType &aToken); // L31
 Func *TokenToFunc(ExprTokenType &aToken);
 ResultType TokenSetResult(ExprTokenType &aResultToken, LPCTSTR aResult, size_t aResultLength = -1);
+BOOL TokensAreEqual(ExprTokenType &left, ExprTokenType &right);
 
 LPTSTR RegExMatch(LPTSTR aHaystack, LPTSTR aNeedleRegEx);
 void SetWorkingDir(LPTSTR aNewDir);
+void UpdateWorkingDir(LPTSTR aNewDir = NULL);
+LPTSTR GetWorkingDir();
 int ConvertJoy(LPTSTR aBuf, int *aJoystickID = NULL, bool aAllowOnlyButtons = false);
 bool ScriptGetKeyState(vk_type aVK, KeyStateTypes aKeyStateType);
 double ScriptGetJoyState(JoyControls aJoy, int aJoystickID, ExprTokenType &aToken, bool aUseBoolForUpDown);

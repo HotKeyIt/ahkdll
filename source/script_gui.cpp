@@ -1964,7 +1964,7 @@ LPTSTR GuiType::ConvertEvent(GuiEventType evt)
 
 IObject* GuiType::CreateDropArray(HDROP hDrop)
 {
-	TCHAR buf[MAX_PATH];
+	TCHAR buf[T_MAX_PATH]; // T_MAX_PATH vs. MAX_PATH is unlikely to matter if the source of hDrop is the shell as of 2018, but may allow long paths in future OS versions.
 	UINT file_count = DragQueryFile(hDrop, 0xFFFFFFFF, NULL, 0);
 	Object* obj = Object::Create();
 	ExprTokenType tok(buf);
@@ -1972,7 +1972,7 @@ IObject* GuiType::CreateDropArray(HDROP hDrop)
 
 	for (UINT u = 0; u < file_count; u++)
 	{
-		DragQueryFile(hDrop, u, buf, MAX_PATH);
+		DragQueryFile(hDrop, u, buf, _countof(buf));
 		obj->InsertAt(u, u+1, &pTok, 1);
 	}
 
@@ -5379,10 +5379,13 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 			if (adding) aOpt.style_add |= TBS_NOTICKS; else aOpt.style_remove |= TBS_NOTICKS;
 		else if (aControl.type == GUI_CONTROL_SLIDER && !_tcsnicmp(next_option, _T("TickInterval"), 12))
 		{
+			aOpt.tick_interval_changed = true;
 			if (adding)
 			{
 				aOpt.style_add |= TBS_AUTOTICKS;
-				aOpt.tick_interval = ATOI(next_option + 12);
+				next_option += 12;
+				aOpt.tick_interval_specified = *next_option;
+				aOpt.tick_interval = ATOI(next_option);
 			}
 			else
 			{
@@ -10023,7 +10026,8 @@ LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPara
 		// because otherwise it would probably become a CPU-maxing loop wherein the dialog or MonthCal
 		// msg pump that called us dispatches the above message right back to us, causing it to
 		// bounce around thousands of times until that other msg pump finally finishes.
-		if (!g_MenuIsVisible)
+		// UPDATE: This will backfire if the script is uninterruptible.
+		if (IsInterruptible())
 		{
 			// Handling these messages here by reposting them to our thread relieves the one who posted them
 			// from ever having to do a MsgSleep(-1), which in turn allows it or its caller to acknowledge
@@ -10711,12 +10715,21 @@ void GuiType::ControlSetSliderOptions(GuiControlType &aControl, GuiControlOption
 		SendMessage(aControl.hwnd, TBM_SETRANGEMIN, FALSE, aOpt.range_min); // No redraw
 		SendMessage(aControl.hwnd, TBM_SETRANGEMAX, TRUE, aOpt.range_max); // Redraw.
 	}
-	if (aOpt.tick_interval)
+	if (aOpt.tick_interval_changed)
 	{
 		if (aOpt.tick_interval < 0) // This is the signal to remove the existing tickmarks.
 			SendMessage(aControl.hwnd, TBM_CLEARTICS, TRUE, 0);
-		else // greater than zero, since zero itself it checked in one of the enclose IFs above.
+		else if (aOpt.tick_interval_specified)
 			SendMessage(aControl.hwnd, TBM_SETTICFREQ, aOpt.tick_interval, 0);
+		else
+			// +TickInterval without a value.  TBS_AUTOTICKS was added, but doesn't take effect
+			// until TBM_SETRANGE' or TBM_SETTICFREQ is sent.  Since the script might have already
+			// set an interval and there's no TBM_GETTICFREQ, use TBM_SETRANGEMAX to set the ticks.
+			if (!aOpt.range_changed) // TBM_SETRANGEMAX wasn't already sent.
+			{
+				SendMessage(aControl.hwnd, TBM_SETRANGEMAX, TRUE
+					, SendMessage(aControl.hwnd, TBM_GETRANGEMAX, 0, 0));
+			}
 	}
 	if (aOpt.line_size > 0) // Removal is not supported, so only positive values are considered.
 		SendMessage(aControl.hwnd, TBM_SETLINESIZE, 0, aOpt.line_size);

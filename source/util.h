@@ -751,7 +751,8 @@ bool DoesFilePatternExist(LPTSTR aFilePattern, DWORD *aFileAttr = NULL);
 #ifdef _DEBUG
 	ResultType FileAppend(LPTSTR aFilespec, LPTSTR aLine, bool aAppendNewline = true);
 #endif
-LPTSTR ConvertFilespecToCorrectCase(LPTSTR aFullFileSpec);
+LPTSTR ConvertFilespecToCorrectCase(LPTSTR aFilespec, LPTSTR aBuf, size_t aBufSize, size_t &aBufLength);
+void ConvertFilespecToCorrectCase(LPTSTR aBuf, size_t aBufSize, size_t &aBufLength);
 LPTSTR FileAttribToStr(LPTSTR aBuf, DWORD aAttr);
 unsigned __int64 GetFileSize64(HANDLE aFileHandle);
 LPTSTR GetWin32ErrorText(LPTSTR aBuf, DWORD aBufSize, DWORD aError);
@@ -762,6 +763,7 @@ HRESULT MyEnableThemeDialogTexture(HWND hwnd, DWORD dwFlags);
 BOOL MyIsAppThemed();
 LPTSTR ConvertEscapeSequences(LPTSTR aBuf, TCHAR aEscapeChar, bool aAllowEscapedSpace);
 int FindNextDelimiter(LPCTSTR aBuf, TCHAR aDelimiter = ',', int aStartIndex = 0, LPCTSTR aLiteralMap = NULL);
+int FindExprDelim(LPCTSTR aBuf, TCHAR aDelimiter = ',', int aStartIndex = 0, LPCTSTR aLiteralMap = NULL);
 POINT CenterWindow(int aWidth, int aHeight);
 bool FontExist(HDC aHdc, LPCTSTR aTypeface);
 void ScreenToWindow(POINT &aPoint, HWND aHwnd);
