@@ -50,7 +50,7 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 	return;
 #endif
 #ifndef AUTOHOTKEYSC
-	if (!FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), MAKEINTRESOURCE(RT_RCDATA)))
+	if (!FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), RT_RCDATA))
 	{
 		g_TlsDoExecute = true;
 		return;
@@ -130,7 +130,7 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 {
 	/*
 	HGLOBAL hResData;
-	if (g_hResource = FindResource(NULL, _T("EA80A44AA77E484295B1813BD4C12C28"), MAKEINTRESOURCE(RT_RCDATA)))
+	if (g_hResource = FindResource(NULL, _T("EA80A44AA77E484295B1813BD4C12C28"), RT_RCDATA))
 		if (hResData = LoadResource(NULL, g_hResource))
 		{
 			LPVOID aDataBuf;
@@ -200,9 +200,9 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	*/
 	// Init any globals not in "struct g" that need it:
 #ifdef _DEBUG
-	g_hResource = FindResource(NULL, _T("AHK"), MAKEINTRESOURCE(RT_RCDATA));
+	g_hResource = FindResource(NULL, _T("AHK"), RT_RCDATA);
 #else
-	g_hResource = FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), MAKEINTRESOURCE(RT_RCDATA));
+	g_hResource = FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), RT_RCDATA);
 #endif
 	g_hInstance = hInstance;
 	InitializeCriticalSection(&g_CriticalRegExCache); // v1.0.45.04: Must be done early so that it's unconditional, so that DeleteCriticalSection() in the script destructor can also be unconditional (deleting when never initialized can crash, at least on Win 9x).

@@ -152,12 +152,12 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	g_CryptEncrypt = (MyCryptEncrypt)GetProcAddress(advapi32, "CryptEncrypt");
 	g_CryptDecrypt = (MyCryptDecrypt)GetProcAddress(advapi32, "CryptDecrypt");
 #ifdef _DEBUG
-	g_hResource = FindResource(g_hInstance, _T("AHK"), MAKEINTRESOURCE(RT_RCDATA));
+	g_hResource = FindResource(g_hInstance, _T("AHK"), RT_RCDATA);
 #else
 	if (g_hMemoryModule)
-		g_hResource = (HRSRC)MemoryFindResource(g_hMemoryModule, _T("E4847ED08866458F8DD35F94B37001C0"), MAKEINTRESOURCE(RT_RCDATA));
+		g_hResource = (HRSRC)MemoryFindResource(g_hMemoryModule, _T("E4847ED08866458F8DD35F94B37001C0"), RT_RCDATA);
 	else
-		g_hResource = FindResource(g_hInstance, _T("E4847ED08866458F8DD35F94B37001C0"), MAKEINTRESOURCE(RT_RCDATA));
+		g_hResource = FindResource(g_hInstance, _T("E4847ED08866458F8DD35F94B37001C0"), RT_RCDATA);
 #endif
 	
 	UpdateWorkingDir(); // Needed for the FileSelectFile() workaround.

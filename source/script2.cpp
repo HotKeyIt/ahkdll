@@ -10601,7 +10601,7 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 		HRSRC res;
 		HGLOBAL res_load;
 		LPVOID res_lock;
-		if ( (res = FindResource(NULL, source, MAKEINTRESOURCE(RT_RCDATA)))
+		if ( (res = FindResource(NULL, source, RT_RCDATA))
 		  && (res_load = LoadResource(NULL, res))
 		  && (res_lock = LockResource(res_load))  )
 		{
@@ -18166,7 +18166,7 @@ BIF_DECL(BIF_ResourceLoadLibrary)
 	HRSRC hRes;
 	HGLOBAL hResData = NULL;
 
-	hRes = FindResource(NULL, aParam[0]->symbol == SYM_VAR ? aParam[0]->var->Contents() : aParam[0]->marker, MAKEINTRESOURCE(RT_RCDATA));
+	hRes = FindResource(NULL, aParam[0]->symbol == SYM_VAR ? aParam[0]->var->Contents() : aParam[0]->marker, RT_RCDATA);
 	
 	if ( !( hRes 
 			&& (textbuf.mLength = SizeofResource(NULL, hRes))

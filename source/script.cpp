@@ -2375,11 +2375,31 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 // Returns OK or FAIL.
 {
 #ifndef AUTOHOTKEYSC
-	TextFile ts;
+	ResultType result;
+	if (g_hResource)
+	{
+		TextMem tm;
+		result = OpenIncludedFile(tm, aFileSpec, aAllowDuplicateInclude, aIgnoreLoadFailure);
+		if (result != CONDITION_TRUE)
+			return result; // OK or FAIL.
+
+		// Off-loading to another function significantly reduces code size, perhaps because
+		// the TextFile/TextMem destructor is called from fewer places (each "return"):
+		return LoadIncludedFile(&tm);
+	}
+	else
+	{
+		TextFile ts;
+		result = OpenIncludedFile(ts, aFileSpec, aAllowDuplicateInclude, aIgnoreLoadFailure);
+		if (result != CONDITION_TRUE)
+			return result; // OK or FAIL.
+
+		// Off-loading to another function significantly reduces code size, perhaps because
+		// the TextFile/TextMem destructor is called from fewer places (each "return"):
+		return LoadIncludedFile(&ts);
+	}
 #else
 	TextMem ts;
-#endif
-
 	ResultType result = OpenIncludedFile(ts, aFileSpec, aAllowDuplicateInclude, aIgnoreLoadFailure);
 	if (result != CONDITION_TRUE)
 		return result; // OK or FAIL.
@@ -2387,6 +2407,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 	// Off-loading to another function significantly reduces code size, perhaps because
 	// the TextFile/TextMem destructor is called from fewer places (each "return"):
 	return LoadIncludedFile(&ts);
+#endif
 }
 
 
