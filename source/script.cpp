@@ -2169,9 +2169,9 @@ ResultType Script::OpenIncludedFile(TextStream &ts, LPTSTR aFileSpec, bool aAllo
 {
 	TextMem::Buffer textbuf(NULL, 0, false);
 	DWORD aSizeDeCompressed = 0;
+	AUTO_MALLOCA_DEFINE(LPVOID, buff);
 
 #ifndef AUTOHOTKEYSC
-	AUTO_MALLOCA_DEFINE(LPVOID, buff);
 
 	if (!aFileSpec || !*aFileSpec) return FAIL;
 
@@ -2323,10 +2323,8 @@ ResultType Script::OpenIncludedFile(TextStream &ts, LPTSTR aFileSpec, bool aAllo
 #ifdef _DEBUG
 	if (hRes = FindResource(NULL, _T("AHK"), RT_RCDATA))
 #else
-	if (hRes = FindResource(NULL, _T(">AUTOHOTKEY SCRIPT<"), RT_RCDATA))
+	if (hRes = FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), RT_RCDATA))
 #endif
-	{}
-	else if (hRes = FindResource(NULL, _T(">AHK WITH ICON<"), RT_RCDATA))
 	{}
 	
 	if ( !( hRes 
@@ -2337,7 +2335,29 @@ ResultType Script::OpenIncludedFile(TextStream &ts, LPTSTR aFileSpec, bool aAllo
 		MsgBox(_T("Could not extract script from EXE."), 0, aFileSpec);
 		return FAIL;
 	}
-
+	if (*(unsigned int*)textbuf.mBuffer == 0x04034b50)
+	{
+		if (!AHKModule())
+			return FAIL;
+		LPVOID aDataBuf;
+		for (int i = 0; i < 10; i++)
+			*g_default_pwd[i] = i + 1;
+		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength, g_default_pwd);
+		if (aSizeDeCompressed)
+		{
+			AUTO_MALLOCA(buff, LPVOID, aSizeDeCompressed + 2); // +2 for terminator, will be freed when function returns
+			memcpy(buff, aDataBuf, aSizeDeCompressed);
+			g_memset((char*)buff + aSizeDeCompressed, 0, 2);
+			g_memset(aDataBuf, 0, aSizeDeCompressed);
+			free(aDataBuf);
+			textbuf.mLength = aSizeDeCompressed + 2;
+			textbuf.mBuffer = buff;
+			if (!AHKModule())
+				return FAIL;
+			MemoryFreeLibrary(g_hNTDLL);
+			MemoryFreeLibrary(g_hKERNEL32);
+		}
+	}
 	// NOTE: Ahk2Exe strips off the UTF-8 BOM.
 	ts.Open(textbuf, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR, CP_UTF8);
 
