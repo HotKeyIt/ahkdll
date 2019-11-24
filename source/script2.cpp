@@ -17,7 +17,6 @@ GNU General Public License for more details.
 #include "stdafx.h" // pre-compiled headers
 #include <olectl.h> // for OleLoadPicture()
 #include <winioctl.h> // For PREVENT_MEDIA_REMOVAL and CD lock/unlock.
-#include <typeinfo.h> // For typeid in BIF_Type.
 #include "qmath.h" // Used by Transform() [math.h incurs 2k larger code size just for ceil() & floor()]
 #include "mt19937ar-cok.h" // for sorting in random order
 #include "script.h"
@@ -28,13 +27,8 @@ GNU General Public License for more details.
 #include <Psapi.h> // for GetModuleBaseName.
 #include <process.h>  // NewThread
 
-#undef _WIN32_WINNT // v1.1.10.01: Redefine this just for these APIs, to avoid breaking some other commands on Win XP (such as Process Close).
-#define _WIN32_WINNT 0x0600 // Windows Vista
 #include <mmdeviceapi.h> // for SoundSet/SoundGet.
-#pragma warning(push)
-#pragma warning(disable:4091) // Work around a bug in the SDK used by the v140_xp toolset.
 #include <endpointvolume.h> // for SoundSet/SoundGet.
-#pragma warning(pop)
 
 #define PCRE_STATIC             // For RegEx. PCRE_STATIC tells PCRE to declare its functions for normal, static
 #include "lib_pcre/pcre/pcre.h" // linkage rather than as functions inside an external DLL.
@@ -109,7 +103,7 @@ ResultType Line::ToolTip(LPTSTR aText, LPTSTR aX, LPTSTR aY, LPTSTR aID)
 		pt.y = ATOI(aY) + origin.y;
 
 	TOOLINFO ti = {0};
-	ti.cbSize = sizeof(ti) - sizeof(void *); // Fixed for v1.0.36.05: Tooltips fail to work on Win9x and probably NT4/2000 unless the size for the *lpReserved member in _WIN32_WINNT 0x0501 is omitted.
+	ti.cbSize = sizeof(ti);
 	ti.uFlags = TTF_TRACK;
 	ti.lpszText = aText;
 	// Note that the ToolTip won't work if ti.hwnd is assigned the HWND from GetDesktopWindow().
@@ -254,6 +248,10 @@ ResultType TrayTipParseOptions(LPTSTR aOptions, NOTIFYICONDATA &nic)
 		{
 			nic.dwInfoFlags |= ATOI(option);
 		}
+		else
+		{
+			goto invalid_option;
+		}
 	}
 invalid_option:
 	return g_script->ScriptError(ERR_INVALID_OPTION, next_option);
@@ -275,9 +273,31 @@ ResultType Line::TrayTip(LPTSTR aText, LPTSTR aTitle, LPTSTR aOptions)
 		// pass a space to ensure the TrayTip is shown.  Testing showed that Windows 10
 		// will size the notification to fit only the title, as if there was no text.
 		aText = _T(" ");
+	if (nic.dwInfoFlags & NIIF_USER)
+	{
+		// Windows 10 toast notifications display the small tray icon stretched to the
+		// large size if NIIF_USER is passed but without NIIF_LARGE_ICON or hBalloonIcon.
+		// If a large icon is passed without the flag, the notification does not show at all.
+		// But since this could change, let the script pass 0x24 to use the large icon.
+		//if (g_os.IsWin10OrLater())
+		//	nic.dwInfoFlags |= NIIF_LARGE_ICON;
+		if (nic.dwInfoFlags & NIIF_LARGE_ICON)
+			nic.hBalloonIcon = g_script->mCustomIcon ? g_script->mCustomIcon : g_IconLarge;
+		else
+			nic.hBalloonIcon = g_script->mCustomIconSmall ? g_script->mCustomIconSmall : g_IconSmall;
+	}
 	tcslcpy(nic.szInfoTitle, aTitle, _countof(nic.szInfoTitle)); // Empty title omits the title line entirely.
 	tcslcpy(nic.szInfo, aText, _countof(nic.szInfo));	// Empty text removes the balloon.
-	Shell_NotifyIcon(NIM_MODIFY, &nic);
+	if (!Shell_NotifyIcon(NIM_MODIFY, &nic) && (nic.dwInfoFlags & NIIF_USER))
+	{
+		// Passing NIIF_USER without NIIF_LARGE_ICON on Windows 10.0.19018 caused failure,
+		// even though a small icon is displayed by default (without NIIF_USER), the docs
+		// indicate it should work, and it works on Vista.  There's a good chance that
+		// removing the flag and trying again will produce the desired result, or at least
+		// show a TrayTip without the icon, which is preferable to complete failure.
+		nic.dwInfoFlags &= ~NIIF_USER;
+		Shell_NotifyIcon(NIM_MODIFY, &nic);
+	}
 	return OK; // i.e. never a critical error if it fails.
 }
 
@@ -301,17 +321,16 @@ BIF_DECL(BIF_Input)
 // at a time.  Thus, if an input is ongoing and a new thread starts, and it begins its
 // own input, that input should terminate the prior input prior to beginning the new one.
 // In a "worst case" scenario, each interrupted quasi-thread could have its own
-// input, which is in turn terminated by the thread that interrupts it.  Every time
-// this function returns, it must be sure to set g_input.status to INPUT_OFF beforehand.
-// This signals the quasi-threads beneath, when they finally return, that their input
-// was terminated due to a new input that took precedence.
+// input, which is in turn terminated by the thread that interrupts it.
 {
+	auto *prior_input = InputFind(NULL); // Not g_input, which could belong to an object and should not be ended.
+
 	if (_f_callee_id == FID_InputEnd)
 	{
 		// This means that the user is specifically canceling the prior input (if any).
-		bool prior_input_is_being_terminated = (g_input.status == INPUT_IN_PROGRESS);
-		g_input.status = INPUT_TERMINATED_BY_INPUTEND;
-		_f_return_i(prior_input_is_being_terminated);
+		if (prior_input)
+			prior_input->Stop();
+		_f_return_i(prior_input != NULL);
 	}
 
 	size_t aMatchList_length;
@@ -321,103 +340,141 @@ BIF_DECL(BIF_Input)
 	// The aEndKeys string must be modifiable (not constant), since for performance reasons,
 	// it's allowed to be temporarily altered by this function.
 	
-	// Set default in case of early return (we want these to be in effect even if
-	// FAIL is returned for our thread, since the underlying thread that had the
-	// active input prior to us didn't fail and it it needs to know how its input
-	// was terminated):
-	g_input.status = INPUT_OFF;
-	
-	//////////////////////////////////////////
-	// Set default options and parse aOptions:
-	//////////////////////////////////////////
-	g_input.BackspaceIsUndo = true;
-	g_input.CaseSensitive = false;
-	g_input.IgnoreAHKInput = false;
-	g_input.TranscribeModifiedKeys = false;
-	g_input.Visible = false;
-	g_input.FindAnywhere = false;
-	g_input.BufferLengthMax = INPUT_BUFFER_SIZE - 1;
-	int timeout = 0;
-	bool endchar_mode = false;
+	input_type input;
+	input.VisibleNonText = false; // Override InputHook default.
+	input.BufferLengthMax = INPUT_BUFFER_SIZE - 1;
+	if (!input.Setup(aOptions, aEndKeys, aMatchList, aMatchList_length))
+		_f_return_FAIL;
+	// Only now is it safe to do things which might cause interruption (see comments above).
 
-	//////////////////////////////////////////////////////////////
-	// Initialize buffers and state variables for use by the hook:
-	//////////////////////////////////////////////////////////////
-	TCHAR input_buf[INPUT_BUFFER_SIZE] = _T(""); // Will contain the actual input from the user.
-	TCHAR prev_buf[INPUT_BUFFER_SIZE] = _T("");
-	*input_buf = '\0';
-	*prev_buf = '\0';
-	g_input.buffer = input_buf;
-	g_input.BufferLength = 0;
-	Var *A_Input = g_script->FindOrAddVar(_T("A_Input"));
+	if (prior_input)
+		prior_input->EndByNewInput();
+
+	if (!InputStart(input, &aResultToken))
+		_f_return_FAIL;
+}
+
+
+ResultType input_type::Setup(LPTSTR aOptions, LPTSTR aEndKeys, LPTSTR aMatchList, size_t aMatchList_length)
+{
+	ParseOptions(aOptions);
+	if (!SetKeyFlags(aEndKeys))
+		return FAIL;
+	if (!SetMatchList(aMatchList, aMatchList_length))
+		return FAIL;
+	
+	// For maintainability/simplicity/code size, it's allocated even if BufferLengthMax == 0.
+	if (  !(Buffer = tmalloc(BufferLengthMax + 1))  )
+		return g_script->ScriptError(ERR_OUTOFMEM);
+	*Buffer = '\0';
+
+	return OK;
+}
+
+
+ResultType InputStart(input_type &input, ResultToken *apResultToken)
+{
+	ASSERT(!input.InProgress());
+
+	// Keep the object alive while it is active, even if the script discards it.
+	// The corresponding Release() is done when g_input is reset by InputRelease().
+	if (input.ScriptObject)
+		input.ScriptObject->AddRef();
+	
+	// Set or update the timeout timer if needed.  The timer proc takes care to end
+	// only those inputs which are due, and will reset or kill the timer as needed.
+	if (input.Timeout > 0)
+		input.SetTimeoutTimer();
+
+	input.Prev = g_input;
+	input.Start();
+	g_input = &input; // Signal the hook to start the input.
+
+	Hotkey::InstallKeybdHook(); // Install the hook (if needed).
+
+	if (!apResultToken)
+		return OK;
+	return InputWait(*apResultToken, input);
+}
+
+
+void input_type::ParseOptions(LPTSTR aOptions)
+{
 	for (LPTSTR cp = aOptions; *cp; ++cp)
 	{
 		switch(ctoupper(*cp))
 		{
 		case 'A':
-			if (_tcslen(A_Input->Contents())) // Append value if variable is not empty (only strings allowed)
-			{
-				g_input.BufferLength = (int)_tcslen(A_Input->Contents());
-				if (g_input.BufferLength > INPUT_BUFFER_SIZE - 1)
-					g_input.BufferLength = INPUT_BUFFER_SIZE - 1;
-				_tcsncpy(input_buf, A_Input->Contents(), g_input.BufferLength);
-				_tcscpy(prev_buf, input_buf);
-			}
+			AppendText = true;
 			break;
 		case 'B':
-			g_input.BackspaceIsUndo = false;
+			BackspaceIsUndo = false;
 			break;
 		case 'C':
-			g_input.CaseSensitive = true;
+			CaseSensitive = true;
 			break;
 		case 'I':
-			g_input.IgnoreAHKInput = true;
+			MinSendLevel = (cp[1] <= '9' && cp[1] >= '0') ? (SendLevelType)_ttoi(cp + 1) : 1;
 			break;
 		case 'M':
-			g_input.TranscribeModifiedKeys = true;
+			TranscribeModifiedKeys = true;
 			break;
 		case 'L':
 			// Use atoi() vs. ATOI() to avoid interpreting something like 0x01C as hex
 			// when in fact the C was meant to be an option letter:
-			g_input.BufferLengthMax = _ttoi(cp + 1);
-			if (g_input.BufferLengthMax > INPUT_BUFFER_SIZE - 1)
-				g_input.BufferLengthMax = INPUT_BUFFER_SIZE - 1;
+			BufferLengthMax = _ttoi(cp + 1);
+			if (BufferLengthMax < 0)
+				BufferLengthMax = 0;
 			break;
 		case 'T':
 			// Although ATOF() supports hex, it's been documented in the help file that hex should
 			// not be used (see comment above) so if someone does it anyway, some option letters
 			// might be misinterpreted:
-			timeout = (int)(ATOF(cp + 1) * 1000);
+			Timeout = (int)(ATOF(cp + 1) * 1000);
 			break;
 		case 'V':
-			g_input.Visible = true;
+			VisibleText = true;
+			VisibleNonText = true;
 			break;
 		case '*':
-			g_input.FindAnywhere = true;
+			FindAnywhere = true;
 			break;
 		case 'E':
 			// Interpret single-character keys as characters rather than converting them to VK codes.
 			// This tends to work better when using multiple keyboard layouts, but changes behaviour:
 			// for instance, an end char of "." cannot be triggered while holding Alt.
-			endchar_mode = true;
+			EndCharMode = true;
 			break;
 		}
 	}
+}
 
-	//////////////////////////////////////////////
-	// Set up sparse arrays according to aEndKeys:
-	//////////////////////////////////////////////
-	UCHAR end_vk[VK_ARRAY_COUNT] = {0};  // A sparse array that indicates which VKs terminate the input.
-	UCHAR end_sc[SC_ARRAY_COUNT] = {0};  // A sparse array that indicates which SCs terminate the input.
 
+void input_type::SetTimeoutTimer()
+{
+	DWORD now = GetTickCount();
+	TimeoutAt = now + Timeout;
+	if (!g_InputTimerExists || Timeout < int(g_InputTimeoutAt - now))
+		SET_INPUT_TIMER(Timeout, TimeoutAt)
+}
+
+
+ResultType input_type::SetKeyFlags(LPTSTR aKeys, bool aEndKeyMode, UCHAR aFlagsRemove, UCHAR aFlagsAdd)
+{
+	bool vk_by_number;
 	vk_type vk;
 	sc_type sc = 0;
 	modLR_type modifiersLR;
-	size_t key_text_length, single_char_count = 0;
+	size_t key_text_length;
+	UINT single_char_count = 0;
 	TCHAR *end_pos, single_char_string[2];
 	single_char_string[1] = '\0'; // Init its second character once, since the loop only changes the first char.
+	
+	const bool endchar_mode = aEndKeyMode && EndCharMode;
+	UCHAR * const end_vk = KeyVK;
+	UCHAR * const end_sc = KeySC;
 
-	for (TCHAR *end_key = aEndKeys; *end_key; ++end_key) // This a modified version of the processing loop used in SendKeys().
+	for (TCHAR *end_key = aKeys; *end_key; ++end_key) // This a modified version of the processing loop used in SendKeys().
 	{
 		vk = 0; // Set default.  Not strictly necessary but more maintainable.
 		*single_char_string = '\0';  // Set default as "this key name is not a single-char string".
@@ -455,10 +512,21 @@ BIF_DECL(BIF_Input)
 			*end_pos = '\0';  // temporarily terminate the string here.
 
 			modifiersLR = 0;  // Init prior to below.
-			if (  !(vk = TextToVK(end_key + 1, &modifiersLR, true))  )
+			// Handle the key by VK if it was given by number, such as {vk26}.
+			// Otherwise, for any key name which has a VK shared by two possible SCs
+			// (such as Up and NumpadUp), handle it by SC so it's identified correctly.
+			if (vk = TextToVK(end_key + 1, &modifiersLR, true))
+			{
+				vk_by_number = ctoupper(end_key[1]) == 'V' && ctoupper(end_key[2]) == 'K';
+				if (!vk_by_number && (sc = vk_to_sc(vk, true)))
+				{
+					sc ^= 0x100; // Convert sc to the primary scan code, which is the one named by end_key.
+					vk = 0; // Handle it only by SC.
+				}
+			}
+			else
 				// No virtual key, so try to find a scan code.
-				if (sc = TextToSC(end_key + 1))
-					end_sc[sc] = END_KEY_ENABLED;
+				sc = TextToSC(end_key + 1);
 
 			*end_pos = '}';  // undo the temporary termination
 
@@ -475,14 +543,14 @@ BIF_DECL(BIF_Input)
 			*single_char_string = *end_key;
 			modifiersLR = 0;  // Init prior to below.
 			vk = TextToVK(single_char_string, &modifiersLR, true);
+			vk_by_number = false;
 		} // switch()
 
 		if (vk) // A valid virtual key code was discovered above.
 		{
-			end_vk[vk] |= END_KEY_ENABLED; // Use of |= is essential for cases such as ";:".
 			// Insist the shift key be down to form genuinely different symbols --
 			// namely punctuation marks -- but not for alphabetic chars.
-			if (*single_char_string && !IsCharAlpha(*single_char_string)) // v1.0.46.05: Added check for "*single_char_string" so that non-single-char strings like {F9} work as end keys even when the Shift key is being held down (this fixes the behavior to be like it was in pre-v1.0.45).
+			if (*single_char_string && aEndKeyMode && !IsCharAlpha(*single_char_string)) // v1.0.46.05: Added check for "*single_char_string" so that non-single-char strings like {F9} work as end keys even when the Shift key is being held down (this fixes the behavior to be like it was in pre-v1.0.45).
 			{
 				// Now we know it's not alphabetic, and it's not a key whose name
 				// is longer than one char such as a function key or numpad number.
@@ -494,16 +562,40 @@ BIF_DECL(BIF_Input)
 				else
 					end_vk[vk] |= END_KEY_WITHOUT_SHIFT;
 			}
+			else
+			{
+				end_vk[vk] = (end_vk[vk] & ~aFlagsRemove) | aFlagsAdd;
+				// Apply flag removal to this key's SC as well.  This is primarily
+				// to support combinations like {All} +E, {LCtrl}{RCtrl} -E.
+				sc_type temp_sc;
+				if (aFlagsRemove && !vk_by_number && (temp_sc = vk_to_sc(vk)))
+				{
+					end_sc[temp_sc] &= ~aFlagsRemove; // But apply aFlagsAdd only by VK.
+					// Since aFlagsRemove implies ScriptObject != NULL and !vk_by_number
+					// was also checked, that implies vk_to_sc(vk, true) was already called
+					// and did not find a secondary SC.
+				}
+			}
+		}
+		if (sc)
+		{
+			end_sc[sc] = (end_sc[sc] & ~aFlagsRemove) | aFlagsAdd;
 		}
 	} // for()
 
-	g_input.EndChars = _T("");
-	if (single_char_count)
+	if (single_char_count)  // See single_char_count++ above for comments.
 	{
-		// See single_char_count++ above for comments.
-		g_input.EndChars = talloca(single_char_count + 1);
+		if (single_char_count > EndCharsMax)
+		{
+			// Allocate a bigger buffer.
+			if (EndCharsMax) // If zero, EndChars may point to static memory.
+				free(EndChars);
+			if (  !(EndChars = tmalloc(single_char_count + 1))  )
+				return g_script->ScriptError(ERR_OUTOFMEM);
+			EndCharsMax = single_char_count;
+		}
 		TCHAR *dst, *src;
-		for (dst = g_input.EndChars, src = aEndKeys; *src; ++src)
+		for (dst = EndChars, src = aKeys; *src; ++src)
 		{
 			switch (*src)
 			{
@@ -522,39 +614,49 @@ BIF_DECL(BIF_Input)
 			}
 			*dst++ = *src;
 		}
+		ASSERT(dst > EndChars);
 		*dst = '\0';
 	}
+	else if (aEndKeyMode) // single_char_count is false
+	{
+		if (EndCharsMax)
+			*EndChars = '\0';
+		else
+			EndChars = _T("");
+	}
+	return OK;
+}
 
-	/////////////////////////////////////////////////
-	// Parse aMatchList into an array of key phrases:
-	/////////////////////////////////////////////////
+
+ResultType input_type::SetMatchList(LPTSTR aMatchList, size_t aMatchList_length)
+{
 	LPTSTR *realloc_temp;  // Needed since realloc returns NULL on failure but leaves original block allocated.
-	g_input.MatchCount = 0;  // Set default.
+	MatchCount = 0;  // Set default.
 	if (*aMatchList)
 	{
 		// If needed, create the array of pointers that points into MatchBuf to each match phrase:
-		if (!g_input.match)
+		if (!match)
 		{
-			if (   !(g_input.match = (LPTSTR *)malloc(INPUT_ARRAY_BLOCK_SIZE * sizeof(LPTSTR)))   )
-				_f_throw(ERR_OUTOFMEM);
-			g_input.MatchCountMax = INPUT_ARRAY_BLOCK_SIZE;
+			if (   !(match = (LPTSTR *)malloc(INPUT_ARRAY_BLOCK_SIZE * sizeof(LPTSTR)))   )
+				return g_script->ScriptError(ERR_OUTOFMEM);  // Short msg. since so rare.
+			MatchCountMax = INPUT_ARRAY_BLOCK_SIZE;
 		}
 		// If needed, create or enlarge the buffer that contains all the match phrases:
 		size_t space_needed = aMatchList_length + 1;  // +1 for the final zero terminator.
-		if (space_needed > g_input.MatchBufSize)
+		if (space_needed > MatchBufSize)
 		{
-			g_input.MatchBufSize = (UINT)(space_needed > 4096 ? space_needed : 4096);
-			if (g_input.MatchBuf) // free the old one since it's too small.
-				free(g_input.MatchBuf);
-			if (   !(g_input.MatchBuf = tmalloc(g_input.MatchBufSize))   )
+			MatchBufSize = (UINT)(space_needed > 4096 ? space_needed : 4096);
+			if (MatchBuf) // free the old one since it's too small.
+				free(MatchBuf);
+			if (   !(MatchBuf = tmalloc(MatchBufSize))   )
 			{
-				g_input.MatchBufSize = 0;
-				_f_throw(ERR_OUTOFMEM);
+				MatchBufSize = 0;
+				return g_script->ScriptError(ERR_OUTOFMEM);  // Short msg. since so rare.
 			}
 		}
 		// Copy aMatchList into the match buffer:
 		LPTSTR source, dest;
-		for (source = aMatchList, dest = g_input.match[g_input.MatchCount] = g_input.MatchBuf
+		for (source = aMatchList, dest = match[MatchCount] = MatchBuf
 			; *source; ++source)
 		{
 			if (*source != ',') // Not a comma, so just copy it over.
@@ -576,90 +678,48 @@ BIF_DECL(BIF_Input)
 			// If the previous item is blank -- which I think can only happen now if the MatchList
 			// begins with an orphaned comma (since two adjacent commas resolve to one literal comma)
 			// -- don't add it to the match list:
-			if (*g_input.match[g_input.MatchCount])
+			if (*match[MatchCount])
 			{
-				++g_input.MatchCount;
-				g_input.match[g_input.MatchCount] = ++dest;
+				++MatchCount;
+				match[MatchCount] = ++dest;
 				*dest = '\0';  // Init to prevent crash on orphaned comma such as "btw,otoh,"
 			}
 			if (*(source + 1)) // There is a next element.
 			{
-				if (g_input.MatchCount >= g_input.MatchCountMax) // Rarely needed, so just realloc() to expand.
+				if (MatchCount >= MatchCountMax) // Rarely needed, so just realloc() to expand.
 				{
 					// Expand the array by one block:
-					if (   !(realloc_temp = (LPTSTR *)realloc(g_input.match  // Must use a temp variable.
-						, (g_input.MatchCountMax + INPUT_ARRAY_BLOCK_SIZE) * sizeof(LPTSTR)))   )
-						_f_throw(ERR_OUTOFMEM);
-					g_input.match = realloc_temp;
-					g_input.MatchCountMax += INPUT_ARRAY_BLOCK_SIZE;
+					if (   !(realloc_temp = (LPTSTR *)realloc(match  // Must use a temp variable.
+						, (MatchCountMax + INPUT_ARRAY_BLOCK_SIZE) * sizeof(LPTSTR)))   )
+						return g_script->ScriptError(ERR_OUTOFMEM);  // Short msg. since so rare.
+					match = realloc_temp;
+					MatchCountMax += INPUT_ARRAY_BLOCK_SIZE;
 				}
 			}
 		} // for()
 		*dest = '\0';  // Terminate the last item.
 		// This check is necessary for only a single isolated case: When the match list
 		// consists of nothing except a single comma.  See above comment for details:
-		if (*g_input.match[g_input.MatchCount]) // i.e. omit empty strings from the match list.
-			++g_input.MatchCount;
+		if (*match[MatchCount]) // i.e. omit empty strings from the match list.
+			++MatchCount;
 	}
+	return OK;
+}
 
-	// Notes about the below macro:
-	// In case the Input timer has already put a WM_TIMER msg in our queue before we killed it,
-	// clean out the queue now to avoid any chance that such a WM_TIMER message will take effect
-	// later when it would be unexpected and might interfere with this input.  To avoid an
-	// unnecessary call to PeekMessage(), which has been known to yield our timeslice to other
-	// processes if the CPU is under load (which might be undesirable if this input is
-	// time-critical, such as in a game), call GetQueueStatus() to see if there are any timer
-	// messages in the queue.  I believe that GetQueueStatus(), unlike PeekMessage(), does not
-	// have the nasty/undocumented side-effect of yielding our timeslice under certain hard-to-reproduce
-	// circumstances, but Google and MSDN are completely devoid of any confirming info on this.
-	#define KILL_AND_PURGE_INPUT_TIMER \
-	if (g_InputTimerExists)\
-	{\
-		KILL_INPUT_TIMER \
-		if (HIWORD(GetQueueStatus(QS_TIMER)) & QS_TIMER)\
-			MsgSleep(-1);\
-	}
 
-	// Be sure to get rid of the timer if it exists due to a prior, ongoing input.
-	// It seems best to do this only after signaling the hook to start the input
-	// so that it's MsgSleep(-1), if it launches a new hotkey or timed subroutine,
-	// will be less likely to interrupt us during our setup of the input, i.e.
-	// it seems best that we put the input in progress prior to allowing any
-	// interruption.  UPDATE: Must do this before changing to INPUT_IN_PROGRESS
-	// because otherwise the purging of the timer message might call InputTimeout(),
-	// which in turn would set the status immediately to INPUT_TIMED_OUT:
-	KILL_AND_PURGE_INPUT_TIMER
-
-	// g_input.BufferLengthMax was set in the option parsing section.
-
-	// Point the global addresses to our memory areas on the stack:
-	g_input.EndVK = end_vk;
-	g_input.EndSC = end_sc;
-	g_input.status = INPUT_IN_PROGRESS; // Signal the hook to start the input.
-	if (!g_input.BufferLength) // Free variable since user did not use A option
-		A_Input->Free();
-	Hotkey::InstallKeybdHook(); // Install the hook (if needed).
-
-	// A timer is used rather than monitoring the elapsed time here directly because
-	// this script's quasi-thread might be interrupted by a Timer or Hotkey subroutine,
-	// which (if it takes a long time) would result in our Input not obeying its timeout.
-	// By using an actual timer, the TimerProc() will run when the timer expires regardless
-	// of which quasi-thread is active, and it will end our input on schedule:
-	if (timeout > 0)
-		SET_INPUT_TIMER(timeout < 10 ? 10 : timeout)
-
-#ifdef _WIN64
-		DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
-#else
-		DWORD aThreadID = __readfsdword(0x24);
-#endif
-	
+ResultType InputWait(ResultToken &aResultToken, input_type &input)
+{
 	//////////////////////////////////////////////////////////////////
 	// Wait for one of the following to terminate our input:
 	// 1) The hook (due a match in aEndKeys or aMatchList);
 	// 2) A thread that interrupts us with a new Input of its own;
 	// 3) The timer we put in effect for our timeout (if we have one).
 	//////////////////////////////////////////////////////////////////
+#ifdef _WIN64
+	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
+#else
+	DWORD aThreadID = __readfsdword(0x24);
+#endif
 	for (;;)
 	{
 		// Rather than monitoring the timeout here, just wait for the incoming WM_TIMER message
@@ -667,50 +727,48 @@ BIF_DECL(BIF_Input)
 		if (g_ThreadID == aThreadID)
 			MsgSleep();
 		else
-			Sleep(SLEEP_INTERVAL);
-		// HotKeyIt added multi-threading support so variable can be read from other threads while input is in progress
-		LPCTSTR output_var_contents = A_Input->Contents();
-		int output_var_len = (int) _tcslen(output_var_contents);
-		if (output_var_len > INPUT_BUFFER_SIZE - 1)
-			output_var_len = INPUT_BUFFER_SIZE - 1;
-		if (_tcsncmp(prev_buf,output_var_contents,output_var_len ? output_var_len : 1)
-			|| (!_tcscmp(prev_buf,input_buf) && _tcscmp(output_var_contents,input_buf)) ) // Check for vars contents and updatebuffer
-		{
-			g_input.BufferLength = output_var_len;
-			_tcsncpy(input_buf,output_var_contents,output_var_len);
-			input_buf[output_var_len] = '\0';
-			_tcsncpy(prev_buf,input_buf,output_var_len);
-			prev_buf[output_var_len] = '\0';
-		}
-		else if (_tcscmp(prev_buf,input_buf))
-		{
-			A_Input->Assign(input_buf);
-			if (g_input.BufferLength)
-				_tcscpy(prev_buf,input_buf);
-			else
-				*prev_buf = '\0';
-		}
-		if (g_input.status != INPUT_IN_PROGRESS)
+			Sleep(100);
+		if (!input.InProgress())
 			break;
 	}
+	
+	// Translate the "ending" to an ErrorLevel string.  Even if we were interrupted by another
+	// Input which terminated for a different reason, that instance had its own struct, so ours
+	// hasn't been overwritten.
+	TCHAR key_name[128];
+	g_ErrorLevel->Assign(input.GetEndReason(key_name, _countof(key_name)));
 
-	switch(g_input.status)
+	aResultToken.symbol = SYM_STRING;
+	return TokenSetResult(aResultToken, input.Buffer, input.BufferLength);
+}
+
+
+LPTSTR input_type::GetEndReason(LPTSTR aKeyBuf, int aKeyBufSize, bool aCombined)
+{
+	switch (Status)
 	{
 	case INPUT_TIMED_OUT:
-		g_ErrorLevel->Assign(_T("Timeout"));
-		break;
+		return _T("Timeout");
 	case INPUT_TERMINATED_BY_MATCH:
-		g_ErrorLevel->Assign(_T("Match"));
-		break;
+		return _T("Match");
 	case INPUT_TERMINATED_BY_ENDKEY:
 	{
-		TCHAR key_name[128] = _T("EndKey:");
-		if (g_input.EndingChar)
+		LPTSTR key_name = aKeyBuf;
+		if (!key_name)
+			return _T("EndKey");
+		if (aCombined) // Traditional "EndKey:xxx" mode.
 		{
-			key_name[7] = g_input.EndingChar;
-			key_name[8] = '\0';
+			ASSERT(aKeyBufSize > 7);
+			_tcscpy(key_name, _T("EndKey:"));
+			key_name += 7;
+			aKeyBufSize -= 7;
 		}
-		else if (g_input.EndingRequiredShift)
+		if (EndingChar)
+		{
+			key_name[0] = EndingChar;
+			key_name[1] = '\0';
+		}
+		else if (EndingRequiredShift)
 		{
 			// Since the only way a shift key can be required in our case is if it's a key whose name
 			// is a single char (such as a shifted punctuation mark), use a diff. method to look up the
@@ -721,75 +779,219 @@ BIF_DECL(BIF_Input)
 			// In some cases, however, bit 15 of the uScanCode parameter may be used to distinguish
 			// between a key press and a key release. The scan code is used for translating ALT+
 			// number key combinations.
-			BYTE state[256] = {0};
+			BYTE state[256] = { 0 };
 			state[VK_SHIFT] |= 0x80; // Indicate that the neutral shift key is down for conversion purposes.
 			Get_active_window_keybd_layout // Defines the variable active_window_keybd_layout for use below.
-			int count = ToUnicodeOrAsciiEx(g_input.EndingVK, vk_to_sc(g_input.EndingVK), (PBYTE)&state // Nothing is done about ToAsciiEx's dead key side-effects here because it seems to rare to be worth it (assuming its even a problem).
-				, key_name + 7, g_MenuIsVisible ? 1 : 0, active_window_keybd_layout); // v1.0.44.03: Changed to call ToAsciiEx() so that active window's layout can be specified (see hook.cpp for details).
-			*(key_name + 7 + count) = '\0';  // Terminate the string.
+			int count = ToUnicodeOrAsciiEx(EndingVK, vk_to_sc(EndingVK), (PBYTE)&state // Nothing is done about ToAsciiEx's dead key side-effects here because it seems to rare to be worth it (assuming its even a problem).
+				, key_name, g_MenuIsVisible ? 1 : 0, active_window_keybd_layout); // v1.0.44.03: Changed to call ToAsciiEx() so that active window's layout can be specified (see hook.cpp for details).
+			key_name[count] = '\0';  // Terminate the string.
 		}
 		else
 		{
-			g_input.EndedBySC ? SCtoKeyName(g_input.EndingSC, key_name + 7, _countof(key_name) - 7)
-				: VKtoKeyName(g_input.EndingVK, key_name + 7, _countof(key_name) - 7);
+			*key_name = '\0';
+			if (EndingBySC)
+				SCtoKeyName(EndingSC, key_name, aKeyBufSize, false);
+			if (!*key_name)
+				VKtoKeyName(EndingVK, key_name, aKeyBufSize, !EndingBySC);
+			if (!*key_name)
+				sntprintf(key_name, aKeyBufSize, _T("sc%03X"), EndingSC);
 		}
-		g_ErrorLevel->Assign(key_name);
-		break;
+		return aCombined ? aKeyBuf : _T("EndKey");
 	}
 	case INPUT_LIMIT_REACHED:
-		g_ErrorLevel->Assign(_T("Max"));
-		break;
-	case INPUT_TERMINATED_BY_INPUTEND:
-		g_ErrorLevel->Assign(_T("End"));
-		break;
-	default: // Our input was terminated due to a new input in a quasi-thread that interrupted ours.
-		g_ErrorLevel->Assign(_T("NewInput"));
-		break;
-	}
-
-	g_input.status = INPUT_OFF;  // See OVERVIEW above for why this must be set prior to returning.
-
-	// In case it ended for reason other than a timeout, in which case the timer is still on:
-	KILL_AND_PURGE_INPUT_TIMER
-
-	// Seems ok to assign after the kill/purge above since input_buf is our own stack variable
-	// and its contents shouldn't be affected even if KILL_AND_PURGE_INPUT_TIMER's MsgSleep()
-	// results in a new thread being created that starts a new Input:
-	if (_tcslen(input_buf) || !A_Input->CharCapacity()) // Assign will free memory if input_buf empty
-	{
-		A_Input->Assign(input_buf);
-		_f_return(input_buf);
-	}
-	else
-	{
-		A_Input->Assign(_T("")); // Assign empty string
-		_f_return(_T(""));
+		return _T("Max");
+	case INPUT_INTERRUPTED:
+		// Our input was terminated due to a new input in a quasi-thread that interrupted ours.
+		return _T("NewInput");
+	case INPUT_OFF:
+		return _T("Stopped");
+	default: // In progress.
+		return _T("");
 	}
 }
 
 
-
-ResultType Line::PerformShowWindow(ActionTypeType aActionType, LPTSTR aTitle, LPTSTR aText
-	, LPTSTR aExcludeTitle, LPTSTR aExcludeText)
+void input_type::Start()
 {
-	// By design, the WinShow command must always unhide a hidden window, even if the user has
-	// specified that hidden windows should not be detected.  So set this now so that
-	// DetermineTargetWindow() will make its calls in the right mode:
-	bool need_restore = (aActionType == ACT_WINSHOW && !g->DetectHiddenWindows);
-	if (need_restore)
-		g->DetectHiddenWindows = true;
-	HWND target_window = DetermineTargetWindow(aTitle, aText, aExcludeTitle, aExcludeText);
-	if (need_restore)
-		g->DetectHiddenWindows = false;
+	ASSERT(!InProgress());
+	Status = INPUT_IN_PROGRESS;
+}
+
+void input_type::EndByMatch(UINT aMatchIndex)
+{
+	ASSERT(InProgress());
+	EndingMatchIndex = aMatchIndex;
+	EndByReason(INPUT_TERMINATED_BY_MATCH);
+}
+
+void input_type::EndByKey(vk_type aVK, sc_type aSC, bool aBySC, bool aRequiredShift)
+{
+	ASSERT(InProgress());
+	EndingVK = aVK;
+	EndingSC = aSC;
+	EndingBySC = aBySC;
+	EndingRequiredShift = aRequiredShift;
+	EndingChar = 0; // Must be zero if the above are to be used.
+	EndByReason(INPUT_TERMINATED_BY_ENDKEY);
+}
+
+void input_type::EndByChar(TCHAR aChar)
+{
+	ASSERT(aChar && InProgress());
+	EndingChar = aChar;
+	// The other EndKey related fields are ignored when Char is non-zero.
+	EndByReason(INPUT_TERMINATED_BY_ENDKEY);
+}
+
+void input_type::EndByReason(InputStatusType aReason)
+{
+	ASSERT(InProgress());
+	EndingMods = g_modifiersLR_logical; // Not relevant to all end reasons, but might be useful anyway.
+	Status = aReason;
+
+	// It's done this way rather than calling InputRelease() directly...
+	// ...so that we can rely on MsgSleep() to create a new thread for the OnEnd event.
+	// ...because InputRelease() can't be called by the hook thread.
+	// ...because some callers rely on the list not being broken by this call.
+	PostMessage(g_hWnd, AHK_INPUT_END, (WPARAM)this, 0);
+}
+
+
+input_type *InputRelease(input_type *aInput)
+{
+	if (!aInput)
+		return NULL;
+	// Input should already have ended prior to this function being called.
+	// Otherwise, removal of aInput from the chain will end input collection.
+	if (g_input == aInput)
+		g_input = aInput->Prev;
+	else
+		for (auto *input = g_input; ; input = input->Prev)
+		{
+			if (!input)
+				return NULL; // aInput is not valid (faked AHK_INPUT_END message?) or not active.
+			if (input->Prev == aInput)
+			{
+				input->Prev = aInput->Prev;
+				break;
+			}
+		}
+
+	// Ensure any pending use of aInput by the hook is finished.
+	WaitHookIdle();
+	
+	aInput->Prev = NULL;
+	if (aInput->ScriptObject)
+	{
+		Hotkey::MaybeUninstallHook();
+		if (aInput->ScriptObject->onEnd)
+			return aInput; // Return for caller to call OnEnd and Release.
+		aInput->ScriptObject->Release();
+		g_script->ExitIfNotPersistent(EXIT_EXIT); // In case this InputHook was the only thing keeping the script running.
+	}
+	return NULL;
+}
+
+
+input_type *InputFind(InputObject *object)
+{
+	for (auto *input = g_input; input; input = input->Prev)
+		if (input->ScriptObject == object)
+			return input;
+	return NULL;
+}
+
+
+BIF_DECL(BIF_WinShow)
+{
+	auto action = _f_callee_id;
+
+	_f_set_retval_p(_T(""), 0);
+
+	_f_param_string_opt(aTitle, 0);
+	_f_param_string_opt(aText, 1);
+	// The remaining parameters depend on which function this is.
+
+	// Set initial guess for is_ahk_group (further refined later).  For ahk_group, WinText,
+	// ExcludeTitle, and ExcludeText must be blank so that they are reserved for future use
+	// (i.e. they're currently not supported since the group's own criteria take precedence):
+	bool is_ahk_group = !_tcsnicmp(aTitle, _T("ahk_group"), 9)
+		&& ParamIndexIsOmittedOrEmpty(1) && ParamIndexIsOmittedOrEmpty(3);
+	// The following is not quite accurate since is_ahk_group is only a guess at this stage, but
+	// given the extreme rarity of the guess being wrong, this shortcut seems justified to reduce
+	// the code size/complexity.  A wait_time of zero seems best for group closing because it's
+	// currently implemented to do the wait after every window in the group.  In addition,
+	// this makes "WinClose ahk_group GroupName" behave identically to "GroupClose GroupName",
+	// which seems best, for consistency:
+	int wait_time = is_ahk_group ? 0 : DEFAULT_WINCLOSE_WAIT;
+	if (action == FID_WinClose || action == FID_WinKill) // aParam[2] contains the wait time.
+	{
+		if (!ParamIndexIsOmittedOrEmpty(2))
+			wait_time = (int)(1000 * ParamIndexToDouble(2));
+		if (!ParamIndexIsOmittedOrEmpty(4))
+			is_ahk_group = false;  // Override the default.
+	}
+	else
+		if (!ParamIndexIsOmittedOrEmpty(2))
+			is_ahk_group = false;  // Override the default.
+	if (is_ahk_group)
+		if (WinGroup *group = g_script->FindGroup(omit_leading_whitespace(aTitle + 9)))
+		{
+			group->ActUponAll(action, wait_time); // It will do DoWinDelay if appropriate.
+			_f_return_retval;
+		}
+	// Since above didn't return, it's not "ahk_group", so do the normal single-window behavior.
+
+	HWND target_window = NULL;
+	if (aParamCount > 0)
+	{
+		switch (DetermineTargetHwnd(target_window, aResultToken, *aParam[0]))
+		{
+		case FAIL: return;
+		case OK:
+			if (!target_window) // Specified a HWND of 0.
+				_f_return_retval;
+		}
+	}
+
+	if (action == FID_WinClose || action == FID_WinKill)
+	{
+		if (target_window)
+		{
+			WinClose(target_window, wait_time, action == FID_WinKill);
+			DoWinDelay;
+			_f_return_retval;
+		}
+		_f_param_string_opt(aExcludeTitle, 3);
+		_f_param_string_opt(aExcludeText, 4);
+		if (WinClose(*g, aTitle, aText, wait_time, aExcludeTitle, aExcludeText, action == FID_WinKill)) // It closed something.
+			DoWinDelay;
+		_f_return_retval;
+	}
+
 	if (!target_window)
-		return OK;
+	{
+		_f_param_string_opt(aExcludeTitle, 2);
+		_f_param_string_opt(aExcludeText, 3);
+		// By design, the WinShow command must always unhide a hidden window, even if the user has
+		// specified that hidden windows should not be detected.  So set this now so that
+		// DetermineTargetWindow() will make its calls in the right mode:
+		bool need_restore = (_f_callee_id == FID_WinShow && !g->DetectHiddenWindows);
+		if (need_restore)
+			g->DetectHiddenWindows = true;
+		target_window = Line::DetermineTargetWindow(aTitle, aText, aExcludeTitle, aExcludeText);
+		if (need_restore)
+			g->DetectHiddenWindows = false;
+		if (!target_window)
+			_f_return_retval;
+	}
 
 	// WinGroup's EnumParentActUponAll() is quite similar to the following, so the two should be
 	// maintained together.
 
 	int nCmdShow = SW_NONE; // Set default.
 
-	switch (aActionType)
+	switch (action)
 	{
 	// SW_FORCEMINIMIZE: supported only in Windows 2000/XP and beyond: "Minimizes a window,
 	// even if the thread that owns the window is hung. This flag should only be used when
@@ -800,27 +1002,25 @@ ResultType Line::PerformShowWindow(ActionTypeType aActionType, LPTSTR aTitle, LP
 	// UPDATE: For now, not using "force" every time because it has undesirable side-effects such
 	// as the window not being restored to its maximized state after it was minimized
 	// this way.
-	case ACT_WINMINIMIZE:
+	case FID_WinMinimize:
 		if (IsWindowHung(target_window))
 		{
-			if (g_os.IsWin2000orLater())
-				nCmdShow = SW_FORCEMINIMIZE;
-			//else it's not Win2k or later.  I have confirmed that SW_MINIMIZE can
-			// lock up our thread on WinXP, which is why we revert to SW_FORCEMINIMIZE above.
+			nCmdShow = SW_FORCEMINIMIZE;
+			// SW_MINIMIZE can lock up our thread on WinXP, which is why we revert to SW_FORCEMINIMIZE above.
 			// Older/obsolete comment for background: don't attempt to minimize hung windows because that
 			// might hang our thread because the call to ShowWindow() would never return.
 		}
 		else
 			nCmdShow = SW_MINIMIZE;
 		break;
-	case ACT_WINMAXIMIZE: if (!IsWindowHung(target_window)) nCmdShow = SW_MAXIMIZE; break;
-	case ACT_WINRESTORE:  if (!IsWindowHung(target_window)) nCmdShow = SW_RESTORE;  break;
+	case FID_WinMaximize: if (!IsWindowHung(target_window)) nCmdShow = SW_MAXIMIZE; break;
+	case FID_WinRestore:  if (!IsWindowHung(target_window)) nCmdShow = SW_RESTORE;  break;
 	// Seems safe to assume it's not hung in these cases, since I'm inclined to believe
 	// (untested) that hiding and showing a hung window won't lock up our thread, and
 	// there's a chance they may be effective even against hung windows, unlike the
 	// others above (except ACT_WINMINIMIZE, which has a special FORCE method):
-	case ACT_WINHIDE: nCmdShow = SW_HIDE; break;
-	case ACT_WINSHOW: nCmdShow = SW_SHOW; break;
+	case FID_WinHide: nCmdShow = SW_HIDE; break;
+	case FID_WinShow: nCmdShow = SW_SHOW; break;
 	}
 
 	// UPDATE:  Trying ShowWindowAsync()
@@ -840,10 +1040,45 @@ ResultType Line::PerformShowWindow(ActionTypeType aActionType, LPTSTR aTitle, LP
 			ShowWindow(target_window, nCmdShow);
 		//else
 		//	ShowWindowAsync(target_window, nCmdShow);
-//PostMessage(target_window, WM_SYSCOMMAND, SC_MINIMIZE, 0);
 		DoWinDelay;
 	}
-	return OK;  // Return success for all the above cases.
+	_f_return_retval;
+}
+
+
+
+BIF_DECL(BIF_WinActivate)
+{
+	_f_set_retval_p(_T(""), 0);
+
+	HWND target_hwnd;
+	if (aParamCount > 0)
+	{
+		switch (DetermineTargetHwnd(target_hwnd, aResultToken, *aParam[0]))
+		{
+		case FAIL: return;
+		case OK:
+			if (target_hwnd)
+				SetForegroundWindowEx(target_hwnd);
+			_f_return_retval;
+		}
+	}
+
+	_f_param_string_opt(aTitle, 0);
+	_f_param_string_opt(aText, 1);
+	_f_param_string_opt(aExcludeTitle, 2);
+	_f_param_string_opt(aExcludeText, 3);
+
+	if (WinActivate(*g, aTitle, aText, aExcludeTitle, aExcludeText, _f_callee_id == FID_WinActivateBottom))
+		// It seems best to do these sleeps here rather than in the windowing
+		// functions themselves because that way, the program can use the
+		// windowing functions without being subject to the script's delay
+		// setting (i.e. there are probably cases when we don't need to wait,
+		// such as bringing a message box to the foreground, since no other
+		// actions will be dependent on it actually having happened):
+		DoWinDelay;
+
+	_f_return_retval;
 }
 
 
@@ -871,18 +1106,49 @@ BIF_DECL(BIF_Wait)
 
 	Line *waiting_line = g_script->mCurrLine;
 
+	_f_set_retval_i(TRUE); // Set default return value to be possibly overridden later on.
+
 	_f_param_string_opt(arg1, 0);
 	_f_param_string_opt(arg2, 1);
 	_f_param_string_opt(arg3, 2);
 	_f_param_string_opt(arg4, 3);
 	_f_param_string_opt(arg5, 4);
+	HWND target_hwnd = NULL;
 
-	if (_f_callee_id == FID_RunWait)
+	switch (_f_callee_id)
 	{
+	case FID_RunWait:
 		if (!g_script->ActionExec(arg1, NULL, arg2, true, arg3, &running_process, true, true
 			, ParamIndexToOptionalVar(4-1)))
 			_f_return_FAIL;
 		//else fall through to the waiting-phase of the operation.
+		break;
+	case FID_WinWait:
+	case FID_WinWaitClose:
+	case FID_WinWaitActive:
+	case FID_WinWaitNotActive:
+		if (ParamIndexIsOmitted(0))
+			break;
+		// The following supports pure HWND or {Hwnd:HWND} as in other WinTitle parameters,
+		// in lieu of saving aParam[] and evaluating them vs. arg1,2,4,5 on each iteration.
+		switch (DetermineTargetHwnd(target_hwnd, aResultToken, *aParam[0]))
+		{
+		case FAIL: return;
+		case OK:
+			if (!target_hwnd) // Caller passed 0 or a value that failed an IsWindow() check.
+			{
+				// If it's 0 due to failing IsWindow(), there's no way to determine whether
+				// it was ever valid, so assume it was but that the window has been closed.
+				DoWinDelay;
+				if (_f_callee_id == FID_WinWaitClose || _f_callee_id == FID_WinWaitNotActive)
+					_f_return_retval;
+				// Otherwise, this window will never exist or be active again, so abort early.
+				// It might be more correct to just wait the timeout (or stall indefinitely),
+				// but that's probably not the user's intention.
+				_f_return_i(FALSE);
+			}
+		}
+		break;
 	}
 	
 	// Must NOT use ELSE-IF in line below due to ELSE further down needing to execute for RunWait.
@@ -941,8 +1207,6 @@ BIF_DECL(BIF_Wait)
 		sleep_duration = 0; // Just to catch any bugs.
 	}
 
-	_f_set_retval_i(TRUE); // Set default return value to be possibly overridden later on.
-
 	bool any_clipboard_format = (_f_callee_id == FID_ClipWait && ATOI(arg2) == 1);
 
 #ifdef _WIN64
@@ -953,7 +1217,46 @@ BIF_DECL(BIF_Wait)
 
 	for (start_time = GetTickCount();;) // start_time is initialized unconditionally for use with v1.0.30.02's new logging feature further below.
 	{ // Always do the first iteration so that at least one check is done.
-		switch(_f_callee_id)
+		if (target_hwnd) // Caller passed a pure HWND or {Hwnd:HWND}.
+		{
+			// Change the behaviour a little since we know that once the HWND is destroyed,
+			// it is not meaningful to wait for another window with that same HWND.
+			if (!IsWindow(target_hwnd))
+			{
+				DoWinDelay;
+				if (_f_callee_id == FID_WinWaitClose || _f_callee_id == FID_WinWaitNotActive)
+					_f_return_retval; // Condition met.
+				// Otherwise, it would not be meaningful to wait for another window to be
+				// created with the same HWND.  It seems more useful to abort immediately
+				// but report timeout/failure than to wait for the timeout to elapse.
+				_f_return_i(FALSE);
+			}
+			if (_f_callee_id == FID_WinWait || _f_callee_id == FID_WinWaitClose)
+			{
+				// Wait for the window to become visible/hidden.  Most functions ignore
+				// DetectHiddenWindows when given a pure HWND/object (because it's more
+				// useful that way), but in this case it seems more useful and intuitive
+				// to respect DetectHiddenWindows.
+				if (g->DetectWindow(target_hwnd) == (_f_callee_id == FID_WinWait))
+				{
+					DoWinDelay;
+					if (_f_callee_id == FID_WinWaitClose)
+						_f_return_retval;
+					_f_return_i((size_t)target_hwnd);
+				}
+			}
+			else
+			{
+				if ((GetForegroundWindow() == target_hwnd) == (_f_callee_id == FID_WinWaitActive))
+				{
+					DoWinDelay;
+					if (_f_callee_id == FID_WinWaitNotActive)
+						_f_return_retval;
+					_f_return_i((size_t)target_hwnd);
+				}
+			}
+		}
+		else switch (_f_callee_id)
 		{
 		case FID_WinWait:
 			#define SAVED_WIN_ARGS arg1, arg2, arg4, arg5
@@ -1075,25 +1378,23 @@ BIF_DECL(BIF_Wait)
 
 
 
-ResultType Line::WinMove(LPTSTR aX, LPTSTR aY, LPTSTR aWidth, LPTSTR aHeight
-	, LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LPTSTR aExcludeText)
+BIF_DECL(BIF_WinMove)
 {
-	// So that compatibility is retained, don't set ErrorLevel for commands that are native to AutoIt2
-	// but that AutoIt2 doesn't use ErrorLevel with (such as this one).
-	HWND target_window = DetermineTargetWindow(aTitle, aText, aExcludeTitle, aExcludeText);
-	if (!target_window)
-		return OK;
+	HWND target_window;
+	if (!DetermineTargetWindow(target_window, aResultToken, aParam + 4, aParamCount - 4))
+		return;
 	RECT rect;
-	if (!GetWindowRect(target_window, &rect))
-		return OK;  // Can't set errorlevel, see above.
-	MoveWindow(target_window
-		, *aX ? ATOI(aX) : rect.left  // X-position
-		, *aY ? ATOI(aY) : rect.top   // Y-position
-		, *aWidth ? ATOI(aWidth) : rect.right - rect.left
-		, *aHeight ? ATOI(aHeight) : rect.bottom - rect.top
-		, TRUE);  // Do repaint.
-	DoWinDelay;
-	return OK;
+	if (target_window && GetWindowRect(target_window, &rect))
+	{
+		MoveWindow(target_window
+			, ParamIndexToOptionalInt(0, rect.left) // X-position
+			, ParamIndexToOptionalInt(1, rect.top)  // Y-position
+			, ParamIndexToOptionalInt(2, rect.right - rect.left)
+			, ParamIndexToOptionalInt(3, rect.bottom - rect.top)
+			, TRUE);  // Do repaint.
+		DoWinDelay;
+	}
+	_f_return_empty;
 }
 
 
@@ -1179,25 +1480,18 @@ BIF_DECL(BIF_ControlClick)
 		}
 	}
 	
-	// Consolidate the control and window parameters.
-	ExprTokenType *param[5];
-	int param_count = 0;
-	for (int i = 0; i < aParamCount; ++i)
-	{
-		param[param_count++] = aParam[i];
-		if (i == 2) i += 3; // Skip WhichButton, ClickCount, Options.
-	}
 	HWND target_window, control_window;
 	if (position_mode)
 	{
 		// Determine target window only.  Control will be found by position below.
-		target_window = DetermineTargetWindow(param + 1, param_count - 1);
+		if (!DetermineTargetWindow(target_window, aResultToken, aParam + 1, aParamCount - 1, 3))
+			return; // aResultToken.SetExitResult() or Error() was already called.
 		control_window = NULL;
 	}
 	else
 	{
 		// Determine target window and control.
-		if (!DetermineTargetControl(control_window, target_window, aResultToken, param, param_count))
+		if (!DetermineTargetControl(control_window, target_window, aResultToken, aParam, aParamCount, 3))
 			return; // aResultToken.SetExitResult() or Error() was already called.
 	}
 	if (!target_window)
@@ -1473,7 +1767,9 @@ error:
 
 BIF_DECL(BIF_ControlGetFocus)
 {
-	HWND target_window = DetermineTargetWindow(aParam, aParamCount);
+	HWND target_window;
+	if (!DetermineTargetWindow(target_window, aResultToken, aParam, aParamCount))
+		return;
 	if (!target_window)
 		goto error;
 
@@ -1975,7 +2271,9 @@ BIF_DECL(BIF_StatusBarGetText)//(LPTSTR aPart, LPTSTR aTitle, LPTSTR aText
 {
 	int part = ParamIndexToOptionalInt(0, 1);
 	// Note: ErrorLevel is handled by StatusBarUtil(), below.
-	HWND target_window = DetermineTargetWindow(aParam + 1, aParamCount - 1);
+	HWND target_window;
+	if (!DetermineTargetWindow(target_window, aResultToken, aParam + 1, aParamCount - 1))
+		return;
 	HWND control_window = target_window ? ControlExist(target_window, _T("msctls_statusbar321")) : NULL;
 	// Call this even if control_window is NULL because in that case, it will set the output var to
 	// be blank for us:
@@ -1984,23 +2282,27 @@ BIF_DECL(BIF_StatusBarGetText)//(LPTSTR aPart, LPTSTR aTitle, LPTSTR aText
 
 
 
-ResultType Line::StatusBarWait(LPTSTR aTextToWaitFor, LPTSTR aSeconds, LPTSTR aPart, LPTSTR aTitle, LPTSTR aText
-	, LPTSTR aInterval, LPTSTR aExcludeTitle, LPTSTR aExcludeText)
-// Since other script threads can interrupt this command while it's running, it's important that
-// this command not refer to sArgDeref[] and sArgVar[] anytime after an interruption becomes possible.
-// This is because an interrupting thread usually changes the values to something inappropriate for this thread.
+BIF_DECL(BIF_StatusBarWait)
 {
-	// Note: ErrorLevel is handled by StatusBarUtil(), below.
-	HWND target_window = DetermineTargetWindow(aTitle, aText, aExcludeTitle, aExcludeText);
-	// Make a copy of any memory areas that are volatile (due to Deref buf being overwritten
-	// if a new hotkey subroutine is launched while we are waiting) but whose contents we
-	// need to refer to while we are waiting:
+	HWND target_window;
+	if (!DetermineTargetWindow(target_window, aResultToken, aParam + 3, aParamCount - 3, 1))
+		return;
+
+	LPTSTR aTextToWaitFor = ParamIndexToOptionalString(0, _f_number_buf);
+	int aSeconds = ParamIndexIsOmittedOrEmpty(1) ? -1 : int(ParamIndexToDouble(1) * 1000);
+	int aPart = ParamIndexToOptionalInt(2, 0);
+	int aInterval = ParamIndexToOptionalInt(5, 50);
+
+	// Make a copy of any memory areas that are volatile (due to caller passing a variable,
+	// which could be reassigned by a new hotkey subroutine launched while we are waiting)
+	// but whose contents we need to refer to while we are waiting:
 	TCHAR text_to_wait_for[4096];
 	tcslcpy(text_to_wait_for, aTextToWaitFor, _countof(text_to_wait_for));
 	HWND control_window = target_window ? ControlExist(target_window, _T("msctls_statusbar321")) : NULL;
-	return StatusBarUtil(NULL, control_window, ATOI(aPart) // It will handle a NULL control_window or zero part# for us.
-		, text_to_wait_for, *aSeconds ? (int)(ATOF(aSeconds)*1000) : -1 // Blank->indefinite.  0 means 500ms.
-		, ATOI(aInterval));
+	// Note: ErrorLevel is handled by StatusBarUtil(), below.
+	// It will also handle a NULL control_window or zero part# for us.
+	StatusBarUtil(NULL, control_window, aPart, text_to_wait_for, aSeconds, aInterval);
+	_f_return_b(!g_ErrorLevel->ToInt64());
 }
 
 
@@ -2050,16 +2352,23 @@ BIF_DECL(BIF_PostSendMessage)
 		case SYM_INTEGER:
 			param[i-1] = (INT_PTR)this_param.value_int64;
 			break;
+		case SYM_OBJECT: // Support Buffer-like objects, i.e, objects with a "Ptr" property.
+			size_t ptr_property_value;
+			GetBufferObjectPtr(aResultToken, this_param.object, ptr_property_value);
+			if (aResultToken.Exited())
+				return;
+			param[i - 1] = ptr_property_value;
+			break;
 		case SYM_STRING:
 			LPTSTR error_marker;
-			param[i-1] = (INT_PTR)tcstoi64_o(this_param.marker, &error_marker, 0);
+			param[i - 1] = (INT_PTR)istrtoi64(this_param.marker, &error_marker);
 			if (!*error_marker) // Valid number or empty string.
 				break;
 			//else: It's a non-numeric string; maybe the caller forgot the &address-of operator.
 			// Note that an empty string would satisfy the check above.
+			// Fall through:
 		default:
 			// SYM_FLOAT: Seems best to treat it as an error rather than truncating the value.
-			// SYM_OBJECT: Reserve for future use (user-defined conversion meta-functions?).
 			_f_throw(i == 1 ? ERR_PARAM2_INVALID : ERR_PARAM3_INVALID);
 		}
 	}
@@ -2098,7 +2407,7 @@ BIF_DECL(BIF_Process)
 		_f_set_retval_i(0); // Set default.
 		if (pid = ProcessExist(aProcess))  // Assign
 		{
-			if (hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid))
+			if (hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, pid))
 			{
 				if (TerminateProcess(hProcess, 0))
 					_f_set_retval_i(pid); // Indicate success.
@@ -2117,6 +2426,8 @@ BIF_DECL(BIF_Process)
 		DWORD start_time;
 		if (aParamCount > 1) // The param containing the timeout value was specified.
 		{
+			if (!ParamIndexIsNumeric(1))
+				_f_throw(ERR_PARAM2_INVALID);
 			wait_indefinitely = false;
 			sleep_duration = (int)(TokenToDouble(*aParam[1]) * 1000); // Can be zero.
 			start_time = GetTickCount();
@@ -2188,10 +2499,6 @@ BIF_DECL(BIF_ProcessSetPriority)
 	{
 		if (hProcess = OpenProcess(PROCESS_SET_INFORMATION, FALSE, pid)) // Assign
 		{
-			// If OS doesn't support "above/below normal", seems best to default to normal rather than high/low,
-			// since "above/below normal" aren't that dramatically different from normal:
-			if (!g_os.IsWin2000orLater() && (priority == BELOW_NORMAL_PRIORITY_CLASS || priority == ABOVE_NORMAL_PRIORITY_CLASS))
-				priority = NORMAL_PRIORITY_CLASS;
 			if (!SetPriorityClass(hProcess, priority))
 				pid = 0; // Indicate failure.
 			CloseHandle(hProcess);
@@ -2363,7 +2670,9 @@ BIF_DECL(BIF_WinSet)
 {
 	_f_param_string_opt(aValue, 0);
 
-	HWND target_window = DetermineTargetWindow(aParam + 1, aParamCount - 1);
+	HWND target_window;
+	if (!DetermineTargetWindow(target_window, aResultToken, aParam + 1, aParamCount - 1))
+		return;
 	if (!target_window)
 	{
 		Script::SetErrorLevelOrThrow();
@@ -2554,7 +2863,10 @@ BIF_DECL(BIF_WinSet)
 
 BIF_DECL(BIF_WinRedraw)
 {
-	if (HWND target_window = DetermineTargetWindow(aParam, aParamCount))
+	HWND target_window;
+	if (!DetermineTargetWindow(target_window, aResultToken, aParam, aParamCount))
+		return;
+	if (target_window)
 	{
 		// Seems best to always have the last param be TRUE. Also, it seems best not to call
 		// UpdateWindow(), which forces the window to immediately process a WM_PAINT message,
@@ -2572,7 +2884,10 @@ BIF_DECL(BIF_WinRedraw)
 
 BIF_DECL(BIF_WinMoveTopBottom)
 {
-	if (HWND target_window = DetermineTargetWindow(aParam, aParamCount))
+	HWND target_window;
+	if (!DetermineTargetWindow(target_window, aResultToken, aParam, aParamCount))
+		return;
+	if (target_window)
 	{
 		HWND mode = _f_callee_id == FID_WinMoveBottom ? HWND_BOTTOM : HWND_TOP;
 		// Note: SWP_NOACTIVATE must be specified otherwise the target window often fails to move:
@@ -2586,22 +2901,23 @@ BIF_DECL(BIF_WinMoveTopBottom)
 
 
 
-ResultType Line::WinSetTitle(LPTSTR aNewTitle, LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LPTSTR aExcludeText)
-// Like AutoIt2, this function and others like it always return OK, even if the target window doesn't
-// exist or there action doesn't actually succeed.
+BIF_DECL(BIF_WinSetTitle)
 {
-	HWND target_window = DetermineTargetWindow(aTitle, aText, aExcludeTitle, aExcludeText);
-	if (!target_window)
-		return OK;
-	SetWindowText(target_window, aNewTitle);
-	return OK;
+	HWND target_window;
+	if (!DetermineTargetWindow(target_window, aResultToken, aParam + 1, aParamCount - 1))
+		return;
+	if (target_window)
+		SetWindowText(target_window, ParamIndexToString(0, _f_number_buf));
+	_f_return_empty;
 }
 
 
 
 BIF_DECL(BIF_WinGetTitle)
 {
-	HWND target_window = DetermineTargetWindow(aParam, aParamCount);
+	HWND target_window;
+	if (!DetermineTargetWindow(target_window, aResultToken, aParam, aParamCount))
+		return;
 
 	int space_needed = target_window ? GetWindowTextLength(target_window) + 1 : 1; // 1 for terminator.
 	if (!TokenSetResult(aResultToken, NULL, space_needed - 1))
@@ -2626,7 +2942,9 @@ BIF_DECL(BIF_WinGetTitle)
 
 BIF_DECL(BIF_WinGetClass)
 {
-	HWND target_window = DetermineTargetWindow(aParam, aParamCount);
+	HWND target_window;
+	if (!DetermineTargetWindow(target_window, aResultToken, aParam, aParamCount))
+		return;
 	if (!target_window)
 		_f_return_empty;
 	TCHAR class_name[WINDOW_CLASS_SIZE];
@@ -2644,7 +2962,7 @@ void WinGetList(ResultToken &aResultToken, BuiltInFunctionID aCmd, LPTSTR aTitle
 	WindowSearch ws;
 	ws.mFindLastMatch = true; // Must set mFindLastMatch to get all matches rather than just the first.
 	if (aCmd == FID_WinGetList)
-		if (  !(ws.mArray = Object::Create())  )
+		if (  !(ws.mArray = Array::Create())  )
 			_f_throw(ERR_OUTOFMEM);
 	// Check if we were asked to "list" or count the active window:
 	if (USE_FOREGROUND_WINDOW(aTitle, aText, aExcludeTitle, aExcludeText))
@@ -2695,7 +3013,17 @@ BIF_DECL(BIF_WinGet)
 		return;
 	}
 	// Not List or Count, so it's a function that operates on a single window.
-	HWND target_window = WinExist(*g, aTitle, aText, aExcludeTitle, aExcludeText, cmd == FID_WinGetIDLast);
+	HWND target_window = NULL;
+	if (aParamCount > 0)
+		switch (DetermineTargetHwnd(target_window, aResultToken, *aParam[0]))
+		{
+		case FAIL: return;
+		case OK:
+			if (!target_window)
+				_f_return_empty;
+		}
+	if (!target_window)
+		target_window = WinExist(*g, aTitle, aText, aExcludeTitle, aExcludeText, cmd == FID_WinGetIDLast);
 	if (!target_window)
 		_f_return_empty;
 
@@ -2737,16 +3065,10 @@ BIF_DECL(BIF_WinGet)
 
 	case FID_WinGetTransparent:
 	case FID_WinGetTransColor:
-		typedef BOOL (WINAPI *MyGetLayeredWindowAttributesType)(HWND, COLORREF*, BYTE*, DWORD*);
-		static MyGetLayeredWindowAttributesType MyGetLayeredWindowAttributes = (MyGetLayeredWindowAttributesType)
-			GetProcAddress(GetModuleHandle(_T("user32")), "GetLayeredWindowAttributes");
 		COLORREF color;
 		BYTE alpha;
 		DWORD flags;
-		// IMPORTANT (when considering future enhancements to these commands): Unlike
-		// SetLayeredWindowAttributes(), which works on Windows 2000, GetLayeredWindowAttributes()
-		// is supported only on XP or later.
-		if (!MyGetLayeredWindowAttributes || !(MyGetLayeredWindowAttributes(target_window, &color, &alpha, &flags)))
+		if (!(GetLayeredWindowAttributes(target_window, &color, &alpha, &flags)))
 			break;
 		if (cmd == FID_WinGetTransparent)
 		{
@@ -2781,7 +3103,7 @@ void WinGetControlList(ResultToken &aResultToken, HWND aTargetWindow, bool aFetc
 // z-order of the controls will be useful information to some script authors.
 {
 	control_list_type cl; // A big struct containing room to store class names and counts for each.
-	if (  !(cl.target_array = Object::Create())  )
+	if (  !(cl.target_array = Array::Create())  )
 		_f_throw(ERR_OUTOFMEM);
 	CL_INIT_CONTROL_LIST(cl)
 	cl.fetch_hwnds = aFetchHWNDs;
@@ -2850,7 +3172,9 @@ BOOL CALLBACK EnumChildGetControlList(HWND aWnd, LPARAM lParam)
 
 BIF_DECL(BIF_WinGetText)
 {
-	HWND target_window = DetermineTargetWindow(aParam, aParamCount);
+	HWND target_window;
+	if (!DetermineTargetWindow(target_window, aResultToken, aParam, aParamCount))
+		return;
 	if (!target_window)
 	{
 		g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
@@ -2934,7 +3258,9 @@ BOOL CALLBACK EnumChildGetText(HWND aWnd, LPARAM lParam)
 
 BIF_DECL(BIF_WinGetPos)
 {
-	HWND target_window = DetermineTargetWindow(aParam + 4, aParamCount - 4);
+	HWND target_window;
+	if (!DetermineTargetWindow(target_window, aResultToken, aParam + 4, aParamCount - 4))
+		return;
 	// Even if target_window is NULL, we want to continue on so that the output
 	// variables are set to be the empty string, which is the proper thing to do
 	// rather than leaving whatever was in there before.
@@ -2963,7 +3289,7 @@ BIF_DECL(BIF_WinGetPos)
 		if (target_window)
 			var->Assign(((int *)(&rect))[i]); // Always succeeds.
 		else
-			if (!var->Assign(_T(""))) // Failure would be very unusual, but can occur for Clipboard and other built-in variables.
+			if (!var->Assign()) // Failure would be very unusual, but can occur for Clipboard and other built-in variables.
 				aResultToken.SetExitResult(FAIL);
 	}
 	_f_return((__int64)(size_t)target_window); // Return the HWND to indicate success/failure.
@@ -3025,9 +3351,6 @@ BIF_DECL(BIF_SysGet)
 
 
 
-#if defined(CONFIG_WIN9X) || defined(CONFIG_WINNT4)
-#error MonitorGet: Win9x/NT4 support was removed; to restore it, load EnumDisplayMonitors dynamically.
-#endif
 BIF_DECL(BIF_MonitorGet)
 {
 	MonitorInfoPackage mip = {0};  // Improves maintainability to initialize unconditionally, here.
@@ -3106,13 +3429,7 @@ BOOL CALLBACK EnumMonitorProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMoni
 		++mip.count;
 		return TRUE;  // Enumerate all monitors so that they can be counted.
 	}
-	// GetMonitorInfo() must be dynamically loaded; otherwise, the app won't launch at all on Win95/NT.
-	typedef BOOL (WINAPI* GetMonitorInfoType)(HMONITOR, LPMONITORINFO);
-	static GetMonitorInfoType MyGetMonitorInfo = (GetMonitorInfoType)
-		GetProcAddress(GetModuleHandle(_T("user32")), "GetMonitorInfo" WINAPI_SUFFIX);
-	if (!MyGetMonitorInfo) // Shouldn't normally happen since caller wouldn't have called us if OS is Win95/NT. 
-		return FALSE;
-	if (!MyGetMonitorInfo(hMonitor, &mip.monitor_info_ex)) // Failed.  Probably very rare.
+	if (!GetMonitorInfo(hMonitor, &mip.monitor_info_ex)) // Failed.  Probably very rare.
 		return FALSE; // Due to the complexity of needing to stop at the correct monitor number, do not continue.
 		// In the unlikely event that the above fails when the caller wanted us to find the primary
 		// monitor, the caller will think the primary is the previously found monitor (if any).
@@ -3927,8 +4244,6 @@ error:
 /////////////////
 LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lParam)
 {
-	DWORD_PTR dwTemp;
-
 	// Detect Explorer crashes so that tray icon can be recreated.  I think this only works on Win98
 	// and beyond, since the feature was never properly implemented in Win95:
 	static UINT WM_TASKBARCREATED = RegisterWindowMessage(_T("TaskbarCreated"));
@@ -4031,14 +4346,18 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 	}
 	case AHK_USER_MENU:
 		// Search for AHK_USER_MENU in GuiWindowProc() for comments about why this is done:
-		PostMessage(hWnd, iMsg, wParam, lParam);
-		MsgSleep(-1, RETURN_AFTER_MESSAGES_SPECIAL_FILTER);
+		if (IsInterruptible())
+		{
+			PostMessage(hWnd, iMsg, wParam, lParam);
+			MsgSleep(-1, RETURN_AFTER_MESSAGES_SPECIAL_FILTER);
+		}
 		return 0;
 
 	case WM_HOTKEY: // As a result of this app having previously called RegisterHotkey().
 	case AHK_HOOK_HOTKEY:  // Sent from this app's keyboard or mouse hook.
 	case AHK_HOTSTRING: // Added for v1.0.36.02 so that hotstrings work even while an InputBox or other non-standard msg pump is running.
 	case AHK_CLIPBOARD_CHANGE: // Added for v1.0.44 so that clipboard notifications aren't lost while the script is displaying a MsgBox or other dialog.
+	case AHK_INPUT_END:
 		// If the following facts are ever confirmed, there would be no need to post the message in cases where
 		// the MsgSleep() won't be done:
 		// 1) The mere fact that any of the above messages has been received here in MainWindowProc means that a
@@ -4218,22 +4537,11 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 		}
 		break;
 
-	case WM_CLIPBOARDUPDATE: // For Vista and later.
-	case WM_DRAWCLIPBOARD:
+	case WM_CLIPBOARDUPDATE:
 		if (g_script->mOnClipboardChange.Count()) // In case it's a bogus msg, it's our responsibility to avoid posting the msg if there's no function to call.
 			PostMessage(g_hWnd, AHK_CLIPBOARD_CHANGE, 0, 0); // It's done this way to buffer it when the script is uninterruptible, etc.  v1.0.44: Post to g_hWnd vs. NULL so that notifications aren't lost when script is displaying a MsgBox or other dialog.
-		if (g_script->mNextClipboardViewer) // Will be NULL if there are no other windows in the chain, or if we're on Vista or later and used AddClipboardFormatListener instead of SetClipboardViewer (in which case iMsg should be WM_CLIPBOARDUPDATE).
-			SendMessageTimeout(g_script->mNextClipboardViewer, iMsg, wParam, lParam, SMTO_ABORTIFHUNG, 2000, &dwTemp);
 		return 0;
 
-	case WM_CHANGECBCHAIN:
-		// MSDN: If the next window is closing, repair the chain. 
-		if ((HWND)wParam == g_script->mNextClipboardViewer)
-			g_script->mNextClipboardViewer = (HWND)lParam;
-		// MSDN: Otherwise, pass the message to the next link. 
-		else if (g_script->mNextClipboardViewer)
-			SendMessageTimeout(g_script->mNextClipboardViewer, iMsg, wParam, lParam, SMTO_ABORTIFHUNG, 2000, &dwTemp);
-		return 0;
 	case AHK_GETWINDOWTEXT:
 		// It's best to handle this msg here rather than in the main event loop in case a non-standard message
 		// pump is running (such as MsgBox's), in which case this msg would be dispatched directly here.
@@ -4274,18 +4582,6 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 	case AHK_EXECUTE_FUNCTION_DLL: 
 		callFuncDll((FuncAndToken *) wParam);
 		return 0;
-	case WM_MEASUREITEM: // L17: Measure menu icon. Not used on Windows Vista or later.
-		if (hWnd == g_hWnd && wParam == 0 && !g_os.IsWinVistaOrLater())
-			if (UserMenu::OwnerMeasureItem((LPMEASUREITEMSTRUCT)lParam))
-				return TRUE;
-		break;
-
-	case WM_DRAWITEM: // L17: Draw menu icon. Not used on Windows Vista or later.
-		if (hWnd == g_hWnd && wParam == 0 && !g_os.IsWinVistaOrLater())
-			if (UserMenu::OwnerDrawItem((LPDRAWITEMSTRUCT)lParam))
-				return TRUE;
-		break;
-
 	case WM_ENTERMENULOOP:
 		CheckMenuItem(GetMenu(g_hWnd), ID_FILE_PAUSE, g->IsPaused ? MF_CHECKED : MF_UNCHECKED); // This is the menu bar in the main window; the tray menu's checkmark is updated only when the tray menu is actually displayed.
 		if (!g_MenuIsVisible) // See comments in similar code in GuiWindowProc().
@@ -4972,6 +5268,16 @@ INT_PTR CALLBACK InputBoxProc(HWND hWndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 		if (hControl = GetDlgItem(hWndDlg, IDC_INPUTPROMPT))
 			SetWindowText(hControl, CURR_INPUTBOX.text);
 
+		// Use the system's current language for the button names:
+		typedef LPCWSTR(WINAPI*pfnUser)(int);
+		HMODULE hMod = GetModuleHandle(_T("user32.dll"));
+		pfnUser mbString = (pfnUser)GetProcAddress(hMod, "MB_GetString");
+		if (mbString)
+		{
+			SetWindowTextW(GetDlgItem(hWndDlg, IDOK), mbString(0));
+			SetWindowTextW(GetDlgItem(hWndDlg, IDCANCEL), mbString(1));
+		}
+
 		// Don't do this check; instead allow the MoveWindow() to occur unconditionally so that
 		// the new button positions and such will override those set in the dialog's resource
 		// properties:
@@ -5034,22 +5340,11 @@ INT_PTR CALLBACK InputBoxProc(HWND hWndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 		SendMessage(hWndDlg, WM_SETICON, ICON_SMALL, small_icon);
 		SendMessage(hWndDlg, WM_SETICON, ICON_BIG, big_icon);
 
-		if(g_os.IsWinVistaOrLater())
-		{
-			// Use a more appealing font on Windows Vista and later (Segoe UI).
-			HDC hdc = GetDC(hWndDlg);
-			CURR_INPUTBOX.font = CreateFont(FONT_POINT(hdc, 10), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-					, DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, _T("Segoe UI"));
-			ReleaseDC(hWndDlg, hdc); // In theory it must be done.
-
-			// Set the font.
-			SendMessage(hControl, WM_SETFONT, (WPARAM)CURR_INPUTBOX.font, 0);
-			SendMessage(GetDlgItem(hWndDlg, IDC_INPUTEDIT), WM_SETFONT, (WPARAM)CURR_INPUTBOX.font, 0);
-			SendMessage(GetDlgItem(hWndDlg, IDOK), WM_SETFONT, (WPARAM)CURR_INPUTBOX.font, 0);
-			SendMessage(GetDlgItem(hWndDlg, IDCANCEL), WM_SETFONT, (WPARAM)CURR_INPUTBOX.font, 0);
-		}
-		else
-			CURR_INPUTBOX.font = NULL;
+		// Set the font.
+		SendMessage(hControl, WM_SETFONT, (WPARAM)CURR_INPUTBOX.font, 0);
+		SendMessage(GetDlgItem(hWndDlg, IDC_INPUTEDIT), WM_SETFONT, (WPARAM)CURR_INPUTBOX.font, 0);
+		SendMessage(GetDlgItem(hWndDlg, IDOK), WM_SETFONT, (WPARAM)CURR_INPUTBOX.font, 0);
+		SendMessage(GetDlgItem(hWndDlg, IDCANCEL), WM_SETFONT, (WPARAM)CURR_INPUTBOX.font, 0);
 
 		// For the timeout, use a timer ID that doesn't conflict with MsgBox's IDs (which are the
 		// integers 1 through the max allowed number of msgboxes).  Use +3 vs. +1 for a margin of safety
@@ -5154,6 +5449,19 @@ INT_PTR CALLBACK InputBoxProc(HWND hWndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 		}
 		InvalidateRect(hWndDlg, NULL, TRUE);	// force window to be redrawn
 		return TRUE;  // i.e. completely handled here.
+	}
+
+	case WM_GETMINMAXINFO:
+	{
+		// Increase the minimum width to prevent the buttons from overlapping:
+		RECT rTmp;
+		int min_width = 0;
+		LPMINMAXINFO lpMMI = (LPMINMAXINFO)lParam;
+		GetWindowRect(GetDlgItem(hWndDlg, IDOK), &rTmp);
+		min_width += rTmp.right - rTmp.left;
+		GetWindowRect(GetDlgItem(hWndDlg, IDCANCEL), &rTmp);
+		min_width += rTmp.right - rTmp.left;
+		lpMMI->ptMinTrackSize.x = min_width + 30;
 	}
 
 	case WM_COMMAND:
@@ -5835,11 +6143,11 @@ BIF_DECL(BIF_StrSplit)
 
 	if (aParamCount > 1)
 	{
-		if (Object *obj = dynamic_cast<Object *>(TokenToObject(*aParam[1])))
+		if (auto arr = dynamic_cast<Array *>(TokenToObject(*aParam[1])))
 		{
-			aDelimiterCount = obj->GetNumericItemCount();
+			aDelimiterCount = arr->Length();
 			aDelimiterList = (LPTSTR *)_alloca(aDelimiterCount * sizeof(LPTSTR *));
-			if (!obj->ArrayToStrings(aDelimiterList, aDelimiterCount, aDelimiterCount))
+			if (!arr->ToStrings(aDelimiterList, aDelimiterCount, aDelimiterCount))
 				// Array contains something other than a string.
 				goto throw_invalid_delimiter;
 			for (int i = 0; i < aDelimiterCount; ++i)
@@ -5863,7 +6171,7 @@ BIF_DECL(BIF_StrSplit)
 		}
 	}
 	
-	Object *output_array = Object::Create();
+	auto output_array = Array::Create();
 	if (!output_array)
 		goto throw_outofmem;
 
@@ -6186,38 +6494,30 @@ int SortRandom(const void *a1, const void *a2)
 int SortUDF(const void *a1, const void *a2)
 // See comments in prior function for details.
 {
+	if (!g_SortFuncResult || g_SortFuncResult == EARLY_EXIT)
+		return 0;
+
 	// The following isn't necessary because by definition, the current thread isn't paused because it's the
 	// thing that called the sort in the first place.
 	//g_script->UpdateTrayIcon();
 
-	FuncResult result_token;
-
 	LPTSTR aStr1 = *(LPTSTR *)a1;
 	LPTSTR aStr2 = *(LPTSTR *)a2;
-	bool returned = g_SortFunc->Call(result_token, 3, FUNC_ARG_STR(aStr1), FUNC_ARG_STR(aStr2), FUNC_ARG_INT(aStr2 - aStr1));
+	ExprTokenType param[] = { aStr1, aStr2, __int64(aStr2 - aStr1) };
+	__int64 i64;
+	g_SortFuncResult = CallMethod(g_SortFunc, g_SortFunc, nullptr, param, _countof(param), &i64);
+	// An alternative to g_SortFuncResult using 'throw' to abort qsort() produced slightly
+	// smaller code, but in release builds the program crashed with code 0xC0000409 and the
+	// catch() block never executed.
 
-	// MUST handle return_value BEFORE calling FreeAndRestoreFunctionVars() because return_value might be
-	// the contents of one of the function's local variables (which are about to be free'd).
 	int returned_int;
-	if (returned && !TokenIsEmptyString(result_token))
-	{
-		// Using float vs. int makes sort up to 46% slower, so decided to use int. Must use ATOI64 vs. ATOI
-		// because otherwise a negative might overflow/wrap into a positive (at least with the MSVC++
-		// implementation of ATOI).
-		// ATOI64()'s implementation (and probably any/all others?) truncates any decimal portion;
-		// e.g. 0.8 and 0.3 both yield 0.
-		__int64 i64 = TokenToInt64(result_token);
-		if (i64 > 0)  // Maybe there's a faster/better way to do these checks. Can't simply typecast to an int because some large positives wrap into negative, maybe vice versa.
-			returned_int = 1;
-		else if (i64 < 0)
-			returned_int = -1;
-		else
-			returned_int = 0;
-	}
+	if (i64 > 0)  // Maybe there's a faster/better way to do these checks. Can't simply typecast to an int because some large positives wrap into negative, maybe vice versa.
+		returned_int = 1;
+	else if (i64 < 0)
+		returned_int = -1;
 	else
 		returned_int = 0;
 
-	result_token.Free();
 	return returned_int;
 }
 
@@ -6230,8 +6530,11 @@ BIF_DECL(BIF_Sort)
 {
 	// Set defaults in case of early goto:
 	LPTSTR mem_to_free = NULL;
-	Func *sort_func_orig = g_SortFunc; // Because UDFs can be interrupted by other threads -- and because UDFs can themselves call Sort with some other UDF (unlikely to be sure) -- backup & restore original g_SortFunc so that the "collapsing in reverse order" behavior will automatically ensure proper operation.
+	LPTSTR *item = NULL; // The index/pointer list used for the sort.
+	IObject *sort_func_orig = g_SortFunc; // Because UDFs can be interrupted by other threads -- and because UDFs can themselves call Sort with some other UDF (unlikely to be sure) -- backup & restore original g_SortFunc so that the "collapsing in reverse order" behavior will automatically ensure proper operation.
+	ResultType sort_func_result_orig = g_SortFuncResult;
 	g_SortFunc = NULL; // Now that original has been saved above, reset to detect whether THIS sort uses a UDF.
+	g_SortFuncResult = OK;
 	ResultType result_to_return = OK;
 	DWORD ErrorLevel = -1; // Use -1 to mean "don't change/set ErrorLevel".
 
@@ -6247,7 +6550,7 @@ BIF_DECL(BIF_Sort)
 	bool trailing_delimiter_indicates_trailing_blank_item = false, terminate_last_item_with_delimiter = false
 		, trailing_crlf_added_temporarily = false, sort_by_naked_filename = false, sort_random = false
 		, omit_dupes = false;
-	LPTSTR cp, cp_end;
+	LPTSTR cp;
 
 	for (cp = aOptions; *cp; ++cp)
 	{
@@ -6268,28 +6571,6 @@ BIF_DECL(BIF_Sort)
 			++cp;
 			if (*cp)
 				delimiter = *cp;
-			break;
-		case 'F': // v1.0.47: Support a callback function to extend flexibility.
-			// Decided not to set ErrorLevel here because omit-dupes already uses it, and the code/docs
-			// complexity of having one take precedence over the other didn't seem worth it given rarity
-			// of errors and rarity of UDF use.
-			cp = omit_leading_whitespace(cp + 1); // Point it to the function's name.
-			if (   !(cp_end = StrChrAny(cp, _T(" \t")))   ) // Find space or tab, if any.
-				cp_end = cp + _tcslen(cp); // Point it to the terminator instead.
-			if (   !(g_SortFunc = g_script->FindFunc(cp, cp_end - cp))   )
-				goto end; // For simplicity, just abort the sort.
-			// To improve callback performance, ensure there are no ByRef parameters (for simplicity:
-			// not even ones that have default values) among the first two parameters.  This avoids the
-			// need to ensure formal parameters are non-aliases each time the callback is called.
-			if (g_SortFunc->mIsBuiltIn || g_SortFunc->mParamCount < 2 // This validation is relied upon at a later stage.
-				|| g_SortFunc->mParamCount > 3  // Reserve 4-or-more parameters for possible future use (to avoid breaking existing scripts if such features are ever added).
-				|| g_SortFunc->mParam[0].is_byref || g_SortFunc->mParam[1].is_byref) // Relies on short-circuit boolean order.
-				goto end; // For simplicity, just abort the sort.
-			// Otherwise, the function meets the minimum constraints (though for simplicity, optional parameters
-			// (default values), if any, aren't populated).
-			// Fix for v1.0.47.05: The following line now subtracts 1 in case *cp_end=='\0'; otherwise the
-			// loop's ++cp would go beyond the terminator when there are no more options.
-			cp = cp_end - 1; // In the next iteration (which also does a ++cp), resume looking for options after the function's name.
 			break;
 		case 'N':
 			g_SortNumeric = true;
@@ -6324,6 +6605,18 @@ BIF_DECL(BIF_Sort)
 			sort_by_naked_filename = true;
 		}
 	}
+
+	if (!ParamIndexIsOmitted(2))
+	{
+		if (  !(g_SortFunc = ParamIndexToObject(2))  )
+			g_SortFunc = TokenToFunc(*aParam[2]);
+		if (!g_SortFunc)
+		{
+			result_to_return = aResultToken.Error(ERR_PARAM3_INVALID);
+			goto end;
+		}
+		g_SortFunc->AddRef(); // Ensure the object exists for the duration of the sorting.
+	}
 	
 	// Check for early return only after parsing options in case an option that sets ErrorLevel is present:
 	if (!*aContents) // Input is empty, nothing to sort, return empty string.
@@ -6332,9 +6625,6 @@ BIF_DECL(BIF_Sort)
 		goto end;
 	}
 	
-	// size_t helps performance and should be plenty of capacity for many years of advancement.
-	// In addition, things like realloc() can't accept anything larger than size_t anyway,
-	// so there's no point making this 64-bit until size_t itself becomes 64-bit (it already is on some compilers?).
 	size_t item_count;
 
 	// Check how many delimiters are present:
@@ -6416,7 +6706,7 @@ BIF_DECL(BIF_Sort)
 	// trailing_delimiter_indicates_trailing_blank_item is false:
 	int unit_size = sort_random ? 2 : 1;
 	size_t item_size = unit_size * sizeof(LPTSTR);
-	LPTSTR *item = (LPTSTR *)malloc((item_count + 1) * item_size);
+	item = (LPTSTR *)malloc((item_count + 1) * item_size);
 	if (!item)
 	{
 		result_to_return = aResultToken.Error(ERR_OUTOFMEM);
@@ -6482,7 +6772,14 @@ BIF_DECL(BIF_Sort)
 	// Now aContents has been divided up based on delimiter.  Sort the array of pointers
 	// so that they indicate the correct ordering to copy aContents into output_var:
 	if (g_SortFunc) // Takes precedence other sorting methods.
+	{
 		qsort((void *)item, item_count, item_size, SortUDF);
+		if (!g_SortFuncResult || g_SortFuncResult == EARLY_EXIT)
+		{
+			result_to_return = g_SortFuncResult;
+			goto end;
+		}
+	}
 	else if (sort_random) // Takes precedence over all remaining options.
 		qsort((void *)item, item_count, item_size, SortRandom);
 	else
@@ -6504,8 +6801,7 @@ BIF_DECL(BIF_Sort)
 	LPTSTR item_prev = NULL;
 
 	// Copy the sorted result back into output_var.  Do all except the last item, since the last
-	// item gets special treatment depending on the options that were specified.  The call to
-	// output_var->Contents() below should never fail due to the above having prepped it:
+	// item gets special treatment depending on the options that were specified.
 	item_curr = item; // i.e. Don't use [] indexing for the reason described higher above (same applies to item += unit_size below).
 	for (dest = aResultToken.marker, i = 0; i < item_count; ++i, item_curr += unit_size)
 	{
@@ -6565,7 +6861,6 @@ BIF_DECL(BIF_Sort)
 				--dest; // Remove the previous item's trailing delimiter there's nothing for it to delimit due to omission of this duplicate.
 		}
 	} // for()
-	free(item); // Free the index/pointer list used for the sort.
 
 	// Terminate the variable's contents.
 	if (trailing_crlf_added_temporarily) // Remove the CRLF only after its presence was used above to simplify the code by reducing the number of types/cases.
@@ -6590,9 +6885,14 @@ BIF_DECL(BIF_Sort)
 end:
 	if (ErrorLevel != -1) // A change to ErrorLevel is desired.  Compare directly to -1 due to unsigned.
 		g_ErrorLevel->Assign(ErrorLevel); // ErrorLevel is set only when dupe-mode is in effect.
+	if (!item)
+		free(item);
 	if (mem_to_free)
 		free(mem_to_free);
+	if (g_SortFunc)
+		g_SortFunc->Release();
 	g_SortFunc = sort_func_orig;
+	g_SortFuncResult = sort_func_result_orig;
 	if (!result_to_return)
 		_f_return_FAIL;
 }
@@ -6606,7 +6906,7 @@ void DriveSpace(ResultToken &aResultToken, LPTSTR aPath, bool aGetFreeSpace)
 {
 	if (!aPath || !*aPath) goto error;  // Below relies on this check.
 
-	TCHAR buf[MAX_PATH + 1];  // +1 to allow appending of backslash.
+	TCHAR buf[MAX_PATH]; // MAX_PATH vs T_MAX_PATH because testing shows it doesn't support long paths even with \\?\.
 	tcslcpy(buf, aPath, _countof(buf));
 	size_t length = _tcslen(buf);
 	if (buf[length - 1] != '\\') // Trailing backslash is present, which some of the API calls below don't like.
@@ -6646,7 +6946,7 @@ BIF_DECL(BIF_Drive)
 	LPTSTR aValue = ParamIndexToOptionalString(0, _f_number_buf);
 
 	bool successful = false;
-	TCHAR path[MAX_PATH + 1];  // +1 to allow room for trailing backslash in case it needs to be added.
+	TCHAR path[MAX_PATH]; // MAX_PATH vs. T_MAX_PATH because SetVolumeLabel() can't seem to make use of long paths.
 	size_t path_length;
 
 	// Notes about the below macro:
@@ -6725,84 +7025,22 @@ ResultType DriveLock(TCHAR aDriveLetter, bool aLockIt)
 	HANDLE hdevice;
 	DWORD unused;
 	BOOL result;
-
-	if (g_os.IsWin9x())
-	{
-		// blisteringhot@hotmail.com has confirmed that the code below works on Win98 with an IDE CD Drive:
-		// System:  Win98 IDE CdRom (my ejector is CloseTray)
-		// I get a blue screen when I try to eject after using the test script.
-		// "eject request to drive in use"
-		// It asks me to Ok or Esc, Ok is default.
-		//	-probably a bit scary for a novice.
-		// BUT its locked alright!"
-
-		// Use the Windows 9x method.  The code below is based on an example posted by Microsoft.
-		// Note: The presence of the code below does not add a detectible amount to the EXE size
-		// (probably because it's mostly defines and data types).
-		#pragma pack(push, 1)
-		typedef struct _DIOC_REGISTERS
-		{
-			DWORD reg_EBX;
-			DWORD reg_EDX;
-			DWORD reg_ECX;
-			DWORD reg_EAX;
-			DWORD reg_EDI;
-			DWORD reg_ESI;
-			DWORD reg_Flags;
-		} DIOC_REGISTERS, *PDIOC_REGISTERS;
-		typedef struct _PARAMBLOCK
-		{
-			BYTE Operation;
-			BYTE NumLocks;
-		} PARAMBLOCK, *PPARAMBLOCK;
-		#pragma pack(pop)
-
-		// MS: Prepare for lock or unlock IOCTL call
-		#define CARRY_FLAG 0x1
-		#define VWIN32_DIOC_DOS_IOCTL 1
-		#define LOCK_MEDIA   0
-		#define UNLOCK_MEDIA 1
-		#define STATUS_LOCK  2
-		PARAMBLOCK pb = {0};
-		pb.Operation = aLockIt ? LOCK_MEDIA : UNLOCK_MEDIA;
-		
-		DIOC_REGISTERS regs = {0};
-		regs.reg_EAX = 0x440D;
-		regs.reg_EBX = ctoupper(aDriveLetter) - 'A' + 1; // Convert to drive index. 0 = default, 1 = A, 2 = B, 3 = C
-		regs.reg_ECX = 0x0848; // MS: Lock/unlock media
-		regs.reg_EDX = (DWORD)(size_t)&pb;
-		
-		// MS: Open VWIN32
-		hdevice = CreateFile(_T("\\\\.\\vwin32"), 0, 0, NULL, 0, FILE_FLAG_DELETE_ON_CLOSE, NULL);
-		if (hdevice == INVALID_HANDLE_VALUE)
-			return FAIL;
-		
-		// MS: Call VWIN32
-		result = DeviceIoControl(hdevice, VWIN32_DIOC_DOS_IOCTL, &regs, sizeof(regs), &regs, sizeof(regs), &unused, 0);
-		if (result)
-			result = !(regs.reg_Flags & CARRY_FLAG);
-	}
-	else // NT4/2k/XP or later
-	{
-		// The calls below cannot work on Win9x (as documented by MSDN's PREVENT_MEDIA_REMOVAL).
-		// Don't even attempt them on Win9x because they might blow up.
-		TCHAR filename[64];
-		_stprintf(filename, _T("\\\\.\\%c:"), aDriveLetter);
-		// FILE_READ_ATTRIBUTES is not enough; it yields "Access Denied" error.  So apparently all or part
-		// of the sub-attributes in GENERIC_READ are needed.  An MSDN example implies that GENERIC_WRITE is
-		// only needed for GetDriveType() == DRIVE_REMOVABLE drives, and maybe not even those when all we
-		// want to do is lock/unlock the drive (that example did quite a bit more).  In any case, research
-		// indicates that all CD/DVD drives are ever considered DRIVE_CDROM, not DRIVE_REMOVABLE.
-		// Due to this and the unlikelihood that GENERIC_WRITE is ever needed anyway, GetDriveType() is
-		// not called for the purpose of conditionally adding the GENERIC_WRITE attribute.
-		hdevice = CreateFile(filename, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
-		if (hdevice == INVALID_HANDLE_VALUE)
-			return FAIL;
-		PREVENT_MEDIA_REMOVAL pmr;
-		pmr.PreventMediaRemoval = aLockIt;
-		result = DeviceIoControl(hdevice, IOCTL_STORAGE_MEDIA_REMOVAL, &pmr, sizeof(PREVENT_MEDIA_REMOVAL)
-			, NULL, 0, &unused, NULL);
-	}
+	TCHAR filename[64];
+	_stprintf(filename, _T("\\\\.\\%c:"), aDriveLetter);
+	// FILE_READ_ATTRIBUTES is not enough; it yields "Access Denied" error.  So apparently all or part
+	// of the sub-attributes in GENERIC_READ are needed.  An MSDN example implies that GENERIC_WRITE is
+	// only needed for GetDriveType() == DRIVE_REMOVABLE drives, and maybe not even those when all we
+	// want to do is lock/unlock the drive (that example did quite a bit more).  In any case, research
+	// indicates that all CD/DVD drives are ever considered DRIVE_CDROM, not DRIVE_REMOVABLE.
+	// Due to this and the unlikelihood that GENERIC_WRITE is ever needed anyway, GetDriveType() is
+	// not called for the purpose of conditionally adding the GENERIC_WRITE attribute.
+	hdevice = CreateFile(filename, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+	if (hdevice == INVALID_HANDLE_VALUE)
+		return FAIL;
+	PREVENT_MEDIA_REMOVAL pmr;
+	pmr.PreventMediaRemoval = aLockIt;
+	result = DeviceIoControl(hdevice, IOCTL_STORAGE_MEDIA_REMOVAL, &pmr, sizeof(PREVENT_MEDIA_REMOVAL)
+		, NULL, 0, &unused, NULL);
 	CloseHandle(hdevice);
 	return result ? OK : FAIL;
 }
@@ -6828,7 +7066,7 @@ BIF_DECL(BIF_DriveGet)
 	
 	g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Set default: indicate success.
 
-	TCHAR path[MAX_PATH + 1];  // +1 to allow room for trailing backslash in case it needs to be added.
+	TCHAR path[T_MAX_PATH]; // T_MAX_PATH vs. MAX_PATH, though testing indicates only GetDriveType() supports long paths.
 	size_t path_length;
 
 	switch(drive_get_cmd)
@@ -6990,188 +7228,7 @@ BIF_DECL(BIF_Sound)
 	if (control_type == MIXERCONTROL_CONTROLTYPE_INVALID || aComponentType == MIXERLINE_COMPONENTTYPE_DST_UNDEFINED)
 		_f_throw(_T("Invalid Control Type or Component Type"));
 
-	if (g_os.IsWinVistaOrLater())
-		SoundSetGetVista(aResultToken, aSetting, component_type, instance_number, control_type, aDevice);
-	else
-		SoundSetGet2kXP(aResultToken, aSetting, component_type, instance_number, control_type, aDevice);
-}
-
-
-ResultType SoundSetGet2kXP(ResultToken &aResultToken, LPTSTR aSetting
-	, DWORD aComponentType, int aComponentInstance, DWORD aControlType, LPTSTR aDevice)
-{
-	int aMixerID = *aDevice ? ATOI(aDevice) - 1 : 0;
-	if (aMixerID < 0)
-		aMixerID = 0;
-
-	double setting_percent;
-	if (SOUND_MODE_IS_SET)
-	{
-		setting_percent = ATOF(aSetting);
-		if (setting_percent < -100)
-			setting_percent = -100;
-		else if (setting_percent > 100)
-			setting_percent = 100;
-	}
-
-	// Open the specified mixer ID:
-	HMIXER hMixer;
-    if (mixerOpen(&hMixer, aMixerID, 0, 0, 0) != MMSYSERR_NOERROR)
-		return g_ErrorLevel->Assign(_T("Can't Open Specified Mixer"));
-
-	// Find out how many destinations are available on this mixer (should always be at least one):
-	int dest_count;
-	MIXERCAPS mxcaps;
-	if (mixerGetDevCaps((UINT_PTR)hMixer, &mxcaps, sizeof(mxcaps)) == MMSYSERR_NOERROR)
-		dest_count = mxcaps.cDestinations;
-	else
-		dest_count = 1;  // Assume it has one so that we can try to proceed anyway.
-
-	// Find specified line (aComponentType + aComponentInstance):
-	MIXERLINE ml = {0};
-    ml.cbStruct = sizeof(ml);
-	if (aComponentInstance == 1)  // Just get the first line of this type, the easy way.
-	{
-		ml.dwComponentType = aComponentType;
-		if (mixerGetLineInfo((HMIXEROBJ)hMixer, &ml, MIXER_GETLINEINFOF_COMPONENTTYPE) != MMSYSERR_NOERROR)
-		{
-			mixerClose(hMixer);
-			return g_ErrorLevel->Assign(_T("Mixer Doesn't Support This Component Type"));
-		}
-	}
-	else
-	{
-		// Search through each source of each destination, looking for the indicated instance
-		// number for the indicated component type:
-		int source_count;
-		bool found = false;
-		for (int d = 0, found_instance = 0; d < dest_count && !found; ++d) // For each destination of this mixer.
-		{
-			ml.dwDestination = d;
-			if (mixerGetLineInfo((HMIXEROBJ)hMixer, &ml, MIXER_GETLINEINFOF_DESTINATION) != MMSYSERR_NOERROR)
-				// Keep trying in case the others can be retrieved.
-				continue;
-			source_count = ml.cConnections;  // Make a copy of this value so that the struct can be reused.
-			for (int s = 0; s < source_count && !found; ++s) // For each source of this destination.
-			{
-				ml.dwDestination = d; // Set it again in case it was changed.
-				ml.dwSource = s;
-				if (mixerGetLineInfo((HMIXEROBJ)hMixer, &ml, MIXER_GETLINEINFOF_SOURCE) != MMSYSERR_NOERROR)
-					// Keep trying in case the others can be retrieved.
-					continue;
-				// This line can be used to show a soundcard's component types (match them against mmsystem.h):
-				//MsgBox(ml.dwComponentType);
-				if (ml.dwComponentType == aComponentType)
-				{
-					++found_instance;
-					if (found_instance == aComponentInstance)
-						found = true;
-				}
-			} // inner for()
-		} // outer for()
-		if (!found)
-		{
-			mixerClose(hMixer);
-			return g_ErrorLevel->Assign(_T("Mixer Doesn't Have That Many of That Component Type"));
-		}
-	}
-
-	// Find the mixer control (aControlType) for the above component:
-    MIXERCONTROL mc; // MSDN: "No initialization of the buffer pointed to by [pamxctrl below] is required"
-    MIXERLINECONTROLS mlc;
-	mlc.cbStruct = sizeof(mlc);
-	mlc.pamxctrl = &mc;
-	mlc.cbmxctrl = sizeof(mc);
-	mlc.dwLineID = ml.dwLineID;
-	mlc.dwControlType = aControlType;
-	mlc.cControls = 1;
-	if (mixerGetLineControls((HMIXEROBJ)hMixer, &mlc, MIXER_GETLINECONTROLSF_ONEBYTYPE) != MMSYSERR_NOERROR)
-	{
-		mixerClose(hMixer);
-		return g_ErrorLevel->Assign(_T("Component Doesn't Support This Control Type"));
-	}
-
-	// Does user want to adjust the current setting by a certain amount?
-	bool adjust_current_setting = aSetting && (*aSetting == '-' || *aSetting == '+');
-
-	// These are used in more than once place, so always initialize them here:
-	MIXERCONTROLDETAILS mcd = {0};
-    MIXERCONTROLDETAILS_UNSIGNED mcdMeter;
-	mcd.cbStruct = sizeof(MIXERCONTROLDETAILS);
-	mcd.dwControlID = mc.dwControlID;
-	mcd.cChannels = 1; // MSDN: "when an application needs to get and set all channels as if they were uniform"
-	mcd.paDetails = &mcdMeter;
-	mcd.cbDetails = sizeof(mcdMeter);
-
-	// Get the current setting of the control, if necessary:
-	if (!SOUND_MODE_IS_SET || adjust_current_setting)
-	{
-		if (mixerGetControlDetails((HMIXEROBJ)hMixer, &mcd, MIXER_GETCONTROLDETAILSF_VALUE) != MMSYSERR_NOERROR)
-		{
-			mixerClose(hMixer);
-			return g_ErrorLevel->Assign(_T("Can't Get Current Setting"));
-		}
-	}
-
-	bool control_type_is_boolean;
-	switch (aControlType)
-	{
-	case MIXERCONTROL_CONTROLTYPE_ONOFF:
-	case MIXERCONTROL_CONTROLTYPE_MUTE:
-	case MIXERCONTROL_CONTROLTYPE_MONO:
-	case MIXERCONTROL_CONTROLTYPE_LOUDNESS:
-	case MIXERCONTROL_CONTROLTYPE_STEREOENH:
-	case MIXERCONTROL_CONTROLTYPE_BASS_BOOST:
-		control_type_is_boolean = true;
-		break;
-	default: // For all others, assume the control can have more than just ON/OFF as its allowed states.
-		control_type_is_boolean = false;
-	}
-
-	if (SOUND_MODE_IS_SET)
-	{
-		if (control_type_is_boolean)
-		{
-			if (adjust_current_setting) // The user wants this toggleable control to be toggled to its opposite state:
-				mcdMeter.dwValue = (mcdMeter.dwValue > mc.Bounds.dwMinimum) ? mc.Bounds.dwMinimum : mc.Bounds.dwMaximum;
-			else // Set the value according to whether the user gave us a setting that is greater than zero:
-				mcdMeter.dwValue = (setting_percent > 0.0) ? mc.Bounds.dwMaximum : mc.Bounds.dwMinimum;
-		}
-		else // For all others, assume the control can have more than just ON/OFF as its allowed states.
-		{
-			// Make this an __int64 vs. DWORD to avoid underflow (so that a setting_percent of -100
-			// is supported whenever the difference between Min and Max is large, such as MAXDWORD):
-			__int64 specified_vol = (__int64)((mc.Bounds.dwMaximum - mc.Bounds.dwMinimum) * (setting_percent / 100.0));
-			if (adjust_current_setting)
-			{
-				// Make it a big int so that overflow/underflow can be detected:
-				__int64 vol_new = mcdMeter.dwValue + specified_vol;
-				if (vol_new < mc.Bounds.dwMinimum)
-					vol_new = mc.Bounds.dwMinimum;
-				else if (vol_new > mc.Bounds.dwMaximum)
-					vol_new = mc.Bounds.dwMaximum;
-				mcdMeter.dwValue = (DWORD)vol_new;
-			}
-			else
-				mcdMeter.dwValue = (DWORD)specified_vol; // Due to the above, it's known to be positive in this case.
-		}
-
-		MMRESULT result = mixerSetControlDetails((HMIXEROBJ)hMixer, &mcd, MIXER_GETCONTROLDETAILSF_VALUE);
-		mixerClose(hMixer);
-		return result == MMSYSERR_NOERROR ? g_ErrorLevel->Assign(ERRORLEVEL_NONE) : g_ErrorLevel->Assign(_T("Can't Change Setting"));
-	}
-
-	// Otherwise, the mode is "Get":
-	mixerClose(hMixer);
-	g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
-
-	if (control_type_is_boolean)
-		return aResultToken.Return(mcdMeter.dwValue ? TRUE : FALSE);
-	else // For all others, assume the control can have more than just ON/OFF as its allowed states.
-		// The MSDN docs imply that values fetched via the above method do not distinguish between
-		// left and right volume levels, unlike waveOutGetVolume():
-		return aResultToken.Return(   ((double)100 * (mcdMeter.dwValue - (DWORD)mc.Bounds.dwMinimum))
-			/ (mc.Bounds.dwMaximum - mc.Bounds.dwMinimum)   );
+	SoundSetGetVista(aResultToken, aSetting, component_type, instance_number, control_type, aDevice);
 }
 
 
@@ -7609,6 +7666,10 @@ ResultType Line::SoundPlay(LPTSTR aFilespec, bool aSleepUntilDone)
 		// ATOU() returns 0xFFFFFFFF for -1, which is relied upon to support the -1 sound.
 	// See http://msdn.microsoft.com/library/default.asp?url=/library/en-us/multimed/htm/_win32_play.asp
 	// for some documentation mciSendString() and related.
+	// MAX_PATH note: There's no chance this API supports long paths even on Windows 10.
+	// Research indicates it limits paths to 127 chars (not even MAX_PATH), but since there's
+	// no apparent benefit to reducing it, we'll keep this size to ensure backward-compatibility.
+	// Note that using a relative path does not help, but using short (8.3) names does.
 	TCHAR buf[MAX_PATH * 2]; // Allow room for filename and commands.
 	mciSendString(_T("status ") SOUNDPLAY_ALIAS _T(" mode"), buf, _countof(buf), NULL);
 	if (*buf) // "playing" or "stopped" (so close it before trying to re-open with a new aFilespec).
@@ -7658,62 +7719,77 @@ ResultType Line::SoundPlay(LPTSTR aFilespec, bool aSleepUntilDone)
 void SetWorkingDir(LPTSTR aNewDir, bool aSetErrorLevel)
 // Sets ErrorLevel to indicate success/failure, but only if the script has begun runtime execution (callers
 // want that).
-// This function was added in v1.0.45.01 for the reasons commented further below.
-// It's similar to the one in the ahk2exe source, so maintain them together.
+// This function was added in v1.0.45.01 for the reason described below.
 {
+	// v1.0.45.01: Since A_ScriptDir omits the trailing backslash for roots of drives (such as C:),
+	// and since that variable probably shouldn't be changed for backward compatibility, provide
+	// the missing backslash to allow SetWorkingDir %A_ScriptDir% (and others) to work as expected
+	// in the root of a drive.
+	// Update in 2018: The reason it wouldn't by default is that "C:" is actually a reference to the
+	// the current directory if it's on C: drive, otherwise a reference to the path contained by the
+	// env var "=C:".  Similarly, "C:x" is a reference to "x" inside that directory.
+	// For details, see https://blogs.msdn.microsoft.com/oldnewthing/20100506-00/?p=14133
+	// Although the override here creates inconsistency between SetWorkingDir and everything else
+	// that can accept "C:", it is most likely what the user wants, and now there's also backward-
+	// compatibility to consider since this workaround has been in place since 2006.
+	// v1.1.31.00: Add the slash up-front instead of attempting SetCurrentDirectory(_T("C:"))
+	// and comparing the result, since the comparison would always yield "not equal" due to either
+	// a trailing slash or the directory being incorrect.
+	TCHAR drive_buf[4];
+	if (aNewDir[0] && aNewDir[1] == ':' && !aNewDir[2])
+	{
+		drive_buf[0] = aNewDir[0];
+		drive_buf[1] = aNewDir[1];
+		drive_buf[2] = '\\';
+		drive_buf[3] = '\0';
+		aNewDir = drive_buf;
+	}
+
 	if (!SetCurrentDirectory(aNewDir)) // Caused by nonexistent directory, permission denied, etc.
 	{
 		if (aSetErrorLevel && g_script->mIsReadyToExecute)
 			g_script->SetErrorLevelOrThrow();
 		return;
 	}
+	// Otherwise, the change to the working directory succeeded.
 
-	// Otherwise, the change to the working directory *apparently* succeeded (but is confirmed below for root drives
-	// and also because we want the absolute path in cases where aNewDir is relative).
-	TCHAR buf[_countof(g_WorkingDir)];
-	LPTSTR actual_working_dir = g_script->mIsReadyToExecute ? g_WorkingDir : buf; // i.e. don't update g_WorkingDir when our caller is the #include directive.
 	// Other than during program startup, this should be the only place where the official
 	// working dir can change.  The exception is FileSelect(), which changes the working
 	// dir as the user navigates from folder to folder.  However, the whole purpose of
 	// maintaining g_WorkingDir is to workaround that very issue.
+	if (g_script->mIsReadyToExecute) // Callers want this done only during script runtime.
+	{
+		UpdateWorkingDir(aNewDir);
+		// Since the above didn't return, it wants us to indicate success.
+		if (aSetErrorLevel) // Callers want ErrorLevel changed only during script runtime.
+			g_ErrorLevel->Assign(ERRORLEVEL_NONE);
+	}
+}
 
-	// GetCurrentDirectory() is called explicitly, to confirm the change, in case aNewDir is a relative path.
+
+
+void UpdateWorkingDir(LPTSTR aNewDir)
+// aNewDir is NULL or a path which was just passed to SetCurrentDirectory().
+{
+	TCHAR buf[T_MAX_PATH]; // Windows 10 long path awareness enables working dir to exceed MAX_PATH.
+	// GetCurrentDirectory() is called explicitly, in case aNewDir is a relative path.
 	// We want to store the absolute path:
-	if (!GetCurrentDirectory(_countof(buf), actual_working_dir)) // Might never fail in this case, but kept for backward compatibility.
-	{
-		tcslcpy(actual_working_dir, aNewDir, _countof(buf)); // Update the global to the best info available.
-		// But ErrorLevel is set to "none" further below because the actual "set" did succeed; it's also for
-		// backward compatibility.
-	}
-	else // GetCurrentDirectory() succeeded, so it's appropriate to compare what we asked for to what was received.
-	{
-		if (aNewDir[0] && aNewDir[1] == ':' && !aNewDir[2] // Root with missing backslash. Relies on short-circuit boolean order.
-			&& _tcsicmp(aNewDir, actual_working_dir)) // The root directory we requested didn't actually get set. See below.
-		{
-			// There is some strange OS behavior here: If the current working directory is C:\anything\...
-			// and SetCurrentDirectory() is called to switch to "C:", the function reports success but doesn't
-			// actually change the directory.  However, if you first change to D: then back to C:, the change
-			// works as expected.  Presumably this is for backward compatibility with DOS days; but it's 
-			// inconvenient and seems desirable to override it in this case, especially because:
-			// v1.0.45.01: Since A_ScriptDir omits the trailing backslash for roots of drives (such as C:),
-			// and since that variable probably shouldn't be changed for backward compatibility, provide
-			// the missing backslash to allow SetWorkingDir %A_ScriptDir% (and others) to work in the root
-			// of a drive.
-			TCHAR buf_temp[8];
-			_stprintf(buf_temp, _T("%s\\"), aNewDir); // No danger of buffer overflow in this case.
-			if (SetCurrentDirectory(buf_temp))
-			{
-				if (!GetCurrentDirectory(_countof(buf), actual_working_dir)) // Might never fail in this case, but kept for backward compatibility.
-					tcslcpy(actual_working_dir, aNewDir, _countof(buf)); // But still report "no error" (below) because the Set() actually did succeed.
-					// But treat this as a success like the similar one higher above.
-			}
-			//else Set() failed; but since the original Set() succeeded (and for simplicity) report ErrorLevel "none".
-		}
-	}
+	if (GetCurrentDirectory(_countof(buf), buf)) // Might never fail in this case, but kept for backward compatibility.
+		aNewDir = buf;
+	if (aNewDir)
+		g_WorkingDir.SetString(aNewDir);
+}
 
-	// Since the above didn't return, it wants us to indicate success.
-	if (aSetErrorLevel && g_script->mIsReadyToExecute) // Callers want ErrorLevel changed only during script runtime.
-		g_ErrorLevel->Assign(ERRORLEVEL_NONE);
+
+
+LPTSTR GetWorkingDir()
+// Allocate a copy of the working directory from the heap.  This is used to support long
+// paths without adding 64KB of stack usage per recursive #include <> on Unicode builds.
+{
+	TCHAR buf[T_MAX_PATH];
+	if (GetCurrentDirectory(_countof(buf), buf))
+		return _tcsdup(buf);
+	return NULL;
 }
 
 BIF_DECL(BIF_FileSelect)
@@ -7738,12 +7814,20 @@ BIF_DECL(BIF_FileSelect)
 	TCHAR file_buf[65535];
 	*file_buf = '\0'; // Set default.
 
-	TCHAR working_dir[MAX_PATH];
+	TCHAR working_dir[MAX_PATH]; // Using T_MAX_PATH vs. MAX_PATH did not help on Windows 10.0.16299 (see below).
 	if (!aWorkingDir || !*aWorkingDir)
 		*working_dir = '\0';
 	else
 	{
-		tcslcpy(working_dir, aWorkingDir, _countof(working_dir));
+		// Compress the path if possible to support longer paths.  Without this, any path longer
+		// than MAX_PATH would be ignored, presumably because the dialog, as part of the shell,
+		// does not support long paths.  Surprisingly, although Windows 10 long path awareness
+		// does not allow us to pass a long path for working_dir, it does affect whether the long
+		// path is used in the address bar and returned filenames.
+		if (_tcslen(aWorkingDir) >= MAX_PATH)
+			GetShortPathName(aWorkingDir, working_dir, _countof(working_dir));
+		else
+			tcslcpy(working_dir, aWorkingDir, _countof(working_dir));
 		// v1.0.43.10: Support CLSIDs such as:
 		//   My Computer  ::{20d04fe0-3aea-1069-a2d8-08002b30309d}
 		//   My Documents ::{450d8fba-ad25-11d0-98a8-0800361b1103}
@@ -7835,11 +7919,7 @@ BIF_DECL(BIF_FileSelect)
 	}
 
 	OPENFILENAME ofn = {0};
-	// OPENFILENAME_SIZE_VERSION_400 must be used for 9x/NT otherwise the dialog will not appear!
-	// MSDN: "In an application that is compiled with WINVER and _WIN32_WINNT >= 0x0500, use
-	// OPENFILENAME_SIZE_VERSION_400 for this member.  Windows 2000/XP: Use sizeof(OPENFILENAME)
-	// for this parameter."
-	ofn.lStructSize = g_os.IsWin2000orLater() ? sizeof(OPENFILENAME) : OPENFILENAME_SIZE_VERSION_400;
+	ofn.lStructSize = sizeof(OPENFILENAME);
 	ofn.hwndOwner = THREAD_DIALOG_OWNER; // Can be NULL, which is used instead of main window since no need to have main window forced into the background for this.
 	ofn.lpstrTitle = greeting;
 	ofn.lpstrFilter = *filter ? filter : _T("All Files (*.*)\0*.*\0Text Documents (*.txt)\0*.txt\0");
@@ -7851,7 +7931,7 @@ BIF_DECL(BIF_FileSelect)
 	// Note that the OFN_NOCHANGEDIR flag is ineffective in some cases, so we'll use a custom
 	// workaround instead.  MSDN: "Windows NT 4.0/2000/XP: This flag is ineffective for GetOpenFileName."
 	// In addition, it does not prevent the CWD from changing while the user navigates from folder to
-	// folder in the dialog, except perhaps on Win9x.
+	// folder in the dialog.
 
 	// For v1.0.25.05, the new "M" letter is used for a new multi-select method since the old multi-select
 	// is faulty in the following ways:
@@ -7978,25 +8058,45 @@ BIF_DECL(BIF_FileSelect)
 }
 
 
-ResultType Line::FileCreateDir(LPTSTR aDirSpec)
+// As of 2019-09-29, noinline reduces code size by over 20KB on VC++ 2019.
+// Prior to merging Util_CreateDir with this, it wasn't inlined.
+DECLSPEC_NOINLINE
+bool Line::FileCreateDir(LPTSTR aDirSpec, LPTSTR aCanModifyDirSpec)
 {
 	if (!aDirSpec || !*aDirSpec)
-		return LineError(ERR_PARAM1_REQUIRED);
+	{
+		SetLastError(ERROR_INVALID_PARAMETER);
+		return false;
+	}
 
 	DWORD attr = GetFileAttributes(aDirSpec);
 	if (attr != 0xFFFFFFFF)  // aDirSpec already exists.
-		return SetErrorsOrThrow(!(attr & FILE_ATTRIBUTE_DIRECTORY), ERROR_ALREADY_EXISTS); // Indicate success if it already exists as a dir.
+	{
+		SetLastError(ERROR_ALREADY_EXISTS);
+		return (attr & FILE_ATTRIBUTE_DIRECTORY) != 0; // Indicate success if it already exists as a dir.
+	}
 
 	// If it has a backslash, make sure all its parent directories exist before we attempt
 	// to create this directory:
 	LPTSTR last_backslash = _tcsrchr(aDirSpec, '\\');
-	if (last_backslash > aDirSpec) // v1.0.48.04: Changed "last_backslash" to "last_backslash > aDirSpec" so that an aDirSpec with a leading \ (but no other backslashes), such as \dir, is supported.
+	if (last_backslash > aDirSpec // v1.0.48.04: Changed "last_backslash" to "last_backslash > aDirSpec" so that an aDirSpec with a leading \ (but no other backslashes), such as \dir, is supported.
+		&& last_backslash[-1] != ':') // v1.1.31.00: Don't attempt FileCreateDir("C:") since that's equivalent to either "C:\" or the working directory (which already exists), or FileCreateDir("\\?\C:") since it always fails.
 	{
-		TCHAR parent_dir[MAX_PATH];
-		if (_tcslen(aDirSpec) >= _countof(parent_dir)) // avoid overflow
-			return SetErrorsOrThrow(true, ERROR_BUFFER_OVERFLOW);
-		tcslcpy(parent_dir, aDirSpec, last_backslash - aDirSpec + 1); // Omits the last backslash.
-		FileCreateDir(parent_dir); // Recursively create all needed ancestor directories.
+		LPTSTR parent_dir;
+		if (aCanModifyDirSpec)
+		{
+			parent_dir = aDirSpec; // Caller provided a modifiable aDirSpec.
+			*last_backslash = '\0'; // Temporarily terminate for parent directory.
+		}
+		else
+		{
+			// v1.1.31.00: Allocate a modifiable buffer to be used by all calls (supports long paths).
+			parent_dir = (LPTSTR)_alloca((last_backslash - aDirSpec + 1) * sizeof(TCHAR));
+			tcslcpy(parent_dir, aDirSpec, last_backslash - aDirSpec + 1); // Omits the last backslash.
+		}
+		bool exists = FileCreateDir(parent_dir, parent_dir); // Recursively create all needed ancestor directories.
+		if (aCanModifyDirSpec)
+			*last_backslash = '\\'; // Undo temporary termination.
 
 		// v1.0.44: Fixed ErrorLevel being set to 1 when the specified directory ends in a backslash.  In such cases,
 		// two calls were made to CreateDirectory for the same folder: the first without the backslash and then with
@@ -8004,14 +8104,14 @@ ResultType Line::FileCreateDir(LPTSTR aDirSpec)
 		// everything succeeded.  So now, when recursion finishes creating all the ancestors of this directory
 		// our own layer here does not call CreateDirectory() when there's a trailing backslash because a previous
 		// layer already did:
-		if (!last_backslash[1] || g_ErrorLevel->ToInt64() == ERRORLEVEL_ERROR)
-			return OK; // Let the previously set ErrorLevel (whatever it is) tell the story.
+		if (!last_backslash[1] || !exists)
+			return exists;
 	}
 
 	// The above has recursively created all parent directories of aDirSpec if needed.
 	// Now we can create aDirSpec.  Be sure to explicitly set g_ErrorLevel since it's value
 	// is now indeterminate due to action above:
-	return SetErrorsOrThrow(!CreateDirectory(aDirSpec, NULL));
+	return CreateDirectory(aDirSpec, NULL);
 }
 
 
@@ -8058,7 +8158,7 @@ ResultType ConvertFileOptions(LPTSTR aOptions, UINT &codepage, bool &translate_c
 			else
 			{
 				codepage = Line::ConvertFileEncoding(cp);
-				if (codepage == -1)
+				if (codepage == -1 || cisdigit(*cp)) // Require "cp" prefix in FileRead/FileAppend options.
 					return g_script->ScriptError(ERR_INVALID_OPTION, cp);
 			}
 			break;
@@ -8128,7 +8228,7 @@ BIF_DECL(BIF_FileRead)
 		_f_throw(ERR_OUTOFMEM); // Using this instead of "File too large." to reduce code size, since this condition is very rare (and malloc succeeding would be even rarer).
 	}
 
-	if (!bytes_to_read)
+	if (!bytes_to_read && codepage != -1) // In RAW mode, always return a zero-byte Buffer.
 	{
 		Script::SetErrorLevelsAndClose(hfile, false, 0); // Indicate success (a zero-length file results in an empty string).
 		return;
@@ -8228,20 +8328,10 @@ BIF_DECL(BIF_FileRead)
 		}
 		else // codepage == -1 ("RAW" mode)
 		{
-			// This could be text or any kind of binary data, so may not be null-terminated.
-			// Since we're returning a string, ensure it is terminated with a complete \0 TCHAR:
-			DWORD terminate_at = bytes_actually_read;
-#ifdef UNICODE
-			// Since the data might be interpreted as UTF-16, we need to ensure the null-terminator is
-			// aligned correctly, like "xxxx 0000" and not "xx00 00??" (where xx is valid data and ??
-			// is an uninitialized byte).
-			if (terminate_at & 1) // Odd number of bytes.
-				output_buf[terminate_at++] = 0; // Put an extra zero byte in and move the actual terminator right one byte.
-#endif
-			// Write final TCHAR terminator.
-			*LPTSTR(output_buf + terminate_at) = 0;
 			// Return the buffer to our caller.
-			aResultToken.AcceptMem((LPTSTR)output_buf, terminate_at / sizeof(TCHAR));
+			auto bo = new BufferObject(output_buf, bytes_actually_read);
+			bo->SetBase(BufferObject::sPrototype);
+			aResultToken.Return(bo);
 		}
 	}
 	else
@@ -8264,6 +8354,18 @@ BIF_DECL(BIF_FileAppend)
 	_f_param_string_opt(aFilespec, 1);
 	_f_param_string_opt(aOptions, 2);
 
+	IObject *aBuf_obj = ParamIndexToObject(0); // Allow a Buffer-like object.
+	if (aBuf_obj)
+	{
+		size_t ptr;
+		GetBufferObjectPtr(aResultToken, aBuf_obj, ptr, aBuf_length);
+		if (aResultToken.Exited())
+			return;
+		aBuf = (LPTSTR)ptr;
+	}
+	else
+		aBuf_length *= sizeof(TCHAR); // Convert to byte count.
+
 	_f_set_retval_p(_T(""), 0); // For all non-throw cases.
 
 	// The below is avoided because want to allow "nothing" to be written to a file in case the
@@ -8283,7 +8385,7 @@ BIF_DECL(BIF_FileAppend)
 	bool file_was_already_open = ts;
 
 #ifdef CONFIG_DEBUGGER
-	if (*aFilespec == '*' && !aFilespec[1] && g_Debugger.FileAppendStdOut(aBuf))
+	if (*aFilespec == '*' && !aFilespec[1] && !aBuf_obj && g_Debugger.FileAppendStdOut(aBuf))
 	{
 		// StdOut has been redirected to the debugger, and this "FileAppend" call has been
 		// fully handled by the call above, so just return.
@@ -8302,7 +8404,7 @@ BIF_DECL(BIF_FileAppend)
 	//    file-modification time when no actual text will be appended).
 	if (!file_was_already_open)
 	{
-		codepage = g->Encoding;
+		codepage = aBuf_obj ? -1 : g->Encoding; // Never default to BOM if a Buffer object was passed.
 		bool translate_crlf_to_lf = false;
 		if (!ConvertFileOptions(aOptions, codepage, translate_crlf_to_lf, NULL))
 			_f_return_FAIL;
@@ -8338,10 +8440,10 @@ BIF_DECL(BIF_FileAppend)
 	DWORD result = 1;
 	if (aBuf_length)
 	{
-		if (codepage == -1) // "RAW" mode.
-			result = ts->Write((LPCVOID)aBuf, DWORD(aBuf_length * sizeof(TCHAR)));
+		if (codepage == -1 || aBuf_obj) // "RAW" mode.
+			result = ts->Write((LPCVOID)aBuf, (DWORD)aBuf_length);
 		else
-			result = ts->Write(aBuf, DWORD(aBuf_length));
+			result = ts->Write(aBuf, DWORD(aBuf_length / sizeof(TCHAR)));
 	}
 	//else: aBuf is empty; we've already succeeded in creating the file and have nothing further to do.
 	Script::SetErrorLevels(result == 0);
@@ -8375,8 +8477,7 @@ ResultType Line::FileDelete(LPTSTR aFilePattern)
 	}
 
 	// Otherwise aFilePattern contains wildcards, so we'll search for all matches and delete them.
-	FilePatternApply(aFilePattern, FILE_LOOP_FILES_ONLY, false, FileDeleteCallback, NULL);
-	return OK;
+	return FilePatternApply(aFilePattern, FILE_LOOP_FILES_ONLY, false, FileDeleteCallback, NULL);
 }
 
 
@@ -8397,7 +8498,7 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 		// Ahk2Exe converts it to upper-case before adding the resource. My testing showed that
 		// using lower or mixed case in some instances prevented the resource from being found.
 		// Since file paths are case-insensitive, it certainly doesn't seem harmful to do this:
-		TCHAR source[MAX_PATH];
+		TCHAR source[T_MAX_PATH];
 		size_t source_length = _tcslen(aSource);
 		if (source_length >= _countof(source))
 			// Probably can't happen; for simplicity, truncate it.
@@ -8409,7 +8510,7 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 		HRSRC res;
 		HGLOBAL res_load;
 		LPVOID res_lock;
-		if ( (res = FindResource(NULL, source, MAKEINTRESOURCE(RT_RCDATA)))
+		if ( (res = FindResource(NULL, source, RT_RCDATA))
 		  && (res_load = LoadResource(NULL, res))
 		  && (res_lock = LockResource(res_load))  )
 		{
@@ -8438,8 +8539,8 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 		// v1.0.35.11: Must search in A_ScriptDir by default because that's where ahk2exe will search by default.
 		// The old behavior was to search in A_WorkingDir, which seems pointless because ahk2exe would never
 		// be able to use that value if the script changes it while running.
-		TCHAR aDestPath[MAX_PATH];
-		GetFullPathName(aDest, MAX_PATH, aDestPath, NULL);
+		TCHAR aDestPath[T_MAX_PATH];
+		GetFullPathName(aDest, _countof(aDestPath), aDestPath, NULL);
 		SetCurrentDirectory(g_script->mFileDir);
 		success = CopyFile(aSource, aDestPath, !allow_overwrite);
 		SetCurrentDirectory(g_WorkingDir); // Restore to proper value.
@@ -8475,8 +8576,8 @@ struct FileSetAttribData
 	DWORD and_mask, xor_mask;
 };
 
-ResultType Line::FileSetAttrib(LPTSTR aAttributes, LPTSTR aFilePattern, FileLoopModeType aOperateOnFolders
-	, bool aDoRecurse, bool aCalledRecursively)
+ResultType Line::FileSetAttrib(LPTSTR aAttributes, LPTSTR aFilePattern
+	, FileLoopModeType aOperateOnFolders, bool aDoRecurse)
 // Returns the number of files and folders that could not be changed due to an error.
 {
 	if (!*aFilePattern)
@@ -8549,70 +8650,65 @@ BOOL FileSetAttribCallback(LPTSTR file_path, WIN32_FIND_DATA &current_file, void
 
 
 
-int Line::FilePatternApply(LPTSTR aFilePattern, FileLoopModeType aOperateOnFolders
-	, bool aDoRecurse, FilePatternCallback aCallback, void *aCallbackData
-	, bool aCalledRecursively)
+ResultType Line::FilePatternApply(LPTSTR aFilePattern, FileLoopModeType aOperateOnFolders
+	, bool aDoRecurse, FilePatternCallback aCallback, void *aCallbackData)
 {
-	if (!aCalledRecursively)  // i.e. Only need to do this if we're not called by ourself:
-	{
-		if (!*aFilePattern)
-		{
-			// Caller should handle this case before calling us if an exception is to be thrown.
-			SetErrorsOrThrow(true, ERROR_INVALID_PARAMETER);
-			return 0;
-		}
-		if (aOperateOnFolders == FILE_LOOP_INVALID) // In case runtime dereference of a var was an invalid value.
-			aOperateOnFolders = FILE_LOOP_FILES_ONLY;  // Set default.
-		g->LastError = 0; // Set default. Overridden only when a failure occurs.
-	}
+	if (!*aFilePattern)
+		// Caller should handle this case before calling us if an exception is to be thrown.
+		return SetErrorsOrThrow(true, ERROR_INVALID_PARAMETER);
 
-	if (_tcslen(aFilePattern) >= MAX_PATH) // Checked early to simplify other things below.
-	{
-		SetErrorsOrThrow(true, ERROR_BUFFER_OVERFLOW);
-		return 0;
-	}
+	if (aOperateOnFolders == FILE_LOOP_INVALID) // In case runtime dereference of a var was an invalid value.
+		aOperateOnFolders = FILE_LOOP_FILES_ONLY;  // Set default.
+	g->LastError = 0; // Set default. Overridden only when a failure occurs.
 
-	// Testing shows that the ANSI version of FindFirstFile() will not accept a path+pattern longer
-	// than 256 or so, even if the pattern would match files whose names are short enough to be legal.
-	// Therefore, as of v1.0.25, there is also a hard limit of MAX_PATH on all these variables.
-	// MSDN confirms this in a vague way: "In the ANSI version of FindFirstFile(), [plpFileName] is
-	// limited to MAX_PATH characters."
-	TCHAR file_pattern[MAX_PATH], file_path[MAX_PATH]; // Giving +3 extra for "*.*" seems fairly pointless because any files that actually need that extra room would fail to be retrieved by FindFirst/Next due to their inability to support paths much over 256.
-	_tcscpy(file_pattern, aFilePattern); // Make a copy in case of overwrite of deref buf during LONG_OPERATION/MsgSleep.
-	_tcscpy(file_path, aFilePattern);    // An earlier check has ensured these won't overflow.
+	FilePatternStruct fps;
 
-	size_t file_path_length; // The length of just the path portion of the filespec.
-	LPTSTR last_backslash = _tcsrchr(file_path, '\\');
+	LPTSTR last_backslash = _tcsrchr(aFilePattern, '\\');
 	if (last_backslash)
-	{
-		// Remove the filename and/or wildcard part.   But leave the trailing backslash on it for
-		// consistency with below:
-		*(last_backslash + 1) = '\0';
-		file_path_length = _tcslen(file_path);
-	}
+		fps.dir_length = last_backslash - aFilePattern + 1; // Include the slash.
 	else // Use current working directory, e.g. if user specified only *.*
-	{
-		*file_path = '\0';
-		file_path_length = 0;
-	}
-	LPTSTR append_pos = file_path + file_path_length; // For performance, copy in the unchanging part only once.  This is where the changing part gets appended.
-	size_t space_remaining = _countof(file_path) - file_path_length - 1; // Space left in file_path for the changing part.
+		fps.dir_length = 0;
+	fps.pattern_length = _tcslen(aFilePattern + fps.dir_length);
+	
+	// Testing shows that the ANSI version of FindFirstFile() will not accept a path+pattern longer
+	// than 259, even if the pattern would match files whose names are short enough to be legal.
+	if (fps.dir_length + fps.pattern_length >= _countof(fps.path)
+		|| fps.pattern_length >= _countof(fps.pattern))
+		return SetErrorsOrThrow(true, ERROR_BUFFER_OVERFLOW);
 
-	// For use with aDoRecurse, get just the naked file name/pattern:
-	LPTSTR naked_filename_or_pattern = _tcsrchr(file_pattern, '\\');
-	if (naked_filename_or_pattern)
-		++naked_filename_or_pattern;
-	else
-		naked_filename_or_pattern = file_pattern;
+	// Make copies in case of overwrite of deref buf during LONG_OPERATION/MsgSleep,
+	// and to allow modification:
+	_tcscpy(fps.path, aFilePattern); // Include the pattern initially.
+	_tcscpy(fps.pattern, aFilePattern + fps.dir_length); // Just the naked filename or pattern, for use with aDoRecurse.
 
-	if (!StrChrAny(naked_filename_or_pattern, _T("?*")))
+	if (!StrChrAny(fps.pattern, _T("?*")))
 		// Since no wildcards, always operate on this single item even if it's a folder.
 		aOperateOnFolders = FILE_LOOP_FILES_AND_FOLDERS;
+
+	// Passing the parameters this way reduces code size:
+	fps.aCallback = aCallback;
+	fps.aCallbackData = aCallbackData;
+	fps.aDoRecurse = aDoRecurse;
+	fps.aOperateOnFolders = aOperateOnFolders;
+
+	fps.failure_count = 0;
+
+	FilePatternApply(fps);
+	return SetErrorLevelOrThrowInt(fps.failure_count); // i.e. indicate success if there were no failures.
+}
+
+
+
+void Line::FilePatternApply(FilePatternStruct &fps)
+{
+	size_t dir_length = fps.dir_length; // Length of this directory (saved before recursion).
+	LPTSTR append_pos = fps.path + dir_length; // This is where the changing part gets appended.
+	size_t space_remaining = _countof(fps.path) - dir_length - 1; // Space left in file_path for the changing part.
 
 	LONG_OPERATION_INIT
 	int failure_count = 0;
 	WIN32_FIND_DATA current_file;
-	HANDLE file_search = FindFirstFile(file_pattern, &current_file);
+	HANDLE file_search = FindFirstFile(fps.path, &current_file);
 
 #ifdef _WIN64
 	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
@@ -8637,11 +8733,11 @@ int Line::FilePatternApply(LPTSTR aFilePattern, FileLoopModeType aOperateOnFolde
 					|| current_file.cFileName[1] == '.' && !current_file.cFileName[2]) //
 					// Regardless of whether this folder will be recursed into, this folder
 					// will not be affected when the mode is files-only:
-					|| aOperateOnFolders == FILE_LOOP_FILES_ONLY)
+					|| fps.aOperateOnFolders == FILE_LOOP_FILES_ONLY)
 					continue; // Never operate upon or recurse into these.
 			}
 			else // It's a file, not a folder.
-				if (aOperateOnFolders == FILE_LOOP_FOLDERS_ONLY)
+				if (fps.aOperateOnFolders == FILE_LOOP_FOLDERS_ONLY)
 					continue;
 
 			if (_tcslen(current_file.cFileName) > space_remaining)
@@ -8656,7 +8752,7 @@ int Line::FilePatternApply(LPTSTR aFilePattern, FileLoopModeType aOperateOnFolde
 			_tcscpy(append_pos, current_file.cFileName); // Above has ensured this won't overflow.
 			//
 			// This is the part that actually does something to the file:
-			if (!aCallback(file_path, current_file, aCallbackData))
+			if (!fps.aCallback(fps.path, current_file, fps.aCallbackData))
 				++failure_count;
 			//
 		} while (FindNextFile(file_search, &current_file));
@@ -8664,29 +8760,23 @@ int Line::FilePatternApply(LPTSTR aFilePattern, FileLoopModeType aOperateOnFolde
 		FindClose(file_search);
 	} // if (file_search != INVALID_HANDLE_VALUE)
 
-	if (aDoRecurse && space_remaining > 2) // The space_remaining check ensures there's enough room to append "*.*" (if not, just avoid recursing into it due to rarity).
+	if (fps.aDoRecurse && space_remaining > 1) // The space_remaining check ensures there's enough room to append "*", though if false, that would imply lfs.pattern is empty.
 	{
-		// Testing shows that the ANSI version of FindFirstFile() will not accept a path+pattern longer
-		// than 256 or so, even if the pattern would match files whose names are short enough to be legal.
-		// Therefore, as of v1.0.25, there is also a hard limit of MAX_PATH on all these variables.
-		// MSDN confirms this in a vague way: "In the ANSI version of FindFirstFile(), [plpFileName] is
-		// limited to MAX_PATH characters."
-		_tcscpy(append_pos, _T("*.*")); // Above has ensured this won't overflow.
-		file_search = FindFirstFile(file_path, &current_file);
+		_tcscpy(append_pos, _T("*")); // Above has ensured this won't overflow.
+		file_search = FindFirstFile(fps.path, &current_file);
 
 		if (file_search != INVALID_HANDLE_VALUE)
 		{
-			size_t pattern_length = _tcslen(naked_filename_or_pattern);
 			do
 			{
 				LONG_OPERATION_UPDATE
 				if (!(current_file.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-					|| current_file.cFileName[0] == '.' && (!current_file.cFileName[1]     // Relies on short-circuit boolean order.
-						|| current_file.cFileName[1] == '.' && !current_file.cFileName[2]) //
-					// v1.0.45.03: Skip over folders whose full-path-names are too long to be supported by the ANSI
-					// versions of FindFirst/FindNext.  Without this fix, it might be possible for infinite recursion
-					// to occur (see PerformLoop() for more comments).
-					|| pattern_length + _tcslen(current_file.cFileName) >= space_remaining) // >= vs. > to reserve 1 for the backslash to be added between cFileName and naked_filename_or_pattern.
+					|| current_file.cFileName[0] == '.' && (!current_file.cFileName[1]      // Relies on short-circuit boolean order.
+						|| current_file.cFileName[1] == '.' && !current_file.cFileName[2])) //
+					continue;
+				size_t filename_length = _tcslen(current_file.cFileName);
+				// v1.0.45.03: Skip over folders whose paths are too long to be supported by FindFirst.
+				if (fps.pattern_length + filename_length >= space_remaining) // >= vs. > to reserve 1 for the backslash to be added between cFileName and naked_filename_or_pattern.
 					continue; // Never recurse into these.
 				// This will build the string CurrentDir+SubDir+FilePatternOrName.
 				// If FilePatternOrName doesn't contain a wildcard, the recursion
@@ -8695,19 +8785,18 @@ int Line::FilePatternApply(LPTSTR aFilePattern, FileLoopModeType aOperateOnFolde
 				// tree, e.g. recursing C:\Temp\temp.txt would affect all occurrences
 				// of temp.txt both in C:\Temp and any subdirectories it might contain:
 				_stprintf(append_pos, _T("%s\\%s") // Above has ensured this won't overflow.
-					, current_file.cFileName, naked_filename_or_pattern);
+					, current_file.cFileName, fps.pattern);
+				fps.dir_length = dir_length + filename_length + 1; // Include the slash.
 				//
 				// Apply the callback to files in this subdirectory:
-				failure_count += FilePatternApply(file_path, aOperateOnFolders, aDoRecurse, aCallback, aCallbackData, true);
+				FilePatternApply(fps);
 				//
 			} while (FindNextFile(file_search, &current_file));
 			FindClose(file_search);
 		} // if (file_search != INVALID_HANDLE_VALUE)
 	} // if (aDoRecurse)
 
-	if (!aCalledRecursively) // i.e. Only need to do this if we're returning to top-level caller:
-		SetErrorLevelOrThrowInt(failure_count); // i.e. indicate success if there were no failures.
-	return failure_count;
+	fps.failure_count += failure_count; // Update failure count (produces smaller code than doing ++fps.failure_count directly).
 }
 
 
@@ -8758,7 +8847,7 @@ struct FileSetTimeData
 };
 
 ResultType Line::FileSetTime(LPTSTR aYYYYMMDD, LPTSTR aFilePattern, TCHAR aWhichTime
-	, FileLoopModeType aOperateOnFolders, bool aDoRecurse, bool aCalledRecursively)
+	, FileLoopModeType aOperateOnFolders, bool aDoRecurse)
 // Returns the number of files and folders that could not be changed due to an error.
 {
 	// Related to the comment at the top: Since the script subroutine that resulted in the call to
@@ -8963,82 +9052,128 @@ HWND Line::DetermineTargetWindow(LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTit
 }
 
 
-ResultType GetObjectHwnd(IObject *aObject, HWND &aHwnd, ResultToken &aResultToken)
+ResultType GetObjectIntProperty(IObject *aObject, LPTSTR aPropName, __int64 &aValue, ResultToken &aResultToken, bool aOptional)
 {
 	FuncResult result_token;
-	ExprTokenType hwnd_token = _T("Hwnd");
 	ExprTokenType this_token = aObject;
-	ExprTokenType *param = &hwnd_token;
-			
-	auto result = aObject->Invoke(result_token, this_token, IT_GET, &param, 1);
+
+	auto result = aObject->Invoke(result_token, IT_GET, aPropName, this_token, nullptr, 0);
 
 	if (result_token.symbol != SYM_INTEGER)
 	{
 		result_token.Free();
-		if (result == FAIL)
-			return aResultToken.SetExitResult(FAIL);
-		if (result == INVOKE_NOT_HANDLED)
-			return aResultToken.Error(ERR_UNKNOWN_PROPERTY, _T("Hwnd"));
-		return aResultToken.Error(ERR_INVALID_HWND);
+		if (result == FAIL || result == EARLY_EXIT)
+			return aResultToken.SetExitResult(result);
+		if (result != INVOKE_NOT_HANDLED) // Property exists but is not an integer.
+		{
+			if (!TokenIsEmptyString(result_token))
+				return aResultToken.Error(ERR_TYPE_MISMATCH, aPropName);
+			result = INVOKE_NOT_HANDLED;
+		}
+		if (!aOptional)
+			return aResultToken.UnknownMemberError(ExprTokenType(aObject), IT_GET, aPropName);
+		aValue = 0;
+		return result; // Let caller know it wasn't found.
 	}
 
-	aHwnd = (HWND)(UINT_PTR)result_token.value_int64;
+	aValue = result_token.value_int64;
 	return OK;
 }
 
-
-HWND DetermineTargetWindow(ExprTokenType *aParam[], int aParamCount)
+ResultType SetObjectIntProperty(IObject *aObject, LPTSTR aPropName, __int64 aValue, ResultToken &aResultToken)
 {
-	TCHAR number_buf[4][MAX_NUMBER_SIZE];
-	LPTSTR param[4];
-	for (int i = 0; i < 4; i++)
-		param[i] = i < aParamCount ? TokenToString(*aParam[i], number_buf[i]) : _T("");
-	return Line::DetermineTargetWindow(param[0], param[1], param[2], param[3]);
+	FuncResult result_token;
+	ExprTokenType this_token = aObject, value_token = aValue, *param = &value_token;
+
+	auto result = aObject->Invoke(result_token, IT_SET, aPropName, this_token, &param, 1);
+
+	result_token.Free();
+	if (result == FAIL || result == EARLY_EXIT)
+		return aResultToken.SetExitResult(result);
+	if (result == INVOKE_NOT_HANDLED)
+		return aResultToken.UnknownMemberError(ExprTokenType(aObject), IT_GET, aPropName);
+	return OK;
+}
+
+ResultType GetObjectPtrProperty(IObject *aObject, LPTSTR aPropName, UINT_PTR &aPtr, ResultToken &aResultToken, bool aOptional)
+{
+	__int64 value;
+	auto result = GetObjectIntProperty(aObject, aPropName, value, aResultToken, aOptional);
+	aPtr = (UINT_PTR)value;
+	return result;
 }
 
 
-ResultType DetermineTargetControl(HWND &aControl, HWND &aWindow, ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount)
+ResultType DetermineTargetHwnd(HWND &aWindow, ResultToken &aResultToken, ExprTokenType &aToken)
 {
-	aWindow = aControl = NULL;
-
-	if (ParamIndexIsOmitted(0))
+	__int64 n;
+	if (IObject *obj = TokenToObject(aToken))
 	{
-		// Only functions which can operate on top-level windows allow Control to be
-		// omitted (and a select few other functions with more optional parameters).
-		// This replaces the old "ahk_parent" string used with ControlSend, but is
-		// also used by SendMessage.
-		aControl = aWindow = DetermineTargetWindow(aParam + 1, aParamCount - 1);
-		return OK;
-	}
-
-	HWND hwnd;
-	if (IObject *obj = ParamIndexToObject(0))
-	{
-		if (!GetObjectHwnd(obj, hwnd, aResultToken))
+		if (!GetObjectIntProperty(obj, _T("Hwnd"), n, aResultToken))
 			return FAIL;
 	}
-	else if (TokenIsPureNumeric(*aParam[0]) == PURE_INTEGER)
-	{
-		hwnd = (HWND)(UINT_PTR)ParamIndexToInt64(0);
-	}
+	else if (TokenIsPureNumeric(aToken) == PURE_INTEGER)
+		n = TokenToInt64(aToken);
 	else
+		return CONDITION_FALSE;
+	aWindow = (HWND)(UINT_PTR)n;
+	// Callers expect the return value to be either a valid HWND or 0:
+	if (!IsWindow(aWindow))
+		aWindow = 0;
+	return OK;
+}
+
+
+ResultType DetermineTargetWindow(HWND &aWindow, ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, int aNonWinParamCount)
+{
+	if (aParamCount > 0)
 	{
-		_f_param_string(control_spec, 0);
-		aWindow = DetermineTargetWindow(aParam + 1, aParamCount - 1);
-		aControl = ControlExist(aWindow, control_spec);
-		return OK;
+		auto result = DetermineTargetHwnd(aWindow, aResultToken, *aParam[0]);
+		if (result != CONDITION_FALSE)
+			return result;
 	}
-	// Set both aControl and aWindow, as if ahk_id was used.
-	if (IsWindow(hwnd))
-		aWindow = aControl = hwnd;
+	TCHAR number_buf[4][MAX_NUMBER_SIZE];
+	LPTSTR param[4];
+	for (int i = 0, j = 0; i < 4; ++i, ++j)
+	{
+		if (i == 2) j += aNonWinParamCount;
+		param[i] = j < aParamCount ? TokenToString(*aParam[j], number_buf[i]) : _T("");
+	}
+	aWindow = Line::DetermineTargetWindow(param[0], param[1], param[2], param[3]);
+	return OK;
+}
+
+
+ResultType DetermineTargetControl(HWND &aControl, HWND &aWindow, ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, int aNonWinParamCount)
+{
+	aWindow = aControl = nullptr;
+	// Only functions which can operate on top-level windows allow Control to be
+	// omitted (and a select few other functions with more optional parameters).
+	// This replaces the old "ahk_parent" string used with ControlSend, but is
+	// also used by SendMessage.
+	LPTSTR control_spec = nullptr;
+	if (!ParamIndexIsOmitted(0))
+	{
+		switch (DetermineTargetHwnd(aWindow, aResultToken, *aParam[0]))
+		{
+		case OK:
+			aControl = aWindow;
+			return OK;
+		case FAIL:
+			return FAIL;
+		}
+		// Since above didn't return, it wasn't a pure Integer or object {Hwnd}.
+		control_spec = ParamIndexToString(0, _f_number_buf);
+	}
+	if (!DetermineTargetWindow(aWindow, aResultToken, aParam + 1, aParamCount - 1, aNonWinParamCount))
+		return FAIL;
+	aControl = control_spec ? ControlExist(aWindow, control_spec) : aWindow;
 	return OK;
 }
 
 
 
-bool Line::FileIsFilteredOut(WIN32_FIND_DATA &aCurrentFile, FileLoopModeType aFileLoopMode
-	, LPTSTR aFilePath, size_t aFilePathLength)
-// Caller has ensured that aFilePath (if non-blank) has a trailing backslash.
+bool Line::FileIsFilteredOut(LoopFilesStruct &aCurrentFile, FileLoopModeType aFileLoopMode)
 {
 	if (aCurrentFile.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) // It's a folder.
 	{
@@ -9051,23 +9186,14 @@ bool Line::FileIsFilteredOut(WIN32_FIND_DATA &aCurrentFile, FileLoopModeType aFi
 		if (aFileLoopMode == FILE_LOOP_FOLDERS_ONLY)
 			return true; // Exclude this file by returning true.
 
-	// Since file was found, also prepend the file's path to its name for the caller:
-	if (*aFilePath)
-	{
-		// Seems best to check length in advance because it allows a faster move/copy method further below
-		// (in lieu of sntprintf(), which is probably quite a bit slower than the method here).
-		size_t name_length = _tcslen(aCurrentFile.cFileName);
-		if (aFilePathLength + name_length >= MAX_PATH)
-			// v1.0.45.03: Filter out filenames that would be truncated because it seems undesirable in 99% of
-			// cases to include such "faulty" data in the loop.  Most scripts would want to skip them rather than
-			// seeing the truncated names.  Furthermore, a truncated name might accidentally match the name
-			// of a legitimate non-truncated filename, which could cause such a name to get retrieved twice by
-			// the loop (or other undesirable side-effects).
-			return true;
-		//else no overflow is possible, so below can move things around inside the buffer without concern.
-		tmemmove(aCurrentFile.cFileName + aFilePathLength, aCurrentFile.cFileName, name_length + 1); // memmove() because source & dest might overlap.  +1 to include the terminator.
-		tmemcpy(aCurrentFile.cFileName, aFilePath, aFilePathLength); // Prepend in the area liberated by the above. Don't include the terminator since this is a concat operation.
-	}
+	// Since file was found, also append the file's name to its directory for the caller:
+	// Seems best to check length in advance because it allows a faster move/copy method further below
+	// (in lieu of sntprintf(), which is probably quite a bit slower than the method here).
+	size_t name_length = _tcslen(aCurrentFile.cFileName);
+	if (aCurrentFile.dir_length + name_length >= _countof(aCurrentFile.file_path)) // Should be impossible with current buffer sizes.
+		return true; // Exclude this file/folder.
+	tmemcpy(aCurrentFile.file_path + aCurrentFile.dir_length, aCurrentFile.cFileName, name_length + 1); // +1 to include the terminator.
+	aCurrentFile.file_path_length = aCurrentFile.dir_length + name_length;
 	return false; // Indicate that this file is not to be filtered out.
 }
 
@@ -9642,7 +9768,7 @@ VarSizeType BIV_LastError(LPTSTR aBuf, LPTSTR aVarName)
 {
 	TCHAR buf[MAX_INTEGER_SIZE];
 	LPTSTR target_buf = aBuf ? aBuf : buf;
-	_itot(g->LastError, target_buf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
+	_ultot(g->LastError, target_buf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
 	return (VarSizeType)_tcslen(target_buf);
 }
 
@@ -9750,7 +9876,7 @@ BIV_DECL_W(BIV_AllowMainWindow_Set)
 	// which is only sometimes compiled may execute it unconditionally.
 	// For code size, false values are ignored instead of throwing an exception.
 	//if (!ResultToBOOL(aBuf))
-	//	return g_script.ScriptError(ERR_INVALID_VALUE, aBuf);
+	//	return g_script->ScriptError(ERR_INVALID_VALUE, aBuf);
 	return OK;
 }
 
@@ -9868,7 +9994,9 @@ VarSizeType BIV_PriorKey(LPTSTR aBuf, LPTSTR aVarName)
 		// Get index for circular buffer
 		int i = (g_KeyHistoryNext + g_MaxHistoryKeys - iOffset) % g_MaxHistoryKeys;
 		// Keep looking until we hit the second valid event
-		if (g_KeyHistory[i].event_type != _T('i') && ++validEventCount > 1)
+		if (g_KeyHistory[i].event_type != _T('i') // Not an ignored event.
+			&& g_KeyHistory[i].event_type != _T('U') // Not a Unicode packet (SendInput/VK_PACKET).
+			&& ++validEventCount > 1)
 		{
 			// Find the next most recent key-down
 			if (!g_KeyHistory[i].key_up)
@@ -9892,8 +10020,7 @@ LPTSTR GetExitReasonString(ExitReasons aExitReason)
 	// Since the below are all relatively rare, except WM_CLOSE perhaps, they are all included
 	// as one word to cut down on the number of possible words (it's easier to write OnExit
 	// functions to cover all possibilities if there are fewer of them).
-	case EXIT_WM_QUIT:
-	case EXIT_CRITICAL:
+	// Update: The redundant ExitReasons were merged to reduce code size.
 	case EXIT_DESTROY:
 	case EXIT_CLOSE: str = _T("Close"); break;
 	case EXIT_ERROR: str = _T("Error"); break;
@@ -10020,16 +10147,6 @@ VarSizeType BIV_Now(LPTSTR aBuf, LPTSTR aVarName)
 	return (VarSizeType)_tcslen(aBuf);
 }
 
-#ifdef CONFIG_WIN9X
-VarSizeType BIV_OSType(LPTSTR aBuf, LPTSTR aVarName)
-{
-	LPTSTR type = g_os.IsWinNT() ? _T("WIN32_NT") : _T("WIN32_WINDOWS");
-	if (aBuf)
-		_tcscpy(aBuf, type);
-	return (VarSizeType)_tcslen(type); // Return length of type, not aBuf.
-}
-#endif
-
 VarSizeType BIV_OSVersion(LPTSTR aBuf, LPTSTR aVarName)
 {
 	if (aBuf)
@@ -10072,15 +10189,10 @@ VarSizeType BIV_WorkingDir(LPTSTR aBuf, LPTSTR aVarName)
 	// dialog can thus change the current directory as seen by the active quasi-thread even
 	// though g_WorkingDir hasn't been updated.  It might also be possible for the working
 	// directory to change in unusual circumstances such as a network drive being lost).
-	//
-	// Fix for v1.0.43.11: Changed size below from 9999 to MAX_PATH, otherwise it fails sometimes on Win9x.
-	// Testing shows that the failure is not caused by GetCurrentDirectory() writing to the unused part of the
-	// buffer, such as zeroing it (which is good because that would require this part to be redesigned to pass
-	// the actual buffer size or use a temp buffer).  So there's something else going on to explain why the
-	// problem only occurs in longer scripts on Win98se, not in trivial ones such as Var=%A_WorkingDir%.
-	// Nor did the problem affect expression assignments such as Var:=A_WorkingDir.
-	TCHAR buf[MAX_PATH];
-	VarSizeType length = GetCurrentDirectory(MAX_PATH, buf);
+	// Update: FileSelectFile changing the current directory might be OS-specific;
+	// I could not reproduce it on Windows 10.
+	TCHAR buf[T_MAX_PATH]; // T_MAX_PATH vs. MAX_PATH only has an effect with Windows 10 long path awareness.
+	DWORD length = GetCurrentDirectory(_countof(buf), buf);
 	if (aBuf)
 		_tcscpy(aBuf, buf); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string). This is true for ReadRegString()'s API call and may be true for other API calls like the one here.
 	return length;
@@ -10106,33 +10218,26 @@ VarSizeType BIV_InitialWorkingDir(LPTSTR aBuf, LPTSTR aVarName)
 
 VarSizeType BIV_WinDir(LPTSTR aBuf, LPTSTR aVarName)
 {
-	TCHAR buf[MAX_PATH];
-	VarSizeType length = GetWindowsDirectory(buf, MAX_PATH);
+	TCHAR buf[MAX_PATH]; // MSDN (2018): The uSize parameter "should be set to MAX_PATH."
+	VarSizeType length = GetWindowsDirectory(buf, _countof(buf));
 	if (aBuf)
 		_tcscpy(aBuf, buf); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string). This is true for ReadRegString()'s API call and may be true for other API calls like the one here.
 	return length;
-	// Formerly the following, but I don't think it's as reliable/future-proof given the 1.0.47 comment above:
-	//TCHAR buf_temp[1]; // Just a fake buffer to pass to some API functions in lieu of a NULL, to avoid any chance of misbehavior. Keep the size at 1 so that API functions will always fail to copy to buf.
-	//// Sizes/lengths/-1/return-values/etc. have been verified correct.
-	//return aBuf
-	//	? GetWindowsDirectory(aBuf, MAX_PATH) // MAX_PATH is kept in case it's needed on Win9x for reasons similar to those in GetEnvironmentVarWin9x().
-	//	: GetWindowsDirectory(buf_temp, 0);
-		// Above avoids subtracting 1 to be conservative and to reduce code size (due to the need to otherwise check for zero and avoid subtracting 1 in that case).
 }
 
 VarSizeType BIV_Temp(LPTSTR aBuf, LPTSTR aVarName)
 {
-	TCHAR buf[MAX_PATH];
-	VarSizeType length = GetTempPath(MAX_PATH, buf);
+	TCHAR buf[MAX_PATH+1]; // MSDN (2018): "The maximum possible return value is MAX_PATH+1 (261)."
+	VarSizeType length = GetTempPath(_countof(buf), buf);
 	if (aBuf)
 	{
 		_tcscpy(aBuf, buf); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string). This is true for ReadRegString()'s API call and may be true for other API calls like the one here.
 		if (length)
 		{
 			aBuf += length - 1;
-			if (*aBuf == '\\') // For some reason, it typically yields a trailing backslash, so omit it to improve friendliness/consistency.
+			if (*aBuf == '\\') // Should always be true. MSDN: "The returned string ends with a backslash"
 			{
-				*aBuf = '\0';
+				*aBuf = '\0'; // Omit the trailing backslash to improve friendliness/consistency.
 				--length;
 			}
 		}
@@ -10144,13 +10249,17 @@ VarSizeType BIV_ComSpec(LPTSTR aBuf, LPTSTR aVarName)
 {
 	TCHAR buf_temp[1]; // Just a fake buffer to pass to some API functions in lieu of a NULL, to avoid any chance of misbehavior. Keep the size at 1 so that API functions will always fail to copy to buf.
 	// Sizes/lengths/-1/return-values/etc. have been verified correct.
-	return aBuf ? GetEnvVarReliable(_T("comspec"), aBuf) // v1.0.46.08: GetEnvVarReliable() fixes %Comspec% on Windows 9x.
-		: GetEnvironmentVariable(_T("comspec"), buf_temp, 0); // Avoids subtracting 1 to be conservative and to reduce code size (due to the need to otherwise check for zero and avoid subtracting 1 in that case).
+	return aBuf ? GetEnvVarReliable(_T("ComSpec"), aBuf) // v1.0.46.08: Use GetEnvVarReliable() to avoid passing an inaccurate buffer size to GetEnvironmentVariable().
+		: GetEnvironmentVariable(_T("ComSpec"), buf_temp, 0); // Avoids subtracting 1 to be conservative and to reduce code size (due to the need to otherwise check for zero and avoid subtracting 1 in that case).
 }
 
 VarSizeType BIV_SpecialFolderPath(LPTSTR aBuf, LPTSTR aVarName)
 {
 	TCHAR buf[MAX_PATH]; // One caller relies on this being explicitly limited to MAX_PATH.
+	// SHGetFolderPath requires a buffer size of MAX_PATH, but the function was superseded
+	// by SHGetKnownFolderPath in Windows Vista, and that function returns COM-allocated
+	// memory of unknown length.  However, it seems the shell still does not support long
+	// paths as of 2018.
 	int aFolder;
 	switch (ctoupper(aVarName[2]))
 	{
@@ -10186,7 +10295,7 @@ VarSizeType BIV_SpecialFolderPath(LPTSTR aBuf, LPTSTR aVarName)
 
 VarSizeType BIV_MyDocuments(LPTSTR aBuf, LPTSTR aVarName) // Called by multiple callers.
 {
-	TCHAR buf[MAX_PATH];
+	TCHAR buf[MAX_PATH]; // SHGetFolderPath requires a buffer size of MAX_PATH.  At least one caller relies on this.
 	if (SHGetFolderPath(NULL, CSIDL_MYDOCUMENTS, NULL, SHGFP_TYPE_CURRENT, buf) != S_OK)
 		*buf = '\0';
 	// Since it is common (such as in networked environments) to have My Documents on the root of a drive
@@ -10254,31 +10363,10 @@ VarSizeType BIV_Cursor(LPTSTR aBuf, LPTSTR aVarName)
 	if (!aBuf)
 		return SMALL_STRING_LENGTH;  // We're returning the length of the var's contents, not the size.
 
-	// Must fetch it at runtime, otherwise the program can't even be launched on Windows 95:
-	typedef BOOL (WINAPI *MyGetCursorInfoType)(PCURSORINFO);
-	static MyGetCursorInfoType MyGetCursorInfo = (MyGetCursorInfoType)GetProcAddress(GetModuleHandle(_T("user32")), "GetCursorInfo");
-
 	HCURSOR current_cursor;
-	if (MyGetCursorInfo) // v1.0.42.02: This method is used to avoid ATTACH_THREAD_INPUT, which interferes with double-clicking if called repeatedly at a high frequency.
-	{
-		CURSORINFO ci;
-		ci.cbSize = sizeof(CURSORINFO);
-		current_cursor = MyGetCursorInfo(&ci) ? ci.hCursor : NULL;
-	}
-	else // Windows 95 and old-service-pack versions of NT4 require the old method.
-	{
-		POINT point;
-		GetCursorPos(&point);
-		HWND target_window = WindowFromPoint(point);
-
-		// MSDN docs imply that threads must be attached for GetCursor() to work.
-		// A side-effect of attaching threads or of GetCursor() itself is that mouse double-clicks
-		// are interfered with, at least if this function is called repeatedly at a high frequency.
-		ATTACH_THREAD_INPUT
-		current_cursor = GetCursor();
-		DETACH_THREAD_INPUT
-	}
-
+	CURSORINFO ci;
+	ci.cbSize = sizeof(CURSORINFO);
+	current_cursor = GetCursorInfo(&ci) ? ci.hCursor : NULL;
 	if (!current_cursor)
 	{
 		#define CURSOR_UNKNOWN _T("Unknown")
@@ -10389,53 +10477,30 @@ VarSizeType BIV_LineFile(LPTSTR aBuf, LPTSTR aVarName)
 }
 
 
-
 VarSizeType BIV_LoopFileName(LPTSTR aBuf, LPTSTR aVarName) // Called by multiple callers.
 {
-	LPTSTR naked_filename;
+	LPCTSTR filename = _T("");  // Set default.
 	if (g->mLoopFile)
 	{
-		// The loop handler already prepended the script's directory in here for us:
-		if (naked_filename = _tcsrchr(g->mLoopFile->cFileName, '\\'))
-			++naked_filename;
-		else // No backslash, so just make it the entire file name.
-			naked_filename = g->mLoopFile->cFileName;
-	}
-	else
-		naked_filename = _T("");
-	if (aBuf)
-		_tcscpy(aBuf, naked_filename);
-	return (VarSizeType)_tcslen(naked_filename);
-}
-
-VarSizeType BIV_LoopFileShortName(LPTSTR aBuf, LPTSTR aVarName)
-{
-	LPTSTR short_filename = _T("");  // Set default.
-	if (g->mLoopFile)
-	{
-		if (   !*(short_filename = g->mLoopFile->cAlternateFileName)   )
-			// Files whose long name is shorter than the 8.3 usually don't have value stored here,
-			// so use the long name whenever a short name is unavailable for any reason (could
-			// also happen if NTFS has short-name generation disabled?)
-			return BIV_LoopFileName(aBuf, _T(""));
+		// cAlternateFileName can be blank if the file lacks a short name, but it can also be blank
+		// if the file's proper name complies with all 8.3 requirements (not just length), so use
+		// cFileName whenever cAlternateFileName is empty.  GetShortPathName() also behaves this way.
+		if (   ctoupper(aVarName[10]) != 'S' // It's not A_LoopFileShortName or ...
+			|| !*(filename = g->mLoopFile->cAlternateFileName)   ) // ... there's no alternate name (see above).
+			filename = g->mLoopFile->cFileName;
 	}
 	if (aBuf)
-		_tcscpy(aBuf, short_filename);
-	return (VarSizeType)_tcslen(short_filename);
+		_tcscpy(aBuf, filename);
+	return (VarSizeType)_tcslen(filename);
 }
 
 VarSizeType BIV_LoopFileExt(LPTSTR aBuf, LPTSTR aVarName)
 {
-	LPTSTR file_ext = _T("");  // Set default.
+	LPCTSTR file_ext = _T("");  // Set default.
 	if (g->mLoopFile)
 	{
-		// The loop handler already prepended the script's directory in here for us:
 		if (file_ext = _tcsrchr(g->mLoopFile->cFileName, '.'))
-		{
 			++file_ext;
-			if (_tcschr(file_ext, '\\')) // v1.0.48.01: Disqualify periods found in the path instead of the filename; e.g. path.name\FileWithNoExtension.
-				file_ext = _T("");
-		}
 		else // Reset to empty string vs. NULL.
 			file_ext = _T("");
 	}
@@ -10446,74 +10511,104 @@ VarSizeType BIV_LoopFileExt(LPTSTR aBuf, LPTSTR aVarName)
 
 VarSizeType BIV_LoopFileDir(LPTSTR aBuf, LPTSTR aVarName)
 {
-	LPTSTR file_dir = _T("");  // Set default.
-	LPTSTR last_backslash = NULL;
-	if (g->mLoopFile)
+	if (!g->mLoopFile)
 	{
-		// The loop handler already prepended the script's directory in here for us.
-		// But if the loop had a relative path in its FilePattern, there might be
-		// only a relative directory here, or no directory at all if the current
-		// file is in the origin/root dir of the search:
-		if (last_backslash = _tcsrchr(g->mLoopFile->cFileName, '\\'))
-		{
-			*last_backslash = '\0'; // Temporarily terminate.
-			file_dir = g->mLoopFile->cFileName;
-		}
-		else // No backslash, so there is no directory in this case.
-			file_dir = _T("");
+		if (aBuf)
+			*aBuf = '\0';
+		return 0;
 	}
-	VarSizeType length = (VarSizeType)_tcslen(file_dir);
-	if (!aBuf)
+	LoopFilesStruct &lfs = *g->mLoopFile;
+	LPTSTR dir_end = lfs.file_path + lfs.dir_length; // Start of the filename.
+	size_t suffix_length = dir_end - lfs.file_path_suffix; // Directory names\ added since the loop started.
+	size_t total_length = lfs.orig_dir_length + suffix_length;
+	if (total_length)
+		--total_length; // Omit the trailing slash.
+	if (aBuf)
 	{
-		if (last_backslash)
-			*last_backslash = '\\';  // Restore the original value.
-		return length;
+		tmemcpy(aBuf, lfs.orig_dir, lfs.orig_dir_length);
+		tmemcpy(aBuf + lfs.orig_dir_length, lfs.file_path_suffix, suffix_length);
+		aBuf[total_length] = '\0'; // This replaces the final character copied above, if any.
 	}
-	_tcscpy(aBuf, file_dir);
-	if (last_backslash)
-		*last_backslash = '\\';  // Restore the original value.
-	return length;
+	return total_length;
+}
+
+VarSizeType FixLoopFilePath(LPTSTR aBuf, LPTSTR aPattern)
+// Fixes aBuf to account for "." and ".." as file patterns.  These match the directory itself
+// or parent directory, so for example "x\y\.." returns a directory named "x" which appears to
+// be inside "y".  Without the handling here, the invalid path "x\y\x" would be returned.
+// A small amount of temporary buffer space might be wasted compared to handling this in the BIV,
+// but this way minimizes code size (and these cases are rare anyway).
+{
+	int count = 0;
+	if (*aPattern == '.')
+	{
+		if (!aPattern[1])
+			count = 1; // aBuf "x\y\y" should be "x\y" for "x\y\.".
+		else if (aPattern[1] == '.' && !aPattern[2])
+			count = 2; // aBuf "x\y\x" should be "x" for "x\y\..".
+	}
+	for ( ; count > 0; --count)
+	{
+		LPTSTR end = _tcsrchr(aBuf, '\\');
+		if (end)
+			*end = '\0';
+		else if (*aBuf && aBuf[1] == ':') // aBuf "C:x" should be "C:" for "C:" or "C:.".
+			aBuf[2] = '\0';
+	}
+	return _tcslen(aBuf);
 }
 
 VarSizeType BIV_LoopFilePath(LPTSTR aBuf, LPTSTR aVarName)
 {
-	// The loop handler already prepended the script's directory in cFileName for us:
-	LPTSTR full_path = g->mLoopFile ? g->mLoopFile->cFileName : _T("");
+	if (!g->mLoopFile)
+	{
+		if (aBuf)
+			*aBuf = '\0';
+		return 0;
+	}
+	LoopFilesStruct &lfs = *g->mLoopFile;
+	// Combine the original directory specified by the script with the dynamic part of file_path
+	// (i.e. the sub-directory and file names appended to it since the loop started):
+	size_t suffix_length = lfs.file_path_length - (lfs.file_path_suffix - lfs.file_path);
 	if (aBuf)
-		_tcscpy(aBuf, full_path);
-	return (VarSizeType)_tcslen(full_path);
+	{
+		tmemcpy(aBuf, lfs.orig_dir, lfs.orig_dir_length);
+		tmemcpy(aBuf + lfs.orig_dir_length, lfs.file_path_suffix, suffix_length + 1); // +1 for \0.
+		return FixLoopFilePath(aBuf, lfs.pattern);
+	}
+	return lfs.orig_dir_length + suffix_length;
 }
 
 VarSizeType BIV_LoopFileFullPath(LPTSTR aBuf, LPTSTR aVarName)
 {
-	TCHAR *unused, buf[MAX_PATH];
-	*buf = '\0'; // Set default.
-	if (g->mLoopFile)
+	if (!g->mLoopFile)
 	{
-		// GetFullPathName() is done in addition to ConvertFilespecToCorrectCase() for the following reasons:
-		// 1) It's currently the only easy way to get the full path of the directory in which a file resides.
-		//    For example, if a script is passed a filename via command line parameter, that file could be
-		//    either an absolute path or a relative path.  If relative, of course it's relative to A_WorkingDir.
-		//    The problem is, the script would have to manually detect this, which would probably take several
-		//    extra steps.
-		// 2) A_LoopFileLongPath is mostly intended for the following cases, and in all of them it seems
-		//    preferable to have the full/absolute path rather than the relative path:
-		//    a) Files dragged onto a .ahk script when the drag-and-drop option has been enabled via the Installer.
-		//    b) Files passed into the script via command line.
-		// The below also serves to make a copy because changing the original would yield
-		// unexpected/inconsistent results in a script that retrieves the A_LoopFileFullPath
-		// but only conditionally retrieves A_LoopFileLongPath.
-		if (!GetFullPathName(g->mLoopFile->cFileName, MAX_PATH, buf, &unused))
-			*buf = '\0'; // It might fail if NtfsDisable8dot3NameCreation is turned on in the registry, and possibly for other reasons.
-		else
-			// The below is called in case the loop is being used to convert filename specs that were passed
-			// in from the command line, which thus might not be the proper case (at least in the path
-			// portion of the filespec), as shown in the file system:
-			ConvertFilespecToCorrectCase(buf);
+		if (aBuf)
+			*aBuf = '\0';
+		return 0;
 	}
+	// GetFullPathName() is done in addition to ConvertFilespecToCorrectCase() for the following reasons:
+	// 1) It's currently the only easy way to get the full path of the directory in which a file resides.
+	//    For example, if a script is passed a filename via command line parameter, that file could be
+	//    either an absolute path or a relative path.  If relative, of course it's relative to A_WorkingDir.
+	//    The problem is, the script would have to manually detect this, which would probably take several
+	//    extra steps.
+	// 2) A_LoopFileLongPath is mostly intended for the following cases, and in all of them it seems
+	//    preferable to have the full/absolute path rather than the relative path:
+	//    a) Files dragged onto a .ahk script when the drag-and-drop option has been enabled via the Installer.
+	//    b) Files passed into the script via command line.
+	// Currently both are done by PerformLoopFilePattern(), for performance and in case the working
+	// directory changes after the Loop begins.
+	LoopFilesStruct &lfs = *g->mLoopFile;
+	// Combine long_dir with the dynamic part of file_path:
+	size_t suffix_length = lfs.file_path_length - (lfs.file_path_suffix - lfs.file_path);
 	if (aBuf)
-		_tcscpy(aBuf, buf); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string). This is true for ReadRegString()'s API call and may be true for other API calls like the one here.
-	return (VarSizeType)_tcslen(buf); // Must explicitly calculate the length rather than using the return value from GetFullPathName(), because ConvertFilespecToCorrectCase() expands 8.3 path components.
+	{
+		tmemcpy(aBuf, lfs.long_dir, lfs.long_dir_length);
+		tmemcpy(aBuf + lfs.long_dir_length, lfs.file_path_suffix, suffix_length + 1); // +1 for \0.
+		return FixLoopFilePath(aBuf, lfs.pattern);
+	}
+	return lfs.long_dir_length + suffix_length;
 }
 
 VarSizeType BIV_LoopFileShortPath(LPTSTR aBuf, LPTSTR aVarName)
@@ -10525,16 +10620,25 @@ VarSizeType BIV_LoopFileShortPath(LPTSTR aBuf, LPTSTR aVarName)
 // But to detect if that short name is really a long name, A_LoopFileShortPath could be checked
 // and if it's blank, there is no short name available.
 {
-	TCHAR buf[MAX_PATH];
-	*buf = '\0'; // Set default.
-	DWORD length = 0;        //
-	if (g->mLoopFile)
-		// The loop handler already prepended the script's directory in cFileName for us:
-		if (   !(length = GetShortPathName(g->mLoopFile->cFileName, buf, MAX_PATH))   )
-			*buf = '\0'; // It might fail if NtfsDisable8dot3NameCreation is turned on in the registry, and possibly for other reasons.
+	if (!g->mLoopFile)
+	{
+		if (aBuf)
+			*aBuf = '\0';
+		return 0;
+	}
+	LoopFilesStruct &lfs = *g->mLoopFile;
+	// MSDN says cAlternateFileName is empty if the file does not have a long name.
+	// Testing and research shows that GetShortPathName() uses the long name for a directory
+	// or file if no short name exists, so there's no check for the filename's length here.
+	LPTSTR name = *lfs.cAlternateFileName ? lfs.cAlternateFileName : lfs.cFileName;
+	size_t name_length = _tcslen(name);
 	if (aBuf)
-		_tcscpy(aBuf, buf); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string). This is true for ReadRegString()'s API call and may be true for other API calls like the one here.
-	return (VarSizeType)length;
+	{
+		tmemcpy(aBuf, lfs.short_path, lfs.short_path_length);
+		tmemcpy(aBuf + lfs.short_path_length, name, name_length + 1); // +1 for \0.
+		return FixLoopFilePath(aBuf, lfs.pattern);
+	}
+	return lfs.short_path_length + name_length;
 }
 
 VarSizeType BIV_LoopFileTime(LPTSTR aBuf, LPTSTR aVarName)
@@ -10625,9 +10729,8 @@ VarSizeType BIV_LoopRegTimeModified(LPTSTR aBuf, LPTSTR aVarName)
 	TCHAR buf[64];
 	LPTSTR target_buf = aBuf ? aBuf : buf;
 	*target_buf = '\0'; // Set default.
-	// Only subkeys (not values) have a time.  In addition, Win9x doesn't support retrieval
-	// of the time (nor does it store it), so make the var blank in that case:
-	if (g->mLoopRegItem && g->mLoopRegItem->type == REG_SUBKEY && !g_os.IsWin9x())
+	// Only subkeys (not values) have a time.
+	if (g->mLoopRegItem && g->mLoopRegItem->type == REG_SUBKEY)
 		FileTimeToYYYYMMDD(target_buf, g->mLoopRegItem->ftLastWriteTime, true);
 	return (VarSizeType)_tcslen(target_buf);
 }
@@ -10665,7 +10768,7 @@ BIV_DECL_W(BIV_LoopIndex_Set)
 
 VarSizeType BIV_ThisFunc(LPTSTR aBuf, LPTSTR aVarName)
 {
-	LPTSTR name;
+	LPCTSTR name;
 	if (g->CurrentFunc)
 		name = g->CurrentFunc->mName;
 	else if (g->CurrentFuncGosub) // v1.0.48.02: For flexibility and backward compatibility, support A_ThisFunc even when a function Gosubs an external subroutine.
@@ -10779,31 +10882,12 @@ VarSizeType BIV_TimeIdle(LPTSTR aBuf, LPTSTR aVarName) // Called by multiple cal
 {
 	if (!aBuf) // IMPORTANT: Conservative estimate because tick might change between 1st & 2nd calls.
 		return MAX_INTEGER_LENGTH;
-#ifdef CONFIG_WIN9X
-	*aBuf = '\0';  // Set default.
-	if (g_os.IsWin2000orLater()) // Checked in case the function is present in the OS but "not implemented".
-	{
-		// Must fetch it at runtime, otherwise the program can't even be launched on Win9x/NT:
-		typedef BOOL (WINAPI *MyGetLastInputInfoType)(PLASTINPUTINFO);
-		static MyGetLastInputInfoType MyGetLastInputInfo = (MyGetLastInputInfoType)
-			GetProcAddress(GetModuleHandle(_T("user32")), "GetLastInputInfo");
-		if (MyGetLastInputInfo)
-		{
-			LASTINPUTINFO lii;
-			lii.cbSize = sizeof(lii);
-			if (MyGetLastInputInfo(&lii))
-				ITOA64(GetTickCount() - lii.dwTime, aBuf);
-		}
-	}
-#else
-	// Not Win9x: Calling it directly should (in theory) produce smaller code size.
 	LASTINPUTINFO lii;
 	lii.cbSize = sizeof(lii);
 	if (GetLastInputInfo(&lii))
 		ITOA64(GetTickCount() - lii.dwTime, aBuf);
 	else
 		*aBuf = '\0';
-#endif
 	return (VarSizeType)_tcslen(aBuf);
 }
 
@@ -10837,7 +10921,7 @@ VarSizeType BIV_TimeIdlePhysical(LPTSTR aBuf, LPTSTR aVarName)
 #ifdef ENABLE_DLLCALL
 
 // DynaCall Object
-class DynaToken : public ObjectBase
+class DynaToken : public Object
 {
 protected:
 	int marg_count;
@@ -10864,8 +10948,9 @@ protected:
 
 public:
 	static DynaToken *Create(ExprTokenType *aParam[], int aParamCount);
-	ResultType STDMETHODCALLTYPE Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	IObject_Type_Impl("DynaCall")
+	ResultType Invoke(IObject_Invoke_PARAMS_DECL);
+	bool is_hresult; // Only used for the return value.
+	IObject_Type_Impl("DynaCall");
 };
 
 #ifdef _WIN64
@@ -11129,85 +11214,65 @@ DYNARESULT DynaCall(void *aFunction, DYNAPARM aParam[], int aParamCount, DWORD &
 
 
 
-void ConvertDllArgType(LPTSTR aBuf[], DYNAPARM &aDynaParam)
+void ConvertDllArgType(LPTSTR aBuf, DYNAPARM &aDynaParam)
 // Helper function for DllCall().  Updates aDynaParam's type and other attributes.
-// Caller has ensured that aBuf contains exactly two strings (though the second can be NULL).
 {
-	LPTSTR type_string;
+	LPTSTR type_string = aBuf;
 	TCHAR buf[32];
-	int i;
-
-	// Up to two iterations are done to cover the following cases:
-	// No second type because there was no SYM_VAR to get it from:
-	//	blank means int
-	//	invalid is err
-	// (for the below, note that 2nd can't be blank because var name can't be blank, and the first case above would have caught it if 2nd is NULL)
-	// 1Blank, 2Invalid: blank (but ensure is_unsigned and passed_by_address get reset)
-	// 1Blank, 2Valid: 2
-	// 1Valid, 2Invalid: 1 (second iteration would never have run, so no danger of it having erroneously reset is_unsigned/passed_by_address)
-	// 1Valid, 2Valid: 1 (same comment)
-	// 1Invalid, 2Invalid: invalid
-	// 1Invalid, 2Valid: 2
-
-	for (i = 0, type_string = aBuf[0]; i < 2 && type_string; type_string = aBuf[++i])
+	
+	if (ctoupper(*type_string) == 'U') // Unsigned
 	{
-		if (ctoupper(*type_string) == 'U') // Unsigned
+		aDynaParam.is_unsigned = true;
+		++type_string; // Omit the 'U' prefix from further consideration.
+	}
+	else
+		aDynaParam.is_unsigned = false;
+	
+	// Check for empty string before checking for pointer suffix, so that we can skip the first character.  This is needed to simplify "Ptr" type-name support.
+	if (!*type_string)
+	{
+		aDynaParam.type = DLL_ARG_INVALID; 
+		return; 
+	}
+
+	tcslcpy(buf, type_string, _countof(buf)); // Make a modifiable copy for easier parsing below.
+
+	// v1.0.30.02: The addition of 'P'.
+	// However, the current detection below relies upon the fact that none of the types currently
+	// contain the letter P anywhere in them, so it would have to be altered if that ever changes.
+	LPTSTR cp = StrChrAny(buf + 1, _T("*pP")); // Asterisk or the letter P.  Relies on the check above to ensure type_string is not empty (and buf + 1 is valid).
+	if (cp && !*omit_leading_whitespace(cp + 1)) // Additional validation: ensure nothing following the suffix.
+	{
+		aDynaParam.passed_by_address = true;
+		// Remove trailing options so that stricmp() can be used below.
+		// Allow optional space in front of asterisk (seems okay even for 'P').
+		if (IS_SPACE_OR_TAB(cp[-1]))
 		{
-			aDynaParam.is_unsigned = true;
-			++type_string; // Omit the 'U' prefix from further consideration.
+			cp = omit_trailing_whitespace(buf, cp - 1);
+			cp[1] = '\0'; // Terminate at the leftmost whitespace to remove all whitespace and the suffix.
 		}
 		else
-			aDynaParam.is_unsigned = false;
-		
-		// Check for empty string before checking for pointer suffix, so that we can skip the first character.  This is needed to simplify "Ptr" type-name support.
-		if (!*type_string)
-		{
-			// The following also serves to set the default in case this is the first iteration.
-			// Set default but perform second iteration in case the second type string isn't NULL.
-			// In other words, if the second type string is explicitly valid rather than blank,
-			// it should override the following default:
-			aDynaParam.type = DLL_ARG_INVALID;  // To assist with detection of errors like DllCall(...,flaot,n), treat empty string as an error; naked "CDecl" is now handled elsewhere.  OBSOLETE COMMENT: Assume int.  This is relied upon at least for having a return type such as a naked "CDecl".
-			continue; // OK to do this regardless of whether this is the first or second iteration.
-		}
+			*cp = '\0'; // Terminate at the suffix to remove it.
+	}
+	else
+		aDynaParam.passed_by_address = false;
 
-		tcslcpy(buf, type_string, _countof(buf)); // Make a modifiable copy for easier parsing below.
-
-		// v1.0.30.02: The addition of 'P' allows the quotes to be omitted around a pointer type.
-		// However, the current detection below relies upon the fact that not of the types currently
-		// contain the letter P anywhere in them, so it would have to be altered if that ever changes.
-		LPTSTR cp = StrChrAny(buf + 1, _T("*pP")); // Asterisk or the letter P.  Relies on the check above to ensure type_string is not empty (and buf + 1 is valid).
-		if (cp && !*omit_leading_whitespace(cp + 1)) // Additional validation: ensure nothing following the suffix.
-		{
-			aDynaParam.passed_by_address = true;
-			// Remove trailing options so that stricmp() can be used below.
-			// Allow optional space in front of asterisk (seems okay even for 'P').
-			if (IS_SPACE_OR_TAB(cp[-1]))
-			{
-				cp = omit_trailing_whitespace(buf, cp - 1);
-				cp[1] = '\0'; // Terminate at the leftmost whitespace to remove all whitespace and the suffix.
-			}
-			else
-				*cp = '\0'; // Terminate at the suffix to remove it.
-		}
-		else
-			aDynaParam.passed_by_address = false;
-
-		if (false) {} // To simplify the macro below.  It should have no effect on the compiled code.
+	if (false) {} // To simplify the macro below.  It should have no effect on the compiled code.
 #define TEST_TYPE(t, n)  else if (!_tcsicmp(buf, _T(t)))  aDynaParam.type = (n);
-		TEST_TYPE("Int",	DLL_ARG_INT) // The few most common types are kept up top for performance.
-		TEST_TYPE("Str",	DLL_ARG_STR)
+	TEST_TYPE("Int",	DLL_ARG_INT) // The few most common types are kept up top for performance.
+	TEST_TYPE("Str",	DLL_ARG_STR)
 #ifdef _WIN64
-		TEST_TYPE("Ptr",	DLL_ARG_INT64) // Ptr vs IntPtr to simplify recognition of the pointer suffix, to avoid any possible confusion with IntP, and because it is easier to type.
+	TEST_TYPE("Ptr",	DLL_ARG_INT64) // Ptr vs IntPtr to simplify recognition of the pointer suffix, to avoid any possible confusion with IntP, and because it is easier to type.
 #else
-		TEST_TYPE("Ptr",	DLL_ARG_INT)
+	TEST_TYPE("Ptr",	DLL_ARG_INT)
 #endif
-		TEST_TYPE("Short",	DLL_ARG_SHORT)
-		TEST_TYPE("Char",	DLL_ARG_CHAR)
-		TEST_TYPE("Int64",	DLL_ARG_INT64)
-		TEST_TYPE("Float",	DLL_ARG_FLOAT)
-		TEST_TYPE("Double",	DLL_ARG_DOUBLE)
-		TEST_TYPE("AStr",	DLL_ARG_ASTR)
-		TEST_TYPE("WStr",	DLL_ARG_WSTR)
+	TEST_TYPE("Short",	DLL_ARG_SHORT)
+	TEST_TYPE("Char",	DLL_ARG_CHAR)
+	TEST_TYPE("Int64",	DLL_ARG_INT64)
+	TEST_TYPE("Float",	DLL_ARG_FLOAT)
+	TEST_TYPE("Double",	DLL_ARG_DOUBLE)
+	TEST_TYPE("AStr",	DLL_ARG_ASTR)
+	TEST_TYPE("WStr",	DLL_ARG_WSTR)
 		TEST_TYPE("I",	DLL_ARG_INT) // The few most common types are kept up top for performance.
 		TEST_TYPE("S",	DLL_ARG_STR)
 #ifdef _WIN64
@@ -11223,28 +11288,13 @@ void ConvertDllArgType(LPTSTR aBuf[], DYNAPARM &aDynaParam)
 		TEST_TYPE("A",	DLL_ARG_ASTR)
 		TEST_TYPE("W",	DLL_ARG_WSTR)
 #undef TEST_TYPE
-		else // It's non-blank but an unknown type.
-		{
-			if (i > 0) // Second iteration.
-			{
-				// Reset flags to go with any blank value (i.e. !*buf) we're falling back to from the first iteration
-				// (in case our iteration changed the flags based on bogus contents of the second type_string):
-				aDynaParam.passed_by_address = false;
-				aDynaParam.is_unsigned = false;
-				//aDynaParam.type: The first iteration already set it to DLL_ARG_INT or DLL_ARG_INVALID.
-			}
-			else // First iteration, so aDynaParam.type's value will be set by the second (however, the loop's own condition will skip the second iteration if the second type_string is NULL).
-			{
-				aDynaParam.type = DLL_ARG_INVALID; // Set in case of: 1) the second iteration is skipped by the loop's own condition (since the caller doesn't always initialize "type"); or 2) the second iteration can't find a valid type.
-				continue;
-			}
-		}
-		// Since above didn't "continue", the type is explicitly valid so "return" to ensure that
-		// the second iteration doesn't run (in case this is the first iteration):
+	else // It's non-blank but an unknown type.
+	{
+		aDynaParam.type = DLL_ARG_INVALID; 
 		return;
 	}
+	return; // Since above didn't "return", the type is explicitly valid
 }
-
 
 
 int ConvertDllArgTypes(LPTSTR aBuf, DYNAPARM *aDynaParam)
@@ -11314,17 +11364,6 @@ int ConvertDllArgTypes(LPTSTR aBuf, DYNAPARM *aDynaParam)
 	return arg_count;
 }
 
-bool IsDllArgTypeName(LPTSTR name)
-// Test whether given name is a valid DllCall arg type (used by Script::MaybeWarnLocalSameAsGlobal).
-{
-	LPTSTR names[] = { name, NULL };
-	DYNAPARM param;
-	// An alternate method using an array of strings and tcslicmp in a loop benchmarked
-	// slightly faster than this, but didn't seem worth the extra code size. This should
-	// be more maintainable and is guaranteed to be consistent with what DllCall accepts.
-	ConvertDllArgType(names, param);
-	return param.type != DLL_ARG_INVALID;
-}
 
 void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free) // L31: Contains code extracted from BIF_DllCall for reuse in ExpressionToPostfix.
 {
@@ -11526,13 +11565,7 @@ bool CriticalObject::Delete()
 }
 
 
-ResultType STDMETHODCALLTYPE CriticalObject::Invoke(
-                                            ResultToken &aResultToken,
-                                            ExprTokenType &aThisToken,
-                                            int aFlags,
-                                            ExprTokenType *aParam[],
-                                            int aParamCount
-                                            )
+ResultType CriticalObject::Invoke(IObject_Invoke_PARAMS_DECL)
  {
 	 // Avoid deadlocking the process so messages can still be processed
 	 while (!TryEnterCriticalSection(this->lpCriticalSection))
@@ -11545,7 +11578,7 @@ ResultType STDMETHODCALLTYPE CriticalObject::Invoke(
 		else
 			Sleep(0);
 	 // Invoke original object as if it was called
-	 ResultType r = this->object->Invoke(aResultToken, aThisToken, aFlags, aParam, aParamCount);
+	 ResultType r = this->object->Invoke(aResultToken, aFlags, aName, aThisToken, aParam, aParamCount);
 	 if (aResultToken.symbol == SYM_OBJECT && dynamic_cast<EnumBase *>(aResultToken.object))
 	 {	// Result is an enumerator object enwrap enumerator into critical object
 		// using same LPCRITICAL_SECTION and update aResultToken
@@ -11563,7 +11596,7 @@ BIF_DECL(BIF_DynaCall)
 	IObject *obj = TokenToObject(*aParam[0]);
 	if (obj)
 	{
-		obj->Invoke(aResultToken,*aParam[0],IT_SET,aParam+1,aParamCount-1);
+		obj->Invoke(aResultToken,IT_SET, TokenToString(*aParam[0]), *aParam[0], aParam+1,aParamCount-1);
 		return;
 	}
 	else if (aParamCount == 1 && IS_NUMERIC(aParam[0]->symbol)) // L33: POTENTIALLY UNSAFE - Cast IObject address to object reference.
@@ -11634,9 +11667,9 @@ DynaToken *DynaToken::Create(ExprTokenType *aParam[], int aParamCount)
 			{
 				oParam.SetValue(1);
 				if (aParam[1]->symbol == SYM_OBJECT)
-					aParam[1]->object->Invoke(result_token,*aParam[1],IT_GET,param,1);
+					aParam[1]->object->Invoke(result_token, IT_GET, 0, *aParam[1], param, 1);
 				else
-					aParam[1]->var->mObject->Invoke(result_token,*aParam[1],IT_GET,param,1);
+					aParam[1]->var->mObject->Invoke(result_token, IT_GET, 0, *aParam[1], param, 1);
 				if (IS_NUMERIC(result_token.symbol) || result_token.symbol == SYM_OBJECT)
 				{
 					g_script->ThrowRuntimeException(ERR_INVALID_ARG_TYPE, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
@@ -11932,9 +11965,9 @@ CStringW **pStr = (CStringW **)
 		if (aParamCount > 1 && (aParam[1]->symbol == SYM_OBJECT || (aParam[1]->symbol == SYM_VAR && aParam[1]->var->HasObject())))
 		{
 			// Find out the length of array containing the definition and shift info for parameters
-			IObject *paramobj = ((aParam[1]->symbol == SYM_OBJECT) ? aParam[1]->object : aParam[1]->var->mObject); 
-			oParam.SetValue(_T("Length"));
-			paramobj->Invoke(result_token,token,IT_CALL,param,1);
+			IObject *paramobj = ((aParam[1]->symbol == SYM_OBJECT) ? aParam[1]->object : aParam[1]->var->mObject);
+			token.SetValue(paramobj);
+			token.object->Invoke(result_token, IT_GET, _T("length"), token, nullptr, 0);
 			int aArrayLen = (int)result_token.value_int64;
 			oParam.symbol = PURE_INTEGER;
 			if (aArrayLen < 2)
@@ -11947,7 +11980,7 @@ CStringW **pStr = (CStringW **)
 				// Set shift info for parameters, -1 for definition in first item.
 				g_memset(obj->paramshift, -1, (obj->marg_count + 1) * sizeof(int));
 				oParam.value_int64 = 2;
-				paramobj->Invoke(result_token, *aParam[1], IT_GET, param, 1);
+				paramobj->Invoke(result_token, IT_GET, 0, *aParam[1], param, 1);
 				if (!IS_NUMERIC(result_token.symbol))
 				{
 					g_script->ThrowRuntimeException(ERR_INVALID_ARG_TYPE, _T("DynaCall")); // Stage 2 error: Invalid return type or arg type.
@@ -11957,7 +11990,7 @@ CStringW **pStr = (CStringW **)
 				for (i = 1; i < aArrayLen - 1; i++)
 				{
 					oParam.value_int64 = i + 2;
-					paramobj->Invoke(result_token, *aParam[1], IT_GET, param, 1);
+					paramobj->Invoke(result_token, IT_GET, 0, *aParam[1], param, 1);
 					obj->paramshift[i] = (int)result_token.value_int64 - 1;
 				}
 				for (;i <= obj->marg_count;i++)
@@ -12015,13 +12048,7 @@ DynaToken::~DynaToken()
 }
 
 
-ResultType STDMETHODCALLTYPE DynaToken::Invoke(
-                                            ResultToken &aResultToken,
-                                            ExprTokenType &aThisToken,
-                                            int aFlags,
-                                            ExprTokenType *aParam[],
-                                            int aParamCount
-                                            )
+ResultType DynaToken::Invoke(IObject_Invoke_PARAMS_DECL)
  {
 	// Set default result in case of early return; a blank value:
 	aResultToken.symbol = SYM_STRING;
@@ -12060,8 +12087,8 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 		{
 			if (aParam[0]->symbol == SYM_STRING && _tcscmp(aParam[0]->marker, _T("")))
 			{
-				LPTSTR return_type_string[2] = { 0 };
-				return_type_string[0] = aParam[0]->marker;
+				LPTSTR return_type_string = { 0 };
+				return_type_string = aParam[0]->marker;
 				ConvertDllArgType(return_type_string, return_attrib);
 				if (return_attrib.type == DLL_ARG_INVALID)
 					_o_throw(ERR_INVALID_RETURN_TYPE);
@@ -12274,7 +12301,7 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 		// Call ScriptErrror() so that the user knows *which* DllCall is at fault:
 		g->ExcptMode = EXCPTMODE_NONE; // Do not throw an exception.
 		g_script->ScriptError(_T("This DynaCall requires a prior VarSetCapacity. The program is now unstable and will exit."));
-		g_script->ExitApp(EXIT_CRITICAL); // Called this way, it will run the OnExit routine, which is debatable because it could cause more good than harm, but might avoid loss of data if the OnExit routine does something important.
+		g_script->ExitApp(EXIT_CLOSE); // Called this way, it will run the OnExit routine, which is debatable because it could cause more good than harm, but might avoid loss of data if the OnExit routine does something important.
 	}
 
 	// It seems best to have the above take precedence over "exception_occurred" below.
@@ -12496,10 +12523,10 @@ BIF_DECL(BIF_DllImport)
 // #DllImport will create a dummy function that will redirect the call here
 // All parameters are pre-defined in func-> structure and are used to call the Dll function via DllCall
 {
-	Func *func = aResultToken.func;
-	void *function = (void*)func->mDllImportFunction;
+	UserFunc *func = (UserFunc*)aResultToken.func;
+	void *function = func->mClass;
 	int arg_count = func->mParamCount;
-	DYNAPARM *dyna_param = (DYNAPARM*)func->mdyna_param;
+	DYNAPARM *dyna_param = (DYNAPARM*)func->mParam;
 	DYNAPARM *dyna_param_def = (DYNAPARM*)func->mLazyVar;
 	DYNAPARM *return_attrib = (DYNAPARM*)func->mVar;
 	CStringA **pStr = (CStringA **)_alloca(arg_count * sizeof(void*)); // _alloca vs malloc can make a significant difference to performance in some cases.
@@ -12713,7 +12740,7 @@ BIF_DECL(BIF_DllImport)
 		// Call ScriptErrror() so that the user knows *which* DllCall is at fault:
 		g->ExcptMode = EXCPTMODE_NONE; // Do not throw an exception.
 		g_script->ScriptError(_T("This DllCall requires a prior VarSetCapacity. The program is now unstable and will exit."));
-		g_script->ExitApp(EXIT_CRITICAL); // Called this way, it will run the OnExit function, which is debatable because it could cause more good than harm, but might avoid loss of data if the OnExit function does something important.
+		g_script->ExitApp(EXIT_CLOSE); // Called this way, it will run the OnExit function, which is debatable because it could cause more good than harm, but might avoid loss of data if the OnExit function does something important.
 	}
 
 	if (g->ThrownToken)
@@ -12937,14 +12964,29 @@ BIF_DECL(BIF_DllCall)
 // Author: Marcus Sonntag (Ultra)
 {
 	HMODULE hmodule_to_free = NULL; // Set default in case of early goto; mostly for maintainability.
-	void *function; // Will hold the address of the function to be called.
+	LPTSTR function_name = NULL;
+	void *function = NULL; // Will hold the address of the function to be called.
+	int vf_index = -1; // Set default: not ComCall.
 
-	// Check that the mandatory first parameter (DLL+Function) is valid.
-	// (load-time validation has ensured at least one parameter is present).
-	switch(aParam[0]->symbol)
+	if (_f_callee_id == FID_ComCall)
 	{
+		function = NULL;
+		vf_index = ParamIndexIsNumeric(0) ? (int)ParamIndexToInt64(0) : -1;
+		if (vf_index < 0) // But positive values aren't checked since there's no known upper bound.
+			_f_throw(ERR_PARAM1_INVALID);
+		// Cheat a bit to make the second arg both the source of the virtual function
+		// and the first parameter value (always an interface pointer):
+		ExprTokenType t_this_arg_type = _T("Ptr");
+		aParam[0] = &t_this_arg_type;
+	}
+	else
+	{
+		// Check that the mandatory first parameter (DLL+Function) is valid.
+		// (load-time validation has ensured at least one parameter is present).
+		switch (aParam[0]->symbol)
+		{
 		case SYM_STRING: // By far the most common, so it's listed first for performance. Also for performance, don't even consider the possibility that a quoted literal string like "33" is a function-address.
-			function = NULL; // Indicate that no function has been specified yet.
+			//function = NULL; // Already set: indicates that no function has been specified yet.
 			break;
 		case SYM_VAR:
 			// v1.0.46.08: Allow script to specify the address of a function, which might be useful for
@@ -12966,8 +13008,13 @@ BIF_DECL(BIF_DllCall)
 		case SYM_INTEGER:
 			function = (void *)aParam[0]->value_int64; // For simplicity and due to rarity, this doesn't check for zero or negative numbers.
 			break;
-		default: // SYM_FLOAT, SYM_OBJECT or not an operand.
+		default: // SYM_FLOAT, SYM_OBJECT, SYM_MISSING or (should be impossible) something else.
 			_f_throw(ERR_PARAM1_INVALID);
+		}
+		if (!function)
+			function_name = TokenToString(*aParam[0]);
+		++aParam; // Normalize aParam to simplify ComCall vs. DllCall.
+		--aParamCount;
 	}
 
 	// Determine the type of return value.
@@ -12975,61 +13022,53 @@ BIF_DECL(BIF_DllCall)
 #ifdef WIN32_PLATFORM
 	int dll_call_mode = DC_CALL_STD; // Set default.  Can be overridden to DC_CALL_CDECL and flags can be OR'd into it.
 #endif
-	if (aParamCount % 2) // Odd number of parameters indicates the return type has been omitted, so assume BOOL/INT.
+	if ( !(aParamCount % 2) ) // An even number of parameters indicates the return type has been omitted. aParamCount excludes DllCall's first parameter at this point.
+	{
 		return_attrib.type = DLL_ARG_INT;
+		if (vf_index >= 0) // Default to HRESULT for ComCall.
+			return_attrib.is_hresult = true;
+		// Otherwise, assume normal INT (also covers BOOL).
+	}
 	else
 	{
 		// Check validity of this arg's return type:
 		ExprTokenType &token = *aParam[aParamCount - 1];
-		LPTSTR return_type_string[2];
+		LPTSTR return_type_string;
 		switch (token.symbol)
 		{
-		case SYM_VAR: // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
-			return_type_string[0] = token.var->Contents(TRUE, TRUE);	
-			return_type_string[1] = token.var->mName; // v1.0.33.01: Improve convenience by falling back to the variable's name if the contents are not appropriate.
-			break;
-		case SYM_STRING:
-			return_type_string[0] = token.marker;
-			return_type_string[1] = NULL; // Added in 1.0.48.
-			break;
-		default:
-			return_type_string[0] = _T(""); // It will be detected as invalid below.
-			return_type_string[1] = NULL;
-			break;
+		case SYM_STRING:	return_type_string = token.marker; break;						// Kept first since assumed to be most common.
+		case SYM_VAR:		return_type_string = token.var->Contents(TRUE, TRUE); break;	// SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
+		default:			return_type_string = _T(""); break; // It will be detected as invalid below.
 		}
 
 		// 64-bit note: The calling convention detection code is preserved here for script compatibility.
 
-		if (!_tcsnicmp(return_type_string[0], _T("CDecl"), 5)) // Alternate calling convention.
+		if (!_tcsnicmp(return_type_string, _T("CDecl"), 5)) // Alternate calling convention.
 		{
 #ifdef WIN32_PLATFORM
 			dll_call_mode = DC_CALL_CDECL;
 #endif
-			return_type_string[0] = omit_leading_whitespace(return_type_string[0] + 5);
-			if (!*return_type_string[0])
+			return_type_string = omit_leading_whitespace(return_type_string + 5);
+			if (!*return_type_string)
 			{	// Take a shortcut since we know this empty string will be used as "Int":
 				return_attrib.type = DLL_ARG_INT;
 				goto has_valid_return_type;
 			}
 		}
-		// This next part is a little iffy because if a legitimate return type is contained in a variable
-		// that happens to be named Cdecl, Cdecl will be put into effect regardless of what's in the variable.
-		// But the convenience of being able to omit the quotes around Cdecl seems to outweigh the extreme
-		// rarity of such a thing happening.
-		else if (return_type_string[1] && !_tcsnicmp(return_type_string[1], _T("CDecl"), 5)) // Alternate calling convention.
+		if (!_tcsicmp(return_type_string, _T("HRESULT")))
 		{
-#ifdef WIN32_PLATFORM
-			dll_call_mode = DC_CALL_CDECL;
-#endif
-			return_type_string[1] += 5; // Support return type immediately following CDecl (this was previously supported _with_ quotes, though not documented).  OBSOLETE COMMENT: Must be NULL since return_type_string[1] is the variable's name, by definition, so it can't have any spaces in it, and thus no space delimited items after "Cdecl".
-			if (!*return_type_string[1])
-				// Pass default return type.  Don't take shortcut approach used above as return_type_string[0] should take precedence if valid.
-				return_type_string[1] = _T("Int");
+			return_attrib.type = DLL_ARG_INT;
+			return_attrib.is_hresult = true;
+			//return_attrib.is_unsigned = true; // Not relevant since an exception is thrown for any negative value.
 		}
-
-		ConvertDllArgType(return_type_string, return_attrib);
+		else
+			ConvertDllArgType(return_type_string, return_attrib);
 		if (return_attrib.type == DLL_ARG_INVALID)
+		{
+			if (token.symbol == SYM_VAR)
+				token.var->MaybeWarnUninitialized();
 			_f_throw(ERR_INVALID_RETURN_TYPE);
+		}
 has_valid_return_type:
 		--aParamCount;  // Remove the last parameter from further consideration.
 #ifdef WIN32_PLATFORM
@@ -13044,7 +13083,7 @@ has_valid_return_type:
 	}
 
 	// Using stack memory, create an array of dll args large enough to hold the actual number of args present.
-	int arg_count = aParamCount/2; // Might provide one extra due to first/last params, which is inconsequential.
+	int arg_count = aParamCount/2;
 	DYNAPARM *dyna_param = arg_count ? (DYNAPARM *)_alloca(arg_count * sizeof(DYNAPARM)) : NULL;
 	// Above: _alloca() has been checked for code-bloat and it doesn't appear to be an issue.
 	// Above: Fix for v1.0.36.07: According to MSDN, on failure, this implementation of _alloca() generates a
@@ -13053,7 +13092,7 @@ has_valid_return_type:
 	// does happen, it would probably mean the script or the program has a design flaw somewhere, such as
 	// infinite recursion).
 
-	LPTSTR arg_type_string[2];
+	LPTSTR arg_type_string;
 	int i = arg_count * sizeof(void *);
 	// for Unicode <-> ANSI charset conversion
 #ifdef UNICODE
@@ -13061,39 +13100,38 @@ has_valid_return_type:
 #else
 	CStringW **pStr = (CStringW **)
 #endif
-		_alloca(i); // _alloca vs malloc can make a significant difference to performance in some cases.
+	_alloca(i); // _alloca vs malloc can make a significant difference to performance in some cases.
 	g_memset(pStr, 0, i);
 
 	// Above has already ensured that after the first parameter, there are either zero additional parameters
 	// or an even number of them.  In other words, each arg type will have an arg value to go with it.
 	// It has also verified that the dyna_param array is large enough to hold all of the args.
-	for (arg_count = 0, i = 1; i < aParamCount; ++arg_count, i += 2)  // Same loop as used later below, so maintain them together.
+	for (arg_count = 0, i = 0; i < aParamCount; ++arg_count, i += 2)  // Same loop as used later below, so maintain them together.
 	{
-		switch (aParam[i]->symbol)
-		{
-		case SYM_VAR: // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
-			arg_type_string[0] = aParam[i]->var->Contents(TRUE, TRUE);
-			arg_type_string[1] = aParam[i]->var->mName;
-			// v1.0.33.01: arg_type_string[1] improves convenience by falling back to the variable's name
-			// if the contents are not appropriate.  In other words, both Int and "Int" are treated the same.
-			// It's done this way to allow the variable named "Int" to actually contain some other legitimate
-			// type-name such as "Str" (in case anyone ever happens to do that).
-			break;
-		case SYM_STRING:
-			arg_type_string[0] = aParam[i]->marker;
-			arg_type_string[1] = NULL; // Added in 1.0.48.
-			break;
-		default:
-			arg_type_string[0] = _T(""); // It will be detected as invalid below.
-			arg_type_string[1] = NULL;
-			break;
-		}
+		arg_type_string = TokenToString(*aParam[i]); // aBuf not needed since numbers and "" are equally invalid.
 
 		ExprTokenType &this_param = *aParam[i + 1];         // Resolved for performance and convenience.
 		DYNAPARM &this_dyna_param = dyna_param[arg_count];  //
 		SymbolType is_number;
 		// Store the each arg into a dyna_param struct, using its arg type to determine how.
 		ConvertDllArgType(arg_type_string, this_dyna_param);
+
+		if (this_dyna_param.type == DLL_ARG_INVALID)
+			_f_throw(ERR_INVALID_ARG_TYPE);
+
+		if (IObject *obj = TokenToObject(this_param))
+		{
+			// Support Buffer.Ptr, but only for "Ptr" type.  All other types are reserved for possible
+			// future use, which might be general like obj.ToValue(), or might be specific to DllCall
+			// or the particular type of this arg (Int, Float, etc.).
+			if (ctoupper(*arg_type_string) != 'P')
+				_f_throw(ERR_TYPE_MISMATCH);
+			GetBufferObjectPtr(aResultToken, obj, this_dyna_param.value_uintptr);
+			if (aResultToken.Exited())
+				return;
+			continue;
+		}
+
 		switch (this_dyna_param.type)
 		{
 		case DLL_ARG_STR:
@@ -13120,7 +13158,7 @@ has_valid_return_type:
 					// to be stack memory, which would be invalid memory upon return to the caller).
 					// The complexity of this doesn't seem worth the rarity of the need, so this will be
 					// documented in the help file.
-				_f_throw(ERR_INVALID_ARG_TYPE);
+				_f_throw(ERR_TYPE_MISMATCH);
 				}
 			}
 			else
@@ -13183,7 +13221,7 @@ has_valid_return_type:
 						this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
 				}
 				else
-					_f_throw(ERR_INVALID_ARG_TYPE);
+					_f_throw(ERR_TYPE_MISMATCH);
 			} 
 			else
 			{
@@ -13211,54 +13249,41 @@ has_valid_return_type:
 		case DLL_ARG_FLOAT:
 			// This currently doesn't validate that this_dyna_param.is_unsigned==false, since it seems
 			// too rare and mostly harmless to worry about something like "Ufloat" having been specified.
+			if (!TokenIsNumeric(this_param))
+				_f_throw(ERR_TYPE_MISMATCH);
 			this_dyna_param.value_double = TokenToDouble(this_param);
 			if (this_dyna_param.type == DLL_ARG_FLOAT)
 				this_dyna_param.value_float = (float)this_dyna_param.value_double;
 			break;
-
-		case DLL_ARG_INVALID:
-			if (aParam[i]->symbol == SYM_VAR)
-				aParam[i]->var->MaybeWarnUninitialized();
-			_f_throw(ERR_INVALID_ARG_TYPE);
 
 		default: // Namely:
 		//case DLL_ARG_INT:
 		//case DLL_ARG_SHORT:
 		//case DLL_ARG_CHAR:
 		//case DLL_ARG_INT64:
-			if (this_dyna_param.is_unsigned && this_dyna_param.type == DLL_ARG_INT64 && !IS_NUMERIC(this_param.symbol))
-				// The above and below also apply to BIF_NumPut(), so maintain them together.
-				// !IS_NUMERIC() is checked because such tokens are already signed values, so should be
-				// written out as signed so that whoever uses them can interpret negatives as large
-				// unsigned values.
-				// Support for unsigned values that are 32 bits wide or less is done via ATOI64() since
-				// it should be able to handle both signed and unsigned values.  However, unsigned 64-bit
-				// values probably require ATOU64(), which will prevent something like -1 from being seen
-				// as the largest unsigned 64-bit int; but more importantly there are some other issues
-				// with unsigned 64-bit numbers: The script internals use 64-bit signed values everywhere,
-				// so unsigned values can only be partially supported for incoming parameters, but probably
-				// not for outgoing parameters (values the function changed) or the return value.  Those
-				// should probably be written back out to the script as negatives so that other parts of
-				// the script, such as expressions, can see them as signed values.  In other words, if the
-				// script somehow gets a 64-bit unsigned value into a variable, and that value is larger
-				// that LLONG_MAX (i.e. too large for ATOI64 to handle), ATOU64() will be able to resolve
-				// it, but any output parameter should be written back out as a negative if it exceeds
-				// LLONG_MAX (return values can be written out as unsigned since the script can specify
-				// signed to avoid this, since they don't need the incoming detection for ATOU()).
-				this_dyna_param.value_int64 = (__int64)ATOU64(TokenToString(this_param)); // Cast should not prevent called function from seeing it as an undamaged unsigned number.
-			else
-				this_dyna_param.value_int64 = TokenToInt64(this_param);
-
-			// Values less than or equal to 32-bits wide always get copied into a single 32-bit value
-			// because they should be right justified within it for insertion onto the call stack.
-			if (this_dyna_param.type != DLL_ARG_INT64) // Shift the 32-bit value into the high-order DWORD of the 64-bit value for later use by DynaCall().
-				this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
+			if (!TokenIsNumeric(this_param))
+				_f_throw(ERR_TYPE_MISMATCH);
+			// Note that since v2.0-a083-97803aeb, TokenToInt64 supports conversion of large unsigned 64-bit
+			// numbers from strings (producing a negative value, but with the right bit representation).
+			// This allows large unsigned literals and numeric strings to be passed to DllCall (regardless
+			// of whether Int64 or UInt64 is used), but the script itself will interpret the value as signed
+			// if greater than _I64_MAX.  Any UInt64 values returned by DllCall can be safely passed back
+			// without loss, and can be operated upon by the bitwise operators, although arithmetic and
+			// string conversion will treat the value as Int64.
+			this_dyna_param.value_int64 = TokenToInt64(this_param);
 		} // switch (this_dyna_param.type)
 	} // for() each arg.
     
-	if (!function) // The function's address hasn't yet been determined.
+	if (vf_index >= 0) // ComCall
 	{
-		function = GetDllProcAddress(TokenToString(*aParam[0]), &hmodule_to_free);
+		if ((UINT_PTR)dyna_param[0].ptr < 65536) // Basic sanity check to catch null pointers and small numbers.  On Win32, the first 64KB of address space is always invalid.
+			_f_throw(ERR_PARAM2_INVALID);
+		LPVOID *vftbl = *(LPVOID **)dyna_param[0].ptr;
+		function = vftbl[vf_index];
+	}
+	else if (!function) // The function's address hasn't yet been determined.
+	{
+		function = GetDllProcAddress(function_name, &hmodule_to_free);
 		if (!function)
 		{
 			// GetDllProcAddress has thrown the appropriate exception.
@@ -13290,10 +13315,14 @@ has_valid_return_type:
 		*Var::sEmptyString = '\0';
 		// Don't bother with freeing hmodule_to_free since a critical error like this calls for minimal cleanup.
 		// The OS almost certainly frees it upon termination anyway.
-		// Call ScriptErrror() so that the user knows *which* DllCall is at fault:
-		g->ExcptMode = EXCPTMODE_NONE; // Do not throw an exception.
-		g_script->ScriptError(_T("This DllCall requires a prior VarSetCapacity. The program is now unstable and will exit."));
-		g_script->ExitApp(EXIT_CRITICAL); // Called this way, it will run the OnExit function, which is debatable because it could cause more good than harm, but might avoid loss of data if the OnExit function does something important.
+		// Call CriticalError() so that the user knows *which* DllCall is at fault:
+		g_script->CriticalError(_T("This DllCall requires a prior VarSetCapacity."));
+		// CriticalError always terminates the process.
+	}
+
+	if (return_attrib.is_hresult && FAILED((HRESULT)return_value.Int) && !g->ThrownToken)
+	{
+		g_script->ThrowWin32Exception((DWORD)return_value.Int);
 	}
 
 	if (g->ThrownToken)
@@ -13437,49 +13466,41 @@ has_valid_return_type:
 
 	// Store any output parameters back into the input variables.  This allows a function to change the
 	// contents of a variable for the following arg types: String and Pointer to <various number types>.
-	for (arg_count = 0, i = 1; i < aParamCount; ++arg_count, i += 2) // Same loop as used above, so maintain them together.
+	for (arg_count = 0, i = 0; i < aParamCount; ++arg_count, i += 2) // Same loop as used above, so maintain them together.
 	{
 		ExprTokenType &this_param = *aParam[i + 1];  // Resolved for performance and convenience.
-		// The following check applies to DLL_ARG_xSTR, which is "AStr" on Unicode builds and "WStr"
-		// on ANSI builds.  Since the buffer is only as large as required to hold the input string,
-		// it has very limited use as an output parameter.  Thus, it seems best to ignore anything the
-		// function may have written into the buffer (primarily for performance), and just delete it:
-		if (pStr[arg_count])
+		DYNAPARM &this_dyna_param = dyna_param[arg_count];
+
+		if (IObject * obj = TokenToObject(this_param)) // Implies the type is "Ptr" or "Ptr*".
 		{
-			delete pStr[arg_count];
-			continue; // Nothing further to do for this parameter.
-		}
-		if (this_param.symbol != SYM_VAR) // Output parameters are copied back only if its counterpart parameter is a naked variable.
-			continue;
-		DYNAPARM &this_dyna_param = dyna_param[arg_count]; // Resolved for performance and convenience.
-		Var &output_var = *this_param.var;                 //
-		if (this_dyna_param.type == DLL_ARG_STR) // Native string type for current build config.
-		{
-			if (!(output_var.mAttrib & VAR_ATTRIB_IS_INT64))
-			{
-				LPTSTR contents = output_var.Contents(); // Contents() shouldn't update mContents in this case because Contents() was already called for each "str" parameter prior to calling the Dll function.
-				VarSizeType capacity = output_var.Capacity();
-				// Since the performance cost is low, ensure the string is terminated at the limit of its
-				// capacity (helps prevent crashes if DLL function didn't do its job and terminate the string,
-				// or when a function is called that deliberately doesn't terminate the string, such as
-				// RtlMoveMemory()).
-				if (capacity)
-					contents[capacity - 1] = '\0';
-				// The function might have altered Contents(), so update Length().
-				output_var.SetCharLength((VarSizeType)_tcslen(contents));
-				output_var.Close(); // Clear the attributes of the variable to reflect the fact that the contents may have changed.
-			}
+			if (this_dyna_param.passed_by_address)
+				SetObjectIntProperty(obj, _T("Ptr"), this_dyna_param.value_int64, aResultToken);
 			continue;
 		}
 
-		// Since above didn't "continue", this arg wasn't passed as a string.  Of the remaining types, only
-		// those passed by address can possibly be output parameters, so skip the rest:
-		if (!this_dyna_param.passed_by_address)
+		if (this_param.symbol != SYM_VAR) // Output parameters are copied back only if its counterpart parameter is a naked variable.
 			continue;
+		Var &output_var = *this_param.var;
+
+		if (!this_dyna_param.passed_by_address)
+		{
+			if (this_dyna_param.type == DLL_ARG_STR) // Native string type for current build config.
+			{
+				if (!(output_var.mAttrib & VAR_ATTRIB_IS_INT64))
+				{
+					output_var.SetLengthFromContents();
+					output_var.Close(); // Clear the attributes of the variable to reflect the fact that the contents may have changed.
+				}
+			}
+			// Nothing is done for xSTR since 1) we didn't pass the variable's contents to the function
+			// so its length doesn't need updating, and 2) the buffer that was passed was only as large
+			// as the input string, so has very little practical use for output.
+			// No other types can be output parameters when !passed_by_address.
+			continue;
+		}
 
 		switch (this_dyna_param.type)
 		{
-		// case DLL_ARG_STR:  Already handled above.
 		case DLL_ARG_INT:
 			if (this_dyna_param.is_unsigned)
 				output_var.Assign((DWORD)this_dyna_param.value_int);
@@ -13507,10 +13528,27 @@ has_valid_return_type:
 		case DLL_ARG_DOUBLE:
 			output_var.Assign(this_dyna_param.value_double);
 			break;
+		case DLL_ARG_STR: // Str*
+			// The use of LPWSTR* vs. LPWSTR typically means the function will pass back the
+			// address of a string, not modify the string itself.  This is also consistent with
+			// passed_by_address for all other types.  However, it must be used carefully since
+			// there's no way for Str* to know how or whether the function requires the string
+			// to be freed (e.g. by calling CoTaskMemFree()).
+			if (this_dyna_param.ptr != output_var.Contents(FALSE, TRUE)
+				&& !output_var.AssignString((LPTSTR)this_dyna_param.ptr))
+				aResultToken.SetExitResult(FAIL);
+			break;
+		case DLL_ARG_xSTR: // AStr* on Unicode builds and WStr* on ANSI builds.
+			if (this_dyna_param.ptr != output_var.Contents(FALSE, TRUE)
+				&& !output_var.AssignStringFromCodePage(UorA(LPSTR,LPWSTR)this_dyna_param.ptr))
+				aResultToken.SetExitResult(FAIL);
 		}
 	}
 
 end:
+	for (arg_count = (aParamCount / 2) - 1; arg_count >= 0; --arg_count)
+		if (pStr[arg_count])
+			delete pStr[arg_count];
 	if (hmodule_to_free)
 		FreeLibrary(hmodule_to_free);
 }
@@ -13522,12 +13560,10 @@ void ObjectToString(ResultToken &aResultToken, ExprTokenType &aThisToken, IObjec
 	// Something like this should be done for every TokenToString() call or
 	// equivalent, but major changes are needed before that will be feasible.
 	// For now, String(anytype) provides a limited workaround.
-	ExprTokenType method_name = _T("ToString");
-	ExprTokenType *params = &method_name;
-	switch (aObject->Invoke(aResultToken, aThisToken, IT_CALL, &params, 1))
+	switch (aObject->Invoke(aResultToken, IT_CALL, _T("ToString"), aThisToken, nullptr, 0))
 	{
 	case INVOKE_NOT_HANDLED:
-		aResultToken.Error(ERR_UNKNOWN_METHOD, _T("ToString"));
+		aResultToken.UnknownMemberError(aThisToken, IT_CALL, _T("ToString"));
 		break;
 	case FAIL:
 		aResultToken.SetExitResult(FAIL);
@@ -13535,6 +13571,34 @@ void ObjectToString(ResultToken &aResultToken, ExprTokenType &aThisToken, IObjec
 	}
 }
 
+BIF_DECL(BIF_StrCompare)
+{
+	// In script:
+	// Result := StrCompare(str1, str2 [, CaseSensitive := false])
+	// str1, str2, the strings to compare, can be be pure numbers, such numbers are converted to strings before the comparison.
+	// CaseSensitive, the case sensitive setting to use.
+	// Result, the result of the comparison:
+	//	< 0,	if str1 is less than str2.
+	//	0,		if str1 is identical to str2.
+	//	> 0,	if str1 is greater than str2.
+	// Param 1 and 2, str1 and str2
+	TCHAR str1_buf[MAX_NUMBER_SIZE];	// numeric input is converted to string.
+	TCHAR str2_buf[MAX_NUMBER_SIZE];
+	LPTSTR str1 = ParamIndexToString(0, str1_buf);
+	LPTSTR str2 = ParamIndexToString(1, str2_buf);
+	// Could return 0 here if str1 == str2, but it is probably rare to call StrCompare(str_var, str_var)
+	// so for most cases that would just be an unnecessary cost, albeit low.
+	// Param 3 - CaseSensitive
+	StringCaseSenseType string_case_sense = ParamIndexToCaseSense(2);
+	int result;
+	switch (string_case_sense)		// Compare the strings according to the string_case_sense setting.
+	{
+	case SCS_SENSITIVE:				result = _tcscmp(str1, str2); break;
+	case SCS_INSENSITIVE:			result = _tcsicmp(str1, str2); break;
+	case SCS_INSENSITIVE_LOCALE:	result = lstrcmpi(str1, str2); break;
+	}
+	_f_return_i(result);			// Return 
+}
 
 BIF_DECL(BIF_String)
 {
@@ -13654,18 +13718,7 @@ BIF_DECL(BIF_InStr)
 	size_t needle_length;
 	LPTSTR needle = ParamIndexToString(1, needle_buf, &needle_length);
 	
-	// v1.0.43.03: Rather than adding a third value to the CaseSensitive parameter, it seems better to
-	// obey StringCaseSense because:
-	// 1) It matches the behavior of the equal operator (=) in expressions.
-	// 2) It's more friendly for typical international uses because it avoids having to specify that special/third value
-	//    for every call of InStr.  It's nice to be able to omit the CaseSensitive parameter every time and know that
-	//    the behavior of both InStr and its counterpart the equals operator are always consistent with each other.
-	// 3) Avoids breaking existing scripts that may pass something other than true/false for the CaseSense parameter.
-	StringCaseSenseType string_case_sense = (StringCaseSenseType)(!ParamIndexIsOmitted(2) && ParamIndexToBOOL(2));
-	// Above has assigned SCS_INSENSITIVE (0) or SCS_SENSITIVE (1).  If it's insensitive, resolve it to
-	// be Locale-mode if the StringCaseSense mode is either case-sensitive or Locale-insensitive.
-	if (g->StringCaseSense != SCS_INSENSITIVE && string_case_sense == SCS_INSENSITIVE) // Ordered for short-circuit performance.
-		string_case_sense = SCS_INSENSITIVE_LOCALE;
+	StringCaseSenseType string_case_sense = ParamIndexToCaseSense(2);
 
 	LPTSTR found_pos;
 	INT_PTR offset = 0; // Set default.
@@ -13750,6 +13803,7 @@ ResultType RegExMatchObject::Create(LPCTSTR aHaystack, int *aOffset, LPCTSTR *aP
 	RegExMatchObject *m = new RegExMatchObject();
 	if (!m)
 		return FAIL;
+	m->SetBase(sPrototype);
 
 	if (  aMark && !(m->mMark = _tcsdup(aMark))  )
 	{
@@ -13845,141 +13899,59 @@ ResultType RegExMatchObject::Create(LPCTSTR aHaystack, int *aOffset, LPCTSTR *aP
 	return OK;
 }
 
-ResultType STDMETHODCALLTYPE RegExMatchObject::Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount)
+
+ResultType RegExMatchObject::Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
-	if (aParamCount < 1 || aParamCount > 2 || IS_INVOKE_SET)
+	switch (aID)
+	{
+	case M_Count: _o_return(mPatternCount - 1);
+	case M_Mark: _o_return(mMark ? mMark : _T(""));
+	case M___Enum: _o_return(new IndexEnumerator(this, static_cast<IndexEnumerator::Callback>(&RegExMatchObject::GetEnumItem)));
+	}
+
+	int p;
+	if (ParamIndexIsOmitted(0))
+		p = 0;
+	else if (ParamIndexIsNumeric(0))
+		p = ParamIndexToInt(0);
+	else if (!mPatternName) // There are no named subpatterns, so param 0 is invalid.
+		p = -1;
+	else
+	{
+		auto name = ParamIndexToString(0);
+		for (p = 0; p < mPatternCount; ++p)
+			if (mPatternName[p] && !_tcsicmp(mPatternName[p], name))
+			{
+				if (mOffset[2*p] < 0)
+					// This pattern wasn't matched, so check for one with a duplicate name.
+					for (int i = p + 1; i < mPatternCount; ++i)
+						if (mPatternName[i] && !_tcsicmp(mPatternName[i], name) // It has the same name.
+							&& mOffset[2*i] >= 0) // It matched something.
+						{
+							// Prefer this pattern.
+							p = i;
+							break;
+						}
+				break;
+			}
+	}
+	if (p < 0 || p >= mPatternCount)
+	{
+		if (IS_INVOKE_CALL)
+			_o_throw(ERR_PARAM1_INVALID);
 		return INVOKE_NOT_HANDLED;
-
-	LPTSTR name;
-	int p = -1;
-
-	// Check for a subpattern offset/name first so that a subpattern named "Pos" takes
-	// precedence over our "Pos" property when invoked like m.Pos (but not m.Pos()).
-	if (aParamCount > 1 || !IS_INVOKE_CALL)
-	{
-		ExprTokenType &name_param = *aParam[aParamCount - 1];
-
-		if (TokenIsNumeric(name_param))
-		{
-			p = (int)TokenToInt64(name_param);
-		}
-		else if (mPatternName) // i.e. there is at least one named subpattern.
-		{
-			name = TokenToString(name_param);
-			for (p = 0; p < mPatternCount; ++p)
-				if (mPatternName[p] && !_tcsicmp(mPatternName[p], name))
-				{
-					if (mOffset[2*p] < 0)
-						// This pattern wasn't matched, so check for one with a duplicate name.
-						for (int i = p + 1; i < mPatternCount; ++i)
-							if (mPatternName[i] && !_tcsicmp(mPatternName[i], name) // It has the same name.
-								&& mOffset[2*i] >= 0) // It matched something.
-							{
-								// Prefer this pattern.
-								p = i;
-								break;
-							}
-					break;
-				}
-		}
 	}
 
-	bool pattern_found = p >= 0 && p < mPatternCount;
-	
-	// Checked for named properties:
-	if (aParamCount > 1 || !pattern_found)
+	switch (aID)
 	{
-		name = TokenToString(*aParam[0]);
-
-		if (!pattern_found && aParamCount == 1)
-		{
-			p = 0; // For m.Pos, m.Len and m.Value, use the overall match.
-			pattern_found = true; // Relies on below returning if the property name is invalid.
-		}
-
-		if (!_tcsicmp(name, _T("Pos")))
-		{
-			if (pattern_found)
-				_o_return(mOffset[2*p] + 1);
-			return OK;
-		}
-		else if (!_tcsicmp(name, _T("Len")))
-		{
-			if (pattern_found)
-				_o_return(mOffset[2*p + 1]);
-			return OK;
-		}
-		else if (!_tcsicmp(name, _T("Count")))
-		{
-			if (aParamCount == 1)
-				_o_return(mPatternCount - 1); // Return number of subpatterns (exclude overall match).
-			return OK;
-		}
-		else if (!_tcsicmp(name, _T("Name")))
-		{
-			if (pattern_found && mPatternName && mPatternName[p])
-				_o_return(mPatternName[p]);
-			return OK;
-		}
-		else if (!_tcsicmp(name, _T("Mark")))
-		{
-			_o_return(aParamCount == 1 && mMark ? mMark : _T(""));
-		}
-		else if (_tcsicmp(name, _T("Value"))) // i.e. NOT "Value".
-		{
-			// This is something like m[n] where n is not a valid subpattern or property name,
-			// or m.Foo[n] where Foo is not a valid property name.  For the two-param case,
-			// reset pattern_found so that if n is a valid subpattern it won't be returned:
-			pattern_found = false;
-		}
+	// Gives the correct result even if there was no match (because length is 0):
+	case M_Value: _o_return(mHaystack - mHaystackStart + mOffset[p*2], mOffset[p*2+1]);
+	case M_Pos: _o_return(mOffset[2*p] + 1);
+	case M_Len: _o_return(mOffset[2*p + 1]);
+	case M_Name: _o_return((mPatternName && mPatternName[p]) ? mPatternName[p] : _T(""));
 	}
-
-	if (pattern_found)
-	{
-		// Gives the correct result even if there was no match (because length is 0):
-		_o_return(mHaystack - mHaystackStart + mOffset[p*2], mOffset[p*2+1]);
-	}
-
 	return INVOKE_NOT_HANDLED;
 }
-
-#ifdef CONFIG_DEBUGGER
-void RegExMatchObject::DebugWriteProperty(IDebugProperties *aDebugger, int aPage, int aPageSize, int aMaxDepth)
-{
-	DebugCookie rootCookie, cookie;
-	aDebugger->BeginProperty(NULL, "object", 5, rootCookie);
-	if (aPage == 0)
-	{
-		aDebugger->WriteProperty("Count", ExprTokenType((__int64)mPatternCount));
-
-		static LPSTR sNames[] = { "Value", "Pos", "Len", "Name" };
-#ifdef UNICODE
-		static LPWSTR sNamesT[] = { _T("Value"), _T("Pos"), _T("Len"), _T("Name") };
-#else
-		static LPSTR *sNamesT = sNames;
-#endif
-		TCHAR resultBuf[_f_retval_buf_size];
-		ResultToken resultToken;
-		ExprTokenType thisTokenUnused, paramToken[2], *param[] = { &paramToken[0], &paramToken[1] };
-		for (int i = 0; i < _countof(sNames); i++)
-		{
-			aDebugger->BeginProperty(sNames[i], "array", mPatternCount - (i == 3), cookie);
-			paramToken[0].SetValue(sNamesT[i]);
-			for (int p = (i == 3); p < mPatternCount; p++)
-			{
-				resultToken.InitResult(resultBuf); // Init before EACH invoke.
-				paramToken[1].SetValue(p);
-				Invoke(resultToken, thisTokenUnused, IT_GET, param, 2);
-				aDebugger->WriteProperty(paramToken[1], resultToken);
-				if (resultToken.mem_to_free)
-					free(resultToken.mem_to_free);
-			}
-			aDebugger->EndProperty(cookie);
-		}
-	}
-	aDebugger->EndProperty(rootCookie);
-}
-#endif
 
 
 void *pcret_resolve_user_callout(LPCTSTR aCalloutParam, int aCalloutParamLength)
@@ -13988,8 +13960,8 @@ void *pcret_resolve_user_callout(LPCTSTR aCalloutParam, int aCalloutParamLength)
 	// In that case, the callout param becomes an integer between 0 and 255. No valid pointer
 	// could be in this range, but we must take care to check (ptr>255) rather than (ptr!=NULL).
 	Func *callout_func = g_script->FindFunc(aCalloutParam, aCalloutParamLength);
-	if (!callout_func || callout_func->mIsBuiltIn)
-		return NULL;
+	if (!callout_func)
+		return nullptr;
 	return (void *)callout_func;
 }
 
@@ -14033,7 +14005,7 @@ int RegExCallout(pcret_callout_block *cb)
 		token.symbol = SYM_VAR;
 		token.var = pcre_callout_var;
 		callout_func = TokenToFunc(token); // Allow name or reference.
-		if (!callout_func || callout_func->mIsBuiltIn)
+		if (!callout_func)
 		{
 			if (!pcre_callout_var->HasContents()) // Var exists but is empty.
 				return 0;
@@ -14098,29 +14070,29 @@ int RegExCallout(pcret_callout_block *cb)
 	//++cb->pattern_position;
 	//++cb->start_match;
 	//++cb->current_position;
-
-	func.Call(result_token, 5
-		, FUNC_ARG_OBJ(match_object)
-		, FUNC_ARG_INT(cb->callout_number)
-		, FUNC_ARG_INT(cb->start_match + 1) // FoundPos (distinct from Match.Pos, which hasn't been set yet)
-		, FUNC_ARG_STR(const_cast<LPTSTR>(cb->subject)) // Haystack
-		, FUNC_ARG_STR(cd.re_text)); // NeedleRegEx
 	
-	int number_to_return;
-	if (result_token.Exited())
+	ExprTokenType param[] =
+	{
+		match_object,
+		cb->callout_number,
+		cb->start_match + 1, // FoundPos (distinct from Match.Pos, which hasn't been set yet)
+		const_cast<LPTSTR>(cb->subject), // Haystack
+		cd.re_text // NeedleRegEx
+	};
+	__int64 number_to_return;
+	auto result = CallMethod(&func, &func, nullptr, param, _countof(param), &number_to_return);
+	if (result == FAIL || result == EARLY_EXIT)
 	{
 		number_to_return = PCRE_ERROR_CALLOUT;
-		cd.result_token->SetExitResult(result_token.Result());
+		cd.result_token->SetExitResult(result);
 	}
 	else
-		number_to_return = (int)TokenToInt64(result_token);
+		number_to_return = TokenToInt64(result_token);
 	
-	result_token.Free();
-
 	g->EventInfo = EventInfo_saved;
 
 	// Behaviour of return values is defined by PCRE.
-	return number_to_return;
+	return (int)number_to_return;
 }
 
 
@@ -15074,71 +15046,117 @@ BIF_DECL(BIF_NewThread)
 }
 #endif
 
-BIF_DECL(BIF_NumGet)
+struct NumGetParams
 {
-	size_t right_side_bound, target; // Don't make target a pointer-type because the integer offset might not be a multiple of 4 (i.e. the below increments "target" directly by "offset" and we don't want that to use pointer math).
-	ExprTokenType &target_token = *aParam[0];
-	if (target_token.symbol == SYM_VAR // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
-		&& !target_token.var->IsPureNumeric()) // If the var contains a pure/binary number, its probably an address.  Scripts can't directly access Contents() in that case anyway.
+	size_t target, right_side_bound;
+	size_t num_size = sizeof(DWORD_PTR);
+	BOOL is_integer = TRUE, is_signed = FALSE;
+};
+
+void ConvertNumGetType(ExprTokenType &aToken, NumGetParams &op)
+{
+	LPTSTR type = TokenToString(aToken); // No need to pass aBuf since any numeric value would not be recognized anyway.
+	if (ctoupper(*type) == 'U') // Unsigned.
 	{
-		target = (size_t)target_token.var->Contents(); // Although Contents(TRUE) will force an update of mContents if necessary, it very unlikely to be necessary here because we're about to fetch a binary number from inside mContents, not a normal/text number.
-		right_side_bound = target + target_token.var->ByteCapacity(); // This is first illegal address to the right of target.
+		++type; // Remove the first character from further consideration.
+		op.is_signed = FALSE;
+	}
+	else
+		op.is_signed = TRUE;
+
+	switch(ctoupper(*type)) // Override "size" and aResultToken.symbol if type warrants it. Note that the above has omitted the leading "U", if present, leaving type as "Int" vs. "Uint", etc.
+	{
+	case 'P': // Nothing extra needed in this case.
+		op.num_size = sizeof(void *), op.is_integer = TRUE;
+		break;
+	case 'I':
+		if (_tcschr(type, '6')) // Int64. It's checked this way for performance, and to avoid access violation if string is bogus and too short such as "i64".
+			op.num_size = 8, op.is_integer = TRUE;
+		else
+			op.num_size = 4, op.is_integer = TRUE;
+		break;
+	case 'S': op.num_size = 2, op.is_integer = TRUE; break; // Short.
+	case 'C': op.num_size = 1, op.is_integer = TRUE; break; // Char.
+
+	case 'D': op.num_size = 8, op.is_integer = FALSE; break; // Double.
+	case 'F': op.num_size = 4, op.is_integer = FALSE; break; // Float.
+
+	default: op.num_size = 0; break;
+	}
+}
+
+void GetBufferObjectPtr(ResultToken &aResultToken, IObject *obj, size_t &aPtr, size_t &aSize)
+{
+	static BufferObject sBuffer(0, 0);
+	if (*(void **)obj == *(void **)&sBuffer) // See ""type check"" comments in Object::Invoke for comments.
+	{
+		// Some primitive benchmarks showed that this was about as fast as passing
+		// a pointer directly, whereas invoking the properties (below) doubled the
+		// overall time taken by NumGet/NumPut.
+		aPtr = (size_t)((BufferObject *)obj)->Data();
+		aSize = ((BufferObject *)obj)->Size();
 	}
 	else
 	{
-		target = (size_t)TokenToInt64(target_token);
-		right_side_bound = 0;
+		if (GetObjectPtrProperty(obj, _T("Ptr"), aPtr, aResultToken))
+			GetObjectPtrProperty(obj, _T("Size"), aSize, aResultToken);
+	}
+}
+
+void GetBufferObjectPtr(ResultToken &aResultToken, IObject *obj, size_t &aPtr)
+// See above for comments.
+{
+	static BufferObject sBuffer(0, 0);
+	if (*(void **)obj == *(void **)&sBuffer)
+		aPtr = (size_t)((BufferObject *)obj)->Data();
+	else
+		GetObjectPtrProperty(obj, _T("Ptr"), aPtr, aResultToken);
+}
+
+void ConvertNumGetParams(BIF_DECL_PARAMS, NumGetParams &op)
+{
+	ExprTokenType &target_token = *aParam[0];
+	if (IObject *obj = TokenToObject(target_token))
+	{
+		GetBufferObjectPtr(aResultToken, obj, op.target, op.right_side_bound);
+		if (aResultToken.Exited())
+			return;
+		op.right_side_bound += op.target;
+	}
+	else if (target_token.symbol == SYM_VAR // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
+		&& !target_token.var->IsPureNumeric()) // If the var contains a pure/binary number, it's probably an address.  Scripts can't directly access Contents() in that case anyway.
+	{
+		op.target = (size_t)target_token.var->Contents(); // Never needs updating because it's not pure numeric, but the default parameters support #Warn UseUnset.
+		op.right_side_bound = op.target + target_token.var->ByteCapacity(); // This is the first illegal address to the right of target.
+	}
+	else
+	{
+		op.target = (size_t)TokenToInt64(target_token);
+		op.right_side_bound = SIZE_MAX;
 	}
 
 	if (aParamCount > 1) // Parameter "offset" is present, so increment the address by that amount.  For flexibility, this is done even when the target isn't a variable.
 	{
 		if (aParamCount > 2 || TokenIsNumeric(*aParam[1])) // Checking aParamCount first avoids some unnecessary work in common cases where all parameters were specified.
-			target += (ptrdiff_t)TokenToInt64(*aParam[1]); // Cast to ptrdiff_t vs. size_t to support negative offsets.
-		else
-			// Final param was omitted but this param is non-numeric, so use it as Type instead of Offset:
-			++aParamCount, --aParam; // aParam[0] is no longer valid, but that's OK.
-	}
-
-	BOOL is_signed;
-	size_t size = sizeof(DWORD_PTR); // Set default.
-
-	if (aParamCount < 3) // The "type" parameter is absent (which is most often the case), so use defaults.
-	{
-#ifndef _WIN64 // is_signed is ignored on 64-bit builds due to lack of support for UInt64.  Explicitly disable this for maintainability.
-		is_signed = FALSE;
-#endif
-		// And keep "size" at its default set earlier.
-	}
-	else // An explicit "type" is present.
-	{
-		LPTSTR type = TokenToString(*aParam[2]); // No need to pass aBuf since any numeric value would not be recognized anyway.
-		if (ctoupper(*type) == 'U') // Unsigned.
 		{
-			++type; // Remove the first character from further consideration.
-			is_signed = FALSE;
+			op.target += (ptrdiff_t)TokenToInt64(*aParam[1]); // Cast to ptrdiff_t vs. size_t to support negative offsets.
+			aParam++;
+			aParamCount--;
 		}
-		else
-			is_signed = TRUE;
-
-		switch(ctoupper(*type)) // Override "size" and aResultToken.symbol if type warrants it. Note that the above has omitted the leading "U", if present, leaving type as "Int" vs. "Uint", etc.
+		if (aParamCount > 1)
 		{
-		//case 'P': // Nothing extra needed in this case.
-		case 'I':
-			if (_tcschr(type, '6')) // Int64. It's checked this way for performance, and to avoid access violation if string is bogus and too short such as "i64".
-				size = 8;
-			else
-				size = 4;
-			break;
-		case 'S': size = 2; break; // Short.
-		case 'C': size = 1; break; // Char.
-
-		case 'D': size = 8; aResultToken.symbol = SYM_FLOAT; break; // Double.
-		case 'F': size = 4; aResultToken.symbol = SYM_FLOAT; break; // Float.
-
-		// default: For any unrecognized values, keep "size" and aResultToken.symbol at their defaults set earlier
-		// (for simplicity).
+			ConvertNumGetType(*aParam[1], op);
 		}
 	}
+}
+
+
+BIF_DECL(BIF_NumGet)
+{
+	NumGetParams op;
+	ConvertNumGetParams(aResultToken, aParam, aParamCount, op);
+	if (aResultToken.Exited())
+		return;
 
 	// If the target is a variable, the following check ensures that the memory to be read lies within its capacity.
 	// This seems superior to an exception handler because exception handlers only catch illegal addresses,
@@ -15147,40 +15165,46 @@ BIF_DECL(BIF_NumGet)
 	// but those are discouraged by MSDN.
 	// The following aren't covered by the check below:
 	// - Due to rarity of negative offsets, only the right-side boundary is checked, not the left.
-	// - Due to rarity and to simplify things, Float/Double (which "return" higher above) aren't checked.
-	if (target < 65536 // Basic sanity check to catch incoming raw addresses that are zero or blank.  On Win32, the first 64KB of address space is always invalid.
-		|| right_side_bound && target+size > right_side_bound) // i.e. it's ok if target+size==right_side_bound because the last byte to be read is actually at target+size-1. In other words, the position of the last possible terminator within the variable's capacity is considered an allowable address.
+	// - Due to rarity and to simplify things, Float/Double aren't checked.
+	if (!op.num_size
+		|| op.target < 65536 // Basic sanity check to catch incoming raw addresses that are zero or blank.  On Win32, the first 64KB of address space is always invalid.
+		|| op.target+op.num_size > op.right_side_bound) // i.e. it's ok if target+size==right_side_bound because the last byte to be read is actually at target+size-1. In other words, the position of the last possible terminator within the variable's capacity is considered an allowable address.
 	{
-		_f_throw(ERR_PARAM1_INVALID);
+		_f_throw(ERR_PARAM_INVALID);
 	}
 
-	switch(size)
+	switch (op.num_size)
 	{
 	case 4: // Listed first for performance.
-		if (aResultToken.symbol == SYM_FLOAT)
-			aResultToken.value_double = *(float *)target;
-		else if (is_signed)
-			aResultToken.value_int64 = *(int *)target; // aResultToken.symbol was set to SYM_FLOAT or SYM_INTEGER higher above.
+		if (!op.is_integer)
+			aResultToken.value_double = *(float *)op.target;
+		else if (op.is_signed)
+			aResultToken.value_int64 = *(int *)op.target; // aResultToken.symbol defaults to SYM_INTEGER.
 		else
-			aResultToken.value_int64 = *(unsigned int *)target;
+			aResultToken.value_int64 = *(unsigned int *)op.target;
 		break;
 	case 8:
-		// The below correctly copies both DOUBLE and INT64 into the union.
-		// Unsigned 64-bit integers aren't supported because variables/expressions can't support them.
-		aResultToken.value_int64 = *(__int64 *)target;
+		if (op.is_integer)
+			// Unsigned 64-bit integers aren't supported because variables/expressions can't support them.
+			aResultToken.value_int64 = *(__int64 *)op.target;
+		else
+			aResultToken.value_double = *(double *)op.target;
 		break;
 	case 2:
-		if (is_signed) // Don't use ternary because that messes up type-casting.
-			aResultToken.value_int64 = *(short *)target;
+		if (op.is_signed) // Don't use ternary because that messes up type-casting.
+			aResultToken.value_int64 = *(short *)op.target;
 		else
-			aResultToken.value_int64 = *(unsigned short *)target;
+			aResultToken.value_int64 = *(unsigned short *)op.target;
 		break;
-	default: // size 1
-		if (is_signed) // Don't use ternary because that messes up type-casting.
-			aResultToken.value_int64 = *(char *)target;
+	case 1:
+		if (op.is_signed) // Don't use ternary because that messes up type-casting.
+			aResultToken.value_int64 = *(char *)op.target;
 		else
-			aResultToken.value_int64 = *(unsigned char *)target;
+			aResultToken.value_int64 = *(unsigned char *)op.target;
+		break;
 	}
+	if (!op.is_integer)
+		aResultToken.symbol = SYM_FLOAT;
 }
 
 
@@ -15340,117 +15364,105 @@ BIF_DECL(BIF_Format)
 
 BIF_DECL(BIF_NumPut)
 {
+	NumGetParams op;
+	ExprTokenType **target_param;
+	int target_param_count, n_param;
 	// Load-time validation has ensured that at least the first two parameters are present.
-	ExprTokenType &token_to_write = *aParam[0];
-
-	size_t right_side_bound, target; // Don't make target a pointer-type because the integer offset might not be a multiple of 4 (i.e. the below increments "target" directly by "offset" and we don't want that to use pointer math).
-	ExprTokenType &target_token = *aParam[1];
-	if (target_token.symbol == SYM_VAR // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
-		&& !target_token.var->IsPureNumeric()) // If the var contains a pure/binary number, its probably an address.  Scripts can't directly access Contents() in that case anyway.
+	if (ParamIndexIsNumeric(0))
 	{
-		target = (size_t)target_token.var->Contents(FALSE); // Pass FALSE for performance because contents is about to be overwritten, followed by a call to Close(). If something goes wrong and we return early, Contents() won't have been changed, so nothing about it needs updating.
-		right_side_bound = target + target_token.var->ByteCapacity(); // This is the first illegal address to the right of target.
+		// NumPut(n, target [, offset, type])
+		target_param = aParam + 1;
+		target_param_count = aParamCount - 1;
+		n_param = 0;
+		aParamCount = 1;
 	}
 	else
 	{
-		target = (size_t)TokenToInt64(target_token);
-		right_side_bound = 0;
+		// Params can be any number of type-number pairs, followed by  target[, offset].
+		// Valid:		NumPut(t1, n1, t2, n2, p, o)
+		// Valid:		NumPut(t1, n1, t2, n2, p)
+		// Ambiguous:	NumPut(t1, n1, t2, p, o) -> ...n2, p)
+		// Valid:		NumPut(t1, n1, p, o)
+		// Invalid:		NumPut(t1, n1, t2, x)  ; Either n2 or p is missing.
+		// Valid:		NumPut(t1, n1, p)
+		// Ambiguous:	NumPut(t1, p, o) -> ...n1, p)
+		// Invalid:		NumPut(t1, p)
+		// Invalid:		NumPut(t1)
+		if (aParamCount < 3)
+			_f_throw(ERR_TYPE_MISMATCH);
+		// Split target[,offset] from aParam.
+		target_param_count = 2 - (aParamCount & 1);
+		aParamCount -= target_param_count;
+		target_param = aParam + aParamCount;
+		// Handle the first type name here to enable the loop to handle the other parameter mode.
+		ConvertNumGetType(*aParam[0], op);
+		n_param = 1;
 	}
 
-	if (aParamCount > 2) // Parameter "offset" is present, so increment the address by that amount.  For flexibility, this is done even when the target isn't a variable.
+	ConvertNumGetParams(aResultToken, target_param, target_param_count, op);
+	if (aResultToken.Exited())
+		return;
+
+	size_t num_end;
+	for (;; op.target = num_end)
 	{
-		if (aParamCount > 3 || TokenIsNumeric(*aParam[2])) // Checking aParamCount first avoids some unnecessary work in common cases where all parameters were specified.
-			target += (ptrdiff_t)TokenToInt64(*aParam[2]); // Cast to ptrdiff_t vs. size_t to support negative offsets.
+		ExprTokenType &token_to_write = *aParam[n_param];
+
+		num_end = op.target + op.num_size; // This is used below and also as NumPut's return value. It's the address to the right of the item to be written.
+
+		// See comments in NumGet about the following section:
+		if (!op.num_size
+			|| !TokenIsNumeric(token_to_write)
+			|| op.target < 65536 // Basic sanity check to catch incoming raw addresses that are zero or blank.  On Win32, the first 64KB of address space is always invalid.
+			|| num_end > op.right_side_bound) // i.e. it's ok if target+size==right_side_bound because the last byte to be read is actually at target+size-1. In other words, the position of the last possible terminator within the variable's capacity is considered an allowable address.
+		{
+			_f_throw(ERR_PARAM_INVALID);
+		}
+
+		union
+		{
+			__int64 num_i64;
+			double num_f64;
+			float num_f32;
+		};
+
+		// Note that since v2.0-a083-97803aeb, TokenToInt64 supports conversion of large unsigned 64-bit
+		// numbers from strings (producing a negative value, but with the right bit representation).
+		if (op.is_integer)
+			num_i64 = TokenToInt64(token_to_write);
 		else
-			// Final param was omitted but this param is non-numeric, so use it as Type instead of Offset:
-			++aParamCount, --aParam; // aParam[0] is no longer valid, but that's OK.
-	}
-
-	size_t size = sizeof(DWORD_PTR); // Set defaults.
-	BOOL is_integer = TRUE;   //
-	BOOL is_unsigned = (aParamCount > 3) ? FALSE : TRUE; // This one was added v1.0.48 to support unsigned __int64 the way DllCall does.
-
-	if (aParamCount > 3) // The "type" parameter is present (which is somewhat unusual).
-	{
-		LPTSTR type = TokenToString(*aParam[3]); // No need to pass aBuf since any numeric value would not be recognized anyway.
-		if (ctoupper(*type) == 'U') // Unsigned; but in the case of NumPut, it matters only for UInt64.
 		{
-			is_unsigned = TRUE;
-			++type; // Remove the first character from further consideration.
+			num_f64 = TokenToDouble(token_to_write);
+			if (op.num_size == 4)
+				num_f32 = (float)num_f64;
 		}
 
-		switch(ctoupper(*type)) // Override "size" and is_integer if type warrants it. Note that the above has omitted the leading "U", if present, leaving type as "Int" vs. "Uint", etc.
+		// This method benchmarked marginally faster than memcpy for the multi-param mode.
+		switch (op.num_size)
 		{
-		case 'P': is_unsigned = TRUE; break; // Ptr.
-		case 'I':
-			if (_tcschr(type, '6')) // Int64. It's checked this way for performance, and to avoid access violation if string is bogus and too short such as "i64".
-				size = 8;
-			else
-				size = 4;
-			//else keep "size" at its default set earlier.
+		case 8: *(UINT64 *)op.target = (UINT64)num_i64; break;
+		case 4: *(UINT32 *)op.target = (UINT32)num_i64; break;
+		case 2: *(UINT16 *)op.target = (UINT16)num_i64; break;
+		case 1: *(UINT8 *)op.target = (UINT8)num_i64; break;
+		}
+
+		n_param += 2;
+		if (n_param >= aParamCount)
 			break;
-		case 'S': size = 2; break; // Short.
-		case 'C': size = 1; break; // Char.
-
-		case 'D': size = 8; is_integer = FALSE; break; // Double.
-		case 'F': size = 4; is_integer = FALSE; break; // Float.
-
-		// default: For any unrecognized values, keep "size" and is_integer at their defaults set earlier
-		// (for simplicity).
-		}
+		// Convert the type name for the next number.
+		ConvertNumGetType(*aParam[n_param - 1], op);
 	}
-
-	aResultToken.value_int64 = target + size; // This is used below and also as NumPut's return value. It's the address to the right of the item to be written.  aResultToken.symbol was set to SYM_INTEGER by our caller.
-
-	// See comments in NumGet about the following section:
-	if (target < 65536 // Basic sanity check to catch incoming raw addresses that are zero or blank.  On Win32, the first 64KB of address space is always invalid.
-		|| right_side_bound && (size_t)aResultToken.value_int64 > right_side_bound) // i.e. it's ok if target+size==right_side_bound because the last byte to be read is actually at target+size-1. In other words, the position of the last possible terminator within the variable's capacity is considered an allowable address.
-	{
-		if (target_token.symbol == SYM_VAR)
-		{
-			// Since target_token is a var, maybe the target is out of bounds because the var
-			// hasn't been initialized (i.e. it has zero capacity).  Note that if a local var
-			// has been given semi-permanent memory in a previous call to the function, the
-			// check above might not catch it and we won't get an "uninitialized var" warning.
-			// However, for that to happen the script must use VarSetCapacity that time but
-			// not this time, which seems too rare to justify checking this every time.
-			target_token.var->MaybeWarnUninitialized();
-		}
-		_f_throw(ERR_PARAM2_INVALID);
-	}
-
-	switch(size)
-	{
-	case 4: // Listed first for performance.
-		if (is_integer)
-			*(unsigned int *)target = (unsigned int)TokenToInt64(token_to_write);
-		else // Float (32-bit).
-			*(float *)target = (float)TokenToDouble(token_to_write);
-		break;
-	case 8:
-		if (is_integer)
-			// v1.0.48: Support unsigned 64-bit integers like DllCall does:
-			*(__int64 *)target = (is_unsigned && !IS_NUMERIC(token_to_write.symbol)) // Must not be numeric because those are already signed values, so should be written out as signed so that whoever uses them can interpret negatives as large unsigned values.
-				? (__int64)ATOU64(TokenToString(token_to_write)) // For comments, search for ATOU64 in BIF_DllCall().
-				: TokenToInt64(token_to_write);
-		else // Double (64-bit).
-			*(double *)target = TokenToDouble(token_to_write);
-		break;
-	case 2:
-		*(unsigned short *)target = (unsigned short)TokenToInt64(token_to_write);
-		break;
-	default: // size 1
-		*(unsigned char *)target = (unsigned char)TokenToInt64(token_to_write);
-	}
-	if (right_side_bound) // Implies (target_token.symbol == SYM_VAR && !target_token.var->IsPureNumeric()).
+	ExprTokenType &target_token = **target_param;
+	if (target_token.symbol == SYM_VAR && !target_token.var->IsPureNumeric())
 		target_token.var->Close(); // This updates various attributes of the variable.
 	//else the target was an raw address.  If that address is inside some variable's contents, the above
 	// attributes would already have been removed at the time the & operator was used on the variable.
+	aResultToken.value_int64 = num_end; // aResultToken.symbol was set to SYM_INTEGER by our caller.
 }
 
 
 
-BIF_DECL(BIF_StrGetPut)
+BIF_DECL(BIF_StrGetPut) // BIF_DECL(BIF_StrGet), BIF_DECL(BIF_StrPut)
 {
 	// To simplify flexible handling of parameters:
 	ExprTokenType **aParam_end = aParam + aParamCount;
@@ -15475,7 +15487,9 @@ BIF_DECL(BIF_StrGetPut)
 	aResultToken.symbol = SYM_STRING;
 	aResultToken.marker = _T(""); // Set default in case of early return.
 
+	IObject *buffer_obj;
 	LPVOID 	address;
+	size_t  max_bytes = SIZE_MAX;
 	int 	length = -1; // actual length
 	bool	length_is_max_size = false;
 	UINT 	encoding = UorA(CP_UTF16, CP_ACP); // native encoding
@@ -15493,6 +15507,15 @@ BIF_DECL(BIF_StrGetPut)
 	if (aParam < aParam_end && TokenIsNumeric(**aParam))
 	{
 		address = (LPVOID)TokenToInt64(**aParam);
+		++aParam;
+	}
+	else if (aParam < aParam_end && (buffer_obj = TokenToObject(**aParam)))
+	{
+		size_t ptr;
+		GetBufferObjectPtr(aResultToken, buffer_obj, ptr, max_bytes);
+		if (aResultToken.Exited())
+			return;
+		address = (LPVOID)ptr;
 		++aParam;
 	}
 	else
@@ -15514,7 +15537,7 @@ BIF_DECL(BIF_StrGetPut)
 	{
 		if (length == -1) // i.e. not StrPut(String, Encoding)
 		{
-			if (TokenIsNumeric(**aParam))
+			if (TokenIsNumeric(**aParam)) // Length parameter
 			{
 				length = (int)TokenToInt64(**aParam);
 				if (!source_string) // StrGet
@@ -15540,13 +15563,9 @@ BIF_DECL(BIF_StrGetPut)
 		}
 		if (aParam < aParam_end)
 		{
-			if (!TokenIsNumeric(**aParam))
-			{
-				encoding = Line::ConvertFileEncoding(TokenToString(**aParam));
-				if (encoding == -1)
-					_f_throw(ERR_INVALID_ENCODING);
-			}
-			else encoding = (UINT)TokenToInt64(**aParam);
+			encoding = Line::ConvertFileEncoding(**aParam);
+			if (encoding == -1)
+				_f_throw(ERR_INVALID_ENCODING);
 		}
 	}
 	// Note: CP_AHKNOBOM is not supported; "-RAW" must be omitted.
@@ -15564,6 +15583,19 @@ BIF_DECL(BIF_StrGetPut)
 		_f_throw(source_string ? ERR_PARAM2_INVALID : ERR_PARAM1_INVALID);
 	}
 
+	if (max_bytes != SIZE_MAX)
+	{
+		// Target is a Buffer object with known size, so limit length accordingly.
+		int max_chars = int(max_bytes >> int(encoding == CP_UTF16));
+		if (length > max_chars)
+			_f_throw(ERR_INVALID_LENGTH);
+		if (length == -1)
+		{
+			length = max_chars;
+			length_is_max_size = true;
+		}
+	}
+
 	if (source_string) // StrPut
 	{
 		int char_count; // Either bytes or characters, depending on the target encoding.
@@ -15579,7 +15611,7 @@ BIF_DECL(BIF_StrGetPut)
 				else
 					*(LPSTR)address = '\0';
 			}
-			aResultToken.value_int64 = 1;
+			aResultToken.value_int64 = encoding == CP_UTF16 ? sizeof(WCHAR) : sizeof(CHAR);
 			return;
 		}
 
@@ -15620,7 +15652,7 @@ BIF_DECL(BIF_StrGetPut)
 					char_count = MultiByteToWideChar(CP_ACP, 0, (LPCSTR)source_string, source_length, NULL, 0) + 1;
 					if (length == 0)
 					{
-						aResultToken.value_int64 = char_count;
+						aResultToken.value_int64 = char_count * (1 + (encoding == CP_UTF16));
 						return;
 					}
 					length = char_count;
@@ -15657,7 +15689,7 @@ BIF_DECL(BIF_StrGetPut)
 					++char_count; // + 1 for null-terminator (source_length causes it to be excluded from char_count).
 					if (length == 0) // Caller just wants the required buffer size.
 					{
-						aResultToken.value_int64 = char_count;
+						aResultToken.value_int64 = char_count * (1 + (encoding == CP_UTF16));
 						return;
 					}
 					// Assume there is sufficient buffer space and hope for the best:
@@ -15675,10 +15707,10 @@ BIF_DECL(BIF_StrGetPut)
 			}
 #endif
 			if (!char_count)
-				_f_throw(ERR_INTERNAL_CALL);
+				_f_throw(GetLastError() == ERROR_INSUFFICIENT_BUFFER ? ERR_INVALID_LENGTH : ERR_INTERNAL_CALL);
 		}
-		// Return the number of characters copied.
-		aResultToken.value_int64 = char_count;
+		// Return the number of bytes written.
+		aResultToken.value_int64 = char_count * (1 + (encoding == CP_UTF16));
 	}
 	else // StrGet
 	{
@@ -15765,7 +15797,7 @@ BIF_DECL(BIF_IsLabel)
 
 BIF_DECL(BIF_IsFunc) // Lexikos: Added for use with dynamic function calls.
 // Returns a non-zero value if the function exists in the current scope.  Since a dynamic function-call
-// fails when too few parameters are passed (but not too many), the return value indicates to the caller
+// fails when too few or (in v2) too many parameters are passed, the return value indicates to the caller
 // not only that the function exists, but also how many parameters are required.  Although this may seem
 // redundant due to Func().MinParams, it has the benefit of not creating a new closure if the function
 // is a nested one with upvalues.
@@ -15798,13 +15830,14 @@ BIF_DECL(BIF_Func)
 }
 
 
-IObject *Func::CloseIfNeeded()
+IObject *UserFunc::CloseIfNeeded()
 {
 	FreeVars *fv = (mOuterFunc && sFreeVars) ? sFreeVars->ForFunc(mOuterFunc) : NULL;
 	if (!fv)
-		// Standard practice would require AddRef() here, but we have the inside
-		// knowledge that Func ignores it (since it's allocated with SimpleHeap).
+	{
+		AddRef();
 		return this;
+	}
 	Closure *cl = new Closure(this, fv);
 	fv->AddRef();
 	return cl;
@@ -15830,6 +15863,16 @@ BIF_DECL(BIF_IsByRef)
 		_f_return_b(var.ResolveAlias() != &var
 			&& (var.Scope() & (VAR_LOCAL_FUNCPARAM | VAR_DOWNVAR)) == VAR_LOCAL_FUNCPARAM);
 	}
+}
+
+
+
+BIF_DECL(BIF_IsSet)
+{
+	if (aParam[0]->symbol != SYM_VAR)
+		_f_throw(ERR_PARAM1_INVALID);
+
+	_f_return_b(!aParam[0]->var->IsUninitializedNormalVar());
 }
 
 
@@ -15916,10 +15959,10 @@ BIF_DECL(BIF_VarSetCapacity)
 			{
 				if (param1 == -1) // Adjust variable's internal length.
 				{
+					var.SetLengthFromContents();
 					// Seems more useful to report length vs. capacity in this special case. Scripts might be able
 					// to use this to boost performance.
-					aResultToken.value_int64 = var.ByteLength() = ((VarSizeType)_tcslen(var.Contents()) * sizeof(TCHAR)); // Performance: Length() and Contents() will update mContents if necessary, it's unlikely to be necessary under the circumstances of this call.  In any case, it seems appropriate to do it this way.
-					var.Close();
+					aResultToken.value_int64 = var.ByteLength();
 					return;
 				}
 				// x64: it's negative but not -1.
@@ -16050,15 +16093,36 @@ BIF_DECL(BIF_FileExist)
 
 BIF_DECL(BIF_WinExistActive)
 {
-	TCHAR *param[4], param_buf[4][MAX_NUMBER_SIZE];
-	for (int j = 0; j < 4; ++j) // For each formal parameter, including optional ones.
-		param[j] = ParamIndexToOptionalString(j, param_buf[j]);
+	bool hwnd_specified = false;
+	HWND hwnd;
+	if (!ParamIndexIsOmitted(0))
+	{
+		switch (DetermineTargetHwnd(hwnd, aResultToken, *aParam[0]))
+		{
+		case FAIL:
+			return;
+		case OK:
+			hwnd_specified = true;
+			// DetermineTargetHwnd() already called IsWindow() to verify hwnd.
+			// g->DetectHiddenWindows is intentionally ignored for these cases.
+			if (_f_callee_id == FID_WinActive && GetForegroundWindow() != hwnd)
+				hwnd = 0;
+			break;
+		}
+	}
 
-	HWND found_hwnd = _f_callee_id == FID_WinExist
-		? WinExist(*g, param[0], param[1], param[2], param[3], false, true)
-		: WinActive(*g, param[0], param[1], param[2], param[3], true);
+	if (!hwnd_specified) // Do not call WinExist()/WinActive() even if the specified hwnd was 0.
+	{
+		TCHAR *param[4], param_buf[4][MAX_NUMBER_SIZE];
+		for (int j = 0; j < 4; ++j) // For each formal parameter, including optional ones.
+			param[j] = ParamIndexToOptionalString(j, param_buf[j]);
 
-	_f_return((size_t)found_hwnd);
+		hwnd = _f_callee_id == FID_WinExist
+			? WinExist(*g, param[0], param[1], param[2], param[3], false, true)
+			: WinActive(*g, param[0], param[1], param[2], param[3], true);
+	}
+
+	_f_return_i((size_t)hwnd);
 }
 
 BIF_DECL(BIF_ResourceLoadLibrary)
@@ -16072,7 +16136,7 @@ BIF_DECL(BIF_ResourceLoadLibrary)
 	HRSRC hRes;
 	HGLOBAL hResData = NULL;
 
-	hRes = FindResource(NULL, aParam[0]->symbol == SYM_VAR ? aParam[0]->var->Contents() : aParam[0]->marker, MAKEINTRESOURCE(RT_RCDATA));
+	hRes = FindResource(NULL, aParam[0]->symbol == SYM_VAR ? aParam[0]->var->Contents() : aParam[0]->marker, RT_RCDATA);
 	
 	if ( !( hRes 
 			&& (textbuf.mLength = SizeofResource(NULL, hRes))
@@ -16381,7 +16445,7 @@ BIF_DECL(BIF_ZipCloseBuffer)
 	DWORD aErrCode;
 	TCHAR	aMsg[100];
 	unsigned char	*aBuffer;
-	DWORD			aLen;
+	ULONGLONG		aLen;
 	HANDLE			aBase;
 	if (aParam[1]->symbol != SYM_VAR)
 	{
@@ -16465,39 +16529,39 @@ BIF_DECL(BIF_ZipInfo)
 		aValue.symbol = SYM_STRING;
 		aValue.marker_length = -1;
 		aValue.marker = ze.Name;
-		aThisObject->Invoke(Result, this_token, IT_SET, params, 2);
+		aThisObject->Invoke(Result, IT_SET, 0, this_token, params, 2);
 
 		aKey.marker = _T("CreateTime");
 		aValue.marker = FileTimeToYYYYMMDD(aTimeBuf, ze.CreateTime, true);
-		aThisObject->Invoke(Result, this_token, IT_SET, params, 2);
+		aThisObject->Invoke(Result, IT_SET, 0, this_token, params, 2);
 
 		aKey.marker = _T("ModifyTime");
 		aValue.marker = FileTimeToYYYYMMDD(aTimeBuf, ze.ModifyTime, true);
-		aThisObject->Invoke(Result, this_token, IT_SET, params, 2);
+		aThisObject->Invoke(Result, IT_SET, 0, this_token, params, 2);
 
 		aKey.marker = _T("AccessTime");
 		aValue.marker = FileTimeToYYYYMMDD(aTimeBuf, ze.AccessTime, true);
-		aThisObject->Invoke(Result, this_token, IT_SET, params, 2);
+		aThisObject->Invoke(Result, IT_SET, 0, this_token, params, 2);
 
 		aKey.marker = _T("Attributes");
 		aValue.marker = FileAttribToStr(aTimeBuf, ze.Attributes);
-		aThisObject->Invoke(Result, this_token, IT_SET, params, 2);
+		aThisObject->Invoke(Result, IT_SET, 0, this_token, params, 2);
 
 
 		aKey.marker = _T("CompressedSize");
 		aValue.symbol = SYM_INTEGER;
 		aValue.value_int64 = ze.CompressedSize;
-		aThisObject->Invoke(Result, this_token, IT_SET, params, 2);
+		aThisObject->Invoke(Result, IT_SET, 0, this_token, params, 2);
 
 
 		aKey.marker = _T("UncompressedSize");
 		aValue.value_int64 = ze.UncompressedSize;
-		aThisObject->Invoke(Result, this_token, IT_SET, params, 2);
+		aThisObject->Invoke(Result, IT_SET, 0, this_token, params, 2);
 
 		aKey.marker = _T("Push");
 		aValue.symbol = SYM_OBJECT;
 		aValue.object = aThisObject;
-		aObject->Invoke(Result, this_token, IT_CALL, params, 2);
+		aObject->Invoke(Result, IT_CALL, 0, this_token, params, 2);
 		aThisObject->Release();
 	}
 
@@ -17117,8 +17181,8 @@ BIF_DECL(BIF_Random)
 		init_genrand((UINT)ParamIndexToInt64(0)); // It's documented that an unsigned 32-bit number is required.
 		_f_return_empty;
 	}
-	SymbolType arg1type = aParamCount > 0 ? TokenIsNumeric(*aParam[0]) : SYM_MISSING;
-	SymbolType arg2type = aParamCount > 1 ? TokenIsNumeric(*aParam[1]) : SYM_MISSING;
+	SymbolType arg1type = aParamCount > 0 ? ParamIndexIsNumeric(0) : SYM_MISSING;
+	SymbolType arg2type = aParamCount > 1 ? ParamIndexIsNumeric(1) : SYM_MISSING;
 	bool use_float = arg1type == PURE_FLOAT || arg2type == PURE_FLOAT;
 	if (use_float)
 	{
@@ -17246,7 +17310,7 @@ BIF_DECL(BIF_Hotkey)
 	{
 		if (!ParamIndexIsOmitted(1))
 			functor = TokenToFunctor(*aParam[1]);
-		result = Hotkey::IfExpr(aParam1, functor);
+		result = Hotkey::IfExpr(aParam1, functor, aResultToken);
 	}
 	else
 	{
@@ -17274,8 +17338,8 @@ BIF_DECL(BIF_Hotkey)
 BIF_DECL(BIF_SetTimer)
 {
 	IObject *callback;
-	// Note that only one timer per callback is allowed because the callback is the unique identifier
-	// that allows us to figure out whether to "update or create" when searching the list of timers.
+	// Note that only one timer per callback is allowed because the callback is the
+	// unique identifier that allows us to update or delete an existing timer.
 	if (ParamIndexIsOmitted(0)) // Fully omitted, not an empty string.
 	{
 		if (g->CurrentTimer)
@@ -17286,45 +17350,44 @@ BIF_DECL(BIF_SetTimer)
 		if (!callback)
 			// Either the thread was not launched by a timer or the timer has been deleted.
 			_f_throw(ERR_PARAM1_MUST_NOT_BE_BLANK);
-	}
-	else
-		callback = ParamIndexToObject(0);
-	if (callback)
 		callback->AddRef();
+	}
 	else
 	{
-		LPTSTR arg1 = ParamIndexToString(0, _f_number_buf);
-		if (  !(callback = StringToFunctor(arg1))  )
-			_f_throw(ERR_PARAM1_INVALID, arg1);
-	}
-	ToggleValueType toggle;
-	_f_param_string_opt(arg2, 1);
-	_f_param_string_opt(arg3, 2);
-	if (!IsNumeric(arg2, true, true, true)) // Allow it to be neg. or floating point at runtime.
-	{
-		toggle = Line::ConvertOnOff(arg2);
-		if (!toggle)
+		callback = ParamIndexToObject(0);
+		if (callback)
+			callback->AddRef();
+		else
 		{
-			if (!_tcsicmp(arg2, _T("Delete")))
-			{
-				g_script->DeleteTimer(callback);
-				callback->Release();
-				_f_return_empty;
-			}
-			callback->Release();
-			_f_throw(ERR_PARAM2_INVALID, arg2);
+			LPTSTR arg1 = ParamIndexToString(0, _f_number_buf);
+			if (  !(callback = StringToFunctor(arg1))  )
+				_f_throw(ERR_PARAM1_INVALID, arg1);
 		}
+		if (!ValidateFunctor(callback, 0, aResultToken))
+			return;
 	}
-	else
-		toggle = TOGGLE_INVALID;
-	switch(toggle)
+	__int64 period = DEFAULT_TIMER_PERIOD;
+	int priority = 0;
+	bool update_period = false, update_priority = false;
+	if (!ParamIndexIsOmitted(1))
 	{
-	case TOGGLED_ON:
-	case TOGGLED_OFF: g_script->UpdateOrCreateTimer(callback, _T(""), arg3, toggle == TOGGLED_ON, false); break;
-	// Timer is always (re)enabled when ARG2 specifies a numeric period or is blank + there's no ARG3.
-	// If ARG2 is blank but ARG3 (priority) isn't, tell it to update only the priority and nothing else:
-	default: g_script->UpdateOrCreateTimer(callback, arg2, arg3, true, !*arg2 && *arg3);
+		if (!ParamIndexIsNumeric(1))
+			_f_throw(ERR_PARAM2_INVALID);
+		period = ParamIndexToInt64(1);
+		if (!period)
+		{
+			g_script->DeleteTimer(callback);
+			callback->Release();
+			_f_return_empty;
+		}
+		update_period = true;
 	}
+	if (!ParamIndexIsOmitted(2))
+	{
+		priority = ParamIndexToInt(2);
+		update_priority = true;
+	}
+	g_script->UpdateOrCreateTimer(callback, update_period, period, update_priority, priority);
 	callback->Release();
 	_f_return_empty;
 }
@@ -17382,7 +17445,7 @@ BIF_DECL(BIF_OnMessage)
 	// very rare cases where a valid but wrong function name is given *and* that function has
 	// ByRef or optional parameters.
 	// If the parameter is not an object or a valid function...
-	if (!callback || func && (func->mIsBuiltIn || func->mMinParams > 4))
+	if (!callback || func && func->mMinParams > 4)
 		_f_throw(specified_hwnd ? ERR_PARAM3_INVALID : ERR_PARAM2_INVALID);
 
 	// Check if this message already exists in the array:
@@ -17418,7 +17481,7 @@ BIF_DECL(BIF_OnMessage)
 			// The main disadvantage to deleting message filters from the array is that the deletion might
 			// occur while the monitor is currently running, which requires more complex handling within
 			// MsgMonitor() (see its comments for details).
-			g_MsgMonitor->Remove(pmonitor);
+			g_MsgMonitor->Delete(pmonitor);
 			_f_return_retval;
 		}
 		if (aParamCount < (specified_hwnd ? 3 : 2)) // Single-parameter mode: Report existing item's function name.
@@ -17564,7 +17627,7 @@ MsgMonitorStruct *MsgMonitorList::Add(UINT aMsg, HWND aHwnd, LPTSTR aMethodName,
 }
 
 
-void MsgMonitorList::Remove(MsgMonitorStruct *aMonitor)
+void MsgMonitorList::Delete(MsgMonitorStruct *aMonitor)
 {
 	ASSERT(aMonitor >= mMonitor && aMonitor < mMonitor + mCount);
 
@@ -17649,19 +17712,9 @@ BIF_DECL(BIF_On)
 	MsgMonitorList &handlers = *phandlers;
 
 
-	IObject *callback;
-	if (callback = TokenToFunctor(*aParam[0]))
-	{
-		// Ensure this function is a valid one (if possible).
-		if (Func *func = dynamic_cast<Func *>(callback))
-			if (func->mMinParams > (event_type == FID_OnExit ? 2 : 1))
-			{
-				callback->Release();
-				callback = NULL;
-			}
-	}
-	if (!callback)
-		_f_throw(ERR_PARAM1_INVALID);
+	IObject *callback = TokenToFunctor(*aParam[0]);
+	if (!ValidateFunctor(callback, event_type == FID_OnExit ? 2 : 1, aResultToken, ERR_PARAM1_INVALID))
+		return;
 	
 	int mode = 1; // Default.
 	if (!ParamIndexIsOmitted(1))
@@ -17693,7 +17746,7 @@ BIF_DECL(BIF_On)
 		break;
 	case  0:
 		if (existing)
-			handlers.Remove(existing);
+			handlers.Delete(existing);
 		break;
 	default:
 		callback->Release();
@@ -17805,7 +17858,7 @@ UINT_PTR CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address) // Used
 
 	g_script->mLastPeekTime = GetTickCount(); // Somewhat debatable, but might help minimize interruptions when the callback is called via message (e.g. subclassing a control; overriding a WindowProc).
 
-	INT_PTR number_to_return;
+	__int64 number_to_return;
 	FuncResult result_token;
 	ExprTokenType *param, one_param;
 	int param_count;
@@ -17824,7 +17877,7 @@ UINT_PTR CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address) // Used
 			param[i].SetValue((UINT_PTR)params[i]);
 	}
 	
-	CallMethod(cb.func, cb.func, _T("call"), param, param_count, &number_to_return);
+	CallMethod(cb.func, cb.func, nullptr, param, param_count, &number_to_return);
 	// CallMethod()'s own return value is ignored because it wouldn't affect the handling below.
 	
 	if (cb.flags & CBF_CREATE_NEW_THREAD)
@@ -17849,7 +17902,7 @@ UINT_PTR CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address) // Used
 		}
 	}
 
-	return number_to_return; //return integer value to callback stub
+	return (INT_PTR)number_to_return;
 }
 
 
@@ -17869,19 +17922,10 @@ BIF_DECL(BIF_CallbackCreate)
 		_f_throw(ERR_PARAM1_INVALID);
 
 	// Get func.MinParams (if present) for validation and default parameter count.
-	ResultToken rt;
-	rt.InitResult(_f_retval_buf);
-	ExprTokenType pt(_T("MinParams"), 9);
-	ExprTokenType *pp = &pt;
-	ResultType result = func->Invoke(rt, ExprTokenType(func), IT_GET, &pp, 1);
-	rt.Free();
-	if (!result)
-	{
-		func->Release();
-		_f_return_FAIL;
-	}
-	bool has_minparams = TokenIsPureNumeric(rt);
-	int minparams = has_minparams ? (int)TokenToInt64(rt) : 0;
+	__int64 minparams;
+	bool has_minparams = GetObjectIntProperty(func, _T("MinParams"), minparams, aResultToken, true) != INVOKE_NOT_HANDLED;
+	if (aResultToken.Exited())
+		return;
 
 	LPTSTR options = ParamIndexToOptionalString(1);
 	bool pass_params_pointer = _tcschr(options, '&'); // Callback wants the address of the parameter list instead of their values.
@@ -17895,12 +17939,19 @@ BIF_DECL(BIF_CallbackCreate)
 	int actual_param_count;
 	if (!ParamIndexIsOmittedOrEmpty(2)) // A parameter count was specified.
 	{
+		__int64 maxparams;
+		bool has_maxparams = GetObjectIntProperty(func, _T("MaxParams"), maxparams, aResultToken, true) != INVOKE_NOT_HANDLED;
+		if (aResultToken.Exited())
+			return;
+		
 		actual_param_count = ParamIndexToInt(2);
+		int script_params = pass_params_pointer ? 1 : actual_param_count;
 		if (  actual_param_count < 0 // Invalid.
-			|| has_minparams && (pass_params_pointer ? 1 : actual_param_count) < minparams  ) // Too many mandatory parameters.
+			|| has_minparams && script_params < (int)minparams // Too many mandatory parameters.
+			|| has_maxparams && script_params > (int)maxparams  ) // Too few.
 		{
 			func->Release();
-			_f_throw(ERR_PARAM3_INVALID);
+			_f_throw(ERR_PARAM_COUNT_INVALID); // Seems a bit clearer than "Invalid parameter #3".
 		}
 	}
 	else if (!has_minparams || pass_params_pointer && require_param_count)
@@ -17909,7 +17960,7 @@ BIF_DECL(BIF_CallbackCreate)
 		_f_throw(ERR_PARAM3_MUST_NOT_BE_BLANK);
 	}
 	else // Default to the number of mandatory formal parameters in the function's definition.
-		actual_param_count = minparams;
+		actual_param_count = (int)minparams;
 
 #ifdef WIN32_PLATFORM
 	if (!use_cdecl && actual_param_count > 31) // The ASM instruction currently used limits parameters to 31 (which should be plenty for any realistic use).
@@ -18031,18 +18082,17 @@ BIF_DECL(BIF_Menu)
 
 
 
-BIF_DECL_GUICTRL(BIF_StatusBar)
+ResultType GuiControlType::StatusBar(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
-	LPTSTR buf = _f_number_buf; // Must be saved early since below overwrites the union (better maintainability too).
-
-	GuiType& gui = *control.gui;
-	HWND control_hwnd = control.hwnd;
+	GuiType& gui = *this->gui;
+	HWND control_hwnd = this->hwnd;
+	LPTSTR buf = _f_number_buf;
 
 	HICON hicon;
-	switch (aCalleeID)
+	switch (aID)
 	{
 	case FID_SB_SetText:
-		_f_return_b(SendMessage(control_hwnd, SB_SETTEXT
+		_o_return(SendMessage(control_hwnd, SB_SETTEXT
 			, (WPARAM)((ParamIndexIsOmitted(1) ? 0 : ParamIndexToInt64(1) - 1) // The Part# param is present.
 				     | (ParamIndexIsOmitted(2) ? 0 : ParamIndexToInt64(2) << 8)) // The uType parameter is present.
 			, (LPARAM)ParamIndexToString(0, buf))); // Caller has ensured that there's at least one param in this mode.
@@ -18066,12 +18116,11 @@ BIF_DECL_GUICTRL(BIF_StatusBar)
 				if (hicon = (HICON)SendMessage(control_hwnd, SB_GETICON, i, 0))
 					DestroyIcon(hicon);
 
-		_f_return_b(SendMessage(control_hwnd, SB_SETPARTS, new_part_count, (LPARAM)part)
+		_o_return(SendMessage(control_hwnd, SB_SETPARTS, new_part_count, (LPARAM)part)
 			? (__int64)control_hwnd : 0); // Return HWND to provide an easy means for the script to get the bar's HWND.
 
 	//case FID_SB_SetIcon:
 	default:
-		_f_set_retval_i(0); // Set default return value.
 		int unused, icon_number;
 		icon_number = ParamIndexToOptionalInt(1, 1);
 		if (icon_number == 0) // Must be != 0 to tell LoadPicture that "icon must be loaded, never a bitmap".
@@ -18087,18 +18136,19 @@ BIF_DECL_GUICTRL(BIF_StatusBar)
 			// script doesn't load too many) since they're all destroyed by the system upon program termination.
 			if (SendMessage(control_hwnd, SB_SETICON, part_index, (LPARAM)hicon))
 			{
-				_f_set_retval_i((size_t)hicon); // Override the 0 default. This allows the script to destroy the HICON later when it doesn't need it (see comments above too).
 				if (hicon_old)
 					// Although the old icon is automatically destroyed here, the script can call SendMessage(SB_SETICON)
 					// itself if it wants to work with HICONs directly (for performance reasons, etc.)
 					DestroyIcon(hicon_old);
 			}
 			else
+			{
 				DestroyIcon(hicon);
-				// And leave retval at its default value (0).
+				hicon = NULL;
+			}
 		}
-		//else can't load icon, so leave retval at its default value (0).
-		_f_return_retval;
+		//else can't load icon, so return 0.
+		_o_return((size_t)hicon); // This allows the script to destroy the HICON later when it doesn't need it (see comments above too).
 	// SB_SetTipText() not implemented (though can be done via SendMessage in the script) because the conditions
 	// under which tooltips are displayed don't seem like something a script would want very often:
 	// This ToolTip text is displayed in two situations: 
@@ -18113,7 +18163,7 @@ BIF_DECL_GUICTRL(BIF_StatusBar)
 }
 
 
-BIF_DECL_GUICTRL(BIF_LV_GetNextOrCount)
+ResultType GuiControlType::LV_GetNextOrCount(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 // LV.GetNext:
 // Returns: The index of the found item, or 0 on failure.
 // Parameters:
@@ -18121,24 +18171,22 @@ BIF_DECL_GUICTRL(BIF_LV_GetNextOrCount)
 // 2: Options string.
 // 3: (FUTURE): Possible for use with LV.FindItem (though I think it can only search item text, not subitem text).
 {
-	LPTSTR buf = aResultToken.buf; // Must be saved early since below overwrites the union (better maintainability too).
-
-	HWND control_hwnd = control.hwnd;
+	HWND control_hwnd = hwnd;
 
 	LPTSTR options;
-	if (aCalleeID == FID_LV_GetCount)
+	if (aID == FID_LV_GetCount)
 	{
 		options = (aParamCount > 0) ? omit_leading_whitespace(ParamIndexToString(0, _f_number_buf)) : _T("");
 		if (*options)
 		{
 			if (ctoupper(*options) == 'S')
-				_f_return_i(SendMessage(control_hwnd, LVM_GETSELECTEDCOUNT, 0, 0));
+				_o_return(SendMessage(control_hwnd, LVM_GETSELECTEDCOUNT, 0, 0));
 			else if (!_tcsnicmp(options, _T("Col"), 3)) // "Col" or "Column". Don't allow "C" by itself, so that "Checked" can be added in the future.
-				_f_return_i(control.union_lv_attrib->col_count);
+				_o_return(union_lv_attrib->col_count);
 			else
-				_f_throw(ERR_PARAM1_INVALID);
+				_o_throw(ERR_PARAM1_INVALID);
 		}
-		_f_return_i(SendMessage(control_hwnd, LVM_GETITEMCOUNT, 0, 0));
+		_o_return(SendMessage(control_hwnd, LVM_GETITEMCOUNT, 0, 0));
 	}
 	// Since above didn't return, this is GetNext() mode.
 
@@ -18163,25 +18211,25 @@ BIF_DECL_GUICTRL(BIF_LV_GetNextOrCount)
 	{
 	case '\0': // Listed first for performance.
 	case 'F':
-		_f_return_i(ListView_GetNextItem(control_hwnd, index
+		_o_return(ListView_GetNextItem(control_hwnd, index
 			, first_char ? LVNI_FOCUSED : LVNI_SELECTED) + 1); // +1 to convert to 1-based.
 	case 'C': // Checkbox: Find checked items. For performance assume that the control really has checkboxes.
 	  {
 		int item_count = ListView_GetItemCount(control_hwnd);
 		for (int i = index + 1; i < item_count; ++i) // Start at index+1 to omit the first item from the search (for consistency with the other mode above).
 			if (ListView_GetCheckState(control_hwnd, i)) // Item's box is checked.
-				_f_return_i(i + 1); // +1 to convert from zero-based to one-based.
+				_o_return(i + 1); // +1 to convert from zero-based to one-based.
 		// Since above didn't return, no match found.
-		_f_return_i(0);
+		_o_return(0);
 	  }
 	default:
-		_f_throw(ERR_PARAM1_INVALID);
+		_o_throw(ERR_PARAM1_INVALID);
 	}
 }
 
 
 
-BIF_DECL_GUICTRL(BIF_LV_GetText)
+ResultType GuiControlType::LV_GetText(ResultToken & aResultToken, int aID, int aFlags, ExprTokenType * aParam[], int aParamCount)
 // Returns: Text on success.
 // Throws on failure.
 // Parameters:
@@ -18195,11 +18243,11 @@ BIF_DECL_GUICTRL(BIF_LV_GetText)
 
 	int row_index = ParamIndexToInt(0) - 1; // -1 to convert to zero-based.
 	if (row_index < -1) // row_index==-1 is reserved to mean "get column heading's text".
-		_f_throw(ERR_PARAM1_INVALID);
+		_o_throw(ERR_PARAM1_INVALID);
 	// If parameter 2 is omitted, default to the first column (index 0):
 	int col_index = ParamIndexIsOmitted(1) ? 0 : ParamIndexToInt(1) - 1; // -1 to convert to zero-based.
 	if (col_index < 0)
-		_f_throw(ERR_PARAM2_INVALID);
+		_o_throw(ERR_PARAM2_INVALID);
 
 	TCHAR buf[LV_TEXT_BUF_SIZE];
 	bool result;
@@ -18210,10 +18258,10 @@ BIF_DECL_GUICTRL(BIF_LV_GetText)
 		lvc.cchTextMax = LV_TEXT_BUF_SIZE - 1;  // See notes below about -1.
 		lvc.pszText = buf;
 		lvc.mask = LVCF_TEXT;
-		if (result = SendMessage(control.hwnd, LVM_GETCOLUMN, col_index, (LPARAM)&lvc)) // Assign.
-			_f_return(lvc.pszText); // See notes below about why pszText is used instead of buf (might apply to this too).
+		if (result = SendMessage(hwnd, LVM_GETCOLUMN, col_index, (LPARAM)&lvc)) // Assign.
+			_o_return(lvc.pszText); // See notes below about why pszText is used instead of buf (might apply to this too).
 		else // On failure, it seems best to throw.
-			_f_throw(_T("Error while retrieving text."));
+			_o_throw(_T("Error while retrieving text."));
 	}
 	else // Get row's indicated item or subitem text.
 	{
@@ -18227,19 +18275,19 @@ BIF_DECL_GUICTRL(BIF_LV_GetText)
 		lvi.cchTextMax = LV_TEXT_BUF_SIZE - 1; // Note that LVM_GETITEM doesn't update this member to reflect the new length.
 		// Unlike LVM_GETITEMTEXT, LVM_GETITEM indicates success or failure, which seems more useful/preferable
 		// as a return value since a text length of zero would be ambiguous: could be an empty field or a failure.
-		if (result = SendMessage(control.hwnd, LVM_GETITEM, 0, (LPARAM)&lvi)) // Assign
+		if (result = SendMessage(hwnd, LVM_GETITEM, 0, (LPARAM)&lvi)) // Assign
 			// Must use lvi.pszText vs. buf because MSDN says: "Applications should not assume that the text will
 			// necessarily be placed in the specified buffer. The control may instead change the pszText member
 			// of the structure to point to the new text rather than place it in the buffer."
-			_f_return(lvi.pszText);
+			_o_return(lvi.pszText);
 		else // On failure, it seems best to throw.
-			_f_throw(_T("Error while retrieving text."));
+			_o_throw(_T("Error while retrieving text."));
 	}
 }
 
 
 
-BIF_DECL_GUICTRL(BIF_LV_AddInsertModify)
+ResultType GuiControlType::LV_AddInsertModify(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 // Returns: 1 on success and 0 on failure.
 // Parameters:
 // 1: For Add(), this is the options.  For Insert/Modify, it's the row index (one-based when it comes in).
@@ -18247,7 +18295,8 @@ BIF_DECL_GUICTRL(BIF_LV_AddInsertModify)
 // 3 and beyond: Additional field text.
 // In Add/Insert mode, if there are no text fields present, a blank for is appended/inserted.
 {
-	BuiltInFunctionID mode = aCalleeID;
+	GuiControlType &control = *this;
+	auto mode = BuiltInFunctionID(aID);
 	LPTSTR buf = _f_number_buf; // Resolve macro early for maintainability.
 
 	int index;
@@ -18260,7 +18309,7 @@ BIF_DECL_GUICTRL(BIF_LV_AddInsertModify)
 	{
 		index = ParamIndexToInt(0) - 1; // -1 to convert to zero-based.
 		if (index < -1 || (mode != FID_LV_Modify && index < 0)) // Allow -1 to mean "all rows" when in modify mode.
-			_f_throw(ERR_PARAM1_INVALID);
+			_o_throw(ERR_PARAM1_INVALID);
 		++aParam;  // Remove the first parameter from further consideration to make Insert/Modify symmetric with Add.
 		--aParamCount;
 	}
@@ -18390,7 +18439,7 @@ BIF_DECL_GUICTRL(BIF_LV_AddInsertModify)
 		{
 			aResultToken.Error(ERR_INVALID_OPTION, next_option);
 			*option_end = orig_char; // See comment below.
-			return;
+			return FAIL;
 		}
 
 		*option_end = orig_char; // Undo the temporary termination because the caller needs aOptions to be unaltered.
@@ -18435,7 +18484,7 @@ BIF_DECL_GUICTRL(BIF_LV_AddInsertModify)
 			if (   -1 == (lvi_sub.iItem = ListView_InsertItem(control.hwnd, &lvi))   )
 			{
 				control.attrib &= ~GUI_CONTROL_ATTRIB_SUPPRESS_EVENTS; // Re-enable events.
-				_f_return_i(0); // Since item can't be inserted, no reason to try attaching any subitems to it.
+				_o_return(0); // Since item can't be inserted, no reason to try attaching any subitems to it.
 			}
 			// Update iItem with the actual index assigned to the item, which might be different than the
 			// specified index if the control has an auto-sort style in effect.  This new iItem value
@@ -18496,33 +18545,31 @@ BIF_DECL_GUICTRL(BIF_LV_AddInsertModify)
 	}
 
 	control.attrib &= ~GUI_CONTROL_ATTRIB_SUPPRESS_EVENTS; // Re-enable events.
-	_f_return_i(result);
+	_o_return(result);
 }
 
 
 
-BIF_DECL_GUICTRL(BIF_LV_Delete)
+ResultType GuiControlType::LV_Delete(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 // Returns: 1 on success and 0 on failure.
 // Parameters:
 // 1: Row index (one-based when it comes in).
 {
-	HWND control_hwnd = control.hwnd;
-
 	if (ParamIndexIsOmitted(0))
-		_f_return_b(SendMessage(control_hwnd, LVM_DELETEALLITEMS, 0, 0)); // Returns TRUE/FALSE.
+		_o_return(SendMessage(hwnd, LVM_DELETEALLITEMS, 0, 0)); // Returns TRUE/FALSE.
 
 	// Since above didn't return, there is a first parameter present.
 	int index = ParamIndexToInt(0) - 1; // -1 to convert to zero-based.
 	if (index > -1)
-		_f_return_b(SendMessage(control_hwnd, LVM_DELETEITEM, index, 0)); // Returns TRUE/FALSE.
+		_o_return(SendMessage(hwnd, LVM_DELETEITEM, index, 0)); // Returns TRUE/FALSE.
 	else
 		// Even if index==0, for safety, it seems best not to do a delete-all.
-		_f_throw(ERR_PARAM1_INVALID);
+		_o_throw(ERR_PARAM1_INVALID);
 }
 
 
 
-BIF_DECL_GUICTRL(BIF_LV_InsertModifyDeleteCol)
+ResultType GuiControlType::LV_InsertModifyDeleteCol(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 // Returns: 1 on success and 0 on failure.
 // Parameters:
 // 1: Column index (one-based when it comes in).
@@ -18530,13 +18577,14 @@ BIF_DECL_GUICTRL(BIF_LV_InsertModifyDeleteCol)
 // 3: New text of column
 // There are also some special modes when only zero or one parameter is present, see below.
 {
-	BuiltInFunctionID mode = aCalleeID;
+	auto mode = BuiltInFunctionID(aID);
 	LPTSTR buf = _f_number_buf; // Resolve macro early for maintainability.
-	_f_set_retval_i(0); // Set default return value.
+	aResultToken.SetValue(0); // Set default return value.
 
+	GuiControlType &control = *this;
 	GuiType &gui = *control.gui;
 	lv_attrib_type &lv_attrib = *control.union_lv_attrib;
-	DWORD view_mode = mode != 'D' ? GuiType::ControlGetListViewMode(control.hwnd) : 0;
+	DWORD view_mode = mode != 'D' ? ListView_GetView(control.hwnd) : 0;
 
 	int index;
 	if (!ParamIndexIsOmitted(0))
@@ -18545,15 +18593,15 @@ BIF_DECL_GUICTRL(BIF_LV_InsertModifyDeleteCol)
 	{
 		if (mode == FID_LV_ModifyCol)
 		{
-			if (view_mode != LVS_REPORT)
-				_f_return_retval; // Return 0 to indicate failure.
+			if (view_mode != LV_VIEW_DETAILS)
+				_o_return_retval; // Return 0 to indicate failure.
 			// Otherwise:
 			// v1.0.36.03: Don't attempt to auto-size the columns while the view is not report-view because
 			// that causes any subsequent switch to the "list" view to be corrupted (invisible icons and items):
 			for (int i = 0; ; ++i) // Don't limit it to lv_attrib.col_count in case script added extra columns via direct API calls.
 				if (!ListView_SetColumnWidth(control.hwnd, i, LVSCW_AUTOSIZE)) // Failure means last column has already been processed.
 					break;
-			_f_return_b(1); // Always successful, regardless of what happened in the loop above.
+			_o_return(1); // Always successful, regardless of what happened in the loop above.
 		}
 		// Since above didn't return, mode must be 'I' (insert).
 		index = lv_attrib.col_count; // When no insertion index was specified, append to the end of the list.
@@ -18576,22 +18624,22 @@ BIF_DECL_GUICTRL(BIF_LV_InsertModifyDeleteCol)
 				MoveMemory(lv_attrib.col+index, lv_attrib.col+index+1, sizeof(lv_col_type)*(lv_attrib.col_count-index));
 			_f_set_retval_i(1);
 		}
-		_f_return_retval;
+		_o_return_retval;
 	}
 	// Do this prior to checking if index is in bounds so that it can support columns beyond LV_MAX_COLUMNS:
 	if (mode == FID_LV_ModifyCol && aParamCount < 2) // A single parameter is a special modify-mode to auto-size that column.
 	{
 		// v1.0.36.03: Don't attempt to auto-size the columns while the view is not report-view because
 		// that causes any subsequent switch to the "list" view to be corrupted (invisible icons and items):
-		if (view_mode == LVS_REPORT)
+		if (view_mode == LV_VIEW_DETAILS)
 			_f_set_retval_i(ListView_SetColumnWidth(control.hwnd, index, LVSCW_AUTOSIZE));
 		//else leave retval set to 0.
-		_f_return_retval;
+		_o_return_retval;
 	}
 	if (mode == FID_LV_InsertCol)
 	{
 		if (lv_attrib.col_count >= LV_MAX_COLUMNS) // No room to insert or append.
-			_f_return_retval;
+			_o_return_retval;
 		if (index >= lv_attrib.col_count) // For convenience, fall back to "append" when index too large.
 			index = lv_attrib.col_count;
 	}
@@ -18600,7 +18648,7 @@ BIF_DECL_GUICTRL(BIF_LV_InsertModifyDeleteCol)
 	// since col-attrib array can get out of sync with actual columns that way).
 
 	if (index < 0 || index >= LV_MAX_COLUMNS) // For simplicity, do nothing else if index out of bounds.
-		_f_return_retval; // Avoid array under/overflow below.
+		_o_return_retval; // Avoid array under/overflow below.
 
 	// In addition to other reasons, must convert any numeric value to a string so that an isolated width is
 	// recognized, e.g. LV.SetCol(1, old_width + 10):
@@ -18757,7 +18805,7 @@ BIF_DECL_GUICTRL(BIF_LV_InsertModifyDeleteCol)
 				// updating on Windows 7 and 10 (but not XP).  As a workaround, initialise the width
 				// to 0 and then resize it afterward.  do_auto_size is overloaded for this purpose
 				// since it's already passed to ListView_SetColumnWidth().
-				if (mode == 'I' && view_mode == LVS_REPORT)
+				if (mode == 'I' && view_mode == LV_VIEW_DETAILS)
 				{
 					lvc.cx = 0; // Must be zero; if width is zero, ListView_SetColumnWidth() won't be called.
 					do_auto_size = width; // If non-zero, this is passed to ListView_SetColumnWidth().
@@ -18772,7 +18820,7 @@ BIF_DECL_GUICTRL(BIF_LV_InsertModifyDeleteCol)
 			{
 				aResultToken.Error(ERR_INVALID_OPTION, next_option);
 				*option_end = orig_char; // See comment below.
-				return;
+				return FAIL;
 			}
 		}
 
@@ -18814,7 +18862,7 @@ BIF_DECL_GUICTRL(BIF_LV_InsertModifyDeleteCol)
 		//lvc.mask |= LVCF_ORDER;
 		//lvc.iOrder = index + 1;
 		if (   -1 == (index = ListView_InsertColumn(control.hwnd, index, &lvc))   )
-			_f_return_retval; // Since column could not be inserted, return so that below, sort-now, etc. are not done.
+			_o_return_retval; // Since column could not be inserted, return so that below, sort-now, etc. are not done.
 		_f_set_retval_i(index + 1); // +1 to convert the new index to 1-based.
 		if (index < lv_attrib.col_count) // Since col is not being appended to the end, make room in the array to insert this column.
 			MoveMemory(lv_attrib.col+index+1, lv_attrib.col+index, sizeof(lv_col_type)*(lv_attrib.col_count-index));
@@ -18832,7 +18880,7 @@ BIF_DECL_GUICTRL(BIF_LV_InsertModifyDeleteCol)
 	// Auto-size is done only at this late a stage, in case column was just created above.
 	// Note that ListView_SetColumn() apparently does not support LVSCW_AUTOSIZE_USEHEADER for it's "cx" member.
 	// do_auto_size contains the actual column width if mode == 'I' and a width was passed by the caller.
-	if (do_auto_size && view_mode == LVS_REPORT)
+	if (do_auto_size && view_mode == LV_VIEW_DETAILS)
 		ListView_SetColumnWidth(control.hwnd, index, do_auto_size); // retval was previously set to the more important result above.
 	//else v1.0.36.03: Don't attempt to auto-size the columns while the view is not report-view because
 	// that causes any subsequent switch to the "list" view to be corrupted (invisible icons and items).
@@ -18840,12 +18888,12 @@ BIF_DECL_GUICTRL(BIF_LV_InsertModifyDeleteCol)
 	if (sort_now)
 		GuiType::LV_Sort(control, index, false, sort_now_direction);
 
-	_f_return_retval;
+	_o_return_retval;
 }
 
 
 
-BIF_DECL_GUICTRL(BIF_LV_SetImageList)
+ResultType GuiControlType::LV_SetImageList(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 // Returns (MSDN): "handle to the image list previously associated with the control if successful; NULL otherwise."
 // Parameters:
 // 1: HIMAGELIST obtained from somewhere such as IL_Create().
@@ -18862,12 +18910,12 @@ BIF_DECL_GUICTRL(BIF_LV_SetImageList)
 		ImageList_GetIconSize(himl, &cx, &cy);
 		list_type = (cx > GetSystemMetrics(SM_CXSMICON)) ? LVSIL_NORMAL : LVSIL_SMALL;
 	}
-	_f_return_i((size_t)ListView_SetImageList(control.hwnd, himl, list_type));
+	_o_return((size_t)ListView_SetImageList(hwnd, himl, list_type));
 }
 
 
 
-BIF_DECL_GUICTRL(BIF_TV_AddModifyDelete)
+ResultType GuiControlType::TV_AddModifyDelete(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 // TV.Add():
 // Returns the HTREEITEM of the item on success, zero on failure.
 // Parameters:
@@ -18883,7 +18931,8 @@ BIF_DECL_GUICTRL(BIF_TV_AddModifyDelete)
 // Parameters for TV.Delete():
 //    1: ID of item to delete (if omitted, all items are deleted).
 {
-	BuiltInFunctionID mode = aCalleeID;
+	GuiControlType &control = *this;
+	auto mode = BuiltInFunctionID(aID);
 	LPTSTR buf = _f_number_buf; // Resolve macro early for maintainability.
 
 	if (mode == FID_TV_Delete)
@@ -18892,7 +18941,7 @@ BIF_DECL_GUICTRL(BIF_TV_AddModifyDelete)
 		// script bug is so rare that it is never caught until the script is distributed).  Another reason
 		// is that a script might do something like TV.Delete(TV.GetSelection()), which would be desired
 		// to fail not delete-all if there's ever any way for there to be no selection.
-		_f_return_i(SendMessage(control.hwnd, TVM_DELETEITEM, 0
+		_o_return(SendMessage(control.hwnd, TVM_DELETEITEM, 0
 			, ParamIndexIsOmitted(0) ? NULL : (LPARAM)ParamIndexToInt64(0)));
 	}
 
@@ -18927,7 +18976,7 @@ BIF_DECL_GUICTRL(BIF_TV_AddModifyDelete)
 			if (!TreeView_SelectItem(control.hwnd, tvi.item.hItem))
 				retval = 0; // Override the HTREEITEM default value set above.
 			control.attrib &= ~GUI_CONTROL_ATTRIB_SUPPRESS_EVENTS; // Re-enable events.
-			_f_return_i((size_t)retval);
+			_o_return((size_t)retval);
 		}
 		// Otherwise, there's a second parameter (even if it's 0 or "").
 		options = ParamIndexToString(1, buf);
@@ -19004,10 +19053,11 @@ BIF_DECL_GUICTRL(BIF_TV_AddModifyDelete)
 			else if (!*next_option)
 				ensure_visible = adding;
 		}
-		else if (!_tcsicmp(next_option, _T("Bold")))
+		else if (!_tcsnicmp(next_option, _T("Bold"), 4))
 		{
-			// Bold%VarContainingOneOrZero isn't supported because due to rarity.  There might someday
-			// be a ternary operator to make such things easier anyway.
+			next_option += 4;
+			if (*next_option && !ATOI(next_option)) // If it's Bold0, invert the mode.
+				adding = !adding;
 			tvi.item.stateMask |= TVIS_BOLD;
 			if (adding)
 				tvi.item.state |= TVIS_BOLD;
@@ -19086,19 +19136,21 @@ BIF_DECL_GUICTRL(BIF_TV_AddModifyDelete)
 				if (!TreeView_SortChildren(control.hwnd, tvi.item.hItem, FALSE)) // Best default seems no-recurse, since typically this is used after a user edits merely a single item.
 					retval = 0; // Indicate partial failure by overriding the HTREEITEM return value set earlier.
 		}
-		else if (add_mode) // MUST BE LISTED LAST DUE TO "ELSE IF": Options valid only for TV.Add().
+		// MUST BE LISTED LAST DUE TO "ELSE IF": Options valid only for TV.Add().
+		else if (add_mode && !_tcsicmp(next_option, _T("First")))
 		{
-			if (!_tcsicmp(next_option, _T("First")))
-				tvi.hInsertAfter = TVI_FIRST; // For simplicity, the value of "adding" is ignored.
-			else if (IsNumeric(next_option, false, false, false))
-				tvi.hInsertAfter = (HTREEITEM)ATOI64(next_option); // ATOI64 vs. ATOU avoids need for extra casting to avoid compiler warning.
+			tvi.hInsertAfter = TVI_FIRST; // For simplicity, the value of "adding" is ignored.
+		}
+		else if (add_mode && IsNumeric(next_option, false, false, false))
+		{
+			tvi.hInsertAfter = (HTREEITEM)ATOI64(next_option); // ATOI64 vs. ATOU avoids need for extra casting to avoid compiler warning.
 		}
 		else
 		{
 			control.attrib &= ~GUI_CONTROL_ATTRIB_SUPPRESS_EVENTS; // Re-enable events.
 			aResultToken.Error(ERR_INVALID_OPTION, next_option);
 			*option_end = orig_char; // See comment below.
-			return;
+			return FAIL;
 		}
 
 		// If the item was not handled by the above, ignore it because it is unknown.
@@ -19134,7 +19186,7 @@ BIF_DECL_GUICTRL(BIF_TV_AddModifyDelete)
 			retval = 0; // When not in add-mode, indicate partial failure by overriding the return value set earlier (add-mode should always return the new item's ID).
 
 	control.attrib &= ~GUI_CONTROL_ATTRIB_SUPPRESS_EVENTS; // Re-enable events.
-	_f_return_i((size_t)retval);
+	_o_return((size_t)retval);
 }
 
 
@@ -19171,13 +19223,14 @@ HTREEITEM GetNextTreeItem(HWND aTreeHwnd, HTREEITEM aItem)
 
 
 
-BIF_DECL_GUICTRL(BIF_TV_GetRelatedItem)
+ResultType GuiControlType::TV_GetRelatedItem(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 // TV.GetParent/Child/Selection/Next/Prev(hitem):
 // The above all return the HTREEITEM (or 0 on failure).
 // When TV.GetNext's second parameter is present, the search scope expands to include not just siblings,
 // but also children and parents, which allows a tree to be traversed from top to bottom without the script
 // having to do something fancy.
 {
+	GuiControlType &control = *this;
 	HWND control_hwnd = control.hwnd;
 
 	HTREEITEM hitem = (HTREEITEM)ParamIndexToOptionalIntPtr(0, NULL);
@@ -19185,7 +19238,7 @@ BIF_DECL_GUICTRL(BIF_TV_GetRelatedItem)
 	if (ParamIndexIsOmitted(1))
 	{
 		WPARAM flag;
-		switch (aCalleeID)
+		switch (aID)
 		{
 		case FID_TV_GetSelection: flag = TVGN_CARET; break; // TVGN_CARET is the focused item.
 		case FID_TV_GetParent: flag = TVGN_PARENT; break;
@@ -19205,12 +19258,12 @@ BIF_DECL_GUICTRL(BIF_TV_GetRelatedItem)
 			// story is with this, so for now just casting to UINT rather than something less future-proof like WORD:
 			// Older note, apparently unneeded at least on XP SP2: Cast to WORD to convert -1 through -32768 to the
 			// positive counterparts.
-			_f_return_i((UINT)SendMessage(control_hwnd, TVM_GETCOUNT, 0, 0));
+			_o_return((UINT)SendMessage(control_hwnd, TVM_GETCOUNT, 0, 0));
 		}
 		// Apparently there's no direct call to get the topmost ancestor of an item, presumably because it's rarely
 		// needed.  Therefore, no such mode is provide here yet (the syntax TV.GetParent(hitem, true) could be supported
 		// if it's ever needed).
-		_f_return_i(SendMessage(control_hwnd, TVM_GETNEXTITEM, flag, (LPARAM)hitem));
+		_o_return(SendMessage(control_hwnd, TVM_GETNEXTITEM, flag, (LPARAM)hitem));
 	}
 
 	// Since above didn't return, this TV.GetNext's 2-parameter mode, which has an expanded scope that includes
@@ -19223,29 +19276,29 @@ BIF_DECL_GUICTRL(BIF_TV_GetRelatedItem)
 	else if (first_char_upper == 'F')
 		search_checkmark = false;
 	else // Reserve other option letters/words for future use by being somewhat strict.
-		_f_throw(ERR_PARAM2_INVALID);
+		_o_throw(ERR_PARAM2_INVALID);
 
 	// When an actual item was specified, search begins at the item *after* it.  Otherwise (when NULL):
 	// It's a special mode that always considers the root node first.  Otherwise, there would be no way
 	// to start the search at the very first item in the tree to find out whether it's checked or not.
 	hitem = GetNextTreeItem(control_hwnd, hitem); // Handles the comment above.
 	if (!search_checkmark) // Simple tree traversal, so just return the next item (if any).
-		_f_return_i((size_t)hitem); // OK if NULL.
+		_o_return((size_t)hitem); // OK if NULL.
 
 	// Otherwise, search for the next item having a checkmark. For performance, it seems best to assume that
 	// the control has the checkbox style (the script would realistically never call it otherwise, so the
 	// control's style isn't checked.
 	for (; hitem; hitem = GetNextTreeItem(control_hwnd, hitem))
 		if (TreeView_GetCheckState(control_hwnd, hitem) == 1) // 0 means unchecked, -1 means "no checkbox image".
-			_f_return_i((size_t)hitem); // OK if NULL.
+			_o_return((size_t)hitem); // OK if NULL.
 	// Since above didn't return, the entire tree starting at the specified item has been searched,
 	// with no match found.
-	_f_return_i(0);
+	_o_return(0);
 }
 
 
 
-BIF_DECL_GUICTRL(BIF_TV_Get)
+ResultType GuiControlType::TV_Get(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 // TV.Get()
 // Returns: Varies depending on param #2.
 // Parameters:
@@ -19257,9 +19310,9 @@ BIF_DECL_GUICTRL(BIF_TV_Get)
 // Parameters:
 //    1: HTREEITEM.
 {
-	bool get_text = aCalleeID == FID_TV_GetText;
+	bool get_text = aID == FID_TV_GetText;
 
-	HWND control_hwnd = control.hwnd;
+	HWND control_hwnd = hwnd;
 
 	if (!get_text)
 	{
@@ -19286,7 +19339,7 @@ BIF_DECL_GUICTRL(BIF_TV_Get)
 		else // For all others, anything non-zero means the flag is present.
             if (!result) // Flag not present.
 				hitem = 0;
-		_f_return_i((size_t)hitem);
+		_o_return((size_t)hitem);
 	}
 
 	TCHAR text_buf[LV_TEXT_BUF_SIZE]; // i.e. uses same size as ListView.
@@ -19301,18 +19354,18 @@ BIF_DECL_GUICTRL(BIF_TV_Get)
 		// Must use tvi.pszText vs. text_buf because MSDN says: "Applications should not assume that the text will
 		// necessarily be placed in the specified buffer. The control may instead change the pszText member
 		// of the structure to point to the new text rather than place it in the buffer."
-		_f_return(tvi.pszText);
+		_o_return(tvi.pszText);
 	}
 	else
 	{
 		// On failure, it seems best to throw an exception.
-		_f_throw(_T("Error while retrieving text."));
+		_o_throw(_T("Error while retrieving text."));
 	}
 }
 
 
 
-BIF_DECL_GUICTRL(BIF_TV_SetImageList)
+ResultType GuiControlType::TV_SetImageList(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 // Returns (MSDN): "handle to the image list previously associated with the control if successful; NULL otherwise."
 // Parameters:
 // 1: HIMAGELIST obtained from somewhere such as IL_Create().
@@ -19322,7 +19375,7 @@ BIF_DECL_GUICTRL(BIF_TV_SetImageList)
 	HIMAGELIST himl = (HIMAGELIST)ParamIndexToInt64(0);
 	int list_type;
 	list_type = ParamIndexToOptionalInt(1, TVSIL_NORMAL);
-	_f_return_i((size_t)TreeView_SetImageList(control.hwnd, himl, list_type));
+	_o_return((size_t)TreeView_SetImageList(hwnd, himl, list_type));
 }
 
 
@@ -19618,30 +19671,21 @@ BIF_DECL(BIF_Cast)
 
 
 BIF_DECL(BIF_Type)
-// Returns the pure type of the given value.
 {
-	LPTSTR type;
-	if (aParam[0]->symbol == SYM_VAR)
-		aParam[0]->var->ToTokenSkipAddRef(*aParam[0]);
-	switch (aParam[0]->symbol)
+	_f_return_p(TokenTypeString(*aParam[0]));
+}
+
+// Returns the type name of the given value.
+LPTSTR TokenTypeString(ExprTokenType &aToken)
+{
+	switch (TypeOfToken(aToken))
 	{
-	case SYM_STRING:
-		type = _T("String");
-		break;
-	case SYM_INTEGER:
-		type = _T("Integer");
-		break;
-	case SYM_FLOAT:
-		type = _T("Float");
-		break;
-	case SYM_OBJECT:
-		type = aParam[0]->object->Type();
-		break;
-	default:
-		// Default for maintainability.  Could be SYM_MISSING, but it would have to be intentional: %'type'%(,).
-		type = _T("");
+	case SYM_STRING: return _T("String");
+	case SYM_INTEGER: return _T("Integer");
+	case SYM_FLOAT: return _T("Float");
+	case SYM_OBJECT: return TokenToObject(aToken)->Type();
+	default: return _T(""); // For maintainability.
 	}
-	_f_return_p(type);
 }
 
 
@@ -19650,7 +19694,7 @@ BIF_DECL(BIF_Exception)
 {
 	LPTSTR message = ParamIndexToString(0, _f_number_buf);
 	TCHAR what_buf[MAX_NUMBER_SIZE], extra_buf[MAX_NUMBER_SIZE];
-	LPTSTR what = NULL;
+	LPCTSTR what = NULL;
 	Line *line = NULL;
 
 	if (ParamIndexIsOmitted(1)) // "What"
@@ -19668,7 +19712,7 @@ BIF_DECL(BIF_Exception)
 	else
 	{
 #ifdef CONFIG_DEBUGGER
-		int offset = TokenIsNumeric(*aParam[1]) ? ParamIndexToInt(1) : 0;
+		int offset = ParamIndexIsNumeric(1) ? ParamIndexToInt(1) : 0;
 		DbgStack::Entry *se = g_Debugger.mStack.mTop;
 		while (--se >= g_Debugger.mStack.mBottom)
 		{
@@ -19903,7 +19947,7 @@ double TokenToDouble(ExprTokenType &aToken, BOOL aCheckForHex)
 
 
 LPTSTR TokenToString(ExprTokenType &aToken, LPTSTR aBuf, size_t *aLength)
-// Supports Type() VAR_NORMAL and VAR-CLIPBOARD.
+// Supports Type() VAR_NORMAL and VAR_CLIPBOARD.
 // Returns "" on failure to simplify logic in callers.  Otherwise, it returns either aBuf (if aBuf was needed
 // for the conversion) or the token's own string.  aBuf may be NULL, in which case the caller presumably knows
 // that this token is SYM_STRING or SYM_VAR (or the caller wants "" back for anything other than those).
@@ -19912,10 +19956,11 @@ LPTSTR TokenToString(ExprTokenType &aToken, LPTSTR aBuf, size_t *aLength)
 	LPTSTR result;
 	switch (aToken.symbol)
 	{
-	case SYM_VAR: // Caller has ensured that any SYM_VAR's Type() is VAR_NORMAL.
+	case SYM_VAR: // Caller has ensured that any SYM_VAR's Type() is VAR_NORMAL or VAR_CLIPBOARD.
+		result = aToken.var->Contents(); // Contents() vs. mCharContents in case mCharContents needs to be updated by Contents().
 		if (aLength)
-			*aLength = aToken.var->Length(); // Might also update mCharContents.
-		return aToken.var->Contents(); // Contents() vs. mCharContents in case mCharContents needs to be updated by Contents().
+			*aLength = aToken.var->Type() == VAR_NORMAL ? aToken.var->Length() : _tcslen(result);
+		return result;
 	case SYM_STRING:
 		result = aToken.marker;
 		if (aLength)
@@ -20056,6 +20101,46 @@ IObject *StringToFunctor(LPTSTR aStr)
 
 
 
+ResultType ValidateFunctor(IObject *aFunc, int aParamCount, ResultToken &aResultToken, LPTSTR aNullErr)
+{
+	if (!aFunc)
+		return aResultToken.Error(aNullErr);
+	__int64 min_params, max_params;
+	auto min_result = /*aParamCount < 0 ? INVOKE_NOT_HANDLED
+		:*/ GetObjectIntProperty(aFunc, _T("MinParams"), min_params, aResultToken, true);
+	if (aResultToken.Exited())
+		return FAIL; // For maintainability, consider EARLY_EXIT the same as failure (boolean false).
+	//if (aParamCount < 0) // Caller's signal to skip MinParams check.
+	//	aParamCount = -aParamCount;
+	auto max_result = aParamCount == 0 ? INVOKE_NOT_HANDLED // No need to check MaxParams when passing 0 params.
+		: GetObjectIntProperty(aFunc, _T("MaxParams"), max_params, aResultToken, true);
+	if (aResultToken.Exited())
+		return FAIL;
+	if (min_result != INVOKE_NOT_HANDLED && aParamCount < (int)min_params)
+		return aResultToken.Error(ERR_PARAM_COUNT_INVALID);
+	if (max_result != INVOKE_NOT_HANDLED && aParamCount > (int)max_params)
+	{
+		__int64 is_variadic;
+		auto result = GetObjectIntProperty(aFunc, _T("IsVariadic"), is_variadic, aResultToken, true);
+		if (aResultToken.Exited())
+			return FAIL;
+		if (result == INVOKE_NOT_HANDLED || !is_variadic)
+			return aResultToken.Error(ERR_PARAM_COUNT_INVALID);
+	}
+	// If either MinParams or MaxParams was confirmed to exist, this is likely a valid
+	// function object, so skip the following check for performance.  Otherwise, catch
+	// likely errors by checking that the object is callable.
+	if (min_result == INVOKE_NOT_HANDLED && max_result == INVOKE_NOT_HANDLED)
+		if (Object *obj = dynamic_cast<Object *>(aFunc))
+			if (!obj->HasMethod(_T("Call")))
+				return aResultToken.Error(ERR_TYPE_MISMATCH);
+		// Otherwise: COM objects can be callable via DISPID_VALUE.  There's probably
+		// no way to determine whether the object supports that without invoking it.
+	return OK;
+}
+
+
+
 ResultType TokenSetResult(ResultToken &aResultToken, LPCTSTR aValue, size_t aLength)
 // Utility function for handling memory allocation and return to callers of built-in functions; based on BIF_SubStr.
 // Returns FAIL if malloc failed, in which case our caller is responsible for returning a sensible default value.
@@ -20077,6 +20162,103 @@ ResultType TokenSetResult(ResultToken &aResultToken, LPCTSTR aValue, size_t aLen
 	aResultToken.marker[aLength] = '\0'; // Must be done separately from the memcpy() because the memcpy() might just be taking a substring (i.e. long before result's terminator).
 	aResultToken.marker_length = aLength;
 	return OK;
+}
+
+
+
+// TypeOfToken: Similar result to TokenIsPureNumeric, but may return SYM_OBJECT.
+SymbolType TypeOfToken(ExprTokenType &aToken)
+{
+	switch (aToken.symbol)
+	{
+	case SYM_VAR:
+		switch (aToken.var->IsPureNumericOrObject())
+		{
+		case VAR_ATTRIB_IS_INT64: return SYM_INTEGER;
+		case VAR_ATTRIB_IS_DOUBLE: return SYM_FLOAT;
+		case VAR_ATTRIB_IS_OBJECT: return SYM_OBJECT;
+		}
+		// Fall through for the default case:
+	case SYM_MISSING:
+		return SYM_STRING;
+	default:
+#ifdef _DEBUG
+		MsgBox(_T("DEBUG: Unhandled symbol type."));
+#endif
+	case SYM_STRING:
+	case SYM_INTEGER:
+	case SYM_FLOAT:
+	case SYM_OBJECT:
+		return aToken.symbol;
+	}
+}
+
+
+
+// TypeOfToken: Similar result to TokenIsPureNumeric, but may return SYM_OBJECT.
+SymbolType TypeOfToken(ExprTokenType &aToken, SymbolType &aIsNum)
+{
+	switch (aToken.symbol)
+	{
+	case SYM_VAR:
+		switch (aToken.var->IsPureNumericOrObject())
+		{
+		case VAR_ATTRIB_IS_INT64:
+			aIsNum = PURE_INTEGER;
+			return SYM_INTEGER;
+		case VAR_ATTRIB_IS_DOUBLE:
+			aIsNum = PURE_FLOAT;
+			return SYM_FLOAT;
+		case VAR_ATTRIB_IS_OBJECT:
+			aIsNum = PURE_NOT_NUMERIC;
+			return SYM_OBJECT;
+		default:
+			aIsNum = aToken.var->IsNumeric();
+			return SYM_STRING;
+		}
+	case SYM_STRING:
+	case SYM_MISSING:
+		aIsNum = IsNumeric(aToken.marker, true, false, true);
+		return SYM_STRING;
+	case SYM_INTEGER:
+	case SYM_FLOAT:
+		aIsNum = aToken.symbol;
+		return aToken.symbol;
+	default:
+#ifdef _DEBUG
+		MsgBox(_T("DEBUG: Unhandled symbol type."));
+#endif
+	case SYM_OBJECT:
+		aIsNum = PURE_NOT_NUMERIC;
+		return aToken.symbol;
+	}
+}
+
+
+
+BOOL TokensAreEqual(ExprTokenType &left, ExprTokenType &right)
+// Compares two tokens using similar rules to SYM_EQUAL, but case sensitive if appropriate.
+{
+	SymbolType left_is_numeric, left_type = TypeOfToken(left, left_is_numeric)
+			, right_is_numeric, right_type = TypeOfToken(right, right_is_numeric);
+
+	if (left_type == SYM_OBJECT || right_type == SYM_OBJECT)
+		return TokenToObject(left) == TokenToObject(right);
+	if (!left_is_numeric || !right_is_numeric || (left_type == SYM_STRING && right_type == SYM_STRING))
+	{
+		TCHAR left_buf[MAX_NUMBER_SIZE], *left_string = TokenToString(left, left_buf);
+		TCHAR right_buf[MAX_NUMBER_SIZE], *right_string = TokenToString(right, right_buf);
+		switch (g->StringCaseSense)
+		{
+		case SCS_INSENSITIVE:	return !_tcsicmp(left_string, right_string);
+		case SCS_SENSITIVE:		return !_tcscmp(left_string, right_string);
+		default:				return !lstrcmpi(left_string, right_string);
+		}
+	}
+	if (left_type == PURE_INTEGER && right_type == PURE_INTEGER)
+		return TokenToInt64(left) == TokenToInt64(right);
+	else
+		return TokenToDouble(left) == TokenToDouble(right);
 }
 
 
@@ -20149,31 +20331,13 @@ bool ScriptGetKeyState(vk_type aVK, KeyStateTypes aKeyStateType)
 	switch (aKeyStateType)
 	{
 	case KEYSTATE_TOGGLE: // Whether a toggleable key such as CapsLock is currently turned on.
-		// Under Win9x, at least certain versions and for certain hardware, this
-		// doesn't seem to be always accurate, especially when the key has just
-		// been toggled and the user hasn't pressed any other key since then.
-		// I tried using GetKeyboardState() instead, but it produces the same
-		// result.  Therefore, I've documented this as a limitation in the help file.
-		// In addition, this was attempted but it didn't seem to help:
-		//if (g_os.IsWin9x())
-		//{
-		//	DWORD fore_thread = GetWindowThreadProcessId(GetForegroundWindow(), NULL);
-		//	bool is_attached_my_to_fore = false;
-		//	if (fore_thread && fore_thread != g_ThreadID)
-		//		is_attached_my_to_fore = AttachThreadInput(g_ThreadID, fore_thread, TRUE) != 0;
-		//	output_var->Assign(IsKeyToggledOn(aVK) ? "D" : "U");
-		//	if (is_attached_my_to_fore)
-		//		AttachThreadInput(g_ThreadID, fore_thread, FALSE);
-		//	return OK;
-		//}
-		//else
-		return IsKeyToggledOn(aVK); // This also works for the INSERT key, but only on XP (and possibly Win2k).
+		return IsKeyToggledOn(aVK); // This also works for non-"lock" keys, but in that case the toggle state can be out of sync with other processes/threads.
 	case KEYSTATE_PHYSICAL: // Physical state of key.
 		if (IsMouseVK(aVK)) // mouse button
 		{
 			if (g_MouseHook) // mouse hook is installed, so use it's tracking of physical state.
 				return g_PhysicalKeyState[aVK] & STATE_DOWN;
-			else // Even for Win9x/NT, it seems slightly better to call this rather than IsKeyDown9xNT():
+			else
 				return IsKeyDownAsync(aVK);
 		}
 		else // keyboard
@@ -20188,28 +20352,20 @@ bool ScriptGetKeyState(vk_type aVK, KeyStateTypes aKeyStateType)
 					GetModifierLRState(true); // Correct hook's physical state if needed.
 				return g_PhysicalKeyState[aVK] & STATE_DOWN;
 			}
-			else // Even for Win9x/NT, it seems slightly better to call this rather than IsKeyDown9xNT():
+			else
 				return IsKeyDownAsync(aVK);
 		}
 	} // switch()
 
 	// Otherwise, use the default state-type: KEYSTATE_LOGICAL
-	if (g_os.IsWin9x() || g_os.IsWinNT4())
-		return IsKeyDown9xNT(aVK); // See its comments for why it's more reliable on these OSes.
-	else
-		// On XP/2K at least, a key can be physically down even if it isn't logically down,
-		// which is why the below specifically calls IsKeyDown2kXP() rather than some more
-		// comprehensive method such as consulting the physical key state as tracked by the hook:
-		// v1.0.42.01: For backward compatibility, the following hasn't been changed to IsKeyDownAsync().
-		// For example, a script might rely on being able to detect whether Control was down at the
-		// time the current Gui thread was launched rather than whether than whether it's down right now.
-		// Another example is the journal playback hook: when a window owned by the script receives
-		// such a keystroke, only GetKeyState() can detect the changed state of the key, not GetAsyncKeyState().
-		// A new mode can be added to KeyWait & GetKeyState if Async is ever explicitly needed.
-		return IsKeyDown2kXP(aVK);
-		// Known limitation: For some reason, both the above and IsKeyDown9xNT() will indicate
-		// that the CONTROL key is up whenever RButton is down, at least if the mouse hook is
-		// installed without the keyboard hook.  No known explanation.
+	// On XP/2K at least, a key can be physically down even if it isn't logically down,
+	// which is why the below specifically calls IsKeyDown() rather than some more
+	// comprehensive method such as consulting the physical key state as tracked by the hook:
+	// v1.0.42.01: For backward compatibility, the following hasn't been changed to IsKeyDownAsync().
+	// One example is the journal playback hook: when a window owned by the script receives
+	// such a keystroke, only GetKeyState() can detect the changed state of the key, not GetAsyncKeyState().
+	// A new mode can be added to KeyWait & GetKeyState if Async is ever explicitly needed.
+	return IsKeyDown(aVK);
 }
 
 
@@ -20350,69 +20506,48 @@ DWORD GetProcessName(DWORD aProcessID, LPTSTR aBuf, DWORD aBufSize, bool aGetNam
 {
 	*aBuf = '\0'; // Set default.
 	HANDLE hproc;
-	if (  !(hproc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, aProcessID))  )
-		// OpenProcess failed, so try fallback access; this will probably cause the
-		// first method below to fail and fall back to GetProcessImageFileName.
-		if (  !(hproc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, aProcessID))  )
-			return 0;
+	// Windows XP/2003 would require PROCESS_QUERY_INFORMATION, but those OSes are not supported.
+	if (  !(hproc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, aProcessID))  )
+		return 0;
 
-	// Attempt these first, since they return exactly what we want and are available on Win2k:
-	DWORD buf_length = aGetNameOnly
-		? GetModuleBaseName(hproc, NULL, aBuf, aBufSize)
-		: GetModuleFileNameEx(hproc, NULL, aBuf, aBufSize);
-
-	typedef DWORD (WINAPI *MyGetName)(HANDLE, LPTSTR, DWORD);
-#ifdef CONFIG_WIN2K
-	// This must be loaded dynamically or the program will probably not launch at all on Win2k:
-	static MyGetName lpfnGetName = (MyGetName)GetProcAddress(GetModuleHandle(_T("psapi")), "GetProcessImageFileName" WINAPI_SUFFIX);;
-#else
-	static MyGetName lpfnGetName = &GetProcessImageFileName;
-#endif
-
-	if (!buf_length && lpfnGetName)
+	// Benchmarks showed that attempting GetModuleBaseName/GetModuleFileNameEx
+	// first did not help performance.  Also, QueryFullProcessImageName appeared
+	// to be slower than the following.
+	DWORD buf_length = GetProcessImageFileName(hproc, aBuf, aBufSize);
+	if (buf_length)
 	{
-		// Above failed, possibly for one of the following reasons:
-		//	- Our process is 32-bit, but that one is 64-bit.
-		//	- That process is running at a higher integrity level (UAC is interfering).
-		//	- We didn't have permission to use PROCESS_VM_READ access?
-		//
-		// So fall back to GetProcessImageFileName (XP or later required):
-		buf_length = lpfnGetName(hproc, aBuf, aBufSize);
-		if (buf_length)
+		LPTSTR cp;
+		if (aGetNameOnly)
 		{
-			LPTSTR cp;
-			if (aGetNameOnly)
+			// Convert full path to just name.
+			cp = _tcsrchr(aBuf, '\\');
+			if (cp)
+				tmemmove(aBuf, cp + 1, _tcslen(cp)); // Includes the null terminator.
+		}
+		else
+		{
+			// Convert device path to logical path.
+			TCHAR device_path[MAX_PATH];
+			TCHAR letter[3];
+			letter[1] = ':';
+			letter[2] = '\0';
+			// For simplicity and because GetLogicalDriveStrings does not exist on Win2k, it is not used.
+			for (*letter = 'A'; *letter <= 'Z'; ++(*letter))
 			{
-				// Convert full path to just name.
-				cp = _tcsrchr(aBuf, '\\');
-				if (cp)
-					tmemmove(aBuf, cp + 1, _tcslen(cp)); // Includes the null terminator.
-			}
-			else
-			{
-				// Convert device path to logical path.
-				TCHAR device_path[MAX_PATH];
-				TCHAR letter[3];
-				letter[1] = ':';
-				letter[2] = '\0';
-				// For simplicity and because GetLogicalDriveStrings does not exist on Win2k, it is not used.
-				for (*letter = 'A'; *letter <= 'Z'; ++(*letter))
+				DWORD device_path_length = QueryDosDevice(letter, device_path, _countof(device_path));
+				if (device_path_length > 2) // Includes two null terminators.
 				{
-					DWORD device_path_length = QueryDosDevice(letter, device_path, _countof(device_path));
-					if (device_path_length > 2) // Includes two null terminators.
+					device_path_length -= 2;
+					if (!_tcsncmp(device_path, aBuf, device_path_length)
+						&& aBuf[device_path_length] == '\\') // Relies on short-circuit evaluation.
 					{
-						device_path_length -= 2;
-						if (!_tcsncmp(device_path, aBuf, device_path_length)
-							&& aBuf[device_path_length] == '\\') // Relies on short-circuit evaluation.
-						{
-							// Copy drive letter:
-							aBuf[0] = letter[0];
-							aBuf[1] = letter[1];
-							// Contract path to remove remainder of device name.
-							tmemmove(aBuf + 2, aBuf + device_path_length, buf_length - device_path_length + 1);
-							buf_length -= device_path_length - 2;
-							break;
-						}
+						// Copy drive letter:
+						aBuf[0] = letter[0];
+						aBuf[1] = letter[1];
+						// Contract path to remove remainder of device name.
+						tmemmove(aBuf + 2, aBuf + device_path_length, buf_length - device_path_length + 1);
+						buf_length -= device_path_length - 2;
+						break;
 					}
 				}
 			}

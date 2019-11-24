@@ -39,15 +39,14 @@ HCUSTOMMODULE g_hKERNEL32 = NULL;
 _QueryPerformanceCounter g_QPC = NULL;
 double g_QPCtimer = 0.0;
 double g_QPCfreq = 0.0;
-#ifdef _USRDLL
 _thread_local bool g_Reloading = false;
+#ifdef _USRDLL
 _thread_local bool g_Loading = false;
 #endif
 #ifndef _USRDLL
 EXPORT FARPROC g_ThreadExitApp = (FARPROC)&ThreadExitApp;
 UINT_PTR g_ahkThreads[MAX_AHK_THREADS][7];
 #endif
-_thread_local MetaObject *g_MetaObject;
 HINSTANCE g_hInstance = NULL; // Set by WinMain().
 _thread_local HMODULE g_hMemoryModule = NULL; // Set by DllMain() used for COM 
 EXPORT DWORD g_MainThreadID = GetCurrentThreadId();
@@ -73,13 +72,13 @@ _thread_local HWND g_hWndEdit = NULL;
 _thread_local HFONT g_hFontEdit = NULL;
 _thread_local HACCEL g_hAccelTable = NULL;
 
-typedef int (WINAPI *StrCmpLogicalW_type)(LPCWSTR, LPCWSTR);
-_thread_local StrCmpLogicalW_type g_StrCmpLogicalW = NULL;
 _thread_local WNDPROC g_TabClassProc = NULL;
 
 modLR_type g_modifiersLR_logical = 0;
 modLR_type g_modifiersLR_logical_non_ignored = 0;
 modLR_type g_modifiersLR_physical = 0;
+modLR_type g_modifiersLR_numpad_mask = 0;
+modLR_type g_modifiersLR_ctrlaltdel_mask = 0;
 
 #ifdef FUTURE_USE_MOUSE_BUTTONS_LOGICAL
 WORD g_mouse_buttons_logical = 0;
@@ -90,9 +89,7 @@ WORD g_mouse_buttons_logical = 0;
 // requires its format to be the same as that returned from GetKeyboardState():
 BYTE g_PhysicalKeyState[VK_ARRAY_COUNT] = { 0 };
 bool g_BlockWinKeys = false;
-DWORD g_HookReceiptOfLControlMeansAltGr = 0; // In these cases, zero is used as a false value, any others are true.
-DWORD g_IgnoreNextLControlDown = 0;          //
-DWORD g_IgnoreNextLControlUp = 0;            //
+DWORD g_AltGrExtraInfo = 0;
 BYTE g_MenuMaskKeyVK = VK_CONTROL; // For #MenuMaskKey.
 USHORT g_MenuMaskKeySC = SC_LCONTROL;
 
@@ -122,11 +119,13 @@ _thread_local bool g_DerefTimerExists = false;
 _thread_local bool g_SoundWasPlayed = false;
 bool g_IsSuspended = false;  // Make this separate from g_AllowInterruption since that is frequently turned off & on.
 _thread_local bool g_DeferMessagesForUnderlyingPump = false;
+_thread_local bool g_OnExitIsRunning = false;
 _thread_local BOOL g_AllowInterruption = TRUE;  // BOOL vs. bool might improve performance a little for frequently-accessed variables.
 _thread_local int g_nLayersNeedingTimer = 0;
 _thread_local int g_nThreads = 0;
 _thread_local int g_nPausedThreads = 0;
 _thread_local int g_MaxHistoryKeys = 40;
+_thread_local DWORD g_InputTimeoutAt = 0;
 // g_MaxVarCapacity is used to prevent a buggy script from consuming all available system RAM. It is defined
 // as the maximum memory size of a variable, including the string's zero terminator.
 // The chosen default seems big enough to be flexible, yet small enough to not be a problem on 99% of systems:
@@ -175,12 +174,14 @@ _thread_local UCHAR g_SortCaseSensitive;
 _thread_local bool g_SortNumeric;
 _thread_local bool g_SortReverse;
 _thread_local int g_SortColumnOffset;
-_thread_local Func *g_SortFunc;
+_thread_local IObject *g_SortFunc;
+_thread_local ResultType g_SortFuncResult;
 
 // Hot-string vars (initialized when ResetHook() is first called):
 TCHAR g_HSBuf[HS_BUF_SIZE];
 int g_HSBufLength;
 HWND g_HShwnd;
+
 // Hot-string global settings:
 int g_HSPriority = 0;  // default priority is always 0
 int g_HSKeyDelay = 0;  // Fast sends are much nicer for auto-replace and auto-backspace.
@@ -201,9 +202,10 @@ TCHAR g_EndChars[HS_MAX_END_CHARS + 1] = _T("-()[]{}:;'\"/\\,.?!\n \t");  // Hot
 // Although dash/hyphen is used for multiple purposes, it seems to me that it is best (on average) to include it.
 // Jay D. Novak suggested ([{/ for things such as fl/nj or fl(nj) which might resolve to USA state names.
 // i.e. word(synonym) and/or word/synonym
+
 // Global objects:
 _thread_local Var *g_ErrorLevel = NULL; // Allows us (in addition to the user) to set this var to indicate success/failure.
-input_type g_input;
+_thread_local input_type *g_input = NULL;
 _thread_local Script *g_script;
 // This made global for performance reasons (determining size of clipboard data then
 // copying contents in or out without having to close & reopen the clipboard in between):
@@ -221,8 +223,8 @@ _thread_local global_struct *g; // g_startup provides a non-NULL placeholder dur
 // when the script has many high-frequency timers), and possibly changing the working directory
 // whenever a new thread is launched, doesn't seem worth it.  This is because the need to change
 // the working directory is comparatively rare:
-_thread_local TCHAR g_WorkingDir[MAX_PATH] = _T("");
-_thread_local TCHAR *g_WorkingDirOrig = NULL;  // Assigned a value in WinMain().
+_thread_local CString g_WorkingDir;
+_thread_local LPTSTR g_WorkingDirOrig = NULL;  // Assigned a value in WinMain().
 
 bool g_ForceKeybdHook = false;
 ToggleValueType g_ForceNumLock = NEUTRAL;
@@ -324,6 +326,9 @@ Action g_act[] =
 	, {_T("Catch"), 0, 1, false, NULL} // fincs: seems best to allow catch without a parameter
 	, {_T("Finally"), 0, 0, false, NULL}
 	, {_T("Throw"), 0, 1, false, {1, 0}}
+	, {_T("Switch"), 0, 1, false, {1, 0}}
+	, {_T("Case"), 1, MAX_ARGS, false, NULL}
+
 	, {_T("Exit"), 0, 1, false, {1, 0}} // ExitCode
 	, {_T("ExitApp"), 0, 1, false, {1, 0}} // ExitCode
 
@@ -351,25 +356,12 @@ Action g_act[] =
 	, {_T("MouseClickDrag"), 1, 7, false, {2, 3, 4, 5, 6, 0}} // which-button, x1, y1, x2, y2, speed, Relative
 	, {_T("MouseGetPos"), 0, 5, true, {5, 0}} // 4 optional output vars: xpos, ypos, WindowID, ControlName. Finally: Mode. MinParams must be 0.
 
-	, {_T("StatusBarWait"), 0, 8, false, {2, 3, 6, 0}} // Wait-text(blank ok),seconds,part#,title,text,interval,exclude-title,exclude-text
-
 	, {_T("Sleep"), 1, 1, false, {1, 0}} // Sleep time in ms (numeric)
 
 	, {_T("Critical"), 0, 1, false, NULL}  // On|Off
 	, {_T("Thread"), 1, 3, false, {2, 3, 0}}  // Command, value1 (can be blank for interrupt), value2
 
-	, {_T("WinActivate"), 0, 4, false, NULL} // Passing zero params results in activating the LastUsed window.
-	, {_T("WinActivateBottom"), 0, 4, false, NULL} // Min. 0 so that 1st params can be blank and later ones not blank.
-
-	, {_T("WinMinimize"), 0, 4, false, NULL}, {_T("WinMaximize"), 0, 4, false, NULL}, {_T("WinRestore"), 0, 4, false, NULL} // std. 4 params
-	, {_T("WinHide"), 0, 4, false, NULL}, {_T("WinShow"), 0, 4, false, NULL} // std. 4 params
 	, {_T("WinMinimizeAll"), 0, 0, false, NULL}, {_T("WinMinimizeAllUndo"), 0, 0, false, NULL}
-	, {_T("WinClose"), 0, 5, false, {3, 0}} // title, text, time-to-wait-for-close (0 = 500ms), exclude title/text
-	, {_T("WinKill"), 0, 5, false, {3, 0}} // same as WinClose.
-	, {_T("WinMove"), 0, 8, false, {1, 2, 3, 4, 0}} // xpos, ypos, width, height, title, text, exclude-title, exclude_text
-	, {_T("MenuSelect"), 0, 11, false, NULL} // WinTitle, WinText, Menu name, 6 optional sub-menu names, ExcludeTitle/Text
-
-	, {_T("WinSetTitle"), 1, 5, false, NULL} // newtitle, title, text, exclude-title, exclude-text
 
 	// See above for why minimum is 1 vs. 2:
 	, {_T("GroupAdd"), 1, 5, false, NULL} // Group name, WinTitle, WinText, exclude-title/text
@@ -479,12 +471,12 @@ key_to_vk_type g_key_to_vk[] =
 // the hook from telling the difference between it and Numpad7 since the hook is currently set
 // to handle an incoming key by either vk or sc, but not both.
 
-// Even though ENTER is probably less likely to be assigned than NumpadEnter, must have ENTER as
-// the primary vk because otherwise, if the user configures only naked-NumPadEnter to do something,
-// RegisterHotkey() would register that vk and ENTER would also be configured to do the same thing.
+// For VKs with multiple SCs, such as VK_RETURN, the keyboard hook is made mandatory unless the
+// user specifies the VK by number.  This ensures that Enter:: and NumpadEnter::, for example,
+// only fire when the appropriate key is pressed.
 , {_T("Enter"), VK_RETURN}  // So that VKtoKeyName() delivers consistent results, always have the preferred name first.
-, {_T("Return"), VK_RETURN}
 
+// See g_key_to_sc for why these Numpad keys are handled here:
 , {_T("NumpadDel"), VK_DELETE}
 , {_T("NumpadIns"), VK_INSERT}
 , {_T("NumpadClear"), VK_CLEAR}  // same physical key as Numpad5 on most keyboards?
@@ -500,14 +492,11 @@ key_to_vk_type g_key_to_vk[] =
 , {_T("PrintScreen"), VK_SNAPSHOT}
 , {_T("CtrlBreak"), VK_CANCEL}  // Might want to verify this, and whether it has any peculiarities.
 , {_T("Pause"), VK_PAUSE} // So that VKtoKeyName() delivers consistent results, always have the preferred name first.
-, {_T("Break"), VK_PAUSE} // Not really meaningful, but kept for as a synonym of Pause for backward compatibility.  See CtrlBreak.
 , {_T("Help"), VK_HELP}  // VK_HELP is probably not the extended HELP key.  Not sure what this one is.
 , {_T("Sleep"), VK_SLEEP}
 
 , {_T("AppsKey"), VK_APPS}
 
-// UPDATE: For the NT/2k/XP version, now doing these by VK since it's likely to be
-// more compatible with non-standard or non-English keyboards:
 , {_T("LControl"), VK_LCONTROL} // So that VKtoKeyName() delivers consistent results, always have the preferred name first.
 , {_T("RControl"), VK_RCONTROL} // So that VKtoKeyName() delivers consistent results, always have the preferred name first.
 , {_T("LCtrl"), VK_LCONTROL} // Abbreviated versions of the above.
@@ -521,17 +510,11 @@ key_to_vk_type g_key_to_vk[] =
 , {_T("LWin"), VK_LWIN}
 , {_T("RWin"), VK_RWIN}
 
-// The left/right versions of these are handled elsewhere since their virtual keys aren't fully API-supported:
 , {_T("Control"), VK_CONTROL} // So that VKtoKeyName() delivers consistent results, always have the preferred name first.
 , {_T("Ctrl"), VK_CONTROL}  // An alternate for convenience.
 , {_T("Alt"), VK_MENU}
 , {_T("Shift"), VK_SHIFT}
-/*
-These were used to confirm the fact that you can't use RegisterHotkey() on VK_LSHIFT, even if the shift
-modifier is specified along with it:
-, {_T("LShift"), VK_LSHIFT}
-, {_T("RShift"), VK_RSHIFT}
-*/
+
 , {_T("F1"), VK_F1}
 , {_T("F2"), VK_F2}
 , {_T("F3"), VK_F3}
@@ -561,13 +544,11 @@ modifier is specified along with it:
 , {_T("LButton"), VK_LBUTTON}
 , {_T("RButton"), VK_RBUTTON}
 , {_T("MButton"), VK_MBUTTON}
-// Supported in only in Win2k and beyond:
 , {_T("XButton1"), VK_XBUTTON1}
 , {_T("XButton2"), VK_XBUTTON2}
-// Custom/fake VKs for use by the mouse hook (supported only in WinNT SP3 and beyond?):
+// Custom/fake VKs for use by the mouse hook:
 , {_T("WheelDown"), VK_WHEEL_DOWN}
 , {_T("WheelUp"), VK_WHEEL_UP}
-// Lexikos: Added fake VKs for support for horizontal scrolling in Windows Vista and later.
 , {_T("WheelLeft"), VK_WHEEL_LEFT}
 , {_T("WheelRight"), VK_WHEEL_RIGHT}
 
@@ -600,10 +581,13 @@ modifier is specified along with it:
 
 
 
+// For VKs with multiple SCs, one is handled by VK and one by SC.  Since MapVirtualKey() prefers
+// non-extended keys, we treat extended keys as secondary and handle them by SC.  This simplifies
+// the logic in vk_to_sc().  Another reason not to handle the Numlock-off Numpad keys here is that
+// extra logic would be required to prioritize the Numlock-on VKs.  By contrast, handling the
+// non-Numpad keys here requires a little extra logic in GetKeyName() to have it return the generic
+// names when a generic VK (such as VK_END) is given without SC.
 key_to_sc_type g_key_to_sc[] =
-// Even though ENTER is probably less likely to be assigned than NumpadEnter, must have ENTER as
-// the primary vk because otherwise, if the user configures only naked-NumPadEnter to do something,
-// RegisterHotkey() would register that vk and ENTER would also be configured to do the same thing.
 { {_T("NumpadEnter"), SC_NUMPADENTER}
 
 , {_T("Delete"), SC_DELETE}
@@ -619,21 +603,6 @@ key_to_sc_type g_key_to_sc[] =
 , {_T("End"), SC_END}
 , {_T("PgUp"), SC_PGUP}
 , {_T("PgDn"), SC_PGDN}
-
-// If user specified left or right, must use scan code to distinguish *both* halves of the pair since
-// each half has same vk *and* since their generic counterparts (e.g. CONTROL vs. L/RCONTROL) are
-// already handled by vk.  Note: RWIN and LWIN don't need to be handled here because they each have
-// their own virtual keys.
-// UPDATE: For the NT/2k/XP version, now doing these by VK since it's likely to be
-// more compatible with non-standard or non-English keyboards:
-/*
-, {_T("LControl"), SC_LCONTROL}
-, {_T("RControl"), SC_RCONTROL}
-, {_T("LShift"), SC_LSHIFT}
-, {_T("RShift"), SC_RSHIFT}
-, {_T("LAlt"), SC_LALT}
-, {_T("RAlt"), SC_RALT}
-*/
 };
 
 

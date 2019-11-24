@@ -8,6 +8,19 @@
 #define ParamIndexToBOOL(index)						TokenToBOOL(*aParam[(index)])
 #define ParamIndexToObject(index)					TokenToObject(*aParam[(index)])
 
+// Rather than adding a third value to the CaseSensitive parameter, it obeys StringCaseSense because:
+// 1) It matches the behavior of the equal operator (=) in expressions.
+// 2) It's more friendly for typical international uses because it avoids having to specify that special/third value
+//    for every call of InStr.  It's nice to be able to omit the CaseSensitive parameter every time and know that
+//    the behavior of both InStr and its counterpart the equals operator are always consistent with each other.
+// If the parameter is (false or omitted) insensitive, resolve it to be Locale-mode if the StringCaseSense mode is
+// either case-sensitive or Locale-insensitive.
+// The parameter is assumed to be optional and always defaults to false.
+#define ParamIndexToCaseSense(index)				(!ParamIndexIsOmitted(index) && ParamIndexToBOOL(index) ? SCS_SENSITIVE \
+													: (g->StringCaseSense != SCS_INSENSITIVE ? SCS_INSENSITIVE_LOCALE : SCS_INSENSITIVE) )
+
+#define ParamIndexIsNumeric(index)  (TokenIsNumeric(*aParam[(index)]))
+
 // For functions that allow "" to mean parameter is omitted.
 #define ParamIndexIsOmittedOrEmpty(index)  (ParamIndexIsOmitted(index) || TokenIsEmptyString(*aParam[(index)], TRUE))
 
@@ -24,10 +37,20 @@
 #define ParamIndexToOptionalBOOL(index, def)		ParamIndexToOptionalType(BOOL, index, def)
 #define ParamIndexToOptionalVar(index)				(((index) < aParamCount && aParam[index]->symbol == SYM_VAR) ? aParam[index]->var : NULL)
 
-#define ParamIndexToOptionalStringDef(index, def, ...)	(ParamIndexIsOmitted(index) ? (def) : ParamIndexToString(index, __VA_ARGS__))
+inline LPTSTR _OptionalStringDefaultHelper(LPTSTR aDef, LPTSTR aBuf = NULL, size_t *aLength = NULL)
+{
+	if (aLength)
+		*aLength = _tcslen(aDef);
+	return aDef;
+}
+#define ParamIndexToOptionalStringDef(index, def, ...) \
+	(ParamIndexIsOmitted(index) ? _OptionalStringDefaultHelper(def, __VA_ARGS__) \
+								: ParamIndexToString(index, __VA_ARGS__))
 // The macro below defaults to "", since that is by far the most common default.
 // This allows it to skip the check for SYM_MISSING, which always has marker == _T("").
-#define ParamIndexToOptionalString(index, ...)		(((index) < aParamCount) ? ParamIndexToString(index, __VA_ARGS__) : _T(""))
+#define ParamIndexToOptionalString(index, ...) \
+	(((index) < aParamCount) ? ParamIndexToString(index, __VA_ARGS__) \
+							: _OptionalStringDefaultHelper(_T(""), __VA_ARGS__))
 
 #define ParamIndexToOptionalObject(index)			((index) < aParamCount ? ParamIndexToObject(index) : NULL)
 

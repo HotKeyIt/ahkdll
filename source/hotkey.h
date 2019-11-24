@@ -13,6 +13,7 @@ but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 */
+
 #ifndef hotkey_h
 #define hotkey_h
 
@@ -41,6 +42,13 @@ EXTERN_SCRIPT;  // For g_script->
 #define HOTKEY_ID_OFF                  0x02
 #define HOTKEY_ID_TOGGLE               0x03
 #define IS_ALT_TAB(id) (id > HOTKEY_ID_MAX && id < HOTKEY_ID_INVALID)
+
+// Below: Use double-colon as delimiter to set these apart from normal labels.
+// The main reason for this is that otherwise the user would have to worry
+// about a normal label being unintentionally valid as a hotkey, e.g. "Shift:"
+// might be a legitimate label that the user forgot is also a valid hotkey:
+#define HOTKEY_FLAG _T("::")
+#define HOTKEY_FLAG_LENGTH 2
 
 #define COMPOSITE_DELIMITER _T(" & ")
 #define COMPOSITE_DELIMITER_LENGTH 3
@@ -160,7 +168,7 @@ public:
 	HookActionType mHookAction;
 	sc_type mSC; // Scan code.  All vk's have a scan code, but not vice versa.
 	sc_type mModifierSC; // If mModifierVK is zero, this scan code, if non-zero, will be used as the modifier.
-	HotkeyIDType mNextCustomCombo; // ID of the next custom combo with the same suffix as this one (initialized by the hook, but only for combos).
+	HotkeyIDType mNextHotkey; // ID of the next hotkey with the same suffix as this one (initialized by the hook).
 
 	// Keep single-byte attributes adjacent to each other to conserve memory within byte-aligned class/struct:
 	modLR_type mModifiersLR;  // Left-right centric versions of the above.
@@ -179,9 +187,6 @@ public:
 	bool mAllowExtraModifiers;  // False if the hotkey should not fire when extraneous modifiers are held down.
 	bool mKeyUp; // A hotkey that should fire on key-up.
 	bool mVK_WasSpecifiedByNumber; // A hotkey defined by something like "VK24::" or "Hotkey, VK24, ..."
-#ifdef CONFIG_WIN9X
-	bool mUnregisterDuringThread; // Win9x: Whether this hotkey should be unregistered during its own subroutine (to prevent its own Send command from firing itself).  Seems okay to apply this to all variants.
-#endif
 	bool mIsRegistered;  // Whether this hotkey has been successfully registered.
 	bool mParentEnabled; // When true, the individual variants' mEnabled flags matter. When false, the entire hotkey is disabled.
 	bool mConstructedOK;
@@ -205,12 +210,12 @@ public:
 	#define HOTKEY_EL_ALTTAB             4
 	#define HOTKEY_EL_NOTEXIST           5
 	#define HOTKEY_EL_NOTEXISTVARIANT    6
-	#define HOTKEY_EL_WIN9X              50
+	//#define HOTKEY_EL_WIN9X              50 // Reserved; no longer used.
 	#define HOTKEY_EL_NOREG              51
 	#define HOTKEY_EL_MAXCOUNT           98 // 98 allows room for other ErrorLevels to be added in between.
 	#define HOTKEY_EL_MEM                99
 	static ResultType IfWin(LPTSTR aIfWin, LPTSTR aWinTitle, LPTSTR aWinText);
-	static ResultType IfExpr(LPTSTR aExpr, IObject *aExprObj);
+	static ResultType IfExpr(LPTSTR aExpr, IObject *aExprObj, ResultToken &aResultToken);
 	static ResultType Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOptions
 		, IObject *aJumpToLabel, HookActionType aHookAction);
 
@@ -227,6 +232,7 @@ public:
 	void PerformInNewThreadMadeByCaller(HotkeyVariant &aVariant);
 	static void ManifestAllHotkeysHotstringsHooks();
 	static void RequireHook(HookType aWhichHook) {sWhichHookAlways |= aWhichHook;}
+	static void MaybeUninstallHook();
 	static ResultType TextInterpret(LPTSTR aName, Hotkey *aThisHotkey, bool aUseErrorLevel);
 
 	struct HotkeyProperties // Struct used by TextToModifiers() and its callers.
@@ -363,7 +369,7 @@ public:
 	#define HS_TEMPORARILY_DISABLED 0x04
 	UCHAR mExistingThreads, mMaxThreads;
 	bool mCaseSensitive, mConformToCase, mDoBackspace, mOmitEndChar, mEndCharRequired
-		, mDetectWhenInsideWord, mDoReset, mExecuteAction, mSuspendExempt, mConstructedOK;
+		, mDetectWhenInsideWord, mDoReset, mSuspendExempt, mConstructedOK;
 
 	static void SuspendAll(bool aSuspend);
 	static void AllDestruct(); // HotKeyIt H1 destroy all HotStrings

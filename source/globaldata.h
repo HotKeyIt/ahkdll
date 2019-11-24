@@ -35,15 +35,15 @@ extern _QueryPerformanceCounter g_QPC;
 extern double g_QPCtimer;
 extern double g_QPCfreq;
 
-#ifdef _USRDLL
 _thread_local extern bool g_Reloading;
+#ifdef _USRDLL
 _thread_local extern bool g_Loading;
 #endif
 #ifndef _USRDLL
 EXPORT FARPROC g_ThreadExitApp;
 extern UINT_PTR g_ahkThreads[MAX_AHK_THREADS][7];
 #endif
-_thread_local extern MetaObject *g_MetaObject; // Defines "object" behaviour for non-object values.
+extern HINSTANCE g_hInstance;
 extern HINSTANCE g_hInstance;
 _thread_local extern HMODULE g_hMemoryModule;
 _thread_local extern HANDLE g_hThread;
@@ -70,12 +70,15 @@ _thread_local extern HFONT g_hFontEdit;
 _thread_local extern HACCEL g_hAccelTable; // Accelerator table for main menu shortcut keys.
 
 typedef int (WINAPI *StrCmpLogicalW_type)(LPCWSTR, LPCWSTR);
-_thread_local extern StrCmpLogicalW_type g_StrCmpLogicalW;
 _thread_local extern WNDPROC g_TabClassProc;
 
 extern modLR_type g_modifiersLR_logical;   // Tracked by hook (if hook is active).
 extern modLR_type g_modifiersLR_logical_non_ignored;
 extern modLR_type g_modifiersLR_physical;  // Same as above except it's which modifiers are PHYSICALLY down.
+extern modLR_type g_modifiersLR_numpad_mask;  // Shift keys temporarily released by Numpad.
+extern modLR_type g_modifiersLR_ctrlaltdel_mask; // For excluding AltGr from Ctrl+Alt+Del handling.
+
+extern key_type *pPrefixKey;
 
 #ifdef FUTURE_USE_MOUSE_BUTTONS_LOGICAL
 _thread_local extern WORD g_mouse_buttons_logical; // A bitwise combination of MK_LBUTTON, etc.
@@ -85,9 +88,7 @@ _thread_local extern WORD g_mouse_buttons_logical; // A bitwise combination of M
 #define STATE_ON 0x01
 extern BYTE g_PhysicalKeyState[VK_ARRAY_COUNT];
 extern bool g_BlockWinKeys;
-extern DWORD g_HookReceiptOfLControlMeansAltGr;
-extern DWORD g_IgnoreNextLControlDown;
-extern DWORD g_IgnoreNextLControlUp;
+extern DWORD g_AltGrExtraInfo;
 
 extern BYTE g_MenuMaskKeyVK; // For #MenuMaskKey.
 extern USHORT g_MenuMaskKeySC;
@@ -119,11 +120,13 @@ _thread_local extern bool g_InputTimerExists;
 _thread_local extern bool g_DerefTimerExists;
 _thread_local extern bool g_SoundWasPlayed;
 extern bool g_IsSuspended;
+_thread_local extern bool g_OnExitIsRunning;
 _thread_local extern BOOL g_AllowInterruption;
 _thread_local extern int g_nLayersNeedingTimer;
 _thread_local extern int g_nThreads;
 _thread_local extern int g_nPausedThreads;
 _thread_local extern int g_MaxHistoryKeys;
+_thread_local extern DWORD g_InputTimeoutAt;
 
 _thread_local extern UCHAR g_MaxThreadsPerHotkey;
 _thread_local extern int g_MaxThreadsTotal;
@@ -155,7 +158,8 @@ _thread_local extern UCHAR g_SortCaseSensitive;
 _thread_local extern bool g_SortNumeric;
 _thread_local extern bool g_SortReverse;
 _thread_local extern int g_SortColumnOffset;
-_thread_local extern Func *g_SortFunc;
+_thread_local extern IObject *g_SortFunc;
+_thread_local extern ResultType g_SortFuncResult;
 
 #define g_DerefChar   '%' // As of v2 these are constant, so even more parts of the code assume they
 #define g_EscapeChar  '`' // are at their usual default values to reduce code size/complexity.
@@ -183,7 +187,7 @@ extern bool g_HSSameLineAction;
 extern TCHAR g_EndChars[HS_MAX_END_CHARS + 1];
 // Global objects:
 _thread_local extern Var *g_ErrorLevel;
-extern input_type g_input;
+_thread_local extern input_type *g_input;
 EXTERN_SCRIPT;
 EXTERN_CLIPBOARD;
 EXTERN_OSVER;
@@ -194,7 +198,7 @@ _thread_local extern DWORD g_OriginalTimeout;
 EXTERN_G;
 _thread_local extern global_struct g_default, g_startup, *g_array;
 
-_thread_local extern TCHAR g_WorkingDir[MAX_PATH];  // Explicit size needed here in .h file for use with sizeof().
+_thread_local extern CString g_WorkingDir;
 _thread_local extern LPTSTR g_WorkingDirOrig;
 
 extern bool g_ForceKeybdHook;
@@ -319,9 +323,12 @@ if (!g_MainTimerExists)\
 	if (!g_AutoExecTimerExists)\
 		g_AutoExecTimerExists = SetTimer(g_hWnd, TIMER_ID_AUTOEXEC, aTimeoutValue, AutoExecSectionTimeout);\
 } // v1.0.39 for above: Removed the call to ExitApp() upon failure.  See SET_MAIN_TIMER for details.
-#define SET_INPUT_TIMER(aTimeoutValue) \
-if (!g_InputTimerExists)\
-	g_InputTimerExists = SetTimer(g_hWnd, TIMER_ID_INPUT, aTimeoutValue, InputTimeout);
+#define SET_INPUT_TIMER(aTimeoutValue, aTimeoutAt) \
+{ \
+g_InputTimeoutAt = aTimeoutAt; \
+g_InputTimerExists = SetTimer(g_hWnd, TIMER_ID_INPUT, aTimeoutValue, InputTimeout); \
+}
+
 // For this one, SetTimer() is called unconditionally because our caller wants the timer reset
 // (as though it were killed and recreated) unconditionally.  MSDN's comments are a little vague
 // about this, but testing shows that calling SetTimer() against an existing timer does completely
@@ -340,9 +347,11 @@ if (g_MainTimerExists && KillTimer(g_hWnd, TIMER_ID_MAIN))\
 	if (g_AutoExecTimerExists && KillTimer(g_hWnd, TIMER_ID_AUTOEXEC))\
 		g_AutoExecTimerExists = false;\
 }
+
 #define KILL_INPUT_TIMER \
 if (g_InputTimerExists && KillTimer(g_hWnd, TIMER_ID_INPUT))\
 	g_InputTimerExists = false;
+
 #define KILL_DEREF_TIMER \
 if (g_DerefTimerExists && KillTimer(g_hWnd, TIMER_ID_DEREF))\
 	g_DerefTimerExists = false;

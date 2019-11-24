@@ -28,14 +28,14 @@ GNU General Public License for more details.
 #include "process.h"
 #include "TlHelp32.h"
 
-// Globals that are for only this module (mostly):
-static ExprOpFunc g_ObjGetInPlace(Op_ObjGetInPlace, IT_GET);
-static ExprOpFunc g_ObjNew(Op_ObjNew, IT_CALL);
-static ExprOpFunc g_ObjPreInc(Op_ObjIncDec, SYM_PRE_INCREMENT), g_ObjPreDec(Op_ObjIncDec, SYM_PRE_DECREMENT)
-, g_ObjPostInc(Op_ObjIncDec, SYM_POST_INCREMENT), g_ObjPostDec(Op_ObjIncDec, SYM_POST_DECREMENT);
-ExprOpFunc g_ObjCall(Op_ObjInvoke, IT_CALL); // Also needed in script_expression.cpp.
-ExprOpFunc g_ObjGet(Op_ObjInvoke, IT_GET), g_ObjSet(Op_ObjInvoke, IT_SET); // Also needed in script_object_bif.cpp.
-ExprOpFunc g_FuncClose(BIF_Func, FID_FuncClose);
+
+// These are the common pseudo-Funcs, defined here mostly for readability:
+auto OpFunc_GetProp = ExprOp<Op_ObjInvoke, IT_GET>();
+auto OpFunc_GetItem = ExprOp<Op_ObjInvoke, IT_GET|IF_DEFAULT>();
+auto OpFunc_SetProp = ExprOp<Op_ObjInvoke, IT_SET>();
+auto OpFunc_SetItem = ExprOp<Op_ObjInvoke, IT_SET|IF_DEFAULT>();
+auto OpFunc_CallMethod = ExprOp<Op_ObjInvoke, IT_CALL>();
+
 
 #define NA MAX_FUNCTION_PARAMS
 #define BIFn(name, minp, maxp, bif, ...) {_T(#name), bif, minp, maxp, FID_##name, __VA_ARGS__}
@@ -52,15 +52,20 @@ FuncEntry g_BIF[] =
 	BIF1(Array, 0, NA),
 	BIFn(ASin, 1, 1, BIF_ASinACos),
 	BIF1(ATan, 1, 1),
-	BIF1(CacheEnable, 1, 1),
+	BIF1(BufferAlloc, 1, 2),
+#ifdef ENABLE_REGISTERCALLBACK
 	BIF1(CallbackCreate, 1, 3),
 	BIF1(CallbackFree, 1, 1),
+#endif
 	BIF1(CaretGetPos, 0, 2, {1, 2}),
 	BIF1(Cast, 3, 3),
 	BIFn(Ceil, 1, 1, BIF_FloorCeil),
 	BIF1(Chr, 1, 1),
 	BIF1(ClipboardAll, 0, 2),
 	BIFn(ClipWait, 0, 2, BIF_Wait),
+#ifdef ENABLE_DLLCALL
+	BIFn(ComCall, 2, NA, BIF_DllCall),
+#endif
 	BIF1(ComObjActive, 1, 1),
 	BIF1(ComObjArray, 2, 9),
 	BIF1(ComObjConnect, 1, 2),
@@ -71,8 +76,8 @@ FuncEntry g_BIF[] =
 	BIF1(ComObjFlags, 1, 3),
 	BIF1(ComObjGet, 1, 1),
 	BIF1(ComObjQuery, 2, 3),
-	BIFn(ComObjType, 1, 2, BIF_ComObjTypeOrValue),
-	BIFn(ComObjValue, 1, 1, BIF_ComObjTypeOrValue),
+	BIF1(ComObjType, 1, 2),
+	BIF1(ComObjValue, 1, 1),
 	BIFn(ControlAddItem, 2, 6, BIF_Control),
 	BIFn(ControlChoose, 2, 6, BIF_Control),
 	BIFn(ControlChooseString, 2, 6, BIF_Control),
@@ -119,7 +124,9 @@ FuncEntry g_BIF[] =
 	BIF1(DateDiff, 3, 3),
 	BIFn(DirExist, 1, 1, BIF_FileExist),
 	BIF1(DirSelect, 0, 3),
-	BIF1(DllCall, 1, NA),
+#ifdef ENABLE_DLLCALL
+	BIFn(DllCall, 1, NA, BIF_DllCall),
+#endif
 	BIFn(DriveEject, 0, 2, BIF_Drive),
 	BIFn(DriveGetCapacity, 1, 1, BIF_DriveGet),
 	BIFn(DriveGetFilesystem, 1, 1, BIF_DriveGet),
@@ -156,11 +163,14 @@ FuncEntry g_BIF[] =
 	BIFn(GetKeySC, 1, 1, BIF_GetKeyName),
 	BIF1(GetKeyState, 1, 2),
 	BIFn(GetKeyVK, 1, 1, BIF_GetKeyName),
-	BIF1(getTokenValue, 1, 1),
+	BIF1(GetMethod, 2, 2),
 	BIF1(Getvar, 1, 2),
 	BIF1(GuiCreate, 0, 3),
 	BIF1(GuiCtrlFromHwnd, 1, 1),
 	BIF1(GuiFromHwnd, 1, 2),
+	BIF1(HasBase, 2, 2),
+	BIF1(HasMethod, 2, 2),
+	BIF1(HasProp, 2, 2),
 	BIF1(Hotkey, 1, 3),
 	BIF1(Hotstring, 1, 3),
 	BIF1(IL_Add, 2, 4),
@@ -171,17 +181,20 @@ FuncEntry g_BIF[] =
 	BIFn(Input, 0, 3, BIF_Input),
 	BIF1(InputBox, 0, 4),
 	BIFn(InputEnd, 0, 0, BIF_Input),
+	BIF1(InputHook, 0, 3),
 	BIF1(InStr, 2, 5),
 	BIF1(Integer, 1, 1),
 	BIF1(IsByRef, 1, 1, {1}),
 	BIF1(IsFunc, 1, 1),
 	BIF1(IsLabel, 1, 1),
-	BIF1(IsObject, 1, NA),
+	BIF1(IsObject, 1, 1),
+	BIF1(IsSet, 1, 1),
 	BIFn(KeyWait, 1, 2, BIF_Wait),
 	BIFn(Ln, 1, 1, BIF_SqrtLogLn),
 	BIF1(LoadPicture, 1, 3),
 	BIFn(Log, 1, 1, BIF_SqrtLogLn),
 	BIFn(LTrim, 1, 2, BIF_Trim),
+	BIF1(Map, 0, NA),
 	BIFn(Max, 1, NA, BIF_MinMax),
 	BIF1(MemoryCallEntryPoint, 1, 2),
 	BIF1(MemoryFindResource, 3, 4),
@@ -194,6 +207,7 @@ FuncEntry g_BIF[] =
 	BIFn(MenuBarCreate, 0, 0, BIF_Menu),
 	BIFn(MenuCreate, 0, 0, BIF_Menu),
 	BIFn(MenuFromHandle, 1, 1, BIF_Menu),
+	BIF1(MenuSelect, 0, 11),
 	BIFn(Min, 1, NA, BIF_MinMax),
 	BIF1(Mod, 2, 2),
 	BIFn(MonitorGet, 0, 5, BIF_MonitorGet, {2, 3, 4, 5}),
@@ -206,32 +220,25 @@ FuncEntry g_BIF[] =
 	BIF1(NewThread, 1, 3),
 #endif
 	BIF1(NumGet, 1, 3),
-	BIF1(NumPut, 2, 4),
+	BIF1(NumPut, 2, NA),
 	BIFn(ObjAddRef, 1, 1, BIF_ObjAddRefRelease),
 	BIF1(ObjBindMethod, 1, NA),
 	BIFn(ObjClone, 1, 3, BIF_ObjXXX),
-	BIFn(ObjCount, 1, 1, BIF_ObjXXX),
-	BIFn(ObjDelete, 2, 3, BIF_ObjXXX),
+	BIFn(ObjDeleteProp, 2, 3, BIF_ObjXXX),
 	BIF1(ObjDump, 1, 4),
 	BIF1(Object, 0, NA),
-	BIFn(ObjGetAddress, 2, 2, BIF_ObjXXX),
-	BIFn(ObjGetBase, 1, 1, BIF_ObjBase),
-	BIFn(ObjGetCapacity, 1, 2, BIF_ObjXXX),
-	BIFn(ObjHasKey, 2, 2, BIF_ObjXXX),
-	BIFn(ObjInsertAt, 3, NA, BIF_ObjXXX),
-	BIFn(ObjLength, 1, 1, BIF_ObjXXX),
+	BIFn(ObjGetBase, 1, 1, BIF_Base),
+	BIFn(ObjGetCapacity, 1, 1, BIF_ObjXXX),
+	BIFn(ObjHasOwnProp, 2, 2, BIF_ObjXXX),
 	BIF1(ObjLoad, 1, 2),
-	BIFn(ObjMaxIndex, 1, 1, BIF_ObjXXX),
-	BIFn(ObjMinIndex, 1, 1, BIF_ObjXXX),
-	BIFn(ObjNewEnum, 1, 1, BIF_ObjXXX),
-	BIFn(ObjPop, 1, 1, BIF_ObjXXX),
-	BIFn(ObjPush, 2, NA, BIF_ObjXXX),
+	BIFn(ObjOwnMethods, 1, 1, BIF_ObjXXX),
+	BIFn(ObjOwnPropCount, 1, 1, BIF_ObjXXX),
+	BIFn(ObjOwnProps, 1, 1, BIF_ObjXXX),
 	BIFn(ObjRawGet, 2, 2, BIF_ObjRaw),
 	BIFn(ObjRawSet, 3, 3, BIF_ObjRaw),
 	BIFn(ObjRelease, 1, 1, BIF_ObjAddRefRelease),
-	BIFn(ObjRemoveAt, 2, 3, BIF_ObjXXX),
-	BIFn(ObjSetBase, 2, 2, BIF_ObjBase),
-	BIFn(ObjSetCapacity, 2, 3, BIF_ObjXXX),
+	BIFn(ObjSetBase, 2, 2, BIF_Base),
+	BIFn(ObjSetCapacity, 2, 2, BIF_ObjXXX),
 	BIFn(OnClipboardChange, 1, 2, BIF_On),
 	BIFn(OnError, 1, 2, BIF_On),
 	BIFn(OnExit, 1, 2, BIF_On),
@@ -261,11 +268,13 @@ FuncEntry g_BIF[] =
 	BIF1(SetTimer, 0, 3),
 	BIF1(Sin, 1, 1),
 	BIF1(sizeof, 1, 2),
-	BIF1(Sort, 1, 2),
+	BIF1(Sort, 1, 3),
 	BIFn(SoundGet, 0, 3, BIF_Sound),
 	BIFn(SoundSet, 1, 4, BIF_Sound),
 	BIFn(Sqrt, 1, 1, BIF_SqrtLogLn),
 	BIF1(StatusBarGetText, 0, 5),
+	BIF1(StatusBarWait, 0, 8),
+	BIF1(StrCompare, 2, 3),
 	BIFn(StrGet, 1, 3, BIF_StrGetPut),
 	BIF1(String, 1, 1),
 	BIF1(StrLen, 1, 1),
@@ -285,8 +294,11 @@ FuncEntry g_BIF[] =
 	BIF1(UnZip, 2, 6),
 	BIF1(UnZipBuffer, 2, 5),
 	BIF1(UnZipRawMemory, 2, 4),
-	BIF1(VarSetCapacity, 1, 3, {1}),
+	BIF1(VarSetCapacity, 1, 3, {1}), 
+	BIFn(WinActivate, 0, 4, BIF_WinActivate),
+	BIFn(WinActivateBottom, 0, 4, BIF_WinActivate),
 	BIFn(WinActive, 0, 4, BIF_WinExistActive),
+	BIFn(WinClose, 0, 5, BIF_WinShow),
 	BIFn(WinExist, 0, 4, BIF_WinExistActive),
 	BIF1(WinGetClass, 0, 4),
 	BIFn(WinGetClientPos, 0, 8, BIF_WinGetPos, {1, 2, 3, 4}),
@@ -307,16 +319,24 @@ FuncEntry g_BIF[] =
 	BIF1(WinGetTitle, 0, 4),
 	BIFn(WinGetTransColor, 0, 4, BIF_WinGet),
 	BIFn(WinGetTransparent, 0, 4, BIF_WinGet),
+	BIFn(WinHide, 0, 4, BIF_WinShow),
+	BIFn(WinKill, 0, 5, BIF_WinShow),
+	BIFn(WinMaximize, 0, 4, BIF_WinShow),
+	BIFn(WinMinimize, 0, 4, BIF_WinShow),
+	BIF1(WinMove, 0, 8),
 	BIFn(WinMoveBottom, 0, 4, BIF_WinMoveTopBottom),
 	BIFn(WinMoveTop, 0, 4, BIF_WinMoveTopBottom),
 	BIF1(WinRedraw, 0, 4),
+	BIFn(WinRestore, 0, 4, BIF_WinShow),
 	BIFn(WinSetAlwaysOnTop, 0, 5, BIF_WinSet),
 	BIFn(WinSetEnabled, 1, 5, BIF_WinSet),
 	BIFn(WinSetExStyle, 1, 5, BIF_WinSet),
 	BIFn(WinSetRegion, 0, 5, BIF_WinSet),
 	BIFn(WinSetStyle, 1, 5, BIF_WinSet),
+	BIF1(WinSetTitle, 1, 5),
 	BIFn(WinSetTransColor, 1, 5, BIF_WinSet),
 	BIFn(WinSetTransparent, 1, 5, BIF_WinSet),
+	BIFn(WinShow, 0, 4, BIF_WinShow),
 	BIFn(WinWait, 0, 5, BIF_Wait),
 	BIFn(WinWaitActive, 0, 5, BIF_Wait),
 	BIFn(WinWaitClose, 0, 5, BIF_Wait),
@@ -352,7 +372,6 @@ VarEntry g_BIV[] =
 	VF(Clipboard, (BuiltInVarType)VAR_CLIPBOARD),
 	VF(False, BIV_True_False_Null),
 	VF(Null, BIV_True_False_Null),
-	VF(ProgramFiles, BIV_SpecialFolderPath), // v1.0.43.08: Added to ease the transition to #NoEnv.,
 	VF(True, BIV_True_False_Null)
 };
 // g_BIV_A: All built-in vars beginning with "A_".  The prefix is omitted from each
@@ -417,9 +436,9 @@ VarEntry g_BIV_A[] =
 	A_(LoopFileDir),
 	A_(LoopFileExt),
 	A_(LoopFileFullPath),
-	A_(LoopFileName),
+	A_x(LoopFileName, BIV_LoopFileName),
 	A_(LoopFilePath),
-	A_(LoopFileShortName),
+	A_x(LoopFileShortName, BIV_LoopFileName),
 	A_(LoopFileShortPath),
 	A_x(LoopFileSize, BIV_LoopFileSize),
 	A_x(LoopFileSizeKB, BIV_LoopFileSize),
@@ -447,9 +466,6 @@ VarEntry g_BIV_A[] =
 	A_(MyDocuments),
 	A_x(Now, BIV_Now),
 	A_x(NowUTC, BIV_Now),
-#ifdef CONFIG_WIN9X
-	A_(OSType),
-#endif
 	A_(OSVersion),
 	A_(PriorHotkey),
 	A_(PriorKey),
@@ -510,15 +526,7 @@ VarEntry g_BIV_A[] =
 #undef VF
 
 
-// See Script::CreateWindows() for details about the following:
-typedef BOOL(WINAPI* AddRemoveClipboardListenerType)(HWND);
-static AddRemoveClipboardListenerType MyRemoveClipboardListener = (AddRemoveClipboardListenerType)
-GetProcAddress(GetModuleHandle(_T("user32")), "RemoveClipboardFormatListener");
-static AddRemoveClipboardListenerType MyAddClipboardListener = (AddRemoveClipboardListenerType)
-GetProcAddress(GetModuleHandle(_T("user32")), "AddClipboardFormatListener");
-
 static TextMem::Buffer includedtextbuf; //HotKeyIt for dll to read script from memory
-
 // General note about the methods in here:
 // Want to be able to support multiple simultaneous points of execution
 // because more than one subroutine can be executing simultaneously
@@ -533,7 +541,7 @@ Script::Script()
 	: mFirstLine(NULL), mLastLine(NULL), mCurrLine(NULL), mPlaceholderLabel(NULL), mFirstStaticLine(NULL), mLastStaticLine(NULL)
 	, mThisHotkeyName(_T("")), mPriorHotkeyName(_T("")), mThisHotkeyStartTime(0), mPriorHotkeyStartTime(0)
 	, mEndChar(0), mThisHotkeyModifiersLR(0)
-	, mNextClipboardViewer(NULL), mOnClipboardChangeIsRunning(false), mExitReason(EXIT_NONE)
+	, mOnClipboardChangeIsRunning(false), mExitReason(EXIT_NONE)
 	, mFirstLabel(NULL), mLastLabel(NULL), mFirstGroup(NULL)
 	, mFirstTimer(NULL), mLastTimer(NULL), mTimerEnabledCount(0), mTimerCount(0)
 	, mFirstMenu(NULL), mLastMenu(NULL), mMenuCount(0)
@@ -562,14 +570,6 @@ void Script::Construct()  // Constructor.
 	g = &g_startup;
 	ZeroMemory(&mNIC, sizeof(mNIC));  // Constructor initializes this, to be safe.
 	mNIC.hWnd = NULL;  // Set this as an indicator that it tray icon is not installed.
-	// Lastly (after the above have been initialized), anything that can fail:
-	if (!(mTrayMenu = AddMenu(MENU_TYPE_POPUP))) // realistically never happens
-	{
-		ScriptError(_T("No tray mem"));
-		ExitApp(EXIT_CRITICAL);
-	}
-	else
-		mTrayMenu->AppendStandardItems();
 #ifdef _DEBUG
 	if (ID_FILE_EXIT < ID_MAIN_FIRST) // Not a very thorough check.
 		ScriptError(_T("DEBUG: ID_FILE_EXIT is too large (conflicts with IDs reserved via ID_USER_FIRST)."));
@@ -633,9 +633,6 @@ Script::~Script() // Destructor.
 		mOnExit.RemoveAll();
 	if (mOnClipboardChange.Count())
 		mOnClipboardChange.RemoveAll();
-	// free Meta Object
-	if (g_MetaObject)
-		g_MetaObject->Free();
 #ifdef _USRDLL
 	// Disconnect Debugger
 	if (!g_DebuggerHost.IsEmpty())
@@ -717,10 +714,10 @@ Script::~Script() // Destructor.
 	// delete static func vars first
 	for (i = 0; i < mFuncs.mCount; i++)
 	{
-		Func &f = *mFuncs.mItem[i];
-		if (f.mIsBuiltIn)
+		auto &f = *(UserFunc *)mFuncs.mItem[i];
+		if (f.IsBuiltIn())
 		{
-			if (f.mStaticVar && (f.mBIF = (BuiltInFunctionType)BIF_DllImport))
+			if (f.mStaticVar && (f.mBIF == (BuiltInFunctionType)BIF_DllImport))
 			{
 				for (int i = 0; i < f.mParamCount; i++)
 				{
@@ -789,16 +786,14 @@ Script::~Script() // Destructor.
 	// delete static func vars first
 	for (i = 0; i < mFuncs.mCount; i++)
 	{
-		Func &f = *mFuncs.mItem[i];
-		if (f.mIsBuiltIn)
+		UserFunc &f = *(UserFunc *)mFuncs.mItem[i];
+		if (f.IsBuiltIn() || (f.mBIF == (BIF_DllImport)))
 			continue;
-		else if (f.mClass && _tcschr(f.mName, '.'))
-			f.mClass->Release();
 	}
 	for (i = 0; i < mFuncs.mCount; i++)
 	{
-		Func &f = *mFuncs.mItem[i];
-		if (f.mIsBuiltIn)
+		auto &f = *(UserFunc *)mFuncs.mItem[i];
+		if (f.IsBuiltIn() || (f.mBIF == (BIF_DllImport)))
 		{
 			delete mFuncs.mItem[i];
 			continue;
@@ -930,7 +925,7 @@ Script::~Script() // Destructor.
 	// especially if the sound subsystem part of the OS is currently swapped out or something:
 	if (g_SoundWasPlayed)
 	{
-		TCHAR buf[MAX_PATH * 2];
+		TCHAR buf[MAX_PATH * 2]; // See "MAX_PATH note" in Line::SoundPlay for comments.
 		mciSendString(_T("status ") SOUNDPLAY_ALIAS _T(" mode"), buf, _countof(buf), NULL);
 		if (*buf) // "playing" or "stopped"
 			mciSendString(_T("close ") SOUNDPLAY_ALIAS, NULL, 0, NULL);
@@ -1032,7 +1027,6 @@ Script::~Script() // Destructor.
 	g_hWnd = NULL;
 	g_hWndEdit = NULL;
 	g_hFontEdit = NULL;
-	g_StrCmpLogicalW = NULL;
 	g_TabClassProc = NULL;
 	g_modifiersLR_logical = 0;
 	g_modifiersLR_logical_non_ignored = 0;
@@ -1041,9 +1035,6 @@ Script::~Script() // Destructor.
 	g_mouse_buttons_logical = 0;
 #endif
 	g_BlockWinKeys = false;
-	g_HookReceiptOfLControlMeansAltGr = 0; // In these cases, zero is used as a false value, any others are true.
-	g_IgnoreNextLControlDown = 0;          //
-	g_IgnoreNextLControlUp = 0;            //
 	g_HotkeyModifierTimeout = 50;  // Reduced from 100, which was a little too large for fast typists.
 	g_ClipboardTimeout = 1000; // v1.0.31
 	//g_KeybdHook = NULL;
@@ -1093,10 +1084,9 @@ Script::~Script() // Destructor.
 #endif
 	global_clear_state(*g);
 	//free(g_Debugger.mStack.mBottom);
-	delete g_MetaObject;
 	g_SimpleHeap->DeleteAll();
-	delete g_SimpleHeap;
 #ifdef _USRDLL
+	delete g_SimpleHeap;
 	//ZeroMemory(&g_script-> sizeof(g_script->);
 	mPriorHotkeyName = mThisHotkeyName = _T("");
 #endif
@@ -1125,8 +1115,16 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 // Caller has provided an empty string for aScriptFilename if this is a compiled script.
 // Otherwise, aScriptFilename can be NULL if caller hasn't determined the filename of the script yet.
 {
+	// Now that all static initializers (such as for Object::sPrototype)
+	// are guaranteed to have been executed, construct the Tray menu.
+	if (!(mTrayMenu = AddMenu(MENU_TYPE_POPUP))) // realistically never happens
+		return ScriptError(_T("No tray mem"));
+	else
+		mTrayMenu->AppendStandardItems();
+
 	mIsRestart = aIsRestart;
-	TCHAR buf[2048]; // Just to make sure we have plenty of room to do things with.
+	TCHAR buf[UorA(T_MAX_PATH, 2048)]; // Just to make sure we have plenty of room to do things with.
+	size_t buf_length;
 	TCHAR def_buf[MAX_PATH + 1], exe_buf[MAX_PATH + 20]; // For simplicity, allow at least space for +2 (see below) and "AutoHotkey.chm".
 	if (!aScriptFilename) // v1.0.46.08: Change in policy: store the default script in the My Documents directory rather than in Program Files.  It's more correct and solves issues that occur due to Vista's file-protection scheme.
 	{
@@ -1134,8 +1132,11 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 		// For portability, first check if there's an <EXENAME>.ahk file in the current directory.
 		LPTSTR suffix, dot;
 		DWORD exe_len = GetModuleFileName(NULL, exe_buf, MAX_PATH + 2);
-		// exe_len can be MAX_PATH+2 on Windows XP, in which case it is not null-terminated.
-		// MAX_PATH+1 could mean it was truncated.  Any path longer than MAX_PATH would be rare.
+		// MAX_PATH+1 could mean it was truncated.  Any path longer than MAX_PATH is probably
+		// impossible as of 2018 since testing indicates the program can't start if its path
+		// is longer than MAX_PATH-1 even with Windows 10 long path awareness enabled.
+		// On Windows XP, exe_len of exactly the buffer size specified would indicate the path
+		// was truncated and not null-terminated, but is probably impossible in this case.
 		if (exe_len > MAX_PATH)
 			return FAIL; // Seems the safest option for this unlikely case.
 		if ((suffix = _tcsrchr(exe_buf, '\\')) // Find name part of path.
@@ -1237,7 +1238,8 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 		else
 		{
 			// In case the script is a relative filespec (relative to current working dir):
-			if (!GetFullPathName(aScriptFilename, _countof(buf), buf, NULL)) // This is also relied upon by mIncludeLibraryFunctionsThenExit.  Succeeds even on nonexistent files.
+			buf_length = GetFullPathName(aScriptFilename, _countof(buf), buf, NULL); // This is also relied upon by mIncludeLibraryFunctionsThenExit.  Succeeds even on nonexistent files.
+			if (!buf_length)
 				return FAIL; // Due to rarity, no error msg, just abort.
 		}
 
@@ -1248,7 +1250,7 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 			// it also helps with the detection of "this script already running" since otherwise
 			// it might not find the dupe if the same script name is launched with different
 			// lowercase/uppercase letters:
-			ConvertFilespecToCorrectCase(buf); // This might change the length, e.g. due to expansion of 8.3 filename.
+			ConvertFilespecToCorrectCase(buf, _countof(buf), buf_length); // This might change the length, e.g. due to expansion of 8.3 filename.
 		}
 	}
 
@@ -1378,29 +1380,17 @@ ResultType Script::CreateWindows()
 		return FAIL;
 	}
 	// FONTS: The font used by default, at least on XP, is GetStockObject(SYSTEM_FONT).
-	// It seems preferable to smaller fonts such DEFAULT_GUI_FONT(DEFAULT_GUI_FONT).
-	// For more info on pre-loaded fonts (not too many choices), see MSDN's GetStockObject().
-	if (g_os.IsWinNT())
-	{
-		// Use a more appealing font on NT versions of Windows.
-
-		// Windows NT to Windows XP -> Lucida Console
-		HDC hdc = GetDC(g_hWndEdit);
-		if (!g_os.IsWinVistaOrLater())
-			g_hFontEdit = CreateFont(FONT_POINT(hdc, 10), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-			, DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, _T("Lucida Console"));
-		else // Windows Vista and later -> Consolas
-			g_hFontEdit = CreateFont(FONT_POINT(hdc, 10), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+	// Use something more appealing (monospaced seems preferable):
+	HDC hdc = GetDC(g_hWndEdit);
+	g_hFontEdit = CreateFont(FONT_POINT(hdc, 10), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 			, DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, _T("Consolas"));
-		ReleaseDC(g_hWndEdit, hdc); // In theory it must be done.
-		SendMessage(g_hWndEdit, WM_SETFONT, (WPARAM)g_hFontEdit, 0);
-	}
+	ReleaseDC(g_hWndEdit, hdc); // In theory it must be done.
+	SendMessage(g_hWndEdit, WM_SETFONT, (WPARAM)g_hFontEdit, 0);
 
 	// v1.0.30.05: Specifying a limit of zero opens the control to its maximum text capacity,
 	// which removes the 32K size restriction.  Testing shows that this does not increase the actual
 	// amount of memory used for controls containing small amounts of text.  All it does is allow
-	// the control to allocate more memory as needed.  By specifying zero, a max
-	// of 64K becomes available on Windows 9x, and perhaps as much as 4 GB on NT/2k/XP.
+	// the control to allocate more memory as needed.
 	SendMessage(g_hWndEdit, EM_LIMITTEXT, 0, 0);
 
 	// Some of the MSDN docs mention that an app's very first call to ShowWindow() makes that
@@ -1454,27 +1444,16 @@ ResultType Script::CreateWindows()
 
 void Script::EnableClipboardListener(bool aEnable)
 {
-	_thread_local static bool sEnabled = false;
+	static bool sEnabled = false;
 	if (aEnable == sEnabled) // Simplifies BIF_On.
 		return;
 	if (aEnable)
-	{
-		if (MyAddClipboardListener && MyRemoveClipboardListener) // Should be impossible for only one of these to be NULL, but check both anyway to be safe.
-			// The old clipboard viewer chain method is prone to break when some other application uses
-			// it incorrectly.  This newer method should be more reliable, but requires Vista or later:
-			MyAddClipboardListener(g_hWnd);
-		else
-			mNextClipboardViewer = SetClipboardViewer(g_hWnd);
-	}
+		AddClipboardFormatListener(g_hWnd);
 	else
-	{
-		if (MyRemoveClipboardListener && MyAddClipboardListener)
-			MyRemoveClipboardListener(g_hWnd); // MyAddClipboardListener was used.
-		else
-			ChangeClipboardChain(g_hWnd, mNextClipboardViewer); // SetClipboardViewer was used.
-	}
+		RemoveClipboardFormatListener(g_hWnd);
 	sEnabled = aEnable;
 }
+
 
 
 #ifdef AUTOHOTKEYSC
@@ -1580,8 +1559,8 @@ ResultType Script::SetTrayIcon(LPTSTR aIconFile, int aIconNumber, ToggleValueTyp
 			// destroying it later.
 			mCustomIcon = NULL;  // To indicate that there is no custom icon.
 			mCustomIconSmall = NULL;
-			if (mCustomIconFile)
-				*mCustomIconFile = '\0';
+			free(mCustomIconFile);
+			mCustomIconFile = NULL;
 			mCustomIconNumber = 0;
 			force_update = true;
 		}
@@ -1635,24 +1614,17 @@ ResultType Script::SetTrayIcon(LPTSTR aIconFile, int aIconNumber, ToggleValueTyp
 	mCustomIcon = new_icon;
 	mCustomIconSmall = new_icon_small;
 	mCustomIconNumber = aIconNumber;
-	// Allocate the full MAX_PATH in case the contents grow longer later.
-	// SimpleHeap improves avg. case mem load:
-	if (!mCustomIconFile)
-		mCustomIconFile = (LPTSTR) g_SimpleHeap->Malloc(MAX_PATH * sizeof(TCHAR));
-	if (mCustomIconFile)
-	{
-		TCHAR full_path[MAX_PATH], *filename_marker;
-		// If the icon was loaded from a DLL, relative->absolute conversion below may produce the
-		// wrong result (i.e. in the typical case where the DLL is not in the working directory).
-		// So in that case, get the path of the module which contained the icon (if available).
-		// Get the full path in case it's a relative path.  This is documented and it's done in case
-		// the script ever changes its working directory:
-		if (   icon_module && GetModuleFileName(icon_module, full_path, _countof(full_path))
-			|| GetFullPathName(aIconFile, _countof(full_path) - 1, full_path, &filename_marker)   )
-			tcslcpy(mCustomIconFile, full_path, MAX_PATH);
-		else
-			tcslcpy(mCustomIconFile, aIconFile, MAX_PATH);
-	}
+	TCHAR full_path[MAX_PATH], *filename_marker;
+	// If the icon was loaded from a DLL, relative->absolute conversion below may produce the
+	// wrong result (i.e. in the typical case where the DLL is not in the working directory).
+	// So in that case, get the path of the module which contained the icon (if available).
+	// Get the full path in case it's a relative path.  This is documented and it's done in case
+	// the script ever changes its working directory:
+	if (icon_module && GetModuleFileName(icon_module, full_path, _countof(full_path))
+		|| GetFullPathName(aIconFile, _countof(full_path) - 1, full_path, &filename_marker))
+		aIconFile = full_path;
+	free(mCustomIconFile);
+	mCustomIconFile = _tcsdup(aIconFile); // Failure isn't checked due to rarity and for simplicity; it'll be reported as empty in that case.
 
 	if (icon_module)
 		FreeLibrary(icon_module);
@@ -1678,6 +1650,9 @@ ResultType Script::AutoExecSection()
 	// could replace CopyMemory() above with global_init(), but it would need to be changed back if ever we
 	// want a directive to affect the default settings.
 	g->HotCriterion = NULL;
+
+	if (!InitClasses())
+		return FAIL; // Treat it like a load-time error.
 
 	// v1.0.48: Due to switching from SET_UNINTERRUPTIBLE_TIMER to IsInterruptible():
 	// In spite of the comments in IsInterruptible(), periodically have a timer call IsInterruptible() due to
@@ -1826,9 +1801,7 @@ bool Script::IsPersistent()
 		|| g_script->mTimerEnabledCount // At least one script timer is currently enabled.
 		|| (g_MsgMonitor && g_MsgMonitor->Count()) // At least one message monitor is active (installed by OnMessage).
 		|| mOnClipboardChange.Count() // The script is monitoring clipboard changes.
-		// The following isn't checked because there has to be at least one script thread
-		// running for it to be true, in which case we shouldn't have been called:
-		//|| (g_input.status == INPUT_IN_PROGRESS) // The hook is actively collecting input for the Input command.
+		|| g_input // At least one active Input or InputHook (but Input would imply there is a script thread running).
 		|| (mNIC.hWnd && mTrayMenu->ContainsCustomItems())) // The tray icon is visible and its menu has custom items.
 		return true;
 	for (GuiType* gui = g_firstGui; gui; gui = gui->mNextGui)
@@ -1868,7 +1841,7 @@ ResultType Script::Edit()
 		SetForegroundWindowEx(hwnd);
 	else
 	{
-		TCHAR buf[MAX_PATH * 2];
+		TCHAR buf[T_MAX_PATH + 2]; // +2 for the two quote marks.
 		// Enclose in double quotes anything that might contain spaces since the CreateProcess()
 		// method, which is attempted first, is more likely to succeed.  This is because it uses
 		// the command line method of creating the process, with everything all lumped together:
@@ -1903,7 +1876,10 @@ ResultType Script::Reload(bool aDisplayErrors)
 	return EARLY_RETURN;
 #else
 	if (g_MainThreadID != g_ThreadID)
+	{
+		g_Reloading = true;
 		return (ResultType)EXIT_RELOAD;
+	}
 	WCHAR buf[MAX_PATH];
 	GetModuleFileNameW(NULL, buf, MAX_PATH);
 	int argc = 0;
@@ -1913,7 +1889,7 @@ ResultType Script::Reload(bool aDisplayErrors)
 		LocalFree(argv);
 		return g_script->ActionExec(mOurEXE, _T("/restart"), g_WorkingDirOrig, aDisplayErrors);
 	}
-	TCHAR arg_string[MAX_PATH + 512];
+	TCHAR arg_string[T_MAX_PATH + 16];
 	sntprintf(arg_string, _countof(arg_string), _T("/restart \"%s\""), mFileSpec);
 	return g_script->ActionExec(mOurEXE, arg_string, g_WorkingDirOrig, aDisplayErrors);
 #endif // _USRDLL
@@ -1927,21 +1903,19 @@ ResultType Script::ExitApp(ExitReasons aExitReason, int aExitCode)
 // make the situation even worse).
 {
 	mExitReason = aExitReason;
-	// Otherwise, it's not a critical error.  Note that currently, mOnExit.Count() can only be
-	// non-zero if the script is in a runnable state (since registering an OnExit function requires
-	// that a script command has executed to do it).  If this ever changes, the !mIsReadyToExecute
-	// condition should be added to the below if statement:
-	_thread_local static bool sOnExitIsRunning = false;
-	if (!mOnExit.Count() || sOnExitIsRunning)  // || !mIsReadyToExecute
+	// Note that currently, mOnExit.Count() can only be non-zero if the script is in a runnable
+	// state (since registering an OnExit function requires that the script calls OnExit()).
+	// If this ever changes, the !mIsReadyToExecute condition should be added below:
+	if (!mOnExit.Count() || g_OnExitIsRunning)
 	{
-		// In the case of sOnExitIsRunning == true:
+		// In the case of g_OnExitIsRunning == true:
 		// There is another instance of this function beneath us on the stack.  Since we have
 		// been called, this is a true exit condition and we exit immediately.
-		// MUST NOT create a new thread when sOnExitIsRunning because g_array allows only one
+		// MUST NOT create a new thread when g_OnExitIsRunning because g_array allows only one
 		// extra thread for ExitApp() (which allows it to run even when MAX_THREADS_EMERGENCY has
 		// been reached).  See TOTAL_ADDITIONAL_THREADS.
 #ifdef _USRDLL
-		sOnExitIsRunning = false;
+		g_OnExitIsRunning = false;
 		if (g_Reloading)
 			return EARLY_EXIT;
 #endif
@@ -1985,7 +1959,7 @@ ResultType Script::ExitApp(ExitReasons aExitReason, int aExitCode)
 	BOOL g_AllowInterruption_prev = g_AllowInterruption;  // Save current setting.
 	g_AllowInterruption = FALSE; // Mark the thread just created above as permanently uninterruptible (i.e. until it finishes and is destroyed).
 
-	sOnExitIsRunning = true;
+	g_OnExitIsRunning = true;
 	DEBUGGER_STACK_PUSH(_T("OnExit"))
 
 	ExprTokenType param[] = { GetExitReasonString(aExitReason), (__int64)aExitCode };
@@ -2005,9 +1979,9 @@ ResultType Script::ExitApp(ExitReasons aExitReason, int aExitCode)
 	g_AllowInterruption = g_AllowInterruption_prev;  // Restore original setting.
 	ResumeUnderlyingThread(ErrorLevel_saved);
 	// If this OnExit thread is the last script thread and the script is not persistent, the above
-	// call recurses into this function.  sOnExitIsRunning == true prevents infinite recursion
+	// call recurses into this function.  g_OnExitIsRunning == true prevents infinite recursion
 	// in that case.  It is now safe to reset:
-	sOnExitIsRunning = false;  // In case the user wanted the thread to end normally (see above).
+	g_OnExitIsRunning = false;  // In case the user wanted the thread to end normally (see above).
 
 	return EARLY_EXIT;
 }
@@ -2044,9 +2018,9 @@ void ReleaseStaticVarObjects(FuncList &aFuncs)
 {
 	for (int i = 0; i < aFuncs.mCount; ++i)
 	{
-		Func &f = *aFuncs.mItem[i];
-		if (f.mIsBuiltIn)
+		if (aFuncs.mItem[i]->IsBuiltIn())
 			continue;
+		auto &f = *(UserFunc *)aFuncs.mItem[i];
 		// Since it doesn't seem feasible to release all var backups created by recursive function
 		// calls and all tokens in the 'stack' of each currently executing expression, currently
 		// only static and global variables are released.  It seems best for consistency to also
@@ -2067,7 +2041,9 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 #ifdef _USRDLL
 	terminateDll(aExitCode);
 #else
-	if (g_MainThreadID == g_ThreadID)
+
+	// L31: Release objects stored in variables, where possible.
+	if (g_MainThreadID == g_ThreadID && aExitReason != CRITICAL_ERROR) // i.e. Avoid making matters worse if CRITICAL_ERROR.
 	{
 		for (int i = 1; i < MAX_AHK_THREADS; i++)
 		{
@@ -2292,7 +2268,7 @@ UINT Script::LoadFromFile()
 	{
 		if (!g_script->mErrorStdOut)
 		{
-			TCHAR buf[MAX_PATH + 256];
+			TCHAR buf[T_MAX_PATH + 24];
 			sntprintf(buf, _countof(buf), _T("%s\n%s"), ERR_SCRIPT_NOT_FOUND, mFileSpec);
 			MsgBox(buf, MB_ICONHAND);
 		}
@@ -2417,7 +2393,7 @@ UINT Script::LoadFromFile()
 
 
 
-bool Script::IsFunction(LPTSTR aBuf, bool *aPendingFunctionHasBrace)
+bool Script::IsFunctionDefinition(LPTSTR aBuf, LPTSTR aNextBuf)
 // Helper function for LoadIncludedFile().
 // Caller passes in an aBuf containing a candidate line such as "function(x, y)"
 // Caller has ensured that aBuf is rtrim'd.
@@ -2433,41 +2409,31 @@ bool Script::IsFunction(LPTSTR aBuf, bool *aPendingFunctionHasBrace)
 	LPTSTR action_end = find_identifier_end(aBuf);
 
 	// Can't be a function definition or call without an open-parenthesis as first char found by the above.
-	// In addition, if action_end isn't NULL, that confirms that the string in aBuf prior to action_end contains
-	// no spaces, tabs, colons, or equal-signs.  As a result, it can't be:
+	// action_end points at the first character which is not usable in an identifier, such as a space, tab
+	// colon or other operator symbol.  As a result, it can't be:
 	// 1) a hotstring, since they always start with at least one colon that would be caught immediately as 
 	//    first-expr-char-is-not-open-parenthesis by the above.
 	// 2) Any kind of math or assignment, such as var:=(x+y) or var+=(x+y).
 	// The only things it could be other than a function call or function definition are:
 	// Normal label that ends in single colon but contains an open-parenthesis prior to the colon, e.g. Label(x):
-	// Single-line hotkey such as KeyName::MsgBox.  But since '(' isn't valid inside KeyName, this isn't a concern.
-	// In addition, note that it isn't necessary to check for colons that lie outside of quoted strings because
-	// we're only interested in the first "word" of aBuf: If this is indeed a function call or definition, what
-	// lies to the left of its first open-parenthesis can't contain any colons anyway because the above would
-	// have caught it as first-expr-char-is-not-open-parenthesis.  In other words, there's no way for a function's
-	// opening parenthesis to occur after a legitimate/quoted colon or double-colon in its parameters.
-	// v1.0.40.04: Added condition "action_end != aBuf" to allow a hotkey or remap or hotkey such as
-	// such as "(::" to work even if it ends in a close-parenthesis such as "(::)" or "(::MsgBox )"
+	// Single-line hotkey such as KeyName::MsgBox.  But (:: is the only valid hotkey where *action_end == '(',
+	// and that's handled by excluding action_end == aBuf.
 	if (*action_end != '(' || action_end == aBuf)
 		return false;
 	// Is it a control flow statement, such as "if(condition)"?
-	TCHAR orig_char = *action_end;
 	*action_end = '\0';
 	bool is_control_flow = ConvertActionType(aBuf, ACT_FIRST_NAMED_ACTION, ACT_FIRST_COMMAND);
-	*action_end = orig_char;
+	*action_end = '(';
 	if (is_control_flow)
 		return false;
 	// It's not control flow.
-	LPTSTR aBuf_last_char = action_end + _tcslen(action_end) - 1; // Above has already ensured that action_end is "(...".
-	if (aPendingFunctionHasBrace) // Caller specified that an optional open-brace may be present at the end of aBuf.
-	{
-		if (*aPendingFunctionHasBrace = (*aBuf_last_char == '{')) // Caller has ensured that aBuf is rtrim'd.
-		{
-			*aBuf_last_char = '\0'; // For the caller, remove it from further consideration.
-			aBuf_last_char = aBuf + rtrim(aBuf, aBuf_last_char - aBuf) - 1; // Omit trailing whitespace too.
-		}
-	}
-	return *aBuf_last_char == ')'; // This last check avoids detecting a label such as "Label(x):" as a function.
+	LPTSTR param_end = action_end + FindExprDelim(action_end, ')', 1);
+	if (*param_end != ')')
+		return false;
+	LPTSTR next_token = omit_leading_whitespace(param_end + 1);
+	return *next_token == 0 && *aNextBuf == '{' // Brace on next line.
+		|| *next_token == '{' && next_token[1] == 0 // Brace on same line.
+		|| *next_token == '=' && next_token[1] == '>'; // Fn() => expr
 }
 
 
@@ -2485,6 +2451,18 @@ inline LPTSTR IsClassDefinition(LPTSTR aBuf)
 }
 
 
+void RemoveBufChar0(LPTSTR aBuf, size_t &aBufLength)
+{
+	LPTSTR cp = omit_leading_whitespace(aBuf + 1);
+	aBufLength -= (cp - aBuf);
+	if (aBufLength) // Some non-whitespace remains.
+		tmemmove(aBuf, aBuf + 1, aBufLength);
+	else
+		*aBuf = '\0';
+}
+
+
+
 bool ClassHasOpenBrace(LPTSTR aBuf, size_t aBufLength, LPTSTR aNextBuf, size_t &aNextBufLength)
 {
 	if (aBuf[aBufLength - 1] == '{') // Brace on same line (OTB).
@@ -2495,883 +2473,24 @@ bool ClassHasOpenBrace(LPTSTR aBuf, size_t aBufLength, LPTSTR aNextBuf, size_t &
 	if (*aNextBuf == '{') // Brace on next line.
 	{
 		// Remove '{' from aNextBuf since ACT_BLOCK_END is unwanted in this context.
-		LPTSTR cp = omit_leading_whitespace(aNextBuf + 1);
-		aNextBufLength -= (cp - aNextBuf);
-		if (aNextBufLength) // There's something following the '{'.
-			tmemmove(aNextBuf, aNextBuf + 1, aNextBufLength);
-		else
-			*aNextBuf = '\0';
+		RemoveBufChar0(aNextBuf, aNextBufLength);
 		return true;
 	}
 	return false;
 }
 
 
-ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
-// Returns OK or FAIL.
-// Below: Use double-colon as delimiter to set these apart from normal labels.
-// The main reason for this is that otherwise the user would have to worry
-// about a normal label being unintentionally valid as a hotkey, e.g.
-// "Shift:" might be a legitimate label that the user forgot is also
-// a valid hotkey:
-#define HOTKEY_FLAG _T("::")
-#define HOTKEY_FLAG_LENGTH 2
+ResultType Script::OpenIncludedFile(TextStream &ts, LPTSTR aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure, LPCTSTR aPathToShow)
+// Open the included file.  Returns CONDITION_TRUE if the file is to
+// be loaded, otherwise OK (duplicate/already loaded) or FAIL (error).
+// See "full_path" below for why this is separate to LoadIncludedFile().  
 {
-	if (!aScript || !*aScript) return FAIL;
+	TextMem::Buffer textbuf(NULL, 0, false);
+	DWORD aSizeDeCompressed = 0;
+	AUTO_MALLOCA_DEFINE(LPVOID, buff);
 
-	// Keep this var on the stack due to recursion, which allows newly created lines to be given the
-	// correct file number even when some #include's have been encountered in the middle of the script:
-	int source_file_index = Line::sSourceFileCount;
+#ifndef AUTOHOTKEYSC
 
-	if (Line::sSourceFileCount >= Line::sMaxSourceFiles)
-	{
-
-		int new_max;
-		if (Line::sMaxSourceFiles)
-		{
-			new_max = 2 * Line::sMaxSourceFiles;
-			if (new_max > ABSOLUTE_MAX_SOURCE_FILES)
-				new_max = ABSOLUTE_MAX_SOURCE_FILES;
-		}
-		else
-			new_max = 100;
-		// For simplicity and due to rarity of every needing to, expand by reallocating the array.
-		// Use a temp var. because realloc() returns NULL on failure but leaves original block allocated.
-		LPTSTR *realloc_temp = (LPTSTR *)realloc(Line::sSourceFile, new_max * sizeof(LPTSTR)); // If passed NULL, realloc() will do a malloc().
-		if (!realloc_temp)
-			return ScriptError(ERR_OUTOFMEM); // Short msg since so rare.
-		Line::sSourceFile = realloc_temp;
-		Line::sMaxSourceFiles = new_max;
-	}
-
-	if (!source_file_index)
-		// Since this is the first source file, it must be the main script file.  Just point it to the
-		// location of the filespec already dynamically allocated:
-		Line::sSourceFile[source_file_index] = aScript;
-	else
-	{
-		if (aPathToShow)
-		{
-			if (!(Line::sSourceFile[source_file_index] = tmalloc(_tcslen(aPathToShow) + 1)))
-				return ScriptError(ERR_OUTOFMEM);
-			_tcscpy(Line::sSourceFile[source_file_index], aPathToShow);
-		}
-		else
-			Line::sSourceFile[source_file_index] = g_script->mOurEXE;
-	}
-	
-	// <buf> should be no larger than LINE_SIZE because some later functions rely upon that:
-	TCHAR msg_text[MAX_PATH + 256], buf1[LINE_SIZE], buf2[LINE_SIZE], remap_buf[LINE_SIZE] = _T("");
-	LPTSTR buf = buf1, next_buf = buf2; // Oscillate between bufs to improve performance (avoids memcpy from buf2 to buf1).
-	size_t buf_length, next_buf_length;
-	bool buf_has_brace;
-
-
-
-
-
-	++Line::sSourceFileCount;
-
-
-
-
-
-	includedtextbuf.mBuffer = aScript;
-	includedtextbuf.mLength = (DWORD)(_tcslen(aScript) * sizeof(TCHAR));
-	includedtextbuf.mOwned = false;
-	TextMem tmem, *fp = &tmem;
-	// NOTE: Ahk2Exe strips off the UTF-8 BOM.
-	//tmem.Open(textbuf, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR, CP_UTF16);
-	tmem.Open(includedtextbuf, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR
-#ifdef UNICODE
-		, CP_UTF16
-#endif
-		);
-	// File is now open, read lines from it.
-
-	bool has_continuation_section;
-	TCHAR orig_char;
-
-	LPTSTR hotkey_flag, cp, cp1, hotstring_start, hotstring_options;
-	Hotkey *hk;
-	LineNumberType saved_line_number;
-	HookActionType hook_action;
-	bool is_label, suffix_has_tilde, hook_is_mandatory;
-	ResultType hotkey_validity;
-
-	// For the remap mechanism, e.g. a::b
-
-	vk_type remap_source_vk, remap_dest_vk = 0; // Only dest is initialized to enforce the fact that it is the flag/signal to indicate whether remapping is in progress.
-	TCHAR remap_source[32], remap_dest[32], remap_dest_modifiers[8]; // Must fit the longest key name (currently Browser_Favorites [17]), but buffer overflow is checked just in case.
-	LPTSTR remap_ptr, extra_event;
-	bool remap_source_is_combo, remap_source_is_mouse, remap_dest_is_mouse, remap_keybd_to_mouse;
-
-#define MAX_FUNC_VAR_GLOBALS 2000
-	Var *func_global_var[MAX_FUNC_VAR_GLOBALS];
-
-	// Init both for main file and any included files loaded by this function:
-	mCurrFileIndex = source_file_index;  // source_file_index is kept on the stack due to recursion (from #include).
-
-
-	LineNumberType phys_line_number = 0;
-
-	// buf is initialized this way rather than calling GetLine() to simplify handling of comment
-	// sections beginning at the first line, and to reduce code size by having GetLine() only
-	// called from one place:
-	*buf = '\0';
-	buf_length = 0;
-
-	while (buf_length != -1)  // Compare directly to -1 since length is unsigned.
-	{
-		// For each whole line (a line with continuation section is counted as only a single line
-		// for the purpose of this outer loop).
-
-		// Keep track of this line's *physical* line number within its file for A_LineNumber and
-		// error reporting purposes.  This must be done only in the outer loop so that it tracks
-		// the topmost line of any set of lines merged due to continuation section/line(s)..
-		mCombinedLineNumber = phys_line_number;
-
-		// This must be reset for each iteration because a prior iteration may have changed it, even
-		// indirectly by calling something that changed it:
-		mCurrLine = NULL;  // To signify that we're in transition, trying to load a new one.
-
-		if (buf_length == LINE_SIZE - 1) // The documented limit is 16383 (LINE_SIZE - 2).
-			return ScriptError(ERR_LINE_TOO_LONG);
-
-		if (!GetLineContinuation(fp, buf, buf_length, next_buf, next_buf_length
-			, phys_line_number, has_continuation_section))
-			return FAIL;
-
-		process_completed_line:
-			// buf_length can't be -1 (though next_buf_length can) because outer loop's condition prevents it:
-			if (!buf_length) // Done only after the line number increments above so that the physical line number is properly tracked.
-				goto continue_main_loop; // In lieu of "continue", for performance.
-
-			// Since neither of the above executed, or they did but didn't "continue",
-			// buf now contains a non-commented line, either by itself or built from
-			// any continuation sections/lines that might have been present.  Also note that
-			// by design, phys_line_number will be greater than mCombinedLineNumber whenever
-			// a continuation section/lines were used to build this combined line.
-
-			// The following "examine_line" label skips the following parts above:
-			// 1) The inner loop that handles continuation sections: Not needed by the callers of this label.
-			// 2) Things like the following should be skipped because callers of this label don't want the
-			//    physical line number changed (which would throw off the count of lines that lie beneath a remap):
-			//    mCombinedLineNumber = phys_line_number + 1;
-			//    ++phys_line_number;
-			// 3) "mCurrLine = NULL": Probably not necessary since it's only for error reporting.  Worst thing
-			//    that could happen is that syntax errors would be thrown off, which testing shows isn't the case.
-		examine_line:
-			// "::" alone isn't a hotstring, it's a label whose name is colon.
-			// ": & somekey::" is a valid hotkey on some non-US layouts (and works even on US layouts but is
-			// equivalent to "`; & somekey::").  Hotstring detection below is thorough enough to exclude this.
-			hotstring_start = NULL;
-			hotstring_options = NULL; // Set default as "no options were specified for this hotstring".
-			hotkey_flag = NULL;
-			if (buf[0] == ':' && buf[1])
-			{
-				if (buf[1] != ':')
-				{
-					hotstring_options = buf + 1; // Point it to the hotstring's option letters.
-					// The following relies on the fact that options should never contain a literal colon.
-					// ALSO, the following doesn't use IS_HOTSTRING_OPTION() for backward compatibility,
-					// performance, and because it seems seldom if ever necessary at this late a stage.
-					if (!(hotstring_start = _tcschr(hotstring_options, ':')))
-						hotstring_start = NULL; // Indicate that this isn't a hotstring after all.
-					else
-						++hotstring_start; // Points to the hotstring itself.
-				}
-				else // Double-colon, so it's a hotstring if there's more after this (but this means no options are present).
-					if (buf[2])
-						hotstring_start = buf + 2; // And leave hotstring_options at its default of NULL to indicate no options.
-				//else it's just a naked "::", which is considered to be an ordinary label whose name is colon.
-			}
-			if (hotstring_start)
-			{
-				// Find the hotstring's final double-colon by considering escape sequences from left to right.
-				// This is necessary for it to handle cases such as the following:
-				// ::abc```::::Replacement String
-				// The above hotstring translates literally into "abc`::".
-				LPTSTR escaped_double_colon = NULL;
-				for (cp = hotstring_start;; ++cp)  // Increment to skip over the symbol just found by the inner for().
-				{
-					for (; *cp && *cp != g_EscapeChar && *cp != ':'; ++cp);  // Find the next escape char or colon.
-					if (!*cp) // end of string.
-						break;
-					cp1 = cp + 1;
-					if (*cp == ':')
-					{
-						// v2: Use the first non-escaped double-colon, not the last, since it seems more likely
-						// that the user intends to produce text with "::" in it rather than typing "::" to trigger
-						// the hotstring, and generally the trigger should be short.  By contrast, the v1 policy
-						// behaved inconsistently with an odd number of colons, such as:
-						//   ::foo::::bar  ; foo:: -> bar
-						//   ::foo:::bar   ; foo -> :bar
-						if (!hotkey_flag && *cp1 == ':') // Found a non-escaped double-colon, so this is the right one.
-						{
-							hotkey_flag = cp++;  // Increment to have loop skip over both colons.
-							// and the continue with the loop so that escape sequences in the replacement
-							// text (if there is replacement text) are also translated.
-						}
-						// else just a single colon, or the second colon of an escaped pair (`::), so continue.
-						continue;
-					}
-					switch (*cp1)
-					{
-						// Only lowercase is recognized for these:
-					case 'a': *cp1 = '\a'; break;  // alert (bell) character
-					case 'b': *cp1 = '\b'; break;  // backspace
-					case 'f': *cp1 = '\f'; break;  // formfeed
-					case 'n': *cp1 = '\n'; break;  // newline
-					case 'r': *cp1 = '\r'; break;  // carriage return
-					case 't': *cp1 = '\t'; break;  // horizontal tab
-					case 'v': *cp1 = '\v'; break;  // vertical tab
-						// Otherwise, if it's not one of the above, the escape-char is considered to
-						// mark the next character as literal, regardless of what it is. Examples:
-						// `` -> `
-						// `: -> : (so `::: means a literal : followed by hotkey_flag)
-						// `; -> ;
-						// `c -> c (i.e. unknown escape sequences resolve to the char after the `)
-					}
-					// Below has a final +1 to include the terminator:
-					tmemmove(cp, cp1, _tcslen(cp1) + 1);
-					// v2: The following is not done because 1) it is counter-intuitive for ` to affect two
-					// characters and 2) it hurts flexibility by preventing the escaping of a single colon
-					// immediately prior to the double-colon, such as ::lbl`:::.  Older comment:
-					// Since single colons normally do not need to be escaped, this increments one extra
-					// for double-colons to skip over the entire pair so that its second colon
-					// is not seen as part of the hotstring's final double-colon.  Example:
-					// ::ahc```::::Replacement String
-					//if (*cp == ':' && *cp1 == ':')
-					//	++cp;
-				} // for()
-				if (!hotkey_flag)
-					hotstring_start = NULL;  // Indicate that this isn't a hotstring after all.
-			}
-			if (!hotstring_start) // Not a hotstring (hotstring_start is checked *again* in case above block changed it; otherwise hotkeys like ": & x" aren't recognized).
-			{
-				// Note that there may be an action following the HOTKEY_FLAG (on the same line).
-				if (hotkey_flag = _tcsstr(buf, HOTKEY_FLAG)) // Find the first one from the left, in case there's more than 1.
-				{
-					if (hotkey_flag == buf && hotkey_flag[2] == ':') // v1.0.46: Support ":::" to mean "colon is a hotkey".
-						++hotkey_flag;
-					// v1.0.40: It appears to be a hotkey, but validate it as such before committing to processing
-					// it as a hotkey.  If it fails validation as a hotkey, treat it as a command that just happens
-					// to contain a double-colon somewhere.  This avoids the need to escape double colons in scripts.
-					// Note: Hotstrings can't suffer from this type of ambiguity because a leading colon or pair of
-					// colons makes them easier to detect.
-					cp = omit_trailing_whitespace(buf, hotkey_flag); // For maintainability.
-					orig_char = *cp;
-					*cp = '\0'; // Temporarily terminate.
-					hotkey_validity = Hotkey::TextInterpret(omit_leading_whitespace(buf), NULL, false); // Passing NULL calls it in validate-only mode.
-					switch (hotkey_validity)
-					{
-					case FAIL:
-						hotkey_flag = NULL; // It's not a valid hotkey, so indicate that it's a command (i.e. one that contains a literal double-colon, which avoids the need to escape the double-colon).
-						break;
-					case CONDITION_FALSE:
-						return FAIL; // It's an invalid hotkey and above already displayed the error message.
-						//case CONDITION_TRUE:
-						// It's a key that doesn't exist on the current keyboard layout.  Leave hotkey_flag set
-						// so that the section below handles it as a hotkey.  This allows it to end the auto-exec
-						// section and register the appropriate label even though it won't be an active hotkey.
-					}
-					*cp = orig_char; // Undo the temp. termination above.
-				}
-			}
-
-			// Treat a naked "::" as a normal label whose label name is colon:
-			if (is_label = (hotkey_flag && hotkey_flag > buf)) // It's a hotkey/hotstring label.
-			{
-				if (g->CurrentFunc || mClassObjectCount)
-				{
-					// Even if it weren't for the reasons below, the first hotkey/hotstring label in a script
-					// will end the auto-execute section with a "return".  Therefore, if this restriction here
-					// is ever removed, be sure that that extra return doesn't get put inside the function.
-					//
-					// The reason for not allowing hotkeys and hotstrings inside a function's body is that
-					// when the subroutine is launched, the hotstring/hotkey would be using the function's
-					// local variables.  But that is not appropriate and it's likely to cause problems even
-					// if it were.  It doesn't seem useful in any case.  By contrast, normal labels can
-					// safely exist inside a function body and since the body is a block, other validation
-					// ensures that a Gosub or Goto can't jump to it from outside the function.
-					return ScriptError(_T("Hotkeys/hotstrings are not allowed inside functions or classes."), buf);
-				}
-				*hotkey_flag = '\0'; // Terminate so that buf is now the label itself.
-				hotkey_flag += HOTKEY_FLAG_LENGTH;  // Now hotkey_flag is the hotkey's action, if any.
-				if (!hotstring_start)
-				{
-					ltrim(hotkey_flag); // Has already been rtrimmed by GetLine().
-					// Not done because Hotkey::TextInterpret() does not allow trailing whitespace: 
-					//rtrim(buf); // Trim the new substring inside of buf (due to temp termination). It has already been ltrimmed.
-					cp = hotkey_flag; // Set default, conditionally overridden below (v1.0.44.07).
-					// v1.0.40: Check if this is a remap rather than hotkey:
-					if (*hotkey_flag // This hotkey's action is on the same line as its label.
-						&& (remap_dest_vk = hotkey_flag[1] ? TextToVK(cp = Hotkey::TextToModifiers(hotkey_flag, NULL)) : 0xFF)) // And the action appears to be a remap destination rather than a command.
-						// For above:
-						// Fix for v1.0.44.07: Set remap_dest_vk to 0xFF if hotkey_flag's length is only 1 because:
-						// 1) It allows a destination key that doesn't exist in the keyboard layout (such as 6::ð in
-						//    English).
-						// 2) It improves performance a little by not calling TextToVK except when the destination key
-						//    might be a mouse button or some longer key name whose actual/correct VK value is relied
-						//    upon by other places below.
-						// Fix for v1.0.40.01: Since remap_dest_vk is also used as the flag to indicate whether
-						// this line qualifies as a remap, must do it last in the statement above.  Otherwise,
-						// the statement might short-circuit and leave remap_dest_vk as non-zero even though
-						// the line shouldn't be a remap.  For example, I think a hotkey such as "x & y::return"
-						// would trigger such a bug.
-					{
-						// These will be ignored in other stages if it turns out not to be a remap later below:
-						remap_source_vk = TextToVK(cp1 = Hotkey::TextToModifiers(buf, NULL)); // An earlier stage verified that it's a valid hotkey, though VK could be zero.
-						remap_source_is_combo = _tcsstr(cp1, COMPOSITE_DELIMITER);
-						remap_source_is_mouse = IsMouseVK(remap_source_vk);
-						remap_dest_is_mouse = IsMouseVK(remap_dest_vk);
-						remap_keybd_to_mouse = !remap_source_is_mouse && remap_dest_is_mouse;
-						sntprintf(remap_source, _countof(remap_source), _T("%s%s%s")
-							, remap_source_is_combo ? _T("") : _T("*") // v1.1.27.01: Omit * when the remap source is a custom combo.
-							, _tcslen(cp1) == 1 && IsCharUpper(*cp1) ? _T("+") : _T("")  // Allow A::b to be different than a::b.
-							, buf); // Include any modifiers too, e.g. ^b::c.
-						if (*cp == '"' || *cp == g_EscapeChar) // Need to escape these.
-						{
-							*remap_dest = g_EscapeChar;
-							remap_dest[1] = *cp;
-							remap_dest[2] = '\0';
-						}
-						else
-							tcslcpy(remap_dest, cp, _countof(remap_dest));  // But exclude modifiers here; they're wanted separately.
-						tcslcpy(remap_dest_modifiers, hotkey_flag, _countof(remap_dest_modifiers));
-						if (cp - hotkey_flag < _countof(remap_dest_modifiers)) // Avoid reading beyond the end.
-							remap_dest_modifiers[cp - hotkey_flag] = '\0';   // Terminate at the proper end of the modifier string.
-						remap_ptr = NULL; // Init for use in the next stage.
-						// In the unlikely event that the dest key has the same name as a command, disqualify it
-						// from being a remap (as documented).  v1.0.40.05: If the destination key has any modifiers,
-						// it is unambiguously a key name rather than a command, so the switch() isn't necessary.
-						if (*remap_dest_modifiers)
-							goto continue_main_loop; // It will see that remap_dest_vk is non-zero and act accordingly.
-						switch (remap_dest_vk)
-						{
-						case VK_CONTROL: // Checked in case it was specified as "Control" rather than "Ctrl".
-						case VK_SLEEP:
-							if (StrChrAny(hotkey_flag, _T(" \t,"))) // Not using g_delimiter (reduces code size/complexity).
-								break; // Any space, tab, or enter means this is a command rather than a remap destination.
-							goto continue_main_loop; // It will see that remap_dest_vk is non-zero and act accordingly.
-							// "Return" and "Pause" as destination keys are always considered commands instead.
-							// This is documented and is done to preserve backward compatibility.
-						case VK_RETURN:
-							// v1.0.40.05: Although "Return" can't be a destination, "Enter" can be.  Must compare
-							// to "Return" not "Enter" so that things like "vk0d" (the VK of "Enter") can also be a
-							// destination key:
-							if (!_tcsicmp(remap_dest, _T("Return")))
-								break;
-							goto continue_main_loop; // It will see that remap_dest_vk is non-zero and act accordingly.
-						case VK_PAUSE:  // Used for both "Pause" and "Break"
-							break;
-						default: // All other VKs are valid destinations and thus the remap is valid.
-							goto continue_main_loop; // It will see that remap_dest_vk is non-zero and act accordingly.
-						}
-						// Since above didn't goto, indicate that this is not a remap after all:
-						remap_dest_vk = 0;
-					}
-				}
-				// else don't trim hotstrings since literal spaces in both substrings are significant.
-
-				// If this is the first hotkey label encountered, Add a return before
-				// adding the label, so that the auto-execute section is terminated.
-				// Only do this if the label is a hotkey because, for example,
-				// the user may want to fully execute a normal script that contains
-				// no hotkeys but does contain normal labels to which the execution
-				// should fall through, if specified, rather than returning.
-				// But this might result in weirdness?  Example:
-				//testlabel:
-				// Sleep, 1
-				// return
-				// ^a::
-				// return
-				// It would put the hard return in between, which is wrong.  But in the case above,
-				// the first sub shouldn't have a return unless there's a part up top that ends in Exit.
-				// So if Exit is encountered before the first hotkey, don't add the return?
-				// Even though wrong, the return is harmless because it's never executed?  Except when
-				// falling through from above into a hotkey (which probably isn't very valid anyway)?
-				// Update: Below must check if there are any true hotkey labels, not just regular labels.
-				// Otherwise, a normal (non-hotkey) label in the autoexecute section would count and
-				// thus the RETURN would never be added here, even though it should be:
-
-				// Notes about the below macro:
-				// Fix for v1.0.34: Don't point labels to this particular RETURN so that labels
-				// can point to the very first hotkey or hotstring in a script.  For example:
-				// Goto Test
-				// Test:
-				// ^!z::ToolTip Without the fix`, this is never displayed by "Goto Test".
-				// UCHAR_MAX signals it not to point any pending labels to this RETURN.
-				// mCurrLine = NULL -> signifies that we're in transition, trying to load a new one.
-#define CHECK_Text_mNoHotkeyLabels \
-			if (mNoHotkeyLabels)\
-									{\
-				mNoHotkeyLabels = false;\
-				if (!AddLine(ACT_RETURN, NULL, UCHAR_MAX))\
-					return FAIL;\
-				mCurrLine = NULL;\
-									}
-					CHECK_Text_mNoHotkeyLabels
-					// For hotstrings, the below makes the label include leading colon(s) and the full option
-					// string (if any) so that the uniqueness of labels is preserved.  For example, we want
-					// the following two hotstring labels to be unique rather than considered duplicates:
-					// ::abc::
-					// :c:abc::
-					if (!AddLabel(buf, true)) // Always add a label before adding the first line of its section.
-						return FAIL;
-
-					if (hotstring_start)
-					{
-						if (!*hotstring_start)
-						{
-							// The following error message won't indicate the correct line number because
-							// the hotstring (as a label) does not actually exist as a line.  But it seems
-							// best to report it this way in case the hotstring is inside a #Include file,
-							// so that the correct file name and approximate line number are shown:
-							return ScriptError(_T("This hotstring is missing its abbreviation."), buf); // Display buf vs. hotkey_flag in case the line is simply "::::".
-						}
-						// In the case of hotstrings, hotstring_start is the beginning of the hotstring itself,
-						// i.e. the character after the second colon.  hotstring_options is NULL if no options,
-						// otherwise it's the first character in the options list (option string is not terminated,
-						// but instead ends in a colon).  hotkey_flag is blank if it's not an auto-replace
-						// hotstring, otherwise it contains the auto-replace text.
-						// v1.0.42: Unlike hotkeys, duplicate hotstrings are not detected.  This is because
-						// hotstrings are less commonly used and also because it requires more code to find
-						// hotstring duplicates (and performs a lot worse if a script has thousands of
-						// hotstrings) because of all the hotstring options.
-						if (!Hotstring::AddHotstring(mLastLabel->mName, mLastLabel, hotstring_options ? hotstring_options : _T("")
-							, hotstring_start, hotkey_flag, has_continuation_section))
-							return FAIL;
-					}
-					else // It's a hotkey vs. hotstring.
-					{
-						hook_action = Hotkey::ConvertAltTab(hotkey_flag, false);
-						if (hk = Hotkey::FindHotkeyByTrueNature(buf, suffix_has_tilde, hook_is_mandatory)) // Parent hotkey found.  Add a child/variant hotkey for it.
-						{
-							if (hook_action) // suffix_has_tilde has always been ignored for these types (alt-tab hotkeys).
-							{
-								// Hotkey::Dynamic() contains logic and comments similar to this, so maintain them together.
-								// An attempt to add an alt-tab variant to an existing hotkey.  This might have
-								// merit if the intention is to make it alt-tab now but to later disable that alt-tab
-								// aspect via the Hotkey cmd to let the context-sensitive variants shine through
-								// (take effect).
-								hk->mHookAction = hook_action;
-							}
-							else
-							{
-								// Detect duplicate hotkey variants to help spot bugs in scripts.
-								if (hk->FindVariant()) // See if there's already a variant matching the current criteria (suffix_has_tilde does not make variants distinct form each other because it would require firing two hotkey IDs in response to pressing one hotkey, which currently isn't in the design).
-								{
-									mCurrLine = NULL;  // Prevents showing unhelpful vicinity lines.
-									return ScriptError(_T("Duplicate hotkey."), buf);
-								}
-								if (!hk->AddVariant(mLastLabel, suffix_has_tilde))
-								{
-									return ScriptError(ERR_OUTOFMEM, buf);
-								}
-								if (hook_is_mandatory || (!g_os.IsWin9x() && g_ForceKeybdHook))
-								{
-									// Require the hook for all variants of this hotkey if any variant requires it.
-									// This seems more intuitive than the old behaviour, which required $ or #UseHook
-									// to be used on the *first* variant, even though it affected all variants.
-#ifdef CONFIG_WIN9X
-									if (g_os.IsWin9x())
-										hk->mUnregisterDuringThread = true;
-									else
-#endif
-										hk->mKeybdHookMandatory = true;
-								}
-							}
-						}
-						else // No parent hotkey yet, so create it.
-							if (!(hk = Hotkey::AddHotkey(mLastLabel, hook_action, mLastLabel->mName, suffix_has_tilde, false)))
-							{
-								if (hotkey_validity != CONDITION_TRUE)
-									return FAIL; // It already displayed the error.
-								// This hotkey uses a single-character key name, which could be valid on some other
-								// keyboard layout.  Allow the script to start, but warn the user about the problem.
-								// Note that this hotkey's label is still valid even though the hotkey wasn't created.
-								if (!mIncludeLibraryFunctionsThenExit) // Current keyboard layout is not relevant in /iLib mode.
-								{
-									sntprintf(msg_text, _countof(msg_text), _T("Note: The hotkey %s will not be active because it does not exist in the current keyboard layout."), buf);
-									MsgBox(msg_text);
-								}
-							}
-					}
-					if (*hotkey_flag) // This hotkey's/hotstring's action is on the same line as its label.
-					{
-						// Don't add AltTab or similar as a line, since it has no meaning as a script command.
-						// But do put in the Return regardless, in case this label is ever jumped to via Goto/Gosub:
-						if (hotstring_start ? Hotstring::shs[Hotstring::sHotstringCount - 1]->mExecuteAction : !hook_action)
-						{
-							// Remove the hotkey from buf.
-							buf_length -= hotkey_flag - buf;
-							tmemmove(buf, hotkey_flag, buf_length);
-							buf[buf_length] = '\0';
-							// Before adding the line, apply expression line-continuation logic, which hasn't
-							// been applied yet because hotkey labels can contain unbalanced ()[]{}:
-							if (!GetLineContExpr(fp, buf, buf_length, next_buf, next_buf_length, phys_line_number, has_continuation_section)
-								|| !ParseAndAddLine(buf, LINE_SIZE))
-								return FAIL;
-						}
-						// Also add the Return that's implicit for a single-line hotkey.  This is also done for
-						// auto-replace hotstrings in case gosub/goto is ever used to jump to their labels:
-						if (!AddLine(ACT_RETURN))
-							return FAIL;
-					}
-					goto continue_main_loop; // In lieu of "continue", for performance.
-				} // if (is_label = ...)
-				// Otherwise, not a hotkey or hotstring.  Check if it's a generic, non-hotkey label:
-				if (buf[buf_length - 1] == ':' // Labels must end in a colon (buf was previously rtrimmed).
-					&& (!mClassObjectCount || g->CurrentFunc)) // Not directly inside a class body or property definition (but inside a method is okay).
-				{
-					if (buf_length == 1) // v1.0.41.01: Properly handle the fact that this line consists of only a colon.
-					{
-						return ScriptError(ERR_UNRECOGNIZED_ACTION, buf);
-					}
-					// Labels (except hotkeys) must contain no whitespace, delimiters, or escape-chars.
-					// This is to avoid problems where a legitimate action-line ends in a colon,
-					// such as "WinActivate SomeTitle" and "#Include c:".
-					// We allow hotkeys to violate this since they may contain commas, and since a normal
-					// script line (i.e. just a plain command) is unlikely to ever end in a double-colon:
-					for (cp = buf, is_label = true; *cp; ++cp)
-						if (IS_SPACE_OR_TAB(*cp) || *cp == g_delimiter || *cp == g_EscapeChar)
-						{
-							is_label = false;
-							break;
-						}
-					if (is_label // It's a generic label, since valid hotkeys and hotstrings have already been handled.
-						&& !(buf[buf_length - 2] == ':' && buf_length > 2)) // i.e. allow "::" as a normal label, but consider anything else with double-colon to be an error (reported at a later stage).
-					{
-						// v1.0.44.04: Fixed this check by moving it after the above loop.
-						// Above has ensured buf_length>1, so it's safe to check for double-colon:
-						// v1.0.44.03: Don't allow anything that ends in "::" (other than a line consisting only
-						// of "::") to be a normal label.  Assume it's a command instead (if it actually isn't, a
-						// later stage will report it as "invalid hotkey"). This change avoids the situation in
-						// which a hotkey like ^!ä:: is seen as invalid because the current keyboard layout doesn't
-						// have a "ä" key. Without this change, if such a hotkey appears at the top of the script,
-						// its subroutine would execute immediately as a normal label, which would be especially
-						// bad if the hotkey were something like the "Shutdown" command.
-						// Update: Hotkeys with single-character names like ^!ä are now handled earlier, so that
-						// anything else with double-colon can be detected as an error.  The checks above prevent
-						// something like foo:: from being interpreted as a generic label, so when the line fails
-						// to resolve to a command or expression, an error message will be shown.
-						buf[--buf_length] = '\0';  // Remove the trailing colon.
-						rtrim(buf, buf_length); // Has already been ltrimmed.
-						if (!AddLabel(buf, false))
-							return FAIL;
-						goto continue_main_loop; // In lieu of "continue", for performance.
-					}
-				}
-				// Since above didn't "goto", it's not a label.
-				if (*buf == '#')
-				{
-					if (!_tcsnicmp(buf, _T("#If"), 2) && IS_SPACE_OR_TAB(buf[3]))
-					{
-						// Allow an expression enclosed in ()/[]/{} to span multiple lines:
-						if (!GetLineContExpr(fp, buf, buf_length, next_buf, next_buf_length, phys_line_number, has_continuation_section))
-							return FAIL;
-					}
-					saved_line_number = mCombinedLineNumber; // Backup in case IsDirective() processes an include file, which would change mCombinedLineNumber's value.
-					switch (IsDirective(buf)) // Note that it may alter the contents of buf, at least in the case of #IfWin.
-					{
-					case CONDITION_TRUE:
-						// Since the directive may have been a #include which called us recursively,
-						// restore the class's values for these two, which are maintained separately
-						// like this to avoid having to specify them in various calls, especially the
-						// hundreds of calls to ScriptError() and LineError():
-						mCurrFileIndex = source_file_index;
-						mCombinedLineNumber = saved_line_number;
-						goto continue_main_loop; // In lieu of "continue", for performance.
-					case FAIL: // IsDirective() already displayed the error.
-						return FAIL;
-						//case CONDITION_FALSE: Do nothing; let processing below handle it.
-					}
-				}
-				// Otherwise, treat it as a normal script line.
-
-				if (*buf == '{' || *buf == '}')
-				{
-					if (mClassObjectCount && !g->CurrentFunc)
-					{
-						if (*buf == '{')
-							return ScriptError(ERR_UNEXPECTED_OPEN_BRACE, buf);
-
-						if (mClassProperty)
-						{
-							// Close this property definition.
-							mClassProperty = NULL;
-							if (mClassPropertyDef)
-							{
-								free(mClassPropertyDef);
-								mClassPropertyDef = NULL;
-							}
-						}
-						else
-						{
-							// End of class definition.
-							--mClassObjectCount;
-							mClassObject[mClassObjectCount]->EndClassDefinition(); // Remove instance variables from the class object.
-							mClassObject[mClassObjectCount]->Release();
-							// Revert to the name of the class this class is nested inside, or "" if none.
-							if (cp1 = _tcsrchr(mClassName, '.'))
-								*cp1 = '\0';
-							else
-								*mClassName = '\0';
-						}
-					}
-					else // Normal block begin/end.
-					{
-						if (!AddLine(*buf == '{' ? ACT_BLOCK_BEGIN : ACT_BLOCK_END))
-							return FAIL;
-					}
-					// Allow the remainder of the line to be treated as a separate line:
-					if (*(buf = omit_leading_whitespace(buf + 1)))
-					{
-						buf_length = _tcslen(buf); // Update.
-						mCurrLine = NULL;  // To signify that we're in transition, trying to load a new line.
-						goto process_completed_line; // Have the main loop process the contents of "buf" as though it came in from the script.
-					}
-					goto continue_main_loop; // It's just a naked "{" or "}", so no more processing needed for this line.
-				}
-
-				if (mClassProperty && !g->CurrentFunc) // This is checked before IsFunction() to prevent method definitions inside a property.
-				{
-					if (!_tcsnicmp(buf, _T("Get"), 3) || !_tcsnicmp(buf, _T("Set"), 3))
-					{
-						LPTSTR cp = omit_leading_whitespace(buf + 3);
-						if (!*cp && *next_buf == '{' || *cp == '{' && !cp[1])
-						{
-							// For simplicity, pass the property definition to DefineFunc instead of the actual
-							// line text, even though it makes some error messages a bit inaccurate. (That would
-							// happen anyway when DefineFunc() finds a syntax error in the parameter list.)
-							LPTSTR dot = _tcschr(mClassPropertyDef, '.');
-							dot[1] = *buf; // Replace the x in property.xet(params).
-							if (!DefineFunc(mClassPropertyDef, func_global_var))
-								return FAIL;
-							if (*cp == '{' && !AddLine(ACT_BLOCK_BEGIN))
-								return FAIL;
-							goto continue_main_loop;
-						}
-					}
-					return ScriptError(ERR_INVALID_LINE_IN_PROPERTY_DEF, buf);
-				}
-
-				// Handle this first so that GetLineContExpr() doesn't need to detect it for OTB exclusion:
-				if (LPTSTR class_name = IsClassDefinition(buf))
-				{
-					if (g->CurrentFunc)
-						return ScriptError(_T("Functions cannot contain classes."), buf);
-					if (!ClassHasOpenBrace(buf, buf_length, next_buf, next_buf_length))
-						return ScriptError(ERR_MISSING_OPEN_BRACE, buf);
-					if (!DefineClass(class_name))
-						return FAIL;
-					goto continue_main_loop;
-				}
-
-				// Aside from goto/gosub/break/continue, anything not already handled above is either an expression
-				// or something with similar lexical requirements (i.e. balanced parentheses/brackets/braces).
-				// The following call allows any expression enclosed in ()/[]/{} to span multiple lines:
-				if (!GetLineContExpr(fp, buf, buf_length, next_buf, next_buf_length
-					, phys_line_number, has_continuation_section))
-					return FAIL;
-
-				if (IsFunction(buf, &buf_has_brace)) // If true, it's either a function definition or a function call.
-				{
-					// Open brace means this is a function definition. NOTE: Both bufs were already ltrimmed by GetLine().
-					if (buf_has_brace || *next_buf == '{')
-					{
-						if (!DefineFunc(buf, func_global_var))
-							return FAIL;
-						if (buf_has_brace && !AddLine(ACT_BLOCK_BEGIN))
-							return FAIL;
-						goto continue_main_loop;
-					}
-				}
-				
-				if (mClassObjectCount && !g->CurrentFunc) // Inside a class definition (and not inside a method).
-				{
-					// Check for assignment first, in case of something like "Static := 123".
-					for (cp = buf; IS_IDENTIFIER_CHAR(*cp) || *cp == '.'; ++cp);
-					if (cp > buf) // i.e. buf begins with an identifier.
-					{
-						cp = omit_leading_whitespace(cp);
-						if (*cp == ':' && cp[1] == '=') // This is an assignment.
-						{
-							if (!DefineClassVars(buf, false)) // See above for comments.
-								return FAIL;
-							goto continue_main_loop;
-						}
-						if ((!*cp || *cp == '[' || (*cp == '{' && !cp[1])) // Property
-							&& ClassHasOpenBrace(buf, buf_length, next_buf, next_buf_length))
-						{
-							if (!DefineClassProperty(buf))
-								return FAIL;
-							goto continue_main_loop;
-						}
-					}
-					if (!_tcsnicmp(buf, _T("Static"), 6) && IS_SPACE_OR_TAB(buf[6]))
-					{
-						if (!DefineClassVars(buf + 7, true))
-							return FAIL; // Above already displayed the error.
-						goto continue_main_loop; // In lieu of "continue", for performance.
-					}
-					// Anything not already handled above is not valid directly inside a class definition.
-					return ScriptError(ERR_INVALID_LINE_IN_CLASS_DEF, buf);
-				}
-
-				// Parse the command, assignment or expression, including any same-line open brace or sub-action
-				// for ELSE, TRY, CATCH or FINALLY.  Unlike braces at the start of a line (processed above), this
-				// does not allow directives or labels to the right of the command.
-				if (!ParseAndAddLine(buf, LINE_SIZE))
-					return FAIL;
-
-			continue_main_loop: // This method is used in lieu of "continue" for performance and code size reduction.
-				if (remap_dest_vk)
-				{
-					// For remapping, decided to use a "macro expansion" approach because I think it's considerably
-					// smaller in code size and complexity than other approaches would be.  I originally wanted to
-					// do it with the hook by changing the incoming event prior to passing it back out again (for
-					// example, a::b would transform an incoming 'a' keystroke into 'b' directly without having
-					// to suppress the original keystroke and simulate a new one).  Unfortunately, the low-level
-					// hooks apparently do not allow this.  Here is the test that confirmed it:
-					// if (event.vkCode == 'A')
-					// {
-					//	event.vkCode = 'B';
-					//	event.scanCode = 0x30; // Or use vk_to_sc(event.vkCode).
-					//	return CallNextHookEx(g_KeybdHook, aCode, wParam, lParam);
-					// }
-
-					if (!remap_ptr)
-					{
-						cp = remap_buf;
-						cp += _stprintf(cp
-							, _T("%s::\n") // Key-down hotkey label, e.g. *LButton::
-							_T("Set%sDelay(-1)\n") // Does NOT need to be "-1, -1" for SetKeyDelay (see below).
-							, remap_source
-							, remap_dest_is_mouse ? _T("Mouse") : _T("Key")
-							);
-
-						// It seems unnecessary to set press-duration to -1 even though the auto-exec section might
-						// have set it to something higher than -1 because:
-						// 1) Press-duration doesn't apply to normal remappings since they use down-only and up-only events.
-						// 2) Although it does apply to remappings such as a::B and a::^b (due to press-duration being
-						//    applied after a change to modifier state), those remappings are fairly rare and supporting
-						//    a non-negative-one press-duration (almost always 0) probably adds a degree of flexibility
-						//    that may be desirable to keep.
-						// 3) SendInput may become the predominant SendMode, so press-duration won't often be in effect anyway.
-						// 4) It has been documented that remappings use the auto-execute section's press-duration.
-						// The primary reason for adding Key/MouseDelay -1 is to minimize the chance that a one of
-						// these hotkey threads will get buried under some other thread such as a timer, which
-						// would disrupt the remapping if #MaxThreadsPerHotkey is at its default of 1.
-						if (remap_keybd_to_mouse)
-						{
-							// Since source is keybd and dest is mouse, prevent keyboard auto-repeat from auto-repeating
-							// the mouse button (since that would be undesirable 90% of the time).  This is done
-							// by inserting a single extra IF-statement above the Send that produces the down-event:
-							cp += _stprintf(cp, _T("if not GetKeyState(\"%s\")\n"), remap_dest); // Should be no risk of buffer overflow due to prior validation.
-						}
-						// Otherwise, remap_keybd_to_mouse==false.
-
-						TCHAR blind_mods[5], *next_blind_mod = blind_mods, *this_mod, *found_mod;
-						for (this_mod = _T("!#^+"); *this_mod; ++this_mod)
-						{
-							found_mod = _tcschr(remap_source, *this_mod);
-							if (found_mod && found_mod[1]) // Exclude the last char for !:: and similar.
-								*next_blind_mod++ = *this_mod;
-						}
-						*next_blind_mod = '\0';
-
-						extra_event = _T(""); // Set default.
-						switch (remap_dest_vk)
-						{
-						case VK_LMENU:
-						case VK_RMENU:
-						case VK_MENU:
-							switch (remap_source_vk)
-							{
-							case VK_LCONTROL:
-							case VK_CONTROL:
-								extra_event = _T("{LCtrl up}"); // Somewhat surprisingly, this is enough to make "Ctrl::Alt" properly remap both right and left control.
-								break;
-							case VK_RCONTROL:
-								extra_event = _T("{RCtrl up}");
-								break;
-								// Below is commented out because its only purpose was to allow a shift key remapped to alt
-								// to be able to alt-tab.  But that wouldn't work correctly due to the need for the following
-								// hotkey, which does more harm than good by impacting the normal Alt key's ability to alt-tab
-								// (if the normal Alt key isn't remapped): *Tab::Send {Blind}{Tab}
-								//case VK_LSHIFT:
-								//case VK_SHIFT:
-								//	extra_event = "{LShift up}";
-								//	break;
-								//case VK_RSHIFT:
-								//	extra_event = "{RShift up}";
-								//	break;
-							}
-							break;
-						}
-						_stprintf(cp
-							, _T("Send(\"{Blind%s}%s%s{%s DownR}\")\n") // DownR vs. Down. See Send's DownR handler for details.
-							_T("Return\n")
-							_T("%s up::\n") // Key-up hotkey label, e.g. *LButton up::
-							_T("Set%sDelay(-1)\n")
-							_T("Send(\"{Blind}{%s Up}\")\n") // Unlike the down-event above, remap_dest_modifiers is not included for the up-event; e.g. ^{b up} is inappropriate.
-							_T("Return\n") // Last line must end with \n to simplify the code.
-							, blind_mods, extra_event, remap_dest_modifiers, remap_dest
-							, remap_source
-							, remap_dest_is_mouse ? _T("Mouse") : _T("Key")
-							, remap_dest
-							);
-
-						// Begin parsing remap_buf on the next iteration.
-						remap_ptr = remap_buf;
-					}
-					cp = _tcschr(remap_ptr, '\n'); // Always succeeds unless there's a bug.
-					tcslcpy(buf, remap_ptr, cp - remap_ptr + 1); // Copy this line into buf.
-					remap_ptr = cp + 1; // Set up remap_ptr for next iteration.
-					if (!*remap_ptr)
-						remap_dest_vk = 0; // Reset to signal that the remapping expansion will be complete after the next iteration.
-					mCurrLine = NULL; // Prevent misleading vicinity lines if an error is somehow possible.
-					goto examine_line;
-				} // if (remap_dest_vk)
-				// Since above didn't "continue", resume loading script line by line:
-				buf = next_buf;
-				buf_length = next_buf_length;
-				next_buf = (buf == buf1) ? buf2 : buf1;
-				// The line above alternates buffers (toggles next_buf to be the unused buffer), which helps
-				// performance because it avoids memcpy from buf2 to buf1.
-	} // for each whole/constructed line.
-
-	if (mClassObjectCount && !source_file_index) // or mClassProperty, which implies mClassObjectCount != 0.
-	{
-		// A class definition has not been closed with "}".  Previously this was detected by adding
-		// the open and close braces as lines, but this way is simpler and has less overhead.
-		// The downside is that the line number won't be shown; however, the class name will.
-		// Seems okay not to show mClassProperty->mName since the class is missing "}" as well.
-		return ScriptError(ERR_MISSING_CLOSE_BRACE, mClassName);
-	}
-
-	++mCombinedLineNumber; // L40: Put the implicit ACT_EXIT on the line after the last physical line (for the debugger).
-
-	// This is not required, it is called by the destructor.
-	// fp->Close();
-	return OK;
-}
-
-
-
-ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure)
-// Returns OK or FAIL.
-// Below: Use double-colon as delimiter to set these apart from normal labels.
-// The main reason for this is that otherwise the user would have to worry
-// about a normal label being unintentionally valid as a hotkey, e.g.
-// "Shift:" might be a legitimate label that the user forgot is also
-// a valid hotkey:
-#define HOTKEY_FLAG _T("::")
-#define HOTKEY_FLAG_LENGTH 2
-{
 	if (!aFileSpec || !*aFileSpec) return FAIL;
 
 	if (Line::sSourceFileCount >= Line::sMaxSourceFiles)
@@ -3381,7 +2500,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		int new_max;
 		if (Line::sMaxSourceFiles)
 		{
-			new_max = 2 * Line::sMaxSourceFiles;
+			new_max = 2*Line::sMaxSourceFiles;
 			if (new_max > ABSOLUTE_MAX_SOURCE_FILES)
 				new_max = ABSOLUTE_MAX_SOURCE_FILES;
 		}
@@ -3396,129 +2515,271 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		Line::sMaxSourceFiles = new_max;
 	}
 
-	TCHAR full_path[MAX_PATH];
+	// Use of stack memory here to build the full path is the most efficient method,
+	// but utilizes 64KB per buffer on Unicode builds.  There is virtually no cost
+	// when used here, but if used directly in LoadIncludedFile(), this would mean
+	// 64KB used *for each instance on the stack*, which significantly reduces the
+	// recursion limit for #include inside #include.  Note that enclosing the buf
+	// within a limited scope is insufficient, as the compiler will (or may) still
+	// allocate the required stack space on entry to the function.
+	TCHAR full_path[T_MAX_PATH];
 
-	// Keep this var on the stack due to recursion, which allows newly created lines to be given the
-	// correct file number even when some #include's have been encountered in the middle of the script:
 	int source_file_index = Line::sSourceFileCount;
-
-	if (!source_file_index)
-		// Since this is the first source file, it must be the main script file.  Just point it to the
-		// location of the filespec already dynamically allocated:
-		Line::sSourceFile[source_file_index] = mFileSpec;
+	if (aPathToShow)
+	{
+		if (!source_file_index)
+			// Since this is the first source file, it must be the main script file.  Just point it to the
+			// location of the filespec already dynamically allocated:
+			Line::sSourceFile[source_file_index] = aFileSpec;
+		else
+		{
+			if (*aPathToShow == '\0')
+			{
+				if (!(Line::sSourceFile[source_file_index] = tmalloc(_tcslen(aPathToShow) + 1)))
+					return ScriptError(ERR_OUTOFMEM);
+				_tcscpy(Line::sSourceFile[source_file_index], aPathToShow);
+			}
+			else
+				Line::sSourceFile[source_file_index] = g_script->mOurEXE;
+		}
+		textbuf.mBuffer = aFileSpec;
+		textbuf.mLength = (DWORD)(_tcslen(aFileSpec) * sizeof(TCHAR));
+		ts.Open(textbuf, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR
+#ifdef UNICODE
+			, CP_UTF16
+#endif
+		);
+	}
 	else
 	{
-		// Get the full path in case aFileSpec has a relative path.  This is done so that duplicates
-		// can be reliably detected (we only want to avoid including a given file more than once):
-		LPTSTR filename_marker;
-		GetFullPathName(aFileSpec, _countof(full_path), full_path, &filename_marker);
-		// Check if this file was already included.  If so, it's not an error because we want
-		// to support automatic "include once" behavior.  So just ignore repeats:
-		if (!aAllowDuplicateInclude)
-			for (int f = 0; f < source_file_index; ++f) // Here, source_file_index==Line::sSourceFileCount
-				if (!lstrcmpi(Line::sSourceFile[f], full_path)) // Case insensitive like the file system (testing shows that "Ä" == "ä" in the NTFS, which is hopefully how lstrcmpi works regardless of locale).
-					return OK;
-		// The file is added to the list further below, after the file has been opened, in case the
-		// opening fails and aIgnoreLoadFailure==true.
-	}
-	// <buf> should be no larger than LINE_SIZE because some later functions rely upon that:
-	TCHAR msg_text[MAX_PATH + 256], buf1[LINE_SIZE], buf2[LINE_SIZE], remap_buf[LINE_SIZE];
-	LPTSTR buf = buf1, next_buf = buf2; // Oscillate between bufs to improve performance (avoids memcpy from buf2 to buf1).
-	size_t buf_length, next_buf_length;
-	bool buf_has_brace;
-	TextStream *fp;
-	TextFile tfile;
-	TextMem tmem;
-	DWORD aSizeDeCompressed = 0;
-	TextMem::Buffer textbuf(NULL, 0, false);
-	AUTO_MALLOCA_DEFINE(LPVOID, buff);
-
-	if (!g_hResource || Line::sSourceFileCount) // It is not a compiled exe or main script was already loaded
-	{
-		if (!tfile.Open(aFileSpec, DEFAULT_READ_FLAGS, g_DefaultScriptCodepage))
+		if (!source_file_index)
+			// Since this is the first source file, it must be the main script file.  Just point it to the
+			// location of the filespec already dynamically allocated:
+			Line::sSourceFile[source_file_index] = mFileSpec;
+		else
 		{
-			if (aIgnoreLoadFailure)
-				return OK;
-			sntprintf(msg_text, _countof(msg_text), _T("%s file \"%s\" cannot be opened.")
-				, Line::sSourceFileCount > 0 ? _T("#Include") : _T("Script"), aFileSpec);
-			return ScriptError(msg_text);
+			// Get the full path in case aFileSpec has a relative path.  This is done so that duplicates
+			// can be reliably detected (we only want to avoid including a given file more than once):
+			LPTSTR filename_marker;
+			GetFullPathName(aFileSpec, _countof(full_path), full_path, &filename_marker);
+			// Check if this file was already included.  If so, it's not an error because we want
+			// to support automatic "include once" behavior.  So just ignore repeats:
+			if (!aAllowDuplicateInclude)
+				for (int f = 0; f < source_file_index; ++f) // Here, source_file_index==Line::sSourceFileCount
+					if (!lstrcmpi(Line::sSourceFile[f], full_path)) // Case insensitive like the file system (testing shows that "Ä" == "ä" in the NTFS, which is hopefully how lstrcmpi works regardless of locale).
+						return OK;
+			// The file is added to the list further below, after the file has been opened, in case the
+			// opening fails and aIgnoreLoadFailure==true.
 		}
-		fp = &tfile;
-		// Set the working directory so that any #Include directives are relative to the directory
-		// containing this file by default.  Call SetWorkingDir() vs. SetCurrentDirectory() so that it
-		// succeeds even for a root drive like C: that lacks a backslash (see SetWorkingDir() for details).
-		if (source_file_index)
+
+		if (!g_hResource || Line::sSourceFileCount) // It is not a compiled exe or main script was already loaded
 		{
-			LPTSTR terminate_here = _tcsrchr(full_path, '\\');
-			if (terminate_here > full_path)
+			if (!ts.Open(aFileSpec, DEFAULT_READ_FLAGS, g_DefaultScriptCodepage))
 			{
-				*terminate_here = '\0'; // Temporarily terminate it for use with SetWorkingDir().
-				SetWorkingDir(full_path);
-				*terminate_here = '\\'; // Undo the termination.
+				if (aIgnoreLoadFailure)
+					return OK;
+				TCHAR msg_text[T_MAX_PATH + 64]; // T_MAX_PATH vs. MAX_PATH because the full length could be utilized with ErrorStdOut.
+				sntprintf(msg_text, _countof(msg_text), _T("%s file \"%s\" cannot be opened.")
+					, Line::sSourceFileCount > 0 ? _T("#Include") : _T("Script"), full_path);
+				return ScriptError(msg_text);
 			}
-			//else: probably impossible? Just leave the working dir as-is, for simplicity.
 		}
 		else
-			SetWorkingDir(mFileDir);
-
-		// This is done only after the file has been successfully opened in case aIgnoreLoadFailure==true:
-		if (source_file_index > 0)
 		{
-			Line::sSourceFile[source_file_index] = tmalloc(_tcslen(full_path) + 1); //g_SimpleHeap->Malloc(full_path);
-			if (Line::sSourceFile[source_file_index] == 0)
+			HGLOBAL hResData;
+			if ((!g_hMemoryModule && !((textbuf.mLength = SizeofResource(g_hInstance, g_hResource))
+				&& (hResData = LoadResource(g_hInstance, g_hResource))
+				&& (textbuf.mBuffer = LockResource(hResData))))
+				|| (g_hMemoryModule && !((textbuf.mLength = MemorySizeOfResource(g_hMemoryModule, g_hResource))
+					&& (textbuf.mBuffer = MemoryLoadResource(g_hMemoryModule, g_hResource)))))
 			{
-				ScriptError(ERR_OUTOFMEM);
+				MsgBox(_T("Could not extract script from EXE."), 0, aFileSpec);
 				return FAIL;
 			}
-			_tcscpy(Line::sSourceFile[source_file_index], full_path);
-		}
-	}
-	else
-	{
-		HGLOBAL hResData;
-		if ((!g_hMemoryModule && !((textbuf.mLength = SizeofResource(g_hInstance, g_hResource))
-			&& (hResData = LoadResource(g_hInstance, g_hResource))
-			&& (textbuf.mBuffer = LockResource(hResData))))
-			|| (g_hMemoryModule && !((textbuf.mLength = MemorySizeOfResource(g_hMemoryModule, g_hResource))
-			&& (textbuf.mBuffer = MemoryLoadResource(g_hMemoryModule, g_hResource)))))
-		{
-			MsgBox(_T("Could not extract script from EXE."), 0, aFileSpec);
-			return FAIL;
-		}
-		if (*(unsigned int*)textbuf.mBuffer == 0x04034b50)
-		{
-#ifndef _USRDLL
-			if (!AHKModule())
-				return FAIL;
-#endif
-			LPVOID aDataBuf;
-			for (int i = 0; i < 10; i++)
-				*g_default_pwd[i] = i + 1;
-			aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength, g_default_pwd);
-			if (aSizeDeCompressed)
+			if (*(unsigned int*)textbuf.mBuffer == 0x04034b50)
 			{
-				AUTO_MALLOCA(buff, LPVOID, aSizeDeCompressed + 2); // +2 for terminator, will be freed when function returns
-				memcpy(buff, aDataBuf, aSizeDeCompressed);
-				g_memset((char*)buff + aSizeDeCompressed, 0, 2);
-				g_memset(aDataBuf, 0, aSizeDeCompressed);
-				free(aDataBuf);
-				textbuf.mLength = aSizeDeCompressed + 2;
-				textbuf.mBuffer = buff;
 #ifndef _USRDLL
 				if (!AHKModule())
 					return FAIL;
-				MemoryFreeLibrary(g_hNTDLL);
-				MemoryFreeLibrary(g_hKERNEL32);
 #endif
+				LPVOID aDataBuf;
+				for (int i = 0; i < 10; i++)
+					*g_default_pwd[i] = i + 1;
+				aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength, g_default_pwd);
+				if (aSizeDeCompressed)
+				{
+					AUTO_MALLOCA(buff, LPVOID, aSizeDeCompressed + 2); // +2 for terminator, will be freed when function returns
+					memcpy(buff, aDataBuf, aSizeDeCompressed);
+					g_memset((char*)buff + aSizeDeCompressed, 0, 2);
+					g_memset(aDataBuf, 0, aSizeDeCompressed);
+					free(aDataBuf);
+					textbuf.mLength = aSizeDeCompressed + 2;
+					textbuf.mBuffer = buff;
+#ifndef _USRDLL
+					if (!AHKModule())
+						return FAIL;
+					MemoryFreeLibrary(g_hNTDLL);
+					MemoryFreeLibrary(g_hKERNEL32);
+#endif
+				}
 			}
+			ts.Open(textbuf, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR, CP_UTF8);
 		}
-		fp = &tmem;
-		// NOTE: Ahk2Exe strips off the UTF-8 BOM.
-		tmem.Open(textbuf, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR, CP_UTF8);
 	}
+
+	// Set the working directory so that any #Include directives are relative to the directory
+	// containing this file by default.  Call SetWorkingDir() vs. SetCurrentDirectory() so that it
+	// succeeds even for a root drive like C: that lacks a backslash (see SetWorkingDir() for details).
+	if (source_file_index)
+	{
+		LPTSTR terminate_here = _tcsrchr(full_path, '\\');
+		if (terminate_here > full_path)
+		{
+			*terminate_here = '\0'; // Temporarily terminate it for use with SetWorkingDir().
+			SetWorkingDir(full_path);
+			*terminate_here = '\\'; // Undo the termination.
+		}
+		//else: probably impossible? Just leave the working dir as-is, for simplicity.
+	}
+	else
+		SetWorkingDir(mFileDir);
+
+	// This is done only after the file has been successfully opened in case aIgnoreLoadFailure==true:
+	if (source_file_index > 0)
+		if (  !(Line::sSourceFile[source_file_index] = tmalloc(_tcslen(full_path) + 1))  )
+			return ScriptError(ERR_OUTOFMEM);
 	//else the first file was already taken care of by another means.
 
+#else // Stand-alone mode (there are no include files in this mode since all of them were merged into the main script at the time of compiling).
+
+
+	HRSRC hRes;
+	HGLOBAL hResData;
+
+#ifdef _DEBUG
+	if (hRes = FindResource(NULL, _T("AHK"), RT_RCDATA))
+#else
+	if (hRes = FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), RT_RCDATA))
+#endif
+	{}
+	
+	if ( !( hRes 
+			&& (textbuf.mLength = SizeofResource(NULL, hRes))
+			&& (hResData = LoadResource(NULL, hRes))
+			&& (textbuf.mBuffer = LockResource(hResData)) ) )
+	{
+		MsgBox(_T("Could not extract script from EXE."), 0, aFileSpec);
+		return FAIL;
+	}
+	if (*(unsigned int*)textbuf.mBuffer == 0x04034b50)
+	{
+		if (!AHKModule())
+			return FAIL;
+		LPVOID aDataBuf;
+		for (int i = 0; i < 10; i++)
+			*g_default_pwd[i] = i + 1;
+		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength, g_default_pwd);
+		if (aSizeDeCompressed)
+		{
+			AUTO_MALLOCA(buff, LPVOID, aSizeDeCompressed + 2); // +2 for terminator, will be freed when function returns
+			memcpy(buff, aDataBuf, aSizeDeCompressed);
+			g_memset((char*)buff + aSizeDeCompressed, 0, 2);
+			g_memset(aDataBuf, 0, aSizeDeCompressed);
+			free(aDataBuf);
+			textbuf.mLength = aSizeDeCompressed + 2;
+			textbuf.mBuffer = buff;
+			if (!AHKModule())
+				return FAIL;
+			MemoryFreeLibrary(g_hNTDLL);
+			MemoryFreeLibrary(g_hKERNEL32);
+		}
+	}
+	// NOTE: Ahk2Exe strips off the UTF-8 BOM.
+	ts.Open(textbuf, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR, CP_UTF8);
+
+	// Since this is a compiled script, there is only one script file.
+	// Just point it to the location of the filespec already dynamically allocated:
+	Line::sSourceFile[0] = mFileSpec;
+
+#endif
+	
+	// Since above did not continue, proceed with loading the file.
 	++Line::sSourceFileCount;
+	return CONDITION_TRUE;
+}
+
+
+
+
+#ifndef AUTOHOTKEYSC
+ResultType Script::LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow)
+{
+	TextMem ts;
+	TextMem::Buffer textbuf(NULL, 0, false);
+
+	ResultType result = OpenIncludedFile(ts, aScript, true, false, aPathToShow);
+	if (result != CONDITION_TRUE)
+		return result; // OK or FAIL.
+	// Off-loading to another function significantly reduces code size, perhaps because
+	// the TextFile/TextMem destructor is called from fewer places (each "return"):
+	return LoadIncludedFile(&ts);
+}
+#endif
+
+
+ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure)
+// Returns OK or FAIL.
+{
+#ifndef AUTOHOTKEYSC
+	ResultType result;
+	if (g_hResource)
+	{
+		TextMem tm;
+		result = OpenIncludedFile(tm, aFileSpec, aAllowDuplicateInclude, aIgnoreLoadFailure);
+		if (result != CONDITION_TRUE)
+			return result; // OK or FAIL.
+
+		// Off-loading to another function significantly reduces code size, perhaps because
+		// the TextFile/TextMem destructor is called from fewer places (each "return"):
+		return LoadIncludedFile(&tm);
+	}
+	else
+	{
+		TextFile ts;
+		result = OpenIncludedFile(ts, aFileSpec, aAllowDuplicateInclude, aIgnoreLoadFailure);
+		if (result != CONDITION_TRUE)
+			return result; // OK or FAIL.
+
+		// Off-loading to another function significantly reduces code size, perhaps because
+		// the TextFile/TextMem destructor is called from fewer places (each "return"):
+		return LoadIncludedFile(&ts);
+	}
+#else
+	TextMem ts;
+	ResultType result = OpenIncludedFile(ts, aFileSpec, aAllowDuplicateInclude, aIgnoreLoadFailure);
+	if (result != CONDITION_TRUE)
+		return result; // OK or FAIL.
+
+	// Off-loading to another function significantly reduces code size, perhaps because
+	// the TextFile/TextMem destructor is called from fewer places (each "return"):
+	return LoadIncludedFile(&ts);
+#endif
+}
+
+
+
+ResultType Script::LoadIncludedFile(TextStream *fp)
+// Returns OK or FAIL.
+{
+	// Keep this var on the stack due to recursion, which allows newly created lines to be given the
+	// correct file number even when some #include's have been encountered in the middle of the script:
+	int source_file_index = Line::sSourceFileCount - 1;
+
+	// <buf> should be no larger than LINE_SIZE because some later functions rely upon that:
+	TCHAR buf1[LINE_SIZE], buf2[LINE_SIZE], remap_buf[LINE_SIZE];
+	LPTSTR buf = buf1, next_buf = buf2; // Oscillate between bufs to improve performance (avoids memcpy from buf2 to buf1).
+	size_t buf_length, next_buf_length;
+	bool buf_has_brace;
 
 	// File is now open, read lines from it.
 
@@ -3529,7 +2790,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 	Hotkey *hk;
 	LineNumberType saved_line_number;
 	HookActionType hook_action;
-	bool is_label, suffix_has_tilde, hook_is_mandatory;
+	bool is_label, suffix_has_tilde, hook_is_mandatory, hotstring_execute;
 	ResultType hotkey_validity;
 
 	// For the remap mechanism, e.g. a::b
@@ -3597,13 +2858,12 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		// ": & somekey::" is a valid hotkey on some non-US layouts (and works even on US layouts but is
 		// equivalent to "`; & somekey::").  Hotstring detection below is thorough enough to exclude this.
 		hotstring_start = NULL;
-		hotstring_options = NULL; // Set default as "no options were specified for this hotstring".
 		hotkey_flag = NULL;
 		if (buf[0] == ':' && buf[1])
 		{
+			hotstring_options = buf + 1; // Point it to the hotstring's option letters, if any.
 			if (buf[1] != ':')
 			{
-				hotstring_options = buf + 1; // Point it to the hotstring's option letters.
 				// The following relies on the fact that options should never contain a literal colon.
 				// ALSO, the following doesn't use IS_HOTSTRING_OPTION() for backward compatibility,
 				// performance, and because it seems seldom if ever necessary at this late a stage.
@@ -3614,11 +2874,19 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			}
 			else // Double-colon, so it's a hotstring if there's more after this (but this means no options are present).
 				if (buf[2])
-					hotstring_start = buf + 2; // And leave hotstring_options at its default of NULL to indicate no options.
+					hotstring_start = buf + 2;
 			//else it's just a naked "::", which is considered to be an ordinary label whose name is colon.
 		}
 		if (hotstring_start)
 		{
+			// Check for 'X' option early since escape sequence processing depends on it.
+			hotstring_execute = g_HSSameLineAction;
+			for (cp = hotstring_options; cp < hotstring_start; ++cp)
+				if (ctoupper(*cp) == 'X')
+				{
+					hotstring_execute = cp[1] != '0';
+					break;
+				}
 			// Find the hotstring's final double-colon by considering escape sequences from left to right.
 			// This is necessary for it to handle cases such as the following:
 			// ::abc```::::Replacement String
@@ -3641,7 +2909,9 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 					if (!hotkey_flag && *cp1 == ':') // Found a non-escaped double-colon, so this is the right one.
 					{
 						hotkey_flag = cp++;  // Increment to have loop skip over both colons.
-						// and the continue with the loop so that escape sequences in the replacement
+						if (hotstring_execute)
+							break; // Let ParseAndAddLine() properly handle any escape sequences.
+						// else continue with the loop so that escape sequences in the replacement
 						// text (if there is replacement text) are also translated.
 					}
 					// else just a single colon, or the second colon of an escaped pair (`::), so continue.
@@ -3657,6 +2927,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 				case 'r': *cp1 = '\r'; break;  // carriage return
 				case 't': *cp1 = '\t'; break;  // horizontal tab
 				case 'v': *cp1 = '\v'; break;  // vertical tab
+					case 's': *cp1 = ' '; break;   // space
 					// Otherwise, if it's not one of the above, the escape-char is considered to
 					// mark the next character as literal, regardless of what it is. Examples:
 					// `` -> `
@@ -3726,8 +2997,6 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 				// if it were.  It doesn't seem useful in any case.  By contrast, normal labels can
 				// safely exist inside a function body and since the body is a block, other validation
 				// ensures that a Gosub or Goto can't jump to it from outside the function.
-				if (aSizeDeCompressed)
-					g_memset(textbuf.mBuffer, 0, aSizeDeCompressed);
 				return ScriptError(_T("Hotkeys/hotstrings are not allowed inside functions or classes."), buf);
 			}
 			*hotkey_flag = '\0'; // Terminate so that buf is now the label itself.
@@ -3783,22 +3052,10 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 						goto continue_main_loop; // It will see that remap_dest_vk is non-zero and act accordingly.
 					switch (remap_dest_vk)
 					{
-					case VK_CONTROL: // Checked in case it was specified as "Control" rather than "Ctrl".
-					case VK_SLEEP:
-						if (StrChrAny(hotkey_flag, _T(" \t,"))) // Not using g_delimiter (reduces code size/complexity).
-							break; // Any space, tab, or enter means this is a command rather than a remap destination.
-						goto continue_main_loop; // It will see that remap_dest_vk is non-zero and act accordingly.
-						// "Return" and "Pause" as destination keys are always considered commands instead.
-						// This is documented and is done to preserve backward compatibility.
-					case VK_RETURN:
-						// v1.0.40.05: Although "Return" can't be a destination, "Enter" can be.  Must compare
-						// to "Return" not "Enter" so that things like "vk0d" (the VK of "Enter") can also be a
-						// destination key:
-						if (!_tcsicmp(remap_dest, _T("Return")))
+					case VK_PAUSE:
+						if (!_tcsicmp(remap_dest, _T("Pause"))) // Specifically "Pause", not "vk13".
 							break;
-						goto continue_main_loop; // It will see that remap_dest_vk is non-zero and act accordingly.
-					case VK_PAUSE:  // Used for both "Pause" and "Break"
-						break;
+						// Fall through:
 					default: // All other VKs are valid destinations and thus the remap is valid.
 						goto continue_main_loop; // It will see that remap_dest_vk is non-zero and act accordingly.
 					}
@@ -3842,7 +3099,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 						{\
 				mNoHotkeyLabels = false;\
 				if (!AddLine(ACT_RETURN, NULL, UCHAR_MAX))\
-					goto FAIL;\
+					return FAIL;\
 				mCurrLine = NULL;\
 						}
 			CHECK_mNoHotkeyLabels
@@ -3852,7 +3109,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 				// ::abc::
 				// :c:abc::
 				if (!AddLabel(buf, true)) // Always add a label before adding the first line of its section.
-					goto FAIL;
+					return FAIL;
 			
 			if (hotstring_start)
 			{
@@ -3862,22 +3119,19 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 					// the hotstring (as a label) does not actually exist as a line.  But it seems
 					// best to report it this way in case the hotstring is inside a #Include file,
 					// so that the correct file name and approximate line number are shown:
-					if (aSizeDeCompressed)
-						g_memset(textbuf.mBuffer, 0, aSizeDeCompressed);
 					return ScriptError(_T("This hotstring is missing its abbreviation."), buf); // Display buf vs. hotkey_flag in case the line is simply "::::".
 				}
 				// In the case of hotstrings, hotstring_start is the beginning of the hotstring itself,
-				// i.e. the character after the second colon.  hotstring_options is NULL if no options,
-				// otherwise it's the first character in the options list (option string is not terminated,
-				// but instead ends in a colon).  hotkey_flag is blank if it's not an auto-replace
-				// hotstring, otherwise it contains the auto-replace text.
+				// i.e. the character after the second colon.  hotstring_options is the first character
+				// in the options list (which is terminated by a colon).  hotkey_flag is blank or the
+				// hotstring's auto-replace text or same-line action.
 				// v1.0.42: Unlike hotkeys, duplicate hotstrings are not detected.  This is because
 				// hotstrings are less commonly used and also because it requires more code to find
 				// hotstring duplicates (and performs a lot worse if a script has thousands of
 				// hotstrings) because of all the hotstring options.
-				if (!Hotstring::AddHotstring(mLastLabel->mName, mLastLabel, hotstring_options ? hotstring_options : _T("")
-					, hotstring_start, hotkey_flag, has_continuation_section))
-					goto FAIL;
+				if (!Hotstring::AddHotstring(mLastLabel->mName, mLastLabel, hotstring_options
+					, hotstring_start, hotstring_execute ? _T("") : hotkey_flag, has_continuation_section))
+					return FAIL;
 			}
 			else // It's a hotkey vs. hotstring.
 			{
@@ -3899,27 +3153,16 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 						if (hk->FindVariant()) // See if there's already a variant matching the current criteria (suffix_has_tilde does not make variants distinct form each other because it would require firing two hotkey IDs in response to pressing one hotkey, which currently isn't in the design).
 						{
 							mCurrLine = NULL;  // Prevents showing unhelpful vicinity lines.
-							if (aSizeDeCompressed)
-								g_memset(textbuf.mBuffer, 0, aSizeDeCompressed);
 							return ScriptError(_T("Duplicate hotkey."), buf);
 						}
 						if (!hk->AddVariant(mLastLabel, suffix_has_tilde))
-						{
-							if (aSizeDeCompressed)
-								g_memset(textbuf.mBuffer, 0, aSizeDeCompressed);
 							return ScriptError(ERR_OUTOFMEM, buf);
-						}
-						if (hook_is_mandatory || (!g_os.IsWin9x() && g_ForceKeybdHook))
+						if (hook_is_mandatory || g_ForceKeybdHook)
 						{
 							// Require the hook for all variants of this hotkey if any variant requires it.
 							// This seems more intuitive than the old behaviour, which required $ or #UseHook
 							// to be used on the *first* variant, even though it affected all variants.
-#ifdef CONFIG_WIN9X
-							if (g_os.IsWin9x())
-								hk->mUnregisterDuringThread = true;
-							else
-#endif
-								hk->mKeybdHookMandatory = true;
+							hk->mKeybdHookMandatory = true;
 						}
 					}
 				}
@@ -3927,12 +3170,13 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 					if (   !(hk = Hotkey::AddHotkey(mLastLabel, hook_action, mLastLabel->mName, suffix_has_tilde, false))   )
 					{
 						if (hotkey_validity != CONDITION_TRUE)
-							goto FAIL; // It already displayed the error.
+							return FAIL; // It already displayed the error.
 						// This hotkey uses a single-character key name, which could be valid on some other
 						// keyboard layout.  Allow the script to start, but warn the user about the problem.
 						// Note that this hotkey's label is still valid even though the hotkey wasn't created.
 						if (!mIncludeLibraryFunctionsThenExit) // Current keyboard layout is not relevant in /iLib mode.
 						{
+							TCHAR msg_text[128];
 							sntprintf(msg_text, _countof(msg_text), _T("Note: The hotkey %s will not be active because it does not exist in the current keyboard layout."), buf);
 							MsgBox(msg_text);
 						}
@@ -3942,7 +3186,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			{
 				// Don't add AltTab or similar as a line, since it has no meaning as a script command.
 				// But do put in the Return regardless, in case this label is ever jumped to via Goto/Gosub:
-				if (hotstring_start ? Hotstring::shs[Hotstring::sHotstringCount - 1]->mExecuteAction : !hook_action)
+				if (hotstring_start ? hotstring_execute : !hook_action)
 				{
 					// Remove the hotkey from buf.
 					buf_length -= hotkey_flag - buf;
@@ -3952,7 +3196,9 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 					// been applied yet because hotkey labels can contain unbalanced ()[]{}:
 					if (   !GetLineContExpr(fp, buf, buf_length, next_buf, next_buf_length, phys_line_number, has_continuation_section)
 						|| !ParseAndAddLine(buf, LINE_SIZE)   )
-						return FAIL;
+						return FAIL;					
+					if (ACT_IS_LINE_PARENT(mLastLine->mActionType))
+						return ScriptError(ERR_INVALID_SINGLELINE_HOT);
 				}
 				// Also add the Return that's implicit for a single-line hotkey.  This is also done for
 				// auto-replace hotstrings in case gosub/goto is ever used to jump to their labels:
@@ -3966,11 +3212,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			&& (!mClassObjectCount || g->CurrentFunc)) // Not directly inside a class body or property definition (but inside a method is okay).
 		{
 			if (buf_length == 1) // v1.0.41.01: Properly handle the fact that this line consists of only a colon.
-			{
-				if (aSizeDeCompressed)
-					g_memset(textbuf.mBuffer, 0, aSizeDeCompressed);
 				return ScriptError(ERR_UNRECOGNIZED_ACTION, buf);
-			}
 			// Labels (except hotkeys) must contain no whitespace, delimiters, or escape-chars.
 			// This is to avoid problems where a legitimate action-line ends in a colon,
 			// such as "WinActivate SomeTitle" and "#Include c:".
@@ -3999,9 +3241,17 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 				// something like foo:: from being interpreted as a generic label, so when the line fails
 				// to resolve to a command or expression, an error message will be shown.
 				buf[--buf_length] = '\0';  // Remove the trailing colon.
-				rtrim(buf, buf_length); // Has already been ltrimmed.
-				if (!AddLabel(buf, false))
-					goto FAIL;
+				if (!_tcsicmp(buf, _T("Default")) && mOpenBlock && mOpenBlock->mPrevLine // "Default:" case.
+					&& mOpenBlock->mPrevLine->mActionType == ACT_SWITCH) // It's a normal label in any other case.
+				{
+					if (!AddLine(ACT_CASE))
+						return FAIL;
+				}
+				else
+				{
+					if (!AddLabel(buf, false))
+						return FAIL;
+				}
 				goto continue_main_loop; // In lieu of "continue", for performance.
 			}
 		}
@@ -4026,7 +3276,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 				mCombinedLineNumber = saved_line_number;
 				goto continue_main_loop; // In lieu of "continue", for performance.
 			case FAIL: // IsDirective() already displayed the error.
-				goto FAIL;
+				return FAIL;
 				//case CONDITION_FALSE: Do nothing; let processing below handle it.
 			}
 		}
@@ -4065,7 +3315,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			else // Normal block begin/end.
 			{
 				if (!AddLine(*buf == '{' ? ACT_BLOCK_BEGIN : ACT_BLOCK_END))
-					goto FAIL;
+					return FAIL;
 			}
 			// Allow the remainder of the line to be treated as a separate line:
 			if (*(buf = omit_leading_whitespace(buf + 1)))
@@ -4082,16 +3332,13 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			if (!_tcsnicmp(buf, _T("Get"), 3) || !_tcsnicmp(buf, _T("Set"), 3))
 			{
 				LPTSTR cp = omit_leading_whitespace(buf + 3);
-				if (!*cp && *next_buf == '{' || *cp == '{' && !cp[1])
+				if (!*cp && *next_buf == '{' // Brace on next line
+					|| *cp == '{' && !cp[1] // Brace on this line
+					|| *cp == '=' && cp[1] == '>') // => expr
 				{
-					// For simplicity, pass the property definition to DefineFunc instead of the actual
-					// line text, even though it makes some error messages a bit inaccurate. (That would
-					// happen anyway when DefineFunc() finds a syntax error in the parameter list.)
 					LPTSTR dot = _tcschr(mClassPropertyDef, '.');
 					dot[1] = *buf; // Replace the x in property.xet(params).
-					if (!DefineFunc(mClassPropertyDef, func_global_var))
-						return FAIL;
-					if (*cp == '{' && !AddLine(ACT_BLOCK_BEGIN))
+					if (!DefineClassPropertyXet(buf, LINE_SIZE, cp, func_global_var))
 						return FAIL;
 					goto continue_main_loop;
 				}
@@ -4118,55 +3365,62 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			, phys_line_number, has_continuation_section))
 			return FAIL;
 
-		if (IsFunction(buf, &buf_has_brace)) // If true, it's either a function definition or a function call.
+		if (mClassObjectCount && !g->CurrentFunc) // Inside a class definition (and not inside a method).
 		{
-			// Open brace means this is a function definition. NOTE: Both bufs were already ltrimmed by GetLine().
-			if (buf_has_brace || *next_buf == '{')
+			LPTSTR id = buf;
+			bool is_static = false;
+			if (!_tcsnicmp(id, _T("Static"), 6) && IS_SPACE_OR_TAB(id[6]))
 			{
-				if (!DefineFunc(buf, func_global_var))
-					return FAIL;
-				if (buf_has_brace && !AddLine(ACT_BLOCK_BEGIN))
+				id = omit_leading_whitespace(id + 7);
+				if (IS_IDENTIFIER_CHAR(*id))
+					is_static = true;
+				else
+					id = buf;
+			}
+			if (IsFunctionDefinition(id, next_buf))
+			{
+				if (!DefineFunc(id, func_global_var, is_static))
 					return FAIL;
 				goto continue_main_loop;
 			}
-		}
-
-		if (mClassObjectCount && !g->CurrentFunc) // Inside a class definition (and not inside a method).
-		{
-			// Check for assignment first, in case of something like "Static := 123".
-			for (cp = buf; IS_IDENTIFIER_CHAR(*cp) || *cp == '.'; ++cp);
-			if (cp > buf) // i.e. buf begins with an identifier.
+			for (cp = id; IS_IDENTIFIER_CHAR(*cp) || *cp == '.'; ++cp);
+			if (cp > id) // i.e. buf begins with an identifier.
 			{
 				cp = omit_leading_whitespace(cp);
 				if (*cp == ':' && cp[1] == '=') // This is an assignment.
 				{
-					if (!DefineClassVars(buf, false)) // See above for comments.
+					if (!DefineClassVars(id, is_static))
 						return FAIL;
 					goto continue_main_loop;
 				}
-				if (   (!*cp || *cp == '[' || (*cp == '{' && !cp[1])) // Property
-					&& ClassHasOpenBrace(buf, buf_length, next_buf, next_buf_length)   )
+				if (!*cp || *cp == '[' || *cp == '{' || (*cp == '=' && cp[1] == '>')) // Property or invalid.
 				{
-					if (!DefineClassProperty(buf))
+					if (!DefineClassProperty(id, LINE_SIZE - int(id - buf), is_static, func_global_var, buf_has_brace))
 						return FAIL;
+					if (!buf_has_brace)
+					{
+						if (*next_buf != '{')
+							return ScriptError(ERR_UNRECOGNIZED_ACTION, buf); // Vague message because user's intention is unknown.
+						RemoveBufChar0(next_buf, next_buf_length);
+					}
 					goto continue_main_loop;
 				}
-			}
-			if (!_tcsnicmp(buf, _T("Static"), 6) && IS_SPACE_OR_TAB(buf[6]))
-			{
-				if (!DefineClassVars(buf + 7, true))
-					return FAIL; // Above already displayed the error.
-				goto continue_main_loop; // In lieu of "continue", for performance.
 			}
 			// Anything not already handled above is not valid directly inside a class definition.
 			return ScriptError(ERR_INVALID_LINE_IN_CLASS_DEF, buf);
+		}
+		else if (IsFunctionDefinition(buf, next_buf))
+		{
+			if (!DefineFunc(buf, func_global_var))
+				return FAIL;
+			goto continue_main_loop;
 		}
 
 		// Parse the command, assignment or expression, including any same-line open brace or sub-action
 		// for ELSE, TRY, CATCH or FINALLY.  Unlike braces at the start of a line (processed above), this
 		// does not allow directives or labels to the right of the command.
 		if (!ParseAndAddLine(buf, LINE_SIZE))
-			goto FAIL;
+			return FAIL;
 
 	continue_main_loop: // This method is used in lieu of "continue" for performance and code size reduction.
 		if (remap_dest_vk)
@@ -4285,8 +3539,6 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		// performance because it avoids memcpy from buf2 to buf1.
 	} // for each whole/constructed line.
 
-	if (aSizeDeCompressed)
-		g_memset(textbuf.mBuffer, 0, aSizeDeCompressed);
 	if (mClassObjectCount && !source_file_index) // or mClassProperty, which implies mClassObjectCount != 0.
 	{
 		// A class definition has not been closed with "}".  Previously this was detected by adding
@@ -4301,10 +3553,6 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 	// This is not required, it is called by the destructor.
 	// fp->Close();
 	return OK;
-FAIL:
-	if (aSizeDeCompressed)
-		g_memset(textbuf.mBuffer, 0, aSizeDeCompressed);
-	return FAIL;
 }
 
 /*
@@ -4425,7 +3673,7 @@ ResultType Script::GetLineContExpr(TextStream *fp, LPTSTR buf, size_t &buf_lengt
 	TCHAR orig_char, *action_start, *action_end;
 	ActionTypeType action_type = ACT_INVALID; // Set default.
 
-	TCHAR expect[MAX_BALANCEEXPR_DEPTH];
+	TCHAR expect[MAX_BALANCEEXPR_DEPTH], open_quote = 0;
 	int balance = BalanceExpr(buf, 0, expect);
 	if (balance <= 0 // Balanced or invalid.
 		|| next_buf_length == -1) // End of file.
@@ -4457,6 +3705,13 @@ ResultType Script::GetLineContExpr(TextStream *fp, LPTSTR buf, size_t &buf_lengt
 				if (action_type >= ACT_FIRST_JUMP && action_type <= ACT_LAST_JUMP // Gosub, goto, break or continue (though only the first two are likely to be needed).
 					&& orig_char != '(') // Not "Gosub(x)", which takes an expression.
 					return OK;
+
+				if (mClassObjectCount && !g->CurrentFunc // In a class body.
+					&& (action_end - action_start == 6) && !_tcsnicmp(action_start, _T("Static"), 6)) // Ignore "Static" modifier.
+				{
+					action_start = omit_leading_whitespace(action_end);
+					continue;
+				}
 			}
 		}
 		break;
@@ -4488,7 +3743,7 @@ ResultType Script::GetLineContExpr(TextStream *fp, LPTSTR buf, size_t &buf_lengt
 			LPTSTR cp = omit_trailing_whitespace(buf, buf + (buf_length - 2));
 			if (   *cp == ')' // Function/method definition or reserved.
 				|| *cp == ']' // Property definition or reserved.
-				|| ACT_IS_LINE_PARENT(action_type) && !EndsWithOperator(buf, cp)
+				|| (ACT_IS_LINE_PARENT(action_type) || action_type == ACT_SWITCH) && !EndsWithOperator(buf, cp)
 				|| mClassObjectCount && !g->CurrentFunc && cp < action_end   ) // "Property {" (get/set was already handled by caller).
 				return OK;
 		}
@@ -4496,21 +3751,28 @@ ResultType Script::GetLineContExpr(TextStream *fp, LPTSTR buf, size_t &buf_lengt
 		{
 			if (next_buf_length + buf_length + 1 >= LINE_SIZE)
 				return ScriptError(ERR_CONTINUATION_SECTION_TOO_LONG);
-			balance = BalanceExpr(next_buf, balance, expect); // Adjust balance based on what we're about to append.
+			balance = BalanceExpr(next_buf, balance, expect, &open_quote); // Adjust balance based on what we're about to append.
 			buf[buf_length++] = ' '; // To ensure two distinct tokens aren't joined together.  ' ' vs. '\n' because DefineFunc() currently doesn't permit '\n'.
 			tmemcpy(buf + buf_length, next_buf, next_buf_length); // Append next_buf to this line.
 			buf_length += next_buf_length;
 			buf[buf_length] = '\0';
 		}
 		LPTSTR addition_to_balance = buf + buf_length;
-		// This serves to get the next line into next_buf but also handle any comment sections
-		// or (when balance <= 0) continuation lines/sections which follow the line just appended:
+		// This serves to get the next line into next_buf but also handles any comment sections,
+		// continuation lines (when balance <= 0) or sections which follow the line just appended:
 		if (!GetLineContinuation(fp, buf, buf_length, next_buf, next_buf_length
-			, phys_line_number, has_continuation_section, balance))
+			, phys_line_number, has_continuation_section, open_quote ? 0 : balance))
 			return FAIL;
-		if (*addition_to_balance // buf was extended via line continuation (only possible when balance <= 0).
+		if (*addition_to_balance // buf was extended.
 			 && balance >= 0)
-			balance = BalanceExpr(addition_to_balance, balance, expect); // Adjust balance based on what was appended.
+			balance = BalanceExpr(addition_to_balance, balance, expect, &open_quote); // Adjust balance based on what was appended.
+		if (open_quote)
+		{
+			// Unterminated string (continuation expressions should not automatically permit strings to span lines).
+			expect[0] = open_quote;
+			expect[1] = 0;
+			balance = -1;
+		}
 	} // do
 	while (balance > 0 && next_buf_length != -1);
 	if (balance != 0)
@@ -5146,7 +4408,12 @@ size_t Script::GetLine(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSect
 			break; // Once the first valid comment-flag is found, nothing after it can matter.
 		}
 		else // No whitespace to the left.
-			if (*prevp == g_EscapeChar) // Remove the escape char.
+		{
+			// The following is done here, at this early stage, to support escaping the comment flag in
+			// hotkeys and directives (the latter is mostly for backward-compatibility).
+			LPTSTR p;
+			for (p = prevp; p > aBuf && *p == g_EscapeChar && p[-1] == g_EscapeChar; p -= 2);
+			if (p >= aBuf && *p == g_EscapeChar) // Odd number of escape chars: remove the final escape char.
 			{
 			// The following isn't exactly correct because it prevents an include filename from ever
 			// containing the literal string "`;".  This is because attempts to escape the accent via
@@ -5160,6 +4427,7 @@ size_t Script::GetLine(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSect
 			}
 		// else there wasn't any whitespace to its left, so keep looking in case there's
 		// another further on in the line.
+		}
 	} // for()
 
 	return aBuf_length; // The above is responsible for keeping aBufLength up-to-date with any changes to aBuf.
@@ -5215,8 +4483,6 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 				++parameter;
 		}
 
-		TCHAR buf[MAX_PATH];
-
 		if (*parameter == '<') // Support explicitly-specified <standard_lib_name>.
 		{
 			LPTSTR parameter_end = _tcschr(parameter, '>');
@@ -5226,12 +4492,15 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 				*parameter_end = '\0'; // Remove '>'.
 				bool error_was_shown, file_was_found;
 				// Save the working directory; see the similar line below for details.
-				if (!GetCurrentDirectory(_countof(buf) - 1, buf))
-					*buf = '\0';
+				LPTSTR prev_dir = GetWorkingDir();
 				// Attempt to include a script file based on the same rules as func() auto-include:
 				FindFuncInLibrary(parameter, parameter_end - parameter, error_was_shown, file_was_found, false);
 				// Restore the working directory.
-				SetCurrentDirectory(buf);
+				if (prev_dir)
+				{
+					SetCurrentDirectory(prev_dir);
+					free(prev_dir);
+				}
 				// If any file was included, consider it a success; i.e. allow #include <lib> and #include <lib_func>.
 				if (!error_was_shown && (file_was_found || ignore_load_failure))
 					return CONDITION_TRUE;
@@ -5260,16 +4529,64 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		}
 		// Save the working directory because LoadIncludedFile() changes it, and we want to retain any directory
 		// set by a previous instance of "#Include DirPath" for any other instances of #Include below this line.
-		if (!GetCurrentDirectory(_countof(buf) - 1, buf))
-			*buf = '\0';
+		LPTSTR prev_dir = GetWorkingDir();
 		// Since above didn't return, it's a file (or non-existent file, in which case the below will display
 		// the error).  This will also display any other errors that occur:
 		ResultType result = LoadIncludedFile(include_path, is_include_again, ignore_load_failure) ? CONDITION_TRUE : FAIL;
 		// Restore the working directory.
-		SetCurrentDirectory(buf);
+		if (prev_dir)
+		{
+			SetCurrentDirectory(prev_dir);
+			free(prev_dir);
+		}
 		free(include_path);
 		return result;
 	}
+
+	if (IS_DIRECTIVE_MATCH(_T("#DllLoad")))
+	{
+		if (!parameter)
+		{
+			// an empty #DllLoad restores the default search order.
+			if (!SetDllDirectory(NULL))
+				return ScriptError(ERR_INTERNAL_CALL);
+			return CONDITION_TRUE;
+		}
+		// ignore failure if path is preceeded by "*i".
+		bool ignore_load_failure = (parameter[0] == '*' && ctoupper(parameter[1]) == 'I'); // Relies on short-circuit boolean order.
+		if (ignore_load_failure)
+		{
+			parameter += 2;
+			if (IS_SPACE_OR_TAB(*parameter)) // Skip over at most one space or tab, since others might be a literal part of the filename.
+				++parameter;
+		}
+		LPTSTR library_path;	// needs to be freed before return, unless DerefInclude return FAIL.
+		if (!DerefInclude(library_path, parameter))
+			return FAIL;
+		DWORD attr = GetFileAttributes(library_path);
+		if (attr != 0xFFFFFFFF && (attr & FILE_ATTRIBUTE_DIRECTORY)) // File exists and its a directory
+		{
+			BOOL result = SetDllDirectory(library_path);
+			free(library_path);
+			if (!result)
+				return ScriptError(ERR_INTERNAL_CALL);
+			return CONDITION_TRUE;
+		}
+		ResultType result = CONDITION_TRUE;	// set default
+		HMODULE hmodule = LoadLibrary(library_path);
+
+		if (hmodule)
+			// "Pin" the dll so that the script cannot unload it with FreeLibrary.
+			// This is done to avoid undefined behaviour when DllCall optimizations
+			// resolves a proc address in a dll loaded by this directive.
+			GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_PIN, library_path, &hmodule);  // MSDN regarding hmodule: "If the function fails, this parameter is NULL."
+
+		if (!hmodule					// the library couldn't be loaded
+			&& !ignore_load_failure)	// no *i was specified
+			result = ScriptError(_T("Failed to load DLL."), library_path);
+		free(library_path);
+		return result;
+	} // end #DllLoad
 
 	if (IS_DIRECTIVE_MATCH(_T("#NoTrayIcon")))
 	{
@@ -5300,20 +4617,12 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 	}
 	if (IS_DIRECTIVE_MATCH(_T("#InstallKeybdHook")))
 	{
-		// It seems best not to report this warning because a user may want to use partial functionality
-		// of a script on Win9x:
-		//MsgBox("#InstallKeybdHook is not supported on Windows 95/98/Me.  This line will be ignored.");
-		if (!g_os.IsWin9x())
-			Hotkey::RequireHook(HOOK_KEYBD);
+		Hotkey::RequireHook(HOOK_KEYBD);
 		return CONDITION_TRUE;
 	}
 	if (IS_DIRECTIVE_MATCH(_T("#InstallMouseHook")))
 	{
-		// It seems best not to report this warning because a user may want to use partial functionality
-		// of a script on Win9x:
-		//MsgBox("#InstallMouseHook is not supported on Windows 95/98/Me.  This line will be ignored.");
-		if (!g_os.IsWin9x())
-			Hotkey::RequireHook(HOOK_MOUSE);
+		Hotkey::RequireHook(HOOK_MOUSE);
 		return CONDITION_TRUE;
 	}
 	if (IS_DIRECTIVE_MATCH(_T("#UseHook")))
@@ -5338,7 +4647,7 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		if (g->HotCriterion = FindHotkeyIfExpr(parameter))
 			return CONDITION_TRUE;
 		
-		Func *current_func = g->CurrentFunc;
+		auto current_func = g->CurrentFunc;
 		g->CurrentFunc = NULL; // Use global scope.
 		mNoUpdateLabels = true; // Avoid pointing any pending labels at this line.
 		
@@ -5652,8 +4961,8 @@ void ScriptTimer::Disable()
 
 
 
-ResultType Script::UpdateOrCreateTimer(IObject *aCallback, LPTSTR aPeriod, LPTSTR aPriority, bool aEnable
-	, bool aUpdatePriorityOnly)
+ResultType Script::UpdateOrCreateTimer(IObject *aCallback
+	, bool aUpdatePeriod, __int64 aPeriod, bool aUpdatePriority, int aPriority)
 	// Caller should specific a blank aPeriod to prevent the timer's period from being changed
 	// (i.e. if caller just wants to turn on or off an existing timer).  But if it does this
 	// for a non-existent timer, that timer will be created with the default period as specified in
@@ -5678,41 +4987,41 @@ ResultType Script::UpdateOrCreateTimer(IObject *aCallback, LPTSTR aPeriod, LPTST
 		}
 		++mTimerCount;
 	}
-	// Update its members:
-	if (aEnable && !timer->mEnabled) // Must check both or the mTimerEnabledCount below will be wrong.
-	{
-		// The exception is if the timer already existed but the caller only wanted its priority changed:
-		if (!(timer_existed && aUpdatePriorityOnly))
-		{
-			timer->mEnabled = true;
-			++mTimerEnabledCount;
-			SET_MAIN_TIMER  // Ensure the API timer is always running when there is at least one enabled timed subroutine.
-		}
-		//else do nothing, leave it disabled.
-	}
-	else if (!aEnable && timer->mEnabled) // Must check both or the below count will be wrong.
-		timer->Disable();
 
-	aPeriod = omit_leading_whitespace(aPeriod); // This causes A_Space to be treated as "omitted" rather than zero, so may change the behaviour of some poorly-written scripts, but simplifies the check below which allows -0 to work.
-	if (*aPeriod) // Caller wanted us to update this member.
+	if (!timer->mEnabled)
 	{
-		__int64 period = ATOI64(aPeriod);
-		if (*aPeriod == '-') // v1.0.46.16: Support negative periods to mean "run only once".
+		timer->mEnabled = true;
+		++mTimerEnabledCount;
+		SET_MAIN_TIMER  // Ensure the API timer is always running when there is at least one enabled timed subroutine.
+		if (timer_existed)
+		{
+			// mEnabled is currently used to mark a running timer for deletion upon return.
+			// Since the timer could be recreated by a different thread which just happens
+			// to interrupt the timer thread, it seems best for consistency to reset Period
+			// and Priority as though it had already been deleted.
+			aUpdatePeriod = true;
+			aUpdatePriority = true;
+		}
+	}
+
+	if (aUpdatePeriod)
+	{
+		if (aPeriod < 0) // Support negative periods to mean "run only once".
 		{
 			timer->mRunOnlyOnce = true;
-			timer->mPeriod = (DWORD)-period;
+			timer->mPeriod = (DWORD)-aPeriod;
 		}
-		else // Positive number.  v1.0.36.33: Changed from int to DWORD, and ATOI to ATOU, to double its capacity:
+		else // Positive number.
 		{
-			timer->mPeriod = (DWORD)period; // Always use this method & check to retain compatibility with existing scripts.
+			timer->mPeriod = (DWORD)aPeriod;
 			timer->mRunOnlyOnce = false;
 		}
 	}
 
-	if (*aPriority) // Caller wants this member to be changed from its current or default value.
-		timer->mPriority = ATOI(aPriority); // Read any float in a runtime variable reference as an int.
+	if (aUpdatePriority)
+		timer->mPriority = aPriority;
 
-	if (!(timer_existed && aUpdatePriorityOnly))
+	if (aUpdatePeriod || !aUpdatePriority)
 		// Caller relies on us updating mTimeLastRun in this case.  This is done because it's more
 		// flexible, e.g. a user might want to create a timer that is triggered 5 seconds from now.
 		// In such a case, we don't want the timer's first triggering to occur immediately.
@@ -5741,15 +5050,8 @@ void Script::DeleteTimer(IObject *aLabel)
 				timer->Disable(); // Keeps track of mTimerEnabledCount and whether the main timer is needed.
 			if (timer->mExistingThreads) // This condition differs from g->CurrentTimer == timer, which only detects the "top-most" timer.
 			{
-				if (!aLabel) // Caller requested we delete a previously marked timer which
-					continue; // has now finished, but this one hasn't, so keep looking.
-				// In this case we can't delete the timer yet, so mark it for later deletion.
-				timer->mCallback = NULL;
-				// Clearing mCallback:
-				//  1) Marks the timer to be deleted after its last thread finishes.
-				//  2) Ensures any subsequently created timer will get default settings.
-				//  3) Allows the object to be freed before the timer subroutine returns
-				//     if all other references to it are released.
+				// In this case we can't delete the timer yet, but CheckScriptTimers()
+				// will check mEnabled after the callback returns and will delete it then.
 				break;
 			}
 			// Remove it from the list.
@@ -5852,7 +5154,7 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, int aBufSize, ActionTypeTyp
 	// allowing the string to be split into sections without having to make temporary copies.
 {
 #ifdef _DEBUG
-	if (!aLineText || !*aLineText)
+	if (!aLineText || !*aLineText && !aActionType)
 		return ScriptError(_T("DEBUG: ParseAndAddLine() called incorrectly."));
 #endif
 
@@ -5919,7 +5221,7 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, int aBufSize, ActionTypeTyp
 					{
 						// v1.1.27: "local" by itself restricts globals to only those declared inside the function.
 						declare_type |= VAR_FORCE_LOCAL;
-						if (Func *outer = g->CurrentFunc->mOuterFunc)
+						if (auto outer = g->CurrentFunc->mOuterFunc)
 						{
 							// Exclude all global declarations of the outer function.  This relies on the lack of
 							// duplicate checking below (so that a re-declaration above this line will take effect
@@ -6219,8 +5521,9 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, int aBufSize, ActionTypeTyp
 				for (;;) // L35: Loop to fix x.y.z() and similar.
 				{
 					id_end = find_identifier_end(id_begin);
-					if (*id_end == '(')
-					{	// Allow function/method Call as standalone expression.
+					if (*id_end == '(' // Allow function/method Call as standalone expression.
+						|| *id_end == g_DerefChar) // Allow dynamic property/method access (too hard to validate what's to the right of %).
+					{
 						aActionType = ACT_EXPRESSION;
 						break;
 					}
@@ -6297,12 +5600,7 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, int aBufSize, ActionTypeTyp
 
 		if (!aActionType && *end_marker != '(')
 		{
-			if (!_tcsicmp(action_name, _T("new")) && *end_marker) // Note that new(MyClass) doesn't need to be checked here because our caller pre-determines ACT_EXPRESSION based on IsFunction().
-			{
-				aActionType = ACT_EXPRESSION; // Mark this line as a stand-alone expression.
-				action_args = aLineText; // Use the line's full text for later parsing.
-			}
-			else if (*action_name < '0' || *action_name > '9') // Exclude numbers, since no function name can start with a number.
+			if (*action_name < '0' || *action_name > '9') // Exclude numbers, since no function name can start with a number.
 			{
 				// Convert function/method call statements to function/method calls.
 				int line_length = (int)_tcslen(aLineText);
@@ -6329,7 +5627,7 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, int aBufSize, ActionTypeTyp
 			switch (ActionTypeType otb_act = ConvertActionType(action_name, ACT_FIRST_NAMED_ACTION, ACT_FIRST_COMMAND))
 			{
 			case ACT_LOOP:
-				add_openbrace_afterward = true;
+			case ACT_SWITCH:
 				if (action_args[1]) // See above.
 					break;
 				//else fall through:
@@ -6339,6 +5637,21 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, int aBufSize, ActionTypeTyp
 			case ACT_FINALLY:
 				aActionType = otb_act;
 				break;
+			}
+		}
+		else if (*action_args == ':')
+		{
+			// Default isn't handled as its own action type because that would only cover the cases
+			// where there is a space after the name.  This covers "Default: subaction", "Default :"
+			// and "Default : subaction".  "Default:" on its own is handled by label-parsing.
+			if (!_tcsicmp(action_name, _T("Default")))
+			{
+				if (!AddLine(ACT_CASE))
+					return FAIL;
+				action_args = omit_leading_whitespace(action_args + 1);
+				if (!*action_args)
+					return OK;
+				return ParseAndAddLine(action_args, aBufSize ? aBufSize - int(action_args - aLineText) : 0);
 			}
 		}
 		if (!aActionType && _tcschr(EXPR_ALL_SYMBOLS, *action_args))
@@ -6424,6 +5737,8 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, int aBufSize, ActionTypeTyp
 				return ScriptError(_T("Invalid loop type."), aLineText);
 		}
 	}
+	int mark;
+	LPTSTR subaction_start = NULL;
 	// Perform some pre-processing to allow the parameter list of a control flow statement
 	// to be enclosed in parentheses.  For goto/gosub/break/continue, this changes the param
 	// from a literal label to an expression.  For others it is just a matter of coding style.
@@ -6472,19 +5787,27 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, int aBufSize, ActionTypeTyp
 	case ACT_FINALLY:
 		if (end_marker && *end_marker == '(') // Seems best to treat this as an error, perhaps reserve for future use.
 			return ScriptError(ERR_EXPR_SYNTAX, aLineText);
-		if (!AddLine(aActionType))
-			return FAIL;
 		if (*action_args == '{')
 		{
-			if (!AddLine(ACT_BLOCK_BEGIN))
-				return FAIL;
+			add_openbrace_afterward = true;
 			action_args = omit_leading_whitespace(action_args + 1);
 		}
-		if (!*action_args)
-			return OK;
-		// Call self recursively to parse the sub-action.
-		//mCurrLine = NULL; // Seems more useful to leave this set to the line added above.
-		return ParseAndAddLine(action_args, aBufSize - int(action_args - aLineText));
+		if (*action_args)
+		{
+			subaction_start = action_args;
+			*--action_args = '\0'; // Relies on there being a space, tab or brace at this position.
+		}
+		break;
+	case ACT_CASE:
+		mark = FindExprDelim(action_args, ':');
+		if (!action_args[mark])
+			return ScriptError(ERR_MISSING_COLON, aLineText);
+		action_args[mark] = '\0';
+		rtrim(action_args);
+		subaction_start = omit_leading_whitespace(action_args + mark + 1);
+		if (!*subaction_start) // Nothing to the right of ':'.
+			subaction_start = NULL;
+		break;
 	}
 
 	Action &this_action = g_act[aActionType];
@@ -6524,7 +5847,6 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, int aBufSize, ActionTypeTyp
 		ConvertEscapeSequences(action_args, literal_map);
 	}
 
-	int mark;
 	if (aActionType == ACT_FOR)
 	{
 		// Validate "For" syntax and translate to conventional command syntax.
@@ -6626,7 +5948,8 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, int aBufSize, ActionTypeTyp
 			, max_params > 1 ? _T("s") : _T(""));
 		return ScriptError(error_msg, aLineText);
 	}
-	for (int i = 0; i < this_action.MinParams; ++i) // It's only safe to do this after the above.
+	for (int i = 0, non_blank_params = aActionType == ACT_CASE ? nArgs : this_action.MinParams
+		; i < non_blank_params; ++i) // It's only safe to do this after the above.
 		if (!*arg[i])
 		{
 		sntprintf(error_msg, _countof(error_msg), _T("\"%s\" requires that parameter #%u be non-blank.")
@@ -6636,7 +5959,7 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, int aBufSize, ActionTypeTyp
 
 	// Handle one-true-brace (OTB).
 	// Else, Try and Finally were already handled, since they also accept a sub-action.
-	if (nArgs && (ACT_IS_LOOP(aActionType) || aActionType == ACT_IF || aActionType == ACT_CATCH)
+	if (nArgs && (ACT_IS_LOOP(aActionType) || aActionType == ACT_IF || aActionType == ACT_CATCH || aActionType == ACT_SWITCH)
 		&& !add_openbrace_afterward) // It wasn't already handled.
 	{
 		LPTSTR arg1 = arg[nArgs - 1]; // For readability and possibly performance.
@@ -6647,9 +5970,9 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, int aBufSize, ActionTypeTyp
 			add_openbrace_afterward = true;
 			*arg1_last_char = '\0';  // Since it will be fully handled here, remove the brace from further consideration.
 			if (!rtrim(arg1)) // Trimmed down to nothing, so only a brace was present: remove the arg completely.
-				if (aActionType == ACT_LOOP || aActionType == ACT_CATCH)
+				if (aActionType == ACT_LOOP || aActionType == ACT_CATCH || aActionType == ACT_SWITCH)
 					--nArgs;
-				else // ACT_WHILE or ACT_FOR
+				else // ACT_WHILE, ACT_FOR or ACT_IF
 					return ScriptError(ERR_PARAM1_REQUIRED, aLineText);
 		}
 	}
@@ -6659,7 +5982,9 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, int aBufSize, ActionTypeTyp
 	if (add_openbrace_afterward)
 		if (!AddLine(ACT_BLOCK_BEGIN))
 			return FAIL;
-	return OK;
+	if (!subaction_start) // There is no subaction in this case.
+		return OK;
+	return ParseAndAddLine(subaction_start, aBufSize ? aBufSize - int(subaction_start - aLineText) : 0); // Escape sequences in the subaction haven't been translated yet.
 }
 
 
@@ -6937,9 +6262,6 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 		// "consecutive function" for more comments.
 		if (g->CurrentFunc && !g->CurrentFunc->mJumpToLine)
 		{
-			// The above check relies upon the fact that g->CurrentFunc->mIsBuiltIn must be false at this stage,
-			// which is the case because any non-overridden built-in function won't get added until after all
-			// lines have been added, namely PreparseBlocks().
 			line.mAttribute = g->CurrentFunc;  // Flag this ACT_BLOCK_BEGIN as the opening brace of the function's body.
 			// For efficiency, and to prevent ExecUntil from starting a new recursion layer for the function's
 			// body, the function's execution should begin at the first line after its open-brace (even if that
@@ -7007,7 +6329,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 	{
 		if (g->CurrentFunc && g->CurrentFunc == mOpenBlock->mAttribute)
 		{
-			Func &func = *g->CurrentFunc;
+			auto &func = *g->CurrentFunc;
 			if (func.mOuterFunc)
 				// At this point both functions point to the same buffer, but maybe different portions.
 				// Reverse any adjustment that may have been made by a force-local declaration.
@@ -7126,18 +6448,24 @@ ResultType Script::ParseOperands(LPTSTR aArgText, LPTSTR aArgMap, DerefType *aDe
 				// handled outside the loop for simplicity.  Breaking out of the loop means that this
 				// will be seen as an operand of zero length.
 				break;
-			switch (*op_begin)
+			if (*op_begin == '.')
 			{
-			case '.':
 				// This case also handles the dot in `.=` (the `=` is skipped by the next iteration).
 				// Skip the numeric literal or identifier to the right of this, if there is one.
 				// This won't skip the signed exponent of a scientific-notation literal, but that should
 				// be OK as it will be recognized as purely numeric in the next iteration of this loop.
-				do ++op_begin; while (!_tcschr(EXPR_OPERAND_TERMINATORS, *op_begin));
-				// Considered using ParseDoubleDeref() to allow derefs like x.y%z% (meaning x["y" z]),
-				// but in addition to being redundant, it would complicate things in ExpressionToPostfix().
-				continue;
-
+				op_end = find_identifier_end(op_begin + 1);
+				if (*op_end != g_DerefChar || aEndChar == g_DerefChar)
+				{
+					op_begin = op_end;
+					continue;
+				}
+				// Otherwise, it's a dynamic property or method call.
+				++op_begin; // Skip the dot.
+				break;
+			}
+			switch (*op_begin)
+			{
 			default:
 				op_begin++;
 				continue;
@@ -7226,7 +6554,7 @@ ResultType Script::ParseOperands(LPTSTR aArgText, LPTSTR aArgMap, DerefType *aDe
 		if (*op_begin <= '9' && *op_begin >= '0') // Numeric literal.  Numbers starting with a decimal point are handled under "case '.'".
 		{
 			// Behaviour here should match the similar section in ExpressionToPostfix().
-			tcstoi64_o(op_begin, &op_end, 0);
+			istrtoi64(op_begin, &op_end);
 			if (!IS_HEX(op_begin)) // This check is probably only needed on VC++ 2015 and later, where _tcstod allows hex.
 			{
 				LPTSTR d_end;
@@ -7310,7 +6638,11 @@ ResultType Script::ParseOperands(LPTSTR aArgText, LPTSTR aArgMap, DerefType *aDe
 			// in this double-deref or dynamic function call:
 			aDeref[aDerefCount].marker = op_end;
 			aDeref[aDerefCount].length = 0;
-			if (is_function)
+			if (op_begin > aArgText && op_begin[-1] == '.')
+			{
+				aDeref[aDerefCount].type = DT_DOTPERCENT;
+			}
+			else if (is_function)
 			{
 				// func is initialized to NULL and left that way to indicate the call is dynamic.
 				// PreparseBlocks() relies on length == 0 meaning a dynamic function reference.
@@ -7323,18 +6655,7 @@ ResultType Script::ParseOperands(LPTSTR aArgText, LPTSTR aArgMap, DerefType *aDe
 		else if (  operand_length < 9 && (wordop = ConvertWordOperator(op_begin, operand_length))  )
 		{
 			// It's a word operator like AND/OR/NOT.
-			if (wordop == SYM_NEW)
-			{
-				cp = omit_leading_whitespace(op_begin + 3);
-				if (IS_IDENTIFIER_CHAR(*cp) || *cp == g_DerefChar)
-				{
-					// This "new" is followed by something that could be a class name or double-deref
-					// (but might be some other var, as in `new x.y()`).  In any case, we need to avoid
-					// parsing it as a function call.
-					pending_op_is_class = true;
-				}
-			}
-			else if (wordop == SYM_IN || wordop == SYM_CONTAINS)
+			if (wordop == SYM_IN || wordop == SYM_CONTAINS)
 			{
 				return ScriptError(_T("Word reserved for future use."), op_begin);
 			}
@@ -7426,7 +6747,6 @@ SymbolType Script::ConvertWordOperator(LPCTSTR aWord, size_t aLength)
 		{ _T("or"), SYM_OR },
 		{ _T("and"), SYM_AND },
 		{ _T("not"), SYM_LOWNOT },
-		{ _T("new"), SYM_NEW },
 		{ _T("is"), SYM_IS },
 		{ _T("in"), SYM_IN },
 		{ _T("contains"), SYM_CONTAINS }
@@ -7469,7 +6789,7 @@ ResultType Script::ParseFatArrow(DerefType &aDeref, LPTSTR aPrmStart, LPTSTR aPr
 	{
 		orig_end = aPrmEnd[1];
 		aPrmEnd[1] = '\0';
-		if (!DefineFunc(aPrmStart, NULL, true))
+		if (!DefineFunc(aPrmStart, NULL, false, true))
 			return FAIL;
 		aPrmEnd[1] = orig_end;
 	}
@@ -7478,7 +6798,7 @@ ResultType Script::ParseFatArrow(DerefType &aDeref, LPTSTR aPrmStart, LPTSTR aPr
 		// Format the parameter list as needed for DefineFunc().
 		TCHAR prm[MAX_VAR_NAME_LENGTH + 4];
 		sntprintf(prm, _countof(prm), _T("(%.*s)"), aPrmEnd - aPrmStart, aPrmStart);
-		if (!DefineFunc(prm, NULL, true))
+		if (!DefineFunc(prm, NULL, false, true))
 			return FAIL;
 	}
 
@@ -7488,6 +6808,7 @@ ResultType Script::ParseFatArrow(DerefType &aDeref, LPTSTR aPrmStart, LPTSTR aPr
 	if (!g->CurrentFunc->mOuterFunc)
 		g->CurrentFunc->mDefaultVarType = VAR_DECLARE_GLOBAL;
 
+	for (; aExprEnd > aExpr && IS_SPACE_OR_TAB(aExprEnd[-1]); --aExprEnd);
 	orig_end = *aExprEnd;
 	*aExprEnd = '\0';
 	if (!ParseAndAddLine(aExpr, 0, ACT_RETURN, aExprMap, aExprEnd - aExpr))
@@ -7513,7 +6834,7 @@ ResultType Script::ParseFatArrow(DerefType &aDeref, LPTSTR aPrmStart, LPTSTR aPr
 
 
 
-ResultType Script::DefineFunc(LPTSTR aBuf, Var *aFuncGlobalVar[], bool aIsFatArrow)
+ResultType Script::DefineFunc(LPTSTR aBuf, Var *aFuncGlobalVar[], bool aStatic, bool aIsInExpression)
 // Returns OK or FAIL.
 // Caller has already called ValidateName() on the function, and it is known that this valid name
 // is followed immediately by an open-paren.  aFuncExceptionVar is the address of an array on
@@ -7523,10 +6844,12 @@ ResultType Script::DefineFunc(LPTSTR aBuf, Var *aFuncGlobalVar[], bool aIsFatArr
 	LPTSTR param_end, param_start = _tcschr(aBuf, '('); // Caller has ensured that this will return non-NULL.
 	int insert_pos;
 
-	bool is_method = mClassObjectCount && !g->CurrentFunc && !aIsFatArrow;
+	bool is_method = mClassObjectCount && !g->CurrentFunc && !aIsInExpression;
 	if (is_method) // Class method or property getter/setter.
 	{
 		Object *class_object = mClassObject[mClassObjectCount - 1];
+		if (!aStatic)
+			class_object = (Object *)class_object->GetOwnPropObj(_T("Prototype"));
 
 		*param_start = '\0'; // Temporarily terminate, for simplicity.
 
@@ -7535,56 +6858,41 @@ ResultType Script::DefineFunc(LPTSTR aBuf, Var *aFuncGlobalVar[], bool aIsFatArr
 		// on by FindFunc(), BIF_OnMessage() and perhaps others.  For simplicity, allow one extra char to be
 		// printed and rely on AddFunc() detecting that the name is too long.
 		TCHAR full_name[MAX_VAR_NAME_LENGTH + 1 + 1]; // Extra +1 for null terminator.
-		_sntprintf(full_name, MAX_VAR_NAME_LENGTH + 1, _T("%s.%s"), mClassName, aBuf);
+		_sntprintf(full_name, MAX_VAR_NAME_LENGTH + 1, aStatic ? _T("%s.%s") : _T("%s.Prototype.%s"), mClassName, aBuf);
 		full_name[MAX_VAR_NAME_LENGTH + 1] = '\0'; // Must terminate at this exact point if _sntprintf hit the limit.
 		
 		// Check for duplicates and determine insert_pos:
 		Func *found_func;
 		ExprTokenType found_item;
-		if (!mClassProperty && class_object->GetItem(found_item, aBuf) // Must be done in addition to the below to detect conflicting var/method declarations.
-			|| (found_func = FindFunc(full_name, -1, &insert_pos))) // Must be done to determine insert_pos.
-		{
+		if (found_func = FindFunc(full_name, -1, &insert_pos)) // Must be done to determine insert_pos.
 			return ScriptError(ERR_DUPLICATE_DECLARATION, aBuf); // The parameters are omitted due to temporary termination above.  This might make it more obvious why "X[]" and "X()" are considered duplicates.
-		}
 		
 		*param_start = '('; // Undo temporary termination.
 
 		// Below passes class_object for AddFunc() to store the func "by reference" in it:
-		if (  !(g->CurrentFunc = AddFunc(full_name, -1, false, insert_pos, class_object))  )
+		if (  !(g->CurrentFunc = AddFunc(full_name, -1, insert_pos, class_object))  )
 			return FAIL;
 	}
 	else
 	{
 		Func *found_func = FindFunc(aBuf, param_start - aBuf, &insert_pos);
-		if (found_func)
-		{
-			if (!found_func->mIsBuiltIn)
-				return ScriptError(_T("Duplicate function definition."), aBuf); // Seems more descriptive than "Function already defined."
-			else // It's a built-in function that the user wants to override with a custom definition.
-			{
-				found_func->mIsBuiltIn = false;  // Override built-in with custom.
-				found_func->mParamCount = 0; // Revert to the default appropriate for non-built-in functions.
-				found_func->mMinParams = 0;  //
-				found_func->mJumpToLine = NULL; // Fixed for v1.0.35.12: Must reset for detection elsewhere.
-				found_func->mParam = NULL;
-				g->CurrentFunc = found_func;
-			}
-		}
+		if (found_func && !found_func->IsBuiltIn())
+			return ScriptError(_T("Duplicate function definition."), aBuf); // Seems more descriptive than "Function already defined."
 		else
 			// The value of g->CurrentFunc must be set here rather than by our caller since AddVar(), which we call,
 			// relies upon it having been done.
-			if (!(g->CurrentFunc = AddFunc(aBuf, param_start - aBuf, false, insert_pos)))
+			if (   !(g->CurrentFunc = AddFunc(aBuf, param_start - aBuf, insert_pos))   )
 				return FAIL; // It already displayed the error.
 	}
 
-	Func &func = *g->CurrentFunc; // For performance and convenience.
+	auto &func = *g->CurrentFunc; // For performance and convenience.
 	size_t param_length, value_length;
 	FuncParam param[MAX_FUNCTION_PARAMS];
 	int param_count = 0;
 	TCHAR buf[LINE_SIZE], *target;
 	bool param_must_have_default = false;
 
-	func.mIsFatArrow = aIsFatArrow;
+	func.mIsFuncExpression = aIsInExpression;
 
 	if (is_method)
 	{
@@ -7632,17 +6940,24 @@ ResultType Script::DefineFunc(LPTSTR aBuf, Var *aFuncGlobalVar[], bool aIsFatArr
 				return ScriptError(ERR_MISSING_CLOSE_PAREN, aBuf);
 		}
 
-		if (!(param_length = param_end - param_start))
-			return ScriptError(ERR_MISSING_PARAM_NAME, aBuf); // Reporting aBuf vs. param_start seems more informative since Vicinity isn't shown.
-
-		// search for local vars (static vars will be double checked before searching locals)
-		if (this_param.var = FindVar(param_start, param_length, &insert_pos, FINDVAR_LOCAL))  // Assign.
-			return ScriptError(_T("Duplicate parameter."), param_start);
-		if (!(this_param.var = AddVar(param_start, param_length, insert_pos, VAR_DECLARE_LOCAL | VAR_LOCAL_FUNCPARAM)))	// Pass VAR_LOCAL_FUNCPARAM as last parameter to mean "it's a local but more specifically a function's parameter".
-			return FAIL; // It already displayed the error, including attempts to have reserved names as parameter names.
-
+		param_length = param_end - param_start;
+		if (param_length)
+		{
+			if (this_param.var = FindVar(param_start, param_length, &insert_pos, FINDVAR_LOCAL))  // Assign.
+				return ScriptError(_T("Duplicate parameter."), param_start);
+			if (   !(this_param.var = AddVar(param_start, param_length, insert_pos, VAR_DECLARE_LOCAL | VAR_LOCAL_FUNCPARAM))   )	// Pass VAR_LOCAL_FUNCPARAM as last parameter to mean "it's a local but more specifically a function's parameter".
+				return FAIL; // It already displayed the error, including attempts to have reserved names as parameter names.
+			param_start = omit_leading_whitespace(param_end);
+		}
+		else
+		{
+			if (*param_start != '*')
+				return ScriptError(ERR_MISSING_PARAM_NAME, aBuf); // Reporting aBuf vs. param_start seems more informative since Vicinity isn't shown.
+			// fn(a,*) permits surplus parameters but does not store them.
+			this_param.var = NULL;
+		}
+		
 		this_param.default_type = PARAM_DEFAULT_NONE;  // Set default.
-		param_start = omit_leading_whitespace(param_end);
 
 		if (func.mIsVariadic = (*param_start == '*'))
 		{
@@ -7759,10 +7074,7 @@ ResultType Script::DefineFunc(LPTSTR aBuf, Var *aFuncGlobalVar[], bool aIsFatArr
 		//else it's ')', in which case the next iteration will handle it.
 		// Above has ensured that param_start now points to the next parameter, or ')' if none.
 	} // for() each formal parameter.
-
-	if (param_start[1]) // Something follows the ')' other than OTB (which was handled at an earlier stage).
-		return ScriptError(ERR_INVALID_FUNCDECL, aBuf);
-
+	
 	if (param_count)
 	{
 		// Allocate memory only for the actual number of parameters actually present.
@@ -7832,7 +7144,33 @@ ResultType Script::DefineFunc(LPTSTR aBuf, Var *aFuncGlobalVar[], bool aIsFatArr
 		mGlobalVarCountMax = aFuncGlobalVar ? MAX_FUNC_VAR_GLOBALS : 0;
 	}
 	mNextLineIsFunctionBody = false; // This is part of a workaround for functions which start with a nested function.
-	// Indicate success:
+
+	// At this point, param_start points to ')'.
+	ASSERT(*param_start == ')');
+	param_start = omit_leading_whitespace(param_start + 1);
+	if (*param_start == '{') // OTB.
+	{
+		if (!AddLine(ACT_BLOCK_BEGIN))
+			return FAIL;
+		ASSERT(!param_start[1]); // IsFunctionDefinition() verified this.
+	}
+	else if (*param_start == '=' && '>' == param_start[1]) // => expr
+	{
+		if (!func.mOuterFunc && !is_method)
+			func.mDefaultVarType = VAR_DECLARE_GLOBAL;
+		param_start = omit_leading_whitespace(param_start + 2);
+		if (!*param_start)
+			return ScriptError(ERR_INVALID_FUNCDECL, aBuf);
+		if (!AddLine(ACT_BLOCK_BEGIN)
+			|| !ParseAndAddLine(param_start, 0, ACT_RETURN)
+			|| !AddLine(ACT_BLOCK_END))
+			return FAIL;
+	}
+	else
+	{
+		// IsFunctionDefinition() permits only {, => or \0.
+		ASSERT(!*param_start);
+	}
 	return OK;
 }
 
@@ -7843,9 +7181,11 @@ ResultType Script::DefineClass(LPTSTR aBuf)
 	if (mClassObjectCount == MAX_NESTED_CLASSES)
 		return ScriptError(_T("This class definition is nested too deep."), aBuf);
 
+	if (!mClasses)
+		mClasses = Array::Create();
+
 	LPTSTR cp, class_name = aBuf;
-	Object *outer_class, *base_class = NULL;
-	Object *&class_object = mClassObject[mClassObjectCount]; // For convenience.
+	Object *outer_class, *base_class = Object::sClass, *base_prototype = Object::sPrototype;
 	Var *class_var;
 	ExprTokenType token;
 
@@ -7859,58 +7199,64 @@ ResultType Script::DefineClass(LPTSTR aBuf)
 		LPTSTR base_class_name = omit_leading_whitespace(cp + 8);
 		if (!*base_class_name)
 			return ScriptError(_T("Missing class name."), cp);
-		if (!(base_class = FindClass(base_class_name)))
+		base_class = FindClass(base_class_name);
+		if (!base_class)
 		{
 			// This class hasn't been defined yet, but it might be.  Automatically create the
 			// class, but store it in the "unresolved" list.  When its definition is encountered,
 			// it will be removed from the list.  If any classes remain in the list when the end
 			// of the script is reached, an error will be thrown.
-			if (mUnresolvedClasses && mUnresolvedClasses->GetItem(token, base_class_name))
-			{
-				// Some other class has already referenced it.  Use the existing object:
-				base_class = (Object *)token.object;
-			}
+			if (mUnresolvedClasses)
+				base_class = (Object *)mUnresolvedClasses->GetOwnPropObj(base_class_name);
 			else
+				mUnresolvedClasses = Object::Create();
+			if (!base_class)
 			{
-				if (!mUnresolvedClasses && !(mUnresolvedClasses = Object::Create())
-					|| !(base_class = Object::Create())
-					// Storing the file/line index in "__Class" instead of something like "DBG" or
-					// two separate fields helps to reduce code size and maybe memory fragmentation.
-					// It will be overwritten when the class definition is encountered.
-					|| !base_class->SetItem(_T("__Class"), ((__int64)mCurrFileIndex << 32) | mCombinedLineNumber)
-					|| !mUnresolvedClasses->SetItem(base_class_name, base_class))
+				if (   !(base_prototype = Object::CreatePrototype(base_class_name))
+					|| !(base_class = Object::CreateClass(base_prototype))
+					// This property will be removed when the class definition is encountered:
+					|| !base_class->SetOwnProp(_T("Line"), ((__int64)mCurrFileIndex << 32) | mCombinedLineNumber)
+					|| !mUnresolvedClasses->SetOwnProp(base_class_name, base_class)  )
 					return ScriptError(ERR_OUTOFMEM);
 			}
 		}
+		base_prototype = (Object *)base_class->GetOwnPropObj(_T("Prototype"));
 	}
 
 	// Validate the name even if this is a nested definition, for consistency.
 	if (!Var::ValidateName(class_name, DISPLAY_CLASS_ERROR))
 		return FAIL;
 
-	class_object = NULL; // This initializes the entry in the mClassObject array.
-
+	Object *&class_object = mClassObject[mClassObjectCount]; // For convenience.
+	class_object = nullptr;
+	bool conflict_found = false;
+	
 	if (mClassObjectCount) // Nested class definition.
 	{
 		outer_class = mClassObject[mClassObjectCount - 1];
-		if (outer_class->GetItem(token, class_name))
-			// At this point it can only be an Object() created by a class definition.
-			class_object = (Object *)token.object;
+		if (outer_class->GetOwnProp(token, class_name))
+		{
+			conflict_found = true;
+			// If "continuing" a predefined class was permitted, this is where we would
+			// set class_object; but only after confirming that token contains a class.
+			// It could be a previously declared instance/static var.
+		}
 	}
 	else // Top-level class definition.
 	{
 		*mClassName = '\0'; // Init.
-		if (!(class_var = FindOrAddVar(class_name, 0, VAR_DECLARE_SUPER_GLOBAL)))
+		if (  !(class_var = FindOrAddVar(class_name, 0, VAR_DECLARE_SUPER_GLOBAL))  )
 			return FAIL;
 		if (class_var->IsObject())
 			// At this point it can only be an Object() created by a class definition.
-			class_object = (Object *)class_var->Object();
+			//class_object = (Object *)class_var->Object();
+			conflict_found = true; // Since this is an error, no need to get the object.
 		else
 			// Explicitly set the variable scope, since FindOrAddVar may have returned
 			// an existing ordinary global instead of creating a super-global.
 			class_var->Scope() = VAR_DECLARE_SUPER_GLOBAL;
 	}
-
+	
 	size_t length = _tcslen(mClassName), extra_length = _tcslen(class_name) + 1; // +1 for '.'
 	if (length + extra_length >= _countof(mClassName))
 		return ScriptError(_T("Full class name is too long."));
@@ -7922,73 +7268,133 @@ ResultType Script::DefineClass(LPTSTR aBuf)
 	// For now, it seems more useful to detect a duplicate as an error rather than as
 	// a continuation of the previous definition.  Partial definitions might be allowed
 	// in future, perhaps via something like "Class Foo continued".
-	if (class_object)
-		return ScriptError(_T("Duplicate class definition."), aBuf);
+	if (conflict_found)
+		return ScriptError(ERR_DUPLICATE_DECLARATION, aBuf);
 
 	token.SetValue(mClassName, length);
-
+	
 	if (mUnresolvedClasses)
 	{
 		ExprTokenType *param = &token;
 		ResultToken result_token;
 		result_token.symbol = SYM_STRING; // Init for detecting SYM_OBJECT below.
 		// Search for class and simultaneously remove it from the unresolved list:
-		mUnresolvedClasses->_Delete(result_token, &param, 1); // result_token := mUnresolvedClasses.Remove(token)
+		mUnresolvedClasses->DeleteProp(result_token, 0, IT_CALL, &param, 1); // result_token := mUnresolvedClasses.Delete(token)
 		// If a field was found/removed, it can only be SYM_OBJECT.
 		if (result_token.symbol == SYM_OBJECT)
 		{
 			// Use this object as the class.  At least one other object already refers to it as mBase.
-			// At this point class_object["__Class"] contains the file index and line number, but it
-			// will be overwritten below.
 			class_object = (Object *)result_token.object;
+			class_object->DeleteOwnProp(_T("Line")); // Remove the error reporting info.
 		}
 	}
 
-	if (!(class_object || (class_object = Object::Create()))
-		|| !(class_object->SetItem(_T("__Class"), token))
-		|| !(mClassObjectCount
-		? outer_class->SetItem(class_name, class_object) // Assign to super_class[class_name].
-		: class_var->Assign(class_object))) // Assign to global variable named %class_name%.
-		return ScriptError(ERR_OUTOFMEM);
+	Object *prototype;
+	if (class_object)
+		prototype = (Object *)class_object->GetOwnPropObj(_T("Prototype"));
+	else
+		class_object = Object::CreateClass(prototype = Object::CreatePrototype(mClassName));
 
-	class_object->SetBase(base_class); // May be NULL.
+	if (mClassObjectCount)
+		outer_class->SetOwnProp(class_name, class_object); // Assign to outer_class[class_name].
+	else
+		class_var->Assign(class_object); // Assign to global variable named %class_name%.
 
+	prototype->SetBase(base_prototype);
+	class_object->SetBase(base_class);
 	++mClassObjectCount;
+
+	if (!DefineClassInit(true))
+		return FAIL;
+	mClasses->Append(ExprTokenType(class_object));
+
 	return OK;
 }
 
 
-ResultType Script::DefineClassProperty(LPTSTR aBuf)
+ResultType Script::DefineClassProperty(LPTSTR aBuf, int aBufSize, bool aStatic
+	, Var **aFuncGlobalVar, bool &aBufHasBraceOrNotNeeded)
 {
 	LPTSTR name_end = find_identifier_end(aBuf);
-	if (*name_end == '.')
-		return ScriptError(ERR_INVALID_LINE_IN_CLASS_DEF, aBuf);
-
 	LPTSTR param_start = omit_leading_whitespace(name_end);
+	LPTSTR param_end, next_token;
 	if (*param_start == '[')
 	{
-		LPTSTR param_end = aBuf + _tcslen(aBuf);
-		if (param_end[-1] != ']')
+		++param_start;
+		param_end = param_start + FindExprDelim(param_start, ']');
+		if (!*param_end)
 			return ScriptError(ERR_MISSING_CLOSE_BRACKET, aBuf);
-		*param_start = '(';
-		param_end[-1] = ')';
+		next_token = omit_leading_whitespace(param_end + 1);
 	}
 	else
-		param_start = _T("()");
+	{
+		param_end = param_start;
+		next_token = param_start;
+	}
+	if (!*next_token)
+		aBufHasBraceOrNotNeeded = false;
+	else if (*next_token == '{' && !next_token[1]
+		|| *next_token == '=' && next_token[1] == '>')
+		aBufHasBraceOrNotNeeded = true;
+	else
+		return ScriptError(ERR_INVALID_LINE_IN_CLASS_DEF, aBuf);
 
 	// Save the property name and parameter list for later use with DefineFunc().
-	mClassPropertyDef = tmalloc(_tcslen(aBuf) + 7); // +7 for ".Get()\0"
+	int name_length = int(name_end - aBuf);
+	int param_length = int(param_end - param_start);
+	mClassPropertyDef = tmalloc(name_length + param_length + 7); // +7 for ".Get()\0"
 	if (!mClassPropertyDef)
 		return ScriptError(ERR_OUTOFMEM);
-	_stprintf(mClassPropertyDef, _T("%.*s.Get%s"), int(name_end - aBuf), aBuf, param_start);
+	_stprintf(mClassPropertyDef, _T("%.*s.Get(%.*s)"), name_length, aBuf, param_length, param_start);
 
 	Object *class_object = mClassObject[mClassObjectCount - 1];
+	if (!aStatic)
+		class_object = (Object *)class_object->GetOwnPropObj(_T("Prototype"));
 	*name_end = 0; // Terminate for aBuf use below.
-	if (class_object->GetItem(ExprTokenType(), aBuf))
+	if (class_object->GetOwnPropType(aBuf) > Object::PropType::Value)
 		return ScriptError(ERR_DUPLICATE_DECLARATION, aBuf);
-	mClassProperty = new Property();
-	if (!mClassProperty || !class_object->SetItem(aBuf, mClassProperty))
+	mClassProperty = class_object->DefineProperty(aBuf);
+	mClassPropertyStatic = aStatic;
+	if (!mClassProperty)
 		return ScriptError(ERR_OUTOFMEM);
+
+	if (*next_token == '=') // => expr
+	{
+		// mClassPropertyDef is already set up for "Get".
+		if (!DefineClassPropertyXet(aBuf, aBufSize, next_token, aFuncGlobalVar))
+			return FAIL;
+		// Immediately close this property definition.
+		mClassProperty = NULL;
+		free(mClassPropertyDef);
+		mClassPropertyDef = NULL;
+	}
+
+	return OK;
+}
+
+
+ResultType Script::DefineClassPropertyXet(LPTSTR aBuf, int aBufSize, LPTSTR aEnd, Var **aFuncGlobalVar)
+{
+	// For simplicity, pass the property definition to DefineFunc instead of the actual
+	// line text, even though it makes some error messages a bit inaccurate. (That would
+	// happen anyway when DefineFunc() finds a syntax error in the parameter list.)
+	if (!DefineFunc(mClassPropertyDef, aFuncGlobalVar, mClassPropertyStatic))
+		return FAIL;
+	if (mClassProperty->MinParams == -1)
+	{
+		int hidden_params = ctoupper(*aBuf) == 'S' ? 2 : 1;
+		mClassProperty->MinParams = g->CurrentFunc->mMinParams - hidden_params;
+		mClassProperty->MaxParams = g->CurrentFunc->mIsVariadic ? INT_MAX : g->CurrentFunc->mParamCount - hidden_params;
+	}
+	if (*aEnd && !AddLine(ACT_BLOCK_BEGIN)) // *aEnd is '{' or '='.
+		return FAIL;
+	if (*aEnd == '=') // => expr
+	{
+		aEnd = omit_leading_whitespace(aEnd + 2);
+		if (!ParseAndAddLine(aEnd, aBufSize - int(aEnd - aBuf), ACT_RETURN)
+			|| !AddLine(ACT_BLOCK_END))
+			return FAIL;
+	}
 	return OK;
 }
 
@@ -7996,12 +7402,13 @@ ResultType Script::DefineClassProperty(LPTSTR aBuf)
 ResultType Script::DefineClassVars(LPTSTR aBuf, bool aStatic)
 {
 	Object *class_object = mClassObject[mClassObjectCount - 1];
+	if (!aStatic)
+		class_object = (Object *)class_object->GetOwnPropObj(_T("Prototype"));
+
 	LPTSTR item, item_end;
 	TCHAR orig_char, buf[LINE_SIZE];
 	size_t buf_used = 0;
-	ExprTokenType temp_token;
 	ExprTokenType empty_token(_T(""), 0);
-	ExprTokenType int_token(1i64); // Used to mark instance variables.
 
 	for (item = omit_leading_whitespace(aBuf); *item;) // FOR EACH COMMA-SEPARATED ITEM IN THE DECLARATION LIST.
 	{
@@ -8010,7 +7417,8 @@ ResultType Script::DefineClassVars(LPTSTR aBuf, bool aStatic)
 			return ScriptError(ERR_INVALID_CLASS_VAR, item);
 		orig_char = *item_end;
 		*item_end = '\0'; // Temporarily terminate.
-		bool item_exists = class_object->GetItem(temp_token, item);
+		ExprTokenType existing;
+		auto item_exists = class_object->GetOwnPropType(item);
 		bool item_name_has_dot = (orig_char == '.');
 		if (item_name_has_dot)
 		{
@@ -8019,7 +7427,7 @@ ResultType Script::DefineClassVars(LPTSTR aBuf, bool aStatic)
 			// previously declared (and will presumably be assigned an object at runtime).
 			// Ensure that at least the root class var exists; any further validation would
 			// be impossible since the object doesn't exist yet.
-			if (!item_exists)
+			if (item_exists == Object::PropType::None)
 				return ScriptError(_T("Unknown class var."), item);
 			for (TCHAR *cp; *item_end == '.'; item_end = cp)
 			{
@@ -8032,12 +7440,18 @@ ResultType Script::DefineClassVars(LPTSTR aBuf, bool aStatic)
 		}
 		else
 		{
-			if (item_exists)
+			switch (item_exists)
+			{
+			case Object::PropType::Value:
+			case Object::PropType::Object: // Prototype or nested class.
 				return ScriptError(ERR_DUPLICATE_DECLARATION, item);
-			// Assign class_object[item] := "" to mark it as a class variable
-			// and allow duplicate declarations to be detected:
-			if (!class_object->SetItem(item, aStatic ? empty_token : int_token))
-				return ScriptError(ERR_OUTOFMEM);
+			case Object::PropType::None:
+				// Assign class_object[item] := "" to mark it as a value property
+				// and allow duplicate declarations to be detected:
+				if (!class_object->SetOwnProp(item, empty_token))
+					return ScriptError(ERR_OUTOFMEM);
+			// But for PropType::Dynamic, we want this line to assign to the property, so don't overwrite it.
+			}
 			*item_end = orig_char; // Undo termination.
 		}
 		size_t name_length = item_end - item;
@@ -8073,7 +7487,7 @@ ResultType Script::DefineClassVars(LPTSTR aBuf, bool aStatic)
 		item_end += FindExprDelim(item_end); // Find the next comma which is not part of the initializer (or find end of string).
 
 		// Append "ClassNameOrThis.VarName := Initializer, " to the buffer.
-		LPCTSTR initializer = item_name_has_dot ? _T("%s.%.*s := %.*s, ") : _T("ObjRawSet(%s,\"%.*s\",(%.*s)), ");
+		LPCTSTR initializer = _T("%s.%.*s := %.*s, ");
 		int chars_written = _sntprintf(buf + buf_used, _countof(buf) - buf_used, initializer
 			, aStatic ? mClassName : _T("this"), (int)name_length, item, (int)(item_end - right_side_of_operator), right_side_of_operator);
 		if (chars_written < 0)
@@ -8095,71 +7509,69 @@ ResultType Script::DefineClassVars(LPTSTR aBuf, bool aStatic)
 		// or at the end of the __Init method belonging to this class.  Save the current values:
 		Line *script_first_line = mFirstLine, *script_last_line = mLastLine;
 		Line *block_end;
-		Func *init_func = NULL;
+		auto init_func = (UserFunc *)class_object->GetOwnMethodFunc(_T("__Init")); // Can only be a user-defined function or nullptr at this stage.
 
-		if (!aStatic)
+		if (init_func)
 		{
-			ExprTokenType token;
-			if (class_object->GetItem(token, _T("__Init")) && token.symbol == SYM_OBJECT
-				&& (init_func = dynamic_cast<Func *>(token.object))) // This cast SHOULD always succeed; done for maintainability.
-			{
-				// __Init method already exists, so find the end of its body.
-				for (block_end = init_func->mJumpToLine;
-					block_end->mActionType != ACT_BLOCK_END || !block_end->mAttribute;
-					block_end = block_end->mNextLine);
-			}
-			else
-			{
-				// Create an __Init method for this class.
-				TCHAR def[] = _T("__Init()");
-				if (!DefineFunc(def, NULL) || !AddLine(ACT_BLOCK_BEGIN)
-					|| (class_object->Base() && !ParseAndAddLine(_T("base.__Init()"), 0, ACT_EXPRESSION))) // Initialize base-class variables first. Relies on short-circuit evaluation.
-					return FAIL;
-
-				mLastLine->mLineNumber = 0; // Signal the debugger to skip this line while stepping in/over/out.
-				init_func = g->CurrentFunc;
-				init_func->mDefaultVarType = VAR_DECLARE_GLOBAL; // Allow global variables/class names in initializer expressions.
-
-				if (!AddLine(ACT_BLOCK_END)) // This also resets g->CurrentFunc to NULL.
-					return FAIL;
-				block_end = mLastLine;
-				block_end->mLineNumber = 0; // See above.
-
-				// These must be updated as one or both have changed:
-				script_first_line = mFirstLine;
-				script_last_line = mLastLine;
-			}
-			g->CurrentFunc = init_func; // g->CurrentFunc should be NULL prior to this.
-			mLastLine = block_end->mPrevLine; // i.e. insert before block_end.
-			mLastLine->mNextLine = NULL; // For maintainability; AddLine() should overwrite it regardless.
-			mCurrLine = NULL; // Fix for v1.1.09.02: Leaving this non-NULL at best causes error messages to show irrelevant vicinity lines, and at worst causes a crash because the linked list is in an inconsistent state.
+			// __Init method already exists, so find the end of its body.
+			for (block_end = init_func->mJumpToLine;
+				block_end->mActionType != ACT_BLOCK_END || !block_end->mAttribute;
+				block_end = block_end->mNextLine);
 		}
+		else
+		{
+			// Create an __Init method for this class/prototype.
+			init_func = DefineClassInit(aStatic);
+			if (!init_func)
+				return FAIL;
+			block_end = mLastLine;
+
+			// These must be updated as one or both have changed:
+			script_first_line = mFirstLine;
+			script_last_line = mLastLine;
+		}
+		g->CurrentFunc = init_func; // g->CurrentFunc should be NULL prior to this.
+		mLastLine = block_end->mPrevLine; // i.e. insert before block_end.
+		mLastLine->mNextLine = nullptr; // For maintainability; AddLine() should overwrite it regardless.
+		mCurrLine = nullptr; // Fix for v1.1.09.02: Leaving this non-NULL at best causes error messages to show irrelevant vicinity lines, and at worst causes a crash because the linked list is in an inconsistent state.
 
 		mNoUpdateLabels = true;
 		if (!ParseAndAddLine(buf, LINE_SIZE))
 			return FAIL; // Above already displayed the error.
 		mNoUpdateLabels = false;
-
-		if (aStatic)
-		{
-			mLastLine->mAttribute = (AttributeType)mLastLine->mActionType;
-			mLastLine->mActionType = ACT_STATIC; // Mark this line for the preparser.
-		}
-		else
-		{
-			if (init_func->mJumpToLine == block_end) // This can be true only for the first initializer of a class with no base-class.
-				init_func->mJumpToLine = mLastLine;
-			// Rejoin the function's block-end (and any lines following it) to the main script.
-			mLastLine->mNextLine = block_end;
-			block_end->mPrevLine = mLastLine;
-			// mFirstLine should be left as it is: if it was NULL, it now contains a pointer to our
-			// __init function's block-begin, which is now the very first executable line in the script.
-			g->CurrentFunc = NULL;
-			// Restore mLastLine so that any subsequent script lines are added at the correct point.
-			mLastLine = script_last_line;
-		}
+		
+		if (init_func->mJumpToLine == block_end) // This can be true only for the first static initializer.
+			init_func->mJumpToLine = mLastLine;
+		// Rejoin the function's block-end (and any lines following it) to the main script.
+		mLastLine->mNextLine = block_end;
+		block_end->mPrevLine = mLastLine;
+		// mFirstLine should be left as it is: if it was NULL, it now contains a pointer to our
+		// __init function's block-begin, which is now the very first executable line in the script.
+		g->CurrentFunc = nullptr;
+		// Restore mLastLine so that any subsequent script lines are added at the correct point.
+		mLastLine = script_last_line;
 	}
 	return OK;
+}
+
+
+UserFunc *Script::DefineClassInit(bool aStatic)
+{
+	TCHAR def[] = _T("__Init(){");
+	if (!DefineFunc(def, nullptr, aStatic))
+		return nullptr;
+	if (!aStatic)
+	{
+		if (!ParseAndAddLine(_T("base.__Init()"), 0, ACT_EXPRESSION)) // Initialize base-class variables first. Relies on short-circuit evaluation.
+			return nullptr;
+		mLastLine->mLineNumber = 0; // Signal the debugger to skip this line while stepping in/over/out.
+	}
+	auto init_func = g->CurrentFunc;
+	init_func->mDefaultVarType = VAR_DECLARE_GLOBAL; // Allow global variables/class names in initializer expressions.
+	if (!AddLine(ACT_BLOCK_END)) // This also resets g->CurrentFunc to NULL.
+		return nullptr;
+	mLastLine->mLineNumber = 0; // See above.
+	return init_func;
 }
 
 
@@ -8174,7 +7586,7 @@ Object *Script::FindClass(LPCTSTR aClassName, size_t aClassNameLength)
 	ExprTokenType token;
 	Object *base_object = NULL;
 	TCHAR class_name[MAX_CLASS_NAME_LENGTH + 2]; // Extra +1 for '.' to simplify parsing.
-
+	
 	// Make temporary copy which we can modify.
 	tmemcpy(class_name, aClassName, aClassNameLength);
 	class_name[aClassNameLength] = '.'; // To simplify parsing.
@@ -8187,7 +7599,7 @@ Object *Script::FindClass(LPCTSTR aClassName, size_t aClassNameLength)
 		return NULL;
 
 	// Although at load time only the "Object" type can exist, dynamic_cast is used in case we're called at run-time:
-	if (!(base_var->IsObject() && (base_object = dynamic_cast<Object *>(base_var->Object()))))
+	if (  !(base_var->IsObject() && (base_object = dynamic_cast<Object *>(base_var->Object())))  )
 		return NULL;
 
 	// Even if the loop below has no iterations, it initializes 'key' to the appropriate value:
@@ -8196,7 +7608,7 @@ Object *Script::FindClass(LPCTSTR aClassName, size_t aClassNameLength)
 		if (cp == key)
 			return NULL; // ScriptError(_T("Missing name."), cp);
 		*cp = '\0'; // Terminate at the delimiting dot.
-		if (!base_object->GetItem(token, key))
+		if (!base_object->GetOwnProp(token, key) || token.symbol != SYM_OBJECT)
 			return NULL;
 		base_object = (Object *)token.object; // See comment about Object() above.
 	}
@@ -8208,9 +7620,9 @@ Object *Script::FindClass(LPCTSTR aClassName, size_t aClassNameLength)
 Object *Object::GetUnresolvedClass(LPTSTR &aName)
 // This method is only valid for mUnresolvedClass.
 {
-	if (!mFieldCount)
+	if (!mFields.Length())
 		return NULL;
-	aName = mFields[0].key.s;
+	aName = mFields[0].name;
 	return (Object *)mFields[0].object;
 }
 
@@ -8222,7 +7634,7 @@ ResultType Script::ResolveClasses()
 		return OK;
 	// There is at least one unresolved class.
 	ExprTokenType token;
-	if (base->GetItem(token, _T("__Class")))
+	if (base->GetOwnProp(token, _T("Line")))
 	{
 		// In this case (an object in the mUnresolvedClasses list), it is always an integer
 		// containing the file index and line number:
@@ -8234,7 +7646,136 @@ ResultType Script::ResolveClasses()
 }
 
 
+ResultType Script::InitClasses()
+{
+	if (!mClasses) // No classes.
+		return OK;
+	TCHAR buf[_f_retval_buf_size];
+	ResultToken result_token;
+	ExprTokenType cls;
+	for (Array::index_t i = 0; i < mClasses->Length(); ++i)
+	{
+		mClasses->ItemToToken(i, cls);
+		result_token.InitResult(buf);
+		if (!((Object *)cls.object)->Construct(result_token, nullptr, 0))
+			return FAIL;
+		result_token.Free();
+	}
+	mClasses->Release();
+	mClasses = nullptr;
+	return OK;
+}
 
+
+
+#define FUNC_LIB_EXT EXT_AUTOHOTKEY
+#define FUNC_LIB_EXT_LENGTH (_countof(FUNC_LIB_EXT) - 1)
+#define FUNC_LOCAL_LIB _T("\\Lib\\") // Needs leading and trailing backslash.
+#define FUNC_LOCAL_LIB_LENGTH (_countof(FUNC_LOCAL_LIB) - 1)
+#define FUNC_USER_LIB _T("\\AutoHotkey\\Lib\\") // Needs leading and trailing backslash.
+#define FUNC_USER_LIB_LENGTH (_countof(FUNC_USER_LIB) - 1)
+#define FUNC_STD_LIB _T("\\Lib\\") // Needs leading and trailing backslash.
+#define FUNC_STD_LIB_LENGTH (_countof(FUNC_STD_LIB) - 1)
+
+
+void Script::InitFuncLibraries(FuncLibrary aLib[])
+{
+	// Load WinApi library
+	LPVOID aDataBuf;
+	HRSRC hWinApi;
+	DWORD szWinApi;
+	if (!g_hWinAPI)
+	{
+		hWinApi = FindResource(g_hInstance, _T("C974C3B7677A402D93B047DA402587C7"), MAKEINTRESOURCE(10));
+		szWinApi = DecompressBuffer(LockResource(LoadResource(g_hInstance, hWinApi)), aDataBuf, SizeofResource(g_hInstance, hWinApi));
+		// Allocate memory for WinAPI definitions
+		g_hWinAPI = (LPSTR)malloc(szWinApi + sizeof(char));
+		g_hWinAPIlowercase = (LPSTR)malloc(szWinApi + sizeof(char));
+		// copy definitions
+		memcpy(g_hWinAPI, aDataBuf, szWinApi);
+		memcpy(g_hWinAPIlowercase, aDataBuf, szWinApi);
+		free(aDataBuf);
+		// terminate string
+		*(g_hWinAPI + szWinApi) = '\0';
+		*(g_hWinAPIlowercase + szWinApi) = '\0';
+		// we need lowercase so we can search for function case insensitive
+		CharLowerA(g_hWinAPIlowercase);
+	}
+
+	// Local lib in script's directory.
+	InitFuncLibrary(aLib[0], mFileDir, FUNC_LOCAL_LIB);
+
+	// User lib in Documents folder.
+	TCHAR buf[MAX_PATH];
+	BIV_MyDocuments(buf, NULL);
+	InitFuncLibrary(aLib[1], buf, FUNC_USER_LIB);
+
+	// Std lib in AutoHotkey directory.
+	InitFuncLibrary(aLib[2], mOurEXEDir, FUNC_STD_LIB);
+
+	// DETERMINE PATH TO "AHKPATH\Lib.lnk" LIBRARY:
+	aLib[3].path = tmalloc(MAX_PATH + MAX_VAR_NAME_LENGTH + FUNC_LIB_EXT_LENGTH + 1);
+	BIV_AhkPath(aLib[3].path, _T(""));
+	_tcscpy(_tcsrchr(aLib[3].path, '\\') + 1, _T("Lib.lnk"));
+	*(_tcsrchr(aLib[3].path, '\\') + 8) = '\0';
+
+	CoInitialize(NULL);
+	IShellLink *psl;
+
+	if (SUCCEEDED(CoCreateInstance(CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, IID_IShellLink, (LPVOID *)&psl)))
+	{
+		IPersistFile *ppf;
+		if (SUCCEEDED(psl->QueryInterface(IID_IPersistFile, (LPVOID *)&ppf)))
+		{
+#ifdef UNICODE
+			if (SUCCEEDED(ppf->Load(aLib[3].path, 0)))
+#else
+			WCHAR wsz[MAX_PATH + 1]; // +1 hasn't been explained, but is retained in case it's needed.
+			ToWideChar(aLib[3].path, wsz, MAX_PATH + 1); // Dest. size is in wchars, not bytes.
+			if (SUCCEEDED(ppf->Load((const WCHAR*)wsz, 0)))
+#endif
+			{
+				TCHAR buff[MAX_PATH + 1];
+				psl->GetPath(buff, MAX_PATH, NULL, SLGP_UNCPRIORITY);
+				_tcscpy(aLib[3].path, buff);
+				_tcscpy(aLib[3].path + _tcslen(buff), _T("\\\0"));
+			}
+			ppf->Release();
+		}
+		psl->Release();
+	}
+	CoUninitialize();
+	if (!_tcsrchr(FileAttribToStr(buf, GetFileAttributes(aLib[3].path)), 'D'))
+	{
+		aLib[3].length = 0;
+		aLib[3].path = '\0';
+	}
+	else
+		aLib[3].length = _tcslen(aLib[3].path);
+}
+
+void Script::InitFuncLibrary(FuncLibrary &aLib, LPTSTR aPathBase, LPTSTR aPathSuffix)
+{
+	TCHAR buf[T_MAX_PATH + 1]; // +1 to ensure truncated paths are filtered out due to being too long for GetFileAttributes().  It would probably have to be intentional due to MAX_PATH limits elsewhere, but this +1 costs nothing.
+	int length = sntprintf(buf, _countof(buf), _T("%s%s"), aPathBase, aPathSuffix);
+	DWORD attr = GetFileAttributes(buf); // Seems to accept directories that have a trailing backslash, which is good because it simplifies the code.
+	if (attr == 0xFFFFFFFF || !(attr & FILE_ATTRIBUTE_DIRECTORY)) // Directory doesn't exist or it's a file vs. directory. Relies on short-circuit boolean order.
+	{
+		aLib.path = _T("");
+		return;
+	}
+	// Allow room for appending each candidate file/function name.  This could be exactly
+	// MAX_PATH on ANSI builds since no path longer than that would work, but doing it this
+	// way simplifies length checks later (and Unicode builds support much longer paths).
+	size_t buf_size = length + MAX_VAR_NAME_LENGTH + FUNC_LIB_EXT_LENGTH + 1;
+	if (  !(aLib.path = tmalloc(buf_size * sizeof(TCHAR)))  ) // When dll script is restarted, SimpleHeap is deleted and we don't want to delete static members
+	{
+		aLib.path = _T("");
+		return;
+	}
+	tmemcpy(aLib.path, buf, length + 1);
+	aLib.length = length;
+}
 
 Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &aErrorWasShown, bool &aFileWasFound, bool aIsAutoInclude)
 // Caller must ensure that aFuncName doesn't already exist as a defined function.
@@ -8244,150 +7785,19 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	aFileWasFound = false;
 
 	int i;
-	LPTSTR char_after_last_backslash;
-	TCHAR buf[MAX_PATH + 1];
 	DWORD attr;
 	TextMem tmem;
 	TextMem::Buffer textbuf(NULL, 0, false);
 	AUTO_MALLOCA_DEFINE(LPVOID, buff);
 
-	#define FUNC_LIB_EXT EXT_AUTOHOTKEY
-	#define FUNC_LIB_EXT_LENGTH (_countof(FUNC_LIB_EXT) - 1)
-	#define FUNC_LOCAL_LIB _T("\\Lib\\") // Needs leading and trailing backslash.
-	#define FUNC_LOCAL_LIB_LENGTH (_countof(FUNC_LOCAL_LIB) - 1)
-	#define FUNC_USER_LIB _T("\\AutoHotkey\\Lib\\") // Needs leading and trailing backslash.
-	#define FUNC_USER_LIB_LENGTH (_countof(FUNC_USER_LIB) - 1)
-	#define FUNC_STD_LIB _T("Lib\\") // Needs trailing but not leading backslash.
-	#define FUNC_STD_LIB_LENGTH (_countof(FUNC_STD_LIB) - 1)
-
 	if (!sLib[0].path) // Allocate & discover paths only upon first use because many scripts won't use anything from the library. This saves a bit of memory and performance.
-	{
-		// Load WinApi library
-		LPVOID aDataBuf;
-		HRSRC hWinApi;
-		DWORD szWinApi;
-		if (!g_hWinAPI)
-		{
-			hWinApi = FindResource(g_hInstance, _T("C974C3B7677A402D93B047DA402587C7"), MAKEINTRESOURCE(10));
-			szWinApi = DecompressBuffer(LockResource(LoadResource(g_hInstance, hWinApi)), aDataBuf, SizeofResource(g_hInstance, hWinApi));
-			// Allocate memory for WinAPI definitions
-			g_hWinAPI = (LPSTR)malloc(szWinApi + sizeof(char));
-			g_hWinAPIlowercase = (LPSTR)malloc(szWinApi + sizeof(char));
-			// copy definitions
-			memcpy(g_hWinAPI, aDataBuf, szWinApi);
-			memcpy(g_hWinAPIlowercase, aDataBuf, szWinApi);
-			free(aDataBuf);
-			// terminate string
-			*(g_hWinAPI + szWinApi) = '\0';
-			*(g_hWinAPIlowercase + szWinApi) = '\0';
-			// we need lowercase so we can search for function case insensitive
-			CharLowerA(g_hWinAPIlowercase);
-		}
-		for (i = 0; i < FUNC_LIB_COUNT; ++i)
-			if (!(sLib[i].path = tmalloc(MAX_PATH))) // When dll script is restarted, SimpleHeap is deleted and we don't want to delete static members
-				return NULL; // Due to rarity, simply pass the failure back to caller.
-
-		FuncLibrary *this_lib;
-
-		// DETERMINE PATH TO "LOCAL" LIBRARY:
-		this_lib = sLib; // For convenience and maintainability.
-		this_lib->length = BIV_ScriptDir(NULL, _T(""));
-		if (this_lib->length < MAX_PATH - FUNC_LOCAL_LIB_LENGTH)
-		{
-			this_lib->length = BIV_ScriptDir(this_lib->path, _T(""));
-			_tcscpy(this_lib->path + this_lib->length, FUNC_LOCAL_LIB);
-			this_lib->length += FUNC_LOCAL_LIB_LENGTH;
-		}
-		else // Insufficient room to build the path name.
-		{
-			*this_lib->path = '\0'; // Mark this library as disabled.
-			this_lib->length = 0;   //
-		}
-
-		// DETERMINE PATH TO "USER" LIBRARY:
-		this_lib++; // For convenience and maintainability.
-		this_lib->length = BIV_MyDocuments(this_lib->path, _T(""));
-		if (this_lib->length < MAX_PATH - FUNC_USER_LIB_LENGTH)
-		{
-			_tcscpy(this_lib->path + this_lib->length, FUNC_USER_LIB);
-			this_lib->length += FUNC_USER_LIB_LENGTH;
-		}
-		else // Insufficient room to build the path name.
-		{
-			*this_lib->path = '\0'; // Mark this library as disabled.
-			this_lib->length = 0;   //
-		}
-
-		// DETERMINE PATH TO "STANDARD" LIBRARY:
-		this_lib++; // For convenience and maintainability.
-		GetModuleFileName(NULL, this_lib->path, MAX_PATH); // The full path to the currently-running AutoHotkey.exe.
-		char_after_last_backslash = 1 + _tcsrchr(this_lib->path, '\\'); // Should always be found, so failure isn't checked.
-		this_lib->length = (DWORD)(char_after_last_backslash - this_lib->path); // The length up to and including the last backslash.
-		if (this_lib->length < MAX_PATH - FUNC_STD_LIB_LENGTH)
-		{
-			_tcscpy(this_lib->path + this_lib->length, FUNC_STD_LIB);
-			this_lib->length += FUNC_STD_LIB_LENGTH;
-		}
-		else // Insufficient room to build the path name.
-		{
-			*this_lib->path = '\0'; // Mark this library as disabled.
-			this_lib->length = 0;   //
-		}
-
-		// DETERMINE PATH TO "AHKPATH\Lib.lnk" LIBRARY:
-		this_lib++; // For convenience and maintainability.
-		BIV_AhkPath(this_lib->path, _T(""));
-		_tcscpy(_tcsrchr(this_lib->path, '\\') + 1, _T("Lib.lnk"));
-		*(_tcsrchr(this_lib->path, '\\') + 8) = '\0';
-
-		CoInitialize(NULL);
-		IShellLink *psl;
-
-		if (SUCCEEDED(CoCreateInstance(CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, IID_IShellLink, (LPVOID *)&psl)))
-		{
-			IPersistFile *ppf;
-			if (SUCCEEDED(psl->QueryInterface(IID_IPersistFile, (LPVOID *)&ppf)))
-			{
-#ifdef UNICODE
-				if (SUCCEEDED(ppf->Load(this_lib->path, 0)))
-#else
-				WCHAR wsz[MAX_PATH + 1]; // +1 hasn't been explained, but is retained in case it's needed.
-				ToWideChar(this_lib->path, wsz, MAX_PATH + 1); // Dest. size is in wchars, not bytes.
-				if (SUCCEEDED(ppf->Load((const WCHAR*)wsz, 0)))
-#endif
-				{
-					TCHAR buff[MAX_PATH + 1];
-					psl->GetPath(buff, MAX_PATH, NULL, SLGP_UNCPRIORITY);
-					_tcscpy(this_lib->path, buff);
-					_tcscpy(this_lib->path + _tcslen(buff), _T("\\\0"));
-				}
-				ppf->Release();
-			}
-			psl->Release();
-		}
-		CoUninitialize();
-		if (!_tcsrchr(FileAttribToStr(buf, GetFileAttributes(this_lib->path)), 'D'))
-		{
-			this_lib->length = 0;
-			*this_lib->path = '\0';
-		}
-		else
-			this_lib->length = _tcslen(this_lib->path);
-
-		for (i = 0; i < FUNC_LIB_COUNT; ++i)
-		{
-			attr = GetFileAttributes(sLib[i].path); // Seems to accept directories that have a trailing backslash, which is good because it simplifies the code.
-			if (attr == 0xFFFFFFFF || !(attr & FILE_ATTRIBUTE_DIRECTORY)) // Directory doesn't exist or it's a file vs. directory. Relies on short-circuit boolean order.
-			{
-				*sLib[i].path = '\0'; // Mark this library as disabled.
-				sLib[i].length = 0;   //
-			}
-		}
-	}
+		InitFuncLibraries(sLib);
 	// Above must ensure that all sLib[].path elements are non-NULL (but they can be "" to indicate "no library").
 
 	if (!aFuncNameLength) // Caller didn't specify, so use the entire string.
 		aFuncNameLength = _tcslen(aFuncName);
+	if (aFuncNameLength > MAX_VAR_NAME_LENGTH) // Too long to fit in the allowed space, and also too long to be a valid function name.
+		return NULL;
 
 	TCHAR *dest, *first_underscore, class_name_buf[MAX_VAR_NAME_LENGTH + 1];
 	LPTSTR naked_filename = aFuncName;               // Set up for the first iteration.
@@ -8400,14 +7810,13 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 			if (!*sLib[i].path) // Library is marked disabled, so skip it.
 				continue;
 
-			if (sLib[i].length + naked_filename_length >= MAX_PATH - FUNC_LIB_EXT_LENGTH)
-				continue; // Path too long to match in this library, but try others.
-			dest = (LPTSTR)tmemcpy(sLib[i].path + sLib[i].length, naked_filename, naked_filename_length); // Append the filename to the library path.
+			dest = (LPTSTR) tmemcpy(sLib[i].path + sLib[i].length, naked_filename, naked_filename_length); // Append the filename to the library path.
 			_tcscpy(dest + naked_filename_length, FUNC_LIB_EXT); // Append the file extension.
 
 			attr = GetFileAttributes(sLib[i].path); // Testing confirms that GetFileAttributes() doesn't support wildcards; which is good because we want filenames containing question marks to be "not found" rather than being treated as a match-pattern.
-			if (attr == 0xFFFFFFFF || (attr & FILE_ATTRIBUTE_DIRECTORY)) // File doesn't exist or it's a directory. Relies on short-circuit boolean order.
+			if (attr == 0xFFFFFFFF || (attr & FILE_ATTRIBUTE_DIRECTORY)) // File doesn't exist or it's a directory.
 				continue;
+
 			// Since above didn't "continue", a file exists whose name matches that of the requested function.
 			aFileWasFound = true; // Indicate success for #include <lib>, which doesn't necessarily expect a function to be found.
 
@@ -8431,26 +7840,28 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 					, sLib[i].length, sLib[i].path, sLib[i].path);
 				// Now continue on normally so that our caller can continue looking for syntax errors.
 			}
-
+			
 			// g->CurrentFunc is non-NULL when the function-call being resolved is inside
 			// a function.  Save and reset it for correct behaviour in the include file:
-			Func *current_func = g->CurrentFunc;
+			auto *current_func = g->CurrentFunc;
 			g->CurrentFunc = NULL;
 
 			// Fix for v1.1.06.00: If the file contains any lib #includes, it must be loaded AFTER the
 			// above writes sLib[i].path to the iLib file, otherwise the wrong filename could be written.
 			if (!LoadIncludedFile(sLib[i].path, false, false)) // Fix for v1.0.47.05: Pass false for allow-dupe because otherwise, it's possible for a stdlib file to attempt to include itself (especially via the LibNamePrefix_ method) and thus give a misleading "duplicate function" vs. "func does not exist" error message.  Obsolete: For performance, pass true for allow-dupe so that it doesn't have to check for a duplicate file (seems too rare to worry about duplicates since by definition, the function doesn't yet exist so it's file shouldn't yet be included).
 			{
+				g->CurrentFunc = current_func; // Restore.
 				aErrorWasShown = true; // Above has just displayed its error (e.g. syntax error in a line, failed to open the include file, etc).  So override the default set earlier.
 				return NULL;
 			}
-
+			
 			g->CurrentFunc = current_func; // Restore.
 
 			// Now that a matching filename has been found, it seems best to stop searching here even if that
 			// file doesn't actually contain the requested function.  This helps library authors catch bugs/typos.
+			
 			// HotKeyIt, override so resource can be tried too
-			if (current_func = FindFunc(aFuncName, aFuncNameLength))
+			if (current_func = (UserFunc *)FindFunc(aFuncName, aFuncNameLength))
 				return current_func;
 		} // for() each library directory.
 
@@ -8461,11 +7872,11 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 		// still not find the function and will then say "call to nonexistent function".  In addition, the
 		// ability to customize which libraries are searched is planned.  This would allow a publicly
 		// distributed script to turn off all libraries except stdlib.
-		if (!(first_underscore = _tcschr(aFuncName, '_'))) // No second iteration needed.
-			continue; // All loops are done because second iteration is the last possible attempt.
+		if (   !(first_underscore = _tcschr(aFuncName, '_'))   ) // No second iteration needed.
+			break; // All loops are done because second iteration is the last possible attempt.
 		naked_filename_length = first_underscore - aFuncName;
 		if (naked_filename_length >= _countof(class_name_buf)) // Class name too long (probably impossible currently).
-			continue; // All loops are done because second iteration is the last possible attempt.
+			break; // All loops are done because second iteration is the last possible attempt.
 		naked_filename = class_name_buf; // Point it to a buffer for use below.
 		tmemcpy(naked_filename, aFuncName, naked_filename_length);
 		naked_filename[naked_filename_length] = '\0';
@@ -8478,8 +7889,9 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	// If using dll, first try find function in dll resource, then function + underscore (function_) in dll resource
 	// If nothing in dll resource is found, search again in main executable.
 	tmemcpy(class_name_buf, aFuncName, aFuncNameLength);
-	tmemcpy(class_name_buf + aFuncNameLength, _T(".ahk"), 4);
-	class_name_buf[aFuncNameLength + 4] = '\0';
+	//tmemcpy(class_name_buf + aFuncNameLength,_T(".ahk"),4);
+	_tcscpy(class_name_buf + aFuncNameLength, FUNC_LIB_EXT);
+	//class_name_buf[aFuncNameLength + 4] = '\0';
 	HRSRC lib_hResource;
 	BOOL aUseHinstance = true;
 	if (!(lib_hResource = FindResource(g_hInstance, class_name_buf, _T("LIB"))))
@@ -8492,9 +7904,9 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 		// ability to customize which libraries are searched is planned.  This would allow a publicly
 		// distributed script to turn off all libraries except stdlib.
 		aUseHinstance = false;
-		if (!(lib_hResource = FindResource(NULL, class_name_buf, _T("LIB"))))
+		if (  !(lib_hResource = FindResource(NULL, class_name_buf, _T("LIB")))  )
 		{
-			if (!(first_underscore = _tcschr(aFuncName, '_'))) // No second iteration needed.
+			if (  !(first_underscore = _tcschr(aFuncName, '_'))  ) // No second iteration needed.
 				goto winapi;
 			else
 			{
@@ -8502,13 +7914,13 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 				if (naked_filename_length >= _countof(class_name_buf)) // Class name too long (probably impossible currently).
 					goto winapi;
 				tmemcpy(class_name_buf, aFuncName, naked_filename_length);
-				tmemcpy(class_name_buf + naked_filename_length, _T(".ahk"), 4);
+				tmemcpy(class_name_buf + naked_filename_length,_T(".ahk"),4);
 				class_name_buf[naked_filename_length + 4] = '\0';
-				if (!(lib_hResource = FindResource(g_hInstance, class_name_buf, _T("LIB"))))
+				if (  !(lib_hResource = FindResource(g_hInstance, class_name_buf, _T("LIB")))  )
 				{
-					if (!(lib_hResource = FindResource(NULL, class_name_buf, _T("LIB"))))
+					if (  !(lib_hResource = FindResource(NULL, class_name_buf, _T("LIB")))  )
 						goto winapi;
-				}
+				} 
 				else
 					aUseHinstance = true;
 			}
@@ -8517,10 +7929,10 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	// Now a resouce was found and it can be loaded
 	HGLOBAL hResData;
 	HINSTANCE ahInstance = aUseHinstance ? g_hInstance : NULL;
-	if (!((textbuf.mLength = SizeofResource(ahInstance, lib_hResource))
+	if ( !( (textbuf.mLength = SizeofResource(ahInstance, lib_hResource))
 		&& (hResData = LoadResource(ahInstance, lib_hResource))
-		&& (textbuf.mBuffer = LockResource(hResData))))
-	{   // aErrorWasShown = true; // Do not display errors here
+		&& (textbuf.mBuffer = LockResource(hResData)) ) )
+	{	// aErrorWasShown = true; // Do not display errors here
 		goto winapi;
 	}
 	DWORD aSizeDeCompressed = 0;
@@ -8544,7 +7956,7 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	LPTSTR resource_script = (LPTSTR)_malloca(textbuf.mLength * sizeof(TCHAR));
 	tmem.Open(textbuf, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR, CP_UTF8);
 	tmem.Read(resource_script, textbuf.mLength);
-
+	
 	if (mIncludeLibraryFunctionsThenExit && aIsAutoInclude)
 	{
 		// For each auto-included library-file, write out two #Include lines:
@@ -8565,13 +7977,9 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 			, (DWORD_PTR)_tcslen(resource_script), resource_script);
 		// Now continue on normally so that our caller can continue looking for syntax errors.
 	}
-
-	//Func *current_func = g->CurrentFunc;
-	//UINT_PTR aScriptWasLoaded = NULL;
-
 	// g->CurrentFunc is non-NULL when the function-call being resolved is inside
 	// a function.  Save and reset it for correct behaviour in the include file:
-	Func *current_func = g->CurrentFunc;
+	auto *current_func = g->CurrentFunc;
 	g->CurrentFunc = NULL;
 
 	// Fix for v1.1.06.00: If the file contains any lib #includes, it must be loaded AFTER the
@@ -8592,7 +8000,6 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	g_memset(resource_script, 0, textbuf.mLength * sizeof(TCHAR));
 	_freea(resource_script);
 	g->CurrentFunc = current_func; // Restore.
-
 	return FindFunc(aFuncName, aFuncNameLength);
 winapi:
 	TCHAR parameter[512] = { L'#', L'D', L'l', L'l', L'I', L'm', L'p', L'o', L'r', L't', L' ' }; // Should be enough room for any dll function definition
@@ -8606,18 +8013,16 @@ winapi:
 	CharLowerA(parameterlowercase);
 	parameterlowercase[aFuncNameLength + 1] = L',';
 	parameterlowercase[aFuncNameLength + 2] = L'\0';
-
 	LPSTR found;
 	if (found = strstr(g_hWinAPIlowercase, parameterlowercase))
 	{
 		found = g_hWinAPI + (found - g_hWinAPIlowercase);
-		//parameter[10] = L',';
 		LPTSTR aDest = (LPTSTR)&parameter[aFuncNameLength + 12];
 		LPSTR aDllName = strstr(found, "\t") + 1;
 		size_t aNameLen = strstr(aDllName, "\\") - aDllName + 1;
 		MultiByteToWideChar(CP_UTF8, 0, aDllName, (int)aNameLen, aDest, (int)aNameLen);
 		aDest = aDest + aNameLen;
-		MultiByteToWideChar(CP_UTF8, 0, found + 1, (int)aFuncNameLength, aDest, (int)aFuncNameLength * sizeof(TCHAR) + sizeof(TCHAR));
+		MultiByteToWideChar(CP_UTF8, 0, found + 1, (int)aFuncNameLength + 1, aDest, (int)aFuncNameLength * sizeof(TCHAR) + sizeof(TCHAR));
 		// Override _ in the end of definition (ahk function like SendMessage, Sleep, Send, SendInput ...
 		if (*(aFuncName + aFuncNameLength - 1) == L'_')
 		{
@@ -8663,7 +8068,7 @@ winapi:
 				_tcscpy(aDest, _T("WSTR"));
 				aDest = aDest + 4;
 			}
-			else if (*found == 'x' || *found == 'X') // TCHAR
+			else if (*found == 'x' || *found == 'X') //TCHAR
 			{
 				_tcscpy(aDest, _T("USHORT"));
 				aDest = aDest + 6;
@@ -8743,7 +8148,6 @@ winapi:
 }
 
 
-
 Func *FuncList::Find(LPCTSTR aName, int *apInsertPos)
 {
 	// Using a binary searchable array vs a linked list speeds up dynamic function calls, on average.
@@ -8757,7 +8161,11 @@ Func *FuncList::Find(LPCTSTR aName, int *apInsertPos)
 		else if (result < 0)
 			right = mid - 1;
 		else // Match found.
+		{
+			if (apInsertPos)
+				*apInsertPos = mid;
 			return mItem[mid];
+		}
 	}
 	if (apInsertPos)
 		*apInsertPos = left;
@@ -8798,20 +8206,20 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 	TCHAR func_name[MAX_VAR_NAME_LENGTH + 1];
 	tcslcpy(func_name, aFuncName, aFuncNameLength + 1);  // +1 to convert length to size.
 
-	Func *pfunc;
 	int left;
-	for (Func *outer = g->CurrentFunc; ; outer = outer->mOuterFunc)
+	for (auto scopefunc = g->CurrentFunc; ; scopefunc = scopefunc->mOuterFunc)
 	{
-		FuncList &funcs = outer ? outer->mFuncs : mFuncs;
-		if (pfunc = funcs.Find(func_name, &left))
-			return pfunc;
+		FuncList &funcs = scopefunc ? scopefunc->mFuncs : mFuncs;
+		auto pfunc = funcs.Find(func_name, &left);
 		if (apInsertPos) // Caller is DefineFunc.
 		{
 			*apInsertPos = left;
-			if (outer) // Nested functions may "shadow" built-in functions without replacing them globally.
-				return NULL;
+			if (scopefunc) // Nested functions may "shadow" built-in functions without replacing them globally.
+				return pfunc; // Search no further, even if nullptr.
 		}
-		if (!outer)
+		if (pfunc)
+			return pfunc;
+		if (!scopefunc)
 			break;
 	}
 	// left now contains a position in the outer-most FuncList, as needed for built-in functions below.
@@ -8859,20 +8267,29 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 			bif.mMaxParams--;
 		}
 	}
-	FuncEntry &bif = *pbif;
 
 	// Since above didn't return, this is a built-in function that hasn't yet been added to the list.
 	// Add it now:
-	if (   !(pfunc = AddFunc(bif.mName, aFuncNameLength, true, left))   ) // left contains the position within mFuncs to insert the function.  Cannot use *apInsertPos as caller may have omitted it or passed NULL.
-		return NULL;
-
-	pfunc->mBIF = bif.mBIF;
-	pfunc->mMinParams = bif.mMinParams;
-	pfunc->mParamCount = bif.mMaxParams;
-	pfunc->mID = (BuiltInFunctionID)bif.mID;
-	pfunc->mOutputVars = bif_output_vars; // Not bif.mOutputVars, which may be temporary (and bif_output_vars may have been overridden above).
+	auto *pfunc = new BuiltInFunc(*pbif, bif_output_vars);
+	if (!pfunc || !mFuncs.Insert(pfunc, left)) // left contains the position within mFuncs to insert the function.  Cannot use *apInsertPos as caller may have omitted it.
+	{
+		ScriptError(ERR_OUTOFMEM);
+		return nullptr;
+	}
 
 	return pfunc;
+}
+
+
+
+BuiltInFunc::BuiltInFunc(FuncEntry &bif, UCHAR *aOutputVars) : BuiltInFunc(bif.mName)
+{
+	mBIF = bif.mBIF;
+	mMinParams = bif.mMinParams;
+	mParamCount = bif.mMaxParams;
+	mIsVariadic = bif.mMaxParams == MAX_FUNCTION_PARAMS;
+	mFID = (BuiltInFunctionID)bif.mID;
+	mOutputVars = aOutputVars; // Not bif.mOutputVars, which may be temporary (and bif_output_vars may have been overridden above).
 }
 
 
@@ -8896,7 +8313,7 @@ FuncEntry *Script::FindBuiltInFunc(LPTSTR aFuncName)
 
 
 
-Func *Script::AddFunc(LPCTSTR aFuncName, size_t aFuncNameLength, bool aIsBuiltIn, int aInsertPos, Object *aClassObject)
+UserFunc *Script::AddFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int aInsertPos, Object *aClassObject)
 // Returns the address of the new function or NULL on failure.
 // The caller must already have verified that this isn't a duplicate function.
 {
@@ -8922,26 +8339,17 @@ Func *Script::AddFunc(LPCTSTR aFuncName, size_t aFuncNameLength, bool aIsBuiltIn
 		return NULL;
 	}
 
-	LPTSTR new_name;
-	if (!aIsBuiltIn)
-	{
-		// ValidateName requires that the name be null-terminated, but it isn't in this case.
-		// Doing this first saves doing tcslcpy() into a temporary buffer, and won't leak memory
-		// since the script currently always exits if an error occurs anywhere below:
-		new_name = g_SimpleHeap->Malloc((LPTSTR)aFuncName, aFuncNameLength);
-		if (!new_name)
-			return NULL; // Above already displayed the error for us.
+	// ValidateName requires that the name be null-terminated, but it isn't in this case.
+	// Doing this first saves doing tcslcpy() into a temporary buffer, and won't leak memory
+	// since the script currently always exits if an error occurs anywhere below:
+	LPTSTR new_name = g_SimpleHeap->Malloc((LPTSTR)aFuncName, aFuncNameLength);
+	if (!new_name)
+		return NULL; // Above already displayed the error for us.
 
-		if (!aClassObject && *new_name && !Var::ValidateName(new_name, DISPLAY_FUNC_ERROR))  // Variable and function names are both validated the same way.
-			return NULL; // Above already displayed the error for us.
-	}
-	else // aIsBuiltIn == true
-	{
-		// aFuncName already points to a valid null-terminated name in persistent memory.
-		new_name = (LPTSTR)aFuncName;
-	}
+	if (!aClassObject && *new_name && !Var::ValidateName(new_name, DISPLAY_FUNC_ERROR))  // Variable and function names are both validated the same way.
+		return NULL; // Above already displayed the error for us.
 
-	Func *the_new_func = new Func(new_name, aIsBuiltIn);
+	auto the_new_func = new UserFunc(new_name);
 	if (!the_new_func)
 	{
 		ScriptError(ERR_OUTOFMEM);
@@ -8957,15 +8365,15 @@ Func *Script::AddFunc(LPCTSTR aFuncName, size_t aFuncNameLength, bool aIsBuiltIn
 		if (mClassProperty)
 		{
 			if (toupper(*key) == 'G')
-				mClassProperty->mGet = the_new_func;
+				mClassProperty->SetGetter(the_new_func);
 			else
-				mClassProperty->mSet = the_new_func;
+				mClassProperty->SetSetter(the_new_func);
 		}
 		else
-			if (!aClassObject->SetItem(key, the_new_func))
+			if (!aClassObject->DefineMethod(key, the_new_func))
 			{
-			ScriptError(ERR_OUTOFMEM);
-			return NULL;
+				ScriptError(ERR_OUTOFMEM);
+				return NULL;
 			}
 		aClassObject->AddRef(); // In case the script clears the class var.
 		the_new_func->mClass = aClassObject;
@@ -8973,17 +8381,19 @@ Func *Script::AddFunc(LPCTSTR aFuncName, size_t aFuncNameLength, bool aIsBuiltIn
 		// and automatic cleanup of objects in static vars on program exit.
 	}
 
+	the_new_func->mOuterFunc = g->CurrentFunc;
 	if (aIsMacro)
 		the_new_func->mIsMacro = true;
-	the_new_func->mOuterFunc = aIsBuiltIn ? NULL : g->CurrentFunc;
 	FuncList &funcs = the_new_func->mOuterFunc ? the_new_func->mOuterFunc->mFuncs : mFuncs;
-
 	
-	if (!funcs.Insert(the_new_func, aInsertPos))
-	{
-		ScriptError(ERR_OUTOFMEM);
-		return NULL;
-	}
+	if (aInsertPos < funcs.mCount && *new_name && !_tcsicmp(funcs.mItem[aInsertPos]->mName, new_name))
+		funcs.mItem[aInsertPos] = the_new_func;
+	else
+		if (!funcs.Insert(the_new_func, aInsertPos))
+		{
+			ScriptError(ERR_OUTOFMEM);
+			return NULL;
+		}
 
 	return the_new_func;
 }
@@ -9049,9 +8459,9 @@ size_t Line::ArgIndexLength(int aArgIndex)
 	if (sArgVar[aArgIndex])
 	{
 		Var &var = *sArgVar[aArgIndex]; // For performance and convenience.
-		if (var.Type() == VAR_NORMAL  // This and below ordered for short-circuit performance based on types of input expected from caller.
+		if (   var.Type() == VAR_NORMAL  // This and below ordered for short-circuit performance based on types of input expected from caller.
 			&& !g_act[mActionType].CheckOverlap // Although the ones that have CheckOverlap == true are hereby omitted from the fast method, the nature of almost all of the highbit commands is such that their performance won't be measurably affected. See ArgMustBeDereferenced() for more info.
-			&& &var != g_ErrorLevel) // Mostly for maintainability because the following situation is very rare: If it's g_ErrorLevel, use the deref version instead because if g_ErrorLevel is an input variable in the caller's command, and the caller changes ErrorLevel (such as to set a default) prior to calling this function, the changed/new ErrorLevel will be used rather than its original value (which is usually undesirable).
+			&& &var != g_ErrorLevel   ) // Mostly for maintainability because the following situation is very rare: If it's g_ErrorLevel, use the deref version instead because if g_ErrorLevel is an input variable in the caller's command, and the caller changes ErrorLevel (such as to set a default) prior to calling this function, the changed/new ErrorLevel will be used rather than its original value (which is usually undesirable).
 			return var.Length(); // Do it the fast way.
 	}
 	// Otherwise, length isn't known due to no variable, a built-in variable, or an environment variable.
@@ -9079,7 +8489,7 @@ __int64 Line::ArgIndexToInt64(int aArgIndex)
 	if (sArgVar[aArgIndex])
 	{
 		Var &var = *sArgVar[aArgIndex];
-		if (var.Type() == VAR_NORMAL  // See ArgIndexLength() for comments about this line and below.
+		if (   var.Type() == VAR_NORMAL  // See ArgIndexLength() for comments about this line and below.
 			&& !g_act[mActionType].CheckOverlap
 			&& &var != g_ErrorLevel   )
 			return var.ToInt64();
@@ -9108,7 +8518,7 @@ double Line::ArgIndexToDouble(int aArgIndex)
 	if (sArgVar[aArgIndex])
 	{
 		Var &var = *sArgVar[aArgIndex];
-		if (var.Type() == VAR_NORMAL  // See ArgIndexLength() for comments about this line and below.
+		if (   var.Type() == VAR_NORMAL  // See ArgIndexLength() for comments about this line and below.
 			&& !g_act[mActionType].CheckOverlap
 			&& &var != g_ErrorLevel   )
 			return var.ToDouble();
@@ -9140,12 +8550,12 @@ Var *Script::FindOrAddVar(LPTSTR aVarName, size_t aVarNameLength, int aScope)
 
 Var *Script::FindVar(LPTSTR aVarName, size_t aVarNameLength, int *apInsertPos, int aScope
 	, bool *apIsLocal)
-	// Caller has ensured that aVarName isn't NULL.  It must also ignore the contents of apInsertPos when
-	// a match (non-NULL value) is returned.
-	// Returns the Var whose name matches aVarName.  If it doesn't exist, NULL is returned.
-	// If caller provided a non-NULL apInsertPos, it will be given a the array index that a newly
-	// inserted item should have to keep the list in sorted order (which also allows the ListVars command
-	// to display the variables in alphabetical order).
+// Caller has ensured that aVarName isn't NULL.  It must also ignore the contents of apInsertPos when
+// a match (non-NULL value) is returned.
+// Returns the Var whose name matches aVarName.  If it doesn't exist, NULL is returned.
+// If caller provided a non-NULL apInsertPos, it will be given a the array index that a newly
+// inserted item should have to keep the list in sorted order (which also allows the ListVars command
+// to display the variables in alphabetical order).
 {
 	if (!*aVarName)
 		return NULL;
@@ -9756,7 +9166,7 @@ ResultType Script::PreparseExpressions(Line *aStartingLine)
 		// Set g->CurrentFunc for use resolving names of nested functions.
 		case ACT_BLOCK_BEGIN:
 			if (line->mAttribute)
-				g->CurrentFunc = (Func *)line->mAttribute;
+				g->CurrentFunc = (UserFunc *)line->mAttribute;
 			break;
 		case ACT_BLOCK_END:
 			if (line->mAttribute)
@@ -10001,6 +9411,50 @@ Line *Script::PreparseBlocks(Line *aStartingLine, ExecUntilMode aMode, Line *aPa
 			// Otherwise, continue processing at line's new location:
 			continue;
 		} // ActionType is IF/LOOP/TRY.
+		else if (line->mActionType == ACT_SWITCH)
+		{
+			// "Hide" the arg so that ExpandArgs() doesn't evaluate it.  This is necessary because
+			// ACT_SWITCH has special handling to support objects.
+			line->mAttribute = (AttributeType)line->mArgc;
+			line->mArgc = 0;
+			Line *switch_line = line;
+
+			line = line->mNextLine;
+			if (line->mActionType != ACT_BLOCK_BEGIN)
+				return switch_line->PreparseError(ERR_MISSING_OPEN_BRACE);
+			Line *block_begin = line;
+			block_begin->mParentLine = switch_line;
+			
+			Line *end_line = NULL;
+			for (line = line->mNextLine; line->mActionType == ACT_CASE; line = end_line)
+			{
+				// Hide the arg so that ExpandArgs() won't evaluate it.
+				line->mAttribute = (AttributeType)line->mArgc;
+				line->mArgc = 0;
+				line->mParentLine = block_begin; // Required for GOTO to work correctly.
+				// Find the next ACT_CASE or ACT_BLOCK_END:
+				end_line = PreparseBlocks(line->mNextLine, UNTIL_BLOCK_END, block_begin, aLoopType);
+				if (!end_line)
+					return NULL; // Error.
+				// Form a linked list of CASE lines within this block:
+				line->mRelatedLine = end_line;
+			}
+
+			if (!end_line) // First line is not ACT_CASE.
+			{
+				if (line->mActionType != ACT_BLOCK_END)
+					return line->PreparseError(_T("Expected Case/Default"));
+				end_line = line;
+			}
+
+			// After evaluating ACT_SWITCH, execution resumes after ACT_BLOCK_END:
+			switch_line->mRelatedLine = line = end_line->mNextLine;
+
+			if (aMode == ONLY_ONE_LINE) // Return the next unprocessed line to the caller.
+				return line;
+			// Otherwise, continue processing at line's new location:
+			continue;
+		}
 
 		// Since above didn't continue, do the switch:
 		switch (line->mActionType)
@@ -10031,6 +9485,12 @@ Line *Script::PreparseBlocks(Line *aStartingLine, ExecUntilMode aMode, Line *aPa
 			if (aLoopType == ACT_FINALLY)
 				return line->PreparseError(ERR_BAD_JUMP_INSIDE_FINALLY);
 			break;
+
+		case ACT_CASE:
+			if (!aParentLine || !aParentLine->mParentLine
+				|| aParentLine->mParentLine->mActionType != ACT_SWITCH)
+				return line->PreparseError(ERR_UNEXPECTED_CASE);
+			return line;
 
 		case ACT_ELSE:
 			// This happens if there's an extra ELSE in this scope level that has no IF:
@@ -10097,7 +9557,7 @@ Line *Script::PreparseBlocksStmtBody(Line *aStartingLine, Line *aParentLine, con
 		
 		if (body->mActionType == ACT_BLOCK_BEGIN && body->mAttribute) // Function body.
 		{
-			if (!((Func *)body->mAttribute)->mIsFatArrow)
+			if (!((UserFunc *)body->mAttribute)->mIsFuncExpression)
 			{
 				// Normal function definitions aren't allowed here because it simply wouldn't make sense.
 				return body->PreparseError(_T("Unexpected function"));
@@ -10142,11 +9602,11 @@ Line *Script::PreparseCommands(Line *aStartingLine)
 		{
 		case ACT_BLOCK_BEGIN:
 			if (line->mAttribute) // This is the opening brace of a function definition.
-				g->CurrentFunc = (Func *)line->mAttribute; // Must be set only for the above condition because functions can of course contain types of blocks other than the function's own block.
+				g->CurrentFunc = (UserFunc *)line->mAttribute; // Must be set only for the above condition because functions can of course contain types of blocks other than the function's own block.
 			break;
 		case ACT_BLOCK_END:
 			if (line->mAttribute) // This is the closing brace of a function definition.
-				g->CurrentFunc = NULL; // Must be set only for the above condition because functions can of course contain types of blocks other than the function's own block.
+				g->CurrentFunc = g->CurrentFunc->mOuterFunc;
 			break;
 		case ACT_BREAK:
 		case ACT_CONTINUE:
@@ -10282,7 +9742,6 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 		, 77, 77         // SYM_PRE_INCREMENT, SYM_PRE_DECREMENT (higher precedence than SYM_POWER because it doesn't make sense to evaluate power first because that would cause ++/-- to fail due to operating on a non-lvalue.
 		//		, 78             // THIS VALUE MUST BE LEFT UNUSED so that the one above can be promoted to it by the infix-to-postfix routine.
 		//		, 82, 82         // RESERVED FOR SYM_POST_INCREMENT, SYM_POST_DECREMENT (which are listed higher above for the performance of YIELDS_AN_OPERAND().
-		, 87             // SYM_NEW.  Unlike SYM_FUNC, SYM_DOT, etc., precedence actually matters for this one.
 		, 86             // SYM_FUNC -- Has special handling which ensures it stays tightly bound with its parameters as though it's a single operand for use by other operators; the actual value here is irrelevant.
 	};
 	// Most programming languages give exponentiation a higher precedence than unary minus and logical-not.
@@ -10540,6 +9999,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 						infix[infix_count++].symbol = SYM_CONCAT;
 					}
 					infix[infix_count].symbol = SYM_OPAREN; // MUST NOT REFER TO this_infix_item IN CASE ABOVE DID ++infix_count.
+					infix[infix_count].marker = cp;
 					break;
 				case ')':
 					this_infix_item.symbol = SYM_CPAREN;
@@ -10564,7 +10024,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 						}
 						else
 						{
-							deref_new->func = &g_ObjGet; // This may be overridden by standard_pop_into_postfix.
+							deref_new->func = OpFunc_GetItem; // This may be overridden by standard_pop_into_postfix.
 							deref_new->param_count = 1; // Initially one parameter: the target object.
 						}
 						deref_new->marker = cp; // For error-reporting.
@@ -10772,6 +10232,12 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 						// side-effect, implicit concatenation is no longer supported for floating point numbers beginning with ".".
 						if (infix_count && YIELDS_AN_OPERAND(infix[infix_count - 1].symbol))
 						{
+							if (this_deref && this_deref->marker == cp + 1) // Dynamic member such as x.%y% or x.y%z%.
+							{
+								--infix_count; // Counter the loop's increment.
+								break;
+							}
+
 							// Ensure at least enough room for this operand and the operator further below.
 							if (infix_count > MAX_TOKENS - 2)
 								return LineError(ERR_EXPR_TOO_LONG);
@@ -10788,23 +10254,10 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 								return LineError(ERR_EXPR_SYNTAX, FAIL, cp-1); // Intentionally vague since the user's intention isn't clear.
 
 							// Output an operand for the text following '.'
-							if (op_end - cp < MAX_NUMBER_SIZE)
-								tcslcpy(number_buf, cp, op_end - cp + 1); // +1 for null terminator.
-							else
-								*number_buf = '\0'; // For simplicity; IsNumeric() should yield the correct result.
-							if (IsNumeric(number_buf, false, false) == PURE_INTEGER)
-							{
-								// Seems best to treat obj.1 as obj[1] rather than obj["1"].
-								// But what about obj.001?  That's also treated as obj[1] for now.
-								infix[infix_count].SetValue(ATOI64(number_buf));
-							}
-							else
-							{
-								LPTSTR str = g_SimpleHeap->Malloc(cp, op_end - cp);
-								if (!str)
-									return FAIL; // Malloc already displayed an error message.
-								infix[infix_count].SetValue(str, op_end - cp);
-							}
+							LPTSTR str = g_SimpleHeap->Malloc(cp, op_end - cp);
+							if (!str)
+								return FAIL; // Malloc already displayed an error message.
+							infix[infix_count].SetValue(str, op_end - cp);
 
 							++infix_count;
 
@@ -10815,18 +10268,18 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 							new_deref->marker = cp - 1; // Not typically needed, set for error-reporting.
 							new_deref->param_count = 2; // Initially two parameters: the object and identifier.
 							new_deref->type = DT_FUNC;
-
+							
 							if (*op_end == '(')
 							{
 								new_symbol = SYM_FUNC;
-								new_deref->func = &g_ObjCall;
+								new_deref->func = OpFunc_CallMethod;
 								// DON'T DO THE FOLLOWING - must let next iteration handle '(' so it outputs a SYM_OPAREN:
 								//++op_end;
 							}
 							else
 							{
 								new_symbol = SYM_DOT; // This will be changed to SYM_FUNC at a later stage.
-								new_deref->func = &g_ObjGet; // Set default; may be overridden by standard_pop_into_postfix.
+								new_deref->func = OpFunc_GetProp; // Set default; may be overridden by standard_pop_into_postfix.
 							}
 
 							// Output the operator next - after the operand to avoid auto-concat.
@@ -10839,7 +10292,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 						}
 					}
 
-				unquoted_literal:
+unquoted_literal:
 					// This operand is a normal raw numeric-literal, or an unquoted literal string/key in
 					// an object literal, such as "{key: value}".  Word operators such as AND/OR/NOT/NEW
 					// and variable/function references don't reach this point as they are pre-parsed by
@@ -10857,14 +10310,9 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 						// (VC++ 2015 and later).  This is done because we don't support those values
 						// elsewhere in the code, such as in IsNumeric().
 						LPTSTR i_end, d_end;
-						__int64 i;
-						if (IsHex(cp))
+						__int64 i = istrtoi64(cp, &i_end);
+						if (!IsHex(cp))
 						{
-							i = tcstoi64_o(cp, &i_end, 16);
-						}
-						else
-						{
-							i = tcstoi64_o(cp, &i_end, 10);
 							double d = _tcstod(cp, &d_end);
 							if (d_end > i_end && _tcschr(EXPR_OPERAND_TERMINATORS, *d_end))
 							{
@@ -10926,11 +10374,14 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 			{
 				TCHAR c = this_deref_ref.type == DT_QSTRING ? cp[-2] : cp[-1];
 				// See CHECK_AUTO_CONCAT macro definition for comments.
-				if (!IS_SPACE_OR_TAB(c))
-					return LineError(ERR_BAD_AUTO_CONCAT, FAIL, cp);
-				if (infix_count > MAX_TOKENS - 2)
-					return LineError(ERR_EXPR_TOO_LONG);
-				infix[infix_count++].symbol = SYM_CONCAT;
+				if (c != '.') // i.e. it's not a dynamic member like .my%x%
+				{
+					if (!IS_SPACE_OR_TAB(c))
+						return LineError(ERR_BAD_AUTO_CONCAT, FAIL, cp);
+					if (infix_count > MAX_TOKENS - 2)
+						return LineError(ERR_EXPR_TOO_LONG);
+					infix[infix_count++].symbol = SYM_CONCAT;
+				}
 			}
 
 			bool can_be_optimized_out = this_deref_ref.length == 0;
@@ -10964,6 +10415,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 				if (infix_count > MAX_TOKENS - 2)
 					return LineError(ERR_EXPR_TOO_LONG);
 				infix[infix_count].symbol = SYM_OPAREN;
+				infix[infix_count].marker = cp;
 				infix_count++;
 			}
 
@@ -11018,19 +10470,25 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 			infix[infix_count].symbol = SYM_DYNAMIC;
 			infix[infix_count].var = NULL; // Indicate this is a double-deref.
 		}
-		else if (this_deref_ref.type == DT_WORDOP)
+		else if (this_deref_ref.type == DT_DOTPERCENT)
 		{
-			if (this_deref_ref.symbol == SYM_NEW)
+			if (*this_deref_ref.marker == '(')
 			{
-				CHECK_AUTO_CONCAT; // Something like `"X" new C().getY()` is valid, though hardly readable.
-				// Above may have incremented infix_count.
-				infix[infix_count].symbol = SYM_NEW;
-				infix[infix_count].deref = this_deref;
-				this_deref_ref.param_count = 1; // Start counting at the class object, which precedes the open-parenthesis.
-				this_deref_ref.func = &g_ObjNew; // This overwrites this_deref_ref.symbol via the union.
+				infix[infix_count].symbol = SYM_FUNC;
+				this_deref_ref.func = OpFunc_CallMethod;
 			}
 			else
-				infix[infix_count].symbol = this_deref_ref.symbol;
+			{
+				infix[infix_count].symbol = SYM_DOT;
+				this_deref_ref.func = OpFunc_GetProp;
+			}
+			this_deref_ref.param_count = 2; // Initially two parameters: the object and identifier.
+			this_deref_ref.type = DT_FUNC;
+			infix[infix_count].deref = this_deref;
+		}
+		else if (this_deref_ref.type == DT_WORDOP)
+		{
+			infix[infix_count].symbol = this_deref_ref.symbol;
 			infix[infix_count].error_reporting_marker = this_deref_ref.marker;
 		}
 		else if (this_deref_ref.type == DT_FUNCREF)
@@ -11044,11 +10502,12 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 			infix[infix_count].symbol = SYM_FUNC;
 			infix[infix_count].deref = this_deref;
 			infix[infix_count+1].symbol = SYM_OPAREN;
+			infix[infix_count+1].marker = cp;
 			infix[infix_count+2].symbol = SYM_OBJECT;
 			infix[infix_count+2].object = this_deref_ref.func;
 			infix[infix_count+3].symbol = SYM_CPAREN;
 			infix_count += 3; // Loop will increment once more.
-			this_deref_ref.func = &g_FuncClose;
+			this_deref_ref.func = ExprOp<BIF_Func, FID_FuncClose>();
 			this_deref_ref.param_count = 0; // Init.
 		}
 		else // this_deref is a variable.
@@ -11221,13 +10680,18 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 						// This is SYM_COMMA or SYM_CPAREN/BRACKET/BRACE at the end of a parameter.
 						++in_param_list->param_count;
 
+						auto *bif = func && func->IsBuiltIn() ? ((BuiltInFunc *)func)->mBIF : nullptr;
 						if (!func)
 						{
 							// Skip the checks below.
 						}
-						else if (in_param_list->param_count > func->mParamCount && (func->mBIF != &BIF_DllImport) && !func->mIsVariadic)
+						else if (in_param_list->param_count > func->mParamCount && (bif && ((BuiltInFunc *)func)->mBIF != &BIF_DllImport) && !func->mIsVariadic)
 						{
 							return LineError(ERR_TOO_MANY_PARAMS, FAIL, in_param_list->marker);
+						}
+						else if (!bif)
+						{
+							// Skip the checks below.
 						}
 						else if (postfix[postfix_count-1][-1].symbol != SYM_COMMA && postfix[postfix_count-1][-1].symbol != stack_symbol)
 						{
@@ -11268,7 +10732,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 							}
 						}
 #ifdef ENABLE_DLLCALL
-						else if (func->mBIF == &BIF_DllCall // Implies mIsBuiltIn == true.
+						else if (bif == &BIF_DllCall // Implies mIsBuiltIn == true.
 							&& in_param_list->param_count == 1) // i.e. this is the end of the first param.
 						{
 							// Optimise DllCall by resolving function addresses at load-time where possible.
@@ -11288,7 +10752,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 							}
 						}
 #endif
-						else if (func->mBIF == &BIF_Func) // Implies mIsBuiltIn == true.
+						else if (bif == &BIF_Func)
 						{
 							ExprTokenType &param1 = *postfix[postfix_count-1];
 							if (param1.symbol == SYM_STRING && infix_symbol == SYM_CPAREN) // Checking infix_symbol ensures errors such as Func(a,b) are handled correctly.
@@ -11299,13 +10763,13 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 								{
 									// Pass the Func to an internal version of Func() which will call CloseIfNeeded().
 									param1.SetValue(param_func);
-									in_param_list->func = &g_FuncClose;
+									in_param_list->func = ExprOp<BIF_Func, FID_FuncClose>();
 								}
 								else
 								{
 									param1.SetValue(_T(""), 0);
 								}
-								if (!param_func || !param_func->mOuterFunc)
+								if (!param_func || param_func->IsBuiltIn() || !((UserFunc *)param_func)->mOuterFunc)
 								{
 									// The function either doesn't exist or is not nested.  In both cases, the value
 									// in param1 would always be the result of Func(), so skip the function call.
@@ -11352,34 +10816,6 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 				ExprTokenType &stack_top = *stack[stack_count - 1];
 				//--stack_count; // DON'T DO THIS.
 				stack_top.symbol = SYM_FUNC; // Change this OBRACKET to FUNC (see below).
-
-				if (this_infix[1].symbol == SYM_OPAREN // i.e. "]("
-					&& !(stack_count > 1 && stack[stack_count - 2]->symbol == SYM_NEW)) // Not "new x[n]()" or "new {...}()"
-				{
-					// Appears to be a method call with a computed method name, such as x[y](prms).
-					if (infix_symbol == SYM_CBRACE // i.e. {...}(), seems best to reserve this for now.
-						|| in_param_list->func != &g_ObjGet // i.e. it's something like x := [y,z]().
-						|| in_param_list->param_count > 2) // i.e. x[y, ...]().
-						return LineError(_T("Unsupported method call syntax."), FAIL, in_param_list->marker); // Error message is a bit vague since this can be x[y,z]() or x.y[z]().
-					if (in_param_list->param_count == 1) // Just the target object; no method name: x[](...)
-					{
-						in_param_list->param_count++;
-						postfix[postfix_count] = this_infix;
-						postfix[postfix_count]->symbol = SYM_MISSING;
-						postfix[postfix_count]->marker = _T(""); // Simplify some cases by letting it be treated as SYM_STRING.
-						++postfix_count;
-					}
-					stack_top.deref->func = &g_ObjCall; // Override the default now that we know this is a method-call.
-					++this_infix; // Skip SYM_CBRACKET so this_infix points to SYM_OPAREN.
-					this_infix->outer_deref = stack_top.outer_deref; // This contains the old value of in_param_list.
-					// Push the open-paren over stack_top (which is now SYM_FUNC) so it will be handled
-					// like an ordinary function call when a comma or the close-paren is encountered.
-					STACK_PUSH(this_infix++);
-					// The rest of the parameter list will be handled like any other function call,
-					// except that in_param_list->param_count is already non-zero.
-					break;
-				}
-
 				++this_infix; // Since this pair of brackets is done, move on to the next token in the infix expression.
 				in_param_list = stack_top.outer_deref; // Restore in_param_list to the value it had when '[' was pushed onto the stack.					
 				goto standard_pop_into_postfix; // Pop the token (now SYM_FUNC) into the postfix array to immediately follow its params.
@@ -11417,39 +10853,11 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 		case SYM_OPAREN:
 			// Open-parentheses always go on the stack to await their matching close-parentheses.
 			this_infix->outer_deref = in_param_list; // Save current value on the stack with this SYM_OPAREN.
-			if (stack_symbol == SYM_NEW // Something like "new Class()".
-				&& this_infix[-1].symbol != SYM_NEW) // Not "new (Class)" or "new(Class)".
-			{
-				if (infix_symbol == SYM_FUNC)
-				{
-					// It can't be anything but ObjCall at this point because stack_symbol == SYM_NEW.
-					//	new Func()		; This would be SYM_VAR, SYM_OPAREN, SYM_CPAREN.
-					//	new (Func())	; stack_symbol would be SYM_OPAREN.
-					//	new x[Func()]()	; stack_symbol would be SYM_OBRACKET.
-					//	new x Func()	; SYM_NEW would've been popped off the stack by auto-SYM_CONCAT.
-					ASSERT(this_infix[-1].deref->func == &g_ObjCall);
-					// It can be anything like:
-					//	new x.y(z)		; This simple case could be easily handled at an earlier stage.
-					//	new (getClass()).y(z)
-					//	new x[y](z)
-					// So at this point, this_infix[-1] has two parameters: the target object x
-					// and method name y.  Instead of calling method y of object x, we want to
-					// get property y of object x and use the result as the class to instantiate.
-					// To achieve this, we can just change ObjCall to ObjGet:
-					this_infix[-1].deref->func = &g_ObjGet;
-					goto standard_pop_into_postfix;
-					// Let the next iteration encounter SYM_OPAREN while stack_symbol is still
-					// SYM_NEW so that the lines below will be executed:
-				}
-				// Now that the SYM_OPAREN of this SYM_NEW has been found, translate it to SYM_FUNC
-				// so that it will be popped off the stack immediately after its parameter list:
-				stack[stack_count - 1]->symbol = SYM_FUNC;
-				in_param_list = stack[stack_count - 1]->deref;
-			}
-			else if (infix_symbol == SYM_FUNC)
+			if (infix_symbol == SYM_FUNC)
 				in_param_list = this_infix[-1].deref; // Store this SYM_FUNC's deref.
-			else if (this_infix > infix && YIELDS_AN_OPERAND(this_infix[-1].symbol))
-				return LineError(_T("Missing operator or space before \"(\"."));
+			else if (this_infix > infix && YIELDS_AN_OPERAND(this_infix[-1].symbol)
+				&& *this_infix->marker == '(') // i.e. it's not an implicit SYM_OPAREN generated by DT_STRING.
+				return LineError(_T("Missing operator or space before \"(\"."), FAIL, this_infix->marker);
 			else
 				in_param_list = NULL; // Allow multi-statement commas, even in cases like Func((x,y)).
 			STACK_PUSH(this_infix++);
@@ -11704,8 +11112,11 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 			//	x.y := z	->	x "y" z (set)
 			//	x[y] += z	->	x y (get in-place, assume 2 params) z (add) (set)
 			//	x.y[i] /= z	->	x "y" i 3 (get in-place, n params) z (div) (set)
-			if (this_postfix->deref->func == &g_ObjGet)
+			if (this_postfix->deref->func == OpFunc_GetProp
+				|| this_postfix->deref->func == OpFunc_GetItem)
 			{
+				bool square_brackets = this_postfix->deref->func == OpFunc_GetItem;
+				
 				if (IS_ASSIGNMENT_EXCEPT_POST_AND_PRE(infix_symbol))
 				{
 					if (infix_symbol != SYM_ASSIGN)
@@ -11729,7 +11140,9 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 						that_postfix->symbol = SYM_FUNC;
 						if (!(that_postfix->deref = (DerefType *)g_SimpleHeap->Malloc(sizeof(DerefType)))) // Must be persistent memory, unlike that_postfix itself.
 							return LineError(ERR_OUTOFMEM);
-						that_postfix->deref->func = &g_ObjGetInPlace;
+						that_postfix->deref->func = square_brackets
+							? ExprOp<Op_ObjGetInPlace, IT_GET|IF_DEFAULT>()
+							: ExprOp<Op_ObjGetInPlace, IT_GET>();
 						that_postfix->deref->type = DT_FUNC;
 						that_postfix->deref->param_count = param_count;
 					}
@@ -11738,7 +11151,7 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 						--postfix_count; // Discard this token; the assignment op will be converted into SYM_FUNC later.
 					}
 					this_infix->deref = stack[stack_count]->deref; // Mark this assignment as an object assignment for the section below.
-					this_infix->deref->func = &g_ObjSet;
+					this_infix->deref->func = square_brackets ? OpFunc_SetItem : OpFunc_SetProp;
 					this_infix->deref->param_count++;
 					// Now let this_infix be processed by the next iteration.
 				}
@@ -11747,11 +11160,14 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 					// Post-increment/decrement has higher precedence, so check for it first:
 					if (infix_symbol == SYM_POST_INCREMENT || infix_symbol == SYM_POST_DECREMENT)
 					{
-						// Replace the func with Op_ObjIncDec to perform the operation. This has
-						// the same effect as the section above with x.y(z) := 1; i.e. x.y(z)++ is
-						// equivalent to x.y[z]++.  This is done for consistency, simplicity and
-						// because x.y(z)++ would otherwise be a useless syntax error.
-						this_postfix->deref->func = (infix_symbol == SYM_POST_INCREMENT ? &g_ObjPostInc : &g_ObjPostDec);
+						// Replace Op_ObjInvoke with Op_ObjIncDec to perform the operation.
+						this_postfix->deref->func = infix_symbol == SYM_POST_DECREMENT
+							? square_brackets
+								? ExprOp<Op_ObjIncDec, SYM_POST_DECREMENT|IF_DEFAULT>()
+								: ExprOp<Op_ObjIncDec, SYM_POST_DECREMENT>()
+							: square_brackets
+								? ExprOp<Op_ObjIncDec, SYM_POST_INCREMENT|IF_DEFAULT>()
+								: ExprOp<Op_ObjIncDec, SYM_POST_INCREMENT>();
 						++this_infix; // Discard this operator.
 					}
 					else
@@ -11759,8 +11175,14 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 						stack_symbol = stack[stack_count - 1]->symbol;
 						if (stack_symbol == SYM_PRE_INCREMENT || stack_symbol == SYM_PRE_DECREMENT)
 						{
-							// See comments in the similar section above.
-							this_postfix->deref->func = (stack_symbol == SYM_PRE_INCREMENT ? &g_ObjPreInc : &g_ObjPreDec);
+							// Replace Op_ObjInvoke with Op_ObjIncDec to perform the operation.
+							this_postfix->deref->func = stack_symbol == SYM_PRE_DECREMENT
+								? square_brackets
+									? ExprOp<Op_ObjIncDec, SYM_PRE_DECREMENT|IF_DEFAULT>()
+									: ExprOp<Op_ObjIncDec, SYM_PRE_DECREMENT>()
+								: square_brackets
+									? ExprOp<Op_ObjIncDec, SYM_PRE_INCREMENT|IF_DEFAULT>()
+									: ExprOp<Op_ObjIncDec, SYM_PRE_INCREMENT>();	
 							--stack_count; // Discard this operator.
 						}
 					}
@@ -11771,7 +11193,6 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg)
 			}
 			break;
 
-		case SYM_NEW: // This is probably something like "new Class", without "()", otherwise an earlier stage would've handled it.
 		case SYM_REGEXMATCH: // a ~= b  ->  RegExMatch(a, b)
 			this_postfix->symbol = SYM_FUNC;
 			break;
@@ -11884,7 +11305,8 @@ end_of_infix_to_postfix:
 				}
 				else if ( !(only_token.var->mType == VAR_VIRTUAL
 					&& (only_token.var->mVV->Get == BIV_LoopIndex || only_token.var->mVV->Get == BIV_EventInfo))
-					&& !(only_token.var->mType == VAR_BUILTIN && only_token.var->mBIV == BIV_TrayMenu) ) // This exception is required for A_TrayMenu to return an object.
+					&& !(only_token.var->mType == VAR_BUILTIN && (only_token.var->mBIV == BIV_TrayMenu // This exception is required for A_TrayMenu to return an object.
+						|| only_token.var->mBIV == BIV_ScriptHwnd)) )
 				{
 					aArg.type = ARG_TYPE_INPUT_VAR;
 				}
@@ -12038,7 +11460,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ResultToken *aResultToken, Line 
 	// is about 0.25%.  Since that is probably not even statistically significant, the only reason for declaring
 	// them here is in case compilers other than MSVC++ 7.1 benefit more -- and because it's an old silly habit.
 	__int64 loop_iteration;
-	WIN32_FIND_DATA *loop_file;
+	LoopFilesStruct *loop_file;
 	RegItemStruct *loop_reg_item;
 	LoopReadFileStruct *loop_read_file;
 	LPTSTR loop_field;
@@ -12679,7 +12101,9 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ResultToken *aResultToken, Line 
 				ResultToken *thrown_token = g.ThrownToken;
 				g.ThrownToken = NULL; // Must clear this temporarily to avoid arbitrarily re-throwing it.
 				Line *invalid_jump; // Don't overwrite jump_to_line in case the try block used goto.
+				PRIVATIZE_S_DEREF_BUF; // In case return was used and is returning the contents of the deref buf.
 				ResultType res = line->ExecUntil(ONLY_ONE_LINE, NULL, &invalid_jump);
+				DEPRIVATIZE_S_DEREF_BUF;
 				if (res != OK || invalid_jump)
 				{
 					if (thrown_token) // The new error takes precedence over this one.
@@ -12768,6 +12192,121 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ResultToken *aResultToken, Line 
 			line = line->mNextLine;
 			continue;
 		}
+
+		case ACT_SWITCH:
+		{
+			Line *line_to_execute = NULL;
+
+			// Privatize our deref buf so that any function calls within any of the SWITCH/CASE
+			// expressions can allocate and use their own separate deref buf.  Our deref buf
+			// will be reused for each expression evaluation.
+			PRIVATIZE_S_DEREF_BUF;
+
+			size_t switch_value_mem_size;
+			ResultToken switch_value;
+			switch_value.mem_to_free = NULL;
+			if (!line->mAttribute) // Switch with no value: find the first 'true' case.
+			{
+				switch_value.symbol = SYM_INVALID;
+				result = OK;
+			}
+			else
+				result = line->ExpandSingleArg(0, switch_value, our_deref_buf, our_deref_buf_size);
+			if (result == OK)
+			{
+				if (switch_value.symbol == SYM_STRING && switch_value.marker == our_deref_buf)
+				{
+					// Prevent the case expressions from reusing our_deref_buf, since we'll need it.
+					// A new buf will be allocated by ExpandSingleArg() if required, which would only
+					// be if at least one case expression is not a literal number/quoted string.
+					switch_value.mem_to_free = our_deref_buf;
+					switch_value_mem_size = our_deref_buf_size;
+					our_deref_buf = NULL;
+					our_deref_buf_size = 0;
+				}
+				// For each CASE:
+				for (Line *case_line = line->mNextLine->mNextLine; case_line->mActionType == ACT_CASE; case_line = case_line->mRelatedLine)
+				{
+					int arg, arg_count = (int)(INT_PTR)case_line->mAttribute;
+					if (!arg_count) // The default case.
+					{
+						line_to_execute = case_line->mNextLine;
+						continue;
+					}
+					for (arg = 0; arg < arg_count; ++arg)
+					{
+						ResultToken case_value;
+						result = case_line->ExpandSingleArg(arg, case_value, our_deref_buf, our_deref_buf_size);
+						if (result != OK)
+						{
+							line_to_execute = NULL; // Do not execute default case.
+							break;
+						}
+						bool found = switch_value.symbol == SYM_INVALID ? TokenToBOOL(case_value)
+							: TokensAreEqual(switch_value, case_value);
+						if (case_value.symbol == SYM_OBJECT)
+							case_value.object->Release();
+						if (found)
+						{
+							line_to_execute = case_line->mNextLine;
+							break;
+						}
+					}
+					if (arg < arg_count)
+						break;
+				}
+				if (switch_value.symbol == SYM_OBJECT)
+					switch_value.object->Release();
+				if (switch_value.mem_to_free)
+				{
+					if (our_deref_buf)
+					{
+						// Free the newly allocated deref buf.
+						free(our_deref_buf);
+						if (our_deref_buf_size > LARGE_DEREF_BUF_SIZE)
+							--sLargeDerefBufs;
+					}
+					// Restore original deref buf.
+					our_deref_buf = switch_value.mem_to_free;
+					our_deref_buf_size = switch_value_mem_size;
+				}
+			}
+
+			DEPRIVATIZE_S_DEREF_BUF;
+
+			if (line_to_execute)
+			{
+				// Above found a matching CASE.  Execute the lines between it and the next CASE or block-end.
+				result = line_to_execute->ExecUntil(UNTIL_BLOCK_END, aResultToken, &jump_to_line);
+			}
+			else
+				jump_to_line = NULL;
+
+			if (result != OK || aMode == ONLY_ONE_LINE)
+			{
+				caller_jump_to_line = jump_to_line;
+				return result;
+			}
+			
+			if (jump_to_line != NULL)
+			{
+				if (jump_to_line->mParentLine != line->mParentLine)
+				{
+					caller_jump_to_line = jump_to_line;
+					return OK;
+				}
+				line = jump_to_line;
+				continue;
+			}
+			
+			// Continue execution at the line following the block-end.
+			line = line->mRelatedLine;
+			continue;
+		}
+
+		case ACT_CASE:
+			// This is the next CASE after one that matched, so we're done.
+			return OK;
 
 		case ACT_BLOCK_BEGIN:
 			if (line->mAttribute) // This is the ACT_BLOCK_BEGIN that starts a function's body.
@@ -12949,6 +12488,13 @@ ResultType HotkeyCriterion::Eval(LPTSTR aHotkeyName)
 	if (g_nThreads >= g_MaxThreadsTotal)
 		return CONDITION_FALSE;
 
+	bool prev_defer_messages = g_DeferMessagesForUnderlyingPump;
+	// Force the use of PeekMessage() within MsgSleep() since GetMessage() is known to stall while
+	// the system is waiting for our keyboard hook to return (last confirmed on Windows 10.0.18356).
+	// This might relate to WM_TIMER being lower priority than the input hardware processing
+	// performed by GetMessage().  MsgSleep() relies on WM_TIMER acting as a timeout for GetMessage().
+	g_DeferMessagesForUnderlyingPump = true;
+
 	// See MsgSleep() for comments about the following section.
 	VarBkp ErrorLevel_saved;
 	ErrorLevel_Backup(ErrorLevel_saved);
@@ -12975,7 +12521,7 @@ ResultType HotkeyCriterion::Eval(LPTSTR aHotkeyName)
 	else
 	{
 		ExprTokenType param = aHotkeyName;
-		INT_PTR retval;
+		__int64 retval;
 		result = LabelPtr(Callback)->ExecuteInNewThread(_T("#If"), &param, 1, &retval);
 		if (result != FAIL)
 			result = retval ? CONDITION_TRUE : CONDITION_FALSE;
@@ -12995,6 +12541,8 @@ ResultType HotkeyCriterion::Eval(LPTSTR aHotkeyName)
 	g_script->mPriorHotkeyStartTime = prior_hotkey_time[1];
 
 		ResumeUnderlyingThread(ErrorLevel_saved);
+
+	g_DeferMessagesForUnderlyingPump = prev_defer_messages;
 
 	return result;
 }
@@ -13134,134 +12682,6 @@ ResultType Line::PerformLoopWhile(ResultToken *aResultToken, bool &aContinueMain
 }
 
 
-ResultType Line::IncludeFiles(bool aAllowDuplicateInclude, bool aIgnoreLoadFailure, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, LPTSTR aFilePattern)
-// Note: Even if aFilePattern is just a directory (i.e. with not wildcard pattern), it seems best
-// not to append "\\*.*" to it because the pattern might be a script variable that the user wants
-// to conditionally resolve to various things at runtime.  In other words, it's valid to have
-// only a single directory be the target of the loop.
-{
-	// Make a local copy of the path given in aFilePattern because as the lines of
-	// the loop are executed, the deref buffer (which is what aFilePattern might
-	// point to if we were called from ExecUntil()) may be overwritten --
-	// and we will need the path string for every loop iteration.  We also need
-	// to determine naked_filename_or_pattern:
-	TCHAR file_path[MAX_PATH], naked_filename_or_pattern[MAX_PATH]; // Giving +3 extra for "*.*" seems fairly pointless because any files that actually need that extra room would fail to be retrieved by FindFirst/Next due to their inability to support paths much over 256.
-	size_t file_path_length;
-	tcslcpy(file_path, aFilePattern, _countof(file_path));
-	LPTSTR last_backslash = _tcsrchr(file_path, '\\');
-	if (last_backslash)
-	{
-		_tcscpy(naked_filename_or_pattern, last_backslash + 1); // Naked filename.  No danger of overflow due size of src vs. dest.
-		*(last_backslash + 1) = '\0';  // Convert file_path to be the file's path, but use +1 to retain the final backslash on the string.
-		file_path_length = _tcslen(file_path);
-	}
-	else
-	{
-		_tcscpy(naked_filename_or_pattern, file_path); // No danger of overflow due size of src vs. dest.
-		*file_path = '\0'; // There is no path, so make it empty to use current working directory.
-		file_path_length = 0;
-	}
-
-	// g->mLoopFile is the current file of the file-loop that encloses this file-loop, if any.
-	// The below is our own current_file, which will take precedence over g->mLoopFile if this
-	// loop is a file-loop:
-	BOOL file_found;
-	WIN32_FIND_DATA new_current_file;
-	HANDLE file_search = FindFirstFile(aFilePattern, &new_current_file);
-	for (file_found = (file_search != INVALID_HANDLE_VALUE) // Convert FindFirst's return value into a boolean so that it's compatible with with FindNext's.
-		; file_found && FileIsFilteredOut(new_current_file, aFileLoopMode, file_path, file_path_length)
-		; file_found = FindNextFile(file_search, &new_current_file));
-	// file_found and new_current_file have now been set for use below.
-	// Above is responsible for having properly set file_found and file_search.
-
-	ResultType result;
-
-	global_struct &g = *::g; // Primarily for performance in this case.
-
-	for (; file_found; ++g.mLoopIteration)
-	{
-		g.mLoopFile = &new_current_file; // inner file-loop's file takes precedence over any outer file-loop's.
-		// Other types of loops leave g.mLoopFile unchanged so that a file-loop can enclose some other type of
-		// inner loop, and that inner loop will still have access to the outer loop's current file.
-		// MessageBox(NULL, file_path, g.mLoopFile->cFileName, 0); 
-		if (!g_script->LoadIncludedFile(g.mLoopFile->cFileName, false, false)) // Fix for v1.0.47.05: Pass false for allow-dupe because otherwise, it's possible for a stdlib file to attempt to include itself (especially via the LibNamePrefix_ method) and thus give a misleading "duplicate function" vs. "func does not exist" error message.  Obsolete: For performance, pass true for allow-dupe so that it doesn't have to check for a duplicate file (seems too rare to worry about duplicates since by definition, the function doesn't yet exist so it's file shouldn't yet be included).
-		{
-			//   aErrorWasShown = true; // Above has just displayed its error (e.g. syntax error in a line, failed to open the include file, etc).  So override the default set earlier.
-			return FAIL;
-		}
-		// Execute once the body of the loop (either just one statement or a block of statements).
-		// Preparser has ensured that every LOOP has a non-NULL next line.
-
-		// Otherwise, the result of executing the body of the loop, above, was either OK
-		// (the current iteration completed normally) or LOOP_CONTINUE (the current loop
-		// iteration was cut short).  In both cases, just continue on through the loop.
-		// But first do end-of-iteration steps:
-		while ((file_found = FindNextFile(file_search, &new_current_file))
-			&& FileIsFilteredOut(new_current_file, aFileLoopMode, file_path, file_path_length)); // Relies on short-circuit boolean order.
-		// Above is a self-contained loop that keeps fetching files until there's no more files, or a file
-		// is found that isn't filtered out.  It also sets file_found and new_current_file for use by the
-		// outer loop.
-	} // for()
-
-	// The script's loop is now over.
-	if (file_search != INVALID_HANDLE_VALUE)
-		FindClose(file_search);
-
-	// If aRecurseSubfolders is true, we now need to perform the loop's body for every subfolder to
-	// search for more files and folders inside that match aFilePattern.  We can't do this in the
-	// first loop, above, because it may have a restricted file-pattern such as *.txt and we want to
-	// find and recurse into ALL folders:
-	if (!aRecurseSubfolders) // No need to continue into the "recurse" section.
-		return OK;
-
-	// Since above didn't return, this is a file-loop and recursion into sub-folders has been requested.
-	// Append *.* to file_path so that we can retrieve all files and folders in the aFilePattern
-	// main folder.  We're only interested in the folders, but we have to use *.* to ensure
-	// that the search will find all folder names:
-	if (file_path_length > _countof(file_path) - 4) // v1.0.45.03: No room to append "*.*", so for simplicity, skip this folder (don't recurse into it).
-		return OK; // This situation might be impossible except for 32000-capable paths because the OS seems to reserve room inside every directory for at least the maximum length of a short filename.
-	LPTSTR append_pos = file_path + file_path_length;
-	_tcscpy(append_pos, _T("*.*")); // Above has already verified that no overflow is possible.
-
-	file_search = FindFirstFile(file_path, &new_current_file);
-	if (file_search == INVALID_HANDLE_VALUE)
-		return OK; // Nothing more to do.
-	// Otherwise, recurse into any subdirectories found inside this parent directory.
-
-	size_t path_and_pattern_length = file_path_length + _tcslen(naked_filename_or_pattern); // Calculated only once for performance.
-	do
-	{
-		if (!(new_current_file.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) // We only want directories (except "." and "..").
-			|| new_current_file.cFileName[0] == '.' && (!new_current_file.cFileName[1]      // Relies on short-circuit boolean order.
-			|| new_current_file.cFileName[1] == '.' && !new_current_file.cFileName[2])  //
-			// v1.0.45.03: Skip over folders whose full-path-names are too long to be supported by the ANSI
-			// versions of FindFirst/FindNext.  Without this fix, the section below formerly called PerformLoop()
-			// with a truncated full-path-name, which caused the last_backslash-finding logic to find the wrong
-			// backslash, which in turn caused infinite recursion and a stack overflow (i.e. caused by the
-			// full-path-name getting truncated in the same spot every time, endlessly).
-			|| path_and_pattern_length + _tcslen(new_current_file.cFileName) > _countof(file_path) - 2) // -2 to reflect: 1) the backslash to be added between cFileName and naked_filename_or_pattern; 2) the zero terminator.
-			continue;
-		// Build the new search pattern, which consists of the original file_path + the subfolder name
-		// we just discovered + the original pattern:
-		_stprintf(append_pos, _T("%s\\%s"), new_current_file.cFileName, naked_filename_or_pattern); // Indirectly set file_path to the new search pattern.  This won't overflow due to the check above.
-		// Pass NULL for the 2nd param because it will determine its own current-file when it does
-		// its first loop iteration.  This is because this directory is being recursed into, not
-		// processed itself as a file-loop item (since this was already done in the first loop,
-		// above, if its name matches the original search pattern):
-		result = IncludeFiles(aAllowDuplicateInclude, aIgnoreLoadFailure, aFileLoopMode, aRecurseSubfolders, file_path);
-		// result should never be LOOP_CONTINUE because the above call to PerformLoop() should have
-		// handled that case.  However, it can be LOOP_BREAK if it encoutered the break command.
-		if (result != OK && result != LOOP_CONTINUE) // i.e. result == LOOP_BREAK || result == EARLY_RETURN || result == EARLY_EXIT || result == FAIL)
-		{
-			FindClose(file_search);
-			return result;  // Return even LOOP_BREAK, since our caller can be either ExecUntil() or ourself.
-		}
-
-	} while (FindNextFile(file_search, &new_current_file));
-	FindClose(file_search);
-	return OK;
-}
-
 bool Line::EvaluateLoopUntil(ResultType &aResult)
 {
 	g_script->mCurrLine = this; // For error-reporting purposes.
@@ -13304,7 +12724,7 @@ ResultType Line::PerformLoopFor(ResultToken *aResultToken, bool &aContinueMainLo
 		if (param_tokens[2].mem_to_free)
 			free(param_tokens[2].mem_to_free);
 		// The following would need to be checked if the "non-expression" optimization
-		// was enabled for ACT_FOR (currently it does not improve performance):
+		// was enabled for ACT_FOR (when last tested, it did not improve performance):
 		//if (  (ARGVARRAW3 && (param_tokens[2].object = ARGVARRAW3->ToObject()))  )
 		//{
 		//	// Arg was a simple var ref, so not evaluated as an expression, but it contained an object.
@@ -13319,34 +12739,11 @@ ResultType Line::PerformLoopFor(ResultToken *aResultToken, bool &aContinueMainLo
 	// Save these pointers since they will be overwritten during the loop:
 	Var *var[] = { ARGVARRAW1, ARGVARRAW2 };
 
-	TCHAR buf[MAX_NUMBER_SIZE]; // Small buffer which may be used by object->Invoke().
-
-	ResultToken enum_token;
-	ExprTokenType *params[] = { param_tokens, param_tokens + 1, param_tokens + 2 };
-	int param_count;
-
-	// Set up enum_token the way Invoke expects:
-	enum_token.InitResult(buf);
-
-	// Prepare to call object._NewEnum():
-	param_tokens[0].SetValue(_T("_NewEnum"), 8);
-
-	// enum := object._NewEnum()
-	result = param_tokens[2].object->Invoke(enum_token, param_tokens[2], IT_CALL | IF_NEWENUM, params, 1);
-	param_tokens[2].object->Release(); // This object reference is no longer needed.
-
-	if (enum_token.mem_to_free)
-		// Invoke returned memory for us to free.
-		free(enum_token.mem_to_free);
-	
+	IObject *enumerator;
+	result = GetEnumerator(enumerator, param_tokens[2].object, 1 + (var[1] != nullptr), true);
+	param_tokens[2].object->Release();
 	if (result == FAIL || result == EARLY_EXIT)
 		return result;
-
-	if (enum_token.symbol != SYM_OBJECT)
-		if (result == INVOKE_NOT_HANDLED)
-			return LineError(ERR_UNKNOWN_METHOD, FAIL, _T("_NewEnum"));
-		else
-			return LineError(ERR_NO_OBJECT, FAIL, _T("Enumerator")); // Since it's probably rare, keep the unique part of the message short.
 
 	// "Localize" the loop variables.
 	VarBkp var_bkp[2];
@@ -13358,50 +12755,16 @@ ResultType Line::PerformLoopFor(ResultToken *aResultToken, bool &aContinueMainLo
 		var[1]->Backup(var_bkp[1]);
 	}
 
-	// Prepare parameters for the loop below: enum.Next(var1 [, var2])
-	param_tokens[0].SetValue(_T("Next"), 4);
-	param_tokens[1].symbol = SYM_VAR;
-	param_tokens[1].var = var[0];
-	if (var[1])
-	{
-		// for x,y in z  ->  enum.Next(x,y)
-		param_tokens[2].symbol = SYM_VAR;
-		param_tokens[2].var = var[1];
-		param_count = 3;
-	}
-	else
-		// for x in z  ->  enum.Next(x)
-		param_count = 2;
-
-	IObject &enumerator = *enum_token.object; // Might perform better as a reference?
-
-	ResultToken result_token;
-
 	// Now that the enumerator expression has been evaluated, init A_Index:
 	g.mLoopIteration = 1;
 
 	for (;; ++g.mLoopIteration)
 	{
-		// Set up result_token for each Invoke:
-		result_token.InitResult(buf);
-
-		// Call enumerator.Next(var1, var2)
-		result = enumerator.Invoke(result_token, enum_token, IT_CALL, params, param_count);
+		result = CallEnumerator(enumerator, var[0], var[1], true);
 		if (result == FAIL || result == EARLY_EXIT)
 			break;
 
-		if (result == INVOKE_NOT_HANDLED)
-		{
-			result = LineError(ERR_UNKNOWN_METHOD, FAIL, _T("Next"));
-			break;
-		}
-
-		bool next_returned_true = TokenToBOOL(result_token);
-
-		// Free any memory or object which may have been returned by Invoke:
-		result_token.Free();
-
-		if (!next_returned_true)
+		if (result != CONDITION_TRUE)
 		{	// The enumerator returned false, which means there are no more items.
 			result = OK;
 			break;
@@ -13428,7 +12791,7 @@ ResultType Line::PerformLoopFor(ResultToken *aResultToken, bool &aContinueMainLo
 		if (aUntil && aUntil->EvaluateLoopUntil(result))
 			break;
 	} // for()
-	enumerator.Release();
+	enumerator->Release();
 	var[0]->Free();
 	var[0]->Restore(var_bkp[0]);
 	if (var[1])
@@ -13443,55 +12806,206 @@ ResultType Line::PerformLoopFor(ResultToken *aResultToken, bool &aContinueMainLo
 
 ResultType Line::PerformLoopFilePattern(ResultToken *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
 	, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, LPTSTR aFilePattern)
-	// Note: Even if aFilePattern is just a directory (i.e. with not wildcard pattern), it seems best
+{
+	ResultType result = OK; // Set default.
+	// LoopFilesStruct is currently about 128KB, so it's probably best not to put it on the stack.
+	// 128KB temporary usage per Loop (for all iterations) seems a reasonable trade-off for supporting
+	// long paths while keeping code size minimal.
+	LoopFilesStruct *plfs = new LoopFilesStruct;
+	if (!plfs)
+		return LineError(ERR_OUTOFMEM);
+	// Parse aFilePattern into its components and copy into *plfs.  Copies are taken because:
+	//  - As the lines of the loop are executed, the deref buffer (which is what aFilePattern might
+	//    point to if we were called from ExecUntil()) may be overwritten -- and we will need the path
+	//    string for every loop iteration.
+	//  - We relative paths resolved to full paths in case the working directory is changed after the
+	//    loop begins but before FindFirstFile() is called for a sub-directory.
+	//  - Several built-in variables rely on the paths stored in *plfs and updated on each iteration.
+	//    This approach means a little up-front work that mightn't be needed, but greatly improves
+	//    performance in some common cases, such as if A_LoopFileLongPath is used on each iteration.
+	if (ParseLoopFilePattern(aFilePattern, *plfs, result))
+		result = PerformLoopFilePattern(aResultToken, aContinueMainLoop, aJumpToLine, aUntil, aFileLoopMode, aRecurseSubfolders, *plfs);
+	//else: leave result == OK, since in effect, no files were found.
+	delete plfs;
+	return result;
+}
+
+
+
+bool Line::ParseLoopFilePattern(LPTSTR aFilePattern, LoopFilesStruct &lfs, ResultType &aResult)
+// Parse aFilePattern and initialize lfs.
+{
+	if (!*aFilePattern) // Some checks below may rely on empty aFilePattern having been excluded.
+		// FindFirstFile() would find nothing in this case, but continuing may cause unnecessary
+		// rescursion through all subdirectories of the working directory.
+		return false;
+	// Note: Even if aFilePattern is just a directory (i.e. with no wildcard pattern), it seems best
 	// not to append "\\*.*" to it because the pattern might be a script variable that the user wants
 	// to conditionally resolve to various things at runtime.  In other words, it's valid to have
 	// only a single directory be the target of the loop.
-{
-	// Make a local copy of the path given in aFilePattern because as the lines of
-	// the loop are executed, the deref buffer (which is what aFilePattern might
-	// point to if we were called from ExecUntil()) may be overwritten --
-	// and we will need the path string for every loop iteration.  We also need
-	// to determine naked_filename_or_pattern:
-	TCHAR file_path[MAX_PATH], naked_filename_or_pattern[MAX_PATH]; // Giving +3 extra for "*.*" seems fairly pointless because any files that actually need that extra room would fail to be retrieved by FindFirst/Next due to their inability to support paths much over 256.
-	size_t file_path_length;
-	tcslcpy(file_path, aFilePattern, _countof(file_path));
-	LPTSTR last_backslash = _tcsrchr(file_path, '\\');
-	if (last_backslash)
+	
+	// v1.1.31.00: This function was revised.
+	//  - Resolve aFilePattern to a full path immediately so that changing the working directory
+	//    does not disrupt recursion or A_LoopFileLongPath/ShortPath.
+	//  - Take care that path lengths are not limited to below what the system allows.
+	//    That is, directory+pattern can be up to MAX_PATH on ANSI and 32767 on Unicode,
+	//    although the latter requires the \\?\ prefix or Windows 10 long path awareness.
+	//  - Optimize A_LoopFileLongPath and A_LoopFileShortPath by resolving the path prefix
+	//    up-front and utilizing the names returned by FindFirstFile() during the loop.
+	//    This can be much faster because file system access is minimized.  Benchmarks
+	//    showed improvement even for single-iteration loops which use A_LoopFileLongPath.
+	
+	// Prior to v1.1.31.00, A_LoopFileLongPath worked as follows:
+	//  - Each reference to A_LoopFileLongPath results in two BIV_LoopFileLongPath calls.
+	//  - BIV_LoopFileLongPath calls GetFullPathName() and ConvertFilespecToCorrectCase().
+	//  - CFTCC() calls FindFirstFile() once for each slash-delimited name.
+	//  - For example, with "c:\foo\bar\baz.txt", A_LoopFileLongPath results in SIX calls to
+	//    FindFirstFile().
+
+	// Find the final name or pattern component of aFilePattern.
+	LPTSTR name_part, cp;
+	for (name_part = cp = aFilePattern; *cp; cp++)
+		if (*cp == '\\' || *cp == '/')
+			name_part = cp + 1;
+
+	if (name_part == aFilePattern && *name_part && name_part[1] == ':') // Single character followed by ':' but not '\\' or '/'.
+		name_part += 2;
+	
+	size_t pattern_length = cp - name_part;
+	if (pattern_length > _countof(lfs.pattern)) // Most likely too long to match a real path/filename.
+		return false; 
+	tmemcpy(lfs.pattern, name_part, pattern_length + 1);
+	lfs.pattern_length = pattern_length;
+
+	size_t orig_dir_length = name_part - aFilePattern;
+	if (orig_dir_length)
 	{
-		_tcscpy(naked_filename_or_pattern, last_backslash + 1); // Naked filename.  No danger of overflow due size of src vs. dest.
-		*(last_backslash + 1) = '\0';  // Convert file_path to be the file's path, but use +1 to retain the final backslash on the string.
-		file_path_length = _tcslen(file_path);
+		if (  !(lfs.orig_dir = tmalloc(orig_dir_length + 1))  )
+		{
+			aResult = LineError(ERR_OUTOFMEM);
+			return false;
+		}
+		tmemcpy(lfs.orig_dir, aFilePattern, orig_dir_length);
+		lfs.orig_dir[orig_dir_length] = '\0';
+		lfs.orig_dir_length = orig_dir_length;
 	}
 	else
 	{
-		_tcscpy(naked_filename_or_pattern, file_path); // No danger of overflow due size of src vs. dest.
-		*file_path = '\0'; // There is no path, so make it empty to use current working directory.
-		file_path_length = 0;
+		lfs.orig_dir = _T("");
+		lfs.orig_dir_length = 0;
 	}
 
-	// g->mLoopFile is the current file of the file-loop that encloses this file-loop, if any.
-	// The below is our own current_file, which will take precedence over g->mLoopFile if this
-	// loop is a file-loop:
+	// The following aren't checked because A_LoopFileLongPath requires that GetFullPathName()
+	// be called unconditionally so that relative references such as "x\..\y" are resolved:
+	//if (   !(aFilePattern[1] == ':' && aFilePattern[2] == '\\') // Not an absolute path with drive letter (must have slash, as "C:xxx" is not fully qualified).
+	//	&& !(*aFilePattern == '\\' && aFilePattern[1] == '\\')   ) // Not a UNC path.
+
+	// Testing shows that GetFullPathNameW() supports longer than MAX_PATH even on Windows XP.
+	// MSDN: "In the ANSI version of this function, the name is limited to MAX_PATH characters.
+	//  To extend this limit to 32,767 wide characters, call the Unicode version of the function
+	//  (GetFullPathNameW), and prepend "\\?\" to the path. "
+	// But that's obviously incorrect, since prepending "\\?\" would make it an absolute path.
+	// Instead, we just call it without the prefix, and this works (on Unicode builds).
+	LPCTSTR dir_to_resolve = *lfs.orig_dir ? lfs.orig_dir : _T(".\\"); // Include a trailing slash so there will be one in the result.
+	lfs.file_path_length = GetFullPathName(dir_to_resolve, _countof(lfs.file_path), lfs.file_path, NULL);
+	if (!lfs.file_path_length)
+		// It's unclear under what conditions GetFullPathName() can fail, but the most likely
+		// cause is that the buffer is too small (and even this is unlikely on Unicode builds).
+		// With current buffer sizes, that implies the path is too long for FindFirstFile().
+		return false;
+
+	if (lfs.file_path[lfs.file_path_length - 1] != '\\') // aFilePattern was "x:pattern" with no slash.
+	{
+		lfs.file_path[lfs.file_path_length++] = '\\';
+		lfs.file_path[lfs.file_path_length] = '\0';
+	}
+	
+	// Mark the part of file_path which will contain discovered sub-directories/files.
+	// This will be appended to orig_dir to get the value of A_LoopFilePath.
+	lfs.file_path_suffix = lfs.file_path + lfs.file_path_length;
+	
+	// Correct case and convert any short names to long names for A_LoopFileLongPath.
+	LPTSTR long_dir;
+	TCHAR long_dir_buf[MAX_WIDE_PATH]; // Max expanded length is probably about 8k on ANSI, but this covers all builds.
+	if (  !(long_dir = ConvertFilespecToCorrectCase(lfs.file_path, long_dir_buf, _countof(long_dir_buf), lfs.long_dir_length))  )
+	{
+		// Conversion failed.  In theory, FindFirstFile() can fail for a parent directory
+		// but succeed for the full path, so use file_path as-is and attempt to continue.
+		// Since this is rare, _tcsdup() is still used below rather than aliasing file_path
+		// (which would require avoiding free() in that case).
+		long_dir = lfs.file_path;
+		lfs.long_dir_length = lfs.file_path_length;
+	}
+	if (  !(lfs.long_dir = _tcsdup(long_dir))  ) // Conserve memory during loop execution by not using the full MAX_WIDE_PATH.
+	{
+		aResult = LineError(ERR_OUTOFMEM);
+		return false;
+	}
+
+	// For simplicity/code size, get the short path unconditionally, even though it's more
+	// rarely used than the long path (and not required for the loop to function).  Having the
+	// short path built in advance helps performance for loops which use it.
+	// Testing and research shows that GetShortPathName() uses the long name for a directory
+	// or file if no short name exists, so it can be as long as orig_dir (also, see below).
+	lfs.short_path_length = GetShortPathName(lfs.orig_dir, lfs.short_path, _countof(lfs.short_path));
+	if (lfs.short_path_length > _countof(lfs.short_path)) // Buffer was too small.
+		// This can only occur if the short path is longer than the long path (file_path),
+		// which is possible for names which are short but don't comply with 8.3 rules,
+		// such as ".vs", which might have the 8.3 name "VS4DA5~1".  Even so, file_path
+		// must be near the limit for short_path to exceed it.
+		return false; // short_path and short_path_length aren't valid, so just abort.
+
+	return true; // aFilePattern parsed and all members initialized okay.
+}
+
+
+
+ResultType Line::PerformLoopFilePattern(ResultToken *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
+	, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, LoopFilesStruct &lfs)
+// This is the recursive part, called for each sub-directory when aRecurseSubfolders is true.
+// Caller has allocated buffers (lfs) and filled in the initial paths and filename/pattern.
+{
+	// Save current lengths before modification.
+	size_t file_path_length = lfs.file_path_length;
+	size_t short_path_length = lfs.short_path_length;
+	lfs.dir_length = file_path_length; // During the loop, lfs.file_path_length will include the filename.
+	
+	if (!lfs.pattern_length && lfs.orig_dir_length == 2 && lfs.orig_dir[1] == ':')
+	{
+		// Handle "C:" by changing the pattern to "." to match the directory itself,
+		// otherwise it would fail since lfs.file_path contains a trailing slash.
+		// Search for "=C:" in SetWorkingDir() for explanation of "C:" vs. "C:\".
+		lfs.pattern[0] = '.';
+		lfs.pattern[1] = '\0';
+		lfs.pattern_length = 1;
+		// Disable recursion since "." would otherwise be found in every sub-directory.
+		aRecurseSubfolders = false;
+	}
+
+	LPTSTR file_path_end = lfs.file_path + file_path_length;
+	size_t file_space_remaining = _countof(lfs.file_path) - file_path_length;
+	if (lfs.pattern_length >= file_space_remaining)
+		return OK;
+	tmemcpy(file_path_end, lfs.pattern, lfs.pattern_length + 1); // file_path already includes the slash.
+
 	BOOL file_found;
-	WIN32_FIND_DATA new_current_file;
-	HANDLE file_search = FindFirstFile(aFilePattern, &new_current_file);
+	HANDLE file_search = FindFirstFile(lfs.file_path, &lfs);
 	for (file_found = (file_search != INVALID_HANDLE_VALUE) // Convert FindFirst's return value into a boolean so that it's compatible with FindNext's.
-		; file_found && FileIsFilteredOut(new_current_file, aFileLoopMode, file_path, file_path_length)
-		; file_found = FindNextFile(file_search, &new_current_file));
-	// file_found and new_current_file have now been set for use below.
+		; file_found && FileIsFilteredOut(lfs, aFileLoopMode)
+		; file_found = FindNextFile(file_search, &lfs));
+	// file_found and lfs have now been set for use below.
 	// Above is responsible for having properly set file_found and file_search.
 
 	ResultType result;
 	Line *jump_to_line;
 	global_struct &g = *::g; // Primarily for performance in this case.
 
+	g.mLoopFile = &lfs; // inner file-loop's file takes precedence over any outer file-loop's.
+	// Other types of loops leave g.mLoopFile unchanged so that a file-loop can enclose some other type of
+	// inner loop, and that inner loop will still have access to the outer loop's current file.
+
 	for (; file_found; ++g.mLoopIteration)
 	{
-		g.mLoopFile = &new_current_file; // inner file-loop's file takes precedence over any outer file-loop's.
-		// Other types of loops leave g.mLoopFile unchanged so that a file-loop can enclose some other type of
-		// inner loop, and that inner loop will still have access to the outer loop's current file.
-
 		// Execute once the body of the loop (either just one statement or a block of statements).
 		// Preparser has ensured that every LOOP has a non-NULL next line.
 		if (mNextLine->mActionType == ACT_BLOCK_BEGIN) // See PerformLoop() for comments about this section.
@@ -13500,6 +13014,7 @@ ResultType Line::PerformLoopFilePattern(ResultToken *aResultToken, bool &aContin
 		while (jump_to_line == mNextLine);
 		else
 			result = mNextLine->ExecUntil(ONLY_ONE_LINE, aResultToken, &jump_to_line);
+
 		if (jump_to_line && !(result == LOOP_CONTINUE && jump_to_line == this)) // See comments in PerformLoop() about this section.
 		{
 			if (jump_to_line == this)
@@ -13524,11 +13039,10 @@ ResultType Line::PerformLoopFilePattern(ResultToken *aResultToken, bool &aContin
 		// (the current iteration completed normally) or LOOP_CONTINUE (the current loop
 		// iteration was cut short).  In both cases, just continue on through the loop.
 		// But first do end-of-iteration steps:
-		while ((file_found = FindNextFile(file_search, &new_current_file))
-			&& FileIsFilteredOut(new_current_file, aFileLoopMode, file_path, file_path_length)); // Relies on short-circuit boolean order.
-		// Above is a self-contained loop that keeps fetching files until there's no more files, or a file
-		// is found that isn't filtered out.  It also sets file_found and new_current_file for use by the
-		// outer loop.
+		while ((file_found = FindNextFile(file_search, &lfs))
+			&& FileIsFilteredOut(lfs, aFileLoopMode)); // Relies on short-circuit boolean order.
+			// Above is a self-contained loop that keeps fetching files until there's no more files, or a file
+			// is found that isn't filtered out.  It also sets file_found and lfs for use by the outer loop.
 	} // for()
 
 	// The script's loop is now over.
@@ -13543,40 +13057,55 @@ ResultType Line::PerformLoopFilePattern(ResultToken *aResultToken, bool &aContin
 		return OK;
 
 	// Since above didn't return, this is a file-loop and recursion into sub-folders has been requested.
-	// Append *.* to file_path so that we can retrieve all files and folders in the aFilePattern
-	// main folder.  We're only interested in the folders, but we have to use *.* to ensure
-	// that the search will find all folder names:
-	if (file_path_length > _countof(file_path) - 4) // v1.0.45.03: No room to append "*.*", so for simplicity, skip this folder (don't recurse into it).
-		return OK; // This situation might be impossible except for 32000-capable paths because the OS seems to reserve room inside every directory for at least the maximum length of a short filename.
-	LPTSTR append_pos = file_path + file_path_length;
-	_tcscpy(append_pos, _T("*.*")); // Above has already verified that no overflow is possible.
-
-	file_search = FindFirstFile(file_path, &new_current_file);
+	// Append * to file_path so that we can retrieve all files and folders in the aFilePattern main dir.
+	// We're only interested in the folders, but there's no special pattern that would filter out files.
+	file_path_end[0] = '*'; // There's always room for this since it's shorter than lfs.pattern.
+	file_path_end[1] = '\0';
+	file_search = FindFirstFile(lfs.file_path, &lfs);
 	if (file_search == INVALID_HANDLE_VALUE)
 		return OK; // Nothing more to do.
 	// Otherwise, recurse into any subdirectories found inside this parent directory.
 
-	size_t path_and_pattern_length = file_path_length + _tcslen(naked_filename_or_pattern); // Calculated only once for performance.
+	LPTSTR short_path_end = lfs.short_path + short_path_length;
+	size_t short_space_remaining = _countof(lfs.short_path) - short_path_length;
+
 	do
 	{
-		if (!(new_current_file.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) // We only want directories (except "." and "..").
-			|| new_current_file.cFileName[0] == '.' && (!new_current_file.cFileName[1]      // Relies on short-circuit boolean order.
-			|| new_current_file.cFileName[1] == '.' && !new_current_file.cFileName[2])  //
-			// v1.0.45.03: Skip over folders whose full-path-names are too long to be supported by the ANSI
-			// versions of FindFirst/FindNext.  Without this fix, the section below formerly called PerformLoop()
-			// with a truncated full-path-name, which caused the last_backslash-finding logic to find the wrong
-			// backslash, which in turn caused infinite recursion and a stack overflow (i.e. caused by the
-			// full-path-name getting truncated in the same spot every time, endlessly).
-			|| path_and_pattern_length + _tcslen(new_current_file.cFileName) > _countof(file_path) - 2) // -2 to reflect: 1) the backslash to be added between cFileName and naked_filename_or_pattern; 2) the zero terminator.
+		if (!(lfs.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) // We only want directories (except "." and "..").
+			|| lfs.cFileName[0] == '.' && (!lfs.cFileName[1]      // Relies on short-circuit boolean order.
+				|| lfs.cFileName[1] == '.' && !lfs.cFileName[2])) //
 			continue;
-		// Build the new search pattern, which consists of the original file_path + the subfolder name
-		// we just discovered + the original pattern:
-		_stprintf(append_pos, _T("%s\\%s"), new_current_file.cFileName, naked_filename_or_pattern); // Indirectly set file_path to the new search pattern.  This won't overflow due to the check above.
-		// Pass NULL for the 2nd param because it will determine its own current-file when it does
-		// its first loop iteration.  This is because this directory is being recursed into, not
-		// processed itself as a file-loop item (since this was already done in the first loop,
-		// above, if its name matches the original search pattern):
-		result = PerformLoopFilePattern(aResultToken, aContinueMainLoop, aJumpToLine, aUntil, aFileLoopMode, aRecurseSubfolders, file_path);
+
+		size_t this_dir_length = _tcslen(lfs.cFileName);
+		if (this_dir_length + 1 >= file_space_remaining)
+			// This should be virtually impossible because:
+			//  - Unicode builds allow 32767 chars, which is also the limit for most APIs.
+			//  - ANSI builds allow MAX_PATH*2 (520), but FindFirstFileA() would fail for any
+			//    file pattern longer than MAX_PATH, and cFileName itself is MAX_PATH chars max.
+			continue;
+
+		// Append the directory name\ to file_path.
+		tmemcpy(file_path_end, lfs.cFileName, this_dir_length);
+		file_path_end[this_dir_length] = '\\';
+		file_path_end[this_dir_length + 1] = '\0';
+		lfs.file_path_length = file_path_length + this_dir_length + 1;
+
+		// Append the directory's short (8.3) name to short_path.
+		LPTSTR short_name = lfs.cAlternateFileName;
+		size_t short_name_length = _tcslen(short_name);
+		if (!short_name_length)
+		{
+			short_name = lfs.cFileName; // See BIV_LoopFileName for comments about why cFileName is used.
+			short_name_length = this_dir_length;
+		}
+		if (short_name_length + 1 >= short_space_remaining) // Should realistically never happen, but it's possible for an 8.3 name to be longer than the non-8.3 name.
+			continue;
+		tmemcpy(short_path_end, short_name, short_name_length);
+		short_path_end[short_name_length] = '\\';
+		short_path_end[short_name_length + 1] = '\0';
+		lfs.short_path_length = short_path_length + short_name_length + 1;
+
+		result = PerformLoopFilePattern(aResultToken, aContinueMainLoop, aJumpToLine, aUntil, aFileLoopMode, aRecurseSubfolders, lfs);
 		// Above returns LOOP_CONTINUE for cases like "continue 2" or "continue outer_loop", where the
 		// target is not this Loop but a Loop which encloses it. In those cases we want below to return:
 		if (result != OK) // i.e. result == LOOP_BREAK || result == EARLY_RETURN || result == EARLY_EXIT || result == FAIL)
@@ -13590,7 +13119,7 @@ ResultType Line::PerformLoopFilePattern(ResultToken *aResultToken, bool &aContin
 			// handled it.  But if it set aJumpToLine to be non-NULL, it means we have to return and let our caller
 			// handle the jump.
 			break;
-	} while (FindNextFile(file_search, &new_current_file));
+	} while (FindNextFile(file_search, &lfs));
 	FindClose(file_search);
 
 	return OK;
@@ -13995,6 +13524,10 @@ ResultType Line::PerformLoopParseCSV(ResultToken *aResultToken, bool &aContinueM
 ResultType Line::PerformLoopReadFile(ResultToken *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
 	, TextStream *aReadFile, LPTSTR aWriteFileName)
 {
+	// Make a persistent copy in case aWriteFileName's contents are in the deref buffer:
+	if (  !(aWriteFileName = _tcsdup(aWriteFileName))  )
+		return LineError(ERR_OUTOFMEM);
+
 	LoopReadFileStruct loop_info(aReadFile, aWriteFileName);
 	size_t line_length;
 	ResultType result;
@@ -14171,70 +13704,10 @@ ResultType Line::Perform()
 	case ACT_MOUSEGETPOS:
 		return MouseGetPos(ArgToUInt(5));
 
-	case ACT_WINACTIVATE:
-	case ACT_WINACTIVATEBOTTOM:
-		if (WinActivate(g, FOUR_ARGS, mActionType == ACT_WINACTIVATEBOTTOM))
-			// It seems best to do these sleeps here rather than in the windowing
-			// functions themselves because that way, the program can use the
-			// windowing functions without being subject to the script's delay
-			// setting (i.e. there are probably cases when we don't need
-			// to wait, such as bringing a message box to the foreground,
-			// since no other actions will be dependent on it actually
-			// having happened:
-			DoWinDelay;
-		return OK;
-
-	case ACT_WINMINIMIZE:
-	case ACT_WINMAXIMIZE:
-	case ACT_WINRESTORE:
-	case ACT_WINHIDE:
-	case ACT_WINSHOW:
-	case ACT_WINCLOSE:
-	case ACT_WINKILL:
-	{
-		// Set initial guess for is_ahk_group (further refined later).  For ahk_group, WinText,
-		// ExcludeTitle, and ExcludeText must be blank so that they are reserved for future use
-		// (i.e. they're currently not supported since the group's own criteria take precedence):
-		bool is_ahk_group = !(_tcsnicmp(ARG1, _T("ahk_group"), 9) || *ARG2 || *ARG4);
-		// The following is not quite accurate since is_ahk_group is only a guess at this stage, but
-		// given the extreme rarity of the guess being wrong, this shortcut seems justified to reduce
-		// the code size/complexity.  A wait_time of zero seems best for group closing because it's
-		// currently implemented to do the wait after every window in the group.  In addition,
-		// this makes "WinClose ahk_group GroupName" behave identically to "GroupClose GroupName",
-		// which seems best, for consistency:
-		int wait_time = is_ahk_group ? 0 : DEFAULT_WINCLOSE_WAIT;
-		if (mActionType == ACT_WINCLOSE || mActionType == ACT_WINKILL) // ARG3 is contains the wait time.
-		{
-			if (*ARG3 && !(wait_time = (int)(1000 * ArgToDouble(3))))
-				wait_time = 500; // Legacy (prior to supporting floating point): 0 is defined as 500ms, which seems more useful than a true zero.
-			if (*ARG5)
-				is_ahk_group = false;  // Override the default.
-		}
-		else
-			if (*ARG3)
-				is_ahk_group = false;  // Override the default.
-		// Act upon all members of this group (WinText/ExcludeTitle/ExcludeText are ignored in this mode).
-		if (is_ahk_group && (group = g_script->FindGroup(omit_leading_whitespace(ARG1 + 9)))) // Assign.
-			return group->ActUponAll(mActionType, wait_time); // It will do DoWinDelay if appropriate.
-		//else try to act upon it as though "ahk_group something" is a literal window title.
-
-		// Since above didn't return, it's not "ahk_group", so do the normal single-window behavior.
-		if (mActionType == ACT_WINCLOSE || mActionType == ACT_WINKILL)
-		{
-			if (WinClose(g, ARG1, ARG2, wait_time, ARG4, ARG5, mActionType == ACT_WINKILL)) // It closed something.
-				DoWinDelay;
-			return OK;
-		}
-		else
-			return PerformShowWindow(mActionType, FOUR_ARGS);
-	}
-
 	case ACT_DOWNLOAD:
 		return Download(TWO_ARGS);
 
 	case ACT_RUNAS:
-		if (!g_os.IsWin2000orLater()) // Do nothing if the OS doesn't support it.
-			return OK;
 		StringTCharToWChar(ARG1, g_script->mRunAsUser);
 		StringTCharToWChar(ARG2, g_script->mRunAsPass);
 		StringTCharToWChar(ARG3, g_script->mRunAsDomain);
@@ -14242,17 +13715,6 @@ ResultType Line::Perform()
 
 	case ACT_RUN:
 		return g_script->ActionExec(ARG1, NULL, ARG2, true, ARG3, NULL, true, true, ARGVAR4); // Be sure to pass NULL for 2nd param.
-
-	case ACT_WINMOVE:
-		return WinMove(EIGHT_ARGS);
-
-	case ACT_MENUSELECT:
-		return MenuSelect(ELEVEN_ARGS);
-
-	case ACT_STATUSBARWAIT:
-		return StatusBarWait(EIGHT_ARGS);
-	case ACT_WINSETTITLE:
-		return WinSetTitle(FIVE_ARGS);
 
 	case ACT_WINMINIMIZEALL:
 		PostMessage(FindWindow(_T("Shell_TrayWnd"), NULL), WM_COMMAND, 419, 0);
@@ -14272,11 +13734,6 @@ ResultType Line::Perform()
 		// be enough during an extreme load depending on the exact preemption/timeslice dynamics involved).
 		// DON'T GO TOO HIGH because this setting reduces response time for ALL messages, even those that
 		// don't launch script threads (especially painting/drawing and other screen-update events).
-		// Future enhancement: Could allow the value of 16 to be customized via something like "Critical 25".
-		// However, it seems best not to allow it to go too high (say, no more than 2000) because that would
-		// cause the script to completely hang if the critical thread never finishes, or takes a long time
-		// to finish.  A configurable limit might also allow things to work better on Win9x because it has
-		// a bigger tickcount granularity.
 		// Some hardware has a tickcount granularity of 15 instead of 10, so this covers more variations.
 		DWORD peek_frequency_when_critical_is_on = 16; // Set default.  See below.
 		// v1.0.48: Below supports "Critical 0" as meaning "Off" to improve compatibility with A_IsCritical.
@@ -14327,36 +13784,28 @@ ResultType Line::Perform()
 		return OK;
 
 	case ACT_GROUPADD: // Adding a WindowSpec *to* a group, not adding a group.
-	{
-		if (!(group = (WinGroup *)mAttribute))
-			if (!(group = g_script->FindGroup(ARG1, true)))  // Last parameter -> create-if-not-found.
-				return FAIL;  // It already displayed the error for us.
+		if (   !(group = g_script->FindGroup(ARG1, true))   )  // Last parameter -> create-if-not-found.
+			return FAIL;  // It already displayed the error for us.
 		return group->AddWindow(ARG2, ARG3, ARG4, ARG5);
-	}
 
 	case ACT_GROUPACTIVATE:
-		if (!(group = (WinGroup *)mAttribute))
-			group = g_script->FindGroup(ARG1);
+		if (   !(group = g_script->FindGroup(ARG1))   )
+			return LineError(ERR_PARAM1_INVALID, FAIL, ARG1);
 		// Note: This will take care of DoWinDelay if needed:
-		return SetErrorLevelOrThrowBool(!group || !group->Activate(*ARG2 && !_tcsicmp(ARG2, _T("R"))));
+		return SetErrorLevelOrThrowBool(!group->Activate(*ARG2 && !_tcsicmp(ARG2, _T("R"))));
 
 	case ACT_GROUPDEACTIVATE:
-		if (!(group = (WinGroup *)mAttribute))
-			group = g_script->FindGroup(ARG1);
-		if (group)
-			group->Deactivate(*ARG2 && !_tcsicmp(ARG2, _T("R")));  // Note: It will take care of DoWinDelay if needed.
-		//else nonexistent group: By design, do nothing.
-		return OK;
+		if (   !(group = g_script->FindGroup(ARG1))   )
+			return LineError(ERR_PARAM1_INVALID, FAIL, ARG1);
+		return group->Deactivate(*ARG2 && !_tcsicmp(ARG2, _T("R")));  // Note: It will take care of DoWinDelay if needed.
 
 	case ACT_GROUPCLOSE:
-		if (!(group = (WinGroup *)mAttribute))
-			group = g_script->FindGroup(ARG1);
-		if (group)
-			if (*ARG2 && !_tcsicmp(ARG2, _T("A")))
-				group->ActUponAll(ACT_WINCLOSE, 0);  // Note: It will take care of DoWinDelay if needed.
-			else
-				group->CloseAndGoToNext(*ARG2 && !_tcsicmp(ARG2, _T("R")));  // Note: It will take care of DoWinDelay if needed.
-		//else nonexistent group: By design, do nothing.
+		if (   !(group = g_script->FindGroup(ARG1))   )
+			return LineError(ERR_PARAM1_INVALID, FAIL, ARG1);
+		if (*ARG2 && !_tcsicmp(ARG2, _T("A")))
+			group->ActUponAll(FID_WinClose, 0);  // Note: It will take care of DoWinDelay if needed.
+		else
+			group->CloseAndGoToNext(*ARG2 && !_tcsicmp(ARG2, _T("R")));  // Note: It will take care of DoWinDelay if needed.
 		return OK;
 
 	case ACT_SOUNDBEEP:
@@ -14390,7 +13839,7 @@ ResultType Line::Perform()
 	case ACT_FILEMOVE:
 		return SetErrorLevelOrThrowInt(Util_CopyFile(ARG1, ARG2, ArgToInt(3) == 1, true, g.LastError));
 	case ACT_DIRCOPY:
-		return SetErrorLevelOrThrowBool(!Util_CopyDir(ARG1, ARG2, ArgToInt(3) == 1));
+		return SetErrorLevelOrThrowBool(!Util_CopyDir(ARG1, ARG2, ArgToInt(3) == 1, false));
 	case ACT_DIRMOVE:
 		if (ctoupper(*ARG3) == 'R')
 		{
@@ -14401,10 +13850,10 @@ ResultType Line::Perform()
 			return SetErrorLevelOrThrowBool(!MoveFile(ARG1, ARG2));
 		}
 		// Otherwise:
-		return SetErrorLevelOrThrowBool(!Util_MoveDir(ARG1, ARG2, ArgToInt(3)));
+		return SetErrorLevelOrThrowBool(!Util_CopyDir(ARG1, ARG2, ArgToInt(3), true));
 
 	case ACT_DIRCREATE:
-		return FileCreateDir(ARG1);
+		return SetErrorsOrThrow(!FileCreateDir(ARG1));
 	case ACT_DIRDELETE:
 		return SetErrorLevelOrThrowBool(!*ARG1 // Consider an attempt to create or remove a blank dir to be an error.
 			|| !Util_RemoveDir(ARG1, ArgToInt(2) == 1)); // Relies on short-circuit evaluation.
@@ -14413,7 +13862,8 @@ ResultType Line::Perform()
 	{
 		FileLoopModeType mode = ConvertLoopMode(ARG3);
 		// The specified ARG, if non-blank, takes precedence over the file-loop's file (if any):
-		#define USE_FILE_LOOP_FILE_IF_ARG_BLANK(arg) (*arg ? arg : (g.mLoopFile ? g.mLoopFile->cFileName : _T("")))
+		#define USE_FILE_LOOP_FILE_IF_ARG_BLANK(arg) \
+			(*arg ? arg : (g.mLoopFile ? g.mLoopFile->file_path : _T("")))
 		return FileSetAttrib(ARG1, USE_FILE_LOOP_FILE_IF_ARG_BLANK(ARG2), (mode & ~FILE_LOOP_RECURSE), (mode & FILE_LOOP_RECURSE));
 	}
 	case ACT_FILESETTIME:
@@ -14628,20 +14078,12 @@ ResultType Line::Perform()
 		// it sleep more than 24.8 days or so.  It also helps performance on 32-bit hardware because
 		// MsgSleep() is so heavily called and checks the value of the first parameter frequently:
 		int sleep_time = ArgToInt(1); // Keep it signed vs. unsigned for backward compatibility (e.g. scripts that do Sleep -1).
-
-		// Do a true sleep on Win9x because the MsgSleep() method is very inaccurate on Win9x
-		// for some reason (a MsgSleep(1) causes a sleep between 10 and 55ms, for example).
-		// But only do so for short sleeps, for which the user has a greater expectation of
-		// accuracy.  UPDATE: Do not change the 25 below without also changing it in Critical's
-		// documentation.
 #ifdef _WIN64
 		DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
 #else
 		DWORD aThreadID = __readfsdword(0x24);
 #endif
-		if ((g_ThreadID != aThreadID && sleep_time > -1) || (sleep_time < 25 && sleep_time > 0 && g_os.IsWin9x())) // Ordered for short-circuit performance. v1.0.38.05: Added "sleep_time > 0" so that Sleep -1/0 will work the same on Win9x as it does on other OSes.
-			Sleep(sleep_time);
-		else
+		if ((g_ThreadID != aThreadID && sleep_time > -1)) // Ordered for short-circuit performance. v1.0.38.05: Added "sleep_time > 0" so that Sleep -1/0 will work the same on Win9x as it does on other OSes.
 			MsgSleep(sleep_time);
 		return OK;
 	}
@@ -14833,7 +14275,7 @@ BIF_DECL(BIF_PerformAction)
 
 
 ResultType Script::DerefInclude(LPTSTR &aOutput, LPTSTR aBuf)
-// For #Include and #IncludeAgain.
+// For #Include, #IncludeAgain and #DllLoad.
 // Based on Line::Deref above, but with a few differences for backward-compatibility:
 //  1) Percent signs that aren't part of a valid deref are not omitted.
 //  2) Escape sequences aren't recognized (`; is handled elsewhere).
@@ -15087,6 +14529,11 @@ LPTSTR Line::ToText(LPTSTR aBuf, int aBufSize, bool aCRLF, DWORD aElapsed, bool 
 	else if (mActionType == ACT_FOR)
 		aBuf += sntprintf(aBuf, BUF_SPACE_REMAINING, _T("For %s%s%s in %s")
 			, mArg[0].text, *mArg[1].text ? _T(",") : _T(""), mArg[1].text, mArg[2].text);
+	else if ((mActionType == ACT_SWITCH || mActionType == ACT_CASE) && mAttribute)
+		aBuf += sntprintf(aBuf, BUF_SPACE_REMAINING, _T("%s %s%s"), g_act[mActionType].Name
+			, mArg[0].text, mActionType == ACT_CASE ? _T(":") : _T(""));
+	else if (mActionType == ACT_CASE)
+		aBuf += sntprintf(aBuf, BUF_SPACE_REMAINING, _T("Default:"));
 	else
 	{
 		aBuf += sntprintf(aBuf, BUF_SPACE_REMAINING, _T("%s"), g_act[mActionType].Name);
@@ -15212,15 +14659,9 @@ ResultType Line::ChangePauseState(ToggleValueType aChangeTo, bool aAlwaysOperate
 ResultType Line::ScriptBlockInput(bool aEnable)
 // Always returns OK for caller convenience.
 {
-	// Must be running Win98/2000+ for this function to be successful.
-	// We must dynamically load the function to retain compatibility with Win95 (program won't launch
-	// at all otherwise).
-	typedef void (CALLBACK *BlockInput)(BOOL);
-	static BlockInput lpfnDLLProc = (BlockInput)GetProcAddress(GetModuleHandle(_T("user32")), "BlockInput");
 	// Always turn input ON/OFF even if g_BlockInput says its already in the right state.  This is because
 	// BlockInput can be externally and undetectably disabled, e.g. if the user presses Ctrl-Alt-Del:
-	if (lpfnDLLProc)
-		(*lpfnDLLProc)(aEnable ? TRUE : FALSE);
+	BlockInput(aEnable ? TRUE : FALSE);
 	g_BlockInput = aEnable;
 	return OK;  // By design, it never returns FAIL.
 }
@@ -15310,6 +14751,32 @@ ResultType Line::ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat, LPCTST
 ResultType Script::ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat, LPCTSTR aExtraInfo)
 {
 	return g_script->mCurrLine->ThrowRuntimeException(aErrorText, aWhat, aExtraInfo);
+}
+
+ResultType Script::ThrowWin32Exception(DWORD aError)
+{
+	TCHAR message[1024];
+	DWORD size = FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS
+		, NULL, aError, 0, message, _countof(message), NULL);
+	if (size)
+	{
+		if (message[size - 1] == '\n')
+			message[--size] = '\0';
+		if (message[size - 1] == '\r')
+			message[--size] = '\0';
+	}
+	else
+		_tcscpy(message, _T("Function returned failure."));
+	TCHAR code[12];
+	if ((int)aError < 0)
+	{
+		code[0] = '0';
+		code[1] = 'x';
+		_ultot(aError, code + 2, 16);
+	}
+	else
+		_itot(aError, code, 10);
+	return g_script->ThrowRuntimeException(message, nullptr, code);
 }
 
 
@@ -15448,11 +14915,12 @@ ResultType Line::LineError(LPCTSTR aErrorText, ResultType aErrorType, LPCTSTR aE
 		TCHAR buf[MSGBOX_TEXT_SIZE];
 		FormatError(buf, _countof(buf), aErrorType, aErrorText, aExtraInfo, this
 			// The last parameter determines the final line of the message:
-			, (aErrorType == FAIL && g_script->mIsReadyToExecute) ? ERR_ABORT_NO_SPACES
-			: (aErrorType == CRITICAL_ERROR || aErrorType == FAIL) ? (g_script->mIsRestart ? OLD_STILL_IN_EFFECT : WILL_EXIT)
+			, (aErrorType == FAIL) ? (g_script->mIsReadyToExecute ? ERR_ABORT_NO_SPACES
+									: (g_script->mIsRestart ? OLD_STILL_IN_EFFECT : WILL_EXIT))
+			: (aErrorType == CRITICAL_ERROR) ? UNSTABLE_WILL_EXIT
 			: (aErrorType == EARLY_EXIT) ? _T("Continue running the script?")
 			: _T("For more details, read the documentation for #Warn."));
-
+		
 		g_script->mCurrLine = this;  // This needs to be set in some cases where the caller didn't.
 
 #ifdef CONFIG_DEBUGGER
@@ -15461,22 +14929,15 @@ ResultType Line::LineError(LPCTSTR aErrorText, ResultType aErrorType, LPCTSTR aE
 		else
 #endif
 			if (MsgBox(buf, MB_TOPMOST | (aErrorType == EARLY_EXIT ? MB_YESNO : 0)) == IDNO)
-				aErrorType = CRITICAL_ERROR;
+			// The user was asked "Continue running the script?" and answered "No".
+			// This will attempt to run the OnExit subroutine, which should be okay since that
+			// subroutine will terminate the script if it encounters another runtime error:
+			g_script->ExitApp(EXIT_ERROR);
 	}
 
 	if (aErrorType == CRITICAL_ERROR && g_script->mIsReadyToExecute)
-		// Also ask the main message loop function to quit and announce to the system that
-		// we expect it to quit.  In most cases, this is unnecessary because all functions
-		// called to get to this point will take note of the CRITICAL_ERROR and thus keep
-		// return immediately, all the way back to main.  However, there may cases
-		// when this isn't true:
-		// Note: Must do this only after MsgBox, since it appears that new dialogs can't
-		// be created once it's done.  Update: Using ExitApp() now, since it's known to be
-		// more reliable:
-		//PostQuitMessage(CRITICAL_ERROR);
-		// This will attempt to run the OnExit function, which should be okay since that function
-		// will terminate the script if it encounters another runtime error:
-		g_script->ExitApp(EXIT_ERROR);
+		// Pass EXIT_DESTROY to ensure the program always exits, regardless of OnExit.
+		g_script->ExitApp(EXIT_DESTROY);
 
 	return aErrorType; // The caller told us whether it should be a critical error or not.
 }
@@ -15598,6 +15059,20 @@ ResultType Script::ScriptError(LPCTSTR aErrorText, LPCTSTR aExtraInfo) //, Resul
 
 
 
+ResultType Script::CriticalError(LPCTSTR aErrorText, LPCTSTR aExtraInfo)
+{
+	g->ExcptMode = EXCPTMODE_NONE; // Do not throw an exception.
+	if (mCurrLine)
+		mCurrLine->LineError(aErrorText, CRITICAL_ERROR, aExtraInfo);
+	// mCurrLine should always be non-NULL during runtime, and CRITICAL_ERROR should
+	// cause LineError() to exit even if an OnExit routine is present, so this is here
+	// mainly for maintainability.
+	TerminateApp(EXIT_DESTROY, CRITICAL_ERROR);
+	return FAIL; // Never executed.
+}
+
+
+
 __declspec(noinline)
 ResultType ResultToken::Error(LPCTSTR aErrorText)
 {
@@ -15615,6 +15090,17 @@ ResultType ResultToken::Error(LPCTSTR aErrorText, LPCTSTR aExtraInfo)
 	//ASSERT(!mem_to_free); // At least one caller frees it after calling this function.
 	ASSERT(symbol != SYM_OBJECT);
 	return SetExitResult(g_script->ScriptError(aErrorText, aExtraInfo));
+}
+
+__declspec(noinline)
+ResultType ResultToken::UnknownMemberError(ExprTokenType &aObject, int aFlags, LPCTSTR aMember)
+{
+	TCHAR msg[512];
+	if (!aMember)
+		aMember = (aFlags & IT_CALL) ? _T("Call") : _T("__Item");
+	sntprintf(msg, _countof(msg), _T("This value of type \"%s\" has no %s named \"%s\".")
+		, TokenTypeString(aObject), (aFlags & IT_CALL) ? _T("method") : _T("property"), aMember);
+	return Error(msg);
 }
 
 
@@ -15655,14 +15141,14 @@ ResultType Script::UnhandledException(Line* aLine)
 	{
 		// For simplicity and safety, we call into the Object directly rather than via Invoke().
 		ExprTokenType t;
-		if (ex->GetItem(t, _T("Message")))
+		if (ex->GetOwnProp(t, _T("Message")))
 			message = TokenToString(t, message_buf);
-		if (ex->GetItem(t, _T("Extra")))
+		if (ex->GetOwnProp(t, _T("Extra")))
 			extra = TokenToString(t, extra_buf);
-		if (ex->GetItem(t, _T("Line")))
+		if (ex->GetOwnProp(t, _T("Line")))
 		{
 			LineNumberType line_no = (LineNumberType)TokenToInt64(t);
-			if (ex->GetItem(t, _T("File")))
+			if (ex->GetOwnProp(t, _T("File")))
 			{
 				LPCTSTR file = TokenToString(t);
 
@@ -15805,22 +15291,13 @@ void Script::WarnUninitializedVar(Var *var)
 
 
 
-void Script::MaybeWarnLocalSameAsGlobal(Func &func, Var &var)
+void Script::MaybeWarnLocalSameAsGlobal(UserFunc &func, Var &var)
 // Caller has verified the following:
 //  1) var is not a declared variable.
 //  2) a global variable with the same name definitely exists.
 {
 	if (!g_Warn_LocalSameAsGlobal)
 		return;
-
-#ifdef ENABLE_DLLCALL
-	if (IsDllArgTypeName(var.mName))
-		// Exclude unquoted DllCall arg type names.  Although variable names like "str" and "ptr"
-		// might be used for other purposes, it seems far more likely that both this var and its
-		// global counterpart (if it exists) are blank vars which were used as DllCall arg types.
-		return;
-#endif
-
 	Line *line = func.mJumpToLine;
 	while (line && line->mActionType != ACT_BLOCK_BEGIN) line = line->mPrevLine;
 	if (!line) line = func.mJumpToLine;
@@ -15841,11 +15318,16 @@ ResultType Script::PreprocessLocalVars(FuncList &aFuncs)
 	int upvarindex[MAX_FUNC_UP_VARS];
 	for (int i = 0; i < aFuncs.mCount; ++i)
 	{
-		Func &func = *aFuncs.mItem[i];
-		if (func.mIsBuiltIn || func.mPreprocessLocalVarsDone)
+		if (aFuncs.mItem[i]->IsBuiltIn())
 			continue;
+		auto &func = *(UserFunc *)aFuncs.mItem[i];
 		// HotKeyIt: set flag so function does not need to be processed again
 		func.mPreprocessLocalVarsDone = true;
+		if (func.mBIF == (BuiltInFunctionType)BIF_DllImport)
+		{
+			g->CurrentFunc = NULL; // Reset for subsequent preparsing/execution stages.
+			return OK;
+		}
 		// Set temporary buffers for use processing this func and nested functions:
 		func.mUpVar = upvar;
 		func.mUpVarIndex = upvarindex;
@@ -15894,12 +15376,13 @@ ResultType Script::PreprocessLocalVars(FuncList &aFuncs)
 		else
 			func.mUpVar = NULL;
 	}
+	g->CurrentFunc = NULL; // Reset for subsequent preparsing/execution stages.
 	return OK;
 }
 
 
 
-ResultType Script::PreprocessLocalVars(Func &aFunc, Var **aVarList, int &aVarCount)
+ResultType Script::PreprocessLocalVars(UserFunc &aFunc, Var **aVarList, int &aVarCount)
 {
 	bool check_globals = aFunc.AllowSuperGlobals();
 
@@ -15948,16 +15431,16 @@ ResultType Script::PreprocessLocalVars(Func &aFunc, Var **aVarList, int &aVarCou
 			--v; // Counter the loop's increment since var has been removed.
 		}
 		else
-			// Since this undeclared local variable has the same name as a global, there's
-			// a chance the user intended it to be global. So consider warning the user:
-			MaybeWarnLocalSameAsGlobal(aFunc, var);
+		// Since this undeclared local variable has the same name as a global, there's
+		// a chance the user intended it to be global. So consider warning the user:
+		MaybeWarnLocalSameAsGlobal(aFunc, var);
 	}
 	return OK;
 }
 
 
 
-ResultType Script::PreprocessFindUpVar(LPTSTR aName, Func &aOuter, Func &aInner, Var *&aFound, Var *aLocal)
+ResultType Script::PreprocessFindUpVar(LPTSTR aName, UserFunc &aOuter, UserFunc &aInner, Var *&aFound, Var *aLocal)
 {
 	g->CurrentFunc = &aOuter;
 	// If aOuter is assume-global, add the variable as global if no variable is found.
@@ -16078,14 +15561,14 @@ LPTSTR Script::ListVars(LPTSTR aBuf, int aBufSize) // aBufSize should be an int 
 // into aBuf and returning the position in aBuf of its new string terminator.
 {
 	LPTSTR aBuf_orig = aBuf;
-	Func *current_func = g->CurrentFunc ? g->CurrentFunc : g->CurrentFuncGosub;
+	auto current_func = g->CurrentFunc ? g->CurrentFunc : g->CurrentFuncGosub;
 	if (current_func)
 	{
 		// This definition might help compiler string pooling by ensuring it stays the same for both usages:
 #define LIST_VARS_UNDERLINE _T("\r\n--------------------------------------------------\r\n")
 		// Start at the oldest and continue up through the newest:
 		aBuf += sntprintf(aBuf, BUF_SPACE_REMAINING, _T("Static Variables for %s()%s"), current_func->mName, LIST_VARS_UNDERLINE);
-		Func &func = *current_func; // For performance.
+		auto &func = *current_func; // For performance.
 		for (int i = 0; i < func.mStaticVarCount; ++i)
 			if (func.mStaticVar[i]->Type() == VAR_NORMAL) // Don't bother showing clipboard and other built-in vars.
 				aBuf = func.mStaticVar[i]->ToText(aBuf, BUF_SPACE_REMAINING, true);
@@ -16448,15 +15931,11 @@ ResultType Script::ActionExec(LPTSTR aAction, LPTSTR aParams, LPTSTR aWorkingDir
 
 		if (ShellExecuteEx(&sei)) // Relies on short-circuit boolean order.
 		{
-			typedef DWORD(WINAPI *GetProcessIDType)(HANDLE);
-			// GetProcessID is only available on WinXP SP1 or later, so load it dynamically.
-			static GetProcessIDType fnGetProcessID = (GetProcessIDType)GetProcAddress(GetModuleHandle(_T("kernel32.dll")), "GetProcessId");
-
 			if (hprocess = sei.hProcess)
 			{
 				// A new process was created, so get its ID if possible.
-				if (aOutputVar && fnGetProcessID)
-					aOutputVar->Assign(fnGetProcessID(hprocess));
+				if (aOutputVar)
+					aOutputVar->Assign(GetProcessId(hprocess));
 			}
 			// Even if there's no process handle, it's considered a success because some
 			// system verbs and file associations do not create a new process, by design.

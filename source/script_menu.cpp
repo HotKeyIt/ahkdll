@@ -23,56 +23,41 @@ GNU General Public License for more details.
 
 
 
-ResultType STDMETHODCALLTYPE UserMenu::Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount)
+ObjectMember UserMenu::sMembers[] =
 {
-	if (!aParamCount) // menu[]
-		return INVOKE_NOT_HANDLED;
-	
-	LPTSTR name = ParamIndexToString(0); // Name of method or property.
-	MemberID member = INVALID;
-	--aParamCount; // Exclude name from param count.
-	++aParam; // As above, but for the param array.
+	Object_Method(Add, 0, 3),
+	Object_Method(AddStandard, 0, 0),
+	Object_Method(Insert, 0, 4),
+	Object_Method(Delete, 0, 1),
+	Object_Method(Rename, 1, 2),
+	Object_Method(Check, 1, 1),
+	Object_Method(Uncheck, 1, 1),
+	Object_Method(ToggleCheck, 1, 1),
+	Object_Method(Enable, 1, 1),
+	Object_Method(Disable, 1, 1),
+	Object_Method(ToggleEnable, 1, 1),
+	Object_Method(SetIcon, 2, 4),
+	Object_Method(Show, 0, 2),
+	Object_Method(SetColor, 0, 2),
 
-	if (0) {}
-#define if_member(s,e)	else if (!_tcsicmp(name, _T(s))) member = e;
-	if_member("Add", M_Add)
-	if_member("AddStandard", M_AddStandard)
-	if_member("Insert", M_Insert)
-	if_member("Delete", M_Delete)
-	if_member("Rename", M_Rename)
-	if_member("Check", M_Check)
-	if_member("Uncheck", M_Uncheck)
-	if_member("ToggleCheck", M_ToggleCheck)
-	if_member("Enable", M_Enable)
-	if_member("Disable", M_Disable)
-	if_member("ToggleEnable", M_ToggleEnable)
-	if_member("SetIcon", M_SetIcon)
-	if_member("Show", M_Show)
-	if_member("SetColor", M_SetColor)
-	if_member("Default", P_Default)
-	if_member("Handle", P_Handle)
-	if_member("ClickCount", P_ClickCount)
-#undef if_member
-	if (member == INVALID)
-		return INVOKE_NOT_HANDLED;
-	
-	// Syntax validation:
-	if (!IS_INVOKE_CALL)
-	{
-		if (member < LastMethodPlusOne)
-			// Member requires parentheses().
-			return INVOKE_NOT_HANDLED;
-		if (aParamCount != (IS_INVOKE_SET ? 1 : 0))
-			_o_throw(ERR_INVALID_USAGE);
-	}
-	else if (IS_INVOKE_CALL && member > LastMethodPlusOne)
-		return INVOKE_NOT_HANDLED; // Properties cannot be invoked with CALL syntax.
+	Object_Property_get_set(Default),
+	Object_Property_get(Handle),
+	Object_Property_get_set(ClickCount)
+};
 
-	LPTSTR param1 = ParamIndexToOptionalString(0, _f_number_buf);
+Object *UserMenu::sMenuPrototype;
+Object *UserMenu::sMenuBarPrototype;
+
+
+
+ResultType UserMenu::Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+{
+	LPTSTR param1 = (aParamCount || IS_INVOKE_SET) ? ParamIndexToString(0, _f_number_buf) : _T("");
 
 	bool ignore_existing_items = false; // These are used to simplify M_Insert, combining it with M_Add.
 	UserMenuItem **insert_at = NULL;    //
 
+	auto member = MemberID(aID);
 	switch (member)
 	{
 	case M_Show:
@@ -118,8 +103,7 @@ ResultType STDMETHODCALLTYPE UserMenu::Invoke(ResultToken &aResultToken, ExprTok
 		{
 			if (*param1) // Since a menu item has been specified, let a later switch() handle it.
 				break;
-			if (!SetDefault())
-				return FAIL;
+			return SetDefault();
 		}
 		_o_return(mDefault ? mDefault->mName : _T(""));
 
@@ -137,8 +121,6 @@ ResultType STDMETHODCALLTYPE UserMenu::Invoke(ResultToken &aResultToken, ExprTok
 	}
 
 	case P_Handle:
-		if (IS_INVOKE_SET)
-			_o_throw(ERR_INVALID_USAGE);
 		if (!mMenu)
 			Create(); // On failure (rare), we just return 0.
 		_o_return((__int64)(UINT_PTR)mMenu);
@@ -151,6 +133,7 @@ ResultType STDMETHODCALLTYPE UserMenu::Invoke(ResultToken &aResultToken, ExprTok
 				mClickCount = 1;  // Single-click to activate menu's default item.
 			else if (mClickCount > 2)
 				mClickCount = 2;  // Double-click.
+			return OK;
 		}
 		_o_return(mClickCount);
 	}
@@ -195,14 +178,19 @@ ResultType STDMETHODCALLTYPE UserMenu::Invoke(ResultToken &aResultToken, ExprTok
 				_o_throw(ERR_PARAM2_INVALID);
 			callback = NULL;
 		}
-		else if (callback) 
-			callback->AddRef();
-		else // Param #2 is not an object of any kind; must be a function name.
+		else 
 		{
-			if (!*param2) // Allow the function name to default to the menu item name.
-				param2 = param1;
-			if (  !(callback = StringToFunctor(param2))  )
-				_o_throw(ERR_PARAM2_INVALID, param2);
+			// Param #2 is not a submenu.
+			if (callback) 
+				callback->AddRef();
+			else // Param #2 is not an object of any kind; must be a function name.
+			{
+				if (!*param2) // Allow the function name to default to the menu item name.
+					param2 = param1;
+				callback = StringToFunctor(param2);
+			}
+			if (!ValidateFunctor(callback, 3, aResultToken, ERR_PARAM2_INVALID))
+				return FAIL;
 		}
 	}
 
@@ -295,6 +283,12 @@ UserMenu *Script::AddMenu(MenuTypeType aMenuType)
 	UserMenu *menu = new UserMenu(aMenuType);
 	if (!menu)
 		return NULL;  // Caller should show error if desired.
+	if (!UserMenu::sMenuPrototype)
+	{
+		UserMenu::sMenuPrototype = Object::CreatePrototype(_T("Menu"), Object::sPrototype, UserMenu::sMembers, _countof(UserMenu::sMembers));
+		UserMenu::sMenuBarPrototype = Object::CreatePrototype(_T("MenuBar"), UserMenu::sMenuPrototype);
+	}
+	menu->SetBase(aMenuType == MENU_TYPE_BAR ? UserMenu::sMenuBarPrototype : UserMenu::sMenuPrototype);
 	if (!mFirstMenu)
 		mFirstMenu = mLastMenu = menu;
 	else
@@ -439,7 +433,7 @@ UserMenuItem *UserMenu::FindItem(LPTSTR aNameOrPos, UserMenuItem *&aPrevItem, bo
 	// This should be reasonably backwards-compatible, as any scripts that want literally
 	// "1&" as menu item text would have to actually write "1&&".
 	if (length > 1
-		&& aNameOrPos[length - 1] == '&' // Use the same convention as WinMenuSelectItem: 1&, 2&, 3&...
+		&& aNameOrPos[length - 1] == '&' // Use the same convention as MenuSelect: 1&, 2&, 3&...
 		&& aNameOrPos[length - 2] != '&') // Not &&, which means one literal &.
 		index_to_find = ATOI(aNameOrPos) - 1; // Yields -1 if aParam3 doesn't start with a number.
 	aByPos = index_to_find > -1;
@@ -502,6 +496,12 @@ ResultType UserMenu::AddItem(LPTSTR aName, UINT aMenuID, IObject *aCallback, Use
 			free(name_dynamic);
 		return g_script->ScriptError(ERR_OUTOFMEM);
 	}
+	if (*aOptions && !UpdateOptions(menu_item, aOptions))
+	{
+		// Invalid options; an error message was displayed.
+		delete menu_item; 
+		return FAIL;
+	}
 	if (mMenu)
 	{
 		InternalAppendMenu(menu_item, aInsertAt ? *aInsertAt : NULL);
@@ -526,8 +526,6 @@ ResultType UserMenu::AddItem(LPTSTR aName, UINT aMenuID, IObject *aCallback, Use
 		mLastMenuItem = menu_item;
 	}
 	++mMenuItemCount;  // Only after memory has been successfully allocated.
-	if (*aOptions)
-		UpdateOptions(menu_item, aOptions);
 	if (_tcschr(aName, '\t')) // v1.1.04: The new item has a keyboard accelerator.
 		UpdateAccelerators();
 	return OK;
@@ -553,10 +551,10 @@ ResultType UserMenu::InternalAppendMenu(UserMenuItem *mi, UserMenuItem *aInsertB
 		mii.fMask |= MIIM_SUBMENU;
 		mii.hSubMenu = mi->mSubmenu->mMenu;
 	}
-	if (mi->mIcon)
+	if (mi->mBitmap)
 	{
 		mii.fMask |= MIIM_BITMAP;
-		mii.hbmpItem = g_os.IsWinVistaOrLater() ? mi->mBitmap : HBMMENU_CALLBACK;
+		mii.hbmpItem = mi->mBitmap;
 	}
 	UINT insert_at;
 	BOOL by_position;
@@ -579,7 +577,7 @@ UserMenuItem::UserMenuItem(LPTSTR aName, size_t aNameCapacity, UINT aMenuID, IOb
 	, mPriority(0) // default priority = 0
 	, mMenuState(MFS_ENABLED | MFS_UNCHECKED), mMenuType(*aName ? MFT_STRING : MFT_SEPARATOR)
 	, mNextMenuItem(NULL)
-	, mIcon(NULL) // L17: Initialize mIcon/mBitmap union.
+	, mBitmap(NULL) // L17: Initialize mIcon/mBitmap union.
 {
 	if (aSubmenu)
 		aSubmenu->AddRef();
@@ -654,8 +652,8 @@ ResultType UserMenu::ModifyItem(UserMenuItem *aMenuItem, IObject *aCallback, Use
 // If a menu item becomes a submenu, we don't relinquish its ID in case it's ever made a normal item
 // again (avoids the need to re-lookup a unique ID).
 {
-	if (*aOptions)
-		UpdateOptions(aMenuItem, aOptions);
+	if (*aOptions && UpdateOptions(aMenuItem, aOptions) != OK)
+		return FAIL; // UpdateOptions displays an error message if aOptions contains invalid options.
 	if (!aCallback && !aSubmenu) // We were called only to update this item's options.
 		return OK;
 
@@ -697,7 +695,7 @@ ResultType UserMenu::ModifyItem(UserMenuItem *aMenuItem, IObject *aCallback, Use
 
 
 
-void UserMenu::UpdateOptions(UserMenuItem *aMenuItem, LPTSTR aOptions)
+ResultType UserMenu::UpdateOptions(UserMenuItem *aMenuItem, LPTSTR aOptions)
 {
 	UINT new_type = aMenuItem->mMenuType; // Set default.
 
@@ -731,15 +729,19 @@ void UserMenu::UpdateOptions(UserMenuItem *aMenuItem, LPTSTR aOptions)
 		orig_char = *option_end;
 		*option_end = '\0';
 		// End generic option-parsing code; begin menu options.
-
-		     if (!_tcsicmp(next_option, _T("Radio"))) if (adding) new_type |= MFT_RADIOCHECK; else new_type &= ~MFT_RADIOCHECK;
-		else if (!_tcsicmp(next_option, _T("Right"))) if (adding) new_type |= MFT_RIGHTJUSTIFY; else new_type &= ~MFT_RIGHTJUSTIFY;
+		if (!_tcsicmp(next_option, _T("Radio"))) if (adding) new_type |= MFT_RADIOCHECK; else new_type &= ~MFT_RADIOCHECK;
+		else if (mMenuType == MENU_TYPE_BAR && !_tcsicmp(next_option, _T("Right"))) if (adding) new_type |= MFT_RIGHTJUSTIFY; else new_type &= ~MFT_RIGHTJUSTIFY;
 		else if (!_tcsicmp(next_option, _T("Break"))) if (adding) new_type |= MFT_MENUBREAK; else new_type &= ~MFT_MENUBREAK;
 		else if (!_tcsicmp(next_option, _T("BarBreak"))) if (adding) new_type |= MFT_MENUBARBREAK; else new_type &= ~MFT_MENUBARBREAK;
 		else if (ctoupper(*next_option) == 'P')
-			aMenuItem->mPriority = ATOI(next_option + 1);
-
+			aMenuItem->mPriority = ATOI(next_option + 1);	// invalid priority options are not detected, due to rarity and for brevity. Hence, eg Pxyz, is equivalent to P0.
+		else
+		{
+			*option_end = orig_char;
+			return g_script->ScriptError(ERR_INVALID_OPTION, next_option); // invalid option
+		}
 		*option_end = orig_char;
+
 	}
 
 	if (new_type != aMenuItem->mMenuType)
@@ -754,6 +756,7 @@ void UserMenu::UpdateOptions(UserMenuItem *aMenuItem, LPTSTR aOptions)
 		}
 		aMenuItem->mMenuType = (WORD)new_type;
 	}
+	return OK;
 }
 
 
@@ -783,10 +786,6 @@ ResultType UserMenu::RenameItem(UserMenuItem *aMenuItem, LPTSTR aNewName)
 
 	if (*aNewName)
 	{
-		// Names must be unique only within each menu:
-		for (UserMenuItem *mi = mFirstMenuItem; mi; mi = mi->mNextMenuItem)
-			if (!lstrcmpi(mi->mName, aNewName)) // Match found (case insensitive).
-				return FAIL; // Caller should display an error message.
 		if (aMenuItem->mMenuType & MFT_SEPARATOR)
 		{
 			// Since this item is currently a separator, the system will have disabled it.
@@ -1015,16 +1014,11 @@ void UserMenu::ApplyColor(bool aApplyToSubmenus)
 // testing shows that the OS sets the color to white if the HBRUSH becomes invalid.
 // The caller is also responsible for calling UPDATE_GUI_MENU_BARS if desired.
 {
-	// Must fetch function address dynamically or program won't launch at all on Win95/NT:
-	typedef BOOL (WINAPI *MySetMenuInfoType)(HMENU, LPCMENUINFO);
-	static MySetMenuInfoType MySetMenuInfo = (MySetMenuInfoType)GetProcAddress(GetModuleHandle(_T("user32")), "SetMenuInfo");
-	if (!MySetMenuInfo)
-		return;
 	MENUINFO mi = {0}; 
 	mi.cbSize = sizeof(MENUINFO);
 	mi.fMask = MIM_BACKGROUND|(aApplyToSubmenus ? MIM_APPLYTOSUBMENUS : 0);
 	mi.hbrBack = mBrush;
-	MySetMenuInfo(mMenu, &mi);
+	SetMenuInfo(mMenu, &mi);
 }
 
 
@@ -1370,58 +1364,44 @@ ResultType UserMenu::SetItemIcon(UserMenuItem *aMenuItem, LPTSTR aFilename, int 
 	if (!*aFilename || (*aFilename == '*' && !aFilename[1]))
 		return RemoveItemIcon(aMenuItem);
 
-	if (aIconNumber == 0 && !g_os.IsWinVistaOrLater()) // The owner-draw method used on XP and older expects an icon.
-		aIconNumber = 1; // Must be != 0 to tell LoadPicture to return an icon, converting from bitmap if necessary.
-
 	int image_type;
-	HICON new_icon;
+	HBITMAP new_icon, new_copy;
 	// Currently height is always -1 and cannot be overridden. -1 means maintain aspect ratio, usually 1:1 for icons.
-	if ( !(new_icon = (HICON)LoadPicture(aFilename, aWidth, -1, image_type, aIconNumber, false)) )
+	if ( !(new_icon = LoadPicture(aFilename, aWidth, -1, image_type, aIconNumber, false)) )
 		return FAIL;
 
-	HBITMAP new_copy;
-
-	if (g_os.IsWinVistaOrLater())
+	if (image_type != IMAGE_BITMAP) // Convert to 32-bit bitmap:
 	{
-		if (image_type != IMAGE_BITMAP) // Convert to 32-bit bitmap:
-		{
-			new_copy = IconToBitmap32(new_icon, true);
-			// Even if conversion failed, we have no further use for the icon:
-			DestroyIcon(new_icon);
-			if (!new_copy)
-				return FAIL;
-			new_icon = (HICON)new_copy;
-		}
+		new_copy = IconToBitmap32((HICON)new_icon, true);
+		// Even if conversion failed, we have no further use for the icon:
+		DestroyIcon((HICON)new_icon);
+		if (!new_copy)
+			return FAIL;
+		new_icon = new_copy;
+	}
 
-		if (aMenuItem->mBitmap) // Delete previous bitmap.
-			DeleteObject(aMenuItem->mBitmap);
-	}
-	else
-	{
-		// LoadPicture already converted to icon if needed, due to aIconNumber > 0.
-		if (aMenuItem->mIcon) // Delete previous icon.
-			DestroyIcon(aMenuItem->mIcon);
-	}
-	// Also sets mBitmap via union:
-	aMenuItem->mIcon = new_icon;
+	if (aMenuItem->mBitmap) // Delete previous bitmap.
+		DeleteObject(aMenuItem->mBitmap);
+	
+	aMenuItem->mBitmap = new_icon;
 
 	if (mMenu)
 		ApplyItemIcon(aMenuItem);
 
-	return aMenuItem->mIcon ? OK : FAIL;
+	return aMenuItem->mBitmap ? OK : FAIL;
 }
 
 
 // Caller has ensured mMenu is non-NULL.
 ResultType UserMenu::ApplyItemIcon(UserMenuItem *aMenuItem)
 {
-	if (aMenuItem->mIcon) // Check mIcon/mBitmap union.
+	if (aMenuItem->mBitmap)
 	{
 		MENUITEMINFO item_info;
 		item_info.cbSize = sizeof(MENUITEMINFO);
 		item_info.fMask = MIIM_BITMAP;
 		// Set HBMMENU_CALLBACK or 32-bit bitmap as appropriate.
-		item_info.hbmpItem = g_os.IsWinVistaOrLater() ? aMenuItem->mBitmap : HBMMENU_CALLBACK;
+		item_info.hbmpItem = aMenuItem->mBitmap;
 		SetMenuItemInfo(mMenu, aMenuItem_ID, aMenuItem_MF_BY, &item_info);
 	}
 	return OK;
@@ -1430,7 +1410,7 @@ ResultType UserMenu::ApplyItemIcon(UserMenuItem *aMenuItem)
 
 ResultType UserMenu::RemoveItemIcon(UserMenuItem *aMenuItem)
 {
-	if (aMenuItem->mIcon) // Check mIcon/mBitmap union.
+	if (aMenuItem->mBitmap)
 	{
 		if (mMenu)
 		{
@@ -1438,58 +1418,11 @@ ResultType UserMenu::RemoveItemIcon(UserMenuItem *aMenuItem)
 			item_info.cbSize = sizeof(MENUITEMINFO);
 			item_info.fMask = MIIM_BITMAP;
 			item_info.hbmpItem = NULL;
-			// If g_os.IsWinVistaOrLater(), this removes the bitmap we set. Otherwise it removes HBMMENU_CALLBACK, therefore disabling owner-drawing.
 			SetMenuItemInfo(mMenu, aMenuItem_ID, aMenuItem_MF_BY, &item_info);
 		}
-		if (g_os.IsWinVistaOrLater()) // Free the appropriate union member.
-			DeleteObject(aMenuItem->mBitmap);
-		else
-			DestroyIcon(aMenuItem->mIcon);
-		aMenuItem->mIcon = NULL; // Clear mIcon/mBitmap union.
+		DeleteObject(aMenuItem->mBitmap);
+		aMenuItem->mBitmap = NULL;
 	}
 	return OK;
 }
 
-
-BOOL UserMenu::OwnerMeasureItem(LPMEASUREITEMSTRUCT aParam)
-{
-	UserMenuItem *menu_item = g_script->FindMenuItemByID(aParam->itemID);
-	if (!menu_item) // L26: Check if the menu item is one with a submenu.
-		menu_item = g_script->FindMenuItemBySubmenu((HMENU)(UINT_PTR)aParam->itemID); // Extra cast avoids warning C4312.
-
-	if (!menu_item || !menu_item->mIcon)
-		return FALSE;
-
-	BOOL size_is_valid = FALSE;
-	ICONINFO icon_info;
-	if (GetIconInfo(menu_item->mIcon, &icon_info))
-	{
-		BITMAP icon_bitmap;
-		if (GetObject(icon_info.hbmColor, sizeof(BITMAP), &icon_bitmap))
-		{
-			// Return size of icon.
-			aParam->itemWidth = icon_bitmap.bmWidth;
-			aParam->itemHeight = icon_bitmap.bmHeight;
-			size_is_valid = TRUE;
-		}
-		DeleteObject(icon_info.hbmColor);
-		DeleteObject(icon_info.hbmMask);
-	}
-	return size_is_valid;
-}
-
-
-BOOL UserMenu::OwnerDrawItem(LPDRAWITEMSTRUCT aParam)
-{
-	UserMenuItem *menu_item = g_script->FindMenuItemByID(aParam->itemID);
-	if (!menu_item) // L26: Check if the menu item is one with a submenu.
-		menu_item = g_script->FindMenuItemBySubmenu((HMENU)(UINT_PTR)aParam->itemID); // Extra cast avoids warning C4312.
-
-	if (!menu_item || !menu_item->mIcon)
-		return FALSE;
-
-	// Draw icon at actual size at requested position.
-	return DrawIconEx(aParam->hDC
-				, aParam->rcItem.left, aParam->rcItem.top
-				, menu_item->mIcon, 0, 0, 0, NULL, DI_NORMAL);
-}

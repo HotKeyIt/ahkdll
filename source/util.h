@@ -281,12 +281,8 @@ inline size_t rtrim(LPTSTR aStr, size_t aLength = -1)
 		// Otherwise, it is a space or tab...
 		if (cp == aStr) // ... and we're now at the first character of the string...
 		{
-			if (IS_SPACE_OR_TAB(*cp)) // ... and that first character is also a space or tab...
-			{
-				*cp = '\0'; // ... so the entire string is made empty...
-				return 0; // Fix for v1.0.39: Must return 0 not aLength in this case.
-			}
-			return aLength; // ... and we return in any case.
+			*cp = '\0'; // ... so the entire string is made empty.
+			return 0;
 		}
 		// else it's a space or tab, and there are still more characters to check.  Let the loop
 		// do its decrements.
@@ -426,12 +422,14 @@ inline bool IsHex(LPCTSTR aBuf) // 10/17/2006: __forceinline worsens performance
 
 
 
-__int64 tcstoi64_o(LPCTSTR buf, LPCTSTR *endptr, int base);
+__int64 istrtoi64(LPCTSTR buf, LPCTSTR *endptr);
 
-inline __int64 tcstoi64_o(LPTSTR buf, LPTSTR *endptr, int base)
+inline __int64 istrtoi64(LPTSTR buf, LPTSTR *endptr)
 {
-	return tcstoi64_o(buf, const_cast<LPCTSTR *>(endptr), base);
+	return istrtoi64(buf, const_cast<LPCTSTR *>(endptr));
 }
+
+__int64 nstrtoi64(LPCTSTR buf);
 
 // As of v1.0.30, ATOI(), ITOA() and the other related functions below are no longer macros
 // because there are too many places where something like ATOI(++cp) is done, which would be a
@@ -460,13 +458,13 @@ inline __int64 ATOI64(LPCTSTR buf)
 	//   0xFFFFFFFFFFFFFFFF == -1
 	//  0x10000000000000001 ==  1
 	//return IsHex(buf) ? _tcstoi64(buf, NULL, 16) : _ttoi64(buf);  
-	return tcstoi64_o(buf, NULL, 0);
+	return nstrtoi64(buf);
 }
 
 inline unsigned __int64 ATOU64(LPCTSTR buf)
 {
-	// Simple type-cast is sufficient since tcstoi64_o doesn't do range checks.
-	return (unsigned __int64)tcstoi64_o(buf, NULL, 0);
+	// Simple type-cast is sufficient since nstrtoi64 doesn't do range checks.
+	return (unsigned __int64)nstrtoi64(buf);
 	//return _tcstoui64(buf, NULL, IsHex(buf) ? 16 : 10);
 }
 
@@ -480,7 +478,7 @@ inline int ATOI(LPCTSTR buf)
 	// on performance; still, this method benchmarks slightly faster and produces smaller code
 	// than the older version above.  It is also behaves more consistently with ATOI64() for
 	// very large out of range values.
-	return (int)tcstoi64_o(buf, NULL, 0);
+	return (int)nstrtoi64(buf);
 }
 
 // v1.0.38.01: Make ATOU a macro that refers to ATOI64() to improve performance (takes advantage of _atoi64()
@@ -689,21 +687,19 @@ bool DoesFilePatternExist(LPTSTR aFilePattern, DWORD *aFileAttr = NULL, DWORD aR
 #ifdef _DEBUG
 	ResultType FileAppend(LPTSTR aFilespec, LPTSTR aLine, bool aAppendNewline = true);
 #endif
-LPTSTR ConvertFilespecToCorrectCase(LPTSTR aFullFileSpec);
+LPTSTR ConvertFilespecToCorrectCase(LPTSTR aFilespec, LPTSTR aBuf, size_t aBufSize, size_t &aBufLength);
+void ConvertFilespecToCorrectCase(LPTSTR aBuf, size_t aBufSize, size_t &aBufLength);
 LPTSTR FileAttribToStr(LPTSTR aBuf, DWORD aAttr);
 unsigned __int64 GetFileSize64(HANDLE aFileHandle);
 LPTSTR GetWin32ErrorText(LPTSTR aBuf, DWORD aBufSize, DWORD aError);
 void AssignColor(LPTSTR aNewColorName, COLORREF &aColor, HBRUSH &aBrush);
 void AssignColor(COLORREF aNewColorValue, COLORREF &aColor, HBRUSH &aBrush);
 COLORREF ColorNameToBGR(LPTSTR aColorName);
-HRESULT MySetWindowTheme(HWND hwnd, LPCWSTR pszSubAppName, LPCWSTR pszSubIdList);
-HRESULT MyEnableThemeDialogTexture(HWND hwnd, DWORD dwFlags);
-BOOL MyIsAppThemed();
 LPTSTR ConvertEscapeSequences(LPTSTR aBuf, LPTSTR aLiteralMap);
 int FindExprDelim(LPCTSTR aBuf, TCHAR aDelimiter = ',', int aStartIndex = 0, LPCTSTR aLiteralMap = NULL);
 int FindTextDelim(LPCTSTR aBuf, TCHAR aDelimiter = ',', int aStartIndex = 0, LPCTSTR aLiteralMap = NULL);
 #define MAX_BALANCEEXPR_DEPTH 100 // The maximum depth at which BalanceExpr() can validate symbols (the size of aExpect[]).
-int BalanceExpr(LPCTSTR aBuf, int aStartBalance, TCHAR aExpect[]);
+int BalanceExpr(LPCTSTR aBuf, int aStartBalance, TCHAR aExpect[], TCHAR *aOpenQuote = NULL);
 POINT CenterWindow(int aWidth, int aHeight);
 bool FontExist(HDC aHdc, LPCTSTR aTypeface);
 void ScreenToWindow(POINT &aPoint, HWND aHwnd);

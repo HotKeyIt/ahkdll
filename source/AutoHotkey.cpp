@@ -53,7 +53,7 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 #endif
 #ifndef _DEBUG
 	PBOOLEAN BeingDebugged;
-	if (!FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), MAKEINTRESOURCE(RT_RCDATA)))
+	if (!FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), RT_RCDATA))
 	{
 		g_TlsDoExecute = true;
 		return;
@@ -132,9 +132,9 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 {
 	// Init any globals not in "struct g" that need it:
 #ifdef _DEBUG
-	g_hResource = FindResource(NULL, _T("AHK"), MAKEINTRESOURCE(RT_RCDATA));
+	g_hResource = FindResource(NULL, _T("AHK"), RT_RCDATA);
 #else
-	g_hResource = FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), MAKEINTRESOURCE(RT_RCDATA));
+	g_hResource = FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), RT_RCDATA);
 #endif
 	g_hInstance = hInstance;
 	g_HistoryTickPrev = GetTickCount();
@@ -143,7 +143,6 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	g_script->Construct();
 	g_clip = new Clipboard();
 	g_MsgMonitor = new MsgMonitorList();
-	g_MetaObject = new MetaObject();
 	g_SimpleHeap = new SimpleHeap();
 	g_SimpleHeapVar = g_SimpleHeap;
 	InitializeCriticalSection(&g_CriticalRegExCache); // v1.0.45.04: Must be done early so that it's unconditional, so that DeleteCriticalSection() in the script destructor can also be unconditional (deleting when never initialized can crash, at least on Win 9x).
@@ -154,6 +153,38 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	g_ahkThreads[0][4] = (UINT_PTR)&g_startup;
 	g_ahkThreads[0][5] = (UINT_PTR)g_ThreadID;
 	g_ahkThreads[0][6] = (UINT_PTR)((PMYTEB)NtCurrentTeb())->ThreadLocalStoragePointer;
+
+	FileObject::sPrototype = Object::CreatePrototype(_T("File"), FileObject::sPrototype, FileObject::sMembers, _countof(FileObject::sMembers));
+	Object::sAnyPrototype = Object::CreateRootPrototypes();
+	Object::sClassPrototype = Object::CreatePrototype(_T("Class"), Object::sPrototype);
+	Array::sPrototype = Object::CreatePrototype(_T("Array"), Array::sPrototype, Array::sMembers, _countof(Array::sMembers));
+	Map::sPrototype = Object::CreatePrototype(_T("Map"), Map::sPrototype, Map::sMembers, _countof(Map::sMembers));
+
+	//																							Direct base			Prototype			Constructor
+	Object::sClass = Object::CreateClass(_T("Object"), Object::sClassPrototype, Object::sPrototype, static_cast<ObjectMethod>(&Object::New<Object>));
+	Object::sClassClass = Object::CreateClass(_T("Class"), Object::sClass, Object::sClassPrototype, static_cast<ObjectMethod>(&Object::New<Object>));
+	Array::sClass = Object::CreateClass(_T("Array"), Array::sClass, Array::sPrototype, static_cast<ObjectMethod>(&Array::New<Array>));
+	Map::sClass = Object::CreateClass(_T("Map"), Map::sClass, Map::sPrototype, static_cast<ObjectMethod>(&Map::New<Map>));
+
+
+
+	Closure::sPrototype = Object::CreatePrototype(_T("Closure"), Func::sPrototype);
+	BoundFunc::sPrototype = Object::CreatePrototype(_T("BoundFunc"), Func::sPrototype);
+	EnumBase::sPrototype = Object::CreatePrototype(_T("Enumerator"), Func::sPrototype);
+
+
+
+	BufferObject::sPrototype = Object::CreatePrototype(_T("Buffer"), BufferObject::sPrototype, BufferObject::sMembers, _countof(BufferObject::sMembers));
+	ClipboardAll::sPrototype = Object::CreatePrototype(_T("ClipboardAll"), BufferObject::sPrototype);
+
+	RegExMatchObject::sPrototype = Object::CreatePrototype(_T("RegExMatch"), RegExMatchObject::sPrototype, RegExMatchObject::sMembers, _countof(RegExMatchObject::sMembers));
+
+	Object::sPrimitivePrototype = Object::CreatePrototype(_T("Primitive"), Object::sAnyPrototype);
+	Object::sStringPrototype = Object::CreatePrototype(_T("String"), Object::sPrimitivePrototype);
+	Object::sNumberPrototype = Object::CreatePrototype(_T("Number"), Object::sPrimitivePrototype);
+	Object::sIntegerPrototype = Object::CreatePrototype(_T("Integer"), Object::sNumberPrototype);
+	Object::sFloatPrototype = Object::CreatePrototype(_T("Float"), Object::sNumberPrototype);
+
 	// v1.1.22+: This is done unconditionally, on startup, so that any attempts to read a drive
 	// that has no media (and possibly other errors) won't cause the system to display an error
 	// dialog that the script can't suppress.  This is known to affect floppy drives and some
@@ -163,11 +194,8 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	// reverted afterward, so it affected all subsequent commands.
 	SetErrorMode(SEM_FAILCRITICALERRORS);
 
-	if (!GetCurrentDirectory(_countof(g_WorkingDir), g_WorkingDir)) // Needed for the FileSelect() workaround.
-		*g_WorkingDir = '\0';
-	// Unlike the below, the above must not be Malloc'd because the contents can later change to something
-	// as large as MAX_PATH by means of the SetWorkingDir command.
-	g_WorkingDirOrig = g_SimpleHeap->Malloc(g_WorkingDir); // Needed by the Reload command.
+	UpdateWorkingDir(); // Needed for the FileSelect() workaround.
+	g_WorkingDirOrig = g_SimpleHeap->Malloc(const_cast<LPTSTR>(g_WorkingDir.GetString())); // Needed by the Reload command.
 
 	// Set defaults, to be overridden by command line args we receive:
 	bool restart_mode = false;
@@ -262,16 +290,12 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 		}
 	}
 
-	// used to monitor Input
-	if (!g_script->FindOrAddVar(_T("A_Input"), 7, VAR_DECLARE_SUPER_GLOBAL))
-		return CRITICAL_ERROR;
-
 	if (Var *var = g_script->FindOrAddVar(_T("A_Args"), 6, VAR_DECLARE_SUPER_GLOBAL))
 	{
 		// Store the remaining args in an array and assign it to "A_Args".
 		// If there are no args, assign an empty array so that A_Args[1]
 		// and A_Args.Length() don't cause an error.
-		Object *args = Object::CreateFromArgV(__targv + i, __argc - i);
+		auto args = Array::FromArgV(__targv + i, __argc - i);
 		if (!args)
 			return CRITICAL_ERROR;  // Realistically should never happen.
 		var->AssignSkipAddRef(args);
@@ -400,37 +424,6 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 		ZeroMemory(g_KeyHistory, g_MaxHistoryKeys * sizeof(KeyHistoryItem)); // Must be zeroed.
 	//else leave it NULL as it was initialized in globaldata.
 
-	// MSDN: "Windows XP: If a manifest is used, InitCommonControlsEx is not required."
-	// Therefore, in case it's a high overhead call, it's not done on XP or later:
-	if (!g_os.IsWinXPorLater())
-	{
-		// Since InitCommonControls() is apparently incapable of initializing DateTime and MonthCal
-		// controls, InitCommonControlsEx() must be called.
-#if defined(CONFIG_WIN9X) || defined(CONFIG_WINNT4)
-		// Since Ex() requires comctl32.dll 4.70+, must get the function's address dynamically
-		// in case the program is running on Windows 95/NT without the updated DLL (otherwise
-		// the program would not launch at all).
-		typedef BOOL (WINAPI *MyInitCommonControlsExType)(LPINITCOMMONCONTROLSEX);
-		MyInitCommonControlsExType MyInitCommonControlsEx = (MyInitCommonControlsExType)
-			GetProcAddress(GetModuleHandle(_T("comctl32")), "InitCommonControlsEx"); // LoadLibrary shouldn't be necessary because comctl32 in linked by compiler.
-		if (MyInitCommonControlsEx)
-		{
-			INITCOMMONCONTROLSEX icce;
-			icce.dwSize = sizeof(INITCOMMONCONTROLSEX);
-			icce.dwICC = ICC_WIN95_CLASSES | ICC_DATE_CLASSES; // ICC_WIN95_CLASSES is equivalent to calling InitCommonControls().
-			MyInitCommonControlsEx(&icce);
-		}
-		else // InitCommonControlsEx not available, so must revert to non-Ex() to make controls work on Win95/NT4.
-			InitCommonControls();
-#else
-		// Currently only needed on Win2k, since Win9x is unsupported.
-		INITCOMMONCONTROLSEX icce;
-		icce.dwSize = sizeof(INITCOMMONCONTROLSEX);
-		icce.dwICC = ICC_WIN95_CLASSES | ICC_DATE_CLASSES; // ICC_WIN95_CLASSES is equivalent to calling InitCommonControls().
-		InitCommonControlsEx(&icce);
-#endif
-	}
-
 #ifdef CONFIG_DEBUGGER
 	// Initiate debug session now if applicable.
 	if (!g_DebuggerHost.IsEmpty() && g_Debugger.Connect(g_DebuggerHost, g_DebuggerPort) == DEBUGGER_E_OK)
@@ -489,15 +482,43 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 	free(lpScriptCmdLine);
 	g_clip = new Clipboard();
 	InitializeCriticalSection(&g_CriticalRegExCache); // v1.0.45.04: Must be done early so that it's unconditional, so that DeleteCriticalSection() in the script destructor can also be unconditional (deleting when never initialized can crash, at least on Win 9x).
-	for (;;)
+	for (int f = 0;;f=f ? f : 1)
 	{
 		g_script = new Script();
 		g_script->Construct();
 		g_MsgMonitor = new MsgMonitorList();
-		g_MetaObject = new MetaObject();
-		g_SimpleHeap = new SimpleHeap();
-		g_SimpleHeapVar = g_SimpleHeap;
 
+		if (!f)
+		{
+			g_SimpleHeap = new SimpleHeap();
+			g_SimpleHeapVar = g_SimpleHeap;
+			FileObject::sPrototype = Object::CreatePrototype(_T("File"), FileObject::sPrototype, FileObject::sMembers, _countof(FileObject::sMembers));
+			Object::sAnyPrototype = Object::CreateRootPrototypes();
+			Object::sClassPrototype = Object::CreatePrototype(_T("Class"), Object::sPrototype);
+			Array::sPrototype = Object::CreatePrototype(_T("Array"), Array::sPrototype, Array::sMembers, _countof(Array::sMembers));
+			Map::sPrototype = Object::CreatePrototype(_T("Map"), Map::sPrototype, Map::sMembers, _countof(Map::sMembers));
+
+			//																							Direct base			Prototype			Constructor
+			Object::sClass = Object::CreateClass(_T("Object"), Object::sClassPrototype, Object::sPrototype, static_cast<ObjectMethod>(&Object::New<Object>));
+			Object::sClassClass = Object::CreateClass(_T("Class"), Object::sClass, Object::sClassPrototype, static_cast<ObjectMethod>(&Object::New<Object>));
+			Array::sClass = Object::CreateClass(_T("Array"), Array::sClass, Array::sPrototype, static_cast<ObjectMethod>(&Array::New<Array>));
+			Map::sClass = Object::CreateClass(_T("Map"), Map::sClass, Map::sPrototype, static_cast<ObjectMethod>(&Map::New<Map>));
+
+			Closure::sPrototype = Object::CreatePrototype(_T("Closure"), Func::sPrototype);
+			BoundFunc::sPrototype = Object::CreatePrototype(_T("BoundFunc"), Func::sPrototype);
+			EnumBase::sPrototype = Object::CreatePrototype(_T("Enumerator"), Func::sPrototype);
+
+			BufferObject::sPrototype = Object::CreatePrototype(_T("Buffer"), BufferObject::sPrototype, BufferObject::sMembers, _countof(BufferObject::sMembers));
+			ClipboardAll::sPrototype = Object::CreatePrototype(_T("ClipboardAll"), BufferObject::sPrototype);
+
+			RegExMatchObject::sPrototype = Object::CreatePrototype(_T("RegExMatch"), RegExMatchObject::sPrototype, RegExMatchObject::sMembers, _countof(RegExMatchObject::sMembers));
+
+			Object::sPrimitivePrototype = Object::CreatePrototype(_T("Primitive"), Object::sAnyPrototype);
+			Object::sStringPrototype = Object::CreatePrototype(_T("String"), Object::sPrimitivePrototype);
+			Object::sNumberPrototype = Object::CreatePrototype(_T("Number"), Object::sPrimitivePrototype);
+			Object::sIntegerPrototype = Object::CreatePrototype(_T("Integer"), Object::sNumberPrototype);
+			Object::sFloatPrototype = Object::CreatePrototype(_T("Float"), Object::sNumberPrototype);
+		}
 		// v1.1.22+: This is done unconditionally, on startup, so that any attempts to read a drive
 		// that has no media (and possibly other errors) won't cause the system to display an error
 		// dialog that the script can't suppress.  This is known to affect floppy drives and some
@@ -507,11 +528,8 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 		// reverted afterward, so it affected all subsequent commands.
 		SetErrorMode(SEM_FAILCRITICALERRORS);
 
-		if (!GetCurrentDirectory(_countof(g_WorkingDir), g_WorkingDir)) // Needed for the FileSelect() workaround.
-			*g_WorkingDir = '\0';
-		// Unlike the below, the above must not be Malloc'd because the contents can later change to something
-		// as large as MAX_PATH by means of the SetWorkingDir command.
-		g_WorkingDirOrig = g_SimpleHeap->Malloc(g_WorkingDir); // Needed by the Reload command.
+		UpdateWorkingDir(); // Needed for the FileSelect() workaround.
+		g_WorkingDirOrig = g_SimpleHeap->Malloc(const_cast<LPTSTR>(g_WorkingDir.GetString())); // Needed by the Reload command.
 
 		// Set defaults, to be overridden by command line args we receive:
 		bool restart_mode = false;
@@ -575,7 +593,7 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 			// Store the remaining args in an array and assign it to "A_Args".
 			// If there are no args, assign an empty array so that A_Args[1]
 			// and A_Args.Length() don't cause an error.
-			Object *args = Object::CreateFromArgV((LPTSTR*)(argv + i), argc - i);
+			auto args = Array::FromArgV(__targv + i, __argc - i);
 			if (!args)
 			{
 				if (argv)
@@ -685,27 +703,6 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 		if (g_MaxHistoryKeys && !g_KeyHistory && (g_KeyHistory = (KeyHistoryItem *)malloc(g_MaxHistoryKeys * sizeof(KeyHistoryItem))))
 			ZeroMemory(g_KeyHistory, g_MaxHistoryKeys * sizeof(KeyHistoryItem)); // Must be zeroed.
 		//else leave it NULL as it was initialized in globaldata.
-		// MSDN: "Windows XP: If a manifest is used, InitCommonControlsEx is not required."
-		// Therefore, in case it's a high overhead call, it's not done on XP or later:
-		if (!g_os.IsWinXPorLater())
-		{
-			// Since InitCommonControls() is apparently incapable of initializing DateTime and MonthCal
-			// controls, InitCommonControlsEx() must be called.  But since Ex() requires comctl32.dll
-			// 4.70+, must get the function's address dynamically in case the program is running on
-			// Windows 95/NT without the updated DLL (otherwise the program would not launch at all).
-			typedef BOOL(WINAPI *MyInitCommonControlsExType)(LPINITCOMMONCONTROLSEX);
-			MyInitCommonControlsExType MyInitCommonControlsEx = (MyInitCommonControlsExType)
-				GetProcAddress(GetModuleHandle(_T("comctl32")), "InitCommonControlsEx"); // LoadLibrary shouldn't be necessary because comctl32 in linked by compiler.
-			if (MyInitCommonControlsEx)
-			{
-				INITCOMMONCONTROLSEX icce;
-				icce.dwSize = sizeof(INITCOMMONCONTROLSEX);
-				icce.dwICC = ICC_WIN95_CLASSES | ICC_DATE_CLASSES; // ICC_WIN95_CLASSES is equivalent to calling InitCommonControls().
-				MyInitCommonControlsEx(&icce);
-			}
-			else // InitCommonControlsEx not available, so must revert to non-Ex() to make controls work on Win95/NT4.
-				InitCommonControls();
-		}
 
 		/* // Use ExceptionHandler only in main process
 		// set exception filter to disable hook before exception occures to avoid system/mouse freeze
@@ -720,6 +717,8 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 		// top part (the auto-execute part) of the script so that they will be in effect even if the
 		// top part is something that's very involved and requires user interaction:
 		Hotkey::ManifestAllHotkeysHotstringsHooks(); // We want these active now in case auto-execute never returns (e.g. loop)
+		g_HSSameLineAction = false; // `#Hotstring X` should not affect Hotstring().
+		g_SuspendExempt = false; // #SuspendExempt should not affect Hotkey()/Hotstring().
 		//Hotkey::InstallKeybdHook();
 		//Hotkey::InstallMouseHook();
 		//if (Hotkey::sHotkeyCount > 0 || Hotstring::sHotstringCount > 0)
@@ -738,8 +737,9 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 			_endthreadex(CRITICAL_ERROR);
 			return CRITICAL_ERROR;
 		}
-		else if (result == EXIT_RELOAD)
+		else if (g_Reloading)
 		{
+			g_Reloading = false;
 			delete g_script;
 			continue;
 		}
@@ -752,6 +752,7 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 		// Be sure to pass something >0 for the first param or it will
 		// return (and we never want this to return):
 		MsgSleep(SLEEP_INTERVAL, WAIT_FOR_MESSAGES);
+		delete g_SimpleHeap;
 		_endthreadex(0);
 	}
 	return 0; // Never executed; avoids compiler warning.

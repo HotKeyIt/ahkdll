@@ -54,10 +54,10 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <WindowsTargetPlatformVersion>10.0.17134.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.17763.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <PropertyGroup Label="Configuration">
-    <PlatformToolset>v141_xp</PlatformToolset>
+    <PlatformToolset>v141</PlatformToolset>
   </PropertyGroup>
   <!-- import common config -->
   <Import Project="..\..\Config.vcxproj" />
@@ -118,8 +118,10 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|x64'" />
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
-      <UndefinePreprocessorDefinitions></UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions>
+      </UndefinePreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <MinimalRebuild>false</MinimalRebuild>
     </ClCompile>
     <Lib>
       <MinimumRequiredVersion>5</MinimumRequiredVersion>
@@ -128,6 +130,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <MinimalRebuild>false</MinimalRebuild>
     </ClCompile>
     <Lib>
       <MinimumRequiredVersion>5.02</MinimumRequiredVersion>
@@ -137,7 +140,7 @@
     <ClCompile>
       <Optimization>MaxSpeed</Optimization>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
-      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
     <Lib>
@@ -234,24 +237,41 @@
   </ItemDefinitionGroup>
   <!-- FILES -->
   <ItemGroup>
-    <ClCompile Include="pcre\pcre16_chartables.c"></ClCompile>
-    <ClCompile Include="pcre\pcre16_compile.c"></ClCompile>
-    <ClCompile Include="pcre\pcre16_config.c"></ClCompile>
-    <ClCompile Include="pcre\pcre16_exec.c"></ClCompile>
-    <ClCompile Include="pcre\pcre16_fullinfo.c"></ClCompile>
-    <ClCompile Include="pcre\pcre16_get.c"></ClCompile>
-    <ClCompile Include="pcre\pcre16_globals.c"></ClCompile>
-    <ClCompile Include="pcre\pcre16_jit_compile.c"></ClCompile>
-    <ClCompile Include="pcre\pcre16_newline.c"></ClCompile>
-    <ClCompile Include="pcre\pcre16_ord2utf16.c"></ClCompile>
-    <ClCompile Include="pcre\pcre16_refcount.c"></ClCompile>
+    <ClCompile Include="pcre\pcre16_chartables.c">
+    </ClCompile>
+    <ClCompile Include="pcre\pcre16_compile.c">
+    </ClCompile>
+    <ClCompile Include="pcre\pcre16_config.c">
+    </ClCompile>
+    <ClCompile Include="pcre\pcre16_exec.c">
+    </ClCompile>
+    <ClCompile Include="pcre\pcre16_fullinfo.c">
+    </ClCompile>
+    <ClCompile Include="pcre\pcre16_get.c">
+    </ClCompile>
+    <ClCompile Include="pcre\pcre16_globals.c">
+    </ClCompile>
+    <ClCompile Include="pcre\pcre16_jit_compile.c">
+    </ClCompile>
+    <ClCompile Include="pcre\pcre16_newline.c">
+    </ClCompile>
+    <ClCompile Include="pcre\pcre16_ord2utf16.c">
+    </ClCompile>
+    <ClCompile Include="pcre\pcre16_refcount.c">
+    </ClCompile>
     <ClCompile Include="pcre\pcre16_string_utils.c" />
-    <ClCompile Include="pcre\pcre16_study.c"></ClCompile>
-    <ClCompile Include="pcre\pcre16_tables.c"></ClCompile>
-    <ClCompile Include="pcre\pcre16_ucd.c"></ClCompile>
-    <ClCompile Include="pcre\pcre16_valid_utf16.c"></ClCompile>
-    <ClCompile Include="pcre\pcre16_version.c"></ClCompile>
-    <ClCompile Include="pcre\pcre16_xclass.c"></ClCompile>
+    <ClCompile Include="pcre\pcre16_study.c">
+    </ClCompile>
+    <ClCompile Include="pcre\pcre16_tables.c">
+    </ClCompile>
+    <ClCompile Include="pcre\pcre16_ucd.c">
+    </ClCompile>
+    <ClCompile Include="pcre\pcre16_valid_utf16.c">
+    </ClCompile>
+    <ClCompile Include="pcre\pcre16_version.c">
+    </ClCompile>
+    <ClCompile Include="pcre\pcre16_xclass.c">
+    </ClCompile>
     <ClCompile Include="pcre\pcre_chartables.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>

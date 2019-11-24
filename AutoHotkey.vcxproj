@@ -63,11 +63,11 @@
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectName>AutoHotkey</ProjectName>
-    <WindowsTargetPlatformVersion>7.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.17763.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <!-- x64 toolset: must precede the import below -->
   <PropertyGroup Label="Configuration">
-    <PlatformToolset>v141_xp</PlatformToolset>
+    <PlatformToolset>v141</PlatformToolset>
   </PropertyGroup>
   <!-- import common config -->
   <Import Project="Config.vcxproj" />
@@ -78,7 +78,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <AdditionalDependencies>wsock32.lib;winmm.lib;version.lib;comctl32.lib;odbc32.lib;odbccp32.lib;shlwapi.lib;crypt32.lib;psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>wsock32.lib;winmm.lib;version.lib;comctl32.lib;odbc32.lib;odbccp32.lib;shlwapi.lib;crypt32.lib;psapi.lib;wininet.lib;shlwapi.lib;uxtheme.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <StackReserveSize>4194304</StackReserveSize>
       <TerminalServerAware>false</TerminalServerAware>
     </Link>
@@ -111,7 +111,6 @@
   <ItemDefinitionGroup Condition="'$(Platform)'=='Win32'">
     <Link>
       <TargetMachine>MachineX86</TargetMachine>
-      <MinimumRequiredVersion>5.01</MinimumRequiredVersion>
     </Link>
   </ItemDefinitionGroup>
   <!-- platform: x64 -->
@@ -121,7 +120,6 @@
     </ClCompile>
     <Link>
       <TargetMachine>MachineX64</TargetMachine>
-      <MinimumRequiredVersion>5.02</MinimumRequiredVersion>
     </Link>
   </ItemDefinitionGroup>
   <!-- paths and basic settings -->
@@ -156,8 +154,12 @@
     <ClCompile Include="source\globaldata.cpp" />
     <ClCompile Include="source\hook.cpp" />
     <ClCompile Include="source\hotkey.cpp" />
+    <ClCompile Include="source\input_object.cpp" />
     <ClCompile Include="source\keyboard_mouse.cpp" />
-    <ClCompile Include="source\LiteZip.cpp" />
+    <ClCompile Include="source\LiteZip.cpp">
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">CompileAsCpp</CompileAs>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Use</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="source\lowlevelbif.cpp" />
     <ClCompile Include="source\MemoryModule.cpp" />
     <ClCompile Include="source\MinHook.cpp" />
@@ -198,7 +200,7 @@
     <ClInclude Include="source\Debugger.h" />
     <ClInclude Include="source\defines.h" />
     <ClInclude Include="source\exports.h" />
-    <ClInclude Include="source\lib\exearc_read.h" />
+    <ClInclude Include="source\input_object.h" />
     <ClInclude Include="source\globaldata.h" />
     <ClInclude Include="source\hook.h" />
     <ClInclude Include="source\hotkey.h" />
@@ -214,7 +216,8 @@
     <ClInclude Include="source\Registry.h" />
     <ClInclude Include="source\resources\resource.h" />
     <ClInclude Include="source\script.h" />
-    <ClInclude Include="source\script_com.h"></ClInclude>
+    <ClInclude Include="source\script_com.h">
+    </ClInclude>
     <ClInclude Include="source\script_object.h" />
     <ClInclude Include="source\SimpleHeap.h" />
     <ClInclude Include="source\stdafx.h" />
@@ -272,29 +275,43 @@
     </ResourceCompile>
     <ClCompile>
       <RuntimeLibrary Condition="$(ConfigDebug)">MultiThreadedDebugDLL</RuntimeLibrary>
+      <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">false</MinimalRebuild>
+      <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</MinimalRebuild>
     </ClCompile>
     <Link>
       <GenerateDebugInformation Condition="$(ConfigDebug)">true</GenerateDebugInformation>
     </Link>
     <ClCompile>
-      <IntrinsicFunctions Condition="$(ConfigRelease) OR $(ConfigReleaseDll)">true</IntrinsicFunctions>
+      <IntrinsicFunctions Condition="$(ConfigRelease) OR $(ConfigReleaseDll)">false</IntrinsicFunctions>
     </ClCompile>
     <ClCompile>
       <EnableFiberSafeOptimizations Condition="$(ConfigRelease)">true</EnableFiberSafeOptimizations>
     </ClCompile>
+    <ClCompile>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">MultiThreadedDebugDLL</RuntimeLibrary>
+    </ClCompile>
+    <ClCompile>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">MultiThreadedDebugDLL</RuntimeLibrary>
+    </ClCompile>
+    <Midl>
+      <MkTypLibCompatible Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">true</MkTypLibCompatible>
+    </Midl>
+    <Link>
+      <LinkTimeCodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+      </LinkTimeCodeGeneration>
+    </Link>
   </ItemDefinitionGroup>
   <!--Dll-->
   <ItemDefinitionGroup Condition="$(ConfigReleaseDll)">
     <Midl>
       <TargetEnvironment Condition="'$(Platform)'=='x64'">X64</TargetEnvironment>
+      <MkTypLibCompatible Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">false</MkTypLibCompatible>
     </Midl>
   </ItemDefinitionGroup>
   <!--Include CustomBuild-->
   <ItemGroup>
-    <ResourceCompile Include="source\resources\AutoHotkey.rc"></ResourceCompile>
-    <CustomBuild Include="source\lib\win2kcompat.asm">
-      <ExcludedFromBuild Condition="'$(Platform)'!='Win32'">true</ExcludedFromBuild>
-    </CustomBuild>
+    <ResourceCompile Include="source\resources\AutoHotkey.rc">
+    </ResourceCompile>
     <CustomBuild Include="source\libx64call\x64call.asm">
       <ExcludedFromBuild Condition="'$(Platform)'!='x64'">true</ExcludedFromBuild>
     </CustomBuild>

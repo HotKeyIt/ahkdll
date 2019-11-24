@@ -44,13 +44,20 @@ static HANDLE sThreadHandle = NULL;
 // time it's called (currently it can be only called once):
 static bool sDisguiseNextMenu;          // Initialized by ResetHook().
 static bool sUndisguisedMenuInEffect;	//
-static bool sAltTabMenuIsVisible;       //
+
+// Whether the alt-tab menu was shown by an AltTab hotkey or alt-tab was detected
+// by the hook.  This might be inaccurate if the menu was displayed before the hook
+// was installed or the keys weren't detected because of UIPI.  If this turns out to
+// be a problem, the accuracy could be improved by additional checks with FindWindow(),
+// keeping in mind that there are at least 3 different window classes to check,
+// depending on OS and the "AltTabSettings" registry value.
+static bool sAltTabMenuIsVisible;       // Initialized by ResetHook().
 
 // The prefix key that's currently down (i.e. in effect).
 // It's tracked this way, rather than as a count of the number of prefixes currently down, out of
 // concern that such a count might accidentally wind up above zero (due to a key-up being missed somehow)
 // and never come back down, thus penalizing performance until the program is restarted:
-static key_type *pPrefixKey;  // Initialized by ResetHook().
+key_type *pPrefixKey;  // Initialized by ResetHook().
 
 // Less memory overhead (space and performance) to allocate a solid block for multidimensional arrays:
 // These store all the valid modifier+suffix combinations (those that result in hotkey actions) except
@@ -72,7 +79,9 @@ static key_type *ksc = NULL;
 #define KVKM_SIZE ((MODLR_MAX + 1)*(VK_ARRAY_COUNT))
 #define KSCM_SIZE ((MODLR_MAX + 1)*(SC_ARRAY_COUNT))
 
-// Notes about the following variables:
+
+// Notes about fake shift-key events (there used to be some related variables defined here,
+// but they were superseded by SC_FAKE_LSHIFT and SC_FAKE_RSHIFT):
 // Used to help make a workaround for the way the keyboard driver generates physical
 // shift-key events to release the shift key whenever it is physically down during
 // the press or release of a dual-state Numpad key. These keyboard driver generated
@@ -117,25 +126,6 @@ static key_type *ksc = NULL;
 // A0  02A	 	d	0.49	Shift          	driver lazy down (but not detected as non-physical)
 // 6B  04E	 	d	0.00	Num +          	
 
-// The below timeout is for the subset of driver-generated shift-events that occur immediately
-// before or after some other keyboard event.  The elapsed time is usually zero, but using 22ms
-// here just in case slower systems or systems under load have longer delays between keystrokes:
-#define SHIFT_KEY_WORKAROUND_TIMEOUT 22
-static bool sNextPhysShiftDownIsNotPhys; // All of these are initialized by ResetHook().
-static vk_type sPriorVK;
-static sc_type sPriorSC;
-static bool sPriorEventWasKeyUp;
-static bool sPriorEventWasPhysical;
-static DWORD sPriorEventTickCount;
-static modLR_type sPriorModifiersLR_physical;
-static BYTE sPriorShiftState;
-static BYTE sPriorLShiftState;
-
-enum DualNumpadKeys	{PAD_DECIMAL, PAD_NUMPAD0, PAD_NUMPAD1, PAD_NUMPAD2, PAD_NUMPAD3
-, PAD_NUMPAD4, PAD_NUMPAD5, PAD_NUMPAD6, PAD_NUMPAD7, PAD_NUMPAD8, PAD_NUMPAD9
-, PAD_DELETE, PAD_INSERT, PAD_END, PAD_DOWN, PAD_NEXT, PAD_LEFT, PAD_CLEAR
-, PAD_RIGHT, PAD_HOME, PAD_UP, PAD_PRIOR, PAD_TOTAL_COUNT};
-static bool sPadState[PAD_TOTAL_COUNT];  // Initialized by ChangeHookState()
 
 static bool sHookSyncd; // Only valid while in WaitHookIdle().
 
@@ -224,74 +214,12 @@ LRESULT CALLBACK LowLevelKeybdProc(int aCode, WPARAM wParam, LPARAM lParam)
 	case VK_MENU:    vk = (sc == SC_RALT)     ? VK_RMENU    : VK_LMENU; break;
 	}
 
-	// Now that the above has translated VK_CONTROL to VK_LCONTROL (if necessary):
-	if (vk == VK_LCONTROL)
+	if (event.scanCode == SC_FAKE_LCTRL && g_AltGrExtraInfo && (event.flags & LLKHF_INJECTED))
 	{
-		// The following helps hasten AltGr detection after script startup.  It's kept to supplement
-		// LayoutHasAltGr() because that function isn't 100% reliable for the reasons described there.
-		// It shouldn't be necessary to check what type of LControl event (up or down) is received, since
-		// it should be impossible for any unrelated keystrokes to be received while g_HookReceiptOfLControlMeansAltGr
-		// is true.  This is because all unrelated keystrokes stay buffered until the main thread calls GetMessage().
-		// UPDATE for v1.0.39: Now that the hook has a dedicated thread, the above is no longer 100% certain.
-		// However, I think confidence is very high that this AltGr detection method is okay as it is because:
-		// 1) Hook thread has high priority, which means it generally shouldn't get backlogged with buffered keystrokes.
-		// 2) When the main thread calls keybd_event(), there is strong evidence that the OS immediately preempts
-		//    the main thread (or executes a SendMessage(), which is the same as preemption) and gives the next
-		//    timeslice to the hook thread, which then immediately processes the incoming keystroke as long
-		//    as there are no keystrokes in the queue ahead of it (see #1).
-		// 3) Even if #1 and #2 fail to hold, the probability of misclassifying an LControl event seems very low.
-		//    If there is ever concern, adding a call to IsIgnored() below would help weed out physical keystrokes
-		//    (or those of other programs) that arrive during a vulnerable time.
-		if (g_HookReceiptOfLControlMeansAltGr)
-		{
-			// But don't reset g_HookReceiptOfLControlMeansAltGr here to avoid timing problems where the hook
-			// is installed at a time when g_HookReceiptOfLControlMeansAltGr is wrongly true because the
-			// inactive hook never made it false.  Let KeyEvent() do that.
-			Get_active_window_keybd_layout // Defines the variable active_window_keybd_layout for use below.
-			LayoutHasAltGr(active_window_keybd_layout, CONDITION_TRUE);
-			// The following must be done; otherwise, if LayoutHasAltGr hasn't yet been autodetected by the
-			// time the first AltGr keystroke comes through, that keystroke would cause LControl to get stuck down
-			// as seen in g_modifiersLR_physical.
-			event.flags |= LLKHF_INJECTED; // Flag it as artificial for any other instances of the hook that may be running.
-			event.dwExtraInfo = g_HookReceiptOfLControlMeansAltGr; // The one who set this variable put the desired ExtraInfo in it.
-		}
-		else // Since AltGr wasn't detected above, see if any other means is ready to detect it.
-		{
-			// v1.0.42.04: This section was moved out of IsIgnored() to here because:
-			// 1) Immediately correcting the incoming event simplifies other parts of the hook.
-			// 2) It allows this instance of the hook to communicate with other instances of the hook by
-			//    correcting the bogus values directly inside the event structure.  This is something those
-			//    other hooks can't do easily if the keystrokes were generated/simulated inside our instance
-			//    (due to our instance's KeyEvent() function communicating corrections via
-			//    g_HookReceiptOfLControlMeansAltGr and g_IgnoreNextLControlDown/Up).
-			//
-			// This new approach solves an AltGr keystroke's disruption of A_TimeIdlePhysical and related
-			// problems that were caused by AltGr's incoming keystroke being marked by the driver or OS as a
-			// physical event (even when the AltGr keystroke that caused it was artificial).  It might not
-			// be a perfect solution, but it's pretty complete. For example, with the exception of artificial
-			// AltGr keystrokes from non-AHK sources, it completely solves the A_TimeIdlePhysical issue because
-			// by definition, any script that *uses* A_TimeIdlePhysical in a way that the fix applies to also
-			// has the keyboard hook installed (if it only has the mouse hook installed, the fix isn't in effect,
-			// but it also doesn't matter because that script detects only mouse events as true physical events,
-			// as described in the documentation for A_TimeIdlePhysical).
-			if (key_up)
-			{
-				if (g_IgnoreNextLControlUp)
-				{
-					event.flags |= LLKHF_INJECTED; // Flag it as artificial for any other instances of the hook that may be running.
-					event.dwExtraInfo = g_IgnoreNextLControlUp; // The one who set this variable put the desired ExtraInfo in here.
-				}
-			}
-			else // key-down event
-			{
-				if (g_IgnoreNextLControlDown)
-				{
-					event.flags |= LLKHF_INJECTED; // Flag it as artificial for any other instances of the hook that may be running.
-					event.dwExtraInfo = g_IgnoreNextLControlDown; // The one who set this variable put the desired ExtraInfo in here.
-				}
-			}
-		}
-	} // if (vk == VK_LCONTROL)
+		// This LCtrl is a result of sending RAlt, which hasn't been received yet.
+		// Override dwExtraInfo, though it will only affect this hook instance.
+		event.dwExtraInfo = g_AltGrExtraInfo;
+	}
 
 	return LowLevelCommon(g_KeybdHook, aCode, wParam, lParam, vk, sc, key_up, event.dwExtraInfo, event.flags);
 }
@@ -465,7 +393,8 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 	// the notch count from pKeyHistoryCurr->sc.
 	if (aVK == VK_PACKET) // Win2k/XP: VK_PACKET is used to send Unicode characters as if they were keystrokes.  sc is a 16-bit character code in that case.
 	{
-		pKeyHistoryCurr->sc = aSC = (sc_type)((PKBDLLHOOKSTRUCT)lParam)->scanCode; // Get the full value; aSC was truncated by the caller.
+		aSC = 0; // This held a truncated character code, not to be mistaken for a real scan code.
+		pKeyHistoryCurr->sc = (sc_type)((PKBDLLHOOKSTRUCT)lParam)->scanCode; // Get the full character code.
 		pKeyHistoryCurr->event_type = 'U'; // Give it a unique identifier even though it can be distinguished by the 4-digit "SC".  'U' vs 'u' to avoid confusion with 'u'=up.
 		// Artificial character input via VK_PACKET isn't supported by hotkeys, since they always work via
 		// keycode, but hotstrings and Input are supported via the macro below when #InputLevel is non-zero.
@@ -489,27 +418,6 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 		// Even if the below is set to false, the event might be reclassified as artificial later (though it
 		// won't be logged as such).  See comments in KeybdEventIsPhysical() for details.
 		is_artificial = aEventFlags & LLKHF_INJECTED; // LLKHF vs. LLMHF
-		// If the scan code is extended, the key that was pressed is not a dual-state numpad key,
-		// i.e. it could be the counterpart key, such as End vs. NumpadEnd, located elsewhere on
-		// the keyboard, but we're not interested in those.  Also, Numlock must be ON because
-		// otherwise the driver will not generate those false-physical shift key events:
-		if (!(aSC & 0x100) && (IsKeyToggledOn(VK_NUMLOCK)))
-		{
-			switch (aVK)
-			{
-			case VK_DELETE: case VK_DECIMAL: sPadState[PAD_DECIMAL] = !aKeyUp; break;
-			case VK_INSERT: case VK_NUMPAD0: sPadState[PAD_NUMPAD0] = !aKeyUp; break;
-			case VK_END:    case VK_NUMPAD1: sPadState[PAD_NUMPAD1] = !aKeyUp; break;
-			case VK_DOWN:   case VK_NUMPAD2: sPadState[PAD_NUMPAD2] = !aKeyUp; break;
-			case VK_NEXT:   case VK_NUMPAD3: sPadState[PAD_NUMPAD3] = !aKeyUp; break;
-			case VK_LEFT:   case VK_NUMPAD4: sPadState[PAD_NUMPAD4] = !aKeyUp; break;
-			case VK_CLEAR:  case VK_NUMPAD5: sPadState[PAD_NUMPAD5] = !aKeyUp; break;
-			case VK_RIGHT:  case VK_NUMPAD6: sPadState[PAD_NUMPAD6] = !aKeyUp; break;
-			case VK_HOME:   case VK_NUMPAD7: sPadState[PAD_NUMPAD7] = !aKeyUp; break;
-			case VK_UP:     case VK_NUMPAD8: sPadState[PAD_NUMPAD8] = !aKeyUp; break;
-			case VK_PRIOR:  case VK_NUMPAD9: sPadState[PAD_NUMPAD9] = !aKeyUp; break;
-			}
-		}
 
 		// Track physical state of keyboard & mouse buttons. Also, if it's a modifier, let another section
 		// handle it because it's not as simple as just setting the value to true or false (e.g. if LShift
@@ -520,13 +428,6 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 		// physically down even if it isn't logically down):
 		if (!kvk[aVK].as_modifiersLR && KeybdEventIsPhysical(aEventFlags, aVK, aKeyUp))
 			g_PhysicalKeyState[aVK] = aKeyUp ? 0 : STATE_DOWN;
-
-		// Pointer to the key record for the current key event.  Establishes this_key as an alias
-		// for the array element in kvk or ksc that corresponds to the vk or sc, respectively.
-		// I think the compiler can optimize the performance of reference variables better than
-		// pointers because the pointer indirection step is avoided.  In any case, this must be
-		// a true alias to the object, not a copy of it, because it's address (&this_key) is compared
-		// to other addresses for equality further below.
 	}
 
 	// The following is done even if key history is disabled because sAltTabMenuIsVisible relies on it:
@@ -571,6 +472,10 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 		//    close an alt-tab window it invoked (a simulated escape keystroke can apparently also close
 		//    any alt-tab menu, even one invoked by physical keystrokes; but the converse isn't true).
 		// 3) Lesser reason: Reduces code size and complexity.
+		// UPDATE in 2019: Testing on Windows 7 and 10 indicate this does not apply to the more modern
+		// versions of Alt-Tab, but it still applies if the classic Alt-Tab is restored via the registry.
+		// However, on these OSes, the user is able to press Esc to dismiss our Alt-Tab.  Other scripts
+		// (and presumably other processes) are *NOT* able to dismiss it by simulating Esc.
 		HWND alt_tab_window;
 		if ((alt_tab_window = FindWindow(_T("#32771"), NULL)) // There is an alt-tab window...
 			&& GetWindowThreadProcessId(alt_tab_window, NULL) == GetCurrentThreadId()) // ...and it's owned by the hook thread (not the main thread).
@@ -595,6 +500,12 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 		// due to being a hotkey).
 	}
 
+	// Pointer to the key record for the current key event.  Establishes this_key as an alias
+	// for the array element in kvk or ksc that corresponds to the vk or sc, respectively.
+	// I think the compiler can optimize the performance of reference variables better than
+	// pointers because the pointer indirection step is avoided.  In any case, this must be
+	// a true alias to the object, not a copy of it, because it's address (&this_key) is compared
+	// to other addresses for equality further below.
 	bool sc_takes_precedence = ksc[aSC].sc_takes_precedence;
 	// Check hook type too in case a script every explicitly specifies scan code zero as a hotkey:
 	key_type &this_key = *((aHook == g_KeybdHook && sc_takes_precedence) ? (ksc + aSC) : (kvk + aVK));
@@ -705,8 +616,17 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 	//if (!vk && !sc)
 	//	return AllowKeyToGoToSystem;
 
+	
+
 	if (!this_key.used_as_prefix && !this_key.used_as_suffix)
+	{
+		// Fix for v1.1.31.02: This is done regardless of used_as to ensure it doesn't get "stuck down"
+		// when a custom combination hotkey Suspends itself, thereby causing used_as to be reset to false.
+		// Fix for v1.1.31.03: Done conditionally because its previous value is used below.  This affects
+		// modifier keys as hotkeys, such as Shift::MsgBox.
+		this_key.is_down = !aKeyUp;
 		return AllowKeyToGoToSystem;
+	}
 
 	HotkeyIDType hotkey_id_with_flags = HOTKEY_ID_INVALID; // Set default.
 	HotkeyVariant *firing_is_certain = NULL;               //
@@ -763,6 +683,17 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 	modLR_type modifiersLRnew;
 
 	bool this_toggle_key_can_be_toggled = this_key.pForceToggle && *this_key.pForceToggle == NEUTRAL; // Relies on short-circuit boolean order.
+
+	// Prior to considering whether to fire a hotkey, correct the hook's modifier state.
+	// Although this is rarely needed, there are times when the OS disables the hook, thus
+	// it is possible for it to miss keystrokes.  This should be done before pPrefixKey is
+	// consulted below as pPrefixKey itself might be corrected if it is a standard modifier.
+	// See comments in GetModifierLRState() for more info:
+	if (!modifiers_were_corrected)
+	{
+		modifiers_were_corrected = true;
+		GetModifierLRState(true);
+	}
 
 	///////////////////////////////////////////////////////////////////////////////////////
 	// CASE #1 of 4: PREFIX key has been pressed down.  But use it in this capacity only if
@@ -833,16 +764,6 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 			// fire now rather than waiting for the key-up event.  This is done because it makes sense,
 			// it's more correct, and also it makes the behavior of a hooked ^a hotkey consistent with
 			// that of a registered ^a.
-
-			// Prior to considering whether to fire a hotkey, correct the hook's modifier state.
-			// Although this is rarely needed, there are times when the OS disables the hook, thus
-			// it is possible for it to miss keystrokes.  See comments in GetModifierLRState()
-			// for more info:
-			if (!modifiers_were_corrected)
-			{
-				modifiers_were_corrected = true;
-				GetModifierLRState(true);
-			}
 
 			// non_ignored is always used when considering whether a key combination is in place to
 			// trigger a hotkey:
@@ -1132,13 +1053,6 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 	// it fell through from CASE #3 or #2 above).  This case can also happen if it fell through from
 	// case #1 (i.e. it already determined the value of hotkey_id_with_flags).
 	////////////////////////////////////////////////////////////////////////////////////////////////////
-	// First correct modifiers, because at this late a state, the likelihood of firing a hotkey is high.
-	// For details, see comments for "modifiers_were_corrected" above:
-	if (!modifiers_were_corrected && hotkey_id_with_flags == HOTKEY_ID_INVALID)
-	{
-		modifiers_were_corrected = true;
-		GetModifierLRState(true);
-	}
 	bool fire_with_no_suppress = false; // Set default.
 
 	if (pPrefixKey && (!aKeyUp || this_key.used_as_key_up) && hotkey_id_with_flags == HOTKEY_ID_INVALID) // Helps performance by avoiding all the below checking.
@@ -1148,9 +1062,12 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 		// those modifiers themselves form another valid hotkey with this suffix.  In other words,
 		// ModifierVK/SC combos take precedence over normally-modified combos:
 		Hotkey *found_hk = NULL;
-		for (hotkey_id_temp = this_key.first_custom_combo; hotkey_id_temp != HOTKEY_ID_INVALID; )
+		for (hotkey_id_temp = this_key.first_hotkey; hotkey_id_temp != HOTKEY_ID_INVALID; )
 		{
 			Hotkey &this_hk = *Hotkey::shk[hotkey_id_temp]; // hotkey_id_temp does not include flags in this case.
+			if (!(this_hk.mModifierVK || this_hk.mModifierSC))
+				break; // Not a custom combo.
+			hotkey_id_temp = this_hk.mNextHotkey;
 			key_type &this_modifier_key = this_hk.mModifierVK ? kvk[this_hk.mModifierVK] : ksc[this_hk.mModifierSC];
 			// The following check supports the prefix+suffix pairs that have both an up hotkey and a down,
 			// such as:
@@ -1193,7 +1110,6 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 					// generates down-events (e.g. certain Dell keyboards).
 				}
 			} // qualified prefix is down
-			hotkey_id_temp = this_hk.mNextCustomCombo;
 		} // for each prefix of this suffix
 		if (found_hk)
 		{
@@ -1305,9 +1221,6 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 			}
 			// Any down control key prevents alt-tab from working.  This is similar to
 			// what's done for the shift-key above, so see those comments for details.
-			// Note: Since this is the low-level hook, the current OS must be something
-			// beyond other than Win9x, so there's no need to conditionally send
-			// VK_CONTROL instead of the left/right specific key of the pair:
 			if (g_modifiersLR_logical & MOD_LCONTROL)
 				KeyEvent(KEYUP, VK_LCONTROL);
 			if (g_modifiersLR_logical & MOD_RCONTROL)
@@ -1517,6 +1430,8 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 		&& !firing_is_certain  // i.e. CriterionFiringIsCertain() wasn't already called earlier.
 		&& !(firing_is_certain = Hotkey::CriterionFiringIsCertain(hotkey_id_with_flags, aKeyUp, aExtraInfo, this_key.no_suppress, fire_with_no_suppress, &pKeyHistoryCurr->event_type)))
 	{
+		if (pKeyHistoryCurr->event_type == 'i') // This non-zero SendLevel event is being ignored due to #InputLevel, so unconditionally pass it through, like with is_ignored.
+			return AllowKeyToGoToSystem;
 		// v1.1.08: Although the hotkey corresponding to this event is disabled, it may need to
 		// be suppressed if it has a counterpart (key-down or key-up) hotkey which is enabled.
 		// This can be broken down into two cases:
@@ -1568,8 +1483,7 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 		// When the user finally releases the WIN key, that release will be disguised if called
 		// for by the logic below and in AllowIt().
 		if (   (g_modifiersLR_logical & (MOD_LWIN|MOD_RWIN)) // One or both are down and may require disguising.
-			&& ((g_modifiersLR_physical & (MOD_LWIN|MOD_RWIN)) // Always disguise if physically down, for backward compatibility.
-				|| Hotkey::HotkeyRequiresModLR(hotkey_id_to_fire, MOD_LWIN|MOD_RWIN))   ) // If not physically down, avoid masking hotkeys which could be intended to send {LWin up}, such as for AppsKey::RWin.
+			&& Hotkey::HotkeyRequiresModLR(hotkey_id_to_fire, MOD_LWIN|MOD_RWIN)   ) // Avoid masking hotkeys which could be intended to send {LWin up}, such as for AppsKey::RWin.
 		{
 			sDisguiseNextMenu = true;
 			// An earlier stage has ensured that the keyboard hook is installed for suppression of LWin/RWin if
@@ -1592,8 +1506,7 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 		if (   !sDisguiseNextMenu // It's not already going to be disguised due to the section above or a previous hotkey.
 			&& (g_modifiersLR_logical & (MOD_LALT|MOD_RALT)) // If RAlt==AltGr, it should never need disguising, but in that case LCtrl is also down, so ActiveWindowLayoutHasAltGr() isn't checked.
 			&& !(g_modifiersLR_logical & (MOD_LCONTROL|MOD_RCONTROL)) // No need to mask if Ctrl is down (the key-repeat issue that affects the WIN key does not affect ALT).
-			&& ((g_modifiersLR_physical & (MOD_LALT|MOD_RALT)) // Always disguise if physically down, for backward compatibility.
-				|| Hotkey::HotkeyRequiresModLR(hotkey_id_to_fire, MOD_LALT|MOD_RALT))   ) // If not physically down, avoid masking hotkeys which could be intended to send {Alt up}, such as for AppsKey::Alt.
+			&& Hotkey::HotkeyRequiresModLR(hotkey_id_to_fire, MOD_LALT|MOD_RALT)   ) // Avoid masking hotkeys which could be intended to send {Alt up}, such as for AppsKey::Alt.
 		{
 			if (g_KeybdHook)
 				sDisguiseNextMenu = true;
@@ -1612,8 +1525,6 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 	{
 		case HOTKEY_ID_ALT_TAB_MENU_DISMISS: // This case must occur before HOTKEY_ID_ALT_TAB_MENU due to non-break.
 			if (!sAltTabMenuIsVisible)
-				// Even if the menu really is displayed by other means, we can't easily detect it
-				// because it's not a real window?
 				return AllowKeyToGoToSystem;  // Let the key do its native function.
 			// else fall through to the next case.
 		case HOTKEY_ID_ALT_TAB_MENU:  // These cases must occur before the Alt-tab ones due to conditional break.
@@ -1711,7 +1622,7 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 					else // Because there hasn't been a chance to update g_modifiersLR_logical yet:
 						which_alt_down = aVK;
 				if (!which_alt_down)
-					KeyEvent(KEYDOWN, VK_MENU); // Use the generic/neutral ALT key so it works with Win9x.
+					KeyEvent(KEYDOWN, VK_MENU);
 
 				KeyEvent(KEYDOWNANDUP, VK_TAB); // v1.0.28: KEYDOWNANDUP vs. KEYDOWN.
 
@@ -1749,8 +1660,6 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 			// WheelDown::AltTab     ; But if the menu is displayed, the wheel will function normally.
 			// WheelUp::ShiftAltTab  ; But if the menu is displayed, the wheel will function normally.
 			if (!sAltTabMenuIsVisible)
-				// Even if the menu really is displayed by other means, we can't easily detect it
-				// because it's not a real window?
 				return AllowKeyToGoToSystem;
 
 			// Unlike CONTROL, SHIFT, AND ALT, the LWIN/RWIN keys don't seem to need any
@@ -1767,7 +1676,7 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 				KeyEvent(KEYUP, aVK); // Can't send sc here since it's not defined for the mouse hook.
 
 			// Even when the menu is visible, it's possible that neither of the ALT keys
-			// is down, at least under XP (probably NT and 2k also).  Not sure about Win9x:
+			// is down (such as if Ctrl+Alt+Tab was used, and perhaps other cases):
 			if (   !(g_modifiersLR_logical & (MOD_LALT | MOD_RALT))   // Neither ALT key is down 
 				|| (aKeyUp && (aVK == VK_LMENU || aVK == VK_RMENU))   ) // Or the suffix key for Alt-tab *is* an ALT key and it's being released: must push ALT down for upcoming TAB to work.
 				KeyEvent(KEYDOWN, VK_MENU);
@@ -2120,7 +2029,7 @@ LRESULT AllowIt(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lParam, cons
 	{
 		// Since a mouse button that is physically down is not necessarily logically down -- such as
 		// when the mouse button is a suppressed hotkey -- only update the logical state (which is the
-		// state the OS believes the key to be in) when this even is non-supressed (i.e. allowed to
+		// state the OS believes the key to be in) when this event is non-supressed (i.e. allowed to
 		// go to the system):
 #ifdef FUTURE_USE_MOUSE_BUTTONS_LOGICAL
 		// THIS ENTIRE SECTION might never be necessary if it's true that GetAsyncKeyState() and
@@ -2169,9 +2078,7 @@ LRESULT AllowIt(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lParam, cons
 			}
 		}
 
-		// This is done unconditionally so that even if a qualified Input is not in progress, the
-		// variable will be correctly reset anyway:
-		if ((Hotstring::sEnabledCount && !is_ignored) || (g_input.status == INPUT_IN_PROGRESS && !(g_input.IgnoreAHKInput && is_ignored)))
+		if ((Hotstring::sEnabledCount && !is_ignored) || g_input)
 			if (!CollectInput(event, aVK, aSC, aKeyUp, is_ignored, pKeyHistoryCurr, hs_wparam_to_post, hs_lparam_to_post)) // Key should be invisible (suppressed).
 				return SuppressThisKeyFunc(aHook, lParam, aVK, aSC, aKeyUp, pKeyHistoryCurr, aHotkeyIDToPost, hs_wparam_to_post, hs_lparam_to_post);
 
@@ -2191,8 +2098,7 @@ LRESULT AllowIt(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lParam, cons
 		// Win-L uses logical keys, unlike Ctrl-Alt-Del which uses physical keys (i.e. Win-L can be simulated,
 		// but Ctrl-Alt-Del must be physically pressed by the user):
 		if (   aVK == 'L' && !aKeyUp && (g_modifiersLR_logical == MOD_LWIN  // i.e. *no* other keys but WIN.
-			|| g_modifiersLR_logical == MOD_RWIN || g_modifiersLR_logical == (MOD_LWIN | MOD_RWIN))
-			&& g_os.IsWinXPorLater())
+			|| g_modifiersLR_logical == MOD_RWIN || g_modifiersLR_logical == (MOD_LWIN | MOD_RWIN))   )
 		{
 			// Since the user has pressed Win-L with *no* other modifier keys held down, and since
 			// this key isn't being suppressed (since we're here in this function), the computer
@@ -2217,10 +2123,11 @@ LRESULT AllowIt(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lParam, cons
 		// probably very common because whenever the welcome screen is disabled, that's the default behavior?:
 		// Control Panel > User Accounts > Use the welcome screen for fast and easy logon
 		if (   (aVK == VK_DELETE || aVK == VK_DECIMAL) && !aKeyUp         // Both of these qualify, see notes.
-			&& (g_modifiersLR_physical & (MOD_LCONTROL | MOD_RCONTROL)) // At least one CTRL key is physically down.
+			// Below: At least one CTRL key is physically down.  physical and ctrlaltdel_mask are combined
+			// because ctrlaltdel_mask excludes fake LCtrl (from AltGr) but might not be tracked as reliably.
+			&& (g_modifiersLR_physical & g_modifiersLR_ctrlaltdel_mask & (MOD_LCONTROL | MOD_RCONTROL))
 			&& (g_modifiersLR_physical & (MOD_LALT | MOD_RALT))         // At least one ALT key is physically down.
-			&& !(g_modifiersLR_physical & (MOD_LSHIFT | MOD_RSHIFT))    // Neither shift key is phys. down (WIN is ok).
-			&& g_os.IsWinNT4orLater()   )
+			&& !(g_modifiersLR_physical & (MOD_LSHIFT | MOD_RSHIFT))   )// Neither shift key is phys. down (WIN is ok).
 		{
 			// Similar to the above case except for Windows 2000.  I suspect it also applies to NT,
 			// but I'm not sure.  It seems safer to apply it to NT until confirmed otherwise.
@@ -2267,9 +2174,8 @@ LRESULT AllowIt(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lParam, cons
 			// (due to ShiftAltTab causing sAltTabMenuIsVisible to become false):
 			//if (   sAltTabMenuIsVisible && !((g_modifiersLR_logical & MOD_LALT) || (g_modifiersLR_logical & MOD_RALT))
 			//	&& !(aKeyUp && pKeyHistoryCurr->event_type == 'h')   )  // In case the alt key itself is "AltTabMenu"
-			if (   sAltTabMenuIsVisible && // Release of Alt key or press down of Escape:
-				(aKeyUp && (aVK == VK_LMENU || aVK == VK_RMENU || aVK == VK_MENU)
-					|| !aKeyUp && aVK == VK_ESCAPE)
+			if (sAltTabMenuIsVisible && // Release of Alt key (the check above confirmed it is a modifier):
+				(aKeyUp && (aVK == VK_LMENU || aVK == VK_RMENU || aVK == VK_MENU))
 				// In case the alt key itself is "AltTabMenu":
 				&& pKeyHistoryCurr->event_type != 'h' && pKeyHistoryCurr->event_type != 's'   )
 				// It's important to reset in this case because if sAltTabMenuIsVisible were to
@@ -2371,96 +2277,44 @@ bool CollectInput(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type aSC,
 // might have adjusted vk, namely to make it a left/right specific modifier key rather than a
 // neutral one.
 {
-#define shs Hotstring::shs  // For convenience.
-	// Generally, we return this value to our caller so that it will treat the event as visible
-	// if either there's no input in progress or if there is but it's visible.  Below relies on
-	// boolean evaluation order:
-	bool treat_as_visible = g_input.status != INPUT_IN_PROGRESS || g_input.Visible
-		|| kvk[aVK].pForceToggle;  // Never suppress toggleable keys such as CapsLock.
+	// Transcription is done only once for all layers, so do this if any layer requests it:
+	bool transcribe_modified_keys = false;
 
+	for (auto *input = g_input; input; input = input->Prev)
+	{
+		if (input->InProgress() && input->IsInteresting(aEvent))
+		{
+			if (aKeyUp && (input->KeySC[aSC] & INPUT_KEY_DOWN_SUPPRESSED))
+			{
+				input->KeySC[aSC] &= ~INPUT_KEY_DOWN_SUPPRESSED;
+				return false;
+			}
+			if (aKeyUp && (input->KeyVK[aVK] & INPUT_KEY_DOWN_SUPPRESSED))
+			{
+				input->KeyVK[aVK] &= ~INPUT_KEY_DOWN_SUPPRESSED;
+				return false;
+			}
+
+			if (input->TranscribeModifiedKeys)
+				transcribe_modified_keys = true;
+		}
+	}
+
+	// The checks above suppress key-up if key-down was suppressed and the Input is still active.
+	// Otherwise, avoid suppressing key-up since it may result in the key getting stuck down.
+	// At the very least, this is needed for cases where a user presses a #z hotkey, for example,
+	// to initiate an Input.  When the user releases the LWIN/RWIN key during the input, that
+	// up-event should not be suppressed otherwise the modifier key would get "stuck down".  
 	if (aKeyUp)
-		// Always pass modifier-up events through unaltered.  At the very least, this is needed for
-		// cases where a user presses a #z hotkey, for example, to initiate an Input.  When the user
-		// releases the LWIN/RWIN key during the input, that up-event should not be suppressed
-		// otherwise the modifier key would get "stuck down".  
-		return kvk[aVK].as_modifiersLR ? true : treat_as_visible;
+		return true;
 
-	// Hotstrings monitor neither ignored input nor input that is invisible due to suppression by
-	// the Input command.  One reason for not monitoring ignored input is to avoid any chance of
-	// an infinite loop of keystrokes caused by one hotstring triggering itself directly or
-	// indirectly via a different hotstring:
-	bool do_monitor_hotstring = shs && !aIsIgnored && treat_as_visible;
-	bool do_input = g_input.status == INPUT_IN_PROGRESS && !(g_input.IgnoreAHKInput && aIsIgnored);
-	
 	static vk_type sPendingDeadKeyVK = 0;
 	static sc_type sPendingDeadKeySC = 0; // Need to track this separately because sometimes default VK-to-SC mapping isn't correct.
 	static bool sPendingDeadKeyUsedShift = false;
 	static bool sPendingDeadKeyUsedAltGr = false;
-
-	if (do_input && aVK != VK_PACKET)
-	{
-		UCHAR end_key_attributes = g_input.EndVK[aVK];
-		if (!end_key_attributes)
-			end_key_attributes = g_input.EndSC[aSC];
-		if (end_key_attributes) // A terminating keystroke has now occurred unless the shift state isn't right.
-		{
-			// Caller has ensured that only one of the flags below is set (if any):
-			bool shift_must_be_down = end_key_attributes & END_KEY_WITH_SHIFT;
-			bool shift_must_not_be_down = end_key_attributes & END_KEY_WITHOUT_SHIFT;
-			bool shift_state_matters = shift_must_be_down && !shift_must_not_be_down
-				|| !shift_must_be_down && shift_must_not_be_down; // i.e. exactly one of them.
-			if (    !shift_state_matters
-				|| (shift_must_be_down && (g_modifiersLR_logical & (MOD_LSHIFT | MOD_RSHIFT)))
-				|| (shift_must_not_be_down && !(g_modifiersLR_logical & (MOD_LSHIFT | MOD_RSHIFT)))   )
-			{
-				// The shift state is correct to produce the desired end-key.
-				g_input.status = INPUT_TERMINATED_BY_ENDKEY;
-				g_input.EndedBySC = g_input.EndSC[aSC];
-				g_input.EndingVK = aVK;
-				g_input.EndingSC = aSC;
-				g_input.EndingChar = 0;
-				// Don't change this line:
-				g_input.EndingRequiredShift = shift_must_be_down && (g_modifiersLR_logical & (MOD_LSHIFT | MOD_RSHIFT));
-				if (!do_monitor_hotstring && !sPendingDeadKeyVK)
-					return treat_as_visible;
-				// else need to return only after the input is collected for the hotstring,
-				// or after determining whether this key completes the pending dead key sequence.
-			}
-		}
-	}
-
-	// Fix for v1.0.29: Among other things, this resolves the problem where an Input command without
-	// the Visible option in effect would capture uppercase and other shifted characters as unshifted:
-	switch (aVK)
-	{
-	case VK_LSHIFT:
-	case VK_RSHIFT:
-	case VK_LCONTROL:
-	case VK_RCONTROL:
-	case VK_LMENU:
-	case VK_RMENU:
-	case VK_LWIN:
-	case VK_RWIN:
-		return true; // "true" because the above should never be suppressed, nor do they need further processing below.
-
-	case VK_LEFT:
-	case VK_RIGHT:
-	case VK_DOWN:
-	case VK_UP:
-	case VK_NEXT:
-	case VK_PRIOR:
-	case VK_HOME:
-	case VK_END:
-		// Reset hotstring detection if the user seems to be navigating within an editor.  This is done
-		// so that hotstrings do not fire in unexpected places.
-		if (do_monitor_hotstring && g_HSBufLength)
-		{
-			*g_HSBuf = '\0';
-			g_HSBufLength = 0;
-		}
-		break;
-	}
-
+	
+	bool transcribe_key = true;
+	
 	// Don't unconditionally transcribe modified keys such as Ctrl-C because calling ToAsciiEx() on
 	// some such keys (e.g. Ctrl-LeftArrow or RightArrow if I recall correctly), disrupts the native
 	// function of those keys.  That is the reason for the existence of the
@@ -2471,10 +2325,8 @@ bool CollectInput(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type aSC,
 	// keystrokes even when they were sent via hotkey such #c or a hotstring for which the user
 	// might still be holding down a modifier, such as :*:<t>::Test (if '>' requires shift key).
 	// It might also fix other issues.
-	if (g_modifiersLR_logical
-		&& !(g_input.status == INPUT_IN_PROGRESS && g_input.TranscribeModifiedKeys)
-		&& g_modifiersLR_logical != MOD_LSHIFT && g_modifiersLR_logical != MOD_RSHIFT
-		&& g_modifiersLR_logical != (MOD_LSHIFT | MOD_RSHIFT)
+	if ((g_modifiersLR_logical & ~(MOD_LSHIFT | MOD_RSHIFT)) // At least one non-Shift modifier is down (Shift may also be down).
+		&& !transcribe_modified_keys
 		&& !((g_modifiersLR_logical & (MOD_LALT | MOD_RALT)) && (g_modifiersLR_logical & (MOD_LCONTROL | MOD_RCONTROL))))
 		// Since in some keybd layouts, AltGr (Ctrl+Alt) will produce valid characters (such as the @ symbol,
 		// which is Ctrl+Alt+Q in the German/IBM layout and Ctrl+Alt+2 in the Spanish layout), an attempt
@@ -2489,29 +2341,7 @@ bool CollectInput(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type aSC,
 		// normally be excluded from the input (except those rare ones that have only SHIFT as a modifier).
 		// Note that ToAsciiEx() will translate ^i to a tab character, !i to plain i, and many other modified
 		// letters as just the plain letter key, which we don't want.
-		return treat_as_visible;
-
-	// v1.0.21: Only true (unmodified) backspaces are recognized by the below.  Another reason to do
-	// this is that ^backspace has a native function (delete word) different than backspace in many editors.
-	// Fix for v1.0.38: Below now uses g_modifiersLR_logical vs. physical because it's the logical state
-	// that determines whether the backspace behaves like an unmodified backspace.  This solves the issue
-	// of the Input command collecting simulated backspaces as real characters rather than recognizing
-	// them as a means to erase the previous character in the buffer.
-	// Fix for v2.0: Shift is allowed as it generally has no effect on the native function of Backspace.
-	// This is probably connected with the fact that Shift+BS is also transcribed to `b, which we don't want.
-	if (aVK == VK_BACK && !(g_modifiersLR_logical & ~(MOD_LSHIFT | MOD_RSHIFT))) // Backspace
-	{
-		// Note that it might have been in progress upon entry to this function but now isn't due to
-		// INPUT_TERMINATED_BY_ENDKEY above:
-		if (do_input && g_input.status == INPUT_IN_PROGRESS && g_input.BackspaceIsUndo) // Backspace is being used as an Undo key.
-			if (g_input.BufferLength)
-				g_input.buffer[--g_input.BufferLength] = '\0';
-		if (do_monitor_hotstring && g_HSBufLength)
-			g_HSBuf[--g_HSBufLength] = '\0';
-		if (sPendingDeadKeyVK) // Doing this produces the expected behavior when a backspace occurs immediately after a dead key.
-			sPendingDeadKeyVK = 0;
-		return treat_as_visible;
-	}
+		transcribe_key = false;
 
 	// v1.1.28.00: active_window is set to the focused control, if any, so that the hotstring buffer is reset
 	// when the focus changes between controls, not just between windows.
@@ -2538,7 +2368,7 @@ bool CollectInput(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type aSC,
 		sUwpAppFocused = !_tcsicmp(class_name, _T("ApplicationFrameWindow"));
 	}
 	int char_count;
-	TBYTE ch[3];
+	TCHAR ch[3] = { 0 };
 	BYTE key_state[256];
 	memcpy(key_state, g_PhysicalKeyState, 256);
 
@@ -2553,11 +2383,8 @@ bool CollectInput(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type aSC,
 		sPendingDeadKeyVK = 0; // Don't reinsert it afterward (see above).
 	}
 
-	// As of v1.0.25.10, the below fixes the Input command so that when it is capturing artificial input,
-	// such as from the Send command or a hotstring's replacement text, the captured input will reflect
-	// any modifiers that are logically but not physically down (or vice versa):
+	// Provide the correct logical modifier and CapsLock state for any translation below.
 	AdjustKeyState(key_state, g_modifiersLR_logical);
-	// Make the state of capslock accurate so that ToAsciiEx() will return upper vs. lower if appropriate:
 	if (IsKeyToggledOn(VK_CAPITAL))
 		key_state[VK_CAPITAL] |= STATE_ON;
 	else
@@ -2568,20 +2395,51 @@ bool CollectInput(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type aSC,
 		// VK_PACKET corresponds to a SendInput event with the KEYEVENTF_UNICODE flag.
 #ifdef UNICODE
 		char_count = 1; // SendInput only supports a single 16-bit character code.
-		ch[0] = (TBYTE)aSC; // No translation needed.
+		ch[0] = (WCHAR)aEvent.scanCode; // No translation needed.
 #else
 		// Convert the Unicode character to ANSI, dropping any that can't be converted.
-		char_count = WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, (WCHAR *)&aSC, 1, (CHAR *)ch, _countof(ch), NULL, NULL);
+		char_count = WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, (WCHAR *)&aEvent.scanCode, 1, (CHAR *)ch, _countof(ch), NULL, NULL);
 #endif
 	}
-	else
+	else if (transcribe_key)
 	{
 		char_count = ToUnicodeOrAsciiEx(aVK, aEvent.scanCode  // Uses the original scan code, not the adjusted "sc" one.
 			, key_state, ch, g_MenuIsVisible ? 1 : 0, active_window_keybd_layout);
-	}
-	if (!char_count) // No translation for this key (or for VK_PACKET, this character).
-		return treat_as_visible;
 
+		if ((g_modifiersLR_logical & (MOD_LCONTROL | MOD_RCONTROL)) == 0) // i.e. must not replace '\r' with '\n' if it is the result of Ctrl+M.
+		{
+			if (ch[0] == '\r')  // Translate \r to \n since \n is more typical and useful in Windows.
+				ch[0] = '\n';
+			if (ch[1] == '\r')  // But it's never referred to if byte_count < 2
+				ch[1] = '\n';
+		}
+	}
+	else
+	{
+		char_count = 0;
+	}
+
+	// If Backspace is pressed after a dead key, ch[0] is the "dead" char and ch[1] is '\b'.
+	// Testing shows that this can be handled a number of ways (we only support 1 & 2):
+	// 1. Most Win32 apps perform backspacing and THEN insert ch[0].
+	// 2. UWP apps perform backspacing and discard the pending dead key.
+	// 3. VS2015 performs backspacing and leaves the dead key in the buffer.
+	// 4. MarkdownPad 2 prints the dead char as if Space was pressed, and does no backspacing.
+	// 5. Unconfirmed: some apps might do nothing; i.e. print the dead char and then delete it.
+	if (aVK == VK_BACK && char_count /*&& !g_modifiersLR_logical*/) // Modifier state is checked mostly for backward-compatibility.
+	{
+		if (sUwpAppFocused)
+		{
+			char_count = 0;
+			sPendingDeadKeyVK = 0;
+		}
+		else // Assume standard Win32 behaviour as described above.
+			--char_count; // Remove '\b' to simplify the backspacing and collection stages.
+	}
+	
+	if (!CollectInputHook(aEvent, aVK, aSC, ch, char_count, aIsIgnored))
+		return false; // Suppress.
+	
 	// More notes about dead keys: The dead key behavior of Enter/Space/Backspace is already properly
 	// maintained when an Input or hotstring monitoring is in effect.  In addition, keys such as the
 	// following already work okay (i.e. the user can press them in between the pressing of a dead
@@ -2591,13 +2449,6 @@ bool CollectInput(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type aSC,
 	// Note that if a pending dead key is followed by the press of another dead key (including itself),
 	// the sequence should be triggered and both keystrokes should appear in the active window.
 	// That case has been tested too, and works okay with the layouts tested so far.
-	// I've only discovered two keys which need special handling, and they are handled below:
-	// VK_TAB & VK_ESCAPE
-	// These keys have an ascii translation but should not trigger/complete a pending dead key,
-	// at least not on the Spanish and Danish layouts, which are the two I've tested so far.
-	// UPDATE: Above appears to be untrue (tested on Windows 10 and XP).  Both Tab and Esc complete
-	// the dead key sequence (by inserting the dead char and tab/nothing), so excluding these keys
-	// actually causes unwanted side-effects.
 
 	// Dead keys in Danish layout as they appear on a US English keyboard: Equals and Plus /
 	// Right bracket & Brace / probably others.
@@ -2626,333 +2477,91 @@ bool CollectInput(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type aSC,
 	// allows dead keys to continue to operate properly in the user's foreground window, while still
 	// being capturable by the Input command and recognizable by any defined hotstrings whose
 	// abbreviations use diacritical letters:
-	bool dead_key_sequence_complete = sPendingDeadKeyVK;
+	bool dead_key_sequence_complete = sPendingDeadKeyVK && char_count > 0;
 	if (char_count < 0) // It's a dead key, and it doesn't complete a sequence since in that case char_count would be >= 1.
 	{
-		if (treat_as_visible)
-		{
-			sPendingDeadKeyVK = aVK;
-			sPendingDeadKeySC = aSC;
-			sPendingDeadKeyUsedShift = g_modifiersLR_logical & (MOD_LSHIFT | MOD_RSHIFT);
-			// Detect AltGr as fully and completely as possible in case the current keyboard layout
-			// doesn't even have an AltGr key.  The section above which references sPendingDeadKeyUsedAltGr
-			// relies on this check having been done here.  UPDATE:
-			// v1.0.35.10: Allow Ctrl+Alt to be seen as AltGr too, which allows users to press Ctrl+Alt+Deadkey
-			// rather than AltGr+Deadkey.  It might also resolve other issues.  This change seems okay since
-			// the mere fact that this IS a dead key (as checked above) should mean that it's a deadkey made
-			// manifest through AltGr.
-			// Previous method:
-			//sPendingDeadKeyUsedAltGr = (g_modifiersLR_logical & (MOD_LCONTROL | MOD_RALT)) == (MOD_LCONTROL | MOD_RALT);
-			sPendingDeadKeyUsedAltGr = (g_modifiersLR_logical & (MOD_LCONTROL | MOD_RCONTROL))
-				&& (g_modifiersLR_logical & (MOD_LALT | MOD_RALT));
-			
-			// Lexikos: Testing shows that calling ToUnicodeEx with the VK/SC of a dead key
-			// acts the same as actually pressing that key.  Calling it once when there is
-			// no pending dead key places the dead key in the keyboard layout's buffer and
-			// returns -1; calling it again consumes the dead key and returns either 1 or 2,
-			// depending on the keyboard layout.  For instance:
-			//	- Passing vkC0 twice with US-International gives the string "``".
-			//  - Passing vkBA twice with Neo2 gives just the combining version of "^".
-			// 
-			// Normally ToUnicodeEx would be called by the active window (after the hook
-			// returns), thus placing the dead key in the buffer.  Since our call above
-			// has already done that, we need to remove the dead key from the buffer
-			// before returning.  The benefits of this over the old method include:
-			//  - The hook is not called recursively since no extra keystrokes are generated.
-			//  - It's probably faster for the same reason.
-			//  - It works correctly even when there are multiple scripts with hotstrings,
-			//    all calling ToUnicodeEx in sequence.
-			//
-			// The other half of this workaround can be found by searching for "if (dead_key_sequence_complete)".
-			//
-			ToUnicodeOrAsciiEx(aVK, aEvent.scanCode, key_state, ch, g_MenuIsVisible ? 1 : 0, active_window_keybd_layout);
-		}
-		return treat_as_visible;
+		// Since above did not return, treat_as_visible must be true.
+		sPendingDeadKeyVK = aVK;
+		sPendingDeadKeySC = aSC;
+		sPendingDeadKeyUsedShift = g_modifiersLR_logical & (MOD_LSHIFT | MOD_RSHIFT);
+		// Detect AltGr as fully and completely as possible in case the current keyboard layout
+		// doesn't even have an AltGr key.  The section above which references sPendingDeadKeyUsedAltGr
+		// relies on this check having been done here.  UPDATE:
+		// v1.0.35.10: Allow Ctrl+Alt to be seen as AltGr too, which allows users to press Ctrl+Alt+Deadkey
+		// rather than AltGr+Deadkey.  It might also resolve other issues.  This change seems okay since
+		// the mere fact that this IS a dead key (as checked above) should mean that it's a deadkey made
+		// manifest through AltGr.
+		// Previous method:
+		//sPendingDeadKeyUsedAltGr = (g_modifiersLR_logical & (MOD_LCONTROL | MOD_RALT)) == (MOD_LCONTROL | MOD_RALT);
+		sPendingDeadKeyUsedAltGr = (g_modifiersLR_logical & (MOD_LCONTROL | MOD_RCONTROL))
+			&& (g_modifiersLR_logical & (MOD_LALT | MOD_RALT));
+
+		// Lexikos: Testing shows that calling ToUnicodeEx with the VK/SC of a dead key
+		// acts the same as actually pressing that key.  Calling it once when there is
+		// no pending dead key places the dead key in the keyboard layout's buffer and
+		// returns -1; calling it again consumes the dead key and returns either 1 or 2,
+		// depending on the keyboard layout.  For instance:
+		//	- Passing vkC0 twice with US-International gives the string "``".
+		//  - Passing vkBA twice with Neo2 gives just the combining version of "^".
+		// 
+		// Normally ToUnicodeEx would be called by the active window (after the hook
+		// returns), thus placing the dead key in the buffer.  Since our call above
+		// has already done that, we need to remove the dead key from the buffer
+		// before returning.  The benefits of this over the old method include:
+		//  - The hook is not called recursively since no extra keystrokes are generated.
+		//  - It's probably faster for the same reason.
+		//  - It works correctly even when there are multiple scripts with hotstrings,
+		//    all calling ToUnicodeEx in sequence.
+		//
+		// The other half of this workaround can be found by searching for "if (dead_key_sequence_complete)".
+		//
+		ToUnicodeOrAsciiEx(aVK, aEvent.scanCode, key_state, ch, g_MenuIsVisible ? 1 : 0, active_window_keybd_layout);
+		return true; // Visible.
 	}
-
-
-	if ((g_modifiersLR_logical & (MOD_LCONTROL | MOD_RCONTROL)) == 0) // i.e. must not replace '\r' with '\n' if it is the result of Ctrl+M.
+	
+	// Hotstrings monitor neither ignored input nor input that is invisible due to suppression by
+	// the Input command.  One reason for not monitoring ignored input is to avoid any chance of
+	// an infinite loop of keystrokes caused by one hotstring triggering itself directly or
+	// indirectly via a different hotstring:
+	if (Hotstring::sEnabledCount && !aIsIgnored)
 	{
-		if (ch[0] == '\r')  // Translate \r to \n since \n is more typical and useful in Windows.
-			ch[0] = '\n';
-		if (ch[1] == '\r')  // But it's never referred to if byte_count < 2
-			ch[1] = '\n';
-	}
-
-	bool suppress_hotstring_final_char = false; // Set default.
-
-	if (do_monitor_hotstring)
-	{
-		if (active_window != g_HShwnd)
+		switch (aVK)
 		{
-			// Since the buffer tends to correspond to the text to the left of the caret in the
-			// active window, if the active window changes, it seems best to reset the buffer
-			// to avoid misfires.
-			g_HShwnd = active_window;
-			*g_HSBuf = '\0';
-			g_HSBufLength = 0;
-		}
-		else if (HS_BUF_SIZE - g_HSBufLength < 3) // Not enough room for up-to-2 chars.
-		{
-			// Make room in buffer by removing chars from the front that are no longer needed for HS detection:
-			// Bug-fixed the below for v1.0.21:
-			g_HSBufLength = (int)_tcslen(g_HSBuf + HS_BUF_DELETE_COUNT);  // The new length.
-			tmemmove(g_HSBuf, g_HSBuf + HS_BUF_DELETE_COUNT, g_HSBufLength + 1); // +1 to include the zero terminator.
-		}
-
-		g_HSBuf[g_HSBufLength++] = ch[0];
-		if (char_count > 1)
-			// MSDN: "This usually happens when a dead-key character (accent or diacritic) stored in the
-			// keyboard layout cannot be composed with the specified virtual key to form a single character."
-			g_HSBuf[g_HSBufLength++] = ch[1];
-		g_HSBuf[g_HSBufLength] = '\0';
-
-		if (g_HSBufLength)
-		{
-			TCHAR *cphs, *cpbuf, *cpcase_start, *cpcase_end;
-			int case_capable_characters;
-			bool first_char_with_case_is_upper, first_char_with_case_has_gone_by;
-			CaseConformModes case_conform_mode;
-
-			// Searching through the hot strings in the original, physical order is the documented
-			// way in which precedence is determined, i.e. the first match is the only one that will
-			// be triggered.
-			for (HotstringIDType u = 0; u < Hotstring::sHotstringCount; ++u)
+		case VK_LEFT:
+		case VK_RIGHT:
+		case VK_DOWN:
+		case VK_UP:
+		case VK_NEXT:
+		case VK_PRIOR:
+		case VK_HOME:
+		case VK_END:
+			// Reset hotstring detection if the user seems to be navigating within an editor.  This is done
+			// so that hotstrings do not fire in unexpected places.
+			if (g_HSBufLength)
 			{
-				Hotstring &hs = *shs[u];  // For performance and convenience.
-				if (hs.mSuspended)
-					continue;
-				if (hs.mEndCharRequired)
-				{
-					if (g_HSBufLength <= hs.mStringLength) // Ensure the string is long enough for loop below.
-						continue;
-					if (!_tcschr(g_EndChars, g_HSBuf[g_HSBufLength - 1])) // It's not an end-char, so no match.
-						continue;
-					cpbuf = g_HSBuf + g_HSBufLength - 2; // Init once for both loops. -2 to omit end-char.
-				}
-				else // No ending char required.
-				{
-					if (g_HSBufLength < hs.mStringLength) // Ensure the string is long enough for loop below.
-						continue;
-					cpbuf = g_HSBuf + g_HSBufLength - 1; // Init once for both loops.
-				}
-				cphs = hs.mString + hs.mStringLength - 1; // Init once for both loops.
-				// Check if this item is a match:
-				if (hs.mCaseSensitive)
-				{
-					for (; cphs >= hs.mString; --cpbuf, --cphs)
-						if (*cpbuf != *cphs)
-							break;
-				}
-				else // case insensitive
-					// v1.0.43.03: Using CharLower vs. tolower seems the best default behavior (even though slower)
-					// so that languages in which the higher ANSI characters are common will see "Ä" == "ä", etc.
-					for (; cphs >= hs.mString; --cpbuf, --cphs)
-						if (ltolower(*cpbuf) != ltolower(*cphs)) // v1.0.43.04: Fixed crash by properly casting to UCHAR (via macro).
-							break;
-
-				// Check if one of the loops above found a matching hotstring (relies heavily on
-				// short-circuit boolean order):
-				if (   cphs >= hs.mString // One of the loops above stopped early due discovering "no match"...
-					// ... or it did but the "?" option is not present to protect from the fact that
-					// what lies to the left of this hotstring abbreviation is an alphanumeric character:
-					|| !hs.mDetectWhenInsideWord && cpbuf >= g_HSBuf && IsHotstringWordChar(*cpbuf)
-					// ... v1.0.41: Or it's a perfect match but the right window isn't active or doesn't exist.
-					// In that case, continue searching for other matches in case the script contains
-					// hotstrings that would trigger simultaneously were it not for the "only one" rule.
-					|| !HotCriterionAllowsFiring(hs.mHotCriterion, hs.mName)   )
-					continue; // No match or not eligible to fire.
-					// v1.0.42: The following scenario defeats the ability to give criterion hotstrings
-					// precedence over non-criterion:
-					// A global/non-criterion hotstring is higher up in the file than some criterion hotstring,
-					// but both are eligible to fire at the same instant.  In v1.0.41, the global one would
-					// take precedence because it's higher up (and this behavior is preserved not just for
-					// backward compatibility, but also because it might be more flexible -- this is because
-					// unlike hotkeys, variants aren't stored under a parent hotstring, so we don't know which
-					// ones are exact dupes of each other (same options+abbreviation).  Thus, it would take
-					// extra code to determine this at runtime; and even if it were added, it might be
-					// more flexible not to do it; instead, to let the script determine (even by resorting to
-					// #IfWinNOTActive) what precedence hotstrings have with respect to each other.
-
-				//////////////////////////////////////////////////////////////
-				// MATCHING HOTSTRING WAS FOUND (since above didn't continue).
-				//////////////////////////////////////////////////////////////
-
-				// Now that we have a match, see if its InputLevel is allowed. If not,
-				// consider the key ignored (rather than continuing to search for more matches).
-				if (!HotInputLevelAllowsFiring(hs.mInputLevel, aEvent.dwExtraInfo, &pKeyHistoryCurr->event_type))
-					break;
-
-				// Since default KeyDelay is 0, and since that is expected to be typical, it seems
-				// best to unconditionally post a message rather than trying to handle the backspacing
-				// and replacing here.  This is because a KeyDelay of 0 might be fairly slow at
-				// sending keystrokes if the system is under heavy load, in which case we would
-				// not be returning to our caller in a timely fashion, which would case the OS to
-				// think the hook is unresponsive, which in turn would cause it to timeout and
-				// route the key through anyway (testing confirms this).
-				if (!hs.mConformToCase)
-					case_conform_mode = CASE_CONFORM_NONE;
-				else
-				{
-					// Find out what case the user typed the string in so that we can have the
-					// replacement produced in similar case:
-					cpcase_end = g_HSBuf + g_HSBufLength;
-					if (hs.mEndCharRequired)
-						--cpcase_end;
-					// Bug-fix for v1.0.19: First find out how many of the characters in the abbreviation
-					// have upper and lowercase versions (i.e. exclude digits, punctuation, etc):
-					for (case_capable_characters = 0, first_char_with_case_is_upper = first_char_with_case_has_gone_by = false
-						, cpcase_start = cpcase_end - hs.mStringLength
-						; cpcase_start < cpcase_end; ++cpcase_start)
-						if (IsCharLower(*cpcase_start) || IsCharUpper(*cpcase_start)) // A case-capable char.
-						{
-							if (!first_char_with_case_has_gone_by)
-							{
-								first_char_with_case_has_gone_by = true;
-								if (IsCharUpper(*cpcase_start))
-									first_char_with_case_is_upper = true; // Override default.
-							}
-							++case_capable_characters;
-						}
-					if (!case_capable_characters) // All characters in the abbreviation are caseless.
-						case_conform_mode = CASE_CONFORM_NONE;
-					else if (case_capable_characters == 1)
-						// Since there is only a single character with case potential, it seems best as
-						// a default behavior to capitalize the first letter of the replacement whenever
-						// that character was typed in uppercase.  The behavior can be overridden by
-						// turning off the case-conform mode.
-						case_conform_mode = first_char_with_case_is_upper ? CASE_CONFORM_FIRST_CAP : CASE_CONFORM_NONE;
-					else // At least two characters have case potential. If all of them are upper, use ALL_CAPS.
-					{
-						if (!first_char_with_case_is_upper) // It can't be either FIRST_CAP or ALL_CAPS.
-							case_conform_mode = CASE_CONFORM_NONE;
-						else // First char is uppercase, and if all the others are too, this will be ALL_CAPS.
-						{
-							case_conform_mode = CASE_CONFORM_FIRST_CAP; // Set default.
-							// Bug-fix for v1.0.19: Changed !IsCharUpper() below to IsCharLower() so that
-							// caseless characters such as the @ symbol do not disqualify an abbreviation
-							// from being considered "all uppercase":
-							for (cpcase_start = cpcase_end - hs.mStringLength; cpcase_start < cpcase_end; ++cpcase_start)
-								if (IsCharLower(*cpcase_start)) // Use IsCharLower to better support chars from non-English languages.
-									break; // Any lowercase char disqualifies CASE_CONFORM_ALL_CAPS.
-							if (cpcase_start == cpcase_end) // All case-possible characters are uppercase.
-								case_conform_mode = CASE_CONFORM_ALL_CAPS;
-							//else leave it at the default set above.
-						}
-					}
-				}
-
-				if (hs.mDoBackspace || hs.mOmitEndChar) // Fix for v1.0.37.07: Added hs.mOmitEndChar so that B0+O will omit the ending character.
-				{
-					// Have caller suppress this final key pressed by the user, since it would have
-					// to be backspaced over anyway.  Even if there is a visible Input command in
-					// progress, this should still be okay since the input will still see the key,
-					// it's just that the active window won't see it, which is okay since once again
-					// it would have to be backspaced over anyway.  UPDATE: If an Input is in progress,
-					// it should not receive this final key because otherwise the hotstring's backspacing
-					// would backspace one too few times from the Input's point of view, thus the input
-					// would have one extra, unwanted character left over (namely the first character
-					// of the hotstring's abbreviation).  However, this method is not a complete
-					// solution because it fails to work under a situation such as the following:
-					// A hotstring script is started, followed by a separate script that uses the
-					// Input command.  The Input script's hook will take precedence (since it was
-					// started most recently), thus when the Hotstring's script's hook does sends
-					// its replacement text, the Input script's hook will get a hold of it first
-					// before the Hotstring's script has a chance to suppress it.  In other words,
-					// The Input command will capture the ending character and then there will
-					// be insufficient backspaces sent to clear the abbreviation out of it.  This
-					// situation is quite rare so for now it's just mentioned here as a known limitation.
-					treat_as_visible = false; // It might already have been false due to an invisible-input in progress, etc.
-					suppress_hotstring_final_char = true; // This var probably must be separate from treat_as_visible to support invisible inputs.
-				}
-
-				// Post the message rather than sending it, because Send would need
-				// SendMessageTimeout(), which is undesirable because the whole point of
-				// making this hook thread separate from the main thread is to have it be
-				// maximally responsive (especially to prevent mouse cursor lag).
-				// Put the end char in the LOWORD and the case_conform_mode in the HIWORD.
-				// Casting to UCHAR might be necessary to avoid problems when MAKELONG
-				// casts a signed char to an unsigned WORD.
-				// UPDATE: In v1.0.42.01, the message is posted later (by our caller) to avoid
-				// situations in which the message arrives and is processed by the main thread
-				// before we finish processing the hotstring's final keystroke here.  This avoids
-				// problems with a script calling GetKeyState() and getting an inaccurate value
-				// because the hook thread is either pre-empted or is running in parallel
-				// (multiprocessor) and hasn't yet returned 1 or 0 to determine whether the final
-				// keystroke is suppressed or passed through to the active window.
-				// UPDATE: In v1.0.43, the ending character is not put into the Lparam when
-				// hs.mDoBackspace is false.  This is because:
-				// 1) When not backspacing, it's more correct that the ending character appear where the
-				//    user typed it rather than appearing at the end of the replacement.
-				// 2) Two ending characters would appear in pre-1.0.43 versions: one where the user typed
-				//    it and one at the end, which is clearly incorrect.
-				aHotstringWparamToPost = u; // Override the default set by caller.
-				aHotstringLparamToPost = MAKELONG(
-					hs.mEndCharRequired  // v1.0.48.04: Fixed to omit "&& hs.mDoBackspace" so that A_EndChar is set properly even for option "B0" (no backspacing).
-						? g_HSBuf[g_HSBufLength - 1]  // Used by A_EndChar and Hotstring::DoReplace().
-						: 0
-					, case_conform_mode);
-
-				// Clean up.
-				// The keystrokes to be sent by the other thread upon receiving the message prepared above
-				// will not be received by this function because:
-				// 1) CollectInput() is not called for simulated keystrokes.
-				// 2) The keyboard hook is absent during a SendInput hotstring.
-				// 3) The keyboard hook does not receive SendPlay keystrokes (if hotstring is of that type).
-				// Consequently, the buffer should be adjusted below to ensure it's in the right state to work
-				// in situations such as the user typing two hotstrings consecutively where the ending
-				// character of the first is used as a valid starting character (non-alphanumeric) for the next.
-				if (hs.mReplacement)
-				{
-					// Since the buffer no longer reflects what is actually on screen to the left
-					// of the caret position (since a replacement is about to be done), reset the
-					// buffer, except for any end-char (since that might legitimately form part
-					// of another hot string adjacent to the one just typed).  The end-char
-					// sent by DoReplace() won't be captured (since it's "ignored input", which
-					// is why it's put into the buffer manually here):
-					if (hs.mEndCharRequired)
-					{
-						*g_HSBuf = g_HSBuf[g_HSBufLength - 1];
-						g_HSBufLength = 1; // The buffer will be terminated to reflect this length later below.
-					}
-					else
-						g_HSBufLength = 0; // The buffer will be terminated to reflect this length later below.
-				}
-				else if (hs.mDoBackspace)
-				{
-					// It's *not* a replacement, but we're doing backspaces, so adjust buf for backspaces
-					// and the fact that the final char of the HS (if no end char) or the end char
-					// (if end char required) will have been suppressed and never made it to the
-					// active window.  A simpler way to understand is to realize that the buffer now
-					// contains (for recognition purposes, in its right side) the hotstring and its
-					// end char (if applicable), so remove both:
-					g_HSBufLength -= hs.mStringLength;
-					if (hs.mEndCharRequired)
-						--g_HSBufLength; // The buffer will be terminated to reflect this length later below.
-				}
-
-				// v1.0.38.04: Fixed the following mDoReset section by moving it beneath the above because
-				// the above relies on the fact that the buffer has not yet been reset.
-				// v1.0.30: mDoReset was added to prevent hotstrings such as the following
-				// from firing twice in a row, if you type 11 followed by another 1 afterward:
-				//:*?B0:11::
-				//MsgBox,0,test,%A_ThisHotkey%,1 ; Show which key was pressed and close the window after a second.
-				//return
-				// There are probably many other uses for the reset option (albeit obscure, but they have
-				// been brought up in the forum at least twice).
-				if (hs.mDoReset)
-					g_HSBufLength = 0; // Further below, the buffer will be terminated to reflect this change.
-
-				// In case the above changed the value of g_HSBufLength, terminate the buffer at that position:
-				g_HSBuf[g_HSBufLength] = '\0';
-
-				break; // Somewhere above would have done "continue" if a match wasn't found.
-			} // for()
-		} // if buf not empty
-	} // Yes, collect hotstring input.
+				*g_HSBuf = '\0';
+				g_HSBufLength = 0;
+			}
+			break;
+		case VK_BACK:
+			// v1.0.21: Only true (unmodified) backspaces are recognized by the below.  Another reason to do
+			// this is that ^backspace has a native function (delete word) different than backspace in many editors.
+			// Fix for v1.0.38: Below now uses g_modifiersLR_logical vs. physical because it's the logical state
+			// that determines whether the backspace behaves like an unmodified backspace.  This solves the issue
+			// of the Input command collecting simulated backspaces as real characters rather than recognizing
+			// them as a means to erase the previous character in the buffer.
+			if (!g_modifiersLR_logical && g_HSBufLength)
+				g_HSBuf[--g_HSBufLength] = '\0';
+			// Fall through to the check below in case this {BS} completed a dead key sequence.
+			break;
+		}
+		if (char_count > 0
+			&& !CollectHotstring(aEvent, ch, char_count, active_window, pKeyHistoryCurr, aHotstringWparamToPost, aHotstringLparamToPost))
+			return false; // Suppress.
+	}
 
 	// Fix for v1.0.37.06: The following section was moved beneath the hotstring section so that
-	// the hotstring section has a chance to set treat_as_visible to false for use below. This fixes
+	// the hotstring section has a chance to bypass reinsertion of the dead key below. This fixes
 	// wildcard hotstrings whose final character is diacritic, which would otherwise have the
 	// dead key reinserted below, which in turn would cause the hotstring's first backspace to fire
 	// the dead key (which kills the backspace, turning it into the dead key character itself).
@@ -2962,108 +2571,478 @@ bool CollectInput(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type aSC,
 	// the letter "a" to produce á.
 	if (dead_key_sequence_complete)
 	{
-		// If there's an Input in progress and it's invisible, the foreground app won't see the keystrokes,
-		// thus no need to re-insert the dead key into the keyboard buffer.  Note that the Input might have
-		// been in progress upon entry to this function but now isn't due to INPUT_TERMINATED_BY_ENDKEY above.
-		if (treat_as_visible)
-		{
-			// Since our call to ToUnicodeOrAsciiEx above has removed the pending dead key from the
-			// buffer, we need to put it back for the active window or the next hook in the chain:
-			ZeroMemory(key_state, 256);
-			AdjustKeyState(key_state
-				, (sPendingDeadKeyUsedAltGr ? MOD_LCONTROL|MOD_RALT : 0)
-				| (sPendingDeadKeyUsedShift ? MOD_RSHIFT : 0)); // Left vs Right Shift probably doesn't matter in this context.
-			TCHAR temp_ch[2];
-			ToUnicodeOrAsciiEx(sPendingDeadKeyVK, sPendingDeadKeySC, key_state, temp_ch, 0, active_window_keybd_layout);
-			sPendingDeadKeyVK = 0;
-		}
+		// Since our call to ToUnicodeOrAsciiEx above has removed the pending dead key from the
+		// buffer, we need to put it back for the active window or the next hook in the chain.
+		// This is not needed when ch (the character or characters produced by combining the dead
+		// key with the last keystroke) is being suppressed, since in that case we don't want the
+		// dead key back in the buffer.
+		ZeroMemory(key_state, 256);
+		AdjustKeyState(key_state
+			, (sPendingDeadKeyUsedAltGr ? MOD_LCONTROL|MOD_RALT : 0)
+			| (sPendingDeadKeyUsedShift ? MOD_RSHIFT : 0)); // Left vs Right Shift probably doesn't matter in this context.
+		TCHAR temp_ch[2];
+		ToUnicodeOrAsciiEx(sPendingDeadKeyVK, sPendingDeadKeySC, key_state, temp_ch, 0, active_window_keybd_layout);
+		sPendingDeadKeyVK = 0;
 	}
 
-	// Note that it might have been in progress upon entry to this function but now isn't due to
-	// INPUT_TERMINATED_BY_ENDKEY above:
-	if (!do_input || g_input.status != INPUT_IN_PROGRESS || suppress_hotstring_final_char)
-		return treat_as_visible; // Returns "false" in cases such as suppress_hotstring_final_char==true.
+	return true; // Visible.
+}
 
-	// Since above didn't return, the only thing remaining to do below is handle the input that's
-	// in progress (which we know is the case otherwise other opportunities to return above would
-	// have done so).  Hotstrings (if any) have already been fully handled by the above.
+
+
+bool CollectHotstring(KBDLLHOOKSTRUCT &aEvent, TCHAR ch[], int char_count, HWND active_window
+	, KeyHistoryItem *pKeyHistoryCurr, WPARAM &aHotstringWparamToPost, LPARAM &aHotstringLparamToPost)
+{
+	bool suppress_hotstring_final_char = false; // Set default.
+
+	if (active_window != g_HShwnd)
+	{
+		// Since the buffer tends to correspond to the text to the left of the caret in the
+		// active window, if the active window changes, it seems best to reset the buffer
+		// to avoid misfires.
+		g_HShwnd = active_window;
+		*g_HSBuf = '\0';
+		g_HSBufLength = 0;
+	}
+	else if (HS_BUF_SIZE - g_HSBufLength < 3) // Not enough room for up-to-2 chars.
+	{
+		// Make room in buffer by removing chars from the front that are no longer needed for HS detection:
+		// Bug-fixed the below for v1.0.21:
+		g_HSBufLength = (int)_tcslen(g_HSBuf + HS_BUF_DELETE_COUNT);  // The new length.
+		tmemmove(g_HSBuf, g_HSBuf + HS_BUF_DELETE_COUNT, g_HSBufLength + 1); // +1 to include the zero terminator.
+	}
+
+	g_HSBuf[g_HSBufLength++] = ch[0];
+	if (char_count > 1)
+		// MSDN: "This usually happens when a dead-key character (accent or diacritic) stored in the
+		// keyboard layout cannot be composed with the specified virtual key to form a single character."
+		g_HSBuf[g_HSBufLength++] = ch[1];
+	g_HSBuf[g_HSBufLength] = '\0';
+
+	if (g_HSBufLength)
+	{
+		TCHAR *cphs, *cpbuf, *cpcase_start, *cpcase_end;
+		int case_capable_characters;
+		bool first_char_with_case_is_upper, first_char_with_case_has_gone_by;
+		CaseConformModes case_conform_mode;
+
+		// Searching through the hot strings in the original, physical order is the documented
+		// way in which precedence is determined, i.e. the first match is the only one that will
+		// be triggered.
+		for (HotstringIDType u = 0; u < Hotstring::sHotstringCount; ++u)
+		{
+			Hotstring &hs = *Hotstring::shs[u];  // For performance and convenience.
+			if (hs.mSuspended)
+				continue;
+			if (hs.mEndCharRequired)
+			{
+				if (g_HSBufLength <= hs.mStringLength) // Ensure the string is long enough for loop below.
+					continue;
+				if (!_tcschr(g_EndChars, g_HSBuf[g_HSBufLength - 1])) // It's not an end-char, so no match.
+					continue;
+				cpbuf = g_HSBuf + g_HSBufLength - 2; // Init once for both loops. -2 to omit end-char.
+			}
+			else // No ending char required.
+			{
+				if (g_HSBufLength < hs.mStringLength) // Ensure the string is long enough for loop below.
+					continue;
+				cpbuf = g_HSBuf + g_HSBufLength - 1; // Init once for both loops.
+			}
+			cphs = hs.mString + hs.mStringLength - 1; // Init once for both loops.
+			// Check if this item is a match:
+			if (hs.mCaseSensitive)
+			{
+				for (; cphs >= hs.mString; --cpbuf, --cphs)
+					if (*cpbuf != *cphs)
+						break;
+			}
+			else // case insensitive
+				// v1.0.43.03: Using CharLower vs. tolower seems the best default behavior (even though slower)
+				// so that languages in which the higher ANSI characters are common will see "Ä" == "ä", etc.
+				for (; cphs >= hs.mString; --cpbuf, --cphs)
+					if (ltolower(*cpbuf) != ltolower(*cphs)) // v1.0.43.04: Fixed crash by properly casting to UCHAR (via macro).
+						break;
+
+			// Check if one of the loops above found a matching hotstring (relies heavily on
+			// short-circuit boolean order):
+			if (   cphs >= hs.mString // One of the loops above stopped early due discovering "no match"...
+				// ... or it did but the "?" option is not present to protect from the fact that
+				// what lies to the left of this hotstring abbreviation is an alphanumeric character:
+				|| !hs.mDetectWhenInsideWord && cpbuf >= g_HSBuf && IsHotstringWordChar(*cpbuf)
+				// ... v1.0.41: Or it's a perfect match but the right window isn't active or doesn't exist.
+				// In that case, continue searching for other matches in case the script contains
+				// hotstrings that would trigger simultaneously were it not for the "only one" rule.
+				|| !HotCriterionAllowsFiring(hs.mHotCriterion, hs.mName)   )
+				continue; // No match or not eligible to fire.
+				// v1.0.42: The following scenario defeats the ability to give criterion hotstrings
+				// precedence over non-criterion:
+				// A global/non-criterion hotstring is higher up in the file than some criterion hotstring,
+				// but both are eligible to fire at the same instant.  In v1.0.41, the global one would
+				// take precedence because it's higher up (and this behavior is preserved not just for
+				// backward compatibility, but also because it might be more flexible -- this is because
+				// unlike hotkeys, variants aren't stored under a parent hotstring, so we don't know which
+				// ones are exact dupes of each other (same options+abbreviation).  Thus, it would take
+				// extra code to determine this at runtime; and even if it were added, it might be
+				// more flexible not to do it; instead, to let the script determine (even by resorting to
+				// #IfWinNOTActive) what precedence hotstrings have with respect to each other.
+
+			//////////////////////////////////////////////////////////////
+			// MATCHING HOTSTRING WAS FOUND (since above didn't continue).
+			//////////////////////////////////////////////////////////////
+
+			// Now that we have a match, see if its InputLevel is allowed. If not,
+			// consider the key ignored (rather than continuing to search for more matches).
+			if (!HotInputLevelAllowsFiring(hs.mInputLevel, aEvent.dwExtraInfo, &pKeyHistoryCurr->event_type))
+				break;
+
+			// Since default KeyDelay is 0, and since that is expected to be typical, it seems
+			// best to unconditionally post a message rather than trying to handle the backspacing
+			// and replacing here.  This is because a KeyDelay of 0 might be fairly slow at
+			// sending keystrokes if the system is under heavy load, in which case we would
+			// not be returning to our caller in a timely fashion, which would case the OS to
+			// think the hook is unresponsive, which in turn would cause it to timeout and
+			// route the key through anyway (testing confirms this).
+			if (!hs.mConformToCase)
+				case_conform_mode = CASE_CONFORM_NONE;
+			else
+			{
+				// Find out what case the user typed the string in so that we can have the
+				// replacement produced in similar case:
+				cpcase_end = g_HSBuf + g_HSBufLength;
+				if (hs.mEndCharRequired)
+					--cpcase_end;
+				// Bug-fix for v1.0.19: First find out how many of the characters in the abbreviation
+				// have upper and lowercase versions (i.e. exclude digits, punctuation, etc):
+				for (case_capable_characters = 0, first_char_with_case_is_upper = first_char_with_case_has_gone_by = false
+					, cpcase_start = cpcase_end - hs.mStringLength
+					; cpcase_start < cpcase_end; ++cpcase_start)
+					if (IsCharLower(*cpcase_start) || IsCharUpper(*cpcase_start)) // A case-capable char.
+					{
+						if (!first_char_with_case_has_gone_by)
+						{
+							first_char_with_case_has_gone_by = true;
+							if (IsCharUpper(*cpcase_start))
+								first_char_with_case_is_upper = true; // Override default.
+						}
+						++case_capable_characters;
+					}
+				if (!case_capable_characters) // All characters in the abbreviation are caseless.
+					case_conform_mode = CASE_CONFORM_NONE;
+				else if (case_capable_characters == 1)
+					// Since there is only a single character with case potential, it seems best as
+					// a default behavior to capitalize the first letter of the replacement whenever
+					// that character was typed in uppercase.  The behavior can be overridden by
+					// turning off the case-conform mode.
+					case_conform_mode = first_char_with_case_is_upper ? CASE_CONFORM_FIRST_CAP : CASE_CONFORM_NONE;
+				else // At least two characters have case potential. If all of them are upper, use ALL_CAPS.
+				{
+					if (!first_char_with_case_is_upper) // It can't be either FIRST_CAP or ALL_CAPS.
+						case_conform_mode = CASE_CONFORM_NONE;
+					else // First char is uppercase, and if all the others are too, this will be ALL_CAPS.
+					{
+						case_conform_mode = CASE_CONFORM_FIRST_CAP; // Set default.
+						// Bug-fix for v1.0.19: Changed !IsCharUpper() below to IsCharLower() so that
+						// caseless characters such as the @ symbol do not disqualify an abbreviation
+						// from being considered "all uppercase":
+						for (cpcase_start = cpcase_end - hs.mStringLength; cpcase_start < cpcase_end; ++cpcase_start)
+							if (IsCharLower(*cpcase_start)) // Use IsCharLower to better support chars from non-English languages.
+								break; // Any lowercase char disqualifies CASE_CONFORM_ALL_CAPS.
+						if (cpcase_start == cpcase_end) // All case-possible characters are uppercase.
+							case_conform_mode = CASE_CONFORM_ALL_CAPS;
+						//else leave it at the default set above.
+					}
+				}
+			}
+
+			if (hs.mDoBackspace || hs.mOmitEndChar) // Fix for v1.0.37.07: Added hs.mOmitEndChar so that B0+O will omit the ending character.
+			{
+				// Have caller suppress this final key pressed by the user, since it would have
+				// to be backspaced over anyway.  Even if there is a visible Input command in
+				// progress, this should still be okay since the input will still see the key,
+				// it's just that the active window won't see it, which is okay since once again
+				// it would have to be backspaced over anyway.  UPDATE: If an Input is in progress,
+				// it should not receive this final key because otherwise the hotstring's backspacing
+				// would backspace one too few times from the Input's point of view, thus the input
+				// would have one extra, unwanted character left over (namely the first character
+				// of the hotstring's abbreviation).  However, this method is not a complete
+				// solution because it fails to work under a situation such as the following:
+				// A hotstring script is started, followed by a separate script that uses the
+				// Input command.  The Input script's hook will take precedence (since it was
+				// started most recently), thus when the Hotstring's script's hook does sends
+				// its replacement text, the Input script's hook will get a hold of it first
+				// before the Hotstring's script has a chance to suppress it.  In other words,
+				// The Input command will capture the ending character and then there will
+				// be insufficient backspaces sent to clear the abbreviation out of it.  This
+				// situation is quite rare so for now it's just mentioned here as a known limitation.
+				suppress_hotstring_final_char = true;
+			}
+
+			// Post the message rather than sending it, because Send would need
+			// SendMessageTimeout(), which is undesirable because the whole point of
+			// making this hook thread separate from the main thread is to have it be
+			// maximally responsive (especially to prevent mouse cursor lag).
+			// Put the end char in the LOWORD and the case_conform_mode in the HIWORD.
+			// Casting to UCHAR might be necessary to avoid problems when MAKELONG
+			// casts a signed char to an unsigned WORD.
+			// UPDATE: In v1.0.42.01, the message is posted later (by our caller) to avoid
+			// situations in which the message arrives and is processed by the main thread
+			// before we finish processing the hotstring's final keystroke here.  This avoids
+			// problems with a script calling GetKeyState() and getting an inaccurate value
+			// because the hook thread is either pre-empted or is running in parallel
+			// (multiprocessor) and hasn't yet returned 1 or 0 to determine whether the final
+			// keystroke is suppressed or passed through to the active window.
+			// UPDATE: In v1.0.43, the ending character is not put into the Lparam when
+			// hs.mDoBackspace is false.  This is because:
+			// 1) When not backspacing, it's more correct that the ending character appear where the
+			//    user typed it rather than appearing at the end of the replacement.
+			// 2) Two ending characters would appear in pre-1.0.43 versions: one where the user typed
+			//    it and one at the end, which is clearly incorrect.
+			aHotstringWparamToPost = u; // Override the default set by caller.
+			aHotstringLparamToPost = MAKELONG(
+				hs.mEndCharRequired  // v1.0.48.04: Fixed to omit "&& hs.mDoBackspace" so that A_EndChar is set properly even for option "B0" (no backspacing).
+					? g_HSBuf[g_HSBufLength - 1]  // Used by A_EndChar and Hotstring::DoReplace().
+					: 0
+				, case_conform_mode);
+
+			// Clean up.
+			// The keystrokes to be sent by the other thread upon receiving the message prepared above
+			// will not be received by this function because:
+			// 1) CollectInput() is not called for simulated keystrokes.
+			// 2) The keyboard hook is absent during a SendInput hotstring.
+			// 3) The keyboard hook does not receive SendPlay keystrokes (if hotstring is of that type).
+			// Consequently, the buffer should be adjusted below to ensure it's in the right state to work
+			// in situations such as the user typing two hotstrings consecutively where the ending
+			// character of the first is used as a valid starting character (non-alphanumeric) for the next.
+			if (hs.mReplacement)
+			{
+				// Since the buffer no longer reflects what is actually on screen to the left
+				// of the caret position (since a replacement is about to be done), reset the
+				// buffer, except for any end-char (since that might legitimately form part
+				// of another hot string adjacent to the one just typed).  The end-char
+				// sent by DoReplace() won't be captured (since it's "ignored input", which
+				// is why it's put into the buffer manually here):
+				if (hs.mEndCharRequired)
+				{
+					*g_HSBuf = g_HSBuf[g_HSBufLength - 1];
+					g_HSBufLength = 1; // The buffer will be terminated to reflect this length later below.
+				}
+				else
+					g_HSBufLength = 0; // The buffer will be terminated to reflect this length later below.
+			}
+			else if (hs.mDoBackspace)
+			{
+				// It's *not* a replacement, but we're doing backspaces, so adjust buf for backspaces
+				// and the fact that the final char of the HS (if no end char) or the end char
+				// (if end char required) will have been suppressed and never made it to the
+				// active window.  A simpler way to understand is to realize that the buffer now
+				// contains (for recognition purposes, in its right side) the hotstring and its
+				// end char (if applicable), so remove both:
+				g_HSBufLength -= hs.mStringLength;
+				if (hs.mEndCharRequired)
+					--g_HSBufLength; // The buffer will be terminated to reflect this length later below.
+			}
+
+			// v1.0.38.04: Fixed the following mDoReset section by moving it beneath the above because
+			// the above relies on the fact that the buffer has not yet been reset.
+			// v1.0.30: mDoReset was added to prevent hotstrings such as the following
+			// from firing twice in a row, if you type 11 followed by another 1 afterward:
+			//:*?B0:11::
+			//MsgBox,0,test,%A_ThisHotkey%,1 ; Show which key was pressed and close the window after a second.
+			//return
+			// There are probably many other uses for the reset option (albeit obscure, but they have
+			// been brought up in the forum at least twice).
+			if (hs.mDoReset)
+				g_HSBufLength = 0; // Further below, the buffer will be terminated to reflect this change.
+
+			// In case the above changed the value of g_HSBufLength, terminate the buffer at that position:
+			g_HSBuf[g_HSBufLength] = '\0';
+
+			break; // Somewhere above would have done "continue" if a match wasn't found.
+		} // for()
+	} // if buf not empty
+	return !suppress_hotstring_final_char;
+}
+
+
+
+bool CollectInputHook(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type aSC, TCHAR aChar[], int aCharCount
+	, bool aIsIgnored)
+{
+	auto *input = g_input;
+	for (; input; input = input->Prev)
+	{
+		if (!input->InProgress() || !input->IsInteresting(aEvent))
+			continue;
+		
+		UCHAR key_flags = input->KeyVK[aVK] | input->KeySC[aSC];
+		
+		// aCharCount is negative for dead keys, which are treated as text but not collected.
+		bool treat_as_text = aCharCount && !(key_flags & INPUT_KEY_IGNORE_TEXT);
+		bool collect_chars = treat_as_text && aCharCount > 0;
+
+		// Determine visibility based on options and whether the key produced text.
+		// Negative aCharCount (dead key) is treated as text in this context.
+		bool visible;
+		if (key_flags & INPUT_KEY_VISIBILITY_MASK)
+			visible = key_flags & INPUT_KEY_VISIBLE;
+		else if (kvk[aVK].as_modifiersLR || kvk[aVK].pForceToggle)
+			visible = true; // Do not suppress modifiers or toggleable keys unless specified by KeyOpt().
+		else
+			visible = treat_as_text ? input->VisibleText : input->VisibleNonText;
+
+		if (key_flags & END_KEY_ENABLED) // A terminating keystroke has now occurred unless the shift state isn't right.
+		{
+			bool end_if_shift_is_down = key_flags & END_KEY_WITH_SHIFT;
+			bool end_if_shift_is_not_down = key_flags & END_KEY_WITHOUT_SHIFT;
+			bool shift_is_down = g_modifiersLR_logical & (MOD_LSHIFT | MOD_RSHIFT);
+			if (shift_is_down ? end_if_shift_is_down : end_if_shift_is_not_down)
+			{
+				// The shift state is correct to produce the desired end-key.
+				input->EndByKey(aVK, aSC, input->KeySC[aSC], shift_is_down && !end_if_shift_is_not_down);
+				if (!visible)
+					break;
+				continue;
+			}
+		}
+		
+		// Fix for v2.0: Shift is allowed as it generally has no effect on the native function of Backspace.
+		// This is probably connected with the fact that Shift+BS is also transcribed to `b, which we don't want.
+		if (aVK == VK_BACK && input->BackspaceIsUndo
+			&& !(g_modifiersLR_logical & ~(MOD_LSHIFT | MOD_RSHIFT)))
+		{
+			if (input->BufferLength)
+				input->Buffer[--input->BufferLength] = '\0';
+			visible = input->VisibleText; // Override VisibleNonText.
+			// Fall through to the check below in case this {BS} completed a dead key sequence.
+		}
+
+		if (collect_chars)
+			input->CollectChar(aChar, aCharCount);
+		
+		// Posting the notifications after CollectChar() might reduce the odds of a race condition.
+		if (((key_flags & INPUT_KEY_NOTIFY) || input->NotifyNonText && !treat_as_text)
+			&& input->ScriptObject && input->ScriptObject->onKeyDown)
+		{
+			// input is passed because the alternative would require the main thread to
+			// iterate through the Input chain and determine which ones should be notified.
+			// This would mean duplicating much of the logic that's used here, and would be
+			// complicated by the possibility of an Input being terminated while OnKeyDown
+			// is being executed (and thereby breaking the list).
+			// This leaves room only for the bare essential parameters: aVK and aSC.
+			PostMessage(g_hWnd, AHK_INPUT_KEYDOWN, (WPARAM)input, (aSC << 16) | aVK);
+		}
+		// Seems best to not collect dead key chars by default; if needed, OnDeadChar
+		// could be added, or the script could mark each dead key for OnKeyDown.
+		if (collect_chars && input->ScriptObject && input->ScriptObject->onChar)
+		{
+			PostMessage(g_hWnd, AHK_INPUT_CHAR, (WPARAM)input, ((TBYTE)aChar[1] << 16) | (TBYTE)aChar[0]);
+		}
+
+		if (!visible)
+			break;
+	}
+	if (input) // Early break (invisible input).
+	{
+		if (aSC)
+			input->KeySC[aSC] |= INPUT_KEY_DOWN_SUPPRESSED;
+		else
+			input->KeyVK[aVK] |= INPUT_KEY_DOWN_SUPPRESSED;
+		return false;
+	}
+	return true;
+}
+
+
+
+bool input_type::IsInteresting(KBDLLHOOKSTRUCT &aEvent)
+{
+	return MinSendLevel == 0 ? true : HotInputLevelAllowsFiring(MinSendLevel - 1, aEvent.dwExtraInfo, NULL);
+}
+
+
+
+void input_type::CollectChar(TCHAR *ch, int char_count)
+{
+	const auto buffer = Buffer; // Marginally reduces code size.
+	const auto match = this->match;
 
 	for (int i = 0; i < char_count; ++i)
 	{
-		if (g_input.CaseSensitive ? _tcschr(g_input.EndChars, ch[i]) : ltcschr(g_input.EndChars, ch[i]))
+		if (CaseSensitive ? _tcschr(EndChars, ch[i]) : ltcschr(EndChars, ch[i]))
 		{
-			g_input.status = INPUT_TERMINATED_BY_ENDKEY;
-			g_input.EndingChar = ch[i]; // EndingVK etc. are ignored when this is non-zero.
-			return treat_as_visible;
+			EndByChar(ch[i]);
+			return;
 		}
-		if (g_input.BufferLength == g_input.BufferLengthMax)
+		if (BufferLength == BufferLengthMax)
+		{
+			if (!BufferLength) // For L0, collect nothing but allow OnChar, etc.
+				return;
 			break;
-		g_input.buffer[g_input.BufferLength++] = ch[i];
-		g_input.buffer[g_input.BufferLength] = '\0';
+		}
+		buffer[BufferLength++] = ch[i];
+		buffer[BufferLength] = '\0';
 	}
 
 	// Check if the buffer now matches any of the key phrases, if there are any:
-	if (g_input.FindAnywhere)
+	if (FindAnywhere)
 	{
-		if (g_input.CaseSensitive)
+		if (CaseSensitive)
 		{
-			for (UINT i = 0; i < g_input.MatchCount; ++i)
+			for (UINT i = 0; i < MatchCount; ++i)
 			{
-				if (_tcsstr(g_input.buffer, g_input.match[i]))
+				if (_tcsstr(buffer, match[i]))
 				{
-					g_input.status = INPUT_TERMINATED_BY_MATCH;
-					return treat_as_visible;
+					EndByMatch(i);
+					return;
 				}
 			}
 		}
 		else // Not case sensitive.
 		{
-			for (UINT i = 0; i < g_input.MatchCount; ++i)
+			for (UINT i = 0; i < MatchCount; ++i)
 			{
 				// v1.0.43.03: Changed lstrcasestr to strcasestr because it seems unlikely to break any existing
 				// scripts and is also more useful given that Input with match-list is pretty rarely used,
 				// and even when it is used, match lists are usually short (so performance isn't impacted much
 				// by this change).
-				if (lstrcasestr(g_input.buffer, g_input.match[i]))
+				if (lstrcasestr(buffer, match[i]))
 				{
-					g_input.status = INPUT_TERMINATED_BY_MATCH;
-					return treat_as_visible;
+					EndByMatch(i);
+					return;
 				}
 			}
 		}
 	}
 	else // Exact match is required
 	{
-		if (g_input.CaseSensitive)
+		if (CaseSensitive)
 		{
-			for (UINT i = 0; i < g_input.MatchCount; ++i)
+			for (UINT i = 0; i < MatchCount; ++i)
 			{
-				if (!_tcscmp(g_input.buffer, g_input.match[i]))
+				if (!_tcscmp(buffer, match[i]))
 				{
-					g_input.status = INPUT_TERMINATED_BY_MATCH;
-					return treat_as_visible;
+					EndByMatch(i);
+					return;
 				}
 			}
 		}
 		else // Not case sensitive.
 		{
-			for (UINT i = 0; i < g_input.MatchCount; ++i)
+			for (UINT i = 0; i < MatchCount; ++i)
 			{
 				// v1.0.43.03: Changed to locale-insensitive search.  See similar v1.0.43.03 comment above for more details.
-				if (!lstrcmpi(g_input.buffer, g_input.match[i]))
+				if (!lstrcmpi(buffer, match[i]))
 				{
-					g_input.status = INPUT_TERMINATED_BY_MATCH;
-					return treat_as_visible;
+					EndByMatch(i);
+					return;
 				}
 			}
 		}
 	}
 
 	// Otherwise, no match found.
-	if (g_input.BufferLength >= g_input.BufferLengthMax)
-		g_input.status = INPUT_LIMIT_REACHED;
-	return treat_as_visible;
-#undef shs  // To avoid naming conflicts
+	if (BufferLength >= BufferLengthMax)
+		EndByLimit();
 }
 
 
@@ -3100,40 +3079,6 @@ void UpdateKeybdState(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type 
 // might have adjusted vk, namely to make it a left/right specific modifier key rather than a
 // neutral one.
 {
-	// See above notes near the first mention of SHIFT_KEY_WORKAROUND_TIMEOUT for details.
-	// This part of the workaround can be tested via "NumpadEnd::KeyHistory".  Turn on numlock,
-	// hold down shift, and press numpad1. The hotkey will fire and the status should display
-	// that the shift key is physically, but not logically down at that exact moment:
-	if (sPriorEventWasPhysical && (sPriorVK == VK_LSHIFT || sPriorVK == VK_SHIFT)  // But not RSHIFT.
-		&& (DWORD)(GetTickCount() - sPriorEventTickCount) < (DWORD)SHIFT_KEY_WORKAROUND_TIMEOUT)
-	{
-		bool current_is_dual_state = IsDualStateNumpadKey(aVK, aSC);
-		// Verified: Both down and up events for the *current* (not prior) key qualify for this:
-		bool fix_it = (!sPriorEventWasKeyUp && DualStateNumpadKeyIsDown())  // Case #4 of the workaround.
-			|| (sPriorEventWasKeyUp && aKeyUp && current_is_dual_state); // Case #5
-		if (fix_it)
-			sNextPhysShiftDownIsNotPhys = true;
-		// In the first case, both the numpad key-up and down events are eligible:
-		if (   fix_it || (sPriorEventWasKeyUp && current_is_dual_state)   )
-		{
-			// Since the prior event (the shift key) already happened (took effect) and since only
-			// now is it known that it shouldn't have been physical, undo the effects of it having
-			// been physical:
-			g_modifiersLR_physical = sPriorModifiersLR_physical;
-			g_PhysicalKeyState[VK_SHIFT] = sPriorShiftState;
-			g_PhysicalKeyState[VK_LSHIFT] = sPriorLShiftState;
-		}
-	}
-
-
-	// Must do this part prior to updating modifier state because we want to store the values
-	// as they are prior to the potentially-erroneously-physical shift key event takes effect.
-	// The state of these is also saved because we can't assume that a shift-down, for
-	// example, CHANGED the state to down, because it may have been already down before that:
-	sPriorModifiersLR_physical = g_modifiersLR_physical;
-	sPriorShiftState = g_PhysicalKeyState[VK_SHIFT];
-	sPriorLShiftState = g_PhysicalKeyState[VK_LSHIFT];
-
 	// If this function was called from SuppressThisKey(), these comments apply:
 	// Currently SuppressThisKey is only called with a modifier in the rare case
 	// when sDisguiseNextLWinUp/RWinUp is in effect.  But there may be other cases in the
@@ -3152,10 +3097,18 @@ void UpdateKeybdState(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type 
 		// that instance's g_modifiersLR_logical doesn't say it's down, which is definitely wrong.  So it
 		// is now omitted below:
 		bool is_not_ignored = (aEvent.dwExtraInfo != KEY_IGNORE);
-		bool event_is_physical = KeybdEventIsPhysical(aEvent.flags, aVK, aKeyUp);
+		bool is_fake_shift = aEvent.scanCode == SC_FAKE_LSHIFT || aEvent.scanCode == SC_FAKE_RSHIFT;
+		bool is_fake_ctrl = aEvent.scanCode == SC_FAKE_LCTRL; // AltGr.
+		// For backward-compatibility, fake LCtrl is marked as physical.
+		bool event_is_physical = !is_fake_shift && KeybdEventIsPhysical(aEvent.flags, aVK, aKeyUp);
 
 		if (aKeyUp)
 		{
+			// Keep track of system-generated Shift-up events (as part of a workaround for
+			// Shift becoming stuck due to interaction between Send and the system handling
+			// of shift-numpad combinations).  Find "fake shift" for more details.
+			if (is_fake_shift)
+				g_modifiersLR_numpad_mask |= modLR;
 			if (!aIsSuppressed)
 			{
 				g_modifiersLR_logical &= ~modLR;
@@ -3177,6 +3130,8 @@ void UpdateKeybdState(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type 
 			{
 				g_modifiersLR_physical &= ~modLR;
 				g_PhysicalKeyState[aVK] = 0;
+				if (!is_fake_ctrl)
+					g_modifiersLR_ctrlaltdel_mask &= ~modLR;
 				// If a modifier with an available neutral VK has been released, update the state
 				// of the neutral VK to be that of the opposite key (the one that wasn't released):
 				switch (aVK)
@@ -3192,6 +3147,7 @@ void UpdateKeybdState(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type 
 		}
 		else // Modifier key was pressed down.
 		{
+			g_modifiersLR_numpad_mask &= ~modLR;
 			if (!aIsSuppressed)
 			{
 				g_modifiersLR_logical |= modLR;
@@ -3202,6 +3158,8 @@ void UpdateKeybdState(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type 
 			{
 				g_modifiersLR_physical |= modLR;
 				g_PhysicalKeyState[aVK] = STATE_DOWN;
+				if (!is_fake_ctrl)
+					g_modifiersLR_ctrlaltdel_mask |= modLR;
 				// If a modifier with an available neutral VK has been pressed down (unlike LWIN & RWIN),
 				// update the state of the neutral VK to be down also:
 				switch (aVK)
@@ -3216,15 +3174,6 @@ void UpdateKeybdState(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type 
 			}
 		}
 	} // vk is a modifier key.
-
-	// Now that we're done using the old values (updating modifier state and calls to KeybdEventIsPhysical()
-	// above used them, as well as a section higher above), update these to their new values then call
-	// KeybdEventIsPhysical() again.
-	sPriorVK = aVK;
-	sPriorSC = aSC;
-	sPriorEventWasKeyUp = aKeyUp;
-	sPriorEventWasPhysical = KeybdEventIsPhysical(aEvent.flags, aVK, aKeyUp);
-	sPriorEventTickCount = GetTickCount();
 }
 
 
@@ -3239,20 +3188,17 @@ bool KeybdEventIsPhysical(DWORD aEventFlags, const vk_type aVK, bool aKeyUp)
 	// My: This also applies to mouse events, so use it for them too:
 	if (aEventFlags & LLKHF_INJECTED)
 		return false;
-	// So now we know it's a physical event.  But certain LSHIFT key-down events are driver-generated.
+	// So now we know it's a physical event.  But certain SHIFT key-down events are driver-generated.
 	// We want to be able to tell the difference because the Send command and other aspects
 	// of keyboard functionality need us to be accurate about which keys the user is physically
 	// holding down at any given time:
-	if (   (aVK == VK_LSHIFT || aVK == VK_SHIFT) && !aKeyUp   ) // But not RSHIFT.
+	if (   (aVK == VK_LSHIFT || aVK == VK_RSHIFT) && !aKeyUp   )
 	{
-		if (sNextPhysShiftDownIsNotPhys && !DualStateNumpadKeyIsDown())
-		{
-			sNextPhysShiftDownIsNotPhys = false;
-			return false;
-		}
-		// Otherwise (see notes about SHIFT_KEY_WORKAROUND_TIMEOUT above for details):
-		if (sPriorEventWasKeyUp && IsDualStateNumpadKey(sPriorVK, sPriorSC)
-			&& (DWORD)(GetTickCount() - sPriorEventTickCount) < (DWORD)SHIFT_KEY_WORKAROUND_TIMEOUT   )
+		// If the corresponding mask bit is set, the key was temporarily "released" by the system
+		// as part of translating a shift-numpad combination to its unshifted counterpart, and this
+		// event is the fake key-down which follows the release of the numpad key.  The system uses
+		// standard scancodes for this specific case, not SC_FAKE_LSHIFT or SC_FAKE_RSHIFT.
+		if (g_modifiersLR_numpad_mask & (aVK == VK_LSHIFT ? MOD_LSHIFT : MOD_RSHIFT))
 			return false;
 	}
 
@@ -3269,55 +3215,6 @@ bool KeybdEventIsPhysical(DWORD aEventFlags, const vk_type aVK, bool aKeyUp)
 	// events can impact the script's calls to GetKeyState("LControl", "P"), etc.
 	g_TimeLastInputPhysical = g_TimeLastInputKeyboard = GetTickCount();
 	return true;
-}
-
-
-
-bool DualStateNumpadKeyIsDown()
-{
-	// Note: GetKeyState() might not agree with us that the key is physically down because
-	// the hook may have suppressed it (e.g. if it's a hotkey).  Therefore, sPadState
-	// is the only way to know for user if the user is physically holding down a *qualified*
-	// Numpad key.  "Qualified" means that it must be a dual-state key and Numlock must have
-	// been ON at the time the key was first pressed down.  This last criteria is needed because
-	// physically holding down the shift-key will change VK generated by the driver to appear
-	// to be that of the numpad without the numlock key on.  In other words, we can't just
-	// consult the g_PhysicalKeyState array because it won't tell whether a key such as
-	// NumpadEnd is truly physically down:
-	for (int i = 0; i < PAD_TOTAL_COUNT; ++i)
-		if (sPadState[i])
-			return true;
-	return false;
-}
-
-
-
-bool IsDualStateNumpadKey(const vk_type aVK, const sc_type aSC)
-{
-	if (aSC & 0x100)  // If it's extended, it can't be a numpad key.
-		return false;
-
-	switch (aVK)
-	{
-	// It seems best to exclude the VK_DECIMAL and VK_NUMPAD0 through VK_NUMPAD9 from the below
-	// list because the callers want to know whether this is a numpad key being *modified* by
-	// the shift key (i.e. the shift key is being held down to temporarily transform the numpad
-	// key into its opposite state, overriding the fact that Numlock is ON):
-	case VK_DELETE: // NumpadDot (VK_DECIMAL)
-	case VK_INSERT: // Numpad0
-	case VK_END:    // Numpad1
-	case VK_DOWN:   // Numpad2
-	case VK_NEXT:   // Numpad3
-	case VK_LEFT:   // Numpad4
-	case VK_CLEAR:  // Numpad5 (this has been verified to be the VK that is sent, at least on my keyboard).
-	case VK_RIGHT:  // Numpad6
-	case VK_HOME:   // Numpad7
-	case VK_UP:     // Numpad8
-	case VK_PRIOR:  // Numpad9
-		return true;
-	}
-
-	return false;
 }
 
 
@@ -3533,14 +3430,6 @@ void ChangeHookState(Hotkey *aHK[], int aHK_count, HookType aWhichHook, HookType
 // the hooks.
 // Returns the set of hooks that are active after processing is complete.
 {
-	// v1.0.39: For simplicity and maintainability, don't even make the attempt on Win9x since it
-	// seems too rare that they would have LL hook capability somehow (such as in an emulFator).
-	// NOTE: Some sections rely on the fact that no warning dialogs are displayed if the hook is
-	// called for but the OS doesn't support it.  For example, ManifestAllHotkeysHotstringsHooks()
-	// doesn't check the OS version in many cases when marking hotkeys as hook hotkeys.
-	if (g_os.IsWin9x())
-		return;
-
 	// Determine the set of hooks that should be activated or deactivated.
 	HookType hooks_to_be_active = aWhichHook | aWhichHookAlways; // Bitwise union.
 
@@ -3608,14 +3497,8 @@ void ChangeHookState(Hotkey *aHK[], int aHK_count, HookType aWhichHook, HookType
 
 		// This is a bit iffy because it's far from certain that these particular scan codes
 		// are really modifier keys on anything but a standard English keyboard.  However,
-		// at the very least the Win9x version must rely on something like this because a
-		// low-level hook can't be used under Win9x, and a high-level hook doesn't receive
-		// the left/right VKs at all (so the scan code must be used to tell them apart).
-		// However: it might be possible under Win9x to use MapVirtualKey() or some similar
-		// function to verify, at runtime, that the expected scan codes really do map to the
-		// expected VK.  If not, perhaps MapVirtualKey() or such can be used to search through
-		// every scan code to find out which map to VKs that are modifiers.  Any such keys
-		// found can then be initialized similar to below:
+		// long years of use haven't shown this to be a problem, and there are certainly other
+		// parts of the code that do not support custom layouts remapping the modifier keys.
 		ksc[SC_LCONTROL].as_modifiersLR = MOD_LCONTROL;
 		ksc[SC_RCONTROL].as_modifiersLR = MOD_RCONTROL;
 		ksc[SC_LALT].as_modifiersLR = MOD_LALT;
@@ -3699,13 +3582,6 @@ void ChangeHookState(Hotkey *aHK[], int aHK_count, HookType aWhichHook, HookType
 			// the overhead of a switch stmt to *every* keypress ever made on the
 			// system, so it seems better to set up everything correctly here since
 			// this init section is only done once.
-			// Note: These switch stmts probably aren't needed under Win9x since I think
-			// it might be impossible for them to receive something like VK_LCONTROL,
-			// except *possibly* if keybd_event() is explicitly called with VK_LCONTROL
-			// and (might want to verify that -- if true, might want to keep the switches
-			// even for Win9x for safety and in case Win9x ever gets overhauled and
-			// improved in some future era, or in case Win9x is running in an emulator
-			// that expands its capabilities.
 			switch (hk.mVK)
 			{
 			case VK_MENU:
@@ -3806,9 +3682,9 @@ void ChangeHookState(Hotkey *aHK[], int aHK_count, HookType aWhichHook, HookType
 					ksc[hk.mModifierSC].sc_takes_precedence = true;
 				}
 			}
-			// Insert this hotkey at the front of the linked list of combos which use this suffix key.
-			hk.mNextCustomCombo = pThisKey->first_custom_combo;
-			pThisKey->first_custom_combo = hk.mID;
+			// Insert this hotkey at the front of the linked list of hotkeys which use this suffix key.
+			hk.mNextHotkey = pThisKey->first_hotkey;
+			pThisKey->first_hotkey = hk.mID;
 			continue;
 		}
 		#ifndef SEND_NOSUPPRESS_PREFIX_KEY_ON_RELEASE // Search for this symbol for details.
@@ -3853,6 +3729,19 @@ void ChangeHookState(Hotkey *aHK[], int aHK_count, HookType aWhichHook, HookType
 			hk_sorted_type &this_hk = hk_sorted[i]; // For performance and convenience.
 			this_hk_is_key_up = this_hk.id_with_flags & HOTKEY_KEY_UP;
 			this_hk_id = this_hk.id_with_flags & HOTKEY_ID_MASK;
+
+			if (this_hk_id <= HOTKEY_ID_MAX) // It's a valid ID and not an ALT_TAB action.
+			{
+				// Insert this hotkey at the front of the list of hotkeys that use this suffix key.
+				// This enables fallback between overlapping hotkeys, such as LCtrl & a, <^+a, ^+a.
+				pThisKey = this_hk.vk ? kvk + this_hk.vk : ksc + this_hk.sc;
+				// Insert after any custom combos.
+				HotkeyIDType *first = &pThisKey->first_hotkey;
+				while (*first != HOTKEY_ID_INVALID && (aHK[*first]->mModifierVK || aHK[*first]->mModifierSC))
+					first = &aHK[*first]->mNextHotkey;
+				aHK[this_hk_id]->mNextHotkey = *first;
+				*first = this_hk_id;
+			}
 
 			i_modifiers_merged = this_hk.modifiers;
 			if (this_hk.modifiersLR)
@@ -4059,24 +3948,23 @@ bool HookAdjustMaxHotkeys(Hotkey **&aHK, int &aCurrentMax, int aNewMax)
 
 HotkeyIDType &CustomComboLast(HotkeyIDType *aFirst)
 {
-	for (; *aFirst != HOTKEY_ID_INVALID; aFirst = &Hotkey::shk[*aFirst]->mNextCustomCombo);
+	for (; *aFirst != HOTKEY_ID_INVALID; aFirst = &Hotkey::shk[*aFirst]->mNextHotkey);
 	return *aFirst;
 }
 
 void LinkKeysForCustomCombo(vk_type aNeutral, vk_type aLeft, vk_type aRight)
 {
-	HotkeyIDType first_neutral = kvk[aNeutral].first_custom_combo;
+	HotkeyIDType first_neutral = kvk[aNeutral].first_hotkey;
 	if (first_neutral == HOTKEY_ID_INVALID)
 		return;
 	// Append the neutral key's list to the lists of the left and right keys.
-	CustomComboLast(&kvk[aLeft].first_custom_combo) = first_neutral;
-	CustomComboLast(&kvk[aRight].first_custom_combo) = first_neutral;
+	CustomComboLast(&kvk[aLeft].first_hotkey) = first_neutral;
+	CustomComboLast(&kvk[aRight].first_hotkey) = first_neutral;
 }
 
 
 
 void AddRemoveHooks(HookType aHooksToBeActive, bool aChangeIsTemporary)
-// Caller has already ensured that OS isn't Win9x.
 // Caller has ensured that any static memory arrays used by the hook functions have been allocated.
 // Caller is always the main thread, never the hook thread because this function isn't thread-safe
 // and it also calls PeekMessage() for the main thread.
@@ -4116,7 +4004,7 @@ void AddRemoveHooks(HookType aHooksToBeActive, bool aChangeIsTemporary)
 		// memory used by the hook thread.  The XP Task Manager's "VM Size" column (which seems much
 		// more accurate than "Mem Usage") indicates that a new thread consumes 28 KB + its stack size.
 		if (!aChangeIsTemporary) // Caller has ensured that thread already exists when aChangeIsTemporary==true.
-			if (sThreadHandle = CreateThread(NULL, 8*1024, HookThreadProc, NULL, 0, &g_HookThreadID)) // Win9x: Last parameter cannot be NULL.
+			if (sThreadHandle = CreateThread(NULL, 8*1024, HookThreadProc, NULL, 0, &g_HookThreadID))
 				SetThreadPriority(sThreadHandle, THREAD_PRIORITY_TIME_CRITICAL); // See below for explanation.
 			// The above priority level seems optimal because if some other process has high priority,
 			// the keyboard and mouse hooks will still take precedence, which avoids the mouse cursor
@@ -4305,7 +4193,7 @@ bool SystemHasAnotherKeybdHook()
 	// we want a handle to the mutex maintained here.
 	if (sKeybdMutex) // It was open originally, so update the handle the the newly opened one.
 		sKeybdMutex = mutex;
-	else // Keep it closed because the system tracks how many handles there are, deleting the mutex when zero.
+	else if (mutex) // Keep it closed because the system tracks how many handles there are, deleting the mutex when zero.
 		CloseHandle(mutex);  // This facilitates other instances of the program getting the proper last_error value.
 	return last_error == ERROR_ALREADY_EXISTS;
 }
@@ -4322,7 +4210,7 @@ bool SystemHasAnotherMouseHook()
 	// we want a handle to the mutex maintained here.
 	if (sMouseMutex) // It was open originally, so update the handle the the newly opened one.
 		sMouseMutex = mutex;
-	else // Keep it closed because the system tracks how many handles there are, deleting the mutex when zero.
+	else if (mutex) // Keep it closed because the system tracks how many handles there are, deleting the mutex when zero.
 		CloseHandle(mutex);  // This facilitates other instances of the program getting the proper last_error value.
 	return last_error == ERROR_ALREADY_EXISTS;
 }
@@ -4363,7 +4251,7 @@ DWORD WINAPI HookThreadProc(LPVOID aUnused)
 			problem_activating_hooks = false;
 			if (msg.wParam & HOOK_KEYBD) // Activate the keyboard hook (if it isn't already).
 			{
-				if (!g_KeybdHook) // The creator of this thread has already ensured that OS isn't Win9x.
+				if (!g_KeybdHook)
 				{
 					// v1.0.39: Reset *before* hook is installed to avoid any chance that events can
 					// flow into the hook prior to the reset:
@@ -4380,7 +4268,7 @@ DWORD WINAPI HookThreadProc(LPVOID aUnused)
 
 			if (msg.wParam & HOOK_MOUSE) // Activate the mouse hook (if it isn't already).
 			{
-				if (!g_MouseHook) // The creator of this thread has already ensured that OS isn't Win9x.
+				if (!g_MouseHook)
 				{
 					if (msg.lParam) // Sender of msg. is signaling that reset should be done.
 						ResetHook(false, HOOK_MOUSE, true);
@@ -4482,30 +4370,27 @@ void ResetHook(bool aAllModifiersUp, HookType aWhichHook, bool aResetKVKandKSC)
 		// because we don't know the current physical state of the keyboard and such:
 
 		g_modifiersLR_physical = 0;  // Best to make this zero, otherwise keys might get stuck down after a Send.
+		g_modifiersLR_numpad_mask = 0;
+		g_modifiersLR_ctrlaltdel_mask = 0;
 		g_modifiersLR_logical = g_modifiersLR_logical_non_ignored = (aAllModifiersUp ? 0 : GetModifierLRState(true));
 
 		ZeroMemory(g_PhysicalKeyState, sizeof(g_PhysicalKeyState));
 
 		sDisguiseNextMenu = false;
 		sUndisguisedMenuInEffect = false;
-		sAltTabMenuIsVisible = (FindWindow(_T("#32771"), NULL) != NULL); // I've seen indications that MS wants this to work on all operating systems.
 
-		ZeroMemory(sPadState, sizeof(sPadState));
+		// On Windows Vista and later, this definitely only works if the classic alt-tab menu
+		// has been restored via the registry.  A non-NULL result is probably only helpful for
+		// enabling the Esc key workaround in the hook (even though that isn't as critical on
+		// Windows 7 as it was on XP, since on 7 the user can dismiss it with physical Esc).
+		// A NULL result is probably more common, such as if it's been a while since the hook
+		// was removed (or Alt was released).  If the *classic* alt-tab menu isn't in use,
+		// this at least serves to reset sAltTabMenuIsVisible to false:
+		sAltTabMenuIsVisible = (FindWindow(_T("#32771"), NULL) != NULL);
 
 		*g_HSBuf = '\0';
 		g_HSBufLength = 0;
 		g_HShwnd = 0; // It isn't necessary to determine the actual window/control at this point since the buffer is already empty.
-
-		// Variables for the Shift+Numpad workaround:
-		sNextPhysShiftDownIsNotPhys = false;
-		sPriorVK = 0;
-		sPriorSC = 0;
-		sPriorEventWasKeyUp = false;
-		sPriorEventWasPhysical = false;
-		sPriorEventTickCount = 0;
-		sPriorModifiersLR_physical = 0;
-		sPriorShiftState = 0;  // i.e. default to "key is up".
-		sPriorLShiftState = 0; //
 
 		if (aResetKVKandKSC)
 		{

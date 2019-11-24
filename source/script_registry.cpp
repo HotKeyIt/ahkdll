@@ -37,13 +37,13 @@ BIF_DECL(BIF_IniRead)
 	_f_param_string_opt(aKey, 2);
 	_f_param_string_opt(aDefault, 3);
 
-	TCHAR	szFileTemp[_MAX_PATH+1];
+	TCHAR	szFileTemp[T_MAX_PATH];
 	TCHAR	*szFilePart, *cp;
 	TCHAR	szBuffer[65535];					// Max ini file size is 65535 under 95
 	*szBuffer = '\0';
 	TCHAR	szEmpty[] = _T("");
 	// Get the fullpathname (ini functions need a full path):
-	GetFullPathName(aFilespec, _MAX_PATH, szFileTemp, &szFilePart);
+	GetFullPathName(aFilespec, _countof(szFileTemp), szFileTemp, &szFilePart);
 	if (*aKey)
 	{
 		// An access violation can occur if the following conditions are met:
@@ -120,11 +120,11 @@ static BOOL IniEncodingFix(LPWSTR aFilespec, LPWSTR aSection)
 
 ResultType Line::IniWrite(LPTSTR aValue, LPTSTR aFilespec, LPTSTR aSection, LPTSTR aKey)
 {
-	TCHAR	szFileTemp[_MAX_PATH+1];
+	TCHAR	szFileTemp[T_MAX_PATH];
 	TCHAR	*szFilePart;
 	BOOL	result;
 	// Get the fullpathname (INI functions need a full path) 
-	GetFullPathName(aFilespec, _MAX_PATH, szFileTemp, &szFilePart);
+	GetFullPathName(aFilespec, _countof(szFileTemp), szFileTemp, &szFilePart);
 #ifdef UNICODE
 	// WritePrivateProfileStringW() always creates INIs using the system codepage.
 	// IniEncodingFix() checks if the file exists and if it doesn't then it creates
@@ -161,10 +161,10 @@ ResultType Line::IniWrite(LPTSTR aValue, LPTSTR aFilespec, LPTSTR aSection, LPTS
 ResultType Line::IniDelete(LPTSTR aFilespec, LPTSTR aSection, LPTSTR aKey)
 // Note that aKey can be NULL, in which case the entire section will be deleted.
 {
-	TCHAR	szFileTemp[_MAX_PATH+1];
+	TCHAR	szFileTemp[T_MAX_PATH];
 	TCHAR	*szFilePart;
 	// Get the fullpathname (ini functions need a full path) 
-	GetFullPathName(aFilespec, _MAX_PATH, szFileTemp, &szFilePart);
+	GetFullPathName(aFilespec, _countof(szFileTemp), szFileTemp, &szFilePart);
 	BOOL result = WritePrivateProfileString(aSection, aKey, NULL, szFileTemp);  // Returns zero on failure.
 	WritePrivateProfileString(NULL, NULL, NULL, szFileTemp);	// Flush
 	return SetErrorLevelOrThrowBool(!result);
@@ -534,10 +534,8 @@ void RegDelete(ResultToken &aResultToken, HKEY aRootKey, LPTSTR aRegSubkey, LPTS
 		RegCloseKey(hRegKey); // Close parent key.  Not sure if this needs to be done only after the above.
 		if (result == ERROR_SUCCESS)
 		{
-			typedef LONG (WINAPI * PFN_RegDeleteKeyEx)(HKEY hKey , LPCTSTR lpSubKey , REGSAM samDesired , DWORD Reserved );
-			static PFN_RegDeleteKeyEx _RegDeleteKeyEx = (PFN_RegDeleteKeyEx)GetProcAddress(GetModuleHandle(_T("advapi32")), "RegDeleteKeyEx" WINAPI_SUFFIX);
-			if (g->RegView && _RegDeleteKeyEx)
-				result = _RegDeleteKeyEx(aRootKey, aRegSubkey, g->RegView, 0);
+			if (g->RegView)
+				result = RegDeleteKeyEx(aRootKey, aRegSubkey, g->RegView, 0);
 			else
 				result = RegDeleteKey(aRootKey, aRegSubkey);
 		}
@@ -586,8 +584,8 @@ LPTSTR Line::RegConvertRootKeyType(HKEY aKey)
 	for (int i = 0; i < _countof(sRegRootKeyTypes); ++i)
 		if (aKey == sRegRootKeyTypes[i].key)
 			return sRegRootKeyTypes[i].long_name;
-	// These are either unused or so rarely used (DYN_DATA on Win9x) that they aren't supported:
-	// HKEY_PERFORMANCE_DATA, HKEY_PERFORMANCE_TEXT, HKEY_PERFORMANCE_NLSTEXT, HKEY_DYN_DATA
+	// These are either unused or so rarely used that they aren't supported:
+	// HKEY_PERFORMANCE_DATA, HKEY_PERFORMANCE_TEXT, HKEY_PERFORMANCE_NLSTEXT
 	return _T("");
 }
 

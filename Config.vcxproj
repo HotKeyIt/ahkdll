@@ -36,6 +36,7 @@
       <OmitFramePointers>true</OmitFramePointers>
       <StringPooling>true</StringPooling>
       <BufferSecurityCheck>false</BufferSecurityCheck>
+      <AdditionalOptions Condition="$(PlatformToolsetVersion) &gt;= 140">/Zc:threadSafeInit- %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <!-- note linker settings don't apply to lib_pcre -->
@@ -72,8 +73,4 @@
   <ImportGroup Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" />
   </ImportGroup>
-  <PropertyGroup>
-    <SupportWin2k>false</SupportWin2k>
-    <SupportWin2k Condition="'$(Platform)'=='Win32' AND $(PlatformToolsetVersion) &lt;= 100">true</SupportWin2k>
-  </PropertyGroup>
 </Project>

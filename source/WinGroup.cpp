@@ -81,10 +81,11 @@ ResultType WinGroup::AddWindow(LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle
 
 
 
-ResultType WinGroup::ActUponAll(ActionTypeType aActionType, int aTimeToWaitForClose)
+void WinGroup::ActUponAll(BuiltInFunctionID aActionType, int aTimeToWaitForClose)
 {
-	if (IsEmpty())
-		return OK;  // OK since this is the expected behavior in this case.
+	// A group should never be empty, since it is created by "adding" a set of criteria.
+	//if (IsEmpty())
+	//	return;
 	// Don't need to call Update() in this case.
 	WindowSearch ws;
 	ws.mFirstWinSpec = mFirstWindow; // Act upon all windows that match any WindowSpec in the group.
@@ -93,7 +94,6 @@ ResultType WinGroup::ActUponAll(ActionTypeType aActionType, int aTimeToWaitForCl
 	EnumWindows(EnumParentActUponAll, (LPARAM)&ws);
 	if (ws.mFoundParent) // It acted upon least one window.
 		DoWinDelay;
-	return OK;
 }
 
 
@@ -279,13 +279,14 @@ ResultType WinGroup::Activate(bool aStartWithMostRecent, WindowSpec *aWinSpec)
 
 ResultType WinGroup::Deactivate(bool aStartWithMostRecent)
 {
-	if (IsEmpty())
-		return OK;  // OK since this is the expected behavior in this case.
-	// Otherwise:
 	if (!Update(false)) // Update our private member vars.
 		return FAIL;  // It already displayed the error for us.
 
 	HWND active_window = GetForegroundWindow();
+	// Since EnumParentFindAnyExcept does not evaluate owned windows but one may have
+	// been activated by a previous call, evaluate the owner of active_window, if any.
+	while (HWND owner = GetWindow(active_window, GW_OWNER))
+		active_window = owner;
 	if (IsMember(active_window, *g))
 		sAlreadyVisitedCount = 0;
 
@@ -300,24 +301,16 @@ ResultType WinGroup::Deactivate(bool aStartWithMostRecent)
 
 	if (ws.mFoundParent)
 	{
-		// If the window we're about to activate owns other visible parent windows, it can
-		// never truly be activated because it must always be below them in the z-order.
-		// Thus, instead of activating it, activate the first (and usually the only?)
-		// visible window that it owns.  Doing this makes things nicer for some apps that
-		// have a pair of main windows, such as MS Visual Studio (and probably many more),
-		// because it avoids activating such apps twice in a row as the user progresses
-		// through the sequence:
-		HWND first_visible_owned = WindowOwnsOthers(ws.mFoundParent);
-		if (first_visible_owned)
-		{
-			MarkAsVisited(ws.mFoundParent);  // Must mark owner as well as the owned window.
-			// Activate the owned window instead of the owner because it usually
-			// (probably always, given the comments above) is the real main window:
-			ws.mFoundParent = first_visible_owned;
-		}
-		SetForegroundWindowEx(ws.mFoundParent);
+		// Contrary to comments previously found here, a window that owns other windows can be
+		// (and often is) activated, unless the window is also disabled.  However, when the
+		// window is activated via the Taskbar, Alt-Tab or due to closing or minimizing some
+		// other window, the OS activates the *last active owned window* if it was active more
+		// recently than the owner.  Doing it this way will activate either the owner or one
+		// of its owned windows, instead of the old way, activating *every one* of the owned
+		// windows in turn and never the owner.
+		SetForegroundWindowEx(GetLastActivePopup(ws.mFoundParent));
 		// Probably best to do this before WinDelay in case another hotkey fires during the delay:
-		MarkAsVisited(ws.mFoundParent);
+		MarkAsVisited(ws.mFoundParent); // Mark the found HWND, not necessarily the one that was activated.
 		DoWinDelay;
 	}
 	else // No window was found to activate (they have all been visited).
@@ -340,6 +333,13 @@ ResultType WinGroup::Deactivate(bool aStartWithMostRecent)
 				// impossible with the current logic:
 				Deactivate(false); // Seems best to ignore aStartWithMostRecent in this case?
 			}
+		}
+		else
+		{
+			// Since there are apparently no eligible windows, deactivate the window by
+			// activating the taskbar, which is usually what happens when you minimize
+			// the last non-minimized top-level window.
+			SetForegroundWindowEx(FindWindow(_T("Shell_TrayWnd"), nullptr));
 		}
 	}
 	// Even if a window wasn't found, we've done our job so return OK:
@@ -405,32 +405,46 @@ BOOL CALLBACK EnumParentFindAnyExcept(HWND aWnd, LPARAM lParam)
 	// Since the following two sections apply only to GroupDeactivate (since that's our only caller),
 	// they both seem okay even in light of the ahk_group method.
 
-	if (!IsWindowVisible(aWnd))
-		// Skip these because we always want them to stay invisible, regardless
-		// of the setting for g->DetectHiddenWindows:
+	DWORD style = GetWindowLong(aWnd, GWL_STYLE);
+	if (!(style & WS_VISIBLE) || (style & WS_DISABLED) && GetLastActivePopup(aWnd) == aWnd)
+		// Skip hidden windows because we always want them to stay invisible, regardless
+		// of the setting for g->DetectHiddenWindows.  v2.0: Also skip disabled windows,
+		// except those which own a popup window (such as a modal dialog).
+		// Since these are top-level windows, IsWindowVisible() shouldn't be necessary.
 		return TRUE;
 
 	// UPDATE: Because the window of class Shell_TrayWnd (the taskbar) is also always-on-top,
 	// the below prevents it from ever being activated too, which is almost always desirable.
-	// However, this prevents the addition of WS_DISABLED as an extra criteria for skipping
-	// a window.  Maybe that's best for backward compatibility anyway.
 	// Skip always-on-top windows, such as SplashText, because probably shouldn't
 	// be activated (especially in this mode, which is often used to visit the user's
 	// "non-favorite" windows).  In addition, they're already visible so the user already
 	// knows about them, so there's no need to have them presented for review.
-	if (GetWindowLong(aWnd, GWL_EXSTYLE) & WS_EX_TOPMOST)
+	// v2.0:
+	//  - Windows with WS_EX_NOACTIVATE are excluded because they probably aren't intended
+	//    to be activated.  Past testing indicated they were omitted from Alt-Tab and/or
+	//    the taskbar on some OSes, but there must be some other factor as I currently can't
+	//    reproduce that.  However, they are skipped by the Alt+Esc/Alt+Shift+Esc hotkeys.
+	//  - Windows with WS_EX_TOOLWINDOW but without WS_EX_APPWINDOW are excluded from the
+	//    taskbar and Alt-Tab.  They are also usually owned anyway, except for the WorkerW
+	//    window which contains some of the Desktop content on Windows 10 (and 7, but it's
+	//    hidden there).  Excluding this style avoids the need to check for WorkerW, which
+	//    also means we don't need to retrieve the window class.
+	DWORD ex_style = GetWindowLong(aWnd, GWL_EXSTYLE);
+	if ((ex_style & (WS_EX_TOPMOST | WS_EX_NOACTIVATE))
+		|| (ex_style & (WS_EX_TOOLWINDOW | WS_EX_APPWINDOW)) == WS_EX_TOOLWINDOW)
 		return TRUE;
 
-	// It probably would have been better to use the class name (ProgMan?) for this instead,
-	// but there is doubt that the same class name is used across all OSes.  The reason for
-	// doing that is to avoid ambiguity with other windows that just happen to be called
-	// "Program Manager".  See similar section in EnumParentActUponAll().
-	// Skip "Program Manager" too because activating it would serve no purpose.  This is probably
-	// the same HWND that GetShellWindow() returns, but GetShellWindow() isn't supported on
-	// Win9x or WinNT, so don't bother using it.  And GetDeskTopWindow() apparently doesn't
-	// return "Program Manager" (something with a blank title I think):
-	TCHAR win_title[20]; // Just need enough size to check for Program Manager
-	if (GetWindowText(aWnd, win_title, _countof(win_title)) && !_tcsicmp(win_title, _T("Program Manager")))
+	// Exclude owned windows.  The owner should be considered by a subsequent call.
+	// If eligible, either the owner or its last active owned window will be activated.
+	if (GetWindow(aWnd, GW_OWNER))
+		return TRUE;
+
+	if (IsWindowCloaked(aWnd)) // This is probably higher cost than the style checks, so done after.
+		return TRUE;
+	
+	// Skip "Program Manager" (the Desktop) because the user probably doesn't want it
+	// activated (although that would serve the purpose of deactivating any other window).
+	if (aWnd == GetShellWindow())
 		return TRUE;
 
 	WindowSearch &ws = *(WindowSearch *)lParam;  // For performance and convenience.
@@ -479,7 +493,7 @@ BOOL CALLBACK EnumParentActUponAll(HWND aWnd, LPARAM lParam)
 
 	// Skip windows the command isn't supposed to detect.  ACT_WINSHOW is exempt because
 	// hidden windows are always detected by the WinShow command:
-	if (!(g->DetectHiddenWindows || ws.mActionType == ACT_WINSHOW || IsWindowVisible(aWnd)))
+	if (!(ws.mActionType == FID_WinShow || g->DetectWindow(aWnd)))
 		return TRUE;
 
 	int nCmdShow;
@@ -492,32 +506,29 @@ BOOL CALLBACK EnumParentActUponAll(HWND aWnd, LPARAM lParam)
 		{
 			// Match found, so aWnd is a member of the group.  In addition, IsMatch() has set
 			// the value of ws.mFoundParent to tell our caller that at least one window was acted upon.
-			// See Line::PerformShowWindow() for comments about the following section.
+			// See BIF_WinShow for comments about the following section.
 			nCmdShow = SW_NONE; // Set default each time.
 			switch (ws.mActionType)
 			{
-			case ACT_WINCLOSE:
-			case ACT_WINKILL:
+			case FID_WinClose:
+			case FID_WinKill:
 				// mTimeToWaitForClose is not done in a very efficient way here: to keep code size
 				// in check, it closes each window individually rather than sending WM_CLOSE to all
 				// the windows simultaneously and then waiting until all have vanished:
-				WinClose(aWnd, ws.mTimeToWaitForClose, ws.mActionType == ACT_WINKILL); // DoWinDelay is done by our caller.
+				WinClose(aWnd, ws.mTimeToWaitForClose, ws.mActionType == FID_WinKill); // DoWinDelay is done by our caller.
 				return TRUE; // All done with the current window, so fetch the next one.
 
-			case ACT_WINMINIMIZE:
+			case FID_WinMinimize:
 				if (IsWindowHung(aWnd))
-				{
-					if (g_os.IsWin2000orLater())
-						nCmdShow = SW_FORCEMINIMIZE;
-				}
+					nCmdShow = SW_FORCEMINIMIZE;
 				else
 					nCmdShow = SW_MINIMIZE;
 				break;
 
-			case ACT_WINMAXIMIZE: if (!IsWindowHung(aWnd)) nCmdShow = SW_MAXIMIZE; break;
-			case ACT_WINRESTORE:  if (!IsWindowHung(aWnd)) nCmdShow = SW_RESTORE;  break;
-			case ACT_WINHIDE: nCmdShow = SW_HIDE; break;
-			case ACT_WINSHOW: nCmdShow = SW_SHOW; break;
+			case FID_WinMaximize: if (!IsWindowHung(aWnd)) nCmdShow = SW_MAXIMIZE; break;
+			case FID_WinRestore:  if (!IsWindowHung(aWnd)) nCmdShow = SW_RESTORE;  break;
+			case FID_WinHide: nCmdShow = SW_HIDE; break;
+			case FID_WinShow: nCmdShow = SW_SHOW; break;
 			}
 
 			if (nCmdShow != SW_NONE)

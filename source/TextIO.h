@@ -15,7 +15,8 @@
 #define TEOF ((TCHAR)EOF)
 
 #include <locale.h> // For _locale_t, _create_locale and _free_locale.
-
+#include <algorithm>
+#include "script_object.h"
 extern UINT g_ACP;
 
 // VS2005 and later come with Unicode stream IO in the C runtime library, but it doesn't work very well.
@@ -111,7 +112,7 @@ public:
 	{
 		if (aCodePage == CP_ACP)
 			aCodePage = g_ACP; // Required by _create_locale.
-		//if (!IsValidCodePage(aCodePage)) // Returns FALSE for UTF-16 and possibly other valid code pages, so leave it up to the user to pass a valid codepage.
+		//if (!IsValidCodePage(aCodePage)) // Returns FALSE for UTF-16 and possibly other valid code pages, so leave it up to the caller to validate.
 			//return;
 
 		if (mCodePage != aCodePage)
@@ -299,7 +300,7 @@ public:
 		if (!_Seek(aLength, SEEK_SET) || !SetEndOfFile(mFile))
 			return -1;
 		// Make sure we do not extend the file again.
-		_Seek(min(aLength, pos), SEEK_SET);
+		_Seek((std::min)(aLength, pos), SEEK_SET); // (std::min) - see https://stackoverflow.com/a/22023122/180275
 		return _Length();
 	}
 	HANDLE  Handle() { RollbackFilePointer(); FlushWriteBuffer(); return mFile; }
@@ -356,4 +357,49 @@ protected:
 private:
 	Buffer mData;
 	LPBYTE mDataPos;
+};
+
+
+// FileObject: exports TextFile interfaces to the scripts.
+class FileObject : public Object
+{
+	FileObject() {}
+	~FileObject() {}
+
+	enum MemberID {
+		// methods
+		M_Read,
+		M_Write,
+		M_ReadLine,
+		M_WriteLine,
+		M_RawRead,
+		M_RawWrite,
+		M_Close,
+		M_Seek,
+		// properties
+		P_Pos,
+		P_Length,
+		P_AtEOF,
+		P_Handle,
+		P_Encoding
+	};
+
+	enum NumReadWriteFlags
+	{
+		F_SIZE_MASK = 0xF,
+		F_READ = 0x10,
+		F_WRITE = 0,
+		F_SIGNED = 0x20,
+		F_UNSIGNED = 0,
+		F_FLOAT = 0x40
+	};
+
+	ResultType NumReadWrite(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	ResultType Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	TextFile mFile;
+	
+public:
+	_thread_local static ObjectMember sMembers[31];
+	_thread_local static Object *sPrototype;
+	static FileObject *Open(LPCTSTR aFileSpec, DWORD aFlags, UINT aCodePage);
 };

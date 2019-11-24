@@ -18,6 +18,7 @@ GNU General Public License for more details.
 #define application_h
 
 #include "defines.h"
+#include <winternl.h>
 
 // Callers should note that using INTERVAL_UNSPECIFIED might not rest the CPU at all if there is
 // already at least one msg waiting in our thread's msg queue:
@@ -54,12 +55,10 @@ bool MsgSleep(int aSleepDuration = INTERVAL_UNSPECIFIED, MessageMode aMode = RET
 // any other important types of messages:
 #define MSG_FILTER_MAX (IsInterruptible() ? 0 : WM_HOTKEY - 1)
 #define INTERRUPTIBLE_IN_EMERGENCY (g_AllowInterruption && !g_MenuIsVisible)
-// Do a true Sleep() for short sleeps on Win9x because it is much more accurate than the MsgSleep()
-// method on that OS, at least for when short sleeps are done on Win98SE:
 #define DoWinDelay \
 	if (::g->WinDelay > -1)\
 	{\
-		if (g_ThreadID != GetCurrentThreadId() || (::g->WinDelay < 25 && g_os.IsWin9x()))\
+		if (g_ThreadID != GetCurrentThreadId())\
 			Sleep(::g->WinDelay);\
 		else\
 			MsgSleep(::g->WinDelay);\
@@ -68,7 +67,7 @@ bool MsgSleep(int aSleepDuration = INTERVAL_UNSPECIFIED, MessageMode aMode = RET
 #define DoControlDelay \
 	if (g->ControlDelay > -1)\
 	{\
-		if (g_ThreadID != GetCurrentThreadId() || (g->ControlDelay < 25 && g_os.IsWin9x()))\
+		if (g_ThreadID != GetCurrentThreadId())\
 			Sleep(g->ControlDelay);\
 		else\
 			MsgSleep(g->ControlDelay);\
@@ -99,11 +98,6 @@ VOID CALLBACK InputTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime)
 VOID CALLBACK RefreshInterruptibility(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime);
 #endif
 #ifndef _USRDLL
-typedef struct _CLIENT_ID
-{
-	PVOID UniqueProcess;
-	PVOID UniqueThread;
-} CLIENT_ID, *PCLIENT_ID;
 
 typedef struct _MYTEB
 {

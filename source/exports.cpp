@@ -73,8 +73,8 @@ UINT_PTR com_ahkFindFunc(LPTSTR funcname){return ahkFindFunc(funcname);}
 UINT_PTR com_addScript(LPTSTR script, int waitexecute){return addScript(script,waitexecute);}
 int com_ahkExec(LPTSTR script){return ahkExec(script);}
 UINT_PTR com_addFile(LPTSTR fileName, int waitexecute){return addFile(fileName,waitexecute);}
-UINT_PTR com_ahkdll(LPTSTR fileName,LPTSTR argv, LPTSTR title){return ahkdll(fileName,argv, title);}
-UINT_PTR com_ahktextdll(LPTSTR script,LPTSTR argv, LPTSTR title){return ahktextdll(script,argv, title);}
+HANDLE com_ahkdll(LPTSTR fileName,LPTSTR argv, LPTSTR title){return ahkdll(fileName,argv, title);}
+HANDLE com_ahktextdll(LPTSTR script,LPTSTR argv, LPTSTR title){return ahktextdll(script,argv, title);}
 int com_ahkTerminate(int timeout){return ahkTerminate(timeout);}
 int com_ahkReady(){return ahkReady();}
 int com_ahkIsUnicode(){return ahkIsUnicode();}
@@ -186,7 +186,7 @@ EXPORT int ahkPause(LPTSTR aChangeTo, DWORD aThreadID) //Change pause state of a
 		return 0; // AutoHotkey needs to be running at this point //
 	}
 
-	if (!g->IsPaused && ((int)aChangeTo == 1 || *aChangeTo == '1' || ((*aChangeTo == 'O' || *aChangeTo == 'o') && (*(aChangeTo + 1) == 'N' || *(aChangeTo + 1) == 'n'))))
+	if (!g->IsPaused && ((size_t)aChangeTo == 1 || *aChangeTo == '1' || ((*aChangeTo == 'O' || *aChangeTo == 'o') && (*(aChangeTo + 1) == 'N' || *(aChangeTo + 1) == 'n'))))
 	{
 		Hotkey::ResetRunAgainAfterFinished();
 		g->IsPaused = true;
@@ -769,7 +769,7 @@ EXPORT int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR par
 			script->ScriptError(ERR_TOO_FEW_PARAMS, func);
 			return -1;
 		}
-		if(aFunc->mIsBuiltIn)
+		if(aFunc->IsBuiltIn())
 		{
 			EnterCriticalSection(&g_CriticalAhkFunction);
 			ResultType aResult = OK;
@@ -804,10 +804,10 @@ EXPORT int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR par
 			}
 			aFuncAndToken.buf = new_buf;
 			aFuncAndToken.mToken.buf = aFuncAndToken.buf;
-			aFuncAndToken.mToken.func = aFunc;
-			aFuncAndToken.mToken.marker = aFunc->mName;
+			aFuncAndToken.mToken.func = (BuiltInFunc*)aFunc;
+			aFuncAndToken.mToken.marker = (LPTSTR)aFunc->mName;
 			
-			aFunc->mBIF(aFuncAndToken.mToken, aFuncAndToken.param, aFunc->mParamCount < aParamsCount ? aFunc->mParamCount : aParamsCount);
+			aFunc->Call(aFuncAndToken.mToken, aFuncAndToken.param, aFunc->mParamCount < aParamsCount ? aFunc->mParamCount : aParamsCount);
 #ifndef _USRDLL
 			if (tls)
 				curr_teb->ThreadLocalStoragePointer = tls;
@@ -933,7 +933,7 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute, DWORD aThreadID)
 	if (g_script->LoadFromFile()!= OK) //fileName, aAllowDuplicateInclude, (bool) aIgnoreLoadFailure) != OK) || !g_script->PreparseBlocks(oldLastLine->mNextLine))
 	{
 		g_script->mFileSpec = oldFileSpec;				// Restore script path
-		g->CurrentFunc = aCurrFunc;						// Restore current function
+		g->CurrentFunc = (UserFunc *)aCurrFunc;						// Restore current function
 		if (g_script->mPlaceholderLabel)
 			delete g_script->mPlaceholderLabel;
 		RESTORE_G_SCRIPT
@@ -957,7 +957,7 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute, DWORD aThreadID)
 #ifdef _USRDLL
 	g_Loading = false;
 #endif
-	g->CurrentFunc = aCurrFunc;
+	g->CurrentFunc = (UserFunc *)aCurrFunc;
 	if (waitexecute != 0)
 	{
 		if (waitexecute == 1)
@@ -1057,7 +1057,7 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute, DWORD aThreadID)
 	BACKUP_G_SCRIPT
 	if (g_script->LoadFromText(script,aPathToShow) != OK) // || !g_script->PreparseBlocks(oldLastLine->mNextLine)))
 	{
-		g->CurrentFunc = aCurrFunc;
+		g->CurrentFunc = (UserFunc *)aCurrFunc;
 		if (g_script->mPlaceholderLabel)
 			delete g_script->mPlaceholderLabel;
 		RESTORE_G_SCRIPT
@@ -1080,7 +1080,7 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute, DWORD aThreadID)
 #ifdef _USRDLL
 	g_Loading = false;
 #endif
-	g->CurrentFunc = aCurrFunc;
+	g->CurrentFunc = (UserFunc *)aCurrFunc;
 	if (waitexecute != 0)
 	{
 		if (waitexecute == 1)
@@ -1188,7 +1188,7 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 
 	if ((g_script->LoadFromText(script) != OK)) // || !g_script->PreparseBlocks(oldLastLine->mNextLine))
 	{
-		g->CurrentFunc = aCurrFunc;
+		g->CurrentFunc = (UserFunc *)aCurrFunc;
 		if (g_script->mPlaceholderLabel)
 			delete g_script->mPlaceholderLabel;
 		// Delete used and restore SimpleHeap
@@ -1219,7 +1219,7 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 #ifdef _USRDLL
 	g_Loading = false;
 #endif
-	g->CurrentFunc = aCurrFunc;
+	g->CurrentFunc = (UserFunc *)aCurrFunc;
 	Line *aTempLine = g_script->mLastLine;
 	Line *aExecLine = g_script->mFirstLine;
 	delete g_script->mPlaceholderLabel;
@@ -1326,7 +1326,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 			script->ScriptError(ERR_TOO_FEW_PARAMS, func);
 			return _T("");
 		}
-		if(aFunc->mIsBuiltIn)
+		if(aFunc->IsBuiltIn())
 		{
 			ResultType aResult = OK;
 			EnterCriticalSection(&g_CriticalAhkFunction);
@@ -1361,10 +1361,10 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 			}
 			aFuncAndToken.buf = new_buf;
 			aFuncAndToken.mToken.buf = aFuncAndToken.buf;
-			aFuncAndToken.mToken.func = aFunc;
-			aFuncAndToken.mToken.marker = aFunc->mName;
+			aFuncAndToken.mToken.func = (BuiltInFunc *)aFunc;
+			aFuncAndToken.mToken.marker = (LPTSTR)aFunc->mName;
 			
-			aFunc->mBIF(aFuncAndToken.mToken, aFuncAndToken.param, aFunc->mParamCount < aParamsCount ? aFunc->mParamCount : aParamsCount);
+			aFunc->Call(aFuncAndToken.mToken, aFuncAndToken.param, aFunc->mParamCount < aParamsCount ? aFunc->mParamCount : aParamsCount);
 
 #ifndef _USRDLL
 			if (curr_teb)
@@ -1525,7 +1525,7 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 	// See MsgSleep() for comments about the following section.
 	VarBkp ErrorLevel_saved;
 	g_ErrorLevel->Backup(ErrorLevel_saved); // Back up the current ErrorLevel for later restoration.
-	InitNewThread(0, false, true, func.mJumpToLine->mActionType);
+	InitNewThread(0, false, true);
 
 	//for (int aParamCount = 0;func.mParamCount > aParamCount && aFuncAndToken->mParamCount > aParamCount;aParamCount++)
 	//	func.mParam[aParamCount].var->AssignString(aFuncAndToken->param[aParamCount]);
@@ -1608,7 +1608,7 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 void AssignVariant(Var &aArg, VARIANT &aVar, bool aRetainVar = true);
 VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT param2,/*[in,optional]*/ VARIANT param3,/*[in,optional]*/ VARIANT param4,/*[in,optional]*/ VARIANT param5,/*[in,optional]*/ VARIANT param6,/*[in,optional]*/ VARIANT param7,/*[in,optional]*/ VARIANT param8,/*[in,optional]*/ VARIANT param9,/*[in,optional]*/ VARIANT param10, int sendOrPost)
 {
-	Func *aFunc = g_script->FindFunc(func) ;
+	UserFunc *aFunc = (UserFunc *)g_script->FindFunc(func) ;
 	if (aFunc)
 	{	
 		VARIANT *variants[10] = {&param1,&param2,&param3,&param4,&param5,&param6,&param7,&param8,&param9,&param10};
@@ -1623,7 +1623,7 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 			r.vt = VT_NULL ;
 			return r ; 
 		}
-		if(aFunc->mIsBuiltIn)
+		if(aFunc->IsBuiltIn())
 		{
 			ResultType aResult = OK;
 			EnterCriticalSection(&g_CriticalAhkFunction);
@@ -1665,7 +1665,7 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 				AssignVariant(*aParam[i]->var, *variants[i],false);
 			}
 			aResultToken.symbol = SYM_INTEGER;
-			aResultToken.marker = aFunc->mName;
+			aResultToken.marker = (LPTSTR)aFunc->mName;
 			
 			aFunc->mBIF(aResultToken,aParam,aFunc->mParamCount < aParamsCount ? aFunc->mParamCount : aParamsCount);
 
@@ -1711,7 +1711,7 @@ VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT
 
 void callFuncDllVariant(FuncAndToken *aFuncAndToken)
 {
- 	Func &func =  *(aFuncAndToken->mFunc); 
+ 	UserFunc &func =  *(UserFunc *)aFuncAndToken->mFunc;
 	ResultToken & aResultToken = aFuncAndToken->mToken ;
 	// Func &func = *(Func *)g_script->mTempFunc ;
 	if (!INTERRUPTIBLE_IN_EMERGENCY)
@@ -1742,7 +1742,7 @@ void callFuncDllVariant(FuncAndToken *aFuncAndToken)
 	// ExprTokenType aResultToken;
 	// ExprTokenType &aResultToken = aResultToken_to_return ;
 	++func.mInstances;
-	func.Call(&aResultToken); // Call the UDF.
+	func.Call(aResultToken, aFuncAndToken->param, (int)aFuncAndToken->mParamCount, (IObject*)NULL); // Call the UDF.
 
 	TokenToVariant(aResultToken, aFuncAndToken->variant_to_return_dll, FALSE);
 

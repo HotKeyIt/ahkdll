@@ -21,7 +21,22 @@ BIF_DECL(BIF_ComObjCreate)
 	CLSID clsid, iid;
 	for (;;)
 	{
-		hr = CLSIDFromString(CStringWCharFromTCharIfNeeded(TokenToString(*aParam[0])), &clsid);
+#ifdef UNICODE
+		LPTSTR cls = TokenToString(*aParam[0]);
+#else
+		CStringWCharFromTChar cls = TokenToString(*aParam[0]);
+#endif
+		// It has been confirmed on Windows 10 that both CLSIDFromString and CLSIDFromProgID
+		// were unable to resolve a ProgID starting with '{', like "{Foo", though "Foo}" works.
+		// There are probably also guidelines and such that prohibit it.
+		if (cls[0] == '{')
+			hr = CLSIDFromString(cls, &clsid);
+		else
+			// CLSIDFromString is known to be able to resolve ProgIDs via the registry,
+			// but fails on registration-free classes such as "Microsoft.Windows.ActCtx".
+			// CLSIDFromProgID works for that, but fails when given a CLSID string
+			// (consistent with VBScript and JScript in both cases).
+			hr = CLSIDFromProgID(cls, &clsid);
 		if (FAILED(hr)) break;
 
 		if (aParamCount > 1)
@@ -406,80 +421,80 @@ BIF_DECL(BIF_ComObjError)
 }
 
 
-BIF_DECL(BIF_ComObjTypeOrValue)
+BIF_DECL(BIF_ComObjValue)
 {
 	ComObject *obj = dynamic_cast<ComObject *>(TokenToObject(*aParam[0]));
-	if (_f_callee_id == FID_ComObjValue)
+	if (!obj)
 	{
-		if (!obj)
-		{
-			ComError(-1, aResultToken); // No COM object
-			_f_return_empty;
-		}
-		aResultToken.value_int64 = obj->mVal64;
+		ComError(-1, aResultToken); // No COM object
+		_f_return_empty;
+	}
+	aResultToken.value_int64 = obj->mVal64;
+}
+
+
+BIF_DECL(BIF_ComObjType)
+{
+	ComObject *obj = dynamic_cast<ComObject *>(TokenToObject(*aParam[0]));
+	if (!obj)
+		_f_return_empty; // So ComObjType(x) != "" can be used for "x is ComObject".
+	if (aParamCount < 2)
+	{
+		aResultToken.value_int64 = obj->mVarType;
 	}
 	else
 	{
-		if (!obj)
-			_f_return_empty; // So ComObjType(x) != "" can be used for "x is ComObject".
-		if (aParamCount < 2)
+		aResultToken.symbol = SYM_STRING; // for all code paths below
+		aResultToken.marker = _T(""); // in case of error
+		aResultToken.marker_length = 0;
+
+		LPTSTR requested_info = TokenToString(*aParam[1]);
+
+		ITypeInfo *ptinfo = NULL;
+		if (tolower(*requested_info) == 'c')
 		{
-			aResultToken.value_int64 = obj->mVarType;
+			// Get class information.
+			if ((VT_DISPATCH == obj->mVarType || VT_UNKNOWN == obj->mVarType) && obj->mUnknown)
+			{
+				ptinfo = GetClassTypeInfo(obj->mUnknown);
+				if (ptinfo)
+				{
+					if (!_tcsicmp(requested_info, _T("Class")))
+						requested_info = _T("Name");
+					else if (!_tcsicmp(requested_info, _T("CLSID")))
+						requested_info = _T("IID");
+				}
+			}
 		}
 		else
 		{
-			aResultToken.symbol = SYM_STRING; // for all code paths below
-			aResultToken.marker = _T(""); // in case of error
-			aResultToken.marker_length = 0;
-
-			LPTSTR requested_info = TokenToString(*aParam[1]);
-
-			ITypeInfo *ptinfo = NULL;
-			if (tolower(*requested_info) == 'c')
+			// Get IDispatch information.
+			if (VT_DISPATCH == obj->mVarType && obj->mDispatch)
+				if (FAILED(obj->mDispatch->GetTypeInfo(0, LOCALE_USER_DEFAULT, &ptinfo)))
+					ptinfo = NULL;
+		}
+		if (ptinfo)
+		{
+			if (!_tcsicmp(requested_info, _T("Name")))
 			{
-				// Get class information.
-				if ((VT_DISPATCH == obj->mVarType || VT_UNKNOWN == obj->mVarType) && obj->mUnknown)
+				BSTR name;
+				if (SUCCEEDED(ptinfo->GetDocumentation(MEMBERID_NIL, &name, NULL, NULL, NULL)))
 				{
-					ptinfo = GetClassTypeInfo(obj->mUnknown);
-					if (ptinfo)
-					{
-						if (!_tcsicmp(requested_info, _T("class")))
-							requested_info = _T("name");
-						else if (!_tcsicmp(requested_info, _T("clsid")))
-							requested_info = _T("iid");
-					}
+					TokenSetResult(aResultToken, CStringTCharFromWCharIfNeeded(name), SysStringLen(name));
+					SysFreeString(name);
 				}
 			}
-			else
+			else if (!_tcsicmp(requested_info, _T("IID")))
 			{
-				// Get IDispatch information.
-				if (VT_DISPATCH == obj->mVarType && obj->mDispatch)
-					if (FAILED(obj->mDispatch->GetTypeInfo(0, LOCALE_USER_DEFAULT, &ptinfo)))
-						ptinfo = NULL;
-			}
-			if (ptinfo)
-			{
-				if (!_tcsicmp(requested_info, _T("name")))
+				TYPEATTR *typeattr;
+				if (SUCCEEDED(ptinfo->GetTypeAttr(&typeattr)))
 				{
-					BSTR name;
-					if (SUCCEEDED(ptinfo->GetDocumentation(MEMBERID_NIL, &name, NULL, NULL, NULL)))
-					{
-						TokenSetResult(aResultToken, CStringTCharFromWCharIfNeeded(name), SysStringLen(name));
-						SysFreeString(name);
-					}
+					aResultToken.marker = aResultToken.buf;
+					aResultToken.marker_length = StringFromGUID2(typeattr->guid, aResultToken.marker, MAX_NUMBER_SIZE);
+					ptinfo->ReleaseTypeAttr(typeattr);
 				}
-				else if (!_tcsicmp(requested_info, _T("iid")))
-				{
-					TYPEATTR *typeattr;
-					if (SUCCEEDED(ptinfo->GetTypeAttr(&typeattr)))
-					{
-						aResultToken.marker = aResultToken.buf;
-						aResultToken.marker_length = StringFromGUID2(typeattr->guid, aResultToken.marker, MAX_NUMBER_SIZE);
-						ptinfo->ReleaseTypeAttr(typeattr);
-					}
-				}
-				ptinfo->Release();
 			}
+			ptinfo->Release();
 		}
 	}
 }
@@ -919,32 +934,6 @@ void VarTypeToToken(VARTYPE aVarType, void *apValue, ResultToken &aToken)
 }
 
 
-void RValueToResultToken(ExprTokenType &aRValue, ExprTokenType &aResultToken)
-// Support function for chaining assignments.  Provides consistent results when aRValue has been
-// converted to a VARIANT.  Passes wrapper objects as is, whereas VariantToToken would return
-// either a simple value or a new wrapper object.
-{
-	switch (aRValue.symbol)
-	{
-	case SYM_STRING:
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = aRValue.marker;
-		aResultToken.marker_length = aRValue.marker_length;
-		break;
-	case SYM_OBJECT:
-		aResultToken.symbol = SYM_OBJECT;
-		aResultToken.object = aRValue.object;
-		aResultToken.object->AddRef();
-		break;
-	case SYM_INTEGER:
-	case SYM_FLOAT:
-		aResultToken.symbol = aRValue.symbol;
-		aResultToken.value_int64 = aRValue.value_int64;
-		break;
-	}
-}
-
-
 bool g_ComErrorNotify = true;
 
 ResultType ComError(HRESULT hr)
@@ -1074,9 +1063,7 @@ STDMETHODIMP ComEvent::Invoke(DISPID dispIdMember, REFIID riid, LCID lcid, WORD 
 	if (SUCCEEDED(hr))
 		hr = func->Invoke(dispid, riid, lcid, wFlags, &dispParams, pVarResult, pExcepInfo, puArgErr);
 
-	// It's hard to say what our caller will do if DISP_E_MEMBERNOTFOUND is returned,
-	// so just return S_OK as in previous versions:
-	return S_OK;
+	return hr;
 }
 
 HRESULT ComEvent::Connect(LPTSTR pfx, IObject *ahkObject)
@@ -1133,67 +1120,43 @@ HRESULT ComEvent::Connect(LPTSTR pfx, IObject *ahkObject)
 	return hr;
 }
 
-ResultType STDMETHODCALLTYPE ComObject::Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount)
+ResultType ComObject::Invoke(IObject_Invoke_PARAMS_DECL)
 {
-	if (aParamCount < (IS_INVOKE_SET ? 2 : 1))
-	{
-		HRESULT hr = DISP_E_BADPARAMCOUNT; // Set default.
-		// Something like x[] or x[]:=y.
-		if (mVarType & VT_BYREF)
-		{
-			VARTYPE item_type = mVarType & VT_TYPEMASK;
-			if (aParamCount) // Implies SET.
-			{
-				hr = TokenToVarType(*aParam[0], item_type, mValPtr);
-				if (SUCCEEDED(hr))
-				{
-					RValueToResultToken(*aParam[0], aResultToken);
-					return OK;
-				}
-			}
-			else // !aParamCount: Implies GET.
-			{
-				VarTypeToToken(item_type, mValPtr, aResultToken);
-				return OK;
-			}
-		}
-		if ((mVarType & VT_ARRAY) // Not meaningful for SafeArrays.
-			|| IS_INVOKE_SET) // Wouldn't be handled correctly below and probably has no real-world use.
-		{
-			ComError(hr, aResultToken);
-			return aResultToken.Result();
-		}
-	}
-
 	if (mVarType != VT_DISPATCH || !mDispatch)
 	{
+		if (!IS_INVOKE_CALL && aName && !_tcsicmp(aName, _T("Ptr")))
+		{
+			if (IS_INVOKE_SET || aParamCount)
+				_o_throw(ERR_INVALID_USAGE);
+			// Support passing VT_ARRAY, VT_BYREF or IUnknown to DllCall.
+			if ((mVarType & (VT_ARRAY | VT_BYREF)) || mVarType == VT_UNKNOWN || mVarType == VT_DISPATCH)
+				_o_return(mVal64);
+		}
 		if (mVarType & VT_ARRAY)
-			return SafeArrayInvoke(aResultToken, aFlags, aParam, aParamCount);
+			return SafeArrayInvoke(IObject_Invoke_PARAMS);
+		if (mVarType & VT_BYREF)
+			return ByRefInvoke(IObject_Invoke_PARAMS);
 		// Otherwise: this object can't be invoked.
 		ComError(-1, aResultToken);
 		return aResultToken.Result();
 	}
 
 	DISPID dispid;
-	LPTSTR aName;
 	HRESULT	hr;
 	if (aFlags & IF_NEWENUM)
 	{
 		hr = S_OK;
 		dispid = DISPID_NEWENUM;
 		aName = _T("_NewEnum"); // Init for ComError().
+		aParamCount = 0;
 	}
-	else if (!aParamCount || aParam[0]->symbol == SYM_MISSING)
+	else if (!aName)
 	{
-		// v1.1.20: a[,b] is now permitted.  Rather than treating it the same as 
-		// an empty string, invoke the object's default/"value" property/method.
 		hr = S_OK;
 		dispid = DISPID_VALUE;
-		aName = _T("");
 	}
 	else
 	{
-		aName = TokenToString(*aParam[0], aResultToken.buf);
 #ifdef UNICODE
 		LPOLESTR wname = aName;
 #else
@@ -1216,18 +1179,6 @@ ResultType STDMETHODCALLTYPE ComObject::Invoke(ResultToken &aResultToken, ExprTo
 					dispEx->Release();
 				}
 			}
-			else if (IS_INVOKE_CALL && TokenIsEmptyString(*aParam[0]))
-			{
-				// Fn.() and %Fn%() both produce this condition.  aParam[0] is checked instead of aName
-				// because aName is also empty if an object was passed, as for Fn[Obj]() or {X: Fn}.X().
-				// Although allowing JScript functions to act as methods of AutoHotkey objects could be
-				// useful, a different approach would be needed to pass 'this', such as:
-				//  - IDispatchEx::InvokeEx with the named arg DISPID_THIS.
-				//  - Fn.call(this) -- this would also work with AutoHotkey functions, but would break
-				//    existing meta-function scripts.
-				dispid = DISPID_VALUE;
-				hr = S_OK;
-			}
 		}
 		if (FAILED(hr))
 			aParamCount = 0; // Skip parameter conversion and cleanup.
@@ -1240,15 +1191,12 @@ ResultType STDMETHODCALLTYPE ComObject::Invoke(ResultToken &aResultToken, ExprTo
 	VARIANT varResult = {0};
 	
 	if (aParamCount)
-		--aParamCount; // Exclude the member name, if any.
-
-	if (aParamCount)
 	{
 		rgvarg = (VARIANTARG *)_alloca(sizeof(VARIANTARG) * aParamCount);
 
-		for (int i = 0; i < aParamCount; i++)
+		for (int i = 1; i <= aParamCount; i++)
 		{
-			TokenToVariant(*aParam[aParamCount-i], rgvarg[i], TRUE);
+			TokenToVariant(*aParam[aParamCount-i], rgvarg[i-1], TRUE);
 		}
 
 		dispparams.rgvarg = rgvarg;
@@ -1272,7 +1220,7 @@ ResultType STDMETHODCALLTYPE ComObject::Invoke(ResultToken &aResultToken, ExprTo
 	{
 		// TokenToVariant() in "arg" mode never calls AddRef() or SafeArrayCopy(), so the arg needs to be freed
 		// only if it is a BSTR and not one which came from a ComObject wrapper (such as ComObject(9, pbstr)).
-		if (rgvarg[i].vt == VT_BSTR && aParam[aParamCount-i]->symbol != SYM_OBJECT)
+		if (rgvarg[i].vt == VT_BSTR && aParam[aParamCount-(i+1)]->symbol != SYM_OBJECT)
 			SysFreeString(rgvarg[i].bstrVal);
 	}
 
@@ -1282,10 +1230,8 @@ ResultType STDMETHODCALLTYPE ComObject::Invoke(ResultToken &aResultToken, ExprTo
 	}
 	else if	(IS_INVOKE_SET)
 	{
-		// Allow chaining, e.g. obj2.prop := obj1.prop := val.
-		aResultToken.CopyValueFrom(*aParam[aParamCount]); // Can't be SYM_VAR at this stage because TokenToVariant() would have converted it to its contents.
-		if (aResultToken.symbol == SYM_OBJECT)
-			aResultToken.object->AddRef();
+		// Op_ObjInvoke sets the result of IT_SET.
+		VariantClear(&varResult);
 	}
 	else
 	{
@@ -1295,7 +1241,8 @@ ResultType STDMETHODCALLTYPE ComObject::Invoke(ResultToken &aResultToken, ExprTo
 	return	aResultToken.Result();
 }
 
-ResultType ComObject::SafeArrayInvoke(ResultToken &aResultToken, int aFlags, ExprTokenType *aParam[], int aParamCount)
+
+ResultType ComObject::SafeArrayInvoke(IObject_Invoke_PARAMS_DECL)
 {
 	HRESULT hr = S_OK;
 	SAFEARRAY *psa = (SAFEARRAY*)mVal64;
@@ -1303,9 +1250,11 @@ ResultType ComObject::SafeArrayInvoke(ResultToken &aResultToken, int aFlags, Exp
 
 	if (IS_INVOKE_CALL)
 	{
-		LPTSTR name = TokenToString(*aParam[0]);
+		if (!aName)
+			return INVOKE_NOT_HANDLED;
+
 		LONG retval;
-		if (!_tcsicmp(name, _T("_NewEnum")))
+		if (!_tcsicmp(aName, _T("__Enum")))
 		{
 			ComArrayEnum *enm;
 			if (SUCCEEDED(hr = ComArrayEnum::Begin(this, enm)))
@@ -1314,7 +1263,7 @@ ResultType ComObject::SafeArrayInvoke(ResultToken &aResultToken, int aFlags, Exp
 				aResultToken.object = enm;
 			}
 		}
-		else if (!_tcsicmp(name, _T("Clone")))
+		else if (!_tcsicmp(aName, _T("Clone")))
 		{
 			SAFEARRAY *clone;
 			if (SUCCEEDED(hr = SafeArrayCopy(psa, &clone)))
@@ -1323,22 +1272,24 @@ ResultType ComObject::SafeArrayInvoke(ResultToken &aResultToken, int aFlags, Exp
 		}
 		else
 		{
-			if (!_tcsicmp(name, _T("Length")) || !_tcsicmp(name, _T("Count")))
-				hr = SafeArrayGetUBound(psa, aParamCount > 1 ? (UINT)TokenToInt64(*aParam[1]) : 1, &retval);
-			//else if (!_tcsicmp(name, _T("MinIndex")))
-				//hr = SafeArrayGetLBound(psa, aParamCount > 1 ? (UINT)TokenToInt64(*aParam[1]) : 1, &retval);
+			if (!_tcsicmp(aName, _T("MaxIndex")))
+				hr = SafeArrayGetUBound(psa, aParamCount ? (UINT)TokenToInt64(*aParam[0]) : 1, &retval);
+			else if (!_tcsicmp(aName, _T("MinIndex")))
+				hr = SafeArrayGetLBound(psa, aParamCount ? (UINT)TokenToInt64(*aParam[0]) : 1, &retval);
 			else
 				hr = DISP_E_UNKNOWNNAME; // Seems slightly better than ignoring the call.
 			if (SUCCEEDED(hr))
 			{
 				aResultToken.symbol = SYM_INTEGER;
-				aResultToken.value_int64 = retval + !_tcsicmp(name, _T("Count"));
+				aResultToken.value_int64 = retval;
 			}
 		}
 		if (FAILED(hr))
 			ComError(hr, aResultToken);
 		return aResultToken.Result();
 	}
+	if (aName && _tcsicmp(aName, _T("__Item")))
+		return INVOKE_NOT_HANDLED;
 
 	UINT dims = SafeArrayGetDim(psa);
 	LONG index[8];
@@ -1374,9 +1325,6 @@ ResultType ComObject::SafeArrayInvoke(ResultToken &aResultToken, int aFlags, Exp
 		{
 			ExprTokenType &rvalue = *aParam[dims];
 			hr = TokenToVarType(rvalue, item_type, item);
-			if (SUCCEEDED(hr))
-				RValueToResultToken(rvalue, aResultToken);
-			// Otherwise, leave aResultToken blank.
 		}
 	}
 
@@ -1385,6 +1333,33 @@ ResultType ComObject::SafeArrayInvoke(ResultToken &aResultToken, int aFlags, Exp
 	if (FAILED(hr))
 		ComError(hr, aResultToken);
 	return aResultToken.Result();
+}
+
+
+ResultType ComObject::ByRefInvoke(IObject_Invoke_PARAMS_DECL)
+{
+	if (IS_INVOKE_CALL || aName && _tcsicmp(aName, _T("__Item"))) // It's not [] or .__Item.
+		return INVOKE_NOT_HANDLED;
+
+	if (aParamCount > (IS_INVOKE_SET ? 1 : 0))
+		_o_throw(ERR_INVALID_USAGE);
+	//else: Something like x[] or x[]:=y.
+	
+	VARTYPE item_type = mVarType & VT_TYPEMASK;
+	if (IS_INVOKE_SET)
+	{
+		auto hr = TokenToVarType(*aParam[0], item_type, mValPtr);
+		if (FAILED(hr))
+		{
+			ComError(hr, aResultToken);
+			return aResultToken.Result();
+		}
+	}
+	else
+	{
+		VarTypeToToken(item_type, mValPtr, aResultToken);
+	}
+	return OK;
 }
 
 
@@ -1414,7 +1389,7 @@ LPTSTR ComObject::Type()
 }
 
 
-int ComEnum::Next(Var *aOutput, Var *aOutputType)
+ResultType ComEnum::Next(Var *aOutput, Var *aOutputType)
 {
 	VARIANT varResult = {0};
 	if (penum->Next(1, &varResult, NULL) == S_OK)
@@ -1423,9 +1398,9 @@ int ComEnum::Next(Var *aOutput, Var *aOutputType)
 			aOutputType->Assign((__int64)varResult.vt);
 		if (aOutput)
 			AssignVariant(*aOutput, varResult, false);
-		return true;
+		return CONDITION_TRUE;
 	}
-	return	false;
+	return CONDITION_FALSE;
 }
 
 
@@ -1465,7 +1440,7 @@ ComArrayEnum::~ComArrayEnum()
 	mArrayObject->Release();
 }
 
-int ComArrayEnum::Next(Var *aOutput, Var *aOutputType)
+ResultType ComArrayEnum::Next(Var *aOutput, Var *aOutputType)
 {
 	if ((mPointer += mElemSize) <= mEnd)
 	{
@@ -1485,9 +1460,9 @@ int ComArrayEnum::Next(Var *aOutput, Var *aOutputType)
 		AssignVariant(*aOutput, var);
 		if (aOutputType)
 			aOutputType->Assign(var.vt);
-		return true;
+		return CONDITION_TRUE;
 	}
-	return false;
+	return CONDITION_FALSE;
 }
 
 IObject *GuiType::ControlGetActiveX(HWND aWnd)
@@ -1549,7 +1524,7 @@ STDMETHODIMP IObjectComCompatible::GetTypeInfo(UINT itinfo, LCID lcid, ITypeInfo
 	return E_NOTIMPL;
 }
 
-_thread_local static Object *g_IdToName;
+_thread_local static Array *g_IdToName;
 _thread_local static Object *g_NameToId;
 
 STDMETHODIMP IObjectComCompatible::GetIDsOfNames(REFIID riid, LPOLESTR *rgszNames, UINT cNames, LCID lcid, DISPID *rgDispId)
@@ -1560,17 +1535,17 @@ STDMETHODIMP IObjectComCompatible::GetIDsOfNames(REFIID riid, LPOLESTR *rgszName
 	CStringCharFromWChar name_buf(*rgszNames);
 	LPTSTR name = const_cast<LPTSTR>(name_buf.GetString());
 #endif
-	if ( !(g_IdToName || (g_IdToName = Object::Create())) ||
+	if ( !(g_IdToName || (g_IdToName = Array::Create())) ||
 		 !(g_NameToId || (g_NameToId = Object::Create())) )
 		return E_OUTOFMEMORY;
 	ExprTokenType id;
-	if (!g_NameToId->GetItem(id, name))
+	if (!g_NameToId->GetOwnProp(id, name))
 	{
 		if (!g_IdToName->Append(name))
 			return E_OUTOFMEMORY;
 		id.symbol = SYM_INTEGER;
-		id.value_int64 = g_IdToName->GetNumericItemCount();
-		if (!g_NameToId->SetItem(name, id))
+		id.value_int64 = g_IdToName->Length();
+		if (!g_NameToId->SetOwnProp(name, id))
 			return E_OUTOFMEMORY;
 	}
 	*rgDispId = (DISPID)id.value_int64;
@@ -1601,45 +1576,21 @@ STDMETHODIMP IObjectComCompatible::Invoke(DISPID dispIdMember, REFIID riid, LCID
 	int flags = (wFlags & (DISPATCH_PROPERTYPUT | DISPATCH_PROPERTYPUTREF)) ? IT_SET
 		: (wFlags & DISPATCH_METHOD) ? IT_CALL : IT_GET;
 	
-	ExprTokenType **first_param = param;
+	ExprTokenType **first_param = param + 1;
 	int param_count = cArgs;
+	LPTSTR name;
 	
 	if (dispIdMember > 0)
 	{
-		if (!g_IdToName->GetItemOffset(param_token[0], dispIdMember - 1))
+		if (!g_IdToName->ItemToToken(dispIdMember - 1, param_token[0]))
 			return DISP_E_MEMBERNOTFOUND;
-		if (IsNumeric(param_token[0].marker, FALSE, FALSE)) // o[1] in JScript produces a numeric name.
-		{
-			param_token[0].symbol = SYM_INTEGER;
-			param_token[0].value_int64 = ATOI(param_token[0].marker);
-		}
-		param[0] = &param_token[0];
-		++param_count;
-		if (flags == IT_CALL && (wFlags & DISPATCH_PROPERTYGET))
-			flags |= IF_CALL_FUNC_ONLY;
+		name = param_token[0].marker;
 	}
 	else
 	{
 		if (dispIdMember != DISPID_VALUE)
 			return DISP_E_MEMBERNOTFOUND;
-		if (flags == IT_CALL && !(wFlags & DISPATCH_PROPERTYGET))
-		{
-			// This approach works well for Func, but not for an Object implementing __Call,
-			// which always expects a method name or the object whose method is being called:
-			//flags = (IT_CALL|IF_FUNCOBJ);
-			//++first_param;
-			// This is consistent with %func%():
-			param_token[0].symbol = SYM_STRING;
-			param_token[0].marker = _T("Call");
-			param[0] = &param_token[0];
-			++param_count;
-		}
-		else
-		{
-			if (flags == IT_CALL) // Obj(X) in VBScript and C#, or Obj[X] in C#
-				flags = IT_GET|IF_FUNCOBJ;
-			++first_param;
-		}
+		name = nullptr;
 	}
 	
 	for (UINT i = 1; i <= cArgs; ++i)
@@ -1662,7 +1613,7 @@ STDMETHODIMP IObjectComCompatible::Invoke(DISPID dispIdMember, REFIID riid, LCID
 
 	for (;;)
 	{
-		switch (static_cast<IObject *>(this)->Invoke(result_token, this_token, flags, first_param, param_count))
+		switch (static_cast<IObject *>(this)->Invoke(result_token, flags, name, this_token, first_param, param_count))
 		{
 		case FAIL:
 			result_to_return = E_FAIL;
@@ -1678,29 +1629,38 @@ STDMETHODIMP IObjectComCompatible::Invoke(DISPID dispIdMember, REFIID riid, LCID
 						SysAllocString(CStringWCharFromTCharIfNeeded(TokenToString(__VA_ARGS__)))
 
 					ExprTokenType token;
-					if (obj->GetItem(token, _T("Message")))
+					if (obj->GetOwnProp(token, _T("Message")))
 						pExcepInfo->bstrDescription = SysStringFromToken(token, result_token.buf);
-					if (obj->GetItem(token, _T("What")))
+					if (obj->GetOwnProp(token, _T("What")))
 						pExcepInfo->bstrSource = SysStringFromToken(token, result_token.buf);
-					if (obj->GetItem(token, _T("File")))
+					if (obj->GetOwnProp(token, _T("File")))
 						pExcepInfo->bstrHelpFile = SysStringFromToken(token, result_token.buf);
-					if (obj->GetItem(token, _T("Line")))
+					if (obj->GetOwnProp(token, _T("Line")))
 						pExcepInfo->dwHelpContext = (DWORD)TokenToInt64(token);
+				}
+				else
+				{
+					// Showing an error message seems more helpful than silently returning E_FAIL.
+					// Although there's risk of our caller showing a second message or handling
+					// the error in some other way, it couldn't report anything specific since
+					// all it will have is the generic failure code.
+					g_script->UnhandledException(NULL);
 				}
 				g_script->FreeExceptionToken(g->ThrownToken);
 			}
 			break;
 		case INVOKE_NOT_HANDLED:
-			if ((flags & IT_BITMASK) != IT_GET)
+			if ((flags & IT_BITMASK) == IT_CALL && (wFlags & DISPATCH_PROPERTYGET))
 			{
-				if (wFlags & DISPATCH_PROPERTYGET)
-				{
-					flags = IT_GET;
-					continue;
-				}
-				result_to_return = DISP_E_MEMBERNOTFOUND;
-				break;
+				// Request was to call a method OR retrieve a property, but we now know there's no such
+				// method.  For DISPID_VALUE, it could be Obj(X) in VBScript and C#, or Obj[X] in C#.
+				// For other IDs, Obj.X(Y) in VBScript is known to do this.  VBScript uses () for both
+				// functions and array indexing.
+				flags = IT_GET;
+				continue;
 			}
+			result_to_return = DISP_E_MEMBERNOTFOUND;
+			break;
 		default:
 			result_to_return = S_OK;
 			if (pVarResult)
@@ -1726,17 +1686,13 @@ void WriteComObjType(IDebugProperties *aDebugger, ComObject *aObject, LPCSTR aNa
 {
 	TCHAR buf[_f_retval_buf_size];
 	ResultToken resultToken;
-	_thread_local static Func *ComObjType = NULL;
-	if (!ComObjType)
-		ComObjType = g_script->FindFunc(_T("ComObjType")); // FIXME: Probably better to split ComObjType and ComObjValue.
-	resultToken.func = ComObjType;
 	resultToken.symbol = SYM_INTEGER;
 	resultToken.marker_length = -1;
 	resultToken.mem_to_free = NULL;
 	resultToken.buf = buf;
 	ExprTokenType paramToken[] = { aObject, aWhichType };
 	ExprTokenType *param[] = { &paramToken[0], &paramToken[1] };
-	BIF_ComObjTypeOrValue(resultToken, param, 2);
+	BIF_ComObjType(resultToken, param, 2);
 	aDebugger->WriteProperty(aName, resultToken);
 	if (resultToken.mem_to_free)
 		free(resultToken.mem_to_free);

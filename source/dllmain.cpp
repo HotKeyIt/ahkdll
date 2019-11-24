@@ -107,10 +107,10 @@ switch(fwdReason)
 			free(Line::sSourceFile);
 		 if (g_Debugger.mStack.mSize)
 			free(g_Debugger.mStack.mBottom);
-		 if (g_input.MatchCount)
+		 /*if (g_input.MatchCount)
 		 {
 			 free(g_input.match);
-		 }
+		 }*/
 		 free(g_KeyHistory);
 		 if (g_hWinAPI)
 		 {
@@ -158,28 +158,64 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	g_script->Construct();
 	g_clip = new Clipboard();
 	g_MsgMonitor = new MsgMonitorList();
-	g_MetaObject = new MetaObject();
 	g_SimpleHeap = new SimpleHeap();
 	g_SimpleHeapVar = g_SimpleHeap;
 	
+
+	FileObject::sPrototype = Object::CreatePrototype(_T("File"), FileObject::sPrototype, FileObject::sMembers, _countof(FileObject::sMembers));
+	Object::sAnyPrototype = Object::CreateRootPrototypes();
+	Object::sClassPrototype = Object::CreatePrototype(_T("Class"), Object::sPrototype);
+	Array::sPrototype = Object::CreatePrototype(_T("Array"), Array::sPrototype, Array::sMembers, _countof(Array::sMembers));
+	Map::sPrototype = Object::CreatePrototype(_T("Map"), Map::sPrototype, Map::sMembers, _countof(Map::sMembers));
+
+	//																							Direct base			Prototype			Constructor
+	Object::sClass = Object::CreateClass(_T("Object"), Object::sClassPrototype, Object::sPrototype, static_cast<ObjectMethod>(&Object::New<Object>));
+	Object::sClassClass = Object::CreateClass(_T("Class"), Object::sClass, Object::sClassPrototype, static_cast<ObjectMethod>(&Object::New<Object>));
+	Array::sClass = Object::CreateClass(_T("Array"), Array::sClass, Array::sPrototype, static_cast<ObjectMethod>(&Array::New<Array>));
+	Map::sClass = Object::CreateClass(_T("Map"), Map::sClass, Map::sPrototype, static_cast<ObjectMethod>(&Map::New<Map>));
+
+
+
+	Closure::sPrototype = Object::CreatePrototype(_T("Closure"), Func::sPrototype);
+	BoundFunc::sPrototype = Object::CreatePrototype(_T("BoundFunc"), Func::sPrototype);
+	EnumBase::sPrototype = Object::CreatePrototype(_T("Enumerator"), Func::sPrototype);
+
+
+
+	BufferObject::sPrototype = Object::CreatePrototype(_T("Buffer"), BufferObject::sPrototype, BufferObject::sMembers, _countof(BufferObject::sMembers));
+	ClipboardAll::sPrototype = Object::CreatePrototype(_T("ClipboardAll"), BufferObject::sPrototype);
+
+	RegExMatchObject::sPrototype = Object::CreatePrototype(_T("RegExMatch"), RegExMatchObject::sPrototype, RegExMatchObject::sMembers, _countof(RegExMatchObject::sMembers));
+
+	Object::sPrimitivePrototype = Object::CreatePrototype(_T("Primitive"), Object::sAnyPrototype);
+	Object::sStringPrototype = Object::CreatePrototype(_T("String"), Object::sPrimitivePrototype);
+	Object::sNumberPrototype = Object::CreatePrototype(_T("Number"), Object::sPrimitivePrototype);
+	Object::sIntegerPrototype = Object::CreatePrototype(_T("Integer"), Object::sNumberPrototype);
+	Object::sFloatPrototype = Object::CreatePrototype(_T("Float"), Object::sNumberPrototype);
+
 	HMODULE advapi32 = LoadLibrary(_T("advapi32.dll"));
 	g_CryptEncrypt = (MyCryptEncrypt)GetProcAddress(advapi32, "CryptEncrypt");
 	g_CryptDecrypt = (MyCryptDecrypt)GetProcAddress(advapi32, "CryptDecrypt");
 #ifdef _DEBUG
-	g_hResource = FindResource(g_hInstance, _T("AHK"), MAKEINTRESOURCE(RT_RCDATA));
+	g_hResource = FindResource(g_hInstance, _T("AHK"), RT_RCDATA);
 #else
 	if (g_hMemoryModule)
-		g_hResource = (HRSRC)MemoryFindResource(g_hMemoryModule, _T("E4847ED08866458F8DD35F94B37001C0"), MAKEINTRESOURCE(RT_RCDATA));
+		g_hResource = (HRSRC)MemoryFindResource(g_hMemoryModule, _T("E4847ED08866458F8DD35F94B37001C0"), RT_RCDATA);
 	else
-		g_hResource = FindResource(g_hInstance, _T("E4847ED08866458F8DD35F94B37001C0"), MAKEINTRESOURCE(RT_RCDATA));
+		g_hResource = FindResource(g_hInstance, _T("E4847ED08866458F8DD35F94B37001C0"), RT_RCDATA);
 #endif
 
-	if (!GetCurrentDirectory(_countof(g_WorkingDir), g_WorkingDir)) // Needed for the FileSelectFile() workaround.
-		*g_WorkingDir = '\0';
-	// Unlike the below, the above must not be Malloc'd because the contents can later change to something
-	// as large as MAX_PATH by means of the SetWorkingDir command.
+	// v1.1.22+: This is done unconditionally, on startup, so that any attempts to read a drive
+	// that has no media (and possibly other errors) won't cause the system to display an error
+	// dialog that the script can't suppress.  This is known to affect floppy drives and some
+	// but not all CD/DVD drives.  MSDN says: "Best practice is that all applications call the
+	// process-wide SetErrorMode function with a parameter of SEM_FAILCRITICALERRORS at startup."
+	// Note that in previous versions, this was done by the Drive/DriveGet commands and not
+	// reverted afterward, so it affected all subsequent commands.
+	SetErrorMode(SEM_FAILCRITICALERRORS);
 
-	g_WorkingDirOrig = g_SimpleHeap->Malloc(g_WorkingDir); // Needed by the Reload command.
+	UpdateWorkingDir(); // Needed for the FileSelect() workaround.
+	g_WorkingDirOrig = g_SimpleHeap->Malloc(const_cast<LPTSTR>(g_WorkingDir.GetString())); // Needed by the Reload command.
 
 	// Set defaults, to be overridden by command line args we receive:
 	ahkdll_restart_mode = false;
@@ -298,16 +334,12 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 			}
 		}
 
-	// used to monitor Input
-	if (!g_script->FindOrAddVar(_T("A_Input"), 7, VAR_DECLARE_SUPER_GLOBAL))
-		return CRITICAL_ERROR;
-
 	if (Var *var = g_script->FindOrAddVar(_T("A_Args"), 6, VAR_DECLARE_SUPER_GLOBAL))
 	{
 		// Store the remaining args in an array and assign it to "A_Args".
 		// If there are no args, assign an empty array so that A_Args[1]
 		// and A_Args.Length() don't cause an error.
-		Object *args = Object::CreateFromArgV((LPTSTR*)(ahkdll_argv + ahkdll_i), ahkdll_argc - ahkdll_i);
+		auto *args = Array::FromArgV((LPTSTR*)(ahkdll_argv + ahkdll_i), ahkdll_argc - ahkdll_i);
 		if (!args)
 		{
 			g_Reloading = false;
@@ -391,27 +423,6 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	if (g_MaxHistoryKeys && (g_KeyHistory = (KeyHistoryItem *)realloc(g_KeyHistory,g_MaxHistoryKeys * sizeof(KeyHistoryItem))))
 		ZeroMemory(g_KeyHistory, g_MaxHistoryKeys * sizeof(KeyHistoryItem)); // Must be zeroed.
 	//else leave it NULL as it was initialized in globaldata.
-	// MSDN: "Windows XP: If a manifest is used, InitCommonControlsEx is not required."
-	// Therefore, in case it's a high overhead call, it's not done on XP or later:
-	if (!g_os.IsWinXPorLater())
-	{
-		// Since InitCommonControls() is apparently incapable of initializing DateTime and MonthCal
-		// controls, InitCommonControlsEx() must be called.  But since Ex() requires comctl32.dll
-		// 4.70+, must get the function's address dynamically in case the program is running on
-		// Windows 95/NT without the updated DLL (otherwise the program would not launch at all).
-		typedef BOOL (WINAPI *MyInitCommonControlsExType)(LPINITCOMMONCONTROLSEX);
-		MyInitCommonControlsExType MyInitCommonControlsEx = (MyInitCommonControlsExType)
-			GetProcAddress(GetModuleHandle(_T("comctl32")), "InitCommonControlsEx"); // LoadLibrary shouldn't be necessary because comctl32 in linked by compiler.
-		if (MyInitCommonControlsEx)
-		{
-			INITCOMMONCONTROLSEX icce;
-			icce.dwSize = sizeof(INITCOMMONCONTROLSEX);
-			icce.dwICC = ICC_WIN95_CLASSES | ICC_DATE_CLASSES; // ICC_WIN95_CLASSES is equivalent to calling InitCommonControls().
-			MyInitCommonControlsEx(&icce);
-		}
-		else // InitCommonControlsEx not available, so must revert to non-Ex() to make controls work on Win95/NT4.
-			InitCommonControls();
-	}
 
 #ifdef CONFIG_DEBUGGER
 	// Initiate debug session now if applicable.
@@ -520,7 +531,7 @@ void WaitIsReadyToExecute()
 }
 
 
-unsigned runThread()
+HANDLE runThread()
 {
 	if (g_hThread)
 	{	// Small check to be done to make sure we do not start a new thread before the old is closed
@@ -534,7 +545,7 @@ unsigned runThread()
 	}
 	g_hThread = (HANDLE)_beginthreadex( NULL, 0, &runScript, NULL, 0, 0 );
 	WaitIsReadyToExecute();
-	return (unsigned int)g_hThread;
+	return g_hThread;
 }
 
 int setscriptstrings(LPTSTR fileName, LPTSTR argv, LPTSTR title)
@@ -553,7 +564,7 @@ int setscriptstrings(LPTSTR fileName, LPTSTR argv, LPTSTR title)
 	return 0;
 }
 
-EXPORT UINT_PTR ahkdll(LPTSTR fileName, LPTSTR argv, LPTSTR title)
+EXPORT HANDLE ahkdll(LPTSTR fileName, LPTSTR argv, LPTSTR title)
 {
 	if (setscriptstrings(fileName && !IsBadReadPtr(fileName,1) && *fileName ? fileName : aDefaultDllScript, argv && !IsBadReadPtr(argv,1) && *argv ? argv : _T(""), title && !IsBadReadPtr(title,1) && *title ? title : _T("")))
 		return 0;
@@ -562,7 +573,7 @@ EXPORT UINT_PTR ahkdll(LPTSTR fileName, LPTSTR argv, LPTSTR title)
 }
 
 // HotKeyIt ahktextdll
-EXPORT UINT_PTR ahktextdll(LPTSTR fileName, LPTSTR argv, LPTSTR title)
+EXPORT HANDLE ahktextdll(LPTSTR fileName, LPTSTR argv, LPTSTR title)
 {
 	if (setscriptstrings(fileName && !IsBadReadPtr(fileName,1) && *fileName ? fileName : aDefaultDllScript, argv && !IsBadReadPtr(argv,1) && *argv ? argv : _T(""), title && !IsBadReadPtr(title,1) && *title ? title : _T("")))
 		return 0;
@@ -719,7 +730,7 @@ unsigned int Variant2I(VARIANT var)
 		return var.uintVal;
 }
 
-HRESULT __stdcall CoCOMServer::ahktextdll(/*in,optional*/VARIANT script,/*in,optional*/VARIANT params,/*in,optional*/VARIANT title,/*out*/UINT_PTR* hThread)
+HRESULT __stdcall CoCOMServer::ahktextdll(/*in,optional*/VARIANT script,/*in,optional*/VARIANT params,/*in,optional*/VARIANT title,/*out*/HANDLE* hThread)
 {
 	USES_CONVERSION;
 	TCHAR buf1[MAX_INTEGER_SIZE],buf2[MAX_INTEGER_SIZE];
@@ -731,7 +742,7 @@ HRESULT __stdcall CoCOMServer::ahktextdll(/*in,optional*/VARIANT script,/*in,opt
 	return S_OK;
 }
 
-HRESULT __stdcall CoCOMServer::ahkdll(/*in,optional*/VARIANT filepath,/*in,optional*/VARIANT params,/*in,optional*/VARIANT title,/*out*/UINT_PTR* hThread)
+HRESULT __stdcall CoCOMServer::ahkdll(/*in,optional*/VARIANT filepath,/*in,optional*/VARIANT params,/*in,optional*/VARIANT title,/*out*/HANDLE* hThread)
 {
 	USES_CONVERSION;
 	TCHAR buf1[MAX_INTEGER_SIZE],buf2[MAX_INTEGER_SIZE];

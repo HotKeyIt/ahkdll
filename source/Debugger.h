@@ -49,6 +49,7 @@ freely, without restriction.
 #define DEBUGGER_E_BREAKPOINT_NO_CODE	203 // No code on breakpoint line.
 #define DEBUGGER_E_BREAKPOINT_STATE		204 // Invalid breakpoint state.
 #define DEBUGGER_E_BREAKPOINT_NOT_FOUND	205 // No such breakpoint.
+#define DEBUGGER_E_EVAL_FAIL			206
 
 #define DEBUGGER_E_UNKNOWN_PROPERTY		300
 #define DEBUGGER_E_INVALID_STACK_DEPTH	301
@@ -103,7 +104,7 @@ private:
 
 // Forward-declarations (this file is included in script.h before these are declared).
 class Line;
-class Func;
+class NativeFunc;
 struct UDFCallInfo;
 class Label;
 
@@ -119,11 +120,11 @@ struct DbgStack
 		{
 			TCHAR *desc; // SE_Thread -- "auto-exec", hotkey/hotstring name, "timer", etc.
 			Label *sub; // SE_Sub
-			Func *func; // SE_BIF
+			NativeFunc *func; // SE_BIF
 			UDFCallInfo *udf; // SE_UDF
 		};
 		StackEntryType type;
-		TCHAR *Name();
+		LPCTSTR Name();
 	};
 
 	Entry *mBottom, *mTop, *mTopBound;
@@ -179,7 +180,7 @@ struct DbgStack
 
 	void Push(TCHAR *aDesc);
 	void Push(Label *aSub);
-	void Push(Func *aFunc);
+	void Push(NativeFunc *aFunc);
 	void Push(UDFCallInfo *aRecurse);
 
 	void GetLocalVars(int aDepth, Var **&aVar, Var **&aVarEnd, VarBkp *&aBkp, VarBkp *&aBkpEnd);
@@ -315,7 +316,7 @@ private:
 		int WriteEncodeBase64(const char *aData, size_t aDataSize, bool aSkipBufferSizeCheck = false);
 		int Expand();
 		int ExpandIfNecessary(size_t aRequiredSize);
-		void Remove(size_t aDataSize);
+		void Delete(size_t aDataSize);
 		void Clear();
 
 		Buffer() : mData(NULL), mDataSize(0), mDataUsed(0), mFailed(FALSE) {}
@@ -359,8 +360,8 @@ private:
 		PropNone = 0,
 		PropVar,
 		PropVarBkp,
-		PropField,
-		PropValue // Read-only pseudo-property (ExprTokenType)
+		PropValue, // Read-only (ExprTokenType)
+		PropEnum
 	};
 
 	struct PropertySource
@@ -368,8 +369,19 @@ private:
 		PropertyType kind;
 		Var *var;
 		VarBkp *bkp;
-		Object::FieldType *field;
+		Object::Variant *field;
 		ExprTokenType value;
+		IObject *owner = nullptr, *this_object = nullptr;
+		LPTSTR mem_to_free = nullptr;
+		PropertySource() {}
+		~PropertySource()
+		{
+			if (owner)
+				owner->Release();
+			if (this_object)
+				this_object->Release();
+			free(mem_to_free);
+		}
 	};
 
 	struct PropertyInfo : PropertySource
@@ -406,9 +418,13 @@ private:
 		}
 
 		void WriteProperty(LPCSTR aName, ExprTokenType &aValue);
+		void WriteProperty(LPCWSTR aName, ExprTokenType &aValue);
 		void WriteProperty(ExprTokenType &aKey, ExprTokenType &aValue);
+		void WriteBaseProperty(IObject *aBase);
+		void WriteDynamicProperty(LPTSTR aName);
+		void WriteEnumItems(IObject *aEnumerable, int aStart, int aEnd);
 
-		void _WriteProperty(ExprTokenType &aValue);
+		void _WriteProperty(ExprTokenType &aValue, IObject *aThisOverride = nullptr);
 
 		void BeginProperty(LPCSTR aName, LPCSTR aType, int aNumChildren, DebugCookie &aCookie);
 		void EndProperty(DebugCookie aCookie);
@@ -432,11 +448,11 @@ private:
 	int WriteBreakpointXml(Breakpoint *aBreakpoint, Line *aLine, LPTSTR *aSourceFile);
 #endif
 
-	void AppendKeyName(CStringA &aNameBuf, size_t aParentNameLength, const char *aName);
+	void AppendPropertyName(CStringA &aNameBuf, size_t aParentNameLength, const char *aName);
+	void AppendStringKey(CStringA &aNameBuf, size_t aParentNameLength, const char *aKey);
 
 	int GetPropertyInfo(Var &aVar, PropertyInfo &aProp, LPTSTR &aValueBuf);
 	int GetPropertyInfo(VarBkp &aBkp, PropertyInfo &aProp, LPTSTR &aValueBuf);
-	int GetPropertyInfo(Object::FieldType &aField, PropertyInfo &aProp);
 	
 	int GetPropertyValue(Var &aVar, PropertyInfo &aProp, LPTSTR &aValueBuf);
 
@@ -447,7 +463,9 @@ private:
 	int WritePropertyData(LPCTSTR aData, size_t aDataSize, int aMaxEncodedSize);
 	int WritePropertyData(ExprTokenType &aValue, int aMaxEncodedSize);
 
-	int ParsePropertyName(LPCSTR aFullName, int aDepth, int aVarScope, bool aVarMustExist
+	int WriteEnumItems(PropertyInfo &aProp, IObject *aObject);
+
+	int ParsePropertyName(LPCSTR aFullName, int aDepth, int aVarScope, ExprTokenType *aSetValue
 		, PropertySource &aResult);
 	int property_get_or_value(char **aArgV, int aArgCount, char *aTransactionId, bool aIsPropertyGet);
 	int redirect_std(char **aArgV, int aArgCount, char *aTransactionId, char *aCommandName);

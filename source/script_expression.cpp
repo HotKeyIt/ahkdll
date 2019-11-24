@@ -247,6 +247,11 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 						this_token.SetValue(g_script->mTrayMenu);
 						goto push_this_token;
 					}
+					if (this_token.var->mBIV == BIV_ScriptHwnd) // As above. Can't be done by ExpressionToPostfix() as g_hWnd is NULL at that point.
+					{
+						this_token.SetValue((UINT_PTR)g_hWnd);
+						goto push_this_token;
+					}
   				}
 				// Otherwise, it's a built-in variable.
 				result_size = this_token.var->Get() + 1;
@@ -321,7 +326,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 				{
 					// This isn't a function name or reference, but it could be an object emulating
 					// a function reference.  Additionally, we want something like %emptyvar%() to
-					// invoke g_MetaObject, so this part is done even if stack[stack_count] is not
+					// invoke ValueBase(), so this part is done even if stack[stack_count] is not
 					// an object.  To "call" the object/value, we need to insert the "call" method
 					// name between the object/value and the parameter list.  There should always
 					// be room for this since the maximum number of operands at any one time <=
@@ -330,13 +335,15 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 					// effectively reserves one stack slot.
 					if (actual_param_count)
 						memmove(params + 1, params, actual_param_count * sizeof(ExprTokenType *));
-					// Insert an empty string:
+					// Insert the "use default method name" marker:
 					params[0] = (ExprTokenType *)_alloca(sizeof(ExprTokenType));
-					params[0]->SetValue(_T("Call"), 4);
+					params[0]->symbol = SYM_MISSING;
+					params[0]->marker = _T("");
+					params[0]->marker_length = 0;
 					params--; // Include the object, which is already in the right place.
 					actual_param_count += 2;
-					extern ExprOpFunc g_ObjCall;
-					func = &g_ObjCall;
+					extern BuiltInFunc *OpFunc_CallMethod;
+					func = OpFunc_CallMethod;
 				}
 				// Above has set func to a non-NULL value, but still need to verify there are enough params.
 				// Although passing too many parameters is useful (due to the limitations of variadic calls),
@@ -528,7 +535,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 			}
 
 			if (make_result_persistent) // At this stage, this means that the above wasn't able to determine its correct value yet.
-			if (func->mIsBuiltIn)
+			if (func->IsBuiltIn())
 			{
 				// Since above didn't goto, "result" is not SYM_INTEGER/FLOAT/VAR, and not "".  Therefore, it's
 				// either a pointer to static memory (such as a constant string), or more likely the small buf
@@ -813,7 +820,10 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 			{
 				Var *right_var = right.var->ResolveAlias();
 				if (right_var->IsPureNumeric())
+				{
 					this_token.value_int64 = (__int64)&right_var->mContentsInt64; // Since the value is a pure number, this seems more useful and less confusing than returning the address of a numeric string.
+					right_var->mAttrib |= VAR_ATTRIB_CONTENTS_OUT_OF_DATE_UNTIL_REASSIGNED | VAR_ATTRIB_CONTENTS_OUT_OF_DATE; // Since the user might change the value via NumPut or DllCall.
+				}
 				else
 					this_token.value_int64 = (__int64)right_var->Contents(); // Contents() vs. mContents to support VAR_CLIPBOARD, and in case mContents needs to be updated by Contents().
 				this_token.symbol = SYM_INTEGER;
@@ -954,6 +964,8 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 				case SYM_LTOE:			this_token.value_int64 = g_tcscmp(left_string, right_string) < 1; break;
 
 				case SYM_CONCAT:
+					if (TokenToObject(left) || TokenToObject(right))
+						goto type_mismatch; // Treat this as an error, especially to catch `new classname`.
 					// Even if the left or right is "", must copy the result to temporary memory, at least
 					// when integers and floats had to be converted to temporary strings above.
 					// Binary clipboard is ignored because it's documented that except for certain features,
@@ -1138,8 +1150,14 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 				case SYM_BITAND:		this_token.value_int64 = left_int64 & right_int64; break;
 				case SYM_BITOR:			this_token.value_int64 = left_int64 | right_int64; break;
 				case SYM_BITXOR:		this_token.value_int64 = left_int64 ^ right_int64; break;
-				case SYM_BITSHIFTLEFT:  this_token.value_int64 = left_int64 << right_int64; break;
-				case SYM_BITSHIFTRIGHT: this_token.value_int64 = left_int64 >> right_int64; break;
+				case SYM_BITSHIFTLEFT:
+				case SYM_BITSHIFTRIGHT:
+					if (right_int64 < 0 || right_int64 > 63)
+						goto abort_with_exception;
+					this_token.value_int64 = this_token.symbol == SYM_BITSHIFTLEFT
+						? left_int64 << right_int64
+						: left_int64 >> right_int64;
+					break;
 				case SYM_FLOORDIVIDE:
 					// Since it's integer division, no need for explicit floor() of the result.
 					// Also, performance is much higher for integer vs. float division, which is part
@@ -1149,21 +1167,28 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 					this_token.value_int64 = left_int64 / right_int64;
 					break;
 				case SYM_POWER:
-					// Note: The function pow() in math.h adds about 28 KB of code size (uncompressed)!
-					// Even assuming pow() supports negative bases such as (-2)**2, its size is why it's not used.
-					// v1.0.44.11: With Laszlo's help, negative integer bases are now supported.
 					if (!left_int64 && right_int64 < 0) // In essence, this is divide-by-zero.
 					{
 						// Throw an exception rather than returning something undefined:
 						goto divide_by_zero;
 					}
+					else if (left_int64 == 0 && right_int64 == 0)	// 0**0, not defined.
+					{
+						goto abort_with_exception;
+					}
 					else // We have a valid base and exponent and both are integers, so the calculation will always have a defined result.
 					{
+#ifdef USE_INLINE_ASM	// see qmath.h
+						// Note: The function pow() in math.h adds about 28 KB of code size (uncompressed)! That is why it's not used here.
+						// v1.0.44.11: With Laszlo's help, negative integer bases are now supported.
 						if (left_was_negative = (left_int64 < 0))
 							left_int64 = -left_int64; // Force a positive due to the limitations of qmathPow().
 						this_token.value_double = qmathPow((double)left_int64, (double)right_int64);
 						if (left_was_negative && right_int64 % 2) // Negative base and odd exponent (not zero or even).
 							this_token.value_double = -this_token.value_double;
+#else
+						this_token.value_double = pow((double)left_int64, (double)right_int64);
+#endif
 						if (right_int64 < 0)
 							result_symbol = SYM_FLOAT; // Due to negative exponent, override to float.
 						else
@@ -1201,18 +1226,23 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 				case SYM_GTOE:     this_token.value_int64 = left_double >= right_double; break;
 				case SYM_LTOE:     this_token.value_int64 = left_double <= right_double; break;
 				case SYM_POWER:
-					// v1.0.44.11: With Laszlo's help, negative bases are now supported as long as the exponent is not fractional.
-					// See the other SYM_POWER higher above for more details about below.
-					left_was_negative = (left_double < 0);
 					if (left_double == 0.0 && right_double < 0)  // In essence, this is divide-by-zero.
 						goto divide_by_zero;
-					if (left_was_negative && qmathFmod(right_double, 1.0) != 0.0) // Negative base, but exponent isn't close enough to being an integer: unsupported (to simplify code).
+					left_was_negative = (left_double < 0);
+					if ((left_was_negative && qmathFmod(right_double, 1.0) != 0.0)	// Negative base, but exponent isn't close enough to being an integer: unsupported (to simplify code).
+						|| (left_double == 0.0 && right_double == 0.0))				// 0.0**0.0, not defined.
 						goto abort_with_exception;
+#ifdef USE_INLINE_ASM	// see qmath.h
+					// v1.0.44.11: With Laszlo's help, negative bases are now supported as long as the exponent is not fractional.
+					// See the other SYM_POWER higher above for more details about below.
 					if (left_was_negative)
 						left_double = -left_double; // Force a positive due to the limitations of qmathPow().
 					this_token.value_double = qmathPow(left_double, right_double);
 					if (left_was_negative && qmathFabs(qmathFmod(right_double, 2.0)) == 1.0) // Negative base and exactly-odd exponent (otherwise, it can only be zero or even because if not it would have returned higher above).
 						this_token.value_double = -this_token.value_double;
+#else
+					this_token.value_double = pow(left_double, right_double);
+#endif
 					break;
 				} // switch(this_token.symbol)
 				this_token.symbol = result_symbol; // Must be done only after the switch() above.
@@ -1489,48 +1519,188 @@ normal_end_skip_output_var:
 
 
 
-bool Func::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, bool aIsVariadic, FreeVars *aUpVars)
+ResultType Line::ExpandSingleArg(int aArgIndex, ResultToken &aResultToken, LPTSTR &aDerefBuf, size_t &aDerefBufSize)
 {
+	ExprTokenType *postfix = mArg[aArgIndex].postfix;
+	if (postfix->symbol < SYM_DYNAMIC // i.e. any other operand type.
+		&& postfix->symbol != SYM_VAR // Variables must be dereferenced.
+		&& postfix[1].symbol == SYM_INVALID) // Exactly one token.
+	{
+		aResultToken.symbol = postfix->symbol;
+		aResultToken.value_int64 = postfix->value_int64;
+#ifdef _WIN64
+		aResultToken.marker_length = postfix->marker_length;
+#endif
+		return OK;
+	}
 
-	Object *param_obj = NULL;
+	size_t space_needed = EXPR_BUF_SIZE(mArg[aArgIndex].length);
+
+	if (aDerefBufSize < space_needed)
+	{
+		if (aDerefBuf)
+		{
+			free(aDerefBuf);
+			if (aDerefBufSize > LARGE_DEREF_BUF_SIZE)
+				--sLargeDerefBufs;
+		}
+		if ( !(aDerefBuf = tmalloc(space_needed)) )
+		{
+			aDerefBufSize = 0;
+			return LineError(ERR_OUTOFMEM);
+		}
+		aDerefBufSize = space_needed;
+		if (aDerefBufSize > LARGE_DEREF_BUF_SIZE)
+			++sLargeDerefBufs;
+	}
+
+	// Use the whole buf:
+	LPTSTR buf_marker = aDerefBuf;
+	size_t extra_size = aDerefBufSize - space_needed;
+
+	// None of the previous args (if any) are needed, so pass an array of NULLs:
+	LPTSTR arg_deref[MAX_ARGS];
+	for (int i = 0; i < aArgIndex; i++)
+		arg_deref[i] = NULL;
+
+	// Initialize aResultToken so we can detect when ExpandExpression() uses it:
+	aResultToken.symbol = SYM_INVALID;
+	
+	ResultType result;
+	LPTSTR string_result = ExpandExpression(aArgIndex, result, &aResultToken, buf_marker, aDerefBuf, aDerefBufSize, arg_deref, extra_size);
+	if (!string_result)
+		return result; // Should be EARLY_EXIT or FAIL.
+
+	if (aResultToken.symbol == SYM_INVALID) // It wasn't set by ExpandExpression().
+	{
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = string_result;
+	}
+	return OK;
+}
+
+
+
+bool Func::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, bool aIsVariadic)
+{
+	IObject *param_obj = NULL; // Vararg object passed by caller.
+	Array *param_array = NULL; // Array of parameters, either the same as param_obj or the result of enumeration.
 	CriticalObject *param_critical = NULL;
 	CRITICAL_SECTION *crisec = NULL;
+
 	if (aIsVariadic) // i.e. this is a variadic function call.
 	{
 		ExprTokenType *rvalue = NULL;
-		if (mBIF == &Op_ObjInvoke && mID == IT_SET && aParamCount > 1) // x[y*]:=z
+		if (IsBuiltIn() && ((BuiltInFunc *)this)->mBIF == &Op_ObjInvoke
+			&& (((BuiltInFunc *)this)->mFID & IT_BITMASK) == IT_SET) // x[y*]:=z
 			rvalue = aParam[--aParamCount];
 
-		--aParamCount; // i.e. make aParamCount the count of normal params.
+		--aParamCount; // Exclude param_obj from aParamCount, so it's the count of normal params.
 		if (param_critical = dynamic_cast<CriticalObject *>(TokenToObject(*aParam[aParamCount])))
 			EnterCriticalSection(crisec = (LPCRITICAL_SECTION)param_critical->GetCriSec());
-		if (	(param_critical && (param_obj = (Object *)param_critical->GetObj())) 
-			||  (param_obj = dynamic_cast<Object *>(TokenToObject(*aParam[aParamCount]))) )
+		if (!(param_critical && (param_obj = (Object *)param_critical->GetObj())))
+			param_obj = TokenToObject(*aParam[aParamCount]);
+		if (!param_obj)
 		{
-			int extra_params = param_obj->MaxIndex();
-			if (extra_params > 0 || param_obj->HasNonnumericKeys())
+			aResultToken.Error(ERR_TYPE_MISMATCH, _T("*"));
+			return false;
+		}
+		// It might be more correct to use the enumerator even for Array, but that could be slow.
+		// Future changes might enable efficient detection of a custom __Enum method, allowing
+		// us to take the more efficient path most times, but still support custom enumeration.
+		if (param_array = dynamic_cast<Array *>(param_obj))
+			param_array->AddRef();
+		else
+			if (!(param_array = Array::FromEnumerable(param_obj)))
 			{
-				// Calculate space required for ...
-				size_t space_needed = extra_params * sizeof(ExprTokenType) // ... new param tokens
-					+ max(mParamCount, aParamCount + extra_params) * sizeof(ExprTokenType *); // ... existing and new param pointers
-				if (rvalue)
-					space_needed += sizeof(rvalue); // ... extra slot for aRValue
-				// Allocate new param list and tokens; tokens first for convenience.
-				ExprTokenType *token = (ExprTokenType *)_alloca(space_needed);
-				ExprTokenType **param_list = (ExprTokenType **)(token + extra_params);
-				// Since built-in functions don't have variables we can directly assign to,
-				// we need to expand the param object's contents into an array of tokens:
-				param_obj->ArrayToParams(token, param_list, extra_params, aParam, aParamCount);
-				aParam = param_list;
-				aParamCount += extra_params;
+				aResultToken.SetExitResult(FAIL);
+				if (crisec)
+					LeaveCriticalSection(crisec);
+				return false;
 			}
+		int extra_params = param_array->Length();
+		if (extra_params > 0)
+		{
+			// Check total param count first (even though it's checked below) in case
+			// the array is abnormally large, to reduce the risk of stack overflow.
+			if (aParamCount + extra_params > mParamCount && !mIsVariadic) // v2 policy.
+			{
+				param_array->Release();
+				aResultToken.Error(ERR_TOO_MANY_PARAMS, mName);
+				if (crisec)
+					LeaveCriticalSection(crisec);
+				return false;
+			}
+			// Calculate space required for ...
+			size_t space_needed = extra_params * sizeof(ExprTokenType) // ... new param tokens
+				+ (aParamCount + extra_params) * sizeof(ExprTokenType *); // ... existing and new param pointers
+			if (rvalue)
+				space_needed += sizeof(rvalue); // ... extra slot for aRValue
+			// Allocate new param list and tokens; tokens first for convenience.
+			ExprTokenType *token = (ExprTokenType *)_alloca(space_needed);
+			ExprTokenType **param_list = (ExprTokenType **)(token + extra_params);
+			// Since built-in functions don't have variables we can directly assign to,
+			// we need to expand the param object's contents into an array of tokens:
+			param_array->ToParams(token, param_list, aParam, aParamCount);
+			aParam = param_list;
+			aParamCount += extra_params;
 		}
 		if (rvalue)
 			aParam[aParamCount++] = rvalue; // In place of the variadic param.
 	}
 
-	if (mIsBuiltIn)
+	bool result;
+	if (auto hook = GetOwnMethodFunc(_T("Call")))
 	{
+		CallMethod(hook, aResultToken, ExprTokenType(this), aParam, aParamCount);
+		result = !aResultToken.Exited();
+	}
+	else if (this->mBIF == (BuiltInFunctionType)BIF_DllImport)
+	{
+		aResultToken.func = (BuiltInFunc *)this; // Inform function of which built-in function called it (allows code sharing/reduction).
+		// Push an entry onto the debugger's stack.  This has two purposes:
+		//  1) Allow CreateRuntimeException() to know which function is throwing an exception.
+		//  2) If a UDF is called before the BIF returns, it will show on the call stack.
+		//     e.g. DllCall(RegisterCallback("F")) will show DllCall while F is running.
+		DEBUGGER_STACK_PUSH((BuiltInFunc*) this)
+
+		aResultToken.symbol = SYM_INTEGER; // Set default return type so that functions don't have to do it if they return INTs.
+		mBIF(aResultToken, aParam, aParamCount);
+
+		DEBUGGER_STACK_POP()
+
+		// There shouldn't be any need to check g->ThrownToken since built-in functions
+		// currently throw exceptions via aResultToken.Error():
+		//if (g->ThrownToken)
+		//	aResultToken.SetExitResult(FAIL); // Abort thread.
+
+		return !aResultToken.Exited();
+	}
+	else
+		result = Call(aResultToken, aParam, aParamCount, param_obj);
+
+	if (param_array)
+		param_array->Release();
+	if (crisec)
+		LeaveCriticalSection(crisec);
+	return result;
+}
+
+bool Func::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, IObject *aParamObj)
+{
+	if (aParamCount > mParamCount && !mIsVariadic) // v2 policy.
+	{
+		aResultToken.Error(ERR_TOO_MANY_PARAMS, mName);
+		return false;
+	}
+	return true;
+}
+
+bool NativeFunc::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, IObject *aParamObj)
+{
+	if (!Func::Call(aResultToken, aParam, aParamCount, aParamObj))
+		return false;
+
 		// mMinParams is validated at load-time where possible; so not for variadic or dynamic calls,
 		// nor for calls via objects.  This check could be avoided for normal calls by instead checking
 		// in each of the above cases, but any performance gain would probably be marginal and not worth
@@ -1540,8 +1710,6 @@ bool Func::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCo
 		if (aParamCount < mMinParams)
 		{
 			aResultToken.Error(ERR_TOO_FEW_PARAMS, mName);
-			if (crisec)
-				LeaveCriticalSection(crisec);
 			return false; // Abort expression.
 		}
 		// Otherwise, even if some params are SYM_MISSING, it is relatively safe to call the function.
@@ -1556,7 +1724,7 @@ bool Func::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCo
 					&& aParam[mOutputVars[i]-1]->symbol != SYM_VAR
 					&& aParam[mOutputVars[i]-1]->symbol != SYM_MISSING)
 				{
-					sntprintf(aResultToken.buf, MAX_NUMBER_SIZE, _T("Parameter #%i of %s must be a variable.")
+					sntprintf(aResultToken.buf, _f_retval_buf_size, _T("Parameter #%i of %s must be a variable.")
 						, mOutputVars[i], mName);
 					aResultToken.Error(aResultToken.buf);
 					return false; // Abort expression.
@@ -1564,17 +1732,22 @@ bool Func::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCo
 			}
 		}
 
-		aResultToken.symbol = SYM_INTEGER; // Set default return type so that functions don't have to do it if they return INTs.
-		aResultToken.func = this;          // Inform function of which built-in function called it (allows code sharing/reduction).
-		if (crisec)
-				LeaveCriticalSection(crisec);
+	return true;
+}
+
+bool BuiltInFunc::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, IObject *aParamObj)
+{
+	if (!NativeFunc::Call(aResultToken, aParam, aParamCount, aParamObj))
+		return false;
+
+	aResultToken.func = this; // Inform function of which built-in function called it (allows code sharing/reduction).
 		// Push an entry onto the debugger's stack.  This has two purposes:
 		//  1) Allow CreateRuntimeException() to know which function is throwing an exception.
 		//  2) If a UDF is called before the BIF returns, it will show on the call stack.
 		//     e.g. DllCall(RegisterCallback("F")) will show DllCall while F is running.
 		DEBUGGER_STACK_PUSH(this)
 
-		// CALL THE BUILT-IN FUNCTION:
+		aResultToken.symbol = SYM_INTEGER; // Set default return type so that functions don't have to do it if they return INTs.
 		mBIF(aResultToken, aParam, aParamCount);
 
 		DEBUGGER_STACK_POP()
@@ -1583,9 +1756,41 @@ bool Func::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCo
 		// currently throw exceptions via aResultToken.Error():
 		//if (g->ThrownToken)
 		//	aResultToken.SetExitResult(FAIL); // Abort thread.
-	}
-	else // It's not a built-in function, or it's a built-in that was overridden with a custom function.
-	{
+
+	return !aResultToken.Exited();
+}
+
+bool BuiltInMethod::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, IObject *aParamObj)
+{
+	if (!NativeFunc::Call(aResultToken, aParam, aParamCount, aParamObj))
+		return false;
+
+	DEBUGGER_STACK_PUSH(this) // See comments in BuiltInFunc::Call.
+
+	auto obj = dynamic_cast<Object *>(TokenToObject(*aParam[0]));
+	// If this method is for a built-in class derived from Object, mClass != nullptr.
+	// In that case, the method can't be called if obj is a Prototype object, since
+	// that's natively just an Object, or if obj is not derived from mClass.
+	if (!obj || mClass && (obj->IsClassPrototype() || !obj->IsDerivedFrom(mClass)))
+		aResultToken.Error(ERR_TYPE_MISMATCH);
+	else
+		(obj->*mBIM)(aResultToken, mMID, mMIT, aParam + 1, aParamCount - 1);
+
+	DEBUGGER_STACK_POP()
+
+	return !aResultToken.Exited();
+}
+
+bool UserFunc::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, IObject *aParamObj)
+{
+	return Call(aResultToken, aParam, aParamCount, aParamObj, nullptr);
+}
+
+bool UserFunc::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, IObject *param_obj, FreeVars *aUpVars)
+{
+	if (!Func::Call(aResultToken, aParam, aParamCount, param_obj))
+		return false;
+
 		ResultType result;
 		UDFCallInfo recurse(this);
 
@@ -1645,8 +1850,6 @@ bool Func::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCo
 			if (!Var::BackupFunctionVars(*this, recurse.backup, recurse.backup_count)) // Out of memory.
 			{
 				aResultToken.Error(ERR_OUTOFMEM, mName);
-				if (crisec)
-					LeaveCriticalSection(crisec);
 				return false;
 			}
 		} // if (func.mInstances > 0)
@@ -1712,12 +1915,17 @@ bool Func::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCo
 
 				if (param_obj)
 				{
-					ExprTokenType named_value;
-					if (param_obj->GetItem(named_value, this_formal_param.var->mName))
+					FuncResult rt_item;
+					ExprTokenType t_this(param_obj);
+					auto r = param_obj->Invoke(rt_item, IT_GET, this_formal_param.var->mName, t_this, nullptr, 0);
+					if (r == FAIL || r == EARLY_EXIT)
 					{
-						this_formal_param.var->Assign(named_value);
-						continue;
+						aResultToken.SetExitResult(r);
+						goto free_and_return;
 					}
+					this_formal_param.var->Assign(rt_item);
+					rt_item.Free();
+					continue;
 				}
 			
 				switch(this_formal_param.default_type)
@@ -1727,8 +1935,6 @@ bool Func::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCo
 				case PARAM_DEFAULT_FLOAT: this_formal_param.var->Assign(this_formal_param.default_double); break;
 				default: //case PARAM_DEFAULT_NONE:
 					// No value has been supplied for this REQUIRED parameter.
-					if (crisec)
-						LeaveCriticalSection(crisec);
 					TCHAR *extraInfo = (TCHAR*)alloca((_tcslen(mName) + _tcslen(this_formal_param.var->mName) + 14) * sizeof(TCHAR));
 					TCHAR * dest = _tcscpy(extraInfo, this_formal_param.var->mName);
 					_tcscpy(extraInfo + _tcslen(this_formal_param.var->mName), _T(" in function "));
@@ -1770,35 +1976,30 @@ bool Func::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCo
 			if (!this_formal_param.var->Assign(token))
 			{
 				aResultToken.SetExitResult(FAIL); // Abort thread.
-				if (crisec)
-					LeaveCriticalSection(crisec);
 				goto free_and_return;
 			}
 		} // for each formal parameter.
 		
-		if (mIsVariadic) // i.e. this function is capable of accepting excess params via an object/array.
+		if (mIsVariadic && mParam[mParamCount].var) // i.e. this function is capable of accepting excess params via an object/array.
 		{
-			// If the caller supplied an array of parameters, copy any key-value pairs with non-numbered keys;
-			// otherwise, just create a new object.  Either way, numbered params will be inserted below.
-			Object *vararg_obj = param_obj ? param_obj->Clone(NULL,true) : Object::Create();
+			// Unused named parameters in param_obj are currently discarded, pending completion of the
+			// object redesign.  Ultimately the named parameters (either key-value pairs or properties)
+			// would be enumerated and added to vararg_obj or passed to the function some other way.
+			auto vararg_obj = Array::Create();
 			if (!vararg_obj)
 			{
 				aResultToken.Error(ERR_OUTOFMEM, mName); // Abort thread.
-				if (crisec)
-					LeaveCriticalSection(crisec);
 				goto free_and_return;
 			}
 			if (j < aParamCount)
 				// Insert the excess parameters from the actual parameter list.
-				vararg_obj->InsertAt(0, 1, aParam + j, aParamCount - j);
+				vararg_obj->InsertAt(0, aParam + j, aParamCount - j);
 			// Assign to the "param*" var:
 			mParam[mParamCount].var->AssignSkipAddRef(vararg_obj);
 		}
-		if (crisec)
-			LeaveCriticalSection(crisec);
 		DEBUGGER_STACK_PUSH(&recurse)
 
-		result = Call(&aResultToken); // Call the UDF.
+		result = Execute(&aResultToken); // Execute the body of the function.
 
 		DEBUGGER_STACK_POP()
 		
@@ -1836,47 +2037,10 @@ free_and_return:
 		if (sFreeVars)
 			sFreeVars->Release();
 		sFreeVars = caller_free_vars;
-	}
 	return !aResultToken.Exited(); // i.e. aResultToken.SetExitResult() or aResultToken.Error() was not called.
 }
 
-FreeVars *Func::sFreeVars = NULL;
-
-
-bool Func::Call(ResultToken &aResultToken, int aParamCount, ...)
-{
-	ASSERT(aParamCount >= 0);
-
-	// Allocate and build the parameter array
-	ExprTokenType **aParam = (ExprTokenType**) _alloca(aParamCount*sizeof(ExprTokenType*));
-	ExprTokenType *args    = (ExprTokenType*)  _alloca(aParamCount*sizeof(ExprTokenType));
-	va_list va;
-	va_start(va, aParamCount);
-	for (int i = 0; i < aParamCount; i ++)
-	{
-		ExprTokenType &cur_arg = args[i];
-		aParam[i] = &cur_arg;
-
-		// Initialize the argument structure
-		cur_arg.symbol = va_arg(va, SymbolType);
-
-		// Fill in the argument value
-		switch (cur_arg.symbol)
-		{
-			case SYM_INTEGER: cur_arg.value_int64  = va_arg(va, __int64);  break;
-			case SYM_STRING:
-				cur_arg.marker = va_arg(va, LPTSTR);
-				cur_arg.marker_length = -1;
-				break;
-			case SYM_FLOAT:   cur_arg.value_double = va_arg(va, double);   break;
-			case SYM_OBJECT:  cur_arg.object       = va_arg(va, IObject*); break;
-		}
-	}
-	va_end(va);
-
-	// Perform function call
-	return Call(aResultToken, aParam, aParamCount);
-}
+FreeVars *UserFunc::sFreeVars = nullptr;
 
 
 
@@ -2357,12 +2521,14 @@ ResultType Line::ValueIsType(ExprTokenType &aResultToken, ExprTokenType &aValue,
 		}
 		// Otherwise, the comparison is invalid.
 	}
-	else if (IObject *type_obj = TokenToObject(aType))
+	else if (Object *type_obj = dynamic_cast<Object *>(TokenToObject(aType)))
 	{
-		// Is the value an object which can derive, and is it derived from type_obj?
-		Object *value_obj = dynamic_cast<Object *>(TokenToObject(aValue));
-		aResultToken.value_int64 = value_obj && value_obj->IsDerivedFrom(type_obj);
-		return OK;
+		if (IObject *prototype = type_obj->GetOwnPropObj(_T("Prototype")))
+		{
+			aResultToken.value_int64 = Object::HasBase(aValue, prototype);
+			return OK;
+		}
+		aTypeStr = type_obj->Type(); // For error-reporting.
 	}
 	else if (TokenToObject(aValue))
 	{

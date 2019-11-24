@@ -239,10 +239,6 @@ LPTSTR FileTimeToYYYYMMDD(LPTSTR aBuf, FILETIME &aTime, bool aConvertToLocalTime
 
 
 LPTSTR SystemTimeToYYYYMMDD(LPTSTR aBuf, SYSTEMTIME &aTime)
-// Returns aBuf.
-// Remember not to offer a "aConvertToLocalTime" option, because calling SystemTimeToTzSpecificLocalTime()
-// on Win9x apparently results in an invalid time because the function is implemented only as a stub on
-// those OSes.
 {
 	_stprintf(aBuf, _T("%04d%02d%02d") _T("%02d%02d%02d")
 		, aTime.wYear, aTime.wMonth, aTime.wDay
@@ -893,67 +889,169 @@ ret0:
 
 
 
-__int64 tcstoi64_o(LPCTSTR buf, LPCTSTR *endptr, int base)
-// A version of _tcstoi64 which does no range checks, but instead has overflow behaviour
-// consistent with arithmetic operations.  Some behaviour may be unlike _tcstoi64/strtoll:
-//  - base must be 0 (undetermined), 10 or 16.
+template<typename T> T digitsTo(LPCTSTR p, LPCTSTR &end)
+{
+	T i = 0;
+	for (;; ++p)
+	{
+		int c = *p;
+		if (c <= '9' && c >= '0')
+			c -= '0';
+		else
+			break;
+		i = i * 10 + c;
+	}
+	end = p;
+	return i;
+}
+
+
+template<typename T> T xdigitsTo(LPCTSTR p, LPCTSTR &end)
+{
+	T i = 0;
+	for (;; ++p)
+	{
+		int c = *p;
+		if (c <= '9' && c >= '0')
+			c -= '0';
+		else if (c <= 'F' && c >= 'A')
+			c -= 'A' - 10;
+		else if (c <= 'f' && c >= 'a')
+			c -= 'a' - 10;
+		else
+			break;
+		i = i * 16 + c;
+	}
+	end = p;
+	return i;
+}
+
+
+// istrtoi64(): like _tcstoi64, but allows wrapping overflow consistent with
+// arithmetic expressions.  Some behaviour may be unlike _tcstoi64/strtoll:
+//  - Decimal and hexadecimal are always supported; caller cannot specify base.
 //  - A leading '0' does not activate base 8, since we specifically don't want that.
 //  - Only space and tab are considered whitespace, consistent with IsNumeric().
 //  - errno is never set.
+__int64 istrtoi64(LPCTSTR buf, LPCTSTR *endptr)
 {
+	// unsigned vs. signed is unlikely to matter in practice, but only unsigned has
+	// well-defined behaviour regarding overflow (that is, it wraps but technically
+	// never "overflows" according to the standard).
+	UINT64 i;
+
 	// Skip spaces and tabs.
 	LPCTSTR p = omit_leading_whitespace(buf);
 	
 	// Determine/skip sign.
-	TCHAR sign = (*p != '+' && *p != '-') ? '+' : *p++;
-	
-	// Handle hex prefix if allowed.
-	if (*p == '0' && (p[1] == 'x' || p[1] == 'X') && (base == 0 || base == 16) && isxdigit(p[2]))
+	bool negative = *p == '-';
+	if (negative || *p == '+')
+		++p;
+
+	LPCTSTR end;
+	if (IS_HEX(p))
 	{
 		p += 2;
-		base = 16;
+		i = xdigitsTo<UINT64>(p, end);
 	}
-	else if (base != 16)
+	else
 	{
-		base = 10; // Ignore any other base value since we'll only test what we need, 10 and 16.
-	}
-
-	__int64 i = 0;
-	LPCTSTR first = p;
-	// Having two separate loops keeps each one simpler, so benchmarks faster.
-	// This approach has similar code size and performance to using a pre-filled
-	// array to map '0'..'f' to their numeric values.
-	if (base == 16)
-	{
-		for (;; ++p)
-		{
-			int c = *p;
-			if (c <= '9' && c >= '0')
-				c -= '0';
-			else if (c <= 'F' && c >= 'A')
-				c -= 'A' - 10;
-			else if (c <= 'f' && c >= 'a')
-				c -= 'a' - 10;
-			else
-				break;
-			i = i * base + c;
-		}
-	}
-	else // base == 10
-	{
-		for (;; ++p)
-		{
-			int c = *p;
-			if (c <= '9' && c >= '0')
-				c -= '0';
-			else
-				break;
-			i = i * base + c;
-		}
+		i = digitsTo<UINT64>(p, end);
 	}
 	if (endptr)
-		*endptr = p == first ? buf : p; // Don't consider " -" numeric on its own.
-	return sign == '+' ? i : -i;
+		*endptr = p == end ? buf : end; // Don't consider " -" or "-0x" numeric on its own.
+	// Casting out of range unsigned to signed has "implementation defined" behaviour;
+	// Microsoft's implementation does not change the bit pattern.
+	return negative ? -(__int64)i : (__int64)i;
+}
+
+
+// nstrtoi64(): like istrtoi64, but permits scientific notation (including a decimal
+// fraction, which may be significant in combination with the exponent).
+// This function is mostly identical to istrtoi64, so comments there also apply here.
+// Attempts to merge the two functions resulted in 300-1000 bytes larger code size due
+// to inlining, how heavily these are used, and the fact that omitted parameters are
+// actually still passed by the compiler.
+__int64 nstrtoi64(LPCTSTR buf)
+{
+	UINT64 i;
+
+	LPCTSTR p = omit_leading_whitespace(buf);
+
+	bool negative = *p == '-';
+	if (negative || *p == '+')
+		++p;
+
+	if (IS_HEX(p))
+	{
+		p += 2;
+		i = xdigitsTo<UINT64>(p, p);
+	}
+	else // Decimal.
+	{
+		i = digitsTo<UINT64>(p, p);
+
+		// Check for a decimal fraction/exponent:
+		LPCTSTR end_int = p;
+		if (*p == '.')
+		{
+			do ++p;
+			while (*p <= '9' && *p >= '0');
+		}
+		LPCTSTR end_fraction = p;
+		if (*p == 'e' || *p == 'E')
+		{
+			++p;
+			bool exp_negative = *p == '-';
+			if (exp_negative || *p == '+')
+				++p;
+			UINT64 exp = digitsTo<UINT64>(p, p); // UINT64 vs. char does not affect code size; using UINT64 ensures that unreasonably large exponents produce a consistent result.
+			if (p > end_fraction + 1) // Exponent present.
+			{
+				if (!exp_negative && *end_int == '.')
+				{
+					// Parse additional digits while simultaneously applying part of the exponentiation.
+					for (p = end_int + 1; p < end_fraction && exp; ++p, --exp) // Scan from '.' to 'e'
+						i = i * 10 + (*p - '0');
+				}
+				if (exp >= (exp_negative ? 20 : 64)) // Avoid unnecessary looping for abnormally large exponents.
+				{
+					// For n * 10**64, the low 64 bits of the result are always 0.  
+					// For n / 10**20, the result is always 0 since 10**20 > _UI16_MAX > n.
+					i = 0;
+				}
+				else
+				{
+					// This section multiplies or divides i by a power of 10 without resorting to
+					// floating-point operations.  Overflow of the result is allowed and will wrap,
+					// but to get the correct result we must not wrap the multiplier.
+					while (exp >= 20) // Implies !exp_negative.  10**20 won't fit in multiplier.
+					{
+						i *= 10000000000000000000ui64;
+						exp -= 19;
+					}
+					if (exp != 0) // An exponent of 0 is valid but does not alter the result.
+					{
+						// Perform exponentiation by squaring.
+						UINT64 multiplier = 1;
+						UINT64 bs = 10;
+						while (exp > 1)
+						{
+							if (exp & 1) multiplier *= bs;
+							exp >>= 1;
+							bs *= bs;
+						}
+						multiplier *= bs;
+						if (exp_negative)
+							i /= multiplier;
+						else
+							i *= multiplier;
+					}
+				}
+			}
+		}
+	}
+	return negative ? -(__int64)i : (__int64)i;
 }
 
 
@@ -1411,43 +1509,45 @@ ResultType FileAppend(LPTSTR aFilespec, LPTSTR aLine, bool aAppendNewline)
 
 
 
-LPTSTR ConvertFilespecToCorrectCase(LPTSTR aFullFileSpec)
-// aFullFileSpec must be a modifiable string since it will be converted to proper case.
-// Also, it should be at least MAX_PATH is size because if it contains any short (8.3)
-// components, they will be converted into their long names.
-// Returns aFullFileSpec, the contents of which have been converted to the case used by the
-// file system.  Note: The trick of changing the current directory to be that of
-// aFullFileSpec and then calling GetFullPathName() doesn't always work.  So perhaps the
-// only easy way is to call FindFirstFile() on each directory that composes aFullFileSpec,
-// which is what is done here.  I think there's another way involving some PIDL Explorer
-// function, but that might not support UNCs correctly.
+LPTSTR ConvertFilespecToCorrectCase(LPTSTR aFilespec, LPTSTR aBuf, size_t aBufSize, size_t &aBufLength)
+// Convert aFilespec to proper case and put the result into aBuf.
+// aFilespec and aBuf must not overlap.
+// aFilespec should be modifiable, but on return always has its original value.
+// aBufSize is the size of aBuf in WCHARs, including space for the null-terminator;
+// it should be large enough to allow expansion of short (8.3) names to long names.
+// If the final path would exceed aBufSize or if the conversion could not be completed,
+// returns NULL and leaves aBufLength unchanged; otherwise returns aBuf and sets
+// aBufLength to its length.
+// Note: GetFullPathName() doesn't perform case-correction, only string manipulation.
+// GetLongPathName() skips name components which are not 8.3-compliant.
 {
-	if (!aFullFileSpec || !*aFullFileSpec) return aFullFileSpec;
-	size_t length = _tcslen(aFullFileSpec);
-	if (length < 2 || length >= MAX_PATH) return aFullFileSpec;
+	ASSERT(aBufSize > 3);
+	ASSERT(aFilespec != aBuf);
+	if (!*aFilespec)
+		return NULL;
+	LPTSTR dir_start, dir_end;
+	size_t built_length;
 	// Start with something easy, the drive letter:
-	if (aFullFileSpec[1] == ':')
-		aFullFileSpec[0] = ctoupper(aFullFileSpec[0]);
-	// else it might be a UNC that has no drive letter.
-	TCHAR built_filespec[MAX_PATH], *dir_start, *dir_end;
-	if (dir_start = _tcschr(aFullFileSpec, ':'))
-		// MSDN: "To examine any directory other than a root directory, use an appropriate
-		// path to that directory, with no trailing backslash. For example, an argument of
-		// "C:\windows" will return information about the directory "C:\windows", not about
-		// any directory or file in "C:\windows". An attempt to open a search with a trailing
-		// backslash will always fail."
-		dir_start += 2; // Skip over the first backslash that goes with the drive letter.
+	if (aFilespec[1] == ':' && aFilespec[2] == '\\')
+	{
+		aBuf[0] = ctoupper(aFilespec[0]);
+		aBuf[1] = ':';
+		aBuf[2] = '\\';
+		// MSDN: "An attempt to open a search with a trailing backslash will always fail."
+		dir_start = aFilespec + 3; // Skip over the first backslash that goes with the drive letter.
+		built_length = 3;
+	}
 	else // it's probably a UNC
 	{
-		if (_tcsncmp(aFullFileSpec, _T("\\\\"), 2))
+		if (_tcsncmp(aFilespec, _T("\\\\"), 2))
 			// It doesn't appear to be a UNC either, so not sure how to deal with it.
-			return aFullFileSpec;
+			return NULL;
 		// I think MS says you can't use FindFirstFile() directly on a share name, so we
 		// want to omit both that and the server name from consideration (i.e. we don't attempt
 		// to find their proper case).  MSDN: "Similarly, on network shares, you can use an
 		// lpFileName of the form "\\server\service\*" but you cannot use an lpFileName that
 		// points to the share itself, such as "\\server\service".
-		dir_start = aFullFileSpec + 2;
+		dir_start = aFilespec + 2;
 		LPTSTR end_of_server_name = _tcschr(dir_start, '\\');
 		if (end_of_server_name)
 		{
@@ -1456,32 +1556,56 @@ LPTSTR ConvertFilespecToCorrectCase(LPTSTR aFullFileSpec)
 			if (end_of_share_name)
 				dir_start = end_of_share_name + 1;
 		}
+		built_length = dir_start - aFilespec;
+		if (built_length >= aBufSize) // Too long.
+			return NULL;
+		tmemcpy(aBuf, aFilespec, built_length);
 	}
-	// Init the new string (the filespec we're building), e.g. copy just the "c:\\" part.
-	tcslcpy(built_filespec, aFullFileSpec, dir_start - aFullFileSpec + 1);
 	WIN32_FIND_DATA found_file;
+	size_t found_length;
 	HANDLE file_search;
-	for (dir_end = dir_start; dir_end = _tcschr(dir_end, '\\'); ++dir_end)
+	for ( ; dir_end = _tcschr(dir_start, '\\'); dir_start = dir_end + 1)
 	{
 		*dir_end = '\0';  // Temporarily terminate.
-		file_search = FindFirstFile(aFullFileSpec, &found_file);
+		file_search = FindFirstFile(aFilespec, &found_file);
 		*dir_end = '\\'; // Restore it before we do anything else.
 		if (file_search == INVALID_HANDLE_VALUE)
-			return aFullFileSpec;
+			return NULL;
 		FindClose(file_search);
 		// Append the case-corrected version of this directory name:
-		sntprintfcat(built_filespec, _countof(built_filespec), _T("%s\\"), found_file.cFileName);
+		found_length = _tcslen(found_file.cFileName);
+		if (built_length + found_length + 1 > aBufSize) // Too long (+1 for the slash).
+			return NULL;
+		tmemcpy(aBuf + built_length, found_file.cFileName, found_length);
+		built_length += found_length;
+		aBuf[built_length++] = '\\';
 	}
-	// Now do the filename itself:
-	if (   (file_search = FindFirstFile(aFullFileSpec, &found_file)) == INVALID_HANDLE_VALUE   )
-		return aFullFileSpec;
-	FindClose(file_search);
-	sntprintfcat(built_filespec, _countof(built_filespec), _T("%s"), found_file.cFileName);
-	// It might be possible for the new one to be longer than the old, e.g. if some 8.3 short
-	// names were converted to long names by the process.  Thus, the caller should ensure that
-	// aFullFileSpec is large enough:
-	_tcscpy(aFullFileSpec, built_filespec);
-	return aFullFileSpec;
+	if (*dir_start) // Not a path ending in '\\'.
+	{
+		// Now do the filename itself:
+		if (   (file_search = FindFirstFile(aFilespec, &found_file)) == INVALID_HANDLE_VALUE   )
+			return NULL;
+		FindClose(file_search);
+		found_length = _tcslen(found_file.cFileName);
+		if (built_length + found_length > aBufSize) // Too long.
+			return NULL;
+		tmemcpy(aBuf + built_length, found_file.cFileName, found_length);
+		built_length += found_length;
+	}
+	aBuf[built_length] = '\0';
+	aBufLength = built_length;
+	return aBuf;
+}
+
+
+
+void ConvertFilespecToCorrectCase(LPTSTR aBuf, size_t aBufSize, size_t &aBufLength)
+{
+	TCHAR built_filespec[T_MAX_PATH];
+	if (aBufSize > _countof(built_filespec))
+		aBufSize = _countof(built_filespec);
+	if (ConvertFilespecToCorrectCase(aBuf, built_filespec, aBufSize, aBufLength))
+		tmemcpy(aBuf, built_filespec, aBufLength + 1);
 }
 
 
@@ -1821,13 +1945,6 @@ DWORD ReadRegString(HKEY aRootKey, LPTSTR aSubkey, LPTSTR aValueName, LPTSTR aBu
 
 
 
-#ifndef _WIN64
-// Load function dynamically to allow the program to launch on Win2k/XPSP1:
-typedef BOOL (WINAPI *PFN_IsWow64Process)(HANDLE, PBOOL);
-static PFN_IsWow64Process _IsWow64Process = (PFN_IsWow64Process)GetProcAddress(GetModuleHandle(_T("kernel32"))
-	, "IsWow64Process");
-#endif
-
 BOOL IsProcess64Bit(HANDLE aHandle)
 {
 	BOOL is32on64;
@@ -1840,22 +1957,21 @@ BOOL IsProcess64Bit(HANDLE aHandle)
 	// cause this, so for simplicity just assume the target process is 64-bit (like this one).
 	return TRUE;
 #else
-	if (_IsWow64Process && _IsWow64Process(GetCurrentProcess(), &is32on64))
+	if (IsWow64Process(GetCurrentProcess(), &is32on64))
 	{
 		if (is32on64)
 		{
 			// We're running under WOW64.  Since WOW64 only exists on 64-bit systems and on such systems
 			// 32-bit processes can run ONLY under WOW64, if the target process is also running under
 			// WOW64 it must be 32-bit; otherwise it must be 64-bit.
-			if (_IsWow64Process(aHandle, &is32on64))
+			if (IsWow64Process(aHandle, &is32on64))
 				return !is32on64;
 		}
 	}
 	// Since above didn't return, one of the following is true:
-	//  a) IsWow64Process doesn't exist, so the OS and all running processes must be 32-bit.
-	//  b) IsWow64Process failed on the first or second call.  MSDN isn't clear about what conditions
+	//  a) IsWow64Process failed on the first or second call.  MSDN isn't clear about what conditions
 	//     can cause this, so for simplicity just assume the target process is 32-bit (like this one).
-	//  c) The current process is not running under WOW64.  Since we know it is 32-bit (due to our use
+	//  b) The current process is not running under WOW64.  Since we know it is 32-bit (due to our use
 	//     of conditional compilation), the OS and all running processes must be 32-bit.
 	return FALSE;
 #endif
@@ -1869,7 +1985,7 @@ BOOL IsOS64Bit()
 #else
 	// If OS is 64-bit, this program must be running in WOW64.
 	BOOL is32on64;
-	if (_IsWow64Process && _IsWow64Process(GetCurrentProcess(), &is32on64))
+	if (IsWow64Process(GetCurrentProcess(), &is32on64))
 		return is32on64;
 	return FALSE;
 #endif
@@ -2200,8 +2316,8 @@ HBITMAP LoadPicture(LPTSTR aFilespec, int aWidth, int aHeight, int &aImageType, 
 			if (DynGdiplusStartup && DynGdiplusStartup(&token, &gdi_input, NULL) == Gdiplus::Ok)
 			{
 #ifndef UNICODE
-				WCHAR filespec_wide[MAX_PATH];
-				ToWideChar(aFilespec, filespec_wide, MAX_PATH); // Dest. size is in wchars, not bytes.
+				WCHAR filespec_wide[MAX_WIDE_PATH]; // MAX_WIDE_PATH vs. MAX_PATH allows this to work with long paths (\\?\ prefix may be required).
+				ToWideChar(aFilespec, filespec_wide, _countof(filespec_wide)); // Dest. size is in wchars, not bytes.
 				if (DynGdipCreateBitmapFromFile(filespec_wide, &pgdi_bitmap) == Gdiplus::Ok)
 #else
 				if (DynGdipCreateBitmapFromFile(aFilespec, &pgdi_bitmap) == Gdiplus::Ok)
@@ -2313,11 +2429,6 @@ HBITMAP LoadPicture(LPTSTR aFilespec, int aWidth, int aHeight, int &aImageType, 
 			{
 				DestroyIcon((HICON)hbitmap); // Destroy the original HICON.
 				// Load a new one, but at the size newly calculated above.
-				// Due to an apparent bug in Windows 9x (at least Win98se), the below call will probably
-				// crash the program with a "divide error" if the specified aWidth and/or aHeight are
-				// greater than 90.  Since I don't know whether this affects all versions of Windows 9x, and
-				// all animated cursors, it seems best just to document it here and in the help file rather
-				// than limiting the dimensions of .ani (and maybe .cur) files for certain operating systems.
 				return (HBITMAP)LoadImage(NULL, aFilespec, aImageType, aWidth, aHeight, LR_LOADFROMFILE);
 			}
 		}
@@ -2702,63 +2813,6 @@ HBITMAP IconToBitmap32(HICON ahIcon, bool aDestroyIcon)
 }
 
 
-HRESULT MySetWindowTheme(HWND hwnd, LPCWSTR pszSubAppName, LPCWSTR pszSubIdList)
-{
-	// The library must be loaded dynamically, otherwise the app will not launch on OSes older than XP.
-	// Theme DLL is normally available only on XP+, but an attempt to load it is made unconditionally
-	// in case older OSes can ever have it.
-	HRESULT hresult = !S_OK; // Set default as "failure".
-	HINSTANCE hinstTheme = LoadLibrary(_T("uxtheme"));
-	if (hinstTheme)
-	{
-		typedef HRESULT (WINAPI *MySetWindowThemeType)(HWND, LPCWSTR, LPCWSTR);
-  		MySetWindowThemeType DynSetWindowTheme = (MySetWindowThemeType)GetProcAddress(hinstTheme, "SetWindowTheme");
-		if (DynSetWindowTheme)
-			hresult = DynSetWindowTheme(hwnd, pszSubAppName, pszSubIdList);
-		FreeLibrary(hinstTheme);
-	}
-	return hresult;
-}
-
-
-
-HRESULT MyEnableThemeDialogTexture(HWND hwnd, DWORD dwFlags)
-{
-	// The library must be loaded dynamically, otherwise the app will not launch on OSes older than XP.
-	// Theme DLL is normally available only on XP+, but an attempt to load it is made unconditionally
-	// in case older OSes can ever have it.
-	HRESULT hresult = !S_OK; // Set default as "failure".
-	HINSTANCE hinstTheme = LoadLibrary(_T("uxtheme"));
-	if (hinstTheme)
-	{
-		typedef HRESULT (WINAPI *MyEnableThemeDialogTextureType)(HWND, DWORD);
-  		MyEnableThemeDialogTextureType DynEnableThemeDialogTexture = (MyEnableThemeDialogTextureType)GetProcAddress(hinstTheme, "EnableThemeDialogTexture");
-		if (DynEnableThemeDialogTexture)
-			hresult = DynEnableThemeDialogTexture(hwnd, dwFlags);
-		FreeLibrary(hinstTheme);
-	}
-	return hresult;
-}
-
-
-
-BOOL MyIsAppThemed()
-{
-	BOOL result = FALSE;
-	HINSTANCE hinstTheme = GetModuleHandle(_T("uxtheme")); // Should always succeed if app is themed.
-	if (hinstTheme)
-	{
-		typedef BOOL (WINAPI *IsAppThemedType)();
-		// Unlike IsThemeActive, IsAppThemed will return false if the "Disable visual styles"
-		// compatibility setting is turned on for this script's EXE.
-  		IsAppThemedType DynIsAppThemed = (IsAppThemedType)GetProcAddress(hinstTheme, "IsAppThemed");
-		if (DynIsAppThemed)
-			result = DynIsAppThemed();
-	}
-	return result;
-}
-
-
 
 LPTSTR ConvertEscapeSequences(LPTSTR aBuf, LPTSTR aLiteralMap)
 // Replaces any escape sequences in aBuf with their reduced equivalent.  For example, if aEscapeChar
@@ -2825,7 +2879,7 @@ int FindExprDelim(LPCTSTR aBuf, TCHAR aDelimiter, int aStartIndex, LPCTSTR aLite
 		case ']':
 		case '}':
 		case g_delimiter:
-			if (aDelimiter && aDelimiter != ':') // Caller wants to find a specific symbol and it's not this one.
+			if (aDelimiter) // Caller wants to find a specific symbol and it's not this one.
 				continue; // Unbalanced parentheses etc are caught at a later stage.
 			return mark;
 		case ':':
@@ -2903,10 +2957,19 @@ int FindTextDelim(LPCTSTR aBuf, TCHAR aDelimiter, int aStartIndex, LPCTSTR aLite
 
 
 
-int BalanceExpr(LPCTSTR aBuf, int aStartBalance, TCHAR aExpect[])
+int BalanceExpr(LPCTSTR aBuf, int aStartBalance, TCHAR aExpect[], TCHAR *aOpenQuote)
 {
 	TCHAR quote;
-	for (int balance = aStartBalance, mark = 0;; ++mark)
+	int balance = aStartBalance, mark = 0;
+	if (aOpenQuote && *aOpenQuote)
+	{
+		mark = FindTextDelim(aBuf, *aOpenQuote, mark);
+		if (!aBuf[mark])
+			return balance;
+		*aOpenQuote = 0;
+		++mark;
+	}
+	for (;; ++mark)
 	{
 		switch (aBuf[mark])
 		{
@@ -2923,6 +2986,11 @@ int BalanceExpr(LPCTSTR aBuf, int aStartBalance, TCHAR aExpect[])
 			mark = FindTextDelim(aBuf, quote, mark + 1);
 			if (!aBuf[mark]) // i.e. it isn't safe to do ++mark.
 			{
+				if (aOpenQuote)
+				{
+					*aOpenQuote = quote;
+					return balance;
+				}
 				aExpect[0] = quote; // Expected
 				aExpect[1] = 0; // Found
 				return -1; // Since this quote is missing its close-quote, abort the continuation loop.
@@ -3079,19 +3147,19 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 	if (_tcschr(aFuncName, ','))
 		*(_tcschr(aFuncName, ',')) = '\0';
 	ltrim(parameter);
-	int insert_pos;
+	int insert_pos = 0;
 	if (!*aFuncName)
 		return g_script->ScriptError(_T("Empty function name, make sure to use space after #DllImport not ','."), parameter); // Seems more descriptive than "Function already defined."
-	Func *found_func = g_script->FindFunc(aFuncName, _tcslen(aFuncName), &insert_pos);
+	UserFunc *found_func = (UserFunc *)g_script->FindFunc(aFuncName, _tcslen(aFuncName), &insert_pos);
 	if (found_func)
 		return g_script->ScriptError(_T("Duplicate function definition."), aFuncName); // Seems more descriptive than "Function already defined."
 	else
-		if (!(found_func = g_script->AddFunc(aFuncName, _tcslen(aFuncName), false, insert_pos)))
+		if (!(found_func = g_script->AddFunc(aFuncName, _tcslen(aFuncName), insert_pos)))
 			return FAIL; // It already displayed the error.
 	void *function = NULL; // Will hold the address of the function to be called.
 
 	found_func->mBIF = (BuiltInFunctionType)BIF_DllImport;
-	found_func->mIsBuiltIn = true;
+	//found_func->mIsBuiltIn = true;
 	found_func->mMinParams = 0;
 
 	TCHAR buf[MAX_PATH];
@@ -3213,19 +3281,18 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 	else
 	{
 		// Check validity of this arg's return type:
-		LPTSTR return_type_string[2];
-		return_type_string[0] = omit_leading_whitespace(parameter);
-		return_type_string[1] = NULL; // Added in 1.0.48.
+		LPTSTR return_type_string;
+		return_type_string = omit_leading_whitespace(parameter);
 
 		// 64-bit note: The calling convention detection code is preserved here for script compatibility.
 
-		if (!_tcsnicmp(return_type_string[0], _T("CDecl"), 5)) // Alternate calling convention.
+		if (!_tcsnicmp(return_type_string, _T("CDecl"), 5)) // Alternate calling convention.
 		{
 #ifdef WIN32_PLATFORM
 			dll_call_mode = DC_CALL_CDECL;
 #endif
-			return_type_string[0] = omit_leading_whitespace(return_type_string[0] + 5);
-			if (!*return_type_string[0])
+			return_type_string = omit_leading_whitespace(return_type_string + 5);
+			if (!*return_type_string)
 			{	// Take a shortcut since we know this empty string will be used as "Int":
 				return_attrib->type = DLL_ARG_INT;
 				goto has_valid_return_type;
@@ -3263,7 +3330,7 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 	// does happen, it would probably mean the script or the program has a design flaw somewhere, such as
 	// infinite recursion).
 
-	LPTSTR arg_type_string[2];
+	LPTSTR arg_type_string;
 	int i = arg_count * sizeof(void *);
 	// for Unicode <-> ANSI charset conversion
 #ifdef UNICODE
@@ -3285,8 +3352,7 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 		this_param = _tcschr(parm, ',');
 		*this_param = '\0';
 		this_param++;
-		arg_type_string[0] = parm; // It will be detected as invalid below.
-		arg_type_string[1] = NULL;
+		arg_type_string = parm; // It will be detected as invalid below.
 
 		//ExprTokenType &this_param = *aParam[i + 1];         // Resolved for performance and convenience.
 		DYNAPARM &this_dyna_param = dyna_param_def[arg_count];  //
@@ -3411,12 +3477,12 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 	if (has_return && aParamCount)
 		*(this_param) = '\0';
 
-	found_func->mDllImportFunction = function;
+	found_func->mClass = (Object*)function;
 	found_func->mParamCount = arg_count;
 	found_func->mVar = (Var**)return_attrib;
 	found_func->mStaticVar = (Var**)pStr;
 	found_func->mLazyVar = (Var**)dyna_param_def;
-	found_func->mdyna_param = dyna_param;
+	found_func->mParam = (FuncParam*)dyna_param;
 #ifdef WIN32_PLATFORM
 	found_func->mVarCount = dll_call_mode;
 #endif
@@ -3457,7 +3523,7 @@ DWORD CompressBuffer(BYTE *aBuffer, LPVOID &aDataBuf, DWORD sz, TCHAR *pwd[]) //
 	HZIP	hz;
 	ZipCreateBuffer(&hz, 0, sz + 10240, 0);
 	ZipAddBufferRaw(hz, aBuffer, sz);
-	DWORD aSize;
+	ULONGLONG aSize;
 	HANDLE aBase;
 	DWORD aSizeEncoded;
 	BYTE *aBufferMem;
@@ -3469,9 +3535,9 @@ DWORD CompressBuffer(BYTE *aBuffer, LPVOID &aDataBuf, DWORD sz, TCHAR *pwd[]) //
 		CloseHandle(aBase);
 		aBufferMem = aBuffer;
 	}
-	CryptBinaryToStringA(aBufferMem, aSize, 0x1, NULL, &aSizeEncoded);
+	CryptBinaryToStringA(aBufferMem, (DWORD)aSize, 0x1, NULL, &aSizeEncoded);
 	LPTSTR aDataCompressed = (LPTSTR)malloc(aSizeEncoded + 16);
-	CryptBinaryToStringA(aBufferMem, aSize, CRYPT_STRING_BASE64, (LPSTR)aDataCompressed, &aSizeEncoded);
+	CryptBinaryToStringA(aBufferMem, (DWORD)aSize, CRYPT_STRING_BASE64, (LPSTR)aDataCompressed, &aSizeEncoded);
 	LPVOID aBufferPtr;
 	if (pwd && pwd[0])
 	{
@@ -3488,18 +3554,18 @@ DWORD CompressBuffer(BYTE *aBuffer, LPVOID &aDataBuf, DWORD sz, TCHAR *pwd[]) //
 		aBufferPtr = aBufferMem;
 		aSizeEncoded = 0;
 	}
-	UINT hdr[5] = { 0x4034b50, 0, aSize, sz, aSizeEncoded };
-	HashData((LPBYTE)aBufferPtr, aSizeEncoded ? aSizeEncoded : aSize, (LPBYTE)&hdr[1], 4);
-	aDataBuf = (LPTSTR)malloc((aSizeEncoded ? aSizeEncoded : aSize) + sizeof(hdr));
+	UINT hdr[5] = { 0x4034b50, 0, (DWORD)aSize, sz, aSizeEncoded };
+	HashData((LPBYTE)aBufferPtr, aSizeEncoded ? aSizeEncoded : (DWORD)aSize, (LPBYTE)&hdr[1], 4);
+	aDataBuf = (LPTSTR)malloc((aSizeEncoded ? aSizeEncoded : (DWORD)aSize) + sizeof(hdr));
 	memcpy(aDataBuf, hdr, sizeof(hdr));
-	memcpy((char*)aDataBuf + sizeof(hdr), aBufferPtr, (aSizeEncoded ? aSizeEncoded : aSize));
+	memcpy((char*)aDataBuf + sizeof(hdr), aBufferPtr, (aSizeEncoded ? aSizeEncoded : (DWORD)aSize));
 	free(aDataCompressed);
 	if (aBufferMem != aBuffer)
 	{
 		UnmapViewOfFile(aBufferMem);
 		CloseHandle(aBase);
 	}
-	return sizeof(hdr) + (aSizeEncoded ? aSizeEncoded : aSize);
+	return sizeof(hdr) + (aSizeEncoded ? aSizeEncoded : (DWORD)aSize);
 }
 
 DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf,DWORD sz, TCHAR *pwd[]) // LiteZip Raw decompression
@@ -3576,22 +3642,24 @@ DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf,DWORD sz, TCHAR *pwd[]) //
 
 int FTOA(double aValue, LPTSTR aBuf, int aBufSize)
 // Converts aValue to a string while trying to ensure that conversion back to double will
-// produce the same value.  Trailing 0s after the decimal point are stripped for brevity.
-// Caller must ensure there is sufficient buffer size to avoid truncating the decimal point.
+// produce the same value.  Trailing 0s after the decimal point are stripped for brevity, when not printed in scientific notation.
+// Numbers printed in scientific notation may not contain a decimal point.
+// Caller must ensure there is sufficient buffer size to avoid truncating the output.
 {
-	int result = sntprintf(aBuf, aBufSize, _T("%0.17f"), aValue);
-	for (int i = result; i > 0; --i)
+	int result = sntprintf(aBuf, aBufSize, _T("%.17g"), aValue);
+	
+	// the 'g' specifier might cause the result to lack a decimal point. 
+	// If the number is not written in scientific notation, and lacks a decimal point,
+	// add ".0" to make the string look like a float.
+	size_t search_result = _tcscspn(aBuf, _T(".e")); 
+	if (search_result == result			// if true, no decimal point, '.', or 'e' was found, add ".0",
+		&& result + 3 <= aBufSize		// but only if the buffer has room for two more characters and the null terminator,
+		&& isdigit(aBuf[result - 1]))	// and the number isn't some variation of inf or NaN.
 	{
-		if (aBuf[i - 1] != '0')
-		{
-			if (i < result)
-			{
-				if (aBuf[i - 1] == '.')
-					++i;
-				aBuf[i] = '\0';
-			}
-			return i;
-		}
+		aBuf[result] = '.';				// overwrites the current null terminator.
+		aBuf[result+1] = '0';
+		aBuf[result+2] = '\0';
+		result += 2;					// the result is the number of characters written, excluding the terminator.
 	}
 	return result;
 }

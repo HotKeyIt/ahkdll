@@ -44,22 +44,6 @@ ResultType Script::DoRunAs(LPTSTR aCommandLine, LPTSTR aWorkingDir, bool aDispla
 		LPSTARTUPINFOW lpStartupInfo,       // startup information
 		LPPROCESS_INFORMATION lpProcessInfo // process information
 		);
-	// Get a handle to the DLL module that contains CreateProcessWithLogonW
-	HINSTANCE hinstLib = LoadLibrary(_T("advapi32"));
-	if (!hinstLib)
-	{
-		if (aDisplayErrors)
-			ScriptError(_T("RunAs: Missing advapi32.dll."));
-		return FAIL;
-	}
-	MyCreateProcessWithLogonW lpfnDLLProc = (MyCreateProcessWithLogonW)GetProcAddress(hinstLib, "CreateProcessWithLogonW");
-	if (!lpfnDLLProc)
-	{
-		FreeLibrary(hinstLib);
-		if (aDisplayErrors)
-			ScriptError(_T("CreateProcessWithLogonW.")); // Short msg since it probably never happens.
-		return FAIL;
-	}
 	// Set up wide char version that we need for CreateProcessWithLogon
 	// init structure for running programs (wide char version)
 	STARTUPINFOW wsi = {0};
@@ -85,7 +69,7 @@ ResultType Script::DoRunAs(LPTSTR aCommandLine, LPTSTR aWorkingDir, bool aDispla
 	if (lpfnDLLProc(mRunAsUser, mRunAsDomain, mRunAsPass, LOGON_WITH_PROFILE, 0
 		, command_line_wide, 0, 0, *working_dir_wide ? working_dir_wide : NULL, &wsi, &aPI))
 #else
-	if (lpfnDLLProc(mRunAsUser, mRunAsDomain, mRunAsPass, LOGON_WITH_PROFILE, 0
+	if (CreateProcessWithLogonW(mRunAsUser, mRunAsDomain, mRunAsPass, LOGON_WITH_PROFILE, 0
 		, aCommandLine, 0, 0, aWorkingDir && *aWorkingDir ? aWorkingDir : NULL, &wsi, &aPI))
 #endif
 	{
@@ -98,7 +82,6 @@ ResultType Script::DoRunAs(LPTSTR aCommandLine, LPTSTR aWorkingDir, bool aDispla
 	}
 	else
 		aLastError = GetLastError(); // Caller will use this to get an error message and set g->LastError if needed.
-	FreeLibrary(hinstLib);
 	return OK;
 }
 
@@ -109,7 +92,7 @@ BIF_DECL(BIF_SysGetIPAddresses)
 	// aaa.bbb.ccc.ddd = 15, but allow room for larger IP's in the future.
 	#define IP_ADDRESS_SIZE 32 // The maximum size of any of the strings we return, including terminator.
 
-	Object *addresses = Object::Create();
+	auto addresses = Array::Create();
 	if (!addresses)
 		_f_throw(ERR_OUTOFMEM);
 
@@ -150,27 +133,22 @@ VarSizeType BIV_IsAdmin(LPTSTR aBuf, LPTSTR aVarName)
 	if (!aBuf)
 		return 1;  // The length of the string "1" or "0".
 	TCHAR result = '0';  // Default.
-	if (g_os.IsWin9x())
-		result = '1';
-	else
+	SC_HANDLE h = OpenSCManager(NULL, NULL, SC_MANAGER_LOCK);
+	if (h)
 	{
-		SC_HANDLE h = OpenSCManager(NULL, NULL, SC_MANAGER_LOCK);
-		if (h)
+		SC_LOCK lock = LockServiceDatabase(h);
+		if (lock)
 		{
-			SC_LOCK lock = LockServiceDatabase(h);
-			if (lock)
-			{
-				UnlockServiceDatabase(lock);
-				result = '1'; // Current user is admin.
-			}
-			else
-			{
-				DWORD lastErr = GetLastError();
-				if (lastErr == ERROR_SERVICE_DATABASE_LOCKED)
-					result = '1'; // Current user is admin.
-			}
-			CloseServiceHandle(h);
+			UnlockServiceDatabase(lock);
+			result = '1'; // Current user is admin.
 		}
+		else
+		{
+			DWORD lastErr = GetLastError();
+			if (lastErr == ERROR_SERVICE_DATABASE_LOCKED)
+				result = '1'; // Current user is admin.
+		}
+		CloseServiceHandle(h);
 	}
 	aBuf[0] = result;
 	aBuf[1] = '\0';
@@ -214,25 +192,24 @@ BIF_DECL(BIF_PixelGetColor)
 	_f_return_retval;
 }
 
-ResultType Line::MenuSelect(LPTSTR aTitle, LPTSTR aText, LPTSTR aMenu1, LPTSTR aMenu2
-	, LPTSTR aMenu3, LPTSTR aMenu4, LPTSTR aMenu5, LPTSTR aMenu6, LPTSTR aMenu7
-	, LPTSTR aExcludeTitle, LPTSTR aExcludeText)
+BIF_DECL(BIF_MenuSelect)
 {
-	// Set up a temporary array make it easier to traverse nested menus & submenus
-	// in a loop.  Also add a NULL at the end to simplify the loop a little:
-	LPTSTR menu_param[] = {aMenu1, aMenu2, aMenu3, aMenu4, aMenu5, aMenu6, aMenu7, NULL};
+	const int max_menu_params = 7;
+	int menu_param_index = 2;
+	int menu_param_end = min(aParamCount, menu_param_index + max_menu_params);
 
-	HWND target_window = DetermineTargetWindow(aTitle, aText, aExcludeTitle, aExcludeText);
+	HWND target_window;
+	if (!DetermineTargetWindow(target_window, aResultToken, aParam, aParamCount, max_menu_params))
+		return;
 	if (!target_window)
 		goto error;
 
-	int first_menu_param = 0;
 	UINT message = WM_COMMAND;
 	HMENU hMenu;
-	if (!_tcsicmp(aMenu1, _T("0&")))
+	if (!_tcsicmp(ParamIndexToOptionalString(menu_param_index), _T("0&")))
 	{
 		hMenu = GetSystemMenu(target_window, FALSE);
-		first_menu_param = 1;
+		menu_param_index += 1;
 		message = WM_SYSCOMMAND;
 	}
 	else
@@ -262,11 +239,11 @@ else\
 	int pos, target_menu_pos;
 	LPTSTR this_menu_param;
 
-	for (int i = first_menu_param; ; ++i)
+	for ( ; menu_param_index < menu_param_end; ++menu_param_index)
 	{
-		this_menu_param = menu_param[i]; // For performance and convenience.
-		if (!(this_menu_param && *this_menu_param))
-			break;
+		this_menu_param = ParamIndexToOptionalString(menu_param_index, _f_number_buf);
+		if (!*this_menu_param)
+			goto error;
 		if (!hMenu)  // The nesting of submenus ended prior to the end of the list of menu search terms.
 			goto error;
 
@@ -316,16 +293,18 @@ else\
 
 	// This would happen if the outer loop above had zero iterations due to aMenu1 being NULL or blank,
 	// or if the caller specified a submenu as the target (which doesn't seem valid since an app would
-	// next expect to ever receive a message for a submenu?):
+	// never expect to ever receive a message for a submenu?):
 	if (menu_id == MENU_ITEM_IS_SUBMENU)
 		goto error;
 
 	// Since the above didn't return, the specified search hierarchy was completely found.
 	PostMessage(target_window, message, (WPARAM)menu_id, 0);
-	return g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
+	g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
+	_f_return_b(TRUE);
 
 error:
-	return SetErrorLevelOrThrow();
+	g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
+	_f_return_b(FALSE);
 }
 
 
@@ -555,18 +534,7 @@ BIF_DECL(BIF_Control)
 				goto error;
 		if (dwResult == CB_ERR && control_index != -1)  // CB_ERR == LB_ERR
 			goto error;
-		if (   !(immediate_parent = GetParent(control_window))   )
-			goto error;
-		if (   !(control_id = GetDlgCtrlID(control_window))   )
-			goto error;
-		if (!SendMessageTimeout(immediate_parent, WM_COMMAND, (WPARAM)MAKELONG(control_id, x_msg)
-			, (LPARAM)control_window, SMTO_ABORTIFHUNG, 2000, &dwResult))
-			goto error;
-		if (!SendMessageTimeout(immediate_parent, WM_COMMAND, (WPARAM)MAKELONG(control_id, y_msg)
-			, (LPARAM)control_window, SMTO_ABORTIFHUNG, 2000, &dwResult))
-			goto error;
-		// Otherwise break and do the end-function processing.
-		break;
+		goto notify_parent;
 
 	case FID_ControlChooseString:
 		GetClassName(control_window, classname, _countof(classname));
@@ -600,6 +568,7 @@ BIF_DECL(BIF_Control)
 			if (!SendMessageTimeout(control_window, msg, -1, (LPARAM)aValue, SMTO_ABORTIFHUNG, 2000, &item_index)
 				|| item_index == CB_ERR) // CB_ERR == LB_ERR
 				goto error;
+	notify_parent:
 		if (   !(immediate_parent = GetParent(control_window))   )
 			goto error;
 		SetLastError(0); // Must be done to differentiate between success and failure when control has ID 0.
@@ -908,34 +877,6 @@ error:
 
 ResultType Line::Download(LPTSTR aURL, LPTSTR aFilespec)
 {
-	// Check that we have IE3 and access to wininet.dll
-	HINSTANCE hinstLib = LoadLibrary(_T("wininet"));
-	if (!hinstLib)
-		return SetErrorLevelOrThrow();
-
-	typedef HINTERNET (WINAPI *MyInternetOpen)(LPCTSTR, DWORD, LPCTSTR, LPCTSTR, DWORD dwFlags);
-	typedef HINTERNET (WINAPI *MyInternetOpenUrl)(HINTERNET hInternet, LPCTSTR, LPCTSTR, DWORD, DWORD, LPDWORD);
-	typedef BOOL (WINAPI *MyInternetCloseHandle)(HINTERNET);
-	typedef BOOL (WINAPI *MyInternetReadFileEx)(HINTERNET, LPINTERNET_BUFFERSA, DWORD, DWORD);
-	typedef BOOL (WINAPI *MyInternetReadFile)(HINTERNET, LPVOID, DWORD, LPDWORD);
-
-	#ifndef INTERNET_OPEN_TYPE_PRECONFIG_WITH_NO_AUTOPROXY
-		#define INTERNET_OPEN_TYPE_PRECONFIG_WITH_NO_AUTOPROXY 4
-	#endif
-
-	// Get the address of all the functions we require.  It's done this way in case the system
-	// lacks MSIE v3.0+, in which case the app would probably refuse to launch at all:
- 	MyInternetOpen lpfnInternetOpen = (MyInternetOpen)GetProcAddress(hinstLib, "InternetOpen" WINAPI_SUFFIX);
-	MyInternetOpenUrl lpfnInternetOpenUrl = (MyInternetOpenUrl)GetProcAddress(hinstLib, "InternetOpenUrl" WINAPI_SUFFIX);
-	MyInternetCloseHandle lpfnInternetCloseHandle = (MyInternetCloseHandle)GetProcAddress(hinstLib, "InternetCloseHandle");
-	MyInternetReadFileEx lpfnInternetReadFileEx = (MyInternetReadFileEx)GetProcAddress(hinstLib, "InternetReadFileExA"); // InternetReadFileExW() appears unimplemented prior to Windows 7, so always use InternetReadFileExA().
-	MyInternetReadFile lpfnInternetReadFile = (MyInternetReadFile)GetProcAddress(hinstLib, "InternetReadFile"); // Called unconditionally to reduce code size and because the time required is likely insignificant compared to network latency.
-	if (!(lpfnInternetOpen && lpfnInternetOpenUrl && lpfnInternetCloseHandle && lpfnInternetReadFileEx && lpfnInternetReadFile))
-	{
-		FreeLibrary(hinstLib);
-		return SetErrorLevelOrThrow();
-	}
-
 	// v1.0.44.07: Set default to INTERNET_FLAG_RELOAD vs. 0 because the vast majority of usages would want
 	// the file to be retrieved directly rather than from the cache.
 	// v1.0.46.04: Added more no-cache flags because otherwise, it definitely falls back to the cache if
@@ -959,19 +900,15 @@ ResultType Line::Download(LPTSTR aURL, LPTSTR aFilespec)
 	// requests that lack a user-agent.  Furthermore, it's more professional to have one, in which case it
 	// should probably be kept as simple and unchanging as possible.  Using something like the script's name
 	// as the user agent (even if documented) seems like a bad idea because it might contain personal/sensitive info.
-	HINTERNET hInet = lpfnInternetOpen(_T("AutoHotkey"), INTERNET_OPEN_TYPE_PRECONFIG_WITH_NO_AUTOPROXY, NULL, NULL, 0);
+	HINTERNET hInet = InternetOpen(_T("AutoHotkey"), INTERNET_OPEN_TYPE_PRECONFIG_WITH_NO_AUTOPROXY, NULL, NULL, 0);
 	if (!hInet)
-	{
-		FreeLibrary(hinstLib);
 		return SetErrorLevelOrThrow();
-	}
 
 	// Open the required URL
-	HINTERNET hFile = lpfnInternetOpenUrl(hInet, aURL, NULL, 0, flags_for_open_url, 0);
+	HINTERNET hFile = InternetOpenUrl(hInet, aURL, NULL, 0, flags_for_open_url, 0);
 	if (!hFile)
 	{
-		lpfnInternetCloseHandle(hInet);
-		FreeLibrary(hinstLib);
+		InternetCloseHandle(hInet);
 		return SetErrorLevelOrThrow();
 	}
 
@@ -979,9 +916,8 @@ ResultType Line::Download(LPTSTR aURL, LPTSTR aFilespec)
 	FILE *fptr = _tfopen(aFilespec, _T("wb"));	// Open in binary write/destroy mode
 	if (!fptr)
 	{
-		lpfnInternetCloseHandle(hFile);
-		lpfnInternetCloseHandle(hInet);
-		FreeLibrary(hinstLib);
+		InternetCloseHandle(hFile);
+		InternetCloseHandle(hInet);
 		return SetErrorLevelOrThrow();
 	}
 
@@ -1009,7 +945,7 @@ ResultType Line::Download(LPTSTR aURL, LPTSTR aFilespec)
 
 	if (*aURL == 'h' || *aURL == 'H')
 	{
-		while (result = lpfnInternetReadFileEx(hFile, &buffers, IRF_NO_WAIT, NULL)) // Assign
+		while (result = InternetReadFileExA(hFile, &buffers, IRF_NO_WAIT, NULL)) // Assign
 		{
 			if (!buffers.dwBufferLength) // Transfer is complete.
 				break;
@@ -1021,7 +957,7 @@ ResultType Line::Download(LPTSTR aURL, LPTSTR aFilespec)
 	else // v1.0.48.04: This section adds support for FTP and perhaps Gopher by using InternetReadFile() instead of InternetReadFileEx().
 	{
 		DWORD number_of_bytes_read;
-		while (result = lpfnInternetReadFile(hFile, bufData, sizeof(bufData), &number_of_bytes_read))
+		while (result = InternetReadFile(hFile, bufData, sizeof(bufData), &number_of_bytes_read))
 		{
 			if (!number_of_bytes_read)
 				break;
@@ -1030,9 +966,8 @@ ResultType Line::Download(LPTSTR aURL, LPTSTR aFilespec)
 		}
 	}
 	// Close internet session:
-	lpfnInternetCloseHandle(hFile);
-	lpfnInternetCloseHandle(hInet);
-	FreeLibrary(hinstLib); // Only after the above.
+	InternetCloseHandle(hFile);
+	InternetCloseHandle(hInet);
 	// Close output file:
 	fclose(fptr);
 
@@ -1063,7 +998,7 @@ BIF_DECL(BIF_DirSelect)
 // This is because an interrupting thread usually changes the values to something inappropriate for this thread.
 {
 	_f_param_string_opt(aRootDir, 0);
-	_f_param_string_opt(aOptions, 1);
+	//_f_param_string_opt(aOptions, 1);
 	_f_param_string_opt(aGreeting, 2);
 
 	if (g_nFolderDialogs >= MAX_FOLDERDIALOGS)
@@ -1142,7 +1077,7 @@ BIF_DECL(BIF_DirSelect)
 	#define FSF_ALLOW_CREATE 0x01
 	#define FSF_EDITBOX      0x02
 	#define FSF_NONEWDIALOG  0x04
-	DWORD options = *aOptions ? ATOI(aOptions) : FSF_ALLOW_CREATE;
+	DWORD options = (DWORD)ParamIndexToOptionalInt(1, FSF_ALLOW_CREATE);
 	bi.ulFlags =
 		  ((options & FSF_NONEWDIALOG)    ? 0           : BIF_NEWDIALOGSTYLE) // v1.0.48: Added to support BartPE/WinPE.
 		| ((options & FSF_ALLOW_CREATE)   ? 0           : BIF_NONEWFOLDERBUTTON)
@@ -1429,8 +1364,10 @@ BIF_DECL(BIF_FileGetVersion)
 
 
 
-bool Line::Util_CopyDir(LPCTSTR szInputSource, LPCTSTR szInputDest, bool bOverwrite)
+bool Line::Util_CopyDir(LPCTSTR szInputSource, LPCTSTR szInputDest, int OverwriteMode, bool bMove)
 {
+	bool bOverwrite = OverwriteMode == 1 || OverwriteMode == 2; // Strict validation for safety.
+
 	// Get the fullpathnames and strip trailing \s
 	TCHAR szSource[_MAX_PATH+2];
 	TCHAR szDest[_MAX_PATH+2];
@@ -1441,22 +1378,54 @@ bool Line::Util_CopyDir(LPCTSTR szInputSource, LPCTSTR szInputDest, bool bOverwr
 	if (Util_IsDir(szSource) == false)
 		return false;							// Nope
 
-	// Does the destination dir exist?
-	if (Util_IsDir(szDest))
+	// Jon on the AutoIt forums says "Well SHFileOp is way too unpredictable under 9x. Grrr."
+	// So the comments below about some OSes/old versions are probably just referring to 9x,
+	// which we don't support anymore.  Testing on Windows 2000 and Windows 10 showed that
+	// SHFileOperation can move a directory between two volumes.  However, performing copy
+	// then remove ensures nothing is removed if the copy partially fails, so it's kept this
+	// way for backward-compatibility, even though it may be inconsistent with local moves.
+	// Obsolete comment from Util_MoveDir:
+	// If the source and dest are on different volumes then we must copy rather than move
+	// as move in this case only works on some OSes.  Copy and delete (poor man's move).
+	if (bMove && (ctolower(szSource[0]) != ctolower(szDest[0]) || szSource[1] != ':'))
 	{
-		if (bOverwrite == false)
+		if (!Util_CopyDir(szSource, szDest, bOverwrite, false))
 			return false;
+		return Util_RemoveDir(szSource, true);
 	}
-	else // Although dest doesn't exist as a dir, it might be a file, which is covered below too.
+
+	// Does the destination dir exist?
+	DWORD attr = GetFileAttributes(szDest);
+	if (attr != 0xFFFFFFFF) // Destination already exists as a file or directory.
+	{
+		if (attr & FILE_ATTRIBUTE_DIRECTORY) // Dest already exists as a directory.
+		{
+			if (!bOverwrite) // Overwrite Mode is "Never".
+				return false;
+		}
+		else // Dest already exists as a file.
+			return false; // Don't even attempt to overwrite a file with a dir, regardless of mode (I think SHFileOperation refuses to do it anyway).
+	}
+	else // Dest doesn't exist.
 	{
 		// We must create the top level directory
-		if (!Util_CreateDir(szDest)) // Failure is expected to happen if szDest is an existing *file*, since a dir should never be allowed to overwrite a file (to avoid accidental loss of data).
+		// FOF_SILENT (which is included in FOF_NO_UI and means "Do not display a progress dialog box")
+		// seems to be bugged on some older OSes (such as 2k and XP).  Specifically, it answers "No" to
+		// the "confirmmkdir" dialog, which it isn't supposed to suppress, and ignores FOF_NOCONFIRMMKDIR.
+		// Creating the directory first works around this.  Win 7 is okay without this; Vista wasn't tested.
+		if (!bMove && !FileCreateDir(szDest))
 			return false;
 	}
 
+	// The wildcard below is kept for backward-compatibility, although as indicated above, the
+	// issues alluded to below are probably only on 9x, which is no longer supported.  Adding the
+	// wildcard appears to permit copying a directory into itself (perhaps because the directory
+	// itself isn't being copied), although we still document the result as "undefined".
+	// Really old comment:
 	// To work under old versions AND new version of shell32.dll the source must be specified
 	// as "dir\*.*" and the destination directory must already exist... Goddamn Microsoft and their APIs...
-	_tcscat(szSource, _T("\\*.*"));
+	if (!bMove)
+		_tcscat(szSource, _T("\\*.*"));
 
 	// We must also make source\dest double nulled strings for the SHFileOp API
 	szSource[_tcslen(szSource)+1] = '\0';	
@@ -1466,8 +1435,10 @@ bool Line::Util_CopyDir(LPCTSTR szInputSource, LPCTSTR szInputDest, bool bOverwr
 	SHFILEOPSTRUCT FileOp = {0};
 	FileOp.pFrom = szSource;
 	FileOp.pTo = szDest;
-	FileOp.wFunc = FO_COPY;
-	FileOp.fFlags = FOF_SILENT | FOF_NOCONFIRMMKDIR | FOF_NOCONFIRMATION | FOF_NOERRORUI; // FOF_NO_UI ("perform the operation with no user input") is not present for in case it would break compatibility somehow, and because the other flags already present seem to make its behavior implicit.  Also, unlike FileMoveDir, FOF_MULTIDESTFILES never seems to be needed.
+	FileOp.wFunc = bMove ? FO_MOVE : FO_COPY;
+	FileOp.fFlags = FOF_NO_UI; // Set default.
+	if (OverwriteMode == 2)
+		FileOp.fFlags |= FOF_MULTIDESTFILES; // v1.0.46.07: Using the FOF_MULTIDESTFILES flag (as hinted by MSDN) overwrites/merges any existing target directory.  This logic supersedes and fixes old logic that didn't work properly when the source dir was being both renamed and moved to overwrite an existing directory.
 	// All of the below left set to NULL/FALSE by the struct initializer higher above:
 	//FileOp.hNameMappings			= NULL;
 	//FileOp.lpszProgressTitle		= NULL;
@@ -1489,68 +1460,23 @@ bool Line::Util_CopyDir(LPCTSTR szInputSource, LPCTSTR szInputDest, bool bOverwr
 
 
 
-bool Line::Util_MoveDir(LPCTSTR szInputSource, LPCTSTR szInputDest, int OverwriteMode)
-{
-	// Get the fullpathnames and strip trailing \s
-	TCHAR szSource[_MAX_PATH+2];
-	TCHAR szDest[_MAX_PATH+2];
-	Util_GetFullPathName(szInputSource, szSource);
-	Util_GetFullPathName(szInputDest, szDest);
-
-	// Ensure source is a directory
-	if (Util_IsDir(szSource) == false)
-		return false;							// Nope
-
-	// Does the destination dir exist?
-	DWORD attr = GetFileAttributes(szDest);
-	if (attr != 0xFFFFFFFF) // Destination already exists as a file or directory.
-	{
-		if (attr & FILE_ATTRIBUTE_DIRECTORY) // Dest already exists as a directory.
-		{
-			if (OverwriteMode != 1 && OverwriteMode != 2) // Overwrite Mode is "Never".  Strict validation for safety.
-				return false; // For consistency, mode1 actually should move the source-dir *into* the identically name dest dir.  But for backward compatibility, this change hasn't been made.
-		}
-		else // Dest already exists as a file.
-			return false; // Don't even attempt to overwrite a file with a dir, regardless of mode (I think SHFileOperation refuses to do it anyway).
-	}
-
-	if (Util_IsDifferentVolumes(szSource, szDest))
-	{
-		// If the source and dest are on different volumes then we must copy rather than move
-		// as move in this case only works on some OSes.  Copy and delete (poor man's move).
-		if (!Util_CopyDir(szSource, szDest, true))
-			return false;
-		return Util_RemoveDir(szSource, true);
-	}
-
-	// Since above didn't return, source and dest are on same volume.
-	// We must also make source\dest double nulled strings for the SHFileOp API
-	szSource[_tcslen(szSource)+1] = '\0';
-	szDest[_tcslen(szDest)+1] = '\0';
-
-	// Setup the struct
-	SHFILEOPSTRUCT FileOp = {0};
-	FileOp.pFrom = szSource;
-	FileOp.pTo = szDest;
-	FileOp.wFunc = FO_MOVE;
-	FileOp.fFlags = FOF_SILENT | FOF_NOCONFIRMMKDIR | FOF_NOCONFIRMATION | FOF_NOERRORUI; // Set default. FOF_NO_UI ("perform the operation with no user input") is not present for in case it would break compatibility somehow, and because the other flags already present seem to make its behavior implicit.
-	if (OverwriteMode == 2) // v1.0.46.07: Using the FOF_MULTIDESTFILES flag (as hinted by MSDN) overwrites/merges any existing target directory.  This logic supersedes and fixes old logic that didn't work properly when the source dir was being both renamed and moved to overwrite an existing directory.
-		FileOp.fFlags |= FOF_MULTIDESTFILES;
-	// All of the below left set to NULL/FALSE by the struct initializer higher above:
-	//FileOp.hNameMappings			= NULL;
-	//FileOp.lpszProgressTitle		= NULL;
-	//FileOp.fAnyOperationsAborted	= FALSE;
-	//FileOp.hwnd					= NULL;
-
-	return !SHFileOperation(&FileOp);
-}
-
-
-
 bool Line::Util_RemoveDir(LPCTSTR szInputSource, bool bRecurse)
 {
 	SHFILEOPSTRUCT	FileOp;
 	TCHAR			szSource[_MAX_PATH+2];
+	
+	// If recursion not on just try a standard delete on the directory (the SHFile function WILL
+	// delete a directory even if not empty no matter what flags you give it...)
+	if (bRecurse == false)
+	{
+		// v1.1.31.00: Use the original source path in case its length exceeds _MAX_PATH.
+		// Relative paths and trailing slashes are okay in this case, and Util_IsDir() is
+		// not needed since the function only removes empty directories, not files.
+		if (!RemoveDirectory(szInputSource))
+			return false;
+		else
+			return true;
+	}
 
 	// Get the fullpathnames and strip trailing \s
 	Util_GetFullPathName(szInputSource, szSource);
@@ -1558,16 +1484,6 @@ bool Line::Util_RemoveDir(LPCTSTR szInputSource, bool bRecurse)
 	// Ensure source is a directory
 	if (Util_IsDir(szSource) == false)
 		return false;							// Nope
-
-	// If recursion not on just try a standard delete on the directory (the SHFile function WILL
-	// delete a directory even if not empty no matter what flags you give it...)
-	if (bRecurse == false)
-	{
-		if (!RemoveDirectory(szSource))
-			return false;
-		else
-			return true;
-	}
 
 	// We must also make double nulled strings for the SHFileOp API
 	szSource[_tcslen(szSource)+1] = '\0';
@@ -1595,18 +1511,14 @@ bool Line::Util_RemoveDir(LPCTSTR szInputSource, bool bRecurse)
 ///////////////////////////////////////////////////////////////////////////////
 int Line::Util_CopyFile(LPCTSTR szInputSource, LPCTSTR szInputDest, bool bOverwrite, bool bMove, DWORD &aLastError)
 {
-	TCHAR			szSource[_MAX_PATH+1];
-	TCHAR			szDest[_MAX_PATH+1];
-	TCHAR			szExpandedDest[MAX_PATH+1];
-	TCHAR			szTempPath[_MAX_PATH+1];
-	TCHAR			szDrive[_MAX_PATH+1];
-	TCHAR			szDir[_MAX_PATH+1];
-	TCHAR			szFile[_MAX_PATH+1];
-	TCHAR			szExt[_MAX_PATH+1];
+	TCHAR szSource[T_MAX_PATH];
+	TCHAR szDest[T_MAX_PATH];
+	TCHAR szDestPattern[MAX_PATH];
 
 	// Get local version of our source/dest with full path names, strip trailing \s
-	Util_GetFullPathName(szInputSource, szSource);
-	Util_GetFullPathName(szInputDest, szDest);
+	// and normalize the path separator (replace / with \).
+	Util_GetFullPathName(szInputSource, szSource, _countof(szSource));
+	Util_GetFullPathName(szInputDest, szDest, _countof(szDest));
 
 	// If the source or dest is a directory then add *.* to the end
 	if (Util_IsDir(szSource))
@@ -1624,12 +1536,14 @@ int Line::Util_CopyFile(LPCTSTR szInputSource, LPCTSTR szInputDest, bool bOverwr
 	aLastError = 0; // Set default. Overridden only when a failure occurs.
 
 	// Otherwise, loop through all the matching files.
-	// Split source into file and extension (we need this info in the loop below to reconstruct the path)
-	_tsplitpath(szSource, szDrive, szDir, szFile, szExt);
-	// Note we now rely on the SOURCE being the contents of szDrive, szDir, szFile, etc.
-	size_t szTempPath_length = sntprintf(szTempPath, _countof(szTempPath), _T("%s%s"), szDrive, szDir);
-	LPTSTR append_pos = szTempPath + szTempPath_length;
-	size_t space_remaining = _countof(szTempPath) - szTempPath_length - 1;
+
+	// Locate the filename/pattern, which will be overwritten on each iteration.
+	LPTSTR source_append_pos = _tcsrchr(szSource, '\\') + 1;
+	LPTSTR dest_append_pos = _tcsrchr(szDest, '\\') + 1;
+	size_t space_remaining = _countof(szSource) - (source_append_pos - szSource) - 1;
+
+	// Copy destination filename or pattern, since it will be overwritten.
+	tcslcpy(szDestPattern, dest_append_pos, _countof(szDestPattern));
 
 	int failure_count = 0;
 	LONG_OPERATION_INIT
@@ -1659,10 +1573,10 @@ int Line::Util_CopyFile(LPCTSTR szInputSource, LPCTSTR szInputDest, bool bOverwr
 			++failure_count;
 			continue;
 		}
-		_tcscpy(append_pos, findData.cFileName); // Indirectly populate szTempPath. Above has ensured this won't overflow.
+		_tcscpy(source_append_pos, findData.cFileName); // Indirectly populate szSource. Above has ensured this won't overflow.
 
 		// Expand the destination based on this found file
-		Util_ExpandFilenameWildcard(findData.cFileName, szDest, szExpandedDest);
+		Util_ExpandFilenameWildcard(findData.cFileName, szDestPattern, dest_append_pos);
 
 		// Fixed for v1.0.36.01: This section has been revised to avoid unnecessary calls; but more
 		// importantly, it now avoids the deletion and complete loss of a file when it is copied or
@@ -1685,14 +1599,14 @@ int Line::Util_CopyFile(LPCTSTR szInputSource, LPCTSTR szInputDest, bool bOverwr
 			// physical file on disk (hopefully MoveFile handles all of these correctly by indicating
 			// success [below] when a file is moved onto itself, though it has only been tested for
 			// basic cases of relative vs. absolute path).
-			if (!MoveFile(szTempPath, szExpandedDest))
+			if (!MoveFile(szSource, szDest))
 			{
 				// If overwrite mode was not specified by the caller, or it was but the existing
 				// destination file cannot be deleted (perhaps because it is a folder rather than
 				// a file), or it can be deleted but the source cannot be moved, indicate a failure.
 				// But by design, continue the operation.  The following relies heavily on
 				// short-circuit boolean evaluation order:
-				if (   !(bOverwrite && DeleteFile(szExpandedDest) && MoveFile(szTempPath, szExpandedDest))   )
+				if (   !(bOverwrite && DeleteFile(szDest) && MoveFile(szSource, szDest))   )
 				{
 					aLastError = GetLastError();
 					++failure_count; // At this stage, any of the above 3 being false is cause for failure.
@@ -1702,7 +1616,7 @@ int Line::Util_CopyFile(LPCTSTR szInputSource, LPCTSTR szInputDest, bool bOverwr
 			}
 		}
 		else // The mode is "Copy" vs. "Move"
-			if (!CopyFile(szTempPath, szExpandedDest, !bOverwrite)) // Force it to fail if bOverwrite==false.
+			if (!CopyFile(szSource, szDest, !bOverwrite)) // Force it to fail if bOverwrite==false.
 			{
 				aLastError = GetLastError();
 				++failure_count;
@@ -1718,18 +1632,12 @@ int Line::Util_CopyFile(LPCTSTR szInputSource, LPCTSTR szInputDest, bool bOverwr
 void Line::Util_ExpandFilenameWildcard(LPCTSTR szSource, LPCTSTR szDest, LPTSTR szExpandedDest)
 {
 	// copy one.two.three  *.txt     = one.two   .txt
-	// copy one.two.three  *.*.txt   = one.two   .three  .txt
-	// copy one.two.three  *.*.*.txt = one.two   .three  ..txt
+	// copy one.two.three  *.*.txt   = one.two.  .txt  (extra asterisks are removed)
 	// copy one.two		   test      = test
-
-	TCHAR	szFileTemp[_MAX_PATH+1];
-	TCHAR	szExtTemp[_MAX_PATH+1];
 
 	TCHAR	szSrcFile[_MAX_PATH+1];
 	TCHAR	szSrcExt[_MAX_PATH+1];
 
-	TCHAR	szDestDrive[_MAX_PATH+1];
-	TCHAR	szDestDir[_MAX_PATH+1];
 	TCHAR	szDestFile[_MAX_PATH+1];
 	TCHAR	szDestExt[_MAX_PATH+1];
 
@@ -1741,8 +1649,8 @@ void Line::Util_ExpandFilenameWildcard(LPCTSTR szSource, LPCTSTR szDest, LPTSTR 
 	}
 
 	// Split source and dest into file and extension
-	_tsplitpath( szSource, szDestDrive, szDestDir, szSrcFile, szSrcExt );
-	_tsplitpath( szDest, szDestDrive, szDestDir, szDestFile, szDestExt );
+	_tsplitpath( szSource, NULL, NULL, szSrcFile, szSrcExt );
+	_tsplitpath( szDest, NULL, NULL, szDestFile, szDestExt );
 
 	// Source and Dest ext will either be ".nnnn" or "" or ".*", remove the period
 	if (szSrcExt[0] == '.')
@@ -1750,35 +1658,28 @@ void Line::Util_ExpandFilenameWildcard(LPCTSTR szSource, LPCTSTR szDest, LPTSTR 
 	if (szDestExt[0] == '.')
 		_tcscpy(szDestExt, &szDestExt[1]);
 
-	// Start of the destination with the drive and dir
-	_tcscpy(szExpandedDest, szDestDrive);
-	_tcscat(szExpandedDest, szDestDir);
-
-	// Replace first * in the destext with the srcext, remove any other *
-	Util_ExpandFilenameWildcardPart(szSrcExt, szDestExt, szExtTemp);
-
 	// Replace first * in the destfile with the srcfile, remove any other *
-	Util_ExpandFilenameWildcardPart(szSrcFile, szDestFile, szFileTemp);
-
-	// Concat the filename and extension if req
-	if (szExtTemp[0] != '\0')
+	Util_ExpandFilenameWildcardPart(szSrcFile, szDestFile, szExpandedDest);
+	
+	if (*szSrcExt || *szDestExt)
 	{
-		_tcscat(szFileTemp, _T("."));
-		_tcscat(szFileTemp, szExtTemp);	
-	}
-	else
-	{
-		// Dest extension was blank SOURCE MIGHT NOT HAVE BEEN!
-		if (szSrcExt[0] != '\0')
+		LPTSTR ext = _tcschr(szExpandedDest, '\0');
+		
+		if (!szDestExt[0])
 		{
-			_tcscat(szFileTemp, _T("."));
-			_tcscat(szFileTemp, szSrcExt);	
+			// Always include the source extension if destination extension was blank
+			// (for backward-compatibility, this is done even if a '.' was present)
+			szDestExt[0] = '*';
+			szDestExt[1] = '\0';
 		}
+
+		// Replace first * in the destext with the srcext, remove any other *
+		Util_ExpandFilenameWildcardPart(szSrcExt, szDestExt, ext + 1);
+
+		// If there's a non-blank extension, replace the filename's null terminator with .
+		if (ext[1])
+			*ext = '.';
 	}
-
-	// Now add the drive and directory bit back onto the dest
-	_tcscat(szExpandedDest, szFileTemp);
-
 }
 
 
@@ -1815,54 +1716,6 @@ void Line::Util_ExpandFilenameWildcardPart(LPCTSTR szSource, LPCTSTR szDest, LPT
 		// No wildcard, straight copy of destext
 		_tcscpy(szExpandedDest, szDest);
 	}
-}
-
-
-
-bool Line::Util_CreateDir(LPCTSTR szDirName) // Recursive directory creation function.
-{
-	DWORD	dwTemp;
-	LPTSTR	szTemp = NULL;
-	LPTSTR	psz_Loc = NULL;
-	size_t  length;
-
-	dwTemp = GetFileAttributes(szDirName);
-
-	if (dwTemp == 0xffffffff) 
-	{	// error getting attribute - what was the error?
-		switch (GetLastError())
-		{
-		case ERROR_PATH_NOT_FOUND:
-			// Create path
-			length = _tcslen(szDirName);
-			if (length > MAX_PATH) // Sanity check to reduce chance of stack overflow (since this function recursively calls self).
-				return false;
-			szTemp = (LPTSTR)talloca(length+1); // Faster, and also avoids need to delete it afterward.
-			_tcscpy(szTemp, szDirName);
-			psz_Loc = _tcsrchr(szTemp, '\\');	/* find last \ */
-			if (psz_Loc == NULL)				// not found
-				return false;
-			else 
-			{
-				*psz_Loc = '\0';				// remove \ and everything after
-				if (!Util_CreateDir(szTemp))
-					return false;
-				return CreateDirectory(szDirName, NULL) ? true : false;
-			}
-			// All paths above "return".
-		case ERROR_FILE_NOT_FOUND:
-			// Create directory
-			return CreateDirectory(szDirName, NULL);
-		// Otherwise, it's some unforeseen error, so fall through to the end, which reports failure.
-		} // switch()
-	}
-	else // The specified name already exists as a file or directory.
-		if (dwTemp & FILE_ATTRIBUTE_DIRECTORY) // Fixed for v1.0.36.01 (previously it used == vs &).
-			return true;							// Directory exists, yay!
-		//else it exists, but it's a file! Not allowed, so fall through and report failure.
-			
-	return false;
-
 }
 
 
@@ -1914,32 +1767,10 @@ void Line::Util_GetFullPathName(LPCTSTR szIn, LPTSTR szOut)
 
 
 
-bool Line::Util_IsDifferentVolumes(LPCTSTR szPath1, LPCTSTR szPath2)
-// Checks two paths to see if they are on the same volume.
+void Line::Util_GetFullPathName(LPCTSTR szIn, LPTSTR szOut, DWORD aBufSize)
 {
-	TCHAR			szP1Drive[_MAX_DRIVE+1];
-	TCHAR			szP2Drive[_MAX_DRIVE+1];
-
-	TCHAR			szDir[_MAX_DIR+1];
-	TCHAR			szFile[_MAX_FNAME+1];
-	TCHAR			szExt[_MAX_EXT+1];
-	
-	TCHAR			szP1[_MAX_PATH+1];	
-	TCHAR			szP2[_MAX_PATH+1];
-
-	// Get full pathnames
-	Util_GetFullPathName(szPath1, szP1);
-	Util_GetFullPathName(szPath2, szP2);
-
-	// Split the target into bits
-	_tsplitpath( szP1, szP1Drive, szDir, szFile, szExt );
-	_tsplitpath( szP2, szP2Drive, szDir, szFile, szExt );
-
-	if (szP1Drive[0] == '\0' || szP2Drive[0] == '\0')
-		// One or both paths is a UNC - assume different volumes
-		return true;
-	else
-		return _tcsicmp(szP1Drive, szP2Drive);
+	GetFullPathName(szIn, aBufSize, szOut, NULL);
+	strip_trailing_backslash(szOut);
 }
 
 
@@ -1959,33 +1790,22 @@ flags can be a combination of:
 	HANDLE				hToken; 
 	TOKEN_PRIVILEGES	tkp; 
 
-	// If we are running NT/2k/XP, make sure we have rights to shutdown
-	if (g_os.IsWinNT()) // NT/2k/XP/2003 and family
-	{
-		// Get a token for this process.
- 		if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken)) 
-			return false;						// Don't have the rights
+	// Get a token for this process.
+ 	if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken)) 
+		return false;						// Don't have the rights
  
-		// Get the LUID for the shutdown privilege.
- 		LookupPrivilegeValue(NULL, SE_SHUTDOWN_NAME, &tkp.Privileges[0].Luid); 
+	// Get the LUID for the shutdown privilege.
+ 	LookupPrivilegeValue(NULL, SE_SHUTDOWN_NAME, &tkp.Privileges[0].Luid); 
  
-		tkp.PrivilegeCount = 1;  /* one privilege to set */
-		tkp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED; 
+	tkp.PrivilegeCount = 1;  /* one privilege to set */
+	tkp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED; 
  
-		// Get the shutdown privilege for this process.
- 		AdjustTokenPrivileges(hToken, FALSE, &tkp, 0, (PTOKEN_PRIVILEGES)NULL, 0); 
+	// Get the shutdown privilege for this process.
+ 	AdjustTokenPrivileges(hToken, FALSE, &tkp, 0, (PTOKEN_PRIVILEGES)NULL, 0); 
  
-		// Cannot test the return value of AdjustTokenPrivileges.
- 		if (GetLastError() != ERROR_SUCCESS) 
-			return false;						// Don't have the rights
-	}
-
-	// if we are forcing the issue, AND this is 95/98 terminate all windows first
-	if ( g_os.IsWin9x() && (nFlag & EWX_FORCE) ) 
-	{
-		nFlag ^= EWX_FORCE;	// remove this flag - not valid in 95
-		EnumWindows((WNDENUMPROC) Util_ShutdownHandler, 0);
-	}
+	// Cannot test the return value of AdjustTokenPrivileges.
+ 	if (GetLastError() != ERROR_SUCCESS) 
+		return false;						// Don't have the rights
 
 	// ExitWindows
 	if (ExitWindowsEx(nFlag, 0))
@@ -2097,30 +1917,19 @@ void DoIncrementalMouseMove(int aX1, int aY1, int aX2, int aY2, int aSpeed)
 // PROCESS ROUTINES
 ////////////////////
 
-DWORD ProcessExist9x2000(LPTSTR aProcess)
+DWORD ProcessExist(LPTSTR aProcess)
 {
-	// We must dynamically load the function or program will probably not launch at all on NT4.
-	typedef BOOL (WINAPI *PROCESSWALK)(HANDLE hSnapshot, LPPROCESSENTRY32 lppe);
-	typedef HANDLE (WINAPI *CREATESNAPSHOT)(DWORD dwFlags, DWORD th32ProcessID);
-
-	static CREATESNAPSHOT lpfnCreateToolhelp32Snapshot = (CREATESNAPSHOT)GetProcAddress(GetModuleHandle(_T("kernel32")), "CreateToolhelp32Snapshot");
-    static PROCESSWALK lpfnProcess32First = (PROCESSWALK)GetProcAddress(GetModuleHandle(_T("kernel32")), "Process32First" PROCESS_API_SUFFIX);
-    static PROCESSWALK lpfnProcess32Next = (PROCESSWALK)GetProcAddress(GetModuleHandle(_T("kernel32")), "Process32Next" PROCESS_API_SUFFIX);
-
-	if (!lpfnCreateToolhelp32Snapshot || !lpfnProcess32First || !lpfnProcess32Next)
-		return 0;
-
 	PROCESSENTRY32 proc;
     proc.dwSize = sizeof(proc);
-	HANDLE snapshot = lpfnCreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-	lpfnProcess32First(snapshot, &proc);
+	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	Process32First(snapshot, &proc);
 
 	// Determine the PID if aProcess is a pure, non-negative integer (any negative number
 	// is more likely to be the name of a process [with a leading dash], rather than the PID).
 	DWORD specified_pid = IsNumeric(aProcess) ? ATOU(aProcess) : 0;
 	TCHAR szDrive[_MAX_PATH+1], szDir[_MAX_PATH+1], szFile[_MAX_PATH+1], szExt[_MAX_PATH+1];
 
-	while (lpfnProcess32Next(snapshot, &proc))
+	while (Process32Next(snapshot, &proc))
 	{
 		if (specified_pid && specified_pid == proc.th32ProcessID)
 		{
@@ -2142,111 +1951,3 @@ DWORD ProcessExist9x2000(LPTSTR aProcess)
 	CloseHandle(snapshot);
 	return 0;  // Not found.
 }
-
-
-
-#ifdef CONFIG_WINNT4
-DWORD ProcessExistNT4(LPTSTR aProcess, LPTSTR aProcessName)
-{
-	if (aProcessName) // Init this output variable in case of early return.
-		*aProcessName = '\0';
-	//BOOL EnumProcesses(
-	//  DWORD *lpidProcess,  // array of process identifiers
-	//  DWORD cb,            // size of array
-	//  DWORD *cbNeeded      // number of bytes returned
-	//);
-	typedef BOOL (WINAPI *MyEnumProcesses)(DWORD*, DWORD, DWORD*);
-
-	//BOOL EnumProcessModules(
-	//  HANDLE hProcess,      // handle to process
-	//  HMODULE *lphModule,   // array of module handles
-	//  DWORD cb,             // size of array
-	//  LPDWORD lpcbNeeded    // number of bytes required
-	//);
-	typedef BOOL (WINAPI *MyEnumProcessModules)(HANDLE, HMODULE*, DWORD, LPDWORD);
-
-	//DWORD GetModuleBaseName(
-	//  HANDLE hProcess,    // handle to process
-	//  HMODULE hModule,    // handle to module
-	//  LPTSTR lpBaseName,  // base name buffer
-	//  DWORD nSize         // maximum characters to retrieve
-	//);
-	typedef DWORD (WINAPI *MyGetModuleBaseName)(HANDLE, HMODULE, LPTSTR, DWORD);
-
-	// We must dynamically load the function or program will probably not launch at all on Win95.
-    // Get a handle to the DLL module that contains EnumProcesses
-	HINSTANCE hinstLib = LoadLibrary(_T("psapi"));
-	if (!hinstLib)
-		return 0;
-
-	// Not static in this case, since address can change with each new load of the library:
-  	MyEnumProcesses lpfnEnumProcesses = (MyEnumProcesses)GetProcAddress(hinstLib, "EnumProcesses");
-	MyEnumProcessModules lpfnEnumProcessModules = (MyEnumProcessModules)GetProcAddress(hinstLib, "EnumProcessModules");
-	MyGetModuleBaseName lpfnGetModuleBaseName = (MyGetModuleBaseName)GetProcAddress(hinstLib, "GetModuleBaseName" WINAPI_SUFFIX);
-
-	DWORD idProcessArray[512];		// 512 processes max
-	DWORD cbNeeded;					// Bytes returned
-	if (!lpfnEnumProcesses || !lpfnEnumProcessModules || !lpfnGetModuleBaseName
-		|| !lpfnEnumProcesses(idProcessArray, sizeof(idProcessArray), &cbNeeded))
-	{
-		FreeLibrary(hinstLib);
-		return 0;
-	}
-
-	// Get the count of PIDs in the array
-	DWORD cProcesses = cbNeeded / sizeof(DWORD);
-	// Determine the PID if aProcess is a pure, non-negative integer (any negative number
-	// is more likely to be the name of a process [with a leading dash], rather than the PID).
-	DWORD specified_pid = IsNumeric(aProcess) ? ATOU(aProcess) : 0;
-	TCHAR szDrive[_MAX_PATH+1], szDir[_MAX_PATH+1], szFile[_MAX_PATH+1], szExt[_MAX_PATH+1];
-	TCHAR szProcessName[_MAX_PATH+1];
-	HMODULE hMod;
-	HANDLE hProcess;
-
-	for (UINT i = 0; i < cProcesses; ++i)
-	{
-		if (specified_pid && specified_pid == idProcessArray[i])
-		{
-			if (aProcessName) // Caller wanted process name also.
-			{
-				if (hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, idProcessArray[i])) // Assign
-				{
-					lpfnEnumProcessModules(hProcess, &hMod, sizeof(hMod), &cbNeeded);
-					if (lpfnGetModuleBaseName(hProcess, hMod, szProcessName, _MAX_PATH))
-					{
-						// For consistency in results, use _splitpath() both here and below rather than
-						// something that just checks for a rightmost backslash.
-						_tsplitpath(szProcessName, szDrive, szDir, aProcessName, szExt);
-						_tcscat(aProcessName, szExt);
-					}
-					CloseHandle(hProcess);
-				}
-			}
-			FreeLibrary(hinstLib);
-			return specified_pid;
-		}
-		// Otherwise, check for matching name even if aProcess is purely numeric (i.e. a number might
-		// also be a valid name?):
-		if (hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, idProcessArray[i])) // Assign
-		{
-			lpfnEnumProcessModules(hProcess, &hMod, sizeof(hMod), &cbNeeded);
-			if (lpfnGetModuleBaseName(hProcess, hMod, szProcessName, _MAX_PATH))
-			{
-				_tsplitpath(szProcessName, szDrive, szDir, szFile, szExt);
-				_tcscat(szFile, szExt);
-				if (!_tcsicmp(szFile, aProcess)) // lstrcmpi() is not used: 1) avoids breaking existing scripts; 2) provides consistent behavior across multiple locales; 3) performance.
-				{
-					if (aProcessName) // Caller wanted process name also.
-						_tcscpy(aProcessName, szProcessName);
-					CloseHandle(hProcess);
-					FreeLibrary(hinstLib);
-					return idProcessArray[i];  // The PID.
-				}
-			}
-			CloseHandle(hProcess);
-		}
-	}
-	FreeLibrary(hinstLib);
-	return 0;  // Not found.
-}
-#endif

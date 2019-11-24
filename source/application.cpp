@@ -261,6 +261,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 	int gui_event_arg_count;
 	POINT gui_point;
 	HDROP hdrop_to_free;
+	input_type *input_hook;
 	LRESULT msg_reply;
 	BOOL peek_result;
 	MSG msg;
@@ -686,6 +687,9 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 		case AHK_GUI_ACTION:   // The user pressed a button on a GUI window, or some other actionable event. Listed before the below for performance.
 		case WM_HOTKEY:        // As a result of this app having previously called RegisterHotkey(), or from TriggerJoyHotkeys().
 		case AHK_USER_MENU:    // The user selected a custom menu item.
+		case AHK_INPUT_END:    // Input ended (sent by the hook thread).
+		case AHK_INPUT_KEYDOWN:
+		case AHK_INPUT_CHAR:
 		{
 			hdrop_to_free = NULL;  // Set default for this message's processing (simplifies code).
 			switch(msg.message)
@@ -843,6 +847,23 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 				priority = 0;  // Always use default for now.
 				break;
 
+			case AHK_INPUT_END:
+				input_hook = InputRelease((input_type *)msg.wParam); // The function will verify that it is a valid input_type pointer.
+				if (!input_hook)
+					continue; // No OnEnd callback/invalid message.
+				priority = 0;
+				break;
+
+			case AHK_INPUT_KEYDOWN:
+			case AHK_INPUT_CHAR:
+				for (input_hook = g_input; input_hook && input_hook != (input_type *)msg.wParam; input_hook = input_hook->Prev);
+				if (!input_hook)
+					continue; // Invalid message or Input already ended (and therefore may have been deleted).
+				if (!(msg.message == AHK_INPUT_KEYDOWN ? input_hook->ScriptObject->onKeyDown : input_hook->ScriptObject->onChar))
+					continue;
+				priority = 0;
+				break;
+
 			default: // hotkey
 				hk_id = msg.wParam & HOTKEY_ID_MASK;
 				if (hk_id >= Hotkey::sHotkeyCount) // Invalid hotkey ID.
@@ -860,9 +881,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 				// An incoming WM_HOTKEY can be subject to #IfWin at this stage under the following conditions:
 				// 1) Joystick hotkey, because it relies on us to do the check so that the check is done only
 				//    once rather than twice.
-				// 2) Win9x's support for #IfWin, which never uses the hook but instead simply does nothing if
-				//    none of the hotkey's criteria is satisfied.
-				// 3) #IfWin keybd hotkeys that were made non-hook because they have a non-suspended, global variant.
+				// 2) #IfWin keybd hotkeys that were made non-hook because they have a non-suspended, global variant.
 				//
 				// If message is AHK_HOOK_HOTKEY:
 				// Rather than having the hook pass the qualified variant to us, it seems preferable
@@ -955,6 +974,8 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 					DragFinish(hdrop_to_free); // Since the drop-thread will not be launched, free the memory.
 					pgui->mHdrop = NULL; // Indicate that this GUI window is ready for another drop.
 				}
+				if (msg.message == AHK_INPUT_END)
+					input_hook->ScriptObject->Release();
 				continue;
 				// If the above "continued", it seems best not to re-queue/buffer the key since
 				// it might be a while before the number of threads drops back below the limit.
@@ -968,6 +989,8 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 					DragFinish(hdrop_to_free); // Since the drop-thread will not be launched, free the memory.
 					pgui->mHdrop = NULL; // Indicate that this GUI window is ready for another drop.
 				}
+				if (msg.message == AHK_INPUT_END)
+					input_hook->ScriptObject->Release();
 				continue;
 			}
 
@@ -999,6 +1022,9 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 			{
 			case AHK_GUI_ACTION: // Listed first for performance.
 			case AHK_CLIPBOARD_CHANGE:
+			case AHK_INPUT_END:
+			case AHK_INPUT_KEYDOWN:
+			case AHK_INPUT_CHAR:
 			case AHK_USER_MENU: // user-defined menu item
 				break; // Do nothing at this stage.
 			default: // hotkey or hotstring
@@ -1298,6 +1324,38 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 				break;
 			}
 
+			case AHK_INPUT_END:
+			{
+				ExprTokenType param = input_hook->ScriptObject;
+				LabelPtr(input_hook->ScriptObject->onEnd)->ExecuteInNewThread(_T("InputHook"), &param, 1);
+				input_hook->ScriptObject->Release();
+				break;
+			}
+			
+			case AHK_INPUT_KEYDOWN:
+			{
+				ExprTokenType params[] =
+				{
+					input_hook->ScriptObject,
+					__int64(vk_type(msg.lParam)),
+					__int64(sc_type(msg.lParam >> 16)),
+				};
+				LabelPtr(input_hook->ScriptObject->onKeyDown)->ExecuteInNewThread(_T("InputHook"), params, _countof(params));
+				break;
+			}
+
+			case AHK_INPUT_CHAR:
+			{
+				TCHAR chars[] = { TCHAR(msg.lParam), TCHAR(msg.lParam >> 16), '\0' };
+				ExprTokenType params[] =
+				{
+					input_hook->ScriptObject,
+					chars
+				};
+				LabelPtr(input_hook->ScriptObject->onChar)->ExecuteInNewThread(_T("InputHook"), params, _countof(params));
+				break;
+			}
+
 			default: // hotkey
 				if (IS_WHEEL_VK(hk->mVK)) // If this is true then also: msg.message==AHK_HOOK_HOTKEY
 					g.EventInfo = (DWORD)msg.lParam; // v1.0.43.03: Override the thread default of 0 with the number of notches by which the wheel was turned.
@@ -1414,10 +1472,11 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 			// The app normally terminates before WM_QUIT is ever seen here because of the way
 			// WM_CLOSE is handled by MainWindowProc().  However, this is kept here in case anything
 			// external ever explicitly posts a WM_QUIT to our thread's queue:
-			g_script->ExitApp(EXIT_WM_QUIT);
+			g_script->ExitApp(EXIT_CLOSE);
 			continue; // Since ExitApp() won't necessarily exit.
 		} // switch()
 break_out_of_main_switch:
+
 		// If a "continue" statement wasn't encountered somewhere in the switch(), we want to
 		// process this message in a more generic way.
 		// This little part is from the Miranda source code.  But it doesn't seem
@@ -1654,22 +1713,11 @@ bool CheckScriptTimers()
 		// Resolve the next timer only now, in case other timers were created or deleted while
 		// this timer was executing.  Must be done before the timer is potentially deleted below.
 		next_timer = timer.mNextTimer;
-		// If this is a run-once timer for a live reference-counted object (i.e. not a Label or
-		// Func, which can never be deleted), delete the timer.  Otherwise, there's a high risk
-		// that the script will leak objects, because if the object is only referenced by the
-		// timer list, there's no way to re-enable it.  By contrast, a Label or Func can be
-		// referenced by name, and a repeating timer can self-reference during execution.
-		// It is tempting to do this only when mRefCount == 1 (for backward-compatibility),
-		// but that would only work if the script releases its last reference to the object
-		// *before* the timer expires.
-		// mEnabled is checked in case the timer re-enabled itself.
-		if (timer.mRunOnlyOnce && !timer.mEnabled && timer.mCallback.IsLiveObject())
-			timer.mCallback = NULL;
-		// If the script attempted to delete this timer while it was executing, mCallback was set
-		// to NULL and it is now time to delete the timer.  mExistingThreads == 0 is implied
-		// at this point since timers are only allowed one thread.
-		if (timer.mCallback == NULL)
-			g_script->DeleteTimer(NULL);
+		// Currently timers are disabled only when they can't be deleted (because they're
+		// running).  So now that this one has finished, check if it needs to be deleted.
+		// mExistingThreads==0 is implied at this point since timers are only allowed one thread.
+		if (!timer.mEnabled)
+			g_script->DeleteTimer(timer.mCallback->ToObject());
 	} // for() each timer.
 
 	if (at_least_one_timer_launched) // Since at least one subroutine was run above, restore various values for our caller.
@@ -1679,6 +1727,7 @@ bool CheckScriptTimers()
 	}
 	return false;
 }
+
 
 
 void PollJoysticks()
@@ -1724,6 +1773,7 @@ void PollJoysticks()
 		Hotkey::TriggerJoyHotkeys(i, buttons_newly_down);
 	}
 }
+
 
 
 inline bool MsgMonitor(MsgMonitorInstance &aInstance, HWND aWnd, UINT aMsg, WPARAM awParam, LPARAM alParam, MSG *apMsg, LRESULT &aMsgReply);
@@ -1828,9 +1878,9 @@ bool MsgMonitor(MsgMonitorInstance &aInstance, HWND aWnd, UINT aMsg, WPARAM awPa
 	};
 
 	ResultType result;
-	INT_PTR retval;
+	__int64 retval;
 
-	result = CallMethod(func, func, _T("call"), param, _countof(param), &retval);
+	result = CallMethod(func, func, nullptr, param, _countof(param), &retval);
 
 	bool block_further_processing = (result == EARLY_RETURN);
 	if (block_further_processing)
@@ -1839,6 +1889,7 @@ bool MsgMonitor(MsgMonitorInstance &aInstance, HWND aWnd, UINT aMsg, WPARAM awPa
 	// to ignore aMsgReply.
 
 	DEBUGGER_STACK_POP()
+
 	ResumeUnderlyingThread(ErrorLevel_saved);
 
 	// Check that the msg monitor still exists (it may have been deleted during the thread that just finished,
@@ -1908,6 +1959,7 @@ void InitNewThread(int aPriority, bool aSkipUninterruptible, bool aIncrementThre
 		g_script->UpdateTrayIcon(); // Must be done ONLY AFTER updating "g" (e.g, ++g) and/or g->IsPaused.
 	// For performance reasons, ErrorLevel isn't reset.  See similar line in WinMain() for other reasons.
 	//g_ErrorLevel->Assign(ERRORLEVEL_NONE);
+
 	if (g_nFileDialogs)
 		// Since there is a quasi-thread with an open file dialog underneath the one
 		// we're about to launch, set the current directory to be the one the user
@@ -1926,6 +1978,7 @@ void InitNewThread(int aPriority, bool aSkipUninterruptible, bool aIncrementThre
 		// does not seem to care that its changing of the directory as the user
 		// navigates is "undone" here:
 		SetCurrentDirectory(g_WorkingDir);
+
 	if (aSkipUninterruptible)
 		return;
 
@@ -1998,7 +2051,8 @@ void ResumeUnderlyingThread(VarBkp &aSavedErrorLevel)
 
 	// If this was the last running thread and the script has nothing keeping it open (hotkeys, Gui,
 	// message monitors, etc.) then it should terminate now:
-	g_script->ExitIfNotPersistent(EXIT_EXIT);
+	if (!g_OnExitIsRunning)
+		g_script->ExitIfNotPersistent(EXIT_EXIT);
 }
 
 
@@ -2081,14 +2135,14 @@ VOID CALLBACK MsgBoxTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime
 	// v1.0.33: The following was added to fix the fact that a MsgBox with only an OK button
 	// does not actually send back the code sent by EndDialog() above.  The HWND is checked
 	// in case "g" is no longer the original thread due to another thread having interrupted it.
-	// Consequently, MsgBox's with an OK button won't be 100% reliable with the timeout feature
-	// if an interrupting thread is running at the time the box times out.  This is in the help
-	// file as a known limitation.  Perhaps in the future it can be solved by setting some new
-	// member of "g" that tells ResumeUnderlyingThread() to keep passing back "hWnd" as threads
-	// are resumed until the thread whose g->DialogHWND matches that hwnd.  That thread's
-	// g->MsgBoxTimedOut could then be set to true just before the thread is resumed.
-	if (g->DialogHWND == hWnd) // Regardless of whether IsWindow() is true.  See also: above comment.
-		g->MsgBoxTimedOut = true;
+	// v1.1.30.01: The loop was added so that the timeout can be detected even if the thread
+	// which owns the dialog was interrupted.
+	for (auto *dialog_g = g; dialog_g >= g_array; --dialog_g)
+		if (dialog_g->DialogHWND == hWnd) // Regardless of whether IsWindow() is true.
+		{
+			dialog_g->MsgBoxTimedOut = true;
+			break;
+		}
 }
 
 
@@ -2133,8 +2187,22 @@ VOID CALLBACK AutoExecSectionTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWO
 
 VOID CALLBACK InputTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime)
 {
-	KILL_INPUT_TIMER
-	g_input.status = INPUT_TIMED_OUT;
+	int new_timer_period = 0;
+	for (auto *input = g_input; input; input = input->Prev)
+	{
+		if (input->Timeout && input->InProgress())
+		{
+			int time_left = int(input->TimeoutAt - dwTime);
+			if (time_left <= 0)
+				input->EndByTimeout();
+			else if (time_left < new_timer_period || !new_timer_period)
+				new_timer_period = time_left;
+		}
+	}
+	if (new_timer_period != 0)
+		SET_INPUT_TIMER(new_timer_period, dwTime + new_timer_period)
+	else
+		KILL_INPUT_TIMER
 }
 
 

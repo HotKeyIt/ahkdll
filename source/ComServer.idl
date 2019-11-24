@@ -19,8 +19,8 @@ library AutoHotkey
 	]
 	interface ICOMServer : IDispatch
 	{
-		[id(1)] HRESULT ahktextdll([in,optional] VARIANT script,[in,optional] VARIANT params,[in,optional] VARIANT title, [out, retval] UINT_PTR* hThread);
-		[id(2)] HRESULT ahkdll([in,optional] VARIANT filepath,[in,optional] VARIANT params,[in,optional] VARIANT title, [out, retval] UINT_PTR* hThread);
+		[id(1)] HRESULT ahktextdll([in,optional] VARIANT script,[in,optional] VARIANT params,[in,optional] VARIANT title, [out, retval] HANDLE* hThread);
+		[id(2)] HRESULT ahkdll([in,optional] VARIANT filepath,[in,optional] VARIANT params,[in,optional] VARIANT title, [out, retval] HANDLE* hThread);
 		[id(3)] HRESULT ahkPause([in,optional] VARIANT aChangeTo,[out, retval] int* paused);
 		[id(4)] HRESULT ahkReady([out, retval] int* ready);
 		[id(5)] HRESULT ahkFindLabel([in] VARIANT aLabelName,[out, retval] UINT_PTR *pLabel);

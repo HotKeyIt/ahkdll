@@ -64,7 +64,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 	// Structure object is saved in fixed order
 	// insert_pos is simply increased each time
 	// for loop will enumerate items in same order as it was created
-	IndexType insert_pos = 0;
+	index_t insert_pos = 0;
 
 	// the new structure object
 	Struct *obj = new Struct();
@@ -318,13 +318,13 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 		else // type was not found, check for user defined type in variables
 		{
 			Var1.var = NULL;			// init to not found
-			Func *bkpfunc = NULL;
+			UserFunc *bkpfunc = NULL;
 			// check if we have a local/static declaration and resolve to function
 			// For example Struct("*MyFunc(mystruct) mystr")
 			if (_tcschr(defbuf,'('))
 			{
 				bkpfunc = g->CurrentFunc; // don't bother checking, just backup and restore later
-				g->CurrentFunc = g_script->FindFunc(defbuf + 1,_tcscspn(defbuf,_T("(")) - 1);
+				g->CurrentFunc = (UserFunc *)g_script->FindFunc(defbuf + 1,_tcscspn(defbuf,_T("(")) - 1);
 				if (g->CurrentFunc) // break if not found to identify error
 				{
 					Var1.var = g_script->FindVar(defbuf + _tcscspn(defbuf,_T("(")) + 1,_tcslen(defbuf) - _tcscspn(defbuf,_T("(")) - 3,NULL,FINDVAR_LOCAL,NULL);
@@ -519,89 +519,41 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 
 void Struct::ObjectToStruct(IObject *objfrom)
 {
-	ResultToken Result, this_token,enum_token,param_tokens[3];
-	ExprTokenType *params[] = { param_tokens, param_tokens+1, param_tokens+2 };
-	TCHAR defbuf[MAX_PATH],buf[MAX_PATH];
+	ResultToken result_token, this_token, aKey, aValue;
+	ExprTokenType *params[] = { &aKey, &aValue };
+	Var vkey, vval;
 	int param_count = 3;
 
-	// Set up enum_token the way Invoke expects:
-	enum_token.symbol = SYM_STRING;
-	enum_token.marker = _T("");
-	enum_token.mem_to_free = NULL;
-	enum_token.buf = defbuf;
 
-	// Prepare to call object._NewEnum():
-	param_tokens[0].symbol = SYM_STRING;
-	param_tokens[0].marker = _T("_NewEnum");
-		
-	objfrom->Invoke(enum_token, Result, IT_CALL, params, 1);
-
-	if (enum_token.mem_to_free)
-		// Invoke returned memory for us to free.
-		free(enum_token.mem_to_free);
-
-	// Check if object returned an enumerator, otherwise return
-	if (enum_token.symbol != SYM_OBJECT)
+	IObject *enumerator;
+	ResultType result = GetEnumerator(enumerator, objfrom, 2, false);
+	if (result != OK)
 		return;
-
-	// create variables to use in for loop / for enumeration
-	// these will be deleted afterwards
-
-	Var *var1 = (Var*)alloca(sizeof(Var));
-	Var *var2 = (Var*)alloca(sizeof(Var));
-	var1->mType = var2->mType = VAR_NORMAL;
-	var1->mAttrib = var2->mAttrib = 0;
-	var1->mByteCapacity = var2->mByteCapacity = 0;
-	var1->mHowAllocated = var2->mHowAllocated = ALLOC_MALLOC;
-
-	// Prepare parameters for the loop below: enum.Next(var1 [, var2])
-	param_tokens[0].marker = _T("Next");
-	param_tokens[1].symbol = SYM_VAR;
-	param_tokens[1].var = var1;
-	param_tokens[1].mem_to_free = 0;
-	param_tokens[2].symbol = SYM_VAR;
-	param_tokens[2].var = var2;
-	param_tokens[2].mem_to_free = 0;
-
-	ResultToken result_token;
-	IObject &enumerator = *enum_token.object; // Might perform better as a reference?
 
 	this_token.symbol = SYM_OBJECT;
 	this_token.object = this;
-		
+	// Prepare parameters for the loop below
+	aKey.symbol = SYM_VAR;
+	aKey.var = &vkey;
+	aKey.var->mCharContents = _T("");
+	aKey.mem_to_free = 0;
+	aValue.symbol = SYM_VAR;
+	aValue.var = &vval;
+	aValue.var->mCharContents = _T("");
+	aValue.mem_to_free = 0;
+
 	for (;;)
 	{
-		// Set up result_token the way Invoke expects; each Invoke() will change some or all of these:
-		result_token.symbol = SYM_STRING;
-		result_token.marker = _T("");
-		result_token.mem_to_free = NULL;
-		result_token.buf = buf;
-
 		// Call enumerator.Next(var1, var2)
-		enumerator.Invoke(result_token,enum_token,IT_CALL, params, param_count);
-
-		bool next_returned_true = TokenToBOOL(result_token);
-		if (!next_returned_true)
+		result = CallEnumerator(enumerator, &vkey, &vval, false);
+		if (result == CONDITION_FALSE)
 			break;
-
-		this->Invoke(Result,this_token,IT_SET,params+1,2);
-		
-		// release object if it was assigned prevoiously when calling enum.Next
-		if (var1->IsObject())
-			var1->ReleaseObject();
-		if (var2->IsObject())
-			var2->ReleaseObject();
-
-		// Free any memory or object which may have been returned by Invoke:
-		if (result_token.mem_to_free)
-			free(result_token.mem_to_free);
-		if (result_token.symbol == SYM_OBJECT)
-			result_token.object->Release();
+		this->Invoke(result_token, IT_SET, nullptr, this_token, params, 2);
 	}
 	// release enumerator and free vars
-	enumerator.Release();
-	var1->Free();
-	var2->Free();
+	enumerator->Release();
+	vkey.Free();
+	vval.Free();
 }
 
 //
@@ -623,7 +575,7 @@ Struct::~Struct()
 	{
 		if (mFieldCount)
 		{
-			IndexType i = mFieldCount - 1;
+			int i = mFieldCount - 1;
 			// Free keys
 			for ( ; i >= 0 ; --i)
 			{
@@ -642,7 +594,7 @@ Struct::~Struct()
 // Struct::SetPointer - used to set pointer for a field or array item
 //
 
-UINT_PTR Struct::SetPointer(UINT_PTR aPointer,int aArrayItem)
+UINT_PTR Struct::SetPointer(UINT_PTR aPointer,__int64 aArrayItem)
 {
 	if (mIsPointer)
 		*((UINT_PTR*)((UINT_PTR)mStructMem + (aArrayItem - 1)*sizeof(UINT_PTR))) = aPointer;
@@ -712,7 +664,7 @@ Struct *Struct::Clone(bool aIsDynamic)
 
 	FieldType *fields = obj.mFields; // Newly allocated by above.
 	int failure_count = 0; // See comment below.
-	IndexType i;
+	index_t i;
 
 	obj.mFieldCount = mFieldCount;
 	
@@ -759,16 +711,24 @@ Struct *Struct::Clone(bool aIsDynamic)
 // Struct::Invoke - Called by BIF_ObjInvoke when script explicitly interacts with an object.
 //
 
-ResultType STDMETHODCALLTYPE Struct::Invoke(
-                                            ResultToken &aResultToken,
-                                            ExprTokenType &aThisToken,
-                                            int aFlags,
-                                            ExprTokenType *aParam[],
-                                            int aParamCount
-                                            )
+ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 // L40: Revised base mechanism for flexibility and to simplify some aspects.
 //		obj[] -> obj.base.__Get -> obj.base[] -> obj.base.__Get etc.
 {
+	// copy aName back to aParam (old method) since struct does not differentiate between property and item
+	if (aName)
+	{
+		ExprTokenType aNameParam;
+		ExprTokenType **aParams = (ExprTokenType **)alloca((aParamCount + 1) * sizeof(ExprTokenType));
+		for (int c = 0; c < aParamCount; ++c)
+			aParams[c+1] = aParam[c];
+			//memmove(aParams + sizeof(ExprTokenType), aParam, (aParamCount - 1) * sizeof(ExprTokenType));
+		aParams[0] = &aNameParam;
+		aNameParam.symbol = SYM_STRING;
+		aNameParam.marker = aName;
+		aParam = aParams;
+		aParamCount++;
+	}
 	int ptrsize = sizeof(UINT_PTR);
     FieldType *field = NULL; // init to NULL to use in IS_INVOKE_CALL
 
@@ -930,7 +890,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 					// MULTIPARAM
 					if (param_count_excluding_rvalue > 1)
 					{
-						objclone->Invoke(aResultToken,ResultToken,aFlags,aParam + 1,aParamCount - 1);
+						objclone->Invoke(aResultToken, aFlags, nullptr, ResultToken, aParam + 1, aParamCount - 1);
 						objclone->Release();
 						return OK;
 					}
@@ -966,7 +926,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 						}
 						if (param_count_excluding_rvalue > 1)
 						{
-							objclone->Invoke(aResultToken,ResultToken,aFlags,aParam + 1,aParamCount - 1);
+							objclone->Invoke(aResultToken,aFlags, nullptr, ResultToken, aParam + 1, aParamCount - 1);
 							objclone->Release();
 							return OK;
 						}
@@ -995,7 +955,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 				{
 					if (param_count_excluding_rvalue > 1)
 					{	// MULTIPARAM
-						objclone->Invoke(aResultToken,ResultToken,aFlags,aParam + 1,aParamCount - 1);
+						objclone->Invoke(aResultToken, aFlags, nullptr, ResultToken, aParam + 1, aParamCount - 1);
 						objclone->Release();
 						return OK;
 					}
@@ -1020,7 +980,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 				if (TokenToObject(Var2) && (objclone = ((Struct *)TokenToObject(Var2))->Clone(true)))
 				{	// variable is a structure object
 					objclone->mStructMem = target;
-					objclone->Invoke(aResultToken,ResultToken ,aFlags,aParam,aParamCount);
+					objclone->Invoke(aResultToken, aFlags, nullptr, ResultToken, aParam, aParamCount);
 					objclone->Release();
 					return OK;
 				}
@@ -1035,7 +995,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 						Struct* tempobj = objclone->Clone(true);
 						// resolve pointer
 						tempobj->mStructMem = mIsPointer ? (UINT_PTR*)*target : target;
-						tempobj->Invoke(aResultToken,aThisToken ,aFlags,aParam,aParamCount);
+						tempobj->Invoke(aResultToken, aFlags, nullptr, aThisToken, aParam, aParamCount);
 						tempobj->Release();
 						objclone->Release();
 						return OK;
@@ -1087,13 +1047,13 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 		if (*name == '_')
 			++name; // ++ to exclude '_' from further consideration.
 		++aParam; --aParamCount; // Exclude the method identifier.  A prior check ensures there was at least one param in this case.
-		if (!_tcsicmp(name, _T("NewEnum")))
+		if (!_tcsicmp(name, _T("_Enum")))
 		{
 			if (deletefield) // we created the field from a structure
 				delete field;
 			if (releaseobj)
 				objclone->Release();
-			return _NewEnum(aResultToken, aParam, aParamCount);
+			return __Enum(aResultToken, IF_NEWENUM, IT_CALL, aParam, aParamCount);
 		}
 		// if first function parameter is a field get it
 		if (!mTypeOnly && aParamCount && !TokenIsNumeric(*aParam[0]))
@@ -1435,7 +1395,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 				objclone->mStructMem = (UINT_PTR*)((UINT_PTR)target + (TokenToInt64(*aParam[1])-1)*(field->mIsPointer ? ptrsize : field->mSize));
 			*/
 			objclone->mStructMem = (UINT_PTR*)((UINT_PTR)target + field->mOffset);
-			objclone->Invoke(aResultToken,ResultToken,aFlags,aParam + 1,aParamCount - 1);
+			objclone->Invoke(aResultToken, aFlags, nullptr, ResultToken, aParam + 1, aParamCount - 1);
 			objclone->Release();
 			if (deletefield) // we created the field from a structure
 				delete field;
@@ -1474,7 +1434,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 			objclone = this->CloneField(field,true);
 			objclone->mIsPointer--;
 			objclone->mStructMem = (UINT_PTR*)*((UINT_PTR*)((UINT_PTR)target + field->mOffset));
-			objclone->Invoke(aResultToken,aThisToken,aFlags,aParam,aParamCount);
+			objclone->Invoke(aResultToken, aFlags, nullptr, aThisToken, aParam, aParamCount);
 			objclone->Release();
 			return OK;
 		}
@@ -1864,7 +1824,7 @@ ResultType STDMETHODCALLTYPE Struct::Invoke(
 
 Struct::FieldType *Struct::FindField(LPTSTR val)
 {
-	for (int i = 0;i < mFieldCount;i++)
+	for (UINT i = 0;i < mFieldCount;i++)
 	{
 		FieldType &field = mFields[i];
 		if (!_tcsicmp(field.key,val))
@@ -1873,7 +1833,7 @@ Struct::FieldType *Struct::FindField(LPTSTR val)
 	return NULL;
 }
 
-bool Struct::SetInternalCapacity(IndexType new_capacity)
+bool Struct::SetInternalCapacity(index_t new_capacity)
 // Expands mFields to the specified number if fields.
 // Caller *must* ensure new_capacity >= 1 && new_capacity >= mFieldCount.
 {
@@ -1885,24 +1845,16 @@ bool Struct::SetInternalCapacity(IndexType new_capacity)
 	return true;
 }
 
-ResultType Struct::_NewEnum(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount)
+ResultType Struct::__Enum(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
-	if (aParamCount == 0)
-	{
-		IObject *newenum;
-		if (newenum = new Enumerator(this))
-		{
-			aResultToken.SetValue(newenum);
-		}
-	}
-	return OK;
+	_o_return(new IndexEnumerator(this, static_cast<IndexEnumerator::Callback>(&Struct::GetEnumItem)));
 }
 
-int Struct::Enumerator::Next(Var *aKey, Var *aVal)
+ResultType Struct::GetEnumItem(UINT aIndex, Var *aKey, Var *aVal)
 {
-	if (++mOffset < mObject->mFieldCount)
+	if (aIndex < mFieldCount)
 	{
-		FieldType &field = mObject->mFields[mOffset];
+		FieldType &field = mFields[aIndex];
 		if (aKey)
 			aKey->Assign(field.key);
 		if (aVal)
@@ -1912,10 +1864,10 @@ int Struct::Enumerator::Next(Var *aKey, Var *aVal)
 			TCHAR buf[MAX_PATH];
 			aResultToken.buf = buf;
 			ExprTokenType aThisToken;
-			aThisToken.SetValue(mObject);
+			aThisToken.SetValue(this);
 			ExprTokenType *aVarToken = new ExprTokenType();
 			aVarToken->SetValue(field.key);
-			mObject->Invoke(aResultToken,aThisToken,0,&aVarToken,1);
+			Invoke(aResultToken, IT_GET, nullptr, aThisToken, &aVarToken, 1);
 			switch (aResultToken.symbol)
 			{
 				case SYM_STRING:	aVal->AssignString(aResultToken.marker);	break;
@@ -1925,22 +1877,22 @@ int Struct::Enumerator::Next(Var *aKey, Var *aVal)
 			}
 			delete aVarToken;
 		}
-		return true;
+		return CONDITION_TRUE;
 	}
-	else if (mOffset < mObject->mArraySize)
+	else if (aIndex < mArraySize)
 	{	// structure is an array
 		if (aKey)
-			aKey->Assign(mOffset + 1); // mOffset starts at 1
+			aKey->Assign((VarSizeType) aIndex + 1); // aIndex starts at 1
 		if (aVal)
 		{	// again we need to invoke structure to retrieve the value
 			ResultToken aResultToken;
 			TCHAR buf[MAX_PATH];
 			aResultToken.buf = buf;
 			ExprTokenType aThisToken;
-			aThisToken.SetValue(mObject);
+			aThisToken.SetValue(this);
 			ExprTokenType *aVarToken = new ExprTokenType();
-			aVarToken->SetValue(mOffset + 1); // mOffset starts at 1
-			mObject->Invoke(aResultToken,aThisToken,0,&aVarToken,1);
+			aVarToken->SetValue((UINT64) aIndex + 1); // mOffset starts at 1
+			Invoke(aResultToken, IT_GET, nullptr, aThisToken, &aVarToken, 1);
 			switch (aResultToken.symbol)
 			{
 				case SYM_STRING:	aVal->AssignString(aResultToken.marker);	break;
@@ -1950,13 +1902,13 @@ int Struct::Enumerator::Next(Var *aKey, Var *aVal)
 			}
 			delete aVarToken;
 		}
-		return true;
+		return CONDITION_FALSE;
 	}
-	return false;
+	return CONDITION_FALSE;
 }
 
 
-Struct::FieldType *Struct::Insert(LPTSTR key, IndexType &at,USHORT aIspointer,int aOffset,int aArrsize,Var *variableref,int aFieldsize,bool aIsinteger,bool aIsunsigned,USHORT aEncoding, BYTE aBitSize,BYTE aBitField )
+Struct::FieldType *Struct::Insert(LPTSTR key, index_t &at,USHORT aIspointer,int aOffset,int aArrsize,Var *variableref,int aFieldsize,bool aIsinteger,bool aIsunsigned,USHORT aEncoding, BYTE aBitSize,BYTE aBitField )
 // Inserts a single field with the given key at the given offset.
 // Caller must ensure 'at' is the correct offset for this key.
 {

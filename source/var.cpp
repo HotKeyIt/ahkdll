@@ -941,19 +941,29 @@ void Var::SetLengthFromContents()
 {
 	// Relies on the fact that aliases can't point to other aliases (enforced by UpdateAlias()).
 	Var &var = *(mType == VAR_ALIAS ? mAliasFor : this);
-	VarSizeType capacity = var.Capacity();
-	var.UpdateContents(); // Ensure mContents and mLength are up-to-date.
-	if (capacity > 0)
+	if (var.mAttrib & VAR_ATTRIB_CONTENTS_OUT_OF_DATE)
 	{
- 		var.mCharContents[capacity - 1] = '\0';  // Caller wants us to ensure it's terminated, to avoid crashing strlen() below.
-		var.mByteLength = ((VarSizeType)_tcslen(var.mCharContents)) * sizeof(TCHAR);
+		var.UpdateContents(); // Set contents and length based on numeric value.
+		return;
 	}
-	//else it has no capacity, so do nothing (it could also be a reserved/built-in variable).
+	size_t length = 0;
+	LPTSTR contents = var.mCharContents;
+	size_t max_count = var.mByteCapacity / sizeof(TCHAR);
+	// Since the performance cost is low, ensure the string is terminated at the limit of its
+	// capacity (helps prevent crashes if DLL function didn't do its job and terminate the string,
+	// or when a function is called that deliberately doesn't terminate the string, such as
+	// RtlMoveMemory()).
+	if (max_count == 0)
+		max_count = 1; // Contents() == Var::sEmptyString in this case, so check it hasn't been tampered with.
+	length = _tcsnlen(contents, max_count);
+	if (length == max_count)
+		g_script->CriticalError(ERR_STRING_NOT_TERMINATED, var.mName);
+	var.mByteLength = _TSIZE(length);
 }
 
 
 
-ResultType Var::BackupFunctionVars(Func &aFunc, VarBkp *&aVarBackup, int &aVarBackupCount)
+ResultType Var::BackupFunctionVars(UserFunc &aFunc, VarBkp *&aVarBackup, int &aVarBackupCount)
 // All parameters except the first are output parameters that are set for our caller (though caller
 // is responsible for having initialized aVarBackup to NULL).
 // If there is nothing to backup, only the aVarBackupCount is changed (to zero).
@@ -1040,7 +1050,7 @@ void Var::Restore(VarBkp &aVarBkp)
 
 
 
-void Var::FreeAndRestoreFunctionVars(Func &aFunc, VarBkp *&aVarBackup, int &aVarBackupCount)
+void Var::FreeAndRestoreFunctionVars(UserFunc &aFunc, VarBkp *&aVarBackup, int &aVarBackupCount)
 {
 	int i;
 	for (i = 0; i < aFunc.mVarCount; ++i)
@@ -1128,12 +1138,44 @@ ResultType Var::ValidateName(LPCTSTR aName, int aDisplayError)
 			break;
 	// Reserve operator keywords.  This makes ACT_ASSIGNEXPR more consistent with ACT_EXPRESSION,
 	// such as for "and := 1" vs. "(and := 1)", though a different error message is given.
-	if (i < ACT_FIRST_COMMAND || Script::ConvertWordOperator(aName, _tcslen(aName)))
+	if (i < ACT_FIRST_COMMAND || Script::ConvertWordOperator(aName, _tcslen(aName))
+		|| !_tcsicmp(aName, _T("Local")) || !_tcsicmp(aName, _T("Global")) || !_tcsicmp(aName, _T("Static")))
 	{
 		return DisplayNameError(_T("The following reserved word must not be used as a %s name:\n\"%-1.300s\""), aDisplayError, aName);
 	}
 	// Otherwise:
 	return OK;
+}
+
+
+
+ResultType Var::AssignStringFromCodePage(LPCSTR aBuf, int aLength, UINT aCodePage)
+{
+#ifndef UNICODE
+	// Not done since some callers have a more effective optimization in place:
+	//if (aCodePage == CP_ACP || aCodePage == GetACP())
+		// Avoid unnecessary conversion (ACP -> UTF16 -> ACP).
+		//return AssignString(aBuf, aLength, true, false);
+	// Convert from specified codepage to UTF-16,
+	CStringWCharFromChar wide_buf(aBuf, aLength, aCodePage);
+	// then back to the active codepage:
+	return AssignStringToCodePage(wide_buf, wide_buf.GetLength(), CP_ACP);
+#else
+	int iLen = MultiByteToWideChar(aCodePage, 0, aBuf, aLength, NULL, 0);
+	if (iLen > 0) {
+		if (!AssignString(NULL, iLen, true))
+			return FAIL;
+		LPWSTR aContents = Contents(TRUE, TRUE);
+		iLen = MultiByteToWideChar(aCodePage, 0, aBuf, aLength, (LPWSTR) aContents, iLen);
+		aContents[iLen] = 0;
+		if (!iLen)
+			return FAIL;
+		SetCharLength(iLen);
+	}
+	else
+		Assign(); // Return value is ambiguous in this case: may be zero-length input or an error.  For simplicity, return OK.
+	return OK;
+#endif
 }
 
 

@@ -157,6 +157,7 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_ABORT_NO_SPACES _T("The current thread will exit.")
 #define ERR_ABORT _T("  ") ERR_ABORT_NO_SPACES
 #define WILL_EXIT _T("The program will exit.")
+#define UNSTABLE_WILL_EXIT _T("The program is now unstable and will exit.")
 #define OLD_STILL_IN_EFFECT _T("The script was not reloaded; the old version will remain in effect.")
 #define ERR_SCRIPT_NOT_FOUND _T("Script file not found.")
 #define ERR_ABORT_DELETE _T("__Delete will now return.")
@@ -165,11 +166,14 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_UNRECOGNIZED_ACTION _T("This line does not contain a recognized action.")
 #define ERR_NONEXISTENT_HOTKEY _T("Nonexistent hotkey.")
 #define ERR_NONEXISTENT_VARIANT _T("Nonexistent hotkey variant (IfWin).")
+#define ERR_INVALID_SINGLELINE_HOT _T("Not valid for a single-line hotkey/hotstring.")
 #define ERR_NONEXISTENT_FUNCTION _T("Call to nonexistent function.")
 #define ERR_UNRECOGNIZED_DIRECTIVE _T("Unknown directive.")
 #define ERR_EXE_CORRUPTED _T("EXE corrupted")
+#define ERR_INVALID_INDEX _T("Invalid index.")
 #define ERR_INVALID_VALUE _T("Invalid value.")
 #define ERR_PARAM_INVALID _T("Invalid parameter(s).")
+#define ERR_PARAM_COUNT_INVALID _T("Invalid number of parameters.")
 #define ERR_PARAM1_INVALID _T("Parameter #1 invalid.")
 #define ERR_PARAM2_INVALID _T("Parameter #2 invalid.")
 #define ERR_PARAM3_INVALID _T("Parameter #3 invalid.")
@@ -202,6 +206,7 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_BAD_AUTO_CONCAT _T("Missing space or operator before this.")
 #define ERR_MISSING_CLOSE_QUOTE _T("Missing close-quote") // No period after short phrases.
 #define ERR_MISSING_COMMA _T("Missing comma")             //
+#define ERR_MISSING_COLON _T("Missing \":\"")             //
 #define ERR_MISSING_PARAM_NAME _T("Missing parameter name.")
 #define ERR_PARAM_REQUIRED _T("Missing a required parameter.")
 #define ERR_TOO_MANY_PARAMS _T("Too many parameters passed to function.") // L31
@@ -214,6 +219,8 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_FINALLY_WITH_NO_PRECEDENT _T("FINALLY with no matching TRY or CATCH")
 #define ERR_BAD_JUMP_INSIDE_FINALLY _T("Jumps cannot exit a FINALLY block.")
 #define ERR_BAD_JUMP_OUT_OF_FUNCTION _T("Cannot jump from inside a function to outside.")
+#define ERR_UNEXPECTED_CASE _T("Case/Default must be enclosed by a Switch.")
+#define ERR_TOO_MANY_CASE_VALUES _T("Too many case values.")
 #define ERR_EXPECTED_BLOCK_OR_ACTION _T("Expected \"{\" or single-line action.")
 #define ERR_OUTOFMEM _T("Out of memory.")  // Used by RegEx too, so don't change it without also changing RegEx to keep the former string.
 #define ERR_EXPR_TOO_LONG _T("Expression too complex")
@@ -253,21 +260,21 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_NO_OBJECT _T("No object to invoke.")
 #define ERR_UNKNOWN_PROPERTY _T("Unknown property.")
 #define ERR_UNKNOWN_METHOD _T("Unknown method.")
+#define ERR_PROPERTY_READONLY _T("Property is read-only.")
+#define ERR_NO_KEY _T("Key not found.")
 #define ERR_NO_GUI _T("No default GUI.")
 #define ERR_NO_STATUSBAR _T("No StatusBar.")
 #define ERR_NO_LISTVIEW _T("No ListView.")
 #define ERR_NO_TREEVIEW _T("No TreeView.")
 #define ERR_PCRE_EXEC _T("PCRE execution error.")
-#define ERR_ARRAY_NOT_MULTIDIM _T("Array is not multi-dimensional.")
-#define ERR_NEW_NO_CLASS _T("Missing class object for \"new\" operator.")
 #define ERR_INVALID_ARG_TYPE _T("Invalid arg type.")
 #define ERR_INVALID_RETURN_TYPE _T("Invalid return type.")
 #define ERR_INVALID_LENGTH _T("Invalid Length.")
 #define ERR_INVALID_ENCODING _T("Invalid Encoding.")
-#define ERR_INVALID_HWND _T("Invalid HWND.")
 #define ERR_INVALID_USAGE _T("Invalid usage.")
+#define ERR_INVALID_BASE _T("Invalid base.")
 #define ERR_INTERNAL_CALL _T("An internal function call failed.")
-
+#define ERR_STRING_NOT_TERMINATED _T("String not null-terminated.")
 #define WARNING_USE_UNSET_VARIABLE _T("This variable has not been assigned a value.")
 #define WARNING_LOCAL_SAME_AS_GLOBAL _T("This local variable has the same name as a global variable.")
 #define WARNING_USE_ENV_VARIABLE _T("An environment variable is being accessed; see #NoEnv.")
@@ -276,20 +283,8 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 //----------------------------------------------------------------------------------
 
 void DoIncrementalMouseMove(int aX1, int aY1, int aX2, int aY2, int aSpeed);
-DWORD ProcessExist9x2000(LPTSTR aProcess);
-#ifdef CONFIG_WINNT4
-DWORD ProcessExistNT4(LPTSTR aProcess);
-#endif
 
-inline DWORD ProcessExist(LPTSTR aProcess)
-{
-	return 
-#ifdef CONFIG_WINNT4
-		g_os.IsWinNT4() ? ProcessExistNT4(aProcess) :
-#endif
-		ProcessExist9x2000(aProcess);
-}
-
+DWORD ProcessExist(LPTSTR aProcess);
 DWORD GetProcessName(DWORD aProcessID, LPTSTR aBuf, DWORD aBufSize, bool aGetNameOnly);
 
 bool Util_Shutdown(int nFlag);
@@ -386,6 +381,7 @@ enum DerefTypeType : BYTE
 	DT_STRING,		// Segment of text in a text arg (delimited by '%').
 	DT_QSTRING,		// Segment of text in a quoted string (delimited by '%').
 	DT_WORDOP,		// Word operator: and, or, not, new.
+	DT_DOTPERCENT,	// Dynamic member: .%name%
 	DT_FUNCREF,		// Reference to function (for fat arrow functions).
 	// DerefType::is_function() requires that these are last:
 	DT_FUNC,		// Function call.
@@ -440,7 +436,6 @@ struct ArgStruct
 
 // The following macro is used for definitions and declarations of built-in functions:
 #define BIF_DECL(name) void name(BIF_DECL_PARAMS)
-#define BIF_DECL_GUICTRL(name) void name(BIF_DECL_PARAMS, GuiControlType& control, BuiltInFunctionID aCalleeID)
 
 #define _f__oneline(act)		do { act } while (0)		// Make the macro safe to use like a function, under if(), etc.
 #define _f__ret(act)			_f__oneline( act; return; )	// BIFs have no return value.
@@ -468,14 +463,54 @@ struct ArgStruct
 #define _f_return_p(...)		_f__ret(_f_set_retval_p(__VA_ARGS__)) // Return a string which is already in persistent memory.
 #define _o_return_p(...)		_o__ret(_f_set_retval_p(__VA_ARGS__)) // Return a string which is already in persistent memory.
 #define _f_return_retval		return  // Return the value set by _f_set_retval().
+#define _o_return_retval		return OK
 #define _f_return_empty			_f_return_p(_T(""), 0)
 #define _o_return_empty			return OK  // Default return value for Invoke is "".
 #define _o_return_or_throw(p)	if (p) _o_return(p); else _o_throw(ERR_OUTOFMEM);
 #define _f_retval_buf			(aResultToken.buf)
 #define _f_retval_buf_size		MAX_NUMBER_SIZE
 #define _f_number_buf			_f_retval_buf  // An alias to show intended usage, and in case the buffer size is changed.
-#define _f_callee_id			(aResultToken.func->mID)
+#define _f_callee_id			(aResultToken.func->mFID)
 
+
+struct LoopFilesStruct : WIN32_FIND_DATA
+{
+	// Note that using fixed buffer sizes significantly reduces code size vs. using CString
+	// or probably any other method of dynamically allocating/expanding the buffers.  It also
+	// performs marginally better, but file system performance has a much bigger impact.
+	// Unicode builds allow for the maximum path size supported by Win32 as of 2018, although
+	// in some cases the script might need to use the \\?\ prefix to go beyond MAX_PATH.
+	// On Windows 10 v1607+, MAX_PATH limits can be lifted by opting-in to long path support
+	// via the application's manifest and LongPathsEnabled registry setting.  In any case,
+	// ANSI APIs are still limited to MAX_PATH, but MAX_PATH*2 allows for the longest path
+	// supported by FindFirstFile() concatenated with the longest filename it can return.
+	// This preserves backward-compatibility under the following set of conditions:
+	//  1) the absolute path and pattern fits within MAX_PATH;
+	//  2) the relative path and filename fits within MAX_PATH; and
+	//  3) the absolute path and filename exceeds MAX_PATH.
+	static const size_t BUF_SIZE = UorA(MAX_WIDE_PATH, MAX_PATH*2);
+	// file_path contains the full path of the directory being looped, with trailing slash.
+	// Temporarily also contains the pattern for FindFirstFile(), which is either a copy of
+	// 'pattern' or "*" for scanning sub-directories.
+	// During execution of the loop body, it contains the full path of the file.
+	TCHAR file_path[BUF_SIZE];
+	TCHAR pattern[MAX_PATH]; // Naked filename or pattern.  Allows max NTFS filename length plus a few chars.
+	TCHAR short_path[BUF_SIZE]; // Short name version of orig_dir.
+	TCHAR *file_path_suffix; // The dynamic part of file_path (used by A_LoopFilePath).
+	TCHAR *orig_dir; // Initial directory as specified by caller (used by A_LoopFilePath).
+	TCHAR *long_dir; // Full/long path of initial directory (used by A_LoopFileLongPath).
+	size_t file_path_length, pattern_length, short_path_length, orig_dir_length, long_dir_length
+		, dir_length; // Portion of file_path which is the directory, used by BIVs.
+
+	LoopFilesStruct() : orig_dir_length(0), long_dir(NULL) {}
+	~LoopFilesStruct()
+	{
+		if (orig_dir_length)
+			free(orig_dir);
+		//else: orig_dir is the constant _T("").
+		free(long_dir);
+	}
+};
 
 // Some of these lengths and such are based on the MSDN example at
 // http://msdn.microsoft.com/library/default.asp?url=/library/en-us/sysinfo/base/enumerating_registry_subkeys.asp:
@@ -521,15 +556,18 @@ class TextStream; // TextIO
 struct LoopReadFileStruct
 {
 	TextStream *mReadFile, *mWriteFile;
-	TCHAR mWriteFileName[MAX_PATH];
+	LPTSTR mWriteFileName;
 	#define READ_FILE_LINE_SIZE (64 * 1024)
 	TCHAR mCurrentLine[READ_FILE_LINE_SIZE];
 	LoopReadFileStruct(TextStream *aReadFile, LPTSTR aWriteFileName)
 		: mReadFile(aReadFile), mWriteFile(NULL) // mWriteFile is opened by FileAppend() only upon first use.
+		, mWriteFileName(aWriteFileName) // Caller has passed the result of _tcsdup() for us to take over.
 	{
-		// Use our own buffer because caller's is volatile due to possibly being in the deref buffer:
-		tcslcpy(mWriteFileName, aWriteFileName, _countof(mWriteFileName));
 		*mCurrentLine = '\0';
+	}
+	~LoopReadFileStruct()
+	{
+		free(mWriteFileName);
 	}
 };
 
@@ -578,6 +616,7 @@ enum JoyControls {JOYCTRL_INVALID, JOYCTRL_XPOS, JOYCTRL_YPOS, JOYCTRL_ZPOS
 // C++ function to tell it which function is being called.  Each group starts at ID 0 in case
 // it helps the compiler to reduce code size.
 enum BuiltInFunctionID {
+	FID_DllCall = 0, FID_ComCall,
 	FID_Func = 0, FID_FuncClose,
 	FID_LV_GetNext = 0, FID_LV_GetCount,
 	FID_LV_Add = 0, FID_LV_Insert, FID_LV_Modify,
@@ -600,14 +639,15 @@ enum BuiltInFunctionID {
 	FID_Min = 0, FID_Max,
 	FID_Random = 0, FID_RandomSeed,
 	FID_ObjAddRef = 0, FID_ObjRelease,
-	FID_ObjInsertAt = 0, FID_ObjDelete, FID_ObjRemoveAt, FID_ObjPush, FID_ObjPop, FID_ObjLength, FID_ObjCount, FID_ObjMaxIndex, FID_ObjMinIndex, FID_ObjHasKey, FID_ObjGetCapacity, FID_ObjSetCapacity, FID_ObjGetAddress, FID_ObjClone, FID_ObjNewEnum,
+	FID_ObjDeleteProp = 0, FID_ObjOwnPropCount, FID_ObjHasOwnProp, FID_ObjGetCapacity, FID_ObjSetCapacity, FID_ObjClone, FID_ObjOwnProps, FID_ObjOwnMethods,
 	FID_ObjGetBase = 0, FID_ObjSetBase,
 	FID_ObjRawGet = 0, FID_ObjRawSet,
-	FID_ComObjType = 0, FID_ComObjValue,
 	FID_WinGetID = 0, FID_WinGetIDLast, FID_WinGetPID, FID_WinGetProcessName, FID_WinGetProcessPath, FID_WinGetCount, FID_WinGetList, FID_WinGetMinMax, FID_WinGetControls, FID_WinGetControlsHwnd, FID_WinGetTransparent, FID_WinGetTransColor, FID_WinGetStyle, FID_WinGetExStyle,
 	FID_WinGetPos = 0, FID_WinGetClientPos,
 	FID_WinSetTransparent = 0, FID_WinSetTransColor, FID_WinSetAlwaysOnTop, FID_WinSetStyle, FID_WinSetExStyle, FID_WinSetEnabled, FID_WinSetRegion,
 	FID_WinMoveBottom = 0, FID_WinMoveTop,
+	FID_WinShow = 0, FID_WinHide, FID_WinMinimize, FID_WinMaximize, FID_WinRestore, FID_WinClose, FID_WinKill,
+	FID_WinActivate = 0, FID_WinActivateBottom,
 	FID_ProcessExist = 0, FID_ProcessClose, FID_ProcessWait, FID_ProcessWaitClose, 
 	FID_MonitorGet = 0, FID_MonitorGetWorkArea, FID_MonitorGetCount, FID_MonitorGetPrimary, FID_MonitorGetName, 
 	FID_OnExit = 0, FID_OnClipboardChange, FID_OnError,
@@ -656,6 +696,9 @@ private:
 		, __int64 aIterationLimit, bool aIsInfinite);
 	ResultType Line::PerformLoopFilePattern(ResultToken *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
 		, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, LPTSTR aFilePattern);
+	bool ParseLoopFilePattern(LPTSTR aFilePattern, LoopFilesStruct &lfs, ResultType &aResult);
+	ResultType PerformLoopFilePattern(ResultToken *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
+		, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, LoopFilesStruct &lfs);
 	ResultType PerformLoopReg(ResultToken *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
 		, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, HKEY aRootKeyType, HKEY aRootKey, LPTSTR aRegSubkey);
 	ResultType PerformLoopParse(ResultToken *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil);
@@ -675,40 +718,38 @@ private:
 	ResultType FileGetShortcut(LPTSTR aShortcutFile);
 	ResultType FileCreateShortcut(LPTSTR aTargetFile, LPTSTR aShortcutFile, LPTSTR aWorkingDir, LPTSTR aArgs
 		, LPTSTR aDescription, LPTSTR aIconFile, LPTSTR aHotkey, LPTSTR aIconNumber, LPTSTR aRunState);
-	ResultType FileCreateDir(LPTSTR aDirSpec);
+	static bool FileCreateDir(LPTSTR aDirSpec, LPTSTR aCanModifyDirSpec = NULL);
 	ResultType FileDelete(LPTSTR aFilePattern);
 	ResultType FileRecycle(LPTSTR aFilePattern);
 	ResultType FileRecycleEmpty(LPTSTR aDriveLetter);
 	ResultType FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag);
 
 	typedef BOOL (* FilePatternCallback)(LPTSTR aFilename, WIN32_FIND_DATA &aFile, void *aCallbackData);
-	int FilePatternApply(LPTSTR aFilePattern, FileLoopModeType aOperateOnFolders
-		, bool aDoRecurse, FilePatternCallback aCallback, void *aCallbackData
-		, bool aCalledRecursively = false);
+	struct FilePatternStruct
+	{
+		TCHAR path[T_MAX_PATH]; // Directory and naked filename or pattern.
+		TCHAR pattern[MAX_PATH]; // Naked filename or pattern.
+		size_t dir_length, pattern_length;
+		FilePatternCallback aCallback;
+		void *aCallbackData;
+		FileLoopModeType aOperateOnFolders;
+		bool aDoRecurse;
+		int failure_count;
+	};
+	ResultType FilePatternApply(LPTSTR aFilePattern, FileLoopModeType aOperateOnFolders
+		, bool aDoRecurse, FilePatternCallback aCallback, void *aCallbackData);
+	void FilePatternApply(FilePatternStruct &);
 
-	ResultType FileSetAttrib(LPTSTR aAttributes, LPTSTR aFilePattern, FileLoopModeType aOperateOnFolders
-		, bool aDoRecurse, bool aCalledRecursively = false);
+	ResultType FileSetAttrib(LPTSTR aAttributes, LPTSTR aFilePattern
+		, FileLoopModeType aOperateOnFolders, bool aDoRecurse);
 	ResultType FileSetTime(LPTSTR aYYYYMMDD, LPTSTR aFilePattern, TCHAR aWhichTime
-		, FileLoopModeType aOperateOnFolders, bool aDoRecurse, bool aCalledRecursively = false);
+		, FileLoopModeType aOperateOnFolders, bool aDoRecurse);
 
 	ResultType IniWrite(LPTSTR aValue, LPTSTR aFilespec, LPTSTR aSection, LPTSTR aKey);
 	ResultType IniDelete(LPTSTR aFilespec, LPTSTR aSection, LPTSTR aKey);
 
 	ResultType ToolTip(LPTSTR aText, LPTSTR aX, LPTSTR aY, LPTSTR aID);
 	ResultType TrayTip(LPTSTR aText, LPTSTR aTitle, LPTSTR aOptions);
-	#define SW_NONE -1
-	ResultType PerformShowWindow(ActionTypeType aActionType, LPTSTR aTitle = _T(""), LPTSTR aText = _T("")
-		, LPTSTR aExcludeTitle = _T(""), LPTSTR aExcludeText = _T(""));
-
-	ResultType WinMove(LPTSTR aTitle, LPTSTR aText, LPTSTR aX, LPTSTR aY
-		, LPTSTR aWidth = _T(""), LPTSTR aHeight = _T(""), LPTSTR aExcludeTitle = _T(""), LPTSTR aExcludeText = _T(""));
-	ResultType MenuSelect(LPTSTR aTitle, LPTSTR aText, LPTSTR aMenu1, LPTSTR aMenu2
-		, LPTSTR aMenu3, LPTSTR aMenu4, LPTSTR aMenu5, LPTSTR aMenu6, LPTSTR aMenu7
-		, LPTSTR aExcludeTitle, LPTSTR aExcludeText);
-	ResultType StatusBarWait(LPTSTR aTextToWaitFor, LPTSTR aSeconds, LPTSTR aPart, LPTSTR aTitle, LPTSTR aText
-		, LPTSTR aInterval, LPTSTR aExcludeTitle, LPTSTR aExcludeText);
-	ResultType WinSetTitle(LPTSTR aTitle, LPTSTR aText, LPTSTR aNewTitle
-		, LPTSTR aExcludeTitle = _T(""), LPTSTR aExcludeText = _T(""));
 	static ResultType SetToggleState(vk_type aVK, ToggleValueType &ForceLock, LPTSTR aToggleText);
 
 public:
@@ -911,16 +952,15 @@ public:
 	LPTSTR ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *aResultToken
 		, LPTSTR &aTarget, LPTSTR &aDerefBuf, size_t &aDerefBufSize, LPTSTR aArgDeref[], size_t aExtraSize
 		, Var **aArgVar = NULL);
+	ResultType ExpandSingleArg(int aArgIndex, ResultToken &aResultToken, LPTSTR &aDerefBuf, size_t &aDerefBufSize);
 	ResultType ExpressionToPostfix(ArgStruct &aArg);
 	ResultType EvaluateHotCriterionExpression(); // Called by HotkeyCriterion::Eval().
 
 	ResultType ValueIsType(ExprTokenType &aResultToken, ExprTokenType &aValue, LPTSTR aValueStr, ExprTokenType &aType, LPTSTR aTypeStr);
 
-	static bool FileIsFilteredOut(WIN32_FIND_DATA &aCurrentFile, FileLoopModeType aFileLoopMode
-		, LPTSTR aFilePath, size_t aFilePathLength);
+	static bool FileIsFilteredOut(LoopFilesStruct &aCurrentFile, FileLoopModeType aFileLoopMode);
 
 	Label *GetJumpTarget(bool aIsDereferenced);
-	Label *GetJumpTarget(bool aIsDereferenced, Func *aFunc);
 	Label *IsJumpValid(Label &aTargetLabel, bool aSilent = false);
 	BOOL IsOutsideAnyFunctionBody();
 	BOOL CheckValidFinallyJump(Line* jumpTarget);
@@ -1367,21 +1407,36 @@ public:
 		return VAR_TYPE_INVALID;
 	}
 
+	static bool IsValidFileCodePage(UINT aCP)
+	{
+		return aCP == 0 || aCP == 1200 || IsValidCodePage(aCP);
+	}
+
 	static UINT ConvertFileEncoding(LPTSTR aBuf)
 	// Returns the encoding with possible CP_AHKNOBOM flag, or (UINT)-1 if invalid.
 	{
-		if (!aBuf || !*aBuf)
+		if (!*aBuf)
 			// Active codepage, equivalent to specifying CP0.
 			return CP_ACP;
 		if (!_tcsicmp(aBuf, _T("UTF-8")))		return CP_UTF8;
 		if (!_tcsicmp(aBuf, _T("UTF-8-RAW")))	return CP_UTF8 | CP_AHKNOBOM;
 		if (!_tcsicmp(aBuf, _T("UTF-16")))		return 1200;
 		if (!_tcsicmp(aBuf, _T("UTF-16-RAW")))	return 1200 | CP_AHKNOBOM;
-		if (!_tcsnicmp(aBuf, _T("CP"), 2) && IsNumeric(aBuf + 2, false, false))
+		if (!_tcsnicmp(aBuf, _T("CP"), 2))
+			aBuf += 2;
+		if (IsNumeric(aBuf, false, false))
+		{
 			// CPnnn
-			return ATOU(aBuf + 2);
+			UINT cp = ATOU(aBuf);
+			// Catch invalid or (not installed) code pages early rather than
+			// failing conversion later on.
+			if (IsValidFileCodePage(cp))
+				return cp;
+		}
 		return -1;
 	}
+
+	static UINT ConvertFileEncoding(ExprTokenType &aToken);
 
 	static ResultType ValidateMouseCoords(LPTSTR aX, LPTSTR aY)
 	{
@@ -1428,17 +1483,15 @@ public:
 	void operator delete[](void *aPtr) { free(aPtr); }
 
 	// AutoIt3 functions:
-	static bool Util_CopyDir(LPCTSTR szInputSource, LPCTSTR szInputDest, bool bOverwrite);
-	static bool Util_MoveDir(LPCTSTR szInputSource, LPCTSTR szInputDest, int OverwriteMode);
+	static bool Util_CopyDir(LPCTSTR szInputSource, LPCTSTR szInputDest, int OverwriteMode, bool bMove);
 	static bool Util_RemoveDir(LPCTSTR szInputSource, bool bRecurse);
 	static int Util_CopyFile(LPCTSTR szInputSource, LPCTSTR szInputDest, bool bOverwrite, bool bMove, DWORD &aLastError);
 	static void Util_ExpandFilenameWildcard(LPCTSTR szSource, LPCTSTR szDest, LPTSTR szExpandedDest);
 	static void Util_ExpandFilenameWildcardPart(LPCTSTR szSource, LPCTSTR szDest, LPTSTR szExpandedDest);
-	static bool Util_CreateDir(LPCTSTR szDirName);
 	static bool Util_DoesFileExist(LPCTSTR szFilename);
 	static bool Util_IsDir(LPCTSTR szPath);
 	static void Util_GetFullPathName(LPCTSTR szIn, LPTSTR szOut);
-	static bool Util_IsDifferentVolumes(LPCTSTR szPath1, LPCTSTR szPath2);
+	static void Util_GetFullPathName(LPCTSTR szIn, LPTSTR szOut, DWORD aBufSize);
 };
 
 
@@ -1476,13 +1529,10 @@ public:
 	void operator delete[](void *aPtr) { free(aPtr); }
 
 	// IObject.
-	ResultType STDMETHODCALLTYPE Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	ResultType Invoke(IObject_Invoke_PARAMS_DECL);
 	ULONG STDMETHODCALLTYPE AddRef() { return 1; }
 	ULONG STDMETHODCALLTYPE Release() { return 1; }
 	IObject_Type_Impl("Label") // Currently never called since Label isn't accessible to script.
-#ifdef CONFIG_DEBUGGER
-	void DebugWriteProperty(IDebugProperties *, int aPage, int aPageSize, int aDepth) {}
-#endif
 };
 
 
@@ -1496,34 +1546,24 @@ class LabelPtr
 protected:
 	IObject *mObject;
 	
-	enum CallableType
-	{
-		Callable_Label,
-		Callable_Func,
-		Callable_Object
-	};
-	static Line *getJumpToLine(IObject *aObject);
-	static CallableType getType(IObject *aObject);
-
 public:
 	LabelPtr() : mObject(NULL) {}
 	LabelPtr(IObject *object) : mObject(object) {}
 	ResultType ExecuteInNewThread(TCHAR *aNewThreadDesc
-		, ExprTokenType *aParamValue = NULL, int aParamCount = 0, INT_PTR *aRetVal = NULL) const;
+		, ExprTokenType *aParamValue = NULL, int aParamCount = 0, __int64 *aRetVal = NULL) const;
 	const LabelPtr* operator-> () { return this; } // Act like a pointer.
 	operator void *() const { return mObject; } // For comparisons and boolean eval.
 
 	// Caller beware: does not check for NULL.
-	Label *ToLabel() const { return getType(mObject) == Callable_Label ? (Label *)mObject : NULL; }
-	// Caller beware: does not check for NULL.
-	Func *ToFunc() const { return getType(mObject) == Callable_Func ? (Func *)mObject : NULL; }
+	Label *ToLabel() const;
+	Func *ToFunc() const;
 	IObject *ToObject() const { return mObject; }
 	
 	// True if it is a dynamically-allocated object, not a Label or Func.
-	bool IsLiveObject() const { return mObject && getType(mObject) == Callable_Object; }
+	bool IsLiveObject() const { return mObject && !(ToFunc() || ToLabel()); }
 	
-	// Helper methods for legacy code which deals with Labels.
-	LPTSTR Name() const;
+	// Currently only used by ListLines, listing active timers.
+	LPCTSTR Name() const;
 };
 
 // LabelPtr with automatic reference-counting, for storing an object safely,
@@ -1569,7 +1609,6 @@ public:
 
 #ifdef ENABLE_DLLCALL
 #ifdef WIN32_PLATFORM
-// Interface for DynaCall():
 #define  DC_MICROSOFT           0x0000      // Default
 #define  DC_BORLAND             0x0001      // Borland compat
 #define  DC_CALL_CDECL          0x0010      // __cdecl
@@ -1583,6 +1622,7 @@ public:
 #endif
 
 
+// Interface for DynaCall():
 union DYNARESULT                // Various result types
 {
 	int     Int;                // Generic four-byte type
@@ -1616,9 +1656,10 @@ struct DYNAPARM
 	DllArgTypes type;
 	bool passed_by_address;
 	bool is_unsigned; // Allows return value and output parameters to be interpreted as unsigned vs. signed.
+	bool is_hresult; // Only used for the return value.
 };
 
-void ConvertDllArgType(LPTSTR aBuf[], DYNAPARM &aDynaParam);
+void ConvertDllArgType(LPTSTR aBuf, DYNAPARM &aDynaParam);
 #endif
 
 enum FuncParamDefaults {PARAM_DEFAULT_NONE, PARAM_DEFAULT_STR, PARAM_DEFAULT_INT, PARAM_DEFAULT_FLOAT};
@@ -1659,7 +1700,7 @@ struct FreeVars
 {
 	int mRefCount, mVarCount;
 	Var *mVar;
-	Func *mFunc;
+	UserFunc *mFunc;
 	FreeVars *mOuterVars;
 
 	void AddRef()
@@ -1675,7 +1716,7 @@ struct FreeVars
 			--mRefCount;
 	}
 
-	FreeVars *ForFunc(Func *aFunc)
+	FreeVars *ForFunc(UserFunc *aFunc)
 	{
 		FreeVars *fv = this;
 		do
@@ -1687,14 +1728,14 @@ struct FreeVars
 		return NULL;
 	}
 
-	static FreeVars *Alloc(Func &aFunc, int aVarCount, FreeVars *aOuterVars)
+	static FreeVars *Alloc(UserFunc &aFunc, int aVarCount, FreeVars *aOuterVars)
 	{
 		Var *v = aVarCount ? ::new Var[aVarCount] : NULL;
 		return new FreeVars(v, aFunc, aVarCount, aOuterVars); // Must use :: to avoid SimpleHeap.
 	}
 
 private:
-	FreeVars(Var *aVars, Func &aFunc, int aVarCount, FreeVars *aOuterVars)
+	FreeVars(Var *aVars, UserFunc &aFunc, int aVarCount, FreeVars *aOuterVars)
 		: mVar(aVars), mVarCount(aVarCount), mRefCount(1)
 		, mFunc(&aFunc), mOuterVars(aOuterVars)
 	{
@@ -1715,56 +1756,103 @@ private:
 
 struct UDFCallInfo
 {
-	Func *func;
-	VarBkp *backup; // Backup of previous instance's local vars.  NULL if no previous instance or no vars.
-	int backup_count; // Number of previous instance's local vars.  0 if no previous instance or no vars.
-	UDFCallInfo(Func *f) : func(f), backup(NULL), backup_count(0) {}
+	UserFunc *func;
+	VarBkp *backup = nullptr; // Backup of previous instance's local vars.  NULL if no previous instance or no vars.
+	int backup_count = 0; // Number of previous instance's local vars.  0 if no previous instance or no vars.
+	UDFCallInfo(UserFunc *f) : func(f) {}
 };
 
 
 typedef BIF_DECL((* BuiltInFunctionType));
 
 
-class Func : public IObjectComCompatible
+class DECLSPEC_NOVTABLE Func : public Object
 {
 public:
-	LPTSTR mName;
-	union {
-		struct { // User-defined functions.
-			Line *mJumpToLine;
-			FuncParam *mParam; // Holds an array of FuncParams (array length: mParamCount).
-			Object *mClass; // The class which this Func was defined in, if applicable.
-		};
-		struct { // Built-in functions.
-			BuiltInFunctionType mBIF;
-			UCHAR *mOutputVars; // String of indices indicating which params are output vars (for BIF_PerformAction).
-			BuiltInFunctionID mID; // For code sharing: this function's ID in the group of functions which share the same C++ function.
-		};
+	LPCTSTR mName;
+	int mParamCount = 0; // The function's maximum number of parameters.  For UDFs, also the number of items in the mParam array.
+	int mMinParams = 0;  // The number of mandatory parameters (populated for both UDFs and built-in's).
+	bool mIsVariadic = false; // Whether to allow mParamCount to be exceeded.
+	// HotKeyIt: due to DllImport moved to Func
+	BuiltInFunctionType mBIF;
+
+	virtual bool IsBuiltIn() = 0; // FIXME: Should not need to rely on this.
+	virtual bool ArgIsOutputVar(int aArg) = 0;
+
+	// bool result indicates whether aResultToken contains a value (i.e. false for FAIL/EARLY_EXIT).
+	bool Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, bool aIsVariadic = false);
+	virtual bool Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, IObject *aParamObj);
+	
+	virtual IObject *CloseIfNeeded()
+	{
+		AddRef();
+		return this;
+	}
+
+	enum MemberID
+	{
+		M_Call,
+		M_Bind,
+		M_IsOptional,
+		M_IsByRef,
+
+		P_Name,
+		P_MinParams,
+		P_MaxParams,
+		P_IsBuiltIn,
+		P_IsVariadic
 	};
-	int mParamCount; // The function's maximum number of parameters.  For UDFs, also the number of items in the mParam array.
-	int mMinParams;  // The number of mandatory parameters (populated for both UDFs and built-in's).
-	Label *mFirstLabel, *mLastLabel; // Linked list of private labels.
-	Var **mGlobalVar; // Array of global declarations
-	Func *mOuterFunc; // Func which contains this Func (usually NULL).
-	FuncList mFuncs; // List of nested functions (usually empty).
-	Var **mVar, **mLazyVar; // Array of pointers-to-variable, allocated upon first use and later expanded as needed.
+	_thread_local static ObjectMember sMembers[];
+	ResultType Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+
+	_thread_local static Object *sPrototype;
+	ResultType Invoke(IObject_Invoke_PARAMS_DECL);
+
+	Func(LPCTSTR aFuncName)
+		: mName(aFuncName) // Caller gave us a pointer to dynamic memory for this.
+	{
+		SetBase(sPrototype);
+	}
+};
+
+
+class UserFunc : public Func
+{
+public:
+	int mInstances = 0; // How many instances currently exist on the call stack (due to recursion or thread interruption).  Future use: Might be used to limit how deep recursion can go to help prevent stack overflow.
+	Line *mJumpToLine = nullptr;
+	FuncParam *mParam = nullptr; // Holds an array of FuncParams (array length: mParamCount).
+	Object *mClass = nullptr; // The class or prototype object which this user-defined method was defined for, or nullptr.
+	Label *mFirstLabel = nullptr, *mLastLabel = nullptr; // Linked list of private labels.
+	UserFunc *mOuterFunc = nullptr; // Func which contains this func (usually nullptr).
+	FuncList mFuncs {}; // List of nested functions (usually empty).
+	Var **mVar = nullptr, **mLazyVar = nullptr; // Array of pointers-to-variable, allocated upon first use and later expanded as needed.
+	Var **mGlobalVar = nullptr; // Array of global declarations.
 	Var **mStaticVar, **mStaticLazyVar;
-	Var **mDownVar, **mUpVar;
-	int *mUpVarIndex;
-	// Count of items in the above array as well as the maximum capacity.
-	int mGlobalVarCount, mVarCount, mVarCountMax, mLazyVarCount, mStaticVarCount, mStaticVarCountMax, mStaticLazyVarCount; 
+	Var **mDownVar = nullptr, **mUpVar = nullptr;
+	int *mUpVarIndex = nullptr;
 	static FreeVars *sFreeVars;
-	#define MAX_FUNC_UP_VARS 1000
-	int mDownVarCount, mUpVarCount;
-	int mInstances; // How many instances currently exist on the call stack (due to recursion or thread interruption).  Future use: Might be used to limit how deep recursion can go to help prevent stack overflow.
+#define MAX_FUNC_UP_VARS 1000
+	int mVarCount = 0, mVarCountMax = 0, mLazyVarCount = 0, mGlobalVarCount = 0, mStaticVarCount = 0, mStaticVarCountMax = 0, mStaticLazyVarCount = 0; // Count of items in the above array as well as the maximum capacity.
+	int mDownVarCount = 0, mUpVarCount = 0;
 
 	// Keep small members adjacent to each other to save space and improve perf. due to byte alignment:
-	UCHAR mDefaultVarType;
-	#define VAR_DECLARE_GLOBAL (VAR_DECLARED | VAR_GLOBAL)
-	#define VAR_DECLARE_SUPER_GLOBAL (VAR_DECLARE_GLOBAL | VAR_SUPER_GLOBAL)
-	#define VAR_DECLARE_LOCAL  (VAR_DECLARED | VAR_LOCAL)
-	#define VAR_DECLARE_STATIC (VAR_DECLARED | VAR_LOCAL | VAR_LOCAL_STATIC)
+	bool mIsFuncExpression; // Whether this function was defined *within* an expression and is therefore allowed under a control flow statement.
+#define VAR_DECLARE_GLOBAL (VAR_DECLARED | VAR_GLOBAL)
+#define VAR_DECLARE_SUPER_GLOBAL (VAR_DECLARE_GLOBAL | VAR_SUPER_GLOBAL)
+#define VAR_DECLARE_LOCAL  (VAR_DECLARED | VAR_LOCAL)
+#define VAR_DECLARE_STATIC (VAR_DECLARED | VAR_LOCAL | VAR_LOCAL_STATIC)
 	// The last two may be combined (bitwise-OR) with VAR_FORCE_LOCAL.
+	UCHAR mDefaultVarType = VAR_DECLARE_LOCAL;
+
+	UserFunc(LPCTSTR aName) : Func(aName) {}
+
+	bool IsBuiltIn() override { return false; }
+
+	bool ArgIsOutputVar(int aArg) override
+	{
+		return aArg < mParamCount && mParam[aArg].is_byref;
+	}
 
 	bool AllowSuperGlobals()
 	{
@@ -1776,55 +1864,25 @@ public:
 		return mOuterFunc ? mOuterFunc->AllowSuperGlobals() : true;
 	}
 
-	bool mIsBuiltIn; // Determines contents of union. Keep this member adjacent/contiguous with the above.
-	// Note that it's possible for a built-in function such as WinExist() to become a normal/UDF via
-	// override in the script.  So mIsBuiltIn should always be used to determine whether the function
-	// is truly built-in, not its name.
-	bool mIsVariadic;
-	bool mIsFatArrow;
+	IObject *CloseIfNeeded() override; // Returns this UserFunc or (if mUpVarCount != 0) a Closure.
 	bool mIsMacro;
 	// DynaCall related
-	void *mDllImportFunction;
 	DYNAPARM *mdyna_param;
+	// preprocess vars only once
 	bool mPreprocessLocalVarsDone;
 
-#define MAX_FUNC_OUTPUT_VAR 7
-	bool ArgIsOutputVar(int aIndex)
-	{
-		// Since this function is used only to determine whether a parameter requires a writable var,
-		// ByRef parameters are not considered to be OutputVars:
-		if (!mIsBuiltIn)
-			return false;
-		if (!mOutputVars)
-			return false;
-		++aIndex; // Convert to one-based.
-		if (mBIF == &BIF_PerformAction)
-			return mOutputVars[aIndex] == ARG_TYPE_OUTPUT_VAR;
-		for (int i = 0; i < MAX_FUNC_OUTPUT_VAR && mOutputVars[i]; ++i)
-			if (mOutputVars[i] == aIndex)
-				return true;
-		return false;
-	}
+	bool Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, IObject *aParamObj) override;
+	bool Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, IObject *aParamObj, FreeVars *aUpVars);
 
-	// bool result indicates whether aResultToken contains a value (i.e. false for FAIL/EARLY_EXIT).
-	bool Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, bool aIsVariadic = false, FreeVars *aUpVars = NULL);
-	bool Call(ResultToken &aResultToken, int aParamCount, ...);
-
-// Macros for specifying arguments in Func::Call(aResultToken, aParamCount, ...)
-#define FUNC_ARG_INT(_arg)   SYM_INTEGER, static_cast<__int64>(_arg)
-#define FUNC_ARG_STR(_arg)   SYM_STRING,  static_cast<LPTSTR>(_arg)
-#define FUNC_ARG_FLOAT(_arg) SYM_FLOAT,   static_cast<double>(_arg)
-#define FUNC_ARG_OBJ(_arg)   SYM_OBJECT,  static_cast<IObject *>(_arg)
-
-	ResultType Call(ResultToken *aResultToken)
+	ResultType Execute(ResultToken *aResultToken)
 	{
 		// Launch the function similar to Gosub (i.e. not as a new quasi-thread):
 		// The performance gain of conditionally passing NULL in place of result (when this is the
 		// outermost function call of a line consisting only of function calls, namely ACT_EXPRESSION)
 		// would not be significant because the Return command's expression (arg1) must still be evaluated
 		// in case it calls any functions that have side-effects, e.g. "return LogThisError()".
-		Func *prev_func = g->CurrentFunc; // This will be non-NULL when a function is called from inside another function.
-		Func *prev_macro = g->CurrentMacro;
+		auto prev_func = g->CurrentFunc; // This will be non-NULL when a function is called from inside another function.
+		auto *prev_macro = g->CurrentMacro;
 		if (!mIsMacro)
 			g->CurrentFunc = this;
 		else
@@ -1880,58 +1938,156 @@ public:
 		return result;
 	}
 
-	IObject *CloseIfNeeded(); // Returns this Func or (if mUpVarCount != 0) a Closure.
-
-	// IObject.
-	ResultType STDMETHODCALLTYPE Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ULONG STDMETHODCALLTYPE AddRef() { return 1; }
-	ULONG STDMETHODCALLTYPE Release() { return 1; }
-	IObject_Type_Impl("Func")
-#ifdef CONFIG_DEBUGGER
-	void DebugWriteProperty(IDebugProperties *, int aPage, int aPageSize, int aDepth);
-#endif
-
-	Func(LPTSTR aFuncName, bool aIsBuiltIn) // Constructor.
-		: mName(aFuncName) // Caller gave us a pointer to dynamic memory for this.
-		, mBIF(NULL) // Also initializes mJumpToLine via union.
-		, mParam(NULL), mParamCount(0), mMinParams(0) // Also initializes mOutputVar via union (mParam).
-		, mOuterFunc(NULL)
-		, mFirstLabel(NULL), mLastLabel(NULL)
-		, mClass(NULL) // Also initializes mID via union.
-		, mVar(NULL), mVarCount(0), mVarCountMax(0), mLazyVar(NULL), mLazyVarCount(0)
-		, mStaticVar(NULL), mStaticVarCount(0), mStaticVarCountMax(0), mStaticLazyVar(NULL), mStaticLazyVarCount(0)
-		, mGlobalVar(NULL), mGlobalVarCount(0)
-		, mDownVar(NULL), mDownVarCount(0), mUpVar(NULL), mUpVarCount(0), mUpVarIndex(NULL)
-		, mInstances(0)
-		, mDefaultVarType(VAR_DECLARE_LOCAL)
-		, mIsBuiltIn(aIsBuiltIn)
-		, mIsVariadic(false)
-		, mIsMacro(false)
-		, mIsFatArrow(false)
-		, mPreprocessLocalVarsDone(false)
-	{}
-	void *operator new(size_t aBytes){ return malloc(aBytes); }
-	void *operator new[](size_t aBytes) {return malloc(aBytes); }
-	void operator delete(void *aPtr) { free(aPtr); }
-	void operator delete[](void *aPtr) { free(aPtr); }
+	void *operator new(size_t aBytes) {return memset(malloc(aBytes), 0, aBytes);}
+	void *operator new[](size_t aBytes) {return memset(malloc(aBytes), 0, aBytes);}
+	void operator delete(void *aPtr) { free(aPtr);}
+	void operator delete[](void *aPtr) {free(aPtr);}
 };
 
 
-class ExprOpFunc : public Func
+class Closure : public Func
+{
+	UserFunc *mFunc;
+	FreeVars *mVars;
+
+
+public:
+	Closure(UserFunc *aFunc, FreeVars *aVars)
+		: mFunc(aFunc), mVars(aVars), Func(aFunc->mName)
+	{
+		mMinParams = aFunc->mMinParams;
+		mParamCount = aFunc->mParamCount;
+		mIsVariadic = aFunc->mIsVariadic;
+		SetBase(sPrototype);
+	}
+	~Closure();
+
+	bool IsBuiltIn() override { return false; }
+	bool ArgIsOutputVar(int aArg) override { return mFunc->ArgIsOutputVar(aArg); }
+	bool Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, IObject *aParamObj) override;
+	_thread_local static Object *sPrototype;
+};
+
+
+class BoundFunc : public Func
+{
+	IObject *mFunc;
+	LPTSTR mMember;
+	Array *mParams;
+	int mFlags;
+
+	BoundFunc(IObject *aFunc, LPTSTR aMember, Array *aParams, int aFlags)
+		: mFunc(aFunc), mMember(aMember), mParams(aParams), mFlags(aFlags)
+		, Func(_T(""))
+	{
+		mIsVariadic = true;
+		SetBase(sPrototype);
+	}
+
+
+public:
+	static BoundFunc *Bind(IObject *aFunc, int aFlags, LPCTSTR aMember, ExprTokenType **aParam, int aParamCount);
+	~BoundFunc();
+	
+	bool IsBuiltIn() override { return true; }
+	bool ArgIsOutputVar(int aArg) override { return false; }
+	bool Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, IObject *aParamObj) override;
+	_thread_local static Object *sPrototype;
+};
+
+
+class DECLSPEC_NOVTABLE NativeFunc : public Func
+{
+protected:
+	NativeFunc(LPCTSTR aName) : Func(aName) {}
+
+public:
+	UCHAR *mOutputVars = nullptr; // String of indices indicating which params are output vars (for BIF_PerformAction).
+
+	bool IsBuiltIn() override { return true; }
+
+	bool Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, IObject *aParamObj) override;
+
+};
+
+
+struct FuncEntry;
+class BuiltInFunc : public NativeFunc
+{
+public:
+	BuiltInFunctionID mFID; // For code sharing: this function's ID in the group of functions which share the same C++ function.
+
+	BuiltInFunc(LPCTSTR aName) : NativeFunc(aName) {}
+	BuiltInFunc(FuncEntry &, UCHAR *aOutputVars);
+
+#define MAX_FUNC_OUTPUT_VAR 7
+	bool ArgIsOutputVar(int aIndex) override
+	{
+		if (!mOutputVars)
+			return false;
+		++aIndex; // Convert to one-based.
+		if (mBIF == &BIF_PerformAction)
+			return mOutputVars[aIndex] == ARG_TYPE_OUTPUT_VAR;
+		for (int i = 0; i < MAX_FUNC_OUTPUT_VAR && mOutputVars[i]; ++i)
+			if (mOutputVars[i] == aIndex)
+				return true;
+		return false;
+	}
+
+	bool Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, IObject *aParamObj) override;
+};
+
+
+class BuiltInMethod : public NativeFunc
+{
+public:
+	ObjectMethod mBIM;
+	Object *mClass; // The class or prototype object which this method was defined for, and which `this` must derive from.
+	UCHAR mMID;
+	UCHAR mMIT;
+
+	BuiltInMethod(LPTSTR aName) : NativeFunc(aName) {}
+
+	bool ArgIsOutputVar(int aArg) override { return false; }
+
+	bool Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, IObject *aParamObj) override;
+};
+
+
+class ExprOpFunc : public BuiltInFunc
 {	// ExprOpFunc: Used in combination with SYM_FUNC to implement certain operations in expressions.
 	// These are not inserted into the script's function list, so mName is used only by the debugger.
 public:
-	ExprOpFunc(BuiltInFunctionType aBIF, int aID)
-		: Func(_T("<object>"), true)
+	ExprOpFunc(BuiltInFunctionType aBIF, int aID) : BuiltInFunc(_T("<object>"))
 	{
 		mBIF = aBIF;
-		mID = (BuiltInFunctionID)aID;
+		mFID = (BuiltInFunctionID)aID;
 		// Allow any number of parameters, since these functions aren't called directly by users
 		// and might break the rules in some cases, such as Op_ObjGetInPlace() having 0 *visible*
 		// parameters but actually reading 2 which are then also passed to the next function call.
-		mParamCount = 1000;
+		mParamCount = 255;
+		mIsVariadic = true;
 	}
 };
+
+template<BuiltInFunctionType bif, int flags>
+struct ExprOpT
+{
+	static ExprOpFunc Func;
+};
+
+template<BuiltInFunctionType bif, int flags>
+ExprOpFunc ExprOpT<bif, flags>::Func(bif, flags);
+
+// ExprOp<bif, flags>() returns a Func* which calls bif with the given ID/flags.
+// The call is optimized out and replaced with a reference to a static variable,
+// which should be unique for that combination of bif and flags.
+template<BuiltInFunctionType bif, int flags>
+inline BuiltInFunc *ExprOp()
+{
+	// Using static ExprOpFunc directly increased code size considerably.
+	return &ExprOpT<bif, flags>::Func;
+}
 
 
 struct FuncEntry
@@ -1941,6 +2097,43 @@ struct FuncEntry
 	UCHAR mMinParams, mMaxParams;
 	UCHAR mID;
 	UCHAR mOutputVars[MAX_FUNC_OUTPUT_VAR];
+};
+
+
+class DECLSPEC_NOVTABLE EnumBase : public Func
+{
+public:
+	_thread_local static Object *sPrototype;
+	EnumBase() : Func(_T(""))
+	{
+		mParamCount = 2;
+		SetBase(sPrototype);
+	}
+	bool IsBuiltIn() override { return true; };
+	bool ArgIsOutputVar(int aArg) override { return true; }
+	bool Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, IObject *aParamObj) override;
+	virtual ResultType Next(Var *, Var *) = 0;
+};
+
+
+class IndexEnumerator : public EnumBase
+{
+	Object *mObject;
+	UINT mIndex = UINT_MAX;
+	ResultType (Object::* mGetItem)(UINT aIndex, Var *aOutputVar1, Var *aOutputVar2);
+public:
+	typedef ResultType (Object::* Callback)(UINT aIndex, Var *aOutputVar1, Var *aOutputVar2);
+	IndexEnumerator(Object *aObject, Callback aGetItem) : mObject(aObject), mGetItem(aGetItem)
+	{
+		mObject->AddRef();
+		mParamCount = 2;
+		SetBase(EnumBase::sPrototype);
+	}
+	~IndexEnumerator()
+	{
+		mObject->Release();
+	}
+	ResultType Next(Var *, Var *) override;
 };
 
 
@@ -2002,7 +2195,7 @@ public:
 	MsgMonitorStruct *Find(UINT aMsg, HWND aHwnd, LPTSTR aMethodName, UCHAR aMsgType = 0);
 	MsgMonitorStruct *Add(UINT aMsg, HWND aHwnd, IObject *aCallback, bool aAppend = TRUE);
 	MsgMonitorStruct *Add(UINT aMsg, HWND aHwnd, LPTSTR aMethodName, bool aAppend = TRUE);
-	void Remove(MsgMonitorStruct *aMonitor);
+	void Delete(MsgMonitorStruct *aMonitor);
 //#ifdef _USRDLL
 	void RemoveAll();
 	void Free();
@@ -2061,7 +2254,7 @@ struct MsgMonitorInstance
 
 #define MAX_MENU_NAME_LENGTH MAX_PATH // For both menu and menu item names.
 class UserMenuItem;  // Forward declaration since classes use each other (i.e. a menu *item* can have a submenu).
-class UserMenu : public ObjectBase
+class UserMenu : public Object
 {
 public:
 	UserMenuItem *mFirstMenuItem, *mLastMenuItem, *mDefault;
@@ -2074,6 +2267,9 @@ public:
 	HMENU mMenu;
 	HBRUSH mBrush;   // Background color to apply to menu.
 	COLORREF mColor; // The color that corresponds to the above.
+
+	static ObjectMember sMembers[];
+	static Object *sMenuPrototype, *sMenuBarPrototype;
 
 	// Don't overload new and delete operators in this case since we want to use real dynamic memory
 	// (since menus can be read in from a file, destroyed and recreated, over and over).
@@ -2116,16 +2312,14 @@ public:
 		P_ClickCount,
 	};
 	
-	//IObject_Type_Impl("Menu")
-	LPTSTR Type() { return mMenuType == MENU_TYPE_BAR ? _T("MenuBar") : _T("Menu"); }
-	ResultType STDMETHODCALLTYPE Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	ResultType Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 
 	ResultType AddItem(LPTSTR aName, UINT aMenuID, IObject *aCallback, UserMenu *aSubmenu, LPTSTR aOptions, UserMenuItem **aInsertAt);
 	ResultType InternalAppendMenu(UserMenuItem *aMenuItem, UserMenuItem *aInsertBefore = NULL);
 	ResultType DeleteItem(UserMenuItem *aMenuItem, UserMenuItem *aMenuItemPrev, bool aUpdateGuiMenuBars = true);
 	ResultType DeleteAllItems();
 	ResultType ModifyItem(UserMenuItem *aMenuItem, IObject *aCallback, UserMenu *aSubmenu, LPTSTR aOptions);
-	void UpdateOptions(UserMenuItem *aMenuItem, LPTSTR aOptions);
+	ResultType UpdateOptions(UserMenuItem *aMenuItem, LPTSTR aOptions);
 	ResultType RenameItem(UserMenuItem *aMenuItem, LPTSTR aNewName);
 	ResultType UpdateName(UserMenuItem *aMenuItem, LPTSTR aNewName);
 	ResultType SetItemState(UserMenuItem *aMenuItem, UINT aState, UINT aStateMask);
@@ -2152,8 +2346,6 @@ public:
 	ResultType SetItemIcon(UserMenuItem *aMenuItem, LPTSTR aFilename, int aIconNumber, int aWidth);
 	ResultType ApplyItemIcon(UserMenuItem *aMenuItem);
 	ResultType RemoveItemIcon(UserMenuItem *aMenuItem);
-	static BOOL OwnerMeasureItem(LPMEASUREITEMSTRUCT aParam);
-	static BOOL OwnerDrawItem(LPDRAWITEMSTRUCT aParam);
 };
 
 
@@ -2174,23 +2366,11 @@ public:
 	WORD mMenuType;
 	UserMenuItem *mNextMenuItem;  // Next item in linked list
 	
-	union
-	{
-		// L17: Implementation of menu item icons is OS-dependent (g_os.IsWinVistaOrLater()).
-		
-		// Older versions of Windows do not support alpha channels in menu item bitmaps, so owner-drawing
-		// must be used for icons with transparent backgrounds to appear correctly. Owner-drawing also
-		// prevents the icon colours from inverting when the item is selected. DrawIcon() gives the best
-		// results, so we store the icon handle as is.
-		//
-		HICON mIcon;
-		
-		// Windows Vista and later support alpha channels via 32-bit bitmaps. Since owner-drawing prevents
-		// visual styles being applied to menus, we convert each icon to a 32-bit bitmap, calculating the
-		// alpha channel as necessary. This is done only once, when the icon is initially set.
-		//
-		HBITMAP mBitmap;
-	};
+	// For menu item icons:
+	// Windows Vista and later support alpha channels via 32-bit bitmaps. Since owner-drawing prevents
+	// visual styles being applied to menus, we convert each icon to a 32-bit bitmap, calculating the
+	// alpha channel as necessary. This is done only once, when the icon is initially set.
+	HBITMAP mBitmap;
 
 	UserMenuItem(LPTSTR aName, size_t aNameCapacity, UINT aMenuID, IObject *aCallback, UserMenu *aSubmenu, UserMenu *aMenu);
 	~UserMenuItem();
@@ -2237,15 +2417,15 @@ typedef UCHAR TabIndexType;
 // Keep the below in sync with the size of the types above:
 #define MAX_TAB_CONTROLS 255  // i.e. the value 255 itself is reserved to mean "doesn't belong to a tab".
 #define MAX_TABS_PER_CONTROL 256
-struct GuiControlType : public ObjectBase
+struct GuiControlType : public Object
 {
-	GuiType* gui; // Below code relies on this being the first field.
-	HWND hwnd;
-	LPTSTR name;
+	GuiType* gui;
+	HWND hwnd = NULL;
+	LPTSTR name = nullptr;
 	MsgMonitorList events;
 	// Keep any fields that are smaller than 4 bytes adjacent to each other.  This conserves memory
 	// due to byte-alignment.  It has been verified to save 4 bytes per struct in this case:
-	GuiControls type;
+	GuiControls type = GUI_CONTROL_INVALID;
 	// Unused: 0x01
 	#define GUI_CONTROL_ATTRIB_ALTSUBMIT           0x02
 	// Unused: 0x04
@@ -2254,22 +2434,25 @@ struct GuiControlType : public ObjectBase
 	#define GUI_CONTROL_ATTRIB_SUPPRESS_EVENTS     0x20
 	// Unused: 0x40
 	#define GUI_CONTROL_ATTRIB_ALTBEHAVIOR         0x80 // Slider +Invert, ListView/TreeView +WantF2, Edit +WantTab
-	UCHAR attrib; // A field of option flags/bits defined above.
-	TabControlIndexType tab_control_index; // Which tab control this control belongs to, if any.
-	TabIndexType tab_index; // For type==TAB, this stores the tab control's index.  For other types, it stores the page.
+	UCHAR attrib = 0; // A field of option flags/bits defined above.
+	TabControlIndexType tab_control_index = 0; // Which tab control this control belongs to, if any.
+	TabIndexType tab_index = 0; // For type==TAB, this stores the tab control's index.  For other types, it stores the page.
 	#define CLR_TRANSPARENT 0xFF000001L
 	#define IS_AN_ACTUAL_COLOR(color) !((color) & ~0xffffff) // Produces smaller code than checking against CLR_DEFAULT || CLR_INVALID.
-	COLORREF background_color;
-	HBRUSH background_brush;
+	COLORREF background_color = CLR_INVALID;
+	HBRUSH background_brush = NULL;
 	union
 	{
 		COLORREF union_color;  // Color of the control's text.
-		HBITMAP union_hbitmap; // For PIC controls, stores the bitmap.
+		HBITMAP union_hbitmap = NULL; // For PIC controls, stores the bitmap.
 		// Note: Pic controls cannot obey the text color, but they can obey the window's background
 		// color if the picture's background is transparent (at least in the case of icons on XP).
 		lv_attrib_type *union_lv_attrib; // For ListView: Some attributes and an array of columns.
 		IObject *union_object; // For ActiveX.
 	};
+
+	GuiControlType() = delete;
+	GuiControlType(GuiType* owner) : gui(owner) {}
 
 	static LPTSTR sTypeNames[];
 	static GuiControls ConvertTypeName(LPTSTR aTypeName);
@@ -2367,20 +2550,12 @@ struct GuiControlType : public ObjectBase
 		return TypeHasAttrib(TYPE_USES_BGCOLOR);
 	}
 
-	void Initialize(GuiType* owner)
-	{
-		// Zerofill all the members of this object (except for ObjectBase members)
-		ZeroMemory(&gui, (char*)(this+1) - (char*)&gui);
-		gui = owner;
-		background_color = CLR_INVALID;
-	}
-	
 	enum MemberID
 	{
 		INVALID = 0,
 
 		// Methods
-		M_Options,
+		M_Opt, // a.k.a. Opt
 		M_Focus,
 		M_Move,
 		M_Choose,
@@ -2392,10 +2567,9 @@ struct GuiControlType : public ObjectBase
 		M_List_Add,
 		M_List_Delete,
 		M_DateTime_SetFormat,
-		LastMethodPlusOne,
 
 		// Properties
-		P_Handle,
+		P_Hwnd,
 		P_Gui,
 		P_Name,
 		P_Type,
@@ -2408,16 +2582,38 @@ struct GuiControlType : public ObjectBase
 		P_Focused,
 	};
 
-	void Dispose(); // Called by GuiType::Dispose().
+	static ObjectMember sMembers[];
+	static ObjectMember sMembersList[]; // Tab, ListBox, ComboBox, DDL
+	static ObjectMember sMembersTab[];
+	static ObjectMember sMembersDate[];
+	static ObjectMember sMembersLV[];
+	static ObjectMember sMembersTV[];
+	static ObjectMember sMembersSB[];
 
-	ResultType STDMETHODCALLTYPE Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	LPTSTR Type();
+	static Object *GetPrototype(GuiControls aType);
+
+	ResultType StatusBar(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	ResultType LV_GetNextOrCount(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	ResultType LV_GetText(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	ResultType LV_AddInsertModify(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	ResultType LV_Delete(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	ResultType LV_InsertModifyDeleteCol(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	ResultType LV_SetImageList(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	ResultType TV_AddModifyDelete(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	ResultType TV_GetRelatedItem(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	ResultType TV_Get(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	ResultType TV_SetImageList(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+
+	ResultType Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	ResultType Invoke(IObject_Invoke_PARAMS_DECL);
+
+	void Dispose(); // Called by GuiType::Dispose().
 };
 
 struct GuiControlOptionsType
 {
 	DWORD style_add, style_remove, exstyle_add, exstyle_remove, listview_style;
-	int listview_view; // Viewing mode, such as LVS_ICON, LVS_REPORT.  Int vs. DWORD to more easily use any negative value as "invalid".
+	int listview_view; // Viewing mode, such as LV_VIEW_ICON, LV_VIEW_DETAILS.  Int vs. DWORD to more easily use any negative value as "invalid".
 	HIMAGELIST himagelist;
 	int x, y, width, height;  // Position info.
 	float row_count;
@@ -2443,6 +2639,7 @@ struct GuiControlOptionsType
 	ResultType redraw;  // Whether the state of WM_REDRAW should be changed.
 	TCHAR password_char; // When zeroed, indicates "use default password" for an edit control with the password style.
 	bool range_changed;
+	bool tick_interval_changed, tick_interval_specified;
 	bool start_new_section;
 	bool use_theme; // v1.0.32: Provides the means for the window's current setting of mUseTheme to be overridden.
 	bool listview_no_auto_sort; // v1.0.44: More maintainable and frees up GUI_CONTROL_ATTRIB_ALTBEHAVIOR for other uses.
@@ -2459,7 +2656,7 @@ struct GuiControlOptionsType
 LRESULT CALLBACK GuiWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK TabWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lParam);
 
-class GuiType : public ObjectBase
+class GuiType : public Object
 {
 	// The use of 72 and 96 below comes from v1, using the font's point size in the
 	// calculation.  It's really just 11.25 * font height in pixels.  Could use 12
@@ -2531,30 +2728,26 @@ public:
 
 	enum MemberID
 	{
-		INVALID = 0,
-
 		// Methods
 		M_Destroy,
-		M_AddControl,
+		//M_AddControl,
 		M_Show,
 		M_Hide,
 		M_SetFont,
-		M_Options,
+		M_Opt,
 		M_Minimize,
 		M_Maximize,
 		M_Restore,
 		M_Flash,
 		M_Submit,
-		M_NewEnum,
+		M___Enum,
 		M_OnEvent,
 
-		LastMethodPlusOne,
-		
 		// Properties
-		P_Handle,
+		P_Hwnd,
 		P_Title,
 		P_Name,
-		P_Control,
+		P___Item,
 		P_FocusedCtrl,
 		P_BackColor,
 		P_MarginX,
@@ -2563,6 +2756,8 @@ public:
 		P_Pos,
 		P_ClientPos,
 	};
+
+	static ObjectMember sMembers[];
 
 	GuiType() // Constructor
 		: mHwnd(NULL), mOwner(NULL), mName(NULL)
@@ -2606,13 +2801,14 @@ public:
 	void Destroy();
 	void Dispose();
 	static void DestroyIconsIfUnused(HICON ahIcon, HICON ahIconSmall); // L17: Renamed function and added parameter to also handle the window's small icon.
-	IObject_Type_Impl("Gui")
-	ResultType STDMETHODCALLTYPE Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	ResultType Invoke(IObject_Invoke_PARAMS_DECL);
+	ResultType Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	ResultType AddControl(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	ResultType Create(LPTSTR aTitle);
 	ResultType SetName(LPTSTR aName);
 	ResultType NameToEventHandler(LPTSTR aName, IObject *&aObject);
 	ResultType OnEvent(GuiControlType *aControl, UINT aEvent, UCHAR aEventKind, ExprTokenType *aParam[], int aParamCount, ResultToken &aResultToken);
-	ResultType OnEvent(GuiControlType *aControl, UINT aEvent, UCHAR aEventKind, IObject *aFunc, LPTSTR aMethodName, int aMaxThreads);
+	ResultType OnEvent(GuiControlType *aControl, UINT aEvent, UCHAR aEventKind, IObject *aFunc, LPTSTR aMethodName, int aMaxThreads, ResultToken &aResultToken);
 	void ApplyEventStyles(GuiControlType *aControl, UINT aEvent, bool aAdded);
 	static LPTSTR sEventNames[];
 	static LPTSTR ConvertEvent(GuiEventType evt);
@@ -2622,10 +2818,12 @@ public:
 	// unreliable (but maybe placing some limitations would solve that?).
 	BOOL IsMonitoring(GuiEventType aEvent) { return mEvents.IsMonitoring(aEvent); }
 
+	ResultType GetEnumItem(UINT aIndex, Var *, Var *);
+
 	static IObject* CreateDropArray(HDROP hDrop);
 	ResultType SetMenu(ExprTokenType &aParam);
 	static void UpdateMenuBars(HMENU aMenu);
-	ResultType AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR aText, GuiControlType*& apControl, Object *aObj = NULL);
+	ResultType AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR aText, GuiControlType*& apControl, Array *aObj = NULL);
 	ResultType PropertyGetPos(ResultToken &aResultToken, RECT &aPos);
 
 	ResultType ParseOptions(LPTSTR aOptions, bool &aSetLastFoundWindow, ToggleValueType &aOwnDialogs);
@@ -2641,7 +2839,7 @@ public:
 	ResultType ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &aOpt, GuiControlType &aControl
 		, GuiIndexType aControlIndex = -1); // aControlIndex is not needed upon control creation.
 	void ControlInitOptions(GuiControlOptionsType &aOpt, GuiControlType &aControl);
-	void ControlAddContents(GuiControlType &aControl, LPTSTR aContent, int aChoice, GuiControlOptionsType *aOpt = NULL, Object *aObj = NULL);
+	void ControlAddContents(GuiControlType &aControl, LPTSTR aContent, int aChoice, GuiControlOptionsType *aOpt = NULL, Array *aObj = NULL);
 	void ControlSetChoice(GuiControlType &aControl, int aChoice);
 	ResultType ControlLoadPicture(GuiControlType &aControl, LPTSTR aFilename, int aWidth, int aHeight, int aIconNumber);
 	ResultType Show(LPTSTR aOptions);
@@ -2755,7 +2953,6 @@ public:
 	void UpdateTabDialog(HWND aTabControlHwnd);
 	void ControlGetPosOfFocusedItem(GuiControlType &aControl, POINT &aPoint);
 	static void LV_Sort(GuiControlType &aControl, int aColumnIndex, bool aSortOnlyIfEnabled, TCHAR aForceDirection = '\0');
-	static DWORD ControlGetListViewMode(HWND aWnd);
 	static IObject *ControlGetActiveX(HWND aWnd);
 	
 	void UpdateAccelerators(UserMenu &aMenu);
@@ -2770,7 +2967,7 @@ public:
 	int ScaleSize(int x) { return mUsesDPIScaling && x != -1 ? DPIScale(x) : x; }
 
 protected:
-	bool Delete();
+	bool Delete() override;
 };
 
 typedef BOOL(WINAPI *_QueryPerformanceCounter)(LARGE_INTEGER *lpPerformanceCount);
@@ -2810,6 +3007,7 @@ public:
 	Object *mClassObject[MAX_NESTED_CLASSES]; // Class definition currently being parsed.
 	TCHAR mClassName[MAX_CLASS_NAME_LENGTH + 1]; // Only used during load-time.
 	Object *mUnresolvedClasses;
+	Array *mClasses = nullptr;
 	Property *mClassProperty;
 	LPTSTR mClassPropertyDef;
 
@@ -2821,6 +3019,7 @@ public:
 	LineNumberType mCombinedLineNumber; // In the case of a continuation section/line(s), this is always the top line.
 
 	bool mNoHotkeyLabels;
+	bool mClassPropertyStatic;
 
 	#define UPDATE_TIP_FIELD tcslcpy(mNIC.szTip, mTrayIconTip ? mTrayIconTip \
 		: mFileName, _countof(mNIC.szTip));
@@ -2832,7 +3031,7 @@ public:
 	ResultType GetLineContExpr(TextStream *ts, LPTSTR aBuf, size_t &aBufLength, LPTSTR aNextBuf, size_t &aNextBufLength
 		, LineNumberType &aPhysLineNumber, bool &aHasContinuationSection);
 	ResultType BalanceExprError(int aBalance, TCHAR aExpect[], LPTSTR aLineText);
-	static bool IsFunction(LPTSTR aBuf, bool *aPendingFunctionHasBrace = NULL);
+	static bool IsFunctionDefinition(LPTSTR aBuf, LPTSTR aNextBuf);
 	ResultType IsDirective(LPTSTR aBuf);
 	ResultType ConvertDirectiveBool(LPTSTR aBuf, bool &aResult, bool aDefault);
 	ResultType ParseAndAddLine(LPTSTR aLineText, int aBufSize = 0, ActionTypeType aActionType = ACT_INVALID
@@ -2872,7 +3071,6 @@ public:
 	Label *mPlaceholderLabel; // Used in place of a NULL label to simplify code.
 	LPTSTR mThisHotkeyName, mPriorHotkeyName;
 	MsgMonitorList mOnExit, mOnClipboardChange, mOnError; // Event handlers for OnExit(), OnClipboardChange() and OnError().
-	HWND mNextClipboardViewer;
 	bool mOnClipboardChangeIsRunning;
 	ExitReasons mExitReason;
 
@@ -2930,32 +3128,45 @@ public:
 	ResultType ExitApp(ExitReasons aExitReason, int aExitCode = 0);
 	void TerminateApp(ExitReasons aExitReason, int aExitCode); // L31: Added aExitReason. See script.cpp.
 	LineNumberType LoadFromFile();
-	LineNumberType LoadFromText(LPTSTR aScript,LPCTSTR aPathToShow = NULL); // HotKeyIt H1 load text instead file ahktextdll
-	ResultType LoadIncludedText(LPTSTR aScript,LPCTSTR aPathToShow = NULL); //New read text
+	LineNumberType LoadFromText(LPTSTR aScript, LPCTSTR aPathToShow = _T("")); // HotKeyIt H1 load text instead file ahktextdll
+	ResultType LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow = _T("")); //New read text
 	ResultType LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure);
+	ResultType LoadIncludedFile(TextStream *fp);
+	ResultType OpenIncludedFile(TextStream &ts, LPTSTR aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure, LPCTSTR aPathToShow = NULL);
 	LineNumberType CurrentLine();
 	LPTSTR CurrentFile();
 
-	ResultType UpdateOrCreateTimer(IObject *aLabel, LPTSTR aPeriod, LPTSTR aPriority, bool aEnable
-		, bool aUpdatePriorityOnly);
-	void DeleteTimer(IObject *aLabel);
+	enum SetTimerFlags
+	{
+		SET_TIMER_PERIOD = 1,
+		SET_TIMER_STATE = 2,
+		SET_TIMER_PRIORITY = 4,
+		SET_TIMER_RESET = 8
+	};
+	ResultType UpdateOrCreateTimer(IObject *aCallback
+		, bool aUpdatePeriod, __int64 aPeriod, bool aUpdatePriority, int aPriority);
+	void DeleteTimer(IObject *aCallback);
 	LPTSTR DefaultDialogTitle();
 
-	ResultType DefineFunc(LPTSTR aBuf, Var *aFuncGlobalVar[], bool aIsFatArrow = false);
+	ResultType DefineFunc(LPTSTR aBuf, Var *aFuncGlobalVar[], bool aStatic = false, bool aIsInExpression = false);
+	void InitFuncLibraries(FuncLibrary aLibs[]);
+	void InitFuncLibrary(FuncLibrary &aLib, LPTSTR aPathBase, LPTSTR aPathSuffix);
 	Func *FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &aErrorWasShown, bool &aFileWasFound, bool aIsAutoInclude);
 	Func *FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength = -1, int *apInsertPos = NULL);
 	FuncEntry *FindBuiltInFunc(LPTSTR aFuncName);
-	Func *AddFunc(LPCTSTR aFuncName, size_t aFuncNameLength, bool aIsBuiltIn, int aInsertPos, Object *aClassObject = NULL);
+	UserFunc *AddFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int aInsertPos, Object *aClassObject = NULL);
 
 	ResultType DefineClass(LPTSTR aBuf);
+	UserFunc *DefineClassInit(bool aStatic);
 	ResultType DefineClassVars(LPTSTR aBuf, bool aStatic);
-	ResultType DefineClassProperty(LPTSTR aBuf);
+	ResultType DefineClassProperty(LPTSTR aBuf, int aBufSize, bool aStatic, Var **aFuncGlobalVar, bool &aBufHasBraceOrNotNeeded);
+	ResultType DefineClassPropertyXet(LPTSTR aBuf, int aBufSize, LPTSTR aEnd, Var **aFuncGlobalVar);
 	Object *FindClass(LPCTSTR aClassName, size_t aClassNameLength = 0);
 	ResultType ResolveClasses();
+	ResultType InitClasses();
 
 	static SymbolType ConvertWordOperator(LPCTSTR aWord, size_t aLength);
 	static bool EndsWithOperator(LPTSTR aBuf, LPTSTR aBuf_marker);
-	int AddBIF(LPTSTR aFuncName, BuiltInFunctionType bif, size_t minparams, size_t maxparams); // N10 added for dynamic BIFs
 
 	#define FINDVAR_DEFAULT  (VAR_LOCAL | VAR_GLOBAL)
 	#define FINDVAR_GLOBAL   VAR_GLOBAL
@@ -3009,14 +3220,15 @@ public:
 
 	// Call this SciptError to avoid confusion with Line's error-displaying functions:
 	ResultType ScriptError(LPCTSTR aErrorText, LPCTSTR aExtraInfo = _T("")); // , ResultType aErrorType = FAIL);
+	ResultType CriticalError(LPCTSTR aErrorText, LPCTSTR aExtraInfo = _T(""));
 
 	void ScriptWarning(WarnMode warnMode, LPCTSTR aWarningText, LPCTSTR aExtraInfo = _T(""), Line *line = NULL);
 	void WarnUninitializedVar(Var *var);
-	void MaybeWarnLocalSameAsGlobal(Func &func, Var &var);
+	void MaybeWarnLocalSameAsGlobal(UserFunc &func, Var &var);
 
 	ResultType PreprocessLocalVars(FuncList &aFuncs);
-	ResultType PreprocessLocalVars(Func &aFunc, Var **aVarList, int &aVarCount);
-	ResultType PreprocessFindUpVar(LPTSTR aName, Func &aOuter, Func &aInner, Var *&aFound, Var *aLocal);
+	ResultType PreprocessLocalVars(UserFunc &aFunc, Var **aVarList, int &aVarCount);
+	ResultType PreprocessFindUpVar(LPTSTR aName, UserFunc &aOuter, UserFunc &aInner, Var *&aFound, Var *aLocal);
 	void ConvertLocalToAlias(Var &aLocal, Var *aAliasFor, int aPos, Var **aVarList, int &aVarCount);
 	void CheckForClassOverwrite();
 
@@ -3026,6 +3238,7 @@ public:
 	static ResultType SetErrorLevelOrThrowInt(int aErrorValue, LPCTSTR aWhat = NULL);
 	static ResultType SetErrorLevelOrThrowStr(LPCTSTR aErrorValue, LPCTSTR aWhat = NULL);
 	static ResultType ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat = NULL, LPCTSTR aExtraInfo = _T(""));
+	static ResultType ThrowWin32Exception(DWORD aError);
 	static void FreeExceptionToken(ResultToken*& aToken);
 	static void SetErrorLevels(bool aError, DWORD aLastErrorOverride = -1);
 	static void SetErrorLevelsAndClose(HANDLE aHandle, bool aError, DWORD aLastErrorOverride = -1);
@@ -3103,9 +3316,6 @@ BIV_DECL_R(BIV_ThreadID);
 BIV_DECL_R(BIV_MainThreadID);
 BIV_DECL_R (BIV_TickCount);
 BIV_DECL_R (BIV_Now);
-#ifdef CONFIG_WIN9X
-BIV_DECL_R (BIV_OSType);
-#endif
 BIV_DECL_R (BIV_OSVersion);
 BIV_DECL_R (BIV_Is64bitOS);
 BIV_DECL_R (BIV_Language);
@@ -3127,7 +3337,6 @@ BIV_DECL_R (BIV_ScriptHwnd);
 BIV_DECL_R (BIV_LineNumber);
 BIV_DECL_R (BIV_LineFile);
 BIV_DECL_R (BIV_LoopFileName);
-BIV_DECL_R (BIV_LoopFileShortName);
 BIV_DECL_R (BIV_LoopFileExt);
 BIV_DECL_R (BIV_LoopFileDir);
 BIV_DECL_R (BIV_LoopFilePath);
@@ -3165,21 +3374,19 @@ BIV_DECL_RW(BIV_ZipCompressionLevel);
 ////////////////////////
 
 #ifdef ENABLE_DLLCALL
-bool IsDllArgTypeName(LPTSTR name);
 void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free = NULL);
 BIF_DECL(BIF_DllCall);
 BIF_DECL(BIF_DllImport);
 BIF_DECL(BIF_DynaCall);
 #endif
 
+BIF_DECL(BIF_StrCompare);
 BIF_DECL(BIF_String);
 BIF_DECL(BIF_Struct);
 BIF_DECL(BIF_sizeof);
 
 BIF_DECL(BIF_Getvar);
 BIF_DECL(BIF_Alias);
-BIF_DECL(BIF_CacheEnable);
-BIF_DECL(BIF_getTokenValue);
 BIF_DECL(BIF_ResourceLoadLibrary);
 BIF_DECL(BIF_MemoryLoadLibrary);
 BIF_DECL(BIF_MemoryCallEntryPoint);
@@ -3226,6 +3433,7 @@ BIF_DECL(BIF_IsLabel);
 BIF_DECL(BIF_IsFunc);
 BIF_DECL(BIF_Func);
 BIF_DECL(BIF_IsByRef);
+BIF_DECL(BIF_IsSet);
 BIF_DECL(BIF_GetKeyState);
 BIF_DECL(BIF_GetKeyName);
 BIF_DECL(BIF_VarSetCapacity);
@@ -3255,6 +3463,7 @@ BIF_DECL(BIF_Hotkey);
 BIF_DECL(BIF_SetTimer);
 BIF_DECL(BIF_OnMessage);
 BIF_DECL(BIF_On);
+BIF_DECL(BIF_BufferAlloc);
 BIF_DECL(BIF_ClipboardAll);
 
 #ifdef ENABLE_REGISTERCALLBACK
@@ -3275,20 +3484,6 @@ BIF_DECL(BIF_GuiCreate);
 BIF_DECL(BIF_GuiFromHwnd);
 BIF_DECL(BIF_GuiCtrlFromHwnd);
 
-BIF_DECL_GUICTRL(BIF_StatusBar);
-
-BIF_DECL_GUICTRL(BIF_LV_GetNextOrCount);
-BIF_DECL_GUICTRL(BIF_LV_GetText);
-BIF_DECL_GUICTRL(BIF_LV_AddInsertModify);
-BIF_DECL_GUICTRL(BIF_LV_Delete);
-BIF_DECL_GUICTRL(BIF_LV_InsertModifyDeleteCol);
-BIF_DECL_GUICTRL(BIF_LV_SetImageList);
-
-BIF_DECL_GUICTRL(BIF_TV_AddModifyDelete);
-BIF_DECL_GUICTRL(BIF_TV_GetRelatedItem);
-BIF_DECL_GUICTRL(BIF_TV_Get);
-BIF_DECL_GUICTRL(BIF_TV_SetImageList);
-
 BIF_DECL(BIF_IL_Create);
 BIF_DECL(BIF_IL_Destroy);
 BIF_DECL(BIF_IL_Add);
@@ -3296,29 +3491,35 @@ BIF_DECL(BIF_LoadPicture);
 BIF_DECL(BIF_Trim); // L31: Also handles LTrim and RTrim.
 
 BIF_DECL(BIF_Hotstring);
+BIF_DECL(BIF_InputHook);
 
 BIF_DECL(BIF_Type);
+BIF_DECL(BIF_IsObject);
 BIF_DECL(BIF_Cast);
 
 
-BIF_DECL(BIF_IsObject);
 BIF_DECL(BIF_Object);
 BIF_DECL(BIF_Array);
+BIF_DECL(BIF_Map);
 BIF_DECL(BIF_CriticalObject);
 BIF_DECL(BIF_ObjLoad);
 BIF_DECL(BIF_ObjDump);
 BIF_DECL(BIF_ObjAddRefRelease);
 BIF_DECL(BIF_ObjBindMethod);
 BIF_DECL(BIF_ObjRaw);
-BIF_DECL(BIF_ObjBase);
 // Built-ins also available as methods -- these are available as functions for use primarily by overridden methods (i.e. where using the built-in methods isn't possible as they're no longer accessible).
 BIF_DECL(BIF_ObjXXX);
+
+BIF_DECL(BIF_Base);
+BIF_DECL(BIF_HasBase);
+BIF_DECL(BIF_HasProp);
+BIF_DECL(BIF_HasMethod);
+BIF_DECL(BIF_GetMethod);
 
 // Expression operators implemented via SYM_FUNC:
 BIF_DECL(Op_ObjInvoke);
 BIF_DECL(Op_ObjGetInPlace);
 BIF_DECL(Op_ObjIncDec);
-BIF_DECL(Op_ObjNew);
 
 
 // Advanced file IO interfaces
@@ -3333,7 +3534,8 @@ BIF_DECL(BIF_ComObjGet);
 BIF_DECL(BIF_ComObjDll);
 BIF_DECL(BIF_ComObjConnect);
 BIF_DECL(BIF_ComObjError);
-BIF_DECL(BIF_ComObjTypeOrValue);
+BIF_DECL(BIF_ComObjType);
+BIF_DECL(BIF_ComObjValue);
 BIF_DECL(BIF_ComObjFlags);
 BIF_DECL(BIF_ComObjArray);
 BIF_DECL(BIF_ComObjQuery);
@@ -3371,6 +3573,7 @@ BIF_DECL(BIF_Reg);
 BIF_DECL(BIF_Random);
 BIF_DECL(BIF_Sound);
 BIF_DECL(BIF_StatusBarGetText);
+BIF_DECL(BIF_StatusBarWait);
 BIF_DECL(BIF_CaretGetPos);
 BIF_DECL(BIF_WinGetClass);
 BIF_DECL(BIF_WinGetText);
@@ -3378,8 +3581,13 @@ BIF_DECL(BIF_WinGetTitle);
 BIF_DECL(BIF_WinGetPos);
 BIF_DECL(BIF_WinGet);
 BIF_DECL(BIF_WinSet);
+BIF_DECL(BIF_WinSetTitle);
 BIF_DECL(BIF_WinRedraw);
+BIF_DECL(BIF_WinMove);
 BIF_DECL(BIF_WinMoveTopBottom);
+BIF_DECL(BIF_WinShow);
+BIF_DECL(BIF_WinActivate);
+BIF_DECL(BIF_MenuSelect);
 BIF_DECL(BIF_Process);
 BIF_DECL(BIF_ProcessSetPriority);
 BIF_DECL(BIF_MonitorGet);
@@ -3396,6 +3604,8 @@ SymbolType TokenIsPureNumeric(ExprTokenType &aToken);
 SymbolType TokenIsPureNumeric(ExprTokenType &aToken, SymbolType &aIsImpureNumeric);
 BOOL TokenIsEmptyString(ExprTokenType &aToken);
 BOOL TokenIsEmptyString(ExprTokenType &aToken, BOOL aWarnUninitializedVar); // Same as TokenIsEmptyString but optionally warns if the token is an uninitialized var.
+SymbolType TypeOfToken(ExprTokenType &aToken);
+SymbolType TypeOfToken(ExprTokenType &aToken, SymbolType &aIsNum);
 __int64 TokenToInt64(ExprTokenType &aToken);
 double TokenToDouble(ExprTokenType &aToken, BOOL aCheckForHex = TRUE);
 LPTSTR TokenToString(ExprTokenType &aToken, LPTSTR aBuf = NULL, size_t *aLength = NULL);
@@ -3403,19 +3613,24 @@ ResultType TokenToDoubleOrInt64(const ExprTokenType &aInput, ExprTokenType &aOut
 IObject *TokenToObject(ExprTokenType &aToken); // L31
 Func *TokenToFunc(ExprTokenType &aToken);
 IObject *TokenToFunctor(ExprTokenType &aToken);
-IObject *TokenToLabelOrFunctor(ExprTokenType &aToken);
 IObject *StringToLabelOrFunctor(LPTSTR aStr);
 IObject *StringToFunctor(LPTSTR aStr);
+ResultType ValidateFunctor(IObject *aFunc, int aParamCount, ResultToken &aResultToken, LPTSTR aNullErr = ERR_TYPE_MISMATCH);
 ResultType TokenSetResult(ResultToken &aResultToken, LPCTSTR aValue, size_t aLength = -1);
+BOOL TokensAreEqual(ExprTokenType &left, ExprTokenType &right);
+LPTSTR TokenTypeString(ExprTokenType &aToken);
 
 LPTSTR RegExMatch(LPTSTR aHaystack, LPTSTR aNeedleRegEx);
 void SetWorkingDir(LPTSTR aNewDir, bool aSetErrorLevel = true);
+void UpdateWorkingDir(LPTSTR aNewDir = NULL);
+LPTSTR GetWorkingDir();
 int ConvertJoy(LPTSTR aBuf, int *aJoystickID = NULL, bool aAllowOnlyButtons = false);
 bool ScriptGetKeyState(vk_type aVK, KeyStateTypes aKeyStateType);
 bool ScriptGetJoyState(JoyControls aJoy, int aJoystickID, ExprTokenType &aToken, LPTSTR aBuf);
 
-HWND DetermineTargetWindow(ExprTokenType *aParam[], int aParamCount);
-ResultType DetermineTargetControl(HWND &aControl, HWND &aWindow, ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount);
+ResultType DetermineTargetHwnd(HWND &aWindow, ResultToken &aResultToken, ExprTokenType &aToken);
+ResultType DetermineTargetWindow(HWND &aWindow, ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, int aNonWinParamCount = 0);
+ResultType DetermineTargetControl(HWND &aControl, HWND &aWindow, ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, int aNonWinParamCount = 0);
 #define DETERMINE_TARGET_CONTROL(param_offset) \
 	HWND target_window, control_window; \
 	if (!DetermineTargetControl(control_window, target_window, aResultToken, aParam + param_offset, aParamCount - param_offset)) \
@@ -3433,10 +3648,13 @@ void PixelSearch(Var *aOutputVarX, Var *aOutputVarY
 	, int aVariation, LPTSTR aOptions, bool aIsPixelGetColor
 	, ResultToken &aResultToken);
 
-ResultType SoundSetGet2kXP(ResultToken &aResultToken, LPTSTR aSetting
-	, DWORD aComponentType, int aComponentInstance, DWORD aControlType, LPTSTR aDevice);
 ResultType SoundSetGetVista(ResultToken &aResultToken, LPTSTR aSetting
 	, DWORD aComponentType, int aComponentInstance, DWORD aControlType, LPTSTR aDevice);
+
+ResultType GetObjectPtrProperty(IObject *aObject, LPTSTR aPropName, UINT_PTR &aPtr, ResultToken &aResultToken, bool aOptional = false);
+ResultType GetObjectIntProperty(IObject *aObject, LPTSTR aPropName, __int64 &aValue, ResultToken &aResultToken, bool aOptional = false);
+void GetBufferObjectPtr(ResultToken &aResultToken, IObject *obj, size_t &aPtr, size_t &aSize);
+void GetBufferObjectPtr(ResultToken &aResultToken, IObject *obj, size_t &aPtr);
 
 #ifndef _USRDLL
 VOID CALLBACK ThreadExitApp(ULONG_PTR dwParam);

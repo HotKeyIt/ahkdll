@@ -6,7 +6,8 @@
 #include "script_object.h"
 #include "application.h"
 
-extern ExprOpFunc g_ObjGet, g_ObjSet;
+
+extern BuiltInFunc *OpFunc_GetProp, *OpFunc_GetItem, *OpFunc_SetProp, *OpFunc_SetItem;
 
 //
 // BIF_Struct - Create structure
@@ -372,13 +373,13 @@ BIF_DECL(BIF_sizeof)
 		else // type was not found, check for user defined type in variables
 		{
 			Var1.var = NULL;
-			Func *bkpfunc = NULL;
+			UserFunc *bkpfunc = NULL;
 			// check if we have a local/static declaration and resolve to function
 			// For example Struct("MyFunc(mystruct) mystr")
 			if (_tcschr(defbuf,'('))
 			{
 				bkpfunc = g->CurrentFunc; // don't bother checking, just backup and restore later
-				g->CurrentFunc = g_script->FindFunc(defbuf + 1,_tcscspn(defbuf,_T("(")) - 1);
+				g->CurrentFunc = (UserFunc *)g_script->FindFunc(defbuf + 1,_tcscspn(defbuf,_T("(")) - 1);
 				if (g->CurrentFunc) // break if not found to identify error
 				{
 					_tcscpy(tempbuf,defbuf + 1);
@@ -455,114 +456,111 @@ BIF_DECL(BIF_sizeof)
 // ObjRawSize()
 //
 
-__int64 ObjRawSize(IObject *aObject, bool aCopyBuffer, IObject *aObjects)
+__int64 ObjRawSize(IObject *aObject, IObject *aObjects)
 {
-	ResultToken Result, this_token, enum_token, aCall, aKey, aValue;
-	ExprTokenType *params[] = { &aCall, &aKey, &aValue };
-	TCHAR buf[MAX_PATH];
+	ResultToken result_token, this_token, aKey, aValue;
+	ExprTokenType *params[] = { &aKey, &aValue };
+	this_token.symbol = SYM_OBJECT;
+
+	if ((_tcscmp(aObject->Type(), _T("Object")))
+		&&(_tcscmp(aObject->Type(), _T("Array")))
+		&&(_tcscmp(aObject->Type(), _T("Map")))
+		&&(_tcscmp(aObject->Type(), _T("Buffer")))
+		&&(_tcscmp(aObject->Type(), _T("Struct"))))
+		g_script->ScriptError(ERR_TYPE_MISMATCH, aObject->Type());
+
+	__int64 aSize = 1 + sizeof(__int64);
 	
-	// Set up enum_token the way Invoke expects:
-	enum_token.symbol = SYM_STRING;
-	enum_token.marker = _T("");
-	enum_token.mem_to_free = NULL;
-	enum_token.buf = buf;
+	if (!_tcscmp(aObject->Type(), _T("Buffer")))
+	{
+		this_token.object = aObject;
+		aObject->Invoke(result_token, IT_GET, _T("size"), this_token, nullptr, 0);
+		return result_token.value_int64 + aSize;
+	}
+	this_token.object = aObjects;
 
-	// Prepare to call object._NewEnum():
-	aCall.symbol = SYM_STRING;
-	aCall.marker = _T("_NewEnum");
-
-	aObject->Invoke(enum_token, Result, IT_CALL, params, 1);
-
-	if (enum_token.mem_to_free)
-		// Invoke returned memory for us to free.
-		free(enum_token.mem_to_free);
-
+	IObject *enumerator;
+	ResultType result;
+	if (!_tcscmp(aObject->Type(), _T("Object")))
+	{
+		this_token.object = aObject;
+		aObject->Invoke(result_token, IT_CALL, _T("OwnProps"), this_token, nullptr, 0);
+		if (result_token.symbol == SYM_OBJECT)
+		{
+			result = OK;
+			enumerator = result_token.object;
+		}
+		else
+			result = FAIL;
+	}
+	else
+		result = GetEnumerator(enumerator, aObject, 2, false);
 	// Check if object returned an enumerator, otherwise return
-	if (enum_token.symbol != SYM_OBJECT)
+	if (result != OK)
 		return 0;
 
 	// create variables to use in for loop / for enumeration
 	// these will be deleted afterwards
 
-	Var *var1 = (Var*)alloca(sizeof(Var));
-	Var *var2 = (Var*)alloca(sizeof(Var));
-	var1->mType = var2->mType = VAR_NORMAL;
-	var1->mAttrib = var2->mAttrib = 0;
-	var1->mByteCapacity = var2->mByteCapacity = 0;
-	var1->mHowAllocated = var2->mHowAllocated = ALLOC_MALLOC;
+	Var vkey, vval;
 
 	if (!aObjects)
 	{
-		aCall.symbol = SYM_OBJECT;
-		aCall.object = aObject;
-		aKey.symbol = SYM_STRING;
-		aKey.marker = _T("");
-		aKey.marker_length = 0;
-		aObjects = Object::Create(params, 2);
+		aKey.symbol = SYM_OBJECT;
+		aKey.object = aObject;
+		aValue.symbol = SYM_STRING;
+		aValue.marker = _T("");
+		aValue.marker_length = 0;
+		aObjects = Map::Create(params, 2);
 	}
 	else
 	{
-		aCall.marker = _T("HasKey");
 		aKey.symbol = SYM_OBJECT;
 		aKey.object = aObject;
-		aObjects->Invoke(Result, this_token, IT_CALL, params, 2);
-		if (!Result.value_int64)
+		this_token.object = aObjects;
+		aObjects->Invoke(result_token, IT_CALL, _T("Has"), this_token, params, 1);
+		if (!result_token.value_int64)
 		{
-			aCall.symbol = SYM_OBJECT;
-			aCall.object = aObject;
-			aKey.symbol = SYM_STRING;
-			aKey.marker = _T("");
-			aKey.marker_length = 0;
-			aObjects->Invoke(Result, this_token, IT_SET, params, 2);
+			aKey.symbol = SYM_OBJECT;
+			aKey.object = aObject;
+			aValue.symbol = SYM_STRING;
+			aValue.marker = _T("");
+			aValue.marker_length = 0;
+			aObjects->Invoke(result_token, IT_SET, 0, this_token, params, 2);
 		}
 	}
 	// Prepare parameters for the loop below: enum.Next(var1 [, var2])
-	aCall.symbol = SYM_STRING;
-	aCall.marker = _T("Next");
 	aKey.symbol = SYM_VAR;
-	aKey.var = var1;
+	aKey.var = &vkey;
 	aKey.var->mCharContents = _T("");
 	aKey.mem_to_free = 0;
 	aValue.symbol = SYM_VAR;
-	aValue.var = var2;
+	aValue.var = &vval;
 	aValue.var->mCharContents = _T("");
 	aValue.mem_to_free = 0;
 
-	ResultToken result_token;
-	IObject &enumerator = *enum_token.object; // Might perform better as a reference?
-	__int64 aSize = 0;
 	IObject *aIsObject;
 	__int64 aIsValue;
 	SymbolType aVarType;
 
 	for (;;)
 	{
-		// Set up result_token the way Invoke expects; each Invoke() will change some or all of these:
-		result_token.symbol = SYM_STRING;
-		result_token.marker = _T("");
-		result_token.mem_to_free = NULL;
-		result_token.buf = buf;
-
-		// Call enumerator.Next(var1, var2)
-		enumerator.Invoke(result_token, enum_token, IT_CALL, params, 3);
-
-		bool next_returned_true = TokenToBOOL(result_token);
-		if (!next_returned_true)
+		result = CallEnumerator(enumerator, &vkey, &vval, false);
+		if (result != CONDITION_TRUE)
 			break;
 
 		if (aIsObject = TokenToObject(aKey))
 		{
-			aCall.marker = _T("HasKey");
-			aObjects->Invoke(Result, this_token, IT_CALL, params, 2);
-			if (Result.value_int64)
-				aSize += 9;
+			this_token.object = aObjects;
+			aObjects->Invoke(result_token, IT_CALL, _T("Has"), this_token, params, 1);
+			if (result_token.value_int64)
+				aSize += 1 + sizeof(__int64);
 			else
-				aSize += ObjRawSize(aIsObject, aCopyBuffer, aObjects) + 9;
-			aCall.marker = _T("Next");
+				aSize += ObjRawSize(aIsObject, aObjects);
 		}
 		else 
 		{
-			aKey.var->ToTokenSkipAddRef(aKey);
+			vkey.ToTokenSkipAddRef(aKey);
 			if ((aVarType = aKey.symbol) == SYM_STRING)
 				aSize += (aKey.marker_length ? (aKey.marker_length + 1) * sizeof(TCHAR) : 0) + 9;
 			else
@@ -571,56 +569,39 @@ __int64 ObjRawSize(IObject *aObject, bool aCopyBuffer, IObject *aObjects)
 
 		if (aIsObject = TokenToObject(aValue))
 		{
-			aCall.marker = _T("HasKey");
 			aKey.symbol = SYM_OBJECT;
 			aKey.object = aIsObject;
-			aObjects->Invoke(Result, this_token, IT_CALL, params, 2);
-			if (Result.value_int64)
-				aSize += 9;
+			this_token.object = aObjects;
+			aObjects->Invoke(result_token, IT_CALL, _T("Has"), this_token, params, 1);
+			if (result_token.value_int64)
+				aSize += 1 + sizeof(__int64);
 			else
-				aSize += ObjRawSize(aIsObject, aCopyBuffer, aObjects) + 9;
-			aCall.marker = _T("Next");
+				aSize += ObjRawSize(aIsObject, aObjects);
 		}
 		else
 		{
 			aValue.var->ToTokenSkipAddRef(aValue);
 			if ((aVarType = aValue.symbol) == SYM_STRING)
-			{
-				if (aCopyBuffer)
-				{
-					aCall.marker = _T("GetCapacity");
-					aObject->Invoke(Result, this_token, IT_CALL, params, 2);
-					aSize += Result.value_int64 + 9;
-					aCall.marker = _T("Next");
-				}
-				else
-					aSize += (aValue.marker_length ? (aValue.marker_length + 1) * sizeof(TCHAR) : 0) + 9;
-			}
+				aSize += (aValue.marker_length ? (aValue.marker_length + 1) * sizeof(TCHAR) : 0) + 9;
 			else
 				aSize += aVarType == SYM_FLOAT || (aIsValue = TokenToInt64(aValue)) > 4294967295 ? 9 : aIsValue > 65535 ? 5 : aIsValue > 255 ? 3 : aIsValue > -129 ? 2 : aIsValue > -32769 ? 3 : aIsValue >= INT_MIN ? 5 : 9;
 		}
 
 		// release object if it was assigned prevoiously when calling enum.Next
-		if (var1->IsObject())
-			var1->ReleaseObject();
-		if (var2->IsObject())
-			var2->ReleaseObject();
-
-		// Free any memory or object which may have been returned by Invoke:
-		if (result_token.mem_to_free)
-			free(result_token.mem_to_free);
-		if (result_token.symbol == SYM_OBJECT)
-			result_token.object->Release();
+		if (vkey.IsObject())
+			vkey.ReleaseObject();
+		if (vval.IsObject())
+			vval.ReleaseObject();
 
 		aKey.symbol = SYM_VAR;
-		aKey.var = var1;
+		aKey.var = &vkey;
 		aValue.symbol = SYM_VAR;
-		aValue.var = var2;
+		aValue.var = &vval;
 	}
 	// release enumerator and free vars
-	enumerator.Release();
-	var1->Free();
-	var2->Free();
+	enumerator->Release();
+	vkey.Free();
+	vval.Free();
 	return aSize;
 }
 
@@ -628,71 +609,80 @@ __int64 ObjRawSize(IObject *aObject, bool aCopyBuffer, IObject *aObjects)
 // ObjRawDump()
 //
 
-__int64 ObjRawDump(IObject *aObject, char *aBuffer, bool aCopyBuffer, IObject *aObjects, UINT &aObjCount)
+__int64 ObjRawDump(IObject *aObject, char *aBuffer, Map *aObjects, UINT &aObjCount)
 {
+
+	ResultToken result_token, this_token, aKey, aValue;
+	ExprTokenType *params[] = { &aKey, &aValue };
+	
+	this_token.symbol = SYM_OBJECT;
+
 	char *aThisBuffer = aBuffer;
+	if (!_tcscmp(aObject->Type(), _T("Object")))
+		*aThisBuffer = (char)-12;
+	else if (!_tcscmp(aObject->Type(), _T("Array")))
+		*aThisBuffer = (char)-13;
+	else if (!_tcscmp(aObject->Type(), _T("Map")) || !_tcscmp(aObject->Type(), _T("Struct")))
+		*aThisBuffer = (char)-14;
+	else if (!_tcscmp(aObject->Type(), _T("Buffer")))
+	{
+		*aThisBuffer = (char)-15;
+		aThisBuffer += 1 + sizeof(__int64);
+		this_token.object = aObject;
+		aObject->Invoke(result_token, IT_GET, _T("size"), this_token, nullptr, 0);
+		__int64 bufsize = result_token.value_int64;
+		aObject->Invoke(result_token, IT_GET, _T("ptr"), this_token, nullptr, 0);
+		memmove(aThisBuffer, (void *)result_token.value_int64, (size_t)bufsize);
+		aThisBuffer += bufsize;
+		return aThisBuffer - aBuffer;
+	}
+	else
+		g_script->ScriptError(ERR_TYPE_MISMATCH, aObject->Type());
+	aThisBuffer += 1 + sizeof(__int64);
 
-	ResultToken Result, this_token, enum_token, aCall, aKey, aValue;
-	ExprTokenType *params[] = { &aCall, &aKey, &aValue };
-	TCHAR buf[MAX_PATH];
-
-	// Set up enum_token the way Invoke expects:
-	enum_token.symbol = SYM_STRING;
-	enum_token.marker = _T("");
-	enum_token.mem_to_free = NULL;
-	enum_token.buf = buf;
-
-	// Prepare to call object._NewEnum():
-	aCall.symbol = SYM_STRING;
-	aCall.marker = _T("_NewEnum");
-
-	aObject->Invoke(enum_token, Result, IT_CALL, params, 1);
-
-	if (enum_token.mem_to_free)
-		// Invoke returned memory for us to free.
-		free(enum_token.mem_to_free);
+	IObject *enumerator;
+	ResultType result;
 
 	// Check if object returned an enumerator, otherwise return
-	if (enum_token.symbol != SYM_OBJECT)
-		return NULL;
-
-	// create variables to use in for loop / for enumeration
-	// these will be deleted afterwards
-
-	Var *var1 = (Var*)alloca(sizeof(Var));
-	Var *var2 = (Var*)alloca(sizeof(Var));
-	var1->mType = var2->mType = VAR_NORMAL;
-	var1->mAttrib = var2->mAttrib = 0;
-	var1->mByteCapacity = var2->mByteCapacity = 0;
-	var1->mHowAllocated = var2->mHowAllocated = ALLOC_MALLOC;
-
-	aCall.marker = _T("HasKey");
-	aKey.symbol = SYM_OBJECT;
-	aKey.object = aObject;
-	aObjects->Invoke(Result, this_token, IT_CALL, params, 2);
-	if (!Result.value_int64)
+	if (!_tcscmp(aObject->Type(), _T("Object")))
 	{
-		aCall.symbol = SYM_OBJECT;
-		aCall.object = aObject;
-		aKey.symbol = SYM_INTEGER;
-		aKey.value_int64 = aObjCount++;
-		aObjects->Invoke(Result, this_token, IT_SET, params, 2);
+		this_token.object = aObject;
+		aObject->Invoke(result_token, IT_CALL, _T("OwnProps"), this_token, nullptr, 0);
+		if (result_token.symbol == SYM_OBJECT)
+			enumerator = result_token.object;
+		else 
+			return NULL;
+	}
+	else
+	{
+		result = GetEnumerator(enumerator, aObject, 2, false);
+		if (result != OK)
+			return NULL;
 	}
 
-	// Prepare parameters for the loop below: enum.Next(var1 [, var2])
-	aCall.symbol = SYM_STRING;
-	aCall.marker = _T("Next");
+	Var vkey, vval;
+	
+	aKey.symbol = SYM_OBJECT;
+	aKey.object = aObject;
+	this_token.object = aObjects;
+	aObjects->Invoke(result_token, IT_CALL, _T("Has"), this_token, params, 1);
+	if (!result_token.value_int64)
+	{
+		aValue.symbol = SYM_INTEGER;
+		aValue.value_int64 = aObjCount++;
+		aObjects->Invoke(result_token, IT_SET, 0, this_token, params, 2);
+	}
+
+	// Prepare parameters for the loop below
 	aKey.symbol = SYM_VAR;
-	aKey.var = var1;
+	aKey.var = &vkey;
 	aKey.var->mCharContents = _T("");
 	aKey.mem_to_free = 0;
 	aValue.symbol = SYM_VAR;
-	aValue.var = var2;
+	aValue.var = &vval;
 	aValue.var->mCharContents = _T("");
 	aValue.mem_to_free = 0;
 
-	ResultToken result_token;
-	IObject &enumerator = *enum_token.object; // Might perform better as a reference?
 	IObject *aIsObject;
 	__int64 aIsValue;
 	__int64 aThisSize;
@@ -700,39 +690,27 @@ __int64 ObjRawDump(IObject *aObject, char *aBuffer, bool aCopyBuffer, IObject *a
 
 	for (;;)
 	{
-		// Set up result_token the way Invoke expects; each Invoke() will change some or all of these:
-		result_token.symbol = SYM_STRING;
-		result_token.marker = _T("");
-		result_token.mem_to_free = NULL;
-		result_token.buf = buf;
-
-		// Call enumerator.Next(var1, var2)
-		enumerator.Invoke(result_token, enum_token, IT_CALL, params, 3);
-
-		bool next_returned_true = TokenToBOOL(result_token);
-		if (!next_returned_true)
+		result = CallEnumerator(enumerator, &vkey, &vval, false);
+		if (result != CONDITION_TRUE)
 			break;
 
 		// copy Key
 		if (aIsObject = TokenToObject(aKey))
 		{
-			aCall.marker = _T("HasKey");
-			aObjects->Invoke(Result, this_token, IT_CALL, params, 2);
-			aCall.marker = _T("Next");
-			if (Result.value_int64)
+			aObjects->Invoke(result_token, IT_CALL, _T("Has"), this_token, params, 1);
+			if (result_token.value_int64)
 			{
-				aObjects->Invoke(Result, this_token, IT_GET, params + 1, 1);
-				*aThisBuffer = (char)-12;
+				aObjects->Invoke(result_token, IT_GET, 0, this_token, params, 1);
+				*aThisBuffer = (char)-11;
 				aThisBuffer += 1;
-				*(__int64*)aThisBuffer = Result.value_int64;
+				*(__int64*)aThisBuffer = result_token.value_int64;
 				aThisBuffer += sizeof(__int64);
 			}
 			else
 			{
-				*aThisBuffer = (char)-11;
-				aThisBuffer += 1;
-				*(__int64*)aThisBuffer = aThisSize = ObjRawDump(aIsObject, aThisBuffer + sizeof(__int64), aCopyBuffer, aObjects, aObjCount);
-				aThisBuffer += aThisSize + sizeof(__int64);
+				aThisSize = ObjRawDump(aIsObject, aThisBuffer, aObjects, aObjCount);
+				*(__int64*)(aThisBuffer + 1) = aThisSize - 1 - sizeof(__int64);
+				aThisBuffer += aThisSize;
 			}
 		}
 		else
@@ -740,8 +718,7 @@ __int64 ObjRawDump(IObject *aObject, char *aBuffer, bool aCopyBuffer, IObject *a
 			aKey.var->ToTokenSkipAddRef(aKey);
 			if ((aVarType = aKey.symbol) == SYM_STRING)
 			{
-				*aThisBuffer = (char)-10;
-				aThisBuffer += 1;
+				*aThisBuffer++ = (char)-10;
 				*(__int64*)aThisBuffer = aThisSize = (__int64)(aKey.marker_length ? (aKey.marker_length + 1) * sizeof(TCHAR) : 0);
 				aThisBuffer += sizeof(__int64);
 				if (aThisSize)
@@ -752,64 +729,55 @@ __int64 ObjRawDump(IObject *aObject, char *aBuffer, bool aCopyBuffer, IObject *a
 			}
 			else if (aVarType == SYM_FLOAT)
 			{
-				*aThisBuffer = (char)-9;
-				aThisBuffer += 1;
+				*aThisBuffer++ = (char)-9;
 				*(double*)aThisBuffer = TokenToDouble(aKey);
 				aThisBuffer += sizeof(__int64);
 			}
 			else if ((aIsValue = TokenToInt64(aKey)) > 4294967295)
 			{
-				*aThisBuffer = (char)-8;
-				aThisBuffer += 1;
+				*aThisBuffer++ = (char)-8;
 				*(__int64*)aThisBuffer = aIsValue;
 				aThisBuffer += sizeof(__int64);
 			}
 			else if (aIsValue > 65535)
 			{
-				*aThisBuffer = (char)-6;
-				aThisBuffer += 1;
+				*aThisBuffer++ = (char)-6;
 				*(UINT*)aThisBuffer = (UINT)aIsValue;
 				aThisBuffer += sizeof(UINT);
 			}
 			else if (aIsValue > 255)
 			{
-				*aThisBuffer = (char)-4;
-				aThisBuffer += 1;
+				*aThisBuffer++ = (char)-4;
 				*(USHORT*)aThisBuffer = (USHORT)aIsValue;
 				aThisBuffer += sizeof(USHORT);
 			}
 			else if (aIsValue > -1)
 			{
-				*aThisBuffer = (char)-2;
-				aThisBuffer += 1;
+				*aThisBuffer++ = (char)-2;
 				*aThisBuffer = (BYTE)aIsValue;
 				aThisBuffer += sizeof(BYTE);
 			}
 			else if (aIsValue > -129)
 			{
-				*aThisBuffer = (char)-1;
-				aThisBuffer += 1;
+				*aThisBuffer++ = (char)-1;
 				*aThisBuffer = (char)aIsValue;
 				aThisBuffer += sizeof(char);
 			}
 			else if (aIsValue > -32769)
 			{
-				*aThisBuffer = (char)-3;
-				aThisBuffer += 1;
+				*aThisBuffer++ = (char)-3;
 				*(short*)aThisBuffer = (short)aIsValue;
 				aThisBuffer += sizeof(short);
 			}
 			else if (aIsValue >= INT_MIN)
 			{
-				*aThisBuffer = (char)-5;
-				aThisBuffer += 1;
+				*aThisBuffer++ = (char)-5;
 				*(int*)aThisBuffer = (int)aIsValue;
 				aThisBuffer += sizeof(int);
 			}
 			else
 			{
-				*aThisBuffer = (char)-7;
-				aThisBuffer += 1;
+				*aThisBuffer++ = (char)-7;
 				*(__int64*)aThisBuffer = (__int64)aIsValue;
 				aThisBuffer += sizeof(__int64);
 			}
@@ -818,25 +786,22 @@ __int64 ObjRawDump(IObject *aObject, char *aBuffer, bool aCopyBuffer, IObject *a
 		// copy Value
 		if (aIsObject = TokenToObject(aValue))
 		{
-			aCall.marker = _T("HasKey");
 			aKey.symbol = SYM_OBJECT;
 			aKey.object = aIsObject;
-			aObjects->Invoke(Result, this_token, IT_CALL, params, 2);
-			aCall.marker = _T("Next");
-			if (Result.value_int64)
+			aObjects->Invoke(result_token, IT_CALL, _T("Has"), this_token, params + 1, 1);
+			if (result_token.value_int64)
 			{
-				aObjects->Invoke(Result, this_token, IT_GET, params + 2, 1);
-				*aThisBuffer = (char)12;
-				aThisBuffer += 1;
-				*(__int64*)aThisBuffer = Result.value_int64;
+				aObjects->Invoke(result_token, IT_GET, 0, this_token, params + 1, 1);
+				*aThisBuffer++ = (char)11;
+				*(__int64*)aThisBuffer = result_token.value_int64;
 				aThisBuffer += sizeof(__int64);
 			}
 			else
 			{
-				*aThisBuffer = (char)11;
-				aThisBuffer += 1;
-				*(__int64*)aThisBuffer = aThisSize = ObjRawDump(aIsObject, aThisBuffer + sizeof(__int64), aCopyBuffer, aObjects, aObjCount);
-				aThisBuffer += aThisSize + sizeof(__int64);
+				aThisSize = ObjRawDump(aIsObject, aThisBuffer, aObjects, aObjCount);
+				*(__int64*)(aThisBuffer + 1) = aThisSize - 1 - sizeof(__int64);
+				*(char*)aThisBuffer = -1 * *(char*)aThisBuffer;
+				aThisBuffer += aThisSize;
 			}
 		}
 		else
@@ -844,117 +809,86 @@ __int64 ObjRawDump(IObject *aObject, char *aBuffer, bool aCopyBuffer, IObject *a
 			aValue.var->ToTokenSkipAddRef(aValue);
 			if ((aVarType = aValue.symbol) == SYM_STRING)
 			{
-				*aThisBuffer = (char)10;
-				aThisBuffer += 1;
-				if (aCopyBuffer)
+				*aThisBuffer++ = (char)10;
+				*(__int64*)aThisBuffer = aThisSize = (__int64)(aValue.marker_length ? (aValue.marker_length + 1) * sizeof(TCHAR) : 0);
+				aThisBuffer += sizeof(__int64);
+				if (aThisSize)
 				{
-					aCall.marker = _T("GetCapacity");
-					aObject->Invoke(Result, this_token, IT_CALL, params, 2);
-					*(__int64*)aThisBuffer = aThisSize = Result.value_int64;
-					aThisBuffer += sizeof(__int64);
-					if (aThisSize)
-					{
-						aCall.marker = _T("GetAddress");
-						aObject->Invoke(Result, this_token, IT_CALL, params, 2);
-						memcpy(aThisBuffer, (char*)Result.value_int64, (size_t)aThisSize);
-					}
-					aCall.marker = _T("Next");
+					memcpy(aThisBuffer, aValue.marker, (size_t)aThisSize);
+					aThisBuffer += aThisSize;
 				}
-				else
-				{
-					*(__int64*)aThisBuffer = aThisSize = (__int64)(aValue.marker_length ? (aValue.marker_length + 1) * sizeof(TCHAR) : 0);
-					aThisBuffer += sizeof(__int64);
-					if (aThisSize)
-						memcpy(aThisBuffer, aValue.marker, (size_t)aThisSize);
-				}
-				aThisBuffer += aThisSize;
 			}
 			else if (aVarType == SYM_FLOAT)
 			{
-				*aThisBuffer = (char)9;
-				aThisBuffer += 1;
+				*aThisBuffer++ = (char)9;
 				*(double*)aThisBuffer = TokenToDouble(aValue);
 				aThisBuffer += sizeof(double);
 			}
 			else if ((aIsValue = TokenToInt64(aValue)) > 4294967295)
 			{
-				*aThisBuffer = (char)8;
-				aThisBuffer += 1;
+				*aThisBuffer++ = (char)8;
 				*(__int64*)aThisBuffer = aIsValue;
 				aThisBuffer += sizeof(__int64);
 			}
 			else if (aIsValue > 65535)
 			{
-				*aThisBuffer = (char)6;
-				aThisBuffer += 1;
+				*aThisBuffer++ = (char)6;
 				*(UINT*)aThisBuffer = (UINT)aIsValue;
 				aThisBuffer += sizeof(UINT);
 			}
 			else if (aIsValue > 255)
 			{
-				*aThisBuffer = (char)4;
-				aThisBuffer += 1;
+				*aThisBuffer++ = (char)4;
 				*(USHORT*)aThisBuffer = (USHORT)aIsValue;
 				aThisBuffer += sizeof(USHORT);
 			}
 			else if (aIsValue > -1)
 			{
-				*aThisBuffer = (char)2;
-				aThisBuffer += 1;
+				*aThisBuffer++ = (char)2;
 				*aThisBuffer = (BYTE)aIsValue;
 				aThisBuffer += sizeof(BYTE);
 			}
 			else if (aIsValue > -129)
 			{
-				*aThisBuffer = (char)1;
-				aThisBuffer += 1;
+				*aThisBuffer++ = (char)1;
 				*aThisBuffer = (char)aIsValue;
 				aThisBuffer += sizeof(char);
 			}
 			else if (aIsValue > -32769)
 			{
-				*aThisBuffer = (char)3;
-				aThisBuffer += 1;
+				*aThisBuffer++ = (char)3;
 				*(short*)aThisBuffer = (short)aIsValue;
 				aThisBuffer += sizeof(short);
 			}
 			else if (aIsValue > INT_MIN)
 			{
-				*aThisBuffer = (char)5;
-				aThisBuffer += 1;
+				*aThisBuffer++ = (char)5;
 				*aThisBuffer = (int)aIsValue;
 				aThisBuffer += sizeof(int);
 			}
 			else
 			{
-				*aThisBuffer = (char)7;
-				aThisBuffer += 1;
+				*aThisBuffer++ = (char)7;
 				*(__int64*)aThisBuffer = (__int64)aIsValue;
 				aThisBuffer += sizeof(__int64);
 			}
 		}
 
-		// release object if it was assigned prevoiously when calling enum.Next
-		if (var1->IsObject())
-			var1->ReleaseObject();
-		if (var2->IsObject())
-			var2->ReleaseObject();
-
-		// Free any memory or object which may have been returned by Invoke:
-		if (result_token.mem_to_free)
-			free(result_token.mem_to_free);
-		if (result_token.symbol == SYM_OBJECT)
-			result_token.object->Release();
+		// release object if it was assigned prevoiously when calling enum
+		if (vkey.IsObject())
+			vkey.ReleaseObject();
+		if (vval.IsObject())
+			vval.ReleaseObject();
 
 		aKey.symbol = SYM_VAR;
-		aKey.var = var1;
+		aKey.var = &vkey;
 		aValue.symbol = SYM_VAR;
-		aValue.var = var2;
+		aValue.var = &vval;
 	}
 	// release enumerator and free vars
-	enumerator.Release();
-	var1->Free();
-	var2->Free();
+	enumerator->Release();
+	vkey.Free();
+	vval.Free();
 	return aThisBuffer - aBuffer;
 }
 
@@ -973,8 +907,8 @@ BIF_DECL(BIF_ObjDump)
 		return;
 	}
 	INT aCopyBuffer = aParamCount > 2 ? (int)TokenToInt64(*aParam[2]) : 0;
-	DWORD aSize = (DWORD)ObjRawSize(aObject, (aCopyBuffer == 1 || aCopyBuffer == 3), NULL);
-	char *aBuffer = (char*)malloc(aSize + sizeof(__int64));
+	DWORD aSize = (DWORD)ObjRawSize(aObject, NULL);
+	char *aBuffer = (char*)malloc(aSize);
 	if (!aBuffer)
 	{
 		g_script->ScriptError(ERR_OUTOFMEM);
@@ -982,10 +916,10 @@ BIF_DECL(BIF_ObjDump)
 		aResultToken.marker = _T("");
 		return;
 	}
-	*(__int64*)aBuffer = aSize;
-	IObject *aObjects = Object::Create();
+	*(__int64*)(aBuffer + 1) = aSize - 1 - sizeof(__int64) ;
+	Map *aObjects = Map::Create();
 	UINT aObjCount = 0;
-	if (aSize != ObjRawDump(aObject, aBuffer + sizeof(__int64), (aCopyBuffer == 1 || aCopyBuffer == 3), aObjects, aObjCount))
+	if (aSize != ObjRawDump(aObject, aBuffer, aObjects, aObjCount))
 	{
 		aObjects->Release();
 		free(aBuffer);
@@ -994,9 +928,9 @@ BIF_DECL(BIF_ObjDump)
 		aResultToken.marker = _T("");
 		return;
 	}
-	aSize += sizeof(__int64);
+	//aSize += sizeof(__int64);
 	aObjects->Release();
-	if (aParamCount > 2 && TokenToInt64(*aParam[2]) > 1)
+	if (aParamCount > 2 && TokenToInt64(*aParam[2]) != 0)
 	{
 		LPVOID aDataBuf;
 		TCHAR *pw[1024] = {};
@@ -1061,7 +995,13 @@ BIF_DECL(BIF_ObjDump)
 
 IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &aObjSize)
 {
-	IObject *aObject = Object::Create();
+	IObject *aObject;
+	ResultToken result_token, this_token, enum_token, aKey, aValue;
+	ExprTokenType *params[] = { &aKey, &aValue };
+	TCHAR buf[MAX_INTEGER_LENGTH];
+	result_token.buf = buf;
+	this_token.symbol = SYM_OBJECT;
+
 	if (aObjCount == aObjSize)
 	{
 		IObject **newObjects = (IObject**)malloc(aObjSize * 2 * sizeof(IObject**));
@@ -1072,39 +1012,63 @@ IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &a
 		aObjects = newObjects;
 		aObjSize *= 2;
 	}
+	
+	char *aThisBuffer = aBuffer;
+	char typekey,typeval, typeobj = *(char*)aThisBuffer;
+	
+	if (typeobj == -12 || typeobj == 12) //(_tcscmp(aObject->Type(), _T("Object")))
+		aObject = Object::Create();
+	else if (typeobj == -13 || typeobj == 13) //(_tcscmp(aObject->Type(), _T("Array")))
+		aObject = Array::Create();
+	else if (typeobj == -14 || typeobj == 14) //(_tcscmp(aObject->Type(), _T("Map")) || _tcscmp(aObject->Type(), _T("Struct")))
+		aObject = Map::Create();
+	else if (typeobj == -15 || typeobj == 15) //(_tcscmp(aObject->Type(), _T("Buffer")))
+	{
+		size_t mSize = (size_t)*(__int64*)(aThisBuffer + 1);
+		aKey.buf = (LPTSTR)malloc(mSize);
+		memmove((void *)aKey.buf, (aThisBuffer + 1 + sizeof(__int64)), mSize);
+		if (!(aObject = new BufferObject((void *)aKey.buf, mSize)))
+			g_script->ScriptError(ERR_OUTOFMEM);
+		dynamic_cast<BufferObject*>(aObject)->SetBase(BufferObject::sPrototype);
+		return aObject;
+	}
+	else
+		g_script->ScriptError(ERR_TYPE_MISMATCH);
+	if (!aObject)
+		g_script->ScriptError(ERR_OUTOFMEM);
 	aObjects[aObjCount++] = aObject;
-	char *aThisBuffer = aBuffer + sizeof(__int64);
 
-	ResultToken Result, this_token, enum_token, aCall, aKey, aValue;
-	ExprTokenType *params[] = { &aCall, &aKey, &aValue };
-	aCall.symbol = SYM_STRING;
-	size_t aSize = (size_t)*(__int64*)aBuffer;
-	TCHAR buf[MAX_INTEGER_LENGTH];
+
+	aThisBuffer++;
+	size_t aSize = (size_t)*(__int64*)aThisBuffer;
+	aThisBuffer += sizeof(__int64);
+
+	this_token.object = aObject;
 
 	for (char *end = aThisBuffer + aSize; aThisBuffer < end;)
 	{
-		char type = *(char*)aThisBuffer;
-		aThisBuffer += 1;
-		if (type == -12)
+		typekey = *(char*)aThisBuffer++;
+		if (typekey < -11)
+		{
+			aThisBuffer -= 1;  // required for the object type
+			aKey.symbol = SYM_OBJECT;
+			aKey.object = ObjRawLoad(aThisBuffer, aObjects, aObjCount, aObjSize);
+			aThisBuffer += 1 + sizeof(__int64) + *(__int64*)(aThisBuffer + 1);
+		}
+		else if (typekey == -11)
 		{
 			aKey.symbol = SYM_OBJECT;
 			aKey.object = aObjects[*(__int64*)aThisBuffer];
 			aThisBuffer += sizeof(__int64);
 		}
-		else if (type == -11)
-		{
-			aKey.symbol = SYM_OBJECT;
-			aKey.object = ObjRawLoad(aThisBuffer, aObjects, aObjCount, aObjSize);
-			aThisBuffer += sizeof(__int64) + *(__int64*)aThisBuffer;
-		}
-		else if (type == -10)
+		else if (typekey == -10)
 		{
 			aKey.symbol = SYM_STRING;
 			__int64 aMarkerSize = *(__int64*)aThisBuffer;
 			aThisBuffer += sizeof(__int64);
 			if (aMarkerSize)
 			{
-				aKey.marker_length = (size_t)(aMarkerSize - sizeof(TCHAR)) / sizeof(TCHAR);
+				aKey.marker_length = (size_t)(aMarkerSize - 1) / sizeof(TCHAR);
 				aKey.marker = (LPTSTR)aThisBuffer;
 				aThisBuffer += aMarkerSize;
 			}
@@ -1114,7 +1078,7 @@ IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &a
 				aKey.marker_length = 0;
 			}
 		}
-		else if (type == -9)
+		else if (typekey == -9)
 		{
 			aKey.symbol = SYM_STRING;
 			aKey.marker_length = FTOA(*(double*)aThisBuffer, buf, MAX_INTEGER_LENGTH);
@@ -1124,42 +1088,42 @@ IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &a
 		else
 		{
 			aKey.symbol = SYM_INTEGER;
-			if (type == -8)
+			if (typekey == -8)
 			{
 				aKey.value_int64 = *(__int64*)aThisBuffer;
 				aThisBuffer += sizeof(__int64);
 			}
-			else if (type == -6)
+			else if (typekey == -6)
 			{
 				aKey.value_int64 = *(UINT*)aThisBuffer;
 				aThisBuffer += sizeof(UINT);
 			}
-			else if (type == -4)
+			else if (typekey == -4)
 			{
 				aKey.value_int64 = *(USHORT*)aThisBuffer;
 				aThisBuffer += sizeof(USHORT);
 			}
-			else if (type == -2)
+			else if (typekey == -2)
 			{
 				aKey.value_int64 = *(BYTE*)aThisBuffer;
 				aThisBuffer += sizeof(BYTE);
 			}
-			else if (type == -1)
+			else if (typekey == -1)
 			{
 				aKey.value_int64 = *(char*)aThisBuffer;
 				aThisBuffer += sizeof(char);
 			}
-			else if (type == -3)
+			else if (typekey == -3)
 			{
 				aKey.value_int64 = *(short*)aThisBuffer;
 				aThisBuffer += sizeof(short);
 			}
-			else if (type == -5)
+			else if (typekey == -5)
 			{
 				aKey.value_int64 = *(int*)aThisBuffer;
 				aThisBuffer += sizeof(int);
 			}
-			else if (type == -7)
+			else if (typekey == -7)
 			{
 				aKey.value_int64 = *(__int64*)aThisBuffer;
 				aThisBuffer += sizeof(__int64);
@@ -1168,65 +1132,81 @@ IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &a
 				return NULL;
 		}
 
-		type = *(char*)aThisBuffer;
-		aThisBuffer += 1;
-		if (type == 12)
+		typeval = *(char*)aThisBuffer++;
+		if (typeval > 11)
+		{
+			aValue.symbol = SYM_OBJECT;
+			aValue.object = ObjRawLoad(--aThisBuffer, aObjects, aObjCount, aObjSize);   // aThisBuffer-- required to pass type of object
+			aThisBuffer += 1 + sizeof(__int64) + *(__int64*)(aThisBuffer + 1);
+		}
+		else if (typeval == 11)
 		{
 			aValue.symbol = SYM_OBJECT;
 			aValue.object = aObjects[*(__int64*)aThisBuffer];
 			aThisBuffer += sizeof(__int64);
 		}
-		else if (type == 11)
+		else if (typeval == 10)
 		{
-			aValue.symbol = SYM_OBJECT;
-			aValue.object = ObjRawLoad(aThisBuffer, aObjects, aObjCount, aObjSize);
-			aThisBuffer += sizeof(__int64) + *(__int64*)aThisBuffer;
+			aValue.symbol = SYM_STRING;
+			__int64 aMarkerSize = *(__int64*)aThisBuffer;
+			aThisBuffer += sizeof(__int64);
+			if (aMarkerSize)
+			{
+				aValue.marker_length = (size_t)(aMarkerSize - 1) / sizeof(TCHAR);
+				aValue.marker = (LPTSTR)aThisBuffer;
+				aThisBuffer += aMarkerSize;
+			}
+			else
+			{
+				aValue.marker = _T("");
+				aValue.marker_length = 0;
+			}
 		}
-		else if (type == 9)
+		else if (typeval == 9)
 		{
 			aValue.symbol = SYM_FLOAT;
 			aValue.value_double = *(double*)aThisBuffer;
 			aThisBuffer += sizeof(__int64);
 		}
-		else if (type != 10)
+		else
 		{
 			aValue.symbol = SYM_INTEGER;
-			if (type == 8)
+			if (typeval == 8)
 			{
 				aValue.value_int64 = *(__int64*)aThisBuffer;
 				aThisBuffer += sizeof(__int64);
 			}
-			else if (type == 6)
+			else if (typeval == 6)
 			{
 				aValue.value_int64 = *(UINT*)aThisBuffer;
 				aThisBuffer += sizeof(UINT);
 			}
-			else if (type == 4)
+			else if (typeval == 4)
 			{
 				aValue.value_int64 = *(USHORT*)aThisBuffer;
 				aThisBuffer += sizeof(USHORT);
 			}
-			else if (type == 2)
+			else if (typeval == 2)
 			{
 				aValue.value_int64 = *(BYTE*)aThisBuffer;
 				aThisBuffer += sizeof(BYTE);
 			}
-			else if (type == 1)
+			else if (typeval == 1)
 			{
 				aValue.value_int64 = *(char*)aThisBuffer;
 				aThisBuffer += sizeof(char);
 			}
-			else if (type == 3)
+			else if (typeval == 3)
 			{
 				aValue.value_int64 = *(short*)aThisBuffer;
 				aThisBuffer += sizeof(short);
 			}
-			else if (type == 5)
+			else if (typeval == 5)
 			{
 				aValue.value_int64 = *(int*)aThisBuffer;
 				aThisBuffer += sizeof(int);
 			}
-			else if (type == 7)
+			else if (typeval == 7)
 			{
 				aValue.value_int64 = *(__int64*)aThisBuffer;
 				aThisBuffer += sizeof(__int64);
@@ -1234,34 +1214,13 @@ IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &a
 			else
 				return NULL;
 		}
-		if (type == 10)
-		{
-			aValue.symbol = SYM_STRING;
-			__int64 aMarkerSize = *(__int64*)aThisBuffer;
-			aThisBuffer += sizeof(__int64);
-			if (aMarkerSize)
-			{
-				aValue.marker_length = -1;
-				aValue.marker = (LPTSTR)aThisBuffer;
-				aObject->Invoke(Result, this_token, IT_SET, params + 1, 2);
-				aCall.marker = _T("SetCapacity");
-				aValue.symbol = SYM_INTEGER;
-				aValue.value_int64 = aMarkerSize;
-				aObject->Invoke(Result, this_token, IT_CALL, params, 3);
-				aCall.marker = _T("GetAddress");
-				aObject->Invoke(Result, this_token, IT_CALL, params, 2);
-				memcpy((char*)Result.value_int64, aThisBuffer, (size_t)aMarkerSize);
-				aThisBuffer += aMarkerSize;
-			}
-			else
-			{
-				aValue.marker = _T("");
-				aValue.marker_length = 0;
-				aObject->Invoke(Result, this_token, IT_SET, params + 1, 2);
-			}
-		}
+		
+		if (typeobj == -12 || typeobj == 12)
+			aObject->Invoke(result_token, IT_SET, aKey.marker, this_token, params + 1, 1);
+		else if (typeobj == -13 || typeobj == 13)
+			aObject->Invoke(result_token, IT_CALL, _T("Push"), this_token, params + 1, 1);
 		else
-			aObject->Invoke(Result, this_token, IT_SET, params + 1, 2);
+			aObject->Invoke(result_token, IT_SET, 0, this_token, params , 2);
 	}
 	return aObject;
 }
@@ -1365,20 +1324,18 @@ BIF_DECL(BIF_Object)
 	{
 		obj = (IObject *)TokenToInt64(*aParam[0]);
 		if (obj < (IObject *)65536) // Prevent some obvious errors.
-			obj = NULL;
+			_f_throw(ERR_PARAM1_INVALID);
 		else
 			obj->AddRef();
 	}
 	else
-		obj = Object::Create(aParam, aParamCount);
+		obj = Object::Create(aParam, aParamCount, &aResultToken);
 
 	if (obj)
 	{
 		// DO NOT ADDREF: the caller takes responsibility for the only reference.
 		_f_return(obj);
 	}
-	else
-		_f_throw(aParamCount == 1 ? ERR_PARAM1_INVALID : ERR_OUTOFMEM);
 }
 
 
@@ -1388,24 +1345,34 @@ BIF_DECL(BIF_Object)
 
 BIF_DECL(BIF_Array)
 {
-	if (aResultToken.object = Object::CreateArray(aParam, aParamCount))
-	{
-		aResultToken.symbol = SYM_OBJECT;
-		return;
-	}
+	if (auto arr = Array::Create(aParam, aParamCount))
+		_f_return(arr);
 	_f_throw(ERR_OUTOFMEM);
+}
+
+
+//
+// Map()
+//
+
+BIF_DECL(BIF_Map)
+{
+	if (aParamCount & 1)
+		_f_throw(ERR_PARAM_COUNT_INVALID);
+	auto obj = Map::Create(aParam, aParamCount);
+	if (!obj)
+		_f_throw(ERR_OUTOFMEM);
+	_f_return(obj);
 }
 	
 
 //
-// BIF_IsObject - IsObject(obj)
+// IsObject
 //
 
 BIF_DECL(BIF_IsObject)
 {
-	int i;
-	for (i = 0; i < aParamCount && TokenToObject(*aParam[i]); ++i);
-	_f_return_b(i == aParamCount); // TRUE if all are objects.  Caller has ensured aParamCount > 0.
+	_f_return_b(TokenToObject(*aParam[0]) != nullptr);
 }
 
 
@@ -1416,6 +1383,7 @@ BIF_DECL(BIF_IsObject)
 BIF_DECL(Op_ObjInvoke)
 {
     int invoke_type = _f_callee_id;
+	bool must_be_handled = true;
     IObject *obj;
     ExprTokenType *obj_param;
 
@@ -1432,66 +1400,74 @@ BIF_DECL(Op_ObjInvoke)
 		obj = obj_param->object;
 	else if (obj_param->symbol == SYM_VAR && obj_param->var->HasObject())
 		obj = obj_param->var->Object();
+	else if (obj_param->symbol == SYM_VAR && !_tcsicmp(obj_param->var->mName, _T("base")) // base pseudo-keyword.
+		&& !obj_param->var->HasContents() // For now, allow `base` variable to be reassigned as in v1.
+		&& g->CurrentFunc && g->CurrentFunc->mClass) // We're in a function defined within a class (i.e. a method).
+	{
+		obj = g->CurrentFunc->mClass->Base();
+		ASSERT(obj != nullptr); // Should always pass for classes created by a class definition.
+		obj_param = (ExprTokenType *)alloca(sizeof(ExprTokenType));
+		obj_param->symbol = SYM_VAR;
+		obj_param->var = g->CurrentFunc->mParam[0].var; // this
+		invoke_type |= IF_NO_SET_PROPVAL;
+		// Maybe not the best for error-detection, but this allows calls such as base.__delete()
+		// to work when the superclass has no definition, which avoids the need to check whether
+		// the superclass defines it, and ensures that any definition added later is called.
+		must_be_handled = false;
+	}
+	else // Non-object value.
+	{
+		obj = Object::ValueBase(*obj_param);
+		invoke_type |= IF_NO_SET_PROPVAL;
+	}
+
+	TCHAR name_buf[MAX_NUMBER_SIZE];
+	LPTSTR name = nullptr;
+	if (invoke_type & IF_DEFAULT)
+		invoke_type &= ~IF_DEFAULT;
 	else
-		obj = NULL;
+	{
+		if (aParam[0]->symbol != SYM_MISSING)
+		{
+			name = TokenToString(*aParam[0], name_buf);
+			if (!*name && TokenToObject(*aParam[0]))
+				_f_throw(ERR_TYPE_MISMATCH);
+		}
+		++aParam;
+		--aParamCount;
+	}
     
 	ResultType result;
-    if (obj)
+	bool param_is_var = obj_param->symbol == SYM_VAR;
+	if (param_is_var)
+		obj->AddRef(); // Ensure obj isn't deleted during the call if the variable is reassigned.
+    result = obj->Invoke(aResultToken, invoke_type, name, *obj_param, aParam, aParamCount);
+	if (param_is_var)
+		obj->Release();
+	
+	if (result == INVOKE_NOT_HANDLED && must_be_handled)
 	{
-		bool param_is_var = obj_param->symbol == SYM_VAR;
-		if (param_is_var)
-			// Since the variable may be cleared as a side-effect of the invocation, call AddRef to ensure the object does not expire prematurely.
-			// This is not necessary for SYM_OBJECT since that reference is already counted and cannot be released before we return.  Each object
-			// could take care not to delete itself prematurely, but it seems more proper, more reliable and more maintainable to handle it here.
-			obj->AddRef();
-        result = obj->Invoke(aResultToken, *obj_param, invoke_type, aParam, aParamCount);
-		if (param_is_var)
-			obj->Release();
-	}
-	// Invoke meta-functions of g_MetaObject->
-	else if (INVOKE_NOT_HANDLED == (result = g_MetaObject->Invoke(aResultToken, *obj_param, invoke_type | IF_META, aParam, aParamCount)))
-	{
-		// Since above did not handle it, check for attempts to access .base of non-object value (g_MetaObject itself).
-		if (   invoke_type != IT_CALL // Exclude things like "".base().
-			&& aParamCount > (invoke_type == IT_SET ? 2 : 0) // SET is supported only when an index is specified: "".base[x]:=y
-			&& !_tcsicmp(TokenToString(*aParam[0]), _T("base"))   )
-		{
-			if (aParamCount > 1)	// "".base[x] or similar
-			{
-				// Re-invoke g_MetaObject without meta flag or "base" param.
-				ExprTokenType base_token;
-				base_token.symbol = SYM_OBJECT;
-				base_token.object = g_MetaObject;
-				result = g_MetaObject->Invoke(aResultToken, base_token, invoke_type, aParam + 1, aParamCount - 1);
-			}
-			else					// "".base
-			{
-				// Return a reference to g_MetaObject->  No need to AddRef as g_MetaObject ignores it.
-				aResultToken.symbol = SYM_OBJECT;
-				aResultToken.object = g_MetaObject;
-				result = OK;
-			}
-		}
-		else
-		{
-			// Since it wasn't handled (not even by g_MetaObject), maybe warn at this point:
-			if (obj_param->symbol == SYM_VAR)
-				obj_param->var->MaybeWarnUninitialized();
-		}
-	}
-	if (result == INVOKE_NOT_HANDLED)
-	{
-		// Invocation not handled. Either there was no target object, or the object doesn't handle
-		// this method/property.  For Object (associative arrays), only CALL should give this result.
-		if (!obj)
-			_f_throw(ERR_NO_OBJECT, g->ExcptDeref ? g->ExcptDeref->marker : _T(""));
-		else
-			_f_throw(invoke_type == IT_CALL ? ERR_UNKNOWN_METHOD : ERR_UNKNOWN_PROPERTY
-				, aParamCount ? TokenToString(*aParam[0]) : _T(""));
+		_f__ret(aResultToken.UnknownMemberError(*obj_param, invoke_type, name));
 	}
 	else if (result == FAIL || result == EARLY_EXIT) // For maintainability: SetExitResult() might not have been called.
 	{
 		aResultToken.SetExitResult(result);
+	}
+	else if (invoke_type & IT_SET)
+	{
+		aResultToken.Free();
+		aResultToken.mem_to_free = NULL;
+		auto &value = *aParam[aParamCount - 1];
+		switch (value.symbol)
+		{
+		case SYM_VAR:
+			value.var->ToToken(aResultToken);
+			break;
+		case SYM_OBJECT:
+			value.object->AddRef();
+		default:
+			aResultToken.CopyValueFrom(value);
+		}
 	}
 }
 	
@@ -1511,107 +1487,25 @@ BIF_DECL(Op_ObjGetInPlace)
 
 
 //
-// Op_ObjNew - Handles "new" as in "new Class()".
-//
-
-BIF_DECL(Op_ObjNew)
-{
-	// Set default return value for Invoke().
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = _T("");
-
-	ExprTokenType *class_token = aParam[0]; // Save this to be restored later.
-
-	IObject *class_object = TokenToObject(*class_token);
-	if (!class_object)
-		_f_throw(ERR_NEW_NO_CLASS);
-
-	Object *new_object = Object::Create();
-	if (!new_object)
-		_f_throw(ERR_OUTOFMEM);
-
-	new_object->SetBase(class_object);
-
-	ExprTokenType name_token, this_token;
-	this_token.symbol = SYM_OBJECT;
-	this_token.object = new_object;
-	name_token.symbol = SYM_STRING;
-	aParam[0] = &name_token;
-
-	ResultType result;
-	LPTSTR buf = aResultToken.buf; // In case Invoke overwrites aResultToken.buf via the union.
-
-	Line *curr_line = g_script->mCurrLine;
-
-	// __Init was added so that instance variables can be initialized in the correct order
-	// (beginning at the root class and ending at class_object) before __New is called.
-	// It shouldn't be explicitly defined by the user, but auto-generated in DefineClassVars().
-	name_token.marker = _T("__Init");
-	name_token.marker_length = 6;
-	result = class_object->Invoke(aResultToken, this_token, IT_CALL | IF_METAOBJ, aParam, 1);
-	if (result != INVOKE_NOT_HANDLED)
-	{
-		// It's possible that __Init is user-defined (despite recommendations in the
-		// documentation) or built-in, so make sure the return value, if any, is freed:
-		aResultToken.Free();
-		// Reset to defaults for __New, invoked below.
-		aResultToken.InitResult(buf);
-		if (result == FAIL || result == EARLY_EXIT) // Checked only after Free() and InitResult() as caller might expect mem_to_free == NULL.
-		{
-			new_object->Release();
-			aParam[0] = class_token; // Restore it to original caller-supplied value.
-			aResultToken.SetExitResult(result);
-			return;
-		}
-	}
-
-	g_script->mCurrLine = curr_line; // Prevent misleading error reports/Exception() stack trace.
-	
-	// __New may be defined by the script for custom initialization code.
-	name_token.marker = _T("__New");
-	name_token.marker_length = 5;
-	result = class_object->Invoke(aResultToken, this_token, IT_CALL | IF_METAOBJ, aParam, aParamCount);
-	if (result == EARLY_RETURN || !TokenIsEmptyString(aResultToken))
-	{
-		// __New() returned a value in aResultToken, so use it as our result.  aResultToken is checked
-		// for the unlikely case that class_object is not an Object (perhaps it's a ComObject) or __New
-		// points to a built-in function.  The older behaviour for those cases was to free the unexpected
-		// return value, but this requires less code and might be useful somehow.
-		new_object->Release();
-	}
-	else if (result == FAIL || result == EARLY_EXIT)
-	{
-		// An error was raised within __New() or while trying to call it, or Exit was called.
-		new_object->Release();
-		aResultToken.SetExitResult(result);
-	}
-	else
-	{
-		// Either it wasn't handled (i.e. neither this class nor any of its super-classes define __New()),
-		// or there was no explicit "return", so just return the new object.
-		aResultToken.symbol = SYM_OBJECT;
-		aResultToken.object = this_token.object;
-	}
-	aParam[0] = class_token;
-}
-
-
-//
 // Op_ObjIncDec - Handles pre/post-increment/decrement for object fields, such as ++x[y].
 //
 
 BIF_DECL(Op_ObjIncDec)
 {
-	SymbolType op = (SymbolType)_f_callee_id;
+	SymbolType op = SymbolType(_f_callee_id & ~IF_DEFAULT);
+	
+	bool square_brackets = _f_callee_id & IF_DEFAULT;
+	auto *get_func = square_brackets ? OpFunc_GetItem : OpFunc_GetProp;
+	auto *set_func = square_brackets ? OpFunc_SetItem : OpFunc_SetProp;
 
 	ResultToken temp_result;
 	// Set the defaults expected by Op_ObjInvoke:
 	temp_result.InitResult(aResultToken.buf);
 	temp_result.symbol = SYM_INTEGER;
-	temp_result.func = &g_ObjGet;
+	temp_result.func = get_func;
 
 	// Retrieve the current value.  Do it this way instead of calling Object::Invoke
-	// so that if aParam[0] is not an object, g_MetaObject is correctly invoked.
+	// so that if aParam[0] is not an object, ValueBase() is correctly invoked.
 	Op_ObjInvoke(temp_result, aParam, aParamCount);
 
 	if (temp_result.Exited()) // Implies no return value.
@@ -1619,7 +1513,7 @@ BIF_DECL(Op_ObjIncDec)
 		aResultToken.SetExitResult(temp_result.Result());
 		return;
 	}
-
+	bool throw_after_free_token = false; // set default, overridden if value_to_set is non-numeric.
 	ExprTokenType current_value, value_to_set;
 	switch (value_to_set.symbol = current_value.symbol = TokenIsNumeric(temp_result))
 	{
@@ -1634,14 +1528,14 @@ BIF_DECL(Op_ObjIncDec)
 		break;
 
 	default: // PURE_NOT_NUMERIC == SYM_STRING.
-		// Value is non-numeric, so assign and return "".
-		value_to_set.marker = _T(""); value_to_set.marker_length = 0;
-		current_value.marker = _T(""); current_value.marker_length = 0;
+		// Value is non-numeric, so throw.
+		throw_after_free_token = true;
 	}
 
 	// Free the object or string returned by Op_ObjInvoke, if applicable.
 	temp_result.Free();
-
+	if (throw_after_free_token)
+		_f_throw(ERR_TYPE_MISMATCH);
 	// Although it's likely our caller's param array has enough space to hold the extra
 	// parameter, there's no way to know for sure whether it's safe, so we allocate our own:
 	ExprTokenType **param = (ExprTokenType **)_alloca((aParamCount + 1) * sizeof(ExprTokenType *));
@@ -1650,17 +1544,17 @@ BIF_DECL(Op_ObjIncDec)
 
 	if (op == SYM_PRE_INCREMENT || op == SYM_PRE_DECREMENT)
 	{
-		aResultToken.func = &g_ObjSet;
+		aResultToken.func = set_func;
 		// Set the new value and pass the return value of the invocation back to our caller.
 		// This should be consistent with something like x.y := x.y + 1.
 		Op_ObjInvoke(aResultToken, param, aParamCount);
 	}
 	else // SYM_POST_INCREMENT || SYM_POST_DECREMENT
 	{
-		// Must be re-initialized (and must use g_ObjSet instead of g_ObjGet):
+		// Must be re-initialized (and must use SET rather than GET):
 		temp_result.InitResult(aResultToken.buf);
 		temp_result.symbol = SYM_INTEGER;
-		temp_result.func = &g_ObjSet;
+		temp_result.func = set_func;
 		
 		// Set the new value.
 		Op_ObjInvoke(temp_result, param, aParamCount);
@@ -1725,10 +1619,18 @@ BIF_DECL(BIF_ObjBindMethod)
 {
 	IObject *func, *bound_func;
 	if (  !(func = TokenToFunctor(*aParam[0]))  )
-	{
 		_f_throw(ERR_PARAM1_INVALID);
+	LPCTSTR name = nullptr;
+	if (aParamCount > 1)
+	{
+		if (aParam[1]->symbol != SYM_MISSING)
+			name = TokenToString(*aParam[1], _f_number_buf);
+		aParam += 2;
+		aParamCount -= 2;
 	}
-	bound_func = BoundFunc::Bind(func, aParam + 1, aParamCount - 1, IT_CALL);
+	else
+		aParamCount = 0;
+	bound_func = BoundFunc::Bind(func, IT_CALL, name, aParam, aParamCount);
 	func->Release();
 	if (!bound_func)
 		_f_throw(ERR_OUTOFMEM);
@@ -1745,14 +1647,15 @@ BIF_DECL(BIF_ObjRaw)
 	Object *obj = dynamic_cast<Object*>(TokenToObject(*aParam[0]));
 	if (!obj)
 		_f_throw(ERR_PARAM1_INVALID);
+	LPTSTR name = TokenToString(*aParam[1], _f_number_buf);
 	if (_f_callee_id == FID_ObjRawSet)
 	{
-		if (!obj->SetItem(*aParam[1], *aParam[2]))
+		if (!obj->SetOwnProp(name, *aParam[2]))
 			_f_throw(ERR_OUTOFMEM);
 	}
 	else
 	{
-		if (obj->GetItem(aResultToken, *aParam[1]))
+		if (obj->GetOwnProp(aResultToken, name))
 		{
 			if (aResultToken.symbol == SYM_OBJECT)
 				aResultToken.object->AddRef();
@@ -1767,25 +1670,98 @@ BIF_DECL(BIF_ObjRaw)
 // ObjSetBase/ObjGetBase - Change or return Object's base without invoking any meta-functions.
 //
 
-BIF_DECL(BIF_ObjBase)
+BIF_DECL(BIF_Base)
 {
 	Object *obj = dynamic_cast<Object*>(TokenToObject(*aParam[0]));
-	if (!obj)
-		_f_throw(ERR_PARAM1_INVALID);
 	if (_f_callee_id == FID_ObjSetBase)
 	{
-		IObject *new_base = TokenToObject(*aParam[1]);
-		if (!new_base && !TokenIsEmptyString(*aParam[1]))
-			_f_throw(ERR_PARAM2_INVALID);
-		obj->SetBase(new_base);
+		if (!obj)
+			_f_throw(ERR_TYPE_MISMATCH);
+		auto new_base = dynamic_cast<Object *>(TokenToObject(*aParam[1]));
+		if (!obj->SetBase(new_base, aResultToken))
+			return;
 	}
 	else // ObjGetBase
 	{
-		if (IObject *obj_base = obj->Base())
+		Object *obj_base;
+		if (obj)
+			obj_base = obj->Base();
+		else
+			obj_base = Object::ValueBase(*aParam[0]);
+		if (obj_base)
 		{
 			obj_base->AddRef();
 			_f_return(obj_base);
 		}
+		// Otherwise, it's something with no base, so return "".
+		// Could be Object::sAnyPrototype, a ComObject or perhaps SYM_MISSING.
 	}
 	_f_return_empty;
+}
+
+
+bool Object::HasBase(ExprTokenType &aValue, IObject *aBase)
+{
+	if (auto obj = dynamic_cast<Object *>(TokenToObject(aValue)))
+	{
+		return obj->IsDerivedFrom(aBase);
+	}
+	if (auto value_base = Object::ValueBase(aValue))
+	{
+		return value_base == aBase || value_base->IsDerivedFrom(aBase);
+	}
+	// Something that doesn't fit in our type hierarchy, like a ComObject.
+	// Returning false seems correct and more useful than throwing.
+	// HasBase(ComObj, "".base.base) ; False, it's not a primitive value.
+	// HasBase(ComObj, Object.Prototype) ; False, it's not one of our Objects.
+	return false;
+}
+
+
+BIF_DECL(BIF_HasBase)
+{
+	auto that_base = ParamIndexToObject(1);
+	if (!that_base)
+	{
+		_f_throw(ERR_TYPE_MISMATCH);
+	}
+	_f_return_b(Object::HasBase(*aParam[0], that_base));
+}
+
+
+Object *ParamToObjectOrBase(ExprTokenType &aToken, ResultToken &aResultToken)
+{
+	Object *obj;
+	if (  (obj = dynamic_cast<Object *>(TokenToObject(aToken)))
+		|| (obj = Object::ValueBase(aToken))  )
+		return obj;
+	aResultToken.Error(ERR_TYPE_MISMATCH);
+	return nullptr;
+}
+
+
+BIF_DECL(BIF_HasProp)
+{
+	auto obj = ParamToObjectOrBase(*aParam[0], aResultToken);
+	if (!obj)
+		return;
+	_f_return_b(obj->HasProp(ParamIndexToString(1, _f_number_buf)));
+}
+
+
+BIF_DECL(BIF_HasMethod)
+{
+	auto obj = ParamToObjectOrBase(*aParam[0], aResultToken);
+	if (!obj)
+		return;
+	_f_return_b(obj->HasMethod(ParamIndexToString(1, _f_number_buf)));
+}
+
+
+BIF_DECL(BIF_GetMethod)
+{
+	auto obj = ParamToObjectOrBase(*aParam[0], aResultToken);
+	if (!obj)
+		return;
+	obj->GetMethod(aResultToken, ParamIndexToString(1, _f_number_buf));
 }

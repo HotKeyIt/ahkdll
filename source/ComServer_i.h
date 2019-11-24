@@ -94,11 +94,11 @@ DEFINE_GUID(IID_ICOMServer,0xa58e17b4, 0xf892, 0x4839, 0x8c, 0x46, 0x9f, 0x3c, 0
     {
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahktextdll( 
-           /*in,optional*/VARIANT script,/*in,optional*/VARIANT params,/*in,optional*/VARIANT title, /* [retval][out] */UINT_PTR* hThread) = 0;
+           /*in,optional*/VARIANT script,/*in,optional*/VARIANT params,/*in,optional*/VARIANT title, /* [retval][out] */HANDLE* hThread) = 0;
         
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkdll( 
-           /*in,optional*/VARIANT filepath,/*in,optional*/VARIANT params,/*in,optional*/VARIANT title, /* [retval][out] */UINT_PTR* hThread) = 0;
+           /*in,optional*/VARIANT filepath,/*in,optional*/VARIANT params,/*in,optional*/VARIANT title, /* [retval][out] */HANDLE* hThread) = 0;
         
     public:
         virtual /* [id] */ HRESULT STDMETHODCALLTYPE ahkPause( 

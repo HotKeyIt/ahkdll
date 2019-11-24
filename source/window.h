@@ -32,7 +32,7 @@ GNU General Public License for more details.
 #define SET_TARGET_TO_ALLOWABLE_FOREGROUND(detect_hidden_windows) \
 {\
 	if (target_window = GetForegroundWindow())\
-		if (!(detect_hidden_windows) && !IsWindowVisible(target_window))\
+		if (!(detect_hidden_windows) && (!IsWindowVisible(target_window) || IsWindowCloaked(target_window)))\
 			target_window = NULL;\
 }
 #define IF_USE_FOREGROUND_WINDOW(detect_hidden_windows, title, text, exclude_title, exclude_text)\
@@ -113,9 +113,9 @@ public:
 	HWND *mAlreadyVisited;      // Array of HWNDs to exclude from consideration.
 	int mAlreadyVisitedCount;   // Count of items in the above.
 	WindowSpec *mFirstWinSpec;  // Linked list used by the WinGroup commands.
-	ActionTypeType mActionType; // Used only by WinGroup::PerformShowWindow().
+	BuiltInFunctionID mActionType; // Used only by WinGroup::PerformShowWindow().
 	int mTimeToWaitForClose;    // Same.
-	Object *mArray;             // Used by WinGetList() to fetch an array of matching HWNDs.
+	Array *mArray;             // Used by WinGetList() to fetch an array of matching HWNDs.
 
 	// Controlled by the SetCandidate() method:
 	HWND mCandidateParent;
@@ -123,7 +123,7 @@ public:
 	DWORD mCandidatePID;
 	TCHAR mCandidateTitle[WINDOW_TEXT_SIZE];  // For storing title or class name of the given mCandidateParent.
 	TCHAR mCandidateClass[WINDOW_CLASS_SIZE]; // Must not share mem with mCandidateTitle because even if ahk_class is in effect, ExcludeTitle can also be in effect.
-	TCHAR mCandidatePath[MAX_PATH];
+	TCHAR mCandidatePath[MAX_PATH]; // MAX_PATH vs. T_MAX_PATH because it currently seems to be impossible to run an executable with a longer path (in Windows 10.0.16299).
 
 
 	void SetCandidate(HWND aWnd) // Must be kept thread-safe since it may be called indirectly by the hook thread.
@@ -167,7 +167,7 @@ struct control_list_type
 		cl.buf_free_spot = cl.class_buf; // Points to the next available/writable place in the buf.
 	bool fetch_hwnds;         // True if fetching HWND of each control rather than its ClassNN.
 	int total_classes;        // Must be initialized to 0.
-	Object *target_array;
+	Array *target_array;
 	#define CL_CLASS_BUF_SIZE (32 * 1024) // Even if class names average 50 chars long, this supports 655 of them.
 	TCHAR class_buf[CL_CLASS_BUF_SIZE];
 	LPTSTR buf_free_spot;      // Must be initialized to point to the beginning of class_buf.
@@ -256,11 +256,10 @@ int MsgBox(LPCTSTR aText = _T(""), UINT uType = MSGBOX_NORMAL, LPTSTR aTitle = N
 HWND FindOurTopDialog();
 BOOL CALLBACK EnumDialog(HWND hwnd, LPARAM lParam);
 
-HWND WindowOwnsOthers(HWND aWnd);
-BOOL CALLBACK EnumParentFindOwned(HWND aWnd, LPARAM lParam);
 HWND GetNonChildParent(HWND aWnd);
 HWND GetTopChild(HWND aParent);
 bool IsWindowHung(HWND aWnd);
+bool IsWindowCloaked(HWND aWnd);
 
 // Defaults to a low timeout because a window may have hundreds of controls, and if the window
 // is hung, each control might result in a delay of size aTimeout during an EnumWindows.

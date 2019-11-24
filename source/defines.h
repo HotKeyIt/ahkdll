@@ -61,6 +61,14 @@ GNU General Public License for more details.
 // max function libraries
 #define FUNC_LIB_COUNT 4
 
+// Maximum length of a Unicode file path, plus null-terminator.
+#define MAX_WIDE_PATH 32768
+#ifdef UNICODE
+#define T_MAX_PATH MAX_WIDE_PATH
+#else
+#define T_MAX_PATH MAX_PATH
+#endif
+
 // The following avoid having to link to OLDNAMES.lib, but they probably don't
 // reduce code size at all.
 #define stricmp(str1, str2) _stricmp(str1, str2)
@@ -128,8 +136,8 @@ enum SendModes {SM_EVENT, SM_INPUT, SM_PLAY, SM_INPUT_FALLBACK_TO_PLAY, SM_INVAL
 enum SendRawModes {SCM_NOT_RAW = FALSE, SCM_RAW, SCM_RAW_TEXT};
 typedef UCHAR SendRawType;
 
-enum ExitReasons {EXIT_NONE, EXIT_CRITICAL, EXIT_ERROR, EXIT_DESTROY, EXIT_LOGOFF, EXIT_SHUTDOWN
-	, EXIT_WM_QUIT, EXIT_CLOSE, EXIT_MENU, EXIT_EXIT, EXIT_RELOAD, EXIT_SINGLEINSTANCE};
+enum ExitReasons {EXIT_NONE, EXIT_ERROR, EXIT_DESTROY, EXIT_LOGOFF, EXIT_SHUTDOWN
+	, EXIT_CLOSE, EXIT_MENU, EXIT_EXIT, EXIT_RELOAD, EXIT_SINGLEINSTANCE};
 
 enum WarnType {WARN_USE_UNSET_LOCAL, WARN_USE_UNSET_GLOBAL, WARN_LOCAL_SAME_AS_GLOBAL, WARN_CLASS_OVERWRITE, WARN_ALL};
 #define WARN_TYPE_STRINGS _T("UseUnsetLocal"), _T("UseUnsetGlobal"), _T("LocalSameAsGlobal"), _T("ClassOverwrite"), _T("All")
@@ -149,7 +157,6 @@ enum ToggleValueType {TOGGLE_INVALID = 0, TOGGLED_ON, TOGGLED_OFF, ALWAYS_ON, AL
 	, TOGGLE_MOUSEMOVE, TOGGLE_MOUSEMOVEOFF};
 
 // Some things (such as ListView sorting) rely on SCS_INSENSITIVE being zero.
-// In addition, BIF_InStr relies on SCS_SENSITIVE being 1:
 enum StringCaseSenseType {SCS_INSENSITIVE, SCS_SENSITIVE, SCS_INSENSITIVE_LOCALE, SCS_INSENSITIVE_LOGICAL, SCS_INVALID};
 
 enum SymbolType // For use with ExpandExpression() and IsNumeric().
@@ -207,8 +214,7 @@ enum SymbolType // For use with ExpandExpression() and IsNumeric().
 #define SYM_OVERRIDES_POWER_ON_STACK(symbol) ((symbol) >= SYM_LOWNOT && (symbol) <= SYM_ADDRESS) // Check lower bound first for short-circuit performance.
 	, SYM_PRE_INCREMENT, SYM_PRE_DECREMENT // Must be kept after the post-ops and in this order relative to each other due to a range check in the code.
 #define SYM_INCREMENT_OR_DECREMENT_IS_PRE(symbol) ((symbol) >= SYM_PRE_INCREMENT) // Caller has verified symbol is an INCREMENT or DECREMENT operator.
-	, SYM_NEW      // new Class()
-#define IS_PREFIX_OPERATOR(symbol) ((symbol) >= SYM_LOWNOT && (symbol) <= SYM_NEW)
+#define IS_PREFIX_OPERATOR(symbol) ((symbol) >= SYM_LOWNOT && (symbol) <= SYM_PRE_DECREMENT)
 	, SYM_FUNC     // A call to a function.
 	, SYM_COUNT    // Must be last because it's the total symbol count for everything above.
 	, SYM_INVALID = SYM_COUNT // Some callers may rely on YIELDS_AN_OPERAND(SYM_INVALID)==false.
@@ -236,14 +242,21 @@ typedef __int64 IntKeyType;
 struct DECLSPEC_NOVTABLE IObject // L31: Abstract interface for "objects".
 	: public IDispatch
 {
-	// See script_object.cpp for comments.
-	virtual ResultType STDMETHODCALLTYPE Invoke(ResultToken &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount) = 0;
+	#define IObject_Invoke_PARAMS_DECL \
+		ResultToken &aResultToken, int aFlags, LPTSTR aName, ExprTokenType &aThisToken, ExprTokenType *aParam[], int aParamCount
+	#define IObject_Invoke_PARAMS \
+		aResultToken, aFlags, aName, aThisToken, aParam, aParamCount
+	virtual ResultType Invoke(IObject_Invoke_PARAMS_DECL) = 0;
 	virtual LPTSTR Type() = 0;
 	#define IObject_Type_Impl(name) \
 		LPTSTR Type() { return _T(name); }
 	
 #ifdef CONFIG_DEBUGGER
-	virtual void DebugWriteProperty(IDebugProperties *, int aPage, int aPageSize, int aMaxDepth) = 0;
+	#define IObject_DebugWriteProperty_Def \
+		void DebugWriteProperty(IDebugProperties *, int aPage, int aPageSize, int aMaxDepth)
+	virtual IObject_DebugWriteProperty_Def;
+#else
+	#define IObject_DebugWriteProperty_Def
 #endif
 };
 
@@ -269,7 +282,11 @@ struct DECLSPEC_NOVTABLE IDebugProperties
 	// For simplicity/code size, the debugger handles failures internally
 	// rather than returning an error code and requiring caller to handle it.
 	virtual void WriteProperty(LPCSTR aName, ExprTokenType &aValue) = 0;
+	virtual void WriteProperty(LPCWSTR aName, ExprTokenType &aValue) = 0;
 	virtual void WriteProperty(ExprTokenType &aKey, ExprTokenType &aValue) = 0;
+	virtual void WriteBaseProperty(IObject *aBase) = 0;
+	virtual void WriteDynamicProperty(LPTSTR aName) = 0;
+	virtual void WriteEnumItems(IObject *aEnumerable, int aStart, int aEnd) = 0;
 	virtual void BeginProperty(LPCSTR aName, LPCSTR aType, int aNumChildren, DebugCookie &aCookie) = 0;
 	virtual void EndProperty(DebugCookie aCookie) = 0;
 };
@@ -280,20 +297,18 @@ struct DECLSPEC_NOVTABLE IDebugProperties
 // Flags used when calling Invoke; also used by g_ObjGet etc.:
 #define IT_GET				0
 #define IT_SET				1
-#define IT_CALL				2 // L40: MetaObject::Invoke relies on these being mutually-exclusive bits.
+#define IT_CALL				2
 #define IT_BITMASK			3 // bit-mask for the above.
 
-#define IF_METAOBJ			0x10000 // Indicates 'this' is a meta-object/base of aThisToken. Restricts some functionality and causes aThisToken to be inserted into the param list of called functions.
-#define IF_METAFUNC			0x20000 // Indicates Invoke should call a meta-function before checking the object's fields.
-#define IF_META				(IF_METAOBJ | IF_METAFUNC)	// Flags for regular recursion into base object.
-#define IF_FUNCOBJ			0x40000 // Indicates 'this' is a function, being called via another object (aParam[0]).
+#define IF_BYPASS_METAFUNC	0x10000 // Skip invocation of meta-functions, such as when calling __Init or __Delete.
+#define IF_NO_SET_PROPVAL	0x20000 // Fail IT_SET for value properties (allow only setters/__set).
+#define IF_DEFAULT			0x40000 // Invoke the default member (call a function object, array indexing, etc.).
 #define IF_NEWENUM			0x80000 // Workaround for COM objects which don't resolve "_NewEnum" to DISPID_NEWENUM.
-#define IF_CALL_FUNC_ONLY	0x100000 // Used by IDispatch: call only if value is a function.
 
 
 // Helper function for event handlers and __Delete:
 ResultType CallMethod(IObject *aInvokee, IObject *aThis, LPTSTR aMethodName
-	, ExprTokenType *aParamValue = NULL, int aParamCount = 0, INT_PTR *aRetVal = NULL // For event handlers.
+	, ExprTokenType *aParamValue = NULL, int aParamCount = 0, __int64 *aRetVal = NULL // For event handlers.
 	, int aExtraFlags = 0); // For Object.__Delete().
 
 
@@ -315,7 +330,7 @@ struct ExprTokenType  // Something in the compiler hates the name TokenType, so 
 				IObject *object;
 				DerefType *deref;  // for SYM_FUNC, and (while parsing) SYM_ASSIGN etc.
 				Var *var;          // for SYM_VAR and SYM_DYNAMIC
-				LPTSTR marker;     // for SYM_STRING
+				LPTSTR marker;     // for SYM_STRING and (while parsing) SYM_OPAREN
 				ExprTokenType *circuit_token; // for short-circuit operators
 			};
 			union // Due to the outermost union, this doesn't increase the total size of the struct on x86 builds (but it does on x64).
@@ -392,8 +407,7 @@ private: // Force code to use one of the CopyFrom() methods, for clarity.
 #define STACK_PUSH(token_ptr) stack[stack_count++] = token_ptr
 #define STACK_POP stack[--stack_count]  // To be used as the r-value for an assignment.
 
-class Func;
-enum BuiltInFunctionID;
+class BuiltInFunc;
 struct ResultToken : public ExprTokenType
 {
 	LPTSTR buf; // Points to a buffer of _f_retval_buf_size characters for returning short strings and misc purposes.
@@ -493,8 +507,9 @@ struct ResultToken : public ExprTokenType
 
 	ResultType Error(LPCTSTR aErrorText);
 	ResultType Error(LPCTSTR aErrorText, LPCTSTR aExtraInfo);
+	ResultType UnknownMemberError(ExprTokenType &aObject, int aFlags, LPCTSTR aMember);
 
-	Func *func; // For maintainability, this is separate from the ExprTokenType union.  Its main uses are func->mID and func->mOutputVars.
+	BuiltInFunc *func; // For maintainability, this is separate from the ExprTokenType union.  Its main uses are func->mID and func->mOutputVars.
 
 private:
 	// Currently can't be included in the value union because meta-functions
@@ -514,7 +529,6 @@ enum enum_act {
 // any POD structures that contain an action_type field:
   ACT_INVALID = FAIL  // These should both be zero for initialization and function-return-value purposes.
 , ACT_ASSIGNEXPR
-// Actions above this line take care of calling ExpandArgs() for themselves (ACT_EXPANDS_ITS_OWN_ARGS).
 , ACT_EXPRESSION
 // Keep ACT_BLOCK_BEGIN as the first "control flow" action, for range checks with ACT_FIRST_CONTROL_FLOW:
 , ACT_BLOCK_BEGIN, ACT_BLOCK_END
@@ -529,7 +543,8 @@ enum enum_act {
 , ACT_FIRST_JUMP = ACT_BREAK, ACT_LAST_JUMP = ACT_GOSUB // Actions which accept a label name.
 , ACT_RETURN
 , ACT_TRY, ACT_CATCH, ACT_FINALLY, ACT_THROW // Keep TRY, CATCH and FINALLY together and in this order for range checks.
-, ACT_FIRST_CONTROL_FLOW = ACT_BLOCK_BEGIN, ACT_LAST_CONTROL_FLOW = ACT_THROW
+, ACT_SWITCH, ACT_CASE
+, ACT_FIRST_CONTROL_FLOW = ACT_BLOCK_BEGIN, ACT_LAST_CONTROL_FLOW = ACT_CASE
 , ACT_FIRST_COMMAND, ACT_EXIT = ACT_FIRST_COMMAND, ACT_EXITAPP // Excluded from the "CONTROL_FLOW" range above because they can be safely wrapped into a Func.
 , ACT_TOOLTIP, ACT_TRAYTIP
 , ACT_SPLITPATH
@@ -537,15 +552,9 @@ enum enum_act {
 , ACT_SEND, ACT_SENDTEXT, ACT_SENDINPUT, ACT_SENDPLAY, ACT_SENDEVENT
 , ACT_SENDMODE, ACT_SENDLEVEL, ACT_COORDMODE, ACT_SETDEFAULTMOUSESPEED
 , ACT_CLICK, ACT_MOUSEMOVE, ACT_MOUSECLICK, ACT_MOUSECLICKDRAG, ACT_MOUSEGETPOS
-, ACT_STATUSBARWAIT
 , ACT_SLEEP
 , ACT_CRITICAL, ACT_THREAD
-, ACT_WINACTIVATE, ACT_WINACTIVATEBOTTOM
-, ACT_WINMINIMIZE, ACT_WINMAXIMIZE, ACT_WINRESTORE
-, ACT_WINHIDE, ACT_WINSHOW
 , ACT_WINMINIMIZEALL, ACT_WINMINIMIZEALLUNDO
-, ACT_WINCLOSE, ACT_WINKILL, ACT_WINMOVE, ACT_MENUSELECT
-, ACT_WINSETTITLE
 // Keep rarely used actions near the bottom for parsing/performance reasons:
 , ACT_GROUPADD, ACT_GROUPACTIVATE, ACT_GROUPDEACTIVATE, ACT_GROUPCLOSE
 , ACT_SOUNDBEEP, ACT_SOUNDPLAY
@@ -581,7 +590,7 @@ enum enum_act {
 #define ACT_IS_LINE_PARENT(ActionType) (ACT_IS_IF(ActionType) || ActionType == ACT_ELSE \
 	|| ACT_IS_LOOP(ActionType) || (ActionType >= ACT_TRY && ActionType <= ACT_FINALLY))
 #define ACT_EXPANDS_ITS_OWN_ARGS(ActionType) (ActionType == ACT_ASSIGNEXPR || ActionType == ACT_WHILE || ActionType == ACT_FOR || ActionType == ACT_THROW)
-#define ACT_USES_SIMPLE_POSTFIX(ActionType) (ActionType == ACT_ASSIGNEXPR || ActionType == ACT_RETURN) // Actions which are optimized to use arg.postfix when is_expression == false, via the "only_token" optimization.
+#define ACT_USES_SIMPLE_POSTFIX(ActionType) (ActionType == ACT_ASSIGNEXPR || ActionType == ACT_RETURN || ActionType == ACT_SWITCH || ActionType == ACT_CASE) // Actions which are optimized to use arg.postfix when is_expression == false, via the "only_token" optimization.
 
 // For convenience in many places.  Must cast to int to avoid loss of negative values.
 #define BUF_SPACE_REMAINING ((int)(aBufSize - (aBuf - aBuf_orig)))
@@ -613,6 +622,8 @@ enum enum_act {
 #define MAX_NUMBER_SIZE (MAX_NUMBER_LENGTH + 1) // But not too large because some things might rely on this being fairly small.
 #define MAX_INTEGER_LENGTH 20                     // Max length of a 64-bit number when expressed as decimal or
 #define MAX_INTEGER_SIZE (MAX_INTEGER_LENGTH + 1) // hex string; e.g. -9223372036854775808 or (unsigned) 18446744073709551616 or (hex) -0xFFFFFFFFFFFFFFFF.
+
+#define SW_NONE -1
 
 // Hot-strings:
 // memmove() and proper detection of long hotstrings rely on buf being at least this large:
@@ -746,9 +757,9 @@ enum GuiEventTypes {GUI_EVENT_NONE  // NONE must be zero for any uses of ZeroMem
 	, GUI_EVENT_ITEMCHECK, GUI_EVENT_ITEMSELECT, GUI_EVENT_ITEMFOCUS, GUI_EVENT_ITEMEXPAND
 	, GUI_EVENT_ITEMEDIT
 	, GUI_EVENT_FOCUS, GUI_EVENT_LOSEFOCUS
+	, GUI_EVENT_NAMED_COUNT
 	// The rest don't have explicit names in GUI_EVENT_NAMES:
-	, GUI_EVENT_WM_COMMAND
-	, GUI_EVENT_DIGIT_0 = 48 // Here just as a reminder that from this value up to 0xFF are reserved so that a single printable character or digit (mnemonic) can be sent.
+	, GUI_EVENT_WM_COMMAND = GUI_EVENT_NAMED_COUNT
 };
 
 enum GuiEventKinds {GUI_EVENTKIND_EVENT = 0, GUI_EVENTKIND_NOTIFY, GUI_EVENTKIND_COMMAND};
@@ -804,11 +815,9 @@ struct HotkeyCriterion
 };
 
 
-// Each instance of this struct generally corresponds to a quasi-thread.  The function that creates
-// a new thread typically saves the old thread's struct values on its stack so that they can later
-// be copied back into the g struct when the thread is resumed:
+// Each instance of this struct generally corresponds to a quasi-thread.
 class Func;                 // Forward declarations
-
+class UserFunc;             //
 struct FuncAndToken {
 	ResultToken mToken ;
 	LPTSTR result_to_return_dll;
@@ -822,6 +831,7 @@ struct FuncAndToken {
 
 class Label;                //
 struct RegItemStruct;       //
+struct LoopFilesStruct;
 struct LoopReadFileStruct;  //
 class GuiType;				//
 class ScriptTimer;			//
@@ -829,7 +839,7 @@ struct global_struct
 {
 	// 8-byte items are listed first, which might improve alignment for 64-bit processors (dubious).
 	__int64 mLoopIteration; // Signed, since script/ITOA64 aren't designed to handle unsigned.
-	WIN32_FIND_DATA *mLoopFile;  // The file of the current file-loop, if applicable.
+	LoopFilesStruct *mLoopFile;  // The file of the current file-loop, if applicable.
 	RegItemStruct *mLoopRegItem; // The registry subkey or value of the current registry enumeration loop.
 	LoopReadFileStruct *mLoopReadFile;  // The file whose contents are currently being read by a File-Read Loop.
 	LPTSTR mLoopField;  // The field of the current string-parsing loop.
@@ -852,8 +862,8 @@ struct global_struct
 	int PressDurationPlay; // 
 	int MouseDelay;     // negative values may be used as special flags.
 	int MouseDelayPlay; //
-	Func *CurrentFunc; // v1.0.46.16: The function whose body is currently being processed at load-time, or being run at runtime (if any).
-	Func *CurrentFuncGosub; // v1.0.48.02: Allows A_ThisFunc to work even when a function Gosubs an external subroutine.
+	UserFunc *CurrentFunc; // v1.0.46.16: The function whose body is currently being processed at load-time, or being run at runtime (if any).
+	UserFunc *CurrentFuncGosub; // v1.0.48.02: Allows A_ThisFunc to work even when a function Gosubs an external subroutine.
 	Label *CurrentLabel; // The label that is currently awaiting its matching "return" (if any).
 	ScriptTimer *CurrentTimer; // The timer that launched this thread (if any).
 	HWND hWndLastUsed;  // In many cases, it's better to use GetValidLastUsedWindow() when referring to this.
@@ -886,9 +896,10 @@ struct global_struct
 	int ExcptMode;
 	ResultToken* ThrownToken;
 	//inline bool InTryBlock() { return ExcptMode & EXCPTMODE_TRY; } // Currently unused.
+	bool DetectWindow(HWND aWnd);
 	DerefType* ExcptDeref;
 	BYTE ZipCompressionLevel;
-	Func* CurrentMacro;
+	UserFunc* CurrentMacro;
 };
 
 inline void global_maximize_interruptibility(global_struct &g)

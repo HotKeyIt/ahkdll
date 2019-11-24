@@ -105,9 +105,9 @@ typedef struct
 
 typedef struct
 {
-	ULONGLONG		compressed_size;	// compressed size					4 bytes
-	ULONGLONG		uncompressed_size;	// uncompressed size				4 bytes
-	ULONGLONG		offset;				// Byte offset of local header		4 bytes
+	ULONGLONG		compressed_size;	// compressed size					8 bytes
+	ULONGLONG		uncompressed_size;	// uncompressed size				8 bytes
+	ULONGLONG		offset;				// Byte offset of local header		8 bytes
 } ZIPENTRYINFO64;
 #pragma pack()
 
@@ -1485,7 +1485,7 @@ static int huft_build(
 	register uInt j;              // counter
 	register int k;               // number of bits in current code 
 	int l;                        // bits per table (returned in m) 
-	uInt mask;                    // (1 << w) - 1, to avoid cc -O bug on HP 
+	//uInt mask;                    // (1 << w) - 1, to avoid cc -O bug on HP 
 	register uInt	*p;				// pointer into c[], b[], or v[]
 	INFLATE_HUFT	*q;				// points to current table 
 	INFLATE_HUFT	r;				// table entry for structure assignment 
@@ -1645,12 +1645,12 @@ static int huft_build(
 			i ^= j;
 
 			// backup over finished tables 
-			mask = (1 << w) - 1;      // needed on HP, cc -O bug 
-			while ((i & mask) != x[h])
+			//mask = (1 << w) - 1;      // needed on HP, cc -O bug 
+			while ((i & ((1 << w) - 1)) != x[h])
 			{
 				h--;                    // don't need to update q
 				w -= l;
-				mask = (1 << w) - 1;
+				//mask = (1 << w) - 1;
 			}
 		}
 	}
@@ -2922,7 +2922,7 @@ static void initEntry(register TUNZIP *tunzip, ZIPENTRY *ze)
 
 			// Get the offset to where the entry's compressed data starts within the archive
 			//		tunzip->EntryReadVars.PosInArchive = (DWORD)tunzip->CurrentEntryInfo.offset + SIZEZIPLOCALHEADER + (DWORD)tunzip->CurrentEntryInfo.size_filename + (DWORD)extra_offset;
-			offset = (DWORD)tunzip->CurrentEntryInfo64.offset + SIZEZIPLOCALHEADER + (DWORD)tunzip->CurrentEntryInfo.size_filename + (DWORD)extra_offset;
+			offset = tunzip->CurrentEntryInfo64.offset + SIZEZIPLOCALHEADER + tunzip->CurrentEntryInfo.size_filename + extra_offset;
 		}
 	}
 
@@ -3815,7 +3815,7 @@ DWORD WINAPI UnzipItemToFileW(HUNZIP tunzip, const WCHAR *fn, ZIPENTRY *ze)
 	return(unzipEntry((TUNZIP*)tunzip, (void *)fn, ze, UNZIP_FILENAME | UNZIP_UNICODE));
 }
 
-DWORD WINAPI UnzipItemToBuffer(HUNZIP tunzip, void *z, DWORD len, ZIPENTRY *ze)
+DWORD WINAPI UnzipItemToBuffer(HUNZIP tunzip, void *z, ULONGLONG len, ZIPENTRY *ze)
 {
 	ze->CompressedSize = len;
 	return(unzipEntry((TUNZIP*)tunzip, z, ze, UNZIP_MEMORY));
@@ -3943,7 +3943,7 @@ DWORD WINAPI UnzipFindItemW(HUNZIP tunzip, ZIPENTRY *ze, BOOL ic)
 
 #define BUFREADCOMMENT (0x400)
 
-static DWORD openArchive(HANDLE *ptr, void *z, DWORD len, DWORD flags, const char *pwd)
+static DWORD openArchive(HANDLE *ptr, void *z, ULONGLONG len, DWORD flags, const char *pwd)
 {
 	register TUNZIP		*tunzip;
 	ULONGLONG			centralDirPos;
@@ -4264,12 +4264,12 @@ DWORD WINAPI UnzipOpenFileRawW(HUNZIP *tunzip, const WCHAR *fn, const char *pass
 	return(openArchive(tunzip, (void *)fn, 0, UNZIP_FILENAME | UNZIP_UNICODE | UNZIP_RAW, password));
 }
 
-DWORD WINAPI UnzipOpenBuffer(HUNZIP *tunzip, void *z, DWORD len, const char *password)
+DWORD WINAPI UnzipOpenBuffer(HUNZIP *tunzip, void *z, ULONGLONG len, const char *password)
 {
 	return(openArchive(tunzip, z, len, UNZIP_MEMORY, password));
 }
 
-DWORD WINAPI UnzipOpenBufferRaw(HUNZIP *tunzip, void *z, DWORD len, const char *password)
+DWORD WINAPI UnzipOpenBufferRaw(HUNZIP *tunzip, void *z, ULONGLONG len, const char *password)
 {
 	return(openArchive(tunzip, z, len, UNZIP_MEMORY | UNZIP_RAW, password));
 }
@@ -4869,7 +4869,7 @@ typedef struct _TZIP
 	// Memory map stuff
 	HANDLE		memorymap;		// If not 0, then this is a memory mapped file handle.
 	ULONGLONG	opos;			// Current (byte) position in "destination".
-	DWORD		mapsize;		// The size of the memory buffer.
+	ULONGLONG	mapsize;		// The size of the memory buffer.
 
 	// Encryption
 	unsigned long keys[3];		// keys are initialised inside addSrc()
@@ -4883,7 +4883,7 @@ typedef struct _TZIP
 	ULONGLONG	isize, totalRead;	// size is not set until close() on pipes
 	ULG			crc;				// crc is not set until close(). iwrit is cumulative
 	HANDLE		source;
-	DWORD		lenin, posin;		// These are for a memory buffer source
+	ULONGLONG	lenin, posin;		// These are for a memory buffer source
 	// and a variable for what we've done with the input: (i.e. compressed it!)
 	ULONGLONG	csize;				// Compressed size, set by the compression routines.
 	TSTATE		*state;				// We allocate just one state object per zip, because it's big (500k), and store a ptr here. It is freed when the TZIP is freed
@@ -5054,7 +5054,8 @@ static void			fill_window(register TSTATE *);
 
 // ==================== Unix/Windows Time conversion ====================
 
-static void filetime2dosdatetime(const FILETIME ft, WORD *dosdate, WORD *dostime)
+// Replaced with Windows Function FileTimeToDosDateTime
+/*static void filetime2dosdatetime(const FILETIME ft, WORD *dosdate, WORD *dostime)
 {
 	// date: bits 0-4 are day of month 1-31. Bits 5-8 are month 1..12. Bits 9-15 are year-1980
 	// time: bits 0-4 are seconds/2, bits 5-10 are minute 0..59. Bits 11-15 are hour 0..23
@@ -5066,8 +5067,8 @@ static void filetime2dosdatetime(const FILETIME ft, WORD *dosdate, WORD *dostime
 	*dosdate |= (WORD)((st.wDay & 0x1f));
 	*dostime = (WORD)((st.wHour & 0x1f) << 11);
 	*dostime |= (WORD)((st.wMinute & 0x3f) << 5);
-	*dostime |= (WORD)((st.wSecond * 2) & 0x1f);
-}
+	*dostime |= (WORD)((st.wSecond / 2) & 0x1f); //*dostime |= (WORD)((st.wSecond * 2) & 0x1f);
+}*/
 
 static lutime_t filetime2timet(const FILETIME ft)
 {
@@ -5085,7 +5086,7 @@ static void getNow(lutime_t *pft, WORD *dosdate, WORD *dostime)
 
 	GetLocalTime(&st);
 	SystemTimeToFileTime(&st, &ft);
-	filetime2dosdatetime(ft, dosdate, dostime);
+	FileTimeToDosDateTime(&ft, dosdate, dostime); //filetime2dosdatetime
 	*pft = filetime2timet(ft);
 }
 
@@ -5165,7 +5166,7 @@ static DWORD getFileInfo(TZIP *tzip, IZTIMES *times)
 	{
 		WORD	dosdate, dostime;
 
-		filetime2dosdatetime(bhi.ftLastWriteTime, &dosdate, &dostime);
+		FileTimeToDosDateTime(&bhi.ftLastWriteTime, &dosdate, &dostime); // filetime2dosdatetime
 		times->timestamp = (WORD)dostime | (((DWORD)dosdate) << 16);
 	}
 
@@ -6992,12 +6993,12 @@ static void putlocal(TZIPFILEINFO *z, TZIP *tzip)
 		
 		writeDestShort(tzip, 1);
 		writeDestShort(tzip, 16);
-		writeDestShort(tzip, (DWORD)z->len & 0xFFFFFFFF);
-		writeDestShort(tzip, (DWORD)((z->len >> 16) & 0xFFFFFFFF));
+		writeDestShort(tzip, (DWORD)z->len);
+		writeDestShort(tzip, (DWORD)(z->len >> 16));
 		writeDestShort(tzip, (DWORD)(z->len >> 32));
 		writeDestShort(tzip, (DWORD)(z->len >> 48));
-		writeDestShort(tzip, (DWORD)z->siz & 0xFFFFFFFF);
-		writeDestShort(tzip, (DWORD)((z->siz >> 16) & 0xFFFFFFFF));
+		writeDestShort(tzip, (DWORD)z->siz);
+		writeDestShort(tzip, (DWORD)(z->siz >> 16));
 		writeDestShort(tzip, (DWORD)(z->siz >> 32));
 		writeDestShort(tzip, (DWORD)(z->siz >> 48));
 		if (z->ext) writeDestination(tzip, z->extra, z->ext);
@@ -7030,7 +7031,7 @@ static void addCentral(register TZIP *tzip)
 				// Write this TZIPFILEINFO entry to the Central directory
 				writeDestShort(tzip, CENSIG);
 				writeDestShort(tzip, CENSIG >> 16);
-				writeDestShort(tzip, (USH)45);		// zip 4.5
+				writeDestShort(tzip, (USH)0x0B2D);		// 0x0B00 is win32 os-code. 0x2D is 45 in decimal: zip 4.5
 				writeDestShort(tzip, (USH)45);			// Needs PKUNZIP 4.5 to unzip it
 				writeDestShort(tzip, zfi->flg);
 				writeDestShort(tzip, zfi->how);
@@ -7049,7 +7050,7 @@ static void addCentral(register TZIP *tzip)
 				}
 				else
 				{
-					writeDestShort(tzip, (DWORD)zfi->off & 0xFFFFFFFF);
+					writeDestShort(tzip, (DWORD)zfi->off);
 					writeDestShort(tzip, (DWORD)(zfi->off >> 16));
 				}
 				writeDestination(tzip, zfi->iname, zfi->nam);
@@ -7059,21 +7060,21 @@ static void addCentral(register TZIP *tzip)
 					writeDestShort(tzip, (zfi->off >= ULONG_MAX ? 8 : 0) + (zfi->siz >= ULONG_MAX ? 8 : 0) + (zfi->len >= ULONG_MAX ? 8 : 0));
 					if (zfi->len >= ULONG_MAX)
 					{
-						writeDestShort(tzip, (DWORD)zfi->len & 0xFFFFFFFF);
+						writeDestShort(tzip, (DWORD)zfi->len);
 						writeDestShort(tzip, (DWORD)(zfi->len >> 16));
 						writeDestShort(tzip, (DWORD)(zfi->len >> 32));
 						writeDestShort(tzip, (DWORD)(zfi->len >> 48));
 					}
 					if (zfi->siz >= ULONG_MAX)
 					{
-						writeDestShort(tzip, (DWORD)zfi->siz & 0xFFFFFFFF);
+						writeDestShort(tzip, (DWORD)zfi->siz);
 						writeDestShort(tzip, (DWORD)(zfi->siz >> 16));
 						writeDestShort(tzip, (DWORD)(zfi->siz >> 32));
 						writeDestShort(tzip, (DWORD)(zfi->siz >> 48));
 					}
 					if (zfi->off >= ULONG_MAX)
 					{
-						writeDestShort(tzip, (DWORD)zfi->off & 0xFFFFFFFF);
+						writeDestShort(tzip, (DWORD)zfi->off);
 						writeDestShort(tzip, (DWORD)(zfi->off >> 16));
 						writeDestShort(tzip, (DWORD)(zfi->off >> 32));
 						writeDestShort(tzip, (DWORD)(zfi->off >> 48));
@@ -7105,27 +7106,27 @@ static void addCentral(register TZIP *tzip)
 			writeDestShort(tzip, 0);
 			writeDestShort(tzip, 0);
 			writeDestShort(tzip, 0);
-			writeDestShort(tzip, (USH)45);
-			writeDestShort(tzip, (USH)45);
+			writeDestShort(tzip, (USH)0x0B2D);		// 0x0B00 is win32 os-code. 0x2D is 45 in decimal: zip 4.5
+			writeDestShort(tzip, (USH)45);			// Needs PKUNZIP 4.5 to unzip it
 			writeDestShort(tzip, 0);
 			writeDestShort(tzip, 0);
 			writeDestShort(tzip, 0);
 			writeDestShort(tzip, 0);
-			writeDestShort(tzip, (DWORD)numentries & 0xFFFFFFFF);
+			writeDestShort(tzip, (DWORD)numentries);
 			writeDestShort(tzip, (DWORD)(numentries >> 16));
 			writeDestShort(tzip, (DWORD)(numentries >> 32));
 			writeDestShort(tzip, (DWORD)(numentries >> 48));
-			writeDestShort(tzip, (DWORD)numentries & 0xFFFFFFFF);
+			writeDestShort(tzip, (DWORD)numentries);
 			writeDestShort(tzip, (DWORD)(numentries >> 16));
 			writeDestShort(tzip, (DWORD)(numentries >> 32));
 			writeDestShort(tzip, (DWORD)(numentries >> 48));
 			ULONGLONG size_of_central = tzip->writ - pos_at_start_of_central;
-			writeDestShort(tzip, (DWORD)size_of_central & 0xFFFFFFFF);
+			writeDestShort(tzip, (DWORD)size_of_central);
 			writeDestShort(tzip, (DWORD)(size_of_central >> 16));
 			writeDestShort(tzip, (DWORD)(size_of_central >> 32));
 			writeDestShort(tzip, (DWORD)(size_of_central >> 48));
 			ULONGLONG offset_central = pos_at_start_of_central + tzip->ooffset;
-			writeDestShort(tzip, (DWORD)offset_central & 0xFFFFFFFF);
+			writeDestShort(tzip, (DWORD)offset_central);
 			writeDestShort(tzip, (DWORD)(offset_central >> 16));
 			writeDestShort(tzip, (DWORD)(offset_central >> 32));
 			writeDestShort(tzip, (DWORD)(offset_central >> 48));
@@ -7136,7 +7137,7 @@ static void addCentral(register TZIP *tzip)
 			writeDestShort(tzip, END64LOCSIG >> 16);
 			writeDestShort(tzip, 0);
 			writeDestShort(tzip, 0);
-			writeDestShort(tzip, (DWORD)pos_at_start_of_end64 & 0xFFFFFFFF);
+			writeDestShort(tzip, (DWORD)pos_at_start_of_end64);
 			writeDestShort(tzip, (DWORD)(pos_at_start_of_end64 >> 16));
 			writeDestShort(tzip, (DWORD)(pos_at_start_of_end64 >> 32));
 			writeDestShort(tzip, (DWORD)(pos_at_start_of_end64 >> 48));
@@ -7156,8 +7157,8 @@ static void addCentral(register TZIP *tzip)
 			}
 			else
 			{
-				writeDestShort(tzip, (DWORD)numentries & 0xFFFFFFFF);
-				writeDestShort(tzip, (DWORD)numentries & 0xFFFFFFFF);
+				writeDestShort(tzip, (DWORD)numentries);
+				writeDestShort(tzip, (DWORD)numentries);
 			}
 			if (size_of_central >= ULONG_MAX)
 			{
@@ -7166,7 +7167,7 @@ static void addCentral(register TZIP *tzip)
 			}
 			else
 			{
-				writeDestShort(tzip, (DWORD)size_of_central & 0xFFFFFFFF);
+				writeDestShort(tzip, (DWORD)size_of_central);
 				writeDestShort(tzip, (DWORD)(size_of_central >> 16));
 			}
 			if (offset_central >= ULONG_MAX)
@@ -7176,7 +7177,7 @@ static void addCentral(register TZIP *tzip)
 			}
 			else
 			{
-				writeDestShort(tzip, (DWORD)offset_central & 0xFFFFFFFF);
+				writeDestShort(tzip, (DWORD)offset_central);
 				writeDestShort(tzip, (DWORD)(offset_central >> 16));
 			}
 			writeDestShort(tzip, 0);
@@ -7189,13 +7190,13 @@ static void addCentral(register TZIP *tzip)
 			writeDestShort(tzip, ENDSIG >> 16);
 			writeDestShort(tzip, 0);
 			writeDestShort(tzip, 0);
-			writeDestShort(tzip, (DWORD)numentries & 0xFFFFFFFF);
-			writeDestShort(tzip, (DWORD)numentries & 0xFFFFFFFF);
+			writeDestShort(tzip, (DWORD)numentries);
+			writeDestShort(tzip, (DWORD)numentries);
 			numentries = (DWORD)(tzip->writ - pos_at_start_of_central);
-			writeDestShort(tzip, (DWORD)numentries & 0xFFFFFFFF);
+			writeDestShort(tzip, (DWORD)numentries);
 			writeDestShort(tzip, (DWORD)(numentries >> 16));
 			pos_at_start_of_central += (DWORD)tzip->ooffset;
-			writeDestShort(tzip, (DWORD)pos_at_start_of_central & 0xFFFFFFFF);
+			writeDestShort(tzip, (DWORD)pos_at_start_of_central);
 			writeDestShort(tzip, (DWORD)(pos_at_start_of_central >> 16));
 			writeDestShort(tzip, 0);
 			tzip->writ += 4 + ENDHEAD + 0;
@@ -7444,7 +7445,7 @@ static void writeDestination(register TZIP *tzip, const char *buf, DWORD size)
 * ZIP destination (ZIP output file).
 */
 
-static BOOL seekDestination(TZIP *tzip, LONGLONG pos)
+static BOOL seekDestination(TZIP *tzip, ULONGLONG pos)
 {
 	if (!(tzip->flags & TZIP_CANSEEK))
 	{
@@ -7464,7 +7465,7 @@ static BOOL seekDestination(TZIP *tzip, LONGLONG pos)
 	}
 	else
 	{
-		LONGLONG offset = pos + tzip->ooffset;
+		ULONGLONG offset = pos + tzip->ooffset;
 		if (offset > LONG_MAX)
 		{
 			LONG highpart = 0;
@@ -7540,7 +7541,7 @@ static unsigned readFromSource(register TZIP *tzip, char *buf, unsigned size)
 	if (tzip->flags & TZIP_SRCMEMORY)
 	{
 		if (tzip->posin >= tzip->lenin) goto bad;	// end of input
-		bytes = tzip->lenin - tzip->posin;
+		bytes = (DWORD)(tzip->lenin - tzip->posin);
 		if (bytes > size) bytes = size;
 		CopyMemory(buf, (unsigned char *)tzip->source + tzip->posin, bytes);
 		tzip->posin += bytes;
@@ -7666,12 +7667,12 @@ static void ideflate(TZIP *tzip, TZIPFILEINFO *zfi)
 
 static void istore(register TZIP *tzip)
 {
-	register DWORD		cin;
+	register DWORD	cin;
 
 	// If a memory buffer, we can write out those bytes all at once
 	if (tzip->flags & TZIP_SRCMEMORY)
 	{
-		cin = tzip->lenin;
+		cin = (DWORD)tzip->lenin;
 		writeDestination(tzip, (const char*)tzip->source, cin);
 		tzip->totalRead += cin;
 		tzip->crc = crc32(tzip->crc, (UCH *)tzip->source, cin);
@@ -7790,7 +7791,7 @@ static BOOL hasExtension(const void * pchName, DWORD flags)
 *			Also ZIP_UNICODE may be set.
 */
 
-static DWORD addSrc(register TZIP *tzip, const void *destname, const void *src, DWORD len, DWORD flags)
+static DWORD addSrc(register TZIP *tzip, const void *destname, const void *src, ULONGLONG len, DWORD flags)
 {
 	DWORD			passex;
 	TZIPFILEINFO	*zfi;
@@ -8338,17 +8339,17 @@ DWORD WINAPI ZipAddFileRawW(HZIP tzip, const WCHAR *fn)
 	return(addSrc((TZIP *)tzip, (void *)&Extra_lbits[0], (void *)fn, 0, ZIP_FILENAME | ZIP_UNICODE | ZIP_RAW));
 }
 
-DWORD WINAPI ZipAddBufferA(HZIP tzip, const char *destname, const void *src, DWORD len)
+DWORD WINAPI ZipAddBufferA(HZIP tzip, const char *destname, const void *src, ULONGLONG len)
 {
 	return(addSrc((TZIP *)tzip, (void *)destname, src, len, ZIP_MEMORY));
 }
 
-DWORD WINAPI ZipAddBufferW(HZIP tzip, const WCHAR *destname, const void *src, DWORD len)
+DWORD WINAPI ZipAddBufferW(HZIP tzip, const WCHAR *destname, const void *src, ULONGLONG len)
 {
 	return(addSrc((TZIP *)tzip, (void *)destname, src, len, ZIP_MEMORY | ZIP_UNICODE));
 }
 
-DWORD WINAPI ZipAddBufferRaw(HZIP tzip, const void *src, DWORD len)
+DWORD WINAPI ZipAddBufferRaw(HZIP tzip, const void *src, ULONGLONG len)
 {
 	return(addSrc((TZIP *)tzip, (void *)&Extra_lbits[0], src, len, ZIP_MEMORY | ZIP_RAW));
 }
@@ -8368,17 +8369,17 @@ DWORD WINAPI ZipAddHandleRaw(HZIP tzip, HANDLE h)
 	return(addSrc((TZIP *)tzip, (void *)&Extra_lbits[0], h, 0, ZIP_HANDLE | ZIP_RAW));
 }
 
-DWORD WINAPI ZipAddPipeA(HZIP tzip, const char *destname, HANDLE h, DWORD len)
+DWORD WINAPI ZipAddPipeA(HZIP tzip, const char *destname, HANDLE h, ULONGLONG len)
 {
 	return(addSrc((TZIP *)tzip, (void *)destname, h, len, ZIP_HANDLE));
 }
 
-DWORD WINAPI ZipAddPipeRaw(HZIP tzip, HANDLE h, DWORD len)
+DWORD WINAPI ZipAddPipeRaw(HZIP tzip, HANDLE h, ULONGLONG len)
 {
 	return(addSrc((TZIP *)tzip, (void *)&Extra_lbits[0], h, len, ZIP_HANDLE | ZIP_RAW));
 }
 
-DWORD WINAPI ZipAddPipeW(HZIP tzip, const WCHAR *destname, HANDLE h, DWORD len)
+DWORD WINAPI ZipAddPipeW(HZIP tzip, const WCHAR *destname, HANDLE h, ULONGLONG len)
 {
 	return(addSrc((TZIP *)tzip, (void *)destname, h, len, ZIP_HANDLE | ZIP_UNICODE));
 }
@@ -8566,7 +8567,7 @@ DWORD WINAPI ZipClose(HZIP tzip)
 * Does all the real work for the ZipCreate* functions.
 */
 
-static DWORD createZip(HZIP *zipHandle, void *z, DWORD len, DWORD flags, const char *pwd)
+static DWORD createZip(HZIP *zipHandle, void *z, ULONGLONG len, DWORD flags, const char *pwd)
 {
 	register TZIP	*tzip;
 	register DWORD	result;
@@ -8640,15 +8641,15 @@ static DWORD createZip(HZIP *zipHandle, void *z, DWORD len, DWORD flags, const c
 		// memory-mapped file of the requested size
 		if (!(tzip->destination = z))
 		{
-			if (!(tzip->memorymap = CreateFileMapping(INVALID_HANDLE_VALUE, 0, PAGE_READWRITE, 0, len, 0))) goto badalloc;
-			if (!(tzip->destination = (HANDLE)MapViewOfFile(tzip->memorymap, FILE_MAP_ALL_ACCESS, 0, 0, len)))
+			if (!(tzip->memorymap = CreateFileMapping(INVALID_HANDLE_VALUE, 0, PAGE_READWRITE, len >> 32, len & 0xFFFFFFFF, 0))) goto badalloc;
+			if (!(tzip->destination = (HANDLE)MapViewOfFile(tzip->memorymap, FILE_MAP_ALL_ACCESS, 0, 0, (SIZE_T)len)))
 			{
 				CloseHandle(tzip->memorymap);
 			badalloc:			result = ZR_NOALLOC;
 				goto freeit;
 			}
 		}
-		else if (IsBadReadPtr(z, len))
+		else if (IsBadReadPtr(z, (UINT_PTR)len))
 			goto argerr;
 		tzip->flags |= (TZIP_CANSEEK | TZIP_DESTMEMORY);
 		tzip->mapsize = len;
@@ -8696,7 +8697,7 @@ DWORD WINAPI ZipCreateFileW(HZIP *zipHandle, const WCHAR *fn, const char *passwo
 	return(createZip(zipHandle, (void *)fn, 0, ZIP_FILENAME | ZIP_UNICODE, password));
 }
 
-DWORD WINAPI ZipCreateBuffer(HZIP *zipHandle, void *z, DWORD len, const char *password)
+DWORD WINAPI ZipCreateBuffer(HZIP *zipHandle, void *z, ULONGLONG len, const char *password)
 {
 	return(createZip(zipHandle, z, len, ZIP_MEMORY, password));
 }
@@ -8716,7 +8717,7 @@ DWORD WINAPI ZipCreateBuffer(HZIP *zipHandle, void *z, DWORD len, const char *pa
 *
 */
 
-DWORD WINAPI ZipGetMemory(HZIP tzip, void **pbuf, DWORD *plen, HANDLE *base)
+DWORD WINAPI ZipGetMemory(HZIP tzip, void **pbuf, ULONGLONG *plen, HANDLE *base)
 {
 	DWORD	result;
 
@@ -8749,7 +8750,7 @@ DWORD WINAPI ZipGetMemory(HZIP tzip, void **pbuf, DWORD *plen, HANDLE *base)
 		{
 			// Return the memory buffer and size
 			*pbuf = (void *)((TZIP *)tzip)->destination;
-			*plen = (DWORD)((TZIP *)tzip)->writ;
+			*plen = (ULONGLONG)((TZIP *)tzip)->writ;
 		}
 
 		// Does caller want everything freed except for the memory?
@@ -8783,7 +8784,7 @@ DWORD WINAPI ZipResetMemory(HZIP tzip)
 	if ((memorymap = ((TZIP *)tzip)->memorymap))
 	{
 		UnmapViewOfFile(((TZIP *)tzip)->destination);
-		if (!(((TZIP *)tzip)->destination = (HANDLE)MapViewOfFile(memorymap, FILE_MAP_ALL_ACCESS, 0, 0, ((TZIP *)tzip)->mapsize)))
+		if (!(((TZIP *)tzip)->destination = (HANDLE)MapViewOfFile(memorymap, FILE_MAP_ALL_ACCESS, 0, 0, (SIZE_T)((TZIP *)tzip)->mapsize)))
 		{
 			CloseHandle(memorymap);
 			free_tzip((TZIP *)tzip);
