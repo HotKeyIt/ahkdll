@@ -19,6 +19,12 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="source\stdafx.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="source\Registry.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="source\application.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -31,13 +37,34 @@
     <ClCompile Include="source\Debugger.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="source\dllmain.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="source\exports.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="source\globaldata.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="source\hook.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="source\hotkey.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="source\keyboard_mouse.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="source\LiteZip.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="source\lowlevelbif.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="source\MemoryModule.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="source\MinHook.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="source\mt19937ar-cok.cpp">
@@ -49,10 +76,10 @@
     <ClCompile Include="source\script.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="source\script2.cpp">
+    <ClCompile Include="source\script_autoit.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="source\script_autoit.cpp">
+    <ClCompile Include="source\script_com.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="source\script_expression.cpp">
@@ -73,10 +100,13 @@
     <ClCompile Include="source\script_registry.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="source\SimpleHeap.cpp">
+    <ClCompile Include="source\script_struct.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="source\stdafx.cpp">
+    <ClCompile Include="source\script2.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="source\SimpleHeap.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="source\StringConv.cpp">
@@ -97,34 +127,7 @@
     <ClCompile Include="source\WinGroup.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="source\script_com.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="source\dllmain.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="source\exports.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="source\Registry.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="source\MemoryModule.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="source\script_struct.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="source\lowlevelbif.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="source\hook.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="source\MinHook.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="source\LiteZip.cpp">
+    <ClCompile Include="source\input_object.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -234,6 +237,9 @@
     <ClInclude Include="source\LiteZip.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="source\input_object.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="source\resources\AutoHotkey.rc">
@@ -250,11 +256,6 @@
     <CustomBuild Include="source\libx64call\x64stub.asm">
       <Filter>Assembly Files</Filter>
     </CustomBuild>
-  </ItemGroup>
-  <ItemGroup>
-    <Manifest Include="source\resources\AutoHotkey.exe.manifest">
-      <Filter>Resource Files</Filter>
-    </Manifest>
   </ItemGroup>
   <ItemGroup>
     <None Include="source\resources\icon_filetype.ico">
@@ -281,7 +282,6 @@
     <None Include="ComServer.def">
       <Filter>Source Files</Filter>
     </None>
-    <None Include="ClassDiagram.cd" />
   </ItemGroup>
   <ItemGroup>
     <Midl Include="source\ComServer.idl">
@@ -293,6 +293,12 @@
       <Filter>Resource Files</Filter>
     </Library>
     <Library Include="source\lib\libMinHook.x86.lib">
+      <Filter>Resource Files</Filter>
+    </Library>
+    <Library Include="source\lib\MT_libMinHook.x64.lib">
+      <Filter>Resource Files</Filter>
+    </Library>
+    <Library Include="source\lib\MT_libMinHook.x86.lib">
       <Filter>Resource Files</Filter>
     </Library>
   </ItemGroup>

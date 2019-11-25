@@ -58,12 +58,10 @@ bool MsgSleep(int aSleepDuration = INTERVAL_UNSPECIFIED, MessageMode aMode = RET
 #else
 #define INTERRUPTIBLE_IN_EMERGENCY (g_AllowInterruption)
 #endif
-// Do a true Sleep() for short sleeps on Win9x because it is much more accurate than the MsgSleep()
-// method on that OS, at least for when short sleeps are done on Win98SE:
 #define DoWinDelay \
 	if (::g->WinDelay > -1)\
 	{\
-		if (g_MainThreadID != GetCurrentThreadId() || (::g->WinDelay < 25 && g_os.IsWin9x()))\
+		if (g_MainThreadID != GetCurrentThreadId())\
 			Sleep(::g->WinDelay);\
 		else\
 			MsgSleep(::g->WinDelay);\
@@ -72,7 +70,7 @@ bool MsgSleep(int aSleepDuration = INTERVAL_UNSPECIFIED, MessageMode aMode = RET
 #define DoControlDelay \
 	if (g->ControlDelay > -1)\
 	{\
-		if (g_MainThreadID != GetCurrentThreadId() || (g->ControlDelay < 25 && g_os.IsWin9x()))\
+		if (g_MainThreadID != GetCurrentThreadId())\
 			Sleep(g->ControlDelay);\
 		else\
 			MsgSleep(g->ControlDelay);\

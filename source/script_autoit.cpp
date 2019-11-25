@@ -147,27 +147,22 @@ VarSizeType BIV_IsAdmin(LPTSTR aBuf, LPTSTR aVarName)
 	if (!aBuf)
 		return 1;  // The length of the string "1" or "0".
 	TCHAR result = '0';  // Default.
-	if (g_os.IsWin9x())
-		result = '1';
-	else
+	SC_HANDLE h = OpenSCManager(NULL, NULL, SC_MANAGER_LOCK);
+	if (h)
 	{
-		SC_HANDLE h = OpenSCManager(NULL, NULL, SC_MANAGER_LOCK);
-		if (h)
+		SC_LOCK lock = LockServiceDatabase(h);
+		if (lock)
 		{
-			SC_LOCK lock = LockServiceDatabase(h);
-			if (lock)
-			{
-				UnlockServiceDatabase(lock);
-				result = '1'; // Current user is admin.
-			}
-			else
-			{
-				DWORD lastErr = GetLastError();
-				if (lastErr == ERROR_SERVICE_DATABASE_LOCKED)
-					result = '1'; // Current user is admin.
-			}
-			CloseServiceHandle(h);
+			UnlockServiceDatabase(lock);
+			result = '1'; // Current user is admin.
 		}
+		else
+		{
+			DWORD lastErr = GetLastError();
+			if (lastErr == ERROR_SERVICE_DATABASE_LOCKED)
+				result = '1'; // Current user is admin.
+		}
+		CloseServiceHandle(h);
 	}
 	aBuf[0] = result;
 	aBuf[1] = '\0';
@@ -999,34 +994,6 @@ error:
 
 ResultType Line::URLDownloadToFile(LPTSTR aURL, LPTSTR aFilespec)
 {
-	// Check that we have IE3 and access to wininet.dll
-	HINSTANCE hinstLib = LoadLibrary(_T("wininet"));
-	if (!hinstLib)
-		return SetErrorLevelOrThrow();
-
-	typedef HINTERNET (WINAPI *MyInternetOpen)(LPCTSTR, DWORD, LPCTSTR, LPCTSTR, DWORD dwFlags);
-	typedef HINTERNET (WINAPI *MyInternetOpenUrl)(HINTERNET hInternet, LPCTSTR, LPCTSTR, DWORD, DWORD, LPDWORD);
-	typedef BOOL (WINAPI *MyInternetCloseHandle)(HINTERNET);
-	typedef BOOL (WINAPI *MyInternetReadFileEx)(HINTERNET, LPINTERNET_BUFFERSA, DWORD, DWORD);
-	typedef BOOL (WINAPI *MyInternetReadFile)(HINTERNET, LPVOID, DWORD, LPDWORD);
-
-	#ifndef INTERNET_OPEN_TYPE_PRECONFIG_WITH_NO_AUTOPROXY
-		#define INTERNET_OPEN_TYPE_PRECONFIG_WITH_NO_AUTOPROXY 4
-	#endif
-
-	// Get the address of all the functions we require.  It's done this way in case the system
-	// lacks MSIE v3.0+, in which case the app would probably refuse to launch at all:
- 	MyInternetOpen lpfnInternetOpen = (MyInternetOpen)GetProcAddress(hinstLib, "InternetOpen" WINAPI_SUFFIX);
-	MyInternetOpenUrl lpfnInternetOpenUrl = (MyInternetOpenUrl)GetProcAddress(hinstLib, "InternetOpenUrl" WINAPI_SUFFIX);
-	MyInternetCloseHandle lpfnInternetCloseHandle = (MyInternetCloseHandle)GetProcAddress(hinstLib, "InternetCloseHandle");
-	MyInternetReadFileEx lpfnInternetReadFileEx = (MyInternetReadFileEx)GetProcAddress(hinstLib, "InternetReadFileExA"); // InternetReadFileExW() appears unimplemented prior to Windows 7, so always use InternetReadFileExA().
-	MyInternetReadFile lpfnInternetReadFile = (MyInternetReadFile)GetProcAddress(hinstLib, "InternetReadFile"); // Called unconditionally to reduce code size and because the time required is likely insignificant compared to network latency.
-	if (!(lpfnInternetOpen && lpfnInternetOpenUrl && lpfnInternetCloseHandle && lpfnInternetReadFileEx && lpfnInternetReadFile))
-	{
-		FreeLibrary(hinstLib);
-		return SetErrorLevelOrThrow();
-	}
-
 	// v1.0.44.07: Set default to INTERNET_FLAG_RELOAD vs. 0 because the vast majority of usages would want
 	// the file to be retrieved directly rather than from the cache.
 	// v1.0.46.04: Added more no-cache flags because otherwise, it definitely falls back to the cache if
@@ -1050,19 +1017,15 @@ ResultType Line::URLDownloadToFile(LPTSTR aURL, LPTSTR aFilespec)
 	// requests that lack a user-agent.  Furthermore, it's more professional to have one, in which case it
 	// should probably be kept as simple and unchanging as possible.  Using something like the script's name
 	// as the user agent (even if documented) seems like a bad idea because it might contain personal/sensitive info.
-	HINTERNET hInet = lpfnInternetOpen(_T("AutoHotkey"), INTERNET_OPEN_TYPE_PRECONFIG_WITH_NO_AUTOPROXY, NULL, NULL, 0);
+	HINTERNET hInet = InternetOpen(_T("AutoHotkey"), INTERNET_OPEN_TYPE_PRECONFIG_WITH_NO_AUTOPROXY, NULL, NULL, 0);
 	if (!hInet)
-	{
-		FreeLibrary(hinstLib);
 		return SetErrorLevelOrThrow();
-	}
 
 	// Open the required URL
-	HINTERNET hFile = lpfnInternetOpenUrl(hInet, aURL, NULL, 0, flags_for_open_url, 0);
+	HINTERNET hFile = InternetOpenUrl(hInet, aURL, NULL, 0, flags_for_open_url, 0);
 	if (!hFile)
 	{
-		lpfnInternetCloseHandle(hInet);
-		FreeLibrary(hinstLib);
+		InternetCloseHandle(hInet);
 		return SetErrorLevelOrThrow();
 	}
 
@@ -1070,9 +1033,8 @@ ResultType Line::URLDownloadToFile(LPTSTR aURL, LPTSTR aFilespec)
 	FILE *fptr = _tfopen(aFilespec, _T("wb"));	// Open in binary write/destroy mode
 	if (!fptr)
 	{
-		lpfnInternetCloseHandle(hFile);
-		lpfnInternetCloseHandle(hInet);
-		FreeLibrary(hinstLib);
+		InternetCloseHandle(hFile);
+		InternetCloseHandle(hInet);
 		return SetErrorLevelOrThrow();
 	}
 
@@ -1100,7 +1062,7 @@ ResultType Line::URLDownloadToFile(LPTSTR aURL, LPTSTR aFilespec)
 
 	if (*aURL == 'h' || *aURL == 'H')
 	{
-		while (result = lpfnInternetReadFileEx(hFile, &buffers, IRF_NO_WAIT, NULL)) // Assign
+		while (result = InternetReadFileExA(hFile, &buffers, IRF_NO_WAIT, NULL)) // Assign
 		{
 			if (!buffers.dwBufferLength) // Transfer is complete.
 				break;
@@ -1112,7 +1074,7 @@ ResultType Line::URLDownloadToFile(LPTSTR aURL, LPTSTR aFilespec)
 	else // v1.0.48.04: This section adds support for FTP and perhaps Gopher by using InternetReadFile() instead of InternetReadFileEx().
 	{
 		DWORD number_of_bytes_read;
-		while (result = lpfnInternetReadFile(hFile, bufData, sizeof(bufData), &number_of_bytes_read))
+		while (result = InternetReadFile(hFile, bufData, sizeof(bufData), &number_of_bytes_read))
 		{
 			if (!number_of_bytes_read)
 				break;
@@ -1121,9 +1083,8 @@ ResultType Line::URLDownloadToFile(LPTSTR aURL, LPTSTR aFilespec)
 		}
 	}
 	// Close internet session:
-	lpfnInternetCloseHandle(hFile);
-	lpfnInternetCloseHandle(hInet);
-	FreeLibrary(hinstLib); // Only after the above.
+	InternetCloseHandle(hFile);
+	InternetCloseHandle(hInet);
 	// Close output file:
 	fclose(fptr);
 
@@ -1937,33 +1898,22 @@ flags can be a combination of:
 	HANDLE				hToken; 
 	TOKEN_PRIVILEGES	tkp; 
 
-	// If we are running NT/2k/XP, make sure we have rights to shutdown
-	if (g_os.IsWinNT()) // NT/2k/XP/2003 and family
-	{
-		// Get a token for this process.
- 		if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken)) 
-			return false;						// Don't have the rights
+	// Get a token for this process.
+ 	if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken)) 
+		return false;						// Don't have the rights
  
-		// Get the LUID for the shutdown privilege.
- 		LookupPrivilegeValue(NULL, SE_SHUTDOWN_NAME, &tkp.Privileges[0].Luid); 
+	// Get the LUID for the shutdown privilege.
+ 	LookupPrivilegeValue(NULL, SE_SHUTDOWN_NAME, &tkp.Privileges[0].Luid); 
  
-		tkp.PrivilegeCount = 1;  /* one privilege to set */
-		tkp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED; 
+	tkp.PrivilegeCount = 1;  /* one privilege to set */
+	tkp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED; 
  
-		// Get the shutdown privilege for this process.
- 		AdjustTokenPrivileges(hToken, FALSE, &tkp, 0, (PTOKEN_PRIVILEGES)NULL, 0); 
+	// Get the shutdown privilege for this process.
+ 	AdjustTokenPrivileges(hToken, FALSE, &tkp, 0, (PTOKEN_PRIVILEGES)NULL, 0); 
  
-		// Cannot test the return value of AdjustTokenPrivileges.
- 		if (GetLastError() != ERROR_SUCCESS) 
-			return false;						// Don't have the rights
-	}
-
-	// if we are forcing the issue, AND this is 95/98 terminate all windows first
-	if ( g_os.IsWin9x() && (nFlag & EWX_FORCE) ) 
-	{
-		nFlag ^= EWX_FORCE;	// remove this flag - not valid in 95
-		EnumWindows((WNDENUMPROC) Util_ShutdownHandler, 0);
-	}
+	// Cannot test the return value of AdjustTokenPrivileges.
+ 	if (GetLastError() != ERROR_SUCCESS) 
+		return false;						// Don't have the rights
 
 	// ExitWindows
 	if (ExitWindowsEx(nFlag, 0))
@@ -2077,30 +2027,19 @@ void DoIncrementalMouseMove(int aX1, int aY1, int aX2, int aY2, int aSpeed)
 // PROCESS ROUTINES
 ////////////////////
 
-DWORD ProcessExist9x2000(LPTSTR aProcess)
+DWORD ProcessExist(LPTSTR aProcess)
 {
-	// We must dynamically load the function or program will probably not launch at all on NT4.
-	typedef BOOL (WINAPI *PROCESSWALK)(HANDLE hSnapshot, LPPROCESSENTRY32 lppe);
-	typedef HANDLE (WINAPI *CREATESNAPSHOT)(DWORD dwFlags, DWORD th32ProcessID);
-
-	static CREATESNAPSHOT lpfnCreateToolhelp32Snapshot = (CREATESNAPSHOT)GetProcAddress(GetModuleHandle(_T("kernel32")), "CreateToolhelp32Snapshot");
-    static PROCESSWALK lpfnProcess32First = (PROCESSWALK)GetProcAddress(GetModuleHandle(_T("kernel32")), "Process32First" PROCESS_API_SUFFIX);
-    static PROCESSWALK lpfnProcess32Next = (PROCESSWALK)GetProcAddress(GetModuleHandle(_T("kernel32")), "Process32Next" PROCESS_API_SUFFIX);
-
-	if (!lpfnCreateToolhelp32Snapshot || !lpfnProcess32First || !lpfnProcess32Next)
-		return 0;
-
 	PROCESSENTRY32 proc;
     proc.dwSize = sizeof(proc);
-	HANDLE snapshot = lpfnCreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-	lpfnProcess32First(snapshot, &proc);
+	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	Process32First(snapshot, &proc);
 
 	// Determine the PID if aProcess is a pure, non-negative integer (any negative number
 	// is more likely to be the name of a process [with a leading dash], rather than the PID).
 	DWORD specified_pid = IsPureNumeric(aProcess) ? ATOU(aProcess) : 0;
 	TCHAR szDrive[_MAX_PATH+1], szDir[_MAX_PATH+1], szFile[_MAX_PATH+1], szExt[_MAX_PATH+1];
 
-	while (lpfnProcess32Next(snapshot, &proc))
+	while (Process32Next(snapshot, &proc))
 	{
 		if (specified_pid && specified_pid == proc.th32ProcessID)
 		{
@@ -2122,111 +2061,3 @@ DWORD ProcessExist9x2000(LPTSTR aProcess)
 	CloseHandle(snapshot);
 	return 0;  // Not found.
 }
-
-
-
-#ifdef CONFIG_WINNT4
-DWORD ProcessExistNT4(LPTSTR aProcess, LPTSTR aProcessName)
-{
-	if (aProcessName) // Init this output variable in case of early return.
-		*aProcessName = '\0';
-	//BOOL EnumProcesses(
-	//  DWORD *lpidProcess,  // array of process identifiers
-	//  DWORD cb,            // size of array
-	//  DWORD *cbNeeded      // number of bytes returned
-	//);
-	typedef BOOL (WINAPI *MyEnumProcesses)(DWORD*, DWORD, DWORD*);
-
-	//BOOL EnumProcessModules(
-	//  HANDLE hProcess,      // handle to process
-	//  HMODULE *lphModule,   // array of module handles
-	//  DWORD cb,             // size of array
-	//  LPDWORD lpcbNeeded    // number of bytes required
-	//);
-	typedef BOOL (WINAPI *MyEnumProcessModules)(HANDLE, HMODULE*, DWORD, LPDWORD);
-
-	//DWORD GetModuleBaseName(
-	//  HANDLE hProcess,    // handle to process
-	//  HMODULE hModule,    // handle to module
-	//  LPTSTR lpBaseName,  // base name buffer
-	//  DWORD nSize         // maximum characters to retrieve
-	//);
-	typedef DWORD (WINAPI *MyGetModuleBaseName)(HANDLE, HMODULE, LPTSTR, DWORD);
-
-	// We must dynamically load the function or program will probably not launch at all on Win95.
-    // Get a handle to the DLL module that contains EnumProcesses
-	HINSTANCE hinstLib = LoadLibrary(_T("psapi"));
-	if (!hinstLib)
-		return 0;
-
-	// Not static in this case, since address can change with each new load of the library:
-  	MyEnumProcesses lpfnEnumProcesses = (MyEnumProcesses)GetProcAddress(hinstLib, "EnumProcesses");
-	MyEnumProcessModules lpfnEnumProcessModules = (MyEnumProcessModules)GetProcAddress(hinstLib, "EnumProcessModules");
-	MyGetModuleBaseName lpfnGetModuleBaseName = (MyGetModuleBaseName)GetProcAddress(hinstLib, "GetModuleBaseName" WINAPI_SUFFIX);
-
-	DWORD idProcessArray[512];		// 512 processes max
-	DWORD cbNeeded;					// Bytes returned
-	if (!lpfnEnumProcesses || !lpfnEnumProcessModules || !lpfnGetModuleBaseName
-		|| !lpfnEnumProcesses(idProcessArray, sizeof(idProcessArray), &cbNeeded))
-	{
-		FreeLibrary(hinstLib);
-		return 0;
-	}
-
-	// Get the count of PIDs in the array
-	DWORD cProcesses = cbNeeded / sizeof(DWORD);
-	// Determine the PID if aProcess is a pure, non-negative integer (any negative number
-	// is more likely to be the name of a process [with a leading dash], rather than the PID).
-	DWORD specified_pid = IsPureNumeric(aProcess) ? ATOU(aProcess) : 0;
-	TCHAR szDrive[_MAX_PATH+1], szDir[_MAX_PATH+1], szFile[_MAX_PATH+1], szExt[_MAX_PATH+1];
-	TCHAR szProcessName[_MAX_PATH+1];
-	HMODULE hMod;
-	HANDLE hProcess;
-
-	for (UINT i = 0; i < cProcesses; ++i)
-	{
-		if (specified_pid && specified_pid == idProcessArray[i])
-		{
-			if (aProcessName) // Caller wanted process name also.
-			{
-				if (hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, idProcessArray[i])) // Assign
-				{
-					lpfnEnumProcessModules(hProcess, &hMod, sizeof(hMod), &cbNeeded);
-					if (lpfnGetModuleBaseName(hProcess, hMod, szProcessName, _MAX_PATH))
-					{
-						// For consistency in results, use _splitpath() both here and below rather than
-						// something that just checks for a rightmost backslash.
-						_tsplitpath(szProcessName, szDrive, szDir, aProcessName, szExt);
-						_tcscat(aProcessName, szExt);
-					}
-					CloseHandle(hProcess);
-				}
-			}
-			FreeLibrary(hinstLib);
-			return specified_pid;
-		}
-		// Otherwise, check for matching name even if aProcess is purely numeric (i.e. a number might
-		// also be a valid name?):
-		if (hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, idProcessArray[i])) // Assign
-		{
-			lpfnEnumProcessModules(hProcess, &hMod, sizeof(hMod), &cbNeeded);
-			if (lpfnGetModuleBaseName(hProcess, hMod, szProcessName, _MAX_PATH))
-			{
-				_tsplitpath(szProcessName, szDrive, szDir, szFile, szExt);
-				_tcscat(szFile, szExt);
-				if (!_tcsicmp(szFile, aProcess)) // lstrcmpi() is not used: 1) avoids breaking existing scripts; 2) provides consistent behavior across multiple locales; 3) performance.
-				{
-					if (aProcessName) // Caller wanted process name also.
-						_tcscpy(aProcessName, szProcessName);
-					CloseHandle(hProcess);
-					FreeLibrary(hinstLib);
-					return idProcessArray[i];  // The PID.
-				}
-			}
-			CloseHandle(hProcess);
-		}
-	}
-	FreeLibrary(hinstLib);
-	return 0;  // Not found.
-}
-#endif

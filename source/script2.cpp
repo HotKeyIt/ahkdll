@@ -776,7 +776,7 @@ ResultType Line::ToolTip(LPTSTR aText, LPTSTR aX, LPTSTR aY, LPTSTR aID)
 		pt.y = ATOI(aY) + origin.y;
 
 	TOOLINFO ti = {0};
-	ti.cbSize = sizeof(ti) - sizeof(void *); // Fixed for v1.0.36.05: Tooltips fail to work on Win9x and probably NT4/2000 unless the size for the *lpReserved member in _WIN32_WINNT 0x0501 is omitted.
+	ti.cbSize = sizeof(ti) - sizeof(void *); // Fixed for v1.0.36.05: Tooltips fail to work on Windows 2000 unless the size for the *lpReserved member in _WIN32_WINNT 0x0501 is omitted.
 	ti.uFlags = TTF_TRACK;
 	ti.lpszText = aText;
 	// Note that the ToolTip won't work if ti.hwnd is assigned the HWND from GetDesktopWindow().
@@ -883,8 +883,6 @@ ResultType Line::ToolTip(LPTSTR aText, LPTSTR aX, LPTSTR aY, LPTSTR aID)
 #ifndef MINIDLL
 ResultType Line::TrayTip(LPTSTR aTitle, LPTSTR aText, LPTSTR aTimeout, LPTSTR aOptions)
 {
-	if (!g_os.IsWin2000orLater()) // Older OSes do not support it, so do nothing.
-		return OK;
 	NOTIFYICONDATA nic = {0};
 	nic.cbSize = sizeof(nic);
 	nic.uID = AHK_NOTIFYICON;  // This must match our tray icon's uID or Shell_NotifyIcon() will return failure.
@@ -1436,9 +1434,6 @@ ResultType Line::Input()
 // In a "worst case" scenario, each interrupted quasi-thread could have its own
 // input, which is in turn terminated by the thread that interrupts it.
 {
-	if (g_os.IsWin9x()) // v1.0.44.14: For simplicity, do nothing on Win9x rather than try to see if it actually supports the hook (such as if its some kind of emulated/hybrid OS).
-		return OK; // Could also set ErrorLevel to "Timeout" and output_var to be blank, but the benefits to backward compatibility seemed too dubious.
-
 	auto *prior_input = InputFind(NULL); // Not g_input, which could belong to an object and should not be ended.
 
 	// Since other script threads can interrupt this command while it's running, it's important that
@@ -2075,10 +2070,8 @@ ResultType Line::PerformShowWindow(ActionTypeType aActionType, LPTSTR aTitle, LP
 	case ACT_WINMINIMIZE:
 		if (IsWindowHung(target_window))
 		{
-			if (g_os.IsWin2000orLater())
-				nCmdShow = SW_FORCEMINIMIZE;
-			//else it's not Win2k or later.  I have confirmed that SW_MINIMIZE can
-			// lock up our thread on WinXP, which is why we revert to SW_FORCEMINIMIZE above.
+			nCmdShow = SW_FORCEMINIMIZE;
+			// SW_MINIMIZE can lock up our thread on WinXP, which is why we revert to SW_FORCEMINIMIZE above.
 			// Older/obsolete comment for background: don't attempt to minimize hung windows because that
 			// might hang our thread because the call to ShowWindow() would never return.
 		}
@@ -3375,10 +3368,6 @@ ResultType Line::ScriptProcess(LPTSTR aCmd, LPTSTR aProcess, LPTSTR aParam3)
 		{
 			if (hProcess = OpenProcess(PROCESS_SET_INFORMATION, FALSE, pid)) // Assign
 			{
-				// If OS doesn't support "above/below normal", seems best to default to normal rather than high/low,
-				// since "above/below normal" aren't that dramatically different from normal:
-				if (!g_os.IsWin2000orLater() && (priority == BELOW_NORMAL_PRIORITY_CLASS || priority == ABOVE_NORMAL_PRIORITY_CLASS))
-					priority = NORMAL_PRIORITY_CLASS;
 				result = SetPriorityClass(hProcess, priority);
 				CloseHandle(hProcess);
 				return g_ErrorLevel->Assign(result ? pid : 0); // Indicate success or failure.
@@ -4374,11 +4363,6 @@ ResultType Line::SysGet(LPTSTR aCmd, LPTSTR aValue)
 	MonitorInfoPackage mip = {0};  // Improves maintainability to initialize unconditionally, here.
 	mip.monitor_info_ex.cbSize = sizeof(MONITORINFOEX); // Also improves maintainability.
 
-	// EnumDisplayMonitors() must be dynamically loaded; otherwise, the app won't launch at all on Win95/NT.
-	typedef BOOL (WINAPI* EnumDisplayMonitorsType)(HDC, LPCRECT, MONITORENUMPROC, LPARAM);
-	static EnumDisplayMonitorsType MyEnumDisplayMonitors = (EnumDisplayMonitorsType)
-		GetProcAddress(GetModuleHandle(_T("user32")), "EnumDisplayMonitors");
-
 	switch(cmd)
 	{
 	case SYSGET_CMD_METRICS: // In this case, aCmd is the value itself.
@@ -4395,20 +4379,16 @@ ResultType Line::SysGet(LPTSTR aCmd, LPTSTR aValue)
 		// Don't use GetSystemMetrics(SM_CMONITORS) because of this:
 		// MSDN: "GetSystemMetrics(SM_CMONITORS) counts only display monitors. This is different from
 		// EnumDisplayMonitors, which enumerates display monitors and also non-display pseudo-monitors."
-		if (!MyEnumDisplayMonitors) // Since system only supports 1 monitor, the first must be primary.
-			return output_var.Assign(1); // Assign as 1 vs. "1" to use hexadecimal display if that is in effect.
 		mip.monitor_number_to_find = COUNT_ALL_MONITORS;
-		MyEnumDisplayMonitors(NULL, NULL, EnumMonitorProc, (LPARAM)&mip);
+		EnumDisplayMonitors(NULL, NULL, EnumMonitorProc, (LPARAM)&mip);
 		return output_var.Assign(mip.count); // Will assign zero if the API ever returns a legitimate zero.
 
 	// Even if the first monitor to be retrieved by the EnumProc is always the primary (which is doubtful
 	// since there's no mention of this in the MSDN docs) it seems best to have this sub-cmd in case that
 	// policy ever changes:
 	case SYSGET_CMD_MONITORPRIMARY:
-		if (!MyEnumDisplayMonitors) // Since system only supports 1 monitor, the first must be primary.
-			return output_var.Assign(1); // Assign as 1 vs. "1" to use hexadecimal display if that is in effect.
 		// The mip struct's values have already initialized correctly for the below:
-		MyEnumDisplayMonitors(NULL, NULL, EnumMonitorProc, (LPARAM)&mip);
+		EnumDisplayMonitors(NULL, NULL, EnumMonitorProc, (LPARAM)&mip);
 		return output_var.Assign(mip.count); // Will assign zero if the API ever returns a legitimate zero.
 
 	case SYSGET_CMD_MONITORAREA:
@@ -4441,36 +4421,21 @@ ResultType Line::SysGet(LPTSTR aCmd, LPTSTR aValue)
 			return FAIL;
 
 		RECT monitor_rect;
-		if (MyEnumDisplayMonitors)
+		mip.monitor_number_to_find = ATOI(aValue);  // If this returns 0, it will default to the primary monitor.
+		EnumDisplayMonitors(NULL, NULL, EnumMonitorProc, (LPARAM)&mip);
+		if (!mip.count || (mip.monitor_number_to_find && mip.monitor_number_to_find != mip.count))
 		{
-			mip.monitor_number_to_find = ATOI(aValue);  // If this returns 0, it will default to the primary monitor.
-			MyEnumDisplayMonitors(NULL, NULL, EnumMonitorProc, (LPARAM)&mip);
-			if (!mip.count || (mip.monitor_number_to_find && mip.monitor_number_to_find != mip.count))
-			{
-				// With the exception of the caller having specified a non-existent monitor number, all of
-				// the ways the above can happen are probably impossible in practice.  Make all the variables
-				// blank vs. zero to indicate the problem.
-				output_var_left->Assign();
-				output_var_top->Assign();
-				output_var_right->Assign();
-				output_var_bottom->Assign();
-				return OK;
-			}
-			// Otherwise:
-			monitor_rect = (cmd == SYSGET_CMD_MONITORAREA) ? mip.monitor_info_ex.rcMonitor : mip.monitor_info_ex.rcWork;
+			// With the exception of the caller having specified a non-existent monitor number, all of
+			// the ways the above can happen are probably impossible in practice.  Make all the variables
+			// blank vs. zero to indicate the problem.
+			output_var_left->Assign();
+			output_var_top->Assign();
+			output_var_right->Assign();
+			output_var_bottom->Assign();
+			return OK;
 		}
-		else // Win95/NT: Since system only supports 1 monitor, the first must be primary.
-		{
-			if (cmd == SYSGET_CMD_MONITORAREA)
-			{
-				monitor_rect.left = 0;
-				monitor_rect.top = 0;
-				monitor_rect.right = GetSystemMetrics(SM_CXSCREEN);
-				monitor_rect.bottom = GetSystemMetrics(SM_CYSCREEN);
-			}
-			else // Work area
-				SystemParametersInfo(SPI_GETWORKAREA, 0, &monitor_rect, 0);  // Get desktop rect excluding task bar.
-		}
+		// Otherwise:
+		monitor_rect = (cmd == SYSGET_CMD_MONITORAREA) ? mip.monitor_info_ex.rcMonitor : mip.monitor_info_ex.rcWork;
 		output_var_left->Assign(monitor_rect.left);
 		output_var_top->Assign(monitor_rect.top);
 		output_var_right->Assign(monitor_rect.right);
@@ -4478,20 +4443,15 @@ ResultType Line::SysGet(LPTSTR aCmd, LPTSTR aValue)
 		return OK;
 
 	case SYSGET_CMD_MONITORNAME:
-		if (MyEnumDisplayMonitors)
-		{
-			mip.monitor_number_to_find = ATOI(aValue);  // If this returns 0, it will default to the primary monitor.
-			MyEnumDisplayMonitors(NULL, NULL, EnumMonitorProc, (LPARAM)&mip);
-			if (!mip.count || (mip.monitor_number_to_find && mip.monitor_number_to_find != mip.count))
-				// With the exception of the caller having specified a non-existent monitor number, all of
-				// the ways the above can happen are probably impossible in practice.  Make the variable
-				// blank to indicate the problem:
-				return output_var.Assign();
-			else
-				return output_var.Assign(mip.monitor_info_ex.szDevice);
-		}
-		else // Win95/NT: There is probably no way to find out the name of the monitor.
+		mip.monitor_number_to_find = ATOI(aValue);  // If this returns 0, it will default to the primary monitor.
+		EnumDisplayMonitors(NULL, NULL, EnumMonitorProc, (LPARAM)&mip);
+		if (!mip.count || (mip.monitor_number_to_find && mip.monitor_number_to_find != mip.count))
+			// With the exception of the caller having specified a non-existent monitor number, all of
+			// the ways the above can happen are probably impossible in practice.  Make the variable
+			// blank to indicate the problem:
 			return output_var.Assign();
+		else
+			return output_var.Assign(mip.monitor_info_ex.szDevice);
 	} // switch()
 
 	return FAIL;  // Never executed (increases maintainability and avoids compiler warning).
@@ -4507,13 +4467,7 @@ BOOL CALLBACK EnumMonitorProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMoni
 		++mip.count;
 		return TRUE;  // Enumerate all monitors so that they can be counted.
 	}
-	// GetMonitorInfo() must be dynamically loaded; otherwise, the app won't launch at all on Win95/NT.
-	typedef BOOL (WINAPI* GetMonitorInfoType)(HMONITOR, LPMONITORINFO);
-	static GetMonitorInfoType MyGetMonitorInfo = (GetMonitorInfoType)
-		GetProcAddress(GetModuleHandle(_T("user32")), "GetMonitorInfo" WINAPI_SUFFIX);
-	if (!MyGetMonitorInfo) // Shouldn't normally happen since caller wouldn't have called us if OS is Win95/NT. 
-		return FALSE;
-	if (!MyGetMonitorInfo(hMonitor, &mip.monitor_info_ex)) // Failed.  Probably very rare.
+	if (!GetMonitorInfo(hMonitor, &mip.monitor_info_ex)) // Failed.  Probably very rare.
 		return FALSE; // Due to the complexity of needing to stop at the correct monitor number, do not continue.
 		// In the unlikely event that the above fails when the caller wanted us to find the primary
 		// monitor, the caller will think the primary is the previously found monitor (if any).
@@ -4689,6 +4643,24 @@ ResultType Line::PixelSearch(int aLeft, int aTop, int aRight, int aBottom, COLOR
 	aRight  += origin.x;
 	aBottom += origin.y;
 
+	bool right_to_left = aLeft > aRight;
+	bool bottom_to_top = aTop > aBottom;
+
+	int left = aLeft;
+	int top = aTop;
+	int right = aRight;
+	int bottom = aBottom;
+	if (right_to_left)
+	{
+		left = aRight;
+		right = aLeft;
+	}
+	if (bottom_to_top)
+	{
+		top = aBottom;
+		bottom = aTop;
+	}
+
 	if (aVariation < 0)
 		aVariation = 0;
 	if (aVariation > 255)
@@ -4733,8 +4705,8 @@ ResultType Line::PixelSearch(int aLeft, int aTop, int aRight, int aBottom, COLOR
 		// the correct pixels are copied across."
 
 		// Create an empty bitmap to hold all the pixels currently visible on the screen (within the search area):
-		int search_width = aRight - aLeft + 1;
-		int search_height = aBottom - aTop + 1;
+		int search_width = right - left + 1;
+		int search_height = bottom - top + 1;
 		if (   !(sdc = CreateCompatibleDC(hdc)) || !(hbitmap_screen = CreateCompatibleBitmap(hdc, search_width, search_height))   )
 			goto fast_end;
 
@@ -4742,7 +4714,7 @@ ResultType Line::PixelSearch(int aLeft, int aTop, int aRight, int aBottom, COLOR
 			goto fast_end;
 
 		// Copy the pixels in the search-area of the screen into the DC to be searched:
-		if (   !(BitBlt(sdc, 0, 0, search_width, search_height, hdc, aLeft, aTop, SRCCOPY))   )
+		if (   !(BitBlt(sdc, 0, 0, search_width, search_height, hdc, left, top, SRCCOPY))   )
 			goto fast_end;
 
 		LONG screen_width, screen_height;
@@ -4772,8 +4744,18 @@ ResultType Line::PixelSearch(int aLeft, int aTop, int aRight, int aBottom, COLOR
 		{
 			if (screen_is_16bit)
 				aColorRGB &= 0xF8F8F8F8;
-			for (i = 0; i < screen_pixel_count; ++i)
+
+			for (int j = 0; j < screen_pixel_count; ++j)
 			{
+				if (right_to_left && bottom_to_top)
+					i = screen_pixel_count - j - 1;
+				else if (right_to_left)
+					i = j / screen_width * screen_width + screen_width - j % screen_width - 1;
+				else if (bottom_to_top)
+					i = (screen_pixel_count - j - 1) / screen_width * screen_width + j % screen_width;
+				else
+					i = j;
+
 				// Note that screen pixels sometimes have a non-zero high-order byte.  That's why
 				// bit-and with 0x00FFFFFF is done.  Otherwise, reddish/orangish colors are not properly
 				// found:
@@ -4807,8 +4789,17 @@ ResultType Line::PixelSearch(int aLeft, int aTop, int aRight, int aBottom, COLOR
 			
 			SET_COLOR_RANGE
 
-			for (i = 0; i < screen_pixel_count; ++i)
+			for (int j = 0; j < screen_pixel_count; ++j)
 			{
+				if (right_to_left && bottom_to_top)
+					i = screen_pixel_count - j - 1;
+				else if (right_to_left)
+					i = j / screen_width * screen_width + screen_width - j % screen_width - 1;
+				else if (bottom_to_top)
+					i = (screen_pixel_count - j - 1) / screen_width * screen_width + j % screen_width;
+				else
+					i = j;
+
 				// Note that screen pixels sometimes have a non-zero high-order byte.  But it doesn't
 				// matter with the below approach, since that byte is not checked in the comparison.
 				pixel = screen_pixel[i];
@@ -4847,9 +4838,9 @@ fast_end:
 		// zeroes if this doesn't need to be done):
 		if (!aIsPixelGetColor && found)
 		{
-			if (output_var_x && !output_var_x->Assign((aLeft + i%screen_width) - origin.x))
+			if (output_var_x && !output_var_x->Assign((left + i%screen_width) - origin.x))
 				return FAIL;
-			if (output_var_y && !output_var_y->Assign((aTop + i/screen_width) - origin.y))
+			if (output_var_y && !output_var_y->Assign((top + i/screen_width) - origin.y))
 				return FAIL;
 		}
 
@@ -4865,8 +4856,6 @@ fast_end:
 
 	// If the caller gives us inverted X or Y coordinates, conduct the search in reverse order.
 	// This feature was requested; it was put into effect for v1.0.25.06.
-	bool right_to_left = aLeft > aRight;
-	bool bottom_to_top = aTop > aBottom;
 	register int xpos, ypos;
 
 	if (aVariation > 0)
@@ -8442,32 +8431,15 @@ ResultType Line::DriveSpace(LPTSTR aPath, bool aGetFreeSpace)
 		buf[length] = '\0';
 	}
 
-	// The program won't launch at all on Win95a (original Win95) unless the function address is resolved
-	// at runtime:
-	typedef BOOL (WINAPI *GetDiskFreeSpaceExType)(LPCTSTR, PULARGE_INTEGER, PULARGE_INTEGER, PULARGE_INTEGER);
-	static GetDiskFreeSpaceExType MyGetDiskFreeSpaceEx =
-		(GetDiskFreeSpaceExType)GetProcAddress(GetModuleHandle(_T("kernel32")), "GetDiskFreeSpaceEx" WINAPI_SUFFIX);
-
 	// MSDN: "The GetDiskFreeSpaceEx function returns correct values for all volumes, including those
 	// that are greater than 2 gigabytes."
 	__int64 free_space;
-	if (MyGetDiskFreeSpaceEx)  // Function is available (unpatched Win95 and WinNT might not have it).
-	{
-		ULARGE_INTEGER total, free, used;
-		if (!MyGetDiskFreeSpaceEx(buf, &free, &total, &used))
-			goto error;
-		// Casting this way allows sizes of up to 2,097,152 gigabytes:
-		free_space = (__int64)((unsigned __int64)(aGetFreeSpace ? free.QuadPart : total.QuadPart)
-			/ (1024*1024));
-	}
-	else // For unpatched versions of Win95/NT4, fall back to compatibility mode.
-	{
-		DWORD sectors_per_cluster, bytes_per_sector, free_clusters, total_clusters;
-		if (!GetDiskFreeSpace(buf, &sectors_per_cluster, &bytes_per_sector, &free_clusters, &total_clusters))
-			goto error;
-		free_space = (__int64)((unsigned __int64)((aGetFreeSpace ? free_clusters : total_clusters)
-			* sectors_per_cluster * bytes_per_sector) / (1024*1024));
-	}
+	ULARGE_INTEGER total, free, used;
+	if (!GetDiskFreeSpaceEx(buf, &free, &total, &used))
+		goto error;
+	// Casting this way allows sizes of up to 2,097,152 gigabytes:
+	free_space = (__int64)((unsigned __int64)(aGetFreeSpace ? free.QuadPart : total.QuadPart)
+		/ (1024*1024));
 
 	g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
 	return OUTPUT_VAR->Assign(free_space);
@@ -8559,84 +8531,22 @@ ResultType Line::DriveLock(TCHAR aDriveLetter, bool aLockIt)
 	HANDLE hdevice;
 	DWORD unused;
 	BOOL result;
-
-	if (g_os.IsWin9x())
-	{
-		// blisteringhot@hotmail.com has confirmed that the code below works on Win98 with an IDE CD Drive:
-		// System:  Win98 IDE CdRom (my ejector is CloseTray)
-		// I get a blue screen when I try to eject after using the test script.
-		// "eject request to drive in use"
-		// It asks me to Ok or Esc, Ok is default.
-		//	-probably a bit scary for a novice.
-		// BUT its locked alright!"
-
-		// Use the Windows 9x method.  The code below is based on an example posted by Microsoft.
-		// Note: The presence of the code below does not add a detectible amount to the EXE size
-		// (probably because it's mostly defines and data types).
-		#pragma pack(push, 1)
-		typedef struct _DIOC_REGISTERS
-		{
-			DWORD reg_EBX;
-			DWORD reg_EDX;
-			DWORD reg_ECX;
-			DWORD reg_EAX;
-			DWORD reg_EDI;
-			DWORD reg_ESI;
-			DWORD reg_Flags;
-		} DIOC_REGISTERS, *PDIOC_REGISTERS;
-		typedef struct _PARAMBLOCK
-		{
-			BYTE Operation;
-			BYTE NumLocks;
-		} PARAMBLOCK, *PPARAMBLOCK;
-		#pragma pack(pop)
-
-		// MS: Prepare for lock or unlock IOCTL call
-		#define CARRY_FLAG 0x1
-		#define VWIN32_DIOC_DOS_IOCTL 1
-		#define LOCK_MEDIA   0
-		#define UNLOCK_MEDIA 1
-		#define STATUS_LOCK  2
-		PARAMBLOCK pb = {0};
-		pb.Operation = aLockIt ? LOCK_MEDIA : UNLOCK_MEDIA;
-		
-		DIOC_REGISTERS regs = {0};
-		regs.reg_EAX = 0x440D;
-		regs.reg_EBX = ctoupper(aDriveLetter) - 'A' + 1; // Convert to drive index. 0 = default, 1 = A, 2 = B, 3 = C
-		regs.reg_ECX = 0x0848; // MS: Lock/unlock media
-		regs.reg_EDX = (DWORD)(size_t)&pb;
-		
-		// MS: Open VWIN32
-		hdevice = CreateFile(_T("\\\\.\\vwin32"), 0, 0, NULL, 0, FILE_FLAG_DELETE_ON_CLOSE, NULL);
-		if (hdevice == INVALID_HANDLE_VALUE)
-			return FAIL;
-		
-		// MS: Call VWIN32
-		result = DeviceIoControl(hdevice, VWIN32_DIOC_DOS_IOCTL, &regs, sizeof(regs), &regs, sizeof(regs), &unused, 0);
-		if (result)
-			result = !(regs.reg_Flags & CARRY_FLAG);
-	}
-	else // NT4/2k/XP or later
-	{
-		// The calls below cannot work on Win9x (as documented by MSDN's PREVENT_MEDIA_REMOVAL).
-		// Don't even attempt them on Win9x because they might blow up.
-		TCHAR filename[64];
-		_stprintf(filename, _T("\\\\.\\%c:"), aDriveLetter);
-		// FILE_READ_ATTRIBUTES is not enough; it yields "Access Denied" error.  So apparently all or part
-		// of the sub-attributes in GENERIC_READ are needed.  An MSDN example implies that GENERIC_WRITE is
-		// only needed for GetDriveType() == DRIVE_REMOVABLE drives, and maybe not even those when all we
-		// want to do is lock/unlock the drive (that example did quite a bit more).  In any case, research
-		// indicates that all CD/DVD drives are ever considered DRIVE_CDROM, not DRIVE_REMOVABLE.
-		// Due to this and the unlikelihood that GENERIC_WRITE is ever needed anyway, GetDriveType() is
-		// not called for the purpose of conditionally adding the GENERIC_WRITE attribute.
-		hdevice = CreateFile(filename, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
-		if (hdevice == INVALID_HANDLE_VALUE)
-			return FAIL;
-		PREVENT_MEDIA_REMOVAL pmr;
-		pmr.PreventMediaRemoval = aLockIt;
-		result = DeviceIoControl(hdevice, IOCTL_STORAGE_MEDIA_REMOVAL, &pmr, sizeof(PREVENT_MEDIA_REMOVAL)
-			, NULL, 0, &unused, NULL);
-	}
+	TCHAR filename[64];
+	_stprintf(filename, _T("\\\\.\\%c:"), aDriveLetter);
+	// FILE_READ_ATTRIBUTES is not enough; it yields "Access Denied" error.  So apparently all or part
+	// of the sub-attributes in GENERIC_READ are needed.  An MSDN example implies that GENERIC_WRITE is
+	// only needed for GetDriveType() == DRIVE_REMOVABLE drives, and maybe not even those when all we
+	// want to do is lock/unlock the drive (that example did quite a bit more).  In any case, research
+	// indicates that all CD/DVD drives are ever considered DRIVE_CDROM, not DRIVE_REMOVABLE.
+	// Due to this and the unlikelihood that GENERIC_WRITE is ever needed anyway, GetDriveType() is
+	// not called for the purpose of conditionally adding the GENERIC_WRITE attribute.
+	hdevice = CreateFile(filename, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+	if (hdevice == INVALID_HANDLE_VALUE)
+		return FAIL;
+	PREVENT_MEDIA_REMOVAL pmr;
+	pmr.PreventMediaRemoval = aLockIt;
+	result = DeviceIoControl(hdevice, IOCTL_STORAGE_MEDIA_REMOVAL, &pmr, sizeof(PREVENT_MEDIA_REMOVAL)
+		, NULL, 0, &unused, NULL);
 	CloseHandle(hdevice);
 	return result ? OK : FAIL;
 }
@@ -9786,11 +9696,7 @@ ResultType Line::FileSelectFile(LPTSTR aOptions, LPTSTR aWorkingDir, LPTSTR aGre
 	}
 
 	OPENFILENAME ofn = {0};
-	// OPENFILENAME_SIZE_VERSION_400 must be used for 9x/NT otherwise the dialog will not appear!
-	// MSDN: "In an application that is compiled with WINVER and _WIN32_WINNT >= 0x0500, use
-	// OPENFILENAME_SIZE_VERSION_400 for this member.  Windows 2000/XP: Use sizeof(OPENFILENAME)
-	// for this parameter."
-	ofn.lStructSize = g_os.IsWin2000orLater() ? sizeof(OPENFILENAME) : OPENFILENAME_SIZE_VERSION_400;
+	ofn.lStructSize = sizeof(OPENFILENAME);
 	ofn.hwndOwner = THREAD_DIALOG_OWNER; // Can be NULL, which is used instead of main window since no need to have main window forced into the background for this.
 	ofn.lpstrTitle = greeting;
 	ofn.lpstrFilter = *filter ? filter : _T("All Files (*.*)\0*.*\0Text Documents (*.txt)\0*.txt\0");
@@ -9802,7 +9708,7 @@ ResultType Line::FileSelectFile(LPTSTR aOptions, LPTSTR aWorkingDir, LPTSTR aGre
 	// Note that the OFN_NOCHANGEDIR flag is ineffective in some cases, so we'll use a custom
 	// workaround instead.  MSDN: "Windows NT 4.0/2000/XP: This flag is ineffective for GetOpenFileName."
 	// In addition, it does not prevent the CWD from changing while the user navigates from folder to
-	// folder in the dialog, except perhaps on Win9x.
+	// folder in the dialog.
 
 	// For v1.0.25.05, the new "M" letter is used for a new multi-select method since the old multi-select
 	// is faulty in the following ways:
@@ -11797,7 +11703,9 @@ VarSizeType BIV_PriorKey(LPTSTR aBuf, LPTSTR aVarName)
 		// Get index for circular buffer
 		int i = (g_KeyHistoryNext + g_MaxHistoryKeys - iOffset) % g_MaxHistoryKeys;
 		// Keep looking until we hit the second valid event
-		if (g_KeyHistory[i].event_type != _T('i') && ++validEventCount > 1)
+		if (g_KeyHistory[i].event_type != _T('i') // Not an ignored event.
+			&& g_KeyHistory[i].event_type != _T('U') // Not a Unicode packet (SendInput/VK_PACKET).
+			&& ++validEventCount > 1)
 		{
 			// Find the next most recent key-down
 			if (!g_KeyHistory[i].key_up)
@@ -11969,48 +11877,31 @@ VarSizeType BIV_Now(LPTSTR aBuf, LPTSTR aVarName)
 
 VarSizeType BIV_OSType(LPTSTR aBuf, LPTSTR aVarName)
 {
-	LPTSTR type = g_os.IsWinNT() ? _T("WIN32_NT") : _T("WIN32_WINDOWS");
-	if (aBuf)
-		_tcscpy(aBuf, type);
-	return (VarSizeType)_tcslen(type); // Return length of type, not aBuf.
+       LPTSTR type = _T("WIN32_NT");
+       if (aBuf)
+               _tcscpy(aBuf, type);
+       return (VarSizeType)_tcslen(type); // Return length of type, not aBuf.
 }
 
 VarSizeType BIV_OSVersion(LPTSTR aBuf, LPTSTR aVarName)
 {
-	LPCTSTR version = g_os.Version();  // Init for new or unrecognized OSes.
-	if (g_os.IsWinNT()) // "NT" includes all NT-kernel OSes: NT4/2000/XP/2003/Vista/7/8/etc.
+	LPCTSTR version = g_os.Version(); // Init for Windows 10 and any unrecognized OSes.
+	if (!g_os.IsWin10OrLater()) // Windows 10 is probably most common, and becoming more so.
 	{
-		if (g_os.IsWinXP())
-			version = _T("WIN_XP");
-		else if (g_os.IsWin7())
-			version = _T("WIN_7");
-		else if (g_os.IsWin8_1())
+		if (g_os.IsWin8_1())
 			version = _T("WIN_8.1");
 		else if (g_os.IsWin8())
 			version = _T("WIN_8");
+		else if (g_os.IsWin7())
+			version = _T("WIN_7");
 		else if (g_os.IsWinVista())
 			version = _T("WIN_VISTA");
+		else if (g_os.IsWinXP())
+			version = _T("WIN_XP");
 		else if (g_os.IsWin2003())
 			version = _T("WIN_2003");
-		else
-		{
-			if (g_os.IsWin2000())
-				version = _T("WIN_2000");
-			else if (g_os.IsWinNT4())
-				version = _T("WIN_NT4");
-		}
-	}
-	else
-	{
-		if (g_os.IsWin95())
-			version = _T("WIN_95");
-		else
-		{
-			if (g_os.IsWin98())
-				version = _T("WIN_98");
-			else
-				version = _T("WIN_ME");
-		}
+		else if (g_os.IsWin2000())
+			version = _T("WIN_2000");
 	}
 	if (aBuf)
 		_tcscpy(aBuf, version);
@@ -12073,13 +11964,6 @@ VarSizeType BIV_WinDir(LPTSTR aBuf, LPTSTR aVarName)
 	if (aBuf)
 		_tcscpy(aBuf, buf); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string). This is true for ReadRegString()'s API call and may be true for other API calls like the one here.
 	return length;
-	// Formerly the following, but I don't think it's as reliable/future-proof given the 1.0.47 comment above:
-	//TCHAR buf_temp[1]; // Just a fake buffer to pass to some API functions in lieu of a NULL, to avoid any chance of misbehavior. Keep the size at 1 so that API functions will always fail to copy to buf.
-	//// Sizes/lengths/-1/return-values/etc. have been verified correct.
-	//return aBuf
-	//	? GetWindowsDirectory(aBuf, MAX_PATH) // MAX_PATH is kept in case it's needed on Win9x for reasons similar to those in GetEnvironmentVarWin9x().
-	//	: GetWindowsDirectory(buf_temp, 0);
-		// Above avoids subtracting 1 to be conservative and to reduce code size (due to the need to otherwise check for zero and avoid subtracting 1 in that case).
 }
 
 VarSizeType BIV_Temp(LPTSTR aBuf, LPTSTR aVarName)
@@ -12106,8 +11990,8 @@ VarSizeType BIV_ComSpec(LPTSTR aBuf, LPTSTR aVarName)
 {
 	TCHAR buf_temp[1]; // Just a fake buffer to pass to some API functions in lieu of a NULL, to avoid any chance of misbehavior. Keep the size at 1 so that API functions will always fail to copy to buf.
 	// Sizes/lengths/-1/return-values/etc. have been verified correct.
-	return aBuf ? GetEnvVarReliable(_T("comspec"), aBuf) // v1.0.46.08: GetEnvVarReliable() fixes %Comspec% on Windows 9x.
-		: GetEnvironmentVariable(_T("comspec"), buf_temp, 0); // Avoids subtracting 1 to be conservative and to reduce code size (due to the need to otherwise check for zero and avoid subtracting 1 in that case).
+	return aBuf ? GetEnvVarReliable(_T("ComSpec"), aBuf) // v1.0.46.08: Use GetEnvVarReliable() to avoid passing an inaccurate buffer size to GetEnvironmentVariable().
+		: GetEnvironmentVariable(_T("ComSpec"), buf_temp, 0); // Avoids subtracting 1 to be conservative and to reduce code size (due to the need to otherwise check for zero and avoid subtracting 1 in that case).
 }
 
 VarSizeType BIV_SpecialFolderPath(LPTSTR aBuf, LPTSTR aVarName)
@@ -12237,31 +12121,10 @@ VarSizeType BIV_Cursor(LPTSTR aBuf, LPTSTR aVarName)
 	if (!aBuf)
 		return SMALL_STRING_LENGTH;  // We're returning the length of the var's contents, not the size.
 
-	// Must fetch it at runtime, otherwise the program can't even be launched on Windows 95:
-	typedef BOOL (WINAPI *MyGetCursorInfoType)(PCURSORINFO);
-	static MyGetCursorInfoType MyGetCursorInfo = (MyGetCursorInfoType)GetProcAddress(GetModuleHandle(_T("user32")), "GetCursorInfo");
-
 	HCURSOR current_cursor;
-	if (MyGetCursorInfo) // v1.0.42.02: This method is used to avoid ATTACH_THREAD_INPUT, which interferes with double-clicking if called repeatedly at a high frequency.
-	{
-		CURSORINFO ci;
-		ci.cbSize = sizeof(CURSORINFO);
-		current_cursor = MyGetCursorInfo(&ci) ? ci.hCursor : NULL;
-	}
-	else // Windows 95 and old-service-pack versions of NT4 require the old method.
-	{
-		POINT point;
-		GetCursorPos(&point);
-		HWND target_window = WindowFromPoint(point);
-
-		// MSDN docs imply that threads must be attached for GetCursor() to work.
-		// A side-effect of attaching threads or of GetCursor() itself is that mouse double-clicks
-		// are interfered with, at least if this function is called repeatedly at a high frequency.
-		ATTACH_THREAD_INPUT
-		current_cursor = GetCursor();
-		DETACH_THREAD_INPUT
-	}
-
+	CURSORINFO ci;
+	ci.cbSize = sizeof(CURSORINFO);
+	current_cursor = GetCursorInfo(&ci) ? ci.hCursor : NULL;
 	if (!current_cursor)
 	{
 		#define CURSOR_UNKNOWN _T("Unknown")
@@ -12622,9 +12485,8 @@ VarSizeType BIV_LoopRegTimeModified(LPTSTR aBuf, LPTSTR aVarName)
 	TCHAR buf[64];
 	LPTSTR target_buf = aBuf ? aBuf : buf;
 	*target_buf = '\0'; // Set default.
-	// Only subkeys (not values) have a time.  In addition, Win9x doesn't support retrieval
-	// of the time (nor does it store it), so make the var blank in that case:
-	if (g->mLoopRegItem && g->mLoopRegItem->type == REG_SUBKEY && !g_os.IsWin9x())
+	// Only subkeys (not values) have a time.
+	if (g->mLoopRegItem && g->mLoopRegItem->type == REG_SUBKEY)
 		FileTimeToYYYYMMDD(target_buf, g->mLoopRegItem->ftLastWriteTime, true);
 	return (VarSizeType)_tcslen(target_buf);
 }
@@ -12963,31 +12825,12 @@ VarSizeType BIV_TimeIdle(LPTSTR aBuf, LPTSTR aVarName) // Called by multiple cal
 {
 	if (!aBuf) // IMPORTANT: Conservative estimate because tick might change between 1st & 2nd calls.
 		return MAX_INTEGER_LENGTH;
-#ifdef CONFIG_WIN9X
-	*aBuf = '\0';  // Set default.
-	if (g_os.IsWin2000orLater()) // Checked in case the function is present in the OS but "not implemented".
-	{
-		// Must fetch it at runtime, otherwise the program can't even be launched on Win9x/NT:
-		typedef BOOL (WINAPI *MyGetLastInputInfoType)(PLASTINPUTINFO);
-		static MyGetLastInputInfoType MyGetLastInputInfo = (MyGetLastInputInfoType)
-			GetProcAddress(GetModuleHandle(_T("user32")), "GetLastInputInfo");
-		if (MyGetLastInputInfo)
-		{
-			LASTINPUTINFO lii;
-			lii.cbSize = sizeof(lii);
-			if (MyGetLastInputInfo(&lii))
-				ITOA64(GetTickCount() - lii.dwTime, aBuf);
-		}
-	}
-#else
-	// Not Win9x: Calling it directly should (in theory) produce smaller code size.
 	LASTINPUTINFO lii;
 	lii.cbSize = sizeof(lii);
 	if (GetLastInputInfo(&lii))
 		ITOA64(GetTickCount() - lii.dwTime, aBuf);
 	else
 		*aBuf = '\0';
-#endif
 	return (VarSizeType)_tcslen(aBuf);
 }
 
@@ -21926,32 +21769,14 @@ bool ScriptGetKeyState(vk_type aVK, KeyStateTypes aKeyStateType)
 	switch (aKeyStateType)
 	{
 	case KEYSTATE_TOGGLE: // Whether a toggleable key such as CapsLock is currently turned on.
-		// Under Win9x, at least certain versions and for certain hardware, this
-		// doesn't seem to be always accurate, especially when the key has just
-		// been toggled and the user hasn't pressed any other key since then.
-		// I tried using GetKeyboardState() instead, but it produces the same
-		// result.  Therefore, I've documented this as a limitation in the help file.
-		// In addition, this was attempted but it didn't seem to help:
-		//if (g_os.IsWin9x())
-		//{
-		//	DWORD fore_thread = GetWindowThreadProcessId(GetForegroundWindow(), NULL);
-		//	bool is_attached_my_to_fore = false;
-		//	if (fore_thread && fore_thread != g_MainThreadID)
-		//		is_attached_my_to_fore = AttachThreadInput(g_MainThreadID, fore_thread, TRUE) != 0;
-		//	output_var->Assign(IsKeyToggledOn(aVK) ? "D" : "U");
-		//	if (is_attached_my_to_fore)
-		//		AttachThreadInput(g_MainThreadID, fore_thread, FALSE);
-		//	return OK;
-		//}
-		//else
-		return IsKeyToggledOn(aVK); // This also works for the INSERT key, but only on XP (and possibly Win2k).
+		return IsKeyToggledOn(aVK); // This also works for non-"lock" keys, but in that case the toggle state can be out of sync with other processes/threads.
 	case KEYSTATE_PHYSICAL: // Physical state of key.
 		if (IsMouseVK(aVK)) // mouse button
 		{
 #ifndef MINIDLL
 			if (g_MouseHook) // mouse hook is installed, so use it's tracking of physical state.
 				return g_PhysicalKeyState[aVK] & STATE_DOWN;
-			else // Even for Win9x/NT, it seems slightly better to call this rather than IsKeyDown9xNT():
+			else
 #endif
 				return IsKeyDownAsync(aVK);
 		}
@@ -21968,29 +21793,21 @@ bool ScriptGetKeyState(vk_type aVK, KeyStateTypes aKeyStateType)
 					GetModifierLRState(true); // Correct hook's physical state if needed.
 				return g_PhysicalKeyState[aVK] & STATE_DOWN;
 			}
-			else // Even for Win9x/NT, it seems slightly better to call this rather than IsKeyDown9xNT():
+			else
 #endif
 				return IsKeyDownAsync(aVK);
 		}
 	} // switch()
 
 	// Otherwise, use the default state-type: KEYSTATE_LOGICAL
-	if (g_os.IsWin9x() || g_os.IsWinNT4())
-		return IsKeyDown9xNT(aVK); // See its comments for why it's more reliable on these OSes.
-	else
-		// On XP/2K at least, a key can be physically down even if it isn't logically down,
-		// which is why the below specifically calls IsKeyDown2kXP() rather than some more
-		// comprehensive method such as consulting the physical key state as tracked by the hook:
-		// v1.0.42.01: For backward compatibility, the following hasn't been changed to IsKeyDownAsync().
-		// For example, a script might rely on being able to detect whether Control was down at the
-		// time the current Gui thread was launched rather than whether than whether it's down right now.
-		// Another example is the journal playback hook: when a window owned by the script receives
-		// such a keystroke, only GetKeyState() can detect the changed state of the key, not GetAsyncKeyState().
-		// A new mode can be added to KeyWait & GetKeyState if Async is ever explicitly needed.
-		return IsKeyDown2kXP(aVK);
-		// Known limitation: For some reason, both the above and IsKeyDown9xNT() will indicate
-		// that the CONTROL key is up whenever RButton is down, at least if the mouse hook is
-		// installed without the keyboard hook.  No known explanation.
+	// On XP/2K at least, a key can be physically down even if it isn't logically down,
+	// which is why the below specifically calls IsKeyDown() rather than some more
+	// comprehensive method such as consulting the physical key state as tracked by the hook:
+	// v1.0.42.01: For backward compatibility, the following hasn't been changed to IsKeyDownAsync().
+	// One example is the journal playback hook: when a window owned by the script receives
+	// such a keystroke, only GetKeyState() can detect the changed state of the key, not GetAsyncKeyState().
+	// A new mode can be added to KeyWait & GetKeyState if Async is ever explicitly needed.
+	return IsKeyDown(aVK);
 }
 
 

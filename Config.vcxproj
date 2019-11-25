@@ -45,6 +45,7 @@
       <OmitFramePointers>true</OmitFramePointers>
       <StringPooling>true</StringPooling>
       <BufferSecurityCheck>false</BufferSecurityCheck>
+      <AdditionalOptions Condition="$(PlatformToolsetVersion) &gt;= 141">/Zc:threadSafeInit- %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <!-- note linker settings don't apply to lib_pcre -->

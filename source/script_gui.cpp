@@ -719,9 +719,7 @@ ResultType Script::PerformGui(LPTSTR aBuf, LPTSTR aParam2, LPTSTR aParam3, LPTST
 		goto return_the_result;
 
 	case GUI_CMD_FLASH:
-		// Note that FlashWindowEx() would have to be loaded dynamically since it is not available
-		// on Win9x/NT.  But for now, just this simple method is provided.  In the future, more
-		// sophisticated parameters can be made available to flash the window a given number of times
+		// Note that FlashWindowEx() could enable parameters for flashing the window a given number of times
 		// and at a certain frequency, and other options such as only-taskbar-button or only-caption.
 		// Set FlashWindowEx() for more ideas:
 		FlashWindow(gui.mHwnd, _tcsicmp(aParam2, _T("Off")) ? TRUE : FALSE);
@@ -3662,8 +3660,7 @@ ResultType GuiType::AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR
 			// Now set the limit. Specifying a limit of zero opens the control to its maximum text capacity,
 			// which removes the 32K size restriction.  Testing shows that this does not increase the actual
 			// amount of memory used for controls containing small amounts of text.  All it does is allow
-			// the control to allocate more memory as the user enters text.  By specifying zero, a max
-			// of 64K becomes available on Windows 9x, and perhaps as much as 4 GB on NT/2k/XP.
+			// the control to allocate more memory as the user enters text.
 			SendMessage(control.hwnd, EM_LIMITTEXT, (WPARAM)opt.limit, 0); // EM_LIMITTEXT == EM_SETLIMITTEXT
 			if (opt.tabstop_count)
 				SendMessage(control.hwnd, EM_SETTABSTOPS, opt.tabstop_count, (LPARAM)opt.tabstop);
@@ -10569,7 +10566,7 @@ LPTSTR GuiType::HotkeyToText(WORD aHotkey, LPTSTR aBuf)
 		// If a hotkey control could capture AppsKey, PrintScreen, Ctrl-Break (VK_CANCEL), which it can't, this
 		// would also apply to them.
 		// Fix for v1.1.26.02: Check sc2 != 0, not sc1 != sc2, otherwise the fix described above doesn't work.
-		sc_type sc2 = vk_to_sc(vk, true); // Secondary scan code (will be the same as above if the VK has only one SC).
+		sc_type sc2 = vk_to_sc(vk, true); // Secondary scan code.
 		if (sc2) // Non-zero means this key has two scan codes.
 		{
 			sc_type sc1 = vk_to_sc(vk); // Primary scan code for this virtual key.
@@ -10582,24 +10579,7 @@ LPTSTR GuiType::HotkeyToText(WORD aHotkey, LPTSTR aBuf)
 		}
 	}
 	// Since above didn't return, use a simple lookup on VK, since it gives preference to non-extended keys.
-	// KNOWN ISSUE: Someone pointed out that the following will typically produce ^A instead of ^a, which will
-	// produce an unwanted shift keystroke if for some reason the script uses the Send command to send the hotkey.
-	// However, for the following reasons, it seems best not to try to "fix" it:
-	// 1) There's no telling what names (single-character or otherwise) various keyboard layouts/languages
-	//    might produce.
-	// 2) ^A seems more readable than ^a (which is probably the exact reason the OS's hotkey control displays it
-	//     in uppercase).  Of course, this has merit only when the script actually displays the hotkey somewhere.
-	// 3) There's a slight possibility that changing it would break existing scripts that rely on uppercase.
-	// 4) Using the Send command to send the hotkey seems very rare; the script would normally Gosub the hotkey's
-	//    subroutine instead.
 	return VKtoKeyName(vk, cp, 100);
-
-	// v1.0.48: The above calls GetKeyName(), which calls GetKeyNameText(), which produces the character's
-	// name rather than the character itself if the VK is a dead key (e.g. Zircumflex rather than ^ in the
-	// German keyboard layout).  Since such names are not currently supported by commands like
-	// Hotkey/GetKeyState/Send, try another method to convert it.  Testing shows that MapVirtualKey() produces
-	// the correct character, at least for dead keys in the German keyboard layout.
-	// Update by Lexikos on 2011-07-23: GetKeyNameText() is no longer used.
 }
 
 

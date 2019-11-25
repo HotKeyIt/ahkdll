@@ -191,7 +191,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <AdditionalDependencies>wsock32.lib;winmm.lib;version.lib;comctl32.lib;odbc32.lib;odbccp32.lib;shlwapi.lib;crypt32.lib;psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>wsock32.lib;winmm.lib;version.lib;comctl32.lib;odbc32.lib;odbccp32.lib;shlwapi.lib;crypt32.lib;psapi.lib;wininet.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <StackReserveSize>4194304</StackReserveSize>
       <TerminalServerAware>false</TerminalServerAware>
     </Link>
@@ -300,6 +300,7 @@
     <ClCompile Include="source\globaldata.cpp" />
     <ClCompile Include="source\hook.cpp" />
     <ClCompile Include="source\hotkey.cpp" />
+    <ClCompile Include="source\input_object.cpp" />
     <ClCompile Include="source\keyboard_mouse.cpp" />
     <ClCompile Include="source\LiteZip.cpp" />
     <ClCompile Include="source\lowlevelbif.cpp" />
@@ -342,6 +343,7 @@
     <ClInclude Include="source\Debugger.h" />
     <ClInclude Include="source\defines.h" />
     <ClInclude Include="source\exports.h" />
+    <ClInclude Include="source\input_object.h" />
     <ClInclude Include="source\lib\exearc_read.h" />
     <ClInclude Include="source\globaldata.h" />
     <ClInclude Include="source\hook.h" />
@@ -358,7 +360,8 @@
     <ClInclude Include="source\Registry.h" />
     <ClInclude Include="source\resources\resource.h" />
     <ClInclude Include="source\script.h" />
-    <ClInclude Include="source\script_com.h"></ClInclude>
+    <ClInclude Include="source\script_com.h">
+    </ClInclude>
     <ClInclude Include="source\script_object.h" />
     <ClInclude Include="source\SimpleHeap.h" />
     <ClInclude Include="source\stdafx.h" />
@@ -432,6 +435,16 @@
     <ClCompile>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">Use</PrecompiledHeader>
     </ClCompile>
+    <ClCompile>
+      <Optimization Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">MaxSpeed</Optimization>
+    </ClCompile>
+    <ClCompile>
+      <FavorSizeOrSpeed Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">Speed</FavorSizeOrSpeed>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">MultiThreadedDLL</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">false</GenerateDebugInformation>
+    </Link>
   </ItemDefinitionGroup>
   <!--Dll-->
   <ItemDefinitionGroup Condition="$(ConfigReleaseDll) OR $(ConfigReleaseDllMini)">
@@ -442,7 +455,8 @@
   </ItemDefinitionGroup>
   <!--Include CustomBuild-->
   <ItemGroup>
-    <ResourceCompile Include="source\resources\AutoHotkey.rc"></ResourceCompile>
+    <ResourceCompile Include="source\resources\AutoHotkey.rc">
+    </ResourceCompile>
     <CustomBuild Include="source\lib\win2kcompat.asm">
       <ExcludedFromBuild Condition="'$(Platform)'!='Win32'">true</ExcludedFromBuild>
     </CustomBuild>

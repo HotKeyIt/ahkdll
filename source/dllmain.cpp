@@ -466,20 +466,10 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	{
 		// Since InitCommonControls() is apparently incapable of initializing DateTime and MonthCal
 		// controls, InitCommonControlsEx() must be called.  But since Ex() requires comctl32.dll
-		// 4.70+, must get the function's address dynamically in case the program is running on
-		// Windows 95/NT without the updated DLL (otherwise the program would not launch at all).
-		typedef BOOL (WINAPI *MyInitCommonControlsExType)(LPINITCOMMONCONTROLSEX);
-		MyInitCommonControlsExType MyInitCommonControlsEx = (MyInitCommonControlsExType)
-			GetProcAddress(GetModuleHandle(_T("comctl32")), "InitCommonControlsEx"); // LoadLibrary shouldn't be necessary because comctl32 in linked by compiler.
-		if (MyInitCommonControlsEx)
-		{
-			INITCOMMONCONTROLSEX icce;
-			icce.dwSize = sizeof(INITCOMMONCONTROLSEX);
-			icce.dwICC = ICC_WIN95_CLASSES | ICC_DATE_CLASSES; // ICC_WIN95_CLASSES is equivalent to calling InitCommonControls().
-			MyInitCommonControlsEx(&icce);
-		}
-		else // InitCommonControlsEx not available, so must revert to non-Ex() to make controls work on Win95/NT4.
-			InitCommonControls();
+		INITCOMMONCONTROLSEX icce;
+		icce.dwSize = sizeof(INITCOMMONCONTROLSEX);
+		icce.dwICC = ICC_WIN95_CLASSES | ICC_DATE_CLASSES; // ICC_WIN95_CLASSES is equivalent to calling InitCommonControls().
+		InitCommonControlsEx(&icce);
 	}
 
 #ifdef CONFIG_DEBUGGER
