@@ -85,7 +85,7 @@ ResultType InputObject::Invoke(ExprTokenType &aResultToken, ExprTokenType &aThis
 				_o_throw(ERR_OUTOFMEM);
 			_tcscpy(input.Buffer, ParamIndexToString(1));
 			aResultToken.symbol = SYM_STRING;
-			return TokenSetResult(aResultToken, input.Buffer, input.BufferLength = _tcslen(input.Buffer));
+			return TokenSetResult(aResultToken, input.Buffer, input.BufferLength = (int)_tcslen(input.Buffer));
 		}
 	}
 	else if (IS_INVOKE_GET)

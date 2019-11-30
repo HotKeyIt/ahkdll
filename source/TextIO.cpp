@@ -1267,7 +1267,10 @@ void TextMem::_Close()
 {
 	if (mData.mBuffer) {
 		if (mData.mOwned)
+		{
+			g_memset(mData.mBuffer, 0, mData.mLength);
 			free(mData.mBuffer);
+		}
 		mData.mBuffer = NULL;
 	}
 }

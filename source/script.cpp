@@ -2158,7 +2158,6 @@ ResultType Script::OpenIncludedFile(TextStream &ts, LPTSTR aFileSpec, bool aAllo
 {
 	TextMem::Buffer textbuf(NULL, 0, false);
 	DWORD aSizeDeCompressed = 0;
-	AUTO_MALLOCA_DEFINE(LPVOID, buff);
 
 #ifndef AUTOHOTKEYSC
 
@@ -2279,13 +2278,13 @@ ResultType Script::OpenIncludedFile(TextStream &ts, LPTSTR aFileSpec, bool aAllo
 				aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength, g_default_pwd);
 				if (aSizeDeCompressed)
 				{
-					AUTO_MALLOCA(buff, LPVOID, aSizeDeCompressed + 2); // +2 for terminator, will be freed when function returns
-					memcpy(buff, aDataBuf, aSizeDeCompressed);
-					g_memset((char*)buff + aSizeDeCompressed, 0, 2);
+					textbuf.mBuffer = malloc(aSizeDeCompressed + 2); // +2 for terminator, will be freed when function returns
+					textbuf.mOwned = true;
+					memcpy(textbuf.mBuffer, aDataBuf, aSizeDeCompressed);
+					g_memset((char*)textbuf.mBuffer + aSizeDeCompressed, 0, 2);
 					g_memset(aDataBuf, 0, aSizeDeCompressed);
 					free(aDataBuf);
 					textbuf.mLength = aSizeDeCompressed + 2;
-					textbuf.mBuffer = buff;
 #ifndef _USRDLL
 					if (!AHKModule())
 						return FAIL;
@@ -2334,13 +2333,14 @@ ResultType Script::OpenIncludedFile(TextStream &ts, LPTSTR aFileSpec, bool aAllo
 		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength, g_default_pwd);
 		if (aSizeDeCompressed)
 		{
-			AUTO_MALLOCA(buff, LPVOID, aSizeDeCompressed + 2); // +2 for terminator, will be freed when function returns
-			memcpy(buff, aDataBuf, aSizeDeCompressed);
-			g_memset((char*)buff + aSizeDeCompressed, 0, 2);
+			textbuf.mBuffer = malloc(aSizeDeCompressed + 2); // +2 for terminator, will be freed when function returns
+			textbuf.mOwned = true;
+			memcpy(textbuf.mBuffer, aDataBuf, aSizeDeCompressed);
+			g_memset((char*)textbuf.mBuffer + aSizeDeCompressed, 0, 2);
 			g_memset(aDataBuf, 0, aSizeDeCompressed);
 			free(aDataBuf);
 			textbuf.mLength = aSizeDeCompressed + 2;
-			textbuf.mBuffer = buff;
+
 			if (!AHKModule())
 				return FAIL;
 			MemoryFreeLibrary(g_hNTDLL);
