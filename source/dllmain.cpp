@@ -730,25 +730,25 @@ unsigned int Variant2I(VARIANT var)
 		return var.uintVal;
 }
 
-HRESULT __stdcall CoCOMServer::ahktextdll(/*in,optional*/VARIANT script,/*in,optional*/VARIANT params,/*in,optional*/VARIANT title,/*out*/HANDLE* hThread)
+HRESULT __stdcall CoCOMServer::ahktextdll(/*in,optional*/VARIANT script,/*in,optional*/VARIANT params,/*in,optional*/VARIANT title,/*out*/UINT_PTR* hThread)
 {
 	USES_CONVERSION;
 	TCHAR buf1[MAX_INTEGER_SIZE],buf2[MAX_INTEGER_SIZE];
 	if (hThread==NULL)
 		return ERROR_INVALID_PARAMETER;
-	*hThread = com_ahktextdll(script.vt == VT_BSTR ? OLE2T(script.bstrVal) : Variant2T(script,buf1)
+	*hThread = (UINT_PTR)com_ahktextdll(script.vt == VT_BSTR ? OLE2T(script.bstrVal) : Variant2T(script,buf1)
 							,params.vt == VT_BSTR ? OLE2T(params.bstrVal) : Variant2T(params,buf2)
 							,title.vt == VT_BSTR ? OLE2T(title.bstrVal) : Variant2T(title,buf2));
 	return S_OK;
 }
 
-HRESULT __stdcall CoCOMServer::ahkdll(/*in,optional*/VARIANT filepath,/*in,optional*/VARIANT params,/*in,optional*/VARIANT title,/*out*/HANDLE* hThread)
+HRESULT __stdcall CoCOMServer::ahkdll(/*in,optional*/VARIANT filepath,/*in,optional*/VARIANT params,/*in,optional*/VARIANT title,/*out*/UINT_PTR* hThread)
 {
 	USES_CONVERSION;
 	TCHAR buf1[MAX_INTEGER_SIZE],buf2[MAX_INTEGER_SIZE];
 	if (hThread==NULL)
 		return ERROR_INVALID_PARAMETER;
-	*hThread = com_ahkdll(filepath.vt == VT_BSTR ? OLE2T(filepath.bstrVal) : Variant2T(filepath,buf1)
+	*hThread = (UINT_PTR)com_ahkdll(filepath.vt == VT_BSTR ? OLE2T(filepath.bstrVal) : Variant2T(filepath,buf1)
 							,params.vt == VT_BSTR ? OLE2T(params.bstrVal) : Variant2T(params,buf2)
 							,title.vt == VT_BSTR ? OLE2T(title.bstrVal) : Variant2T(title,buf2));
 	return S_OK;

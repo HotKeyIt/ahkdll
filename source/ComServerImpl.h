@@ -32,8 +32,8 @@ public:
 
 	// ICOMServer implementation
 	//
-	virtual HRESULT __stdcall ahktextdll(/*in,optional*/VARIANT script,/*in,optional*/VARIANT params,/*in,optional*/VARIANT title, /*out*/HANDLE* hThread);
-	virtual HRESULT __stdcall ahkdll(/*in,optional*/VARIANT filepath,/*in,optional*/VARIANT params,/*in,optional*/VARIANT title, /*out*/HANDLE* hThread);
+	virtual HRESULT __stdcall ahktextdll(/*in,optional*/VARIANT script,/*in,optional*/VARIANT params,/*in,optional*/VARIANT title, /*out*/UINT_PTR* hThread);
+	virtual HRESULT __stdcall ahkdll(/*in,optional*/VARIANT filepath,/*in,optional*/VARIANT params,/*in,optional*/VARIANT title, /*out*/UINT_PTR* hThread);
 	virtual HRESULT __stdcall ahkPause(/*in,optional*/VARIANT aChangeTo, /*out*/int* paused);
 	virtual HRESULT __stdcall ahkReady(/*out*/int* ready);
 	virtual HRESULT __stdcall ahkFindLabel(/*[in]*/ VARIANT aLabelName,/*[out, retval]*/ UINT_PTR *pLabel);
