@@ -14084,6 +14084,8 @@ ResultType Line::Perform()
 		DWORD aThreadID = __readfsdword(0x24);
 #endif
 		if ((g_ThreadID != aThreadID && sleep_time > -1)) // Ordered for short-circuit performance. v1.0.38.05: Added "sleep_time > 0" so that Sleep -1/0 will work the same on Win9x as it does on other OSes.
+			Sleep(sleep_time);
+		else
 			MsgSleep(sleep_time);
 		return OK;
 	}

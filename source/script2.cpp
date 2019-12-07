@@ -727,7 +727,7 @@ ResultType InputWait(ResultToken &aResultToken, input_type &input)
 		if (g_ThreadID == aThreadID)
 			MsgSleep();
 		else
-			Sleep(100);
+			Sleep(SLEEP_INTERVAL);
 		if (!input.InProgress())
 			break;
 	}
