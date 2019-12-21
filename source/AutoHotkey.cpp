@@ -154,17 +154,17 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	g_ahkThreads[0][5] = (UINT_PTR)g_ThreadID;
 	g_ahkThreads[0][6] = (UINT_PTR)((PMYTEB)NtCurrentTeb())->ThreadLocalStoragePointer;
 
-	FileObject::sPrototype = Object::CreatePrototype(_T("File"), FileObject::sPrototype, FileObject::sMembers, _countof(FileObject::sMembers));
 	Object::sAnyPrototype = Object::CreateRootPrototypes();
+	FileObject::sPrototype = Object::CreatePrototype(_T("File"), Object::sPrototype, FileObject::sMembers, _countof(FileObject::sMembers));
 	Object::sClassPrototype = Object::CreatePrototype(_T("Class"), Object::sPrototype);
-	Array::sPrototype = Object::CreatePrototype(_T("Array"), Array::sPrototype, Array::sMembers, _countof(Array::sMembers));
-	Map::sPrototype = Object::CreatePrototype(_T("Map"), Map::sPrototype, Map::sMembers, _countof(Map::sMembers));
+	Array::sPrototype = Object::CreatePrototype(_T("Array"), Object::sPrototype, Array::sMembers, _countof(Array::sMembers));
+	Map::sPrototype = Object::CreatePrototype(_T("Map"), Object::sPrototype, Map::sMembers, _countof(Map::sMembers));
 
 	//																							Direct base			Prototype			Constructor
 	Object::sClass = Object::CreateClass(_T("Object"), Object::sClassPrototype, Object::sPrototype, static_cast<ObjectMethod>(&Object::New<Object>));
 	Object::sClassClass = Object::CreateClass(_T("Class"), Object::sClass, Object::sClassPrototype, static_cast<ObjectMethod>(&Object::New<Object>));
-	Array::sClass = Object::CreateClass(_T("Array"), Array::sClass, Array::sPrototype, static_cast<ObjectMethod>(&Array::New<Array>));
-	Map::sClass = Object::CreateClass(_T("Map"), Map::sClass, Map::sPrototype, static_cast<ObjectMethod>(&Map::New<Map>));
+	Array::sClass = Object::CreateClass(_T("Array"), Object::sClass, Array::sPrototype, static_cast<ObjectMethod>(&Array::New<Array>));
+	Map::sClass = Object::CreateClass(_T("Map"), Object::sClass, Map::sPrototype, static_cast<ObjectMethod>(&Map::New<Map>));
 
 
 
@@ -174,10 +174,10 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 
 
 
-	BufferObject::sPrototype = Object::CreatePrototype(_T("Buffer"), BufferObject::sPrototype, BufferObject::sMembers, _countof(BufferObject::sMembers));
+	BufferObject::sPrototype = Object::CreatePrototype(_T("Buffer"), Object::sPrototype, BufferObject::sMembers, _countof(BufferObject::sMembers));
 	ClipboardAll::sPrototype = Object::CreatePrototype(_T("ClipboardAll"), BufferObject::sPrototype);
 
-	RegExMatchObject::sPrototype = Object::CreatePrototype(_T("RegExMatch"), RegExMatchObject::sPrototype, RegExMatchObject::sMembers, _countof(RegExMatchObject::sMembers));
+	RegExMatchObject::sPrototype = Object::CreatePrototype(_T("RegExMatch"), Object::sPrototype, RegExMatchObject::sMembers, _countof(RegExMatchObject::sMembers));
 
 	Object::sPrimitivePrototype = Object::CreatePrototype(_T("Primitive"), Object::sAnyPrototype);
 	Object::sStringPrototype = Object::CreatePrototype(_T("String"), Object::sPrimitivePrototype);
@@ -492,26 +492,26 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 		{
 			g_SimpleHeap = new SimpleHeap();
 			g_SimpleHeapVar = g_SimpleHeap;
-			FileObject::sPrototype = Object::CreatePrototype(_T("File"), FileObject::sPrototype, FileObject::sMembers, _countof(FileObject::sMembers));
 			Object::sAnyPrototype = Object::CreateRootPrototypes();
+			FileObject::sPrototype = Object::CreatePrototype(_T("File"), Object::sPrototype, FileObject::sMembers, _countof(FileObject::sMembers));
 			Object::sClassPrototype = Object::CreatePrototype(_T("Class"), Object::sPrototype);
-			Array::sPrototype = Object::CreatePrototype(_T("Array"), Array::sPrototype, Array::sMembers, _countof(Array::sMembers));
-			Map::sPrototype = Object::CreatePrototype(_T("Map"), Map::sPrototype, Map::sMembers, _countof(Map::sMembers));
+			Array::sPrototype = Object::CreatePrototype(_T("Array"), Object::sPrototype, Array::sMembers, _countof(Array::sMembers));
+			Map::sPrototype = Object::CreatePrototype(_T("Map"), Object::sPrototype, Map::sMembers, _countof(Map::sMembers));
 
 			//																							Direct base			Prototype			Constructor
 			Object::sClass = Object::CreateClass(_T("Object"), Object::sClassPrototype, Object::sPrototype, static_cast<ObjectMethod>(&Object::New<Object>));
 			Object::sClassClass = Object::CreateClass(_T("Class"), Object::sClass, Object::sClassPrototype, static_cast<ObjectMethod>(&Object::New<Object>));
-			Array::sClass = Object::CreateClass(_T("Array"), Array::sClass, Array::sPrototype, static_cast<ObjectMethod>(&Array::New<Array>));
-			Map::sClass = Object::CreateClass(_T("Map"), Map::sClass, Map::sPrototype, static_cast<ObjectMethod>(&Map::New<Map>));
+			Array::sClass = Object::CreateClass(_T("Array"), Object::sClass, Array::sPrototype, static_cast<ObjectMethod>(&Array::New<Array>));
+			Map::sClass = Object::CreateClass(_T("Map"), Object::sClass, Map::sPrototype, static_cast<ObjectMethod>(&Map::New<Map>));
 
 			Closure::sPrototype = Object::CreatePrototype(_T("Closure"), Func::sPrototype);
 			BoundFunc::sPrototype = Object::CreatePrototype(_T("BoundFunc"), Func::sPrototype);
 			EnumBase::sPrototype = Object::CreatePrototype(_T("Enumerator"), Func::sPrototype);
 
-			BufferObject::sPrototype = Object::CreatePrototype(_T("Buffer"), BufferObject::sPrototype, BufferObject::sMembers, _countof(BufferObject::sMembers));
+			BufferObject::sPrototype = Object::CreatePrototype(_T("Buffer"), Object::sPrototype, BufferObject::sMembers, _countof(BufferObject::sMembers));
 			ClipboardAll::sPrototype = Object::CreatePrototype(_T("ClipboardAll"), BufferObject::sPrototype);
 
-			RegExMatchObject::sPrototype = Object::CreatePrototype(_T("RegExMatch"), RegExMatchObject::sPrototype, RegExMatchObject::sMembers, _countof(RegExMatchObject::sMembers));
+			RegExMatchObject::sPrototype = Object::CreatePrototype(_T("RegExMatch"), Object::sPrototype, RegExMatchObject::sMembers, _countof(RegExMatchObject::sMembers));
 
 			Object::sPrimitivePrototype = Object::CreatePrototype(_T("Primitive"), Object::sAnyPrototype);
 			Object::sStringPrototype = Object::CreatePrototype(_T("String"), Object::sPrimitivePrototype);
