@@ -1069,7 +1069,7 @@ Script::~Script() // Destructor.
 	Line::sLargeDerefBufs = 0;
 #ifndef _USRDLL
 	for (i = 0; i < FUNC_LIB_COUNT; i++)
-		if (sLib[i].path)
+		if (sLib[i].length)
 		{
 			free(sLib[i].path);
 			sLib[i].path = NULL;
