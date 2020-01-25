@@ -13310,6 +13310,15 @@ ResultType Line::PerformLoopParse(ResultToken *aResultToken, bool &aContinueMain
 	tcslcpy(delimiters, ARG2, _countof(delimiters));
 	tcslcpy(omit_list, ARG3, _countof(omit_list));
 
+	// Free deref buffer otherwise each call to ExpandArgs will cause a slowdown by calling SET_DEREF_TIMER if sDerefBufSize > LARGE_DEREF_BUF_SIZE.
+	if (Line::sDerefBuf && Line::sDerefBufSize > LARGE_DEREF_BUF_SIZE)
+	{
+		free(Line::sDerefBuf);
+		if (Line::sDerefBufSize > LARGE_DEREF_BUF_SIZE)
+			--Line::sLargeDerefBufs;
+	}
+	SET_S_DEREF_BUF(NULL, 0);
+
 	ResultType result;
 	Line *jump_to_line;
 	TCHAR *field, *field_end, saved_char;
@@ -13413,6 +13422,15 @@ ResultType Line::PerformLoopParseCSV(ResultToken *aResultToken, bool &aContinueM
 
 	TCHAR omit_list[512];
 	tcslcpy(omit_list, ARG3, _countof(omit_list));
+
+	// Free deref buffer otherwise each call to ExpandArgs will cause a slowdown by calling SET_DEREF_TIMER if sDerefBufSize > LARGE_DEREF_BUF_SIZE.
+	if (Line::sDerefBuf && Line::sDerefBufSize > LARGE_DEREF_BUF_SIZE)
+	{
+		free(Line::sDerefBuf);
+		if (Line::sDerefBufSize > LARGE_DEREF_BUF_SIZE)
+			--Line::sLargeDerefBufs;
+	}
+	SET_S_DEREF_BUF(NULL, 0);
 
 	ResultType result;
 	Line *jump_to_line;
