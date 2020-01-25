@@ -737,7 +737,9 @@ ObjectMember Map::sMembers[] =
 	Object_Method1(Clear, 0, 0),
 	Object_Method1(Clone, 0, 0),
 	Object_Method1(Delete, 1, 1),
-	Object_Method1(Has, 1, 1)
+	Object_Method1(Has, 1, 1),
+	Object_Method1(MinIndex, 0, 0),
+	Object_Method1(MaxIndex, 0, 0)
 };
 
 
@@ -1236,6 +1238,34 @@ ResultType Map::Clone(ResultToken &aResultToken, int aID, int aFlags, ExprTokenT
 	if (!CloneTo(*clone))
 		_o_throw(ERR_OUTOFMEM);
 	_o_return(clone);
+}
+
+ResultType Map::MinIndex(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+{
+	if (aParamCount)
+		return OK;
+
+	if (mKeyOffsetObject) // i.e. there are fields with integer keys
+	{
+		aResultToken.symbol = SYM_INTEGER;
+		aResultToken.value_int64 = (__int64)mItem[0].key.i;
+	}
+	// else no integer keys; leave aResultToken at default, empty string.
+	return OK;
+}
+
+ResultType Map::MaxIndex(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+{
+	if (aParamCount)
+		return OK;
+
+	if (mKeyOffsetObject) // i.e. there are fields with integer keys
+	{
+		aResultToken.symbol = SYM_INTEGER;
+		aResultToken.value_int64 = (__int64)mItem[mKeyOffsetObject - 1].key.i;
+	}
+	// else no integer keys; leave aResultToken at default, empty string.
+	return OK;
 }
 
 ResultType Object::GetMethod(ResultToken &aResultToken, name_t aName)
@@ -2299,7 +2329,7 @@ Map::Pair *Map::FindItem(ExprTokenType &key_token, LPTSTR aBuf, SymbolType &key_
 	ConvertKey(key_token, aBuf, key_type, key);
 	return FindItem(key_type, key, insert_pos);
 }
-	
+
 bool Object::SetInternalCapacity(index_t new_capacity)
 // Expands mFields to the specified number if fields.
 // Caller *must* ensure new_capacity >= 1 && new_capacity >= mFields.Length().
