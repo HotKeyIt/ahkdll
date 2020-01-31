@@ -1,7 +1,7 @@
-FileReplace(ByRef data,file,Encoding:=""){
+FileReplace(ByRef data,file,Options:=""){
 	If FileExist(file)&&!FileDelete(file)
 		Return (ErrorLevel:=1,0)
-	if Encoding
+	if !Options
 		return FileAppend(data,file)
-	else return FileAppend(data,file,Encoding)
+	else return FileAppend(data,file,Options)
 }

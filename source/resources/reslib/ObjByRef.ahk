@@ -2,7 +2,7 @@ objbyref(ByRef _1:="",ByRef _2:="",ByRef _3:="",ByRef _4:="",ByRef _5:="",ByRef 
 	static _AHkVar,var
 	if !var
     _AHkVar:="{Int64 ContentsInt64,Double ContentsDouble,PTR object},{char *mByteContents,LPTSTR CharContents},{UINT_PTR Length,ObjByRef(_AHKVar) *AliasFor},{UINT_PTR Capacity,UINT_PTR BIV},BYTE HowAllocated,BYTE Attrib,BYTE mScope,BYTE Type,LPTSTR Name",var:=Struct(_AhkVar)
-this:=new _ObjByRef
+this:=_ObjByRef.new()
 while IsByRef(_%A_Index%){
 	var[]:=getvar(_%A_Index%)
 	ObjRawSet(this,"`a" var.AliasFor.name,var.AliasFor["",""])
@@ -10,20 +10,20 @@ while IsByRef(_%A_Index%){
 return this
 }
 Class _ObjByRef{
-__GET(key){
-Alias(var,this["`a" key])
+__GET(key,param){
+Alias(var,this.%"`a" key%)
 return var
 }
-__SET(key,ByRef value:=""){
+__SET(key,param,ByRef value:=""){
 static var
 if !var
 var:=Struct("ObjByRef(_AhkVar)")
-If !this.HasKey("`a" key){
+If !this.HasOwnProp("`a" key){
 If !IsByRef(value)
 return
 else return (var[]:=getvar(value),ObjRawSet(this,"`a" key,var.AliasFor["",""]),"")
 }
-Alias(thisvar,this["`a" key])
+Alias(thisvar,this.%"`a" key%)
 return thisvar:=value
 }
 }
