@@ -607,13 +607,35 @@ ResultType Object::Invoke(IObject_Invoke_PARAMS_DECL)
 			memcpy(prop_param + prop_param_count, actual_param, actual_param_count * sizeof(ExprTokenType *));
 			prop_param_count += actual_param_count;
 		}
+#ifndef _USRDLL
+		PMYTEB curr_teb = NULL;
+		PVOID tls = NULL;
+		if (!g)
+		{
+			curr_teb = (PMYTEB)NtCurrentTeb();
+			tls = curr_teb->ThreadLocalStoragePointer;
+			curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[0][6];
+		}
+#endif
 		auto caller_line = g_script->mCurrLine;
 		// Call getter/setter.
 		auto result = etter->Invoke(aResultToken, IT_CALL, nullptr, this_etter, prop_param, prop_param_count);
 		if (!handle_params_recursively || result == FAIL || result == EARLY_EXIT)
+#ifndef _USRDLL
+		{
+			if (tls)
+				curr_teb->ThreadLocalStoragePointer = tls;
 			return result;
+		}
+#else
+			return result;
+#endif
 		// Otherwise, handle_params_recursively == true.
 		g_script->mCurrLine = caller_line; // For error-reporting.
+#ifndef _USRDLL
+		if (tls)
+			curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 		if (aResultToken.symbol != SYM_OBJECT)
 		{
 			if (aResultToken.mem_to_free) // Caller may ignore mem_to_free when we return FAIL.
