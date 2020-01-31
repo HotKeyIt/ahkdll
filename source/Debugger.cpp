@@ -15,6 +15,7 @@ freely, without restriction.
 #include "stdafx.h"
 
 #include "defines.h"
+#include "application.h"
 #include "globaldata.h" // for access to many global vars
 #include "script_object.h"
 #include "script_com.h"
@@ -3026,6 +3027,14 @@ DbgStack::Entry *DbgStack::Push()
 {
 #ifndef _USRDLL
 	EnterCriticalSection(&g_CriticalDebugger);
+	PMYTEB curr_teb = NULL;
+	PVOID tls = NULL;
+	if (!g)
+	{
+		curr_teb = (PMYTEB)NtCurrentTeb();
+		tls = curr_teb->ThreadLocalStoragePointer;
+		curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[0][6];
+	}
 #endif
 	if (mTop == mTopBound)
 		Expand();
@@ -3045,6 +3054,8 @@ DbgStack::Entry *DbgStack::Push()
 	mTop++;
 #ifndef _USRDLL
 	LeaveCriticalSection(&g_CriticalDebugger);
+	if (tls)
+		curr_teb->ThreadLocalStoragePointer = tls;
 #endif
 	return mTop;
 }
