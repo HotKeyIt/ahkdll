@@ -462,11 +462,14 @@ __int64 ObjRawSize(IObject *aObject, IObject *aObjects)
 	ExprTokenType *params[] = { &aKey, &aValue };
 	this_token.symbol = SYM_OBJECT;
 
+	CriticalObject *aCriticalObject;
+	if (aCriticalObject = dynamic_cast<CriticalObject*>(aObject))
+			aObject = (IObject*)aCriticalObject->GetObj();
+
 	if ((_tcscmp(aObject->Type(), _T("Object")))
 		&&(_tcscmp(aObject->Type(), _T("Array")))
 		&&(_tcscmp(aObject->Type(), _T("Map")))
 		&&(_tcscmp(aObject->Type(), _T("Buffer")))
-		&& (_tcscmp(aObject->Type(), _T("CriticalObject")))
 		&&(_tcscmp(aObject->Type(), _T("Struct"))))
 		g_script->ScriptError(ERR_TYPE_MISMATCH, aObject->Type());
 
@@ -478,8 +481,6 @@ __int64 ObjRawSize(IObject *aObject, IObject *aObjects)
 		aObject->Invoke(result_token, IT_GET, _T("size"), this_token, nullptr, 0);
 		return result_token.value_int64 + aSize;
 	}
-	else if (!_tcscmp(aObject->Type(), _T("CriticalObject")))
-		aObject = (IObject*)dynamic_cast<CriticalObject*>(aObject)->GetObj();
 
 	this_token.object = aObjects;
 
@@ -621,8 +622,9 @@ __int64 ObjRawDump(IObject *aObject, char *aBuffer, Map *aObjects, UINT &aObjCou
 	
 	this_token.symbol = SYM_OBJECT;
 	
-	if (!_tcscmp(aObject->Type(), _T("CriticalObject")))
-		aObject = (IObject*)dynamic_cast<CriticalObject*>(aObject)->GetObj();
+	CriticalObject *aCriticalObject;
+	if (aCriticalObject = dynamic_cast<CriticalObject*>(aObject))
+		aObject = (IObject*)aCriticalObject->GetObj();
 
 	char *aThisBuffer = aBuffer;
 	if (!_tcscmp(aObject->Type(), _T("Object")))

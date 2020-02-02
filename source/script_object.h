@@ -820,7 +820,8 @@ public:
 	}
 	static CriticalObject *Create(ExprTokenType *aParam[], int aParamCount);
 	ResultType Invoke(IObject_Invoke_PARAMS_DECL);
-	IObject_Type_Impl("CriticalObject");
+	//IObject_Type_Impl("CriticalObject");
+	LPTSTR Type() { return ((IObject*)GetObj())->Type();}
 };
 
 //
