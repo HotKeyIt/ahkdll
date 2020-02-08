@@ -36,14 +36,12 @@ ObjectMember InputObject::sMembers[] =
 	Object_Member(VisibleText, BoolOpt, P_VisibleText, IT_SET),
 };
 
-Object *InputObject::sPrototype = nullptr;
+_thread_local Object *InputObject::sPrototype = nullptr;
 
 InputObject::InputObject()
 {
 	input.ScriptObject = this;
-	if (!sPrototype)
-		sPrototype = CreatePrototype(_T("InputHook"), Object::sPrototype, sMembers, _countof(sMembers));
-	SetBase(sPrototype);
+	SetBase(InputObject::sPrototype);
 }
 
 

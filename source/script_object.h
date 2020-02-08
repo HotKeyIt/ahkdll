@@ -268,7 +268,7 @@ protected:
 		name_t name;
 		IObject *func;
 		MethodType() = delete;
-		~MethodType() { func->Release(); }
+		~MethodType() { func->Release(); free(name); }
 	};
 
 	enum EnumeratorType
@@ -331,7 +331,13 @@ protected:
 	ResultType CallMeta(IObject *aFunc, LPTSTR aName, int aFlags, ResultToken &aResultToken, ExprTokenType &aThisToken, ExprTokenType *aParam[], int aParamCount);
 
 public:
-
+	static void FreesPrototype(Object *aObject, bool aRelease = true) 
+	{ 
+		aObject->mMethods.Free(); 
+		aObject->mFields.Free();
+		if (aRelease)
+			aObject->Release();
+	}
 	static Object *Create();
 	static Object *Create(ExprTokenType *aParam[], int aParamCount, ResultToken *apResultToken = nullptr);
 
@@ -435,8 +441,8 @@ public:
 	
 	ResultType Invoke(IObject_Invoke_PARAMS_DECL);
 
-	_thread_local static ObjectMember sMembers[];
-	_thread_local static ObjectMember sClassMembers[];
+	static ObjectMember sMembers[];
+	static ObjectMember sClassMembers[];
 	_thread_local static Object *sPrototype, *sClass, *sClassPrototype, *sClassClass;
 
 	static Object *CreateRootPrototypes();
@@ -470,13 +476,13 @@ public:
 	ResultType New(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 
 	// For pseudo-objects:
-	_thread_local static ObjectMember sValueMembers[];
+	static ObjectMember sValueMembers[];
 	_thread_local static Object *sAnyPrototype, *sPrimitivePrototype, *sStringPrototype
 		, *sNumberPrototype, *sIntegerPrototype, *sFloatPrototype;
 	static Object *ValueBase(ExprTokenType &aValue);
 	static bool HasBase(ExprTokenType &aValue, IObject *aBase);
 
-	_thread_local static LPTSTR sMetaFuncName[];
+	static LPTSTR sMetaFuncName[];
 
 	IObject_DebugWriteProperty_Def;
 #ifdef CONFIG_DEBUGGER
@@ -548,7 +554,7 @@ public:
 		M_Clone,
 		M___Enum
 	};
-	_thread_local static ObjectMember sMembers[12];
+	static ObjectMember sMembers[12];
 	_thread_local static Object *sPrototype, *sClass;
 	ResultType Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 };
@@ -679,7 +685,7 @@ public:
 	ResultType MinIndex(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	ResultType MaxIndex(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 
-	_thread_local static ObjectMember sMembers[10];
+	static ObjectMember sMembers[10];
 	_thread_local static Object *sPrototype, *sClass;
 };
 
@@ -733,7 +739,7 @@ public:
 		M_Mark,
 		M___Enum
 	};
-	_thread_local static ObjectMember sMembers[9];
+	static ObjectMember sMembers[9];
 	_thread_local static Object *sPrototype;
 	ResultType Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 };
@@ -763,7 +769,7 @@ public:
 		P_Ptr,
 		P_Size
 	};
-	_thread_local static ObjectMember sMembers[2];
+	static ObjectMember sMembers[2];
 	_thread_local static Object *sPrototype;
 	ResultType Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 };

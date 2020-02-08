@@ -667,6 +667,7 @@ Script::~Script() // Destructor.
 	if (GuiType::sFontCount)
 	{
 		GuiType::sFontCount = 0;
+		free(GuiType::sFont);
 		GuiType::sFont = NULL;
 	}
 
@@ -685,11 +686,17 @@ Script::~Script() // Destructor.
 	// Since they're not associated with a window, we must free the resources for all popup menus.
 	// Update: Even if a menu is being used as a GUI window's menu bar, see note above for why menu
 	// destruction is done AFTER the GUI windows are destroyed:
-	for (UserMenu *m = mFirstMenu; m; m = m->mNextMenu)
+	for (UserMenu *n, *m = mFirstMenu; m;) // m = m->mNextMenu)
+	{
+		n = m->mNextMenu;
 		m->Dispose();
+		m->Release();
+		m = n;
+	}
 	mFirstMenu = NULL;
 	mLastMenu = NULL;
 	mTrayMenu = NULL;
+
 	/*else if (mFirstMenu)
 	{
 	mFirstMenu->mNextMenu = NULL;
@@ -714,7 +721,7 @@ Script::~Script() // Destructor.
 		else
 			mLazyVar[v]->Free();
 	}
-
+	
 	// delete static func vars first
 	for (i = 0; i < mFuncs.mCount; i++)
 	{
@@ -788,18 +795,19 @@ Script::~Script() // Destructor.
 	mLazyVar = NULL;
 	mLazyVarCount = NULL;
 	// delete static func vars first
-	for (i = 0; i < mFuncs.mCount; i++)
+	/*for (i = 0; i < mFuncs.mCount; i++)
 	{
 		UserFunc &f = *(UserFunc *)mFuncs.mItem[i];
 		if (f.IsBuiltIn() || (f.mBIF == (BIF_DllImport)))
 			continue;
-	}
+	}*/
+
 	for (i = 0; i < mFuncs.mCount; i++)
 	{
 		auto &f = *(UserFunc *)mFuncs.mItem[i];
 		if (f.IsBuiltIn() || (f.mBIF == (BIF_DllImport)))
 		{
-			delete mFuncs.mItem[i];
+			mFuncs.mItem[i]->Release();
 			continue;
 		}
 		// Since it doesn't seem feasible to release all var backups created by recursive function
@@ -830,13 +838,51 @@ Script::~Script() // Destructor.
 			free(f.mVar);
 		if (f.mLazyVar)
 			free(f.mLazyVar);
-		delete mFuncs.mItem[i];
+		mFuncs.mItem[i]->Release();
 	}
+	
+	// HotkeyIt
+	// release all prototypes to clean up memory and get rid of memory leaks
+	Object::sFloatPrototype->Release();
+	Object::sIntegerPrototype->Release();
+	Object::sStringPrototype->Release();
+	Object::sNumberPrototype->Release();
+	Object::sPrimitivePrototype->Release();
+	
+	RegExMatchObject::sPrototype->Release();
+	ClipboardAll::sPrototype->Release();
+	BufferObject::sPrototype->Release();
+	EnumBase::sPrototype->Release();
+	BoundFunc::sPrototype->Release();
+	Closure::sPrototype->Release();
+	Map::sPrototype->Release();
+	Array::sPrototype->Release();
+	Object::sClassPrototype->Release();
+	FileObject::sPrototype->Release();
+	InputObject::sPrototype->Release();
+	for (int i = _countof(GuiControlType::sPrototypes) - 1; i; i--)
+		if (GuiControlType::sPrototypes[i])
+			GuiControlType::sPrototypes[i]->Release();
+	GuiControlType::sPrototypeList->Release();
+	GuiControlType::sPrototype->Release();
+	GuiType::sPrototype->Release();
+	UserMenu::sMenuBarPrototype->Release();
+	UserMenu::sMenuPrototype->Release();
 
+	// HotKeyIt: mMethods and mFields needs to be cleared to release prototypes
+	// use FreesPrototype for this task
+	Object::sAnyPrototype->FreesPrototype(Object::sAnyPrototype, false);
+	Func::sPrototype->FreesPrototype(Func::sPrototype, false);
+	Object::sPrototype->FreesPrototype(Object::sPrototype, false);
+	Func::sPrototype->Release();
+	Object::sPrototype->Release();
+	Object::sAnyPrototype->Release();
 	if (mFuncs.mCount)
 		free(mFuncs.mItem);
 	mFuncs.mCount = 0;
 	mFuncs.mCountMax = 0;
+
+	
 	// Destroy Labels
 	for (Label *label = mFirstLabel, *nextLabel = NULL; label;)
 	{
@@ -862,11 +908,6 @@ Script::~Script() // Destructor.
 		line->FreeDerefBufIfLarge();
 		delete line;
 		line = nextLine;
-	}
-	if (Line::sDerefBuf)
-	{
-		free(Line::sDerefBuf);
-		Line::sDerefBuf = NULL;
 	}
 //#endif
 	// MSDN: "Before terminating, an application must call the UnhookWindowsHookEx function to free
@@ -908,10 +949,6 @@ Script::~Script() // Destructor.
 		if (g_ClassRegistered)
 			UnregisterClass((LPCWSTR)&WINDOW_CLASS_MAIN, g_hInstance);
 #endif
-	if (GuiType::sFont)
-		free(GuiType::sFont);
-	GuiType::sFont = NULL;
-	GuiType::sFontCount = 0;
 	if (g_hAccelTable)
 		DestroyAcceleratorTable(g_hAccelTable);
 
@@ -1060,12 +1097,11 @@ Script::~Script() // Destructor.
 	Line::sSourceFile = NULL;
 	Line::sSourceFileCount = 0;
 	Line::sMaxSourceFiles = 0;
+	Line::FreeDerefBufIfLarge();
+	if (Line::sDerefBufBackup)
+		free(Line::sDerefBufBackup);
+	Line::sDerefBuf = Line::sDerefBufBackup = NULL;
 	Line::sDerefBufSize = 0;
-	if (Line::sDerefBuf)
-	{
-		free(Line::sDerefBuf);
-		Line::sDerefBuf = NULL;
-	}
 	Line::sLargeDerefBufs = 0;
 #ifndef _USRDLL
 	for (i = 0; i < FUNC_LIB_COUNT; i++)
@@ -1086,12 +1122,13 @@ Script::~Script() // Destructor.
 	Line::sLogNext = 0;
 	g_memset(Line::sLog,NULL,sizeof(Line*) * LINE_LOG_SIZE);
 #endif
+
 	global_clear_state(*g);
 	//free(g_Debugger.mStack.mBottom);
 	g_SimpleHeap->DeleteAll();
-#ifdef _USRDLL
 	delete g_SimpleHeap;
 	//ZeroMemory(&g_script-> sizeof(g_script->);
+#ifdef _USRDLL
 	mPriorHotkeyName = mThisHotkeyName = _T("");
 #endif
 #ifdef ENABLE_KEY_HISTORY_FILE
@@ -2652,7 +2689,7 @@ ResultType Script::OpenIncludedFile(TextStream &ts, LPTSTR aFileSpec, bool aAllo
 		if (  !(Line::sSourceFile[source_file_index] = tmalloc(_tcslen(full_path) + 1))  )
 			return ScriptError(ERR_OUTOFMEM);
 		else
-			tmemcpy(Line::sSourceFile[source_file_index], full_path, _tcslen(full_path) + 1);
+			_tcscpy(Line::sSourceFile[source_file_index], full_path);
 	//else the first file was already taken care of by another means.
 
 #else // Stand-alone mode (there are no include files in this mode since all of them were merged into the main script at the time of compiling).
@@ -11408,6 +11445,7 @@ _thread_local int Line::sMaxSourceFiles = 0;
 _thread_local int Line::sSourceFileCount = 0; // Zero source files initially.  The main script will be the first.
 
 _thread_local LPTSTR Line::sDerefBuf = NULL;  // Buffer to hold the values of any args that need to be dereferenced.
+_thread_local LPTSTR Line::sDerefBufBackup = NULL;  // Buffer backup to cleanup on exit if needed.
 _thread_local size_t Line::sDerefBufSize = 0;
 _thread_local int Line::sLargeDerefBufs = 0; // Keeps track of how many large bufs exist on the call-stack, for the purpose of determining when to stop the buffer-freeing timer.
 _thread_local LPTSTR Line::sArgDeref[MAX_ARGS]; // No init needed.
@@ -11423,7 +11461,7 @@ void Line::FreeDerefBufIfLarge()
 		// deref buffer (they make copies of anything they need prior to calling MsgSleep() or anything
 		// else that might pump messages and thus result in a call to us here).
 		free(sDerefBuf); // The above size-check has ensured this is non-NULL.
-		SET_S_DEREF_BUF(NULL, 0);
+		SET_S_DEREF_BUF_BKP(NULL, 0);
 		--sLargeDerefBufs;
 		if (!sLargeDerefBufs)
 			KILL_DEREF_TIMER
@@ -13318,8 +13356,12 @@ ResultType Line::PerformLoopParse(ResultToken *aResultToken, bool &aContinueMain
 		free(Line::sDerefBuf);
 		if (Line::sDerefBufSize > LARGE_DEREF_BUF_SIZE)
 			--Line::sLargeDerefBufs;
+		SET_S_DEREF_BUF_BKP(NULL, 0);
+	} 
+	else
+	{
+		SET_S_DEREF_BUF(NULL, 0);
 	}
-	SET_S_DEREF_BUF(NULL, 0);
 
 	ResultType result;
 	Line *jump_to_line;
@@ -13431,8 +13473,12 @@ ResultType Line::PerformLoopParseCSV(ResultToken *aResultToken, bool &aContinueM
 		free(Line::sDerefBuf);
 		if (Line::sDerefBufSize > LARGE_DEREF_BUF_SIZE)
 			--Line::sLargeDerefBufs;
+		SET_S_DEREF_BUF_BKP(NULL, 0);
 	}
-	SET_S_DEREF_BUF(NULL, 0);
+	else
+	{
+		SET_S_DEREF_BUF(NULL, 0);
+	}
 
 	ResultType result;
 	Line *jump_to_line;

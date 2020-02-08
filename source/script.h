@@ -755,6 +755,7 @@ private:
 public:
 	static ResultType Line::IncludeFiles(bool aAllowDuplicateInclude, bool aIgnoreLoadFailure, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, LPTSTR aFilePattern);
 	#define SET_S_DEREF_BUF(ptr, size) Line::sDerefBuf = ptr, Line::sDerefBufSize = size
+	#define SET_S_DEREF_BUF_BKP(ptr, size) Line::sDerefBuf = Line::sDerefBufBackup = ptr, Line::sDerefBufSize = size
 
 	#define NULLIFY_S_DEREF_BUF \
 	{\
@@ -776,13 +777,18 @@ public:
 				free(Line::sDerefBuf);\
 				if (Line::sDerefBufSize > LARGE_DEREF_BUF_SIZE)\
 					--Line::sLargeDerefBufs;\
+				SET_S_DEREF_BUF_BKP(our_deref_buf, our_deref_buf_size);\
 			}\
-			SET_S_DEREF_BUF(our_deref_buf, our_deref_buf_size);\
+			else\
+			{\
+				SET_S_DEREF_BUF(our_deref_buf, our_deref_buf_size);\
+			}\
 		}
 		//else the original buffer is NULL, so keep any new sDerefBuf that might have been created (should
 		// help avg-case performance).
 
 	_thread_local static LPTSTR sDerefBuf;  // Buffer to hold the values of any args that need to be dereferenced.
+	_thread_local static LPTSTR sDerefBufBackup;  // Buffer backup to cleanup on exit if needed.
 	_thread_local static size_t sDerefBufSize;
 	_thread_local static int sLargeDerefBufs;
 
@@ -2421,7 +2427,7 @@ struct GuiControlType : public Object
 	GuiControlType() = delete;
 	GuiControlType(GuiType* owner) : gui(owner) {}
 
-	static LPTSTR sTypeNames[];
+	static LPTSTR sTypeNames[26];
 	static GuiControls ConvertTypeName(LPTSTR aTypeName);
 	LPTSTR GetTypeName();
 
@@ -2549,13 +2555,13 @@ struct GuiControlType : public Object
 		P_Focused,
 	};
 
-	static ObjectMember sMembers[];
-	static ObjectMember sMembersList[]; // Tab, ListBox, ComboBox, DDL
-	static ObjectMember sMembersTab[];
-	static ObjectMember sMembersDate[];
-	static ObjectMember sMembersLV[];
-	static ObjectMember sMembersTV[];
-	static ObjectMember sMembersSB[];
+	static ObjectMember sMembers[19];
+	static ObjectMember sMembersList[2]; // Tab, ListBox, ComboBox, DDL
+	static ObjectMember sMembersTab[1];
+	static ObjectMember sMembersDate[1];
+	static ObjectMember sMembersLV[11];
+	static ObjectMember sMembersTV[12];
+	static ObjectMember sMembersSB[3];
 
 	static Object *GetPrototype(GuiControls aType);
 
@@ -2575,6 +2581,8 @@ struct GuiControlType : public Object
 	ResultType Invoke(IObject_Invoke_PARAMS_DECL);
 
 	void Dispose(); // Called by GuiType::Dispose().
+
+	_thread_local static Object *sPrototype, *sPrototypes[26], *sPrototypeList;
 };
 
 struct GuiControlOptionsType
@@ -2724,7 +2732,7 @@ public:
 		P_ClientPos,
 	};
 
-	static ObjectMember sMembers[];
+	static ObjectMember sMembers[51];
 
 	GuiType() // Constructor
 		: mHwnd(NULL), mOwner(NULL), mName(NULL)
@@ -2933,6 +2941,7 @@ public:
 	// The following is a workaround for the "w-1" and "h-1" options:
 	int ScaleSize(int x) { return mUsesDPIScaling && x != -1 ? DPIScale(x) : x; }
 
+	_thread_local static Object *sPrototype;
 protected:
 	bool Delete() override;
 };

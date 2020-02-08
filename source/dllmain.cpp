@@ -168,7 +168,11 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	Array::sPrototype = Object::CreatePrototype(_T("Array"), Object::sPrototype, Array::sMembers, _countof(Array::sMembers));
 	Map::sPrototype = Object::CreatePrototype(_T("Map"), Object::sPrototype, Map::sMembers, _countof(Map::sMembers));
 
-	//																							Direct base			Prototype			Constructor
+	GuiType::sPrototype = Object::CreatePrototype(_T("Gui"), Object::sPrototype, GuiType::sMembers, _countof(GuiType::sMembers));
+	GuiControlType::sPrototype = Object::CreatePrototype(_T("Gui.Control"), Object::sPrototype, GuiControlType::sMembers, _countof(GuiControlType::sMembers));
+	GuiControlType::sPrototypeList = Object::CreatePrototype(_T("Gui.List"), GuiControlType::sPrototype, GuiControlType::sMembersList, _countof(GuiControlType::sMembersList));
+	InputObject::sPrototype = Object::CreatePrototype(_T("InputHook"), Object::sPrototype, InputObject::sMembers, _countof(InputObject::sMembers));
+	
 	Object::sClass = Object::CreateClass(_T("Object"), Object::sClassPrototype, Object::sPrototype, static_cast<ObjectMethod>(&Object::New<Object>));
 	Object::sClassClass = Object::CreateClass(_T("Class"), Object::sClass, Object::sClassPrototype, static_cast<ObjectMethod>(&Object::New<Object>));
 	Array::sClass = Object::CreateClass(_T("Array"), Object::sClass, Array::sPrototype, static_cast<ObjectMethod>(&Array::New<Array>));

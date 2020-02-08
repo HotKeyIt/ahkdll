@@ -2094,7 +2094,7 @@ ResultType Line::ExpandArgs(ResultToken *aResultTokens)
 			if (sDerefBufSize > LARGE_DEREF_BUF_SIZE)
 				--sLargeDerefBufs;
 		}
-		if (   !(sDerefBuf = tmalloc(new_buf_size))   )
+		if (   !(sDerefBuf = sDerefBufBackup = tmalloc(new_buf_size))   )
 		{
 			// Error msg was formerly: "Ran out of memory while attempting to dereference this line's parameters."
 			sDerefBufSize = 0;  // Reset so that it can make another attempt, possibly smaller, next time.

@@ -33,8 +33,8 @@ class InputObject : public Object
 public:
 	IObject *onEnd = nullptr, *onKeyDown = nullptr, *onChar = nullptr, *onKeyUp = nullptr;
 
-	static Object *sPrototype;
-	static ObjectMember sMembers[];
+	_thread_local static Object *sPrototype;
+	static ObjectMember sMembers[22];
 
 	InputObject();
 	~InputObject()

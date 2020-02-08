@@ -544,6 +544,7 @@ ResultType GuiType::Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprT
 	return FAIL;
 }
 
+_thread_local Object *GuiType::sPrototype;
 
 BIF_DECL(BIF_GuiCreate)
 {
@@ -556,10 +557,10 @@ BIF_DECL(BIF_GuiCreate)
 	if (  !(GuiType::sFont || (GuiType::sFont = (FontType *)malloc(sizeof(FontType) * MAX_GUI_FONTS)))  )
 		_f_throw(ERR_OUTOFMEM);
 
-	static Object *sPrototype = Object::CreatePrototype(_T("Gui"), Object::sPrototype, GuiType::sMembers, _countof(GuiType::sMembers));
+	//static Object *sPrototype = Object::CreatePrototype(_T("Gui"), Object::sPrototype, GuiType::sMembers, _countof(GuiType::sMembers));
 
 	GuiType* gui = new GuiType();
-	gui->SetBase(sPrototype);
+	gui->SetBase(GuiType::sPrototype);
 	if (!gui)
 		_f_throw(ERR_OUTOFMEM); // Short msg since so rare.
 
@@ -735,11 +736,15 @@ ObjectMember GuiControlType::sMembersSB[] =
 #undef FUN1
 #undef FUNn
 
+_thread_local Object *GuiControlType::sPrototype;
+_thread_local Object *GuiControlType::sPrototypeList;
+_thread_local Object *GuiControlType::sPrototypes[] = {};
+
 Object *GuiControlType::GetPrototype(GuiControls aType)
 {
-	static Object *sPrototype = CreatePrototype(_T("Gui.Control"), Object::sPrototype, sMembers, _countof(sMembers));
-	static Object *sPrototypeList = CreatePrototype(_T("Gui.List"), sPrototype, sMembersList, _countof(sMembersList));
-	static Object *sPrototypes[_countof(sTypeNames)] = {};
+	//static Object *sPrototype = CreatePrototype(_T("Gui.Control"), Object::sPrototype, sMembers, _countof(sMembers));
+	//static Object *sPrototypeList = CreatePrototype(_T("Gui.List"), sPrototype, sMembersList, _countof(sMembersList));
+	//static Object *sPrototypes[_countof(sTypeNames)] = {};
 	ASSERT(aType <= _countof(sPrototypes));
 	if (aType == GUI_CONTROL_TAB2 || aType == GUI_CONTROL_TAB3)
 		aType = GUI_CONTROL_TAB; // Just make them all Gui.Tab.

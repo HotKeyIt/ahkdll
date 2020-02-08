@@ -1013,7 +1013,8 @@ Object *Object::DefineMembers(Object *obj, LPTSTR aClassName, ObjectMember aMemb
 			func->mIsVariadic = member.maxParams == MAXP_VARIADIC;
 			func->mClass = type_checked;
 			prop->SetGetter(func);
-			
+			func->Release();
+
 			if (member.invokeType == IT_SET)
 			{
 				_tcscpy(op_name, _T(".Set"));
@@ -1026,6 +1027,7 @@ Object *Object::DefineMembers(Object *obj, LPTSTR aClassName, ObjectMember aMemb
 				func->mIsVariadic = member.maxParams == MAXP_VARIADIC;
 				func->mClass = obj;
 				prop->SetSetter(func);
+				func->Release();
 			}
 		}
 	}
@@ -2829,9 +2831,9 @@ Object *Object::CreateRootPrototypes()
 _thread_local Object *Object::sAnyPrototype; // = CreateRootPrototypes();
 _thread_local Object *Func::sPrototype;
 _thread_local Object *Object::sPrototype;
-Object *TempInit::init1 = 0 ? Object::CreateClass(_T("Class"), Object::sClass, sClassPrototype, static_cast<ObjectMethod>(&New<Object>)) : NULL;
-Object *TempInit::init2 = 0 ? Object::CreateClass(_T("Array"), Object::sClass, sPrototype, static_cast<ObjectMethod>(&New<Array>)) : NULL;
-Object *TempInit::init3 = 0 ? Object::CreateClass(_T("Map"), Object::sClass, sPrototype, static_cast<ObjectMethod>(&New<Map>)) : NULL;
+Object *TempInit::init1 = 0 ? Object::CreateClass(_T("Class"), NULL, NULL, static_cast<ObjectMethod>(&New<Object>)) : NULL;
+Object *TempInit::init2 = 0 ? Object::CreateClass(_T("Array"), NULL, NULL, static_cast<ObjectMethod>(&New<Array>)) : NULL;
+Object *TempInit::init3 = 0 ? Object::CreateClass(_T("Map"), NULL, NULL, static_cast<ObjectMethod>(&New<Map>)) : NULL;
 
 //																								Direct base			Members
 _thread_local Object *Object::sClassPrototype; // = Object::CreatePrototype(_T("Class"), Object::sPrototype);
