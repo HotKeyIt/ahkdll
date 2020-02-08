@@ -520,6 +520,7 @@ __int64 ObjRawSize(IObject *aObject, IObject *aObjects)
 	}
 	else
 	{
+		aObjects->AddRef();
 		aKey.symbol = SYM_OBJECT;
 		aKey.object = aObject;
 		this_token.object = aObjects;
@@ -607,6 +608,7 @@ __int64 ObjRawSize(IObject *aObject, IObject *aObjects)
 	enumerator->Release();
 	vkey.Free();
 	vval.Free();
+	aObjects->Release();
 	return aSize;
 }
 
@@ -994,6 +996,7 @@ BIF_DECL(BIF_ObjDump)
 		var.Free(VAR_ALWAYS_FREE); // Release the variable's old memory. This also removes flags VAR_ATTRIB_OFTEN_REMOVED.
 		var.mHowAllocated = ALLOC_MALLOC; // Must always be this type to avoid complications and possible memory leaks.
 		var.mByteContents = aBuffer;
+		var.mByteCapacity = aResultToken.value_int64;
 		var.mByteLength = (VarSizeType)aResultToken.value_int64;
 	}
 }
