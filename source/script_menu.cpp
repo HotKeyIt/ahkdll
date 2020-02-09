@@ -283,11 +283,6 @@ UserMenu *Script::AddMenu(MenuTypeType aMenuType)
 	UserMenu *menu = new UserMenu(aMenuType);
 	if (!menu)
 		return NULL;  // Caller should show error if desired.
-	if (!UserMenu::sMenuPrototype)
-	{
-		UserMenu::sMenuPrototype = Object::CreatePrototype(_T("Menu"), Object::sPrototype, UserMenu::sMembers, _countof(UserMenu::sMembers));
-		UserMenu::sMenuBarPrototype = Object::CreatePrototype(_T("MenuBar"), UserMenu::sMenuPrototype);
-	}
 	menu->SetBase(aMenuType == MENU_TYPE_BAR ? UserMenu::sMenuBarPrototype : UserMenu::sMenuPrototype);
 	if (!mFirstMenu)
 		mFirstMenu = mLastMenu = menu;

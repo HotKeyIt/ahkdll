@@ -160,6 +160,9 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	Array::sPrototype = Object::CreatePrototype(_T("Array"), Object::sPrototype, Array::sMembers, _countof(Array::sMembers));
 	Map::sPrototype = Object::CreatePrototype(_T("Map"), Object::sPrototype, Map::sMembers, _countof(Map::sMembers));
 
+	UserMenu::sMenuPrototype = Object::CreatePrototype(_T("Menu"), Object::sPrototype, UserMenu::sMembers, _countof(UserMenu::sMembers));
+	UserMenu::sMenuBarPrototype = Object::CreatePrototype(_T("MenuBar"), UserMenu::sMenuPrototype);
+
 	GuiType::sPrototype = Object::CreatePrototype(_T("Gui"), Object::sPrototype, GuiType::sMembers, _countof(GuiType::sMembers));
 	GuiControlType::sPrototype = Object::CreatePrototype(_T("Gui.Control"), Object::sPrototype, GuiControlType::sMembers, _countof(GuiControlType::sMembers));
 	GuiControlType::sPrototypeList = Object::CreatePrototype(_T("Gui.List"), GuiControlType::sPrototype, GuiControlType::sMembersList, _countof(GuiControlType::sMembersList));
@@ -501,6 +504,9 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 			Object::sClassPrototype = Object::CreatePrototype(_T("Class"), Object::sPrototype);
 			Array::sPrototype = Object::CreatePrototype(_T("Array"), Object::sPrototype, Array::sMembers, _countof(Array::sMembers));
 			Map::sPrototype = Object::CreatePrototype(_T("Map"), Object::sPrototype, Map::sMembers, _countof(Map::sMembers));
+
+			UserMenu::sMenuPrototype = Object::CreatePrototype(_T("Menu"), Object::sPrototype, UserMenu::sMembers, _countof(UserMenu::sMembers));
+			UserMenu::sMenuBarPrototype = Object::CreatePrototype(_T("MenuBar"), UserMenu::sMenuPrototype);
 
 			GuiType::sPrototype = Object::CreatePrototype(_T("Gui"), Object::sPrototype, GuiType::sMembers, _countof(GuiType::sMembers));
 			GuiControlType::sPrototype = Object::CreatePrototype(_T("Gui.Control"), Object::sPrototype, GuiControlType::sMembers, _countof(GuiControlType::sMembers));
