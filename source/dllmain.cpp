@@ -103,8 +103,6 @@ switch(fwdReason)
 		 }
 		 if (scriptstring)
 			 free(scriptstring);
-		 if (Line::sMaxSourceFiles)
-			free(Line::sSourceFile);
 		 if (g_Debugger.mStack.mSize)
 			free(g_Debugger.mStack.mBottom);
 		 /*if (g_input.MatchCount)
@@ -120,7 +118,7 @@ switch(fwdReason)
 		 }
 		 for(int i = 0;i < FUNC_LIB_COUNT;i++)
 		 {
-			 if (sLib[i].path)
+			 if (sLib[i].length)
 				 free(sLib[i].path);
 		 }
 		 free(g_array);
