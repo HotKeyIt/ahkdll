@@ -1234,9 +1234,9 @@ IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &a
 			aObject->Invoke(result_token, IT_CALL, _T("Push"), this_token, params + 1, 1);
 		else
 			aObject->Invoke(result_token, IT_SET, 0, this_token, params , 2);
+		aKey.Free();
+		aValue.Free();
 	}
-	aKey.Free();
-	aValue.Free();
 	return aObject;
 }
 
