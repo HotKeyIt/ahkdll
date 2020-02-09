@@ -806,9 +806,9 @@ Script::~Script() // Destructor.
 	for (i = 0; i < mFuncs.mCount; i++)
 	{
 		auto &f = *(UserFunc *)mFuncs.mItem[i];
-		if (f.IsBuiltIn() || (f.mBIF == (BIF_DllImport)))
+		if (f.IsBuiltIn() || (f.mBIF == BIF_DllImport))
 		{
-			if (f.mStaticVar && (f.mBIF == (BuiltInFunctionType)BIF_DllImport))
+			if (f.mStaticVar && (f.mBIF == BIF_DllImport))
 			{
 				for (int i = 0; i < f.mParamCount; i++)
 				{
@@ -853,7 +853,7 @@ Script::~Script() // Destructor.
 	for (i = 0; i < mFuncs.mCount; i++)
 	{
 		auto &f = *(UserFunc *)mFuncs.mItem[i];
-		if (f.IsBuiltIn() || (f.mBIF == (BIF_DllImport)))
+		if (f.IsBuiltIn() || (f.mBIF == BIF_DllImport))
 		{
 			mFuncs.mItem[i]->Release();
 			continue;
@@ -7944,7 +7944,7 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 		tmemcpy(naked_filename, aFuncName, naked_filename_length);
 		naked_filename[naked_filename_length] = '\0';
 	} // 2-iteration for().
-
+	
 	// HotKeyIt find library in Resource
 	// Since above didn't return, no match found in any library.
 	// Search in Resource for a library
@@ -10752,7 +10752,7 @@ unquoted_literal:
 						{
 							// Skip the checks below.
 						}
-						else if (in_param_list->param_count > func->mParamCount && (bif && ((BuiltInFunc *)func)->mBIF != &BIF_DllImport) && !func->mIsVariadic)
+						else if (in_param_list->param_count > func->mParamCount && !func->mIsVariadic)
 						{
 							return LineError(ERR_TOO_MANY_PARAMS, FAIL, in_param_list->marker);
 						}
@@ -15419,10 +15419,10 @@ ResultType Script::PreprocessLocalVars(FuncList &aFuncs)
 		auto &func = *(UserFunc *)aFuncs.mItem[i];
 		// HotKeyIt: set flag so function does not need to be processed again
 		func.mPreprocessLocalVarsDone = true;
-		if (func.mBIF == (BuiltInFunctionType)BIF_DllImport)
+		if (func.mBIF == BIF_DllImport)
 		{
 			g->CurrentFunc = NULL; // Reset for subsequent preparsing/execution stages.
-			return OK;
+			continue;
 		}
 		// Set temporary buffers for use processing this func and nested functions:
 		func.mUpVar = upvar;
