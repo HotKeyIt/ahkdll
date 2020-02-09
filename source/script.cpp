@@ -622,6 +622,86 @@ void Script::Construct()  // Constructor.
 }
 
 
+void FreeFunctionVariables(Func *aFunc, bool aDelete)
+{	// Free Nested User Functions
+	// Since it doesn't seem feasible to release all var backups created by recursive function
+	// calls and all tokens in the 'stack' of each currently executing expression, currently
+	// only static and global variables are released.  It seems best for consistency to also
+	// avoid releasing top-level non-static local variables (i.e. which aren't in var backups).
+	auto &f = *(UserFunc *)aFunc;
+	int v;
+	if (aDelete)
+	{
+		for (v = 0; v < f.mStaticVarCount; v++)
+		{
+			delete f.mStaticVar[v];
+		}
+		for (v = 0; v < f.mStaticLazyVarCount; v++)
+		{
+			delete f.mStaticLazyVar[v];
+		}
+		for (v = 0; v < f.mVarCount; v++)
+		{
+			delete f.mVar[v];
+		}
+		for (v = 0; v < f.mLazyVarCount; v++)
+		{
+			delete f.mLazyVar[v];
+		}
+		if (f.mStaticVar)
+			free(f.mStaticVar);
+		if (f.mStaticLazyVar)
+			free(f.mStaticLazyVar);
+		if (f.mVar)
+			free(f.mVar);
+		if (f.mLazyVar)
+			free(f.mLazyVar);
+		if (f.mFuncs.mCount)
+		{
+			for (v = 0; v < f.mFuncs.mCount; v++)
+				FreeFunctionVariables(f.mFuncs.mItem[v], aDelete);
+			free(f.mFuncs.mItem);
+		}
+		aFunc->Release();
+	}
+	else
+	{
+		for (v = 0; v < f.mStaticVarCount; v++)
+		{
+			if (f.mStaticVar[v]->mType == VAR_ALIAS)
+				f.mStaticVar[v]->ConvertToNonAliasIfNecessary();
+			else
+				f.mStaticVar[v]->Free();
+		}
+		for (v = 0; v < f.mStaticLazyVarCount; v++)
+		{
+			if (f.mStaticLazyVar[v]->mType == VAR_ALIAS)
+				f.mStaticLazyVar[v]->ConvertToNonAliasIfNecessary();
+			else
+				f.mStaticLazyVar[v]->Free();
+		}
+		for (v = 0; v < f.mVarCount; v++)
+		{
+			if (f.mVar[v]->mType == VAR_ALIAS)
+				f.mVar[v]->ConvertToNonAliasIfNecessary();
+			else
+				f.mVar[v]->Free();
+		}
+		for (v = 0; v < f.mLazyVarCount; v++)
+		{
+			if (f.mLazyVar[v]->mType == VAR_ALIAS)
+				f.mLazyVar[v]->ConvertToNonAliasIfNecessary();
+			else
+				f.mLazyVar[v]->Free();
+		}
+		if (f.mFuncs.mCount)
+		{
+			for (v = 0; v < f.mFuncs.mCount; v++)
+				FreeFunctionVariables(f.mFuncs.mItem[v], aDelete);
+		}
+	}
+}
+
 Script::~Script() // Destructor.
 {
 	int i;
@@ -726,7 +806,7 @@ Script::~Script() // Destructor.
 	for (i = 0; i < mFuncs.mCount; i++)
 	{
 		auto &f = *(UserFunc *)mFuncs.mItem[i];
-		if (f.IsBuiltIn())
+		if (f.IsBuiltIn() || (f.mBIF == (BIF_DllImport)))
 		{
 			if (f.mStaticVar && (f.mBIF == (BuiltInFunctionType)BIF_DllImport))
 			{
@@ -739,39 +819,7 @@ Script::~Script() // Destructor.
 			}
 			continue;
 		}
-
-		// Since it doesn't seem feasible to release all var backups created by recursive function
-		// calls and all tokens in the 'stack' of each currently executing expression, currently
-		// only static and global variables are released.  It seems best for consistency to also
-		// avoid releasing top-level non-static local variables (i.e. which aren't in var backups).
-		for (v = 0; v < f.mStaticVarCount; v++)
-		{
-			if (f.mStaticVar[v]->mType == VAR_ALIAS)
-				f.mStaticVar[v]->ConvertToNonAliasIfNecessary();
-			else
-				f.mStaticVar[v]->Free();
-		}
-		for (v = 0; v < f.mStaticLazyVarCount; v++)
-		{
-			if (f.mStaticLazyVar[v]->mType == VAR_ALIAS)
-				f.mStaticLazyVar[v]->ConvertToNonAliasIfNecessary();
-			else
-				f.mStaticLazyVar[v]->Free();
-		}
-		for (v = 0; v < f.mVarCount; v++)
-		{
-			if (f.mVar[v]->mType == VAR_ALIAS)
-				f.mVar[v]->ConvertToNonAliasIfNecessary();
-			else
-				f.mVar[v]->Free();
-		}
-		for (v = 0; v < f.mLazyVarCount; v++)
-		{
-			if (f.mLazyVar[v]->mType == VAR_ALIAS)
-				f.mLazyVar[v]->ConvertToNonAliasIfNecessary();
-			else
-				f.mLazyVar[v]->Free();
-		}
+		FreeFunctionVariables(mFuncs.mItem[i], false);
 	}
 	// Now all objects are freed and variables can be deleted
 	for (v = 0; v < mVarCount; v++)
@@ -810,36 +858,12 @@ Script::~Script() // Destructor.
 			mFuncs.mItem[i]->Release();
 			continue;
 		}
-		// Since it doesn't seem feasible to release all var backups created by recursive function
-		// calls and all tokens in the 'stack' of each currently executing expression, currently
-		// only static and global variables are released.  It seems best for consistency to also
-		// avoid releasing top-level non-static local variables (i.e. which aren't in var backups).
-		for (v = 0; v < f.mStaticVarCount; v++)
-		{
-			delete f.mStaticVar[v];
-		}
-		for (v = 0; v < f.mStaticLazyVarCount; v++)
-		{
-			delete f.mStaticLazyVar[v];
-		}
-		for (v = 0; v < f.mVarCount; v++)
-		{
-			delete f.mVar[v];
-		}
-		for (v = 0; v < f.mLazyVarCount; v++)
-		{
-			delete f.mLazyVar[v];
-		}
-		if (f.mStaticVar)
-			free(f.mStaticVar);
-		if (f.mStaticLazyVar)
-			free(f.mStaticLazyVar);
-		if (f.mVar)
-			free(f.mVar);
-		if (f.mLazyVar)
-			free(f.mLazyVar);
-		mFuncs.mItem[i]->Release();
+		FreeFunctionVariables(mFuncs.mItem[i], true);
 	}
+	if (mFuncs.mCount)
+		free(mFuncs.mItem);
+	mFuncs.mCount = 0;
+	mFuncs.mCountMax = 0;
 	
 	// HotkeyIt
 	// release all prototypes to clean up memory and get rid of memory leaks
@@ -877,10 +901,6 @@ Script::~Script() // Destructor.
 	Func::sPrototype->Release();
 	Object::sPrototype->Release();
 	Object::sAnyPrototype->Release();
-	if (mFuncs.mCount)
-		free(mFuncs.mItem);
-	mFuncs.mCount = 0;
-	mFuncs.mCountMax = 0;
 
 	
 	// Destroy Labels
@@ -8045,6 +8065,9 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	g->CurrentFunc = current_func; // Restore.
 	return FindFunc(aFuncName, aFuncNameLength);
 winapi:
+	// WinApi and #DllImport are always global functions
+	auto *aCurrent_func = g->CurrentFunc;
+	g->CurrentFunc = NULL;
 	TCHAR parameter[512] = { L'#', L'D', L'l', L'l', L'I', L'm', L'p', L'o', L'r', L't', L' ' }; // Should be enough room for any dll function definition
 	memcpy(&parameter[11], aFuncName, aFuncNameLength*sizeof(TCHAR));
 	parameter[aFuncNameLength + 11] = L',';
@@ -8185,6 +8208,7 @@ winapi:
 			// Now continue on normally so that our caller can continue looking for syntax errors.
 		}
 		LoadDllFunction(_tcschr(parameter, L' ') + 1, parameter);
+		g->CurrentFunc = aCurrent_func;
 		return FindFunc(aFuncName, aFuncNameLength);
 	}
 	return NULL;
