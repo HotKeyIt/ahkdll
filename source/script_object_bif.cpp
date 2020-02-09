@@ -1004,13 +1004,15 @@ BIF_DECL(BIF_ObjDump)
 // ObjRawLoad()
 //
 
-IObject* ObjRawLoad(char *aBuffer, IObject **aObjects, UINT &aObjCount, UINT &aObjSize)
+IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &aObjSize)
 {
 	IObject *aObject;
 	ResultToken result_token, this_token, enum_token, aKey, aValue;
 	ExprTokenType *params[] = { &aKey, &aValue };
 	TCHAR buf[MAX_INTEGER_LENGTH];
 	result_token.buf = buf;
+	aKey.mem_to_free = NULL;
+	aValue.mem_to_free = NULL;
 	this_token.symbol = SYM_OBJECT;
 
 	if (aObjCount == aObjSize)
@@ -1233,6 +1235,8 @@ IObject* ObjRawLoad(char *aBuffer, IObject **aObjects, UINT &aObjCount, UINT &aO
 		else
 			aObject->Invoke(result_token, IT_SET, 0, this_token, params , 2);
 	}
+	aKey.Free();
+	aValue.Free();
 	return aObject;
 }
 
