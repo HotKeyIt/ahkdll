@@ -1004,7 +1004,7 @@ BIF_DECL(BIF_ObjDump)
 // ObjRawLoad()
 //
 
-IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &aObjSize)
+IObject* ObjRawLoad(char *aBuffer, IObject **aObjects, UINT &aObjCount, UINT &aObjSize)
 {
 	IObject *aObject;
 	ResultToken result_token, this_token, enum_token, aKey, aValue;
@@ -1251,8 +1251,7 @@ BIF_DECL(BIF_ObjLoad)
 	{ // FileRead Mode
 		if (GetFileAttributes(aPath) == 0xFFFFFFFF)
 		{
-			aResultToken.symbol = SYM_STRING;
-			aResultToken.marker = _T("");
+			aResultToken.SetValue(_T(""));
 			return;
 		}
 		FILE *fp;
@@ -1260,8 +1259,7 @@ BIF_DECL(BIF_ObjLoad)
 		fp = _tfopen(aPath, _T("rb"));
 		if (fp == NULL)
 		{
-			aResultToken.symbol = SYM_STRING;
-			aResultToken.marker = _T("");
+			aResultToken.SetValue(_T(""));
 			return;
 		}
 
@@ -1299,8 +1297,7 @@ BIF_DECL(BIF_ObjLoad)
 		}
 		else
 		{
-			aResultToken.symbol = SYM_STRING;
-			aResultToken.marker = _T("");
+			aResultToken.SetValue(_T(""));
 			g_script->ScriptError(_T("ObjLoad: Password mismatch."));
 			return;
 		}
@@ -1313,8 +1310,7 @@ BIF_DECL(BIF_ObjLoad)
 		if (!TokenToInt64(*aParam[0]))
 			free(aBuffer);
 		free(aObjects);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		aResultToken.SetValue(_T(""));
 		g_script->ScriptError(ERR_OUTOFMEM);
 		return;
 	}
