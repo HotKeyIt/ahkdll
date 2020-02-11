@@ -2398,7 +2398,7 @@ VarSizeType Line::GetExpandedArgSize(Var *aArgVar[])
 			if (g->CurrentMacro && mActionType != ACT_FOR)
 			{
 				bool aVarIsParam = false;
-				LPTSTR aVarName = VAR(mArg[0])->mName;
+				LPTSTR aVarName = VAR(this_arg)->mName;
 				FuncParam *aFuncParam = g->CurrentMacro->mParam;
 				for (int aParamIndex = g->CurrentMacro->mParamCount; aParamIndex; aParamIndex--)
 					if (!_tcscmp(aVarName, aFuncParam[aParamIndex - 1].var->mName) && (aVarIsParam = true))
