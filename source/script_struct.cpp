@@ -526,8 +526,13 @@ void Struct::ObjectToStruct(IObject *objfrom)
 
 
 	IObject *enumerator;
-	ResultType result = GetEnumerator(enumerator, objfrom, 2, false);
-	if (result != OK)
+	ResultType result;
+	this_token.symbol = SYM_OBJECT;
+	this_token.object = objfrom;
+	objfrom->Invoke(result_token, IT_CALL, _T("OwnProps"), this_token, nullptr, 0);
+	if (result_token.symbol == SYM_OBJECT)
+		enumerator = result_token.object;
+	else
 		return;
 
 	this_token.symbol = SYM_OBJECT;
