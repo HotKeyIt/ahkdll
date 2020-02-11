@@ -13696,22 +13696,22 @@ ResultType Line::PerformAssign()
 		//		x := "quoted literal string"
 		//		x := normal_var
 		ASSERT(!mArg[0].is_expression); // Pre-resolved.  Dynamic assignments are handled as ACT_EXPRESSION.
-			if (g->CurrentMacro)
-			{
-				bool aVarIsParam = false;
-				LPTSTR aVarName = VAR(mArg[0])->mName;
-				FuncParam *aFuncParam = g->CurrentMacro->mParam;
-				for (int aParamIndex = g->CurrentMacro->mParamCount; aParamIndex; aParamIndex--)
-					if (!_tcscmp(aVarName, aFuncParam[aParamIndex - 1].var->mName) && (aVarIsParam = true))
-						break;
-				output_var = !aVarIsParam ? g_script->FindOrAddVar(VAR(mArg[0])->mName) : VAR(mArg[0]);
-			}
-			else
-			{
-		output_var = VAR(mArg[0]);
-			}
-			// HotKeyIt override routine for manually added BuildIn variables
-			// if (!(mArg[1].postfix->symbol == SYM_VAR && (mArg[1].postfix->var->mType == VAR_BUILTIN)))
+		if (g->CurrentMacro)
+		{
+			bool aVarIsParam = false;
+			LPTSTR aVarName = VAR(mArg[0])->mName;
+			FuncParam *aFuncParam = g->CurrentMacro->mParam;
+			for (int aParamIndex = g->CurrentMacro->mParamCount; aParamIndex; aParamIndex--)
+				if (!_tcscmp(aVarName, aFuncParam[aParamIndex - 1].var->mName) && (aVarIsParam = true))
+					break;
+			output_var = !aVarIsParam ? g_script->FindOrAddVar(VAR(mArg[0])->mName) : VAR(mArg[0]);
+		}
+		else
+		{
+			output_var = VAR(mArg[0]);
+		}
+		// HotKeyIt override routine for manually added BuildIn variables
+		// if (!(mArg[1].postfix->symbol == SYM_VAR && (mArg[1].postfix->var->mType == VAR_BUILTIN)))
 		return output_var->Assign(*mArg[1].postfix);
 	}
 
@@ -15420,10 +15420,10 @@ ResultType Script::PreprocessLocalVars(FuncList &aFuncs)
 		// HotKeyIt: set flag so function does not need to be processed again
 		func.mPreprocessLocalVarsDone = true;
 		if (func.mBIF == BIF_DllImport)
-		{
-			g->CurrentFunc = NULL; // Reset for subsequent preparsing/execution stages.
+		//{
+			//g->CurrentFunc = NULL; // Reset for subsequent preparsing/execution stages.
 			continue;
-		}
+		//}
 		// Set temporary buffers for use processing this func and nested functions:
 		func.mUpVar = upvar;
 		func.mUpVarIndex = upvarindex;

@@ -898,8 +898,8 @@ struct global_struct
 	//inline bool InTryBlock() { return ExcptMode & EXCPTMODE_TRY; } // Currently unused.
 	bool DetectWindow(HWND aWnd);
 	DerefType* ExcptDeref;
-	BYTE ZipCompressionLevel;
 	UserFunc* CurrentMacro;
+	BYTE ZipCompressionLevel;
 };
 
 inline void global_maximize_interruptibility(global_struct &g)

@@ -290,7 +290,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 				this_token.marker_length = result_length;
 				this_token.symbol = SYM_STRING;
 			} // if (this_token.symbol == SYM_DYNAMIC)
-			else if (this_token.symbol == SYM_VAR && g->CurrentMacro)
+			else if (this_token.symbol == SYM_VAR && g->CurrentMacro && mParentLine && mParentLine->mActionType != ACT_FOR)
 			{
 				bool aVarIsParam = false;
 				LPTSTR aVarName = this_token.var->mName;
@@ -2390,7 +2390,7 @@ VarSizeType Line::GetExpandedArgSize(Var *aArgVar[])
 		{
 			// Pre-resolved output vars should never be included in the space calculation,
 			// but we do need to store the var reference in aArgVar for our caller.
-			if (g->CurrentMacro)
+			if (g->CurrentMacro && mActionType != ACT_FOR)
 			{
 				bool aVarIsParam = false;
 				LPTSTR aVarName = VAR(mArg[0])->mName;
@@ -2496,9 +2496,8 @@ ResultType Line::ArgMustBeDereferenced(Var *aVar, int aArgIndex, Var *aArgVar[])
 			}
 			else
 			{
-				output_var = VAR(mArg[0]);
+				output_var = (i < aArgIndex) ? aArgVar[i] : mArg[i].is_expression ? NULL : VAR(mArg[i]); // aArgVar: See top of this function for comments.
 			}
-			output_var = (i < aArgIndex) ? aArgVar[i] : mArg[i].is_expression ? NULL : VAR(mArg[i]); // aArgVar: See top of this function for comments.
 			if (!output_var) // Var hasn't been resolved yet.  To be safe, we must assume deref is required.
 				return CONDITION_TRUE;
 			if (output_var->ResolveAlias() == aVar)
