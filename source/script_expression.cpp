@@ -290,16 +290,21 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 				this_token.marker_length = result_length;
 				this_token.symbol = SYM_STRING;
 			} // if (this_token.symbol == SYM_DYNAMIC)
-			else if (this_token.symbol == SYM_VAR && g->CurrentMacro && mParentLine && mParentLine->mActionType != ACT_FOR)
+			else if (this_token.symbol == SYM_VAR && g->CurrentMacro)
 			{
 				bool aVarIsParam = false;
 				LPTSTR aVarName = this_token.var->mName;
-				FuncParam *aFuncParam = g->CurrentMacro->mParam;
-				for (int aParamIndex = g->CurrentMacro->mParamCount; aParamIndex; aParamIndex--)
-					if (!_tcscmp(aVarName, aFuncParam[aParamIndex - 1].var->mName) && (aVarIsParam = true))
-						break;
-				if (!aVarIsParam)
-					this_token.var = g_script->FindOrAddVar(this_token.var->mName);
+				if ((mParentLine && mParentLine->mActionType != ACT_FOR)
+					|| (_tcscmp(aVarName,mParentLine->mArg[0].text)
+					&& mParentLine->mArgc > 2 && _tcscmp(aVarName, mParentLine->mArg[1].text)))
+				{
+					FuncParam *aFuncParam = g->CurrentMacro->mParam;
+					for (int aParamIndex = g->CurrentMacro->mParamCount; aParamIndex; aParamIndex--)
+						if (!_tcscmp(aVarName, aFuncParam[aParamIndex - 1].var->mName) && (aVarIsParam = true))
+							break;
+					if (!aVarIsParam)
+						this_token.var = g_script->FindOrAddVar(this_token.var->mName);
+				}
 			}
 			goto push_this_token;
 		} // if (IS_OPERAND(this_token.symbol))
