@@ -1867,7 +1867,7 @@ bool UserFunc::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aPar
 		if (sFreeVars && mOuterFunc && !aUpVars)
 			aUpVars = sFreeVars->ForFunc(mOuterFunc);
 
-		if (mDownVarCount || aUpVars)
+		if (!mIsMacro && (mDownVarCount || aUpVars))
 		{
 			// These local vars need to persist after the function returns (and be independent of
 			// any other instances of this function).  Since we really only have one set of local
@@ -1879,7 +1879,7 @@ bool UserFunc::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aPar
 		else
 			sFreeVars = NULL;
 		
-		if (mUpVarCount)
+		if (!mIsMacro && mUpVarCount)
 		{
 			if (!aUpVars)
 			{
