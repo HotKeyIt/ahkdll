@@ -17560,7 +17560,7 @@ BIF_DECL(BIF_OnMessage)
 		if (func)
 			callback = func->CloseIfNeeded();
 		pmonitor = g_MsgMonitor->Add(specified_msg, specified_hwnd, callback, call_it_last);
-		if (func && func != callback)
+		if (func) // && func != callback) // HotKeyIt changed due to double reference since g_MsgMonitor->Add will add reference
 			callback->Release();
 		if (!pmonitor)
 			_f_throw(ERR_OUTOFMEM);
