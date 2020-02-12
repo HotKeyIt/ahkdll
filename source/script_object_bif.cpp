@@ -1006,7 +1006,7 @@ BIF_DECL(BIF_ObjDump)
 
 IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &aObjSize)
 {
-	IObject *aObject;
+	IObject *aObject = NULL;
 	ResultToken result_token, this_token, enum_token, aKey, aValue;
 	ExprTokenType *params[] = { &aKey, &aValue };
 	TCHAR buf[MAX_INTEGER_LENGTH];
