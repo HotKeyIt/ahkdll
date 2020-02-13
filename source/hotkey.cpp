@@ -656,6 +656,7 @@ void Hotkey::AllDestruct()
 	if (g_MainThreadID == g_ThreadID)
 		sHotkeyCount = 0;
 	free(shk);
+	shk = NULL;
 }
 
 
