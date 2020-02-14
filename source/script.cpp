@@ -2298,7 +2298,7 @@ ResultType Script::OpenIncludedFile(TextStream &ts, LPTSTR aFileSpec, bool aAllo
 	}
 
 	// This is done only after the file has been successfully opened in case aIgnoreLoadFailure==true:
-	if (source_file_index > 0)
+	if (!aPathToShow && source_file_index > 0)
 		if (  !(Line::sSourceFile[source_file_index] = SimpleHeap::Malloc(full_path))  )
 			return ScriptError(ERR_OUTOFMEM);
 	//else the first file was already taken care of by another means.
