@@ -331,12 +331,10 @@ protected:
 	ResultType CallMeta(IObject *aFunc, LPTSTR aName, int aFlags, ResultToken &aResultToken, ExprTokenType &aThisToken, ExprTokenType *aParam[], int aParamCount);
 
 public:
-	static void FreesPrototype(Object *aObject, bool aRelease = true) 
+	static void FreesPrototype(Object *aObject) 
 	{ 
 		aObject->mMethods.Free(); 
 		aObject->mFields.Free();
-		if (aRelease)
-			aObject->Release();
 	}
 	static Object *Create();
 	static Object *Create(ExprTokenType *aParam[], int aParamCount, ResultToken *apResultToken = nullptr);

@@ -895,9 +895,9 @@ Script::~Script() // Destructor.
 
 	// HotKeyIt: mMethods and mFields needs to be cleared to release prototypes
 	// use FreesPrototype for this task
-	Object::sAnyPrototype->FreesPrototype(Object::sAnyPrototype, false);
-	Func::sPrototype->FreesPrototype(Func::sPrototype, false);
-	Object::sPrototype->FreesPrototype(Object::sPrototype, false);
+	Object::sAnyPrototype->FreesPrototype(Object::sAnyPrototype);
+	Func::sPrototype->FreesPrototype(Func::sPrototype);
+	Object::sPrototype->FreesPrototype(Object::sPrototype);
 	Func::sPrototype->Release();
 	Object::sPrototype->Release();
 	Object::sAnyPrototype->Release();
