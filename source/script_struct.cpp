@@ -1268,7 +1268,22 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 				objclone->Release();
 			return OK;
 		}
-		if (!_tcsicmp(name, _T("Clone")) || !_tcsicmp(name, _T("_New")))
+		if (!_tcsicmp(name, _T("HasMethod")))
+		{
+			static LPTSTR aNeedle[] = { _T("__enum"), _T("clone"), _T("countof"), _T("encoding"), _T("fill"), _T("getaddress"), _T("getcapacity"), _T("getpointer"), _T("hasmethod"), _T("ispointer")
+									, _T("new"), _T("setcapacity"), _T("offset"), _T("size") };
+			size_t aFoundLen = NULL;
+			if (InStrAny(_tcslwr(TokenToString(*aParam[0])), aNeedle, _countof(aNeedle), aFoundLen))
+				aResultToken.value_int64 = 1;
+			else
+				aResultToken.value_int64 = 0;
+			if (deletefield) // we created the field from a structure
+				delete field;
+			if (releaseobj)
+				objclone->Release();
+			return OK;
+		}
+		if (!_tcsicmp(name, _T("Clone")) || !_tcsicmp(name, _T("New")))
 		{
 			if (!field)
 			{
