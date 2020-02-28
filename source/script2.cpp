@@ -16578,8 +16578,8 @@ BIF_DECL(BIF_ZipInfo)
 	HZIP huz;
 	TCHAR	aMsg[100];
 
-	ResultToken Result, this_token, aKey, aValue;
-	ExprTokenType *params[] = { &aKey, &aValue };
+	ResultToken Result, this_token, aValue;
+	ExprTokenType *params[] = { &aValue };
 
 	// CStringA aPassword = aParamCount > 4 ? CStringCharFromTChar(TokenToString(*aParam[4])) : NULL;
 	if (TokenIsNumeric(*aParam[0]))
@@ -16608,61 +16608,48 @@ BIF_DECL(BIF_ZipInfo)
 	ZIPENTRY	ze;
 	ULONGLONG	numitems;
 
-	IObject *aObject = Object::Create();
+	Array *aObject = Array::Create();
 
 	// Find out how many items are in the archive.
 	ze.Index = (ULONGLONG)-1;
 	if ((aErrCode = UnzipGetItem(huz, &ze)))
 		goto errorclose;
 	numitems = ze.Index;
-	
-	aKey.symbol = SYM_STRING;
-	aKey.marker_length = -1;
-	
+		
 	TCHAR aTimeBuf[MAX_INTEGER_LENGTH];
 	// Get info for all item(s).
 	for (ze.Index = 0; ze.Index < numitems; ze.Index++)
 	{
 		if ((aErrCode = UnzipGetItem(huz, &ze)))
 			goto errorclose;
-		IObject *aThisObject = Object::Create();
-		aKey.marker = _T("Name");
+		Map *aThisObject = Map::Create();
 		aValue.symbol = SYM_STRING;
 		aValue.marker_length = -1;
 		aValue.marker = ze.Name;
-		aThisObject->Invoke(Result, IT_SET, 0, this_token, params, 2);
+		aThisObject->Invoke(Result, IT_SET, _T("Name"), this_token, params, 1);
 
-		aKey.marker = _T("CreateTime");
 		aValue.marker = FileTimeToYYYYMMDD(aTimeBuf, ze.CreateTime, true);
-		aThisObject->Invoke(Result, IT_SET, 0, this_token, params, 2);
+		aThisObject->Invoke(Result, IT_SET, _T("CreateTime"), this_token, params, 1);
 
-		aKey.marker = _T("ModifyTime");
 		aValue.marker = FileTimeToYYYYMMDD(aTimeBuf, ze.ModifyTime, true);
-		aThisObject->Invoke(Result, IT_SET, 0, this_token, params, 2);
+		aThisObject->Invoke(Result, IT_SET, _T("ModifyTime"), this_token, params, 1);
 
-		aKey.marker = _T("AccessTime");
 		aValue.marker = FileTimeToYYYYMMDD(aTimeBuf, ze.AccessTime, true);
-		aThisObject->Invoke(Result, IT_SET, 0, this_token, params, 2);
+		aThisObject->Invoke(Result, IT_SET, _T("AccessTime"), this_token, params, 1);
 
-		aKey.marker = _T("Attributes");
 		aValue.marker = FileAttribToStr(aTimeBuf, ze.Attributes);
-		aThisObject->Invoke(Result, IT_SET, 0, this_token, params, 2);
+		aThisObject->Invoke(Result, IT_SET, _T("Attributes"), this_token, params, 1);
 
-
-		aKey.marker = _T("CompressedSize");
 		aValue.symbol = SYM_INTEGER;
 		aValue.value_int64 = ze.CompressedSize;
-		aThisObject->Invoke(Result, IT_SET, 0, this_token, params, 2);
+		aThisObject->Invoke(Result, IT_SET, _T("CompressedSize"), this_token, params, 1);
 
-
-		aKey.marker = _T("UncompressedSize");
 		aValue.value_int64 = ze.UncompressedSize;
-		aThisObject->Invoke(Result, IT_SET, 0, this_token, params, 2);
+		aThisObject->Invoke(Result, IT_SET, _T("UncompressedSize"), this_token, params, 1);
 
-		aKey.marker = _T("Push");
 		aValue.symbol = SYM_OBJECT;
 		aValue.object = aThisObject;
-		aObject->Invoke(Result, IT_CALL, 0, this_token, params, 2);
+		aObject->Append(*params[0]);
 		aThisObject->Release();
 	}
 
