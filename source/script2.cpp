@@ -17558,9 +17558,9 @@ BIF_DECL(BIF_OnMessage)
 			_f_return_retval; // Yield the default return value set earlier (an empty string).
 		// From this point on, it is certain that an item will be added to the array.
 		if (func)
-			callback = func->CloseIfNeeded();
+			callback = func->CloseIfNeeded(); // Returns a new reference, if not a new object.
 		pmonitor = g_MsgMonitor->Add(specified_msg, specified_hwnd, callback, call_it_last);
-		if (func) // && func != callback) // HotKeyIt changed due to double reference since g_MsgMonitor->Add will add reference
+		if (func)
 			callback->Release();
 		if (!pmonitor)
 			_f_throw(ERR_OUTOFMEM);
