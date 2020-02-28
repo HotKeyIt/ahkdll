@@ -1458,7 +1458,15 @@ BIF_DECL(Op_ObjInvoke)
 	
 	if (result == INVOKE_NOT_HANDLED && must_be_handled)
 	{
-		_f__ret(aResultToken.UnknownMemberError(*obj_param, invoke_type, name));
+		Object *aDefault;
+		if (invoke_type == IT_GET && name && (aDefault = dynamic_cast<Object*>(obj)) && aDefault->mDefault.symbol != SYM_MISSING)
+		{
+			aResultToken.CopyValueFrom(aDefault->mDefault);
+			if (aResultToken.symbol == SYM_OBJECT)
+				aResultToken.object->AddRef();
+		}
+		else
+			_f__ret(aResultToken.UnknownMemberError(*obj_param, invoke_type, name));
 	}
 	else if (result == FAIL || result == EARLY_EXIT) // For maintainability: SetExitResult() might not have been called.
 	{

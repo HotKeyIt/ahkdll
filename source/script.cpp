@@ -728,61 +728,6 @@ Script::~Script() // Destructor.
 	if (mNIC.hWnd) // Tray icon is installed.
 		Shell_NotifyIcon(NIM_DELETE, &mNIC); // Remove it.
 
-	// It is safer/easier to destroy the GUI windows prior to the menus (especially the menu bars).
-	// This is because one GUI window might get destroyed and take with it a menu bar that is still
-	// in use by an existing GUI window.  GuiType::Destroy() adheres to this philosophy by detaching
-	// its menu bar prior to destroying its window.
-	if (g_firstGui)
-	{
-		GuiType* gui;
-		while (gui = g_firstGui) // Destroy any remaining GUI windows (due to e.g. circular references). Also: assignment.
-			gui->Destroy();
-		g_firstGui = NULL;
-		g_lastGui = NULL;
-	}
-	for (i = 0; i < GuiType::sFontCount; ++i) // Now that GUI windows are gone, delete all GUI fonts.
-		if (GuiType::sFont[i].hfont)
-			DeleteObject(GuiType::sFont[i].hfont);
-
-	if (GuiType::sFontCount)
-	{
-		GuiType::sFontCount = 0;
-		free(GuiType::sFont);
-		GuiType::sFont = NULL;
-	}
-
-	// The above might attempt to delete an HFONT from GetStockObject(DEFAULT_GUI_FONT), etc.
-	// But that should be harmless:
-	// MSDN: "It is not necessary (but it is not harmful) to delete stock objects by calling DeleteObject."
-
-	// Above: Probably best to have removed icon from tray and destroyed any Gui windows that were
-	// using it prior to getting rid of the script's custom icon below:
-	if (mCustomIcon)
-	{
-		DestroyIcon(mCustomIcon);
-		DestroyIcon(mCustomIconSmall); // Should always be non-NULL if mCustomIcon is non-NULL.
-	}
-
-	// Since they're not associated with a window, we must free the resources for all popup menus.
-	// Update: Even if a menu is being used as a GUI window's menu bar, see note above for why menu
-	// destruction is done AFTER the GUI windows are destroyed:
-	for (UserMenu *n, *m = mFirstMenu; m;) // m = m->mNextMenu)
-	{
-		n = m->mNextMenu;
-		m->Dispose();
-		m->Release();
-		m = n;
-	}
-	mFirstMenu = NULL;
-	mLastMenu = NULL;
-	mTrayMenu = NULL;
-
-	/*else if (mFirstMenu)
-	{
-	mFirstMenu->mNextMenu = NULL;
-	mLastMenu = mFirstMenu;
-	}
-	mTrayIconTip = NULL;*/
 	// L31: Release objects stored in variables, where possible.
 	int v;
 	for (v = 0; v < mVarCount; v++)
@@ -864,7 +809,65 @@ Script::~Script() // Destructor.
 		free(mFuncs.mItem);
 	mFuncs.mCount = 0;
 	mFuncs.mCountMax = 0;
-	
+
+
+
+	// It is safer/easier to destroy the GUI windows prior to the menus (especially the menu bars).
+	// This is because one GUI window might get destroyed and take with it a menu bar that is still
+	// in use by an existing GUI window.  GuiType::Destroy() adheres to this philosophy by detaching
+	// its menu bar prior to destroying its window.
+	if (g_firstGui)
+	{
+		GuiType* gui;
+		while (gui = g_firstGui) // Destroy any remaining GUI windows (due to e.g. circular references). Also: assignment.
+			gui->Destroy();
+		g_firstGui = NULL;
+		g_lastGui = NULL;
+	}
+	for (i = 0; i < GuiType::sFontCount; ++i) // Now that GUI windows are gone, delete all GUI fonts.
+		if (GuiType::sFont[i].hfont)
+			DeleteObject(GuiType::sFont[i].hfont);
+
+	if (GuiType::sFontCount)
+	{
+		GuiType::sFontCount = 0;
+		free(GuiType::sFont);
+		GuiType::sFont = NULL;
+	}
+
+	// The above might attempt to delete an HFONT from GetStockObject(DEFAULT_GUI_FONT), etc.
+	// But that should be harmless:
+	// MSDN: "It is not necessary (but it is not harmful) to delete stock objects by calling DeleteObject."
+
+	// Above: Probably best to have removed icon from tray and destroyed any Gui windows that were
+	// using it prior to getting rid of the script's custom icon below:
+	if (mCustomIcon)
+	{
+		DestroyIcon(mCustomIcon);
+		DestroyIcon(mCustomIconSmall); // Should always be non-NULL if mCustomIcon is non-NULL.
+	}
+
+	// Since they're not associated with a window, we must free the resources for all popup menus.
+	// Update: Even if a menu is being used as a GUI window's menu bar, see note above for why menu
+	// destruction is done AFTER the GUI windows are destroyed:
+	for (UserMenu *n, *m = mFirstMenu; m;) // m = m->mNextMenu)
+	{
+		n = m->mNextMenu;
+		m->Dispose();
+		m->Release();
+		m = n;
+	}
+	mFirstMenu = NULL;
+	mLastMenu = NULL;
+	mTrayMenu = NULL;
+
+	/*else if (mFirstMenu)
+	{
+	mFirstMenu->mNextMenu = NULL;
+	mLastMenu = mFirstMenu;
+	}
+	mTrayIconTip = NULL;*/
+
 	// HotkeyIt
 	// release all prototypes to clean up memory and get rid of memory leaks
 	Object::sFloatPrototype->Release();
