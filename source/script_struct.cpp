@@ -529,11 +529,16 @@ void Struct::ObjectToStruct(IObject *objfrom)
 	ResultType result;
 	this_token.symbol = SYM_OBJECT;
 	this_token.object = objfrom;
-	objfrom->Invoke(result_token, IT_CALL, _T("OwnProps"), this_token, nullptr, 0);
-	if (result_token.symbol == SYM_OBJECT)
-		enumerator = result_token.object;
+	if (!_tcscmp(objfrom->Type(), _T("Object")))
+	{
+		objfrom->Invoke(result_token, IT_CALL, _T("OwnProps"), this_token, nullptr, 0);
+		if (result_token.symbol == SYM_OBJECT)
+			enumerator = result_token.object;
+		else
+			return;
+	}
 	else
-		return;
+		result = GetEnumerator(enumerator, objfrom, 2, false);
 
 	this_token.symbol = SYM_OBJECT;
 	this_token.object = this;
