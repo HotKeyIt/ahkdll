@@ -983,7 +983,7 @@ BIF_DECL(BIF_ObjDump)
 		fclose(hFile);
 		free(aBuffer);
 	}
-	else if (aParam[1]->symbol == SYM_VAR)
+	else if (aParamCount == 2 && aParam[1]->symbol == SYM_VAR)
 	{
 		Var &var = *(aParam[1]->var->mType == VAR_ALIAS ? aParam[1]->var->mAliasFor : aParam[1]->var);
 		if (var.mType != VAR_NORMAL) // i.e. VAR_CLIPBOARD or VAR_VIRTUAL.
