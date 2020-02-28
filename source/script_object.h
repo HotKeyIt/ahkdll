@@ -291,7 +291,7 @@ protected:
 	};
 
 	Object *CloneTo(Object &aTo);
-	Object() { mFlags = 0; }
+	Object() { mFlags = 0; mDefault.symbol = SYM_MISSING; }
 	~Object();
 	bool Delete() override;
 
@@ -331,6 +331,7 @@ protected:
 	ResultType CallMeta(IObject *aFunc, LPTSTR aName, int aFlags, ResultToken &aResultToken, ExprTokenType &aThisToken, ExprTokenType *aParam[], int aParamCount);
 
 public:
+	ExprTokenType mDefault;
 	static void FreesPrototype(Object *aObject) 
 	{ 
 		aObject->mMethods.Free(); 
@@ -460,6 +461,7 @@ public:
 	// Methods and functions:
 	ResultType DeleteProp(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	ResultType DefineProp(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	ResultType DefineDefault(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	ResultType GetOwnPropDesc(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	ResultType HasOwnProp(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	ResultType __Enum(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);

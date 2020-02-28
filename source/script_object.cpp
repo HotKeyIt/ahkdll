@@ -490,6 +490,7 @@ void Map::Clear()
 ObjectMember Object::sMembers[] =
 {
 	Object_Method1(Clone, 0, 0),
+	Object_Method1(DefineDefault, 0, 1),
 	Object_Method1(DefineMethod, 2, 2),
 	Object_Method1(DefineProp, 2, 2),
 	Object_Method1(DeleteMethod, 1, 1),
@@ -778,7 +779,16 @@ ResultType Map::__Item(ResultToken &aResultToken, int aID, int aFlags, ExprToken
 				aResultToken.object->AddRef();
 			return OK;
 		}
-		_o_throw(ERR_NO_KEY, ParamIndexToString(0, _f_number_buf));
+
+		if (IS_INVOKE_GET && mDefault.symbol != SYM_MISSING)
+		{
+			aResultToken.CopyValueFrom(mDefault);
+			if (aResultToken.symbol == SYM_OBJECT)
+				aResultToken.object->AddRef();
+			return OK;
+		}
+		else
+			_o_throw(ERR_NO_KEY, ParamIndexToString(0, _f_number_buf));
 	}
 	else
 	{
@@ -1423,6 +1433,35 @@ ResultType Object::DefineProp(ResultToken &aResultToken, int aID, int aFlags, Ex
 	_o_return(this);
 }
 
+ResultType Object::DefineDefault(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+{
+	if (!aParamCount)
+	{
+		if (mDefault.symbol == SYM_OBJECT)
+			mDefault.object->Release();
+		mDefault.symbol = SYM_MISSING;
+	}
+	else
+	{
+		ExprTokenType *param;
+		param = *aParam;
+		if (param->symbol == SYM_OBJECT)
+		{
+			mDefault.SetValue(param->object);
+			mDefault.object->AddRef();
+		}
+		else if (param->symbol == SYM_VAR && param->var->HasObject())
+		{
+			mDefault.SetValue(param->var->mObject);
+			mDefault.object->AddRef();
+		}
+		else
+			mDefault.CopyValueFrom(*param);
+	}
+	AddRef();
+	_o_return(this);
+}
+
 ResultType Object::GetOwnPropDesc(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
 	auto name = ParamIndexToString(0, _f_number_buf);
@@ -1876,7 +1915,17 @@ ResultType Array::Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTok
 	{
 		auto index = ParamToZeroIndex(*aParam[aParamCount - 1]);
 		if (index >= mLength)
-			_o_throw(ERR_INVALID_INDEX, ParamIndexToString(aParamCount - 1, _f_number_buf));
+		{
+			if (IS_INVOKE_GET && mDefault.symbol != SYM_MISSING)
+			{
+				aResultToken.CopyValueFrom(mDefault);
+				if (aResultToken.symbol == SYM_OBJECT)
+					aResultToken.object->AddRef();
+				return OK;
+			}
+			else
+				_o_throw(ERR_INVALID_INDEX, ParamIndexToString(aParamCount - 1, _f_number_buf));
+		}
 		auto &item = mItem[index];
 		if (IS_INVOKE_GET)
 			item.ReturnRef(aResultToken);
