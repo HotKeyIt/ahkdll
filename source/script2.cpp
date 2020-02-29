@@ -11677,7 +11677,6 @@ ResultType CriticalObject::Invoke(IObject_Invoke_PARAMS_DECL)
 		else
 			Sleep(0);
 	 // Invoke original object as if it was called
-	 aThisToken.symbol = SYM_OBJECT;
 	 aThisToken.object = this->object;
 	 ResultType r = this->object->Invoke(aResultToken, aFlags, aName, aThisToken, aParam, aParamCount);
 	 if (aResultToken.symbol == SYM_OBJECT && dynamic_cast<EnumBase *>(aResultToken.object))
@@ -11688,6 +11687,8 @@ ResultType CriticalObject::Invoke(IObject_Invoke_PARAMS_DECL)
 		new_object->lpCriticalSection = this->lpCriticalSection;
 		aResultToken.object = new_object;
 	 }
+	 // restore our CriticalObject
+	 aThisToken.object = this;
 	 LeaveCriticalSection(this->lpCriticalSection);
 	 return r;
 }
