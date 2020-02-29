@@ -69,10 +69,10 @@ CreateScript(script,pw:=""){
         Continue
       If (RegExMatch(A_LoopField,"^[^:\s]+:[^:\s=]+$")){
         label:=StrSplit(A_LoopField,":")
-        If (label.Length=2 and IsLabel(label.1) and IsLabel(label.2))
+        If (label.Length=2 and IsLabel(label[1]) and IsLabel(label[2]))
           script .=SubStr(mScript
-            , h:=InStr(mScript,"`r`n" label.1 ":`r`n")
-            , InStr(mScript,"`r`n" label.2 ":`r`n")-h) . "`r`n"
+            , h:=InStr(mScript,"`r`n" label[1] ":`r`n")
+            , InStr(mScript,"`r`n" label[2] ":`r`n")-h) . "`r`n"
       } else if RegExMatch(A_LoopField,"^[^\{}\s]+\{}$")
         label := SubStr(A_LoopField,1,-2),script .= SubStr(mScript
           , h:=RegExMatch(mScript,"i)\n" label "\([^\\)\n]*\)\n?\s*\{")

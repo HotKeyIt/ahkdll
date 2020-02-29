@@ -3,6 +3,6 @@ ObjShare(obj){
 	if IsObject(obj)
 		return LresultFromObject(&IDispatch, 0, &obj)
 	else if ObjectFromLresult(obj, &IDispatch, 0, getvar(com:=0))
-		return MessageBox(NULL,A_ThisFunc ": LResult Object could not be created","Error",0)
+		return MsgBox(A_ThisFunc ": LResult Object could not be created")
 	return ComObject(9,com,1)
 }
