@@ -11677,7 +11677,9 @@ ResultType CriticalObject::Invoke(IObject_Invoke_PARAMS_DECL)
 		else
 			Sleep(0);
 	 // Invoke original object as if it was called
-	 aThisToken.object = this->object;
+	 ExprTokenType aBackupToken;
+	 aBackupToken.CopyExprFrom(aThisToken);
+	 aThisToken.SetValue(this->object);
 	 ResultType r = this->object->Invoke(aResultToken, aFlags, aName, aThisToken, aParam, aParamCount);
 	 if (aResultToken.symbol == SYM_OBJECT && dynamic_cast<EnumBase *>(aResultToken.object))
 	 {	// Result is an enumerator object enwrap enumerator into critical object
@@ -11685,10 +11687,9 @@ ResultType CriticalObject::Invoke(IObject_Invoke_PARAMS_DECL)
 		CriticalObject *new_object = new CriticalObject();
 		new_object->object = aResultToken.object;
 		new_object->lpCriticalSection = this->lpCriticalSection;
-		aResultToken.object = new_object;
-	 }
-	 // restore our CriticalObject
-	 aThisToken.object = this;
+		aResultToken.SetValue(new_object);
+	 } else	 // restore our CriticalObject
+		aThisToken.CopyExprFrom(aBackupToken);
 	 LeaveCriticalSection(this->lpCriticalSection);
 	 return r;
 }
