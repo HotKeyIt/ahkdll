@@ -767,97 +767,52 @@ EXPORT int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR par
 		if (aParamsCount < aFunc->mMinParams)
 		{
 			script->ScriptError(ERR_TOO_FEW_PARAMS, func);
+#ifndef _USRDLL
+			if (tls)
+				curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 			return -1;
 		}
-		if(aFunc->IsBuiltIn())
+#ifndef _USRDLL
+		if (curr_teb)
+			curr_teb->ThreadLocalStoragePointer = tls;
+#endif
+		EnterCriticalSection(&g_CriticalAhkFunction);
+		if (++returnCount > 9)
+			returnCount = 0 ;
+		FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
+		if (aParamsCount)
 		{
-			EnterCriticalSection(&g_CriticalAhkFunction);
-			ResultType aResult = OK;
-			if (++returnCount > 9)
-				returnCount = 0 ;
-			FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
-			if (aParamsCount)
+			ExprTokenType **new_mem = (ExprTokenType**)realloc(aFuncAndToken.param,sizeof(ExprTokenType)*aParamsCount);
+			if (!new_mem)
 			{
-				ExprTokenType **new_mem = (ExprTokenType**)realloc(aFuncAndToken.param,sizeof(ExprTokenType)*aParamsCount);
-				if (!new_mem)
-				{
-					script->ScriptError(ERR_OUTOFMEM,func);
-					LeaveCriticalSection(&g_CriticalAhkFunction);
-					return -1;
-				}
-				aFuncAndToken.param = new_mem;
+				script->ScriptError(ERR_OUTOFMEM,func);
+				LeaveCriticalSection(&g_CriticalAhkFunction);
+				return -1;
 			}
-			else
-				aFuncAndToken.param = NULL;
-			for (int i = 0;aFunc->mParamCount > i && aParamsCount>i;i++)
-			{
-				aFuncAndToken.param[i] = &aFuncAndToken.params[i];
-				aFuncAndToken.param[i]->SetValue(*params[i]); // Assign parameters
-			}
-			aFuncAndToken.mToken.symbol = SYM_INTEGER;
-			LPTSTR new_buf = (LPTSTR)realloc(aFuncAndToken.buf,MAX_NUMBER_SIZE * sizeof(TCHAR));
+			aFuncAndToken.param = new_mem;
+		}
+		else
+			aFuncAndToken.param = NULL;
+		aFuncAndToken.mParamCount = aFunc->mParamCount < aParamsCount && !aFunc->mIsVariadic ? aFunc->mParamCount : aParamsCount;
+		LPTSTR new_buf;
+		for (int i = 0;(aFunc->mParamCount > i || aFunc->mIsVariadic) && aParamsCount>i;i++)
+		{
+			aFuncAndToken.param[i] = &aFuncAndToken.params[i];
+			new_buf = (LPTSTR)realloc(aFuncAndToken.param[i]->marker,(_tcslen(*params[i])+1)*sizeof(TCHAR));
 			if (!new_buf)
 			{
 				script->ScriptError(ERR_OUTOFMEM, func);
 				LeaveCriticalSection(&g_CriticalAhkFunction);
 				return -1;
 			}
-			aFuncAndToken.buf = new_buf;
-			aFuncAndToken.mToken.buf = aFuncAndToken.buf;
-			aFuncAndToken.mToken.func = (BuiltInFunc*)aFunc;
-			aFuncAndToken.mToken.marker = (LPTSTR)aFunc->mName;
-			
-			aFunc->Call(aFuncAndToken.mToken, aFuncAndToken.param, aFunc->mParamCount < aParamsCount ? aFunc->mParamCount : aParamsCount);
-#ifndef _USRDLL
-			if (tls)
-				curr_teb->ThreadLocalStoragePointer = tls;
-#endif
-			LeaveCriticalSection(&g_CriticalAhkFunction);
-			return 0;
+			_tcscpy(new_buf,*params[i]); // Assign parameters
+			aFuncAndToken.param[i]->SetValue(new_buf);
 		}
-		else
-		{
-#ifndef _USRDLL
-			if (curr_teb)
-				curr_teb->ThreadLocalStoragePointer = tls;
-#endif
-			EnterCriticalSection(&g_CriticalAhkFunction);
-			if (++returnCount > 9)
-				returnCount = 0 ;
-			FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[returnCount];
-			if (aParamsCount)
-			{
-				ExprTokenType **new_mem = (ExprTokenType**)realloc(aFuncAndToken.param,sizeof(ExprTokenType)*aParamsCount);
-				if (!new_mem)
-				{
-					script->ScriptError(ERR_OUTOFMEM,func);
-					LeaveCriticalSection(&g_CriticalAhkFunction);
-					return -1;
-				}
-				aFuncAndToken.param = new_mem;
-			}
-			else
-				aFuncAndToken.param = NULL;
-			aFuncAndToken.mParamCount = aFunc->mParamCount < aParamsCount && !aFunc->mIsVariadic ? aFunc->mParamCount : aParamsCount;
-			LPTSTR new_buf;
-			for (int i = 0;(aFunc->mParamCount > i || aFunc->mIsVariadic) && aParamsCount>i;i++)
-			{
-				aFuncAndToken.param[i] = &aFuncAndToken.params[i];
-				new_buf = (LPTSTR)realloc(aFuncAndToken.param[i]->marker,(_tcslen(*params[i])+1)*sizeof(TCHAR));
-				if (!new_buf)
-				{
-					script->ScriptError(ERR_OUTOFMEM, func);
-					LeaveCriticalSection(&g_CriticalAhkFunction);
-					return -1;
-				}
-				_tcscpy(new_buf,*params[i]); // Assign parameters
-				aFuncAndToken.param[i]->SetValue(new_buf);
-			}
-			aFuncAndToken.mFunc = aFunc ;
-			PostMessage(msghWnd, AHK_EXECUTE_FUNCTION_DLL, (WPARAM)&aFuncAndToken,NULL);
-			LeaveCriticalSection(&g_CriticalAhkFunction);
-			return 0;
-		}
+		aFuncAndToken.mFunc = aFunc ;
+		PostMessage(msghWnd, AHK_EXECUTE_FUNCTION_DLL, (WPARAM)&aFuncAndToken,NULL);
+		LeaveCriticalSection(&g_CriticalAhkFunction);
+		return 0;
 	} 
 	else // Function not found
 	{
