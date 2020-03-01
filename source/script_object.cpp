@@ -507,6 +507,7 @@ LPTSTR Object::sMetaFuncName[] = { _T("__Get"), _T("__Set"), _T("__Call") };
 ResultType Object::Invoke(IObject_Invoke_PARAMS_DECL)
 {
 	name_t name;
+	ResultType result;
 	if (!aName)
 	{
 		name = IS_INVOKE_CALL ? _T("Call") : _T("__Item");
@@ -518,10 +519,25 @@ ResultType Object::Invoke(IObject_Invoke_PARAMS_DECL)
 	auto actual_param = aParam; // Actual first parameter between [] or ().
 	int actual_param_count = aParamCount; // Actual number of parameters between [] or ().
 
+#ifndef _USRDLL
+	PMYTEB curr_teb = NULL;
+	PVOID tls = NULL;
+	if (!g)
+	{
+		curr_teb = (PMYTEB)NtCurrentTeb();
+		tls = curr_teb->ThreadLocalStoragePointer;
+		curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[0][6];
+	}
+#endif
 	if (IS_INVOKE_CALL)
 	{
 		// This fully handles all method calls.
-		return CallMethod(name, aFlags, aResultToken, aThisToken, actual_param, actual_param_count);
+		result = CallMethod(name, aFlags, aResultToken, aThisToken, actual_param, actual_param_count);
+#ifndef _USRDLL
+		if (tls)
+			curr_teb->ThreadLocalStoragePointer = tls;
+#endif
+		return result;
 	}
 	// GET or SET a property:
 
@@ -590,7 +606,12 @@ ResultType Object::Invoke(IObject_Invoke_PARAMS_DECL)
 		// Look for a meta-function to invoke in place of this non-existent property.
 		if (auto method = GetMethod(sMetaFuncName[INVOKE_TYPE]))
 		{
-			return CallMeta(method->func, name, aFlags, aResultToken, aThisToken, actual_param, actual_param_count);
+			result = CallMeta(method->func, name, aFlags, aResultToken, aThisToken, actual_param, actual_param_count);
+#ifndef _USRDLL
+			if (tls)
+				curr_teb->ThreadLocalStoragePointer = tls;
+#endif
+			return result;
 		}
 	}
 
@@ -611,35 +632,19 @@ ResultType Object::Invoke(IObject_Invoke_PARAMS_DECL)
 			memcpy(prop_param + prop_param_count, actual_param, actual_param_count * sizeof(ExprTokenType *));
 			prop_param_count += actual_param_count;
 		}
-#ifndef _USRDLL
-		PMYTEB curr_teb = NULL;
-		PVOID tls = NULL;
-		if (!g)
-		{
-			curr_teb = (PMYTEB)NtCurrentTeb();
-			tls = curr_teb->ThreadLocalStoragePointer;
-			curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[0][6];
-		}
-#endif
 		auto caller_line = g_script->mCurrLine;
 		// Call getter/setter.
 		auto result = etter->Invoke(aResultToken, IT_CALL, nullptr, this_etter, prop_param, prop_param_count);
 		if (!handle_params_recursively || result == FAIL || result == EARLY_EXIT)
-#ifndef _USRDLL
 		{
+#ifndef _USRDLL
 			if (tls)
 				curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 			return result;
 		}
-#else
-			return result;
-#endif
 		// Otherwise, handle_params_recursively == true.
 		g_script->mCurrLine = caller_line; // For error-reporting.
-#ifndef _USRDLL
-		if (tls)
-			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 		if (aResultToken.symbol != SYM_OBJECT)
 		{
 			if (aResultToken.mem_to_free) // Caller may ignore mem_to_free when we return FAIL.
@@ -647,6 +652,10 @@ ResultType Object::Invoke(IObject_Invoke_PARAMS_DECL)
 				free(aResultToken.mem_to_free);
 				aResultToken.mem_to_free = nullptr;
 			}
+#ifndef _USRDLL
+			if (tls)
+				curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 			// FIXME: For this.x[y] and (this.x)[y] to behave the same, this should invoke ValueBase().
 			_o_throw(ERR_NO_OBJECT, name);
 		}
@@ -664,9 +673,21 @@ ResultType Object::Invoke(IObject_Invoke_PARAMS_DECL)
 		if (!obj_for_recursion)
 		{
 			if (!field)
+			{
+#ifndef _USRDLL
+				if (tls)
+					curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 				return INVOKE_NOT_HANDLED;
+			}
 			else if (field->symbol != SYM_OBJECT)
+			{
+#ifndef _USRDLL
+				if (tls)
+					curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 				_o_throw(ERR_TYPE_MISMATCH, name);
+			}
 			else
 			{
 				obj_for_recursion = field->object;
@@ -696,6 +717,10 @@ ResultType Object::Invoke(IObject_Invoke_PARAMS_DECL)
 			result = aResultToken.UnknownMemberError(token_for_recursion, aFlags, nullptr);
 		}
 		obj_for_recursion->Release();
+#ifndef _USRDLL
+		if (tls)
+			curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 		return result;
 	}
 
@@ -703,14 +728,36 @@ ResultType Object::Invoke(IObject_Invoke_PARAMS_DECL)
 	else if (setting)
 	{
 		if (!field && hasprop) // Property with getter but no setter.
+		{
+#ifndef _USRDLL
+			if (tls)
+				curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 			_o_throw(ERR_PROPERTY_READONLY, name);
+		}
 		if (aFlags & IF_NO_SET_PROPVAL) // Changing value properties not permitted ("".foo := bar).
+		{
+#ifndef _USRDLL
+			if (tls)
+				curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 			return INVOKE_NOT_HANDLED;
+		}
 		
 		if (((field && this == that) // A field already exists in this object.
-				|| (field = Insert(name, insert_pos))) // A new field is inserted.
+			|| (field = Insert(name, insert_pos))) // A new field is inserted.
 			&& field->Assign(**actual_param))
+		{
+#ifndef _USRDLL
+			if (tls)
+				curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 			return OK;
+		}
+#ifndef _USRDLL
+		if (tls)
+			curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 		_o_throw(ERR_OUTOFMEM);
 	}
 
@@ -728,10 +775,18 @@ ResultType Object::Invoke(IObject_Invoke_PARAMS_DECL)
 			// BIF is assumed to be volatile if expression eval isn't finished.  The function call in #1
 			// is handled by ExpandExpression() since commit 2a276145.
 			field->ReturnRef(aResultToken);
+#ifndef _USRDLL
+			if (tls)
+				curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 			return OK;
 		}
 	}
 
+#ifndef _USRDLL
+	if (tls)
+		curr_teb->ThreadLocalStoragePointer = tls;
+#endif
 	// Fell through from one of the sections above: invocation was not handled.
 	return INVOKE_NOT_HANDLED;
 }
