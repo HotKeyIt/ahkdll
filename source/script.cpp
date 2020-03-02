@@ -768,32 +768,20 @@ Script::~Script() // Destructor.
 	}
 	// Now all objects are freed and variables can be deleted
 	for (v = 0; v < mVarCount; v++)
-	{
-		// H19 fix not to delete Clipboard wars
-		//if (mVar[v]->mType == VAR_BUILTIN || mVar[v]->mType == VAR_CLIPBOARD || mVar[v]->mType == VAR_CLIPBOARDALL)
-		//	continue;
 		delete mVar[v];
-	}
+
 	if (mVarCount)
 		free(mVar);
 	mVar = NULL;
 	mVarCount = 0;
 	mVarCountMax = 0;
 	for (v = 0; v < mLazyVarCount; v++)
-	{
 		delete mLazyVar[v];
-	}
+
 	if (mLazyVarCount)
 		free(mLazyVar);
 	mLazyVar = NULL;
 	mLazyVarCount = NULL;
-	// delete static func vars first
-	/*for (i = 0; i < mFuncs.mCount; i++)
-	{
-		UserFunc &f = *(UserFunc *)mFuncs.mItem[i];
-		if (f.IsBuiltIn() || (f.mBIF == (BIF_DllImport)))
-			continue;
-	}*/
 
 	for (i = 0; i < mFuncs.mCount; i++)
 	{
@@ -809,8 +797,6 @@ Script::~Script() // Destructor.
 		free(mFuncs.mItem);
 	mFuncs.mCount = 0;
 	mFuncs.mCountMax = 0;
-
-
 
 	// It is safer/easier to destroy the GUI windows prior to the menus (especially the menu bars).
 	// This is because one GUI window might get destroyed and take with it a menu bar that is still
@@ -860,14 +846,7 @@ Script::~Script() // Destructor.
 	mFirstMenu = NULL;
 	mLastMenu = NULL;
 	mTrayMenu = NULL;
-
-	/*else if (mFirstMenu)
-	{
-	mFirstMenu->mNextMenu = NULL;
-	mLastMenu = mFirstMenu;
-	}
-	mTrayIconTip = NULL;*/
-
+	
 	// HotkeyIt
 	// release all prototypes to clean up memory and get rid of memory leaks
 	Object::sFloatPrototype->Release();
@@ -882,10 +861,6 @@ Script::~Script() // Destructor.
 	EnumBase::sPrototype->Release();
 	BoundFunc::sPrototype->Release();
 	Closure::sPrototype->Release();
-	Map::sPrototype->Release();
-	Array::sPrototype->Release();
-	Object::sClassPrototype->Release();
-	FileObject::sPrototype->Release();
 	InputObject::sPrototype->Release();
 	for (int i = _countof(GuiControlType::sPrototypes) - 1; i; i--)
 		if (GuiControlType::sPrototypes[i])
@@ -895,7 +870,10 @@ Script::~Script() // Destructor.
 	GuiType::sPrototype->Release();
 	UserMenu::sMenuBarPrototype->Release();
 	UserMenu::sMenuPrototype->Release();
-
+	Map::sPrototype->Release();
+	Array::sPrototype->Release();
+	Object::sClassPrototype->Release();
+	FileObject::sPrototype->Release();
 	// HotKeyIt: mMethods and mFields needs to be cleared to release prototypes
 	// use FreesPrototype for this task
 	Object::sAnyPrototype->FreesPrototype(Object::sAnyPrototype);
@@ -1264,7 +1242,7 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 				for (int i = 1; i < dllargc; ++i) // Start at 1 because 0 contains the program name.
 				{
 					param = dllargv[i]; // For performance and convenience.
-					if (!_tcsncmp(param, _T("/"), 1) || !_tcsncmp(param, _T("-"), 1))
+					if (!_tcsncmp(param, _T("/"), 1))
 						continue;
 					else // since this is not a  switch, the end of the [Switches] section has been reached (by design).
 					{
@@ -6938,6 +6916,9 @@ ResultType Script::DefineFunc(LPTSTR aBuf, Var *aFuncGlobalVar[], bool aStatic, 
 		// Below passes class_object for AddFunc() to store the func "by reference" in it:
 		if (  !(g->CurrentFunc = AddFunc(full_name, -1, insert_pos, class_object))  )
 			return FAIL;
+		// HotKeyIt: copied from AddFunc to avoid AddRef for prototype (double ref)
+		if (aStatic)
+			class_object->AddRef(); // In case the script clears the class var.
 	}
 	else
 	{
@@ -7373,7 +7354,9 @@ ResultType Script::DefineClass(LPTSTR aBuf)
 	if (!DefineClassInit(true))
 		return FAIL;
 	mClasses->Append(ExprTokenType(class_object));
-
+	
+	// HotKeyIt: release class_object (double ref)
+	prototype->Release();
 	return OK;
 }
 
@@ -8445,7 +8428,8 @@ UserFunc *Script::AddFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int aInsert
 				ScriptError(ERR_OUTOFMEM);
 				return NULL;
 			}
-		aClassObject->AddRef(); // In case the script clears the class var.
+		// HotKeyIt: transferred to DefineFunc to avoid doing it for a prototype
+		//aClassObject->AddRef(); // In case the script clears the class var.
 		the_new_func->mClass = aClassObject;
 		// Also add it to the script's list of functions, to support #Warn LocalSameAsGlobal
 		// and automatic cleanup of objects in static vars on program exit.
