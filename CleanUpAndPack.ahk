@@ -6,7 +6,12 @@ If (InStr(A_AhkVersion,"1")=1) {
 SetWorkingDir,% A_ScriptDir
 
 dirs:=[A_ScriptDir "\bin"]
-subs:={"Win32w":1,"x64w":1,"Win32a":1,"Win32w_MT":1,"x64w_MT":1,"Win32a_MT":1}
+
+subs := {"Win32a": 0, "Win32w": 0, "x64w": 0, "Win32a_MT": 0, "Win32w_MT": 0, "x64w_MT": 0}
+; Set True on existing Folders
+Loop, Files, % A_ScriptDir "\bin\*", D
+  subs[A_LoopFileName] := 1
+
 exts:=["lib","exp","pdb","iobj","ipdb"]
 for t1,dir in dirs
 	for t2,ext in exts
@@ -18,7 +23,10 @@ for t1,dir in dirs
 		If subs.HasKey(SubStr(A_LoopFileDir,InStr(A_LoopFileDir,"\",1,-1)+1))
 			FileMove,% A_LoopFileFullPath,% RegExReplace(A_LoopFileFullPath,"i)AutoHotkeyDll\.dll","AutoHotkey.dll"),1
 
-RCData:={("bin\Win32a"):["AUTOHOTKEY.DLL","AUTOHOTKEYMINI.DLL"],("bin\Win32w"):["AUTOHOTKEY.DLL","AUTOHOTKEYMINI.DLL"],("bin\x64w"):["AUTOHOTKEY.DLL","AUTOHOTKEYMINI.DLL"],("bin\Win32a_MT"):["AUTOHOTKEY.DLL","AUTOHOTKEYMINI.DLL"],("bin\Win32w_MT"):["AUTOHOTKEY.DLL","AUTOHOTKEYMINI.DLL"],("bin\x64w_MT"):["AUTOHOTKEY.DLL","AUTOHOTKEYMINI.DLL"]}
+; Add existing folders to Array
+RCData := {}
+Loop, Files, % A_ScriptDir "\bin\*", D
+  RCData["bin\" A_LoopFileName] := ["AUTOHOTKEY.DLL","AUTOHOTKEYMINI.DLL"]
 
 for k,v in RCData
   LoopFiles % A_ScriptDir "\" k "\*.dll"
@@ -75,7 +83,19 @@ Loop 2 {
       MsgBox End: %ErrMsg()%
   }
 }
-MsgBox Finished
+
+finalDone := "Done: "
+finalMissing := "Missing: "
+for k, v in subs
+{
+  if (v)
+    finalDone .= "`n  " . k
+  Else
+    finalMissing .= "`n  " . k
+}
+MsgBox % finalDone "`n`n" finalMissing
+
+
 ;----------------------------------------------------------------
 ; Function:     ErrMsg
 ;               Get the description of the operating system error
