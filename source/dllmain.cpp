@@ -32,7 +32,7 @@ GNU General Public License for more details.
 #include "Registry.h"
 #include "ComServerImpl.h"
 #include "MemoryModule.h"
-//#include <string>
+//#include <vld.h>
 
 // General note:
 // The use of Sleep() should be avoided *anywhere* in the code.  Instead, call MsgSleep().

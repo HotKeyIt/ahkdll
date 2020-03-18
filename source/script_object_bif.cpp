@@ -1142,7 +1142,10 @@ IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &a
 				aThisBuffer += sizeof(__int64);
 			}
 			else
+			{
+				g_script->ScriptError(ERR_INVALID_VALUE);
 				return NULL;
+			}
 		}
 
 		typeval = *(char*)aThisBuffer++;
@@ -1225,7 +1228,10 @@ IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &a
 				aThisBuffer += sizeof(__int64);
 			}
 			else
+			{
+				g_script->ScriptError(ERR_INVALID_VALUE);
 				return NULL;
+			}
 		}
 		
 		if (typeobj == -12 || typeobj == 12)
@@ -1315,7 +1321,6 @@ BIF_DECL(BIF_ObjLoad)
 			free(aBuffer);
 		free(aObjects);
 		aResultToken.SetValue(_T(""));
-		g_script->ScriptError(ERR_OUTOFMEM);
 		return;
 	}
 	free(aObjects);
