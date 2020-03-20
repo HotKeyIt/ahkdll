@@ -226,6 +226,13 @@ _thread_local global_struct *g; // g_startup provides a non-NULL placeholder dur
 _thread_local CString g_WorkingDir;
 _thread_local LPTSTR g_WorkingDirOrig = NULL;  // Assigned a value in WinMain().
 
+_thread_local SymbolType g_DefaultObjectValueType = SYM_MISSING;
+_thread_local LPTSTR g_DefaultObjectValue = NULL;
+_thread_local SymbolType g_DefaultArrayValueType = SYM_MISSING;
+_thread_local LPTSTR g_DefaultArrayValue = NULL;
+_thread_local SymbolType g_DefaultMapValueType = SYM_MISSING;
+_thread_local LPTSTR g_DefaultMapValue = NULL;
+
 bool g_ForceKeybdHook = false;
 ToggleValueType g_ForceNumLock = NEUTRAL;
 ToggleValueType g_ForceCapsLock = NEUTRAL;

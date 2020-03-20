@@ -57,6 +57,8 @@ Object *Object::Create()
 {
 	Object *obj = new Object();
 	obj->SetBase(Object::sPrototype);
+	if (g_DefaultObjectValueType != SYM_MISSING)
+		obj->mDefault.SetValue(g_DefaultObjectValue);
 	return obj;
 }
 
@@ -120,6 +122,8 @@ Map *Map::Create(ExprTokenType *aParam[], int aParamCount)
 	ASSERT(!(aParamCount & 1));
 	Map *map = new Map();
 	map->SetBase(Map::sPrototype);
+	if (g_DefaultMapValueType != SYM_MISSING)
+		map->mDefault.SetValue(g_DefaultMapValue);
 	if (aParamCount)
 	{
 		if (aParamCount > 8)
@@ -1350,6 +1354,8 @@ ResultType Object::Clone(ResultToken &aResultToken, int aID, int aFlags, ExprTok
 	if (GetNativeBase() != Object::sPrototype)
 		_o_throw(ERR_TYPE_MISMATCH); // Cannot construct an instance of this class using Object::Clone().
 	auto clone = new Object();
+	if (g_DefaultObjectValueType != SYM_MISSING)
+		clone->mDefault.SetValue(g_DefaultObjectValue);
 	if (!CloneTo(*clone))
 		_o_throw(ERR_OUTOFMEM);	
 	_o_return(clone);
@@ -1360,6 +1366,8 @@ ResultType Map::Clone(ResultToken &aResultToken, int aID, int aFlags, ExprTokenT
 	auto clone = new Map();
 	if (!CloneTo(*clone))
 		_o_throw(ERR_OUTOFMEM);
+	if (g_DefaultMapValueType != SYM_MISSING)
+		clone->mDefault.SetValue(g_DefaultMapValue);
 	_o_return(clone);
 }
 
@@ -1939,6 +1947,8 @@ Array *Array::Create(ExprTokenType *aValue[], index_t aCount)
 {
 	auto arr = new Array();
 	arr->SetBase(Array::sPrototype);
+	if (g_DefaultArrayValueType != SYM_MISSING)
+		arr->mDefault.SetValue(g_DefaultArrayValue);
 	if (!aCount || arr->InsertAt(0, aValue, aCount))
 		return arr;
 	arr->Release();
@@ -1952,6 +1962,8 @@ Array *Array::Clone()
 		return nullptr; // CloneTo() released arr.
 	if (!arr->SetCapacity(mCapacity))
 		return nullptr;
+	if (g_DefaultArrayValueType != SYM_MISSING)
+		arr->mDefault.SetValue(g_DefaultArrayValue);
 	for (index_t i = 0; i < mLength; ++i)
 	{
 		auto &new_item = arr->mItem[arr->mLength++];

@@ -201,6 +201,13 @@ _thread_local extern global_struct g_default, g_startup, *g_array;
 _thread_local extern CString g_WorkingDir;
 _thread_local extern LPTSTR g_WorkingDirOrig;
 
+_thread_local extern SymbolType g_DefaultObjectValueType;
+_thread_local extern LPTSTR g_DefaultObjectValue;
+_thread_local extern SymbolType g_DefaultArrayValueType;
+_thread_local extern LPTSTR g_DefaultArrayValue;
+_thread_local extern SymbolType g_DefaultMapValueType;
+_thread_local extern LPTSTR g_DefaultMapValue;
+
 extern bool g_ForceKeybdHook;
 extern ToggleValueType g_ForceNumLock;
 extern ToggleValueType g_ForceCapsLock;

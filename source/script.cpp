@@ -4899,6 +4899,27 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		return CONDITION_TRUE;
 	}
 
+	if (IS_DIRECTIVE_MATCH(_T("#DefineDefaultObjectValue")))
+	{
+		g_DefaultObjectValue = parameter ? parameter : _T("");
+		g_DefaultObjectValueType = SYM_STRING;
+		return CONDITION_TRUE;
+	}
+
+	if (IS_DIRECTIVE_MATCH(_T("#DefineDefaultArrayValue")))
+	{
+		g_DefaultArrayValue = parameter ? parameter : _T("");
+		g_DefaultArrayValueType = SYM_STRING;
+		return CONDITION_TRUE;
+	}
+
+	if (IS_DIRECTIVE_MATCH(_T("#DefineDefaultMapValue")))
+	{
+		g_DefaultMapValue = parameter ? parameter : _T("");
+		g_DefaultMapValueType = SYM_STRING;
+		return CONDITION_TRUE;
+	}
+
 	if (IS_DIRECTIVE_MATCH(_T("#Warn")))
 	{
 		if (!parameter)
