@@ -503,8 +503,8 @@ ObjectMember Object::sMembers[] =
 	Object_Method1(GetOwnPropDesc, 1, 1),
 	Object_Method1(HasOwnMethod, 1, 1),
 	Object_Method1(HasOwnProp, 1, 1),
-	Object_Member(OwnMethods, __Enum, Enum_Methods, IT_CALL, 0, 0),
-	Object_Member(OwnProps, __Enum, Enum_Properties, IT_CALL, 0, 0)
+	Object_Member(OwnMethods, __Enum, Enum_Methods, IT_CALL, 0, 1),
+	Object_Member(OwnProps, __Enum, Enum_Properties, IT_CALL, 0, 1)
 };
 
 LPTSTR Object::sMetaFuncName[] = { _T("__Get"), _T("__Set"), _T("__Call") };
