@@ -489,6 +489,7 @@ void Map::Clear()
 
 ObjectMember Object::sMembers[] =
 {
+	Object_Member(__Item, __Item, 0, IT_SET, 1, 1),
 	Object_Method1(Clone, 0, 0),
 	Object_Method1(DefineDefault, 0, 1),
 	Object_Method1(DefineMethod, 2, 2),
@@ -833,9 +834,8 @@ ResultType Map::__Item(ResultToken &aResultToken, int aID, int aFlags, ExprToken
 			if (aResultToken.symbol == SYM_OBJECT)
 				aResultToken.object->AddRef();
 			return OK;
-		}
-
-		if (IS_INVOKE_GET && mDefault.symbol != SYM_MISSING)
+		} 
+		else if (mDefault.symbol != SYM_MISSING)
 		{
 			aResultToken.CopyValueFrom(mDefault);
 			if (aResultToken.symbol == SYM_OBJECT)
@@ -853,6 +853,35 @@ ResultType Map::__Item(ResultToken &aResultToken, int aID, int aFlags, ExprToken
 	return OK;
 }
 
+
+ResultType Object::__Item(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+{
+	TCHAR number_buf[MAX_NUMBER_SIZE];
+	if (IS_INVOKE_GET)
+	{
+		if (GetOwnProp(aResultToken, TokenToString(*aParam[0], number_buf)))
+		{
+			if (aResultToken.symbol == SYM_OBJECT)
+				aResultToken.object->AddRef();
+			return OK;
+		}
+		else if (mDefault.symbol != SYM_MISSING)
+		{
+			aResultToken.CopyValueFrom(mDefault);
+			if (aResultToken.symbol == SYM_OBJECT)
+				aResultToken.object->AddRef();
+			return OK;
+		}
+		else
+			_o_throw(ERR_NO_KEY, ParamIndexToString(0, _f_number_buf));
+	}
+	else
+	{
+		if (!SetOwnProp(TokenToString(*aParam[1], number_buf), *aParam[0]))
+			_o_throw(ERR_OUTOFMEM);
+	}
+	return OK;
+}
 
 //
 // Internal
