@@ -4901,21 +4901,33 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 
 	if (IS_DIRECTIVE_MATCH(_T("#DefineDefaultObjectValue")))
 	{
-		g_DefaultObjectValue = parameter ? parameter : _T("");
+		g_DefaultObjectValue = (LPTSTR)g_SimpleHeap->Malloc(2 + (parameter ? _tcslen(parameter)*2 : 0));
+		if (parameter)
+			_tcscpy(g_DefaultObjectValue, parameter);
+		else
+			*g_DefaultObjectValue = L'\0';
 		g_DefaultObjectValueType = SYM_STRING;
 		return CONDITION_TRUE;
 	}
 
 	if (IS_DIRECTIVE_MATCH(_T("#DefineDefaultArrayValue")))
 	{
-		g_DefaultArrayValue = parameter ? parameter : _T("");
+		g_DefaultArrayValue = (LPTSTR)g_SimpleHeap->Malloc(2 + (parameter ? _tcslen(parameter) * 2 : 0));
+		if (parameter)
+			_tcscpy(g_DefaultArrayValue, parameter);
+		else
+			*g_DefaultArrayValue = L'\0';
 		g_DefaultArrayValueType = SYM_STRING;
 		return CONDITION_TRUE;
 	}
 
 	if (IS_DIRECTIVE_MATCH(_T("#DefineDefaultMapValue")))
 	{
-		g_DefaultMapValue = parameter ? parameter : _T("");
+		g_DefaultMapValue = (LPTSTR)g_SimpleHeap->Malloc(2 + (parameter ? _tcslen(parameter) * 2 : 0));
+		if (parameter)
+			_tcscpy(g_DefaultMapValue, parameter);
+		else
+			*g_DefaultMapValue = L'\0';
 		g_DefaultMapValueType = SYM_STRING;
 		return CONDITION_TRUE;
 	}
