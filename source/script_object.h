@@ -234,6 +234,7 @@ protected:
 			Property *prop;		// for SYM_DYNAMIC
 		};
 		SymbolType symbol;
+		SymbolType keytype;
 		// key_c contains the first character of key.s. This utilizes space that would
 		// otherwise be unused due to 8-byte alignment. See FindField() for explanation.
 		TCHAR key_c;
@@ -593,6 +594,7 @@ class Map : public Object
 	// mKeyOffsetObject-1, mKeyOffsetString-1 and mFieldCount-1 indicate the last index of each prior type.
 	_thread_local static const index_t mKeyOffsetInt = 0;
 	index_t mKeyOffsetObject = 0, mKeyOffsetString = 0;
+	bool mUnsorted = 0;
 
 	Map() {}
 	void Clear();
@@ -624,7 +626,7 @@ class Map : public Object
 	ResultType GetEnumItem(UINT aIndex, Var *, Var *);
 
 public:
-	static Map *Create(ExprTokenType *aParam[] = NULL, int aParamCount = 0);
+	static Map *Create(ExprTokenType *aParam[] = NULL, int aParamCount = 0, bool aUnsorted = false);
 
 	bool GetItem(ExprTokenType &aToken, ExprTokenType &aKey)
 	{

@@ -117,10 +117,11 @@ Object *Object::Create(ExprTokenType *aParam[], int aParamCount, ResultToken *ap
 // Map::Create - Create a new Map given an array of key/value pairs.
 //
 
-Map *Map::Create(ExprTokenType *aParam[], int aParamCount)
+Map *Map::Create(ExprTokenType *aParam[], int aParamCount, bool aUnsorted)
 {
 	ASSERT(!(aParamCount & 1));
 	Map *map = new Map();
+	map->mUnsorted = aUnsorted;
 	map->SetBase(Map::sPrototype);
 	if (g_DefaultMapValueType != SYM_MISSING)
 		map->mDefault.SetValue(g_DefaultMapValue);
@@ -472,16 +473,27 @@ void Map::Clear()
 		--mCount;
 		// Copy key before Free() since it might cause re-entry via __delete.
 		auto key = mItem[mCount].key;
+		SymbolType akeytype = mItem[mCount].keytype;
 		mItem[mCount].Free();
-		if (mCount >= mKeyOffsetString)
-			free(key.s);
-		else 
+		if (mUnsorted)
 		{
-			--mKeyOffsetString;
-			if (mCount >= mKeyOffsetObject)
-				key.p->Release(); // Might also cause re-entry.
+			if (akeytype == SYM_STRING)
+				free(key.s);
+			else if (akeytype == SYM_OBJECT)
+				key.p->Release();  // Might also cause re-entry.
+		}
+		else
+		{
+			if (mCount >= mKeyOffsetString)
+				free(key.s);
 			else
-				--mKeyOffsetObject;
+			{
+				--mKeyOffsetString;
+				if (mCount >= mKeyOffsetObject)
+					key.p->Release(); // Might also cause re-entry.
+				else
+					--mKeyOffsetObject;
+			}
 		}
 	}
 }
@@ -2255,7 +2267,16 @@ ResultType Map::GetEnumItem(UINT aIndex, Var *aKey, Var *aVal)
 		auto &item = mItem[aIndex];
 		if (aKey)
 		{
-			if (aIndex < mKeyOffsetObject) // mKeyOffsetInt < mKeyOffsetObject
+			if (mUnsorted)
+			{
+				if (item.keytype == SYM_STRING)
+					aKey->Assign(item.key.s);
+				else if (item.keytype == SYM_OBJECT)
+					aKey->Assign(item.key.p);
+				else
+					aKey->Assign(item.key.i);
+			}
+			else if (aIndex < mKeyOffsetObject) // mKeyOffsetInt < mKeyOffsetObject
 				aKey->Assign(item.key.i);
 			else if (aIndex < mKeyOffsetString) // mKeyOffsetObject < mKeyOffsetString
 				aKey->Assign(item.key.p);
@@ -2308,6 +2329,17 @@ ResultType RegExMatchObject::GetEnumItem(UINT aIndex, Var *aKey, Var *aVal)
 Map::Pair *Map::FindItem(IntKeyType val, index_t left, index_t right, index_t &insert_pos)
 // left and right must be set by caller to the appropriate bounds within mItem.
 {
+	if (mUnsorted)
+	{
+		for (int i = 0; i < mCount; i++)
+		{
+			auto &item = mItem[i];
+			if (item.keytype == SYM_INTEGER && !(val - item.key.i))
+				return &item;
+		}
+		insert_pos = mCount;
+		return nullptr;
+	}
 	while (left < right)
 	{
 		index_t mid = left + ((right - left) >> 1);
@@ -2410,6 +2442,17 @@ Map::Pair *Map::FindItem(LPTSTR val, index_t left, index_t right, index_t &inser
 {
 	index_t mid;
 	int first_char = *val;
+	if (mUnsorted)
+	{
+		for (int i = 0; i < mCount; i++)
+		{
+			auto &item = mItem[i];
+			if (item.keytype == SYM_STRING && !(first_char - item.key_c) && !_tcscmp(val, item.key.s))
+				return &item;
+		}
+		insert_pos = mCount;
+		return nullptr;
+	}
 	while (left < right)
 	{
 		mid = left + ((right - left) >> 1);
@@ -2585,7 +2628,7 @@ Map::Pair *Map::Insert(SymbolType key_type, Key key, index_t at)
 
 	item.key = key; // Above has already copied string or called key.p->AddRef() as appropriate.
 	item.Minit(); // Initialize to default value.  Caller will likely reassign.
-
+	item.keytype = key_type;
 	return &item;
 }
 

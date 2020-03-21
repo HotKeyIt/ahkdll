@@ -295,6 +295,7 @@ FuncEntry g_BIF[] =
 	BIF1(TraySetIcon, 0, 3),
 	BIFn(Trim, 1, 2, BIF_Trim),
 	BIF1(Type, 1, 1),
+	BIF1(UMap, 0, NA),
 	BIF1(UnZip, 2, 6),
 	BIF1(UnZipBuffer, 2, 5),
 	BIF1(UnZipRawMemory, 2, 4),
