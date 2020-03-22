@@ -1354,6 +1354,32 @@ BIF_DECL(BIF_Object)
 	}
 }
 
+//
+// UObject() - unsorted properties
+//
+
+BIF_DECL(BIF_UObject)
+{
+	IObject *obj = NULL;
+
+	if (aParamCount == 1) // L33: POTENTIALLY UNSAFE - Cast IObject address to object reference.
+	{
+		obj = (IObject *)TokenToInt64(*aParam[0]);
+		if (obj < (IObject *)65536) // Prevent some obvious errors.
+			_f_throw(ERR_PARAM1_INVALID);
+		else
+			obj->AddRef();
+	}
+	else
+		obj = Object::Create(aParam, aParamCount, &aResultToken, true);
+
+	if (obj)
+	{
+		// DO NOT ADDREF: the caller takes responsibility for the only reference.
+		_f_return(obj);
+	}
+}
+
 
 //
 // BIF_Array - Array(items*)
@@ -1362,6 +1388,18 @@ BIF_DECL(BIF_Object)
 BIF_DECL(BIF_Array)
 {
 	if (auto arr = Array::Create(aParam, aParamCount))
+		_f_return(arr);
+	_f_throw(ERR_OUTOFMEM);
+}
+
+
+//
+// BIF_UArray - Array(items*) - unsorted properties
+//
+
+BIF_DECL(BIF_UArray)
+{
+	if (auto arr = Array::Create(aParam, aParamCount, true))
 		_f_return(arr);
 	_f_throw(ERR_OUTOFMEM);
 }

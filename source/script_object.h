@@ -333,13 +333,14 @@ protected:
 
 public:
 	ExprTokenType mDefault;
+	bool mUnsorted = 0;
 	static void FreesPrototype(Object *aObject) 
 	{ 
 		aObject->mMethods.Free(); 
 		aObject->mFields.Free();
 	}
 	static Object *Create();
-	static Object *Create(ExprTokenType *aParam[], int aParamCount, ResultToken *apResultToken = nullptr);
+	static Object *Create(ExprTokenType *aParam[], int aParamCount, ResultToken *apResultToken = nullptr, bool aUnsorted = false);
 
 	ResultType Construct(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount);
 
@@ -536,7 +537,7 @@ public:
 	ResultType GetEnumItem(UINT aIndex, Var *, Var *);
 
 	~Array();
-	static Array *Create(ExprTokenType *aValue[] = nullptr, index_t aCount = 0);
+	static Array *Create(ExprTokenType *aValue[] = nullptr, index_t aCount = 0, bool aUnsorted = false);
 	static Array *FromArgV(LPTSTR *aArgV, int aArgC);
 	static Array *FromEnumerable(IObject *aEnum);
 	ResultType ToStrings(LPTSTR *aStrings, int &aStringCount, int aStringsMax);
@@ -594,7 +595,6 @@ class Map : public Object
 	// mKeyOffsetObject-1, mKeyOffsetString-1 and mFieldCount-1 indicate the last index of each prior type.
 	_thread_local static const index_t mKeyOffsetInt = 0;
 	index_t mKeyOffsetObject = 0, mKeyOffsetString = 0;
-	bool mUnsorted = 0;
 
 	Map() {}
 	void Clear();

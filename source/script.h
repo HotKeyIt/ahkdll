@@ -3475,7 +3475,9 @@ BIF_DECL(BIF_Cast);
 
 
 BIF_DECL(BIF_Object);
+BIF_DECL(BIF_UObject);
 BIF_DECL(BIF_Array);
+BIF_DECL(BIF_UArray);
 BIF_DECL(BIF_Map);
 BIF_DECL(BIF_UMap);
 BIF_DECL(BIF_CriticalObject);

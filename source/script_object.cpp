@@ -62,7 +62,7 @@ Object *Object::Create()
 	return obj;
 }
 
-Object *Object::Create(ExprTokenType *aParam[], int aParamCount, ResultToken *apResultToken)
+Object *Object::Create(ExprTokenType *aParam[], int aParamCount, ResultToken *apResultToken, bool aUnsorted)
 {
 	if (aParamCount & 1)
 	{
@@ -71,6 +71,7 @@ Object *Object::Create(ExprTokenType *aParam[], int aParamCount, ResultToken *ap
 	}
 
 	Object *obj = Object::Create();
+	obj->mUnsorted = aUnsorted;
 	if (aParamCount)
 	{
 		if (aParamCount > 8)
@@ -2003,10 +2004,11 @@ Array::~Array()
 	free(mItem);
 }
 
-Array *Array::Create(ExprTokenType *aValue[], index_t aCount)
+Array *Array::Create(ExprTokenType *aValue[], index_t aCount, bool aUnsorted)
 {
 	auto arr = new Array();
 	arr->SetBase(Array::sPrototype);
+	arr->mUnsorted = aUnsorted;
 	if (g_DefaultArrayValueType != SYM_MISSING)
 		arr->mDefault.SetValue(g_DefaultArrayValue);
 	if (!aCount || arr->InsertAt(0, aValue, aCount))
@@ -2412,31 +2414,45 @@ Object::FieldType *Object::FindField(name_t name, index_t &insert_pos)
 	int first_char = *name;
 	if (first_char <= 'Z' && first_char >= 'A')
 		first_char += 32;
-	while (left < right)
+	if (mUnsorted)
 	{
-		mid = left + ((right - left) >> 1);
-		
-		FieldType &field = mFields[mid];
-		
-		// key_c contains the lower-case version of field.name[0].  Checking key_c first
-		// allows the _tcsicmp() call to be skipped whenever the first character differs.
-		// This also means that .name isn't dereferenced, which means one less potential
-		// CPU cache miss (where we wait for the data to be pulled from RAM into cache).
-		// field.key_c might cause a cache miss, but it's very likely that key.s will be
-		// read into cache at the same time (but only the pointer value, not the chars).
-		int result = first_char - field.key_c;
-		if (!result)
-			result = _tcsicmp(name, field.name);
-		
-		if (result < 0)
-			right = mid;
-		else if (result > 0)
-			left = mid + 1;
-		else
-			return &field;
+		for (int i = 0; i < right; i++)
+		{
+			FieldType &field = mFields[i];
+			if (!(first_char - field.key_c) && !_tcsicmp(name, field.name))
+				return &field;
+		}
+		insert_pos = right;
+		return nullptr;
 	}
-	insert_pos = left;
-	return nullptr;
+	else
+	{
+		while (left < right)
+		{
+			mid = left + ((right - left) >> 1);
+
+			FieldType &field = mFields[mid];
+
+			// key_c contains the lower-case version of field.name[0].  Checking key_c first
+			// allows the _tcsicmp() call to be skipped whenever the first character differs.
+			// This also means that .name isn't dereferenced, which means one less potential
+			// CPU cache miss (where we wait for the data to be pulled from RAM into cache).
+			// field.key_c might cause a cache miss, but it's very likely that key.s will be
+			// read into cache at the same time (but only the pointer value, not the chars).
+			int result = first_char - field.key_c;
+			if (!result)
+				result = _tcsicmp(name, field.name);
+
+			if (result < 0)
+				right = mid;
+			else if (result > 0)
+				left = mid + 1;
+			else
+				return &field;
+		}
+		insert_pos = left;
+		return nullptr;
+	}
 }
 
 bool Object::HasProp(name_t name)
