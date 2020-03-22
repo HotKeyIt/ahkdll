@@ -1366,16 +1366,30 @@ BIF_DECL(BIF_Array)
 	_f_throw(ERR_OUTOFMEM);
 }
 
-
 //
 // Map()
 //
 
 BIF_DECL(BIF_Map)
 {
-	if (aParamCount & 1)
+	if (aParamCount & 1 && !(aParamCount == 1 && TokenToObject(*aParam[0])))
 		_f_throw(ERR_PARAM_COUNT_INVALID);
 	auto obj = Map::Create(aParam, aParamCount);
+	if (!obj)
+		_f_throw(ERR_OUTOFMEM);
+	_f_return(obj);
+}
+
+
+//
+// UMap() - unsorted map
+//
+
+BIF_DECL(BIF_UMap)
+{
+	if (aParamCount & 1 && !(aParamCount == 1 && TokenToObject(*aParam[0])))
+		_f_throw(ERR_PARAM_COUNT_INVALID);
+	auto obj = Map::Create(aParam, aParamCount, true);
 	if (!obj)
 		_f_throw(ERR_OUTOFMEM);
 	_f_return(obj);

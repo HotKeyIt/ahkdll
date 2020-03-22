@@ -119,7 +119,7 @@ Object *Object::Create(ExprTokenType *aParam[], int aParamCount, ResultToken *ap
 
 Map *Map::Create(ExprTokenType *aParam[], int aParamCount, bool aUnsorted)
 {
-	ASSERT(!(aParamCount & 1));
+	ASSERT(!(aParamCount & 1 && !(aParamCount == 1 && TokenToObject(*aParam[0]))));
 	Map *map = new Map();
 	map->mUnsorted = aUnsorted;
 	map->SetBase(Map::sPrototype);
@@ -133,18 +133,66 @@ Map *Map::Create(ExprTokenType *aParam[], int aParamCount, bool aUnsorted)
 			map->SetInternalCapacity(aParamCount >> 1);
 		// Otherwise, there are 4 or less key-value pairs.  When the first
 		// item is inserted, a default initial capacity of 4 will be set.
-
-		for (int i = 0; i + 1 < aParamCount; i += 2)
+		if (aParamCount == 1 && TokenToObject(*aParam[0]))
 		{
-			if (aParam[i]->symbol == SYM_MISSING || aParam[i+1]->symbol == SYM_MISSING)
-				continue; // For simplicity.
+			ResultToken result_token, this_token, aKey, aValue;
+			ExprTokenType *params[] = { &aKey, &aValue };
+			Var vkey, vval;
+			IObject *enumerator;
+			ResultType result;
 
-			if (!map->SetItem(*aParam[i], *aParam[i + 1]))
-			{	// Out of memory.
-				map->Release();
+			Object *aobj = dynamic_cast<Object*>(TokenToObject(*aParam[0]));
+			if (!aobj)
 				return NULL;
+
+			this_token.symbol = SYM_OBJECT;
+			this_token.object = aobj;
+			if (!_tcscmp(aobj->Type(), _T("Object")))
+				enumerator = new IndexEnumerator(aobj, static_cast<IndexEnumerator::Callback>(&Object::GetEnumProp));
+			else
+				result = GetEnumerator(enumerator, aobj, 2, false);
+
+			this_token.symbol = SYM_OBJECT;
+			this_token.object = map;
+			// Prepare parameters for the loop below
+			aKey.symbol = SYM_VAR;
+			aKey.var = &vkey;
+			aKey.var->mCharContents = _T("");
+			aKey.mem_to_free = 0;
+			aValue.symbol = SYM_VAR;
+			aValue.var = &vval;
+			aValue.var->mCharContents = _T("");
+			aValue.mem_to_free = 0;
+
+			for (;;)
+			{
+				// Call enumerator.Next(var1, var2)
+				result = CallEnumerator(enumerator, &vkey, &vval, false);
+				if (result == CONDITION_FALSE)
+					break;
+				if (!map->SetItem(*params[0], *params[1]))
+				{	// Out of memory.
+					map->Release();
+					return NULL;
+				}
 			}
+			// release enumerator and free vars
+			enumerator->Release();
+			vkey.Free();
+			vval.Free();
 		}
+		else
+			for (int i = 0; i + 1 < aParamCount; i += 2)
+			{
+				if (aParam[i]->symbol == SYM_MISSING || aParam[i+1]->symbol == SYM_MISSING)
+					continue; // For simplicity.
+
+				if (!map->SetItem(*aParam[i], *aParam[i + 1]))
+				{	// Out of memory.
+					map->Release();
+					return NULL;
+				}
+			}
 	}
 	return map;
 }
