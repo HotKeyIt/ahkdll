@@ -6718,7 +6718,7 @@ ResultType GuiType::ControlParseOptions(LPTSTR aOptions, GuiControlOptionsType &
 						aOpt.AY = 1;
 					else if (_tcschr(next_option + 2, '/') && *_tcschr(next_option + 2, '/') != '\0' && ATOI(_tcschr(next_option + 2, '/') + 1))
 					{
-						if (!(aOpt.AY = (float)ATOI(next_option + 2) / ATOI(_tcschr(next_option + 1, '/') + 2)))
+						if (!(aOpt.AY = (float)ATOI(next_option + 2) / ATOI(_tcschr(next_option + 2, '/') + 1)))
 							aOpt.AY = (float)ATOF(next_option + 2);
 					}
 					else
