@@ -18,7 +18,7 @@ BIF_DECL(BIF_Struct)
 	// At least the definition for structure must be given
 	if (!aParamCount)
 		return;
-	IObject *obj = Struct::Create(aParam, aParamCount);
+	Struct *obj = Struct::Create(aParam, aParamCount);
 	if (obj)
 	{
 		aResultToken.symbol = SYM_OBJECT;

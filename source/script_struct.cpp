@@ -68,6 +68,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 
 	// the new structure object
 	Struct *obj = new Struct();
+	obj->SetBase(Struct::sPrototype);
 
 	if (TokenToObject(*aParam[0]))
 	{
@@ -624,8 +625,9 @@ Struct *Struct::CloneField(FieldType *field,bool aIsDynamic)
 	Struct *objptr = new Struct();
 	if (!objptr)
 		return objptr;
-	
+
 	Struct &obj = *objptr;
+	obj.SetBase(Struct::sPrototype);
 	// if field is an array, set correct size
 	if (obj.mArraySize == field->mArraySize)
 		obj.mSize = field->mSize*obj.mArraySize;
@@ -653,7 +655,8 @@ Struct *Struct::Clone(bool aIsDynamic)
 		return objptr;
 	
 	
-	Struct &obj = *objptr;
+	Struct &obj = *objptr; 
+	obj.SetBase(Struct::sPrototype);
 	obj.mArraySize = mArraySize;
 	obj.mIsInteger = mIsInteger;
 	obj.mIsPointer = mIsPointer;
@@ -728,6 +731,17 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 	// copy aName back to aParam (old method) since struct does not differentiate between property and item
 	if (aName)
 	{
+		if (!_tcsicmp(aName, _T("__class")))
+		{
+			this->Base()->GetOwnProp(aResultToken, _T("__class"));
+			return OK;
+		}
+		else if (!_tcsicmp(aName, _T("base")))
+		{
+			aResultToken.SetValue(this->Base());
+			this->Base()->AddRef();
+			return OK;
+		}
 		ExprTokenType aNameParam;
 		ExprTokenType **aParams = (ExprTokenType **)alloca((aParamCount + 1) * sizeof(ExprTokenType));
 		for (int c = 0; c < aParamCount; ++c)
@@ -1337,6 +1351,8 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 				aThisToken.SetValue(objclone);
 				objclone->AddRef();
 			}
+			else
+				objclone->ObjectToStruct(this);
 			aResultToken.symbol = SYM_OBJECT;
 			aResultToken.object = objclone;
 			if (deletefield) // we created the field from a structure

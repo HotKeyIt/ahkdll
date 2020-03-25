@@ -159,6 +159,10 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	Object::sClassPrototype = Object::CreatePrototype(_T("Class"), Object::sPrototype);
 	Array::sPrototype = Object::CreatePrototype(_T("Array"), Object::sPrototype, Array::sMembers, _countof(Array::sMembers));
 	Map::sPrototype = Object::CreatePrototype(_T("Map"), Object::sPrototype, Map::sMembers, _countof(Map::sMembers));
+	Struct::sPrototype = Object::CreatePrototype(_T("Struct"), Object::sPrototype);
+#ifdef ENABLE_DLLCALL
+	DynaToken::sPrototype = Object::CreatePrototype(_T("DynaCall"), Object::sPrototype);
+#endif
 
 	UserMenu::sMenuPrototype = Object::CreatePrototype(_T("Menu"), Object::sPrototype, UserMenu::sMembers, _countof(UserMenu::sMembers));
 	UserMenu::sMenuBarPrototype = Object::CreatePrototype(_T("MenuBar"), UserMenu::sMenuPrototype);
@@ -178,7 +182,6 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	Closure::sPrototype = Object::CreatePrototype(_T("Closure"), Func::sPrototype);
 	BoundFunc::sPrototype = Object::CreatePrototype(_T("BoundFunc"), Func::sPrototype);
 	EnumBase::sPrototype = Object::CreatePrototype(_T("Enumerator"), Func::sPrototype);
-
 
 
 	BufferObject::sPrototype = Object::CreatePrototype(_T("Buffer"), Object::sPrototype, BufferObject::sMembers, _countof(BufferObject::sMembers));
@@ -504,6 +507,10 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 			Object::sClassPrototype = Object::CreatePrototype(_T("Class"), Object::sPrototype);
 			Array::sPrototype = Object::CreatePrototype(_T("Array"), Object::sPrototype, Array::sMembers, _countof(Array::sMembers));
 			Map::sPrototype = Object::CreatePrototype(_T("Map"), Object::sPrototype, Map::sMembers, _countof(Map::sMembers));
+			Struct::sPrototype = Object::CreatePrototype(_T("Struct"), Object::sPrototype);
+#ifdef ENABLE_DLLCALL
+			DynaToken::sPrototype = Object::CreatePrototype(_T("DynaCall"), Object::sPrototype);
+#endif
 
 			UserMenu::sMenuPrototype = Object::CreatePrototype(_T("Menu"), Object::sPrototype, UserMenu::sMembers, _countof(UserMenu::sMembers));
 			UserMenu::sMenuBarPrototype = Object::CreatePrototype(_T("MenuBar"), UserMenu::sMenuPrototype);

@@ -902,11 +902,101 @@ public:
 	ResultType __Enum(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	//ResultType _Enum(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount);
 	ResultType Invoke(IObject_Invoke_PARAMS_DECL);
-	
+	_thread_local static Object *sPrototype;
 	IObject_Type_Impl("Struct");
 };
 
 
+#ifdef ENABLE_DLLCALL
+
+#define UorA2(u,a)      (u)
+
+enum DllArgTypes {
+	DLL_ARG_INVALID
+	, DLL_ARG_ASTR
+	, DLL_ARG_INT
+	, DLL_ARG_SHORT
+	, DLL_ARG_CHAR
+	, DLL_ARG_INT64
+	, DLL_ARG_FLOAT
+	, DLL_ARG_DOUBLE
+	, DLL_ARG_WSTR
+	, DLL_ARG_STR = UorA2(DLL_ARG_WSTR, DLL_ARG_ASTR)
+	, DLL_ARG_xSTR = UorA2(DLL_ARG_ASTR, DLL_ARG_WSTR) // To simplify some sections.
+};  // Some sections might rely on DLL_ARG_INVALID being 0.
+
+// Interface for DynaCall():
+union DYNARESULT                // Various result types
+{
+	int     Int;                // Generic four-byte type
+	long    Long;               // Four-byte long
+	void   *Pointer;            // 32-bit pointer
+	float   Float;              // Four byte real
+	double  Double;             // 8-byte real
+	__int64 Int64;              // big int (64-bit)
+	UINT_PTR UIntPtr;
+};
+
+////////////////////////
+// DYNACALL TOKEN //
+////////////////////////
+
+struct DYNAPARM
+{
+	union
+	{
+		int value_int; // Args whose width is less than 32-bit are also put in here because they are right justified within a 32-bit block on the stack.
+		float value_float;
+		__int64 value_int64;
+		UINT_PTR value_uintptr;
+		double value_double;
+		char *astr;
+		wchar_t *wstr;
+		void *ptr;
+	};
+	// Might help reduce struct size to keep other members last and adjacent to each other (due to
+	// 8-byte alignment caused by the presence of double and __int64 members in the union above).
+	DllArgTypes type;
+	bool passed_by_address;
+	bool is_unsigned; // Allows return value and output parameters to be interpreted as unsigned vs. signed.
+	bool is_hresult; // Only used for the return value.
+};
+
+// DynaCall Object
+class DynaToken : public Object
+{
+protected:
+	int marg_count;
+#ifdef WIN32_PLATFORM
+	int mdll_call_mode;
+#endif
+	int *paramshift;
+	void *mfunction;
+	DYNAPARM *mdyna_param;
+	DYNAPARM *mdefault_param;
+	DYNAPARM mreturn_attrib;
+
+	DynaToken()
+		: marg_count(0)
+#ifdef WIN32_PLATFORM
+		, mdll_call_mode(0)
+#endif
+		, mfunction(NULL), mdyna_param(NULL)
+		, mreturn_attrib()
+	{}
+
+	bool Delete();
+	~DynaToken();
+
+public:
+	static DynaToken *Create(ExprTokenType *aParam[], int aParamCount);
+	ResultType Invoke(IObject_Invoke_PARAMS_DECL);
+	bool is_hresult; // Only used for the return value.
+	_thread_local static Object *sPrototype;
+	IObject_Type_Impl("DynaCall");
+};
+
+#endif
 
 ResultType GetEnumerator(IObject *&aEnumerator, IObject *aEnumerable, int aVarCount, bool aDisplayError);
 ResultType CallEnumerator(IObject *aEnumerator, Var *aVar0, Var *aVar1, bool aDisplayError);

@@ -873,6 +873,8 @@ Script::~Script() // Destructor.
 	GuiType::sPrototype->Release();
 	UserMenu::sMenuBarPrototype->Release();
 	UserMenu::sMenuPrototype->Release();
+	Struct::sPrototype->Release();
+	DynaToken::sPrototype->Release();
 	Map::sPrototype->Release();
 	Array::sPrototype->Release();
 	Object::sClassPrototype->Release();

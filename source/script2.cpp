@@ -11019,39 +11019,6 @@ VarSizeType BIV_TimeIdlePhysical(LPTSTR aBuf, LPTSTR aVarName)
 
 #ifdef ENABLE_DLLCALL
 
-// DynaCall Object
-class DynaToken : public Object
-{
-protected:
-	int marg_count;
-#ifdef WIN32_PLATFORM
-	int mdll_call_mode;
-#endif
-	int *paramshift;
-	void *mfunction;
-	DYNAPARM *mdyna_param;
-	DYNAPARM *mdefault_param;
-	DYNAPARM mreturn_attrib;
-
-	DynaToken()
-		: marg_count(0)
-#ifdef WIN32_PLATFORM
-		, mdll_call_mode(0)
-#endif
-		, mfunction(NULL), mdyna_param(NULL)
-		, mreturn_attrib()
-	{}
-
-	bool Delete();
-	~DynaToken();
-
-public:
-	static DynaToken *Create(ExprTokenType *aParam[], int aParamCount);
-	ResultType Invoke(IObject_Invoke_PARAMS_DECL);
-	bool is_hresult; // Only used for the return value.
-	IObject_Type_Impl("DynaCall");
-};
-
 #ifdef _WIN64
 // This function was borrowed from http://dyncall.org/
 extern "C" UINT_PTR PerformDynaCall(size_t stackArgsSize, DWORD_PTR* stackArgs, DWORD_PTR* regArgs, void* aFunction);
@@ -11734,6 +11701,7 @@ BIF_DECL(BIF_DynaCall)
 DynaToken *DynaToken::Create(ExprTokenType *aParam[], int aParamCount)
 {
 	DynaToken *obj = new DynaToken();
+	obj->SetBase(DynaToken::sPrototype);
 
 	TCHAR buf[4096];
 	ResultToken result_token;
@@ -12153,6 +12121,20 @@ DynaToken::~DynaToken()
 
 ResultType DynaToken::Invoke(IObject_Invoke_PARAMS_DECL)
  {
+	if (aName)
+	{
+		if (!_tcsicmp(aName, _T("__class")))
+		{
+			this->Base()->GetOwnProp(aResultToken, _T("__class"));
+			return OK;
+		}
+		else if (!_tcsicmp(aName, _T("base")))
+		{
+			aResultToken.SetValue(this->Base());
+			this->Base()->AddRef();
+			return OK;
+		}
+	}
 	// Set default result in case of early return; a blank value:
 	aResultToken.symbol = SYM_STRING;
 	aResultToken.marker = _T("");

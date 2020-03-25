@@ -165,6 +165,10 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	Object::sClassPrototype = Object::CreatePrototype(_T("Class"), Object::sPrototype);
 	Array::sPrototype = Object::CreatePrototype(_T("Array"), Object::sPrototype, Array::sMembers, _countof(Array::sMembers));
 	Map::sPrototype = Object::CreatePrototype(_T("Map"), Object::sPrototype, Map::sMembers, _countof(Map::sMembers));
+	Struct::sPrototype = Object::CreatePrototype(_T("Struct"), Object::sPrototype);
+#ifdef ENABLE_DLLCALL
+	DynaToken::sPrototype = Object::CreatePrototype(_T("DynaCall"), Object::sPrototype);
+#endif
 
 	UserMenu::sMenuPrototype = Object::CreatePrototype(_T("Menu"), Object::sPrototype, UserMenu::sMembers, _countof(UserMenu::sMembers));
 	UserMenu::sMenuBarPrototype = Object::CreatePrototype(_T("MenuBar"), UserMenu::sMenuPrototype);

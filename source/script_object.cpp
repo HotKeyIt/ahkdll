@@ -209,10 +209,13 @@ Object *Object::CloneTo(Object &obj)
 {
 	// Allocate space in destination object.
 	auto field_count = mFields.Length();
-	if (!obj.SetInternalCapacity(field_count))
+	if (field_count)
 	{
-		obj.Release();
-		return NULL;
+		if (!obj.SetInternalCapacity(field_count))
+		{
+			obj.Release();
+			return NULL;
+		}
 	}
 
 	int failure_count = 0; // See comment below.
@@ -3096,7 +3099,11 @@ Object *TempInit::init3 = 0 ? Object::CreateClass(_T("Map"), NULL, NULL, static_
 _thread_local Object *Object::sClassPrototype; // = Object::CreatePrototype(_T("Class"), Object::sPrototype);
 _thread_local Object *Array::sPrototype; // = Object::CreatePrototype(_T("Array"), Object::sPrototype, sMembers, _countof(sMembers));
 _thread_local Object *Map::sPrototype; // = Object::CreatePrototype(_T("Map"), Object::sPrototype, sMembers, _countof(sMembers));
+_thread_local Object *Struct::sPrototype; // = Object::CreatePrototype(_T("Struct"), Object::sPrototype);
 
+#ifdef ENABLE_DLLCALL
+_thread_local Object *DynaToken::sPrototype; // = Object::CreatePrototype(_T("Struct"), Object::sPrototype);
+#endif
 //																							Direct base			Prototype			Constructor
 _thread_local Object *Object::sClass; // = Object::CreateClass(_T("Object"), sClassPrototype, sPrototype, static_cast<ObjectMethod>(&New<Object>));
 _thread_local Object *Object::sClassClass; // = Object::CreateClass(_T("Class"), Object::sClass, sClassPrototype, static_cast<ObjectMethod>(&New<Object>));
