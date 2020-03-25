@@ -490,7 +490,7 @@ BIF_DECL(BIF_ComObjType)
 				if (SUCCEEDED(ptinfo->GetTypeAttr(&typeattr)))
 				{
 					aResultToken.marker = aResultToken.buf;
-					aResultToken.marker_length = StringFromGUID2(typeattr->guid, aResultToken.marker, MAX_NUMBER_SIZE);
+					aResultToken.marker_length = StringFromGUID2(typeattr->guid, aResultToken.marker, MAX_NUMBER_SIZE) - 1;
 					ptinfo->ReleaseTypeAttr(typeattr);
 				}
 			}
