@@ -2190,7 +2190,7 @@ public:
 	COLORREF mColor; // The color that corresponds to the above.
 
 	static ObjectMember sMembers[17];
-	static Object *sMenuPrototype, *sMenuBarPrototype;
+	_thread_local static Object *sMenuPrototype, *sMenuBarPrototype;
 
 	// Don't overload new and delete operators in this case since we want to use real dynamic memory
 	// (since menus can be read in from a file, destroyed and recreated, over and over).
