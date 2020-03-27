@@ -1491,7 +1491,7 @@ ResultType Script::CreateWindows()
 
 void Script::EnableClipboardListener(bool aEnable)
 {
-	static bool sEnabled = false;
+	_thread_local static bool sEnabled = false;
 	if (aEnable == sEnabled) // Simplifies BIF_On.
 		return;
 	if (aEnable)
@@ -15234,7 +15234,7 @@ ResultType Script::UnhandledException(Line* aLine)
 	global_struct &g = *::g;
 
 	// OnError: Allow the script to handle it via a global callback.
-	static bool sOnErrorRunning = false;
+	_thread_local static bool sOnErrorRunning = false;
 	if (g_script->mOnError.Count() && !sOnErrorRunning)
 	{
 		ResultToken *token = g.ThrownToken;

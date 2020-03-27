@@ -15122,11 +15122,19 @@ BIF_DECL(BIF_NewThread)
 	if (aParamCount > 2)
 		_tcscpy(aScriptCmdLine + _tcslen(aScript) + _tcslen(aCmdLine) + 2, aTitle);
 	unsigned int ThreadID;
+	TCHAR buf[MAX_INTEGER_LENGTH];
 	HANDLE hThread = (HANDLE)_beginthreadex(NULL, 0, (unsigned(__stdcall *)(void *))&ThreadMain, aScriptCmdLine, 0, &ThreadID);
 	if (hThread)
+	{
 		CloseHandle(hThread);
-	aResultToken.symbol = SYM_INTEGER;
+		sntprintf(buf, _countof(buf), _T("ahk%d"), ThreadID);
+		HANDLE hEvent = CreateEvent(NULL, false, false, buf);
+		if (WaitForSingleObject(hEvent, 1000) == WAIT_TIMEOUT)
+			g_script->ScriptError(_T("Timeout while waiting for Thread to start!"));
+		CloseHandle(hEvent);
+	}
 	aResultToken.value_int64 = (__int64)ThreadID;
+	aResultToken.symbol = SYM_INTEGER;
 	Sleep(1); // give the thread little time to allocate memory to avoid std::bad_alloc that might happen when you run newthread in a loop
 }
 #endif

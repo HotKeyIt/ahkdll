@@ -3048,7 +3048,7 @@ BIF_DECL(BIF_ClipboardAll)
 
 
 
-_thread_local ObjectMember Func::sMembers[] =
+ObjectMember Func::sMembers[] =
 {
 	Object_Method(Bind, 0, MAXP_VARIADIC),
 	Object_Method(Call, 0, MAXP_VARIADIC),

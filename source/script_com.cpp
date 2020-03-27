@@ -1377,7 +1377,7 @@ LPTSTR ComObject::Type()
 		if (  (ptinfo = GetClassTypeInfo(mUnknown))
 			&& SUCCEEDED(ptinfo->GetDocumentation(MEMBERID_NIL, &name, NULL, NULL, NULL))  )
 		{
-			static TCHAR sBuf[64]; // Seems generous enough.
+			_thread_local static TCHAR sBuf[64]; // Seems generous enough.
 			tcslcpy(sBuf, CStringTCharFromWCharIfNeeded(name), _countof(sBuf));
 			SysFreeString(name);
 			return sBuf;

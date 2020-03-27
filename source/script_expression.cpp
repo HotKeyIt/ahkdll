@@ -2048,7 +2048,7 @@ free_and_return:
 	return !aResultToken.Exited(); // i.e. aResultToken.SetExitResult() or aResultToken.Error() was not called.
 }
 
-FreeVars *UserFunc::sFreeVars = nullptr;
+_thread_local FreeVars *UserFunc::sFreeVars = nullptr;
 
 
 

@@ -399,7 +399,7 @@ class FileObject : public Object
 	TextFile mFile;
 	
 public:
-	_thread_local static ObjectMember sMembers[31];
+	static ObjectMember sMembers[31];
 	_thread_local static Object *sPrototype;
 	static FileObject *Open(LPCTSTR aFileSpec, DWORD aFlags, UINT aCodePage);
 };

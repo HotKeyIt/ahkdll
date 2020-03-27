@@ -56,10 +56,10 @@
 #define MIXBITS(u,v) ( ((u) & UMASK) | ((v) & LMASK) )
 #define TWIST(u,v) ((MIXBITS(u,v) >> 1) ^ ((v)&1UL ? MATRIX_A : 0UL))
 
-static unsigned long state[N]; // the array for the state vector 
-static int left = 1;
-static int initf = 0;
-static unsigned long *next;
+_thread_local static unsigned long state[N]; // the array for the state vector 
+_thread_local static int left = 1;
+_thread_local static int initf = 0;
+_thread_local static unsigned long *next;
 
 // initializes state[N] with a seed 
 void init_genrand(unsigned long s)

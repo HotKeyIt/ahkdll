@@ -156,6 +156,7 @@ private:
 	~Hotkey() {if (mIsRegistered) Unregister();}
 
 public:
+	// non _thread_local since hotkeys are shared between all threads
 	static Hotkey **shk;
 	static int shkMax;
 

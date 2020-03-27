@@ -31,7 +31,7 @@ _thread_local static vk_type sPrevVK = 0;
 // Send {LWinUp}  ; Should still open the Start Menu even though it's a separate Send.
 _thread_local static vk_type sPrevEventModifierDown = 0;
 _thread_local static modLR_type sModifiersLR_persistent = 0; // Tracks this script's own lifetime/persistent modifiers (the ones it caused to be persistent and thus is responsible for tracking).
-static modLR_type sModifiersLR_remapped = 0;
+_thread_local static modLR_type sModifiersLR_remapped = 0;
 
 // v1.0.44.03: Below supports multiple keyboard layouts better by having script adapt to active window's layout.
 #define MAX_CACHED_LAYOUTS 10  // Hard to imagine anyone using more languages/layouts than this, but even if they do it will still work; performance would just be a little worse due to being uncached.
@@ -48,8 +48,8 @@ _thread_local static UINT sEventCount, sMaxEvents; // Number of items in the abo
 _thread_local static UINT sCurrentEvent;
 _thread_local static modLR_type sEventModifiersLR; // Tracks the modifier state to following the progress/building of the SendInput array.
 _thread_local static POINT sSendInputCursorPos;    // Tracks/predicts cursor position as SendInput array is built.
-static HookType sHooksToRemoveDuringSendInput;
-static SendModes sSendMode = SM_EVENT; // Whether a SendInput or Hook array is currently being constructed.
+_thread_local static HookType sHooksToRemoveDuringSendInput;
+_thread_local static SendModes sSendMode = SM_EVENT; // Whether a SendInput or Hook array is currently being constructed.
 _thread_local static bool sAbortArraySend;         // No init needed.
 _thread_local static bool sFirstCallForThisEvent;  //
 _thread_local static bool sInBlindMode;            //
@@ -4319,7 +4319,7 @@ ResultType KeyHistoryToFile(LPTSTR aFilespec, char aType, bool aKeyUp, vk_type a
 	_thread_local static TCHAR sTargetFilespec[MAX_PATH] = _T("");
 	_thread_local static FILE *fp = NULL;
 	_thread_local static HWND last_foreground_window = NULL;
-	static DWORD last_tickcount = GetTickCount();
+	_thread_local static DWORD last_tickcount = GetTickCount();
 
 	if (!g_KeyHistory) // Since key history is disabled, keys are not being tracked by the hook, so there's nothing to log.
 		return OK;     // Files should not need to be closed since they would never have been opened in the first place.

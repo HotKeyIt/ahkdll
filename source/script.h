@@ -1723,7 +1723,7 @@ public:
 		P_IsBuiltIn,
 		P_IsVariadic
 	};
-	_thread_local static ObjectMember sMembers[];
+	static ObjectMember sMembers[];
 	ResultType Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 
 	_thread_local static Object *sPrototype;
@@ -1752,7 +1752,7 @@ public:
 	Var **mStaticVar, **mStaticLazyVar;
 	Var **mDownVar = nullptr, **mUpVar = nullptr;
 	int *mUpVarIndex = nullptr;
-	static FreeVars *sFreeVars;
+	_thread_local static FreeVars *sFreeVars;
 #define MAX_FUNC_UP_VARS 1000
 	int mVarCount = 0, mVarCountMax = 0, mLazyVarCount = 0, mGlobalVarCount = 0, mStaticVarCount = 0, mStaticVarCountMax = 0, mStaticLazyVarCount = 0; // Count of items in the above array as well as the maximum capacity.
 	int mDownVarCount = 0, mUpVarCount = 0;
@@ -1994,7 +1994,7 @@ public:
 template<BuiltInFunctionType bif, int flags>
 struct ExprOpT
 {
-	static ExprOpFunc Func;
+	_thread_local static ExprOpFunc Func;
 };
 
 template<BuiltInFunctionType bif, int flags>
@@ -2092,7 +2092,7 @@ struct MsgMonitorStruct
 	HWND hwnd;
 	UINT msg;
 	// Keep any members smaller than 4 bytes adjacent to save memory:
-	_thread_local static const UCHAR MAX_INSTANCES = MAX_THREADS_LIMIT; // For maintainability.  Causes a compiler warning if MAX_THREADS_LIMIT > MAX_UCHAR.
+	static const UCHAR MAX_INSTANCES = MAX_THREADS_LIMIT; // For maintainability.  Causes a compiler warning if MAX_THREADS_LIMIT > MAX_UCHAR.
 	UCHAR instance_count; // Distinct from func.mInstances because the script might have called the function explicitly.
 	UCHAR max_instances; // v1.0.47: Support more than one thread.
 	UCHAR msg_type; // Used only by GUI, so may be ignored by some methods.
