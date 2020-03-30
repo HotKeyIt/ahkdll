@@ -15442,7 +15442,9 @@ ResultType Script::PreprocessLocalVars(FuncList &aFuncs)
 		if (aFuncs.mItem[i]->IsBuiltIn())
 			continue;
 		auto &func = *(UserFunc *)aFuncs.mItem[i];
-		// HotKeyIt: set flag so function does not need to be processed again
+		if (func.mPreprocessLocalVarsDone)
+			continue;
+		// HotKeyIt: set flag so function does not need to be processed again after addScript or addFile
 		func.mPreprocessLocalVarsDone = true;
 		if (func.mBIF == BIF_DllImport)
 		//{

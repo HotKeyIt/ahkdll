@@ -1786,11 +1786,11 @@ public:
 	}
 
 	IObject *CloseIfNeeded() override; // Returns this UserFunc or (if mUpVarCount != 0) a Closure.
-	bool mIsMacro;
+	bool mIsMacro = false;
 	// DynaCall related
 	DYNAPARM *mdyna_param;
 	// preprocess vars only once
-	bool mPreprocessLocalVarsDone;
+	bool mPreprocessLocalVarsDone = false;
 
 	bool Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, IObject *aParamObj) override;
 	bool Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, IObject *aParamObj, FreeVars *aUpVars);
