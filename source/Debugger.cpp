@@ -1140,12 +1140,12 @@ DEBUGGER_COMMAND(Debugger::stack_get)
 				if (se[1].type == DbgStack::SE_UDF)
 				{
 					line = se[1].udf->func->mJumpToLine;
-					sourcefile = se[1].sourcefile;
+					sourcefile = line->sSourceFile;
 				}
 				else if (se[1].type == DbgStack::SE_Sub)
 				{
 					line = se[1].sub->mJumpToLine;
-					sourcefile = se[1].sourcefile;
+					sourcefile = line->sSourceFile;
 				}
 				else
 				{
@@ -1153,13 +1153,13 @@ DEBUGGER_COMMAND(Debugger::stack_get)
 					// a Sub or Func entry immediately above it.  As se != mStack.mTop, se->line
 					// has been set to a non-NULL by DbgStack::Push().
 					line = se->line;
-					sourcefile = se->sourcefile;
+					sourcefile = line->sSourceFile;
 				}
 			}
 			else
 			{
 				line = se->line;
-				sourcefile = se->sourcefile;
+				sourcefile = line->sSourceFile;
 			}
 			mResponseBuf.WriteF("<stack level=\"%i\" type=\"file\" filename=\"", level);
 			mResponseBuf.WriteFileURI(U4T(sourcefile[line->mFileIndex]));
