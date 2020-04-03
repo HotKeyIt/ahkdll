@@ -16830,7 +16830,7 @@ BIF_DECL(BIF_UnZipBuffer)
 			if (_tcscmp(aSource, ze.Name + 1))
 				continue;
 			aResultToken.value_int64 = ze.UncompressedSize;
-			if (aParamCount < 3 || aParam[2]->var->mType != VAR_ALIAS)
+			if (ParamIndexIsOmitted(2) || aParam[2]->var->mType != SYM_VAR)
 			{
 				UnzipClose(huz);
 				aResultToken.symbol = SYM_INTEGER;
@@ -16839,10 +16839,10 @@ BIF_DECL(BIF_UnZipBuffer)
 			aBuffer = (unsigned char *)GlobalAlloc(GMEM_FIXED, (DWORD)ze.UncompressedSize);
 			if (aErrCode = UnzipItemToBuffer(huz, aBuffer, (DWORD)ze.UncompressedSize, &ze))
 				goto errorclose;
-			Var &aVar = *aParam[2]->var->mAliasFor;
-			aVar.SetCapacity((VarSizeType)aResultToken.value_int64, true);
-			memcpy(aVar.mByteContents, aBuffer, (SIZE_T)aResultToken.value_int64);
-			g_memset((char*)aVar.mCharContents + aResultToken.value_int64, 0, 2);
+			Var *aVar = aParam[2]->var->mType == VAR_ALIAS ? aParam[2]->var->mAliasFor : aParam[2]->var;
+			aVar->SetCapacity((VarSizeType)aResultToken.value_int64, true);
+			memcpy(aVar->mByteContents, aBuffer, (SIZE_T)aResultToken.value_int64);
+			g_memset((char*)aVar->mCharContents + aResultToken.value_int64, 0, 2);
 			GlobalFree(aBuffer);
 			UnzipClose(huz);
 			aResultToken.symbol = SYM_INTEGER;
@@ -16943,9 +16943,10 @@ BIF_DECL(BIF_UnZipRawMemory)
 			{
 				if (aParam[2]->symbol == SYM_VAR)
 				{
-					aParam[2]->var->SetCapacity((VarSizeType)aResultToken.value_int64 + sizeof(char) * 2);
-					memcpy(aParam[2]->var->mCharContents,aDataBuf,(SIZE_T)aResultToken.value_int64);
-					g_memset((char*)aParam[2]->var->mCharContents + aResultToken.value_int64, 0, 2);
+					Var *aVar = aParam[2]->var->mType == VAR_ALIAS ? aParam[2]->var->mAliasFor : aParam[2]->var;
+					aVar->SetCapacity((VarSizeType)aResultToken.value_int64 + sizeof(char) * 2);
+					memcpy(aVar->mCharContents,aDataBuf,(SIZE_T)aResultToken.value_int64);
+					g_memset((char*)aVar->mCharContents + aResultToken.value_int64, 0, 2);
 				}
 				else if (TokenToInt64(*aParam[2]) > 1024) // Assume address
 					memcpy((void *)TokenToInt64(*aParam[2]),aDataBuf,(SIZE_T)aResultToken.value_int64);
