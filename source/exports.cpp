@@ -897,8 +897,7 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute, DWORD aThreadID)
 		g_script->mIsReadyToExecute = true; // Set program to be ready for continuing previous script.
 #ifdef _USRDLL
 		g_Loading = false;
-#endif
-#ifndef _USRDLL
+#else
 		if (curr_teb)
 			curr_teb->ThreadLocalStoragePointer = tls;
 #endif
@@ -1021,8 +1020,7 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute, DWORD aThreadID)
 		g_script->mIsReadyToExecute = true;
 #ifdef _USRDLL
 		g_Loading = false;
-#endif
-#ifndef _USRDLL
+#else
 		if (curr_teb)
 			curr_teb->ThreadLocalStoragePointer = tls;
 #endif

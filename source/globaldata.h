@@ -38,8 +38,7 @@ extern double g_QPCfreq;
 _thread_local extern bool g_Reloading;
 #ifdef _USRDLL
 _thread_local extern bool g_Loading;
-#endif
-#ifndef _USRDLL
+#else
 EXPORT FARPROC g_ThreadExitApp;
 extern UINT_PTR g_ahkThreads[MAX_AHK_THREADS][7];
 #endif
