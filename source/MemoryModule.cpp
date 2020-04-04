@@ -189,7 +189,7 @@ PVOID NTAPI HookRtlPcToFileHeader(IN PVOID PcValue, PVOID* BaseOfImage)
 #elif _M_AMD64 // compiles for x64
 	mypeb = (PMYPEB)(__readgsqword(0x60)); //PEB
 #endif
-
+	/*
 	PCRITICAL_SECTION aLoaderLock; // So no other module can be loaded, expecially due to hooked _RtlPcToFileHeader
 #ifdef _M_IX86 // compiles for x86
 	aLoaderLock = *(PCRITICAL_SECTION*)(__readfsdword(0x30) + 0xA0); //PEB->LoaderLock
@@ -197,7 +197,9 @@ PVOID NTAPI HookRtlPcToFileHeader(IN PVOID PcValue, PVOID* BaseOfImage)
 	aLoaderLock = *(PCRITICAL_SECTION*)(__readgsqword(0x60) + 0x110); //PEB->LoaderLock //0x60 because offset is doubled in 64bit
 #endif
 
-	//EnterCriticalSection(aLoaderLock);
+	EnterCriticalSection(aLoaderLock);
+	*/
+	// Enter and Leave Critical Section is done in MemoryLoadLibraryEx
 	ModuleListHead = &mypeb->Ldr->InLoadOrderModuleList;
 	Entry = ModuleListHead->Flink;
 	while (Entry != ModuleListHead)

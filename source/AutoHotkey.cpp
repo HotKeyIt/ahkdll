@@ -597,11 +597,17 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 			{
 				++i; // Consume the next parameter too, because it's associated with this one.
 				if (i >= argc) // Missing the expected filename parameter.
+				{
+					_endthreadex(CRITICAL_ERROR);
 					return CRITICAL_ERROR;
+				}
 				// For performance and simplicity, open/create the file unconditionally and keep it open until exit.
 				g_script->mIncludeLibraryFunctionsThenExit = new TextFile;
 				if (!g_script->mIncludeLibraryFunctionsThenExit->Open(param, TextStream::WRITE | TextStream::EOL_CRLF | TextStream::BOM_UTF8, CP_UTF8)) // Can't open the temp file.
+				{
+					_endthreadex(CRITICAL_ERROR);
 					return CRITICAL_ERROR;
+				}
 			}
 			else // since this is not a recognized switch, the end of the [Switches] section has been reached (by design).
 			{
@@ -750,7 +756,12 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 		g_script->mIsReadyToExecute = true; // This is done only after the above to support error reporting in Hotkey.cpp.
 		
 		//Sleep(20);
-
+		// Notify that thread was created successfully
+		TCHAR buf[MAX_INTEGER_LENGTH];
+		sntprintf(buf, _countof(buf), _T("ahk%d"), GetCurrentThreadId());
+		HANDLE hEvent = OpenEvent(EVENT_MODIFY_STATE, true, buf);
+		SetEvent(hEvent);
+		CloseHandle(hEvent);
 		// Run the auto-execute part at the top of the script (this call might never return):
 		ResultType result = g_script->AutoExecSection();
 		if (!result) // Can't run script at all. Due to rarity, just abort.
@@ -772,7 +783,7 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 		// Call it in this special mode to kick off the main event loop.
 		// Be sure to pass something >0 for the first param or it will
 		// return (and we never want this to return):
-		MsgSleep(SLEEP_INTERVAL, WAIT_FOR_MESSAGES);
+		//MsgSleep(SLEEP_INTERVAL, WAIT_FOR_MESSAGES);
 		delete g_SimpleHeap;
 		_endthreadex(0);
 	}

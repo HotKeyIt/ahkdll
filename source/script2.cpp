@@ -11634,15 +11634,20 @@ bool CriticalObject::Delete()
 ResultType CriticalObject::Invoke(IObject_Invoke_PARAMS_DECL)
  {
 	 // Avoid deadlocking the process so messages can still be processed
-	 while (!TryEnterCriticalSection(this->lpCriticalSection))
 #ifdef _WIN64
-		 if (g_ThreadID == __readgsdword(0x48)) // Used to identify if code is called from different thread (AutoHotkey.dll)
+	if (g_ThreadID == __readgsdword(0x48)) // Used to identify if code is called from different thread (AutoHotkey.dll)
 #else
-		 if (g_ThreadID == __readfsdword(0x24))
+	if (g_ThreadID == __readfsdword(0x24))
 #endif
+	{
+		while (!TryEnterCriticalSection(this->lpCriticalSection))
 			MsgSleep(-1);
-		else
+	} 
+	else
+	{
+		while (!TryEnterCriticalSection(this->lpCriticalSection))
 			Sleep(0);
+	}
 	 // Invoke original object as if it was called
 	 ExprTokenType aBackupToken;
 	 aBackupToken.CopyExprFrom(aThisToken);
