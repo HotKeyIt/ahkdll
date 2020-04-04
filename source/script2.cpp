@@ -11633,6 +11633,7 @@ bool CriticalObject::Delete()
 
 ResultType CriticalObject::Invoke(IObject_Invoke_PARAMS_DECL)
  {
+	DWORD aSleep;
 	 // Avoid deadlocking the process so messages can still be processed
 #ifdef _WIN64
 	if (g_ThreadID == __readgsdword(0x48)) // Used to identify if code is called from different thread (AutoHotkey.dll)
@@ -11640,13 +11641,47 @@ ResultType CriticalObject::Invoke(IObject_Invoke_PARAMS_DECL)
 	if (g_ThreadID == __readfsdword(0x24))
 #endif
 	{
-		while (!TryEnterCriticalSection(this->lpCriticalSection))
-			MsgSleep(-1);
+		aSleep = g_CriticalObjectSleepTime < 1 ? -1 : g_CriticalObjectSleepTime;
+		if (g_CriticalObjectTimeOut > 0)
+		{
+			DWORD aTimeOut = GetTickCount() + g_CriticalObjectTimeOut*1000;
+			BOOL aSuccess = false;
+			for (; aTimeOut > GetTickCount();)
+			{
+				if (aSuccess = TryEnterCriticalSection(this->lpCriticalSection))
+					break;
+				MsgSleep(aSleep);
+			}
+			if (!aSuccess)
+				return g_script->ThrowRuntimeException(_T("Timeout accessing CriticalObject"), _T("CriticalObject"));
+		}
+		else
+		{
+			while (!TryEnterCriticalSection(this->lpCriticalSection))
+				MsgSleep(aSleep);
+		}
 	} 
 	else
 	{
-		while (!TryEnterCriticalSection(this->lpCriticalSection))
-			Sleep(0);
+		aSleep = g_CriticalObjectSleepTime < 1 ? 0 : g_CriticalObjectSleepTime;
+		if (g_CriticalObjectTimeOut > 0)
+		{
+			DWORD aTimeOut = GetTickCount() + g_CriticalObjectTimeOut * 1000;
+			BOOL aSuccess = false;
+			for (; aTimeOut > GetTickCount();)
+			{
+				if (aSuccess = TryEnterCriticalSection(this->lpCriticalSection))
+					break;
+				Sleep(aSleep);
+			}
+			if (!aSuccess)
+				return g_script->ThrowRuntimeException(_T("Timeout accessing CriticalObject"), _T("CriticalObject"));
+		}
+		else
+		{
+			while (!TryEnterCriticalSection(this->lpCriticalSection))
+				Sleep(aSleep);
+		}
 	}
 	 // Invoke original object as if it was called
 	 ExprTokenType aBackupToken;

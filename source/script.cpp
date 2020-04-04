@@ -4905,6 +4905,20 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		return CONDITION_TRUE;
 	}
 
+	if (IS_DIRECTIVE_MATCH(_T("#CriticalObjectTimeOut")))
+	{
+		if (parameter)
+			g_CriticalObjectTimeOut = ATOI(parameter);
+		return CONDITION_TRUE;
+	}
+
+	if (IS_DIRECTIVE_MATCH(_T("#CriticalObjectSleepTime")))
+	{
+		if (parameter)
+			g_CriticalObjectSleepTime = ATOI(parameter);
+		return CONDITION_TRUE;
+	}
+
 	if (IS_DIRECTIVE_MATCH(_T("#DefineDefaultObjectValue")))
 	{
 		g_DefaultObjectValue = (LPTSTR)g_SimpleHeap->Malloc(2 + (parameter ? _tcslen(parameter)*2 : 0));
