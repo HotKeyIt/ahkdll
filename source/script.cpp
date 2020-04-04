@@ -2670,7 +2670,33 @@ ResultType Script::OpenIncludedFile(TextStream &ts, LPTSTR aFileSpec, bool aAllo
 				}
 			}
 			ts.Open(textbuf, TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR, CP_UTF8);
+
 		}
+
+		// Set the working directory so that any #Include directives are relative to the directory
+		// containing this file by default.  Call SetWorkingDir() vs. SetCurrentDirectory() so that it
+		// succeeds even for a root drive like C: that lacks a backslash (see SetWorkingDir() for details).
+		if (source_file_index)
+		{
+			LPTSTR terminate_here = _tcsrchr(full_path, '\\');
+			if (terminate_here > full_path)
+			{
+				*terminate_here = '\0'; // Temporarily terminate it for use with SetWorkingDir().
+				SetWorkingDir(full_path);
+				*terminate_here = '\\'; // Undo the termination.
+			}
+			//else: probably impossible? Just leave the working dir as-is, for simplicity.
+		}
+		else
+			SetWorkingDir(mFileDir);
+
+		// This is done only after the file has been successfully opened in case aIgnoreLoadFailure==true:
+		if (source_file_index > 0)
+			if (!(Line::sSourceFile[source_file_index] = tmalloc(_tcslen(full_path) + 1)))
+				return ScriptError(ERR_OUTOFMEM);
+			else
+				_tcscpy(Line::sSourceFile[source_file_index], full_path);
+		//else the first file was already taken care of by another means.
 	}
 
 #else // Stand-alone mode (there are no include files in this mode since all of them were merged into the main script at the time of compiling).
