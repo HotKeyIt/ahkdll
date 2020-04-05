@@ -1143,7 +1143,6 @@ Script::~Script() // Destructor.
 	RemoveVectoredExceptionHandler(g_ExceptionHandler); // Exception handler to remove hooks to avoid system/mouse freeze
 	// done on DLL_PROCESS_DETACH
 	// DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
-	// DeleteCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
 	CloseHandle(g_hThread);
 
 	// PeekMessage is required to make sure that Ole/CoUninitialize does not hang

@@ -146,8 +146,7 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	g_SimpleHeap = new SimpleHeap();
 	g_SimpleHeapVar = g_SimpleHeap;
 	InitializeCriticalSection(&g_CriticalRegExCache); // v1.0.45.04: Must be done early so that it's unconditional, so that DeleteCriticalSection() in the script destructor can also be unconditional (deleting when never initialized can crash, at least on Win 9x).
-	InitializeCriticalSection(&g_CriticalAhkFunction); // used to call a function in multithreading environment.
-
+	
 	InitializeCriticalSection(&g_CriticalDebugger);
 	g_ahkThreads[0][1] = (UINT_PTR)g_script;
 	g_ahkThreads[0][4] = (UINT_PTR)&g_startup;

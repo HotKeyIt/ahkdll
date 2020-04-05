@@ -60,7 +60,6 @@ _thread_local CRITICAL_SECTION g_CriticalRegExCache;
 #ifdef _USRDLL
 _thread_local CRITICAL_SECTION g_CriticalHeapBlocks;
 #endif
-CRITICAL_SECTION g_CriticalAhkFunction;
 DWORD g_CriticalObjectTimeOut = 0;
 DWORD g_CriticalObjectSleepTime = 0;
 
