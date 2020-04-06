@@ -230,13 +230,15 @@ Object *Object::CloneTo(Object &obj)
 
 		// Copy name.
 		dst.key_c = src.key_c;
-		if ( !(dst.name = _tcsdup(src.name)) )
+		if (!(dst.name = _tcsdup(src.name)))
 		{
 			// Rather than trying to set up the object so that what we have
 			// so far is valid in order to break out of the loop, continue,
 			// make all fields valid and then allow them to be freed. 
 			++failure_count;
 		}
+		else
+			dst.keytype = SYM_STRING;
 
 		// Copy value.
 		if (!dst.InitCopy(src))
@@ -283,23 +285,52 @@ Map *Map::CloneTo(Map &obj)
 		Pair &dst = obj.mItem[i];
 		Pair &src = mItem[i];
 
-		// Copy key.
-		if (i >= obj.mKeyOffsetString)
+		if (mUnsorted)
 		{
-			dst.key_c = src.key_c;
-			if ( !(dst.key.s = _tcsdup(src.key.s)) )
+			if (src.keytype == SYM_STRING)
+			{	// Copy key.
+				dst.keytype = SYM_STRING;
+				dst.key_c = src.key_c;
+				if (!(dst.key.s = _tcsdup(src.key.s)))
+				{
+					// Key allocation failed. At this point, all int and object keys
+					// have been set and values for previous items have been copied.
+					++failure_count;
+				}
+			}
+			else
 			{
-				// Key allocation failed. At this point, all int and object keys
-				// have been set and values for previous items have been copied.
-				++failure_count;
+				// Copy whole key; search "(IntKeyType)(INT_PTR)" for comments.
+				dst.key = src.key;
+				if (src.keytype == SYM_OBJECT)
+				{
+					dst.key.p->AddRef();
+					dst.keytype = SYM_OBJECT;
+				}
+				else
+					dst.keytype = SYM_INTEGER;
 			}
 		}
-		else 
+		else
 		{
-			// Copy whole key; search "(IntKeyType)(INT_PTR)" for comments.
-			dst.key = src.key;
-			if (i >= obj.mKeyOffsetObject)
-				dst.key.p->AddRef();
+			// Copy key.
+			if (i >= obj.mKeyOffsetString)
+			{
+				dst.key_c = src.key_c;
+				if (!(dst.key.s = _tcsdup(src.key.s)))
+				{
+					// Key allocation failed. At this point, all int and object keys
+					// have been set and values for previous items have been copied.
+					++failure_count;
+				}
+			}
+			else
+			{
+				// Copy whole key; search "(IntKeyType)(INT_PTR)" for comments.
+				dst.key = src.key;
+				if (i >= obj.mKeyOffsetObject)
+					dst.key.p->AddRef();
+			}
 		}
 
 		// Copy value.
@@ -1418,6 +1449,7 @@ ResultType Object::Clone(ResultToken &aResultToken, int aID, int aFlags, ExprTok
 	if (GetNativeBase() != Object::sPrototype)
 		_o_throw(ERR_TYPE_MISMATCH); // Cannot construct an instance of this class using Object::Clone().
 	auto clone = new Object();
+	clone->mUnsorted = mUnsorted;
 	if (g_DefaultObjectValueType != SYM_MISSING)
 		clone->mDefault.SetValue(g_DefaultObjectValue);
 	if (!CloneTo(*clone))
@@ -1428,10 +1460,11 @@ ResultType Object::Clone(ResultToken &aResultToken, int aID, int aFlags, ExprTok
 ResultType Map::Clone(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
 	auto clone = new Map();
-	if (!CloneTo(*clone))
-		_o_throw(ERR_OUTOFMEM);
+	clone->mUnsorted = mUnsorted;
 	if (g_DefaultMapValueType != SYM_MISSING)
 		clone->mDefault.SetValue(g_DefaultMapValue);
+	if (!CloneTo(*clone))
+		_o_throw(ERR_OUTOFMEM);
 	_o_return(clone);
 }
 
@@ -2027,6 +2060,7 @@ Array *Array::Clone()
 		return nullptr; // CloneTo() released arr.
 	if (!arr->SetCapacity(mCapacity))
 		return nullptr;
+	arr->mUnsorted = mUnsorted;
 	if (g_DefaultArrayValueType != SYM_MISSING)
 		arr->mDefault.SetValue(g_DefaultArrayValue);
 	for (index_t i = 0; i < mLength; ++i)
