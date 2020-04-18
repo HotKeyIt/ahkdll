@@ -3,6 +3,7 @@
 #include "application.h"
 #include "globaldata.h"
 #include "script.h"
+#include "script_func_impl.h"
 
 #include "script_object.h"
 
@@ -17,25 +18,26 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 	int offset = 0;					// also used to calculate total size of structure
 	int mod = 0;
 	int arraydef = 0;				// count arraysize to update offset
-	int unionoffset[16] = { 0 };			// backup offset before we enter union or structure
-	int unionsize[16] = { 0 };				// calculate unionsize
-	bool unionisstruct[16] = { 0 };			// updated to move offset for structure in structure
-	int structalign[16] = { 0 };			// keep track of struct alignment
+	int unionoffset[16] = { 0 };	// backup offset before we enter union or structure
+	int unionsize[16] = { 0 };		// calculate unionsize
+	bool unionisstruct[16] = { 0 };	// updated to move offset for structure in structure
+	int structalign[16] = { 0 };	// keep track of struct alignment
 	int totalunionsize = 0;			// total size of all unions and structures in structure
 	int uniondepth = 0;				// count how deep we are in union/structure
-	int ispointer = NULL;			// identify pointer and how deep it goes
+	int ispointer = 0;				// identify pointer and how deep it goes
 	int aligntotal = 0;				// pointer alignment for total structure
-	int thissize = 0;					// used to check if type was found in above array.
+	int thissize = 0;				// used to check if type was found in above array.
 	int maxsize = 0;				// max size of union or struct
 
 	// following are used to find variable and also get size of a structure defined in variable
 	// this will hold the variable reference and offset that is given to size() to align if necessary in 64-bit
-	ResultToken ResultToken;
-	ExprTokenType Var1,Var2,Var3;
-	ExprTokenType *param[] = {&Var1,&Var2,&Var3};
+	ResultToken result_token, obj_token;
+	ExprTokenType Var1,Var2,Var3,Var4;
+	ExprTokenType *param[] = {&Var1,&Var2,&Var3,&Var4};
 	Var1.symbol = SYM_VAR;
 	Var2.symbol = SYM_INTEGER;
 	Var3.symbol = SYM_INTEGER;
+	Var4.symbol = SYM_OBJECT;
 
 	// will hold pointer to structure definition string while we parse trough it
 	TCHAR *buf;
@@ -50,10 +52,11 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 	// Parameter passed to IsDefaultType needs to be ' Definition '
 	// this is because spaces are used as delimiters ( see IsDefaultType function )
 	TCHAR defbuf[MAX_VAR_NAME_LENGTH * 2 + 40] = _T(" UInt "); // Set default UInt definition
+	TCHAR subdefbuf[MAX_VAR_NAME_LENGTH * 2 + 40];
 
 	TCHAR keybuf[MAX_VAR_NAME_LENGTH + 40];
-	// buffer for arraysize + 2 for bracket ] and terminating character
-	TCHAR intbuf[MAX_INTEGER_LENGTH + 2];
+	// buffer for arraysize + 3 for bracket ] and terminating character
+	TCHAR arrbuf[MAX_INTEGER_LENGTH + 3];
 
 	LPTSTR bitfield = NULL;
 	BYTE bitsize = 0;
@@ -65,41 +68,49 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 	// insert_pos is simply increased each time
 	// for loop will enumerate items in same order as it was created
 	index_t insert_pos = 0;
-
-	// the new structure object
-	Struct *obj = new Struct();
-	obj->SetBase(Struct::sPrototype);
-
-	if (TokenToObject(*aParam[0]))
-	{
-		obj->Release();
-		obj = ((Struct *)TokenToObject(*aParam[0]))->Clone();
-		if (aParamCount > 2)
-		{
-			obj->mStructMem = (UINT_PTR*)TokenToInt64(*aParam[1]);
-			obj->ObjectToStruct(TokenToObject(*aParam[2]));
-		}
-		else if (aParamCount > 1)
-		{
-			if (TokenToObject(*aParam[1]))
-			{
-				obj->mStructMem = (UINT_PTR *)malloc(obj->mSize);
-				obj->mMemAllocated = obj->mSize;
-				g_memset(obj->mStructMem,NULL,offset);
-				obj->ObjectToStruct(TokenToObject(*aParam[1]));
-			}
-			else
-				obj->mStructMem = (UINT_PTR*)TokenToInt64(*aParam[1]);
-		}
-		else
-		{
-			obj->mStructMem = (UINT_PTR *)malloc(obj->mSize);
-			obj->mMemAllocated = obj->mSize;
-			g_memset(obj->mStructMem, NULL, obj->mSize);
-		}
-		return obj;
-	}
+	Struct *obj;
 	
+	if (!ParamIndexIsOmittedOrEmpty(3))
+		obj = (Struct *)aParam[3]->object; // use given handle (for substruct)
+	else
+	{
+		if (TokenToObject(*aParam[0]))
+		{
+			g_script->ScriptError(ERR_INVALID_STRUCT);
+			return NULL;
+		}
+
+		obj = new Struct();
+		obj->mHeap = HeapCreate(0, 0, 0);
+		obj->mOwnHeap = true;
+
+		// create new structure object and Heap
+		if (!obj || !obj->mHeap)
+		{
+			if (obj)
+				obj->Release();
+			g_script->ScriptError(ERR_OUTOFMEM, TokenToString(*aParam[0]));
+			return NULL;
+		}
+		BIF_sizeof(result_token, aParam, 1);
+		if (result_token.symbol != SYM_INTEGER)
+		{	// could not resolve structure
+			g_script->ScriptError(ERR_INVALID_STRUCT, TokenToString(*aParam[0]));
+			return NULL;
+		}
+		obj->SetBase(Struct::sPrototype);
+		obj->mMain = obj;
+		obj->AddRef();
+		obj->mStructSize = (int)result_token.value_int64;
+		if (aParamCount > 1 && ParamIndexIsNumeric(1))
+			// second parameter exist and it is digit assumme this is new pointer for our structure
+			// caller must ensure zero initialize memory
+			obj->mStructMem = (UINT_PTR *)TokenToInt64(*aParam[1]);
+		else // no pointer given so allocate memory and fill memory with 0
+			// setting the memory after parsing definition saves a call to BIF_sizeof
+			obj->mStructMem = (UINT_PTR *)HeapAlloc(obj->mHeap, HEAP_ZERO_MEMORY, obj->mStructSize);
+	}
+
 	// Set buf to beginning of structure definition
 	buf = TokenToString(*aParam[0]);
 	
@@ -213,11 +224,18 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 		// Array
 		if (_tcschr(tempbuf,'['))
 		{
-			_tcsncpy(intbuf,_tcschr(tempbuf,'['),MAX_INTEGER_LENGTH);
-			intbuf[_tcscspn(intbuf,_T("]")) + 1] = '\0';
-			arraydef = (int)ATOI64(intbuf + 1);
+			_tcsncpy(arrbuf,_tcschr(tempbuf,'['),MAX_INTEGER_LENGTH);
+			arrbuf[_tcscspn(arrbuf,_T("]")) + 1] = '\0';
+			arraydef = (int)ATOI64(arrbuf + 1);
 			// remove array definition from temp buffer to identify key easier
-			StrReplace(tempbuf, intbuf, _T(""), SCS_SENSITIVE, UINT_MAX, LINE_SIZE);
+			StrReplace(tempbuf, arrbuf, _T(""), SCS_SENSITIVE, 1, LINE_SIZE);
+			
+			if (_tcschr(tempbuf, '['))
+			{	// array to array and similar not supported
+				obj->Release();
+				g_script->ScriptError(ERR_INVALID_STRUCT, tempbuf);
+				return NULL;
+			}
 			// Trim trailing spaces in case we had a definition like UInt [10]
 			rtrim(tempbuf);
 		}
@@ -253,9 +271,10 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 				if (bitfield = _tcschr(keybuf, ':'))
 				{
 					*bitfield = '\0';
+					bitfield++;
 					if (bitsizetotal/8 == thissize)
 						bitsizetotal = bitsize = 0;
-					bitsizetotal += bitsize = ATOI(bitfield + 1);
+					bitsizetotal += bitsize = ATOI(bitfield);
 				}
 				else
 					bitsizetotal = bitsize = 0;
@@ -279,17 +298,28 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			if (bitfield = _tcschr(keybuf, ':'))
 			{
 				*bitfield = '\0';
+				bitfield++;
 				if (bitsizetotal / 8 == thissize)
 					bitsizetotal = bitsize = 0;
-				bitsizetotal += bitsize = ATOI(bitfield + 1);
+				bitsizetotal += bitsize = ATOI(bitfield);
 			}
 			trim(keybuf);
 		}
 
+		if (obj->mOwnHeap && !*keybuf && !arraydef)
+		//if (!*keybuf && !arraydef)
+			arraydef = 1;
+		if (_tcschr(keybuf, '('))
+		{
+			obj->Release();
+			g_script->ScriptError(ERR_INVALID_STRUCT, keybuf);
+			return NULL;
+		}
 		// Now find size in default types array and create new field
 		// If Type not found, resolve type to variable and get size of struct defined in it
 		if ((!_tcscmp(defbuf, _T(" bool ")) && (thissize = 1)) || (thissize = IsDefaultType(defbuf)))
 		{
+			
 			// align offset
 			if (ispointer)
 			{
@@ -305,13 +335,70 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 				if (thissize > aligntotal)
 					aligntotal = thissize; // > ptrsize ? ptrsize : thissize;
 			}
-			if (!(field = obj->Insert(keybuf, insert_pos,ispointer, (offset == 0 || !bitsize || bitsizetotal == bitsize) ? offset : offset - thissize,arraydef,NULL,thissize
-						,ispointer ? true : !tcscasestr(_T(" FLOAT DOUBLE PFLOAT PDOUBLE "),defbuf)
-						,!tcscasestr(_T(" PTR SHORT INT INT8 INT16 INT32 INT64 CHAR ACCESS_MASK PVOID VOID HALF_PTR BOOL LONG LONG32 LONGLONG LONG64 USN INT_PTR LONG_PTR POINTER_64 POINTER_SIGNED SIGNED SSIZE_T WPARAM __int64 "),defbuf)
-						,tcscasestr(_T(" TCHAR LPTSTR LPCTSTR LPWSTR LPCWSTR WCHAR "),defbuf) ? 1200 : tcscasestr(_T(" CHAR LPSTR LPCSTR UCHAR "),defbuf) ? 0 : -1, bitsize, bitsizetotal - bitsize)))
+			if (!(field = obj->Insert(keybuf, insert_pos
+			/* pointer*/	, ispointer //!*keybuf ? ispointer : 0
+			/* offset */	, (offset == 0 || !bitsize || bitsizetotal == bitsize) ? offset : offset - thissize // !*keybuf ? 0 : 
+			/* arraysize */	, arraydef //!*keybuf ? arraydef : 0
+			/* fieldsize */	, thissize
+			/* isinteger */	, (ispointer || arraydef) ? false : ispointer ? true : !tcscasestr(_T(" FLOAT DOUBLE PFLOAT PDOUBLE "),defbuf)
+			/* isunsigned*/	, (ispointer || arraydef) ? 0 : !tcscasestr(_T(" PTR SHORT INT INT8 INT16 INT32 INT64 CHAR ACCESS_MASK PVOID VOID HALF_PTR BOOL LONG LONG32 LONGLONG LONG64 USN INT_PTR LONG_PTR POINTER_64 POINTER_SIGNED SIGNED SSIZE_T WPARAM __int64 "),defbuf)
+			/* encoding */	, (ispointer || arraydef) ? -1 : tcscasestr(_T(" TCHAR LPTSTR LPCTSTR LPWSTR LPCWSTR WCHAR "),defbuf) ? 1200 : tcscasestr(_T(" CHAR LPSTR LPCSTR UCHAR "),defbuf) ? 0 : -1
+			/* bitsize */	, (ispointer || arraydef) ? 0 : bitsize
+			/* bitfield */	, (ispointer || arraydef) ? 0 : bitsizetotal - bitsize)))
 			{	// Out of memory.
 				obj->Release();
 				return NULL;
+			}
+			// Dynamicly handle Arrays and pointers
+			if (arraydef || ispointer)
+			{
+				_tcscpy(subdefbuf, defbuf);
+				if (ispointer)
+				{	// add pointer to definition
+					for (int i = ispointer - (arraydef || *keybuf ? 0 : 1); i; i--)
+					{
+						for (int f = _tcslen(subdefbuf); f; f--)
+							subdefbuf[f + 1] = subdefbuf[f];
+						subdefbuf[1] = '*';
+					}
+				}
+				if (*keybuf && arraydef)
+					_tcscpy(subdefbuf + _tcslen(subdefbuf), arrbuf);
+				if (obj->mMain->GetOwnProp(obj_token, subdefbuf))
+				{
+					field->mStruct = (Struct *)obj_token.object;
+					obj_token.object->AddRef();
+				}
+				else
+				{
+					field->mStruct = new Struct();
+					if (!field->mStruct)
+					{
+						obj->Release();
+						g_script->ScriptError(ERR_OUTOFMEM);
+						return NULL;
+					}
+					field->mStruct->SetBase(Struct::sPrototype);
+					obj->mMain->SetOwnProp(subdefbuf, field->mStruct);
+					field->mStruct->mMain = obj->mMain;
+					obj->mMain->AddRef();
+					field->mStruct->mHeap = obj->mHeap;
+					field->mStruct->mStructSize = *keybuf && arraydef ? (ispointer ? ptrsize : field->mSize) * arraydef : _tcschr(subdefbuf, '*') ? ptrsize : field->mSize;
+
+					Var1.symbol = SYM_STRING;
+					Var1.marker = subdefbuf;
+					Var3.symbol = SYM_MISSING;
+					Var4.object = field->mStruct;
+					if (!Struct::Create(param, 4))
+					{
+						obj->Release();
+						return NULL;
+					}
+					obj->mMain->Release();
+					field->mStruct->mMain = NULL; // won't be required anymore
+					Var1.symbol = SYM_VAR;
+					Var3.symbol = SYM_INTEGER;
+				}
 			}
 			if (!bitsize || bitsizetotal == bitsize)
 				offset += (ispointer ? ptrsize : thissize) * (arraydef ? arraydef : 1);
@@ -347,62 +434,13 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			// variable found
 			if (Var1.var != NULL)
 			{
-				if (!ispointer && !_tcsncmp(tempbuf,buf,_tcslen(buf)) && !*keybuf)
+				/*if (!ispointer && !_tcsncmp(tempbuf,buf,_tcslen(buf)) && !*keybuf)
 				{   // Whole definition is not a pointer and no key was given so create Structure from variable
 					obj->Release();
-					if (aParamCount == 1)
-					{
-						if (TokenToObject(*param[0]))
-						{   // assume variable is a structure object
-							obj = ((Struct *)TokenToObject(*param[0]))->Clone();
-							obj->mStructMem = (UINT_PTR *)malloc(obj->mSize);
-							obj->mMemAllocated = obj->mSize;
-							g_memset(obj->mStructMem, NULL, obj->mSize);
-							return obj;
-						}
-						// else create structure from string definition
-						return Struct::Create(param,1);
-					}
-					else if (aParamCount > 1)
-					{   // more than one parameter was given, copy aParam to param
-						param[1]->symbol = aParam[1]->symbol;
-						param[1]->object = aParam[1]->object;
-						param[1]->value_int64 = aParam[1]->value_int64;
-						param[1]->var = aParam[1]->var;
-					}
-					if (aParamCount > 2)
-					{   // more than 2 parameters were given, copy aParam to param
-						param[2]->symbol = aParam[2]->symbol;
-						param[2]->object = aParam[2]->object;
-						param[2]->var = aParam[2]->var;
-						// definition variable is a structure object, clone it, assign memory and init object
-						if (TokenToObject(*param[0]))
-						{
-							obj = ((Struct *)TokenToObject(*param[0]))->Clone();
-							obj->mMemAllocated = 0;
-							obj->mStructMem = (UINT_PTR*)aParam[1]->value_int64;
-							obj->ObjectToStruct(TokenToObject(*aParam[2]));
-							return obj;
-						}
-						return Struct::Create(param,3);
-					}
-					else if (TokenToObject(*param[0]))
-					{   // definition variable is a structure object, clone it and assign memory or init object
-						obj = ((Struct *)TokenToObject(*param[0]))->Clone();
-						if (TokenToObject(*aParam[1]))
-						{
-							obj->mStructMem = (UINT_PTR *)malloc(obj->mSize);
-							obj->mMemAllocated = obj->mSize;
-							g_memset(obj->mStructMem, NULL, obj->mSize);
-							obj->ObjectToStruct(TokenToObject(*aParam[1]));
-						}
-						else
-							obj->mStructMem = (UINT_PTR*)aParam[1]->value_int64;
-						return obj;
-					}
-					// else simply create structure from variable and given memory/initobject
-					return Struct::Create(param,2);
-				}
+					for (int i = aParamCount - 1; i; i--)
+						param[i] = aParam[i];
+					return Struct::Create(param,aParamCount);
+				}*/
 				// Call BIF_sizeof passing offset in second parameter to align offset if necessary
 				// if field is a pointer we will need its size only
 				if (!ispointer)
@@ -412,10 +450,10 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 						aligntotal = newaligntotal;
 					if ((!bitsize || bitsizetotal == bitsize) && offset && (mod = offset % aligntotal))
 						offset += (aligntotal - mod) % aligntotal;
-					param[1]->value_int64 = (__int64)ispointer ? 0 : offset;
-					param[2]->value_int64 = (__int64)&aligntotal;
-					BIF_sizeof(ResultToken,param,ispointer ? 1 : 3);
-					if (ResultToken.symbol != SYM_INTEGER)
+					Var2.value_int64 = (__int64)offset;
+					Var3.value_int64 = (__int64)&aligntotal;
+					BIF_sizeof(result_token,param,ispointer ? 1 : 3);
+					if (result_token.symbol != SYM_INTEGER)
 					{	// could not resolve structure
 						obj->Release();
 						g_script->ScriptError(ERR_INVALID_STRUCT, defbuf);
@@ -426,9 +464,9 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 				} 
 				else
 				{
-					param[1]->value_int64 = (__int64)0;
-					BIF_sizeof(ResultToken,param,1);
-					if (ResultToken.symbol != SYM_INTEGER)
+					Var2.value_int64 = (__int64)0;
+					BIF_sizeof(result_token,param,1);
+					if (result_token.symbol != SYM_INTEGER)
 					{	// could not resolve structure
 						obj->Release();
 						g_script->ScriptError(ERR_INVALID_STRUCT, defbuf);
@@ -439,17 +477,82 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 					if (ptrsize > aligntotal)
 						aligntotal = ptrsize;
 				}
-				// Insert new field in our structure
-				if (!(field = obj->Insert(keybuf, insert_pos, ispointer, (offset == 0 || !bitsize || bitsizetotal == bitsize) ? offset : offset - thissize, arraydef, Var1.var, bitsize ? bitsize : (int)ResultToken.value_int64,1,1,-1, bitsize, bitsizetotal - bitsize)))
+
+				// Insert new field in our structure, all custom structures are dynamically resolved
+				if (!(field = obj->Insert(keybuf, insert_pos
+					/* pointer*/	, ispointer // !*keybuf ? ispointer : 0
+					/* offset */	, (offset == 0 || !bitsize || bitsizetotal == bitsize) ? offset : offset - thissize // !*keybuf ? 0 : 
+					/* arraysize */	, arraydef //!*keybuf ? arraydef : 0
+					/* fieldsize */	, (int)result_token.value_int64 - (ispointer ? 0 : offset)
+					/* isinteger */	, false
+					/* isunsigned*/	, false
+					/* encoding */	, -1
+					/* bitsize */	, 0
+					/* bitfield */	, 0)))
 				{	// Out of memory.
 					obj->Release();
 					return NULL;
+				}
+				_tcscpy(subdefbuf, defbuf);
+				if (ispointer)
+				{	// add pointer to definition
+					for (int i = ispointer - (arraydef || *keybuf ? 0 : 1); i; i--)
+					{
+						for (int f = _tcslen(subdefbuf); f; f--)
+							subdefbuf[f + 1] = subdefbuf[f];
+						subdefbuf[1] = '*';
+					}
+				}
+				if (*keybuf && arraydef)
+					_tcscpy(subdefbuf + _tcslen(subdefbuf), arrbuf);
+				// Structure in Structure
+				if (obj->mMain->GetOwnProp(obj_token, subdefbuf))
+				{
+					field->mStruct = (Struct *)obj_token.object;
+					obj_token.object->AddRef();
+				}
+				else
+				{
+					field->mStruct = new Struct();
+					if (!field->mStruct)
+					{
+						obj->Release();
+						g_script->ScriptError(ERR_OUTOFMEM);
+						return NULL;
+					}
+					field->mStruct->SetBase(Struct::sPrototype);
+					obj->mMain->SetOwnProp(subdefbuf, field->mStruct);
+					field->mStruct->mMain = obj->mMain;
+					obj->mMain->AddRef();
+					field->mStruct->mHeap = obj->mHeap;
+					field->mStruct->mStructSize = *keybuf && arraydef ? (ispointer ? ptrsize : field->mSize) * arraydef : _tcschr(subdefbuf, '*') ? ptrsize : field->mSize;
+					
+					if (!_tcschr(subdefbuf, '*') && !_tcschr(subdefbuf,'['))
+						Var1.var = Var1.var;
+					else
+					{
+						Var1.symbol = SYM_STRING;
+						Var1.marker = subdefbuf;
+					}
+					//Var2.value_int64 = (UINT_PTR)(obj->mStructMem + offset);
+					Var3.symbol = SYM_MISSING;
+					Var4.object = field->mStruct;
+					if (!Struct::Create(param, 4))
+					{
+						obj->Release();
+						return NULL; 
+					}
+					obj->mMain->Release();
+					field->mStruct->mMain = NULL; // won't be required anymore
+					Var1.symbol = SYM_VAR;
+					Var3.symbol = SYM_INTEGER;
 				}
 				if (ispointer)
 					offset += (int)ptrsize * (arraydef ? arraydef : 1);
 				else if (!bitsize || bitsizetotal == bitsize)
 				// sizeof was given an offset that it applied and aligned if necessary, so set offset =  and not +=
-					offset = (int)ResultToken.value_int64 + (arraydef ? ((arraydef - 1) * ((int)ResultToken.value_int64 - offset)) : 0);
+					offset = (int)result_token.value_int64 + (arraydef ? ((arraydef - 1) * ((int)result_token.value_int64 - offset)) : 0);
+
 			}
 			else // No variable was found and it is not default type so we can't determine size.
 			{
@@ -477,12 +580,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 		else if (StrChrAny(buf, _T(";,")))
 			buf += _tcscspn(buf,_T(";,")) + 1;
 		else
-		{
-			// identify that structure object has no fields
-			if (!*keybuf)
-				obj->mTypeOnly = true;
 			buf += _tcslen(buf);
-		}
 	}
 	// align total structure if necessary
 	if (aligntotal && (mod = offset % aligntotal))
@@ -490,28 +588,239 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 	if (!offset) // structure could not be build
 	{
 		obj->Release();
-		g_script->ScriptError(ERR_INVALID_STRUCT, buf);
+		g_script->ScriptError(ERR_INVALID_STRUCT, TokenToString(*aParam[0]));
 		return NULL;
 	}
-	
-	obj->mSize = offset;
-	if (aParamCount > 1 && TokenIsNumeric(*aParam[1]))
-	{	// second parameter exist and it is digit assumme this is new pointer for our structure
-		obj->mStructMem = (UINT_PTR *)TokenToInt64(*aParam[1]);
-		obj->mMemAllocated = 0;
-	}
-	else // no pointer given so allocate memory and fill memory with 0
-	{	// setting the memory after parsing definition saves a call to BIF_sizeof
-		obj->mStructMem = (UINT_PTR *)malloc(offset);
-		obj->mMemAllocated = offset;
-		g_memset(obj->mStructMem, NULL, offset);
+	else if (obj->mStructSize < offset)
+	{	//obj->mStructSize can be larger due to alignment
+		obj->Release();
+		g_script->ScriptError(ERR_INVALID_LENGTH, TokenToString(*aParam[0]));
+		return NULL;
 	}
 
-	// an object was passed to initialize fields
-	// enumerate trough object and assign values
-	if ((aParamCount > 1 && !TokenIsNumeric(*aParam[1])) || aParamCount > 2 )
-		obj->ObjectToStruct(TokenToObject(*aParam[aParamCount - 1]));
+	if (obj->mOwnHeap)
+	{
+		obj->mMain->Release();
+		if (obj->mFieldCount > 1 || *obj->mFields[0].key)
+		{	// set up a copy of structure to be able to access it dynamically
+			if (!(obj->mMain = obj->CloneStruct()))
+			{
+				obj->Release();
+				return NULL;
+			}
+		}
+		else
+			obj->mMain = NULL;
+		// now delete all properties that were used for recurring reference of sub structure definitions
+		if (CONDITION_TRUE == obj->GetEnumProp(0, 0, 0))
+		{
+			Var vkey, vval;
+			for (; CONDITION_TRUE == obj->GetEnumProp(0, &vkey, &vval);)
+				obj->DeleteOwnProp(vkey.Contents());
+			vkey.Free();
+			vval.Free();
+		}
+
+		// an object was passed to initialize fields
+		// enumerate trough object and assign values
+		if (!ParamIndexIsOmittedOrEmpty(2))
+			obj->ObjectToStruct(TokenToObject(*aParam[2]));
+	}
+	// set isValue if structure has no items, is not an array, not a pointer and not a reference to structure
+	if (obj->mFieldCount == 1)
+	{
+		FieldType &aField = obj->mFields[0];
+		if (aField.key && !aField.mIsPointer && !aField.mArraySize && !aField.mStruct)
+			obj->mIsValue = true;
+	}
 	return obj;
+}
+
+//
+// Struct::Delete - Called immediately before the object is deleted.
+//					Returns false if object should not be deleted yet.
+//
+
+Struct* Struct::CloneStruct(bool aSeparate, HANDLE aHeap)
+{
+	Struct *obj = new Struct();
+	if (!obj)
+		return NULL;
+	obj->mIsValue = mIsValue;
+	obj->mStructSize = mStructSize;
+	if (aSeparate && aHeap == NULL)
+	{
+		obj->mHeap = HeapCreate(0, 0, 0);
+		if (!obj->mHeap)
+			return NULL;
+		obj->mOwnHeap = true;
+		obj->mStructMem = (UINT_PTR *)HeapAlloc(obj->mHeap, HEAP_ZERO_MEMORY, obj->mStructSize);
+		if (!obj->mStructMem)
+			return NULL;
+	}
+	else if (aSeparate)
+		obj->mHeap = aHeap;
+	else
+		obj->mHeap = mHeap;
+	LPTSTR key;
+	for (int i = 0; i < mFieldCount; i++)
+	{	// copy fields since they will be freed on release
+		if (obj->mFieldCount == obj->mFieldCountMax && !obj->Expand()  // Attempt to expand if at capacity.
+			|| !(key = _tcsdup(mFields[i].key)))  // Attempt to duplicate key-string.
+		{	// OutOfMem
+			obj->Release();
+			return NULL;
+		}
+		FieldType &field = obj->mFields[i], &from = mFields[i];
+		++obj->mFieldCount; // Only after memmove above.
+
+		field.mSize = from.mSize; // Init to ensure safe behaviour in Assign().
+		field.key = key; // Above has already copied string
+		field.mArraySize = from.mArraySize;
+		field.mIsPointer = from.mIsPointer;
+		field.mOffset = from.mOffset;
+		field.mBitSize = from.mBitSize;
+		field.mBitOffset = from.mBitOffset;
+		field.mIsInteger = from.mIsInteger;
+		field.mIsUnsigned = from.mIsUnsigned;
+		field.mEncoding = from.mEncoding;
+		if (from.mStruct == NULL)
+			field.mStruct = NULL;
+		else if (aSeparate)
+		{	// clone - separate and use heap of new object or heap forwarded here
+			field.mStruct = from.mStruct->CloneStruct(true, aHeap == NULL ? obj->mHeap : aHeap);
+			if (!field.mStruct)
+			{
+				obj->Release();
+				return NULL;
+			}
+		}
+		else
+		{	// clone to same structure object mMain, onyl AddRef
+			field.mStruct = from.mStruct;
+			if (field.mStruct)
+				field.mStruct->AddRef();
+		}
+	}
+	if (aSeparate && aHeap == NULL && (obj->mFieldCount > 1 || *obj->mFields[0].key))
+	{
+		obj->mMain = obj->CloneStruct();
+		if (!obj->mMain)
+		{
+			obj->Release();
+			return NULL;
+		}
+	}
+	else
+		obj->mMain = NULL;
+	return obj;
+}
+
+//
+// Struct::Delete - Called immediately before the object is deleted.
+//					Returns false if object should not be deleted yet.
+//
+
+bool Struct::Delete()
+{
+	return ObjectBase::Delete();
+}
+
+
+Struct::~Struct()
+{
+	if (mFields)
+	{
+		if (mFieldCount)
+		{
+			int i = mFieldCount - 1;
+			// Free keys
+			for ( ; i >= 0 ; --i)
+			{
+				FieldType &aField = mFields[i];
+				if (aField.mStruct)
+					aField.mStruct->Release();
+				free(mFields[i].key);
+			}
+		}
+		// Free fields array.
+		free(mFields);
+	}
+	if (mMain)
+		mMain->Release();
+	if (mOwnHeap)
+	{
+#ifdef _DEBUG
+		// vld.h throws memory leaks when HeapFree is not used
+		// We cannot use HeapFree directly when walking the Heap
+		// get 127 allocated blocks to be freed, free them, then reset Heap Entry and start over again until end of Heap.
+		PROCESS_HEAP_ENTRY hEntry = { 0 };
+		PVOID *arr = new PVOID[128];
+		int i = 0;
+		while (HeapWalk(mHeap, &hEntry))
+		{
+			if (hEntry.wFlags & PROCESS_HEAP_ENTRY_BUSY)
+			{	// entry is allocated block, backup pointers to free
+				arr[++i] = hEntry.lpData;
+				if (i == 127)
+				{	// array is full, free allocated blocks and start over again
+					for (; i; i--)
+						HeapFree(mHeap, 0, arr[i]);
+					// reset HeapWalk
+					hEntry.lpData = NULL;
+				}
+			}
+		}
+		// free remaining blocks and destroy the heap.
+		for (; i; i--)
+			HeapFree(mHeap, 0, arr[i]);
+		delete arr;
+#endif
+		HeapDestroy(mHeap);
+	}
+}
+
+
+//
+// Inserts a single field with the given key at the given offset.
+// Caller must ensure 'at' is the correct offset for this key.
+//
+
+Struct::FieldType *Struct::Insert(LPTSTR key, index_t &at, USHORT aIspointer, int aOffset, int aArrsize, int aFieldsize, bool aIsInteger, bool aIsunsigned, USHORT aEncoding, BYTE aBitSize, BYTE aBitField)
+{
+	if (this->FindField(key))
+	{
+		g_script->ScriptError(ERR_DUPLICATE_DECLARATION, key);
+		return NULL;
+	}
+	if (mFieldCount == mFieldCountMax && !Expand()  // Attempt to expand if at capacity.
+		|| !(key = _tcsdup(key)))  // Attempt to duplicate key-string.
+	{	// Out of memory.
+		g_script->ScriptError(ERR_OUTOFMEM);
+		return NULL;
+	}
+	// There is now definitely room in mFields for a new field.
+
+	FieldType &field = mFields[at++];
+	if (at < mFieldCount)
+		// Move existing fields to make room.
+		memmove(&field + 1, &field, (size_t)(mFieldCount - at) * sizeof(FieldType));
+	++mFieldCount; // Only after memmove above.
+
+	// Update key-type offsets based on where and what was inserted; also update this key's ref count:
+
+	field.mSize = aFieldsize; // Init to ensure safe behaviour in Assign().
+	field.key = key; // Above has already copied string
+	field.mArraySize = aArrsize;
+	field.mIsPointer = aIspointer;
+	field.mOffset = aOffset;
+	field.mBitSize = aBitSize;
+	field.mBitOffset = aBitField;
+	field.mIsInteger = aIsInteger;
+	field.mIsUnsigned = aIsunsigned;
+	field.mEncoding = aEncoding;
+	field.mStruct = NULL;
+	return &field;
 }
 
 //
@@ -560,44 +869,13 @@ void Struct::ObjectToStruct(IObject *objfrom)
 		if (result == CONDITION_FALSE)
 			break;
 		this->Invoke(result_token, IT_SET, nullptr, this_token, params, 2);
+		if (result_token.symbol == SYM_OBJECT)
+			result_token.object->Release();
+		vkey.Free();
+		vval.Free();
 	}
 	// release enumerator and free vars
 	enumerator->Release();
-	vkey.Free();
-	vval.Free();
-}
-
-//
-// Struct::Delete - Called immediately before the object is deleted.
-//					Returns false if object should not be deleted yet.
-//
-
-bool Struct::Delete()
-{
-	return ObjectBase::Delete();
-}
-
-
-Struct::~Struct()
-{
-	if (mMemAllocated > 0)
-		free(mStructMem);
-	if (mFields)
-	{
-		if (mFieldCount)
-		{
-			int i = mFieldCount - 1;
-			// Free keys
-			for ( ; i >= 0 ; --i)
-			{
-				if (mFields[i].mMemAllocated > 0)
-					free(mFields[i].mStructMem);
-				free(mFields[i].key);
-			}
-		}
-		// Free fields array.
-		free(mFields);
-	}
 }
 
 
@@ -607,116 +885,11 @@ Struct::~Struct()
 
 UINT_PTR Struct::SetPointer(UINT_PTR aPointer,__int64 aArrayItem)
 {
-	if (mIsPointer)
+	if (mFields[0].mIsPointer) //mIsPointer
 		*((UINT_PTR*)((UINT_PTR)mStructMem + (aArrayItem - 1)*sizeof(UINT_PTR))) = aPointer;
 	else
-		*((UINT_PTR*)((UINT_PTR)mStructMem + (aArrayItem-1)*(mSize/(mArraySize ? mArraySize : 1)))) = aPointer;
+		*((UINT_PTR*)((UINT_PTR)mStructMem + (aArrayItem - 1)*mFields[0].mSize)) = aPointer;
 	return aPointer;
-}
-
-
-//
-// Struct::FieldType::Clone - used to clone a field to structure.
-//
-
-Struct *Struct::CloneField(FieldType *field,bool aIsDynamic)
-// Creates an object and copies to it the fields at and after the given offset.
-{
-	Struct *objptr = new Struct();
-	if (!objptr)
-		return objptr;
-
-	Struct &obj = *objptr;
-	obj.SetBase(Struct::sPrototype);
-	// if field is an array, set correct size
-	if (obj.mArraySize == field->mArraySize)
-		obj.mSize = field->mSize*obj.mArraySize;
-	else
-		obj.mSize = field->mSize;
-	obj.mIsInteger = field->mIsInteger;
-	obj.mIsPointer = field->mIsPointer;
-	obj.mEncoding = field->mEncoding;
-	obj.mIsUnsigned = field->mIsUnsigned;
-	obj.mVarRef = field->mVarRef;
-	obj.mTypeOnly = 1;
-	obj.mMemAllocated = aIsDynamic ? -1 : 0;
-	return objptr;
-}
-
-//
-// Struct::Clone - used for cloning structures.
-//
-
-Struct *Struct::Clone(bool aIsDynamic)
-// Creates an object and copies to it the fields at and after the given offset.
-{
-	Struct *objptr = new Struct();
-	if (!objptr)
-		return objptr;
-	
-	
-	Struct &obj = *objptr; 
-	obj.SetBase(Struct::sPrototype);
-	obj.mArraySize = mArraySize;
-	obj.mIsInteger = mIsInteger;
-	obj.mIsPointer = mIsPointer;
-	obj.mEncoding = mEncoding;
-	obj.mIsUnsigned = mIsUnsigned;
-	obj.mSize = mSize;
-	obj.mVarRef = mVarRef;
-	obj.mTypeOnly = mTypeOnly;
-	// -1 will identify a dynamic structure, no memory can be allocated to such
-	obj.mMemAllocated = aIsDynamic ? -1 : 0;
-	
-	// Allocate space in destination object.
-	if (!obj.SetInternalCapacity(mFieldCount))
-	{
-		obj.Release();
-		return NULL;
-	}
-
-	FieldType *fields = obj.mFields; // Newly allocated by above.
-	int failure_count = 0; // See comment below.
-	index_t i;
-
-	obj.mFieldCount = mFieldCount;
-	
-	for (i = 0; i < mFieldCount; ++i)
-	{
-		FieldType &dst = fields[i];
-		FieldType &src = mFields[i];
-
-		if ( !(dst.key = _tcsdup(src.key)) )
-		{
-			// Key allocation failed.
-			// Rather than trying to set up the object so that what we have
-			// so far is valid in order to break out of the loop, continue,
-			// make all fields valid and then allow them to be freed. 
-			++failure_count;
-		}
-		dst.mArraySize = src.mArraySize;
-		dst.mIsInteger = src.mIsInteger;
-		dst.mIsPointer = src.mIsPointer;
-		dst.mBitOffset = src.mBitOffset;
-		dst.mBitSize = src.mBitSize;
-		dst.mEncoding = src.mEncoding;
-		dst.mIsUnsigned = src.mIsUnsigned;
-		dst.mOffset = src.mOffset;
-		dst.mSize = src.mSize;
-		dst.mVarRef = src.mVarRef;
-		dst.mMemAllocated = aIsDynamic ? -1 : 0;
-
-	}
-	if (failure_count)
-	{
-		// One or more memory allocations failed.  It seems best to return a clear failure
-		// indication rather than an incomplete copy.  Now that the loop above has finished,
-		// the object's contents are at least valid and it is safe to free the object:
-		obj.Release();
-		delete objptr;
-		return NULL;
-	}
-	return &obj;
 }
 
 
@@ -764,18 +937,20 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 	ResultToken ResultToken;
 	
 	// used to clone a dynamic field or structure
-	Struct *objclone = NULL;
+	Struct *subobj = NULL;
+	IObject *aInitObject = NULL;
+	SIZE_T aSize;
 
+	UINT_PTR *aBkpMem = NULL;
+	SIZE_T aBkpSize;
+	UINT_PTR *aNewMem;
+	SIZE_T aNewSize;
 	// used for StrGet/StrPut
 	LPCVOID source_string;
 	int source_length;
 	DWORD flags = WC_NO_BEST_FIT_CHARS;
 	int length = -1;
 	int char_count;
-
-	// Identify that we need to release/delete field or structure object
-	bool deletefield = false;
-	bool releaseobj = false;
 
 	int param_count_excluding_rvalue = aParamCount;
 
@@ -792,49 +967,47 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 		// performance when assigning to a new key in any object which has a base object. (The cost may
 		// depend on how many key-value pairs each base object has.) Note that this doesn't affect meta-
 		// functions defined in *this* base object, since they were already invoked if present.
-		//if (IS_INVOKE_META)
-		//{
-		//	if (param_count_excluding_rvalue == 1)
-		//		// Prevent below from unnecessarily searching for a field, since it won't actually be assigned to.
-		//		// Relies on mBase->Invoke recursion using aParamCount and not param_count_excluding_rvalue.
-		//		param_count_excluding_rvalue = 0;
-		//	//else: Allow SET to operate on a field of an object stored in the target's base.
-		//	//		For instance, x[y,z]:=w may operate on x[y][z], x.base[y][z], x[y].base[z], etc.
-		//}
 	}
 	
 	if (!param_count_excluding_rvalue || (param_count_excluding_rvalue == 1 && TokenIsEmptyString(*aParam[0])))
 	{   // for struct[] and struct[""...] / struct[] := ptr and struct[""...] := ptr 
 		if (IS_INVOKE_SET)
 		{
-			if (TokenToObject(*aParam[param_count_excluding_rvalue]))
-			{   // Initialize structure using an object. e.g. struct[]:={x:1,y:2}
-				this->ObjectToStruct(TokenToObject(*aParam[param_count_excluding_rvalue]));
-				
-				// return struct object
-				aResultToken.symbol = SYM_OBJECT;
-				aResultToken.object = this;
-				this->AddRef();
+			if (aInitObject = TokenToObject(*aParam[param_count_excluding_rvalue]))
+			{   // Initialize structure using an object. e.g. struct[]:={x:1,y:2} and return our object to caller
+				this->ObjectToStruct(aInitObject);
+				aResultToken.Return(aInitObject);
+				aInitObject->AddRef();
 				return OK;
-
 			}
-			if (mMemAllocated > 0) // free allocated memory because we will assign a custom pointer
+			else if (mOwnHeap) // assign a custom pointer
 			{
-				free(mStructMem);
-				mMemAllocated = 0;
+				if (!TokenToInt64(*aParam[param_count_excluding_rvalue]))
+					return g_script->ScriptError(ERR_PARAM_INVALID);
+				if (HeapValidate(mHeap, 0, mStructMem))
+					HeapFree(mHeap, 0, mStructMem);
+				// assign new pointer to structure
+				mStructMem = (UINT_PTR *)TokenToInt64(*aParam[param_count_excluding_rvalue]);
 			}
-			// assign new pointer to structure
-			// releasing/deleting structure will not free that memory
-			mStructMem = (UINT_PTR *)TokenToInt64(*aParam[param_count_excluding_rvalue]);
+			else // assign new pointer to dynamic structure (field)
+			{
+				if (!TokenToInt64(*aParam[param_count_excluding_rvalue]))
+					return g_script->ScriptError(ERR_PARAM_INVALID);
+				aBkpMem = (UINT_PTR *)*((UINT_PTR*)((UINT_PTR)target));
+				if (aBkpMem && HeapValidate(mHeap, 0, aBkpMem))
+					HeapFree(mHeap, 0, aBkpMem);
+				*((UINT_PTR*)((UINT_PTR)target)) = (UINT_PTR)TokenToInt64(*aParam[param_count_excluding_rvalue]);
+				aResultToken.SetValue((__int64)*((UINT_PTR*)((UINT_PTR)target)));
+			}
 		}
-		// Return new structure address
-		aResultToken.symbol = SYM_INTEGER;
-		aResultToken.value_int64 = (__int64)mStructMem;
+		else if (mOwnHeap) // else return structure address
+			aResultToken.SetValue((__int64)mStructMem);
+		else // return pointer
+			aResultToken.SetValue((__int64)(UINT_PTR *)*((UINT_PTR*)((UINT_PTR)target)));
 		return OK;
 	}
 	else
-	{
-		// Array access, struct.1 or struct[1] or struct[1].x ...
+	{	// Array access, struct.1 or struct[1] or struct[1].x ...
 		if (TokenIsNumeric(*aParam[0]))
 		{
 			if (param_count_excluding_rvalue > 1 && TokenIsEmptyString(*aParam[1])) 
@@ -845,7 +1018,7 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 						aResultToken.value_int64 = SetPointer((UINT_PTR)TokenToInt64(*aParam[2]),(int)TokenToInt64(*aParam[0]));
 					else
 					{	// resolve pointer to pointer and set it
-						UINT_PTR *aDeepPointer = ((UINT_PTR*)((mIsPointer ? *target : (UINT_PTR)target) + (TokenToInt64(*aParam[0])-1)*(mSize/(mArraySize ? mArraySize : 1))));
+						UINT_PTR *aDeepPointer = ((UINT_PTR*)((mFields[0].mIsPointer ? *target : (UINT_PTR)target) + (TokenToInt64(*aParam[0])-1)*mFields[0].mSize));
 						for (int i = param_count_excluding_rvalue - 2;i && aDeepPointer;i--)
 							aDeepPointer = (UINT_PTR*)*aDeepPointer;
 						*aDeepPointer = (UINT_PTR)TokenToInt64(*aParam[aParamCount]);
@@ -855,10 +1028,10 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 				else // GET pointer
 				{
 					if (param_count_excluding_rvalue < 3)
-						aResultToken.value_int64 = ((mIsPointer ? *target : (UINT_PTR)target) + (TokenToInt64(*aParam[0])-1)*(mSize / (mArraySize ? mArraySize : 1)));
+						aResultToken.value_int64 = ((mFields[0].mIsPointer ? *target : (UINT_PTR)target) + (TokenToInt64(*aParam[0])-1)*mFields[0].mSize);
 					else
 					{	// resolve pointer to pointer
-						UINT_PTR *aDeepPointer = ((UINT_PTR*)((UINT_PTR)target + (TokenToInt64(*aParam[0])-1)*(mSize/(mArraySize ? mArraySize : 1))));
+						UINT_PTR *aDeepPointer = ((UINT_PTR*)((UINT_PTR)target + (TokenToInt64(*aParam[0])-1)*mFields[0].mSize));
 						for (int i = param_count_excluding_rvalue - 2;i && *aDeepPointer;i--)
 							aDeepPointer = (UINT_PTR*)*aDeepPointer;
 						aResultToken.value_int64 = (__int64)aDeepPointer;
@@ -867,194 +1040,47 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 				aResultToken.symbol = SYM_INTEGER;
 				return OK;
 			}
-			// Structure is a reference to variable and not a pointer, get size of structure
-			if (mVarRef) // && !mIsPointer)
-			{
-				Var2.symbol = SYM_VAR;
-				Var2.var = mVarRef;
-				// Variable is a structure object, copy size
-				if (TokenToObject(Var2))
-					ResultToken.value_int64 = ((Struct *)TokenToObject(Var2))->mSize;
-				else
-				{	// use sizeof to find out the size of structure
-					param[0]->symbol = SYM_STRING;
-					Var1.marker = TokenToString(*param[1]);
-					BIF_sizeof(ResultToken,param,1);
-				}
-			}
-			// Check if we have an array, if structure is not array and not pointer, assume array
-			if (mIsPointer) // resolve pointer
-				target = (UINT_PTR*)(*target + (TokenToInt64(*aParam[0]) - 1)*(mIsPointer>1 ? ptrsize : (mVarRef ? ResultToken.value_int64 : mSize / (mArraySize ? mArraySize : 1))));
-			else // amend target to memory of field, if it is not an array and not a pointer assume array
-				target = (UINT_PTR*)((UINT_PTR)target + (TokenToInt64(*aParam[0]) - 1)*(mVarRef ? ResultToken.value_int64 : mSize / (mArraySize ? mArraySize : 1)));
-			
-			// Structure has a variable reference and might be a pointer but not pointer to pointer
-			if (mVarRef && mIsPointer < 2)
-			{
-				Var2.symbol = SYM_VAR;
-				Var2.var = mVarRef;
-				// variable is a structure object, clone it
-				if (TokenToObject(Var2))
-				{
-					objclone = ((Struct *)TokenToObject(Var2))->Clone(true);
-					objclone->mStructMem = target;
-					if (mArraySize)
-					{
-						objclone->mArraySize = 0;
-						objclone->mSize = mSize / mArraySize;
-					}
-					// Object to Structure
-					if (IS_INVOKE_SET && TokenToObject(*aParam[1]))
-					{
-						objclone->ObjectToStruct(TokenToObject(*aParam[1]));
-						aResultToken.symbol = SYM_OBJECT;
-						aResultToken.object = objclone;
-						return OK;
-					}
-					// MULTIPARAM
-					if (param_count_excluding_rvalue > 1)
-					{
-						objclone->Invoke(aResultToken, aFlags, nullptr, ResultToken, aParam + 1, aParamCount - 1);
-						objclone->Release();
-						return OK;
-					}
-					aResultToken.object = objclone;
-					aResultToken.symbol = SYM_OBJECT;
-					return OK;
-				}
-				else
-				{
-					Var1.symbol = SYM_STRING;
-					Var1.marker = TokenToString(Var2);
-					Var2.symbol = SYM_INTEGER;
-					Var2.value_int64 = (UINT_PTR)target; 
-					if (objclone = Struct::Create(param,2))
-					{
-						Struct *tempobj = objclone;
-						objclone = objclone->Clone(true);
-						objclone->mStructMem = tempobj->mStructMem;
-						/*
-						if (mArraySize)
-						{
-							objclone->mArraySize = 0;
-							objclone->mSize = mSize / mArraySize;
-						}
-						*/
-						tempobj->Release();
-						if (IS_INVOKE_SET && TokenToObject(*aParam[1]))
-						{
-							objclone->ObjectToStruct(TokenToObject(*aParam[1]));
-							aResultToken.symbol = SYM_OBJECT;
-							aResultToken.object = objclone;
-							return OK;
-						}
-						if (param_count_excluding_rvalue > 1)
-						{
-							objclone->Invoke(aResultToken,aFlags, nullptr, ResultToken, aParam + 1, aParamCount - 1);
-							objclone->Release();
-							return OK;
-						}
-						aResultToken.object = objclone;
-						aResultToken.symbol = SYM_OBJECT;
-						return OK;
-					}
-					else
-						return INVOKE_NOT_HANDLED;
-				}
-			}
-			else
-			{
-				objclone = Clone(true);
-				releaseobj = true;
-				objclone->mStructMem = target;
-				if (!mArraySize && mIsPointer)
-					objclone->mIsPointer--;
-				/*else if (mArraySize)
-				{
-					objclone->mArraySize = 0;
-					objclone->mSize = mSize / mArraySize;
-				}
-				*/
-				if (objclone->mIsPointer || (aParamCount == 1 && !mTypeOnly))
-				{
-					if (param_count_excluding_rvalue > 1)
-					{	// MULTIPARAM
-						objclone->Invoke(aResultToken, aFlags, nullptr, ResultToken, aParam + 1, aParamCount - 1);
-						objclone->Release();
-						return OK;
-					}
-					aResultToken.symbol = SYM_OBJECT;
-					aResultToken.object = objclone;
-					return OK;
-				}
-				else if (!mTypeOnly)
-				{	// the given integer is now excluded from parameters
-					aParamCount--;param_count_excluding_rvalue--;aParam++;
-				}
-			}
-		}
-		if (mTypeOnly && !IS_INVOKE_CALL) // IS_INVOKE_CALL does not need the tentative field, it will handle it itself
-		{
-			if (mVarRef && !TokenIsEmptyString(*aParam[0]))
-			{
-				if (releaseobj)
-					objclone->Release();
-				Var2.symbol = SYM_VAR;
-				Var2.var = mVarRef;
-				if (TokenToObject(Var2) && (objclone = ((Struct *)TokenToObject(Var2))->Clone(true)))
-				{	// variable is a structure object
-					objclone->mStructMem = target;
-					objclone->Invoke(aResultToken, aFlags, nullptr, ResultToken, aParam, aParamCount);
-					objclone->Release();
-					return OK;
-				}
-				else
-				{
-					Var1.symbol = SYM_STRING;
-					Var1.marker = TokenToString(Var2);
-					Var2.symbol = SYM_INTEGER;
-					Var2.value_int64 = 0;
-					if (objclone = Struct::Create(param,2))
-					{	// create structure from variable
-						Struct* tempobj = objclone->Clone(true);
-						// resolve pointer
-						tempobj->mStructMem = mIsPointer ? (UINT_PTR*)*target : target;
-						tempobj->Invoke(aResultToken, aFlags, nullptr, aThisToken, aParam, aParamCount);
-						tempobj->Release();
-						objclone->Release();
-						return OK;
-					}
-					return INVOKE_NOT_HANDLED;
-				}
-			}
-			else // create field from structure
-			{
-				field = new FieldType();
-				deletefield = true;
-				if (objclone == NULL)
-				{	// use this structure
-					field->mMemAllocated = mMemAllocated;
-					field->mIsInteger = mIsInteger;
-					field->mIsPointer = mIsPointer;
-					field->mEncoding = mEncoding;
-					field->mIsUnsigned = mIsUnsigned;
-					field->mOffset = 0;
 
-					// structure with arrays so set to correct field size
-					field->mSize = mSize / (mArraySize ? mArraySize : 1);
-					field->mVarRef = 0;
-				}
-				else // use objclone created above
-				{
-					field->mMemAllocated = objclone->mMemAllocated;
-					field->mIsInteger = objclone->mIsInteger;
-					field->mIsPointer = objclone->mIsPointer;
-					field->mEncoding = objclone->mEncoding;
-					field->mIsUnsigned = objclone->mIsUnsigned;
-					field->mOffset = 0;
-					field->mSize = objclone->mSize / (objclone->mArraySize ? objclone->mArraySize : 1);
-				}
+			// struct must have unnamed field to be accessed dynamically, otherwise it is main structure
+			if (mOwnHeap && mMain)
+				subobj = mMain;
+			else if (mFieldCount > 1 || *mFields[0].key || !(subobj = mFields[0].mStruct))
+				return INVOKE_NOT_HANDLED;
+
+			// Get size of structure
+			if (mFields[0].mIsPointer)
+				aSize = ptrsize; // array of pointers or pointer to array
+			else
+				aSize = mFields[0].mSize; // array
+			if (mFields[0].mIsPointer && !mFields[0].mArraySize && !IS_INVOKE_CALL) // IS_INVOKE_CALL will need the address and not pointer
+			{	// Pointer to array
+				subobj->mStructMem = target = (UINT_PTR*)((UINT_PTR)*target + ((TokenToInt64(*aParam[0]) - 1)*aSize));
 			}
+			else // assume array
+				subobj->mStructMem = target = (UINT_PTR*)((UINT_PTR)target + ((TokenToInt64(*aParam[0]) - 1)*aSize));
+			
+
+			if (param_count_excluding_rvalue > 1)
+			{	// MULTIPARAM
+				subobj->Invoke(aResultToken, aFlags, nullptr, ResultToken, aParam + 1, aParamCount - 1);
+				return OK;
+			}
+			else if (IS_INVOKE_SET && (aInitObject = TokenToObject(*aParam[1])))
+			{	// init Structure from Object
+				subobj->ObjectToStruct(aInitObject);
+				aInitObject->AddRef();
+				aResultToken.SetValue(aInitObject);
+				return OK;
+			}
+			else if (IS_INVOKE_GET && !subobj->mIsValue)
+			{	// field is a structure
+				subobj->AddRef();
+				aResultToken.SetValue(subobj);
+				return OK;
+			}
+			
+			// structure has only 1 unnamed field (array or pointer
+			field = &subobj->mFields[0];
 		}
 		else if (!IS_INVOKE_CALL) // IS_INVOKE_CALL will handle the field itself
 			field = FindField(TokenToString(*aParam[0]));
@@ -1072,311 +1098,232 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 			++name; // ++ to exclude '_' from further consideration.
 		++aParam; --aParamCount; // Exclude the method identifier.  A prior check ensures there was at least one param in this case.
 		if (!_tcsicmp(name, _T("_Enum")))
-		{
-			if (deletefield) // we created the field from a structure
-				delete field;
-			if (releaseobj)
-				objclone->Release();
 			return __Enum(aResultToken, IF_NEWENUM, IT_CALL, aParam, aParamCount);
-		}
 		// if first function parameter is a field get it
-		if (!mTypeOnly && aParamCount && !TokenIsNumeric(*aParam[0]))
+		if (*mFields[0].key && aParamCount && !TokenIsNumeric(*aParam[0]))
 		{
 			if (field = FindField(TokenToString(*aParam[0])))
 			{	// exclude parameter in aParam
 				++aParam; --aParamCount;
 			}
 		}
-		aResultToken.symbol = SYM_INTEGER;  // mostly used
-		aResultToken.value_int64 = 0; // set default
-		if (!_tcsicmp(name, _T("SetCapacity")))
+		aResultToken.SetValue((__int64)0); // set default, mainly used
+		if (!_tcsicmp(name, _T("Size")))
+		{
+			if (aParamCount && ((field && (field->mArraySize || field->mIsPointer)) || mFields[0].mArraySize || mFields[0].mIsPointer) && TokenToInt64(*aParam[0]))
+				aResultToken.value_int64 = field ? field->mStruct->mFields[0].mSize : mFields[0].mSize;
+			else
+				aResultToken.value_int64 = field ? field->mSize : mStructSize;
+			return OK;
+		}
+		else if (!_tcsicmp(name, _T("SetCapacity")))
 		{	// Set strcuture its capacity or fields capacity
-			if (!field)
-			{
-				if (!aParamCount || !TokenIsNumeric(*aParam[0]) || !TokenToInt64(*aParam[0]) || TokenToInt64(*aParam[0]) == 0)
-				{	// 0 or no parameters were given to free memory
-					if (mMemAllocated > 0)
-					{
-						mMemAllocated = 0;
-						free(mStructMem);
-					}
-					if (deletefield) // we created the field from a structure
-						delete field;
-					if (releaseobj)
-						objclone->Release();
+			aBkpMem = NULL;
+			aBkpSize = 0;
+			if (!field && !*mFields[0].key && (mFields[0].mArraySize || mFields[0].mIsPointer))
+			{	// Set capacity for array
+				if (!aParamCount || !TokenToInt64(*aParam[0]))
+					return g_script->ScriptError(ERR_PARAM_INVALID);
+				aBkpMem = (UINT_PTR *)*((UINT_PTR*)((UINT_PTR)target + (field ? field->mOffset : 0) 
+						+ (TokenToInt64(*aParam[0])-1) * (field 
+							? (field->mIsPointer ? ptrsize : field->mStruct->mFields[0].mSize) 
+							: (mFields[0].mIsPointer ? ptrsize : mFields[0].mSize))));
+				if (aBkpMem && HeapValidate(mHeap, 0, aBkpMem))
+					aBkpSize = HeapSize(mHeap, 0, aBkpMem);
+				if (aParamCount == 1 || (aParamCount > 1 && TokenToInt64(*aParam[1]) == 0))
+				{	// 0 or no parameters were given -> free memory only
+					if (aBkpMem)
+						HeapFree(mHeap, 0, aBkpMem);
 					return OK;
 				}
-				UINT_PTR *aBkpMem = mStructMem;
-				int aBkpMemAlloc = mMemAllocated;
 				// allocate memory
-				if (mStructMem = (UINT_PTR*)malloc((size_t)TokenToInt64(*aParam[0])))
+				if (aNewMem = (UINT_PTR*)HeapAlloc(mHeap, HEAP_ZERO_MEMORY, aNewSize = TokenToInt64(*aParam[1])))
 				{
-					mMemAllocated = (int)TokenToInt64(*aParam[0]);
-					if (aBkpMemAlloc)	// fill existent structure
-						memmove(mStructMem,aBkpMem,mMemAllocated < aBkpMemAlloc ? mMemAllocated : aBkpMemAlloc);
-					else				// zero-fill structure
-						g_memset(mStructMem,NULL,(size_t)mMemAllocated);
-					aResultToken.value_int64 = mMemAllocated;
-					if (aBkpMemAlloc > 0)
-						free(aBkpMem);
+					if (aBkpMem)	// fill existent structure
+						memmove(aNewMem, aBkpMem, aNewSize < aBkpSize ? aNewSize : aBkpSize);
+					*((UINT_PTR*)((UINT_PTR)target + (field ? field->mOffset : 0)
+						+ (TokenToInt64(*aParam[0]) - 1) * (field
+							? (field->mIsPointer ? ptrsize : field->mStruct->mFields[0].mSize)
+							: (mFields[0].mIsPointer ? ptrsize : mFields[0].mSize)))) = (UINT_PTR)aNewMem;
+					aResultToken.value_int64 = aNewSize;
+					if (aBkpMem)
+						HeapFree(mHeap, 0, aBkpMem);
 				}
 				else
-					mMemAllocated = 0;
-			} 
-			else if (aParamCount)
-			{   // we must have two parmeters here since first parameter is field
-				if (!TokenIsNumeric(*aParam[0]) || !TokenToInt64(*aParam[0]) || TokenToInt64(*aParam[0]) == 0)
-				{
-					if (field->mMemAllocated > 0)
-					{
-						field->mMemAllocated = 0;
-						free(field->mStructMem);
-					}
-					if (deletefield) // we created the field from a structure
-						delete field;
-					if (releaseobj)
-						objclone->Release();
-					return OK; // not numeric
-				}
-				if (field->mMemAllocated > 0)
-					free(field->mStructMem);
-				// allocate memory and zero-fill
-				if (field->mStructMem = (UINT_PTR*)malloc((size_t)TokenToInt64(*aParam[0])))
-				{
-					field->mMemAllocated = (int)TokenToInt64(*aParam[0]);
-					g_memset(field->mStructMem, NULL, (size_t)field->mMemAllocated);
-					*((UINT_PTR*)((UINT_PTR)target + field->mOffset)) = (UINT_PTR)field->mStructMem;
-					aResultToken.value_int64 = field->mMemAllocated;
-				}
-				else
-					field->mMemAllocated = 0;
+					return g_script->ScriptError(ERR_OUTOFMEM, name);
+				return OK;
 			}
-			if (deletefield) // we created the field from a structure
-				delete field;
-			if (releaseobj)
-				objclone->Release();
-			return OK;
-		}
-		if (!_tcsicmp(name, _T("GetCapacity")))
-		{
-			if (field)
-				aResultToken.value_int64 = field->mMemAllocated;
+			else if (!field)
+			{	// change structure memory
+				if (!aParamCount || TokenToInt64(*aParam[0]) == 0)
+					// 0 or no parameters were given -> free memory not allowed since structure might become unusable
+					return g_script->ScriptError(ERR_PARAM1_REQUIRED, name);
+				else if (!mOwnHeap) // trying to set main structure memory from dynamic field
+					return g_script->ScriptError(ERR_INVALID_BASE, name);
+				if ((aBkpMem = mStructMem) && HeapValidate(mHeap, 0, target))
+					aBkpSize = HeapSize(mHeap, 0, aBkpMem);
+				// allocate memory
+				if (aNewMem = (UINT_PTR*)HeapAlloc(mHeap, HEAP_ZERO_MEMORY, aNewSize = TokenToInt64(*aParam[0])))
+				{
+					if (aBkpMem)	// fill existent structure
+						memmove(aNewMem, aBkpMem, aNewSize < aBkpSize ? aNewSize : aBkpSize);
+					mStructMem = (UINT_PTR*)aNewMem;
+					aResultToken.value_int64 = aNewSize;
+					if (aBkpMem)
+						HeapFree(mHeap, 0, aBkpMem);
+				}
+				else
+					return g_script->ScriptError(ERR_OUTOFMEM, name);
+			}
 			else
-				aResultToken.value_int64 = mMemAllocated;
-			if (deletefield) // we created the field from a structure
-				delete field;
-			if (releaseobj)
-				objclone->Release();
+			{	// e.g. struct.SetCapacity("field",100)
+				aBkpMem = (UINT_PTR *)*((UINT_PTR*)((UINT_PTR)target + (field ? field->mOffset : 0)));
+				if (aBkpMem && HeapValidate(mHeap, 0, aBkpMem))
+					aBkpSize = HeapSize(mHeap, 0, aBkpMem);
+				if (!aParamCount || TokenToInt64(*aParam[0]) == 0)
+				{	// 0 or no parameters were given -> free memory only
+					if (aBkpMem)
+						HeapFree(mHeap, 0, aBkpMem);
+					return OK;
+				}
+				// allocate memory
+				if (aNewMem = (UINT_PTR*)HeapAlloc(mHeap, HEAP_ZERO_MEMORY, aNewSize = TokenToInt64(*aParam[0])))
+				{
+					if (aBkpMem)	// fill existent structure
+						memmove(aNewMem, aBkpMem, aNewSize < aBkpSize ? aNewSize : aBkpSize);
+					*((UINT_PTR*)((UINT_PTR)target + (field ? field->mOffset : 0))) = (UINT_PTR)aNewMem;
+					aResultToken.value_int64 = aNewSize;
+					if (aBkpMem)
+						HeapFree(mHeap, 0, aBkpMem);
+				}
+				else
+					return g_script->ScriptError(ERR_OUTOFMEM, name);
+			}
 			return OK;
 		}
-		if (!_tcsicmp(name, _T("Offset")))
+		else if (!_tcsicmp(name, _T("Clone")))
 		{
 			if (field)
-				aResultToken.value_int64 = field->mOffset;
-			else if (aParamCount && TokenIsNumeric(*aParam[0]))
-				// calculate size if item is an array
-				aResultToken.value_int64 = mSize / (mArraySize ? mArraySize : 1) * (TokenToInt64(*aParam[0])-1);
-			if (deletefield) // we created the field from a structure
-				delete field;
-			if (releaseobj)
-				objclone->Release();
-			return OK;
-		}
-		if (!_tcsicmp(name, _T("IsPointer")))
-		{
-			if (field)
-				aResultToken.value_int64 = field->mIsPointer;
+			{
+				if (field->mStruct)
+					aResultToken.object = field->mStruct->CloneStruct(true);
+				else
+					return g_script->ScriptError(ERR_INVALID_BASE);
+			}
 			else
-				aResultToken.value_int64 = mIsPointer;
-			if (deletefield) // we created the field from a structure
-				delete field;
-			if (releaseobj)
-				objclone->Release();
+				aResultToken.object = this->CloneStruct(true);
+			if (!aResultToken.object)
+				return g_script->ScriptError(ERR_OUTOFMEM);
+			aResultToken.symbol = SYM_OBJECT;
 			return OK;
 		}
-		if (!_tcsicmp(name, _T("Encoding")))
+		else if (!_tcsicmp(name, _T("Encoding")))
 		{
 			if (field)
 				aResultToken.value_int64 = field->mEncoding == 65535 ? -1 : field->mEncoding;
-			else
-				aResultToken.value_int64 = mEncoding == 65535 ? -1 : mEncoding;
-			if (deletefield) // we created the field from a structure
-				delete field;
-			if (releaseobj)
-				objclone->Release();
+			else if (!*mFields[0].key)
+				aResultToken.value_int64 = mFields[0].mEncoding == 65535 ? -1 : mFields[0].mEncoding;
 			return OK;
 		}
-		if (!_tcsicmp(name, _T("GetPointer")))
+		else if (!_tcsicmp(name, _T("GetCapacity")))
 		{
-			if (!field && aParamCount && mIsPointer)
-			{	// resolve array item
-				if (mArraySize && TokenIsNumeric(*aParam[0]))
-					aResultToken.value_int64 = *((UINT_PTR*)((UINT_PTR)target + ((mIsPointer ? ptrsize : (mSize/mArraySize)) * (TokenToInt64(*aParam[0])-1))));
-				else
-					aResultToken.value_int64 = *target;
-			}
-			else if (field)
-				aResultToken.value_int64 = *((UINT_PTR*)((UINT_PTR)target + field->mOffset));
-			if (deletefield) // we created the field from a structure
-				delete field;
-			if (releaseobj)
-				objclone->Release();
-			return OK;
-		}
-		if (!_tcsicmp(name, _T("Fill")))
-		{
-			if (!field) // only allow to fill main structure
+			if (aParamCount)
 			{
-				if (aParamCount && TokenIsNumeric(*aParam[0]))
-					g_memset(objclone ? objclone->mStructMem : mStructMem,TokenIsNumeric(*aParam[0]),mSize);
-				else if (aParamCount && *TokenToString(*aParam[0]))
-					g_memset(objclone ? objclone->mStructMem : mStructMem, *TokenToString(*aParam[0]), mSize);
-				else
-					g_memset(objclone ? objclone->mStructMem : mStructMem, NULL, mSize);
-			}
-			if (deletefield) // we created the field from a structure
-				delete field;
-			if (releaseobj)
-				objclone->Release();
-			return OK;
-		}
-		if (!_tcsicmp(name, _T("GetAddress")))
-		{
-			if (!field)
-			{
-				if (mArraySize && aParamCount && TokenIsNumeric(*aParam[0]))
-					aResultToken.value_int64 = (UINT_PTR)target + (mSize / mArraySize * (TokenToInt64(*aParam[0])-1));
-				else
-					aResultToken.value_int64 = (UINT_PTR)target;
+				if ((field && !field->mArraySize) || (!field && !mFields[0].mArraySize && mFields[0].key) || !TokenToInt64(*aParam[0]))
+					return g_script->ScriptError(ERR_PARAM_INVALID, TokenToString(*aParam[0]));
+				aBkpMem = (UINT_PTR *)*((UINT_PTR*)((UINT_PTR)target + (field ? field->mOffset : 0)
+					+ (TokenToInt64(*aParam[0]) - 1) * (field
+						? (field->mIsPointer ? ptrsize : field->mStruct->mFields[0].mSize)
+						: (mFields[0].mIsPointer ? ptrsize : mFields[0].mSize))));
+				if (aBkpMem && HeapValidate(mHeap, 0, aBkpMem))
+					aResultToken.value_int64 = HeapSize(mHeap, 0, aBkpMem);
 			}
 			else
-				aResultToken.value_int64 = (UINT_PTR)target + field->mOffset;
-			if (deletefield) // we created the field from a structure
-				delete field;
-			if (releaseobj)
-				objclone->Release();
+			{
+				aBkpMem = (UINT_PTR *)*((UINT_PTR*)((UINT_PTR)target + (field ? field->mOffset : 0)));
+				if (aBkpMem && HeapValidate(mHeap, 0, aBkpMem))
+					aResultToken.value_int64 = HeapSize(mHeap, 0, aBkpMem);
+			}
 			return OK;
 		}
-		if (!_tcsicmp(name, _T("Size")))
+		else if (!_tcsicmp(name, _T("GetAddress")))
 		{
-			if (!field)
+			if (aParamCount)
 			{
-				if (mArraySize && aParamCount && TokenIsNumeric(*aParam[0]))
-					// we do not care which item was requested because all are same size
-					aResultToken.value_int64 = mSize / mArraySize;
-				else
-					aResultToken.value_int64 = mSize;
+				if ((field && !field->mArraySize && !field->mIsPointer) || (!field && !mFields[0].mArraySize && !mFields[0].mIsPointer) || !TokenToInt64(*aParam[0]))
+					return g_script->ScriptError(ERR_PARAM_INVALID, TokenToString(*aParam[0]));
+				aResultToken.value_int64 = (UINT_PTR)target + (field ? field->mOffset : 0)
+					+ ((TokenToInt64(*aParam[0]) - 1) * (field
+						? (field->mIsPointer ? ptrsize : field->mStruct->mFields[0].mSize)
+						: (mFields[0].mIsPointer ? ptrsize : mFields[0].mSize)));
 			}
 			else
-				aResultToken.value_int64 = field->mSize;
-			if (deletefield) // we created the field from a structure
-				delete field;
-			if (releaseobj)
-				objclone->Release();
+				aResultToken.value_int64 = (UINT_PTR)target + (field ? field->mOffset : 0);
 			return OK;
 		}
-		if (!_tcsicmp(name, _T("CountOf")))
+		else if (!_tcsicmp(name, _T("GetPointer")))
+		{
+			if (aParamCount)
+			{
+				if ((field && !field->mIsPointer) || (!field && !mFields[0].mIsPointer) || !TokenToInt64(*aParam[0]))
+					return g_script->ScriptError(ERR_PARAM_INVALID, TokenToString(*aParam[0]));
+				aResultToken.value_int64 = *((UINT_PTR*)((UINT_PTR)target + (field ? field->mOffset : 0)
+					+ ((TokenToInt64(*aParam[0]) - 1) * (field
+						? (field->mIsPointer ? ptrsize : field->mStruct->mFields[0].mSize)
+						: (mFields[0].mIsPointer ? ptrsize : mFields[0].mSize)))));
+			}
+			else
+				aResultToken.value_int64 = *((UINT_PTR*)((UINT_PTR)target + (field ? field->mOffset : 0)));
+			return OK;
+		}
+		else if (!_tcsicmp(name, _T("IsPointer")))
+		{
+			aResultToken.value_int64 = field ? field->mIsPointer : mFields[0].mIsPointer;
+			return OK;
+		}
+		else if (!_tcsicmp(name, _T("Offset")))
+		{
+			if (aParamCount)
+			{
+				if ((field && !field->mArraySize) || (!field && !mFields[0].mArraySize && !mFields[0].mIsPointer) || !TokenToInt64(*aParam[0]))
+					return g_script->ScriptError(ERR_PARAM_INVALID, TokenToString(*aParam[0]));
+				aResultToken.value_int64 = (field ? field->mOffset : 0)
+					+ (TokenToInt64(*aParam[0]) - 1) * (field
+						? (field->mIsPointer ? ptrsize : field->mStruct->mFields[0].mSize)
+						: (mFields[0].mIsPointer ? ptrsize : mFields[0].mSize));
+			}
+			else
+				aResultToken.value_int64 = field ? field->mOffset : 0;
+			return OK;
+		}
+		else if (!_tcsicmp(name, _T("CountOf")))
 		{
 			if (!field)
-				aResultToken.value_int64 = mArraySize;
+				aResultToken.value_int64 = mFields[0].mArraySize;
 			else
 				aResultToken.value_int64 = field->mArraySize;
-			if (deletefield) // we created the field from a structure
-				delete field;
-			if (releaseobj)
-				objclone->Release();
 			return OK;
 		}
-		if (!_tcsicmp(name, _T("HasMethod")))
+		else if (!_tcsicmp(name, _T("HasMethod")))
 		{
-			static LPTSTR aNeedle[] = { _T("__enum"), _T("clone"), _T("countof"), _T("encoding"), _T("fill"), _T("getaddress"), _T("getcapacity"), _T("getpointer"), _T("hasmethod"), _T("ispointer")
+			static LPTSTR aNeedle[] = { _T("__enum"), _T("clone"), _T("countof"), _T("encoding"), /*_T("fill"),*/ _T("getaddress"), _T("getcapacity"), _T("getpointer"), _T("hasmethod"), _T("ispointer")
 									, _T("new"), _T("setcapacity"), _T("offset"), _T("size") };
 			size_t aFoundLen = NULL;
 			if (InStrAny(_tcslwr(TokenToString(*aParam[0])), aNeedle, _countof(aNeedle), aFoundLen))
 				aResultToken.value_int64 = 1;
-			else
-				aResultToken.value_int64 = 0;
-			if (deletefield) // we created the field from a structure
-				delete field;
-			if (releaseobj)
-				objclone->Release();
-			return OK;
-		}
-		if (!_tcsicmp(name, _T("Clone")) || !_tcsicmp(name, _T("New")))
-		{
-			if (!field)
-			{
-				if (!releaseobj) // else we have a clone already
-					objclone = this->Clone();
-			}
-			else
-			{
-				Struct* tempobj = objclone;
-				if (releaseobj) // release object, it is not requred anymore
-				{
-					objclone = objclone->CloneField(field);
-					tempobj->Release();
-				}
-				else
-					objclone = this->CloneField(field);
-			}
-			if (aParamCount)
-			{	// structure pointer and / or init object were given
-				if (TokenIsNumeric(*aParam[0]))
-				{
-					objclone->mStructMem = (UINT_PTR*)TokenToInt64(*aParam[0]);
-					objclone->mMemAllocated = 0;
-					if (aParamCount > 1 && TokenToObject(*aParam[1]))
-						objclone->ObjectToStruct(TokenToObject(*aParam[1]));
-				} 
-				else if (TokenToObject(*aParam[0]))
-				{
-					objclone->mStructMem = (UINT_PTR*)malloc(objclone->mSize);
-					objclone->mMemAllocated = objclone->mSize;
-					g_memset(objclone->mStructMem, NULL, objclone->mSize);
-					objclone->ObjectToStruct(TokenToObject(*aParam[0]));
-				}
-			}
-			else
-			{
-				objclone->mStructMem = (UINT_PTR*)malloc(objclone->mSize);
-				objclone->mMemAllocated = objclone->mSize;
-				g_memset(objclone->mStructMem, NULL, objclone->mSize);
-			}
-			// small fix for _New to work properly because aThisToken contains the new object
-			if (!_tcsicmp(name, _T("_New")))
-			{
-				if (aThisToken.symbol == SYM_OBJECT)
-					aThisToken.object->Release();
-				aThisToken.SetValue(objclone);
-				objclone->AddRef();
-			}
-			else
-				objclone->ObjectToStruct(this);
-			aResultToken.symbol = SYM_OBJECT;
-			aResultToken.object = objclone;
-			if (deletefield) // we created the field from a structure
-				delete field;
-			// do not release objclone because it is returned
 			return OK;
 		}
 		// For maintainability: explicitly return since above has done ++aParam, --aParamCount.
-		if (deletefield) // we created the field from a structure
-			delete field;
-		if (releaseobj)
-			objclone->Release();
-		aResultToken.symbol = SYM_STRING;  
-		aResultToken.marker = _T(""); // identify that method was not found
+		aResultToken.SetValue(_T("")); // identify that method was not found
 		return INVOKE_NOT_HANDLED;
 	}
 	else if (!field)
-	{	// field was not found
-		if (releaseobj)
-			objclone->Release();
-		// The structure doesn't handle this method/property.
+	{	// field was not found. The structure doesn't handle this method/property.
 		_o_throw(ERR_UNKNOWN_PROPERTY, aParamCount && *TokenToString(*aParam[0]) ? TokenToString(*aParam[0]) : g->ExcptDeref ? g->ExcptDeref->marker : _T(""));
 		return INVOKE_NOT_HANDLED;
 	}
+	else if (!target)
+		return g_script->ScriptError(ERR_INVALID_USAGE);
 
 
 	// MULTIPARAM[x,y] -- may be SET[x,y]:=z or GET[x,y], but always treated like GET[x].
@@ -1394,7 +1341,7 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 				}
 				else // set pointer to pointer
 				{
-					UINT_PTR *aDeepPointer = ((UINT_PTR*)((mIsPointer ? *target : (UINT_PTR)target) + field->mOffset));
+					UINT_PTR *aDeepPointer = ((UINT_PTR*)((mFields[0].mIsPointer ? *target : (UINT_PTR)target) + field->mOffset));
 					for (int i = param_count_excluding_rvalue - 2;i && aDeepPointer;i--)
 						aDeepPointer = (UINT_PTR*)*aDeepPointer;
 					*aDeepPointer = (UINT_PTR)TokenToInt64(*aParam[aParamCount]);
@@ -1404,42 +1351,21 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 			else // GET pointer
 			{
 				if (param_count_excluding_rvalue < 3)
-					aResultToken.value_int64 = (mIsPointer ? *target : (UINT_PTR)target) + field->mOffset;
+					aResultToken.value_int64 = (mFields[0].mIsPointer ? *target : (UINT_PTR)target) + field->mOffset;
 				else
 				{	// get pointer to pointer
-					UINT_PTR *aDeepPointer = ((UINT_PTR*)((mIsPointer ? *target : (UINT_PTR)target) + field->mOffset));
+					UINT_PTR *aDeepPointer = ((UINT_PTR*)((mFields[0].mIsPointer ? *target : (UINT_PTR)target) + field->mOffset));
 					for (int i = param_count_excluding_rvalue - 2;i && *aDeepPointer;i--)
 						aDeepPointer = (UINT_PTR*)*aDeepPointer;
 					aResultToken.value_int64 = (__int64)aDeepPointer;
 				}
 			}
-			if (deletefield) // we created the field from a structure
-				delete field;
-			if (releaseobj)
-				objclone->Release();
 			return OK;
 		}
-		else // clone field to object and invoke again
+		else // advandce param and invoke again
 		{
-			if (releaseobj)
-				objclone->Release();
-			objclone = CloneField(field,true);
-			/*
-			if (!field->mArraySize && field->mIsPointer)
-			{
-				objclone->mStructMem = (UINT_PTR*)*((UINT_PTR*)((UINT_PTR)target + field->mOffset));
-				//objclone->mIsPointer--;
-				if (--objclone->mIsPointer) // it is a pointer to array of pointers, set mArraySize to 1 to identify an array
-					objclone->mArraySize = 1;
-			}
-			else
-				objclone->mStructMem = (UINT_PTR*)((UINT_PTR)target + (TokenToInt64(*aParam[1])-1)*(field->mIsPointer ? ptrsize : field->mSize));
-			*/
-			objclone->mStructMem = (UINT_PTR*)((UINT_PTR)target + field->mOffset);
-			objclone->Invoke(aResultToken, aFlags, nullptr, ResultToken, aParam + 1, aParamCount - 1);
-			objclone->Release();
-			if (deletefield) // we created the field from a structure
-				delete field;
+			field->mStruct->mStructMem = (UINT_PTR*)((UINT_PTR)target + field->mOffset);
+			field->mStruct->Invoke(aResultToken, aFlags, nullptr, ResultToken, aParam + 1, aParamCount - 1);
 			return OK;
 		}
 	} // MULTIPARAM[x,y] x[y]
@@ -1447,58 +1373,45 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 	// SET
 	else if (IS_INVOKE_SET)
 	{
-		if (field->mVarRef && TokenToObject(*aParam[1]))
-		{ // field is a structure, assign objct to structure
-			if (releaseobj)
-				objclone->Release();
-			objclone = this->CloneField(field,true);
-			objclone->mStructMem = (UINT_PTR*)((UINT_PTR)target + field->mOffset);
-			objclone->ObjectToStruct(TokenToObject(*aParam[1]));
-			aResultToken.symbol = SYM_OBJECT;
-			aResultToken.object = objclone;
-			return OK;
+		if (field->mStruct)
+		{	// field is structure
+			if (aInitObject = TokenToObject(*aParam[1]))
+			{ // Init structure from objct
+				field->mStruct->mStructMem = ((UINT_PTR*)((UINT_PTR)target + field->mOffset));
+				field->mStruct->ObjectToStruct(aInitObject);
+				aResultToken.SetValue(aInitObject);
+				aInitObject->AddRef();
+				return OK;
+			} 
+			else // trying to assign a value to structure and not field -> error
+				return g_script->ScriptError(ERR_INVALID_ASSIGNMENT);
 		}
-		if (mIsPointer && objclone == NULL)
-		{   // resolve pointer
-			for (int i = mIsPointer;i;i--)
-				target = (UINT_PTR*)*target;
-		}
-		else if (objclone && objclone->mIsPointer)
-		{	// resolve pointer for objclone
-			for (int i = objclone->mIsPointer;i;i--)
-				target = (UINT_PTR*)*target;
-		}
-		if (field->mIsPointer)
-		{   // field is a pointer, clone to structure and invoke again
-			if (releaseobj)
-				objclone->Release();
-			objclone = this->CloneField(field,true);
-			objclone->mIsPointer--;
-			objclone->mStructMem = (UINT_PTR*)*((UINT_PTR*)((UINT_PTR)target + field->mOffset));
-			objclone->Invoke(aResultToken, aFlags, nullptr, aThisToken, aParam, aParamCount);
-			objclone->Release();
-			return OK;
-		}
-
 		// StrPut (code taken from BIF_StrPut())
 		if (field->mEncoding != 65535)
 		{	// field is [T|W|U]CHAR or LP[TC]STR, set get character or string
 			source_string = (LPCVOID)TokenToString(*aParam[1], aResultToken.buf);
 			source_length = (int)((aParam[1]->symbol == SYM_VAR) ? aParam[1]->var->CharLength() : _tcslen((LPCTSTR)source_string));
-			if (field->mSize > 2 && (!target || !*((UINT_PTR*)((UINT_PTR)target + field->mOffset)) || (field->mMemAllocated > 0 && (field->mMemAllocated < ((source_length + 1) * (int)(field->mEncoding == 1200 ? sizeof(WCHAR) : sizeof(CHAR)))))))
-			{   // no memory allocated yet, allocate now
-				if (field->mMemAllocated == -1 && (!target || !*((UINT_PTR*)((UINT_PTR)target + field->mOffset)))){
-					if (deletefield) // we created the field from a structure so no memory can be allocated
-						delete field;
-					if (releaseobj)
-						objclone->Release();
-					return g_script->ScriptError(ERR_MUST_INIT_STRUCT);
+			aNewSize = (source_length + 1) * (field->mEncoding == 1200 ? sizeof(WCHAR) : sizeof(CHAR));
+			if (field->mSize > 2)
+			{
+				aBkpMem = (UINT_PTR*)*((UINT_PTR*)((UINT_PTR)target + field->mOffset));
+				if (aBkpMem && HeapValidate(mHeap, 0, aBkpMem))
+				{
+					if (aNewSize != HeapSize(mHeap, 0, aBkpMem))
+					{
+						if (!(aNewMem = (UINT_PTR*)HeapReAlloc(mHeap, HEAP_ZERO_MEMORY, aBkpMem, aNewSize)))
+							return g_script->ScriptError(ERR_OUTOFMEM, field->key);
+						else
+							*((UINT_PTR*)((UINT_PTR)target + field->mOffset)) = (UINT_PTR)aNewMem;
+					}
 				}
-				else if (field->mMemAllocated > 0)  // free previously allocated memory
-					free(field->mStructMem);
-				field->mMemAllocated = (source_length + 1) * (field->mEncoding == 1200 ? sizeof(WCHAR) : sizeof(CHAR)); // + 1 for terminating character
-				field->mStructMem = (UINT_PTR*)malloc(field->mMemAllocated);
-				*((UINT_PTR*)((UINT_PTR)target + field->mOffset)) = (UINT_PTR)field->mStructMem;
+				else
+				{
+					if (!(aNewMem = (UINT_PTR*)HeapAlloc(mHeap, HEAP_ZERO_MEMORY, aNewSize)))
+						return g_script->ScriptError(ERR_OUTOFMEM, field->key);
+					else
+						*((UINT_PTR*)((UINT_PTR)target + field->mOffset)) = (UINT_PTR)aNewMem;
+				}
 			}
 			if (field->mSize > 2) // not [T|W|U]CHAR
 				source_length++; // for terminating character
@@ -1530,12 +1443,7 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 						}
 						if (!char_count)
 						{
-							aResultToken.symbol = SYM_STRING;
-							aResultToken.marker = _T("");
-							if (deletefield) // we created the field from a structure
-								delete field;
-							if (releaseobj)
-								objclone->Release();
+							aResultToken.SetValue(_T(""));
 							return OK;
 						}
 					}
@@ -1551,16 +1459,12 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 						((LPSTR)*(UINT_PTR*)((UINT_PTR)target + field->mOffset))[char_count] = '\0';
 				}
 			}
-			aResultToken.symbol = SYM_STRING;
-			aResultToken.marker = (LPTSTR)source_string;
+			aResultToken.SetValue((LPTSTR)source_string);
 		}
 		else // NumPut
-		{	 // code taken from BIF_NumPut
-//#define BIT_MASK(n) (~( ((~0ull) << ((n)-1)) << 1 )) // this makro is included in setbits and getbits
+		{	 // code taken from BIF_NumPut and extended to handle bits
 #define setbits(var, val, typesize, offset, size) (var |= ((val < 0 ? val + (2 << (size - 1)) : val) << offset) & (~( ((~0ull) << ((offset + size)-1)) << 1 )))
-//#define setbits(var, val, typesize, offset, size) (var |= ((val < 0 ? val + (2 << (size - 1)) : val) << offset) & (~( ((~0ull) << ((size)-1)) << 1 )))
 #define clearbit(val, pos) ((val) &= ~(1 << (pos)))
-//#define getbits(val, typesize, offset, size) (((val >> offset) & (~( ((~0ull) << ((size)-1)) << 1 ))) - ((!!((val) & (1i64 << (offset + size - 1)))) ? (2 << (size - 1)) : 0))
 #define getbits(val, typesize, offset, size, isunsigned) (((val >> offset) & (~( ((~0ull) << ((size)-1)) << 1 ))) - ((!isunsigned && (!!((val) & (1i64 << (offset + size - 1))))) ? (2 << (size - 1)) : 0))
 			if (field->mBitSize)
 			{
@@ -1652,97 +1556,33 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 					aResultToken.value_int64 = *((unsigned char *)((UINT_PTR)target + field->mOffset));
 				}
 		}
-		if (deletefield) // we created the field from a structure
-			delete field;
-		if (releaseobj)
-			objclone->Release();
 		return OK;
 	}
 
 	// GET
 	else if (field)
 	{
-		if (field->mArraySize || field->mVarRef)
-		{	// filed is an array or variable reference, return a structure object.
-			if (field->mArraySize || field->mIsPointer)
-			{   // field is array or a pointer to variable
-				objclone = CloneField(field,true);
-				objclone->mStructMem = (UINT_PTR *)((UINT_PTR)target + field->mOffset);
-				aResultToken.symbol = SYM_OBJECT;
-				aResultToken.object = objclone;
-			}
-			else // field is refference to a variable and not pointer, create structure
-			{
-				Var1.symbol = SYM_STRING;
-				Var2.symbol = SYM_VAR;
-				Var2.var = field->mVarRef;
-
-				if (TokenToObject(Var2))
-				{	// Variable is a structure object
-					objclone = ((Struct *)TokenToObject(Var2))->Clone(true);
-					objclone->mStructMem = (UINT_PTR *)((UINT_PTR)target + (UINT_PTR)field->mOffset);
-					aResultToken.object = objclone;
-					aResultToken.symbol = SYM_OBJECT;
-				}
-				else // Variable is a string definition
-				{
-					Var1.marker = TokenToString(Var2);
-					Var2.symbol = SYM_INTEGER;
-					Var2.value_int64 = field->mIsPointer ? *(UINT_PTR*)((UINT_PTR)target + field->mOffset) : (UINT_PTR)((UINT_PTR)target + field->mOffset);
-					if (objclone = Struct::Create(param,2))
-					{	// create and clone object because it is created dynamically
-						Struct *tempobj = objclone;
-						objclone = objclone->Clone(true);
-						objclone->mStructMem = tempobj->mStructMem;
-						tempobj->Release();
-						aResultToken.symbol = SYM_OBJECT;
-						aResultToken.object = objclone;
-					}
-				}
-			}
-			if (deletefield) // we created the field from a structure
-				delete field;
-			if (releaseobj)
-				objclone->Release();
+		if (field->mStruct)
+		{	// field is structure
+			field->mStruct->mStructMem = (UINT_PTR *)((UINT_PTR)target + field->mOffset);
+			aResultToken.SetValue(field->mStruct);
+			field->mStruct->AddRef();
 			return OK;
-		}
-		if (mIsPointer && objclone == NULL)
-		{	// resolve pointer of main structure
-			for (int i = mIsPointer;i;i--)
-				target = (UINT_PTR*)*target;
-		}
-		else if (objclone && objclone->mIsPointer)
-		{	// resolve pointer for objclone
-			for (int i = objclone->mIsPointer;i;i--)
-				target = (UINT_PTR*)*target;
-		}
-		if (field->mIsPointer)
-		{	// field is a pointer we need to return an object	
-			if (releaseobj)
-				objclone->Release();
-			objclone = this->CloneField(field,true);
-			objclone->mStructMem = (UINT_PTR*)((UINT_PTR*)((UINT_PTR)target + field->mOffset));
-			aResultToken.symbol = SYM_OBJECT;
-			aResultToken.object = objclone;
-			return OK;
-		}
+		} 
 
 		// StrGet (code stolen from BIF_StrGet())
 		if (field->mEncoding != 65535)
 		{
+			aResultToken.symbol = SYM_STRING;
 			if (field->mEncoding == 1200) // no conversation required
 			{
 				if (field->mSize > 2 && !*((UINT_PTR*)((UINT_PTR)target + field->mOffset)))
 				{
-					if (deletefield) // we created the field from a structure
-						delete field;
-					if (releaseobj)
-						objclone->Release();
+					aResultToken.SetValue(_T(""));
 					return OK;
 				}
-				aResultToken.symbol = SYM_STRING;
 				if (!TokenSetResult(aResultToken, (LPCWSTR)(field->mSize > 2 ? *((UINT_PTR*)((UINT_PTR)target + field->mOffset)) : ((UINT_PTR)target + field->mOffset)),field->mSize < 4 ? 1 : -1))
-					aResultToken.marker = _T("");
+					aResultToken.SetValue(_T(""));
 			}
 			else
 			{
@@ -1753,11 +1593,8 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 				conv_length = MultiByteToWideChar(field->mEncoding, 0, (LPCSTR)(field->mSize > 2 ? *((UINT_PTR*)((UINT_PTR)target + field->mOffset)) : ((UINT_PTR)target + field->mOffset)), length, NULL, 0);
 				if (!TokenSetResult(aResultToken, NULL, conv_length)) // DO NOT SUBTRACT 1, conv_length might not include a null-terminator.
 				{
-					if (deletefield) // we created the field from a structure
-						delete field;
-					if (releaseobj)
-						objclone->Release();
-					return OK; // Out of memory.
+					aResultToken.SetValue(_T(""));
+					return OK;
 				}
 				conv_length = MultiByteToWideChar(field->mEncoding, 0, (LPCSTR)(field->mSize > 2 ? *((UINT_PTR*)((UINT_PTR)target + field->mOffset)) : ((UINT_PTR)target + field->mOffset)), length, aResultToken.marker, conv_length);
 
@@ -1767,7 +1604,6 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 					aResultToken.marker[conv_length] = '\0';
 				aResultToken.marker_length = conv_length; // Update this in case TokenSeResult used mem_to_free.
 			}
-			aResultToken.symbol = SYM_STRING;
 		}
 		else // NumGet (code stolen from BIF_NumGet())
 		{
@@ -1846,14 +1682,8 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 				aResultToken.symbol = SYM_INTEGER;
 			}
 		}
-		if (deletefield) // we created the field from a structure
-			delete field;
-		if (releaseobj)
-			objclone->Release();
 		return OK;
 	}
-	if (releaseobj)
-		objclone->Release();
 	// The structure doesn't handle this method/property.
 	_o_throw(ERR_UNKNOWN_PROPERTY, aParamCount && *TokenToString(*aParam[0]) ? TokenToString(*aParam[0]) : g->ExcptDeref ? g->ExcptDeref->marker : _T(""));
 	return INVOKE_NOT_HANDLED;
@@ -1893,7 +1723,7 @@ ResultType Struct::__Enum(ResultToken &aResultToken, int aID, int aFlags, ExprTo
 
 ResultType Struct::GetEnumItem(UINT aIndex, Var *aKey, Var *aVal)
 {
-	if (aIndex < mFieldCount)
+	if (*mFields[0].key && aIndex < mFieldCount)
 	{
 		FieldType &field = mFields[aIndex];
 		if (aKey)
@@ -1916,11 +1746,13 @@ ResultType Struct::GetEnumItem(UINT aIndex, Var *aKey, Var *aVal)
 				case SYM_FLOAT:		aVal->Assign(aResultToken.value_double);		break;
 				case SYM_OBJECT:	aVal->Assign(aResultToken.object);			break;
 			}
+			if (aResultToken.symbol == SYM_OBJECT)
+				aResultToken.object->Release();
 			delete aVarToken;
 		}
 		return CONDITION_TRUE;
 	}
-	else if (aIndex < mArraySize)
+	else if (aIndex < mFields[0].mArraySize || (aIndex == 0 && mFields[0].mIsPointer))
 	{	// structure is an array
 		if (aKey)
 			aKey->Assign((VarSizeType) aIndex + 1); // aIndex starts at 1
@@ -1941,63 +1773,11 @@ ResultType Struct::GetEnumItem(UINT aIndex, Var *aKey, Var *aVal)
 				case SYM_FLOAT:		aVal->Assign(aResultToken.value_double);		break;
 				case SYM_OBJECT:	aVal->Assign(aResultToken.object);			break;
 			}
+			if (aResultToken.symbol == SYM_OBJECT)
+				aResultToken.object->Release();
 			delete aVarToken;
 		}
-		return CONDITION_FALSE;
+		return CONDITION_TRUE;
 	}
 	return CONDITION_FALSE;
 }
-
-
-Struct::FieldType *Struct::Insert(LPTSTR key, index_t &at,USHORT aIspointer,int aOffset,int aArrsize,Var *variableref,int aFieldsize,bool aIsinteger,bool aIsunsigned,USHORT aEncoding, BYTE aBitSize,BYTE aBitField )
-// Inserts a single field with the given key at the given offset.
-// Caller must ensure 'at' is the correct offset for this key.
-{
-	if (!*key)
-	{
-		// empty key = only type was given so assign all to structure object
-		// do not assign size here since it will be assigned in StructCreate later
-		mArraySize = aArrsize;
-		mIsPointer = aIspointer;
-		mIsInteger = aIsinteger;
-		mIsUnsigned = aIsunsigned;
-		mEncoding = aEncoding;
-		mVarRef = variableref;
-		return (FieldType*)true;
-	}
-	if (this->FindField(key))
-	{
-		g_script->ScriptError(ERR_DUPLICATE_DECLARATION, key);
-		return NULL;
-	}
-	if (mFieldCount == mFieldCountMax && !Expand()  // Attempt to expand if at capacity.
-		|| !(key = _tcsdup(key)))  // Attempt to duplicate key-string.
-	{	// Out of memory.
-		g_script->ScriptError(ERR_OUTOFMEM);
-		return NULL;
-	}
-	// There is now definitely room in mFields for a new field.
-
-	FieldType &field = mFields[at++];
-	if (at < mFieldCount)
-		// Move existing fields to make room.
-		memmove(&field + 1, &field, (size_t)(mFieldCount - at) * sizeof(FieldType));
-	++mFieldCount; // Only after memmove above.
-	
-	// Update key-type offsets based on where and what was inserted; also update this key's ref count:
-	
-	field.mSize = aFieldsize; // Init to ensure safe behaviour in Assign().
-	field.key = key; // Above has already copied string
-	field.mArraySize = aArrsize;
-	field.mIsPointer = aIspointer;
-	field.mOffset = aOffset;
-	field.mBitSize = aBitSize;
-	field.mBitOffset = aBitField;
-	field.mIsInteger = aIsinteger;
-	field.mIsUnsigned = aIsunsigned;
-	field.mEncoding = aEncoding;
-	field.mVarRef = variableref;
-	field.mMemAllocated = 0;
-	return &field;
-}
-

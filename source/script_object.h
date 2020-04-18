@@ -843,18 +843,16 @@ protected:
 	//typedef INT64 IndexType; // Type of index for the internal array.  Must be signed for FindKey to work correctly.
 	struct FieldType
 	{
-		UINT_PTR *mStructMem;	// Pointer to allocated memory
-		int mSize;				// Size of field
-		int mOffset;			// Offset for field	
-		USHORT mIsPointer;		// Pointer depth (Pointer to Pointer...)
 		BYTE mBitOffset;		// Bit offset
 		BYTE mBitSize;			// Bit field size
 		bool mIsInteger;		// IsInteger for NumGet/NumPut
 		bool mIsUnsigned;		// IsUnsigned for NumGet/NumPut
+		USHORT mIsPointer;		// Pointer depth (Pointer to Pointer...)
 		USHORT mEncoding;		// Encoding for StrGet/StrPut
+		int mSize;				// Size of field
+		int mOffset;			// Offset for field	
 		int mArraySize;			// Struct is array if ArraySize > 0
-		int mMemAllocated;		// size of allocated memory
-		Var *mVarRef;			// Reference to a variable containing the definition
+		Struct *mStruct;		// Structure in structure e.g. {Int a,b,MyStruct c} or type only e.g. MyStruct[5]
 		LPTSTR key;				// Field's name
 	};
 
@@ -862,16 +860,15 @@ protected:
 	index_t mFieldCount, mFieldCountMax; // Current/max number of fields.
 
 	Struct()
-		: mFields(NULL), mFieldCount(0), mFieldCountMax(0), mTypeOnly(false)
-		, mStructMem(0), mSize(0), mIsPointer(0), mIsInteger(true), mIsUnsigned(true)
-		, mEncoding(-1), mArraySize(0), mMemAllocated(false), mVarRef(NULL)
+		: mFields(NULL), mFieldCount(0), mFieldCountMax(0), mIsValue(false)
+		, mStructMem(NULL), mHeap(NULL), mStructSize(0), mOwnHeap(false)
 	{}
 
 	bool Delete();
 	~Struct();
 
 	FieldType *FindField(LPTSTR val);
-	FieldType *Insert(LPTSTR key, index_t &at, USHORT aIspointer, int aOffset, int aArrsize, Var *variableref, int aFieldsize, bool aIsinteger, bool aIsunsigned, USHORT aEncoding, BYTE aBitSize, BYTE aBitField);
+	FieldType *Insert(LPTSTR key, index_t &at, USHORT aIspointer, int aOffset, int aArrsize, int aFieldsize, bool aIsInteger, bool aIsunsigned, USHORT aEncoding, BYTE aBitSize, BYTE aBitField);
 	bool SetInternalCapacity(index_t new_capacity);
 	bool Expand()
 		// Expands mFields by at least one field.
@@ -881,26 +878,20 @@ protected:
 	//ResultType GetEnumItem(UINT aIndex, Var *, Var *);
 
 public:
-	UINT_PTR *mStructMem;		// Pointer to allocated memory
-	bool mTypeOnly;				// Identify that structure has no fields
-	int mSize;					// Size of structure
-	USHORT mIsPointer;			// Pointer depth
-	bool mIsInteger;			// IsInteger for NumGet/NumPut
-	bool mIsUnsigned;			// IsUnsigned for NumGet/NumPut
-	USHORT mEncoding;			// Encoding for StrGet/StrPut
-	UINT mArraySize;				// ArraySize = 0 if not an array
-	int mMemAllocated;			// Identify that we allocated memory
-	Var *mVarRef;				// Reference to a variable containing the definition
+	bool mOwnHeap;				// true if struct created the Heap
+	bool mIsValue;				// True if not array and not a structure
+	int mStructSize;			// Size of structure
+	Struct *mMain;				// Reference to main object to share structure definitions
+	HANDLE mHeap;				// use Heap for memory management
+	UINT_PTR *mStructMem;		// Main memory block for our structure (may be not owned memory)
 
 	static Struct *Create(ExprTokenType *aParam[] = NULL, int aParamCount = 0);
 
-	Struct *Clone(bool aIsDynamic = false);
-	Struct *CloneField(FieldType *field, bool aIsDynamic = false);
 	UINT_PTR SetPointer(UINT_PTR aPointer, __int64 aArrayItem = 1);
 	void ObjectToStruct(IObject *objfrom);
 	ResultType GetEnumItem(UINT aIndex, Var *, Var *);
+	Struct* CloneStruct(bool aSeparate = false, HANDLE aHeap = NULL);
 	ResultType __Enum(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	//ResultType _Enum(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount);
 	ResultType Invoke(IObject_Invoke_PARAMS_DECL);
 	_thread_local static Object *sPrototype;
 	IObject_Type_Impl("Struct");
