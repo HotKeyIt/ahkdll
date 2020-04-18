@@ -360,7 +360,7 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	{
 		// Note: the title below must be constructed the same was as is done by our
 		// CreateWindows(), which is why it's standardized in g_script->mMainWindowTitle:
-		if (w_existing = FindWindow(WINDOW_CLASS_MAIN, g_script->mMainWindowTitle))
+		if (w_existing = FindWindow(g_WindowClassMain, g_script->mMainWindowTitle))
 		{
 			if (g_AllowOnlyOneInstance == SINGLE_INSTANCE_IGNORE)
 				return 0;
@@ -374,7 +374,7 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 		}
 	}
 	if (!reason_to_close_prior && restart_mode)
-		if (w_existing = FindWindow(WINDOW_CLASS_MAIN, g_script->mMainWindowTitle))
+		if (w_existing = FindWindow(g_WindowClassMain, g_script->mMainWindowTitle))
 			reason_to_close_prior = AHK_EXIT_BY_RELOAD;
 	if (reason_to_close_prior)
 	{
@@ -677,6 +677,7 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 		{
 			if (g_script->mIncludeLibraryFunctionsThenExit)
 				g_script->mIncludeLibraryFunctionsThenExit->Close(); // Flush its buffer to disk.
+
 			_endthreadex(CRITICAL_ERROR);
 			return CRITICAL_ERROR;  // Should return this value because PostQuitMessage() also uses it.
 		}

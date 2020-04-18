@@ -62,6 +62,8 @@ _thread_local CRITICAL_SECTION g_CriticalHeapBlocks;
 #endif
 DWORD g_CriticalObjectTimeOut = 0;
 DWORD g_CriticalObjectSleepTime = 0;
+_thread_local LPWSTR g_WindowClassMain = WINDOW_CLASS_MAIN;
+_thread_local LPWSTR g_WindowClassGUI = WINDOW_CLASS_GUI;
 
 _thread_local UINT g_DefaultScriptCodepage = CP_ACP;
 

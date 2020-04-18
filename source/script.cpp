@@ -938,7 +938,7 @@ Script::~Script() // Destructor.
 #ifndef _USRDLL
 		if (g_MainThreadID == g_ThreadID && g_ClassRegistered)
 		{
-			UnregisterClass((LPCWSTR)&WINDOW_CLASS_MAIN, g_hInstance);
+			UnregisterClass(g_WindowClassMain, g_hInstance);
 			g_ClassRegistered = 0;
 		}
 		while (g_FirstHotExpr && g_FirstHotExpr->ThreadID == g_ThreadID)
@@ -1365,7 +1365,7 @@ ResultType Script::CreateWindows()
 	// Register a window class for the main window:
 	WNDCLASSEX wc = {0};
 	wc.cbSize = sizeof(wc);
-	wc.lpszClassName = WINDOW_CLASS_MAIN;
+	wc.lpszClassName = g_WindowClassMain;
 	wc.hInstance = g_hInstance;
 	wc.lpfnWndProc = MainWindowProc;
 	// The following are left at the default of NULL/0 set higher above:
@@ -1401,7 +1401,7 @@ ResultType Script::CreateWindows()
 	// noticeable. WS_EX_TOOLWINDOW is used instead of WS_EX_NOACTIVATE because
 	// WS_EX_NOACTIVATE is available only on 2000/XP.
 	if (!(g_hWnd = CreateWindowEx(do_minimize ? WS_EX_TOOLWINDOW : 0
-		, WINDOW_CLASS_MAIN
+		, g_WindowClassMain
 		, mMainWindowTitle
 		, WS_OVERLAPPEDWINDOW // Style.  Alt: WS_POPUP or maybe 0.
 		, CW_USEDEFAULT // xpos
@@ -2038,7 +2038,7 @@ BOOL CALLBACK ThreadWindowsCloseCallback(HWND ahWnd, LPARAM aThreadID)
 {	// close all windows that are open for thread so we can exit the thread properly
 	TCHAR WinClass[MAX_CLASS_NAME];
 	GetClassName(ahWnd, WinClass, MAX_CLASS_NAME);
-	if (!_tcscmp(WinClass, WINDOW_CLASS_GUI) || !_tcscmp(WinClass, _T("#32770")))
+	if (!_tcscmp(WinClass, g_WindowClassGUI) || !_tcscmp(WinClass, _T("#32770")))
 		PostMessage(ahWnd, WM_CLOSE, 0, 0);
 	return true;
 
@@ -4948,6 +4948,26 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		else
 			*g_DefaultMapValue = L'\0';
 		g_DefaultMapValueType = SYM_STRING;
+		return CONDITION_TRUE;
+	}
+
+	if (IS_DIRECTIVE_MATCH(_T("#WindowClassMain")))
+	{
+		if (parameter)
+		{
+			g_WindowClassMain = (LPWSTR)g_SimpleHeap->Malloc(2 + (parameter ? _tcslen(parameter) * 2 : 0));
+			_tcscpy(g_WindowClassMain, parameter);
+		}
+		return CONDITION_TRUE;
+	}
+
+	if (IS_DIRECTIVE_MATCH(_T("#WindowClassGui")))
+	{
+		if (parameter)
+		{
+			g_WindowClassGUI = (LPWSTR)g_SimpleHeap->Malloc(2 + (parameter ? _tcslen(parameter) * 2 : 0));
+			_tcscpy(g_WindowClassGUI, parameter);
+		}
 		return CONDITION_TRUE;
 	}
 

@@ -59,6 +59,8 @@ _thread_local extern CRITICAL_SECTION g_CriticalHeapBlocks;
 #endif
 extern DWORD g_CriticalObjectTimeOut;
 extern DWORD g_CriticalObjectSleepTime;
+_thread_local extern LPWSTR g_WindowClassMain;
+_thread_local extern LPWSTR g_WindowClassGUI;
 
 _thread_local extern UINT g_DefaultScriptCodepage;
 
