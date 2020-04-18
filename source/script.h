@@ -182,6 +182,7 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_NONEXISTENT_FUNCTION _T("Call to nonexistent function.")
 #define ERR_EXE_CORRUPTED _T("EXE corrupted")
 #define ERR_INVALID_VALUE _T("Invalid value.")
+#define ERR_PARAM_INVALID _T("Invalid parameter(s).")
 #define ERR_PARAM1_INVALID _T("Parameter #1 invalid.")
 #define ERR_PARAM2_INVALID _T("Parameter #2 invalid.")
 #define ERR_PARAM3_INVALID _T("Parameter #3 invalid.")
@@ -253,6 +254,8 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_INVALID_STRUCT_BIT_POINTER _T("Bit field must not be a pointer")
 #define ERR_EXCEPTION _T("An exception was thrown.")
 #define ERR_INVALID_USAGE _T("Invalid usage.")
+#define ERR_INVALID_BASE _T("Invalid base.")
+#define ERR_INVALID_ASSIGNMENT _T("Invalid assignment.")
 #define ERR_MUST_INIT_STRUCT _T("Empty pointer, dynamic Structure fields must be initialized manually first.")
 
 #define WARNING_USE_UNSET_VARIABLE _T("This variable has not been assigned a value.")

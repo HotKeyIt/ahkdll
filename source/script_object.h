@@ -517,19 +517,17 @@ protected:
 	typedef INT_PTR IndexType; // Type of index for the internal array.  Must be signed for FindKey to work correctly.
 	struct FieldType
 	{
-		UINT_PTR *mStructMem;	// Pointer to allocated memory
-		int mSize;				// Size of field
-		int mOffset;			// Offset for field	
-		USHORT mIsPointer;		// Pointer depth (Pointer to Pointer...)
 		BYTE mBitOffset;		// Bit offset
 		BYTE mBitSize;			// Bit field size
 		bool mIsInteger;		// IsInteger for NumGet/NumPut
 		bool mIsUnsigned;		// IsUnsigned for NumGet/NumPut
+		USHORT mIsPointer;		// Pointer depth (Pointer to Pointer...)
 		USHORT mEncoding;		// Encoding for StrGet/StrPut
-		int mArraySize;			// ArraySize = 0 if not an array
-		int mMemAllocated;		// Identify that we allocated memory
-		Var *mVarRef;			// Reference to a variable containing the definition
-		LPTSTR key;				// Name of field
+		int mSize;				// Size of field
+		int mOffset;			// Offset for field	
+		int mArraySize;			// Struct is array if ArraySize > 0
+		Struct *mStruct;		// Structure in structure e.g. {Int a,b,MyStruct c} or type only e.g. MyStruct[5]
+		LPTSTR key;				// Field's name
 	};
 	
 	FieldType *mFields;
@@ -552,16 +550,16 @@ protected:
 #endif
 
 	Struct()
-		: mFields(NULL), mFieldCount(0), mFieldCountMax(0), mTypeOnly(false)
-		, mStructMem(0), mSize(0), mIsPointer(0), mIsInteger(true), mIsUnsigned(true)
-		, mEncoding(-1), mArraySize(0), mMemAllocated(false), mVarRef(NULL)
+		: mFields(NULL), mFieldCount(0), mFieldCountMax(0), mIsValue(false)
+		, mStructMem(NULL), mHeap(NULL), mStructSize(0), mOwnHeap(false)
 	{}
 
 	bool Delete();
 	~Struct();
 
 	FieldType *FindField(LPTSTR val);
-	FieldType *Insert(LPTSTR key, IndexType &at,USHORT aIspointer,int aOffset,int aArrsize,Var *variableref,int aFieldsize,bool aIsinteger,bool aIsunsigned,USHORT aEncoding, BYTE aBitSize, BYTE aBitField);
+	Struct* CloneStruct(bool aSeparate = false, HANDLE aHeap = NULL);
+	FieldType *Insert(LPTSTR key, IndexType &at, USHORT aIspointer, int aOffset, int aArrsize, int aFieldsize, bool aIsInteger, bool aIsunsigned, USHORT aEncoding, BYTE aBitSize, BYTE aBitField);
 	bool SetInternalCapacity(IndexType new_capacity);
 	bool Expand()
 	// Expands mFields by at least one field.
@@ -570,16 +568,12 @@ protected:
 	}
 
 public:
-	UINT_PTR *mStructMem;		// Pointer to allocated memory
-	bool mTypeOnly;				// Identify that structure has no fields
-	int mSize;					// Size of structure
-	SHORT mIsPointer;			// Pointer depth
-	bool mIsInteger;			// IsInteger for NumGet/NumPut
-	bool mIsUnsigned;			// IsUnsigned for NumGet/NumPut
-	USHORT mEncoding;			// Encoding for StrGet/StrPut
-	int mArraySize;				// ArraySize = 0 if not an array
-	int mMemAllocated;			// Identify that we allocated memory
-	Var *mVarRef;				// Reference to a variable containing the definition
+	bool mOwnHeap;				// true if struct created the Heap
+	bool mIsValue;				// True if not array and not a structure
+	int mStructSize;			// Size of structure
+	Struct *mMain;				// Reference to main object to share structure definitions
+	HANDLE mHeap;				// use Heap for memory management
+	UINT_PTR *mStructMem;		// Main memory block for our structure (may be not owned memory)
 
 	static Struct *Create(ExprTokenType *aParam[] = NULL, int aParamCount = 0);
 	

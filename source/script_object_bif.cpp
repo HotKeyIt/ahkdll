@@ -15,7 +15,7 @@ BIF_DECL(BIF_Struct)
 	// At least the definition for structure must be given
 	if (!aParamCount)
 		return;
-	IObject *obj = Struct::Create(aParam, aParamCount);
+	Struct *obj = Struct::Create(aParam, aParamCount);
 	if (obj)
 	{
 		aResultToken.symbol = SYM_OBJECT;
@@ -28,9 +28,6 @@ BIF_DECL(BIF_Struct)
 		aResult = FAIL;
 		return;
 	}
-	// indicate error
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = _T("");
 }
 
 //
@@ -105,6 +102,8 @@ BYTE sizeof_maxsize(TCHAR *buf)
 				if (max < align)
 					max = (BYTE)align;
 			}
+			else if (max < 4)
+				max = 4;
 		}
 	}
 	return max;
@@ -129,7 +128,7 @@ BIF_DECL(BIF_sizeof)
 	int uniondepth = 0;				// count how deep we are in union/structure
 	int align = 0;
 	int *aligntotal = &align;		// pointer alignment for total structure
-	int thissize;					// used to save size returned from IsDefaultType
+	int thissize = 0;					// used to save size returned from IsDefaultType
 	int maxsize = 0;				// max size of union or struct
 
 	// following are used to find variable and also get size of a structure defined in variable
@@ -180,7 +179,7 @@ BIF_DECL(BIF_sizeof)
 	{
 		aResultToken.symbol = SYM_INTEGER;
 		Struct *obj = (Struct*)TokenToObject(*aParam[0]);
-		aResultToken.value_int64 = obj->mSize + (aParamCount > 1 ? TokenToInt64(*aParam[1],true) : 0);
+		aResultToken.value_int64 = obj->mStructSize + (aParamCount > 1 ? TokenToInt64(*aParam[1],true) : 0);
 		return;
 	}
 
@@ -227,6 +226,7 @@ BIF_DECL(BIF_sizeof)
 			*aligntotal = 0;
 			unionoffset[uniondepth] = offset; // backup offset 
 			unionsize[uniondepth] = 0;
+			bitsizetotal = bitsize = 0;
 			// ignore even any wrong input here so it is even {mystructure...} for struct and  {anyother string...} for union
 			buf = _tcschr(buf,'{') + 1;
 			continue;
@@ -236,7 +236,7 @@ BIF_DECL(BIF_sizeof)
 			// update size of union in case it was not updated below (e.g. last item was a union or struct)
 			if ((maxsize = offset - unionoffset[uniondepth]) > unionsize[uniondepth])
 				unionsize[uniondepth] = maxsize;
-			// now restore or correct offset even if we had a structure in structure
+			// restore offset even if we had a structure in structure
 			if (uniondepth > 1 && unionisstruct[uniondepth - 1])
 			{
 				if (mod = offset % structalign[uniondepth])
@@ -257,6 +257,7 @@ BIF_DECL(BIF_sizeof)
 				// correct offset
 				offset += totalunionsize;
 			}
+			bitsizetotal = bitsize = 0;
 			buf++;
 			if (buf == StrChrAny(buf,_T(";,")))
 				buf++;
@@ -294,9 +295,13 @@ BIF_DECL(BIF_sizeof)
 			intbuf[_tcscspn(intbuf,_T("]")) + 1] = '\0';
 			arraydef = (int)ATOI64(intbuf + 1);
 			// remove array definition
-			StrReplace(tempbuf, intbuf, _T(""), SCS_SENSITIVE, UINT_MAX, LINE_SIZE);
+			StrReplace(tempbuf, intbuf, _T(""), SCS_SENSITIVE, 1, LINE_SIZE);
 		}
-
+		if (_tcschr(tempbuf, '['))
+		{	// array to array and similar not supported
+			g_script.ScriptError(ERR_INVALID_STRUCT, tempbuf);
+			return;
+		}
 		// Pointer, while loop will continue here because we only need size
 		if (_tcschr(tempbuf,'*'))
 		{
@@ -356,8 +361,21 @@ BIF_DECL(BIF_sizeof)
 			else
 				bitsizetotal = bitsize = 0;
 		}
+		else // Not 'TypeOnly' definition because there are more than one fields in structure so use default type UInt
+		{
+			// Commented out following line to keep previous or default UInt definition like in c++, e.g. "Int x,y,Char a,b", 
+			// Note: separator , or ; can be still used but
 			// _tcscpy(defbuf,_T(" UInt "));
-		
+			if (bitfield = _tcschr(tempbuf, ':'))
+			{
+				if (bitsizetotal / 8 == thissize)
+					bitsizetotal = bitsize = 0;
+				bitsizetotal += bitsize = ATOI(bitfield + 1);
+			}
+			else
+				bitsizetotal = bitsize = 0;
+		}
+
 		// Now find size in default types array and create new field
 		// If Type not found, resolve type to variable and get size of struct defined in it
 		if ((!_tcscmp(defbuf, _T(" bool ")) && (thissize = 1)) || (thissize = IsDefaultType(defbuf)))

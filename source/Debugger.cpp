@@ -1156,10 +1156,10 @@ void Struct::DebugWriteProperty(IDebugProperties *aDebugger, int aPage, int aPag
 	if (aDepth)
 	{
 		int i = aPageSize * aPage, j = aPageSize * (aPage + 1);
-		if (mArraySize)
+		if (!*mFields[0].key && mFields[0].mArraySize)
 		{
-			if (j > (int)mArraySize)
-				j = (int)mArraySize;
+			if (j > (int)mFields[0].mArraySize)
+				j = (int)mFields[0].mArraySize;
 			// For each array item in the requested page...
 			for ( ; i < j; ++i)
 			{
