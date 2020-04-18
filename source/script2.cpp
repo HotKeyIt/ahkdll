@@ -15169,13 +15169,13 @@ BIF_DECL(BIF_NewThread)
 		CloseHandle(hThread);
 		sntprintf(buf, _countof(buf), _T("ahk%d"), ThreadID);
 		HANDLE hEvent = CreateEvent(NULL, false, false, buf);
+		// we need to give the thread also little time to allocate memory to avoid std::bad_alloc that might happen when you run newthread in a loop
 		if (WaitForSingleObject(hEvent, 1000) == WAIT_TIMEOUT)
-			g_script->ScriptError(_T("Timeout while waiting for Thread to start!"));
+			aResultToken.SetValue(0);
+		else
+			aResultToken.SetValue((__int64)ThreadID);
 		CloseHandle(hEvent);
 	}
-	aResultToken.value_int64 = (__int64)ThreadID;
-	aResultToken.symbol = SYM_INTEGER;
-	Sleep(1); // give the thread little time to allocate memory to avoid std::bad_alloc that might happen when you run newthread in a loop
 }
 #endif
 
