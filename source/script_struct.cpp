@@ -646,6 +646,7 @@ Struct* Struct::CloneStruct(bool aSeparate, HANDLE aHeap)
 	Struct *obj = new Struct();
 	if (!obj)
 		return NULL;
+	obj->SetBase(Struct::sPrototype);
 	obj->mIsValue = mIsValue;
 	obj->mStructSize = mStructSize;
 	if (aSeparate && aHeap == NULL)
