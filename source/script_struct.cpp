@@ -657,6 +657,7 @@ Struct* Struct::CloneStruct(bool aSeparate, HANDLE aHeap)
 		obj->mStructMem = (UINT_PTR *)HeapAlloc(obj->mHeap, HEAP_ZERO_MEMORY, obj->mStructSize);
 		if (!obj->mStructMem)
 			return NULL;
+		memmove(obj->mStructMem, mStructMem, mStructSize);
 	}
 	else if (aSeparate)
 		obj->mHeap = aHeap;

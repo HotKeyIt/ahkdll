@@ -156,7 +156,6 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	g_MsgMonitor = new MsgMonitorList();
 	g_SimpleHeap = new SimpleHeap();
 	g_SimpleHeapVar = g_SimpleHeap;
-	
 
 	Object::sAnyPrototype = Object::CreateRootPrototypes();
 	FileObject::sPrototype = Object::CreatePrototype(_T("File"), Object::sPrototype, FileObject::sMembers, _countof(FileObject::sMembers));
