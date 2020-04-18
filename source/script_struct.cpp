@@ -1446,10 +1446,6 @@ ResultType Struct::Invoke(
 					if (!char_count)
 					{
 						aResultToken.value_int64 = char_count;
-						if (deletefield) // we created the field from a structure
-							delete field;
-						if (releaseobj)
-							objclone->Release();
 						return OK;
 					}
 					if (field->mSize > 2) // Not TCHAR or CHAR or WCHAR
@@ -1618,7 +1614,7 @@ ResultType Struct::Invoke(
 					aResultToken.SetValue(_T(""));
 					return OK;
 				}
-				if (!TokenSetResult(aResultToken, (LPCWSTR)(field->mSize > 2 ? *((UINT_PTR*)((UINT_PTR)target + field->mOffset)) : ((UINT_PTR)target + field->mOffset)), field->mSize < 4 ? 1 : -1))
+				if (!TokenSetResult(aResultToken, (LPCTSTR)(field->mSize > 2 ? *((UINT_PTR*)((UINT_PTR)target + field->mOffset)) : ((UINT_PTR)target + field->mOffset)), field->mSize < 4 ? 1 : -1))
 					aResultToken.SetValue(_T(""));
 			}
 			else
@@ -1647,13 +1643,7 @@ ResultType Struct::Invoke(
 				// Now convert UTF-16 to ACP.
 				conv_length = WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, (LPCWSTR)(field->mSize > 2 ? *((UINT_PTR*)((UINT_PTR)target + field->mOffset)) : ((UINT_PTR)target + field->mOffset)), length, NULL, 0, NULL, NULL);
 				if (!TokenSetResult(aResultToken, NULL, conv_length)) // DO NOT SUBTRACT 1, conv_length might not include a null-terminator.
-				{
-					if (deletefield) // we created the field from a structure
-						delete field;
-					if (releaseobj)
-						objclone->Release();
 					return OK; // Out of memory.
-				}
 				conv_length = WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, (LPCWSTR)(field->mSize > 2 ? *((UINT_PTR*)((UINT_PTR)target + field->mOffset)) : ((UINT_PTR)target + field->mOffset)), length, aResultToken.marker, conv_length, NULL, NULL);
 #endif
 				if (conv_length && !aResultToken.marker[conv_length - 1])
