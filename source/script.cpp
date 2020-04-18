@@ -492,10 +492,10 @@ Script::~Script() // Destructor.
 #endif // MINIDLL
 #else
 		if (g_ClassRegistered)
-			UnregisterClass((LPCSTR)&WINDOW_CLASS_MAIN, g_hInstance);
+			UnregisterClass((LPCSTR)g_WindowClassMain, g_hInstance);
 #ifndef MINIDLL
 		if (g_ClassSplashRegistered)
-			UnregisterClass((LPCSTR)&WINDOW_CLASS_SPLASH, g_hInstance);
+			UnregisterClass((LPCSTR)g_WindowClassMain, g_hInstance);
 #endif // MINIDLL
 #endif // UNICODE
 	}
@@ -1119,7 +1119,7 @@ ResultType Script::CreateWindows()
 	// Register a window class for the main window:
 	WNDCLASSEX wc = {0};
 	wc.cbSize = sizeof(wc);
-	wc.lpszClassName = WINDOW_CLASS_MAIN;
+	wc.lpszClassName = g_WindowClassMain;
 	wc.hInstance = g_hInstance;
 	wc.lpfnWndProc = MainWindowProc;
 	// The following are left at the default of NULL/0 set higher above:
@@ -1169,7 +1169,7 @@ ResultType Script::CreateWindows()
 	// noticeable. WS_EX_TOOLWINDOW is used instead of WS_EX_NOACTIVATE because
 	// WS_EX_NOACTIVATE is available only on 2000/XP.
 	if (   !(g_hWnd = CreateWindowEx(do_minimize ? WS_EX_TOOLWINDOW : 0
-		, WINDOW_CLASS_MAIN
+		, g_WindowClassMain
 		, mMainWindowTitle
 		, WS_OVERLAPPEDWINDOW // Style.  Alt: WS_POPUP or maybe 0.
 		, CW_USEDEFAULT // xpos
@@ -4739,6 +4739,26 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		if (warnType == WARN_CLASS_OVERWRITE || warnType == WARN_ALL)
 			g_Warn_ClassOverwrite = warnMode;
 
+		return CONDITION_TRUE;
+	}
+	
+	if (IS_DIRECTIVE_MATCH(_T("#WindowClassMain")))
+	{
+		if (parameter)
+		{
+			g_WindowClassMain = (LPTSTR)SimpleHeap::Malloc(2 + (parameter ? _tcslen(parameter) * 2 : 0));
+			_tcscpy(g_WindowClassMain, parameter);
+		}
+		return CONDITION_TRUE;
+	}
+
+	if (IS_DIRECTIVE_MATCH(_T("#WindowClassGui")))
+	{
+		if (parameter)
+		{
+			g_WindowClassGUI = (LPTSTR)SimpleHeap::Malloc(2 + (parameter ? _tcslen(parameter) * 2 : 0));
+			_tcscpy(g_WindowClassGUI, parameter);
+		}
 		return CONDITION_TRUE;
 	}
 

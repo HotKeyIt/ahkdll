@@ -1776,7 +1776,12 @@ ResultType GuiType::Destroy(GuiType &gui)
 			break;
 		}
 	}
-
+	if (gui.mVScroll)
+	{
+		delete gui.mVScroll;
+		delete gui.mHScroll;
+		gui.mVScroll = gui.mHScroll = 0;
+	}
 	if (gui.mBackgroundBrushWin)
 		DeleteObject(gui.mBackgroundBrushWin);
 	if (gui.mBackgroundBrushCtl)
@@ -1879,7 +1884,7 @@ ResultType GuiType::Create()
 	{
 		WNDCLASSEX wc = {0};
 		wc.cbSize = sizeof(wc);
-		wc.lpszClassName = WINDOW_CLASS_GUI;
+		wc.lpszClassName = g_WindowClassGUI;
 		wc.hInstance = g_hInstance;
 		wc.lpfnWndProc = GuiWindowProc;
 		wc.hIcon = g_IconLarge;
@@ -1906,7 +1911,7 @@ ResultType GuiType::Create()
 	// The above is done prior to creating the window so that mLabelForDropFiles can determine
 	// whether to add the WS_EX_ACCEPTFILES style.
 
-	if (   !(mHwnd = CreateWindowEx(mExStyle, WINDOW_CLASS_GUI, g_script.mFileName, mStyle, 0, 0, 0, 0
+	if (   !(mHwnd = CreateWindowEx(mExStyle, g_WindowClassGUI, g_script.mFileName, mStyle, 0, 0, 0, 0
 		, mOwner, NULL, g_hInstance, NULL))   )
 		return FAIL;
 

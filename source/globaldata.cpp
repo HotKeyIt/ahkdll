@@ -60,6 +60,8 @@ CRITICAL_SECTION g_CriticalHeapBlocks;
 #endif
 CRITICAL_SECTION g_CriticalAhkFunction;
 
+LPTSTR g_WindowClassMain = WINDOW_CLASS_MAIN;
+LPTSTR g_WindowClassGUI = WINDOW_CLASS_GUI;
 UINT g_DefaultScriptCodepage = CP_ACP;
 
 bool g_ReturnNotExit;	// for ahkExec/addScript/addFile

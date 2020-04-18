@@ -53,6 +53,9 @@ extern CRITICAL_SECTION g_CriticalHeapBlocks;
 #endif
 extern CRITICAL_SECTION g_CriticalAhkFunction;
 
+extern LPTSTR g_WindowClassMain;
+extern LPTSTR g_WindowClassGUI;
+
 extern UINT g_DefaultScriptCodepage;
 
 extern bool g_ReturnNotExit;	// for ahkExec/addScript/addFile
