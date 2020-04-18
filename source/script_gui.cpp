@@ -2225,6 +2225,13 @@ void GuiType::Destroy()
 {
 	if (!mHwnd)
 		return; // We have already been destroyed.
+	
+	if (mVScroll)
+	{
+		delete mVScroll;
+		delete mHScroll;
+		mVScroll = mHScroll = 0;
+	}
 
 	// First destroy any windows owned by this window, since they will be auto-destroyed
 	// anyway due to their being owned.  By destroying them explicitly, the Destroy()
@@ -2300,6 +2307,10 @@ void GuiType::Destroy()
 	if (mVisibleRefCounted)
 		Release();
 	// IT IS NOW UNSAFE TO REFER TO ANY NON-STATIC MEMBERS OF THIS OBJECT.
+
+	// If script is not persistent and script is about to exit, release gui object
+	if (mRefCount == 1 && !g_nThreads && !g_script->IsPersistent())
+		Object::Delete();
 
 	// If this Gui was the last thing keeping the script running, exit the script:
 	g_script->ExitIfNotPersistent(EXIT_DESTROY);
@@ -2416,7 +2427,7 @@ ResultType GuiType::Create(LPTSTR aTitle)
 	{
 		WNDCLASSEX wc = {0};
 		wc.cbSize = sizeof(wc);
-		wc.lpszClassName = WINDOW_CLASS_GUI;
+		wc.lpszClassName = g_WindowClassGUI;
 		wc.hInstance = g_hInstance;
 		wc.lpfnWndProc = GuiWindowProc;
 		wc.hIcon = g_IconLarge;
@@ -2435,7 +2446,7 @@ ResultType GuiType::Create(LPTSTR aTitle)
 #endif
 	}
 
-	if (   !(mHwnd = CreateWindowEx(mExStyle, WINDOW_CLASS_GUI, aTitle
+	if (   !(mHwnd = CreateWindowEx(mExStyle, g_WindowClassGUI, aTitle
 		, mStyle, 0, 0, 0, 0, mOwner, NULL, g_hInstance, NULL))   )
 		return FAIL;
 
