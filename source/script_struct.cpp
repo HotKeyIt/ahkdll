@@ -917,6 +917,10 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 			this->Base()->AddRef();
 			return OK;
 		}
+		else if (!_tcsicmp(aName, _T("ptr")))
+		{
+			return aResultToken.Return((__int64)this->mStructMem);
+		}
 		ExprTokenType aNameParam;
 		ExprTokenType **aParams = (ExprTokenType **)alloca((aParamCount + 1) * sizeof(ExprTokenType));
 		for (int c = 0; c < aParamCount; ++c)
