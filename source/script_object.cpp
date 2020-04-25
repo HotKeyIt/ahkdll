@@ -1634,6 +1634,8 @@ ResultType Object::DefineDefault(ResultToken &aResultToken, int aID, int aFlags,
 	{
 		ExprTokenType *param;
 		param = *aParam;
+		if (mDefault.symbol == SYM_OBJECT)
+			mDefault.object->Release();
 		if (param->symbol == SYM_OBJECT)
 		{
 			mDefault.SetValue(param->object);

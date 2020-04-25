@@ -15018,7 +15018,7 @@ void Script::SetErrorLevelsAndClose(HANDLE aHandle, bool aError, DWORD aLastErro
 }
 
 
-#define ERR_PRINT(fmt, ...) _ftprintf(stderr, fmt, __VA_ARGS__)
+#define ERR_PRINT(fmt, ...) _ftprintf(stderr, fmt, __VA_ARGS__, setlocale(LC_ALL, ".65001"))
 
 ResultType Line::LineError(LPCTSTR aErrorText, ResultType aErrorType, LPCTSTR aExtraInfo)
 {

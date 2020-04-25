@@ -977,10 +977,9 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 		{
 			if (aInitObject = TokenToObject(*aParam[param_count_excluding_rvalue]))
 			{   // Initialize structure using an object. e.g. struct[]:={x:1,y:2} and return our object to caller
+				aInitObject->AddRef();
 				this->ObjectToStruct(aInitObject);
 				aResultToken.Return(aInitObject);
-				aInitObject->AddRef();
-				return OK;
 			}
 			else if (mOwnHeap) // assign a custom pointer
 			{
@@ -990,6 +989,7 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 					HeapFree(mHeap, 0, mStructMem);
 				// assign new pointer to structure
 				mStructMem = (UINT_PTR *)TokenToInt64(*aParam[param_count_excluding_rvalue]);
+				aResultToken.Return(TokenToInt64(*aParam[param_count_excluding_rvalue]));
 			}
 			else // assign new pointer to dynamic structure (field)
 			{
@@ -999,14 +999,13 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 				if (aBkpMem && HeapValidate(mHeap, 0, aBkpMem))
 					HeapFree(mHeap, 0, aBkpMem);
 				*((UINT_PTR*)((UINT_PTR)target)) = (UINT_PTR)TokenToInt64(*aParam[param_count_excluding_rvalue]);
-				aResultToken.SetValue((__int64)*((UINT_PTR*)((UINT_PTR)target)));
+				aResultToken.Return((__int64)*((UINT_PTR*)((UINT_PTR)target)));
 			}
 		}
 		else if (mOwnHeap) // else return structure address
-			aResultToken.SetValue((__int64)mStructMem);
+			aResultToken.Return((__int64)mStructMem);
 		else // return pointer
-			aResultToken.SetValue((__int64)(UINT_PTR *)*((UINT_PTR*)((UINT_PTR)target)));
-		return OK;
+			aResultToken.Return((__int64)(UINT_PTR *)*((UINT_PTR*)((UINT_PTR)target)));
 	}
 	else
 	{	// Array access, struct.1 or struct[1] or struct[1].x ...

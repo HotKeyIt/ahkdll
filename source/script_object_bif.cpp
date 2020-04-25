@@ -31,9 +31,6 @@ BIF_DECL(BIF_Struct)
 		aResultToken.SetResult(FAIL);
 		return;
 	}
-	// indicate error
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = _T("");
 }
 
 //
@@ -1533,7 +1530,12 @@ BIF_DECL(Op_ObjInvoke)
 	if (result == INVOKE_NOT_HANDLED && must_be_handled)
 	{
 		Object *aDefault;
-		if (invoke_type == IT_GET && name && (aDefault = dynamic_cast<Object*>(obj)) && aDefault->mDefault.symbol != SYM_MISSING)
+		aDefault = dynamic_cast<CriticalObject*>(obj);
+		if (aDefault)
+			aDefault = (Object*)((CriticalObject*)aDefault)->GetObj();
+		else
+			aDefault = dynamic_cast<Object*>(obj);
+		if (invoke_type == IT_GET && name && aDefault && aDefault->mDefault.symbol != SYM_MISSING)
 		{
 			aResultToken.CopyValueFrom(aDefault->mDefault);
 			if (aResultToken.symbol == SYM_OBJECT)
