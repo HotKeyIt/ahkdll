@@ -16870,7 +16870,7 @@ BIF_DECL(BIF_UnZipBuffer)
 			if (_tcscmp(aSource, ze.Name + 1))
 				continue;
 			aResultToken.value_int64 = ze.UncompressedSize;
-			if (ParamIndexIsOmitted(2) || aParam[2]->var->mType != SYM_VAR)
+			if (ParamIndexIsOmitted(2) || aParam[2]->symbol != SYM_VAR)
 			{
 				UnzipClose(huz);
 				aResultToken.symbol = SYM_INTEGER;
