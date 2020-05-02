@@ -1518,6 +1518,13 @@ ResultType InputStart(input_type &input, Var *output_var)
 
 	if (!output_var)
 		return OK;
+	else
+	{
+		if (output_var->mByteCapacity > input.BufferLengthMax)
+			_o_throw(ERR_OUTOFMEM);
+		_tcscpy(input.Buffer, output_var->Contents());
+		input.BufferLength = output_var->mByteLength;
+	}
 	return InputWait(output_var, input);
 }
 
@@ -1857,6 +1864,7 @@ ResultType InputWait(Var *output_var, input_type &input)
 			MsgSleep();
 		else
 			Sleep(SLEEP_INTERVAL);
+		output_var->Assign(input.Buffer, input.BufferLength);
 		if (!input.InProgress())
 			break;
 	}
