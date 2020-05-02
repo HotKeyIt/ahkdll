@@ -1520,10 +1520,10 @@ ResultType InputStart(input_type &input, Var *output_var)
 		return OK;
 	else
 	{
-		if (output_var->mByteCapacity > input.BufferLengthMax)
+		if (_tcslen(output_var->Contents()) > input.BufferLengthMax)
 			_o_throw(ERR_OUTOFMEM);
 		_tcscpy(input.Buffer, output_var->Contents());
-		input.BufferLength = output_var->mByteLength;
+		input.BufferLength = _tcslen(output_var->Contents());
 	}
 	return InputWait(output_var, input);
 }
