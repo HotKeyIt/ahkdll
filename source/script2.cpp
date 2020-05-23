@@ -1518,7 +1518,7 @@ ResultType InputStart(input_type &input, Var *output_var)
 
 	if (!output_var)
 		return OK;
-	else
+	else if (input.AppendText)
 	{
 		if (_tcslen(output_var->Contents()) > input.BufferLengthMax)
 			_o_throw(ERR_OUTOFMEM);
