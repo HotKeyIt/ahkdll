@@ -533,7 +533,7 @@ VarEntry g_BIV_A[] =
 #undef VF
 
 
-static TextMem::Buffer includedtextbuf; //HotKeyIt for dll to read script from memory
+_thread_local static TextMem::Buffer includedtextbuf; //HotKeyIt for dll to read script from memory
 // General note about the methods in here:
 // Want to be able to support multiple simultaneous points of execution
 // because more than one subroutine can be executing simultaneously

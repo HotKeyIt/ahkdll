@@ -1994,7 +1994,7 @@ public:
 template<BuiltInFunctionType bif, int flags>
 struct ExprOpT
 {
-	_thread_local static ExprOpFunc Func;
+	static ExprOpFunc Func;
 };
 
 template<BuiltInFunctionType bif, int flags>
