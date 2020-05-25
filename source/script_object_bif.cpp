@@ -1034,7 +1034,7 @@ IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &a
 		IObject **newObjects = (IObject**)malloc(aObjSize * 2 * sizeof(IObject**));
 		if (!newObjects)
 			return 0;
-		memcpy(newObjects, aObjects, aObjSize);
+		memcpy(newObjects, aObjects, aObjSize * sizeof(IObject**));
 		free(aObjects);
 		aObjects = newObjects;
 		aObjSize *= 2;
@@ -1086,6 +1086,7 @@ IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &a
 		{
 			aKey.symbol = SYM_OBJECT;
 			aKey.object = aObjects[*(__int64*)aThisBuffer];
+			aKey.object->AddRef();
 			aThisBuffer += sizeof(__int64);
 		}
 		else if (typekey == -10)
@@ -1173,6 +1174,7 @@ IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &a
 		{
 			aValue.symbol = SYM_OBJECT;
 			aValue.object = aObjects[*(__int64*)aThisBuffer];
+			aValue.object->AddRef();
 			aThisBuffer += sizeof(__int64);
 		}
 		else if (typeval == 10)
