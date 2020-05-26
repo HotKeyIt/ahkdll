@@ -902,6 +902,7 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute, DWORD aThreadID)
 	//g_guiCount = a_guiCount;
 	FINALIZE_HOTKEYS
 	RESTORE_IF_EXPR
+	g_script->InitClasses();
 	g_script->mIsReadyToExecute = true;
 #ifdef _USRDLL
 	g_Loading = false;
@@ -1024,6 +1025,7 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute, DWORD aThreadID)
 	//g_guiCount = a_guiCount;
 	FINALIZE_HOTKEYS
 	RESTORE_IF_EXPR
+	g_script->InitClasses();
 	g_script->mIsReadyToExecute = true;
 #ifdef _USRDLL
 	g_Loading = false;
@@ -1163,6 +1165,7 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 	}
 	FINALIZE_HOTKEYS
 	RESTORE_IF_EXPR
+	g_script->InitClasses();
 	g_script->mIsReadyToExecute = true;
 #ifdef _USRDLL
 	g_Loading = false;
