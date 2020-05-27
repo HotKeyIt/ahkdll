@@ -2341,7 +2341,12 @@ UINT Script::LoadFromFile()
 	if (   LoadIncludedFile(g_RunStdIn ? _T("*") : mFileSpec, false, false) != OK
 		|| !AddLine(ACT_EXIT)) // Add an Exit to ensure lib auto-includes aren't auto-executed, for backward compatibility.
 		return LOADING_FAILED;
-
+#ifdef ENABLE_DLLCALL
+	// So that (the last occuring) "#DllLoad directory" doesn't affect calls to GetDllProcAddress for run time calls to DllCall
+	// or DllCall optimizations in Line::ExpressionToPostfix.
+	if (!SetDllDirectory(NULL))
+		return ScriptError(ERR_INTERNAL_CALL);
+#endif
 	if (!PreparseExpressions(mFirstLine))
 		return LOADING_FAILED; // Error was already displayed by the above call.
 	// ABOVE: In v1.0.47, the above may have auto-included additional files from the userlib/stdlib.
@@ -6461,7 +6466,7 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 			}
 			else
 				func.mGlobalVar = NULL; // For maintainability.
-			line.mAttribute = ATTR_TRUE;  // Flag this ACT_BLOCK_END as the ending brace of a function's body.
+			line.mAttribute = &func;  // Flag this ACT_BLOCK_END as the ending brace of this function's body.
 			g->CurrentFunc = func.mOuterFunc;
 			if (g->CurrentFunc && !g->CurrentFunc->mJumpToLine)
 				// The outer function has no body yet, so it probably began with one or more nested functions.
@@ -7636,7 +7641,7 @@ ResultType Script::DefineClassVars(LPTSTR aBuf, bool aStatic)
 		{
 			// __Init method already exists, so find the end of its body.
 			for (block_end = init_func->mJumpToLine;
-				block_end->mActionType != ACT_BLOCK_END || !block_end->mAttribute;
+				block_end->mActionType != ACT_BLOCK_END || block_end->mAttribute != init_func;
 				block_end = block_end->mNextLine);
 		}
 		else
@@ -11296,7 +11301,7 @@ unquoted_literal:
 								: ExprOp<Op_ObjIncDec, SYM_POST_INCREMENT>();
 						++this_infix; // Discard this operator.
 					}
-					else
+					else if (infix_symbol != SYM_OPAREN) // if it is something like "++x.y.%expr%", do not apply the "++" to the "x.y" part.
 					{
 						stack_symbol = stack[stack_count - 1]->symbol;
 						if (stack_symbol == SYM_PRE_INCREMENT || stack_symbol == SYM_PRE_DECREMENT)
@@ -11414,6 +11419,7 @@ end_of_infix_to_postfix:
 	SymbolType only_symbol = only_token.symbol;
 	if (postfix_count == 1 && IS_OPERAND(only_symbol) // This expression is a lone operand, like (1) or "string".
 		&& (mActionType < ACT_FOR || mActionType > ACT_UNTIL) // It's not WHILE or UNTIL, which currently perform better as expressions, or FOR, which performs the same but currently expects aResultToken to always be set.
+		&& (mActionType != ACT_SWITCH && mActionType != ACT_CASE) // It's not SWITCH or CASE, which require a proper postfix expression.
 		&& (mActionType != ACT_THROW) // Exclude THROW to simplify variable handling (ensures vars are always dereferenced).
 		&& (mActionType != ACT_HOTKEY_IF) // #If requires the expression text not be modified.
 		&& ((only_symbol != SYM_VAR && only_symbol != SYM_DYNAMIC) || mActionType != ACT_RETURN) // "return var" is kept as an expression for correct handling of built-ins, locals (see "ToReturnValue") and ByRef.
@@ -13256,9 +13262,9 @@ ResultType Line::PerformLoopFilePattern(ResultToken *aResultToken, bool &aContin
 
 ResultType Line::PerformLoopReg(ResultToken *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
 	, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, HKEY aRootKeyType, HKEY aRootKey, LPTSTR aRegSubkey)
-	// aRootKeyType is the type of root key, independent of whether it's local or remote.
-	// This is used because there's no easy way to determine which root key a remote HKEY
-	// refers to.
+// aRootKeyType is the type of root key, independent of whether it's local or remote.
+// This is used because there's no easy way to determine which root key a remote HKEY
+// refers to.
 {
 	RegItemStruct reg_item(aRootKeyType, aRootKey, aRegSubkey);
 	HKEY hRegKey;

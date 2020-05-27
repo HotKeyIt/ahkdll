@@ -351,8 +351,11 @@ BIF_DECL(BIF_Input)
 	if (prior_input)
 		prior_input->EndByNewInput();
 
-	if (!InputStart(input, &aResultToken))
-		_f_return_FAIL;
+	InputStart(input, &aResultToken);
+	
+	// Ensure input is not present in the input chain, since its life time is about to end.
+	input_type *result = InputRelease(&input);
+	ASSERT(result == NULL);
 }
 
 
@@ -687,7 +690,7 @@ ResultType input_type::SetMatchList(LPTSTR aMatchList, size_t aMatchList_length)
 			}
 			if (*(source + 1)) // There is a next element.
 			{
-				if (MatchCount >= MatchCountMax) // Rarely needed, so just realloc() to expand.
+				if (MatchCount >= MatchCountMax - 1) // Rarely needed, so just realloc() to expand.
 				{
 					// Expand the array by one block:
 					if (   !(realloc_temp = (LPTSTR *)realloc(match  // Must use a temp variable.
@@ -888,6 +891,7 @@ input_type *InputRelease(input_type *aInput)
 		if (aInput->ScriptObject->onEnd)
 			return aInput; // Return for caller to call OnEnd and Release.
 		aInput->ScriptObject->Release();
+		aInput->ScriptObject = NULL;
 		g_script->ExitIfNotPersistent(EXIT_EXIT); // In case this InputHook was the only thing keeping the script running.
 	}
 	return NULL;
@@ -7542,7 +7546,7 @@ BIF_DECL(BIF_Sound)
 	float setting_scalar;
 	if (SOUND_MODE_IS_SET)
 	{
-		setting_scalar = (float)(ParamIndexToDouble(0) / 100);
+		setting_scalar = (float)(ATOF(aSetting) / 100);
 		if (setting_scalar < -1)
 			setting_scalar = -1;
 		else if (setting_scalar > 1)
@@ -10318,7 +10322,7 @@ VarSizeType BIV_InitialWorkingDir(LPTSTR aBuf, LPTSTR aVarName)
 VarSizeType BIV_WinDir(LPTSTR aBuf, LPTSTR aVarName)
 {
 	TCHAR buf[MAX_PATH]; // MSDN (2018): The uSize parameter "should be set to MAX_PATH."
-	VarSizeType length = GetWindowsDirectory(buf, _countof(buf));
+	VarSizeType length = GetSystemWindowsDirectory(buf, _countof(buf));
 	if (aBuf)
 		_tcscpy(aBuf, buf); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string). This is true for ReadRegString()'s API call and may be true for other API calls like the one here.
 	return length;
@@ -20239,7 +20243,7 @@ ResultType ValidateFunctor(IObject *aFunc, int aParamCount, ResultToken &aResult
 	if (aResultToken.Exited())
 		return FAIL;
 	if (min_result != INVOKE_NOT_HANDLED && aParamCount < (int)min_params)
-		return aResultToken.Error(ERR_PARAM_COUNT_INVALID);
+		return aResultToken.Error(ERR_INVALID_FUNCTOR);
 	if (max_result != INVOKE_NOT_HANDLED && aParamCount > (int)max_params)
 	{
 		__int64 is_variadic;
@@ -20247,7 +20251,7 @@ ResultType ValidateFunctor(IObject *aFunc, int aParamCount, ResultToken &aResult
 		if (aResultToken.Exited())
 			return FAIL;
 		if (result == INVOKE_NOT_HANDLED || !is_variadic)
-			return aResultToken.Error(ERR_PARAM_COUNT_INVALID);
+			return aResultToken.Error(ERR_INVALID_FUNCTOR);
 	}
 	// If either MinParams or MaxParams was confirmed to exist, this is likely a valid
 	// function object, so skip the following check for performance.  Otherwise, catch
@@ -20678,4 +20682,27 @@ DWORD GetProcessName(DWORD aProcessID, LPTSTR aBuf, DWORD aBufSize, bool aGetNam
 
 	CloseHandle(hproc);
 	return buf_length;
+}
+
+__int64 pow_ll(__int64 base, __int64 exp)
+{
+	/*
+	Caller must ensure exp >= 0
+	Below uses 'a^b' to denote 'raising a to the power of b'.
+	Computes and returns base^exp. If the mathematical result doesn't fit in __int64, the result is undefined.
+	By convention, x^0 returns 1, even when x == 0,	caller should ensure base is non-zero when exp is zero to handle 0^0.
+	*/
+	if (exp == 0)
+		return 1ll;
+
+	// based on: https://en.wikipedia.org/wiki/Exponentiation_by_squaring (2018-11-03)
+	__int64 result = 1;
+	while (exp > 1)
+	{
+		if (exp % 2) // exp is odd
+			result *= base;
+		base *= base;
+		exp /= 2;
+	}
+	return result * base;
 }

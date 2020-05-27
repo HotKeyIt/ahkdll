@@ -288,7 +288,8 @@ protected:
 	enum Flags : decltype(mFlags)
 	{
 		ClassPrototype = 0x01,
-		NativeClassPrototype = 0x02
+		NativeClassPrototype = 0x02,
+		LastObjectFlag = 0x02
 	};
 
 	Object *CloneTo(Object &aTo);
@@ -583,6 +584,12 @@ class Map : public Object
 		~Pair() = delete;
 	};
 
+	enum MapOption : decltype(mFlags)
+	{
+		MapCaseless = LastObjectFlag << 1,
+		MapUseLocale = MapCaseless << 1
+	};
+
 	Pair *mItem = nullptr;
 	index_t mCount = 0, mCapacity = 0;
 
@@ -680,6 +687,7 @@ public:
 	ResultType __Item(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	ResultType Capacity(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	ResultType Count(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	ResultType CaseSense(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	ResultType Clear(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	ResultType Delete(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	ResultType __Enum(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
@@ -688,7 +696,7 @@ public:
 	ResultType MinIndex(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	ResultType MaxIndex(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 
-	static ObjectMember sMembers[10];
+	static ObjectMember sMembers[11];
 	_thread_local static Object *sPrototype, *sClass;
 };
 

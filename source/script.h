@@ -172,6 +172,7 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_EXE_CORRUPTED _T("EXE corrupted")
 #define ERR_INVALID_INDEX _T("Invalid index.")
 #define ERR_INVALID_VALUE _T("Invalid value.")
+#define ERR_INVALID_FUNCTOR _T("Invalid callback function.")
 #define ERR_PARAM_INVALID _T("Invalid parameter(s).")
 #define ERR_PARAM_COUNT_INVALID _T("Invalid number of parameters.")
 #define ERR_PARAM1_INVALID _T("Parameter #1 invalid.")
@@ -431,6 +432,8 @@ struct ArgStruct
 	DerefType *deref;  // Will hold a NULL-terminated array of operands/word-operators pre-parsed by ParseDerefs()/ParseOperands().
 	ExprTokenType *postfix;  // An array of tokens in postfix order.
 };
+
+__int64 pow_ll(__int64 base, __int64 exp); // integer power function
 
 #define BIF_DECL_PARAMS ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount
 
