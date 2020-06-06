@@ -51,7 +51,7 @@ ResultType Line::ToolTip(LPTSTR aText, LPTSTR aX, LPTSTR aY, LPTSTR aID)
 {
 	int window_index = *aID ? ATOI(aID) - 1 : 0;
 	if (window_index < 0 || window_index >= MAX_TOOLTIPS)
-		return LineError(_T("Max window number is ") MAX_TOOLTIPS_STR _T("."), FAIL, aID);
+		return LineError(_T("Max window number is ") MAX_TOOLTIPS_STR _T("."), FAIL_OR_OK, aID);
 	HWND tip_hwnd = g_hWndToolTip[window_index];
 
 	// Destroy windows except the first (for performance) so that resources/mem are conserved.
@@ -255,7 +255,7 @@ ResultType TrayTipParseOptions(LPTSTR aOptions, NOTIFYICONDATA &nic)
 		}
 	}
 invalid_option:
-	return g_script->ScriptError(ERR_INVALID_OPTION, next_option);
+	return g_script->RuntimeError(ERR_INVALID_OPTION, next_option);
 }
 
 
@@ -316,49 +316,6 @@ BIF_DECL(BIF_TraySetIcon)
 
 
 
-BIF_DECL(BIF_Input)
-// OVERVIEW:
-// Although a script can have many concurrent quasi-threads, there can only be one input
-// at a time.  Thus, if an input is ongoing and a new thread starts, and it begins its
-// own input, that input should terminate the prior input prior to beginning the new one.
-// In a "worst case" scenario, each interrupted quasi-thread could have its own
-// input, which is in turn terminated by the thread that interrupts it.
-{
-	auto *prior_input = InputFind(NULL); // Not g_input, which could belong to an object and should not be ended.
-
-	if (_f_callee_id == FID_InputEnd)
-	{
-		// This means that the user is specifically canceling the prior input (if any).
-		if (prior_input)
-			prior_input->Stop();
-		_f_return_i(prior_input != NULL);
-	}
-
-	size_t aMatchList_length;
-	_f_param_string_opt(aOptions, 0);
-	_f_param_string_opt(aEndKeys, 1);
-	_f_param_string_opt(aMatchList, 2, &aMatchList_length);
-	// The aEndKeys string must be modifiable (not constant), since for performance reasons,
-	// it's allowed to be temporarily altered by this function.
-	
-	input_type input;
-	input.VisibleNonText = false; // Override InputHook default.
-	input.BufferLengthMax = INPUT_BUFFER_SIZE - 1;
-	if (!input.Setup(aOptions, aEndKeys, aMatchList, aMatchList_length))
-		_f_return_FAIL;
-	// Only now is it safe to do things which might cause interruption (see comments above).
-
-	if (prior_input)
-		prior_input->EndByNewInput();
-
-	InputStart(input, &aResultToken);
-	
-	// Ensure input is not present in the input chain, since its life time is about to end.
-	input_type *result = InputRelease(&input);
-	ASSERT(result == NULL);
-}
-
-
 ResultType input_type::Setup(LPTSTR aOptions, LPTSTR aEndKeys, LPTSTR aMatchList, size_t aMatchList_length)
 {
 	ParseOptions(aOptions);
@@ -376,7 +333,7 @@ ResultType input_type::Setup(LPTSTR aOptions, LPTSTR aEndKeys, LPTSTR aMatchList
 }
 
 
-ResultType InputStart(input_type &input, ResultToken *apResultToken)
+ResultType InputStart(input_type &input)
 {
 	ASSERT(!input.InProgress());
 
@@ -396,9 +353,7 @@ ResultType InputStart(input_type &input, ResultToken *apResultToken)
 
 	Hotkey::InstallKeybdHook(); // Install the hook (if needed).
 
-	if (!apResultToken)
-		return OK;
-	return InputWait(*apResultToken, input);
+	return OK;
 }
 
 
@@ -711,43 +666,7 @@ ResultType input_type::SetMatchList(LPTSTR aMatchList, size_t aMatchList_length)
 }
 
 
-ResultType InputWait(ResultToken &aResultToken, input_type &input)
-{
-	//////////////////////////////////////////////////////////////////
-	// Wait for one of the following to terminate our input:
-	// 1) The hook (due a match in aEndKeys or aMatchList);
-	// 2) A thread that interrupts us with a new Input of its own;
-	// 3) The timer we put in effect for our timeout (if we have one).
-	//////////////////////////////////////////////////////////////////
-#ifdef _WIN64
-	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
-#else
-	DWORD aThreadID = __readfsdword(0x24);
-#endif
-	for (;;)
-	{
-		// Rather than monitoring the timeout here, just wait for the incoming WM_TIMER message
-		// to take effect as a TimerProc() call during the MsgSleep():
-		if (g_ThreadID == aThreadID)
-			MsgSleep();
-		else
-			Sleep(SLEEP_INTERVAL);
-		if (!input.InProgress())
-			break;
-	}
-	
-	// Translate the "ending" to an ErrorLevel string.  Even if we were interrupted by another
-	// Input which terminated for a different reason, that instance had its own struct, so ours
-	// hasn't been overwritten.
-	TCHAR key_name[128];
-	g_ErrorLevel->Assign(input.GetEndReason(key_name, _countof(key_name)));
-
-	aResultToken.symbol = SYM_STRING;
-	return TokenSetResult(aResultToken, input.Buffer, input.BufferLength);
-}
-
-
-LPTSTR input_type::GetEndReason(LPTSTR aKeyBuf, int aKeyBufSize, bool aCombined)
+LPTSTR input_type::GetEndReason(LPTSTR aKeyBuf, int aKeyBufSize)
 {
 	switch (Status)
 	{
@@ -760,13 +679,6 @@ LPTSTR input_type::GetEndReason(LPTSTR aKeyBuf, int aKeyBufSize, bool aCombined)
 		LPTSTR key_name = aKeyBuf;
 		if (!key_name)
 			return _T("EndKey");
-		if (aCombined) // Traditional "EndKey:xxx" mode.
-		{
-			ASSERT(aKeyBufSize > 7);
-			_tcscpy(key_name, _T("EndKey:"));
-			key_name += 7;
-			aKeyBufSize -= 7;
-		}
 		if (EndingChar)
 		{
 			key_name[0] = EndingChar;
@@ -800,13 +712,10 @@ LPTSTR input_type::GetEndReason(LPTSTR aKeyBuf, int aKeyBufSize, bool aCombined)
 			if (!*key_name)
 				sntprintf(key_name, aKeyBufSize, _T("sc%03X"), EndingSC);
 		}
-		return aCombined ? aKeyBuf : _T("EndKey");
+		return _T("EndKey");
 	}
 	case INPUT_LIMIT_REACHED:
 		return _T("Max");
-	case INPUT_INTERRUPTED:
-		// Our input was terminated due to a new input in a quasi-thread that interrupted ours.
-		return _T("NewInput");
 	case INPUT_OFF:
 		return _T("Stopped");
 	default: // In progress.
@@ -945,7 +854,8 @@ BIF_DECL(BIF_WinShow)
 			group->ActUponAll(action, wait_time); // It will do DoWinDelay if appropriate.
 			_f_return_retval;
 		}
-	// Since above didn't return, it's not "ahk_group", so do the normal single-window behavior.
+	// Since above didn't return, either the group doesn't exist or it's paired with other
+	// criteria, such as "ahk_group G ahk_class C", so do the normal single-window behavior.
 
 	HWND target_window = NULL;
 	if (aParamCount > 0)
@@ -955,7 +865,7 @@ BIF_DECL(BIF_WinShow)
 		case FAIL: return;
 		case OK:
 			if (!target_window) // Specified a HWND of 0.
-				_f_return_retval;
+				_f_throw(ERR_NO_WINDOW);
 		}
 	}
 
@@ -969,8 +879,10 @@ BIF_DECL(BIF_WinShow)
 		}
 		_f_param_string_opt(aExcludeTitle, 3);
 		_f_param_string_opt(aExcludeText, 4);
-		if (WinClose(*g, aTitle, aText, wait_time, aExcludeTitle, aExcludeText, action == FID_WinKill)) // It closed something.
-			DoWinDelay;
+		if (!WinClose(*g, aTitle, aText, wait_time, aExcludeTitle, aExcludeText, action == FID_WinKill))
+			// Currently WinClose returns NULL only for this case; it doesn't confirm the window closed.
+			_f_throw(ERR_NO_WINDOW);
+		DoWinDelay;
 		_f_return_retval;
 	}
 
@@ -988,7 +900,7 @@ BIF_DECL(BIF_WinShow)
 		if (need_restore)
 			g->DetectHiddenWindows = false;
 		if (!target_window)
-			_f_return_retval;
+			_f_throw(ERR_NO_WINDOW);
 	}
 
 	// WinGroup's EnumParentActUponAll() is quite similar to the following, so the two should be
@@ -1084,6 +996,28 @@ BIF_DECL(BIF_WinActivate)
 		DoWinDelay;
 
 	_f_return_retval;
+}
+
+
+
+BIF_DECL(BIF_GroupActivate)
+{
+	LPTSTR aGroup = ParamIndexToOptionalString(0, _f_number_buf);
+	WinGroup *group;
+	if (   !(group = g_script->FindGroup(aGroup, true))   ) // Last parameter -> create-if-not-found.
+		_f_return_FAIL;  // It already displayed the error for us.
+	
+	LPTSTR aMode = ParamIndexToOptionalString(1, _f_number_buf);
+	bool reverse = false;
+	if (!_tcsicmp(aMode, _T("R")))
+		reverse = true;
+	else if (*aMode)
+		_f_throw(ERR_PARAM1_INVALID, aMode);
+
+	HWND activated;
+	if (!group->Activate(reverse, activated))
+		_f_return_FAIL;
+	_f_return_i((UINT_PTR)activated);
 }
 
 
@@ -1389,16 +1323,15 @@ BIF_DECL(BIF_WinMove)
 	if (!DetermineTargetWindow(target_window, aResultToken, aParam + 4, aParamCount - 4))
 		return;
 	RECT rect;
-	if (target_window && GetWindowRect(target_window, &rect))
-	{
-		MoveWindow(target_window
+	if (!GetWindowRect(target_window, &rect)
+		|| !MoveWindow(target_window
 			, ParamIndexToOptionalInt(0, rect.left) // X-position
 			, ParamIndexToOptionalInt(1, rect.top)  // Y-position
 			, ParamIndexToOptionalInt(2, rect.right - rect.left)
 			, ParamIndexToOptionalInt(3, rect.bottom - rect.top)
-			, TRUE);  // Do repaint.
-		DoWinDelay;
-	}
+			, TRUE)) // Do repaint.
+		_f_throw_win32();
+	DoWinDelay;
 	_f_return_empty;
 }
 
@@ -1411,12 +1344,7 @@ BIF_DECL(BIF_ControlSend) // ControlSend and ControlSendText.
 	_f_param_string(aKeysToSend, 0);
 	SendKeys(aKeysToSend, (SendRawModes)_f_callee_id, SM_EVENT, control_window);
 	// But don't do WinDelay because KeyDelay should have been in effect for the above.
-	g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
-	_f_return_b(TRUE);
-
-error:
-	g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
-	_f_return_b(FALSE);
+	_f_return_empty;
 }
 
 
@@ -1436,7 +1364,7 @@ BIF_DECL(BIF_ControlClick)
 	bool position_mode = false;
 	bool do_activate = true;
 	// These default coords can be overridden either by aOptions or aControl's X/Y mode:
-	{POINT click = {COORD_UNSPECIFIED, COORD_UNSPECIFIED};
+	POINT click = {COORD_UNSPECIFIED, COORD_UNSPECIFIED};
 
 	for (LPTSTR cp = aOptions; *cp; ++cp)
 	{
@@ -1498,9 +1426,9 @@ BIF_DECL(BIF_ControlClick)
 		// Determine target window and control.
 		if (!DetermineTargetControl(control_window, target_window, aResultToken, aParam, aParamCount, 3))
 			return; // aResultToken.SetExitResult() or Error() was already called.
+		ASSERT(control_window != NULL);
 	}
-	if (!target_window)
-		goto error;
+	ASSERT(target_window != NULL);
 
 	// It's debatable, but might be best for flexibility (and backward compatibility) to allow target_window to itself
 	// be a control (at least for the position_mode handler below).  For example, the script may have called SetParent
@@ -1517,19 +1445,19 @@ BIF_DECL(BIF_ControlClick)
 		// to keep the code simple.
 		LPTSTR cp = omit_leading_whitespace(aControl);
 		if (ctoupper(*cp) != 'X')
-			goto error;
+			goto control_error;
 		++cp;
 		if (!*cp)
-			goto error;
+			goto control_error;
 		pah.pt.x = ATOI(cp);
 		if (   !(cp = StrChrAny(cp, _T(" \t")))   ) // Find next space or tab (there must be one for it to be considered valid).
-			goto error;
+			goto control_error;
 		cp = omit_leading_whitespace(cp + 1);
 		if (!*cp || _totupper(*cp) != 'Y')
-			goto error;
+			goto control_error;
 		++cp;
 		if (!*cp)
-			goto error;
+			goto control_error;
 		pah.pt.y = ATOI(cp);
 		// The passed-in coordinates are always relative to target_window's client area because offering
 		// an option for absolute/screen coordinates doesn't seem useful.
@@ -1545,15 +1473,14 @@ BIF_DECL(BIF_ControlClick)
 		ScreenToClient(control_window, &click);
 	}
 
-	// This is done this late because it seems better to set an ErrorLevel of 1 (above) whenever the
+	// This is done this late because it seems better to throw an exception whenever the
 	// target window or control isn't found, or any other error condition occurs above:
 	if (aClickCount < 1)
 	{
 		// Allow this to simply "do nothing", because it increases flexibility
 		// in the case where the number of clicks is a dereferenced script variable
 		// that may sometimes (by intent) resolve to zero or negative:
-		g_ErrorLevel->Assign(ERRORLEVEL_NONE);
-		_f_return_b(TRUE);
+		_f_return_empty;
 	}
 
 	RECT rect;
@@ -1613,12 +1540,13 @@ BIF_DECL(BIF_ControlClick)
 	{
 		switch (aVK)
 		{
-			case VK_LBUTTON:  msg_down = WM_LBUTTONDOWN; msg_up = WM_LBUTTONUP; wparam = MK_LBUTTON; break;
-			case VK_RBUTTON:  msg_down = WM_RBUTTONDOWN; msg_up = WM_RBUTTONUP; wparam = MK_RBUTTON; break;
+			case VK_LBUTTON_LOGICAL:  msg_down = WM_LBUTTONDOWN; msg_up = WM_LBUTTONUP; wparam = MK_LBUTTON; break;
+			case VK_RBUTTON_LOGICAL:  msg_down = WM_RBUTTONDOWN; msg_up = WM_RBUTTONUP; wparam = MK_RBUTTON; break;
 			case VK_MBUTTON:  msg_down = WM_MBUTTONDOWN; msg_up = WM_MBUTTONUP; wparam = MK_MBUTTON; break;
 			case VK_XBUTTON1: msg_down = WM_XBUTTONDOWN; msg_up = WM_XBUTTONUP; wparam_up = XBUTTON1<<16; wparam = MK_XBUTTON1|wparam_up; break;
 			case VK_XBUTTON2: msg_down = WM_XBUTTONDOWN; msg_up = WM_XBUTTONUP; wparam_up = XBUTTON2<<16; wparam = MK_XBUTTON2|wparam_up; break;
-			default: goto error; // Just do nothing since this should realistically never happen.
+			default: // Just do nothing since this should realistically never happen.
+				ASSERT(!"aVK value not handled");
 		}
 	}
 
@@ -1678,12 +1606,13 @@ BIF_DECL(BIF_ControlClick)
 
 	DETACH_THREAD_INPUT  // Also takes into account do_activate, indirectly.
 
-	g_ErrorLevel->Assign(ERRORLEVEL_NONE);} // Indicate success.
-	_f_return_b(TRUE);
+	_f_return_empty;
 
 error:
-	g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
-	_f_return_b(FALSE);
+	_f_throw_win32();
+
+control_error:
+	_f_throw(ERR_NO_CONTROL, aControl);
 }
 
 
@@ -1704,7 +1633,7 @@ BIF_DECL(BIF_ControlMove)
 	RECT control_rect;
 	if (!GetWindowRect(control_window, &control_rect)
 		|| !MapWindowPoints(NULL, coord_parent, (LPPOINT)&control_rect, 2))
-		goto error;
+		_f_throw_win32();
 	
 	POINT point;
 	point.x = ParamIndexToOptionalInt(0, control_rect.left);
@@ -1725,12 +1654,7 @@ BIF_DECL(BIF_ControlMove)
 		, TRUE);  // Do repaint.
 
 	DoControlDelay
-	g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
-	_f_return_b(TRUE);
-
-error:
-	g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
-	_f_return_b(FALSE);
+	_f_return_empty;
 }
 
 
@@ -1758,14 +1682,7 @@ BIF_DECL(BIF_ControlGetPos)
 	output_var_y && output_var_y->Assign(child_rect.top);
 	output_var_width && output_var_width->Assign(child_rect.right - child_rect.left);
 	output_var_height && output_var_height->Assign(child_rect.bottom - child_rect.top);
-	_f_return_b(TRUE);
-
-error:
-	output_var_x && output_var_x->Assign();
-	output_var_y && output_var_y->Assign();
-	output_var_width && output_var_width->Assign();
-	output_var_height && output_var_height->Assign();
-	_f_return_b(FALSE);
+	_f_return_empty;
 }
 
 
@@ -1775,26 +1692,18 @@ BIF_DECL(BIF_ControlGetFocus)
 	HWND target_window;
 	if (!DetermineTargetWindow(target_window, aResultToken, aParam, aParamCount))
 		return;
-	if (!target_window)
-		goto error;
 
 	GUITHREADINFO guithreadInfo;
 	guithreadInfo.cbSize = sizeof(GUITHREADINFO);
 	if (!GetGUIThreadInfo(GetWindowThreadProcessId(target_window, NULL), &guithreadInfo))
-		goto error;
+		_f_throw_win32();
 
-	// At this point, even an answer of "no focused control" is not an error:
-	g_ErrorLevel->Assign(ERRORLEVEL_NONE);
 	// Use IsChild() to ensure the focused control actually belongs to this window.
 	// Otherwise, a HWND will be returned if any window in the same thread has focus,
 	// including the target window itself (typically when it has no controls).
 	if (!IsChild(target_window, guithreadInfo.hwndFocus))
 		_f_return_i(0); // As documented, if "none of the target window's controls has focus, the return value is 0".
 	_f_return_i((UINT_PTR)guithreadInfo.hwndFocus);
-
-error:
-	g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
-	_f_return_i(0);
 }
 
 
@@ -1811,19 +1720,16 @@ BIF_DECL(BIF_ControlGetClassNN)
 	cah.hwnd = control_window;
 	cah.class_name = class_name;
 	if (!GetClassName(cah.hwnd, class_name, _countof(class_name) - 5)) // -5 to allow room for sequence number.
-		goto error;
+		_f_throw_win32();
 	
 	cah.class_count = 0;  // Init for the below.
 	cah.is_found = false; // Same.
 	EnumChildWindows(target_window, EnumChildFindSeqNum, (LPARAM)&cah);
 	if (!cah.is_found)
-		goto error;
+		_f_throw(ERR_FAILED);
 	// Append the class sequence number onto the class name:
 	sntprintfcat(class_name, _countof(class_name), _T("%d"), cah.class_count);
 	_f_return(class_name);
-
-error:
-	_f_return_empty;
 }
 
 
@@ -1850,8 +1756,6 @@ BOOL CALLBACK EnumChildFindSeqNum(HWND aWnd, LPARAM lParam)
 
 BIF_DECL(BIF_ControlFocus)
 {
-	bool success = false;
-
 	DETERMINE_TARGET_CONTROL(0);
 
 	// Unlike many of the other Control commands, this one requires AttachThreadInput()
@@ -1859,11 +1763,11 @@ BIF_DECL(BIF_ControlFocus)
 	// chance even without it):
 	ATTACH_THREAD_INPUT
 
-	success = SetFocus(control_window) != NULL;
+	SetFocus(control_window);
 	DoControlDelay; // Done unconditionally for simplicity, and in case SetFocus() had some effect despite indicating failure.
-	// Call GetFocus() in case focus was previously NULL, since that would cause SetFocus() to return NULL even if it succeeded:
-	if (!success && GetFocus() == control_window)
-		success = true;
+	// GetFocus() isn't called and failure to focus isn't treated as an error because
+	// a successful change in focus doesn't guarantee that the focus will still be as
+	// expected when the next line of code runs.
 
 	// Very important to detach any threads whose inputs were attached above,
 	// prior to returning, otherwise the next attempt to attach thread inputs
@@ -1871,9 +1775,7 @@ BIF_DECL(BIF_ControlFocus)
 	// undesirable effect:
 	DETACH_THREAD_INPUT
 
-error:
-	g_ErrorLevel->Assign(!success);
-	_f_return_b(success);
+	_f_return_empty;
 }
 
 
@@ -1890,12 +1792,7 @@ BIF_DECL(BIF_ControlSetText)
 	SendMessageTimeout(control_window, WM_SETTEXT, (WPARAM)0, (LPARAM)aNewText
 		, SMTO_ABORTIFHUNG, 5000, &result);
 	DoControlDelay;
-	g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
-	_f_return_b(TRUE);
-
-error:
-	g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
-	_f_return_b(FALSE);
+	_f_return_empty;
 }
 
 
@@ -1912,10 +1809,9 @@ BIF_DECL(BIF_ControlGetText)
 	// because it is able to get text from more types of controls (e.g. large edit controls):
 	VarSizeType space_needed = GetWindowTextTimeout(control_window) + 1; // 1 for terminator.
 
-	// Set up the var, enlarging it if necessary.  If the output_var is of type VAR_CLIPBOARD,
-	// this call will set up the clipboard for writing:
+	// Allocate memory for the return value.
 	if (!TokenSetResult(aResultToken, NULL, space_needed - 1))
-		_f_return_FAIL;  // It already displayed the error.
+		return;  // It already displayed the error.
 	aResultToken.symbol = SYM_STRING;
 	// Fetch the text directly into the buffer.  Also set the length explicitly
 	// in case actual size written was off from the estimated size (since
@@ -1924,12 +1820,6 @@ BIF_DECL(BIF_ControlGetText)
 	aResultToken.marker_length = GetWindowTextTimeout(control_window, aResultToken.marker, space_needed);
 	if (!aResultToken.marker_length) // There was no text to get or GetWindowTextTimeout() failed.
 		*aResultToken.marker = '\0';
-	g_ErrorLevel->Assign(ERRORLEVEL_NONE);
-	return;
-
-error:
-	g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
-	_f_return_empty;
 }
 
 
@@ -1984,9 +1874,8 @@ void ControlGetListView(ResultToken &aResultToken, HWND aHwnd, LPTSTR aOptions)
 	bool include_focused_only = tcscasestr(aOptions, _T("Focused"));  // Same.
 	LPTSTR col_option = tcscasestr(aOptions, _T("Col")); // Also used for mode "Count Col"
 	int requested_col = col_option ? ATOI(col_option + 3) - 1 : -1;
-	// If the above yields a negative col number for any reason, it's ok because below will just ignore it.
-	if (col_count > -1 && requested_col > -1 && requested_col >= col_count) // Specified column does not exist.
-		goto error;
+	if (col_count > -1 && col_option && (requested_col < 0 || requested_col >= col_count)) // Specified column does not exist.
+		_f_throw(ERR_PARAM1_INVALID, col_option);
 
 	// IF THE "COUNT" OPTION IS PRESENT, FULLY HANDLE THAT AND RETURN
 	if (get_count)
@@ -2007,7 +1896,6 @@ void ControlGetListView(ResultToken &aResultToken, HWND aHwnd, LPTSTR aOptions)
 			result = (int)col_count;
 		else // Total row count.
 			result = (int)row_count;
-		//g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Already done by caller.
 		_f_return(result);
 	}
 
@@ -2209,7 +2097,6 @@ void ControlGetListView(ResultToken &aResultToken, HWND aHwnd, LPTSTR aOptions)
 break_both:
 	*contents = '\0'; // Final termination.  Above has reserved room for this one byte.
 	aResultToken.marker_length = (size_t)total_length; // Update to actual vs. estimated length.
-	//g_ErrorLevel->Assign(ERRORLEVEL_NONE);  // Already done by caller.
 
 	// CLEAN UP
 cleanup_and_return: // This is "called" if a memory allocation failed above
@@ -2217,8 +2104,7 @@ cleanup_and_return: // This is "called" if a memory allocation failed above
 	return;
 
 error:
-	g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
-	return;
+	_f_throw_win32();
 }
 
 
@@ -2275,14 +2161,12 @@ BIF_DECL(BIF_StatusBarGetText)//(LPTSTR aPart, LPTSTR aTitle, LPTSTR aText
 	//, LPTSTR aExcludeTitle, LPTSTR aExcludeText)
 {
 	int part = ParamIndexToOptionalInt(0, 1);
-	// Note: ErrorLevel is handled by StatusBarUtil(), below.
 	HWND target_window;
 	if (!DetermineTargetWindow(target_window, aResultToken, aParam + 1, aParamCount - 1))
 		return;
-	HWND control_window = target_window ? ControlExist(target_window, _T("msctls_statusbar321")) : NULL;
-	// Call this even if control_window is NULL because in that case, it will set the output var to
-	// be blank for us:
-	StatusBarUtil(&aResultToken, control_window, part); // It will handle any zero part# for us.
+	HWND control_window = ControlExist(target_window, _T("msctls_statusbar321"));
+	// StatusBarUtil will handle any NULL control_window or zero part# for us.
+	StatusBarUtil(aResultToken, control_window, part);
 }
 
 
@@ -2303,11 +2187,9 @@ BIF_DECL(BIF_StatusBarWait)
 	// but whose contents we need to refer to while we are waiting:
 	TCHAR text_to_wait_for[4096];
 	tcslcpy(text_to_wait_for, aTextToWaitFor, _countof(text_to_wait_for));
-	HWND control_window = target_window ? ControlExist(target_window, _T("msctls_statusbar321")) : NULL;
-	// Note: ErrorLevel is handled by StatusBarUtil(), below.
-	// It will also handle a NULL control_window or zero part# for us.
-	StatusBarUtil(NULL, control_window, aPart, text_to_wait_for, aSeconds, aInterval);
-	_f_return_b(!g_ErrorLevel->ToInt64());
+	HWND control_window = ControlExist(target_window, _T("msctls_statusbar321"));
+	// StatusBarUtil will handle any NULL control_window or zero part# for us.
+	StatusBarUtil(aResultToken, control_window, aPart, text_to_wait_for, aSeconds, aInterval);
 }
 
 
@@ -2384,9 +2266,13 @@ BIF_DECL(BIF_PostSendMessage)
 	else
 		successful = PostMessage(control_window, msg, (WPARAM)param[0], (LPARAM)param[1]);
 
-error:
-	g_ErrorLevel->Assign(successful ? ERRORLEVEL_NONE : ERRORLEVEL_ERROR);
-	if (aUseSend && successful)
+	if (!successful)
+	{
+		if (aUseSend && GetLastError() == ERROR_TIMEOUT)
+			_f_throw(ERR_TIMEOUT);
+		_f_throw_win32();
+	}
+	if (aUseSend)
 		_f_return_i((__int64)dwResult);
 	else
 		_f_return_empty;
@@ -2515,7 +2401,7 @@ BIF_DECL(BIF_ProcessSetPriority)
 
 
 
-ResultType WinSetRegion(HWND aWnd, LPTSTR aPoints, ResultToken &aResultToken)
+void WinSetRegion(HWND aWnd, LPTSTR aPoints, ResultToken &aResultToken)
 {
 	if (!*aPoints) // Attempt to restore the window's normal/correct region.
 	{
@@ -2533,17 +2419,19 @@ ResultType WinSetRegion(HWND aWnd, LPTSTR aPoints, ResultToken &aResultToken)
 		//	{
 		//		// Presumably, the system deletes the former region when upon a successful call to SetWindowRgn().
 		//		if (SetWindowRgn(aWnd, hrgn, TRUE))
-		//			return g_ErrorLevel->Assign(ERRORLEVEL_NONE);
+		//			_f_return_empty;
 		//		// Otherwise, get rid of it since it didn't take effect:
 		//		DeleteObject(hrgn);
 		//	}
 		//}
 		//// Since above didn't return:
-		//return OK; // Let ErrorLevel tell the story.
+		//return OK;
 
 		// It's undocumented by MSDN, but apparently setting the Window's region to NULL restores it
 		// to proper working order:
-		return Script::SetErrorLevelOrThrowBool(!SetWindowRgn(aWnd, NULL, TRUE)); // Let ErrorLevel tell the story.
+		if (!SetWindowRgn(aWnd, NULL, TRUE))
+			_f_throw_win32();
+		_f_return_empty;
 	}
 
 	#define MAX_REGION_POINTS 2000  // 2000 requires 16 KB of stack space.
@@ -2571,7 +2459,7 @@ ResultType WinSetRegion(HWND aWnd, LPTSTR aPoints, ResultToken &aResultToken)
 	{
 		// To allow the MAX to be increased in the future with less chance of breaking existing scripts, consider this an error.
 		if (pt_count >= MAX_REGION_POINTS)
-			goto error;
+			goto arg_error;
 
 		if (isdigit(*cp) || *cp == '-' || *cp == '+') // v1.0.38.02: Recognize leading minus/plus sign so that the X-coord is just as tolerant as the Y.
 		{
@@ -2585,7 +2473,7 @@ ResultType WinSetRegion(HWND aWnd, LPTSTR aPoints, ResultToken &aResultToken)
 			// "x" is not used to avoid detecting "x" inside hex numbers.
 			#define REGION_DELIMITER '-'
 			if (   !(cp = _tcschr(cp + 1, REGION_DELIMITER))   ) // v1.0.38.02: cp + 1 to omit any leading minus sign.
-				goto error;
+				goto arg_error;
 			pt[pt_count].y = ATOI(++cp);  // Increment cp by only 1 to support negative Y-coord.
 			++pt_count; // Move on to the next element of the pt array.
 		}
@@ -2609,7 +2497,7 @@ ResultType WinSetRegion(HWND aWnd, LPTSTR aPoints, ResultToken &aResultToken)
 					if (cp = _tcschr(cp, REGION_DELIMITER)) // Assign
 						rr_height = ATOI(++cp);
 					else // Avoid problems with going beyond the end of the string.
-						goto error;
+						goto arg_error;
 				}
 				break;
 			case 'W':
@@ -2622,7 +2510,7 @@ ResultType WinSetRegion(HWND aWnd, LPTSTR aPoints, ResultToken &aResultToken)
 				height = ATOI(cp);
 				break;
 			default: // For simplicity and to reserve other letters for future use, unknown options result in failure.
-				goto error;
+				goto arg_error;
 			} // switch()
 		} // else
 
@@ -2631,7 +2519,7 @@ ResultType WinSetRegion(HWND aWnd, LPTSTR aPoints, ResultToken &aResultToken)
 	}
 
 	if (!pt_count)
-		goto error;
+		goto arg_error;
 
 	bool width_and_height_were_both_specified = !(width == COORD_UNSPECIFIED || height == COORD_UNSPECIFIED);
 	if (width_and_height_were_both_specified)
@@ -2661,12 +2549,14 @@ ResultType WinSetRegion(HWND aWnd, LPTSTR aPoints, ResultToken &aResultToken)
 	}
 	//else don't delete hrgn since the system has taken ownership of it.
 
-	// Since above didn't return, indicate success.
-	aResultToken.value_int64 = TRUE;
-	return Script::SetErrorLevelOrThrowBool(false);
+	// Since above didn't return, it's a success.
+	_f_return_empty;
+
+arg_error:
+	_f_throw(ERR_PARAM1_INVALID);
 
 error:
-	return Script::SetErrorLevelOrThrow();
+	_f_throw_win32();
 }
 
 
@@ -2678,11 +2568,6 @@ BIF_DECL(BIF_WinSet)
 	HWND target_window;
 	if (!DetermineTargetWindow(target_window, aResultToken, aParam + 1, aParamCount - 1))
 		return;
-	if (!target_window)
-	{
-		Script::SetErrorLevelOrThrow();
-		_f_return_b(FALSE);
-	}
 
 	int value;
 	BOOL success = FALSE;
@@ -2860,8 +2745,9 @@ BIF_DECL(BIF_WinSet)
 		return;
 
 	} // switch()
-	Script::SetErrorLevelOrThrowBool(!success);
-	_f_return_b(success);
+	if (!success)
+		_f_throw_win32();
+	_f_return_empty;
 }
 
 
@@ -2871,17 +2757,14 @@ BIF_DECL(BIF_WinRedraw)
 	HWND target_window;
 	if (!DetermineTargetWindow(target_window, aResultToken, aParam, aParamCount))
 		return;
-	if (target_window)
-	{
-		// Seems best to always have the last param be TRUE. Also, it seems best not to call
-		// UpdateWindow(), which forces the window to immediately process a WM_PAINT message,
-		// since that might not be desirable.  Some other methods of getting a window to redraw:
-		// SendMessage(mHwnd, WM_NCPAINT, 1, 0);
-		// RedrawWindow(mHwnd, NULL, NULL, RDW_INVALIDATE|RDW_FRAME|RDW_UPDATENOW);
-		// SetWindowPos(mHwnd, NULL, 0, 0, 0, 0, SWP_DRAWFRAME|SWP_FRAMECHANGED|SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE);
-		// GetClientRect(mHwnd, &client_rect); InvalidateRect(mHwnd, &client_rect, TRUE);
-		InvalidateRect(target_window, NULL, TRUE);
-	}
+	// Seems best to always have the last param be TRUE. Also, it seems best not to call
+	// UpdateWindow(), which forces the window to immediately process a WM_PAINT message,
+	// since that might not be desirable.  Some other methods of getting a window to redraw:
+	// SendMessage(mHwnd, WM_NCPAINT, 1, 0);
+	// RedrawWindow(mHwnd, NULL, NULL, RDW_INVALIDATE|RDW_FRAME|RDW_UPDATENOW);
+	// SetWindowPos(mHwnd, NULL, 0, 0, 0, 0, SWP_DRAWFRAME|SWP_FRAMECHANGED|SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE);
+	// GetClientRect(mHwnd, &client_rect); InvalidateRect(mHwnd, &client_rect, TRUE);
+	InvalidateRect(target_window, NULL, TRUE);
 	_f_return_empty;
 }
 
@@ -2892,16 +2775,11 @@ BIF_DECL(BIF_WinMoveTopBottom)
 	HWND target_window;
 	if (!DetermineTargetWindow(target_window, aResultToken, aParam, aParamCount))
 		return;
-	if (target_window)
-	{
-		HWND mode = _f_callee_id == FID_WinMoveBottom ? HWND_BOTTOM : HWND_TOP;
-		// Note: SWP_NOACTIVATE must be specified otherwise the target window often fails to move:
-		if (SetWindowPos(target_window, mode, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE))
-		{
-			_f_return_b(TRUE);
-		}
-	}
-	_f_return_b(FALSE);
+	HWND mode = _f_callee_id == FID_WinMoveBottom ? HWND_BOTTOM : HWND_TOP;
+	// Note: SWP_NOACTIVATE must be specified otherwise the target window often fails to move:
+	if (!SetWindowPos(target_window, mode, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE))
+		_f_throw_win32();
+	_f_return_empty;
 }
 
 
@@ -2911,8 +2789,8 @@ BIF_DECL(BIF_WinSetTitle)
 	HWND target_window;
 	if (!DetermineTargetWindow(target_window, aResultToken, aParam + 1, aParamCount - 1))
 		return;
-	if (target_window)
-		SetWindowText(target_window, ParamIndexToString(0, _f_number_buf));
+	if (!SetWindowText(target_window, ParamIndexToString(0, _f_number_buf)))
+		_f_throw_win32();
 	_f_return_empty;
 }
 
@@ -2928,19 +2806,11 @@ BIF_DECL(BIF_WinGetTitle)
 	if (!TokenSetResult(aResultToken, NULL, space_needed - 1))
 		return;  // It already displayed the error.
 	aResultToken.symbol = SYM_STRING;
-	if (target_window)
-	{
-		// Update length using the actual length, rather than the estimate provided by GetWindowTextLength():
-		aResultToken.marker_length = GetWindowText(target_window, aResultToken.marker, space_needed);
-		if (!aResultToken.marker_length)
-			// There was no text to get or GetWindowTextTimeout() failed.
-			*aResultToken.marker = '\0';
-	}
-	else
-	{
+	// Update length using the actual length, rather than the estimate provided by GetWindowTextLength():
+	aResultToken.marker_length = GetWindowText(target_window, aResultToken.marker, space_needed);
+	if (!aResultToken.marker_length)
+		// There was no text to get or GetWindowTextTimeout() failed.
 		*aResultToken.marker = '\0';
-		aResultToken.marker_length = 0;
-	}
 }
 
 
@@ -2950,11 +2820,9 @@ BIF_DECL(BIF_WinGetClass)
 	HWND target_window;
 	if (!DetermineTargetWindow(target_window, aResultToken, aParam, aParamCount))
 		return;
-	if (!target_window)
-		_f_return_empty;
 	TCHAR class_name[WINDOW_CLASS_SIZE];
 	if (!GetClassName(target_window, class_name, _countof(class_name)))
-		_f_return_empty;
+		_f_throw_win32();
 	_f_return(class_name);
 }
 
@@ -3025,12 +2893,12 @@ BIF_DECL(BIF_WinGet)
 		case FAIL: return;
 		case OK:
 			if (!target_window)
-				_f_return_empty;
+				_f_throw(ERR_NO_WINDOW);
 		}
 	if (!target_window)
 		target_window = WinExist(*g, aTitle, aText, aExcludeTitle, aExcludeText, cmd == FID_WinGetIDLast);
 	if (!target_window)
-		_f_return_empty;
+		_f_throw(ERR_NO_WINDOW);
 
 	switch(cmd)
 	{
@@ -3180,11 +3048,6 @@ BIF_DECL(BIF_WinGetText)
 	HWND target_window;
 	if (!DetermineTargetWindow(target_window, aResultToken, aParam, aParamCount))
 		return;
-	if (!target_window)
-	{
-		g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
-		_f_return_empty;
-	}
 
 	length_and_buf_type sab;
 	sab.buf = NULL; // Tell it just to calculate the length this time around.
@@ -3193,10 +3056,7 @@ BIF_DECL(BIF_WinGetText)
 	EnumChildWindows(target_window, EnumChildGetText, (LPARAM)&sab);
 
 	if (!sab.total_length) // No text in window.
-	{
-		g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
 		_f_return_empty;
-	}
 
 	// Set up the var, enlarging it if necessary.  If the output_var is of type VAR_CLIPBOARD,
 	// this call will set up the clipboard for writing:
@@ -3223,9 +3083,11 @@ BIF_DECL(BIF_WinGetText)
 	// conversion from ANSI to Unicode."
 	aResultToken.marker_length = sab.total_length;
 	if (!sab.total_length)
+	{
 		// Something went wrong, so make sure we set to empty string.
 		*sab.buf = '\0';
-	g_ErrorLevel->Assign(!sab.total_length);
+		_f_throw(ERR_FAILED);
+	}
 }
 
 
@@ -3266,24 +3128,18 @@ BIF_DECL(BIF_WinGetPos)
 	HWND target_window;
 	if (!DetermineTargetWindow(target_window, aResultToken, aParam + 4, aParamCount - 4))
 		return;
-	// Even if target_window is NULL, we want to continue on so that the output
-	// variables are set to be the empty string, which is the proper thing to do
-	// rather than leaving whatever was in there before.
 	RECT rect;
-	if (target_window)
+	if (_f_callee_id == FID_WinGetPos)
 	{
-		if (_f_callee_id == FID_WinGetPos)
-		{
-			GetWindowRect(target_window, &rect);
-			rect.right -= rect.left; // Convert right to width.
-			rect.bottom -= rect.top; // Convert bottom to height.
-		}
-		else // FID_WinGetClientPos
-		{
-			GetClientRect(target_window, &rect); // Get client pos relative to client (position is always 0,0).
-			// Since the position is always 0,0, right,bottom are already equivalent to width,height.
-			MapWindowPoints(target_window, NULL, (LPPOINT)&rect, 1); // Convert position to screen coordinates.
-		}
+		GetWindowRect(target_window, &rect);
+		rect.right -= rect.left; // Convert right to width.
+		rect.bottom -= rect.top; // Convert bottom to height.
+	}
+	else // FID_WinGetClientPos
+	{
+		GetClientRect(target_window, &rect); // Get client pos relative to client (position is always 0,0).
+		// Since the position is always 0,0, right,bottom are already equivalent to width,height.
+		MapWindowPoints(target_window, NULL, (LPPOINT)&rect, 1); // Convert position to screen coordinates.
 	}
 
 	for (int i = 0; i < 4; ++i)
@@ -3291,13 +3147,9 @@ BIF_DECL(BIF_WinGetPos)
 		Var *var = ParamIndexToOptionalVar(i);
 		if (!var)
 			continue;
-		if (target_window)
-			var->Assign(((int *)(&rect))[i]); // Always succeeds.
-		else
-			if (!var->Assign()) // Failure would be very unusual, but can occur for Clipboard and other built-in variables.
-				aResultToken.SetExitResult(FAIL);
+		var->Assign(((int *)(&rect))[i]); // Always succeeds.
 	}
-	_f_return((__int64)(size_t)target_window); // Return the HWND to indicate success/failure.
+	_f_return_empty;
 }
 
 
@@ -3322,7 +3174,9 @@ BIF_DECL(BIF_Env)
 		// validate aEnvVarName the same way we validate script variables (i.e. just let the return value
 		// determine whether there's an error).
 		LPTSTR aValue = ParamIndexIsOmitted(1) ? NULL : ParamIndexToString(1, buf);
-		_f_return_i(SetEnvironmentVariable(aEnvVarName, aValue) != FALSE);
+		if (!SetEnvironmentVariable(aEnvVarName, aValue))
+			_f_throw_win32();
+		_f_return_empty;
 	}
 
 	// GetEnvironmentVariable() could be called twice, the first time to get the actual size.  But that would
@@ -3391,37 +3245,30 @@ BIF_DECL(BIF_MonitorGet)
 	case FID_MonitorGetWorkArea:
 	// Params: N, Left, Top, Right, Bottom
 	{
-		mip.monitor_number_to_find = aParamCount ? (int)TokenToInt64(*aParam[0]) : 0;  // If this returns 0, it will default to the primary monitor.
+		mip.monitor_number_to_find = ParamIndexToOptionalInt(0, 0);  // If this returns 0, it will default to the primary monitor.
 		EnumDisplayMonitors(NULL, NULL, EnumMonitorProc, (LPARAM)&mip);
 		if (!mip.count || (mip.monitor_number_to_find && mip.monitor_number_to_find != mip.count))
-		{
-			// With the exception of the caller having specified a non-existent monitor number, all of
-			// the ways the above can happen are probably impossible in practice.  Make all the variables
-			// blank vs. zero (and return zero) to indicate the problem.
-			for (int i = 1; i <= 4; ++i)
-				if (i < aParamCount && aParam[i]->symbol == SYM_VAR)
-					aParam[i]->var->Assign();
-			_f_return_b(FALSE);
-		}
+			break;
 		// Otherwise:
 		LONG *monitor_rect = (LONG *)((cmd == FID_MonitorGetWorkArea) ? &mip.monitor_info_ex.rcWork : &mip.monitor_info_ex.rcMonitor);
 		for (int i = 1; i <= 4; ++i) // Params: N (0), Left (1), Top, Right, Bottom.
 			if (i < aParamCount && aParam[i]->symbol == SYM_VAR)
 				aParam[i]->var->Assign(monitor_rect[i-1]);
-		_f_return_b(TRUE);
+		_f_return_i(mip.count); // Return the monitor number.
 	}
 
 	case FID_MonitorGetName: // Param: N
-		mip.monitor_number_to_find = aParamCount ? (int)TokenToInt64(*aParam[0]) : 0;  // If this returns 0, it will default to the primary monitor.
+		mip.monitor_number_to_find = ParamIndexToOptionalInt(0, 0);  // If this returns 0, it will default to the primary monitor.
 		EnumDisplayMonitors(NULL, NULL, EnumMonitorProc, (LPARAM)&mip);
 		if (!mip.count || (mip.monitor_number_to_find && mip.monitor_number_to_find != mip.count))
-			// With the exception of the caller having specified a non-existent monitor number, all of
-			// the ways the above can happen are probably impossible in practice.  Make the return value
-			// blank to indicate the problem:
-			_f_return_empty;
-		else
-			_f_return(mip.monitor_info_ex.szDevice);
+			break;
+		_f_return(mip.monitor_info_ex.szDevice);
 	} // switch()
+	
+	// Since above didn't return, an error was detected.
+	if (!mip.count) // Might be virtually impossible.
+		_f_throw_win32();
+	_f_throw(ERR_PARAM1_INVALID);
 }
 
 
@@ -3861,7 +3708,7 @@ fast_end:
 	_f_return_b(found);
 
 error:
-	_f_throw(ERR_INTERNAL_CALL);
+	_f_throw_win32();
 }
 
 
@@ -4274,7 +4121,7 @@ arg7_error:
 	_f_throw(ERR_PARAM7_INVALID, aImageFile);
 
 error:
-	_f_throw(ERR_INTERNAL_CALL);
+	_f_throw_win32();
 }
 
 
@@ -5071,7 +4918,7 @@ ResultType MsgBoxParseOptions(LPTSTR aOptions, int &aType, double &aTimeout, HWN
 		}
 	}
 invalid_option:
-	return g_script->ScriptError(ERR_INVALID_OPTION, next_option);
+	return g_script->RuntimeError(ERR_INVALID_OPTION, next_option);
 }
 
 
@@ -5135,7 +4982,7 @@ BIF_DECL(BIF_MsgBox)
 	//	// the user of this via a final MessageBox dialog, so our call here will
 	//	// not have any effect.  The below only takes effect if MsgBox()'s call to
 	//	// MessageBox() failed in some unexpected way:
-	//	LineError("The MsgBox could not be displayed.");
+	//	_f_throw("The MsgBox could not be displayed.");
 	// v1.1.09.02: If the MsgBox failed due to invalid options, it seems better to display
 	// an error dialog than to silently exit the thread:
 	if (!result && GetLastError() == ERROR_INVALID_MSGBOX_STYLE)
@@ -5178,7 +5025,10 @@ ResultType InputBoxParseOptions(LPTSTR aOptions, InputBoxType &aInputBox)
 				|| !IsNumeric(next_option + 1 // Or not a valid number.
 					, option_char == 'X' || option_char == 'Y' // Only X and Y allow negative numbers.
 					, FALSE, option_char == 'T')) // Only Timeout allows floating-point.
-				return g_script->ScriptError(ERR_INVALID_OPTION, next_option);
+			{
+				*option_end = orig_char; // Undo the temporary termination.
+				return g_script->RuntimeError(ERR_INVALID_OPTION, next_option);
+			}
 
 			switch (ctoupper(*next_option))
 			{
@@ -5197,42 +5047,25 @@ ResultType InputBoxParseOptions(LPTSTR aOptions, InputBoxType &aInputBox)
 
 BIF_DECL(BIF_InputBox)
 {
-	if (g_nInputBoxes >= MAX_INPUTBOXES)
-	{
-		// Have a maximum to help prevent runaway hotkeys due to key-repeat feature, etc.
-		_f_throw(_T("The maximum number of InputBoxes has been reached."));
-	}
 	_f_param_string_opt(aText, 0);
-	_f_param_string_opt_def(aTitle, 1, NULL);
+	_f_param_string_opt_def(aTitle, 1, g_script->DefaultDialogTitle());
 	_f_param_string_opt(aOptions, 2);
 	_f_param_string_opt(aDefault, 3);
-	if (!aTitle) // Omitted, not just blank.
-		aTitle = g_script->DefaultDialogTitle();
-	// Limit the size of what we were given to prevent unreasonably huge strings from
-	// possibly causing a failure in CreateDialog().  This copying method is always done because:
-	// Make a copy of all string parameters, using the stack, because they may reside in the deref buffer
-	// and other commands (such as those in timed/hotkey subroutines) maybe overwrite the deref buffer.
-	// This is not strictly necessary since InputBoxProc() is called immediately and makes instantaneous
-	// and one-time use of these strings (not needing them after that), but it feels safer:
-	TCHAR title[DIALOG_TITLE_SIZE];
-	TCHAR text[4096];  // Size was increased in light of the fact that dialog can be made larger now.
-	TCHAR default_string[4096];
-	tcslcpy(title, aTitle, _countof(title));
-	tcslcpy(text, aText, _countof(text));
-	tcslcpy(default_string, aDefault, _countof(default_string));
-	g_InputBox[g_nInputBoxes].title = title;
-	g_InputBox[g_nInputBoxes].text = text;
-	g_InputBox[g_nInputBoxes].default_string = default_string;
-	g_InputBox[g_nInputBoxes].result_token = &aResultToken;
+
+	InputBoxType inputbox;
+	inputbox.title = aTitle;
+	inputbox.text = aText;
+	inputbox.default_string = aDefault;
+	inputbox.return_string = nullptr;
 	// Set defaults:
-	g_InputBox[g_nInputBoxes].width = INPUTBOX_DEFAULT;
-	g_InputBox[g_nInputBoxes].height = INPUTBOX_DEFAULT;
-	g_InputBox[g_nInputBoxes].xpos = INPUTBOX_DEFAULT;
-	g_InputBox[g_nInputBoxes].ypos = INPUTBOX_DEFAULT;
-	g_InputBox[g_nInputBoxes].password_char = '\0';
-	g_InputBox[g_nInputBoxes].timeout = 0;
+	inputbox.width = INPUTBOX_DEFAULT;
+	inputbox.height = INPUTBOX_DEFAULT;
+	inputbox.xpos = INPUTBOX_DEFAULT;
+	inputbox.ypos = INPUTBOX_DEFAULT;
+	inputbox.password_char = '\0';
+	inputbox.timeout = 0;
 	// Parse options and override defaults:
-	if (!InputBoxParseOptions(aOptions, g_InputBox[g_nInputBoxes]))
+	if (!InputBoxParseOptions(aOptions, inputbox))
 		_f_return_FAIL; // It already displayed the error.
 
 	// At this point, we know a dialog will be displayed.  See macro's comments for details:
@@ -5240,32 +5073,39 @@ BIF_DECL(BIF_InputBox)
 
 	// Specify NULL as the owner window since we want to be able to have the main window in the foreground even
 	// if there are InputBox windows.  Update: A GUI window can now be the parent if thread has that setting.
-	++g_nInputBoxes;
-	INT_PTR result = DialogBox(g_hInstance, MAKEINTRESOURCE(IDD_INPUTBOX), THREAD_DIALOG_OWNER, InputBoxProc);
-	--g_nInputBoxes;
+	INT_PTR result = DialogBoxParam(g_hInstance, MAKEINTRESOURCE(IDD_INPUTBOX), THREAD_DIALOG_OWNER
+		, InputBoxProc, (LPARAM)&inputbox);
 
 	DIALOG_END
 
-	// See the comments in InputBoxProc() for why ErrorLevel is set here rather than there.
-	switch(result)
+	LPTSTR value = inputbox.return_string;
+	LPTSTR reason;
+	
+	switch (result)
 	{
-	case AHK_TIMEOUT:
-		// In this case the TimerProc already set the output variable to be what the user entered.
-		g_ErrorLevel->Assign(2);
-		break;
-	case IDOK:
-	case IDCANCEL:
-		// The output variable is set to whatever the user entered, even if the user pressed
-		// the cancel button.  This allows the cancel button to specify that a different
-		// operation should be performed on the entered text:
-		g_ErrorLevel->Assign(result == IDCANCEL ? ERRORLEVEL_ERROR : ERRORLEVEL_NONE);
-		break;
-	case -1:
-		// No need to set ErrorLevel since this is a runtime error that will kill the current quasi-thread.
-		_f_throw(_T("The InputBox window could not be displayed."));
-	case FAIL:
-		_f_return_FAIL;
+	case AHK_TIMEOUT:	reason = _T("Timeout");	break;
+	case IDOK:			reason = _T("OK");		break;
+	case IDCANCEL:		reason = _T("Cancel");	break;
+	default:			reason = nullptr;		break;
 	}
+	// result can be -1 or FAIL in case of failure, but since failure of any
+	// kind is rare, all kinds are handled the same way, below.
+
+	if (reason && value)
+	{
+		ExprTokenType argt[] = { _T("Result"), reason, _T("Value"), value };
+		ExprTokenType *args[_countof(argt)] = { argt, argt+1, argt+2, argt+3 };
+		if (Object *obj = Object::Create(args, _countof(args)))
+		{
+			free(value);
+			_f_return(obj);
+		}
+	}
+
+	free(value);
+	// Since above didn't return, result is -1 (DialogBox somehow failed),
+	// result is FAIL (something failed in InputBoxProc), or value is null.
+	_f_throw(ERR_INTERNAL_CALL);
 }
 
 
@@ -5284,12 +5124,6 @@ INT_PTR CALLBACK InputBoxProc(HWND hWndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 		return (BOOL)msg_reply; // MsgMonitor has returned "true", indicating that this message should be omitted from further processing.
 	g->CalledByIsDialogMessageOrDispatch = false; // v1.0.40.01.
 
-	HWND hControl;
-
-	// Set default array index for g_InputBox[].  Caller has ensured that g_nInputBoxes > 0:
-	int target_index = g_nInputBoxes - 1;
-	#define CURR_INPUTBOX g_InputBox[target_index]
-
 	switch(uMsg)
 	{
 	case WM_INITDIALOG:
@@ -5299,14 +5133,15 @@ INT_PTR CALLBACK InputBoxProc(HWND hWndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 		// anything that might take a relatively long time (e.g. SetForegroundWindowEx()):
 		CLOSE_CLIPBOARD_IF_OPEN;
 
+		SetWindowLongPtr(hWndDlg, DWLP_USER, lParam); // Store it for later use.
+		auto &CURR_INPUTBOX = *(InputBoxType *)lParam;
 		CURR_INPUTBOX.hwnd = hWndDlg;
 
 		if (CURR_INPUTBOX.password_char)
 			SendDlgItemMessage(hWndDlg, IDC_INPUTEDIT, EM_SETPASSWORDCHAR, CURR_INPUTBOX.password_char, 0);
 
 		SetWindowText(hWndDlg, CURR_INPUTBOX.title);
-		if (hControl = GetDlgItem(hWndDlg, IDC_INPUTPROMPT))
-			SetWindowText(hControl, CURR_INPUTBOX.text);
+		SetDlgItemText(hWndDlg, IDC_INPUTPROMPT, CURR_INPUTBOX.text);
 
 		// Use the system's current language for the button names:
 		typedef LPCWSTR(WINAPI*pfnUser)(int);
@@ -5314,8 +5149,8 @@ INT_PTR CALLBACK InputBoxProc(HWND hWndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 		pfnUser mbString = (pfnUser)GetProcAddress(hMod, "MB_GetString");
 		if (mbString)
 		{
-			SetWindowTextW(GetDlgItem(hWndDlg, IDOK), mbString(0));
-			SetWindowTextW(GetDlgItem(hWndDlg, IDCANCEL), mbString(1));
+			SetDlgItemTextW(hWndDlg, IDOK, mbString(0));
+			SetDlgItemTextW(hWndDlg, IDCANCEL, mbString(1));
 		}
 
 		// Don't do this check; instead allow the MoveWindow() to occur unconditionally so that
@@ -5324,9 +5159,12 @@ INT_PTR CALLBACK InputBoxProc(HWND hWndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 		//if (CURR_INPUTBOX.width != INPUTBOX_DEFAULT || CURR_INPUTBOX.height != INPUTBOX_DEFAULT
 		//	|| CURR_INPUTBOX.xpos != INPUTBOX_DEFAULT || CURR_INPUTBOX.ypos != INPUTBOX_DEFAULT)
 		RECT rect;
-		GetWindowRect(hWndDlg, &rect);
-		int new_width = (CURR_INPUTBOX.width == INPUTBOX_DEFAULT) ? rect.right - rect.left : CURR_INPUTBOX.width;
-		int new_height = (CURR_INPUTBOX.height == INPUTBOX_DEFAULT) ? rect.bottom - rect.top : CURR_INPUTBOX.height;
+		GetClientRect(hWndDlg, &rect);
+		if (CURR_INPUTBOX.width != INPUTBOX_DEFAULT) rect.right = CURR_INPUTBOX.width;
+		if (CURR_INPUTBOX.height != INPUTBOX_DEFAULT) rect.bottom = CURR_INPUTBOX.height;
+		AdjustWindowRect(&rect, GetWindowLong(hWndDlg, GWL_STYLE), FALSE);
+		int new_width = rect.right - rect.left;
+		int new_height = rect.bottom - rect.top;
 
 		// If a non-default size was specified, the box will need to be recentered; thus, we can't rely on
 		// the dialog's DS_CENTER style in its template.  The exception is when an explicit xpos or ypos is
@@ -5380,29 +5218,12 @@ INT_PTR CALLBACK InputBoxProc(HWND hWndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 		SendMessage(hWndDlg, WM_SETICON, ICON_SMALL, small_icon);
 		SendMessage(hWndDlg, WM_SETICON, ICON_BIG, big_icon);
 
-		// Set the font.
-		SendMessage(hControl, WM_SETFONT, (WPARAM)CURR_INPUTBOX.font, 0);
-		SendMessage(GetDlgItem(hWndDlg, IDC_INPUTEDIT), WM_SETFONT, (WPARAM)CURR_INPUTBOX.font, 0);
-		SendMessage(GetDlgItem(hWndDlg, IDOK), WM_SETFONT, (WPARAM)CURR_INPUTBOX.font, 0);
-		SendMessage(GetDlgItem(hWndDlg, IDCANCEL), WM_SETFONT, (WPARAM)CURR_INPUTBOX.font, 0);
-
-		// For the timeout, use a timer ID that doesn't conflict with MsgBox's IDs (which are the
-		// integers 1 through the max allowed number of msgboxes).  Use +3 vs. +1 for a margin of safety
-		// (e.g. in case a few extra MsgBoxes can be created directly by the program and not by
-		// the script):
-		#define INPUTBOX_TIMER_ID_OFFSET (MAX_MSGBOXES + 3)
+		// Regarding the timer ID: https://devblogs.microsoft.com/oldnewthing/20150924-00/?p=91521
+		// Basically, timer IDs need only be non-zero and unique to the given HWND.
 		if (CURR_INPUTBOX.timeout)
-			SetTimer(hWndDlg, INPUTBOX_TIMER_ID_OFFSET + target_index, CURR_INPUTBOX.timeout, InputBoxTimeout);
+			SetTimer(hWndDlg, (UINT_PTR)&CURR_INPUTBOX, CURR_INPUTBOX.timeout, InputBoxTimeout);
 
 		return TRUE; // i.e. let the system set the keyboard focus to the first visible control.
-	}
-
-	case WM_DESTROY:
-	{
-		if (CURR_INPUTBOX.font)
-			DeleteObject(CURR_INPUTBOX.font);
-
-		return TRUE;
 	}
 
 	case WM_SIZE:
@@ -5505,43 +5326,24 @@ INT_PTR CALLBACK InputBoxProc(HWND hWndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 	}
 
 	case WM_COMMAND:
-		// In this case, don't use (g_nInputBoxes - 1) as the index because it might
-		// not correspond to the g_InputBox[] array element that belongs to hWndDlg.
-		// This is because more than one input box can be on the screen at the same time.
-		// If the user choses to work with on underneath instead of the most recent one,
-		// we would be called with an hWndDlg whose index is less than the most recent
-		// one's index (g_nInputBoxes - 1).  Instead, search the array for a match.
-		// Work backward because the most recent one(s) are more likely to be a match:
-		for (; target_index > -1; --target_index)
-			if (g_InputBox[target_index].hwnd == hWndDlg)
-				break;
-		if (target_index < 0)  // Should never happen if things are designed right.
-			return FALSE;
 		switch (LOWORD(wParam))
 		{
 		case IDOK:
 		case IDCANCEL:
 		{
-			WORD return_value = LOWORD(wParam);  // Set default, i.e. IDOK or IDCANCEL
-			if (   !(hControl = GetDlgItem(hWndDlg, IDC_INPUTEDIT))   )
-				return_value = (WORD)FAIL;
-			else
-			{
-				// The output variable is set to whatever the user entered, even if the user pressed
-				// the cancel button.  This allows the cancel button to specify that a different
-				// operation should be performed on the entered text.
-				// NOTE: ErrorLevel must not be set here because it's possible that the user has
-				// dismissed a dialog that's underneath another, active dialog, or that's currently
-				// suspended due to a timed/hotkey subroutine running on top of it.  In other words,
-				// it's only safe to set ErrorLevel when the call to DialogProc() returns in InputBox().
-				CURR_INPUTBOX.UpdateResult(hControl);
-			}
+			auto &CURR_INPUTBOX = *(InputBoxType *)GetWindowLongPtr(hWndDlg, DWLP_USER);
+			// The entered text is used even if the user pressed the cancel button.  This allows the
+			// cancel button to specify that a different operation should be performed on the text.
+			WORD return_value = (WORD)FAIL;
+			HWND hControl = GetDlgItem(hWndDlg, IDC_INPUTEDIT);
+			if (hControl && CURR_INPUTBOX.UpdateResult(hControl))
+				return_value = LOWORD(wParam); // IDOK or IDCANCEL
 			// Since the user pressed a button to dismiss the dialog:
-			// Kill its timer for performance reasons (might degrade perf. a little since OS has
-			// to keep track of it as long as it exists).  InputBoxTimeout() already handles things
-			// right even if we don't do this:
+			// Timers belonging to a window are destroyed automatically when the window is destroyed,
+			// but it seems prudent to clean up; also, EndDialog may fail, perhaps as a result of the
+			// script interfering via OnMessage.
 			if (CURR_INPUTBOX.timeout) // It has a timer.
-				KillTimer(hWndDlg, INPUTBOX_TIMER_ID_OFFSET + target_index);
+				KillTimer(hWndDlg, (UINT_PTR)&CURR_INPUTBOX);
 			EndDialog(hWndDlg, return_value);
 			return TRUE;
 		} // case
@@ -5570,18 +5372,17 @@ VOID CALLBACK InputBoxTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTi
 	// so case #1 is obsolete (but kept here for background/insight).
 	if (IsWindow(hWnd))
 	{
-		// This is the element in the array that corresponds to the InputBox for which
-		// this function has just been called.
-		INT_PTR target_index = idEvent - INPUTBOX_TIMER_ID_OFFSET;
+		auto &CURR_INPUTBOX = *(InputBoxType *)idEvent;
 		// Even though the dialog has timed out, we still want to write anything the user
 		// had a chance to enter into the output var.  This is because it's conceivable that
 		// someone might want a short timeout just to enter something quick and let the
 		// timeout dismiss the dialog for them (i.e. so that they don't have to press enter
 		// or a button:
+		INT_PTR result = FAIL;
 		HWND hControl = GetDlgItem(hWnd, IDC_INPUTEDIT);
-		if (hControl)
-			CURR_INPUTBOX.UpdateResult(hControl);
-		EndDialog(hWnd, AHK_TIMEOUT);
+		if (hControl && CURR_INPUTBOX.UpdateResult(hControl))
+			result = AHK_TIMEOUT;
+		EndDialog(hWnd, result);
 	}
 	KillTimer(hWnd, idEvent);
 }
@@ -5592,24 +5393,13 @@ ResultType InputBoxType::UpdateResult(HWND hControl)
 {
 	int space_needed = GetWindowTextLength(hControl) + 1;
 	// Set up the result buffer.
-	if (!TokenSetResult(*result_token, NULL, space_needed - 1))
-		// It will have already displayed the error.  Displaying errors in a callback
-		// function like this one isn't that good, since the callback won't return
-		// to its caller in a timely fashion.  However, these type of errors are so
-		// rare it's not a priority to change all the called functions (and the functions
-		// they call) to skip the displaying of errors and just return FAIL instead.
-		// In addition, this callback function has been tested with a MsgBox() call
-		// inside and it doesn't seem to cause any crashes or undesirable behavior other
-		// than the fact that the InputBox window is not dismissed until the MsgBox
-		// window is dismissed:
-		return FAIL;
+	if (  !(return_string = tmalloc(space_needed))  )
+		return FAIL; // BIF_InputBox will display an error.
 	// Write to the variable:
-	size_t len = (size_t)GetWindowText(hControl, result_token->marker, space_needed);
+	size_t len = (size_t)GetWindowText(hControl, return_string, space_needed);
 	if (!len)
 		// There was no text to get or GetWindowText() failed.
-		*result_token->marker = '\0';
-	result_token->marker_length = len;
-	result_token->symbol = SYM_STRING;
+		*return_string = '\0';
 	return OK;
 }
 
@@ -5627,7 +5417,7 @@ ResultType Script::SetCoordMode(LPTSTR aCommand, LPTSTR aMode)
 	SHORT mode = Line::ConvertCoordMode(aMode); // CoordModeType is USHORT so can't compare to -1
 	SHORT shift = Line::ConvertCoordModeCmd(aCommand); // CoordModeType is USHORT so can't compare to -1
 	if (shift == COORD_MODE_INVALID || mode == COORD_MODE_INVALID)
-		return g_script->ScriptError(ERR_INVALID_VALUE, aMode);
+		return g_script->RuntimeError(ERR_INVALID_VALUE, aMode);
 	g->CoordMode = (g->CoordMode & ~(COORD_MODE_MASK << shift)) | (mode << shift);
 	return OK;
 }
@@ -5642,7 +5432,7 @@ ResultType Script::SetSendLevel(int aValue, LPTSTR aValueStr)
 {
 	int sendLevel = aValue;
 	if (!SendLevelIsValid(sendLevel))
-		return g_script->ScriptError(ERR_INVALID_VALUE, aValueStr);
+		return g_script->RuntimeError(ERR_INVALID_VALUE, aValueStr);
 	g->SendLevel = sendLevel;
 	return OK;
 }
@@ -6575,8 +6365,6 @@ BIF_DECL(BIF_Sort)
 	ResultType sort_func_result_orig = g_SortFuncResult;
 	g_SortFunc = NULL; // Now that original has been saved above, reset to detect whether THIS sort uses a UDF.
 	g_SortFuncResult = OK;
-	ResultType result_to_return = OK;
-	DWORD ErrorLevel = -1; // Use -1 to mean "don't change/set ErrorLevel".
 
 	_f_param_string(aContents, 0);
 	_f_param_string_opt(aOptions, 1);
@@ -6634,7 +6422,6 @@ BIF_DECL(BIF_Sort)
 			break;
 		case 'U':  // Unique.
 			omit_dupes = true;
-			ErrorLevel = 0; // Set default dupe-count to 0 in case of early return.
 			break;
 		case 'Z':
 			// By setting this to true, the final item in the list, if it ends in a delimiter,
@@ -6652,16 +6439,15 @@ BIF_DECL(BIF_Sort)
 			g_SortFunc = TokenToFunc(*aParam[2]);
 		if (!g_SortFunc)
 		{
-			result_to_return = aResultToken.Error(ERR_PARAM3_INVALID);
+			aResultToken.Error(ERR_PARAM3_INVALID);
 			goto end;
 		}
 		g_SortFunc->AddRef(); // Ensure the object exists for the duration of the sorting.
 	}
 	
-	// Check for early return only after parsing options in case an option that sets ErrorLevel is present:
 	if (!*aContents) // Input is empty, nothing to sort, return empty string.
 	{
-		result_to_return = aResultToken.Return(_T(""), 0);
+		aResultToken.Return(_T(""), 0);
 		goto end;
 	}
 	
@@ -6712,7 +6498,7 @@ BIF_DECL(BIF_Sort)
 
 	if (item_count == 1) // 1 item is already sorted, and no dupes are possible.
 	{
-		result_to_return = aResultToken.Return(aContents, aContents_length);
+		aResultToken.Return(aContents, aContents_length);
 		goto end;
 	}
 
@@ -6727,7 +6513,7 @@ BIF_DECL(BIF_Sort)
 		// and that deref buffer is about to be overwritten by the execution of the script's UDF body.
 		if (   !(mem_to_free = tmalloc(aContents_length + 3))   ) // +1 for terminator and +2 in case of trailing_crlf_added_temporarily.
 		{
-			result_to_return = aResultToken.Error(ERR_OUTOFMEM);
+			aResultToken.Error(ERR_OUTOFMEM);
 			goto end;
 		}
 		tmemcpy(mem_to_free, aContents, aContents_length + 1); // memcpy() usually benches a little faster than _tcscpy().
@@ -6749,7 +6535,7 @@ BIF_DECL(BIF_Sort)
 	item = (LPTSTR *)malloc((item_count + 1) * item_size);
 	if (!item)
 	{
-		result_to_return = aResultToken.Error(ERR_OUTOFMEM);
+		aResultToken.Error(ERR_OUTOFMEM);
 		goto end;
 	}
 
@@ -6816,7 +6602,7 @@ BIF_DECL(BIF_Sort)
 		qsort((void *)item, item_count, item_size, SortUDF);
 		if (!g_SortFuncResult || g_SortFuncResult == EARLY_EXIT)
 		{
-			result_to_return = g_SortFuncResult;
+			aResultToken.SetExitResult(g_SortFuncResult);
 			goto end;
 		}
 	}
@@ -6827,10 +6613,7 @@ BIF_DECL(BIF_Sort)
 
 	// Allocate space to store the result.
 	if (!TokenSetResult(aResultToken, NULL, aContents_length))
-	{
-		result_to_return = FAIL;
 		goto end;
-	}
 	aResultToken.symbol = SYM_STRING;
 
 	// Set default in case original last item is still the last item, or if last item was omitted due to being a dupe:
@@ -6916,15 +6699,12 @@ BIF_DECL(BIF_Sort)
 		if (omit_dupe_count) // Update the length to actual whenever at least one dupe was omitted.
 		{
 			aResultToken.marker_length = _tcslen(aResultToken.marker);
-			ErrorLevel = omit_dupe_count; // Override the 0 set earlier.
 		}
 	}
 	//else it is not necessary to set the length here because its length hasn't
 	// changed since it was originally set by the above call TokenSetResult.
 
 end:
-	if (ErrorLevel != -1) // A change to ErrorLevel is desired.  Compare directly to -1 due to unsigned.
-		g_ErrorLevel->Assign(ErrorLevel); // ErrorLevel is set only when dupe-mode is in effect.
 	if (!item)
 		free(item);
 	if (mem_to_free)
@@ -6933,8 +6713,6 @@ end:
 		g_SortFunc->Release();
 	g_SortFunc = sort_func_orig;
 	g_SortFuncResult = sort_func_result_orig;
-	if (!result_to_return)
-		_f_return_FAIL;
 }
 
 
@@ -6944,35 +6722,30 @@ void DriveSpace(ResultToken &aResultToken, LPTSTR aPath, bool aGetFreeSpace)
 // have the same amount of free space as its root drive.  However, I'm not sure if this
 // method here actually takes that into account.
 {
-	if (!aPath || !*aPath) goto error;  // Below relies on this check.
+	ASSERT(aPath && *aPath);
 
 	TCHAR buf[MAX_PATH]; // MAX_PATH vs T_MAX_PATH because testing shows it doesn't support long paths even with \\?\.
 	tcslcpy(buf, aPath, _countof(buf));
 	size_t length = _tcslen(buf);
-	if (buf[length - 1] != '\\') // Trailing backslash is present, which some of the API calls below don't like.
+	if (buf[length - 1] != '\\' // Trailing backslash is absent,
+		&& length + 1 < _countof(buf)) // and there's room to fix it.
 	{
-		if (length + 1 >= _countof(buf)) // No room to fix it.
-			goto error;
 		buf[length++] = '\\';
 		buf[length] = '\0';
 	}
+	//else it should still work unless this is a UNC path.
 
 	// MSDN: "The GetDiskFreeSpaceEx function returns correct values for all volumes, including those
 	// that are greater than 2 gigabytes."
 	__int64 free_space;
 	ULARGE_INTEGER total, free, used;
 	if (!GetDiskFreeSpaceEx(buf, &free, &total, &used))
-		goto error;
+		_f_throw_win32();
 	// Casting this way allows sizes of up to 2,097,152 gigabytes:
 	free_space = (__int64)((unsigned __int64)(aGetFreeSpace ? free.QuadPart : total.QuadPart)
 		/ (1024*1024));
 
-	g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate success.
 	_f_return(free_space);
-
-error:
-	g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
-	_f_return_empty;
 }
 
 
@@ -7018,9 +6791,10 @@ BIF_DECL(BIF_Drive)
 		//    they aren't of type DRIVE_CDROM.
 		// 3) One or both of the calls to mciSendString() will simply fail if the drive isn't of the right type.
 		//if (GetDriveType(aValue) != DRIVE_CDROM) // Testing reveals that the below method does not work on Network CD/DVD drives.
-		//	return g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
+		//	_f_throw(ERR_FAILED);
 		TCHAR mci_string[256];
 		MCIERROR error;
+		successful = true; // GetLastError() is not relevant for this function.
 		// Note: The following comment is obsolete because research of MSDN indicates that there is no way
 		// not to wait when the tray must be physically opened or closed, at least on Windows XP.  Omitting
 		// the word "wait" from both "close cd wait" and "set cd door open/closed wait" does not help, nor
@@ -7034,7 +6808,8 @@ BIF_DECL(BIF_Drive)
 		{
 			sntprintf(mci_string, _countof(mci_string), _T("set cdaudio door %s wait"), retract ? _T("closed") : _T("open"));
 			error = mciSendString(mci_string, NULL, 0, NULL); // Open or close the tray.
-			successful = !error;
+			if (error)
+				_f_throw(ERR_FAILED); // GetLastError() not relevant.
 			break;
 		}
 		sntprintf(mci_string, _countof(mci_string), _T("open %s type cdaudio alias cd wait shareable"), aValue);
@@ -7043,7 +6818,8 @@ BIF_DECL(BIF_Drive)
 		sntprintf(mci_string, _countof(mci_string), _T("set cd door %s wait"), retract ? _T("closed") : _T("open"));
 		error = mciSendString(mci_string, NULL, 0, NULL); // Open or close the tray.
 		mciSendString(_T("close cd wait"), NULL, 0, NULL);
-		successful = !error;
+		if (error)
+			_f_throw(ERR_FAILED); // GetLastError() not relevant.
 		break;
 	}
 
@@ -7054,8 +6830,9 @@ BIF_DECL(BIF_Drive)
 
 	} // switch()
 
-	g_ErrorLevel->Assign(!successful);
-	_f_return_b(successful);
+	if (!successful)
+		_f_throw_win32();
+	_f_return_empty;
 }
 
 
@@ -7098,14 +6875,10 @@ BIF_DECL(BIF_DriveGet)
 	
 	if (drive_get_cmd == FID_DriveGetCapacity || drive_get_cmd == FID_DriveGetSpaceFree)
 	{
-		if (!*aValue)
-			goto invalid_parameter;
 		DriveSpace(aResultToken, aValue, drive_get_cmd == FID_DriveGetSpaceFree);
 		return;
 	}
 	
-	g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Set default: indicate success.
-
 	TCHAR path[T_MAX_PATH]; // T_MAX_PATH vs. MAX_PATH, though testing indicates only GetDriveType() supports long paths.
 	size_t path_length;
 
@@ -7124,7 +6897,7 @@ BIF_DECL(BIF_DriveGet)
 		else if (!_tcsicmp(aValue, _T("Ramdisk"))) drive_type = DRIVE_RAMDISK;
 		else if (!_tcsicmp(aValue, _T("Unknown"))) drive_type = DRIVE_UNKNOWN;
 		else
-			goto error;
+			goto invalid_parameter;
 
 		TCHAR found_drives[32];  // Need room for all 26 possible drive letters.
 		int found_drives_count;
@@ -7143,8 +6916,11 @@ BIF_DECL(BIF_DriveGet)
 				found_drives[found_drives_count++] = letter;  // Store just the drive letters.
 		}
 		found_drives[found_drives_count] = '\0';  // Terminate the string of found drive letters.
-		if (!*found_drives)
-			goto error;  // Seems best to flag zero drives in the system as ErrorLevel of "1".
+		// An empty list should not be flagged as failure, even for FIXED drive_type.
+		// For example, when booting Windows PE from a REMOVABLE drive, it mounts a RAMDISK
+		// drive but there may be no FIXED drives present.
+		//if (!*found_drives)
+		//	goto error;
 		_f_return(found_drives);
 	}
 
@@ -7180,7 +6956,7 @@ BIF_DECL(BIF_DriveGet)
 		case DRIVE_CDROM:     _f_return_p(_T("CDROM"));
 		case DRIVE_RAMDISK:   _f_return_p(_T("RAMDisk"));
 		default: // DRIVE_NO_ROOT_DIR
-			goto error;
+			_f_return_empty;
 		}
 		break;
 	}
@@ -7211,33 +6987,35 @@ BIF_DECL(BIF_DriveGet)
 		//    they aren't of type DRIVE_CDROM.
 		// 3) One or both of the calls to mciSendString() will simply fail if the drive isn't of the right type.
 		//if (GetDriveType(aValue) != DRIVE_CDROM) // Testing reveals that the below method does not work on Network CD/DVD drives.
-		//	return g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
+		//	_f_throw(ERR_FAILED);
 		TCHAR mci_string[256], status[128];
 		// Note that there is apparently no way to determine via mciSendString() whether the tray is ejected
 		// or not, since "open" is returned even when the tray is closed but there is no media.
 		if (!*aValue) // When drive is omitted, operate upon default CD/DVD drive.
 		{
 			if (mciSendString(_T("status cdaudio mode"), status, _countof(status), NULL)) // Error.
-				goto error;
+				goto failed;
 		}
 		else // Operate upon a specific drive letter.
 		{
 			sntprintf(mci_string, _countof(mci_string), _T("open %s type cdaudio alias cd wait shareable"), aValue);
 			if (mciSendString(mci_string, NULL, 0, NULL)) // Error.
-				goto error;
+				goto failed;
 			MCIERROR error = mciSendString(_T("status cd mode"), status, _countof(status), NULL);
 			mciSendString(_T("close cd wait"), NULL, 0, NULL);
 			if (error)
-				goto error;
+				goto failed;
 		}
 		// Otherwise, success:
 		_f_return(status);
 
 	} // switch()
 
-error:
-	g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
-	_f_return_empty;
+failed: // Failure where GetLastError() isn't relevant.
+	_f_throw(ERR_FAILED);
+
+error: // Win32 error
+	_f_throw_win32();
 
 invalid_parameter:
 	_f_throw(ERR_PARAM1_INVALID);
@@ -7561,10 +7339,7 @@ BIF_DECL(BIF_Sound)
 
 	hr = SoundSetGet_GetDevice(aDevice, device);
 	if (FAILED(hr))
-	{
-		g_ErrorLevel->Assign(_T("Device Not Found"));
-		return;
-	}
+		_f_throw(ERR_SOUND_DEVICE);
 
 	LPCTSTR errorlevel = NULL;
 	float result_float;
@@ -7576,7 +7351,8 @@ BIF_DECL(BIF_Sound)
 		{
 			void *result_ptr = nullptr;
 			if (FAILED(device->QueryInterface(search.target_iid, (void **)&result_ptr)))
-				hr = device->Activate(search.target_iid, CLSCTX_ALL, NULL, &result_ptr);
+				device->Activate(search.target_iid, CLSCTX_ALL, NULL, &result_ptr);
+			// For consistency with ComObjQuery, the result is returned even on failure.
 			aResultToken.SetValue((UINT_PTR)result_ptr);
 		}
 		else if (search.target_control == SoundControlType::Name)
@@ -7643,7 +7419,7 @@ BIF_DECL(BIF_Sound)
 		
 		if (!SoundSetGet_FindComponent(device, search))
 		{
-			errorlevel = _T("Component Not Found");
+			errorlevel = ERR_SOUND_COMPONENT;
 		}
 		else if (search.target_control == SoundControlType::IID)
 		{
@@ -7656,7 +7432,7 @@ BIF_DECL(BIF_Sound)
 		}
 		else if (!search.control)
 		{
-			errorlevel = _T("Component Doesn't Support This Control Type");
+			errorlevel = ERR_SOUND_CONTROLTYPE;
 		}
 		else if (search.target_control == SoundControlType::Volume)
 		{
@@ -7737,19 +7513,12 @@ control_fail:
 
 	device->Release();
 	
-	if (FAILED(hr))
-	{
-		if (SOUND_MODE_IS_SET)
-			errorlevel = _T("Can't Change Setting");
-		else
-			errorlevel = _T("Can't Get Current Setting");
-	}
 	if (errorlevel)
-		g_ErrorLevel->Assign(errorlevel);
-	else
-		g_ErrorLevel->Assign(ERRORLEVEL_NONE);
+		_f_throw(errorlevel);
+	if (FAILED(hr)) // This would be rare and unexpected.
+		_f_throw_win32(hr);
 
-	if (SOUND_MODE_IS_SET || errorlevel)
+	if (SOUND_MODE_IS_SET)
 		return;
 
 	switch (search.target_control)
@@ -7765,8 +7534,14 @@ ResultType Line::SoundPlay(LPTSTR aFilespec, bool aSleepUntilDone)
 {
 	LPTSTR cp = omit_leading_whitespace(aFilespec);
 	if (*cp == '*')
-		return SetErrorLevelOrThrowBool(!MessageBeep(ATOU(cp + 1)));
+	{
 		// ATOU() returns 0xFFFFFFFF for -1, which is relied upon to support the -1 sound.
+		// Even if there are no enabled sound devices, MessageBeep() indicates success
+		// (tested on Windows 10).  It's hard to imagine how the script would handle a
+		// failure anyway, so just omit error checking.
+		MessageBeep(ATOU(cp + 1));
+		return OK;
+	}
 	// See http://msdn.microsoft.com/library/default.asp?url=/library/en-us/multimed/htm/_win32_play.asp
 	// for some documentation mciSendString() and related.
 	// MAX_PATH note: There's no chance this API supports long paths even on Windows 10.
@@ -7779,12 +7554,11 @@ ResultType Line::SoundPlay(LPTSTR aFilespec, bool aSleepUntilDone)
 		mciSendString(_T("close ") SOUNDPLAY_ALIAS, NULL, 0, NULL);
 	sntprintf(buf, _countof(buf), _T("open \"%s\" alias ") SOUNDPLAY_ALIAS, aFilespec);
 	if (mciSendString(buf, NULL, 0, NULL)) // Failure.
-		return SetErrorLevelOrThrow();
+		goto error;
 	g_SoundWasPlayed = true;  // For use by Script's destructor.
 	if (mciSendString(_T("play ") SOUNDPLAY_ALIAS, NULL, 0, NULL)) // Failure.
-		return SetErrorLevelOrThrow();
+		goto error;
 	// Otherwise, the sound is now playing.
-	g_ErrorLevel->Assign(ERRORLEVEL_NONE);
 	if (!aSleepUntilDone)
 		return OK;
 	// Otherwise, caller wants us to wait until the file is done playing.  To allow our app to remain
@@ -7815,13 +7589,15 @@ ResultType Line::SoundPlay(LPTSTR aFilespec, bool aSleepUntilDone)
 			Sleep(20);
 	}
 	return OK;
+
+error:
+	return LineError(ERR_FAILED, FAIL_OR_OK);
 }
 
 
 
-void SetWorkingDir(LPTSTR aNewDir, bool aSetErrorLevel)
-// Sets ErrorLevel to indicate success/failure, but only if the script has begun runtime execution (callers
-// want that).
+ResultType SetWorkingDir(LPTSTR aNewDir)
+// Throws a script runtime exception on failure, but only if the script has begun runtime execution.
 // This function was added in v1.0.45.01 for the reason described below.
 {
 	// v1.0.45.01: Since A_ScriptDir omits the trailing backslash for roots of drives (such as C:),
@@ -7849,11 +7625,7 @@ void SetWorkingDir(LPTSTR aNewDir, bool aSetErrorLevel)
 	}
 
 	if (!SetCurrentDirectory(aNewDir)) // Caused by nonexistent directory, permission denied, etc.
-	{
-		if (aSetErrorLevel && g_script->mIsReadyToExecute)
-			g_script->SetErrorLevelOrThrow();
-		return;
-	}
+		return FAIL;
 	// Otherwise, the change to the working directory succeeded.
 
 	// Other than during program startup, this should be the only place where the official
@@ -7861,12 +7633,8 @@ void SetWorkingDir(LPTSTR aNewDir, bool aSetErrorLevel)
 	// dir as the user navigates from folder to folder.  However, the whole purpose of
 	// maintaining g_WorkingDir is to workaround that very issue.
 	if (g_script->mIsReadyToExecute) // Callers want this done only during script runtime.
-	{
 		UpdateWorkingDir(aNewDir);
-		// Since the above didn't return, it wants us to indicate success.
-		if (aSetErrorLevel) // Callers want ErrorLevel changed only during script runtime.
-			g_ErrorLevel->Assign(ERRORLEVEL_NONE);
-	}
+	return OK;
 }
 
 
@@ -8108,13 +7876,10 @@ BIF_DECL(BIF_FileSelect)
 
 	if (!result) // User pressed CANCEL vs. OK to dismiss the dialog or there was a problem displaying it.
 	{
-		// Currently always returning ErrorLevel, otherwise this would tell us whether an error
+		// Currently assuming the user canceled, otherwise this would tell us whether an error
 		// occurred vs. the user canceling: if (CommDlgExtendedError())
-		g_ErrorLevel->Assign(ERRORLEVEL_ERROR); // User pressed CANCEL, so never throw an exception.
 		_f_return_empty;
 	}
-	else
-		g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate that the user pressed OK vs. CANCEL.
 
 	if (ofn.Flags & OFN_ALLOWMULTISELECT)
 	{
@@ -8212,14 +7977,13 @@ bool Line::FileCreateDir(LPTSTR aDirSpec, LPTSTR aCanModifyDirSpec)
 	}
 
 	// The above has recursively created all parent directories of aDirSpec if needed.
-	// Now we can create aDirSpec.  Be sure to explicitly set g_ErrorLevel since it's value
-	// is now indeterminate due to action above:
+	// Now we can create aDirSpec.
 	return CreateDirectory(aDirSpec, NULL);
 }
 
 
 
-ResultType ConvertFileOptions(LPTSTR aOptions, UINT &codepage, bool &translate_crlf_to_lf, unsigned __int64 *pmax_bytes_to_load)
+ResultType ConvertFileOptions(ResultToken &aResultToken, LPTSTR aOptions, UINT &codepage, bool &translate_crlf_to_lf, unsigned __int64 *pmax_bytes_to_load)
 {
 	for (LPTSTR next, cp = aOptions; cp && *(cp = omit_leading_whitespace(cp)); cp = next)
 	{
@@ -8262,7 +8026,7 @@ ResultType ConvertFileOptions(LPTSTR aOptions, UINT &codepage, bool &translate_c
 			{
 				codepage = Line::ConvertFileEncoding(cp);
 				if (codepage == -1 || cisdigit(*cp)) // Require "cp" prefix in FileRead/FileAppend options.
-					return g_script->ScriptError(ERR_INVALID_OPTION, cp);
+					return aResultToken.Error(ERR_INVALID_OPTION, cp);
 			}
 			break;
 		} // switch()
@@ -8282,8 +8046,8 @@ BIF_DECL(BIF_FileRead)
 	unsigned __int64 max_bytes_to_load = ULLONG_MAX; // By default, fail if the file is too large.  See comments near bytes_to_read below.
 	UINT codepage = g->Encoding;
 
-	if (!ConvertFileOptions(aOptions, codepage, translate_crlf_to_lf, &max_bytes_to_load))
-		_f_return_FAIL; // It already displayed the error.
+	if (!ConvertFileOptions(aResultToken, aOptions, codepage, translate_crlf_to_lf, &max_bytes_to_load))
+		return; // It already displayed the error.
 
 	_f_set_retval_p(_T(""), 0); // Set default.
 
@@ -8296,14 +8060,14 @@ BIF_DECL(BIF_FileRead)
 		, FILE_FLAG_SEQUENTIAL_SCAN, NULL); // MSDN says that FILE_FLAG_SEQUENTIAL_SCAN will often improve performance
 	if (hfile == INVALID_HANDLE_VALUE)      // in cases like these (and it seems best even if max_bytes_to_load was specified).
 	{
-		Script::SetErrorLevels(true);
+		aResultToken.SetLastErrorMaybeThrow(true);
 		return;
 	}
 
 	unsigned __int64 bytes_to_read = GetFileSize64(hfile);
 	if (bytes_to_read == ULLONG_MAX) // GetFileSize64() failed.
 	{
-		Script::SetErrorLevelsAndClose(hfile, true);
+		aResultToken.SetLastErrorCloseAndMaybeThrow(hfile, true);
 		return;
 	}
 	// In addition to imposing the limit set by the *M option, the following check prevents an error
@@ -8333,7 +8097,7 @@ BIF_DECL(BIF_FileRead)
 
 	if (!bytes_to_read && codepage != -1) // In RAW mode, always return a zero-byte Buffer.
 	{
-		Script::SetErrorLevelsAndClose(hfile, false, 0); // Indicate success (a zero-length file results in an empty string).
+		aResultToken.SetLastErrorCloseAndMaybeThrow(hfile, false, 0); // Indicate success (a zero-length file results in an empty string).
 		return;
 	}
 
@@ -8408,7 +8172,7 @@ BIF_DECL(BIF_FileRead)
 						if (!TokenSetResult(aResultToken, NULL, wlen))
 						{
 							free(output_buf);
-							_f_return_FAIL;
+							return;
 						}
 						wlen = MultiByteToWideChar(codepage, 0, text, length, aResultToken.marker, wlen);
 						aResultToken.symbol = SYM_STRING;
@@ -8441,11 +8205,11 @@ BIF_DECL(BIF_FileRead)
 	{
 		// ReadFile() failed.  Since MSDN does not document what is in the buffer at this stage, or
 		// whether bytes_to_read contains a valid value, it seems best to abort the entire operation
-		// rather than try to return partial file contents.  ErrorLevel will indicate the failure.
+		// rather than try to return partial file contents.  An exception will indicate the failure.
 		free(output_buf);
 	}
 
-	Script::SetErrorLevels(!result);
+	aResultToken.SetLastErrorMaybeThrow(!result);
 }
 
 
@@ -8474,7 +8238,7 @@ BIF_DECL(BIF_FileAppend)
 	// The below is avoided because want to allow "nothing" to be written to a file in case the
 	// user is doing this to reset it's timestamp (or create an empty file).
 	//if (!aBuf || !*aBuf)
-	//	return g_ErrorLevel->Assign(ERRORLEVEL_NONE);
+	//	_f_return_retval;
 
 	// Use the read-file loop's current item if filename was explicitly left blank (i.e. not just
 	// a reference to a variable that's blank):
@@ -8492,7 +8256,7 @@ BIF_DECL(BIF_FileAppend)
 	{
 		// StdOut has been redirected to the debugger, and this "FileAppend" call has been
 		// fully handled by the call above, so just return.
-		Script::SetErrorLevels(false, 0);
+		g->LastError = 0;
 		_f_return_retval;
 	}
 #endif
@@ -8509,8 +8273,8 @@ BIF_DECL(BIF_FileAppend)
 	{
 		codepage = aBuf_obj ? -1 : g->Encoding; // Never default to BOM if a Buffer object was passed.
 		bool translate_crlf_to_lf = false;
-		if (!ConvertFileOptions(aOptions, codepage, translate_crlf_to_lf, NULL))
-			_f_return_FAIL;
+		if (!ConvertFileOptions(aResultToken, aOptions, codepage, translate_crlf_to_lf, NULL))
+			return;
 
 		DWORD flags = TextStream::APPEND | (translate_crlf_to_lf ? TextStream::EOL_CRLF : 0);
 		
@@ -8525,13 +8289,13 @@ BIF_DECL(BIF_FileAppend)
 
 		// Open the output file (if one was specified).  Unlike the input file, this is not
 		// a critical error if it fails.  We want it to be non-critical so that FileAppend
-		// commands in the body of the loop will set ErrorLevel to indicate the problem:
+		// commands in the body of the loop will throw to indicate the problem:
 		ts = new TextFile; // ts was already verified NULL via !file_was_already_open.
 		if ( !ts->Open(aFilespec, flags, codepage) )
 		{
+			aResultToken.SetLastErrorMaybeThrow(true);
 			delete ts; // Must be deleted explicitly!
-			Script::SetErrorLevels(true);
-			_f_return_retval;
+			return;
 		}
 		if (aCurrentReadFile)
 			aCurrentReadFile->mWriteFile = ts;
@@ -8549,13 +8313,11 @@ BIF_DECL(BIF_FileAppend)
 			result = ts->Write(aBuf, DWORD(aBuf_length / sizeof(TCHAR)));
 	}
 	//else: aBuf is empty; we've already succeeded in creating the file and have nothing further to do.
-	Script::SetErrorLevels(result == 0);
+	aResultToken.SetLastErrorMaybeThrow(result == 0);
 
 	if (!aCurrentReadFile)
 		delete ts;
 	// else it's the caller's responsibility, or it's caller's, to close it.
-
-	_f_return_retval;
 }
 
 
@@ -8568,15 +8330,14 @@ BOOL FileDeleteCallback(LPTSTR aFilename, WIN32_FIND_DATA &aFile, void *aCallbac
 ResultType Line::FileDelete(LPTSTR aFilePattern)
 {
 	if (!*aFilePattern)
-		return LineError(ERR_PARAM1_INVALID);
+		return LineError(ERR_PARAM1_INVALID, FAIL_OR_OK);
 
-	// The no-wildcard case could be handled via FilePatternApply(), but it is handled here
-	// for backward-compatibility (just in case the use of FindFirstFile() affects something):
+	// The no-wildcard case could be handled via FilePatternApply(), but handling it this
+	// way ensures deleting a non-existent path without wildcards is considered a failure:
 	if (!StrChrAny(aFilePattern, _T("?*"))) // No wildcards; just a plain path/filename.
 	{
 		SetLastError(0); // For sanity: DeleteFile appears to set it only on failure.
-		// ErrorLevel will indicate failure if DeleteFile fails.
-		return SetErrorsOrThrow(!DeleteFile(aFilePattern));
+		return SetLastErrorMaybeThrow(!DeleteFile(aFilePattern));
 	}
 
 	// Otherwise aFilePattern contains wildcards, so we'll search for all matches and delete them.
@@ -8591,11 +8352,11 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 	if (g_hResource)
 	{
 		if (!allow_overwrite && Util_DoesFileExist(aDest))
-			return SetErrorLevelOrThrow();
+		return Throw();
 		// Open the file first since it's the most likely to fail:
 		HANDLE hfile = CreateFile(aDest, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
 		if (hfile == INVALID_HANDLE_VALUE)
-			return SetErrorLevelOrThrow();
+		return Throw();
 
 		// Create a temporary copy of aSource to ensure it is the correct case (upper-case).
 		// Ahk2Exe converts it to upper-case before adding the resource. My testing showed that
@@ -8648,7 +8409,7 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 		success = CopyFile(aSource, aDestPath, !allow_overwrite);
 		SetCurrentDirectory(g_WorkingDir); // Restore to proper value.
 	}
-	return SetErrorLevelOrThrowBool(!success);
+	return ThrowIfTrue(!success);
 }
 
 
@@ -8663,11 +8424,11 @@ BIF_DECL(BIF_FileGetAttrib)
 	DWORD attr = GetFileAttributes(aFilespec);
 	if (attr == 0xFFFFFFFF)  // Failure, probably because file doesn't exist.
 	{
-		Script::SetErrorLevels(true);
-		_f_return_empty;
+		aResultToken.SetLastErrorMaybeThrow(true);
+		return;
 	}
 
-	Script::SetErrorLevels(false, 0);
+	g->LastError = 0;
 	_f_return_p(FileAttribToStr(_f_retval_buf, attr));
 }
 
@@ -8684,7 +8445,7 @@ ResultType Line::FileSetAttrib(LPTSTR aAttributes, LPTSTR aFilePattern
 // Returns the number of files and folders that could not be changed due to an error.
 {
 	if (!*aFilePattern)
-		return LineError(ERR_PARAM2_INVALID);
+		return LineError(ERR_PARAM2_INVALID, FAIL_OR_OK);
 
 	// Convert the attribute string to three bit-masks: add, remove and toggle.
 	FileSetAttribData attrib;
@@ -8704,7 +8465,7 @@ ResultType Line::FileSetAttrib(LPTSTR aAttributes, LPTSTR aFilePattern
 		case '\t':
 			continue;
 		default:
-			return LineError(ERR_PARAM1_INVALID, FAIL, cp);
+			return LineError(ERR_PARAM1_INVALID, FAIL_OR_OK, cp);
 		// Note that D (directory) and C (compressed) are currently not supported:
 		case 'R': mask = FILE_ATTRIBUTE_READONLY; break;
 		case 'A': mask = FILE_ATTRIBUTE_ARCHIVE; break;
@@ -8758,7 +8519,7 @@ ResultType Line::FilePatternApply(LPTSTR aFilePattern, FileLoopModeType aOperate
 {
 	if (!*aFilePattern)
 		// Caller should handle this case before calling us if an exception is to be thrown.
-		return SetErrorsOrThrow(true, ERROR_INVALID_PARAMETER);
+		return SetLastErrorMaybeThrow(true, ERROR_INVALID_PARAMETER);
 
 	if (aOperateOnFolders == FILE_LOOP_INVALID) // In case runtime dereference of a var was an invalid value.
 		aOperateOnFolders = FILE_LOOP_FILES_ONLY;  // Set default.
@@ -8777,7 +8538,7 @@ ResultType Line::FilePatternApply(LPTSTR aFilePattern, FileLoopModeType aOperate
 	// than 259, even if the pattern would match files whose names are short enough to be legal.
 	if (fps.dir_length + fps.pattern_length >= _countof(fps.path)
 		|| fps.pattern_length >= _countof(fps.pattern))
-		return SetErrorsOrThrow(true, ERROR_BUFFER_OVERFLOW);
+		return SetLastErrorMaybeThrow(true, ERROR_BUFFER_OVERFLOW);
 
 	// Make copies in case of overwrite of deref buf during LONG_OPERATION/MsgSleep,
 	// and to allow modification:
@@ -8797,7 +8558,7 @@ ResultType Line::FilePatternApply(LPTSTR aFilePattern, FileLoopModeType aOperate
 	fps.failure_count = 0;
 
 	FilePatternApply(fps);
-	return SetErrorLevelOrThrowInt(fps.failure_count); // i.e. indicate success if there were no failures.
+	return ThrowIntIfNonzero(fps.failure_count); // i.e. indicate success if there were no failures.
 }
 
 
@@ -8918,8 +8679,8 @@ BIF_DECL(BIF_FileGetTime)
 	HANDLE file_search = FindFirstFile(aFilespec, &found_file);
 	if (file_search == INVALID_HANDLE_VALUE)
 	{
-		Script::SetErrorLevels(true);
-		_f_return_empty;
+		aResultToken.SetLastErrorMaybeThrow(true);
+		return;
 	}
 	FindClose(file_search);
 
@@ -8936,7 +8697,7 @@ BIF_DECL(BIF_FileGetTime)
 		FileTimeToLocalFileTime(&found_file.ftLastWriteTime, &local_file_time);
 	}
 
-	Script::SetErrorLevels(false, 0); // Indicate success.
+	g->LastError = 0;
 	_f_return_p(FileTimeToYYYYMMDD(_f_retval_buf, local_file_time));
 }
 
@@ -8969,14 +8730,14 @@ ResultType Line::FileSetTime(LPTSTR aYYYYMMDD, LPTSTR aFilePattern, TCHAR aWhich
 			|| !LocalFileTimeToFileTime(&ft, &callbackData.Time)   )  // Convert from local to UTC.
 		{
 			// Invalid parameters are the only likely cause of this condition.
-			return LineError(ERR_PARAM1_INVALID, FAIL, aYYYYMMDD);
+			return LineError(ERR_PARAM1_INVALID, FAIL_OR_OK, aYYYYMMDD);
 		}
 	}
 	else // User wants to use the current time (i.e. now) as the new timestamp.
 		GetSystemTimeAsFileTime(&callbackData.Time);
 
 	if (!*aFilePattern)
-		return LineError(ERR_PARAM2_INVALID);
+		return LineError(ERR_PARAM2_INVALID, FAIL_OR_OK);
 #ifdef _WIN64
 	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
 #else
@@ -9055,7 +8816,7 @@ BIF_DECL(BIF_FileGetSize)
 		HANDLE file_search = FindFirstFile(aFilespec, &found_file);
 		if (file_search == INVALID_HANDLE_VALUE)
 		{
-			Script::SetErrorLevels(true);
+			aResultToken.SetLastErrorMaybeThrow(true);
 			_f_return_empty;
 		}
 		FindClose(file_search);
@@ -9074,7 +8835,7 @@ BIF_DECL(BIF_FileGetSize)
 		// do nothing
 	}
 
-	Script::SetErrorLevels(false, 0); // Indicate success.
+	g->LastError = 0;
 	_f_return(size);
 	// The below comment is obsolete in light of the switch to 64-bit integers.  But it might
 	// be good to keep for background:
@@ -9173,9 +8934,9 @@ ResultType GetObjectIntProperty(IObject *aObject, LPTSTR aPropName, __int64 &aVa
 				return aResultToken.Error(ERR_TYPE_MISMATCH, aPropName);
 			result = INVOKE_NOT_HANDLED;
 		}
+		aValue = 0;
 		if (!aOptional)
 			return aResultToken.UnknownMemberError(ExprTokenType(aObject), IT_GET, aPropName);
-		aValue = 0;
 		return result; // Let caller know it wasn't found.
 	}
 
@@ -9233,7 +8994,11 @@ ResultType DetermineTargetWindow(HWND &aWindow, ResultToken &aResultToken, ExprT
 	{
 		auto result = DetermineTargetHwnd(aWindow, aResultToken, *aParam[0]);
 		if (result != CONDITION_FALSE)
+		{
+			if (result == OK && !aWindow)
+				return aResultToken.Error(ERR_NO_WINDOW);
 			return result;
+		}
 	}
 	TCHAR number_buf[4][MAX_NUMBER_SIZE];
 	LPTSTR param[4];
@@ -9243,7 +9008,9 @@ ResultType DetermineTargetWindow(HWND &aWindow, ResultToken &aResultToken, ExprT
 		param[i] = j < aParamCount ? TokenToString(*aParam[j], number_buf[i]) : _T("");
 	}
 	aWindow = Line::DetermineTargetWindow(param[0], param[1], param[2], param[3]);
-	return OK;
+	if (aWindow)
+		return OK;
+	return aResultToken.Error(ERR_NO_WINDOW, param[0]);
 }
 
 
@@ -9261,6 +9028,8 @@ ResultType DetermineTargetControl(HWND &aControl, HWND &aWindow, ResultToken &aR
 		{
 		case OK:
 			aControl = aWindow;
+			if (!aControl)
+				return aResultToken.Error(ERR_NO_CONTROL);
 			return OK;
 		case FAIL:
 			return FAIL;
@@ -9271,6 +9040,8 @@ ResultType DetermineTargetControl(HWND &aControl, HWND &aWindow, ResultToken &aR
 	if (!DetermineTargetWindow(aWindow, aResultToken, aParam + 1, aParamCount - 1, aNonWinParamCount))
 		return FAIL;
 	aControl = control_spec ? ControlExist(aWindow, control_spec) : aWindow;
+	if (!aControl)
+		return aResultToken.Error(ERR_NO_CONTROL);
 	return OK;
 }
 
@@ -9351,7 +9122,7 @@ Label *Line::IsJumpValid(Label &aTargetLabel, bool aSilent)
 	// is at a more shallow level but is in some block totally unrelated to it!
 	// Returns FAIL by default, which is what we want because that value is zero:
 	if (!aSilent)
-		LineError(_T("A Goto/Gosub must not jump into a block that doesn't enclose it.")); // Omit GroupActivate from the error msg since that is rare enough to justify the increase in common-case clarity.
+		LineError(_T("A Goto/Gosub must not jump into a block that doesn't enclose it."));
 	return NULL;
 }
 
@@ -9519,7 +9290,7 @@ BIV_DECL_W(BIV_TitleMatchMode_Set)
 	case FIND_FAST: g->TitleFindFast = true; break;
 	case FIND_SLOW: g->TitleFindFast = false; break;
 	default:
-		return g_script->ScriptError(ERR_INVALID_VALUE, aBuf);
+		return g_script->RuntimeError(ERR_INVALID_VALUE, aBuf);
 	}
 	return OK;
 }
@@ -9547,7 +9318,7 @@ BIV_DECL_W(BIV_DetectHiddenWindows_Set)
 	if ( (toggle = Line::ConvertOnOff(aBuf, NEUTRAL)) != NEUTRAL )
 		g->DetectHiddenWindows = (toggle == TOGGLED_ON);
 	else
-		return g_script->ScriptError(ERR_INVALID_VALUE, aBuf);
+		return g_script->RuntimeError(ERR_INVALID_VALUE, aBuf);
 	return OK;
 }
 
@@ -9567,7 +9338,7 @@ BIV_DECL_W(BIV_DetectHiddenText_Set)
 	if ( (toggle = Line::ConvertOnOff(aBuf, NEUTRAL)) != NEUTRAL )
 		g->DetectHiddenText = (toggle == TOGGLED_ON);
 	else
-		return g_script->ScriptError(ERR_INVALID_VALUE, aBuf);
+		return g_script->RuntimeError(ERR_INVALID_VALUE, aBuf);
 	return OK;
 }
 
@@ -9585,7 +9356,7 @@ BIV_DECL_W(BIV_StringCaseSense_Set)
 	if ( (sense = Line::ConvertStringCaseSense(aBuf)) != SCS_INVALID )
 		g->StringCaseSense = sense;
 	else
-		return g_script->ScriptError(ERR_INVALID_VALUE, aBuf);
+		return g_script->RuntimeError(ERR_INVALID_VALUE, aBuf);
 	return OK;
 }
 
@@ -9706,7 +9477,7 @@ BIV_DECL_W(BIV_StoreCapslockMode_Set)
 {
 	ToggleValueType toggle = Line::ConvertOnOff(aBuf, NEUTRAL);
 	if (toggle == NEUTRAL)
-		return g_script->ScriptError(ERR_INVALID_VALUE, aBuf);
+		return g_script->RuntimeError(ERR_INVALID_VALUE, aBuf);
 	g->StoreCapslockMode = (toggle == TOGGLED_ON);
 	return OK;
 }
@@ -9831,7 +9602,7 @@ BIV_DECL_W(BIV_FileEncoding_Set)
 {
 	UINT new_encoding = Line::ConvertFileEncoding(aBuf);
 	if (new_encoding == -1)
-		return g_script->ScriptError(ERR_INVALID_VALUE, aBuf);
+		return g_script->RuntimeError(ERR_INVALID_VALUE, aBuf);
 	g->Encoding = new_encoding;
 	return OK;
 }
@@ -9857,7 +9628,7 @@ BIV_DECL_W(BIV_RegView_Set)
 	DWORD reg_view = Line::RegConvertView(aBuf);
 	// Validate the parameter even if it's not going to be used.
 	if (reg_view == -1)
-		return g_script->ScriptError(ERR_INVALID_VALUE, aBuf);
+		return g_script->RuntimeError(ERR_INVALID_VALUE, aBuf);
 	// Since these flags cause the registry functions to fail on Win2k and have no effect on
 	// any later 32-bit OS, ignore this command when the OS is 32-bit.  Leave A_RegView blank.
 	if (IsOS64Bit())
@@ -9979,7 +9750,7 @@ BIV_DECL_W(BIV_AllowMainWindow_Set)
 	// which is only sometimes compiled may execute it unconditionally.
 	// For code size, false values are ignored instead of throwing an exception.
 	//if (!ResultToBOOL(aBuf))
-	//	return g_script->ScriptError(ERR_INVALID_VALUE, aBuf);
+	//	return g_script->RuntimeError(ERR_INVALID_VALUE, aBuf);
 	return OK;
 }
 
@@ -10308,7 +10079,8 @@ VarSizeType BIV_WorkingDir(LPTSTR aBuf, LPTSTR aVarName)
 
 BIV_DECL_W(BIV_WorkingDir_Set)
 {
-	SetWorkingDir(aBuf, false);
+	if (!SetWorkingDir(aBuf))
+		return g_script->RuntimeError(ERR_INVALID_VALUE); // Hard to imagine any other cause.
 	return OK;
 }
 
@@ -10522,7 +10294,7 @@ BIV_DECL_W(BIV_ScriptName_Set)
 	// For simplicity, a new buffer is allocated each time.  It is not expected to be set frequently.
 	LPTSTR script_name = _tcsdup(aBuf);
 	if (!script_name)
-		return g_script->ScriptError(ERR_OUTOFMEM);
+		return g_script->RuntimeError(ERR_OUTOFMEM);
 	free(g_script->mScriptName);
 	g_script->mScriptName = script_name;
 	return OK;
@@ -11497,7 +11269,7 @@ void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free) // L31: 
 		if (   !(hmodule = GetModuleHandle(dll_name))    )
 			if (   !hmodule_to_free  ||  !(hmodule = *hmodule_to_free = LoadLibrary(dll_name))   )
 			{
-				if (hmodule_to_free) // L31: BIF_DllCall wants us to set ErrorLevel.  ExpressionToPostfix passes NULL.
+				if (hmodule_to_free) // L31: BIF_DllCall wants us to set throw.  ExpressionToPostfix passes NULL.
 					g_script->ThrowRuntimeException(_T("Failed to load DLL."), _T("DllCall"), dll_name);
 				return NULL;
 			}
@@ -11516,7 +11288,7 @@ void *GetDllProcAddress(LPCTSTR aDllFileFunc, HMODULE *hmodule_to_free) // L31: 
 		}
 	}
 
-	if (!function && hmodule_to_free) // Caller wants us to set ErrorLevel.
+	if (!function && hmodule_to_free) // Caller wants us to throw.
 	{
 		// This must be done here since only we know for certain that the dll
 		// was loaded okay (if GetModuleHandle succeeded, nothing is passed
@@ -13087,7 +12859,6 @@ BIF_DECL(BIF_DllImport)
 
 BIF_DECL(BIF_DllCall)
 // Stores a number or a SYM_STRING result in aResultToken.
-// Sets ErrorLevel to the error code appropriate to any problem that occurred.
 // Caller has set up aParam to be viewable as a left-to-right array of params rather than a stack.
 // It has also ensured that the array has exactly aParamCount items in it.
 // Author: Marcus Sonntag (Ultra)
@@ -13125,12 +12896,9 @@ BIF_DECL(BIF_DllCall)
 				: NULL; // Not a pure integer, so fall back to normal method of considering it to be path+name.
 			// A check like the following is not present due to rarity of need and because if the address
 			// is zero or negative, the same result will occur as for any other invalid address:
-			// an ErrorLevel of 0xc0000005.
-			//if (temp64 <= 0)
-			//{
-			//	g_ErrorLevel->Assign(-1); // Stage 1 error: Invalid first param.
-			//	return;
-			//}
+			// an exception code of 0xc0000005.
+			//if ((UINT64)temp64 < 0x10000 || (UINT64)temp64 > UINTPTR_MAX)
+			//	_f_throw(ERR_PARAM1_INVALID); // Stage 1 error: Invalid first param.
 			//// Otherwise, assume it's a valid address:
 			//	function = (void *)temp64;
 			break;
@@ -13328,8 +13096,8 @@ has_valid_return_type:
 			// Of course, it's not a complete solution because it doesn't stop a script from
 			// passing a variable whose capacity is non-zero yet too small to handle what the
 			// function will write to it.  But it's a far cry better than nothing because it's
-			// common for a script to forget to call VarSetCapacity before passing a buffer to some
-			// function that writes a string to it.
+			// common for a script to (unintentionally) pass an empty/uninitialized variable to
+			// some function that writes a string to it.
 			//if (this_dyna_param.str == Var::sEmptyString) // To improve performance, compare directly to Var::sEmptyString rather than calling Capacity().
 			//	this_dyna_param.str = _T(""); // Make it read-only to force an exception.  See comments above.
 			break;
@@ -13432,7 +13200,6 @@ has_valid_return_type:
 #ifdef _WIN64
 	return_value = DynaCall(function, dyna_param, arg_count, exception_occurred);
 #endif
-	// The above has also set g_ErrorLevel appropriately.
 
 	if (*Var::sEmptyString)
 	{
@@ -13445,13 +13212,13 @@ has_valid_return_type:
 		// Don't bother with freeing hmodule_to_free since a critical error like this calls for minimal cleanup.
 		// The OS almost certainly frees it upon termination anyway.
 		// Call CriticalError() so that the user knows *which* DllCall is at fault:
-		g_script->CriticalError(_T("This DllCall requires a prior VarSetCapacity."));
+		g_script->CriticalError(_T("An invalid write to an empty variable was detected."));
 		// CriticalError always terminates the process.
 	}
 
 	if (return_attrib.is_hresult && FAILED((HRESULT)return_value.Int) && !g->ThrownToken)
 	{
-		g_script->ThrowWin32Exception((DWORD)return_value.Int);
+		g_script->Win32Error((DWORD)return_value.Int);
 	}
 
 	if (g->ThrownToken)
@@ -14154,8 +13921,6 @@ int RegExCallout(pcret_callout_block *cb)
 
 	g->EventInfo = (EventInfoType) cb;
 	
-	FuncResult result_token;
-
 	/*
 	callout_number:		should be available since callout number can be specified within (?C...).
 	subject:			useful when behaviour might depend on text surrounding a capture.
@@ -14215,8 +13980,6 @@ int RegExCallout(pcret_callout_block *cb)
 		number_to_return = PCRE_ERROR_CALLOUT;
 		cd.result_token->SetExitResult(result);
 	}
-	else
-		number_to_return = TokenToInt64(result_token);
 	
 	g->EventInfo = EventInfo_saved;
 
@@ -14275,12 +14038,11 @@ pcret *get_compiled_regex(LPTSTR aRegEx, pcret_extra *&aExtra, int *aOptionsLeng
 // Returns the compiled RegEx, or NULL on failure.
 // This function is called by things other than built-in functions so it should be kept general-purpose.
 // Upon failure, if aResultToken!=NULL:
-//   - ErrorLevel is set to a descriptive string other than "0".
+//   - An exception is thrown with a descriptive message on failure.
 //   - *aResultToken is set up to contain an empty string.
 // Upon success, the following output parameters are set based on the options that were specified:
 //    aGetPositionsNotSubstrings
 //    aExtra
-//    (but it doesn't change ErrorLevel on success, not even if aResultToken!=NULL)
 // L14: aOptionsLength is used by callouts to adjust cb->pattern_position to be relative to beginning of actual user-specified NeedleRegEx instead of string seen by PCRE.
 {	
 	if (!pcret_callout)
@@ -14474,7 +14236,7 @@ break_both:
 				, error_offset, error_msg);
 			// Seems best to bring the error to the user's attention rather than letting it potentially
 			// escape their notice.  This sort of error should be corrected immediately, not handled
-			// within the script (such as by checking ErrorLevel).
+			// within the script (such as by try-catch).
 			aResultToken->Error(error_buf);
 		}
 		goto error;
@@ -14490,16 +14252,13 @@ break_both:
 		// The following isn't done because:
 		// 1) It seems best not to abort the caller's RegEx operation just due to a study error, since the only
 		//    error likely to happen (from looking at PCRE's source code) is out-of-memory.
-		// 2) ErrorLevel is traditionally used for error/abort conditions only, not warnings.  So it seems best
-		//    not to pollute it with a warning message that indicates, "yes it worked, but here's a warning".
-		//    ErrorLevel 0 (success) seems better and more desirable.
-		// 3) Reduced code size.
+		// 2) Reduced code size.
 		//if (error_msg)
 		//{
-			//if (aResultToken) // Only when this is non-NULL does caller want ErrorLevel changed.
+			//if (aResultToken)
 			//{
 			//	sntprintf(error_buf, sizeof(error_buf), "Study error: %s", error_msg);
-			//	g_ErrorLevel->Assign(error_buf);
+			//	aResultToken->Error(error_buf);
 			//}
 			//goto error;
 		//}
@@ -15726,6 +15485,8 @@ BIF_DECL(BIF_StrGetPut) // BIF_DECL(BIF_StrGet), BIF_DECL(BIF_StrPut)
 		int max_chars = int(max_bytes >> int(encoding == CP_UTF16));
 		if (length > max_chars)
 			_f_throw(ERR_INVALID_LENGTH);
+		if (source_length > max_chars)
+			_f_throw(ERR_PARAM2_INVALID);
 		if (length == -1)
 		{
 			length = max_chars;
@@ -15821,7 +15582,7 @@ BIF_DECL(BIF_StrGetPut) // BIF_DECL(BIF_StrGet), BIF_DECL(BIF_StrPut)
 							char_count = WideCharToMultiByte(encoding, flags, (LPCWSTR)source_string, source_length, NULL, 0, NULL, NULL);
 						}
 						if (!char_count)
-							_f_throw(ERR_INTERNAL_CALL);
+							_f_throw_win32();
 					}
 					++char_count; // + 1 for null-terminator (source_length causes it to be excluded from char_count).
 					if (length == 0) // Caller just wants the required buffer size.
@@ -15844,7 +15605,7 @@ BIF_DECL(BIF_StrGetPut) // BIF_DECL(BIF_StrGet), BIF_DECL(BIF_StrPut)
 			}
 #endif
 			if (!char_count)
-				_f_throw(GetLastError() == ERROR_INSUFFICIENT_BUFFER ? ERR_INVALID_LENGTH : ERR_INTERNAL_CALL);
+				_f_throw_win32();
 		}
 		// Return the number of bytes written.
 		aResultToken.value_int64 = char_count * (1 + (encoding == CP_UTF16));
@@ -15895,7 +15656,7 @@ BIF_DECL(BIF_StrGetPut) // BIF_DECL(BIF_StrGet), BIF_DECL(BIF_StrPut)
 			conv_length = WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, (LPCWSTR)address, length, aResultToken.marker, conv_length, NULL, NULL);
 #endif
 			if (!conv_length) // This can only be failure, since ... (see below)
-				_f_throw(ERR_INTERNAL_CALL);
+				_f_throw_win32();
 			if (length == -1) // conv_length includes a null-terminator in this case.
 				--conv_length;
 			else
@@ -16073,12 +15834,11 @@ BIF_DECL(BIF_GetKeyName)
 
 
 
-BIF_DECL(BIF_VarSetCapacity)
+BIF_DECL(BIF_VarSetStrCapacity)
 // Returns: The variable's new capacity.
 // Parameters:
 // 1: Target variable (unquoted).
 // 2: Requested capacity.
-// 3: Byte-value to fill the variable with (e.g. 0 to have the same effect as ZeroMemory).
 {
 	// Caller has set aResultToken.symbol to a default of SYM_INTEGER, so no need to set it here.
 	aResultToken.value_int64 = 0; // Set default. In spite of being ambiguous with the result of Free(), 0 seems a little better than -1 since it indicates "no capacity" and is also equal to "false" for easy use in expressions.
@@ -16092,14 +15852,14 @@ BIF_DECL(BIF_VarSetCapacity)
 			// to unsigned.  Var::AssignString used to have a similar check, but integer overflow caused
 			// by "* sizeof(TCHAR)" allowed some errors to go undetected.  For this same reason, we can't
 			// simply rely on SetCapacity() calling malloc() and then detecting failure.
-			if ((unsigned __int64)param1 > MAXINT_PTR)
+			if ((unsigned __int64)param1 > (MAXINT_PTR / sizeof(TCHAR)))
 			{
 				if (param1 == -1) // Adjust variable's internal length.
 				{
 					var.SetLengthFromContents();
 					// Seems more useful to report length vs. capacity in this special case. Scripts might be able
 					// to use this to boost performance.
-					aResultToken.value_int64 = var.ByteLength();
+					aResultToken.value_int64 = var.CharLength();
 					return;
 				}
 				// x64: it's negative but not -1.
@@ -16107,14 +15867,7 @@ BIF_DECL(BIF_VarSetCapacity)
 				_f_throw(ERR_PARAM2_INVALID, TokenToString(*aParam[1], _f_number_buf));
 			}
 			// Since above didn't return:
-			size_t new_capacity = (size_t)param1; // in bytes
-			if (!new_capacity && aParam[1]->symbol == SYM_MISSING)
-			{
-				// This case is likely to be rare, but allows VarSetCapacity(v,,b) to fill
-				// v with byte b up to its current capacity, rather than freeing it.
-				if (new_capacity = var.ByteCapacity())
-					new_capacity -= sizeof(TCHAR);
-			}
+			size_t new_capacity = (size_t)param1 * sizeof(TCHAR); // Chars to bytes.
 			if (new_capacity)
 			{
 				AUTO_MALLOCA_DEFINE(BYTE*, aBkpContents);
@@ -16130,28 +15883,13 @@ BIF_DECL(BIF_VarSetCapacity)
 					aResultToken.SetExitResult(FAIL); // ScriptError() was already called.
 					return;
 				}
-				VarSizeType capacity; // in characters
-				if (aParamCount > 2 && (capacity = var.Capacity()) > 1) // Third parameter is present and var has enough capacity to make FillMemory() meaningful.
-				{
-					--capacity; // Convert to script-POV capacity. To avoid underflow, do this only now that Capacity() is known not to be zero.
-					// The following uses capacity-1 because the last byte of a variable should always
-					// be left as a binary zero to avoid crashes and problems due to unterminated strings.
-					// In other words, a variable's usable capacity from the script's POV is always one
-					// less than its actual capacity:
-					BYTE fill_byte = (BYTE)TokenToInt64(*aParam[2]); // For simplicity, only numeric characters are supported, not something like "a" to mean the character 'a'.
-					LPTSTR contents = var.Contents();
-					FillMemory(contents, capacity * sizeof(TCHAR), fill_byte); // Last byte of variable is always left as a binary zero.
-					contents[capacity] = '\0'; // Must terminate because nothing else is explicitly responsible for doing it.
-					var.SetCharLength(fill_byte ? capacity : 0); // Length is same as capacity unless fill_byte is zero.
-				}
-				else
 				{
 					// restore variables content if FillMemory parameter is not used and the size is apropriate
 					if (aParamCount < 3 && aBkpCapacity > 1 && (var.ByteCapacity()) > 1)
 						memcpy(var.Contents(false), aBkpContents, var.ByteCapacity() < aBkpCapacity ? var.ByteCapacity() : aBkpCapacity);
-					// By design, Assign() has already set the length of the variable to reflect new_capacity.
-					// This is not what is wanted in this case since it should be truly empty.
-					var.ByteLength() = 0;
+				// By design, Assign() has already set the length of the variable to reflect new_capacity.
+				// This is not what is wanted in this case since it should be truly empty.
+				var.ByteLength() = 0;
 				}
 			}
 			else // ALLOC_SIMPLE, due to its nature, will not actually be freed, which is documented.
@@ -16161,31 +15899,17 @@ BIF_DECL(BIF_VarSetCapacity)
 		{
 			// RequestedCapacity was omitted, so the var is not altered; instead, the current capacity
 			// is reported, which seems more intuitive/useful than having it do a Free(). In this case
-			// it's an input var rather than an output var, so check if it has been initialized:
+			// it's an input var rather than an output var, so check if it contains a string.
 			// v1.1.11.01: Support VarSetCapacity(var) as a means for the script to check if it
 			// has initialized a var.  In other words, don't show a warning even in that case.
+			// v2: We now have IsSet(), but it still seems reasonable to allow this without a warning.
 			//var.MaybeWarnUninitialized();
-
-			switch (var.IsPureNumericOrObject())
-			{
-			case VAR_ATTRIB_IS_INT64:
-			case VAR_ATTRIB_IS_DOUBLE:
-				// For consistency and maintainability, return the size of the usable space returned by
-				// &var even though in this case it is a pure __int64 or double.  Any script which uses
-				// &var intentionally in this context already knows what it's getting so has no need to
-				// call this function; therefore, the caller of this function probably expects the return
-				// value to exclude space for the null-terminator (sizeof(TCHAR)).
-				aResultToken.value_int64 = 8 - sizeof(TCHAR); // sizeof(__int64) or sizeof(double), minus 1 TCHAR.
-				return;
-			case VAR_ATTRIB_IS_OBJECT:
-				// For consistency, though it seems of dubious usefulness:
-				aResultToken.value_int64 = 0;
-				return;
-			}
+			if (var.IsPureNumericOrObject())
+				_f_throw(ERR_TYPE_MISMATCH);
 		}
 
-		if (aResultToken.value_int64 = var.ByteCapacity()) // Don't subtract 1 here in lieu doing it below (avoids underflow).
-			aResultToken.value_int64 -= sizeof(TCHAR); // Omit the room for the zero terminator since script capacity is defined as length vs. size.
+		if (aResultToken.value_int64 = var.CharCapacity()) // Don't subtract 1 here in lieu doing it below (avoids underflow).
+			aResultToken.value_int64 -= 1; // Omit the room for the zero terminator since script capacity is defined as length vs. size.
 	} // (aParam[0]->symbol == SYM_VAR && aParam[0]->var->Type() == VAR_NORMAL)
 	else
 		_f_throw(ERR_PARAM1_INVALID);
@@ -17314,7 +17038,7 @@ BIF_DECL(BIF_Random)
 	{
 		double rand_min = arg1type != SYM_MISSING ? ParamIndexToDouble(0) : 0;
 		double rand_max = arg2type != SYM_MISSING ? ParamIndexToDouble(1) : INT_MAX;
-		// Seems best not to use ErrorLevel for this command at all, since silly cases
+		// Seems best not to raise an error for this function at all, since silly cases
 		// such as Max > Min are too rare.  Swap the two values instead.
 		if (rand_min > rand_max)
 		{
@@ -17328,7 +17052,7 @@ BIF_DECL(BIF_Random)
 	{
 		int rand_min = arg1type != SYM_MISSING ? ParamIndexToInt(0) : 0;
 		int rand_max = arg2type != SYM_MISSING ? ParamIndexToInt(1) : INT_MAX;
-		// Seems best not to use ErrorLevel for this command at all, since silly cases
+		// Seems best not to raise an error for this function at all, since silly cases
 		// such as Max > Min are too rare.  Swap the two values instead.
 		if (rand_min > rand_max)
 		{
@@ -17391,20 +17115,16 @@ BIF_DECL(BIF_DateAdd)
 
 BIF_DECL(BIF_DateDiff)
 {
-	// Since above didn't return, the command is being used to subtract date-time values.
-	bool failed;
+	LPTSTR error_message;
 	// If either parameter is blank, it will default to the current time:
 	__int64 time_until; // Declaring separate from initializing avoids compiler warning when not inside a block.
 	TCHAR number_buf[MAX_NUMBER_SIZE]; // Additional buf used in case both parameters are pure numbers.
 	time_until = YYYYMMDDSecondsUntil(
 		ParamIndexToString(1, _f_number_buf),
 		ParamIndexToString(0, number_buf),
-		failed);
-	if (failed) // Usually caused by an invalid component in the date-time string.
-	{
-		aResultToken.SetExitResult(FAIL); // ScriptError() was already called.
-		return;
-	}
+		error_message);
+	if (error_message) // Usually caused by an invalid component in the date-time string.
+		_f_throw(error_message);
 	switch (ctoupper(*ParamIndexToString(2)))
 	{
 	case 'S': break;
@@ -17430,7 +17150,7 @@ BIF_DECL(BIF_Hotkey)
 	
 	if (!_tcsnicmp(aParam0, _T("IfWin"), 5)) // Seems reasonable to assume that anything starting with "IfWin" can't be the name of a hotkey.
 	{
-		result = Hotkey::IfWin(aParam0, aParam1, aParam2);
+		result = Hotkey::IfWin(aParam0, aParam1, aParam2, aResultToken);
 	}
 	else if (!_tcsicmp(aParam0, _T("If")))
 	{
@@ -17448,7 +17168,7 @@ BIF_DECL(BIF_Hotkey)
 			else if (  !(hook_action = Hotkey::ConvertAltTab(aParam1, true))  )
 				functor = StringToLabelOrFunctor(aParam1);
 		}
-		result = Hotkey::Dynamic(aParam0, aParam1, aParam2, functor, hook_action);
+		result = Hotkey::Dynamic(aParam0, aParam1, aParam2, functor, hook_action, aResultToken);
 	}
 	
 	if (functor)
@@ -17839,7 +17559,7 @@ BIF_DECL(BIF_On)
 
 
 	IObject *callback = TokenToFunctor(*aParam[0]);
-	if (!ValidateFunctor(callback, event_type == FID_OnExit ? 2 : 1, aResultToken, ERR_PARAM1_INVALID))
+	if (!ValidateFunctor(callback, event_type == FID_OnClipboardChange ? 1 : 2, aResultToken, ERR_PARAM1_INVALID))
 		return;
 	
 	int mode = 1; // Default.
@@ -17929,7 +17649,6 @@ UINT_PTR CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address) // Used
 	RCCallbackFunc &cb = *((RCCallbackFunc*) address);
 #endif
 
-	VarBkp ErrorLevel_saved;
 	BOOL pause_after_execute;
 
 	// NOTES ABOUT INTERRUPTIONS / CRITICAL:
@@ -17954,7 +17673,6 @@ UINT_PTR CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address) // Used
 		if (g_nThreads >= g_MaxThreadsTotal) // To avoid array overflow, g_MaxThreadsTotal must not be exceeded except where otherwise documented.
 			return 0;
 		// See MsgSleep() for comments about the following section.
-		ErrorLevel_Backup(ErrorLevel_saved);
 		InitNewThread(0, false, true);
 		DEBUGGER_STACK_PUSH(_T("Callback"))
 	}
@@ -18009,7 +17727,7 @@ UINT_PTR CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address) // Used
 	if (cb.flags & CBF_CREATE_NEW_THREAD)
 	{
 		DEBUGGER_STACK_POP()
-		ResumeUnderlyingThread(ErrorLevel_saved);
+		ResumeUnderlyingThread();
 	}
 	else
 	{
@@ -18045,13 +17763,22 @@ BIF_DECL(BIF_CallbackCreate)
 {
 	IObject *func = TokenToFunctor(*aParam[0]);
 	if (!func)
-		_f_throw(ERR_PARAM1_INVALID);
+		_f_throw(ERR_INVALID_FUNCTOR);
 
 	// Get func.MinParams (if present) for validation and default parameter count.
 	__int64 minparams;
 	bool has_minparams = GetObjectIntProperty(func, _T("MinParams"), minparams, aResultToken, true) != INVOKE_NOT_HANDLED;
 	if (aResultToken.Exited())
 		return;
+
+	// Check whether func is callable (or assume it is if has_minparams, for performance).
+	// For clarity, this check should take precedence over ERR_PARAM3_MUST_NOT_BE_BLANK.
+	// Since MaxParams hasn't been checked yet, we don't know if it exists; however, it
+	// would be very unusual to have MaxParams and not MinParams.
+	if (!has_minparams) // See ValidateFunctor() for comments about this.
+		if (Object *obj = dynamic_cast<Object *>(func))
+			if (!obj->HasMethod(_T("Call")))
+				_f_throw(ERR_INVALID_FUNCTOR);
 
 	LPTSTR options = ParamIndexToOptionalString(1);
 	bool pass_params_pointer = _tcschr(options, '&'); // Callback wants the address of the parameter list instead of their values.
@@ -18063,10 +17790,11 @@ BIF_DECL(BIF_CallbackCreate)
 #endif
 
 	int actual_param_count;
+	bool has_maxparams = false;
 	if (!ParamIndexIsOmittedOrEmpty(2)) // A parameter count was specified.
 	{
 		__int64 maxparams;
-		bool has_maxparams = GetObjectIntProperty(func, _T("MaxParams"), maxparams, aResultToken, true) != INVOKE_NOT_HANDLED;
+		has_maxparams = GetObjectIntProperty(func, _T("MaxParams"), maxparams, aResultToken, true) != INVOKE_NOT_HANDLED;
 		if (aResultToken.Exited())
 			return;
 		
@@ -18077,7 +17805,9 @@ BIF_DECL(BIF_CallbackCreate)
 			|| has_maxparams && script_params > (int)maxparams  ) // Too few.
 		{
 			func->Release();
-			_f_throw(ERR_PARAM_COUNT_INVALID); // Seems a bit clearer than "Invalid parameter #3".
+			_f_throw(ERR_INVALID_FUNCTOR);
+			// Not ERR_PARAM_COUNT_INVALID because it would confuse Helgef.
+			// Not ERR_PARAM3_INVALID because it might be due to pass_params_pointer vs. min/maxparams.
 		}
 	}
 	else if (!has_minparams || pass_params_pointer && require_param_count)
@@ -19875,8 +19605,7 @@ BIF_DECL(BIF_Exception)
 	else
 	{
 		// Out of memory. Seems best to alert the user.
-		MsgBox(ERR_OUTOFMEM);
-		_f_return_empty;
+		_f_throw(ERR_OUTOFMEM);
 	}
 }
 
@@ -20259,7 +19988,7 @@ ResultType ValidateFunctor(IObject *aFunc, int aParamCount, ResultToken &aResult
 	if (min_result == INVOKE_NOT_HANDLED && max_result == INVOKE_NOT_HANDLED)
 		if (Object *obj = dynamic_cast<Object *>(aFunc))
 			if (!obj->HasMethod(_T("Call")))
-				return aResultToken.Error(ERR_TYPE_MISMATCH);
+				return aResultToken.Error(ERR_INVALID_FUNCTOR);
 		// Otherwise: COM objects can be callable via DISPID_VALUE.  There's probably
 		// no way to determine whether the object supports that without invoking it.
 	return OK;

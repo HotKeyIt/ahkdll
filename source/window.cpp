@@ -23,7 +23,7 @@ GNU General Public License for more details.
 
 
 HWND WinActivate(global_struct &aSettings, LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LPTSTR aExcludeText
-	, bool aFindLastMatch, HWND aAlreadyVisited[], int aAlreadyVisitedCount)
+	, bool aFindLastMatch, bool aReturnFoundWindow, HWND aAlreadyVisited[], int aAlreadyVisitedCount)
 {
 	// If window is already active, be sure to leave it that way rather than activating some
 	// other window that may match title & text also.  NOTE: An explicit check is done
@@ -78,7 +78,11 @@ HWND WinActivate(global_struct &aSettings, LPTSTR aTitle, LPTSTR aText, LPTSTR a
 	// Above has ensured that target_window is non-NULL, that it is a valid window, and that
 	// it is eligible due to g->DetectHiddenWindows being true or the window not being hidden
 	// (or being one of the script's GUI windows).
-	return SetForegroundWindowEx(target_window);
+	HWND activated = SetForegroundWindowEx(target_window);
+	// GroupActivate wants the window found above, even if it isn't now active.
+	// aReturnFoundWindow was added because aAlreadyVisited is allocated on first
+	// use and therefore not a reliable indicator of whether this is GroupActivate.
+	return aReturnFoundWindow ? target_window : activated;
 }
 
 
@@ -766,14 +770,12 @@ BOOL CALLBACK EnumChildFind(HWND aWnd, LPARAM lParam)
 
 
 
-ResultType StatusBarUtil(ResultToken *apResultToken, HWND aBarHwnd, int aPartNumber
+void StatusBarUtil(ResultToken &aResultToken, HWND aBarHwnd, int aPartNumber
 	, LPTSTR aTextToWaitFor, int aWaitTime, int aCheckInterval)
-// aOutputVar is allowed to be NULL if aTextToWaitFor isn't NULL or blank. aBarHwnd is allowed
-// to be NULL because in that case, the caller wants us to set ErrorLevel appropriately and also
-// make aOutputVar empty.
+// aBarHwnd is allowed to be NULL because in that case, the caller wants us to set aresultToken appropriately.
 {
-	if (apResultToken)
-		apResultToken->ReturnPtr(_T(""), 0); // Init to blank in case of early return.
+	if (!aBarHwnd)
+		_f_throw(ERR_NO_STATUSBAR);
 
 	// Legacy: Waiting 500ms in place of a "0" seems more useful than a true zero, which doesn't need
 	// to be supported because it's the same thing as something like "IfWinExist":
@@ -786,7 +788,7 @@ ResultType StatusBarUtil(ResultToken *apResultToken, HWND aBarHwnd, int aPartNum
 
 	// Must have at least one of these.  UPDATE: We want to allow this so that the command can be
 	// used to wait for the status bar text to become blank:
-	//if (!aOutputVar && !*aTextToWaitFor) return OK;
+	//if (aTextToWaitFor && !*aTextToWaitFor) return OK;
 
 	// Whenever using SendMessageTimeout(), our app will be unresponsive until
 	// the call returns, since our message loop isn't running.  In addition,
@@ -800,10 +802,11 @@ ResultType StatusBarUtil(ResultToken *apResultToken, HWND aBarHwnd, int aPartNum
 	HANDLE handle;
 	LPVOID remote_buf;
 	LRESULT part_count; // The number of parts this status bar has.
-	if (!aBarHwnd  // These conditions rely heavily on short-circuit boolean order.
-		|| !SendMessageTimeout(aBarHwnd, SB_GETPARTS, 0, 0, SMTO_ABORTIFHUNG, SB_TIMEOUT, (PDWORD_PTR)&part_count) // It failed or timed out.
-		|| aPartNumber > part_count
-		|| !(remote_buf = AllocInterProcMem(handle, _TSIZE(WINDOW_TEXT_SIZE + 1), aBarHwnd))) // Alloc mem last.
+	if (!SendMessageTimeout(aBarHwnd, SB_GETPARTS, 0, 0, SMTO_ABORTIFHUNG, SB_TIMEOUT, (PDWORD_PTR)&part_count)) // It failed or timed out.
+		goto error;
+	if (aPartNumber > part_count)
+		_f_throw(ERR_PARAM1_INVALID);
+	if (  !(remote_buf = AllocInterProcMem(handle, _TSIZE(WINDOW_TEXT_SIZE + 1), aBarHwnd))  )
 		goto error;
 
 	TCHAR local_buf[WINDOW_TEXT_SIZE + 1]; // The local counterpart to the buf allocated remotely above.
@@ -827,7 +830,7 @@ ResultType StatusBarUtil(ResultToken *apResultToken, HWND aBarHwnd, int aPartNum
 		{
 			// Testing confirms that LOWORD(result) [the length] does not include the zero terminator.
 			if (LOWORD(result) > WINDOW_TEXT_SIZE) // Text would be too large (very unlikely but good to check for security).
-				break; // Abort the operation and leave ErrorLevel set to its default to indicate the problem.
+				break; // Abort the operation.
 			// Retrieve the bar's text:
 			if (SendMessageTimeout(aBarHwnd, SB_GETTEXT, aPartNumber, (LPARAM)remote_buf, SMTO_ABORTIFHUNG, SB_TIMEOUT, &result))
 			{
@@ -841,9 +844,9 @@ ResultType StatusBarUtil(ResultToken *apResultToken, HWND aBarHwnd, int aPartNum
 				// Check if the retrieved text matches the caller's criteria. In addition to
 				// normal/intuitive matching, a match is also achieved if both are empty strings.
 				// In fact, IsTextMatch() yields "true" whenever aTextToWaitFor is the empty string:
-				if (IsTextMatch(local_buf, aTextToWaitFor))
+				if (aTextToWaitFor && IsTextMatch(local_buf, aTextToWaitFor))
 				{
-					g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Indicate "match found".
+					aResultToken.value_int64 = TRUE; // Indicate "match found".
 					break;
 				}
 			}
@@ -854,38 +857,32 @@ ResultType StatusBarUtil(ResultToken *apResultToken, HWND aBarHwnd, int aPartNum
 		// when the target window (or the entire system) is unresponsive for a long time, perhaps due
 		// to a drive spinning up, etc.
 
-		// Only when above didn't break are the following secondary conditions checked.  When aOutputVar
-		// is non-NULL, the caller wanted a single check only (no waiting) [however, in most such cases,
-		// the checking above would already have done a "break" because of aTextToWaitFor being blank when
-		// passed to IsTextMatch()].  Also, don't continue to wait if the status bar no longer exists
-		// (which is usually caused by the parent window having been destroyed):
-		if (apResultToken || !IsWindow(aBarHwnd))
-			break; // Leave ErrorLevel at its default to indicate bar text retrieval problem in both cases.
+		// When aTextToWaitFor is NULL, the caller wanted a single check only (no waiting).
+		if (!aTextToWaitFor)
+			break;
 
 		// Since above didn't break, we're in "wait" mode (more than one iteration).
 		// In the following, must cast to int or any negative result will be lost due to DWORD type.
 		// Note: A negative aWaitTime means we're waiting indefinitely for a match to appear.
-		if (g_ThreadID == aThreadID && (aWaitTime < 0 || (int)(aWaitTime - (GetTickCount() - start_time)) > SLEEP_INTERVAL_HALF))
+		if (IsWindow(aBarHwnd) && g_ThreadID == aThreadID && (aWaitTime < 0 || (int)(aWaitTime - (GetTickCount() - start_time)) > SLEEP_INTERVAL_HALF))
 			MsgSleep(aCheckInterval);
-		else if (aWaitTime < 0 || (int)(aWaitTime - (GetTickCount() - start_time)) > SLEEP_INTERVAL_HALF)
+		else if (IsWindow(aBarHwnd) && aWaitTime < 0 || (int)(aWaitTime - (GetTickCount() - start_time)) > SLEEP_INTERVAL_HALF)
 			Sleep(aCheckInterval);
 		else // Timed out.
 		{
-			g_ErrorLevel->Assign(ERRORLEVEL_ERROR); // Indicate "timeout".
+			aResultToken.value_int64 = FALSE; // Indicate "timeout".
 			break;
 		}
 	} // for()
 
-	// Consider this to be always successful, even if aBarHwnd == NULL
-	// or the status bar didn't have the part number provided, unless the below fails.
-	// Note we use a temp buf rather than writing directly to the var contents above, because
-	// we don't know how long the text will be until after the above operation finishes.
-	ResultType result_to_return = apResultToken ? apResultToken->Return(local_buf) : OK;
 	FreeInterProcMem(handle, remote_buf);
-	return result_to_return;
+	// Consider this to be always successful, even if aBarHwnd == NULL.
+	if (!aTextToWaitFor)
+		aResultToken.Return(local_buf);
+	return;
 
 error:
-	return g_ErrorLevel->Assign(apResultToken ? ERRORLEVEL_ERROR : ERRORLEVEL_ERROR2);
+	_f_throw(ERR_INTERNAL_CALL);
 }
 
 

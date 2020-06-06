@@ -77,8 +77,11 @@ ResultType Var::Assign(ExprTokenType &aToken)
 
 ResultType Var::GetClipboardAll(void **aData, size_t *aDataSize)
 {
+	*aData = NULL; // Set default in case of early return or empty data.
+	*aDataSize = 0;
+
 	if (!g_clip->Open())
-		return g_script->ScriptError(CANT_OPEN_CLIPBOARD_READ);
+		return g_script->RuntimeError(CANT_OPEN_CLIPBOARD_READ);
 
 	// Calculate the size needed:
 	// EnumClipboardFormats() retrieves all formats, including synthesized formats that don't
@@ -189,8 +192,6 @@ ResultType Var::GetClipboardAll(void **aData, size_t *aDataSize)
 	if (space_needed == sizeof(format)) // This works because even a single empty format requires space beyond sizeof(format) for storing its format+size.
 	{
 		g_clip->Close();
-		*aData = NULL;
-		*aDataSize = 0;
 		return OK;
 	}
 
@@ -205,7 +206,7 @@ ResultType Var::GetClipboardAll(void **aData, size_t *aDataSize)
 	if (!binary_contents)
 	{
 		g_clip->Close();
-		return g_script->ScriptError(ERR_OUTOFMEM);
+		return g_script->RuntimeError(ERR_OUTOFMEM);
 	}
 
 	// Retrieve and store all the clipboard formats.  Because failures of GetClipboardData() are now
@@ -279,7 +280,7 @@ ResultType Var::GetClipboardAll(void **aData, size_t *aDataSize)
 ResultType Var::SetClipboardAll(void *aData, size_t aDataSize)
 {
 	if (!g_clip->Open())
-		return g_script->ScriptError(CANT_OPEN_CLIPBOARD_WRITE);
+		return g_script->RuntimeError(CANT_OPEN_CLIPBOARD_WRITE);
 	EmptyClipboard(); // Failure is not checked for since it's probably impossible under these conditions.
 
 	// In case the variable contents are incomplete or corrupted (such as having been read in from a
@@ -309,7 +310,7 @@ ResultType Var::SetClipboardAll(void *aData, size_t aDataSize)
 		if (   !(hglobal = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, size + (size == 0)))   )
 		{
 			g_clip->Close();
-			return g_script->ScriptError(ERR_OUTOFMEM); // Short msg since so rare.
+			return g_script->RuntimeError(ERR_OUTOFMEM); // Short msg since so rare.
 		}
 		if (size) // i.e. Don't try to lock memory of size zero.  It's not needed.
 		{
@@ -317,7 +318,7 @@ ResultType Var::SetClipboardAll(void *aData, size_t aDataSize)
 			{
 				GlobalFree(hglobal);
 				g_clip->Close();
-				return g_script->ScriptError(_T("GlobalLock")); // Short msg since so rare.
+				return g_script->RuntimeError(ERR_INTERNAL_CALL); // Generic msg since so rare.
 			}
 			memcpy(hglobal_locked, binary_contents, size);
 			GlobalUnlock(hglobal);
@@ -445,7 +446,7 @@ ResultType Var::AssignString(LPCTSTR aBuf, VarSizeType aLength, bool aExactSize)
 				// case, it saves memory by avoiding the overhead incurred for each separate malloc'd block).
 				if (space_needed_in_bytes <= _TSIZE(4)) // Even for aExactSize, it seems best to prevent variables from having only a zero terminator in them because that would usually waste 3 bytes due to byte alignment in SimpleHeap.
 					new_size = _TSIZE(4); // v1.0.45: Increased from 2 to 4 to exploit byte alignment in SimpleHeap.
-				else if (aExactSize) // Allows VarSetCapacity() to make more flexible use of SimpleHeap.
+				else if (aExactSize) // Allows VarSetStrCapacity() to make more flexible use of SimpleHeap.
 					new_size = space_needed_in_bytes;
 				else
 				{
@@ -508,9 +509,9 @@ ResultType Var::AssignString(LPCTSTR aBuf, VarSizeType aLength, bool aExactSize)
 					// change mContents/Capacity (that would cause a memory leak for reasons described elsewhere).
 					// Make the var empty for the following reasons:
 					//  1) This condition could be caused by the script requesting a very high (possibly invalid)
-					//     capacity with VarSetCapacity().  The script might be handling the failure using TRY/CATCH,
+					//     capacity with VarSetStrCapacity().  The script might be handling the failure using TRY/CATCH,
 					//     so we want the result to be sane.
-					//  2) It's safer and more maintainable.  For instance, VarSetCapacity() sets length to 0, which
+					//  2) It's safer and more maintainable.  For instance, VarSetStrCapacity() sets length to 0, which
 					//     can produce bad/undefined results if there is no null-terminator at mCharContents[Length()]
 					//     as some other parts of the code assume.
 					//  3) It's more consistent.  If this var contained a binary number or object, it has already
@@ -593,7 +594,7 @@ ResultType Var::AssignSkipAddRef(IObject *aValueToAssign)
 			}
 		}
 		aValueToAssign->Release();
-		return g_script->ScriptError(ERR_INVALID_VALUE, _T("An object."));
+		return g_script->RuntimeError(ERR_INVALID_VALUE, _T("An object."));
 	}
 
 	var.Free(); // If var contains an object, this will Release() it.  It will also clear any string contents and free memory if appropriate.

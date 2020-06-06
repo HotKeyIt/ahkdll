@@ -19,7 +19,7 @@ GNU General Public License for more details.
 
 #include "hook.h" // For KeyHistoryItem and probably other things.
 #include "clipboard.h"  // For the global clipboard object
-#include "script.h" // For the global script object and g_ErrorLevel
+#include "script.h" // For the global script object
 #include "os_version.h" // For the global OS_Version object
 #include "MemoryModule.h"
 #include "Debugger.h"
@@ -148,10 +148,8 @@ extern HotkeyCriterion *g_FirstHotExpr, *g_LastHotExpr;
 extern int g_ScreenDPI;
 extern MenuTypeType g_MenuIsVisible;
 _thread_local extern int g_nMessageBoxes;
-_thread_local extern int g_nInputBoxes;
 _thread_local extern int g_nFileDialogs;
 _thread_local extern int g_nFolderDialogs;
-_thread_local extern InputBoxType g_InputBox[MAX_INPUTBOXES];
 _thread_local extern GuiType *g_firstGui, *g_lastGui;
 _thread_local extern HWND g_hWndToolTip[MAX_TOOLTIPS];
 _thread_local extern MsgMonitorList *g_MsgMonitor;
@@ -188,7 +186,6 @@ extern bool g_HSResetUponMouseClick;
 extern bool g_HSSameLineAction;
 extern TCHAR g_EndChars[HS_MAX_END_CHARS + 1];
 // Global objects:
-_thread_local extern Var *g_ErrorLevel;
 _thread_local extern input_type *g_input;
 EXTERN_SCRIPT;
 EXTERN_CLIPBOARD;

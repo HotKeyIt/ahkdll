@@ -327,12 +327,6 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	// never returns, perhaps because it contains an infinite loop (intentional or not):
 	CopyMemory(&g_default, g, sizeof(global_struct));
 
-	// Use FindOrAdd vs Add for maintainability, although it shouldn't already exist:
-	if (   !(g_ErrorLevel = g_script->FindOrAddVar(_T("ErrorLevel")))   )
-		return CRITICAL_ERROR; // Error.  Above already displayed it for us.
-	// Initialize the var state to zero:
-	g_ErrorLevel->Assign(ERRORLEVEL_NONE);
-
 	// Could use CreateMutex() but that seems pointless because we have to discover the
 	// hWnd of the existing process so that we can close or restart it, so we would have
 	// to do this check anyway, which serves both purposes.  Alt method is this:
@@ -518,15 +512,18 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 			GuiControlType::sPrototype = Object::CreatePrototype(_T("Gui.Control"), Object::sPrototype, GuiControlType::sMembers, _countof(GuiControlType::sMembers));
 			GuiControlType::sPrototypeList = Object::CreatePrototype(_T("Gui.List"), GuiControlType::sPrototype, GuiControlType::sMembersList, _countof(GuiControlType::sMembersList));
 			InputObject::sPrototype = Object::CreatePrototype(_T("InputHook"), Object::sPrototype, InputObject::sMembers, _countof(InputObject::sMembers));
-			
+
 			Object::sClass = Object::CreateClass(_T("Object"), Object::sClassPrototype, Object::sPrototype, static_cast<ObjectMethod>(&Object::New<Object>));
 			Object::sClassClass = Object::CreateClass(_T("Class"), Object::sClass, Object::sClassPrototype, static_cast<ObjectMethod>(&Object::New<Object>));
 			Array::sClass = Object::CreateClass(_T("Array"), Object::sClass, Array::sPrototype, static_cast<ObjectMethod>(&Array::New<Array>));
 			Map::sClass = Object::CreateClass(_T("Map"), Object::sClass, Map::sPrototype, static_cast<ObjectMethod>(&Map::New<Map>));
 
+
+
 			Closure::sPrototype = Object::CreatePrototype(_T("Closure"), Func::sPrototype);
 			BoundFunc::sPrototype = Object::CreatePrototype(_T("BoundFunc"), Func::sPrototype);
 			EnumBase::sPrototype = Object::CreatePrototype(_T("Enumerator"), Func::sPrototype);
+
 
 			BufferObject::sPrototype = Object::CreatePrototype(_T("Buffer"), Object::sPrototype, BufferObject::sMembers, _countof(BufferObject::sMembers));
 			ClipboardAll::sPrototype = Object::CreatePrototype(_T("ClipboardAll"), BufferObject::sPrototype);
@@ -650,15 +647,6 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 		// Set g_default now, reflecting any changes made to "g" above, in case AutoExecSection(), below,
 		// never returns, perhaps because it contains an infinite loop (intentional or not):
 		CopyMemory(&g_default, g, sizeof(global_struct));
-
-		// Use FindOrAdd vs Add for maintainability, although it shouldn't already exist:
-		if (!(g_ErrorLevel = g_script->FindOrAddVar(_T("ErrorLevel"))))
-		{
-			_endthreadex(CRITICAL_ERROR);
-			return CRITICAL_ERROR; // Error.  Above already displayed it for us.
-		}
-		// Initialize the var state to zero:
-		g_ErrorLevel->Assign(ERRORLEVEL_NONE);
 
 		//if (nameHinstanceP.istext)
 		//	GetCurrentDirectory(MAX_PATH, g_script->mFileDir);

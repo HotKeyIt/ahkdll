@@ -159,6 +159,7 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define WILL_EXIT _T("The program will exit.")
 #define UNSTABLE_WILL_EXIT _T("The program is now unstable and will exit.")
 #define OLD_STILL_IN_EFFECT _T("The script was not reloaded; the old version will remain in effect.")
+#define ERR_CONTINUE_THREAD_Q _T("Continue the current thread?")
 #define ERR_SCRIPT_NOT_FOUND _T("Script file not found.")
 #define ERR_ABORT_DELETE _T("__Delete will now return.")
 #define ERR_LINE_TOO_LONG _T("Line too long.")
@@ -166,6 +167,10 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_UNRECOGNIZED_ACTION _T("This line does not contain a recognized action.")
 #define ERR_NONEXISTENT_HOTKEY _T("Nonexistent hotkey.")
 #define ERR_NONEXISTENT_VARIANT _T("Nonexistent hotkey variant (IfWin).")
+#define ERR_INVALID_KEYNAME _T("Invalid key name.")
+#define ERR_UNSUPPORTED_PREFIX _T("Unsupported prefix key.")
+#define ERR_ALTTAB_MODLR _T("This AltTab hotkey must specify which key (L or R).")
+#define ERR_ALTTAB_ONEMOD _T("This AltTab hotkey must have exactly one modifier/prefix.")
 #define ERR_INVALID_SINGLELINE_HOT _T("Not valid for a single-line hotkey/hotstring.")
 #define ERR_NONEXISTENT_FUNCTION _T("Call to nonexistent function.")
 #define ERR_UNRECOGNIZED_DIRECTIVE _T("Unknown directive.")
@@ -242,7 +247,7 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_INVALID_LINE_IN_PROPERTY_DEF _T("Not a valid property getter/setter.")
 #define ERR_INVALID_GUI_NAME _T("Invalid Gui name.")
 #define ERR_INVALID_OPTION _T("Invalid option.") // Generic message used by the Gui system.
-#define ERR_GUI_NOT_FOR_THIS_TYPE _T("Not supported for this control type.")
+#define ERR_GUI_NOT_FOR_THIS_TYPE _T("Not supported for this control type.") // Used by GuiControl object and Control functions.
 #define ERR_INVALID_STRUCT _T("Invalid structure definition.")
 #define ERR_INVALID_STRUCT_IN_FUNC _T("Variable was not found in function.")
 #define ERR_INVALID_STRUCT_BIT_POINTER _T("Bit field must not be a pointer")
@@ -263,10 +268,13 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_UNKNOWN_METHOD _T("Unknown method.")
 #define ERR_PROPERTY_READONLY _T("Property is read-only.")
 #define ERR_NO_KEY _T("Key not found.")
+#define ERR_NO_WINDOW _T("Target window not found.")
+#define ERR_NO_CONTROL _T("Target control not found.")
 #define ERR_NO_GUI _T("No default GUI.")
 #define ERR_NO_STATUSBAR _T("No StatusBar.")
 #define ERR_NO_LISTVIEW _T("No ListView.")
 #define ERR_NO_TREEVIEW _T("No TreeView.")
+#define ERR_WINDOW_HAS_NO_MENU _T("Non-existent or unsupported menu.")
 #define ERR_PCRE_EXEC _T("PCRE execution error.")
 #define ERR_INVALID_ARG_TYPE _T("Invalid arg type.")
 #define ERR_INVALID_RETURN_TYPE _T("Invalid return type.")
@@ -274,8 +282,13 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_INVALID_ENCODING _T("Invalid Encoding.")
 #define ERR_INVALID_USAGE _T("Invalid usage.")
 #define ERR_INVALID_BASE _T("Invalid base.")
-#define ERR_INTERNAL_CALL _T("An internal function call failed.")
+#define ERR_INTERNAL_CALL _T("An internal function call failed.") // Win32 function failed.  Eventually an error message should be generated based on GetLastError().
+#define ERR_FAILED _T("Failed") // A function failed to achieve its primary purpose for unspecified reason.  Equivalent to v1 throwing 1 (ErrorLevel).
 #define ERR_STRING_NOT_TERMINATED _T("String not null-terminated.")
+#define ERR_SOUND_DEVICE _T("Device not found")
+#define ERR_SOUND_COMPONENT _T("Component not found")
+#define ERR_SOUND_CONTROLTYPE _T("Component doesn't support this control type")
+#define ERR_TIMEOUT _T("Timeout")
 #define WARNING_USE_UNSET_VARIABLE _T("This variable has not been assigned a value.")
 #define WARNING_LOCAL_SAME_AS_GLOBAL _T("This local variable has the same name as a global variable.")
 #define WARNING_USE_ENV_VARIABLE _T("An environment variable is being accessed; see #NoEnv.")
@@ -301,17 +314,16 @@ struct InputBoxType
 {
 	LPTSTR title;
 	LPTSTR text;
+	LPTSTR default_string;
+	LPTSTR return_string;
 	int width;
 	int height;
 	int xpos;
 	int ypos;
 	TCHAR password_char;
 	bool set_password_char;
-	LPTSTR default_string;
 	DWORD timeout;
 	HWND hwnd;
-	HFONT font;
-	ResultToken *result_token;
 
 	ResultType UpdateResult(HWND hControl);
 };
@@ -450,6 +462,7 @@ __int64 pow_ll(__int64 base, __int64 exp); // integer power function
 #define _f_return(...)			_f__ret(aResultToken.Return(__VA_ARGS__))
 #define _o_return(...)			_o__ret(aResultToken.Return(__VA_ARGS__))
 #define _f_throw(...)			_f__ret(aResultToken.Error(__VA_ARGS__))
+#define _f_throw_win32(...)		return ((void)aResultToken.Win32Error(__VA_ARGS__))
 #define _o_throw(...)			_o__ret(aResultToken.Error(__VA_ARGS__))
 #define _f_return_FAIL			_f__ret(aResultToken.SetExitResult(FAIL))
 #define _o_return_FAIL			_o__ret(aResultToken.SetExitResult(FAIL))
@@ -1296,16 +1309,14 @@ public:
 	// Returns the matching WinShow mode, or SW_SHOWNORMAL if none.
 	// These are also the modes that AutoIt3 uses.
 	{
-		// For v1.0.19, this was made more permissive (the use of strcasestr vs. stricmp) to support
-		// the optional word UseErrorLevel inside this parameter:
 		if (!aBuf || !*aBuf) return SW_SHOWNORMAL;
-		if (tcscasestr(aBuf, _T("MIN"))) return SW_MINIMIZE;
-		if (tcscasestr(aBuf, _T("MAX"))) return SW_MAXIMIZE;
-		if (tcscasestr(aBuf, _T("HIDE"))) return SW_HIDE;
+		if (!_tcsicmp(aBuf, _T("MIN"))) return SW_MINIMIZE;
+		if (!_tcsicmp(aBuf, _T("MAX"))) return SW_MAXIMIZE;
+		if (!_tcsicmp(aBuf, _T("HIDE"))) return SW_HIDE;
 		return SW_SHOWNORMAL;
 	}
 
-	static int ConvertMouseButton(LPTSTR aBuf, bool aAllowWheel = true, bool aUseLogicalButton = false)
+	static int ConvertMouseButton(LPTSTR aBuf, bool aAllowWheel = true, bool aUseLogicalButton = true)
 	// Returns the matching VK, or zero if none.
 	{
 		if (!*aBuf || !_tcsicmp(aBuf, _T("LEFT")) || !_tcsicmp(aBuf, _T("L")))
@@ -1418,15 +1429,13 @@ public:
 	Line *PreparseError(LPTSTR aErrorText, LPTSTR aExtraInfo = _T(""));
 	// Call this LineError to avoid confusion with Script's error-displaying functions:
 	ResultType LineError(LPCTSTR aErrorText, ResultType aErrorType = FAIL, LPCTSTR aExtraInfo = _T(""));
-	static int FormatError(LPTSTR aBuf, int aBufSize, ResultType aErrorType, LPCTSTR aErrorText, LPCTSTR aExtraInfo, Line *aLine, LPCTSTR aFooter);
 	IObject *CreateRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat = NULL, LPCTSTR aExtraInfo = _T(""));
 	ResultType ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat = NULL, LPCTSTR aExtraInfo = _T(""));
 	
-	ResultType SetErrorsOrThrow(bool aError, DWORD aLastErrorOverride = -1);
-	ResultType SetErrorLevelOrThrow() { return SetErrorLevelOrThrowBool(true); }
-	ResultType SetErrorLevelOrThrowBool(bool aError);        //
-	ResultType SetErrorLevelOrThrowStr(LPCTSTR aErrorValue); // Explicit names to avoid calling the wrong overload.
-	ResultType SetErrorLevelOrThrowInt(int aErrorValue);     //
+	ResultType SetLastErrorMaybeThrow(bool aError, DWORD aLastError = GetLastError());
+	ResultType Throw() { return ThrowIfTrue(true); }
+	ResultType ThrowIfTrue(bool aError);
+	ResultType ThrowIntIfNonzero(int aErrorValue);
 
 	Line(FileIndexType aFileIndex, LineNumberType aFileLineNumber, ActionTypeType aActionType
 		, ArgStruct aArg[], ArgCountType aArgc) // Constructor
@@ -2120,11 +2129,11 @@ public:
 	MsgMonitorStruct *Add(UINT aMsg, HWND aHwnd, IObject *aCallback, bool aAppend = TRUE);
 	MsgMonitorStruct *Add(UINT aMsg, HWND aHwnd, LPTSTR aMethodName, bool aAppend = TRUE);
 	void Delete(MsgMonitorStruct *aMonitor);
+	ResultType Call(ExprTokenType *aParamValue, int aParamCount, int aInitNewThreadIndex, __int64 *aRetVal = nullptr); // Used for OnExit and OnClipboardChange, but not OnMessage.
 //#ifdef _USRDLL
 	void RemoveAll();
 	void Free();
 //#endif
-	ResultType Call(ExprTokenType *aParamValue, int aParamCount, int aInitNewThreadIndex); // Used for OnExit and OnClipboardChange, but not OnMessage.
 	ResultType Call(ExprTokenType *aParamValue, int aParamCount, UINT aMsg, UCHAR aMsgType, GuiType *aGui, INT_PTR *aRetVal = NULL); // Used by GUI.
 
 	MsgMonitorStruct& operator[] (const int aIndex) { return mMonitor[aIndex]; }
@@ -3145,9 +3154,18 @@ public:
 	static ResultType SetSendMode(LPTSTR aValue);
 	static ResultType SetSendLevel(int aValue, LPTSTR aValueStr);
 
-	// Call this SciptError to avoid confusion with Line's error-displaying functions:
+	// Call this ScriptError to avoid confusion with Line's error-displaying functions.
+	// Use it for load time errors and non-continuable runtime errors:
 	ResultType ScriptError(LPCTSTR aErrorText, LPCTSTR aExtraInfo = _T("")); // , ResultType aErrorType = FAIL);
+	// CriticalError forces the program to exit after displaying an error.
+	// Bypasses try/catch but does allow OnError and OnExit callbacks.
 	ResultType CriticalError(LPCTSTR aErrorText, LPCTSTR aExtraInfo = _T(""));
+	// RuntimeError allows the user to choose to continue, in which case OK is returned instead of FAIL;
+	// therefore, caller must not rely on a FAIL result to abort the overall operation.
+	ResultType RuntimeError(LPCTSTR aErrorText, LPCTSTR aExtraInfo = _T(""), ResultType aErrorType = FAIL_OR_OK, Line *aLine = nullptr);
+	
+	ResultType ShowError(LPCTSTR aErrorText, ResultType aErrorType, LPCTSTR aExtraInfo, Line *aLine);
+	int FormatError(LPTSTR aBuf, int aBufSize, ResultType aErrorType, LPCTSTR aErrorText, LPCTSTR aExtraInfo, Line *aLine);
 
 	void ScriptWarning(WarnMode warnMode, LPCTSTR aWarningText, LPCTSTR aExtraInfo = _T(""), Line *line = NULL);
 	void WarnUninitializedVar(Var *var);
@@ -3159,16 +3177,14 @@ public:
 	void ConvertLocalToAlias(Var &aLocal, Var *aAliasFor, int aPos, Var **aVarList, int &aVarCount);
 	void CheckForClassOverwrite();
 
-	static ResultType UnhandledException(Line* aLine);
-	static ResultType SetErrorLevelOrThrow() { return SetErrorLevelOrThrowBool(true); }
-	static ResultType SetErrorLevelOrThrowBool(bool aError);
-	static ResultType SetErrorLevelOrThrowInt(int aErrorValue, LPCTSTR aWhat = NULL);
-	static ResultType SetErrorLevelOrThrowStr(LPCTSTR aErrorValue, LPCTSTR aWhat = NULL);
-	static ResultType ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat = NULL, LPCTSTR aExtraInfo = _T(""));
-	static ResultType ThrowWin32Exception(DWORD aError);
+	ResultType ThrowIfTrue(bool aError);
+	ResultType ThrowIntIfNonzero(int aErrorValue, LPCTSTR aWhat = NULL);
+	ResultType ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat, LPCTSTR aExtraInfo, Line *aLine, ResultType aErrorType);
+	ResultType ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat = nullptr, LPCTSTR aExtraInfo = _T(""));
+	ResultType Win32Error(DWORD aError = GetLastError());
+	
+	ResultType UnhandledException(Line* aLine, ResultType aErrorType = FAIL);
 	static void FreeExceptionToken(ResultToken*& aToken);
-	static void SetErrorLevels(bool aError, DWORD aLastErrorOverride = -1);
-	static void SetErrorLevelsAndClose(HANDLE aHandle, bool aError, DWORD aLastErrorOverride = -1);
 
 
 	#define SOUNDPLAY_ALIAS _T("AHK_PlayMe")  // Used by destructor and SoundPlay().
@@ -3363,7 +3379,7 @@ BIF_DECL(BIF_IsByRef);
 BIF_DECL(BIF_IsSet);
 BIF_DECL(BIF_GetKeyState);
 BIF_DECL(BIF_GetKeyName);
-BIF_DECL(BIF_VarSetCapacity);
+BIF_DECL(BIF_VarSetStrCapacity);
 BIF_DECL(BIF_FileExist);
 BIF_DECL(BIF_WinExistActive);
 BIF_DECL(BIF_Round);
@@ -3397,8 +3413,6 @@ BIF_DECL(BIF_ClipboardAll);
 BIF_DECL(BIF_CallbackCreate);
 BIF_DECL(BIF_CallbackFree);
 #endif
-
-BIF_DECL(BIF_Input);
 
 BIF_DECL(BIF_Menu);
 BIF_DECL(BIF_TraySetIcon);
@@ -3495,6 +3509,7 @@ BIF_DECL(BIF_FileGetTime);
 BIF_DECL(BIF_FileGetVersion);
 BIF_DECL(BIF_FileRead);
 BIF_DECL(BIF_FileSelect);
+BIF_DECL(BIF_GroupActivate);
 BIF_DECL(BIF_ImageSearch);
 BIF_DECL(BIF_IniRead);
 BIF_DECL(BIF_PixelGetColor);
@@ -3551,7 +3566,7 @@ BOOL TokensAreEqual(ExprTokenType &left, ExprTokenType &right);
 LPTSTR TokenTypeString(ExprTokenType &aToken);
 
 LPTSTR RegExMatch(LPTSTR aHaystack, LPTSTR aNeedleRegEx);
-void SetWorkingDir(LPTSTR aNewDir, bool aSetErrorLevel = true);
+ResultType SetWorkingDir(LPTSTR aNewDir);
 void UpdateWorkingDir(LPTSTR aNewDir = NULL);
 LPTSTR GetWorkingDir();
 int ConvertJoy(LPTSTR aBuf, int *aJoystickID = NULL, bool aAllowOnlyButtons = false);
@@ -3564,9 +3579,7 @@ ResultType DetermineTargetControl(HWND &aControl, HWND &aWindow, ResultToken &aR
 #define DETERMINE_TARGET_CONTROL(param_offset) \
 	HWND target_window, control_window; \
 	if (!DetermineTargetControl(control_window, target_window, aResultToken, aParam + param_offset, aParamCount - param_offset)) \
-		return; \
-	if (!target_window || !control_window) \
-		goto error
+		return;
 
 LPTSTR GetExitReasonString(ExitReasons aExitReason);
 
@@ -3582,6 +3595,7 @@ ResultType GetObjectPtrProperty(IObject *aObject, LPTSTR aPropName, UINT_PTR &aP
 ResultType GetObjectIntProperty(IObject *aObject, LPTSTR aPropName, __int64 &aValue, ResultToken &aResultToken, bool aOptional = false);
 void GetBufferObjectPtr(ResultToken &aResultToken, IObject *obj, size_t &aPtr, size_t &aSize);
 void GetBufferObjectPtr(ResultToken &aResultToken, IObject *obj, size_t &aPtr);
+
 
 #ifndef _USRDLL
 VOID CALLBACK ThreadExitApp(ULONG_PTR dwParam);

@@ -248,12 +248,11 @@ LPTSTR SystemTimeToYYYYMMDD(LPTSTR aBuf, SYSTEMTIME &aTime)
 
 
 
-__int64 YYYYMMDDSecondsUntil(LPTSTR aYYYYMMDDStart, LPTSTR aYYYYMMDDEnd, bool &aFailed)
+__int64 YYYYMMDDSecondsUntil(LPTSTR aYYYYMMDDStart, LPTSTR aYYYYMMDDEnd, LPTSTR &aFailed)
 // Returns the number of seconds from aYYYYMMDDStart until aYYYYMMDDEnd.
 // If aYYYYMMDDStart is blank, the current time will be used in its place.
 {
-	aFailed = true;  // Set default for output parameter, in case of early return.
-	if (!aYYYYMMDDStart || !aYYYYMMDDEnd) return 0;
+	ASSERT(aYYYYMMDDStart && aYYYYMMDDEnd);
 
 	FILETIME ftStart, ftEnd, ftNowUTC;
 
@@ -261,7 +260,7 @@ __int64 YYYYMMDDSecondsUntil(LPTSTR aYYYYMMDDStart, LPTSTR aYYYYMMDDEnd, bool &a
 	{
 		if (!YYYYMMDDToFileTime(aYYYYMMDDStart, ftStart))
 		{
-			g_script->ScriptError(ERR_PARAM2_INVALID);
+			aFailed = ERR_PARAM2_INVALID;
 			return 0;
 		}
 	}
@@ -274,7 +273,7 @@ __int64 YYYYMMDDSecondsUntil(LPTSTR aYYYYMMDDStart, LPTSTR aYYYYMMDDEnd, bool &a
 	{
 		if (!YYYYMMDDToFileTime(aYYYYMMDDEnd, ftEnd))
 		{
-			g_script->ScriptError(ERR_PARAM1_INVALID);
+			aFailed = ERR_PARAM1_INVALID;
 			return 0;
 		}
 	}
@@ -283,7 +282,7 @@ __int64 YYYYMMDDSecondsUntil(LPTSTR aYYYYMMDDStart, LPTSTR aYYYYMMDDEnd, bool &a
 		GetSystemTimeAsFileTime(&ftNowUTC);
 		FileTimeToLocalFileTime(&ftNowUTC, &ftEnd);  // Convert UTC to local time.
 	}
-	aFailed = false;  // Indicate success.
+	aFailed = nullptr;  // Indicate success.
 	return FileTimeSecondsUntil(&ftStart, &ftEnd);
 }
 
@@ -2003,7 +2002,7 @@ LPVOID AllocInterProcMem(HANDLE &aHandle, DWORD aSize, HWND aHwnd, DWORD aExtraA
 	// Even if the PID is our own, open the process anyway to simplify the code. After all, it would be
 	// pretty silly for a script to access its own ListViews via this method.
 	if (   !(aHandle = OpenProcess(PROCESS_VM_OPERATION | PROCESS_VM_READ | PROCESS_VM_WRITE | aExtraAccess, FALSE, pid))   )
-		return NULL; // Let ErrorLevel tell the story.
+		return NULL;
 	// Reason for using VirtualAllocEx(): When sending LVITEM structures to a control in a remote process, the
 	// structure and its pszText buffer must both be memory inside the remote process rather than in our own.
 	mem = VirtualAllocEx(aHandle, NULL, aSize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
@@ -3689,9 +3688,9 @@ LONG WINAPI DisableHooksOnException(PEXCEPTION_POINTERS pExceptionPtrs)
 			AddRemoveHooks(0); // Disable all hooks to avoid system/mouse freeze
 			TCHAR aException[sizeof(TCHAR) * 3 * MAX_PATH];
 			if (g->ExcptDeref && *g->ExcptDeref->marker)
-				_stprintf(aException, _T("Error: %s EXCEPTION_ACCESS_VIOLATION\n\nMouse and Keyboard hooks have been disabled.\n\n  -  Press yes to exit thread and continue execution.\n  -  Press no to continue thread (debug).\n  -  Press cancel to exit application.\n\nException was caused in thread id: %d\nLine: %d\nSpecifically: %.260s\nLineFile: %.260s"), pExceptionPtrs->ExceptionRecord->ExceptionFlags == EXCEPTION_NONCONTINUABLE ? _T("NONCONTINUABLE") : _T("CONTINUABLE"), g_ThreadID, g_script->mCurrLine->mLineNumber, g->ExcptDeref->marker, Line::sSourceFile[g_script->mCurrLine->mFileIndex]);
+				_stprintf(aException, _T("Error: %s EXCEPTION_ACCESS_VIOLATION\n\nMouse and Keyboard hooks have been disabled.\n\n  -  Press yes to exit thread and continue execution.\n  -  Press no to continue thread (debug).\n  -  Press cancel to exit application.\n\nException was caused in thread id: %d\nLine: %d\nSpecifically: %.260s\nLineFile: %.260s\nLine first arg: %.260s"), pExceptionPtrs->ExceptionRecord->ExceptionFlags == EXCEPTION_NONCONTINUABLE ? _T("NONCONTINUABLE") : _T("CONTINUABLE"), g_ThreadID, g_script->mCurrLine->mLineNumber, g->ExcptDeref->marker, Line::sSourceFile[g_script->mCurrLine->mFileIndex], g_script->mCurrLine->mArgc ? g_script->mCurrLine->mArg->text : _T(""));
 			else
-				_stprintf(aException, _T("Error: %s EXCEPTION_ACCESS_VIOLATION\n\nMouse and Keyboard hooks have been disabled.\n\n  -  Press yes to exit thread and continue execution.\n  -  Press no to continue thread (debug).\n  -  Press cancel to exit application.\n\nException was caused in thread id: %d\nLine: %d\nLineFile: %.260s"), pExceptionPtrs->ExceptionRecord->ExceptionFlags == EXCEPTION_NONCONTINUABLE ? _T("NONCONTINUABLE") : _T("CONTINUABLE"), g_ThreadID, g_script->mCurrLine->mLineNumber, Line::sSourceFile[g_script->mCurrLine->mFileIndex]);
+				_stprintf(aException, _T("Error: %s EXCEPTION_ACCESS_VIOLATION\n\nMouse and Keyboard hooks have been disabled.\n\n  -  Press yes to exit thread and continue execution.\n  -  Press no to continue thread (debug).\n  -  Press cancel to exit application.\n\nException was caused in thread id: %d\nLine: %d\nLineFile: %.260s\nLine first arg: %.260s"), pExceptionPtrs->ExceptionRecord->ExceptionFlags == EXCEPTION_NONCONTINUABLE ? _T("NONCONTINUABLE") : _T("CONTINUABLE"), g_ThreadID, g_script->mCurrLine->mLineNumber, Line::sSourceFile[g_script->mCurrLine->mFileIndex], g_script->mCurrLine->mArgc ? g_script->mCurrLine->mArg->text : _T(""));
 			int result = MessageBox(NULL, aException, T_AHK_NAME, MB_ICONERROR | MB_YESNOCANCEL | MB_DEFBUTTON3 | MB_TOPMOST);
 			if (result == IDNO)
 			{

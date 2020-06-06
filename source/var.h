@@ -26,11 +26,6 @@ EXTERN_CLIPBOARD;
 #define MAX_ALLOC_SIMPLE 64  // Do not decrease this much since it is used for the sizing of some built-in variables.
 #define SMALL_STRING_LENGTH (MAX_ALLOC_SIMPLE - 1)  // The largest string that can fit in the above.
 #define DEREF_BUF_EXPAND_INCREMENT (16 * 1024) // Reduced from 32 to 16 in v1.0.46.07 to reduce the memory utilization of deeply recursive UDFs.
-#define ERRORLEVEL_NONE		0
-#define ERRORLEVEL_ERROR	1
-#define ERRORLEVEL_ERROR2	2
-#define ERRORLEVEL_ERROR_STR _T("1")
-#define ErrorLevel_Backup(bkp) g_ErrorLevel->Backup(bkp), g_ErrorLevel->Assign(ERRORLEVEL_NONE)
 
 enum AllocMethod {ALLOC_NONE, ALLOC_SIMPLE, ALLOC_MALLOC};
 enum VarTypes
@@ -265,7 +260,7 @@ public:
 	// cuts down on code size due to not having to always check Capacity() and/or create more functions to
 	// protect from writing to read-only strings, which would hurt performance.
 	// The biggest offender of buffer overflow in sEmptyString is DllCall, which happens most frequently
-	// when a script forgets to call VarSetCapacity before passing a buffer to some function that writes a
+	// when a script forgets to call VarSetStrCapacity before passing a buffer to some function that writes a
 	// string to it.  There is now some code there that tries to detect when that happens.
 	_thread_local static TCHAR sEmptyString[1]; // See above.
 
@@ -945,8 +940,10 @@ public:
 
 	void *operator new(size_t aBytes){ return malloc(aBytes); }
 	void *operator new[](size_t aBytes) {return malloc(aBytes); }
+	void *operator new(size_t aBytes, void *p) {return p;}
 	void operator delete(void *aPtr) { free(aPtr); }
 	void operator delete[](void *aPtr) { free(aPtr); }
+	void operator delete(void *aPtr, void *) {}
 
 
 	__forceinline bool IsUninitializedNormalVar()

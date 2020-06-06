@@ -372,15 +372,6 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	// never returns, perhaps because it contains an infinite loop (intentional or not):
 	CopyMemory(&g_default, g, sizeof(global_struct));
 
-	// Use FindOrAdd vs Add for maintainability, although it shouldn't already exist:
-	if (   !(g_ErrorLevel = g_script->FindOrAddVar(_T("ErrorLevel")))   )
-	{
-		g_Reloading = false;
-		return CRITICAL_ERROR; // Error.  Above already displayed it for us.
-	}
-	// Initialize the var state to zero:
-	g_ErrorLevel->Assign(ERRORLEVEL_NONE);
-
 	//if (nameHinstanceP.istext)
 	//	GetCurrentDirectory(MAX_PATH, g_script->mFileDir);
 	// Could use CreateMutex() but that seems pointless because we have to discover the

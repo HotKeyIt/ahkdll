@@ -1457,8 +1457,6 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 	// Since above didn't return, the launch of the new thread is now considered unavoidable.
 
 	// See MsgSleep() for comments about the following section.
-	VarBkp ErrorLevel_saved;
-	g_ErrorLevel->Backup(ErrorLevel_saved); // Back up the current ErrorLevel for later restoration.
 	InitNewThread(0, false, true);
 
 	//for (int aParamCount = 0;func.mParamCount > aParamCount && aFuncAndToken->mParamCount > aParamCount;aParamCount++)
@@ -1534,7 +1532,7 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 	}
 	else if (aFuncAndToken->result_to_return_dll)
 			*aFuncAndToken->result_to_return_dll = '\0';
-	ResumeUnderlyingThread(ErrorLevel_saved);
+	ResumeUnderlyingThread();
 	return;
 }
 
@@ -1653,8 +1651,6 @@ void callFuncDllVariant(FuncAndToken *aFuncAndToken)
 	// Since above didn't return, the launch of the new thread is now considered unavoidable.
 
 	// See MsgSleep() for comments about the following section.
-	VarBkp ErrorLevel_saved;
-	g_ErrorLevel->Backup(ErrorLevel_saved);
 	InitNewThread(0, false, true, func.mJumpToLine->mActionType);
 	UDFCallInfo recurse(&func);
 	DEBUGGER_STACK_PUSH(&recurse)
@@ -1671,7 +1667,7 @@ void callFuncDllVariant(FuncAndToken *aFuncAndToken)
 
 	DEBUGGER_STACK_POP()
 	
-	ResumeUnderlyingThread(ErrorLevel_saved);
+	ResumeUnderlyingThread();
 	return;
 }
 #endif

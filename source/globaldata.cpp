@@ -18,7 +18,7 @@ GNU General Public License for more details.
 // These includes should probably a superset of those in globaldata.h:
 #include "hook.h" // For KeyHistoryItem and probably other things.
 #include "clipboard.h"  // For the global clipboard object
-#include "script.h" // For the global script object and g_ErrorLevel
+#include "script.h" // For the global script object
 #include "os_version.h" // For the global OS_Version object
 #include "MemoryModule.h"
 #include "Debugger.h"
@@ -164,10 +164,8 @@ static int GetScreenDPI()
 int g_ScreenDPI = GetScreenDPI();
 MenuTypeType g_MenuIsVisible = MENU_TYPE_NONE;
 _thread_local int g_nMessageBoxes = 0;
-_thread_local int g_nInputBoxes = 0;
 _thread_local int g_nFileDialogs = 0;
 _thread_local int g_nFolderDialogs = 0;
-_thread_local InputBoxType g_InputBox[MAX_INPUTBOXES];
 _thread_local GuiType *g_firstGui = NULL, *g_lastGui = NULL;
 _thread_local HWND g_hWndToolTip[MAX_TOOLTIPS] = { NULL };
 _thread_local MsgMonitorList *g_MsgMonitor;
@@ -206,7 +204,6 @@ TCHAR g_EndChars[HS_MAX_END_CHARS + 1] = _T("-()[]{}:;'\"/\\,.?!\n \t");  // Hot
 // i.e. word(synonym) and/or word/synonym
 
 // Global objects:
-_thread_local Var *g_ErrorLevel = NULL; // Allows us (in addition to the user) to set this var to indicate success/failure.
 _thread_local input_type *g_input = NULL;
 _thread_local Script *g_script;
 // This made global for performance reasons (determining size of clipboard data then
@@ -374,7 +371,6 @@ Action g_act[] =
 
 	// See above for why minimum is 1 vs. 2:
 	, {_T("GroupAdd"), 1, 5, false, NULL} // Group name, WinTitle, WinText, exclude-title/text
-	, {_T("GroupActivate"), 1, 2, false, NULL}
 	, {_T("GroupDeactivate"), 1, 2, false, NULL}
 	, {_T("GroupClose"), 1, 2, false, NULL}
 
@@ -550,8 +546,8 @@ key_to_vk_type g_key_to_vk[] =
 , {_T("F24"), VK_F24}
 
 // Mouse buttons:
-, {_T("LButton"), VK_LBUTTON}
-, {_T("RButton"), VK_RBUTTON}
+, {_T("LButton"), VK_LBUTTON_LOGICAL}
+, {_T("RButton"), VK_RBUTTON_LOGICAL}
 , {_T("MButton"), VK_MBUTTON}
 , {_T("XButton1"), VK_XBUTTON1}
 , {_T("XButton2"), VK_XBUTTON2}

@@ -116,10 +116,12 @@ GNU General Public License for more details.
 enum ResultType {FAIL = 0, OK, WARN = OK, CRITICAL_ERROR  // Some things might rely on OK==1 (i.e. boolean "true")
 	, CONDITION_TRUE, CONDITION_FALSE
 	, LOOP_BREAK, LOOP_CONTINUE
-	, EARLY_RETURN, EARLY_EXIT}; // EARLY_EXIT needs to be distinct from FAIL for ExitApp() and AutoExecSection().
+	, EARLY_RETURN, EARLY_EXIT // EARLY_EXIT needs to be distinct from FAIL for ExitApp() and AutoExecSection().
+	, FAIL_OR_OK // For LineError/RuntimeError, error is continuable.
+};
 
 enum ExcptModeType {EXCPTMODE_NONE = 0
-	//, EXCPTMODE_TRY = 1 // Currently unused: Try block present.  Affects SetErrorLevelOrThrow().
+	//, EXCPTMODE_TRY = 1 // Currently unused: Try block present.
 	, EXCPTMODE_CATCH = 2 // Exception will be suppressed or caught.
 	, EXCPTMODE_DELETE = 4 // Unhandled exceptions will display ERR_ABORT_DELETE vs. ERR_ABORT.
 	, EXCPTMODE_LINE_WORKAROUND = 8}; // See comments in BIF_PerformAction.
@@ -508,6 +510,10 @@ struct ResultToken : public ExprTokenType
 	ResultType Error(LPCTSTR aErrorText);
 	ResultType Error(LPCTSTR aErrorText, LPCTSTR aExtraInfo);
 	ResultType UnknownMemberError(ExprTokenType &aObject, int aFlags, LPCTSTR aMember);
+	ResultType Win32Error(DWORD aError = GetLastError());
+	
+	void SetLastErrorMaybeThrow(bool aError, DWORD aLastError = GetLastError());
+	void SetLastErrorCloseAndMaybeThrow(HANDLE aHandle, bool aError, DWORD aLastError = GetLastError());
 
 	BuiltInFunc *func; // For maintainability, this is separate from the ExprTokenType union.  Its main uses are func->mID and func->mOutputVars.
 
@@ -556,7 +562,7 @@ enum enum_act {
 , ACT_CRITICAL, ACT_THREAD
 , ACT_WINMINIMIZEALL, ACT_WINMINIMIZEALLUNDO
 // Keep rarely used actions near the bottom for parsing/performance reasons:
-, ACT_GROUPADD, ACT_GROUPACTIVATE, ACT_GROUPDEACTIVATE, ACT_GROUPCLOSE
+, ACT_GROUPADD, ACT_GROUPDEACTIVATE, ACT_GROUPCLOSE
 , ACT_SOUNDBEEP, ACT_SOUNDPLAY
 , ACT_FILEDELETE, ACT_FILERECYCLE, ACT_FILERECYCLEEMPTY
 , ACT_FILEINSTALL, ACT_FILECOPY, ACT_FILEMOVE, ACT_DIRCOPY, ACT_DIRMOVE
@@ -602,7 +608,6 @@ enum enum_act {
 #define AHK_TIMEOUT -2
 // And these to prevent mutual dependency problem between window.h and globaldata.h:
 #define MAX_MSGBOXES 7 // Probably best not to change this because it's used by OurTimers to set the timer IDs, which should probably be kept the same for backward compatibility.
-#define MAX_INPUTBOXES 4
 #define MAX_MSG_MONITORS 500
 
 // IMPORTANT: Before ever changing the below, note that it will impact the IDs of menu items created
@@ -915,7 +920,7 @@ inline void global_maximize_interruptibility(global_struct &g)
 inline void global_clear_state(global_struct &g)
 // Reset those values that represent the condition or state created by previously executed commands
 // but that shouldn't be retained for future threads (e.g. SetTitleMatchMode should be retained for
-// future threads if it occurs in the auto-execute section, but ErrorLevel shouldn't).
+// future threads if it occurs in the auto-execute section, but A_ThisFunc shouldn't).
 {
 	g.CurrentFunc = NULL;
 	g.CurrentFuncGosub = NULL;

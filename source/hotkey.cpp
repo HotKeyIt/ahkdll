@@ -1065,7 +1065,7 @@ void Hotkey::PerformInNewThreadMadeByCaller(HotkeyVariant &aVariant)
 
 
 
-ResultType Hotkey::IfWin(LPTSTR aIfWin, LPTSTR aWinTitle, LPTSTR aWinText)
+ResultType Hotkey::IfWin(LPTSTR aIfWin, LPTSTR aWinTitle, LPTSTR aWinText, ResultToken &aResultToken)
 {
 	HotCriterionType hot_criterion;
 	bool invert = !_tcsnicmp(aIfWin + 5, _T("Not"), 3);
@@ -1074,9 +1074,9 @@ ResultType Hotkey::IfWin(LPTSTR aIfWin, LPTSTR aWinTitle, LPTSTR aWinText)
 	else if (!_tcsicmp(aIfWin + (invert ? 8 : 5), _T("Exist")))
 		hot_criterion = invert ? HOT_IF_NOT_EXIST : HOT_IF_EXIST;
 	else // It starts with IfWin but isn't Active or Exist: Don't alter the current criterion.
-		return g_script->ScriptError(ERR_PARAM1_INVALID);
+		return aResultToken.Error(ERR_PARAM1_INVALID);
 	if (!SetHotkeyCriterion(hot_criterion, aWinTitle, aWinText)) // Currently, it only fails upon out-of-memory.
-		return FAIL;
+		return aResultToken.SetExitResult(FAIL);
 	return OK;
 }
 
@@ -1118,10 +1118,7 @@ ResultType Hotkey::IfExpr(LPTSTR aExpr, IObject *aExprObj, ResultToken &aResultT
 	{
 		HotkeyCriterion *cp = FindHotkeyIfExpr(aExpr);
 		if (!cp) // Expression not found.
-			// This should only occur if aLabelName contains a variable reference, since this parameter is
-			// validated at load time where possible.  Setting ErrorLevel might go unnoticed and would be
-			// inconsistent with other modes of this command (without UseErrorLevel), so throw an error.
-			return g_script->ScriptError(ERR_HOTKEY_IF_EXPR);
+			return aResultToken.Error(ERR_HOTKEY_IF_EXPR);
 		g->HotCriterion = cp;
 	}
 	return OK;
@@ -1130,28 +1127,22 @@ ResultType Hotkey::IfExpr(LPTSTR aExpr, IObject *aExprObj, ResultToken &aResultT
 
 
 ResultType Hotkey::Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOptions
-	, IObject *aJumpToLabel, HookActionType aHookAction)
+	, IObject *aJumpToLabel, HookActionType aHookAction, ResultToken &aResultToken)
 // Creates, updates, enables, or disables a hotkey dynamically (while the script is running).
 // Returns OK or FAIL.
 {
-	// For maintainability (and script readability), don't support "U" as a substitute for "UseErrorLevel",
-	// since future options might contain the letter U as a "parameter" that immediately follows an option-letter.
-	bool use_errorlevel = tcscasestr(aOptions, _T("UseErrorLevel"));
-	#define RETURN_HOTKEY_ERROR(level, msg, info) return use_errorlevel ? g_ErrorLevel->Assign(level) \
-		: g_script->ScriptError(msg, info)
+	// This macro was used to support UseErrorLevel in previous versions.
+	#define RETURN_HOTKEY_ERROR(level, msg, info) return aResultToken.Error(msg, info)
 
 	if (!aJumpToLabel && !aHookAction && *aLabelName)
 		RETURN_HOTKEY_ERROR(HOTKEY_EL_BADLABEL, ERR_PARAM2_INVALID, aLabelName);
 	// Caller has ensured that aJumpToLabel and aHookAction can't both be non-zero.  Furthermore,
 	// both can be zero/NULL only when the caller is updating an existing hotkey to have new options
 	// (i.e. it's retaining its current label).
-	if (aJumpToLabel) // Provided by caller or by name lookup above.
+	if (aJumpToLabel)
 	{
-		// Currently using Func* cast rather than ValidateFunctor() because of the need to
-		// support UseErrorLevel (which should be removed when the Error model is revised).
-		Func *func = LabelPtr(aJumpToLabel).ToFunc();
-		if (func && func->mMinParams > 0)
-			RETURN_HOTKEY_ERROR(HOTKEY_EL_BADLABEL, ERR_HOTKEY_FUNC_PARAMS, func->mName);
+		if (!ValidateFunctor(aJumpToLabel, 0, aResultToken))
+			return FAIL;
 	}
 
 	bool suffix_has_tilde, hook_is_mandatory;
@@ -1168,7 +1159,7 @@ ResultType Hotkey::Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOption
 		if (!hk)
 			RETURN_HOTKEY_ERROR(HOTKEY_EL_NOTEXIST, ERR_NONEXISTENT_HOTKEY, aHotkeyName);
 		if (!(variant || hk->mHookAction)) // mHookAction (alt-tab) hotkeys don't need a variant that matches the current criteria.
-			// To avoid ambiguity and also allow the script to use ErrorLevel to detect whether a variant
+			// To avoid ambiguity and also allow the script to use error handling to detect whether a variant
 			// already exists, it seems best to strictly require a matching variant rather than falling back
 			// onto some "default variant" such as the global variant (if any).
 			RETURN_HOTKEY_ERROR(HOTKEY_EL_NOTEXISTVARIANT, ERR_NONEXISTENT_VARIANT, aHotkeyName);
@@ -1190,15 +1181,15 @@ ResultType Hotkey::Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOption
 		if (!hk) // No existing hotkey of this name, so create a new hotkey.
 		{
 			if (aHookAction) // COMMAND (create hotkey): Hotkey, Name, AltTabAction
-				hk = AddHotkey(NULL, aHookAction, aHotkeyName, suffix_has_tilde, use_errorlevel);
+				hk = AddHotkey(NULL, aHookAction, aHotkeyName, suffix_has_tilde);
 			else // COMMAND (create hotkey): Hotkey, Name, LabelName [, Options]
 			{
 				if (!aJumpToLabel) // Caller is trying to set new aOptions for a nonexistent hotkey.
 					RETURN_HOTKEY_ERROR(HOTKEY_EL_NOTEXIST, ERR_NONEXISTENT_HOTKEY, aHotkeyName);
-				hk = AddHotkey(aJumpToLabel, 0, aHotkeyName, suffix_has_tilde, use_errorlevel);
+				hk = AddHotkey(aJumpToLabel, 0, aHotkeyName, suffix_has_tilde);
 			}
 			if (!hk)
-				return use_errorlevel ? OK : FAIL; // AddHotkey() already displayed the error (or set ErrorLevel).
+				return FAIL; // AddHotkey() already displayed the error.
 			variant = hk->mLastVariant; // Update for use with the options-parsing section further below.
 			update_all_hotkeys = true;
 			variant_was_just_created = true;
@@ -1349,13 +1340,6 @@ ResultType Hotkey::Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOption
 						variant->mMaxThreads = 1;
 				}
 				break;
-			case 'U':
-				// The actual presence of "UseErrorLevel" was already acted upon earlier, so nothing
-				// is done here other than skip over the string so that the letters inside it aren't
-				// misinterpreted as other option letters.
-				if (!_tcsicmp(cp, _T("UseErrorLevel")))
-					cp += 12; // Omit the rest of the letters in the string from further consideration.
-				break;
 			case 'I':
 				if (variant)
 				{
@@ -1382,20 +1366,12 @@ ResultType Hotkey::Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOption
 	if (update_all_hotkeys)
 		ManifestAllHotkeysHotstringsHooks(); // See its comments for why it's done in so many of the above situations.
 
-	// Somewhat debatable, but the following special ErrorLevels are set even if the above didn't
-	// need to re-manifest the hotkeys.
-	if (use_errorlevel)
-	{
-		g_ErrorLevel->Assign(ERRORLEVEL_NONE); // Set default, possibly to be overridden below.
-		if (hk->mType == HK_NORMAL && !hk->mIsRegistered && (!g_IsSuspended || hk->IsExemptFromSuspend()) && !hk->IsCompletelyDisabled())
-			g_ErrorLevel->Assign(HOTKEY_EL_NOREG); // Generally doesn't happen because it should have reverted to hook when register failed.
-	}
 	return OK;
 }
 
 
 
-Hotkey *Hotkey::AddHotkey(IObject *aJumpToLabel, HookActionType aHookAction, LPTSTR aName, bool aSuffixHasTilde, bool aUseErrorLevel)
+Hotkey *Hotkey::AddHotkey(IObject *aJumpToLabel, HookActionType aHookAction, LPTSTR aName, bool aSuffixHasTilde)
 // Caller provides aJumpToLabel rather than a Line* because at the time a hotkey or hotstring
 // is created, the label's destination line is not yet known.  So the label is used a placeholder.
 // Caller must ensure that either aJumpToLabel or aName is not NULL.
@@ -1406,17 +1382,15 @@ Hotkey *Hotkey::AddHotkey(IObject *aJumpToLabel, HookActionType aHookAction, LPT
 // The caller is responsible for calling ManifestAllHotkeysHotstringsHooks(), if appropriate.
 {
 	if (   (shkMax <= sNextID && !HookAdjustMaxHotkeys(shk, shkMax, shkMax ? shkMax * 2 : INITIAL_MAX_HOTKEYS)) // Allocate or expand shk if needed.
-		|| !(shk[sNextID] = new Hotkey(sNextID, aJumpToLabel, aHookAction, aName, aSuffixHasTilde, aUseErrorLevel))   )
+		|| !(shk[sNextID] = new Hotkey(sNextID, aJumpToLabel, aHookAction, aName, aSuffixHasTilde))   )
 	{
-		if (aUseErrorLevel)
-			g_ErrorLevel->Assign(HOTKEY_EL_MEM);
 		g_script->ScriptError(ERR_OUTOFMEM);
 		return NULL;
 	}
 	if (!shk[sNextID]->mConstructedOK)
 	{
 		delete shk[sNextID];  // SimpleHeap allows deletion of most recently added item.
-		return NULL;  // The constructor already displayed the error (or updated ErrorLevel).
+		return NULL;  // The constructor already displayed the error.
 	}
 	++sNextID;
 	return shk[sNextID - 1]; // Indicate success by returning the new hotkey.
@@ -1425,7 +1399,7 @@ Hotkey *Hotkey::AddHotkey(IObject *aJumpToLabel, HookActionType aHookAction, LPT
 
 
 Hotkey::Hotkey(HotkeyIDType aID, IObject *aJumpToLabel, HookActionType aHookAction, LPTSTR aName
-	, bool aSuffixHasTilde, bool aUseErrorLevel)
+	, bool aSuffixHasTilde)
 // Constructor.
 // Caller provides aJumpToLabel rather than a Line* because at the time a hotkey or hotstring
 // is created, the label's destination line is not yet known.  So the label is used a placeholder.
@@ -1460,15 +1434,12 @@ Hotkey::Hotkey(HotkeyIDType aID, IObject *aJumpToLabel, HookActionType aHookActi
 	{
 		// This will actually cause the script to terminate if this hotkey is a static (load-time)
 		// hotkey.  In the future, some other behavior is probably better:
-		if (aUseErrorLevel)
-			g_ErrorLevel->Assign(HOTKEY_EL_MAXCOUNT);
-		else
-			MsgBox(_T("Max hotkeys."));  // Brief msg since so rare.
+		g_script->ScriptError(_T("Max hotkeys."));  // Brief msg since so rare.
 		return;
 	}
 
 	LPTSTR hotkey_name = aName;
-	if (!TextInterpret(hotkey_name, this, aUseErrorLevel)) // The called function already displayed the error.
+	if (!TextInterpret(hotkey_name, this)) // The called function already displayed the error.
 		return;
 
 	if (mType != HK_JOYSTICK) // Perform modifier adjustment and other activities that don't apply to joysticks.
@@ -1495,22 +1466,13 @@ Hotkey::Hotkey(HotkeyIDType aID, IObject *aJumpToLabel, HookActionType aHookActi
 		if (   (mHookAction == HOTKEY_ID_ALT_TAB || mHookAction == HOTKEY_ID_ALT_TAB_SHIFT)
 			&& !mModifierVK && !mModifierSC   )
 		{
-			TCHAR error_text[512];
 			if (mModifiers)
 			{
-				if (aUseErrorLevel)
-					g_ErrorLevel->Assign(HOTKEY_EL_ALTTAB);
-				else
-				{
-					// Neutral modifier has been specified.  Future enhancement: improve this
-					// to try to guess which key, left or right, should be used based on the
-					// location of the suffix key on the keyboard.
-					sntprintf(error_text, _countof(error_text), _T("The AltTab hotkey \"%s\" must specify which key (L or R)."), hotkey_name);
-					if (g_script->mIsReadyToExecute) // Dynamically registered via the Hotkey command.
-						g_script->ScriptError(error_text);
-					else
-						MsgBox(error_text);
-				}
+				// Neutral modifier has been specified.  Future enhancement: improve this
+				// to try to guess which key, left or right, should be used based on the
+				// location of the suffix key on the keyboard.  Lexikos: Better not do that
+				// since a wrong guess will leave the user wondering why it doesn't work.
+				g_script->ScriptError(ERR_ALTTAB_MODLR, hotkey_name);
 				return;  // Key is invalid so don't give it an ID.
 			}
 			if (mModifiersLR)
@@ -1529,17 +1491,7 @@ Hotkey::Hotkey(HotkeyIDType aID, IObject *aJumpToLabel, HookActionType aHookActi
 				case MOD_LWIN: mModifierVK = VK_LWIN; break;
 				case MOD_RWIN: mModifierVK = VK_RWIN; break;
 				default:
-					if (aUseErrorLevel)
-						g_ErrorLevel->Assign(HOTKEY_EL_ALTTAB);
-					else
-					{
-						sntprintf(error_text, _countof(error_text), _T("The AltTab hotkey \"%s\" must have exactly ")
-							_T("one modifier/prefix."), hotkey_name);
-						if (g_script->mIsReadyToExecute) // Dynamically registered via the Hotkey command.
-							g_script->ScriptError(error_text);
-						else
-							MsgBox(error_text);
-					}
+					g_script->ScriptError(ERR_ALTTAB_ONEMOD, hotkey_name);
 					return;  // Key is invalid so don't give it an ID.
 				}
 				// Since above didn't return:
@@ -1658,10 +1610,7 @@ Hotkey::Hotkey(HotkeyIDType aID, IObject *aJumpToLabel, HookActionType aHookActi
 	if (   !(mName = aName ? g_SimpleHeap->Malloc(aName) : hotkey_name)
 		|| !(AddVariant(aJumpToLabel, aSuffixHasTilde))   ) // Too rare to worry about freeing the other if only one fails.
 	{
-		if (aUseErrorLevel)
-			g_ErrorLevel->Assign(HOTKEY_EL_MEM);
-		else
-			g_script->ScriptError(ERR_OUTOFMEM);
+		g_script->ScriptError(ERR_OUTOFMEM);
 		return;
 	}
 	// Above has ensured that both mFirstVariant and mLastVariant are non-NULL, so callers can rely on that.
@@ -1753,7 +1702,7 @@ HotkeyVariant *Hotkey::AddVariant(IObject *aJumpToLabel, bool aSuffixHasTilde)
 
 
 
-ResultType Hotkey::TextInterpret(LPTSTR aName, Hotkey *aThisHotkey, bool aUseErrorLevel)
+ResultType Hotkey::TextInterpret(LPTSTR aName, Hotkey *aThisHotkey)
 // Returns OK or FAIL.  This function is static and aThisHotkey is passed in as a parameter
 // so that aThisHotkey can be NULL. NULL signals that aName should be checked as a valid
 // hotkey only rather than populating the members of the new hotkey aThisHotkey. This function
@@ -1766,7 +1715,7 @@ ResultType Hotkey::TextInterpret(LPTSTR aName, Hotkey *aThisHotkey, bool aUseErr
 	LPTSTR term1 = hotkey_name;
 	LPTSTR term2 = _tcsstr(term1, COMPOSITE_DELIMITER);
 	if (!term2)
-		return TextToKey(TextToModifiers(term1, aThisHotkey), aName, false, aThisHotkey, aUseErrorLevel);
+		return TextToKey(TextToModifiers(term1, aThisHotkey), aName, false, aThisHotkey);
 	if (*term1 == '~')
 	{
 		if (aThisHotkey)
@@ -1780,7 +1729,7 @@ ResultType Hotkey::TextInterpret(LPTSTR aName, Hotkey *aThisHotkey, bool aUseErr
 	// Temporarily terminate the string so that the 2nd term is hidden:
 	TCHAR ctemp = *end_of_term1;
 	*end_of_term1 = '\0';
-	ResultType result = TextToKey(term1, aName, true, aThisHotkey, aUseErrorLevel);
+	ResultType result = TextToKey(term1, aName, true, aThisHotkey);
 	*end_of_term1 = ctemp;  // Undo the termination.
 	if (result != OK)
 		return result;
@@ -1794,7 +1743,7 @@ ResultType Hotkey::TextInterpret(LPTSTR aName, Hotkey *aThisHotkey, bool aUseErr
 	//term2 = TextToModifiers(term2, aThisHotkey);
 	if (*term2 == '~')
 		++term2; // Some other stage handles this modifier, so just ignore it here.
-	return TextToKey(term2, aName, false, aThisHotkey, aUseErrorLevel);
+	return TextToKey(term2, aName, false, aThisHotkey);
 }
 
 
@@ -1973,9 +1922,9 @@ break_loop:
 
 
 
-ResultType Hotkey::TextToKey(LPTSTR aText, LPTSTR aHotkeyName, bool aIsModifier, Hotkey *aThisHotkey, bool aUseErrorLevel)
-// This function and those it calls should avoid showing any error dialogs when caller passes aUseErrorLevel==true or
-// NULL for aThisHotkey (however, there is at least one exception explained in comments below where it occurs).
+ResultType Hotkey::TextToKey(LPTSTR aText, LPTSTR aHotkeyName, bool aIsModifier, Hotkey *aThisHotkey)
+// This function and those it calls should avoid showing any error dialogs when caller passes NULL for
+// aThisHotkey (however, there is at least one exception explained in comments below where it occurs).
 // Caller must ensure that aText is a modifiable string.
 // Takes input param aText to support receiving only a subset of mName.
 // In private members, sets the values of vk/sc or ModifierVK/ModifierSC depending on aIsModifier.
@@ -1983,7 +1932,6 @@ ResultType Hotkey::TextToKey(LPTSTR aText, LPTSTR aHotkeyName, bool aIsModifier,
 // should never reset modifiers after calling this.
 // Returns OK or FAIL.
 {
-	TCHAR error_text[512];
 	vk_type temp_vk; // No need to initialize this one.
 	sc_type temp_sc = 0;
 	modLR_type modifiersLR = 0;
@@ -2012,18 +1960,12 @@ ResultType Hotkey::TextToKey(LPTSTR aText, LPTSTR aHotkeyName, bool aIsModifier,
 		{
 			if (IS_WHEEL_VK(temp_vk))
 			{
-				if (aUseErrorLevel)
-					g_ErrorLevel->Assign(HOTKEY_EL_UNSUPPORTED_PREFIX);
-				else
-				{
-					sntprintf(error_text, _countof(error_text), _T("\"%s\" is not allowed as a prefix key."), aText);
-					g_script->ScriptError(error_text, aHotkeyName);
-					// When aThisHotkey==NULL, return CONDITION_FALSE to indicate to our caller that it's
-					// an invalid hotkey and we've already shown the error message.  Unlike the old method,
-					// this method respects /ErrorStdOut and avoids the second, generic error message.
-					if (!aThisHotkey)
-						return CONDITION_FALSE;
-				}
+				g_script->ScriptError(ERR_UNSUPPORTED_PREFIX, aText);
+				// When aThisHotkey==NULL, return CONDITION_FALSE to indicate to our caller that it's
+				// an invalid hotkey and we've already shown the error message.  Unlike the old method,
+				// this method respects /ErrorStdOut and avoids the second, generic error message.
+				if (!aThisHotkey)
+					return CONDITION_FALSE;
 				return FAIL;
 			}
 		}
@@ -2045,14 +1987,6 @@ ResultType Hotkey::TextToKey(LPTSTR aText, LPTSTR aHotkeyName, bool aIsModifier,
 		if (   !(temp_sc = TextToSC(aText))   )
 			if (   !(temp_sc = (sc_type)ConvertJoy(aText, &joystick_id, true))   )  // Is there a joystick control/button?
 			{
-				if (aUseErrorLevel)
-				{
-					// Tempting to store the name of the invalid key in ErrorLevel, but because it might
-					// be really long, it seems best not to.  Another reason is that the keyname could
-					// conceivably be the same as one of the other/reserved ErrorLevel numbers.
-					g_ErrorLevel->Assign(HOTKEY_EL_INVALID_KEYNAME);
-					return FAIL;
-				}
 				if (!aText[1] && !g_script->mIsReadyToExecute)
 				{
 					// At load time, single-character key names are always considered valid but show a
@@ -2070,8 +2004,7 @@ ResultType Hotkey::TextToKey(LPTSTR aText, LPTSTR aHotkeyName, bool aIsModifier,
 					// would make loadtime's second call to create the hotkey always succeed. Also, it's
 					// more appropriate to say "key name" than "hotkey" in this message because it's only
 					// showing the one bad key name when it's a composite hotkey such as "Capslock & y".
-					sntprintf(error_text, _countof(error_text), _T("\"%s\" is not a valid key name."), aText);
-					g_script->ScriptError(error_text);
+					g_script->ScriptError(ERR_INVALID_KEYNAME, aText);
 				}
 				//else do not show an error in this case because the loader will attempt to interpret
 				// this line as a command.  If that too fails, it will show an "unrecognized action"

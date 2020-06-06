@@ -165,6 +165,7 @@ FuncEntry g_BIF[] =
 	BIFn(GetKeyVK, 1, 1, BIF_GetKeyName),
 	BIF1(GetMethod, 2, 2),
 	BIF1(Getvar, 1, 2),
+	BIF1(GroupActivate, 1, 2),
 	BIF1(GuiCreate, 0, 3),
 	BIF1(GuiCtrlFromHwnd, 1, 1),
 	BIF1(GuiFromHwnd, 1, 2),
@@ -178,9 +179,7 @@ FuncEntry g_BIF[] =
 	BIF1(IL_Destroy, 1, 1),
 	BIF1(ImageSearch, 7, 7, {1, 2}),
 	BIF1(IniRead, 1, 4),
-	BIFn(Input, 0, 3, BIF_Input),
 	BIF1(InputBox, 0, 4),
-	BIFn(InputEnd, 0, 0, BIF_Input),
 	BIF1(InputHook, 0, 3),
 	BIF1(InStr, 2, 5),
 	BIF1(Integer, 1, 1),
@@ -301,7 +300,7 @@ FuncEntry g_BIF[] =
 	BIF1(UnZipBuffer, 2, 5),
 	BIF1(UnZipRawMemory, 2, 4),
 	BIF1(UObject, 0, NA),
-	BIF1(VarSetCapacity, 1, 3, {1}), 
+	BIF1(VarSetStrCapacity, 1, 2, {1}), 
 	BIFn(WinActivate, 0, 4, BIF_WinActivate),
 	BIFn(WinActivateBottom, 0, 4, BIF_WinActivate),
 	BIFn(WinActive, 0, 4, BIF_WinExistActive),
@@ -1001,7 +1000,6 @@ Script::~Script() // Destructor.
 	mTempLine = NULL;
 
 	g_nMessageBoxes = 0;
-	g_nInputBoxes = 0;
 	g_nFileDialogs = 0;
 	g_nFolderDialogs = 0;
 	g_NoTrayIcon = false;
@@ -1048,7 +1046,6 @@ Script::~Script() // Destructor.
 	g_HSDetectWhenInsideWord = false;
 	g_HSDoReset = false;
 	g_HSResetUponMouseClick = true;
-	g_ErrorLevel = NULL; // Allows us (in addition to the user) to set this var to indicate success/failure.
 
 	g_ForceKeybdHook = false;
 	g_ForceNumLock = NEUTRAL;
@@ -1653,7 +1650,7 @@ ResultType Script::SetTrayIcon(LPTSTR aIconFile, int aIconNumber, ToggleValueTyp
 		if ( !(new_icon = (HICON)LoadPicture(aIconFile, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), image_type, aIconNumber, false, NULL, &icon_module)) )
 			DestroyIcon(new_icon_small);
 	if ( !new_icon )
-		return g_script->ScriptError(_T("Can't load icon."), aIconFile);
+		return g_script->RuntimeError(_T("Can't load icon."), aIconFile);
 
 	GuiType::DestroyIconsIfUnused(mCustomIcon, mCustomIconSmall); // This destroys it if non-NULL and it's not used by an GUI windows.
 
@@ -1797,15 +1794,8 @@ ResultType Script::AutoExecSection()
 	// the commands Critical and Thread), ensure that the very first g-item is always interruptible.
 	// This avoids having to treat the first g-item as special in various places.
 
-	// It seems best to set ErrorLevel to NONE after the auto-execute part of the script is done.
-	// However, it isn't set to NONE right before launching each new thread (e.g. hotkey subroutine)
-	// because it's more flexible that way (i.e. the user may want one hotkey subroutine to use the value
-	// of ErrorLevel set by another).  This reset was also done by LoadFromFile(), but it is done again
-	// here in case the auto-execute section changed it:
-	g_ErrorLevel->Assign(ERRORLEVEL_NONE);
 	if (g_MainThreadID != g_ThreadID && ExecUntil_result == EXIT_RELOAD)
 		return ExecUntil_result;
-
 	// BEFORE DOING THE BELOW, "g" and "g_default" should be set up properly in case there's an OnExit
 	// function (even non-persistent scripts can have one).
 	// See Script::IsPersistent() for a list of conditions that cause the program to continue running.
@@ -1977,8 +1967,6 @@ ResultType Script::ExitApp(ExitReasons aExitReason, int aExitCode)
 
 	// Next, save the current state of the globals so that they can be restored just prior
 	// to returning to our caller:
-	VarBkp ErrorLevel_saved;
-	ErrorLevel_Backup(ErrorLevel_saved); // Save caller's errorlevel.
 	InitNewThread(0, true, true); // Uninterruptibility is handled below. Since this special thread should always run, no checking of g_MaxThreadsTotal is done before calling this.
 
 	// Turn on uninterruptibility to forbid any hotkeys, timers, or user defined menu items
@@ -2023,7 +2011,7 @@ ResultType Script::ExitApp(ExitReasons aExitReason, int aExitCode)
 
 	// Otherwise:
 	g_AllowInterruption = g_AllowInterruption_prev;  // Restore original setting.
-	ResumeUnderlyingThread(ErrorLevel_saved);
+	ResumeUnderlyingThread();
 	// If this OnExit thread is the last script thread and the script is not persistent, the above
 	// call recurses into this function.  g_OnExitIsRunning == true prevents infinite recursion
 	// in that case.  It is now safe to reset:
@@ -3019,7 +3007,7 @@ ResultType Script::LoadIncludedFile(TextStream *fp)
 				cp = omit_trailing_whitespace(buf, hotkey_flag); // For maintainability.
 				orig_char = *cp;
 				*cp = '\0'; // Temporarily terminate.
-				hotkey_validity = Hotkey::TextInterpret(omit_leading_whitespace(buf), NULL, false); // Passing NULL calls it in validate-only mode.
+				hotkey_validity = Hotkey::TextInterpret(omit_leading_whitespace(buf), NULL); // Passing NULL calls it in validate-only mode.
 				switch (hotkey_validity)
 				{
 				case FAIL:
@@ -3221,7 +3209,7 @@ ResultType Script::LoadIncludedFile(TextStream *fp)
 					}
 				}
 				else // No parent hotkey yet, so create it.
-					if (   !(hk = Hotkey::AddHotkey(mLastLabel, hook_action, mLastLabel->mName, suffix_has_tilde, false))   )
+					if (   !(hk = Hotkey::AddHotkey(mLastLabel, hook_action, mLastLabel->mName, suffix_has_tilde))   )
 					{
 						if (hotkey_validity != CONDITION_TRUE)
 							return FAIL; // It already displayed the error.
@@ -5418,7 +5406,7 @@ ResultType Script::ParseAndAddLine(LPTSTR aLineText, int aBufSize, ActionTypeTyp
 
 				if (!(var = FindOrAddVar(item, var_name_length, declare_type)))
 					return FAIL; // It already displayed the error.
-				if (var->Type() != VAR_NORMAL || !tcslicmp(item, _T("ErrorLevel"), var_name_length)) // Shouldn't be declared either way (global or local).
+				if (var->Type() != VAR_NORMAL) // Shouldn't be declared either way (global or local).
 					return ScriptError(_T("Built-in variables must not be declared."), item);
 				if (declare_type == VAR_DECLARE_GLOBAL && g->CurrentFunc) // i.e. "global x" in a function, not "var x" (which is also VAR_DECLARE_GLOBAL).
 				{
@@ -8591,8 +8579,7 @@ size_t Line::ArgIndexLength(int aArgIndex)
 	{
 		Var &var = *sArgVar[aArgIndex]; // For performance and convenience.
 		if (   var.Type() == VAR_NORMAL  // This and below ordered for short-circuit performance based on types of input expected from caller.
-			&& !g_act[mActionType].CheckOverlap // Although the ones that have CheckOverlap == true are hereby omitted from the fast method, the nature of almost all of the highbit commands is such that their performance won't be measurably affected. See ArgMustBeDereferenced() for more info.
-			&& &var != g_ErrorLevel   ) // Mostly for maintainability because the following situation is very rare: If it's g_ErrorLevel, use the deref version instead because if g_ErrorLevel is an input variable in the caller's command, and the caller changes ErrorLevel (such as to set a default) prior to calling this function, the changed/new ErrorLevel will be used rather than its original value (which is usually undesirable).
+			&& !g_act[mActionType].CheckOverlap   ) // Although the ones that have CheckOverlap == true are hereby omitted from the fast method, the nature of almost all of the highbit commands is such that their performance won't be measurably affected. See ArgMustBeDereferenced() for more info.
 			return var.Length(); // Do it the fast way.
 	}
 	// Otherwise, length isn't known due to no variable, a built-in variable, or an environment variable.
@@ -8621,8 +8608,7 @@ __int64 Line::ArgIndexToInt64(int aArgIndex)
 	{
 		Var &var = *sArgVar[aArgIndex];
 		if (   var.Type() == VAR_NORMAL  // See ArgIndexLength() for comments about this line and below.
-			&& !g_act[mActionType].CheckOverlap
-			&& &var != g_ErrorLevel   )
+			&& !g_act[mActionType].CheckOverlap   )
 			return var.ToInt64();
 	}
 	// Otherwise:
@@ -8650,8 +8636,7 @@ double Line::ArgIndexToDouble(int aArgIndex)
 	{
 		Var &var = *sArgVar[aArgIndex];
 		if (   var.Type() == VAR_NORMAL  // See ArgIndexLength() for comments about this line and below.
-			&& !g_act[mActionType].CheckOverlap
-			&& &var != g_ErrorLevel   )
+			&& !g_act[mActionType].CheckOverlap   )
 			return var.ToDouble();
 	}
 	// Otherwise:
@@ -8994,7 +8979,7 @@ Var *Script::AddVar(LPTSTR aVarName, size_t aVarNameLength, int aInsertPos, int 
 	// section at loadtime displays an error for any attempt to explicitly declare built-in variables as
 	// either global or local.
 	VarEntry *builtin = GetBuiltInVar(var_name);
-	if (aIsLocal && (builtin || !_tcsicmp(var_name, _T("ErrorLevel")))) // Attempt to create built-in variable as local.
+	if (aIsLocal && builtin) // Attempt to create built-in variable as local.
 	{
 		if (aIsLocal)
 		{
@@ -9236,7 +9221,7 @@ WinGroup *Script::FindGroup(LPTSTR aGroupName, bool aCreateIfNotFound)
 	if (!*aGroupName)
 	{
 		if (aCreateIfNotFound)
-			// An error message must be shown in this case since or caller is about to
+			// An error message must be shown in this case since our caller is about to
 			// exit the current script thread (and we don't want it to happen silently).
 			ScriptError(_T("Blank group name."));
 		return NULL;
@@ -11599,7 +11584,7 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ResultToken *aResultToken, Line 
 	LPTSTR loop_field;
 
 	Line *jump_to_line; // Don't use *apJumpToLine because it might not exist.
-	Label *jump_to_label;  // For use with Gosub & Goto & GroupActivate.
+	Label *jump_to_label;  // For use with Gosub & Goto.
 	BOOL jumping_from_inside_function_to_outside;
 	ResultType if_condition, result;
 	LONG_OPERATION_INIT
@@ -12051,11 +12036,8 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ResultToken *aResultToken, Line 
 					tfile.Close();
 				}
 				else
-					// The open of a the input file failed.  So just set result to OK since setting the
-					// ErrorLevel isn't supported with loops (since that seems like it would be an overuse
-					// of ErrorLevel, perhaps changing its value too often when the user would want
-					// it saved -- in any case, changing that now might break existing scripts).
-					result = OK;
+						// The open of a the input file failed.
+						result = g_script->Win32Error();
 			}
 				break;
 			case ACT_LOOP_FILE:
@@ -12079,11 +12061,8 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ResultToken *aResultToken, Line 
 				}
 				else
 					// The open of a remote key failed (we know it's remote otherwise it should have
-					// failed earlier rather than here).  So just set result to OK since no ErrorLevel
-					// setting is supported with loops (since that seems like it would be an overuse
-					// of ErrorLevel, perhaps changing its value too often when the user would want
-					// it saved.  But in any case, changing that now might break existing scripts).
-					result = OK;
+					// failed earlier rather than here).
+					result = g_script->Win32Error();
 				break;
 			}
 
@@ -12581,8 +12560,7 @@ ResultType Line::EvaluateCondition()
 
 	int if_condition;
 
-	// The following is ordered for short-circuit performance. No need to check if it's g_ErrorLevel
-	// (like ArgMustBeDereferenced() does) because ACT_IF doesn't internally change ErrorLevel.
+	// The following is ordered for short-circuit performance.
 	// Also, RAW is safe because loadtime validation ensured there is at least 1 arg.
 	if_condition = (ARGVARRAW1 && !*ARG1 && ARGVARRAW1->Type() == VAR_NORMAL)
 		? VarToBOOL(*ARGVARRAW1) // 30% faster than having ExpandArgs() resolve ARG1 even when it's a naked variable.
@@ -12629,8 +12607,6 @@ ResultType HotkeyCriterion::Eval(LPTSTR aHotkeyName)
 	g_DeferMessagesForUnderlyingPump = true;
 
 	// See MsgSleep() for comments about the following section.
-	VarBkp ErrorLevel_saved;
-	ErrorLevel_Backup(ErrorLevel_saved);
 	// Critical seems to improve reliability, either because the thread completes faster (i.e. before the timeout) or because we check for messages less often.
 	InitNewThread(0, false, true, true);
 	ResultType result;
@@ -12673,7 +12649,7 @@ ResultType HotkeyCriterion::Eval(LPTSTR aHotkeyName)
 	g_script->mPriorHotkeyName = prior_hotkey_name[1];
 	g_script->mPriorHotkeyStartTime = prior_hotkey_time[1];
 
-		ResumeUnderlyingThread(ErrorLevel_saved);
+	ResumeUnderlyingThread();
 
 	g_DeferMessagesForUnderlyingPump = prev_defer_messages;
 
@@ -12866,7 +12842,7 @@ ResultType Line::PerformLoopFor(ResultToken *aResultToken, bool &aContinueMainLo
 		//}
 		//else:
 		// The expression didn't resolve to an object, so no enumerator is available.
-		return LineError(ERR_NO_OBJECT);
+		return LineError(ERR_NO_OBJECT, FAIL_OR_OK);
 	}
 
 	// Save these pointers since they will be overwritten during the loop:
@@ -13947,20 +13923,14 @@ ResultType Line::Perform()
 			return FAIL;  // It already displayed the error for us.
 		return group->AddWindow(ARG2, ARG3, ARG4, ARG5);
 
-	case ACT_GROUPACTIVATE:
-		if (   !(group = g_script->FindGroup(ARG1))   )
-			return LineError(ERR_PARAM1_INVALID, FAIL, ARG1);
-		// Note: This will take care of DoWinDelay if needed:
-		return SetErrorLevelOrThrowBool(!group->Activate(*ARG2 && !_tcsicmp(ARG2, _T("R"))));
-
 	case ACT_GROUPDEACTIVATE:
 		if (   !(group = g_script->FindGroup(ARG1))   )
-			return LineError(ERR_PARAM1_INVALID, FAIL, ARG1);
+			return LineError(ERR_PARAM1_INVALID, FAIL_OR_OK, ARG1);
 		return group->Deactivate(*ARG2 && !_tcsicmp(ARG2, _T("R")));  // Note: It will take care of DoWinDelay if needed.
 
 	case ACT_GROUPCLOSE:
 		if (   !(group = g_script->FindGroup(ARG1))   )
-			return LineError(ERR_PARAM1_INVALID, FAIL, ARG1);
+			return LineError(ERR_PARAM1_INVALID, FAIL_OR_OK, ARG1);
 		if (*ARG2 && !_tcsicmp(ARG2, _T("A")))
 			group->ActUponAll(FID_WinClose, 0);  // Note: It will take care of DoWinDelay if needed.
 		else
@@ -13969,9 +13939,9 @@ ResultType Line::Perform()
 
 	case ACT_SOUNDBEEP:
 		// For simplicity and support for future/greater capabilities, no range checking is done.
-		// It simply calls the function with the two DWORD values provided. It avoids setting
-		// ErrorLevel because failure is rare and also because a script might want play a beep
-		// right before displaying an error dialog that uses the previous value of ErrorLevel.
+		// It simply calls the function with the two DWORD values provided.  Error checking is
+		// omitted because failure is rare and also because a script might want play a beep
+		// right before displaying an error dialog.
 		Beep(*ARG1 ? ArgToUInt(1) : 523, *ARG2 ? ArgToUInt(2) : 150);
 		return OK;
 
@@ -13989,16 +13959,11 @@ ResultType Line::Perform()
 	case ACT_FILEINSTALL:
 		return FileInstall(THREE_ARGS);
 	case ACT_FILECOPY:
-	{
-		int error_count = Util_CopyFile(ARG1, ARG2, ArgToInt(3) == 1, false, g.LastError);
-		if (!error_count)
-			return g_ErrorLevel->Assign(ERRORLEVEL_NONE);
-		return SetErrorLevelOrThrowInt(error_count);
-	}
 	case ACT_FILEMOVE:
-		return SetErrorLevelOrThrowInt(Util_CopyFile(ARG1, ARG2, ArgToInt(3) == 1, true, g.LastError));
+		return ThrowIntIfNonzero(Util_CopyFile(ARG1, ARG2, ArgToInt(3) == 1
+			, mActionType == ACT_FILEMOVE, g.LastError));
 	case ACT_DIRCOPY:
-		return SetErrorLevelOrThrowBool(!Util_CopyDir(ARG1, ARG2, ArgToInt(3) == 1, false));
+		return ThrowIfTrue(!Util_CopyDir(ARG1, ARG2, ArgToInt(3) == 1, false));
 	case ACT_DIRMOVE:
 		if (ctoupper(*ARG3) == 'R')
 		{
@@ -14006,15 +13971,15 @@ ResultType Line::Perform()
 			// complete if the source directory is in use (due to being a working dir for a currently
 			// running process, or containing a file that is being written to).  In other words,
 			// the operation will be "all or none":
-			return SetErrorLevelOrThrowBool(!MoveFile(ARG1, ARG2));
+			return ThrowIfTrue(!MoveFile(ARG1, ARG2));
 		}
 		// Otherwise:
-		return SetErrorLevelOrThrowBool(!Util_CopyDir(ARG1, ARG2, ArgToInt(3), true));
+		return ThrowIfTrue(!Util_CopyDir(ARG1, ARG2, ArgToInt(3), true));
 
 	case ACT_DIRCREATE:
-		return SetErrorsOrThrow(!FileCreateDir(ARG1));
+		return SetLastErrorMaybeThrow(!FileCreateDir(ARG1));
 	case ACT_DIRDELETE:
-		return SetErrorLevelOrThrowBool(!*ARG1 // Consider an attempt to create or remove a blank dir to be an error.
+		return ThrowIfTrue(!*ARG1 // Consider an attempt to create or remove a blank dir to be an error.
 			|| !Util_RemoveDir(ARG1, ArgToInt(2) == 1)); // Relies on short-circuit evaluation.
 
 	case ACT_FILESETATTRIB:
@@ -14032,8 +13997,9 @@ ResultType Line::Perform()
 	}
 
 	case ACT_SETWORKINGDIR:
-		SetWorkingDir(ARG1);
-		return !g.ThrownToken ? OK : FAIL;
+		if (!SetWorkingDir(ARG1))
+			return LineError(ERR_PARAM1_INVALID, FAIL_OR_OK); // Hard to imagine any other cause.
+		return OK;
 	case ACT_FILEGETSHORTCUT:
 		return FileGetShortcut(ARG1);
 	case ACT_FILECREATESHORTCUT:
@@ -14059,7 +14025,7 @@ ResultType Line::Perform()
 				break;
 				// We know it's a variable because otherwise the loading validation would have caught it earlier:
 			case TOGGLE_INVALID:
-				return LineError(ERR_PARAM1_INVALID, FAIL, ARG1);
+				return LineError(ERR_PARAM1_INVALID, FAIL_OR_OK, ARG1);
 			}
 			if (*ARG2) // The user also specified a filename, so update the target filename.
 				KeyHistoryToFile(ARG2);
@@ -14166,7 +14132,7 @@ ResultType Line::Perform()
 				ToggleSuspendState();
 			break;
 		case TOGGLE_INVALID:
-			return LineError(ERR_PARAM1_INVALID, FAIL, ARG1);
+			return LineError(ERR_PARAM1_INVALID, FAIL_OR_OK, ARG1);
 		}
 		return OK;
 	case ACT_PAUSE:
@@ -14263,7 +14229,7 @@ ResultType Line::Perform()
 
 	case ACT_OUTPUTDEBUG:
 #ifndef CONFIG_DEBUGGER
-		OutputDebugString(ARG1); // It does not return a value for the purpose of setting ErrorLevel.
+		OutputDebugString(ARG1);
 #else
 		g_Debugger.OutputDebug(ARG1);
 #endif
@@ -14373,17 +14339,8 @@ BIF_DECL(BIF_PerformAction)
 	auto outer_excptmode = g->ExcptMode;
 	g->ExcptMode |= EXCPTMODE_LINE_WORKAROUND;
 
-	FileIndexType line_file = 0;
-	LineNumberType line_num = 0;
-	if (g_script->mCurrLine)
-	{
-		// These are used by CreateRuntimeException().
-		line_file = g_script->mCurrLine->mFileIndex;
-		line_num = g_script->mCurrLine->mLineNumber;
-	}
-
 	// Construct a Line containing the required context for ExpandArgs() and Perform().
-	Line line(line_file, line_num, act, arg, aParamCount);
+	Line line(0, 0, act, arg, aParamCount);
 
 	// Expand args BEFORE RESETTING ERRORLEVEL BELOW.
 	if (!line.ExpandArgs())
@@ -14393,44 +14350,18 @@ BIF_DECL(BIF_PerformAction)
 		return;
 	}
 
-	// Back up ErrorLevel and reset it so we can detect whether it is used.
-	VarBkp el_bkp;
-	g_ErrorLevel->Backup(el_bkp);
-	g_ErrorLevel->MarkInitialized();
-
 
 	// PERFORM THE ACTION
 	ResultType result = line.Perform();
 
 	if (result == OK) // Can be OK, FAIL or EARLY_EXIT.
-	{
-		Var *output_var = g_ErrorLevel;
-		if (output_var->HasContents()) // Commands which don't set ErrorLevel at all shouldn't return 1.
-		{
-			aResultToken.Return(!VarToBOOL(*output_var)); // Return TRUE for success, otherwise FALSE.
-		}
-		else
-		{
-			// Return the value of the output var if there is one, or ErrorLevel if there isn't:
-			if (!output_var->MoveMemToResultToken(aResultToken))
-				output_var->ToToken(aResultToken); // It's a number, object or Var::sEmptyString.
-		}
-	}
+		aResultToken.ReturnPtr(_T(""), 0);
 	else
-	{
 		// Pass back the result code (FAIL or EARLY_EXIT).
 		aResultToken.SetExitResult(result);
-	}
 
 
 	g->ExcptMode = outer_excptmode;
-
-	// If the command did not set ErrorLevel, restore it to its previous value.
-	if (!g_ErrorLevel->HasContents())
-	{
-		g_ErrorLevel->Free(VAR_ALWAYS_FREE); // For the unlikely case that memory was allocated but not used.
-		g_ErrorLevel->Restore(el_bkp);
-	}
 }
 
 
@@ -14787,7 +14718,7 @@ ResultType Line::ChangePauseState(ToggleValueType aChangeTo, bool aAlwaysOperate
 		break;
 	default: // TOGGLE_INVALID or some other disallowed value.
 		// We know it's a variable because otherwise the loading validation would have caught it earlier:
-		return LineError(ERR_PARAM1_INVALID, FAIL, ARG1);
+		return LineError(ERR_PARAM1_INVALID, FAIL_OR_OK, ARG1);
 	}
 
 	// Since above didn't return, pause should be turned on.
@@ -14844,6 +14775,22 @@ Line *Line::PreparseError(LPTSTR aErrorText, LPTSTR aExtraInfo)
 }
 
 
+#ifdef CONFIG_DEBUGGER
+LPCTSTR Debugger::WhatThrew()
+{
+	// We want 'What' to indicate the function/sub/operation that *threw* the exception.
+	// For BIFs, throwing is always explicit.  For a UDF, 'What' should only name it if
+	// it explicitly constructed the Exception object.  This provides an easy way for
+	// OnError and Catch to categorise errors.  No information is lost because File/Line
+	// can already be used locate the function/sub that was running.
+	// So only return a name when a BIF is raising an error:
+	if (mStack.mTop < mStack.mBottom || mStack.mTop->type != DbgStack::SE_BIF)
+		return _T("");
+	return mStack.mTop->func->mName;
+}
+#endif
+
+
 IObject *Line::CreateRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat, LPCTSTR aExtraInfo)
 {
 	// Build the parameters for Object::Create()
@@ -14851,15 +14798,15 @@ IObject *Line::CreateRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat, LPCTSTR
 	ExprTokenType* aParam[5 * 2] = { aParams + 0, aParams + 1, aParams + 2, aParams + 3, aParams + 4
 		, aParams + 5, aParams + 6, aParams + 7, aParams + 8, aParams + 9 };
 	aParams[0].SetValue(_T("What"), 4);
-	aParams[1].SetValue(aWhat ? (LPTSTR)aWhat :
+	aParams[1].SetValue(const_cast<LPTSTR>(aWhat ? aWhat : 
 #ifdef CONFIG_DEBUGGER
-		g_Debugger.WhatThrew());
+		g_Debugger.WhatThrew()));
 #else
 		// Without the debugger stack, there's no good way to determine what's throwing. It could be:
 		//g_act[mActionType].Name; // A command implemented as an Action (g_act).
 		//g->CurrentFunc->mName; // A user-defined function (perhaps when mActionType == ACT_THROW).
 		//???; // A built-in function implemented as a Func (g_BIF).
-		_T(""));
+		_T("")));
 #endif
 	aParams[2].SetValue(_T("File"), 4);
 	aParams[3].SetValue(Line::sSourceFile[mFileIndex]);
@@ -14879,13 +14826,22 @@ IObject *Line::CreateRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat, LPCTSTR
 
 ResultType Line::ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat, LPCTSTR aExtraInfo)
 {
+	return g_script->ThrowRuntimeException(aErrorText, aWhat, aExtraInfo, this, FAIL);
+}
+
+ResultType Script::ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat, LPCTSTR aExtraInfo
+	, Line *aLine, ResultType aErrorType)
+{
 	// ThrownToken should only be non-NULL while control is being passed up the
 	// stack, which implies no script code can be executing.
 	ASSERT(!g->ThrownToken);
 
+	if (!aLine)
+		aLine = mCurrLine;
+
 	ResultToken *token;
 	if (!(token = new ResultToken)
-		|| !(token->object = CreateRuntimeException(aErrorText, aWhat, aExtraInfo)))
+		|| !(token->object = aLine->CreateRuntimeException(aErrorText, aWhat, aExtraInfo))   )
 	{
 		// Out of memory. It's likely that we were called for this very reason.
 		// Since we don't even have enough memory to allocate an exception object,
@@ -14902,7 +14858,7 @@ ResultType Line::ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat, LPCTST
 
 	g->ThrownToken = token;
 	if (!(g->ExcptMode & EXCPTMODE_CATCH))
-		g_script->UnhandledException(this);
+		return UnhandledException(aLine, aErrorType);
 
 	// Returning FAIL causes each caller to also return FAIL, until either the
 	// thread has fully exited or the recursion layer handling ACT_TRY is reached:
@@ -14911,14 +14867,19 @@ ResultType Line::ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat, LPCTST
 
 ResultType Script::ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat, LPCTSTR aExtraInfo)
 {
-	return g_script->mCurrLine->ThrowRuntimeException(aErrorText, aWhat, aExtraInfo);
+	return ThrowRuntimeException(aErrorText, aWhat, aExtraInfo, mCurrLine, FAIL);
 }
 
-ResultType Script::ThrowWin32Exception(DWORD aError)
+
+ResultType Script::Win32Error(DWORD aError)
 {
 	TCHAR message[1024];
-	DWORD size = FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS
-		, NULL, aError, 0, message, _countof(message), NULL);
+	// Prefix the message with the error number to avoid something like
+	// "Error: The file does not exist. Specifically: 2".
+	DWORD size = (DWORD)_sntprintf(message, _countof(message)
+		, (int)aError < 0 ? _T("(0x%X) ") : _T("(%i) "), aError);
+	size += FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS
+		, NULL, aError, 0, message + size, _countof(message) - size, NULL);
 	if (size)
 	{
 		if (message[size - 1] == '\n')
@@ -14926,101 +14887,60 @@ ResultType Script::ThrowWin32Exception(DWORD aError)
 		if (message[size - 1] == '\r')
 			message[--size] = '\0';
 	}
-	else
-		_tcscpy(message, _T("Function returned failure."));
-	TCHAR code[12];
-	if ((int)aError < 0)
-	{
-		code[0] = '0';
-		code[1] = 'x';
-		_ultot(aError, code + 2, 16);
-	}
-	else
-		_itot(aError, code, 10);
-	return g_script->ThrowRuntimeException(message, nullptr, code);
+	return RuntimeError(message, _T(""), FAIL_OR_OK);
 }
 
 
-//#define SHOULD_USE_ERRORLEVEL (!g->InTryBlock()) // v1 behaviour
-#define SHOULD_USE_ERRORLEVEL TRUE
-
-ResultType Line::SetErrorLevelOrThrowBool(bool aError)
+ResultType Line::ThrowIfTrue(bool aError)
 {
-	if (!aError)
-		return g_ErrorLevel->Assign(ERRORLEVEL_NONE);
-	if (SHOULD_USE_ERRORLEVEL)
-		return g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
-	// Otherwise, an error occurred and there is a try block, so throw an exception:
-	return ThrowRuntimeException(ERRORLEVEL_ERROR_STR);
+	return aError ? ThrowRuntimeException(ERR_FAILED) : OK;
 }
 
-ResultType Line::SetErrorLevelOrThrowStr(LPCTSTR aErrorValue)
+ResultType Line::ThrowIntIfNonzero(int aErrorValue)
 {
-	if ((*aErrorValue == '0' && !aErrorValue[1]) || SHOULD_USE_ERRORLEVEL)
-		return g_ErrorLevel->Assign(aErrorValue);
-	// Otherwise, an error occurred and there is a try block, so throw an exception:
-	return ThrowRuntimeException(aErrorValue);
-}
-
-ResultType Line::SetErrorLevelOrThrowInt(int aErrorValue)
-{
-	if (!aErrorValue || SHOULD_USE_ERRORLEVEL)
-		return g_ErrorLevel->Assign(aErrorValue);
+	if (!aErrorValue)
+		return OK;
 	TCHAR buf[12];
-	// Otherwise, an error occurred and there is a try block, so throw an exception:
-	return ThrowRuntimeException(_itot(aErrorValue, buf, 10));
+	return ThrowRuntimeException(ERR_FAILED, nullptr, _itot(aErrorValue, buf, 10));
 }
 
 // Logic from the above functions is duplicated in the below functions rather than calling
-// g_script->mCurrLine->SetErrorLevelOrThrow() to squeeze out a little extra performance for
+// g_script->mCurrLine->Throw() to squeeze out a little extra performance for
 // "success" cases.
 
-ResultType Script::SetErrorLevelOrThrowBool(bool aError)
+ResultType Script::ThrowIfTrue(bool aError)
 {
-	if (!aError)
-		return g_ErrorLevel->Assign(ERRORLEVEL_NONE);
-	if (SHOULD_USE_ERRORLEVEL)
-		return g_ErrorLevel->Assign(ERRORLEVEL_ERROR);
-	// Otherwise, an error occurred and there is a try block, so throw an exception:
-	return ThrowRuntimeException(ERRORLEVEL_ERROR_STR);
+	return aError ? ThrowRuntimeException(ERR_FAILED) : OK;
 }
 
-ResultType Script::SetErrorLevelOrThrowStr(LPCTSTR aErrorValue, LPCTSTR aWhat)
+ResultType Script::ThrowIntIfNonzero(int aErrorValue, LPCTSTR aWhat)
 {
-	if ((*aErrorValue == '0' && !aErrorValue[1]) || SHOULD_USE_ERRORLEVEL)
-		return g_ErrorLevel->Assign(aErrorValue);
-	// Otherwise, an error occurred and there is a try block, so throw an exception:
-	return ThrowRuntimeException(aErrorValue, aWhat);
-}
-
-ResultType Script::SetErrorLevelOrThrowInt(int aErrorValue, LPCTSTR aWhat)
-{
-	if (!aErrorValue || SHOULD_USE_ERRORLEVEL)
-		return g_ErrorLevel->Assign(aErrorValue);
+	if (!aErrorValue)
+		return OK;
 	TCHAR buf[12];
-	// Otherwise, an error occurred and there is a try block, so throw an exception:
-	return ThrowRuntimeException(_itot(aErrorValue, buf, 10), aWhat);
+	return ThrowRuntimeException(ERR_FAILED, aWhat, _itot(aErrorValue, buf, 10));
 }
 
 
-ResultType Line::SetErrorsOrThrow(bool aError, DWORD aLastErrorOverride)
+ResultType Line::SetLastErrorMaybeThrow(bool aError, DWORD aLastError)
 {
-	// LastError is set even if we're going to throw an exception, for simplicity:
-	g->LastError = aLastErrorOverride == -1 ? GetLastError() : aLastErrorOverride;
-	return SetErrorLevelOrThrowBool(aError);
+	g->LastError = aLastError; // Set this unconditionally.
+	return aError ? g_script->Win32Error(aLastError) : OK;
 }
 
-void Script::SetErrorLevels(bool aError, DWORD aLastErrorOverride)
+void ResultToken::SetLastErrorMaybeThrow(bool aError, DWORD aLastError)
 {
-	g->LastError = aLastErrorOverride == -1 ? GetLastError() : aLastErrorOverride;
-	g_ErrorLevel->Assign(aError);
+	g->LastError = aLastError; // Set this unconditionally.
+	if (aError)
+		Win32Error(aLastError);
 }
 
-void Script::SetErrorLevelsAndClose(HANDLE aHandle, bool aError, DWORD aLastErrorOverride)
+void ResultToken::SetLastErrorCloseAndMaybeThrow(HANDLE aHandle, bool aError, DWORD aLastError)
 {
-	g->LastError = aLastErrorOverride == -1 ? GetLastError() : aLastErrorOverride;
+	g->LastError = aLastError;
 	CloseHandle(aHandle);
-	g_ErrorLevel->Assign(aError);
+	if (aError)
+		Win32Error(aLastError);
 }
 
 
@@ -15028,16 +14948,16 @@ void Script::SetErrorLevelsAndClose(HANDLE aHandle, bool aError, DWORD aLastErro
 
 ResultType Line::LineError(LPCTSTR aErrorText, ResultType aErrorType, LPCTSTR aExtraInfo)
 {
-	if (!aErrorText)
-		aErrorText = _T("");
+	ASSERT(aErrorText);
 	if (!aExtraInfo)
 		aExtraInfo = _T("");
 
-	if ((g->ExcptMode || g_script->mOnError.Count()) // OnError also needs an exception object.
-		&& (aErrorType == FAIL || aErrorType == EARLY_EXIT)) // FAIL is most common, but EARLY_EXIT is used by ComError(). WARN and CRITICAL_ERROR are excluded.
-		return ThrowRuntimeException(aErrorText, NULL, aExtraInfo);
+	if (g_script->mIsReadyToExecute)
+	{
+		return g_script->RuntimeError(aErrorText, aExtraInfo, aErrorType, this);
+	}
 
-	if (g_script->mErrorStdOut && !g_script->mIsReadyToExecute && aErrorType != WARN) // i.e. runtime errors are always displayed via dialog.
+	if (g_script->mErrorStdOut && aErrorType != WARN)
 	{
 		// JdeB said:
 		// Just tested it in Textpad, Crimson and Scite. they all recognise the output and jump
@@ -15063,53 +14983,72 @@ ResultType Line::LineError(LPCTSTR aErrorText, ResultType aErrorType, LPCTSTR aE
 			*new_line_pos = '\0';
 		}
 #endif
-		ERR_PRINT(STD_ERROR_FORMAT, sSourceFile[mFileIndex], mLineNumber, aErrorText); // printf() does not significantly increase the size of the EXE, probably because it shares most of the same code with sprintf(), etc.
+		ERR_PRINT(STD_ERROR_FORMAT, Line::sSourceFile[mFileIndex], mLineNumber, aErrorText); // printf() does not significantly increase the size of the EXE, probably because it shares most of the same code with sprintf(), etc.
 #ifdef _USRDLL
 		if (new_line_pos)
 			*new_line_pos = new_line_char;
 #endif
 		if (*aExtraInfo)
 			ERR_PRINT(_T("     Specifically: %s\n"), aExtraInfo);
+		return FAIL;
 	}
-	else
-	{
-		TCHAR buf[MSGBOX_TEXT_SIZE];
-		FormatError(buf, _countof(buf), aErrorType, aErrorText, aExtraInfo, this
-			// The last parameter determines the final line of the message:
-			, (aErrorType == FAIL) ? (g_script->mIsReadyToExecute ? ERR_ABORT_NO_SPACES
-									: (g_script->mIsRestart ? OLD_STILL_IN_EFFECT : WILL_EXIT))
-			: (aErrorType == CRITICAL_ERROR) ? UNSTABLE_WILL_EXIT
-			: (aErrorType == EARLY_EXIT) ? _T("Continue running the script?")
-			: _T("For more details, read the documentation for #Warn."));
+
+	return g_script->ShowError(aErrorText, aErrorType, aExtraInfo, this);
+}
+
+ResultType Script::RuntimeError(LPCTSTR aErrorText, LPCTSTR aExtraInfo, ResultType aErrorType, Line *aLine)
+{
+	ASSERT(aErrorText);
+	if (!aExtraInfo)
+		aExtraInfo = _T("");
+	
+	if (g->ExcptMode == EXCPTMODE_LINE_WORKAROUND && mCurrLine)
+		aLine = mCurrLine;
+	
+	if ((g->ExcptMode || mOnError.Count()) && aErrorType != WARN)
+		return ThrowRuntimeException(aErrorText, nullptr, aExtraInfo, aLine, aErrorType);
+
+	return ShowError(aErrorText, aErrorType, aExtraInfo, aLine);
+}
+
+ResultType Script::ShowError(LPCTSTR aErrorText, ResultType aErrorType, LPCTSTR aExtraInfo, Line *aLine)
+{
+	if (!aErrorText)
+		aErrorText = _T("");
+	if (!aExtraInfo)
+		aExtraInfo = _T("");
+	if (!aLine)
+		aLine = mCurrLine;
+
+	TCHAR buf[MSGBOX_TEXT_SIZE];
+	FormatError(buf, _countof(buf), aErrorType, aErrorText, aExtraInfo, aLine);
 		
-		g_script->mCurrLine = this;  // This needs to be set in some cases where the caller didn't.
+	// It's currently unclear why this would ever be needed, so it's disabled:
+	//mCurrLine = aLine;  // This needs to be set in some cases where the caller didn't.
 
 #ifdef CONFIG_DEBUGGER
-		if (g_Debugger.HasStdErrHook())
-			g_Debugger.OutputDebug(buf);
-		else
+	if (g_Debugger.HasStdErrHook())
+		g_Debugger.OutputDebug(buf);
 #endif
-			if (MsgBox(buf, MB_TOPMOST | (aErrorType == EARLY_EXIT ? MB_YESNO : 0)) == IDNO)
-			// The user was asked "Continue running the script?" and answered "No".
-			// This will attempt to run the OnExit subroutine, which should be okay since that
-			// subroutine will terminate the script if it encounters another runtime error:
-			g_script->ExitApp(EXIT_ERROR);
-	}
+	if (MsgBox(buf, MB_TOPMOST | (aErrorType == FAIL_OR_OK ? MB_YESNO : 0)) == IDYES)
+		return OK;
 
-	if (aErrorType == CRITICAL_ERROR && g_script->mIsReadyToExecute)
+	if (aErrorType == CRITICAL_ERROR && mIsReadyToExecute)
 		// Pass EXIT_DESTROY to ensure the program always exits, regardless of OnExit.
-		g_script->ExitApp(EXIT_DESTROY);
+		ExitApp(EXIT_DESTROY);
 
-	return aErrorType; // The caller told us whether it should be a critical error or not.
+	// Since above didn't exit, the caller isn't CriticalError(), which ignores
+	// the return value.  Other callers always want FAIL at this point.
+	return FAIL;
 }
 
 
 
-int Line::FormatError(LPTSTR aBuf, int aBufSize, ResultType aErrorType, LPCTSTR aErrorText, LPCTSTR aExtraInfo, Line *aLine, LPCTSTR aFooter)
+int Script::FormatError(LPTSTR aBuf, int aBufSize, ResultType aErrorType, LPCTSTR aErrorText, LPCTSTR aExtraInfo, Line *aLine)
 {
 	TCHAR source_file[MAX_PATH * 2];
 	if (aLine && aLine->mFileIndex)
-		sntprintf(source_file, _countof(source_file), _T(" in #include file \"%s\""), sSourceFile[aLine->mFileIndex]);
+		sntprintf(source_file, _countof(source_file), _T(" in #include file \"%s\""), Line::sSourceFile[aLine->mFileIndex]);
 	else
 		*source_file = '\0'; // Don't bother cluttering the display if it's the main script file.
 
@@ -15128,8 +15067,13 @@ int Line::FormatError(LPTSTR aBuf, int aBufSize, ResultType aErrorType, LPCTSTR 
 	if (aLine)
 		aBuf = aLine->VicinityToText(aBuf, BUF_SPACE_REMAINING);
 	// What now?:
-	if (aFooter)
-		aBuf += sntprintf(aBuf, BUF_SPACE_REMAINING, _T("\n%s"), aFooter);
+	LPCTSTR footer = (g->ExcptMode & EXCPTMODE_DELETE) ? ERR_ABORT_DELETE
+		: (aErrorType == FAIL) ? (mIsReadyToExecute ? ERR_ABORT_NO_SPACES
+		: (mIsRestart ? OLD_STILL_IN_EFFECT : WILL_EXIT))
+		: (aErrorType == CRITICAL_ERROR) ? UNSTABLE_WILL_EXIT
+		: (aErrorType == FAIL_OR_OK) ? ERR_CONTINUE_THREAD_Q
+		: _T("For more details, read the documentation for #Warn.");
+	aBuf += sntprintf(aBuf, BUF_SPACE_REMAINING, _T("\n%s"), footer);
 
 	return (int)(aBuf - aBuf_orig);
 }
@@ -15250,7 +15194,11 @@ ResultType ResultToken::Error(LPCTSTR aErrorText, LPCTSTR aExtraInfo)
 	// isn't expecting a value, or they might be freed twice (if the callee already freed it).
 	//ASSERT(!mem_to_free); // At least one caller frees it after calling this function.
 	ASSERT(symbol != SYM_OBJECT);
-	return SetExitResult(g_script->ScriptError(aErrorText, aExtraInfo));
+	if (g_script->RuntimeError(aErrorText, aExtraInfo) == FAIL)
+		return SetExitResult(FAIL);
+	SetValue(_T(""), 0);
+	// Caller may rely on FAIL to unwind stack, but this->result is still OK.
+	return FAIL;
 }
 
 __declspec(noinline)
@@ -15264,9 +15212,17 @@ ResultType ResultToken::UnknownMemberError(ExprTokenType &aObject, int aFlags, L
 	return Error(msg);
 }
 
+ResultType ResultToken::Win32Error(DWORD aError)
+{
+	if (g_script->Win32Error(aError) == FAIL)
+		return SetExitResult(FAIL);
+	SetValue(_T(""), 0);
+	return FAIL;
+}
 
 
-ResultType Script::UnhandledException(Line* aLine)
+
+ResultType Script::UnhandledException(Line* aLine, ResultType aErrorType)
 {
 	LPCTSTR message = _T(""), extra = _T("");
 	TCHAR extra_buf[MAX_NUMBER_SIZE], message_buf[MAX_NUMBER_SIZE];
@@ -15275,12 +15231,17 @@ ResultType Script::UnhandledException(Line* aLine)
 
 	// OnError: Allow the script to handle it via a global callback.
 	_thread_local static bool sOnErrorRunning = false;
-	if (g_script->mOnError.Count() && !sOnErrorRunning)
+	if (mOnError.Count() && !sOnErrorRunning)
 	{
+		__int64 retval;
 		ResultToken *token = g.ThrownToken;
 		g.ThrownToken = NULL; // Allow the callback to execute correctly.
 		sOnErrorRunning = true;
-		bool returned_true = g_script->mOnError.Call(token, 1, INT_MAX) == CONDITION_TRUE;
+		ExprTokenType param[2];
+		param[0].CopyValueFrom(*token);
+		param[1].SetValue(aErrorType == CRITICAL_ERROR ? _T("ExitApp")
+			: aErrorType == FAIL_OR_OK ? _T("Return") : _T("Exit"));
+		mOnError.Call(param, 2, INT_MAX, &retval);
 		sOnErrorRunning = false;
 		if (g.ThrownToken) // An exception was thrown by the callback.
 		{
@@ -15290,12 +15251,17 @@ ResultType Script::UnhandledException(Line* aLine)
 			FreeExceptionToken(token);
 			return FAIL;
 		}
+		if (retval < 0 && aErrorType == FAIL_OR_OK)
+		{
+			FreeExceptionToken(token);
+			return OK; // Ignore error and continue.
+		}
 		// Some callers rely on g.ThrownToken!=NULL to unwind the stack, so it is restored
 		// rather than freeing it immediately.  If the exception object has __Delete, it
 		// will be called after the stack unwinds.
 		g.ThrownToken = token;
-		if (returned_true)
-			return FAIL;
+		if (retval)
+			return FAIL; // Exit thread.
 	}
 
 	if (Object *ex = dynamic_cast<Object *>(TokenToObject(*g.ThrownToken)))
@@ -15320,7 +15286,7 @@ ResultType Script::UnhandledException(Line* aLine)
 					if (!_tcsicmp(file, Line::sSourceFile[file_index]))
 						break;
 				Line *line;
-				for (line = g_script->mFirstLine;
+				for (line = mFirstLine;
 					line && (line->mLineNumber != line_no || line->mFileIndex != file_index);
 					line = line->mNextLine);
 				if (line)
@@ -15342,10 +15308,13 @@ ResultType Script::UnhandledException(Line* aLine)
 	}
 
 	TCHAR buf[MSGBOX_TEXT_SIZE];
-	Line::FormatError(buf, _countof(buf), FAIL, message, extra, aLine
-		, (g.ExcptMode & EXCPTMODE_DELETE) ? ERR_ABORT_DELETE : ERR_ABORT_NO_SPACES);
-	MsgBox(buf);
+	FormatError(buf, _countof(buf), aErrorType, message, extra, aLine);
 
+	if (MsgBox(buf, aErrorType == FAIL_OR_OK ? MB_YESNO : 0) == IDYES)
+	{
+		FreeExceptionToken(g.ThrownToken);
+		return OK;
+	}
 	return FAIL;
 }
 
@@ -15412,14 +15381,7 @@ void Script::ScriptWarning(WarnMode warnMode, LPCTSTR aWarningText, LPCTSTR aExt
 	// In MsgBox mode, MsgBox is in addition to OutputDebug
 	if (warnMode == WARNMODE_MSGBOX)
 	{
-		if (!line)
-			line = mCurrLine; // Call mCurrLine->LineError() vs ScriptError() to pass WARN.
-		if (line)
-			line->LineError(aWarningText, WARN, aExtraInfo);
-		else
-			// Realistically shouldn't happen.  If it does, the message might be slightly
-			// misleading since ScriptError isn't equipped to display "warning" messages.
-			ScriptError(aWarningText, aExtraInfo);
+		g_script->RuntimeError(aWarningText, aExtraInfo, WARN, line);
 	}
 }
 
@@ -15905,7 +15867,7 @@ ResultType Script::ActionExec(LPTSTR aAction, LPTSTR aParams, LPTSTR aWorkingDir
 	if (use_runas && shell_verb)
 	{
 		if (aDisplayErrors)
-			ScriptError(_T("System verbs unsupported with RunAs."));
+			return RuntimeError(_T("System verbs unsupported with RunAs."));
 		return FAIL;
 	}
 
@@ -15913,7 +15875,7 @@ ResultType Script::ActionExec(LPTSTR aAction, LPTSTR aParams, LPTSTR aWorkingDir
 	if (action_length >= LINE_SIZE) // Max length supported by CreateProcess() is 32 KB. But there hasn't been any demand to go above 16 KB, so seems little need to support it (plus it reduces risk of stack overflow).
 	{
 		if (aDisplayErrors)
-			ScriptError(_T("String too long.")); // Short msg since so rare.
+			return RuntimeError(_T("String too long.")); // Short msg since so rare.
 		return FAIL;
 	}
 
@@ -16134,7 +16096,7 @@ ResultType Script::ActionExec(LPTSTR aAction, LPTSTR aParams, LPTSTR aWorkingDir
 				, verb_text
 				, shell_params, _tcslen(shell_params) > 400 ? _T("...") : _T("")
 				);
-			ScriptError(error_text, system_error_text);
+			return RuntimeError(error_text, system_error_text);
 		}
 		return FAIL;
 	}
