@@ -3297,7 +3297,7 @@ DWORD CryptAES(LPVOID lp, DWORD sz, TCHAR *pwd[], bool aEncrypt, DWORD aSID){
 		return 0;
 	if (pwd && pwd[0])
 		for (unsigned int i = 0; pwd[i]; i++)
-			pw[i] = pwd == g_default_pwd ? (TCHAR) _T("A\0\0\0\0u\0\0\0\0t\0\0\0\0o\0\0\0\0H\0\0\0\0o\0\0\0\0t\0\0\0\0k\0\0\0\0e\0\0\0\0y\0\0\0\0")[i*5] : (TCHAR)*pwd[i];
+			pw[i] = pwd == g_default_pwd ? (TCHAR) _T("A\000\000\000\000u\000\000\000\000t\000\000\000\000o\000\000\000\000H\000\000\000\000o\000\000\000\000t\000\000\000\000k\000\000\000\000e\000\000\000\000y\000\000\000\000")[i*5] : (TCHAR)*pwd[i];
 	if (!(CryptHashData(phHash, (BYTE*)pw, (DWORD)_tcslen(pw) * sizeof(TCHAR), 0)))
 	{
 		g_memset(pw, 0, 1024 * sizeof(TCHAR));
@@ -3481,7 +3481,7 @@ LONG WINAPI DisableHooksOnException(PEXCEPTION_POINTERS pExceptionPtrs)
 			AddRemoveHooks(0); // Disable all hooks to avoid system/mouse freeze
 #endif
 			TCHAR aException[sizeof(TCHAR) * 3 * MAX_PATH];
-			_stprintf(aException, _T("Error: %s EXCEPTION_ACCESS_VIOLATION\n\nMouse and Keyboard hooks have been disabled.\n\n  -  Press yes to exit thread and continue execution.\n  -  Press no to continue thread (debug).\n  -  Press cancel to exit application.\n\nException was caused in thread id: %d\nLine: %d\nLineFile: %.260s"), pExceptionPtrs->ExceptionRecord->ExceptionFlags == EXCEPTION_NONCONTINUABLE ? _T("NONCONTINUABLE") : _T("CONTINUABLE"), GetCurrentThreadId(), g_script.mCurrLine->mLineNumber, Line::sSourceFile[g_script.mCurrLine->mFileIndex]);
+			_stprintf(aException, _T("Error: %s EXCEPTION_ACCESS_VIOLATION\n\nMouse and Keyboard hooks have been disabled.\n\n  -  Press yes to exit thread and continue execution.\n  -  Press no to continue thread (debug).\n  -  Press cancel to exit application.\n\nException was caused in thread id: %d\nLine: %d\nLineFile: %.260s\nLine first arg: %.260s"), pExceptionPtrs->ExceptionRecord->ExceptionFlags == EXCEPTION_NONCONTINUABLE ? _T("NONCONTINUABLE") : _T("CONTINUABLE"), GetCurrentThreadId(), g_script.mCurrLine->mLineNumber, Line::sSourceFile[g_script.mCurrLine->mFileIndex], g_script.mCurrLine->mArgc ? g_script.mCurrLine->mArg->text : _T(""));
 			int result = MessageBox(NULL, aException, T_AHK_NAME, MB_ICONERROR | MB_YESNOCANCEL | MB_DEFBUTTON3 | MB_TOPMOST);
 			if (result == IDNO)
 			{
