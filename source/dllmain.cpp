@@ -118,7 +118,7 @@ switch(fwdReason)
 		 }
 		 for(int i = 0;i < FUNC_LIB_COUNT;i++)
 		 {
-			 if (sLib[i].path)
+			 if (sLib[i].path && *sLib[i].path)
 				free(sLib[i].path);
 		 }
 		 DeleteCriticalSection(&g_CriticalHeapBlocks); // g_CriticalHeapBlocks is used in simpleheap for thread-safety.
