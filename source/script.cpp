@@ -2302,8 +2302,11 @@ ResultType Script::OpenIncludedFile(TextStream &ts, LPTSTR aFileSpec, bool aAllo
 
 	// This is done only after the file has been successfully opened in case aIgnoreLoadFailure==true:
 	if (!aPathToShow && source_file_index > 0)
-		if (  !(Line::sSourceFile[source_file_index] = tmalloc(_tcslen(full_path) + 1))  )
+	{
+		if (!(Line::sSourceFile[source_file_index] = tmalloc(_tcslen(full_path) + 1)))
 			return ScriptError(ERR_OUTOFMEM);
+		_tcscpy(Line::sSourceFile[source_file_index], full_path);
+	}
 	//else the first file was already taken care of by another means.
 
 #else // Stand-alone mode (there are no include files in this mode since all of them were merged into the main script at the time of compiling).
