@@ -2423,27 +2423,19 @@ HICON ExtractIconFromExecutable(LPTSTR aFilespec, int aIconNumber, int aWidth, i
 
 			NEWHEADER *resHead = (NEWHEADER *)presdata;
 			WORD resCount = resHead->ResCount;
-			RESDIR *resDir = (RESDIR *)(resHead + 1), *chosen = NULL;
-			int chosen_width = 0;
-			for (int i = 0; i < resCount; ++i)
+			RESDIR *resDir = (RESDIR *)(resHead + 1), *chosen = resDir; // Default to the first icon.
+			for (int i = 1; i < resCount; ++i)
 			{
-				int this_width = resDir[i].Icon.Width;
-				if (!this_width) // Workaround for 256x256 icons.
-					this_width = 256;
 				// Find the closest match for size, preferring the next larger icon if there's
 				// no exact match.  Normally the system will just pick the closest size, but
 				// at least for our icon, the 32x32 icon rendered at 20x20 looks much better
 				// than the 16x16 icon rendered at 20x20 (i.e. small icon size for 125% DPI).
-				if (this_width > chosen_width
-					? chosen_width < aWidth // Current icon smaller than desired, so up-size.
-					: this_width >= aWidth) // This icon is closer to the desired size, so down-size.
-				{
+				if (resDir[i].Icon.Width > chosen->Icon.Width
+					? chosen->Icon.Width < aWidth // Current icon smaller than desired, so up-size.
+					: resDir[i].Icon.Width >= aWidth) // Current icon larger than desired, so down-size (without going below aWidth).
 					chosen = &resDir[i];
-					chosen_width = this_width;
-				}
 			}
-			if (   (chosen) // It would be NULL if there were no icons.
-				&& (hres = FindResource(hdatafile, MAKEINTRESOURCE(chosen->IconCursorId), RT_ICON))
+			if (   (hres = FindResource(hdatafile, MAKEINTRESOURCE(chosen->IconCursorId), RT_ICON))
 				&& (hresdata = LoadResource(hdatafile, hres))
 				&& (presdata = LockResource(hresdata))   )
 			{
@@ -2929,48 +2921,6 @@ LPTSTR InStrAny(LPTSTR aStr, LPTSTR aNeedle[], int aNeedleCount, size_t &aFoundL
 			}
 	// If the above loops completed without returning, no matches were found.
 	return NULL;
-}
-
-
-
-int CompareVersion(LPCTSTR a, LPCTSTR b)
-{
-	while (*a || *b)
-	{
-		// 1.1-a001 < 1.1 = 1.1.0 = 1.1.0+foo
-		LPTSTR pa, pb;
-		int ia = _tcstol(a, &pa, 10);
-		int ib = _tcstol(b, &pb, 10);
-		// If *pa is not in the set .-+\0, this component is non-numeric (and not empty).
-		// Treat non-numeric as greater than numeric (but assume any absent component is 0).
-		if (!_tcschr(_T(".-+"), *pa)) ia = INT_MAX; else a = pa;
-		if (!_tcschr(_T(".-+"), *pb)) ib = INT_MAX; else b = pb;
-		if (ia < ib) return -1;
-		if (ia > ib) return  1;
-		// They are either equal or both non-numeric.
-		if (*a == '.' || *b == '.')
-		{
-			if (*a == '.') ++a;
-			if (*b == '.') ++b;
-			continue; // On to the next component.
-		}
-		// Give -pre-release lower precedence.
-		if (*a == '-' && *b != '-') return -1;
-		if (*b == '-' && *a != '-') return  1;
-		for (;; ++a, ++b)
-		{
-			auto ac = *a == '+' || *a == '.' ? '\0' : *a; // Ignore any + suffix (treat as terminator).
-			auto bc = *b == '+' || *b == '.' ? '\0' : *b;
-			if (ac != bc) return ac < bc ? -1 : 1;
-			if (!ac) // End of both components.
-			{
-				if (*a == '.' || *b == '.')
-					break; // Try to compare the next component as numeric.
-				return 0; // Both reached the end; a and b are equal.
-			}
-		}
-	}
-	return 0;
 }
 
 

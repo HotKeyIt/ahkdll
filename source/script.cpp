@@ -291,7 +291,7 @@ Script::Script()
 #endif
 	, mFileSpec(_T("")), mFileDir(_T("")), mFileName(_T("")), mOurEXE(_T("")), mOurEXEDir(_T("")), mMainWindowTitle(_T(""))
 	, mIsReadyToExecute(false), mAutoExecSectionIsRunning(false)
-	, mIsRestart(false), mErrorStdOut(false)
+	, mIsRestart(false), mErrorStdOut(false), mErrorStdOutCP(-1)
 #ifndef AUTOHOTKEYSC
 	, mIncludeLibraryFunctionsThenExit(NULL)
 #endif
@@ -1966,6 +1966,7 @@ UINT Script::LoadFromFile()
 	if (   LoadIncludedFile(g_RunStdIn ? _T("*") : mFileSpec, false, false) != OK
 		|| !AddLine(ACT_EXIT)) // Add an Exit to ensure lib auto-includes aren't auto-executed, for backward compatibility.
 		return LOADING_FAILED;
+	mLastLine->mAttribute = ATTR_LINE_CAN_BE_UNREACHABLE;
 
 	if (!PreparseExpressions(mFirstLine))
 		return LOADING_FAILED; // Error was already displayed by the above call.
@@ -2050,6 +2051,8 @@ UINT Script::LoadFromFile()
 	++mCombinedLineNumber;  // So that the EXITs will both show up in ListLines as the line # after the last physical one in the script.
 	if (!(AddLine(ACT_EXIT) && AddLine(ACT_EXIT))) // Second exit guaranties non-NULL mRelatedLine(s).
 		return LOADING_FAILED;
+	mLastLine->mPrevLine->mAttribute = ATTR_LINE_CAN_BE_UNREACHABLE;
+	mLastLine->mAttribute = ATTR_LINE_CAN_BE_UNREACHABLE;
 	mPlaceholderLabel->mJumpToLine = mLastLine; // To follow the rule "all labels should have a non-NULL line before the script starts running".
 
 	if (   !PreparseBlocks(mFirstLine)
@@ -3424,6 +3427,7 @@ examine_line:
 				mNoHotkeyLabels = false;\
 				if (!AddLine(ACT_RETURN, NULL, UCHAR_MAX))\
 					goto FAIL;\
+				mLastLine->mAttribute = ATTR_LINE_CAN_BE_UNREACHABLE;\
 				mCurrLine = NULL;\
 			}
 			CHECK_mNoHotkeyLabels
@@ -3475,6 +3479,7 @@ examine_line:
 					// hotstrings in case gosub/goto is ever used to jump to their labels:
 					if (!AddLine(ACT_RETURN))
 						return FAIL;
+					mLastLine->mAttribute = ATTR_LINE_CAN_BE_UNREACHABLE;
 				}
 			}
 			else // It's a hotkey vs. hotstring.
@@ -3498,6 +3503,7 @@ examine_line:
 					// Also add a Return that's implicit for a single-line hotkey.
 					if (!AddLine(ACT_RETURN))
 						return FAIL;
+					mLastLine->mAttribute = ATTR_LINE_CAN_BE_UNREACHABLE;
 				}
 				if (hk = Hotkey::FindHotkeyByTrueNature(buf, suffix_has_tilde, hook_is_mandatory)) // Parent hotkey found.  Add a child/variant hotkey for it.
 				{
@@ -4531,7 +4537,7 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 	}
 	if (IS_DIRECTIVE_MATCH(_T("#ErrorStdOut")))
 	{
-		mErrorStdOut = true;
+		SetErrorStdOut(parameter);
 		return CONDITION_TRUE;
 	}
 	if (IS_DIRECTIVE_MATCH(_T("#MaxMem")))
@@ -4739,7 +4745,42 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		if (warnType == WARN_CLASS_OVERWRITE || warnType == WARN_ALL)
 			g_Warn_ClassOverwrite = warnMode;
 
+		if (warnType == WARN_UNREACHABLE || warnType == WARN_ALL)
+			g_Warn_Unreachable = warnMode;
+
 		return CONDITION_TRUE;
+	}
+
+	if (IS_DIRECTIVE_MATCH(_T("#Requires")))
+	{
+#ifdef AUTOHOTKEYSC
+		return CONDITION_TRUE; // Omit the checks for compiled scripts to reduce code size.
+#else
+		if (!parameter)
+			return ScriptError(ERR_PARAM1_REQUIRED);
+
+		bool show_autohotkey_version = false;
+		if (!_tcsnicmp(parameter, _T("AutoHotkey"), 10))
+		{
+			if (!parameter[10]) // Just #requires AutoHotkey; would seem silly to warn the user in this case.
+				return CONDITION_TRUE;
+
+			if (IS_SPACE_OR_TAB(parameter[10]))
+			{
+				auto cp = omit_leading_whitespace(parameter + 11);
+				if (*cp == 'v')
+					++cp;
+				if (!_tcsncmp(cp, T_AHK_VERSION, 3) && (!cp[3] || cp[3] == '.') // Major version matches.
+					&& CompareVersion(cp, T_AHK_VERSION) <= 0) // Required minor and patch versions <= A_AhkVersion (also taking into account any pre-release suffix).
+					return CONDITION_TRUE;
+				show_autohotkey_version = true;
+			}
+		}
+		TCHAR buf[100];
+		sntprintf(buf, _countof(buf), _T("This script requires %s%s.")
+			, parameter, show_autohotkey_version ? _T(", but you have v") T_AHK_VERSION : _T(""));
+		return ScriptError(buf);
+#endif
 	}
 	
 	if (IS_DIRECTIVE_MATCH(_T("#WindowClassMain")))
@@ -12000,9 +12041,52 @@ Line *Script::PreparseCommands(Line *aStartingLine)
 			}
 			break;
 		}
+		// Check for unreachable code.
+		if (g_Warn_Unreachable)
+		switch (line->mActionType)
+		{
+		case ACT_RETURN:
+		case ACT_BREAK:
+		case ACT_CONTINUE:
+		case ACT_GOTO:
+		case ACT_THROW:
+		case ACT_EXIT:
+		//case ACT_EXITAPP: // Excluded since it's just a function in v2, and there can't be any expectation that the code following it will execute anyway.
+			Line *next_line = line->mNextLine;
+			if (!next_line // line is the script's last line.
+				|| next_line->mParentLine != line->mParentLine) // line is the one-line action of if/else/loop/etc.
+				break;
+			while (next_line->mActionType == ACT_BLOCK_BEGIN && next_line->mAttribute)
+				next_line = next_line->mRelatedLine; // Skip function body.
+			switch (next_line->mActionType)
+			{
+			case ACT_EXIT:
+			case ACT_RETURN:
+				if (next_line->mAttribute != ATTR_LINE_CAN_BE_UNREACHABLE)
+					break; // It's a normal Exit/Return.
+				// It's from an automatic AddLine(), so should be excluded.
+			case ACT_BLOCK_END: // There's nothing following this line in the same block.
+			case ACT_CASE:
+				continue;
+			}
+			if (IsLabelTarget(next_line))
+				break;
+			TCHAR buf[64];
+			sntprintf(buf, _countof(buf), _T("This line will never execute, due to %s preceeding it."), g_act[line->mActionType].Name);
+			ScriptWarning(g_Warn_Unreachable, buf, _T(""), next_line);
+		}
 	} // for()
 	// Return something non-NULL to indicate success:
 	return mLastLine;
+}
+
+
+
+bool Script::IsLabelTarget(Line *aLine)
+{
+	Label *lbl;
+	for (lbl = mFirstLabel; lbl && lbl->mJumpToLine != aLine; lbl = lbl->mNextLabel);
+	return lbl;
 }
 
 
@@ -17815,11 +17899,10 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 	}
 
 	case ACT_OUTPUTDEBUG:
-#ifndef CONFIG_DEBUGGER
-		OutputDebugString(ARG1); // It does not return a value for the purpose of setting ErrorLevel.
-#else
-		g_Debugger.OutputDebug(ARG1);
+#ifdef CONFIG_DEBUGGER
+		if (!g_Debugger.OutputStdErr(ARG1))
 #endif
+			OutputDebugString(ARG1); // It does not return a value for the purpose of setting ErrorLevel.
 		return OK;
 
 	case ACT_SHUTDOWN:
@@ -18542,7 +18625,34 @@ ResultType Line::SetErrorsOrThrow(bool aError, DWORD aLastErrorOverride)
 }
 
 
-#define ERR_PRINT(fmt, ...) _ftprintf(stderr, fmt, __VA_ARGS__)
+void Script::SetErrorStdOut(LPTSTR aParam)
+{
+	mErrorStdOut = true;
+	mErrorStdOutCP = Line::ConvertFileEncoding(aParam);
+}
+
+void Script::PrintErrorStdOut(LPCTSTR aErrorText, int aLength, LPCTSTR aFile)
+{
+#ifdef CONFIG_DEBUGGER
+	if (g_Debugger.OutputStdOut(aErrorText))
+		return;
+#endif
+	TextFile tf;
+	tf.Open(aFile, TextStream::APPEND, mErrorStdOutCP);
+	tf.Write(aErrorText, aLength);
+	tf.Close();
+}
+
+// For backward compatibility, this actually prints to stderr, not stdout.
+void Script::PrintErrorStdOut(LPCTSTR aErrorText, LPCTSTR aExtraInfo, FileIndexType aFileIndex, LineNumberType aLineNumber)
+{
+	TCHAR buf[LINE_SIZE * 2];
+#define STD_ERROR_FORMAT _T("%s (%d) : ==> %s\n")
+	int n = sntprintf(buf, _countof(buf), STD_ERROR_FORMAT, Line::sSourceFile[aFileIndex], aLineNumber, aErrorText);
+	if (*aExtraInfo)
+		n += sntprintf(buf + n, _countof(buf) - n, _T("     Specifically: %s\n"), aExtraInfo);
+	PrintErrorStdOut(buf, n, _T("**"));
+}
 
 ResultType Line::LineError(LPCTSTR aErrorText, ResultType aErrorType, LPCTSTR aExtraInfo)
 {
@@ -18568,7 +18678,7 @@ ResultType Line::LineError(LPCTSTR aErrorText, ResultType aErrorType, LPCTSTR aE
 		// v1.0.47: Added a space before the colon as originally intended.  Toralf said, "With this minor
 		// change the error lexer of Scite recognizes this line as a Microsoft error message and it can be
 		// used to jump to that line."
-		#define STD_ERROR_FORMAT _T("%s (%d) : ==> %s\n")
+		g_script.PrintErrorStdOut(aErrorText, aExtraInfo, mFileIndex, mLineNumber);
 #ifdef _USRDLL
 		// terminate source file if it contains new lines
 		LPTSTR new_line_pos = _tcschr(Line::sSourceFile[mFileIndex], '\r');
@@ -18581,13 +18691,10 @@ ResultType Line::LineError(LPCTSTR aErrorText, ResultType aErrorType, LPCTSTR aE
 			*new_line_pos = '\0';
 		}
 #endif
-		ERR_PRINT(STD_ERROR_FORMAT, sSourceFile[mFileIndex], mLineNumber, aErrorText); // printf() does not significantly increase the size of the EXE, probably because it shares most of the same code with sprintf(), etc.
 #ifdef _USRDLL
 		if (new_line_pos)
 			*new_line_pos = new_line_char;
 #endif
-		if (*aExtraInfo)
-			ERR_PRINT(_T("     Specifically: %s\n"), aExtraInfo);
 	}
 	else
 	{
@@ -18603,9 +18710,7 @@ ResultType Line::LineError(LPCTSTR aErrorText, ResultType aErrorType, LPCTSTR aE
 		g_script.mCurrLine = this;  // This needs to be set in some cases where the caller didn't.
 		
 #ifdef CONFIG_DEBUGGER
-		if (g_Debugger.HasStdErrHook())
-			g_Debugger.OutputDebug(buf);
-		else
+		if (!g_Debugger.OutputStdErr(buf))
 #endif
 		if (MsgBox(buf, MB_TOPMOST | (aErrorType == EARLY_EXIT ? MB_YESNO : 0)) == IDNO)
 			// The user was asked "Continue running the script?" and answered "No".
@@ -18690,13 +18795,11 @@ ResultType Script::ScriptError(LPCTSTR aErrorText, LPCTSTR aExtraInfo) //, Resul
 		}
 #endif
 		// See LineError() for details.
-		ERR_PRINT(STD_ERROR_FORMAT, Line::sSourceFile[mCurrFileIndex], mCombinedLineNumber, aErrorText);
+		PrintErrorStdOut(aErrorText, aExtraInfo, mCurrFileIndex, mCombinedLineNumber);
 #ifdef _USRDLL
 		if (new_line_pos)
 			*new_line_pos = new_line_char;
 #endif
-		if (*aExtraInfo)
-			ERR_PRINT(_T("     Specifically: %s\n"), aExtraInfo);
 	}
 	else
 	{
@@ -18727,9 +18830,7 @@ ResultType Script::ScriptError(LPCTSTR aErrorText, LPCTSTR aExtraInfo) //, Resul
 
 		//ShowInEditor();
 #ifdef CONFIG_DEBUGGER
-		if (g_Debugger.HasStdErrHook())
-			g_Debugger.OutputDebug(buf);
-		else
+		if (!g_Debugger.OutputStdErr(buf))
 #endif
 		MsgBox(buf);
 	}
@@ -18888,15 +18989,12 @@ void Script::ScriptWarning(WarnMode warnMode, LPCTSTR aWarningText, LPCTSTR aExt
 	}
 
 	if (warnMode == WARNMODE_STDOUT)
-#ifndef CONFIG_DEBUGGER
-		_fputts(buf, stdout);
+		PrintErrorStdOut(buf);
 	else
-		OutputDebugString(buf);
-#else
-		g_Debugger.FileAppendStdOut(buf) || _fputts(buf, stdout);
-	else
-		g_Debugger.OutputDebug(buf);
+#ifdef CONFIG_DEBUGGER
+	if (!g_Debugger.OutputStdErr(buf))
 #endif
+		OutputDebugString(buf);
 
 	// In MsgBox mode, MsgBox is in addition to OutputDebug
 	if (warnMode == WARNMODE_MSGBOX)

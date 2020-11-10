@@ -351,7 +351,7 @@ ResultType LayoutHasAltGr(HKL aLayout, ResultType aHasAltGr = LAYOUT_UNDETERMINE
 LPTSTR SCtoKeyName(sc_type aSC, LPTSTR aBuf, int aBufSize, bool aUseFallback = true);
 LPTSTR VKtoKeyName(vk_type aVK, LPTSTR aBuf, int aBufSize, bool aUseFallback = true);
 TCHAR VKtoChar(vk_type aVK, HKL aKeybdLayout = NULL);
-sc_type TextToSC(LPTSTR aText, bool *aSpecifiedByNumber = NULL);
+sc_type TextToSC(LPTSTR aText);
 #ifdef  AHKX
 extern HKL g_HKL;   // Naveen # TODO N10
 vk_type TextToVK(LPTSTR aText, modLR_type *pModifiersLR = NULL, bool aExcludeThoseHandledByScanCode = false

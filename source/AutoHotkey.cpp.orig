@@ -126,9 +126,6 @@ void WINAPI TlsCallbackCall(PVOID Module, DWORD Reason, PVOID Context)
 
 //#define GET_HEADER_DICTIONARY(module, idx)  &(module)->headers->OptionalHeader.DataDirectory[idx]
 
-int MainExecuteScript();
-
-
 int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdLine, int nCmdShow)
 {
 	/*
@@ -269,8 +266,8 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 			restart_mode = true;
 		else if (!_tcsicmp(param, _T("/F")) || !_tcsicmp(param, _T("/force")))
 			g_ForceLaunch = true;
-		else if (!_tcsnicmp(param, _T("/ErrorStdOut"), 12))
-			g_script.SetErrorStdOut(param[12] == '=' ? param + 13 : NULL);
+		else if (!_tcsicmp(param, _T("/ErrorStdOut")))
+			g_script.mErrorStdOut = true;
 #ifndef AUTOHOTKEYSC // i.e. the following switch is recognized only by AutoHotkey.exe (especially since recognizing new switches in compiled scripts can break them, unlike AutoHotkey.exe).
 		else if (!_tcsicmp(param, _T("/iLib"))) // v1.0.47: Build an include-file so that ahk2exe can include library functions called by the script.
 		{
@@ -512,50 +509,18 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 		// Since other applications and the user should see any changes the program makes to the clipboard,
 		// don't write-cache it either.
 		clipboard_var->DisableCache();
-	return MainExecuteScript();
-}
+	// Run the auto-execute part at the top of the script (this call might never return):
+	if (!g_script.AutoExecSection()) // Can't run script at all. Due to rarity, just abort.
+		return CRITICAL_ERROR;
+	// REMEMBER: The call above will never return if one of the following happens:
+	// 1) The AutoExec section never finishes (e.g. infinite loop).
+	// 2) The AutoExec function uses the Exit or ExitApp command to terminate the script.
+	// 3) The script isn't persistent and its last line is reached (in which case an ExitApp is implicit).
 
-
-int MainExecuteScript()
-{
-	
-#ifndef _DEBUG
-	__try
-#endif
-	{
-		// Run the auto-execute part at the top of the script (this call might never return):
-		if (!g_script.AutoExecSection()) // Can't run script at all. Due to rarity, just abort.
-			return CRITICAL_ERROR;
-		// REMEMBER: The call above will never return if one of the following happens:
-		// 1) The AutoExec section never finishes (e.g. infinite loop).
-		// 2) The AutoExec function uses the Exit or ExitApp command to terminate the script.
-		// 3) The script isn't persistent and its last line is reached (in which case an ExitApp is implicit).
-
-		// Call it in this special mode to kick off the main event loop.
-		// Be sure to pass something >0 for the first param or it will
-		// return (and we never want this to return):
-		MsgSleep(SLEEP_INTERVAL, WAIT_FOR_MESSAGES);
-	}
-#ifndef _DEBUG
-	__except (EXCEPTION_EXECUTE_HANDLER)
-	{
-		LPCTSTR msg;
-		auto ecode = GetExceptionCode();
-		switch (ecode)
-		{
-		// Having specific messages for the most common exceptions seems worth the added code size.
-		// The term "stack overflow" is not used because it is probably less easily understood by
-		// the average user, and is not useful as a search term due to stackoverflow.com.
-		case EXCEPTION_STACK_OVERFLOW: msg = _T("Function recursion limit exceeded."); break;
-		case EXCEPTION_ACCESS_VIOLATION: msg = _T("Invalid memory read/write."); break;
-		default: msg = _T("System exception 0x%X."); break;
-		}
-		TCHAR buf[127];
-		sntprintf(buf, _countof(buf), msg, ecode);
-		g_script.CriticalError(buf);
-		return ecode;
-	}
-#endif 
+	// Call it in this special mode to kick off the main event loop.
+	// Be sure to pass something >0 for the first param or it will
+	// return (and we never want this to return):
+	MsgSleep(SLEEP_INTERVAL, WAIT_FOR_MESSAGES);
 	return 0; // Never executed; avoids compiler warning.
 }
 #endif

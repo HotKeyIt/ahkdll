@@ -113,7 +113,6 @@ extern WarnMode g_Warn_UseUnsetGlobal;
 extern WarnMode g_Warn_UseEnv;
 extern WarnMode g_Warn_LocalSameAsGlobal;
 extern WarnMode g_Warn_ClassOverwrite;
-extern WarnMode g_Warn_Unreachable;
 extern PVOID g_ExceptionHandler;
 extern bool g_ExceptionWarnContinuable;
 #ifndef _USRDLL
