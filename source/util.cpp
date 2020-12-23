@@ -2606,9 +2606,9 @@ HICON ExtractIconFromExecutable(LPTSTR aFilespec, int aIconNumber, int aWidth, i
 
 			NEWHEADER *resHead = (NEWHEADER *)presdata;
 			WORD resCount = resHead->ResCount;
-			RESDIR *resDir = (RESDIR *)(resHead + 1), *chosen = resDir; // Default to the first icon.
+			RESDIR *resDir = (RESDIR *)(resHead + 1), *chosen = NULL;
 			int chosen_width = 0;
-			for (int i = 1; i < resCount; ++i)
+			for (int i = 0; i < resCount; ++i)
 			{
 				int this_width = resDir[i].Icon.Width;
 				if (!this_width) // Workaround for 256x256 icons.
@@ -2625,7 +2625,8 @@ HICON ExtractIconFromExecutable(LPTSTR aFilespec, int aIconNumber, int aWidth, i
 					chosen_width = this_width;
 				}
 			}
-			if (   (hres = FindResource(hdatafile, MAKEINTRESOURCE(chosen->IconCursorId), RT_ICON))
+			if (   (chosen) // It would be NULL if there were no icons.
+				&& (hres = FindResource(hdatafile, MAKEINTRESOURCE(chosen->IconCursorId), RT_ICON))
 				&& (hresdata = LoadResource(hdatafile, hres))
 				&& (presdata = LockResource(hresdata))   )
 			{
@@ -2940,17 +2941,6 @@ int FindTextDelim(LPCTSTR aBuf, TCHAR aDelimiter, int aStartIndex, LPCTSTR aLite
 			// Reached the end of the string without finding a delimiter.  Return the
 			// index of the null-terminator since that's typically what the caller wants.
 			return mark;
-#ifdef ENABLE_TEXT_DEREFS
-		case g_DerefChar:
-			if (!aLiteralMap || !aLiteralMap[mark])
-			{
-				// Find the corresponding end char for this deref.
-				mark = FindExprDelim(aBuf, g_DerefChar, mark + 1, aLiteralMap);
-				if (!aBuf[mark]) // i.e. it isn't safe to do ++mark.
-					return mark; // See case '\0' for comments.
-			}
-			continue;
-#endif
 		case '`':
 			// This allows g_DerefChar or aDelimiter to be escaped, but since every other non-null
 			// character has no meaning here, it doesn't need to check which character it is skipping.
@@ -3027,6 +3017,7 @@ int BalanceExpr(LPCTSTR aBuf, int aStartBalance, TCHAR aExpect[], TCHAR *aOpenQu
 
 
 
+#if 0 // Currently unused.
 bool IsStringInList(LPTSTR aStr, LPTSTR aList, bool aFindExactMatch)
 // Checks if aStr exists in aList (which is a comma-separated list).
 // If aStr is blank, aList must start with a delimiting comma for there to be a match.
@@ -3080,6 +3071,7 @@ bool IsStringInList(LPTSTR aStr, LPTSTR aList, bool aFindExactMatch)
 
 	return false;  // No match found.
 }
+#endif
 
 
 
@@ -3169,51 +3161,61 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 	found_func->mMinParams = 0;
 
 	TCHAR buf[MAX_PATH];
+	ResultToken aResultToken;
 	size_t space_remaining = LINE_SIZE - (parameter - aBuf);
 	if (tcscasestr(parameter, _T("%A_ScriptDir%")))
 	{
-		BIV_ScriptDir(buf, _T("A_ScriptDir"));
-		StrReplace(parameter, _T("%A_ScriptDir%"), buf, SCS_INSENSITIVE, 1, space_remaining);
+		BIV_ScriptDir(aResultToken, _T("A_ScriptDir"));
+		StrReplace(parameter, _T("%A_ScriptDir%"), aResultToken.buf, SCS_INSENSITIVE, 1, space_remaining);
+		aResultToken.Free();
 	}
 	if (tcscasestr(parameter, _T("%A_AppData%"))) // v1.0.45.04: This and the next were requested by Tekl to make it easier to customize scripts on a per-user basis.
 	{
-		BIV_SpecialFolderPath(buf, _T("A_AppData"));
-		StrReplace(parameter, _T("%A_AppData%"), buf, SCS_INSENSITIVE, 1, space_remaining);
+		BIV_SpecialFolderPath(aResultToken, _T("A_AppData"));
+		StrReplace(parameter, _T("%A_AppData%"), aResultToken.buf, SCS_INSENSITIVE, 1, space_remaining);
+		aResultToken.Free();
 	}
 	if (tcscasestr(parameter, _T("%A_AppDataCommon%"))) // v1.0.45.04.
 	{
-		BIV_SpecialFolderPath(buf, _T("A_AppDataCommon"));
-		StrReplace(parameter, _T("%A_AppDataCommon%"), buf, SCS_INSENSITIVE, 1, space_remaining);
+		BIV_SpecialFolderPath(aResultToken, _T("A_AppDataCommon"));
+		StrReplace(parameter, _T("%A_AppDataCommon%"), aResultToken.buf, SCS_INSENSITIVE, 1, space_remaining);
+		aResultToken.Free();
 	}
 	if (tcscasestr(parameter, _T("%A_AhkPath%"))) // v1.0.45.04.
 	{
-		BIV_AhkPath(buf, _T("A_AhkPath"));
-		StrReplace(parameter, _T("%A_AhkPath%"), buf, SCS_INSENSITIVE, 1, space_remaining);
+		BIV_AhkPath(aResultToken, _T("A_AhkPath"));
+		StrReplace(parameter, _T("%A_AhkPath%"), aResultToken.buf, SCS_INSENSITIVE, 1, space_remaining);
+		aResultToken.Free();
 	}
 	if (tcscasestr(parameter, _T("%A_AhkDir%"))) // v1.0.45.04.
 	{
-		BIV_AhkDir(buf, _T("A_AhkDir"));
-		StrReplace(parameter, _T("%A_AhkDir%"), buf, SCS_INSENSITIVE, 1, space_remaining);
+		BIV_AhkDir(aResultToken, _T("A_AhkDir"));
+		StrReplace(parameter, _T("%A_AhkDir%"), aResultToken.buf, SCS_INSENSITIVE, 1, space_remaining);
+		aResultToken.Free();
 	}
 	if (tcscasestr(parameter, _T("%A_DllDir%"))) // v1.0.45.04.
 	{
-		BIV_DllDir(buf, _T("A_DllDir"));
-		StrReplace(parameter, _T("%A_DllDir%"), buf, SCS_INSENSITIVE, 1, space_remaining);
+		BIV_DllDir(aResultToken, _T("A_DllDir"));
+		StrReplace(parameter, _T("%A_DllDir%"), aResultToken.buf, SCS_INSENSITIVE, 1, space_remaining);
+		aResultToken.Free();
 	}
 	if (tcscasestr(parameter, _T("%A_DllPath%"))) // v1.0.45.04.
 	{
-		BIV_DllPath(buf, _T("A_DllPath"));
-		StrReplace(parameter, _T("%A_DllPath%"), buf, SCS_INSENSITIVE, 1, space_remaining);
+		BIV_DllPath(aResultToken, _T("A_DllPath"));
+		StrReplace(parameter, _T("%A_DllPath%"), aResultToken.buf, SCS_INSENSITIVE, 1, space_remaining);
+		aResultToken.Free();
 	}
 	if (tcscasestr(parameter, _T("%A_ThreadID%"))) // v1.0.45.04.
 	{
-		BIV_ThreadID(buf, _T("A_ThreadID"));
-		StrReplace(parameter, _T("%A_ThreadID%"), buf, SCS_INSENSITIVE, 1, space_remaining);
+		BIV_ThreadID(aResultToken, _T("A_ThreadID"));
+		StrReplace(parameter, _T("%A_ThreadID%"), aResultToken.buf, SCS_INSENSITIVE, 1, space_remaining);
+		aResultToken.Free();
 	}
 	if (tcscasestr(parameter, _T("%A_PtrSize%"))) // v1.0.45.04.
 	{
-		BIV_ThreadID(buf, _T("A_PtrSize"));
-		StrReplace(parameter, _T("%A_PtrSize%"), buf, SCS_INSENSITIVE, 1, space_remaining);
+		BIV_ThreadID(aResultToken, _T("A_PtrSize"));
+		StrReplace(parameter, _T("%A_PtrSize%"), aResultToken.buf, SCS_INSENSITIVE, 1, space_remaining);
+		aResultToken.Free();
 	}
 	if (_tcschr(parameter, '%'))
 	{
@@ -3485,12 +3487,12 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 
 	found_func->mClass = (Object*)function;
 	found_func->mParamCount = arg_count;
-	found_func->mVar = (Var**)return_attrib;
-	found_func->mStaticVar = (Var**)pStr;
-	found_func->mLazyVar = (Var**)dyna_param_def;
+	found_func->mDownVar = (Var**)return_attrib;
+	found_func->mUpVar = (Var**)pStr;
+	found_func->mOuterFunc = (UserFunc*)dyna_param_def;
 	found_func->mParam = (FuncParam*)dyna_param;
 #ifdef WIN32_PLATFORM
-	found_func->mVarCount = dll_call_mode;
+	found_func->mDownVarCount = dll_call_mode;
 #endif
 	return CONDITION_TRUE;
 }
@@ -3670,6 +3672,59 @@ int FTOA(double aValue, LPTSTR aBuf, int aBufSize)
 	return result;
 }
 
+
+
+// Caller must call CoTaskMemFree() on the result when done.
+PWSTR GetDocumentsFolder()
+{
+	PWSTR path;
+	if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Documents, KF_FLAG_DONT_VERIFY, NULL, &path)))
+		return path;
+	return nullptr;
+}
+
+
+
+int CompareVersion(LPCTSTR a, LPCTSTR b)
+{
+	while (*a || *b)
+	{
+		// 1.1-a001 < 1.1 = 1.1.0 = 1.1.0+foo
+		LPTSTR pa, pb;
+		int ia = _tcstol(a, &pa, 10);
+		int ib = _tcstol(b, &pb, 10);
+		// If *pa is not in the set .-+\0, this component is non-numeric (and not empty).
+		// Treat non-numeric as greater than numeric (but assume any absent component is 0).
+		if (!_tcschr(_T(".-+"), *pa)) ia = INT_MAX; else a = pa;
+		if (!_tcschr(_T(".-+"), *pb)) ib = INT_MAX; else b = pb;
+		if (ia < ib) return -1;
+		if (ia > ib) return  1;
+		// They are either equal or both non-numeric.
+		if (*a == '.' || *b == '.')
+		{
+			if (*a == '.') ++a;
+			if (*b == '.') ++b;
+			continue; // On to the next component.
+		}
+		// Give -pre-release lower precedence.
+		if (*a == '-' && *b != '-') return -1;
+		if (*b == '-' && *a != '-') return  1;
+		for (;; ++a, ++b)
+		{
+			auto ac = *a == '+' || *a == '.' ? '\0' : *a; // Ignore any + suffix (treat as terminator).
+			auto bc = *b == '+' || *b == '.' ? '\0' : *b;
+			if (ac != bc) return ac < bc ? -1 : 1;
+			if (!ac) // End of both components.
+			{
+				if (*a == '.' || *b == '.')
+					break; // Try to compare the next component as numeric.
+				return 0; // Both reached the end; a and b are equal.
+			}
+		}
+	}
+	return 0;
+}
+
 VOID CALLBACK EnableHooksOnException(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime)
 {
 	AddRemoveHooks(g_ExceptionHooksToEnable);
@@ -3707,7 +3762,6 @@ LONG WINAPI DisableHooksOnException(PEXCEPTION_POINTERS pExceptionPtrs)
 	}
 	return EXCEPTION_CONTINUE_SEARCH;
 }
-
 
 
 #if defined(_MSC_VER) && defined(_DEBUG)

@@ -25,6 +25,7 @@ GNU General Public License for more details.
 #include "resources/resource.h"  // For InputBox.
 #include "TextIO.h"
 #include <Psapi.h> // for GetModuleBaseName.
+#include "shlwapi.h" // StrCmpLogicalW
 #include <process.h>  // NewThread
 
 #include <mmdeviceapi.h> // for SoundSet/SoundGet.
@@ -420,7 +421,7 @@ void input_type::SetTimeoutTimer()
 
 ResultType input_type::SetKeyFlags(LPTSTR aKeys, bool aEndKeyMode, UCHAR aFlagsRemove, UCHAR aFlagsAdd)
 {
-	bool vk_by_number;
+	bool vk_by_number, sc_by_number;
 	vk_type vk;
 	sc_type sc = 0;
 	modLR_type modifiersLR;
@@ -470,6 +471,7 @@ ResultType input_type::SetKeyFlags(LPTSTR aKeys, bool aEndKeyMode, UCHAR aFlagsR
 
 			*end_pos = '\0';  // temporarily terminate the string here.
 
+			sc_by_number = false; // Set default.
 			modifiersLR = 0;  // Init prior to below.
 			// Handle the key by VK if it was given by number, such as {vk26}.
 			// Otherwise, for any key name which has a VK shared by two possible SCs
@@ -485,7 +487,7 @@ ResultType input_type::SetKeyFlags(LPTSTR aKeys, bool aEndKeyMode, UCHAR aFlagsR
 			}
 			else
 				// No virtual key, so try to find a scan code.
-				sc = TextToSC(end_key + 1);
+				sc = TextToSC(end_key + 1, &sc_by_number);
 
 			*end_pos = '}';  // undo the temporary termination
 
@@ -536,7 +538,7 @@ ResultType input_type::SetKeyFlags(LPTSTR aKeys, bool aEndKeyMode, UCHAR aFlagsR
 				}
 			}
 		}
-		if (sc)
+		if (sc || sc_by_number) // Fixed for v1.1.33.02: Allow sc000 for setting/unsetting flags for any events that lack a scan code.
 		{
 			end_sc[sc] = (end_sc[sc] & ~aFlagsRemove) | aFlagsAdd;
 		}
@@ -1058,7 +1060,7 @@ BIF_DECL(BIF_Wait)
 	{
 	case FID_RunWait:
 		if (!g_script->ActionExec(arg1, NULL, arg2, true, arg3, &running_process, true, true
-			, ParamIndexToOptionalVar(4-1)))
+			, ParamIndexToOutputVar(4-1)))
 			_f_return_FAIL;
 		//else fall through to the waiting-phase of the operation.
 		break;
@@ -1132,13 +1134,6 @@ BIF_DECL(BIF_Wait)
 		// otherwise, the loading validation would have prevented the script from loading.
 		wait_indefinitely = false;
 		sleep_duration = (int)(ATOF(_f_callee_id == FID_ClipWait ? arg1 : arg3) * 1000); // Can be zero.
-		if (sleep_duration < 1)
-			// Waiting 500ms in place of a "0" seems more useful than a true zero, which
-			// doesn't need to be supported because it's the same thing as something like
-			// "IfWinExist".  A true zero for clipboard would be the same as
-			// "IfEqual, clipboard, , xxx" (though admittedly it's higher overhead to
-			// actually fetch the contents of the clipboard).
-			sleep_duration = 500;
 	}
 	else
 	{
@@ -1424,9 +1419,8 @@ BIF_DECL(BIF_ControlClick)
 	else
 	{
 		// Determine target window and control.
-		if (!DetermineTargetControl(control_window, target_window, aResultToken, aParam, aParamCount, 3))
+		if (!DetermineTargetControl(control_window, target_window, aResultToken, aParam, aParamCount, 3, false))
 			return; // aResultToken.SetExitResult() or Error() was already called.
-		ASSERT(control_window != NULL);
 	}
 	ASSERT(target_window != NULL);
 
@@ -1540,8 +1534,8 @@ BIF_DECL(BIF_ControlClick)
 	{
 		switch (aVK)
 		{
-			case VK_LBUTTON_LOGICAL:  msg_down = WM_LBUTTONDOWN; msg_up = WM_LBUTTONUP; wparam = MK_LBUTTON; break;
-			case VK_RBUTTON_LOGICAL:  msg_down = WM_RBUTTONDOWN; msg_up = WM_RBUTTONUP; wparam = MK_RBUTTON; break;
+			case VK_LBUTTON:  msg_down = WM_LBUTTONDOWN; msg_up = WM_LBUTTONUP; wparam = MK_LBUTTON; break;
+			case VK_RBUTTON:  msg_down = WM_RBUTTONDOWN; msg_up = WM_RBUTTONUP; wparam = MK_RBUTTON; break;
 			case VK_MBUTTON:  msg_down = WM_MBUTTONDOWN; msg_up = WM_MBUTTONUP; wparam = MK_MBUTTON; break;
 			case VK_XBUTTON1: msg_down = WM_XBUTTONDOWN; msg_up = WM_XBUTTONUP; wparam_up = XBUTTON1<<16; wparam = MK_XBUTTON1|wparam_up; break;
 			case VK_XBUTTON2: msg_down = WM_XBUTTONDOWN; msg_up = WM_XBUTTONUP; wparam_up = XBUTTON2<<16; wparam = MK_XBUTTON2|wparam_up; break;
@@ -1661,10 +1655,10 @@ BIF_DECL(BIF_ControlMove)
 
 BIF_DECL(BIF_ControlGetPos)
 {
-	Var *output_var_x = ParamIndexToOptionalVar(0);
-	Var *output_var_y = ParamIndexToOptionalVar(1);
-	Var *output_var_width = ParamIndexToOptionalVar(2);
-	Var *output_var_height = ParamIndexToOptionalVar(3);
+	Var *output_var_x = ParamIndexToOutputVar(0);
+	Var *output_var_y = ParamIndexToOutputVar(1);
+	Var *output_var_width = ParamIndexToOutputVar(2);
+	Var *output_var_height = ParamIndexToOutputVar(3);
 
 	DETERMINE_TARGET_CONTROL(4);
 
@@ -2268,9 +2262,10 @@ BIF_DECL(BIF_PostSendMessage)
 
 	if (!successful)
 	{
-		if (aUseSend && GetLastError() == ERROR_TIMEOUT)
+		auto last_error = GetLastError();
+		if (aUseSend && last_error == ERROR_TIMEOUT)
 			_f_throw(ERR_TIMEOUT);
-		_f_throw_win32();
+		_f_throw_win32(last_error); // Passing last_error reduces code size due to the implied additional GetLastError() call when omitting this parameter.
 	}
 	if (aUseSend)
 		_f_return_i((__int64)dwResult);
@@ -2563,8 +2558,6 @@ error:
 
 BIF_DECL(BIF_WinSet)
 {
-	_f_param_string_opt(aValue, 0);
-
 	HWND target_window;
 	if (!DetermineTargetWindow(target_window, aResultToken, aParam + 1, aParamCount - 1))
 		return;
@@ -2574,22 +2567,30 @@ BIF_DECL(BIF_WinSet)
 	DWORD exstyle;
 	BuiltInFunctionID cmd = _f_callee_id;
 
+	LPTSTR aValue;
+	ToggleValueType toggle = TOGGLE_INVALID;
+	if (cmd == FID_WinSetAlwaysOnTop || cmd == FID_WinSetEnabled)
+	{
+		toggle = ParamIndexToToggleValue(0);
+		if (toggle == TOGGLE_INVALID)
+			_f_throw(ERR_PARAM1_INVALID);
+	}
+	else
+		aValue = ParamIndexToString(0, _f_number_buf);
+
 	switch (cmd)
 	{
 	case FID_WinSetAlwaysOnTop:
 	{
 		HWND topmost_or_not;
-		switch(Line::ConvertOnOffToggle(aValue))
+		switch (toggle)
 		{
 		case TOGGLED_ON: topmost_or_not = HWND_TOPMOST; break;
 		case TOGGLED_OFF: topmost_or_not = HWND_NOTOPMOST; break;
-		case NEUTRAL: // parameter was blank, so it defaults to TOGGLE.
 		case TOGGLE:
 			exstyle = GetWindowLong(target_window, GWL_EXSTYLE);
 			topmost_or_not = (exstyle & WS_EX_TOPMOST) ? HWND_NOTOPMOST : HWND_TOPMOST;
 			break;
-		default:
-			_f_throw(ERR_PARAM1_INVALID);
 		}
 		// SetWindowLong() didn't seem to work, at least not on some windows.  But this does.
 		// As of v1.0.25.14, SWP_NOACTIVATE is also specified, though its absence does not actually
@@ -2729,15 +2730,11 @@ BIF_DECL(BIF_WinSet)
 		break;
 	}
 
-	case FID_WinSetEnabled: // This is separate from WINSET_STYLE because merely changing the WS_DISABLED style is usually not as effective as calling EnableWindow().
-		switch (Line::ConvertOnOffToggle(aValue))
-		{
-		case TOGGLED_ON:	success = EnableWindow(target_window, TRUE); break;
-		case TOGGLED_OFF:	success = EnableWindow(target_window, FALSE); break;
-		case TOGGLE:		success = EnableWindow(target_window, !IsWindowEnabled(target_window)); break;
-		default:
-			_f_throw(ERR_PARAM1_INVALID);
-		}
+	case FID_WinSetEnabled:
+		if (toggle == TOGGLE)
+			toggle = IsWindowEnabled(target_window) ? TOGGLED_OFF : TOGGLED_ON;
+		EnableWindow(target_window, toggle == TOGGLED_ON); // Return value is based on previous state, not success/failure.
+		success = bool(IsWindowEnabled(target_window)) == (toggle == TOGGLED_ON);
 		break;
 
 	case FID_WinSetRegion:
@@ -3058,8 +3055,6 @@ BIF_DECL(BIF_WinGetText)
 	if (!sab.total_length) // No text in window.
 		_f_return_empty;
 
-	// Set up the var, enlarging it if necessary.  If the output_var is of type VAR_CLIPBOARD,
-	// this call will set up the clipboard for writing:
 	if (!TokenSetResult(aResultToken, NULL, sab.total_length))
 		return;  // It already displayed the error.
 	aResultToken.symbol = SYM_STRING;
@@ -3144,11 +3139,24 @@ BIF_DECL(BIF_WinGetPos)
 
 	for (int i = 0; i < 4; ++i)
 	{
-		Var *var = ParamIndexToOptionalVar(i);
+		Var *var = ParamIndexToOutputVar(i);
 		if (!var)
 			continue;
 		var->Assign(((int *)(&rect))[i]); // Always succeeds.
 	}
+	_f_return_empty;
+}
+
+
+
+BIF_DECL(BIF_Run)
+{
+	_f_param_string(target, 0);
+	_f_param_string_opt(working_dir, 1);
+	_f_param_string_opt(options, 2);
+	Var *output_var_pid = ParamIndexToOutputVar(3);
+	if (!g_script->ActionExec(target, nullptr, working_dir, true, options, nullptr, true, true, output_var_pid))
+		_f_return_FAIL;
 	_f_return_empty;
 }
 
@@ -3252,8 +3260,8 @@ BIF_DECL(BIF_MonitorGet)
 		// Otherwise:
 		LONG *monitor_rect = (LONG *)((cmd == FID_MonitorGetWorkArea) ? &mip.monitor_info_ex.rcWork : &mip.monitor_info_ex.rcMonitor);
 		for (int i = 1; i <= 4; ++i) // Params: N (0), Left (1), Top, Right, Bottom.
-			if (i < aParamCount && aParam[i]->symbol == SYM_VAR)
-				aParam[i]->var->Assign(monitor_rect[i-1]);
+			if (Var *var = ParamIndexToOutputVar(i))
+				var->Assign(monitor_rect[i-1]);
 		_f_return_i(mip.count); // Return the monitor number.
 	}
 
@@ -3422,12 +3430,10 @@ end:
 
 void PixelSearch(Var *output_var_x, Var *output_var_y
 	, int aLeft, int aTop, int aRight, int aBottom, COLORREF aColorRGB
-	, int aVariation, LPTSTR aOptions, bool aIsPixelGetColor
-	, ResultToken &aResultToken)
+	, int aVariation, bool aIsPixelGetColor, ResultToken &aResultToken)
 // Author: The fast-mode PixelSearch was created by Aurelian Maga.
 {
-	// For maintainability, get options and RGB/BGR conversion out of the way early.
-	bool fast_mode = aIsPixelGetColor || !tcscasestr(aOptions, _T("Slow"));
+	// For maintainability, get RGB/BGR conversion out of the way early.
 	COLORREF aColorBGR = rgb_to_bgr(aColorRGB);
 
 	// Many of the following sections are similar to those in ImageSearch(), so they should be
@@ -3485,97 +3491,99 @@ void PixelSearch(Var *output_var_x, Var *output_var_y
 	}
 	//else leave uninitialized since they won't be used.
 
+	DWORD first_error = 0;
 	HDC hdc = GetDC(NULL);
 	if (!hdc)
-		goto error;
-
-	bool found = false; // Must init here for use by "goto fast_end" and for use by both fast and slow modes.
-
-	if (fast_mode)
 	{
-		// From this point on, "goto fast_end" will assume hdc is non-NULL but that the below might still be NULL.
-		// Therefore, all of the following must be initialized so that the "fast_end" label can detect them:
-		HDC sdc = NULL;
-		HBITMAP hbitmap_screen = NULL;
-		LPCOLORREF screen_pixel = NULL;
-		HGDIOBJ sdc_orig_select = NULL;
+		first_error = GetLastError();
+		goto error;
+	}
 
-		// Some explanation for the method below is contained in this quote from the newsgroups:
-		// "you shouldn't really be getting the current bitmap from the GetDC DC. This might
-		// have weird effects like returning the entire screen or not working. Create yourself
-		// a memory DC first of the correct size. Then BitBlt into it and then GetDIBits on
-		// that instead. This way, the provider of the DC (the video driver) can make sure that
-		// the correct pixels are copied across."
+	bool found = false; // Must init here for use by "goto fast_end".
 
-		// Create an empty bitmap to hold all the pixels currently visible on the screen (within the search area):
-		int search_width = right - left + 1;
-		int search_height = bottom - top + 1;
-		if (   !(sdc = CreateCompatibleDC(hdc)) || !(hbitmap_screen = CreateCompatibleBitmap(hdc, search_width, search_height))   )
-			goto fast_end;
+	// From this point on, "goto fast_end" will assume hdc is non-NULL but that the below might still be NULL.
+	// Therefore, all of the following must be initialized so that the "fast_end" label can detect them:
+	HDC sdc = NULL;
+	HBITMAP hbitmap_screen = NULL;
+	LPCOLORREF screen_pixel = NULL;
+	HGDIOBJ sdc_orig_select = NULL;
 
-		if (   !(sdc_orig_select = SelectObject(sdc, hbitmap_screen))   )
-			goto fast_end;
+	// Some explanation for the method below is contained in this quote from the newsgroups:
+	// "you shouldn't really be getting the current bitmap from the GetDC DC. This might
+	// have weird effects like returning the entire screen or not working. Create yourself
+	// a memory DC first of the correct size. Then BitBlt into it and then GetDIBits on
+	// that instead. This way, the provider of the DC (the video driver) can make sure that
+	// the correct pixels are copied across."
 
-		// Copy the pixels in the search-area of the screen into the DC to be searched:
-		if (   !(BitBlt(sdc, 0, 0, search_width, search_height, hdc, left, top, SRCCOPY))   )
-			goto fast_end;
+	// Create an empty bitmap to hold all the pixels currently visible on the screen (within the search area):
+	int search_width = right - left + 1;
+	int search_height = bottom - top + 1;
+	if (   !(sdc = CreateCompatibleDC(hdc)) || !(hbitmap_screen = CreateCompatibleBitmap(hdc, search_width, search_height))   )
+		goto fast_end;
 
-		LONG screen_width, screen_height;
-		bool screen_is_16bit;
-		if (   !(screen_pixel = getbits(hbitmap_screen, sdc, screen_width, screen_height, screen_is_16bit))   )
-			goto fast_end;
+	if (   !(sdc_orig_select = SelectObject(sdc, hbitmap_screen))   )
+		goto fast_end;
 
-		// Concerning 0xF8F8F8F8: "On 16bit and 15 bit color the first 5 bits in each byte are valid
-		// (in 16bit there is an extra bit but i forgot for which color). And this will explain the
-		// second problem [in the test script], since GetPixel even in 16bit will return some "valid"
-		// data in the last 3bits of each byte."
-		register int i;
-		LONG screen_pixel_count = screen_width * screen_height;
+	// Copy the pixels in the search-area of the screen into the DC to be searched:
+	if (   !(BitBlt(sdc, 0, 0, search_width, search_height, hdc, left, top, SRCCOPY))   )
+		goto fast_end;
+
+	LONG screen_width, screen_height;
+	bool screen_is_16bit;
+	if (   !(screen_pixel = getbits(hbitmap_screen, sdc, screen_width, screen_height, screen_is_16bit))   )
+		goto fast_end;
+
+	// Concerning 0xF8F8F8F8: "On 16bit and 15 bit color the first 5 bits in each byte are valid
+	// (in 16bit there is an extra bit but i forgot for which color). And this will explain the
+	// second problem [in the test script], since GetPixel even in 16bit will return some "valid"
+	// data in the last 3bits of each byte."
+	register int i;
+	LONG screen_pixel_count = screen_width * screen_height;
+	if (screen_is_16bit)
+		for (i = 0; i < screen_pixel_count; ++i)
+			screen_pixel[i] &= 0xF8F8F8F8;
+
+	if (aIsPixelGetColor)
+	{
+		COLORREF color = screen_pixel[0] & 0x00FFFFFF; // See other 0x00FFFFFF below for explanation.
+		aResultToken.marker_length = _stprintf(aResultToken.marker, _T("0x%06X"), color);
+	}
+	else if (aVariation < 1) // Caller wants an exact match on one particular color.
+	{
 		if (screen_is_16bit)
-			for (i = 0; i < screen_pixel_count; ++i)
-				screen_pixel[i] &= 0xF8F8F8F8;
+			aColorRGB &= 0xF8F8F8F8;
 
-		if (aIsPixelGetColor)
+		for (int j = 0; j < screen_pixel_count; ++j)
 		{
-			COLORREF color = screen_pixel[0] & 0x00FFFFFF; // See other 0x00FFFFFF below for explanation.
-			aResultToken.marker_length = _stprintf(aResultToken.marker, _T("0x%06X"), color);
-		}
-		else if (aVariation < 1) // Caller wants an exact match on one particular color.
-		{
-			if (screen_is_16bit)
-				aColorRGB &= 0xF8F8F8F8;
+			if (right_to_left && bottom_to_top)
+				i = screen_pixel_count - j - 1;
+			else if (right_to_left)
+				i = j / screen_width * screen_width + screen_width - j % screen_width - 1;
+			else if (bottom_to_top)
+				i = (screen_pixel_count - j - 1) / screen_width * screen_width + j % screen_width;
+			else
+				i = j;
 
-			for (int j = 0; j < screen_pixel_count; ++j)
+			// Note that screen pixels sometimes have a non-zero high-order byte.  That's why
+			// bit-and with 0x00FFFFFF is done.  Otherwise, reddish/orangish colors are not properly
+			// found:
+			if ((screen_pixel[i] & 0x00FFFFFF) == aColorRGB)
 			{
-				if (right_to_left && bottom_to_top)
-					i = screen_pixel_count - j - 1;
-				else if (right_to_left)
-					i = j / screen_width * screen_width + screen_width - j % screen_width - 1;
-				else if (bottom_to_top)
-					i = (screen_pixel_count - j - 1) / screen_width * screen_width + j % screen_width;
-				else
-					i = j;
-
-				// Note that screen pixels sometimes have a non-zero high-order byte.  That's why
-				// bit-and with 0x00FFFFFF is done.  Otherwise, reddish/orangish colors are not properly
-				// found:
-				if ((screen_pixel[i] & 0x00FFFFFF) == aColorRGB)
-				{
-					found = true;
-					break;
-				}
+				found = true;
+				break;
 			}
 		}
-		else
+	}
+	else
+	{
+		// It seems more appropriate to do the 16-bit conversion prior to SET_COLOR_RANGE,
+		// rather than applying 0xF8 to each of the high/low values individually.
+		if (screen_is_16bit)
 		{
-			// It seems more appropriate to do the 16-bit conversion prior to SET_COLOR_RANGE,
-			// rather than applying 0xF8 to each of the high/low values individually.
-			if (screen_is_16bit)
-			{
-				search_red &= 0xF8;
-				search_green &= 0xF8;
-				search_blue &= 0xF8;
-			}
+			search_red &= 0xF8;
+			search_green &= 0xF8;
+			search_blue &= 0xF8;
+		}
 
 #define SET_COLOR_RANGE \
 {\
@@ -3587,142 +3595,81 @@ void PixelSearch(Var *output_var_x, Var *output_var_y
 	blue_high = (aVariation > 0xFF - search_blue) ? 0xFF : search_blue + aVariation;\
 }
 			
-			SET_COLOR_RANGE
-
-			for (int j = 0; j < screen_pixel_count; ++j)
-			{
-				if (right_to_left && bottom_to_top)
-					i = screen_pixel_count - j - 1;
-				else if (right_to_left)
-					i = j / screen_width * screen_width + screen_width - j % screen_width - 1;
-				else if (bottom_to_top)
-					i = (screen_pixel_count - j - 1) / screen_width * screen_width + j % screen_width;
-				else
-					i = j;
-
-				// Note that screen pixels sometimes have a non-zero high-order byte.  But it doesn't
-				// matter with the below approach, since that byte is not checked in the comparison.
-				pixel = screen_pixel[i];
-				red = GetBValue(pixel);   // Because pixel is in RGB vs. BGR format, red is retrieved with
-				green = GetGValue(pixel); // GetBValue() and blue is retrieved with GetRValue().
-				blue = GetRValue(pixel);
-				if (red >= red_low && red <= red_high
-					&& green >= green_low && green <= green_high
-					&& blue >= blue_low && blue <= blue_high)
-				{
-					found = true;
-					break;
-				}
-			}
-		}
-
-fast_end:
-		ReleaseDC(NULL, hdc);
-		if (sdc)
-		{
-			if (sdc_orig_select) // i.e. the original call to SelectObject() didn't fail.
-				SelectObject(sdc, sdc_orig_select); // Probably necessary to prevent memory leak.
-			DeleteDC(sdc);
-		}
-		if (hbitmap_screen)
-			DeleteObject(hbitmap_screen);
-		if (screen_pixel)
-			free(screen_pixel);
-		else // One of the GDI calls failed and the search wasn't carried out.
-			goto error;
-
-		if (aIsPixelGetColor)
-			return; // Return value was already set.
-
-		// Otherwise, success.  Calculate xpos and ypos of where the match was found and adjust
-		// coords to make them relative to the position of the target window (rect will contain
-		// zeroes if this doesn't need to be done):
-		if (found)
-		{
-			output_var_x->Assign((left + i%screen_width) - origin.x);
-			output_var_y->Assign((top + i/screen_width) - origin.y);
-		}
-		_f_return_b(found);
-	}
-
-	// Otherwise (since above didn't return): fast_mode==false
-	// This old/slower method is kept  because fast mode will break older scripts that rely on
-	// which match is found if there is more than one match (since fast mode searches the
-	// pixels in a different order (horizontally rather than vertically, I believe).
-	// In addition, there is doubt that the fast mode works in all the screen color depths, games,
-	// and other circumstances that the slow mode is known to work in.
-
-	// If the caller gives us inverted X or Y coordinates, conduct the search in reverse order.
-	// This feature was requested; it was put into effect for v1.0.25.06.
-	register int xpos, ypos;
-
-	if (aVariation > 0)
 		SET_COLOR_RANGE
 
-	for (xpos = aLeft  // It starts at aLeft even if right_to_left is true.
-		; (right_to_left ? (xpos >= aRight) : (xpos <= aRight)) // Verified correct.
-		; xpos += right_to_left ? -1 : 1)
-	{
-		for (ypos = aTop  // It starts at aTop even if bottom_to_top is true.
-			; bottom_to_top ? (ypos >= aBottom) : (ypos <= aBottom) // Verified correct.
-			; ypos += bottom_to_top ? -1 : 1)
+		for (int j = 0; j < screen_pixel_count; ++j)
 		{
-			pixel = GetPixel(hdc, xpos, ypos); // Returns a BGR value, not RGB.
-			if (aVariation < 1)  // User wanted an exact match.
+			if (right_to_left && bottom_to_top)
+				i = screen_pixel_count - j - 1;
+			else if (right_to_left)
+				i = j / screen_width * screen_width + screen_width - j % screen_width - 1;
+			else if (bottom_to_top)
+				i = (screen_pixel_count - j - 1) / screen_width * screen_width + j % screen_width;
+			else
+				i = j;
+
+			// Note that screen pixels sometimes have a non-zero high-order byte.  But it doesn't
+			// matter with the below approach, since that byte is not checked in the comparison.
+			pixel = screen_pixel[i];
+			red = GetBValue(pixel);   // Because pixel is in RGB vs. BGR format, red is retrieved with
+			green = GetGValue(pixel); // GetBValue() and blue is retrieved with GetRValue().
+			blue = GetRValue(pixel);
+			if (red >= red_low && red <= red_high
+				&& green >= green_low && green <= green_high
+				&& blue >= blue_low && blue <= blue_high)
 			{
-				if (pixel == aColorBGR)
-				{
-					found = true;
-					break;
-				}
-			}
-			else  // User specified that some variation in each of the RGB components is allowable.
-			{
-				red = GetRValue(pixel);
-				green = GetGValue(pixel);
-				blue = GetBValue(pixel);
-				if (red >= red_low && red <= red_high && green >= green_low && green <= green_high
-					&& blue >= blue_low && blue <= blue_high)
-				{
-					found = true;
-					break;
-				}
+				found = true;
+				break;
 			}
 		}
-		// Check this here rather than in the outer loop's top line because otherwise the loop's
-		// increment would make xpos too big by 1:
-		if (found)
-			break;
 	}
 
+fast_end:
+	first_error = GetLastError(); // Might help to ensure the correct error number is thrown on failure.
 	ReleaseDC(NULL, hdc);
+	if (sdc)
+	{
+		if (sdc_orig_select) // i.e. the original call to SelectObject() didn't fail.
+			SelectObject(sdc, sdc_orig_select); // Probably necessary to prevent memory leak.
+		DeleteDC(sdc);
+	}
+	if (hbitmap_screen)
+		DeleteObject(hbitmap_screen);
+	if (screen_pixel)
+		free(screen_pixel);
+	else // One of the GDI calls failed and the search wasn't carried out.
+		goto error;
 
+	if (aIsPixelGetColor)
+		return; // Return value was already set.
+
+	// Otherwise, success.  Calculate xpos and ypos of where the match was found and adjust
+	// coords to make them relative to the position of the target window (rect will contain
+	// zeroes if this doesn't need to be done):
 	if (found)
 	{
-		// This pixel matches one of the specified color(s).
-		// Adjust coords to make them relative to the position of the target window
-		// (rect will contain zeroes if this doesn't need to be done):
-		output_var_x->Assign(xpos - origin.x);
-		output_var_y->Assign(ypos - origin.y);
+		output_var_x->Assign((left + i%screen_width) - origin.x);
+		output_var_y->Assign((top + i/screen_width) - origin.y);
 	}
 	_f_return_b(found);
 
 error:
-	_f_throw_win32();
+	_f_throw_win32(first_error);
 }
 
 
 
 BIF_DECL(BIF_PixelSearch)
 {
-	if (aParam[0]->symbol != SYM_VAR)
+	Var *output_var_x = ParamIndexToOutputVar(0);
+	Var *output_var_y = ParamIndexToOutputVar(1);
+	if (!output_var_x)
 		_f_throw(ERR_PARAM1_INVALID);
-	if (aParam[1]->symbol != SYM_VAR)
+	if (!output_var_y)
 		_f_throw(ERR_PARAM2_INVALID);
-	PixelSearch(aParam[0]->var, aParam[1]->var
+	PixelSearch(output_var_x, output_var_y
 		, ParamIndexToInt(2), ParamIndexToInt(3), ParamIndexToInt(4), ParamIndexToInt(5)
-		, ParamIndexToInt(6), ParamIndexToOptionalInt(7, 0), ParamIndexToOptionalString(8)
-		, false, aResultToken);
+		, ParamIndexToInt(6), ParamIndexToOptionalInt(7, 0), false, aResultToken);
 }
 
 
@@ -3734,12 +3681,12 @@ BIF_DECL(BIF_ImageSearch)
 	// Many of the following sections are similar to those in PixelSearch(), so they should be
 	// maintained together.
 
-	if (aParam[0]->symbol != SYM_VAR)
+	Var *output_var_x = ParamIndexToOutputVar(0);
+	Var *output_var_y = ParamIndexToOutputVar(1);
+	if (!output_var_x)
 		_f_throw(ERR_PARAM1_INVALID);
-	if (aParam[1]->symbol != SYM_VAR)
+	if (!output_var_y)
 		_f_throw(ERR_PARAM2_INVALID);
-	Var *output_var_x = aParam[0]->var;
-	Var *output_var_y = aParam[1]->var;
 
 	int aLeft = ParamIndexToInt(2);
 	int aTop = ParamIndexToInt(3);
@@ -3857,9 +3804,11 @@ BIF_DECL(BIF_ImageSearch)
 	if (!hbitmap_image)
 		goto arg7_error;
 
+	DWORD first_error = 0;
 	HDC hdc = GetDC(NULL);
 	if (!hdc)
 	{
+		first_error = GetLastError();
 		if (!no_delete_bitmap)
 		{
 			if (image_type == IMAGE_ICON)
@@ -4087,6 +4036,7 @@ BIF_DECL(BIF_ImageSearch)
 	}
 
 end:
+	first_error = GetLastError();
 	ReleaseDC(NULL, hdc);
 	if (!no_delete_bitmap && hbitmap_image)
 		DeleteObject(hbitmap_image);
@@ -4121,7 +4071,7 @@ arg7_error:
 	_f_throw(ERR_PARAM7_INVALID, aImageFile);
 
 error:
-	_f_throw_win32();
+	_f_throw_win32(first_error);
 }
 
 
@@ -4187,11 +4137,6 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 	} // case AHK_NOTIFYICON
 	case AHK_DIALOG:  // User defined msg sent from our functions MsgBox() or FileSelect().
 	{
-		// Always call this to close the clipboard if it was open (e.g. due to a script
-		// line such as "MsgBox, %clipboard%" that got us here).  Seems better just to
-		// do this rather than incurring the delay and overhead of a MsgSleep() call:
-		CLOSE_CLIPBOARD_IF_OPEN;
-		
 		// Ensure that the app's top-most window (the modal dialog) is the system's
 		// foreground window.  This doesn't use FindWindow() since it can hang in rare
 		// cases.  And GetActiveWindow, GetTopWindow, GetWindow, etc. don't seem appropriate.
@@ -4459,7 +4404,7 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 		 return 0;
 	case AHK_EXECUTE_LABEL: 
 		g_script->mTempLabel = (Label *)wParam ;
-		g_script->mTempLabel->Execute();
+		g_script->mTempLabel->mJumpToLine->ExecUntil(UNTIL_RETURN);
 		return 0;
 #ifdef _USRDLL
 	case AHK_EXECUTE_FUNCTION_VARIANT: 
@@ -4828,7 +4773,47 @@ LPTSTR Script::DefaultDialogTitle()
 	return (mFileName && *mFileName) ? mFileName : T_AHK_NAME_VERSION;
 }
 
+UserFunc* Script::CreateHotFunc()
+{
+	// Should only be called during load time.
+	// Creates a new function for hotkeys and hotstrings.
+	// Caller should abort loading if this function returns nullptr.
+	
+	if (mUnusedHotFunc)
+	{
+		auto tmp = mLastHotFunc = g->CurrentFunc = mUnusedHotFunc;
+		mUnusedHotFunc = nullptr;
+		mHotFuncs.mCount++;			// DefineFunc "removed" this func previously.
+		ASSERT(mHotFuncs.mItem[mHotFuncs.mCount - 1] == tmp);
+		return tmp;
+	}
+	
+	static LPCTSTR sName = _T("<Hotkey>");
+	auto func = new UserFunc(sName);
+	
+	if (!func)
+	{
+		ScriptError(ERR_OUTOFMEM);
+		return nullptr;
+	}
+	
+	g->CurrentFunc = func; // Must do this before calling AddVar
 
+	// Add one parameter to hold the name of the hotkey/hotstring when triggered:
+	if (	!(func->mParam = (FuncParam*)g_SimpleHeap->Malloc(sizeof FuncParam))
+		||	!(func->mParam[0].var = AddVar(_T("ThisHotkey"), 10, &func->mVars, 0, VAR_DECLARE_LOCAL | VAR_LOCAL_FUNCPARAM)) )
+		return nullptr;
+
+	func->mParam[0].default_type = PARAM_DEFAULT_NONE;
+	func->mParam[0].is_byref = false;
+	func->mParamCount = 1;
+	func->mMinParams = 1;
+	func->mIsFuncExpression = false;
+	
+	mLastHotFunc = func;
+	mHotFuncs.Insert(func, mHotFuncs.mCount);
+	return func;
+}
 
 ResultType MsgBoxParseOptions(LPTSTR aOptions, int &aType, double &aTimeout, HWND &aOwner)
 {
@@ -5128,11 +5113,6 @@ INT_PTR CALLBACK InputBoxProc(HWND hWndDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 	{
 	case WM_INITDIALOG:
 	{
-		// Clipboard may be open if its contents were used to build the text or title
-		// of this dialog (e.g. "InputBox, out, %clipboard%").  It's best to do this before
-		// anything that might take a relatively long time (e.g. SetForegroundWindowEx()):
-		CLOSE_CLIPBOARD_IF_OPEN;
-
 		SetWindowLongPtr(hWndDlg, DWLP_USER, lParam); // Store it for later use.
 		auto &CURR_INPUTBOX = *(InputBoxType *)lParam;
 		CURR_INPUTBOX.hwnd = hWndDlg;
@@ -5439,17 +5419,15 @@ ResultType Script::SetSendLevel(int aValue, LPTSTR aValueStr)
 
 
 
-ResultType Line::MouseGetPos(DWORD aOptions)
+BIF_DECL(BIF_MouseGetPos)
 // Returns OK or FAIL.
 {
-	// Caller should already have ensured that at least one of these will be non-NULL.
-	// The only time this isn't true is for dynamically-built variable names.  In that
-	// case, we don't worry about it if it's NULL, since the user will already have been
-	// warned:
-	Var *output_var_x = ARGVAR1;  // Ok if NULL. Load-time validation has ensured that these are valid output variables (e.g. not built-in vars).
-	Var *output_var_y = ARGVAR2;  // Ok if NULL.
-	Var *output_var_parent = ARGVAR3;  // Ok if NULL.
-	Var *output_var_child = ARGVAR4;  // Ok if NULL.
+	// Since SYM_VAR is always VAR_NORMAL, these always resolve to normal vars or nullptr:
+	Var *output_var_x = ParamIndexToOutputVar(0);
+	Var *output_var_y = ParamIndexToOutputVar(1);
+	Var *output_var_parent = ParamIndexToOutputVar(2);
+	Var *output_var_child = ParamIndexToOutputVar(3);
+	int aOptions = ParamIndexToOptionalInt(4, 0);
 
 	POINT point;
 	GetCursorPos(&point);  // Realistically, can't fail?
@@ -5459,25 +5437,26 @@ ResultType Line::MouseGetPos(DWORD aOptions)
 
 	if (output_var_x) // else the user didn't want the X coordinate, just the Y.
 		if (!output_var_x->Assign(point.x - origin.x))
-			return FAIL;
+			_f_return_FAIL;
 	if (output_var_y) // else the user didn't want the Y coordinate, just the X.
 		if (!output_var_y->Assign(point.y - origin.y))
-			return FAIL;
+			_f_return_FAIL;
+
+	_f_set_retval_p(_T(""), 0); // Set default.
 
 	if (!output_var_parent && !output_var_child)
-		return OK;
+		_f_return_retval;
+
+	if (output_var_parent)
+		output_var_parent->Assign(); // Set default: empty.
+	if (output_var_child)
+		output_var_child->Assign(); // Set default: empty.
 
 	// This is the child window.  Despite what MSDN says, WindowFromPoint() appears to fetch
 	// a non-NULL value even when the mouse is hovering over a disabled control (at least on XP).
 	HWND child_under_cursor = WindowFromPoint(point);
 	if (!child_under_cursor)
-	{
-		if (output_var_parent)
-			output_var_parent->Assign();
-		if (output_var_child)
-			output_var_child->Assign();
-		return OK;
-	}
+		_f_return_retval;
 
 	HWND parent_under_cursor = GetNonChildParent(child_under_cursor);  // Find the first ancestor that isn't a child.
 	if (output_var_parent)
@@ -5487,12 +5466,11 @@ ResultType Line::MouseGetPos(DWORD aOptions)
 		// documented feature:
 		//if (!g->DetectHiddenWindows && !IsWindowVisible(parent_under_cursor))
 		//	return output_var_parent->Assign();
-		if (!output_var_parent->AssignHWND(parent_under_cursor))
-			return FAIL;
+		output_var_parent->AssignHWND(parent_under_cursor);
 	}
 
 	if (!output_var_child)
-		return OK;
+		_f_return_retval;
 
 	// Doing it this way overcomes the limitations of WindowFromPoint() and ChildWindowFromPoint()
 	// and also better matches the control that Window Spy would think is under the cursor:
@@ -5510,25 +5488,30 @@ ResultType Line::MouseGetPos(DWORD aOptions)
 	// although probably constant, is not useful for determine which one is one top of the others).
 
 	if (parent_under_cursor == child_under_cursor) // if there's no control per se, make it blank.
-		return output_var_child->Assign();
+		_f_return_retval;
 
 	if (aOptions & 0x02) // v1.0.43.06: Bitwise flag that means "return control's HWND vs. ClassNN".
-		return output_var_child->AssignHWND(child_under_cursor);
+	{
+		output_var_child->AssignHWND(child_under_cursor);
+		_f_return_retval;
+	}
 
 	class_and_hwnd_type cah;
 	cah.hwnd = child_under_cursor;  // This is the specific control we need to find the sequence number of.
 	TCHAR class_name[WINDOW_CLASS_SIZE];
 	cah.class_name = class_name;
 	if (!GetClassName(cah.hwnd, class_name, _countof(class_name) - 5))  // -5 to allow room for sequence number.
-		return output_var_child->Assign();
+		_f_return_retval;
 	cah.class_count = 0;  // Init for the below.
 	cah.is_found = false; // Same.
 	EnumChildWindows(parent_under_cursor, EnumChildFindSeqNum, (LPARAM)&cah); // Find this control's seq. number.
 	if (!cah.is_found)
-		return output_var_child->Assign();  
+		_f_return_retval;
 	// Append the class sequence number onto the class name and set the output param to be that value:
 	sntprintfcat(class_name, _countof(class_name), _T("%d"), cah.class_count);
-	return output_var_child->Assign(class_name);
+	if (!output_var_child->Assign(class_name))
+		_f_return_FAIL;
+	_f_return_retval;
 }
 
 
@@ -5931,16 +5914,23 @@ BIF_DECL(BIF_StrReplace)
 	_f_param_string(source, 0, &length);
 	_f_param_string(oldstr, 1);
 	_f_param_string_opt(newstr, 2);
-	Var *output_var_count = ParamIndexToOptionalVar(3); 
-	UINT replacement_limit = (UINT)ParamIndexToOptionalInt64(4, UINT_MAX); 
+
+	// Maintain this together with the equivalent section of BIF_InStr:
+	StringCaseSenseType string_case_sense = ParamIndexToCaseSense(3);
+	if (string_case_sense == SCS_INVALID 
+		|| string_case_sense == SCS_INSENSITIVE_LOGICAL) // Not supported, seems more useful to throw rather than using SCS_INSENSITIVE.
+		_f_throw(ERR_PARAM4_INVALID);
+
+	Var *output_var_count = ParamIndexToOutputVar(4); 
+	UINT replacement_limit = (UINT)ParamIndexToOptionalInt64(5, UINT_MAX); 
 	
+
 	// Note: The current implementation of StrReplace() should be able to handle any conceivable inputs
 	// without an empty string causing an infinite loop and without going infinite due to finding the
 	// search string inside of newly-inserted replace strings (e.g. replacing all occurrences
 	// of b with bcd would not keep finding b in the newly inserted bcd, infinitely).
 	LPTSTR dest;
-	UINT found_count = StrReplace(source, oldstr, newstr, (StringCaseSenseType)g->StringCaseSense
-		, replacement_limit, -1, &dest, &length); // Length of haystack is passed to improve performance because TokenToString() can often discover it instantaneously.
+	UINT found_count = StrReplace(source, oldstr, newstr, string_case_sense, replacement_limit, -1, &dest, &length); // Length of haystack is passed to improve performance because TokenToString() can often discover it instantaneously.
 
 	if (!dest) // Failure due to out of memory.
 		_f_throw(ERR_OUTOFMEM); 
@@ -6092,18 +6082,12 @@ throw_invalid_delimiter:
 
 
 
-ResultType Line::SplitPath(LPTSTR aFileSpec)
+ResultType SplitPath(LPCTSTR aFileSpec, Var *output_var_name, Var *output_var_dir, Var *output_var_ext, Var *output_var_name_no_ext, Var *output_var_drive)
 {
-	Var *output_var_name = ARGVAR2;  // i.e. Param #2. Ok if NULL.
-	Var *output_var_dir = ARGVAR3;  // Ok if NULL. Load-time validation has ensured that these are valid output variables (e.g. not built-in vars).
-	Var *output_var_ext = ARGVAR4;  // Ok if NULL.
-	Var *output_var_name_no_ext = ARGVAR5;  // Ok if NULL.
-	Var *output_var_drive = ARGVAR6;  // Ok if NULL.
-
 	// For URLs, "drive" is defined as the server name, e.g. http://somedomain.com
-	LPTSTR name = _T(""), name_delimiter = NULL, drive_end = NULL; // Set defaults to improve maintainability.
-	LPTSTR drive = omit_leading_whitespace(aFileSpec); // i.e. whitespace is considered for everything except the drive letter or server name, so that a pathless filename can have leading whitespace.
-	LPTSTR colon_double_slash = _tcsstr(aFileSpec, _T("://"));
+	LPCTSTR name = _T(""), name_delimiter = NULL, drive_end = NULL; // Set defaults to improve maintainability.
+	LPCTSTR drive = omit_leading_whitespace(aFileSpec); // i.e. whitespace is considered for everything except the drive letter or server name, so that a pathless filename can have leading whitespace.
+	LPCTSTR colon_double_slash = _tcsstr(aFileSpec, _T("://"));
 
 	if (colon_double_slash) // This is a URL such as ftp://... or http://...
 	{
@@ -6227,7 +6211,7 @@ ResultType Line::SplitPath(LPTSTR aFileSpec)
 				return FAIL;
 	}
 
-	LPTSTR ext_dot = _tcsrchr(name, '.');
+	LPCTSTR ext_dot = _tcsrchr(name, '.');
 	if (output_var_ext)
 	{
 		// Note that the OS doesn't allow filenames to end in a period.
@@ -6245,6 +6229,51 @@ ResultType Line::SplitPath(LPTSTR aFileSpec)
 		return FAIL;
 
 	return OK;
+}
+
+BIF_DECL(BIF_SplitPath)
+{
+	LPTSTR mem_to_free = nullptr;
+	_f_param_string(aFileSpec, 0);
+	Var *vars[6];
+	for (int i = 0; i < _countof(vars); ++i)
+		vars[i] = ParamIndexToOutputVar(i);
+	if (vars[0]) // Check for overlap of input/output vars.
+	{
+		// There are cases where this could be avoided, such as by careful ordering of the assignments
+		// in SplitPath(), or when there's only one output var.  Also, real paths are generally short
+		// enough that stack memory could be used.  However, perhaps simple is best in this case.
+		for (int i = 1; i < _countof(vars); ++i)
+		{
+			if (vars[i] == vars[0])
+			{
+				aFileSpec = mem_to_free = _tcsdup(aFileSpec);
+				if (!mem_to_free)
+					_f_throw(ERR_OUTOFMEM);
+				break;
+			}
+		}
+	}
+	aResultToken.SetValue(_T(""), 0);
+	if (!SplitPath(aFileSpec, vars[1], vars[2], vars[3], vars[4], vars[5]))
+		aResultToken.SetExitResult(FAIL);
+	free(mem_to_free);
+}
+
+
+
+BIF_DECL(BIF_Swap)
+{
+	Var *a = aParam[0]->var, *b = aParam[1]->var;
+	if (aParam[0]->symbol != SYM_VAR || aParam[1]->symbol != SYM_VAR || a->mType != VAR_NORMAL || b->mType != VAR_NORMAL)
+		_f_throw(ERR_INVALID_ARG_TYPE);
+	LPTSTR aName = a->mName, bName = b->mName;
+	Var aTempVar = *a;
+	*a = *b;
+	a->mName = aName;
+	*b = aTempVar;
+	b->mName = bName;
+	_f_return(true);
 }
 
 
@@ -6354,9 +6383,6 @@ int SortUDF(const void *a1, const void *a2)
 
 
 BIF_DECL(BIF_Sort)
-// Caller must ensure that aContents is modifiable (ArgMustBeDereferenced() currently ensures this) because
-// not only does this function modify it, it also needs to store its result back into output_var in a way
-// that requires that output_var not be at the same address as the contents that were sorted.
 {
 	// Set defaults in case of early goto:
 	LPTSTR mem_to_free = NULL;
@@ -6548,8 +6574,7 @@ BIF_DECL(BIF_Sort)
 	// Scan aContents and do the following:
 	// 1) Replace each delimiter with a terminator so that the individual items can be seen
 	//    as real strings by the SortWithOptions() and when copying the sorted results back
-	//    into output_vav.  It is safe to change aContents in this way because
-	//    ArgMustBeDereferenced() has ensured that those contents are in the deref buffer.
+	//    into the result.
 	// 2) Store a marker/pointer to each item (string) in aContents so that we know where
 	//    each item begins for sorting and recopying purposes.
 	LPTSTR *item_curr = item; // i.e. Don't use [] indexing for the reason in the paragraph previous to above.
@@ -7678,12 +7703,7 @@ BIF_DECL(BIF_FileSelect)
 	_f_param_string_opt(aGreeting, 2);
 	_f_param_string_opt(aFilter, 3);
 	
-	// Large in case more than one file is allowed to be selected.
-	// The call to GetOpenFileName() may fail if the first character of the buffer isn't NULL
-	// because it then thinks the buffer contains the default filename, which if it's uninitialized
-	// may be a string that's too long.
-	TCHAR file_buf[65535];
-	*file_buf = '\0'; // Set default.
+	LPCTSTR default_file_name = _T("");
 
 	TCHAR working_dir[MAX_PATH]; // Using T_MAX_PATH vs. MAX_PATH did not help on Windows 10.0.16299 (see below).
 	if (!aWorkingDir || !*aWorkingDir)
@@ -7728,31 +7748,19 @@ BIF_DECL(BIF_FileSelect)
 			LPTSTR last_backslash;
 			if (last_backslash = _tcsrchr(working_dir, '\\'))
 			{
-				tcslcpy(file_buf, last_backslash + 1, _countof(file_buf)); // Set the default filename.
+				default_file_name = last_backslash + 1;
 				*last_backslash = '\0'; // Make the working directory just the file's path.
 			}
 			else // The entire working_dir string is the default file (unless this is a clsid).
 				if (!is_clsid)
-				{
-					tcslcpy(file_buf, working_dir, _countof(file_buf));
-					*working_dir = '\0';  // This signals it to use the default directory.
-				}
+					default_file_name = working_dir; // This signals it to use the default directory.
 				//else leave working_dir set to the entire clsid string in case it's somehow valid.
 		}
 		// else it is a directory, so just leave working_dir set as it was initially.
 	}
 
-	TCHAR greeting[1024];
-	if (aGreeting && *aGreeting)
-		tcslcpy(greeting, aGreeting, _countof(greeting));
-	else
-		// Use a more specific title so that the dialogs of different scripts can be distinguished
-		// from one another, which may help script automation in rare cases:
-		sntprintf(greeting, _countof(greeting), _T("Select File - %s"), g_script->DefaultDialogTitle());
-
-	// The filter must be terminated by two NULL characters.  One is explicit, the other automatic:
-	TCHAR filter[1024], pattern[1024];
-	*filter = '\0'; *pattern = '\0'; // Set default.
+	TCHAR pattern[1024];
+	*pattern = '\0'; // Set default.
 	if (*aFilter)
 	{
 		LPTSTR pattern_start = _tcschr(aFilter, '(');
@@ -7766,43 +7774,42 @@ BIF_DECL(BIF_FileSelect)
 			LPTSTR pattern_end = _tcsrchr(pattern, ')'); // strrchr() in case there are other literal parentheses.
 			if (pattern_end)
 				*pattern_end = '\0';  // If parentheses are empty, this will set pattern to be the empty string.
-			else // no closing paren, so set to empty string as an indicator:
-				*pattern = '\0';
-
 		}
 		else // No open-paren, so assume the entire string is the filter.
 			tcslcpy(pattern, aFilter, _countof(pattern));
-		if (*pattern)
-		{
-			// Remove any spaces present in the pattern, such as a space after every semicolon
-			// that separates the allowed file extensions.  The API docs specify that there
-			// should be no spaces in the pattern itself, even though it's okay if they exist
-			// in the displayed name of the file-type:
-			StrReplace(pattern, _T(" "), _T(""), SCS_SENSITIVE);
-			// Also include the All Files (*.*) filter, since there doesn't seem to be much
-			// point to making this an option.  This is because the user could always type
-			// *.* and press ENTER in the filename field and achieve the same result:
-			sntprintf(filter, _countof(filter), _T("%s%c%s%cAll Files (*.*)%c*.*%c")
-				, aFilter, '\0', pattern, '\0', '\0', '\0'); // The final '\0' double-terminates by virtue of the fact that sntprintf() itself provides a final terminator.
-		}
-		else
-			*filter = '\0';  // It will use a standard default below.
 	}
+	UINT filter_count = 0;
+	COMDLG_FILTERSPEC filters[2];
+	if (*pattern)
+	{
+		// Remove any spaces present in the pattern, such as a space after every semicolon
+		// that separates the allowed file extensions.  The API docs specify that there
+		// should be no spaces in the pattern itself, even though it's okay if they exist
+		// in the displayed name of the file-type:
+		// Update by Lexikos: Don't remove spaces, since that gives incorrect behaviour for more
+		// complex patterns like "prefix *.ext" (where the space should be considered part of the
+		// pattern).  Although the docs for OPENFILENAMEW say "Do not include spaces", it may be
+		// just because spaces are considered part of the pattern.  On the other hand, the docs
+		// relating to IFileDialog::SetFileTypes() say nothing about spaces; and in fact, using a
+		// pattern like "*.cpp; *.h" will work correctly (possibly due to how leading spaces work
+		// with the file system).
+		//StrReplace(pattern, _T(" "), _T(""), SCS_SENSITIVE);
+		filters[0].pszName = aFilter;
+		filters[0].pszSpec = pattern;
+		++filter_count;
+	}
+	// Always include the All Files (*.*) filter, since there doesn't seem to be much
+	// point to making this an option.  This is because the user could always type
+	// *.* (or *) and press ENTER in the filename field and achieve the same result:
+	filters[filter_count].pszName = _T("All Files (*.*)");
+	filters[filter_count].pszSpec = _T("*.*");
+	++filter_count;
 
-	OPENFILENAME ofn = {0};
-	ofn.lStructSize = sizeof(OPENFILENAME);
-	ofn.hwndOwner = THREAD_DIALOG_OWNER; // Can be NULL, which is used instead of main window since no need to have main window forced into the background for this.
-	ofn.lpstrTitle = greeting;
-	ofn.lpstrFilter = *filter ? filter : _T("All Files (*.*)\0*.*\0Text Documents (*.txt)\0*.txt\0");
-	ofn.lpstrFile = file_buf;
-	ofn.nMaxFile = _countof(file_buf) - 1; // -1 to be extra safe.
-	// Specifying NULL will make it default to the last used directory (at least in Win2k):
-	ofn.lpstrInitialDir = *working_dir ? working_dir : NULL;
-
-	// Note that the OFN_NOCHANGEDIR flag is ineffective in some cases, so we'll use a custom
-	// workaround instead.  MSDN: "Windows NT 4.0/2000/XP: This flag is ineffective for GetOpenFileName."
-	// In addition, it does not prevent the CWD from changing while the user navigates from folder to
-	// folder in the dialog.
+	// v1.0.43.09: OFN_NODEREFERENCELINKS is now omitted by default because most people probably want a click
+	// on a shortcut to navigate to the shortcut's target rather than select the shortcut and end the dialog.
+	// v2: Testing on Windows 7 and 10 indicated IFileDialog doesn't change the working directory while the
+	// user navigates, unlike GetOpenFileName/GetSaveFileName, and doesn't appear to affect the CWD at all.
+	DWORD flags = FOS_NOCHANGEDIR; // FOS_NOCHANGEDIR according to MS: "Don't change the current working directory."
 
 	// For v1.0.25.05, the new "M" letter is used for a new multi-select method since the old multi-select
 	// is faulty in the following ways:
@@ -7814,12 +7821,18 @@ BIF_DECL(BIF_FileSelect)
 	// 2) The last item in the list is terminated by a linefeed, which is not as easily used with a
 	//    parsing loop as shown in example in the help file.
 	bool always_use_save_dialog = false; // Set default.
-	bool new_multi_select_method = false; // Set default.
 	switch (ctoupper(*aOptions))
 	{
+	case 'D':
+		++aOptions;
+		flags |= FOS_PICKFOLDERS;
+		if (*aFilter)
+			_f_throw(ERR_PARAM4_MUST_BE_BLANK);
+		filter_count = 0;
+		break;
 	case 'M':  // Multi-select.
 		++aOptions;
-		new_multi_select_method = true;
+		flags |= FOS_ALLOWMULTISELECT;
 		break;
 	case 'S': // Have a "Save" button rather than an "Open" button.
 		++aOptions;
@@ -7827,102 +7840,112 @@ BIF_DECL(BIF_FileSelect)
 		break;
 	}
 
+	TCHAR greeting[1024];
+	if (aGreeting && *aGreeting)
+		tcslcpy(greeting, aGreeting, _countof(greeting));
+	else
+		// Use a more specific title so that the dialogs of different scripts can be distinguished
+		// from one another, which may help script automation in rare cases:
+		sntprintf(greeting, _countof(greeting), _T("Select %s - %s")
+			, (flags & FOS_PICKFOLDERS) ? _T("Folder") : _T("File"), g_script->DefaultDialogTitle());
+
 	int options = ATOI(aOptions);
-	// v1.0.43.09: OFN_NODEREFERENCELINKS is now omitted by default because most people probably want a click
-	// on a shortcut to navigate to the shortcut's target rather than select the shortcut and end the dialog.
-	ofn.Flags = OFN_HIDEREADONLY | OFN_EXPLORER;  // OFN_HIDEREADONLY: Hides the Read Only check box.
-	if (options & 0x20) // v1.0.43.09.
-		ofn.Flags |= OFN_NODEREFERENCELINKS;
+	if (options & 0x20)
+		flags |= FOS_NODEREFERENCELINKS;
 	if (options & 0x10)
-		ofn.Flags |= OFN_OVERWRITEPROMPT;
+		flags |= FOS_OVERWRITEPROMPT;
 	if (options & 0x08)
-		ofn.Flags |= OFN_CREATEPROMPT;
-	if (new_multi_select_method)
-		ofn.Flags |= OFN_ALLOWMULTISELECT;
+		flags |= FOS_CREATEPROMPT;
 	if (options & 0x02)
-		ofn.Flags |= OFN_PATHMUSTEXIST;
+		flags |= FOS_PATHMUSTEXIST;
 	if (options & 0x01)
-		ofn.Flags |= OFN_FILEMUSTEXIST;
+		flags |= FOS_FILEMUSTEXIST;
+
+	// Despite old documentation indicating it was due to an "OS quirk", previous versions were specifically
+	// designed to enable the Save button when OFN_OVERWRITEPROMPT is present but not OFN_CREATEPROMPT, since
+	// the former requires the Save dialog while the latter requires the Open dialog.  If both options are
+	// present, the caller must specify or omit 'S' to choose the dialog type, and one option has no effect.
+	if ((flags & FOS_OVERWRITEPROMPT) && !(flags & (FOS_CREATEPROMPT | FOS_PICKFOLDERS)))
+		always_use_save_dialog = true;
+
+	IFileDialog *pfd = NULL;
+	HRESULT hr = CoCreateInstance(always_use_save_dialog ? CLSID_FileSaveDialog : CLSID_FileOpenDialog,
+		NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pfd));
+	if (FAILED(hr))
+		_f_throw_win32(hr);
+
+	pfd->SetOptions(flags);
+	pfd->SetTitle(greeting);
+	if (filter_count)
+		pfd->SetFileTypes(filter_count, filters);
+	pfd->SetFileName(default_file_name);
+
+	if (*working_dir && default_file_name != working_dir)
+	{
+		IShellItem *psi;
+		if (SUCCEEDED(SHCreateItemFromParsingName(working_dir, nullptr, IID_PPV_ARGS(&psi))))
+		{
+			pfd->SetFolder(psi);
+			psi->Release();
+		}
+	}
 
 	// At this point, we know a dialog will be displayed.  See macro's comments for details:
 	DIALOG_PREP
 	POST_AHK_DIALOG(0) // Do this only after the above. Must pass 0 for timeout in this case.
-
 	++g_nFileDialogs;
-	// Below: OFN_CREATEPROMPT doesn't seem to work with GetSaveFileName(), so always
-	// use GetOpenFileName() in that case:
-	BOOL result = (always_use_save_dialog || ((ofn.Flags & OFN_OVERWRITEPROMPT) && !(ofn.Flags & OFN_CREATEPROMPT)))
-		? GetSaveFileName(&ofn) : GetOpenFileName(&ofn);
+	auto result = pfd->Show(THREAD_DIALOG_OWNER);
 	--g_nFileDialogs;
-
 	DIALOG_END
 
-	// Both GetOpenFileName() and GetSaveFileName() change the working directory as a side-effect
-	// of their operation.  The below is not a 100% workaround for the problem because even while
-	// a new quasi-thread is running (having interrupted this one while the dialog is still
-	// displayed), the dialog is still functional, and as a result, the dialog changes the
-	// working directory every time the user navigates to a new folder.
-	// This is only needed when the user pressed OK, since the dialog auto-restores the
-	// working directory if CANCEL is pressed or the window was closed by means other than OK.
-	// UPDATE: No, it's needed for CANCEL too because GetSaveFileName/GetOpenFileName will restore
-	// the working dir to the wrong dir if the user changed it (via SetWorkingDir) while the
-	// dialog was displayed.
-	// Restore the original working directory so that any threads suspended beneath this one,
-	// and any newly launched ones if there aren't any suspended threads, will have the directory
-	// that the user expects.  NOTE: It's possible for g_WorkingDir to have changed via the
-	// SetWorkingDir command while the dialog was displayed (e.g. a newly launched quasi-thread):
-	if (*g_WorkingDir)
-		SetCurrentDirectory(g_WorkingDir);
-
-	if (!result) // User pressed CANCEL vs. OK to dismiss the dialog or there was a problem displaying it.
+	if (flags & FOS_ALLOWMULTISELECT)
 	{
-		// Currently assuming the user canceled, otherwise this would tell us whether an error
-		// occurred vs. the user canceling: if (CommDlgExtendedError())
-		_f_return_empty;
-	}
-
-	if (ofn.Flags & OFN_ALLOWMULTISELECT)
-	{
-		LPTSTR cp;
-		// If the first terminator in file_buf is also the last, the user selected only
-		// a single file:
-		size_t length = _tcslen(file_buf);
-		if (!file_buf[length + 1]) // The list contains only a single file (full path and name).
+		auto *files = Array::Create();
+		IFileOpenDialog *pfod;
+		if (SUCCEEDED(result) && SUCCEEDED(pfd->QueryInterface(&pfod)))
 		{
-			// v1.0.25.05: To make the result of selecting one file the same as selecting multiple files
-			// -- and thus easier to work with in a script -- convert the result into the multi-file
-			// format (folder as first item and naked filename as second):
-			if (cp = _tcsrchr(file_buf, '\\'))
+			IShellItemArray *penum;
+			if (SUCCEEDED(pfod->GetResults(&penum)))
 			{
-				*cp = '\n';
-				// If the folder is the root folder, add a backslash so that selecting a single
-				// file yields the same reported folder as selecting multiple files.  One reason
-				// for doing it this way is that SetCurrentDirectory() requires a backslash after
-				// a root folder to succeed.  This allows a script to use SetWorkingDir to change
-				// to the selected folder before operating on each of the selected/naked filenames.
-				if (cp - file_buf == 2 && cp[-1] == ':') // e.g. "C:"
+				DWORD count = 0;
+				penum->GetCount(&count);
+				for (DWORD i = 0; i < count; ++i)
 				{
-					tmemmove(cp + 1, cp, _tcslen(cp) + 1); // Make room to insert backslash (since only one file was selcted, the buf is large enough).
-					*cp = '\\';
+					IShellItem *psi;
+					if (SUCCEEDED(penum->GetItemAt(i, &psi)))
+					{
+						LPWSTR filename;
+						if (SUCCEEDED(psi->GetDisplayName(SIGDN_FILESYSPATH, &filename)))
+						{
+							files->Append(filename);
+							CoTaskMemFree(filename);
+						}
+						psi->Release();
+					}
 				}
+				penum->Release();
 			}
+			pfod->Release();
 		}
-		else // More than one file was selected.
-		{
-			// Use the same method as the old multi-select format except don't provide a
-			// linefeed after the final item.  That final linefeed would make parsing via
-			// a parsing loop more complex because a parsing loop would see a blank item
-			// at the end of the list:
-			for (cp = file_buf;;)
-			{
-				for (; *cp; ++cp); // Find the next terminator.
-				if (!cp[1]) // This is the last file because it's double-terminated, so we're done.
-					break;
-				*cp = '\n'; // Replace zero-delimiter with a visible/printable delimiter, for the user.
-			}
-		}
+		pfd->Release();
+		_f_return(files);
 	}
-	_f_return(file_buf);
+	aResultToken.SetValue(_T(""), 0); // Set default.
+	IShellItem *psi;
+	if (SUCCEEDED(result) && SUCCEEDED(pfd->GetResult(&psi)))
+	{
+		LPWSTR filename;
+		if (SUCCEEDED(psi->GetDisplayName(SIGDN_FILESYSPATH, &filename)))
+		{
+			aResultToken.Return(filename);
+			CoTaskMemFree(filename);
+		}
+		psi->Release();
+	}
+	//else: User pressed CANCEL vs. OK to dismiss the dialog or there was a problem displaying it.
+		// Currently assuming the user canceled, otherwise this would tell us whether an error
+		// occurred vs. the user canceling: if (result != HRESULT_FROM_WIN32(ERROR_CANCELLED))
+	pfd->Release();
 }
 
 
@@ -8252,7 +8275,7 @@ BIF_DECL(BIF_FileAppend)
 	bool file_was_already_open = ts;
 
 #ifdef CONFIG_DEBUGGER
-	if (*aFilespec == '*' && !aFilespec[1] && !aBuf_obj && g_Debugger.FileAppendStdOut(aBuf))
+	if (*aFilespec == '*' && !aFilespec[1] && !aBuf_obj && g_Debugger.OutputStdOut(aBuf))
 	{
 		// StdOut has been redirected to the debugger, and this "FileAppend" call has been
 		// fully handled by the call above, so just return.
@@ -8927,14 +8950,17 @@ ResultType GetObjectIntProperty(IObject *aObject, LPTSTR aPropName, __int64 &aVa
 	{
 		result_token.Free();
 		if (result == FAIL || result == EARLY_EXIT)
-			return aResultToken.SetExitResult(result);
+		{
+			aResultToken.SetExitResult(result);
+			return FAIL;
+		}
 		if (result != INVOKE_NOT_HANDLED) // Property exists but is not an integer.
 		{
 			if (!TokenIsEmptyString(result_token))
 				return aResultToken.Error(ERR_TYPE_MISMATCH, aPropName);
 			result = INVOKE_NOT_HANDLED;
 		}
-		aValue = 0;
+		//aValue = 0; // Caller should set default value for these cases.
 		if (!aOptional)
 			return aResultToken.UnknownMemberError(ExprTokenType(aObject), IT_GET, aPropName);
 		return result; // Let caller know it wasn't found.
@@ -8961,7 +8987,7 @@ ResultType SetObjectIntProperty(IObject *aObject, LPTSTR aPropName, __int64 aVal
 
 ResultType GetObjectPtrProperty(IObject *aObject, LPTSTR aPropName, UINT_PTR &aPtr, ResultToken &aResultToken, bool aOptional)
 {
-	__int64 value;
+	__int64 value = NULL;
 	auto result = GetObjectIntProperty(aObject, aPropName, value, aResultToken, aOptional);
 	aPtr = (UINT_PTR)value;
 	return result;
@@ -8970,7 +8996,7 @@ ResultType GetObjectPtrProperty(IObject *aObject, LPTSTR aPropName, UINT_PTR &aP
 
 ResultType DetermineTargetHwnd(HWND &aWindow, ResultToken &aResultToken, ExprTokenType &aToken)
 {
-	__int64 n;
+	__int64 n = NULL;
 	if (IObject *obj = TokenToObject(aToken))
 	{
 		if (!GetObjectIntProperty(obj, _T("Hwnd"), n, aResultToken))
@@ -9014,7 +9040,8 @@ ResultType DetermineTargetWindow(HWND &aWindow, ResultToken &aResultToken, ExprT
 }
 
 
-ResultType DetermineTargetControl(HWND &aControl, HWND &aWindow, ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, int aNonWinParamCount)
+ResultType DetermineTargetControl(HWND &aControl, HWND &aWindow, ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount
+	, int aNonWinParamCount, bool aThrowIfNotFound)
 {
 	aWindow = aControl = nullptr;
 	// Only functions which can operate on top-level windows allow Control to be
@@ -9040,7 +9067,7 @@ ResultType DetermineTargetControl(HWND &aControl, HWND &aWindow, ResultToken &aR
 	if (!DetermineTargetWindow(aWindow, aResultToken, aParam + 1, aParamCount - 1, aNonWinParamCount))
 		return FAIL;
 	aControl = control_spec ? ControlExist(aWindow, control_spec) : aWindow;
-	if (!aControl)
+	if (!aControl && aThrowIfNotFound)
 		return aResultToken.Error(ERR_NO_CONTROL);
 	return OK;
 }
@@ -9082,10 +9109,11 @@ Label *Line::GetJumpTarget(bool aIsDereferenced)
 		LineError(ERR_NO_LABEL, FAIL, target_label);
 		return NULL;
 	}
+	// If g->CurrentFunc, label is never outside the function since it would not
+	// have been found by FindLabel().  So there's no need to check for that here.
 	if (!aIsDereferenced)
 		mRelatedLine = (Line *)label; // The script loader has ensured that label->mJumpToLine isn't NULL.
 	// else don't update it, because that would permanently resolve the jump target, and we want it to stay dynamic.
-	// Seems best to do this even for GOSUBs even though it's a bit weird:
 	return IsJumpValid(*label);
 	// Any error msg was already displayed by the above call.
 }
@@ -9097,20 +9125,24 @@ Label *Line::IsJumpValid(Label &aTargetLabel, bool aSilent)
 {
 	// aTargetLabel can be NULL if this Goto's target is the physical end of the script.
 	// And such a destination is always valid, regardless of where aOrigin is.
-	// UPDATE: It's no longer possible for the destination of a Goto or Gosub to be
+	// UPDATE: It's no longer possible for the destination of a Goto to be
 	// NULL because the script loader has ensured that the end of the script always has
 	// an extra ACT_EXIT that serves as an anchor for any final labels in the script:
 	//if (aTargetLabel == NULL)
 	//	return OK;
 	// The above check is also necessary to avoid dereferencing a NULL pointer below.
 
+	if (!CheckValidFinallyJump(aTargetLabel.mJumpToLine, aSilent))
+		return NULL;
+
 	Line *parent_line_of_label_line;
 	if (   !(parent_line_of_label_line = aTargetLabel.mJumpToLine->mParentLine)   )
-		// A Goto/Gosub can always jump to a point anywhere in the outermost layer
-		// (i.e. outside all blocks) without restriction:
+		// A Goto can always jump to a point anywhere in the outermost layer
+		// (i.e. outside all blocks) without restriction (except from inside a
+		// function to outside, but in that case the label would not be found):
 		return &aTargetLabel; // Indicate success.
 
-	// So now we know this Goto/Gosub is attempting to jump into a block somewhere.  Is that
+	// So now we know this Goto is attempting to jump into a block somewhere.  Is that
 	// block a legal place to jump?:
 
 	for (Line *ancestor = mParentLine; ancestor != NULL; ancestor = ancestor->mParentLine)
@@ -9122,21 +9154,12 @@ Label *Line::IsJumpValid(Label &aTargetLabel, bool aSilent)
 	// is at a more shallow level but is in some block totally unrelated to it!
 	// Returns FAIL by default, which is what we want because that value is zero:
 	if (!aSilent)
-		LineError(_T("A Goto/Gosub must not jump into a block that doesn't enclose it."));
+		LineError(_T("A Goto must not jump into a block that doesn't enclose it."));
 	return NULL;
 }
 
 
-BOOL Line::IsOutsideAnyFunctionBody() // v1.0.48.02
-{
-	for (Line *ancestor = mParentLine; ancestor != NULL; ancestor = ancestor->mParentLine)
-		if (ancestor->mAttribute && ancestor->mActionType == ACT_BLOCK_BEGIN) // Ordered for short-circuit performance.
-			return FALSE; // Non-zero mAttribute marks an open-brace as belonging to a function's body, so indicate this line is inside a function.
-	return TRUE; // Indicate that this line is not inside any function body.
-}
-
-
-BOOL Line::CheckValidFinallyJump(Line* jumpTarget) // v1.1.14
+BOOL Line::CheckValidFinallyJump(Line* jumpTarget, bool aSilent)
 {
 	Line* jumpParent = jumpTarget->mParentLine;
 	for (Line *ancestor = mParentLine; ancestor != NULL; ancestor = ancestor->mParentLine)
@@ -9145,7 +9168,8 @@ BOOL Line::CheckValidFinallyJump(Line* jumpTarget) // v1.1.14
 			return TRUE; // We found the common ancestor.
 		if (ancestor->mActionType == ACT_FINALLY)
 		{
-			LineError(ERR_BAD_JUMP_INSIDE_FINALLY);
+			if (!aSilent)
+				LineError(ERR_BAD_JUMP_INSIDE_FINALLY);
 			return FALSE; // The common ancestor is outside the FINALLY block and thus this jump is invalid.
 		}
 	}
@@ -9157,17 +9181,40 @@ BOOL Line::CheckValidFinallyJump(Line* jumpTarget) // v1.1.14
 // BUILT-IN VARIABLES //
 ////////////////////////
 
-VarSizeType BIV_True_False_Null(LPTSTR aBuf, LPTSTR aVarName)
+
+BIV_DECL_R(BIV_Clipboard)
 {
-	if (aBuf)
+	auto length = g_clip->Get();
+	if (TokenSetResult(aResultToken, nullptr, length))
 	{
-		*aBuf++ = (aVarName[2] == 'l' || aVarName[2] == 'L') ? '0': '1';
-		*aBuf = '\0';
+		aResultToken.marker_length = g_clip->Get(aResultToken.marker);
+		if (aResultToken.marker_length == CLIPBOARD_FAILURE)
+			aResultToken.SetExitResult(FAIL);
+		aResultToken.symbol = SYM_STRING;
 	}
-	return 1; // The length of the value.
+	g_clip->Close();
 }
 
-VarSizeType BIV_MMM_DDD(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_W(BIV_Clipboard_Set)
+{
+	if (auto *obj = BivRValueToObject())
+	{
+		if (ClipboardAll *cba = dynamic_cast<ClipboardAll *>(obj))
+		{
+			if (!Var::SetClipboardAll(cba->Data(), cba->Size()))
+				_f_return_FAIL;
+			return;
+		}
+		_f_throw_type(_T("ClipboardAll"), obj->Type());
+	}
+	size_t aLength;
+	LPTSTR aBuf = BivRValueToString(&aLength);
+	if (!g_clip->Set(aBuf, aLength))
+		_f_return_FAIL;
+}
+
+
+BIV_DECL_R(BIV_MMM_DDD)
 {
 	LPTSTR format_str;
 	switch(ctoupper(aVarName[2]))
@@ -9177,10 +9224,13 @@ VarSizeType BIV_MMM_DDD(LPTSTR aBuf, LPTSTR aVarName)
 	case 'D': format_str = (aVarName[5] ? _T("dddd") : _T("ddd")); break;
 	}
 	// Confirmed: The below will automatically use the local time (not UTC) when 3rd param is NULL.
-	return (VarSizeType)(GetDateFormat(LOCALE_USER_DEFAULT, 0, NULL, format_str, aBuf, aBuf ? 999 : 0) - 1);
+	int len = GetDateFormatEx(LOCALE_NAME_USER_DEFAULT, 0, nullptr, format_str, _f_retval_buf, _f_retval_buf_size, nullptr);
+	if (len && !_f_retval_buf[len - 1])
+		--len; // "Returns the number of characters written" apparently includes the terminator.
+	_f_return_p(_f_retval_buf, len);
 }
 
-VarSizeType BIV_DateTime(LPTSTR aBuf, LPTSTR aVarName)
+VarSizeType GetDateTimeBIV(LPTSTR aBuf, LPTSTR aVarName)
 {
 	if (!aBuf)
 		return 6; // Since only an estimate is needed in this mode, return the maximum length of any item.
@@ -9190,7 +9240,7 @@ VarSizeType BIV_DateTime(LPTSTR aBuf, LPTSTR aVarName)
 	// The current time is refreshed only if it's been a certain number of milliseconds since
 	// the last fetch of one of these built-in time variables.  This keeps the variables in
 	// sync with one another when they are used consecutively such as this example:
-	// Var = %A_Hour%:%A_Min%:%A_Sec%
+	// Var := A_Hour ':' A_Min ':' A_Sec
 	// Using GetTickCount() because it's very low overhead compared to the other time functions:
 	_thread_local static DWORD sLastUpdate = 0; // Static should be thread + recursion safe in this case.
 	_thread_local static SYSTEMTIME sST = { 0 }; // Init to detect when it's empty.
@@ -9246,41 +9296,35 @@ VarSizeType BIV_DateTime(LPTSTR aBuf, LPTSTR aVarName)
 	return 0; // Never reached, but avoids compiler warning.
 }
 
+BIV_DECL_R(BIV_DateTime)
+{
+	GetDateTimeBIV(_f_retval_buf, aVarName);
+	_f_return_p(_f_retval_buf);
+}
+
 BIV_DECL_R(BIV_ListLines)
 {
-	if (aBuf)
-	{
-		*aBuf++ = g->ListLinesIsEnabled ? '1' : '0';
-		*aBuf = '\0';
-	}
-	return 1;
+	_f_return_b(g->ListLinesIsEnabled);
 }
 
 BIV_DECL_W(BIV_ListLines_Set)
 {
-	g->ListLinesIsEnabled = ResultToBOOL(aBuf);
-	return OK;
+	g->ListLinesIsEnabled = BivRValueToBOOL();
 }
 
-VarSizeType BIV_TitleMatchMode(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_TitleMatchMode)
 {
 	if (g->TitleMatchMode == FIND_REGEX) // v1.0.45.
-	{
-		if (aBuf)  // For backward compatibility (due to StringCaseSense), never change the case used here:
-			_tcscpy(aBuf, _T("RegEx"));
-		return 5; // The length.
-	}
+		// For backward compatibility (due to possible use of case-sensitive comparison), never change the case used here:
+		_f_return_p(_T("RegEx"));
 	// Otherwise, it's a numerical mode:
-	// It's done this way in case it's ever allowed to go beyond a single-digit number.
-	TCHAR buf[MAX_INTEGER_SIZE];
-	LPTSTR target_buf = aBuf ? aBuf : buf;
-	_itot(g->TitleMatchMode, target_buf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
-	return (VarSizeType)_tcslen(target_buf);
+	_f_return_i(g->TitleMatchMode);
 }
 
 BIV_DECL_W(BIV_TitleMatchMode_Set)
 {
-	switch (Line::ConvertTitleMatchMode((LPTSTR)aBuf))
+	LPTSTR aBuf = BivRValueToString();
+	switch (Line::ConvertTitleMatchMode(aBuf))
 	{
 	case FIND_IN_LEADING_PART: g->TitleMatchMode = FIND_IN_LEADING_PART; break;
 	case FIND_ANYWHERE: g->TitleMatchMode = FIND_ANYWHERE; break;
@@ -9290,74 +9334,34 @@ BIV_DECL_W(BIV_TitleMatchMode_Set)
 	case FIND_FAST: g->TitleFindFast = true; break;
 	case FIND_SLOW: g->TitleFindFast = false; break;
 	default:
-		return g_script->RuntimeError(ERR_INVALID_VALUE, aBuf);
+		_f_throw(ERR_INVALID_VALUE, aBuf);
 	}
-	return OK;
 }
 
-VarSizeType BIV_TitleMatchModeSpeed(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_TitleMatchModeSpeed)
 {
-	if (aBuf)  // For backward compatibility (due to StringCaseSense), never change the case used here:
-		_tcscpy(aBuf, g->TitleFindFast ? _T("Fast") : _T("Slow"));
-	return 4;  // Always length 4
+	// For backward compatibility (due to possible use of case-sensitive comparison), never change the case used here:
+	_f_return_p(g->TitleFindFast ? _T("Fast") : _T("Slow"));
 }
 
-VarSizeType BIV_DetectHiddenWindows(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_DetectHiddenWindows)
 {
-	if (aBuf)
-	{
-		*aBuf++ = g->DetectHiddenWindows ? '1' : '0';
-		*aBuf = '\0';
-	}
-	return 1;
+	_f_return_b(g->DetectHiddenWindows);
 }
 
 BIV_DECL_W(BIV_DetectHiddenWindows_Set)
 {
-	ToggleValueType toggle;
-	if ( (toggle = Line::ConvertOnOff(aBuf, NEUTRAL)) != NEUTRAL )
-		g->DetectHiddenWindows = (toggle == TOGGLED_ON);
-	else
-		return g_script->RuntimeError(ERR_INVALID_VALUE, aBuf);
-	return OK;
+	g->DetectHiddenWindows = BivRValueToBOOL();
 }
 
-VarSizeType BIV_DetectHiddenText(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_DetectHiddenText)
 {
-	if (aBuf)
-	{
-		*aBuf++ = g->DetectHiddenText ? '1' : '0';
-		*aBuf = '\0';
-	}
-	return 1;
+	_f_return_b(g->DetectHiddenText);
 }
 
 BIV_DECL_W(BIV_DetectHiddenText_Set)
 {
-	ToggleValueType toggle;
-	if ( (toggle = Line::ConvertOnOff(aBuf, NEUTRAL)) != NEUTRAL )
-		g->DetectHiddenText = (toggle == TOGGLED_ON);
-	else
-		return g_script->RuntimeError(ERR_INVALID_VALUE, aBuf);
-	return OK;
-}
-
-VarSizeType BIV_StringCaseSense(LPTSTR aBuf, LPTSTR aVarName)
-{
-	return aBuf
-		? (VarSizeType)_tcslen(_tcscpy(aBuf, g->StringCaseSense == SCS_INSENSITIVE ? _T("Off") // For backward compatibility (due to StringCaseSense), never change the case used here.  Fixed in v1.0.42.01 to return exact length (required).
-			: (g->StringCaseSense == SCS_SENSITIVE ? _T("On") : _T("Locale"))))
-		: 6; // Room for On, Off, or Locale (in the estimation phase).
-}
-
-BIV_DECL_W(BIV_StringCaseSense_Set)
-{
-	StringCaseSenseType sense;
-	if ( (sense = Line::ConvertStringCaseSense(aBuf)) != SCS_INVALID )
-		g->StringCaseSense = sense;
-	else
-		return g_script->RuntimeError(ERR_INVALID_VALUE, aBuf);
-	return OK;
+	g->DetectHiddenText = BivRValueToBOOL();
 }
 
 int& BIV_xDelay(LPTSTR aVarName)
@@ -9393,96 +9397,72 @@ int& BIV_xDelay(LPTSTR aVarName)
 	}
 }
 
-VarSizeType BIV_xDelay(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_xDelay)
 {
-	TCHAR buf[MAX_INTEGER_SIZE];
-	LPTSTR target_buf = aBuf ? aBuf : buf;
-	int result = BIV_xDelay(aVarName);
-	_itot(result, target_buf, 10);
-	return (VarSizeType)_tcslen(target_buf);
+	_f_return_i(BIV_xDelay(aVarName));
 }
 
 BIV_DECL_W(BIV_xDelay_Set)
 {
-	int &delay_var_ref = BIV_xDelay(aVarName);
-	delay_var_ref = ATOI(aBuf);
-	return OK;
+	BIV_xDelay(aVarName) = (int)BivRValueToInt64();
 }
 
-VarSizeType BIV_DefaultMouseSpeed(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_DefaultMouseSpeed)
 {
-	TCHAR buf[MAX_INTEGER_SIZE];
-	LPTSTR target_buf = aBuf ? aBuf : buf;
-	_itot(g->DefaultMouseSpeed, target_buf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
-	return (VarSizeType)_tcslen(target_buf);
+	_f_return_i(g->DefaultMouseSpeed);
 }
 
 BIV_DECL_W(BIV_DefaultMouseSpeed_Set)
 {
-	g->DefaultMouseSpeed = ATOI(aBuf);
-	return OK;
+	g->DefaultMouseSpeed = (int)BivRValueToInt64();
 }
 
-VarSizeType BIV_CoordMode(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_CoordMode)
 {
-	_thread_local static LPCTSTR sCoordModes[] = COORD_MODES;
-	LPCTSTR result = sCoordModes[(g->CoordMode >> Line::ConvertCoordModeCmd(aVarName + 11)) & COORD_MODE_MASK];
-	if (aBuf)
-		_tcscpy(aBuf, result);
-	return 6; // Currently all are 6 chars.
+	_thread_local static LPTSTR sCoordModes[] = COORD_MODES;
+	_f_return_p(sCoordModes[(g->CoordMode >> Line::ConvertCoordModeCmd(aVarName + 11)) & COORD_MODE_MASK]);
 }
 
 BIV_DECL_W(BIV_CoordMode_Set)
 {
-	return Script::SetCoordMode(aVarName + 11, aBuf); // A_CoordMode is 11 chars.
+	if (!Script::SetCoordMode(aVarName + 11, BivRValueToString())) // A_CoordMode is 11 chars.
+		_f_return_FAIL;
 }
 
-VarSizeType BIV_SendMode(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_SendMode)
 {
-	_thread_local static LPCTSTR sSendModes[] = SEND_MODES;
-	LPCTSTR result = sSendModes[g->SendMode];
-	if (aBuf)
-		_tcscpy(aBuf, result);
-	return (VarSizeType)_tcslen(result);
+	_thread_local static LPTSTR sSendModes[] = SEND_MODES;
+	_f_return_p(sSendModes[g->SendMode]);
 }
 
 BIV_DECL_W(BIV_SendMode_Set)
 {
-	return Script::SetSendMode(aBuf);
+	if (!Script::SetSendMode(BivRValueToString()))
+		_f_return_FAIL;
 }
 
-VarSizeType BIV_SendLevel(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_SendLevel)
 {
-	if (aBuf)
-		return (VarSizeType)_tcslen(_itot(g->SendLevel, aBuf, 10));  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
-	return 3; // Enough room for the maximum SendLevel (100).
+	_f_return_i(g->SendLevel);
 }
 
 BIV_DECL_W(BIV_SendLevel_Set)
 {
-	return Script::SetSendLevel(ATOI(aBuf), aBuf);
+	if (!Script::SetSendLevel((int)BivRValueToInt64(), BivRValueToString()))
+		_f_return_FAIL;
 }
 
-VarSizeType BIV_StoreCapslockMode(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_StoreCapsLockMode)
 {
-	if (aBuf)
-	{
-		*aBuf++ = g->StoreCapslockMode ? '1' : '0';
-		*aBuf = '\0';
-	}
-	return 1;
+	_f_return_b(g->StoreCapslockMode);
 }
 
-BIV_DECL_W(BIV_StoreCapslockMode_Set)
+BIV_DECL_W(BIV_StoreCapsLockMode_Set)
 {
-	ToggleValueType toggle = Line::ConvertOnOff(aBuf, NEUTRAL);
-	if (toggle == NEUTRAL)
-		return g_script->RuntimeError(ERR_INVALID_VALUE, aBuf);
-	g->StoreCapslockMode = (toggle == TOGGLED_ON);
-	return OK;
+	g->StoreCapslockMode = BivRValueToBOOL();
 }
 
-VarSizeType BIV_IsPaused(LPTSTR aBuf, LPTSTR aVarName) // v1.0.48: Lexikos: Added BIV_IsPaused and BIV_IsCritical.
+BIV_DECL_R(BIV_IsPaused) // v1.0.48: Lexikos: Added BIV_IsPaused and BIV_IsCritical.
 {
 	// Although A_IsPaused could indicate how many threads are paused beneath the current thread,
 	// that would be a problem because it would yield a non-zero value even when the underlying thread
@@ -9494,280 +9474,183 @@ VarSizeType BIV_IsPaused(LPTSTR aBuf, LPTSTR aVarName) // v1.0.48: Lexikos: Adde
 	//    The fact that it wouldn't be likely for a function to turn off pause then turn it back on
 	//      (or vice versa), which was the main reason for storing "Off" and "On" in things like
 	//      A_DetectHiddenWindows.
-	if (aBuf)
-	{
-		// Checking g>g_array avoids any chance of underflow, which might otherwise happen if this is
-		// called by the AutoExec section or a threadless callback running in thread #0.
-		*aBuf++ = (g > g_array && g[-1].IsPaused) ? '1' : '0';
-		*aBuf = '\0';
-	}
-	return 1;
+	// Checking g>g_array avoids any chance of underflow, which might otherwise happen if this is
+	// called by the AutoExec section or a threadless callback running in thread #0.
+	_f_return_b(g > g_array && g[-1].IsPaused);
 }
 
-VarSizeType BIV_IsCritical(LPTSTR aBuf, LPTSTR aVarName) // v1.0.48: Lexikos: Added BIV_IsPaused and BIV_IsCritical.
+BIV_DECL_R(BIV_IsCritical) // v1.0.48: Lexikos: Added BIV_IsPaused and BIV_IsCritical.
 {
-	if (!aBuf) // Return conservative estimate in case Critical status can ever change between the 1st and 2nd calls to this function.
-		return MAX_INTEGER_LENGTH;
 	// It seems more useful to return g->PeekFrequency than "On" or "Off" (ACT_CRITICAL ensures that
 	// g->PeekFrequency!=0 whenever g->ThreadIsCritical==true).  Also, the word "Is" in "A_IsCritical"
 	// implies a value that can be used as a boolean such as "if A_IsCritical".
 	if (g->ThreadIsCritical)
-		return (VarSizeType)_tcslen(UTOA(g->PeekFrequency, aBuf)); // ACT_CRITICAL ensures that g->PeekFrequency > 0 when critical is on.
+		_f_return_i(g->PeekFrequency); // ACT_CRITICAL ensures that g->PeekFrequency > 0 when critical is on.
 	// Otherwise:
-	*aBuf++ = '0';
-	*aBuf = '\0';
-	return 1; // Caller might rely on receiving actual length when aBuf!=NULL.
+	_f_return_i(0);
 }
 
-VarSizeType BIV_IsSuspended(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_IsSuspended)
 {
-	if (aBuf)
-	{
-		*aBuf++ = g_IsSuspended ? '1' : '0';
-		*aBuf = '\0';
-	}
-	return 1;
+	_f_return_b(g_IsSuspended);
 }
 
-VarSizeType BIV_IsCompiled(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_IsCompiled)
 {
-	if (!g_hResource)
-	{
-		if (aBuf)
-			*aBuf = '\0';
-		return 1;
-	} 
-	else if (aBuf)
-	{
-		*aBuf++ = '1';
-		*aBuf = '\0';
-	}
-	return 1;
+	_f_return_b(!g_hResource ? false : true);
 }
 
 
 
-VarSizeType BIV_IsUnicode(LPTSTR aBuf, LPTSTR aVarName)
-{
-#ifdef UNICODE
-	if (aBuf)
-	{
-		*aBuf++ = '1';
-		*aBuf = '\0';
-	}
-	return 1;
-#else
-	// v1.1.06: A_IsUnicode is defined so that it does not cause warnings with #Warn enabled,
-	// but left empty to encourage compatibility with older versions and AutoHotkey Basic.
-	// This prevents scripts from using expressions like A_IsUnicode+1, which would succeed
-	// if A_IsUnicode is 0 or 1 but fail if it is "".  This change has side-effects similar
-	// to those described for A_IsCompiled above.
-	if (aBuf)
-		*aBuf = '\0';
-	return 0;
-#endif
-}
-
-
-
-VarSizeType BIV_FileEncoding(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_FileEncoding)
 {
 	// A similar section may be found under "case Encoding:" in FileObject::Invoke.  Maintain that with this:
+	LPTSTR enc;
 	switch (g->Encoding)
 	{
-#define FILEENCODING_CASE(n, s) \
-	case n: \
-		if (aBuf) \
-			_tcscpy(aBuf, _T(s)); \
-		return _countof(_T(s)) - 1;
 	// Returning readable strings for these seems more useful than returning their numeric values, especially with CP_AHKNOBOM:
-	FILEENCODING_CASE(CP_UTF8, "UTF-8")
-	FILEENCODING_CASE(CP_UTF8 | CP_AHKNOBOM, "UTF-8-RAW")
-	FILEENCODING_CASE(CP_UTF16, "UTF-16")
-	FILEENCODING_CASE(CP_UTF16 | CP_AHKNOBOM, "UTF-16-RAW")
-#undef FILEENCODING_CASE
+	case CP_UTF8:                enc = _T("UTF-8");      break;
+	case CP_UTF8 | CP_AHKNOBOM:  enc = _T("UTF-8-RAW");  break;
+	case CP_UTF16:               enc = _T("UTF-16");     break;
+	case CP_UTF16 | CP_AHKNOBOM: enc = _T("UTF-16-RAW"); break;
 	default:
 	  {
-		TCHAR buf[MAX_INTEGER_SIZE + 2]; // + 2 for "CP"
-		LPTSTR target_buf = aBuf ? aBuf : buf;
-		target_buf[0] = _T('C');
-		target_buf[1] = _T('P');
-		_itot(g->Encoding, target_buf + 2, 10);  // Always output as decimal since we aren't exactly returning a number.
-		return (VarSizeType)_tcslen(target_buf);
+		enc = _f_retval_buf;
+		enc[0] = _T('C');
+		enc[1] = _T('P');
+		_itot(g->Encoding, enc + 2, 10);
 	  }
 	}
+	_f_return_p(enc);
 }
 
 BIV_DECL_W(BIV_FileEncoding_Set)
 {
+	LPTSTR aBuf = BivRValueToString();
 	UINT new_encoding = Line::ConvertFileEncoding(aBuf);
 	if (new_encoding == -1)
-		return g_script->RuntimeError(ERR_INVALID_VALUE, aBuf);
+		_f_throw(ERR_INVALID_VALUE, aBuf);
 	g->Encoding = new_encoding;
-	return OK;
 }
 
 
 
-VarSizeType BIV_RegView(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_RegView)
 {
-	LPCTSTR value;
+	LPTSTR value;
 	switch (g->RegView)
 	{
 	case KEY_WOW64_32KEY: value = _T("32"); break;
 	case KEY_WOW64_64KEY: value = _T("64"); break;
 	default: value = _T("Default"); break;
 	}
-	if (aBuf)
-		_tcscpy(aBuf, value);
-	return (VarSizeType)_tcslen(value);
+	_f_return_p(value);
 }
 
 BIV_DECL_W(BIV_RegView_Set)
 {
+	LPTSTR aBuf = BivRValueToString();
 	DWORD reg_view = Line::RegConvertView(aBuf);
 	// Validate the parameter even if it's not going to be used.
 	if (reg_view == -1)
-		return g_script->RuntimeError(ERR_INVALID_VALUE, aBuf);
+		_f_throw(ERR_INVALID_VALUE, aBuf);
 	// Since these flags cause the registry functions to fail on Win2k and have no effect on
-	// any later 32-bit OS, ignore this command when the OS is 32-bit.  Leave A_RegView blank.
+	// any later 32-bit OS, ignore this command when the OS is 32-bit.  Leave A_RegView = "Default".
 	if (IsOS64Bit())
 		g->RegView = reg_view;
-	return OK;
 }
 
 
 
-VarSizeType BIV_LastError(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_LastError)
 {
-	TCHAR buf[MAX_INTEGER_SIZE];
-	LPTSTR target_buf = aBuf ? aBuf : buf;
-	_ultot(g->LastError, target_buf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
-	return (VarSizeType)_tcslen(target_buf);
+	_f_return_i(g->LastError);
 }
 
 BIV_DECL_W(BIV_LastError_Set)
 {
-	SetLastError(g->LastError = ATOU(aBuf));
-	return OK;
+	SetLastError(g->LastError = (DWORD)BivRValueToInt64());
 }
 
-VarSizeType BIV_GlobalStruct(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_GlobalStruct)
 {
-	return aBuf
-		? (VarSizeType)_tcslen(ITOA64((LONGLONG)g, aBuf))
-		: MAX_INTEGER_LENGTH;
+	_f_return((UINT_PTR)g);
 }
 
 
 
-VarSizeType BIV_ScriptStruct(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_ScriptStruct)
 {
-	return aBuf
-		? (VarSizeType)_tcslen(ITOA64((LONGLONG)g_script, aBuf))
-		: MAX_INTEGER_LENGTH;
+	_f_return((UINT_PTR)g_script);
 }
 
 
-VarSizeType BIV_ModuleHandle(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_ModuleHandle)
 {
-	return aBuf
-		? (VarSizeType)_tcslen(ITOA64((LONGLONG)g_hInstance, aBuf))
-		: MAX_INTEGER_LENGTH; // IMPORTANT: Conservative estimate because tick might change between 1st & 2nd calls.
+	_f_return((UINT_PTR)g_hInstance);
 }
 
-VarSizeType BIV_MemoryModule(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_MemoryModule)
 {
-	return aBuf
-		? (VarSizeType)_tcslen(ITOA64((LONGLONG)g_hMemoryModule, aBuf))
-		: MAX_INTEGER_LENGTH; // IMPORTANT: Conservative estimate because tick might change between 1st & 2nd calls.
+	_f_return((UINT_PTR)BIV_MemoryModule);
 }
 
 
-VarSizeType BIV_IsDll(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_IsDll)
 {
-	if (aBuf)
-	{
 #ifdef _USRDLL
-		*aBuf++ = '1';
+	_f_return_b(true);
 #else
-		*aBuf++ = '0';
+	_f_return_b(false);
 #endif
-		*aBuf = '\0';
-	}
-	return 1;
 }
 
 
-VarSizeType BIV_PtrSize(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_PtrSize)
 {
-	if (aBuf)
-	{
-		// Return size in bytes of a pointer in the current build.
-		*aBuf++ = '0' + sizeof(void *);
-		*aBuf = '\0';
-	}
-	return 1;
+	_f_return_i(sizeof(void *));
 }
 
 
-VarSizeType BIV_ScreenDPI(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_ScreenDPI)
 {
-	if (aBuf)
-		_itot(g_ScreenDPI, aBuf, 10);
-	return aBuf ? (VarSizeType)_tcslen(aBuf) : MAX_INTEGER_SIZE;
+	_f_return_i(g_ScreenDPI);
 }
 
 
 
 BIV_DECL_R(BIV_TrayMenu)
 {
-	// The actual value (an object) is resolved in ExpandExpression, to work around the
-	// limitations of the current BIV interface.  The current implementation requires that
-	// this function has a unique address, which would not be the case if COMDAT folding
-	// caused it to be "folded" with an identical function (such as A_IsCompiled, which
-	// also just returns an empty string ifndef AUTOHOTKEYSC).  So to ensure it gets a
-	// unique address, we check aVarName.
-	if (aBuf)
-		*aBuf = '\0';
-	return !_tcsicmp(aVarName, _T("A_TrayMenu")) ? 0 : 1;
+	// Currently ExpandExpression() does not automatically release objects returned
+	// by BIVs since this is the only one, and we're retaining a reference to it.
+	//g_script->mTrayMenu->AddRef();
+	_f_return(g_script->mTrayMenu);
 }
 
 
 BIV_DECL_R(BIV_AllowMainWindow)
 {
-	if (aBuf)
-	{
-		*aBuf++ = '1';
-		*aBuf = '\0';
-	}
-	return 1;  // Length is always 1.
+	_f_return_b(g_AllowMainWindow);
 }
 
 BIV_DECL_W(BIV_AllowMainWindow_Set)
 {
+	g_script->AllowMainWindow(BivRValueToBOOL());
 	// It seems best to allow `A_AllowMainWindow := true`, since a script
 	// which is only sometimes compiled may execute it unconditionally.
 	// For code size, false values are ignored instead of throwing an exception.
-	//if (!ResultToBOOL(aBuf))
-	//	return g_script->RuntimeError(ERR_INVALID_VALUE, aBuf);
-	return OK;
+	//if (!BivRValueToBOOL())
+	//	_f_throw(ERR_INVALID_VALUE, aBuf);
 }
 
-VarSizeType BIV_IconHidden(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_IconHidden)
 {
-	if (aBuf)
-	{
-		*aBuf++ = g_NoTrayIcon ? '1' : '0';
-		*aBuf = '\0';
-	}
-	return 1;  // Length is always 1.
+	_f_return_b(g_NoTrayIcon);
 }
 
 BIV_DECL_W(BIV_IconHidden_Set)
 {
-	g_script->ShowTrayIcon(!ResultToBOOL(aBuf));
-	return OK;
+	g_script->ShowTrayIcon(!BivRValueToBOOL());
 }
 
 void Script::ShowTrayIcon(bool aShow)
@@ -9795,19 +9678,15 @@ void Script::ShowTrayIcon(bool aShow)
 	}
 }
 
-VarSizeType BIV_IconTip(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_IconTip)
 {
 	// Return the custom tip if any, otherwise the default tip.
-	LPTSTR icontip = g_script->mTrayIconTip ? g_script->mTrayIconTip : g_script->mFileName;
-	if (!aBuf)
-		return (VarSizeType)_tcslen(icontip);
-	return (VarSizeType)_tcslen(_tcscpy(aBuf, icontip));
+	_f_return_p(g_script->mTrayIconTip ? g_script->mTrayIconTip : g_script->mFileName);
 }
 
 BIV_DECL_W(BIV_IconTip_Set)
 {
-	g_script->SetTrayTip(aBuf);
-	return OK;
+	g_script->SetTrayTip(BivRValueToString());
 }
 
 void Script::SetTrayTip(LPTSTR aText)
@@ -9826,41 +9705,20 @@ void Script::SetTrayTip(LPTSTR aText)
 	}
 }
 
-VarSizeType BIV_IconFile(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_IconFile)
 {
-	if (!aBuf)
-		return g_script->mCustomIconFile ? (VarSizeType)_tcslen(g_script->mCustomIconFile) : 0;
-	if (g_script->mCustomIconFile)
-		return (VarSizeType)_tcslen(_tcscpy(aBuf, g_script->mCustomIconFile));
-	else
-	{
-		*aBuf = '\0';
-		return 0;
-	}
+	_f_return_p(g_script->mCustomIconFile ? g_script->mCustomIconFile : _T(""));
 }
 
-VarSizeType BIV_IconNumber(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_IconNumber)
 {
-	TCHAR buf[MAX_INTEGER_SIZE];
-	LPTSTR target_buf = aBuf ? aBuf : buf;
-	if (!g_script->mCustomIconNumber) // Yield an empty string rather than the digit "0".
-	{
-		*target_buf = '\0';
-		return 0;
-	}
-	return (VarSizeType)_tcslen(UTOA(g_script->mCustomIconNumber, target_buf));
+	_f_return_i(g_script->mCustomIconNumber);
 }
 
 
 
-VarSizeType BIV_PriorKey(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_PriorKey)
 {
-	const int bufSize = 32;
-	if (!aBuf)
-		return bufSize;
-
-	*aBuf = '\0'; // Init for error & not-found cases
-
 	int validEventCount = 0;
 	// Start at the current event (offset 1)
 	for (int iOffset = 1; iOffset <= g_MaxHistoryKeys; ++iOffset)
@@ -9875,12 +9733,12 @@ VarSizeType BIV_PriorKey(LPTSTR aBuf, LPTSTR aVarName)
 			// Find the next most recent key-down
 			if (!g_KeyHistory[i].key_up)
 			{
-				GetKeyName(g_KeyHistory[i].vk, g_KeyHistory[i].sc, aBuf, bufSize);
-				break;
+				GetKeyName(g_KeyHistory[i].vk, g_KeyHistory[i].sc, _f_retval_buf, _f_retval_buf_size);
+				_f_return_p(_f_retval_buf);
 			}
 		}
 	}
-	return (VarSizeType)_tcslen(aBuf);
+	_f_return_empty;
 }
 
 
@@ -9910,153 +9768,112 @@ LPTSTR GetExitReasonString(ExitReasons aExitReason)
 
 
 
-VarSizeType BIV_Space_Tab(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_Space_Tab)
 {
-	// Really old comment:
-	// A_Space is a built-in variable rather than using an escape sequence such as `s, because the escape
-	// sequence method doesn't work (probably because `s resolves to a space and is trimmed at some point
-	// prior to when it can be used):
-	if (aBuf)
-	{
-		*aBuf++ = aVarName[5] ? ' ' : '\t'; // A_Tab[]
-		*aBuf = '\0';
-	}
-	return 1;
+	_f_return_p(aVarName[5] ? _T(" ") : _T("\t"));
 }
 
-VarSizeType BIV_AhkVersion(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_AhkVersion)
 {
-	if (aBuf)
-		_tcscpy(aBuf, T_AHK_VERSION);
-	return (VarSizeType)_tcslen(T_AHK_VERSION);
+	_f_return_p(T_AHK_VERSION);
 }
 
-VarSizeType BIV_AhkPath(LPTSTR aBuf, LPTSTR aVarName) // v1.0.41.
+BIV_DECL_R(BIV_AhkPath)
 {
 	TCHAR buf[MAX_PATH];
-	VarSizeType length = (VarSizeType)GetModuleFileName(NULL, buf, MAX_PATH);
-	if (aBuf)
-		_tcscpy(aBuf, buf); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string). This is true for ReadRegString()'s API call and may be true for other API calls like this one.
-	return length;
+	auto length = GetModuleFileName(NULL, buf, MAX_PATH);
+	_f_return(buf, length);
 }
 
-VarSizeType BIV_AhkDir(LPTSTR aBuf, LPTSTR aVarName) // v1.0.41.
+BIV_DECL_R(BIV_AhkDir) // v1.0.41.
 {
 	TCHAR buf[MAX_PATH];
 	GetModuleFileName(NULL, buf, MAX_PATH);
 	VarSizeType length = (_tcsrchr(buf, L'\\') - buf);
-	if (aBuf)
-	{
-		_tcsncpy(aBuf, buf, length); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string). This is true for ReadRegString()'s API call and may be true for other API calls like this one.
-		*(aBuf + length) = L'\0';
-	}
-	return length;
+	*(buf + length) = L'\0';
+	_f_return(buf, length);
 }
 
-VarSizeType BIV_DllPath(LPTSTR aBuf, LPTSTR aVarName) // HotKeyIt H1 path of loaded dll
+BIV_DECL_R(BIV_DllPath) // HotKeyIt H1 path of loaded dll
 {
 	TCHAR buf[MAX_PATH];
-	VarSizeType length = (VarSizeType)GetModuleFileName(g_hInstance, buf, _countof(buf));
+	auto length = GetModuleFileName(g_hInstance, buf, _countof(buf));
 	if (length == 0)
-		length = (VarSizeType)GetModuleFileName(NULL, buf, _countof(buf));
-	if (aBuf)
-		_tcscpy(aBuf, buf); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string). This is true for ReadRegString()'s API call and may be true for other API calls like this one.
-	return length;
+		length = GetModuleFileName(NULL, buf, _countof(buf));
+	_f_return(buf, length);
 }
 
-VarSizeType BIV_DllDir(LPTSTR aBuf, LPTSTR aVarName) // HotKeyIt H1 path of loaded dll
+BIV_DECL_R(BIV_DllDir) // HotKeyIt H1 path of loaded dll
 {
 	TCHAR buf[MAX_PATH];
-	VarSizeType length = (VarSizeType)GetModuleFileName(g_hInstance, buf, _countof(buf));
+	auto length = GetModuleFileName(g_hInstance, buf, _countof(buf));
 	if (length == 0)
 		GetModuleFileName(NULL, buf, _countof(buf));
 	length = _tcsrchr(buf, L'\\') - buf;
-	if (aBuf)
-	{
-		_tcsncpy(aBuf, buf, length); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string). This is true for ReadRegString()'s API call and may be true for other API calls like this one.
-		*(aBuf + length) = '\0';
-	}
-	return length;
+	_f_return(buf, length);
 }
 
 
-VarSizeType BIV_ZipCompressionLevel(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_ZipCompressionLevel)
 {
-	TCHAR buf[MAX_INTEGER_SIZE];
-	LPTSTR target_buf = aBuf ? aBuf : buf;
-	_itot(g->ZipCompressionLevel, target_buf, 10);  // Always output as decimal vs. hex in this case (so that scripts can use "If var in list" with confidence).
-	return (VarSizeType)_tcslen(target_buf);
+	_f_return_i(g->ZipCompressionLevel);
 }
 
 BIV_DECL_W(BIV_ZipCompressionLevel_Set)
 {
-	BYTE aCompressionLevel = (BYTE)ATOI(aBuf);
+	BYTE aCompressionLevel = (BYTE)BivRValueToBOOL();
 	if (aCompressionLevel > 9)
 		aCompressionLevel = 9;
 	else if (aCompressionLevel < 1)
 		aCompressionLevel = 1;
 	g->ZipCompressionLevel = aCompressionLevel;
-	return OK;
 }
 
 
-VarSizeType BIV_TickCount(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_TickCount)
 {
-	return aBuf
-		? (VarSizeType)_tcslen(ITOA64(GetTickCount(), aBuf))
-		: MAX_INTEGER_LENGTH; // IMPORTANT: Conservative estimate because tick might change between 1st & 2nd calls.
+	_f_return(GetTickCount64());
 }
 
 
-VarSizeType BIV_Now(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_Now)
 {
-	if (!aBuf)
-		return DATE_FORMAT_LENGTH;
 	SYSTEMTIME st;
 	if (aVarName[5]) // A_Now[U]TC
 		GetSystemTime(&st);
 	else
 		GetLocalTime(&st);
-	SystemTimeToYYYYMMDD(aBuf, st);
-	return (VarSizeType)_tcslen(aBuf);
+	SystemTimeToYYYYMMDD(_f_retval_buf, st);
+	_f_return_p(_f_retval_buf);
 }
 
-VarSizeType BIV_OSVersion(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_OSVersion)
 {
-	if (aBuf)
-		_tcscpy(aBuf, g_os.Version());
-	return (VarSizeType)_tcslen(g_os.Version());
+	_f_return_p(const_cast<LPTSTR>(g_os.Version()));
 }
 
-VarSizeType BIV_Is64bitOS(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_Is64bitOS)
 {
-	if (aBuf)
-	{
-		*aBuf++ = IsOS64Bit() ? '1' : '0';
-		*aBuf = '\0';
-	}
-	return 1;
+	_f_return_b(IsOS64Bit());
 }
 
-VarSizeType BIV_Language(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_Language)
 {
-	if (aBuf)
-		_stprintf(aBuf, _T("%04hX"), GetSystemDefaultUILanguage());
-	return 4;
+	LPTSTR aBuf = _f_retval_buf;
+	_stprintf(aBuf, _T("%04hX"), GetSystemDefaultUILanguage());
+	_f_return_p(aBuf);
 }
 
-VarSizeType BIV_UserName_ComputerName(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_UserName_ComputerName)
 {
 	TCHAR buf[MAX_PATH];  // Doesn't use MAX_COMPUTERNAME_LENGTH + 1 in case longer names are allowed in the future.
 	DWORD buf_size = MAX_PATH; // Below: A_Computer[N]ame (N is the 11th char, index 10, which if present at all distinguishes between the two).
 	if (   !(aVarName[10] ? GetComputerName(buf, &buf_size) : GetUserName(buf, &buf_size))   )
 		*buf = '\0';
-	if (aBuf)
-		_tcscpy(aBuf, buf); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string). This is true for ReadRegString()'s API call and may be true for other API calls like the ones here.
-	return (VarSizeType)_tcslen(buf); // I seem to remember that the lengths returned from the above API calls aren't consistent in these cases.
+	_f_return(buf);
 }
 
-VarSizeType BIV_WorkingDir(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_WorkingDir)
 {
 	// Use GetCurrentDirectory() vs. g_WorkingDir because any in-progress FileSelect()
 	// dialog is able to keep functioning even when it's quasi-thread is suspended.  The
@@ -10067,68 +9884,48 @@ VarSizeType BIV_WorkingDir(LPTSTR aBuf, LPTSTR aVarName)
 	// I could not reproduce it on Windows 10.
 	TCHAR buf[T_MAX_PATH]; // T_MAX_PATH vs. MAX_PATH only has an effect with Windows 10 long path awareness.
 	DWORD length = GetCurrentDirectory(_countof(buf), buf);
-	if (aBuf)
-		_tcscpy(aBuf, buf); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string). This is true for ReadRegString()'s API call and may be true for other API calls like the one here.
-	return length;
-	// Formerly the following, but I don't think it's as reliable/future-proof given the 1.0.47 comment above:
-	//return aBuf
-	//	? GetCurrentDirectory(MAX_PATH, aBuf)
-	//	: GetCurrentDirectory(0, NULL); // MSDN says that this is a valid way to call it on all OSes, and testing shows that it works on WinXP and 98se.
-		// Above avoids subtracting 1 to be conservative and to reduce code size (due to the need to otherwise check for zero and avoid subtracting 1 in that case).
+	_f_return(buf, length);
 }
 
 BIV_DECL_W(BIV_WorkingDir_Set)
 {
-	if (!SetWorkingDir(aBuf))
-		return g_script->RuntimeError(ERR_INVALID_VALUE); // Hard to imagine any other cause.
-	return OK;
+	if (!SetWorkingDir(BivRValueToString()))
+		_f_throw(ERR_INVALID_VALUE); // Hard to imagine any other cause.
 }
 
-VarSizeType BIV_InitialWorkingDir(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_InitialWorkingDir)
 {
-	if (aBuf)
-		_tcscpy(aBuf, g_WorkingDirOrig);
-	return (VarSizeType)_tcslen(g_WorkingDirOrig);
+	_f_return_p(g_WorkingDirOrig);
 }
 
-VarSizeType BIV_WinDir(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_WinDir)
 {
 	TCHAR buf[MAX_PATH]; // MSDN (2018): The uSize parameter "should be set to MAX_PATH."
 	VarSizeType length = GetSystemWindowsDirectory(buf, _countof(buf));
-	if (aBuf)
-		_tcscpy(aBuf, buf); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string). This is true for ReadRegString()'s API call and may be true for other API calls like the one here.
-	return length;
+	_f_return(buf, length);
 }
 
-VarSizeType BIV_Temp(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_Temp)
 {
 	TCHAR buf[MAX_PATH+1]; // MSDN (2018): "The maximum possible return value is MAX_PATH+1 (261)."
 	VarSizeType length = GetTempPath(_countof(buf), buf);
-	if (aBuf)
-	{
-		_tcscpy(aBuf, buf); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string). This is true for ReadRegString()'s API call and may be true for other API calls like the one here.
-		if (length)
-		{
-			aBuf += length - 1;
-			if (*aBuf == '\\') // Should always be true. MSDN: "The returned string ends with a backslash"
-			{
-				*aBuf = '\0'; // Omit the trailing backslash to improve friendliness/consistency.
-				--length;
-			}
-		}
-	}
-	return length;
+	if (length)
+		if (buf[length - 1] == '\\') // Should always be true. MSDN: "The returned string ends with a backslash"
+			buf[--length] = '\0'; // Omit the trailing backslash to improve friendliness/consistency.
+	_f_return(buf, length);
 }
 
-VarSizeType BIV_ComSpec(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_ComSpec)
 {
 	TCHAR buf_temp[1]; // Just a fake buffer to pass to some API functions in lieu of a NULL, to avoid any chance of misbehavior. Keep the size at 1 so that API functions will always fail to copy to buf.
-	// Sizes/lengths/-1/return-values/etc. have been verified correct.
-	return aBuf ? GetEnvVarReliable(_T("ComSpec"), aBuf) // v1.0.46.08: Use GetEnvVarReliable() to avoid passing an inaccurate buffer size to GetEnvironmentVariable().
-		: GetEnvironmentVariable(_T("ComSpec"), buf_temp, 0); // Avoids subtracting 1 to be conservative and to reduce code size (due to the need to otherwise check for zero and avoid subtracting 1 in that case).
+	auto size_required = GetEnvironmentVariable(_T("ComSpec"), buf_temp, 0);
+	if (!TokenSetResult(aResultToken, nullptr, size_required)) // Avoids subtracting 1 to be conservative and to reduce code size (due to the need to otherwise check for zero and avoid subtracting 1 in that case).
+		return;
+	aResultToken.symbol = SYM_STRING;
+	aResultToken.marker_length = GetEnvVarReliable(_T("ComSpec"), aResultToken.marker);
 }
 
-VarSizeType BIV_SpecialFolderPath(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_SpecialFolderPath)
 {
 	TCHAR buf[MAX_PATH]; // One caller relies on this being explicitly limited to MAX_PATH.
 	// SHGetFolderPath requires a buffer size of MAX_PATH, but the function was superseded
@@ -10163,12 +9960,10 @@ VarSizeType BIV_SpecialFolderPath(LPTSTR aBuf, LPTSTR aVarName)
 	}
 	if (SHGetFolderPath(NULL, aFolder, NULL, SHGFP_TYPE_CURRENT, buf) != S_OK)
 		*buf = '\0';
-	if (aBuf)
-		_tcscpy(aBuf, buf); // Must be done as a separate copy because SHGetFolderPath requires a buffer of length MAX_PATH, and aBuf is usually smaller.
-	return _tcslen(buf);
+	_f_return(buf);
 }
 
-VarSizeType BIV_MyDocuments(LPTSTR aBuf, LPTSTR aVarName) // Called by multiple callers.
+BIV_DECL_R(BIV_MyDocuments) // Called by multiple callers.
 {
 	TCHAR buf[MAX_PATH]; // SHGetFolderPath requires a buffer size of MAX_PATH.  At least one caller relies on this.
 	if (SHGetFolderPath(NULL, CSIDL_MYDOCUMENTS, NULL, SHGFP_TYPE_CURRENT, buf) != S_OK)
@@ -10177,16 +9972,14 @@ VarSizeType BIV_MyDocuments(LPTSTR aBuf, LPTSTR aVarName) // Called by multiple 
 	// (such as a mapped drive letter), remove the backslash from something like M:\ because M: is more
 	// appropriate for most uses:
 	VarSizeType length = (VarSizeType)strip_trailing_backslash(buf);
-	if (aBuf)
-		_tcscpy(aBuf, buf); // v1.0.47: Must be done as a separate copy because passing a size of MAX_PATH for aBuf can crash when aBuf is actually smaller than that (even though it's large enough to hold the string).
-	return length;
+	_f_return(buf, length);
 }
 
 
 BIF_DECL(BIF_CaretGetPos)
 {
-	Var *varX = ParamIndexToOptionalVar(0);
-	Var *varY = ParamIndexToOptionalVar(1);
+	Var *varX = ParamIndexToOutputVar(0);
+	Var *varY = ParamIndexToOutputVar(1);
 	
 	// I believe only the foreground window can have a caret position due to relationship with focused control.
 	HWND target_window = GetForegroundWindow(); // Variable must be named target_window for ATTACH_THREAD_INPUT.
@@ -10233,11 +10026,8 @@ BIF_DECL(BIF_CaretGetPos)
 
 
 
-VarSizeType BIV_Cursor(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_Cursor)
 {
-	if (!aBuf)
-		return SMALL_STRING_LENGTH;  // We're returning the length of the var's contents, not the size.
-
 	HCURSOR current_cursor;
 	CURSORINFO ci;
 	ci.cbSize = sizeof(CURSORINFO);
@@ -10245,8 +10035,7 @@ VarSizeType BIV_Cursor(LPTSTR aBuf, LPTSTR aVarName)
 	if (!current_cursor)
 	{
 		#define CURSOR_UNKNOWN _T("Unknown")
-		tcslcpy(aBuf, CURSOR_UNKNOWN, SMALL_STRING_LENGTH + 1);
-		return (VarSizeType)_tcslen(aBuf);
+		_f_return_p(CURSOR_UNKNOWN);
 	}
 
 	// Static so that it's initialized on first use (should help performance after the first time):
@@ -10256,71 +10045,56 @@ VarSizeType BIV_Cursor(LPTSTR aBuf, LPTSTR aVarName)
 		, LoadCursor(NULL, IDC_SIZEALL), LoadCursor(NULL, IDC_SIZENESW), LoadCursor(NULL, IDC_SIZENS)
 		, LoadCursor(NULL, IDC_SIZENWSE), LoadCursor(NULL, IDC_SIZEWE), LoadCursor(NULL, IDC_UPARROW)
 		, LoadCursor(NULL, IDC_WAIT)}; // If IDC_HAND were added, it would break existing scripts that rely on Unknown being synonymous with Hand.  If ever added, IDC_HAND should return NULL on Win95/NT.
+	static const size_t cursor_count = _countof(sCursor);
 	// The order in the below array must correspond to the order in the above array:
-	static LPTSTR sCursorName[] = {_T("AppStarting"), _T("Arrow")
+	static LPTSTR sCursorName[cursor_count + 1] = {_T("AppStarting"), _T("Arrow")
 		, _T("Cross"), _T("Help"), _T("IBeam")
 		, _T("Icon"), _T("No"), _T("Size")
 		, _T("SizeAll"), _T("SizeNESW"), _T("SizeNS")  // NESW = NorthEast+SouthWest
 		, _T("SizeNWSE"), _T("SizeWE"), _T("UpArrow")
-		, _T("Wait"), CURSOR_UNKNOWN};  // The last item is used to mark end-of-array.
-	static const size_t cursor_count = _countof(sCursor);
+		, _T("Wait"), CURSOR_UNKNOWN}; // The default item must be last.
 
 	int i;
 	for (i = 0; i < cursor_count; ++i)
 		if (sCursor[i] == current_cursor)
 			break;
 
-	tcslcpy(aBuf, sCursorName[i], SMALL_STRING_LENGTH + 1);  // If a is out-of-bounds, "Unknown" will be used.
-	return (VarSizeType)_tcslen(aBuf);
+	_f_return_p(sCursorName[i]); // If i is out-of-bounds, "Unknown" will be used.
 }
 
-VarSizeType BIV_ScreenWidth_Height(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_ScreenWidth_Height)
 {
-	return aBuf
-		? (VarSizeType)_tcslen(ITOA(GetSystemMetrics(aVarName[13] ? SM_CYSCREEN : SM_CXSCREEN), aBuf))
-		: MAX_INTEGER_LENGTH;
+	_f_return_i(GetSystemMetrics(aVarName[13] ? SM_CYSCREEN : SM_CXSCREEN));
 }
 
-VarSizeType BIV_ScriptName(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_ScriptName)
 {
-	LPTSTR script_name = g_script->mScriptName ? g_script->mScriptName : g_script->mFileName;
-	if (aBuf)
-		_tcscpy(aBuf, script_name);
-	return (VarSizeType)_tcslen(script_name);
+	_f_return_p(g_script->mScriptName ? g_script->mScriptName : g_script->mFileName);
 }
 
 BIV_DECL_W(BIV_ScriptName_Set)
 {
 	// For simplicity, a new buffer is allocated each time.  It is not expected to be set frequently.
-	LPTSTR script_name = _tcsdup(aBuf);
+	LPTSTR script_name = _tcsdup(BivRValueToString());
 	if (!script_name)
-		return g_script->RuntimeError(ERR_OUTOFMEM);
+		_f_throw(ERR_OUTOFMEM);
 	free(g_script->mScriptName);
 	g_script->mScriptName = script_name;
-	return OK;
 }
 
-VarSizeType BIV_ScriptDir(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_ScriptDir)
 {
-	if (aBuf)
-		_tcscpy(aBuf, g_script->mFileDir);
-	return _tcslen(g_script->mFileDir);
+	_f_return_p(g_script->mFileDir);
 }
 
-VarSizeType BIV_ScriptFullPath(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_ScriptFullPath)
 {
-	if (aBuf)
-		_tcscpy(aBuf, g_script->mFileSpec);
-	return _tcslen(g_script->mFileSpec);
+	_f_return_p(g_script->mFileSpec);
 }
 
-VarSizeType BIV_ScriptHwnd(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_ScriptHwnd)
 {
-	if (aBuf)
-		// For consistency with all of the other commands which return HWNDs as
-		// pure integers, this is formatted as decimal rather than hexadecimal:
-		return (VarSizeType)_tcslen(ITOA64((size_t)g_hWnd, aBuf));
-	return MAX_INTEGER_LENGTH;
+	_f_return((UINT_PTR)g_hWnd);
 }
 
 
@@ -10329,12 +10103,9 @@ LineNumberType Script::CurrentLine()
 	return mCurrLine ? mCurrLine->mLineNumber : mCombinedLineNumber;
 }
 
-VarSizeType BIV_LineNumber(LPTSTR aBuf, LPTSTR aVarName)
-// Caller has ensured that g_script->mCurrLine is not NULL.
+BIV_DECL_R(BIV_LineNumber)
 {
-	return aBuf
-		? (VarSizeType)_tcslen(ITOA(g_script->mCurrLine->mLineNumber, aBuf))
-		: MAX_INTEGER_LENGTH;
+	_f_return_i(g_script->CurrentLine());
 }
 
 
@@ -10343,18 +10114,15 @@ LPTSTR Script::CurrentFile()
 	return Line::sSourceFile[mCurrLine ? mCurrLine->mFileIndex : mCurrFileIndex];
 }
 
-VarSizeType BIV_LineFile(LPTSTR aBuf, LPTSTR aVarName)
-// Caller has ensured that g_script->mCurrLine is not NULL.
+BIV_DECL_R(BIV_LineFile)
 {
-	if (aBuf)
-		_tcscpy(aBuf, g_script->CurrentFile());
-	return (VarSizeType)_tcslen(g_script->CurrentFile());
+	_f_return_p(g_script->CurrentFile());
 }
 
 
-VarSizeType BIV_LoopFileName(LPTSTR aBuf, LPTSTR aVarName) // Called by multiple callers.
+BIV_DECL_R(BIV_LoopFileName) // Called by multiple callers.
 {
-	LPCTSTR filename = _T("");  // Set default.
+	LPTSTR filename = _T("");  // Set default.
 	if (g->mLoopFile)
 	{
 		// cAlternateFileName can be blank if the file lacks a short name, but it can also be blank
@@ -10364,14 +10132,12 @@ VarSizeType BIV_LoopFileName(LPTSTR aBuf, LPTSTR aVarName) // Called by multiple
 			|| !*(filename = g->mLoopFile->cAlternateFileName)   ) // ... there's no alternate name (see above).
 			filename = g->mLoopFile->cFileName;
 	}
-	if (aBuf)
-		_tcscpy(aBuf, filename);
-	return (VarSizeType)_tcslen(filename);
+	_f_return_p(filename);
 }
 
-VarSizeType BIV_LoopFileExt(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_LoopFileExt)
 {
-	LPCTSTR file_ext = _T("");  // Set default.
+	LPTSTR file_ext = _T("");  // Set default.
 	if (g->mLoopFile)
 	{
 		if (file_ext = _tcsrchr(g->mLoopFile->cFileName, '.'))
@@ -10379,35 +10145,29 @@ VarSizeType BIV_LoopFileExt(LPTSTR aBuf, LPTSTR aVarName)
 		else // Reset to empty string vs. NULL.
 			file_ext = _T("");
 	}
-	if (aBuf)
-		_tcscpy(aBuf, file_ext);
-	return (VarSizeType)_tcslen(file_ext);
+	_f_return_p(file_ext);
 }
 
-VarSizeType BIV_LoopFileDir(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_LoopFileDir)
 {
 	if (!g->mLoopFile)
-	{
-		if (aBuf)
-			*aBuf = '\0';
-		return 0;
-	}
+		_f_return_empty;
 	LoopFilesStruct &lfs = *g->mLoopFile;
 	LPTSTR dir_end = lfs.file_path + lfs.dir_length; // Start of the filename.
 	size_t suffix_length = dir_end - lfs.file_path_suffix; // Directory names\ added since the loop started.
 	size_t total_length = lfs.orig_dir_length + suffix_length;
 	if (total_length)
 		--total_length; // Omit the trailing slash.
-	if (aBuf)
-	{
-		tmemcpy(aBuf, lfs.orig_dir, lfs.orig_dir_length);
-		tmemcpy(aBuf + lfs.orig_dir_length, lfs.file_path_suffix, suffix_length);
-		aBuf[total_length] = '\0'; // This replaces the final character copied above, if any.
-	}
-	return total_length;
+	if (!TokenSetResult(aResultToken, nullptr, total_length))
+		return;
+	aResultToken.symbol = SYM_STRING;
+	LPTSTR buf = aResultToken.marker;
+	tmemcpy(buf, lfs.orig_dir, lfs.orig_dir_length);
+	tmemcpy(buf + lfs.orig_dir_length, lfs.file_path_suffix, suffix_length);
+	buf[total_length] = '\0'; // This replaces the final character copied above, if any.
 }
 
-VarSizeType FixLoopFilePath(LPTSTR aBuf, LPTSTR aPattern)
+void FixLoopFilePath(LPTSTR aBuf, LPTSTR aPattern)
 // Fixes aBuf to account for "." and ".." as file patterns.  These match the directory itself
 // or parent directory, so for example "x\y\.." returns a directory named "x" which appears to
 // be inside "y".  Without the handling here, the invalid path "x\y\x" would be returned.
@@ -10430,38 +10190,36 @@ VarSizeType FixLoopFilePath(LPTSTR aBuf, LPTSTR aPattern)
 		else if (*aBuf && aBuf[1] == ':') // aBuf "C:x" should be "C:" for "C:" or "C:.".
 			aBuf[2] = '\0';
 	}
-	return _tcslen(aBuf);
 }
 
-VarSizeType BIV_LoopFilePath(LPTSTR aBuf, LPTSTR aVarName)
+void ReturnLoopFilePath(ResultToken &aResultToken, LPTSTR aPattern, LPTSTR aPrefix, size_t aPrefixLen, LPTSTR aSuffix, size_t aSuffixLen)
+{
+	if (!TokenSetResult(aResultToken, nullptr, aPrefixLen + aSuffixLen))
+		return;
+	aResultToken.symbol = SYM_STRING;
+	LPTSTR buf = aResultToken.marker;
+	tmemcpy(buf, aPrefix, aPrefixLen);
+	tmemcpy(buf + aPrefixLen, aSuffix, aSuffixLen + 1); // +1 for \0.
+	FixLoopFilePath(buf, aPattern);
+	aResultToken.marker_length = -1; // Let caller determine actual length.
+}
+
+BIV_DECL_R(BIV_LoopFilePath)
 {
 	if (!g->mLoopFile)
-	{
-		if (aBuf)
-			*aBuf = '\0';
-		return 0;
-	}
+		_f_return_empty;
 	LoopFilesStruct &lfs = *g->mLoopFile;
 	// Combine the original directory specified by the script with the dynamic part of file_path
 	// (i.e. the sub-directory and file names appended to it since the loop started):
-	size_t suffix_length = lfs.file_path_length - (lfs.file_path_suffix - lfs.file_path);
-	if (aBuf)
-	{
-		tmemcpy(aBuf, lfs.orig_dir, lfs.orig_dir_length);
-		tmemcpy(aBuf + lfs.orig_dir_length, lfs.file_path_suffix, suffix_length + 1); // +1 for \0.
-		return FixLoopFilePath(aBuf, lfs.pattern);
-	}
-	return lfs.orig_dir_length + suffix_length;
+	ReturnLoopFilePath(aResultToken, lfs.pattern
+		, lfs.orig_dir, lfs.orig_dir_length
+		, lfs.file_path_suffix, lfs.file_path_length - (lfs.file_path_suffix - lfs.file_path));
 }
 
-VarSizeType BIV_LoopFileFullPath(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_LoopFileFullPath)
 {
 	if (!g->mLoopFile)
-	{
-		if (aBuf)
-			*aBuf = '\0';
-		return 0;
-	}
+		_f_return_empty;
 	// GetFullPathName() is done in addition to ConvertFilespecToCorrectCase() for the following reasons:
 	// 1) It's currently the only easy way to get the full path of the directory in which a file resides.
 	//    For example, if a script is passed a filename via command line parameter, that file could be
@@ -10476,17 +10234,12 @@ VarSizeType BIV_LoopFileFullPath(LPTSTR aBuf, LPTSTR aVarName)
 	// directory changes after the Loop begins.
 	LoopFilesStruct &lfs = *g->mLoopFile;
 	// Combine long_dir with the dynamic part of file_path:
-	size_t suffix_length = lfs.file_path_length - (lfs.file_path_suffix - lfs.file_path);
-	if (aBuf)
-	{
-		tmemcpy(aBuf, lfs.long_dir, lfs.long_dir_length);
-		tmemcpy(aBuf + lfs.long_dir_length, lfs.file_path_suffix, suffix_length + 1); // +1 for \0.
-		return FixLoopFilePath(aBuf, lfs.pattern);
-	}
-	return lfs.long_dir_length + suffix_length;
+	ReturnLoopFilePath(aResultToken, lfs.pattern
+		, lfs.long_dir, lfs.long_dir_length
+		, lfs.file_path_suffix, lfs.file_path_length - (lfs.file_path_suffix - lfs.file_path));
 }
 
-VarSizeType BIV_LoopFileShortPath(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_LoopFileShortPath)
 // Unlike GetLoopFileShortName(), this function returns blank when there is no short path.
 // This is done so that there's a way for the script to more easily tell the difference between
 // an 8.3 name not being available (due to the being disabled in the registry) and the short
@@ -10496,30 +10249,20 @@ VarSizeType BIV_LoopFileShortPath(LPTSTR aBuf, LPTSTR aVarName)
 // and if it's blank, there is no short name available.
 {
 	if (!g->mLoopFile)
-	{
-		if (aBuf)
-			*aBuf = '\0';
-		return 0;
-	}
+		_f_return_empty;
 	LoopFilesStruct &lfs = *g->mLoopFile;
 	// MSDN says cAlternateFileName is empty if the file does not have a long name.
 	// Testing and research shows that GetShortPathName() uses the long name for a directory
 	// or file if no short name exists, so there's no check for the filename's length here.
 	LPTSTR name = *lfs.cAlternateFileName ? lfs.cAlternateFileName : lfs.cFileName;
-	size_t name_length = _tcslen(name);
-	if (aBuf)
-	{
-		tmemcpy(aBuf, lfs.short_path, lfs.short_path_length);
-		tmemcpy(aBuf + lfs.short_path_length, name, name_length + 1); // +1 for \0.
-		return FixLoopFilePath(aBuf, lfs.pattern);
-	}
-	return lfs.short_path_length + name_length;
+	ReturnLoopFilePath(aResultToken, lfs.pattern
+		, lfs.short_path, lfs.short_path_length
+		, name, _tcslen(name));
 }
 
-VarSizeType BIV_LoopFileTime(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_LoopFileTime)
 {
-	TCHAR buf[64];
-	LPTSTR target_buf = aBuf ? aBuf : buf;
+	LPTSTR target_buf = _f_retval_buf;
 	*target_buf = '\0'; // Set default.
 	if (g->mLoopFile)
 	{
@@ -10532,24 +10275,20 @@ VarSizeType BIV_LoopFileTime(LPTSTR aBuf, LPTSTR aVarName)
 		}
 		FileTimeToYYYYMMDD(target_buf, ft, true);
 	}
-	return (VarSizeType)_tcslen(target_buf);
+	_f_return_p(target_buf);
 }
 
-VarSizeType BIV_LoopFileAttrib(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_LoopFileAttrib)
 {
-	TCHAR buf[64];
-	LPTSTR target_buf = aBuf ? aBuf : buf;
+	LPTSTR target_buf = _f_retval_buf;
 	*target_buf = '\0'; // Set default.
 	if (g->mLoopFile)
 		FileAttribToStr(target_buf, g->mLoopFile->dwFileAttributes);
-	return (VarSizeType)_tcslen(target_buf);
+	_f_return_p(target_buf);
 }
 
-VarSizeType BIV_LoopFileSize(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_LoopFileSize)
 {
-	TCHAR str[MAX_INTEGER_SIZE];
-	LPTSTR target_buf = aBuf ? aBuf : str;
-	*target_buf = '\0';  // Set default.
 	if (g->mLoopFile)
 	{
 		ULARGE_INTEGER ul;
@@ -10562,20 +10301,17 @@ VarSizeType BIV_LoopFileSize(LPTSTR aBuf, LPTSTR aVarName)
 		case 'M': divider = 1024*1024; break;
 		default:  divider = 0;
 		}
-		ITOA64((__int64)(divider ? ((unsigned __int64)ul.QuadPart / divider) : ul.QuadPart), target_buf);
+		_f_return_i(divider ? ((unsigned __int64)ul.QuadPart / divider) : ul.QuadPart);
 	}
-	return (VarSizeType)_tcslen(target_buf);
+	_f_return_empty;
 }
 
-VarSizeType BIV_LoopRegType(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_LoopRegType)
 {
-	LPTSTR value = g->mLoopRegItem ? Line::RegConvertValueType(g->mLoopRegItem->type) : _T("");
-	if (aBuf)
-		_tcscpy(aBuf, value);
-	return (VarSizeType)_tcslen(value);
+	_f_return_p(g->mLoopRegItem ? Line::RegConvertValueType(g->mLoopRegItem->type) : _T(""));
 }
 
-VarSizeType BIV_LoopRegKey(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_LoopRegKey)
 {
 	LPTSTR rootkey = _T("");
 	LPTSTR subkey = _T("");
@@ -10585,102 +10321,72 @@ VarSizeType BIV_LoopRegKey(LPTSTR aBuf, LPTSTR aVarName)
 		rootkey = Line::RegConvertRootKeyType(g->mLoopRegItem->root_key_type);
 		subkey = g->mLoopRegItem->subkey;
 	}
-	if (aBuf)
-		return _stprintf(aBuf, _T("%s%s%s"), rootkey, *subkey ? _T("\\") : _T(""), subkey);
-	return _tcslen(rootkey) + 1 + _tcslen(subkey);
+	if (!TokenSetResult(aResultToken, nullptr, _tcslen(rootkey) + (*subkey != 0) + _tcslen(subkey)))
+		return;
+	_stprintf(aResultToken.marker, _T("%s%s%s"), rootkey, *subkey ? _T("\\") : _T(""), subkey);
+	aResultToken.symbol = SYM_STRING;
 }
 
-VarSizeType BIV_LoopRegName(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_LoopRegName)
 {
 	// This can be either the name of a subkey or the name of a value.
-	LPTSTR str = g->mLoopRegItem ? g->mLoopRegItem->name : _T("");
-	if (aBuf)
-		_tcscpy(aBuf, str);
-	return (VarSizeType)_tcslen(str);
+	_f_return_p(g->mLoopRegItem ? g->mLoopRegItem->name : _T(""));
 }
 
-VarSizeType BIV_LoopRegTimeModified(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_LoopRegTimeModified)
 {
-	TCHAR buf[64];
-	LPTSTR target_buf = aBuf ? aBuf : buf;
+	LPTSTR target_buf = _f_retval_buf;
 	*target_buf = '\0'; // Set default.
 	// Only subkeys (not values) have a time.
 	if (g->mLoopRegItem && g->mLoopRegItem->type == REG_SUBKEY)
 		FileTimeToYYYYMMDD(target_buf, g->mLoopRegItem->ftLastWriteTime, true);
-	return (VarSizeType)_tcslen(target_buf);
+	_f_return_p(target_buf);
 }
 
-VarSizeType BIV_LoopReadLine(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_LoopReadLine)
 {
-	LPTSTR str = g->mLoopReadFile ? g->mLoopReadFile->mCurrentLine : _T("");
-	if (aBuf)
-		_tcscpy(aBuf, str);
-	return (VarSizeType)_tcslen(str);
+	_f_return_p(g->mLoopReadFile ? g->mLoopReadFile->mCurrentLine : _T(""));
 }
 
-VarSizeType BIV_LoopField(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_LoopField)
 {
-	LPTSTR str = g->mLoopField ? g->mLoopField : _T("");
-	if (aBuf)
-		_tcscpy(aBuf, str);
-	return (VarSizeType)_tcslen(str);
+	_f_return_p(g->mLoopField ? g->mLoopField : _T(""));
 }
 
-VarSizeType BIV_LoopIndex(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_LoopIndex)
 {
-	return aBuf
-		? (VarSizeType)_tcslen(ITOA64(g->mLoopIteration, aBuf)) // Must return exact length when aBuf isn't NULL.
-		: MAX_INTEGER_LENGTH; // Probably performs better to return a conservative estimate for the first pass than to call ITOA64 for both passes.
+	_f_return_i(g->mLoopIteration);
 }
 
 BIV_DECL_W(BIV_LoopIndex_Set)
 {
-	g->mLoopIteration = ATOI64(aBuf);
-	return OK;
+	g->mLoopIteration = BivRValueToInt64();
 }
 
 
 
-VarSizeType BIV_ThisFunc(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_ThisFunc)
 {
 	LPCTSTR name;
 	if (g->CurrentFunc)
 		name = g->CurrentFunc->mName;
-	else if (g->CurrentFuncGosub) // v1.0.48.02: For flexibility and backward compatibility, support A_ThisFunc even when a function Gosubs an external subroutine.
-		name = g->CurrentFuncGosub->mName;
 	else
 		name = _T("");
-	if (aBuf)
-		_tcscpy(aBuf, name);
-	return (VarSizeType)_tcslen(name);
+	_f_return_p(const_cast<LPTSTR>(name));
 }
 
-VarSizeType BIV_ThisLabel(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_ThisHotkey)
 {
-	LPTSTR name = g->CurrentLabel ? g->CurrentLabel->mName : _T("");
-	if (aBuf)
-		_tcscpy(aBuf, name);
-	return (VarSizeType)_tcslen(name);
+	_f_return_p(g_script->mThisHotkeyName);
 }
 
-VarSizeType BIV_ThisHotkey(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_PriorHotkey)
 {
-	if (aBuf)
-		_tcscpy(aBuf, g_script->mThisHotkeyName);
-	return (VarSizeType)_tcslen(g_script->mThisHotkeyName);
+	_f_return_p(g_script->mPriorHotkeyName);
 }
 
-VarSizeType BIV_PriorHotkey(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_TimeSinceThisHotkey)
 {
-	if (aBuf)
-		_tcscpy(aBuf, g_script->mPriorHotkeyName);
-	return (VarSizeType)_tcslen(g_script->mPriorHotkeyName);
-}
-
-VarSizeType BIV_TimeSinceThisHotkey(LPTSTR aBuf, LPTSTR aVarName)
-{
-	if (!aBuf) // IMPORTANT: Conservative estimate because the time might change between 1st & 2nd calls.
-		return MAX_INTEGER_LENGTH;
 	// It must be the type of hotkey that has a label because we want the TimeSinceThisHotkey
 	// value to be "in sync" with the value of ThisHotkey itself (i.e. use the same method
 	// to determine which hotkey is the "this" hotkey):
@@ -10690,103 +10396,88 @@ VarSizeType BIV_TimeSinceThisHotkey(LPTSTR aBuf, LPTSTR aVarName)
 		// isn't greater than about 49.  See MyGetTickCount() for explanation of %d vs. %u.
 		// Update: Using 64-bit ints now, so above is obsolete:
 		//sntprintf(str, sizeof(str), "%d", (DWORD)(GetTickCount() - g_script->mThisHotkeyStartTime));
-		ITOA64((__int64)(GetTickCount() - g_script->mThisHotkeyStartTime), aBuf);
+		_f_return_i((__int64)(GetTickCount() - g_script->mThisHotkeyStartTime));
 	else
-		_tcscpy(aBuf, _T("-1"));
-	return (VarSizeType)_tcslen(aBuf);
+		_f_return_empty; // Cause any attempt at math to throw.
 }
 
-VarSizeType BIV_TimeSincePriorHotkey(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_TimeSincePriorHotkey)
 {
-	if (!aBuf) // IMPORTANT: Conservative estimate because the time might change between 1st & 2nd calls.
-		return MAX_INTEGER_LENGTH;
 	if (*g_script->mPriorHotkeyName)
 		// See MyGetTickCount() for explanation for explanation:
 		//sntprintf(str, sizeof(str), "%d", (DWORD)(GetTickCount() - g_script->mPriorHotkeyStartTime));
-		ITOA64((__int64)(GetTickCount() - g_script->mPriorHotkeyStartTime), aBuf);
+		_f_return_i((__int64)(GetTickCount() - g_script->mPriorHotkeyStartTime));
 	else
-		_tcscpy(aBuf, _T("-1"));
-	return (VarSizeType)_tcslen(aBuf);
+		_f_return_empty; // Cause any attempt at math to throw.
 }
 
-VarSizeType BIV_EndChar(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_EndChar)
 {
-	if (aBuf)
-	{
-		if (g_script->mEndChar)
-			*aBuf++ = g_script->mEndChar;
-		//else we returned 0 previously, so MUST WRITE ONLY ONE NULL-TERMINATOR.
-		*aBuf = '\0';
-	}
-	return g_script->mEndChar ? 1 : 0; // v1.0.48.04: Fixed to support a NULL char, which happens when the hotstring has the "no ending character required" option.
+	_f_retval_buf[0] = g_script->mEndChar;
+	_f_retval_buf[1] = '\0';
+	_f_return_p(_f_retval_buf);
 }
 
 
 
-VarSizeType BIV_EventInfo(LPTSTR aBuf, LPTSTR aVarName)
-// We're returning the length of the var's contents, not the size.
+BIV_DECL_R(BIV_EventInfo)
 {
-	return aBuf
-		? (VarSizeType)_tcslen(UPTRTOA(g->EventInfo, aBuf)) // Must return exact length when aBuf isn't NULL.
-		: MAX_INTEGER_LENGTH;
+	_f_return_i(g->EventInfo);
 }
 
 BIV_DECL_W(BIV_EventInfo_Set)
 {
-	g->EventInfo = (EventInfoType)ATOI64(aBuf);
-	return OK;
+	g->EventInfo = (EventInfoType)BivRValueToInt64();
 }
 
-VarSizeType BIV_ThreadID(LPTSTR aBuf, LPTSTR aVarName)
-// We're returning the length of the var's contents, not the size.
+BIV_DECL_R(BIV_ThreadID)
 {
-	return aBuf
-		? (VarSizeType)_tcslen(UTOA(g_ThreadID, aBuf)) // Must return exact length when aBuf isn't NULL.
-		: MAX_INTEGER_LENGTH;
+	_f_return_i(g_ThreadID);
 }
 
-VarSizeType BIV_MainThreadID(LPTSTR aBuf, LPTSTR aVarName)
-// We're returning the length of the var's contents, not the size.
+BIV_DECL_R(BIV_MainThreadID)
 {
-	return aBuf
-		? (VarSizeType)_tcslen(UTOA(g_MainThreadID, aBuf)) // Must return exact length when aBuf isn't NULL.
-		: MAX_INTEGER_LENGTH;
-}
-
-VarSizeType BIV_TimeIdle(LPTSTR aBuf, LPTSTR aVarName) // Called by multiple callers.
-{
-	if (!aBuf) // IMPORTANT: Conservative estimate because tick might change between 1st & 2nd calls.
-		return MAX_INTEGER_LENGTH;
-	LASTINPUTINFO lii;
-	lii.cbSize = sizeof(lii);
-	if (GetLastInputInfo(&lii))
-		ITOA64(GetTickCount() - lii.dwTime, aBuf);
-	else
-		*aBuf = '\0';
-	return (VarSizeType)_tcslen(aBuf);
+	_f_return_i(g_MainThreadID);
 }
 
 
 
-VarSizeType BIV_TimeIdlePhysical(LPTSTR aBuf, LPTSTR aVarName)
+
+BIV_DECL_R(BIV_TimeIdle)
 // This is here rather than in script.h with the others because it depends on
 // hotkey.h and globaldata.h, which can't be easily included in script.h due to
 // mutual dependency issues.
 {
-	DWORD time_last_input;
+	DWORD time_last_input = 0;
 	switch (toupper(aVarName[10]))
 	{
 	case 'M': time_last_input = g_MouseHook ? g_TimeLastInputMouse : 0; break;
 	case 'K': time_last_input = g_KeybdHook ? g_TimeLastInputKeyboard : 0; break;
-	default: time_last_input = (g_KeybdHook || g_MouseHook) ? g_TimeLastInputPhysical : 0; break;
+	case 'P': time_last_input = (g_KeybdHook || g_MouseHook) ? g_TimeLastInputPhysical : 0; break;
 	}
 	// If the relevant hook is not active, default this to the same as the regular idle time:
 	if (!time_last_input)
-		return BIV_TimeIdle(aBuf, _T(""));
-	if (!aBuf)
-		return MAX_INTEGER_LENGTH; // IMPORTANT: Conservative estimate because tick might change between 1st & 2nd calls.
-	return (VarSizeType)_tcslen(ITOA64(GetTickCount() - time_last_input, aBuf)); // Switching keyboard layouts/languages sometimes sees to throw off the timestamps of the incoming events in the hook.
+	{
+		LASTINPUTINFO lii;
+		lii.cbSize = sizeof(lii);
+		if (GetLastInputInfo(&lii))
+			time_last_input = lii.dwTime;
+		else // This is rare; the possibility isn't even documented as of 2020-06-11.
+			_f_return_empty; // Cause any attempt at math to throw.
+	}
+	_f_return_i(GetTickCount() - time_last_input);
 }
+
+
+
+BIF_DECL(BIF_SetBIV)
+{
+	static VirtualVar::Setter sBiv[] = { &BIV_DetectHiddenText_Set, &BIV_DetectHiddenWindows_Set, &BIV_FileEncoding_Set, &BIV_RegView_Set, &BIV_StoreCapsLockMode_Set, &BIV_TitleMatchMode_Set };
+	auto biv = sBiv[_f_callee_id];
+	_f_set_retval_p(_T(""), 0);
+	biv(aResultToken, nullptr, *aParam[0]);
+}
+
 
 
 ////////////////////////
@@ -11528,7 +11219,7 @@ DynaToken *DynaToken::Create(ExprTokenType *aParam[], int aParamCount)
 
 	DYNAPARM *dyna_param;
 	ExprTokenType token;
-	
+
 	if (obj && aParamCount)
 	{
 		ExprTokenType this_token;
@@ -11693,6 +11384,28 @@ CStringW **pStr = (CStringW **)
 		{
 			ExprTokenType &this_param = *aParam[i + ((aParamCount-2) > i ? 2 : 0)]; // *aParam[i] will not be used for default parameter
 			DYNAPARM &this_dyna_param = dyna_param[i];
+
+			IObject *this_param_obj = NULL;
+			if ((aParamCount - 2) > i)
+				this_param_obj = TokenToObject(this_param);
+			if (this_param_obj)
+			{
+				// Support Buffer.Ptr, but only for "Ptr" type.  All other types are reserved for possible
+				// future use, which might be general like obj.ToValue(), or might be specific to DllCall
+				// or the particular type of this arg (Int, Float, etc.).
+				if (this_dyna_param.type == 1 || this_dyna_param.type == 8
+#ifdef _WIN64
+					|| this_dyna_param.type == 5)
+#else
+					|| this_dyna_param.type == 2)
+#endif
+				{
+					GetBufferObjectPtr(result_token, this_param_obj, this_dyna_param.value_uintptr);
+					if (result_token.Exited())
+						return NULL;
+					continue;
+				}
+			}
 
 			switch (this_dyna_param.type)
 			{
@@ -12012,6 +11725,27 @@ ResultType DynaToken::Invoke(IObject_Invoke_PARAMS_DECL)
 		ExprTokenType &this_param = *aParam[i];
 		DYNAPARM &this_dyna_param = this->mdyna_param[this->paramshift[i]];
 		SymbolType is_number;
+
+		IObject *this_param_obj = TokenToObject(this_param);
+		if (this_param_obj)
+		{
+			// Support Buffer.Ptr, but only for "Ptr" type.  All other types are reserved for possible
+			// future use, which might be general like obj.ToValue(), or might be specific to DllCall
+			// or the particular type of this arg (Int, Float, etc.).
+			if (this_dyna_param.type == 1 || this_dyna_param.type == 8
+#ifdef _WIN64
+				|| this_dyna_param.type == 5)
+#else
+				|| this_dyna_param.type == 2)
+#endif
+			{
+				GetBufferObjectPtr(aResultToken, this_param_obj, this_dyna_param.value_uintptr);
+				if (aResultToken.Exited())
+					_o_throw(ERR_INVALID_ARG_TYPE);
+				continue;
+			}
+		}
+
 		switch (this_dyna_param.type)
 		{
 		case DLL_ARG_STR:
@@ -12199,10 +11933,9 @@ ResultType DynaToken::Invoke(IObject_Invoke_PARAMS_DECL)
 		*Var::sEmptyString = '\0';
 		// Don't bother with freeing hmodule_to_free since a critical error like this calls for minimal cleanup.
 		// The OS almost certainly frees it upon termination anyway.
-		// Call ScriptErrror() so that the user knows *which* DllCall is at fault:
-		g->ExcptMode = EXCPTMODE_NONE; // Do not throw an exception.
-		g_script->ScriptError(_T("This DynaCall requires a prior VarSetCapacity. The program is now unstable and will exit."));
-		g_script->ExitApp(EXIT_CLOSE); // Called this way, it will run the OnExit routine, which is debatable because it could cause more good than harm, but might avoid loss of data if the OnExit routine does something important.
+		// Call CriticalError() so that the user knows *which* DllCall is at fault:
+		g_script->CriticalError(_T("An invalid write to an empty variable was detected."));
+		// CriticalError always terminates the process.
 	}
 
 	// It seems best to have the above take precedence over "exception_occurred" below.
@@ -12357,9 +12090,17 @@ ResultType DynaToken::Invoke(IObject_Invoke_PARAMS_DECL)
 			delete pStr[arg_count];
 			continue; // Nothing further to do for this parameter.
 		}
+		DYNAPARM &this_dyna_param = this->mdyna_param[this->paramshift[i]]; // Resolved for performance and convenience.
+		
+		if (IObject * obj = TokenToObject(this_param)) // Implies the type is "Ptr" or "Ptr*".
+		{
+			if (this_dyna_param.passed_by_address)
+				SetObjectIntProperty(obj, _T("Ptr"), this_dyna_param.value_int64, aResultToken);
+			continue;
+		}
+
 		if (this_param.symbol != SYM_VAR) // Output parameters are copied back only if its counterpart parameter is a naked variable.
 			continue;
-		DYNAPARM &this_dyna_param = this->mdyna_param[this->paramshift[i]]; // Resolved for performance and convenience.
 		Var &output_var = *this_param.var;                 //
 		if (this_dyna_param.type == DLL_ARG_STR) // Native string type for current build config.
 		{
@@ -12428,12 +12169,12 @@ BIF_DECL(BIF_DllImport)
 	void *function = func->mClass;
 	int arg_count = func->mParamCount;
 	DYNAPARM *dyna_param = (DYNAPARM*)func->mParam;
-	DYNAPARM *dyna_param_def = (DYNAPARM*)func->mLazyVar;
-	DYNAPARM *return_attrib = (DYNAPARM*)func->mVar;
+	DYNAPARM *dyna_param_def = (DYNAPARM*)func->mOuterFunc;
+	DYNAPARM *return_attrib = (DYNAPARM*)func->mDownVar;
 	CStringA **pStr = (CStringA **)_alloca(arg_count * sizeof(void*)); // _alloca vs malloc can make a significant difference to performance in some cases.
-	memcpy(pStr, func->mStaticVar, arg_count * sizeof(void*));
+	memcpy(pStr, func->mUpVar, arg_count * sizeof(void*));
 #ifdef WIN32_PLATFORM
-	int dll_call_mode = func->mVarCount;
+	int dll_call_mode = func->mDownVarCount;
 #endif
 	// Set default result in case of early return; a blank value:
 	aResultToken.symbol = SYM_STRING;
@@ -12451,6 +12192,26 @@ BIF_DECL(BIF_DllImport)
 		if (this_param.symbol == SYM_MISSING)
 			continue;
 		SymbolType is_number;
+
+		IObject *this_param_obj = TokenToObject(this_param);
+		if (this_param_obj)
+		{
+			// Support Buffer.Ptr, but only for "Ptr" type (HotKeyIt: assume String and Int for 32-bit and Int64 for 64-bit are PTR).  All other types are reserved for possible
+			// future use, which might be general like obj.ToValue(), or might be specific to DllCall
+			// or the particular type of this arg (Int, Float, etc.).
+			if (this_dyna_param.type == 1 || this_dyna_param.type == 8
+#ifdef _WIN64
+				|| this_dyna_param.type == 5)
+#else
+				|| this_dyna_param.type == 2)
+#endif
+			{
+				GetBufferObjectPtr(aResultToken, this_param_obj, this_dyna_param.value_uintptr);
+				if (aResultToken.Exited())
+					return;
+				continue;
+			}
+		}
 
 		switch (this_dyna_param.type)
 		{
@@ -12638,10 +12399,9 @@ BIF_DECL(BIF_DllImport)
 		*Var::sEmptyString = '\0';
 		// Don't bother with freeing hmodule_to_free since a critical error like this calls for minimal cleanup.
 		// The OS almost certainly frees it upon termination anyway.
-		// Call ScriptErrror() so that the user knows *which* DllCall is at fault:
-		g->ExcptMode = EXCPTMODE_NONE; // Do not throw an exception.
-		g_script->ScriptError(_T("This DllCall requires a prior VarSetCapacity. The program is now unstable and will exit."));
-		g_script->ExitApp(EXIT_CLOSE); // Called this way, it will run the OnExit function, which is debatable because it could cause more good than harm, but might avoid loss of data if the OnExit function does something important.
+		// Call CriticalError() so that the user knows *which* DllCall is at fault:
+		g_script->CriticalError(_T("An invalid write to an empty variable was detected."));
+		// CriticalError always terminates the process.
 	}
 
 	if (g->ThrownToken)
@@ -12791,13 +12551,22 @@ BIF_DECL(BIF_DllImport)
 		// function may have written into the buffer (primarily for performance), and just delete it:
 		if (pStr[i])
 		{
-			if (pStr[i] != ((CStringA**)func->mStaticVar)[i])
+			if (pStr[i] != ((CStringA**)func->mUpVar)[i])
 				delete pStr[i];
 			continue; // Nothing further to do for this parameter.
 		}
+		
+		DYNAPARM &this_dyna_param = dyna_param[i]; // Resolved for performance and convenience.
+		
+		if (IObject * obj = TokenToObject(this_param)) // Implies the type is "Ptr" or "Ptr*".
+		{
+			if (this_dyna_param.passed_by_address)
+				SetObjectIntProperty(obj, _T("Ptr"), this_dyna_param.value_int64, aResultToken);
+			continue;
+		}
+		
 		if (this_param.symbol != SYM_VAR) // Output parameters are copied back only if its counterpart parameter is a naked variable.
 			continue;
-		DYNAPARM &this_dyna_param = dyna_param[i]; // Resolved for performance and convenience.
 		Var &output_var = *this_param.var;                 //
 		if (this_dyna_param.type == DLL_ARG_STR) // Native string type for current build config.
 		{
@@ -12876,7 +12645,7 @@ BIF_DECL(BIF_DllCall)
 			_f_throw(ERR_PARAM1_INVALID);
 		// Cheat a bit to make the second arg both the source of the virtual function
 		// and the first parameter value (always an interface pointer):
-		ExprTokenType t_this_arg_type = _T("Ptr");
+		static ExprTokenType t_this_arg_type = _T("Ptr");
 		aParam[0] = &t_this_arg_type;
 	}
 	else
@@ -12930,13 +12699,7 @@ BIF_DECL(BIF_DllCall)
 	{
 		// Check validity of this arg's return type:
 		ExprTokenType &token = *aParam[aParamCount - 1];
-		LPTSTR return_type_string;
-		switch (token.symbol)
-		{
-		case SYM_STRING:	return_type_string = token.marker; break;						// Kept first since assumed to be most common.
-		case SYM_VAR:		return_type_string = token.var->Contents(TRUE, TRUE); break;	// SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
-		default:			return_type_string = _T(""); break; // It will be detected as invalid below.
-		}
+		LPTSTR return_type_string = TokenToString(token); // If non-numeric it will return "", which is detected as invalid below.
 
 		// 64-bit note: The calling convention detection code is preserved here for script compatibility.
 
@@ -13016,23 +12779,25 @@ has_valid_return_type:
 		if (this_dyna_param.type == DLL_ARG_INVALID)
 			_f_throw(ERR_INVALID_ARG_TYPE);
 
-		if (IObject *obj = TokenToObject(this_param))
+		IObject *this_param_obj = TokenToObject(this_param);
+		if (this_param_obj)
 		{
 			// Support Buffer.Ptr, but only for "Ptr" type.  All other types are reserved for possible
 			// future use, which might be general like obj.ToValue(), or might be specific to DllCall
 			// or the particular type of this arg (Int, Float, etc.).
-			if (ctoupper(*arg_type_string) != 'P')
-				_f_throw(ERR_TYPE_MISMATCH);
-			GetBufferObjectPtr(aResultToken, obj, this_dyna_param.value_uintptr);
-			if (aResultToken.Exited())
-				return;
-			continue;
+			if (ctoupper(*arg_type_string) == 'P')
+			{
+				GetBufferObjectPtr(aResultToken, this_param_obj, this_dyna_param.value_uintptr);
+				if (aResultToken.Exited())
+					return;
+				continue;
+			}
 		}
 
 		switch (this_dyna_param.type)
 		{
 		case DLL_ARG_STR:
-			if (IS_NUMERIC(this_param.symbol))
+			if (IS_NUMERIC(this_param.symbol) || this_param_obj)
 			{
 				// HotKeyIt - Allow PURE_INTEGER = Pointers (also used in functions like FindResource >> MAKEINTRESOURCE
 				if (this_param.symbol == PURE_INTEGER)
@@ -13055,7 +12820,7 @@ has_valid_return_type:
 					// to be stack memory, which would be invalid memory upon return to the caller).
 					// The complexity of this doesn't seem worth the rarity of the need, so this will be
 					// documented in the help file.
-				_f_throw(ERR_TYPE_MISMATCH);
+				_f_throw_type(_T("String"), this_param);
 				}
 			}
 			else
@@ -13103,7 +12868,7 @@ has_valid_return_type:
 			break;
 		case DLL_ARG_xSTR:
 			// See the section above for comments.
-			if (IS_NUMERIC(this_param.symbol))
+			if (IS_NUMERIC(this_param.symbol) || this_param_obj)
 			{
 				// HotKeyIt - Allow PURE_INTEGER = Pointers (also used in functions like FindResource >> MAKEINTRESOURCE
 				if (this_param.symbol == PURE_INTEGER)
@@ -13118,7 +12883,7 @@ has_valid_return_type:
 						this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
 				}
 				else
-					_f_throw(ERR_TYPE_MISMATCH);
+					_f_throw_type(_T("String"), this_param);
 			} 
 			else
 			{
@@ -13147,7 +12912,7 @@ has_valid_return_type:
 			// This currently doesn't validate that this_dyna_param.is_unsigned==false, since it seems
 			// too rare and mostly harmless to worry about something like "Ufloat" having been specified.
 			if (!TokenIsNumeric(this_param))
-				_f_throw(ERR_TYPE_MISMATCH);
+				_f_throw_type(_T("Number"), this_param);
 			this_dyna_param.value_double = TokenToDouble(this_param);
 			if (this_dyna_param.type == DLL_ARG_FLOAT)
 				this_dyna_param.value_float = (float)this_dyna_param.value_double;
@@ -13159,7 +12924,7 @@ has_valid_return_type:
 		//case DLL_ARG_CHAR:
 		//case DLL_ARG_INT64:
 			if (!TokenIsNumeric(this_param))
-				_f_throw(ERR_TYPE_MISMATCH);
+				_f_throw_type(_T("Number"), this_param);
 			// Note that since v2.0-a083-97803aeb, TokenToInt64 supports conversion of large unsigned 64-bit
 			// numbers from strings (producing a negative value, but with the right bit representation).
 			// This allows large unsigned literals and numeric strings to be passed to DllCall (regardless
@@ -13492,6 +13257,9 @@ BIF_DECL(BIF_StrCompare)
 	case SCS_SENSITIVE:				result = _tcscmp(str1, str2); break;
 	case SCS_INSENSITIVE:			result = _tcsicmp(str1, str2); break;
 	case SCS_INSENSITIVE_LOCALE:	result = lstrcmpi(str1, str2); break;
+	case SCS_INSENSITIVE_LOGICAL:	result = StrCmpLogicalW(str1, str2); break;
+	case SCS_INVALID:
+		_f_throw(ERR_PARAM3_INVALID);
 	}
 	_f_return_i(result);			// Return 
 }
@@ -13615,10 +13383,17 @@ BIF_DECL(BIF_InStr)
 	LPTSTR needle = ParamIndexToString(1, needle_buf, &needle_length);
 	
 	StringCaseSenseType string_case_sense = ParamIndexToCaseSense(2);
+	if (string_case_sense == SCS_INVALID 
+		|| string_case_sense == SCS_INSENSITIVE_LOGICAL) // Not supported, seems more useful to throw rather than using SCS_INSENSITIVE.
+		_f_throw(ERR_PARAM3_INVALID);
+	// BIF_StrReplace sets string_case_sense similarly, maintain together.
 
 	LPTSTR found_pos;
 	INT_PTR offset = 0; // Set default.
 	int occurrence_number = ParamIndexToOptionalInt(4, 1);
+
+	if (!needle_length) // Although arguably legitimate, this is more likely an error, so throw.
+		_f_throw(ERR_PARAM2_INVALID);
 
 	if (!ParamIndexIsOmitted(3)) // There is a starting position present.
 	{
@@ -13874,16 +13649,17 @@ struct RegExCalloutData // L14: Used by BIF_RegEx to pass necessary info to RegE
 int RegExCallout(pcret_callout_block *cb)
 {
 	// It should be documented that (?C) is ignored if encountered by the hook thread,
-	// which could happen if SetTitleMatchMode,Regex and #IfWin are used. This would be a
-	// problem if the callout should affect the outcome of the match or should be called
-	// even if #IfWin will ultimately prevent the hotkey from firing. This is because:
+	// which could happen if SetTitleMatchMode,Regex and "#HotIf Winactive/Exist" are used.
+	// This would be a problem if the callout should affect the outcome of the match or 
+	// should be called even if #HotIf WinA/E. will ultimately prevent the hotkey from firing. 
+	// This is because:
 	//	- The callout cannot be called from the hook thread, and therefore cannot affect
-	//		the outcome of #IfWin when called by the hook thread.
-	//	- If #IfWin does NOT prevent the hotkey from firing, it will be reevaluated from
+	//		the outcome of #HotIf WinA/E. when called by the hook thread.
+	//	- If #HotIf WinA/E does NOT prevent the hotkey from firing, it will be reevaluated from
 	//		the main thread before the hotkey is actually fired. This will allow any
 	//		callouts to occur on the main thread.
-	//  - By contrast, if #IfWin DOES prevent the hotkey from firing, #IfWin will not be
-	//		reevaluated from the main thread, so callouts cannot occur.
+	//  - By contrast, if #HotIf WinA/E DOES prevent the hotkey from firing, 
+	//		#HotIf WinA/E will not be reevaluated from the main thread,
 	if (GetCurrentThreadId() != g_ThreadID)
 		return 0;
 
@@ -14052,7 +13828,7 @@ pcret *get_compiled_regex(LPTSTR aRegEx, pcret_extra *&aExtra, int *aOptionsLeng
 
 	// While reading from or writing to the cache, don't allow another thread entry.  This is because
 	// that thread (or this one) might write to the cache while the other one is reading/writing, which
-	// could cause loss of data integrity (the hook thread can enter here via #IfWin & SetTitleMatchMode RegEx).
+	// could cause loss of data integrity (the hook thread can enter here via #HotIf WinActive/Exist & SetTitleMatchMode RegEx).
 	// Together, Enter/LeaveCriticalSection reduce performance by only 1.4% in the tightest possible script
 	// loop that hits the first cache entry every time.  So that's the worst case except when there's an actual
 	// collision, in which case performance suffers more because internally, EnterCriticalSection() does a
@@ -14350,7 +14126,7 @@ void RegExReplace(ResultToken &aResultToken, ExprTokenType *aParam[], int aParam
 	// as the haystack, needle, or replacement (i.e. the same memory), don't set output_var_count until
 	// immediately prior to returning.  Otherwise, haystack, needle, or replacement would corrupted while
 	// it's still being used here.
-	Var *output_var_count = ParamIndexToOptionalVar(3);
+	Var *output_var_count = ParamIndexToOutputVar(3);
 	int replacement_count = 0; // This value will be stored in output_var_count, but only at the very end due to the reason above.
 
 	// Get the replacement text (if any) from the incoming parameters.  If it was omitted, treat it as "".
@@ -14842,18 +14618,17 @@ BIF_DECL(BIF_RegEx)
 		aResultToken.value_int64 = match_offset + 1; // i.e. the position of the entire-pattern match is the function's return value.
 	}
 
-	if (aParamCount < 3 || aParam[2]->symbol != SYM_VAR) // No output var, so nothing more to do.
+	Var *output_var = ParamIndexToOutputVar(2);
+	if (!output_var)
 		return;
 
-	Var &output_var = *aParam[2]->var;
-	
 	IObject *match_object;
 	if (!RegExCreateMatchArray(haystack, re, extra, offset, pattern_count, captured_pattern_count, match_object))
 		aResultToken.Error(ERR_OUTOFMEM);
 	if (match_object)
-		output_var.AssignSkipAddRef(match_object);
+		output_var->AssignSkipAddRef(match_object);
 	else // Out-of-memory or there were no captured patterns.
-		output_var.Assign();
+		output_var->Assign();
 }
 
 
@@ -15009,9 +14784,8 @@ void GetBufferObjectPtr(ResultToken &aResultToken, IObject *obj, size_t &aPtr)
 		GetObjectPtrProperty(obj, _T("Ptr"), aPtr, aResultToken);
 }
 
-void ConvertNumGetParams(BIF_DECL_PARAMS, NumGetParams &op)
+void ConvertNumGetTarget(ResultToken &aResultToken, ExprTokenType &target_token, NumGetParams &op)
 {
-	ExprTokenType &target_token = *aParam[0];
 	if (IObject *obj = TokenToObject(target_token))
 	{
 		GetBufferObjectPtr(aResultToken, obj, op.target, op.right_side_bound);
@@ -15019,30 +14793,10 @@ void ConvertNumGetParams(BIF_DECL_PARAMS, NumGetParams &op)
 			return;
 		op.right_side_bound += op.target;
 	}
-	else if (target_token.symbol == SYM_VAR // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
-		&& !target_token.var->IsPureNumeric()) // If the var contains a pure/binary number, it's probably an address.  Scripts can't directly access Contents() in that case anyway.
-	{
-		op.target = (size_t)target_token.var->Contents(); // Never needs updating because it's not pure numeric, but the default parameters support #Warn UseUnset.
-		op.right_side_bound = op.target + target_token.var->ByteCapacity(); // This is the first illegal address to the right of target.
-	}
 	else
 	{
 		op.target = (size_t)TokenToInt64(target_token);
 		op.right_side_bound = SIZE_MAX;
-	}
-
-	if (aParamCount > 1) // Parameter "offset" is present, so increment the address by that amount.  For flexibility, this is done even when the target isn't a variable.
-	{
-		if (aParamCount > 2 || TokenIsNumeric(*aParam[1])) // Checking aParamCount first avoids some unnecessary work in common cases where all parameters were specified.
-		{
-			op.target += (ptrdiff_t)TokenToInt64(*aParam[1]); // Cast to ptrdiff_t vs. size_t to support negative offsets.
-			aParam++;
-			aParamCount--;
-		}
-		if (aParamCount > 1)
-		{
-			ConvertNumGetType(*aParam[1], op);
-		}
 	}
 }
 
@@ -15050,9 +14804,16 @@ void ConvertNumGetParams(BIF_DECL_PARAMS, NumGetParams &op)
 BIF_DECL(BIF_NumGet)
 {
 	NumGetParams op;
-	ConvertNumGetParams(aResultToken, aParam, aParamCount, op);
+	ConvertNumGetTarget(aResultToken, *aParam[0], op);
 	if (aResultToken.Exited())
 		return;
+	if (aParamCount > 2) // Offset was specified.
+	{
+		op.target += (ptrdiff_t)TokenToInt64(*aParam[1]);
+		aParam++;
+	}
+	// MinParams ensures there is always one more parameter.
+	ConvertNumGetType(*aParam[1], op);
 
 	// If the target is a variable, the following check ensures that the memory to be read lies within its capacity.
 	// This seems superior to an exception handler because exception handlers only catch illegal addresses,
@@ -15260,49 +15021,30 @@ BIF_DECL(BIF_Format)
 
 BIF_DECL(BIF_NumPut)
 {
+	// Params can be any non-zero number of type-number pairs, followed by target[, offset].
+	// Prior validation has ensured that there are at least three parameters.
+	//   NumPut(t1, n1, t2, n2, p, o)
+	//   NumPut(t1, n1, t2, n2, p)
+	//   NumPut(t1, n1, p, o)
+	//   NumPut(t1, n1, p)
+	
+	// Split target[,offset] from aParam.
+	bool offset_was_specified = !(aParamCount & 1);
+	aParamCount -= 1 + int(offset_was_specified);
+	ExprTokenType &target_token = *aParam[aParamCount];
+	
 	NumGetParams op;
-	ExprTokenType **target_param;
-	int target_param_count, n_param;
-	// Load-time validation has ensured that at least the first two parameters are present.
-	if (ParamIndexIsNumeric(0))
-	{
-		// NumPut(n, target [, offset, type])
-		target_param = aParam + 1;
-		target_param_count = aParamCount - 1;
-		n_param = 0;
-		aParamCount = 1;
-	}
-	else
-	{
-		// Params can be any number of type-number pairs, followed by  target[, offset].
-		// Valid:		NumPut(t1, n1, t2, n2, p, o)
-		// Valid:		NumPut(t1, n1, t2, n2, p)
-		// Ambiguous:	NumPut(t1, n1, t2, p, o) -> ...n2, p)
-		// Valid:		NumPut(t1, n1, p, o)
-		// Invalid:		NumPut(t1, n1, t2, x)  ; Either n2 or p is missing.
-		// Valid:		NumPut(t1, n1, p)
-		// Ambiguous:	NumPut(t1, p, o) -> ...n1, p)
-		// Invalid:		NumPut(t1, p)
-		// Invalid:		NumPut(t1)
-		if (aParamCount < 3)
-			_f_throw(ERR_TYPE_MISMATCH);
-		// Split target[,offset] from aParam.
-		target_param_count = 2 - (aParamCount & 1);
-		aParamCount -= target_param_count;
-		target_param = aParam + aParamCount;
-		// Handle the first type name here to enable the loop to handle the other parameter mode.
-		ConvertNumGetType(*aParam[0], op);
-		n_param = 1;
-	}
-
-	ConvertNumGetParams(aResultToken, target_param, target_param_count, op);
+	ConvertNumGetTarget(aResultToken, target_token, op);
 	if (aResultToken.Exited())
 		return;
+	if (offset_was_specified)
+		op.target += (ptrdiff_t)TokenToInt64(*aParam[aParamCount + 1]);
 
 	size_t num_end;
-	for (;; op.target = num_end)
+	for (int n_param = 1; n_param < aParamCount; n_param += 2, op.target = num_end)
 	{
-		ExprTokenType &token_to_write = *aParam[n_param];
+		ConvertNumGetType(*aParam[n_param - 1], op); // Type name.
+		ExprTokenType &token_to_write = *aParam[n_param]; // Numeric value.
 
 		num_end = op.target + op.num_size; // This is used below and also as NumPut's return value. It's the address to the right of the item to be written.
 
@@ -15341,14 +15083,7 @@ BIF_DECL(BIF_NumPut)
 		case 2: *(UINT16 *)op.target = (UINT16)num_i64; break;
 		case 1: *(UINT8 *)op.target = (UINT8)num_i64; break;
 		}
-
-		n_param += 2;
-		if (n_param >= aParamCount)
-			break;
-		// Convert the type name for the next number.
-		ConvertNumGetType(*aParam[n_param - 1], op);
 	}
-	ExprTokenType &target_token = **target_param;
 	if (target_token.symbol == SYM_VAR && !target_token.var->IsPureNumeric())
 		target_token.var->Close(); // This updates various attributes of the variable.
 	//else the target was an raw address.  If that address is inside some variable's contents, the above
@@ -15680,13 +15415,23 @@ BIF_DECL(BIF_StrGetPut) // BIF_DECL(BIF_StrGet), BIF_DECL(BIF_StrPut)
 
 
 
+BIF_DECL(BIF_StrPtr)
+{
+	switch (aParam[0]->symbol)
+	{
+	case SYM_STRING:
+		_f_return((UINT_PTR)aParam[0]->marker);
+	case SYM_VAR:
+		if (!aParam[0]->var->IsPureNumericOrObject())
+			_f_return((UINT_PTR)aParam[0]->var->Contents());
+	default:
+		_f_throw_type(_T("String"), *aParam[0]);
+	}
+}
+
+
+
 BIF_DECL(BIF_IsLabel)
-// For performance and code-size reasons, this function does not currently return what
-// type of label it is (hotstring, hotkey, or generic).  To preserve the option to do
-// this in the future, it has been documented that the function returns non-zero rather
-// than "true".  However, if performance is an issue (since scripts that use IsLabel are
-// often performance sensitive), it might be better to add a second parameter that tells
-// IsLabel to look up the type of label, and return it as a number or letter.
 {
 	_f_return_b(g_script->FindLabel(ParamIndexToString(0, _f_number_buf)) ? 1 : 0);
 }
@@ -15761,6 +15506,169 @@ BIF_DECL(BIF_IsByRef)
 		_f_return_b(var.ResolveAlias() != &var
 			&& (var.Scope() & (VAR_LOCAL_FUNCPARAM | VAR_DOWNVAR)) == VAR_LOCAL_FUNCPARAM);
 	}
+}
+
+
+
+BIF_DECL(BIF_IsTypeish)
+{
+	auto variable_type = (VariableTypeType)_f_callee_id;
+	bool if_condition;
+	TCHAR *cp;
+
+	// The first set of checks are for isNumber(), isInteger() and isFloat(), which permit pure numeric values.
+	switch (TypeOfToken(*aParam[0]))
+	{
+	case SYM_INTEGER:
+		switch (variable_type)
+		{
+		case VAR_TYPE_NUMBER:
+		case VAR_TYPE_INTEGER:
+			_f_return_b(true);
+		case VAR_TYPE_FLOAT:
+			_f_return_b(false);
+		default:
+			// Do not permit pure numbers for the other functions, since the results would not be intuitive.
+			// For instance, isAlnum() would return false for negative values due to '-'; isXDigit() would
+			// return true for positive integers even though they are always in decimal.
+			goto type_mismatch;
+		}
+	case SYM_FLOAT:
+		switch (variable_type)
+		{
+		case VAR_TYPE_NUMBER:
+		case VAR_TYPE_FLOAT:
+			_f_return_b(true);
+		case VAR_TYPE_INTEGER:
+			// Given that legacy "if var is float" required a decimal point in var and isFloat() is false for
+			// integers which can be represented as float, it seems inappropriate for isInteger(1.0) to be true.
+			// A function like isWholeNumber() could be added if that was needed.
+			_f_return_b(false);
+		default:
+			goto type_mismatch;
+		}
+	case SYM_OBJECT:
+		switch (variable_type)
+		{
+		case VAR_TYPE_NUMBER:
+		case VAR_TYPE_INTEGER:
+		case VAR_TYPE_FLOAT:
+			_f_return_b(false);
+		default:
+			goto type_mismatch;
+		}
+	}
+	// Since above did not return or goto, the value is a string.
+	LPTSTR aValueStr = ParamIndexToString(0);
+	auto string_case_sense = ParamIndexToCaseSense(1); // For IsAlpha, IsAlnum, IsUpper, IsLower.
+	switch (string_case_sense)
+	{
+	case SCS_INSENSITIVE: // This case also executes when the parameter is omitted, such as for functions which don't have this parameter.
+	case SCS_SENSITIVE: // Insensitive vs. sensitive doesn't mean anything for these functions, but seems fair to allow either, rather than requiring 0 or deviating from the CaseSense convention by requiring "".
+	case SCS_INSENSITIVE_LOCALE: // 'Locale'
+		break;
+	default:
+		_f_throw(ERR_PARAM2_INVALID);
+	}
+
+	// The remainder of this function is based on the original code for ACT_IFIS, which was removed
+	// in commit 3382e6e2.
+	switch (variable_type)
+	{
+	case VAR_TYPE_NUMBER:
+		if_condition = IsNumeric(aValueStr, true, false, true);
+		break;
+	case VAR_TYPE_INTEGER:
+		if_condition = IsNumeric(aValueStr, true, false, false);  // Passes false for aAllowFloat.
+		break;
+	case VAR_TYPE_FLOAT:
+		if_condition = (IsNumeric(aValueStr, true, false, true) == PURE_FLOAT);
+		break;
+	case VAR_TYPE_TIME:
+	{
+		SYSTEMTIME st;
+		// Also insist on numeric, because even though YYYYMMDDToFileTime() will properly convert a
+		// non-conformant string such as "2004.4", for future compatibility, we don't want to
+		// report that such strings are valid times:
+		if_condition = IsNumeric(aValueStr, false, false, false) && YYYYMMDDToSystemTime(aValueStr, st, true); // Can't call Var::IsNumeric() here because it doesn't support aAllowNegative.
+		break;
+	}
+	case VAR_TYPE_DIGIT:
+		if_condition = true;
+		for (cp = aValueStr; *cp; ++cp)
+			if (!_istdigit((UCHAR)*cp))
+			{
+				if_condition = false;
+				break;
+			}
+		break;
+	case VAR_TYPE_XDIGIT:
+		cp = aValueStr;
+		if (!_tcsnicmp(cp, _T("0x"), 2)) // Allow 0x prefix.
+			cp += 2;
+		if_condition = true;
+		for (; *cp; ++cp)
+			if (!_istxdigit((UCHAR)*cp))
+			{
+				if_condition = false;
+				break;
+			}
+		break;
+	case VAR_TYPE_ALNUM:
+		if_condition = true;
+		for (cp = aValueStr; *cp; ++cp)
+			if (string_case_sense == SCS_INSENSITIVE_LOCALE ? !IsCharAlphaNumeric(*cp) : !cisalnum(*cp))
+			{
+				if_condition = false;
+				break;
+			}
+		break;
+	case VAR_TYPE_ALPHA:
+		// Like AutoIt3, the empty string is considered to be alphabetic, which is only slightly debatable.
+		if_condition = true;
+		for (cp = aValueStr; *cp; ++cp)
+			if (string_case_sense == SCS_INSENSITIVE_LOCALE ? !IsCharAlpha(*cp) : !cisalpha(*cp))
+			{
+				if_condition = false;
+				break;
+			}
+		break;
+	case VAR_TYPE_UPPER:
+		if_condition = true;
+		for (cp = aValueStr; *cp; ++cp)
+			if (string_case_sense == SCS_INSENSITIVE_LOCALE ? !IsCharUpper(*cp) : !cisupper(*cp))
+			{
+				if_condition = false;
+				break;
+			}
+		break;
+	case VAR_TYPE_LOWER:
+		if_condition = true;
+		for (cp = aValueStr; *cp; ++cp)
+			if (string_case_sense == SCS_INSENSITIVE_LOCALE ? !IsCharLower(*cp) : !cislower(*cp))
+			{
+				if_condition = false;
+				break;
+			}
+		break;
+	case VAR_TYPE_SPACE:
+		if_condition = true;
+		for (cp = aValueStr; *cp; ++cp)
+			if (!_istspace(*cp))
+			{
+				if_condition = false;
+				break;
+			}
+		break;
+#ifdef DEBUG
+	default:
+		MsgBox(_T("DEBUG: Unhandled IsXStr mode."));
+#endif
+	}
+	_f_return_b(if_condition);
+
+type_mismatch:
+	_f_throw_type(_T("String"), *aParam[0]);
 }
 
 
@@ -15840,36 +15748,37 @@ BIF_DECL(BIF_VarSetStrCapacity)
 // 1: Target variable (unquoted).
 // 2: Requested capacity.
 {
-	// Caller has set aResultToken.symbol to a default of SYM_INTEGER, so no need to set it here.
-	aResultToken.value_int64 = 0; // Set default. In spite of being ambiguous with the result of Free(), 0 seems a little better than -1 since it indicates "no capacity" and is also equal to "false" for easy use in expressions.
-	if (aParam[0]->symbol == SYM_VAR && aParam[0]->var->Type() == VAR_NORMAL)
+	Var *target_var = ParamIndexToOutputVar(0);
+	if (!target_var)
+		_f_throw(ERR_PARAM1_INVALID);
+	Var &var = *target_var;
+	ASSERT(var.Type() == VAR_NORMAL); // Should always be true.
+
+	if (aParamCount > 1) // Second parameter is present.
 	{
-		Var &var = *aParam[0]->var; // For performance and convenience.
-		if (aParamCount > 1) // Second parameter is present.
+		__int64 param1 = TokenToInt64(*aParam[1]);
+		// Check for invalid values, in particular small negatives which end up large when converted
+		// to unsigned.  Var::AssignString used to have a similar check, but integer overflow caused
+		// by "* sizeof(TCHAR)" allowed some errors to go undetected.  For this same reason, we can't
+		// simply rely on SetCapacity() calling malloc() and then detecting failure.
+		if ((unsigned __int64)param1 > (MAXINT_PTR / sizeof(TCHAR)))
 		{
-			__int64 param1 = TokenToInt64(*aParam[1]);
-			// Check for invalid values, in particular small negatives which end up large when converted
-			// to unsigned.  Var::AssignString used to have a similar check, but integer overflow caused
-			// by "* sizeof(TCHAR)" allowed some errors to go undetected.  For this same reason, we can't
-			// simply rely on SetCapacity() calling malloc() and then detecting failure.
-			if ((unsigned __int64)param1 > (MAXINT_PTR / sizeof(TCHAR)))
+			if (param1 == -1) // Adjust variable's internal length.
 			{
-				if (param1 == -1) // Adjust variable's internal length.
-				{
-					var.SetLengthFromContents();
-					// Seems more useful to report length vs. capacity in this special case. Scripts might be able
-					// to use this to boost performance.
-					aResultToken.value_int64 = var.CharLength();
-					return;
-				}
-				// x64: it's negative but not -1.
-				// x86: it's either >2GB or negative and not -1.
-				_f_throw(ERR_PARAM2_INVALID, TokenToString(*aParam[1], _f_number_buf));
+				var.SetLengthFromContents();
+				// Seems more useful to report length vs. capacity in this special case. Scripts might be able
+				// to use this to boost performance.
+				aResultToken.value_int64 = var.CharLength();
+				return;
 			}
-			// Since above didn't return:
-			size_t new_capacity = (size_t)param1 * sizeof(TCHAR); // Chars to bytes.
-			if (new_capacity)
-			{
+			// x64: it's negative but not -1.
+			// x86: it's either >2GB or negative and not -1.
+			_f_throw(ERR_PARAM2_INVALID, TokenToString(*aParam[1], _f_number_buf));
+		}
+		// Since above didn't return:
+		size_t new_capacity = (size_t)param1 * sizeof(TCHAR); // Chars to bytes.
+		if (new_capacity)
+		{
 				AUTO_MALLOCA_DEFINE(BYTE*, aBkpContents);
 				VarSizeType aBkpCapacity = NULL;
 				if (aParamCount < 3 && (aBkpCapacity = var.ByteCapacity()) > 1)  // Third parameter is present and var has enough capacity to make memmove() meaningful.
@@ -15878,41 +15787,34 @@ BIF_DECL(BIF_VarSetStrCapacity)
 					AUTO_MALLOCA(aBkpContents, BYTE*, aBkpCapacity);
 					memcpy(aBkpContents, var.Contents(false), aBkpCapacity);
 				}
-				if (!var.SetCapacity(new_capacity, true)) // This also destroys the variables contents.
-				{
-					aResultToken.SetExitResult(FAIL); // ScriptError() was already called.
-					return;
-				}
-				{
-					// restore variables content if FillMemory parameter is not used and the size is apropriate
-					if (aParamCount < 3 && aBkpCapacity > 1 && (var.ByteCapacity()) > 1)
-						memcpy(var.Contents(false), aBkpContents, var.ByteCapacity() < aBkpCapacity ? var.ByteCapacity() : aBkpCapacity);
-				// By design, Assign() has already set the length of the variable to reflect new_capacity.
-				// This is not what is wanted in this case since it should be truly empty.
-				var.ByteLength() = 0;
-				}
+			if (!var.SetCapacity(new_capacity, true)) // This also destroys the variables contents.
+			{
+				aResultToken.SetExitResult(FAIL); // ScriptError() was already called.
+				return;
 			}
-			else // ALLOC_SIMPLE, due to its nature, will not actually be freed, which is documented.
-				var.Free();
-		} // if (aParamCount > 1)
-		else
-		{
-			// RequestedCapacity was omitted, so the var is not altered; instead, the current capacity
-			// is reported, which seems more intuitive/useful than having it do a Free(). In this case
-			// it's an input var rather than an output var, so check if it contains a string.
-			// v1.1.11.01: Support VarSetCapacity(var) as a means for the script to check if it
-			// has initialized a var.  In other words, don't show a warning even in that case.
-			// v2: We now have IsSet(), but it still seems reasonable to allow this without a warning.
-			//var.MaybeWarnUninitialized();
-			if (var.IsPureNumericOrObject())
-				_f_throw(ERR_TYPE_MISMATCH);
+			// By design, Assign() has already set the length of the variable to reflect new_capacity.
+			// This is not what is wanted in this case since it should be truly empty.
+			var.ByteLength() = 0;
 		}
-
-		if (aResultToken.value_int64 = var.CharCapacity()) // Don't subtract 1 here in lieu doing it below (avoids underflow).
-			aResultToken.value_int64 -= 1; // Omit the room for the zero terminator since script capacity is defined as length vs. size.
-	} // (aParam[0]->symbol == SYM_VAR && aParam[0]->var->Type() == VAR_NORMAL)
+		else // ALLOC_SIMPLE, due to its nature, will not actually be freed, which is documented.
+			var.Free();
+	} // if (aParamCount > 1)
 	else
-		_f_throw(ERR_PARAM1_INVALID);
+	{
+		// RequestedCapacity was omitted, so the var is not altered; instead, the current capacity
+		// is reported, which seems more intuitive/useful than having it do a Free(). In this case
+		// it's an input var rather than an output var, so check if it contains a string.
+		// v1.1.11.01: Support VarSetCapacity(var) as a means for the script to check if it
+		// has initialized a var.  In other words, don't show a warning even in that case.
+		// v2: We now have IsSet(), but it still seems reasonable to allow this without a warning.
+		//var.MaybeWarnUninitialized();
+		if (var.IsPureNumericOrObject())
+			_f_throw_type(_T("String"), *aParam[0]);
+	}
+
+	// Caller has set aResultToken.symbol to a default of SYM_INTEGER, so no need to set it here.
+	if (aResultToken.value_int64 = var.CharCapacity()) // Don't subtract 1 here in lieu doing it below (avoids underflow).
+		aResultToken.value_int64 -= 1; // Omit the room for the zero terminator since script capacity is defined as length vs. size.
 }
 
 
@@ -16280,16 +16182,36 @@ BIF_DECL(BIF_ZipCreateBuffer)
 
 BIF_DECL(BIF_ZipAddBuffer)
 {
+	IObject *buffer_obj;
+	size_t max_bytes = SIZE_MAX;
 	DWORD aErrCode;
-	const void *aSource = (const void *)TokenToInt64(*aParam[1]);
+	const void *aSource;
+
+	if (buffer_obj = TokenToObject(**aParam))
+	{
+		size_t ptr;
+		GetBufferObjectPtr(aResultToken, buffer_obj, ptr, max_bytes);
+		if (aResultToken.Exited())
+		{
+			g_script->ScriptError(ERR_PARAM1_INVALID);
+			aResultToken.SetExitResult(FAIL);
+			return;
+		}
+		aSource = (const void*)ptr;
+		if (!ParamIndexIsOmittedOrEmpty(2))
+			max_bytes = TokenToInt64(*aParam[2]);
+	}
+	else
+	{
+		aSource = (const void *)TokenToInt64(*aParam[1]);
+		max_bytes = TokenToInt64(*aParam[2]);
+	}
 	LPTSTR aDestination = TokenToString(*aParam[3]);
 	if (!TokenToInt64(*aParam[0]))
 	{
-		g_script->ScriptError(ERR_PARAM1_INVALID);
-		aResultToken.SetExitResult(FAIL);
 		return;
 	}
-	if (aErrCode = ZipAddBuffer((HZIP)TokenToInt64(*aParam[0]), aDestination, aSource, (DWORD)TokenToInt64(*aParam[2])))
+	else if (aErrCode = ZipAddBuffer((HZIP)TokenToInt64(*aParam[0]), aDestination, aSource, max_bytes))
 	{
 		TCHAR	aMsg[100];
 		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
@@ -16321,15 +16243,20 @@ BIF_DECL(BIF_ZipCloseBuffer)
 		aResultToken.SetExitResult(FAIL);
 		return;
 	}
-	aResultToken.value_int64 = aLen;
-	aParam[1]->var->SetCapacity((VarSizeType)aResultToken.value_int64, true);
-	memcpy(aParam[1]->var->mCharContents, aBuffer, (SIZE_T)aResultToken.value_int64);
-	g_memset((char*)aParam[1]->var->mCharContents + aResultToken.value_int64, 0, 2);
+	LPVOID aData = malloc(aLen);
+	if (!aData)
+	{
+		g_script->ScriptError(ERR_OUTOFMEM);
+		aResultToken.SetExitResult(FAIL);
+		return;
+	}
+	memcpy(aData, aBuffer, aLen);
+	IObject *aObject = new BufferObject(aData, aLen);
+	dynamic_cast<BufferObject*>(aObject)->SetBase(BufferObject::sPrototype);
+	aResultToken.SetValue(aObject);
 	// Free the memory now that we're done with it.
 	UnmapViewOfFile(aBuffer);
 	CloseHandle(aBase);
-	aResultToken.symbol = SYM_INTEGER;
-	aResultToken.value_int64 = aLen;
 }
 
 BIF_DECL(BIF_ZipInfo)
@@ -16429,6 +16356,8 @@ error:
 
 BIF_DECL(BIF_UnZip)
 {
+	IObject *buffer_obj;
+	size_t max_bytes = SIZE_MAX;
 	DWORD aErrCode;
 	HZIP huz;
 	TCHAR	aMsg[100];
@@ -16451,6 +16380,19 @@ BIF_DECL(BIF_UnZip)
 			goto error;
 		aParam++;
 		aParamCount--;
+	}
+	else if (buffer_obj = TokenToObject(**aParam))
+	{
+		size_t ptr;
+		GetBufferObjectPtr(aResultToken, buffer_obj, ptr, max_bytes);
+		if (aResultToken.Exited())
+		{
+			g_script->ScriptError(ERR_PARAM2_INVALID);
+			aResultToken.SetExitResult(FAIL);
+			return;
+		}
+		if (aErrCode = UnzipOpenBuffer(&huz, (void*)ptr, max_bytes, aPassword))
+			goto error;
 	}
 	else if (aErrCode = UnzipOpenFile(&huz, TokenToString(*aParam[0]), aPassword))
 	{
@@ -16524,13 +16466,12 @@ BIF_DECL(BIF_UnZipBuffer)
 	TCHAR	aMsg[100];
 	char aPassword[1024] = { 0 };
 	if (aParamCount > 4)
-#ifndef _UNICODE
-		_tcscpy(aPassword, TokenToString(*aParam[4]));
-#else
 		WideCharToMultiByte(CP_ACP, 0, TokenToString(*aParam[4]), -1, aPassword, 1024, 0, 0);
-#endif
 	//CStringA aPassword = aParamCount > 4 ? CStringCharFromTChar(TokenToString(*aParam[4])) : NULL;
-	if (TokenIsNumeric(*aParam[0]))
+	IObject *buffer_obj;
+	unsigned char *aBuffer;
+	size_t  max_bytes = SIZE_MAX;
+	if (TokenIsNumeric(**aParam))
 	{
 		if (!TokenIsNumeric(*aParam[1]))
 		{
@@ -16538,13 +16479,23 @@ BIF_DECL(BIF_UnZipBuffer)
 			aResultToken.SetExitResult(FAIL);
 			return;
 		}
-		else if (aParamCount < 3)
+		aBuffer = (unsigned char *)TokenToInt64(**aParam);
+	}
+	else if (buffer_obj = TokenToObject(**aParam))
+	{
+		size_t ptr;
+		GetBufferObjectPtr(aResultToken, buffer_obj, ptr, max_bytes);
+		if (aResultToken.Exited())
 		{
-			g_script->ScriptError(ERR_PARAM3_REQUIRED);
+			g_script->ScriptError(ERR_PARAM2_INVALID);
 			aResultToken.SetExitResult(FAIL);
 			return;
 		}
-		if (aErrCode = UnzipOpenBuffer(&huz, (void*)TokenToInt64(*aParam[0]), (DWORD)TokenToInt64(*aParam[1]), aPassword))
+		aBuffer = (unsigned char *)ptr;
+	}
+	if (aBuffer)
+	{
+		if (aErrCode = UnzipOpenBuffer(&huz, aBuffer, (DWORD)TokenToInt64(*aParam[1]), aPassword))
 			goto error;
 		aParam++;
 		aParamCount--;
@@ -16556,14 +16507,12 @@ BIF_DECL(BIF_UnZipBuffer)
 	UnzipSetBaseDir(huz, _T(""));
 
 	ZIPENTRY	ze;
-	unsigned char *aBuffer;
 
 	if (TokenIsNumeric(*aParam[2]))
 	{
 		ze.Index = (ULONGLONG)TokenToInt64(*aParam[2]);
 		if ((aErrCode = UnzipGetItem(huz, &ze)))
 			goto errorclose;
-		aResultToken.value_int64 = ze.UncompressedSize;
 		if (aParamCount < 3 || aParam[2]->symbol != SYM_VAR)
 		{
 			UnzipClose(huz);
@@ -16571,14 +16520,24 @@ BIF_DECL(BIF_UnZipBuffer)
 			return;
 		}
 		aBuffer = (unsigned char *)malloc((DWORD)ze.UncompressedSize);
-		if (aErrCode = UnzipItemToBuffer(huz, aBuffer, (DWORD)ze.UncompressedSize, &ze))
+		if (!aBuffer)
+		{
+			UnzipClose(huz);
+			g_script->ScriptError(ERR_OUTOFMEM);
+			aResultToken.SetExitResult(FAIL);
+			return;
+		}
+		if (!aBuffer)
 			goto errorclose;
-		aParam[2]->var->SetCapacity((VarSizeType)aResultToken.value_int64, true);
-		memcpy(aParam[2]->var->mCharContents, aBuffer, (SIZE_T)aResultToken.value_int64);
-		g_memset((char*)aParam[2]->var->mCharContents + aResultToken.value_int64, 0, 2);
-		free(aBuffer);
+		if (aErrCode = UnzipItemToBuffer(huz, aBuffer, (DWORD)ze.UncompressedSize, &ze))
+		{
+			free(aBuffer);
+			goto errorclose;
+		}
+		IObject *aObject = new BufferObject(aBuffer, ze.UncompressedSize);
+		dynamic_cast<BufferObject*>(aObject)->SetBase(BufferObject::sPrototype);
+		aResultToken.SetValue(aObject);
 		UnzipClose(huz);
-		aResultToken.symbol = SYM_INTEGER;
 		return;
 	}
 	else
@@ -16605,23 +16564,24 @@ BIF_DECL(BIF_UnZipBuffer)
 				return;
 			}
 			aBuffer = (unsigned char *)GlobalAlloc(GMEM_FIXED, (DWORD)ze.UncompressedSize);
-			if (aErrCode = UnzipItemToBuffer(huz, aBuffer, (DWORD)ze.UncompressedSize, &ze))
+			if (!aBuffer)
 				goto errorclose;
-			Var *aVar = aParam[2]->var->mType == VAR_ALIAS ? aParam[2]->var->mAliasFor : aParam[2]->var;
-			aVar->SetCapacity((VarSizeType)aResultToken.value_int64, true);
-			memcpy(aVar->mByteContents, aBuffer, (SIZE_T)aResultToken.value_int64);
-			g_memset((char*)aVar->mCharContents + aResultToken.value_int64, 0, 2);
-			GlobalFree(aBuffer);
+			if (aErrCode = UnzipItemToBuffer(huz, aBuffer, (DWORD)ze.UncompressedSize, &ze))
+			{
+				free(aBuffer);
+				goto errorclose;
+			}
+			IObject *aObject = new BufferObject(aBuffer, ze.UncompressedSize);
+			dynamic_cast<BufferObject*>(aObject)->SetBase(BufferObject::sPrototype);
+			aResultToken.SetValue(aObject);
 			UnzipClose(huz);
-			aResultToken.symbol = SYM_INTEGER;
 			return;
 		}
 	}
 
 	// Item not found, so close the ZIP archive.
 	UnzipClose(huz);
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = _T("");
+	aResultToken.SetValue(_T(""));
 	return;
 errorclose:
 	UnzipClose(huz);
@@ -16656,77 +16616,86 @@ BIF_DECL(BIF_CryptAES)
 
 BIF_DECL(BIF_ZipRawMemory)
 {
+	IObject *buffer_obj;
+	size_t  max_bytes = SIZE_MAX;
 	LPVOID aDataBuf = NULL;
-	TCHAR *pw[1024] = {};
-	if (!ParamIndexIsOmittedOrEmpty(3))
+	TCHAR *pw[1024] = { NULL };
+	size_t sz = NULL;
+	if (!ParamIndexIsOmittedOrEmpty(2))
 	{
-		TCHAR *pwd = TokenToString(*aParam[3]);
+		TCHAR *pwd = TokenToString(*aParam[2]);
 		size_t pwlen = _tcslen(pwd);
 		for (size_t i = 0; i <= pwlen; i++)
 			pw[i] = &pwd[i];
 	}
-	aResultToken.value_int64 = CompressBuffer(aParam[0]->symbol == SYM_VAR ? (BYTE*)aParam[0]->var->mByteContents : (BYTE*)TokenToInt64(*aParam[0]), aDataBuf,
-											  (DWORD)TokenToInt64(*aParam[1]), pw);
-	if (aResultToken.value_int64)
+	if (buffer_obj = TokenToObject(**aParam))
 	{
-		aResultToken.symbol = SYM_INTEGER;
-		if (!ParamIndexIsOmitted(2))
+		size_t ptr;
+		GetBufferObjectPtr(aResultToken, buffer_obj, ptr, max_bytes);
+		if (aResultToken.Exited())
 		{
-			if (aParam[2]->symbol == SYM_VAR)
-			{
-				aParam[2]->var->SetCapacity((VarSizeType)aResultToken.value_int64 + sizeof(char) * 2);
-				memcpy(aParam[2]->var->mCharContents, aDataBuf, (SIZE_T)aResultToken.value_int64);
-				g_memset((char*)aParam[2]->var->mCharContents + aResultToken.value_int64, 0, 2);
-			}
-			else if (TokenToInt64(*aParam[2]) > 1024) // Assume address
-				memcpy((void *)TokenToInt64(*aParam[2]), aDataBuf, (SIZE_T)aResultToken.value_int64);
-
+			g_script->ScriptError(ERR_PARAM2_INVALID);
+			aResultToken.SetExitResult(FAIL);
+			return;
 		}
-		g_memset(aDataBuf, 0, (size_t)aResultToken.value_int64);
-		free(aDataBuf);
-		return;
+		if (!ParamIndexIsOmittedOrEmpty(1))
+			sz = CompressBuffer((BYTE*)ptr, aDataBuf, (DWORD)TokenToInt64(*aParam[1]), pw);
+		else
+			sz = CompressBuffer((BYTE*)ptr, aDataBuf, max_bytes, pw);
 	}
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = _T("");
+	else
+		sz = CompressBuffer(aParam[0]->symbol == SYM_VAR ? (BYTE*)aParam[0]->var->mByteContents : (BYTE*)TokenToInt64(**aParam), aDataBuf,
+											  (DWORD)TokenToInt64(*aParam[1]), pw);
+	if (sz)
+	{
+		IObject *aObject = new BufferObject(aDataBuf, sz);
+		dynamic_cast<BufferObject*>(aObject)->SetBase(BufferObject::sPrototype);
+		aResultToken.SetValue(aObject);
+	}
+	else
+		aResultToken.SetValue(_T(""));
 }
 
 BIF_DECL(BIF_UnZipRawMemory)
 {
-	if (TokenToInt64(*aParam[0]))
+	IObject *buffer_obj;
+	size_t max_bytes = SIZE_MAX;
+	size_t sz = NULL;
+	LPVOID aBuffer;
+	LPVOID aDataBuf = NULL;
+	TCHAR *pw[1024] = {};
+	if (!ParamIndexIsOmittedOrEmpty(2))
 	{
-		LPVOID aDataBuf = NULL;
-		TCHAR *pw[1024] = {};
-		if (!ParamIndexIsOmittedOrEmpty(3))
+		TCHAR *pwd = TokenToString(*aParam[2]);
+		size_t pwlen = _tcslen(pwd);
+		for(size_t i = 0;i <= pwlen;i++)
+			pw[i] = &pwd[i];
+	}
+	if (TokenIsNumeric(**aParam))
+	{
+		aBuffer = (LPVOID)TokenToInt64(**aParam);
+		sz = DecompressBuffer(aBuffer, aDataBuf, (DWORD)TokenToInt64(*aParam[1]), pw);
+	}
+	else if (buffer_obj = TokenToObject(**aParam))
+	{
+		size_t ptr;
+		GetBufferObjectPtr(aResultToken, buffer_obj, ptr, max_bytes);
+		if (aResultToken.Exited())
 		{
-			TCHAR *pwd = TokenToString(*aParam[3]);
-			size_t pwlen = _tcslen(pwd);
-			for(size_t i = 0;i <= pwlen;i++)
-				pw[i] = &pwd[i];
-		}
-		aResultToken.value_int64 = DecompressBuffer((void *)TokenToInt64(*aParam[0]), aDataBuf, (DWORD)TokenToInt64(*aParam[1]), pw);
-		if (aResultToken.value_int64)
-		{
-			aResultToken.symbol = SYM_INTEGER;
-			if (!ParamIndexIsOmitted(2))
-			{
-				if (aParam[2]->symbol == SYM_VAR)
-				{
-					Var *aVar = aParam[2]->var->mType == VAR_ALIAS ? aParam[2]->var->mAliasFor : aParam[2]->var;
-					aVar->SetCapacity((VarSizeType)aResultToken.value_int64 + sizeof(char) * 2);
-					memcpy(aVar->mCharContents,aDataBuf,(SIZE_T)aResultToken.value_int64);
-					g_memset((char*)aVar->mCharContents + aResultToken.value_int64, 0, 2);
-				}
-				else if (TokenToInt64(*aParam[2]) > 1024) // Assume address
-					memcpy((void *)TokenToInt64(*aParam[2]),aDataBuf,(SIZE_T)aResultToken.value_int64);
-
-			}
-			g_memset(aDataBuf, 0, (size_t)aResultToken.value_int64);
-			free(aDataBuf);
+			g_script->ScriptError(ERR_PARAM2_INVALID);
+			aResultToken.SetExitResult(FAIL);
 			return;
 		}
+		sz = DecompressBuffer(aBuffer = (LPVOID)ptr, aDataBuf, max_bytes, pw);
 	}
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker =_T("");
+	if (sz)
+	{	// in case this is a string add 2 bytes for terminating character, BufferObject will report the actual size
+		IObject *aObject = new BufferObject(aDataBuf, sz);
+		dynamic_cast<BufferObject*>(aObject)->SetBase(BufferObject::sPrototype);
+		aResultToken.SetValue(aObject);
+	}
+	else
+		aResultToken.SetValue(_T(""));
 }
 
 BIF_DECL(BIF_Round)
@@ -17141,24 +17110,16 @@ BIF_DECL(BIF_DateDiff)
 
 BIF_DECL(BIF_Hotkey)
 {
-	_f_param_string(aParam0, 0);
+	_f_param_string_opt(aParam0, 0);
 	_f_param_string_opt(aParam1, 1);
 	_f_param_string_opt(aParam2, 2);
 	
-	ResultType result;
+	ResultType result = OK;
 	IObject *functor = NULL;
-	
-	if (!_tcsnicmp(aParam0, _T("IfWin"), 5)) // Seems reasonable to assume that anything starting with "IfWin" can't be the name of a hotkey.
+
+	switch (_f_callee_id) 
 	{
-		result = Hotkey::IfWin(aParam0, aParam1, aParam2, aResultToken);
-	}
-	else if (!_tcsicmp(aParam0, _T("If")))
-	{
-		if (!ParamIndexIsOmitted(1))
-			functor = TokenToFunctor(*aParam[1]);
-		result = Hotkey::IfExpr(aParam1, functor, aResultToken);
-	}
-	else
+	case FID_Hotkey:
 	{
 		HookActionType hook_action = 0;
 		if (!ParamIndexIsOmitted(1))
@@ -17166,9 +17127,39 @@ BIF_DECL(BIF_Hotkey)
 			if (functor = TokenToObject(*aParam[1]))
 				functor->AddRef();
 			else if (  !(hook_action = Hotkey::ConvertAltTab(aParam1, true))  )
-				functor = StringToLabelOrFunctor(aParam1);
+				functor = StringToFunctor(aParam1);
+			if (!functor)
+			{
+				// Search for a match in the hotkey variants' "original callbacks".
+				// I.e., find the function implicitly defined by "x::action".
+				for (int i = 0; i < Hotkey::sHotkeyCount; ++i)
+				{
+					if (_tcscmp(Hotkey::shk[i]->mName, aParam1))
+						continue;
+					
+					for (HotkeyVariant* v = Hotkey::shk[i]->mFirstVariant; v; v = v->mNextVariant)
+						if (v->mHotCriterion == g->HotCriterion)
+						{
+							if (functor = v->mOriginalCallback.ToFunc())
+								functor->AddRef(); // To counter the below release.
+							goto break_twice;
+						}
+				}
+			break_twice:;
+			}
 		}
 		result = Hotkey::Dynamic(aParam0, aParam1, aParam2, functor, hook_action, aResultToken);
+		break;
+	}
+	case FID_HotIf:
+		if (!ParamIndexIsOmitted(0))
+			functor = TokenToFunctor(*aParam[0]);
+		result = Hotkey::IfExpr(aParam0, functor, aResultToken);
+		break;
+	
+	default: // HotIfWinXXX
+		result = SetHotkeyCriterion(_f_callee_id, aParam0, aParam1); // Currently, it only fails upon out-of-memory.
+	
 	}
 	
 	if (functor)
@@ -17537,6 +17528,7 @@ void MsgMonitorList::Dispose()
 			mMonitor[mCount].func->Release();
 	}
 	free(mMonitor);
+	mMonitor = nullptr;
 	mCountMax = 0;
 	// Dispose all iterator instances to ensure Call() does not continue iterating:
 	for (MsgMonitorInstance *inst = mTop; inst; inst = inst->previous)
@@ -17763,22 +17755,7 @@ BIF_DECL(BIF_CallbackCreate)
 {
 	IObject *func = TokenToFunctor(*aParam[0]);
 	if (!func)
-		_f_throw(ERR_INVALID_FUNCTOR);
-
-	// Get func.MinParams (if present) for validation and default parameter count.
-	__int64 minparams;
-	bool has_minparams = GetObjectIntProperty(func, _T("MinParams"), minparams, aResultToken, true) != INVOKE_NOT_HANDLED;
-	if (aResultToken.Exited())
-		return;
-
-	// Check whether func is callable (or assume it is if has_minparams, for performance).
-	// For clarity, this check should take precedence over ERR_PARAM3_MUST_NOT_BE_BLANK.
-	// Since MaxParams hasn't been checked yet, we don't know if it exists; however, it
-	// would be very unusual to have MaxParams and not MinParams.
-	if (!has_minparams) // See ValidateFunctor() for comments about this.
-		if (Object *obj = dynamic_cast<Object *>(func))
-			if (!obj->HasMethod(_T("Call")))
-				_f_throw(ERR_INVALID_FUNCTOR);
+		_f_throw(ERR_PARAM1_INVALID);
 
 	LPTSTR options = ParamIndexToOptionalString(1);
 	bool pass_params_pointer = _tcschr(options, '&'); // Callback wants the address of the parameter list instead of their values.
@@ -17789,35 +17766,24 @@ BIF_DECL(BIF_CallbackCreate)
 	bool require_param_count = false;
 #endif
 
-	int actual_param_count;
-	bool has_maxparams = false;
-	if (!ParamIndexIsOmittedOrEmpty(2)) // A parameter count was specified.
-	{
-		__int64 maxparams;
-		has_maxparams = GetObjectIntProperty(func, _T("MaxParams"), maxparams, aResultToken, true) != INVOKE_NOT_HANDLED;
-		if (aResultToken.Exited())
-			return;
-		
-		actual_param_count = ParamIndexToInt(2);
-		int script_params = pass_params_pointer ? 1 : actual_param_count;
-		if (  actual_param_count < 0 // Invalid.
-			|| has_minparams && script_params < (int)minparams // Too many mandatory parameters.
-			|| has_maxparams && script_params > (int)maxparams  ) // Too few.
-		{
-			func->Release();
-			_f_throw(ERR_INVALID_FUNCTOR);
-			// Not ERR_PARAM_COUNT_INVALID because it would confuse Helgef.
-			// Not ERR_PARAM3_INVALID because it might be due to pass_params_pointer vs. min/maxparams.
-		}
-	}
-	else if (!has_minparams || pass_params_pointer && require_param_count)
+	bool params_specified = !ParamIndexIsOmittedOrEmpty(2);
+	if (pass_params_pointer && require_param_count && !params_specified)
 	{
 		func->Release();
 		_f_throw(ERR_PARAM3_MUST_NOT_BE_BLANK);
 	}
-	else // Default to the number of mandatory formal parameters in the function's definition.
-		actual_param_count = (int)minparams;
 
+	int actual_param_count = params_specified ? ParamIndexToInt(2) : 0;
+	if (!ValidateFunctor(func
+		, pass_params_pointer ? 1 : actual_param_count // Count of script parameters being passed.
+		, aResultToken, nullptr
+		// Use MinParams as actual_param_count if unspecified and no & option.
+		, params_specified || pass_params_pointer ? nullptr : &actual_param_count))
+	{
+		func->Release();
+		return;
+	}
+	
 #ifdef WIN32_PLATFORM
 	if (!use_cdecl && actual_param_count > 31) // The ASM instruction currently used limits parameters to 31 (which should be plenty for any realistic use).
 	{
@@ -17914,25 +17880,14 @@ BIF_DECL(BIF_CallbackFree)
 
 #endif
 
-BIF_DECL(BIF_Menu)
+BIF_DECL(BIF_MenuFromHandle)
 {
-	UserMenu *menu;
-	switch (_f_callee_id)
-	{
-	default:
-	//case FID_MenuCreate:
-	//case FID_MenuBarCreate:
-		if (  !(menu = g_script->AddMenu(_f_callee_id == FID_MenuCreate ? MENU_TYPE_POPUP : MENU_TYPE_BAR))  )
-			_f_throw(ERR_OUTOFMEM);
-		break;
-	case FID_MenuFromHandle:
-		menu = g_script->FindMenu((HMENU)ParamIndexToInt64(0));
-		if (menu)
-			menu->AddRef();
-		break;
-	}
+	auto *menu = g_script->FindMenu((HMENU)ParamIndexToInt64(0));
 	if (menu)
+	{
+		menu->AddRef();
 		_f_return(menu);
+	}
 	_f_return_empty;
 }
 
@@ -19338,7 +19293,7 @@ BIF_DECL(BIF_LoadPicture)
 	// h := LoadPicture(filename [, options, ByRef image_type])
 	LPTSTR filename = ParamIndexToString(0, aResultToken.buf);
 	LPTSTR options = ParamIndexToOptionalString(1);
-	Var *image_type_var = ParamIndexToOptionalVar(2);
+	Var *image_type_var = ParamIndexToOutputVar(2);
 
 	int width = -1;
 	int height = -1;
@@ -19412,7 +19367,9 @@ BIF_DECL(BIF_Cast)
 
 	size_t target = (size_t)&aValue; // Don't make target a pointer-type because the integer offset might not be a multiple of 4 (i.e. the below increments "target" directly by "offset" and we don't want that to use pointer math).
 
-	size_t size = sizeof(DWORD_PTR); // Set defaults.
+	size_t source_size = sizeof(DWORD_PTR); // Set defaults.
+	int source_type = 0; // 1 Char; 2 Uchar; 3 Short; 4 UShort; 5 Int; 6 UInt; 7 Float; 8 Double; 9 Int64
+	size_t target_size = sizeof(DWORD_PTR); // Set defaults.
 	BOOL is_integer = TRUE;   //
 	BOOL is_unsigned = (aParamCount > 3) ? FALSE : TRUE; // This one was added v1.0.48 to support unsigned __int64 the way DllCall does.
 
@@ -19425,25 +19382,38 @@ BIF_DECL(BIF_Cast)
 
 	switch (ctoupper(*type)) // Override "size" and is_integer if type warrants it. Note that the above has omitted the leading "U", if present, leaving type as "Int" vs. "Uint", etc.
 	{
-	case 'P': is_unsigned = TRUE; break; // Ptr.
+	case 'P': 
+		is_unsigned = TRUE;
+#ifdef _WIN64
+		source_type = 9;
+#else
+		source_type = 6;
+#endif
+		break; // Ptr.
 	case 'I':
 		if (_tcschr(type, '6')) // Int64. It's checked this way for performance, and to avoid access violation if string is bogus and too short such as "i64".
-			size = 8;
+		{
+			source_size = 8;
+			source_type = 9;
+		}
 		else
-			size = 4;
+		{
+			source_size = 4;
+			source_type = 5 + is_unsigned;
+		}
 		//else keep "size" at its default set earlier.
 		break;
-	case 'S': size = 2; break; // Short.
-	case 'C': size = 1; break; // Char.
+	case 'S': source_size = 2; source_type = 3 + is_unsigned; break; // Short.
+	case 'C': source_size = 1; source_type = 1 + is_unsigned; break; // Char.
 
-	case 'D': size = 8; is_integer = FALSE; break; // Double.
-	case 'F': size = 4; is_integer = FALSE; break; // Float.
+	case 'D': source_size = 8; is_integer = FALSE; source_type = 8;  break; // Double.
+	case 'F': source_size = 4; is_integer = FALSE; source_type = 7; break; // Float.
 
 		// default: For any unrecognized values, keep "size" and is_integer at their defaults set earlier
 		// (for simplicity).
 	}
 
-	switch (size)
+	switch (source_size)
 	{
 	case 4: // Listed first for performance.
 		if (is_integer)
@@ -19461,10 +19431,16 @@ BIF_DECL(BIF_Cast)
 			*(double *)target = TokenToDouble(token_to_write);
 		break;
 	case 2:
-		*(unsigned short *)target = (unsigned short)TokenToInt64(token_to_write);
+		if (is_unsigned)
+			*(unsigned short *)target = (unsigned short)TokenToInt64(token_to_write);
+		else
+			*(short *)target = (short)TokenToInt64(token_to_write);
 		break;
 	default: // size 1
-		*(unsigned char *)target = (unsigned char)TokenToInt64(token_to_write);
+		if (is_unsigned)
+			*(unsigned char *)target = (unsigned char)TokenToInt64(token_to_write);
+		else
+			*(char *)target = (char)TokenToInt64(token_to_write);
 	}
 
 	type = TokenToString(*aParam[2]); // No need to pass aBuf since any numeric value would not be recognized anyway.
@@ -19481,46 +19457,49 @@ BIF_DECL(BIF_Cast)
 		//case 'P': // Nothing extra needed in this case.
 		case 'I':
 			if (_tcschr(type, '6')) // Int64. It's checked this way for performance, and to avoid access violation if string is bogus and too short such as "i64".
-				size = 8;
+				target_size = 8;
 			else
-				size = 4;
+				target_size = 4;
 			break;
-		case 'S': size = 2; break; // Short.
-		case 'C': size = 1; break; // Char.
+		case 'S': target_size = 2; break; // Short.
+		case 'C': target_size = 1; break; // Char.
 
-		case 'D': size = 8; aResultToken.symbol = SYM_FLOAT; break; // Double.
-		case 'F': size = 4; aResultToken.symbol = SYM_FLOAT; break; // Float.
+		case 'D': target_size = 8; aResultToken.symbol = SYM_FLOAT; break; // Double.
+		case 'F': target_size = 4; aResultToken.symbol = SYM_FLOAT; break; // Float.
 
 			// default: For any unrecognized values, keep "size" and aResultToken.symbol at their defaults set earlier
 			// (for simplicity).
 	}
-
-	switch (size)
+#define CONVERT_SOURCE (\
+		source_type == 1 ? *(char *)target : source_type == 2 ? *(unsigned char *)target : source_type == 3 ? *(short *)target : source_type == 4 ? *(unsigned short *)target : source_type == 5 ? *(int *)target : source_type == 6 ? *(unsigned int *)target : source_type == 7 ? *(float *)target : source_type == 8 ? *(double *)target : *(__int64 *)target \
+	)
+	switch (target_size)
 	{
 	case 4: // Listed first for performance.
 		if (aResultToken.symbol == SYM_FLOAT)
-			aResultToken.value_double = *(float *)target;
+			aResultToken.value_double = (float)CONVERT_SOURCE;
 		else if (!is_unsigned)
-			aResultToken.value_int64 = *(int *)target; // aResultToken.symbol was set to SYM_FLOAT or SYM_INTEGER higher above.
+			aResultToken.value_int64 = (int)CONVERT_SOURCE; // aResultToken.symbol was set to SYM_FLOAT or SYM_INTEGER higher above.
 		else
-			aResultToken.value_int64 = *(unsigned int *)target;
+			aResultToken.value_int64 = (unsigned int)CONVERT_SOURCE;
 		break;
 	case 8:
-		// The below correctly copies both DOUBLE and INT64 into the union.
-		// Unsigned 64-bit integers aren't supported because variables/expressions can't support them.
-		aResultToken.value_int64 = *(__int64 *)target;
+		if (ctoupper(*type) == 'D')
+			aResultToken.value_double = (double)CONVERT_SOURCE;
+		else
+			aResultToken.value_int64 = (__int64)CONVERT_SOURCE;
 		break;
 	case 2:
 		if (!is_unsigned) // Don't use ternary because that messes up type-casting.
-			aResultToken.value_int64 = *(short *)target;
+			aResultToken.value_int64 = (short)CONVERT_SOURCE;
 		else
-			aResultToken.value_int64 = *(unsigned short *)target;
+			aResultToken.value_int64 = (unsigned short)CONVERT_SOURCE;
 		break;
 	default: // size 1
 		if (!is_unsigned) // Don't use ternary because that messes up type-casting.
-			aResultToken.value_int64 = *(char *)target;
+			aResultToken.value_int64 = (char)CONVERT_SOURCE;
 		else
-			aResultToken.value_int64 = *(unsigned char *)target;
+			aResultToken.value_int64 = (unsigned char)CONVERT_SOURCE;
 	}
 }
 
@@ -19536,9 +19515,9 @@ LPTSTR TokenTypeString(ExprTokenType &aToken)
 {
 	switch (TypeOfToken(aToken))
 	{
-	case SYM_STRING: return _T("String");
-	case SYM_INTEGER: return _T("Integer");
-	case SYM_FLOAT: return _T("Float");
+	case SYM_STRING: return STRING_TYPE_STRING;
+	case SYM_INTEGER: return INTEGER_TYPE_STRING;
+	case SYM_FLOAT: return FLOAT_TYPE_STRING;
 	case SYM_OBJECT: return TokenToObject(aToken)->Type();
 	default: return _T(""); // For maintainability.
 	}
@@ -19556,12 +19535,8 @@ BIF_DECL(BIF_Exception)
 	if (ParamIndexIsOmitted(1)) // "What"
 	{
 		line = g_script->mCurrLine;
-		// Using the current function seems preferable even if g->CurrentLabel is a sub
-		// within the function, since the sub is internal (local) to the function.
 		if (g->CurrentFunc)
 			what = g->CurrentFunc->mName;
-		else if (g->CurrentLabel)
-			what = g->CurrentLabel->mName;
 		else
 			what = _T(""); // Probably the auto-execute section?
 	}
@@ -19575,7 +19550,7 @@ BIF_DECL(BIF_Exception)
 			if (se->type == DbgStack::SE_Thread)
 				break; // Never return stack locations in other threads.
 			if (se->type == DbgStack::SE_BIF)
-				continue; // Skip built-in functions such as Op_ObjInvoke (common).
+				continue; // Skip built-in functions.
 			if (++offset == 0)
 			{
 				line = se > g_Debugger.mStack.mBottom ? se[-1].line : se->line;
@@ -19584,7 +19559,7 @@ BIF_DECL(BIF_Exception)
 				// line, return the name of the function or sub which that line called.
 				// In other words, an offset of -1 gives the name of the current function and
 				// the file and number of the line which it was called from.
-				what = se->type == DbgStack::SE_UDF ? se->udf->func->mName : se->sub->mName;
+				what = se->udf->func->mName;
 				break;
 			}
 		}
@@ -19679,6 +19654,21 @@ BOOL TokenToBOOL(ExprTokenType &aToken)
 }
 
 
+
+ToggleValueType TokenToToggleValue(ExprTokenType &aToken)
+{
+	if (TokenIsNumeric(aToken))
+	switch (TokenToInt64(aToken)) // Reserve other values for potential future use by requiring exact match.
+	{
+	case 1: return TOGGLED_ON;
+	case 0: return TOGGLED_OFF;
+	case -1: return TOGGLE;
+	}
+	return TOGGLE_INVALID;
+}
+
+
+
 SymbolType TokenIsNumeric(ExprTokenType &aToken)
 {
 	switch(aToken.symbol)
@@ -19687,7 +19677,7 @@ SymbolType TokenIsNumeric(ExprTokenType &aToken)
 	case SYM_FLOAT:
 		return aToken.symbol;
 	case SYM_VAR: 
-		return aToken.var->IsNumeric(); // Supports VAR_NORMAL and VAR_CLIPBOARD.
+		return aToken.var->IsNumeric();
 	default: // SYM_STRING: Callers of this function expect a "numeric" result for numeric strings.
 		return IsNumeric(aToken.marker, true, false, true);
 	}
@@ -19766,7 +19756,7 @@ BOOL TokenIsEmptyString(ExprTokenType &aToken, BOOL aWarnUninitializedVar)
 
 
 __int64 TokenToInt64(ExprTokenType &aToken)
-// Caller has ensured that any SYM_VAR's Type() is VAR_NORMAL or VAR_CLIPBOARD.
+// Caller has ensured that any SYM_VAR's Type() is VAR_NORMAL.
 // Converts the contents of aToken to a 64-bit int.
 {
 	// Some callers, such as those that cast our return value to UINT, rely on the use of 64-bit
@@ -19785,7 +19775,7 @@ __int64 TokenToInt64(ExprTokenType &aToken)
 
 
 double TokenToDouble(ExprTokenType &aToken, BOOL aCheckForHex)
-// Caller has ensured that any SYM_VAR's Type() is VAR_NORMAL or VAR_CLIPBOARD.
+// Caller has ensured that any SYM_VAR's Type() is VAR_NORMAL.
 // Converts the contents of aToken to a double.
 {
 	switch (aToken.symbol)
@@ -19802,7 +19792,6 @@ double TokenToDouble(ExprTokenType &aToken, BOOL aCheckForHex)
 
 
 LPTSTR TokenToString(ExprTokenType &aToken, LPTSTR aBuf, size_t *aLength)
-// Supports Type() VAR_NORMAL and VAR_CLIPBOARD.
 // Returns "" on failure to simplify logic in callers.  Otherwise, it returns either aBuf (if aBuf was needed
 // for the conversion) or the token's own string.  aBuf may be NULL, in which case the caller presumably knows
 // that this token is SYM_STRING or SYM_VAR (or the caller wants "" back for anything other than those).
@@ -19811,10 +19800,10 @@ LPTSTR TokenToString(ExprTokenType &aToken, LPTSTR aBuf, size_t *aLength)
 	LPTSTR result;
 	switch (aToken.symbol)
 	{
-	case SYM_VAR: // Caller has ensured that any SYM_VAR's Type() is VAR_NORMAL or VAR_CLIPBOARD.
+	case SYM_VAR: // Caller has ensured that any SYM_VAR's Type() is VAR_NORMAL.
 		result = aToken.var->Contents(); // Contents() vs. mCharContents in case mCharContents needs to be updated by Contents().
 		if (aLength)
-			*aLength = aToken.var->Type() == VAR_NORMAL ? aToken.var->Length() : _tcslen(result);
+			*aLength = aToken.var->Length();
 		return result;
 	case SYM_STRING:
 		result = aToken.marker;
@@ -19885,7 +19874,38 @@ ResultType TokenToDoubleOrInt64(const ExprTokenType &aInput, ExprTokenType &aOut
 	return OK; // Since above didn't return, indicate success.
 }
 
+StringCaseSenseType TokenToStringCase(ExprTokenType& aToken)
+{
+	// Pure integers 1 and 0 corresponds to SCS_SENSITIVE and SCS_INSENSITIVE, respectively.
+	// Pure floats returns SCS_INVALID.
+	// For strings see Line::ConvertStringCaseSense.
+	LPTSTR str = NULL;
+	__int64 int_val = 0;
+	switch (aToken.symbol)
+	{
+	case SYM_VAR:
+		
+		switch (aToken.var->IsPureNumeric())
+		{
+		case PURE_INTEGER: int_val = aToken.var->ToInt64(); break;
+		case PURE_NOT_NUMERIC: str = aToken.var->Contents(); break;
+		case PURE_FLOAT: 
+		default:	
+			return SCS_INVALID;
+		}
+		break;
 
+	case SYM_INTEGER: int_val = TokenToInt64(aToken); break;
+	case SYM_FLOAT: return SCS_INVALID;
+	default: str = TokenToString(aToken); break;
+	}
+	if (str)
+		return !_tcsicmp(str, _T("Logical"))	? SCS_INSENSITIVE_LOGICAL
+												: Line::ConvertStringCaseSense(str);
+	return int_val == 1 ? SCS_SENSITIVE						// 1	- Sensitive
+						: (int_val == 0 ? SCS_INSENSITIVE	// 0	- Insensitive
+										: SCS_INVALID);		// else - invalid.
+}
 
 IObject *TokenToObject(ExprTokenType &aToken)
 // L31: Returns IObject* from SYM_OBJECT or SYM_VAR (where var->HasObject()), NULL for other tokens.
@@ -19937,15 +19957,6 @@ IObject *TokenToFunctor(ExprTokenType &aToken)
 }
 
 
-IObject *StringToLabelOrFunctor(LPTSTR aStr)
-// Reference is counted so CALLER MUST Release() WHEN APPROPRIATE.
-{
-	if (Label *lbl = g_script->FindLabel(aStr, false))
-		return lbl;
-	return StringToFunctor(aStr);
-}
-
-
 
 IObject *StringToFunctor(LPTSTR aStr)
 // Reference is counted so CALLER MUST Release() WHEN APPROPRIATE.
@@ -19956,30 +19967,36 @@ IObject *StringToFunctor(LPTSTR aStr)
 
 
 
-ResultType ValidateFunctor(IObject *aFunc, int aParamCount, ResultToken &aResultToken, LPTSTR aNullErr)
+ResultType ValidateFunctor(IObject *aFunc, int aParamCount, ResultToken &aResultToken, LPTSTR aNullErr, int *aUseMinParams)
 {
 	if (!aFunc)
 		return aResultToken.Error(aNullErr);
-	__int64 min_params, max_params;
+	__int64 min_params = 0, max_params = INT_MAX;
 	auto min_result = /*aParamCount < 0 ? INVOKE_NOT_HANDLED
 		:*/ GetObjectIntProperty(aFunc, _T("MinParams"), min_params, aResultToken, true);
-	if (aResultToken.Exited())
-		return FAIL; // For maintainability, consider EARLY_EXIT the same as failure (boolean false).
-	//if (aParamCount < 0) // Caller's signal to skip MinParams check.
-	//	aParamCount = -aParamCount;
-	auto max_result = aParamCount == 0 ? INVOKE_NOT_HANDLED // No need to check MaxParams when passing 0 params.
-		: GetObjectIntProperty(aFunc, _T("MaxParams"), max_params, aResultToken, true);
-	if (aResultToken.Exited())
+	if (!min_result)
 		return FAIL;
-	if (min_result != INVOKE_NOT_HANDLED && aParamCount < (int)min_params)
+	bool has_minparams = min_result != INVOKE_NOT_HANDLED; // For readability.
+	if (aUseMinParams) // CallbackCreate's signal to default to MinParams.
+	{
+		if (!has_minparams)
+			return aResultToken.UnknownMemberError(ExprTokenType(aFunc), IT_GET, _T("MinParams"));
+		*aUseMinParams = aParamCount = (int)min_params;
+	}
+	else if (has_minparams && aParamCount < (int)min_params)
 		return aResultToken.Error(ERR_INVALID_FUNCTOR);
+	auto max_result = (aParamCount == 0 || has_minparams && min_params == aParamCount)
+		? INVOKE_NOT_HANDLED // No need to check MaxParams in the above cases.
+		: GetObjectIntProperty(aFunc, _T("MaxParams"), max_params, aResultToken, true);
+	if (!max_result)
+		return FAIL;
 	if (max_result != INVOKE_NOT_HANDLED && aParamCount > (int)max_params)
 	{
-		__int64 is_variadic;
+		__int64 is_variadic = 0;
 		auto result = GetObjectIntProperty(aFunc, _T("IsVariadic"), is_variadic, aResultToken, true);
-		if (aResultToken.Exited())
+		if (!result)
 			return FAIL;
-		if (result == INVOKE_NOT_HANDLED || !is_variadic)
+		if (!is_variadic) // or not defined.
 			return aResultToken.Error(ERR_INVALID_FUNCTOR);
 	}
 	// If either MinParams or MaxParams was confirmed to exist, this is likely a valid
@@ -19988,7 +20005,7 @@ ResultType ValidateFunctor(IObject *aFunc, int aParamCount, ResultToken &aResult
 	if (min_result == INVOKE_NOT_HANDLED && max_result == INVOKE_NOT_HANDLED)
 		if (Object *obj = dynamic_cast<Object *>(aFunc))
 			if (!obj->HasMethod(_T("Call")))
-				return aResultToken.Error(ERR_INVALID_FUNCTOR);
+				return aResultToken.UnknownMemberError(ExprTokenType(aFunc), IT_CALL, _T("Call"));
 		// Otherwise: COM objects can be callable via DISPID_VALUE.  There's probably
 		// no way to determine whether the object supports that without invoking it.
 	return OK;
@@ -20103,12 +20120,7 @@ BOOL TokensAreEqual(ExprTokenType &left, ExprTokenType &right)
 	{
 		TCHAR left_buf[MAX_NUMBER_SIZE], *left_string = TokenToString(left, left_buf);
 		TCHAR right_buf[MAX_NUMBER_SIZE], *right_string = TokenToString(right, right_buf);
-		switch (g->StringCaseSense)
-		{
-		case SCS_INSENSITIVE:	return !_tcsicmp(left_string, right_string);
-		case SCS_SENSITIVE:		return !_tcscmp(left_string, right_string);
-		default:				return !lstrcmpi(left_string, right_string);
-		}
+		return !_tcscmp(left_string, right_string);
 	}
 	if (left_type == PURE_INTEGER && right_type == PURE_INTEGER)
 		return TokenToInt64(left) == TokenToInt64(right);

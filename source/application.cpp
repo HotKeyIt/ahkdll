@@ -85,10 +85,6 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 		// non-standard msg pump beneath us on the call stack.
 	}
 
-	// The following is done here for performance reasons.  UPDATE: This probably never needs
-	// to close the clipboard now that Line::ExecUntil() also calls CLOSE_CLIPBOARD_IF_OPEN:
-	CLOSE_CLIPBOARD_IF_OPEN;
-
 	// While in mode RETURN_AFTER_MESSAGES, there are different things that can happen:
 	// 1) We launch a new hotkey subroutine, interrupting/suspending the old one.  But
 	//    subroutine calls this function again, so now it's recursed.  And thus the
@@ -883,10 +879,10 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 				// 1) A joystick hotkey from TriggerJoyHotkeys(), in which case the lParam is ignored.
 				// 2) A hotkey message sent by the OS, in which case lParam contains currently-unused info set by the OS.
 				//
-				// An incoming WM_HOTKEY can be subject to #IfWin at this stage under the following conditions:
+				// An incoming WM_HOTKEY can be subject to #HotIf Win. at this stage under the following conditions:
 				// 1) Joystick hotkey, because it relies on us to do the check so that the check is done only
 				//    once rather than twice.
-				// 2) #IfWin keybd hotkeys that were made non-hook because they have a non-suspended, global variant.
+				// 2) #HotIf Win. keybd hotkeys that were made non-hook because they have a non-suspended, global variant.
 				//
 				// If message is AHK_HOOK_HOTKEY:
 				// Rather than having the hook pass the qualified variant to us, it seems preferable
@@ -894,7 +890,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 				// may have changed since the message was posted, and although the hotkey might still be
 				// eligible for firing, a different variant might now be called for (e.g. due to a change
 				// in the active window).  Since most criteria hotkeys have at most only a few criteria,
-				// and since most such criteria are #IfWinActive rather than Exist, the performance will
+				// and since most such criteria are #HotIf WinActive rather than Exist, the performance will
 				// typically not be reduced much at all.  Furthermore, trading performance for greater
 				// reliability seems worth it in this case.
 				// 
@@ -904,9 +900,9 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 				//   that have a global variant are usually non-hook, even on NT/2k/XP).
 				// - The hook avoids doing its first check of WinActive/Exist if it sees that the hotkey
 				//   has a non-suspended, global variant.  That way, hotkeys that are hook-hotkeys for
-				//   reasons other than #IfWin (such as mouse, overriding OS hotkeys, or hotkeys
+				//   reasons other than #HotIf Win. (such as mouse, overriding OS hotkeys, or hotkeys
 				//   that are too fancy for RegisterHotkey) will not have to do the check twice.
-				// - It provides the ability to set the last-found-window for #IfWinActive/Exist
+				// - It provides the ability to set the last-found-window for #HotIf WinActive/Exist
 				//   (though it's not needed for the "Not" counterparts).  This HWND could be passed
 				//   via the message, but that would require malloc-there and free-here, and might
 				//   result in memory leaks if its ever possible for messages to get discarded by the OS.
@@ -915,12 +911,12 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 				//   good precaution for most users/situations because such hotkey subroutines will
 				//   often assume (for scripting simplicity) that the specified window is active or
 				//   exists when the subroutine executes its first line.
-				// - Most criterion hotkeys use #IfWinActive, which is a very fast call.  Also, although
-				//   WinText and/or "SetTitleMatchMode Slow" slow down window searches, those are rarely
+				// - Most criterion hotkeys use #HotIf WinActive(), which is a very fast call.  Also, although
+				//   WinText and/or "SetTitleMatchMode 'Slow'" slow down window searches, those are rarely
 				//   used too.
 				//
 				variant = NULL; // Set default.
-				// For #If hotkey variants, we don't want to evaluate the expression a second time. If the hook
+				// For #HotIf hotkey variants, we don't want to evaluate the expression a second time. If the hook
 				// thread determined that a specific variant should fire, it is passed via the high word of wParam:
 				if (variant_id = HIWORD(msg.wParam))
 				{
@@ -958,7 +954,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 				if (!hc || hc->Type == HOT_IF_NOT_ACTIVE || hc->Type == HOT_IF_NOT_EXIST)
 					criterion_found_hwnd = NULL; // For "NONE" and "NOT", there is no last found window.
 				else if (HOT_IF_REQUIRES_EVAL(hc->Type))
-					criterion_found_hwnd = g_HotExprLFW; // For #if WinExist(WinTitle) and similar.
+					criterion_found_hwnd = g_HotExprLFW; // For #HotIf WinExist(WinTitle) and similar.
 
 				priority = variant->mPriority;
 			} // switch(msg.message)
@@ -1080,8 +1076,9 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 			{
 #define EVT_ARG_ADD(_value) gui_event_args[gui_event_arg_count++].SetValue(_value)
 
-				// Set first argument
-				EVT_ARG_ADD(event_is_control_generated ? (IObject*)pcontrol : (IObject*)pgui);
+				if (event_is_control_generated || pgui->mEventSink != pgui)
+					// Set first argument
+					EVT_ARG_ADD(event_is_control_generated ? (IObject*)pcontrol : (IObject*)pgui);
 
 				switch(gui_action)
 				{
@@ -1366,7 +1363,8 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 				g.hWndLastUsed = criterion_found_hwnd; // v1.0.42. Even if the window is invalid for some reason, IsWindow() and such are called whenever the script accesses it (GetValidLastUsedWindow()).
 				g.SendLevel = variant->mInputLevel;
 				g.HotCriterion = variant->mHotCriterion; // v2: Let the Hotkey command use the criterion of this hotkey variant by default.
-				hk->PerformInNewThreadMadeByCaller(*variant);
+				hk->PerformInNewThreadMadeByCaller(*variant, hk->mName);
+				
 			}
 
 			// v1.0.37.06: Call ResumeUnderlyingThread() even if aMode==WAIT_FOR_MESSAGES; this is for
@@ -1508,27 +1506,6 @@ break_out_of_main_switch:
 				g->CalledByIsDialogMessageOrDispatchMsg = msg.message; // Added in v1.0.44.11 because it's known that IsDialogMessage can change the message number (e.g. WM_KEYDOWN->WM_NOTIFY for UpDowns)
 				if (IsDialogMessage(fore_window, &msg))  // This message is for it, so let it process it.
 				{
-					// If it is likely that a FileSelect dialog is active, this
-					// section attempt to retain the current directory as the user
-					// navigates from folder to folder.  This is done because it is
-					// possible that our caller is a quasi-thread other than the one
-					// that originally launched the FileSelect (i.e. that dialog
-					// is in a suspended thread), in which case the user's navigation
-					// would cause the active threads working dir to change unexpectedly
-					// unless the below is done.  This is not a complete fix since if
-					// a message pump other than this one is running (e.g. that of a
-					// MessageBox()), these messages will not be detected:
-					if (g_nFileDialogs) // See MsgSleep() for comments on this.
-						// The below two messages that are likely connected with a user
-						// navigating to a different folder within the FileSelect dialog.
-						// That avoids changing the directory for every message, since there
-						// can easily be thousands of such messages every second if the
-						// user is moving the mouse.  UPDATE: This doesn't work, so for now,
-						// just call SetCurrentDirectory() for every message, which does work.
-						// A brief test of CPU utilization indicates that SetCurrentDirectory()
-						// is not a very high overhead call when it is called many times here:
-						//if (msg.message == WM_ERASEBKGND || msg.message == WM_DELETEITEM)
-						SetCurrentDirectory(g_WorkingDir);
 					g->CalledByIsDialogMessageOrDispatch = false;
 					continue;  // This message is done, so start a new iteration to get another msg.
 				}
@@ -1615,7 +1592,9 @@ bool CheckScriptTimers()
 	// v1.0.48: Since g_IdleIsPaused was removed (to simplify a lot of things), g_nPausedThreads now
 	// counts the idle thread if it's paused.  Also, to avoid array overflow, g_MaxThreadsTotal must not
 	// be exceeded except where otherwise documented.
-	if (g_nPausedThreads > 0 || !g->AllowTimers || g_nThreads >= g_MaxThreadsTotal || !IsInterruptible()) // See above.
+	// v2.0: g->AllowTimers is ignored when !g_nThreads so that its value can be retained for use as
+	// the default for new threads, after the auto-execute thread finishes.
+	if (g_nPausedThreads > 0 || (!g->AllowTimers && g_nThreads) || g_nThreads >= g_MaxThreadsTotal || !IsInterruptible()) // See above.
 		return false;
 
 	ScriptTimer *ptimer, *next_timer;
@@ -1941,11 +1920,16 @@ void InitNewThread(int aPriority, bool aSkipUninterruptible, bool aIncrementThre
 	if (aIncrementThreadCountAndUpdateTrayIcon)
 	{
 		++g_nThreads; // It is the caller's responsibility to avoid calling us if the thread count is too high.
-		++g; // Once g_array[0] is used by AutoExec section, it's never used by any other thread BECAUSE THE AUTO-EXEC SECTION MIGHT NEVER FINISH, in which case it needs to keep consulting the values in g_array[0].
+		// Once g_array[0] is used by AutoExec section, it's never used by any other thread because:
+		//  1) the auto-execute thread might never finish, in which case it needs to keep consulting the values in g_array[0].
+		//  2) it's used to retain the default settings for each newly launched thread.
+		++g; 
 	}
-	memcpy(g, &g_default, sizeof(global_struct)); // memcpy() benches a hair faster than CopyMemory() in this spot. But I suspect they map to the same code internally, so it's probably a coincidence.
+	// Copy only settings, not state, from the auto-execute thread.
+	memcpy(static_cast<ScriptThreadSettings*>(g), static_cast<ScriptThreadSettings*>(&g_default), sizeof(ScriptThreadSettings));
 
 	global_struct &g = *::g; // Must be done AFTER the ++g above. Reduces code size and may improve performance.
+	global_clear_state(g);
 	g.Priority = aPriority;
 
 	// If the current quasi-thread is paused, the thread we're about to launch will not be, so the tray icon
@@ -1953,25 +1937,6 @@ void InitNewThread(int aPriority, bool aSkipUninterruptible, bool aIncrementThre
 	// in the right state (which it usually, since paused threads are rare), UpdateTrayIcon() is a very fast call.
 	if (aIncrementThreadCountAndUpdateTrayIcon)
 		g_script->UpdateTrayIcon(); // Must be done ONLY AFTER updating "g" (e.g, ++g) and/or g->IsPaused.
-	if (g_nFileDialogs)
-		// Since there is a quasi-thread with an open file dialog underneath the one
-		// we're about to launch, set the current directory to be the one the user
-		// would expect to be in effect.  This is not a 100% fix/workaround for the
-		// fact that the dialog changes the working directory as the user navigates
-		// from folder to folder because the dialog can still function even when its
-		// quasi-thread is suspended (i.e. while our new thread being launched here
-		// is in the middle of running).  In other words, the user can still use
-		// the dialog of a suspended quasi-thread, and thus change the working
-		// directory indirectly.  But that should be very rare and I don't see an
-		// easy way to fix it completely without using a "HOOK function to monitor
-		// the WM_NOTIFY message", calling SetCurrentDirectory() after every script
-		// line executes (which seems too high in overhead to be justified), or
-		// something similar.  Note changing to a new directory here does not seem
-		// to hurt the ongoing FileSelect() dialog.  In other words, the dialog
-		// does not seem to care that its changing of the directory as the user
-		// navigates is "undone" here:
-		SetCurrentDirectory(g_WorkingDir);
-
 	if (aSkipUninterruptible)
 		return;
 
@@ -1981,7 +1946,7 @@ void InitNewThread(int aPriority, bool aSkipUninterruptible, bool aIncrementThre
 	if (g_script->mUninterruptibleTime && g_script->mUninterruptedLineCountMax // Both components must be non-zero to start off uninterruptible.
 		|| g.ThreadIsCritical) // v1.0.38.04.
 	{
-		g.AllowThreadToBeInterrupted = false; // Fairly old comment: Use g.AllowThreadToBeInterrupted vs. g_AllowInterruption in case g_AllowInterruption just happens to have been set to true for some other reason (e.g. SendKeys()):
+		g.AllowThreadToBeInterrupted = false;
 		if (!g.ThreadIsCritical)
 		{
 			if (g_script->mUninterruptibleTime < 0) // A setting of -1 (or any negative) means the thread's uninterruptibility never times out.
@@ -1990,8 +1955,10 @@ void InitNewThread(int aPriority, bool aSkipUninterruptible, bool aIncrementThre
 			else // It's now known to be >0 (due to various checks above).
 			{
 				// For backward compatibility, "lock in" the time this thread will become interruptible
-				// because that's how previous versions behaved (i.e. "Thread, Interrupt, %NewTimeout%"
+				// because that's how previous versions behaved (i.e. 'Thread "Interrupt", NewTimeout'
 				// doesn't affect the current thread, only the thread creation behavior in the future).
+				// This also makes it more predictable, since AllowThreadToBeInterrupted is only changed
+				// when IsInterruptible() is called, which might not happen in between changes to the setting.
 				// For explanation of why two fields instead of one are used, see comments in IsInterruptible().
 				g.ThreadStartTime = GetTickCount();
 				g.UninterruptibleDuration = g_script->mUninterruptibleTime;
@@ -2028,18 +1995,6 @@ void ResumeUnderlyingThread()
 	// when the macro is used by CheckScriptTimers(), which although it might not technically
 	// need it, lends maintainability and peace of mind.
 	g_script->UpdateTrayIcon();
-	// UPDATE v1.0.48: The following no longer seems necessary because the whole point of it
-	// was to protect against SET_UNINTERRUPTIBLE_TIMER firing for the interrupting thread rather
-	// than the thread that's about to be resumed. That is no longer possible due to the way
-	// interruptibility is handled now.
-	// OLDER (v1.0.38.04): Make it reflect the state of ThreadIsCritical for cases where
-	// a critical thread was interrupted by an OnExit or OnMessage thread.  Upon being resumed after
-	// such an emergency interruption, a critical thread should be uninterruptible again.
-	//g->AllowThreadToBeInterrupted = !g->ThreadIsCritical;
-	// ABOVE: if g==g_array now, g->ThreadIsCritical==true should be possible only when the AutoExec
-	// section is still running (and it has turned on Critical), or if a threadless CallbackCreate()
-	// function is running in the idle thread (the docs discourage that).
-
 	// If this was the last running thread and the script has nothing keeping it open (hotkeys, Gui,
 	// message monitors, etc.) then it should terminate now:
 	if (!g_OnExitIsRunning)
@@ -2061,6 +2016,9 @@ BOOL IsInterruptible()
 	// g->AllowThreadToBeInterrupted in several places.
 	if (!INTERRUPTIBLE_IN_EMERGENCY)
 		return FALSE; // Since it's not even emergency-interruptible, it can't be ordinary-interruptible.
+	if (!g_nThreads) // Except in the above case, we're always interruptible if no threads are running.
+		return TRUE; // This is necessary to allow g_array[0].ThreadIsCritical to hold the default
+					 // setting without it preventing threads from launching after auto-exec finishes.
 	// Otherwise, update g->AllowThreadToBeInterrupted (if necessary) and use that to determine the final answer.
 	// Below are the reasons for having g->UninterruptibleDuration as a field separate from g->ThreadStartTime
 	// (i.e. this is why they aren't merged into one called TimeThreadWillBecomeInterruptible):
@@ -2091,14 +2049,13 @@ BOOL IsInterruptible()
 	// because GetTickCount() updates in increments of 15 or 16 and therefore 16 can be virtually no time
 	// at all.  It might also be needed for larger values if the system is busy.
 	if (   !g->AllowThreadToBeInterrupted // Those who check whether g->AllowThreadToBeInterrupted==false should then check whether it should be made true.
-		&& !g->ThreadIsCritical // Must take precedence over the checks below.
-		&& g->UninterruptibleDuration > -1 // Must take precedence over the below. For backward compatibility, g_script->mUninterruptibleTime is not checked because it's supposed to go into effect during thread creation, not after the thread is running and has possibly changed the timeout via "Thread Interrupt".
+		&& g->UninterruptibleDuration > -1 // Must take precedence over the below.  g_script->mUninterruptibleTime is not checked because it's supposed to go into effect during thread creation, not after the thread is running and has possibly changed the timeout via 'Thread "Interrupt"'.
 		&& (DWORD)(GetTickCount()- g->ThreadStartTime) >= (DWORD)g->UninterruptibleDuration // See big comment section above.
 		&& g->UninterruptedLineCount // In case of "Critical" on the first line.  See v2.0 comment above.
 		)
 		// Once the thread becomes interruptible by any means, g->ThreadStartTime/UninterruptibleDuration
 		// can never matter anymore because only Critical (never "Thread Interrupt") can turn off the
-		// interruptibility again, at which time only Critical can ever re-enable interruptibility.
+		// interruptibility again, and it resets g->UninterruptibleDuration.
 		g->AllowThreadToBeInterrupted = true; // Avoids issues with 49.7 day limit of 32-bit TickCount, and also helps performance future callers of this function (they can skip most of the checking above).
 	//else g->AllowThreadToBeInterrupted is already up-to-date.
 	return (BOOL)g->AllowThreadToBeInterrupted;
@@ -2134,44 +2091,6 @@ VOID CALLBACK MsgBoxTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime
 			dialog_g->MsgBoxTimedOut = true;
 			break;
 		}
-}
-
-
-
-VOID CALLBACK AutoExecSectionTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime)
-// See the comments in AutoHotkey.cpp for an explanation of this function.
-{
-	// Since this was called, it means the AutoExec section hasn't yet finished (otherwise
-	// this timer would have been killed before we got here).  UPDATE: I don't think this is
-	// necessarily true.  I think it's possible for the WM_TIMER msg (since even TimerProc()
-	// timers use WM_TIMER msgs) to be still buffered in the queue even though its timer
-	// has been killed (killing the timer does not auto-purge any pending messages for
-	// that timer, and it is risky/problematic to try to do so manually).  Therefore, although
-	// we kill the timer here, we also do a double check further below to make sure
-	// the desired action hasn't already occurred.  Finally, the macro is used here because
-	// it's possible that the timer has already been killed, so we don't want to risk any
-	// problems that might arise from killing a non-existent timer (which this prevents).
-	KILL_AUTOEXEC_TIMER
-
-	// This is a double-check because it's possible for the WM_TIMER message to have
-	// been received (thus calling this TimerProc() function) even though the timer
-	// was already killed by AutoExecSection().  In that case, we don't want to update
-	// the global defaults again because the g struct might have incorrect/unintended
-	// values by now:
-	if (!g_script->mAutoExecSectionIsRunning)
-		return;
-
-	// Otherwise, it's still running (or paused). So update global DEFAULTS, which are for all threads
-	// launched in the future:
-	CopyMemory(&g_default, g_array, sizeof(global_struct)); // v1.0.48: Use the first element in g_array (which by definition belongs to the auto-exec thread); don't use g because it might point to something higher than g_array[0] (i.e. if some other thread interrupted the auto-exec thread).
-	global_clear_state(g_default);  // Only clear g_default, not g.  This also ensures that IsPaused gets set to false in case it's true in "g".
-	g_default.AllowThreadToBeInterrupted = true; // See below.
-	// Always want g_default.AllowInterruption==true so that InitNewThread() doesn't have to set it
-	// except when Critical or "Thread Interrupt" require it.  The still-running AutoExec section can have
-	// a false value for this (even without Critical turned on) if no one has needed to call IsInterruptible().
-	// Even if the still-running AutoExec section has turned on Critical, the above assignment is still okay
-	// because InitNewThread() adjusts AllowInterruption based on the value of ThreadIsCritical.
-	// See similar code in AutoExecSection().
 }
 
 

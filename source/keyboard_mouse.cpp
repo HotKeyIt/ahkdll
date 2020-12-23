@@ -144,6 +144,8 @@ void SendKeys(LPTSTR aKeys, SendRawModes aSendRaw, SendModes aSendModeOrig, HWND
 		return;
 	global_struct &g = *::g; // Reduces code size and may improve performance.
 
+	DWORD orig_last_peek_time = g_script->mLastPeekTime;
+
 #ifdef _WIN64
 	DWORD aThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
 #else
@@ -989,6 +991,18 @@ brace_case_end: // This label is used to simplify the code without sacrificing p
 
 	if (do_selective_blockinput && !blockinput_prev) // Turn it back off only if it was off before we started.
 		Line::ScriptBlockInput(false);
+
+	// The following MsgSleep(-1) solves unwanted buffering of hotkey activations while SendKeys is in progress
+	// in a non-Critical thread.  Because SLEEP_WITHOUT_INTERRUPTION is used to perform key delays, any incoming
+	// hotkey messages would be left in the queue.  It is not until the next interruptible sleep that hotkey
+	// messages may be processed, and potentially discarded due to #MaxThreadsPerHotkey (even #MaxThreadsBuffer
+	// should only allow one buffered activation).  But if the hotkey thread just calls Send in a loop and then
+	// returns, it never performs an interruptible sleep, so the hotkey messages are processed one by one after
+	// each new hotkey thread returns, even though Critical was not used.  Also note SLEEP_WITHOUT_INTERRUPTION
+	// causes g_script->mLastScriptRest to be reset, so it's unlikely that a sleep would occur between Send calls.
+	// To solve this, call MsgSleep(-1) now (unless no delays were performed, or the thread is uninterruptible):
+	if (aSendModeOrig == SM_EVENT && g_script->mLastPeekTime != orig_last_peek_time && IsInterruptible())
+		MsgSleep(-1);
 
 	// v1.0.43.03: Someone reported that when a non-autoreplace hotstring calls us to do its backspacing, the
 	// hotstring's subroutine can execute a command that activates another window owned by the script before
@@ -1895,7 +1909,7 @@ void ParseClickOptions(LPTSTR aOptions, int &aX, int &aY, vk_type &aVK, KeyEvent
 	// Set defaults for all output parameters for caller.
 	aX = COORD_UNSPECIFIED;
 	aY = COORD_UNSPECIFIED;
-	aVK = VK_LBUTTON_LOGICAL; // v1.0.43: Logical vs. physical for {Click} and Click-cmd, in case user has buttons swapped via control panel.
+	aVK = VK_LBUTTON;
 	aEventType = KEYDOWNANDUP;
 	aRepeatCount = 1;
 	aMoveOffset = false;
@@ -1934,7 +1948,7 @@ void ParseClickOptions(LPTSTR aOptions, int &aX, int &aY, vk_type &aVK, KeyEvent
 		}
 		else // Mouse button/name and/or Down/Up/Repeat-count is present.
 		{
-			if (temp_vk = Line::ConvertMouseButton(next_option, true, true))
+			if (temp_vk = Line::ConvertMouseButton(next_option, true))
 				aVK = temp_vk;
 			else
 			{
@@ -1972,7 +1986,10 @@ ResultType PerformMouse(ActionTypeType aActionType, LPTSTR aButton, LPTSTR aX1, 
 	else
 		// ConvertMouseButton() treats blank as "Left":
 		if (   !(vk = Line::ConvertMouseButton(aButton, aActionType == ACT_MOUSECLICK))   )
-			vk = VK_LBUTTON_LOGICAL; // Treat invalid button names as "Left".
+			vk = VK_LBUTTON; // See below.
+			// v1.0.43: Seems harmless (due to rarity) to treat invalid button names as "Left" (keeping in
+			// mind that due to loadtime validation, invalid buttons are possible only when the button name is
+			// contained in a variable, e.g. MouseClick %ButtonName%.
 
 	KeyEventTypes event_type = KEYDOWNANDUP;  // Set defaults.
 	int repeat_count = 1;                     //
@@ -2082,13 +2099,11 @@ void MouseClickDrag(vk_type aVK, int aX1, int aY1, int aX2, int aY2, int aSpeed,
 	//if (aSpeed < 2)
 	//	aSpeed = 2;
 
-	// v1.0.43: Translate logical buttons into physical ones.  Which physical button it becomes depends
+	// v2.0: Always translate logical buttons into physical ones.  Which physical button it becomes depends
 	// on whether the mouse buttons are swapped via the Control Panel.  Note that journal playback doesn't
 	// need the swap because every aspect of it is "logical".
-	if (aVK == VK_LBUTTON_LOGICAL)
-		aVK = sSendMode != SM_PLAY && GetSystemMetrics(SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON;
-	else if (aVK == VK_RBUTTON_LOGICAL)
-		aVK = sSendMode != SM_PLAY && GetSystemMetrics(SM_SWAPBUTTON) ? VK_LBUTTON : VK_RBUTTON;
+	if ((aVK == VK_LBUTTON || aVK == VK_RBUTTON) && sSendMode != SM_PLAY && GetSystemMetrics(SM_SWAPBUTTON))
+		aVK = (aVK == VK_LBUTTON) ? VK_RBUTTON : VK_LBUTTON;
 
 	// MSDN: If [event_flags] is not MOUSEEVENTF_WHEEL, [MOUSEEVENTF_HWHEEL,] MOUSEEVENTF_XDOWN,
 	// or MOUSEEVENTF_XUP, then [event_data] should be zero. 
@@ -2222,12 +2237,10 @@ void MouseClick(vk_type aVK, int aX, int aY, int aRepeatCount, int aSpeed, KeyEv
 	// MSDN: If [event_flags] is not MOUSEEVENTF_WHEEL, MOUSEEVENTF_XDOWN, or MOUSEEVENTF_XUP, then [event_data]
 	// should be zero. 
 
-	// v1.0.43: Translate logical buttons into physical ones.  Which physical button it becomes depends
+	// v2.0: Always translate logical buttons into physical ones.  Which physical button it becomes depends
 	// on whether the mouse buttons are swapped via the Control Panel.
-	if (aVK == VK_LBUTTON_LOGICAL)
-		aVK = sSendMode != SM_PLAY && GetSystemMetrics(SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON;
-	else if (aVK == VK_RBUTTON_LOGICAL)
-		aVK = sSendMode != SM_PLAY && GetSystemMetrics(SM_SWAPBUTTON) ? VK_LBUTTON : VK_RBUTTON;
+	if ((aVK == VK_LBUTTON || aVK == VK_RBUTTON) && sSendMode != SM_PLAY && GetSystemMetrics(SM_SWAPBUTTON))
+		aVK = (aVK == VK_LBUTTON) ? VK_RBUTTON : VK_LBUTTON;
 
 	switch (aVK)
 	{
@@ -4060,7 +4073,7 @@ TCHAR VKtoChar(vk_type aVK, HKL aKeybdLayout)
 
 
 
-sc_type TextToSC(LPTSTR aText)
+sc_type TextToSC(LPTSTR aText, bool *aSpecifiedByNumber)
 {
 	if (!*aText) return 0;
 	for (int i = 0; i < g_key_to_sc_count; ++i)
@@ -4071,7 +4084,11 @@ sc_type TextToSC(LPTSTR aText)
 	{
 		LPTSTR endptr;
 		sc_type sc = (sc_type)_tcstol(aText + 2, &endptr, 16);  // Convert from hex.
-		return *endptr ? 0 : sc; // Fixed for v1.1.27: Disallow any invalid suffix so that hotkeys like a::scb() are not misinterpreted as remappings.
+		if (*endptr)
+			return 0; // Fixed for v1.1.27: Disallow any invalid suffix so that hotkeys like a::scb() are not misinterpreted as remappings.
+		if (aSpecifiedByNumber)
+			*aSpecifiedByNumber = true; // Override caller-set default.
+		return sc;
 	}
 	return 0; // Indicate "not found".
 }

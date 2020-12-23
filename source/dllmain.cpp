@@ -167,8 +167,13 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	DynaToken::sPrototype = Object::CreatePrototype(_T("DynaCall"), Object::sPrototype);
 #endif
 
-	UserMenu::sMenuPrototype = Object::CreatePrototype(_T("Menu"), Object::sPrototype, UserMenu::sMembers, _countof(UserMenu::sMembers));
-	UserMenu::sMenuBarPrototype = Object::CreatePrototype(_T("MenuBar"), UserMenu::sMenuPrototype);
+	UserMenu::sPrototype = Object::CreatePrototype(_T("Menu"), Object::sPrototype, UserMenu::sMembers, _countof(UserMenu::sMembers));
+	UserMenu::sBarPrototype = Object::CreatePrototype(_T("MenuBar"), UserMenu::sPrototype);
+	UserMenu::sClass = Object::CreateClass(_T("Menu"), Object::sClass, UserMenu::sPrototype, static_cast<ObjectMethod>(&UserMenu::New<UserMenu>));
+	UserMenu::sBarClass = Object::CreateClass(_T("MenuBar"), UserMenu::sClass, UserMenu::sBarPrototype, static_cast<ObjectMethod>(&UserMenu::New<UserMenu::Bar>));
+
+	GuiControlType::sPrototypeList = Object::CreatePrototype(_T("Gui.List"), GuiControlType::sPrototype, GuiControlType::sMembersList, _countof(GuiControlType::sMembersList));
+	InputObject::sPrototype = Object::CreatePrototype(_T("InputHook"), Object::sPrototype, InputObject::sMembers, _countof(InputObject::sMembers));
 
 	GuiType::sPrototype = Object::CreatePrototype(_T("Gui"), Object::sPrototype, GuiType::sMembers, _countof(GuiType::sMembers));
 	GuiControlType::sPrototype = Object::CreatePrototype(_T("Gui.Control"), Object::sPrototype, GuiControlType::sMembers, _countof(GuiControlType::sMembers));
@@ -179,6 +184,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	Object::sClassClass = Object::CreateClass(_T("Class"), Object::sClass, Object::sClassPrototype, static_cast<ObjectMethod>(&Object::New<Object>));
 	Array::sClass = Object::CreateClass(_T("Array"), Object::sClass, Array::sPrototype, static_cast<ObjectMethod>(&Array::New<Array>));
 	Map::sClass = Object::CreateClass(_T("Map"), Object::sClass, Map::sPrototype, static_cast<ObjectMethod>(&Map::New<Map>));
+	GuiType::sClass = Object::CreateClass(_T("Gui"), Object::sClass, GuiType::sPrototype, static_cast<ObjectMethod>(&GuiType::New<GuiType>));
 
 
 
@@ -279,7 +285,7 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 			else if (!_tcsicmp(ahkdll_param, _T("/F")) || !_tcsicmp(ahkdll_param, _T("/force")))
 				g_ForceLaunch = true;
 			else if (!_tcsicmp(ahkdll_param, _T("/ErrorStdOut")))
-				g_script->mErrorStdOut = true;
+				g_script->SetErrorStdOut(ahkdll_param[12] == '=' ? ahkdll_param + 13 : NULL);
 			else if (!_tcsicmp(ahkdll_param, _T("/iLib"))) // v1.0.47: Build an include-file so that ahk2exe can include library functions called by the script.
 			{
 				++ahkdll_i; // Consume the next parameter too, because it's associated with this one.
@@ -368,9 +374,6 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 		g_Reloading = false;
 		return CRITICAL_ERROR;
 	}
-	// Set g_default now, reflecting any changes made to "g" above, in case AutoExecSection(), below,
-	// never returns, perhaps because it contains an infinite loop (intentional or not):
-	CopyMemory(&g_default, g, sizeof(global_struct));
 
 	//if (nameHinstanceP.istext)
 	//	GetCurrentDirectory(MAX_PATH, g_script->mFileDir);
@@ -450,8 +453,6 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	//Sleep(20);
 	g_Reloading = false;
 	//free(nameHinstanceP.name);
-
-	Var *clipboard_var = g_script->FindOrAddVar(_T("Clipboard")); // Add it if it doesn't exist, in case the script accesses "Clipboard" via a dynamic variable.
 	
 	// Run the auto-execute part at the top of the script (this call might never return):
 	if (!g_script->AutoExecSection()) // Can't run script at all. Due to rarity, just abort.

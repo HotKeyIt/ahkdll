@@ -63,8 +63,6 @@ EXTERN_G;
 // 0x88 - 0x8F : unassigned
 // 0x97 - 0x9F : unassigned (this range seems less likely to be used)
 #define VK_NEW_MOUSE_FIRST 0x9A
-#define VK_LBUTTON_LOGICAL 0x9A // v1.0.43: Added to support swapping of left/right mouse buttons in Control Panel.
-#define VK_RBUTTON_LOGICAL 0x9B //
 #define VK_WHEEL_LEFT      0x9C // v1.0.48: Lexikos: Fake virtual keys for support for horizontal scrolling in
 #define VK_WHEEL_RIGHT     0x9D // Windows Vista and later.
 #define VK_WHEEL_DOWN      0x9E
@@ -352,7 +350,7 @@ ResultType LayoutHasAltGr(HKL aLayout);
 LPTSTR SCtoKeyName(sc_type aSC, LPTSTR aBuf, int aBufSize, bool aUseFallback = true);
 LPTSTR VKtoKeyName(vk_type aVK, LPTSTR aBuf, int aBufSize, bool aUseFallback = true);
 TCHAR VKtoChar(vk_type aVK, HKL aKeybdLayout = NULL);
-sc_type TextToSC(LPTSTR aText);
+sc_type TextToSC(LPTSTR aText, bool *aSpecifiedByNumber = NULL);
 #ifdef  AHKX
 extern HKL g_HKL;   // Naveen # TODO N10
 vk_type TextToVK(LPTSTR aText, modLR_type *pModifiersLR = NULL, bool aExcludeThoseHandledByScanCode = false

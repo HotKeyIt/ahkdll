@@ -40,7 +40,7 @@ GNU General Public License for more details.
 class SimpleHeap
 {
 public:
-	SimpleHeap *CreateBlock();
+	SimpleHeap *CreateBlock(SIZE_T aSize = BLOCK_SIZE);
 	char *mBlock; // This object's memory block.  Although private, its contents are public.
 	char *mFreeMarker;  // Address inside the above block of the first unused byte.
 	size_t mSpaceAvailable;
@@ -50,7 +50,7 @@ public:
 	SimpleHeap **mBlocks;
 	SimpleHeap *mNextBlock;  // The object after this one in the linked list; NULL if none.
 //	static UINT GetBlockCount() {return mBlockCount;}
-	LPTSTR Malloc(LPTSTR aBuf, size_t aLength = -1); // Return a block of memory to the caller and copy aBuf into it.
+	LPTSTR Malloc(LPCTSTR aBuf, size_t aLength = -1); // Return a block of memory to the caller and copy aBuf into it.
 	void* Malloc(size_t aSize); // Return a block of memory to the caller.
 	void Delete(void *aPtr);
 	void DeleteAll();

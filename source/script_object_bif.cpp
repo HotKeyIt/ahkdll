@@ -2,8 +2,9 @@
 #include "defines.h"
 #include "globaldata.h"
 #include "script.h"
-#include "script_func_impl.h"
+
 #include "script_object.h"
+#include "script_func_impl.h"
 #include "application.h"
 
 
@@ -399,7 +400,7 @@ BIF_DECL(BIF_sizeof)
 					_tcscpy(tempbuf,defbuf + 1);
 					_tcscpy(defbuf + 1,tempbuf + _tcscspn(tempbuf,_T("(")) + 1); //,_tcschr(tempbuf,')') - _tcschr(tempbuf,'('));
 					_tcscpy(_tcschr(defbuf,')'),_T(" \0"));
-					Var1.var = g_script->FindVar(defbuf + 1,_tcslen(defbuf) - 2,NULL,FINDVAR_LOCAL,NULL);
+					Var1.var = g_script->FindVar(defbuf + 1,_tcslen(defbuf) - 2,FINDVAR_LOCAL);
 					g->CurrentFunc = bkpfunc;
 				}
 				else // release object and return
@@ -410,10 +411,10 @@ BIF_DECL(BIF_sizeof)
 				}
 			}
 			else if (g->CurrentFunc) // try to find local variable first
-				Var1.var = g_script->FindVar(defbuf + 1,_tcslen(defbuf) - 2,NULL,FINDVAR_LOCAL,NULL);
+				Var1.var = g_script->FindVar(defbuf + 1,_tcslen(defbuf) - 2,FINDVAR_LOCAL);
 			// try to find global variable if local was not found or we are not in func
 			if (Var1.var == NULL)
-				Var1.var = g_script->FindVar(defbuf + 1,_tcslen(defbuf) - 2,NULL,FINDVAR_GLOBAL,NULL);
+				Var1.var = g_script->FindVar(defbuf + 1,_tcslen(defbuf) - 2,FINDVAR_GLOBAL);
 			if (Var1.var != NULL)
 			{
 				// Call BIF_sizeof passing offset in second parameter to align if necessary
@@ -500,6 +501,9 @@ __int64 ObjRawSize(IObject *aObject, IObject *aObjects)
 
 	IObject *enumerator;
 	ResultType result;
+	ResultToken enum_token;
+	enum_token.object = aObject;
+	enum_token.symbol = SYM_OBJECT;
 	if (!_tcscmp(aObject->Type(), _T("Object")))
 	{
 		this_token.object = aObject;
@@ -513,7 +517,7 @@ __int64 ObjRawSize(IObject *aObject, IObject *aObjects)
 			result = FAIL;
 	}
 	else
-		result = GetEnumerator(enumerator, aObject, 2, false);
+		result = GetEnumerator(enumerator, enum_token, 2, false);
 	// Check if object returned an enumerator, otherwise return
 	if (result != OK)
 		return 0;
@@ -522,6 +526,7 @@ __int64 ObjRawSize(IObject *aObject, IObject *aObjects)
 	// these will be deleted afterwards
 
 	Var vkey, vval;
+	vkey.mAttrib = vval.mAttrib = VAR_NORMAL;
 
 	if (!aObjects)
 	{
@@ -562,10 +567,10 @@ __int64 ObjRawSize(IObject *aObject, IObject *aObjects)
 	IObject *aIsObject;
 	__int64 aIsValue;
 	SymbolType aVarType;
-
+	
 	for (;;)
 	{
-		result = CallEnumerator(enumerator, &vkey, &vval, false);
+		result = CallEnumerator(enumerator, params, 2, false);
 		if (result != CONDITION_TRUE)
 			break;
 
@@ -680,13 +685,16 @@ __int64 ObjRawDump(IObject *aObject, char *aBuffer, Map *aObjects, UINT &aObjCou
 	}
 	else
 	{
-		result = GetEnumerator(enumerator, aObject, 2, false);
+		result_token.object = aObject;
+		result_token.symbol = SYM_OBJECT;
+		result = GetEnumerator(enumerator, result_token, 2, false);
 		if (result != OK)
 			return NULL;
 	}
 
 	Var vkey, vval;
-	
+	vkey.mAttrib = vval.mAttrib = VAR_NORMAL;
+
 	aKey.symbol = SYM_OBJECT;
 	aKey.object = aObject;
 	this_token.object = aObjects;
@@ -715,7 +723,7 @@ __int64 ObjRawDump(IObject *aObject, char *aBuffer, Map *aObjects, UINT &aObjCou
 
 	for (;;)
 	{
-		result = CallEnumerator(enumerator, &vkey, &vval, false);
+		result = CallEnumerator(enumerator, params, 2, false);
 		if (result != CONDITION_TRUE)
 			break;
 
@@ -925,20 +933,20 @@ BIF_DECL(BIF_ObjDump)
 {
 	aResultToken.symbol = SYM_INTEGER;
 	IObject *aObject;
-	if (!(aObject = TokenToObject(*aParam[0])) && !(aObject = TokenToObject(*aParam[1])))
+	if (!(aObject = TokenToObject(*aParam[0])))
 	{
+		g_script->ScriptError(ERR_INVALID_ARG_TYPE);
 		aResultToken.symbol = SYM_STRING;
 		aResultToken.marker = _T("");
 		return;
 	}
-	INT aCopyBuffer = aParamCount > 2 ? (int)TokenToInt64(*aParam[2]) : 0;
+	//INT aCopyBuffer = aParamCount > 1 ? (int)TokenToInt64(*aParam[1]) : 0;
 	DWORD aSize = (DWORD)ObjRawSize(aObject, NULL);
 	char *aBuffer = (char*)malloc(aSize);
 	if (!aBuffer)
 	{
 		g_script->ScriptError(ERR_OUTOFMEM);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		aResultToken.SetValue(_T(""));
 		return;
 	}
 	*(__int64*)(aBuffer + 1) = aSize - 1 - sizeof(__int64) ;
@@ -955,14 +963,14 @@ BIF_DECL(BIF_ObjDump)
 	}
 	//aSize += sizeof(__int64);
 	aObjects->Release();
-	if (aParamCount > 2 && TokenToInt64(*aParam[2]) != 0)
+	if (aParamCount > 1 && TokenToInt64(*aParam[1]) != 0)
 	{
 		LPVOID aDataBuf;
 		TCHAR *pw[1024] = {};
-		if (!ParamIndexIsOmittedOrEmpty(3))
+		if (!ParamIndexIsOmittedOrEmpty(2))
 		{
-			TCHAR *pwd = TokenToString(*aParam[3]);
-			size_t pwlen = _tcslen(TokenToString(*aParam[3]));
+			TCHAR *pwd = TokenToString(*aParam[2]);
+			size_t pwlen = _tcslen(TokenToString(*aParam[2]));
 			for (size_t i = 0; i <= pwlen; i++)
 				pw[i] = &pwd[i];
 		}
@@ -974,44 +982,21 @@ BIF_DECL(BIF_ObjDump)
 			if (!aBuffer)
 			{
 				g_script->ScriptError(ERR_OUTOFMEM);
-				aResultToken.symbol = SYM_STRING;
-				aResultToken.marker = _T("");
+				aResultToken.SetValue(_T(""));
 				return;
 			}
-			memcpy(aBuffer, aDataBuf, aSize = aCompressedSize);
+			memcpy(aBuffer, aDataBuf, aCompressedSize);
+			aObject = new BufferObject(aBuffer, aCompressedSize);
+			dynamic_cast<BufferObject*>(aObject)->SetBase(BufferObject::sPrototype);
 			VirtualFree(aDataBuf, 0, MEM_RELEASE);
 		}
 	}
-	aResultToken.value_int64 = aSize;
-	if (!TokenToObject(*aParam[0]) && TokenToObject(*aParam[1]))
-	{ // FileWrite mode
-		FILE *hFile = _tfopen(TokenToString(*aParam[0]), _T("wb"));
-		if (!hFile)
-		{
-			free(aBuffer);
-			aResultToken.symbol = SYM_STRING;
-			aResultToken.marker = _T("");
-			return;
-		}
-		fwrite(aBuffer, aSize, 1, hFile);
-		fclose(hFile);
-		free(aBuffer);
-	}
-	else if (aParamCount == 2 && aParam[1]->symbol == SYM_VAR)
+	else
 	{
-		Var &var = *(aParam[1]->var->mType == VAR_ALIAS ? aParam[1]->var->mAliasFor : aParam[1]->var);
-		if (var.mType != VAR_NORMAL) // i.e. VAR_CLIPBOARD or VAR_VIRTUAL.
-		{
-			g_script->ScriptError(ERR_VAR_IS_READONLY, var.mName);
-			aResultToken.symbol = SYM_STRING;
-			aResultToken.marker = _T("");
-			return;
-		}
-		var.Free(VAR_ALWAYS_FREE); // Release the variable's old memory. This also removes flags VAR_ATTRIB_OFTEN_REMOVED.
-		var.mHowAllocated = ALLOC_MALLOC; // Must always be this type to avoid complications and possible memory leaks.
-		var.mByteContents = aBuffer;
-		var.mByteCapacity = var.mByteLength = aResultToken.value_int64;
+		aObject = new BufferObject(aBuffer, aSize);
+		dynamic_cast<BufferObject*>(aObject)->SetBase(BufferObject::sPrototype);
 	}
+	aResultToken.SetValue(aObject);
 }
 
 //
@@ -1272,8 +1257,21 @@ BIF_DECL(BIF_ObjLoad)
 	bool aFreeBuffer = false;
 	DWORD aSize = aParamCount > 1 ? (DWORD)TokenToInt64(*aParam[1]) : 0;
 	LPTSTR aPath = TokenToString(*aParam[0]);
-	char *aBuffer = (char *)TokenToInt64(*aParam[0]);
-	if (!aBuffer)
+	IObject *buffer_obj;
+	char *aBuffer;
+	size_t  max_bytes = SIZE_MAX;
+
+	if (TokenIsNumeric(**aParam))
+		aBuffer = (char*)TokenToInt64(**aParam);
+	else if (buffer_obj = TokenToObject(**aParam))
+	{
+		size_t ptr;
+		GetBufferObjectPtr(aResultToken, buffer_obj, ptr, max_bytes);
+		if (aResultToken.Exited())
+			return;
+		aBuffer = (char*)ptr;
+	}
+	else
 	{ // FileRead Mode
 		if (GetFileAttributes(aPath) == 0xFFFFFFFF)
 		{
@@ -1350,19 +1348,7 @@ BIF_DECL(BIF_ObjLoad)
 
 BIF_DECL(BIF_Object)
 {
-	IObject *obj = NULL;
-
-	if (aParamCount == 1) // L33: POTENTIALLY UNSAFE - Cast IObject address to object reference.
-	{
-		obj = (IObject *)TokenToInt64(*aParam[0]);
-		if (obj < (IObject *)65536) // Prevent some obvious errors.
-			_f_throw(ERR_PARAM1_INVALID);
-		else
-			obj->AddRef();
-	}
-	else
-		obj = Object::Create(aParam, aParamCount, &aResultToken);
-
+	IObject *obj = Object::Create(aParam, aParamCount, &aResultToken);
 	if (obj)
 	{
 		// DO NOT ADDREF: the caller takes responsibility for the only reference.
@@ -1377,24 +1363,14 @@ BIF_DECL(BIF_Object)
 
 BIF_DECL(BIF_UObject)
 {
-	IObject *obj = NULL;
-
-	if (aParamCount == 1) // L33: POTENTIALLY UNSAFE - Cast IObject address to object reference.
-	{
-		obj = (IObject *)TokenToInt64(*aParam[0]);
-		if (obj < (IObject *)65536) // Prevent some obvious errors.
-			_f_throw(ERR_PARAM1_INVALID);
-		else
-			obj->AddRef();
-	}
-	else
-		obj = Object::Create(aParam, aParamCount, &aResultToken, true);
+	IObject *obj = Object::Create(aParam, aParamCount, &aResultToken, true);
 
 	if (obj)
 	{
 		// DO NOT ADDREF: the caller takes responsibility for the only reference.
 		_f_return(obj);
 	}
+	//else: an error was already thrown.
 }
 
 
@@ -1462,221 +1438,6 @@ BIF_DECL(BIF_IsObject)
 
 
 //
-// Op_ObjInvoke - Handles the object operators: x.y, x[y], x.y(), x.y := z, etc.
-//
-
-BIF_DECL(Op_ObjInvoke)
-{
-    int invoke_type = _f_callee_id;
-	bool must_be_handled = true;
-    IObject *obj;
-    ExprTokenType *obj_param;
-
-	// Set default return value for Invoke().
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = _T("");
-    
-    obj_param = *aParam; // aParam[0].  Load-time validation has ensured at least one parameter was specified.
-	++aParam;
-	--aParamCount;
-
-	// The following is used in place of TokenToObject to bypass #Warn UseUnset:
-	if (obj_param->symbol == SYM_OBJECT)
-		obj = obj_param->object;
-	else if (obj_param->symbol == SYM_VAR && obj_param->var->HasObject())
-		obj = obj_param->var->Object();
-	else if (obj_param->symbol == SYM_VAR && !_tcsicmp(obj_param->var->mName, _T("base")) // base pseudo-keyword.
-		&& !obj_param->var->HasContents() // For now, allow `base` variable to be reassigned as in v1.
-		&& g->CurrentFunc && g->CurrentFunc->mClass) // We're in a function defined within a class (i.e. a method).
-	{
-		obj = g->CurrentFunc->mClass->Base();
-		ASSERT(obj != nullptr); // Should always pass for classes created by a class definition.
-		obj_param = (ExprTokenType *)alloca(sizeof(ExprTokenType));
-		obj_param->symbol = SYM_VAR;
-		obj_param->var = g->CurrentFunc->mParam[0].var; // this
-		invoke_type |= IF_NO_SET_PROPVAL;
-		// Maybe not the best for error-detection, but this allows calls such as base.__delete()
-		// to work when the superclass has no definition, which avoids the need to check whether
-		// the superclass defines it, and ensures that any definition added later is called.
-		must_be_handled = false;
-	}
-	else // Non-object value.
-	{
-		obj = Object::ValueBase(*obj_param);
-		invoke_type |= IF_NO_SET_PROPVAL;
-	}
-
-	TCHAR name_buf[MAX_NUMBER_SIZE];
-	LPTSTR name = nullptr;
-	if (invoke_type & IF_DEFAULT)
-		invoke_type &= ~IF_DEFAULT;
-	else
-	{
-		if (aParam[0]->symbol != SYM_MISSING)
-		{
-			name = TokenToString(*aParam[0], name_buf);
-			if (!*name && TokenToObject(*aParam[0]))
-				_f_throw(ERR_TYPE_MISMATCH);
-		}
-		++aParam;
-		--aParamCount;
-	}
-    
-	ResultType result;
-	bool param_is_var = obj_param->symbol == SYM_VAR;
-	if (param_is_var)
-		obj->AddRef(); // Ensure obj isn't deleted during the call if the variable is reassigned.
-    result = obj->Invoke(aResultToken, invoke_type, name, *obj_param, aParam, aParamCount);
-	if (param_is_var)
-		obj->Release();
-	
-	if (result == INVOKE_NOT_HANDLED && must_be_handled)
-	{
-		Object *aDefault;
-		aDefault = dynamic_cast<CriticalObject*>(obj);
-		if (aDefault)
-			aDefault = (Object*)((CriticalObject*)aDefault)->GetObj();
-		else
-			aDefault = dynamic_cast<Object*>(obj);
-		if (invoke_type == IT_GET && name && aDefault && aDefault->mDefault.symbol != SYM_MISSING)
-		{
-			aResultToken.CopyValueFrom(aDefault->mDefault);
-			if (aResultToken.symbol == SYM_OBJECT)
-				aResultToken.object->AddRef();
-		}
-		else
-			_f__ret(aResultToken.UnknownMemberError(*obj_param, invoke_type, name));
-	}
-	else if (result == FAIL || result == EARLY_EXIT) // For maintainability: SetExitResult() might not have been called.
-	{
-		aResultToken.SetExitResult(result);
-	}
-	else if (invoke_type & IT_SET)
-	{
-		aResultToken.Free();
-		aResultToken.mem_to_free = NULL;
-		auto &value = *aParam[aParamCount - 1];
-		switch (value.symbol)
-		{
-		case SYM_VAR:
-			value.var->ToToken(aResultToken);
-			break;
-		case SYM_OBJECT:
-			value.object->AddRef();
-		default:
-			aResultToken.CopyValueFrom(value);
-		}
-	}
-}
-	
-
-//
-// Op_ObjGetInPlace - Handles part of a compound assignment like x.y += z.
-//
-
-BIF_DECL(Op_ObjGetInPlace)
-{
-	// Since the most common cases have two params, the "param count" param is omitted in
-	// those cases. Otherwise we have one visible parameter, which indicates the number of
-	// actual parameters below it on the stack.
-	aParamCount = aParamCount ? (int)TokenToInt64(*aParam[0]) : 2; // x[<n-1 params>] : x.y
-	Op_ObjInvoke(aResultToken, aParam - aParamCount, aParamCount);
-}
-
-
-//
-// Op_ObjIncDec - Handles pre/post-increment/decrement for object fields, such as ++x[y].
-//
-
-BIF_DECL(Op_ObjIncDec)
-{
-	SymbolType op = SymbolType(_f_callee_id & ~IF_DEFAULT);
-	
-	bool square_brackets = _f_callee_id & IF_DEFAULT;
-	auto *get_func = square_brackets ? OpFunc_GetItem : OpFunc_GetProp;
-	auto *set_func = square_brackets ? OpFunc_SetItem : OpFunc_SetProp;
-
-	ResultToken temp_result;
-	// Set the defaults expected by Op_ObjInvoke:
-	temp_result.InitResult(aResultToken.buf);
-	temp_result.symbol = SYM_INTEGER;
-	temp_result.func = get_func;
-
-	// Retrieve the current value.  Do it this way instead of calling Object::Invoke
-	// so that if aParam[0] is not an object, ValueBase() is correctly invoked.
-	Op_ObjInvoke(temp_result, aParam, aParamCount);
-
-	if (temp_result.Exited()) // Implies no return value.
-	{
-		aResultToken.SetExitResult(temp_result.Result());
-		return;
-	}
-	bool throw_after_free_token = false; // set default, overridden if value_to_set is non-numeric.
-	ExprTokenType current_value, value_to_set;
-	switch (value_to_set.symbol = current_value.symbol = TokenIsNumeric(temp_result))
-	{
-	case PURE_INTEGER:
-		value_to_set.value_int64 = (current_value.value_int64 = TokenToInt64(temp_result))
-			+ ((op == SYM_POST_INCREMENT || op == SYM_PRE_INCREMENT) ? +1 : -1);
-		break;
-
-	case PURE_FLOAT:
-		value_to_set.value_double = (current_value.value_double = TokenToDouble(temp_result))
-			+ ((op == SYM_POST_INCREMENT || op == SYM_PRE_INCREMENT) ? +1 : -1);
-		break;
-
-	default: // PURE_NOT_NUMERIC == SYM_STRING.
-		// Value is non-numeric, so throw.
-		throw_after_free_token = true;
-	}
-
-	// Free the object or string returned by Op_ObjInvoke, if applicable.
-	temp_result.Free();
-	if (throw_after_free_token)
-		_f_throw(ERR_TYPE_MISMATCH);
-	// Although it's likely our caller's param array has enough space to hold the extra
-	// parameter, there's no way to know for sure whether it's safe, so we allocate our own:
-	ExprTokenType **param = (ExprTokenType **)_alloca((aParamCount + 1) * sizeof(ExprTokenType *));
-	memcpy(param, aParam, aParamCount * sizeof(ExprTokenType *)); // Copy caller's param pointers.
-	param[aParamCount++] = &value_to_set; // Append new value as the last parameter.
-
-	if (op == SYM_PRE_INCREMENT || op == SYM_PRE_DECREMENT)
-	{
-		aResultToken.func = set_func;
-		// Set the new value and pass the return value of the invocation back to our caller.
-		// This should be consistent with something like x.y := x.y + 1.
-		Op_ObjInvoke(aResultToken, param, aParamCount);
-	}
-	else // SYM_POST_INCREMENT || SYM_POST_DECREMENT
-	{
-		// Must be re-initialized (and must use SET rather than GET):
-		temp_result.InitResult(aResultToken.buf);
-		temp_result.symbol = SYM_INTEGER;
-		temp_result.func = set_func;
-		
-		// Set the new value.
-		Op_ObjInvoke(temp_result, param, aParamCount);
-
-		if (temp_result.Exited()) // Implies no return value.
-		{
-			aResultToken.SetExitResult(temp_result.Result());
-			return;
-		}
-		
-		// Dispose of the result safely.
-		temp_result.Free();
-
-		// Return the previous value.
-		aResultToken.symbol = current_value.symbol;
-		aResultToken.value_int64 = current_value.value_int64; // Union copy.  Includes marker_length on x86.
-#ifdef _WIN64
-		aResultToken.marker_length = current_value.marker_length; // For simplicity, symbol isn't checked.
-#endif
-	}
-}
-
-
-//
 // Functions for accessing built-in methods (even if obscured by a user-defined method).
 //
 
@@ -1689,7 +1450,7 @@ BIF_DECL(BIF_ObjXXX)
 	if (obj)
 		obj->CallBuiltin(_f_callee_id, aResultToken, aParam + 1, aParamCount - 1);
 	else
-		_f_throw(ERR_NO_OBJECT);
+		_f_throw_type(_T("Object"), *aParam[0]);
 }
 
 
@@ -1737,30 +1498,29 @@ BIF_DECL(BIF_ObjBindMethod)
 
 
 //
-// ObjRawSet - set a value without invoking any meta-functions.
+// ObjPtr/ObjPtrAddRef/ObjFromPtr - Convert between object reference and IObject pointer.
 //
 
-BIF_DECL(BIF_ObjRaw)
+BIF_DECL(BIF_ObjPtr)
 {
-	Object *obj = dynamic_cast<Object*>(TokenToObject(*aParam[0]));
-	if (!obj)
-		_f_throw(ERR_PARAM1_INVALID);
-	LPTSTR name = TokenToString(*aParam[1], _f_number_buf);
-	if (_f_callee_id == FID_ObjRawSet)
+	if (_f_callee_id >= FID_ObjFromPtr)
 	{
-		if (!obj->SetOwnProp(name, *aParam[2]))
-			_f_throw(ERR_OUTOFMEM);
+		auto obj = (IObject *)ParamIndexToInt64(0);
+		if (obj < (IObject *)65536) // Prevent some obvious errors.
+			_f_throw(ERR_PARAM1_INVALID);
+		if (_f_callee_id == FID_ObjFromPtrAddRef)
+			obj->AddRef();
+		_f_return(obj);
 	}
-	else
+	else // FID_ObjPtr or FID_ObjPtrAddRef.
 	{
-		if (obj->GetOwnProp(aResultToken, name))
-		{
-			if (aResultToken.symbol == SYM_OBJECT)
-				aResultToken.object->AddRef();
-			return;
-		}
+		auto obj = ParamIndexToObject(0);
+		if (!obj)
+			_f_throw_type(_T("object"), *aParam[0]);
+		if (_f_callee_id == FID_ObjPtrAddRef)
+			obj->AddRef();
+		_f_return((UINT_PTR)obj);
 	}
-	_f_return_empty;
 }
 
 
@@ -1774,7 +1534,7 @@ BIF_DECL(BIF_Base)
 	if (_f_callee_id == FID_ObjSetBase)
 	{
 		if (!obj)
-			_f_throw(ERR_TYPE_MISMATCH);
+			_f_throw_type(_T("Object"), *aParam[0]);
 		auto new_base = dynamic_cast<Object *>(TokenToObject(*aParam[1]));
 		if (!obj->SetBase(new_base, aResultToken))
 			return;
@@ -1820,9 +1580,7 @@ BIF_DECL(BIF_HasBase)
 {
 	auto that_base = ParamIndexToObject(1);
 	if (!that_base)
-	{
-		_f_throw(ERR_TYPE_MISMATCH);
-	}
+		_f_throw_type(_T("object"), *aParam[1]);
 	_f_return_b(Object::HasBase(*aParam[0], that_base));
 }
 
@@ -1833,7 +1591,7 @@ Object *ParamToObjectOrBase(ExprTokenType &aToken, ResultToken &aResultToken)
 	if (  (obj = dynamic_cast<Object *>(TokenToObject(aToken)))
 		|| (obj = Object::ValueBase(aToken))  )
 		return obj;
-	aResultToken.Error(ERR_TYPE_MISMATCH);
+	aResultToken.Error(ERR_PARAM1_INVALID);
 	return nullptr;
 }
 

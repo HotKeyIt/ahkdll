@@ -39,57 +39,21 @@ BIF_DECL(BIF_ComObjCreate)
 			hr = CLSIDFromProgID(cls, &clsid);
 		if (FAILED(hr)) break;
 
+		__int64 punk = 0;
 		if (aParamCount > 1)
 		{
 			hr = CLSIDFromString(CStringWCharFromTCharIfNeeded(TokenToString(*aParam[1])), &iid);
 			if (FAILED(hr)) break;
-			
-			IUnknown *punk;
-			hr = CoCreateInstance(clsid, NULL, CLSCTX_SERVER, iid, (void **)&punk);
-			if (FAILED(hr)) break;
-
-			// Return interface pointer, as requested.
-			aResultToken.symbol = SYM_INTEGER;
-			aResultToken.value_int64 = (__int64)punk;
 		}
 		else
-		{
-			IDispatch *pdisp;
-			hr = CoCreateInstance(clsid, NULL, CLSCTX_SERVER, IID_IDispatch, (void **)&pdisp);
-			if (FAILED(hr)) break;
-			
-			// Return dispatchable object.
-			if ( !(aResultToken.object = new ComObject(pdisp)) )
-			{
-				pdisp->Release();
-				hr = E_OUTOFMEMORY;
-				break;
-			}
-			aResultToken.symbol = SYM_OBJECT;
-		}
-		return;
-	}
-	_f_set_retval_p(_T(""), 0);
-	ComError(hr, aResultToken);
-}
+			iid = IID_IDispatch;
 
+		hr = CoCreateInstance(clsid, NULL, CLSCTX_SERVER, iid, (void **)&punk);
+		
+		if (FAILED(hr)) break;
 
-BIF_DECL(BIF_ComObjGet)
-{
-	HRESULT hr;
-	IDispatch *pdisp;
-	hr = CoGetObject(CStringWCharFromTCharIfNeeded(TokenToString(*aParam[0])), NULL, IID_IDispatch, (void **)&pdisp);
-	if (SUCCEEDED(hr))
-	{
-		if (aResultToken.object = new ComObject(pdisp))
-		{
-			aResultToken.symbol = SYM_OBJECT;
-			return;
-		}
-		hr = E_OUTOFMEMORY;
-		pdisp->Release();
+		_f_return(new ComObject(punk, iid == IID_IDispatch ? VT_DISPATCH : VT_UNKNOWN));
 	}
-	_f_set_retval_p(_T(""), 0);
 	ComError(hr, aResultToken);
 }
 
@@ -142,6 +106,26 @@ BIF_DECL(BIF_ComObjDll)
 		return;
 	}
 	pdisp->Release();
+	_f_set_retval_p(_T(""), 0);
+	ComError(hr, aResultToken);
+}
+
+
+BIF_DECL(BIF_ComObjGet)
+{
+	HRESULT hr;
+	IDispatch *pdisp;
+	hr = CoGetObject(CStringWCharFromTCharIfNeeded(TokenToString(*aParam[0])), NULL, IID_IDispatch, (void **)&pdisp);
+	if (SUCCEEDED(hr))
+	{
+		if (aResultToken.object = new ComObject(pdisp))
+		{
+			aResultToken.symbol = SYM_OBJECT;
+			return;
+		}
+		hr = E_OUTOFMEMORY;
+		pdisp->Release();
+	}
 	_f_set_retval_p(_T(""), 0);
 	ComError(hr, aResultToken);
 }
@@ -413,14 +397,6 @@ BIF_DECL(BIF_ComObjConnect)
 }
 
 
-BIF_DECL(BIF_ComObjError)
-{
-	aResultToken.value_int64 = g_ComErrorNotify;
-	if (aParamCount && TokenIsNumeric(*aParam[0]))
-		g_ComErrorNotify = (TokenToInt64(*aParam[0]) != 0);
-}
-
-
 BIF_DECL(BIF_ComObjValue)
 {
 	ComObject *obj = dynamic_cast<ComObject *>(TokenToObject(*aParam[0]));
@@ -565,12 +541,11 @@ BIF_DECL(BIF_ComObjArray)
 BIF_DECL(BIF_ComObjQuery)
 {
 	IUnknown *punk = NULL;
-	ComObject *obj;
+	__int64 pint = 0;
+	IObject *iobj;
 	HRESULT hr;
-	
-	aResultToken.value_int64 = 0; // Set default; on 32-bit builds, only the low 32 bits may be set below.
 
-	if (obj = dynamic_cast<ComObject *>(TokenToObject(*aParam[0])))
+	if (auto *obj = dynamic_cast<ComObject *>(iobj = TokenToObject(*aParam[0])))
 	{
 		// We were passed a ComObject, but does it contain an interface pointer?
 		if (obj->mVarType == VT_UNKNOWN || obj->mVarType == VT_DISPATCH)
@@ -579,14 +554,19 @@ BIF_DECL(BIF_ComObjQuery)
 	if (!punk)
 	{
 		// Since it wasn't a valid ComObject, it should be a raw interface pointer.
-		punk = (IUnknown *)TokenToInt64(*aParam[0]);
-		if (punk < (IUnknown *)65536) // Error-detection: the first 64KB of address space is always invalid.
+		if (iobj)
 		{
-			g->LastError = E_INVALIDARG; // For consistency.
-			ComError(-1, aResultToken);
-			return;
+			// ComObject isn't handled this way since it could be VT_DISPATCH.
+			UINT_PTR ptr;
+			if (GetObjectPtrProperty(iobj, _T("Ptr"), ptr, aResultToken) != OK)
+				return;
+			punk = (IUnknown *)ptr;
 		}
+		else
+			punk = (IUnknown *)TokenToInt64(*aParam[0]);
 	}
+	if (punk < (IUnknown *)65536) // Error-detection: the first 64KB of address space is always invalid.
+		_f_throw(ERR_PARAM1_INVALID);
 
 	if (aParamCount > 2) // QueryService(obj, SID, IID)
 	{
@@ -597,7 +577,7 @@ BIF_DECL(BIF_ComObjQuery)
 			IServiceProvider *pprov;
 			if (SUCCEEDED(hr = punk->QueryInterface<IServiceProvider>(&pprov)))
 			{
-				hr = pprov->QueryService(sid, iid, (void **)&aResultToken.value_int64);
+				hr = pprov->QueryService(sid, iid, (void **)&pint);
 			}
 		}
 	}
@@ -606,11 +586,14 @@ BIF_DECL(BIF_ComObjQuery)
 		GUID iid;
 		if (SUCCEEDED(hr = CLSIDFromString(CStringWCharFromTCharIfNeeded(TokenToString(*aParam[1])), &iid)))
 		{
-			hr = punk->QueryInterface(iid, (void **)&aResultToken.value_int64);
+			hr = punk->QueryInterface(iid, (void **)&pint);
 		}
 	}
 
 	g->LastError = hr;
+	if (pint)
+		_f_return(new ComObject(pint, VT_UNKNOWN));
+	ComError(hr, aResultToken);
 }
 
 
@@ -934,8 +917,6 @@ void VarTypeToToken(VARTYPE aVarType, void *apValue, ResultToken &aToken)
 }
 
 
-bool g_ComErrorNotify = true;
-
 ResultType ComError(HRESULT hr)
 {
 	ResultToken errorToken;
@@ -949,33 +930,36 @@ void ComError(HRESULT hr, ResultToken &aResultToken, LPTSTR name, EXCEPINFO* pei
 	if (hr != DISP_E_EXCEPTION)
 		pei = NULL;
 
-	if (g_ComErrorNotify)
+	if (pei)
 	{
-		if (pei)
-		{
-			if (pei->pfnDeferredFillIn)
-				(*pei->pfnDeferredFillIn)(pei);
-			hr = pei->wCode ? 0x80040200 + pei->wCode : pei->scode;
-		}
+		if (pei->pfnDeferredFillIn)
+			(*pei->pfnDeferredFillIn)(pei);
+		hr = pei->wCode ? 0x80040200 + pei->wCode : pei->scode;
+	}
 
-		TCHAR buf[4096], *error_text;
-		if (hr == -1)
-			error_text = _T("No valid COM object!");
-		else
+	TCHAR buf[4096], *error_text;
+	if (hr == -1)
+		error_text = _T("No valid COM object!");
+	else
+	{
+		int size = _stprintf(buf, _T("(0x%X) "), hr);
+		auto msg_buf = buf + size;
+		int msg_size = FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, hr, 0, msg_buf, _countof(buf) - size - 1, NULL);
+		if (msg_size)
 		{
-			int size = _stprintf(buf, _T("0x%08X - "), hr);
-			size += FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, hr, 0, buf + size, _countof(buf) - size, NULL);
-			if (buf[size-1] == '\n')
-				buf[--size] = '\0';
-			if (buf[size-1] == '\r')
-				buf[--size] = '\0';
+			// Remove any possible trailing \r\n.
+			if (msg_buf[msg_size-1] == '\n')
+				msg_buf[--msg_size] = '\0';
+			if (msg_buf[msg_size-1] == '\r')
+				msg_buf[--msg_size] = '\0';
+			// Add a trailing \n if we'll be adding more lines below.
 			if (pei)
-				_vsntprintf(buf + size, _countof(buf) - size, _T("\nSource:\t\t%ws\nDescription:\t%ws\nHelpFile:\t\t%ws\nHelpContext:\t%d"), (va_list) &pei->bstrSource);
-			error_text = buf;
+				msg_buf[msg_size++] = '\n';
 		}
-
-		if (g_script->mCurrLine->LineError(error_text, FAIL_OR_OK, name) == FAIL)
-			aResultToken.SetExitResult(FAIL); // An exception was thrown.
+		size += msg_size;
+		if (pei)
+			_sntprintf(buf + size, _countof(buf) - size, _T("%ws\nSource:\t%ws"), pei->bstrDescription, pei->bstrSource);
+		error_text = buf;
 	}
 
 	if (pei)
@@ -984,6 +968,8 @@ void ComError(HRESULT hr, ResultToken &aResultToken, LPTSTR name, EXCEPINFO* pei
 		SysFreeString(pei->bstrDescription);
 		SysFreeString(pei->bstrHelpFile);
 	}
+
+	aResultToken.Error(error_text, name);
 }
 
 
@@ -1126,7 +1112,17 @@ ResultType ComObject::Invoke(IObject_Invoke_PARAMS_DECL)
 	{
 		if (!IS_INVOKE_CALL && aName && !_tcsicmp(aName, _T("Ptr")))
 		{
-			if (IS_INVOKE_SET || aParamCount)
+			if (IS_INVOKE_SET && (mVarType == VT_UNKNOWN || mVarType == VT_DISPATCH) && !mUnknown)
+			{
+				// Allow this assignment only in the specific cases indicated above, to avoid ambiguity
+				// about what to do with the old value.  This operation is specifically intended for use
+				// with DllCall; i.e. DllCall(..., "ptr*", o := ComObject(13,0)) to wrap a returned ptr.
+				// Assigning zero is permitted and there is no AddRef because the caller wants us to
+				// Release the interface pointer automatically.
+				mUnknown = (IUnknown *)ParamIndexToInt64(0);
+				return OK;
+			}
+			if (aParamCount)
 				_o_throw(ERR_INVALID_USAGE);
 			// Support passing VT_ARRAY, VT_BYREF or IUnknown to DllCall.
 			if ((mVarType & (VT_ARRAY | VT_BYREF)) || mVarType == VT_UNKNOWN || mVarType == VT_DISPATCH)
@@ -1230,7 +1226,7 @@ ResultType ComObject::Invoke(IObject_Invoke_PARAMS_DECL)
 	}
 	else if	(IS_INVOKE_SET)
 	{
-		// Op_ObjInvoke sets the result of IT_SET.
+		// aResultToken's value is ignored by ExpandExpression() for IT_SET.
 		VariantClear(&varResult);
 	}
 	else
@@ -1456,8 +1452,8 @@ ResultType ComArrayEnum::Next(Var *aOutput, Var *aOutputType)
 			var.vt = mType;
 			memcpy(&var.lVal, mPointer, mElemSize);
 		}
-		// Copy value into var.
-		AssignVariant(*aOutput, var);
+		if (aOutput)
+			AssignVariant(*aOutput, var);
 		if (aOutputType)
 			aOutputType->Assign(var.vt);
 		return CONDITION_TRUE;

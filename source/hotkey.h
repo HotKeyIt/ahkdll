@@ -77,6 +77,9 @@ HotkeyCriterion *FindHotkeyIfExpr(LPTSTR aExpr);
 struct HotkeyVariant
 {
 	LabelRef mJumpToLabel;
+	LabelPtr mOriginalCallback;	// This is the callback set at load time. 
+								// Keep it to allow restoring it via hotkey() function if changed
+								// during run time.
 	HotkeyCriterion *mHotCriterion;
 	HotkeyVariant *mNextVariant;
 	DWORD mRunAgainTime;
@@ -194,7 +197,7 @@ public:
 	
 	// 64- or 32-bit members:
 	LPTSTR mName; // Points to the label name for static hotkeys, or a dynamically-allocated string for dynamic hotkeys.
-	HotkeyVariant *mFirstVariant, *mLastVariant; // v1.0.42: Linked list of variant hotkeys created via #IfWin directives.
+	HotkeyVariant *mFirstVariant, *mLastVariant; // v1.0.42: Linked list of variant hotkeys created via #HotIf directives.
 
 	// Make sHotkeyCount an alias for sNextID.  Make it const to enforce modifying the value in only one way:
 	static /*const*/ HotkeyIDType &sHotkeyCount; //HotKeyIt removed const so possible to set to 0 when hotkeys are deleted.
@@ -214,7 +217,6 @@ public:
 	#define HOTKEY_EL_NOTEXISTVARIANT    6
 	#define HOTKEY_EL_MAXCOUNT           98 // 98 allows room for other ErrorLevels to be added in between.
 	#define HOTKEY_EL_MEM                99
-	static ResultType IfWin(LPTSTR aIfWin, LPTSTR aWinTitle, LPTSTR aWinText, ResultToken &aResultToken);
 	static ResultType IfExpr(LPTSTR aExpr, IObject *aExprObj, ResultToken &aResultToken);
 	static ResultType Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOptions
 		, IObject *aJumpToLabel, HookActionType aHookAction, ResultToken &aResultToken);
@@ -229,7 +231,7 @@ public:
 		, UCHAR &aNoSuppress, bool &aFireWithNoSuppress, LPTSTR aSingleChar);
 	static modLR_type HotkeyRequiresModLR(HotkeyIDType aHotkeyIDwithoutflags, modLR_type aModLR);
 	static void TriggerJoyHotkeys(int aJoystickID, DWORD aButtonsNewlyDown);
-	void PerformInNewThreadMadeByCaller(HotkeyVariant &aVariant);
+	void PerformInNewThreadMadeByCaller(HotkeyVariant &aVariant, LPTSTR aName);
 	static void ManifestAllHotkeysHotstringsHooks();
 	static void RequireHook(HookType aWhichHook) {sWhichHookAlways |= aWhichHook;}
 	static void MaybeUninstallHook();

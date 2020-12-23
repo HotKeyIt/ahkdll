@@ -40,7 +40,7 @@ HWND HotCriterionAllowsFiring(HotkeyCriterion *aCriterion, LPTSTR aHotkeyName)
 // In addition to being called by the hook thread, this can now be called by the main thread.
 // That happens when a WM_HOTKEY message arrives (for non-hook hotkeys, i.e. RegisterHotkey).
 // Returns a non-NULL HWND if firing is allowed.  However, if it's a global criterion or
-// a "not-criterion" such as #IfWinNotActive, (HWND)1 is returned rather than a genuine HWND.
+// a "not-criterion" such as #HotIf Not WinActive(), (HWND)1 is returned rather than a genuine HWND.
 {
 	HWND found_hwnd;
 	if (!aCriterion)
@@ -55,8 +55,7 @@ HWND HotCriterionAllowsFiring(HotkeyCriterion *aCriterion, LPTSTR aHotkeyName)
 	case HOT_IF_NOT_EXIST:
 		found_hwnd = WinExist(g_default, aCriterion->WinTitle, aCriterion->WinText, _T(""), _T(""), false, false); // Thread-safe.
 		break;
-	// L4: Handling of #if (expression) hotkey variants.
-	case HOT_IF_EXPR:
+	// L4: Handling of #HotIf (expression) hotkey variants.
 	case HOT_IF_CALLBACK:
 		// Expression evaluation must be done in the main thread. If the message times out, the hotkey/hotstring is not allowed to fire.
 		DWORD_PTR res;
@@ -108,7 +107,7 @@ HotkeyCriterion *AddHotkeyCriterion(HotCriterionType aType, LPTSTR aWinTitle, LP
 	if (   !(cp = (HotkeyCriterion *)g_SimpleHeap->Malloc(sizeof(HotkeyCriterion)))   )
 		return NULL;
 	cp->Type = aType;
-	cp->ExprLine = NULL;
+	cp->OriginalExpr = nullptr;
 	if (*aWinTitle)
 	{
 		if (   !(cp->WinTitle = g_SimpleHeap->Malloc(aWinTitle))   )
@@ -148,6 +147,7 @@ HotkeyCriterion *AddHotkeyIfExpr()
 	if (   !(cp = (HotkeyCriterion *)g_SimpleHeap->Malloc(sizeof(HotkeyCriterion)))   )
 		return NULL;
 	cp->NextExpr = NULL;
+	cp->OriginalExpr = nullptr;
 	if (g_LastHotExpr)
 		g_LastHotExpr->NextExpr = cp;
 	else
@@ -159,28 +159,29 @@ HotkeyCriterion *AddHotkeyIfExpr()
 
 HotkeyCriterion *FindHotkeyIfExpr(LPTSTR aExpr)
 {
-	for (HotkeyCriterion *cp = g_FirstHotExpr; cp; cp = cp->NextExpr)
-		if (cp->Type != HOT_IF_CALLBACK // i.e. HOT_IF_EXPR or an expression optimised to be any other type.
-			&& !_tcscmp(aExpr, cp->ExprLine->mArg[0].text)) // Case-sensitive since the expression might be.
+	for (HotkeyCriterion* cp = g_FirstHotExpr; cp; cp = cp->NextExpr)
+		if (cp->OriginalExpr && !_tcscmp(aExpr, cp->OriginalExpr)) // Case-sensitive since the expression might be.
 			return cp;
 	return NULL;
 }
 
 
-void Script::PreparseHotkeyIfExpr(Line *aLine)
-// Optimize simple #If expressions into the more specific HOT_IF_ types so that they can be
+void Script::PreparseHotkeyIfExpr(Line* aLine)
+// Optimize simple #HotIf expressions into the more specific HOT_IF_ types so that they can be
 // evaluated by the hook directly, without synchronizing with the main thread.
 {
 	ExprTokenType *postfix = aLine->mArg[0].postfix;
 	int param_count = 0;
 	while (postfix[param_count].symbol == SYM_STRING)
 		++param_count;
-	if (postfix[param_count].symbol != SYM_FUNC)
-		return; // Not a function call, or it doesn't only accept strings.
+	if (postfix[param_count].symbol != SYM_FUNC // Not a function call, or it doesn't only accept strings.
+		|| param_count > 2 // Too many parameters.
+		|| !postfix[param_count].callsite->func) // Dynamic target.
+		return;
 	if (param_count > 2)
 		return; // Too many parameters.
-	Func &fn = *postfix[param_count].deref->func;
-	if (!fn.IsBuiltIn() || ((BuiltInFunc&)fn).mBIF != &BIF_WinExistActive)
+	auto fn = dynamic_cast<BuiltInFunc*>(postfix[param_count].callsite->func);
+	if (!fn || fn->mBIF != &BIF_WinExistActive)
 		return; // Not WinExist() or WinActive().
 	bool invert = postfix[param_count+1].symbol == SYM_LOWNOT || postfix[param_count+1].symbol == SYM_HIGHNOT;
 	if (postfix[param_count+1+invert].symbol != SYM_INVALID)
@@ -190,7 +191,7 @@ void Script::PreparseHotkeyIfExpr(Line *aLine)
 	HotkeyCriterion *hc = (HotkeyCriterion *)aLine->mAttribute;
 	// Change the parameters of this criterion.  FindHotkeyIfExpr() will still be able to
 	// find it based on the expression text since it only relies on ExprLine.
-	if (ctoupper(fn.mName[3]) == 'A')
+	if (ctoupper(fn->mName[3]) == 'A')
 		hc->Type = invert ? HOT_IF_NOT_ACTIVE : HOT_IF_ACTIVE;
 	else
 		hc->Type = invert ? HOT_IF_NOT_EXIST : HOT_IF_EXIST;
@@ -283,8 +284,8 @@ void Hotkey::ManifestAllHotkeysHotstringsHooks()
 			//    which would allow it's key-down hotkey to become non-hook.  Similarly, if a
 			//    all of a prefix key's hotkeys become disabled, and that prefix is also a suffix,
 			//    those suffixes no longer need to be hook hotkeys.
-			// 3) There may be other ways, especially in the future involving #IfWin keys whose
-			//    criteria change.
+			// 3) There may be other ways, especially in the future involving #HotIf WinActive/Exist
+			//    keys whose criteria change.
 			if (hot.mType == HK_KEYBD_HOOK)
 				hot.mType = HK_NORMAL; // To possibly be overridden back to HK_KEYBD_HOOK later below; but if not, it will be registered later below.
 		}
@@ -396,7 +397,7 @@ void Hotkey::ManifestAllHotkeysHotstringsHooks()
 				// And if it's currently registered, it will be unregistered later below.
 			else
 			{
-				// v1.0.42: Any #IfWin keyboard hotkey must use the hook if it lacks an enabled,
+				// v1.0.42: Any #HotIf keyboard hotkey must use the hook if it lacks an enabled,
 				// non-suspended, global variant.  Under those conditions, the hotkey is either:
 				// 1) Single-variant hotkey that has criteria (non-global).
 				// 2) Multi-variant hotkey but all variants have criteria (non-global).
@@ -539,31 +540,6 @@ void Hotkey::AllDestructAndExit(int aExitCode)
 	// at which time the OS will reclaim all remaining memory:
 	//g_SimpleHeap->DeleteAll();
 
-	// In light of the comments below, and due to the fact that anyone using this app
-	// is likely to want the anti-focus-stealing measure to always be disabled, I
-	// think it's best not to bother with this ever, since its results are
-	// unpredictable:
-/*	if (g_os.IsWin98orLater() || g_os.IsWin2000orLater())
-		// Restore the original timeout value that was set by WinMain().
-		// Also disables the compiler warning for the PVOID cast.
-		// Note: In many cases, this call will fail to set the value (perhaps even if
-		// SystemParametersInfo() reports success), probably because apps aren't
-		// supposed to change this value unless they currently have the input
-		// focus or something similar (and this app probably doesn't meet the criteria
-		// at this stage).  So I think what will happen is: the value set
-		// in WinMain() will stay in effect until the user reboots, at which time
-		// the default value store in the registry will once again be in effect.
-		// This limitation seems harmless.  Indeed, it's probably a good thing not to
-		// set it back afterward so that windows behave more consistently for the user
-		// regardless of whether this program is currently running.
-#ifdef _MSC_VER
-	#pragma warning( disable : 4312 )
-#endif
-		SystemParametersInfo(SPI_SETFOREGROUNDLOCKTIMEOUT, 0, (PVOID)g_OriginalTimeout, SPIF_SENDCHANGE);
-#ifdef _MSC_VER
-	#pragma warning( default : 4312 ) 
-#endif
-*/
 	// I know this isn't the preferred way to exit the program.  However, due to unusual
 	// conditions such as the script having MsgBoxes or other dialogs displayed on the screen
 	// at the time the user exits (in which case our main event loop would be "buried" underneath
@@ -714,7 +690,7 @@ HotkeyVariant *Hotkey::CriterionAllowsFiring(HWND *aFoundHWND)
 // If non-NULL, aFoundHWND is an output variable for the caller, but it is only set if a
 // non-global/criterion variant is found; that is, it isn't changed when no match is found or
 // when the match is a global variant.  Even when set, aFoundHWND will be (HWND)1 for
-// "not-criteria" such as #IfWinNotActive.
+// "not-criteria" such as #HotIf Not WinActive().
 {
 	// Check mParentEnabled in case the hotkey became disabled between the time the message was posted
 	// and the time it arrived.  A similar check is done for "suspend" later below (since "suspend"
@@ -841,10 +817,10 @@ HotkeyVariant *Hotkey::CriterionFiringIsCertainHelper(HotkeyIDType &aHotkeyIDwit
 		// Fix for v1.0.46.13: Although the section higher above found no variant to fire for the
 		// caller-specified hotkey ID, it's possible that some other hotkey (one with a wildcard) is
 		// eligible to fire due to the eclipsing behavior of wildcard hotkeys.  For example:
-		//    #IfWinNotActive Untitled
-		//    q::tooltip %A_ThisHotkey% Non-notepad
-		//    #IfWinActive Untitled
-		//    *q::tooltip %A_ThisHotkey% Notepad
+		//    #HotIf Not WinActive("Untitled")
+		//    q::tooltip ThisHotkey . " Non-notepad"
+		//    #HotIf WinActive("Untitled")
+		//    *q::tooltip ThisHotkey . " Notepad"
 		// However, the logic here might not be a perfect solution because it fires the first available
 		// hotkey that has a variant whose criteria are met (which might not be exactly the desired rules
 		// of precedence).  However, I think it's extremely rare that there would be more than one hotkey
@@ -907,7 +883,7 @@ HotkeyVariant *Hotkey::CriterionFiringIsCertainHelper(HotkeyIDType &aHotkeyIDwit
 	if (!aKeyUp)
 		aNoSuppress |= NO_SUPPRESS_NEXT_UP_EVENT;  // Update output parameter for the caller.
 	if (aSingleChar)
-		*aSingleChar = '#'; // '#' in KeyHistory to indicate this hotkey is disabled due to #IfWin criterion.
+		*aSingleChar = '#'; // '#' in KeyHistory to indicate this hotkey is disabled due to #HotIf WinActive/Exist() criterion.
 	return NULL;
 }
 
@@ -956,7 +932,7 @@ void Hotkey::TriggerJoyHotkeys(int aJoystickID, DWORD aButtonsNewlyDown)
 
 
 
-void Hotkey::PerformInNewThreadMadeByCaller(HotkeyVariant &aVariant)
+void Hotkey::PerformInNewThreadMadeByCaller(HotkeyVariant &aVariant, LPTSTR aName)
 // Caller is responsible for having called PerformIsAllowed() before calling us.
 // Caller must have already created a new thread for us, and must close the thread when we return.
 {
@@ -1035,7 +1011,10 @@ void Hotkey::PerformInNewThreadMadeByCaller(HotkeyVariant &aVariant)
 
 	// LAUNCH HOTKEY SUBROUTINE:
 	++aVariant.mExistingThreads;  // This is the thread count for this particular hotkey only.
-	ResultType result = aVariant.mJumpToLabel->ExecuteInNewThread(g_script->mThisHotkeyName);
+
+	ExprTokenType params = { aName };
+	ResultType result = aVariant.mJumpToLabel->ExecuteInNewThread(g_script->mThisHotkeyName, &params, 1);
+	
 	--aVariant.mExistingThreads;
 
 	if (result == FAIL)
@@ -1063,29 +1042,10 @@ void Hotkey::PerformInNewThreadMadeByCaller(HotkeyVariant &aVariant)
 	}
 }
 
-
-
-ResultType Hotkey::IfWin(LPTSTR aIfWin, LPTSTR aWinTitle, LPTSTR aWinText, ResultToken &aResultToken)
-{
-	HotCriterionType hot_criterion;
-	bool invert = !_tcsnicmp(aIfWin + 5, _T("Not"), 3);
-	if (!_tcsicmp(aIfWin + (invert ? 8 : 5), _T("Active"))) // It matches #IfWin[Not]Active.
-		hot_criterion = invert ? HOT_IF_NOT_ACTIVE : HOT_IF_ACTIVE;
-	else if (!_tcsicmp(aIfWin + (invert ? 8 : 5), _T("Exist")))
-		hot_criterion = invert ? HOT_IF_NOT_EXIST : HOT_IF_EXIST;
-	else // It starts with IfWin but isn't Active or Exist: Don't alter the current criterion.
-		return aResultToken.Error(ERR_PARAM1_INVALID);
-	if (!SetHotkeyCriterion(hot_criterion, aWinTitle, aWinText)) // Currently, it only fails upon out-of-memory.
-		return aResultToken.SetExitResult(FAIL);
-	return OK;
-}
-
-
-
 ResultType Hotkey::IfExpr(LPTSTR aExpr, IObject *aExprObj, ResultToken &aResultToken)
-// Hotkey "If"  ; Set null criterion.
-// Hotkey "If", "Exact-expression-text"
-// Hotkey "If", FunctionObject
+// HotIf ; Set null criterion.
+// HotIf "Exact-expression-text"
+// HotIf FunctionObject
 {
 	if (aExprObj)
 	{
@@ -1124,8 +1084,6 @@ ResultType Hotkey::IfExpr(LPTSTR aExpr, IObject *aExprObj, ResultToken &aResultT
 	return OK;
 }
 
-
-
 ResultType Hotkey::Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOptions
 	, IObject *aJumpToLabel, HookActionType aHookAction, ResultToken &aResultToken)
 // Creates, updates, enables, or disables a hotkey dynamically (while the script is running).
@@ -1141,7 +1099,7 @@ ResultType Hotkey::Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOption
 	// (i.e. it's retaining its current label).
 	if (aJumpToLabel)
 	{
-		if (!ValidateFunctor(aJumpToLabel, 0, aResultToken))
+		if (!ValidateFunctor(aJumpToLabel, 1, aResultToken))
 			return FAIL;
 	}
 
@@ -1200,9 +1158,9 @@ ResultType Hotkey::Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOption
 			{
 				// LoadIncludedFile() contains logic and comments similar to this, so maintain them together.
 				// If aHookAction isn't zero, the caller is converting this hotkey into a global alt-tab
-				// hotkey (alt-tab hotkeys are never subject to #IfWin, as documented).  Thus, variant can
+				// hotkey (alt-tab hotkeys are never subject to #HotIf, as documented).  Thus, variant can
 				// be NULL because making a hotkey become alt-tab doesn't require the creation or existence
-				// of a variant matching the current #IfWin criteria.  However, continue on to process the
+				// of a variant matching the current #HotIf criteria.  However, continue on to process the
 				// Options parameter in case it contains "On" or some other keyword applicable to alt-tab.
 				hk->mHookAction = aHookAction;
 				if (!aHookAction)
@@ -1245,7 +1203,7 @@ ResultType Hotkey::Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOption
 						// keystroke+modifiers (e.g. ^!c).
 					}
 				}
-				else // No existing variant matching current #IfWin criteria, so create a new variant.
+				else // No existing variant matching current criteria, so create a new variant.
 				{
 					if (   !(variant = hk->AddVariant(aJumpToLabel, suffix_has_tilde))   ) // Out of memory.
 						RETURN_HOTKEY_ERROR(HOTKEY_EL_MEM, ERR_OUTOFMEM, aHotkeyName);
@@ -1627,7 +1585,7 @@ Hotkey::Hotkey(HotkeyIDType aID, IObject *aJumpToLabel, HookActionType aHookActi
 
 
 HotkeyVariant *Hotkey::FindVariant()
-// Returns he address of the variant in this hotkey whose criterion matches the current #IfWin criterion.
+// Returns he address of the variant in this hotkey whose criterion matches the current #HotIf criterion.
 // If no match, it returns NULL.
 {
 	for (HotkeyVariant *vp = mFirstVariant; vp; vp = vp->mNextVariant)
@@ -1655,9 +1613,8 @@ HotkeyVariant *Hotkey::AddVariant(IObject *aJumpToLabel, bool aSuffixHasTilde)
 	// mRunAgainTime
 	// mPriority (default priority is always 0)
 	HotkeyVariant &v = *vp;
-	// aJumpToLabel can be NULL for dynamic hotkeys that are hook actions such as Alt-Tab.
-	// So for maintainability and to help avg-case performance in loops, provide a non-NULL placeholder:
-	v.mJumpToLabel = aJumpToLabel ? aJumpToLabel : g_script->mPlaceholderLabel;
+	v.mJumpToLabel = aJumpToLabel;
+	v.mOriginalCallback = g_script->mLastHotFunc;
 	v.mMaxThreads = g_MaxThreadsPerHotkey;    // The values of these can vary during load-time.
 	v.mMaxThreadsBuffer = g_MaxThreadsBuffer; //
 	v.mInputLevel = g_InputLevel;
@@ -2146,8 +2103,6 @@ Hotkey *Hotkey::FindHotkeyByTrueNature(LPTSTR aName, bool &aSuffixHasTilde, bool
 // Returns the address of the hotkey if found, NULL otherwise.
 // In v1.0.42, it tries harder to find a match so that the order of modifier symbols doesn't affect the true nature of a hotkey.
 // For example, ^!c should be the same as !^c, primarily because RegisterHotkey() and the hook would consider them the same.
-// Although this may break a few existing scripts that rely on the old behavior for obscure uses such as dynamically enabling
-// a duplicate hotkey via the Hotkey command, the #IfWin directives should make up for that in most cases.
 // Primary benefits to the above:
 // 1) Catches script bugs, such as unintended duplicates.
 // 2) Allows a script to use the Hotkey command more precisely and with greater functionality.
@@ -2450,8 +2405,11 @@ ResultType Hotstring::PerformInNewThreadMadeByCaller()
 	// is still timely/accurate -- it seems best to set to "no modifiers":
 	g_script->mThisHotkeyModifiersLR = 0;
 	++mExistingThreads;  // This is the thread count for this particular hotstring only.
+	
 	ResultType result;
-	result = mJumpToLabel->ExecuteInNewThread(g_script->mThisHotkeyName);
+	ExprTokenType params = { mName };
+	result = mJumpToLabel->ExecuteInNewThread(g_script->mThisHotkeyName, &params, 1);
+	
 	--mExistingThreads;
 	return result ? OK : FAIL;	// Return OK on all non-failure results.
 }
@@ -2620,9 +2578,6 @@ Hotstring::Hotstring(LPTSTR aName, LabelPtr aJumpToLabel, LPTSTR aOptions, LPTST
 	, mSuspendExempt(g_SuspendExempt)
 	, mConstructedOK(false)
 {
-	// Insist on certain qualities so that they never need to be checked other than here:
-	if (!mJumpToLabel) // Caller has already ensured that aHotstring is not blank.
-		mJumpToLabel = g_script->mPlaceholderLabel;
 	bool execute_action = false; // do not assign  mReplacement if execute_action is true.
 	ParseOptions(aOptions, mPriority, mKeyDelay, mSendMode, mCaseSensitive, mConformToCase, mDoBackspace
 		, mOmitEndChar, mSendRaw, mEndCharRequired, mDetectWhenInsideWord, mDoReset, execute_action);
@@ -2752,7 +2707,7 @@ Hotstring *Hotstring::FindHotstring(LPTSTR aHotstring, bool aCaseSensitive, bool
 		Hotstring &hs = *shs[u];
 		// hs.mEndCharRequired is not checked because although it affects the conditions for activating
 		// the hotstring, ::abbrev:: and :*:abbrev:: cannot co-exist (the latter would always take over).
-		if (   hs.mHotCriterion == aHotCriterion // Same #If criterion.
+		if (   hs.mHotCriterion == aHotCriterion // Same #HotIf criterion.
 			&& hs.mCaseSensitive == aCaseSensitive // ::BTW:: and :C:BTW:: can co-exist.
 			&& hs.mDetectWhenInsideWord == aDetectWhenInsideWord // :?:ion:: and ::ion:: can co-exist.
 			&& (aCaseSensitive ? !_tcscmp(hs.mString, aHotstring) : !lstrcmpi(hs.mString, aHotstring))   ) // :C:BTW:: and :C:btw:: can co-exist, but not ::BTW:: and ::btw::.
@@ -2847,9 +2802,9 @@ BIF_DECL(BIF_Hotstring)
 	{
 		if (action_obj = ParamIndexToObject(1))
 			action_obj->AddRef();
-		else // Caller did not specify an object, so must specify a function or label name.
+		else // Caller did not specify an object, so must specify a function name.
 			if (   execute_action // Caller specified 'X' option (which is ignored when passing an object).
-				&& !(action_obj = StringToLabelOrFunctor(action))   ) // No valid label or function found.
+				&& !(action_obj = StringToFunctor(action))   ) // No valid function found.
 				_f_throw(ERR_PARAM2_INVALID, action);
 	}
 
@@ -2870,7 +2825,6 @@ BIF_DECL(BIF_Hotstring)
 		// Update the replacement string or function/label, if specified.
 		if (action_obj || *action)
 		{
-			LabelPtr new_label = action_obj ? action_obj : g_script->mPlaceholderLabel; // Other parts may rely on mJumpToLabel always being non-NULL.
 			LPTSTR new_replacement = NULL; // Set default: not auto-replace.
 			if (!action_obj) // Caller specified a replacement string ('E' option was handled above).
 			{
@@ -2893,9 +2847,9 @@ BIF_DECL(BIF_Hotstring)
 					free(existing->mReplacement);
 				existing->mReplacement = new_replacement;
 			}
-			if (new_label != existing->mJumpToLabel)
+			if (action_obj != existing->mJumpToLabel)
 			{
-				existing->mJumpToLabel = new_label;
+				existing->mJumpToLabel = action_obj;
 			}
 		}
 		// Update the hotstring's options.  Note that mCaseSensitive and mDetectWhenInsideWord

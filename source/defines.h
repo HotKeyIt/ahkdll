@@ -75,10 +75,6 @@ GNU General Public License for more details.
 #define strnicmp(str1, str2, size) _strnicmp(str1, str2, size)
 
 // Items that may be needed for VC++ 6.X:
-#ifndef SPI_GETFOREGROUNDLOCKTIMEOUT
-	#define SPI_GETFOREGROUNDLOCKTIMEOUT        0x2000
-	#define SPI_SETFOREGROUNDLOCKTIMEOUT        0x2001
-#endif
 #ifndef VK_XBUTTON1
 	#define VK_XBUTTON1       0x05    /* NOT contiguous with L & RBUTTON */
 	#define VK_XBUTTON2       0x06    /* NOT contiguous with L & RBUTTON */
@@ -141,14 +137,15 @@ typedef UCHAR SendRawType;
 enum ExitReasons {EXIT_NONE, EXIT_ERROR, EXIT_DESTROY, EXIT_LOGOFF, EXIT_SHUTDOWN
 	, EXIT_CLOSE, EXIT_MENU, EXIT_EXIT, EXIT_RELOAD, EXIT_SINGLEINSTANCE};
 
-enum WarnType {WARN_USE_UNSET_LOCAL, WARN_USE_UNSET_GLOBAL, WARN_LOCAL_SAME_AS_GLOBAL, WARN_CLASS_OVERWRITE, WARN_ALL};
-#define WARN_TYPE_STRINGS _T("UseUnsetLocal"), _T("UseUnsetGlobal"), _T("LocalSameAsGlobal"), _T("ClassOverwrite"), _T("All")
+enum WarnType {WARN_USE_UNSET_LOCAL, WARN_USE_UNSET_GLOBAL, WARN_LOCAL_SAME_AS_GLOBAL, WARN_UNREACHABLE, WARN_VAR_UNSET, WARN_ALL};
+#define WARN_TYPE_STRINGS _T("UseUnsetLocal"), _T("UseUnsetGlobal"), _T("LocalSameAsGlobal"), _T("Unreachable"), _T("VarUnset"), _T("All")
 
 enum WarnMode {WARNMODE_OFF, WARNMODE_OUTPUTDEBUG, WARNMODE_MSGBOX, WARNMODE_STDOUT};	// WARNMODE_OFF must be zero.
 #define WARN_MODE_STRINGS _T("Off"), _T("OutputDebug"), _T("MsgBox"), _T("StdOut")
 
 enum SingleInstanceType {SINGLE_INSTANCE_OFF, SINGLE_INSTANCE_PROMPT, SINGLE_INSTANCE_REPLACE
 	, SINGLE_INSTANCE_IGNORE }; // SINGLE_INSTANCE_OFF must be zero.
+
 enum MenuTypeType {MENU_TYPE_NONE, MENU_TYPE_POPUP, MENU_TYPE_BAR}; // NONE must be zero.
 
 // These are used for things that can be turned on, off, or left at a
@@ -174,6 +171,8 @@ enum SymbolType // For use with ExpandExpression() and IsNumeric().
 	, SYM_VAR // An operand that is a variable's contents.
 	, SYM_OBJECT // L31: Represents an IObject interface pointer.
 	, SYM_DYNAMIC // An operand that needs further processing during the evaluation phase.
+	, SYM_SUPER // Special operand just for the "super" keyword.  Should only ever appear as the target of SYM_FUNC with callsite->func == nullptr.
+#define SUPER_KEYWORD _T("Super")
 	, SYM_OPERAND_END // Marks the symbol after the last operand.  This value is used below.
 	, SYM_BEGIN = SYM_OPERAND_END  // SYM_BEGIN is a special marker to simplify the code.
 #define IS_OPERAND(symbol) ((symbol) < SYM_OPERAND_END)
@@ -187,7 +186,7 @@ enum SymbolType // For use with ExpandExpression() and IsNumeric().
 #define SYM_CPAREN_FOR_OPAREN(symbol) ((symbol) - (SYM_OPAREN - SYM_CPAREN)) // Caller must confirm it is OPAREN or OBRACKET.
 #define SYM_OPAREN_FOR_CPAREN(symbol) ((symbol) + (SYM_OPAREN - SYM_CPAREN)) // Caller must confirm it is CPAREN or CBRACKET.
 #define YIELDS_AN_OPERAND(symbol) ((symbol) < SYM_OPAREN) // CPAREN also covers the tail end of a function call.  Post-inc/dec yields an operand for things like Var++ + 2.  Definitely needs the parentheses around symbol.
-	, SYM_ASSIGN, SYM_ASSIGN_ADD, SYM_ASSIGN_SUBTRACT, SYM_ASSIGN_MULTIPLY, SYM_ASSIGN_DIVIDE, SYM_ASSIGN_FLOORDIVIDE
+	, SYM_ASSIGN, SYM_ASSIGN_ADD, SYM_ASSIGN_SUBTRACT, SYM_ASSIGN_MULTIPLY, SYM_ASSIGN_DIVIDE, SYM_ASSIGN_INTEGERDIVIDE
 	, SYM_ASSIGN_BITOR, SYM_ASSIGN_BITXOR, SYM_ASSIGN_BITAND, SYM_ASSIGN_BITSHIFTLEFT, SYM_ASSIGN_BITSHIFTRIGHT
 	, SYM_ASSIGN_CONCAT // THIS MUST BE KEPT AS THE LAST (AND SYM_ASSIGN THE FIRST) BECAUSE THEY'RE USED IN A RANGE-CHECK.
 #define IS_ASSIGNMENT_EXCEPT_POST_AND_PRE(symbol) (symbol <= SYM_ASSIGN_CONCAT && symbol >= SYM_ASSIGN) // Check upper bound first for short-circuit performance.
@@ -198,22 +197,29 @@ enum SymbolType // For use with ExpandExpression() and IsNumeric().
 #define SYM_USES_CIRCUIT_TOKEN(symbol) ((symbol) <= SYM_AND && (symbol) >= SYM_IFF_ELSE)
 	, SYM_IS, SYM_IN, SYM_CONTAINS
 	, SYM_EQUAL, SYM_EQUALCASE, SYM_NOTEQUAL, SYM_NOTEQUALCASE // =, ==, !=, !==... Keep this in sync with IS_RELATIONAL_OPERATOR() below.
+#define IS_EQUALITY_OPERATOR(symbol) (symbol >= SYM_EQUAL && symbol <= SYM_NOTEQUALCASE)
 	, SYM_GT, SYM_LT, SYM_GTOE, SYM_LTOE  // >, <, >=, <= ... Keep this in sync with IS_RELATIONAL_OPERATOR() below.
 #define IS_RELATIONAL_OPERATOR(symbol) (symbol >= SYM_EQUAL && symbol <= SYM_LTOE)
 	, SYM_REGEXMATCH // ~=, equivalent to a RegExMatch call in two-parameter mode.
 	, SYM_CONCAT
 	, SYM_LOW_CONCAT // Zero-precedence concat, used so that "x%y=z%" is equivalent to "x%(y=z)%".
+	
+	// INTEGER OPERATORS START
+	// Note that the below macro does not consider SYM_BITNOT or the bit-assignment operators.
 	, SYM_BITOR // Seems more intuitive to have these higher in prec. than the above, unlike C and Perl, but like Python.
-	, SYM_BITXOR // SYM_BITOR (ABOVE) MUST BE KEPT FIRST AMONG THE BIT OPERATORS BECAUSE IT'S USED IN A RANGE-CHECK.
+	, SYM_BITXOR // SYM_BITOR (ABOVE) MUST BE KEPT FIRST AMONG THE INTEGER OPERATORS BECAUSE IT'S USED IN A RANGE-CHECK (see IS_INTEGER_OPERATOR).
 	, SYM_BITAND
-	, SYM_BITSHIFTLEFT, SYM_BITSHIFTRIGHT // << >>  ALSO: SYM_BITSHIFTRIGHT MUST BE KEPT LAST AMONG THE BIT OPERATORS BECAUSE IT'S USED IN A RANGE-CHECK.
-#define IS_BIT_OPERATOR(symbol) ((symbol) <= SYM_BITSHIFTRIGHT && (symbol) >= SYM_BITOR) // Check upper bound first for short-circuit performance (because operators like +-*/ are much more frequently used).
+	, SYM_BITSHIFTLEFT, SYM_BITSHIFTRIGHT // << >>  
+	, SYM_INTEGERDIVIDE	// eg, x // y ALSO : SYM_INTEGERDIVIDE MUST BE KEPT LAST AMONG THE INTEGER OPERATORS BECAUSE IT'S USED IN A RANGE-CHECK (see IS_INTEGER_OPERATOR).
+#define IS_INTEGER_OPERATOR(symbol) ((symbol) <= SYM_INTEGERDIVIDE && (symbol) >= SYM_BITOR) // Currently not considered: SYM_BITNOT and the bit-assignment operators.
+	// INTEGER OPERATORS END
+
 	, SYM_ADD, SYM_SUBTRACT
-	, SYM_MULTIPLY, SYM_DIVIDE, SYM_FLOORDIVIDE
+	, SYM_MULTIPLY, SYM_DIVIDE
 	, SYM_POWER
 	, SYM_LOWNOT  // LOWNOT is the word "not", the low precedence counterpart of !
-	, SYM_NEGATIVE, SYM_POSITIVE, SYM_HIGHNOT, SYM_BITNOT, SYM_ADDRESS  // Don't change position or order of these because Infix-to-postfix converter's special handling for SYM_POWER relies on them being adjacent to each other.
-#define SYM_OVERRIDES_POWER_ON_STACK(symbol) ((symbol) >= SYM_LOWNOT && (symbol) <= SYM_ADDRESS) // Check lower bound first for short-circuit performance.
+	, SYM_NEGATIVE, SYM_POSITIVE, SYM_HIGHNOT, SYM_BITNOT  // Don't change position or order of these because Infix-to-postfix converter's special handling for SYM_POWER relies on them being adjacent to each other.
+#define SYM_OVERRIDES_POWER_ON_STACK(symbol) ((symbol) >= SYM_LOWNOT && (symbol) <= SYM_BITNOT) // Check lower bound first for short-circuit performance.
 	, SYM_PRE_INCREMENT, SYM_PRE_DECREMENT // Must be kept after the post-ops and in this order relative to each other due to a range check in the code.
 #define SYM_INCREMENT_OR_DECREMENT_IS_PRE(symbol) ((symbol) >= SYM_PRE_INCREMENT) // Caller has verified symbol is an INCREMENT or DECREMENT operator.
 #define IS_PREFIX_OPERATOR(symbol) ((symbol) >= SYM_LOWNOT && (symbol) <= SYM_PRE_DECREMENT)
@@ -223,13 +229,11 @@ enum SymbolType // For use with ExpandExpression() and IsNumeric().
 };
 // These two are macros for maintainability (i.e. seeing them together here helps maintain them together).
 #define SYM_DYNAMIC_IS_DOUBLE_DEREF(token) (!(token).var) // SYM_DYNAMICs are either double-derefs or built-in vars.
-#define SYM_DYNAMIC_IS_WRITABLE(token) ((token)->var && (token)->var->Type() <= VAR_LAST_WRITABLE) // i.e. it's the clipboard, not a built-in variable or double-deref.
 
 // This should include all operators which can produce SYM_VAR for a subsequent assignment:
 #define IS_OPERATOR_VALID_LVALUE(sym) \
 	(IS_ASSIGNMENT_EXCEPT_POST_AND_PRE(sym) \
-		|| sym == SYM_PRE_INCREMENT || sym == SYM_PRE_DECREMENT \
-		|| sym == SYM_IFF_ELSE)
+		|| sym == SYM_PRE_INCREMENT || sym == SYM_PRE_DECREMENT)
 
 
 struct ExprTokenType; // Forward declarations for use below.
@@ -306,6 +310,12 @@ struct DECLSPEC_NOVTABLE IDebugProperties
 #define IF_NO_SET_PROPVAL	0x20000 // Fail IT_SET for value properties (allow only setters/__set).
 #define IF_DEFAULT			0x40000 // Invoke the default member (call a function object, array indexing, etc.).
 #define IF_NEWENUM			0x80000 // Workaround for COM objects which don't resolve "_NewEnum" to DISPID_NEWENUM.
+#define IF_BITMASK			0xF0000
+
+#define EIF_VARIADIC		0x01000
+#define EIF_STACK_MEMBER	0x02000
+#define EIF_LEAVE_PARAMS	0x04000
+#define EIF_BITMASK			0x07000
 
 
 // Helper function for event handlers and __Delete:
@@ -315,6 +325,7 @@ ResultType CallMethod(IObject *aInvokee, IObject *aThis, LPTSTR aMethodName
 
 
 struct DerefType; // Forward declarations for use below.
+struct CallSite;  //
 class Var;        //
 struct ExprTokenType  // Something in the compiler hates the name TokenType, so using a different name.
 {
@@ -330,17 +341,18 @@ struct ExprTokenType  // Something in the compiler hates the name TokenType, so 
 			union // These nested structs and unions minimize the token size by overlapping data.
 			{
 				IObject *object;
-				DerefType *deref;  // for SYM_FUNC, and (while parsing) SYM_ASSIGN etc.
-				Var *var;          // for SYM_VAR and SYM_DYNAMIC
-				LPTSTR marker;     // for SYM_STRING and (while parsing) SYM_OPAREN
+				CallSite *callsite;   // for SYM_FUNC, and (while parsing) SYM_ASSIGN etc.
+				DerefType *var_deref; // for SYM_VAR while parsing
+				Var *var;             // for SYM_VAR and SYM_DYNAMIC
+				LPTSTR marker;        // for SYM_STRING and (while parsing) SYM_OPAREN
 				ExprTokenType *circuit_token; // for short-circuit operators
 			};
 			union // Due to the outermost union, this doesn't increase the total size of the struct on x86 builds (but it does on x64).
 			{
-				DerefType *outer_deref; // Used by ExpressionToPostfix().
+				CallSite *outer_param_list; // Used by ExpressionToPostfix().
 				LPTSTR error_reporting_marker; // Used by ExpressionToPostfix() for binary and unary operators.
 				size_t marker_length;
-				BOOL is_lvalue;		// for SYM_DYNAMIC and SYM_VAR (at load time)
+				int var_usage;		// for SYM_DYNAMIC and SYM_VAR (at load time)
 			};
 		};  
 	};
@@ -399,13 +411,24 @@ struct ExprTokenType  // Something in the compiler hates the name TokenType, so 
 		return CopyValueFrom(other); // Currently nothing needs to be done differently.
 	}
 
+	// Assignments yield a variable using this function so that it can be passed ByRef,
+	// and because in some cases it avoids an extra memory allocation or string copy
+	// (that would otherwise be necessary to ensure the string value is not freed or
+	// overwritten by a subsequent concat/function call while still on the stack).
+	// Yielding SYM_VAR means subsequent assignments may affect it, but in a safer way
+	// that doesn't risk dangling pointers.
+	void SetVar(Var *aVar)
+	{
+		symbol = SYM_VAR;
+		var = aVar;
+	}
+
 private: // Force code to use one of the CopyFrom() methods, for clarity.
 	ExprTokenType & operator = (ExprTokenType &other)
 	{
 		return *this;
 	}
 };
-#define MAX_TOKENS 512 // Max number of operators/operands.  Seems enough to handle anything realistic, while conserving call-stack space.
 #define STACK_PUSH(token_ptr) stack[stack_count++] = token_ptr
 #define STACK_POP stack[--stack_count]  // To be used as the r-value for an assignment.
 
@@ -414,6 +437,7 @@ struct ResultToken : public ExprTokenType
 {
 	LPTSTR buf; // Points to a buffer of _f_retval_buf_size characters for returning short strings and misc purposes.
 	LPTSTR mem_to_free; // Callee stores memory allocated for the result here.  Must be NULL or equal to marker.
+	IObject *named_params; // Variadic callers may pass named parameters via properties of this.
 
 	// Utility function for initializing result tokens.
 	void InitResult(LPTSTR aResultBuf)
@@ -422,7 +446,8 @@ struct ResultToken : public ExprTokenType
 		marker = _T("");
 		marker_length = -1; // Helps code size to do this here instead of in ReturnPtr(), which should be inlined.
 		buf = aResultBuf;
-		mem_to_free = NULL;
+		mem_to_free = nullptr;
+		named_params = nullptr;
 		result = OK;
 	}
 
@@ -511,6 +536,8 @@ struct ResultToken : public ExprTokenType
 	ResultType Error(LPCTSTR aErrorText, LPCTSTR aExtraInfo);
 	ResultType UnknownMemberError(ExprTokenType &aObject, int aFlags, LPCTSTR aMember);
 	ResultType Win32Error(DWORD aError = GetLastError());
+	ResultType TypeError(LPCTSTR aExpectedType, ExprTokenType &aActualValue);
+	ResultType TypeError(LPCTSTR aExpectedType, LPCTSTR aActualType, LPTSTR aExtraInfo = _T(""));
 	
 	void SetLastErrorMaybeThrow(bool aError, DWORD aLastError = GetLastError());
 	void SetLastErrorCloseAndMaybeThrow(HANDLE aHandle, bool aError, DWORD aLastError = GetLastError());
@@ -540,24 +567,27 @@ enum enum_act {
 , ACT_BLOCK_BEGIN, ACT_BLOCK_END
 , ACT_STATIC
 , ACT_HOTKEY_IF // Must be before ACT_FIRST_COMMAND.
-, ACT_FIRST_NAMED_ACTION, ACT_IF = ACT_FIRST_NAMED_ACTION
+, ACT_EXIT // Used both with BIF_PerformAction and AddLine(), but excluded from the "named" range below so the function is preferred.
+, ACT_IF, ACT_FIRST_NAMED_ACTION = ACT_IF
 , ACT_ELSE
 , ACT_LOOP, ACT_LOOP_FILE, ACT_LOOP_REG, ACT_LOOP_READ, ACT_LOOP_PARSE
 , ACT_FOR, ACT_WHILE, ACT_UNTIL // Keep LOOP, FOR, WHILE and UNTIL together and in this order for range checks in various places.
-, ACT_BREAK, ACT_CONTINUE
-, ACT_GOTO, ACT_GOSUB
-, ACT_FIRST_JUMP = ACT_BREAK, ACT_LAST_JUMP = ACT_GOSUB // Actions which accept a label name.
+, ACT_BREAK, ACT_CONTINUE // Keep ACT_FOR..ACT_CONTINUE together for ACT_EXPANDS_ITS_OWN_ARGS.
+, ACT_GOTO
+, ACT_FIRST_JUMP = ACT_BREAK, ACT_LAST_JUMP = ACT_GOTO // Actions which accept a label name.
 , ACT_RETURN
 , ACT_TRY, ACT_CATCH, ACT_FINALLY, ACT_THROW // Keep TRY, CATCH and FINALLY together and in this order for range checks.
-, ACT_SWITCH, ACT_CASE
-, ACT_FIRST_CONTROL_FLOW = ACT_BLOCK_BEGIN, ACT_LAST_CONTROL_FLOW = ACT_CASE
-, ACT_FIRST_COMMAND, ACT_EXIT = ACT_FIRST_COMMAND, ACT_EXITAPP // Excluded from the "CONTROL_FLOW" range above because they can be safely wrapped into a Func.
+, ACT_SWITCH, ACT_CASE // Keep ACT_TRY..ACT_CASE together for ACT_EXPANDS_ITS_OWN_ARGS.
+, ACT_LAST_NAMED_ACTION = ACT_CASE
+// ================================================================================
+// All others are not included in g_act, and are only used with BIF_PerformAction:
+// ================================================================================
+, ACT_EXITAPP
 , ACT_TOOLTIP, ACT_TRAYTIP
-, ACT_SPLITPATH
-, ACT_RUNAS, ACT_RUN, ACT_DOWNLOAD
+, ACT_RUNAS, ACT_DOWNLOAD
 , ACT_SEND, ACT_SENDTEXT, ACT_SENDINPUT, ACT_SENDPLAY, ACT_SENDEVENT
 , ACT_SENDMODE, ACT_SENDLEVEL, ACT_COORDMODE, ACT_SETDEFAULTMOUSESPEED
-, ACT_CLICK, ACT_MOUSEMOVE, ACT_MOUSECLICK, ACT_MOUSECLICKDRAG, ACT_MOUSEGETPOS
+, ACT_CLICK, ACT_MOUSEMOVE, ACT_MOUSECLICK, ACT_MOUSECLICKDRAG
 , ACT_SLEEP
 , ACT_CRITICAL, ACT_THREAD
 , ACT_WINMINIMIZEALL, ACT_WINMINIMIZEALLUNDO
@@ -568,35 +598,31 @@ enum enum_act {
 , ACT_FILEINSTALL, ACT_FILECOPY, ACT_FILEMOVE, ACT_DIRCOPY, ACT_DIRMOVE
 , ACT_DIRCREATE, ACT_DIRDELETE
 , ACT_FILESETATTRIB, ACT_FILESETTIME
-, ACT_SETWORKINGDIR, ACT_FILEGETSHORTCUT, ACT_FILECREATESHORTCUT
+, ACT_SETWORKINGDIR, ACT_FILECREATESHORTCUT
 , ACT_INIWRITE, ACT_INIDELETE
-, ACT_SETREGVIEW
 , ACT_OUTPUTDEBUG
 , ACT_SETKEYDELAY, ACT_SETMOUSEDELAY, ACT_SETWINDELAY, ACT_SETCONTROLDELAY
-, ACT_SETTITLEMATCHMODE
 , ACT_SUSPEND, ACT_PAUSE
-, ACT_STRINGCASESENSE, ACT_DETECTHIDDENWINDOWS, ACT_DETECTHIDDENTEXT, ACT_BLOCKINPUT
-, ACT_SETNUMLOCKSTATE, ACT_SETSCROLLLOCKSTATE, ACT_SETCAPSLOCKSTATE, ACT_SETSTORECAPSLOCKMODE
+, ACT_BLOCKINPUT
+, ACT_SETNUMLOCKSTATE, ACT_SETSCROLLLOCKSTATE, ACT_SETCAPSLOCKSTATE
 , ACT_KEYHISTORY, ACT_LISTLINES, ACT_LISTVARS, ACT_LISTHOTKEYS
 , ACT_EDIT, ACT_RELOAD
 , ACT_SHUTDOWN
-, ACT_FILEENCODING
-// It's safer to use g_ActionCount, which is calculated immediately after the array is declared
-// and initialized, at which time we know its true size.  However, the following lets us detect
-// when the size of the array doesn't match the enum (in debug mode):
-#ifdef _DEBUG
-, ACT_COUNT
-#endif
 };
 
-#define ACT_IS_CONTROL_FLOW(ActionType) (ActionType <= ACT_LAST_CONTROL_FLOW && ActionType >= ACT_FIRST_CONTROL_FLOW)
 #define ACT_IS_IF(ActionType) (ActionType == ACT_IF)
 #define ACT_IS_LOOP(ActionType) (ActionType >= ACT_LOOP && ActionType <= ACT_WHILE)
 #define ACT_IS_LOOP_EXCLUDING_WHILE(ActionType) (ActionType >= ACT_LOOP && ActionType <= ACT_FOR)
 #define ACT_IS_LINE_PARENT(ActionType) (ACT_IS_IF(ActionType) || ActionType == ACT_ELSE \
-	|| ACT_IS_LOOP(ActionType) || (ActionType >= ACT_TRY && ActionType <= ACT_FINALLY))
-#define ACT_EXPANDS_ITS_OWN_ARGS(ActionType) (ActionType == ACT_ASSIGNEXPR || ActionType == ACT_WHILE || ActionType == ACT_FOR || ActionType == ACT_THROW)
-#define ACT_USES_SIMPLE_POSTFIX(ActionType) (ActionType == ACT_ASSIGNEXPR || ActionType == ACT_RETURN || ActionType == ACT_SWITCH || ActionType == ACT_CASE) // Actions which are optimized to use arg.postfix when is_expression == false, via the "only_token" optimization.
+	|| ACT_IS_LOOP(ActionType) || (ActionType >= ACT_TRY && ActionType <= ACT_FINALLY) \
+	|| ActionType == ACT_SWITCH)
+// The following groups of action types do not need ExpandArgs() called by ExecUntil(),
+// for one of the following reasons: 1) action has no args, 2) action's args are
+// always fully resolved at load time, 3) action is never executed by ExecUntil(),
+// 4) action needs to be the one to call ExpandArgs(), or does so for optimization.
+#define ACT_EXPANDS_ITS_OWN_ARGS(ActionType) (ActionType == ACT_ASSIGNEXPR \
+	|| (ActionType >= ACT_FOR && ActionType <= ACT_CONTINUE) \
+	|| (ActionType >= ACT_TRY && ActionType <= ACT_CASE))
 
 // For convenience in many places.  Must cast to int to avoid loss of negative values.
 #define BUF_SPACE_REMAINING ((int)(aBufSize - (aBuf - aBuf_orig)))
@@ -628,6 +654,8 @@ enum enum_act {
 #define MAX_INTEGER_LENGTH 20                     // Max length of a 64-bit number when expressed as decimal or
 #define MAX_INTEGER_SIZE (MAX_INTEGER_LENGTH + 1) // hex string; e.g. -9223372036854775808 or (unsigned) 18446744073709551616 or (hex) -0xFFFFFFFFFFFFFFFF.
 
+#define VARLIST_INITIAL_SIZE 32
+
 #define SW_NONE -1
 
 // Hot-strings:
@@ -647,7 +675,6 @@ typedef UCHAR HookType;
 #define EXTERN_OSVER extern OS_Version g_os
 #define EXTERN_CLIPBOARD _thread_local extern Clipboard *g_clip
 #define EXTERN_SCRIPT _thread_local extern Script *g_script;
-#define CLOSE_CLIPBOARD_IF_OPEN	if (g_clip->mIsOpen) g_clip->Close()
 #define CLIPBOARD_CONTAINS_ONLY_FILES (!IsClipboardFormatAvailable(CF_NATIVETEXT) && IsClipboardFormatAvailable(CF_HDROP))
 
 
@@ -727,13 +754,6 @@ struct Action
 	// generate a warning even when not in debug mode in the unlikely event that a constant
 	// larger than 127 is ever stored in one of these:
 	char MinParams, MaxParams;
-	bool CheckOverlap;
-	// Array indicating which args must be purely numeric.  The first arg is
-	// number 1, the second 2, etc (i.e. it doesn't start at zero).  The list
-	// is ended with a zero, much like a string.  The compiler will notify us
-	// (verified) if MAX_NUMERIC_PARAMS ever needs to be increased:
-	#define MAX_NUMERIC_PARAMS 7
-	ActionTypeType NumericParams[MAX_NUMERIC_PARAMS];
 };
 #pragma pack(pop)
 
@@ -802,25 +822,21 @@ inline bool SendLevelIsValid(int level) { return level >= 0 && level <= SendLeve
 class Line; // Forward declaration.
 typedef UCHAR HotCriterionType;
 enum HotCriterionEnum {HOT_NO_CRITERION, HOT_IF_ACTIVE, HOT_IF_NOT_ACTIVE, HOT_IF_EXIST, HOT_IF_NOT_EXIST // HOT_NO_CRITERION must be zero.
-	, HOT_IF_EXPR, HOT_IF_CALLBACK}; // Keep the last two in this order for the macro below.
-#define HOT_IF_REQUIRES_EVAL(type) ((type) >= HOT_IF_EXPR)
+	, HOT_IF_CALLBACK};
+#define HOT_IF_REQUIRES_EVAL(type) ((type) == HOT_IF_CALLBACK)
 struct HotkeyCriterion
 {
 	HotCriterionType Type;
 	LPTSTR WinTitle, WinText;
-	union
-	{
-		Line *ExprLine;
-		IObject *Callback;
-	};
+	LPTSTR OriginalExpr; // For finding expr in #HotIf expr
+	IObject *Callback;
 	HotkeyCriterion *NextCriterion, *NextExpr;
 	DWORD ThreadID;
 
-	ResultType Eval(LPTSTR aHotkeyName); // For HOT_IF_EXPR and HOT_IF_CALLBACK.
+	ResultType Eval(LPTSTR aHotkeyName); // For HOT_IF_CALLBACK.
 };
 
 
-// Each instance of this struct generally corresponds to a quasi-thread.
 class Func;                 // Forward declarations
 class UserFunc;             //
 struct FuncAndToken {
@@ -836,29 +852,48 @@ struct FuncAndToken {
 
 class Label;                //
 struct RegItemStruct;       //
-struct LoopFilesStruct;
+struct LoopFilesStruct;     //
 struct LoopReadFileStruct;  //
 class GuiType;				//
 class ScriptTimer;			//
-struct global_struct
+
+struct ScriptThreadState
 {
-	// 8-byte items are listed first, which might improve alignment for 64-bit processors (dubious).
 	__int64 mLoopIteration; // Signed, since script/ITOA64 aren't designed to handle unsigned.
 	LoopFilesStruct *mLoopFile;  // The file of the current file-loop, if applicable.
 	RegItemStruct *mLoopRegItem; // The registry subkey or value of the current registry enumeration loop.
 	LoopReadFileStruct *mLoopReadFile;  // The file whose contents are currently being read by a File-Read Loop.
 	LPTSTR mLoopField;  // The field of the current string-parsing loop.
-	// v1.0.44.14: The above mLoop attributes were moved into this structure from the script class
-	// because they're more appropriate as thread-attributes rather than being global to the entire script.
 
-	HotkeyCriterion *HotCriterion;
-	TitleMatchModes TitleMatchMode;
-	int UninterruptedLineCount; // Stored as a g-struct attribute in case OnExit func interrupts it while uninterruptible.
-	int Priority;  // This thread's priority relative to others.
-	DWORD LastError; // The result of GetLastError() after the most recent DllCall or Run.
-	EventInfoType EventInfo; // Not named "GuiEventInfo" because it applies to non-GUI events such as clipboard.
+	UserFunc *CurrentFunc; // v1.0.46.16: The function whose body is currently being processed at load-time, or being run at runtime (if any).
+	ScriptTimer *CurrentTimer; // The timer that launched this thread (if any).
+	HWND hWndLastUsed;  // In many cases, it's better to use GetValidLastUsedWindow() when referring to this.
+	EventInfoType EventInfo;
+	HWND DialogHWND; // MsgBox being shown by this thread.
 	HWND DialogOwner; // This thread's dialog owner, if any.
-	#define THREAD_DIALOG_OWNER (IsWindow(::g->DialogOwner) ? ::g->DialogOwner : NULL)
+#define THREAD_DIALOG_OWNER (IsWindow(::g->DialogOwner) ? ::g->DialogOwner : NULL)
+	ResultToken* ThrownToken;
+
+	int ExcptMode;
+	DWORD LastError; // The result of GetLastError() after the most recent DllCall or Run.
+	int Priority;  // This thread's priority relative to others.
+	int UninterruptedLineCount; // Stored as a g-struct attribute in case OnExit func interrupts it while uninterruptible.
+	int UninterruptibleDuration; // Must be int to preserve negative values found in g_script->mUninterruptibleTime.
+	DWORD ThreadStartTime;
+	DWORD CalledByIsDialogMessageOrDispatchMsg; // Detects the fact that some messages (like WM_KEYDOWN->WM_NOTIFY for UpDown controls) are translated to different message numbers by IsDialogMessage (and maybe Dispatch too).
+
+	bool IsPaused;
+	bool MsgBoxTimedOut; // Meaningful only while a MsgBox call is in progress.
+	bool CalledByIsDialogMessageOrDispatch; // Helps avoid launching a monitor function twice for the same message.  This would probably be okay if it were a normal global rather than in the g-struct, but due to messaging complexity, this lends peace of mind and robustness.
+	bool AllowThreadToBeInterrupted; // Whether this thread can be interrupted by custom menu items, hotkeys, or timers.  Separate from g_AllowInterruption because that's for use by ongoing operations, such as SendKeys, and should override the thread's setting.
+};
+
+struct ScriptThreadSettings
+{
+	HotkeyCriterion *HotCriterion;
+
+	DWORD PeekFrequency; // DWORD vs. UCHAR might improve performance a little since it's checked so often.
+	TitleMatchModes TitleMatchMode;
 	int WinDelay;  // negative values may be used as special flags.
 	int ControlDelay; // negative values may be used as special flags.
 	int KeyDelay;     //
@@ -867,39 +902,23 @@ struct global_struct
 	int PressDurationPlay; // 
 	int MouseDelay;     // negative values may be used as special flags.
 	int MouseDelayPlay; //
-	UserFunc *CurrentFunc; // v1.0.46.16: The function whose body is currently being processed at load-time, or being run at runtime (if any).
-	UserFunc *CurrentFuncGosub; // v1.0.48.02: Allows A_ThisFunc to work even when a function Gosubs an external subroutine.
-	Label *CurrentLabel; // The label that is currently awaiting its matching "return" (if any).
-	ScriptTimer *CurrentTimer; // The timer that launched this thread (if any).
-	HWND hWndLastUsed;  // In many cases, it's better to use GetValidLastUsedWindow() when referring to this.
-	//HWND hWndToRestore;
-	HWND DialogHWND;
 	DWORD RegView;
+	SendModes SendMode;
+	UINT Encoding;
+
+	CoordModeType CoordMode; // Bitwise collection of flags.
 
 	// All these one-byte members are kept adjacent to make the struct smaller, which helps conserve stack space:
-	SendModes SendMode;
-	DWORD PeekFrequency; // DWORD vs. UCHAR might improve performance a little since it's checked so often.
-	DWORD ThreadStartTime;
-	int UninterruptibleDuration; // Must be int to preserve negative values found in g_script->mUninterruptibleTime.
-	DWORD CalledByIsDialogMessageOrDispatchMsg; // Detects that fact that some messages (like WM_KEYDOWN->WM_NOTIFY for UpDown controls) are translated to different message numbers by IsDialogMessage (and maybe Dispatch too).
-	bool CalledByIsDialogMessageOrDispatch; // Helps avoid launching a monitor function twice for the same message.  This would probably be okay if it were a normal global rather than in the g-struct, but due to messaging complexity, this lends peace of mind and robustness.
 	bool TitleFindFast; // Whether to use the fast mode of searching window text, or the more thorough slow mode.
 	bool DetectHiddenWindows; // Whether to detect the titles of hidden parent windows.
 	bool DetectHiddenText;    // Whether to detect the text of hidden child windows.
-	bool AllowThreadToBeInterrupted;  // Whether this thread can be interrupted by custom menu items, hotkeys, or timers.
 	bool AllowTimers; // v1.0.40.01 Whether new timer threads are allowed to start during this thread.
 	bool ThreadIsCritical; // Whether this thread has been marked (un)interruptible by the "Critical" command.
 	UCHAR DefaultMouseSpeed;
-	CoordModeType CoordMode; // Bitwise collection of flags.
-	UCHAR StringCaseSense; // On/Off/Locale
 	bool StoreCapslockMode;
 	SendLevelType SendLevel;
-	bool MsgBoxTimedOut; // Doesn't require initialization.
-	bool IsPaused; // The latter supports better toggling via "Pause" or "Pause Toggle".
 	bool ListLinesIsEnabled;
-	UINT Encoding;
-	int ExcptMode;
-	ResultToken* ThrownToken;
+
 	//inline bool InTryBlock() { return ExcptMode & EXCPTMODE_TRY; } // Currently unused.
 	bool DetectWindow(HWND aWnd);
 	DerefType* ExcptDeref;
@@ -907,53 +926,60 @@ struct global_struct
 	BYTE ZipCompressionLevel;
 };
 
-inline void global_maximize_interruptibility(global_struct &g)
+// global_struct is a combination of thread state (things specific to a thread that
+// are reset for each new thread and should not be affected by the default thread)
+// and thread settings (which are copied from the default thread).
+// Each instance of this struct generally corresponds to a quasi-thread.
+struct global_struct : public ScriptThreadState, public ScriptThreadSettings { };
+
+inline void global_maximize_interruptibility(ScriptThreadState &g)
 {
-	g.AllowThreadToBeInterrupted = true;
-	g.UninterruptibleDuration = 0; // 0 means uninterruptibility times out instantly.  Some callers may want this so that this "g" can be used to launch other threads (e.g. threadless callbacks) using 0 as their default.
-	g.ThreadIsCritical = false;
-	g.AllowTimers = true;
+	//g.AllowThreadToBeInterrupted = true; // Not necessary since its value isn't used when !g_nThreads.
 	#define PRIORITY_MINIMUM INT_MIN
 	g.Priority = PRIORITY_MINIMUM; // Ensure minimum priority so that it can always be interrupted.
+	// The following can't be reset because their values (as set by the auto-execute section) are
+	// used by new threads.  Instead, interruption and timers are always permitted when !g_nThreads.
+	//g.ThreadIsCritical = false;
+	//g.AllowTimers = true;
 }
 
-inline void global_clear_state(global_struct &g)
+inline void global_clear_state(ScriptThreadState &g)
 // Reset those values that represent the condition or state created by previously executed commands
 // but that shouldn't be retained for future threads (e.g. SetTitleMatchMode should be retained for
 // future threads if it occurs in the auto-execute section, but A_ThisFunc shouldn't).
 {
-	g.CurrentFunc = NULL;
-	g.CurrentFuncGosub = NULL;
-	g.CurrentLabel = NULL;
-	g.hWndLastUsed = NULL;
-	//g.hWndToRestore = NULL;
-	g.IsPaused = false;
-	g.UninterruptedLineCount = 0;
-	g.DialogOwner = NULL;
-	g.CalledByIsDialogMessageOrDispatch = false; // CalledByIsDialogMessageOrDispatchMsg doesn't need to be cleared because it's value is only considered relevant when CalledByIsDialogMessageOrDispatch==true.
+	ZeroMemory(&g, sizeof(g));
+	g.AllowThreadToBeInterrupted = true;
+	// All of the following are handled by zero-initialization above:
+	//g.CurrentFunc = NULL;
+	//g.hWndLastUsed = NULL;
+	//g.IsPaused = false;
+	//g.Priority = 0;
+	//g.UninterruptedLineCount = 0;
+	//g.DialogOwner = NULL;
+	//g.CalledByIsDialogMessageOrDispatch = false; // CalledByIsDialogMessageOrDispatchMsg doesn't need to be cleared because it's value is only considered relevant when CalledByIsDialogMessageOrDispatch==true.
 	// Above line is done because allowing it to be permanently changed by the auto-exec section
 	// seems like it would cause more confusion that it's worth.  A change to the global default
 	// or even an override/always-use-this-window-number mode can be added if there is ever a
 	// demand for it.
-	g.mLoopIteration = 0; // Zero seems preferable to 1, to indicate "no loop currently running" when a thread first starts off.  This should probably be left unchanged for backward compatibility (even though script's aren't supposed to rely on it).
-	g.mLoopFile = NULL;
-	g.mLoopRegItem = NULL;
-	g.mLoopReadFile = NULL;
-	g.mLoopField = NULL;
-	g.ThrownToken = NULL;
-	g.ExcptMode = EXCPTMODE_NONE;
-	g.CurrentMacro = NULL;
+	//g.mLoopIteration = 0; // Zero seems preferable to 1, to indicate "no loop currently running" when a thread first starts off.  This should probably be left unchanged for backward compatibility (even though script's aren't supposed to rely on it).
+	//g.mLoopFile = NULL;
+	//g.mLoopRegItem = NULL;
+	//g.mLoopReadFile = NULL;
+	//g.mLoopField = NULL;
+	//g.ThrownToken = NULL;
+	//g.ExcptMode = EXCPTMODE_NONE;
+	//g.LastError = 0;
+	//g.CurrentMacro = NULL;
+	//g.EventInfo = NO_EVENT_INFO;
 }
 
-inline void global_init(global_struct &g)
-// This isn't made a real constructor to avoid the overhead, since there are times when we
-// want to declare a local var of type global_struct without having it initialized.
+inline void global_set_defaults(ScriptThreadSettings &g)
 {
 	// Init struct with application defaults.  They're in a struct so that it's easier
 	// to save and restore their values when one hotkey interrupts another, going into
 	// deeper recursion.  When the interrupting subroutine returns, the former
 	// subroutine's values for these are restored prior to resuming execution:
-	global_clear_state(g);
 	g.HotCriterion = NULL;
 	g.SendMode = SM_INPUT;
 	g.TitleMatchMode = FIND_ANYWHERE;
@@ -962,13 +988,8 @@ inline void global_init(global_struct &g)
 	g.DetectHiddenText = true;  // Unlike AutoIt, which defaults to false.  This setting performs better.
 	#define DEFAULT_PEEK_FREQUENCY 5
 	g.PeekFrequency = DEFAULT_PEEK_FREQUENCY; // v1.0.46. See comments in ACT_CRITICAL.
-	g.AllowThreadToBeInterrupted = true; // Separate from g_AllowInterruption so that they can have independent values.
-	g.UninterruptibleDuration = 0; // 0 means uninterruptibility times out instantly.  Some callers may want this so that this "g" can be used to launch other threads (e.g. threadless callbacks) using 0 as their default.
 	g.AllowTimers = true;
 	g.ThreadIsCritical = false;
-	g.Priority = 0;
-	g.LastError = 0;
-	g.EventInfo = NO_EVENT_INFO;
 	g.WinDelay = 100;
 	g.ControlDelay = 20;
 	g.KeyDelay = 10;
@@ -981,13 +1002,22 @@ inline void global_init(global_struct &g)
 	#define MAX_MOUSE_SPEED 100
 	g.DefaultMouseSpeed = DEFAULT_MOUSE_SPEED;
 	g.CoordMode = 0;  // All the flags it contains are off by default.
-	g.StringCaseSense = SCS_INSENSITIVE;  // AutoIt2 default, and it does seem best.
 	g.StoreCapslockMode = true;  // AutoIt2 (and probably 3's) default, and it makes a lot of sense.
 	g.SendLevel = 0;
 	g.ListLinesIsEnabled = true;
 	g.Encoding = CP_ACP;
 	g.ZipCompressionLevel = 5;
 }
+
+// Initialize g and set application defaults.  This is called only once, since new
+// threads get a copy of the current settings of the auto-execute thread (g_array[0])
+// combined with a cleared state.
+inline void global_init(global_struct &g)
+{
+	global_clear_state(g);
+	global_set_defaults(g);
+}
+
 
 #ifdef UNICODE
 #define WINAPI_SUFFIX "W"

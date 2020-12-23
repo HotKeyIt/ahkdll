@@ -65,7 +65,7 @@ DWORD g_CriticalObjectSleepTime = 0;
 _thread_local LPWSTR g_WindowClassMain = WINDOW_CLASS_MAIN;
 _thread_local LPWSTR g_WindowClassGUI = WINDOW_CLASS_GUI;
 
-_thread_local UINT g_DefaultScriptCodepage = CP_ACP;
+_thread_local UINT g_DefaultScriptCodepage = CP_UTF8;
 
 _thread_local bool g_ReturnNotExit = false;					// for ahkExec/addScript/addFile
 _thread_local bool g_DestroyWindowCalled = false;
@@ -104,16 +104,18 @@ HHOOK g_PlaybackHook = NULL;
 _thread_local bool g_ForceLaunch = false;
 _thread_local bool g_WinActivateForce = false;
 _thread_local bool g_RunStdIn = false;
-_thread_local WarnMode g_Warn_UseUnsetLocal = WARNMODE_OFF;		// Used by #Warn directive.
-_thread_local WarnMode g_Warn_UseUnsetGlobal = WARNMODE_OFF;		//
+_thread_local WarnMode g_Warn_UseUnsetLocal = WARNMODE_MSGBOX;		// Used by #Warn directive.
+_thread_local WarnMode g_Warn_UseUnsetGlobal = WARNMODE_MSGBOX;		//
 _thread_local WarnMode g_Warn_LocalSameAsGlobal = WARNMODE_OFF;	//
-_thread_local WarnMode g_Warn_ClassOverwrite = WARNMODE_OFF;		//
+_thread_local WarnMode g_Warn_Unreachable = WARNMODE_MSGBOX;
+_thread_local WarnMode g_Warn_VarUnset = WARNMODE_MSGBOX;
 _thread_local SingleInstanceType g_AllowOnlyOneInstance = SINGLE_INSTANCE_PROMPT;
 _thread_local PVOID g_ExceptionHandler = NULL;
 _thread_local bool g_ExceptionWarnContinuable = true;
 HookType g_ExceptionHooksToEnable = NULL;
-_thread_local bool g_NoTrayIcon = false;
 _thread_local bool g_persistent = false;  // Whether the script should stay running even after the auto-exec section finishes.
+_thread_local bool g_NoTrayIcon = false;
+_thread_local bool g_AllowMainWindow = false;
 _thread_local bool g_MainTimerExists = false;
 _thread_local bool g_AutoExecTimerExists = false;
 _thread_local bool g_InputTimerExists = false;
@@ -146,9 +148,9 @@ _thread_local SendLevelType g_InputLevel = 0;
 
 HotkeyCriterion *g_FirstHotCriterion = NULL, *g_LastHotCriterion = NULL;
 
-// Global variables for #if (expression).
-UINT g_HotExprTimeout = 1000; // Timeout for #if (expression) evaluation, in milliseconds.
-HWND g_HotExprLFW = NULL; // Last Found Window of last #if expression.
+// Global variables for #HotIf (expression).
+UINT g_HotExprTimeout = 1000; // Timeout for #HotIf (expression) evaluation, in milliseconds.
+HWND g_HotExprLFW = NULL; // Last Found Window of last #HotIf expression.
 HotkeyCriterion *g_FirstHotExpr = NULL, *g_LastHotExpr = NULL;
 static int GetScreenDPI()
 {
@@ -214,7 +216,7 @@ HICON g_IconSmall = NULL;
 HICON g_IconLarge = NULL;
 _thread_local DWORD g_OriginalTimeout;
 
-_thread_local global_struct g_default, g_startup, *g_array;
+_thread_local global_struct g_startup, *g_array;
 _thread_local global_struct *g; // g_startup provides a non-NULL placeholder during script loading. Afterward it's replaced with an array.
 
 // I considered maintaining this on a per-quasi-thread basis (i.e. in global_struct), but the overhead
@@ -262,10 +264,6 @@ MyCryptDecrypt g_CryptDecrypt = NULL;
 // many mutual dependency problems between modules).  Note: Action names must not contain any
 // spaces or tabs because within a script, those characters can be used in lieu of a delimiter
 // to separate the action-type-name from the first parameter.
-// Note about the sub-array: Since the parent array is global, it would be automatically
-// zero-filled if we didn't provide specific initialization.  But since we do, I'm not sure
-// what value the unused elements in the NumericParams subarray will have.  Therefore, it seems
-// safest to always terminate these subarrays with an explicit zero, below.
 
 // STEPS TO ADD A NEW COMMAND:
 // 1) Add an entry to the command enum in script.h.
@@ -273,163 +271,55 @@ MyCryptDecrypt g_CryptDecrypt = NULL;
 //    The first item is the command name, the second is the minimum number of parameters (e.g.
 //    if you enter 3, the first 3 args are mandatory) and the third is the maximum number of
 //    parameters (the user need not escape commas within the last parameter).
-//    The subarray should indicate the param numbers that must be numeric (first param is numbered 1,
-//    not zero).  That subarray should be terminated with an explicit zero to be safe and
-//    so that the compiler will complain if the sub-array size needs to be increased to
-//    accommodate all the elements in the new sub-array, including room for its 0 terminator.
 //    Note: If you use a value for MinParams than is greater than zero, remember than any params
 //    beneath that threshold will also be required to be non-blank (i.e. user can't omit them even
-//    if later, non-blank params are provided).  UPDATE: For a parameter to recognize an expression
-//    such as x+100, it must be listed in the sub-array as a pure numeric parameter.
+//    if later, non-blank params are provided).
 // 3) If the new command has any params that are output or input vars, change Line::ArgIsVar().
-// 4) Add any desired load-time validation in Script::AddLine() in an syntax-checking section.
-// 5) Implement the command in Line::Perform() or Line::EvaluateCondition (if it's an IF).
+// 4) Implement the command in Line::ExecUntil().
 //    If the command waits for anything (e.g. calls MsgSleep()), be sure to make a local
 //    copy of any ARG values that are needed during the wait period, because if another hotkey
 //    subroutine suspends the current one while its waiting, it could also overwrite the ARG
 //    deref buffer with its own values.
 
-// v1.0.45 The following macro sets the high-bit for those commands that require overlap-checking of their
-// input/output variables during runtime (commands that don't have an output variable never need this byte
-// set, and runtime performance is improved even for them).  Some of commands are given the high-bit even
-// though they might not strictly require it because rarity/performance/maintainability say it's best to do
-// so when in doubt.  UPDATE: Macro now obsolete because the flag is stored as a simple bool.
-// Search on "CheckOverlap" for more details.
-//#define H |(char)0x80
-
 Action g_act[] =
 {
-	{_T(""), 0, 0, false, NULL}  // ACT_INVALID.
+	{_T(""), 0, 0}  // ACT_INVALID.
 
 	// ASSIGNEXPR: Give it a name for Line::ToText().
 	// 1st param is the target, 2nd (optional) is the value:
-	, {_T(":="), 2, 2, false, {2, 0}} // Same, though param #2 is flagged as numeric so that expression detection is automatic.
+	, {_T(":="), 2, 2} // Same, though param #2 is flagged as numeric so that expression detection is automatic.
 
 	// ACT_EXPRESSION, which is a stand-alone expression outside of any IF or assignment-command;
 	// e.g. fn1(123, fn2(y)) or x&=3
 	// Its name should be "" so that Line::ToText() will properly display it.
-	, {_T(""), 1, 1, false, {1, 0}}
-	, {_T("{"), 0, 0, false, NULL}, {_T("}"), 0, 0, false, NULL}
+	, {_T(""), 1, 1}
 
-	, {_T("Static"), 1, 1, false, {1, 0}} // ACT_STATIC (used only at load time).
-	, {_T("#If"), 0, 1, false, {1, 0}}
+	, {_T("{"), 0, 0}
+	, {_T("}"), 0, 0}
 
-	, {_T("If"), 1, 1, false, {1, 0}}
-	, {_T("Else"), 0, 0, false, NULL} // No args; it has special handling to support same-line ELSE-actions (e.g. "else if").
-	, {_T("Loop"), 0, 1, false, {1, 0}} // IterationCount
-	, {_T("Loop Files"), 1, 2, false, {1, 2, 0}} // FilePattern [, Mode] -- Files vs File for clarity.
-	, {_T("Loop Reg"), 1, 2, false, {1, 2, 0}} // Key [, Mode]
-	, {_T("Loop Read"), 1, 2, false, {1, 2, 0}} // InputFile [, OutputFile]
-	, {_T("Loop Parse"), 1, 3, false, {1, 2, 3, 0}} // InputString [, Delimiters, OmitChars]
-	, {_T("For"), 1, 3, false, {3, 0}}  // For var [,var] in expression
-	, {_T("While"), 1, 1, false, {1, 0}} // LoopCondition.  v1.0.48: Lexikos: Added g_act entry for ACT_WHILE.
-	, {_T("Until"), 1, 1, false, {1, 0}} // Until expression (follows a Loop)
-	, {_T("Break"), 0, 1, false, NULL}, {_T("Continue"), 0, 1, false, NULL}
-	, {_T("Goto"), 1, 1, false, NULL}
-	, {_T("Gosub"), 1, 1, false, NULL}   // Label (or dereference that resolves to a label).
-	, {_T("Return"), 0, 1, false, {1, 0}}
-	, {_T("Try"), 0, 0, false, NULL}
-	, {_T("Catch"), 0, 1, false, NULL} // fincs: seems best to allow catch without a parameter
-	, {_T("Finally"), 0, 0, false, NULL}
-	, {_T("Throw"), 0, 1, false, {1, 0}}
-	, {_T("Switch"), 0, 1, false, {1, 0}}
-	, {_T("Case"), 1, MAX_ARGS, false, NULL}
-
-	, {_T("Exit"), 0, 1, false, {1, 0}} // ExitCode
-	, {_T("ExitApp"), 0, 1, false, {1, 0}} // ExitCode
-
-	, {_T("ToolTip"), 0, 4, false, {2, 3, 4, 0}}  // Text, X, Y, ID.  If Text is omitted, the Tooltip is turned off.
-	, {_T("TrayTip"), 0, 3, false, NULL}  // Text, Title, Options
-
-	, {_T("SplitPath"), 1, 6, true, NULL} // InputFilespec, OutName, OutDir, OutExt, OutNameNoExt, OutDrive
-	, {_T("RunAs"), 0, 3, false, NULL} // user, pass, domain (0 params can be passed to disable the feature)
-	, {_T("Run"), 1, 4, true, NULL}      // TargetFile, Working Dir, WinShow-Mode, OutputVarPID
-	, {_T("Download"), 2, 2, false, NULL} // URL, save-as-filename
-
-	, {_T("Send"), 1, 1, false, NULL}         // But that first param can validly be a deref that resolves to a blank param.
-	, {_T("SendText"), 1, 1, false, NULL}      //
-	, {_T("SendInput"), 1, 1, false, NULL}    //
-	, {_T("SendPlay"), 1, 1, false, NULL}     //
-	, {_T("SendEvent"), 1, 1, false, NULL}    // (due to rarity, there is no raw counterpart for this one)
-
-	, {_T("SendMode"), 1, 1, false, NULL}
-	, {_T("SendLevel"), 1, 1, false, {1, 0}}
-	, {_T("CoordMode"), 1, 2, false, NULL} // Attribute, screen|relative
-	, {_T("SetDefaultMouseSpeed"), 1, 1, false, {1, 0}} // speed (numeric)
-	, {_T("Click"), 0, 6, false, NULL} // Flex-list of options.
-	, {_T("MouseMove"), 2, 4, false, {1, 2, 3, 0}} // x, y, speed, option
-	, {_T("MouseClick"), 0, 7, false, {2, 3, 4, 5, 0}} // which-button, x, y, ClickCount, speed, d=hold-down/u=release, Relative
-	, {_T("MouseClickDrag"), 1, 7, false, {2, 3, 4, 5, 6, 0}} // which-button, x1, y1, x2, y2, speed, Relative
-	, {_T("MouseGetPos"), 0, 5, true, {5, 0}} // 4 optional output vars: xpos, ypos, WindowID, ControlName. Finally: Mode. MinParams must be 0.
-
-	, {_T("Sleep"), 1, 1, false, {1, 0}} // Sleep time in ms (numeric)
-
-	, {_T("Critical"), 0, 1, false, NULL}  // On|Off
-	, {_T("Thread"), 1, 3, false, {2, 3, 0}}  // Command, value1 (can be blank for interrupt), value2
-
-	, {_T("WinMinimizeAll"), 0, 0, false, NULL}, {_T("WinMinimizeAllUndo"), 0, 0, false, NULL}
-
-	// See above for why minimum is 1 vs. 2:
-	, {_T("GroupAdd"), 1, 5, false, NULL} // Group name, WinTitle, WinText, exclude-title/text
-	, {_T("GroupDeactivate"), 1, 2, false, NULL}
-	, {_T("GroupClose"), 1, 2, false, NULL}
-
-	, {_T("SoundBeep"), 0, 2, false, {1, 2, 0}} // Frequency, Duration.
-	, {_T("SoundPlay"), 1, 2, false, NULL} // Filename [, wait]
-
-	, {_T("FileDelete"), 1, 1, false, NULL} // filename or pattern
-	, {_T("FileRecycle"), 1, 1, false, NULL} // filename or pattern
-	, {_T("FileRecycleEmpty"), 0, 1, false, NULL} // optional drive letter (all bins will be emptied if absent.
-	, {_T("FileInstall"), 2, 3, false, {3, 0}} // source, dest, flag (1/0, where 1=overwrite)
-	, {_T("FileCopy"), 2, 3, false, {3, 0}} // source, dest, flag
-	, {_T("FileMove"), 2, 3, false, {3, 0}} // source, dest, flag
-	, {_T("DirCopy"), 2, 3, false, {3, 0}} // source, dest, flag
-	, {_T("DirMove"), 2, 3, false, NULL} // source, dest, flag (which can be non-numeric in this case)
-	, {_T("DirCreate"), 1, 1, false, NULL} // dir name
-	, {_T("DirDelete"), 1, 2, false, {2, 0}} // dir name, flag
-
-	, {_T("FileSetAttrib"), 1, 3, false, NULL} // Attribute(s), FilePattern, Mode
-	, {_T("FileSetTime"), 0, 4, false, {1, 0}} // datetime (YYYYMMDDHH24MISS), FilePattern, WhichTime, Mode
-
-	, {_T("SetWorkingDir"), 1, 1, false, NULL} // New path
-
-	, {_T("FileGetShortcut"), 1, 8, true, NULL} // Filespec, OutTarget, OutDir, OutArg, OutDescrip, OutIcon, OutIconIndex, OutShowState.
-	, {_T("FileCreateShortcut"), 2, 9, false, {8, 9, 0}} // file, lnk [, workdir, args, desc, icon, hotkey, icon_number, run_state]
-
-	, {_T("IniWrite"), 3, 4, false, NULL}  // Value, Filespec, Section, Key
-	, {_T("IniDelete"), 2, 3, false, NULL} // Filespec, Section, Key
-
-	, {_T("SetRegView"), 1, 1, false, NULL}
-
-	, {_T("OutputDebug"), 1, 1, false, NULL}
-
-	, {_T("SetKeyDelay"), 0, 3, false, {1, 2, 0}} // Delay in ms (numeric, negative allowed), PressDuration [, Play]
-	, {_T("SetMouseDelay"), 1, 2, false, {1, 0}} // Delay in ms (numeric, negative allowed) [, Play]
-	, {_T("SetWinDelay"), 1, 1, false, {1, 0}} // Delay in ms (numeric, negative allowed)
-	, {_T("SetControlDelay"), 1, 1, false, {1, 0}} // Delay in ms (numeric, negative allowed)
-	, {_T("SetTitleMatchMode"), 1, 1, false, NULL} // Allowed values: 1, 2, slow, fast
-
-	, {_T("Suspend"), 0, 1, false, NULL} // On/Off/Toggle/Permit/Blank (blank is the same as toggle)
-	, {_T("Pause"), 0, 2, false, NULL} // On/Off/Toggle/Blank (blank is the same as toggle), AlwaysAffectUnderlying
-	, {_T("StringCaseSense"), 1, 1, false, NULL} // On/Off/Locale
-	, {_T("DetectHiddenWindows"), 1, 1, false, NULL} // On/Off
-	, {_T("DetectHiddenText"), 1, 1, false, NULL} // On/Off
-	, {_T("BlockInput"), 1, 1, false, NULL} // On/Off
-
-	, {_T("SetNumlockState"), 0, 1, false, NULL} // On/Off/AlwaysOn/AlwaysOff or blank (unspecified) to return to normal.
-	, {_T("SetScrollLockState"), 0, 1, false, NULL} // same
-	, {_T("SetCapslockState"), 0, 1, false, NULL} // same
-	, {_T("SetStoreCapslockMode"), 1, 1, false, NULL} // On/Off
-
-	, {_T("KeyHistory"), 0, 2, false, NULL}, {_T("ListLines"), 0, 1, false, NULL}
-	, {_T("ListVars"), 0, 0, false, NULL}, {_T("ListHotkeys"), 0, 0, false, NULL}
-
-	, {_T("Edit"), 0, 0, false, NULL}
-	, {_T("Reload"), 0, 0, false, NULL}
-
-	, {_T("Shutdown"), 1, 1, false, {1, 0}} // Seems best to make the first param (the flag/code) mandatory.
-
-	, {_T("FileEncoding"), 0, 1, false, NULL}
+	, {_T("Static"), 1, 1} // ACT_STATIC (used only at load time).
+	, {_T("#HotIf"), 0, 1}
+	, {_T("Exit"), 0, 1} // ExitCode
+	, {_T("If"), 1, 1}
+	, {_T("Else"), 0, 0} // No args; it has special handling to support same-line ELSE-actions (e.g. "else if").
+	, {_T("Loop"), 0, 1} // IterationCount
+	, {_T("Loop Files"), 1, 2} // FilePattern [, Mode] -- Files vs File for clarity.
+	, {_T("Loop Reg"), 1, 2} // Key [, Mode]
+	, {_T("Loop Read"), 1, 2} // InputFile [, OutputFile]
+	, {_T("Loop Parse"), 1, 3} // InputString [, Delimiters, OmitChars]
+	, {_T("For"), 0, MAX_ARGS}  // For vars in expression
+	, {_T("While"), 1, 1} // LoopCondition.  v1.0.48: Lexikos: Added g_act entry for ACT_WHILE.
+	, {_T("Until"), 1, 1} // Until expression (follows a Loop)
+	, {_T("Break"), 0, 1}
+	, {_T("Continue"), 0, 1}
+	, {_T("Goto"), 1, 1}
+	, {_T("Return"), 0, 1}
+	, {_T("Try"), 0, 0}
+	, {_T("Catch"), 0, 1} // fincs: seems best to allow catch without a parameter
+	, {_T("Finally"), 0, 0}
+	, {_T("Throw"), 0, 1}
+	, {_T("Switch"), 0, 1}
+	, {_T("Case"), 1, MAX_ARGS}
 };
 // Below is the most maintainable way to determine the actual count?
 // Due to C++ lang. restrictions, can't easily make this a const because constants
@@ -546,8 +436,8 @@ key_to_vk_type g_key_to_vk[] =
 , {_T("F24"), VK_F24}
 
 // Mouse buttons:
-, {_T("LButton"), VK_LBUTTON_LOGICAL}
-, {_T("RButton"), VK_RBUTTON_LOGICAL}
+, {_T("LButton"), VK_LBUTTON}
+, {_T("RButton"), VK_RBUTTON}
 , {_T("MButton"), VK_MBUTTON}
 , {_T("XButton1"), VK_XBUTTON1}
 , {_T("XButton2"), VK_XBUTTON2}

@@ -278,11 +278,34 @@ HWND SetForegroundWindowEx(HWND aTargetWindow)
 			is_attached_fore_to_target = AttachThreadInput(fore_thread, target_thread, TRUE) != 0;
 	}
 
+	static bool sTriedKeyUp = false;
+
 	// The log showed that it never seemed to need more than two tries.  But there's
 	// not much harm in trying a few extra times.  The number of tries needed might
 	// vary depending on how fast the CPU is:
 	for (int i = 0; i < 5; ++i)
 	{
+		if (i == (int)g_WinActivateForce && !sTriedKeyUp) // At least one attempt failed this time, and Alt-up hasn't been tried since the process started.
+		{
+			sTriedKeyUp = true;
+			// Lexikos: Recent testing on Windows 10.0.19555 indicated that sending Alt-up was just as effective
+			// as sending double-Alt (the second Alt was probably just to counter the first one), but it should
+			// have lower risk of side-effects since there's no key-down.  One observable side-effect is that
+			// if the user happens to be holding Alt (and it wasn't suppressed due to being part of a hotkey),
+			// the window menu might light up for an instant before the window loses focus.  However, this also
+			// means that if the system is set to hide the menu mnemonics (underlines), that actually happens
+			// whereas they would normally be left visible because the window didn't catch Alt-up.
+			// The Alt-up seems to be effective at allowing ALL subsequent SetForegroundWindow() calls to succeed
+			// even without AttachThreadInput(), and even if Alt-up is just sent at program startup, so it's only
+			// done once per process.  In other words, this should stop subsequent calls from causing taskbar
+			// buttons to flash.  This doesn't seem to be necessary if AttachThreadInput() is used, so it's not
+			// done for #WinActivateForce unless there's been one failed attempt.
+			// KEY_BLOCK_THIS is used so that if this or any other scripts (running on v1.1.27+) have a hook
+			// installed, the Alt-up will be suppressed to further reduce the risk of side-effects.  Testing
+			// showed that the suppressed event worked just as well (in theory, because the system's handling
+			// of it isn't and can't be suppressed).
+			KeyEvent(KEYUP, VK_MENU, 0, NULL, false, KEY_BLOCK_THIS);
+		}
 		IF_ATTEMPT_SET_FORE
 		{
 #ifdef _DEBUG_WINACTIVATE
@@ -777,10 +800,6 @@ void StatusBarUtil(ResultToken &aResultToken, HWND aBarHwnd, int aPartNumber
 	if (!aBarHwnd)
 		_f_throw(ERR_NO_STATUSBAR);
 
-	// Legacy: Waiting 500ms in place of a "0" seems more useful than a true zero, which doesn't need
-	// to be supported because it's the same thing as something like "IfWinExist":
-	if (!aWaitTime)
-		aWaitTime = 500;
 	if (aCheckInterval < 1)
 		aCheckInterval = SB_DEFAULT_CHECK_INTERVAL; // Caller relies on us doing this.
 	if (aPartNumber < 1)
@@ -1354,7 +1373,7 @@ bool IsWindowCloaked(HWND aWnd)
 
 
 
-bool global_struct::DetectWindow(HWND aWnd)
+bool ScriptThreadSettings::DetectWindow(HWND aWnd)
 {
 	return DetectHiddenWindows || (IsWindowVisible(aWnd) && !IsWindowCloaked(aWnd));
 }
@@ -1474,7 +1493,7 @@ int GetWindowTextTimeout(HWND aWnd, LPTSTR aBuf, INT_PTR aBufSize, UINT aTimeout
 
 
 
-ResultType WindowSearch::SetCriteria(global_struct &aSettings, LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LPTSTR aExcludeText)
+ResultType WindowSearch::SetCriteria(ScriptThreadSettings &aSettings, LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LPTSTR aExcludeText)
 // Returns FAIL if the new criteria can't possibly match a window (due to ahk_id being in invalid
 // window or the specified ahk_group not existing).  Otherwise, it returns OK.
 // Callers must ensure that aText, aExcludeTitle, and aExcludeText point to buffers whose contents
@@ -1845,26 +1864,11 @@ HWND WindowSearch::IsMatch(bool aInvert)
 
 
 
-void SetForegroundLockTimeout()
-{
-	// Don't check for failure since this operation isn't critical, and don't want
-	// users continually haunted by startup error if for some reason this doesn't
-	// work on their system:
-	if (SystemParametersInfo(SPI_GETFOREGROUNDLOCKTIMEOUT, 0, &g_OriginalTimeout, 0))
-		if (g_OriginalTimeout) // Anti-focus stealing measure is in effect.
-		{
-			// Set it to zero instead, disabling the measure:
-			SystemParametersInfo(SPI_SETFOREGROUNDLOCKTIMEOUT, 0, (PVOID)0, SPIF_SENDCHANGE);
-		}
-}
-
-
-
-bool DialogPrep()
+void DialogPrep()
 // Having it as a function vs. macro should reduce code size due to expansion of macros inside.
 {
-	bool thread_was_critical = g->ThreadIsCritical;
-	g->ThreadIsCritical = false;
+	// Make the thread immediately interruptible but don't change g->ThreadIsCritical,
+	// since DIALOG_END will refer to it when resetting g->AllowThreadToBeInterrupted.
 	g->AllowThreadToBeInterrupted = true;
 	if (g_KeybdHook) // Workaround added in v1.1.22.01.
 	{
@@ -1896,5 +1900,4 @@ bool DialogPrep()
 	}
 	if (HIWORD(GetQueueStatus(QS_ALLEVENTS))) // See DIALOG_PREP for explanation.
 		MsgSleep(-1);
-	return thread_was_critical; // Caller is responsible for using this to later restore g->ThreadIsCritical.
 }

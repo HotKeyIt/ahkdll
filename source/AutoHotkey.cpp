@@ -17,7 +17,7 @@ GNU General Public License for more details.
 #include "stdafx.h" // pre-compiled headers
 #include "globaldata.h" // for access to many global vars
 #include "application.h" // for MsgSleep()
-#include "window.h" // For MsgBox() & SetForegroundLockTimeout()
+#include "window.h" // For MsgBox()
 #include "TextIO.h"
 #include "LiteZip.h"
 #include <process.h>
@@ -128,6 +128,9 @@ void WINAPI TlsCallbackCall(PVOID Module, DWORD Reason, PVOID Context)
 // (GetMessage() or PeekMessage()) is the only means by which events are ever sent to the
 // hook functions.
 #include <iphlpapi.h>
+int MainExecuteScript();
+void ThreadExecuteScript();
+
 int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdLine, int nCmdShow)
 {
 	// Init any globals not in "struct g" that need it:
@@ -149,7 +152,6 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	
 	InitializeCriticalSection(&g_CriticalDebugger);
 	g_ahkThreads[0][1] = (UINT_PTR)g_script;
-	g_ahkThreads[0][4] = (UINT_PTR)&g_startup;
 	g_ahkThreads[0][5] = (UINT_PTR)g_ThreadID;
 	g_ahkThreads[0][6] = (UINT_PTR)((PMYTEB)NtCurrentTeb())->ThreadLocalStoragePointer;
 
@@ -163,8 +165,10 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	DynaToken::sPrototype = Object::CreatePrototype(_T("DynaCall"), Object::sPrototype);
 #endif
 
-	UserMenu::sMenuPrototype = Object::CreatePrototype(_T("Menu"), Object::sPrototype, UserMenu::sMembers, _countof(UserMenu::sMembers));
-	UserMenu::sMenuBarPrototype = Object::CreatePrototype(_T("MenuBar"), UserMenu::sMenuPrototype);
+	UserMenu::sPrototype = Object::CreatePrototype(_T("Menu"), Object::sPrototype, UserMenu::sMembers, _countof(UserMenu::sMembers));
+	UserMenu::sBarPrototype = Object::CreatePrototype(_T("MenuBar"), UserMenu::sPrototype);
+	UserMenu::sClass = Object::CreateClass(_T("Menu"), Object::sClass, UserMenu::sPrototype, static_cast<ObjectMethod>(&UserMenu::New<UserMenu>));
+	UserMenu::sBarClass = Object::CreateClass(_T("MenuBar"), UserMenu::sClass, UserMenu::sBarPrototype, static_cast<ObjectMethod>(&UserMenu::New<UserMenu::Bar>));
 
 	GuiType::sPrototype = Object::CreatePrototype(_T("Gui"), Object::sPrototype, GuiType::sMembers, _countof(GuiType::sMembers));
 	GuiControlType::sPrototype = Object::CreatePrototype(_T("Gui.Control"), Object::sPrototype, GuiControlType::sMembers, _countof(GuiControlType::sMembers));
@@ -175,6 +179,7 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	Object::sClassClass = Object::CreateClass(_T("Class"), Object::sClass, Object::sClassPrototype, static_cast<ObjectMethod>(&Object::New<Object>));
 	Array::sClass = Object::CreateClass(_T("Array"), Object::sClass, Array::sPrototype, static_cast<ObjectMethod>(&Array::New<Array>));
 	Map::sClass = Object::CreateClass(_T("Map"), Object::sClass, Map::sPrototype, static_cast<ObjectMethod>(&Map::New<Map>));
+	GuiType::sClass = Object::CreateClass(_T("Gui"), Object::sClass, GuiType::sPrototype, static_cast<ObjectMethod>(&GuiType::New<GuiType>));
 
 
 
@@ -238,8 +243,8 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 			restart_mode = true;
 		else if (!_tcsicmp(param, _T("/F")) || !_tcsicmp(param, _T("/force")))
 			g_ForceLaunch = true;
-		else if (!_tcsicmp(param, _T("/ErrorStdOut")))
-			g_script->mErrorStdOut = true;
+		else if (!_tcsnicmp(param, _T("/ErrorStdOut"), 12))
+			g_script->SetErrorStdOut(param[12] == '=' ? param + 13 : NULL);
 		else if (!_tcsicmp(param, _T("/iLib"))) // v1.0.47: Build an include-file so that ahk2exe can include library functions called by the script.
 		{
 			++i; // Consume the next parameter too, because it's associated with this one.
@@ -323,10 +328,6 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 // Set up the basics of the script:
 	if (g_script->Init(*g, script_filespec, restart_mode,0,false) != OK)  // Set up the basics of the script, using the above.
 		return CRITICAL_ERROR;
-	// Set g_default now, reflecting any changes made to "g" above, in case AutoExecSection(), below,
-	// never returns, perhaps because it contains an infinite loop (intentional or not):
-	CopyMemory(&g_default, g, sizeof(global_struct));
-
 	// Could use CreateMutex() but that seems pointless because we have to discover the
 	// hWnd of the existing process so that we can close or restart it, so we would have
 	// to do this check anyway, which serves both purposes.  Alt method is this:
@@ -403,10 +404,6 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 		Sleep(100);
 	}
 
-	// Call this only after closing any existing instance of the program,
-	// because otherwise the change to the "focus stealing" setting would never be undone:
-	SetForegroundLockTimeout();
-
 	// Create all our windows and the tray icon.  This is done after all other chances
 	// to return early due to an error have passed, above.
 	if (g_script->CreateWindows() != OK)
@@ -445,19 +442,51 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 	g_SuspendExempt = false; // #SuspendExempt should not affect Hotkey()/Hotstring().
 
 	g_script->mIsReadyToExecute = true; // This is done only after the above to support error reporting in Hotkey.cpp.
-	Var *clipboard_var = g_script->FindOrAddVar(_T("Clipboard")); // Add it if it doesn't exist, in case the script accesses "Clipboard" via a dynamic variable.
-	// Run the auto-execute part at the top of the script (this call might never return):
-	if (!g_script->AutoExecSection()) // Can't run script at all. Due to rarity, just abort.
-		return CRITICAL_ERROR;
-	// REMEMBER: The call above will never return if one of the following happens:
-	// 1) The AutoExec section never finishes (e.g. infinite loop).
-	// 2) The AutoExec function uses the Exit or ExitApp command to terminate the script.
-	// 3) The script isn't persistent and its last line is reached (in which case an ExitApp is implicit).
 
-	// Call it in this special mode to kick off the main event loop.
-	// Be sure to pass something >0 for the first param or it will
-	// return (and we never want this to return):
-	MsgSleep(SLEEP_INTERVAL, WAIT_FOR_MESSAGES);
+	return MainExecuteScript();
+}
+
+
+int MainExecuteScript()
+{
+	
+#ifndef _DEBUG
+	__try
+#endif
+	{
+		// Run the auto-execute part at the top of the script (this call might never return):
+		if (!g_script->AutoExecSection()) // Can't run script at all. Due to rarity, just abort.
+			return CRITICAL_ERROR;
+		// REMEMBER: The call above will never return if one of the following happens:
+		// 1) The AutoExec section never finishes (e.g. infinite loop).
+		// 2) The AutoExec function uses the Exit or ExitApp command to terminate the script.
+		// 3) The script isn't persistent and its last line is reached (in which case an ExitApp is implicit).
+
+		// Call it in this special mode to kick off the main event loop.
+		// Be sure to pass something >0 for the first param or it will
+		// return (and we never want this to return):
+		MsgSleep(SLEEP_INTERVAL, WAIT_FOR_MESSAGES);
+	}
+#ifndef _DEBUG
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		LPCTSTR msg;
+		auto ecode = GetExceptionCode();
+		switch (ecode)
+		{
+		// Having specific messages for the most common exceptions seems worth the added code size.
+		// The term "stack overflow" is not used because it is probably less easily understood by
+		// the average user, and is not useful as a search term due to stackoverflow.com.
+		case EXCEPTION_STACK_OVERFLOW: msg = _T("Function recursion limit exceeded."); break;
+		case EXCEPTION_ACCESS_VIOLATION: msg = _T("Invalid memory read/write."); break;
+		default: msg = _T("System exception 0x%X."); break;
+		}
+		TCHAR buf[127];
+		sntprintf(buf, _countof(buf), msg, ecode);
+		g_script->CriticalError(buf);
+		return ecode;
+	}
+#endif 
 	return 0; // Never executed; avoids compiler warning.
 }
 
@@ -485,7 +514,7 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 	free(lpScriptCmdLine);
 	g_clip = new Clipboard();
 	InitializeCriticalSection(&g_CriticalRegExCache); // v1.0.45.04: Must be done early so that it's unconditional, so that DeleteCriticalSection() in the script destructor can also be unconditional (deleting when never initialized can crash, at least on Win 9x).
-	for (int f = 0;;f=f ? f : 1)
+	for (int f = 0;; f = f ? f : 1)
 	{
 		g_script = new Script();
 		g_script->Construct();
@@ -505,8 +534,10 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 			DynaToken::sPrototype = Object::CreatePrototype(_T("DynaCall"), Object::sPrototype);
 #endif
 
-			UserMenu::sMenuPrototype = Object::CreatePrototype(_T("Menu"), Object::sPrototype, UserMenu::sMembers, _countof(UserMenu::sMembers));
-			UserMenu::sMenuBarPrototype = Object::CreatePrototype(_T("MenuBar"), UserMenu::sMenuPrototype);
+			UserMenu::sPrototype = Object::CreatePrototype(_T("Menu"), Object::sPrototype, UserMenu::sMembers, _countof(UserMenu::sMembers));
+			UserMenu::sBarPrototype = Object::CreatePrototype(_T("MenuBar"), UserMenu::sPrototype);
+			UserMenu::sClass = Object::CreateClass(_T("Menu"), Object::sClass, UserMenu::sPrototype, static_cast<ObjectMethod>(&UserMenu::New<UserMenu>));
+			UserMenu::sBarClass = Object::CreateClass(_T("MenuBar"), UserMenu::sClass, UserMenu::sBarPrototype, static_cast<ObjectMethod>(&UserMenu::New<UserMenu::Bar>));
 
 			GuiType::sPrototype = Object::CreatePrototype(_T("Gui"), Object::sPrototype, GuiType::sMembers, _countof(GuiType::sMembers));
 			GuiControlType::sPrototype = Object::CreatePrototype(_T("Gui.Control"), Object::sPrototype, GuiControlType::sMembers, _countof(GuiControlType::sMembers));
@@ -517,8 +548,7 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 			Object::sClassClass = Object::CreateClass(_T("Class"), Object::sClass, Object::sClassPrototype, static_cast<ObjectMethod>(&Object::New<Object>));
 			Array::sClass = Object::CreateClass(_T("Array"), Object::sClass, Array::sPrototype, static_cast<ObjectMethod>(&Array::New<Array>));
 			Map::sClass = Object::CreateClass(_T("Map"), Object::sClass, Map::sPrototype, static_cast<ObjectMethod>(&Map::New<Map>));
-
-
+			GuiType::sClass = Object::CreateClass(_T("Gui"), Object::sClass, GuiType::sPrototype, static_cast<ObjectMethod>(&GuiType::New<GuiType>));
 
 			Closure::sPrototype = Object::CreatePrototype(_T("Closure"), Func::sPrototype);
 			BoundFunc::sPrototype = Object::CreatePrototype(_T("BoundFunc"), Func::sPrototype);
@@ -588,7 +618,7 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 			// For example, if the user runs "CompiledScript.exe /find", we want /find to be considered
 			// an input parameter for the script rather than a switch:
 			if (!_tcsicmp(param, _T("/ErrorStdOut")))
-				g_script->mErrorStdOut = true;
+				g_script->SetErrorStdOut(param[12] == '=' ? param + 13 : NULL);
 			else if (!_tcsicmp(param, _T("/iLib"))) // v1.0.47: Build an include-file so that ahk2exe can include library functions called by the script.
 			{
 				++i; // Consume the next parameter too, because it's associated with this one.
@@ -644,9 +674,6 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 			_endthreadex(CRITICAL_ERROR);
 			return CRITICAL_ERROR;
 		}
-		// Set g_default now, reflecting any changes made to "g" above, in case AutoExecSection(), below,
-		// never returns, perhaps because it contains an infinite loop (intentional or not):
-		CopyMemory(&g_default, g, sizeof(global_struct));
 
 		//if (nameHinstanceP.istext)
 		//	GetCurrentDirectory(MAX_PATH, g_script->mFileDir);
@@ -739,10 +766,8 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 		//if (Hotkey::sHotkeyCount > 0 || Hotstring::sHotstringCount > 0)
 		//	AddRemoveHooks(3);
 
-		Var *clipboard_var = g_script->FindOrAddVar(_T("Clipboard")); // Add it if it doesn't exist, in case the script accesses "Clipboard" via a dynamic variable.
-
 		g_script->mIsReadyToExecute = true; // This is done only after the above to support error reporting in Hotkey.cpp.
-		
+
 		//Sleep(20);
 		// Notify that thread was created successfully
 		TCHAR buf[MAX_INTEGER_LENGTH];
@@ -750,18 +775,30 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 		HANDLE hEvent = OpenEvent(EVENT_MODIFY_STATE, true, buf);
 		SetEvent(hEvent);
 		CloseHandle(hEvent);
+
+		ThreadExecuteScript();
+	}
+}
+
+
+void ThreadExecuteScript()
+{
+	
+#ifndef _DEBUG
+	__try
+#endif
+	{
+
 		// Run the auto-execute part at the top of the script (this call might never return):
 		ResultType result = g_script->AutoExecSection();
 		if (!result) // Can't run script at all. Due to rarity, just abort.
 		{
 			_endthreadex(CRITICAL_ERROR);
-			return CRITICAL_ERROR;
 		}
 		else if (g_Reloading)
 		{
 			g_Reloading = false;
 			delete g_script;
-			continue;
 		}
 		// REMEMBER: The call above will never return if one of the following happens:
 		// 1) The AutoExec section never finishes (e.g. infinite loop).
@@ -775,6 +812,25 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 		delete g_SimpleHeap;
 		_endthreadex(0);
 	}
-	return 0; // Never executed; avoids compiler warning.
+#ifndef _DEBUG
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		LPCTSTR msg;
+		auto ecode = GetExceptionCode();
+		switch (ecode)
+		{
+		// Having specific messages for the most common exceptions seems worth the added code size.
+		// The term "stack overflow" is not used because it is probably less easily understood by
+		// the average user, and is not useful as a search term due to stackoverflow.com.
+		case EXCEPTION_STACK_OVERFLOW: msg = _T("Function recursion limit exceeded."); break;
+		case EXCEPTION_ACCESS_VIOLATION: msg = _T("Invalid memory read/write."); break;
+		default: msg = _T("System exception 0x%X."); break;
+		}
+		TCHAR buf[127];
+		sntprintf(buf, _countof(buf), msg, ecode);
+		g_script->CriticalError(buf);
+		_endthreadex(0);
+	}
+#endif
 }
 #endif // _USRDLL

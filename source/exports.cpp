@@ -37,13 +37,11 @@ void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar, BOOL aVarIsArg);
 #define BACKUP_G_SCRIPT \
 	int aCurrFileIndex = g_script->mCurrFileIndex, aCombinedLineNumber = g_script->mCombinedLineNumber;\
 	bool aNextLineIsFunctionBody = g_script->mNextLineIsFunctionBody;\
-	Line *aFirstLine = g_script->mFirstLine,*aLastLine = g_script->mLastLine,*aCurrLine = g_script->mCurrLine,*aFirstStaticLine = g_script->mFirstStaticLine,*aLastStaticLine = g_script->mLastStaticLine;\
+	Line *aFirstLine = g_script->mFirstLine,*aLastLine = g_script->mLastLine,*aCurrLine = g_script->mCurrLine;\
 	g_script->mNextLineIsFunctionBody = false;\
 	Func *aCurrFunc  = g->CurrentFunc;\
-	Label *aPlaceholderLabel = g_script->mPlaceholderLabel;\
 	int aClassObjectCount = g_script->mClassObjectCount;\
 	g_script->mClassObjectCount = NULL;\
-	g_script->mFirstStaticLine = NULL;g_script->mLastStaticLine = NULL;\
 	g_script->mFirstLine = NULL;g_script->mLastLine = NULL;\
 	g_script->mIsReadyToExecute = false;\
 	g->CurrentFunc = NULL;
@@ -53,7 +51,6 @@ void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar, BOOL aVarIsArg);
 	g_script->mLastLine = aLastLine;\
 	g_script->mLastLine->mNextLine = NULL;\
 	g_script->mCurrLine = aCurrLine;\
-	g_script->mPlaceholderLabel = aPlaceholderLabel;\
 	g_script->mClassObjectCount = aClassObjectCount + g_script->mClassObjectCount;\
 	g_script->mCurrFileIndex = aCurrFileIndex;\
 	g_script->mNextLineIsFunctionBody = aNextLineIsFunctionBody;\
@@ -369,7 +366,7 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name, unsigned int getVar, DWORD aThreadID)
 	BYTE aSlot = InterlockedIncrement16(&returnCount) & 0xFF;
 	if (getVar != NULL)
 	{
-		if (ahkvar->mType == VAR_BUILTIN || ahkvar->mType == VAR_VIRTUAL)
+		if (ahkvar->mType == VAR_VIRTUAL)
 		{
 			if (g_ThreadID != ThreadID)
 				ResumeThread(g_hThread);
@@ -401,7 +398,7 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name, unsigned int getVar, DWORD aThreadID)
 #endif
 		return ITOA64((UINT_PTR)ahkvar,result_to_return_dll[aSlot]);
 	}
-	else if (ahkvar->mType != VAR_BUILTIN && !ahkvar->HasContents() )
+	else if ( !ahkvar->HasContents() )
 	{
 		if (g_ThreadID != ThreadID)
 			ResumeThread(g_hThread);
@@ -411,9 +408,11 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name, unsigned int getVar, DWORD aThreadID)
 #endif
 		return _T("");
 	}
+	if (ahkvar->mType == VAR_VIRTUAL)
+		ahkvar->PopulateVirtualVar();
 	if (*ahkvar->mCharContents == '\0')
 	{
-		LPTSTR new_mem = (LPTSTR )realloc((LPTSTR )result_to_return_dll[aSlot],(ahkvar->mType == VAR_BUILTIN ? ahkvar->mBIV(0,name) : ahkvar->mByteCapacity ? ahkvar->mByteCapacity : ahkvar->mByteLength) + MAX_NUMBER_LENGTH + sizeof(TCHAR));
+		LPTSTR new_mem = (LPTSTR )realloc((LPTSTR )result_to_return_dll[aSlot],(ahkvar->mByteCapacity ? ahkvar->mByteCapacity : ahkvar->mByteLength) + MAX_NUMBER_LENGTH + sizeof(TCHAR));
 		if (!new_mem)
 		{
 			g_script->ScriptError(ERR_OUTOFMEM, name);
@@ -426,27 +425,20 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name, unsigned int getVar, DWORD aThreadID)
 			return _T("");
 		}
 		result_to_return_dll[aSlot] = new_mem;
-		if ( ahkvar->mType == VAR_BUILTIN )
+		if (_tcsicmp(name, _T("A_IsPaused"))) //ahkvar->mVV == BIV_IsPaused)
 		{
-			if (ahkvar->mBIV == BIV_IsPaused)
-			{
-				++g; // imitate new thread for A_IsPaused
-				ahkvar->mBIV(result_to_return_dll[aSlot],name); //Hotkeyit 
-				--g;
-			}
-			else
-				ahkvar->mBIV(result_to_return_dll[aSlot],name); //Hotkeyit 
+			++g; // imitate new thread for A_IsPaused
+			ITOA64(ahkvar->mContentsInt64, new_mem);
+			--g;
 		}
-		else if ( ahkvar->mType == VAR_VIRTUAL)
-			ahkvar->mVV->Get(result_to_return_dll[aSlot], name);
-		else if ( ahkvar->mType == VAR_ALIAS )
-			ITOA64(ahkvar->mAliasFor->mContentsInt64,result_to_return_dll[aSlot]);
-		else if ( ahkvar->mType == VAR_NORMAL )
-			ITOA64(ahkvar->mContentsInt64,result_to_return_dll[aSlot]);//Hotkeyit
+		else if (ahkvar->mType == VAR_ALIAS)
+			ITOA64(ahkvar->mAliasFor->mContentsInt64, new_mem);
+		else
+			ITOA64(ahkvar->mContentsInt64, new_mem);
 	}
 	else
 	{
-		LPTSTR new_mem = (LPTSTR)realloc((LPTSTR)result_to_return_dll[aSlot], ahkvar->mType == VAR_BUILTIN ? ahkvar->mBIV(0, name) : (ahkvar->mType == VAR_VIRTUAL ? ahkvar->mVV->Get(0, name) : ahkvar->mByteLength + sizeof(TCHAR)));
+		LPTSTR new_mem = (LPTSTR)realloc((LPTSTR)result_to_return_dll[aSlot], ahkvar->mByteLength + sizeof(TCHAR));
 		if (!new_mem)
 		{
 			g_script->ScriptError(ERR_OUTOFMEM, name);
@@ -459,14 +451,8 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name, unsigned int getVar, DWORD aThreadID)
 			return _T("");
 		}
 		result_to_return_dll[aSlot] = new_mem;
-		if ( ahkvar->mType == VAR_ALIAS )
-			ahkvar->mAliasFor->Get(result_to_return_dll[aSlot]); //Hotkeyit removed ebiv.cpp and made ahkgetvar return all vars
- 		else if ( ahkvar->mType == VAR_NORMAL )
-			ahkvar->Get(result_to_return_dll[aSlot]);  // var.getText() added in V1.
-		else if ( ahkvar->mType == VAR_BUILTIN )
-			ahkvar->mBIV(result_to_return_dll[aSlot],name); //Hotkeyit 
-		else if (ahkvar->mType == VAR_VIRTUAL)
-			ahkvar->mVV->Get(result_to_return_dll[aSlot], name); //Hotkeyit 
+		memcpy(new_mem, ahkvar->mByteContents, ahkvar->mByteLength);
+		*(new_mem + ahkvar->mByteLength) = '\0';
 	}
 	if (g_ThreadID != ThreadID)
 		ResumeThread(g_hThread);
@@ -884,8 +870,6 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute, DWORD aThreadID)
 	{
 		g_script->mFileSpec = oldFileSpec;				// Restore script path
 		g->CurrentFunc = (UserFunc *)aCurrFunc;						// Restore current function
-		if (g_script->mPlaceholderLabel)
-			delete g_script->mPlaceholderLabel;
 		RESTORE_G_SCRIPT
 		//g_guiCount = a_guiCount;
 		RESTORE_IF_EXPR
@@ -919,23 +903,10 @@ EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute, DWORD aThreadID)
 			PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)g_script->mFirstLine, (LPARAM)NULL);
 		g_ReturnNotExit = false;
 	}
-	else
-	{  // Static init lines need always to run
-		Line *tempstatic = NULL;
-		while (tempstatic != g_script->mLastStaticLine)
-		{
-			if (tempstatic == NULL)
-				tempstatic = g_script->mFirstStaticLine;
-			else
-				tempstatic = tempstatic->mNextLine;
-			SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)tempstatic, (LPARAM)ONLY_ONE_LINE);
-		}
-	}
 	Line *aTempLine = g_script->mFirstLine; // required for return
 	aLastLine->mNextLine = aTempLine;
 	aTempLine->mPrevLine = aLastLine;
 	aLastLine = g_script->mLastLine;
-	delete g_script->mPlaceholderLabel;
 	RESTORE_G_SCRIPT
 #ifndef _USRDLL
 		if (curr_teb)
@@ -1008,8 +979,6 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute, DWORD aThreadID)
 	if (g_script->LoadFromText(script,aPathToShow) != OK) // || !g_script->PreparseBlocks(oldLastLine->mNextLine)))
 	{
 		g->CurrentFunc = (UserFunc *)aCurrFunc;
-		if (g_script->mPlaceholderLabel)
-			delete g_script->mPlaceholderLabel;
 		RESTORE_G_SCRIPT
 		//g_guiCount = a_guiCount;
 		RESTORE_IF_EXPR
@@ -1042,23 +1011,10 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute, DWORD aThreadID)
 		else
 			PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)g_script->mFirstLine, (LPARAM)NULL);
 	}
-	else
-	{  // Static init lines need always to run
-		Line *tempstatic = NULL;
-		while (tempstatic != g_script->mLastStaticLine)
-		{
-			if (tempstatic == NULL)
-				tempstatic = g_script->mFirstStaticLine;
-			else
-				tempstatic = tempstatic->mNextLine;
-			SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)tempstatic, (LPARAM)ONLY_ONE_LINE);
-		}
-	}
 	Line *aTempLine = g_script->mFirstLine;
 	aLastLine->mNextLine = aTempLine;
 	aTempLine->mPrevLine = aLastLine;
 	aLastLine = g_script->mLastLine;
-	delete g_script->mPlaceholderLabel;
 	RESTORE_G_SCRIPT
 #ifndef _USRDLL
 		if (curr_teb)
@@ -1139,8 +1095,6 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 	if ((g_script->LoadFromText(script) != OK)) // || !g_script->PreparseBlocks(oldLastLine->mNextLine))
 	{
 		g->CurrentFunc = (UserFunc *)aCurrFunc;
-		if (g_script->mPlaceholderLabel)
-			delete g_script->mPlaceholderLabel;
 		// Delete used and restore SimpleHeap
 		g_SimpleHeap = bkpSimpleHeap;
 		aSimpleHeap->DeleteAll();
@@ -1173,7 +1127,6 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 	g->CurrentFunc = (UserFunc *)aCurrFunc;
 	Line *aTempLine = g_script->mLastLine;
 	Line *aExecLine = g_script->mFirstLine;
-	delete g_script->mPlaceholderLabel;
 	for (int i = 0; i < g_script->mFuncs.mCount; i++)
 	{
 		g_script->mFuncs.mItem[i] = aFuncCount<i ? NULL : aFunc[i];
@@ -1466,7 +1419,7 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 	FuncResult func_call;
 	// func_call.CopyExprFrom(aResultToken);
 	// ExprTokenType &aResultToken = aResultToken_to_return ;
-	bool result = func.Call(func_call,aFuncAndToken->param,(int) aFuncAndToken->mParamCount,false); // Call the UDF.
+	bool result = func.Call(func_call,aFuncAndToken->param,(int) aFuncAndToken->mParamCount); // Call the UDF.
 
 	// DEBUGGER_STACK_POP() //HotKeyIt, AFAIK this is not necessary since it is done in func.Call internally
 	LPTSTR new_buf;
@@ -1657,7 +1610,7 @@ void callFuncDllVariant(FuncAndToken *aFuncAndToken)
 	// ExprTokenType aResultToken;
 	// ExprTokenType &aResultToken = aResultToken_to_return ;
 	++func.mInstances;
-	func.Call(aResultToken, aFuncAndToken->param, (int)aFuncAndToken->mParamCount, (IObject*)NULL); // Call the UDF.
+	func.Call(aResultToken, aFuncAndToken->param, (int)aFuncAndToken->mParamCount); // Call the UDF.
 
 	TokenToVariant(aResultToken, aFuncAndToken->variant_to_return_dll, FALSE);
 

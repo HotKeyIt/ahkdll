@@ -44,9 +44,7 @@ ObjectMember UserMenu::sMembers[] =
 	Object_Property_get(Handle),
 	Object_Property_get_set(ClickCount)
 };
-
-Object *UserMenu::sMenuPrototype;
-Object *UserMenu::sMenuBarPrototype;
+int UserMenu::sMemberCount = _countof(sMembers);
 
 
 
@@ -122,7 +120,7 @@ ResultType UserMenu::Invoke(ResultToken &aResultToken, int aID, int aFlags, Expr
 
 	case P_Handle:
 		if (!mMenu)
-			Create(); // On failure (rare), we just return 0.
+			CreateHandle(); // On failure (rare), we just return 0.
 		_o_return((__int64)(UINT_PTR)mMenu);
 
 	case P_ClickCount:
@@ -156,15 +154,19 @@ ResultType UserMenu::Invoke(ResultToken &aResultToken, int aID, int aFlags, Expr
 	if (!ignore_existing_items) // i.e. Insert always inserts a new item.
 		menu_item = FindItem(param1, menu_item_prev, search_by_pos);
 
+	bool callback_was_omitted = ParamIndexIsOmitted(1);
+	
 	// Whether an existing menu item's options should be updated without updating its submenu or callback:
-	bool update_exiting_item_options = (member == M_Add && menu_item && !*param2 && *aOptions);
+	bool update_existing_item_options = (member == M_Add && menu_item && callback_was_omitted && *aOptions);
 
 	ResultType result;
 	IObject *callback = NULL;  // Set default.
 	UserMenu *submenu = NULL;    // Set default.
-	if (member == M_Add && !update_exiting_item_options) // Callbacks and submenus are only used in conjunction with the ADD command.
+	if (member == M_Add && !update_existing_item_options) // Callbacks and submenus are only used in conjunction with the ADD command.
 	{
-		callback = ParamIndexToOptionalObject(1);
+		if (callback_was_omitted)
+			_o_throw(ERR_PARAM2_MUST_NOT_BE_BLANK);
+		callback = ParamIndexToObject(1);
 		submenu = dynamic_cast<UserMenu *>(callback);
 		if (submenu) // Param #2 is a Menu object.
 		{
@@ -176,19 +178,17 @@ ResultType UserMenu::Invoke(ResultToken &aResultToken, int aID, int aFlags, Expr
 			if (submenu == this || submenu->ContainsMenu(this)
 				|| submenu->mMenuType != MENU_TYPE_POPUP)
 				_o_throw(ERR_PARAM2_INVALID);
+			// Store only submenu, not callback.  Don't Release() this since AddRef() wasn't called
+			// (we're just borrowing the caller's reference until the menu item is constructed).
 			callback = NULL;
 		}
 		else 
 		{
 			// Param #2 is not a submenu.
-			if (callback) 
+			if (callback)
 				callback->AddRef();
-			else // Param #2 is not an object of any kind; must be a function name.
-			{
-				if (!*param2) // Allow the function name to default to the menu item name.
-					param2 = param1;
+			else
 				callback = StringToFunctor(param2);
-			}
 			if (!ValidateFunctor(callback, 3, aResultToken, ERR_PARAM2_INVALID))
 				return FAIL;
 		}
@@ -277,23 +277,27 @@ UserMenu *Script::FindMenu(HMENU aMenuHandle)
 
 
 
-UserMenu *Script::AddMenu(MenuTypeType aMenuType)
+UserMenu::UserMenu(MenuTypeType aMenuType)
+	: mMenuType(aMenuType)
+{
+	SetBase(sPrototype);
+	g_script->AddMenu(this);
+}
+
+UserMenu *Script::AddMenu(UserMenu *aMenu)
 // Returns the newly created UserMenu object.
 {
-	UserMenu *menu = new UserMenu(aMenuType);
-	if (!menu)
-		return NULL;  // Caller should show error if desired.
-	menu->SetBase(aMenuType == MENU_TYPE_BAR ? UserMenu::sMenuBarPrototype : UserMenu::sMenuPrototype);
+	ASSERT(aMenu);
 	if (!mFirstMenu)
-		mFirstMenu = mLastMenu = menu;
+		mFirstMenu = mLastMenu = aMenu;
 	else
 	{
-		mLastMenu->mNextMenu = menu;
+		mLastMenu->mNextMenu = aMenu;
 		// This must be done after the above:
-		mLastMenu = menu;
+		mLastMenu = aMenu;
 	}
 	++mMenuCount;  // Only after memory has been successfully allocated.
-	return menu;
+	return aMenu;
 }
 
 
@@ -348,7 +352,7 @@ ResultType Script::ScriptDeleteMenu(UserMenu *aMenu)
 
 void UserMenu::Dispose()
 {
-	Destroy();
+	DestroyHandle();
 	DeleteAllItems();
 	if (mBrush) // Free the brush used for the menu's background color.
 		DeleteObject(mBrush);
@@ -541,7 +545,7 @@ ResultType UserMenu::InternalAppendMenu(UserMenuItem *mi, UserMenuItem *aInsertB
 	if (mi->mSubmenu)
 	{
 		// Ensure submenu is created so that its handle can be used below.
-		if (!mi->mSubmenu->Create())
+		if (!mi->mSubmenu->CreateHandle())
 			return FAIL;
 		mii.fMask |= MIIM_SUBMENU;
 		mii.hSubMenu = mi->mSubmenu->mMenu;
@@ -604,10 +608,10 @@ ResultType UserMenu::DeleteItem(UserMenuItem *aMenuItem, UserMenuItem *aMenuItem
 ResultType UserMenu::DeleteAllItems()
 // Remove all menu items from the linked list and from the menu.
 {
-	// Fixed for v1.1.27.03: Don't attempt to take a shortcut by calling Destroy(), as it
+	// Fixed for v1.1.27.03: Don't attempt to take a shortcut by calling DestroyHandle(), as it
 	// will fail if this is a sub-menu of a menu bar.  Removing the items individually will
 	// do exactly what the user expects.  The following old comment indicates one reason
-	// Destroy() was used; that reason is now obsolete since submenus are given IDs:
+	// DestroyHandle() was used; that reason is now obsolete since submenus are given IDs:
 	// "In addition, this avoids the need to find any submenus by position:"
 	if (!mFirstMenuItem)
 		return OK;  // If there are no user-defined menu items, it's already in the correct state.
@@ -931,7 +935,7 @@ ResultType UserMenu::SetDefault(UserMenuItem *aMenuItem, bool aUpdateGuiMenuBars
 
 
 
-ResultType UserMenu::Create()
+ResultType UserMenu::CreateHandle()
 // Menu bars require non-popup menus (CreateMenu vs. CreatePopupMenu).  Rather than maintain two
 // different types of HMENUs on the rare chance that a script might try to use a menu both as
 // a popup and a menu bar, it seems best to have only one type to keep the code simple and reduce
@@ -965,7 +969,7 @@ ResultType UserMenu::Create()
 		SetMenuDefaultItem(mMenu, mDefault->mMenuID, FALSE);
 
 	// Apply background color if this menu has a non-standard one.  If this menu has submenus,
-	// they will be individually given their own background color when created via Create(),
+	// they will be individually given their own background color when created via CreateHandle(),
 	// which is why false is passed:
 	ApplyColor(false);
 
@@ -1060,9 +1064,6 @@ ResultType UserMenu::AppendStandardItems()
 }
 
 
-
-#ifdef AUTOHOTKEYSC
-
 ResultType UserMenu::EnableStandardOpenItem(bool aEnable)
 {
 	for (UserMenuItem *mi_prev = NULL, *mi = mFirstMenuItem; mi; mi_prev = mi, mi = mi->mNextMenuItem)
@@ -1089,11 +1090,8 @@ ResultType UserMenu::EnableStandardOpenItem(bool aEnable)
 	return OK;
 }
 
-#endif
 
-
-
-void UserMenu::Destroy()
+void UserMenu::DestroyHandle()
 // Destroys the Win32 menu or marks it NULL if it has already been destroyed externally.
 // This should be called only when the UserMenu is being deleted (or the script is exiting),
 // otherwise any parent menus would still refer to the old Win32 menu.  If the UserMenu is
@@ -1144,7 +1142,7 @@ ResultType UserMenu::Display(bool aForceToForeground, int aX, int aY)
 	DWORD aThreadID = __readfsdword(0x24);
 #endif
 
-	if (!Create()) // Create if needed.  No error msg since so rare.
+	if (!CreateHandle()) // Create if needed.  No error msg since so rare.
 		return FAIL;
 	//if (!IsMenu(mMenu))
 	//	mMenu = NULL;
@@ -1264,8 +1262,8 @@ ResultType UserMenu::Display(bool aForceToForeground, int aX, int aY)
 	// The root problem here is that it would not be intuitive to allow the command after
 	// "Menu, MyMenu, Show" should to run before the menu item's subroutine launches as a new thread.
 	// 
-	// You could argue that selecting a menu item should immediately Gosub the selected menu item's
-	// subroutine rather than queuing it up as a new thread.  However, even if that is a better method,
+	// You could argue that selecting a menu item should immediately execute the selected menu item's
+	// callback rather than queuing it up as a new thread.  However, even if that is a better method,
 	// it would break existing scripts that rely on new-thread behavior (such as fresh default for
 	// SetKeyDelay).
 	//

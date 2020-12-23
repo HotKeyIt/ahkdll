@@ -231,7 +231,6 @@ int Debugger::ProcessCommands()
 	// Disable notification of READ readiness and reset socket to synchronous mode.
 	u_long zero = 0;
 	WSAAsyncSelect(mSocket, g_hWnd, 0, 0);
-	
 	ioctlsocket(mSocket, FIONBIO, &zero);
 
 	int err;
@@ -686,21 +685,6 @@ DEBUGGER_COMMAND(Debugger::breakpoint_set)
 	}
 
 	Line *line = NULL, *found_line = NULL;
-	// Due to the introduction of expressions in static initializers, lines aren't necessarily in
-	// line number order.  First determine if any static initializers match the requested lineno.
-	// If not, use the first non-static line at or following that line number.
-
-	if (g_script->mFirstStaticLine)
-		for (line = g_script->mFirstStaticLine;; line = line->mNextLine)
-		{
-			if (line->mFileIndex == file_index && line->mLineNumber == lineno) // Exact match, unlike normal lines.
-			{
-				found_line = line;
-				break;
-			}
-			if (line == g_script->mLastStaticLine)
-				break;
-		}
 	if (!found_line)
 		// If line is non-NULL, above has left it set to mLastStaticLine, which we want to exclude:
 		for (line = line ? line->mNextLine : g_script->mFirstLine; line; line = line->mNextLine)
@@ -762,21 +746,6 @@ DEBUGGER_COMMAND(Debugger::breakpoint_set)
 		}
 
 		line = found_line = NULL;
-		// Due to the introduction of expressions in static initializers, lines aren't necessarily in
-		// line number order.  First determine if any static initializers match the requested lineno.
-		// If not, use the first non-static line at or following that line number.
-
-		if (script->mFirstStaticLine)
-			for (line = script->mFirstStaticLine;; line = line->mNextLine)
-			{
-				if (line->mFileIndex == file_index && line->mLineNumber == lineno) // Exact match, unlike normal lines.
-				{
-					found_line = line;
-					break;
-				}
-				if (line == script->mLastStaticLine)
-					break;
-			}
 		if (!found_line)
 			// If line is non-NULL, above has left it set to mLastStaticLine, which we want to exclude:
 			for (line = line ? line->mNextLine : script->mFirstLine; line; line = line->mNextLine)
@@ -1142,11 +1111,6 @@ DEBUGGER_COMMAND(Debugger::stack_get)
 					line = se[1].udf->func->mJumpToLine;
 					sourcefile = line->sSourceFile;
 				}
-				else if (se[1].type == DbgStack::SE_Sub)
-				{
-					line = se[1].sub->mJumpToLine;
-					sourcefile = line->sSourceFile;
-				}
 				else
 				{
 					// The auto-execute thread is probably the only one that can exist without
@@ -1174,9 +1138,6 @@ DEBUGGER_COMMAND(Debugger::stack_get)
 				break;
 			case DbgStack::SE_BIF:
 				mResponseBuf.WriteF("%e()", U4T(se->func->mName));
-				break;
-			case DbgStack::SE_Sub:
-				mResponseBuf.WriteF("%e sub", U4T(se->sub->mName)); // %e because label/hotkey names may contain almost anything.
 				break;
 			}
 			mResponseBuf.Write("\"/>");
@@ -1221,7 +1182,11 @@ DEBUGGER_COMMAND(Debugger::context_get)
 		}
 	}
 
-	Var **var = NULL, **var_end = NULL; // An array of pointers-to-var.
+	// Two lists are used to support static and non-static variables, both of which
+	// are seen to be in "local" context, since they are in the same namespace (and
+	// it never makes sense to have a static and non-static with the same name).
+	// Non-static variables are expected to be used more often, so are listed first.
+	VarList *var_lists[2] = { nullptr, nullptr };
 	VarBkp *bkp = NULL, *bkp_end = NULL;
 #ifndef _USRDLL
 	global_struct *g = NULL;
@@ -1239,26 +1204,10 @@ DEBUGGER_COMMAND(Debugger::context_get)
 	if (!g)
 		return DEBUGGER_E_INVALID_CONTEXT;
 #endif
-	// TODO: Include the lazy-var arrays for completeness. Low priority since lazy-var arrays are used only for 10001+ variables, and most conventional debugger interfaces would generally not be useful with that many variables.
 	if (context_id == PC_Local)
-	{
-		mStack.GetLocalVars(depth, var, var_end, bkp, bkp_end);
-	}
-	else if (context_id == PC_Static)
-	{
-		if (g->CurrentFunc)
-		{
-			var = g->CurrentFunc->mStaticVar;
-			var_end = var + g->CurrentFunc->mStaticVarCount;
-		}
-		else
-			var_end = var = NULL;
-	}
+		mStack.GetLocalVars(depth, var_lists[0], var_lists[1], bkp, bkp_end);
 	else if (context_id == PC_Global)
-	{
-		var = g_script->mVar;
-		var_end = var + g_script->mVarCount;
-	}
+		var_lists[0] = g_script->GlobalVars();
 	else
 		return DEBUGGER_E_INVALID_CONTEXT;
 
@@ -1266,21 +1215,27 @@ DEBUGGER_COMMAND(Debugger::context_get)
 		"<response command=\"context_get\" context=\"%i\" transaction_id=\"%e\">"
 		, context_id, aTransactionId);
 
-	LPTSTR value_buf = NULL;
+	TCHAR value_buf[_f_retval_buf_size];
 	CStringA name_buf;
-	PropertyInfo prop(name_buf);
+	PropertyInfo prop(name_buf, value_buf);
 	prop.max_data = mMaxPropertyData;
 	prop.pagesize = mMaxChildren;
 	prop.max_depth = mMaxDepth;
-	for ( ; var < var_end; ++var)
-		if (  (err = GetPropertyInfo(**var, prop, value_buf))
-			|| (err = WritePropertyXml(prop, (*var)->mName))  )
-			break;
 	for ( ; bkp < bkp_end; ++bkp)
-		if (  (err = GetPropertyInfo(*bkp, prop, value_buf))
+		if (  (err = GetPropertyInfo(*bkp, prop))
 			|| (err = WritePropertyXml(prop, bkp->mVar->mName))  )
 			break;
-	free(value_buf);
+	for (int j = 0; j < _countof(var_lists); ++j)
+	{
+		if (!var_lists[j])
+			continue;
+		Var **vars = var_lists[j]->mItem;
+		int var_count = var_lists[j]->mCount;
+		for (int i = 0; i < var_count; ++i)
+			if (  (err = GetPropertyInfo(*vars[i], prop))
+				|| (err = WritePropertyXml(prop, vars[i]->mName))  )
+				break;
+	}
 	if (err)
 		return err;
 
@@ -1313,41 +1268,44 @@ DEBUGGER_COMMAND(Debugger::property_value)
 }
 
 
-int Debugger::GetPropertyInfo(Var &aVar, PropertyInfo &aProp, LPTSTR &aValueBuf)
+int Debugger::GetPropertyInfo(Var &aVar, PropertyInfo &aProp)
 {
 	aProp.is_alias = aVar.mType == VAR_ALIAS;
 	aProp.is_static = aVar.IsStatic();
-	return GetPropertyValue(aVar, aProp, aValueBuf);
+	aProp.is_builtin = aVar.mType == VAR_VIRTUAL;
+	return GetPropertyValue(aVar, aProp);
 }
 
-int Debugger::GetPropertyInfo(VarBkp &aBkp, PropertyInfo &aProp, LPTSTR &aValueBuf)
+int Debugger::GetPropertyInfo(VarBkp &aBkp, PropertyInfo &aProp)
 {
 	aProp.is_static = false;
-	aProp.is_builtin = false;
 	if (aProp.is_alias = aBkp.mType == VAR_ALIAS)
-		return GetPropertyValue(*aBkp.mAliasFor, aProp, aValueBuf);
+	{
+		aProp.is_builtin = aBkp.mAliasFor->mType == VAR_VIRTUAL;
+		return GetPropertyValue(*aBkp.mAliasFor, aProp);
+	}
+	aProp.is_builtin = false;
 	aBkp.ToToken(aProp.value);
 	return DEBUGGER_E_OK;
 }
 
-int Debugger::GetPropertyValue(Var &aVar, PropertyInfo &aProp, LPTSTR &aValueBuf)
+int Debugger::GetPropertyValue(Var &aVar, PropertySource &aProp)
 {
-	if (aProp.is_builtin = aVar.Type() != VAR_NORMAL)
+	if (aVar.Type() == VAR_VIRTUAL)
 	{
-		size_t approx_size = aVar.Get() + 1;
-		if (!aValueBuf || _msize(aValueBuf) < _TSIZE(approx_size))
-		{
-			free(aValueBuf);
-			if (approx_size < MAX_PATH)
-				approx_size = MAX_PATH; // Big enough for most built-in vars (avoids repeated reallocation for context_get).
-			if (!(aValueBuf = tmalloc(approx_size)))
-				return DEBUGGER_E_INTERNAL_ERROR;
-		}
-		aProp.value.SetValue(aValueBuf, aVar.Get(aValueBuf));
-		CLOSE_CLIPBOARD_IF_OPEN; // Above may leave the clipboard open if aVar is Clipboard.
+		aProp.value.Free();
+		aProp.value.InitResult(aProp.value.buf);
+		aProp.value.symbol = SYM_INTEGER; // Virtual vars, like BIFs, expect this default.
+		aVar.Get(aProp.value);
+		if (aProp.value.symbol == SYM_OBJECT)
+			aProp.value.object->AddRef(); // See comments in ExpandExpression and BIV_TrayMenu.
+		if (aProp.value.Exited())
+			return DEBUGGER_E_EVAL_FAIL;
 	}
 	else
 	{
+		aProp.value.Free();
+		aProp.value.mem_to_free = nullptr; // Any value would be overwritten but this must be cleared manually.
 		if (aVar.IsUninitializedNormalVar())
 		{
 			aProp.value.symbol = SYM_MISSING;
@@ -1355,7 +1313,7 @@ int Debugger::GetPropertyValue(Var &aVar, PropertyInfo &aProp, LPTSTR &aValueBuf
 			aProp.value.marker_length = 0;
 		}
 		else
-			aVar.ToTokenSkipAddRef(aProp.value);
+			aVar.ToToken(aProp.value);
 	}
 	return DEBUGGER_E_OK;
 }
@@ -1449,7 +1407,7 @@ int Debugger::WriteEnumItems(PropertyInfo &aProp, IObject *aEnumerable)
 void Debugger::PropertyWriter::WriteEnumItems(IObject *aEnumerable, int aStart, int aEnd)
 {
 	IObject *enumerator;
-	auto result = GetEnumerator(enumerator, aEnumerable, 2, false);
+	auto result = GetEnumerator(enumerator, ExprTokenType(aEnumerable), 2, false);
 	if (result != OK)
 	{
 		mError = DEBUGGER_E_EVAL_FAIL;
@@ -1469,10 +1427,14 @@ void Debugger::PropertyWriter::WriteEnumItems(IObject *aEnumerable, int aStart, 
 	{
 		Var vkey, vval;
 		ExprTokenType tkey, tval;
-		FuncResult result_token;
+		ExprTokenType tparam[2], *param[] = { tparam, tparam + 1 };
+		tparam[0].symbol = SYM_VAR;
+		tparam[0].var = &vkey;
+		tparam[1].symbol = SYM_VAR;
+		tparam[1].var = &vval;
 		for (int i = 0; i < aEnd; ++i)
 		{
-			result = CallEnumerator(enumerator, &vkey, &vval, false);
+			result = CallEnumerator(enumerator, param, 2, false);
 			if (result != CONDITION_TRUE)
 				break;
 			if (i >= aStart)
@@ -1710,56 +1672,34 @@ int Debugger::ParsePropertyName(LPCSTR aFullName, int aDepth, int aVarScope, Exp
 		return DEBUGGER_E_INVALID_CONTEXT;
 #endif
 
-	if (aDepth > 0 && aVarScope != FINDVAR_GLOBAL)
+	VarList *vars = nullptr;
+	bool search_local = (aVarScope & VAR_LOCAL) && g->CurrentFunc;
+	if (search_local && aDepth > 0)
 	{
-		Var **vars = NULL, **vars_end;
-		VarBkp *bkps = NULL, *bkps_end;
-		mStack.GetLocalVars(aDepth, vars, vars_end, bkps, bkps_end);
-		if (bkps)
-		{
-			for ( ; ; ++bkps)
+		VarList *static_vars = nullptr;
+		VarBkp *bkps = nullptr, *bkps_end = nullptr;
+		mStack.GetLocalVars(aDepth, vars, static_vars, bkps, bkps_end);
+		for ( ; bkps < bkps_end; ++bkps)
+			if (!_tcsicmp(bkps->mVar->mName, name))
 			{
-				if (bkps == bkps_end)
-				{
-					// No local var at that depth, so make sure to not return the wrong local.
-					aVarScope = FINDVAR_GLOBAL;
-					break;
-				}
-				if (!_tcsicmp(bkps->mVar->mName, name))
-				{
-					varbkp = bkps;
-					break;
-				}
+				varbkp = bkps;
+				break;
 			}
-		}
-		else if (vars)
-		{
-			for ( ; ; ++vars)
-			{
-				if (vars == vars_end)
-				{
-					// No local var at that depth, so make sure to not return the wrong local.
-					aVarScope = FINDVAR_GLOBAL;
-					break;
-				}
-				if (!_tcsicmp((*vars)->mName, name))
-				{
-					var = *vars;
-					break;
-				}
-			}
-		}
+		if (!varbkp && static_vars)
+			var = static_vars->Find(name);
 	}
 
-	// If we're allowed to create variables
-	if (  !varbkp && !var
-		&& (aSetValue
-		// or this variable doesn't exist
-		|| !(var = g_script->FindVar(name, name_length, NULL, aVarScope))
-			// but it is a built-in variable which hasn't been referenced yet:
-			&& g_script->GetBuiltInVar(name))  )
-		// Find or add the variable.
-		var = g_script->FindOrAddVar(name, name_length, aVarScope);
+	if (!var && !varbkp)
+	{
+		int insert_pos;
+		if (vars) // Use this first to support aDepth.
+			var = vars->Find(name, &insert_pos);
+		if (!var) // Use FindVar to support built-ins and globals.
+			var = g_script->FindVar(name, name_length, aVarScope, &vars, &insert_pos);
+		if (!var && aSetValue) // Avoid creating empty variables.
+			var = g_script->AddVar(name, name_length, vars, insert_pos
+				, search_local ? VAR_LOCAL : VAR_GLOBAL);
+	}
 
 	if (!var && !varbkp)
 		return DEBUGGER_E_UNKNOWN_PROPERTY;
@@ -1773,13 +1713,22 @@ int Debugger::ParsePropertyName(LPCSTR aFullName, int aDepth, int aVarScope, Exp
 			aResult.bkp = varbkp, aResult.kind = PropVarBkp;
 		return DEBUGGER_E_OK;
 	}
-	IObject *iobj;
+	IObject *iobj = nullptr;
 	if (varbkp && varbkp->mType == VAR_ALIAS)
 		var = varbkp->mAliasFor;
 	if (var)
-		iobj = var->HasObject() ? var->Object() : NULL;
+	{
+		auto error = GetPropertyValue(*var, aResult); // Supports built-in vars.
+		if (error)
+			return error;
+		if (aResult.value.symbol == SYM_OBJECT)
+			iobj = aResult.value.object;
+	}
 	else
-		iobj = (varbkp->mAttrib & VAR_ATTRIB_IS_OBJECT) ? varbkp->mObject : NULL;
+	{
+		if (varbkp->mAttrib & VAR_ATTRIB_IS_OBJECT) 
+			iobj = varbkp->mObject;
+	}
 
 	if (!iobj)
 		return DEBUGGER_E_UNKNOWN_PROPERTY;
@@ -1891,7 +1840,6 @@ int Debugger::ParsePropertyName(LPCSTR aFullName, int aDepth, int aVarScope, Exp
 			// For property_set, this won't allow the base to be set (success="0").
 			// That seems okay since it could only ever be set to NULL anyway.
 			aResult.kind = PropValue;
-			aResult.owner = iobj;
 			aResult.value.SetValue(iobj);
 			aResult.this_object = this_override;
 			return DEBUGGER_E_OK;
@@ -1902,12 +1850,11 @@ int Debugger::ParsePropertyName(LPCSTR aFullName, int aDepth, int aVarScope, Exp
 			if (this_override)
 				this_override->Release();
 			aResult.kind = PropEnum;
-			aResult.owner = iobj;
+			aResult.value.SetValue(iobj);
 			return DEBUGGER_E_OK;
 		}
 
 		// Attempt to invoke property.
-		FuncResult result_token;
 		ExprTokenType *set_this = !c ? aSetValue : NULL;
 		ExprTokenType t_this(this_override ? this_override : iobj), t_key, *param[2];
 		int param_count = 0;
@@ -1924,7 +1871,7 @@ int Debugger::ParsePropertyName(LPCSTR aFullName, int aDepth, int aVarScope, Exp
 		if (set_this)
 			param[param_count++] = set_this;
 		int flags = (set_this ? IT_SET : IT_GET);
-		auto result = iobj->Invoke(result_token, flags, name, t_this, param, param_count);
+		auto result = iobj->Invoke(aResult.value, flags, name, t_this, param, param_count);
 		if (g->ThrownToken)
 			g_script->FreeExceptionToken(g->ThrownToken);
 
@@ -1944,38 +1891,20 @@ int Debugger::ParsePropertyName(LPCSTR aFullName, int aDepth, int aVarScope, Exp
 			return_value = DEBUGGER_E_EVAL_FAIL;
 			break;
 		}
-		if (set_this)
+		if (!c)
 		{
-			result_token.Free();
+			if (!set_this)
+				aResult.kind = PropValue;
 			return_value = DEBUGGER_E_OK;
 			break;
 		}
-		if (result_token.symbol == SYM_OBJECT)
-		{
-			iobj->Release();
-			iobj = result_token.object;
-		}
-		if (!c)
-		{
-			if (result_token.symbol == SYM_STRING && !result_token.mem_to_free)
-			{
-				// Ensure string is not on the stack.
-				result_token.marker = result_token.mem_to_free = _tcsdup(result_token.marker);
-				if (!result_token.marker)
-					break;
-			}
-			aResult.kind = PropValue;
-			aResult.value.CopyValueFrom(result_token);
-			aResult.mem_to_free = result_token.mem_to_free;
-			aResult.owner = iobj;
-			return DEBUGGER_E_OK;
-		}
-		if (result_token.symbol != SYM_OBJECT)
-		{
-			result_token.Free();
+		if (aResult.value.symbol != SYM_OBJECT)
 			// No usable target object for the next iteration, therefore the property mustn't exist.
 			break;
-		}
+		iobj->Release();
+		iobj = aResult.value.object;
+		//aResult.value.Free(); // Must not due to the line above.
+		aResult.value.InitResult(aResult.value.buf);
 	}
 	if (this_override)
 		this_override->Release();
@@ -1992,7 +1921,8 @@ int Debugger::property_get_or_value(char **aArgV, int aArgCount, char *aTransact
 	char *name = NULL;
 	int context_id = 0, depth = 0; // Var context and stack depth.
 	CStringA name_buf;
-	PropertyInfo prop(name_buf);
+	TCHAR value_buf[_f_retval_buf_size];
+	PropertyInfo prop(name_buf, value_buf);
 	prop.pagesize = mMaxChildren;
 	prop.max_data = aIsPropertyGet ? mMaxPropertyData : 1024*1024*1024; // Limit property_value to 1GB by default.
 	prop.max_depth = mMaxDepth; // Max property nesting depth.
@@ -2033,7 +1963,6 @@ int Debugger::property_get_or_value(char **aArgV, int aArgCount, char *aTransact
 	// rather than requiring the IDE to check each context when looking up a variable.
 	//case PC_Local:	always_use = FINDVAR_LOCAL; break;
 	case PC_Local:	always_use = FINDVAR_DEFAULT; break;
-	case PC_Static:	always_use = FINDVAR_STATIC; break;
 	case PC_Global:	always_use = FINDVAR_GLOBAL; break;
 	default:
 		return DEBUGGER_E_INVALID_CONTEXT;
@@ -2064,12 +1993,11 @@ int Debugger::property_get_or_value(char **aArgV, int aArgCount, char *aTransact
 	}
 	//else var and field were set by the called function.
 
-	LPTSTR value_buf = NULL;
 	switch (prop.kind)
 	{
-	case PropVar: err = GetPropertyInfo(*prop.var, prop, value_buf); break;
-	case PropVarBkp: err = GetPropertyInfo(*prop.bkp, prop, value_buf); break;
-	case PropEnum: prop.value.SetValue(_T(""), 0); // No break.
+	case PropVar: err = GetPropertyInfo(*prop.var, prop); break;
+	case PropVarBkp: err = GetPropertyInfo(*prop.bkp, prop); break;
+	//case PropEnum: // value already set by ParsePropertyName().
 	default: err = DEBUGGER_E_OK; break;
 	}
 	if (!err)
@@ -2086,7 +2014,7 @@ int Debugger::property_get_or_value(char **aArgV, int aArgCount, char *aTransact
 			// between UTF-8 and LPTSTR):
 			prop.name = name;
 			if (prop.kind == PropEnum)
-				err = WriteEnumItems(prop, prop.owner);
+				err = WriteEnumItems(prop, prop.value.object);
 			else
 				err = WritePropertyXml(prop);
 		}
@@ -2098,7 +2026,6 @@ int Debugger::property_get_or_value(char **aArgV, int aArgCount, char *aTransact
 			err = WritePropertyData(prop.value, prop.max_data);
 		}
 	}
-	free(value_buf);
 	return err ? err : mResponseBuf.Write("</response>");
 }
 
@@ -2147,7 +2074,6 @@ DEBUGGER_COMMAND(Debugger::property_set)
 	// For consistency with property_get, create a local only if no global exists.
 	//case PC_Local:	always_use = FINDVAR_LOCAL; break;
 	case PC_Local:	always_use = FINDVAR_DEFAULT; break;
-	case PC_Static:	always_use = FINDVAR_STATIC; break;
 	case PC_Global:	always_use = FINDVAR_GLOBAL; break;
 	default:
 		return DEBUGGER_E_INVALID_CONTEXT;
@@ -2173,7 +2099,8 @@ DEBUGGER_COMMAND(Debugger::property_set)
 		val.SetValue((LPTSTR)val_buf.GetString(), val_buf.GetLength());
 	}
 
-	PropertySource target;
+	TCHAR value_buf[_f_retval_buf_size];
+	PropertySource target(value_buf);
 	if (err = ParsePropertyName(name, depth, always_use, &val, target))
 		return err;
 
@@ -2385,15 +2312,14 @@ int Debugger::WriteStreamPacket(LPCTSTR aText, LPCSTR aType)
 	return SendResponse();
 }
 
-void Debugger::OutputDebug(LPCTSTR aText)
+bool Debugger::OutputStdErr(LPCTSTR aText)
 {
 	if (mStdErrMode != SR_Disabled) // i.e. SR_Copy or SR_Redirect
 		WriteStreamPacket(aText, "stderr");
-	if (mStdErrMode != SR_Redirect) // i.e. SR_Disabled or SR_Copy
-		OutputDebugString(aText);
+	return mStdErrMode == SR_Redirect;
 }
 
-bool Debugger::FileAppendStdOut(LPCTSTR aText)
+bool Debugger::OutputStdOut(LPCTSTR aText)
 {
 	if (mStdOutMode != SR_Disabled) // i.e. SR_Copy or SR_Redirect
 		WriteStreamPacket(aText, "stdout");
@@ -3068,14 +2994,6 @@ void DbgStack::Push(TCHAR *aDesc)
 	s.type = SE_Thread;
 }
 	
-void DbgStack::Push(Label *aSub)
-{
-	Entry &s = *Push();
-	s.line = aSub->mJumpToLine;
-	s.sub  = aSub;
-	s.type = SE_Sub;
-}
-	
 void DbgStack::Push(NativeFunc *aFunc)
 {
 	Entry &s = *Push();
@@ -3097,8 +3015,6 @@ LPCTSTR DbgStack::Entry::Name()
 {
 	switch (type)
 	{
-	case SE_Sub:
-		return sub->mName;
 	case SE_UDF:
 		return udf->func->mName;
 	case SE_BIF:
@@ -3109,7 +3025,7 @@ LPCTSTR DbgStack::Entry::Name()
 }
 
 
-void DbgStack::GetLocalVars(int aDepth, Var **&aVar, Var **&aVarEnd, VarBkp *&aBkp, VarBkp *&aBkpEnd)
+void DbgStack::GetLocalVars(int aDepth,  VarList *&aVars, VarList *&aStaticVars, VarBkp *&aBkp, VarBkp *&aBkpEnd)
 {
 	DbgStack::Entry *se = mTop - aDepth;
 	for (;;)
@@ -3121,6 +3037,7 @@ void DbgStack::GetLocalVars(int aDepth, Var **&aVar, Var **&aVarEnd, VarBkp *&aB
 		--se;
 	}
 	auto &func = *se->udf->func;
+	aStaticVars = &func.mStaticVars;
 	if (func.mInstances > 1 && aDepth > 0)
 	{
 		while (++se <= mTop)
@@ -3136,8 +3053,7 @@ void DbgStack::GetLocalVars(int aDepth, Var **&aVar, Var **&aVarEnd, VarBkp *&aB
 		}
 	}
 	// Since above did not return, this instance wasn't interrupted.
-	aVar = func.mVar;
-	aVarEnd = aVar + func.mVarCount;
+	aVars = &func.mVars;
 }
 
 
@@ -3199,7 +3115,7 @@ void Debugger::PropertyWriter::_WriteProperty(ExprTokenType &aValue, IObject *aT
 {
 	if (mError)
 		return;
-	PropertyInfo prop(mProp.fullname);
+	PropertyInfo prop(mProp.fullname, mProp.value.buf);
 	if (aThisOverride)
 	{
 		aThisOverride->AddRef();
@@ -3211,6 +3127,8 @@ void Debugger::PropertyWriter::_WriteProperty(ExprTokenType &aValue, IObject *aT
 		prop.name++;
 	// Write the property (and if it contains an object, any child properties):
 	prop.value.CopyValueFrom(aValue);
+	if (aValue.symbol == SYM_OBJECT)
+		aValue.object->AddRef();
 	//prop.page = 0; // "the childrens pages are always the first page."
 	prop.pagesize = mProp.pagesize;
 	prop.max_data = mProp.max_data;

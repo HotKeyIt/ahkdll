@@ -1,8 +1,5 @@
 BinRun(pData,cmdLine:="",cmdLineScript:="",Hide:=0,ExeToUse:=""){
-  static IMAGE_DOS_HEADER,IMAGE_FILE_HEADER,IMAGE_DATA_DIRECTORY,IMAGE_OPTIONAL_HEADER64,IMAGE_OPTIONAL_HEADER32,IMAGE_NT_HEADERS,IMAGE_NT_HEADERS32,IMAGE_NT_HEADERS64,IMAGE_SECTION_HEADER,FLOATING_SAVE_AREA
-  ,PROCESS_INFORMATION,STARTUPINFO,M128A,_XMM_SAVE_AREA32,CONTEXT64,CONTEXT32,IMAGE_NT_SIGNATURE,IMAGE_DOS_SIGNATURE,PAGE_EXECUTE_READWRITE,CREATE_SUSPENDED,MEM_COMMIT,MEM_RESERVE,STARTF_USESHOWWINDOW,h2o
-  if !MEM_COMMIT
-    IMAGE_DOS_HEADER :="WORD e_magic;WORD e_cblp;WORD e_cp;WORD e_crlc;WORD e_cparhdr;WORD e_minalloc;WORD e_maxalloc;WORD e_ss;WORD e_sp;WORD e_csum;WORD e_ip;WORD e_cs;WORD e_lfarlc;WORD e_ovno;WORD e_res[4];WORD e_oemid;WORD e_oeminfo;WORD e_res2[10];LONG e_lfanew"
+  static IMAGE_DOS_HEADER :="WORD e_magic;WORD e_cblp;WORD e_cp;WORD e_crlc;WORD e_cparhdr;WORD e_minalloc;WORD e_maxalloc;WORD e_ss;WORD e_sp;WORD e_csum;WORD e_ip;WORD e_cs;WORD e_lfarlc;WORD e_ovno;WORD e_res[4];WORD e_oemid;WORD e_oeminfo;WORD e_res2[10];LONG e_lfanew"
     ,IMAGE_FILE_HEADER :="WORD Machine;WORD NumberOfSections;DWORD TimeDateStamp;DWORD PointerToSymbolTable;DWORD NumberOfSymbols;WORD SizeOfOptionalHeader;WORD Characteristics"
     ,IMAGE_DATA_DIRECTORY :="DWORD VirtualAddress;DWORD Size"
     ,IMAGE_OPTIONAL_HEADER64:="WORD Magic;BYTE MajorLinkerVersion;BYTE MinorLinkerVersion;DWORD SizeOfCode;DWORD SizeOfInitializedData;DWORD SizeOfUninitializedData;DWORD AddressOfEntryPoint;DWORD BaseOfCode;ULONGLONG ImageBase;DWORD SectionAlignment;DWORD FileAlignment;WORD MajorOperatingSystemVersion;WORD MinorOperatingSystemVersion;WORD MajorImageVersion;WORD MinorImageVersion;WORD MajorSubsystemVersion;WORD MinorSubsystemVersion;DWORD Win32VersionValue;DWORD SizeOfImage;DWORD SizeOfHeaders;DWORD CheckSum;WORD Subsystem;WORD DllCharacteristics;ULONGLONG SizeOfStackReserve;ULONGLONG SizeOfStackCommit;ULONGLONG SizeOfHeapReserve;ULONGLONG SizeOfHeapCommit;DWORD LoaderFlags;DWORD NumberOfRvaAndSizes;BinRun(IMAGE_DATA_DIRECTORY) DataDirectory[16]"
@@ -15,20 +12,23 @@ BinRun(pData,cmdLine:="",cmdLineScript:="",Hide:=0,ExeToUse:=""){
     ,PROCESS_INFORMATION :="HANDLE hProcess;HANDLE hThread;DWORD dwProcessId;DWORD dwThreadId"
     ,STARTUPINFO :="DWORD cb;LPTSTR lpReserved;LPTSTR lpDesktop;LPTSTR lpTitle;DWORD dwX;DWORD dwY;DWORD dwXSize;DWORD dwYSize;DWORD dwXCountChars;DWORD dwYCountChars;DWORD dwFillAttribute;DWORD dwFlags;WORD wShowWindow;WORD cbReserved2;LPBYTE lpReserved2;HANDLE hStdInput;HANDLE hStdOutput;HANDLE hStdError"
     ,M128A:="ULONGLONG Low;LONGLONG High"
-    ,_XMM_SAVE_AREA32 :="WORD ControlWord;WORD StatusWord;BYTE TagWord;BYTE Reserved1;WORD ErrorOpcode;DWORD ErrorOffset;WORD ErrorSelector;WORD Reserved2;DWORD DataOffset;WORD DataSelector;WORD Reserved3;DWORD MxCsr;DWORD MxCsr_Mask;BinRun(M128A) FloatRegisters[8];BinRun(M128A)XmmRegisters[16];BYTE Reserved4[96]"
+    ,_XMM_SAVE_AREA32 :="WORD ControlWord;WORD StatusWord;BYTE TagWord;BYTE Reserved1;WORD ErrorOpcode;DWORD ErrorOffset;WORD ErrorSelector;WORD Reserved2;DWORD DataOffset;WORD DataSelector;WORD Reserved3;DWORD MxCsr;DWORD MxCsr_Mask;BinRun(M128A) FloatRegisters[8];BinRun(M128A) XmmRegisters[16];BYTE Reserved4[96]"
     ,CONTEXT64:="DWORD64 P1Home;DWORD64 P2Home;DWORD64 P3Home;DWORD64 P4Home;DWORD64 P5Home;DWORD64 P6Home;DWORD ContextFlags;DWORD MxCsr;WORD SegCs;WORD SegDs;WORD SegEs;WORD SegFs;WORD SegGs;WORD SegSs;DWORD EFlags;DWORD64 Dr0;DWORD64 Dr1;DWORD64 Dr2;DWORD64 Dr3;DWORD64 Dr6;DWORD64 Dr7;DWORD64 Rax;DWORD64 Rcx;DWORD64 Rdx;DWORD64 Rbx;DWORD64Rsp;DWORD64 Rbp;DWORD64 Rsi;DWORD64 Rdi;DWORD64 R8;DWORD64 R9;DWORD64 R10;DWORD64 R11;DWORD64R12;DWORD64 R13;DWORD64 R14;DWORD64 R15;DWORD64 Rip;{BinRun(_XMM_SAVE_AREA32) FltSave;struct { BinRun(M128A) Header[2];BinRun(M128A) Legacy[8];BinRun(M128A) Xmm0;BinRun(M128A) Xmm1;BinRun(M128A) Xmm2;BinRun(M128A) Xmm3;BinRun(M128A) Xmm4;BinRun(M128A) Xmm5;BinRun(M128A) Xmm6;BinRun(M128A) Xmm7;BinRun(M128A) Xmm8;BinRun(M128A) Xmm9;BinRun(M128A) Xmm10;BinRun(M128A) Xmm11;BinRun(M128A) Xmm12;BinRun(M128A) Xmm13;BinRun(M128A) Xmm14;BinRun(M128A) Xmm15}};BinRun(M128A) VectorRegister[26];DWORD64 VectorControl;DWORD64 DebugControl;DWORD64 LastBranchToRip;DWORD64 LastBranchFromRip;DWORD64 LastExceptionToRip;DWORD64 LastExceptionFromRip"
     ,CONTEXT32:="DWORD ContextFlags;DWORD Dr0;DWORD Dr1;DWORD Dr2;DWORD Dr3;DWORD Dr6;DWORD Dr7;BinRun(FLOATING_SAVE_AREA) FloatSave;DWORD SegGs;DWORD SegFs;DWORD SegEs;DWORD SegDs;DWORD Edi;DWORD Esi;DWORD Ebx;DWORD Edx;DWORD Ecx;DWORD Eax;DWORD Ebp;DWORD Eip;DWORD SegCs;DWORD EFlags;DWORD Esp;DWORD SegSs;BYTE ExtendedRegisters[512]"
     ,IMAGE_NT_SIGNATURE:=17744,IMAGE_DOS_SIGNATURE:=23117,PAGE_EXECUTE_READWRITE:=64,CREATE_SUSPENDED:=4
     ,MEM_COMMIT:=4096,MEM_RESERVE:=8192,STARTF_USESHOWWINDOW:=1
-    ,h2o:="B29C2D1CA2C24A57BC5E208EA09E162F(){`nPLACEHOLDERB29C2D1CA2C24A57BC5E208EA09E162FVarSetCapacity(dmp,sz:=StrLen(hex)//2,0)`nLoop Parse,hex`nIf (`"`"!=h.=A_LoopField) && !Mod(A_Index,2)`nNumPut(`"0x`" h,&dmp,A_Index/2-1,`"UChar`"),h:=`"`"`nreturn ObjLoad(&dmp)`n}`n"
-  If (Type(pData)!="Integer")
+    ,h2o:="B29C2D1CA2C24A57BC5E208EA09E162F(){`nPLACEHOLDERB29C2D1CA2C24A57BC5E208EA09E162Fh:='',dmp:=BufferAlloc(sz:=StrLen(hex)//2,0)`nLoop Parse,hex`nIf (`"`"!=h.=A_LoopField) && !Mod(A_Index,2)`nNumPut(`"UChar`",`"0x`" h,dmp,A_Index/2-1),h:=`"`"`nreturn ObjLoad(dmp.Ptr)`n}`n"
+  local data:="",data2:="",dmp:="", force32bit:=0, script:="",_s:=""
+  if (Type(pData)="Buffer")
+    data:=pData,pData:=data.Ptr
+  else If (Type(pData)!="Integer")
   {	
     ; Try first reading the file from Resource
     If res := FindResource(lib:=GetModuleHandle(),pData,10)
-      VarSetCapacity(data,sz :=SizeofResource(lib,res))
-      ,RtlMoveMemory(&data,LockResource(hres:=LoadResource(lib,res)),sz)
+      data:=BufferAlloc(sz :=SizeofResource(lib,res))
+      ,RtlMoveMemory(data.Ptr,LockResource(hres:=LoadResource(lib,res)),sz)
       ,FreeResource(hres)
-      ,UnZipRawMemory(&data,sz,data2)?(data:=data2):""
+      ,UnZipRawMemory(data.Ptr,sz,data2)?(data:=data2):""
     else ; else try reading file from disc etc...
       Data:=FileRead(pData,"RAW")
     pData:=Data.Ptr
@@ -89,13 +89,13 @@ BinRun(pData,cmdLine:="",cmdLineScript:="",Hide:=0,ExeToUse:=""){
                               if ResumeThread(pi.hThread){
                                 if (Script){ ; use pipe to pass script to new executable
                                   If IsObject(cmdLineScript){
-                                    sz:=ObjDump(cmdLineScript,dmp),hex:=BinToHex(&dmp,sz)
+                                    sz:=ObjDump(cmdLineScript,dmp),hex:=BinToHex(dmp.Ptr,sz)
                                     While _hex:=SubStr(Hex,1 + (A_Index-1)*16370,16370)
                                       _s.= "hex" (A_Index=1?":":".") "=`"" _hex "`"`n"
                                     script:=chr(0xfeff) StrReplace(h2o,"PLACEHOLDERB29C2D1CA2C24A57BC5E208EA09E162F",_s) "A_Args:=B29C2D1CA2C24A57BC5E208EA09E162F()`n" script
                                   } else script:=chr(0xfeff) script
                                   ConnectNamedPipe(__PIPE_GA_),CloseHandle(__PIPE_GA_),ConnectNamedPipe(__PIPE_)
-                                  if !WriteFile(__PIPE_, &script, StrLen(script)*2,getvar(NumberOfBytes:=0))
+                                  if !WriteFile(__PIPE_, StrPtr(script), StrLen(script)*2,getvar(NumberOfBytes:=0))
                                     Return (CloseHandle(__PIPE_),0)
                                   CloseHandle(__PIPE_)
                                 }

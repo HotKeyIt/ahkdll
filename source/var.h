@@ -34,12 +34,9 @@ enum VarTypes
   // any function (namely a BIV_* function).
   VAR_ALIAS  // VAR_ALIAS must always have a non-NULL mAliasFor.  In other ways it's the same as VAR_NORMAL.  VAR_ALIAS is never seen because external users call Var::Type(), which automatically resolves ALIAS to some other type.
 , VAR_NORMAL // Most variables, such as those created by the user, are this type.
+, VAR_CONSTANT // or as I like to say, not variable.
 , VAR_VIRTUAL
-, VAR_CLIPBOARD
-, VAR_LAST_WRITABLE = VAR_CLIPBOARD  // Keep this in sync with any changes to the set of writable variables.
-#define VAR_IS_READONLY(var) ((var).Type() > VAR_LAST_WRITABLE)
-, VAR_BUILTIN
-, VAR_LAST_TYPE = VAR_BUILTIN
+, VAR_LAST_TYPE = VAR_VIRTUAL
 };
 
 typedef UCHAR VarTypeType;     // UCHAR vs. VarTypes to save memory.
@@ -84,19 +81,22 @@ struct VarBkp // This should be kept in sync with any changes to the Var class. 
 	void ToToken(ExprTokenType &aValue);
 };
 
-typedef VarSizeType (* BuiltInVarType)(LPTSTR aBuf, LPTSTR aVarName);
-typedef ResultType (* BuiltInVarSetType)(LPTSTR aBuf, LPTSTR aVarName);
+#define BIV_DECL_R(name) void name(ResultToken &aResultToken, LPTSTR aVarName)
+#define BIV_DECL_W(name) void name(ResultToken &aResultToken, LPTSTR aVarName, ExprTokenType &aValue)
+#define BIV_DECL_RW(name) BIV_DECL_R(name); BIV_DECL_W(name##_Set)
 
 struct VirtualVar
 {
-	BuiltInVarType Get; // Usage similar to Var::Get().
-	BuiltInVarSetType Set;
+	typedef BIV_DECL_R((* Getter));
+	typedef BIV_DECL_W((* Setter));
+	Getter Get;
+	Setter Set;
 };
 
 struct VarEntry
 {
 	LPTSTR name;
-	VirtualVar type; // Function pointer(s) or VarTypes constant.
+	VirtualVar type;
 };
 
 #pragma warning(push)
@@ -142,31 +142,27 @@ public:
 	};
 	union
 	{
+		LPTSTR mCharContents = sEmptyString; // Invariant: Anyone setting mByteCapacity to 0 must also set mCharContents to the empty string.
 		char *mByteContents;
-		LPTSTR mCharContents;
 	};
 	union
 	{
+		Var *mAliasFor = nullptr; // The variable for which this variable is an alias.
 		VarSizeType mByteLength;  // How much is actually stored in it currently, excluding the zero terminator.
-		Var *mAliasFor;           // The variable for which this variable is an alias.
 	};
-	union
-	{
-		VarSizeType mByteCapacity; // In bytes.  Includes the space for the zero terminator.
-		BuiltInVarType mBIV;
-	};
-	AllocMethodType mHowAllocated; // Keep adjacent/contiguous with the below to save memory.
-	#define VAR_ATTRIB_CONTENTS_OUT_OF_DATE						0x01 // Combined with VAR_ATTRIB_IS_INT64/DOUBLE/OBJECT to indicate mContents is not current.
-	#define VAR_ATTRIB_UNINITIALIZED							0x02 // Var requires initialization before use.
-	#define VAR_ATTRIB_CONTENTS_OUT_OF_DATE_UNTIL_REASSIGNED	0x04 // Indicates that the VAR_ATTRIB_CONTENTS_OUT_OF_DATE flag should be kept until the variable is reassigned.
-	#define VAR_ATTRIB_NOT_NUMERIC								0x08 // A prior call to IsNumeric() determined the var's value is PURE_NOT_NUMERIC.
-	#define VAR_ATTRIB_IS_INT64									0x10 // Var's proper value is in mContentsInt64.
-	#define VAR_ATTRIB_IS_DOUBLE								0x20 // Var's proper value is in mContentsDouble.
-	#define VAR_ATTRIB_IS_OBJECT								0x40 // Var's proper value is in mObject.
-	#define VAR_ATTRIB_VIRTUAL_OPEN								0x80 // Virtual var is open for writing.
+	VarSizeType mByteCapacity = 0; // In bytes.  Includes the space for the zero terminator.
+	AllocMethodType mHowAllocated = ALLOC_NONE; // Keep adjacent/contiguous with the below to save memory.
+	#define VAR_ATTRIB_CONTENTS_OUT_OF_DATE	0x01 // Combined with VAR_ATTRIB_IS_INT64/DOUBLE/OBJECT to indicate mContents is not current.
+	#define VAR_ATTRIB_UNINITIALIZED		0x02 // Var requires initialization before use.
+	#define VAR_ATTRIB_HAS_ASSIGNMENT		0x04 // Used during load time to detect vars that are not assigned anywhere.
+	#define VAR_ATTRIB_NOT_NUMERIC			0x08 // A prior call to IsNumeric() determined the var's value is PURE_NOT_NUMERIC.
+	#define VAR_ATTRIB_IS_INT64				0x10 // Var's proper value is in mContentsInt64.
+	#define VAR_ATTRIB_IS_DOUBLE			0x20 // Var's proper value is in mContentsDouble.
+	#define VAR_ATTRIB_IS_OBJECT			0x40 // Var's proper value is in mObject.
+	#define VAR_ATTRIB_VIRTUAL_OPEN			0x80 // Virtual var is open for writing.
 	#define VAR_ATTRIB_CACHE (VAR_ATTRIB_IS_INT64 | VAR_ATTRIB_IS_DOUBLE | VAR_ATTRIB_NOT_NUMERIC) // These three are mutually exclusive.
-	#define VAR_ATTRIB_TYPES (VAR_ATTRIB_IS_INT64 | VAR_ATTRIB_IS_DOUBLE | VAR_ATTRIB_IS_OBJECT) // These are mutually exclusive (but NOT_NUMERIC may be combined with OBJECT or BINARY_CLIP).
-	#define VAR_ATTRIB_OFTEN_REMOVED (VAR_ATTRIB_CACHE | VAR_ATTRIB_CONTENTS_OUT_OF_DATE | VAR_ATTRIB_UNINITIALIZED | VAR_ATTRIB_CONTENTS_OUT_OF_DATE_UNTIL_REASSIGNED)
+	#define VAR_ATTRIB_TYPES (VAR_ATTRIB_IS_INT64 | VAR_ATTRIB_IS_DOUBLE | VAR_ATTRIB_IS_OBJECT) // These are mutually exclusive (but NOT_NUMERIC may be combined with OBJECT).
+	#define VAR_ATTRIB_OFTEN_REMOVED (VAR_ATTRIB_CACHE | VAR_ATTRIB_CONTENTS_OUT_OF_DATE | VAR_ATTRIB_UNINITIALIZED)
 	VarAttribType mAttrib;  // Bitwise combination of the above flags (but many of them may be mutually exclusive).
 	#define VAR_GLOBAL			0x01
 	#define VAR_LOCAL			0x02
@@ -183,66 +179,46 @@ public:
 	// but even if it's not a fluke, it doesn't seem worth the increase in memory for scripts with many
 	// thousands of variables.
 
-	friend class Line; // For access to mBIV.
 #ifdef CONFIG_DEBUGGER
 	friend class Debugger;
 #endif
 
-	void AssignBinaryNumber(__int64 aNumberAsInt64, VarAttribType aAttrib = VAR_ATTRIB_IS_INT64)
+	// Caller has verified mType == VAR_VIRTUAL.
+	bool HasSetter() { return mVV->Set; }
+	ResultType AssignVirtual(ExprTokenType &aValue);
+
+	// Unconditionally accepts new memory, bypassing the usual redirection to Assign() for VAR_VIRTUAL.
+	void _AcceptNewMem(LPTSTR aNewMem, VarSizeType aLength);
+
+	ResultType AssignBinaryNumber(__int64 aNumberAsInt64, VarAttribType aAttrib = VAR_ATTRIB_IS_INT64);
+
+	void UpdateContents()
 	{
-		// Relies on the fact that aliases can't point to other aliases (enforced by UpdateAlias()).
-		Var &var = *(mType == VAR_ALIAS ? mAliasFor : this);
-		if (var.mType == VAR_VIRTUAL)
+		ASSERT(mType != VAR_ALIAS); // Caller has already resolved aliases.
+		if (mAttrib & VAR_ATTRIB_CONTENTS_OUT_OF_DATE)
 		{
-			// Virtual vars have no binary number cache, as their value may be calculated on-demand.
-			// Additionally, THE CACHE MUST NOT BE USED due to the union containing mVV.
+			// THE FOLLOWING ISN'T NECESSARY BECAUSE THE ASSIGN() CALLS BELOW DO IT:
+			//mAttrib &= ~VAR_ATTRIB_CONTENTS_OUT_OF_DATE;
 			TCHAR value_string[MAX_NUMBER_SIZE];
-			if (aAttrib & VAR_ATTRIB_IS_INT64)
-				ITOA64(aNumberAsInt64, value_string);
-			else
-				FTOA(*(double *)&aNumberAsInt64, value_string, _countof(value_string));
-			var.mVV->Set(value_string, var.mName);
-			return;
-		}
-
-		if (var.mAttrib & VAR_ATTRIB_IS_OBJECT) // mObject will be overwritten below via the union.
-			var.ReleaseObject(); // This removes the attribute prior to calling Release() and potentially __Delete().
-
-		var.mContentsInt64 = aNumberAsInt64;
-		var.mAttrib &= ~(VAR_ATTRIB_TYPES | VAR_ATTRIB_NOT_NUMERIC | VAR_ATTRIB_UNINITIALIZED | VAR_ATTRIB_CONTENTS_OUT_OF_DATE_UNTIL_REASSIGNED);
-		var.mAttrib |= (VAR_ATTRIB_CONTENTS_OUT_OF_DATE | aAttrib); // Must be done prior to below.  aAttrib indicates the type of binary number.
-		
-		if (var.mType == VAR_CLIPBOARD) // Clipboard can't use either read or write caching.
-		{
-			var.UpdateContents(); // Update contents based on the new binary number just stored above. This call also removes the VAR_ATTRIB_CONTENTS_OUT_OF_DATE flag.
-			var.mAttrib &= ~VAR_ATTRIB_TYPES; // Must be done after the above: Prevent the cached binary number from ever being used because this variable is considered volatile (e.g. external changes to clipboard) and the cache can't be trusted.
+			if (mAttrib & VAR_ATTRIB_IS_INT64)
+			{
+				Assign(ITOA64(mContentsInt64, value_string)); // Return value currently not checked for this or the below.
+				mAttrib |= VAR_ATTRIB_IS_INT64; // Re-enable the cache because Assign() disables it (since all other callers want that).
+			}
+			else if (mAttrib & VAR_ATTRIB_IS_DOUBLE)
+			{
+				Assign(value_string, FTOA(mContentsDouble, value_string, _countof(value_string)));
+				mAttrib |= VAR_ATTRIB_IS_DOUBLE; // Re-enable the cache because Assign() disables it (since all other callers want that).
+			}
+			//else nothing to update, which shouldn't happen in this block unless there's a flaw or bug somewhere.
 		}
 	}
 
-	void UpdateContents() // Supports both VAR_NORMAL and VAR_CLIPBOARD.
+	void _SetObject(IObject *aObject)
 	{
-		// Relies on the fact that aliases can't point to other aliases (enforced by UpdateAlias()).
-		Var &var = *(mType == VAR_ALIAS ? mAliasFor : this);
-		if (var.mAttrib & VAR_ATTRIB_CONTENTS_OUT_OF_DATE)
-		{
-			// THE FOLLOWING ISN'T NECESSARY BECAUSE THE ASSIGN() CALLS BELOW DO IT:
-			//var.mAttrib &= ~VAR_ATTRIB_CONTENTS_OUT_OF_DATE;
-			TCHAR value_string[MAX_NUMBER_SIZE];
-			bool restore_attribute = var.mAttrib & VAR_ATTRIB_CONTENTS_OUT_OF_DATE_UNTIL_REASSIGNED; // The Assign() calls also clears this flag, hence, set this variable to indicate wether to restore this flag or not.
-			if (var.mAttrib & VAR_ATTRIB_IS_INT64)
-			{
-				var.Assign(ITOA64(var.mContentsInt64, value_string)); // Return value currently not checked for this or the below.
-				var.mAttrib |= VAR_ATTRIB_IS_INT64; // Re-enable the cache because Assign() disables it (since all other callers want that).
-			}
-			else if (var.mAttrib & VAR_ATTRIB_IS_DOUBLE)
-			{
-				var.Assign(value_string, FTOA(var.mContentsDouble, value_string, _countof(value_string)));
-				var.mAttrib |= VAR_ATTRIB_IS_DOUBLE; // Re-enable the cache because Assign() disables it (since all other callers want that).
-			}
-			//else nothing to update, which shouldn't happen in this block unless there's a flaw or bug somewhere.
-			if (restore_attribute)
-				var.mAttrib |= VAR_ATTRIB_CONTENTS_OUT_OF_DATE_UNTIL_REASSIGNED | VAR_ATTRIB_CONTENTS_OUT_OF_DATE;
-		}
+		mObject = aObject;
+		// Mark this variable to indicate it contains an object (objects are never considered numeric).
+		mAttrib |= VAR_ATTRIB_IS_OBJECT | VAR_ATTRIB_NOT_NUMERIC;
 	}
 
 	VarSizeType _CharLength() { return mByteLength / sizeof(TCHAR); }
@@ -264,7 +240,7 @@ public:
 	// string to it.  There is now some code there that tries to detect when that happens.
 	_thread_local static TCHAR sEmptyString[1]; // See above.
 
-	VarSizeType Get(LPTSTR aBuf = NULL);
+	void Get(ResultToken &aResultToken);
 	ResultType AssignHWND(HWND aWnd);
 	ResultType Assign(Var &aVar);
 	ResultType Assign(ExprTokenType &aToken);
@@ -304,28 +280,24 @@ public:
 #endif
 	}
 
-	inline ResultType Assign(DWORD aValueToAssign) // For some reason, this function is actually faster when not __forceinline.
+	inline ResultType Assign(DWORD aValueToAssign)
 	{
-		AssignBinaryNumber(aValueToAssign, VAR_ATTRIB_CONTENTS_OUT_OF_DATE|VAR_ATTRIB_IS_INT64);
-		return OK;
+		return AssignBinaryNumber(aValueToAssign, VAR_ATTRIB_CONTENTS_OUT_OF_DATE|VAR_ATTRIB_IS_INT64);
 	}
 
-	inline ResultType Assign(int aValueToAssign) // For some reason, this function is actually faster when not __forceinline.
+	inline ResultType Assign(int aValueToAssign)
 	{
-		AssignBinaryNumber(aValueToAssign, VAR_ATTRIB_CONTENTS_OUT_OF_DATE|VAR_ATTRIB_IS_INT64);
-		return OK;
+		return AssignBinaryNumber(aValueToAssign, VAR_ATTRIB_CONTENTS_OUT_OF_DATE|VAR_ATTRIB_IS_INT64);
 	}
 
-	inline ResultType Assign(__int64 aValueToAssign) // For some reason, this function is actually faster when not __forceinline.
+	inline ResultType Assign(__int64 aValueToAssign)
 	{
-		AssignBinaryNumber(aValueToAssign, VAR_ATTRIB_CONTENTS_OUT_OF_DATE|VAR_ATTRIB_IS_INT64);
-		return OK;
+		return AssignBinaryNumber(aValueToAssign, VAR_ATTRIB_CONTENTS_OUT_OF_DATE|VAR_ATTRIB_IS_INT64);
 	}
 
-	inline ResultType Assign(VarSizeType aValueToAssign) // For some reason, this function is actually faster when not __forceinline.
+	inline ResultType Assign(VarSizeType aValueToAssign)
 	{
-		AssignBinaryNumber(aValueToAssign, VAR_ATTRIB_CONTENTS_OUT_OF_DATE|VAR_ATTRIB_IS_INT64);
-		return OK;
+		return AssignBinaryNumber(aValueToAssign, VAR_ATTRIB_CONTENTS_OUT_OF_DATE|VAR_ATTRIB_IS_INT64);
 	}
 
 	inline ResultType Assign(double aValueToAssign)
@@ -335,36 +307,36 @@ public:
 		// the compiler resolves it into something that performs better than a memcpy into a temporary variable.
 		// Benchmarks show that the performance is at most a few percent worse than having code similar to
 		// AssignBinaryNumber() in here.
-		AssignBinaryNumber(*(__int64 *)&aValueToAssign, VAR_ATTRIB_CONTENTS_OUT_OF_DATE|VAR_ATTRIB_IS_DOUBLE);
-		return OK;
+		return AssignBinaryNumber(*(__int64 *)&aValueToAssign, VAR_ATTRIB_CONTENTS_OUT_OF_DATE|VAR_ATTRIB_IS_DOUBLE);
 	}
 
 	ResultType AssignSkipAddRef(IObject *aValueToAssign);
 
-	inline ResultType Assign(IObject *aValueToAssign)
+	ResultType Assign(IObject *aValueToAssign)
 	{
 		aValueToAssign->AddRef(); // Must be done before Release() in case the only other reference to this object is already in var.  Such a case seems too rare to be worth optimizing by returning early.
 		return AssignSkipAddRef(aValueToAssign);
 	}
 
-	inline IObject *&Object()
+	IObject *Object()
 	{
-		return (mType == VAR_ALIAS) ? mAliasFor->mObject : mObject;
+		Var &var = *ResolveAlias();
+		return var.mObject;
 	}
 
 	IObject *ToObject()
 	{
-		if (mType == VAR_ALIAS)
-			return mAliasFor->ToObject();
-		if (IsObject())
-			return mObject;
-		MaybeWarnUninitialized();
+		Var &var = *ResolveAlias();
+		if (var.IsObject())
+			return var.mObject;
+		var.MaybeWarnUninitialized();
 		return NULL;
 	}
 
 	void ReleaseObject()
 	// Caller has ensured that IsObject() == true, not just HasObject().
 	{
+		ASSERT(IsObject());
 		// Remove the attributes applied by AssignSkipAddRef().
 		mAttrib &= ~(VAR_ATTRIB_IS_OBJECT | VAR_ATTRIB_NOT_NUMERIC);
 		// MUST BE DONE AFTER THE ABOVE IN CASE IT TRIGGERS __Delete:
@@ -375,10 +347,8 @@ public:
 	}
 
 	SymbolType IsNumeric()
-	// Supports VAR_NORMAL and VAR_CLIPBOARD.  It would need review if any other types need to be supported.
 	{
-		// Relies on the fact that aliases can't point to other aliases (enforced by UpdateAlias()).
-		Var &var = *(mType == VAR_ALIAS ? mAliasFor : this);
+		Var &var = *ResolveAlias();
 		switch (var.mAttrib & VAR_ATTRIB_CACHE) // This switch() method should squeeze a little more performance out of it compared to doing "&" for every attribute.  Only works for attributes that are mutually-exclusive, which these are.
 		{
 		case VAR_ATTRIB_IS_INT64: return PURE_INTEGER;
@@ -386,7 +356,7 @@ public:
 		case VAR_ATTRIB_NOT_NUMERIC: return PURE_NOT_NUMERIC;
 		}
 		// Since above didn't return, its numeric status isn't yet known, so determine it.  For simplicity
-		// (and because Length() doesn't support VAR_CLIPBOARD), the following doesn't check MAX_NUMBER_LENGTH.
+		// (and because Length() doesn't support VAR_VIRTUAL), the following doesn't check MAX_NUMBER_LENGTH.
 		// So any string of digits that is too long to be a legitimate number is still treated as a number
 		// anyway (overflow).  Most of our callers are expressions anyway, in which case any unquoted
 		// series of digits would've been assigned as a pure number and handled above.
@@ -396,8 +366,8 @@ public:
 		// trigger a second warning if we didn't suppress ours and StdOut/OutputDebug warn mode is in effect.
 		// IF-IS is the only caller that wouldn't cause a warning, but in that case ExpandArgs() would have
 		// already caused one.
-		SymbolType is_pure_numeric = ::IsNumeric(var.Contents(FALSE), true, false, true); // Contents() vs. mContents to support VAR_CLIPBOARD lvalue in a pure expression such as "clipboard:=1,clipboard+=5"
-		if (is_pure_numeric == PURE_NOT_NUMERIC && var.mType != VAR_CLIPBOARD)
+		SymbolType is_pure_numeric = ::IsNumeric(var.Contents(), true, false, true); // Contents() vs. mContents to support VAR_VIRTUAL lvalue in a pure expression such as "a_clipboard:=1,a_clipboard+=5"
+		if (is_pure_numeric == PURE_NOT_NUMERIC && var.mType != VAR_VIRTUAL)
 			var.mAttrib |= VAR_ATTRIB_NOT_NUMERIC;
 		return is_pure_numeric;
 	}
@@ -406,8 +376,7 @@ public:
 	// Unlike IsNumeric(), this is purely based on whether a pure number was assigned to this variable.
 	// Implicitly supports all types of variables, since these attributes are used only by VAR_NORMAL.
 	{
-		// Relies on the fact that aliases can't point to other aliases (enforced by UpdateAlias()).
-		Var &var = *(mType == VAR_ALIAS ? mAliasFor : this);
+		Var &var = *ResolveAlias();
 		switch (var.mAttrib & VAR_ATTRIB_CACHE)
 		{
 		case VAR_ATTRIB_IS_INT64: return PURE_INTEGER;
@@ -416,47 +385,40 @@ public:
 		return PURE_NOT_NUMERIC;
 	}
 
-	inline int IsPureNumericOrObject()
+	int IsPureNumericOrObject()
 	{
-		// Relies on the fact that aliases can't point to other aliases (enforced by UpdateAlias()).
-		Var &var = *(mType == VAR_ALIAS ? mAliasFor : this);
-		return (var.mAttrib & (VAR_ATTRIB_IS_INT64 | VAR_ATTRIB_IS_DOUBLE | VAR_ATTRIB_IS_OBJECT));
+		Var &var = *ResolveAlias();
+		return var.mAttrib & (VAR_ATTRIB_IS_INT64 | VAR_ATTRIB_IS_DOUBLE | VAR_ATTRIB_IS_OBJECT);
 	}
 
 	__int64 ToInt64()
-	// This function supports VAR_NORMAL and VAR_CLIPBOARD. It would need review to support any other types.
 	{
-		// Relies on the fact that aliases can't point to other aliases (enforced by UpdateAlias()).
-		Var &var = *(mType == VAR_ALIAS ? mAliasFor : this);
+		Var &var = *ResolveAlias();
 		if (var.mAttrib & VAR_ATTRIB_IS_INT64)
 			return var.mContentsInt64;
 		if (var.mAttrib & VAR_ATTRIB_IS_DOUBLE)
 			// Since mContentsDouble is the true value of this var, cast it to __int64 rather than
-			// calling ATOI64(var.Contents()), which might produce a different result in some cases.
+			// calling ATOI64(Contents()), which might produce a different result in some cases.
 			return (__int64)var.mContentsDouble;
 		// Otherwise, this var does not contain a pure number.
-		return ATOI64(var.Contents()); // Call Contents() vs. using mContents in case of VAR_CLIPBOARD or VAR_ATTRIB_IS_DOUBLE, and also for maintainability.
+		return ATOI64(var.Contents()); // Call Contents() vs. using mContents in case of VAR_VIRTUAL or VAR_ATTRIB_IS_DOUBLE, and also for maintainability.
 	}
 
 	double ToDouble()
-	// This function supports VAR_NORMAL and VAR_CLIPBOARD. It would need review to support any other types.
 	{
-		// Relies on the fact that aliases can't point to other aliases (enforced by UpdateAlias()).
-		Var &var = *(mType == VAR_ALIAS ? mAliasFor : this);
+		Var &var = *ResolveAlias();
 		if (var.mAttrib & VAR_ATTRIB_IS_DOUBLE)
 			return var.mContentsDouble;
 		if (var.mAttrib & VAR_ATTRIB_IS_INT64)
 			return (double)var.mContentsInt64; // As expected, testing shows that casting an int64 to a double is at least 100 times faster than calling ATOF() on the text version of that integer.
 		// Otherwise, this var does not contain a pure number.
-		return ATOF(var.Contents()); // Call Contents() vs. using mContents in case of VAR_CLIPBOARD, and also for maintainability and consistency with ToInt64().
+		return ATOF(var.Contents()); // Call Contents() vs. using mContents in case of VAR_VIRTUAL, and also for maintainability and consistency with ToInt64().
 	}
 
 	ResultType ToDoubleOrInt64(ExprTokenType &aToken)
 	// aToken.var is the same as the "this" var. Converts var into a number and stores it numerically in aToken.
-	// Supports VAR_NORMAL and VAR_CLIPBOARD.  It would need review if any other types need to be supported.
 	{
-		// Relies on the fact that aliases can't point to other aliases (enforced by UpdateAlias()).
-		Var &var = *(mType == VAR_ALIAS ? mAliasFor : this);
+		Var &var = *ResolveAlias();
 		switch (aToken.symbol = var.IsNumeric())
 		{
 		case PURE_INTEGER:
@@ -474,7 +436,7 @@ public:
 	void ToTokenSkipAddRef(ExprTokenType &aToken)
 	// See ToDoubleOrInt64 for comments.
 	{
-		Var &var = *(mType == VAR_ALIAS ? mAliasFor : this);
+		Var &var = *ResolveAlias();
 		switch (var.mAttrib & VAR_ATTRIB_TYPES)
 		{
 		case VAR_ATTRIB_IS_INT64:
@@ -516,27 +478,26 @@ public:
 
 	bool ToReturnValue(ResultToken &aResultToken)
 	{
-		Var &var = *(mType == VAR_ALIAS ? mAliasFor : this);
+		Var &var = *ResolveAlias();
 		// Caller may have checked attrib/type, but check it anyway for maintainability:
 		if ((var.mAttrib & (VAR_ATTRIB_IS_INT64 | VAR_ATTRIB_IS_DOUBLE | VAR_ATTRIB_IS_OBJECT | VAR_ATTRIB_UNINITIALIZED)) != 0
 			// For static/global variables, return a direct pointer to Contents() and
 			// let the caller copy it into persistent memory if needed.
-			|| !var.IsNonStaticLocal())
+			|| (var.Scope() & (VAR_LOCAL_STATIC | VAR_GLOBAL)))
 		{
 			var.ToToken(aResultToken);
 			return true;
 		}
+		// var is either local or a free var (this is an upvar/downvar).
 		if (mType == VAR_ALIAS)
-			// This var is an alias for another var.  Even though the target is local,
-			// there's no quick way to determine if it's a local of this function, so
-			// it's best to assume that we can't steal its memory.  Instead we rely on
-			// ExpandExpression copying the string into the deref buffer.
+			// This var is an alias for another var.  Even if the target is local,
+			// it's most likely not a local of the same function, so not about to be freed.
 			return false;
 		// Var is local.  Since the function is returning, the var is about to be freed.
 		// Instead of copying and then freeing its contents, let the caller take ownership:
-		if (var.mHowAllocated == ALLOC_MALLOC && var.mByteCapacity)
+		if (mHowAllocated == ALLOC_MALLOC && mByteCapacity)
 		{
-			// var.mCharContents was allocated with malloc(); pass it back to the caller.
+			// mCharContents was allocated with malloc(); pass it back to the caller.
 			aResultToken.StealMem(&var);
 		}
 		else
@@ -546,8 +507,8 @@ public:
 			// because this isn't a number and therefore never needs UpdateContents().
 			// Although Contents() should be harmless, we want to be absolutely sure
 			// length isn't increased since that could cause buffer overflow.
-			memcpy(aResultToken.marker = aResultToken.buf, var.mCharContents, var.mByteLength + sizeof(TCHAR));
-			aResultToken.marker_length = var.mByteLength / sizeof(TCHAR);
+			memcpy(aResultToken.marker = aResultToken.buf, mCharContents, mByteLength + sizeof(TCHAR));
+			aResultToken.marker_length = mByteLength / sizeof(TCHAR);
 		}
 		return true;
 	}
@@ -563,9 +524,7 @@ public:
 	}
 
 	// Not an enum so that it can be global more easily:
-	#define VAR_ALWAYS_FREE                    0 // This item and the next must be first and numerically adjacent to
-	// HotKeyIt removed due to separate static var list
-	//#define VAR_ALWAYS_FREE_BUT_EXCLUDE_STATIC 1 // each other so that VAR_ALWAYS_FREE_LAST covers only them.
+	#define VAR_ALWAYS_FREE                    0
 	#define VAR_ALWAYS_FREE_LAST               1 // Never actually passed as a parameter, just a placeholder (see above comment).
 	#define VAR_NEVER_FREE                     2
 	#define VAR_FREE_IF_LARGE                  3
@@ -598,8 +557,7 @@ public:
 	// Translates this var into its text equivalent, putting the result into aBuf and
 	// returning the position in aBuf of its new string terminator.
 	{
-		// Relies on the fact that aliases can't point to other aliases (enforced by UpdateAlias()).
-		Var &var = *(mType == VAR_ALIAS ? mAliasFor : this);
+		Var &var = *ResolveAlias();
 		// v1.0.44.14: Changed it so that ByRef/Aliases report their own name rather than the target's/caller's
 		// (it seems more useful and intuitive).
 		var.UpdateContents(); // Update mContents and mLength for use below.
@@ -629,18 +587,38 @@ public:
 		return aBuf;
 	}
 
-	__forceinline VarTypeType Type()
+	VarTypeType Type()
 	{
-		// Relies on the fact that aliases can't point to other aliases (enforced by UpdateAlias()).
-		return (mType == VAR_ALIAS) ? mAliasFor->mType : mType;
+		Var &var = *ResolveAlias();
+		return var.mType;
 	}
 
-	__forceinline bool IsStatic()
+	bool IsAlias()
+	{
+		return mType == VAR_ALIAS;
+	}
+
+	// Convert VAR_NORMAL to VAR_CONSTANT.
+	void MakeReadOnly()
+	{
+		ASSERT(mType == VAR_NORMAL); // Should never be called on VAR_ALIAS or VAR_VIRTUAL.
+		ASSERT(!(mAttrib & VAR_ATTRIB_UNINITIALIZED));
+		mType = VAR_CONSTANT;
+	}
+
+#define VAR_IS_READONLY(var) ((var).IsReadOnly()) // This used to rely on var.Type(), which is no longer enough.
+	bool IsReadOnly()
+	{
+		auto &var = *ResolveAlias();
+		return var.mType == VAR_CONSTANT || (var.mType == VAR_VIRTUAL && !var.HasSetter());
+	}
+
+	bool IsStatic()
 	{
 		return (mScope & VAR_LOCAL_STATIC);
 	}
 
-	__forceinline bool IsLocal()
+	bool IsLocal()
 	{
 		// Since callers want to know whether this variable is local, even if it's a local alias for a
 		// global, don't use the method below:
@@ -648,7 +626,7 @@ public:
 		return (mScope & VAR_LOCAL);
 	}
 
-	__forceinline bool IsNonStaticLocal()
+	bool IsNonStaticLocal()
 	{
 		// Since callers want to know whether this variable is local, even if it's a local alias for a
 		// global, don't resolve VAR_ALIAS.
@@ -658,48 +636,70 @@ public:
 		return (mScope & (VAR_LOCAL|VAR_LOCAL_STATIC)) == VAR_LOCAL;
 	}
 
-	__forceinline bool IsFuncParam()
+	bool IsFuncParam()
 	{
 		return (mScope & VAR_LOCAL_FUNCPARAM);
 	}
 
-	__forceinline bool IsDeclared()
+	bool IsDeclared()
 	// Returns true if this is a declared var, such as "local var", "static var" or a func param.
 	{
 		return (mScope & VAR_DECLARED);
 	}
 
-	__forceinline bool IsSuperGlobal()
+	bool IsSuperGlobal()
 	{
 		return (mScope & VAR_SUPER_GLOBAL);
 	}
 
-	__forceinline UCHAR &Scope()
+	UCHAR &Scope()
 	{
 		return mScope;
 	}
 
-	__forceinline bool IsObject() // L31: Indicates this var contains an object reference which must be released if the var is emptied.
+	static LPCTSTR DeclarationType(int aDeclType)
+	{
+		if (aDeclType & VAR_LOCAL)
+		{
+			if (aDeclType & VAR_LOCAL_STATIC)
+				return _T("static");
+			if (aDeclType & VAR_LOCAL_FUNCPARAM)
+				return _T("parameter");
+			return _T("local");
+		}
+		return _T("global");
+	}
+
+	bool IsAssignedSomewhere()
+	{
+		//return mAttrib & VAR_ATTRIB_HAS_ASSIGNMENT;
+		return mAttrib != VAR_ATTRIB_UNINITIALIZED;
+		// When this function is called (at load time), any of the other attributes
+		// would mean that this var has a value, which means that it doesn't require
+		// an assignment.  If it lacks all attributes, it's presumably a built-in var.
+	}
+
+	void MarkAssignedSomewhere()
+	{
+		mAttrib |= VAR_ATTRIB_HAS_ASSIGNMENT;
+	}
+
+	bool IsObject() // L31: Indicates this var contains an object reference which must be released if the var is emptied.
 	{
 		return (mAttrib & VAR_ATTRIB_IS_OBJECT);
 	}
 
-	__forceinline bool HasObject() // L31: Indicates this var's effective value is an object reference.
+	bool HasObject() // L31: Indicates this var's effective value is an object reference.
 	{
-		// Relies on the fact that aliases can't point to other aliases (enforced by UpdateAlias()).
-		Var &var = *(mType == VAR_ALIAS ? mAliasFor : this);
-		return (var.mAttrib & VAR_ATTRIB_IS_OBJECT);
+		Var &var = *ResolveAlias();
+		return var.IsObject();
 	}
 
-	VarSizeType ByteCapacity() // __forceinline() on Capacity, Length, and/or Contents bloats the code and reduces performance.
+	VarSizeType ByteCapacity()
 	// Capacity includes the zero terminator (though if capacity is zero, there will also be a zero terminator in mContents due to it being "").
 	{
-		// Relies on the fact that aliases can't point to other aliases (enforced by UpdateAlias()).
-		Var &var = *(mType == VAR_ALIAS ? mAliasFor : this);
-		// Fix for v1.0.37: Callers want the clipboard's capacity returned, if it has a capacity.  This is
-		// because Capacity() is defined as being the size available in Contents(), which for the clipboard
-		// would be a pointer to the clipboard-buffer-to-be-written (or zero if none).
-		return var.mType == VAR_CLIPBOARD ? g_clip->mCapacity : var.mByteCapacity;
+		Var &var = *ResolveAlias();
+		return var.mByteCapacity;
 	}
 
 	VarSizeType CharCapacity()
@@ -716,25 +716,22 @@ public:
 	// A fast alternative to Length() that avoids updating mContents.
 	// Caller must ensure that Type() is VAR_NORMAL.
 	{
-		// Relies on the fact that aliases can't point to other aliases (enforced by UpdateAlias()).
-		Var &var = *(mType == VAR_ALIAS ? mAliasFor : this);
-		// mAttrib is checked because mByteLength isn't applicable when the var contains a pure number
-		// or an object.  VAR_ATTRIB_BINARY_CLIP is also included, but doesn't affect the result because
-		// mByteLength is always non-zero in that case.
+		Var &var = *ResolveAlias();
+		// mAttrib is checked because mByteLength isn't applicable when the var contains
+		// a pure number or an object.
 		return (var.mAttrib & VAR_ATTRIB_TYPES) ? TRUE : var.mByteLength != 0;
 	}
 
-	VarSizeType &ByteLength() // __forceinline() on Capacity, Length, and/or Contents bloats the code and reduces performance.
+	VarSizeType &ByteLength()
 	// This should not be called to discover a non-NORMAL var's length (nor that of an environment variable)
 	// because their lengths aren't knowable without calling Get().
 	// Returns a reference so that caller can use this function as an lvalue.
 	{
-		// Relies on the fact that aliases can't point to other aliases (enforced by UpdateAlias()).
-		Var &var = *(mType == VAR_ALIAS ? mAliasFor : this);
-		// There's no apparent reason to avoid using mByteLength for VAR_CLIPBOARD/VAR_VIRTUAL,
-		// so it's used temporarily for those despite the comments below.  Even if mByteLength
+		Var &var = *ResolveAlias();
+		// There's no apparent reason to avoid using mByteLength for VAR_VIRTUAL,
+		// so it's used temporarily despite the comments below.  Even if mByteLength
 		// isn't always accurate, it's no less accurate than a static variable would be.
-		//if (var.mType == VAR_NORMAL)
+		//if (mType == VAR_NORMAL)
 		{
 			if (var.mAttrib & VAR_ATTRIB_CONTENTS_OUT_OF_DATE)
 				var.UpdateContents();  // Update mContents (and indirectly, mByteLength).
@@ -776,50 +773,32 @@ public:
 	// would almost always have called Assign(NULL, ...) prior to calling Contents(), which would have
 	// cleared the VAR_ATTRIB_CONTENTS_OUT_OF_DATE flag.
 	{
-		// Relies on the fact that aliases can't point to other aliases (enforced by UpdateAlias()).
-		Var &var = *(mType == VAR_ALIAS ? mAliasFor : this);
-		if ((var.mAttrib & VAR_ATTRIB_CONTENTS_OUT_OF_DATE) && aAllowUpdate) // VAR_ATTRIB_CONTENTS_OUT_OF_DATE is checked here and in the function below, for performance.
-			var.UpdateContents(); // This also clears the VAR_ATTRIB_CONTENTS_OUT_OF_DATE flag unless VAR_ATTRIB_CONTENTS_OUT_OF_DATE_UNTIL_REASSIGNED is set.
-		if (var.mType == VAR_NORMAL)
+		if (mType == VAR_ALIAS)
+			return mAliasFor->Contents(aAllowUpdate, aNoWarnUninitializedVar);
+		if ((mAttrib & VAR_ATTRIB_CONTENTS_OUT_OF_DATE) && aAllowUpdate) // VAR_ATTRIB_CONTENTS_OUT_OF_DATE is checked here and in the function below, for performance.
+			UpdateContents(); // This also clears the VAR_ATTRIB_CONTENTS_OUT_OF_DATE.
+		if (mType == VAR_NORMAL)
 		{
 			// If aAllowUpdate is FALSE, the caller just wants to compare mCharContents to another address.
 			// Otherwise, the caller is probably going to use mCharContents and might want a warning:
 			if (aAllowUpdate && !aNoWarnUninitializedVar)
-				var.MaybeWarnUninitialized();
-			return var.mCharContents;
+				MaybeWarnUninitialized();
 		}
-		if (var.mType == VAR_VIRTUAL)
+		if (mType == VAR_VIRTUAL && !(mAttrib & VAR_ATTRIB_VIRTUAL_OPEN) && aAllowUpdate)
 		{
-			if (!(var.mAttrib & VAR_ATTRIB_VIRTUAL_OPEN))
-			{
-				// This var isn't open for writing, so populate mCharContents with its current value.
-				var.AssignVirtualVar(var);
-				// The following ensures the contents are updated each time Contents() is called:
-				var.mAttrib &= ~VAR_ATTRIB_VIRTUAL_OPEN;
-			}
-			return var.mCharContents;
+			// This var isn't open for writing, so populate mCharContents with its current value.
+			PopulateVirtualVar();
+			// The following ensures the contents are updated each time Contents() is called:
+			mAttrib &= ~VAR_ATTRIB_VIRTUAL_OPEN;
 		}
-		if (var.mType == VAR_CLIPBOARD)
-			// The returned value will be a writable mem area if clipboard is open for write.
-			// Otherwise, the clipboard will be opened physically, if it isn't already, and
-			// a pointer to its contents returned to the caller:
-			return g_clip->Contents();
-		return sEmptyString; // For reserved vars (but this method should probably never be called for them).
+		return mCharContents;
 	}
 
-	ResultType AssignVirtualVar(Var &aVar)
+	// Populate a virtual var with its current value, as a string.
 	// Caller has verified aVar->mType == VAR_VIRTUAL.
-	// Caller should call Close() afterward if this is VAR_CLIPBOARD.
-	// Caller should remove VAR_ATTRIB_VIRTUAL_OPEN afterward if this->mType == VAR_VIRTUAL.
-	{
-		VarSizeType len = aVar.mVV->Get(NULL, aVar.mName); // Get value size (estimate).
-		if (!AssignString(NULL, len)) // Allocate buffer.
-			return FAIL;
-		SetCharLength(aVar.mVV->Get(mCharContents, aVar.mName)); // Get value.
-		return OK;
-	}
+	ResultType PopulateVirtualVar();
 
-	__forceinline void ConvertToNonAliasIfNecessary() // __forceinline because it's currently only called from one place.
+	void ConvertToNonAliasIfNecessary() // __forceinline because it's currently only called from one place.
 	// When this function actually converts an alias into a normal variable, the variable's old
 	// attributes (especially mContents and mCapacity) become dominant again.  This prevents a memory
 	// leak in a case where a UDF is defined to provide a default value for a ByRef parameter, and is
@@ -829,113 +808,80 @@ public:
 		mType = VAR_NORMAL; // It might already be this type, so this is just in case it's VAR_ALIAS.
 	}
 
-	__forceinline Var *ResolveAlias()
+	Var *GetAliasFor()
 	{
-		// Relies on the fact that aliases can't point to other aliases (enforced by UpdateAlias()).
-		return (mType == VAR_ALIAS) ? mAliasFor : this; // Return target if it's an alias, or itself if not.
+		ASSERT(mType == VAR_ALIAS);
+		return mAliasFor;
 	}
 
-	__forceinline void UpdateAlias(Var *aTargetVar) // __forceinline because it's currently only called from one place.
-	// Caller must ensure that aTargetVar isn't NULL.
-	// When this function actually converts a normal variable into an alias , the variable's old
-	// attributes (especially mContents and mCapacity) are hidden/suppressed by virtue of all Var:: methods
-	// obeying VAR_ALIAS and resolving it to be the target variable.  This prevents a memory
-	// leak in a case where a UDF is defined to provide a default value for a ByRef parameter, and is
-	// called both with and without that parameter.
+	Var *ResolveAlias()
 	{
-		// BELOW IS THE MEANS BY WHICH ALIASES AREN'T ALLOWED TO POINT TO OTHER ALIASES, ONLY DIRECTLY TO
-		// THE TARGET VAR.
-		// Resolve aliases-to-aliases for performance and to increase the expectation of
-		// reliability since a chain of aliases-to-aliases might break if an alias in
-		// the middle is ever allowed to revert to a non-alias (or gets deleted).
-		// A caller may ask to create an alias to an alias when a function calls another
-		// function and passes to it one of its own byref-params.
-		while (aTargetVar->mType == VAR_ALIAS)
-			aTargetVar = aTargetVar->mAliasFor;
+		// Return target if it's an alias, or itself if not.
+		return mType == VAR_ALIAS ? mAliasFor->ResolveAlias() : this;
+	}
 
-		// The following is done only after the above in case there's ever a way for the above
-		// to circle back to become this variable.
-		// Prevent potential infinite loops in other methods by refusing to change an alias
-		// to point to itself.
-		if (aTargetVar == this)
-			return;
+	// Makes this var an alias of aTargetVar, or aTargetVar's target if it's an alias.
+	// Copies any internal mObject ref used for managing the lifetime of the alias.
+	void UpdateAlias(Var *aTargetVar);
 
+	// Unconditionally makes this var an alias of aTargetVar, without resolving aliases.
+	// Caller must ensure aTargetVar != nullptr && aTargetVar != this.
+	void SetAliasDirect(Var *aTargetVar)
+	{
 		mAliasFor = aTargetVar; // Should always be non-NULL due to various checks elsewhere.
 		mType = VAR_ALIAS; // It might already be this type, so this is just in case it's VAR_NORMAL.
 	}
 
+	// Retrieves the IObject interface for managing this var's lifetime,
+	// converting this var to an alias for a new freevar if needed.
+	IObject *GetRef();
+	ResultType MoveToNewFreeVar(Var &aOther);
+
 	ResultType Close()
 	{
-		// Relies on the fact that aliases can't point to other aliases (enforced by UpdateAlias()).
-		Var &var = *(mType == VAR_ALIAS ? mAliasFor : this);
-		if (var.mType == VAR_CLIPBOARD && g_clip->IsReadyForWrite())
-			return g_clip->Commit(); // Writes the new clipboard contents to the clipboard and closes it.
-		if (var.mType == VAR_VIRTUAL)
+		if (mType == VAR_ALIAS)
+			return mAliasFor->Close();
+		if (mType == VAR_VIRTUAL)
 		{
 			// Commit the value in our temporary buffer.
-			ResultType result = var.mVV->Set(var.mCharContents, var.mName);
+			auto result = AssignVirtual(ExprTokenType(mCharContents, CharLength()));
 			Free(); // Free temporary memory.
-			var.mAttrib &= ~VAR_ATTRIB_VIRTUAL_OPEN;
+			mAttrib &= ~VAR_ATTRIB_VIRTUAL_OPEN;
 			return result;
 		}
 		// VAR_ATTRIB_CONTENTS_OUT_OF_DATE is removed below for maintainability; it shouldn't be
 		// necessary because any caller of Close() should have previously called something that
 		// updates the flags, such as Contents().
-		var.mAttrib &= ~VAR_ATTRIB_OFTEN_REMOVED;
-		//else (already done above)
-		//	var.mAttrib &= ~VAR_ATTRIB_BINARY_CLIP;
+		mAttrib &= ~VAR_ATTRIB_OFTEN_REMOVED;
 		return OK; // In all other cases.
 	}
 
 	// Constructor:
-	Var(LPTSTR aVarName, VarEntry *aBuiltIn, UCHAR aScope)
+	Var(LPTSTR aVarName, UCHAR aScope)
 		// The caller must ensure that aVarName is non-null.
-		: mCharContents(sEmptyString) // Invariant: Anyone setting mCapacity to 0 must also set mContents to the empty string.
-		// Doesn't need initialization: , mContentsInt64(NULL)
-		, mByteLength(0) // This also initializes mAliasFor within the same union.
-		, mHowAllocated(ALLOC_NONE)
+		: mScope(aScope)
 		, mAttrib(VAR_ATTRIB_UNINITIALIZED) // Seems best not to init empty vars to VAR_ATTRIB_NOT_NUMERIC because it would reduce maintainability, plus finding out whether an empty var is numeric via IsNumeric() is a very fast operation.
-		, mScope(aScope)
 		, mName(aVarName) // Caller gave us a pointer to dynamic memory for this.
+		, mType(VAR_NORMAL)
 	{
-		if (!aBuiltIn)
-			mType = VAR_NORMAL;
-		else if ((UINT_PTR)aBuiltIn->type.Get <= VAR_LAST_TYPE) // Relies on the fact that numbers less than VAR_LAST_TYPE can never realistically match the address of any function.
-			mType = (VarTypeType)(UINT_PTR)aBuiltIn->type.Get;
-		else
-			if (aBuiltIn->type.Set)
-			{
-				mType = VAR_VIRTUAL;
-				mVV = &aBuiltIn->type;
-			}
-			else
-			{
-				mType = VAR_BUILTIN;
-				mBIV = aBuiltIn->type.Get; // This also initializes mCapacity within the same union.
-			}
-		if (mType != VAR_BUILTIN) 
-			mByteCapacity = 0; // This also initializes mBIV within the same union.
-		if (mType != VAR_NORMAL)
-			mAttrib = 0; // Any vars that aren't VAR_NORMAL are considered initialized, by definition.
 	}
 
-	Var()
-		//: Var(_T(""), NULL, 0) // Not supported by Visual C++ 2010.
-		// Initialized as above:
-		: mCharContents(sEmptyString)
-		, mByteLength(0)
-		, mAttrib(VAR_ATTRIB_UNINITIALIZED)
-		// For anonymous/temporary variables:
-		, mScope(VAR_LOCAL)
-		, mName(_T(""))
-		// Normally set as a result of !aBuiltIn:
-		, mType(VAR_NORMAL)
-		, mByteCapacity(0)
+	Var(LPTSTR aVarName, VarEntry *aBuiltIn, UCHAR aScope)
+		// The caller must ensure that aVarName is non-null.
+		: mScope(aScope)
+		, mName(aVarName) // Caller gave us a pointer to dynamic memory for this.
+		, mAttrib(0) // Any vars that aren't VAR_NORMAL are considered initialized, by definition.
+		, mType(VAR_VIRTUAL)
+		, mVV(&aBuiltIn->type)
+	{
+	}
+
+	Var() : Var(_T(""), 0)
+	{
 		// Vars constructed this way are for temporary use, and therefore must have mHowAllocated set
 		// as below to prevent the use of g_SimpleHeap->Malloc().  Otherwise, each Var could allocate
 		// some memory which cannot be freed until the program exits.
-		, mHowAllocated(ALLOC_MALLOC)
-	{
+		mHowAllocated = ALLOC_MALLOC;
 	}
 
 	void *operator new(size_t aBytes){ return malloc(aBytes); }
@@ -946,25 +892,45 @@ public:
 	void operator delete(void *aPtr, void *) {}
 
 
-	__forceinline bool IsUninitializedNormalVar()
+	bool IsUninitializedNormalVar()
 	{
-		// Relies on the fact that aliases can't point to other aliases (enforced by UpdateAlias()).
-		Var &var = *(mType == VAR_ALIAS ? mAliasFor : this);
-		return (var.mAttrib & VAR_ATTRIB_UNINITIALIZED);
+		Var &var = *ResolveAlias();
+		return var.mAttrib & VAR_ATTRIB_UNINITIALIZED;
 	}
 
-	__forceinline void MarkInitialized()
+	void MarkInitialized()
 	{
-		// Relies on the fact that aliases can't point to other aliases (enforced by UpdateAlias()).
-		Var &var = *(mType == VAR_ALIAS ? mAliasFor : this);
-		mAttrib &= ~VAR_ATTRIB_UNINITIALIZED;
+		Var &var = *ResolveAlias();
+		var.mAttrib &= ~VAR_ATTRIB_UNINITIALIZED;
 	}
 
-	__forceinline void MaybeWarnUninitialized();
+	void MarkUninitialized()
+	{
+		Var &var = *ResolveAlias();
+		var.mAttrib |= VAR_ATTRIB_UNINITIALIZED;
+	}
+
+	void MaybeWarnUninitialized();
 
 }; // class Var
 #pragma pack(pop) // Calling pack with no arguments restores the default value (which is 8, but "the alignment of a member will be on a boundary that is either a multiple of n or a multiple of the size of the member, whichever is smaller.")
 #pragma warning(pop)
+
+
+class VarRef : public ObjectBase, public Var
+{
+public:
+	VarRef() {}
+
+	~VarRef()
+	{
+		Free(VAR_ALWAYS_FREE, true);
+	}
+
+	ResultType Invoke(IObject_Invoke_PARAMS_DECL) { return INVOKE_NOT_HANDLED; }
+	IObject_Type_Impl("VarRef");
+};
+
 
 inline void ResultToken::StealMem(Var *aVar)
 // Caller must ensure that aVar->mType == VAR_NORMAL and aVar->mHowAllocated == ALLOC_MALLOC.
@@ -972,5 +938,6 @@ inline void ResultToken::StealMem(Var *aVar)
 	VarSizeType length = aVar->Length(); // Must not be combined with the line below, as the compiler is free to evaluate parameters in whatever order.
 	AcceptMem(aVar->StealMem(), length);
 }
+
 
 #endif

@@ -888,7 +888,7 @@ ResultType FileObject::Invoke(ResultToken &aResultToken, int aID, int aFlags, Ex
 					size = max_size; // max_size != SIZE_MAX implies target_var != NULL, so this is its capacity.
 				else
 					// Default to the byte count of the binary string, excluding the null-terminator.
-					size = target_var ? (DWORD)target_var->ByteLength() : (max_size - sizeof(TCHAR));
+					size = target_var ? (DWORD)target_var->ByteLength() : target_token.symbol == SYM_STRING ?(max_size - sizeof(TCHAR)) : max_size;
 			}
 			else
 			{
@@ -1013,8 +1013,6 @@ ResultType FileObject::Invoke(ResultToken &aResultToken, int aID, int aFlags, Ex
 
 	case M_Close:
 		mFile.Close();
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
 		return OK;
 	}
 		

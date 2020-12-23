@@ -12,6 +12,8 @@
 // sizeof_maxsize - helper for Struct and sizeof
 //
 BYTE sizeof_maxsize(TCHAR *buf);
+
+
 //
 // ObjectBase - Common base class, implements reference counting.
 //
@@ -101,7 +103,8 @@ class FlatVector
 	};
 	Data *data;
 	
-	_thread_local static Data Empty;
+	struct OneT : public Data { char zero_buf[sizeof(T)]; }; // zero_buf guarantees zero-termination when used for strings (fixes an issue observed in debug mode).
+	static OneT Empty;
 
 	void FreeRange(index_t i, index_t count)
 	{
@@ -163,7 +166,7 @@ public:
 };
 
 template <typename T, typename index_t>
-typename FlatVector<T, index_t>::Data FlatVector<T, index_t>::Empty = { 0, 0 };
+typename FlatVector<T, index_t>::OneT FlatVector<T, index_t>::Empty;
 
 
 //
@@ -278,8 +281,8 @@ protected:
 		Enum_Methods
 	};
 
-	ResultType GetEnumProp(UINT aIndex, Var *aVal, Var *aReserved);
-	ResultType GetEnumMethod(UINT aIndex, Var *aVal, Var *aReserved);
+	ResultType GetEnumProp(UINT &aIndex, Var *aName, Var *aVal);
+	ResultType GetEnumMethod(UINT &aIndex, Var *aName, Var *aVal);
 
 #ifndef _WIN64
 	// This is defined in ObjectBase on x64 builds to save space (due to alignment requirements).
@@ -336,7 +339,7 @@ public:
 	ExprTokenType mDefault;
 	bool mUnsorted = 0;
 	static void FreesPrototype(Object *aObject) 
-	{ 
+	{
 		aObject->mMethods.Free(); 
 		aObject->mFields.Free();
 	}
@@ -462,7 +465,6 @@ public:
 	ResultType PropCount(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 
 	// Methods and functions:
-	ResultType __Item(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	ResultType DeleteProp(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	ResultType DefineProp(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	ResultType DefineDefault(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
@@ -535,12 +537,12 @@ public:
 	Array *Clone();
 
 	bool ItemToToken(index_t aIndex, ExprTokenType &aToken);
-	ResultType GetEnumItem(UINT aIndex, Var *, Var *);
+	ResultType GetEnumItem(UINT &aIndex, Var *, Var *);
 
 	~Array();
 	static Array *Create(ExprTokenType *aValue[] = nullptr, index_t aCount = 0, bool aUnsorted = false);
 	static Array *FromArgV(LPTSTR *aArgV, int aArgC);
-	static Array *FromEnumerable(IObject *aEnum);
+	static Array *FromEnumerable(ExprTokenType &aEnum);
 	ResultType ToStrings(LPTSTR *aStrings, int &aStringCount, int aStringsMax);
 	void ToParams(ExprTokenType *token, ExprTokenType **param_list, ExprTokenType **aParam, int aParamCount);
 
@@ -630,10 +632,15 @@ class Map : public Object
 
 	Map *CloneTo(Map &aTo);
 
-	ResultType GetEnumItem(UINT aIndex, Var *, Var *);
+	ResultType GetEnumItem(UINT &aIndex, Var *, Var *);
 
 public:
 	static Map *Create(ExprTokenType *aParam[] = NULL, int aParamCount = 0, bool aUnsorted = false);
+
+	bool HasItem(ExprTokenType &aKey)
+	{
+		return GetItem(ExprTokenType(), aKey); // Conserves code size vs. calling FindItem() directly and is unlikely to perform worse.
+	}
 
 	bool GetItem(ExprTokenType &aToken, ExprTokenType &aKey)
 	{
@@ -683,8 +690,11 @@ public:
 		return SetItem(aKey, ExprTokenType(aValue));
 	}
 
+	ResultType SetItems(ExprTokenType *aParam[], int aParamCount);
+
 	// Methods callable by script.
 	ResultType __Item(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	ResultType Set(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	ResultType Capacity(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	ResultType Count(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	ResultType CaseSense(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
@@ -696,7 +706,7 @@ public:
 	ResultType MinIndex(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	ResultType MaxIndex(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 
-	static ObjectMember sMembers[11];
+	static ObjectMember sMembers[12];
 	_thread_local static Object *sPrototype, *sClass;
 };
 
@@ -713,7 +723,7 @@ class RegExMatchObject : public Object
 	int mPatternCount;
 	LPTSTR mMark;
 
-	ResultType GetEnumItem(UINT aIndex, Var *, Var *);
+	ResultType GetEnumItem(UINT &aIndex, Var *, Var *);
 
 	RegExMatchObject() : mHaystack(NULL), mOffset(NULL), mPatternName(NULL), mPatternCount(0), mMark(NULL) {}
 	
@@ -802,10 +812,14 @@ public:
 // TempInit: Required to dynamically init sMembers, sPrototype, sClass...
 //
 
+ResultType GetEnumerator(IObject *&aEnumerator, ExprTokenType &aEnumerable, int aVarCount, bool aDisplayError);
+ResultType CallEnumerator(IObject *aEnumerator, ExprTokenType *aParam[], int aParamCount, bool aDisplayError);
+
+
 class TempInit : public Object
 {
 public:
-	static Object *init1, *init2, *init3;
+	static Object *initObject, *initArray, *initMap, *initGui, *initUserMenu, *initUserMenuBar;
 };
 
 
@@ -897,7 +911,7 @@ public:
 
 	UINT_PTR SetPointer(UINT_PTR aPointer, __int64 aArrayItem = 1);
 	void ObjectToStruct(IObject *objfrom);
-	ResultType GetEnumItem(UINT aIndex, Var *, Var *);
+	ResultType GetEnumItem(UINT &aIndex, Var *, Var *);
 	Struct* CloneStruct(bool aSeparate = false, HANDLE aHeap = NULL);
 	ResultType __Enum(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	ResultType Invoke(IObject_Invoke_PARAMS_DECL);
@@ -997,5 +1011,4 @@ public:
 
 #endif
 
-ResultType GetEnumerator(IObject *&aEnumerator, IObject *aEnumerable, int aVarCount, bool aDisplayError);
-ResultType CallEnumerator(IObject *aEnumerator, Var *aVar0, Var *aVar1, bool aDisplayError);
+ResultType GetEnumerator(IObject *&aEnumerator, ExprTokenType &aEnumerable, int aVarCount, bool aDisplayError);

@@ -1,5 +1,6 @@
 CreateScript(script,pw:=""){
-  static mScript
+  static mScript:=""
+  local Data2:="",linetext:=""
   WorkingDir:=A_WorkingDir
   script:=StrReplace(StrReplace(script,"`n,`r`n"),"`r`r","`r")
   If RegExMatch(script,"m)^[^:]+:[^:]+|[a-zA-Z0-9#_@]+\{}$"){
@@ -12,17 +13,17 @@ CreateScript(script,pw:=""){
         }
         DataSize := SizeofResource(lib, res)
         ,hresdata := LoadResource(lib,res)
-        ,pData := LockResource(hresdata),UnZipRawMemory(pData,DataSize,Data2,pw)?pData:=&Data2:""
+        ,pData := LockResource(hresdata),UnZipRawMemory(pData,DataSize,Data2,pw)?pData:=Data2.Ptr:""
         If (DataSize){
           mScript := StrReplace(StrReplace(StrReplace(StrReplace(StrGet(pData,"UTF-8"),"`n","`r`n"),"`r`r","`r"),"`r`r","`r"),"`n`n","`n")
-          VarSetCapacity(line,16384*2)
+          line:=BufferAlloc(16384*2)
           Loop Parse, mScript,"`n","`r"
           {
-            CryptStringToBinaryW(&A_LoopField, 0, 0x1, &line, getvar(aSizeEncrypted:=16384*2), 0, 0)
-            if (NumGet(&line,"UInt") != 0x04034b50)
+            CryptStringToBinaryW(StrPtr(A_LoopField), 0, 0x1, line.Ptr, getvar(aSizeEncrypted:=16384*2), 0, 0)
+            if (NumGet(line,"UInt") != 0x04034b50)
               break
-            UnZipRawMemory(&line,aSizeEncrypted,linetext,pw)
-            ,aScript .= StrGet(&linetext,"UTF-8") "`r`n"
+            UnZipRawMemory(line.Ptr,aSizeEncrypted,linetext,pw)
+            ,aScript .= StrGet(StrPtr(linetext),"UTF-8") "`r`n"
           }
           if aScript
             mScript:= "`r`n" aScript "`r`n"
@@ -69,7 +70,7 @@ CreateScript(script,pw:=""){
         Continue
       If (RegExMatch(A_LoopField,"^[^:\s]+:[^:\s=]+$")){
         label:=StrSplit(A_LoopField,":")
-        If (label.Length=2 and IsLabel(label[1]) and IsLabel(label[2]))
+        If (label.Length=2) ; cannot test if global label exist inside function (out of scope): and IsLabel(label[1]) and IsLabel(label[2]))
           script .=SubStr(mScript
             , h:=InStr(mScript,"`r`n" label[1] ":`r`n")
             , InStr(mScript,"`r`n" label[2] ":`r`n")-h) . "`r`n"

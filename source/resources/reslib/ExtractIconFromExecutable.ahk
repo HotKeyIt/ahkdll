@@ -1,7 +1,5 @@
 ExtractIconFromExecutable(aFilespec, aIconNumber, aWidth, aHeight){
-	static LOAD_LIBRARY_AS_DATAFILE,RT_ICON,RT_GROUP_ICON
-	if !RT_ICON
-    LOAD_LIBRARY_AS_DATAFILE:=2,RT_ICON:=3,RT_GROUP_ICON := RT_ICON + 11
+	static LOAD_LIBRARY_AS_DATAFILE:=2,RT_ICON:=3,RT_GROUP_ICON := RT_ICON + 11
 	hicon := 0
 	; If the module is already loaded as an executable, LoadLibraryEx returns its handle.
 	; Otherwise each call will receive its own handle to a data file mapping.

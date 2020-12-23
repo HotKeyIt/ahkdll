@@ -60,21 +60,20 @@ GNU General Public License for more details.
 #define ltoupper(ch) (TBYTE)(UINT_PTR)CharUpper((LPTSTR)(TBYTE)(ch))  // For performance, some callers don't want return value cast to char.
 
 
-// Locale independent ctype (applied to the ASCII characters only)
-// isctype/iswctype affects the some non-ASCII characters.
+// Locale independent ctype (applied to the ASCII characters only).
 inline int cisctype(TBYTE c, int type)
 {
 	return (c & (~0x7F)) ? 0 : _isctype(c, type);
 }
 
-#define cisalpha(c)		cisctype(c, _ALPHA)
-#define cisalnum(c)		cisctype(c, _ALPHA | _DIGIT)
-#define cisdigit(c)		cisctype(c, _DIGIT)
-#define cisxdigit(c)	cisctype(c, _HEX)
-#define cisupper(c)		cisctype(c, _UPPER)
-#define cislower(c)		cisctype(c, _LOWER)
-#define cisprint(c)		cisctype(c, _ALPHA | _BLANK | _DIGIT | _PUNCT)
-#define cisspace(c)		cisctype(c, _SPACE)
+inline int cisalpha(TBYTE c)  { return ((c & ~0x7F) ? 0 : isalpha(c)); }
+inline int cisalnum(TBYTE c)  { return ((c & ~0x7F) ? 0 : isalnum(c)); }
+inline int cisdigit(TBYTE c)  { return ((c & ~0x7F) ? 0 : isdigit(c)); }
+inline int cisxdigit(TBYTE c) { return ((c & ~0x7F) ? 0 : isxdigit(c)); }
+inline int cisupper(TBYTE c)  { return ((c & ~0x7F) ? 0 : isupper(c)); }
+inline int cislower(TBYTE c)  { return ((c & ~0x7F) ? 0 : islower(c)); }
+inline int cisprint(TBYTE c)  { return ((c & ~0x7F) ? 0 : isprint(c)); }
+inline int cisspace(TBYTE c)  { return ((c & ~0x7F) ? 0 : isspace(c)); }
 
 // The results of toupper/tolower are implementations dependent (see below), though the test results are OK in VS2008's CRT.
 // MDSN: In order for toupper to give the expected results, __isascii and islower must both return nonzero.
@@ -87,15 +86,6 @@ inline TCHAR ctolower(TBYTE c)
 {
 	return cisupper(c) ? (c | 0x20) : c;
 }
-
-// Runtime setting dependent. "a" prefix stand for AutoHotkey.
-#define aisalpha(c)	((int)((::g->StringCaseSense == SCS_INSENSITIVE_LOCALE) ? IsCharAlpha(c) : cisalpha(c)))
-#define aisalnum(c)	((int)((::g->StringCaseSense == SCS_INSENSITIVE_LOCALE) ? IsCharAlphaNumeric(c) : cisalnum(c)))
-#define aisupper(c)	((int)((::g->StringCaseSense == SCS_INSENSITIVE_LOCALE) ? IsCharUpper(c) : cisupper(c)))
-#define aislower(c)	((int)((::g->StringCaseSense == SCS_INSENSITIVE_LOCALE) ? IsCharLower(c) : cislower(c)))
-
-#define atoupper(c)	((::g->StringCaseSense == SCS_INSENSITIVE_LOCALE) ? ltoupper(c) : ctoupper(c))
-#define atolower(c)	((::g->StringCaseSense == SCS_INSENSITIVE_LOCALE) ? ltolower(c) : ctolower(c))
 
 // NOTE: MOVING THINGS OUT OF THIS FILE AND INTO util.cpp can hurt benchmarks by 10% or more, so be careful
 // when doing so (even when the change seems inconsequential, it can impact benchmarks due to quirks of code
@@ -379,10 +369,25 @@ inline size_t strip_trailing_backslash(LPTSTR aPath)
 }
 
 
+// Returns aBuf if not surrounded by matching quote marks (" or ').
+// Otherwise returns aBuf+1 after terminating at the trailing quote mark.
+inline LPTSTR strip_quote_marks(LPTSTR aBuf)
+{
+	if (!aBuf || !(*aBuf == '"' || *aBuf == '\''))
+		return aBuf;
+	LPTSTR end = _tcschr(aBuf + 1, '\0');
+	if (end[-1] != *aBuf)
+		return aBuf;
+	end[-1] = '\0';
+	return aBuf + 1;
+}
 
-// If this is ever changed to allow symbols which are also valid hotkey modifiers,
-// be sure to update IsFunction() to allow for cases like "$(::fn_call()":
-#define IS_IDENTIFIER_CHAR(c) (cisalnum(c) || (c) == '_' || ((UINT)(c) > 0x7F))
+
+
+// For the following, checking for non-ASCII first avoids undefined behaviour in
+// isalnum/isalpha, which produce smaller code than using cisalnum/cisalpha.
+#define IS_IDENTIFIER_CHAR(c)			(UINT(c) > 0x7F || isalnum(c) || (c) == '_')
+#define IS_LEADING_IDENTIFIER_CHAR(c)	(UINT(c) > 0x7F || isalpha(c) || (c) == '_')
 template<typename T> inline T find_identifier_end(T aBuf)
 // Locates the next character which is not valid in an identifier (var, func, or obj.key name).
 {
@@ -538,7 +543,7 @@ int FTOA(double aValue, LPTSTR aBuf, int aBufSize);
 
 
 
-// v1.0.43.03: The following macros support the new "StringCaseSense Locale" setting.  This setting performs
+// The following macros support StringCaseSense parameters (0, 1, 'Locale').  Locale mode performs
 // 1 to 10 times slower for most things, but has the benefit of seeing characters like ä and Ä as identical
 // when insensitive.  MSDN implies that lstrcmpi() is the same as:
 //     CompareString(LOCALE_USER_DEFAULT, NORM_IGNORECASE, ...)
@@ -549,11 +554,9 @@ int FTOA(double aValue, LPTSTR aBuf, int aBufSize);
 // the program when the new locale-case-insensitive mode is in effect.
 #define tcscmp2(str1, str2, string_case_sense) ((string_case_sense) == SCS_INSENSITIVE ? _tcsicmp(str1, str2) \
 	: ((string_case_sense) == SCS_INSENSITIVE_LOCALE ? lstrcmpi(str1, str2) : _tcscmp(str1, str2)))
-#define g_tcscmp(str1, str2) tcscmp2(str1, str2, ::g->StringCaseSense)
 // The most common mode is listed first for performance:
 #define tcsstr2(haystack, needle, string_case_sense) ((string_case_sense) == SCS_INSENSITIVE ? tcscasestr(haystack, needle) \
 	: ((string_case_sense) == SCS_INSENSITIVE_LOCALE ? lstrcasestr(haystack, needle) : _tcsstr(haystack, needle)))
-#define g_tcsstr(haystack, needle) tcsstr2(haystack, needle, ::g->StringCaseSense)
 // For the following, caller must ensure that len1 and len2 aren't beyond the terminated length of the string
 // because CompareString() might not stop at the terminator when a length is specified.  Also, CompareString()
 // returns 0 on failure, but failure occurs only when parameter/flag is invalid, which should never happen in
@@ -719,17 +722,23 @@ HBITMAP LoadPicture(LPTSTR aFilespec, int aWidth, int aHeight, int &aImageType, 
 HBITMAP IconToBitmap(HICON ahIcon, bool aDestroyIcon);
 HBITMAP IconToBitmap32(HICON aIcon, bool aDestroyIcon); // Lexikos: Used for menu icons on Vista+. Creates a 32-bit (ARGB) device-independent bitmap from an icon.
 int CALLBACK FontEnumProc(ENUMLOGFONTEX *lpelfe, NEWTEXTMETRICEX *lpntme, DWORD FontType, LPARAM lParam);
-bool IsStringInList(LPTSTR aStr, LPTSTR aList, bool aFindExactMatch);
+//bool IsStringInList(LPTSTR aStr, LPTSTR aList, bool aFindExactMatch);
 LPTSTR InStrAny(LPTSTR aStr, LPTSTR aNeedle[], int aNeedleCount, size_t &aFoundLen);
 short IsDefaultType(LPTSTR aTypeDef);
 LPTSTR ResourceIndexToId(HMODULE aModule, LPCTSTR aType, int aIndex); // L17: Find integer ID of resource from index. i.e. IconNumber -> resource ID.
 HICON ExtractIconFromExecutable(LPTSTR aFilespec, int aIconNumber, int aWidth, int aHeight // L17: Extract icon of the appropriate size from an executable (or compatible) file.
 	, HMODULE *apModule = NULL);
+
+PWSTR GetDocumentsFolder();
+
+int CompareVersion(LPCTSTR a, LPCTSTR b);
 DWORD CryptAES(LPVOID lp, DWORD sz, TCHAR *pwd[], bool aEncrypt = true, DWORD aSID = 256);
 DWORD DecompressBuffer(void *buffer, LPVOID &aDataBuf, DWORD sz, TCHAR *pwd[] = NULL);
 DWORD CompressBuffer(BYTE *buffer, LPVOID &aDataBuf, DWORD sz, TCHAR *pwd[] = NULL);
 ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf);
 LONG WINAPI DisableHooksOnException(PEXCEPTION_POINTERS pExceptionPtrs);
+
+PWSTR GetDocumentsFolder();
 
 #if defined(_MSC_VER) && defined(_DEBUG)
 void OutputDebugStringFormat(LPCTSTR fmt, ...); // put debug message to the "Output" panel of Visual Studio.

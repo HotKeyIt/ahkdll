@@ -32,6 +32,8 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 	// following are used to find variable and also get size of a structure defined in variable
 	// this will hold the variable reference and offset that is given to size() to align if necessary in 64-bit
 	ResultToken result_token, obj_token;
+	result_token.SetResult(OK);
+	obj_token.SetResult(OK);
 	ExprTokenType Var1,Var2,Var3,Var4;
 	ExprTokenType *param[] = {&Var1,&Var2,&Var3,&Var4};
 	Var1.symbol = SYM_VAR;
@@ -69,7 +71,8 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 	// for loop will enumerate items in same order as it was created
 	index_t insert_pos = 0;
 	Struct *obj;
-	
+	IObject *buffer_obj;
+
 	if (!ParamIndexIsOmittedOrEmpty(3))
 		obj = (Struct *)aParam[3]->object; // use given handle (for substruct)
 	else
@@ -102,12 +105,27 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 		obj->mMain = obj;
 		obj->AddRef();
 		obj->mStructSize = (int)result_token.value_int64;
-		if (aParamCount > 1 && ParamIndexIsNumeric(1))
-			// second parameter exist and it is digit assumme this is new pointer for our structure
-			// caller must ensure zero initialize memory
-			obj->mStructMem = (UINT_PTR *)TokenToInt64(*aParam[1]);
-		else // no pointer given so allocate memory and fill memory with 0
-			// setting the memory after parsing definition saves a call to BIF_sizeof
+		if (aParamCount > 1 && !ParamIndexIsOmittedOrEmpty(1))
+		{
+			if (ParamIndexIsNumeric(1))
+				obj->mStructMem = (UINT_PTR *)TokenToInt64(*aParam[1]);
+			else if (buffer_obj = ParamIndexToObject(1))
+			{
+				char *aBuffer;
+				size_t  max_bytes = SIZE_MAX;
+				size_t ptr;
+				GetBufferObjectPtr(result_token, buffer_obj, ptr, max_bytes);
+				if (result_token.Exited())
+				{
+					if (obj)
+						obj->Release();
+					g_script->ScriptError(ERR_INVALID_ARG_TYPE, TokenToString(*aParam[1]));
+					return NULL;
+				}
+				obj->mStructMem = (UINT_PTR *)ptr;
+			}
+		}
+		else // no pointer given, allocate memory and fill memory with 0
 			obj->mStructMem = (UINT_PTR *)HeapAlloc(obj->mHeap, HEAP_ZERO_MEMORY, obj->mStructSize);
 	}
 
@@ -415,7 +433,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 				g->CurrentFunc = (UserFunc *)g_script->FindFunc(defbuf + 1,_tcscspn(defbuf,_T("(")) - 1);
 				if (g->CurrentFunc) // break if not found to identify error
 				{
-					Var1.var = g_script->FindVar(defbuf + _tcscspn(defbuf,_T("(")) + 1,_tcslen(defbuf) - _tcscspn(defbuf,_T("(")) - 3,NULL,FINDVAR_LOCAL,NULL);
+					Var1.var = g_script->FindVar(defbuf + _tcscspn(defbuf,_T("(")) + 1,_tcslen(defbuf) - _tcscspn(defbuf,_T("(")) - 3, FINDVAR_LOCAL);
 					g->CurrentFunc = bkpfunc;
 				}
 				else // release object and return
@@ -427,16 +445,21 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 				}
 			}
 			else if (g->CurrentFunc) // try to find local variable first
-				Var1.var = g_script->FindVar(defbuf + 1,_tcslen(defbuf) - 2,NULL,FINDVAR_LOCAL,NULL);
+				Var1.var = g_script->FindVar(defbuf + 1,_tcslen(defbuf) - 2,FINDVAR_LOCAL);
 			// try to find global variable if local was not found or we are not in func
 			if (Var1.var == NULL)
-				Var1.var = g_script->FindVar(defbuf + 1,_tcslen(defbuf) - 2,NULL,FINDVAR_GLOBAL,NULL);
+				Var1.var = g_script->FindVar(defbuf + 1,_tcslen(defbuf) - 2,FINDVAR_GLOBAL);
 			// variable found
 			if (Var1.var != NULL)
 			{
-				/*if (!ispointer && !_tcsncmp(tempbuf,buf,_tcslen(buf)) && !*keybuf)
-				{   // Whole definition is not a pointer and no key was given so create Structure from variable
+				/*if (!*keybuf && (!_tcsncmp(tempbuf,buf,_tcslen(buf)) || (ispointer && (!_tcsncmp(tempbuf, buf + 1, _tcslen(buf) - 1) || !_tcsncmp(tempbuf, buf, _tcslen(buf)-1)))))
+				{   // Whole definition since no key was given so create Structure from variable (pointer is not supported)
 					obj->Release();
+					if (ispointer)
+					{
+						g_script->ScriptError(ERR_INVALID_STRUCT, buf);
+						return NULL;
+					}
 					for (int i = aParamCount - 1; i; i--)
 						param[i] = aParam[i];
 					return Struct::Create(param,aParamCount);
@@ -491,6 +514,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 					/* bitfield */	, 0)))
 				{	// Out of memory.
 					obj->Release();
+					g_script->ScriptError(ERR_OUTOFMEM, defbuf);
 					return NULL;
 				}
 				_tcscpy(subdefbuf, defbuf);
@@ -527,13 +551,12 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 					field->mStruct->mHeap = obj->mHeap;
 					field->mStruct->mStructSize = *keybuf && arraydef ? (ispointer ? ptrsize : field->mSize) * arraydef : _tcschr(subdefbuf, '*') ? ptrsize : field->mSize;
 					
-					if (!_tcschr(subdefbuf, '*') && !_tcschr(subdefbuf,'['))
-						Var1.var = Var1.var;
-					else
+					if (!(!_tcschr(subdefbuf, '*') && !_tcschr(subdefbuf, '[')))
 					{
 						Var1.symbol = SYM_STRING;
 						Var1.marker = subdefbuf;
 					}
+					// else Var1.var = Var1.var;
 					//Var2.value_int64 = (UINT_PTR)(obj->mStructMem + offset);
 					Var3.symbol = SYM_MISSING;
 					Var4.object = field->mStruct;
@@ -611,11 +634,13 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 		}
 		else
 			obj->mMain = NULL;
+		
 		// now delete all properties that were used for recurring reference of sub structure definitions
-		if (CONDITION_TRUE == obj->GetEnumProp(0, 0, 0))
+		UINT aIndex;
+		if (CONDITION_TRUE == obj->GetEnumProp(aIndex, 0, 0))
 		{
 			Var vkey, vval;
-			for (; CONDITION_TRUE == obj->GetEnumProp(0, &vkey, &vval);)
+			for (; CONDITION_TRUE == obj->GetEnumProp(aIndex, &vkey, &vval);)
 				obj->DeleteOwnProp(vkey.Contents());
 			vkey.Free();
 			vval.Free();
@@ -626,8 +651,8 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 		if (!ParamIndexIsOmittedOrEmpty(2))
 			obj->ObjectToStruct(TokenToObject(*aParam[2]));
 	}
-	// set isValue if structure has no items, is not an array, not a pointer and not a reference to structure
-	if (obj->mFieldCount == 1)
+	// set isValue if structure has no items (keys), is not an array, not a pointer and not a reference to structure
+	if (obj->mFieldCount == 1 && !*obj->mFields->key)
 	{
 		FieldType &aField = obj->mFields[0];
 		if (aField.key && !aField.mIsPointer && !aField.mArraySize && !aField.mStruct)
@@ -832,6 +857,8 @@ Struct::FieldType *Struct::Insert(LPTSTR key, index_t &at, USHORT aIspointer, in
 void Struct::ObjectToStruct(IObject *objfrom)
 {
 	ResultToken result_token, this_token, aKey, aValue;
+	result_token.SetResult(OK);
+	this_token.SetResult(OK);
 	ExprTokenType *params[] = { &aKey, &aValue };
 	Var vkey, vval;
 	int param_count = 3;
@@ -850,7 +877,7 @@ void Struct::ObjectToStruct(IObject *objfrom)
 			return;
 	}
 	else
-		result = GetEnumerator(enumerator, objfrom, 2, false);
+		result = GetEnumerator(enumerator, this_token, 2, false);
 
 	this_token.symbol = SYM_OBJECT;
 	this_token.object = this;
@@ -867,7 +894,7 @@ void Struct::ObjectToStruct(IObject *objfrom)
 	for (;;)
 	{
 		// Call enumerator.Next(var1, var2)
-		result = CallEnumerator(enumerator, &vkey, &vval, false);
+		result = CallEnumerator(enumerator, params, 2, false);
 		if (result == CONDITION_FALSE)
 			break;
 		this->Invoke(result_token, IT_SET, nullptr, this_token, params, 2);
@@ -932,7 +959,7 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 		aParam = aParams;
 		aParamCount++;
 	}
-	int ptrsize = sizeof(UINT_PTR);
+ 	int ptrsize = sizeof(UINT_PTR);
     FieldType *field = NULL; // init to NULL to use in IS_INVOKE_CALL
 
 	// Used to resolve dynamic structures
@@ -940,7 +967,10 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 	Var1.symbol = SYM_VAR;
 	Var2.symbol = SYM_INTEGER;
 	ExprTokenType *param[] = { &Var1, &Var2 };
-	ResultToken ResultToken;
+
+
+	ResultToken result_token;
+	result_token.SetResult(OK);
 	
 	// used to clone a dynamic field or structure
 	Struct *subobj = NULL;
@@ -1006,10 +1036,11 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 				return aResultToken.Return((__int64)*((UINT_PTR*)((UINT_PTR)target)));
 			}
 		}
-		else if (mOwnHeap) // else return structure address
+		// Hotkeyit v122 always return address
+		else //if (mOwnHeap) // else return structure address
 			return aResultToken.Return((__int64)mStructMem);
-		else // return pointer
-			return aResultToken.Return((__int64)(UINT_PTR *)*((UINT_PTR*)((UINT_PTR)target)));
+		//else // return pointer
+			//return aResultToken.Return((__int64)(UINT_PTR *)*((UINT_PTR*)((UINT_PTR)target)));
 	}
 	else
 	{	// Array access, struct.1 or struct[1] or struct[1].x ...
@@ -1067,7 +1098,7 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 
 			if (param_count_excluding_rvalue > 1)
 			{	// MULTIPARAM
-				subobj->Invoke(aResultToken, aFlags, nullptr, ResultToken, aParam + 1, aParamCount - 1);
+				subobj->Invoke(aResultToken, aFlags, nullptr, result_token, aParam + 1, aParamCount - 1);
 				return OK;
 			}
 			else if (IS_INVOKE_SET && (aInitObject = TokenToObject(*aParam[1])))
@@ -1084,11 +1115,22 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 				return OK;
 			}
 			
-			// structure has only 1 unnamed field (array or pointer
+			// structure has only 1 unnamed field (array or pointer)
 			field = &subobj->mFields[0];
 		}
 		else if (!IS_INVOKE_CALL) // IS_INVOKE_CALL will handle the field itself
-			field = FindField(TokenToString(*aParam[0]));
+		{
+			if (mFieldCount == 1 && !*mFields[0].key)
+			{	// Direct Array access e.g. struct.Field instead of struct.1.Field
+				subobj = mMain;
+				if (mFields[0].mIsPointer && !mFields[0].mArraySize && !IS_INVOKE_CALL) // IS_INVOKE_CALL will need the address and not pointer
+					// Pointer to array
+					target = (UINT_PTR*)((UINT_PTR)*target);
+				field = mFields[0].mStruct->FindField(TokenToString(*aParam[0]));
+			}
+			else
+				field = FindField(TokenToString(*aParam[0]));
+		}
 	}
 
 	//
@@ -1324,7 +1366,7 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 	}
 	else if (!field)
 	{	// field was not found. The structure doesn't handle this method/property.
-		_o_throw(ERR_UNKNOWN_PROPERTY, aParamCount && *TokenToString(*aParam[0]) ? TokenToString(*aParam[0]) : g->ExcptDeref ? g->ExcptDeref->marker : _T(""));
+		//_o_throw(ERR_UNKNOWN_PROPERTY, aParamCount && *TokenToString(*aParam[0]) ? TokenToString(*aParam[0]) : g->ExcptDeref ? g->ExcptDeref->marker : _T(""));
 		return INVOKE_NOT_HANDLED;
 	}
 	else if (!target)
@@ -1370,7 +1412,7 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 		else // advandce param and invoke again
 		{
 			field->mStruct->mStructMem = (UINT_PTR*)((UINT_PTR)target + field->mOffset);
-			field->mStruct->Invoke(aResultToken, aFlags, nullptr, ResultToken, aParam + 1, aParamCount - 1);
+			field->mStruct->Invoke(aResultToken, aFlags, nullptr, result_token, aParam + 1, aParamCount - 1);
 			return OK;
 		}
 	} // MULTIPARAM[x,y] x[y]
@@ -1690,7 +1732,7 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 		return OK;
 	}
 	// The structure doesn't handle this method/property.
-	_o_throw(ERR_UNKNOWN_PROPERTY, aParamCount && *TokenToString(*aParam[0]) ? TokenToString(*aParam[0]) : g->ExcptDeref ? g->ExcptDeref->marker : _T(""));
+	//_o_throw(ERR_UNKNOWN_PROPERTY, aParamCount && *TokenToString(*aParam[0]) ? TokenToString(*aParam[0]) : g->ExcptDeref ? g->ExcptDeref->marker : _T(""));
 	return INVOKE_NOT_HANDLED;
 }
 
@@ -1726,7 +1768,7 @@ ResultType Struct::__Enum(ResultToken &aResultToken, int aID, int aFlags, ExprTo
 	_o_return(new IndexEnumerator(this, static_cast<IndexEnumerator::Callback>(&Struct::GetEnumItem)));
 }
 
-ResultType Struct::GetEnumItem(UINT aIndex, Var *aKey, Var *aVal)
+ResultType Struct::GetEnumItem(UINT &aIndex, Var *aKey, Var *aVal)
 {
 	if (*mFields[0].key && aIndex < mFieldCount)
 	{

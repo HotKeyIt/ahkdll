@@ -128,11 +128,9 @@ BIF_DECL(BIF_SysGetIPAddresses)
 
 
 
-VarSizeType BIV_IsAdmin(LPTSTR aBuf, LPTSTR aVarName)
+BIV_DECL_R(BIV_IsAdmin)
 {
-	if (!aBuf)
-		return 1;  // The length of the string "1" or "0".
-	TCHAR result = '0';  // Default.
+	bool result = false;  // Default.
 	SC_HANDLE h = OpenSCManager(NULL, NULL, SC_MANAGER_LOCK);
 	if (h)
 	{
@@ -140,19 +138,17 @@ VarSizeType BIV_IsAdmin(LPTSTR aBuf, LPTSTR aVarName)
 		if (lock)
 		{
 			UnlockServiceDatabase(lock);
-			result = '1'; // Current user is admin.
+			result = true; // Current user is admin.
 		}
 		else
 		{
 			DWORD lastErr = GetLastError();
 			if (lastErr == ERROR_SERVICE_DATABASE_LOCKED)
-				result = '1'; // Current user is admin.
+				result = true; // Current user is admin.
 		}
 		CloseServiceHandle(h);
 	}
-	aBuf[0] = result;
-	aBuf[1] = '\0';
-	return 1; // Length of aBuf.
+	_f_return_b(result);
 }
 
 
@@ -166,7 +162,7 @@ BIF_DECL(BIF_PixelGetColor)
 
 	if (tcscasestr(aOptions, _T("Slow"))) // New mode for v1.0.43.10.  Takes precedence over Alt mode.
 	{
-		PixelSearch(NULL, NULL, aX, aY, aX, aY, 0, 0, aOptions, true, aResultToken); // It takes care of setting the return value.
+		PixelSearch(NULL, NULL, aX, aY, aX, aY, 0, 0, true, aResultToken); // It takes care of setting the return value.
 		return;
 	}
 
@@ -321,7 +317,9 @@ BIF_DECL(BIF_Control)
 	// Boolean parameter:
 	case FID_ControlSetChecked:
 	case FID_ControlSetEnabled:
-		aToggle = Line::ConvertOnOffToggle(ParamIndexToString(0, _f_number_buf));
+		aToggle = ParamIndexToToggleValue(0);
+		if (aToggle == TOGGLE_INVALID)
+			_f_throw(ERR_PARAM1_INVALID);
 		++aParam;
 		--aParamCount;
 		break;
@@ -330,15 +328,14 @@ BIF_DECL(BIF_Control)
 	case FID_ControlSetExStyle: // As above.
 	case FID_ControlAddItem:
 	case FID_ControlChooseString:
-	case FID_ControlEditPaste:
+	case FID_EditPaste:
 		aValue = ParamIndexToString(0, _f_number_buf);
 		++aParam;
 		--aParamCount;
 		break;
 	// Integer parameter:
-	case FID_ControlSetTab:
 	case FID_ControlDeleteItem:
-	case FID_ControlChoose:
+	case FID_ControlChooseIndex:
 		aNumber = ParamIndexToInt(0);
 		++aParam;
 		--aParamCount;
@@ -458,13 +455,6 @@ BIF_DECL(BIF_Control)
 			goto win32_error;
 		break;
 
-	case FID_ControlSetTab: // Must be a Tab Control
-		if (aNumber < 1)
-			_f_throw(ERR_PARAM1_INVALID);
-		if (!ControlSetTab(aResultToken, control_window, (DWORD)aNumber - 1))
-			goto win32_error;
-		break;
-
 	case FID_ControlAddItem:
 		GetClassName(control_window, classname, _countof(classname));
 		if (tcscasestr(classname, _T("Combo"))) // v1.0.42: Changed to strcasestr vs. !strnicmp for TListBox/TComboBox.
@@ -497,7 +487,7 @@ BIF_DECL(BIF_Control)
 			goto error;
 		break;
 
-	case FID_ControlChoose:
+	case FID_ControlChooseIndex:
 		control_index = aNumber - 1;
 		if (control_index < -1)
 			_f_throw(ERR_PARAM1_INVALID);
@@ -517,8 +507,16 @@ BIF_DECL(BIF_Control)
 			x_msg = LBN_SELCHANGE;
 			y_msg = LBN_DBLCLK;
 		}
+		else if (tcscasestr(classname, _T("Tab")))
+		{
+			if (control_index < 0)
+				_f_throw(ERR_PARAM1_INVALID);
+			if (!ControlSetTab(aResultToken, control_window, (DWORD)control_index))
+				goto win32_error;
+			goto success;
+		}
 		else
-			goto control_type_error; // Must be ComboBox or ListBox.
+			goto control_type_error; // Must be ComboBox, ListBox or Tab control.
 		if (msg == LB_SETSEL) // Multi-select, so use the cumulative method.
 		{
 			if (!SendMessageTimeout(control_window, msg, control_index != -1, control_index, SMTO_ABORTIFHUNG, 2000, &dwResult))
@@ -529,6 +527,7 @@ BIF_DECL(BIF_Control)
 				goto win32_error;
 		if (dwResult == CB_ERR && control_index != -1)  // CB_ERR == LB_ERR
 			goto error;
+		_f_set_retval_p(_T(""), 0);
 		goto notify_parent;
 
 	case FID_ControlChooseString:
@@ -569,6 +568,7 @@ BIF_DECL(BIF_Control)
 			if (item_index == CB_ERR) // CB_ERR == LB_ERR
 				goto error;
 		}
+		_f_set_retval_i(item_index + 1); // Return the index chosen.  Might have some use if the string was ambiguous.
 	notify_parent:
 		if (   !(immediate_parent = GetParent(control_window))   )
 			goto win32_error;
@@ -584,9 +584,9 @@ BIF_DECL(BIF_Control)
 		if (!SendMessageTimeout(immediate_parent, WM_COMMAND, (WPARAM)MAKELONG(control_id, y_msg)
 			, (LPARAM)control_window, SMTO_ABORTIFHUNG, 2000, &dwResult))
 			goto win32_error;
-		_f_return(item_index + 1); // Return the index chosen.  Might have some use if the string was ambiguous.
+		_f_return_retval;
 
-	case FID_ControlEditPaste:
+	case FID_EditPaste:
 		if (!SendMessageTimeout(control_window, EM_REPLACESEL, TRUE, (LPARAM)aValue, SMTO_ABORTIFHUNG, 2000, &dwResult))
 			goto win32_error;
 		// Note: dwResult is not used by EM_REPLACESEL since it doesn't return a value.
@@ -619,7 +619,7 @@ BIF_DECL(BIF_ControlGet)
 	switch (control_cmd)
 	{
 	case FID_ControlFindItem: // String (required).
-	case FID_ControlGetList: // Options (optional).
+	case FID_ListViewGetContent: // Options (optional).
 		if (aParamCount)
 		{
 			aString = ParamIndexToString(0, _f_number_buf);
@@ -629,7 +629,7 @@ BIF_DECL(BIF_ControlGet)
 		else
 			aString = _T("");
 		break;
-	case FID_ControlGetLine: // Line number (required).
+	case FID_EditGetLine: // Line number (required).
 		// Load-time validation ensures aParamCount > 0.
 		aNumber = ParamIndexToInt(0);
 		++aParam;
@@ -647,7 +647,7 @@ BIF_DECL(BIF_ControlGet)
 	DWORD start, end;
 	UINT msg, x_msg, y_msg;
 	int control_index;
-	TCHAR *cp, *dyn_buf;
+	TCHAR *dyn_buf;
 
 	switch(control_cmd)
 	{
@@ -662,11 +662,6 @@ BIF_DECL(BIF_ControlGet)
 	case FID_ControlGetVisible:
 		_f_return(IsWindowVisible(control_window) ? 1 : 0); // Force pure boolean 0/1.
 
-	case FID_ControlGetTab: // must be a Tab Control
-		if (!SendMessageTimeout(control_window, TCM_GETCURSEL, 0, 0, SMTO_ABORTIFHUNG, 2000, &index))
-			goto win32_error;
-		_f_return(index + 1);
-
 	case FID_ControlFindItem:
 		GetClassName(control_window, classname, _countof(classname));
 		if (tcscasestr(classname, _T("Combo"))) // v1.0.42: Changed to strcasestr vs. strnicmp for TListBox/TComboBox.
@@ -678,6 +673,20 @@ BIF_DECL(BIF_ControlGet)
 		if (!SendMessageTimeout(control_window, msg, -1, (LPARAM)aString, SMTO_ABORTIFHUNG, 2000, &index)
 			|| index == CB_ERR) // CB_ERR == LB_ERR
 			goto error;
+		_f_return(index + 1);
+
+	case FID_ControlGetIndex:
+		GetClassName(control_window, classname, _countof(classname));
+		if (tcscasestr(classname, _T("Combo")))
+			msg = CB_GETCURSEL;
+		else if (tcscasestr(classname, _T("List")))
+			msg = LB_GETCURSEL;
+		else if (tcscasestr(classname, _T("Tab")))
+			msg = TCM_GETCURSEL;
+		else // Must be ComboBox, ListBox or Tab control.
+			goto control_type_error;
+		if (!SendMessageTimeout(control_window, msg, 0, 0, SMTO_ABORTIFHUNG, 2000, &index))
+			goto win32_error;
 		_f_return(index + 1);
 
 	case FID_ControlGetChoice:
@@ -716,11 +725,8 @@ BIF_DECL(BIF_ControlGet)
 		aResultToken.marker_length = length;  // Update to actual vs. estimated length.
 		return;
 
-	case FID_ControlGetList:
+	case FID_ControlGetItems:
 		GetClassName(control_window, classname, _countof(classname));
-		//if (!_tcsnicmp(aControl, _T("SysListView32"), 13)) // Tried strcasestr(aControl, "ListView") to get it to work with IZArc's Delphi TListView1, but none of the modes or options worked.
-		if (tcscasestr(classname, _T("SysListView32"))) // Some users said this works with "WindowsForms10.SysListView32"
-			return ControlGetListView(aResultToken, control_window, aString);
 		// This is done here as the special LIST sub-command rather than just being built into
 		// ControlGetText because ControlGetText already has a function for ComboBoxes: it fetches
 		// the current selection.  Although ListBox does not have such a function, it seem best
@@ -742,52 +748,70 @@ BIF_DECL(BIF_ControlGet)
 		if (!(SendMessageTimeout(control_window, msg, 0, 0, SMTO_ABORTIFHUNG, 5000, &item_count))
 			|| item_count == LB_ERR) // There was a problem getting the count.
 			goto error;
+		Array *items;
+		if (  !(items = Array::Create())  )
+			goto error;
 		if (!item_count)
-			_f_return_empty;
-		// Calculate the length of delimited list of items.  Length is initialized to provide enough
-		// room for each item's delimiter (the last item does not have a delimiter).
-		for (length = item_count - 1, u = 0; u < item_count; ++u)
+			_f_return(items);
+		// Calculate the required buffer size for the largest string.
+		for (length = 0, u = 0; u < item_count; ++u)
 		{
 			if (!SendMessageTimeout(control_window, x_msg, u, 0, SMTO_ABORTIFHUNG, 5000, &item_length)
 				|| item_length == LB_ERR) // Note that item_length is legitimately zero for a blank item in the list.
+			{
+				items->Release();
 				goto error;
-			length += item_length;
+			}
+			if (length < item_length)
+				length = item_length;
 		}
 		// In unusual cases, MSDN says the indicated length might be longer than it actually winds up
 		// being when the item's text is retrieved.  This should be harmless, since there are many
 		// other precedents where a variable is sized to something larger than it winds up carrying.
-		if (!TokenSetResult(aResultToken, NULL, length))
-			return;  // It already displayed the error.
-		aResultToken.symbol = SYM_STRING;
-		for (cp = aResultToken.marker, length = item_count - 1, u = 0; u < item_count; ++u)
+		++length; // To include the null-terminator.
+		// Could use alloca when length is within a safe limit, but it seems unlikely to help
+		// performance much since the bottleneck is probably in message passing between processes.
+		// Although length is only the size of the largest item, not the total of all items,
+		// I don't know how large an item can be, so it's safest to just use malloc().
+		if (  !(dyn_buf = tmalloc(length))  )
 		{
-			if (SendMessageTimeout(control_window, y_msg, (WPARAM)u, (LPARAM)cp, SMTO_ABORTIFHUNG, 5000, &item_length)
-				&& item_length != LB_ERR)
-			{
-				length += item_length; // Accumulate actual vs. estimated length.
-				cp += item_length;  // Point it to the terminator in preparation for the next write.
-			}
-			//else do nothing, just consider this to be a blank item so that the process can continue.
-			if (u < item_count - 1)
-				*cp++ = '\n'; // Add delimiter after each item except the last (helps parsing loop).
-			// Above: In this case, seems better to use \n rather than pipe as default delimiter in case
-			// the listbox/combobox contains any real pipes.
+			items->Release();
+			goto error;
 		}
-		aResultToken.marker_length = length;  // Update it to the actual length, which can vary from the estimate.
-		return;
+		for (u = 0; u < item_count; ++u)
+		{
+			if (!SendMessageTimeout(control_window, y_msg, (WPARAM)u, (LPARAM)dyn_buf, SMTO_ABORTIFHUNG, 5000, &item_length)
+				|| item_length == LB_ERR)
+			{
+				// Just consider this to be a blank item so that the process can continue.
+				*dyn_buf = '\0';
+			}
+			if (!items->Append(dyn_buf))
+				break; // Insufficient memory.
+		}
+		free(dyn_buf);
+		if (u < item_count)
+		{
+			items->Release();
+			goto error;
+		}
+		_f_return(items);
 
-	case FID_ControlGetLineCount:  // Must be an Edit
+	case FID_ListViewGetContent:
+		return ControlGetListView(aResultToken, control_window, aString);
+
+	case FID_EditGetLineCount:  // Must be an Edit
 		// MSDN: "If the control has no text, the return value is 1. The return value will never be less than 1."
 		if (!SendMessageTimeout(control_window, EM_GETLINECOUNT, 0, 0, SMTO_ABORTIFHUNG, 2000, &dwResult))
 			goto win32_error;
 		_f_return(dwResult);
 
-	case FID_ControlGetCurrentLine:
+	case FID_EditGetCurrentLine:
 		if (!SendMessageTimeout(control_window, EM_LINEFROMCHAR, -1, 0, SMTO_ABORTIFHUNG, 2000, &dwResult))
 			goto win32_error;
 		_f_return(dwResult + 1);
 
-	case FID_ControlGetCurrentCol:
+	case FID_EditGetCurrentCol:
 	{
 		DWORD_PTR line_number;
 		// The dwResult from the first msg below is not useful and is not checked.
@@ -805,7 +829,7 @@ BIF_DECL(BIF_ControlGet)
 		_f_return(start - line_start + 1);
 	}
 
-	case FID_ControlGetLine:
+	case FID_EditGetLine:
 	{
 		control_index = aNumber - 1;
 		if (control_index < 0)
@@ -828,7 +852,7 @@ BIF_DECL(BIF_ControlGet)
 		_f_return(line_buf);
 	}
 
-	case FID_ControlGetSelected: // Must be an Edit.
+	case FID_EditGetSelectedText: // Must be an Edit.
 		// Note: The RichEdit controls of certain apps such as Metapad don't return the right selection
 		// with this technique.  Au3 has the same problem with them, so for now it's just documented here
 		// as a limitation.
@@ -1125,85 +1149,73 @@ BIF_DECL(BIF_DirSelect)
 	_f_return(Result);
 }
 
-ResultType Line::FileGetShortcut(LPTSTR aShortcutFile) // Credited to Holger <Holger.Kotsch at GMX de>.
+BIF_DECL(BIF_FileGetShortcut) // Credited to Holger <Holger.Kotsch at GMX de>.
 {
-	Var *output_var_target = ARGVAR2; // These might be omitted in the parameter list, so it's okay if 
-	Var *output_var_dir = ARGVAR3;    // they resolve to NULL.  Also, load-time validation has ensured
-	Var *output_var_arg = ARGVAR4;    // that these are valid output variables (e.g. not built-in vars).
-	Var *output_var_desc = ARGVAR5;   // Load-time validation has ensured that these are valid output variables (e.g. not built-in vars).
-	Var *output_var_icon = ARGVAR6;
-	Var *output_var_icon_idx = ARGVAR7;
-	Var *output_var_show_state = ARGVAR8;
-
-	// For consistency with the behavior of other commands, the output variables are initialized to blank
-	// so that there is another way to detect failure:
-	if (output_var_target) output_var_target->Assign();
-	if (output_var_dir) output_var_dir->Assign();
-	if (output_var_arg) output_var_arg->Assign();
-	if (output_var_desc) output_var_desc->Assign();
-	if (output_var_icon) output_var_icon->Assign();
-	if (output_var_icon_idx) output_var_icon_idx->Assign();
-	if (output_var_show_state) output_var_show_state->Assign();
+	_f_param_string(aShortcutFile, 0);
+	Var *output_var[7];
+	for (int i = 0; i < _countof(output_var); ++i)
+		if (output_var[i] = ParamIndexToOutputVar(i+1))
+			output_var[i]->Assign(); // Init to blank.  OutIconNum relies on this.
 
 	bool bSucceeded = false;
 
-	if (!Util_DoesFileExist(aShortcutFile))
+	if (!Line::Util_DoesFileExist(aShortcutFile))
 		goto error;
 
 	CoInitialize(NULL);
 	IShellLink *psl;
+	HRESULT hr;
 
-	if (SUCCEEDED(CoCreateInstance(CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, IID_IShellLink, (LPVOID *)&psl)))
+	if (SUCCEEDED(hr = CoCreateInstance(CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, IID_IShellLink, (LPVOID *)&psl)))
 	{
 		IPersistFile *ppf;
-		if (SUCCEEDED(psl->QueryInterface(IID_IPersistFile, (LPVOID *)&ppf)))
+		if (SUCCEEDED(hr = psl->QueryInterface(IID_IPersistFile, (LPVOID *)&ppf)))
 		{
 #ifdef UNICODE
-			if (SUCCEEDED(ppf->Load(aShortcutFile, 0)))
+			if (SUCCEEDED(hr = ppf->Load(aShortcutFile, 0)))
 #else
 			WCHAR wsz[MAX_PATH+1]; // +1 hasn't been explained, but is retained in case it's needed.
 			ToWideChar(aShortcutFile, wsz, MAX_PATH+1); // Dest. size is in wchars, not bytes.
-			if (SUCCEEDED(ppf->Load((const WCHAR*)wsz, 0)))
+			if (SUCCEEDED(hr = ppf->Load((const WCHAR*)wsz, 0)))
 #endif
 			{
 				TCHAR buf[MAX_PATH+1];
 				int icon_index, show_cmd;
 
-				if (output_var_target)
+				if (output_var[0])
 				{
 					psl->GetPath(buf, MAX_PATH, NULL, SLGP_UNCPRIORITY);
-					output_var_target->Assign(buf);
+					output_var[0]->Assign(buf);
 				}
-				if (output_var_dir)
+				if (output_var[1])
 				{
 					psl->GetWorkingDirectory(buf, MAX_PATH);
-					output_var_dir->Assign(buf);
+					output_var[1]->Assign(buf);
 				}
-				if (output_var_arg)
+				if (output_var[2])
 				{
 					psl->GetArguments(buf, MAX_PATH);
-					output_var_arg->Assign(buf);
+					output_var[2]->Assign(buf);
 				}
-				if (output_var_desc)
+				if (output_var[3])
 				{
 					psl->GetDescription(buf, MAX_PATH); // Testing shows that the OS limits it to 260 characters.
-					output_var_desc->Assign(buf);
+					output_var[3]->Assign(buf);
 				}
-				if (output_var_icon || output_var_icon_idx)
+				if (output_var[4] || output_var[5])
 				{
 					psl->GetIconLocation(buf, MAX_PATH, &icon_index);
-					if (output_var_icon)
-						output_var_icon->Assign(buf);
-					if (output_var_icon_idx)
+					if (output_var[4])
+						output_var[4]->Assign(buf);
+					if (output_var[5])
 						if (*buf)
-							output_var_icon_idx->Assign(icon_index + (icon_index >= 0 ? 1 : 0));  // Convert from 0-based to 1-based for consistency with the Menu command, etc. but leave negative resource IDs as-is.
-						else
-							output_var_icon_idx->Assign(); // Make it blank to indicate that there is none.
+							output_var[5]->Assign(icon_index + (icon_index >= 0 ? 1 : 0));  // Convert from 0-based to 1-based for consistency with the Menu command, etc. but leave negative resource IDs as-is.
+						//else: Leave it blank to indicate that there is none.
 				}
-				if (output_var_show_state)
+				if (output_var[6])
 				{
 					psl->GetShowCmd(&show_cmd);
-					output_var_show_state->Assign(show_cmd);
+					output_var[6]->Assign(show_cmd);
 					// For the above, decided not to translate them to Max/Min/Normal since other
 					// show-state numbers might be supported in the future (or are already).  In other
 					// words, this allows the flexibility to specify some number other than 1/3/7 when
@@ -1220,9 +1232,9 @@ ResultType Line::FileGetShortcut(LPTSTR aShortcutFile) // Credited to Holger <Ho
 	CoUninitialize();
 
 	if (bSucceeded)
-		return OK;
+		_f_return_empty;
 error:
-	return Throw();
+	_f_throw_win32(hr);
 }
 
 
@@ -1536,7 +1548,7 @@ int Line::Util_CopyFile(LPCTSTR szInputSource, LPCTSTR szInputDest, bool bOverwr
 	if (hSearch == INVALID_HANDLE_VALUE)
 	{
 		aLastError = GetLastError(); // Set even in this case since FindFirstFile can fail due to actual errors, such as an invalid path.
-		return 0; // Indicate no failures.
+		return StrChrAny(const_cast<LPTSTR>(szInputSource), _T("?*")) ? 0 : 1; // Indicate failure only if there were no wildcards.
 	}
 	aLastError = 0; // Set default. Overridden only when a failure occurs.
 

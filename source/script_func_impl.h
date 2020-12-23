@@ -7,17 +7,10 @@
 #define ParamIndexToNumber(index, output)			TokenToDoubleOrInt64(*aParam[(index)], output)
 #define ParamIndexToBOOL(index)						TokenToBOOL(*aParam[(index)])
 #define ParamIndexToObject(index)					TokenToObject(*aParam[(index)])
-
-// Rather than adding a third value to the CaseSensitive parameter, it obeys StringCaseSense because:
-// 1) It matches the behavior of the equal operator (=) in expressions.
-// 2) It's more friendly for typical international uses because it avoids having to specify that special/third value
-//    for every call of InStr.  It's nice to be able to omit the CaseSensitive parameter every time and know that
-//    the behavior of both InStr and its counterpart the equals operator are always consistent with each other.
-// If the parameter is (false or omitted) insensitive, resolve it to be Locale-mode if the StringCaseSense mode is
-// either case-sensitive or Locale-insensitive.
-// The parameter is assumed to be optional and always defaults to false.
-#define ParamIndexToCaseSense(index)				(!ParamIndexIsOmitted(index) && ParamIndexToBOOL(index) ? SCS_SENSITIVE \
-													: (g->StringCaseSense != SCS_INSENSITIVE ? SCS_INSENSITIVE_LOCALE : SCS_INSENSITIVE) )
+#define ParamIndexToToggleValue(index)				TokenToToggleValue(*aParam[(index)])
+													
+// Omitted parameter returns SCS_INSENSITIVE.
+#define ParamIndexToCaseSense(index)				(ParamIndexIsOmitted((index)) ? SCS_INSENSITIVE : TokenToStringCase(*aParam[(index)]))
 
 #define ParamIndexIsNumeric(index)  (TokenIsNumeric(*aParam[(index)]))
 
@@ -36,6 +29,8 @@
 #define ParamIndexToOptionalInt64(index, def)		ParamIndexToOptionalType(Int64, index, def)
 #define ParamIndexToOptionalBOOL(index, def)		ParamIndexToOptionalType(BOOL, index, def)
 #define ParamIndexToOptionalVar(index)				(((index) < aParamCount && aParam[index]->symbol == SYM_VAR) ? aParam[index]->var : NULL)
+
+#define ParamIndexToOutputVar ParamIndexToOptionalVar
 
 inline LPTSTR _OptionalStringDefaultHelper(LPTSTR aDef, LPTSTR aBuf = NULL, size_t *aLength = NULL)
 {
@@ -63,4 +58,10 @@ inline LPTSTR _OptionalStringDefaultHelper(LPTSTR aDef, LPTSTR aBuf = NULL, size
 
 #define Throw_if_Param_NaN(ParamIndex) \
 	if (!TokenIsNumeric(*aParam[(ParamIndex)])) \
-		_f_throw(ERR_TYPE_MISMATCH)
+		_f_throw_type(_T("Number"), *aParam[(ParamIndex)])
+
+
+#define BivRValueToString(...)  TokenToString(aValue, _f_number_buf, __VA_ARGS__)
+#define BivRValueToInt64()  TokenToInt64(aValue)
+#define BivRValueToBOOL()  TokenToBOOL(aValue)
+#define BivRValueToObject()  TokenToObject(aValue)

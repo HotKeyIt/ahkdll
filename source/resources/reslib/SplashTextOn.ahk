@@ -1,12 +1,9 @@
 ﻿SplashTextOn(aWidth:="",aHeight:="",aTitle:="",aText:=""){
-	static SM_CXFIXEDFRAME,SM_CYCAPTION,WS_EX_TOPMOST,WS_DISABLED,WS_POPUP,WS_CAPTION,WS_CHILD,WS_VISIBLE,SS_CENTER,FW_NORMAL,DEFAULT_GUI_FONT,LOGPIXELSY,DEFAULT_CHARSET
-				,OUT_TT_PRECIS,CLIP_DEFAULT_PRECIS,PROOF_QUALITY,FF_DONTCARE,WM_SETFONT,SW_SHOWNOACTIVATE,g_hWndSplash,g_hFontSplash,pt,rect
-	if !SM_CXFIXEDFRAME
-    SM_CXFIXEDFRAME:=7,SM_CYCAPTION:=4,WS_EX_TOPMOST:=8,WS_DISABLED:=134217728,WS_POPUP:=2147483648,WS_CAPTION:=12582912
+	static SM_CXFIXEDFRAME:=7,SM_CYCAPTION:=4,WS_EX_TOPMOST:=8,WS_DISABLED:=134217728,WS_POPUP:=2147483648,WS_CAPTION:=12582912
     ,WS_CHILD:=1073741824,WS_VISIBLE:=268435456,SS_CENTER:=1,FW_NORMAL:=400,DEFAULT_GUI_FONT:=17,LOGPIXELSY:=90,DEFAULT_CHARSET:=1
     ,OUT_TT_PRECIS:=4,CLIP_DEFAULT_PRECIS:=0,PROOF_QUALITY:=2,FF_DONTCARE:=0,WM_SETFONT:=48,SW_SHOWNOACTIVATE:=4
-    ,g_hWndSplash,g_hFontSplash,pt:=Struct("x,y"),rect:=Struct("left,top,right,bottom")
-    ,GuiCreate().Destroy() ; required to init ahk_class AutoHotkeyGUI
+    ,g_hWndSplash:=0,g_hFontSplash:=0,pt:=Struct("x,y"),rect:=Struct("left,top,right,bottom")
+    ,Gui.new().Destroy() ; required to init ahk_class AutoHotkeyGUI
 	if (aWidth aHeight aTitle aText = ""){
 		if (g_hWndSplash && IsWindow(g_hWndSplash))
 			DestroyWindow(g_hWndSplash)
@@ -39,26 +36,26 @@
 
 	if (!g_hFontSplash)
 	{
-		VarSetCapacity(default_font_name,65*2)
+		default_font_name:=BufferAlloc(65*2)
 		nSize := 12, nWeight := FW_NORMAL
 		hdc := CreateDC("DISPLAY",0,0,0)
 		if (FontExist(hdc, "Segoe UI")) ; Use a more appealing font under Windows Vista or later (Segoe UI).
 		{
 			nSize := 11
-			default_font_name:="Segoe UI"
+			StrPut("Segoe UI",default_font_name)
 		}
 		else
 		{
 			SelectObject(hdc,GetStockObject(DEFAULT_GUI_FONT))		; Get Default Font Name
-			GetTextFace(hdc,65 - 1,&default_font_name) ; -1 just in case, like AutoIt3.
+			GetTextFace(hdc,65 - 1,default_font_name.Ptr) ; -1 just in case, like AutoIt3.
 		}
 		CyPixels := GetDeviceCaps(hdc,LOGPIXELSY)			; For Some Font Size Math
 		DeleteDC(hdc)
-		;strcpy(default_font_name,vParams[7].szValue())	; Font Name
+		;strcpy(default_font_name.Ptr,vParams[7].szValue())	; Font Name
 		;nSize = vParams[8].nValue()		; Font Size
 		;if ( vParams[9].nValue() >= 0 && vParams[9].nValue() <= 1000 )
 		;	nWeight = vParams[9].nValue()			; Font Weight
-		g_hFontSplash := CreateFont(0-(nSize*CyPixels)/72,0,0,0,nWeight,0,0,0,DEFAULT_CHARSET,OUT_TT_PRECIS,CLIP_DEFAULT_PRECIS,PROOF_QUALITY,FF_DONTCARE,default_font_name)	; Create Font
+		g_hFontSplash := CreateFont(0-(nSize*CyPixels)/72,0,0,0,nWeight,0,0,0,DEFAULT_CHARSET,OUT_TT_PRECIS,CLIP_DEFAULT_PRECIS,PROOF_QUALITY,FF_DONTCARE,StrGet(default_font_name))	; Create Font
 		; The font is deleted when by g_script's destructor.
 	}
 

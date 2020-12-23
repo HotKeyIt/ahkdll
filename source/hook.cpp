@@ -282,13 +282,13 @@ LRESULT CALLBACK LowLevelMouseProc(int aCode, WPARAM wParam, LPARAM lParam)
 			sc = (wheel_delta > 0 ? wheel_delta : -wheel_delta); // Note that sc is unsigned.
 			key_up = false; // Always consider wheel movements to be "key down" events.
 			break;
-		case WM_LBUTTONUP: vk = VK_LBUTTON_LOGICAL;	break;
-		case WM_RBUTTONUP: vk = VK_RBUTTON_LOGICAL; break;
+		case WM_LBUTTONUP: vk = VK_LBUTTON;	break;
+		case WM_RBUTTONUP: vk = VK_RBUTTON; break;
 		case WM_MBUTTONUP: vk = VK_MBUTTON; break;
 		case WM_NCXBUTTONUP:  // NC means non-client.
 		case WM_XBUTTONUP: vk = (HIWORD(event.mouseData) == XBUTTON1) ? VK_XBUTTON1 : VK_XBUTTON2; break;
-		case WM_LBUTTONDOWN: vk = VK_LBUTTON_LOGICAL; key_up = false; break;
-		case WM_RBUTTONDOWN: vk = VK_RBUTTON_LOGICAL; key_up = false; break;
+		case WM_LBUTTONDOWN: vk = VK_LBUTTON; key_up = false; break;
+		case WM_RBUTTONDOWN: vk = VK_RBUTTON; key_up = false; break;
 		case WM_MBUTTONDOWN: vk = VK_MBUTTON; key_up = false; break;
 		case WM_NCXBUTTONDOWN:
 		case WM_XBUTTONDOWN: vk = (HIWORD(event.mouseData) == XBUTTON1) ? VK_XBUTTON1 : VK_XBUTTON2; key_up = false; break;
@@ -571,7 +571,7 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 		// 3) Right-click should invoke another instance of the context menu (or dismiss existing menu, depending
 		//    on where the click occurs) if user clicks outside of our thread's existing context menu.
 		HWND menu_hwnd;
-		if (   (aVK == VK_LBUTTON_LOGICAL || aVK == VK_RBUTTON_LOGICAL) && (g_MenuIsVisible // Ordered for short-circuit performance.
+		if (   (aVK == VK_LBUTTON || aVK == VK_RBUTTON) && (g_MenuIsVisible // Ordered for short-circuit performance.
 				|| ((menu_hwnd = FindWindow(_T("#32768"), NULL))
 				&& GetWindowThreadProcessId(menu_hwnd, NULL) == g_ThreadID))) // Don't call GetCurrentThreadId() because our thread is different than main's.
 		{
@@ -793,7 +793,7 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 					// Queue it for later, which is done here rather than upon release of the key so that
 					// the user can release the key's modifiers before releasing the key itself, which
 					// is likely to happen pretty often. v1.0.41: This is done even if the hotkey is subject
-					// to #IfWin because it seems more correct to check those criteria at the actual time
+					// to #HotIf because it seems more correct to check those criteria at the actual time
 					// the key is released rather than now:
 					this_key.hotkey_to_fire_upon_release = hotkey_id_with_flags;
 					hotkey_id_with_flags = HOTKEY_ID_INVALID;
@@ -805,8 +805,8 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 						this_key.hotkey_to_fire_upon_release = hotkey_up[hotkey_id_temp]; // Might assign HOTKEY_ID_INVALID.
 					// Since this prefix key is being used in its capacity as a suffix instead,
 					// hotkey_id_with_flags now contains a hotkey ready for firing later below.
-					// v1.0.41: Above is done even if the hotkey is subject to #IfWin because:
-					// 1) The down-hotkey's #IfWin criteria might be different from that of the up's.
+					// v1.0.41: Above is done even if the hotkey is subject to #HotIf because:
+					// 1) The down-hotkey's #HotIf criteria might be different from that of the up's.
 					// 2) It seems more correct to check those criteria at the actual time the key is
 					// released rather than now (and also probably reduces code size).
 				}
@@ -821,7 +821,7 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 			if (has_no_enabled_suffixes)
 			{
 				this_key.no_suppress |= NO_SUPPRESS_NEXT_UP_EVENT; // Since the "down" is non-suppressed, so should the "up".
-				pKeyHistoryCurr->event_type = _T('#'); // '#' to indicate this prefix key is disabled due to #IfWin criterion.
+				pKeyHistoryCurr->event_type = _T('#'); // '#' to indicate this prefix key is disabled due to #HotIf WinActive/Exist criterion.
 			}
 			// In this case, a key-down event can't trigger a suffix, so return immediately.
 			// If our caller is the mouse hook, both of the following will always be false:
@@ -1084,7 +1084,7 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 						// Queue the up-hotkey for later so that the user is free to release the
 						// prefix key prior to releasing the suffix (which seems quite common and
 						// thus desirable).  v1.0.41: This is done even if the hotkey is subject
-						// to #IfWin because it seems more correct to check those criteria at the actual time
+						// to #HotIf because it seems more correct to check those criteria at the actual time
 						// the key is released rather than now:
 						this_key.hotkey_to_fire_upon_release = this_hk.mID;
 						if (found_hk) // i.e. a previous iteration already found the down-event to fire.
@@ -1294,7 +1294,12 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 		{
 			if (!aKeyUp) // Key-up hotkey but the event is a down-event.
 			{
-				this_key.hotkey_to_fire_upon_release = hotkey_id_with_flags; // Seem comments above in other occurrences of this line.
+				// Fixed for v1.1.33.01: Any key-up hotkey already found by the custom combo section
+				// should take precedence over this hotkey.  This fixes "a up::" erroneously taking
+				// precedence over "b & a up::" when "a::" is not defined, which resulted in either
+				// firing the wrong hotkey or firing the right hotkey but not suppressing the key.
+				if (this_key.hotkey_to_fire_upon_release == HOTKEY_ID_INVALID)
+					this_key.hotkey_to_fire_upon_release = hotkey_id_with_flags; // See comments above in other occurrences of this line.
 				hotkey_id_with_flags = HOTKEY_ID_INVALID;
 			}
 			//else hotkey_id_with_flags contains the up-hotkey that is now eligible for firing.
@@ -1331,7 +1336,13 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 			}
 			else // hotkey_id_with_flags contains the down-hotkey that is now eligible for firing. But check if there's an up-event to queue up for later.
 				if (hotkey_id_temp < Hotkey::sHotkeyCount)
-					this_key.hotkey_to_fire_upon_release = hotkey_up[hotkey_id_temp];
+				{
+					// Fixed for v1.1.33.01: Any key-up hotkey already found by the custom combo section
+					// should take precedence over this hotkey.  This fixes "b & a up::" not suppressing
+					// "a" when "a::" is defined but disabled by #If and "b & a::" is not defined.
+					if (this_key.hotkey_to_fire_upon_release == HOTKEY_ID_INVALID)
+						this_key.hotkey_to_fire_upon_release = hotkey_up[hotkey_id_temp];
+				}
 		}
 
 		// Check hotkey_id_with_flags again now that the above possibly changed it:
@@ -1404,6 +1415,7 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 				, 0 // Not applicable here, only affects aSingleChar and return value
 				, this_key.no_suppress // Unused and won't be altered because above is "true".
 				, fire_with_no_suppress, NULL); // fire_with_no_suppress is the value we really need to get back from it.
+			this_key.hotkey_down_was_suppressed = !fire_with_no_suppress; // Fixed for v1.1.33.01: If this isn't set, the key-up won't be suppressed even after the key-down is.
 			return fire_with_no_suppress ? AllowKeyToGoToSystem : SuppressThisKey;
 		}
 		//else an eligible hotkey was found.
@@ -2242,7 +2254,7 @@ LRESULT AllowIt(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lParam, cons
 	} // Keyboard vs. mouse hook.
 
 	// Since above didn't return, this keystroke is being passed through rather than suppressed.
-	if (g_HSResetUponMouseClick && (aVK == VK_LBUTTON_LOGICAL || aVK == VK_RBUTTON_LOGICAL)) // v1.0.42.03
+	if (g_HSResetUponMouseClick && (aVK == VK_LBUTTON || aVK == VK_RBUTTON)) // v1.0.42.03
 	{
 		*g_HSBuf = '\0';
 		g_HSBufLength = 0;
@@ -2690,7 +2702,7 @@ bool CollectHotstring(KBDLLHOOKSTRUCT &aEvent, TCHAR ch[], int char_count, HWND 
 				// ones are exact dupes of each other (same options+abbreviation).  Thus, it would take
 				// extra code to determine this at runtime; and even if it were added, it might be
 				// more flexible not to do it; instead, to let the script determine (even by resorting to
-				// #IfWinNOTActive) what precedence hotstrings have with respect to each other.
+				// #HotIf NOT WinActive()) what precedence hotstrings have with respect to each other.
 
 			//////////////////////////////////////////////////////////////
 			// MATCHING HOTSTRING WAS FOUND (since above didn't continue).
@@ -2904,7 +2916,7 @@ bool CollectInputHook(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type 
 			if (shift_is_down ? end_if_shift_is_down : end_if_shift_is_not_down)
 			{
 				// The shift state is correct to produce the desired end-key.
-				input->EndByKey(aVK, aSC, input->KeySC[aSC], shift_is_down && !end_if_shift_is_not_down);
+				input->EndByKey(aVK, aSC, input->KeySC[aSC] && (aSC || !input->KeyVK[aVK]), shift_is_down && !end_if_shift_is_not_down);
 				if (!visible)
 					break;
 				continue;
@@ -4350,8 +4362,8 @@ void ResetHook(bool aAllModifiersUp, HookType aWhichHook, bool aResetKVKandKSC)
 #ifdef FUTURE_USE_MOUSE_BUTTONS_LOGICAL
 		g_mouse_buttons_logical = 0;
 #endif
-		g_PhysicalKeyState[VK_LBUTTON_LOGICAL] = 0;
-		g_PhysicalKeyState[VK_RBUTTON_LOGICAL] = 0;
+		g_PhysicalKeyState[VK_LBUTTON] = 0;
+		g_PhysicalKeyState[VK_RBUTTON] = 0;
 		g_PhysicalKeyState[VK_MBUTTON] = 0;
 		g_PhysicalKeyState[VK_XBUTTON1] = 0;
 		g_PhysicalKeyState[VK_XBUTTON2] = 0;
@@ -4365,8 +4377,8 @@ void ResetHook(bool aAllModifiersUp, HookType aWhichHook, bool aResetKVKandKSC)
 
 		if (aResetKVKandKSC)
 		{
-			ResetKeyTypeState(kvk[VK_LBUTTON_LOGICAL]);
-			ResetKeyTypeState(kvk[VK_RBUTTON_LOGICAL]);
+			ResetKeyTypeState(kvk[VK_LBUTTON]);
+			ResetKeyTypeState(kvk[VK_RBUTTON]);
 			ResetKeyTypeState(kvk[VK_MBUTTON]);
 			ResetKeyTypeState(kvk[VK_XBUTTON1]);
 			ResetKeyTypeState(kvk[VK_XBUTTON2]);
@@ -4510,7 +4522,7 @@ void GetHookStatus(LPTSTR aBuf, int aBufSize)
 		_T("of the history buffer.  For example: #KeyHistory 100  (Default is 40, Max is 500)")
 		_T("\r\n\r\nThe oldest are listed first.  VK=Virtual Key, SC=Scan Code, Elapsed=Seconds since the previous event")
 		_T(".  Types: h=Hook Hotkey, s=Suppressed (blocked), i=Ignored because it was generated by an AHK script")
-		_T(", a=Artificial, #=Disabled via #IfWinActive/Exist, U=Unicode character (SendInput).\r\n\r\n")
+		_T(", a=Artificial, #=Disabled via #HotIf, U=Unicode character (SendInput).\r\n\r\n")
 		_T("VK  SC\tType\tUp/Dn\tElapsed\tKey\t\tWindow\r\n")
 		_T("-------------------------------------------------------------------------------------------------------------"));
 

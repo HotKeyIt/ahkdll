@@ -1,19 +1,10 @@
 ﻿SplashImage_Struct(){
-  static MAX_SPLASHIMAGE_WINDOWS,SplashType,g_SplashImage
-  if !MAX_SPLASHIMAGE_WINDOWS
-    MAX_SPLASHIMAGE_WINDOWS:=10,SplashType:="int width;int height;int bar_pos;int margin_x;int margin_y;int text1_height;int object_width;int object_height;HWND hwnd;int pic_type;union{HBITMAP pic_bmp;HICON pic_icon};HWND hwnd_bar;HWND hwnd_text1;HWND hwnd_text2;HFONT hfont1;HFONT hfont2;HBRUSH hbrush;COLORREF color_bk;COLORREF color_text"
+  static MAX_SPLASHIMAGE_WINDOWS:=10,SplashType:="int width;int height;int bar_pos;int margin_x;int margin_y;int text1_height;int object_width;int object_height;HWND hwnd;int pic_type;union{HBITMAP pic_bmp;HICON pic_icon};HWND hwnd_bar;HWND hwnd_text1;HWND hwnd_text2;HFONT hfont1;HFONT hfont2;HBRUSH hbrush;COLORREF color_bk;COLORREF color_text"
     ,g_SplashImage:=Struct("SplashImage_Struct(SplashType)[" MAX_SPLASHIMAGE_WINDOWS "]")
   return g_SplashImage
 }
 SplashImage_OnMessage(wParam,lParam,msg,hwnd){
-  static MAX_SPLASHIMAGE_WINDOWS,SW_SHOWNOACTIVATE,WM_SETTEXT,WS_DISABLED,WS_POPUP,WS_CAPTION,WS_EX_TOPMOST,COORD_UNSPECIFIED,WS_SIZEBOX,WS_MINIMIZEBOX,WS_MAXIMIZEBOX,WS_SYSMENU,LOGPIXELSY,IMAGE_BITMAP
-        ,FW_DONTCARE,CLR_DEFAULT,CLR_NONE,DEFAULT_GUI_FONT,IMAGE_ICON,SS_LEFT,FW_SEMIBOLD,DEFAULT_CHARSET,OUT_TT_PRECIS,CLIP_DEFAULT_PRECIS,PROOF_QUALITY,FF_DONTCARE
-        ,DT_CALCRECT,DT_WORDBREAK,DT_EXPANDTABS,SPI_GETWORKAREA,IDI_MAIN,LR_SHARED,ICON_SMALL,ICON_BIG,WS_CHILD,WS_VISIBLE,SS_NOPREFIX,SS_CENTER,SS_LEFTNOWORDWRAP,PBM_GETPOS,PBM_SETPOS,PBM_SETRANGE
-        ,PBM_SETRANGE32,WS_EX_CLIENTEDGE,PBS_SMOOTH,WM_PAINT,WM_SIZE,PBM_SETBARCOLOR,PBM_SETBKCOLOR,WM_SETFONT,SRCCOPY,DI_NORMAL,COLOR_BTNFACE,WM_ERASEBKGND,WM_CTLCOLORSTATIC
-        ,Black,Silver,Gray,White,Maroon,Red,Purple,Fuchsia,Green,Lime,Olive,Yellow,Navy,Blue,Teal,Aqua,Default
-        ,g_SplashImage,RECT,client_rect,draw_rect,main_rect,work_rect
-  if !MAX_SPLASHIMAGE_WINDOWS
-    MAX_SPLASHIMAGE_WINDOWS:=10,SW_SHOWNOACTIVATE:=4,WM_SETTEXT:=12
+  static MAX_SPLASHIMAGE_WINDOWS:=10,SW_SHOWNOACTIVATE:=4,WM_SETTEXT:=12
     ,WS_DISABLED:=134217728,WS_POPUP:=2147483648,WS_CAPTION:=12582912,WS_EX_TOPMOST:=8,COORD_UNSPECIFIED:=(-2147483647 - 1)
     ,WS_SIZEBOX:=262144,WS_MINIMIZEBOX:=131072,WS_MAXIMIZEBOX:=65536,WS_SYSMENU:=524288,LOGPIXELSY:=90,IMAGE_BITMAP:=0
     ,FW_DONTCARE:=0,CLR_DEFAULT:=4278190080,CLR_NONE:=4294967295,DEFAULT_GUI_FONT:=17,IMAGE_ICON:=1,SS_LEFT:=0
@@ -32,7 +23,7 @@ SplashImage_OnMessage(wParam,lParam,msg,hwnd){
   if (i == MAX_SPLASHIMAGE_WINDOWS){ ; It's not a progress window either.
     ; Let DefWindowProc() handle it (should probably never happen since currently the only
     ; other type of window is SplashText, which never receive this msg?)
-    Return
+    Return 1
   }
   splash := g_SplashImage[i]
 
@@ -107,14 +98,14 @@ SplashImage_OnMessage(wParam,lParam,msg,hwnd){
   return DefWindowProc(hWnd, Msg, wParam, lParam) ;ret
 }
 SplashImage(aImageFile,aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFontName:=""){
-  static MAX_SPLASHIMAGE_WINDOWS:=10,SW_SHOWNOACTIVATE:=4,WM_SETTEXT:=12
+  static MAX_SPLASHIMAGE_WINDOWS:=10,SW_SHOWNOACTIVATE:=4,WM_SETTEXT:=12,WM_SETICON:=128
         ,WS_DISABLED:=134217728,WS_POPUP:=2147483648,WS_CAPTION:=12582912,WS_EX_TOPMOST:=8,COORD_UNSPECIFIED:=(-2147483647 - 1)
         ,WS_SIZEBOX:=262144,WS_MINIMIZEBOX:=131072,WS_MAXIMIZEBOX:=65536,WS_SYSMENU:=524288,LOGPIXELSX:=88,LOGPIXELSY:=90,IMAGE_BITMAP:=0
         ,FW_DONTCARE:=0,CLR_NONE:=4294967295,DEFAULT_GUI_FONT:=17,IMAGE_ICON:=1,CLR_DEFAULT:=4278190080
         ,SPLASH_DEFAULT_WIDTH:=MulDiv(300, GetDeviceCaps(hdc:=GetDC(),LOGPIXELSX),96),rel:=ReleaseDC(0, hdc)
         , FW_SEMIBOLD:=600, DEFAULT_CHARSET:=1, OUT_TT_PRECIS:=4, CLIP_DEFAULT_PRECIS:=0, PROOF_QUALITY:=2,FF_DONTCARE:=0,SS_LEFT:=0
         ,DT_CALCRECT:=1024, DT_WORDBREAK:=16, DT_EXPANDTABS:=64,SPI_GETWORKAREA:=48,IDI_MAIN:=159,LR_SHARED:=32768,ICON_SMALL:=0,ICON_BIG:=1
-        ,WS_CHILD:=1073741824,WS_VISIBLE:=268435456,SS_NOPREFIX:=0x80,SS_CENTER:=1,SS_LEFTNOWORDWRAP:=12,PBM_GETPOS:=1032,PBM_SETPOS:=1026
+        ,WS_CHILD:=1073741824,WS_VISIBLE:=268435456,WS_BORDER:=8388608,WS_DLGFRAME:=4194304,SS_NOPREFIX:=0x80,SS_CENTER:=1,SS_LEFTNOWORDWRAP:=12,PBM_GETPOS:=1032,PBM_SETPOS:=1026
         ,PBM_SETRANGE:=1025,PBM_SETRANGE32:=1030,WS_EX_CLIENTEDGE:=512,PBS_SMOOTH:=1,WM_PAINT:=15,WM_SIZE:=5
         ,PBM_SETBARCOLOR:=1033,PBM_SETBKCOLOR:=8193,WM_SETFONT:=48,SRCCOPY:=13369376,DI_NORMAL:=3,COLOR_BTNFACE:=15,WM_ERASEBKGND:=20,WM_CTLCOLORSTATIC:=312
         ,Black:=0,Silver:=0xC0C0C0,Gray:=0x808080,White:=0xFFFFFF,Maroon:=0x000080,Red:=0x0000FF
@@ -128,9 +119,8 @@ SplashImage(aImageFile,aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFon
         ,iconinfo:=Struct("BOOL fIcon;DWORD xHotspot;DWORD yHotspot;HBITMAP hbmMask;HBITMAP hbmColor") ;ICONINFO
         ,RECT:="LONG left,LONG top,LONG right,LONG bottom",client_rect:=Struct(RECT), draw_rect:=Struct(RECT), main_rect:=Struct(RECT), work_rect:=Struct(RECT)
         ,bmp:=Struct("LONG bmType;LONG bmWidth;LONG bmHeight;LONG bmWidthBytes;WORD bmPlanes;WORD bmBitsPixel;LPVOID bmBits") ;BITMAP
-        ,initGui:=GuiCreate(),initGuiDestroy:=initGui.Destroy() ; required to init ahk_class AutoHotkeyGUI
+        ,initGui:=Gui.new(),initGuiDestroy:=initGui.Destroy() ; required to init ahk_class AutoHotkeyGUI
         ,_ttoi:=DynaCall("msvcrt\_wtoi","t==t")
-  ErrorLevel := 0    ; Set default
   window_index := 1  ;  Set the default window to operate upon (the first).
   image_filename := aImageFile  ;  Set default.
   turn_off := false
@@ -142,7 +132,7 @@ SplashImage(aImageFile,aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFon
     image_filename_omit_leading_whitespace := lTrim(image_filename) ;  Added in v1.0.38.04 per someone's suggestion.
     if (colon_pos && colon_pos < 32){
         window_number_str:=SubStr(aImageFile,1,colon_pos-1)
-        if (window_number_str+0!=""){ ;  Seems best to allow float at runtime.
+        if IsNumber(window_number_str){ ;  Seems best to allow float at runtime.
           ;  Note that filenames can start with spaces, so omit_leading_whitespace() is only
           ;  used if the string is entirely blank:
           ; image_filename := colon_pos + 1
@@ -150,11 +140,9 @@ SplashImage(aImageFile,aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFon
           image_filename_omit_leading_whitespace := ltrim(image_filename) ;  Update to reflect the change above.
           if (image_filename_omit_leading_whitespace!="")
             image_filename := image_filename_omit_leading_whitespace
-          window_index := window_number_str
+          window_index := window_number_str+0
           if (window_index < 0 || window_index >= MAX_SPLASHIMAGE_WINDOWS){
-            MsgBox("Max window number is " MAX_SPLASHIMAGE_WINDOWS ".","Error in Function " A_ThisFunc,0)
-            ErrorLevel:=-1
-            return
+            return (MsgBox("Max window number is " MAX_SPLASHIMAGE_WINDOWS ".","Error in Function " A_ThisFunc,0),0)
           }
 
         }
@@ -167,7 +155,7 @@ SplashImage(aImageFile,aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFon
   }
 
   splash := g_SplashImage[window_index]
-
+  
   ;  In case it's possible for the window to get destroyed by other means (WinClose?).
   ;  Do this only after the above options were set so that the each window's settings
   ;  will be remembered until such time as "Command, Off" is used:
@@ -181,7 +169,7 @@ SplashImage(aImageFile,aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFon
     if (splash.hwnd && !IsWindowVisible(splash.hwnd))
       ShowWindow(splash.hwnd, SW_SHOWNOACTIVATE) ;  See bottom of this function for comments on SW_SHOWNOACTIVATE.
     ; else for simplicity, do nothing.
-    return
+    return 1
   }
 
   if (!turn_off && splash.hwnd && image_filename="" && (options_consist_of_bar_pos_only || aOptions="")) ;  The "modify existing window" mode is in effect.
@@ -193,7 +181,7 @@ SplashImage(aImageFile,aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFon
     ;  a text item from non-blank to blank is not supported so that elements can be omitted from an
     ;  update command without changing the text that's in the window.  The script can specify %a_space%
     ;  to explicitly make an element blank.
-    if (!aSplashImage && bar_pos_has_been_set && splash.bar_pos != bar_pos) ; Avoid unnecessary redrawing.
+    if (bar_pos_has_been_set && splash.bar_pos != bar_pos) ; Avoid unnecessary redrawing. ; !aSplashImage && 
     {
       splash.bar_pos := bar_pos
       if (splash.hwnd_bar)
@@ -203,12 +191,12 @@ SplashImage(aImageFile,aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFon
     ;  For simplicity, the hwnd_text1 control is not expanded dynamically if it is currently of
     ;  height zero.  The user can recreate the window if a different height is needed.
     if (aMainText!="" && splash.hwnd_text1)
-      SendMessage_(splash.hwnd_text1, WM_SETTEXT, 0, &aMainText)
+      SendMessage_(splash.hwnd_text1, WM_SETTEXT, 0, StrPtr(aMainText))
     if (aSubText!="")
-      SendMessage_(splash.hwnd_text2, WM_SETTEXT, 0, &aSubText)
+      SendMessage_(splash.hwnd_text2, WM_SETTEXT, 0, StrPtr(aSubText))
     if (aTitle!="")
       SetWindowText(splash.hwnd, aTitle) ;  Use the simple method for parent window titles.
-    return
+    return 1
   }
 
     if (splash.hwnd)
@@ -231,10 +219,11 @@ SplashImage(aImageFile,aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFon
     else
       DestroyIcon(splash.pic_icon)
   }
-  splash.Fill() ;  Set the above and all other fields to zero.
+  
+  RtlFillMemory(splash[], sizeof(splash), 0) ;  Set the above and all other fields to zero.
 
   if (turn_off)
-    return
+    return 1
 
   ;  Otherwise, the window needs to be created or recreated.
 
@@ -270,7 +259,7 @@ SplashImage(aImageFile,aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFon
   }
   else ;  Displaying only a naked image, so don't use borders.
     splash.margin_x := splash.margin_y := 0
-  cp:=(&aOptions)-2
+  cp:=(StrPtr(aOptions))-2
   while (""!=cp_:=StrGet(cp:=cp+2,1)){
   ;for (cp2, cp = options; cp!=""; ++cp)
     If (cp_="a"){  ;  Non-Always-on-top.  Synonymous with A0 in early versions.
@@ -294,8 +283,8 @@ SplashImage(aImageFile,aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFon
       ; 'W': ;  Window/Background color.
         color_str:=StrGet(cp+2,32)
         If (space_pos:=InStr(color_str," ")) ^ (tab_pos:=InStr(color_str,A_Tab))
-          StrPut("",(&color_str)+(space_pos&&space_pos<tab_pos?space_pos:tab_pos?tab_pos:space_pos)*2-2)
-        VarSetCapacity(color_str,-1)
+          StrPut("",(StrPtr(color_str))+(space_pos&&space_pos<tab_pos?space_pos:tab_pos?tab_pos:space_pos)*2-2)
+        ; VarSetCapacity(color_str,-1)
         ; else a color name can still be present if it's at the end of the string.
         color := ( !color_str || !InStr(".black.silver.gray.white.maroon.red.purple.fuchsia.green.lime.olive.yellow.navy.blue.teal.aqua.default.","." color_str ".",0) )
                 ? CLR_NONE : %color_str%
@@ -404,9 +393,9 @@ SplashImage(aImageFile,aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFon
   ;  Get name and size of default font.
   hfont_default := GetStockObject(DEFAULT_GUI_FONT)
   hfont_old := SelectObject(hdc, hfont_default)
-  VarSetCapacity(default_font_name,65*A_IsUnicode)
-  GetTextFace(hdc, 65 - 1, &default_font_name)
-  VarSetCapacity(default_font_name,-1)
+  default_font_name:=BufferAlloc(65*2)
+  GetTextFace(hdc, 65 - 1, default_font_name.Ptr)
+  default_font_name:=StrGet(default_font_name)
   GetTextMetrics(hdc, tm[])
   default_gui_font_height := tm.tmHeight
 
@@ -441,7 +430,7 @@ SplashImage(aImageFile,aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFon
           hbmp_to_measure := iconinfo.hbmColor
       if (hbmp_to_measure)
       {
-        bmp.Fill()
+        RtlFillMemory(bmp[],sizeof(bmp),0)
         if (GetObject(hbmp_to_measure, sizeof(bmp), bmp[]))
         {
           if (splash.object_height == -1 && splash.object_width > 0)
@@ -487,7 +476,7 @@ SplashImage(aImageFile,aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFon
 
   ;  Lay out client area.  If height is COORD_UNSPECIFIED, use a temp value for now until
   ;  it can be later determined.
-  client_rect.Fill(), draw_rect.Fill()
+  RtlFillMemory(client_rect[],sizeof(client_rect),0), RtlFillMemory(draw_rect[],sizeof(draw_rect),0)
   SetRect(client_rect[], 0, 0, splash.width, splash.height == COORD_UNSPECIFIED ? 500 : splash.height)
 
   ;  Create fonts based on specified point sizes.  A zero value for font_size1 & 2 are correctly handled
@@ -567,10 +556,8 @@ SplashImage(aImageFile,aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFon
   }
 
   SelectObject(hdc, hfont_old) ;  Necessary to avoid memory leak.
-  if !DeleteDC(hdc){
-    ErrorLevel := -1
-    return  ;  Force a failure to detect bugs such as hdc still having a created handle inside.
-  }
+  if !DeleteDC(hdc)
+    return 0 ;  Force a failure to detect bugs such as hdc still having a created handle inside.
   ;  Based on the client area determined above, expand the main_rect to include title bar, borders, etc.
   ;  If the window has a border or caption this also changes top & left *slightly* from zero.
   main_rect[] := client_rect
@@ -578,7 +565,7 @@ SplashImage(aImageFile,aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFon
   main_width := main_rect.right - main_rect.left  ;  main.left might be slightly less than zero.
   main_height := main_rect.bottom - main_rect.top ;  main.top might be slightly less than zero.
 
-  work_rect.Fill()
+  RtlFillMemory(work_rect[],sizeof(work_rect),0)
   SystemParametersInfo(SPI_GETWORKAREA, 0, work_rect[], 0)  ;  Get desktop rect excluding task bar.
   work_width := work_rect.right - work_rect.left  ;  Note that "left" won't be zero if task bar is on left!
   work_height := work_rect.bottom - work_rect.top  ;  Note that "top" won't be zero if task bar is on top!
@@ -615,14 +602,12 @@ SplashImage(aImageFile,aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFon
                 ;  v1.0.35.01: For flexibility, allow these windows to be owned by GUIs via +OwnDialogs.
                 , main_width, main_height, owned ? (dialog_owner ? dialog_owner : A_ScriptHwnd) : 0
                 , 0, A_ModuleHandle, 0))
-    return
+    return 1
   OnMessage(WM_ERASEBKGND,splash.hwnd,"SplashImage_OnMessage")
   ,OnMessage(WM_CTLCOLORSTATIC,splash.hwnd,"SplashImage_OnMessage")
   ,OnMessage(WM_SIZE,splash.hwnd,"SplashImage_OnMessage")
-  if !(splash.hwnd){
-    ErrorLevel:=-1
-    return   ;  No error msg since so rare.
-  }
+  if !(splash.hwnd)
+    return 0   ;  No error msg since so rare.
   
   if ((style & WS_SYSMENU) || !owned)
   {
@@ -672,5 +657,5 @@ SplashImage(aImageFile,aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFon
   ;  is usually desirable for progress/splash windows since they should be seen but not be disruptive:
   if (!initially_hidden)
     ShowWindow(splash.hwnd, SW_SHOWNOACTIVATE)
-  return
+  return 1
 }
