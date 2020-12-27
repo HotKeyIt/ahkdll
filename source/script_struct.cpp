@@ -537,13 +537,12 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 					field->mStruct->mHeap = obj->mHeap;
 					field->mStruct->mStructSize = *keybuf && arraydef ? (ispointer ? ptrsize : field->mSize) * arraydef : _tcschr(subdefbuf, '*') ? ptrsize : field->mSize;
 					
-					if (!_tcschr(subdefbuf, '*') && !_tcschr(subdefbuf,'['))
-						Var1.var = Var1.var;
-					else
+					if (!(!_tcschr(subdefbuf, '*') && !_tcschr(subdefbuf, '[')))
 					{
 						Var1.symbol = SYM_STRING;
 						Var1.marker = subdefbuf;
 					}
+					// else Var1.var = Var1.var;
 					//Var2.value_int64 = (UINT_PTR)(obj->mStructMem + offset);
 					Var3.symbol = SYM_MISSING;
 					Var4.object = field->mStruct;
@@ -1062,19 +1061,21 @@ ResultType Struct::Invoke(
 
 			// struct must have unnamed field to be accessed dynamically, otherwise it is main structure
 			if (mOwnHeap && mMain)
+			{
 				subobj = mMain;
+				aSize = mStructSize;
+			}
 			else if (mFieldCount > 1 || *mFields[0].key || !(subobj = mFields[0].mStruct))
 				return INVOKE_NOT_HANDLED;
 
 			// Get size of structure
-			if (mFields[0].mIsPointer)
+			else if (mFields[0].mIsPointer > 1)
 				aSize = ptrsize; // array of pointers or pointer to array
 			else
-				aSize = mFields[0].mSize; // array
-			if (mFields[0].mIsPointer && !mFields[0].mArraySize && !IS_INVOKE_CALL) // IS_INVOKE_CALL will need the address and not pointer
-			{	// Pointer to array
+				aSize = mFields[0].mSize; // array or pointer to array of structs
+			if (mFields[0].mIsPointer && !IS_INVOKE_CALL) // IS_INVOKE_CALL will need the address and not pointer // removed: '&& !mFields[0].mArraySize' because it is a pointer to array, not array of pointers
+				// Pointer to array
 				subobj->mStructMem = target = (UINT_PTR*)((UINT_PTR)*target + ((TokenToInt64(*aParam[0]) - 1)*aSize));
-			}
 			else // assume array
 				subobj->mStructMem = target = (UINT_PTR*)((UINT_PTR)target + ((TokenToInt64(*aParam[0]) - 1)*aSize));
 			
@@ -1102,7 +1103,18 @@ ResultType Struct::Invoke(
 			field = &subobj->mFields[0];
 		}
 		else if (!IS_INVOKE_CALL) // IS_INVOKE_CALL will handle the field itself
-			field = FindField(TokenToString(*aParam[0]));
+		{
+			if (mFieldCount == 1 && !*mFields[0].key)
+			{	// Direct Array access e.g. struct.Field instead of struct.1.Field
+				subobj = mMain;
+				if (mFields[0].mIsPointer && !mFields[0].mArraySize && !IS_INVOKE_CALL) // IS_INVOKE_CALL will need the address and not pointer
+					// Pointer to array
+					target = (UINT_PTR*)((UINT_PTR)*target);
+				field = mFields[0].mStruct->FindField(TokenToString(*aParam[0]));
+			}
+			else
+				field = FindField(TokenToString(*aParam[0]));
+		}
 	}
 
 	//
