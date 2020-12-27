@@ -28,7 +28,7 @@ BinRun(pData,cmdLine:="",cmdLineScript:="",Hide:=0,ExeToUse:=""){
       data:=BufferAlloc(sz :=SizeofResource(lib,res))
       ,RtlMoveMemory(data.Ptr,LockResource(hres:=LoadResource(lib,res)),sz)
       ,FreeResource(hres)
-      ,UnZipRawMemory(data.Ptr,sz,data2)?(data:=data2):""
+      ,data2:=UnZipRawMemory(data.Ptr,sz)?(data:=data2):""
     else ; else try reading file from disc etc...
       Data:=FileRead(pData,"RAW")
     pData:=Data.Ptr

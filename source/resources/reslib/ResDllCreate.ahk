@@ -4,7 +4,7 @@ Loop Parse,hex
 If Mod(A_Index,2)
   h:=A_LoopField
 else NumPut("UChar","0x" h A_LoopField,Trg,A_Index/2-1)
-UnZipRawMemory(Trg,112,data:="")
+Data:=UnZipRawMemory(Trg,112)
 If 0<hF:=CreateFile(path,0x40000000,2,0,2)
 WriteFile(hF,data,1024,getvar(init:=0),0),CloseHandle(hF)
 return FileGetSize(path)=1024

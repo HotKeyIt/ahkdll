@@ -119,7 +119,7 @@ SplashImage(aImageFile,aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFon
         ,iconinfo:=Struct("BOOL fIcon;DWORD xHotspot;DWORD yHotspot;HBITMAP hbmMask;HBITMAP hbmColor") ;ICONINFO
         ,RECT:="LONG left,LONG top,LONG right,LONG bottom",client_rect:=Struct(RECT), draw_rect:=Struct(RECT), main_rect:=Struct(RECT), work_rect:=Struct(RECT)
         ,bmp:=Struct("LONG bmType;LONG bmWidth;LONG bmHeight;LONG bmWidthBytes;WORD bmPlanes;WORD bmBitsPixel;LPVOID bmBits") ;BITMAP
-        ,initGui:=Gui.new(),initGuiDestroy:=initGui.Destroy() ; required to init ahk_class AutoHotkeyGUI
+        ,initGui:=Gui.new().Destroy() ; required to init ahk_class AutoHotkeyGUI
         ,_ttoi:=DynaCall("msvcrt\_wtoi","t==t")
   window_index := 1  ;  Set the default window to operate upon (the first).
   image_filename := aImageFile  ;  Set default.

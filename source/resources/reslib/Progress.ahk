@@ -248,7 +248,7 @@ Progress(aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFontName:=""){
   splash.object_width := COORD_UNSPECIFIED  ;  Currently only used for SplashImage, not Progress.
     splash.margin_x := 10
     splash.margin_y := 5
-  cp:=(StrPtr(aOptions))-2
+  cp:=(StrPtr(aOptions ""))-2
   while (""!=cp_:=StrGet(cp:=cp+2,1)){
   ;for (cp2, cp = options; cp!=""; ++cp)
     If (cp_="a"){  ;  Non-Always-on-top.  Synonymous with A0 in early versions.
