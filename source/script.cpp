@@ -743,11 +743,6 @@ void FreeFunctionVariables(Func *aFunc, bool aDelete)
 				FreeFunctionVariables(f.mFuncs.mItem[v], aDelete);
 			free(f.mFuncs.mItem);
 		}
-		if (f.mFuncs.mCount)
-		{
-			for (v = 0; v < f.mFuncs.mCount; v++)
-				f.mFuncs.mItem[v]->Release();
-		}
 		f.Release();
 	}
 	else
