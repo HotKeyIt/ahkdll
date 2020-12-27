@@ -127,7 +127,55 @@ Map *Map::Create(ExprTokenType *aParam[], int aParamCount, bool aUnsorted)
 	map->SetBase(Map::sPrototype);
 	if (g_DefaultMapValueType != SYM_MISSING)
 		map->mDefault.SetValue(g_DefaultMapValue);
-	if (aParamCount && !map->SetItems(aParam, aParamCount))
+	if (aParamCount == 1 && TokenToObject(*aParam[0]))
+	{
+		ResultToken result_token, this_token, aKey, aValue;
+		ExprTokenType *params[] = { &aKey, &aValue };
+		Var vkey, vval;
+		IObject *enumerator;
+		ResultType result;
+
+		Object *aobj = dynamic_cast<Object*>(TokenToObject(*aParam[0]));
+		if (!aobj)
+			return NULL;
+
+		this_token.symbol = SYM_OBJECT;
+		this_token.object = aobj;
+		if (!_tcscmp(aobj->Type(), _T("Object")))
+			enumerator = new IndexEnumerator(aobj, static_cast<IndexEnumerator::Callback>(&Object::GetEnumProp));
+		else
+			result = GetEnumerator(enumerator, this_token, 2, false);
+
+		this_token.symbol = SYM_OBJECT;
+		this_token.object = map;
+		// Prepare parameters for the loop below
+		aKey.symbol = SYM_VAR;
+		aKey.var = &vkey;
+		aKey.var->mCharContents = _T("");
+		aKey.mem_to_free = 0;
+		aValue.symbol = SYM_VAR;
+		aValue.var = &vval;
+		aValue.var->mCharContents = _T("");
+		aValue.mem_to_free = 0;
+
+		for (;;)
+		{
+			// Call enumerator.Next(var1, var2)
+			result = CallEnumerator(enumerator, params, 2, false);
+			if (result == CONDITION_FALSE)
+				break;
+			if (!map->SetItem(*params[0], *params[1]))
+			{	// Out of memory.
+				map->Release();
+				return NULL;
+			}
+		}
+		// release enumerator and free vars
+		enumerator->Release();
+		vkey.Free();
+		vval.Free();
+	}
+	else if (aParamCount && !map->SetItems(aParam, aParamCount))
 	{
 		// Out of memory.
 		map->Release();
@@ -555,6 +603,7 @@ void Map::Clear()
 
 ObjectMember Object::sMembers[] =
 {
+	Object_Member(__Item, __Item, 0, IT_SET, 1, 1),
 	Object_Method1(Clone, 0, 0),
 	Object_Method1(DefineDefault, 0, 1),
 	Object_Method1(DefineMethod, 2, 2),
@@ -917,6 +966,35 @@ ResultType Map::Set(ResultToken &aResultToken, int aID, int aFlags, ExprTokenTyp
 	_o_return(this);
 }
 
+
+ResultType Object::__Item(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+{
+	TCHAR number_buf[MAX_NUMBER_SIZE];
+	if (IS_INVOKE_GET)
+	{
+		if (GetOwnProp(aResultToken, TokenToString(*aParam[0], number_buf)))
+		{
+			if (aResultToken.symbol == SYM_OBJECT)
+				aResultToken.object->AddRef();
+			return OK;
+		}
+		else if (mDefault.symbol != SYM_MISSING)
+		{
+			aResultToken.CopyValueFrom(mDefault);
+			if (aResultToken.symbol == SYM_OBJECT)
+				aResultToken.object->AddRef();
+			return OK;
+		}
+		else
+			_o_throw(ERR_NO_KEY, ParamIndexToString(0, _f_number_buf));
+	}
+	else
+	{
+		if (!SetOwnProp(TokenToString(*aParam[1], number_buf), *aParam[0]))
+			_o_throw(ERR_OUTOFMEM);
+	}
+	return OK;
+}
 
 
 //
