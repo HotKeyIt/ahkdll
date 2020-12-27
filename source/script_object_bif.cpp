@@ -88,7 +88,7 @@ BYTE sizeof_maxsize(TCHAR *buf)
 		{
 			if (StrChrAny(&buf[i], _T(";,")))
 			{
-				_tcsncpy(tempbuf, &buf[i], thissize = (int)(StrChrAny(&buf[i], _T(";,")) - &buf[i]));
+				_tcsncpy(tempbuf, &buf[i], thissize = (int)(StrChrAny(&buf[i], _T(";,}")) - &buf[i]));
 				i += thissize + 1;
 			}
 			else

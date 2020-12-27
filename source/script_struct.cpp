@@ -1079,19 +1079,22 @@ ResultType Struct::Invoke(IObject_Invoke_PARAMS_DECL)
 
 			// struct must have unnamed field to be accessed dynamically, otherwise it is main structure
 			if (mOwnHeap && mMain)
+			{
 				subobj = mMain;
+				aSize = mStructSize;
+			}
 			else if (mFieldCount > 1 || *mFields[0].key || !(subobj = mFields[0].mStruct))
 				return INVOKE_NOT_HANDLED;
 
 			// Get size of structure
-			if (mFields[0].mIsPointer)
-				aSize = ptrsize; // array of pointers or pointer to array
+			else if (mFields[0].mIsPointer > 1)
+				aSize = ptrsize; // array of pointers
 			else
-				aSize = mFields[0].mSize; // array
-			if (mFields[0].mIsPointer && !mFields[0].mArraySize && !IS_INVOKE_CALL) // IS_INVOKE_CALL will need the address and not pointer
-			{	// Pointer to array
+				aSize = mFields[0].mSize; // array or pointer to array of structs
+
+			if (mFields[0].mIsPointer && !IS_INVOKE_CALL) // IS_INVOKE_CALL will need the address and not pointer // removed: '&& !mFields[0].mArraySize' because it is a pointer to array, not array of pointers
+				// Pointer to array
 				subobj->mStructMem = target = (UINT_PTR*)((UINT_PTR)*target + ((TokenToInt64(*aParam[0]) - 1)*aSize));
-			}
 			else // assume array
 				subobj->mStructMem = target = (UINT_PTR*)((UINT_PTR)target + ((TokenToInt64(*aParam[0]) - 1)*aSize));
 			
