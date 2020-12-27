@@ -304,7 +304,10 @@ EXPORT UINT_PTR ahkFindLabel(LPTSTR aLabelName, DWORD aThreadID)
 #endif
 		return 0; // AutoHotkey needs to be running at this point //
 	}
+	UserFunc *aCurrentFunc = g->CurrentFunc;
+	g->CurrentFunc = NULL;
 	UINT_PTR result = (UINT_PTR)g_script->FindLabel(aLabelName);
+	g->CurrentFunc = aCurrentFunc;
 #ifndef _USRDLL
 	if (curr_teb)
 		curr_teb->ThreadLocalStoragePointer = tls;
