@@ -1345,26 +1345,22 @@ LPVOID MemoryLoadResource(HMEMORYMODULE module, HMEMORYRSRC resource)
     return codeBase + entry->OffsetToData;
 }
 
-int
-MemoryLoadString(HMEMORYMODULE module, UINT id, LPTSTR buffer, int maxsize)
+LPWSTR
+MemoryLoadString(HMEMORYMODULE module, UINT id)
 {
-    return MemoryLoadStringEx(module, id, buffer, maxsize, DEFAULT_LANGUAGE);
+    return MemoryLoadStringEx(module, id, DEFAULT_LANGUAGE);
 }
 
-int
-MemoryLoadStringEx(HMEMORYMODULE module, UINT id, LPTSTR buffer, int maxsize, WORD language)
+LPWSTR
+MemoryLoadStringEx(HMEMORYMODULE module, UINT id, WORD language)
 {
     HMEMORYRSRC resource;
     PIMAGE_RESOURCE_DIR_STRING_U data;
     DWORD size;
-    if (buffer && maxsize == 0) {
-        return 0;
-    }
 
     resource = MemoryFindResourceEx(module, MAKEINTRESOURCE((id >> 4) + 1), RT_STRING, language);
     if (resource == NULL) {
-        buffer[0] = 0;
-        return 0;
+        return NULL;
     }
 
     data = (PIMAGE_RESOURCE_DIR_STRING_U) MemoryLoadResource(module, resource);
@@ -1372,22 +1368,10 @@ MemoryLoadStringEx(HMEMORYMODULE module, UINT id, LPTSTR buffer, int maxsize, WO
     while (id--) {
         data = (PIMAGE_RESOURCE_DIR_STRING_U) OffsetPointer(data, (data->Length + 1) * sizeof(WCHAR));
     }
-    if (data->Length == 0) {
+    if (size = data->Length == 0) {
         SetLastError(ERROR_RESOURCE_NAME_NOT_FOUND);
-        buffer[0] = 0;
-        return 0;
+        return NULL;
     }
 
-    size = data->Length;
-    if (size >= (DWORD) maxsize) {
-        size = maxsize;
-    } else {
-        buffer[size] = 0;
-    }
-#if defined(UNICODE)
-    wcsncpy(buffer, data->NameString, size);
-#else
-    wcstombs(buffer, data->NameString, size);
-#endif
-    return size;
+    return data->NameString;
 }

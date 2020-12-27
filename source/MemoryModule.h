@@ -160,12 +160,12 @@ LPVOID MemoryLoadResource(HMEMORYMODULE, HMEMORYRSRC);
 /**
  * Load a string resource.
  */
-int MemoryLoadString(HMEMORYMODULE, UINT, LPTSTR, int);
+LPWSTR MemoryLoadString(HMEMORYMODULE, UINT);
 
 /**
  * Load a string resource with a given language.
  */
-int MemoryLoadStringEx(HMEMORYMODULE, UINT, LPTSTR, int, WORD);
+LPWSTR MemoryLoadStringEx(HMEMORYMODULE, UINT, WORD);
 
 /**
 * Default implementation of CustomAllocFunc that calls VirtualAlloc
