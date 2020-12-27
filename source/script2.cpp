@@ -9592,7 +9592,7 @@ BIV_DECL_R(BIV_ModuleHandle)
 
 BIV_DECL_R(BIV_MemoryModule)
 {
-	_f_return((UINT_PTR)BIV_MemoryModule);
+	_f_return((UINT_PTR)g_hMemoryModule);
 }
 
 
@@ -15996,17 +15996,16 @@ BIF_DECL(BIF_MemoryGetProcAddress)
 
 BIF_DECL(BIF_MemoryFreeLibrary)
 {
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker =_T("");
+	aResultToken.SetValue(_T(""));
 	if (!TokenToInt64(*aParam[0]))
 		return;
 	MemoryFreeLibrary((HMEMORYMODULE)TokenToInt64(*aParam[0]));
+	aResultToken.SetValue(1);
 }
 
 BIF_DECL(BIF_MemoryFindResource)
 {
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker =_T("");
+	aResultToken.SetValue(_T(""));
 	if (!TokenToInt64(*aParam[0]))
 		return;
 	HMEMORYRSRC resource = NULL;
@@ -16016,8 +16015,7 @@ BIF_DECL(BIF_MemoryFindResource)
 		resource = MemoryFindResourceEx((HMEMORYMODULE)TokenToInt64(*aParam[0]),TokenIsNumeric(*aParam[1]) ? (LPCTSTR)TokenToInt64(*aParam[1]) : TokenToString(*aParam[1]),TokenIsNumeric(*aParam[2]) ? (LPCTSTR)TokenToInt64(*aParam[2]) : TokenToString(*aParam[2]),(WORD)TokenToInt64(*aParam[3]));
 	if (resource)
 	{
-		aResultToken.symbol = SYM_INTEGER;
-		aResultToken.value_int64 = (__int64)resource;
+		aResultToken.SetValue((__int64)resource);
 	}
 }
 
@@ -16041,25 +16039,10 @@ BIF_DECL(BIF_MemoryLoadResource)
 
 BIF_DECL(BIF_MemoryLoadString)
 {
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = _T("");
+	aResultToken.SetValue(_T(""));
 	if (!TokenToInt64(*aParam[0]))
 		return;
-	int result;
-	if (ParamIndexIsOmitted(2) || TokenToInt64(*aParam[2]) == 0 )
-		result = MemoryLoadStringEx((HMEMORYMODULE)TokenToInt64(*aParam[0]),(UINT)TokenToInt64(*aParam[1]),0,0,ParamIndexIsOmitted(4) ? 0 : (WORD)TokenToInt64(*aParam[4]));
-	else
-		result = MemoryLoadStringEx((HMEMORYMODULE)TokenToInt64(*aParam[0]),(UINT)TokenToInt64(*aParam[1]),TokenToString(*aParam[2]),(int)TokenToInt64(*aParam[3]),ParamIndexIsOmitted(4) ? 0 : (WORD)TokenToInt64(*aParam[4]));
-	if (result)
-	{	
-		aResultToken.symbol = SYM_INTEGER;
-		aResultToken.value_int64 = (__int64)result;
-	}
-	else
-	{
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker =_T("");
-	}
+	aResultToken.SetValue(MemoryLoadStringEx((HMEMORYMODULE)TokenToInt64(*aParam[0]),(UINT)TokenToInt64(*aParam[1]),ParamIndexIsOmitted(4) ? 0 : (WORD)TokenToInt64(*aParam[4])));
 }
 
 BIF_DECL(BIF_ZipCreateFile)
