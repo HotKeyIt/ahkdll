@@ -16039,10 +16039,11 @@ BIF_DECL(BIF_MemoryLoadResource)
 
 BIF_DECL(BIF_MemoryLoadString)
 {
-	aResultToken.SetValue(_T(""));
-	if (!TokenToInt64(*aParam[0]))
-		return;
-	aResultToken.SetValue(MemoryLoadStringEx((HMEMORYMODULE)TokenToInt64(*aParam[0]),(UINT)TokenToInt64(*aParam[1]),ParamIndexIsOmitted(4) ? 0 : (WORD)TokenToInt64(*aParam[4])));
+	LPTSTR result = MemoryLoadStringEx((HMEMORYMODULE)TokenToInt64(*aParam[0]), (UINT)TokenToInt64(*aParam[1]), ParamIndexIsOmitted(2) ? 0 : (WORD)TokenToInt64(*aParam[2]));
+	if (result)
+		aResultToken.SetValue(result);
+	else
+		aResultToken.SetValue(_T(""));
 }
 
 BIF_DECL(BIF_ZipCreateFile)

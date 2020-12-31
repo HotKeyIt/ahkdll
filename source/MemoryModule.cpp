@@ -1345,33 +1345,39 @@ LPVOID MemoryLoadResource(HMEMORYMODULE module, HMEMORYRSRC resource)
     return codeBase + entry->OffsetToData;
 }
 
-LPWSTR
+LPTSTR
 MemoryLoadString(HMEMORYMODULE module, UINT id)
 {
-    return MemoryLoadStringEx(module, id, DEFAULT_LANGUAGE);
+	return MemoryLoadStringEx(module, id, DEFAULT_LANGUAGE);
 }
 
-LPWSTR
+LPTSTR
 MemoryLoadStringEx(HMEMORYMODULE module, UINT id, WORD language)
 {
-    HMEMORYRSRC resource;
-    PIMAGE_RESOURCE_DIR_STRING_U data;
-    DWORD size;
+	HMEMORYRSRC resource;
+	PIMAGE_RESOURCE_DIR_STRING_U data;
 
-    resource = MemoryFindResourceEx(module, MAKEINTRESOURCE((id >> 4) + 1), RT_STRING, language);
-    if (resource == NULL) {
-        return NULL;
-    }
+	resource = MemoryFindResourceEx(module, MAKEINTRESOURCE((id >> 4) + 1), RT_STRING, language);
+	if (resource == NULL) {
+		return 0;
+	}
 
-    data = (PIMAGE_RESOURCE_DIR_STRING_U) MemoryLoadResource(module, resource);
-    id = id & 0x0f;
-    while (id--) {
-        data = (PIMAGE_RESOURCE_DIR_STRING_U) OffsetPointer(data, (data->Length + 1) * sizeof(WCHAR));
-    }
-    if (size = data->Length == 0) {
-        SetLastError(ERROR_RESOURCE_NAME_NOT_FOUND);
-        return NULL;
-    }
+	data = (PIMAGE_RESOURCE_DIR_STRING_U)MemoryLoadResource(module, resource);
+	id = id & 0x0f;
+	while (id--) {
+		data = (PIMAGE_RESOURCE_DIR_STRING_U)OffsetPointer(data, (data->Length + 1) * sizeof(WCHAR));
+	}
+	if (data->Length == 0) {
+		SetLastError(ERROR_RESOURCE_NAME_NOT_FOUND);
+		return 0;
+	}
 
-    return data->NameString;
+	LPTSTR buffer = (LPTSTR)malloc(data->Length + sizeof(TCHAR));
+	buffer[data->Length] = 0;
+#if defined(UNICODE)
+	wcsncpy(buffer, data->NameString, data->Length);
+#else
+	wcstombs(buffer, data->NameString, data->Length);
+#endif
+	return buffer;
 }
