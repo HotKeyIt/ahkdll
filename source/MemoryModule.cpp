@@ -33,6 +33,7 @@
 #include "stdafx.h" // pre-compiled headers
 #include "MemoryModule.h"
 #include "globaldata.h" // for access to many global vars
+#include "application.h"
 
 #ifdef _WIN64
 #define POINTER_TYPE ULONGLONG
@@ -94,8 +95,6 @@ HMODULE libkernel32 = LoadLibrary(_T("kernel32.dll"));
 MyCreateActCtx _CreateActCtxA = (MyCreateActCtx)GetProcAddress(libkernel32,"CreateActCtxA");
 MyDeactivateActCtx _DeactivateActCtx = (MyDeactivateActCtx)GetProcAddress(libkernel32,"DeactivateActCtx");
 MyActivateActCtx _ActivateActCtx = (MyActivateActCtx)GetProcAddress(libkernel32,"ActivateActCtx");
-// hook function and global vars for HookRtlPcToFileHeader
-
 #ifdef _WIN64
 #define HOST_MACHINE IMAGE_FILE_MACHINE_AMD64
 #else
@@ -190,7 +189,7 @@ PVOID NTAPI HookRtlPcToFileHeader(IN PVOID PcValue, PVOID* BaseOfImage)
 #elif _M_AMD64 // compiles for x64
 	mypeb = (PMYPEB)(__readgsqword(0x60)); //PEB
 #endif
-
+	/*
 	PCRITICAL_SECTION aLoaderLock; // So no other module can be loaded, expecially due to hooked _RtlPcToFileHeader
 #ifdef _M_IX86 // compiles for x86
 	aLoaderLock = *(PCRITICAL_SECTION*)(__readfsdword(0x30) + 0xA0); //PEB->LoaderLock
@@ -198,7 +197,9 @@ PVOID NTAPI HookRtlPcToFileHeader(IN PVOID PcValue, PVOID* BaseOfImage)
 	aLoaderLock = *(PCRITICAL_SECTION*)(__readgsqword(0x60) + 0x110); //PEB->LoaderLock //0x60 because offset is doubled in 64bit
 #endif
 
-	//EnterCriticalSection(aLoaderLock);
+	EnterCriticalSection(aLoaderLock);
+	*/
+	// Enter and Leave Critical Section is done in MemoryLoadLibraryEx
 	ModuleListHead = &mypeb->Ldr->InLoadOrderModuleList;
 	Entry = ModuleListHead->Flink;
 	while (Entry != ModuleListHead)
@@ -972,7 +973,6 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data, size_t size,
 #elif _M_AMD64 // compiles for x64
 				aLoaderLock = *(PCRITICAL_SECTION*)(__readgsqword(0x60) + 0x110); //PEB->LoaderLock //0x60 because offset is doubled in 64bit
 #endif
-				HANDLE hHeap = NULL;
 				// set start and end of memory for our module so HookRtlPcToFileHeader can report properly
 				currentModuleStart = result->codeBase;
 				currentModuleEnd = result->codeBase + result->headers->OptionalHeader.SizeOfImage;
@@ -1060,7 +1060,7 @@ FARPROC MemoryGetProcAddress(HMEMORYMODULE mod, LPCSTR name)
             DWORD i;
             DWORD *nameRef = (DWORD *) (codeBase + exports->AddressOfNames);
             WORD *ordinal = (WORD *) (codeBase + exports->AddressOfNameOrdinals);
-            struct ExportNameEntry *entry = (struct ExportNameEntry*) HeapAlloc(module->heapmodules, HEAP_ZERO_MEMORY, exports->NumberOfNames * sizeof(struct ExportNameEntry));
+			struct ExportNameEntry *entry = (struct ExportNameEntry*) HeapAlloc(module->heapmodules, HEAP_ZERO_MEMORY, exports->NumberOfNames * sizeof(struct ExportNameEntry));
             module->nameExportsTable = entry;
             if (!entry) {
                 SetLastError(ERROR_OUTOFMEMORY);
@@ -1114,17 +1114,18 @@ void MemoryFreeLibrary(HMEMORYMODULE mod)
 
 	if (module->nameExportsTable != NULL)
 		HeapFree(module->heapmodules, 0, module->nameExportsTable);
-    if (module->modules != NULL) {
-        // free previously opened libraries
-        int i;
-        for (i=0; i<module->numModules; i++) {
-            if (module->modules[i] != NULL) {
-                module->freeLibrary(module->modules[i], module->userdata);
-            }
-        }
-        HeapFree(module->heapmodules, 0, module->modules);
-    }
+	if (module->modules != NULL) {
+		// free previously opened libraries
+		int i;
+		for (i = 0; i < module->numModules; i++) {
+			if (module->modules[i] != NULL) {
+				module->freeLibrary(module->modules[i], module->userdata);
+			}
+		}
+		HeapFree(module->heapmodules, 0, module->modules);
+	}
 	HeapDestroy(module->heapmodules);
+
 
     if (module->codeBase != NULL) {
         // release memory of library
@@ -1344,25 +1345,20 @@ LPVOID MemoryLoadResource(HMEMORYMODULE module, HMEMORYRSRC resource)
     return codeBase + entry->OffsetToData;
 }
 
-int
-MemoryLoadString(HMEMORYMODULE module, UINT id, LPTSTR buffer, int maxsize)
+LPTSTR
+MemoryLoadString(HMEMORYMODULE module, UINT id)
 {
-    return MemoryLoadStringEx(module, id, buffer, maxsize, DEFAULT_LANGUAGE);
+    return MemoryLoadStringEx(module, id, DEFAULT_LANGUAGE);
 }
 
-int
-MemoryLoadStringEx(HMEMORYMODULE module, UINT id, LPTSTR buffer, int maxsize, WORD language)
+LPTSTR
+MemoryLoadStringEx(HMEMORYMODULE module, UINT id, WORD language)
 {
     HMEMORYRSRC resource;
     PIMAGE_RESOURCE_DIR_STRING_U data;
-    DWORD size;
-    if (buffer && maxsize == 0) {
-        return 0;
-    }
 
     resource = MemoryFindResourceEx(module, MAKEINTRESOURCE((id >> 4) + 1), RT_STRING, language);
     if (resource == NULL) {
-        buffer[0] = 0;
         return 0;
     }
 
@@ -1373,20 +1369,15 @@ MemoryLoadStringEx(HMEMORYMODULE module, UINT id, LPTSTR buffer, int maxsize, WO
     }
     if (data->Length == 0) {
         SetLastError(ERROR_RESOURCE_NAME_NOT_FOUND);
-        buffer[0] = 0;
         return 0;
     }
 
-    size = data->Length;
-    if (size >= (DWORD) maxsize) {
-        size = maxsize;
-    } else {
-        buffer[size] = 0;
-    }
+    LPTSTR buffer = (LPTSTR) malloc(data->Length + sizeof(TCHAR));
+    buffer[data->Length] = 0;
 #if defined(UNICODE)
-    wcsncpy(buffer, data->NameString, size);
+    wcsncpy(buffer, data->NameString, data->Length);
 #else
-    wcstombs(buffer, data->NameString, size);
+    wcstombs(buffer, data->NameString, data->Length);
 #endif
-    return size;
+    return buffer;
 }
