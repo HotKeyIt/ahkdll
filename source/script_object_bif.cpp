@@ -47,7 +47,7 @@ BYTE sizeof_maxsize(TCHAR *buf)
 	// used to pass aligntotal counter to structure in structure
 	Var3.symbol = SYM_INTEGER;
 	Var3.value_int64 = (__int64)&align;
-	ExprTokenType *param[] = { &Var1, &Var2, &Var3 };
+	ExprTokenType *param[] = { &Var1, &Var2, &Var3};
 	int depth = 0;
 	int max = 0,thissize = 0;
 	LPCTSTR comments = 0;
@@ -86,7 +86,7 @@ BYTE sizeof_maxsize(TCHAR *buf)
 			if (StrChrAny(&buf[i], _T(";,")))
 			{
 				_tcsncpy(tempbuf, &buf[i], thissize = (int)(StrChrAny(&buf[i], _T(";,}")) - &buf[i]));
-				i += thissize + 1;
+				i += thissize + (buf[i+thissize] == '}' ? 0 : 1);
 			}
 			else
 			{
@@ -130,19 +130,22 @@ BIF_DECL(BIF_sizeof)
 	int *aligntotal = &align;		// pointer alignment for total structure
 	int thissize = 0;					// used to save size returned from IsDefaultType
 	int maxsize = 0;				// max size of union or struct
+	int toalign = 0;				// custom alignment
+	int thisalign = 0;
 
 	// following are used to find variable and also get size of a structure defined in variable
 	// this will hold the variable reference and offset that is given to size() to align if necessary in 64-bit
 	ResultType Result = OK;
 	ExprTokenType ResultToken;
-	ExprTokenType Var1,Var2,Var3;
+	ExprTokenType Var1,Var2,Var3,Var4;
 	Var1.symbol = SYM_VAR;
 	Var2.symbol = SYM_INTEGER;
 
 	// used to pass aligntotal counter to structure in structure
 	Var3.symbol = SYM_INTEGER;
 	Var3.value_int64 = (__int64)&align;
-	ExprTokenType *param[] = {&Var1,&Var2,&Var3};
+	Var4.symbol = SYM_INTEGER;
+	ExprTokenType *param[] = {&Var1,&Var2,&Var3,&Var4};
 	
 	// will hold pointer to structure definition while we parse it
 	TCHAR *buf;
@@ -196,6 +199,23 @@ BIF_DECL(BIF_sizeof)
 	// Set buf to beginning of structure definition
 	buf = TokenToString(*aParam[0]);
 
+
+	toalign = ATOI(buf);
+	TCHAR alignbuf[MAX_INTEGER_LENGTH];
+	if (*(buf + _tcslen(ITOA(toalign, alignbuf))) != ':' || toalign <= 0)
+		Var4.value_int64 = toalign = 0;
+	else
+	{
+		buf += _tcslen(alignbuf) + 1;
+		Var4.value_int64 = toalign;
+	}
+
+	if (aParamCount > 3 && TokenIsPureNumeric(*aParam[3]))
+	{   // a pointer was given to return memory to align
+		toalign = (int)TokenToInt64(*aParam[3], true);
+		Var4.value_int64 = (__int64)toalign;
+	}
+
 	// continue as long as we did not reach end of string / structure definition
 	while (*buf)
 	{
@@ -220,9 +240,9 @@ BIF_DECL(BIF_sizeof)
 				unionisstruct[uniondepth] = false; 
 			// backup offset because we need to set it back after this union / struct was parsed
 			// unionsize is initialized to 0 and buffer moved to next character
-			if (mod = offset % (maxsize = sizeof_maxsize(buf)))
-				offset += (maxsize - mod) % maxsize;
-			structalign[uniondepth] = *aligntotal > maxsize ? *aligntotal : maxsize;
+			if (mod = offset % STRUCTALIGN((maxsize = sizeof_maxsize(buf))))
+				offset += (thisalign - mod) % thisalign;
+			structalign[uniondepth] = *aligntotal > thisalign ? STRUCTALIGN(*aligntotal) : thisalign;
 			*aligntotal = 0;
 			unionoffset[uniondepth] = offset; // backup offset 
 			unionsize[uniondepth] = 0;
@@ -252,8 +272,8 @@ BIF_DECL(BIF_sizeof)
 			if (--uniondepth == 0)
 			{
 				// end of structure, align it
-				if (mod = totalunionsize % *aligntotal)
-					totalunionsize += (*aligntotal - mod) % *aligntotal;
+				//if (mod = totalunionsize % *aligntotal)
+				//	totalunionsize += (*aligntotal - mod) % *aligntotal;
 				// correct offset
 				offset += totalunionsize;
 			}
@@ -311,11 +331,11 @@ BIF_DECL(BIF_sizeof)
 				return;
 			}
 			// align offset for pointer
-			if (mod = offset % ptrsize)
-				offset += (ptrsize - mod) % ptrsize;
+			if (mod = offset % STRUCTALIGN(ptrsize))
+				offset += (thisalign - mod) % thisalign;
 			offset += ptrsize * (arraydef ? arraydef : 1);
-			if (ptrsize > *aligntotal)
-				*aligntotal = ptrsize;
+			if (thisalign > *aligntotal)
+				*aligntotal = thisalign;
 			// update offset
 			if (uniondepth)
 			{
@@ -381,12 +401,12 @@ BIF_DECL(BIF_sizeof)
 		if ((!_tcscmp(defbuf, _T(" bool ")) && (thissize = 1)) || (thissize = IsDefaultType(defbuf)))
 		{
 			// align offset
-			if ((!bitsize || bitsizetotal == bitsize) && thissize > 1 && (mod = offset % thissize))
-				offset += (thissize - mod) % thissize;
+			if ((!bitsize || bitsizetotal == bitsize) && thissize > 1 && (mod = offset % STRUCTALIGN(thissize)))
+				offset += (thisalign - mod) % thisalign;
 			if (!bitsize || bitsizetotal == bitsize)
 				offset += thissize * (arraydef ? arraydef : 1);
-			if (thissize > *aligntotal)
-				*aligntotal = thissize; // > ptrsize ? ptrsize : thissize;
+			if (thisalign > *aligntotal)
+				*aligntotal = thisalign; // > ptrsize ? ptrsize : thissize;
 		}
 		else // type was not found, check for user defined type in variables
 		{
@@ -422,8 +442,8 @@ BIF_DECL(BIF_sizeof)
 			{
 				// Call BIF_sizeof passing offset in second parameter to align if necessary
 				int newaligntotal = sizeof_maxsize(TokenToString(Var1));
-				if (newaligntotal > *aligntotal)
-					*aligntotal = newaligntotal;
+				if (STRUCTALIGN(newaligntotal) > *aligntotal)
+					*aligntotal = thisalign;
 				if ((!bitsize || bitsizetotal == bitsize) && offset && (mod = offset % *aligntotal))
 					offset += (*aligntotal - mod) % *aligntotal;
 				param[1]->value_int64 = (__int64)offset;
@@ -1462,7 +1482,7 @@ BIF_DECL(BIF_ObjInvoke)
 			// This is not necessary for SYM_OBJECT since that reference is already counted and cannot be released before we return.  Each object
 			// could take care not to delete itself prematurely, but it seems more proper, more reliable and more maintainable to handle it here.
 			obj->AddRef();
-        aResult = obj->Invoke(aResultToken, *obj_param, invoke_type, aParam, aParamCount);
+         aResult = obj->Invoke(aResultToken, *obj_param, invoke_type, aParam, aParamCount);
 		if (param_is_var)
 			obj->Release();
 	}
