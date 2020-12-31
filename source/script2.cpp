@@ -18164,25 +18164,11 @@ BIF_DECL(BIF_MemoryLoadResource)
 
 BIF_DECL(BIF_MemoryLoadString)
 {
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = _T("");
-	if (!TokenToInt64(*aParam[0]))
-		return;
-	int result;
-	if (ParamIndexIsOmitted(2) || TokenToInt64(*aParam[2]) == 0 )
-		result = MemoryLoadStringEx((HMEMORYMODULE)TokenToInt64(*aParam[0]),(UINT)TokenToInt64(*aParam[1]),0,0,ParamIndexIsOmitted(4) ? 0 : (WORD)TokenToInt64(*aParam[4]));
-	else
-		result = MemoryLoadStringEx((HMEMORYMODULE)TokenToInt64(*aParam[0]),(UINT)TokenToInt64(*aParam[1]),TokenToString(*aParam[2]),(int)TokenToInt64(*aParam[3]),ParamIndexIsOmitted(4) ? 0 : (WORD)TokenToInt64(*aParam[4]));
+	LPTSTR result = MemoryLoadStringEx((HMEMORYMODULE)TokenToInt64(*aParam[0]), (UINT)TokenToInt64(*aParam[1]), ParamIndexIsOmitted(2) ? 0 : (WORD)TokenToInt64(*aParam[2]));
 	if (result)
-	{	
-		aResultToken.symbol = SYM_INTEGER;
-		aResultToken.value_int64 = (__int64)result;
-	}
+		aResultToken.SetValue(result);
 	else
-	{
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker =_T("");
-	}
+		aResultToken.SetValue(_T(""));
 }
 
 BIF_DECL(BIF_ZipCreateFile)
