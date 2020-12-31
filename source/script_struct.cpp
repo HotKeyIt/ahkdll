@@ -28,18 +28,22 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 	int aligntotal = 0;				// pointer alignment for total structure
 	int thissize = 0;				// used to check if type was found in above array.
 	int maxsize = 0;				// max size of union or struct
+	int toalign = 0;				// custom alignment
+	int thisalign = 0;
 
 	// following are used to find variable and also get size of a structure defined in variable
 	// this will hold the variable reference and offset that is given to size() to align if necessary in 64-bit
 	ResultToken result_token, obj_token;
 	result_token.SetResult(OK);
 	obj_token.SetResult(OK);
-	ExprTokenType Var1,Var2,Var3,Var4;
-	ExprTokenType *param[] = {&Var1,&Var2,&Var3,&Var4};
+	ExprTokenType Var1,Var2,Var3,Var4,Var5;
+	ExprTokenType *param[] = {&Var1,&Var2,&Var3,&Var4,&Var5};
 	Var1.symbol = SYM_VAR;
 	Var2.symbol = SYM_INTEGER;
 	Var3.symbol = SYM_INTEGER;
 	Var4.symbol = SYM_OBJECT;
+	Var5.symbol = SYM_INTEGER;
+	Var5.value_int64 = 0;
 
 	// will hold pointer to structure definition string while we parse trough it
 	TCHAR *buf;
@@ -129,9 +133,34 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			obj->mStructMem = (UINT_PTR *)HeapAlloc(obj->mHeap, HEAP_ZERO_MEMORY, obj->mStructSize);
 	}
 
+
 	// Set buf to beginning of structure definition
 	buf = TokenToString(*aParam[0]);
 	
+	toalign = ATOI(buf);
+	TCHAR alignbuf[MAX_INTEGER_LENGTH];
+	if (*(buf + _tcslen(ITOA(toalign, alignbuf))) != ':' || toalign <= 0)
+	{
+		if (aParamCount == 5)
+		{
+			toalign = (int)TokenToInt64(*aParam[4]);
+			Var5.value_int64 = (__int64)toalign;
+		}
+		else
+			Var5.value_int64 = toalign = 0;
+	}
+	else
+	{
+		buf += _tcslen(alignbuf) + 1;
+		Var5.value_int64 = toalign;
+	}
+
+	if (aParamCount == 5)
+	{
+		toalign = (int)TokenToInt64(*aParam[4]);
+		Var5.value_int64 = (__int64)toalign;
+	}
+
 	// continue as long as we did not reach end of string / structure definition
 	while (*buf)
 	{
@@ -156,9 +185,9 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 				unionisstruct[uniondepth] = false;
 			// backup offset because we need to set it back after this union / struct was parsed
 			// unionsize is initialized to 0 and buffer moved to next character
-			if (mod = offset % (maxsize = sizeof_maxsize(buf)))
-				offset += (maxsize - mod) % maxsize;
-			structalign[uniondepth] = aligntotal > maxsize ? aligntotal : maxsize;
+			if (mod = offset % STRUCTALIGN((maxsize = sizeof_maxsize(buf))))
+				offset += (thisalign - mod) % thisalign;
+			structalign[uniondepth] = aligntotal > thisalign ? STRUCTALIGN(aligntotal) : thisalign;
 			aligntotal = 0;
 			unionoffset[uniondepth] = offset; // backup offset
 			unionsize[uniondepth] = 0;
@@ -344,14 +373,14 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 				if (mod = offset % ptrsize)
 					offset += (ptrsize - mod) % ptrsize;
 				if (ptrsize > aligntotal)
-					aligntotal = ptrsize;
+					aligntotal = toalign > 0 && ptrsize > toalign ? toalign : ptrsize;
 			}
 			else
 			{
 				if ((!bitsize || bitsizetotal == bitsize) && (mod = offset % thissize))
 					offset += (thissize - mod) % thissize;
 				if (thissize > aligntotal)
-					aligntotal = thissize; // > ptrsize ? ptrsize : thissize;
+					aligntotal = toalign > 0 && thissize > toalign ? toalign : thissize; // > ptrsize ? ptrsize : thissize;
 			}
 			if (!(field = obj->Insert(keybuf, insert_pos
 			/* pointer*/	, ispointer //!*keybuf ? ispointer : 0
@@ -407,7 +436,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 					Var1.marker = subdefbuf;
 					Var3.symbol = SYM_MISSING;
 					Var4.object = field->mStruct;
-					if (!Struct::Create(param, 4))
+					if (!Struct::Create(param, 5))
 					{
 						obj->Release();
 						return NULL;
@@ -468,9 +497,9 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 				// if field is a pointer we will need its size only
 				if (!ispointer)
 				{
-					int newaligntotal = sizeof_maxsize(TokenToString(Var1));
-					if (newaligntotal > aligntotal)
-						aligntotal = newaligntotal;
+					STRUCTALIGN((sizeof_maxsize(TokenToString(Var1))));
+					if (thisalign > aligntotal)
+						aligntotal = thisalign;
 					if ((!bitsize || bitsizetotal == bitsize) && offset && (mod = offset % aligntotal))
 						offset += (aligntotal - mod) % aligntotal;
 					Var2.value_int64 = (__int64)offset;
@@ -497,8 +526,8 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 					}
 					if (mod = offset % ptrsize)
 						offset += (ptrsize - mod) % ptrsize;
-					if (ptrsize > aligntotal)
-						aligntotal = ptrsize;
+					if (STRUCTALIGN(ptrsize) > aligntotal)
+						aligntotal = thisalign;
 				}
 
 				// Insert new field in our structure, all custom structures are dynamically resolved
@@ -560,7 +589,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 					//Var2.value_int64 = (UINT_PTR)(obj->mStructMem + offset);
 					Var3.symbol = SYM_MISSING;
 					Var4.object = field->mStruct;
-					if (!Struct::Create(param, 4))
+					if (!Struct::Create(param, 5))
 					{
 						obj->Release();
 						return NULL; 
