@@ -1,6 +1,6 @@
 CreateScript(script,pw:=""){
   static mScript:=""
-  local Data2:=""
+  local Data2:=aScript:=""
   WorkingDir:=A_WorkingDir
   script:=StrReplace(StrReplace(script,"`n,`r`n"),"`r`r","`r")
   If RegExMatch(script,"m)^[^:]+:[^:]+|[a-zA-Z0-9#_@]+\{}$"){
