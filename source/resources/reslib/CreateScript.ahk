@@ -13,7 +13,7 @@ CreateScript(script,pw:=""){
         }
         DataSize := SizeofResource(lib, res)
         ,hresdata := LoadResource(lib,res)
-        ,pData := LockResource(hresdata),Data2:=UnZipRawMemory(pData,DataSize,pw)?pData:=Data2.Ptr:""
+        ,pData := LockResource(hresdata),(Data2:=UnZipRawMemory(pData,DataSize,pw))?pData:=Data2.Ptr:""
         If (DataSize){
           mScript := StrReplace(StrReplace(StrReplace(StrReplace(StrGet(pData,"UTF-8"),"`n","`r`n"),"`r`r","`r"),"`r`r","`r"),"`n`n","`n")
           line:=BufferAlloc(16384*2)
