@@ -2034,7 +2034,10 @@ input_type *InputRelease(input_type *aInput)
 		if (aInput->ScriptObject->onEnd)
 			return aInput; // Return for caller to call OnEnd and Release.
 		aInput->ScriptObject->Release();
-		aInput->ScriptObject = NULL;
+		// The following is not done because this Release() is only to counteract an AddRef() in
+		// InputStart().  ScriptObject != NULL indicates this input_type is actually embedded in
+		// the InputObject and as such the link should never be broken until both are deleted.
+		//aInput->ScriptObject = NULL;
 	}
 	return NULL;
 }
@@ -5863,8 +5866,7 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 		// The following iMsg can't be in the switch() since it's not constant:
 		if (iMsg == WM_TASKBARCREATED && !g_NoTrayIcon) // !g_NoTrayIcon --> the tray icon should be always visible.
 		{
-			g_script.CreateTrayIcon();
-			g_script.UpdateTrayIcon(true);  // Force the icon into the correct pause, suspend, or mIconFrozen state.
+			g_script.RestoreTrayIcon();
 			// And now pass this iMsg on to DefWindowProc() in case it does anything with it.
 		}
 		
@@ -11745,7 +11747,7 @@ LPTSTR GetExitReasonString(ExitReasons aExitReason)
 	// Since the below are all relatively rare, except WM_CLOSE perhaps, they are all included
 	// as one word to cut down on the number of possible words (it's easier to write OnExit
 	// routines to cover all possibilities if there are fewer of them).
-	// Update: The redundant ExitReasons were merged to reduce code size.
+	case EXIT_CRITICAL:
 	case EXIT_DESTROY:
 	case EXIT_CLOSE: str = _T("Close"); break;
 	case EXIT_ERROR: str = _T("Error"); break;
@@ -18912,6 +18914,16 @@ BIF_DECL(BIF_MinMax)
 	aResultToken.value_int64 = param.value_int64;
 }
 
+
+BIF_DECL(BIF_ZipCompressionLevel)
+{
+	int aLevel = TokenToInt64(*aParam[0]);
+	if (TokenIsPureNumeric(*aParam[0]) && aLevel > -1 && aLevel < 10) // 0 - 9 compression level supported
+		g_ZipCompressionLevel = aLevel;
+	else
+		g_script.ScriptError(ERR_PARAM2_INVALID);
+	aResultToken.SetValue(g_ZipCompressionLevel);
+}
 
 
 BIF_DECL(BIF_Abs)

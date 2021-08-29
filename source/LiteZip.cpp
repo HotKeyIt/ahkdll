@@ -4498,6 +4498,7 @@ typedef unsigned long ULG;      // unsigned 32-bit value
 #define EB_UT_LEN(n)		(EB_UT_MINLEN + 4 * (n))
 #define EB_L_UT_SIZE		(EB_HEADSIZE + EB_UT_LEN(3))
 #define EB_C_UT_SIZE		(EB_HEADSIZE + EB_UT_LEN(1))
+#define EB_UTF_SIZE			9		// tag 0x7075 (short), Tsize (short), version (byte), NameCRC32 (4 bytes),
 
 // Signatures for zip file information headers
 #define LOCSIG     0x04034b50L
@@ -7633,7 +7634,7 @@ static void ideflate(TZIP *tzip, TZIPFILEINFO *zfi)
 		state->ts.bl_desc.max_length = MAX_BL_BITS;
 		state->ts.l_desc.max_code = state->ts.d_desc.max_code = state->ts.bl_desc.max_code = 0;
 
-	skip:	state->level = 5;
+	skip:	state->level = g_ZipCompressionLevel;
 		//		state->seekable = tzip->flags & TZIP_SRCCANSEEK ? 1 : 0;
 
 		//		state->ds.window_size =
@@ -7896,7 +7897,7 @@ static DWORD addSrc(register TZIP *tzip, const void *destname, const void *src, 
 	// then the compressed data, and possibly an extended local header.
 
 	// We need to allocate a TZIPFILEINFO + sizeof(EB_C_UT_SIZE)
-	if (!(zfi = (TZIPFILEINFO *)GlobalAlloc(GMEM_FIXED, sizeof(TZIPFILEINFO) + EB_C_UT_SIZE)))
+	if (!(zfi = (TZIPFILEINFO *)GlobalAlloc(GMEM_FIXED, sizeof(TZIPFILEINFO) + EB_C_UT_SIZE + (ZIP_UNICODE ? EB_UTF_SIZE + WideCharToMultiByte(CP_UTF8, 0, (const WCHAR *)destname, -1, NULL, 0, 0, 0) - 1 : 0))))
 	{
 		passex = ZR_NOALLOC;
 		goto badout2;
@@ -7954,11 +7955,11 @@ static DWORD addSrc(register TZIP *tzip, const void *destname, const void *src, 
 
 	// Stuff the 'times' struct into zfi->extra
 	{
-		char xloc[EB_L_UT_SIZE];
+		char xloc[EB_L_UT_SIZE + EB_UTF_SIZE + MAX_PATH];
 
 		zfi->extra = xloc;
-		zfi->ext = EB_L_UT_SIZE;
 		zfi->cextra = (char *)zfi + sizeof(TZIPFILEINFO);
+		zfi->ext = EB_L_UT_SIZE;
 		zfi->cext = EB_C_UT_SIZE;
 		xloc[0] = 'U';
 		xloc[1] = 'T';
@@ -7980,6 +7981,23 @@ static DWORD addSrc(register TZIP *tzip, const void *destname, const void *src, 
 		CopyMemory(zfi->cextra, zfi->extra, EB_C_UT_SIZE);
 		zfi->cextra[EB_LEN] = EB_UT_LEN(1);
 		zfi->cextra[EB_HEADSIZE] = EB_UT_FL_MTIME;
+		if (flags & ZIP_UNICODE)
+		{
+			zfi->ext = EB_L_UT_SIZE + EB_UTF_SIZE + zfi->nam + 1;
+			zfi->cext = EB_C_UT_SIZE + EB_UTF_SIZE + zfi->nam + 1;
+			xloc[17] = 0x75;
+			xloc[18] = 0x70;
+			xloc[19] = (EB_UTF_SIZE + zfi->nam + 1) & 0xFF;
+			xloc[20] = ((EB_UTF_SIZE + zfi->nam + 1) >> 8) & 0xFF;
+			xloc[21] = 1;
+			ULG crc = crc32(0, (const UCH *)&zfi->iname, zfi->nam);
+			xloc[22] = crc & 0xFF;
+			xloc[23] = (crc >> 8) & 0xFF;
+			xloc[24] = (crc >> 16) & 0xFF;
+			xloc[25] = crc >> 24;
+			CopyMemory(zfi->cextra + EB_C_UT_SIZE, zfi->extra + EB_L_UT_SIZE, EB_UTF_SIZE);
+			CopyMemory(zfi->cextra + EB_C_UT_SIZE + EB_UTF_SIZE, zfi->iname, zfi->nam + 1);
+		}
 	}
 
 	if (tzip->flags & TZIP_OPTION_GZIP)

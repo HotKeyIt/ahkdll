@@ -447,7 +447,7 @@ BIF_DECL(BIF_sizeof)
 				if ((!bitsize || bitsizetotal == bitsize) && offset && (mod = offset % *aligntotal))
 					offset += (*aligntotal - mod) % *aligntotal;
 				param[1]->value_int64 = (__int64)offset;
-				BIF_sizeof(Result,ResultToken,param,3);
+				BIF_sizeof(Result,ResultToken,param,4);
 				if (ResultToken.symbol != SYM_INTEGER)
 				{	// could not resolve structure
 					g_script.ScriptError(ERR_INVALID_STRUCT, defbuf);

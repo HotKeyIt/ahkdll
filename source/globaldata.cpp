@@ -46,6 +46,7 @@ bool g_Loading = false;
 HINSTANCE g_hInstance = NULL; // Set by WinMain().
 HMODULE g_hMemoryModule = NULL; // Set by DllMain() used for COM 
 DWORD g_MainThreadID = GetCurrentThreadId();
+unsigned char g_ZipCompressionLevel = 5;
 #ifdef _USRDLL
 HANDLE g_hThread = 0;
 #else

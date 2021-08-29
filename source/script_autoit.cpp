@@ -366,11 +366,23 @@ else\
 					, menu_text_length > this_menu_param_length ? this_menu_param_length : menu_text_length
 					, this_menu_param, this_menu_param_length);
 				//match_found = strcasestr(menu_text, this_menu_param);
-				if (!match_found)
+				TCHAR *cpamp;
+				if (!match_found && (cpamp = _tcschr(menu_text, '&')))
 				{
-					// Try again to find a match, this time without the ampersands used to indicate
-					// a menu item's shortcut key:
-					StrReplace(menu_text, _T("&"), _T(""), SCS_SENSITIVE);
+					// Try again to find a match, this time without the ampersands used to indicate a menu item's
+					// shortcut key.  One might assume that only the first & needs to be removed, but the actual
+					// behaviour confirmed on Windows 10.0.19041 was:
+					//  - Only every second & in a series of consecutive &&s was kept.
+					//  - Only the *first* &-letter was usable as a shortcut key.
+					//  - Only the *last* & caused an underline.
+					for (TCHAR *cplit = cpamp; ; ++cpamp, ++cplit)
+					{
+						if (*cpamp == '&')
+							++cpamp; // Skip this '&' but copy the next character unconditionally, even if it is '&'.
+						*cplit = *cpamp;
+						if (!*cpamp)
+							break; // Only after copying, so menu_text is null-terminated at the correct position (cpw).
+					}
 					menu_text_length = _tcslen(menu_text);
 					match_found = !lstrcmpni(menu_text  // This call is basically a strnicmp() that obeys locale.
 						, menu_text_length > this_menu_param_length ? this_menu_param_length : menu_text_length
@@ -941,7 +953,9 @@ ResultType Line::ControlGet(LPTSTR aCmd, LPTSTR aValue, LPTSTR aControl, LPTSTR 
 		// The above sets start to be the zero-based position of the start of the selection (similar for end).
 		// If there is no selection, start and end will be equal, at least in the edit controls I tried it with.
 		// The dwResult from the above is not useful and is not checked.
-		if (start == end) // Unlike Au3, it seems best to consider a blank selection to be a non-error.
+		if (start > end) // Later sections rely on this for safety with unsupported controls.
+			goto error; // The most likely cause is that this isn't an Edit control, but that isn't certain.
+		if (start == end)
 		{
 			output_var.Assign();
 			break; // Fall out of the switch so that ErrorLevel will be set to 0 (no error).

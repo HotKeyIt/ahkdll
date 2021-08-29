@@ -61,8 +61,8 @@ typedef struct POINTER_LIST {
 #endif
 
 typedef struct {
-    PIMAGE_NT_HEADERS headers;
     unsigned char *codeBase;
+    PIMAGE_NT_HEADERS headers;
     HCUSTOMMODULE *modules;
 	HANDLE heapmodules;
     int numModules;
@@ -160,12 +160,12 @@ LPVOID MemoryLoadResource(HMEMORYMODULE, HMEMORYRSRC);
 /**
  * Load a string resource.
  */
-LPTSTR MemoryLoadString(HMEMORYMODULE module, UINT id);
+LPTSTR MemoryLoadString(HMEMORYMODULE, UINT);
 
 /**
  * Load a string resource with a given language.
  */
-LPTSTR MemoryLoadStringEx(HMEMORYMODULE module, UINT id, WORD language);
+LPTSTR MemoryLoadStringEx(HMEMORYMODULE, UINT, WORD);
 
 /**
 * Default implementation of CustomAllocFunc that calls VirtualAlloc

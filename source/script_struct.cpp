@@ -41,8 +41,8 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 	Var1.symbol = SYM_VAR;
 	Var2.symbol = SYM_INTEGER;
 	Var3.symbol = SYM_INTEGER;
-	Var4.symbol = SYM_OBJECT;
-	Var5.symbol = SYM_INTEGER;
+	Var4.symbol = SYM_INTEGER;
+	Var5.symbol = SYM_OBJECT;
 
 	// will hold pointer to structure definition string while we parse trough it
 	TCHAR *buf;
@@ -75,8 +75,8 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 	IndexType insert_pos = 0;
 	Struct *obj;
 	
-	if (aParamCount > 3)
-		obj = (Struct *)aParam[3]->object; // use given handle (for substruct)
+	if (aParamCount > 4)
+		obj = (Struct *)aParam[4]->object; // use given handle (for substruct)
 	else
 	{
 		if (TokenToObject(*aParam[0]))
@@ -132,16 +132,16 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 	{
 		if (aParamCount == 5)
 		{
-			toalign = (int)TokenToInt64(*aParam[4]);
-			Var5.value_int64 = (__int64)toalign;
+			toalign = (int)TokenToInt64(*aParam[3]);
+			Var4.value_int64 = (__int64)toalign;
 		}
 		else
-			Var5.value_int64 = toalign = 0;
+			Var4.value_int64 = toalign = 0;
 	}
 	else
 	{
 		buf += _tcslen(alignbuf) + 1;
-		Var5.value_int64 = toalign;
+		Var4.value_int64 = toalign;
 	}
 
 	// continue as long as we did not reach end of string / structure definition
@@ -353,17 +353,17 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 			// align offset
 			if (ispointer)
 			{
-				if (mod = offset % ptrsize)
-					offset += (ptrsize - mod) % ptrsize;
-				if (ptrsize > aligntotal)
-					aligntotal = toalign > 0 && ptrsize > toalign ? toalign : ptrsize;
+				if (mod = offset % STRUCTALIGN(ptrsize))
+					offset += (thisalign - mod) % thisalign;
+				if (thisalign > aligntotal)
+					aligntotal = thisalign;
 			}
 			else
 			{
-				if ((!bitsize || bitsizetotal == bitsize) && (mod = offset % thissize))
-					offset += (thissize - mod) % thissize;
-				if (thissize > aligntotal)
-					aligntotal = toalign > 0 && thissize > toalign ? toalign : thissize; // > ptrsize ? ptrsize : thissize;
+				if ((!bitsize || bitsizetotal == bitsize) && (mod = offset % STRUCTALIGN(thissize)))
+					offset += (thisalign - mod) % thisalign;
+				if (thisalign > aligntotal)
+					aligntotal = thisalign; // > ptrsize ? ptrsize : thissize;
 			}
 			if (!(field = obj->Insert(keybuf, insert_pos
 			/* pointer*/	, ispointer //!*keybuf ? ispointer : 0
@@ -419,7 +419,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 					Var1.symbol = SYM_STRING;
 					Var1.marker = subdefbuf;
 					Var3.symbol = SYM_MISSING;
-					Var4.object = field->mStruct;
+					Var5.object = field->mStruct;
 					if (!Struct::Create(param, 5))
 					{
 						obj->Release();
@@ -483,7 +483,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 						offset += (aligntotal - mod) % aligntotal;
 					Var2.value_int64 = (__int64)offset;
 					Var3.value_int64 = (__int64)&aligntotal;
-					BIF_sizeof(Result, result_token,param,ispointer ? 1 : 3);
+					BIF_sizeof(Result, result_token,param,ispointer ? 1 : 4);
 					if (result_token.symbol != SYM_INTEGER)
 					{	// could not resolve structure
 						obj->Release();
@@ -503,9 +503,9 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 						g_script.ScriptError(ERR_INVALID_STRUCT, defbuf);
 						return NULL;
 					}
-					if (mod = offset % ptrsize)
-						offset += (ptrsize - mod) % ptrsize;
-					if (STRUCTALIGN(ptrsize) > aligntotal)
+					if (mod = offset % STRUCTALIGN(ptrsize))
+						offset += (thisalign - mod) % thisalign;
+					if (thisalign > aligntotal)
 						aligntotal = thisalign;
 				}
 
@@ -566,7 +566,7 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 					// else Var1.var = Var1.var;
 					//Var2.value_int64 = (UINT_PTR)(obj->mStructMem + offset);
 					Var3.symbol = SYM_MISSING;
-					Var4.object = field->mStruct;
+					Var5.object = field->mStruct;
 					if (!Struct::Create(param, 5))
 					{
 						obj->Release();
@@ -621,10 +621,10 @@ Struct *Struct::Create(ExprTokenType *aParam[], int aParamCount)
 		g_script.ScriptError(ERR_INVALID_STRUCT, TokenToString(*aParam[0]));
 		return NULL;
 	}
-	else if (obj->mStructSize < offset)
-	{	//obj->mStructSize can be larger due to alignment
+	else if (obj->mStructSize != offset)
+	{
 		obj->Release();
-		g_script.ScriptError(_T("Invalid Length."), TokenToString(*aParam[0]));
+		g_script.ScriptError(_T("Invalid structure Length."), TokenToString(*aParam[0]));
 		return NULL;
 	}
 
@@ -937,6 +937,17 @@ void Struct::ObjectToStruct(IObject *objfrom)
 }
 
 
+#define CHECKHEAPADDR(aAddress) \
+{\
+	Entry.lpData = NULL;\
+	aHeapAddr = false;\
+	while (HeapWalk(mHeap, &Entry) != FALSE) {\
+		if ((Entry.wFlags & PROCESS_HEAP_REGION) != 0) {\
+			if (aHeapAddr = Entry.Region.lpFirstBlock <= aAddress && Entry.Region.lpLastBlock >= aAddress)\
+				break;\
+		}\
+	}\
+}
 //
 // Struct::SetPointer - used to set pointer for a field or array item
 //
@@ -995,6 +1006,8 @@ ResultType Struct::Invoke(
 
 	// target may be altered here to resolve dynamic structure so hold it separately
 	UINT_PTR *target = mStructMem;
+	PROCESS_HEAP_ENTRY Entry;
+	bool aHeapAddr;
 
 	if (IS_INVOKE_SET)
 	{
@@ -1022,7 +1035,8 @@ ResultType Struct::Invoke(
 			{
 				if (!TokenToInt64(*aParam[param_count_excluding_rvalue]))
 					return g_script.ScriptError(ERR_PARAM_INVALID);
-				if (HeapValidate(mHeap, 0, mStructMem))
+				CHECKHEAPADDR(mStructMem);
+				if (aHeapAddr)
 					HeapFree(mHeap, 0, mStructMem);
 				// assign new pointer to structure
 				mStructMem = (UINT_PTR *)TokenToInt64(*aParam[param_count_excluding_rvalue]);
@@ -1033,7 +1047,10 @@ ResultType Struct::Invoke(
 				if (!TokenToInt64(*aParam[param_count_excluding_rvalue]))
 					return g_script.ScriptError(ERR_PARAM_INVALID);
 				aBkpMem = (UINT_PTR *)*((UINT_PTR*)((UINT_PTR)target));
-				if (aBkpMem && HeapValidate(mHeap, 0, aBkpMem))
+				aHeapAddr = false;
+				if (aBkpMem)
+					CHECKHEAPADDR(aBkpMem);
+				if (aHeapAddr)
 					HeapFree(mHeap, 0, aBkpMem);
 				*((UINT_PTR*)((UINT_PTR)target)) = (UINT_PTR)TokenToInt64(*aParam[param_count_excluding_rvalue]);
 				aResultToken.SetValue((__int64)*((UINT_PTR*)((UINT_PTR)target)));
@@ -1180,25 +1197,28 @@ ResultType Struct::Invoke(
 						+ (TokenToInt64(*aParam[0])-1) * (field 
 							? (field->mIsPointer ? ptrsize : field->mStruct->mFields[0].mSize) 
 							: (mFields[0].mIsPointer ? ptrsize : mFields[0].mSize))));
-				if (aBkpMem && HeapValidate(mHeap, 0, aBkpMem))
+				aHeapAddr = false;
+				if (aBkpMem)
+					CHECKHEAPADDR(aBkpMem);
+				if (aHeapAddr)
 					aBkpSize = HeapSize(mHeap, 0, aBkpMem);
 				if (aParamCount == 1 || (aParamCount > 1 && TokenToInt64(*aParam[1]) == 0))
 				{	// 0 or no parameters were given -> free memory only
-					if (aBkpMem)
+					if (aHeapAddr)
 						HeapFree(mHeap, 0, aBkpMem);
 					return OK;
 				}
 				// allocate memory
 				if (aNewMem = (UINT_PTR*)HeapAlloc(mHeap, HEAP_ZERO_MEMORY, aNewSize = TokenToInt64(*aParam[1])))
 				{
-					if (aBkpMem)	// fill existent structure
+					if (aHeapAddr)	// fill existent structure
 						memmove(aNewMem, aBkpMem, aNewSize < aBkpSize ? aNewSize : aBkpSize);
 					*((UINT_PTR*)((UINT_PTR)target + (field ? field->mOffset : 0)
 						+ (TokenToInt64(*aParam[0]) - 1) * (field
 							? (field->mIsPointer ? ptrsize : field->mStruct->mFields[0].mSize)
 							: (mFields[0].mIsPointer ? ptrsize : mFields[0].mSize)))) = (UINT_PTR)aNewMem;
 					aResultToken.value_int64 = aNewSize;
-					if (aBkpMem)
+					if (aHeapAddr)
 						HeapFree(mHeap, 0, aBkpMem);
 				}
 				else
@@ -1212,16 +1232,17 @@ ResultType Struct::Invoke(
 					return g_script.ScriptError(ERR_PARAM1_REQUIRED, name);
 				else if (!mOwnHeap) // trying to set main structure memory from dynamic field
 					return g_script.ScriptError(ERR_INVALID_BASE, name);
-				if ((aBkpMem = mStructMem) && HeapValidate(mHeap, 0, target))
+				CHECKHEAPADDR((aBkpMem = mStructMem));
+				if (aHeapAddr)
 					aBkpSize = HeapSize(mHeap, 0, aBkpMem);
 				// allocate memory
 				if (aNewMem = (UINT_PTR*)HeapAlloc(mHeap, HEAP_ZERO_MEMORY, aNewSize = TokenToInt64(*aParam[0])))
 				{
-					if (aBkpMem)	// fill existent structure
+					if (aHeapAddr)	// fill existent structure
 						memmove(aNewMem, aBkpMem, aNewSize < aBkpSize ? aNewSize : aBkpSize);
 					mStructMem = (UINT_PTR*)aNewMem;
 					aResultToken.value_int64 = aNewSize;
-					if (aBkpMem)
+					if (aHeapAddr)
 						HeapFree(mHeap, 0, aBkpMem);
 				}
 				else
@@ -1230,22 +1251,25 @@ ResultType Struct::Invoke(
 			else
 			{	// e.g. struct.SetCapacity("field",100)
 				aBkpMem = (UINT_PTR *)*((UINT_PTR*)((UINT_PTR)target + (field ? field->mOffset : 0)));
-				if (aBkpMem && HeapValidate(mHeap, 0, aBkpMem))
+				aHeapAddr = false;
+				if (aBkpMem)
+					CHECKHEAPADDR(aBkpMem);
+				if (aHeapAddr)
 					aBkpSize = HeapSize(mHeap, 0, aBkpMem);
 				if (!aParamCount || TokenToInt64(*aParam[0]) == 0)
 				{	// 0 or no parameters were given -> free memory only
-					if (aBkpMem)
+					if (aHeapAddr)
 						HeapFree(mHeap, 0, aBkpMem);
 					return OK;
 				}
 				// allocate memory
 				if (aNewMem = (UINT_PTR*)HeapAlloc(mHeap, HEAP_ZERO_MEMORY, aNewSize = TokenToInt64(*aParam[0])))
 				{
-					if (aBkpMem)	// fill existent structure
+					if (aHeapAddr)	// fill existent structure
 						memmove(aNewMem, aBkpMem, aNewSize < aBkpSize ? aNewSize : aBkpSize);
 					*((UINT_PTR*)((UINT_PTR)target + (field ? field->mOffset : 0))) = (UINT_PTR)aNewMem;
 					aResultToken.value_int64 = aNewSize;
-					if (aBkpMem)
+					if (aHeapAddr)
 						HeapFree(mHeap, 0, aBkpMem);
 				}
 				else
@@ -1287,13 +1311,19 @@ ResultType Struct::Invoke(
 					+ (TokenToInt64(*aParam[0]) - 1) * (field
 						? (field->mIsPointer ? ptrsize : field->mStruct->mFields[0].mSize)
 						: (mFields[0].mIsPointer ? ptrsize : mFields[0].mSize))));
-				if (aBkpMem && HeapValidate(mHeap, 0, aBkpMem))
+				aHeapAddr = false;
+				if (aBkpMem)
+					CHECKHEAPADDR(aBkpMem);
+				if (aHeapAddr)
 					aResultToken.value_int64 = HeapSize(mHeap, 0, aBkpMem);
 			}
 			else
 			{
 				aBkpMem = (UINT_PTR *)*((UINT_PTR*)((UINT_PTR)target + (field ? field->mOffset : 0)));
-				if (aBkpMem && HeapValidate(mHeap, 0, aBkpMem))
+				aHeapAddr = false;
+				if (aBkpMem)
+					CHECKHEAPADDR(aBkpMem);
+				if (aHeapAddr)
 					aResultToken.value_int64 = HeapSize(mHeap, 0, aBkpMem);
 			}
 			return OK;
@@ -1437,7 +1467,10 @@ ResultType Struct::Invoke(
 			if (field->mSize > 2)
 			{
 				aBkpMem = (UINT_PTR*)*((UINT_PTR*)((UINT_PTR)target + field->mOffset));
-				if (aBkpMem && HeapValidate(mHeap, 0, aBkpMem))
+				aHeapAddr = false;
+				if (aBkpMem)
+					CHECKHEAPADDR(aBkpMem);
+				if (aHeapAddr)
 				{
 					if (aNewSize != HeapSize(mHeap, 0, aBkpMem))
 					{
@@ -1445,6 +1478,7 @@ ResultType Struct::Invoke(
 							return g_script.ScriptError(ERR_OUTOFMEM, field->key);
 						else
 							*((UINT_PTR*)((UINT_PTR)target + field->mOffset)) = (UINT_PTR)aNewMem;
+						HeapFree(mHeap, 0, aBkpMem);
 					}
 				}
 				else

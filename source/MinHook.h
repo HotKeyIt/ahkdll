@@ -210,12 +210,50 @@ typedef struct {
 	uint32_t flags;
 } hde64s;
 
+/*
+ * Hacker Disassembler Engine 64 C
+ * Copyright (c) 2008-2009, Vyacheslav Patkov.
+ * All rights reserved.
+ *
+ */
+
+#define C_NONE    0x00
+#define C_MODRM   0x01
+#define C_IMM8    0x02
+#define C_IMM16   0x04
+#define C_IMM_P66 0x10
+#define C_REL8    0x20
+#define C_REL32   0x40
+#define C_GROUP   0x80
+#define C_ERROR   0xff
+
+#define PRE_ANY  0x00
+#define PRE_NONE 0x01
+#define PRE_F2   0x02
+#define PRE_F3   0x04
+#define PRE_66   0x08
+#define PRE_67   0x10
+#define PRE_LOCK 0x20
+#define PRE_SEG  0x40
+#define PRE_ALL  0xff
+
+#define DELTA_OPCODES      0x4a
+#define DELTA_FPU_REG      0xfd
+#define DELTA_FPU_MODRM    0x104
+#define DELTA_PREFIXES     0x13c
+#define DELTA_OP_LOCK_OK   0x1ae
+#define DELTA_OP2_LOCK_OK  0x1c6
+#define DELTA_OP_ONLY_MEM  0x1d8
+#define DELTA_OP2_ONLY_MEM 0x1e7
+
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 	/* __cdecl */
-	unsigned int hde64_disasm(const void *code, hde64s *hs);
+
+	unsigned int hde64_disasm(const void* code, hde64s* hs);
 
 #ifdef __cplusplus
 }
@@ -291,6 +329,35 @@ typedef UINT64 uint64_t;
 #define PREFIX_REPX         0xf3
 #define PREFIX_OPERAND_SIZE 0x66
 #define PREFIX_ADDRESS_SIZE 0x67
+
+#define C_NONE    0x00
+#define C_MODRM   0x01
+#define C_IMM8    0x02
+#define C_IMM16   0x04
+#define C_IMM_P66 0x10
+#define C_REL8    0x20
+#define C_REL32   0x40
+#define C_GROUP   0x80
+#define C_ERROR   0xff
+
+#define PRE_ANY  0x00
+#define PRE_NONE 0x01
+#define PRE_F2   0x02
+#define PRE_F3   0x04
+#define PRE_66   0x08
+#define PRE_67   0x10
+#define PRE_LOCK 0x20
+#define PRE_SEG  0x40
+#define PRE_ALL  0xff
+
+#define DELTA_OPCODES      0x4a
+#define DELTA_FPU_REG      0xf1
+#define DELTA_FPU_MODRM    0xf8
+#define DELTA_PREFIXES     0x130
+#define DELTA_OP_LOCK_OK   0x1a1
+#define DELTA_OP2_LOCK_OK  0x1b9
+#define DELTA_OP_ONLY_MEM  0x1cb
+#define DELTA_OP2_ONLY_MEM 0x1da
 
 #pragma pack(push,1)
 
@@ -393,9 +460,9 @@ typedef struct _HOOK_ENTRY
 	LPVOID pTrampoline;         // Address of the trampoline function.
 	UINT8  backup[8];           // Original prologue of the target function.
 
-	UINT8   patchAbove : 1;     // Uses the hot patch area.
-	UINT8   isEnabled : 1;      // Enabled.
-	UINT8   queueEnable : 1;    // Queued for enabling/disabling when != isEnabled.
+	BOOL   patchAbove : 1;     // Uses the hot patch area.
+	BOOL   isEnabled : 1;     // Enabled.
+	BOOL   queueEnable : 1;     // Queued for enabling/disabling when != isEnabled.
 
 	UINT   nIP : 4;             // Count of the instruction boundaries.
 	UINT8  oldIPs[8];           // Instruction boundaries of the target function.
@@ -410,8 +477,8 @@ VOID   UninitializeBuffer(VOID);
 LPVOID AllocateBuffer(LPVOID pOrigin);
 VOID   FreeBuffer(LPVOID pBuffer);
 BOOL   IsExecutableAddress(LPVOID pAddress);
-PHOOK_ENTRY   MinHookEnable(LPVOID pTarget, LPVOID pDetour, HANDLE *hHeap);
-BOOL   MinHookDisable(PHOOK_ENTRY pHook);
+__declspec(dllexport) PHOOK_ENTRY   MinHookEnable(LPVOID pTarget, LPVOID pDetour, LPVOID* ppOriginal = NULL);
+__declspec(dllexport) BOOL   MinHookDisable(PHOOK_ENTRY pHook);
 #ifdef __cplusplus
 }
 #endif

@@ -176,11 +176,11 @@
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectName>AutoHotkey</ProjectName>
-    <WindowsTargetPlatformVersion>7.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <!-- x64 toolset: must precede the import below -->
   <PropertyGroup Label="Configuration">
-    <PlatformToolset>v141_xp</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
   </PropertyGroup>
   <!-- import common config -->
   <Import Project="Config.vcxproj" />
@@ -428,12 +428,15 @@
     </ResourceCompile>
     <ClCompile>
       <RuntimeLibrary Condition="$(ConfigDebug)">MultiThreadedDebugDLL</RuntimeLibrary>
+      <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</MinimalRebuild>
+      <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">false</MinimalRebuild>
     </ClCompile>
     <Link>
       <GenerateDebugInformation Condition="$(ConfigDebug)">true</GenerateDebugInformation>
     </Link>
     <ClCompile>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">Use</PrecompiledHeader>
+      <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">false</MinimalRebuild>
     </ClCompile>
     <ClCompile>
       <Optimization Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">MaxSpeed</Optimization>
@@ -444,6 +447,15 @@
     </ClCompile>
     <Link>
       <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">false</GenerateDebugInformation>
+    </Link>
+    <ClCompile>
+      <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">false</MinimalRebuild>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</GenerateDebugInformation>
+    </Link>
+    <Link>
+      <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</GenerateDebugInformation>
     </Link>
   </ItemDefinitionGroup>
   <!--Dll-->
@@ -494,20 +506,6 @@
     <None Include="source\resources\icon_suspend.ico" />
     <None Include="source\resources\icon_tray_win9x.ico" />
     <None Include="source\resources\icon_tray_win9x_suspend.ico" />
-  </ItemGroup>
-  <ItemGroup>
-    <Library Include="source\lib\libMinHook.x64.lib">
-      <ExcludedFromBuild Condition="'$(Platform)'=='Win32' OR '$(Configuration)'=='MT_Release' OR '$(Configuration)'=='MT_ReleaseDll' OR '$(Configuration)'=='MT_ReleaseDllMini' OR '$(Configuration)'=='MT_Self-contained' OR '$(Configuration)'=='MT_Release(mbcs)' OR '$(Configuration)'=='MT_ReleaseDll(mbcs)' OR '$(Configuration)'=='MT_ReleaseDllMini(mbcs)' OR '$(Configuration)'=='MT_Self-contained(mbcs)'">true</ExcludedFromBuild>
-    </Library>
-    <Library Include="source\lib\libMinHook.x86.lib">
-      <ExcludedFromBuild Condition="'$(Platform)'=='x64' OR '$(Configuration)'=='MT_Release' OR '$(Configuration)'=='MT_ReleaseDll' OR '$(Configuration)'=='MT_ReleaseDllMini' OR '$(Configuration)'=='MT_Self-contained' OR '$(Configuration)'=='MT_Release(mbcs)' OR '$(Configuration)'=='MT_ReleaseDll(mbcs)' OR '$(Configuration)'=='MT_ReleaseDllMini(mbcs)' OR '$(Configuration)'=='MT_Self-contained(mbcs)'">true</ExcludedFromBuild>
-    </Library>
-    <Library Include="source\lib\MT_libMinHook.x64.lib">
-      <ExcludedFromBuild Condition="'$(Platform)'=='Win32' OR '$(Configuration)'=='Release' OR '$(Configuration)'=='ReleaseDll' OR '$(Configuration)'=='ReleaseDllMini' OR '$(Configuration)'=='Self-contained' OR '$(Configuration)'=='Release(mbcs)' OR '$(Configuration)'=='ReleaseDll(mbcs)' OR '$(Configuration)'=='ReleaseDllMini(mbcs)' OR '$(Configuration)'=='Self-contained(mbcs)'">true</ExcludedFromBuild>
-    </Library>
-    <Library Include="source\lib\MT_libMinHook.x86.lib">
-      <ExcludedFromBuild Condition="'$(Platform)'=='x64' OR '$(Configuration)'=='Release' OR '$(Configuration)'=='ReleaseDll' OR '$(Configuration)'=='ReleaseDllMini' OR '$(Configuration)'=='Self-contained' OR '$(Configuration)'=='Release(mbcs)' OR '$(Configuration)'=='ReleaseDll(mbcs)' OR '$(Configuration)'=='ReleaseDllMini(mbcs)' OR '$(Configuration)'=='Self-contained(mbcs)'">true</ExcludedFromBuild>
-    </Library>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

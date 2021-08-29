@@ -43,6 +43,7 @@ extern HRSRC g_hResource;		// for compiled AutoHotkey.exe
 extern HINSTANCE g_hInstance;
 extern HMODULE g_hMemoryModule;
 extern DWORD g_MainThreadID;
+extern unsigned char g_ZipCompressionLevel;
 extern HANDLE g_hThread;
 extern DWORD g_HookThreadID;
 extern ATOM g_ClassRegistered;

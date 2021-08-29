@@ -2879,6 +2879,7 @@ public:
 	bool mGuiShowHasNeverBeenDone, mFirstActivation, mShowIsInProgress, mDestroyWindowHasBeenCalled;
 	bool mControlWidthWasSetByContents; // Whether the most recently added control was auto-width'd to fit its contents.
 	bool mUsesDPIScaling; // Whether the GUI uses DPI scaling.
+	bool mIsMinimized; // Workaround for bad OS behaviour; see "case WM_SETFOCUS".
 
 	SCROLLINFO *mVScroll, *mHScroll;
 	IObject *mObject; // Variable with object for g and v Options, used as input for gFunc -> {Func:BoundFunction} and output vMyVar -> object.MyVar
@@ -3211,6 +3212,7 @@ public:
 #ifndef MINIDLL
 	void EnableOrDisableViewMenuItems(HMENU aMenu, UINT aFlags);
 	void CreateTrayIcon();
+	void RestoreTrayIcon();
 	void UpdateTrayIcon(bool aForceUpdate = false);
 #endif
 	ResultType AutoExecSection();
@@ -3506,6 +3508,7 @@ BIF_DECL(BIF_MemoryLoadString);
 BIF_DECL(BIF_CryptAES);
 BIF_DECL(BIF_ZipRawMemory);
 BIF_DECL(BIF_UnZipRawMemory);
+BIF_DECL(BIF_ZipCompressionLevel);
 BIF_DECL(BIF_ZipCreateFile);
 BIF_DECL(BIF_ZipCreateBuffer);
 BIF_DECL(BIF_ZipCloseFile);

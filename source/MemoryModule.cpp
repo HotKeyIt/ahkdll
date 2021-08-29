@@ -49,24 +49,8 @@
 #include <winternl.h>
 #include <process.h>
 
-//#include "MinHook/MinHook.h"
-
 #include "MemoryModule.h"
 #include "MinHook.h"
-
-#if defined _M_X64
-#ifdef STATICLIBRARY
-#pragma comment(lib, "MT_libMinHook.x64.lib")
-#else
-#pragma comment(lib, "libMinHook.x64.lib")
-#endif
-#elif defined _M_IX86
-#ifdef STATICLIBRARY
-#pragma comment(lib, "MT_libMinHook.x86.lib")
-#else
-#pragma comment(lib, "libMinHook.x86.lib")
-#endif
-#endif
 
 #ifdef DEBUG_OUTPUT
 #include <stdio.h>
@@ -107,7 +91,6 @@ PVOID currentModuleEnd;
 #define GET_HEADER_DICTIONARY(module, idx)  &(module)->headers->OptionalHeader.DataDirectory[idx]
 
 // hook RtlPcToFileHeader
-HANDLE hHeap;
 PHOOK_ENTRY pHook = NULL;
 
 typedef struct _MY_LDR_DATA_TABLE_ENTRY
@@ -549,6 +532,17 @@ PerformBaseRelocation(PMEMORYMODULE module, ptrdiff_t delta)
     return TRUE;
 }
 
+#ifdef _WIN64
+static BOOL
+RegisterExceptionHandling(PMEMORYMODULE module)
+{
+	PIMAGE_DATA_DIRECTORY pDir = GET_HEADER_DICTIONARY(module, IMAGE_DIRECTORY_ENTRY_EXCEPTION);
+	PIMAGE_RUNTIME_FUNCTION_ENTRY pEntry = (PIMAGE_RUNTIME_FUNCTION_ENTRY)(module->codeBase + pDir->VirtualAddress);
+	UINT count = (pDir->Size / sizeof(IMAGE_RUNTIME_FUNCTION_ENTRY)); // -1;
+	return RtlAddFunctionTable(pEntry, count, (DWORD64)module->codeBase);
+}
+#endif
+
 static BOOL
 BuildImportTable(PMEMORYMODULE module)
 {
@@ -639,9 +633,6 @@ BuildImportTable(PMEMORYMODULE module)
     for (; !IsBadReadPtr(importDesc, sizeof(IMAGE_IMPORT_DESCRIPTOR)) && importDesc->Name; importDesc++) {
         uintptr_t *thunkRef;
         FARPROC *funcRef;
-#ifndef _USRDLL
-        //HRSRC hResource;
-#endif
         HCUSTOMMODULE *tmp;
         HCUSTOMMODULE handle = NULL;
         char *isMsvcr = NULL;
@@ -948,7 +939,11 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data, size_t size,
     if (!BuildImportTable(result)) {
         goto error;
     }
-
+#ifdef _WIN64
+	if (!RegisterExceptionHandling(result)) {
+		goto error;
+	}
+#endif
     // mark memory pages depending on section headers and release
     // sections that are marked as "discardable"
     if (!FinalizeSections(result)) {
@@ -977,13 +972,11 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data, size_t size,
 				currentModuleStart = result->codeBase;
 				currentModuleEnd = result->codeBase + result->headers->OptionalHeader.SizeOfImage;
 				EnterCriticalSection(aLoaderLock);
-				pHook = MinHookEnable(GetProcAddress(GetModuleHandleA("ntdll.dll"), "RtlPcToFileHeader"), &HookRtlPcToFileHeader, &hHeap);
+				pHook = MinHookEnable(GetProcAddress(GetModuleHandleA("ntdll.dll"), "RtlPcToFileHeader"), &HookRtlPcToFileHeader);
 				// notify library about attaching to process
 				BOOL successfull = (*DllEntry)((HINSTANCE)code, DLL_PROCESS_ATTACH, result);
 				// Disable hook if it was enabled before
 				MinHookDisable(pHook);
-				HeapFree(hHeap, 0, pHook);
-				HeapDestroy(hHeap);
 				LeaveCriticalSection(aLoaderLock);
 
 				if (!successfull) {

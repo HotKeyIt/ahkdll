@@ -315,7 +315,7 @@ Script::Script()
 	if (   !(mTrayMenu = AddMenu(_T("Tray")))   ) // realistically never happens
 	{
 		ScriptError(_T("No tray mem"));
-		ExitApp(EXIT_DESTROY);
+		ExitApp(EXIT_CRITICAL);
 	}
 	else
 		mTrayMenu->mIncludeStandardItems = true;
@@ -1342,10 +1342,23 @@ void Script::CreateTrayIcon()
 	mNIC.uCallbackMessage = AHK_NOTIFYICON;
 	mNIC.hIcon = mCustomIconSmall ? mCustomIconSmall : g_IconSmall;
 	UPDATE_TIP_FIELD
-	// If we were called due to an Explorer crash, I don't think it's necessary to call
-	// Shell_NotifyIcon() to remove the old tray icon because it was likely destroyed
-	// along with Explorer.  So just add it unconditionally:
 	if (!Shell_NotifyIcon(NIM_ADD, &mNIC))
+		mNIC.hWnd = NULL;  // Set this as an indicator that tray icon is not installed.
+}
+
+
+
+void Script::RestoreTrayIcon()
+{
+	// v1.1.33.07: This function is called when the TaskbarCreated message is received, instead of calling
+	// CreateTrayIcon() and UpdateTrayIcon(true).  mNIC already contains the values needed to recreate the
+	// icon as it was.  NIM_ADD fails if the icon already exists, such as if the message was received due
+	// to a screen DPI change or explicit SendMessage; for those cases, attempt NIM_MODIFY to be sure that
+	// the icon really doesn't exist.  This also fixes the icon becoming blurry when the DPI is changed
+	// repeatedly (presumably because the tray resizes its copy of the icon, but NIM_MODIFY refreshes it).
+	// This isn't done by UpdateTrayIcon() in case any scripts rely on the fact that the icon won't be
+	// recreated if it is killed by explicitly calling Shell_NotifyIcon().
+	if (  !(Shell_NotifyIcon(NIM_ADD, &mNIC) || Shell_NotifyIcon(NIM_MODIFY, &mNIC))  )
 		mNIC.hWnd = NULL;  // Set this as an indicator that tray icon is not installed.
 }
 
@@ -1703,7 +1716,7 @@ ResultType Script::ExitApp(ExitReasons aExitReason, int aExitCode)
 	DEBUGGER_STACK_POP()
 	sOnExitIsRunning = false;  // In case the user wanted the thread to end normally (see above).
 
-	if (terminate_afterward || aExitReason == EXIT_DESTROY)
+	if (terminate_afterward || EXITREASON_MUST_EXIT(aExitReason))
 		TerminateApp(aExitReason, aExitCode);
 
 	// Otherwise:
@@ -1723,7 +1736,7 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 	terminateDll(aExitCode);
 #else
 	// L31: Release objects stored in variables, where possible.
-	if (aExitReason != CRITICAL_ERROR) // i.e. Avoid making matters worse if CRITICAL_ERROR.
+	if (aExitReason != EXIT_CRITICAL) // i.e. Avoid making matters worse if EXIT_CRITICAL.
 	{
 		// Ensure the current thread is not paused and can't be interrupted
 		// in case one or more objects need to call a __delete meta-function.
@@ -2253,7 +2266,7 @@ ResultType Script::OpenIncludedFile(TextStream &ts, LPTSTR aFileSpec, bool aAllo
 					return OK;
 				TCHAR msg_text[T_MAX_PATH + 64]; // T_MAX_PATH vs. MAX_PATH because the full length could be utilized with ErrorStdOut.
 				sntprintf(msg_text, _countof(msg_text), _T("%s file \"%s\" cannot be opened.")
-					, Line::sSourceFileCount > 0 ? _T("#Include") : _T("Script"), full_path);
+					, source_file_index > 0 ? _T("#Include") : _T("Script"), aFileSpec);
 				return ScriptError(msg_text);
 			}
 		}
@@ -3811,7 +3824,7 @@ inline size_t UTF8ToUTF16(unsigned char* outb, size_t outlen, const unsigned cha
 		inlen = 0;
 		return(0);
 	}
-	outend = out + (outlen / 2);
+	outend = out + outlen;
 	while (in < inend) {
 		d = *in++;
 		if (d < 0x80)  { c = d; trailing = 0; }
@@ -10114,73 +10127,78 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 		min_params = 3;
 		max_params = 5;
 	}
-	else if (!_tcsicmp(func_name, _T("ZipRawMemory")))  // lowlevel() Naveen v9.
+	else if (!_tcsicmp(func_name, _T("ZipRawMemory")))  //LiteZip().
 	{
 		bif = BIF_ZipRawMemory;
 		min_params = 2;
 		max_params = 4;
 	}
-	else if (!_tcsicmp(func_name, _T("UnZipRawMemory")))  // lowlevel() Naveen v9.
+	else if (!_tcsicmp(func_name, _T("UnZipRawMemory")))  //LiteZip().
 	{
 		bif = BIF_UnZipRawMemory;
 		min_params = 2;
 		max_params = 4;
 	}
-	else if (!_tcsicmp(func_name, _T("ZipCreateFile")))  // lowlevel() Naveen v9.
+	else if (!_tcsicmp(func_name, _T("ZipCreateFile")))  //LiteZip().
 	{
 		bif = BIF_ZipCreateFile;
 		max_params = 2;
 	}
-	else if (!_tcsicmp(func_name, _T("ZipCreateBuffer")))  // lowlevel() Naveen v9.
+	else if (!_tcsicmp(func_name, _T("ZipCompressionLevel")))  // LiteZip().
+	{
+		bif = BIF_ZipCompressionLevel;
+		max_params = 1;
+	}
+	else if (!_tcsicmp(func_name, _T("ZipCreateBuffer")))  //LiteZip().
 	{
 		bif = BIF_ZipCreateBuffer;
 		max_params = 2;
 	}
-	else if (!_tcsicmp(func_name, _T("ZipCloseFile")))  // lowlevel() Naveen v9.
+	else if (!_tcsicmp(func_name, _T("ZipCloseFile")))  //LiteZip().
 	{
 		bif = BIF_ZipCloseFile;
 	}
-	else if (!_tcsicmp(func_name, _T("ZipCloseBuffer")))  // lowlevel() Naveen v9.
+	else if (!_tcsicmp(func_name, _T("ZipCloseBuffer")))  //LiteZip().
 	{
 		bif = BIF_ZipCloseBuffer;
 		max_params = 2;
 	}
-	else if (!_tcsicmp(func_name, _T("ZipAddFile")))  // lowlevel() Naveen v9.
+	else if (!_tcsicmp(func_name, _T("ZipAddFile")))  //LiteZip().
 	{
 		bif = BIF_ZipAddFile;
 		min_params = 2;
 		max_params = 3;
 	}
-	else if (!_tcsicmp(func_name, _T("ZipAddFolder")))  // lowlevel() Naveen v9.
+	else if (!_tcsicmp(func_name, _T("ZipAddFolder")))  //LiteZip().
 	{
 		bif = BIF_ZipAddFolder;
 		min_params = 2;
 		max_params = 2;
 	}
-	else if (!_tcsicmp(func_name, _T("ZipAddBuffer")))  // lowlevel() Naveen v9.
+	else if (!_tcsicmp(func_name, _T("ZipAddBuffer")))  //LiteZip().
 	{
 		bif = BIF_ZipAddBuffer;
 		min_params = 4;
 		max_params = 4;
 	}
-	else if (!_tcsicmp(func_name, _T("ZipOptions")))  // lowlevel() Naveen v9.
+	else if (!_tcsicmp(func_name, _T("ZipOptions")))  //LiteZip().
 	{
 		bif = BIF_ZipOptions;
 		min_params = 2;
 		max_params = 2;
 	}
-	else if (!_tcsicmp(func_name, _T("ZipInfo")))  // lowlevel() Naveen v9.
+	else if (!_tcsicmp(func_name, _T("ZipInfo")))  //LiteZip().
 	{
 		bif = BIF_ZipInfo;
 		max_params = 2;
 	}
-	else if (!_tcsicmp(func_name, _T("UnZip")))  // lowlevel() Naveen v9.
+	else if (!_tcsicmp(func_name, _T("UnZip")))  //LiteZip().
 	{
 		bif = BIF_UnZip;
 		min_params = 2;
 		max_params = 6;
 	}
-	else if (!_tcsicmp(func_name, _T("UnZipBuffer")))  // lowlevel() Naveen v9.
+	else if (!_tcsicmp(func_name, _T("UnZipBuffer")))  //LiteZip().
 	{
 		bif = BIF_UnZipBuffer;
 		min_params = 2;
@@ -15103,7 +15121,7 @@ ResultType Line::EvaluateCondition() // __forceinline on this reduces benchmarks
 		case VAR_TYPE_DIGIT:
 			if_condition = true;
 			for (cp = ARG1; *cp; ++cp)
-				if (!_istdigit((UCHAR)*cp))
+				if (*cp < '0' || *cp > '9') // Avoid iswdigit; as documented, only ASCII digits 0 .. 9 are permitted.
 				{
 					if_condition = false;
 					break;
@@ -15115,7 +15133,7 @@ ResultType Line::EvaluateCondition() // __forceinline on this reduces benchmarks
 				cp += 2;
 			if_condition = true;
 			for (; *cp; ++cp)
-				if (!_istxdigit((UCHAR)*cp))
+				if (!cisxdigit(*cp)) // Avoid iswxdigit; as documented, only ASCII xdigits are permitted.
 				{
 					if_condition = false;
 					break;
@@ -17311,12 +17329,16 @@ __forceinline ResultType Line::Perform() // As of 2/9/2009, __forceinline() redu
 			: SoundSetWaveVolume(ARG1, (HWAVEOUT)device_id);
 
 	case ACT_SOUNDBEEP:
-		// For simplicity and support for future/greater capabilities, no range checking is done.
-		// It simply calls the function with the two DWORD values provided. It avoids setting
-		// ErrorLevel because failure is rare and also because a script might want play a beep
-		// right before displaying an error dialog that uses the previous value of ErrorLevel.
-		Beep(*ARG1 ? ArgToUInt(1) : 523, *ARG2 ? ArgToUInt(2) : 150);
+	{
+		// Negative values are checked to avoid interpreting them as a very long duration.
+		// It avoids setting ErrorLevel because failure is rare and also because a script might want
+		// beep right before displaying an error dialog that uses the previous value of ErrorLevel.
+		DWORD duration = *ARG2 ? ArgToUInt(2) : 150;
+		if ((int)duration < 0)
+			duration = 150;
+		Beep(*ARG1 ? ArgToUInt(1) : 523, duration);
 		return OK;
+	}
 
 	case ACT_SOUNDPLAY:
 		return SoundPlay(ARG1, *ARG2 && !_tcsicmp(ARG2, _T("wait")) || !_tcsicmp(ARG2, _T("1")));
@@ -18724,7 +18746,7 @@ ResultType Line::LineError(LPCTSTR aErrorText, ResultType aErrorType, LPCTSTR aE
 
 	if (aErrorType == CRITICAL_ERROR && g_script.mIsReadyToExecute)
 		// Pass EXIT_DESTROY to ensure the program always exits, regardless of OnExit.
-		g_script.ExitApp(EXIT_DESTROY);
+		g_script.ExitApp(EXIT_CRITICAL);
 
 	return aErrorType; // The caller told us whether it should be a critical error or not.
 }
@@ -18809,8 +18831,11 @@ ResultType Script::ScriptError(LPCTSTR aErrorText, LPCTSTR aExtraInfo) //, Resul
 		TCHAR buf[MSGBOX_TEXT_SIZE], *cp = buf;
 		int buf_space_remaining = (int)_countof(buf);
 
-		cp += sntprintf(cp, buf_space_remaining, _T("Error at line %u"), mCombinedLineNumber); // Don't call it "critical" because it's usually a syntax error.
-		buf_space_remaining = (int)(_countof(buf) - (cp - buf));
+		if (mCombinedLineNumber || mCurrFileIndex)
+		{
+			cp += sntprintf(cp, buf_space_remaining, _T("Error at line %u"), mCombinedLineNumber); // Don't call it "critical" because it's usually a syntax error.
+			buf_space_remaining = (int)(_countof(buf) - (cp - buf));
+		}
 
 		if (mCurrFileIndex)
 		{
@@ -18819,8 +18844,11 @@ ResultType Script::ScriptError(LPCTSTR aErrorText, LPCTSTR aExtraInfo) //, Resul
 		}
 		//else don't bother cluttering the display if it's the main script file.
 
-		cp += sntprintf(cp, buf_space_remaining, _T(".\n\n"));
-		buf_space_remaining = (int)(_countof(buf) - (cp - buf));
+		if (mCombinedLineNumber || mCurrFileIndex)
+		{
+			cp += sntprintf(cp, buf_space_remaining, _T(".\n\n"));
+			buf_space_remaining = (int)(_countof(buf) - (cp - buf));
+		}
 
 		if (*aExtraInfo)
 		{
@@ -18850,7 +18878,7 @@ ResultType Script::CriticalError(LPCTSTR aErrorText, LPCTSTR aExtraInfo)
 	// mCurrLine should always be non-NULL during runtime, and CRITICAL_ERROR should
 	// cause LineError() to exit even if an OnExit routine is present, so this is here
 	// mainly for maintainability.
-	TerminateApp(EXIT_DESTROY, CRITICAL_ERROR);
+	TerminateApp(EXIT_CRITICAL, 0);
 	return FAIL; // Never executed.
 }
 

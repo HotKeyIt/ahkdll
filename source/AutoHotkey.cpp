@@ -21,6 +21,7 @@ GNU General Public License for more details.
 #include "window.h" // For MsgBox() & SetForegroundLockTimeout()
 #include "TextIO.h"
 #include "LiteZip.h"
+//#include <vld.h>
 
 BOOL g_TlsDoExecute = false;
 DWORD g_TlsOldProtect;

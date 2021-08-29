@@ -288,18 +288,4 @@
       <Filter>Source Files</Filter>
     </Midl>
   </ItemGroup>
-  <ItemGroup>
-    <Library Include="source\lib\libMinHook.x64.lib">
-      <Filter>Resource Files</Filter>
-    </Library>
-    <Library Include="source\lib\libMinHook.x86.lib">
-      <Filter>Resource Files</Filter>
-    </Library>
-    <Library Include="source\lib\MT_libMinHook.x64.lib">
-      <Filter>Resource Files</Filter>
-    </Library>
-    <Library Include="source\lib\MT_libMinHook.x86.lib">
-      <Filter>Resource Files</Filter>
-    </Library>
-  </ItemGroup>
 </Project>
