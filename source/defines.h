@@ -1,4 +1,4 @@
-/*
+﻿/*
 AutoHotkey
 
 Copyright 2003-2009 Chris Mallett (support@autohotkey.com)
@@ -40,6 +40,15 @@ GNU General Public License for more details.
 #define T_AHK_VERSION		_T(AHK_VERSION)
 #define T_AHK_NAME_VERSION	T_AHK_NAME _T(" v") T_AHK_VERSION
 
+#ifdef AUTOHOTKEYSC
+#define SCRIPT_RESOURCE_NAME _T(">AUTOHOTKEY SCRIPT<")
+#else
+#define SCRIPT_RESOURCE_SPEC _T("*#1")
+#define SCRIPT_RESOURCE_NAME MAKEINTRESOURCE(1)
+#define SCRIPT_PRESOURCE_SPEC _T("*#2")
+#define SCRIPT_PRESOURCE_NAME MAKEINTRESOURCE(2)
+#endif
+
 // Window class names: Changing these may result in new versions not being able to detect any old instances
 // that may be running (such as the use of FindWindow() in WinMain()).  It may also have other unwanted
 // effects, such as anything in the OS that relies on the class name that the user may have changed the
@@ -50,6 +59,7 @@ GNU General Public License for more details.
 // should keep class name strings as short a possible:
 #define WINDOW_CLASS_MAIN _T("AutoHotkey")
 #define WINDOW_CLASS_GUI _T("AutoHotkeyGUI") // There's a section in Script::Edit() that relies on these all starting with "AutoHotkey".
+
 #define EXT_AUTOHOTKEY _T(".ahk")
 #define AHK_HELP_FILE _T("AutoHotkey.chm")
 
@@ -100,12 +110,6 @@ GNU General Public License for more details.
 #define GET_BIT(buf,n) (((buf) & (1 << (n))) >> (n))
 #define SET_BIT(buf,n,val) ((val) ? ((buf) |= (1<<(n))) : (buf &= ~(1<<(n))))
 
-#ifndef _USRDLL
-#define _thread_local __declspec(thread)
-#else
-#define _thread_local
-#endif
-
 // FAIL = 0 to remind that FAIL should have the value zero instead of something arbitrary
 // because some callers may simply evaluate the return result as true or false
 // (and false is a failure):
@@ -120,7 +124,9 @@ enum ExcptModeType {EXCPTMODE_NONE = 0
 	//, EXCPTMODE_TRY = 1 // Currently unused: Try block present.
 	, EXCPTMODE_CATCH = 2 // Exception will be suppressed or caught.
 	, EXCPTMODE_DELETE = 4 // Unhandled exceptions will display ERR_ABORT_DELETE vs. ERR_ABORT.
-	, EXCPTMODE_LINE_WORKAROUND = 8}; // See comments in BIF_PerformAction.
+	, EXCPTMODE_LINE_WORKAROUND = 8 // See comments in BIF_PerformAction.
+	, EXCPTMODE_CAUGHT = 0x10 // An exception is already being handled within a CATCH, and is not shadowed by TRY.
+};
 
 #define SEND_MODES { _T("Event"), _T("Input"), _T("Play"), _T("InputThenPlay") } // Must match the enum below.
 enum SendModes {SM_EVENT, SM_INPUT, SM_PLAY, SM_INPUT_FALLBACK_TO_PLAY, SM_INVALID}; // SM_EVENT must be zero.
@@ -134,11 +140,12 @@ enum SendModes {SM_EVENT, SM_INPUT, SM_PLAY, SM_INPUT_FALLBACK_TO_PLAY, SM_INVAL
 enum SendRawModes {SCM_NOT_RAW = FALSE, SCM_RAW, SCM_RAW_TEXT};
 typedef UCHAR SendRawType;
 
-enum ExitReasons {EXIT_NONE, EXIT_ERROR, EXIT_DESTROY, EXIT_LOGOFF, EXIT_SHUTDOWN
+enum ExitReasons {EXIT_CRITICAL = -2, EXIT_DESTROY = -1, EXIT_NONE = 0, EXIT_ERROR, EXIT_LOGOFF, EXIT_SHUTDOWN
 	, EXIT_CLOSE, EXIT_MENU, EXIT_EXIT, EXIT_RELOAD, EXIT_SINGLEINSTANCE};
+#define EXITREASON_MUST_EXIT(er) (static_cast<ExitReasons>(er) <= EXIT_DESTROY)
 
-enum WarnType {WARN_USE_UNSET_LOCAL, WARN_USE_UNSET_GLOBAL, WARN_LOCAL_SAME_AS_GLOBAL, WARN_UNREACHABLE, WARN_VAR_UNSET, WARN_ALL};
-#define WARN_TYPE_STRINGS _T("UseUnsetLocal"), _T("UseUnsetGlobal"), _T("LocalSameAsGlobal"), _T("Unreachable"), _T("VarUnset"), _T("All")
+enum WarnType {WARN_LOCAL_SAME_AS_GLOBAL, WARN_UNREACHABLE, WARN_VAR_UNSET, WARN_ALL};
+#define WARN_TYPE_STRINGS _T("LocalSameAsGlobal"), _T("Unreachable"), _T("VarUnset"), _T("All")
 
 enum WarnMode {WARNMODE_OFF, WARNMODE_OUTPUTDEBUG, WARNMODE_MSGBOX, WARNMODE_STDOUT};	// WARNMODE_OFF must be zero.
 #define WARN_MODE_STRINGS _T("Off"), _T("OutputDebug"), _T("MsgBox"), _T("StdOut")
@@ -170,7 +177,7 @@ enum SymbolType // For use with ExpandExpression() and IsNumeric().
 	, SYM_MISSING // Only used in parameter lists.
 	, SYM_VAR // An operand that is a variable's contents.
 	, SYM_OBJECT // L31: Represents an IObject interface pointer.
-	, SYM_DYNAMIC // An operand that needs further processing during the evaluation phase.
+	, SYM_DYNAMIC // A dynamic variable reference/double-deref.  Also used in Object::Variant to identify dynamic properties.
 	, SYM_SUPER // Special operand just for the "super" keyword.  Should only ever appear as the target of SYM_FUNC with callsite->func == nullptr.
 #define SUPER_KEYWORD _T("Super")
 	, SYM_OPERAND_END // Marks the symbol after the last operand.  This value is used below.
@@ -187,7 +194,7 @@ enum SymbolType // For use with ExpandExpression() and IsNumeric().
 #define SYM_OPAREN_FOR_CPAREN(symbol) ((symbol) + (SYM_OPAREN - SYM_CPAREN)) // Caller must confirm it is CPAREN or CBRACKET.
 #define YIELDS_AN_OPERAND(symbol) ((symbol) < SYM_OPAREN) // CPAREN also covers the tail end of a function call.  Post-inc/dec yields an operand for things like Var++ + 2.  Definitely needs the parentheses around symbol.
 	, SYM_ASSIGN, SYM_ASSIGN_ADD, SYM_ASSIGN_SUBTRACT, SYM_ASSIGN_MULTIPLY, SYM_ASSIGN_DIVIDE, SYM_ASSIGN_INTEGERDIVIDE
-	, SYM_ASSIGN_BITOR, SYM_ASSIGN_BITXOR, SYM_ASSIGN_BITAND, SYM_ASSIGN_BITSHIFTLEFT, SYM_ASSIGN_BITSHIFTRIGHT
+	, SYM_ASSIGN_BITOR, SYM_ASSIGN_BITXOR, SYM_ASSIGN_BITAND, SYM_ASSIGN_BITSHIFTLEFT, SYM_ASSIGN_BITSHIFTRIGHT, SYM_ASSIGN_BITSHIFTRIGHT_LOGICAL // SYM_ASSIGN_BITSHIFTLEFT_LOGICAL doesn't exist but <<<= is the same as <<=
 	, SYM_ASSIGN_CONCAT // THIS MUST BE KEPT AS THE LAST (AND SYM_ASSIGN THE FIRST) BECAUSE THEY'RE USED IN A RANGE-CHECK.
 #define IS_ASSIGNMENT_EXCEPT_POST_AND_PRE(symbol) (symbol <= SYM_ASSIGN_CONCAT && symbol >= SYM_ASSIGN) // Check upper bound first for short-circuit performance.
 #define IS_ASSIGNMENT_OR_POST_OP(symbol) (IS_ASSIGNMENT_EXCEPT_POST_AND_PRE(symbol) || symbol == SYM_POST_INCREMENT || symbol == SYM_POST_DECREMENT)
@@ -195,7 +202,7 @@ enum SymbolType // For use with ExpandExpression() and IsNumeric().
 	, SYM_OR, SYM_AND // MUST BE KEPT IN THIS ORDER AND ADJACENT TO THE ABOVE for the range checks below.
 #define IS_SHORT_CIRCUIT_OPERATOR(symbol) ((symbol) <= SYM_AND && (symbol) >= SYM_IFF_THEN) // Excludes SYM_IFF_ELSE, which acts as a simple jump after the THEN branch is evaluated.
 #define SYM_USES_CIRCUIT_TOKEN(symbol) ((symbol) <= SYM_AND && (symbol) >= SYM_IFF_ELSE)
-	, SYM_IS, SYM_IN, SYM_CONTAINS
+	, SYM_IS
 	, SYM_EQUAL, SYM_EQUALCASE, SYM_NOTEQUAL, SYM_NOTEQUALCASE // =, ==, !=, !==... Keep this in sync with IS_RELATIONAL_OPERATOR() below.
 #define IS_EQUALITY_OPERATOR(symbol) (symbol >= SYM_EQUAL && symbol <= SYM_NOTEQUALCASE)
 	, SYM_GT, SYM_LT, SYM_GTOE, SYM_LTOE  // >, <, >=, <= ... Keep this in sync with IS_RELATIONAL_OPERATOR() below.
@@ -209,7 +216,7 @@ enum SymbolType // For use with ExpandExpression() and IsNumeric().
 	, SYM_BITOR // Seems more intuitive to have these higher in prec. than the above, unlike C and Perl, but like Python.
 	, SYM_BITXOR // SYM_BITOR (ABOVE) MUST BE KEPT FIRST AMONG THE INTEGER OPERATORS BECAUSE IT'S USED IN A RANGE-CHECK (see IS_INTEGER_OPERATOR).
 	, SYM_BITAND
-	, SYM_BITSHIFTLEFT, SYM_BITSHIFTRIGHT // << >>  
+	, SYM_BITSHIFTLEFT, SYM_BITSHIFTRIGHT, SYM_BITSHIFTRIGHT_LOGICAL // << >> >>>.  <<< is the same as SYM_BITSHIFTLEFT
 	, SYM_INTEGERDIVIDE	// eg, x // y ALSO : SYM_INTEGERDIVIDE MUST BE KEPT LAST AMONG THE INTEGER OPERATORS BECAUSE IT'S USED IN A RANGE-CHECK (see IS_INTEGER_OPERATOR).
 #define IS_INTEGER_OPERATOR(symbol) ((symbol) <= SYM_INTEGERDIVIDE && (symbol) >= SYM_BITOR) // Currently not considered: SYM_BITNOT and the bit-assignment operators.
 	// INTEGER OPERATORS END
@@ -218,17 +225,18 @@ enum SymbolType // For use with ExpandExpression() and IsNumeric().
 	, SYM_MULTIPLY, SYM_DIVIDE
 	, SYM_POWER
 	, SYM_LOWNOT  // LOWNOT is the word "not", the low precedence counterpart of !
-	, SYM_NEGATIVE, SYM_POSITIVE, SYM_HIGHNOT, SYM_BITNOT  // Don't change position or order of these because Infix-to-postfix converter's special handling for SYM_POWER relies on them being adjacent to each other.
+	, SYM_NEGATIVE, SYM_POSITIVE, SYM_REF, SYM_HIGHNOT, SYM_BITNOT  // Don't change position or order of these because Infix-to-postfix converter's special handling for SYM_POWER relies on them being adjacent to each other.
 #define SYM_OVERRIDES_POWER_ON_STACK(symbol) ((symbol) >= SYM_LOWNOT && (symbol) <= SYM_BITNOT) // Check lower bound first for short-circuit performance.
+	, SYM_ISSET
 	, SYM_PRE_INCREMENT, SYM_PRE_DECREMENT // Must be kept after the post-ops and in this order relative to each other due to a range check in the code.
 #define SYM_INCREMENT_OR_DECREMENT_IS_PRE(symbol) ((symbol) >= SYM_PRE_INCREMENT) // Caller has verified symbol is an INCREMENT or DECREMENT operator.
 #define IS_PREFIX_OPERATOR(symbol) ((symbol) >= SYM_LOWNOT && (symbol) <= SYM_PRE_DECREMENT)
 	, SYM_FUNC     // A call to a function.
+	, SYM_RESERVED_WORD, SYM_RESERVED_OPERATOR
+#define SYM_IS_RESERVED(symbol) ((symbol) >= SYM_RESERVED_WORD) // No need to exclude SYM_COUNT in this case.
 	, SYM_COUNT    // Must be last because it's the total symbol count for everything above.
 	, SYM_INVALID = SYM_COUNT // Some callers may rely on YIELDS_AN_OPERAND(SYM_INVALID)==false.
 };
-// These two are macros for maintainability (i.e. seeing them together here helps maintain them together).
-#define SYM_DYNAMIC_IS_DOUBLE_DEREF(token) (!(token).var) // SYM_DYNAMICs are either double-derefs or built-in vars.
 
 // This should include all operators which can produce SYM_VAR for a subsequent assignment:
 #define IS_OPERATOR_VALID_LVALUE(sym) \
@@ -239,8 +247,9 @@ enum SymbolType // For use with ExpandExpression() and IsNumeric().
 struct ExprTokenType; // Forward declarations for use below.
 struct ResultToken;
 struct IDebugProperties;
+class Object;
 
-// Must not be smaller than INT_PTR; see "(IntKeyType)(INT_PTR)".
+
 // Must not be smaller than INT_PTR; see "(IntKeyType)(INT_PTR)".
 typedef __int64 IntKeyType;
 
@@ -256,6 +265,8 @@ struct DECLSPEC_NOVTABLE IObject // L31: Abstract interface for "objects".
 	virtual LPTSTR Type() = 0;
 	#define IObject_Type_Impl(name) \
 		LPTSTR Type() { return _T(name); }
+	virtual Object *Base() = 0;
+	virtual bool IsOfType(Object *aPrototype) = 0;
 	
 #ifdef CONFIG_DEBUGGER
 	#define IObject_DebugWriteProperty_Def \
@@ -411,6 +422,13 @@ struct ExprTokenType  // Something in the compiler hates the name TokenType, so 
 		return CopyValueFrom(other); // Currently nothing needs to be done differently.
 	}
 
+	void SetVarRef(Var *aVar)
+	{
+		symbol = SYM_VAR;
+		var = aVar;
+		var_usage = 1; // FIXME: VARREF_REF
+	}
+
 	// Assignments yield a variable using this function so that it can be passed ByRef,
 	// and because in some cases it avoids an extra memory allocation or string copy
 	// (that would otherwise be necessary to ensure the string value is not freed or
@@ -421,6 +439,7 @@ struct ExprTokenType  // Something in the compiler hates the name TokenType, so 
 	{
 		symbol = SYM_VAR;
 		var = aVar;
+		var_usage = 0;
 	}
 
 private: // Force code to use one of the CopyFrom() methods, for clarity.
@@ -432,12 +451,15 @@ private: // Force code to use one of the CopyFrom() methods, for clarity.
 #define STACK_PUSH(token_ptr) stack[stack_count++] = token_ptr
 #define STACK_POP stack[--stack_count]  // To be used as the r-value for an assignment.
 
+class Object;
 class BuiltInFunc;
 struct ResultToken : public ExprTokenType
 {
 	LPTSTR buf; // Points to a buffer of _f_retval_buf_size characters for returning short strings and misc purposes.
 	LPTSTR mem_to_free; // Callee stores memory allocated for the result here.  Must be NULL or equal to marker.
+#ifdef ENABLE_HALF_BAKED_NAMED_PARAMS
 	IObject *named_params; // Variadic callers may pass named parameters via properties of this.
+#endif
 
 	// Utility function for initializing result tokens.
 	void InitResult(LPTSTR aResultBuf)
@@ -447,7 +469,9 @@ struct ResultToken : public ExprTokenType
 		marker_length = -1; // Helps code size to do this here instead of in ReturnPtr(), which should be inlined.
 		buf = aResultBuf;
 		mem_to_free = nullptr;
+#ifdef ENABLE_HALF_BAKED_NAMED_PARAMS
 		named_params = nullptr;
+#endif
 		result = OK;
 	}
 
@@ -534,10 +558,18 @@ struct ResultToken : public ExprTokenType
 
 	ResultType Error(LPCTSTR aErrorText);
 	ResultType Error(LPCTSTR aErrorText, LPCTSTR aExtraInfo);
+	ResultType Error(LPCTSTR aErrorText, Object *aPrototype);
+	ResultType Error(LPCTSTR aErrorText, LPCTSTR aExtraInfo, Object *aPrototype);
+	ResultType MemoryError();
 	ResultType UnknownMemberError(ExprTokenType &aObject, int aFlags, LPCTSTR aMember);
 	ResultType Win32Error(DWORD aError = GetLastError());
+	ResultType ValueError(LPCTSTR aErrorText);
+	ResultType ValueError(LPCTSTR aErrorText, LPCTSTR aExtraInfo);
 	ResultType TypeError(LPCTSTR aExpectedType, ExprTokenType &aActualValue);
 	ResultType TypeError(LPCTSTR aExpectedType, LPCTSTR aActualType, LPTSTR aExtraInfo = _T(""));
+	ResultType ParamError(int aIndex, ExprTokenType *aParam);
+	ResultType ParamError(int aIndex, ExprTokenType *aParam, LPCTSTR aExpectedType);
+	ResultType ParamError(int aIndex, ExprTokenType *aParam, LPCTSTR aExpectedType, LPCTSTR aFunction);
 	
 	void SetLastErrorMaybeThrow(bool aError, DWORD aLastError = GetLastError());
 	void SetLastErrorCloseAndMaybeThrow(HANDLE aHandle, bool aError, DWORD aLastError = GetLastError());
@@ -552,6 +584,15 @@ private:
 	// function call on the stack.
 	ResultType result;
 };
+
+
+#define BIF_DECL_PARAMS ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount
+
+// The following macro is used for definitions and declarations of built-in functions:
+#define BIF_DECL(name) void name(BIF_DECL_PARAMS)
+
+typedef BIF_DECL((* BuiltInFunctionType));
+
 
 // But the array that goes with these actions is in globaldata.cpp because
 // otherwise it would be a little cumbersome to declare the extern version
@@ -671,10 +712,10 @@ typedef UCHAR HookType;
 #define HOOK_MOUSE 0x02
 #define HOOK_FAIL  0xFF
 
-#define EXTERN_G _thread_local extern global_struct *g
-#define EXTERN_OSVER extern OS_Version g_os
-#define EXTERN_CLIPBOARD _thread_local extern Clipboard *g_clip
-#define EXTERN_SCRIPT _thread_local extern Script *g_script;
+#define EXTERN_G thread_local extern global_struct *g
+#define EXTERN_OSVER thread_local extern OS_Version g_os
+#define EXTERN_CLIPBOARD thread_local extern Clipboard *g_clip
+#define EXTERN_SCRIPT thread_local extern Script *g_script
 #define CLIPBOARD_CONTAINS_ONLY_FILES (!IsClipboardFormatAvailable(CF_NATIVETEXT) && IsClipboardFormatAvailable(CF_HDROP))
 
 
@@ -722,7 +763,7 @@ typedef UCHAR HookType;
 	tick_now = GetTickCount();\
 	if (tick_now - g_script->mLastPeekTime > ::g->PeekFrequency)\
 	{\
-		if (PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE) && g_ThreadID == aThreadID)\
+		if (PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE) && g_MainThreadID == aThreadID)\
 			MsgSleep(-1);\
 		tick_now = GetTickCount();\
 		g_script->mLastPeekTime = tick_now;\
@@ -788,6 +829,7 @@ enum GuiEventTypes {GUI_EVENT_NONE  // NONE must be zero for any uses of ZeroMem
 };
 
 enum GuiEventKinds {GUI_EVENTKIND_EVENT = 0, GUI_EVENTKIND_NOTIFY, GUI_EVENTKIND_COMMAND};
+
 typedef USHORT CoordModeType;
 
 #define COORD_MODE_INVALID ((CoordModeType) -1)
@@ -797,6 +839,7 @@ typedef USHORT CoordModeType;
 #define COORD_MODE_TOOLTIP 4
 #define COORD_MODE_CARET   6
 #define COORD_MODE_MENU    8
+
 #define COORD_MODE_CLIENT  0
 #define COORD_MODE_WINDOW  1
 #define COORD_MODE_SCREEN  2
@@ -832,24 +875,23 @@ struct HotkeyCriterion
 	IObject *Callback;
 	HotkeyCriterion *NextCriterion, *NextExpr;
 	DWORD ThreadID;
-
 	ResultType Eval(LPTSTR aHotkeyName); // For HOT_IF_CALLBACK.
 };
 
 
 class Func;                 // Forward declarations
 class UserFunc;             //
+class Var;
 struct FuncAndToken {
-	ResultToken mToken ;
-	LPTSTR result_to_return_dll;
-	Func * mFunc ;
-	VARIANT variant_to_return_dll;
-	ExprTokenType **param;
-	ExprTokenType params[10];
 	LPTSTR buf;
+	ExprTokenType params[10];
+	Func * mFunc ;
+	LPTSTR result_to_return_dll;
+	ExprTokenType **param;
+	VARIANT variant_to_return_dll;
+	ResultToken mToken ;
 	BYTE mParamCount;
 };
-
 class Label;                //
 struct RegItemStruct;       //
 struct LoopFilesStruct;     //
@@ -866,6 +908,7 @@ struct ScriptThreadState
 	LPTSTR mLoopField;  // The field of the current string-parsing loop.
 
 	UserFunc *CurrentFunc; // v1.0.46.16: The function whose body is currently being processed at load-time, or being run at runtime (if any).
+	UserFunc* CurrentMacro;
 	ScriptTimer *CurrentTimer; // The timer that launched this thread (if any).
 	HWND hWndLastUsed;  // In many cases, it's better to use GetValidLastUsedWindow() when referring to this.
 	EventInfoType EventInfo;
@@ -922,7 +965,6 @@ struct ScriptThreadSettings
 	//inline bool InTryBlock() { return ExcptMode & EXCPTMODE_TRY; } // Currently unused.
 	bool DetectWindow(HWND aWnd);
 	DerefType* ExcptDeref;
-	UserFunc* CurrentMacro;
 	BYTE ZipCompressionLevel;
 };
 
@@ -1046,8 +1088,7 @@ UNICODE_CHECK inline size_t CHECK_SIZEOF(size_t n) { return n; }
 #define UNICODE_CHECK
 #endif
 
-#define STRUCTALIGN(size) \
-			(thisalign = toalign > 0 && size > toalign ? toalign : size)
+#define STRUCTALIGN(size) (thisalign = toalign > 0 && size > toalign ? toalign : size)
 
 // removed return value as it is not used
 __inline void g_memset(void *_S, int _C, size_t _N)

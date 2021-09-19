@@ -1,4 +1,4 @@
-/*
+﻿/*
 AutoHotkey
 
 Copyright 2003-2009 Chris Mallett (support@autohotkey.com)
@@ -14,7 +14,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 */
 
-#include "stdafx.h" // pre-compiled headers
+#include "pch.h" // pre-compiled headers
 #include "clipboard.h"
 #include "globaldata.h"  // for g_script->ScriptError() and g_ClipboardTimeout
 #include "application.h" // for MsgSleep()
@@ -110,7 +110,7 @@ size_t Clipboard::Get(LPTSTR aBuf)
 		}
 		else // clipboard_contains_files
 		{
-			if (file_count = DragQueryFile((HDROP)mClipMemNowLocked, 0xFFFFFFFF, NULL, 0))
+			if (file_count = DragQueryFile((HDROP)mClipMemNowLocked, 0xFFFFFFFF, _T(""), 0))
 			{
 				mLength = (file_count - 1) * 2;  // Init; -1 if don't want a newline after last file.
 				for (i = 0; i < file_count; ++i)
@@ -139,7 +139,7 @@ size_t Clipboard::Get(LPTSTR aBuf)
 	}
 	else // clipboard_contains_files
 	{
-		if (file_count = DragQueryFile((HDROP)mClipMemNowLocked, 0xFFFFFFFF, NULL, 0))
+		if (file_count = DragQueryFile((HDROP)mClipMemNowLocked, 0xFFFFFFFF, _T(""), 0))
 			for (i = 0; i < file_count; ++i)
 			{
 				// Caller has already ensured aBuf is large enough to hold them all:
@@ -202,7 +202,7 @@ LPTSTR Clipboard::PrepareForWrite(size_t aAllocSize)
 	// with 16-bit Windows. They are ignored.": GMEM_DDESHARE
 	if (   !(mClipMemNew = GlobalAlloc(GMEM_MOVEABLE, aAllocSize * sizeof(TCHAR)))   )
 	{
-		g_script->ScriptError(ERR_INTERNAL_CALL);  // Generic error message since so rare.
+		MemoryError();
 		return NULL;
 	}
 	if (   !(mClipMemNewLocked = (LPTSTR)GlobalLock(mClipMemNew))   )

@@ -1,4 +1,4 @@
-/* This file is part of KuShellExtension
+﻿/* This file is part of KuShellExtension
  * Copyright (C) 2008-2009 Kai-Chieh Ku (kjackie@gmail.com)
  *
  * This program is free software; you can redistribute it and/or
@@ -450,7 +450,10 @@ public:
 	virtual ~CKuStringT()
 	{
 		if (m_pData)
+		{
 			m_pData->Release();
+			m_pData = NULL;
+		}
 	}
 
 	SIZET GetLength() const
@@ -1114,11 +1117,7 @@ public:
 	{ Init(); LoadString(nID); }
 #endif
 private:
-#ifndef _USRDLL
-	__declspec(thread) static const T m_sNULL;
-#else
 	static const T m_sNULL;
-#endif
 	CKuStringDataT *m_pData;
 	bool m_bDirty;
 };

@@ -14,7 +14,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 */
 
-#include "stdafx.h" // pre-compiled headers
+#include "pch.h" // pre-compiled headers
 #include "hook.h"
 #include "globaldata.h"  // for access to several global vars
 #include "util.h" // for snprintfcat()
@@ -23,15 +23,15 @@ GNU General Public License for more details.
 #include "hotkey.h"
 
 // Declare static variables (global to only this file/module, i.e. no external linkage):
-static HANDLE sKeybdMutex = NULL;
-static HANDLE sMouseMutex = NULL;
+thread_local static HANDLE sKeybdMutex = NULL;
+thread_local static HANDLE sMouseMutex = NULL;
 #define KEYBD_MUTEX_NAME _T("AHK Keybd")
 #define MOUSE_MUTEX_NAME _T("AHK Mouse")
 
 // It's done the following way because:
 // It's unclear that zero is always an invalid thread ID (not even GetWindowThreadProcessId's
 // documentation gives any hint), so its safer to assume that a thread ID can be zero and yet still valid.
-static HANDLE sThreadHandle = NULL;
+thread_local static HANDLE sThreadHandle = NULL;
 
 // Whether to disguise the next up-event for lwin/rwin to suppress Start Menu.
 // There is only one variable because even if multiple modifiers are pressed
@@ -42,8 +42,8 @@ static HANDLE sThreadHandle = NULL;
 // These are made global, rather than static inside the hook function, so that
 // we can ensure they are initialized by the keyboard init function every
 // time it's called (currently it can be only called once):
-static bool sDisguiseNextMenu;          // Initialized by ResetHook().
-static bool sUndisguisedMenuInEffect;	//
+thread_local static bool sDisguiseNextMenu;          // Initialized by ResetHook().
+thread_local static bool sUndisguisedMenuInEffect;	//
 
 // Whether the alt-tab menu was shown by an AltTab hotkey or alt-tab was detected
 // by the hook.  This might be inaccurate if the menu was displayed before the hook
@@ -51,13 +51,13 @@ static bool sUndisguisedMenuInEffect;	//
 // be a problem, the accuracy could be improved by additional checks with FindWindow(),
 // keeping in mind that there are at least 3 different window classes to check,
 // depending on OS and the "AltTabSettings" registry value.
-static bool sAltTabMenuIsVisible;       // Initialized by ResetHook().
+thread_local static bool sAltTabMenuIsVisible;       // Initialized by ResetHook().
 
 // The prefix key that's currently down (i.e. in effect).
 // It's tracked this way, rather than as a count of the number of prefixes currently down, out of
 // concern that such a count might accidentally wind up above zero (due to a key-up being missed somehow)
 // and never come back down, thus penalizing performance until the program is restarted:
-key_type *pPrefixKey;  // Initialized by ResetHook().
+thread_local key_type *pPrefixKey;  // Initialized by ResetHook().
 
 // Less memory overhead (space and performance) to allocate a solid block for multidimensional arrays:
 // These store all the valid modifier+suffix combinations (those that result in hotkey actions) except
@@ -66,11 +66,11 @@ key_type *pPrefixKey;  // Initialized by ResetHook().
 // this way makes the performance impact of adding many additional hotkeys of this type exactly zero
 // once the program has started up and initialized.  The main alternative is a binary search on an
 // array of keyboard-hook hotkeys (similar to how the mouse is done):
-static HotkeyIDType *kvkm = NULL;
-static HotkeyIDType *kscm = NULL;
-static HotkeyIDType *hotkey_up = NULL;
-static key_type *kvk = NULL;
-static key_type *ksc = NULL;
+thread_local static HotkeyIDType *kvkm = NULL;
+thread_local static HotkeyIDType *kscm = NULL;
+thread_local static HotkeyIDType *hotkey_up = NULL;
+thread_local static key_type *kvk = NULL;
+thread_local static key_type *ksc = NULL;
 // Macros for convenience in accessing the above arrays as multidimensional objects.
 // When using them, be sure to consistently access the first index as ModLR (i.e. the rows)
 // and the second as VK or SC (i.e. the columns):
@@ -127,7 +127,7 @@ static key_type *ksc = NULL;
 // 6B  04E	 	d	0.00	Num +          	
 
 
-static bool sHookSyncd; // Only valid while in WaitHookIdle().
+thread_local static bool sHookSyncd; // Only valid while in WaitHookIdle().
 
 /////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -573,7 +573,7 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 		HWND menu_hwnd;
 		if (   (aVK == VK_LBUTTON || aVK == VK_RBUTTON) && (g_MenuIsVisible // Ordered for short-circuit performance.
 				|| ((menu_hwnd = FindWindow(_T("#32768"), NULL))
-				&& GetWindowThreadProcessId(menu_hwnd, NULL) == g_ThreadID))) // Don't call GetCurrentThreadId() because our thread is different than main's.
+					&& GetWindowThreadProcessId(menu_hwnd, NULL) == g_MainThreadID))   ) // Don't call GetCurrentThreadId() because our thread is different than main's.
 		{
 			// Bug-fix for v1.0.22: If "LControl & LButton::" (and perhaps similar combinations)
 			// is a hotkey, the foreground window would think that the mouse is stuck down, at least
@@ -1300,7 +1300,12 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 				// firing the wrong hotkey or firing the right hotkey but not suppressing the key.
 				if (this_key.hotkey_to_fire_upon_release == HOTKEY_ID_INVALID)
 					this_key.hotkey_to_fire_upon_release = hotkey_id_with_flags; // See comments above in other occurrences of this line.
-				hotkey_id_with_flags = HOTKEY_ID_INVALID;
+				// v1.1.33.03: ChangeHookState now avoids pairing an up hotkey with a more permissive
+				// down hotkey; e.g. "<^a up" and "^a" won't be paired, since that would cause "<^a up"
+				// to fire when RCtrl+A is pressed.  To support them both firing on LCtrl+A, this looks
+				// for any key-down hotkey which might be elegible to fire.  It's okay if this hotkey
+				// has no eligible variants, because Hotkey::CriterionFiringIsCertain will handle that.
+				hotkey_id_with_flags = Hotkey::FindPairedHotkey(this_key.first_hotkey, g_modifiersLR_logical_non_ignored, false);
 			}
 			//else hotkey_id_with_flags contains the up-hotkey that is now eligible for firing.
 		}
@@ -1412,7 +1417,7 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 			// releases the key, but there doesn't seem any way around that.
 			Hotkey::CriterionFiringIsCertain(this_key.hotkey_to_fire_upon_release // firing_is_certain==false under these conditions, so no need to check it.
 				, true  // Always a key-up since it will fire upon release.
-				, 0 // Not applicable here, only affects aSingleChar and return value
+				, aExtraInfo // May affect the result due to #InputLevel.  Assume the key-up's SendLevel will be the same as the key-down.
 				, this_key.no_suppress // Unused and won't be altered because above is "true".
 				, fire_with_no_suppress, NULL); // fire_with_no_suppress is the value we really need to get back from it.
 			this_key.hotkey_down_was_suppressed = !fire_with_no_suppress; // Fixed for v1.1.33.01: If this isn't set, the key-up won't be suppressed even after the key-down is.
@@ -1462,7 +1467,7 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 		// This check should be identical to the section above dealing with hotkey_to_fire_upon_release:
 		Hotkey::CriterionFiringIsCertain(this_key.hotkey_to_fire_upon_release // firing_is_certain==false under these conditions, so no need to check it.
 			, true  // Always a key-up since it will fire upon release.
-			, 0 // Not applicable here, only affects aSingleChar and return value
+			, aExtraInfo // May affect the result due to #InputLevel.  Assume the key-up's SendLevel will be the same as the key-down.
 			, this_key.no_suppress // Unused and won't be altered because above is "true".
 			, fire_with_no_suppress, NULL); // fire_with_no_suppress is the value we really need to get back from it.
 		if (fire_with_no_suppress)
@@ -1943,7 +1948,7 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 
 
 LRESULT SuppressThisKeyFunc(const HHOOK aHook, LPARAM lParam, const vk_type aVK, const sc_type aSC, bool aKeyUp
-	, KeyHistoryItem *pKeyHistoryCurr, WPARAM aHotkeyIDToPost, WPARAM aHSwParamToPost, LPARAM aHSlParamToPost)
+	, ULONG_PTR aExtraInfo, KeyHistoryItem *pKeyHistoryCurr, WPARAM aHotkeyIDToPost, WPARAM aHSwParamToPost, LPARAM aHSlParamToPost)
 // Always use the parameter vk rather than event.vkCode because the caller or caller's caller
 // might have adjusted vk, namely to make it a left/right specific modifier key rather than a
 // neutral one.
@@ -1989,12 +1994,6 @@ LRESULT SuppressThisKeyFunc(const HHOOK aHook, LPARAM lParam, const vk_type aVK,
 		UpdateKeybdState(event, aVK, aSC, aKeyUp, true);
 	}
 
-#ifdef ENABLE_KEY_HISTORY_FILE
-	if (g_KeyHistoryToFile)
-		KeyHistoryToFile(NULL, pKeyHistoryCurr->event_type, pKeyHistoryCurr->key_up
-			, pKeyHistoryCurr->vk, pKeyHistoryCurr->sc);  // A fairly low overhead operation.
-#endif
-
 	// These should be posted only at the last possible moment before returning in order to
 	// minimize the chance that the main thread will receive and process the message before
 	// our thread can finish updating key states and other maintenance.  This has been proven
@@ -2005,23 +2004,24 @@ LRESULT SuppressThisKeyFunc(const HHOOK aHook, LPARAM lParam, const vk_type aVK,
 	// system settings of the same ilk as "favor background processes").
 	if (aHotkeyIDToPost != HOTKEY_ID_INVALID)
 	{
-		PostThreadMessage(Hotkey::shk[aHotkeyIDToPost & HOTKEY_ID_MASK]->mThreadID, AHK_HOOK_HOTKEY, aHotkeyIDToPost, pKeyHistoryCurr->sc); // v1.0.43.03: sc is posted currently only to support the number of wheel turns (to store in A_EventInfo).
+		int input_level = InputLevelFromInfo(aExtraInfo);
+		PostMessage(g_hWnd, AHK_HOOK_HOTKEY, aHotkeyIDToPost, MAKELONG(pKeyHistoryCurr->sc, input_level)); // v1.0.43.03: sc is posted currently only to support the number of wheel turns (to store in A_EventInfo).
 		if (aKeyUp && hotkey_up[aHotkeyIDToPost & HOTKEY_ID_MASK] != HOTKEY_ID_INVALID)
 		{
 			// This is a key-down hotkey being triggered by releasing a prefix key.
 			// There's also a corresponding key-up hotkey, so fire it too:
-			PostThreadMessage(Hotkey::shk[aHotkeyIDToPost & HOTKEY_ID_MASK]->mThreadID, AHK_HOOK_HOTKEY, hotkey_up[aHotkeyIDToPost & HOTKEY_ID_MASK], pKeyHistoryCurr->sc);
+			PostMessage(g_hWnd, AHK_HOOK_HOTKEY, hotkey_up[aHotkeyIDToPost & HOTKEY_ID_MASK], MAKELONG(pKeyHistoryCurr->sc, input_level));
 		}
 	}
 	if (aHSwParamToPost != HOTSTRING_INDEX_INVALID)
-		PostThreadMessage(Hotstring::shs[aHSwParamToPost]->mThreadID, AHK_HOTSTRING, aHSwParamToPost, aHSlParamToPost);
+		PostMessage(g_hWnd, AHK_HOTSTRING, aHSwParamToPost, aHSlParamToPost);
 	return 1;
 }
 
 
 
 LRESULT AllowIt(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lParam, const vk_type aVK, const sc_type aSC
-	, bool aKeyUp, KeyHistoryItem *pKeyHistoryCurr, WPARAM aHotkeyIDToPost)
+	, bool aKeyUp, ULONG_PTR aExtraInfo, KeyHistoryItem *pKeyHistoryCurr, WPARAM aHotkeyIDToPost)
 // Always use the parameter vk rather than event.vkCode because the caller or caller's caller
 // might have adjusted vk, namely to make it a left/right specific modifier key rather than a
 // neutral one.
@@ -2069,11 +2069,6 @@ LRESULT AllowIt(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lParam, cons
 				break;
 		}
 #endif
-#ifdef ENABLE_KEY_HISTORY_FILE
-		if (g_KeyHistoryToFile)
-			KeyHistoryToFile(NULL, pKeyHistoryCurr->event_type, pKeyHistoryCurr->key_up
-				, pKeyHistoryCurr->vk, pKeyHistoryCurr->sc);  // A fairly low overhead operation.
-#endif
 	}
 	else // Our caller is the keyboard hook.
 	{
@@ -2086,21 +2081,15 @@ LRESULT AllowIt(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lParam, cons
 			{
 				// Dereference to get the global var's value:
 				if (*(kvk[aVK].pForceToggle) != NEUTRAL) // Prevent toggle.
-					return SuppressThisKeyFunc(aHook, lParam, aVK, aSC, aKeyUp, pKeyHistoryCurr, aHotkeyIDToPost);
+					return SuppressThisKeyFunc(aHook, lParam, aVK, aSC, aKeyUp, aExtraInfo, pKeyHistoryCurr, aHotkeyIDToPost);
 			}
 		}
 
 		if ((Hotstring::sEnabledCount && !is_ignored) || g_input)
 			if (!CollectInput(event, aVK, aSC, aKeyUp, is_ignored, pKeyHistoryCurr, hs_wparam_to_post, hs_lparam_to_post)) // Key should be invisible (suppressed).
-				return SuppressThisKeyFunc(aHook, lParam, aVK, aSC, aKeyUp, pKeyHistoryCurr, aHotkeyIDToPost, hs_wparam_to_post, hs_lparam_to_post);
+				return SuppressThisKeyFunc(aHook, lParam, aVK, aSC, aKeyUp, aExtraInfo, pKeyHistoryCurr, aHotkeyIDToPost, hs_wparam_to_post, hs_lparam_to_post);
 
-		// Do these here since the above "return SuppressThisKey" will have already done it in that case.
-#ifdef ENABLE_KEY_HISTORY_FILE
-		if (g_KeyHistoryToFile)
-			KeyHistoryToFile(NULL, pKeyHistoryCurr->event_type, pKeyHistoryCurr->key_up
-				, pKeyHistoryCurr->vk, pKeyHistoryCurr->sc);  // A fairly low overhead operation.
-#endif
-
+		// Do this here since the above "return SuppressThisKey" will have already done it in that case.
 		UpdateKeybdState(event, aVK, aSC, aKeyUp, false);
 
 		// UPDATE: The Win-L and Ctrl-Alt-Del workarounds below are still kept in effect in spite of the
@@ -2209,7 +2198,7 @@ LRESULT AllowIt(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lParam, cons
 			}
 			else if (sDisguiseNextMenu)
 			{
-				// If LWin/RWin is still physically down (or down due to an explicit Send, such as a remapping),
+				// If a menu key is still physically down (or down due to an explicit Send, such as a remapping),
 				// keep watching until it is released so that if key-repeat puts it back into effect, it will be
 				// disguised again.  _non_ignored is used to ignore temporary modifier changes made during a
 				// Send which aren't explicit, such as `Send x` temporarily releasing LWin/RWin.  Without this,
@@ -2220,7 +2209,9 @@ LRESULT AllowIt(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lParam, cons
 				// event; i.e. when an isolated Ctrl/Shift up event is received without a corresponding down event.
 				// "Physical" events of this kind can be sent by the system when switching from a window with UK
 				// layout to a window with US layout.  This is likely related to the UK layout having AltGr.
-				if (  !(g_modifiersLR_logical_non_ignored & (MOD_LWIN | MOD_RWIN))  )
+				// v1.1.33.03: This is now applied to LAlt/RAlt, to fix issues with hotkeys like !WheelUp:: in
+				// programs with non-standard handling of the Alt key, such as Firefox.
+				if (  !(g_modifiersLR_logical_non_ignored & (MOD_LWIN | MOD_RWIN | MOD_LALT | MOD_RALT))  )
 				{
 					if (modLR & (MOD_LCONTROL | MOD_RCONTROL | MOD_LSHIFT | MOD_RSHIFT))
 					{
@@ -2266,16 +2257,17 @@ LRESULT AllowIt(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lParam, cons
 	LRESULT result_to_return = CallNextHookEx(aHook, aCode, wParam, lParam);
 	if (aHotkeyIDToPost != HOTKEY_ID_INVALID)
 	{
-		PostThreadMessage(Hotkey::shk[aHotkeyIDToPost & HOTKEY_ID_MASK]->mThreadID, AHK_HOOK_HOTKEY, aHotkeyIDToPost, pKeyHistoryCurr->sc); // v1.0.43.03: sc is posted currently only to support the number of wheel turns (to store in A_EventInfo).
+		int input_level = InputLevelFromInfo(aExtraInfo);
+		PostMessage(g_hWnd, AHK_HOOK_HOTKEY, aHotkeyIDToPost, MAKELONG(pKeyHistoryCurr->sc, input_level)); // v1.0.43.03: sc is posted currently only to support the number of wheel turns (to store in A_EventInfo).
 		if (aKeyUp && hotkey_up[aHotkeyIDToPost & HOTKEY_ID_MASK] != HOTKEY_ID_INVALID)
 		{
 			// This is a key-down hotkey being triggered by releasing a prefix key.
 			// There's also a corresponding key-up hotkey, so fire it too:
-			PostThreadMessage(Hotkey::shk[aHotkeyIDToPost & HOTKEY_ID_MASK]->mThreadID, AHK_HOOK_HOTKEY, hotkey_up[aHotkeyIDToPost & HOTKEY_ID_MASK], pKeyHistoryCurr->sc);
+			PostMessage(g_hWnd, AHK_HOOK_HOTKEY, hotkey_up[aHotkeyIDToPost & HOTKEY_ID_MASK], MAKELONG(pKeyHistoryCurr->sc, input_level));
 		}
 	}
 	if (hs_wparam_to_post != HOTSTRING_INDEX_INVALID)
-		PostThreadMessage(Hotstring::shs[hs_wparam_to_post]->mThreadID, AHK_HOTSTRING, hs_wparam_to_post, hs_lparam_to_post);
+		PostMessage(g_hWnd, AHK_HOTSTRING, hs_wparam_to_post, hs_lparam_to_post);
 	return result_to_return;
 }
 
@@ -2326,10 +2318,10 @@ bool CollectInput(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type aSC,
 	if (aKeyUp)
 		return true;
 
-	static vk_type sPendingDeadKeyVK = 0;
-	static sc_type sPendingDeadKeySC = 0; // Need to track this separately because sometimes default VK-to-SC mapping isn't correct.
-	static bool sPendingDeadKeyUsedShift = false;
-	static bool sPendingDeadKeyUsedAltGr = false;
+	thread_local static vk_type sPendingDeadKeyVK = 0;
+	thread_local static sc_type sPendingDeadKeySC = 0; // Need to track this separately because sometimes default VK-to-SC mapping isn't correct.
+	thread_local static bool sPendingDeadKeyUsedShift = false;
+	thread_local static bool sPendingDeadKeyUsedAltGr = false;
 	
 	bool transcribe_key = true;
 	
@@ -2376,8 +2368,8 @@ bool CollectInput(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type aSC,
 	//  - Pressing a non-dead key disregards any dead key which was placed into the buffer by
 	//    calling ToUnicodeEx, and it is left in the buffer.  To get the correct result for the
 	//    next call, we must NOT reinsert it into the buffer (see dead_key_sequence_complete).
-	static bool sUwpAppFocused = false;
-	static HWND sUwpHwndChecked = 0;
+	thread_local static bool sUwpAppFocused = false;
+	thread_local static HWND sUwpHwndChecked = 0;
 	if (sUwpHwndChecked != active_window)
 	{
 		sUwpHwndChecked = active_window;
@@ -3271,20 +3263,10 @@ int sort_most_general_before_least(const void *a1, const void *a2)
 {
 	hk_sorted_type &b1 = *(hk_sorted_type *)a1; // For performance and convenience.
 	hk_sorted_type &b2 = *(hk_sorted_type *)a2;
-	// It's probably not necessary to be so thorough.  For example, if a1 has a vk but a2 has an sc,
-	// those two are immediately non-equal.  But I'm worried about consistency: qsort() may get messed
-	// up if these same two objects are ever compared, in reverse order, but a different comparison
-	// result is returned.  Therefore, we compare rigorously and consistently:
-	if (b1.vk && b2.vk)
-		if (b1.vk != b2.vk)
-			return b1.vk - b2.vk;
-	if (b1.sc && b2.sc)
-		if (b1.sc != b2.sc)
-			return b1.sc - b2.sc;
-	if (b1.vk && !b2.vk)
-		return 1;
-	if (!b1.vk && b2.vk)
-		return -1;
+	if (b1.vk != b2.vk)
+		return b1.vk - b2.vk;
+	if (b1.sc != b2.sc)
+		return b1.sc - b2.sc;
 
 	// If the above didn't return, we now know that a1 and a2 have the same vk's or sc's.  So
 	// we use a tie-breaker to cause the most general keys to appear closer to the top of the
@@ -3303,62 +3285,50 @@ int sort_most_general_before_least(const void *a1, const void *a2)
 	// Example: User defines ^a, but also defines >^a.  What should probably happen is that >^a forces ^a
 	// to fire only when <^a occurs.
 
-	mod_type mod_a1_merged = b1.modifiers;
-	mod_type mod_a2_merged = b2.modifiers;
-	if (b1.modifiersLR)
-		mod_a1_merged |= ConvertModifiersLR(b1.modifiersLR);
-	if (b2.modifiersLR)
-		mod_a2_merged |= ConvertModifiersLR(b2.modifiersLR);
+	// v1.1.33.03: Compare number of modifiers.  This supersedes some previous checks for when
+	// a1's modifiers are a subset of a2's or vice versa (since the subset would always have
+	// fewer bits).  This new method helps prioritize combinations which overlap but have a
+	// different number of modifiers, such as "*<^a" vs. "*<^>^a".
+	UINT nmodLR_a1 = popcount8(b1.modifiersLR);
+	UINT nmodLR_a2 = popcount8(b2.modifiersLR);
+	UINT nmod_a1 = popcount8(b1.modifiers) + nmodLR_a1;
+	UINT nmod_a2 = popcount8(b2.modifiers) + nmodLR_a2;
+	if (nmod_a1 != nmod_a2)
+		return nmod_a1 - nmod_a2;
+	if (nmodLR_a1 != nmodLR_a2)
+		return nmodLR_a1 - nmodLR_a2;
+	// v1.1.33.03: Sort by modifier value so that key-up hotkeys end up immediately after their
+	// counterparts, otherwise we get odd results like Alt+Shift+A firing "*!a" and "*+a up"
+	// instead of "*!a" and "*!a up" or "*+a" and "*+a up".
+	if (b1.modifiers != b2.modifiers)
+		return b1.modifiers - b2.modifiers; // !^+#
+	if (b1.modifiersLR != b2.modifiersLR)
+		return b1.modifiersLR - b2.modifiersLR; // <^>^<!>!<+>+<#>#
 
-	// Check for equality first to avoid a possible infinite loop where two identical sets are subsets of each other:
-	if (mod_a1_merged == mod_a2_merged)
-	{
-		// Here refine it further to handle a case such as ^a and >^a.  We want ^a to be considered
-		// more general so that it won't override >^a altogether:
-		if (b1.modifiersLR && !b2.modifiersLR)
-			return 1;  // Make a1 greater, so that it goes below a2 on the list.
-		if (!b1.modifiersLR && b2.modifiersLR)
-			return -1;
-		// After the above, the only remaining possible-problem case in this block is that
-		// a1 and a2 have non-zero modifiersLRs that are different.  e.g. >+^a and +>^a
-		// I don't think I want to try to figure out which of those should take precedence,
-		// and how they overlap.  Maybe another day.
+	// v1.0.38.03: The following check is added to handle a script containing hotkeys
+	// such as the following (in this order):
+	// *MButton::
+	// *Mbutton Up::
+	// MButton::
+	// MButton Up::
+	// What would happen before is that the qsort() would sometimes cause "MButton Up" from the
+	// list above to be processed prior to "MButton", which would set hotkey_up[*MButton's ID]
+	// to be MButton Up's ID.  Then when "MButton" was processed, it would set its_table_entry
+	// to MButton's ID, but hotkey_up[MButton's ID] would be wrongly left INVALID when it should
+	// have received a copy of the asterisk hotkey ID's counterpart key-up ID.  However, even
+	// giving it a copy would not be quite correct because then *MButton's ID would wrongly
+	// be left associated with MButton's Up's ID rather than *MButton Up's.  By solving the
+	// problem here in the sort rather than copying the ID, both bugs are resolved.
+	// v1.1.33.03: The scenario above would now also be prevented by checks in ChangeHookState
+	// which avoid pairing a key-up hotkey with a more permissive key-down hotkey, but keeping
+	// this might help ensure key-up hotkeys are matched optimally when there is overlap.
+	//if ((b1.id_with_flags & HOTKEY_KEY_UP) != (b2.id_with_flags & HOTKEY_KEY_UP))
+	//	return (b1.id_with_flags & HOTKEY_KEY_UP) ? 1 : -1; // Put key-up hotkeys higher in the list than their down counterparts (see comment above).
 
-		// v1.0.38.03: The following check is added to handle a script containing hotkeys
-		// such as the following (in this order):
-		// *MButton::
-		// *Mbutton Up::
-		// MButton::
-		// MButton Up::
-		// What would happen before is that the qsort() would sometimes cause "MButton Up" from the
-		// list above to be processed prior to "MButton", which would set hotkey_up[*MButton's ID]
-		// to be MButton Up's ID.  Then when "MButton" was processed, it would set its_table_entry
-		// to MButton's ID, but hotkey_up[MButton's ID] would be wrongly left INVALID when it should
-		// have received a copy of the asterisk hotkey ID's counterpart key-up ID.  However, even
-		// giving it a copy would not be quite correct because then *MButton's ID would wrongly
-		// be left associated with MButton's Up's ID rather than *MButton Up's.  By solving the
-		// problem here in the sort rather than copying the ID, both bugs are resolved.
-		if ((b1.id_with_flags & HOTKEY_KEY_UP) != (b2.id_with_flags & HOTKEY_KEY_UP))
-			return (b1.id_with_flags & HOTKEY_KEY_UP) ? 1 : -1; // Put key-up hotkeys higher in the list than their down counterparts (see comment above).
-
-		// Otherwise, consider them to be equal for the purpose of the sort:
-		return 0;
-	}
-
-	mod_type mod_intersect = mod_a1_merged & mod_a2_merged;
-
-	if (mod_a1_merged == mod_intersect)
-		// a1's modifiers are contained entirely within a2's, thus a1 is more general and
-		// should be considered smaller so that it will go closer to the top of the list:
-		return -1;
-	if (mod_a2_merged == mod_intersect)
-		return 1;
-
-	// Otherwise, since neither is a perfect subset of the other, report that they're equal.
-	// More refinement might need to be done here later for modifiers that partially overlap:
-	// e.g. At this point is it possible for a1's modifiersLR to be a perfect subset of a2's,
-	// or vice versa?
-	return 0;
+	// v1.1.33.03: Getting to this point should mean that a1 and a2 have the same modifiers,
+	// vk and sc, but they might have different up/down status and key name (Esc/Escape/vk1B).
+	// Ensure predictability by putting them in an order based on id_with_flags.
+	return b1.id_with_flags - b2.id_with_flags;
 }
 
 
@@ -3750,7 +3720,7 @@ void ChangeHookState(Hotkey *aHK[], int aHK_count, HookType aWhichHook, HookType
 		modLR_type i_modifiersLR_excluded;
 		int modifiersLR;  // Don't make this modLR_type to avoid integer overflow, since it's a loop-counter.
 		bool prev_hk_is_key_up, this_hk_is_key_up;
-		HotkeyIDType this_hk_id;
+		HotkeyIDType prev_hk_id, this_hk_id;
 
 		for (i = 0; i < hk_sorted_count; ++i)
 		{
@@ -3799,121 +3769,146 @@ void ChangeHookState(Hotkey *aHK[], int aHK_count, HookType aWhichHook, HookType
 					if (this_hk.modifiersLR != (modifiersLR & this_hk.modifiersLR))
 						continue;
 
+				// scan codes don't need the switch() stmt below because, for example,
+				// the hook knows to look up left-control by only SC_LCONTROL, not VK_LCONTROL.
+				bool do_cascade = this_hk.vk;
+
 				// If above didn't "continue", modifiersLR is a valid hotkey combination so set it as such:
-				if (!this_hk.vk)
+				HotkeyIDType &its_table_entry = this_hk.vk ? Kvkm(modifiersLR, this_hk.vk) : Kscm(modifiersLR, this_hk.sc);
+				if (its_table_entry == HOTKEY_ID_INVALID) // Since there is no ID currently in the slot, key-up/down doesn't matter.
+					its_table_entry = this_hk.id_with_flags;
+				else
 				{
-					// scan codes don't need the switch() stmt below because, for example,
-					// the hook knows to look up left-control by only SC_LCONTROL,
-					// not VK_LCONTROL.
-					HotkeyIDType &its_table_entry = Kscm(modifiersLR, this_hk.sc);
-					if (its_table_entry == HOTKEY_ID_INVALID) // Since there is no ID currently in the slot, key-up/down doesn't matter.
-						its_table_entry = this_hk.id_with_flags;
-					else
+					prev_hk_id = its_table_entry & HOTKEY_ID_MASK;
+					if (this_hk_id >= Hotkey::sHotkeyCount || prev_hk_id >= Hotkey::sHotkeyCount) // AltTab hotkey.
+						continue; // Exclude AltTab hotkeys since hotkey_up[] and shk[] can't be used.
+					prev_hk_is_key_up = its_table_entry & HOTKEY_KEY_UP;
+					if (this_hk_is_key_up && !prev_hk_is_key_up) // Override any existing key-up hotkey for this down hotkey ID, e.g. "LButton Up" takes precedence over "*LButton Up".
 					{
-						prev_hk_is_key_up = its_table_entry & HOTKEY_KEY_UP;
-						// Known limitation for a set of hotkeys such as the following:
-						// *MButton::
-						// *Mbutton Up::
-						// MButton Up::  ; This is the key point: that this hotkey lacks a counterpart down-key.
-						// Because there's no down-counterpart to the non-asterisk hotkey, the non-asterisk
-						// hotkey's MButton Up takes over completely and *MButton is ignored.  This is because
-						// a given hotkey ID can only have one entry in the hotkey_up array.  What should
-						// really happen is that every Up hotkey should have an implicit identical down hotkey
-						// just for the purpose of having a unique ID in the hotkey_up array.  But that seems
-						// like too much code given the rarity of doing something like this, especially since
-						// it can be easily avoided simply by defining MButton:: as a hotkey in the script.
-						if (this_hk_is_key_up && !prev_hk_is_key_up) // Override any existing key-up hotkey for this down hotkey ID, e.g. "LButton Up" takes precedence over "*LButton Up".
-							hotkey_up[its_table_entry & HOTKEY_ID_MASK] = this_hk.id_with_flags;
-						else if (!this_hk_is_key_up && prev_hk_is_key_up)
+						Hotkey &prev_hk = *Hotkey::shk[prev_hk_id];
+						// v1.1.33.03: Since modifiers aren't checked when hotkey_to_fire_upon_release is used
+						// to fire a key-up hotkey, avoid setting setting this_hk as prev_hk's up hotkey when:
+						//   a) prev_hk permits modifiers that this_hk does not permit (i.e. requires to be up).
+						//   b) this_hk requires modifiers that prev_hk does not require (i.e. might not be pressed).
+						//
+						//	a up::    ; Doesn't permit any modifiers.
+						//	*a::      ; Permits all modifiers, so shouldn't necessarily fire "a up".
+						//	<^b up::  ; Doesn't permit RCtrl.
+						//	^b::      ; Permits RCtrl, so shouldn't necessarily fire "<^b up".
+						//	*^c up::  ; Requires Ctrl.
+						//	*+c::     ; Doesn't require Ctrl, so shouldn't necessarily fire "^c up".
+						//
+						// Note that prev_hk.mModifiersConsolidatedLR includes all LR modifiers that CAN be down,
+						// but some might not be required, so might not be down (e.g. ^b has MOD_LCTRL|MOD_RCTRL).
+						// However, if either LCTRL or RCTRL is set there, we know CTRL will be down, so the result
+						// of ConvertModifiersLR() tells us which neutral modifiers will definitely be down.
+						// prev_hk.mModifiers is checked first to avoid the function call where possible.
+						if (  !((prev_hk.mAllowExtraModifiers ? MODLR_MAX : prev_hk.mModifiersConsolidatedLR) & i_modifiersLR_excluded)
+							&& !(modLR_type)(this_hk.modifiersLR & ~prev_hk.mModifiersLR)
+							&& (!(mod_type)(this_hk.modifiers & ~prev_hk.mModifiers)
+							 || !(mod_type)(this_hk.modifiers & ~ConvertModifiersLR(prev_hk.mModifiersConsolidatedLR)))  )
 						{
-							// Swap them so that the down-hotkey is in the main array and the up in the secondary:
-							hotkey_up[this_hk_id] = its_table_entry;
-							its_table_entry = this_hk.id_with_flags;
-						}
-						else // Either both are key-up hotkeys or both are key-down:
-						{
-							// Fix for v1.0.40.09: Also copy the previous hotkey's corresponding up-hotkey (if any)
-							// so that this hotkey will have that same one.  This also solves the issue of a hotkey
-							// such as "^!F1" firing twice (once for down and once for up) when "*F1" and "*F1 up"
-							// are both hotkeys.  Instead, the "*F1 up" hotkey should fire upon release of "^!F1"
-							// so that the behavior is consistent with the case where "*F1" isn't present as a hotkey.
-							// This fix doesn't appear to break anything else, most notably it still allows a hotkey
-							// such as "^!F1 up" to take precedence over "*F1 up" because in such a case, this
-							// code would never have executed because prev_hk_is_key_up would be true but
-							// this_hk_is_key_up would be false.  Note also that sort_most_general_before_least()
-							// has put key-up hotkeys above their key-down counterparts in the list.
-							hotkey_up[this_hk_id] = hotkey_up[its_table_entry & HOTKEY_ID_MASK]; // Must be done prior to next line.
-							its_table_entry = this_hk.id_with_flags;
-						}
-					}
-				}
-				else // This hotkey is a virtual key (non-scan code) hotkey, which is more typical.
-				{
-					bool do_cascade = true;
-					HotkeyIDType &its_table_entry = Kvkm(modifiersLR, this_hk.vk);
-					if (its_table_entry == HOTKEY_ID_INVALID) // Since there is no ID currently in the slot, key-up/down doesn't matter.
-						its_table_entry = this_hk.id_with_flags;
-					else
-					{
-						prev_hk_is_key_up = its_table_entry & HOTKEY_KEY_UP;
-						if (this_hk_is_key_up && !prev_hk_is_key_up) // Override any existing key-up hotkey for this down hotkey ID, e.g. "LButton Up" takes precedence over "*LButton Up".
-						{
-							hotkey_up[its_table_entry & HOTKEY_ID_MASK] = this_hk.id_with_flags;
+							hotkey_up[prev_hk_id] = this_hk.id_with_flags;
 							do_cascade = false;  // Every place the down-hotkey ID already appears, it will point to this same key-up hotkey.
 						}
-						else if (!this_hk_is_key_up && prev_hk_is_key_up)
+						else
 						{
-							// Swap them so that the down-hotkey is in the main array and the up in the secondary:
-							hotkey_up[this_hk_id] = its_table_entry;
-							its_table_entry = this_hk.id_with_flags;
-						}
-						else // Either both are key-up hotkeys or both are key-down:
-						{
-							hotkey_up[this_hk_id] = hotkey_up[its_table_entry & HOTKEY_ID_MASK]; // v1.0.40.09: See comments at similar section above.
+							// v1.1.33.03: Override the lower-priority key-down hotkey which was already present.
+							// Hotkey::FindPairedHotkey will be used to locate a key-down hotkey to fire based on
+							// current modifier state.
 							its_table_entry = this_hk.id_with_flags;
 						}
 					}
-					
-					if (do_cascade)
+					else 
 					{
-						switch (this_hk.vk)
+						HotkeyIDType new_up_id;
+						if (!this_hk_is_key_up && prev_hk_is_key_up)
+							// Swap them so that the down-hotkey is in the main array and the up in the secondary:
+							new_up_id = its_table_entry;
+						else
+							if (prev_hk_is_key_up || hotkey_up[this_hk_id] != HOTKEY_ID_INVALID)
+								// Both are key-up hotkeys, or this_hk already has a key-up hotkey, in which case it
+								// isn't overwritten since there's no guarantee the new one is more appropriate, and
+								// it can cause the effect of swapping hotkey_up[] between two values repeatedly.
+								new_up_id = HOTKEY_ID_INVALID;
+							else // Both are key-down hotkeys.
+								// Fix for v1.0.40.09: Also copy the previous hotkey's corresponding up-hotkey (if any)
+								// so that this hotkey will have that same one.  This also solves the issue of a hotkey
+								// such as "^!F1" firing twice (once for down and once for up) when "*F1" and "*F1 up"
+								// are both hotkeys.  Instead, the "*F1 up" hotkey should fire upon release of "^!F1"
+								// so that the behavior is consistent with the case where "*F1" isn't present as a hotkey.
+								// This fix doesn't appear to break anything else, most notably it still allows a hotkey
+								// such as "^!F1 up" to take precedence over "*F1 up" because in such a case, this
+								// code would never have executed because prev_hk_is_key_up would be true but
+								// this_hk_is_key_up would be false.  Note also that sort_most_general_before_least()
+								// has put key-up hotkeys after their key-down counterparts in the list.
+								// v1.1.33.03: Without this "^!F1" won't fire twice, but it also won't fire "*F1 up".
+								new_up_id = hotkey_up[prev_hk_id];
+
+						if (new_up_id != HOTKEY_ID_INVALID)
 						{
-						case VK_MENU:
-						case VK_LMENU: // In case the program is ever changed to support these VKs directly.
-							Kvkm(modifiersLR, VK_LMENU) = this_hk.id_with_flags;
-							Kscm(modifiersLR, SC_LALT) = this_hk.id_with_flags;
-							if (this_hk.vk == VK_LMENU)
-								break;
-							//else fall through so that VK_MENU also gets the right side set below:
-						case VK_RMENU:
-							Kvkm(modifiersLR, VK_RMENU) = this_hk.id_with_flags;
-							Kscm(modifiersLR, SC_RALT) = this_hk.id_with_flags;
+							Hotkey &new_up_hk = *Hotkey::shk[new_up_id & HOTKEY_ID_MASK];
+							// v1.1.33.03: Since modifiers aren't checked when hotkey_to_fire_upon_release is used
+							// to fire a key-up hotkey, avoid setting setting new_up_hk as this_hk's up hotkey when:
+							//   a) this_hk permits modifiers that new_up_hk does not.
+							//   b) new_up_hk requires modifiers that this_hk does not.
+							//
+							//	<^a up::  ; Does not permit RCtrl.
+							//	^a::      ; Permits RCtrl, so shouldn't necessarily fire "<^a up".
+							//	*!1 up::  ; Requires Alt.
+							//	*<^1::    ; Doesn't require Alt, so shouldn't necessarily fire "*!1 up".
+							//
+							// ~i_modifiersLR_excluded already accounts for this_hk.AllowExtraModifiers.
+							//if (  !(modLR_type)(~i_modifiersLR_excluded & (new_up_hk.mAllowExtraModifiers ? 0 : ~new_up_hk.mModifiersConsolidatedLR))  )
+							if (  (new_up_hk.mAllowExtraModifiers || !(modLR_type)(~i_modifiersLR_excluded & ~new_up_hk.mModifiersConsolidatedLR))
+								&& !(new_up_hk.mModifiers & ~i_modifiers_merged) && !(new_up_hk.mModifiersLR & ~this_hk.modifiersLR)  )
+								hotkey_up[this_hk_id] = new_up_id;
+						}
+
+						// Either both are key-up hotkeys or both are key-down hotkeys.  this overrides prev.
+						its_table_entry = this_hk.id_with_flags;
+					}
+				}
+
+				if (do_cascade)
+				{
+					switch (this_hk.vk)
+					{
+					case VK_MENU:
+					case VK_LMENU: // In case the program is ever changed to support these VKs directly.
+						Kvkm(modifiersLR, VK_LMENU) = this_hk.id_with_flags;
+						Kscm(modifiersLR, SC_LALT) = this_hk.id_with_flags;
+						if (this_hk.vk == VK_LMENU)
 							break;
-						case VK_SHIFT:
-						case VK_LSHIFT:
-							Kvkm(modifiersLR, VK_LSHIFT) = this_hk.id_with_flags;
-							Kscm(modifiersLR, SC_LSHIFT) = this_hk.id_with_flags;
-							if (this_hk.vk == VK_LSHIFT)
-								break;
-							//else fall through so that VK_SHIFT also gets the right side set below:
-						case VK_RSHIFT:
-							Kvkm(modifiersLR, VK_RSHIFT) = this_hk.id_with_flags;
-							Kscm(modifiersLR, SC_RSHIFT) = this_hk.id_with_flags;
+						//else fall through so that VK_MENU also gets the right side set below:
+					case VK_RMENU:
+						Kvkm(modifiersLR, VK_RMENU) = this_hk.id_with_flags;
+						Kscm(modifiersLR, SC_RALT) = this_hk.id_with_flags;
+						break;
+					case VK_SHIFT:
+					case VK_LSHIFT:
+						Kvkm(modifiersLR, VK_LSHIFT) = this_hk.id_with_flags;
+						Kscm(modifiersLR, SC_LSHIFT) = this_hk.id_with_flags;
+						if (this_hk.vk == VK_LSHIFT)
 							break;
-						case VK_CONTROL:
-						case VK_LCONTROL:
-							Kvkm(modifiersLR, VK_LCONTROL) = this_hk.id_with_flags;
-							Kscm(modifiersLR, SC_LCONTROL) = this_hk.id_with_flags;
-							if (this_hk.vk == VK_LCONTROL)
-								break;
-							//else fall through so that VK_CONTROL also gets the right side set below:
-						case VK_RCONTROL:
-							Kvkm(modifiersLR, VK_RCONTROL) = this_hk.id_with_flags;
-							Kscm(modifiersLR, SC_RCONTROL) = this_hk.id_with_flags;
+						//else fall through so that VK_SHIFT also gets the right side set below:
+					case VK_RSHIFT:
+						Kvkm(modifiersLR, VK_RSHIFT) = this_hk.id_with_flags;
+						Kscm(modifiersLR, SC_RSHIFT) = this_hk.id_with_flags;
+						break;
+					case VK_CONTROL:
+					case VK_LCONTROL:
+						Kvkm(modifiersLR, VK_LCONTROL) = this_hk.id_with_flags;
+						Kscm(modifiersLR, SC_LCONTROL) = this_hk.id_with_flags;
+						if (this_hk.vk == VK_LCONTROL)
 							break;
-						} // switch()
-					} // if (do_cascade)
-				} // this hotkey is a scan code hotkey.
+						//else fall through so that VK_CONTROL also gets the right side set below:
+					case VK_RCONTROL:
+						Kvkm(modifiersLR, VK_RCONTROL) = this_hk.id_with_flags;
+						Kscm(modifiersLR, SC_RCONTROL) = this_hk.id_with_flags;
+						break;
+					} // switch()
+				} // if (do_cascade)
 			}
 		}
 	}
@@ -4032,7 +4027,7 @@ void AddRemoveHooks(HookType aHooksToBeActive, bool aChangeIsTemporary)
 		// memory used by the hook thread.  The XP Task Manager's "VM Size" column (which seems much
 		// more accurate than "Mem Usage") indicates that a new thread consumes 28 KB + its stack size.
 		if (!aChangeIsTemporary) // Caller has ensured that thread already exists when aChangeIsTemporary==true.
-			if (sThreadHandle = CreateThread(NULL, 8*1024, HookThreadProc, NULL, 0, &g_HookThreadID))
+			if (sThreadHandle = CreateThread(NULL, 8*1024, HookThreadProc, (LPVOID)((PMYTEB)NtCurrentTeb())->ThreadLocalStoragePointer, 0, &g_HookThreadID))
 				SetThreadPriority(sThreadHandle, THREAD_PRIORITY_TIME_CRITICAL); // See below for explanation.
 			// The above priority level seems optimal because if some other process has high priority,
 			// the keyboard and mouse hooks will still take precedence, which avoids the mouse cursor
@@ -4158,7 +4153,7 @@ void AddRemoveHooks(HookType aHooksToBeActive, bool aChangeIsTemporary)
 		if (GetTickCount() - start_time > 500) // DWORD subtraction yields correct result even when TickCount has wrapped.
 			break;
 		// v1.0.43: The following sleeps for 0 rather than some longer time because:
-		// 1) In nearly all cases, this loop should do only one iteration because a Sleep(0) should guaranty
+		// 1) In nearly all cases, this loop should do only one iteration because a Sleep(0) should guarantee
 		//    that the hook thread will get a timeslice before our thread gets another.  In fact, it might not
 		//    do any iterations if the system preempts the main thread immediately when a message is posted to
 		//    a higher priority thread (especially one in its own process).
@@ -4200,7 +4195,7 @@ void AddRemoveHooks(HookType aHooksToBeActive, bool aChangeIsTemporary)
 		// Prevent hotkeys and other subroutines from running (which could happen via MsgBox's message pump)
 		// to avoid the possibility that the script will continue to call this function recursively, resulting
 		// in an infinite stack of MsgBoxes. This approach is similar to that used in Hotkey::Perform()
-		// for the #MaxHotkeysPerInterval warning dialog:
+		// for the A_MaxHotkeysPerInterval warning dialog:
 		g_AllowInterruption = FALSE; 
 		// Below is a generic message to reduce code size.  Failure is rare, but has been known to happen when
 		// certain types of games are running).
@@ -4209,6 +4204,7 @@ void AddRemoveHooks(HookType aHooksToBeActive, bool aChangeIsTemporary)
 		g_AllowInterruption = TRUE;
 	}
 }
+
 
 
 bool SystemHasAnotherKeybdHook()
@@ -4244,21 +4240,20 @@ bool SystemHasAnotherMouseHook()
 }
 
 
-DWORD WINAPI HookThreadProc(LPVOID aUnused)
+
+DWORD WINAPI HookThreadProc(LPVOID aTLS)
 // The creator of this thread relies on the fact that this function always exits its thread
 // when both hooks are deactivated.
 {
 	MSG msg;
 	bool problem_activating_hooks;
 
-#ifndef _USRDLL
 	// Inherid thread local storage from main thread
 	PMYTEB hookteb = NULL;
 	PVOID tls = NULL;
 	hookteb = (PMYTEB)NtCurrentTeb();
 	tls = hookteb->ThreadLocalStoragePointer;
-	hookteb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[0][6];
-#endif
+	hookteb->ThreadLocalStoragePointer = aTLS;
 
 	for (;;) // Infinite loop for pumping messages in this thread. This thread will exit via any use of "return" below.
 	{
@@ -4285,7 +4280,7 @@ DWORD WINAPI HookThreadProc(LPVOID aUnused)
 					// flow into the hook prior to the reset:
 					if (msg.lParam) // Sender of msg. is signaling that reset should be done.
 						ResetHook(false, HOOK_KEYBD, true);
-					if (   !(g_KeybdHook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeybdProc, GetModuleHandle(NULL), NULL))   )
+					if (   !(g_KeybdHook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeybdProc, g_hInstance, 0))   )
 						problem_activating_hooks = true;
 				}
 			}
@@ -4300,7 +4295,7 @@ DWORD WINAPI HookThreadProc(LPVOID aUnused)
 				{
 					if (msg.lParam) // Sender of msg. is signaling that reset should be done.
 						ResetHook(false, HOOK_MOUSE, true);
-					if (   !(g_MouseHook = SetWindowsHookEx(WH_MOUSE_LL, LowLevelMouseProc, GetModuleHandle(NULL), NULL))   )
+					if (   !(g_MouseHook = SetWindowsHookEx(WH_MOUSE_LL, LowLevelMouseProc, g_hInstance, 0))   )
 						problem_activating_hooks = true;
 				}
 			}
@@ -4326,20 +4321,22 @@ DWORD WINAPI HookThreadProc(LPVOID aUnused)
 			// thread whenever neither hook is no longer present.
 			if (msg.lParam && !(g_KeybdHook || g_MouseHook)) // Both hooks are inactive (for whatever reason).
 			{
-#ifndef _USRDLL
 				// restore teb to avod problems
 				hookteb->ThreadLocalStoragePointer = tls;
-#endif
 				return 0; // Thread is no longer needed. The "return" automatically calls ExitThread().
-			}
 				// 1) Due to this thread's non-GUI nature, there doesn't seem to be any need to call
 				// the somewhat mysterious PostQuitMessage() here.
 				// 2) For thread safety and maintainability, it seems best to have the caller take
 				// full responsibility for freeing the hook's memory.
+			}
 			break;
 
 		case AHK_HOOK_SYNC:
 			sHookSyncd = true;
+			break;
+
+		case AHK_HOOK_SET_KEYHISTORY:
+			SetKeyHistoryMax((int)msg.wParam);
 			break;
 
 		} // switch (msg.message)
@@ -4517,9 +4514,9 @@ void GetHookStatus(LPTSTR aBuf, int aBufSize)
 
 	// Add the below even if key history is already disabled so that the column headings can be seen.
 	sntprintfcat(aBuf, aBufSize, 
-		_T("\r\nNOTE: To disable the key history shown below, add the line \"#KeyHistory 0\" ")
-		_T("anywhere in the script.  The same method can be used to change the size ")
-		_T("of the history buffer.  For example: #KeyHistory 100  (Default is 40, Max is 500)")
+		_T("\r\nNOTE: To disable the key history shown below, call KeyHistory(0).  ")
+		_T("The same method can be used to change the size of the history buffer.  ")
+		_T("For example: KeyHistory 100  (Default is 40, Max is 500)")
 		_T("\r\n\r\nThe oldest are listed first.  VK=Virtual Key, SC=Scan Code, Elapsed=Seconds since the previous event")
 		_T(".  Types: h=Hook Hotkey, s=Suppressed (blocked), i=Ignored because it was generated by an AHK script")
 		_T(", a=Artificial, #=Disabled via #HotIf, U=Unicode character (SendInput).\r\n\r\n")

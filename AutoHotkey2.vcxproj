@@ -1,0 +1,1178 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="DebugDll|Win32">
+      <Configuration>DebugDll</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="DebugDll|x64">
+      <Configuration>DebugDll</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="MT_ReleaseDll|Win32">
+      <Configuration>MT_ReleaseDll</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="MT_ReleaseDll|x64">
+      <Configuration>MT_ReleaseDll</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="MT_Release|Win32">
+      <Configuration>MT_Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="MT_Release|x64">
+      <Configuration>MT_Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="ReleaseDll|Win32">
+      <Configuration>ReleaseDll</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="ReleaseDll|x64">
+      <Configuration>ReleaseDll</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>16.0</VCProjectVersion>
+    <ProjectGuid>{21FAE707-EFF9-462C-8B5E-87EE2C6342FF}</ProjectGuid>
+    <Keyword>AtlProj</Keyword>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v142</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v142</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v142</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v142</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='MT_Release|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v142</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDll|Win32'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v142</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v142</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v142</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v142</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v142</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='MT_Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v142</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDll|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v142</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='MT_Release|Win32'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDll|Win32'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='MT_Release|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDll|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <IgnoreImportLibrary>false</IgnoreImportLibrary>
+    <LinkIncremental>true</LinkIncremental>
+    <IntDir>temp\$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>AutoHotkey</TargetName>
+    <OutDir>Debug\$(Platform)\</OutDir>
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">
+    <IgnoreImportLibrary>false</IgnoreImportLibrary>
+    <LinkIncremental>true</LinkIncremental>
+    <IntDir>temp\$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>AutoHotkey</TargetName>
+    <OutDir>DebugDll\$(Platform)\</OutDir>
+    <GenerateManifest>false</GenerateManifest>
+    <TargetExt>.dll</TargetExt>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <IgnoreImportLibrary>false</IgnoreImportLibrary>
+    <LinkIncremental>true</LinkIncremental>
+    <IntDir>temp\$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>AutoHotkey</TargetName>
+    <OutDir>Debug\$(Platform)\</OutDir>
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">
+    <IgnoreImportLibrary>false</IgnoreImportLibrary>
+    <LinkIncremental>true</LinkIncremental>
+    <IntDir>temp\$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>AutoHotkey</TargetName>
+    <OutDir>DebugDll\$(Platform)\</OutDir>
+    <GenerateManifest>false</GenerateManifest>
+    <TargetExt>.dll</TargetExt>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <IgnoreImportLibrary>false</IgnoreImportLibrary>
+    <LinkIncremental>false</LinkIncremental>
+    <IntDir>temp\$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>AutoHotkey</TargetName>
+    <OutDir>bin\$(Platform)w\</OutDir>
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">
+    <IgnoreImportLibrary>false</IgnoreImportLibrary>
+    <LinkIncremental>false</LinkIncremental>
+    <IntDir>temp\$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>AutoHotkeyDLL</TargetName>
+    <OutDir>bin\$(Platform)w\</OutDir>
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='MT_Release|Win32'">
+    <IgnoreImportLibrary>false</IgnoreImportLibrary>
+    <LinkIncremental>false</LinkIncremental>
+    <IntDir>temp\$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>AutoHotkey</TargetName>
+    <OutDir>bin\$(Platform)w_MT\</OutDir>
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDll|Win32'">
+    <IgnoreImportLibrary>false</IgnoreImportLibrary>
+    <LinkIncremental>false</LinkIncremental>
+    <IntDir>temp\$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>AutoHotkeyDll</TargetName>
+    <OutDir>bin\$(Platform)w_MT\</OutDir>
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <IgnoreImportLibrary>false</IgnoreImportLibrary>
+    <LinkIncremental>false</LinkIncremental>
+    <IntDir>temp\$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>AutoHotkey</TargetName>
+    <OutDir>bin\$(Platform)w\</OutDir>
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">
+    <IgnoreImportLibrary>false</IgnoreImportLibrary>
+    <LinkIncremental>false</LinkIncremental>
+    <IntDir>temp\$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>AutoHotkeyDLL</TargetName>
+    <OutDir>bin\$(Platform)w\</OutDir>
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='MT_Release|x64'">
+    <IgnoreImportLibrary>false</IgnoreImportLibrary>
+    <LinkIncremental>false</LinkIncremental>
+    <IntDir>temp\$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>AutoHotkey</TargetName>
+    <OutDir>bin\$(Platform)w_MT\</OutDir>
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDll|x64'">
+    <IgnoreImportLibrary>false</IgnoreImportLibrary>
+    <LinkIncremental>false</LinkIncremental>
+    <IntDir>temp\$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>AutoHotkeyDll</TargetName>
+    <OutDir>bin\$(Platform)w_MT\</OutDir>
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>WIN32;_WINDOWS;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <SDLCheck>
+      </SDLCheck>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <StringPooling>true</StringPooling>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
+      <AdditionalOptions>/Zc:threadSafeInit- %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Midl>
+      <MkTypLibCompatible>false</MkTypLibCompatible>
+      <TargetEnvironment>Win32</TargetEnvironment>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <HeaderFileName>AutoHotkey2_i.h</HeaderFileName>
+      <InterfaceIdentifierFileName>AutoHotkey2_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>AutoHotkey2_p.c</ProxyFileName>
+      <GenerateStublessProxies>true</GenerateStublessProxies>
+      <TypeLibraryName>$(IntDir)AutoHotkey2.tlb</TypeLibraryName>
+      <DllDataFileName />
+      <ValidateAllParameters>true</ValidateAllParameters>
+    </Midl>
+    <ResourceCompile>
+      <Culture>0x0409</Culture>
+      <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <RegisterOutput>false</RegisterOutput>
+      <PerUserRedirection>false</PerUserRedirection>
+      <DataExecutionPrevention>false</DataExecutionPrevention>
+      <ImageHasSafeExceptionHandlers>true</ImageHasSafeExceptionHandlers>
+      <StackReserveSize>4194304</StackReserveSize>
+      <TerminalServerAware>false</TerminalServerAware>
+      <AdditionalDependencies>wsock32.lib;winmm.lib;version.lib;comctl32.lib;odbc32.lib;odbccp32.lib;shlwapi.lib;crypt32.lib;psapi.lib;wininet.lib;uxtheme.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <RandomizedBaseAddress>false</RandomizedBaseAddress>
+      <AdditionalOptions>/SAFESEH:NO %(AdditionalOptions) </AdditionalOptions>
+    </Link>
+    <Manifest>
+      <AdditionalManifestFiles>source\resources\AutoHotkey.exe.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles>
+    </Manifest>
+    <CustomBuild>
+      <Command>$(Masm) /Cx /Fo"$(SolutionDir)temp\$(Platform)\%(Filename).obj" /c "%(FullPath)"</Command>
+      <Outputs>$(SolutionDir)temp\$(Platform)\%(Filename).obj</Outputs>
+    </CustomBuild>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>_USRDLL;WIN32;_WINDOWS;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <SDLCheck>
+      </SDLCheck>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <StringPooling>true</StringPooling>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
+      <AdditionalOptions>/Zc:threadSafeInit- %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Midl>
+      <MkTypLibCompatible>false</MkTypLibCompatible>
+      <TargetEnvironment>Win32</TargetEnvironment>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <HeaderFileName>AutoHotkey2_i.h</HeaderFileName>
+      <InterfaceIdentifierFileName>AutoHotkey2_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>AutoHotkey2_p.c</ProxyFileName>
+      <GenerateStublessProxies>true</GenerateStublessProxies>
+      <TypeLibraryName>$(IntDir)AutoHotkey2.tlb</TypeLibraryName>
+      <DllDataFileName>
+      </DllDataFileName>
+      <ValidateAllParameters>true</ValidateAllParameters>
+    </Midl>
+    <ResourceCompile>
+      <Culture>0x0409</Culture>
+      <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <RegisterOutput>false</RegisterOutput>
+      <PerUserRedirection>false</PerUserRedirection>
+      <DataExecutionPrevention>false</DataExecutionPrevention>
+      <ImageHasSafeExceptionHandlers>true</ImageHasSafeExceptionHandlers>
+      <StackReserveSize>4194304</StackReserveSize>
+      <TerminalServerAware>false</TerminalServerAware>
+      <AdditionalDependencies>wsock32.lib;winmm.lib;version.lib;comctl32.lib;odbc32.lib;odbccp32.lib;shlwapi.lib;crypt32.lib;psapi.lib;wininet.lib;uxtheme.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <RandomizedBaseAddress>false</RandomizedBaseAddress>
+      <AdditionalOptions>/SAFESEH:NO %(AdditionalOptions) </AdditionalOptions>
+    </Link>
+    <Manifest>
+      <AdditionalManifestFiles>source\resources\AutoHotkey.exe.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles>
+    </Manifest>
+    <CustomBuild>
+      <Command>$(Masm) /Cx /Fo"$(SolutionDir)temp\$(Platform)\%(Filename).obj" /c "%(FullPath)"</Command>
+      <Outputs>$(SolutionDir)temp\$(Platform)\%(Filename).obj</Outputs>
+    </CustomBuild>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>WIN32;_WIN64;_WINDOWS;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <SDLCheck>
+      </SDLCheck>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <StringPooling>true</StringPooling>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
+      <AdditionalOptions>/Zc:threadSafeInit- %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Midl>
+      <MkTypLibCompatible>false</MkTypLibCompatible>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <HeaderFileName>AutoHotkey2_i.h</HeaderFileName>
+      <InterfaceIdentifierFileName>AutoHotkey2_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>AutoHotkey2_p.c</ProxyFileName>
+      <GenerateStublessProxies>true</GenerateStublessProxies>
+      <TypeLibraryName>$(IntDir)AutoHotkey2.tlb</TypeLibraryName>
+      <DllDataFileName />
+      <ValidateAllParameters>true</ValidateAllParameters>
+    </Midl>
+    <ResourceCompile>
+      <Culture>0x0409</Culture>
+      <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_WIN64;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <RegisterOutput>false</RegisterOutput>
+      <PerUserRedirection>false</PerUserRedirection>
+      <DataExecutionPrevention>false</DataExecutionPrevention>
+      <ImageHasSafeExceptionHandlers>true</ImageHasSafeExceptionHandlers>
+      <StackReserveSize>4194304</StackReserveSize>
+      <TerminalServerAware>false</TerminalServerAware>
+      <AdditionalDependencies>wsock32.lib;winmm.lib;version.lib;comctl32.lib;odbc32.lib;odbccp32.lib;shlwapi.lib;crypt32.lib;psapi.lib;wininet.lib;uxtheme.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <RandomizedBaseAddress>false</RandomizedBaseAddress>
+      <AdditionalOptions>/SAFESEH:NO %(AdditionalOptions) </AdditionalOptions>
+    </Link>
+    <Manifest>
+      <AdditionalManifestFiles>source\resources\AutoHotkey.exe.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles>
+    </Manifest>
+    <CustomBuild>
+      <Command>$(Masm) /Cx /Fo"$(SolutionDir)temp\$(Platform)\%(Filename).obj" /c "%(FullPath)"</Command>
+    </CustomBuild>
+    <CustomBuild>
+      <Outputs>$(SolutionDir)temp\$(Platform)\%(Filename).obj</Outputs>
+    </CustomBuild>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>_USRDLL;WIN32;_WIN64;_WINDOWS;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <SDLCheck>
+      </SDLCheck>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <StringPooling>true</StringPooling>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
+      <AdditionalOptions>/Zc:threadSafeInit- %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Midl>
+      <MkTypLibCompatible>false</MkTypLibCompatible>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <HeaderFileName>AutoHotkey2_i.h</HeaderFileName>
+      <InterfaceIdentifierFileName>AutoHotkey2_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>AutoHotkey2_p.c</ProxyFileName>
+      <GenerateStublessProxies>true</GenerateStublessProxies>
+      <TypeLibraryName>$(IntDir)AutoHotkey2.tlb</TypeLibraryName>
+      <DllDataFileName>
+      </DllDataFileName>
+      <ValidateAllParameters>true</ValidateAllParameters>
+    </Midl>
+    <ResourceCompile>
+      <Culture>0x0409</Culture>
+      <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_WIN64;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <RegisterOutput>false</RegisterOutput>
+      <PerUserRedirection>false</PerUserRedirection>
+      <DataExecutionPrevention>false</DataExecutionPrevention>
+      <ImageHasSafeExceptionHandlers>true</ImageHasSafeExceptionHandlers>
+      <StackReserveSize>4194304</StackReserveSize>
+      <TerminalServerAware>false</TerminalServerAware>
+      <AdditionalDependencies>wsock32.lib;winmm.lib;version.lib;comctl32.lib;odbc32.lib;odbccp32.lib;shlwapi.lib;crypt32.lib;psapi.lib;wininet.lib;uxtheme.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <RandomizedBaseAddress>false</RandomizedBaseAddress>
+      <AdditionalOptions>/SAFESEH:NO %(AdditionalOptions) </AdditionalOptions>
+    </Link>
+    <Manifest>
+      <AdditionalManifestFiles>source\resources\AutoHotkey.exe.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles>
+    </Manifest>
+    <CustomBuild>
+      <Command>$(Masm) /Cx /Fo"$(SolutionDir)temp\$(Platform)\%(Filename).obj" /c "%(FullPath)"</Command>
+    </CustomBuild>
+    <CustomBuild>
+      <Outputs>$(SolutionDir)temp\$(Platform)\%(Filename).obj</Outputs>
+    </CustomBuild>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <PreprocessorDefinitions>WIN32;_WINDOWS;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <SDLCheck>
+      </SDLCheck>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <StringPooling>true</StringPooling>
+      <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
+      <OmitFramePointers>true</OmitFramePointers>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <AdditionalOptions>/Zc:threadSafeInit- %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Midl>
+      <MkTypLibCompatible>false</MkTypLibCompatible>
+      <TargetEnvironment>Win32</TargetEnvironment>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <HeaderFileName>AutoHotkey2_i.h</HeaderFileName>
+      <InterfaceIdentifierFileName>AutoHotkey2_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>AutoHotkey2_p.c</ProxyFileName>
+      <GenerateStublessProxies>true</GenerateStublessProxies>
+      <TypeLibraryName>$(IntDir)AutoHotkey2.tlb</TypeLibraryName>
+      <DllDataFileName />
+      <ValidateAllParameters>true</ValidateAllParameters>
+    </Midl>
+    <ResourceCompile>
+      <Culture>0x0409</Culture>
+      <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <RegisterOutput>false</RegisterOutput>
+      <PerUserRedirection>false</PerUserRedirection>
+      <DataExecutionPrevention>false</DataExecutionPrevention>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <StackReserveSize>4194304</StackReserveSize>
+      <TerminalServerAware>false</TerminalServerAware>
+      <AdditionalDependencies>wsock32.lib;winmm.lib;version.lib;comctl32.lib;odbc32.lib;odbccp32.lib;shlwapi.lib;crypt32.lib;psapi.lib;wininet.lib;uxtheme.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <RandomizedBaseAddress>false</RandomizedBaseAddress>
+      <AdditionalOptions>/SAFESEH:NO %(AdditionalOptions) </AdditionalOptions>
+    </Link>
+    <Manifest>
+      <AdditionalManifestFiles>source\resources\AutoHotkey.exe.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles>
+    </Manifest>
+    <CustomBuild>
+      <Command>$(Masm) /Cx /Fo"$(SolutionDir)temp\$(Platform)\%(Filename).obj" /c "%(FullPath)"</Command>
+      <Outputs>$(SolutionDir)temp\$(Platform)\%(Filename).obj</Outputs>
+    </CustomBuild>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <PreprocessorDefinitions>_USRDLL;WIN32;_WINDOWS;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <SDLCheck>
+      </SDLCheck>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <StringPooling>true</StringPooling>
+      <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
+      <OmitFramePointers>true</OmitFramePointers>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <AdditionalOptions>/Zc:threadSafeInit- %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Midl>
+      <MkTypLibCompatible>false</MkTypLibCompatible>
+      <TargetEnvironment>Win32</TargetEnvironment>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <HeaderFileName>AutoHotkey2_i.h</HeaderFileName>
+      <InterfaceIdentifierFileName>AutoHotkey2_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>AutoHotkey2_p.c</ProxyFileName>
+      <GenerateStublessProxies>true</GenerateStublessProxies>
+      <TypeLibraryName>$(IntDir)AutoHotkey2.tlb</TypeLibraryName>
+      <DllDataFileName>
+      </DllDataFileName>
+      <ValidateAllParameters>true</ValidateAllParameters>
+    </Midl>
+    <ResourceCompile>
+      <Culture>0x0409</Culture>
+      <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_USRDLL;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <RegisterOutput>false</RegisterOutput>
+      <PerUserRedirection>false</PerUserRedirection>
+      <DataExecutionPrevention>false</DataExecutionPrevention>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <StackReserveSize>4194304</StackReserveSize>
+      <TerminalServerAware>false</TerminalServerAware>
+      <AdditionalDependencies>wsock32.lib;winmm.lib;version.lib;comctl32.lib;odbc32.lib;odbccp32.lib;shlwapi.lib;crypt32.lib;psapi.lib;wininet.lib;uxtheme.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <RandomizedBaseAddress>false</RandomizedBaseAddress>
+      <AdditionalOptions>/SAFESEH:NO %(AdditionalOptions) </AdditionalOptions>
+    </Link>
+    <Manifest>
+      <AdditionalManifestFiles>source\resources\AutoHotkey.exe.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles>
+    </Manifest>
+    <CustomBuild>
+      <Command>$(Masm) /Cx /Fo"$(SolutionDir)temp\$(Platform)\%(Filename).obj" /c "%(FullPath)"</Command>
+      <Outputs>$(SolutionDir)temp\$(Platform)\%(Filename).obj</Outputs>
+    </CustomBuild>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='MT_Release|Win32'">
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <PreprocessorDefinitions>WIN32;_WINDOWS;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <SDLCheck>
+      </SDLCheck>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <StringPooling>true</StringPooling>
+      <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
+      <OmitFramePointers>true</OmitFramePointers>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <AdditionalOptions>/Zc:threadSafeInit- %(AdditionalOptions)</AdditionalOptions>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <Midl>
+      <MkTypLibCompatible>false</MkTypLibCompatible>
+      <TargetEnvironment>Win32</TargetEnvironment>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <HeaderFileName>AutoHotkey2_i.h</HeaderFileName>
+      <InterfaceIdentifierFileName>AutoHotkey2_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>AutoHotkey2_p.c</ProxyFileName>
+      <GenerateStublessProxies>true</GenerateStublessProxies>
+      <TypeLibraryName>$(IntDir)AutoHotkey2.tlb</TypeLibraryName>
+      <DllDataFileName>
+      </DllDataFileName>
+      <ValidateAllParameters>true</ValidateAllParameters>
+    </Midl>
+    <ResourceCompile>
+      <Culture>0x0409</Culture>
+      <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <RegisterOutput>false</RegisterOutput>
+      <PerUserRedirection>false</PerUserRedirection>
+      <DataExecutionPrevention>false</DataExecutionPrevention>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <StackReserveSize>4194304</StackReserveSize>
+      <TerminalServerAware>false</TerminalServerAware>
+      <AdditionalDependencies>wsock32.lib;winmm.lib;version.lib;comctl32.lib;odbc32.lib;odbccp32.lib;shlwapi.lib;crypt32.lib;psapi.lib;wininet.lib;uxtheme.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <RandomizedBaseAddress>false</RandomizedBaseAddress>
+      <AdditionalOptions>/SAFESEH:NO %(AdditionalOptions) </AdditionalOptions>
+    </Link>
+    <Manifest>
+      <AdditionalManifestFiles>source\resources\AutoHotkey.exe.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles>
+    </Manifest>
+    <CustomBuild>
+      <Command>$(Masm) /Cx /Fo"$(SolutionDir)temp\$(Platform)\%(Filename).obj" /c "%(FullPath)"</Command>
+      <Outputs>$(SolutionDir)temp\$(Platform)\%(Filename).obj</Outputs>
+    </CustomBuild>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDll|Win32'">
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <PreprocessorDefinitions>_USRDLL;WIN32;_WINDOWS;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <SDLCheck>
+      </SDLCheck>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <StringPooling>true</StringPooling>
+      <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
+      <OmitFramePointers>true</OmitFramePointers>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <AdditionalOptions>/Zc:threadSafeInit- %(AdditionalOptions)</AdditionalOptions>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <Midl>
+      <MkTypLibCompatible>false</MkTypLibCompatible>
+      <TargetEnvironment>Win32</TargetEnvironment>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <HeaderFileName>AutoHotkey2_i.h</HeaderFileName>
+      <InterfaceIdentifierFileName>AutoHotkey2_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>AutoHotkey2_p.c</ProxyFileName>
+      <GenerateStublessProxies>true</GenerateStublessProxies>
+      <TypeLibraryName>$(IntDir)AutoHotkey2.tlb</TypeLibraryName>
+      <DllDataFileName>
+      </DllDataFileName>
+      <ValidateAllParameters>true</ValidateAllParameters>
+    </Midl>
+    <ResourceCompile>
+      <Culture>0x0409</Culture>
+      <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_USRDLL;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <RegisterOutput>false</RegisterOutput>
+      <PerUserRedirection>false</PerUserRedirection>
+      <DataExecutionPrevention>false</DataExecutionPrevention>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <StackReserveSize>4194304</StackReserveSize>
+      <TerminalServerAware>false</TerminalServerAware>
+      <AdditionalDependencies>wsock32.lib;winmm.lib;version.lib;comctl32.lib;odbc32.lib;odbccp32.lib;shlwapi.lib;crypt32.lib;psapi.lib;wininet.lib;uxtheme.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <RandomizedBaseAddress>false</RandomizedBaseAddress>
+      <AdditionalOptions>/SAFESEH:NO %(AdditionalOptions) </AdditionalOptions>
+    </Link>
+    <Manifest>
+      <AdditionalManifestFiles>source\resources\AutoHotkey.exe.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles>
+    </Manifest>
+    <CustomBuild>
+      <Command>$(Masm) /Cx /Fo"$(SolutionDir)temp\$(Platform)\%(Filename).obj" /c "%(FullPath)"</Command>
+      <Outputs>$(SolutionDir)temp\$(Platform)\%(Filename).obj</Outputs>
+    </CustomBuild>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <PreprocessorDefinitions>WIN32;_WIN64;_WINDOWS;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <SDLCheck>
+      </SDLCheck>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <StringPooling>true</StringPooling>
+      <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
+      <OmitFramePointers>true</OmitFramePointers>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <AdditionalOptions>/Zc:threadSafeInit- %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Midl>
+      <MkTypLibCompatible>false</MkTypLibCompatible>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <HeaderFileName>AutoHotkey2_i.h</HeaderFileName>
+      <InterfaceIdentifierFileName>AutoHotkey2_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>AutoHotkey2_p.c</ProxyFileName>
+      <GenerateStublessProxies>true</GenerateStublessProxies>
+      <TypeLibraryName>$(IntDir)AutoHotkey2.tlb</TypeLibraryName>
+      <DllDataFileName />
+      <ValidateAllParameters>true</ValidateAllParameters>
+    </Midl>
+    <ResourceCompile>
+      <Culture>0x0409</Culture>
+      <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_WIN64;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <RegisterOutput>false</RegisterOutput>
+      <PerUserRedirection>false</PerUserRedirection>
+      <DataExecutionPrevention>false</DataExecutionPrevention>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <ImageHasSafeExceptionHandlers>true</ImageHasSafeExceptionHandlers>
+      <StackReserveSize>4194304</StackReserveSize>
+      <TerminalServerAware>false</TerminalServerAware>
+      <AdditionalDependencies>wsock32.lib;winmm.lib;version.lib;comctl32.lib;odbc32.lib;odbccp32.lib;shlwapi.lib;crypt32.lib;psapi.lib;wininet.lib;uxtheme.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <RandomizedBaseAddress>false</RandomizedBaseAddress>
+      <AdditionalOptions>/SAFESEH:NO %(AdditionalOptions) </AdditionalOptions>
+    </Link>
+    <Manifest>
+      <AdditionalManifestFiles>source\resources\AutoHotkey.exe.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles>
+    </Manifest>
+    <CustomBuild>
+      <Command>$(Masm) /Cx /Fo"$(SolutionDir)temp\$(Platform)\%(Filename).obj" /c "%(FullPath)"</Command>
+    </CustomBuild>
+    <CustomBuild>
+      <Outputs>$(SolutionDir)temp\$(Platform)\%(Filename).obj</Outputs>
+    </CustomBuild>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <PreprocessorDefinitions>_USRDLL;WIN32;_WIN64;_WINDOWS;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <SDLCheck>
+      </SDLCheck>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <StringPooling>true</StringPooling>
+      <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
+      <OmitFramePointers>true</OmitFramePointers>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <AdditionalOptions>/Zc:threadSafeInit- %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Midl>
+      <MkTypLibCompatible>false</MkTypLibCompatible>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <HeaderFileName>AutoHotkey2_i.h</HeaderFileName>
+      <InterfaceIdentifierFileName>AutoHotkey2_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>AutoHotkey2_p.c</ProxyFileName>
+      <GenerateStublessProxies>true</GenerateStublessProxies>
+      <TypeLibraryName>$(IntDir)AutoHotkey2.tlb</TypeLibraryName>
+      <DllDataFileName>
+      </DllDataFileName>
+      <ValidateAllParameters>true</ValidateAllParameters>
+    </Midl>
+    <ResourceCompile>
+      <Culture>0x0409</Culture>
+      <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_USRDLL;_WIN64;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <RegisterOutput>false</RegisterOutput>
+      <PerUserRedirection>false</PerUserRedirection>
+      <DataExecutionPrevention>false</DataExecutionPrevention>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <ImageHasSafeExceptionHandlers>true</ImageHasSafeExceptionHandlers>
+      <StackReserveSize>4194304</StackReserveSize>
+      <TerminalServerAware>false</TerminalServerAware>
+      <AdditionalDependencies>wsock32.lib;winmm.lib;version.lib;comctl32.lib;odbc32.lib;odbccp32.lib;shlwapi.lib;crypt32.lib;psapi.lib;wininet.lib;uxtheme.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <RandomizedBaseAddress>false</RandomizedBaseAddress>
+      <AdditionalOptions>/SAFESEH:NO %(AdditionalOptions) </AdditionalOptions>
+    </Link>
+    <Manifest>
+      <AdditionalManifestFiles>source\resources\AutoHotkey.exe.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles>
+    </Manifest>
+    <CustomBuild>
+      <Command>$(Masm) /Cx /Fo"$(SolutionDir)temp\$(Platform)\%(Filename).obj" /c "%(FullPath)"</Command>
+    </CustomBuild>
+    <CustomBuild>
+      <Outputs>$(SolutionDir)temp\$(Platform)\%(Filename).obj</Outputs>
+    </CustomBuild>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='MT_Release|x64'">
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <PreprocessorDefinitions>WIN32;_WIN64;_WINDOWS;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <SDLCheck>
+      </SDLCheck>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <StringPooling>true</StringPooling>
+      <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
+      <OmitFramePointers>true</OmitFramePointers>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <AdditionalOptions>/Zc:threadSafeInit- %(AdditionalOptions)</AdditionalOptions>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <Midl>
+      <MkTypLibCompatible>false</MkTypLibCompatible>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <HeaderFileName>AutoHotkey2_i.h</HeaderFileName>
+      <InterfaceIdentifierFileName>AutoHotkey2_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>AutoHotkey2_p.c</ProxyFileName>
+      <GenerateStublessProxies>true</GenerateStublessProxies>
+      <TypeLibraryName>$(IntDir)AutoHotkey2.tlb</TypeLibraryName>
+      <DllDataFileName>
+      </DllDataFileName>
+      <ValidateAllParameters>true</ValidateAllParameters>
+    </Midl>
+    <ResourceCompile>
+      <Culture>0x0409</Culture>
+      <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_WIN64;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <RegisterOutput>false</RegisterOutput>
+      <PerUserRedirection>false</PerUserRedirection>
+      <DataExecutionPrevention>false</DataExecutionPrevention>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <ImageHasSafeExceptionHandlers>true</ImageHasSafeExceptionHandlers>
+      <StackReserveSize>4194304</StackReserveSize>
+      <TerminalServerAware>false</TerminalServerAware>
+      <AdditionalDependencies>wsock32.lib;winmm.lib;version.lib;comctl32.lib;odbc32.lib;odbccp32.lib;shlwapi.lib;crypt32.lib;psapi.lib;wininet.lib;uxtheme.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <RandomizedBaseAddress>false</RandomizedBaseAddress>
+      <AdditionalOptions>/SAFESEH:NO %(AdditionalOptions) </AdditionalOptions>
+    </Link>
+    <Manifest>
+      <AdditionalManifestFiles>source\resources\AutoHotkey.exe.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles>
+    </Manifest>
+    <CustomBuild>
+      <Command>$(Masm) /Cx /Fo"$(SolutionDir)temp\$(Platform)\%(Filename).obj" /c "%(FullPath)"</Command>
+    </CustomBuild>
+    <CustomBuild>
+      <Outputs>$(SolutionDir)temp\$(Platform)\%(Filename).obj</Outputs>
+    </CustomBuild>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDll|x64'">
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <PreprocessorDefinitions>_USRDLL;WIN32;_WIN64;_WINDOWS;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <SDLCheck>
+      </SDLCheck>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <StringPooling>true</StringPooling>
+      <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
+      <OmitFramePointers>true</OmitFramePointers>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <AdditionalOptions>/Zc:threadSafeInit- %(AdditionalOptions)</AdditionalOptions>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <Midl>
+      <MkTypLibCompatible>false</MkTypLibCompatible>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <HeaderFileName>AutoHotkey2_i.h</HeaderFileName>
+      <InterfaceIdentifierFileName>AutoHotkey2_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>AutoHotkey2_p.c</ProxyFileName>
+      <GenerateStublessProxies>true</GenerateStublessProxies>
+      <TypeLibraryName>$(IntDir)AutoHotkey2.tlb</TypeLibraryName>
+      <DllDataFileName>
+      </DllDataFileName>
+      <ValidateAllParameters>true</ValidateAllParameters>
+    </Midl>
+    <ResourceCompile>
+      <Culture>0x0409</Culture>
+      <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_USRDLL;_WIN64;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <RegisterOutput>false</RegisterOutput>
+      <PerUserRedirection>false</PerUserRedirection>
+      <DataExecutionPrevention>false</DataExecutionPrevention>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <ImageHasSafeExceptionHandlers>true</ImageHasSafeExceptionHandlers>
+      <StackReserveSize>4194304</StackReserveSize>
+      <TerminalServerAware>false</TerminalServerAware>
+      <AdditionalDependencies>wsock32.lib;winmm.lib;version.lib;comctl32.lib;odbc32.lib;odbccp32.lib;shlwapi.lib;crypt32.lib;psapi.lib;wininet.lib;uxtheme.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <RandomizedBaseAddress>false</RandomizedBaseAddress>
+      <AdditionalOptions>/SAFESEH:NO %(AdditionalOptions) </AdditionalOptions>
+    </Link>
+    <Manifest>
+      <AdditionalManifestFiles>source\resources\AutoHotkey.exe.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles>
+    </Manifest>
+    <CustomBuild>
+      <Command>$(Masm) /Cx /Fo"$(SolutionDir)temp\$(Platform)\%(Filename).obj" /c "%(FullPath)"</Command>
+    </CustomBuild>
+    <CustomBuild>
+      <Outputs>$(SolutionDir)temp\$(Platform)\%(Filename).obj</Outputs>
+    </CustomBuild>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClInclude Include="AutoHotkey2_i.h">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDll|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDll|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">true</ExcludedFromBuild>
+    </ClInclude>
+    <ClInclude Include="source\ahkversion.h" />
+    <ClInclude Include="source\application.h" />
+    <ClInclude Include="source\clipboard.h" />
+    <ClInclude Include="source\COMServer.h" />
+    <ClInclude Include="source\config.h" />
+    <ClInclude Include="source\debug.h" />
+    <ClInclude Include="source\Debugger.h" />
+    <ClInclude Include="source\defines.h" />
+    <ClInclude Include="source\exports.h" />
+    <ClInclude Include="source\framework.h" />
+    <ClInclude Include="source\globaldata.h" />
+    <ClInclude Include="source\hook.h" />
+    <ClInclude Include="source\hotkey.h" />
+    <ClInclude Include="source\input_object.h" />
+    <ClInclude Include="source\keyboard_mouse.h" />
+    <ClInclude Include="source\KuString.h" />
+    <ClInclude Include="source\lib_pcre\pcre\pcre.h" />
+    <ClInclude Include="source\lib_pcre\pcre\pcret.h" />
+    <ClInclude Include="source\LiteZip.h" />
+    <ClInclude Include="source\MemoryModule.h" />
+    <ClInclude Include="source\MinHook.h" />
+    <ClInclude Include="source\ntinternals.h" />
+    <ClInclude Include="source\os_version.h" />
+    <ClInclude Include="source\pch.h" />
+    <ClInclude Include="source\qmath.h" />
+    <ClInclude Include="source\Resource.h" />
+    <ClInclude Include="source\script.h" />
+    <ClInclude Include="source\script_com.h" />
+    <ClInclude Include="source\script_func_impl.h" />
+    <ClInclude Include="source\script_object.h" />
+    <ClInclude Include="source\SimpleHeap.h" />
+    <ClInclude Include="source\StringConv.h" />
+    <ClInclude Include="source\targetver.h" />
+    <ClInclude Include="source\TextIO.h" />
+    <ClInclude Include="source\util.h" />
+    <ClInclude Include="source\var.h" />
+    <ClInclude Include="source\window.h" />
+    <ClInclude Include="source\WinGroup.h" />
+    <ClInclude Include="source\xdlldata.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="AutoHotkey2_i.c">
+      <CompileAsManaged Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">false</CompileAsManaged>
+      <CompileAsManaged Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">false</CompileAsManaged>
+      <CompileAsManaged Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</CompileAsManaged>
+      <CompileAsManaged Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">false</CompileAsManaged>
+      <CompileAsManaged Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</CompileAsManaged>
+      <CompileAsManaged Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</CompileAsManaged>
+      <CompileAsManaged Condition="'$(Configuration)|$(Platform)'=='MT_Release|Win32'">false</CompileAsManaged>
+      <CompileAsManaged Condition="'$(Configuration)|$(Platform)'=='MT_Release|x64'">false</CompileAsManaged>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+      </PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">
+      </PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+      </PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">
+      </PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+      </PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+      </PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='MT_Release|Win32'">
+      </PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='MT_Release|x64'">
+      </PrecompiledHeader>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDll|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDll|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="source\application.cpp" />
+    <ClCompile Include="source\AutoHotkey2.cpp" />
+    <ClCompile Include="source\clipboard.cpp" />
+    <ClCompile Include="source\COMServer.cpp" />
+    <ClCompile Include="source\Debugger.cpp" />
+    <ClCompile Include="source\dllmain.cpp" />
+    <ClCompile Include="source\exports.cpp" />
+    <ClCompile Include="source\globaldata.cpp" />
+    <ClCompile Include="source\hook.cpp" />
+    <ClCompile Include="source\hotkey.cpp" />
+    <ClCompile Include="source\input_object.cpp" />
+    <ClCompile Include="source\keyboard_mouse.cpp" />
+    <ClCompile Include="source\LiteZip.cpp" />
+    <ClCompile Include="source\lowlevelbif.cpp" />
+    <ClCompile Include="source\MemoryModule.cpp" />
+    <ClCompile Include="source\MinHook.cpp" />
+    <ClCompile Include="source\os_version.cpp" />
+    <ClCompile Include="source\pch.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='MT_Release|Win32'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDll|Win32'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='MT_Release|x64'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDll|x64'">Create</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="source\script.cpp" />
+    <ClCompile Include="source\script2.cpp" />
+    <ClCompile Include="source\script_autoit.cpp" />
+    <ClCompile Include="source\script_com.cpp" />
+    <ClCompile Include="source\script_expression.cpp" />
+    <ClCompile Include="source\script_gui.cpp" />
+    <ClCompile Include="source\script_menu.cpp" />
+    <ClCompile Include="source\script_object.cpp" />
+    <ClCompile Include="source\script_object_bif.cpp" />
+    <ClCompile Include="source\script_registry.cpp" />
+    <ClCompile Include="source\script_struct.cpp" />
+    <ClCompile Include="source\SimpleHeap.cpp" />
+    <ClCompile Include="source\StringConv.cpp" />
+    <ClCompile Include="source\TextIO.cpp" />
+    <ClCompile Include="source\util.cpp" />
+    <ClCompile Include="source\var.cpp" />
+    <ClCompile Include="source\window.cpp" />
+    <ClCompile Include="source\WinGroup.cpp" />
+    <ClCompile Include="source\xdlldata.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+      </PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">
+      </PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+      </PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">
+      </PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+      </PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">
+      </PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='MT_Release|Win32'">
+      </PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDll|Win32'">
+      </PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+      </PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">
+      </PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='MT_Release|x64'">
+      </PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDll|x64'">
+      </PrecompiledHeader>
+    </ClCompile>
+  </ItemGroup>
+  <PropertyGroup>
+    <Masm>ml</Masm>
+    <Masm Condition="'$(Platform)'=='x64'">ml64</Masm>
+    <ExecutablePath>$(ExecutablePath);$(WindowsSdkMSBuildTools);$(SystemRoot)\SysWow64;$(FxCopDir);$(PATH);</ExecutablePath>
+    <IncludePath>$(VCInstallDir)include;$(WindowsSdk_71A_IncludePath);$(VCInstallDir)atlmfc\include;$(WindowsSdkDir)include;$(FrameworkSDKDir)\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(LibraryPath);$(VSInstallDir);$(VSInstallDir)lib;$(LibraryPath)</LibraryPath>
+    <ExcludePath>$(ExcludePath);$(MSBuildFrameworkToolsPath);$(MSBuildFrameworkToolsPath32);</ExcludePath>
+    <ReferencePath>$(VCInstallDir)atlmfc\lib;$(VCInstallDir)lib</ReferencePath>
+  </PropertyGroup>
+  <ItemGroup>
+    <ResourceCompile Include="source\resources\AutoHotkey2.rc" />
+    <CustomBuild Include="source\libx64call\x64call.asm">
+      <ExcludedFromBuild Condition="'$(Platform)'!='x64'">true</ExcludedFromBuild>
+    </CustomBuild>
+    <CustomBuild Include="source\libx64call\x64stub.asm">
+      <ExcludedFromBuild Condition="'$(Platform)'!='x64'">true</ExcludedFromBuild>
+    </CustomBuild>
+    <None Include="source\resources\AutoHotkey2.rgs">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDll|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDll|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">true</ExcludedFromBuild>
+    </None>
+    <None Include="source\resources\COMServer.rgs">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDll|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDll|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">true</ExcludedFromBuild>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="source\lib_pcre\lib_pcre.vcxproj">
+      <Project>{39037993-9571-4DF2-8E39-CD2909043574}</Project>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+      <CopyLocalSatelliteAssemblies>false</CopyLocalSatelliteAssemblies>
+      <LinkLibraryDependencies>true</LinkLibraryDependencies>
+      <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <Midl Include="source\resources\AutoHotkey2.idl">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDll|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDll|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">true</ExcludedFromBuild>
+    </Midl>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="source\resources\icon_filetype.ico" />
+    <Image Include="source\resources\icon_filetype_small.ico" />
+    <Image Include="source\resources\icon_main.ico" />
+    <Image Include="source\resources\icon_pause.ico" />
+    <Image Include="source\resources\icon_pause_suspend.ico" />
+    <Image Include="source\resources\icon_suspend.ico" />
+  </ItemGroup>
+  <ItemGroup>
+    <Manifest Include="source\resources\AutoHotkey.exe.manifest" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

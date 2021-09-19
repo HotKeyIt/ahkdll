@@ -14,19 +14,17 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 */
 
-#include "stdafx.h" // pre-compiled headers
+#include "pch.h" // pre-compiled headers
 #include "application.h"
 #include "globaldata.h" // for access to g_clip, the "g" global struct, etc.
 #include "window.h" // for several MsgBox and window functions
 #include "util.h" // for strlcpy()
 #include "resources/resource.h"  // For ID_TRAY_OPEN.
 
-#ifndef _USRDLL
-VOID CALLBACK ThreadExitApp(ULONG_PTR dwParam)
+VOID CALLBACK ThreadExitApp(ULONG_PTR dwData)
 {
 	g_script->ExitApp(EXIT_CLOSE);
 }
-#endif
 
 int CanScrollInDirection(HWND aHwnd, DWORD aMessage, DWORD aStyle, WPARAM wParam)
 {
@@ -226,6 +224,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 	bool sleep0_was_done = false;
 	bool empty_the_queue_via_peek = false;
 	int messages_received = 0; // This is used to ensure we Sleep() at least a minimal amount if no messages are received.
+
 	bool msg_was_handled;
 	HWND fore_window, focused_control, criterion_found_hwnd;
 	TCHAR wnd_class_name[32];
@@ -281,10 +280,10 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 			// Check the active window in each iteration in case a significant amount of time has passed since
 			// the previous iteration (due to launching threads, etc.)
 			if (g_DeferMessagesForUnderlyingPump && (fore_window = GetForegroundWindow()) != NULL  // There is a foreground window.
-				&& GetWindowThreadProcessId(fore_window, NULL) == g_ThreadID) // And it belongs to our main thread (the main thread is the only one that owns any windows).
+				&& GetWindowThreadProcessId(fore_window, NULL) == g_MainThreadID) // And it belongs to our main thread (the main thread is the only one that owns any windows).
 			{
 				do_special_msg_filter = false; // Set default.
-                if (g_nFileDialogs) // v1.0.44.12: Also do the special Peek/msg filter below for FileSelect because testing shows that frequently-running timers disrupt the ability to double-click.
+				if (g_nFileDialogs) // v1.0.44.12: Also do the special Peek/msg filter below for FileSelect because testing shows that frequently-running timers disrupt the ability to double-click.
 				{
 					GetClassName(fore_window, wnd_class_name, _countof(wnd_class_name));
 					do_special_msg_filter = !_tcscmp(wnd_class_name, _T("#32770"));  // Due to checking g_nFileDialogs above, this means that this dialog is probably FileSelect rather than MsgBox/InputBox/DirSelect (even if this guess is wrong, it seems fairly inconsequential to filter the messages since other pump beneath us on the call-stack will handle them ok).
@@ -456,11 +455,11 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 				// (e.g. empty_the_queue_via_peek) and we only want this to be decremented once:
 				if (IsCycleComplete(aSleepDuration, start_time, allow_early_return)) // v1.0.44.11: IsCycleComplete() must be called for all modes, but now its return value is checked due to the new g_DeferMessagesForUnderlyingPump mode.
 					RETURN_FROM_MSGSLEEP
-					// Otherwise (since above didn't return) combined logic has ensured that all of the following are true:
-					// 1) aSleepDuration > 0
-					// 2) !empty_the_queue_via_peek
-					// 3) The above two combined with logic above means that g_DeferMessagesForUnderlyingPump==true.
-					SleepEx(5, true); // Since Peek() didn't find a message, avoid maxing the CPU.  This is a somewhat arbitrary value: the intent of a value below 10 is to avoid yielding more than one timeslice on all systems even if they have unusual timeslice sizes / system timers.
+				// Otherwise (since above didn't return) combined logic has ensured that all of the following are true:
+				// 1) aSleepDuration > 0
+				// 2) !empty_the_queue_via_peek
+				// 3) The above two combined with logic above means that g_DeferMessagesForUnderlyingPump==true.
+				SleepEx(5, true); // Since Peek() didn't find a message, avoid maxing the CPU.  This is a somewhat arbitrary value: the intent of a value below 10 is to avoid yielding more than one timeslice on all systems even if they have unusual timeslice sizes / system timers.
 				continue;
 			}
 			// else Peek() found a message, so process it below.
@@ -661,6 +660,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 					continue; // Continue with the main message loop.
 			}
 		} // if (keyboard message posted to GUI)
+
 		// v1.0.44: There's no reason to call TRANSLATE_AHK_MSG here because all WM_COMMNOTIFY messages
 		// are sent to g_hWnd. Thus, our call to DispatchMessage() later below will route such messages to
 		// MainWindowProc(), which will then call TRANSLATE_AHK_MSG().
@@ -925,7 +925,8 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 					--variant_id; // i.e. index 1 should be mFirstVariant, not mFirstVariant->mNextVariant.
 					for (variant = hk->mFirstVariant; variant_id; variant = variant->mNextVariant, --variant_id);
 				}
-				if (   !(variant || (variant = hk->CriterionAllowsFiring(&criterion_found_hwnd)))   )
+				if (   !(variant || (variant = hk->CriterionAllowsFiring(&criterion_found_hwnd
+					, msg.message == AHK_HOOK_HOTKEY ? KEY_IGNORE_LEVEL(HIWORD(msg.lParam)) : 0)))   )
 					continue; // No criterion is eligible, so ignore this hotkey event (see other comments).
 					// If this is AHK_HOOK_HOTKEY, criterion was eligible at time message was posted,
 					// but not now.  Seems best to abort (see other comments).
@@ -942,11 +943,6 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 					// finishes (this above description applies only when MaxThreadsPerHotkey is 1,
 					// which it usually is).
 					hk->RunAgainAfterFinished(*variant); // Wheel notch count (g->EventInfo below) should be okay because subsequent launches reuse the same thread attributes to do the repeats.
-					continue;
-				}
-				if (variant->mThreadID != g_ThreadID)
-				{
-					PostThreadMessage(variant->mThreadID, msg.message, msg.wParam, msg.lParam);
 					continue;
 				}
 				// Now that above has ensured variant is non-NULL:
@@ -1166,7 +1162,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 						EVT_ARG_ADD(pcontrol);
 					else
 						EVT_ARG_ADD(_T(""));
-					EVT_ARG_ADD(GuiType::CreateDropArray(hdrop_to_free));
+					EVT_ARG_ADD(GuiType::CreateDropArray(hdrop_to_free)); // Currently must be the third-last arg; see "Free the drop array."
 					EVT_ARG_ADD(pgui->Unscale(gui_point.x));
 					EVT_ARG_ADD(pgui->Unscale(gui_point.y));
 
@@ -1265,7 +1261,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 					}
 				}
 				if (gui_action == GUI_EVENT_DROPFILES) // Must be done regardless of pgui->mHwnd.
-					gui_event_args[2].object->Release(); // Free the drop array.
+					gui_event_args[gui_event_arg_count - 3].object->Release(); // Free the drop array.
 				// Counteract the earlier AddRef(). If the Gui was destroyed (and none of this
 				// Gui's other labels are still running), this will free the Gui structure.
 				pgui->Release();
@@ -1325,7 +1321,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 			case AHK_INPUT_END:
 			{
 				ExprTokenType param = input_hook->ScriptObject;
-				LabelPtr(input_hook->ScriptObject->onEnd)->ExecuteInNewThread(_T("InputHook"), &param, 1);
+				IObjectPtr(input_hook->ScriptObject->onEnd)->ExecuteInNewThread(_T("InputHook"), &param, 1);
 				input_hook->ScriptObject->Release();
 				break;
 			}
@@ -1339,7 +1335,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 					__int64(vk_type(msg.lParam)),
 					__int64(sc_type(msg.lParam >> 16)),
 				};
-				LabelPtr onKey = msg.message == AHK_INPUT_KEYDOWN ? input_hook->ScriptObject->onKeyDown : input_hook->ScriptObject->onKeyUp;
+				IObjectPtr onKey = msg.message == AHK_INPUT_KEYDOWN ? input_hook->ScriptObject->onKeyDown : input_hook->ScriptObject->onKeyUp;
 				onKey->ExecuteInNewThread(_T("InputHook"), params, _countof(params));
 				break;
 			}
@@ -1352,7 +1348,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 					input_hook->ScriptObject,
 					chars
 				};
-				LabelPtr(input_hook->ScriptObject->onChar)->ExecuteInNewThread(_T("InputHook"), params, _countof(params));
+				IObjectPtr(input_hook->ScriptObject->onChar)->ExecuteInNewThread(_T("InputHook"), params, _countof(params));
 				break;
 			}
 
@@ -1363,7 +1359,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 				g.hWndLastUsed = criterion_found_hwnd; // v1.0.42. Even if the window is invalid for some reason, IsWindow() and such are called whenever the script accesses it (GetValidLastUsedWindow()).
 				g.SendLevel = variant->mInputLevel;
 				g.HotCriterion = variant->mHotCriterion; // v2: Let the Hotkey command use the criterion of this hotkey variant by default.
-				hk->PerformInNewThreadMadeByCaller(*variant, hk->mName);
+				hk->PerformInNewThreadMadeByCaller(*variant);
 				
 			}
 
@@ -1397,6 +1393,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 			// has expired.
 			continue;
 		} // End of cases that launch new threads, such as hotkeys and GUI events.
+
 		case WM_TIMER:
 			if (msg.lParam // This WM_TIMER is intended for a TimerProc...
 				|| msg.hwnd != g_hWnd) // ...or it's intended for a window other than the main window, which implies that it doesn't belong to program internals (i.e. the script is probably using it). This fix was added in v1.0.47.02 and it also fixes the ES_NUMBER balloon bug.
@@ -1438,6 +1435,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 				RETURN_FROM_MSGSLEEP
 			// Otherwise, stay in the blessed GetMessage() state until the time has expired:
 			continue;
+
 		case WM_CANCELJOURNAL:
 			// IMPORTANT: It's tempting to believe that WM_CANCELJOURNAL might be lost/dropped if the script
 			// is displaying a MsgBox or other dialog that has its own msg pump (since such a pump would
@@ -1453,6 +1451,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 			// Above is set to so that we return faster, since our caller should be SendKeys() whenever
 			// WM_CANCELJOURNAL is received, and SendKeys() benefits from a faster return.
 			continue;
+
 		case WM_KEYDOWN:
 			if (msg.hwnd == g_hWndEdit && msg.wParam == VK_ESCAPE)
 			{
@@ -1473,6 +1472,8 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 			// The app normally terminates before WM_QUIT is ever seen here because of the way
 			// WM_CLOSE is handled by MainWindowProc().  However, this is kept here in case anything
 			// external ever explicitly posts a WM_QUIT to our thread's queue:
+			if (g_FirstThreadID != g_MainThreadID)
+				return false;
 			g_script->ExitApp(EXIT_CLOSE);
 			continue; // Since ExitApp() won't necessarily exit.
 		} // switch()
@@ -1497,7 +1498,7 @@ break_out_of_main_switch:
 		// dialog whose quasi-thread has been suspended, and probably for some of the other
 		// types of dialogs as well:
 		if ((fore_window = GetForegroundWindow()) != NULL  // There is a foreground window.
-			&& GetWindowThreadProcessId(fore_window, NULL) == g_ThreadID) // And it belongs to our main thread (the main thread is the only one that owns any windows).
+			&& GetWindowThreadProcessId(fore_window, NULL) == g_MainThreadID) // And it belongs to our main thread (the main thread is the only one that owns any windows).
 		{
 			GetClassName(fore_window, wnd_class_name, _countof(wnd_class_name));
 			if (!_tcscmp(wnd_class_name, _T("#32770")))  // MsgBox, InputBox, FileSelect, DirSelect dialog.
@@ -1723,7 +1724,7 @@ void PollJoysticks()
 {
 	// Even if joystick hotkeys aren't currently allowed to fire, poll it anyway so that hotkey
 	// messages can be buffered for later.
-	_thread_local static DWORD sButtonsPrev[MAX_JOYSTICKS] = {0}; // Set initial state to "all buttons up for all joysticks".
+	thread_local static DWORD sButtonsPrev[MAX_JOYSTICKS] = {0}; // Set initial state to "all buttons up for all joysticks".
 	JOYINFOEX jie;
 	DWORD buttons_newly_down;
 
@@ -1766,23 +1767,9 @@ bool MsgMonitor(HWND aWnd, UINT aMsg, WPARAM awParam, LPARAM alParam, MSG *apMsg
 	// Consequently, the MSG_FILTER_MAX queuing effect will only occur for monitored messages that are
 	// numerically greater than WM_HOTKEY. Other messages will not be subject to the filter and thus
 	// will arrive here even when the script is currently uninterruptible, in which case it seems best
-	// to discard the message because the current design doesn't allow for interruptions. The design
-	// could be reviewed to find out what the consequences of interruption would be.  Also, the message
-	// could be suppressed (via return 1) and reposted, but if there are other messages already in
-	// the queue that qualify to fire a msg-filter (or even messages such as WM_LBUTTONDOWN that have
-	// a normal effect that relies on ordering), the messages would then be processed out of their
-	// original order, which would be very undesirable in many cases.
-	//
-	// Parts of the following are obsolete:
-	// In light of the above, INTERRUPTIBLE_IF_NECESSARY is used instead of INTERRUPTIBLE_IN_EMERGENCY
-	// to reduce on the unreliability of message filters that are numerically less than WM_HOTKEY.
-	// For example, if the user presses a hotkey and an instant later a qualified WM_LBUTTONDOWN arrives,
-	// the filter will still be able to run by interrupting the uninterruptible thread.  In this case,
-	// ResumeUnderlyingThread() sets g->AllowThreadToBeInterrupted to false for us in case the
-	// timer "TIMER_ID_UNINTERRUPTIBLE" fired for the new thread rather than for the old one (this
-	// prevents the interrupted thread from becoming permanently uninterruptible).
-	if (!INTERRUPTIBLE_IN_EMERGENCY)
-		return false;
+	// for flexibility to allow the interruption (the same is done for CreateCallback).
+	//if (!INTERRUPTIBLE_IN_EMERGENCY)
+	//	return false;
 
 	bool result = false; // Set default: Tell the caller to give this message any additional/default processing.
 	MsgMonitorInstance inst (*g_MsgMonitor); // Register this instance so that index can be adjusted by BIF_OnMessage if an item is deleted.
@@ -1808,6 +1795,7 @@ bool MsgMonitor(HWND aWnd, UINT aMsg, WPARAM awParam, LPARAM alParam, MSG *apMsg
 					break;
 				}
 			}
+
 	return result;
 }
 
@@ -1917,6 +1905,14 @@ void InitNewThread(int aPriority, bool aSkipUninterruptible, bool aIncrementThre
 // due to that component, only the other one (which is now known to be positive otherwise the
 // first rule of precedence would have applied).
 {
+	PMYTEB curr_teb = NULL;
+	PVOID tls = NULL;
+	if (!g)
+	{
+		curr_teb = (PMYTEB)NtCurrentTeb();
+		tls = curr_teb->ThreadLocalStoragePointer;
+		curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[0][6];
+	}
 	if (aIncrementThreadCountAndUpdateTrayIcon)
 	{
 		++g_nThreads; // It is the caller's responsibility to avoid calling us if the thread count is too high.
@@ -1938,7 +1934,11 @@ void InitNewThread(int aPriority, bool aSkipUninterruptible, bool aIncrementThre
 	if (aIncrementThreadCountAndUpdateTrayIcon)
 		g_script->UpdateTrayIcon(); // Must be done ONLY AFTER updating "g" (e.g, ++g) and/or g->IsPaused.
 	if (aSkipUninterruptible)
+	{
+		if (tls)
+			curr_teb->ThreadLocalStoragePointer = tls;
 		return;
+	}
 
 	if (!g.ThreadIsCritical)
 		g.ThreadIsCritical = aIsCritical;
@@ -1968,6 +1968,8 @@ void InitNewThread(int aPriority, bool aSkipUninterruptible, bool aIncrementThre
 	}
 	//else g.AllowThreadToBeInterrupted is left at its default of true, in which case the values set
 	// above won't matter; so they're not set.
+	if (tls)
+		curr_teb->ThreadLocalStoragePointer = tls;
 }
 
 
@@ -1995,6 +1997,7 @@ void ResumeUnderlyingThread()
 	// when the macro is used by CheckScriptTimers(), which although it might not technically
 	// need it, lends maintainability and peace of mind.
 	g_script->UpdateTrayIcon();
+
 	// If this was the last running thread and the script has nothing keeping it open (hotkeys, Gui,
 	// message monitors, etc.) then it should terminate now:
 	if (!g_OnExitIsRunning)
@@ -2121,8 +2124,6 @@ VOID CALLBACK RefreshInterruptibility(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DW
 {
 	IsInterruptible(); // Search on RefreshInterruptibility for comments.
 }
-
-
 
 #ifndef _USRDLL
 bool AHKModule()

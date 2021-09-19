@@ -1,102 +1,17 @@
-﻿Progress_Struct(){
-  static MAX_PROGRESS_WINDOWS:=10,SplashType:="int width;int height;int bar_pos;int margin_x;int margin_y;int text1_height;int object_width;int object_height;HWND hwnd;int pic_type;union{HBITMAP pic_bmp;HICON pic_icon};HWND hwnd_bar;HWND hwnd_text1;HWND hwnd_text2;HFONT hfont1;HFONT hfont2;HBRUSH hbrush;COLORREF color_bk;COLORREF color_text"
-    ,g_Progress:=Struct("Progress_Struct(SplashType)[" MAX_PROGRESS_WINDOWS "]")
-  return g_progress
-}
-Progress_OnMessage(wParam,lParam,msg,hwnd){
-  static MAX_PROGRESS_WINDOWS:=10,SW_SHOWNOACTIVATE:=4,WM_SETTEXT:=12
-    ,WS_DISABLED:=134217728,WS_POPUP:=2147483648,WS_CAPTION:=12582912,WS_EX_TOPMOST:=8,COORD_UNSPECIFIED:=(-2147483647 - 1)
-    ,WS_SIZEBOX:=262144,WS_MINIMIZEBOX:=131072,WS_MAXIMIZEBOX:=65536,WS_SYSMENU:=524288,LOGPIXELSY:=90,IMAGE_BITMAP:=0
-    ,FW_DONTCARE:=0,CLR_DEFAULT:=4278190080,CLR_NONE:=4294967295,DEFAULT_GUI_FONT:=17,IMAGE_ICON:=1,SS_LEFT:=0
-    ,FW_SEMIBOLD:=600, DEFAULT_CHARSET:=1, OUT_TT_PRECIS:=4, CLIP_DEFAULT_PRECIS:=0, PROOF_QUALITY:=2,FF_DONTCARE:=0
-    ,DT_CALCRECT:=1024, DT_WORDBREAK:=16, DT_EXPANDTABS:=64,SPI_GETWORKAREA:=48,IDI_MAIN:=159,LR_SHARED:=32768,ICON_SMALL:=0,ICON_BIG:=1
-    ,WS_CHILD:=1073741824,WS_VISIBLE:=268435456,SS_NOPREFIX:=0x80,SS_CENTER:=1,SS_LEFTNOWORDWRAP:=12,PBM_GETPOS:=1032,PBM_SETPOS:=1026
-    ,PBM_SETRANGE:=1025,PBM_SETRANGE32:=1030,PROGRESS_CLASS:="msctls_progress32",WS_EX_CLIENTEDGE:=512,PBS_SMOOTH:=1,WM_PAINT:=15,WM_SIZE:=5
-    ,PBM_SETBARCOLOR:=1033,PBM_SETBKCOLOR:=8193,WM_SETFONT:=48,SRCCOPY:=13369376,DI_NORMAL:=3,COLOR_BTNFACE:=15,WM_ERASEBKGND:=20,WM_CTLCOLORSTATIC:=312
-    ,Black:=0,Silver:=0xC0C0C0,Gray:=0x808080,White:=0xFFFFFF,Maroon:=0x000080,Red:=0x0000FF
-    ,Purple:=0x800080,Fuchsia:=0xFF00FF,Green:=0x008000,Lime:=0x00FF00,Olive:=0x008080
-    ,Yellow:=0x00FFFF,Navy:=0x800000,Blue:=0xFF0000,Teal:=0x808000,Aqua:=0xFFFF00,Default:=CLR_DEFAULT
-    ,g_Progress:=Progress_Struct(),RECT:="LONG left,LONG top,LONG right,LONG bottom",client_rect:=Struct(RECT), draw_rect:=Struct(RECT), main_rect:=Struct(RECT), work_rect:=Struct(RECT)
-  Loop MAX_PROGRESS_WINDOWS
-    if (g_Progress[i:=A_Index].hwnd == hwnd)
-      break
-  if (i == MAX_PROGRESS_WINDOWS){ ; It's not a progress window either.
-    ; Let DefWindowProc() handle it (should probably never happen since currently the only
-    ; other type of window is SplashText, which never receive this msg?)
-    Return
-  }
-  splash := g_Progress[i]
-  If (msg=WM_SIZE){
-    new_width := lParam & 0xFFFF
-    new_height := (lParam>>16) & 0xFFFF
-    if (new_width != splash.width || new_height != splash.height)
-    {
-      GetClientRect(splash.hwnd, client_rect[])
-      control_width := client_rect.right - (splash.margin_x * 2)
-      bar_y := splash.margin_y + (splash.text1_height ? (splash.text1_height + splash.margin_y) : 0)
-      sub_y := bar_y + splash.object_height + (splash.object_height ? splash.margin_y : 0)  ;  Calculate the Y position of each control in the window.
-      ; The Y offset for each control should match those used in Splash():
-      if (new_width != splash.width)
-      {
-        if (splash.hwnd_text1) ; This control doesn't exist if the main text was originally blank.
-          MoveWindow(splash.hwnd_text1, splash.margin_x, splash.margin_y, control_width, splash.text1_height, FALSE)
-        if (splash.hwnd_bar)
-          MoveWindow(splash.hwnd_bar, splash.margin_x, bar_y, control_width, splash.object_height, FALSE)
-        splash.width := new_width
-      }
-      ; Move the window EVEN IF new_height == splash.height because otherwise the text won't
-      ; get re-centered when only the width of the window changes:
-      MoveWindow(splash.hwnd_text2, splash.margin_x, sub_y, control_width, (client_rect.bottom - client_rect.top) - sub_y, FALSE) ; Negative height seems handled okay.
-      ; Specifying true for "repaint" in MoveWindow() is not always enough refresh the text correctly,
-      ; so this is done instead:
-      InvalidateRect(splash.hwnd, client_rect[], TRUE)
-      ; If the user resizes the window, have that size retained (remembered) until the script
-      ; explicitly changes it or the script destroys the window.
-      splash.height := new_height
-    }
-    return 0 ; i.e. completely handled here.
-  }	else if (msg=WM_CTLCOLORSTATIC){
-    if (!splash.hbrush && splash.color_text == CLR_DEFAULT) ; Let DWP handle it.
-      Return DefWindowProc(hWnd, Msg, wParam, lParam)
-    ; Since we're processing this msg and not DWP, must set background color unconditionally,
-    ; otherwise plain white will likely be used:
-    SetBkColor(wParam, splash.hbrush ? splash.color_bk : GetSysColor(COLOR_BTNFACE))
-    if (splash.color_text != CLR_DEFAULT)
-      SetTextColor(wParam, splash.color_text)
-    ; Always return a real HBRUSH so that Windows knows we altered the HDC for it to use:
-    return splash.hbrush ? splash.hbrush : GetSysColorBrush(COLOR_BTNFACE)
-  } else if (msg=WM_ERASEBKGND){
-    if (splash.pic_bmp) ; And since there is a pic, its object_width/height should already be valid.
-    {
-      ypos := splash.margin_y + (splash.text1_height ? (splash.text1_height + splash.margin_y) : 0)
-      if (splash.pic_type == IMAGE_BITMAP)
-      {
-        hdc := CreateCompatibleDC(wParam)
-        ,hbmpOld := SelectObject(hdc, splash.pic_bmp)
-        ,BitBlt(wParam, splash.margin_x, ypos, splash.object_width, splash.object_height, hdc, 0, 0, SRCCOPY)
-        ,SelectObject(hdc, hbmpOld)
-        ,DeleteDC(hdc)
-      }
-      else ; IMAGE_ICON
-        DrawIconEx(wParam, splash.margin_x, ypos, splash.pic_icon, splash.object_width, splash.object_height, 0, 0, DI_NORMAL)
-      ; Prevent "flashing" by erasing only the part that hasn't already been drawn:
-      ExcludeClipRect(wParam, splash.margin_x, ypos, splash.margin_x + splash.object_width, ypos + splash.object_height)
-      ,hrgn := CreateRectRgn(0, 0, 1, 1)
-      ,GetClipRgn(wParam, hrgn)
-      ,FillRgn(wParam, hrgn, splash.hbrush ? splash.hbrush : GetSysColorBrush(COLOR_BTNFACE))
-      ,DeleteObject(hrgn)
-      return 1
-    }
-    ; Otherwise, it's a Progress window (or a SplashImage window with no picture):
-    if (splash.hbrush){ ; Let DWP handle it.
-      GetClipBox(hdc, client_rect[])
-      ,FillRect(hdc, client_rect[], splash.hbrush)
-    }
-  }
-  ;~ DllCall("InvalidateRect","PTR",splash.hwnd,"PTR", NULL,"Int", TRUE)
-  return DefWindowProc(hWnd, Msg, wParam, lParam) ;ret
-}
-Progress(aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFontName:=""){
+﻿Progress(aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFontName:=""){ ;Progress_OnMessage(wParam,lParam,msg,hwnd)
+    static SW_SHOWNOACTIVATE:=4,WM_SETTEXT:=12 ; for OnMessage
+          ,WS_DISABLED:=134217728,WS_POPUP:=2147483648,WS_CAPTION:=12582912,WS_EX_TOPMOST:=8,COORD_UNSPECIFIED:=(-2147483647 - 1)
+          ,WS_SIZEBOX:=262144,WS_MINIMIZEBOX:=131072,WS_MAXIMIZEBOX:=65536,WS_SYSMENU:=524288,LOGPIXELSY:=90,IMAGE_BITMAP:=0
+          ,FW_DONTCARE:=0,CLR_DEFAULT:=4278190080,CLR_NONE:=4294967295,DEFAULT_GUI_FONT:=17,IMAGE_ICON:=1,SS_LEFT:=0
+          ,FW_SEMIBOLD:=600, DEFAULT_CHARSET:=1, OUT_TT_PRECIS:=4, CLIP_DEFAULT_PRECIS:=0, PROOF_QUALITY:=2,FF_DONTCARE:=0
+          ,DT_CALCRECT:=1024, DT_WORDBREAK:=16, DT_EXPANDTABS:=64,SPI_GETWORKAREA:=48,IDI_MAIN:=159,LR_SHARED:=32768,ICON_SMALL:=0,ICON_BIG:=1
+          ,WS_CHILD:=1073741824,WS_VISIBLE:=268435456,SS_NOPREFIX:=0x80,SS_CENTER:=1,SS_LEFTNOWORDWRAP:=12,PBM_GETPOS:=1032,PBM_SETPOS:=1026
+          ,PBM_SETRANGE:=1025,PBM_SETRANGE32:=1030,PROGRESS_CLASS:="msctls_progress32",WS_EX_CLIENTEDGE:=512,PBS_SMOOTH:=1,WM_PAINT:=15,WM_SIZE:=5
+          ,PBM_SETBARCOLOR:=1033,PBM_SETBKCOLOR:=8193,WM_SETFONT:=48,SRCCOPY:=13369376,DI_NORMAL:=3,COLOR_BTNFACE:=15,WM_ERASEBKGND:=20,WM_CTLCOLORSTATIC:=312
+          ,Black:=0,Silver:=0xC0C0C0,Gray:=0x808080,White:=0xFFFFFF,Maroon:=0x000080,Red:=0x0000FF
+          ,Purple:=0x800080,Fuchsia:=0xFF00FF,Green:=0x008000,Lime:=0x00FF00,Olive:=0x008080
+          ,Yellow:=0x00FFFF,Navy:=0x800000,Blue:=0xFF0000,Teal:=0x808000,Aqua:=0xFFFF00,Default:=CLR_DEFAULT
+          ,RECT:="LONG left,LONG top,LONG right,LONG bottom",client_rect:=Struct(RECT), draw_rect:=Struct(RECT), main_rect:=Struct(RECT), work_rect:=Struct(RECT)
   static MAX_SPLASHIMAGE_WINDOWS:=10,MAX_PROGRESS_WINDOWS:=10,SW_SHOWNOACTIVATE:=4,WM_SETTEXT:=12
         ,WS_DISABLED:=134217728,WS_POPUP:=2147483648,WS_CAPTION:=12582912,WS_EX_TOPMOST:=8,COORD_UNSPECIFIED:=(-2147483647 - 1)
         ,WS_SIZEBOX:=262144,WS_MINIMIZEBOX:=131072,WS_MAXIMIZEBOX:=65536,WS_SYSMENU:=524288,WS_BORDER:=8388608,WS_DLGFRAME:=4194304,WM_SETICON:=128,LOGPIXELSX:=88,LOGPIXELSY:=90,IMAGE_BITMAP:=0
@@ -112,14 +27,97 @@ Progress(aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFontName:=""){
         ,Yellow:=0x00FFFF,Navy:=0x800000,Blue:=0xFF0000,Teal:=0x808000,Aqua:=0xFFFF00,Default:=CLR_DEFAULT
         ,CStringW:="UInt m_sNull,PTR m_pData,bool m_bDirty"
         ,Script:="PTR **mVar,**mLazyVar;int mVarCount,mVarCountMax,mLazyVarCount;PTR *mFirstGroup,*mLastGroup;int mCurrentFuncOpenBlockCount;bool mNextLineIsFunctionBody;int mClassObjectCount;PTR *mClassObject[5];TCHAR mClassName[256];PTR *mUnresolvedClasses;PTR *mClassProperty;LPTSTR mClassPropertyDef;int mCurrFileIndex;UINT mCombinedLineNumber;bool mNoHotkeyLabels,mMenuUseErrorLevel;PTR mNIC;PTR *mFirstLine,*mLastLine,*mFirstStaticLine,*mLastStaticLine;PTR *mFirstLabel,*mLastLabel;PTR **mFunc;int mFuncCount,mFuncCountMax;PTR *mTempLine;PTR *mTempLabel;PTR *mTempFunc;PTR *mCurrLine;PTR *mPlaceholderLabel;TCHAR mThisMenuItemName[261],mThisMenuName[261];LPTSTR mThisHotkeyName,mPriorHotkeyName;HWND mNextClipboardViewer;bool mOnClipboardChangeIsRunning;PTR *mOnClipboardChangeFunc,*mOnExitFunc;int mExitReason;PTR *mFirstTimer,*mLastTimer;UINT mTimerCount,mTimerEnabledCount;PTR *mFirstMenu,*mLastMenu;UINT mMenuCount;DWORD mThisHotkeyStartTime,mPriorHotkeyStartTime;TCHAR mEndChar;BYTE mThisHotkeyModifiersLR;LPTSTR mFileSpec,mFileDir,mFileName,mOurEXE,mOurEXEDir,mMainWindowTitle;bool mIsReadyToExecute,mAutoExecSectionIsRunning,mIsRestart,mErrorStdOut;PTR *mIncludeLibraryFunctionsThenExit;int mUninterruptedLineCountMax,mUninterruptibleTime;DWORD mLastPeekTime;Progress(CStringW) mRunAsUser,mRunAsPass,mRunAsDomain;HICON mCustomIcon,mCustomIconSmall;LPTSTR mCustomIconFile;bool mIconFrozen;LPTSTR mTrayIconTip;UINT mCustomIconNumber;PTR *mTrayMenu"
+        ,MAX_PROGRESS_WINDOWS:=10,SplashType:="int width;int height;int bar_pos;int margin_x;int margin_y;int text1_height;int object_width;int object_height;HWND hwnd;int pic_type;union{HBITMAP pic_bmp;HICON pic_icon};HWND hwnd_bar;HWND hwnd_text1;HWND hwnd_text2;HFONT hfont1;HFONT hfont2;HBRUSH hbrush;COLORREF color_bk;COLORREF color_text"
+        ,g_Progress:=Struct("SplashType[" MAX_PROGRESS_WINDOWS "]")
         ,g_script:=Struct(Script,A_ScriptStruct)
-        ,g_Progress:=Progress_Struct()
         ,tm:=Struct("LONG tmHeight;LONG tmAscent;LONG tmDescent;LONG tmInternalLeading;LONG tmExternalLeading;LONG tmAveCharWidth;LONG tmMaxCharWidth;LONG tmWeight;LONG tmOverhang;LONG tmDigitizedAspectX;LONG tmDigitizedAspectY;WCHAR tmFirstChar;WCHAR tmLastChar;WCHAR tmDefaultChar;WCHAR tmBreakChar;BYTE tmItalic;BYTE tmUnderlined;BYTE tmStruckOut;BYTE tmPitchAndFamily;BYTE tmCharSet") ;TEXTMETRICW
         ,iconinfo:=Struct("BOOL fIcon;DWORD xHotspot;DWORD yHotspot;HBITMAP hbmMask;HBITMAP hbmColor") ;ICONINFO
         ,RECT:="LONG left,LONG top,LONG right,LONG bottom",client_rect:=Struct(RECT), draw_rect:=Struct(RECT), main_rect:=Struct(RECT), work_rect:=Struct(RECT)
         ,bmp:=Struct("LONG bmType;LONG bmWidth;LONG bmHeight;LONG bmWidthBytes;WORD bmPlanes;WORD bmBitsPixel;LPVOID bmBits") ;BITMAP
-        ,initGui:=Gui.new(),initGuiDestroy:=initGui.Destroy() ; required to init ahk_class AutoHotkeyGUI
+        ,initGui:=Gui().Destroy() ; required to init ahk_class AutoHotkeyGUI
         ,_ttoi:=DynaCall("msvcrt\_wtoi","t==t")
+  if (Type(aOptions) Type(aSubText) Type(aMainText) Type(aTitle) = "IntegerIntegerIntegerInteger"){
+    wParam:=aOptions,lParam:=aSubText,msg:=aMainText,hwnd:=aTitle
+    Loop MAX_PROGRESS_WINDOWS
+      if (g_Progress[i:=A_Index].hwnd == hwnd)
+        break
+    if (i == MAX_PROGRESS_WINDOWS){ ; It's not a progress window either.
+      ; Let DefWindowProc() handle it (should probably never happen since currently the only
+      ; other type of window is SplashText, which never receive this msg?)
+      Return
+    }
+    splash := g_Progress[i]
+    If (msg=WM_SIZE){
+      new_width := lParam & 0xFFFF
+      new_height := (lParam>>16) & 0xFFFF
+      if (new_width != splash.width || new_height != splash.height)
+      {
+        GetClientRect(splash.hwnd, client_rect[])
+        control_width := client_rect.right - (splash.margin_x * 2)
+        bar_y := splash.margin_y + (splash.text1_height ? (splash.text1_height + splash.margin_y) : 0)
+        sub_y := bar_y + splash.object_height + (splash.object_height ? splash.margin_y : 0)  ;  Calculate the Y position of each control in the window.
+        ; The Y offset for each control should match those used in Splash():
+        if (new_width != splash.width)
+        {
+          if (splash.hwnd_text1) ; This control doesn't exist if the main text was originally blank.
+            MoveWindow(splash.hwnd_text1, splash.margin_x, splash.margin_y, control_width, splash.text1_height, FALSE)
+          if (splash.hwnd_bar)
+            MoveWindow(splash.hwnd_bar, splash.margin_x, bar_y, control_width, splash.object_height, FALSE)
+          splash.width := new_width
+        }
+        ; Move the window EVEN IF new_height == splash.height because otherwise the text won't
+        ; get re-centered when only the width of the window changes:
+        MoveWindow(splash.hwnd_text2, splash.margin_x, sub_y, control_width, (client_rect.bottom - client_rect.top) - sub_y, FALSE) ; Negative height seems handled okay.
+        ; Specifying true for "repaint" in MoveWindow() is not always enough refresh the text correctly,
+        ; so this is done instead:
+        InvalidateRect(splash.hwnd, client_rect[], TRUE)
+        ; If the user resizes the window, have that size retained (remembered) until the script
+        ; explicitly changes it or the script destroys the window.
+        splash.height := new_height
+      }
+      return 0 ; i.e. completely handled here.
+    }	else if (msg=WM_CTLCOLORSTATIC){
+      if (!splash.hbrush && splash.color_text == CLR_DEFAULT) ; Let DWP handle it.
+        Return DefWindowProc(hWnd, Msg, wParam, lParam)
+      ; Since we're processing this msg and not DWP, must set background color unconditionally,
+      ; otherwise plain white will likely be used:
+      SetBkColor(wParam, splash.hbrush ? splash.color_bk : GetSysColor(COLOR_BTNFACE))
+      if (splash.color_text != CLR_DEFAULT)
+        SetTextColor(wParam, splash.color_text)
+      ; Always return a real HBRUSH so that Windows knows we altered the HDC for it to use:
+      return splash.hbrush ? splash.hbrush : GetSysColorBrush(COLOR_BTNFACE)
+    } else if (msg=WM_ERASEBKGND){
+      if (splash.pic_bmp) ; And since there is a pic, its object_width/height should already be valid.
+      {
+        ypos := splash.margin_y + (splash.text1_height ? (splash.text1_height + splash.margin_y) : 0)
+        if (splash.pic_type == IMAGE_BITMAP)
+        {
+          hdc := CreateCompatibleDC(wParam)
+          ,hbmpOld := SelectObject(hdc, splash.pic_bmp)
+          ,BitBlt(wParam, splash.margin_x, ypos, splash.object_width, splash.object_height, hdc, 0, 0, SRCCOPY)
+          ,SelectObject(hdc, hbmpOld)
+          ,DeleteDC(hdc)
+        }
+        else ; IMAGE_ICON
+          DrawIconEx(wParam, splash.margin_x, ypos, splash.pic_icon, splash.object_width, splash.object_height, 0, 0, DI_NORMAL)
+        ; Prevent "flashing" by erasing only the part that hasn't already been drawn:
+        ExcludeClipRect(wParam, splash.margin_x, ypos, splash.margin_x + splash.object_width, ypos + splash.object_height)
+        ,hrgn := CreateRectRgn(0, 0, 1, 1)
+        ,GetClipRgn(wParam, hrgn)
+        ,FillRgn(wParam, hrgn, splash.hbrush ? splash.hbrush : GetSysColorBrush(COLOR_BTNFACE))
+        ,DeleteObject(hrgn)
+        return 1
+      }
+      ; Otherwise, it's a Progress window (or a SplashImage window with no picture):
+      if (splash.hbrush){ ; Let DWP handle it.
+        GetClipBox(hdc, client_rect[])
+        ,FillRect(hdc, client_rect[], splash.hbrush)
+      }
+    }
+    ;~ DllCall("InvalidateRect","PTR",splash.hwnd,"PTR", NULL,"Int", TRUE)
+    return DefWindowProc(hWnd, Msg, wParam, lParam) ;ret
+  }
+  
   aColorName:=""
   window_index := 1  ;  Set the default window to operate upon (the first).
   turn_off := false
@@ -144,7 +142,7 @@ Progress(aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFontName:=""){
   {
     ;  Allow floats at runtime for flexibility (i.e. in case aOptions was in a variable reference).
     ;  But still use ATOI for the conversion:
-    if (options+0!="") ;  Negatives are allowed as of v1.0.25.
+    if (IsNumber(options)) ;  Negatives are allowed as of v1.0.25.
     {
       bar_pos := options+0
       bar_pos_has_been_set := true
@@ -157,9 +155,9 @@ Progress(aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFontName:=""){
   ;  Do this only after the above options were set so that the each window's settings
   ;  will be remembered until such time as "Command, Off" is used:
   if (splash.hwnd && !IsWindow(splash.hwnd))
-    OnMessage(WM_ERASEBKGND,splash.hwnd,"Progress_OnMessage",0)
-		,OnMessage(WM_CTLCOLORSTATIC,splash.hwnd,"Progress_OnMessage",0)
-    ,OnMessage(WM_SIZE,splash.hwnd,"Progress_OnMessage",0),splash.hwnd := 0
+    OnMessage(WM_ERASEBKGND,splash.hwnd,Progress,0)
+		,OnMessage(WM_CTLCOLORSTATIC,splash.hwnd,Progress,0)
+    ,OnMessage(WM_SIZE,splash.hwnd,Progress,0),splash.hwnd := 0
   if (show_it_only)
   {
     if (splash.hwnd && !IsWindowVisible(splash.hwnd))
@@ -196,9 +194,9 @@ Progress(aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFontName:=""){
   }
 
   if (splash.hwnd)
-      OnMessage(WM_ERASEBKGND,splash.hwnd,"Progress_OnMessage",0)
-      ,OnMessage(WM_CTLCOLORSTATIC,splash.hwnd,"Progress_OnMessage",0)
-      ,OnMessage(WM_SIZE,splash.hwnd,"Progress_OnMessage",0)
+      OnMessage(WM_ERASEBKGND,splash.hwnd,Progress,0)
+      ,OnMessage(WM_CTLCOLORSTATIC,splash.hwnd,Progress,0)
+      ,OnMessage(WM_SIZE,splash.hwnd,Progress,0)
   ;  Otherwise, destroy any existing window first:
   if (splash.hwnd)
     DestroyWindow(splash.hwnd)
@@ -250,6 +248,7 @@ Progress(aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFontName:=""){
     splash.margin_y := 5
   cp:=(StrPtr(aOptions ""))-2
   while (""!=cp_:=StrGet(cp:=cp+2,1)){
+    val:=StrGet(cp,1)
   ;for (cp2, cp = options; cp!=""; ++cp)
     If (cp_="a"){  ;  Non-Always-on-top.  Synonymous with A0 in early versions.
       ;  Decided against this enforcement.  In the enhancement mentioned below is ever done (unlikely),
@@ -304,10 +303,10 @@ Progress(aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFontName:=""){
         continue
       cp+=2 ;  Always increment to omit the next char from consideration by the next loop iteration.
       If ("m"=cp_:=StrGet(cp,1)) {
-        if ((font_size1 := _ttoi[cp + 2]) < 0)
+        if ((font_size1 := _ttoi(cp + 2)) < 0)
           font_size1 := 0
       } else if (cp_="s"){
-        if ((font_size2 := _ttoi[cp + 2]) < 0)
+        if ((font_size2 := _ttoi(cp + 2)) < 0)
           font_size2 := 0
       }
     }else if (cp_="M"){ ;  Movable and (optionally) resizable.
@@ -317,18 +316,18 @@ Progress(aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFontName:=""){
       if (StrGet(cp + 2,1) = "2")
         style |= WS_SIZEBOX|WS_MINIMIZEBOX|WS_MAXIMIZEBOX|WS_SYSMENU
     } else if (cp_="p"){ ;  Starting position of progress bar [v1.0.25]
-      bar_pos := _ttoi[cp + 2]
+      bar_pos := _ttoi(cp + 2)
       bar_pos_has_been_set := true
     } else if (cp_="r"){ ;  Range of progress bar [v1.0.25]
-      if (""=SubStr(cp+2,1)) ;  Ignore it because we don't want cp to ever poto the NULL terminator due to the loop's increment.
+      if (""=StrGet(cp+2,1)) ;  Ignore it because we don't want cp to ever poto the NULL terminator due to the loop's increment.
         continue
-      range_min := _ttoi[cp + 2] ;  Increment cp to poit to range_min.
-      if (cp < cp2 := cp+(InStr(StrGet(cp), "-")-1)*2)  ;  +1 to omit the min's minus sign, if it has one.
+      range_min := _ttoi(cp +=2) ;  Increment cp to poit to range_min.
+      if (cp < cp2 := cp+(InStr(StrGet(cp), "-")+1)*2)  ;  +1 to omit the min's minus sign, if it has one.
       {
         cp := cp2
-        if (""=SubStr(cp+2,1)) ;  Ignore it because we don't want cp to ever poto the NULL terminator due to the loop's increment.
+        if (""=StrGet(cp+2,1)) ;  Ignore it because we don't want cp to ever poto the NULL terminator due to the loop's increment.
           continue
-        range_max := _ttoi[cp + 2] ;  Increment cp to poit to range_max, which can be negative as in this example: R-100--50
+        range_max := _ttoi(cp +=2) ;  Increment cp to poit to range_max, which can be negative as in this example: R-100--50
       }
     } else if (cp_="t"){ ;  Give it a task bar button by making it a non-owned window.
       owned := false
@@ -340,36 +339,36 @@ Progress(aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFontName:=""){
         continue
       cp+= 2 ;  Always increment to omit the next char from consideration by the next loop iteration.
       if ("m"=cp_:=StrGet(cp,1)){
-        if ((font_weight1 := _ttoi[cp + 2]) < 0)
+        if ((font_weight1 := _ttoi(cp + 2)) < 0)
           font_weight1 := 0
         break
       } else if (cp_="s"){
-        if ((font_weight2:=_ttoi[cp + 2]) < 0)
+        if ((font_weight2:=_ttoi(cp + 2)) < 0)
           font_weight2 := 0
       } else
-        splash.width := _ttoi[cp]
+        splash.width := _ttoi(cp)
     } else if (cp_="h"){
       if (StrGet(cp,4)="Hide"){ ;  Hide vs. Hidden is debatable.
         initially_hidden := true
         cp+= 2*3 ;  +3 vs. +4 due to the loop's own ++cp.
       }	else ;  Allow any width/height to be specified so that the window can be "rolled up" to its title bar:
-        splash.height := _ttoi[cp + 2]
+        splash.height := _ttoi(cp + 2)
     } else if (cp_="x"){
-      xpos := _ttoi[cp + 2]
+      xpos := _ttoi(cp + 2)
     } else if (cp_="y"){
-      ypos := _ttoi[cp + 2]
+      ypos := _ttoi(cp + 2)
     } else if (cp_="z"){
       if (""=SubStr(cp+2,1)) ;  Avoids out-of-bounds when the loop's own ++cp is done.
         continue
       cp+=2 ;  Always increment to omit the next char from consideration by the next loop iteration.
       If InStr("bh",cp_:=StrGet(cp,1)){
-        splash.object_height := _ttoi[cp + 2] ;  Allow it to be zero or negative to omit the object.
+        splash.object_height := _ttoi(cp + 2) ;  Allow it to be zero or negative to omit the object.
       ;} else if (cp_="w"){
         ; else for Progress, don't allow width to be changed since a zero would omit the bar.
       } else if (cp_="x"){
-        splash.margin_x := _ttoi[cp + 2]
+        splash.margin_x := _ttoi(cp + 2)
       } else if (cp_="y"){
-        splash.margin_y := _ttoi[cp + 2]
+        splash.margin_y := _ttoi(cp + 2)
       }
     ;  Otherwise: Ignore other characters, such as the digits that occur after the P/X/Y option letters.
     } ;  switch()
@@ -381,7 +380,7 @@ Progress(aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFontName:=""){
   ;  Get name and size of default font.
   hfont_default := GetStockObject(DEFAULT_GUI_FONT)
   hfont_old := SelectObject(hdc, hfont_default)
-  default_font_name:=BufferAlloc(65*2)
+  default_font_name:=Buffer(65*2)
   GetTextFace(hdc, 65 - 1, default_font_name.Ptr)
   default_font_name:=StrGet(default_font_name)
   GetTextMetrics(hdc, tm[])
@@ -533,9 +532,9 @@ Progress(aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFontName:=""){
                 ;  v1.0.35.01: For flexibility, allow these windows to be owned by GUIs via +OwnDialogs.
                 , main_width, main_height, owned ? (dialog_owner ? dialog_owner : A_ScriptHwnd) : 0
                 , 0, A_ModuleHandle, 0)
-  OnMessage(WM_ERASEBKGND,splash.hwnd,"Progress_OnMessage")
-  ,OnMessage(WM_CTLCOLORSTATIC,splash.hwnd,"Progress_OnMessage")
-  ,OnMessage(WM_SIZE,splash.hwnd,"Progress_OnMessage")
+  OnMessage(WM_ERASEBKGND,splash.hwnd,Progress)
+  ,OnMessage(WM_CTLCOLORSTATIC,splash.hwnd,Progress)
+  ,OnMessage(WM_SIZE,splash.hwnd,Progress)
   if !(splash.hwnd){
     ErrorLevel:=-1
     return   ;  No error msg since so rare.
@@ -590,7 +589,7 @@ Progress(aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFontName:=""){
         if (range_min > -1 && range_min < 0x10000 && range_max > -1 && range_max < 0x10000)
           ;  Since the values fall within the bounds for Win95/NT to support, use the old method
           ;  in case Win95/NT lacks MSIE 3.0:
-          SendMessage_(splash.hwnd_bar, PBM_SETRANGE, 0, (range_min & 0xffff) | (range_max & 0xffff) << 16 & 0xFFFF)
+          SendMessage_(splash.hwnd_bar, PBM_SETRANGE, 0, MAKELPARAM(range_min,range_max)) ;(range_min & 0xffff) | (range_max & 0xffff) << 16 & 0xFFFF)
         else
           SendMessage_(splash.hwnd_bar, PBM_SETRANGE32, range_min, range_max)
       }

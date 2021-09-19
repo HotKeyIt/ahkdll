@@ -1,4 +1,4 @@
-/*
+﻿/*
 Debugger.h
 
 Original code by Steve Gray.
@@ -71,15 +71,6 @@ freely, without restriction.
 
 class Debugger;
 
-extern Debugger g_Debugger;
-#ifndef _USRDLL
-extern CRITICAL_SECTION g_CriticalDebugger;
-#endif
-// jackieku: modified to hold the buffer.
-extern CStringA g_DebuggerHost;
-extern CStringA g_DebuggerPort;
-
-
 enum BreakpointTypeType {BT_Line, BT_Call, BT_Return, BT_Exception, BT_Conditional, BT_Watch};
 enum BreakpointStateType {BS_Disabled=0, BS_Enabled};
 
@@ -98,7 +89,7 @@ public:
 	}
 
 private:
-	_thread_local static int sMaxId; // Highest used breakpoint ID.
+	thread_local static int sMaxId; // Highest used breakpoint ID.
 };
 
 
@@ -168,14 +159,8 @@ struct DbgStack
 
 	void Pop()
 	{
-#ifndef _USRDLL
-		EnterCriticalSection(&g_CriticalDebugger);
-#endif
 		ASSERT(mTop >= mBottom);
 		--mTop;
-#ifndef _USRDLL
-		LeaveCriticalSection(&g_CriticalDebugger);
-#endif
 	}
 
 	void Push(TCHAR *aDesc);
@@ -185,8 +170,8 @@ struct DbgStack
 	void GetLocalVars(int aDepth, VarList *&aVars, VarList *&aStaticVars, VarBkp *&aBkp, VarBkp *&aBkpEnd);
 };
 
-#define DEBUGGER_STACK_PUSH(aWhat)	g_Debugger.mStack.Push(aWhat);
-#define DEBUGGER_STACK_POP()		g_Debugger.mStack.Pop();
+#define DEBUGGER_STACK_PUSH(aWhat)	g_Debugger->mStack->Push(aWhat);
+#define DEBUGGER_STACK_POP()		g_Debugger->mStack->Pop();
 
 
 enum PropertyContextType {PC_Local=0, PC_Global};
@@ -216,7 +201,7 @@ public:
 			|| ((mInternalState == DIS_StepOut || mInternalState == DIS_StepOver)
 				// Always '<' since '<=' (for StepOver) shouldn't be possible,
 				// since we just returned from a function call:
-				&& mStack.Depth() < mContinuationDepth))
+				&& mStack->Depth() < mContinuationDepth))
 			// The final check ensures we don't repeatedly break at a line containing
 			// multiple built-in function calls; i.e. don't break unless some script
 			// has been executed since we began evaluating aExpressionLine.  Something
@@ -282,24 +267,19 @@ public:
 
 	Debugger() : mSocket(INVALID_SOCKET), mInternalState(DIS_Starting)
 		, mMaxPropertyData(1024), mContinuationTransactionId(""), mStdErrMode(SR_Disabled), mStdOutMode(SR_Disabled)
-		, mMaxChildren(20), mMaxDepth(2)
-#ifndef _USRDLL
+		, mMaxChildren(20), mMaxDepth(2), mDisabledHooks(0)
 		, mInterlockedExec(0), mCurrhWnd(NULL)
-#endif
-		, mDisabledHooks(0)
 	{
 	}
 
 	
 	// Stack - keeps track of threads and function calls.
-	DbgStack mStack;
+	DbgStack *mStack;
 
 private:
 	SOCKET mSocket;
-#ifndef _USRDLL
 	LONG mInterlockedExec;
 	HWND mCurrhWnd;
-#endif
 	Line *mCurrLine; // Similar to g_script->mCurrLine, but may be different when breaking post-function-call, before continuing expression evaluation.
 	LPTSTR *mSourceFile;
 
@@ -348,8 +328,9 @@ private:
 	CStringA mContinuationTransactionId; // transaction_id of last continuation command.
 
 	int mMaxPropertyData, mMaxChildren, mMaxDepth;
+
 	HookType mDisabledHooks;
-	
+
 
 	enum PropertyType
 	{
@@ -439,11 +420,7 @@ private:
 
 	int EnterBreakState();
 	void ExitBreakState();
-#ifdef _USRDLL
-	int WriteBreakpointXml(Breakpoint *aBreakpoint, Line *aLine);
-#else
 	int WriteBreakpointXml(Breakpoint *aBreakpoint, Line *aLine, LPTSTR *aSourceFile);
-#endif
 
 	void AppendPropertyName(CStringA &aNameBuf, size_t aParentNameLength, const char *aName);
 	void AppendStringKey(CStringA &aNameBuf, size_t aParentNameLength, const char *aKey);
@@ -471,7 +448,7 @@ private:
 	// Decode a file URI in-place.
 	void DecodeURI(char *aUri);
 	
-	_thread_local static const char *sBase64Chars;
+	thread_local static const char *sBase64Chars;
 	static size_t Base64Encode(char *aBuf, const char *aInput, size_t aInputSize = -1);
 	static size_t Base64Decode(char *aBuf, const char *aInput, size_t aInputSize = -1);
 
@@ -485,7 +462,7 @@ private:
 		CommandFunc mFunc;
 	};
 
-	_thread_local static CommandDef sCommands[];
+	thread_local static CommandDef sCommands[];
 	
 
 	// Debugger::ParseArgs
@@ -506,6 +483,10 @@ private:
 	// Fatal debugger error. Prompt user to terminate script or only disconnect debugger.
 	static int FatalError(LPCTSTR aMessage = DEBUGGER_ERR_INTERNAL DEBUGGER_ERR_DISCONNECT_PROMPT);
 };
+
+
+void GetScriptStack(LPTSTR aBuf, int aBufSize, DbgStack::Entry *aTop = nullptr);
+
 
 #endif
 #endif

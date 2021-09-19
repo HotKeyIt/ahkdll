@@ -1,4 +1,4 @@
-
+﻿
 #define ParamIndexToString(index, ...)				TokenToString(*aParam[(index)], __VA_ARGS__)
 #define ParamIndexToInt64(index)					TokenToInt64(*aParam[(index)])
 #define ParamIndexToInt(index)						(int)ParamIndexToInt64(index)
@@ -8,14 +8,16 @@
 #define ParamIndexToBOOL(index)						TokenToBOOL(*aParam[(index)])
 #define ParamIndexToObject(index)					TokenToObject(*aParam[(index)])
 #define ParamIndexToToggleValue(index)				TokenToToggleValue(*aParam[(index)])
-													
+
+#define ParamIndexToOutputVar(index)				((index) < aParamCount ? TokenToOutputVar(*aParam[(index)]) : nullptr)
+
 // Omitted parameter returns SCS_INSENSITIVE.
 #define ParamIndexToCaseSense(index)				(ParamIndexIsOmitted((index)) ? SCS_INSENSITIVE : TokenToStringCase(*aParam[(index)]))
 
 #define ParamIndexIsNumeric(index)  (TokenIsNumeric(*aParam[(index)]))
 
 // For functions that allow "" to mean parameter is omitted.
-#define ParamIndexIsOmittedOrEmpty(index)  (ParamIndexIsOmitted(index) || TokenIsEmptyString(*aParam[(index)], TRUE))
+#define ParamIndexIsOmittedOrEmpty(index)  (ParamIndexIsOmitted(index) || TokenIsEmptyString(*aParam[(index)]))
 
 // For functions that don't allow "" to mean parameter is omitted.
 #define ParamIndexIsOmitted(index)  ((index) >= aParamCount || aParam[(index)]->symbol == SYM_MISSING)
@@ -29,8 +31,6 @@
 #define ParamIndexToOptionalInt64(index, def)		ParamIndexToOptionalType(Int64, index, def)
 #define ParamIndexToOptionalBOOL(index, def)		ParamIndexToOptionalType(BOOL, index, def)
 #define ParamIndexToOptionalVar(index)				(((index) < aParamCount && aParam[index]->symbol == SYM_VAR) ? aParam[index]->var : NULL)
-
-#define ParamIndexToOutputVar ParamIndexToOptionalVar
 
 inline LPTSTR _OptionalStringDefaultHelper(LPTSTR aDef, LPTSTR aBuf = NULL, size_t *aLength = NULL)
 {
@@ -58,10 +58,24 @@ inline LPTSTR _OptionalStringDefaultHelper(LPTSTR aDef, LPTSTR aBuf = NULL, size
 
 #define Throw_if_Param_NaN(ParamIndex) \
 	if (!TokenIsNumeric(*aParam[(ParamIndex)])) \
-		_f_throw_type(_T("Number"), *aParam[(ParamIndex)])
+		_f_throw_param((ParamIndex), _T("Number"))
 
+
+#define Throw_if_RValue_NaN() \
+	if (!TokenIsNumeric(aValue)) \
+		_f_throw_type(_T("Number"), aValue)
 
 #define BivRValueToString(...)  TokenToString(aValue, _f_number_buf, __VA_ARGS__)
 #define BivRValueToInt64()  TokenToInt64(aValue)
 #define BivRValueToBOOL()  TokenToBOOL(aValue)
 #define BivRValueToObject()  TokenToObject(aValue)
+
+
+template<class T>
+BIF_DECL(NewObject)
+{
+	Object *obj = T::Create();
+	if (!obj)
+		_f_throw_oom;
+	obj->New(aResultToken, aParam, aParamCount);
+}

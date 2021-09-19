@@ -17,7 +17,7 @@ GNU General Public License for more details.
 #ifndef script_h
 #define script_h
 
-#include "stdafx.h" // pre-compiled headers
+#include "pch.h" // pre-compiled headers
 #include "defines.h"
 #include "SimpleHeap.h" // for overloaded new/delete operators.
 #include "keyboard_mouse.h" // for modLR_type
@@ -27,9 +27,8 @@ GNU General Public License for more details.
 #include "Util.h" // for FileTimeToYYYYMMDD(), strlcpy()
 #include "resources/resource.h"  // For tray icon.
 #include "Debugger.h"
-#include "exports.h"  // for addfile in script2.cpp
+#include "exports.h"  // for addScript and ahkExec in script2.cpp
 #include "os_version.h" // For the global OS_Version object
-
 #include "Winternl.h"
 
 EXTERN_OSVER; // For the access to the g_os version object without having to include globaldata.h
@@ -49,10 +48,8 @@ EXTERN_G;
 // unconditionally when creating new threads.
 
 // maximal simultaneously running autohotkey threads started via NewThread, tests shown that max is around 900 at /STACK:"4194304" but 2048 should not harm a lot
-#ifndef _USRDLL
 #define MAX_AHK_THREADS 1024
 unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine);
-#endif
 
 enum ExecUntilMode {NORMAL_MODE, UNTIL_RETURN, UNTIL_BLOCK_END, ONLY_ONE_LINE};
 
@@ -79,8 +76,8 @@ enum VariableTypeType {VAR_TYPE_INVALID, VAR_TYPE_NUMBER, VAR_TYPE_INTEGER, VAR_
 #define ATTACH_THREAD_INPUT \
 	bool threads_are_attached = false;\
 	DWORD target_thread = GetWindowThreadProcessId(target_window, NULL);\
-	if (target_thread && target_thread != g_ThreadID && !IsWindowHung(target_window))\
-		threads_are_attached = AttachThreadInput(g_ThreadID, target_thread, TRUE) != 0;
+	if (target_thread && target_thread != g_MainThreadID && !IsWindowHung(target_window))\
+		threads_are_attached = AttachThreadInput(g_MainThreadID, target_thread, TRUE) != 0;
 // BELOW IS SAME AS ABOVE except it checks do_activate and also does a SetActiveWindow():
 #define ATTACH_THREAD_INPUT_AND_SETACTIVEWINDOW_IF_DO_ACTIVATE \
 	bool threads_are_attached = false;\
@@ -88,30 +85,23 @@ enum VariableTypeType {VAR_TYPE_INVALID, VAR_TYPE_NUMBER, VAR_TYPE_INTEGER, VAR_
 	if (do_activate)\
 	{\
 		target_thread = GetWindowThreadProcessId(target_window, NULL);\
-		if (target_thread && target_thread != g_ThreadID && !IsWindowHung(target_window))\
-			threads_are_attached = AttachThreadInput(g_ThreadID, target_thread, TRUE) != 0;\
+		if (target_thread && target_thread != g_MainThreadID && !IsWindowHung(target_window))\
+			threads_are_attached = AttachThreadInput(g_MainThreadID, target_thread, TRUE) != 0;\
 		SetActiveWindow(target_window);\
 	}
 
 #define DETACH_THREAD_INPUT \
 	if (threads_are_attached)\
-		AttachThreadInput(g_ThreadID, target_thread, FALSE);
-
-#define RESEED_RANDOM_GENERATOR \
-{\
-	FILETIME ft;\
-	GetSystemTimeAsFileTime(&ft);\
-	init_genrand(ft.dwLowDateTime);\
-}
+		AttachThreadInput(g_MainThreadID, target_thread, FALSE);
 
 class CAutoMallocAFree
 {
 public:
 	CAutoMallocAFree() : m_pMem(0) {};
 	~CAutoMallocAFree() { if (m_pMem) g_memset(m_pMem, 0, m_sz); _freea(m_pMem); }
-	void Set(void *pMem, size_t sz){ m_sz = sz; m_pMem = pMem; }
+	void Set(void* pMem, size_t sz) { m_sz = sz; m_pMem = pMem; }
 private:
-	void    *m_pMem;
+	void* m_pMem;
 	size_t	m_sz;
 };
 
@@ -142,6 +132,7 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 	, ID_TRAY_EDITSCRIPT, ID_TRAY_SUSPEND, ID_TRAY_PAUSE, ID_TRAY_EXIT
 	, ID_TRAY_SEP1, ID_TRAY_SEP2, ID_TRAY_LAST = ID_TRAY_SEP2 // But this value should never hit the below. There is debug code to enforce.
 	, ID_MAIN_FIRST = 65400, ID_MAIN_LAST = 65534}; // These should match the range used by resource.h
+
 #define GUI_INDEX_TO_ID(index) (index + CONTROL_ID_FIRST)
 #define GUI_ID_TO_INDEX(id) (id - CONTROL_ID_FIRST) // Returns a small negative if "id" is invalid, such as 0.
 #define GUI_HWND_TO_INDEX(hwnd) GUI_ID_TO_INDEX(GetDlgCtrlID(hwnd)) // Returns a small negative on failure (e.g. HWND not found).
@@ -166,6 +157,7 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_UNRECOGNIZED_ACTION _T("This line does not contain a recognized action.")
 #define ERR_NONEXISTENT_HOTKEY _T("Nonexistent hotkey.")
 #define ERR_NONEXISTENT_VARIANT _T("Nonexistent hotkey variant (IfWin).")
+#define ERR_NONEXISTENT_HOTSTRING _T("Nonexistent hotstring.")
 #define ERR_INVALID_KEYNAME _T("Invalid key name.")
 #define ERR_UNSUPPORTED_PREFIX _T("Unsupported prefix key.")
 #define ERR_ALTTAB_MODLR _T("This AltTab hotkey must specify which key (L or R).")
@@ -208,6 +200,7 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_UNEXPECTED_CLOSE_BRACKET _T("Unexpected \"]\"")
 #define ERR_UNEXPECTED_CLOSE_BRACE _T("Unexpected \"}\"")
 #define ERR_UNEXPECTED_COMMA _T("Unexpected comma")
+#define ERR_PROPERTY_EMPTY_BRACKETS _T("Empty [] not permitted.")
 #define ERR_BAD_AUTO_CONCAT _T("Missing space or operator before this.")
 #define ERR_MISSING_CLOSE_QUOTE _T("Missing close-quote") // No period after short phrases.
 #define ERR_MISSING_COMMA _T("Missing comma")             //
@@ -255,10 +248,10 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_INVALID_STRUCT_BIT_POINTER _T("Bit field must not be a pointer")
 #define ERR_MUST_INIT_STRUCT _T("Empty pointer, dynamic Structure fields must be initialized manually first.")
 #define ERR_MUST_DECLARE _T("This variable must be declared.")
-#define ERR_REMOVE_THE_PERCENT _T("If this variable was not intended to be dynamic, remove the % symbols from it.")
-#define ERR_DYNAMIC_TOO_LONG _T("This dynamically built variable name is too long.  ") ERR_REMOVE_THE_PERCENT
-#define ERR_DYNAMIC_BLANK _T("This dynamic variable is blank.  ") ERR_REMOVE_THE_PERCENT
+#define ERR_DYNAMIC_BLANK _T("This dynamic variable is blank.")
 #define ERR_DYNAMIC_UPVAR _T("This dynamic variable is not included in this closure.")
+#define ERR_DYNAMIC_NOT_FOUND _T("Variable not found.")
+#define ERR_DYNAMIC_BAD_GLOBAL _T("This dynamic assignment requires a \"global\" declaration.")
 #define ERR_HOTKEY_IF_EXPR _T("Parameter #1 must match an existing #HotIf expression.")
 #define ERR_EXCEPTION _T("An exception was thrown.")
 #define ERR_INVALID_ASSIGNMENT _T("Invalid assignment.")
@@ -290,7 +283,7 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_SOUND_COMPONENT _T("Component not found")
 #define ERR_SOUND_CONTROLTYPE _T("Component doesn't support this control type")
 #define ERR_TIMEOUT _T("Timeout")
-#define WARNING_USE_UNSET_VARIABLE _T("This variable has not been assigned a value.")
+#define ERR_VAR_UNSET _T("This variable has not been assigned a value.")
 #define WARNING_ALWAYS_UNSET_VARIABLE _T("This variable appears to never be assigned a value.")
 #define WARNING_LOCAL_SAME_AS_GLOBAL _T("This local variable has the same name as a global variable.")
 #define WARNING_USE_ENV_VARIABLE _T("An environment variable is being accessed; see #NoEnv.")
@@ -311,6 +304,8 @@ enum MainWindowModes {MAIN_MODE_NO_CHANGE, MAIN_MODE_LINES, MAIN_MODE_VARS
 	, MAIN_MODE_HOTKEYS, MAIN_MODE_KEYHISTORY, MAIN_MODE_REFRESH};
 ResultType ShowMainWindow(MainWindowModes aMode = MAIN_MODE_NO_CHANGE, bool aRestricted = true);
 DWORD GetAHKInstallDir(LPTSTR aBuf);
+Var* LoadDllFunction(LPTSTR parameter, LPTSTR aBuf);
+
 
 struct InputBoxType
 {
@@ -345,13 +340,13 @@ inline void swap(T &v1, T &v2) {
 
 static inline int DPIScale(int x)
 {
-	extern int g_ScreenDPI;
+	thread_local extern int g_ScreenDPI;
 	return MulDiv(x, g_ScreenDPI, 96);
 }
 
 static inline int DPIUnscale(int x)
 {
-	extern int g_ScreenDPI;
+	thread_local extern int g_ScreenDPI;
 	return MulDiv(x, 96, g_ScreenDPI);
 }
 
@@ -371,6 +366,7 @@ bool HandleMenuItem(HWND aHwnd, WORD aMenuItemID, HWND aGuiHwnd);
 INT_PTR CALLBACK TabDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam);
 #define TABDIALOG_ATTRIB_INDEX(a) (TabControlIndexType)(a & 0xFF)
 #define TABDIALOG_ATTRIB_THEMED 0x100
+
 
 typedef UINT LineNumberType;
 typedef WORD FileIndexType; // Use WORD to conserve memory due to its use in the Line class (adjacency to other members and due to 4-byte struct alignment).
@@ -397,25 +393,17 @@ enum DerefTypeType : BYTE
 	DT_WORDOP,		// Word operator: and, or, not, new.
 	DT_CONST_INT,	// Constant integer value (true, false).
 	DT_DOTPERCENT,	// Dynamic member: .%name%
-	DT_FUNCREF,		// Reference to function (for fat arrow functions).
-	// DerefType::is_function() requires that these are last:
-	DT_FUNC,		// Function call.
-	DT_VARIADIC		// Variadic function call.
+	DT_FUNCREF		// Reference to function (for fat arrow functions).
 };
 
 class Func; // Forward declaration for use below.
-struct FuncLibrary
-{
-	LPTSTR path;
-	DWORD_PTR length;
-};
 struct DerefType
 {
 	LPTSTR marker;
 	union
 	{
 		Var *var; // DT_VAR
-		Func *func; // DT_FUNC
+		Func *func; // DT_FUNCREF
 		DerefType *next; // DT_STRING
 		SymbolType symbol; // DT_WORDOP
 		int int_value; // DT_CONST_INT
@@ -423,14 +411,13 @@ struct DerefType
 	// Keep any fields that aren't an even multiple of 4 adjacent to each other.  This conserves memory
 	// due to byte-alignment:
 	DerefTypeType type;
-	bool is_function() { return type == DT_FUNC; }
 	UCHAR substring_count;
 	DerefLengthType length; // Listed only after byte-sized fields, due to it being a WORD.
 };
 
 struct CallSite
 {
-	IObject *func = nullptr;
+	Func *func = nullptr;
 	LPTSTR member = nullptr;
 	int flags = IT_CALL;
 	int param_count = 0;
@@ -438,16 +425,10 @@ struct CallSite
 	bool is_variadic() { return flags & EIF_VARIADIC; }
 	void is_variadic(bool b) { if (b) flags |= EIF_VARIADIC; else flags &= ~EIF_VARIADIC; }
 	
-	void init() {
-		func = nullptr;
-		member = nullptr;
-		flags = IT_CALL;
-		param_count = 0;
-	}
-	//void *operator new(size_t aBytes) {return malloc(aBytes);}
-	//void *operator new[](size_t aBytes) {return malloc(aBytes);}
-	//void operator delete(void *aPtr) { free(aPtr); }  // Intentionally does nothing.
-	//void operator delete[](void *aPtr) {free(aPtr); }
+	void *operator new(size_t aBytes) {return g_SimpleHeap->Alloc(aBytes);}
+	void *operator new[](size_t aBytes) {return g_SimpleHeap->Alloc(aBytes);}
+	void operator delete(void *aPtr) {}  // Intentionally does nothing.
+	void operator delete[](void *aPtr) {}
 };
 
 typedef UCHAR ArgTypeType;  // UCHAR vs. an enum, to save memory.
@@ -473,27 +454,20 @@ struct ArgStruct
 
 __int64 pow_ll(__int64 base, __int64 exp); // integer power function
 
-#define BIF_DECL_PARAMS ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount
-
-// The following macro is used for definitions and declarations of built-in functions:
-#define BIF_DECL(name) void name(BIF_DECL_PARAMS)
-
 #define _f__oneline(act)		do { act } while (0)		// Make the macro safe to use like a function, under if(), etc.
 #define _f__ret(act)			_f__oneline( act; return; )	// BIFs have no return value.
-#define _o__ret(act)			return (act)				// IObject::Invoke() returns ResultType.
 // The following macros are used in built-in functions and objects to reduce code repetition
 // and facilitate changes to the script "ABI" (i.e. the way in which parameters and return
 // values are passed around).  For instance, the built-in functions might someday be exposed
 // via COM IDispatch or coupled with different scripting languages.
 #define _f_return(...)			_f__ret(aResultToken.Return(__VA_ARGS__))
-#define _o_return(...)			_o__ret(aResultToken.Return(__VA_ARGS__))
 #define _f_throw(...)			_f__ret(aResultToken.Error(__VA_ARGS__))
+#define _f_throw_param(_prm_, ...)	return ((void)aResultToken.ParamError(_prm_, aParam[_prm_], __VA_ARGS__))
 #define _f_throw_win32(...)		return ((void)aResultToken.Win32Error(__VA_ARGS__))
+#define _f_throw_value(...)		return ((void)aResultToken.ValueError(__VA_ARGS__))
 #define _f_throw_type(...)		return ((void)aResultToken.TypeError(__VA_ARGS__))
-#define _o_throw(...)			_o__ret(aResultToken.Error(__VA_ARGS__))
-#define _o_throw_win32(...)		return aResultToken.Win32Error(__VA_ARGS__)
+#define _f_throw_oom			return ((void)aResultToken.MemoryError())
 #define _f_return_FAIL			_f__ret(aResultToken.SetExitResult(FAIL))
-#define _o_return_FAIL			_o__ret(aResultToken.SetExitResult(FAIL))
 // The _f_set_retval macros should be used with care because the integer macros assume symbol
 // is set to its default value; i.e. don't set a string and then attempt to return an integer.
 // It is also best for maintainability to avoid setting mem_to_free or an object without
@@ -505,16 +479,27 @@ __int64 pow_ll(__int64 base, __int64 exp); // integer power function
 #define _f_return_i(n)			_f__ret(_f_set_retval_i(n)) // Return an integer.  Reduces code size vs _f_return() by assuming symbol == SYM_INTEGER, the default for BIFs.
 #define _f_return_b(b)			_f_return_i((bool)(b)) // Boolean.  Currently just returns an int because we have no boolean type.
 #define _f_return_p(...)		_f__ret(_f_set_retval_p(__VA_ARGS__)) // Return a string which is already in persistent memory.
-#define _o_return_p(...)		_o__ret(_f_set_retval_p(__VA_ARGS__)) // Return a string which is already in persistent memory.
 #define _f_return_retval		return  // Return the value set by _f_set_retval().
-#define _o_return_retval		return OK
 #define _f_return_empty			_f_return_p(_T(""), 0)
-#define _o_return_empty			return OK  // Default return value for Invoke is "".
-#define _o_return_or_throw(p)	if (p) _o_return(p); else _o_throw(ERR_OUTOFMEM);
 #define _f_retval_buf			(aResultToken.buf)
 #define _f_retval_buf_size		MAX_NUMBER_SIZE
 #define _f_number_buf			_f_retval_buf  // An alias to show intended usage, and in case the buffer size is changed.
 #define _f_callee_id			(aResultToken.func->mFID)
+// The _o_ macros originally needed different implementations due to differences between the
+// function signature for methods and that for built-in functions.  Currently they're similar
+// enough that most of these macros can just be aliases (kept for maintainability).
+#define _o__ret					_f__ret
+#define _o_throw				_f_throw
+#define _o_throw_param			_f_throw_param
+#define _o_throw_win32			_f_throw_win32
+#define _o_throw_value			_f_throw_value
+#define _o_throw_type			_f_throw_type
+#define _o_throw_oom			_f_throw_oom
+#define _o_return				_f_return
+#define _o_return_p				_f_return_p
+#define _o_return_FAIL			_f_return_FAIL
+#define _o_return_retval		_f_return_retval
+#define _o_return_empty			_o_return_retval  // Default return value for Invoke is "".
 
 
 struct LoopFilesStruct : WIN32_FIND_DATA
@@ -599,12 +584,12 @@ struct RegItemStruct
 class TextStream; // TextIO
 struct LoopReadFileStruct
 {
-	TextStream *mReadFile, *mWriteFile;
+	TextStream *mWriteFile; // Currently no need for mReadFile, so it's left as a local variable of PerformLoopRead().
 	LPTSTR mWriteFileName;
 	#define READ_FILE_LINE_SIZE (64 * 1024)
 	TCHAR mCurrentLine[READ_FILE_LINE_SIZE];
-	LoopReadFileStruct(TextStream *aReadFile, LPTSTR aWriteFileName)
-		: mReadFile(aReadFile), mWriteFile(NULL) // mWriteFile is opened by FileAppend() only upon first use.
+	LoopReadFileStruct(LPTSTR aWriteFileName)
+		: mWriteFile(nullptr) // mWriteFile is opened by FileAppend() only upon first use.
 		, mWriteFileName(aWriteFileName) // Caller has passed the result of _tcsdup() for us to take over.
 	{
 		*mCurrentLine = '\0';
@@ -620,8 +605,32 @@ struct LoopReadFileStruct
 #define DEFAULT_READ_FLAGS (TextStream::READ | TextStream::EOL_CRLF | TextStream::EOL_ORPHAN_CR | TextStream::SHARE_READ | TextStream::SHARE_WRITE)
 
 
+struct CatchStatementArgs
+{
+	Var *output_var;
+	IObject **prototype;
+	int prototype_count;
+};
+
+
 typedef UCHAR ArgCountType;
 #define MAX_ARGS 20   // Maximum number of args used by any command.
+
+
+enum DllArgTypes {
+	  DLL_ARG_INVALID
+	, DLL_ARG_ASTR
+	, DLL_ARG_INT
+	, DLL_ARG_SHORT
+	, DLL_ARG_CHAR
+	, DLL_ARG_INT64
+	, DLL_ARG_FLOAT
+	, DLL_ARG_DOUBLE
+	, DLL_ARG_WSTR
+	, DLL_ARG_STR  = UorA(DLL_ARG_WSTR, DLL_ARG_ASTR)
+	, DLL_ARG_xSTR = UorA(DLL_ARG_ASTR, DLL_ARG_WSTR) // To simplify some sections.
+};  // Some sections might rely on DLL_ARG_INVALID being 0.
+
 
 // Note that currently this value must fit into a sc_type variable because that is how TextToKey()
 // stores it in the hotkey class.  sc_type is currently a UINT, and will always be at least a
@@ -639,13 +648,15 @@ enum JoyControls {JOYCTRL_INVALID, JOYCTRL_XPOS, JOYCTRL_YPOS, JOYCTRL_ZPOS
 };
 #define IS_JOYSTICK_BUTTON(joy) (joy >= JOYCTRL_1 && joy <= JOYCTRL_BUTTON_MAX)
 
+
 // Each line in the enumeration below corresponds to a group of built-in functions (defined
 // in g_BIF) which are implemented using a single C++ function.  These IDs are passed to the
 // C++ function to tell it which function is being called.  Each group starts at ID 0 in case
 // it helps the compiler to reduce code size.
 enum BuiltInFunctionID {
+	FID_Object_New = -1,
+	FID_GetMethod = 0, FID_HasMethod,
 	FID_DllCall = 0, FID_ComCall,
-	FID_Func = 0, FID_FuncClose,
 	FID_LV_GetNext = 0, FID_LV_GetCount,
 	FID_LV_Add = 0, FID_LV_Insert, FID_LV_Modify,
 	FID_LV_InsertCol = 0, FID_LV_ModifyCol, FID_LV_DeleteCol,
@@ -657,7 +668,7 @@ enum BuiltInFunctionID {
 	FID_RegExMatch = 0, FID_RegExReplace,
 	FID_Input = 0, FID_InputEnd,
 	FID_GetKeyName = 0, FID_GetKeyVK = 1, FID_GetKeySC,
-	FID_StrLower = 0, FID_StrUpper,
+	FID_StrLower = 0, FID_StrUpper, FID_StrTitle,
 	FID_StrGet = 0, FID_StrPut,
 	FID_FileExist = 0, FID_DirExist,
 	FID_WinExist = 0, FID_WinActive,
@@ -665,9 +676,8 @@ enum BuiltInFunctionID {
 	FID_ASin = 0, FID_ACos,
 	FID_Sqrt = 0, FID_Log, FID_Ln,
 	FID_Min = 0, FID_Max,
-	FID_Random = 0, FID_RandomSeed,
 	FID_ObjAddRef = 0, FID_ObjRelease,
-	FID_ObjHasOwnProp = 0, FID_ObjOwnPropCount, FID_ObjGetCapacity, FID_ObjSetCapacity, FID_ObjOwnProps, FID_ObjOwnMethods,
+	FID_ObjHasOwnProp = 0, FID_ObjOwnPropCount, FID_ObjGetCapacity, FID_ObjSetCapacity, FID_ObjOwnProps,
 	FID_ObjGetBase = 0, FID_ObjSetBase,
 	FID_ObjPtr = 0, FID_ObjPtrAddRef, FID_ObjFromPtr, FID_ObjFromPtrAddRef,
 	FID_WinGetID = 0, FID_WinGetIDLast, FID_WinGetPID, FID_WinGetProcessName, FID_WinGetProcessPath, FID_WinGetCount, FID_WinGetList, FID_WinGetMinMax, FID_WinGetControls, FID_WinGetControlsHwnd, FID_WinGetTransparent, FID_WinGetTransColor, FID_WinGetStyle, FID_WinGetExStyle,
@@ -682,7 +692,7 @@ enum BuiltInFunctionID {
 	FID_ControlGetChecked = 0, FID_ControlGetEnabled, FID_ControlGetVisible, FID_ControlFindItem, FID_ControlGetIndex, FID_ControlGetChoice, FID_ControlGetItems, FID_ListViewGetContent, FID_EditGetLineCount, FID_EditGetCurrentLine, FID_EditGetCurrentCol, FID_EditGetLine, FID_EditGetSelectedText, FID_ControlGetStyle, FID_ControlGetExStyle, FID_ControlGetHwnd,
 	FID_ControlSetChecked = 0, FID_ControlSetEnabled, FID_ControlShow, FID_ControlHide, FID_ControlSetStyle, FID_ControlSetExStyle, FID_ControlShowDropDown, FID_ControlHideDropDown, FID_ControlAddItem, FID_ControlDeleteItem, FID_ControlChooseIndex, FID_ControlChooseString, FID_EditPaste,
 	FID_ControlSend = SCM_NOT_RAW, FID_ControlSendText = SCM_RAW_TEXT,
-	FID_DriveEject = 0, FID_DriveLock, FID_DriveUnlock, FID_DriveSetLabel,
+	FID_DriveEject = 0, FID_DriveLock, FID_DriveUnlock, FID_DriveSetLabel, FID_DriveRetract,
 	FID_DriveGetList = 0, FID_DriveGetFilesystem, FID_DriveGetLabel, FID_DriveGetSerial, FID_DriveGetType, FID_DriveGetStatus, FID_DriveGetStatusCD, FID_DriveGetCapacity, FID_DriveGetSpaceFree,
 	FID_EnvGet = 0, FID_EnvSet,
 	FID_PostMessage = 0, FID_SendMessage,
@@ -706,7 +716,9 @@ enum GuiControlTypes {GUI_CONTROL_INVALID // GUI_CONTROL_INVALID must be zero du
 	, GUI_CONTROL_LISTBOX, GUI_CONTROL_LISTVIEW, GUI_CONTROL_TREEVIEW
 	, GUI_CONTROL_EDIT, GUI_CONTROL_DATETIME, GUI_CONTROL_MONTHCAL, GUI_CONTROL_HOTKEY
 	, GUI_CONTROL_UPDOWN, GUI_CONTROL_SLIDER, GUI_CONTROL_PROGRESS, GUI_CONTROL_TAB, GUI_CONTROL_TAB2, GUI_CONTROL_TAB3
-	, GUI_CONTROL_ACTIVEX, GUI_CONTROL_LINK, GUI_CONTROL_CUSTOM, GUI_CONTROL_STATUSBAR, GUI_CONTROL_GUI}; // Kept last to reflect it being bottommost in switch()s (for perf), since not too often used.
+	, GUI_CONTROL_ACTIVEX, GUI_CONTROL_LINK, GUI_CONTROL_CUSTOM, GUI_CONTROL_STATUSBAR, GUI_CONTROL_GUI // Kept last to reflect it being bottommost in switch()s (for perf), since not too often used.
+	, GUI_CONTROL_TYPE_COUNT};
+
 #define GUI_CONTROL_TYPE_NAMES  _T(""), \
 	_T("Text"), _T("Pic"), _T("GroupBox"), \
 	_T("Button"), _T("CheckBox"), _T("Radio"), \
@@ -714,7 +726,7 @@ enum GuiControlTypes {GUI_CONTROL_INVALID // GUI_CONTROL_INVALID must be zero du
 	_T("ListBox"), _T("ListView"), _T("TreeView"), \
 	_T("Edit"), _T("DateTime"), _T("MonthCal"), _T("Hotkey"), \
 	_T("UpDown"), _T("Slider"), _T("Progress"), _T("Tab"), _T("Tab2"), _T("Tab3"), \
-	_T("ActiveX"), _T("Link"), _T("Custom"), _T("StatusBar")
+	_T("ActiveX"), _T("Link"), _T("Custom"), _T("StatusBar"), _T("Gui")
 
 enum ThreadCommands {THREAD_CMD_INVALID, THREAD_CMD_PRIORITY, THREAD_CMD_INTERRUPT, THREAD_CMD_NOTIMERS};
 
@@ -724,23 +736,25 @@ class Line
 {
 private:
 	ResultType EvaluateCondition();
+	ResultType EvaluateSwitchCase(ExprTokenType &aSwitch, SymbolType aSwitchIsNumeric, ExprTokenType &aCase, StringCaseSenseType aStringCaseSense);
 	bool EvaluateLoopUntil(ResultType &aResult);
-	ResultType Line::PerformLoop(ResultToken *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
+	ResultType PerformLoop(ResultToken *aResultToken, Line *&aJumpToLine, Line *aUntil
 		, __int64 aIterationLimit, bool aIsInfinite);
-	ResultType Line::PerformLoopFilePattern(ResultToken *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
+	ResultType PerformLoopFilePattern(ResultToken *aResultToken, Line *&aJumpToLine, Line *aUntil
 		, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, LPTSTR aFilePattern);
 	bool ParseLoopFilePattern(LPTSTR aFilePattern, LoopFilesStruct &lfs, ResultType &aResult);
-	ResultType PerformLoopFilePattern(ResultToken *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
+	ResultType PerformLoopFilePattern(ResultToken *aResultToken, Line *&aJumpToLine, Line *aUntil
 		, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, LoopFilesStruct &lfs);
-	ResultType PerformLoopReg(ResultToken *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil
+	ResultType PerformLoopReg(ResultToken *aResultToken, Line *&aJumpToLine, Line *aUntil
 		, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, HKEY aRootKeyType, HKEY aRootKey, LPTSTR aRegSubkey);
-	ResultType PerformLoopParse(ResultToken *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil);
-	ResultType Line::PerformLoopParseCSV(ResultToken *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil);
-	ResultType PerformLoopReadFile(ResultToken *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil, TextStream *aReadFile, LPTSTR aWriteFileName);
-	ResultType PerformLoopWhile(ResultToken *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine); // Lexikos: ACT_WHILE.
-	ResultType PerformLoopFor(ResultToken *aResultToken, bool &aContinueMainLoop, Line *&aJumpToLine, Line *aUntil); // Lexikos: ACT_FOR.
+	ResultType PerformLoopParse(ResultToken *aResultToken, Line *&aJumpToLine, Line *aUntil);
+	ResultType PerformLoopParseCSV(ResultToken *aResultToken, Line *&aJumpToLine, Line *aUntil);
+	ResultType PerformLoopReadFile(ResultToken *aResultToken, Line *&aJumpToLine, Line *aUntil, LPTSTR aReadFileName, LPTSTR aWriteFileName);
+	ResultType PerformLoopWhile(ResultToken *aResultToken, Line *&aJumpToLine); // Lexikos: ACT_WHILE.
+	ResultType PerformLoopFor(ResultToken *aResultToken, Line *&aJumpToLine, Line *aUntil); // Lexikos: ACT_FOR.
 	ResultType PerformAssign();
 	ResultType Perform();
+	bool CatchThis(ExprTokenType &aThrown);
 	friend BIF_DECL(BIF_PerformAction);
 
 	ResultType SoundPlay(LPTSTR aFilespec, bool aSleepUntilDone);
@@ -753,6 +767,10 @@ private:
 	ResultType FileRecycle(LPTSTR aFilePattern);
 	ResultType FileRecycleEmpty(LPTSTR aDriveLetter);
 	ResultType FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag);
+	bool FileInstallExtract(LPTSTR aSource, LPTSTR aDest, bool aOverwrite);
+#ifndef AUTOHOTKEYSC
+	bool FileInstallCopy(LPTSTR aSource, LPTSTR aDest, bool aOverwrite);
+#endif
 
 	typedef BOOL (* FilePatternCallback)(LPTSTR aFilename, WIN32_FIND_DATA &aFile, void *aCallbackData);
 	struct FilePatternStruct
@@ -780,16 +798,17 @@ private:
 
 	ResultType ToolTip(LPTSTR aText, LPTSTR aX, LPTSTR aY, LPTSTR aID);
 	ResultType TrayTip(LPTSTR aText, LPTSTR aTitle, LPTSTR aOptions);
+
 	static ResultType SetToggleState(vk_type aVK, ToggleValueType &ForceLock, LPTSTR aToggleText);
 
 public:
-	static ResultType Line::IncludeFiles(bool aAllowDuplicateInclude, bool aIgnoreLoadFailure, FileLoopModeType aFileLoopMode, bool aRecurseSubfolders, LPTSTR aFilePattern);
 	#define SET_S_DEREF_BUF(ptr, size) Line::sDerefBuf = ptr, Line::sDerefBufSize = size
 	#define SET_S_DEREF_BUF_BKP(ptr, size) Line::sDerefBuf = Line::sDerefBufBackup = ptr, Line::sDerefBufSize = size
 
 	#define NULLIFY_S_DEREF_BUF \
 	{\
 		SET_S_DEREF_BUF(NULL, 0);\
+		SET_S_DEREF_BUF_BKP(NULL, 0);\
 		if (sDerefBufSize > LARGE_DEREF_BUF_SIZE)\
 			--sLargeDerefBufs;\
 	}
@@ -812,19 +831,20 @@ public:
 			else\
 			{\
 				SET_S_DEREF_BUF(our_deref_buf, our_deref_buf_size);\
+				SET_S_DEREF_BUF_BKP(our_deref_buf, our_deref_buf_size);\
 			}\
 		}
 		//else the original buffer is NULL, so keep any new sDerefBuf that might have been created (should
 		// help avg-case performance).
 
-	_thread_local static LPTSTR sDerefBuf;  // Buffer to hold the values of any args that need to be dereferenced.
-	_thread_local static LPTSTR sDerefBufBackup;  // Buffer backup to cleanup on exit if needed.
-	_thread_local static size_t sDerefBufSize;
-	_thread_local static int sLargeDerefBufs;
+	thread_local static LPTSTR sDerefBuf;  // Buffer to hold the values of any args that need to be dereferenced.
+	thread_local static LPTSTR sDerefBufBackup;  // Buffer backup to cleanup on exit if needed.
+	thread_local static size_t sDerefBufSize;
+	thread_local static int sLargeDerefBufs;
 
 	// Static because only one line can be Expanded at a time (not to mention the fact that we
 	// wouldn't want the size of each line to be expanded by this size):
-	_thread_local static LPTSTR sArgDeref[MAX_ARGS];
+	thread_local static LPTSTR sArgDeref[MAX_ARGS];
 
 	// Keep any fields that aren't an even multiple of 4 adjacent to each other.  This conserves memory
 	// due to byte-alignment:
@@ -925,13 +945,17 @@ public:
 	// the vast majority of scripts, so 400 seems unlikely to exceed the buffer size.  Even in the
 	// worst case where the buffer size is exceeded, the text is simply truncated, so it's not too bad:
 	#define LINE_LOG_SIZE 400  // See above.
-	_thread_local static Line *sLog[LINE_LOG_SIZE];
-	_thread_local static DWORD sLogTick[LINE_LOG_SIZE];
-	_thread_local static int sLogNext;
+	thread_local static Line *sLog[LINE_LOG_SIZE];
+	thread_local static DWORD sLogTick[LINE_LOG_SIZE];
+	thread_local static int sLogNext;
 
-	_thread_local static LPTSTR *sSourceFile;   // Will hold an array of strings.
-	_thread_local static int sMaxSourceFiles;  // Maximum number of items it can currently hold.
-	_thread_local static int sSourceFileCount; // Number of items in the above array.
+#ifdef AUTOHOTKEYSC  // Reduces code size to omit things that are unused, and helps catch bugs at compile-time.
+	thread_local static LPTSTR sSourceFile[1]; // Only need to be able to hold the main script since compiled scripts don't support dynamic including.
+#else
+	thread_local static LPTSTR *sSourceFile;   // Will hold an array of strings.
+	thread_local static int sMaxSourceFiles;  // Maximum number of items it can currently hold.
+#endif
+	thread_local static int sSourceFileCount; // Number of items in the above array.
 
 	static void FreeDerefBufIfLarge();
 
@@ -970,6 +994,7 @@ public:
 	ResultType ExpandSingleArg(int aArgIndex, ResultToken &aResultToken, LPTSTR &aDerefBuf, size_t &aDerefBufSize);
 	ResultType ExpressionToPostfix(ArgStruct &aArg);
 	ResultType ExpressionToPostfix(ArgStruct &aArg, ExprTokenType *&aInfix);
+	ResultType FinalizeExpression(ArgStruct &aArg);
 
 	static bool FileIsFilteredOut(LoopFilesStruct &aCurrentFile, FileLoopModeType aFileLoopMode);
 
@@ -980,24 +1005,11 @@ public:
 	static HWND DetermineTargetWindow(LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LPTSTR aExcludeText);
 
 	
-	// This is in the .h file so that it's more likely the compiler's cost/benefit estimate will
-	// make it inline (since it is called from only one place).  Inline would be good since it
-	// is called frequently during script loading and is difficult to macro-ize in a way that
-	// retains readability.
 	static ArgTypeType ArgIsVar(ActionTypeType aActionType, int aArgIndex, int aArgCount)
 	{
-		switch(aArgIndex)
-		{
-		case 0:  // Arg #1
-			switch(aActionType)
-			{
-			case ACT_ASSIGNEXPR:
-			case ACT_CATCH:
-				return ARG_TYPE_OUTPUT_VAR;
-			}
-		}
-		if (aActionType == ACT_FOR)
-			return aArgIndex == aArgCount - 1 ? ARG_TYPE_NORMAL : ARG_TYPE_OUTPUT_VAR;
+		if (aActionType == ACT_ASSIGNEXPR && aArgIndex == 0
+			|| aActionType == ACT_FOR && aArgIndex != aArgCount - 1)
+			return ARG_TYPE_OUTPUT_VAR;
 		return ARG_TYPE_NORMAL;
 	}
 
@@ -1153,8 +1165,8 @@ public:
 		if (*aBuf == '3' && !*(aBuf + 1)) return FIND_EXACT;
 		if (!_tcsicmp(aBuf, _T("RegEx"))) return FIND_REGEX; // Goes with the above, not fast/slow below.
 
-		if (!_tcsicmp(aBuf, _T("FAST"))) return FIND_FAST;
-		if (!_tcsicmp(aBuf, _T("SLOW"))) return FIND_SLOW;
+		if (!_tcsicmp(aBuf, _T("Fast"))) return FIND_FAST;
+		if (!_tcsicmp(aBuf, _T("Slow"))) return FIND_SLOW;
 		return MATCHMODE_INVALID;
 	}
 
@@ -1165,15 +1177,6 @@ public:
 		if (!_tcsicmp(aBuf, _T("Interrupt"))) return THREAD_CMD_INTERRUPT;
 		if (!_tcsicmp(aBuf, _T("NoTimers"))) return THREAD_CMD_NOTIMERS;
 		return THREAD_CMD_INVALID;
-	}
-
-	static ToggleValueType ConvertTrueFalse(LPTSTR aBuf, ToggleValueType aDefault = TOGGLE_INVALID)
-	// Returns aDefault if aBuf isn't either ON, OFF, or blank.
-	{
-		if (!aBuf || !*aBuf) return NEUTRAL;
-		if (!_tcsicmp(aBuf, _T("True")) || !_tcscmp(aBuf, _T("1"))) return TOGGLED_ON;
-		if (!_tcsicmp(aBuf, _T("False")) || !_tcscmp(aBuf, _T("0"))) return TOGGLED_OFF;
-		return aDefault;
 	}
 
 	static ToggleValueType ConvertOnOff(LPTSTR aBuf, ToggleValueType aDefault = TOGGLE_INVALID)
@@ -1291,19 +1294,19 @@ public:
 	// These are also the modes that AutoIt3 uses.
 	{
 		if (!aBuf || !*aBuf) return SW_SHOWNORMAL;
-		if (!_tcsicmp(aBuf, _T("MIN"))) return SW_MINIMIZE;
-		if (!_tcsicmp(aBuf, _T("MAX"))) return SW_MAXIMIZE;
-		if (!_tcsicmp(aBuf, _T("HIDE"))) return SW_HIDE;
+		if (!_tcsicmp(aBuf, _T("Min"))) return SW_MINIMIZE;
+		if (!_tcsicmp(aBuf, _T("Max"))) return SW_MAXIMIZE;
+		if (!_tcsicmp(aBuf, _T("Hide"))) return SW_HIDE;
 		return SW_SHOWNORMAL;
 	}
 
 	static int ConvertMouseButton(LPTSTR aBuf, bool aAllowWheel = true)
 	// Returns the matching VK, or zero if none.
 	{
-		if (!*aBuf || !_tcsicmp(aBuf, _T("LEFT")) || !_tcsicmp(aBuf, _T("L")))
+		if (!*aBuf || !_tcsicmp(aBuf, _T("Left")) || !_tcsicmp(aBuf, _T("L")))
 			return VK_LBUTTON; // Some callers rely on this default when !*aBuf.
-		if (!_tcsicmp(aBuf, _T("RIGHT")) || !_tcsicmp(aBuf, _T("R"))) return VK_RBUTTON;
-		if (!_tcsicmp(aBuf, _T("MIDDLE")) || !_tcsicmp(aBuf, _T("M"))) return VK_MBUTTON;
+		if (!_tcsicmp(aBuf, _T("Right")) || !_tcsicmp(aBuf, _T("R"))) return VK_RBUTTON;
+		if (!_tcsicmp(aBuf, _T("Middle")) || !_tcsicmp(aBuf, _T("M"))) return VK_MBUTTON;
 		if (!_tcsicmp(aBuf, _T("X1"))) return VK_XBUTTON1;
 		if (!_tcsicmp(aBuf, _T("X2"))) return VK_XBUTTON2;
 		if (aAllowWheel)
@@ -1379,7 +1382,7 @@ public:
 
 	static LPTSTR LogToText(LPTSTR aBuf, int aBufSize);
 	LPTSTR VicinityToText(LPTSTR aBuf, int aBufSize);
-	LPTSTR ToText(LPTSTR aBuf, int aBufSize, bool aCRLF, DWORD aElapsed = 0, bool aLineWasResumed = false);
+	LPTSTR ToText(LPTSTR aBuf, int aBufSize, bool aCRLF, DWORD aElapsed = 0, bool aLineWasResumed = false, bool aLineNumber = true);
 
 	static void ToggleSuspendState();
 	static void PauseUnderlyingThread(bool aTrueForPauseFalseForUnpause);
@@ -1390,9 +1393,10 @@ public:
 	Line *PreparseError(LPTSTR aErrorText, LPTSTR aExtraInfo = _T(""));
 	// Call this LineError to avoid confusion with Script's error-displaying functions:
 	ResultType LineError(LPCTSTR aErrorText, ResultType aErrorType = FAIL, LPCTSTR aExtraInfo = _T(""));
-	IObject *CreateRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat = NULL, LPCTSTR aExtraInfo = _T(""));
-	ResultType ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat = NULL, LPCTSTR aExtraInfo = _T(""));
+	IObject *CreateRuntimeException(LPCTSTR aErrorText, LPCTSTR aExtraInfo, Object *aPrototype);
+	ResultType ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aExtraInfo = _T(""));
 	
+	ResultType ValidateVarUsage(Var *aVar, int aUsage);
 	ResultType VarIsReadOnlyError(Var *aVar, int aErrorType);
 	ResultType LineUnexpectedError();
 
@@ -1405,20 +1409,19 @@ public:
 	ResultType ThrowIfTrue(bool aError);
 	ResultType ThrowIntIfNonzero(int aErrorValue);
 
-	void init(FileIndexType aFileIndex, LineNumberType aFileLineNumber, ActionTypeType aActionType
+	Line(FileIndexType aFileIndex, LineNumberType aFileLineNumber, ActionTypeType aActionType
 		, ArgStruct aArg[], ArgCountType aArgc) // Constructor
-	{
-		mFileIndex = aFileIndex; mLineNumber = aFileLineNumber; mActionType = aActionType;
-			mAttribute = ATTR_NONE; mArgc = aArgc; mArg = aArg;
-		mPrevLine = mNextLine = mRelatedLine = mParentLine = NULL;
+		: mFileIndex(aFileIndex), mLineNumber(aFileLineNumber), mActionType(aActionType)
+		, mAttribute(ATTR_NONE), mArgc(aArgc), mArg(aArg)
+		, mPrevLine(NULL), mNextLine(NULL), mRelatedLine(NULL), mParentLine(NULL)
 #ifdef CONFIG_DEBUGGER
-		mBreakpoint = NULL;
+		, mBreakpoint(NULL)
 #endif
-	}
-	//void *operator new(size_t aBytes){ return malloc(aBytes); }
-	//void *operator new[](size_t aBytes) {return malloc(aBytes); }
-	//void operator delete(void *aPtr) { free(aPtr); }  // Intentionally does nothing because we're using SimpleHeap for everything.
-	//void operator delete[](void *aPtr) { free(aPtr); }
+		{}
+	void *operator new(size_t aBytes) {return g_SimpleHeap->Alloc(aBytes);}
+	void *operator new[](size_t aBytes) {return g_SimpleHeap->Alloc(aBytes);}
+	void operator delete(void *aPtr) {}  // Intentionally does nothing because we're using SimpleHeap for everything.
+	void operator delete[](void *aPtr) {}
 
 	// AutoIt3 functions:
 	static bool Util_CopyDir(LPCTSTR szInputSource, LPCTSTR szInputDest, int OverwriteMode, bool bMove);
@@ -1440,15 +1443,16 @@ public:
 	LPTSTR mName;
 	Line *mJumpToLine;
 	Label *mPrevLabel, *mNextLabel;  // Prev & Next items in linked list.
+
 	Label(LPTSTR aLabelName)
 		: mName(aLabelName) // Caller gave us a pointer to dynamic memory for this.
 		, mJumpToLine(NULL)
 		, mPrevLabel(NULL), mNextLabel(NULL)
 	{}
-	void *operator new(size_t aBytes){ return malloc(aBytes); }
-	void *operator new[](size_t aBytes) {return malloc(aBytes); }
-	void operator delete(void *aPtr) { free(aPtr); }
-	void operator delete[](void *aPtr) { free(aPtr); }
+	void *operator new(size_t aBytes) {return g_SimpleHeap->Alloc(aBytes);}
+	void *operator new[](size_t aBytes) {return g_SimpleHeap->Alloc(aBytes);}
+	void operator delete(void *aPtr) {}
+	void operator delete[](void *aPtr) {}
 };
 
 
@@ -1457,17 +1461,17 @@ public:
 // hotkey, etc.  It provides common functionality that wouldn't be suitable for the
 // base IObject interface, but is needed for detection of "Suspend" or "Critical"
 // prior to calling the sub or function.
-class LabelPtr
+class IObjectPtr
 {
 protected:
 	IObject *mObject;
 	
 public:
-	LabelPtr() : mObject(NULL) {}
-	LabelPtr(IObject *object) : mObject(object) {}
+	IObjectPtr() : mObject(NULL) {}
+	IObjectPtr(IObject *object) : mObject(object) {}
 	ResultType ExecuteInNewThread(TCHAR *aNewThreadDesc
 		, ExprTokenType *aParamValue = NULL, int aParamCount = 0, __int64 *aRetVal = NULL) const;
-	const LabelPtr* operator-> () { return this; } // Act like a pointer.
+	const IObjectPtr* operator-> () { return this; } // Act like a pointer.
 	operator void *() const { return mObject; } // For comparisons and boolean eval.
 
 	// Caller beware: does not check for NULL.
@@ -1478,28 +1482,28 @@ public:
 	LPCTSTR Name() const;
 };
 
-// LabelPtr with automatic reference-counting, for storing an object safely,
+// IObjectPtr with automatic reference-counting, for storing an object safely,
 // such as in a HotkeyVariant, UserMenuItem, etc.  Its specific purpose is to
 // work with old code that wasn't concerned with reference counting.
-class LabelRef : public LabelPtr
+class IObjectRef : public IObjectPtr
 {
 private:
-	LabelRef(const LabelRef &); // Disable default copy constructor.
-	LabelRef & operator = (const LabelRef &); // ...and copy assignment.
+	IObjectRef(const IObjectRef &); // Disable default copy constructor.
+	IObjectRef & operator = (const IObjectRef &); // ...and copy assignment.
 
 public:
-	LabelRef() : LabelPtr() {}
-	LabelRef(IObject *object) : LabelPtr(object)
+	IObjectRef() : IObjectPtr() {}
+	IObjectRef(IObject *object) : IObjectPtr(object)
 	{
 		if (object)
 			object->AddRef();
 	}
-	LabelRef(const LabelPtr &other) : LabelPtr(other)
+	IObjectRef(const IObjectPtr &other) : IObjectPtr(other)
 	{
 		if (mObject)
 			mObject->AddRef();
 	}
-	LabelRef & operator = (IObject *object)
+	IObjectRef & operator = (IObject *object)
 	{
 		if (object)
 			object->AddRef();
@@ -1508,11 +1512,11 @@ public:
 		mObject = object;
 		return *this;
 	}
-	LabelRef & operator = (const LabelPtr &other)
+	IObjectRef & operator = (const IObjectPtr &other)
 	{
 		return *this = other.ToObject();
 	}
-	~LabelRef()
+	~IObjectRef()
 	{
 		if (mObject)
 			mObject->Release();
@@ -1521,6 +1525,7 @@ public:
 
 #ifdef ENABLE_DLLCALL
 #ifdef WIN32_PLATFORM
+// Interface for DynaCall():
 #define  DC_MICROSOFT           0x0000      // Default
 #define  DC_BORLAND             0x0001      // Borland compat
 #define  DC_CALL_CDECL          0x0010      // __cdecl
@@ -1532,10 +1537,9 @@ public:
 #define  DC_CALL_STD_MS         (DC_CALL_STD | DC_MICROSOFT)
 #define  DC_CALL_STD_M8         (DC_CALL_STD | DC_RETVAL_MATH8)
 #endif
-
-enum FuncParamDefaults {PARAM_DEFAULT_NONE, PARAM_DEFAULT_STR, PARAM_DEFAULT_INT, PARAM_DEFAULT_FLOAT, PARAM_DEFAULT_UNSET};
 #endif
 
+enum FuncParamDefaults {PARAM_DEFAULT_NONE, PARAM_DEFAULT_STR, PARAM_DEFAULT_INT, PARAM_DEFAULT_FLOAT, PARAM_DEFAULT_UNSET};
 struct FuncParam
 {
 	Var *var;
@@ -1565,12 +1569,13 @@ struct ScriptItemList
 	T *Find(LPCTSTR aName, int *apInsertPos = nullptr);
 	T *Find(LPCTSTR aName, size_t aNameLength, int *apInsertPos = nullptr);
 	ResultType Insert(T *aItem, int aInsertPos);
+	ResultType Remove(LPCTSTR aName);
 	ResultType Alloc(int aAllocCount);
 };
 
-class Func;
 typedef ScriptItemList<Func, 4> FuncList; // Initial count is small since functions aren't expected to contain many nested functions.
 typedef ScriptItemList<Var, VARLIST_INITIAL_SIZE> VarList;
+typedef ScriptItemList<DynaToken, VARLIST_INITIAL_SIZE> DynaTokenList;
 
 
 struct FreeVars
@@ -1587,11 +1592,11 @@ struct FreeVars
 
 	void Release()
 	{
-		if (mRefCount == 1)
-			delete this;
-		else
-			--mRefCount;
+		if (--mRefCount == 0)
+			FullyReleased();
 	}
+
+	bool FullyReleased(ULONG aRefPendingRelease = 0);
 
 	FreeVars *ForFunc(UserFunc *aFunc)
 	{
@@ -1631,6 +1636,13 @@ private:
 };
 
 
+struct ClosureInfo
+{
+	Var *var;
+	UserFunc *func;
+};
+
+
 ResultType VariadicCall(IObject *aObj, IObject_Invoke_PARAMS_DECL);
 
 
@@ -1643,9 +1655,6 @@ struct UDFCallInfo
 };
 
 
-typedef BIF_DECL((* BuiltInFunctionType));
-
-
 class DECLSPEC_NOVTABLE Func : public Object
 {
 public:
@@ -1653,8 +1662,6 @@ public:
 	int mParamCount = 0; // The function's maximum number of parameters.  For UDFs, also the number of items in the mParam array.
 	int mMinParams = 0;  // The number of mandatory parameters (populated for both UDFs and built-in's).
 	bool mIsVariadic = false; // Whether to allow mParamCount to be exceeded.
-	// HotKeyIt: due to DllImport moved to Func
-	BuiltInFunctionType mBIF;
 
 	virtual bool IsBuiltIn() = 0; // FIXME: Should not need to rely on this.
 	virtual bool ArgIsOutputVar(int aArg) = 0;
@@ -1682,9 +1689,9 @@ public:
 		P_IsVariadic
 	};
 	static ObjectMember sMembers[];
-	ResultType Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 
-	_thread_local static Object *sPrototype;
+	thread_local static Object *sPrototype;
 	ResultType Invoke(IObject_Invoke_PARAMS_DECL);
 
 	Func(LPCTSTR aFuncName)
@@ -1694,12 +1701,14 @@ public:
 	}
 };
 
-
+thread_local extern Debugger *g_Debugger;
 class UserFunc : public Func
 {
 public:
 	int mInstances = 0; // How many instances currently exist on the call stack (due to recursion or thread interruption).  Future use: Might be used to limit how deep recursion can go to help prevent stack overflow.
 	Line *mJumpToLine = nullptr;
+	Line *mFirstStaticLine = nullptr;
+	Line *mLastStaticLine = nullptr;
 	FuncParam *mParam = nullptr; // Holds an array of FuncParams (array length: mParamCount).
 	Object *mClass = nullptr; // The class or prototype object which this user-defined method was defined for, or nullptr.
 	Label *mFirstLabel = nullptr, *mLastLabel = nullptr; // Linked list of private labels.
@@ -1709,17 +1718,17 @@ public:
 	VarList mStaticVars {}; // Sorted list of static variables.
 	Var **mDownVar = nullptr, **mUpVar = nullptr;
 	int *mUpVarIndex = nullptr;
-	_thread_local static FreeVars *sFreeVars;
+	ClosureInfo *mClosure = nullptr; // Array of nested functions containing upvars.
+	thread_local static FreeVars *sFreeVars;
 #define MAX_FUNC_UP_VARS 1000
 	int mDownVarCount = 0, mUpVarCount = 0;
+	int mClosureCount = 0;
 
 	// Keep small members adjacent to each other to save space and improve perf. due to byte alignment:
 	bool mIsFuncExpression; // Whether this function was defined *within* an expression and is therefore allowed under a control flow statement.
 #define VAR_DECLARE_GLOBAL (VAR_DECLARED | VAR_GLOBAL)
-#define VAR_DECLARE_SUPER_GLOBAL (VAR_DECLARE_GLOBAL | VAR_SUPER_GLOBAL)
 #define VAR_DECLARE_LOCAL  (VAR_DECLARED | VAR_LOCAL)
 #define VAR_DECLARE_STATIC (VAR_DECLARED | VAR_LOCAL | VAR_LOCAL_STATIC)
-	// The last two may be combined (bitwise-OR) with VAR_FORCE_LOCAL.
 	UCHAR mDefaultVarType = VAR_DECLARE_LOCAL;
 
 	UserFunc(LPCTSTR aName) : Func(aName) {}
@@ -1741,16 +1750,6 @@ public:
 		return nullptr;
 	}
 
-	bool AllowSuperGlobals()
-	{
-		// A function allows super-globals unless it is force-local or contained by another
-		// function which is force-local (i.e. a nested function should inherit the rules and
-		// declarations of the scope which encloses it).
-		if (mDefaultVarType & VAR_FORCE_LOCAL)
-			return false;
-		return mOuterFunc ? mOuterFunc->AllowSuperGlobals() : true;
-	}
-
 	bool IsAssumeGlobal()
 	{
 		return mDefaultVarType & VAR_GLOBAL;
@@ -1758,10 +1757,9 @@ public:
 
 	IObject *CloseIfNeeded() override; // Returns this UserFunc or (if mUpVarCount != 0) a Closure.
 	bool mIsMacro = false;
-	// DynaCall related
-	DYNAPARM *mdyna_param;
 	// preprocess vars only once
 	bool mPreprocessLocalVarsDone = false;
+	bool mPreparseExpressionsDone = false;
 
 	bool Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount) override;
 	bool Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, FreeVars *aUpVars);
@@ -1774,7 +1772,7 @@ public:
 		// would not be significant because the Return command's expression (arg1) must still be evaluated
 		// in case it calls any functions that have side-effects, e.g. "return LogThisError()".
 		auto prev_func = g->CurrentFunc; // This will be non-NULL when a function is called from inside another function.
-		auto *prev_macro = g->CurrentMacro;
+		auto prev_macro = g->CurrentMacro;
 		if (!mIsMacro)
 			g->CurrentFunc = this;
 		else
@@ -1788,7 +1786,7 @@ public:
 		//    bugs in the script).
 		// 3) More difficult to maintain because we have handle jump_to_line the same way ExecUntil() does,
 		//    checking aResult the same way it does, then checking jump_to_line the same way it does, etc.
-		// Fix for v1.0.31.05: g->mLoopFile and the other g_script->members that follow it are
+		// Fix for v1.0.31.05: g->mLoopFile and the other g_script members that follow it are
 		// now passed to ExecUntil() for two reasons (update for v1.0.44.14: now they're implicitly "passed"
 		// because they're done via parameter anymore):
 		// 1) To fix the fact that any function call in one parameter of a command would reset
@@ -1803,7 +1801,7 @@ public:
 		ResultType result;
 		result = mJumpToLine->ExecUntil(UNTIL_BLOCK_END, aResultToken);
 #ifdef CONFIG_DEBUGGER
-		if (g_Debugger.IsConnected())
+		if (g_Debugger->IsConnected())
 		{
 			if (result == EARLY_RETURN)
 			{
@@ -1816,7 +1814,7 @@ public:
 				Line *line = mJumpToLine->mParentLine->mRelatedLine->mPrevLine;
 				// Give user the opportunity to inspect variables before returning.
 				if (line)
-					g_Debugger.PreExecLine(line);
+					g_Debugger->PreExecLine(line);
 			}
 		}
 #endif
@@ -1829,10 +1827,10 @@ public:
 		return result;
 	}
 
-	void *operator new(size_t aBytes) {return memset(malloc(aBytes), 0, aBytes);}
-	void *operator new[](size_t aBytes) {return memset(malloc(aBytes), 0, aBytes);}
-	void operator delete(void *aPtr) { free(aPtr);}
-	void operator delete[](void *aPtr) {free(aPtr);}
+	void *operator new(size_t aBytes) {return g_SimpleHeap->Alloc(aBytes);}
+	void *operator new[](size_t aBytes) {return g_SimpleHeap->Alloc(aBytes);}
+	void operator delete(void *aPtr) {}
+	void operator delete[](void *aPtr) {}
 };
 
 
@@ -1841,22 +1839,35 @@ class Closure : public Func
 	UserFunc *mFunc;
 	FreeVars *mVars;
 
-
 public:
-	Closure(UserFunc *aFunc, FreeVars *aVars)
+	thread_local static Object *sPrototype;
+
+	enum Flags : decltype(mFlags)
+	{
+		ClosureGroupedFlag = LastObjectFlag << 1
+	};
+
+	Closure(UserFunc *aFunc, FreeVars *aVars, bool aIsGrouped)
 		: mFunc(aFunc), mVars(aVars), Func(aFunc->mName)
 	{
+		if (aIsGrouped)
+		{
+			mFlags |= ClosureGroupedFlag;
+			mRefCount = 0;
+		}
+		else
+			aVars->AddRef();
 		mMinParams = aFunc->mMinParams;
 		mParamCount = aFunc->mParamCount;
 		mIsVariadic = aFunc->mIsVariadic;
 		SetBase(sPrototype);
 	}
 	~Closure();
+	bool Delete() override;
 
 	bool IsBuiltIn() override { return false; }
 	bool ArgIsOutputVar(int aArg) override { return mFunc->ArgIsOutputVar(aArg); }
 	bool Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount) override;
-	_thread_local static Object *sPrototype;
 };
 
 
@@ -1875,15 +1886,15 @@ class BoundFunc : public Func
 		SetBase(sPrototype);
 	}
 
-
 public:
+	thread_local static Object *sPrototype;
+
 	static BoundFunc *Bind(IObject *aFunc, int aFlags, LPCTSTR aMember, ExprTokenType **aParam, int aParamCount);
 	~BoundFunc();
 	
 	bool IsBuiltIn() override { return true; }
 	bool ArgIsOutputVar(int aArg) override { return false; }
 	bool Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount) override;
-	_thread_local static Object *sPrototype;
 };
 
 
@@ -1899,6 +1910,10 @@ public:
 
 	bool Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount) override;
 
+	void *operator new(size_t aBytes) {return g_SimpleHeap->Alloc(aBytes);}
+	void *operator new[](size_t aBytes) {return g_SimpleHeap->Alloc(aBytes);}
+	void operator delete(void *aPtr) {}
+	void operator delete[](void *aPtr) {}
 };
 
 
@@ -1906,10 +1921,23 @@ struct FuncEntry;
 class BuiltInFunc : public NativeFunc
 {
 public:
-	BuiltInFunctionID mFID; // For code sharing: this function's ID in the group of functions which share the same C++ function.
-
+	BuiltInFunctionType mBIF;
+	union {
+		BuiltInFunctionID mFID; // For code sharing: this function's ID in the group of functions which share the same C++ function.
+		void *mData;
+	};
+	
 	BuiltInFunc(LPCTSTR aName) : NativeFunc(aName) {}
-	BuiltInFunc(FuncEntry &, UCHAR *aOutputVars);
+	BuiltInFunc(FuncEntry &);
+	BuiltInFunc(LPCTSTR aName, BuiltInFunctionType aBIF, int aMinParams, int aMaxParams, bool aIsVariadic = false, void *aData = nullptr) : BuiltInFunc(aName)
+	{
+		mBIF = aBIF;
+		mMinParams = aMinParams;
+		mParamCount = aMaxParams;
+		mIsVariadic = aIsVariadic;
+		//mFID = (BuiltInFunctionID)0;
+		mData = aData;
+	}
 
 #define MAX_FUNC_OUTPUT_VAR 7
 	bool ArgIsOutputVar(int aIndex) override
@@ -1961,11 +1989,11 @@ public:
 template<BuiltInFunctionType bif, int flags>
 struct ExprOpT
 {
-	static ExprOpFunc Func;
+	thread_local static ExprOpFunc Func;
 };
 
 template<BuiltInFunctionType bif, int flags>
-ExprOpFunc ExprOpT<bif, flags>::Func(bif, flags);
+thread_local ExprOpFunc ExprOpT<bif, flags>::Func(bif, flags);
 
 // ExprOp<bif, flags>() returns a Func* which calls bif with the given ID/flags.
 // The call is optimized out and replaced with a reference to a static variable,
@@ -1991,7 +2019,7 @@ struct FuncEntry
 class DECLSPEC_NOVTABLE EnumBase : public Func
 {
 public:
-	_thread_local static Object *sPrototype;
+	thread_local static Object *sPrototype;
 	EnumBase() : Func(_T(""))
 	{
 		mParamCount = 2;
@@ -2007,16 +2035,16 @@ public:
 class IndexEnumerator : public EnumBase
 {
 public:
-	typedef ResultType (Object::* Callback)(UINT &aIndex, Var *aOutputVar1, Var *aOutputVar2);
+	typedef ResultType (Object::* Callback)(UINT &aIndex, Var *aOutputVar1, Var *aOutputVar2, int aVarCount);
 private:
 	Object *mObject;
 	UINT mIndex = UINT_MAX;
 	Callback mGetItem;
 public:
-	IndexEnumerator(Object *aObject, Callback aGetItem) : mObject(aObject), mGetItem(aGetItem)
+	IndexEnumerator(Object *aObject, int aVarCount, Callback aGetItem) : mObject(aObject), mGetItem(aGetItem)
 	{
 		mObject->AddRef();
-		mParamCount = 2;
+		mParamCount = aVarCount;
 		SetBase(EnumBase::sPrototype);
 	}
 	~IndexEnumerator()
@@ -2031,7 +2059,7 @@ public:
 class ScriptTimer
 {
 public:
-	LabelRef mCallback;
+	IObjectRef mCallback;
 	DWORD mPeriod; // v1.0.36.33: Changed from int to DWORD to double its capacity.
 	DWORD mTimeLastRun;  // TickCount
 	int mPriority;  // Thread priority relative to other threads, default 0.
@@ -2087,12 +2115,10 @@ public:
 	MsgMonitorStruct *Add(UINT aMsg, HWND aHwnd, LPTSTR aMethodName, bool aAppend = TRUE);
 	void Delete(MsgMonitorStruct *aMonitor);
 	ResultType Call(ExprTokenType *aParamValue, int aParamCount, int aInitNewThreadIndex, __int64 *aRetVal = nullptr); // Used for OnExit and OnClipboardChange, but not OnMessage.
+	ResultType Call(ExprTokenType *aParamValue, int aParamCount, UINT aMsg, UCHAR aMsgType, GuiType *aGui, INT_PTR *aRetVal = NULL); // Used by GUI.
 //#ifdef _USRDLL
 	void RemoveAll();
-	void Free();
 //#endif
-	ResultType Call(ExprTokenType *aParamValue, int aParamCount, UINT aMsg, UCHAR aMsgType, GuiType *aGui, INT_PTR *aRetVal = NULL); // Used by GUI.
-
 	MsgMonitorStruct& operator[] (const int aIndex) { return mMonitor[aIndex]; }
 	int Count() { return mCount; }
 	BOOL IsMonitoring(UINT aMsg, UCHAR aMsgType = 0);
@@ -2142,6 +2168,7 @@ struct MsgMonitorInstance
 };
 
 
+
 #define MAX_MENU_NAME_LENGTH MAX_PATH // For both menu and menu item names.
 class UserMenuItem;  // Forward declaration since classes use each other (i.e. a menu *item* can have a submenu).
 class UserMenu : public Object
@@ -2160,9 +2187,9 @@ public:
 	HBRUSH mBrush = NULL; // Background color to apply to menu.
 	COLORREF mColor = CLR_DEFAULT; // The color that corresponds to the above.
 
-	static ObjectMember sMembers[17];
-	_thread_local static int sMemberCount;
-	_thread_local static Object *sPrototype, *sBarPrototype, *sClass, *sBarClass;
+	static ObjectMember sMembers[];
+	static int sMemberCount;
+	thread_local static Object *sPrototype, *sBarPrototype;
 
 	// Don't overload new and delete operators in this case since we want to use real dynamic memory
 	// (since menus can be read in from a file, destroyed and recreated, over and over).
@@ -2199,24 +2226,24 @@ public:
 		P_ClickCount,
 	};
 	
-	ResultType Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 
 	ResultType AddItem(LPTSTR aName, UINT aMenuID, IObject *aCallback, UserMenu *aSubmenu, LPTSTR aOptions, UserMenuItem **aInsertAt);
 	ResultType InternalAppendMenu(UserMenuItem *aMenuItem, UserMenuItem *aInsertBefore = NULL);
-	ResultType DeleteItem(UserMenuItem *aMenuItem, UserMenuItem *aMenuItemPrev, bool aUpdateGuiMenuBars = true);
-	ResultType DeleteAllItems();
+	void DeleteItem(UserMenuItem *aMenuItem, UserMenuItem *aMenuItemPrev, bool aUpdateGuiMenuBars = true);
+	void DeleteAllItems();
 	ResultType ModifyItem(UserMenuItem *aMenuItem, IObject *aCallback, UserMenu *aSubmenu, LPTSTR aOptions);
 	ResultType UpdateOptions(UserMenuItem *aMenuItem, LPTSTR aOptions);
 	ResultType RenameItem(UserMenuItem *aMenuItem, LPTSTR aNewName);
 	ResultType UpdateName(UserMenuItem *aMenuItem, LPTSTR aNewName);
-	ResultType SetItemState(UserMenuItem *aMenuItem, UINT aState, UINT aStateMask);
-	ResultType CheckItem(UserMenuItem *aMenuItem);
-	ResultType UncheckItem(UserMenuItem *aMenuItem);
-	ResultType ToggleCheckItem(UserMenuItem *aMenuItem);
-	ResultType EnableItem(UserMenuItem *aMenuItem);
-	ResultType DisableItem(UserMenuItem *aMenuItem);
-	ResultType ToggleEnableItem(UserMenuItem *aMenuItem);
-	ResultType SetDefault(UserMenuItem *aMenuItem = NULL, bool aUpdateGuiMenuBars = true);
+	void SetItemState(UserMenuItem *aMenuItem, UINT aState, UINT aStateMask);
+	void CheckItem(UserMenuItem *aMenuItem);
+	void UncheckItem(UserMenuItem *aMenuItem);
+	void ToggleCheckItem(UserMenuItem *aMenuItem);
+	void EnableItem(UserMenuItem *aMenuItem);
+	void DisableItem(UserMenuItem *aMenuItem);
+	void ToggleEnableItem(UserMenuItem *aMenuItem);
+	void SetDefault(UserMenuItem *aMenuItem = NULL, bool aUpdateGuiMenuBars = true);
 	ResultType CreateHandle();
 	void DestroyHandle();
 	void SetColor(ExprTokenType &aColor, bool aApplyToSubmenus);
@@ -2227,12 +2254,11 @@ public:
 	UserMenuItem *FindItem(LPTSTR aNameOrPos, UserMenuItem *&aPrevItem, bool &aByPos);
 	UserMenuItem *FindItemByID(UINT aID);
 	bool ContainsMenu(UserMenu *aMenu);
-	bool ContainsCustomItems();
 	void UpdateAccelerators();
 	// L17: Functions for menu icons.
 	ResultType SetItemIcon(UserMenuItem *aMenuItem, LPTSTR aFilename, int aIconNumber, int aWidth);
-	ResultType ApplyItemIcon(UserMenuItem *aMenuItem);
-	ResultType RemoveItemIcon(UserMenuItem *aMenuItem);
+	void ApplyItemIcon(UserMenuItem *aMenuItem);
+	void RemoveItemIcon(UserMenuItem *aMenuItem);
 };
 
 class UserMenu::Bar : public UserMenu
@@ -2253,7 +2279,7 @@ class UserMenuItem
 public:
 	LPTSTR mName;  // Dynamically allocated.
 	size_t mNameCapacity;
-	LabelRef mCallback;
+	IObjectRef mCallback;
 	UserMenu *mSubmenu;
 	UserMenu *mMenu;  // The menu to which this item belongs.  Needed to support script var A_ThisMenu.
 	UINT mMenuID;
@@ -2288,7 +2314,6 @@ struct FontType : public LOGFONT
 
 #define	LV_REMOTE_BUF_SIZE 1024  // 8192 (below) seems too large in hindsight, given that an LV can only display the first 260 chars in a field.
 #define LV_TEXT_BUF_SIZE 8192  // Max amount of text in a ListView sub-item.  Somewhat arbitrary: not sure what the real limit is, if any.
-
 enum LVColTypes {LV_COL_TEXT, LV_COL_INTEGER, LV_COL_FLOAT}; // LV_COL_TEXT must be zero so that it's the default with ZeroMemory.
 struct lv_col_type
 {
@@ -2352,7 +2377,7 @@ struct GuiControlType : public Object
 	GuiControlType() = delete;
 	GuiControlType(GuiType* owner) : gui(owner) {}
 
-	static LPTSTR sTypeNames[26];
+	static LPTSTR sTypeNames[GUI_CONTROL_TYPE_COUNT];
 	static GuiControls ConvertTypeName(LPTSTR aTypeName);
 	LPTSTR GetTypeName();
 
@@ -2381,7 +2406,7 @@ struct GuiControlType : public Object
 	static TypeAttribs TypeHasAttrib(GuiControls aType, TypeAttribs aAttrib);
 	TypeAttribs TypeHasAttrib(TypeAttribs aAttrib) { return TypeHasAttrib(type, aAttrib); }
 
-	static UCHAR **sRaisesEvents;
+	thread_local static UCHAR **sRaisesEvents;
 	bool SupportsEvent(GuiEventType aEvent);
 
 	bool SupportsBackgroundTrans()
@@ -2483,34 +2508,36 @@ struct GuiControlType : public Object
 		P_Focused,
 	};
 
-	static ObjectMember sMembers[20];
-	static ObjectMember sMembersList[2]; // Tab, ListBox, ComboBox, DDL
-	static ObjectMember sMembersTab[1];
-	static ObjectMember sMembersDate[1];
-	static ObjectMember sMembersLV[11];
-	static ObjectMember sMembersTV[12];
-	static ObjectMember sMembersSB[3];
+	static ObjectMember sMembers[];
+	static ObjectMember sMembersList[]; // Tab, ListBox, ComboBox, DDL
+	static ObjectMember sMembersTab[];
+	static ObjectMember sMembersDate[];
+	static ObjectMember sMembersLV[];
+	static ObjectMember sMembersTV[];
+	static ObjectMember sMembersSB[];
 
+	thread_local static Object *sPrototype, *sPrototypeList;
+	thread_local static Object *sPrototypes[GUI_CONTROL_TYPE_COUNT];
+	thread_local static Object *sClasses[GUI_CONTROL_TYPE_COUNT];
+	static void DefineControlClasses();
 	static Object *GetPrototype(GuiControls aType);
 
-	ResultType StatusBar(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType LV_GetNextOrCount(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType LV_GetText(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType LV_AddInsertModify(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType LV_Delete(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType LV_InsertModifyDeleteCol(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType LV_SetImageList(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType TV_AddModifyDelete(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType TV_GetRelatedItem(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType TV_Get(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType TV_SetImageList(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void StatusBar(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void LV_GetNextOrCount(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void LV_GetText(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void LV_AddInsertModify(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void LV_Delete(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void LV_InsertModifyDeleteCol(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void LV_SetImageList(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void TV_AddModifyDelete(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void TV_GetRelatedItem(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void TV_Get(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void TV_SetImageList(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 
-	ResultType Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	ResultType Invoke(IObject_Invoke_PARAMS_DECL);
 
 	void Dispose(); // Called by GuiType::Dispose().
-
-	_thread_local static Object *sPrototype, *sPrototypes[26], *sPrototypeList;
 };
 
 struct GuiControlOptionsType
@@ -2614,15 +2641,15 @@ public:
 	bool mGuiShowHasNeverBeenDone, mFirstActivation, mShowIsInProgress, mDestroyWindowHasBeenCalled;
 	bool mControlWidthWasSetByContents; // Whether the most recently added control was auto-width'd to fit its contents.
 	bool mUsesDPIScaling; // Whether the GUI uses DPI scaling.
+	bool mIsMinimized; // Workaround for bad OS behaviour; see "case WM_SETFOCUS".
 	bool mDisposed; // Simplifies Dispose().
 	bool mVisibleRefCounted; // Whether AddRef() has been done as a result of the window being shown.
 
 	SCROLLINFO *mVScroll, *mHScroll;
-	IObject *mObject; // Variable with object for g and v Options, used as input for gFunc -> {Func:BoundFunction} and output vMyVar -> object.MyVar
 	#define MAX_GUI_FONTS 200  // v1.0.44.14: Increased from 100 to 200 due to feedback that 100 wasn't enough.  But to alleviate memory usage, the array is now allocated upon first use.
-	_thread_local static FontType *sFont; // An array of structs, allocated upon first use.
-	_thread_local static int sFontCount;
-	_thread_local static HWND sTreeWithEditInProgress; // Needed because TreeView's edit control for label-editing conflicts with IDOK (default button).
+	thread_local static FontType *sFont; // An array of structs, allocated upon first use.
+	thread_local static int sFontCount;
+	thread_local static HWND sTreeWithEditInProgress; // Needed because TreeView's edit control for label-editing conflicts with IDOK (default button).
 
 	// Don't overload new and delete operators in this case since we want to use real dynamic memory
 	// (since GUIs can be destroyed and recreated, over and over).
@@ -2659,9 +2686,9 @@ public:
 		P_MenuBar,
 	};
 
-	static ObjectMember sMembers[53];
+	static ObjectMember sMembers[];
 	static int sMemberCount;
-	_thread_local static Object *sPrototype, *sClass;
+	thread_local static Object *sPrototype;
 
 	GuiType() // Constructor
 		: mHwnd(NULL), mOwner(NULL), mName(NULL)
@@ -2707,14 +2734,13 @@ public:
 	void Dispose();
 	static void DestroyIconsIfUnused(HICON ahIcon, HICON ahIconSmall); // L17: Renamed function and added parameter to also handle the window's small icon.
 	static GuiType *Create() { return new GuiType(); } // For Object::New<GuiType>().
-	ResultType __New(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType AddControl(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void __New(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void AddControl(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	ResultType Create(LPTSTR aTitle);
 	ResultType SetName(LPTSTR aName);
-	ResultType NameToEventHandler(LPTSTR aName, IObject *&aObject);
-	ResultType OnEvent(GuiControlType *aControl, UINT aEvent, UCHAR aEventKind, ExprTokenType *aParam[], int aParamCount, ResultToken &aResultToken);
-	ResultType OnEvent(GuiControlType *aControl, UINT aEvent, UCHAR aEventKind, IObject *aFunc, LPTSTR aMethodName, int aMaxThreads, ResultToken &aResultToken);
+	void OnEvent(GuiControlType *aControl, UINT aEvent, UCHAR aEventKind, ExprTokenType *aParam[], int aParamCount, ResultToken &aResultToken);
+	void OnEvent(GuiControlType *aControl, UINT aEvent, UCHAR aEventKind, IObject *aFunc, LPTSTR aMethodName, int aMaxThreads, ResultToken &aResultToken);
 	void ApplyEventStyles(GuiControlType *aControl, UINT aEvent, bool aAdded);
 	static LPTSTR sEventNames[];
 	static LPTSTR ConvertEvent(GuiEventType evt);
@@ -2724,13 +2750,13 @@ public:
 	// unreliable (but maybe placing some limitations would solve that?).
 	BOOL IsMonitoring(GuiEventType aEvent) { return mEvents.IsMonitoring(aEvent); }
 
-	ResultType GetEnumItem(UINT &aIndex, Var *, Var *);
+	ResultType GetEnumItem(UINT &aIndex, Var *, Var *, int);
 
 	static IObject* CreateDropArray(HDROP hDrop);
-	ResultType SetMenu(ExprTokenType &aParam);
+	void SetMenu(ResultToken &aResultToken, ExprTokenType &aParam);
 	static void UpdateMenuBars(HMENU aMenu);
 	ResultType AddControl(GuiControls aControlType, LPTSTR aOptions, LPTSTR aText, GuiControlType*& apControl, Array *aObj = NULL);
-	ResultType MethodGetPos(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, RECT &aPos);
+	void MethodGetPos(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, RECT &aPos);
 
 	ResultType ParseOptions(LPTSTR aOptions, bool &aSetLastFoundWindow, ToggleValueType &aOwnDialogs);
 	void SetOwnDialogs(ToggleValueType state)
@@ -2753,8 +2779,8 @@ public:
 	void Close(); // Due to SC_CLOSE, etc.
 	void Escape(); // Similar to close, except typically called when the user presses ESCAPE.
 	void VisibilityChanged();
-	ResultType Submit(ResultToken &aResultToken, bool aHideIt);
-	
+	void Submit(ResultToken &aResultToken, bool aHideIt);
+
 	static GuiType *FindGui(HWND aHwnd);
 	static GuiType *FindGuiParent(HWND aHwnd);
 
@@ -2814,34 +2840,34 @@ public:
 	GuiControlType *ControlOverrideBkColor(GuiControlType &aControl);
 	void ControlGetBkColor(GuiControlType &aControl, bool aUseWindowColor, HBRUSH &aBrush, COLORREF &aColor);
 	
-	ResultType ControlSetContents(GuiControlType &aControl, LPTSTR aContents, ResultToken &aResultToken, bool aIsText);
-	ResultType ControlSetPic(GuiControlType &aControl, LPTSTR aContents, ResultToken &aResultToken);
-	ResultType ControlSetCheck(GuiControlType &aControl, LPTSTR aContents, ResultToken &aResultToken); // CheckBox, Radio
-	ResultType ControlSetChoice(GuiControlType &aControl, LPTSTR aContents, ResultToken &aResultToken, bool aIsText); // DDL, ComboBox, ListBox, Tab
-	ResultType ControlSetEdit(GuiControlType &aControl, LPTSTR aContents, ResultToken &aResultToken, bool aIsText);
-	ResultType ControlSetDateTime(GuiControlType &aControl, LPTSTR aContents, ResultToken &aResultToken);
-	ResultType ControlSetDateTimeFormat(GuiControlType &aControl, LPTSTR aFormat, ResultToken &aResultToken);
-	ResultType ControlSetMonthCal(GuiControlType &aControl, LPTSTR aContents, ResultToken &aResultToken);
-	ResultType ControlSetHotkey(GuiControlType &aControl, LPTSTR aContents, ResultToken &aResultToken);
-	ResultType ControlSetUpDown(GuiControlType &aControl, LPTSTR aContents, ResultToken &aResultToken);
-	ResultType ControlSetSlider(GuiControlType &aControl, LPTSTR aContents, ResultToken &aResultToken);
-	ResultType ControlSetProgress(GuiControlType &aControl, LPTSTR aContents, ResultToken &aResultToken);
+	void ControlSetContents(GuiControlType &aControl, ExprTokenType &aContents, ResultToken &aResultToken, bool aIsText);
+	void ControlSetPic(GuiControlType &aControl, LPTSTR aContents, ResultToken &aResultToken);
+	void ControlSetChoice(GuiControlType &aControl, LPTSTR aContents, ResultToken &aResultToken, bool aIsText); // DDL, ComboBox, ListBox, Tab
+	void ControlSetEdit(GuiControlType &aControl, LPTSTR aContents, ResultToken &aResultToken, bool aIsText);
+	void ControlSetDateTime(GuiControlType &aControl, LPTSTR aContents, ResultToken &aResultToken);
+	void ControlSetDateTimeFormat(GuiControlType &aControl, LPTSTR aFormat, ResultToken &aResultToken);
+	void ControlSetMonthCal(GuiControlType &aControl, LPTSTR aContents, ResultToken &aResultToken);
+	void ControlSetHotkey(GuiControlType &aControl, LPTSTR aContents, ResultToken &aResultToken);
+	void ControlSetCheck(GuiControlType &aControl, int aValue, ResultToken &aResultToken); // CheckBox, Radio
+	void ControlSetUpDown(GuiControlType &aControl, int aValue, ResultToken &aResultToken);
+	void ControlSetSlider(GuiControlType &aControl, int aValue, ResultToken &aResultToken);
+	void ControlSetProgress(GuiControlType &aControl, int aValue, ResultToken &aResultToken);
 
 	enum ValueModeType { Value_Mode, Text_Mode, Submit_Mode };
 
-	ResultType ControlGetContents(ResultToken &aResultToken, GuiControlType &aControl, ValueModeType aMode = Value_Mode);
-	ResultType ControlGetCheck(ResultToken &aResultToken, GuiControlType &aControl); // CheckBox, Radio
-	ResultType ControlGetDDL(ResultToken &aResultToken, GuiControlType &aControl, ValueModeType aMode);
-	ResultType ControlGetComboBox(ResultToken &aResultToken, GuiControlType &aControl, ValueModeType aMode);
-	ResultType ControlGetListBox(ResultToken &aResultToken, GuiControlType &aControl, ValueModeType aMode);
-	ResultType ControlGetEdit(ResultToken &aResultToken, GuiControlType &aControl);
-	ResultType ControlGetDateTime(ResultToken &aResultToken, GuiControlType &aControl);
-	ResultType ControlGetMonthCal(ResultToken &aResultToken, GuiControlType &aControl);
-	ResultType ControlGetHotkey(ResultToken &aResultToken, GuiControlType &aControl);
-	ResultType ControlGetUpDown(ResultToken &aResultToken, GuiControlType &aControl);
-	ResultType ControlGetSlider(ResultToken &aResultToken, GuiControlType &aControl);
-	ResultType ControlGetProgress(ResultToken &aResultToken, GuiControlType &aControl);
-	ResultType ControlGetTab(ResultToken &aResultToken, GuiControlType &aControl, ValueModeType aMode);
+	void ControlGetContents(ResultToken &aResultToken, GuiControlType &aControl, ValueModeType aMode = Value_Mode);
+	void ControlGetCheck(ResultToken &aResultToken, GuiControlType &aControl); // CheckBox, Radio
+	void ControlGetDDL(ResultToken &aResultToken, GuiControlType &aControl, ValueModeType aMode);
+	void ControlGetComboBox(ResultToken &aResultToken, GuiControlType &aControl, ValueModeType aMode);
+	void ControlGetListBox(ResultToken &aResultToken, GuiControlType &aControl, ValueModeType aMode);
+	void ControlGetEdit(ResultToken &aResultToken, GuiControlType &aControl);
+	void ControlGetDateTime(ResultToken &aResultToken, GuiControlType &aControl);
+	void ControlGetMonthCal(ResultToken &aResultToken, GuiControlType &aControl);
+	void ControlGetHotkey(ResultToken &aResultToken, GuiControlType &aControl);
+	void ControlGetUpDown(ResultToken &aResultToken, GuiControlType &aControl);
+	void ControlGetSlider(ResultToken &aResultToken, GuiControlType &aControl);
+	void ControlGetProgress(ResultToken &aResultToken, GuiControlType &aControl);
+	void ControlGetTab(ResultToken &aResultToken, GuiControlType &aControl, ValueModeType aMode);
 	
 	ResultType ControlGetWindowText(ResultToken &aResultToken, GuiControlType &aControl);
 	void ControlRedraw(GuiControlType &aControl, bool aOnlyWithinTab = false);
@@ -2878,6 +2904,9 @@ protected:
 
 typedef BOOL(WINAPI *_QueryPerformanceCounter)(LARGE_INTEGER *lpPerformanceCount);
 
+typedef BOOL (WINAPI *_CryptStringToBinaryA)(LPCSTR pszString,DWORD cchString,DWORD dwFlags,BYTE* pbBinary,DWORD* pcbBinary,DWORD* pdwSkip,DWORD* pdwFlags);
+typedef BOOL (WINAPI *_CryptStringToBinaryW)(LPCWSTR pszString,DWORD cchString,DWORD dwFlags,BYTE* pbBinary,DWORD* pcbBinary,DWORD* pdwSkip,DWORD* pdwFlags);
+
 typedef NTSTATUS (NTAPI *PFN_NT_QUERY_INFORMATION_PROCESS) (
     HANDLE ProcessHandle,
     PROCESSINFOCLASS ProcessInformationClass,
@@ -2885,9 +2914,15 @@ typedef NTSTATUS (NTAPI *PFN_NT_QUERY_INFORMATION_PROCESS) (
     ULONG ProcessInformationLength,
     PULONG ReturnLength OPTIONAL);
 
-
-typedef BOOL(_stdcall *MyCryptEncrypt)(HCRYPTKEY, HCRYPTHASH, BOOL, DWORD, BYTE *, DWORD *, DWORD);
-typedef BOOL(_stdcall *MyCryptDecrypt)(HCRYPTKEY, HCRYPTHASH, BOOL, DWORD, BYTE *, DWORD *);
+typedef BOOL(WINAPI* MyCryptAcquireContext)(HCRYPTPROV*, LPCTSTR, LPCTSTR, DWORD, DWORD);
+typedef BOOL(WINAPI* MyCryptCreateHash)(HCRYPTPROV, ALG_ID, HCRYPTKEY, DWORD, HCRYPTHASH*);
+typedef BOOL(WINAPI* MyCryptDecrypt)(HCRYPTKEY, HCRYPTHASH, BOOL, DWORD, BYTE*, DWORD*);
+typedef BOOL(WINAPI* MyCryptDeriveKey)(HCRYPTPROV, ALG_ID, HCRYPTHASH, DWORD, HCRYPTKEY*);
+typedef BOOL(WINAPI* MyCryptDestroyHash)(HCRYPTHASH);
+typedef BOOL(WINAPI* MyCryptDestroyKey)(HCRYPTKEY);
+typedef BOOL(WINAPI* MyCryptEncrypt)(HCRYPTKEY, HCRYPTHASH, BOOL, DWORD, BYTE*, DWORD*, DWORD);
+typedef BOOL(WINAPI* MyCryptHashData)(HCRYPTHASH, CONST BYTE*, DWORD, DWORD);
+typedef BOOL(WINAPI* MyCryptReleaseContext)(HCRYPTPROV, DWORD);
 
 struct DerefList
 {
@@ -2908,8 +2943,11 @@ private:
 #ifdef CONFIG_DEBUGGER
 	friend class Debugger;
 #endif
-
-public:	
+public:
+	Line *mFirstLine, *mLastLine;     // The first and last lines in the linked list.
+	Label *mFirstLabel, *mLastLabel;  // The first and last labels in the linked list.
+	Line *mTempLine; // for use with dll Execute # Naveen N9
+	Label *mTempLabel; // for use with dll Execute # Naveen N9
 	FuncList mFuncs;
 	
 	UserFunc *mLastHotFunc;		// For hotkey/hotstring functions
@@ -2923,19 +2961,19 @@ public:
 								// passed to PreprocessLocalVars. Do not use this list after that. 
 
 	VarList mVars; // Sorted list of global variables.
+	DynaTokenList mDynas;
 	WinGroup *mFirstGroup, *mLastGroup;  // The first and last variables in the linked list.
 	Line *mOpenBlock; // While loading the script, this is the beginning of a block which is currently open.
 	Line *mPendingParentLine, *mPendingRelatedLine;
 	bool mNextLineIsFunctionBody; // Whether the very next line to be added will be the first one of the body.
 	bool mNoUpdateLabels;
-	
+
 #define MAX_NESTED_CLASSES 5
 #define MAX_CLASS_NAME_LENGTH UCHAR_MAX
 	int mClassObjectCount;
 	Object *mClassObject[MAX_NESTED_CLASSES]; // Class definition currently being parsed.
 	TCHAR mClassName[MAX_CLASS_NAME_LENGTH + 1]; // Only used during load-time.
 	Object *mUnresolvedClasses;
-	Array *mClasses = nullptr;
 	Property *mClassProperty;
 	LPTSTR mClassPropertyDef;
 
@@ -2968,9 +3006,10 @@ public:
 	};
 	size_t GetLine(LineBuffer &aBuf, int aInContinuationSection, bool aInBlockComment, TextStream *ts);
 	ResultType GetLineContinuation(TextStream *ts, LineBuffer &aBuf, LineBuffer &aNextBuf
-		, LineNumberType &aPhysLineNumber, bool &aHasContinuationSection, int aExprBalance = 0);
+		, LineNumberType &aPhysLineNumber, bool &aHasContinuationSection);
 	ResultType GetLineContExpr(TextStream *ts, LineBuffer &aBuf, LineBuffer &aNextBuf
 		, LineNumberType &aPhysLineNumber, bool &aHasContinuationSection);
+	bool IsSOLContExpr(LineBuffer &aBuf);
 	ResultType BalanceExprError(int aBalance, TCHAR aExpect[], LPTSTR aLineText);
 	static bool IsFunctionDefinition(LPTSTR aBuf, LPTSTR aNextBuf);
 	ResultType IsDirective(LPTSTR aBuf);
@@ -2981,7 +3020,7 @@ public:
 	ResultType ParseDoubleDeref(LPTSTR aArgText, LPTSTR aArgMap, DerefList &aDeref, int *aPos);
 	ResultType ParseFatArrow(LPTSTR aArgText, LPTSTR aArgMap, DerefList &aDeref
 		, LPTSTR aPrmStart, LPTSTR aPrmEnd, LPTSTR aExpr, LPTSTR &aExprEnd);
-	ResultType ParseFatArrow(DerefType &aDeref, LPTSTR aPrmStart, LPTSTR aPrmEnd, LPTSTR aExpr, LPTSTR aExprEnd, LPTSTR aExprMap);
+	ResultType ParseFatArrow(DerefList &aDeref, LPTSTR aPrmStart, LPTSTR aPrmEnd, LPTSTR aExpr, LPTSTR aExprEnd, LPTSTR aExprMap);
 	LPTSTR ParseActionType(LPTSTR aBufTarget, LPTSTR aBufSource, bool aDisplayErrors);
 	ResultType AddLabel(LPTSTR aLabelName, bool aAllowDupe);
 	void RemoveLabel(Label *aLabel);
@@ -2991,20 +3030,15 @@ public:
 	// if aStartingLine is allowed to be NULL (for recursive calls).  If they
 	// were member functions of class Line, a check for NULL would have to
 	// be done before dereferencing any line's mNextLine, for example:
-	ResultType PreparseFuncRefs(Line *aStartingLine);
 	ResultType PreparseExpressions(Line *aStartingLine);
 	ResultType PreparseExpressions(FuncList &aFuncs);
 	void PreparseHotkeyIfExpr(Line *aLine);
 	Line *PreparseCommands(Line *aStartingLine);
+	ResultType PreparseCatchVar(Line *aLine);
+	ResultType PreparseCatchClass(Line *aLine);
 	bool IsLabelTarget(Line *aLine);
 
-	Line *mFirstLine, *mLastLine;     // The first and last lines in the linked list.
-	Label *mFirstLabel, *mLastLabel;  // The first and last labels in the linked list.
-
-	Line *mTempLine; // for use with dll Execute # Naveen N9
-	Label *mTempLabel; // for use with dll Execute # Naveen N9
-
-	// Naveen moved above from private
+public:
 	Line *mCurrLine;     // Seems better to make this public than make Line our friend.
 	LPTSTR mThisHotkeyName, mPriorHotkeyName;
 	MsgMonitorList mOnExit, mOnClipboardChange, mOnError; // Event handlers for OnExit(), OnClipboardChange() and OnError().
@@ -3013,8 +3047,10 @@ public:
 
 	ScriptTimer *mFirstTimer, *mLastTimer;  // The first and last script timers in the linked list.
 	UINT mTimerCount, mTimerEnabledCount;
+
 	UserMenu *mFirstMenu, *mLastMenu;
 	UINT mMenuCount;
+
 	DWORD mThisHotkeyStartTime, mPriorHotkeyStartTime;  // Tickcount timestamp of when its subroutine began.
 	TCHAR mEndChar;  // The ending character pressed to trigger the most recent non-auto-replace hotstring.
 	modLR_type mThisHotkeyModifiersLR;
@@ -3025,6 +3061,11 @@ public:
 	LPTSTR mOurEXE; // Will hold this app's module name (e.g. C:\Program Files\AutoHotkey\AutoHotkey.exe).
 	LPTSTR mOurEXEDir;  // Same as above but just the containing directory (for convenience).
 	LPTSTR mMainWindowTitle; // Will hold our main window's title, for consistency & convenience.
+	enum Kind {
+		ScriptKindFile,
+		ScriptKindResource,
+		ScriptKindStdIn
+	} mKind;
 	bool mIsReadyToExecute;
 	bool mAutoExecSectionIsRunning;
 	bool mIsRestart; // The app is restarting rather than starting from scratch.
@@ -3033,7 +3074,11 @@ public:
 	void SetErrorStdOut(LPTSTR aParam);
 	void PrintErrorStdOut(LPCTSTR aErrorText, int aLength = 0, LPCTSTR aFile = _T("*"));
 	void PrintErrorStdOut(LPCTSTR aErrorText, LPCTSTR aExtraInfo, FileIndexType aFileIndex, LineNumberType aLineNumber);
-	TextStream *mIncludeLibraryFunctionsThenExit;
+#ifndef AUTOHOTKEYSC
+	bool mValidateThenExit;
+	LPTSTR mCmdLineInclude;
+#endif
+
 	int mUninterruptedLineCountMax; // 32-bit for performance (since huge values seem unnecessary here).
 	int mUninterruptibleTime;
 	DWORD mLastPeekTime;
@@ -3048,32 +3093,32 @@ public:
 	UINT mCustomIconNumber; // The number of the icon inside the above file.
 
 	UserMenu *mTrayMenu; // Our tray menu, which should be destroyed upon exiting the program.
-	ResultType Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestart, HINSTANCE hInstance,bool aIsText);
-	// ResultType InitDll(global_struct &g,HINSTANCE hInstance); // HotKeyIt init dll from text
+	DWORD mEncrypt;
+    
+	ResultType Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestart, HINSTANCE hInstance, bool aIsText);
 	ResultType CreateWindows();
 	void EnableClipboardListener(bool aEnable);
-//#ifdef AUTOHOTKEYSC
 	void AllowMainWindow(bool aAllow);
 	void EnableOrDisableViewMenuItems(HMENU aMenu, UINT aFlags);
-//#endif
 	void CreateTrayIcon();
+	void RestoreTrayIcon();
 	void UpdateTrayIcon(bool aForceUpdate = false);
 	void ShowTrayIcon(bool aShow);
 	ResultType SetTrayIcon(LPTSTR aIconFile, int aIconNumber, ToggleValueType aFreezeIcon);
 	void SetTrayTip(LPTSTR aText);
 	ResultType AutoExecSection();
-	ResultType Edit();
 	bool IsPersistent();
 	void ExitIfNotPersistent(ExitReasons aExitReason);
+	ResultType Edit();
 	ResultType Reload(bool aDisplayErrors);
 	ResultType ExitApp(ExitReasons aExitReason, int aExitCode = 0);
 	void TerminateApp(ExitReasons aExitReason, int aExitCode); // L31: Added aExitReason. See script.cpp.
-	LineNumberType LoadFromFile();
+	LineNumberType LoadFromFile(LPCTSTR aFileSpec);
 	LineNumberType LoadFromText(LPTSTR aScript, LPCTSTR aPathToShow = _T("")); // HotKeyIt H1 load text instead file ahktextdll
 	ResultType LoadIncludedText(LPTSTR aScript, LPCTSTR aPathToShow = _T("")); //New read text
-	ResultType LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure);
-	ResultType LoadIncludedFile(TextStream *fp);
-	ResultType OpenIncludedFile(TextStream &ts, LPTSTR aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure, LPCTSTR aPathToShow = NULL);
+	ResultType LoadIncludedFile(LPCTSTR aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure);
+	ResultType LoadIncludedFile(TextStream *fp, int aFileIndex);
+	ResultType OpenIncludedFile(TextStream *&ts, LPCTSTR aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure, LPCTSTR aPathToShow = NULL);
 	LineNumberType CurrentLine();
 	LPTSTR CurrentFile();
 	static ActionTypeType ConvertActionType(LPCTSTR aActionTypeString);
@@ -3091,32 +3136,45 @@ public:
 	LPTSTR DefaultDialogTitle();
 	UserFunc* CreateHotFunc();
 	ResultType DefineFunc(LPTSTR aBuf, bool aStatic = false, bool aIsInExpression = false);
+#ifndef AUTOHOTKEYSC
+	struct FuncLibrary
+	{
+		LPTSTR path;
+		size_t length;
+	};
 	void InitFuncLibraries(FuncLibrary aLibs[]);
 	void InitFuncLibrary(FuncLibrary &aLib, LPTSTR aPathBase, LPTSTR aPathSuffix);
-	Func *FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &aErrorWasShown, bool &aFileWasFound, bool aIsAutoInclude);
-	Func *FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength = -1, int *apInsertPos = NULL);
-	FuncEntry *FindBuiltInFunc(LPTSTR aFuncName);
-	UserFunc *AddFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int aInsertPos, Object *aClassObject = NULL);
+	void IncludeLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &aErrorWasShown, bool &aFileWasFound, bool aIgnoreLoadFailure, bool aIsStandardLib);
+#endif
+	Var* LoadFuncFromWinApi(LPCTSTR aFuncName, size_t aFuncNameLength = 0);
+	Var* LoadFuncFromResource(LPCTSTR aFuncName, size_t aFuncNameLength = 0);
+	Func *FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength = 0);
+	static FuncEntry *GetBuiltInFunc(LPTSTR aFuncName);
+	UserFunc *AddFunc(LPCTSTR aFuncName, size_t aFuncNameLength, Object *aClassObject = NULL);
 
 	ResultType DefineClass(LPTSTR aBuf);
 	UserFunc *DefineClassInit(bool aStatic);
 	ResultType DefineClassVars(LPTSTR aBuf, bool aStatic);
+	ResultType DefineClassVarInit(LPTSTR aBuf, bool aStatic, Object *aObject, ActionTypeType aActionType = ACT_INVALID);
 	ResultType DefineClassProperty(LPTSTR aBuf, bool aStatic, bool &aBufHasBraceOrNotNeeded);
 	ResultType DefineClassPropertyXet(LPTSTR aBuf, LPTSTR aEnd);
 	Object *FindClass(LPCTSTR aClassName, size_t aClassNameLength = 0);
 	ResultType ResolveClasses();
-	ResultType InitClasses();
 
 	static SymbolType ConvertWordOperator(LPCTSTR aWord, size_t aLength);
 	static bool EndsWithOperator(LPTSTR aBuf, LPTSTR aBuf_marker);
 
-	#define FINDVAR_DEFAULT  (VAR_LOCAL | VAR_GLOBAL)
-	#define FINDVAR_GLOBAL   VAR_GLOBAL
-	#define FINDVAR_LOCAL    VAR_LOCAL
-	Var *FindOrAddVar(LPCTSTR aVarName, size_t aVarNameLength = 0, int aScope = FINDVAR_DEFAULT);
-	Var *FindVar(LPCTSTR aVarName, size_t aVarNameLength = 0, int aScope = FINDVAR_DEFAULT
+	#define FINDVAR_DEFAULT			(VAR_LOCAL | VAR_GLOBAL)
+	#define FINDVAR_GLOBAL			VAR_GLOBAL
+	#define FINDVAR_LOCAL			VAR_LOCAL
+	#define FINDVAR_GLOBAL_FALLBACK	0x100
+	#define FINDVAR_NO_BIF			0x200
+	#define FINDVAR_FOR_WRITE		FINDVAR_DEFAULT
+	#define FINDVAR_FOR_READ		(FINDVAR_DEFAULT | FINDVAR_GLOBAL_FALLBACK)
+	Var *FindOrAddVar(LPCTSTR aVarName, size_t aVarNameLength, int aScope);
+	Var *FindVar(LPCTSTR aVarName, size_t aVarNameLength, int aScope = FINDVAR_FOR_READ
 		, VarList **apList = nullptr, int *apInsertPos = nullptr, ResultType *aDisplayError = nullptr);
-	Var *FindUpVar(LPCTSTR aVarName, UserFunc &aInner, ResultType *aDisplayError);
+	Var *FindUpVar(LPCTSTR aVarName, size_t aVarNameLength, UserFunc &aInner, ResultType *aDisplayError);
 	Var *AddVar(LPCTSTR aVarName, size_t aVarNameLength, VarList *aList, int aInsertPos, int aScope);
 	Var *FindOrAddBuiltInVar(LPCTSTR aVarName, VarEntry *aVarEntry);
 	static VarEntry *GetBuiltInVar(LPCTSTR aVarName);
@@ -3137,6 +3195,7 @@ public:
 	ResultType ActionExec(LPTSTR aAction, LPTSTR aParams = NULL, LPTSTR aWorkingDir = NULL
 		, bool aDisplayErrors = true, LPTSTR aRunShowMode = NULL, HANDLE *aProcess = NULL
 		, bool aUpdateLastError = false, bool aUseRunAs = false, Var *aOutputVar = NULL);
+
 	LPTSTR ListVars(LPTSTR aBuf, int aBufSize);
 	LPTSTR ListKeyHistory(LPTSTR aBuf, int aBufSize);
 
@@ -3173,31 +3232,32 @@ public:
 	ResultType CriticalError(LPCTSTR aErrorText, LPCTSTR aExtraInfo = _T(""));
 	// RuntimeError allows the user to choose to continue, in which case OK is returned instead of FAIL;
 	// therefore, caller must not rely on a FAIL result to abort the overall operation.
-	ResultType RuntimeError(LPCTSTR aErrorText, LPCTSTR aExtraInfo = _T(""), ResultType aErrorType = FAIL_OR_OK, Line *aLine = nullptr);
+	ResultType RuntimeError(LPCTSTR aErrorText, LPCTSTR aExtraInfo = _T(""), ResultType aErrorType = FAIL_OR_OK, Line *aLine = nullptr, Object *aPrototype = nullptr);
 
 	ResultType ConflictingDeclarationError(LPCTSTR aDeclType, Var *aExisting);
-	enum VarRefUsageType { VARREF_READ = 0, VARREF_BYREF, VARREF_ISSET
-		, VARREF_DYNAMIC_PARAM, VARREF_LVALUE, VARREF_OUTPUT_VAR };
-#define VARREF_IS_WRITE(is_lvalue) ((is_lvalue) >= Script::VARREF_LVALUE)
+	enum VarRefUsageType { VARREF_READ = 0, VARREF_ISSET
+		, VARREF_REF, VARREF_LVALUE, VARREF_OUTPUT_VAR };
+#define VARREF_IS_WRITE(var_usage) ((var_usage) >= Script::VARREF_REF)
 	ResultType VarIsReadOnlyError(Var *aVar, int aErrorType = VARREF_LVALUE);
+	ResultType VarUnsetError(Var *aVar);
 
 	ResultType ShowError(LPCTSTR aErrorText, ResultType aErrorType, LPCTSTR aExtraInfo, Line *aLine);
 	int FormatError(LPTSTR aBuf, int aBufSize, ResultType aErrorType, LPCTSTR aErrorText, LPCTSTR aExtraInfo, Line *aLine);
 
 	void ScriptWarning(WarnMode warnMode, LPCTSTR aWarningText, LPCTSTR aExtraInfo = _T(""), Line *line = NULL);
-	void WarnUnassignedVar(Var *aVar);
-	void WarnUninitializedVar(Var *aVar);
+	void WarnUnassignedVar(Var *aVar, Line *aLine);
 	void WarnLocalSameAsGlobal(LPCTSTR aVarName);
 
 	ResultType PreprocessLocalVars(FuncList &aFuncs);
 	ResultType PreprocessLocalVars(UserFunc &aFunc);
-	ResultType PreparseVarRefs();
+	ResultType PreparseVarRefs(Line *aLine);
+	void CountNestedFuncRefs(UserFunc &aWithin, LPCTSTR aFuncName);
 
 	ResultType ThrowIfTrue(bool aError);
-	ResultType ThrowIntIfNonzero(int aErrorValue, LPCTSTR aWhat = NULL);
-	ResultType ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat, LPCTSTR aExtraInfo, Line *aLine, ResultType aErrorType);
-	ResultType ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat = nullptr, LPCTSTR aExtraInfo = _T(""));
-	ResultType Win32Error(DWORD aError = GetLastError());
+	ResultType ThrowIntIfNonzero(int aErrorValue);
+	ResultType ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aExtraInfo, Line *aLine, ResultType aErrorType, Object *aPrototype = nullptr);
+	ResultType ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aExtraInfo = _T(""));
+	ResultType Win32Error(DWORD aError = GetLastError(), ResultType aErrorType = FAIL_OR_OK);
 	
 	ResultType UnhandledException(Line* aLine, ResultType aErrorType = FAIL);
 	static void FreeExceptionToken(ResultToken*& aToken);
@@ -3206,7 +3266,6 @@ public:
 	#define SOUNDPLAY_ALIAS _T("AHK_PlayMe")  // Used by destructor and SoundPlay().
 
 	Script();
-	void Construct();
 	~Script();
 	// Note that the anchors to any linked lists will be lost when this
 	// object goes away, so for now, be sure the destructor is only called
@@ -3237,6 +3296,8 @@ BIV_DECL_RW(BIV_CoordMode);
 BIV_DECL_RW(BIV_SendMode);
 BIV_DECL_RW(BIV_SendLevel);
 BIV_DECL_RW(BIV_StoreCapsLockMode);
+BIV_DECL_RW(BIV_Hotkey);
+BIV_DECL_RW(BIV_MenuMaskKey);
 BIV_DECL_R (BIV_IsPaused);
 BIV_DECL_R (BIV_IsCritical);
 BIV_DECL_R (BIV_IsSuspended);
@@ -3248,22 +3309,22 @@ BIV_DECL_RW(BIV_AllowMainWindow);
 BIV_DECL_R (BIV_TrayMenu);
 BIV_DECL_RW(BIV_IconHidden);
 BIV_DECL_RW(BIV_IconTip);
-BIV_DECL_R (BIV_GlobalStruct);
-BIV_DECL_R (BIV_ScriptStruct);
-BIV_DECL_R (BIV_ModuleHandle);
-BIV_DECL_R (BIV_MemoryModule);
-BIV_DECL_R (BIV_IsDll);
-BIV_DECL_RW(BIV_CoordMode);
 BIV_DECL_R (BIV_IconFile);
 BIV_DECL_R (BIV_IconNumber);
 BIV_DECL_R (BIV_Space_Tab);
 BIV_DECL_R (BIV_AhkVersion);
 BIV_DECL_R (BIV_AhkPath);
 BIV_DECL_R (BIV_AhkDir);
+BIV_DECL_R (BIV_DllDir);
 BIV_DECL_R (BIV_DllPath);
-BIV_DECL_R(BIV_DllDir);
-BIV_DECL_R(BIV_ThreadID);
-BIV_DECL_R(BIV_MainThreadID);
+BIV_DECL_R (BIV_IsDll);
+BIV_DECL_R (BIV_ThreadID);
+BIV_DECL_R (BIV_MainThreadID);
+BIV_DECL_R (BIV_ModuleHandle);
+BIV_DECL_R (BIV_MemoryModule);
+BIV_DECL_R (BIV_GlobalStruct);
+BIV_DECL_R (BIV_ScriptStruct);
+BIV_DECL_RW(BIV_CoordMode);
 BIV_DECL_R (BIV_TickCount);
 BIV_DECL_R (BIV_Now);
 BIV_DECL_R (BIV_OSVersion);
@@ -3308,15 +3369,15 @@ BIV_DECL_R (BIV_PriorHotkey);
 BIV_DECL_R (BIV_TimeSinceThisHotkey);
 BIV_DECL_R (BIV_TimeSincePriorHotkey);
 BIV_DECL_R (BIV_EndChar);
-BIV_DECL_R (BIV_ScreenDPI);
 BIV_DECL_RW(BIV_EventInfo);
 BIV_DECL_R (BIV_TimeIdle);
-BIV_DECL_R (BIV_TimeIdlePhysical);
 BIV_DECL_R (BIV_IPAddress);
 BIV_DECL_R (BIV_IsAdmin);
 BIV_DECL_R (BIV_PtrSize);
 BIV_DECL_R (BIV_PriorKey);
+BIV_DECL_R (BIV_ScreenDPI);
 BIV_DECL_RW(BIV_ZipCompressionLevel);
+
 
 ////////////////////////
 // BUILT-IN FUNCTIONS //
@@ -3336,8 +3397,6 @@ BIF_DECL(BIF_sizeof);
 BIF_DECL(BIF_Swap);
 
 BIF_DECL(BIF_Getvar);
-BIF_DECL(BIF_Alias);
-BIF_DECL(BIF_ResourceLoadLibrary);
 BIF_DECL(BIF_MemoryLoadLibrary);
 BIF_DECL(BIF_MemoryCallEntryPoint);
 BIF_DECL(BIF_MemoryGetProcAddress);
@@ -3373,17 +3432,11 @@ BIF_DECL(BIF_Ord);
 BIF_DECL(BIF_Chr);
 BIF_DECL(BIF_Format);
 BIF_DECL(BIF_FormatTime);
-#ifndef _USRDLL
-BIF_DECL(BIF_NewThread);
-#endif
 BIF_DECL(BIF_NumGet);
 BIF_DECL(BIF_NumPut);
 BIF_DECL(BIF_StrGetPut);
 BIF_DECL(BIF_StrPtr);
 BIF_DECL(BIF_IsLabel);
-BIF_DECL(BIF_IsFunc);
-BIF_DECL(BIF_Func);
-BIF_DECL(BIF_IsByRef);
 BIF_DECL(BIF_IsTypeish);
 BIF_DECL(BIF_IsSet);
 BIF_DECL(BIF_GetKeyState);
@@ -3395,6 +3448,7 @@ BIF_DECL(BIF_Round);
 BIF_DECL(BIF_FloorCeil);
 BIF_DECL(BIF_Integer);
 BIF_DECL(BIF_Float);
+BIF_DECL(BIF_Number);
 BIF_DECL(BIF_Mod);
 BIF_DECL(BIF_Abs);
 BIF_DECL(BIF_Sin);
@@ -3415,8 +3469,8 @@ BIF_DECL(BIF_Hotkey);
 BIF_DECL(BIF_SetTimer);
 BIF_DECL(BIF_OnMessage);
 BIF_DECL(BIF_On);
-BIF_DECL(BIF_BufferAlloc);
-BIF_DECL(BIF_ClipboardAll);
+BIF_DECL(BIF_Persistent);
+BIF_DECL(BIF_InstallHook);
 
 #ifdef ENABLE_REGISTERCALLBACK
 BIF_DECL(BIF_CallbackCreate);
@@ -3436,26 +3490,29 @@ BIF_DECL(BIF_GuiCtrlFromHwnd);
 BIF_DECL(BIF_IL_Create);
 BIF_DECL(BIF_IL_Destroy);
 BIF_DECL(BIF_IL_Add);
+
 BIF_DECL(BIF_LoadPicture);
+
 BIF_DECL(BIF_Trim); // L31: Also handles LTrim and RTrim.
+BIF_DECL(BIF_VerCompare);
 
 BIF_DECL(BIF_Hotstring);
-BIF_DECL(BIF_InputHook);
 
 BIF_DECL(BIF_Type);
 BIF_DECL(BIF_IsObject);
+
+BIF_DECL(BIF_Alias);
 BIF_DECL(BIF_Cast);
-
-
-BIF_DECL(BIF_Object);
-BIF_DECL(BIF_UObject);
-BIF_DECL(BIF_Array);
 BIF_DECL(BIF_UArray);
-BIF_DECL(BIF_Map);
-BIF_DECL(BIF_UMap);
 BIF_DECL(BIF_CriticalObject);
+BIF_DECL(BIF_UMap);
+BIF_DECL(BIF_UObject);
 BIF_DECL(BIF_ObjLoad);
 BIF_DECL(BIF_ObjDump);
+
+BIF_DECL(Op_Object);
+BIF_DECL(Op_Array);
+
 BIF_DECL(BIF_ObjAddRefRelease);
 BIF_DECL(BIF_ObjBindMethod);
 BIF_DECL(BIF_ObjPtr);
@@ -3465,29 +3522,25 @@ BIF_DECL(BIF_ObjXXX);
 BIF_DECL(BIF_Base);
 BIF_DECL(BIF_HasBase);
 BIF_DECL(BIF_HasProp);
-BIF_DECL(BIF_HasMethod);
 BIF_DECL(BIF_GetMethod);
-
 
 // Advanced file IO interfaces
 BIF_DECL(BIF_FileOpen);
 
 
 // COM interop
-BIF_DECL(BIF_ComObject);
+BIF_DECL(ComValue_Call);
+BIF_DECL(ComObject_Call);
+BIF_DECL(ComObjArray_Call);
+BIF_DECL(BIF_ComObj);
 BIF_DECL(BIF_ComObjActive);
-BIF_DECL(BIF_ComObjCreate);
 BIF_DECL(BIF_ComObjGet);
 BIF_DECL(BIF_ComObjDll);
 BIF_DECL(BIF_ComObjConnect);
 BIF_DECL(BIF_ComObjType);
 BIF_DECL(BIF_ComObjValue);
 BIF_DECL(BIF_ComObjFlags);
-BIF_DECL(BIF_ComObjArray);
 BIF_DECL(BIF_ComObjQuery);
-
-
-BIF_DECL(BIF_Exception);
 
 
 BIF_DECL(BIF_Control);
@@ -3556,7 +3609,6 @@ SymbolType TokenIsNumeric(ExprTokenType &aToken);
 SymbolType TokenIsPureNumeric(ExprTokenType &aToken);
 SymbolType TokenIsPureNumeric(ExprTokenType &aToken, SymbolType &aIsImpureNumeric);
 BOOL TokenIsEmptyString(ExprTokenType &aToken);
-BOOL TokenIsEmptyString(ExprTokenType &aToken, BOOL aWarnUninitializedVar); // Same as TokenIsEmptyString but optionally warns if the token is an uninitialized var.
 SymbolType TypeOfToken(ExprTokenType &aToken);
 SymbolType TypeOfToken(ExprTokenType &aToken, SymbolType &aIsNum);
 __int64 TokenToInt64(ExprTokenType &aToken);
@@ -3564,17 +3616,17 @@ double TokenToDouble(ExprTokenType &aToken, BOOL aCheckForHex = TRUE);
 LPTSTR TokenToString(ExprTokenType &aToken, LPTSTR aBuf = NULL, size_t *aLength = NULL);
 ResultType TokenToDoubleOrInt64(const ExprTokenType &aInput, ExprTokenType &aOutput);
 StringCaseSenseType TokenToStringCase(ExprTokenType& aToken);
+Var *TokenToOutputVar(ExprTokenType &aToken);
 IObject *TokenToObject(ExprTokenType &aToken); // L31
-Func *TokenToFunc(ExprTokenType &aToken);
-IObject *TokenToFunctor(ExprTokenType &aToken);
-IObject *StringToFunctor(LPTSTR aStr);
-ResultType ValidateFunctor(IObject *aFunc, int aParamCount, ResultToken &aResultToken, LPTSTR aNullErr = ERR_TYPE_MISMATCH, int *aMinParams = nullptr);
+ResultType ValidateFunctor(IObject *aFunc, int aParamCount, ResultToken &aResultToken, int *aMinParams = nullptr, bool aShowError = true);
 ResultType TokenSetResult(ResultToken &aResultToken, LPCTSTR aValue, size_t aLength = -1);
-BOOL TokensAreEqual(ExprTokenType &left, ExprTokenType &right);
 LPTSTR TokenTypeString(ExprTokenType &aToken);
 #define STRING_TYPE_STRING _T("String")
 #define INTEGER_TYPE_STRING _T("Integer")
 #define FLOAT_TYPE_STRING _T("Float")
+
+ResultType MemoryError(LPCTSTR aExtraInfo = nullptr);
+ResultType ValueError(LPCTSTR aErrorText, LPCTSTR aExtraInfo, ResultType aErrorType);
 
 LPTSTR RegExMatch(LPTSTR aHaystack, LPTSTR aNeedleRegEx);
 ResultType SetWorkingDir(LPTSTR aNewDir);
@@ -3606,12 +3658,15 @@ ResultType GetObjectIntProperty(IObject *aObject, LPTSTR aPropName, __int64 &aVa
 void GetBufferObjectPtr(ResultToken &aResultToken, IObject *obj, size_t &aPtr, size_t &aSize);
 void GetBufferObjectPtr(ResultToken &aResultToken, IObject *obj, size_t &aPtr);
 
+struct FuncLibrary
+{
+	LPTSTR path;
+	size_t length;
+};
+
 void ConvertDllArgType(LPTSTR aBuf, DYNAPARM &aDynaParam);
-
-#ifndef _USRDLL
-VOID CALLBACK ThreadExitApp(ULONG_PTR dwParam);
-#endif
-
 void free_compiled_regex();
+
+VOID CALLBACK ThreadExitApp(ULONG_PTR dwData);
 #endif
 

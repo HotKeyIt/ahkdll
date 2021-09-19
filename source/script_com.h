@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 
 extern bool g_ComErrorNotify;
@@ -23,11 +23,9 @@ public:
 	// the script has a reference to the object, which means either that the script
 	// itself has implemented IConnectionPoint (and why would it?), or has used the
 	// IEnumConnections interface to retrieve its own object (unlikely).
-	ResultType Invoke(IObject_Invoke_PARAMS_DECL)
-	{
-		return INVOKE_NOT_HANDLED;
-	}
+	//ResultType Invoke(IObject_Invoke_PARAMS_DECL); // ObjectBase::Invoke is sufficient.
 	IObject_Type_Impl("ComEvent") // Unlikely to be called; see above.
+	Object *Base() { return nullptr; }
 
 	HRESULT Connect(LPTSTR pfx = NULL, IObject *ahkObject = NULL);
 
@@ -62,10 +60,25 @@ public:
 	enum { F_OWNVALUE = 1 };
 	USHORT mFlags;
 
+	enum
+	{
+		P_Ptr,
+		// ComValueRef
+		P___Item,
+		// ComObjArray
+		M___Enum,
+		M_Clone,
+		M_MaxIndex,
+		M_MinIndex,
+	};
+	static ObjectMember sArrayMembers[], sRefMembers[], sValueMembers[];
+
 	ResultType Invoke(IObject_Invoke_PARAMS_DECL);
-	ResultType SafeArrayInvoke(IObject_Invoke_PARAMS_DECL);
-	ResultType ByRefInvoke(IObject_Invoke_PARAMS_DECL);
+	void Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void SafeArrayInvoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void SafeArrayItem(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	LPTSTR Type();
+	Object *Base();
 	IObject_DebugWriteProperty_Def;
 
 	void ToVariant(VARIANT &aVar)
@@ -122,21 +135,33 @@ public:
 class ComArrayEnum : public EnumBase
 {
 	ComObject *mArrayObject;
-	char *mPointer, *mEnd;
+	void *mData;
+	long mLBound, mUBound;
 	UINT mElemSize;
 	VARTYPE mType;
+	bool mIndexMode;
+	long mOffset = -1;
 
-	ComArrayEnum(ComObject *aObj, char *aData, char *aDataEnd, UINT aElemSize, VARTYPE aType)
-		: mArrayObject(aObj), mPointer(aData - aElemSize), mEnd(aDataEnd), mElemSize(aElemSize), mType(aType)
+	ComArrayEnum(ComObject *aObj, void *aData, long aLBound, long aUBound, UINT aElemSize, VARTYPE aType, bool aIndexMode)
+		: mArrayObject(aObj), mData(aData), mLBound(aLBound), mUBound(aUBound), mElemSize(aElemSize), mType(aType), mIndexMode(aIndexMode)
 	{
 	}
 
 public:
-	static HRESULT Begin(ComObject *aArrayObject, ComArrayEnum *&aOutput);
-	ResultType Next(Var *aOutput, Var *aOutputType);
+	static HRESULT Begin(ComObject *aArrayObject, ComArrayEnum *&aOutput, int aMode);
+	ResultType Next(Var *aVar1, Var *aVar2);
 	~ComArrayEnum();
 };
 
+
+enum TTVArgType
+{
+	VariantIsValue,
+	VariantIsAllocatedString,
+	VariantIsVarRef
+};
+void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar, TTVArgType *aVarIsArg = FALSE);
+HRESULT TokenToVarType(ExprTokenType &aToken, VARTYPE aVarType, void *apValue, bool aCallerIsComValue = false);
 
 void ComError(HRESULT, ResultToken &, LPTSTR = _T(""), EXCEPINFO* = NULL);
 

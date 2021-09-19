@@ -1,4 +1,4 @@
-/*
+﻿/*
 AutoHotkey
 
 Copyright 2003-2009 Chris Mallett (support@autohotkey.com)
@@ -14,7 +14,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 */
 
-#include "stdafx.h" // pre-compiled headers
+#include "pch.h" // pre-compiled headers
 // These includes should probably a superset of those in globaldata.h:
 #include "hook.h" // For KeyHistoryItem and probably other things.
 #include "clipboard.h"  // For the global clipboard object
@@ -29,129 +29,128 @@ GNU General Public License for more details.
 // which are necessary to save and restore (even though it would clean
 // up the code and might make maintaining it easier):
 
-_thread_local FuncLibrary sLib[FUNC_LIB_COUNT] = { 0 }; // function libraries
+thread_local FuncLibrary sLib[FUNC_LIB_COUNT] = { 0 }; // function libraries
+thread_local extern bool g_call__Delete = true; // required to avoid calling __Delete when freeing sAnyPrototype on script exit.
 LPSTR g_hWinAPI = NULL, g_hWinAPIlowercase = NULL;  // loads WinAPI functions definitions from resource
-_thread_local SimpleHeap *g_SimpleHeap = NULL;
-_thread_local SimpleHeap *g_SimpleHeapVar = NULL;
+thread_local SimpleHeap *g_SimpleHeap = NULL;
 HRSRC g_hResource = NULL; // Set by WinMain()	// for compiled AutoHotkey.exe
-HCUSTOMMODULE g_hNTDLL = NULL;
-HCUSTOMMODULE g_hKERNEL32 = NULL;
+HMEMORYMODULE g_hNTDLL = NULL;
+HMEMORYMODULE g_hKERNEL32 = NULL;
+HMEMORYMODULE g_hCRYPT32 = NULL;
 _QueryPerformanceCounter g_QPC = NULL;
+_CryptStringToBinaryA g_CS2BA = NULL;
+_CryptStringToBinaryW g_CS2BW = NULL;
 double g_QPCtimer = 0.0;
 double g_QPCfreq = 0.0;
-_thread_local bool g_Reloading = false;
-#ifdef _USRDLL
-_thread_local bool g_Loading = false;
-#else
+LPTSTR g_result_to_return_dll[4095] = {}; //HotKeyIt H2 for ahkgetvar return value.
+FuncAndToken g_FuncAndTokenToReturn[4095] = {};    // for ahkFunction
+thread_local int g_ExitCode = 0;
+thread_local bool g_Reloading = false;
+//#else
 EXPORT FARPROC g_ThreadExitApp = (FARPROC)&ThreadExitApp;
 UINT_PTR g_ahkThreads[MAX_AHK_THREADS][7];
-#endif
 HINSTANCE g_hInstance = NULL; // Set by WinMain().
-_thread_local HMODULE g_hMemoryModule = NULL; // Set by DllMain() used for COM 
-EXPORT DWORD g_MainThreadID = GetCurrentThreadId();
-_thread_local HANDLE g_hThread = 0;
-_thread_local DWORD g_ThreadID = 0;
-DWORD g_HookThreadID; // Not initialized by design because 0 itself might be a valid thread ID.
-#ifndef _USRDLL
-_thread_local LPTSTR g_lpScript = 0;
-#endif
-ATOM g_ClassRegistered = 0;
-_thread_local CRITICAL_SECTION g_CriticalRegExCache;
-#ifdef _USRDLL
-_thread_local CRITICAL_SECTION g_CriticalHeapBlocks;
-#endif
-DWORD g_CriticalObjectTimeOut = 0;
-DWORD g_CriticalObjectSleepTime = 0;
-_thread_local LPWSTR g_WindowClassMain = WINDOW_CLASS_MAIN;
-_thread_local LPWSTR g_WindowClassGUI = WINDOW_CLASS_GUI;
+thread_local HMODULE g_hMemoryModule = NULL; // Set by DllMain() used for COM 
+EXPORT DWORD g_FirstThreadID = NULL;
+thread_local DWORD g_MainThreadID = 0;
+thread_local DWORD g_HookThreadID; // Not initialized by design because 0 itself might be a valid thread ID.
+thread_local LPTSTR g_lpScript = 0;
+thread_local bool g_UseStdLib = false;
+thread_local ATOM g_ClassRegistered = 0;
+thread_local CRITICAL_SECTION g_CriticalRegExCache;
+//#ifdef _USRDLL
+//thread_local CRITICAL_SECTION g_CriticalHeapBlocks;
+//#endif
+thread_local DWORD g_CriticalObjectTimeOut = 0;
+thread_local DWORD g_CriticalObjectSleepTime = 0;
+thread_local LPWSTR g_WindowClassMain = WINDOW_CLASS_MAIN;
+thread_local LPWSTR g_WindowClassGUI = WINDOW_CLASS_GUI;
 
-_thread_local UINT g_DefaultScriptCodepage = CP_UTF8;
+thread_local UINT g_DefaultScriptCodepage = CP_UTF8;
 
-_thread_local bool g_ReturnNotExit = false;					// for ahkExec/addScript/addFile
-_thread_local bool g_DestroyWindowCalled = false;
-_thread_local HWND g_hWnd = NULL;
-_thread_local HWND g_hWndEdit = NULL;
-_thread_local HFONT g_hFontEdit = NULL;
-_thread_local HACCEL g_hAccelTable = NULL;
+thread_local bool g_ReturnNotExit = false;					// for ahkExec/addScript
+thread_local bool g_DestroyWindowCalled = false;
+thread_local HWND g_hWnd = NULL;
+thread_local HWND g_hWndEdit = NULL;
+thread_local HFONT g_hFontEdit = NULL;
+thread_local HACCEL g_hAccelTable = NULL;
 
-_thread_local WNDPROC g_TabClassProc = NULL;
+thread_local WNDPROC g_TabClassProc = NULL;
 
-modLR_type g_modifiersLR_logical = 0;
-modLR_type g_modifiersLR_logical_non_ignored = 0;
-modLR_type g_modifiersLR_physical = 0;
-modLR_type g_modifiersLR_numpad_mask = 0;
-modLR_type g_modifiersLR_ctrlaltdel_mask = 0;
+thread_local modLR_type g_modifiersLR_logical = 0;
+thread_local modLR_type g_modifiersLR_logical_non_ignored = 0;
+thread_local modLR_type g_modifiersLR_physical = 0;
+thread_local modLR_type g_modifiersLR_numpad_mask = 0;
+thread_local modLR_type g_modifiersLR_ctrlaltdel_mask = 0;
 
 #ifdef FUTURE_USE_MOUSE_BUTTONS_LOGICAL
-WORD g_mouse_buttons_logical = 0;
+thread_local WORD g_mouse_buttons_logical = 0;
 #endif
 
 // Used by the hook to track physical state of all virtual keys, since GetAsyncKeyState() does
 // not retrieve the physical state of a key.  Note that this array is sometimes used in a way that
 // requires its format to be the same as that returned from GetKeyboardState():
-BYTE g_PhysicalKeyState[VK_ARRAY_COUNT] = { 0 };
-bool g_BlockWinKeys = false;
-DWORD g_AltGrExtraInfo = 0;
-BYTE g_MenuMaskKeyVK = VK_CONTROL; // For #MenuMaskKey.
-USHORT g_MenuMaskKeySC = SC_LCONTROL;
+thread_local BYTE g_PhysicalKeyState[VK_ARRAY_COUNT] = {0};
+thread_local bool g_BlockWinKeys = false;
+thread_local DWORD g_AltGrExtraInfo = 0;
 
-int g_HotkeyModifierTimeout = 50;  // Reduced from 100, which was a little too large for fast typists.
-_thread_local int g_ClipboardTimeout = 1000; // v1.0.31
+thread_local BYTE g_MenuMaskKeyVK = VK_CONTROL; // For #MenuMaskKey.
+thread_local USHORT g_MenuMaskKeySC = SC_LCONTROL;
 
-HHOOK g_KeybdHook = NULL;
-HHOOK g_MouseHook = NULL;
-HHOOK g_PlaybackHook = NULL;
-_thread_local bool g_ForceLaunch = false;
-_thread_local bool g_WinActivateForce = false;
-_thread_local bool g_RunStdIn = false;
-_thread_local WarnMode g_Warn_UseUnsetLocal = WARNMODE_MSGBOX;		// Used by #Warn directive.
-_thread_local WarnMode g_Warn_UseUnsetGlobal = WARNMODE_MSGBOX;		//
-_thread_local WarnMode g_Warn_LocalSameAsGlobal = WARNMODE_OFF;	//
-_thread_local WarnMode g_Warn_Unreachable = WARNMODE_MSGBOX;
-_thread_local WarnMode g_Warn_VarUnset = WARNMODE_MSGBOX;
-_thread_local SingleInstanceType g_AllowOnlyOneInstance = SINGLE_INSTANCE_PROMPT;
-_thread_local PVOID g_ExceptionHandler = NULL;
-_thread_local bool g_ExceptionWarnContinuable = true;
-HookType g_ExceptionHooksToEnable = NULL;
-_thread_local bool g_persistent = false;  // Whether the script should stay running even after the auto-exec section finishes.
-_thread_local bool g_NoTrayIcon = false;
-_thread_local bool g_AllowMainWindow = false;
-_thread_local bool g_MainTimerExists = false;
-_thread_local bool g_AutoExecTimerExists = false;
-_thread_local bool g_InputTimerExists = false;
-_thread_local bool g_DerefTimerExists = false;
-_thread_local bool g_SoundWasPlayed = false;
-bool g_IsSuspended = false;  // Make this separate from g_AllowInterruption since that is frequently turned off & on.
-_thread_local bool g_DeferMessagesForUnderlyingPump = false;
-_thread_local bool g_OnExitIsRunning = false;
-_thread_local BOOL g_AllowInterruption = TRUE;  // BOOL vs. bool might improve performance a little for frequently-accessed variables.
-_thread_local int g_nLayersNeedingTimer = 0;
-_thread_local int g_nThreads = 0;
-_thread_local int g_nPausedThreads = 0;
-_thread_local int g_MaxHistoryKeys = 40;
-_thread_local DWORD g_InputTimeoutAt = 0;
-// g_MaxVarCapacity is used to prevent a buggy script from consuming all available system RAM. It is defined
-// as the maximum memory size of a variable, including the string's zero terminator.
-// The chosen default seems big enough to be flexible, yet small enough to not be a problem on 99% of systems:
-_thread_local UCHAR g_MaxThreadsPerHotkey = 1;
-_thread_local int g_MaxThreadsTotal = MAX_THREADS_DEFAULT;
+thread_local int g_HotkeyModifierTimeout = 50;  // Reduced from 100, which was a little too large for fast typists.
+thread_local int g_ClipboardTimeout = 1000; // v1.0.31
+
+thread_local HHOOK g_KeybdHook = NULL;
+thread_local HHOOK g_MouseHook = NULL;
+thread_local HHOOK g_PlaybackHook = NULL;
+thread_local bool g_ForceLaunch = false;
+thread_local bool g_WinActivateForce = false;
+thread_local bool g_RunStdIn = false;
+thread_local WarnMode g_Warn_LocalSameAsGlobal = WARNMODE_OFF;
+thread_local WarnMode g_Warn_Unreachable = WARNMODE_MSGBOX;
+thread_local WarnMode g_Warn_VarUnset = WARNMODE_MSGBOX;
+thread_local SingleInstanceType g_AllowOnlyOneInstance = SINGLE_INSTANCE_PROMPT;
+thread_local bool g_persistent = false;  // Whether the script should stay running even after the auto-exec section finishes.
+thread_local bool g_NoTrayIcon = false;
+#ifdef AUTOHOTKEYSC
+	thread_local bool g_AllowMainWindow = false;
+#else
+	thread_local bool g_AllowMainWindow = true;
+#endif
+thread_local bool g_MainTimerExists = false;
+thread_local bool g_InputTimerExists = false;
+thread_local bool g_DerefTimerExists = false;
+thread_local bool g_SoundWasPlayed = false;
+thread_local bool g_IsSuspended = false;  // Make this separate from g_AllowInterruption since that is frequently turned off & on.
+thread_local bool g_DeferMessagesForUnderlyingPump = false;
+thread_local bool g_OnExitIsRunning = false;
+thread_local BOOL g_AllowInterruption = TRUE;  // BOOL vs. bool might improve performance a little for frequently-accessed variables.
+thread_local int g_nLayersNeedingTimer = 0;
+thread_local int g_nThreads = 0;
+thread_local int g_nPausedThreads = 0;
+thread_local int g_MaxHistoryKeys = 40;
+thread_local DWORD g_InputTimeoutAt = 0;
+
+thread_local UCHAR g_MaxThreadsPerHotkey = 1;
+thread_local int g_MaxThreadsTotal = MAX_THREADS_DEFAULT;
 // On my system, the repeat-rate (which is probably set to XP's default) is such that between 20
 // and 25 keys are generated per second.  Therefore, 50 in 2000ms seems like it should allow the
 // key auto-repeat feature to work on most systems without triggering the warning dialog.
 // In any case, using auto-repeat with a hotkey is pretty rare for most people, so it's best
 // to keep these values conservative:
-int g_MaxHotkeysPerInterval = 70; // Increased to 70 because 60 was still causing the warning dialog for repeating keys sometimes.  Increased from 50 to 60 for v1.0.31.02 since 50 would be triggered by keyboard auto-repeat when it is set to its fastest.
-int g_HotkeyThrottleInterval = 2000; // Milliseconds.
-_thread_local bool g_MaxThreadsBuffer = false;  // This feature usually does more harm than good, so it defaults to OFF.
-_thread_local bool g_SuspendExempt = false;
-_thread_local SendLevelType g_InputLevel = 0;
-
-HotkeyCriterion *g_FirstHotCriterion = NULL, *g_LastHotCriterion = NULL;
+thread_local UINT g_MaxHotkeysPerInterval = 70; // Increased to 70 because 60 was still causing the warning dialog for repeating keys sometimes.  Increased from 50 to 60 for v1.0.31.02 since 50 would be triggered by keyboard auto-repeat when it is set to its fastest.
+thread_local UINT g_HotkeyThrottleInterval = 2000; // Milliseconds.
+thread_local bool g_MaxThreadsBuffer = false;  // This feature usually does more harm than good, so it defaults to OFF.
+thread_local bool g_SuspendExempt = false; // #SuspendExempt, applies to hotkeys and hotstrings.
+thread_local bool g_SuspendExemptHS = false; // This is just to prevent #Hotstring "S" from affecting hotkeys.
+thread_local SendLevelType g_InputLevel = 0;
+thread_local HotkeyCriterion *g_FirstHotCriterion = NULL, *g_LastHotCriterion = NULL;
 
 // Global variables for #HotIf (expression).
-UINT g_HotExprTimeout = 1000; // Timeout for #HotIf (expression) evaluation, in milliseconds.
-HWND g_HotExprLFW = NULL; // Last Found Window of last #HotIf expression.
-HotkeyCriterion *g_FirstHotExpr = NULL, *g_LastHotExpr = NULL;
+thread_local UINT g_HotExprTimeout = 1000; // Timeout for #HotIf (expression) evaluation, in milliseconds.
+thread_local HWND g_HotExprLFW = NULL; // Last Found Window of last #HotIf expression.
+thread_local HotkeyCriterion *g_FirstHotExpr = NULL, *g_LastHotExpr = NULL;
+
 static int GetScreenDPI()
 {
 	// The DPI setting can be different for each screen axis, but
@@ -163,42 +162,44 @@ static int GetScreenDPI()
 	ReleaseDC(NULL, hdc);
 	return dpi;
 }
-int g_ScreenDPI = GetScreenDPI();
-MenuTypeType g_MenuIsVisible = MENU_TYPE_NONE;
-_thread_local int g_nMessageBoxes = 0;
-_thread_local int g_nFileDialogs = 0;
-_thread_local int g_nFolderDialogs = 0;
-_thread_local GuiType *g_firstGui = NULL, *g_lastGui = NULL;
-_thread_local HWND g_hWndToolTip[MAX_TOOLTIPS] = { NULL };
-_thread_local MsgMonitorList *g_MsgMonitor;
+
+thread_local int g_ScreenDPI = GetScreenDPI();
+thread_local MenuTypeType g_MenuIsVisible = MENU_TYPE_NONE;
+thread_local int g_nMessageBoxes = 0;
+thread_local int g_nFileDialogs = 0;
+thread_local int g_nFolderDialogs = 0;
+thread_local GuiType *g_firstGui = NULL, *g_lastGui = NULL;
+thread_local HWND g_hWndToolTip[MAX_TOOLTIPS] = {NULL};
+thread_local MsgMonitorList *g_MsgMonitor;
+
 // Init not needed for these:
-_thread_local UCHAR g_SortCaseSensitive;
-_thread_local bool g_SortNumeric;
-_thread_local bool g_SortReverse;
-_thread_local int g_SortColumnOffset;
-_thread_local IObject *g_SortFunc;
-_thread_local ResultType g_SortFuncResult;
+thread_local UCHAR g_SortCaseSensitive;
+thread_local bool g_SortNumeric;
+thread_local bool g_SortReverse;
+thread_local int g_SortColumnOffset;
+thread_local IObject *g_SortFunc;
+thread_local ResultType g_SortFuncResult;
 
 // Hot-string vars (initialized when ResetHook() is first called):
-TCHAR g_HSBuf[HS_BUF_SIZE];
-int g_HSBufLength;
-HWND g_HShwnd;
+thread_local TCHAR g_HSBuf[HS_BUF_SIZE];
+thread_local int g_HSBufLength;
+thread_local HWND g_HShwnd;
 
 // Hot-string global settings:
-int g_HSPriority = 0;  // default priority is always 0
-int g_HSKeyDelay = 0;  // Fast sends are much nicer for auto-replace and auto-backspace.
-SendModes g_HSSendMode = SM_INPUT; // v1.0.43: New default for more reliable hotstrings.
-SendRawType g_HSSendRaw = SCM_NOT_RAW;
-bool g_HSCaseSensitive = false;
-bool g_HSConformToCase = true;
-bool g_HSDoBackspace = true;
-bool g_HSOmitEndChar = false;
-bool g_HSEndCharRequired = true;
-bool g_HSDetectWhenInsideWord = false;
-bool g_HSDoReset = false;
-bool g_HSResetUponMouseClick = true;
-bool g_HSSameLineAction = false;
-TCHAR g_EndChars[HS_MAX_END_CHARS + 1] = _T("-()[]{}:;'\"/\\,.?!\n \t");  // Hotstring default end chars, including a space.
+thread_local int g_HSPriority = 0;  // default priority is always 0
+thread_local int g_HSKeyDelay = 0;  // Fast sends are much nicer for auto-replace and auto-backspace.
+thread_local SendModes g_HSSendMode = SM_INPUT; // v1.0.43: New default for more reliable hotstrings.
+thread_local SendRawType g_HSSendRaw = SCM_NOT_RAW;
+thread_local bool g_HSCaseSensitive = false;
+thread_local bool g_HSConformToCase = true;
+thread_local bool g_HSDoBackspace = true;
+thread_local bool g_HSOmitEndChar = false;
+thread_local bool g_HSEndCharRequired = true;
+thread_local bool g_HSDetectWhenInsideWord = false;
+thread_local bool g_HSDoReset = false;
+thread_local bool g_HSResetUponMouseClick = true;
+thread_local bool g_HSSameLineAction = false;
+thread_local TCHAR g_EndChars[HS_MAX_END_CHARS + 1] = _T("-()[]{}:;'\"/\\,.?!\n \t");  // Hotstring default end chars, including a space.
 // The following were considered but seemed too rare and/or too likely to result in undesirable replacements
 // (such as while programming or scripting, or in usernames or passwords): <>*+=_%^&|@#$|
 // Although dash/hyphen is used for multiple purposes, it seems to me that it is best (on average) to include it.
@@ -206,57 +207,42 @@ TCHAR g_EndChars[HS_MAX_END_CHARS + 1] = _T("-()[]{}:;'\"/\\,.?!\n \t");  // Hot
 // i.e. word(synonym) and/or word/synonym
 
 // Global objects:
-_thread_local input_type *g_input = NULL;
-_thread_local Script *g_script;
+thread_local input_type *g_input = NULL;
+thread_local Script *g_script;
 // This made global for performance reasons (determining size of clipboard data then
 // copying contents in or out without having to close & reopen the clipboard in between):
-_thread_local Clipboard *g_clip;
-OS_Version g_os;  // OS version object, courtesy of AutoIt3.
-HICON g_IconSmall = NULL;
-HICON g_IconLarge = NULL;
-_thread_local DWORD g_OriginalTimeout;
+thread_local Clipboard *g_clip;
+thread_local OS_Version g_os;  // OS version object, courtesy of AutoIt3.
 
-_thread_local global_struct g_startup, *g_array;
-_thread_local global_struct *g; // g_startup provides a non-NULL placeholder during script loading. Afterward it's replaced with an array.
+thread_local HICON g_IconSmall = NULL;
+thread_local HICON g_IconLarge = NULL;
+
+thread_local global_struct g_startup, *g_array;
+thread_local global_struct *g; // g_startup provides a non-NULL placeholder during script loading. Afterward it's replaced with an array.
 
 // I considered maintaining this on a per-quasi-thread basis (i.e. in global_struct), but the overhead
 // of having to check and restore the working directory when a suspended thread is resumed (especially
 // when the script has many high-frequency timers), and possibly changing the working directory
 // whenever a new thread is launched, doesn't seem worth it.  This is because the need to change
 // the working directory is comparatively rare:
-_thread_local CString g_WorkingDir;
-_thread_local LPTSTR g_WorkingDirOrig = NULL;  // Assigned a value in WinMain().
+thread_local CString g_WorkingDir;
+thread_local LPTSTR g_WorkingDirOrig = NULL;  // Assigned a value in WinMain().
 
-_thread_local SymbolType g_DefaultObjectValueType = SYM_MISSING;
-_thread_local LPTSTR g_DefaultObjectValue = NULL;
-_thread_local SymbolType g_DefaultArrayValueType = SYM_MISSING;
-_thread_local LPTSTR g_DefaultArrayValue = NULL;
-_thread_local SymbolType g_DefaultMapValueType = SYM_MISSING;
-_thread_local LPTSTR g_DefaultMapValue = NULL;
+thread_local bool g_ForceKeybdHook = false;
+thread_local ToggleValueType g_ForceNumLock = NEUTRAL;
+thread_local ToggleValueType g_ForceCapsLock = NEUTRAL;
+thread_local ToggleValueType g_ForceScrollLock = NEUTRAL;
 
-bool g_ForceKeybdHook = false;
-ToggleValueType g_ForceNumLock = NEUTRAL;
-ToggleValueType g_ForceCapsLock = NEUTRAL;
-ToggleValueType g_ForceScrollLock = NEUTRAL;
+thread_local ToggleValueType g_BlockInputMode = TOGGLE_DEFAULT;
+thread_local bool g_BlockInput = false;
+thread_local bool g_BlockMouseMove = false;
 
-ToggleValueType g_BlockInputMode = TOGGLE_DEFAULT;
-bool g_BlockInput = false;
-bool g_BlockMouseMove = false;
+thread_local Debugger *g_Debugger = NULL;
+thread_local CStringA g_DebuggerHost;
+thread_local CStringA g_DebuggerPort;
 
-TCHAR g_default_pwd0 = 0;
-TCHAR g_default_pwd1 = 0;
-TCHAR g_default_pwd2 = 0;
-TCHAR g_default_pwd3 = 0;
-TCHAR g_default_pwd4 = 0;
-TCHAR g_default_pwd5 = 0;
-TCHAR g_default_pwd6 = 0;
-TCHAR g_default_pwd7 = 0;
-TCHAR g_default_pwd8 = 0;
-TCHAR g_default_pwd9 = 0;
-TCHAR *g_default_pwd[] = { &g_default_pwd0, &g_default_pwd1, &g_default_pwd2, &g_default_pwd3, &g_default_pwd4, &g_default_pwd5, &g_default_pwd6, &g_default_pwd7, &g_default_pwd8, &g_default_pwd9, 0, 0 };
-
-MyCryptEncrypt g_CryptEncrypt = NULL;
-MyCryptDecrypt g_CryptDecrypt = NULL;
+ULONGLONG g_crypt_code[6];
+TCHAR *g_default_pwd[32] = { _T("abcdefghijkl") };
 // The order of initialization here must match the order in the enum contained in script.h
 // It's in there rather than in globaldata.h so that the action-type constants can be referred
 // to without having access to the global array itself (i.e. it avoids having to include
@@ -300,6 +286,7 @@ Action g_act[] =
 	, {_T("Static"), 1, 1} // ACT_STATIC (used only at load time).
 	, {_T("#HotIf"), 0, 1}
 	, {_T("Exit"), 0, 1} // ExitCode
+
 	, {_T("If"), 1, 1}
 	, {_T("Else"), 0, 0} // No args; it has special handling to support same-line ELSE-actions (e.g. "else if").
 	, {_T("Loop"), 0, 1} // IterationCount
@@ -315,10 +302,10 @@ Action g_act[] =
 	, {_T("Goto"), 1, 1}
 	, {_T("Return"), 0, 1}
 	, {_T("Try"), 0, 0}
-	, {_T("Catch"), 0, 1} // fincs: seems best to allow catch without a parameter
+	, {_T("Catch"), 0, 1}
 	, {_T("Finally"), 0, 0}
 	, {_T("Throw"), 0, 1}
-	, {_T("Switch"), 0, 1}
+	, {_T("Switch"), 0, 2}
 	, {_T("Case"), 1, MAX_ARGS}
 };
 // Below is the most maintainable way to determine the actual count?
@@ -504,21 +491,19 @@ key_to_sc_type g_key_to_sc[] =
 // Can calc the counts only after the arrays are initialized above:
 int g_key_to_vk_count = _countof(g_key_to_vk);
 int g_key_to_sc_count = _countof(g_key_to_sc);
-KeyHistoryItem *g_KeyHistory = NULL; // Array is allocated during startup.
-int g_KeyHistoryNext = 0;
 
-#ifdef ENABLE_KEY_HISTORY_FILE
-_thread_local bool g_KeyHistoryToFile = false;
-#endif
+thread_local KeyHistoryItem *g_KeyHistory = NULL; // Array is allocated during startup.
+thread_local int g_KeyHistoryNext = 0;
 
 // These must be global also, since both the keyboard and mouse hook functions,
 // in addition to KeyEvent() when it's logging keys with only the mouse hook installed,
 // MUST refer to the same variables.  Otherwise, the elapsed time between keyboard and
 // and mouse events will be wrong:
-DWORD g_HistoryTickNow = 0;
-DWORD g_HistoryTickPrev = 0;  // So that the first logged key doesn't have a huge elapsed time.
-HWND g_HistoryHwndPrev = NULL;
+thread_local DWORD g_HistoryTickNow = 0;
+thread_local DWORD g_HistoryTickPrev = GetTickCount();  // So that the first logged key doesn't have a huge elapsed time.
+thread_local HWND g_HistoryHwndPrev = NULL;
+
 // Also hook related:
-DWORD g_TimeLastInputPhysical = 0;
-DWORD g_TimeLastInputKeyboard = g_TimeLastInputPhysical;
-DWORD g_TimeLastInputMouse = g_TimeLastInputPhysical;
+thread_local DWORD g_TimeLastInputPhysical = GetTickCount();
+thread_local DWORD g_TimeLastInputKeyboard = g_TimeLastInputPhysical;
+thread_local DWORD g_TimeLastInputMouse = g_TimeLastInputPhysical;

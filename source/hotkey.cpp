@@ -14,24 +14,25 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 */
 
-#include "stdafx.h" // pre-compiled headers
+#include "pch.h" // pre-compiled headers
 #include "hotkey.h"
+#include "hook.h"
 #include "globaldata.h"  // For g_os and other global vars.
 #include "window.h" // For MsgBox()
 //#include "application.h" // For ExitApp()
 #include "script_func_impl.h"
 
 // Initialize static members:
-HookType Hotkey::sWhichHookNeeded = 0;
-HookType Hotkey::sWhichHookAlways = 0;
-DWORD Hotkey::sTimePrev = { 0 };
-DWORD Hotkey::sTimeNow = { 0 };
-Hotkey **Hotkey::shk = NULL;
-int Hotkey::shkMax = 0;
-HotkeyIDType Hotkey::sNextID = 0;
-/*const */HotkeyIDType &Hotkey::sHotkeyCount = Hotkey::sNextID; // HotKeyIt H1 changed from const as otherwise not possible to change
-bool Hotkey::sJoystickHasHotkeys[MAX_JOYSTICKS] = { false };
-DWORD Hotkey::sJoyHotkeyCount = 0;
+thread_local HookType Hotkey::sWhichHookNeeded = 0;
+thread_local HookType Hotkey::sWhichHookAlways = 0;
+thread_local DWORD Hotkey::sTimePrev = {0};
+thread_local DWORD Hotkey::sTimeNow = {0};
+thread_local Hotkey **Hotkey::shk = NULL;
+thread_local int Hotkey::shkMax = 0;
+thread_local HotkeyIDType Hotkey::sNextID = 0;
+thread_local const HotkeyIDType &Hotkey::sHotkeyCount = Hotkey::sNextID;
+thread_local bool Hotkey::sJoystickHasHotkeys[MAX_JOYSTICKS] = {false};
+thread_local DWORD Hotkey::sJoyHotkeyCount = 0;
 
 
 
@@ -59,11 +60,7 @@ HWND HotCriterionAllowsFiring(HotkeyCriterion *aCriterion, LPTSTR aHotkeyName)
 	case HOT_IF_CALLBACK:
 		// Expression evaluation must be done in the main thread. If the message times out, the hotkey/hotstring is not allowed to fire.
 		DWORD_PTR res;
-#ifndef _USRDLL
-		return (SendMessageTimeout((HWND) g_ahkThreads[0][0], AHK_HOT_IF_EVAL, (WPARAM)aCriterion, (LPARAM)aHotkeyName, SMTO_BLOCK | SMTO_ABORTIFHUNG, g_HotExprTimeout, &res) && res == CONDITION_TRUE) ? (HWND)1 : NULL;
-#else
 		return (SendMessageTimeout(g_hWnd, AHK_HOT_IF_EVAL, (WPARAM)aCriterion, (LPARAM)aHotkeyName, SMTO_BLOCK | SMTO_ABORTIFHUNG, g_HotExprTimeout, &res) && res == CONDITION_TRUE) ? (HWND)1 : NULL;
-#endif
 	}
 	return (aCriterion->Type == HOT_IF_ACTIVE || aCriterion->Type == HOT_IF_EXIST) ? found_hwnd : (HWND)!found_hwnd;
 }
@@ -104,8 +101,7 @@ HotkeyCriterion *FindHotkeyCriterion(HotCriterionType aType, LPTSTR aWinTitle, L
 HotkeyCriterion *AddHotkeyCriterion(HotCriterionType aType, LPTSTR aWinTitle, LPTSTR aWinText)
 {
 	HotkeyCriterion *cp;
-	if (   !(cp = (HotkeyCriterion *)g_SimpleHeap->Malloc(sizeof(HotkeyCriterion)))   )
-		return NULL;
+	cp = g_SimpleHeap->Alloc<HotkeyCriterion>();
 	cp->Type = aType;
 	cp->OriginalExpr = nullptr;
 	if (*aWinTitle)
@@ -143,9 +139,7 @@ HotkeyCriterion *AddHotkeyCriterion(HotkeyCriterion *cp)
 
 HotkeyCriterion *AddHotkeyIfExpr()
 {
-	HotkeyCriterion *cp;
-	if (   !(cp = (HotkeyCriterion *)g_SimpleHeap->Malloc(sizeof(HotkeyCriterion)))   )
-		return NULL;
+	HotkeyCriterion* cp = g_SimpleHeap->Alloc<HotkeyCriterion>();
 	cp->NextExpr = NULL;
 	cp->OriginalExpr = nullptr;
 	if (g_LastHotExpr)
@@ -171,18 +165,18 @@ void Script::PreparseHotkeyIfExpr(Line* aLine)
 // evaluated by the hook directly, without synchronizing with the main thread.
 {
 	ExprTokenType *postfix = aLine->mArg[0].postfix;
+	if (postfix[0].symbol != SYM_OBJECT)
+		return;
+	auto fn = dynamic_cast<BuiltInFunc*>(postfix[0].object);
+	if (!fn || fn->mBIF != &BIF_WinExistActive)
+		return; // Not WinExist() or WinActive().
+	++postfix;
 	int param_count = 0;
 	while (postfix[param_count].symbol == SYM_STRING)
 		++param_count;
 	if (postfix[param_count].symbol != SYM_FUNC // Not a function call, or it doesn't only accept strings.
-		|| param_count > 2 // Too many parameters.
-		|| !postfix[param_count].callsite->func) // Dynamic target.
+		|| param_count > 2) // Too many parameters.
 		return;
-	if (param_count > 2)
-		return; // Too many parameters.
-	auto fn = dynamic_cast<BuiltInFunc*>(postfix[param_count].callsite->func);
-	if (!fn || fn->mBIF != &BIF_WinExistActive)
-		return; // Not WinExist() or WinActive().
 	bool invert = postfix[param_count+1].symbol == SYM_LOWNOT || postfix[param_count+1].symbol == SYM_HIGHNOT;
 	if (postfix[param_count+1+invert].symbol != SYM_INVALID)
 		return; // There's more to the expression.
@@ -371,11 +365,7 @@ void Hotkey::ManifestAllHotkeysHotstringsHooks()
 	// THIRD PASS THROUGH THE HOTKEYS:
 	// v1.0.42: Reset sWhichHookNeeded because it's now possible that the hook was on before but no longer
 	// needed due to changing of a hotkey from hook to registered (for various reasons described above):
-	// v1.0.91: Make sure to leave the keyboard hook active if the script needs it for collecting input.
-	if (g_input) // There's an Input in progress (or just ending).
-		sWhichHookNeeded = HOOK_KEYBD;
-	else
-		sWhichHookNeeded = 0;
+	sWhichHookNeeded = 0;
 	for (i = 0; i < sHotkeyCount; ++i)
 	{
 		if (hk_is_inactive[i])
@@ -474,6 +464,7 @@ void Hotkey::ManifestAllHotkeysHotstringsHooks()
 	// this function was first called.  By design, the Num/Scroll/CapsLock AlwaysOn/Off setting
 	// stays in effect even when Suspend in ON.
 	if (   Hotstring::sEnabledCount
+		|| g_input // v1.0.91: Hook is needed for collecting input.
 		|| !(g_ForceNumLock == NEUTRAL && g_ForceCapsLock == NEUTRAL && g_ForceScrollLock == NEUTRAL)   )
 		sWhichHookNeeded |= HOOK_KEYBD;
 	if (g_BlockMouseMove || (g_HSResetUponMouseClick && Hotstring::sEnabledCount))
@@ -521,7 +512,8 @@ void Hotkey::AllDestructAndExit(int aExitCode)
 		UnhookWindowsHookEx(g_PlaybackHook);
 	for (int i = 0; i < sHotkeyCount; ++i)
 		delete shk[i]; // Unregisters before destroying.
-
+	if (sHotkeyCount)
+		free(shk);
 	// Do this only at the last possible moment prior to exit() because otherwise
 	// it may free memory that is still in use by objects that depend on it.
 	// This is actually kinda wrong because when exit() is called, the destructors
@@ -545,97 +537,13 @@ void Hotkey::AllDestructAndExit(int aExitCode)
 	// at the time the user exits (in which case our main event loop would be "buried" underneath
 	// the event loops of the dialogs themselves), this is the only reliable way I've found to exit
 	// so far.  The caller has already called PostQuitMessage(), which might not help but it doesn't hurt:
-	exit(aExitCode); // exit() is insignificant in code size.  It does more than ExitProcess(), but perhaps nothing more that this application actually requires.
+#ifndef _USRDLL
+	if (g_FirstThreadID == g_MainThreadID)
+		exit(aExitCode); // exit() is insignificant in code size.  It does more than ExitProcess(), but perhaps nothing more that this application actually requires.
+#endif
 	// By contrast to _exit(), exit() flushes all file buffers before terminating the process. It also
 	// calls any functions registered via atexit or _onexit.
 }
-
-void Hotkey::AllDestruct()
-// HotKeyIt added Hotkey destruction H1
-{
-	if (g_MainThreadID == g_ThreadID)
-	{
-		AddRemoveHooks(0); // Remove all hooks. By contrast, registered hotkeys are unregistered below.
-		if (g_PlaybackHook) // Would be unusual for this to be installed during exit, but should be checked for completeness.
-			UnhookWindowsHookEx(g_PlaybackHook);
-	}
-	int i = 0;
-	for (; i < sHotkeyCount; ++i)
-	{
-		Hotkey &hk = *shk[i];
-		if (g_MainThreadID != g_ThreadID && hk.mThreadID != g_ThreadID)
-		{
-			for (HotkeyVariant *v = hk.mFirstVariant; v; v = v->mNextVariant)
-			{
-				if (v->mNextVariant && v->mNextVariant->mThreadID == g_ThreadID)
-				{
-					if (v->mNextVariant == hk.mLastVariant)
-					{
-						v->mNextVariant = NULL;
-						hk.mLastVariant = v;
-						break;
-					}
-					else
-					{
-						if (v->mNextVariant->mNextVariant == NULL)
-						{
-							hk.mLastVariant = v->mNextVariant;
-							break;
-						}
-						else
-						{
-							v->mNextVariant->mNextVariant->mIndex = v->mNextVariant->mIndex;
-							v->mNextVariant = v->mNextVariant->mNextVariant;
-							for (HotkeyVariant *vn = v->mNextVariant; vn && vn->mNextVariant; vn->mNextVariant->mIndex = vn->mIndex + 1, vn = vn->mNextVariant);
-						}
-					}
-				}
-			}
-			continue;
-		}
-		hk.sJoyHotkeyCount = NULL;
-		hk.mFirstVariant = NULL;
-		hk.mAllowExtraModifiers = NULL;
-		hk.mConstructedOK = NULL;
-		hk.mHookAction = NULL;
-		hk.mID = NULL;
-		hk.mIsRegistered = false;
-		hk.mKeybdHookMandatory = false;
-		hk.mKeyUp = false;
-		hk.mLastVariant = NULL;
-		hk.mModifiers = NULL;
-		hk.mModifierSC = NULL;
-		hk.mModifiersConsolidatedLR = NULL;
-		hk.mModifiersLR = NULL;
-		hk.mModifierVK = NULL;
-		hk.mName = _T("");
-		hk.mNoSuppress = NULL;
-		hk.mParentEnabled = false;
-		hk.mSC = NULL;
-		hk.mType = NULL;
-#ifdef CONFIG_WIN9X
-		hk.mUnregisterDuringThread = false;
-#endif
-		hk.mVK = NULL;
-		hk.mVK_WasSpecifiedByNumber = false;
-		delete shk[i]; // Unregisters before destroying.
-		shk[i] = NULL;
-	}
-	HotkeyIDType aHotkeyCount = sHotkeyCount;
-	for (i = 0; i < aHotkeyCount; ++i)
-	{
-		if (!shk[i]){
-			shk[i] = shk[sHotkeyCount - 1];
-			sHotkeyCount--;
-		}
-	}
-	if (g_MainThreadID == g_ThreadID)
-		sHotkeyCount = 0;
-	free(shk);
-	shk = NULL;
-}
-
-
 
 bool Hotkey::PrefixHasNoEnabledSuffixes(int aVKorSC, bool aIsSC)
 // aVKorSC contains the virtual key or scan code of the specified prefix key (it's a scan code if aIsSC is true).
@@ -683,7 +591,7 @@ bool Hotkey::PrefixHasNoEnabledSuffixes(int aVKorSC, bool aIsSC)
 
 
 
-HotkeyVariant *Hotkey::CriterionAllowsFiring(HWND *aFoundHWND)
+HotkeyVariant *Hotkey::CriterionAllowsFiring(HWND *aFoundHWND, ULONG_PTR aExtraInfo, LPTSTR aSingleChar)
 // Caller must not call this for AltTab hotkeys IDs because this will always return NULL in such cases.
 // Returns the address of the first matching non-global hotkey variant that is allowed to fire.
 // If there is no non-global one eligible, the global one is returned (or NULL if none).
@@ -716,6 +624,7 @@ HotkeyVariant *Hotkey::CriterionAllowsFiring(HWND *aFoundHWND)
 		// impact performance since the vast majority of hotkeys have either one or just a few variants.
 		if (   vp->mEnabled // This particular variant within its parent hotkey is enabled.
 			&& (!g_IsSuspended || vp->mSuspendExempt) // This variant isn't suspended...
+			&& HotInputLevelAllowsFiring(vp->mInputLevel, aExtraInfo, aSingleChar) // ... its #InputLevel allows it to fire...
 			&& (!vp->mHotCriterion || (found_hwnd = HotCriterionAllowsFiring(vp->mHotCriterion, mName)))   ) // ... and its criteria allow it to fire.
 		{
 			if (vp->mHotCriterion) // Since this is the first criteria hotkey, it takes precedence.
@@ -731,15 +640,11 @@ HotkeyVariant *Hotkey::CriterionAllowsFiring(HWND *aFoundHWND)
 
 bool HotInputLevelAllowsFiring(SendLevelType inputLevel, ULONG_PTR aEventExtraInfo, LPTSTR aKeyHistoryChar)
 {
-	if (aEventExtraInfo >= KEY_IGNORE_MIN && aEventExtraInfo <= KEY_IGNORE_MAX)
+	if (InputLevelFromInfo(aEventExtraInfo) <= inputLevel)
 	{
-		// We can safely cast here since aExtraInfo is constrained above
-		int eventInputLevel = (int)(KEY_IGNORE_LEVEL(0) - aEventExtraInfo);
-		if (eventInputLevel <= inputLevel) {
-			if (aKeyHistoryChar)
-				*aKeyHistoryChar = 'i'; // Mark as ignored in KeyHistory
-			return false;
-		}
+		if (aKeyHistoryChar)
+			*aKeyHistoryChar = 'i'; // Mark as ignored in KeyHistory
+		return false;
 	}
 	return true;
 }
@@ -747,17 +652,6 @@ bool HotInputLevelAllowsFiring(SendLevelType inputLevel, ULONG_PTR aEventExtraIn
 
 HotkeyVariant *Hotkey::CriterionFiringIsCertain(HotkeyIDType &aHotkeyIDwithFlags, bool aKeyUp, ULONG_PTR aExtraInfo
 	, UCHAR &aNoSuppress, bool &aFireWithNoSuppress, LPTSTR aSingleChar)
-{
-	HotkeyVariant *hkv = CriterionFiringIsCertainHelper(aHotkeyIDwithFlags, aKeyUp, aNoSuppress, aFireWithNoSuppress, aSingleChar);
-	if (!hkv)
-		return NULL;
-
-	return HotInputLevelAllowsFiring(hkv->mInputLevel, aExtraInfo, aSingleChar) ? hkv : NULL;
-}
-
-
-HotkeyVariant *Hotkey::CriterionFiringIsCertainHelper(HotkeyIDType &aHotkeyIDwithFlags, bool aKeyUp, UCHAR &aNoSuppress
-	, bool &aFireWithNoSuppress, LPTSTR aSingleChar)
 // v1.0.44: Caller has ensured that aFireWithNoSuppress is true if has already been decided and false if undecided.
 // Upon return, caller can assume that the value in it is now decided rather than undecided.
 // v1.0.42: Caller must not call this for AltTab hotkeys IDs, but this will always return NULL in such cases.
@@ -786,7 +680,8 @@ HotkeyVariant *Hotkey::CriterionFiringIsCertainHelper(HotkeyIDType &aHotkeyIDwit
 		// (once in the hook to determine whether the hotkey keystroke should be passed through to the active window,
 		// and again upon receipt of the message for reasons explained there).
 		for (HotkeyVariant *vp = hk.mFirstVariant; vp; vp = vp->mNextVariant)
-			if (!vp->mHotCriterion && vp->mEnabled && (!g_IsSuspended || vp->mSuspendExempt))
+			if (!vp->mHotCriterion && vp->mEnabled && (!g_IsSuspended || vp->mSuspendExempt)
+				&& HotInputLevelAllowsFiring(vp->mInputLevel, aExtraInfo, aSingleChar))
 			{
 				// Fix for v1.0.47.02: The following section (above "return") was moved into this block
 				// from above the for() because only when this for() returns is it certain that this
@@ -802,7 +697,7 @@ HotkeyVariant *Hotkey::CriterionFiringIsCertainHelper(HotkeyIDType &aHotkeyIDwit
 	// Since above didn't return, a slower method is needed to find out which variant of this hotkey (if any)
 	// should fire.
 	HotkeyVariant *vp;
-	if (vp = hk.CriterionAllowsFiring())
+	if (vp = hk.CriterionAllowsFiring(NULL, aExtraInfo, aSingleChar))
 	{
 		if (!aFireWithNoSuppress) // Caller hasn't yet determined its value with certainty (currently, this statement might always be true).
 			aFireWithNoSuppress = vp->mNoSuppress;
@@ -851,12 +746,12 @@ HotkeyVariant *Hotkey::CriterionFiringIsCertainHelper(HotkeyIDType &aHotkeyIDwit
 				&& hk2.mID != hotkey_id // Don't consider the original hotkey because it was already found ineligible.
 				&& !(hk2.mModifiers & ~modifiers) // All neutral modifiers required by the candidate are pressed.
 				&& !(hk2.mModifiersLR & ~g_modifiersLR_logical_non_ignored) // All left-right specific modifiers required by the candidate are pressed.
-				//&& hk2.mType != HK_JOYSTICK // Seems unnecessary since joystick hotkeys don't call us and even if they did, probably should be included.
+				//&& hk2.mType != HK_JOYSTICK // Seems unnecessary since joystick hotkeys don't call us and even if they did, probably shouldn't be included.
 				//&& hk2.mParentEnabled   ) // CriterionAllowsFiring() will check this for us.
 				)
 			{
 				// The following section is similar to one higher above, so maintain them together:
-				if (vp = hk2.CriterionAllowsFiring())
+				if (vp = hk2.CriterionAllowsFiring(NULL, aExtraInfo, aSingleChar))
 				{
 					if (!aFireWithNoSuppress) // Caller hasn't yet determined its value with certainty (currently, this statement might always be true).
 						aFireWithNoSuppress = vp->mNoSuppress;
@@ -882,9 +777,32 @@ HotkeyVariant *Hotkey::CriterionFiringIsCertainHelper(HotkeyIDType &aHotkeyIDwit
 	// processing).
 	if (!aKeyUp)
 		aNoSuppress |= NO_SUPPRESS_NEXT_UP_EVENT;  // Update output parameter for the caller.
-	if (aSingleChar)
+	if (aSingleChar && *aSingleChar != 'i') // 'i' takes precedence because it's used to detect when #InputLevel prevented the hotkey from firing, to prevent it from being suppressed.
 		*aSingleChar = '#'; // '#' in KeyHistory to indicate this hotkey is disabled due to #HotIf WinActive/Exist() criterion.
 	return NULL;
+}
+
+
+
+HotkeyIDType Hotkey::FindPairedHotkey(HotkeyIDType aFirstID, modLR_type aModsLR, bool aKeyUp)
+{
+	mod_type modifiers = ConvertModifiersLR(aModsLR); // Neutral modifiers.
+	for (HotkeyIDType candidate_id = aFirstID; candidate_id != HOTKEY_ID_INVALID; )
+	{
+		Hotkey &hk2 = *shk[candidate_id]; // For performance and convenience.
+		candidate_id = hk2.mNextHotkey;
+		if (  (hk2.mAllowExtraModifiers || !(~hk2.mModifiersConsolidatedLR & aModsLR))
+			&& hk2.mKeyUp == aKeyUp
+			&& !hk2.mModifierVK // Avoid accidental matching of normal hotkeys with custom-combo "&"
+			&& !hk2.mModifierSC // hotkeys that happen to have the same mVK/SC.
+			&& !hk2.mHookAction // Might be unnecessary to check this; but just in case.
+			&& !(hk2.mModifiers & ~modifiers) // All neutral modifiers required by the candidate are pressed.
+			&& !(hk2.mModifiersLR & ~aModsLR) // All left-right specific modifiers required by the candidate are pressed.
+			//&& hk2.mParentEnabled // CriterionAllowsFiring() will check this for us.
+			)
+			return aKeyUp ? (hk2.mID | HOTKEY_KEY_UP) : hk2.mID;
+	}
+	return HOTKEY_ID_INVALID;
 }
 
 
@@ -932,16 +850,16 @@ void Hotkey::TriggerJoyHotkeys(int aJoystickID, DWORD aButtonsNewlyDown)
 
 
 
-void Hotkey::PerformInNewThreadMadeByCaller(HotkeyVariant &aVariant, LPTSTR aName)
+void Hotkey::PerformInNewThreadMadeByCaller(HotkeyVariant &aVariant)
 // Caller is responsible for having called PerformIsAllowed() before calling us.
 // Caller must have already created a new thread for us, and must close the thread when we return.
 {
-	static bool sDialogIsDisplayed = false;  // Prevents double-display caused by key buffering.
+	thread_local static bool sDialogIsDisplayed = false;  // Prevents double-display caused by key buffering.
 	if (sDialogIsDisplayed) // Another recursion layer is already displaying the warning dialog below.
 		return; // Don't allow new hotkeys to fire during that time.
 
 	// Help prevent runaway hotkeys (infinite loops due to recursion in bad script files):
-	static UINT throttled_key_count = 0;  // This var doesn't belong in struct since it's used only here.
+	thread_local static UINT throttled_key_count = 0;  // This var doesn't belong in struct since it's used only here.
 	UINT time_until_now;
 	int display_warning;
 	if (!sTimePrev)
@@ -957,8 +875,8 @@ void Hotkey::PerformInNewThreadMadeByCaller(HotkeyVariant &aVariant, LPTSTR aNam
 	// unreliable is when the true difference between the past and future
 	// tickcounts itself is greater than about 49 days:
 	time_until_now = (sTimeNow - sTimePrev);
-	if (display_warning = (throttled_key_count > (DWORD)g_MaxHotkeysPerInterval
-		&& time_until_now < (DWORD)g_HotkeyThrottleInterval))
+	if (display_warning = (throttled_key_count > g_MaxHotkeysPerInterval
+		&& time_until_now < g_HotkeyThrottleInterval))
 	{
 		// The moment any dialog is displayed, hotkey processing is halted since this
 		// app currently has only one thread.
@@ -968,7 +886,7 @@ void Hotkey::PerformInNewThreadMadeByCaller(HotkeyVariant &aVariant, LPTSTR aNam
 		// involved somewhere.  Avoiding floats altogether may reduce EXE size
 		// and maybe other benefits (due to it not being "loaded")?
 		sntprintf(error_text, _countof(error_text), _T("%u hotkeys have been received in the last %ums.\n\n")
-			_T("Do you want to continue?\n(see #MaxHotkeysPerInterval in the help file)")  // In case its stuck in a loop.
+			_T("Do you want to continue?\n(see A_MaxHotkeysPerInterval in the help file)")  // In case its stuck in a loop.
 			, throttled_key_count, time_until_now);
 
 		// Turn off any RunAgain flags that may be on, which in essence is the same as de-buffering
@@ -985,7 +903,7 @@ void Hotkey::PerformInNewThreadMadeByCaller(HotkeyVariant &aVariant, LPTSTR aNam
 		sDialogIsDisplayed = false;
 	}
 	// The display_warning var is needed due to the fact that there's an OR in this condition:
-	if (display_warning || time_until_now > (DWORD)g_HotkeyThrottleInterval)
+	if (display_warning || time_until_now > g_HotkeyThrottleInterval)
 	{
 		// Reset the sliding interval whenever it expires.  Doing it this way makes the
 		// sliding interval more sensitive than alternate methods might be.
@@ -1004,7 +922,7 @@ void Hotkey::PerformInNewThreadMadeByCaller(HotkeyVariant &aVariant, LPTSTR aNam
 	// This is stored as an attribute of the script (semi-globally) rather than passed
 	// as a parameter to ExecUntil (and from their on to any calls to SendKeys() that it
 	// makes) because it's possible for SendKeys to be called asynchronously, namely
-	// by a timed subroutine, while #HotkeyModifierTimeout is still in effect,
+	// by a timed subroutine, while A_HotkeyModifierTimeout is still in effect,
 	// in which case we would want SendKeys() to take note of these modifiers even
 	// if it was called from an ExecUntil() other than ours here:
 	g_script->mThisHotkeyModifiersLR = mModifiersConsolidatedLR;
@@ -1012,8 +930,8 @@ void Hotkey::PerformInNewThreadMadeByCaller(HotkeyVariant &aVariant, LPTSTR aNam
 	// LAUNCH HOTKEY SUBROUTINE:
 	++aVariant.mExistingThreads;  // This is the thread count for this particular hotkey only.
 
-	ExprTokenType params = { aName };
-	ResultType result = aVariant.mJumpToLabel->ExecuteInNewThread(g_script->mThisHotkeyName, &params, 1);
+	ExprTokenType params = { mName };
+	ResultType result = aVariant.mCallback->ExecuteInNewThread(g_script->mThisHotkeyName, &params, 1);
 	
 	--aVariant.mExistingThreads;
 
@@ -1054,10 +972,10 @@ ResultType Hotkey::IfExpr(LPTSTR aExpr, IObject *aExprObj, ResultToken &aResultT
 		{
 			if (!cp) // End of the list and it wasn't found.
 			{
-				if (!ValidateFunctor(aExprObj, 1, aResultToken, ERR_PARAM2_INVALID))
+				if (!ValidateFunctor(aExprObj, 1, aResultToken))
 					return FAIL;
 				if (  !(cp = AddHotkeyIfExpr())  )
-					return aResultToken.Error(ERR_OUTOFMEM);
+					return aResultToken.MemoryError();
 				aExprObj->AddRef();
 				cp->Type = HOT_IF_CALLBACK;
 				cp->Callback = aExprObj;
@@ -1078,28 +996,22 @@ ResultType Hotkey::IfExpr(LPTSTR aExpr, IObject *aExprObj, ResultToken &aResultT
 	{
 		HotkeyCriterion *cp = FindHotkeyIfExpr(aExpr);
 		if (!cp) // Expression not found.
-			return aResultToken.Error(ERR_HOTKEY_IF_EXPR);
+			return aResultToken.ValueError(ERR_HOTKEY_IF_EXPR);
 		g->HotCriterion = cp;
 	}
 	return OK;
 }
 
-ResultType Hotkey::Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOptions
-	, IObject *aJumpToLabel, HookActionType aHookAction, ResultToken &aResultToken)
+ResultType Hotkey::Dynamic(LPTSTR aHotkeyName, LPTSTR aOptions, IObject *aCallback, HookActionType aHookAction, ResultToken &aResultToken)
 // Creates, updates, enables, or disables a hotkey dynamically (while the script is running).
 // Returns OK or FAIL.
 {
-	// This macro was used to support UseErrorLevel in previous versions.
-	#define RETURN_HOTKEY_ERROR(level, msg, info) return aResultToken.Error(msg, info)
-
-	if (!aJumpToLabel && !aHookAction && *aLabelName)
-		RETURN_HOTKEY_ERROR(HOTKEY_EL_BADLABEL, ERR_PARAM2_INVALID, aLabelName);
-	// Caller has ensured that aJumpToLabel and aHookAction can't both be non-zero.  Furthermore,
+	// Caller has ensured that aCallback and aHookAction can't both be non-zero.  Furthermore,
 	// both can be zero/NULL only when the caller is updating an existing hotkey to have new options
-	// (i.e. it's retaining its current label).
-	if (aJumpToLabel)
+	// (i.e. it's retaining its current callback).
+	if (aCallback)
 	{
-		if (!ValidateFunctor(aJumpToLabel, 1, aResultToken))
+		if (!ValidateFunctor(aCallback, 1, aResultToken))
 			return FAIL;
 	}
 
@@ -1115,12 +1027,12 @@ ResultType Hotkey::Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOption
 	case HOTKEY_ID_OFF:
 	case HOTKEY_ID_TOGGLE:
 		if (!hk)
-			RETURN_HOTKEY_ERROR(HOTKEY_EL_NOTEXIST, ERR_NONEXISTENT_HOTKEY, aHotkeyName);
+			return aResultToken.Error(ERR_NONEXISTENT_HOTKEY, aHotkeyName, ErrorPrototype::Target);
 		if (!(variant || hk->mHookAction)) // mHookAction (alt-tab) hotkeys don't need a variant that matches the current criteria.
 			// To avoid ambiguity and also allow the script to use error handling to detect whether a variant
 			// already exists, it seems best to strictly require a matching variant rather than falling back
 			// onto some "default variant" such as the global variant (if any).
-			RETURN_HOTKEY_ERROR(HOTKEY_EL_NOTEXISTVARIANT, ERR_NONEXISTENT_VARIANT, aHotkeyName);
+			return aResultToken.Error(ERR_NONEXISTENT_VARIANT, aHotkeyName, ErrorPrototype::Target);
 		if (aHookAction == HOTKEY_ID_TOGGLE)
 			aHookAction = hk->mHookAction
 				? (hk->mParentEnabled ? HOTKEY_ID_OFF : HOTKEY_ID_ON) // Enable/disable parent hotkey (due to alt-tab being a global hotkey).
@@ -1135,16 +1047,16 @@ ResultType Hotkey::Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOption
 				update_all_hotkeys = true; // Do it this way so that any previous "true" value isn't lost.
 		break;
 
-	default: // aHookAction is 0 or an AltTab action.  COMMAND: Hotkey, Name, Label|AltTabAction
+	default: // aHookAction is 0 or an AltTab action.  COMMAND: Hotkey, Name, Callback|AltTabAction
 		if (!hk) // No existing hotkey of this name, so create a new hotkey.
 		{
-			if (aHookAction) // COMMAND (create hotkey): Hotkey, Name, AltTabAction
+			if (aHookAction) // Create hotkey: Hotkey Name, AltTabAction
 				hk = AddHotkey(NULL, aHookAction, aHotkeyName, suffix_has_tilde);
-			else // COMMAND (create hotkey): Hotkey, Name, LabelName [, Options]
+			else // Create hotkey: Hotkey Name, Callback [, Options]
 			{
-				if (!aJumpToLabel) // Caller is trying to set new aOptions for a nonexistent hotkey.
-					RETURN_HOTKEY_ERROR(HOTKEY_EL_NOTEXIST, ERR_NONEXISTENT_HOTKEY, aHotkeyName);
-				hk = AddHotkey(aJumpToLabel, 0, aHotkeyName, suffix_has_tilde);
+				if (!aCallback) // Caller is trying to set new aOptions for a nonexistent hotkey.
+					return aResultToken.Error(ERR_NONEXISTENT_HOTKEY, aHotkeyName, ErrorPrototype::Target);
+				hk = AddHotkey(aCallback, 0, aHotkeyName, suffix_has_tilde);
 			}
 			if (!hk)
 				return FAIL; // AddHotkey() already displayed the error.
@@ -1185,28 +1097,20 @@ ResultType Hotkey::Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOption
 				update_all_hotkeys = true;
 			}
 			
-			// If the above changed the action from an Alt-tab type to non-alt-tab, there may be a label present
+			// If the above changed the action from an Alt-tab type to non-alt-tab, there may be a callback
 			// to be applied to the existing variant (or created as a new variant).
-			if (aJumpToLabel) // COMMAND (update hotkey): Hotkey, Name, LabelName [, Options]
+			if (aCallback) // Update hotkey: Hotkey Name, Callback [, Options]
 			{
-				// If there's a matching variant, update it's label. Otherwise, create a new variant.
+				// If there's a matching variant, update its callback. Otherwise, create a new variant.
 				if (variant) // There's an existing variant...
 				{
-					if (aJumpToLabel != variant->mJumpToLabel) // ...and it's label is being changed.
-					{
-						variant->mJumpToLabel = aJumpToLabel;
-						// Older comment:
-						// If this hotkey is currently a static hotkey (one not created by the Hotkey command):
-						// Even though it's about to be transformed into a dynamic hotkey via the Hotkey command,
-						// mName can be left pointing to the original Label::mName memory because that should
-						// never change; it will always contain the true name of this hotkey, namely its
-						// keystroke+modifiers (e.g. ^!c).
-					}
+					if (aCallback != variant->mCallback) // ...and its callback is being changed.
+						variant->mCallback = aCallback;
 				}
 				else // No existing variant matching current criteria, so create a new variant.
 				{
-					if (   !(variant = hk->AddVariant(aJumpToLabel, suffix_has_tilde))   ) // Out of memory.
-						RETURN_HOTKEY_ERROR(HOTKEY_EL_MEM, ERR_OUTOFMEM, aHotkeyName);
+					if (   !(variant = hk->AddVariant(aCallback, suffix_has_tilde))   ) // Out of memory.
+						return aResultToken.MemoryError();
 					variant_was_just_created = true;
 					update_all_hotkeys = true;
 					// It seems undesirable for #UseHook to be applied to a hotkey just because it's options
@@ -1217,12 +1121,12 @@ ResultType Hotkey::Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOption
 				}
 			}
 			else
-				// NULL label, so either it just became an alt-tab hotkey above, or it's "Hotkey, Name,, Options".
+				// NULL callback, so either it just became an alt-tab hotkey above, or it's "Hotkey Name,, Options".
 				if (!variant) // Below relies on this check.
 					break; // Let the error-catch below report it as an error.
 
 			// v1.1.15: Allow the ~tilde prefix to be added/removed from an existing hotkey variant.
-			// v1.1.19: Apply this change even if aJumpToLabel is omitted.  This is redundant if
+			// v1.1.19: Apply this change even if aCallback is omitted.  This is redundant if
 			// variant_was_just_created, but checking that condition seems counter-productive.
 			if (variant->mNoSuppress = suffix_has_tilde)
 				hk->mNoSuppress |= AT_LEAST_ONE_VARIANT_HAS_TILDE;
@@ -1248,7 +1152,7 @@ ResultType Hotkey::Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOption
 	// Hotkey, Name,, Options  ; Where name exists as a hotkey, but the right variant doesn't yet exist.
 	// If it catches anything else, that could be a bug, so this error message will help spot it.
 	if (!(variant || hk->mHookAction)) // mHookAction (alt-tab) hotkeys don't need a variant that matches the current criteria.
-		RETURN_HOTKEY_ERROR(HOTKEY_EL_NOTEXISTVARIANT, ERR_NONEXISTENT_VARIANT, aHotkeyName);
+		return aResultToken.Error(ERR_NONEXISTENT_VARIANT, aHotkeyName, ErrorPrototype::Target);
 	// Below relies on the fact that either variant or hk->mHookAction (or both) is now non-zero.
 	// Specifically, when an existing hotkey was changed to become an alt-tab hotkey, above, there will sometimes
 	// be a NULL variant (depending on whether there happens to be a variant in the hotkey that matches the current criteria).
@@ -1286,6 +1190,10 @@ ResultType Hotkey::Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOption
 			case 'P':
 				if (variant)
 					variant->mPriority = _ttoi(cp + 1);
+				break;
+			case 'S':
+				if (variant)
+					variant->mSuspendExempt = (cp[1] != '0');
 				break;
 			case 'T':
 				if (variant)
@@ -1329,20 +1237,16 @@ ResultType Hotkey::Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOption
 
 
 
-Hotkey *Hotkey::AddHotkey(IObject *aJumpToLabel, HookActionType aHookAction, LPTSTR aName, bool aSuffixHasTilde)
-// Caller provides aJumpToLabel rather than a Line* because at the time a hotkey or hotstring
-// is created, the label's destination line is not yet known.  So the label is used a placeholder.
-// Caller must ensure that either aJumpToLabel or aName is not NULL.
-// aName is NULL whenever the caller is creating a static hotkey, at loadtime (i.e. one that
-// points to a hotkey label rather than a normal label).  The only time aJumpToLabel should
-// be NULL is when the caller is creating a dynamic hotkey that has an aHookAction.
+Hotkey *Hotkey::AddHotkey(IObject *aCallback, HookActionType aHookAction, LPTSTR aName, bool aSuffixHasTilde)
+// aCallback can be NULL if the caller is creating a dynamic hotkey that has an aHookAction.
+// aName must not be NULL.
 // Returns the address of the new hotkey on success, or NULL otherwise.
 // The caller is responsible for calling ManifestAllHotkeysHotstringsHooks(), if appropriate.
 {
 	if (   (shkMax <= sNextID && !HookAdjustMaxHotkeys(shk, shkMax, shkMax ? shkMax * 2 : INITIAL_MAX_HOTKEYS)) // Allocate or expand shk if needed.
-		|| !(shk[sNextID] = new Hotkey(sNextID, aJumpToLabel, aHookAction, aName, aSuffixHasTilde))   )
+		|| !(shk[sNextID] = new Hotkey(sNextID, aCallback, aHookAction, aName, aSuffixHasTilde))   )
 	{
-		g_script->ScriptError(ERR_OUTOFMEM);
+		MemoryError();
 		return NULL;
 	}
 	if (!shk[sNextID]->mConstructedOK)
@@ -1356,15 +1260,10 @@ Hotkey *Hotkey::AddHotkey(IObject *aJumpToLabel, HookActionType aHookAction, LPT
 
 
 
-Hotkey::Hotkey(HotkeyIDType aID, IObject *aJumpToLabel, HookActionType aHookAction, LPTSTR aName
+Hotkey::Hotkey(HotkeyIDType aID, IObject *aCallback, HookActionType aHookAction, LPTSTR aName
 	, bool aSuffixHasTilde)
-// Constructor.
-// Caller provides aJumpToLabel rather than a Line* because at the time a hotkey or hotstring
-// is created, the label's destination line is not yet known.  So the label is used a placeholder.
-// Even if the caller-provided aJumpToLabel is NULL, a non-NULL mJumpToLabel will be stored in
-// each hotkey/variant so that NULL doesn't have to be constantly checked during script runtime.
 	: mID(HOTKEY_ID_INVALID)  // Default until overridden.
-	// Caller must ensure that either aName or aJumpToLabel isn't NULL.
+	// Caller must ensure that either aName or aCallback isn't NULL.
 	, mVK(0)
 	, mSC(0)
 	, mModifiers(0)
@@ -1396,8 +1295,7 @@ Hotkey::Hotkey(HotkeyIDType aID, IObject *aJumpToLabel, HookActionType aHookActi
 		return;
 	}
 
-	LPTSTR hotkey_name = aName;
-	if (!TextInterpret(hotkey_name, this)) // The called function already displayed the error.
+	if (!TextInterpret(aName, this)) // The called function already displayed the error.
 		return;
 
 	if (mType != HK_JOYSTICK) // Perform modifier adjustment and other activities that don't apply to joysticks.
@@ -1430,7 +1328,7 @@ Hotkey::Hotkey(HotkeyIDType aID, IObject *aJumpToLabel, HookActionType aHookActi
 				// to try to guess which key, left or right, should be used based on the
 				// location of the suffix key on the keyboard.  Lexikos: Better not do that
 				// since a wrong guess will leave the user wondering why it doesn't work.
-				g_script->ScriptError(ERR_ALTTAB_MODLR, hotkey_name);
+				ValueError(ERR_ALTTAB_MODLR, aName, FAIL);
 				return;  // Key is invalid so don't give it an ID.
 			}
 			if (mModifiersLR)
@@ -1449,7 +1347,7 @@ Hotkey::Hotkey(HotkeyIDType aID, IObject *aJumpToLabel, HookActionType aHookActi
 				case MOD_LWIN: mModifierVK = VK_LWIN; break;
 				case MOD_RWIN: mModifierVK = VK_RWIN; break;
 				default:
-					g_script->ScriptError(ERR_ALTTAB_ONEMOD, hotkey_name);
+					ValueError(ERR_ALTTAB_ONEMOD, aName, FAIL);
 					return;  // Key is invalid so don't give it an ID.
 				}
 				// Since above didn't return:
@@ -1565,10 +1463,10 @@ Hotkey::Hotkey(HotkeyIDType aID, IObject *aJumpToLabel, HookActionType aHookActi
 	// If mKeybdHookMandatory==true, ManifestAllHotkeysHotstringsHooks() will set mType to HK_KEYBD_HOOK for us.
 
 	// To avoid memory leak, this is done only when it is certain the hotkey will be created:
-	if (   !(mName = aName ? g_SimpleHeap->Malloc(aName) : hotkey_name)
-		|| !(AddVariant(aJumpToLabel, aSuffixHasTilde))   ) // Too rare to worry about freeing the other if only one fails.
+	if (   !(mName = g_SimpleHeap->Malloc(aName))
+		|| !(AddVariant(aCallback, aSuffixHasTilde))   ) // Too rare to worry about freeing the other if only one fails.
 	{
-		g_script->ScriptError(ERR_OUTOFMEM);
+		MemoryError();
 		return;
 	}
 	// Above has ensured that both mFirstVariant and mLastVariant are non-NULL, so callers can rely on that.
@@ -1577,7 +1475,6 @@ Hotkey::Hotkey(HotkeyIDType aID, IObject *aJumpToLabel, HookActionType aHookActi
 	// that the constructor succeeded:
 	mConstructedOK = true;
 	mID = aID;
-	mThreadID = g_ThreadID;
 	// Don't do this because the caller still needs the old/unincremented value:
 	//++sHotkeyCount;  // Hmm, seems best to do this here, but revisit this sometime.
 }
@@ -1585,7 +1482,7 @@ Hotkey::Hotkey(HotkeyIDType aID, IObject *aJumpToLabel, HookActionType aHookActi
 
 
 HotkeyVariant *Hotkey::FindVariant()
-// Returns he address of the variant in this hotkey whose criterion matches the current #HotIf criterion.
+// Returns the address of the variant in this hotkey whose criterion matches the current #HotIf criterion.
 // If no match, it returns NULL.
 {
 	for (HotkeyVariant *vp = mFirstVariant; vp; vp = vp->mNextVariant)
@@ -1596,15 +1493,11 @@ HotkeyVariant *Hotkey::FindVariant()
 
 
 
-HotkeyVariant *Hotkey::AddVariant(IObject *aJumpToLabel, bool aSuffixHasTilde)
+HotkeyVariant *Hotkey::AddVariant(IObject *aCallback, bool aSuffixHasTilde)
 // Returns NULL upon out-of-memory; otherwise, the address of the new variant.
-// Even if aJumpToLabel is NULL, a non-NULL mJumpToLabel will be stored in each variant so that
-// NULL doesn't have to be constantly checked during script runtime.
 // The caller is responsible for calling ManifestAllHotkeysHotstringsHooks(), if appropriate.
 {
-	HotkeyVariant *vp;
-	if (   !(vp = (HotkeyVariant *)g_SimpleHeap->Malloc(sizeof(HotkeyVariant)))   )
-		return NULL;
+	HotkeyVariant *vp = g_SimpleHeap->Alloc<HotkeyVariant>();
 	ZeroMemory(vp, sizeof(HotkeyVariant));
 	// The following members are left at 0/NULL by the above:
 	// mNextVariant
@@ -1613,7 +1506,7 @@ HotkeyVariant *Hotkey::AddVariant(IObject *aJumpToLabel, bool aSuffixHasTilde)
 	// mRunAgainTime
 	// mPriority (default priority is always 0)
 	HotkeyVariant &v = *vp;
-	v.mJumpToLabel = aJumpToLabel;
+	v.mCallback = aCallback;
 	v.mOriginalCallback = g_script->mLastHotFunc;
 	v.mMaxThreads = g_MaxThreadsPerHotkey;    // The values of these can vary during load-time.
 	v.mMaxThreadsBuffer = g_MaxThreadsBuffer; //
@@ -1621,7 +1514,6 @@ HotkeyVariant *Hotkey::AddVariant(IObject *aJumpToLabel, bool aSuffixHasTilde)
 	v.mHotCriterion = g->HotCriterion; // If this hotkey is an alt-tab one (mHookAction), this is stored but ignored until/unless the Hotkey command converts it into a non-alt-tab hotkey.
 	v.mEnabled = true;
 	v.mSuspendExempt = g_SuspendExempt;
-	v.mThreadID = g_ThreadID;
 	if (v.mInputLevel > 0)
 	{
 		// A non-zero InputLevel only works when using the hook
@@ -1672,7 +1564,7 @@ ResultType Hotkey::TextInterpret(LPTSTR aName, Hotkey *aThisHotkey)
 	LPTSTR term1 = hotkey_name;
 	LPTSTR term2 = _tcsstr(term1, COMPOSITE_DELIMITER);
 	if (!term2)
-		return TextToKey(TextToModifiers(term1, aThisHotkey), aName, false, aThisHotkey);
+		return TextToKey(TextToModifiers(term1, aThisHotkey), false, aThisHotkey);
 	if (*term1 == '~')
 	{
 		if (aThisHotkey)
@@ -1686,7 +1578,7 @@ ResultType Hotkey::TextInterpret(LPTSTR aName, Hotkey *aThisHotkey)
 	// Temporarily terminate the string so that the 2nd term is hidden:
 	TCHAR ctemp = *end_of_term1;
 	*end_of_term1 = '\0';
-	ResultType result = TextToKey(term1, aName, true, aThisHotkey);
+	ResultType result = TextToKey(term1, true, aThisHotkey);
 	*end_of_term1 = ctemp;  // Undo the termination.
 	if (result != OK)
 		return result;
@@ -1700,7 +1592,7 @@ ResultType Hotkey::TextInterpret(LPTSTR aName, Hotkey *aThisHotkey)
 	//term2 = TextToModifiers(term2, aThisHotkey);
 	if (*term2 == '~')
 		++term2; // Some other stage handles this modifier, so just ignore it here.
-	return TextToKey(term2, aName, false, aThisHotkey);
+	return TextToKey(term2, false, aThisHotkey);
 }
 
 
@@ -1879,7 +1771,7 @@ break_loop:
 
 
 
-ResultType Hotkey::TextToKey(LPTSTR aText, LPTSTR aHotkeyName, bool aIsModifier, Hotkey *aThisHotkey)
+ResultType Hotkey::TextToKey(LPTSTR aText, bool aIsModifier, Hotkey *aThisHotkey)
 // This function and those it calls should avoid showing any error dialogs when caller passes NULL for
 // aThisHotkey (however, there is at least one exception explained in comments below where it occurs).
 // Caller must ensure that aText is a modifiable string.
@@ -1917,7 +1809,7 @@ ResultType Hotkey::TextToKey(LPTSTR aText, LPTSTR aHotkeyName, bool aIsModifier,
 		{
 			if (IS_WHEEL_VK(temp_vk))
 			{
-				g_script->ScriptError(ERR_UNSUPPORTED_PREFIX, aText);
+				ValueError(ERR_UNSUPPORTED_PREFIX, aText, FAIL);
 				// When aThisHotkey==NULL, return CONDITION_FALSE to indicate to our caller that it's
 				// an invalid hotkey and we've already shown the error message.  Unlike the old method,
 				// this method respects /ErrorStdOut and avoids the second, generic error message.
@@ -1961,7 +1853,7 @@ ResultType Hotkey::TextToKey(LPTSTR aText, LPTSTR aHotkeyName, bool aIsModifier,
 					// would make loadtime's second call to create the hotkey always succeed. Also, it's
 					// more appropriate to say "key name" than "hotkey" in this message because it's only
 					// showing the one bad key name when it's a composite hotkey such as "Capslock & y".
-					g_script->ScriptError(ERR_INVALID_KEYNAME, aText);
+					ValueError(ERR_INVALID_KEYNAME, aText, FAIL);
 				}
 				//else do not show an error in this case because the loader will attempt to interpret
 				// this line as a command.  If that too fails, it will show an "unrecognized action"
@@ -2302,11 +2194,10 @@ LPTSTR Hotkey::ToText(LPTSTR aBuf, int aBufSize, bool aAppendNewline)
 ///////////////
 
 // Init static variables:
-Hotstring **Hotstring::shs = NULL;
-HotstringIDType Hotstring::sHotstringCount = 0;
-HotstringIDType Hotstring::sHotstringCountMax = 0;
-UINT Hotstring::sEnabledCount = 0;
-
+thread_local Hotstring **Hotstring::shs = NULL;
+thread_local HotstringIDType Hotstring::sHotstringCount = 0;
+thread_local HotstringIDType Hotstring::sHotstringCountMax = 0;
+thread_local UINT Hotstring::sEnabledCount = 0;
 
 void Hotstring::AllDestruct()
 // HotKeyIt destroy all HotStrings H1
@@ -2314,40 +2205,17 @@ void Hotstring::AllDestruct()
 	if (sHotstringCount < 1) // At least one part below relies on this check.
 		return;
 	
-	UINT u;
-	for (u = 0; u < sHotstringCount; ++u)
+	UINT i;
+	for (i = 0; i < sHotstringCount; ++i)
 	{
-		if (g_ThreadID == shs[u]->mThreadID)
-		{
-			delete shs[u];
-			shs[u] = NULL;
-		}
+		if (shs[i]->mReplacement)
+			free(shs[i]->mReplacement);
+		if (shs[i]->mCallback)
+			shs[i]->mCallback.ToObject()->Release();
+		delete shs[i]; // Unregisters before destroying.
 	}
-	HotstringIDType aHotstringCount = sHotstringCount;
-	for (u = 0; u < aHotstringCount; ++u)
-	{
-		if (!shs[u])
-		{
-			shs[u] = shs[sHotstringCount - 1];
-			sHotstringCount--;
-		}
-	}
-	if (g_MainThreadID == g_ThreadID)
-	{
-		free(shs);
-		shs = NULL;
-		sHotstringCount = 0;
-		sHotstringCountMax = 0;
-		sEnabledCount = 0;
-	}
-	else if (!sHotstringCount)
-	{
-		sEnabledCount = 0;
-	}
+	free(shs);
 }
-
-
-
 
 void Hotstring::SuspendAll(bool aSuspend)
 {
@@ -2408,7 +2276,7 @@ ResultType Hotstring::PerformInNewThreadMadeByCaller()
 	
 	ResultType result;
 	ExprTokenType params = { mName };
-	result = mJumpToLabel->ExecuteInNewThread(g_script->mThisHotkeyName, &params, 1);
+	result = mCallback->ExecuteInNewThread(g_script->mThisHotkeyName, &params, 1);
 	
 	--mExistingThreads;
 	return result ? OK : FAIL;	// Return OK on all non-failure results.
@@ -2512,26 +2380,24 @@ void Hotstring::DoReplace(LPARAM alParam)
 
 
 
-ResultType Hotstring::AddHotstring(LPTSTR aName, LabelPtr aJumpToLabel, LPTSTR aOptions, LPTSTR aHotstring
+ResultType Hotstring::AddHotstring(LPTSTR aName, IObjectPtr aCallback, LPTSTR aOptions, LPTSTR aHotstring
 		, LPTSTR aReplacement, bool aHasContinuationSection, UCHAR aSuspend)
-// Caller provides aJumpToLabel rather than a Line* because at the time a hotkey or hotstring
-// is created, the label's destination line is not yet known.  So the label is used a placeholder.
 // Returns OK or FAIL.
 // Caller has ensured that aHotstringOptions is blank if there are no options.  Otherwise, aHotstringOptions
 // should end in a colon, which marks the end of the options list.  aHotstring is the hotstring itself
-// (e.g. "ahk"), which does not have to be unique, unlike the label name, which was made unique by also
-// including any options in with the label name (e.g. ::ahk:: is a different label than :c:ahk::).
+// (e.g. "ahk"), which does not have to be unique, unlike aName, which was made unique by also including
+// any options (e.g. ::ahk:: has a different aName than :c:ahk::).
 // Caller has also ensured that aHotstring is not blank.
 {
 	// The length is limited for performance reasons, notably so that the hook does not have to move
 	// memory around in the buffer it uses to watch for hotstrings:
 	if (_tcslen(aHotstring) > MAX_HOTSTRING_LENGTH)
-		return g_script->ScriptError(_T("Hotstring max abbreviation length is ") MAX_HOTSTRING_LENGTH_STR _T("."), aHotstring);
+		return ValueError(_T("Hotstring max abbreviation length is ") MAX_HOTSTRING_LENGTH_STR _T("."), aHotstring, FAIL);
 
 	if (!shs)
 	{
 		if (   !(shs = (Hotstring **)malloc(HOTSTRING_BLOCK_SIZE * sizeof(Hotstring *)))   )
-			return g_script->ScriptError(ERR_OUTOFMEM); // Short msg. since so rare.
+			return MemoryError(); // Short msg. since so rare.
 		sHotstringCountMax = HOTSTRING_BLOCK_SIZE;
 	}
 	else if (sHotstringCount >= sHotstringCountMax) // Realloc to preserve contents and keep contiguous array.
@@ -2540,13 +2406,13 @@ ResultType Hotstring::AddHotstring(LPTSTR aName, LabelPtr aJumpToLabel, LPTSTR a
 		// but leaves original block allocated.
 		void *realloc_temp = realloc(shs, (sHotstringCountMax + HOTSTRING_BLOCK_SIZE) * sizeof(Hotstring *));
 		if (!realloc_temp)
-			return g_script->ScriptError(ERR_OUTOFMEM);  // Short msg. since so rare.
+			return MemoryError();  // Short msg. since so rare.
 		shs = (Hotstring **)realloc_temp;
 		sHotstringCountMax += HOTSTRING_BLOCK_SIZE;
 	}
 
-	if (   !(shs[sHotstringCount] = new Hotstring(aName, aJumpToLabel, aOptions, aHotstring, aReplacement, aHasContinuationSection, aSuspend))   )
-		return g_script->ScriptError(ERR_OUTOFMEM); // Short msg. since so rare.
+	if (   !(shs[sHotstringCount] = new Hotstring(aName, aCallback, aOptions, aHotstring, aReplacement, aHasContinuationSection, aSuspend))   )
+		return MemoryError(); // Short msg. since so rare.
 	if (!shs[sHotstringCount]->mConstructedOK)
 	{
 		delete shs[sHotstringCount];  // SimpleHeap allows deletion of most recently added item.
@@ -2561,10 +2427,10 @@ ResultType Hotstring::AddHotstring(LPTSTR aName, LabelPtr aJumpToLabel, LPTSTR a
 
 
 
-Hotstring::Hotstring(LPTSTR aName, LabelPtr aJumpToLabel, LPTSTR aOptions, LPTSTR aHotstring, LPTSTR aReplacement
+Hotstring::Hotstring(LPTSTR aName, IObjectPtr aCallback, LPTSTR aOptions, LPTSTR aHotstring, LPTSTR aReplacement
 	, bool aHasContinuationSection, UCHAR aSuspend)
-	: mJumpToLabel(aJumpToLabel)  // Any NULL value will cause failure further below.
-	, mName(aName)
+	: mCallback(aCallback)  // Any NULL value will cause failure further below.
+	, mName(NULL)
 	, mString(NULL), mReplacement(NULL), mStringLength(0)
 	, mHotCriterion(g->HotCriterion)
 	, mSuspended(aSuspend)
@@ -2575,17 +2441,17 @@ Hotstring::Hotstring(LPTSTR aName, LabelPtr aJumpToLabel, LPTSTR aOptions, LPTST
 	, mOmitEndChar(g_HSOmitEndChar), mSendRaw(aHasContinuationSection ? SCM_RAW_TEXT : g_HSSendRaw)
 	, mEndCharRequired(g_HSEndCharRequired), mDetectWhenInsideWord(g_HSDetectWhenInsideWord), mDoReset(g_HSDoReset)
 	, mInputLevel(g_InputLevel)
-	, mSuspendExempt(g_SuspendExempt)
+	, mSuspendExempt(g_SuspendExempt || g_SuspendExemptHS)
 	, mConstructedOK(false)
 {
 	bool execute_action = false; // do not assign  mReplacement if execute_action is true.
 	ParseOptions(aOptions, mPriority, mKeyDelay, mSendMode, mCaseSensitive, mConformToCase, mDoBackspace
-		, mOmitEndChar, mSendRaw, mEndCharRequired, mDetectWhenInsideWord, mDoReset, execute_action);
+		, mOmitEndChar, mSendRaw, mEndCharRequired, mDetectWhenInsideWord, mDoReset, execute_action, mSuspendExempt);
 	
 	// To avoid memory leak, this is done only when it is certain the hotstring will be created:
-	if (!(mString = g_SimpleHeap->Malloc(aHotstring)))
+	if (   !(mString = g_SimpleHeap->Malloc(aHotstring))   )
 		return; // ScriptError() was already called by Malloc().
-	if (   g_script->mIsReadyToExecute && !(mName = g_SimpleHeap->Malloc(aName))   ) // mName already contains persistent memory when we're called at load time.
+	if (   !(mName = g_SimpleHeap->Malloc(aName))   )
 	{
 		g_SimpleHeap->Delete(mString); // SimpleHeap allows deletion of most recently added item.
 		return;
@@ -2596,13 +2462,12 @@ Hotstring::Hotstring(LPTSTR aName, LabelPtr aJumpToLabel, LPTSTR aOptions, LPTST
 		// SimpleHeap is not used for the replacement as it can be changed at runtime by Hotstring().
 		if (   !(mReplacement = _tcsdup(aReplacement))   )
 		{
-			g_script->ScriptError(ERR_OUTOFMEM); // Short msg since very rare.
+			MemoryError(); // Short msg since very rare.
 			return;
 		}
 	}
 	else // Leave mReplacement NULL, but make this false so that the hook doesn't do extra work.
 		mConformToCase = false;
-	mThreadID = g_ThreadID;
 	mConstructedOK = true; // Done at the very end.
 }
 
@@ -2612,14 +2477,14 @@ void Hotstring::ParseOptions(LPTSTR aOptions)
 {
 	bool unused_X_option;
 	ParseOptions(aOptions, mPriority, mKeyDelay, mSendMode, mCaseSensitive, mConformToCase, mDoBackspace
-		, mOmitEndChar, mSendRaw, mEndCharRequired, mDetectWhenInsideWord, mDoReset, unused_X_option);
+		, mOmitEndChar, mSendRaw, mEndCharRequired, mDetectWhenInsideWord, mDoReset, unused_X_option, mSuspendExempt);
 }
 
 
 
 void Hotstring::ParseOptions(LPTSTR aOptions, int &aPriority, int &aKeyDelay, SendModes &aSendMode
 	, bool &aCaseSensitive, bool &aConformToCase, bool &aDoBackspace, bool &aOmitEndChar, SendRawType &aSendRaw
-	, bool &aEndCharRequired, bool &aDetectWhenInsideWord, bool &aDoReset, bool &aExecuteAction)
+	, bool &aEndCharRequired, bool &aDetectWhenInsideWord, bool &aDoReset, bool &aExecuteAction, bool &aSuspendExempt)
 {
 	// In this case, colon rather than zero marks the end of the string.  However, the string
 	// might be empty so check for that too.  In addition, this is now called from
@@ -2684,7 +2549,7 @@ void Hotstring::ParseOptions(LPTSTR aOptions, int &aPriority, int &aKeyDelay, Se
 			case 'I': aSendMode = SM_INPUT_FALLBACK_TO_PLAY; break;
 			case 'E': aSendMode = SM_EVENT; break;
 			case 'P': aSendMode = SM_PLAY; break;
-			//default: leave it unchanged.
+			default: aSuspendExempt = (*cp1 != '0'); break;
 			}
 			break;
 		case 'Z':
@@ -2763,7 +2628,7 @@ BIF_DECL(BIF_Hotstring)
 		bool unused_X_option; // 'X' option is required to be passed for each Hotstring() call, for clarity.
 		Hotstring::ParseOptions(name, g_HSPriority, g_HSKeyDelay, g_HSSendMode, g_HSCaseSensitive
 			, g_HSConformToCase, g_HSDoBackspace, g_HSOmitEndChar, g_HSSendRaw, g_HSEndCharRequired
-			, g_HSDetectWhenInsideWord, g_HSDoReset, unused_X_option);
+			, g_HSDetectWhenInsideWord, g_HSDoReset, unused_X_option, g_SuspendExemptHS);
 		return;
 	}
 
@@ -2787,25 +2652,21 @@ BIF_DECL(BIF_Hotstring)
 			//else it's just a naked "::", which is invalid.
 	}
 	if (!hotstring_start)
-		_f_throw(ERR_PARAM1_INVALID, action);
+		_f_throw_param(0);
 	
 	// Determine options which affect hotstring identity/uniqueness.
 	bool case_sensitive = g_HSCaseSensitive;
 	bool detect_inside_word = g_HSDetectWhenInsideWord;
-	bool execute_action = false; // Unlike the others, 'X' must be specified each time.
 	bool un; int iun; SendModes sm; SendRawType sr; // Unused.
 	if (*hotstring_options)
-		Hotstring::ParseOptions(hotstring_options, iun, iun, sm, case_sensitive, un, un, un, sr, un, detect_inside_word, un, execute_action);
+		Hotstring::ParseOptions(hotstring_options, iun, iun, sm, case_sensitive, un, un, un, sr, un, detect_inside_word, un, un, un);
 	
 	IObject *action_obj = NULL;
 	if (!ParamIndexIsOmitted(1))
 	{
 		if (action_obj = ParamIndexToObject(1))
 			action_obj->AddRef();
-		else // Caller did not specify an object, so must specify a function name.
-			if (   execute_action // Caller specified 'X' option (which is ignored when passing an object).
-				&& !(action_obj = StringToFunctor(action))   ) // No valid function found.
-				_f_throw(ERR_PARAM2_INVALID, action);
+		// Otherwise, it's always replacement text (the 'X' option is ignored at runtime).
 	}
 
 	ToggleValueType toggle = NEUTRAL;
@@ -2813,7 +2674,7 @@ BIF_DECL(BIF_Hotstring)
 	{
 		if (action_obj)
 			action_obj->Release();
-		_f_throw(ERR_PARAM3_INVALID, onoff);
+		_f_throw_param(2);
 	}
 
 	bool was_already_enabled;
@@ -2822,7 +2683,7 @@ BIF_DECL(BIF_Hotstring)
 	{
 		was_already_enabled = !existing->mSuspended;
 
-		// Update the replacement string or function/label, if specified.
+		// Update the replacement string or function, if specified.
 		if (action_obj || *action)
 		{
 			LPTSTR new_replacement = NULL; // Set default: not auto-replace.
@@ -2835,7 +2696,7 @@ BIF_DECL(BIF_Hotstring)
 					new_replacement = existing->mReplacement; // Avoid reallocating it.
 				}
 				else if (   !(new_replacement = _tcsdup(action))   )
-					_f_throw(ERR_OUTOFMEM);
+					_f_throw_oom;
 			}
 			existing->mSuspended |= HS_TEMPORARILY_DISABLED;
 			WaitHookIdle();
@@ -2847,9 +2708,9 @@ BIF_DECL(BIF_Hotstring)
 					free(existing->mReplacement);
 				existing->mReplacement = new_replacement;
 			}
-			if (action_obj != existing->mJumpToLabel)
+			if (action_obj != existing->mCallback)
 			{
-				existing->mJumpToLabel = action_obj;
+				existing->mCallback = action_obj;
 			}
 		}
 		// Update the hotstring's options.  Note that mCaseSensitive and mDetectWhenInsideWord
@@ -2867,7 +2728,7 @@ BIF_DECL(BIF_Hotstring)
 	else // No matching hotstring yet.
 	{
 		if (!action_obj && !*action)
-			_f_throw(aParamCount > 1 ? ERR_PARAM2_MUST_NOT_BE_BLANK : _T("Hotstring not found."));
+			_f_throw(ERR_NONEXISTENT_HOTSTRING, ErrorPrototype::Target);
 
 		UCHAR initial_suspend_state = (toggle == TOGGLED_OFF) ? HS_TURNED_OFF : FALSE;
 		if (g_IsSuspended)

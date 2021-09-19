@@ -1,4 +1,4 @@
-/*
+﻿/*
 AutoHotkey
 
 Copyright 2003-2009 Chris Mallett (support@autohotkey.com)
@@ -26,7 +26,7 @@ GNU General Public License for more details.
 // 2) If it were in window.h/cpp it causes mutual-dependency problems between header
 //    (probably correctible, but it's fine this way).
 
-
+thread_local extern SimpleHeap* g_SimpleHeap;
 class Label;
 class WindowSpec
 {
@@ -40,10 +40,10 @@ public:
 		: mTitle(aTitle), mText(aText), mExcludeTitle(aExcludeTitle), mExcludeText(aExcludeText)
 		, mNextWindow(NULL) // mNextWindow(NULL) is also required for thread-safety.
 	{}
-	void *operator new(size_t aBytes){ return malloc(aBytes); }
-	void *operator new[](size_t aBytes) {return malloc(aBytes); }
-	void operator delete(void *aPtr) { free(aPtr); }
-	void operator delete[](void *aPtr) { free(aPtr); }
+	void *operator new(size_t aBytes) {return g_SimpleHeap->Alloc(aBytes);}
+	void *operator new[](size_t aBytes) {return g_SimpleHeap->Alloc(aBytes);}
+	void operator delete(void *aPtr) {}
+	void operator delete[](void *aPtr) {}
 };
 
 
@@ -54,9 +54,9 @@ class WinGroup
 private:
 	// The maximum number of windows to keep track of:
 	#define MAX_ALREADY_VISITED 500
-	_thread_local static WinGroup *sGroupLastUsed;
-	_thread_local static HWND *sAlreadyVisited;  // Array.  It will be dynamically allocated on first use.
-	_thread_local static int sAlreadyVisitedCount;
+	thread_local static WinGroup *sGroupLastUsed;
+	thread_local static HWND *sAlreadyVisited;  // Array.  It will be dynamically allocated on first use.
+	thread_local static int sAlreadyVisitedCount;
 	bool mIsModeActivate;
 
 	static void MarkAsVisited(HWND aWnd)
@@ -96,10 +96,10 @@ public:
 		, mNextGroup(NULL) // v1.0.41: Required for thread-safety, but also for maintainability.
 		, mIsModeActivate(true) // arbitrary default.
 	{}
-	void *operator new(size_t aBytes){ return malloc(aBytes); }
-	void *operator new[](size_t aBytes) {return malloc(aBytes); }
-	void operator delete(void *aPtr) { free(aPtr); }
-	void operator delete[](void *aPtr) { free(aPtr); }
+	void *operator new(size_t aBytes) {return g_SimpleHeap->Alloc(aBytes);}
+	void *operator new[](size_t aBytes) {return g_SimpleHeap->Alloc(aBytes);}
+	void operator delete(void *aPtr) {}
+	void operator delete[](void *aPtr) {}
 };
 
 

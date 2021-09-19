@@ -61,8 +61,8 @@ typedef struct POINTER_LIST {
 #endif
 
 typedef struct {
-    PIMAGE_NT_HEADERS headers;
     unsigned char *codeBase;
+    PIMAGE_NT_HEADERS headers;
     HCUSTOMMODULE *modules;
 	HANDLE heapmodules;
     int numModules;

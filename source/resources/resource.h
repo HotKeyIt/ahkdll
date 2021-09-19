@@ -1,10 +1,10 @@
 //{{NO_DEPENDENCIES}}
-// Microsoft Visual C++ generated include file.
-// Used by AutoHotkey.rc
+// Von Microsoft Visual C++ generierte Includedatei.
+// Verwendet durch AutoHotkey2.rc
 //
-#define VS_VERSION_INFO                 1
 #define IDS_PROJNAME                    100
-#define IDR_WMDMLOGGER                  101
+#define IDR_AUTOHOTKEY2                 101
+#define IDR_COMSERVER                   106
 #define IDI_MAIN                        159
 #define IDI_FILETYPE                    160
 #define IDS_LOG_SEV_INFO                201
@@ -44,9 +44,9 @@
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        236
-#define _APS_NEXT_COMMAND_VALUE         65414
-#define _APS_NEXT_CONTROL_VALUE         206
-#define _APS_NEXT_SYMED_VALUE           101
+#define _APS_NEXT_RESOURCE_VALUE        201
+#define _APS_NEXT_COMMAND_VALUE         32768
+#define _APS_NEXT_CONTROL_VALUE         201
+#define _APS_NEXT_SYMED_VALUE           107
 #endif
 #endif

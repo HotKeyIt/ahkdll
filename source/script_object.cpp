@@ -1,13 +1,15 @@
-#include "stdafx.h" // pre-compiled headers
+﻿#include "pch.h" // pre-compiled headers
 #include "defines.h"
 #include "globaldata.h"
 #include "script.h"
 #include "application.h"
 
 #include "script_object.h"
+#include "script_com.h"
 #include "script_func_impl.h"
 
 #include <errno.h> // For ERANGE.
+#include <initializer_list>
 
 
 //
@@ -57,8 +59,6 @@ Object *Object::Create()
 {
 	Object *obj = new Object();
 	obj->SetBase(Object::sPrototype);
-	if (g_DefaultObjectValueType != SYM_MISSING)
-		obj->mDefault.SetValue(g_DefaultObjectValue);
 	return obj;
 }
 
@@ -90,7 +90,7 @@ Object *Object::Create(ExprTokenType *aParam[], int aParamCount, ResultToken *ap
 
 			auto name = TokenToString(*aParam[i], buf);
 
-			if (!_tcsicmp(name, _T("base")) && apResultToken)
+			if (!_tcsicmp(name, _T("Base")) && apResultToken)
 			{
 				auto base = dynamic_cast<Object *>(TokenToObject(*aParam[i + 1]));
 				if (!obj->SetBase(base, *apResultToken))
@@ -104,7 +104,7 @@ Object *Object::Create(ExprTokenType *aParam[], int aParamCount, ResultToken *ap
 			if (!obj->SetOwnProp(name, *aParam[i + 1]))
 			{
 				if (apResultToken)
-					apResultToken->Error(ERR_OUTOFMEM);
+					apResultToken->MemoryError();
 				obj->Release();
 				return NULL;
 			}
@@ -121,61 +121,11 @@ Object *Object::Create(ExprTokenType *aParam[], int aParamCount, ResultToken *ap
 
 Map *Map::Create(ExprTokenType *aParam[], int aParamCount, bool aUnsorted)
 {
-	ASSERT(!(aParamCount & 1 && !(aParamCount == 1 && TokenToObject(*aParam[0]))));
+	ASSERT(!(aParamCount & 1 && !TokenToObject(*aParam[0])));
 	Map *map = new Map();
 	map->mUnsorted = aUnsorted;
 	map->SetBase(Map::sPrototype);
-	if (g_DefaultMapValueType != SYM_MISSING)
-		map->mDefault.SetValue(g_DefaultMapValue);
-	if (aParamCount == 1 && TokenToObject(*aParam[0]))
-	{
-		ResultToken result_token, this_token, aKey, aValue;
-		ExprTokenType *params[] = { &aKey, &aValue };
-		Var vkey, vval;
-		IObject *enumerator;
-		ResultType result;
-
-		Object *aobj = dynamic_cast<Object*>(TokenToObject(*aParam[0]));
-		if (!aobj)
-			return NULL;
-
-		this_token.symbol = SYM_OBJECT;
-		this_token.object = aobj;
-		if (!_tcscmp(aobj->Type(), _T("Object")))
-			enumerator = new IndexEnumerator(aobj, static_cast<IndexEnumerator::Callback>(&Object::GetEnumProp));
-		else
-			result = GetEnumerator(enumerator, this_token, 2, false);
-
-		this_token.symbol = SYM_OBJECT;
-		this_token.object = map;
-		// Prepare parameters for the loop below
-		aKey.symbol = SYM_VAR;
-		aKey.var = &vkey;
-		aKey.var->mCharContents = _T("");
-		aKey.mem_to_free = 0;
-		aValue.symbol = SYM_VAR;
-		aValue.var = &vval;
-		aValue.var->mCharContents = _T("");
-		aValue.mem_to_free = 0;
-
-		for (;;)
-		{
-			// Call enumerator.Next(var1, var2)
-			result = CallEnumerator(enumerator, params, 2, false);
-			if (result == CONDITION_FALSE)
-				break;
-			if (!map->SetItem(*params[0], *params[1]))
-			{	// Out of memory.
-				map->Release();
-				return NULL;
-			}
-		}
-		// release enumerator and free vars
-		enumerator->Release();
-		vkey.Free();
-		vval.Free();
-	}
-	else if (aParamCount && !map->SetItems(aParam, aParamCount))
+	if (aParamCount && !map->SetItems(aParam, aParamCount))
 	{
 		// Out of memory.
 		map->Release();
@@ -186,6 +136,62 @@ Map *Map::Create(ExprTokenType *aParam[], int aParamCount, bool aUnsorted)
 
 ResultType Map::SetItems(ExprTokenType *aParam[], int aParamCount)
 {
+	if (aParamCount == 1 && TokenToObject(*aParam[0]))
+	{
+		ResultToken result_token, this_token, aKey, aValue;
+		ExprTokenType *params[] = { &aKey, &aValue };
+		Var vkey, vval;
+		IObject *enumerator;
+		ResultType result;
+
+		Object *aObject = dynamic_cast<Object*>(TokenToObject(*aParam[0]));
+		if (!aObject)
+			return FAIL;
+
+		this_token.symbol = SYM_OBJECT;
+		this_token.object = aObject;
+		result_token.InitResult(L"");
+		if (!_tcscmp(aObject->Type(), _T("Object")))
+		{
+			aObject->Invoke(result_token, IT_CALL, _T("OwnProps"), this_token, nullptr, 0);
+			if (result_token.symbol == SYM_OBJECT)
+				enumerator = result_token.object;
+			else
+				return FAIL;
+		}
+		else
+			result = GetEnumerator(enumerator, this_token, 2, false);
+
+		this_token.symbol = SYM_OBJECT;
+		this_token.object = this;
+		// Prepare parameters for the loop below
+		aKey.symbol = SYM_VAR;
+		aKey.var = &vkey;
+		aKey.var->mCharContents = _T("");
+		aKey.mem_to_free = 0;
+		aValue.symbol = SYM_VAR;
+		aValue.var = &vval;
+		aValue.var->mCharContents = _T("");
+		aValue.mem_to_free = 0;
+		ExprTokenType eKey,eVal;
+		for (;;)
+		{
+			// Call enumerator.Next(var1, var2)
+			result = CallEnumerator(enumerator, params, 2, false);
+			if (result == CONDITION_FALSE)
+				break;
+			aKey.var->ToToken(eKey);
+			aValue.var->ToToken(eVal);
+			if (!SetItem(eKey, eVal))
+				return FAIL; // Out of memory.
+		}
+		// release enumerator and free vars
+		enumerator->Release();
+		vkey.Free();
+		vval.Free();
+		return OK;
+	}
+
 	ASSERT(!(aParamCount & 1)); // Caller should verify and throw.
 
 	if (!aParamCount)
@@ -247,7 +253,7 @@ Object *Object::CloneTo(Object &obj)
 
 		// Copy name.
 		dst.key_c = src.key_c;
-		if (!(dst.name = _tcsdup(src.name)))
+		if ( !(dst.name = _tcsdup(src.name)) )
 		{
 			// Rather than trying to set up the object so that what we have
 			// so far is valid in order to break out of the loop, continue,
@@ -256,7 +262,6 @@ Object *Object::CloneTo(Object &obj)
 		}
 		else
 			dst.keytype = SYM_STRING;
-
 		// Copy value.
 		if (!dst.InitCopy(src))
 			++failure_count;
@@ -298,6 +303,7 @@ Map *Map::CloneTo(Map &obj)
 			obj.mKeyOffsetString = 0; // aStartOffset also excluded some string keys.
 	}
 	//else no need to check mKeyOffsetString since it should always be >= mKeyOffsetObject.
+
 	for (i = 0; i < mCount; ++i)
 	{
 		Pair &dst = obj.mItem[i];
@@ -335,14 +341,14 @@ Map *Map::CloneTo(Map &obj)
 			if (i >= obj.mKeyOffsetString)
 			{
 				dst.key_c = src.key_c;
-				if (!(dst.key.s = _tcsdup(src.key.s)))
+				if ( !(dst.key.s = _tcsdup(src.key.s)) )
 				{
 					// Key allocation failed. At this point, all int and object keys
 					// have been set and values for previous items have been copied.
 					++failure_count;
 				}
 			}
-			else
+			else 
 			{
 				// Copy whole key; search "(IntKeyType)(INT_PTR)" for comments.
 				dst.key = src.key;
@@ -406,7 +412,7 @@ ResultType GetEnumerator(IObject *&aEnumerator, ExprTokenType &aEnumerable, int 
 		return OK;
 	result_token.Free();
 	if (aDisplayError)
-		g_script->ScriptError(ERR_TYPE_MISMATCH, _T("__Enum"));
+		g_script->RuntimeError(ERR_TYPE_MISMATCH, _T("__Enum"), FAIL, nullptr, ErrorPrototype::Type);
 	return FAIL;
 }
 
@@ -418,7 +424,7 @@ ResultType CallEnumerator(IObject *aEnumerator, ExprTokenType *aParam[], int aPa
 	if (result == FAIL || result == EARLY_EXIT || result == INVOKE_NOT_HANDLED)
 	{
 		if (result == INVOKE_NOT_HANDLED && aDisplayError)
-			return g_script->ScriptError(ERR_NOT_ENUMERABLE); // Object not callable -> wrong type of object.
+			return g_script->RuntimeError(ERR_NOT_ENUMERABLE, nullptr, FAIL, nullptr, ErrorPrototype::Type); // Object not callable -> wrong type of object.
 		return result;
 	}
 	result = TokenToBOOL(result_token) ? CONDITION_TRUE : CONDITION_FALSE;
@@ -435,10 +441,8 @@ Array *Array::FromEnumerable(ExprTokenType &aEnumerable)
 	if (result == FAIL || result == EARLY_EXIT)
 		return nullptr;
 	
-	Var var;
-	ExprTokenType tvar, *param = &tvar;
-	tvar.symbol = SYM_VAR;
-	tvar.var = &var;
+	auto varref = new VarRef();
+	ExprTokenType tvar { varref }, *param = &tvar;
 	Array *vargs = Array::Create();
 	for (;;)
 	{
@@ -452,10 +456,10 @@ Array *Array::FromEnumerable(ExprTokenType &aEnumerable)
 		if (result != CONDITION_TRUE)
 			break;
 		ExprTokenType value;
-		var.ToTokenSkipAddRef(value);
+		varref->ToTokenSkipAddRef(value);
 		vargs->Append(value);
 	}
-	var.Free();
+	varref->Release();
 	enumerator->Release();
 	return vargs;
 }
@@ -496,7 +500,6 @@ bool Object::Delete()
 		// not actually call any script functions) because this function is probably executed much
 		// less often in most cases.
 		PRIVATIZE_S_DEREF_BUF;
-#ifndef _USRDLL
 
 		PMYTEB curr_teb = NULL;
 		PVOID tls = NULL;
@@ -506,7 +509,6 @@ bool Object::Delete()
 			tls = curr_teb->ThreadLocalStoragePointer;
 			curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[0][6];
 		}
-#endif
 		Line *curr_line;
 		if (g_script)
 			curr_line = g_script->mCurrLine;
@@ -518,10 +520,10 @@ bool Object::Delete()
 		// by causing LineError() to throw an exception:
 		int outer_excptmode = g->ExcptMode;
 		g->ExcptMode |= EXCPTMODE_DELETE;
-
+		if(g_call__Delete)
 		{
 			FuncResult rt;
-			CallMethod(_T("__Delete"), IF_BYPASS_METAFUNC, rt, ExprTokenType(this), nullptr, 0);
+			CallMeta(_T("__Delete"), rt, ExprTokenType(this), nullptr, 0);
 			rt.Free();
 		}
 
@@ -540,10 +542,8 @@ bool Object::Delete()
 		if (g_script)
 			g_script->mCurrLine = curr_line; // Prevent misleading error reports/Exception() stack trace.
 
-#ifndef _USRDLL
 		if (tls)
 			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 		DEPRIVATIZE_S_DEREF_BUF; // L33: See above.
 
 		// Above may pass the script a reference to this object to allow cleanup routines to free any
@@ -584,7 +584,7 @@ void Map::Clear()
 		{
 			if (mCount >= mKeyOffsetString)
 				free(key.s);
-			else
+			else 
 			{
 				--mKeyOffsetString;
 				if (mCount >= mKeyOffsetObject)
@@ -603,26 +603,23 @@ void Map::Clear()
 
 ObjectMember Object::sMembers[] =
 {
-	Object_Member(__Item, __Item, 0, IT_SET, 1, 1),
 	Object_Method1(Clone, 0, 0),
-	Object_Method1(DefineDefault, 0, 1),
-	Object_Method1(DefineMethod, 2, 2),
 	Object_Method1(DefineProp, 2, 2),
-	Object_Method1(DeleteMethod, 1, 1),
-	Object_Method1(DeleteProp, 1, 2),
+	Object_Method1(DeleteProp, 1, 1),
 	Object_Method1(GetOwnPropDesc, 1, 1),
-	Object_Method1(HasOwnMethod, 1, 1),
 	Object_Method1(HasOwnProp, 1, 1),
-	Object_Member(OwnMethods, __Enum, Enum_Methods, IT_CALL, 0, 1),
-	Object_Member(OwnProps, __Enum, Enum_Properties, IT_CALL, 0, 1)
+	Object_Method1(OwnProps, 0, 0)
 };
 
 LPTSTR Object::sMetaFuncName[] = { _T("__Get"), _T("__Set"), _T("__Call") };
 
 ResultType Object::Invoke(IObject_Invoke_PARAMS_DECL)
 {
+	// In debug mode, verify aResultToken has been initialized correctly.
+	ASSERT(aResultToken.symbol == SYM_STRING && aResultToken.marker && !*aResultToken.marker);
+	ASSERT(aResultToken.Result() == OK);
+
 	name_t name;
-	ResultType result;
 	if (!aName)
 	{
 		name = IS_INVOKE_CALL ? _T("Call") : _T("__Item");
@@ -630,11 +627,10 @@ ResultType Object::Invoke(IObject_Invoke_PARAMS_DECL)
 	}
 	else
 		name = aName;
-	
+
 	auto actual_param = aParam; // Actual first parameter between [] or ().
 	int actual_param_count = aParamCount; // Actual number of parameters between [] or ().
 
-#ifndef _USRDLL
 	PMYTEB curr_teb = NULL;
 	PVOID tls = NULL;
 	if (!g)
@@ -643,24 +639,12 @@ ResultType Object::Invoke(IObject_Invoke_PARAMS_DECL)
 		tls = curr_teb->ThreadLocalStoragePointer;
 		curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[0][6];
 	}
-#endif
-	if (IS_INVOKE_CALL)
-	{
-		// This fully handles all method calls.
-		result = CallMethod(name, aFlags, aResultToken, aThisToken, actual_param, actual_param_count);
-#ifndef _USRDLL
-		if (tls)
-			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
-		return result;
-	}
-	// GET or SET a property:
-
 	bool hasprop = false; // Whether any kind of property was found.
-	bool handle_params_recursively = false;
 	bool setting = IS_INVOKE_SET;
+	bool calling = IS_INVOKE_CALL;
+	bool handle_params_recursively = calling;
 	ResultToken token_for_recursion;
-	IObject *etter = nullptr;
+	IObject *etter = nullptr, *method = nullptr;
 	Variant *field = nullptr;
 	index_t insert_pos, other_pos;
 	Object *that;
@@ -678,55 +662,60 @@ ResultType Object::Invoke(IObject_Invoke_PARAMS_DECL)
 		// Search each object from this to its most distance base, but set insert_pos only when
 		// searching this object, since it needs to be the position we can insert a new field at.
 		field = that->FindField(name, that == this ? insert_pos : other_pos);
-		if (field)
+		if (!field) // 'that' has no own property.
+			continue;
+		if (field->symbol != SYM_DYNAMIC) // 'that' has a value property.
 		{
-			if (hasprop && field->symbol != SYM_DYNAMIC)
-			{
-				// This value property has been overridden with a half-defined dynamic property.
-				if (setting)
-				{
-					// A derived object has overridden GET but not SET.  The default behaviour
-					// for a value property would be to write a new value in `this`, but that
-					// would override GET.  It seems safer to treat this property as read-only.
-					// It is also simpler, since field points to a field of the base object at
-					// this point (we would need to keep the result of the first FindField()).
-					field = nullptr;
-				}
-				//else this is GET, meaning a derived object has overridden SET but not GET.
-				// In that case, inherit the value from field.
-				break;
-			}
-			hasprop = true;
-			if (field->symbol == SYM_DYNAMIC) // Property with getter/setter.
-			{
-				if (actual_param_count > 0 && field->prop->MaxParams == 0) // Prop cannot accept parameters.
-				{
-					setting = false; // GET this property's value.
-					handle_params_recursively = true; // Apply parameters by passing them to value->Invoke().
-				}
-				// Can this Property actually handle this operation?
-				etter = setting ? field->prop->Setter() : field->prop->Getter();
-				// Reset field to simplify detection of dynamic property vs. value.
-				// Note that field would be reset by the next iteration, if there is one.
+			if (hasprop && setting)
+				// This value property has been overridden with a getter, but no setter.
+				// Treat it as read-only rather than allowing the getter to implicitly be overridden.
 				field = nullptr;
-				if (!etter)
-					// This half of the property isn't implemented here, so keep searching.
-					continue;
-			}
+			hasprop = true;
+			// This value property takes precedence over any getter, setter or method defined in a base.
 			break;
 		}
-	}
+		hasprop = true;
+		// Since above did not break or continue, 'that' has a dynamic property.
+		if (calling)
+		{
+			if (method = field->prop->Method())
+			{
+				etter = nullptr; // Method takes precedence.
+				break;
+			}
+			// Record the first (most derived) getter, if any, in case there is no method:
+			if (!etter)
+				etter = field->prop->Getter();
+			field = nullptr;
+			continue;
+		}
+		if (actual_param_count > 0 && field->prop->MaxParams == 0) // Prop cannot accept parameters.
+		{
+			setting = false; // GET this property's value.
+			handle_params_recursively = true; // Apply parameters by passing them to value->Invoke().
+		}
+		// Can this Property actually handle this operation?
+		if (setting)
+			etter = field->prop->Setter();
+		else if (  !(etter = field->prop->Getter()) && !method  )
+			method = field->prop->Method(); // Fall back to returning this if no getter is found.
+		// Reset field to simplify detection of dynamic property vs. value.
+		// Note that field would be reset by the next iteration, if there is one.
+		field = nullptr;
+		if (etter)
+			break;
+		// This part of the property isn't implemented here, so keep searching.
+		continue;
+	} // for (that = each base)
 
 	if (!hasprop && aName)
 	{
-		// Look for a meta-function to invoke in place of this non-existent property.
-		if (auto method = GetMethod(sMetaFuncName[INVOKE_TYPE]))
+		// Invoke a meta-function in place of this non-existent property.
+		auto result = CallMetaVarg(aFlags, aName, aResultToken, aThisToken, actual_param, actual_param_count);
+		if (result != INVOKE_NOT_HANDLED)
 		{
-			result = CallMeta(method->func, name, aFlags, aResultToken, aThisToken, actual_param, actual_param_count);
-#ifndef _USRDLL
 			if (tls)
 				curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 			return result;
 		}
 	}
@@ -735,7 +724,9 @@ ResultType Object::Invoke(IObject_Invoke_PARAMS_DECL)
 	{
 		// Prepare the parameter list: this, [value,] actual_param*
 		ExprTokenType this_etter(etter);
-		ExprTokenType **prop_param = (ExprTokenType **)_alloca((actual_param_count + 2) * sizeof(ExprTokenType *));
+		ExprTokenType **prop_param = (ExprTokenType **)_malloca((actual_param_count + 2) * sizeof(ExprTokenType *));
+		if (!prop_param)
+			return aResultToken.MemoryError();
 		prop_param[0] = &aThisToken; // For the hidden "this" parameter in the getter/setter.
 		int prop_param_count = 1;
 		if (setting)
@@ -751,26 +742,53 @@ ResultType Object::Invoke(IObject_Invoke_PARAMS_DECL)
 		auto caller_line = g_script->mCurrLine;
 		// Call getter/setter.
 		auto result = etter->Invoke(aResultToken, IT_CALL, nullptr, this_etter, prop_param, prop_param_count);
-		if (!handle_params_recursively || result == FAIL || result == EARLY_EXIT)
-		{
-#ifndef _USRDLL
-			if (tls)
-				curr_teb->ThreadLocalStoragePointer = tls;
-#endif	
-			if (result == INVOKE_NOT_HANDLED)
-					return aResultToken.UnknownMemberError(this_etter, IT_CALL, nullptr);
+		_freea(prop_param);
+		if (tls)
+			curr_teb->ThreadLocalStoragePointer = tls;
+		if (result == INVOKE_NOT_HANDLED)
+			return aResultToken.UnknownMemberError(this_etter, IT_CALL, nullptr);
+		if ((!handle_params_recursively && !calling) || result == FAIL || result == EARLY_EXIT)
 			return result;
-		}
-		// Otherwise, handle_params_recursively == true.
+		// Otherwise, handle_params_recursively || calling.
 		g_script->mCurrLine = caller_line; // For error-reporting.
 		token_for_recursion.CopyValueFrom(aResultToken);
 		token_for_recursion.mem_to_free = aResultToken.mem_to_free;
 		aResultToken.mem_to_free = nullptr;
-#ifndef _USRDLL
-			if (tls)
-				curr_teb->ThreadLocalStoragePointer = tls;
-#endif
+		if (tls)
+			curr_teb->ThreadLocalStoragePointer = tls;
 		aResultToken.SetValue(_T(""));
+	}
+
+	if (calling)
+	{
+		ExprTokenType func_token;
+
+		if (etter)
+			func_token.CopyValueFrom(token_for_recursion);
+		else if (!field)
+		{
+			if (aName && !_tcsicmp(aName, _T("__Enum")) && this->mBase && (field = this->mBase->FindField(_T("OwnProps"))) && field->prop->Method())
+			{
+				actual_param_count = 0, hasprop = true;
+				func_token.SetValue(field->prop->Method());
+			}
+			else
+			{
+				if (tls)
+					curr_teb->ThreadLocalStoragePointer = tls;
+				return INVOKE_NOT_HANDLED;
+			}
+		}
+		else if (field->symbol == SYM_DYNAMIC)
+			func_token.SetValue(field->prop->Method());
+		else
+			field->ToToken(func_token);
+		auto result = CallAsMethod(func_token, aResultToken, aThisToken, actual_param, actual_param_count);
+		if (etter)
+			token_for_recursion.Free();
+		if (tls)
+			curr_teb->ThreadLocalStoragePointer = tls;
+		return result;
 	}
 
 	if (actual_param_count > 0)
@@ -780,15 +798,16 @@ ResultType Object::Invoke(IObject_Invoke_PARAMS_DECL)
 		// property is undefined or just a value).
 		if (!etter)
 		{
-			if (!field)
+			if (field)
+				field->ToToken(token_for_recursion);
+			else if (method)
+				token_for_recursion.SetValue(method);
+			else
 			{
-#ifndef _USRDLL
 				if (tls)
 					curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 				return INVOKE_NOT_HANDLED;
 			}
-			field->ToToken(token_for_recursion);
 		}
 		
 		if (IS_INVOKE_SET)
@@ -820,10 +839,8 @@ ResultType Object::Invoke(IObject_Invoke_PARAMS_DECL)
 		}
 		if (etter)
 			token_for_recursion.Free();
-#ifndef _USRDLL
 		if (tls)
 			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 		return result;
 	}
 
@@ -832,36 +849,27 @@ ResultType Object::Invoke(IObject_Invoke_PARAMS_DECL)
 	{
 		if (!field && hasprop) // Property with getter but no setter.
 		{
-#ifndef _USRDLL
 			if (tls)
 				curr_teb->ThreadLocalStoragePointer = tls;
-#endif
-			_o_throw(ERR_PROPERTY_READONLY, name);
+			return aResultToken.Error(ERR_PROPERTY_READONLY, name);
 		}
 		if (aFlags & IF_NO_SET_PROPVAL) // Changing value properties not permitted ("".foo := bar).
 		{
-#ifndef _USRDLL
 			if (tls)
 				curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 			return INVOKE_NOT_HANDLED;
 		}
-		
 		if (((field && this == that) // A field already exists in this object.
-			|| (field = Insert(name, insert_pos))) // A new field is inserted.
+				|| (field = Insert(name, insert_pos))) // A new field is inserted.
 			&& field->Assign(**actual_param))
 		{
-#ifndef _USRDLL
 			if (tls)
 				curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 			return OK;
 		}
-#ifndef _USRDLL
 		if (tls)
 			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
-		_o_throw(ERR_OUTOFMEM);
+		return aResultToken.MemoryError();
 	}
 
 	// GET
@@ -878,24 +886,38 @@ ResultType Object::Invoke(IObject_Invoke_PARAMS_DECL)
 			// BIF is assumed to be volatile if expression eval isn't finished.  The function call in #1
 			// is handled by ExpandExpression() since commit 2a276145.
 			field->ReturnRef(aResultToken);
-#ifndef _USRDLL
 			if (tls)
 				curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 			return OK;
+		}
+		else if (method)
+		{
+			method->AddRef();
+			if (tls)
+				curr_teb->ThreadLocalStoragePointer = tls;
+			return aResultToken.Return(method);
 		}
 	}
 
-#ifndef _USRDLL
 	if (tls)
 		curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 	// Fell through from one of the sections above: invocation was not handled.
 	return INVOKE_NOT_HANDLED;
 }
 
 
-ResultType Object::CallBuiltin(int aID, ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount)
+ResultType ObjectBase::Invoke(IObject_Invoke_PARAMS_DECL)
+{
+	if (auto base = Base())
+	{
+		aFlags |= IF_NO_SET_PROPVAL;
+		return base->Invoke(IObject_Invoke_PARAMS);
+	}
+	return INVOKE_NOT_HANDLED;
+}
+
+
+void Object::CallBuiltin(int aID, ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
 	switch (aID)
 	{
@@ -903,10 +925,8 @@ ResultType Object::CallBuiltin(int aID, ResultToken &aResultToken, ExprTokenType
 	case FID_ObjHasOwnProp:		return HasOwnProp(aResultToken, 0, IT_CALL, aParam, aParamCount);
 	case FID_ObjGetCapacity:	return GetCapacity(aResultToken, 0, IT_CALL, aParam, aParamCount);
 	case FID_ObjSetCapacity:	return SetCapacity(aResultToken, 0, IT_CALL, aParam, aParamCount);
-	case FID_ObjOwnProps:		return __Enum(aResultToken, Enum_Properties, IT_CALL, aParam, aParamCount);
-	case FID_ObjOwnMethods:		return __Enum(aResultToken, Enum_Methods, IT_CALL, aParam, aParamCount);
+	case FID_ObjOwnProps:		return OwnProps(aResultToken, 0, IT_CALL, aParam, aParamCount);
 	}
-	return INVOKE_NOT_HANDLED;
 }
 
 
@@ -917,9 +937,11 @@ ObjectMember Map::sMembers[] =
 	Object_Member(CaseSense, CaseSense, 0, IT_SET),
 	Object_Member(Count, Count, 0, IT_GET),
 	Object_Method1(__Enum, 0, 1),
+	Object_Member(__New, Set, 0, IT_CALL, 0, MAXP_VARIADIC),
 	Object_Method1(Clear, 0, 0),
 	Object_Method1(Clone, 0, 0),
 	Object_Method1(Delete, 1, 1),
+	Object_Member(Get, __Item, 0, IT_CALL, 1, 2),
 	Object_Method1(Has, 1, 1),
 	Object_Method1(Set, 0, MAXP_VARIADIC),  // Allow 0 for flexibility with variadic calls.
 	Object_Method1(MinIndex, 0, 0),
@@ -927,112 +949,87 @@ ObjectMember Map::sMembers[] =
 };
 
 
-ResultType Map::__Item(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+void Map::__Item(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
-	if (IS_INVOKE_GET)
+	if (!IS_INVOKE_SET) // Get or call.
 	{
-		if (GetItem(aResultToken, *aParam[0]))
+		if (!GetItem(aResultToken, *aParam[0]))
 		{
-			if (aResultToken.symbol == SYM_OBJECT)
-				aResultToken.object->AddRef();
-			return OK;
-		} 
-		else if (mDefault.symbol != SYM_MISSING)
-		{
-			aResultToken.CopyValueFrom(mDefault);
-			if (aResultToken.symbol == SYM_OBJECT)
-				aResultToken.object->AddRef();
-			return OK;
+			if (ParamIndexIsOmitted(1))
+			{
+				auto result = Invoke(aResultToken, IT_GET, _T("Default"), ExprTokenType { this }, nullptr, 0);
+				if (result == INVOKE_NOT_HANDLED)
+					_o_throw(ERR_NO_KEY, ParamIndexToString(0, _f_number_buf), ErrorPrototype::Key);
+				return;
+			}
+			// Otherwise, caller provided a default value.
+			aResultToken.CopyValueFrom(*aParam[1]);
 		}
-		else
-			_o_throw(ERR_NO_KEY, ParamIndexToString(0, _f_number_buf));
+		if (aResultToken.symbol == SYM_OBJECT)
+			aResultToken.object->AddRef();
+		return;
 	}
 	else
 	{
 		if (!SetItem(*aParam[1], *aParam[0]))
-			_o_throw(ERR_OUTOFMEM);
+			_o_throw_oom;
 	}
-	return OK;
 }
 
 
-ResultType Map::Set(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+void Map::Set(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
-	if (aParamCount & 1)
+	if (aParamCount & 1 && (!TokenToObject(*aParam[0]) || _tcscmp(TokenToObject(*aParam[0])->Type(), _T("Object"))))
 		_o_throw(ERR_PARAM_COUNT_INVALID);
 	if (!SetItems(aParam, aParamCount))
-		_o_throw(ERR_OUTOFMEM);
+		_o_throw_oom;
 	AddRef();
 	_o_return(this);
 }
 
-
-ResultType Object::__Item(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
-{
-	TCHAR number_buf[MAX_NUMBER_SIZE];
-	if (IS_INVOKE_GET)
-	{
-		if (GetOwnProp(aResultToken, TokenToString(*aParam[0], number_buf)))
-		{
-			if (aResultToken.symbol == SYM_OBJECT)
-				aResultToken.object->AddRef();
-			return OK;
-		}
-		else if (mDefault.symbol != SYM_MISSING)
-		{
-			aResultToken.CopyValueFrom(mDefault);
-			if (aResultToken.symbol == SYM_OBJECT)
-				aResultToken.object->AddRef();
-			return OK;
-		}
-		else
-			_o_throw(ERR_NO_KEY, ParamIndexToString(0, _f_number_buf));
-	}
-	else
-	{
-		if (!SetOwnProp(TokenToString(*aParam[1], number_buf), *aParam[0]))
-			_o_throw(ERR_OUTOFMEM);
-	}
-	return OK;
-}
 
 
 //
 // Internal
 //
 
-ResultType Object::CallMethod(LPTSTR aName, int aFlags, ResultToken &aResultToken, ExprTokenType &aThisToken, ExprTokenType *aParam[], int aParamCount)
+ResultType Object::CallAsMethod(ExprTokenType &aFunc, ResultToken &aResultToken, ExprTokenType &aThisToken, ExprTokenType *aParam[], int aParamCount)
 {
-	MethodType *method;
-	if (method = GetMethod(aName))
-	{
-		return CallMethod(method->func, aResultToken, aThisToken, aParam, aParamCount);
-	}
-	if (!(aFlags & IF_BYPASS_METAFUNC) && (method = GetMethod(sMetaFuncName[IT_CALL])))
-	{
-		return CallMeta(method->func, aName, aFlags, aResultToken, aThisToken, aParam, aParamCount);
-	}
-	return INVOKE_NOT_HANDLED;
-}
-
-ResultType Object::CallMethod(IObject *aFunc, ResultToken &aResultToken, ExprTokenType &aThisToken, ExprTokenType *aParam[], int aParamCount)
-{
-	ExprTokenType **param = (ExprTokenType **)_malloca((aParamCount + 1) * sizeof(ExprTokenType *));
+	auto func = TokenToObject(aFunc);
+	if (!func)
+		func = ValueBase(aFunc);
+	auto isdynatoken = dynamic_cast<DynaToken *>(func);
+	int paramcount = !isdynatoken ? 1 : 0; // don't pass this to DynaToken object/function
+	ExprTokenType **param = (ExprTokenType **)_malloca((aParamCount + paramcount) * sizeof(ExprTokenType *));
 	if (!param)
-		_o_throw(ERR_OUTOFMEM);
-	param[0] = &aThisToken;
-	memcpy(param + 1, aParam, aParamCount * sizeof(ExprTokenType *));
+		return aResultToken.MemoryError();
+	if (!isdynatoken)
+		param[0] = &aThisToken;
+	memcpy(param + paramcount, aParam, aParamCount * sizeof(ExprTokenType *));
 	// return %func%(this, aParam*)
-	auto invoke_result = aFunc->Invoke(aResultToken, IT_CALL, nullptr, ExprTokenType(aFunc), param, aParamCount + 1);
+	auto invoke_result = func->Invoke(aResultToken, IT_CALL, nullptr, aFunc, param, aParamCount + paramcount);
 	_freea(param);
 	return invoke_result;
 }
 
-ResultType Object::CallMeta(IObject *aFunc, LPTSTR aName, int aFlags, ResultToken &aResultToken, ExprTokenType &aThisToken, ExprTokenType *aParam[], int aParamCount)
+ResultType Object::CallMeta(LPTSTR aName, ResultToken &aResultToken, ExprTokenType &aThisToken, ExprTokenType *aParam[], int aParamCount)
 {
+	IObject *method;
+	if (method = GetMethod(aName))
+	{
+		return CallAsMethod(ExprTokenType(method), aResultToken, aThisToken, aParam, aParamCount);
+	}
+	return INVOKE_NOT_HANDLED;
+}
+
+ResultType Object::CallMetaVarg(int aFlags, LPTSTR aName, ResultToken &aResultToken, ExprTokenType &aThisToken, ExprTokenType *aParam[], int aParamCount)
+{
+	auto func = GetMethod(sMetaFuncName[INVOKE_TYPE]);
+	if (!func)
+		return INVOKE_NOT_HANDLED;
 	auto vargs = Array::Create(aParam, aParamCount);
 	if (!vargs)
-		_o_throw(ERR_OUTOFMEM);
+		return aResultToken.MemoryError();
 	ExprTokenType name_token(aName), args_token(vargs), *param[4];
 	param[0] = &aThisToken; // this
 	param[1] = &name_token; // name
@@ -1040,10 +1037,34 @@ ResultType Object::CallMeta(IObject *aFunc, LPTSTR aName, int aFlags, ResultToke
 	int param_count = 3;
 	if (IS_INVOKE_SET)
 		param[param_count++] = aParam[aParamCount]; // value
-	// return %aFunc%(this, name, args [, value])
-	ResultType aResult = aFunc->Invoke(aResultToken, IT_CALL, nullptr, ExprTokenType(aFunc), param, param_count);
+	// return %func%(this, name, args [, value])
+	ResultType aResult = func->Invoke(aResultToken, IT_CALL, nullptr, ExprTokenType(func), param, param_count);
 	vargs->Release();
 	return aResult;
+}
+
+
+//
+// Helper function for WinMain()
+//
+
+Map *Map::FromArgV(LPTSTR *aArgV, int aArgC)
+{
+	int aParamCount = aArgC + (aArgC % 2);
+	ExprTokenType *token = (ExprTokenType *)_alloca(aParamCount * sizeof(ExprTokenType));
+	ExprTokenType **param = (ExprTokenType **)_alloca(aParamCount * sizeof(ExprTokenType*));
+	// Set Map items: param = value
+	for (int j = 0; j < aArgC; ++j)
+	{
+		token[j].SetValue(aArgV[j]);
+		param[j] = &token[j];
+	}
+	if (aArgC < aParamCount)
+	{
+		token[aArgC].SetValue(_T(""));
+		param[aArgC] = &token[aArgC];
+	}
+	return Create(param, aParamCount);
 }
 
 
@@ -1062,6 +1083,7 @@ Array *Array::FromArgV(LPTSTR *aArgV, int aArgC)
 	}
 	return Create(param, aArgC);
 }
+
 
 
 //
@@ -1085,17 +1107,36 @@ bool Array::Append(ExprTokenType &aValue)
 void Object::EndClassDefinition()
 {
 	auto &obj = *(Object *)GetOwnPropObj(_T("Prototype"));
-	// Instance variables were previously created as keys in the class object to prevent duplicate or
-	// conflicting declarations.  Since these variables will be added at run-time to the derived objects,
-	// we don't want them in the class object.  So delete any key-value pairs with "".
-	for (index_t i = obj.mFields.Length(); i > 0; )
+	// Each variable declaration created a 'missing' property in the class or prototype object to prevent
+	// duplicate or conflicting declarations.  Remove them now so that the declaration acts like a normal
+	// assignment (i.e. invokes property setters and __Set), for flexibility and consistency; and so that
+	// SYM_MISSING doesn't need special handling at runtime.
+	RemoveMissingProperties();
+	obj.RemoveMissingProperties();
+}
+
+void Object::RemoveMissingProperties()
+{
+	for (index_t i = mFields.Length(); i > 0; )
 	{
 		i--;
-		if (obj.mFields[i].symbol == SYM_STRING && obj.mFields[i].string.Length() == 0)
-			obj.mFields.Remove(i, 1);
+		if (mFields[i].symbol == SYM_MISSING)
+			mFields.Remove(i, 1);
 	}
 }
 
+
+
+bool ObjectBase::IsOfType(Object *aPrototype)
+{
+	auto base = Base();
+	return base == aPrototype || base->IsDerivedFrom(aPrototype);
+}
+
+bool Object::IsOfType(Object *aPrototype)
+{
+	return aPrototype == Object::sPrototype || (!IsClassPrototype() && IsDerivedFrom(aPrototype));
+}
 
 
 bool Object::IsDerivedFrom(IObject *aBase)
@@ -1104,13 +1145,7 @@ bool Object::IsDerivedFrom(IObject *aBase)
 	for (base = mBase; base; base = base->mBase)
 		if (base == aBase)
 			return true;
-	return aBase == Object::sPrototype; // Should only be true when this == aBase, since every other Object should derive from it.
-}
-
-
-bool Object::IsInstanceOf(Object *aClass)
-{
-	return IsDerivedFrom(GetOwnPropObj(_T("Prototype")));
+	return false;
 }
 
 
@@ -1136,7 +1171,7 @@ bool Object::CanSetBase(Object *aBase)
 ResultType Object::SetBase(Object *aNewBase, ResultToken &aResultToken)
 {
 	if (!CanSetBase(aNewBase))
-		return aResultToken.Error(ERR_INVALID_BASE);
+		return aResultToken.ValueError(ERR_INVALID_BASE);
 	SetBase(aNewBase);
 	return OK;
 }
@@ -1155,7 +1190,7 @@ LPTSTR Object::Type()
 	for (base = mBase; base; base = base->mBase)
 		if (base->GetOwnProp(value, _T("__Class")))
 			return TokenToString(value); // This object is an instance of that class.
-	return _T("Object"); // This is an Object of undetermined type, like Object() or {}.
+	return _T("Object"); // Provide a default in case __Class has been removed from all of the base objects.
 }
 
 
@@ -1187,13 +1222,11 @@ Object *Object::CreatePrototype(LPTSTR aClassName, Object *aBase, ObjectMember a
 
 Object *Object::DefineMembers(Object *obj, LPTSTR aClassName, ObjectMember aMember[], int aMemberCount)
 {
-	obj->mFlags |= NativeClassPrototype;
+	if (aMemberCount)
+		obj->mFlags |= NativeClassPrototype;
 
 	TCHAR full_name[MAX_VAR_NAME_LENGTH + 1];
 	TCHAR *name = full_name + _stprintf(full_name, _T("%s.Prototype."), aClassName);
-
-	// Skip base checks for Object members, since dynamic_cast<Object*> takes care of it.
-	auto type_checked = (aMember == Object::sMembers) ? nullptr : obj;
 
 	for (int i = 0; i < aMemberCount; ++i)
 	{
@@ -1201,14 +1234,14 @@ Object *Object::DefineMembers(Object *obj, LPTSTR aClassName, ObjectMember aMemb
 		_tcscpy(name, member.name);
 		if (member.invokeType == IT_CALL)
 		{
-			auto func = new BuiltInMethod(g_SimpleHeap->Malloc(full_name));
+			auto func = new BuiltInMethod(g_SimpleHeap->Alloc(full_name));
 			func->mBIM = member.method;
 			func->mMID = member.id;
 			func->mMIT = IT_CALL;
 			func->mMinParams = member.minParams + 1; // Includes `this`.
-			func->mParamCount = member.maxParams + 1;
 			func->mIsVariadic = member.maxParams == MAXP_VARIADIC;
-			func->mClass = type_checked; // AddRef not needed since neither mClass nor our caller's reference to obj is ever Released.
+			func->mParamCount = func->mIsVariadic ? func->mMinParams : member.maxParams + 1;
+			func->mClass = obj; // AddRef not needed since neither mClass nor our caller's reference to obj is ever Released.
 			obj->DefineMethod(member.name, func);
 			func->Release();
 		}
@@ -1221,21 +1254,21 @@ Object *Object::DefineMembers(Object *obj, LPTSTR aClassName, ObjectMember aMemb
 			auto op_name = _tcschr(name, '\0');
 
 			_tcscpy(op_name, _T(".Get"));
-			auto func = new BuiltInMethod(g_SimpleHeap->Malloc(full_name));
+			auto func = new BuiltInMethod(g_SimpleHeap->Alloc(full_name));
 			func->mBIM = member.method;
 			func->mMID = member.id;
 			func->mMIT = IT_GET;
 			func->mMinParams = member.minParams + 1; // Includes `this`.
 			func->mParamCount = member.maxParams + 1;
 			func->mIsVariadic = member.maxParams == MAXP_VARIADIC;
-			func->mClass = type_checked;
+			func->mClass = obj;
 			prop->SetGetter(func);
 			func->Release();
-
+			
 			if (member.invokeType == IT_SET)
 			{
 				_tcscpy(op_name, _T(".Set"));
-				func = new BuiltInMethod(g_SimpleHeap->Malloc(full_name));
+				func = new BuiltInMethod(g_SimpleHeap->Alloc(full_name));
 				func->mBIM = member.method;
 				func->mMID = member.id;
 				func->mMIT = IT_SET;
@@ -1252,26 +1285,27 @@ Object *Object::DefineMembers(Object *obj, LPTSTR aClassName, ObjectMember aMemb
 	return obj;
 }
 
-Object *Object::CreateClass(LPTSTR aClassName, Object *aBase, Object *aPrototype, ObjectMethod aCtor)
+Object *Object::CreateClass(LPTSTR aClassName, Object *aBase, Object *aPrototype, ClassFactoryDef aFactory)
 {
 	auto class_obj = CreateClass(aPrototype);
 
 	class_obj->SetBase(aBase);
 
-	TCHAR full_name[MAX_VAR_NAME_LENGTH + 1];
-	_stprintf(full_name, _T("%s.New"), aClassName);
-	auto ctor = new BuiltInMethod(g_SimpleHeap->Malloc(full_name));
-	ctor->mBIM = aCtor;
-	ctor->mMID = 0;
-	ctor->mMIT = IT_CALL;
-	ctor->mMinParams = 0;
-	ctor->mParamCount = MAX_FUNCTION_PARAMS;
-	ctor->mIsVariadic = true;
-	ctor->mClass = nullptr; // Safe to call on any Object.
-	class_obj->DefineMethod(_T("New"), ctor);
-	ctor->Release();
+	if (aFactory.call)
+	{
+		TCHAR full_name[MAX_VAR_NAME_LENGTH + 1];
+		_stprintf(full_name, _T("%s.Call"), aClassName);
+		auto ctor = new BuiltInFunc(g_SimpleHeap->Alloc(full_name));
+		ctor->mBIF = aFactory.call;
+		ctor->mFID = FID_Object_New;
+		ctor->mMinParams = aFactory.min_params; // Usually 1, the class object.
+		ctor->mParamCount = aFactory.max_params;
+		ctor->mIsVariadic = aFactory.is_variadic; // Usually variadic since __new(...) may be redefined/overridden.
+		class_obj->DefineMethod(_T("Call"), ctor);
+		ctor->Release();
+	}
 
-	auto var = g_script->FindOrAddVar(aClassName, 0, VAR_DECLARE_SUPER_GLOBAL);
+	auto var = g_script->FindOrAddVar(aClassName, 0, VAR_DECLARE_GLOBAL);
 	var->AssignSkipAddRef(class_obj);
 	var->MakeReadOnly();
 
@@ -1283,27 +1317,17 @@ Object *Object::CreateClass(LPTSTR aClassName, Object *aBase, Object *aPrototype
 // Object:: and Map:: Built-ins
 //
 
-ResultType Object::DeleteProp(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+void Object::DeleteProp(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
 	auto field = FindField(ParamIndexToString(0, _f_number_buf));
 	if (!field)
 		_o_return_empty;
 	field->ReturnMove(aResultToken); // Return the removed value.
 	mFields.Remove((index_t)(field - mFields), 1);
-	return OK;
-}
-
-ResultType Object::DeleteMethod(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
-{
-	auto name = ParamIndexToString(0, _f_number_buf);
-	auto method = FindMethod(name);
-	if (!method)
-		_o__ret(aResultToken.UnknownMemberError(ExprTokenType(this), IT_CALL, name));
-	mMethods.Remove((index_t)(method - mMethods), 1);
 	_o_return_empty;
 }
 
-ResultType Map::Delete(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+void Map::Delete(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
 	Pair *item;
 	index_t pos;
@@ -1317,7 +1341,7 @@ ResultType Map::Delete(ResultToken &aResultToken, int aID, int aFlags, ExprToken
 	{
 		// Our return value when only one arg is given is supposed to be the value
 		// removed from this[arg].  Since this[arg] would throw an exception...
-		_o_throw(ERR_NO_KEY, ParamIndexToString(0, _f_number_buf));
+		_o_throw(ERR_NO_KEY, ParamIndexToString(0, _f_number_buf), ErrorPrototype::Key);
 	}
 	// Set return value to the removed item.
 	item->ReturnMove(aResultToken);
@@ -1341,28 +1365,28 @@ ResultType Map::Delete(ResultToken &aResultToken, int aID, int aFlags, ExprToken
 		else
 			copy->key.p->Release();
 	}
-	return OK;
+	_o_return_retval;
 }
 
 
-ResultType Map::Clear(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+void Map::Clear(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
 	Clear();
 	_o_return_empty;
 }
 
 
-ResultType Object::PropCount(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+void Object::PropCount(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
 	_o_return((__int64)mFields.Length());
 }
 
-ResultType Map::Count(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+void Map::Count(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
 	_o_return((__int64)mCount);
 }
 
-ResultType Map::CaseSense(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+void Map::CaseSense(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
 	if (IS_INVOKE_GET)
 	{
@@ -1392,20 +1416,22 @@ ResultType Map::CaseSense(ResultToken &aResultToken, int aID, int aFlags, ExprTo
 		mFlags = (mFlags | MapCaseless) & ~MapUseLocale;
 		break;
 	default:
-		_o_throw(ERR_INVALID_VALUE, value);
+		_o_throw_value(ERR_INVALID_VALUE, value);
 	}
-	return OK;
 }
 
-ResultType Object::GetCapacity(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+void Object::GetCapacity(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
 	_o_return(mFields.Capacity());
 }
 
-ResultType Object::SetCapacity(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+void Object::SetCapacity(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
 	if (!ParamIndexIsNumeric(0))
-		_o_throw(ERR_PARAM1_INVALID);
+	{
+		aResultToken.ParamError(1, aParam[0], _T("Number")); // Param index differs because this is actually the global function ObjSetCapacity().
+		return;
+	}
 
 	index_t desired_count = (index_t)ParamIndexToInt64(0);
 	if (desired_count < mFields.Length())
@@ -1427,10 +1453,10 @@ ResultType Object::SetCapacity(ResultToken &aResultToken, int aID, int aFlags, E
 	// At this point, failure isn't critical since nothing is being stored yet.  However, it might be easier to
 	// debug if an error is thrown here rather than possibly later, when the array attempts to resize itself to
 	// fit new items.  This also avoids the need for scripts to check if the return value is less than expected:
-	_o_throw(ERR_OUTOFMEM);
+	_o_throw_oom;
 }
 
-ResultType Map::Capacity(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+void Map::Capacity(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
 	if (IS_INVOKE_GET)
 	{
@@ -1438,7 +1464,7 @@ ResultType Map::Capacity(ResultToken &aResultToken, int aID, int aFlags, ExprTok
 	}
 
 	if (!ParamIndexIsNumeric(0))
-		_o_throw(ERR_PARAM1_INVALID);
+		_o_throw_type(_T("Number"), *aParam[0]);
 
 	index_t desired_count = (index_t)ParamIndexToInt64(0);
 	if (desired_count < mCount)
@@ -1466,31 +1492,27 @@ ResultType Map::Capacity(ResultToken &aResultToken, int aID, int aFlags, ExprTok
 	// At this point, failure isn't critical since nothing is being stored yet.  However, it might be easier to
 	// debug if an error is thrown here rather than possibly later, when the array attempts to resize itself to
 	// fit new items.  This also avoids the need for scripts to check if the return value is less than expected:
-	_o_throw(ERR_OUTOFMEM);
+	_o_throw_oom;
 }
 
-ResultType Object::__Enum(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+void Object::OwnProps(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
-	_o_return(new IndexEnumerator(this, static_cast<IndexEnumerator::Callback>(
-		aID == Enum_Properties ? &Object::GetEnumProp : &Object::GetEnumMethod)));
+	_o_return(new IndexEnumerator(this, ParamIndexToOptionalInt(0, 1)
+		, static_cast<IndexEnumerator::Callback>(&Object::GetEnumProp)));
 }
 
-ResultType Map::__Enum(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+void Map::__Enum(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
-	_o_return(new IndexEnumerator(this, static_cast<IndexEnumerator::Callback>(&Map::GetEnumItem)));
+	_o_return(new IndexEnumerator(this, ParamIndexToOptionalInt(0, 1)
+		, static_cast<IndexEnumerator::Callback>(&Map::GetEnumItem)));
 }
 
-ResultType Object::HasOwnProp(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+void Object::HasOwnProp(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
 	_o_return(FindField(ParamIndexToString(0, _f_number_buf)) != nullptr);
 }
 
-ResultType Object::HasOwnMethod(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
-{
-	_o_return(FindMethod(ParamIndexToString(0)) != nullptr);
-}
-
-ResultType Map::Has(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+void Map::Has(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
 	SymbolType key_type;
 	Key key;
@@ -1499,34 +1521,30 @@ ResultType Map::Has(ResultToken &aResultToken, int aID, int aFlags, ExprTokenTyp
 	_o_return(item != nullptr);
 }
 
-ResultType Object::Clone(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+void Object::Clone(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
 	if (GetNativeBase() != Object::sPrototype)
-		_o_throw(ERR_TYPE_MISMATCH); // Cannot construct an instance of this class using Object::Clone().
+		_o_throw(ERR_TYPE_MISMATCH, ErrorPrototype::Type); // Cannot construct an instance of this class using Object::Clone().
 	auto clone = new Object();
 	clone->mUnsorted = mUnsorted;
-	if (g_DefaultObjectValueType != SYM_MISSING)
-		clone->mDefault.SetValue(g_DefaultObjectValue);
 	if (!CloneTo(*clone))
-		_o_throw(ERR_OUTOFMEM);	
+		_o_throw_oom;	
 	_o_return(clone);
 }
 
-ResultType Map::Clone(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+void Map::Clone(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
 	auto clone = new Map();
 	clone->mUnsorted = mUnsorted;
-	if (g_DefaultMapValueType != SYM_MISSING)
-		clone->mDefault.SetValue(g_DefaultMapValue);
 	if (!CloneTo(*clone))
-		_o_throw(ERR_OUTOFMEM);
+		_o_throw_oom;
 	_o_return(clone);
 }
 
-ResultType Map::MinIndex(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+void Map::MinIndex(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
 	if (aParamCount)
-		return OK;
+		return;
 
 	if (mKeyOffsetObject) // i.e. there are fields with integer keys
 	{
@@ -1534,13 +1552,12 @@ ResultType Map::MinIndex(ResultToken &aResultToken, int aID, int aFlags, ExprTok
 		aResultToken.value_int64 = (__int64)mItem[0].key.i;
 	}
 	// else no integer keys; leave aResultToken at default, empty string.
-	return OK;
 }
 
-ResultType Map::MaxIndex(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+void Map::MaxIndex(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
 	if (aParamCount)
-		return OK;
+		return;
 
 	if (mKeyOffsetObject) // i.e. there are fields with integer keys
 	{
@@ -1548,43 +1565,16 @@ ResultType Map::MaxIndex(ResultToken &aResultToken, int aID, int aFlags, ExprTok
 		aResultToken.value_int64 = (__int64)mItem[mKeyOffsetObject - 1].key.i;
 	}
 	// else no integer keys; leave aResultToken at default, empty string.
-	return OK;
-}
-
-ResultType Object::GetMethod(ResultToken &aResultToken, name_t aName)
-{
-	auto method = GetMethod(aName);
-	if (!method)
-		_o__ret(aResultToken.UnknownMemberError(ExprTokenType(this), IT_CALL, aName));
-	method->func->AddRef();
-	_o_return(method->func);
 }
 
 bool Object::DefineMethod(name_t aName, IObject *aFunc)
 {
-	index_t insert_pos;
-	auto method = FindMethod(aName, insert_pos);
-	if (!method && !(method = InsertMethod(aName, insert_pos)))
-		return false;
-	aFunc->AddRef();
-	if (method->func)
-		method->func->Release();
-	method->func = aFunc;
-	return true;
-}
-
-ResultType Object::DefineMethod(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
-{
-	auto name = ParamIndexToString(0);
-	if (!*name)
-		_o_throw(ERR_PARAM1_INVALID);
-	auto func = ParamIndexToObject(1);
-	if (!func)
-		_o_throw(ERR_PARAM2_INVALID);
-	if (!DefineMethod(name, func))
-		_o_throw(ERR_OUTOFMEM);
-	AddRef();
-	_o_return(this);
+	if (auto prop = DefineProperty(aName))
+	{
+		prop->SetMethod(aFunc);
+		return true;
+	}
+	return false;
 }
 
 Property *Object::DefineProperty(name_t aName)
@@ -1630,36 +1620,39 @@ ResultType GetObjMaxParams(IObject *aObj, int &aMaxParams, ResultToken &aResultT
 	return result;
 }
 
-ResultType Object::DefineProp(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+void Object::DefineProp(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
 	auto name = ParamIndexToString(0, _f_number_buf);
 	if (!*name)
-		_o_throw(ERR_PARAM1_INVALID);
-	ExprTokenType getter, setter, value;
+		_o_throw_param(0);
+	ExprTokenType getter, setter, method, value;
 	getter.symbol = SYM_INVALID;
 	setter.symbol = SYM_INVALID;
+	method.symbol = SYM_INVALID;
 	value.symbol = SYM_INVALID;
 	auto desc = dynamic_cast<Object *>(ParamIndexToObject(1));
 	if (!desc // Must be an Object.
 		|| desc->GetOwnProp(getter, _T("Get")) && getter.symbol != SYM_OBJECT  // If defined, must be an object.
 		|| desc->GetOwnProp(setter, _T("Set")) && setter.symbol != SYM_OBJECT
-		|| desc->GetOwnProp(value, _T("Value")) && (getter.symbol != SYM_INVALID || setter.symbol != SYM_INVALID)
+		|| desc->GetOwnProp(method, _T("Call")) && method.symbol != SYM_OBJECT
+		|| desc->GetOwnProp(value, _T("Value")) && (getter.symbol != SYM_INVALID || setter.symbol != SYM_INVALID || method.symbol != SYM_INVALID)
 		// To help prevent errors, throw if none of the above properties were present.  This also serves to
 		// reserve some cases for possible future use, such as passing a function object to imply {get:...}.
-		|| getter.symbol == SYM_INVALID && setter.symbol == SYM_INVALID && value.symbol == SYM_INVALID)
-		_o_throw(ERR_PARAM2_INVALID);
+		|| getter.symbol == SYM_INVALID && setter.symbol == SYM_INVALID && method.symbol == SYM_INVALID && value.symbol == SYM_INVALID)
+		_o_throw_param(1);
 	if (value.symbol != SYM_INVALID) // Above already verified that neither Get nor Set was present.
 	{
 		if (!SetOwnProp(name, value))
-			_o_throw(ERR_OUTOFMEM);
+			_o_throw_oom;
 		AddRef();
 		_o_return(this);
 	}
 	auto prop = DefineProperty(name);
 	if (!prop)
-		_o_throw(ERR_OUTOFMEM);
+		_o_throw_oom;
 	if (getter.symbol == SYM_OBJECT) prop->SetGetter(getter.object);
 	if (setter.symbol == SYM_OBJECT) prop->SetSetter(setter.object);
+	if (method.symbol == SYM_OBJECT) prop->SetMethod(method.object);
 	prop->MaxParams = -1;
 	if (auto obj = prop->Getter())
 	{
@@ -1668,7 +1661,7 @@ ResultType Object::DefineProp(ResultToken &aResultToken, int aID, int aFlags, Ex
 		{
 		case FAIL:
 		case EARLY_EXIT:
-			return aResultToken.Result();
+			return;
 		case OK:
 			prop->MaxParams = max_params - 1;
 		}
@@ -1680,7 +1673,7 @@ ResultType Object::DefineProp(ResultToken &aResultToken, int aID, int aFlags, Ex
 		{
 		case FAIL:
 		case EARLY_EXIT:
-			return aResultToken.Result();
+			return;
 		case OK:
 			if (prop->MaxParams < max_params - 2)
 				prop->MaxParams = max_params - 2;
@@ -1690,42 +1683,11 @@ ResultType Object::DefineProp(ResultToken &aResultToken, int aID, int aFlags, Ex
 	_o_return(this);
 }
 
-ResultType Object::DefineDefault(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
-{
-	if (!aParamCount)
-	{
-		if (mDefault.symbol == SYM_OBJECT)
-			mDefault.object->Release();
-		mDefault.symbol = SYM_MISSING;
-	}
-	else
-	{
-		ExprTokenType *param;
-		param = *aParam;
-		if (mDefault.symbol == SYM_OBJECT)
-			mDefault.object->Release();
-		if (param->symbol == SYM_OBJECT)
-		{
-			mDefault.SetValue(param->object);
-			mDefault.object->AddRef();
-		}
-		else if (param->symbol == SYM_VAR && param->var->HasObject())
-		{
-			mDefault.SetValue(param->var->mObject);
-			mDefault.object->AddRef();
-		}
-		else
-			mDefault.CopyValueFrom(*param);
-	}
-	AddRef();
-	_o_return(this);
-}
-
-ResultType Object::GetOwnPropDesc(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+void Object::GetOwnPropDesc(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
 	auto name = ParamIndexToString(0, _f_number_buf);
 	if (!*name)
-		_o_throw(ERR_PARAM1_INVALID);
+		_o_throw_param(0);
 	auto field = FindField(name);
 	if (!field)
 		_o__ret(aResultToken.UnknownMemberError(ExprTokenType(this), IT_GET, name));
@@ -1735,6 +1697,7 @@ ResultType Object::GetOwnPropDesc(ResultToken &aResultToken, int aID, int aFlags
 	{
 		if (auto getter = field->prop->Getter()) desc->SetOwnProp(_T("Get"), getter);
 		if (auto setter = field->prop->Setter()) desc->SetOwnProp(_T("Set"), setter);
+		if (auto method = field->prop->Method()) desc->SetOwnProp(_T("Call"), method);
 	}
 	else
 	{
@@ -1750,15 +1713,21 @@ ResultType Object::GetOwnPropDesc(ResultToken &aResultToken, int aID, int aFlags
 // Class objects
 //
 
-template<class T>
-ResultType Object::New(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+ResultType Object::New(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount)
 {
-	auto obj = T::Create();
-	if (!obj)
-		_o_throw(ERR_OUTOFMEM);
-	if (!obj->SetBase(dynamic_cast<Object *>(GetOwnPropObj(_T("Prototype"))), aResultToken))
+	Object *base = dynamic_cast<Object *>(ParamIndexToObject(0));
+	Object *proto = base ? dynamic_cast<Object *>(base->GetOwnPropObj(_T("Prototype"))) : nullptr;
+	if (!proto)
+	{
+		Release();
+		return aResultToken.ParamError(0, aParam[0]);
+	}
+	if (!SetBase(proto, aResultToken))
+	{
+		Release();
 		return FAIL;
-	return obj->Construct(aResultToken, aParam, aParamCount);
+	}
+	return Construct(aResultToken, aParam + 1, aParamCount - 1);
 }
 
 ResultType Object::Construct(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount)
@@ -1770,7 +1739,7 @@ ResultType Object::Construct(ResultToken &aResultToken, ExprTokenType *aParam[],
 	// __Init was added so that instance variables can be initialized in the correct order
 	// (beginning at the root class and ending at class_object) before __New is called.
 	// It shouldn't be explicitly defined by the user, but auto-generated in DefineClassVars().
-	result = CallMethod(_T("__Init"), IT_CALL|IF_BYPASS_METAFUNC, aResultToken, this_token, nullptr, 0);
+	result = CallMeta(_T("__Init"), aResultToken, this_token, nullptr, 0);
 	if (result != INVOKE_NOT_HANDLED)
 	{
 		// It's possible that __Init is user-defined (despite recommendations in the
@@ -1781,14 +1750,13 @@ ResultType Object::Construct(ResultToken &aResultToken, ExprTokenType *aParam[],
 		if (result == FAIL || result == EARLY_EXIT) // Checked only after Free() and InitResult() as caller might expect mem_to_free == NULL.
 		{
 			Release();
-			return result;
+			return aResultToken.SetExitResult(result); // SetExitResult is necessary because result was reset by InitResult.
 		}
+		g_script->mCurrLine = curr_line; // Prevent misleading error reports in __New or for our caller.
 	}
 
-	g_script->mCurrLine = curr_line; // Prevent misleading error reports/Exception() stack trace.
-
 	// __New may be defined by the script for custom initialization code.
-	result = CallMethod(_T("__New"), IT_CALL|IF_BYPASS_METAFUNC, aResultToken, this_token, aParam, aParamCount);
+	result = CallMeta(_T("__New"), aResultToken, this_token, aParam, aParamCount);
 	aResultToken.Free();
 	if (result == INVOKE_NOT_HANDLED && aParamCount)
 	{
@@ -1802,9 +1770,15 @@ ResultType Object::Construct(ResultToken &aResultToken, ExprTokenType *aParam[],
 		Release();
 		return result;
 	}
+	g_script->mCurrLine = curr_line; // Prevent misleading error reports for our caller.
 
 	aResultToken.SetValue(this); // No AddRef() since Object::New() would need to Release().
 	return aResultToken.SetResult(OK);
+}
+
+BIF_DECL(Any___Init)
+{
+	_f_return_empty;
 }
 
 
@@ -1925,6 +1899,7 @@ bool Object::Variant::InitCopy(Variant &val)
 		prop = new Property();
 		prop->SetGetter(val.prop->Getter());
 		prop->SetSetter(val.prop->Setter());
+		prop->SetMethod(val.prop->Method());
 		break;
 	//case SYM_INTEGER:
 	//case SYM_FLOAT:
@@ -2119,8 +2094,6 @@ Array *Array::Create(ExprTokenType *aValue[], index_t aCount, bool aUnsorted)
 	auto arr = new Array();
 	arr->SetBase(Array::sPrototype);
 	arr->mUnsorted = aUnsorted;
-	if (g_DefaultArrayValueType != SYM_MISSING)
-		arr->mDefault.SetValue(g_DefaultArrayValue);
 	if (!aCount || arr->InsertAt(0, aValue, aCount))
 		return arr;
 	arr->Release();
@@ -2135,8 +2108,6 @@ Array *Array::Clone()
 	if (!arr->SetCapacity(mCapacity))
 		return nullptr;
 	arr->mUnsorted = mUnsorted;
-	if (g_DefaultArrayValueType != SYM_MISSING)
-		arr->mDefault.SetValue(g_DefaultArrayValue);
 	for (index_t i = 0; i < mLength; ++i)
 	{
 		auto &new_item = arr->mItem[arr->mLength++];
@@ -2176,7 +2147,7 @@ ObjectMember Array::sMembers[] =
 	Object_Method(RemoveAt, 1, 2)
 };
 
-ResultType Array::Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+void Array::Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
 	switch (aID)
 	{
@@ -2184,36 +2155,28 @@ ResultType Array::Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTok
 	{
 		auto index = ParamToZeroIndex(*aParam[aParamCount - 1]);
 		if (index >= mLength)
-		{
-			if (IS_INVOKE_GET && mDefault.symbol != SYM_MISSING)
-			{
-				aResultToken.CopyValueFrom(mDefault);
-				if (aResultToken.symbol == SYM_OBJECT)
-					aResultToken.object->AddRef();
-				return OK;
-			}
-			else
-				_o_throw(ERR_INVALID_INDEX, ParamIndexToString(aParamCount - 1, _f_number_buf));
-		}
+			_o_throw(ERR_INVALID_INDEX, ParamIndexToString(aParamCount - 1, _f_number_buf), ErrorPrototype::Index);
 		auto &item = mItem[index];
 		if (IS_INVOKE_GET)
 			item.ReturnRef(aResultToken);
 		else
 			if (!item.Assign(*aParam[0]))
-				_o_throw(ERR_OUTOFMEM);
-		return OK;
+				_o_throw_oom;
+		_o_return_retval;
 	}
 
 	case P_Length:
 	case P_Capacity:
 		if (IS_INVOKE_SET)
 		{
+			if (!ParamIndexIsNumeric(0))
+				_o_throw_type(_T("Number"), *aParam[0]);
 			auto arg64 = (UINT64)ParamIndexToInt64(0);
-			if (arg64 < 0 || arg64 > MaxIndex || !ParamIndexIsNumeric(0))
-				_o_throw(ERR_INVALID_VALUE);
+			if (arg64 < 0 || arg64 > MaxIndex)
+				_o_throw_value(ERR_INVALID_VALUE);
 			if (!(aID == P_Capacity ? SetCapacity((index_t)arg64) : SetLength((index_t)arg64)))
-				_o_throw(ERR_OUTOFMEM);
-			return OK;
+				_o_throw_oom;
+			return;
 		}
 		_o_return(aID == P_Capacity ? Capacity() : Length());
 
@@ -2225,15 +2188,15 @@ ResultType Array::Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTok
 		{
 			index = ParamToZeroIndex(*aParam[0]);
 			if (index > mLength || index + (index_t)aParamCount > MaxIndex) // The second condition is very unlikely.
-				_o_throw(ERR_PARAM1_INVALID);
+				_o_throw_param(0);
 			aParam++;
 			aParamCount--;
 		}
 		else
 			index = mLength;
 		if (!InsertAt(index, aParam, aParamCount))
-			_o_throw(ERR_OUTOFMEM);
-		return OK;
+			_o_throw_oom;
+		_o_return_empty;
 	}
 
 	case M_RemoveAt:
@@ -2244,7 +2207,7 @@ ResultType Array::Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTok
 		{
 			index = ParamToZeroIndex(*aParam[0]);
 			if (index >= mLength)
-				_o_throw(ERR_PARAM1_INVALID);
+				_o_throw_param(0);
 		}
 		else
 		{
@@ -2255,17 +2218,17 @@ ResultType Array::Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTok
 		
 		index_t count = (index_t)ParamIndexToOptionalInt64(1, 1);
 		if (index + count > mLength)
-			_o_throw(ERR_PARAM2_INVALID);
+			_o_throw_param(1);
 
 		if (aParamCount < 2) // Remove-and-return mode.
 		{
 			mItem[index].ReturnMove(aResultToken);
 			if (aResultToken.Exited())
-				return aResultToken.Result();
+				return;
 		}
 		
 		RemoveAt(index, count);
-		return OK;
+		return;
 	}
 	
 	case M_Has:
@@ -2277,23 +2240,22 @@ ResultType Array::Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTok
 	case M_Delete:
 	{
 		auto index = ParamToZeroIndex(*aParam[0]);
-		if (index < mLength)
-		{
-			mItem[index].ReturnMove(aResultToken);
-			mItem[index].AssignMissing();
-		}
-		return OK;
+		if (index >= mLength)
+			_o_throw_param(0);
+		mItem[index].ReturnMove(aResultToken);
+		mItem[index].AssignMissing();
+		_o_return_retval;
 	}
 
 	case M_Clone:
 		if (auto *arr = Clone())
 			_o_return(arr);
-		_o_throw(ERR_OUTOFMEM);
+		_o_throw_oom;
 
 	case M___Enum:
-		_o_return(new IndexEnumerator(this, static_cast<IndexEnumerator::Callback>(&Array::GetEnumItem)));
+		_o_return(new IndexEnumerator(this, ParamIndexToOptionalInt(0, 1)
+			, static_cast<IndexEnumerator::Callback>(&Array::GetEnumItem)));
 	}
-	return INVOKE_NOT_HANDLED;
 }
 
 Array::index_t Array::ParamToZeroIndex(ExprTokenType &aParam)
@@ -2308,11 +2270,11 @@ Array::index_t Array::ParamToZeroIndex(ExprTokenType &aParam)
 }
 
 
-ResultType Array::GetEnumItem(UINT &aIndex, Var *aVal, Var *aReserved)
+ResultType Array::GetEnumItem(UINT &aIndex, Var *aVal, Var *aReserved, int aVarCount)
 {
 	if (aIndex < mLength)
 	{
-		if (aReserved)
+		if (aVarCount > 1)
 		{
 			// Put the index first, only when there are two parameters.
 			if (aVal)
@@ -2324,7 +2286,11 @@ ResultType Array::GetEnumItem(UINT &aIndex, Var *aVal, Var *aReserved)
 			auto &item = mItem[aIndex];
 			switch (item.symbol)
 			{
-			default:	aVal->AssignString(item.string, item.string.Length());	break;
+			default:
+				aVal->AssignString(item.string, item.string.Length());
+				if (item.symbol == SYM_MISSING)
+					aVal->MarkUninitialized();
+				break;
 			case SYM_INTEGER:	aVal->Assign(item.n_int64);			break;
 			case SYM_FLOAT:		aVal->Assign(item.n_double);		break;
 			case SYM_OBJECT:	aVal->Assign(item.object);			break;
@@ -2361,11 +2327,11 @@ bool EnumBase::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aPar
 
 ResultType IndexEnumerator::Next(Var *var0, Var *var1)
 {
-	return (mObject->*mGetItem)(++mIndex, var0, var1);
+	return (mObject->*mGetItem)(++mIndex, var0, var1, mParamCount);
 }
 
 
-ResultType Object::GetEnumProp(UINT &aIndex, Var *aName, Var *aVal)
+ResultType Object::GetEnumProp(UINT &aIndex, Var *aName, Var *aVal, int aVarCount)
 {
 	for  ( ; aIndex < mFields.Length(); ++aIndex)
 	{
@@ -2416,22 +2382,7 @@ ResultType Object::GetEnumProp(UINT &aIndex, Var *aName, Var *aVal)
 }
 
 
-ResultType Object::GetEnumMethod(UINT &aIndex, Var *aKey, Var *aVal)
-{
-	if (aIndex < mMethods.Length())
-	{
-		auto &method = mMethods[aIndex];
-		if (aKey)
-			aKey->Assign(method.name);
-		if (aVal)
-			aVal->Assign(method.func);
-		return CONDITION_TRUE;
-	}
-	return CONDITION_FALSE;
-}
-
-
-ResultType Map::GetEnumItem(UINT &aIndex, Var *aKey, Var *aVal)
+ResultType Map::GetEnumItem(UINT &aIndex, Var *aKey, Var *aVal, int aVarCount)
 {
 	if (aIndex < mCount)
 	{
@@ -2466,13 +2417,13 @@ ResultType Map::GetEnumItem(UINT &aIndex, Var *aKey, Var *aVal)
 }
 
 
-ResultType RegExMatchObject::GetEnumItem(UINT &aIndex, Var *aKey, Var *aVal)
+ResultType RegExMatchObject::GetEnumItem(UINT &aIndex, Var *aKey, Var *aVal, int aVarCount)
 {
 	if (aIndex >= (UINT)mPatternCount)
 		return CONDITION_FALSE;
 	// In single-var mode, return the subpattern values.
 	// Otherwise, return the subpattern names first and values second.
-	if (!aVal)
+	if (aVarCount < 2)
 	{
 		aVal = aKey;
 		aKey = nullptr;
@@ -2502,7 +2453,7 @@ Map::Pair *Map::FindItem(IntKeyType val, index_t left, index_t right, index_t &i
 {
 	if (mUnsorted)
 	{
-		for (int i = 0; i < mCount; i++)
+		for (index_t i = 0; i < mCount; i++)
 		{
 			auto &item = mItem[i];
 			if (item.keytype == SYM_INTEGER && !(val - item.key.i))
@@ -2537,7 +2488,7 @@ Object::FieldType *Object::FindField(name_t name, index_t &insert_pos)
 		first_char += 32;
 	if (mUnsorted)
 	{
-		for (int i = 0; i < right; i++)
+		for (index_t i = 0; i < right; i++)
 		{
 			FieldType &field = mFields[i];
 			if (!(first_char - field.key_c) && !_tcsicmp(name, field.name))
@@ -2546,34 +2497,31 @@ Object::FieldType *Object::FindField(name_t name, index_t &insert_pos)
 		insert_pos = right;
 		return nullptr;
 	}
-	else
+	while (left < right)
 	{
-		while (left < right)
-		{
-			mid = left + ((right - left) >> 1);
-
-			FieldType &field = mFields[mid];
-
-			// key_c contains the lower-case version of field.name[0].  Checking key_c first
-			// allows the _tcsicmp() call to be skipped whenever the first character differs.
-			// This also means that .name isn't dereferenced, which means one less potential
-			// CPU cache miss (where we wait for the data to be pulled from RAM into cache).
-			// field.key_c might cause a cache miss, but it's very likely that key.s will be
-			// read into cache at the same time (but only the pointer value, not the chars).
-			int result = first_char - field.key_c;
-			if (!result)
-				result = _tcsicmp(name, field.name);
-
-			if (result < 0)
-				right = mid;
-			else if (result > 0)
-				left = mid + 1;
-			else
-				return &field;
-		}
-		insert_pos = left;
-		return nullptr;
+		mid = left + ((right - left) >> 1);
+		
+		FieldType &field = mFields[mid];
+		
+		// key_c contains the lower-case version of field.name[0].  Checking key_c first
+		// allows the _tcsicmp() call to be skipped whenever the first character differs.
+		// This also means that .name isn't dereferenced, which means one less potential
+		// CPU cache miss (where we wait for the data to be pulled from RAM into cache).
+		// field.key_c might cause a cache miss, but it's very likely that key.s will be
+		// read into cache at the same time (but only the pointer value, not the chars).
+		int result = first_char - field.key_c;
+		if (!result)
+			result = _tcsicmp(name, field.name);
+		
+		if (result < 0)
+			right = mid;
+		else if (result > 0)
+			left = mid + 1;
+		else
+			return &field;
 	}
+	insert_pos = left;
+	return nullptr;
 }
 
 bool Object::HasProp(name_t name)
@@ -2581,40 +2529,26 @@ bool Object::HasProp(name_t name)
 	return FindField(name) || mBase && mBase->HasProp(name);
 }
 
-Object::MethodType *Object::FindMethod(name_t name, index_t &insert_pos)
+IObject *Object::GetMethod(name_t name)
 {
-	index_t left = 0, mid, right = mMethods.Length();
-	//int first_char = *name;
-	//if (first_char <= 'Z' && first_char >= 'A')
-	//	first_char += 32;
-	while (left < right)
+	// Return the function(?) object which would be called if the named property is called,
+	// or nullptr if that would require invoking a getter.  Does not verify that the object
+	// is callable, and does not support primitive values (even in the unusual case that Call
+	// has been implemented via the value's base/prototype).
+	bool dynamic_only = false;
+	for (Object *that = this; that; that = that->mBase)
 	{
-		mid = left + ((right - left) >> 1);
-
-		auto &method = mMethods[mid];
-
-		//int result = first_char - field.key_c;
-		//if (!result)
-		int result = _tcsicmp(name, method.name);
-
-		if (result < 0)
-			right = mid;
-		else if (result > 0)
-			left = mid + 1;
-		else
-			return &method;
+		if (auto field = that->FindField(name))
+		{
+			if (field->symbol != SYM_DYNAMIC)
+				return (dynamic_only || field->symbol != SYM_OBJECT) ? nullptr : field->object;
+			if (auto func = field->prop->Method())
+				return func; // Method takes precedence over any inherited value or getter.
+			if (field->prop->Getter())
+				dynamic_only = true; // Getter takes precedence over any inherited value.
+		}
 	}
-	insert_pos = left;
 	return nullptr;
-}
-
-Object::MethodType *Object::GetMethod(name_t name)
-{
-	if (auto method = FindMethod(name))
-		return method;
-	if (!mBase)
-		return nullptr;
-	return mBase->GetMethod(name);
 }
 
 bool Object::HasMethod(name_t aName)
@@ -2631,7 +2565,7 @@ Map::Pair *Map::FindItem(LPTSTR val, index_t left, index_t right, index_t &inser
 	int first_char = caseless ? 0 : *val;
 	if (mUnsorted)
 	{
-		for (int i = 0; i < mCount; i++)
+		for (index_t i = 0; i < mCount; i++)
 		{
 			auto &item = mItem[i];
 			if (item.keytype == SYM_STRING && !(first_char - item.key_c) && !(!caseless ? _tcscmp(val, item.key.s) : use_locale ? lstrcmpi(val, item.key.s) : _tcsicmp(val, item.key.s)))
@@ -2736,7 +2670,7 @@ Map::Pair *Map::FindItem(ExprTokenType &key_token, LPTSTR aBuf, SymbolType &key_
 	ConvertKey(key_token, aBuf, key_type, key);
 	return FindItem(key_type, key, insert_pos);
 }
-
+	
 bool Object::SetInternalCapacity(index_t new_capacity)
 // Expands mFields to the specified number if fields.
 // Caller *must* ensure new_capacity >= 1 && new_capacity >= mFields.Length().
@@ -2770,18 +2704,6 @@ Object::FieldType *Object::Insert(name_t name, index_t at)
 	field.name = name; // Above has already copied string or called key.p->AddRef() as appropriate.
 	field.Minit(); // Initialize to default value.  Caller will likely reassign.
 	return &field;
-}
-
-Object::MethodType *Object::InsertMethod(name_t name, index_t pos)
-{
-	if ((mMethods.Length() == mMethods.Capacity()
-		&& !mMethods.SetCapacity(mMethods.Capacity() ? mMethods.Capacity() << 1 : 1))
-		|| !(name = _tcsdup(name)))
-		return nullptr;
-	auto &method = *mMethods.InsertUninitialized(pos, 1);
-	method.name = name;
-	method.func = nullptr;
-	return &method;
 }
 
 Map::Pair *Map::Insert(SymbolType key_type, Key key, index_t at)
@@ -2832,7 +2754,7 @@ Map::Pair *Map::Insert(SymbolType key_type, Key key, index_t at)
 
 ResultType Func::Invoke(IObject_Invoke_PARAMS_DECL)
 {
-	if (!aName && !HasOwnMethods())
+	if (!aName && IS_INVOKE_CALL && !HasOwnProps()) // Very rough check that covers the most common cases.
 	{
 		// Take a shortcut for performance.
 		Call(aResultToken, aParam, aParamCount);
@@ -2841,18 +2763,18 @@ ResultType Func::Invoke(IObject_Invoke_PARAMS_DECL)
 	return Object::Invoke(IObject_Invoke_PARAMS);
 }
 
-ResultType Func::Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+void Func::Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
 	switch (MemberID(aID))
 	{
 	case M_Call:
 		Call(aResultToken, aParam, aParamCount);
-		return aResultToken.Result();
+		return;
 
 	case M_Bind:
 		if (BoundFunc *bf = BoundFunc::Bind(this, IT_CALL, nullptr, aParam, aParamCount))
 			_o_return(bf);
-		_o_throw(ERR_OUTOFMEM);
+		_o_throw_oom;
 
 	case M_IsOptional:
 		if (aParamCount)
@@ -2861,7 +2783,7 @@ ResultType Func::Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprToke
 			if (param > 0 && (param <= mParamCount || mIsVariadic))
 				_o_return(param > mMinParams);
 			else
-				_o_throw(ERR_PARAM1_INVALID);
+				_o_throw_param(0);
 		}
 		else
 			_o_return(mMinParams != mParamCount || mIsVariadic); // True if any params are optional.
@@ -2871,7 +2793,7 @@ ResultType Func::Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprToke
 		{
 			int param = ParamIndexToInt(0);
 			if (param <= 0 || param > mParamCount && !mIsVariadic)
-				_o_throw(ERR_PARAM1_INVALID);
+				_o_throw_param(0);
 			_o_return(ArgIsOutputVar(param-1));
 		}
 		else
@@ -2888,7 +2810,6 @@ ResultType Func::Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprToke
 	case P_IsBuiltIn: _o_return(IsBuiltIn());
 	case P_IsVariadic: _o_return(mIsVariadic);
 	}
-	return INVOKE_NOT_HANDLED;
 }
 
 
@@ -2934,14 +2855,9 @@ BoundFunc *BoundFunc::Bind(IObject *aFunc, int aFlags, LPCTSTR aMember, ExprToke
 		return nullptr;
 	if (auto params = Array::Create(aParam, aParamCount))
 	{
-		if (BoundFunc *bf = new BoundFunc(aFunc, member, params, aFlags))
-		{
-			aFunc->AddRef();
-			// bf has taken over our reference to params.
-			return bf;
-		}
-		// malloc failure; release params and return.
-		params->Release();
+		aFunc->AddRef();
+		// BoundFunc takes our reference to params.
+		return new BoundFunc(aFunc, member, params, aFlags);
 	}
 	free(member);
 	return nullptr;
@@ -2962,11 +2878,54 @@ bool Closure::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aPara
 
 Closure::~Closure()
 {
-	mVars->Release();
+	if (!(mFlags & ClosureGroupedFlag))
+		mVars->Release();
+}
+
+bool Closure::Delete()
+{
+	if ((mFlags & ClosureGroupedFlag) && !mVars->FullyReleased(mRefCount))
+		return false;
+	return Func::Delete();
+}
+
+bool FreeVars::FullyReleased(ULONG aRefPendingRelease)
+{
+	// This function is part of a workaround for circular references that occur because all closures
+	// have a reference to this FreeVars, while any closure referenced by itself or another closure
+	// has a reference in mVar[].
+	if (mRefCount)
+		return mRefCount < 0;
+	int circular_closures = 0;
+	for (int i = 0; i < mVarCount; ++i)
+		if (mVar[i].Type() == VAR_CONSTANT)
+		{
+			ASSERT(mVar[i].HasObject() && dynamic_cast<ObjectBase*>(mVar[i].Object())); // Any object in VAR_CONSTANT must derive from ObjectBase.
+			auto obj = (ObjectBase *)mVar[i].Object();
+			if (obj->RefCount() && aRefPendingRelease == 0)
+				return false;
+			--aRefPendingRelease;
+			++circular_closures;
+		}
+	--mRefCount; // Now that delete is certain, make this non-zero to prevent reentry.
+	if (circular_closures)
+	{
+		// All closures in downvars have mRefCount == 0, meaning their only reference is the
+		// uncounted one in mVar[].  In order to free the object properly, mRefCount needs to
+		// be restored to 1 prior to Release(), which will be called by Var::Free().
+		for (int i = 0; i < mVarCount; ++i)
+			if (mVar[i].Type() == VAR_CONSTANT)
+			{
+				auto obj = (ObjectBase *)mVar[i].Object();
+				obj->AddRef();
+			}
+	}
+	delete this;
+	return true;
 }
 
 
-ResultType LabelPtr::ExecuteInNewThread(TCHAR *aNewThreadDesc, ExprTokenType *aParamValue, int aParamCount, __int64 *aRetVal) const
+ResultType IObjectPtr::ExecuteInNewThread(TCHAR *aNewThreadDesc, ExprTokenType *aParamValue, int aParamCount, __int64 *aRetVal) const
 {
 	DEBUGGER_STACK_PUSH(aNewThreadDesc)
 	ResultType result = CallMethod(mObject, mObject, nullptr, aParamValue, aParamCount, aRetVal);
@@ -2975,12 +2934,12 @@ ResultType LabelPtr::ExecuteInNewThread(TCHAR *aNewThreadDesc, ExprTokenType *aP
 }
 
 
-Func *LabelPtr::ToFunc() const
+Func *IObjectPtr::ToFunc() const
 {
 	return dynamic_cast<Func *>(mObject);
 }
 
-LPCTSTR LabelPtr::Name() const
+LPCTSTR IObjectPtr::Name() const
 {
 	if (auto func = ToFunc()) return func->mName;
 	return mObject->Type();
@@ -3057,33 +3016,52 @@ ResultType MsgMonitorList::Call(ExprTokenType *aParamValue, int aParamCount, UIN
 // Buffer
 //
 
+BufferObject *BufferObject::Create(void *aData, size_t aSize)
+{
+	auto obj = new BufferObject(aData, aSize);
+	obj->SetBase(BufferObject::sPrototype);
+	return obj;
+}
+
 ObjectMember BufferObject::sMembers[] =
 {
+	Object_Method(__New, 0, 2),
 	Object_Property_get(Ptr),
 	Object_Property_get_set(Size)
 };
 
-ResultType BufferObject::Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
+void BufferObject::Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
 	switch (aID)
 	{
 	case P_Ptr:
 		_o_return((size_t)mData);
-	case P_Size:
-		if (IS_INVOKE_SET)
+	case P_Size: // Size or __New
+		if (!IS_INVOKE_GET)
 		{
-			if (!ParamIndexIsNumeric(0))
-				_o_throw(ERR_INVALID_VALUE);
-			auto new_size = ParamIndexToInt64(0);
-			if (new_size < 0 || new_size > SIZE_MAX)
-				_o_throw(ERR_INVALID_VALUE);
-			if (!Resize((size_t)new_size))
-				_o_throw(ERR_OUTOFMEM);
-			return OK;
+			if (!ParamIndexIsOmitted(0))
+			{
+				if (!ParamIndexIsNumeric(0))
+					if (IS_INVOKE_SET)
+						_o_throw_type(_T("Number"), *aParam[0]);
+					else
+						_o_throw_param(0, _T("Number"));
+				auto new_size = ParamIndexToInt64(0);
+				if (new_size < 0 || new_size > SIZE_MAX)
+					_o_throw_value(ERR_INVALID_VALUE);
+				if (!Resize((size_t)new_size))
+					_o_throw_oom;
+			}
+			if (!ParamIndexIsOmitted(1))
+			{
+				if (!ParamIndexIsNumeric(1))
+					_o_throw_param(1, _T("Number"));
+				memset(mData, (char)ParamIndexToInt64(1), mSize);
+			}
+			return;
 		}
 		_o_return(mSize);
 	}
-	return INVOKE_NOT_HANDLED;
 }
 
 ResultType BufferObject::Resize(size_t aNewSize)
@@ -3097,25 +3075,7 @@ ResultType BufferObject::Resize(size_t aNewSize)
 }
 
 
-BIF_DECL(BIF_BufferAlloc)
-{
-	if (!ParamIndexIsNumeric(0))
-		_f_throw(ERR_PARAM1_INVALID);
-	auto size = ParamIndexToInt64(0);
-	if (size < 0 || size > SIZE_MAX)
-		_f_throw(ERR_PARAM1_INVALID);
-	auto data = malloc((size_t)size);
-	if (!data)
-		_f_throw(ERR_OUTOFMEM);
-	if (!ParamIndexIsOmitted(1))
-		memset(data, (char)ParamIndexToInt64(1), (size_t)size);
-	auto bo = new BufferObject(data, (size_t)size);
-	bo->SetBase(BufferObject::sPrototype);
-	_f_return(bo);
-}
-
-
-BIF_DECL(BIF_ClipboardAll)
+void ClipboardAll::__New(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount)
 {
 	void *data;
 	size_t size;
@@ -3123,7 +3083,7 @@ BIF_DECL(BIF_ClipboardAll)
 	{
 		// Retrieve clipboard contents.
 		if (!Var::GetClipboardAll(&data, &size))
-			_f_return_FAIL;
+			_o_return_FAIL;
 	}
 	else
 	{
@@ -3140,21 +3100,36 @@ BIF_DECL(BIF_ClipboardAll)
 			// Caller supplied an address.
 			caller_data = (size_t)ParamIndexToIntPtr(0);
 			if (caller_data < 65536) // Basic check to catch incoming raw addresses that are zero or blank.  On Win32, the first 64KB of address space is always invalid.
-				_f_throw(ERR_PARAM1_INVALID);
+				_o_throw_param(0);
 			size = -1;
 		}
 		if (!ParamIndexIsOmitted(1))
 			size = (size_t)ParamIndexToIntPtr(1);
 		else if (size == -1) // i.e. it can be omitted when size != -1 (a string was passed).
-			_f_throw(ERR_PARAM2_MUST_NOT_BE_BLANK);
+			_o_throw_value(ERR_PARAM2_MUST_NOT_BE_BLANK);
 		if (  !(data = malloc(size))  ) // More likely to be due to invalid parameter than out of memory.
-			_f_throw(ERR_OUTOFMEM);
+			_o_throw_oom;
 		memcpy(data, (void *)caller_data, size);
 	}
-	auto obj = new ClipboardAll(data, size);
-	obj->SetBase(ClipboardAll::sPrototype);
-	_f_return(obj);
+	if (mData != data)
+		free(mData); // In case of explicit call to __New.
+	mData = data;
+	mSize = size;
 }
+
+
+Object *ClipboardAll::Create()
+{
+	auto obj = new ClipboardAll();
+	obj->SetBase(ClipboardAll::sPrototype);
+	return obj;
+}
+
+
+ObjectMember ClipboardAll::sMembers[]
+{
+	Object_Method1(__New, 0, 2)
+};
 
 
 
@@ -3171,6 +3146,74 @@ ObjectMember Func::sMembers[] =
 	Object_Property_get(MinParams),
 	Object_Property_get(Name)
 };
+
+
+
+ObjectMember RegExMatchObject::sMembers[] =
+{
+	Object_Method(__Enum, 0, 1),
+	Object_Method(__Get, 2, 2),
+	Object_Member(__Item, Invoke, M_Value, IT_GET, 0, 1),
+	Object_Member(Count, Invoke, M_Count, IT_GET, 0, 0),
+	Object_Method(Len, 0, 1),
+	Object_Member(Len, Invoke, M_Len, IT_GET, 0, 1),
+	Object_Member(Mark, Invoke, M_Mark, IT_GET, 0, 0),
+	Object_Method(Name, 1, 1),
+	Object_Member(Name, Invoke, M_Name, IT_GET, 1, 1),
+	Object_Method(Pos, 0, 1),
+	Object_Member(Pos, Invoke, M_Pos, IT_GET, 0, 1),
+};
+
+
+
+ObjectMember Object::sErrorMembers[]
+{
+	Object_Member(__New, Error__New, M_Error__New, IT_CALL, 0, 3)
+};
+
+ObjectMember Object::sOSErrorMembers[]
+{
+	Object_Member(__New, Error__New, M_OSError__New, IT_CALL, 0, 3)
+};
+
+ObjectMember Struct::sMembers[] =
+{
+	Object_Method(__Enum, 0, 1),
+	Object_Method(Clone, 0, 0),
+	Object_Method(CountOf, 0, 1),
+	Object_Method(Encoding, 0, 1),
+	Object_Method(GetAddress, 0, 1),
+	Object_Method(GetCapacity, 0, 1),
+	Object_Method(GetPointer, 0, 1),
+	Object_Method(IsPointer, 0, 1),
+	Object_Method(Offset, 1, 1),
+	Object_Method(SetCapacity, 1, 2),
+	Object_Method(Size, 0, 1)
+};
+
+struct ClassDef
+{
+	LPCTSTR name;
+	Object **proto_var;
+	ClassFactoryDef factory;
+	ObjectMember *members;
+	int member_count;
+	std::initializer_list<ClassDef> subclasses;
+};
+
+void DefineClasses(Object *aBaseClass, Object *aBaseProto, std::initializer_list<ClassDef> aClasses)
+{
+	for (auto &c : aClasses)
+	{
+		auto proto = (c.proto_var && *c.proto_var) ? *c.proto_var
+			: Object::CreatePrototype(const_cast<LPTSTR>(c.name), aBaseProto, c.members, c.member_count);
+		if (c.proto_var)
+			*c.proto_var = proto;
+		auto cobj = Object::CreateClass(const_cast<LPTSTR>(c.name), aBaseClass, proto, c.factory);
+		if (c.subclasses.size())
+			DefineClasses(cobj, proto, c.subclasses);
+	}
+}
 
 
 Object *Object::CreateRootPrototypes()
@@ -3191,89 +3234,178 @@ Object *Object::CreateRootPrototypes()
 	prop->MaxParams = 0;
 	prop->SetGetter(g_script->FindFunc(_T("ObjGetBase")));
 	prop->SetSetter(g_script->FindFunc(_T("ObjSetBase")));
+	
+	// Define __Init so that Script::DefineClassInit can add an unconditional super.__Init().
+	thread_local static auto __Init = new BuiltInFunc { _T(""), Any___Init, 1, 1 };
+	sAnyPrototype->DefineMethod(_T("__Init"), __Init);
 
 	DefineMembers(sPrototype, _T("Object"), sMembers, _countof(sMembers));
 	DefineMembers(Func::sPrototype, _T("Func"), Func::sMembers, _countof(Func::sMembers));
 
+	// Create classes.
+	//
+
+	sClassPrototype = Object::CreatePrototype(_T("Class"), Object::sPrototype);
+	auto anyClass = CreateClass(_T("Any"), sClassPrototype, sAnyPrototype, nullptr);
+	Object::sClass = CreateClass(_T("Object"), anyClass, Object::sPrototype, NewObject<Object>);
+
+	ObjectCtor no_ctor = nullptr;
+	ObjectMember *no_members = nullptr;
+
+	DefineClasses(Object::sClass, Object::sPrototype, {
+		{_T("Array"), &Array::sPrototype, NewObject<Array>
+			, Array::sMembers, _countof(Array::sMembers)},
+		{_T("Buffer"), &BufferObject::sPrototype, NewObject<BufferObject>, BufferObject::sMembers, _countof(BufferObject::sMembers), {
+			{_T("ClipboardAll"), &ClipboardAll::sPrototype, NewObject<ClipboardAll>
+				, ClipboardAll::sMembers, _countof(ClipboardAll::sMembers)}
+		}},
+		{_T("Class"), &Object::sClassPrototype},
+		{_T("Error"), &ErrorPrototype::Error, no_ctor, sErrorMembers, _countof(sErrorMembers), {
+			{_T("IndexError"), &ErrorPrototype::Index, no_ctor, no_members, 0, {
+				{_T("KeyError"), &ErrorPrototype::Key}
+			}},
+			{_T("MemberError"), &ErrorPrototype::Member, no_ctor, no_members, 0, {
+				{_T("PropertyError"), &ErrorPrototype::Property},
+				{_T("MethodError"), &ErrorPrototype::Method}
+			}},
+			{_T("MemoryError"), &ErrorPrototype::Memory},
+			{_T("OSError"), &ErrorPrototype::OS, no_ctor, sOSErrorMembers, _countof(sOSErrorMembers)},
+			{_T("TargetError"), &ErrorPrototype::Target},
+			{_T("TimeoutError"), &ErrorPrototype::Timeout},
+			{_T("TypeError"), &ErrorPrototype::Type},
+			{_T("ValueError"), &ErrorPrototype::Value},
+			{_T("ZeroDivisionError"), &ErrorPrototype::ZeroDivision}
+		}},
+		{_T("Func"), &Func::sPrototype, no_ctor, Func::sMembers, _countof(Func::sMembers), {
+			{_T("BoundFunc"), &BoundFunc::sPrototype},
+			{_T("Closure"), &Closure::sPrototype},
+			{_T("Enumerator"), &EnumBase::sPrototype}
+		}},
+		{_T("Gui"), &GuiType::sPrototype, NewObject<GuiType>
+			, GuiType::sMembers, GuiType::sMemberCount},
+		{_T("InputHook"), &InputObject::sPrototype, NewObject<InputObject>
+			, InputObject::sMembers, InputObject::sMemberCount},
+		{_T("JSON"), &JSON::sPrototype},
+		{_T("Map"), &Map::sPrototype, NewObject<Map>
+			, Map::sMembers, _countof(Map::sMembers)},
+		{_T("Menu"), &UserMenu::sPrototype, NewObject<UserMenu>
+			, UserMenu::sMembers, UserMenu::sMemberCount, {
+			{_T("MenuBar"), &UserMenu::sBarPrototype, NewObject<UserMenu::Bar>}
+		}},
+		{_T("RegExMatchInfo"), &RegExMatchObject::sPrototype, no_ctor
+			, RegExMatchObject::sMembers, _countof(RegExMatchObject::sMembers)}
+	});
+	Struct::sPrototype = Object::CreatePrototype(_T("Struct"), Object::sPrototype, Struct::sMembers, _countof(Struct::sMembers));
+#ifdef ENABLE_DLLCALL
+	DynaToken::sPrototype = Object::CreatePrototype(_T("DynaCall"), Object::sPrototype);
+#endif
+	if (auto obj = g_script->FindClass(_T("JSON"), 4)) {
+		auto func = new BuiltInMethod(_T("parse"));
+		func->mBIM = (ObjectMethod)&JSON::parse;
+		func->mMIT = IT_CALL;
+		func->mMinParams = 2; // Includes `this`.
+		func->mIsVariadic = false;
+		func->mParamCount = 2;
+		func->mClass = Object::sPrototype; // AddRef not needed since neither mClass nor our caller's reference to obj is ever Released.
+		obj->DefineMethod(_T("parse"), func);
+		func->Release();
+		func = new BuiltInMethod(_T("stringify"));
+		func->mBIM = (ObjectMethod)&JSON::stringify;
+		func->mMIT = IT_CALL;
+		func->mMinParams = 2;
+		func->mIsVariadic = false;
+		func->mParamCount = 3;
+		func->mClass = Object::sPrototype; // AddRef not needed since neither mClass nor our caller's reference to obj is ever Released.
+		obj->DefineMethod(_T("stringify"), func);
+		func->Release();
+		obj->SetOwnProp(_T("true"), JSON::_true);
+		obj->SetOwnProp(_T("false"), JSON::_false);
+		obj->SetOwnProp(_T("null"), JSON::_null);
+	}
+
+	// Parameter counts are specified for static Call in the following classes
+	// but not those using NewObject<> because the latter passes parameters on
+	// to __New, which can be redefined by a subclass.  Specifying counts here
+	// sets MinParams/MaxParams/IsVariadic appropriately and avoids the need to
+	// validate aParamCount in each function, which reduces code size.
+	// Note that the `this` parameter (the class itself) is counted.
+	DefineClasses(anyClass, sAnyPrototype, {
+		{_T("ComValue"), &sComValuePrototype, {ComValue_Call, 3, 4}, no_members, 0, {
+			{_T("ComObjArray"), &sComArrayPrototype, {ComObjArray_Call, 3, 10}},
+			{_T("ComObject"), &sComObjectPrototype, {ComObject_Call, 2, 3}},
+			{_T("ComValueRef"), &sComRefPrototype}
+		}},
+		{_T("Primitive"), &Object::sPrimitivePrototype, no_ctor, no_members, 0, {
+			{_T("Number"), &Object::sNumberPrototype, {BIF_Number, 2, 2}, no_members, 0, {
+				{_T("Float"), &Object::sFloatPrototype, {BIF_Float, 2, 2}},
+				{_T("Integer"), &Object::sIntegerPrototype, {BIF_Integer, 2, 2}}
+			}},
+			{_T("String"), &Object::sStringPrototype, {BIF_String, 2, 2}}
+		}},
+		{_T("VarRef"), &sVarRefPrototype}
+	});
+
+	GuiControlType::DefineControlClasses();
+	DefineComPrototypeMembers();
+	DefineFileClass();
+
+	// Permit Object.Call to construct Error objects.
+	ErrorPrototype::Error->mFlags &= ~NativeClassPrototype;
+	ErrorPrototype::OS->mFlags &= ~NativeClassPrototype;
+
 	return sAnyPrototype;
 }
 
-_thread_local Object *Object::sAnyPrototype; // = CreateRootPrototypes();
-_thread_local Object *Func::sPrototype;
-_thread_local Object *Object::sPrototype;
-Object *TempInit::initObject = 0 ? Object::CreateClass(_T("Class"), NULL, NULL, static_cast<ObjectMethod>(&New<Object>)) : NULL;
-Object *TempInit::initArray = 0 ? Object::CreateClass(_T("Array"), NULL, NULL, static_cast<ObjectMethod>(&New<Array>)) : NULL;
-Object *TempInit::initMap = 0 ? Object::CreateClass(_T("Map"), NULL, NULL, static_cast<ObjectMethod>(&New<Map>)) : NULL;
-Object *TempInit::initGui = 0 ? Object::CreateClass(_T("Gui"), NULL, NULL, static_cast<ObjectMethod>(&New<GuiType>)) : NULL;
-Object *TempInit::initUserMenu = 0 ? Object::CreateClass(_T("Menu"), NULL, NULL, static_cast<ObjectMethod>(&New<UserMenu>)) : NULL;
-Object *TempInit::initUserMenuBar = 0 ? Object::CreateClass(_T("MenuBar"), NULL, NULL, static_cast<ObjectMethod>(&New<UserMenu::Bar>)) : NULL;
+thread_local Object *Object::sAnyPrototype; // = CreateRootPrototypes();
+thread_local Object *Func::sPrototype;
+thread_local Object *Object::sPrototype;
 
-//																								Direct base			Members
-_thread_local Object *Object::sClassPrototype; // = Object::CreatePrototype(_T("Class"), Object::sPrototype);
-_thread_local Object *Array::sPrototype; // = Object::CreatePrototype(_T("Array"), Object::sPrototype, sMembers, _countof(sMembers));
-_thread_local Object *Map::sPrototype; // = Object::CreatePrototype(_T("Map"), Object::sPrototype, sMembers, _countof(sMembers));
-_thread_local Object *Struct::sPrototype; // = Object::CreatePrototype(_T("Struct"), Object::sPrototype);
+thread_local Object *Object::sClassPrototype;
+thread_local Object *Array::sPrototype;
+thread_local Object *Map::sPrototype;
 
+thread_local Object *Object::sClass;
+
+thread_local Object *Closure::sPrototype;
+thread_local Object *BoundFunc::sPrototype;
+thread_local Object *EnumBase::sPrototype;
+
+thread_local Object *BufferObject::sPrototype;
+thread_local Object *ClipboardAll::sPrototype;
+
+thread_local Object *RegExMatchObject::sPrototype;
+
+thread_local Object *GuiType::sPrototype;
+thread_local Object *UserMenu::sPrototype;
+thread_local Object *UserMenu::sBarPrototype;
+
+thread_local Object* JSON::sPrototype;
+thread_local Object* Struct::sPrototype;
 #ifdef ENABLE_DLLCALL
-_thread_local Object *DynaToken::sPrototype; // = Object::CreatePrototype(_T("Struct"), Object::sPrototype);
+thread_local Object *DynaToken::sPrototype; // = Object::CreatePrototype(_T("Struct"), Object::sPrototype);
 #endif
-//																							Direct base			Prototype			Constructor
-_thread_local Object *Object::sClass; // = Object::CreateClass(_T("Object"), sClassPrototype, sPrototype, static_cast<ObjectMethod>(&New<Object>));
-_thread_local Object *Object::sClassClass; // = Object::CreateClass(_T("Class"), Object::sClass, sClassPrototype, static_cast<ObjectMethod>(&New<Object>));
-_thread_local Object *Array::sClass; // = Object::CreateClass(_T("Array"), Object::sClass, sPrototype, static_cast<ObjectMethod>(&New<Array>));
-_thread_local Object *Map::sClass; // = Object::CreateClass(_T("Map"), Object::sClass, sPrototype, static_cast<ObjectMethod>(&New<Map>));
 
-
-
-_thread_local Object *Closure::sPrototype; // = Object::CreatePrototype(_T("Closure"), Func::sPrototype);
-_thread_local Object *BoundFunc::sPrototype; // = Object::CreatePrototype(_T("BoundFunc"), Func::sPrototype);
-_thread_local Object *EnumBase::sPrototype; // = Object::CreatePrototype(_T("Enumerator"), Func::sPrototype);
-
-
-
-_thread_local Object *BufferObject::sPrototype; // = Object::CreatePrototype(_T("Buffer"), Object::sPrototype, sMembers, _countof(sMembers));
-_thread_local Object *ClipboardAll::sPrototype; // = Object::CreatePrototype(_T("ClipboardAll"), BufferObject::sPrototype);
-
-
-
-ObjectMember RegExMatchObject::sMembers[] =
+namespace ErrorPrototype
 {
-	Object_Method(__Enum, 0, 1),
-	Object_Member(__Get, Invoke, M_Value, IT_CALL, 2, 2),
-	Object_Member(__Item, Invoke, M_Value, IT_GET, 0, 1),
-	Object_Method(Value, 0, 1),
-	Object_Method(Pos, 0, 1),
-	Object_Method(Len, 0, 1),
-	Object_Method(Name, 0, 1),
-	Object_Method(Count, 0, 0),
-	Object_Method(Mark, 0, 0),
-};
+	thread_local Object *Error, *Memory, *Type, *Value, *OS, *ZeroDivision;
+	thread_local Object *Target, *Member, *Property, *Method, *Index, *Key;
+	thread_local Object *Timeout;
+}
 
-_thread_local Object *RegExMatchObject::sPrototype; // = CreatePrototype(_T("RegExMatch"), Object::sPrototype, sMembers, _countof(sMembers));
-
-
-
-_thread_local Object *GuiType::sPrototype; // = CreatePrototype(_T("Gui"), Object::sPrototype, sMembers, sMemberCount);
-_thread_local Object *GuiType::sClass; // = CreateClass(_T("Gui"), Object::sClass, sPrototype, static_cast<ObjectMethod>(&New<GuiType>));
-
-
-
-_thread_local Object *UserMenu::sPrototype; // = CreatePrototype(_T("Menu"), Object::sPrototype, sMembers, sMemberCount);
-_thread_local Object *UserMenu::sBarPrototype; // = CreatePrototype(_T("MenuBar"), sPrototype);
-_thread_local Object *UserMenu::sClass; // = CreateClass(_T("Menu"), Object::sClass, sPrototype, static_cast<ObjectMethod>(&New<UserMenu>));
-_thread_local Object *UserMenu::sBarClass; // = CreateClass(_T("MenuBar"), sClass, sBarPrototype, static_cast<ObjectMethod>(&New<UserMenu::Bar>));
-
+thread_local Object *Object::sVarRefPrototype;
+thread_local Object *Object::sComObjectPrototype, *Object::sComValuePrototype, *Object::sComArrayPrototype, *Object::sComRefPrototype;
 
 
 //
 // Primitive values as objects
 //
 
-_thread_local Object *Object::sPrimitivePrototype; // = CreatePrototype(_T("Primitive"), Object::sAnyPrototype);
-_thread_local Object *Object::sStringPrototype; // = CreatePrototype(_T("String"), Object::sPrimitivePrototype);
-_thread_local Object *Object::sNumberPrototype; // = CreatePrototype(_T("Number"), Object::sPrimitivePrototype);
-_thread_local Object *Object::sIntegerPrototype; // = CreatePrototype(_T("Integer"), Object::sNumberPrototype);
-_thread_local Object *Object::sFloatPrototype; // = CreatePrototype(_T("Float"), Object::sNumberPrototype);
+thread_local Object *Object::sPrimitivePrototype;
+thread_local Object *Object::sStringPrototype;
+thread_local Object *Object::sNumberPrototype;
+thread_local Object *Object::sIntegerPrototype;
+thread_local Object *Object::sFloatPrototype;
+
 Object *Object::ValueBase(ExprTokenType &aValue)
 {
 	switch (TypeOfToken(aValue))
@@ -3283,6 +3415,61 @@ Object *Object::ValueBase(ExprTokenType &aValue)
 	case SYM_FLOAT: return Object::sFloatPrototype;
 	}
 	return nullptr;
+}
+
+
+
+void Object::DefineClass(name_t aName, Object *aClass)
+{
+	auto prop = DefineProperty(aName);
+
+	ExprTokenType values[] { aClass, aName }, *param[] { values, values + 1 };
+
+	auto info = g_SimpleHeap->Alloc<NestedClassInfo>();
+	info->class_object = aClass;
+	info->constructed = false;
+	aClass->AddRef();
+
+	auto get = new BuiltInFunc { _T(""), Class_GetNestedClass, 1, 1, false, info };
+	prop->MinParams = 0;
+	prop->MaxParams = 0;
+	prop->SetGetter(get);
+	get->Release();
+
+	auto call = new BuiltInFunc { _T(""), Class_CallNestedClass, 1, 1, true, info };
+	prop->SetMethod(call);
+	call->Release();
+}
+
+
+BIF_DECL(Class_GetNestedClass)
+{
+	auto info = (NestedClassInfo *)aResultToken.func->mData;
+	auto cls = info->class_object;
+	cls->AddRef();
+	if (info->constructed)
+		_f_return(cls);
+	info->constructed = true;
+	cls->Construct(aResultToken, nullptr, 0);
+}
+
+
+BIF_DECL(Class_CallNestedClass)
+{
+	auto info = (NestedClassInfo *)aResultToken.func->mData;
+	auto cls = info->class_object;
+	if (!info->constructed)
+	{
+		info->constructed = true;
+		cls->AddRef(); // Necessary because Construct() calls Release() on failure/exit.
+		if (cls->Construct(aResultToken, nullptr, 0) != OK) // FAIL or EXIT
+			return;
+		cls->Release();
+		aResultToken.InitResult(aResultToken.buf);
+	}
+	else
+		aResultToken.symbol = SYM_STRING; // Set the default expected by Invoke.
+	cls->Invoke(aResultToken, IT_CALL, nullptr, ExprTokenType { cls }, aParam + 1, aParamCount - 1);
 }
 
 
@@ -3303,3 +3490,2109 @@ void IObject::DebugWriteProperty(IDebugProperties *aDebugger, int aPage, int aPa
 }
 
 #endif
+
+
+//
+// sizeof_maxsize - get max size of union or structure, helper function for BIF_Sizeof and BIF_Struct
+//
+BYTE sizeof_maxsize(TCHAR *buf)
+{
+	ResultToken ResultToken;
+	int align = 0;
+	ExprTokenType Var1, Var2, Var3;
+	Var1.symbol = SYM_STRING;
+	TCHAR tempbuf[LINE_SIZE];
+	Var1.marker = tempbuf;
+	Var2.symbol = SYM_INTEGER;
+	Var2.value_int64 = 0;
+	// used to pass aligntotal counter to structure in structure
+	Var3.symbol = SYM_INTEGER;
+	Var3.value_int64 = (__int64)&align;
+	ExprTokenType *param[] = { &Var1, &Var2, &Var3};
+	int depth = 0;
+	int max = 0,thissize = 0;
+	LPCTSTR comments = 0;
+	for (int i = 0;buf[i];)
+	{
+		if (buf[i] == '{')
+		{
+			depth++;
+			i++;
+		}
+		else if (buf[i] == '}')
+		{
+			if (--depth < 1)
+				break;
+			i++;
+		}
+		else if (StrChrAny(&buf[i], _T(";, \t\n\r")) == &buf[i])
+		{
+			i++;
+			continue;
+		}
+		else if (comments = RegExMatch(&buf[i], _T("i)^(union|struct)?\\s*(\\{|\\})\\s*\\K")))
+		{
+			i += (int)(comments - &buf[i]);
+			continue;
+		}
+		else if (buf[i] == '\\' && buf[i + 1] == '\\')
+		{
+			if (!(comments = StrChrAny(&buf[i], _T("\r\n"))))
+				break; // end of structure
+			i += (int)(comments - &buf[i]);
+			continue;
+		}
+		else
+		{
+			if (StrChrAny(&buf[i], _T(";,")))
+			{
+				_tcsncpy(tempbuf, &buf[i], thissize = (int)(StrChrAny(&buf[i], _T(";,}")) - &buf[i]));
+				i += thissize + (buf[i+thissize] == '}' ? 0 : 1);
+			}
+			else
+			{
+				_tcscpy(tempbuf, &buf[i]);
+				thissize = (int)_tcslen(&buf[i]);
+				i += thissize;
+			}
+			*(tempbuf + thissize) = '\0';
+			if (StrChrAny(tempbuf, _T("\t ")))
+			{
+				align = 0;
+ 				BIF_sizeof(ResultToken, param, 3);
+				if (max < align)
+					max = (BYTE)align;
+			}
+			else if (max < 4)
+				max = 4;
+		}
+	}
+	return max;
+}
+
+//
+// BIF_sizeof - sizeof() for structures and default types
+//
+
+BIF_DECL(BIF_sizeof)
+// This code is very similar to BIF_Struct so should be maintained together
+{
+	int ptrsize = sizeof(UINT_PTR);		// Used for pointers on 32/64 bit system
+	int offset = 0;						// also used to calculate total size of structure
+	int mod = 0;
+	int arraydef = 0;					// count arraysize to update offset
+	int unionoffset[16] = { 0 };		// backup offset before we enter union or structure
+	int unionsize[16] = { 0 };			// calculate unionsize
+	bool unionisstruct[16] = { 0 };		// updated to move offset for structure in structure
+	int structalign[16] = { 0 };		// keep track of struct alignment
+	int totalunionsize = 0;				// total size of all unions and structures in structure
+	int uniondepth = 0;					// count how deep we are in union/structure
+	int align = 1;
+	int *aligntotal = &align;			// pointer alignment for total structure
+	int thissize = 0;					// used to save size returned from IsDefaultType
+	int maxsize = 0;					// max size of union or struct
+	int toalign = 0;					// custom alignment
+	int thisalign = 0;
+
+	// following are used to find variable and also get size of a structure defined in variable
+	// this will hold the variable reference and offset that is given to size() to align if necessary in 64-bit
+	ResultToken ResultToken;
+	ExprTokenType Var1,Var2,Var3,Var4;
+	Var1.symbol = SYM_VAR;
+	Var2.symbol = SYM_INTEGER;
+
+	// used to pass aligntotal counter to structure in structure
+	Var3.symbol = SYM_INTEGER;
+	Var3.value_int64 = (__int64)&align;
+	Var4.symbol = SYM_INTEGER;
+	ExprTokenType *param[] = {&Var1,&Var2,&Var3,&Var4};
+	
+	// will hold pointer to structure definition while we parse it
+	TCHAR *buf;
+	size_t buf_size;
+	// Should be enough buffer to accept any definition and name.
+	TCHAR tempbuf[LINE_SIZE]; // just in case if we have a long comment
+
+	// definition and field name are same max size as variables
+	// also add enough room to store pointers (**) and arrays [1000]
+	// give more room to use local or static variable Function(variable)
+	// Parameter passed to IsDefaultType needs to be ' Definition '
+	// this is because spaces are used as delimiters ( see IsDefaultType function )
+	TCHAR defbuf[MAX_VAR_NAME_LENGTH*2 + 40] = _T(" UInt "); // Set default UInt definition
+	
+	// buffer for arraysize + 2 for bracket ] and terminating character
+	TCHAR intbuf[MAX_INTEGER_LENGTH + 2];
+
+	LPTSTR bitfield = NULL;
+	BYTE bitsize = 0;
+	BYTE bitsizetotal = 0;
+	LPTSTR isBit;
+
+	// Set result to empty string to identify error
+	aResultToken.symbol = SYM_STRING;
+	aResultToken.marker = _T("");
+	
+	// if first parameter is an object (struct), simply return its size
+	if (TokenToObject(*aParam[0]))
+	{
+		aResultToken.symbol = SYM_INTEGER;
+		Struct *obj = (Struct*)TokenToObject(*aParam[0]);
+		aResultToken.value_int64 = obj->mStructSize + (aParamCount > 1 ? TokenToInt64(*aParam[1]) : 0);
+		return;
+	}
+
+	if (aParamCount > 1 && TokenIsNumeric(*aParam[1]))
+	{	// an offset was given, set starting offset 
+		offset = (int)TokenToInt64(*aParam[1]);
+		Var2.value_int64 = (__int64)offset;
+	}
+	if (aParamCount > 2 && TokenIsNumeric(*aParam[2]))
+	{   // a pointer was given to return memory to align
+		aligntotal = (int*)TokenToInt64(*aParam[2]);
+		Var3.value_int64 = (__int64)aligntotal;
+	}
+	// Set buf to beginning of structure definition
+	buf = TokenToString(*aParam[0]);
+
+	toalign = ATOI(buf);
+	TCHAR alignbuf[MAX_INTEGER_LENGTH];
+	if (*(buf + _tcslen(ITOA(toalign, alignbuf))) != ':' || toalign <= 0)
+		Var4.value_int64 = toalign = 0;
+	else
+	{
+		buf += _tcslen(alignbuf) + 1;
+		Var4.value_int64 = toalign;
+	}
+
+	if (aParamCount > 3 && TokenIsPureNumeric(*aParam[3]))
+	{   // a pointer was given to return memory to align
+		toalign = (int)TokenToInt64(*aParam[3]);
+		Var4.value_int64 = (__int64)toalign;
+	}
+
+	// continue as long as we did not reach end of string / structure definition
+	while (*buf)
+	{
+		if (!_tcsncmp(buf,_T("//"),2)) // exclude comments
+		{
+			buf = StrChrAny(buf,_T("\n\r")) ? StrChrAny(buf,_T("\n\r")) : (buf + _tcslen(buf));
+			if (!*buf)
+				break; // end of definition reached
+		}
+		if (buf == StrChrAny(buf,_T("\n\r\t ")))
+		{	// Ignore spaces, tabs and new lines before field definition
+			buf++;
+			continue;
+		}
+		else if (_tcschr(buf,'{') && (!StrChrAny(buf, _T(";,")) || _tcschr(buf,'{') < StrChrAny(buf, _T(";,"))))
+		{   // union or structure in structure definition
+			if (!uniondepth++)
+				totalunionsize = 0; // done here to reduce code
+			if (_tcsstr(buf,_T("struct")) && _tcsstr(buf,_T("struct")) < _tcschr(buf,'{'))
+				unionisstruct[uniondepth] = true; // mark that union is a structure
+			else 
+				unionisstruct[uniondepth] = false; 
+			// backup offset because we need to set it back after this union / struct was parsed
+			// unionsize is initialized to 0 and buffer moved to next character
+			if (mod = offset % STRUCTALIGN((maxsize = sizeof_maxsize(buf))))
+				offset += (thisalign - mod) % thisalign;
+			structalign[uniondepth] = *aligntotal > thisalign ? STRUCTALIGN(*aligntotal) : thisalign;
+			*aligntotal = 0;
+			unionoffset[uniondepth] = offset; // backup offset 
+			unionsize[uniondepth] = 0;
+			bitsizetotal = bitsize = 0;
+			// ignore even any wrong input here so it is even {mystructure...} for struct and  {anyother string...} for union
+			buf = _tcschr(buf,'{') + 1;
+			continue;
+		} 
+		else if (*buf == '}')
+		{	// update union
+			// update size of union in case it was not updated below (e.g. last item was a union or struct)
+			if ((maxsize = offset - unionoffset[uniondepth]) > unionsize[uniondepth])
+				unionsize[uniondepth] = maxsize;
+			// restore offset even if we had a structure in structure
+			if (uniondepth > 1 && unionisstruct[uniondepth - 1])
+			{
+				if (mod = offset % structalign[uniondepth])
+					offset += (structalign[uniondepth] - mod) % structalign[uniondepth];
+			}
+			else
+				offset = unionoffset[uniondepth];
+			if (structalign[uniondepth] > *aligntotal)
+				*aligntotal = structalign[uniondepth];
+			if (unionsize[uniondepth]>totalunionsize)
+				totalunionsize = unionsize[uniondepth];
+			// last item in union or structure, update offset now if not struct, for struct offset is up to date
+			if (--uniondepth == 0)
+			{
+				// end of structure, align it
+				//if (mod = totalunionsize % *aligntotal)
+				//	totalunionsize += (*aligntotal - mod) % *aligntotal;
+				// correct offset
+				offset += totalunionsize;
+			}
+			bitsizetotal = bitsize = 0;
+			buf++;
+			if (buf == StrChrAny(buf,_T(";,")))
+				buf++;
+			continue;
+		}
+		// set default
+		arraydef = 0;
+
+		// copy current definition field to temporary buffer
+		if (StrChrAny(buf, _T("};,")))
+		{
+			if ((buf_size = _tcscspn(buf, _T("};,"))) > LINE_SIZE - 1)
+			{
+				g_script->RuntimeError(ERR_INVALID_STRUCT, buf);
+				return;
+			}
+			_tcsncpy(tempbuf,buf,buf_size);
+			tempbuf[buf_size] = '\0';
+		}
+		else if (_tcslen(buf) > LINE_SIZE - 1)
+		{
+			g_script->RuntimeError(ERR_INVALID_STRUCT, buf);
+			return;
+		}
+		else
+			_tcscpy(tempbuf,buf);
+		
+		// Trim trailing spaces
+		rtrim(tempbuf);
+
+		// Array
+		if (_tcschr(tempbuf,'['))
+		{
+			_tcsncpy(intbuf,_tcschr(tempbuf,'['),MAX_INTEGER_LENGTH);
+			intbuf[_tcscspn(intbuf,_T("]")) + 1] = '\0';
+			arraydef = (int)ATOI64(intbuf + 1);
+			// remove array definition
+			StrReplace(tempbuf, intbuf, _T(""), SCS_SENSITIVE, 1, LINE_SIZE);
+		}
+		if (_tcschr(tempbuf, '['))
+		{	// array to array and similar not supported
+			g_script->RuntimeError(ERR_INVALID_STRUCT, tempbuf);
+			return;
+		}
+		// Pointer, while loop will continue here because we only need size
+		if (_tcschr(tempbuf,'*'))
+		{
+			if (_tcschr(tempbuf, ':'))
+			{
+				g_script->RuntimeError(ERR_INVALID_STRUCT_BIT_POINTER, tempbuf);
+				return;
+			}
+			// align offset for pointer
+			if (mod = offset % STRUCTALIGN(ptrsize))
+				offset += (thisalign - mod) % thisalign;
+			offset += ptrsize * (arraydef ? arraydef : 1);
+			if (thisalign > *aligntotal)
+				*aligntotal = thisalign;
+			// update offset
+			if (uniondepth)
+			{
+				if ((maxsize = offset - unionoffset[uniondepth]) > unionsize[uniondepth])
+					unionsize[uniondepth] = maxsize;
+				// reset offset if in union and union is not a structure
+				if (!unionisstruct[uniondepth])
+					offset = unionoffset[uniondepth];
+			}
+
+			// Move buffer pointer now and continue
+			if (_tcschr(buf,'}') && (!StrChrAny(buf, _T(";,")) || _tcschr(buf,'}') < StrChrAny(buf, _T(";,"))))
+				buf += _tcscspn(buf,_T("}")); // keep } character to update union
+			else if (StrChrAny(buf, _T(";,")))
+				buf += _tcscspn(buf,_T(";,")) + 1;
+			else
+				buf += _tcslen(buf);
+			continue;
+		}
+		
+		// if offset is 0 and there are no };, characters, it means we have a pure definition
+		if (StrChrAny(tempbuf, _T(" \t")) || StrChrAny(tempbuf,_T("};,")) || (!StrChrAny(buf,_T("};,")) && !offset))
+		{
+			if ((buf_size = _tcscspn(tempbuf,_T("\t ["))) > MAX_VAR_NAME_LENGTH*2 + 30)
+			{
+				g_script->RuntimeError(ERR_INVALID_STRUCT, tempbuf);
+				return;
+			}
+			isBit = StrChrAny(omit_leading_whitespace(tempbuf), _T(" \t"));
+			if (!isBit || *isBit != ':')
+			{
+				if (_tcsnicmp(defbuf + 1, tempbuf, _tcslen(defbuf) - 2))
+					bitsizetotal = bitsize = 0;
+				_tcsncpy(defbuf + 1, tempbuf, _tcscspn(tempbuf, _T("\t [")));
+				_tcscpy(defbuf + 1 + _tcscspn(tempbuf, _T("\t [")), _T(" "));
+			}
+			if (bitfield = _tcschr(tempbuf, ':'))
+			{
+				if (bitsizetotal / 8 == thissize)
+					bitsizetotal = bitsize = 0;
+				bitsizetotal += bitsize = ATOI(bitfield + 1);
+			}
+			else
+				bitsizetotal = bitsize = 0;
+		}
+		else // Not 'TypeOnly' definition because there are more than one fields in structure so use default type UInt
+		{
+			// Commented out following line to keep previous or default UInt definition like in c++, e.g. "Int x,y,Char a,b", 
+			// Note: separator , or ; can be still used but
+			// _tcscpy(defbuf,_T(" UInt "));
+			if (bitfield = _tcschr(tempbuf, ':'))
+			{
+				if (bitsizetotal / 8 == thissize)
+					bitsizetotal = bitsize = 0;
+				bitsizetotal += bitsize = ATOI(bitfield + 1);
+			}
+			else
+				bitsizetotal = bitsize = 0;
+		}
+
+		// Now find size in default types array and create new field
+		// If Type not found, resolve type to variable and get size of struct defined in it
+		if ((!_tcscmp(defbuf, _T(" bool ")) && (thissize = 1)) || (thissize = IsDefaultType(defbuf)))
+		{
+			// align offset
+			if ((!bitsize || bitsizetotal == bitsize) && thissize > 1 && (mod = offset % STRUCTALIGN(thissize)))
+				offset += (thisalign - mod) % thisalign;
+			if (!bitsize || bitsizetotal == bitsize)
+				offset += thissize * (arraydef ? arraydef : 1);
+			if (thisalign > *aligntotal)
+				*aligntotal = thisalign; // > ptrsize ? ptrsize : thissize;
+		}
+		else // type was not found, check for user defined type in variables
+		{
+			Var1.var = NULL;
+			UserFunc *bkpfunc = NULL;
+			// check if we have a local/static declaration and resolve to function
+			// For example Struct("MyFunc(mystruct) mystr")
+			if (_tcschr(defbuf,'('))
+			{
+				bkpfunc = g->CurrentFunc; // don't bother checking, just backup and restore later
+				g->CurrentFunc = (UserFunc *)g_script->FindFunc(defbuf + 1,_tcscspn(defbuf,_T("(")) - 1);
+				if (g->CurrentFunc) // break if not found to identify error
+				{
+					_tcscpy(tempbuf,defbuf + 1);
+					_tcscpy(defbuf + 1,tempbuf + _tcscspn(tempbuf,_T("(")) + 1); //,_tcschr(tempbuf,')') - _tcschr(tempbuf,'('));
+					_tcscpy(_tcschr(defbuf,')'),_T(" \0"));
+					Var1.var = g_script->FindVar(defbuf + 1,_tcslen(defbuf) - 2,FINDVAR_LOCAL);
+					g->CurrentFunc = bkpfunc;
+				}
+				else // release object and return
+				{
+					g->CurrentFunc = bkpfunc;
+					g_script->RuntimeError(ERR_INVALID_STRUCT_IN_FUNC, defbuf);
+					return;
+				}
+			}
+			else if (g->CurrentFunc) // try to find local variable first
+				Var1.var = g_script->FindVar(defbuf + 1,_tcslen(defbuf) - 2,FINDVAR_LOCAL);
+			// try to find global variable if local was not found or we are not in func
+			if (Var1.var == NULL)
+				Var1.var = g_script->FindVar(defbuf + 1,_tcslen(defbuf) - 2,FINDVAR_GLOBAL);
+			if (Var1.var != NULL)
+			{
+				// Call BIF_sizeof passing offset in second parameter to align if necessary
+				int newaligntotal = sizeof_maxsize(TokenToString(Var1));
+				if (STRUCTALIGN(newaligntotal) > *aligntotal)
+					*aligntotal = thisalign;
+				if ((!bitsize || bitsizetotal == bitsize) && offset && (mod = offset % *aligntotal))
+					offset += (*aligntotal - mod) % *aligntotal;
+				param[1]->value_int64 = (__int64)offset;
+				BIF_sizeof(ResultToken,param,3);
+				if (ResultToken.symbol != SYM_INTEGER)
+				{	// could not resolve structure
+					g_script->RuntimeError(ERR_INVALID_STRUCT, defbuf);
+					return;
+				}
+				// sizeof was given an offset that it applied and aligned if necessary, so set offset =  and not +=
+				if (!bitsize || bitsizetotal == bitsize)
+					offset = (int)ResultToken.value_int64 + (arraydef ? ((arraydef - 1) * ((int)ResultToken.value_int64 - offset)) : 0);
+			}
+			else // No variable was found and it is not default type so we can't determine size, return empty string.
+			{
+				g_script->RuntimeError(ERR_INVALID_STRUCT, defbuf);
+				return;
+			}
+		}
+		// update union size
+		if (uniondepth)
+		{
+			if ((maxsize = offset - unionoffset[uniondepth]) > unionsize[uniondepth])
+				unionsize[uniondepth] = maxsize;
+			if (!unionisstruct[uniondepth])
+			{
+				// reset offset if in union and union is not a structure
+				offset = unionoffset[uniondepth];
+				// reset bit offset and size
+				bitsize = bitsizetotal = 0;
+			}
+		}
+		// Move buffer pointer now
+		if (_tcschr(buf,'}') && (!StrChrAny(buf, _T(";,")) || _tcschr(buf,'}') < StrChrAny(buf, _T(";,"))))
+			buf += _tcscspn(buf,_T("}")); // keep } character to update union
+		else if (StrChrAny(buf, _T(";,")))
+			buf += _tcscspn(buf,_T(";,")) + 1;
+		else
+			buf += _tcslen(buf);
+	}
+	if (*aligntotal && (mod = offset % *aligntotal)) // align even if offset was given e.g. for _NMHDR:="HWND hwndFrom,UINT_PTR idFrom,UINT code", _NMTVGETINFOTIP: = "_NMHDR hdr,UINT uFlags,UInt link"
+		offset += (*aligntotal - mod) % *aligntotal;
+	aResultToken.symbol = SYM_INTEGER;
+	aResultToken.value_int64 = offset;
+}
+
+//
+// BIF_Struct - Create structure
+//
+
+BIF_DECL(BIF_Struct)
+{
+	// At least the definition for structure must be given
+	if (!aParamCount)
+		return;
+	Struct* obj = Struct::Create(aParam, aParamCount);
+	if (obj)
+	{
+		aResultToken.symbol = SYM_OBJECT;
+		aResultToken.object = obj;
+		return;
+		// DO NOT ADDREF: after we return, the only reference will be in aResultToken.
+	}
+	else
+	{
+		aResultToken.SetResult(FAIL);
+		return;
+	}
+}
+
+//
+// ObjRawSize()
+//
+
+__int64 ObjRawSize(IObject *aObject, IObject *aObjects)
+{
+	ResultToken result_token, this_token, aKey, aValue;
+	ExprTokenType *params[] = { &aKey, &aValue };
+	this_token.symbol = SYM_OBJECT;
+
+	CriticalObject *aCriticalObject;
+	if (aCriticalObject = dynamic_cast<CriticalObject*>(aObject))
+			aObject = (IObject*)aCriticalObject->GetObj();
+
+	if ((_tcscmp(aObject->Type(), _T("Object")))
+		&&(_tcscmp(aObject->Type(), _T("Array")))
+		&&(_tcscmp(aObject->Type(), _T("Map")))
+		&&(_tcscmp(aObject->Type(), _T("Buffer")))
+		&&(_tcscmp(aObject->Type(), _T("Struct"))))
+		g_script->ScriptError(ERR_TYPE_MISMATCH, aObject->Type());
+
+	__int64 aSize = 1 + sizeof(__int64);
+	result_token.InitResult(L"");
+	if (!_tcscmp(aObject->Type(), _T("Buffer")))
+	{
+		this_token.object = aObject;
+		result_token.InitResult(L"");
+		aObject->Invoke(result_token, IT_GET, _T("size"), this_token, nullptr, 0);
+		aSize += result_token.value_int64 + sizeof(__int64);
+	}
+
+	this_token.object = aObjects;
+
+	IObject *enumerator;
+	ResultType result;
+	ResultToken enum_token;
+	enum_token.object = aObject;
+	enum_token.symbol = SYM_OBJECT;
+
+	// create variables to use in for loop / for enumeration
+	// these will be deleted afterwards
+
+	Var vkey, vval;
+
+	if (!aObjects)
+	{
+		aKey.symbol = SYM_OBJECT;
+		aKey.object = aObject;
+		aValue.symbol = SYM_STRING;
+		aValue.marker = _T("");
+		aValue.marker_length = 0;
+		aObjects = Map::Create(params, 2);
+	}
+	else
+	{
+		aObjects->AddRef();
+		aKey.symbol = SYM_OBJECT;
+		aKey.object = aObject;
+		this_token.object = aObjects;
+		result_token.InitResult(L"");
+		aObjects->Invoke(result_token, IT_CALL, _T("Has"), this_token, params, 1);
+		if (!result_token.value_int64)
+		{
+			aKey.symbol = SYM_OBJECT;
+			aKey.object = aObject;
+			aValue.symbol = SYM_STRING;
+			aValue.marker = _T("");
+			aValue.marker_length = 0;
+			result_token.InitResult(L"");
+			aObjects->Invoke(result_token, IT_SET, 0, this_token, params, 2);
+		}
+	}
+	// Prepare parameters for the loop below: enum.Next(var1 [, var2])
+	aKey.SetVarRef(&vkey);
+	aValue.SetVarRef(&vval);
+
+	IObject *aIsObject;
+	__int64 aIsValue;
+	SymbolType aVarType;
+	if (_tcscmp(aObject->Type(), _T("Buffer")) && _tcscmp(aObject->Type(), _T("Object")))
+	{
+		result = GetEnumerator(enumerator, enum_token, 2, false);
+		// Check if object returned an enumerator, otherwise return
+		if (result != OK)
+			return 0;
+		for (;;)
+		{
+			result = CallEnumerator(enumerator, params, 2, false);
+			if (result != CONDITION_TRUE)
+				break;
+
+			if (aIsObject = TokenToObject(aKey))
+			{
+				this_token.object = aObjects;
+				result_token.InitResult(L"");
+				aObjects->Invoke(result_token, IT_CALL, _T("Has"), this_token, params, 1);
+				if (result_token.value_int64)
+					aSize += 1 + sizeof(__int64);
+				else
+					aSize += ObjRawSize(aIsObject, aObjects);
+			}
+			else
+			{
+				vkey.ToTokenSkipAddRef(aKey);
+				if ((aVarType = aKey.symbol) == SYM_STRING)
+					aSize += (aKey.marker_length ? (aKey.marker_length + 1) * sizeof(TCHAR) : 0) + 9;
+				else
+					aSize += (aVarType == SYM_FLOAT || (aIsValue = TokenToInt64(aKey)) > 4294967295) ? 9 : aIsValue > 65535 ? 5 : aIsValue > 255 ? 3 : aIsValue > -129 ? 2 : aIsValue > -32769 ? 3 : aIsValue >= INT_MIN ? 5 : 9;
+			}
+
+			if (aIsObject = TokenToObject(aValue))
+			{
+				aKey.symbol = SYM_OBJECT;
+				aKey.object = aIsObject;
+				this_token.object = aObjects;
+				result_token.InitResult(L"");
+				aObjects->Invoke(result_token, IT_CALL, _T("Has"), this_token, params, 1);
+				if (result_token.value_int64)
+					aSize += 1 + sizeof(__int64);
+				else
+					aSize += ObjRawSize(aIsObject, aObjects);
+			}
+			else
+			{
+				aValue.var->ToTokenSkipAddRef(aValue);
+				if ((aVarType = aValue.symbol) == SYM_STRING)
+					aSize += (aValue.marker_length ? (aValue.marker_length + 1) * sizeof(TCHAR) : 0) + 9;
+				else
+					aSize += aVarType == SYM_FLOAT || (aIsValue = TokenToInt64(aValue)) > 4294967295 ? 9 : aIsValue > 65535 ? 5 : aIsValue > 255 ? 3 : aIsValue > -129 ? 2 : aIsValue > -32769 ? 3 : aIsValue >= INT_MIN ? 5 : 9;
+			}
+
+			// release object if it was assigned prevoiously when calling enum.Next
+			if (vkey.IsObject())
+				vkey.ReleaseObject();
+			if (vval.IsObject())
+				vval.ReleaseObject();
+
+			aKey.SetVarRef(&vkey);
+			aValue.SetVarRef(&vval);
+		}
+		enumerator->Release();
+	}
+
+	result_token.InitResult(L"");
+	this_token.object = aObject;
+	aObject->Invoke(result_token, IT_CALL, _T("OwnProps"), this_token, nullptr, 0);
+	if (result_token.symbol == SYM_OBJECT)
+	{
+		enumerator = result_token.object;
+		for (;;)
+		{
+			result = CallEnumerator(enumerator, params, 2, false);
+			if (result != CONDITION_TRUE)
+				break;
+
+			// Properties are always strings
+			vkey.ToTokenSkipAddRef(aKey);
+			aSize += (aKey.marker_length ? (aKey.marker_length + 1) * sizeof(TCHAR) : 0) + 9;
+
+			if (aIsObject = TokenToObject(aValue))
+			{
+				aKey.symbol = SYM_OBJECT;
+				aKey.object = aIsObject;
+				this_token.object = aObjects;
+				result_token.InitResult(L"");
+				aObjects->Invoke(result_token, IT_CALL, _T("Has"), this_token, params, 1);
+				if (result_token.value_int64)
+					aSize += 1 + sizeof(__int64);
+				else
+					aSize += ObjRawSize(aIsObject, aObjects);
+			}
+			else
+			{
+				aValue.var->ToTokenSkipAddRef(aValue);
+				if ((aVarType = aValue.symbol) == SYM_STRING)
+					aSize += (aValue.marker_length ? (aValue.marker_length + 1) * sizeof(TCHAR) : 0) + 9;
+				else
+					aSize += aVarType == SYM_FLOAT || (aIsValue = TokenToInt64(aValue)) > 4294967295 ? 9 : aIsValue > 65535 ? 5 : aIsValue > 255 ? 3 : aIsValue > -129 ? 2 : aIsValue > -32769 ? 3 : aIsValue >= INT_MIN ? 5 : 9;
+			}
+
+			// release object if it was assigned prevoiously when calling enum.Next
+			if (vkey.IsObject())
+				vkey.ReleaseObject();
+			if (vval.IsObject())
+				vval.ReleaseObject();
+
+			aKey.symbol = SYM_VAR;
+			aKey.var = &vkey;
+			aKey.var_usage = Script::VARREF_REF;
+			aValue.symbol = SYM_VAR;
+			aValue.var = &vval;
+			aValue.var_usage = Script::VARREF_REF;
+		}
+		enumerator->Release();
+	}
+	vkey.Free();
+	vval.Free();
+	aObjects->Release();
+	return aSize;
+}
+
+//
+// ObjRawDump()
+//
+
+__int64 ObjRawDump(IObject *aObject, char *aBuffer, Map *aObjects, UINT &aObjCount)
+{
+
+	ResultToken result_token, this_token, aKey, aValue;
+	ExprTokenType *params[] = { &aKey, &aValue };
+	
+	this_token.symbol = SYM_OBJECT;
+	
+	CriticalObject *aCriticalObject;
+	if (aCriticalObject = dynamic_cast<CriticalObject*>(aObject))
+		aObject = (IObject*)aCriticalObject->GetObj();
+
+	Object *aObj = dynamic_cast<Object*>(aObject);
+	char *aThisBuffer = aBuffer;
+	__int64 bufsize;
+	if (!_tcscmp(aObject->Type(), _T("Object")))
+		*aThisBuffer = (char)(aObj->mUnsorted ? -14 : -13);
+	else if (!_tcscmp(aObject->Type(), _T("Array")))
+		*aThisBuffer = (char)(aObj->mUnsorted ? -16 : -15);
+	else if (!_tcscmp(aObject->Type(), _T("Map")))
+		*aThisBuffer = (char)(aObj->mUnsorted ? -18 : -17);
+	else if (!_tcscmp(aObject->Type(), _T("Struct")))
+		*aThisBuffer = (char)-18;
+	else if (!_tcscmp(aObject->Type(), _T("Buffer")))
+	{
+		this_token.object = aObject;
+		result_token.InitResult(L"");
+		aObject->Invoke(result_token, IT_GET, _T("size"), this_token, nullptr, 0);
+		bufsize = result_token.value_int64;
+		*aThisBuffer = (char)-19;
+		result_token.InitResult(L"");
+		aObject->Invoke(result_token, IT_GET, _T("ptr"), this_token, nullptr, 0);
+		memmove(aThisBuffer + 1 + 2 * sizeof(__int64), (void *)result_token.value_int64, (size_t)bufsize);
+		*(__int64*)(aThisBuffer + 1 + sizeof(__int64)) = bufsize;
+		aThisBuffer += bufsize + sizeof(__int64);
+	}
+	else
+		g_script->ScriptError(ERR_TYPE_MISMATCH, aObject->Type());
+
+	aThisBuffer += 1 + sizeof(__int64);
+
+	IObject *enumerator;
+	ResultType result;
+	Var vkey, vval;
+
+	aKey.symbol = SYM_OBJECT;
+	aKey.object = aObject;
+	this_token.object = aObjects;
+	result_token.InitResult(L"");
+	aObjects->Invoke(result_token, IT_CALL, _T("Has"), this_token, params, 1);
+	if (!result_token.value_int64)
+	{
+		aValue.symbol = SYM_INTEGER;
+		aValue.value_int64 = aObjCount++;
+		result_token.InitResult(L"");
+		aObjects->Invoke(result_token, IT_SET, 0, this_token, params, 2);
+	}
+
+	// Prepare parameters for the loop below
+	aKey.symbol = SYM_VAR;
+	aKey.var = &vkey;
+	aKey.mem_to_free = 0;
+	aKey.var_usage = Script::VARREF_REF;
+	aValue.symbol = SYM_VAR;
+	aValue.var = &vval;
+	aValue.mem_to_free = 0;
+	aValue.var_usage = Script::VARREF_REF;
+
+	IObject *aIsObject;
+	__int64 aIsValue;
+	__int64 aThisSize;
+	SymbolType aVarType;
+
+	if (_tcscmp(aObject->Type(), _T("Buffer")) && _tcscmp(aObject->Type(), _T("Object")))
+	{
+		result_token.object = aObject;
+		result_token.symbol = SYM_OBJECT;
+		result = GetEnumerator(enumerator, result_token, 2, false);
+		if (result != OK)
+			return NULL;
+		for (;;)
+		{
+			result = CallEnumerator(enumerator, params, 2, false);
+			if (result != CONDITION_TRUE)
+				break;
+
+			// copy Key
+			if (aIsObject = TokenToObject(aKey))
+			{
+				result_token.InitResult(L"");
+				aObjects->Invoke(result_token, IT_CALL, _T("Has"), this_token, params, 1);
+				if (result_token.value_int64)
+				{
+					result_token.InitResult(L"");
+					aObjects->Invoke(result_token, IT_GET, 0, this_token, params, 1);
+					*aThisBuffer = (char)-12;
+					aThisBuffer += 1;
+					*(__int64*)aThisBuffer = result_token.value_int64;
+					aThisBuffer += sizeof(__int64);
+				}
+				else
+				{
+					aThisSize = ObjRawDump(aIsObject, aThisBuffer, aObjects, aObjCount);
+					*(__int64*)(aThisBuffer + 1) = aThisSize - 1 - sizeof(__int64);
+					aThisBuffer += aThisSize;
+				}
+			}
+			else
+			{
+				aKey.var->ToTokenSkipAddRef(aKey);
+				if ((aVarType = aKey.symbol) == SYM_STRING)
+				{
+					*aThisBuffer++ = (char)-10;
+					*(__int64*)aThisBuffer = aThisSize = (__int64)(aKey.marker_length ? (aKey.marker_length + 1) * sizeof(TCHAR) : 0);
+					aThisBuffer += sizeof(__int64);
+					if (aThisSize)
+					{
+						memcpy(aThisBuffer, aKey.marker, (size_t)aThisSize);
+						aThisBuffer += aThisSize;
+					}
+				}
+				else if (aVarType == SYM_FLOAT)
+				{
+					*aThisBuffer++ = (char)-9;
+					*(double*)aThisBuffer = TokenToDouble(aKey);
+					aThisBuffer += sizeof(__int64);
+				}
+				else if ((aIsValue = TokenToInt64(aKey)) > 4294967295)
+				{
+					*aThisBuffer++ = (char)-8;
+					*(__int64*)aThisBuffer = aIsValue;
+					aThisBuffer += sizeof(__int64);
+				}
+				else if (aIsValue > 65535)
+				{
+					*aThisBuffer++ = (char)-6;
+					*(UINT*)aThisBuffer = (UINT)aIsValue;
+					aThisBuffer += sizeof(UINT);
+				}
+				else if (aIsValue > 255)
+				{
+					*aThisBuffer++ = (char)-4;
+					*(USHORT*)aThisBuffer = (USHORT)aIsValue;
+					aThisBuffer += sizeof(USHORT);
+				}
+				else if (aIsValue > -1)
+				{
+					*aThisBuffer++ = (char)-2;
+					*aThisBuffer = (BYTE)aIsValue;
+					aThisBuffer += sizeof(BYTE);
+				}
+				else if (aIsValue > -129)
+				{
+					*aThisBuffer++ = (char)-1;
+					*aThisBuffer = (char)aIsValue;
+					aThisBuffer += sizeof(char);
+				}
+				else if (aIsValue > -32769)
+				{
+					*aThisBuffer++ = (char)-3;
+					*(short*)aThisBuffer = (short)aIsValue;
+					aThisBuffer += sizeof(short);
+				}
+				else if (aIsValue >= INT_MIN)
+				{
+					*aThisBuffer++ = (char)-5;
+					*(int*)aThisBuffer = (int)aIsValue;
+					aThisBuffer += sizeof(int);
+				}
+				else
+				{
+					*aThisBuffer++ = (char)-7;
+					*(__int64*)aThisBuffer = (__int64)aIsValue;
+					aThisBuffer += sizeof(__int64);
+				}
+			}
+
+			// copy Value
+			if (aIsObject = TokenToObject(aValue))
+			{
+				aKey.symbol = SYM_OBJECT;
+				aKey.object = aIsObject;
+				result_token.InitResult(L"");
+				aObjects->Invoke(result_token, IT_CALL, _T("Has"), this_token, params + 1, 1);
+				if (result_token.value_int64)
+				{
+					result_token.InitResult(L"");
+					aObjects->Invoke(result_token, IT_GET, 0, this_token, params + 1, 1);
+					*aThisBuffer++ = (char)12;
+					*(__int64*)aThisBuffer = result_token.value_int64;
+					aThisBuffer += sizeof(__int64);
+				}
+				else
+				{
+					aThisSize = ObjRawDump(aIsObject, aThisBuffer, aObjects, aObjCount);
+					*(__int64*)(aThisBuffer + 1) = aThisSize - 1 - sizeof(__int64);
+					*(char*)aThisBuffer = -1 * *(char*)aThisBuffer;
+					aThisBuffer += aThisSize;
+				}
+			}
+			else
+			{
+				aValue.var->ToTokenSkipAddRef(aValue);
+				if ((aVarType = aValue.symbol) == SYM_STRING)
+				{
+					*aThisBuffer++ = (char)10;
+					*(__int64*)aThisBuffer = aThisSize = (__int64)(aValue.marker_length ? (aValue.marker_length + 1) * sizeof(TCHAR) : 0);
+					aThisBuffer += sizeof(__int64);
+					if (aThisSize)
+					{
+						memcpy(aThisBuffer, aValue.marker, (size_t)aThisSize);
+						aThisBuffer += aThisSize;
+					}
+				}
+				else if (aVarType == SYM_FLOAT)
+				{
+					*aThisBuffer++ = (char)9;
+					*(double*)aThisBuffer = TokenToDouble(aValue);
+					aThisBuffer += sizeof(double);
+				}
+				else if ((aIsValue = TokenToInt64(aValue)) > 4294967295)
+				{
+					*aThisBuffer++ = (char)8;
+					*(__int64*)aThisBuffer = aIsValue;
+					aThisBuffer += sizeof(__int64);
+				}
+				else if (aIsValue > 65535)
+				{
+					*aThisBuffer++ = (char)6;
+					*(UINT*)aThisBuffer = (UINT)aIsValue;
+					aThisBuffer += sizeof(UINT);
+				}
+				else if (aIsValue > 255)
+				{
+					*aThisBuffer++ = (char)4;
+					*(USHORT*)aThisBuffer = (USHORT)aIsValue;
+					aThisBuffer += sizeof(USHORT);
+				}
+				else if (aIsValue > -1)
+				{
+					*aThisBuffer++ = (char)2;
+					*aThisBuffer = (BYTE)aIsValue;
+					aThisBuffer += sizeof(BYTE);
+				}
+				else if (aIsValue > -129)
+				{
+					*aThisBuffer++ = (char)1;
+					*aThisBuffer = (char)aIsValue;
+					aThisBuffer += sizeof(char);
+				}
+				else if (aIsValue > -32769)
+				{
+					*aThisBuffer++ = (char)3;
+					*(short*)aThisBuffer = (short)aIsValue;
+					aThisBuffer += sizeof(short);
+				}
+				else if (aIsValue > INT_MIN)
+				{
+					*aThisBuffer++ = (char)5;
+					*aThisBuffer = (int)aIsValue;
+					aThisBuffer += sizeof(int);
+				}
+				else
+				{
+					*aThisBuffer++ = (char)7;
+					*(__int64*)aThisBuffer = (__int64)aIsValue;
+					aThisBuffer += sizeof(__int64);
+				}
+			}
+
+			// release object if it was assigned prevoiously when calling enum
+			if (vkey.IsObject())
+				vkey.ReleaseObject();
+			if (vval.IsObject())
+				vval.ReleaseObject();
+
+			aKey.symbol = SYM_VAR;
+			aKey.var = &vkey;
+			aKey.var_usage = Script::VARREF_REF;
+			aValue.symbol = SYM_VAR;
+			aValue.var = &vval;
+			aValue.var_usage = Script::VARREF_REF;
+		}
+		// release enumerator and free vars
+		enumerator->Release();
+	}
+
+	this_token.object = aObject;
+	result_token.InitResult(L"");
+	aObject->Invoke(result_token, IT_CALL, _T("OwnProps"), this_token, nullptr, 0);
+	if (result_token.symbol == SYM_OBJECT)
+		enumerator = result_token.object;
+	else
+		return NULL;
+	this_token.object = aObjects;
+
+	for (;;)
+	{
+		result = CallEnumerator(enumerator, params, 2, false);
+		if (result != CONDITION_TRUE)
+			break;
+
+		// copy Key
+		aKey.var->ToTokenSkipAddRef(aKey);
+		*aThisBuffer++ = (char)-11;
+		*(__int64*)aThisBuffer = aThisSize = (__int64)(aKey.marker_length ? (aKey.marker_length + 1) * sizeof(TCHAR) : 0);
+		aThisBuffer += sizeof(__int64);
+		if (aThisSize)
+		{
+			memcpy(aThisBuffer, aKey.marker, (size_t)aThisSize);
+			aThisBuffer += aThisSize;
+		}
+
+		// copy Value
+		if (aIsObject = TokenToObject(aValue))
+		{
+			aKey.symbol = SYM_OBJECT;
+			aKey.object = aIsObject;
+			result_token.InitResult(L"");
+			aObjects->Invoke(result_token, IT_CALL, _T("Has"), this_token, params + 1, 1);
+			if (result_token.value_int64)
+			{
+				result_token.InitResult(L"");
+				aObjects->Invoke(result_token, IT_GET, 0, this_token, params + 1, 1);
+				*aThisBuffer++ = (char)12;
+				*(__int64*)aThisBuffer = result_token.value_int64;
+				aThisBuffer += sizeof(__int64);
+			}
+			else
+			{
+				aThisSize = ObjRawDump(aIsObject, aThisBuffer, aObjects, aObjCount);
+				*(__int64*)(aThisBuffer + 1) = aThisSize - 1 - sizeof(__int64);
+				*(char*)aThisBuffer = -1 * *(char*)aThisBuffer;
+				aThisBuffer += aThisSize;
+			}
+		}
+		else
+		{
+			aValue.var->ToTokenSkipAddRef(aValue);
+			if ((aVarType = aValue.symbol) == SYM_STRING)
+			{
+				*aThisBuffer++ = (char)10;
+				*(__int64*)aThisBuffer = aThisSize = (__int64)(aValue.marker_length ? (aValue.marker_length + 1) * sizeof(TCHAR) : 0);
+				aThisBuffer += sizeof(__int64);
+				if (aThisSize)
+				{
+					memcpy(aThisBuffer, aValue.marker, (size_t)aThisSize);
+					aThisBuffer += aThisSize;
+				}
+			}
+			else if (aVarType == SYM_FLOAT)
+			{
+				*aThisBuffer++ = (char)9;
+				*(double*)aThisBuffer = TokenToDouble(aValue);
+				aThisBuffer += sizeof(double);
+			}
+			else if ((aIsValue = TokenToInt64(aValue)) > 4294967295)
+			{
+				*aThisBuffer++ = (char)8;
+				*(__int64*)aThisBuffer = aIsValue;
+				aThisBuffer += sizeof(__int64);
+			}
+			else if (aIsValue > 65535)
+			{
+				*aThisBuffer++ = (char)6;
+				*(UINT*)aThisBuffer = (UINT)aIsValue;
+				aThisBuffer += sizeof(UINT);
+			}
+			else if (aIsValue > 255)
+			{
+				*aThisBuffer++ = (char)4;
+				*(USHORT*)aThisBuffer = (USHORT)aIsValue;
+				aThisBuffer += sizeof(USHORT);
+			}
+			else if (aIsValue > -1)
+			{
+				*aThisBuffer++ = (char)2;
+				*aThisBuffer = (BYTE)aIsValue;
+				aThisBuffer += sizeof(BYTE);
+			}
+			else if (aIsValue > -129)
+			{
+				*aThisBuffer++ = (char)1;
+				*aThisBuffer = (char)aIsValue;
+				aThisBuffer += sizeof(char);
+			}
+			else if (aIsValue > -32769)
+			{
+				*aThisBuffer++ = (char)3;
+				*(short*)aThisBuffer = (short)aIsValue;
+				aThisBuffer += sizeof(short);
+			}
+			else if (aIsValue > INT_MIN)
+			{
+				*aThisBuffer++ = (char)5;
+				*aThisBuffer = (int)aIsValue;
+				aThisBuffer += sizeof(int);
+			}
+			else
+			{
+				*aThisBuffer++ = (char)7;
+				*(__int64*)aThisBuffer = (__int64)aIsValue;
+				aThisBuffer += sizeof(__int64);
+			}
+		}
+
+		// release object if it was assigned prevoiously when calling enum
+		if (vkey.IsObject())
+			vkey.ReleaseObject();
+		if (vval.IsObject())
+			vval.ReleaseObject();
+
+		aKey.symbol = SYM_VAR;
+		aKey.var = &vkey;
+		aKey.var_usage = Script::VARREF_REF;
+		aValue.symbol = SYM_VAR;
+		aValue.var = &vval;
+		aValue.var_usage = Script::VARREF_REF;
+	}
+	// release enumerator and free vars
+	enumerator->Release();
+
+	vkey.Free();
+	vval.Free();
+	return aThisBuffer - aBuffer;
+}
+
+//
+// ObjDump()
+//
+
+BIF_DECL(BIF_ObjDump)
+{
+	aResultToken.symbol = SYM_INTEGER;
+	IObject *aObject;
+	if (!(aObject = TokenToObject(*aParam[0])))
+	{
+		g_script->ScriptError(ERR_INVALID_ARG_TYPE);
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = _T("");
+		return;
+	}
+	DWORD aSize = (DWORD)ObjRawSize(aObject, NULL);
+	char *aBuffer = (char*)malloc(aSize);
+	if (!aBuffer)
+	{
+		g_script->ScriptError(ERR_OUTOFMEM);
+		aResultToken.SetValue(_T(""));
+		return;
+	}
+	*(__int64*)(aBuffer + 1) = aSize - 1 - sizeof(__int64);
+	Map *aObjects = Map::Create();
+	UINT aObjCount = 0;
+	if (aSize != ObjRawDump(aObject, aBuffer, aObjects, aObjCount))
+	{
+		aObjects->Release();
+		free(aBuffer);
+		g_script->ScriptError(_T("Error dumping Object."));
+		aResultToken.symbol = SYM_STRING;
+		aResultToken.marker = _T("");
+		return;
+	}
+	aObjects->Release();
+	if ((aParamCount > 1 && !ParamIndexIsOmittedOrEmpty(1)) || (aParamCount > 2 && TokenToInt64(*aParam[2]) != 0))
+	{
+		LPVOID aDataBuf;
+		TCHAR *pw[1024] = {};
+		if (!ParamIndexIsOmittedOrEmpty(1) && aParamCount > 2 && TokenToInt64(*aParam[2]) == 0)
+		{
+			g_script->ScriptError(ERR_PARAM3_INVALID, _T("Compression is required for password."));
+			return;
+		}
+		if (!ParamIndexIsOmittedOrEmpty(1))
+		{
+			TCHAR *pwd = TokenToString(*aParam[1]);
+			size_t pwlen = _tcslen(TokenToString(*aParam[1]));
+			for (size_t i = 0; i <= pwlen; i++)
+				pw[i] = &pwd[i];
+		}
+		DWORD aCompressedSize = CompressBuffer((BYTE*)aBuffer, aDataBuf, aSize, pw);
+		if (aCompressedSize)
+		{
+			free(aBuffer);
+			aBuffer = (char*)malloc(aCompressedSize);
+			if (!aBuffer)
+			{
+				g_script->ScriptError(ERR_OUTOFMEM);
+				aResultToken.SetValue(_T(""));
+				return;
+			}
+			memcpy(aBuffer, aDataBuf, aCompressedSize);
+			aObject = BufferObject::Create(aBuffer, aCompressedSize);
+			dynamic_cast<BufferObject*>(aObject)->SetBase(BufferObject::sPrototype);
+			VirtualFree(aDataBuf, 0, MEM_RELEASE);
+		}
+	}
+	else
+	{
+		aObject = BufferObject::Create(aBuffer, aSize);
+		dynamic_cast<BufferObject*>(aObject)->SetBase(BufferObject::sPrototype);
+	}
+	aResultToken.SetValue(aObject);
+}
+
+//
+// ObjRawLoad()
+//
+
+IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &aObjSize)
+{
+	IObject *aObject = NULL;
+	ResultToken result_token, this_token, enum_token, aKey, aValue;
+	ExprTokenType *params[] = { &aKey, &aValue };
+	TCHAR buf[MAX_INTEGER_LENGTH];
+	result_token.buf = buf;
+	aKey.mem_to_free = NULL;
+	aValue.mem_to_free = NULL;
+	this_token.symbol = SYM_OBJECT;
+
+	if (aObjCount == aObjSize)
+	{
+		IObject **newObjects = (IObject**)malloc(aObjSize * 2 * sizeof(IObject**));
+		if (!newObjects)
+			return 0;
+		memcpy(newObjects, aObjects, aObjSize * sizeof(IObject**));
+		free(aObjects);
+		aObjects = newObjects;
+		aObjSize *= 2;
+	}
+	
+	char *aThisBuffer = aBuffer;
+	char typekey,typeval, typeobj = *(char*)aThisBuffer;
+	size_t mSize;
+	if (typeobj == -13 || typeobj == 13) //(_tcscmp(aObject->Type(), _T("Object")))
+		aObject = Object::Create();
+	else if (typeobj == -14 || typeobj == 14) //(_tcscmp(aObject->Type(), _T("Object")))
+		aObject = Object::Create(nullptr, 0, nullptr, true);
+	else if (typeobj == -15 || typeobj == 15) //(_tcscmp(aObject->Type(), _T("Array")))
+		aObject = Array::Create();
+	else if (typeobj == -16 || typeobj == 16) //(_tcscmp(aObject->Type(), _T("Array")))
+		aObject = Array::Create(nullptr, 0, true);
+	else if (typeobj == -17 || typeobj == 17) //(_tcscmp(aObject->Type(), _T("Map")) || _tcscmp(aObject->Type(), _T("Struct")))
+		aObject = Map::Create();
+	else if (typeobj == -18 || typeobj == 18) //(_tcscmp(aObject->Type(), _T("Map")) || _tcscmp(aObject->Type(), _T("Struct")))
+		aObject = Map::Create(nullptr, 0, true);
+	else if (typeobj == -19 || typeobj == 19) //(_tcscmp(aObject->Type(), _T("Buffer")))
+	{
+		mSize = (size_t)*(__int64*)(aThisBuffer + 1 + sizeof(__int64));
+		aKey.buf = (LPTSTR)malloc(mSize);
+		memmove((void *)aKey.buf, (aThisBuffer + 1 + 2 * sizeof(__int64)), mSize);
+		if (!(aObject = BufferObject::Create((void *)aKey.buf, mSize)))
+			g_script->ScriptError(ERR_OUTOFMEM);
+		dynamic_cast<BufferObject*>(aObject)->SetBase(BufferObject::sPrototype);
+	}
+	else
+		g_script->ScriptError(ERR_TYPE_MISMATCH);
+	if (!aObject)
+		g_script->ScriptError(ERR_OUTOFMEM);
+	aObjects[aObjCount++] = aObject;
+
+
+	aThisBuffer++;
+	size_t aSize = (size_t)*(__int64*)aThisBuffer;
+	aThisBuffer += sizeof(__int64);
+	if (typeobj == -16 || typeobj == 16) //(_tcscmp(aObject->Type(), _T("Buffer")))
+	{
+		aThisBuffer += mSize + sizeof(__int64);
+		aSize -= mSize + sizeof(__int64);
+	}
+	this_token.object = aObject;
+
+	for (char *end = aThisBuffer + aSize; aThisBuffer < end;)
+	{
+		typekey = *(char*)aThisBuffer++;
+		if (typekey < -12)
+		{
+			aThisBuffer -= 1;  // required for the object type
+			aKey.symbol = SYM_OBJECT;
+			aKey.object = ObjRawLoad(aThisBuffer, aObjects, aObjCount, aObjSize);
+			aThisBuffer += 1 + sizeof(__int64) + *(__int64*)(aThisBuffer + 1);
+		}
+		else if (typekey == -12)
+		{
+			aKey.symbol = SYM_OBJECT;
+			aKey.object = aObjects[*(__int64*)aThisBuffer];
+			aKey.object->AddRef();
+			aThisBuffer += sizeof(__int64);
+		}
+		else if (typekey == -10 || typekey == -11)
+		{
+			aKey.symbol = SYM_STRING;
+			__int64 aMarkerSize = *(__int64*)aThisBuffer;
+			aThisBuffer += sizeof(__int64);
+			if (aMarkerSize)
+			{
+				aKey.marker_length = (size_t)(aMarkerSize - 1) / sizeof(TCHAR);
+				aKey.marker = (LPTSTR)aThisBuffer;
+				aThisBuffer += aMarkerSize;
+			}
+			else
+			{
+				aKey.marker = _T("");
+				aKey.marker_length = 0;
+			}
+		}
+		else if (typekey == -9)
+		{
+			aKey.symbol = SYM_STRING;
+			aKey.marker_length = FTOA(*(double*)aThisBuffer, buf, MAX_INTEGER_LENGTH);
+			aKey.marker = buf;
+			aThisBuffer += sizeof(__int64);
+		}
+		else
+		{
+			aKey.symbol = SYM_INTEGER;
+			if (typekey == -8)
+			{
+				aKey.value_int64 = *(__int64*)aThisBuffer;
+				aThisBuffer += sizeof(__int64);
+			}
+			else if (typekey == -6)
+			{
+				aKey.value_int64 = *(UINT*)aThisBuffer;
+				aThisBuffer += sizeof(UINT);
+			}
+			else if (typekey == -4)
+			{
+				aKey.value_int64 = *(USHORT*)aThisBuffer;
+				aThisBuffer += sizeof(USHORT);
+			}
+			else if (typekey == -2)
+			{
+				aKey.value_int64 = *(BYTE*)aThisBuffer;
+				aThisBuffer += sizeof(BYTE);
+			}
+			else if (typekey == -1)
+			{
+				aKey.value_int64 = *(char*)aThisBuffer;
+				aThisBuffer += sizeof(char);
+			}
+			else if (typekey == -3)
+			{
+				aKey.value_int64 = *(short*)aThisBuffer;
+				aThisBuffer += sizeof(short);
+			}
+			else if (typekey == -5)
+			{
+				aKey.value_int64 = *(int*)aThisBuffer;
+				aThisBuffer += sizeof(int);
+			}
+			else if (typekey == -7)
+			{
+				aKey.value_int64 = *(__int64*)aThisBuffer;
+				aThisBuffer += sizeof(__int64);
+			}
+			else
+			{
+				g_script->ScriptError(ERR_INVALID_VALUE);
+				return NULL;
+			}
+		}
+
+		typeval = *(char*)aThisBuffer++;
+		if (typeval > 12)
+		{
+			aValue.symbol = SYM_OBJECT;
+			aValue.object = ObjRawLoad(--aThisBuffer, aObjects, aObjCount, aObjSize);   // aThisBuffer-- required to pass type of object
+			aThisBuffer += 1 + sizeof(__int64) + *(__int64*)(aThisBuffer + 1);
+		}
+		else if (typeval == 12)
+		{
+			aValue.symbol = SYM_OBJECT;
+			aValue.object = aObjects[*(__int64*)aThisBuffer];
+			aValue.object->AddRef();
+			aThisBuffer += sizeof(__int64);
+		}
+		else if (typeval == 10)
+		{
+			aValue.symbol = SYM_STRING;
+			__int64 aMarkerSize = *(__int64*)aThisBuffer;
+			aThisBuffer += sizeof(__int64);
+			if (aMarkerSize)
+			{
+				aValue.marker_length = (size_t)(aMarkerSize - 1) / sizeof(TCHAR);
+				aValue.marker = (LPTSTR)aThisBuffer;
+				aThisBuffer += aMarkerSize;
+			}
+			else
+			{
+				aValue.marker = _T("");
+				aValue.marker_length = 0;
+			}
+		}
+		else if (typeval == 9)
+		{
+			aValue.symbol = SYM_FLOAT;
+			aValue.value_double = *(double*)aThisBuffer;
+			aThisBuffer += sizeof(__int64);
+		}
+		else
+		{
+			aValue.symbol = SYM_INTEGER;
+			if (typeval == 8)
+			{
+				aValue.value_int64 = *(__int64*)aThisBuffer;
+				aThisBuffer += sizeof(__int64);
+			}
+			else if (typeval == 6)
+			{
+				aValue.value_int64 = *(UINT*)aThisBuffer;
+				aThisBuffer += sizeof(UINT);
+			}
+			else if (typeval == 4)
+			{
+				aValue.value_int64 = *(USHORT*)aThisBuffer;
+				aThisBuffer += sizeof(USHORT);
+			}
+			else if (typeval == 2)
+			{
+				aValue.value_int64 = *(BYTE*)aThisBuffer;
+				aThisBuffer += sizeof(BYTE);
+			}
+			else if (typeval == 1)
+			{
+				aValue.value_int64 = *(char*)aThisBuffer;
+				aThisBuffer += sizeof(char);
+			}
+			else if (typeval == 3)
+			{
+				aValue.value_int64 = *(short*)aThisBuffer;
+				aThisBuffer += sizeof(short);
+			}
+			else if (typeval == 5)
+			{
+				aValue.value_int64 = *(int*)aThisBuffer;
+				aThisBuffer += sizeof(int);
+			}
+			else if (typeval == 7)
+			{
+				aValue.value_int64 = *(__int64*)aThisBuffer;
+				aThisBuffer += sizeof(__int64);
+			}
+			else
+			{
+				g_script->ScriptError(ERR_INVALID_VALUE);
+				return NULL;
+			}
+		}
+		result_token.InitResult(L"");
+		if (typekey == -11)
+			aObject->Invoke(result_token, IT_SET, aKey.marker, this_token, params + 1, 1);
+		else if (typeobj == -15 || typeobj == 15 || typeobj == -16 || typeobj == 16)
+			aObject->Invoke(result_token, IT_CALL, _T("Push"), this_token, params + 1, 1);
+		else
+			aObject->Invoke(result_token, IT_SET, 0, this_token, params , 2);
+		aKey.Free();
+		aValue.Free();
+	}
+	return aObject;
+}
+
+//
+// ObjLoad()
+//
+
+BIF_DECL(BIF_ObjLoad)
+{
+	aResultToken.symbol = SYM_OBJECT;
+	bool aFreeBuffer = false;
+	DWORD aSize = aParamCount > 1 ? (DWORD)TokenToInt64(*aParam[1]) : 0;
+	LPTSTR aPath = TokenToString(*aParam[0]);
+	IObject *buffer_obj;
+	char *aBuffer;
+	size_t  max_bytes = SIZE_MAX;
+
+	if (TokenIsNumeric(**aParam))
+		aBuffer = (char*)TokenToInt64(**aParam);
+	else if (buffer_obj = TokenToObject(**aParam))
+	{
+		size_t ptr;
+		GetBufferObjectPtr(aResultToken, buffer_obj, ptr, max_bytes);
+		if (aResultToken.Exited())
+			return;
+		aBuffer = (char*)ptr;
+	}
+	else
+	{ // FileRead Mode
+		if (GetFileAttributes(aPath) == 0xFFFFFFFF)
+		{
+			aResultToken.SetValue(_T(""));
+			return;
+		}
+		FILE *fp;
+
+		fp = _tfopen(aPath, _T("rb"));
+		if (fp == NULL)
+		{
+			aResultToken.SetValue(_T(""));
+			return;
+		}
+
+		fseek(fp, 0, SEEK_END);
+		aSize = ftell(fp);
+		if (!(aBuffer = (char*)malloc(aSize)))
+		{
+			aResultToken.SetValue(_T(""));
+			fclose(fp);
+			return;
+		}
+		aFreeBuffer = true;
+		fseek(fp, 0, SEEK_SET);
+		fread(aBuffer, 1, aSize, fp);
+		fclose(fp);
+	}
+	if (*(unsigned int*)aBuffer == 0x04034b50)
+	{
+		LPVOID aDataBuf;
+		TCHAR *pw[1024] = {};
+		if (!ParamIndexIsOmittedOrEmpty(1))
+		{
+			TCHAR *pwd = TokenToString(*aParam[1]);
+			size_t pwlen = _tcslen(TokenToString(*aParam[1]));
+			for (size_t i = 0; i <= pwlen; i++)
+				pw[i] = &pwd[i];
+		}
+		aSize = *(ULONG*)((UINT_PTR)aBuffer + 8);
+		if (*(ULONG*)((UINT_PTR)aBuffer + 16) > aSize)
+			aSize = *(ULONG*)((UINT_PTR)aBuffer + 16);
+		DWORD aSizeDeCompressed = DecompressBuffer(aBuffer, aDataBuf, aSize, pw);
+		if (aSizeDeCompressed)
+		{
+			LPVOID buff = malloc(aSizeDeCompressed);
+			aFreeBuffer = true;
+			memcpy(buff, aDataBuf, aSizeDeCompressed);
+			g_memset(aDataBuf, 0, aSizeDeCompressed);
+			free(aDataBuf);
+			aBuffer = (char*)buff;
+		}
+		else
+		{
+			aResultToken.SetValue(_T(""));
+			g_script->ScriptError(_T("ObjLoad: Password mismatch."));
+			return;
+		}
+	}
+	UINT aObjCount = 0;
+	UINT aObjSize = 16;
+	IObject **aObjects = (IObject**)malloc(aObjSize * sizeof(IObject**));
+	if (!aObjects || !(aResultToken.object = ObjRawLoad(aBuffer, aObjects, aObjCount, aObjSize)))
+	{
+		if (!TokenToInt64(*aParam[0]))
+			free(aBuffer);
+		free(aObjects);
+		aResultToken.SetValue(_T(""));
+		return;
+	}
+	free(aObjects);
+	if (aFreeBuffer)
+		free(aBuffer);
+}
+
+
+ResultType JSON::parse(ResultToken& aResultToken, int aID, int aFlags, ExprTokenType* aParam[], int aParamCount)
+{
+	LPTSTR b, beg, key = NULL, t = NULL;
+	size_t keylen, len, deep = 0, stacksz = 64;
+	String valbuf, keybuf;
+	IObject** stack, * cur;
+	struct {
+		union {
+			__int64 n_int64;
+			double n_double;
+			IObject* object;
+		};
+		SymbolType symbol;
+	} val;
+	TCHAR c;
+	bool isarr = false, escape = false, polarity, nonempty;
+	double_conversion::StringToDoubleConverter converter(4, 0, std::numeric_limits<double>::quiet_NaN(), 0, 0);
+
+	b = beg = TokenIsPureNumeric(*aParam[0]) ? (LPTSTR)TokenToInt64(*aParam[0]) : TokenToString(*aParam[0]);
+	if (!b) {
+		aResultToken.SetResult(g_script->RuntimeError(ERR_INVALID_VALUE));
+		return OK;
+	}
+	valbuf.SetCapacity(MAX_NUMBER_LENGTH);
+	keybuf.SetCapacity(MAX_NUMBER_LENGTH);
+	stack = (IObject**)malloc(stacksz * sizeof(IObject*));
+	stack[0] = NULL;
+
+#define ltrim while ((c = *beg) == ' ' || c == '\t' || c == '\r' || c == '\n') beg++;
+
+	while ((c = *beg) == ' ' || c == '\t' || c == '\r' || c == '\n')
+		beg++;
+	if ((c = *beg) == '{')
+		cur = stack[deep++] = Map::Create(0, 0, true);
+	else if (c == '[') {
+		cur = stack[deep++] = Array::Create();
+		isarr = true;
+	}
+	else
+		goto error;
+	beg++, val.symbol = SYM_MISSING;
+	for (; c = *beg; beg++) {
+		ltrim;
+		switch (c)
+		{
+		case '{':
+		case '[':
+			if (val.symbol != SYM_MISSING)
+				goto error;
+			val.symbol = SYM_MISSING;
+			if (c == '[') {
+				if (isarr)
+					((Array*)cur)->Append(ExprTokenType(stack[deep] = Array::Create()));
+				else if (key) {
+					((Map*)cur)->SetItem(ExprTokenType(key, keylen), ExprTokenType(stack[deep] = Array::Create()));
+					key[keylen] = '"', key = NULL, isarr = true;
+				}
+				else
+					goto error;
+			}
+			else {
+				if (isarr)
+					((Array*)cur)->Append(ExprTokenType(stack[deep] = Map::Create(0, 0, true))), isarr = false;
+				else if (key) {
+					((Map*)cur)->SetItem(ExprTokenType(key, keylen), ExprTokenType(stack[deep] = Map::Create(0, 0, true)));
+					key[keylen] = '"', key = NULL;
+				}
+				else
+					goto error;
+			}
+			cur = stack[deep++], cur->Release(), nonempty = false;
+			if (deep == stacksz) {
+				auto p = realloc(stack, (stacksz *= 2) * sizeof(IObject*));
+				if (!p) {
+					stacksz = 0;
+					goto error;
+				}
+				stack = (IObject**)p;
+			}
+			break;
+		case '}':
+		case ']':
+			if ((c == ']' && (!isarr || nonempty && val.symbol == SYM_MISSING)) ||
+				(c == '}' && (isarr || nonempty && val.symbol == SYM_MISSING)))
+				goto error;
+			if (deep == 1) {
+				beg++;
+				ltrim;
+				if (c)
+					goto error;
+				aResultToken.SetValue(stack[0]);
+				goto ret;
+			}
+			val.symbol = SYM_OBJECT, stack[--deep] = NULL, cur = stack[deep - 1];
+			isarr = !_tcscmp(cur->Type(), _T("Array")), nonempty = true;
+			break;
+		case ',':
+			if (val.symbol == SYM_MISSING)
+				goto error;
+			val.symbol = SYM_MISSING;
+			break;
+		case '"':
+			if (val.symbol != SYM_MISSING)
+				goto error;
+			t = ++beg, escape = false;
+			while ((c = *beg) != '"') {
+				if (c == '\\') {
+					if (!(c = *(++beg)))
+						goto error;
+					escape = true;
+				}
+				else if (c == '\r' || c == '\n')
+					goto error;
+				beg++;
+			}
+			len = beg - t;
+			if (escape) {
+				String *buf = isarr || key ? &valbuf : &keybuf;
+				if (len > buf->Capacity())
+					buf->SetCapacity(max(len + 1, buf->Capacity() * 2));
+				beg = t;
+				LPTSTR p = t = buf->Value();
+				while ((c = *beg) != '"') {
+					if (c == '\\') {
+						switch (c = *(++beg))
+						{
+						case '"': *p++ = '"'; break;
+						case '\\': *p++ = '\\'; break;
+						case '/': *p++ = '/'; break;
+						case 'b': *p++ = '\b'; break;
+						case 'f': *p++ = '\f'; break;
+						case 'n': *p++ = '\n'; break;
+						case 'r': *p++ = '\r'; break;
+						case 't': *p++ = '\t'; break;
+						case 'u':
+							*p = 0;
+							for (int i = 4; i; i--) {
+								*p *= 16, c = *++beg;
+								if (c >= '0' && c <= '9')
+									*p += c - '0';
+								else if (c >= 'A' && c <= 'F')
+									*p += c - 'A' + 10;
+								else if (c >= 'a' && c <= 'f')
+									*p += c - 'a' + 10;
+								else
+									goto error;
+							}
+							p++;
+							break;
+						default:
+							goto error;
+						}
+					}
+					else
+						*(p++) = c;
+					beg++;
+				}
+				*p = '\0', len = p - t;
+			}
+			else
+				t[len] = '\0';
+			if (isarr)
+				((Array*)cur)->Append(t, len), t[len] = '"', val.symbol = SYM_STRING;
+			else {
+				if (!key) {
+					key = t, keylen = len, beg++;
+					ltrim;
+					if (c != ':')
+						goto error;
+				}
+				else {
+					((Map*)cur)->SetItem(ExprTokenType(key, keylen), ExprTokenType(t, len));
+					key[keylen] = t[len] = '"', key = NULL, val.symbol = SYM_STRING;
+				}
+			}
+			nonempty = true;
+			break;
+		default:
+#define expect_str(str)               \
+	for (int i = 0; str[i] != 0; ++i) \
+	{                                 \
+		if (str[i] != c)              \
+			goto error;               \
+		c = *++beg;                   \
+	}
+			if (val.symbol != SYM_MISSING || !isarr && !key)
+				goto error;
+			switch (c)
+			{
+			case 'f':
+			case 'n':
+			case 't':
+				if (c == 'f') {
+					expect_str(_T("false"));
+					val.object = JSON::_false;
+				}
+				else if (c == 'n') {
+					expect_str(_T("null"));
+					val.object = JSON::_null;
+				}
+				else {
+					expect_str(_T("true"));
+					val.object = JSON::_true;
+				}
+				val.symbol = SYM_OBJECT, nonempty = true, beg--;
+				if (isarr)
+					((Array*)cur)->Append(ExprTokenType(val.object));
+				else {
+					((Map*)cur)->SetItem(ExprTokenType(key, keylen), ExprTokenType(val.object));
+					key[keylen] = '"', key = NULL;
+				}
+				break;
+			case '\0':
+				goto error;
+			default:
+				t = beg;
+				if (c == '-')
+					polarity = true, c = *++beg;
+				else polarity = false;
+				if (c == '0')
+					c = *++beg, val.n_int64 = 0;
+				else if (c > '0' && c <= '9') {
+					UINT64 i = 0;
+					while (c >= '0' && c <= '9')
+						i = i * 10 + c - '0', c = *++beg;
+					val.n_int64 = polarity ? -(__int64)i : (__int64)i;
+				}
+				else
+					goto error;
+				if (c == '.' || c == 'e' || c == 'E') {
+					int l;
+					val.symbol = SYM_FLOAT;
+					val.n_double = converter.StringToDouble<TCHAR>(t, 2147483647, &l);
+					beg = t + l - 1;
+				}
+				else
+					beg--, val.symbol = SYM_INTEGER;
+				nonempty = true;
+				if (isarr) {
+					if (val.symbol == SYM_FLOAT)
+						((Array*)cur)->Append(ExprTokenType(val.n_double));
+					else
+						((Array*)cur)->Append(ExprTokenType(val.n_int64));
+				}
+				else {
+					if (val.symbol == SYM_FLOAT)
+						((Map*)cur)->SetItem(ExprTokenType(key, keylen), ExprTokenType(val.n_double));
+					else
+						((Map*)cur)->SetItem(ExprTokenType(key, keylen), ExprTokenType(val.n_int64));
+					key[keylen] = '"', key = NULL;
+				}
+				break;
+			}
+		}
+	}
+error:
+	if (stack[0])
+		stack[0]->Release();
+	TCHAR msg[60];
+	if (!stacksz)
+		_tcscpy(msg, ERR_OUTOFMEM);
+	else if (*beg) {
+		if (*beg >= '0' && *beg <= '9')
+			sntprintf(msg, 60, _T("Unexpected number in JSON at position %d"), beg - b);
+		else
+			sntprintf(msg, 60, _T("Unexpected token %c in JSON at position %d"), *beg, beg - b);
+	}
+	else
+		_tcscpy(msg, _T("Unexpected end of JSON input"));
+	aResultToken.SetResult(g_script->RuntimeError(msg));
+ret:
+	if (key) key[keylen] = '"';
+	free(stack);
+	return OK;
+}
+
+thread_local LPTSTR JSON::objcolon;
+thread_local LPTSTR JSON::indent;
+thread_local UINT JSON::deep;
+
+ResultType JSON::stringify(ResultToken& aResultToken, int aID, int aFlags, ExprTokenType* aParam[], int aParamCount)
+{
+	tstring str;
+	if (IObject* obj = TokenToObject(*aParam[0])) {
+		objcolon = _T("\":"), indent = NULL, deep = 0;
+		if (!ParamIndexIsOmitted(1)) {
+			if (TokenIsNumeric(*aParam[1])) {
+				auto sz = TokenToInt64(*aParam[1]);
+				if (sz > 0) {
+					indent = (LPTSTR)_alloca(sizeof(TCHAR) * ((size_t)sz + 1));
+					tmemset(indent, ' ', (size_t)sz);
+					indent[sz] = '\0';
+				}
+			}
+			else if (!TokenIsEmptyString(*aParam[1]))
+				indent = TokenToString(*aParam[1]);
+			if (indent)
+				objcolon = _T("\": ");
+		}
+		append(str, obj);
+	}
+	else {
+		aResultToken.SetResult(g_script->RuntimeError(ERR_INVALID_ARG_TYPE));
+		return OK;
+	}
+	if (str.back() == ',')
+		str.pop_back();
+	aResultToken.Return(_tcsdup(str.data()), str.size());
+	return OK;
+}
+
+void JSON::append(tstring& str, LPTSTR s) {
+	static const char hexDigits[16] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
+	static const char escape[96] = {
+		//0    1    2    3    4    5    6    7    8    9    A    B    C    D    E    F
+		'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'b', 't', 'n', 'u', 'f', 'r', 'u', 'u', // 00
+		'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', // 10
+		  0,   0, '"',   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0, // 20
+		  0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0, // 30
+		  0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0, // 40
+		  0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,'\\',   0,   0,   0, // 50~5F
+	};
+	TCHAR escbuf[7] = _T("\\u0000");
+	LPTSTR b;
+	TCHAR c, ch;
+	size_t sz;
+
+	for (b = s; ch = *s; s++) {
+		if (ch < 0x60 && (c = escape[ch])) {
+			if (b) {
+				if (sz = s - b)
+					str.append(b, sz);
+				b = NULL;
+			}
+			if (c == 'u') {
+				escbuf[4] = hexDigits[ch >> 4];
+				escbuf[5] = hexDigits[ch & 0xf];
+				str += escbuf;
+			}
+			else
+				str += '\\', str += c;
+		}
+		else if (!b)
+			b = s;
+	}
+	if (b && (sz = s - b))
+		str.append(b, sz);
+}
+
+void JSON::append(tstring& str, IObject* obj) {
+	if (obj->IsOfType(Map::sPrototype)) {
+		((map*)obj)->tostring(str);
+	}
+	else if (obj->IsOfType(Array::sPrototype)) {
+		((array*)obj)->tostring(str);
+	}
+	else if (obj->IsOfType(Object::sPrototype))
+		((object*)obj)->tostring(str);
+	else
+	{
+		ComObject* aComObj = dynamic_cast<ComObject*>(obj);
+		if (aComObj && aComObj->mVarType == VT_BOOL)
+			str += aComObj->mVal64 == VARIANT_FALSE ? _T("false") : _T("true");
+		else if (aComObj && (aComObj->mVarType == VT_NULL || aComObj->mVarType == VT_EMPTY))
+			str += _T("null");
+		else
+			dumpOther(str, obj);
+	}
+}
+
+void JSON::append(tstring& str, Variant& field, object* obj) {
+	TCHAR numbuf[MAX_NUMBER_LENGTH];
+	switch (field.symbol)
+	{
+	case SYM_OBJECT:
+		append(str, field.object);
+		break;
+	case SYM_STRING:
+		str += '"';
+		append(str, field.string);
+		str += '"';
+		break;
+	case SYM_FLOAT:
+		FTOA(field.n_double, numbuf, MAX_NUMBER_LENGTH);
+		str += numbuf;
+		break;
+	case SYM_INTEGER:
+		ITOA((int)field.n_int64, numbuf);
+		str += numbuf;
+		break;
+	case SYM_DYNAMIC:
+		if (!obj || ((Object*)obj)->IsClassPrototype() || field.prop->MaxParams > 0 || !field.prop->Getter()) {
+			str += _T("null");
+			break;
+		}
+		else {
+			ResultToken result_token;
+			ExprTokenType getter(field.prop->Getter());
+			ExprTokenType object(obj);
+			auto* param = &object;
+			result_token.InitResult(numbuf);
+			auto result = getter.object->Invoke(result_token, IT_CALL, nullptr, getter, &param, 1);
+			if (result == FAIL || result == EARLY_EXIT) {
+				str += _T("null");
+				break;
+			}
+			if (result_token.mem_to_free)
+			{
+				ASSERT(result_token.symbol == SYM_STRING && result_token.mem_to_free == result_token.marker);
+				str.append(result_token.mem_to_free, result_token.marker_length);
+			}
+			else {
+				switch (result_token.symbol)
+				{
+				case SYM_OBJECT:
+					append(str, result_token.object);
+					result_token.object->Release();
+					break;
+				case SYM_STRING:
+					str.append(result_token.marker, result_token.marker_length);
+					break;
+				case SYM_FLOAT:
+					FTOA(result_token.value_double, numbuf, MAX_NUMBER_LENGTH);
+					str += numbuf;
+					break;
+				case SYM_INTEGER:
+					ITOA((int)result_token.value_int64, numbuf);
+					str += numbuf;
+					break;
+				}
+			}
+		}
+		break;
+	default:
+		str += _T("null");
+		break;
+	}
+}
+
+void JSON::object::tostring(tstring& str) {
+	index_t len = mFields.Length();
+	str += '{', ++deep;
+	if (len) {
+		append(str, deep), str += '"';
+		FieldType& field = mFields[0];
+		append(str, field.name);
+		str += objcolon;
+		append(str, field, this);
+		for (index_t i = 1; i < len; i++) {
+			FieldType& field = mFields[i];
+			str += ',', append(str, deep), str += '"';
+			append(str, field.name);
+			str += objcolon;
+			append(str, field);
+		}
+		append(str, --deep), str += '}';
+	}
+	else
+		--deep, str += '}';
+}
+
+void JSON::array::tostring(tstring& str) {
+	str += '[', ++deep;
+	if (mLength) {
+		append(str, deep), append(str, mItem[0]);
+		for (index_t i = 1; i < mLength; i++) {
+			if (str.back() != ',')
+				str += ',';
+			append(str, deep), append(str, mItem[i]);
+		}
+		append(str, --deep), str += ']';
+	}
+	else
+		--deep, str += ']';
+}
+
+void JSON::map::tostring(tstring& str) {
+	TCHAR numbuf[MAX_NUMBER_LENGTH];
+	str += '{', ++deep;
+	for (index_t i = 0; i < mCount; i++) {
+		map::Pair &pair = mItem[i];
+		if (pair.keytype == SYM_OBJECT)
+			continue;
+		append(str, deep), str += '"';
+		switch (pair.keytype)
+		{
+		case SYM_STRING:
+			append(str, pair.key.s);
+			break;
+		case SYM_INTEGER:
+			ITOA((int)pair.key.i, numbuf);
+			str += numbuf;
+			break;
+		case SYM_FLOAT:
+			FTOA((double)pair.key.i, numbuf, MAX_NUMBER_LENGTH);
+			str += numbuf;
+			break;
+		}
+		str += objcolon;
+		append(str, pair);
+		str += ',';
+	}
+	if (str.back() == ',')
+		str.pop_back(), append(str, --deep), str += '}';
+	else
+		--deep, str += '}';
+}
+
+void JSON::dumpOther(tstring& str, IObject* obj) {
+	ExprTokenType enum_token(obj);
+	IObject* enumerator = NULL;
+	if (GetEnumerator(enumerator, enum_token, 2, false) == OK) {
+		Var vkey, vval;
+		if (obj->IsOfType(sComArrayPrototype)) {
+			str += '[', ++deep;
+			while (((IndexEnumerator*)enumerator)->Next(&vkey, &vval) == CONDITION_TRUE) {
+				append(str, deep);
+				if (vval.IsObject())
+					append(str, vval.mObject), vval.ReleaseObject();
+				else if (vval.IsPureNumeric())
+					append(str, vval.Contents());
+				else
+					str += '"', append(str, vval.Contents()), str += '"';
+				str += ',';
+			}
+			if (str.back() == ',')
+				str.pop_back(), append(str, --deep), str += ']';
+			else
+				--deep, str += ']';
+		}
+		else {
+			str += '{', ++deep;
+			while (((IndexEnumerator*)enumerator)->Next(&vkey, &vval) == CONDITION_TRUE) {
+				if (vkey.IsObject()) {
+					vkey.ReleaseObject();
+					if (vval.IsObject())
+						vval.ReleaseObject();
+				}
+				else {
+					append(str, deep), str += '"', append(str, vkey.Contents()), str += objcolon;
+					if (vval.IsObject())
+						append(str, vval.mObject), vval.ReleaseObject();
+					else if (vval.IsPureNumeric())
+						append(str, vval.Contents());
+					else
+						str += '"', append(str, vval.Contents()), str += '"';
+					str += ',';
+				}
+			}
+			if (str.back() == ',')
+				str.pop_back(), append(str, --deep), str += '}';
+			else
+				--deep, str += '}';
+			vkey.Free();
+		}
+		vval.Free();
+		enumerator->Release();
+	}
+	else
+		str += _T("null");
+}

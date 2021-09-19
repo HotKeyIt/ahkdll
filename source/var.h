@@ -1,4 +1,4 @@
-/*
+﻿/*
 AutoHotkey
 
 Copyright 2003-2009 Chris Mallett (support@autohotkey.com)
@@ -45,7 +45,7 @@ typedef UCHAR VarAttribType;   // Same.
 typedef UINT_PTR VarSizeType;  // jackieku(2009-10-23): Change this to UINT_PTR to ensure its size is the same with a pointer.
 #define VARSIZE_MAX ((VarSizeType) ~0)
 #define VARSIZE_ERROR VARSIZE_MAX
-
+thread_local extern SimpleHeap* g_SimpleHeap;
 class Var; // Forward declaration.
 // #pragma pack(4) not used here because although it would currently save 4 bytes per VarBkp struct (28 vs. 32),
 // it would probably reduce performance since VarBkp items are stored in contiguous array rather than a
@@ -98,6 +98,8 @@ struct VarEntry
 	LPTSTR name;
 	VirtualVar type;
 };
+
+class VarRef;
 
 #pragma warning(push)
 #pragma warning(disable: 4995 4996)
@@ -153,6 +155,7 @@ public:
 	VarSizeType mByteCapacity = 0; // In bytes.  Includes the space for the zero terminator.
 	AllocMethodType mHowAllocated = ALLOC_NONE; // Keep adjacent/contiguous with the below to save memory.
 	#define VAR_ATTRIB_CONTENTS_OUT_OF_DATE	0x01 // Combined with VAR_ATTRIB_IS_INT64/DOUBLE/OBJECT to indicate mContents is not current.
+	#define VAR_ATTRIB_ALREADY_WARNED		0x01 // Combined with VAR_ATTRIB_UNINITIALIZED to limit VarUnset warnings to 1 MsgBox per var.  See WarnUnassignedVar.
 	#define VAR_ATTRIB_UNINITIALIZED		0x02 // Var requires initialization before use.
 	#define VAR_ATTRIB_HAS_ASSIGNMENT		0x04 // Used during load time to detect vars that are not assigned anywhere.
 	#define VAR_ATTRIB_NOT_NUMERIC			0x08 // A prior call to IsNumeric() determined the var's value is PURE_NOT_NUMERIC.
@@ -166,12 +169,12 @@ public:
 	VarAttribType mAttrib;  // Bitwise combination of the above flags (but many of them may be mutually exclusive).
 	#define VAR_GLOBAL			0x01
 	#define VAR_LOCAL			0x02
-	#define VAR_FORCE_LOCAL		0x04 // Flag reserved for force-local mode in functions (not used in Var::mScope).
+	#define VAR_VARREF			0x04 // This is a VarRef (used to determine whether the ToReturnValue optimization is safe).
 	#define VAR_DOWNVAR			0x08 // This var is captured by a nested function/closure (it's in Func::mDownVar).
 	#define VAR_LOCAL_FUNCPARAM	0x10 // Indicates this local var is a function's parameter.  VAR_LOCAL_DECLARED should also be set.
 	#define VAR_LOCAL_STATIC	0x20 // Indicates this local var retains its value between function calls.
 	#define VAR_DECLARED		0x40 // Indicates this var was declared somehow, not automatic.
-	#define VAR_SUPER_GLOBAL	0x80 // Indicates this global var should be visible in all functions.
+	#define VAR_LIB				0x80 // Variable loaded from WINAPI or LIB resource
 	UCHAR mScope;  // Bitwise combination of the above flags.
 	VarTypeType mType; // Keep adjacent/contiguous with the above due to struct alignment, to save memory.
 	// Performance: Rearranging mType and the other byte-sized members with respect to each other didn't seem
@@ -238,7 +241,7 @@ public:
 	// The biggest offender of buffer overflow in sEmptyString is DllCall, which happens most frequently
 	// when a script forgets to call VarSetStrCapacity before passing a buffer to some function that writes a
 	// string to it.  There is now some code there that tries to detect when that happens.
-	_thread_local static TCHAR sEmptyString[1]; // See above.
+	thread_local static TCHAR sEmptyString[1]; // See above.
 
 	void Get(ResultToken &aResultToken);
 	ResultType AssignHWND(HWND aWnd);
@@ -327,10 +330,7 @@ public:
 	IObject *ToObject()
 	{
 		Var &var = *ResolveAlias();
-		if (var.IsObject())
-			return var.mObject;
-		var.MaybeWarnUninitialized();
-		return NULL;
+		return var.IsObject() ? var.mObject : nullptr;
 	}
 
 	void ReleaseObject()
@@ -489,9 +489,15 @@ public:
 			return true;
 		}
 		// var is either local or a free var (this is an upvar/downvar).
-		if (mType == VAR_ALIAS)
-			// This var is an alias for another var.  Even if the target is local,
-			// it's most likely not a local of the same function, so not about to be freed.
+		if (mType == VAR_ALIAS || (mScope & VAR_VARREF))
+			// a) This var is an alias for another var.  Even if the target is local, it's
+			//    most likely not a local of the same function, so not about to be freed.
+			//    On the other hand, it could be an alias due to GetRef(), in which case
+			//    it might be freed, so we can't return Contents().
+			// b) This is a VarRef, which could probably only happen directly as a result
+			//    of a double-deref.  It may not be freed when the function returns, so we
+			//    can't steal its mem.  It may be freed (if it's actually a reference to a
+			//    local variable of this function), so we can't return Contents() either.
 			return false;
 		// Var is local.  Since the function is returning, the var is about to be freed.
 		// Instead of copying and then freeing its contents, let the caller take ownership:
@@ -507,8 +513,10 @@ public:
 			// because this isn't a number and therefore never needs UpdateContents().
 			// Although Contents() should be harmless, we want to be absolutely sure
 			// length isn't increased since that could cause buffer overflow.
-			memcpy(aResultToken.marker = aResultToken.buf, mCharContents, mByteLength + sizeof(TCHAR));
-			aResultToken.marker_length = mByteLength / sizeof(TCHAR);
+			memcpy(aResultToken.buf, mCharContents, mByteLength + sizeof(TCHAR));
+			// symbol should default to SYM_STRING, but it's more robust to use SetValue()
+			// than set marker and marker_length directly.
+			aResultToken.SetValue(aResultToken.buf, mByteLength / sizeof(TCHAR));
 		}
 		return true;
 	}
@@ -525,9 +533,8 @@ public:
 
 	// Not an enum so that it can be global more easily:
 	#define VAR_ALWAYS_FREE                    0
-	#define VAR_ALWAYS_FREE_LAST               1 // Never actually passed as a parameter, just a placeholder (see above comment).
-	#define VAR_NEVER_FREE                     2
-	#define VAR_FREE_IF_LARGE                  3
+	#define VAR_NEVER_FREE                     3
+	#define VAR_FREE_IF_LARGE                  4
 	void Free(int aWhenToFree = VAR_ALWAYS_FREE, bool aExcludeAliasesAndRequireInit = false);
 	ResultType Append(LPTSTR aStr, VarSizeType aLength);
 	ResultType AppendIfRoom(LPTSTR aStr, VarSizeType aLength);
@@ -601,7 +608,7 @@ public:
 	// Convert VAR_NORMAL to VAR_CONSTANT.
 	void MakeReadOnly()
 	{
-		ASSERT(mType == VAR_NORMAL); // Should never be called on VAR_ALIAS or VAR_VIRTUAL.
+		ASSERT(mType == VAR_NORMAL || mType == VAR_CONSTANT); // Should never be called on VAR_ALIAS or VAR_VIRTUAL.
 		ASSERT(!(mAttrib & VAR_ATTRIB_UNINITIALIZED));
 		mType = VAR_CONSTANT;
 	}
@@ -647,11 +654,6 @@ public:
 		return (mScope & VAR_DECLARED);
 	}
 
-	bool IsSuperGlobal()
-	{
-		return (mScope & VAR_SUPER_GLOBAL);
-	}
-
 	UCHAR &Scope()
 	{
 		return mScope;
@@ -673,7 +675,7 @@ public:
 	bool IsAssignedSomewhere()
 	{
 		//return mAttrib & VAR_ATTRIB_HAS_ASSIGNMENT;
-		return mAttrib != VAR_ATTRIB_UNINITIALIZED;
+		return (mAttrib & ~VAR_ATTRIB_ALREADY_WARNED) != VAR_ATTRIB_UNINITIALIZED;
 		// When this function is called (at load time), any of the other attributes
 		// would mean that this var has a value, which means that it doesn't require
 		// an assignment.  If it lacks all attributes, it's presumably a built-in var.
@@ -682,6 +684,18 @@ public:
 	void MarkAssignedSomewhere()
 	{
 		mAttrib |= VAR_ATTRIB_HAS_ASSIGNMENT;
+		if (mType == VAR_ALIAS)
+			mAliasFor->MarkAssignedSomewhere();
+	}
+
+	bool HasAlreadyWarned()
+	{
+		return mAttrib & VAR_ATTRIB_ALREADY_WARNED;
+	}
+
+	void MarkAlreadyWarned()
+	{
+		mAttrib |= VAR_ATTRIB_ALREADY_WARNED;
 	}
 
 	bool IsObject() // L31: Indicates this var contains an object reference which must be released if the var is emptied.
@@ -767,23 +781,16 @@ public:
 	//	return (BYTE *) CharContents(aAllowUpdate);
 	//}
 
-	TCHAR *Contents(BOOL aAllowUpdate = TRUE, BOOL aNoWarnUninitializedVar = FALSE)
+	TCHAR *Contents(BOOL aAllowUpdate = TRUE)
 	// Callers should almost always pass TRUE for aAllowUpdate because any caller who wants to READ from
 	// mContents would almost always want it up-to-date.  Any caller who wants to WRITE to mContents would
 	// would almost always have called Assign(NULL, ...) prior to calling Contents(), which would have
 	// cleared the VAR_ATTRIB_CONTENTS_OUT_OF_DATE flag.
 	{
 		if (mType == VAR_ALIAS)
-			return mAliasFor->Contents(aAllowUpdate, aNoWarnUninitializedVar);
+			return mAliasFor->Contents(aAllowUpdate);
 		if ((mAttrib & VAR_ATTRIB_CONTENTS_OUT_OF_DATE) && aAllowUpdate) // VAR_ATTRIB_CONTENTS_OUT_OF_DATE is checked here and in the function below, for performance.
 			UpdateContents(); // This also clears the VAR_ATTRIB_CONTENTS_OUT_OF_DATE.
-		if (mType == VAR_NORMAL)
-		{
-			// If aAllowUpdate is FALSE, the caller just wants to compare mCharContents to another address.
-			// Otherwise, the caller is probably going to use mCharContents and might want a warning:
-			if (aAllowUpdate && !aNoWarnUninitializedVar)
-				MaybeWarnUninitialized();
-		}
 		if (mType == VAR_VIRTUAL && !(mAttrib & VAR_ATTRIB_VIRTUAL_OPEN) && aAllowUpdate)
 		{
 			// This var isn't open for writing, so populate mCharContents with its current value.
@@ -823,6 +830,7 @@ public:
 	// Makes this var an alias of aTargetVar, or aTargetVar's target if it's an alias.
 	// Copies any internal mObject ref used for managing the lifetime of the alias.
 	void UpdateAlias(Var *aTargetVar);
+	void UpdateAlias(VarRef *aTargetVar);
 
 	// Unconditionally makes this var an alias of aTargetVar, without resolving aliases.
 	// Caller must ensure aTargetVar != nullptr && aTargetVar != this.
@@ -876,23 +884,32 @@ public:
 	{
 	}
 
-	Var() : Var(_T(""), 0)
+	Var() : Var(_T(""), VAR_VARREF)
 	{
 		// Vars constructed this way are for temporary use, and therefore must have mHowAllocated set
 		// as below to prevent the use of g_SimpleHeap->Malloc().  Otherwise, each Var could allocate
 		// some memory which cannot be freed until the program exits.
 		mHowAllocated = ALLOC_MALLOC;
+		mAttrib = VAR_NORMAL;
+		mCharContents = _T("");
 	}
 
-	void *operator new(size_t aBytes){ return malloc(aBytes); }
-	void *operator new[](size_t aBytes) {return malloc(aBytes); }
+	void *operator new(size_t aBytes) {return g_SimpleHeap->Malloc(aBytes);}
 	void *operator new(size_t aBytes, void *p) {return p;}
-	void operator delete(void *aPtr) { free(aPtr); }
-	void operator delete[](void *aPtr) { free(aPtr); }
+	void *operator new[](size_t aBytes) {return g_SimpleHeap->Malloc(aBytes);}
+	void operator delete(void *aPtr) {}
 	void operator delete(void *aPtr, void *) {}
+	void operator delete[](void *aPtr) {}
 
+	ResultType InitializeConstant();
 
 	bool IsUninitializedNormalVar()
+	{
+		Var &var = *ResolveAlias();
+		return var.mType == VAR_NORMAL && (var.mAttrib & VAR_ATTRIB_UNINITIALIZED);
+	}
+
+	bool IsUninitialized()
 	{
 		Var &var = *ResolveAlias();
 		return var.mAttrib & VAR_ATTRIB_UNINITIALIZED;
@@ -910,8 +927,6 @@ public:
 		var.mAttrib |= VAR_ATTRIB_UNINITIALIZED;
 	}
 
-	void MaybeWarnUninitialized();
-
 }; // class Var
 #pragma pack(pop) // Calling pack with no arguments restores the default value (which is 8, but "the alignment of a member will be on a boundary that is either a multiple of n or a multiple of the size of the member, whichever is smaller.")
 #pragma warning(pop)
@@ -927,8 +942,13 @@ public:
 		Free(VAR_ALWAYS_FREE, true);
 	}
 
-	ResultType Invoke(IObject_Invoke_PARAMS_DECL) { return INVOKE_NOT_HANDLED; }
 	IObject_Type_Impl("VarRef");
+	::Object *Base() { return ::Object::sVarRefPrototype; }
+
+	void *operator new(size_t aBytes) { return malloc(aBytes); } // Must override Var::new, which uses SimpleHeap::Malloc.
+	void *operator new[](size_t aBytes) { return malloc(aBytes); }
+	void operator delete(void *aPtr) { free(aPtr); }
+	void operator delete[](void *aPtr) { free(aPtr); }
 };
 
 

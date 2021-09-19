@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // This file debugging defines some macros like MFC does.
 
 #ifndef TRACE
@@ -19,9 +19,7 @@ it is not really work (we will always get a wrong information show us the leaked
 */
 #ifdef _MSC_VER
 //	#define _CRTDBG_MAP_ALLOC
-//	#include <stdlib.h>
 	#include <crtdbg.h>
-// _DEBUG
 //	#ifdef _DEBUG
 //		#define new new(_NORMAL_BLOCK, __FILE__, __LINE__)
 //	#endif

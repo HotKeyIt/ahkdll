@@ -1,8 +1,8 @@
 GetEnv(){
-  global
-  local __env__:=DllCall("GetEnvironmentStringsW","PTR"),__thisenv__,__temp__,__tempenv__:=__env__
-  While __thisenv__:=SubStr(__temp__:=StrGet(__env__,"UTF-16"),1,InStr(__temp__,"=",1,2)-1)
-    If ((__env__+=StrLen(__temp__)*2+2) && RegExMatch(__thisenv__,"^[\w_]+$"))
-      %__thisenv__%:=EnvGet(__thisenv__)
-  DllCall("FreeEnvironmentStringsW","PTR",__tempenv__)
+  allEnvStr:={}
+  _EnvStr:=EnvStr:=DllCall("GetEnvironmentStringsW","PTR")
+  While thisEnvStr:=SubStr(temp:=StrGet(EnvStr,"UTF-16"),1,InStr(temp,"=",1,2)-1)
+    If ((EnvStr+=StrLen(temp)*2+2) && RegExMatch(thisEnvStr,"^[\w_]+$"))
+      allEnvStr.%thisEnvStr%:=EnvGet(thisEnvStr)
+  return (DllCall("FreeEnvironmentStringsW","PTR",_EnvStr), allEnvStr)
 }

@@ -1,4 +1,4 @@
-/*
+﻿/*
 AutoHotkey
 
 Copyright 2003-2009 Chris Mallett (support@autohotkey.com)
@@ -40,12 +40,13 @@ enum UserMessages {AHK_HOOK_HOTKEY = WM_USER, AHK_HOTSTRING, AHK_USER_MENU, AHK_
 	, AHK_HOT_IF_EVAL	// HotCriterionAllowsFiring uses this to ensure expressions are evaluated only on the main thread.
 	, AHK_HOOK_SYNC // For WaitHookIdle().
 	, AHK_INPUT_END, AHK_INPUT_KEYDOWN, AHK_INPUT_CHAR, AHK_INPUT_KEYUP
+	, AHK_HOOK_SET_KEYHISTORY
 	, AHK_EXECUTE  // Naveen N9: enable running ahk code from another os thread 
-#ifdef _USRDLL
+#ifndef _USRDLL
 	, AHK_EXECUTE_FUNCTION_VARIANT
 #endif
 	, AHK_EXECUTE_LABEL
-	, AHK_EXECUTE_FUNCTION_DLL // HotkeyIt for ahkFunction
+	, AHK_EXECUTE_FUNCTION // HotkeyIt for ahkFunction
 };
 // NOTE: TRY NEVER TO CHANGE the specific numbers of the above messages, since some users might be
 // using the Post/SendMessage commands to automate AutoHotkey itself.  Here is the original order
@@ -164,10 +165,12 @@ struct key_type
 	item.no_suppress &= NO_SUPPRESS_STATES;\
 	item.sc_takes_precedence = false;\
 }
+
 // Since index zero is a placeholder for the invalid virtual key or scan code, add one to each MAX value
 // to compute the number of elements actually needed to accommodate 0 up to and including VK_MAX or SC_MAX:
 #define VK_ARRAY_COUNT (VK_MAX + 1)
 #define SC_ARRAY_COUNT (SC_MAX + 1)
+
 #define INPUT_BUFFER_SIZE 16384 // Default buffer size for Input.  Used to be the absolute max.
 #define INPUTHOOK_BUFFER_SIZE 1024 // Default buffer size for InputHook.
 
@@ -265,7 +268,7 @@ private:
 
 #include "input_object.h"
 
-ResultType InputStart(input_type &input);
+void InputStart(input_type &input);
 input_type *InputRelease(input_type *aInput);
 input_type *InputFind(InputObject *object);
 
@@ -301,14 +304,14 @@ LRESULT LowLevelCommon(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lPara
 	, sc_type aSC, bool aKeyUp, ULONG_PTR aExtraInfo, DWORD aEventFlags);
 
 #define HOTSTRING_INDEX_INVALID INT_MAX  // Use a signed maximum rather than unsigned, in case indexes ever become signed.
-#define SuppressThisKey SuppressThisKeyFunc(aHook, lParam, aVK, aSC, aKeyUp, pKeyHistoryCurr, hotkey_id_to_post)
+#define SuppressThisKey SuppressThisKeyFunc(aHook, lParam, aVK, aSC, aKeyUp, aExtraInfo, pKeyHistoryCurr, hotkey_id_to_post)
 LRESULT SuppressThisKeyFunc(const HHOOK aHook, LPARAM lParam, const vk_type aVK, const sc_type aSC
-	, bool aKeyUp, KeyHistoryItem *pKeyHistoryCurr, WPARAM aHotkeyIDToPost
+	, bool aKeyUp, ULONG_PTR aExtraInfo, KeyHistoryItem *pKeyHistoryCurr, WPARAM aHotkeyIDToPost
 	, WPARAM aHSwParamToPost = HOTSTRING_INDEX_INVALID, LPARAM aHSlParamToPost = 0);
 
-#define AllowKeyToGoToSystem AllowIt(aHook, aCode, wParam, lParam, aVK, aSC, aKeyUp, pKeyHistoryCurr, hotkey_id_to_post)
+#define AllowKeyToGoToSystem AllowIt(aHook, aCode, wParam, lParam, aVK, aSC, aKeyUp, aExtraInfo, pKeyHistoryCurr, hotkey_id_to_post)
 LRESULT AllowIt(const HHOOK aHook, int aCode, WPARAM wParam, LPARAM lParam, const vk_type aVK, const sc_type aSC
-	, bool aKeyUp, KeyHistoryItem *pKeyHistoryCurr, WPARAM aHotkeyIDToPost);
+	, bool aKeyUp, ULONG_PTR aExtraInfo, KeyHistoryItem *pKeyHistoryCurr, WPARAM aHotkeyIDToPost);
 
 bool CollectInput(KBDLLHOOKSTRUCT &aEvent, const vk_type aVK, const sc_type aSC, bool aKeyUp, bool aIsIgnored
 	, KeyHistoryItem *pKeyHistoryCurr, WPARAM &aHotstringWparamToPost, LPARAM &aHotstringLparamToPost);
@@ -324,7 +327,7 @@ void AddRemoveHooks(HookType aHooksToBeActive, bool aChangeIsTemporary = false);
 bool HookAdjustMaxHotkeys(Hotkey **&aHK, int &aCurrentMax, int aNewMax);
 bool SystemHasAnotherKeybdHook();
 bool SystemHasAnotherMouseHook();
-DWORD WINAPI HookThreadProc(LPVOID aUnused);
+DWORD WINAPI HookThreadProc(LPVOID aTLS);
 
 void LinkKeysForCustomCombo(vk_type aNeutral, vk_type aLeft, vk_type aRight);
 
@@ -336,4 +339,5 @@ void ResetKeyTypeState(key_type &key);
 void GetHookStatus(LPTSTR aBuf, int aBufSize);
 
 void WaitHookIdle();
+
 #endif

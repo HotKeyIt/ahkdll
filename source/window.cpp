@@ -1,4 +1,4 @@
-/*
+﻿/*
 AutoHotkey
 
 Copyright 2003-2009 Chris Mallett (support@autohotkey.com)
@@ -14,7 +14,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 */
 
-#include "stdafx.h" // pre-compiled headers
+#include "pch.h" // pre-compiled headers
 #include "window.h"
 #include "util.h" // for strlcpy()
 #include "application.h" // for MsgSleep()
@@ -167,7 +167,7 @@ HWND SetForegroundWindowEx(HWND aTargetWindow)
 	// solves a crash that is not fully understood, nor is it easily reproduced (it occurs only in release mode,
 	// not debug mode).  It's likely a bug in the API's IsHungAppWindow(), but that is far from confirmed.
 	DWORD target_thread = GetWindowThreadProcessId(aTargetWindow, NULL);
-	if (target_thread != g_ThreadID && IsWindowHung(aTargetWindow)) // Calls to IsWindowHung should probably be avoided if the window belongs to our thread.  Relies upon short-circuit boolean order.
+	if (target_thread != g_MainThreadID && IsWindowHung(aTargetWindow)) // Calls to IsWindowHung should probably be avoided if the window belongs to our thread.  Relies upon short-circuit boolean order.
 		return NULL;
 
 #ifdef _DEBUG_WINACTIVATE
@@ -270,15 +270,15 @@ HWND SetForegroundWindowEx(HWND aTargetWindow)
 		// Therefore, idAttachTo cannot equal idAttach.  Update: It appears that of the three,
 		// this first call does not offer any additional benefit, at least on XP, so not
 		// using it for now:
-		//if (g_ThreadID != target_thread) // Don't attempt the call otherwise.
-		//	AttachThreadInput(g_ThreadID, target_thread, TRUE);
-		if (fore_thread && g_ThreadID != fore_thread && !IsWindowHung(orig_foreground_wnd))
-			is_attached_my_to_fore = AttachThreadInput(g_ThreadID, fore_thread, TRUE) != 0;
+		//if (g_MainThreadID != target_thread) // Don't attempt the call otherwise.
+		//	AttachThreadInput(g_FirstThreadID, target_thread, TRUE);
+		if (fore_thread && g_MainThreadID != fore_thread && !IsWindowHung(orig_foreground_wnd))
+			is_attached_my_to_fore = AttachThreadInput(g_MainThreadID, fore_thread, TRUE) != 0;
 		if (fore_thread && target_thread && fore_thread != target_thread) // IsWindowHung(aTargetWindow) was called earlier.
 			is_attached_fore_to_target = AttachThreadInput(fore_thread, target_thread, TRUE) != 0;
 	}
 
-	static bool sTriedKeyUp = false;
+	thread_local static bool sTriedKeyUp = false;
 
 	// The log showed that it never seemed to need more than two tries.  But there's
 	// not much harm in trying a few extra times.  The number of tries needed might
@@ -390,7 +390,7 @@ HWND SetForegroundWindowEx(HWND aTargetWindow)
 	// for these particular windows may result in a hung thread or other
 	// undesirable effect:
 	if (is_attached_my_to_fore)
-		AttachThreadInput(g_ThreadID, fore_thread, FALSE);
+		AttachThreadInput(g_MainThreadID, fore_thread, FALSE);
 	if (is_attached_fore_to_target)
 		AttachThreadInput(fore_thread, target_thread, FALSE);
 
@@ -534,7 +534,7 @@ HWND WinClose(HWND aWnd, int aTimeToWaitForClose, bool aKillIfHung)
 	{
 		// Seems best to always do the first one regardless of the value 
 		// of aTimeToWaitForClose:
-		if (g_ThreadID == aThreadID)
+		if (g_MainThreadID == aThreadID)
 			MsgSleep(INTERVAL_UNSPECIFIED);
 		else
 			Sleep(SLEEP_INTERVAL);
@@ -798,7 +798,7 @@ void StatusBarUtil(ResultToken &aResultToken, HWND aBarHwnd, int aPartNumber
 // aBarHwnd is allowed to be NULL because in that case, the caller wants us to set aresultToken appropriately.
 {
 	if (!aBarHwnd)
-		_f_throw(ERR_NO_STATUSBAR);
+		_f_throw(ERR_NO_STATUSBAR, ErrorPrototype::Target);
 
 	if (aCheckInterval < 1)
 		aCheckInterval = SB_DEFAULT_CHECK_INTERVAL; // Caller relies on us doing this.
@@ -824,7 +824,7 @@ void StatusBarUtil(ResultToken &aResultToken, HWND aBarHwnd, int aPartNumber
 	if (!SendMessageTimeout(aBarHwnd, SB_GETPARTS, 0, 0, SMTO_ABORTIFHUNG, SB_TIMEOUT, (PDWORD_PTR)&part_count)) // It failed or timed out.
 		goto error;
 	if (aPartNumber > part_count)
-		_f_throw(ERR_PARAM1_INVALID);
+		_f_throw_value(ERR_PARAM1_INVALID);
 	if (  !(remote_buf = AllocInterProcMem(handle, _TSIZE(WINDOW_TEXT_SIZE + 1), aBarHwnd))  )
 		goto error;
 
@@ -883,10 +883,16 @@ void StatusBarUtil(ResultToken &aResultToken, HWND aBarHwnd, int aPartNumber
 		// Since above didn't break, we're in "wait" mode (more than one iteration).
 		// In the following, must cast to int or any negative result will be lost due to DWORD type.
 		// Note: A negative aWaitTime means we're waiting indefinitely for a match to appear.
-		if (IsWindow(aBarHwnd) && g_ThreadID == aThreadID && (aWaitTime < 0 || (int)(aWaitTime - (GetTickCount() - start_time)) > SLEEP_INTERVAL_HALF))
-			MsgSleep(aCheckInterval);
-		else if (IsWindow(aBarHwnd) && aWaitTime < 0 || (int)(aWaitTime - (GetTickCount() - start_time)) > SLEEP_INTERVAL_HALF)
-			Sleep(aCheckInterval);
+		// Don't continue to wait if the status bar no longer exists (which is usually caused
+		// by the parent window having been destroyed).
+		if (   IsWindow(aBarHwnd)
+			&& (aWaitTime < 0 || (int)(aWaitTime - (GetTickCount() - start_time)) > SLEEP_INTERVAL_HALF)   )
+		{
+			if (g_MainThreadID == aThreadID)
+				MsgSleep(aCheckInterval);
+			else
+				Sleep(aCheckInterval);
+		}
 		else // Timed out.
 		{
 			aResultToken.value_int64 = FALSE; // Indicate "timeout".
@@ -901,7 +907,7 @@ void StatusBarUtil(ResultToken &aResultToken, HWND aBarHwnd, int aPartNumber
 	return;
 
 error:
-	_f_throw(ERR_INTERNAL_CALL);
+	_f_throw_win32();
 }
 
 

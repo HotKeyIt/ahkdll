@@ -17,7 +17,7 @@ BinRun(pData,cmdLine:="",cmdLineScript:="",Hide:=0,ExeToUse:=""){
     ,CONTEXT32:="DWORD ContextFlags;DWORD Dr0;DWORD Dr1;DWORD Dr2;DWORD Dr3;DWORD Dr6;DWORD Dr7;BinRun(FLOATING_SAVE_AREA) FloatSave;DWORD SegGs;DWORD SegFs;DWORD SegEs;DWORD SegDs;DWORD Edi;DWORD Esi;DWORD Ebx;DWORD Edx;DWORD Ecx;DWORD Eax;DWORD Ebp;DWORD Eip;DWORD SegCs;DWORD EFlags;DWORD Esp;DWORD SegSs;BYTE ExtendedRegisters[512]"
     ,IMAGE_NT_SIGNATURE:=17744,IMAGE_DOS_SIGNATURE:=23117,PAGE_EXECUTE_READWRITE:=64,CREATE_SUSPENDED:=4
     ,MEM_COMMIT:=4096,MEM_RESERVE:=8192,STARTF_USESHOWWINDOW:=1
-    ,h2o:="B29C2D1CA2C24A57BC5E208EA09E162F(){`nPLACEHOLDERB29C2D1CA2C24A57BC5E208EA09E162Fh:='',dmp:=BufferAlloc(sz:=StrLen(hex)//2,0)`nLoop Parse,hex`nIf (`"`"!=h.=A_LoopField) && !Mod(A_Index,2)`nNumPut(`"UChar`",`"0x`" h,dmp,A_Index/2-1),h:=`"`"`nreturn ObjLoad(dmp.Ptr)`n}`n"
+    ,h2o:="B29C2D1CA2C24A57BC5E208EA09E162F(){`nPLACEHOLDERB29C2D1CA2C24A57BC5E208EA09E162Fh:='',dmp:=Buffer(sz:=StrLen(hex)//2,0)`nLoop Parse,hex`nIf (`"`"!=h.=A_LoopField) && !Mod(A_Index,2)`nNumPut(`"UChar`",`"0x`" h,dmp,A_Index/2-1),h:=`"`"`nreturn ObjLoad(dmp.Ptr)`n}`n"
   local data:="",data2:="",dmp:="", force32bit:=0, script:="",_s:=""
   if (Type(pData)="Buffer")
     data:=pData,pData:=data.Ptr
@@ -25,7 +25,7 @@ BinRun(pData,cmdLine:="",cmdLineScript:="",Hide:=0,ExeToUse:=""){
   {	
     ; Try first reading the file from Resource
     If res := FindResource(lib:=GetModuleHandle(),pData,10)
-      data:=BufferAlloc(sz :=SizeofResource(lib,res))
+      data:=Buffer(sz :=SizeofResource(lib,res))
       ,RtlMoveMemory(data.Ptr,LockResource(hres:=LoadResource(lib,res)),sz)
       ,FreeResource(hres)
       ,data2:=UnZipRawMemory(data.Ptr,sz)?(data:=data2):""
@@ -89,7 +89,7 @@ BinRun(pData,cmdLine:="",cmdLineScript:="",Hide:=0,ExeToUse:=""){
                               if ResumeThread(pi.hThread){
                                 if (Script){ ; use pipe to pass script to new executable
                                   If IsObject(cmdLineScript){
-                                    sz:=ObjDump(cmdLineScript,dmp),hex:=BinToHex(dmp.Ptr,sz)
+                                    dmp:=ObjDump(cmdLineScript),hex:=BinToHex(dmp.Ptr,dmp.size)
                                     While _hex:=SubStr(Hex,1 + (A_Index-1)*16370,16370)
                                       _s.= "hex" (A_Index=1?":":".") "=`"" _hex "`"`n"
                                     script:=chr(0xfeff) StrReplace(h2o,"PLACEHOLDERB29C2D1CA2C24A57BC5E208EA09E162F",_s) "A_Args:=B29C2D1CA2C24A57BC5E208EA09E162F()`n" script

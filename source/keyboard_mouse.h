@@ -1,4 +1,4 @@
-/*
+﻿/*
 AutoHotkey
 
 Copyright 2003-2009 Chris Mallett (support@autohotkey.com)
@@ -22,11 +22,6 @@ EXTERN_G;
 
 // The max number of keystrokes to Send prior to taking a break to pump messages:
 #define MAX_LUMP_KEYS 50
-
-// Logging keys to a file is disabled in the main version in an effort to prevent
-// AutoHotkey from being branded as a key logger or trojan by various security firms and
-// security software. Uncomment this line to re-enabled logging of keys to a file:
-// #define ENABLE_KEY_HISTORY_FILE
 
 // Maybe define more of these later, perhaps with ifndef (since they should be in the normal header, and probably
 // will be eventually):
@@ -316,10 +311,11 @@ void InitEventArray(void *aMem, UINT aMaxEvents, modLR_type aModifiersLR);
 void SendEventArray(int &aFinalKeyDelay, modLR_type aModsDuringSend);
 void CleanupEventArray(int aFinalKeyDelay);
 
-_thread_local extern SendModes sSendMode;
+thread_local extern SendModes sSendMode;
 void DoKeyDelay(int aDelay = (sSendMode == SM_PLAY) ? g->KeyDelayPlay : g->KeyDelay);
 void DoMouseDelay();
 void UpdateKeyEventHistory(bool aKeyUp, vk_type aVK, sc_type aSC);
+void SetKeyHistoryMax(int aMax);
 #define KEYEVENT_PHYS(event_type, vk, sc) KeyEvent(event_type, vk, sc, NULL, false, KEY_PHYS_IGNORE)
 
 ToggleValueType ToggleKeyState(vk_type aVK, ToggleValueType aToggleValue);
@@ -351,23 +347,12 @@ LPTSTR SCtoKeyName(sc_type aSC, LPTSTR aBuf, int aBufSize, bool aUseFallback = t
 LPTSTR VKtoKeyName(vk_type aVK, LPTSTR aBuf, int aBufSize, bool aUseFallback = true);
 TCHAR VKtoChar(vk_type aVK, HKL aKeybdLayout = NULL);
 sc_type TextToSC(LPTSTR aText, bool *aSpecifiedByNumber = NULL);
-#ifdef  AHKX
-extern HKL g_HKL;   // Naveen # TODO N10
-vk_type TextToVK(LPTSTR aText, modLR_type *pModifiersLR = NULL, bool aExcludeThoseHandledByScanCode = false
-	, bool aAllowExplicitVK = true, HKL aKeybdLayout = g_HKL); // ahkmingw
-#else
 vk_type TextToVK(LPTSTR aText, modLR_type *pModifiersLR = NULL, bool aExcludeThoseHandledByScanCode = false
 	, bool aAllowExplicitVK = true, HKL aKeybdLayout = GetKeyboardLayout(0));
-#endif
 vk_type CharToVKAndModifiers(TCHAR aChar, modLR_type *pModifiersLR, HKL aKeybdLayout, bool aEnableAZFallback = true);
 bool TextToVKandSC(LPTSTR aText, vk_type &aVK, sc_type &aSC, modLR_type *pModifiersLR = NULL, HKL aKeybdLayout = GetKeyboardLayout(0));
 vk_type TextToSpecial(LPTSTR aText, size_t aTextLength, KeyEventTypes &aEventTypem, modLR_type &aModifiersLR
 	, bool aUpdatePersistent);
-
-#ifdef ENABLE_KEY_HISTORY_FILE
-ResultType KeyHistoryToFile(LPTSTR aFilespec = NULL, TCHAR aType = '\0', bool aKeyUp = false
-	, vk_type aVK = 0, sc_type aSC = 0);
-#endif
 
 LPTSTR GetKeyName(vk_type aVK, sc_type aSC, LPTSTR aBuf, int aBufSize, LPTSTR aDefault = _T("not found"));
 sc_type vk_to_sc(vk_type aVK, bool aReturnSecondary = false);

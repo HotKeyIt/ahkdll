@@ -1,4 +1,4 @@
-/*
+﻿/*
 AutoHotkey
 
 Copyright 2003-2009 Chris Mallett (support@autohotkey.com)
@@ -41,7 +41,7 @@ bool MsgSleep(int aSleepDuration = INTERVAL_UNSPECIFIED, MessageMode aMode = RET
 #define SLEEP_WITHOUT_INTERRUPTION(aSleepTime) \
 {\
 	g_AllowInterruption = FALSE;\
-	if (g_ThreadID == aThreadID || aSleepTime < 0)\
+	if (g_MainThreadID == aThreadID || aSleepTime < 0)\
 		MsgSleep(aSleepTime);\
 	else\
 		Sleep(aSleepTime);\
@@ -55,10 +55,11 @@ bool MsgSleep(int aSleepDuration = INTERVAL_UNSPECIFIED, MessageMode aMode = RET
 // any other important types of messages:
 #define MSG_FILTER_MAX (IsInterruptible() ? 0 : WM_HOTKEY - 1)
 #define INTERRUPTIBLE_IN_EMERGENCY (g_AllowInterruption && !g_MenuIsVisible)
+
 #define DoWinDelay \
 	if (::g->WinDelay > -1)\
 	{\
-		if (g_ThreadID != GetCurrentThreadId())\
+		if (g_MainThreadID != GetCurrentThreadId())\
 			Sleep(::g->WinDelay);\
 		else\
 			MsgSleep(::g->WinDelay);\
@@ -67,7 +68,7 @@ bool MsgSleep(int aSleepDuration = INTERVAL_UNSPECIFIED, MessageMode aMode = RET
 #define DoControlDelay \
 	if (g->ControlDelay > -1)\
 	{\
-		if (g_ThreadID != GetCurrentThreadId())\
+		if (g_MainThreadID != GetCurrentThreadId())\
 			Sleep(g->ControlDelay);\
 		else\
 			MsgSleep(g->ControlDelay);\
@@ -82,8 +83,10 @@ ResultType IsCycleComplete(int aSleepDuration, DWORD aStartTime, bool aAllowEarl
 // of the main timer) until the dialog's msg pump ended.
 bool CheckScriptTimers();
 #define CHECK_SCRIPT_TIMERS_IF_NEEDED if (g_script->mTimerEnabledCount && CheckScriptTimers()) return_value = true; // Change the existing value only if it returned true.
+
 void PollJoysticks();
 #define POLL_JOYSTICK_IF_NEEDED if (Hotkey::sJoyHotkeyCount) PollJoysticks();
+
 bool MsgMonitor(HWND aWnd, UINT aMsg, WPARAM awParam, LPARAM alParam, MSG *apMsg, LRESULT &aMsgReply);
 
 void InitNewThread(int aPriority, bool aSkipUninterruptible, bool aIncrementThreadCountAndUpdateTrayIcon
@@ -94,8 +97,8 @@ BOOL IsInterruptible();
 VOID CALLBACK MsgBoxTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime);
 VOID CALLBACK InputTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime);
 VOID CALLBACK RefreshInterruptibility(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime);
+
 #endif
-#ifndef _USRDLL
 
 typedef struct _MYTEB
 {
@@ -105,5 +108,6 @@ typedef struct _MYTEB
 	PVOID ActiveRpcHandle;
 	PVOID ThreadLocalStoragePointer;
 } MYTEB, *PMYTEB;
-#endif
+#ifndef _USRDLL
 bool AHKModule();
+#endif

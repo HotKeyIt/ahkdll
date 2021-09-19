@@ -30,7 +30,7 @@
  * These portions are Copyright (C) 2013 Thomas Heller.
  */
 
-#include "stdafx.h" // pre-compiled headers
+#include "pch.h" // pre-compiled headers
 #include "MemoryModule.h"
 #include "globaldata.h" // for access to many global vars
 #include "application.h"
@@ -49,24 +49,8 @@
 #include <winternl.h>
 #include <process.h>
 
-//#include "MinHook/MinHook.h"
-
 #include "MemoryModule.h"
 #include "MinHook.h"
-
-#if defined _M_X64
-#ifdef STATICLIBRARY
-#pragma comment(lib, "MT_libMinHook.x64.lib")
-#else
-#pragma comment(lib, "libMinHook.x64.lib")
-#endif
-#elif defined _M_IX86
-#ifdef STATICLIBRARY
-#pragma comment(lib, "MT_libMinHook.x86.lib")
-#else
-#pragma comment(lib, "libMinHook.x86.lib")
-#endif
-#endif
 
 #ifdef DEBUG_OUTPUT
 #include <stdio.h>
@@ -107,7 +91,6 @@ PVOID currentModuleEnd;
 #define GET_HEADER_DICTIONARY(module, idx)  &(module)->headers->OptionalHeader.DataDirectory[idx]
 
 // hook RtlPcToFileHeader
-HANDLE hHeap;
 PHOOK_ENTRY pHook = NULL;
 
 typedef struct _MY_LDR_DATA_TABLE_ENTRY
@@ -549,6 +532,47 @@ PerformBaseRelocation(PMEMORYMODULE module, ptrdiff_t delta)
     return TRUE;
 }
 
+#ifdef _WIN64
+static BOOL
+RegisterExceptionHandling(PMEMORYMODULE module)
+{
+
+    PIMAGE_RUNTIME_FUNCTION_ENTRY exceptionDesc;
+    unsigned char* codeBase = module->codeBase;
+
+    PIMAGE_DATA_DIRECTORY directory = GET_HEADER_DICTIONARY(module, IMAGE_DIRECTORY_ENTRY_EXCEPTION);
+    if (directory->Size == 0) {
+        return TRUE;
+    }
+
+    exceptionDesc = (PIMAGE_RUNTIME_FUNCTION_ENTRY)(codeBase + directory->VirtualAddress);
+    if (!RtlAddFunctionTable((PRUNTIME_FUNCTION)(exceptionDesc), directory->Size / sizeof(IMAGE_RUNTIME_FUNCTION_ENTRY), (DWORD64)codeBase)) {
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+static BOOL
+UnRegisterExceptionHandling(PMEMORYMODULE module)
+{
+    PIMAGE_RUNTIME_FUNCTION_ENTRY exceptionDesc;
+    unsigned char* codeBase = module->codeBase;
+
+    PIMAGE_DATA_DIRECTORY directory = GET_HEADER_DICTIONARY(module, IMAGE_DIRECTORY_ENTRY_EXCEPTION);
+    if (directory->Size == 0) {
+        return TRUE;
+    }
+
+    exceptionDesc = (PIMAGE_RUNTIME_FUNCTION_ENTRY)(codeBase + directory->VirtualAddress);
+    if (!RtlDeleteFunctionTable((PRUNTIME_FUNCTION)(exceptionDesc))) {
+        return FALSE;
+    }
+
+    return TRUE;
+}
+#endif
+
 static BOOL
 BuildImportTable(PMEMORYMODULE module)
 {
@@ -639,9 +663,6 @@ BuildImportTable(PMEMORYMODULE module)
     for (; !IsBadReadPtr(importDesc, sizeof(IMAGE_IMPORT_DESCRIPTOR)) && importDesc->Name; importDesc++) {
         uintptr_t *thunkRef;
         FARPROC *funcRef;
-#ifndef _USRDLL
-        //HRSRC hResource;
-#endif
         HCUSTOMMODULE *tmp;
         HCUSTOMMODULE handle = NULL;
         char *isMsvcr = NULL;
@@ -701,9 +722,11 @@ BuildImportTable(PMEMORYMODULE module)
                     *funcRef = MemoryGetProcAddress(handle, (LPCSTR)IMAGE_ORDINAL(*thunkRef));
             } else {
                 PIMAGE_IMPORT_BY_NAME thunkData = (PIMAGE_IMPORT_BY_NAME) (codeBase + (*thunkRef));
-                if (!isMsvcr)
-                    *funcRef = module->getProcAddress(handle, (LPCSTR)&thunkData->Name, module->userdata);
-                else
+				if (!isMsvcr)
+				{
+					*funcRef = module->getProcAddress(handle, (LPCSTR)&thunkData->Name, module->userdata);
+				}
+				else
                     *funcRef = MemoryGetProcAddress(handle, (LPCSTR)&thunkData->Name);
             }
             if (*funcRef == 0) {
@@ -948,7 +971,6 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data, size_t size,
     if (!BuildImportTable(result)) {
         goto error;
     }
-
     // mark memory pages depending on section headers and release
     // sections that are marked as "discardable"
     if (!FinalizeSections(result)) {
@@ -959,6 +981,11 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data, size_t size,
 	if (old_header->OptionalHeader.ImageBase != (ULONGLONG)g_hInstance && !ExecuteTLS(result)) {
         goto error;
     }
+#ifdef _WIN64
+	if (!RegisterExceptionHandling(result)) {
+		goto error;
+	}
+#endif
 
     // get entry point of loaded library
     if (result->headers->OptionalHeader.AddressOfEntryPoint != 0) {
@@ -977,13 +1004,11 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data, size_t size,
 				currentModuleStart = result->codeBase;
 				currentModuleEnd = result->codeBase + result->headers->OptionalHeader.SizeOfImage;
 				EnterCriticalSection(aLoaderLock);
-				pHook = MinHookEnable(GetProcAddress(GetModuleHandleA("ntdll.dll"), "RtlPcToFileHeader"), &HookRtlPcToFileHeader, &hHeap);
+				pHook = MinHookEnable(GetProcAddress(GetModuleHandleA("ntdll.dll"), "RtlPcToFileHeader"), &HookRtlPcToFileHeader);
 				// notify library about attaching to process
 				BOOL successfull = (*DllEntry)((HINSTANCE)code, DLL_PROCESS_ATTACH, result);
 				// Disable hook if it was enabled before
 				MinHookDisable(pHook);
-				HeapFree(hHeap, 0, pHook);
-				HeapDestroy(hHeap);
 				LeaveCriticalSection(aLoaderLock);
 
 				if (!successfull) {
@@ -1106,6 +1131,10 @@ void MemoryFreeLibrary(HMEMORYMODULE mod)
     if (module == NULL) {
         return;
     }
+#ifdef _WIN64
+    UnRegisterExceptionHandling(module);
+#endif
+
     if (module->initialized) {
         // notify library about detaching from process
         DllEntryProc DllEntry = (DllEntryProc)(LPVOID)(module->codeBase + module->headers->OptionalHeader.AddressOfEntryPoint);

@@ -1,0 +1,90 @@
+/*
+AutoHotkey
+
+Copyright 2003-2009 Chris Mallett (support@autohotkey.com)
+
+This program is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License
+as published by the Free Software Foundation; either version 2
+of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+*/
+
+// pch.h: Dies ist eine vorkompilierte Headerdatei.
+// Die unten aufgeführten Dateien werden nur einmal kompiliert, um die Buildleistung für zukünftige Builds zu verbessern.
+// Dies wirkt sich auch auf die IntelliSense-Leistung aus, Codevervollständigung und viele Features zum Durchsuchen von Code eingeschlossen.
+// Die hier aufgeführten Dateien werden jedoch ALLE neu kompiliert, wenn mindestens eine davon zwischen den Builds aktualisiert wird.
+// Fügen Sie hier keine Dateien hinzu, die häufig aktualisiert werden sollen, da sich so der Leistungsvorteil ins Gegenteil verkehrt.
+
+#ifndef PCH_H
+#define PCH_H
+
+#pragma once
+
+#define _CRT_SECURE_NO_DEPRECATE // Avoid compiler warnings in VC++ 8.x/2005 that urge the use of lower-performing C library functions that protect against buffer overruns.
+#define _CRT_NON_CONFORMING_SWPRINTFS // We don't want ISO version of swprintf, which has similar interface with snwprintf (different from sprintf)
+#define WIN32_LEAN_AND_MEAN		 // Exclude rarely-used stuff from Windows headers
+#define _WINSOCK_DEPRECATED_NO_WARNINGS // Primarily for WSAAsyncSelect, since the recommended replacement is inadequate.
+#pragma warning (disable:4351) // Suppress spurious warning about "new behavior" for some compilers.
+
+// Windows Header Files:
+// Necessary to do this prior to including windows.h so that NT functions are unlocked:
+#define _WIN32_WINNT 0x0600
+#define _WIN32_IE _WIN32_IE_IE70  // Added for TVN_ITEMCHANGED, which most likely requires Vista.
+
+#ifdef _MSC_VER
+	#include "config.h" // compile-time configurations
+	#include "debug.h"
+	#include "framework.h"
+
+	// C RunTime Header Files
+	#include <stdio.h>
+	#include <stdlib.h>
+	#include <stdarg.h> // used by snprintfcat()
+	#include <limits.h> // for UINT_MAX, UCHAR_MAX, etc.
+	#include <malloc.h> // For _alloca()
+	//#include <memory.h>
+
+	#include <windows.h>
+	#include <tchar.h>
+	#include <commctrl.h> // for status bar functions. Must be included after <windows.h>.
+	#include <shellapi.h>  // for ShellExecute()
+	#include <shlobj.h>  // for SHGetMalloc()
+	#include <mmsystem.h> // for mciSendString() and waveOutSetVolume()
+	#include <commdlg.h> // for OPENFILENAME
+	#include <string>
+
+	// ATL alternatives
+	#include "KuString.h"
+	#include "StringConv.h"
+
+
+	// It's probably best not to do these, because I think they would then be included
+	// for everything, even modules that don't need it, which might result in undesired
+	// dependencies sneaking in, or subtle naming conflicts:
+	// ...
+	//#include "defines.h"
+	//#include "application.h"
+	//#include "globaldata.h"
+	//#include "window.h"  // Not to be confused with "windows.h"
+	//#include "util.h"
+	//#include "SimpleHeap.h"
+#endif
+
+// Lexikos: Defining _WIN32_WINNT 0x0600 seems to break TrayTip in non-English Windows,
+//			and possibly other things.  Instead, define any Vista constants we need here.
+#if (_WIN32_WINNT < 0x0600)
+#define WM_MOUSEHWHEEL      0x020E
+#define MOUSEEVENTF_HWHEEL  0x01000 /* hwheel button rolled */
+#define LWS_NOPREFIX		0x0004 // SysLink control
+#define LWS_RIGHT			0x0020 // SysLink control
+#endif
+//{{AFX_INSERT_LOCATION}}
+// Microsoft Visual C++ will insert additional declarations immediately before the previous line.
+
+
+#endif //PCH_H

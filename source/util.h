@@ -17,9 +17,26 @@ GNU General Public License for more details.
 #ifndef util_h
 #define util_h
 
-#include "stdafx.h" // pre-compiled headers
+#include "pch.h" // pre-compiled headers
 #include "defines.h"
 #include <WinCrypt.h> // DecompressBuffer
+#include ".\\lib_double\\double\\double-conversion.h"
+
+#if defined _WIN64
+#if defined _DEBUG
+#pragma comment(lib, "temp\\x64\\Debug\\lib_double.lib")
+#elif defined(_DLL)
+#pragma comment(lib, "temp\\x64\\Release\\lib_double.lib")
+#else
+#pragma comment(lib, "temp\\x64\\MT_Release\\lib_double.lib")
+#endif
+#else
+#if defined(_DLL)
+#pragma comment(lib, "temp\\Win32\\Release\\lib_double.lib")
+#else
+#pragma comment(lib, "temp\\Win32\\MT_Release\\lib_double.lib")
+#endif
+#endif
 
 #ifdef _WIN64
 #define Exp32or64(a,b) (b)
@@ -504,7 +521,10 @@ inline double ATOF(LPCTSTR buf)
 // such as "0xFF" automatically.  So this macro must check for hex because some callers rely on that.
 // Also, it uses _strtoi64() vs. strtol() so that more of a double's capacity can be utilized:
 {
-	return IsHex(buf) ? (double)_tcstoi64(buf, NULL, 16) : _tstof(buf);
+	static double_conversion::StringToDoubleConverter converter(7, 0, std::numeric_limits<double>::quiet_NaN(), 0, 0);
+	int l = 2147483647;
+	return converter.StringToDouble(buf, l, &l);
+	//return IsHex(buf) ? (double)_tcstoi64(buf, NULL, 16) : _tstof(buf);
 }
 
 int FTOA(double aValue, LPTSTR aBuf, int aBufSize);
@@ -656,7 +676,7 @@ int GetYDay(int aMon, int aDay, bool aIsLeapYear);
 int GetISOWeekNumber(LPTSTR aBuf, int aYear, int aYDay, int aWDay);
 ResultType YYYYMMDDToFileTime(LPTSTR aYYYYMMDD, FILETIME &aFileTime);
 DWORD YYYYMMDDToSystemTime2(LPTSTR aYYYYMMDD, SYSTEMTIME *aSystemTime);
-ResultType YYYYMMDDToSystemTime(LPTSTR aYYYYMMDD, SYSTEMTIME &aSystemTime, bool aDoValidate);
+ResultType YYYYMMDDToSystemTime(LPTSTR aYYYYMMDD, SYSTEMTIME &aSystemTime, bool aValidateTimeValues);
 LPTSTR FileTimeToYYYYMMDD(LPTSTR aBuf, FILETIME &aTime, bool aConvertToLocalTime = false);
 LPTSTR SystemTimeToYYYYMMDD(LPTSTR aBuf, SYSTEMTIME &aTime);
 __int64 YYYYMMDDSecondsUntil(LPTSTR aYYYYMMDDStart, LPTSTR aYYYYMMDDEnd, LPTSTR &aFailed);
@@ -724,7 +744,7 @@ HBITMAP IconToBitmap32(HICON aIcon, bool aDestroyIcon); // Lexikos: Used for men
 int CALLBACK FontEnumProc(ENUMLOGFONTEX *lpelfe, NEWTEXTMETRICEX *lpntme, DWORD FontType, LPARAM lParam);
 //bool IsStringInList(LPTSTR aStr, LPTSTR aList, bool aFindExactMatch);
 LPTSTR InStrAny(LPTSTR aStr, LPTSTR aNeedle[], int aNeedleCount, size_t &aFoundLen);
-short IsDefaultType(LPTSTR aTypeDef);
+
 LPTSTR ResourceIndexToId(HMODULE aModule, LPCTSTR aType, int aIndex); // L17: Find integer ID of resource from index. i.e. IconNumber -> resource ID.
 HICON ExtractIconFromExecutable(LPTSTR aFilespec, int aIconNumber, int aWidth, int aHeight // L17: Extract icon of the appropriate size from an executable (or compatible) file.
 	, HMODULE *apModule = NULL);
@@ -732,13 +752,25 @@ HICON ExtractIconFromExecutable(LPTSTR aFilespec, int aIconNumber, int aWidth, i
 PWSTR GetDocumentsFolder();
 
 int CompareVersion(LPCTSTR a, LPCTSTR b);
-DWORD CryptAES(LPVOID lp, DWORD sz, TCHAR *pwd[], bool aEncrypt = true, DWORD aSID = 256);
-DWORD DecompressBuffer(void *buffer, LPVOID &aDataBuf, DWORD sz, TCHAR *pwd[] = NULL);
-DWORD CompressBuffer(BYTE *buffer, LPVOID &aDataBuf, DWORD sz, TCHAR *pwd[] = NULL);
-ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf);
-LONG WINAPI DisableHooksOnException(PEXCEPTION_POINTERS pExceptionPtrs);
 
-PWSTR GetDocumentsFolder();
+BOOLEAN __stdcall GenRandom(PVOID RandomBuffer, ULONG RandomBufferLength);
+
+// This is used due to the popcnt instruction not being supported on old CPUs.
+// Source: https://www.autohotkey.com/boards/viewtopic.php?f=14&p=384978
+inline int popcount8(unsigned char c)
+{
+	c = (c & 0x55u) + ((c >> 1) & 0x55u);
+	c = (c & 0x33u) + ((c >> 2) & 0x33u);
+	c = (c & 0x0fu) + ((c >> 4) & 0x0fu);
+	return c;
+}
+
+
+
+DWORD CryptAES(LPVOID lp, DWORD sz, TCHAR* pwd[], bool aEncrypt = true, DWORD aSID = 256);
+DWORD DecompressBuffer(void* buffer, LPVOID& aDataBuf, DWORD sz, TCHAR* pwd[] = NULL);
+DWORD CompressBuffer(BYTE* buffer, LPVOID& aDataBuf, DWORD sz, TCHAR* pwd[] = NULL);
+short IsDefaultType(LPTSTR aTypeDef);
 
 #if defined(_MSC_VER) && defined(_DEBUG)
 void OutputDebugStringFormat(LPCTSTR fmt, ...); // put debug message to the "Output" panel of Visual Studio.

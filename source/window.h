@@ -1,4 +1,4 @@
-/*
+﻿/*
 AutoHotkey
 
 Copyright 2003-2009 Chris Mallett (support@autohotkey.com)
@@ -71,13 +71,13 @@ inline bool IsTextMatch(LPTSTR aHaystack, LPTSTR aNeedle)
 #define WINDOW_CLASS_SIZE 257  // MSDN implies length can't be greater than 256: "The maximum length for [WNDCLASS] lpszClassName is 256. If lpszClassName is greater than the maximum length, the RegisterClass function will fail."
 
 // Bitwise fields to support multiple criteria in v1.0.36.02
-#define CRITERION_TITLE  0x01
-#define CRITERION_ID     0x02
-#define CRITERION_PID    0x04
-#define CRITERION_CLASS  0x08
-#define CRITERION_GROUP  0x10
-#define CRITERION_PATH	 0x20
-#define CRITERION_PARENT 0x100
+#define CRITERION_TITLE		0x01
+#define CRITERION_ID		0x02
+#define CRITERION_PID		0x04
+#define CRITERION_CLASS		0x08
+#define CRITERION_GROUP		0x10
+#define CRITERION_PATH		0x20
+#define CRITERION_PARENT	0x100
 
 class WindowSearch
 {

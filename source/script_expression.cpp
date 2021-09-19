@@ -37,7 +37,7 @@ GNU General Public License for more details.
 // longer has a separate "favor fast code" option.
 //////////////////////////////////////////////////////////////////////////////////////
 
-#include "stdafx.h" // pre-compiled headers
+#include "pch.h" // pre-compiled headers
 #include "script.h"
 #include "script_object.h"
 #include "globaldata.h" // for a lot of things
@@ -125,14 +125,24 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 
 		if (IS_OPERAND(this_token.symbol)) // If it's an operand, just push it onto stack for use by an operator in a future iteration.
 		{
-			// HotKeyIt added a way to override default behaviour for Manually added BuildIn Variable -removed->> || (this_token.symbol == SYM_VAR && this_token.var->mType == VAR_BUILTIN)
-			if (this_token.symbol == SYM_DYNAMIC) // CONVERTED HERE/EARLY TO SOMETHING *OTHER* THAN SYM_DYNAMIC so that no later stages need any handling for them as operands. SYM_DYNAMIC is quite similar to SYM_FUNC/BIF in this respect.
+			if (this_token.symbol == SYM_DYNAMIC) // Dynamic variable reference.
 			{
-				if (SYM_DYNAMIC_IS_DOUBLE_DEREF(this_token)) // Double-deref such as Array%i%.  HotKeyIt added a way to override default behaviour manual buildin var -removed && this_token.symbol != SYM_VAR
+				if (!stack_count) // Prevent stack underflow.
+					goto abort_with_exception;
+				ExprTokenType &right = *STACK_POP;
+				if (auto right_obj = TokenToObject(right))
 				{
-					if (!stack_count) // Prevent stack underflow.
-						goto abort_with_exception;
-					ExprTokenType &right = *STACK_POP;
+					if (right_obj->Base() == Object::sVarRefPrototype)
+						temp_var = static_cast<VarRef *>(right_obj);
+					else
+					{
+						error_info = _T("String or VarRef");
+						error_value = &right;
+						goto type_mismatch;
+					}
+				}
+				else
+				{
 					right_string = TokenToString(right, right_buf, &right_length);
 					// Do some basic validation to ensure a helpful error message is displayed on failure.
 					if (right_length == 0)
@@ -141,113 +151,130 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 						error_info = mArg[aArgIndex].text;
 						goto abort_with_exception;
 					}
-					if (right_length > MAX_VAR_NAME_LENGTH)
+					// v2.0: Use of FindVar() vs. FindOrAddVar() makes this check unnecessary.
+					//if (right_length > MAX_VAR_NAME_LENGTH)
+					//{
+					//	error_msg = ERR_DYNAMIC_TOO_LONG;
+					//	error_info = right_string;
+					//	goto abort_with_exception;
+					//}
+					// v2.0: Dynamic creation of variables is not permitted, so FindOrAddVar() is not used.
+					if (!(temp_var = g_script->FindVar(right_string, right_length
+						, VARREF_IS_WRITE(this_token.var_usage) ? FINDVAR_FOR_WRITE : FINDVAR_FOR_READ)))
 					{
-						error_msg = ERR_DYNAMIC_TOO_LONG;
+						if (g->CurrentFunc && g_script->FindGlobalVar(right_string, right_length))
+							error_msg = ERR_DYNAMIC_BAD_GLOBAL;
+						else
+							error_msg = ERR_DYNAMIC_NOT_FOUND;
 						error_info = right_string;
 						goto abort_with_exception;
 					}
-					// In v1.0.31, FindOrAddVar() vs. FindVar() is called below to support the passing of non-existent
-					// array elements ByRef, e.g. Var:=MyFunc(Array%i%) where the MyFunc function's parameter is
-					// defined as ByRef, would effectively create the new element Array%i% if it doesn't already exist.
-					// Since at this stage we don't know whether this particular double deref is to be sent as a param
-					// to a function, or whether it will be byref, this is done unconditionally for all double derefs
-					// since it seems relatively harmless to create a blank variable in something like var := Array%i%
-					// (though it will produce a runtime error if the double resolves to an illegal variable name such
-					// as one containing spaces).
-					if (   !(temp_var = g_script->FindOrAddVar(right_string, right_length))   )
-					{
-						// Above already displayed the error.  As of v1.0.31, this type of error is displayed and
-						// causes the current thread to terminate, which seems more useful than the old behavior
-						// that tolerated anything in expressions.
-						goto abort;
-					}
-					this_token.var = temp_var;
 				}
-				//else: It's a built-in variable.
-
-				if (VARREF_IS_WRITE(this_token.var_usage) && this_token.var->IsReadOnly())
-				{
-					// Having this check here allows us to display the variable name rather than its contents
-					// in the error message.
-					VarIsReadOnlyError(this_token.var, this_token.var_usage);
+				// var_usage was already validated for non-dynamic variables.  SYM_REF relies on this check.
+				// It also flags invalid assignments, but those can be handled by Var::Assign() anyway.
+				if (!ValidateVarUsage(temp_var, this_token.var_usage))
 					goto abort;
-				}
-
-				if (this_token.var->Type() == VAR_CONSTANT)
+				this_token.var = temp_var;
+				this_token.symbol = SYM_VAR;
+			}
+			if (this_token.symbol == SYM_VAR && !VARREF_IS_WRITE(this_token.var_usage))
+			{
+				if (this_token.var->Type() == VAR_VIRTUAL && this_token.var_usage == Script::VARREF_READ)
 				{
-					// Currently constants can't be local, so there should be no need to AddRef() and add to to_free[].
-					this_token.var->ToTokenSkipAddRef(this_token);
+					// FUTURE: This should be merged with the SYM_FUNC handling at some point to improve
+					// maintainability, reduce code size, and take advantage of SYM_FUNC's optimizations.
+					ResultToken result_token;
+					result_token.InitResult(left_buf);
+					result_token.symbol = SYM_INTEGER; // For _f_return_i() and consistency with BIFs.
+
+					// Call this virtual variable's getter.
+					this_token.var->Get(result_token);
+
+					if (result_token.Exited())
+					{
+						aResult = result_token.Result(); // See similar section under SYM_FUNC for comments.
+						result_to_return = NULL;
+						goto normal_end_skip_output_var;
+					}
+
+					if (result_token.symbol != SYM_STRING || result_token.marker_length == 0)
+					{
+						// Currently SYM_OBJECT is not added to to_free[] as there aren't any built-in
+						// vars that create an object or call AddRef().  If that's changed, must update
+						// BIV_TrayMenu and Debugger::GetPropertyValue.
+						this_token.CopyValueFrom(result_token);
+						goto push_this_token;
+					}
+
+					result_length = result_token.marker_length;
+					if (result_length == -1)
+						result_length = _tcslen(result_token.marker);
+
+					if (result_token.marker != left_buf)
+					{
+						if (result_token.mem_to_free) // Persistent memory was already allocated for the result.
+							to_free[to_free_count++] = &this_token; // A slot was reserved for this SYM_DYNAMIC.
+							// Also push the value, below.
+						//else: Currently marker is assumed to point to persistent memory, such as a literal
+						// string, which should be safe to use at least until expression evaluation completes.
+						this_token.SetValue(result_token.marker, result_length);
+						goto push_this_token;
+					}
+
+					result_size = 1 + result_length;
+					if (result_size <= (int)(aDerefBufSize - (target - aDerefBuf))) // There is room at the end of our deref buf, so use it.
+					{
+						result = target; // Point result to its new, more persistent location.
+						target += result_size; // Point it to the location where the next string would be written.
+					}
+					else // if (result_size < EXPR_SMALL_MEM_LIMIT && alloca_usage < EXPR_ALLOCA_LIMIT) // See comments at EXPR_SMALL_MEM_LIMIT.
+					{	// Above: Anything longer than MAX_NUMBER_SIZE can't be in left_buf and therefore
+						// was already handled above.  alloca_usage is a safeguard but not an absolute limit.
+						result = (LPTSTR)talloca(result_size);
+						alloca_usage += result_size; // This might put alloca_usage over the limit by as much as EXPR_SMALL_MEM_LIMIT, but that is fine because it's more of a guideline than a limit.
+					}
+					tmemcpy(result, result_token.marker, result_length + 1);
+					this_token.SetValue(result, result_length);
 					goto push_this_token;
-				}
-
-				if (this_token.var->Type() == VAR_NORMAL || VARREF_IS_WRITE(this_token.var_usage))
-  				{
-					this_token.symbol = SYM_VAR; // The fact that a SYM_VAR operand is always VAR_NORMAL (with limited exceptions) is relied upon in several places such as built-in functions.
-					goto push_this_token;
-  				}
-				
-				// FUTURE: This should be merged with the SYM_FUNC handling at some point to improve
-				// maintainability, reduce code size, and take advantage of SYM_FUNC's optimizations.
-				ResultToken result_token;
-				result_token.InitResult(left_buf);
-				result_token.symbol = SYM_INTEGER; // For _f_return_i() and consistency with BIFs.
-
-				// Call this virtual variable's getter.
-				this_token.var->Get(result_token);
-
-				if (result_token.Exited())
+				} // end if (reading a var of type VAR_VIRTUAL)
+				if (g->CurrentMacro)
 				{
-					aResult = result_token.Result(); // See similar section under SYM_FUNC for comments.
-					result_to_return = NULL;
-					goto normal_end_skip_output_var;
+					Var *aMacroVar = g_script->FindVar(this_token.var->mName, 0, FINDVAR_FOR_READ);
+					if (!aMacroVar)
+					{
+						error_value = &this_token;
+						goto unset_var;
+					}
+					this_token.var = aMacroVar;
 				}
-
-				if (result_token.symbol != SYM_STRING || result_token.marker_length == 0)
+				else
+				if (this_token.var->IsUninitialized())
 				{
-					// Currently SYM_OBJECT is not added to to_free[] as there aren't any built-in
-					// vars that create an object or call AddRef().  If that's changed, must update
-					// BIV_TrayMenu and Debugger::GetPropertyValue.
-					this_token.CopyValueFrom(result_token);
-					goto push_this_token;
+					if (this_token.var->Type() == VAR_CONSTANT)
+					{
+						auto result = this_token.var->InitializeConstant();
+						if (result != OK)
+						{
+							aResult = result;
+							result_to_return = NULL;
+							goto normal_end_skip_output_var;
+						}
+					}
+					else if (this_token.var_usage == Script::VARREF_READ)
+					{
+						// The expression is always aborted in this case, even if the user chooses to continue the thread.
+						// If this is changed, check all other callers of unset_var and VarUnsetError() for consistency.
+						error_value = &this_token;
+						goto unset_var;
+					}
 				}
-
-				result_length = result_token.marker_length;
-				if (result_length == -1)
-					result_length = _tcslen(result_token.marker);
-				
-				if (result_token.marker != left_buf)
-				{
-					if (result_token.mem_to_free) // Persistent memory was already allocated for the result.
-						to_free[to_free_count++] = &this_token; // A slot was reserved for this SYM_DYNAMIC.
-						// Also push the value, below.
-					//else: Currently marker is assumed to point to persistent memory, such as a literal
-					// string, which should be safe to use at least until expression evaluation completes.
-					this_token.SetValue(result_token.marker, result_length);
-					goto push_this_token;
-				}
-				
-				result_size = 1 + result_length;
-				if (result_size <= (int)(aDerefBufSize - (target - aDerefBuf))) // There is room at the end of our deref buf, so use it.
-				{
-					result = target; // Point result to its new, more persistent location.
-					target += result_size; // Point it to the location where the next string would be written.
-				}
-				else // if (result_size < EXPR_SMALL_MEM_LIMIT && alloca_usage < EXPR_ALLOCA_LIMIT) // See comments at EXPR_SMALL_MEM_LIMIT.
-				{	// Above: Anything longer than MAX_NUMBER_SIZE can't be in left_buf and therefore
-					// was already handled above.  alloca_usage is a safeguard but not an absolute limit.
-					result = (LPTSTR)talloca(result_size);
-					alloca_usage += result_size; // This might put alloca_usage over the limit by as much as EXPR_SMALL_MEM_LIMIT, but that is fine because it's more of a guideline than a limit.
-				}
-				tmemcpy(result, result_token.marker, result_length + 1);
-				this_token.SetValue(result, result_length);
-			} // if (this_token.symbol == SYM_DYNAMIC)
+			}
 			goto push_this_token;
 		} // if (IS_OPERAND(this_token.symbol))
 
 		if (this_token.symbol == SYM_FUNC)
 		{
-			auto func = this_token.callsite->func; // For convenience and because any modifications should not be persistent.
+			IObject *func = this_token.callsite->func; // For convenience and because any modifications should not be persistent.
 			auto member = this_token.callsite->member;
 			auto flags = this_token.callsite->flags;
 			auto param_count = this_token.callsite->param_count;
@@ -278,7 +305,6 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 				}
 			}
 
-			bool permit_unhandled_result = false;
 			if (func)
 			{
 				func_token = (ExprTokenType *)_alloca(sizeof(ExprTokenType));
@@ -287,13 +313,11 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 			else
 			{
 				// This is a dynamic function call.
-				if (!stack_count) // SYM_DYNAMIC should have pushed a function name or reference onto the stack, but a syntax error may still cause this condition.
+				if (!stack_count)
 					goto abort_with_exception;
 				stack_count--;
 				func_token = stack[stack_count];
 				func = TokenToObject(*func_token);
-				if (!func)
-					func = g_script->FindFunc(TokenToString(*func_token, left_buf));
 				if (!func)
 				{
 					if (func_token->symbol == SYM_SUPER)
@@ -303,7 +327,6 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 						func = g->CurrentFunc->mClass->Base();
 						ASSERT(func);
 						func_token->SetVar(g->CurrentFunc->mParam[0].var);
-						permit_unhandled_result = true;
 					}
 					else
 					{
@@ -354,19 +377,15 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 				// reason for early exit) should be considered valid/meaningful only if result_to_return is NULL.
 				goto normal_end_skip_output_var; // output_var is left unchanged in these cases.
 			case INVOKE_NOT_HANDLED:
-				if (permit_unhandled_result)
-				{
-					this_token.SetValue(_T(""), 0);
-					goto push_this_token;
-				}
-				aResult = result_token.UnknownMemberError(*func_token, flags, member);
+				result_token.UnknownMemberError(*func_token, flags, member);
+				aResult = result_token.Result(); // FAIL to abort, OK if user or OnError requested continuation.
 				goto abort_if_result;
 			}
 			g->ExcptDeref = NULL;
 #ifdef CONFIG_DEBUGGER
 			// See PostExecFunctionCall() itself for comments.
-			if (g_Debugger.IsConnected())
-				g_Debugger.PostExecFunctionCall(this);
+			if (g_Debugger->IsConnected())
+				g_Debugger->PostExecFunctionCall(this);
 #endif
 			g_script->mCurrLine = this; // For error-reporting.
 
@@ -572,12 +591,12 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 				if (result_size <= aDerefBufSize - (target - aDerefBuf)) // There is room at the end of our deref buf, so use it.
 				{
 					// Make the token's result the new, more persistent location:
-					this_token.marker = tmemcpy(target, result, result_size); // Benches slightly faster than strcpy().
+					this_token.marker = tmemcpy(target, result, result_length); // Benches slightly faster than strcpy().
 					target += result_size; // Point it to the location where the next string would be written.
 				}
 				else if (result_size < EXPR_SMALL_MEM_LIMIT && alloca_usage < EXPR_ALLOCA_LIMIT) // See comments at EXPR_SMALL_MEM_LIMIT.
 				{
-					this_token.marker = tmemcpy(talloca(result_size), result, result_size); // Benches slightly faster than strcpy().
+					this_token.marker = tmemcpy(talloca(result_size), result, result_length); // Benches slightly faster than strcpy().
 					alloca_usage += result_size; // This might put alloca_usage over the limit by as much as EXPR_SMALL_MEM_LIMIT, but that is fine because it's more of a guideline than a limit.
 				}
 				else // Need to create some new persistent memory for our temporary use.
@@ -592,9 +611,13 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 					//   return values are usually small, such as numbers).
 					if (  !(this_token.marker = tmalloc(result_size))  )
 						goto outofmem;
-					tmemcpy(this_token.marker, result, result_size); // Benches slightly faster than strcpy().
+					tmemcpy(this_token.marker, result, result_length); // Benches slightly faster than strcpy().
 					to_free[to_free_count++] = &this_token; // A slot was reserved for this SYM_FUNC.
 				}
+				// Must be null-terminated because some built-in functions (such as MsgBox) still require it.
+				// Explicit null-termination here (vs. including it in tmemcpy above) allows SubStr and others
+				// to return a non-terminated substring.
+				this_token.marker[result_length] = '\0';
 			}
 			else // make_result_persistent==false
 				this_token.marker = result;
@@ -626,13 +649,12 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 		case SYM_CONCAT:        // resolving right_is_number for CONCAT because TokenIsPureNumeric() will take
 		case SYM_ASSIGN_CONCAT: // a long time if the string is very long and consists entirely of digits/whitespace.
 		case SYM_IS:
-		case SYM_IN:
-		case SYM_CONTAINS:
 			right_is_pure_number = right_is_number = PURE_NOT_NUMERIC; // Init for convenience/maintainability.
 		case SYM_AND:			// v2: These don't need it either since even numeric strings are considered "true".
 		case SYM_OR:			//
 		case SYM_LOWNOT:		//
 		case SYM_HIGHNOT:		//
+		case SYM_REF:
 			break;
 			
 		case SYM_COMMA: // This can only be a statement-separator comma, not a function comma, since function commas weren't put into the postfix array.
@@ -640,8 +662,6 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 			// result of the comma's left-hand sub-statement.  At this point the right-hand sub-statement
 			// has not yet been evaluated.  Like C++ and other languages, but unlike AutoHotkey v1, the
 			// rightmost operand is preserved, not the leftmost.
-			if (right.symbol == SYM_VAR) // Count this as "use" for the purpose of the warning, since it could be an error (maybe the author intended to call a function?).
-				right.var->MaybeWarnUninitialized();
 			continue;
 
 		default:
@@ -716,6 +736,35 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 				error_value = &right;
 				goto type_mismatch; // For consistency with unary minus (see above).
 			}
+			break;
+
+		case SYM_REF:
+			if (right.symbol != SYM_VAR) // Syntax error?
+				goto abort_with_exception;
+			if (this_token.var_usage != Script::VARREF_READ)
+			{
+				if (this_token.var_usage != Script::VARREF_REF)
+				{
+					// VARREF_ISSET or VARREF_OUTPUT_VAR -> SYM_VAR.
+					this_token.SetVarRef(right.var);
+					goto push_this_token;
+				}
+				Var *target_var = right.var->ResolveAlias();
+				if (!target_var->IsNonStaticLocal()
+					|| !this_token.object
+					|| !((UserFunc *)this_token.object)->mInstances)
+				{
+					// target_var definitely isn't a local var of the function being called,
+					// so it's safe to pass as SYM_VAR.
+					this_token.SetVarRef(target_var);
+					goto push_this_token;
+				}
+			}
+			ASSERT(right.var->Type() == VAR_NORMAL);
+			this_token.SetValue(right.var->GetRef());
+			if (!this_token.object)
+				goto outofmem;
+			to_free[to_free_count++] = &this_token;
 			break;
 
 		case SYM_POST_INCREMENT: // These were added in v1.0.46.  It doesn't seem worth translating them into
@@ -830,17 +879,18 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 					else
 						this_token.SetVar(left.var);
 					goto push_this_token;
-				case SYM_ASSIGN_ADD:           this_token.symbol = SYM_ADD; break;
-				case SYM_ASSIGN_SUBTRACT:      this_token.symbol = SYM_SUBTRACT; break;
-				case SYM_ASSIGN_MULTIPLY:      this_token.symbol = SYM_MULTIPLY; break;
-				case SYM_ASSIGN_DIVIDE:        this_token.symbol = SYM_DIVIDE; break;
-				case SYM_ASSIGN_INTEGERDIVIDE: this_token.symbol = SYM_INTEGERDIVIDE; break;
-				case SYM_ASSIGN_BITOR:         this_token.symbol = SYM_BITOR; break;
-				case SYM_ASSIGN_BITXOR:        this_token.symbol = SYM_BITXOR; break;
-				case SYM_ASSIGN_BITAND:        this_token.symbol = SYM_BITAND; break;
-				case SYM_ASSIGN_BITSHIFTLEFT:  this_token.symbol = SYM_BITSHIFTLEFT; break;
-				case SYM_ASSIGN_BITSHIFTRIGHT: this_token.symbol = SYM_BITSHIFTRIGHT; break;
-				case SYM_ASSIGN_CONCAT:        this_token.symbol = SYM_CONCAT; break;
+				case SYM_ASSIGN_ADD:					this_token.symbol = SYM_ADD; break;
+				case SYM_ASSIGN_SUBTRACT:				this_token.symbol = SYM_SUBTRACT; break;
+				case SYM_ASSIGN_MULTIPLY:				this_token.symbol = SYM_MULTIPLY; break;
+				case SYM_ASSIGN_DIVIDE:					this_token.symbol = SYM_DIVIDE; break;
+				case SYM_ASSIGN_INTEGERDIVIDE:			this_token.symbol = SYM_INTEGERDIVIDE; break;
+				case SYM_ASSIGN_BITOR:					this_token.symbol = SYM_BITOR; break;
+				case SYM_ASSIGN_BITXOR:					this_token.symbol = SYM_BITXOR; break;
+				case SYM_ASSIGN_BITAND:					this_token.symbol = SYM_BITAND; break;
+				case SYM_ASSIGN_BITSHIFTLEFT:			this_token.symbol = SYM_BITSHIFTLEFT; break;
+				case SYM_ASSIGN_BITSHIFTRIGHT:			this_token.symbol = SYM_BITSHIFTRIGHT; break;
+				case SYM_ASSIGN_BITSHIFTRIGHT_LOGICAL:	this_token.symbol = SYM_BITSHIFTRIGHT_LOGICAL; break;
+				case SYM_ASSIGN_CONCAT:					this_token.symbol = SYM_CONCAT; break;
 				}
 				// Since above didn't goto or break out of the outer loop, this is an assignment other than
 				// SYM_ASSIGN, so it needs further evaluation later below before the assignment will actually be made.
@@ -1075,7 +1125,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 				default:
 					// All other operators do not support non-numeric operands.
 					error_info = _T("Number");
-					error_value = left_is_number ? &right : &left;
+					error_value = right_is_number ? &left : &right; // Must use right_is_number since if it's false, left_is_number wasn't set.
 					goto type_mismatch;
 				}
 				this_token.symbol = result_symbol; // Must be done only after the switch() above.
@@ -1108,9 +1158,13 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 				case SYM_BITXOR:		this_token.value_int64 = left_int64 ^ right_int64; break;
 				case SYM_BITSHIFTLEFT:
 				case SYM_BITSHIFTRIGHT:
+				case SYM_BITSHIFTRIGHT_LOGICAL:
 					if (right_int64 < 0 || right_int64 > 63)
 						goto abort_with_exception;
-					this_token.value_int64 = this_token.symbol == SYM_BITSHIFTLEFT
+					if (this_token.symbol == SYM_BITSHIFTRIGHT_LOGICAL)
+						this_token.value_int64 = (unsigned __int64)left_int64 >> right_int64;
+					else
+						this_token.value_int64 = this_token.symbol == SYM_BITSHIFTLEFT
 						? left_int64 << right_int64
 						: left_int64 >> right_int64;
 					break;
@@ -1244,11 +1298,7 @@ push_this_token:
 	// It seems best to avoid any chance of looking at the result since it might be invalid due to the above
 	// having taken shortcuts (since it knew the result would be discarded).
 	if (mActionType == ACT_EXPRESSION)   // A stand-alone expression whose end result doesn't matter.
-	{
-		if (result_token.symbol == SYM_VAR) // Count this as "use" for the purpose of the warning, since it could be an error (maybe the author intended to call a function?).
-			result_token.var->MaybeWarnUninitialized();
 		goto normal_end_skip_output_var; // Can't be any output_var for this action type. Also, leave result_to_return at its default of "".
-	}
 
 	if (output_var)
 	{
@@ -1336,13 +1386,14 @@ push_this_token:
 		if (result_token.symbol == SYM_VAR)
 		{
 			result = result_token.var->Contents();
-			result_size = result_token.var->Length() + 1;
+			result_length = result_token.var->Length();
 		}
 		else
 		{
 			result = result_token.marker;
-			result_size = result_token.marker_length + 1; // At this stage, marker_length should always be valid, not -1.
+			result_length = result_token.marker_length; // At this stage, marker_length should always be valid, not -1.
 		}
+		result_size = result_length + 1;
 
 		// Notes about the macro below:
 		// Space is needed for whichever of the following is greater (since only one of the following is in
@@ -1395,7 +1446,8 @@ push_this_token:
 			// larger than capacity_of_our_buf_portion because other arg(s) exist in this line after ours
 			// that will be using a larger total portion of the buffer than ours.  Thus, the following must be
 			// done prior to free(), but memcpy() vs. memmove() is safe in any case:
-			tmemcpy(aTarget, result, result_size); // Copy from old location to the newly allocated one.
+			tmemcpy(aTarget, result, result_length); // Copy from old location to the newly allocated one.
+			aTarget[result_length] = '\0'; // Guarantee null-termination so it doesn't have to be done at an earlier stage.
 
 			free(aDerefBuf); // Free our original buffer since it's contents are no longer needed.
 			if (aDerefBufSize > LARGE_DEREF_BUF_SIZE)
@@ -1413,12 +1465,14 @@ push_this_token:
 			aDerefBufSize = new_buf_size; // Set for our caller.
 		}
 		else // Deref buf is already large enough to fit the string.
-			if (aTarget != result) // Currently, might be always true.
-				tmemmove(aTarget, result, result_size); // memmove() vs. memcpy() in this case, since source and dest might overlap (i.e. "target" may have been used to put temporary things into aTarget, but those things are no longer needed and now safe to overwrite).
+		{
+			tmemmove(aTarget, result, result_length); // memmove() vs. memcpy() in this case, since source and dest might overlap (i.e. "target" may have been used to put temporary things into aTarget, but those things are no longer needed and now safe to overwrite).
+			aTarget[result_length] = '\0'; // Guarantee null-termination so it doesn't have to be done at an earlier stage.
+		}
 		if (aResultToken)
 		{
 			aResultToken->marker = aTarget;
-			aResultToken->marker_length = result_size - 1;
+			aResultToken->marker_length = result_length;
 		}
 		aTarget += result_size;
 		goto normal_end_skip_output_var; // output_var was already checked higher above, so no need to consider it again.
@@ -1455,11 +1509,14 @@ type_mismatch:
 		goto abort_if_result;
 	}
 divide_by_zero:
-	error_msg = ERR_DIVIDEBYZERO;
-	goto abort_with_exception;
+	aResult = g_script->RuntimeError(ERR_DIVIDEBYZERO, nullptr, FAIL_OR_OK, this, ErrorPrototype::ZeroDivision);
+	goto abort_if_result;
 outofmem:
-	error_msg = ERR_OUTOFMEM;
-	goto abort_with_exception;
+	aResult = MemoryError();
+	goto abort_if_result;
+unset_var:
+	aResult = g_script->VarUnsetError(error_value->var);
+	goto abort_if_result;
 
 //normal_end: // This isn't currently used, but is available for future-use and readability.
 	// v1.0.45: ACT_ASSIGNEXPR relies on us to set the output_var (i.e. whenever it's ARG1's is_expression==true).
@@ -1496,7 +1553,7 @@ ResultType Line::ExpandSingleArg(int aArgIndex, ResultToken &aResultToken, LPTST
 #ifdef _WIN64
 		aResultToken.marker_length = postfix->marker_length;
 #endif
-		if (aResultToken.symbol == SYM_OBJECT) // This can happen for VAR_CONSTANT or optimised Func("x").
+		if (aResultToken.symbol == SYM_OBJECT) // This can happen for VAR_CONSTANT.
 			aResultToken.object->AddRef();
 		return OK;
 	}
@@ -1514,7 +1571,7 @@ ResultType Line::ExpandSingleArg(int aArgIndex, ResultToken &aResultToken, LPTST
 		if ( !(aDerefBuf = tmalloc(space_needed)) )
 		{
 			aDerefBufSize = 0;
-			return LineError(ERR_OUTOFMEM);
+			return MemoryError();
 		}
 		aDerefBufSize = space_needed;
 		if (aDerefBufSize > LARGE_DEREF_BUF_SIZE)
@@ -1548,26 +1605,25 @@ ResultType Line::ExpandSingleArg(int aArgIndex, ResultToken &aResultToken, LPTST
 
 
 
-ResultType VariadicCall(IObject *aObj, IObject_Invoke_PARAMS_DECL)
+ResultType VariadicCall(IObject* aObj, IObject_Invoke_PARAMS_DECL)
 {
-	IObject *param_obj = nullptr; // Vararg object passed by caller.
-	Array *param_array = nullptr; // Array of parameters, either the same as param_obj or the result of enumeration.
+	IObject* param_obj = nullptr; // Vararg object passed by caller.
+	Array* param_array = nullptr; // Array of parameters, either the same as param_obj or the result of enumeration.
 	ExprTokenType* token = nullptr; // Used for variadic calls.
 
-	ExprTokenType *rvalue = IS_INVOKE_SET ? aParam[--aParamCount] : nullptr;
+	ExprTokenType* rvalue = IS_INVOKE_SET ? aParam[--aParamCount] : nullptr;
 	CriticalObject *param_critical = NULL;
 	CRITICAL_SECTION *crisec = NULL;
-
 
 	--aParamCount; // Exclude param_obj from aParamCount, so it's the count of normal params.
 	if (param_critical = dynamic_cast<CriticalObject *>(TokenToObject(*aParam[aParamCount])))
 		EnterCriticalSection(crisec = (LPCRITICAL_SECTION)param_critical->GetCriSec());
 	if (!(param_critical && (param_obj = (Object *)param_critical->GetObj())))
-		param_obj = TokenToObject(*aParam[aParamCount]);
+	param_obj = TokenToObject(*aParam[aParamCount]);
 	// It might be more correct to use the enumerator even for Array, but that could be slow.
 	// Future changes might enable efficient detection of a custom __Enum method, allowing
 	// us to take the more efficient path most times, but still support custom enumeration.
-	if (param_array = dynamic_cast<Array *>(param_obj))
+	if (param_array = dynamic_cast<Array*>(param_obj))
 		param_array->AddRef();
 	else
 		if (!(param_array = Array::FromEnumerable(*aParam[aParamCount])))
@@ -1581,14 +1637,14 @@ ResultType VariadicCall(IObject *aObj, IObject_Invoke_PARAMS_DECL)
 			LeaveCriticalSection(crisec);
 		// Calculate space required for ...
 		size_t space_needed = extra_params * sizeof(ExprTokenType) // ... new param tokens
-			+ (aParamCount + extra_params) * sizeof(ExprTokenType *); // ... existing and new param pointers
+			+ (aParamCount + extra_params) * sizeof(ExprTokenType*); // ... existing and new param pointers
 		if (rvalue)
 			space_needed += sizeof(rvalue); // ... extra slot for aRValue
 		// Allocate new param list and tokens; tokens first for convenience.
-		token = (ExprTokenType *)_malloca(space_needed);
+		token = (ExprTokenType*)_malloca(space_needed);
 		if (!token)
-			return aResultToken.Error(ERR_OUTOFMEM);
-		ExprTokenType **param_list = (ExprTokenType **)(token + extra_params);
+			return aResultToken.MemoryError();
+		ExprTokenType** param_list = (ExprTokenType**)(token + extra_params);
 		// Since built-in functions don't have variables we can directly assign to,
 		// we need to expand the param object's contents into an array of tokens:
 		param_array->ToParams(token, param_list, aParam, aParamCount);
@@ -1598,7 +1654,9 @@ ResultType VariadicCall(IObject *aObj, IObject_Invoke_PARAMS_DECL)
 	if (rvalue)
 		aParam[aParamCount++] = rvalue; // In place of the variadic param.
 
+#ifdef ENABLE_HALF_BAKED_NAMED_PARAMS
 	aResultToken.named_params = param_obj;
+#endif
 
 	auto result = aObj->Invoke(aResultToken, aFlags, aName, aThisToken, aParam, aParamCount);
 
@@ -1608,7 +1666,7 @@ ResultType VariadicCall(IObject *aObj, IObject_Invoke_PARAMS_DECL)
 		_freea(token);
 	if (crisec)
 		LeaveCriticalSection(crisec);
-	
+
 	return result;
 }
 
@@ -1649,12 +1707,10 @@ bool NativeFunc::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aP
 			for (int i = 0; i < MAX_FUNC_OUTPUT_VAR && mOutputVars[i]; ++i)
 			{
 				if (mOutputVars[i] <= aParamCount
-					&& aParam[mOutputVars[i]-1]->symbol != SYM_VAR
-					&& aParam[mOutputVars[i]-1]->symbol != SYM_MISSING)
+					&& aParam[mOutputVars[i]-1]->symbol != SYM_MISSING
+					&& !TokenToOutputVar(*aParam[mOutputVars[i]-1]))
 				{
-					sntprintf(aResultToken.buf, _f_retval_buf_size, _T("Parameter #%i of %s must be a variable.")
-						, mOutputVars[i], mName);
-					aResultToken.Error(aResultToken.buf);
+					aResultToken.ParamError(mOutputVars[i]-1, aParam[mOutputVars[i]-1], _T("variable reference"), mName);
 					return false; // Abort expression.
 				}
 			}
@@ -1696,11 +1752,11 @@ bool BuiltInMethod::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int
 
 	DEBUGGER_STACK_PUSH(this) // See comments in BuiltInFunc::Call.
 
-	auto obj = dynamic_cast<Object *>(TokenToObject(*aParam[0]));
-	// If this method is for a built-in class derived from Object, mClass != nullptr.
-	// In that case, the method can't be called if obj is a Prototype object, since
-	// that's natively just an Object, or if obj is not derived from mClass.
-	if (!obj || mClass && (obj->IsClassPrototype() || !obj->IsDerivedFrom(mClass)))
+	auto obj = TokenToObject(*aParam[0]);
+	// mClass is the prototype object of the class which this method is for, such as
+	// Object.Prototype or Map.Prototype.  IsOfType() takes care of ruling out derived
+	// prototype objects, which are always really just Object.
+	if (!obj || !obj->IsOfType(mClass))
 	{
 		LPCTSTR expected_type;
 		ExprTokenType value;
@@ -1723,7 +1779,7 @@ bool UserFunc::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aPar
 	return Call(aResultToken, aParam, aParamCount, nullptr);
 }
 
-bool UserFunc::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount, FreeVars *aUpVars)
+bool UserFunc::Call(ResultToken& aResultToken, ExprTokenType* aParam[], int aParamCount, FreeVars* aUpVars)
 {
 	if (!Func::Call(aResultToken, aParam, aParamCount))
 		return false;
@@ -1731,274 +1787,240 @@ bool UserFunc::Call(ResultToken &aResultToken, ExprTokenType *aParam[], int aPar
 		ResultType result;
 		UDFCallInfo recurse(this);
 
-		FreeVars *caller_free_vars;
-
 		int j, count_of_actuals_that_have_formals;
 		count_of_actuals_that_have_formals = (aParamCount > mParamCount)
 			? mParamCount  // Omit any actuals that lack formals (this can happen when a dynamic call passes too many parameters).
 			: aParamCount;
-		if (this->mBIF == (BuiltInFunctionType)BIF_DllImport)
+		
+		// If there are other instances of this function already running, either via recursion or
+		// an interrupted quasi-thread, back up the local variables of the instance that lies immediately
+		// beneath ours (in turn, that instance is responsible for backing up any instance that lies
+		// beneath it, and so on, since when recursion collapses or threads resume, they always do so
+		// in the reverse order in which they were created.
+		//
+		// I think the backup-and-restore approach to local variables might enhance performance over
+		// other approaches, perhaps a lot.  This is because most of the time there will be no other
+		// instances of a given function on the call stack, thus no backup/restore is needed, and thus
+		// the function's existing local variables can be reused as though they're globals (i.e.
+		// memory allocation/deallocation overhead is often completely avoided for non-recursive calls
+		// to a function after the first).
+		if (mInstances > 0) // i.e. treat negatives as zero to help catch any bugs in the way mInstances is maintained.
 		{
-			caller_free_vars = sFreeVars;
-			sFreeVars = NULL;
-			aResultToken.func = (BuiltInFunc *)this; // Inform function of which built-in function called it (allows code sharing/reduction).
-			// Push an entry onto the debugger's stack.  This has two purposes:
-			//  1) Allow CreateRuntimeException() to know which function is throwing an exception.
-			//  2) If a UDF is called before the BIF returns, it will show on the call stack.
-			//     e.g. DllCall(RegisterCallback("F")) will show DllCall while F is running.
-			DEBUGGER_STACK_PUSH((BuiltInFunc*)this)
+			// Backup/restore of function's variables is needed.
+			// Only when a backup is needed is it possible for this function to be calling itself recursively,
+			// either directly or indirectly by means of an intermediate function.  As a consequence, it's
+			// possible for this function to be passing one or more of its own params or locals to itself.
+			for (j = 0; j < aParamCount; ++j) // For each actual parameter.
+			{
+			ExprTokenType& this_param_token = *aParam[j];
+				if (this_param_token.symbol != SYM_VAR
+					|| this_param_token.var_usage != Script::VARREF_READ) // Other values for var_usage indicate ExpandExpression has determined this var is static or global, and is being passed ByRef.
+					continue;
+				// Since this SYM_VAR is being passed by value, convert it to a non-var to allow
+				// the variables to be backed up and reset further below without corrupting any
+				// SYM_VARs that happen to be locals or params of this very same function.
+				// Skip AddRef() if this is an object because Release() won't be called, and
+				// AddRef() will be called when the object is assigned to a parameter.
+				this_param_token.var->ToTokenSkipAddRef(this_param_token);
+			}
+			// BackupFunctionVars() will also clear each local variable and formal parameter so that
+			// if that parameter or local var is assigned a value by any other means during our call
+			// to it, new memory will be allocated to hold that value rather than overwriting the
+			// underlying recursed/interrupted instance's memory, which it will need intact when it's resumed.
+			if (!Var::BackupFunctionVars(*this, recurse.backup, recurse.backup_count)) // Out of memory.
+			{
+				aResultToken.MemoryError();
+				return false;
+			}
+		} // if (func.mInstances > 0)
+		//else backup is not needed because there are no other instances of this function on the call-stack.
+		// So by definition, this function is not calling itself directly or indirectly, therefore there's no
+		// need to do the conversion of SYM_VAR because those SYM_VARs can't be ones that were blanked out
+		// due to a function exiting.  In other words, it seems impossible for a there to be no other
+		// instances of this function on the call-stack and yet SYM_VAR to be one of this function's own
+		// locals or formal params because it would have no legitimate origin.
 
-				aResultToken.symbol = SYM_INTEGER; // Set default return type so that functions don't have to do it if they return INTs.
-			mBIF(aResultToken, aParam, aParamCount);
+		// From this point on, mInstances must be decremented before returning, even on error:
+		++mInstances;
+		
+		FreeVars* caller_free_vars = sFreeVars;
+		if (sFreeVars && mOuterFunc && !aUpVars)
+			aUpVars = sFreeVars->ForFunc(mOuterFunc);
 
-			DEBUGGER_STACK_POP()
-
-				// There shouldn't be any need to check g->ThrownToken since built-in functions
-				// currently throw exceptions via aResultToken.Error():
-				//if (g->ThrownToken)
-				//	aResultToken.SetExitResult(FAIL); // Abort thread.
+		if (!mIsMacro && mDownVarCount)
+		{
+			// These local vars need to persist after the function returns (and be independent of
+			// any other instances of this function).  Since we really only have one set of local
+			// vars for the lifetime of the script, make them aliases for newly allocated vars:
+			sFreeVars = FreeVars::Alloc(*this, mDownVarCount, aUpVars);
+			for (int i = 0; i < mDownVarCount; ++i)
+				mDownVar[i]->SetAliasDirect(sFreeVars->mVar + i);
 		}
 		else
+			sFreeVars = NULL;
+		
+		if (!mIsMacro && mUpVarCount)
 		{
-			// If there are other instances of this function already running, either via recursion or
-			// an interrupted quasi-thread, back up the local variables of the instance that lies immediately
-			// beneath ours (in turn, that instance is responsible for backing up any instance that lies
-			// beneath it, and so on, since when recursion collapses or threads resume, they always do so
-			// in the reverse order in which they were created.
-			//
-			// I think the backup-and-restore approach to local variables might enhance performance over
-			// other approaches, perhaps a lot.  This is because most of the time there will be no other
-			// instances of a given function on the call stack, thus no backup/restore is needed, and thus
-			// the function's existing local variables can be reused as though they're globals (i.e.
-			// memory allocation/deallocation overhead is often completely avoided for non-recursive calls
-			// to a function after the first).
-			if (mInstances > 0) // i.e. treat negatives as zero to help catch any bugs in the way mInstances is maintained.
+			if (!aUpVars)
 			{
-				// Backup/restore of function's variables is needed.
-				// Only when a backup is needed is it possible for this function to be calling itself recursively,
-				// either directly or indirectly by means of an intermediate function.  As a consequence, it's
-				// possible for this function to be passing one or more of its own params or locals to itself.
-				// The following section compensates for that to handle parameters passed by-value, but it
-				// doesn't correctly handle passing its own locals/params to itself ByRef, which is in the
-				// help file as a known limitation.  Also, the below doesn't indicate a failure when stack
-				// underflow would occur because the loop after this one needs to do that (since this
-				// one will never execute if a backup isn't needed).  Note that this loop that reviews all
-				// actual parameters is necessary as a separate loop from the one further below because this
-				// first one's conversion must occur prior to calling BackupFunctionVars().  In addition, there
-				// might be other interdependencies between formals and actuals if a function is calling itself
-				// recursively.
-				for (j = 0; j < aParamCount; ++j) // For each actual parameter.
-				{
-					ExprTokenType &this_param_token = *aParam[j]; // stack[stack_count] is the first actual parameter. A check higher above has already ensured that this line won't cause stack overflow.
-					if (this_param_token.symbol != SYM_VAR)
-						continue;
-					Var &param_var = *this_param_token.var;
-					Var &target_var = *param_var.ResolveAlias();
-					if (j < mParamCount && mParam[j].is_byref)
-					{
-						// If the target or actual var is local, it could be local to this function, in which
-						// case it's about to be reset.  Enable the function to receive its own local variable
-						// ByRef by moving its storage into a VarRef and aliasing that instead.
-						if (target_var.IsNonStaticLocal()) // Safest to assume it's a local of this function.
-						{
-							// target_var is necessarily not a freevar (due to either GetRef or a closure)
-							// because in that case IsNonStaticLocal would be false.
-							if (!param_var.GetRef()) // Convert it to a freevar ref.
-								return false;
-							this_param_token.var = param_var.GetAliasFor();
-						}
-						else //if (param_var.IsNonStaticLocal()) // No need to check this.
-						{
-							// Ensure the token points to the target of any alias, since the alias itself
-							// will be reset below.  This will have no effect if param_var isn't an alias.
-							this_param_token.var = &target_var;
-						}
-					}
-					else
-					{
-						// Since this formal parameter is passed by value, if it's SYM_VAR, convert it to
-						// a non-var to allow the variables to be backed up and reset further below without
-						// corrupting any SYM_VARs that happen to be locals or params of this very same
-						// function.
-						// DllCall() relies on the fact that this transformation is only done for user
-						// functions, not built-in ones such as DllCall().  This is because DllCall()
-						// sometimes needs the variable of a parameter for use as an output parameter.
-						// Skip AddRef() if this is an object because Release() won't be called, and
-						// AddRef() will be called when the object is assigned to a parameter.
-						target_var.ToTokenSkipAddRef(this_param_token);
-					}
-				}
-				// BackupFunctionVars() will also clear each local variable and formal parameter so that
-				// if that parameter or local var is assigned a value by any other means during our call
-				// to it, new memory will be allocated to hold that value rather than overwriting the
-				// underlying recursed/interrupted instance's memory, which it will need intact when it's resumed.
-				if (!Var::BackupFunctionVars(*this, recurse.backup, recurse.backup_count)) // Out of memory.
-				{
-					aResultToken.Error(ERR_OUTOFMEM, mName);
-					return false;
-				}
-			} // if (func.mInstances > 0)
-			//else backup is not needed because there are no other instances of this function on the call-stack.
-			// So by definition, this function is not calling itself directly or indirectly, therefore there's no
-			// need to do the conversion of SYM_VAR because those SYM_VARs can't be ones that were blanked out
-			// due to a function exiting.  In other words, it seems impossible for a there to be no other
-			// instances of this function on the call-stack and yet SYM_VAR to be one of this function's own
-			// locals or formal params because it would have no legitimate origin.
-
-			// From this point on, mInstances must be decremented before returning, even on error:
-			++mInstances;
-		
-			caller_free_vars = sFreeVars;
-			if (sFreeVars && mOuterFunc && !aUpVars)
-				aUpVars = sFreeVars->ForFunc(mOuterFunc);
-
-			if (!mIsMacro && (mDownVarCount || aUpVars))
-			{
-				// These local vars need to persist after the function returns (and be independent of
-				// any other instances of this function).  Since we really only have one set of local
-				// vars for the lifetime of the script, make them aliases for newly allocated vars:
-				sFreeVars = FreeVars::Alloc(*this, mDownVarCount, aUpVars);
-				for (int i = 0; i < mDownVarCount; ++i)
-					mDownVar[i]->SetAliasDirect(sFreeVars->mVar + i);
+				// No aUpVars, so it must be a direct call, and mOuterFunc wasn't found in the sFreeVars
+				// linked list, so it's probably a direct call from something which doesn't support closures,
+				// occurring after mOuterFunc returned.
+				aResultToken.Error(_T("Func out of scope."), mName); // Keep it short since this shouldn't be possible once the implementation is complete.
+				goto free_and_return;
 			}
-			else
-				sFreeVars = NULL;
-		
-			if (!mIsMacro && mUpVarCount)
+			for (int i = 0; i < mUpVarCount; ++i)
 			{
-				if (!aUpVars)
+				Var* outer_free_var = aUpVars->mVar + mUpVarIndex[i];
+				if (mUpVar[i]->Scope() & VAR_DOWNVAR) // This is both an upvar and a downvar.
 				{
-					// No aUpVars, so it must be a direct call, and mOuterFunc wasn't found in the sFreeVars
-					// linked list, so it's probably a direct call from something which doesn't support closures,
-					// occurring after mOuterFunc returned.
-					aResultToken.Error(_T("Func out of scope."), mName); // Keep it short since this shouldn't be possible once the implementation is complete.
-					goto free_and_return;
+					Var* inner_free_var = mUpVar[i]->ResolveAlias(); // Retrieve the alias which was just set above.
+					inner_free_var->UpdateAlias(outer_free_var); // Point the free var of our layer to the outer one for use by closures within this function.
+					// mUpVar[i] is now a two-level alias (mUpVar[i] -> inner_free_var -> outer_free_var),
+					// but that will be corrected below.  Technically outer_free_var might also be an alias,
+					// in which case inner_free_var is now an alias for outer_free_var->mAliasFor.
 				}
-				for (int i = 0; i < mUpVarCount; ++i)
-				{
-					Var *outer_free_var = aUpVars->mVar + mUpVarIndex[i];
-					if (mUpVar[i]->Scope() & VAR_DOWNVAR) // This is both an upvar and a downvar.
-					{
-						Var *inner_free_var = mUpVar[i]->ResolveAlias(); // Retrieve the alias which was just set above.
-						inner_free_var->UpdateAlias(outer_free_var); // Point the free var of our layer to the outer one for use by closures within this function.
-						// mUpVar[i] is now a two-level alias (mUpVar[i] -> inner_free_var -> outer_free_var),
-						// but that will be corrected below.  Technically outer_free_var might also be an alias,
-						// in which case inner_free_var is now an alias for outer_free_var->mAliasFor.
-					}
-					mUpVar[i]->UpdateAlias(outer_free_var);
-				}
+				mUpVar[i]->UpdateAlias(outer_free_var);
 			}
+		}
 
-			for (j = 0; j < mParamCount; ++j) // For each formal parameter.
+		if (mClosureCount)
+		{
+			ASSERT(sFreeVars);
+			for (int i = 0; i < mClosureCount; ++i)
 			{
-				FuncParam &this_formal_param = mParam[j]; // For performance and convenience.
+				auto closure = new Closure(mClosure[i].func, sFreeVars
+					, mClosure[i].var->Scope() & VAR_DOWNVAR); // Closures in downvars have lifetime tied to sFreeVars.
+				Var* var = mClosure[i].var->ResolveAlias();
+				var->AssignSkipAddRef(closure);
+				var->MakeReadOnly();
+			}
+		}
 
-				// Assignments below rely on ByRef parameters having already been reset to VAR_NORMAL
-				// by Free() or Backup(), except when it's a downvar, which should be VAR_ALIAS.
-				ASSERT((this_formal_param.var->Scope() & VAR_DOWNVAR) ? this_formal_param.var->ResolveAlias()->Scope() == 0
-					: !this_formal_param.var->IsAlias());
+		for (j = 0; j < mParamCount; ++j) // For each formal parameter.
+		{
+			FuncParam& this_formal_param = mParam[j]; // For performance and convenience.
 
-				if (j >= aParamCount || aParam[j]->symbol == SYM_MISSING)
+			// Assignments below rely on ByRef parameters having already been reset to VAR_NORMAL
+			// by Free() or Backup(), except when it's a downvar, which should be VAR_ALIAS.
+			ASSERT((this_formal_param.var->Scope() & VAR_DOWNVAR) ? this_formal_param.var->ResolveAlias()->Scope() == 0
+				: !this_formal_param.var->IsAlias());
+
+			if (j >= aParamCount || aParam[j]->symbol == SYM_MISSING)
+			{
+#ifdef ENABLE_HALF_BAKED_NAMED_PARAMS
+				if (aResultToken.named_params)
 				{
-					if (aResultToken.named_params)
+					FuncResult rt_item;
+					ExprTokenType t_this(aResultToken.named_params);
+					auto r = aResultToken.named_params->Invoke(rt_item, IT_GET, this_formal_param.var->mName, t_this, nullptr, 0);
+					if (r == FAIL || r == EARLY_EXIT)
 					{
-						FuncResult rt_item;
-						ExprTokenType t_this(aResultToken.named_params);
-						auto r = aResultToken.named_params->Invoke(rt_item, IT_GET, this_formal_param.var->mName, t_this, nullptr, 0);
-						if (r == FAIL || r == EARLY_EXIT)
-						{
-							aResultToken.SetExitResult(r);
-							goto free_and_return;
-						}
-						if (r != INVOKE_NOT_HANDLED)
-						{
-							this_formal_param.var->Assign(rt_item);
-							rt_item.Free();
-							continue;
-						}
-					}
-			
-					switch(this_formal_param.default_type)
-					{
-					case PARAM_DEFAULT_STR:   this_formal_param.var->Assign(this_formal_param.default_str);    break;
-					case PARAM_DEFAULT_INT:   this_formal_param.var->Assign(this_formal_param.default_int64);  break;
-					case PARAM_DEFAULT_FLOAT: this_formal_param.var->Assign(this_formal_param.default_double); break;
-					case PARAM_DEFAULT_UNSET: this_formal_param.var->MarkUninitialized(); break;
-					default: //case PARAM_DEFAULT_NONE:
-						// No value has been supplied for this REQUIRED parameter.
-						aResultToken.Error(ERR_PARAM_REQUIRED, this_formal_param.var->mName); // Abort thread.
+						aResultToken.SetExitResult(r);
 						goto free_and_return;
 					}
-					continue;
-				}
-
-				ExprTokenType &token = *aParam[j];
-			
-				if (this_formal_param.is_byref)
-				{
-					// Note that the previous loop might not have checked things like the following because that
-					// loop never ran unless a backup was needed:
-					if (token.symbol == SYM_VAR)
+					if (r != INVOKE_NOT_HANDLED)
 					{
-						if (this_formal_param.var->Scope() & VAR_DOWNVAR) // This parameter's var is referenced by one or more closures.
-						{
-							// Make sure the caller's var (token.var) points to a ref-counted freevar.
-							auto ref = token.var->GetRef();
-							if (!ref)
-								goto free_and_return;
-							ASSERT(this_formal_param.var->IsAlias());
-							// Point our freevar to the caller's freevar, for use by our closures.
-							this_formal_param.var->GetAliasFor()->UpdateAlias(token.var);
-							// Also update our local alias below.
-						}
-						this_formal_param.var->UpdateAlias(token.var); // Make the formal parameter point directly to the actual parameter's contents.
+						this_formal_param.var->Assign(rt_item);
+						rt_item.Free();
 						continue;
 					}
 				}
-				//else // This parameter is passed "by value".
-				// Assign actual parameter's value to the formal parameter (which is itself a
-				// local variable in the function).  
-				// token.var's Type() is always VAR_NORMAL (never a built-in virtual variable).
-				// A SYM_VAR token can still happen because the previous loop's conversion of all
-				// by-value SYM_VAR operands into the appropriate operand symbol would not have
-				// happened if no backup was needed for this function (which is usually the case).
-				if (!this_formal_param.var->Assign(token))
+#endif
+			
+				switch (this_formal_param.default_type)
 				{
-					aResultToken.SetExitResult(FAIL); // Abort thread.
+				case PARAM_DEFAULT_STR:   this_formal_param.var->Assign(this_formal_param.default_str);    break;
+				case PARAM_DEFAULT_INT:   this_formal_param.var->Assign(this_formal_param.default_int64);  break;
+				case PARAM_DEFAULT_FLOAT: this_formal_param.var->Assign(this_formal_param.default_double); break;
+				case PARAM_DEFAULT_UNSET: this_formal_param.var->MarkUninitialized(); break;
+				default: //case PARAM_DEFAULT_NONE:
+					// No value has been supplied for this REQUIRED parameter.
+					aResultToken.Error(ERR_PARAM_REQUIRED, this_formal_param.var->mName); // Abort thread.
 					goto free_and_return;
 				}
-			} // for each formal parameter.
-		
-			if (mIsVariadic && mParam[mParamCount].var) // i.e. this function is capable of accepting excess params via an object/array.
-			{
-				// Unused named parameters in param_obj are currently discarded, pending completion of the
-				// object redesign.  Ultimately the named parameters (either key-value pairs or properties)
-				// would be enumerated and added to vararg_obj or passed to the function some other way.
-				auto vararg_obj = Array::Create();
-				if (!vararg_obj)
-				{
-					aResultToken.Error(ERR_OUTOFMEM, mName); // Abort thread.
-					goto free_and_return;
-				}
-				if (j < aParamCount)
-					// Insert the excess parameters from the actual parameter list.
-					vararg_obj->InsertAt(0, aParam + j, aParamCount - j);
-				// Assign to the "param*" var:
-				mParam[mParamCount].var->AssignSkipAddRef(vararg_obj);
+				continue;
 			}
 
-			DEBUGGER_STACK_PUSH(&recurse)
-
-			result = Execute(&aResultToken); // Execute the body of the function.
-
-			DEBUGGER_STACK_POP()
+			ExprTokenType& token = *aParam[j];
+			
+			if (this_formal_param.is_byref)
+			{
+				if (token.symbol == SYM_VAR && token.var_usage != Script::VARREF_READ) // An optimized &var ref.
+				{
+					if (this_formal_param.var->Scope() & VAR_DOWNVAR) // This parameter's var is referenced by one or more closures.
+					{
+						// Make sure the caller's var (token.var) points to a ref-counted freevar.
+						auto ref = token.var->GetRef();
+						if (!ref)
+							goto free_and_return;
+						ref->Release(); // token.var retains a reference; release ours.
+						ASSERT(this_formal_param.var->IsAlias());
+						// Point our freevar to the caller's freevar, for use by our closures.
+						this_formal_param.var->GetAliasFor()->UpdateAlias(token.var);
+						// Also update our local alias below.
+					}
+					this_formal_param.var->UpdateAlias(token.var); // Set mAliasFor.
+					continue;
+				}
+				else if (auto ref = dynamic_cast<VarRef*>(TokenToObject(token)))
+				{
+					if (this_formal_param.var->Scope() & VAR_DOWNVAR) // This parameter's var is referenced by one or more closures.
+					{
+						ASSERT(this_formal_param.var->IsAlias());
+						// Point our freevar to the caller's freevar, for use by our closures.
+						this_formal_param.var->GetAliasFor()->UpdateAlias(ref);
+						// Also update our local alias below.
+					}
+					this_formal_param.var->UpdateAlias(ref); // Set mAliasFor and mObject.
+					continue;
+				}
+				aResultToken.ParamError(j, &token, _T("variable reference"), mName);
+				goto free_and_return;
+			}
+			//else // This parameter is passed "by value".
+			// Assign actual parameter's value to the formal parameter (which is itself a
+			// local variable in the function).  
+			// token.var's Type() is always VAR_NORMAL (never a built-in virtual variable).
+			// A SYM_VAR token can still happen because the previous loop's conversion of all
+			// by-value SYM_VAR operands into the appropriate operand symbol would not have
+			// happened if no backup was needed for this function (which is usually the case).
+			if (!this_formal_param.var->Assign(token))
+			{
+				aResultToken.SetExitResult(FAIL); // Abort thread.
+				goto free_and_return;
+			}
+		} // for each formal parameter.
 		
-			// Setting this unconditionally isn't likely to perform any worse than checking for EXIT/FAIL,
-			// and likely produces smaller code.  Currently EARLY_RETURN results are possible and must be
-			// passed back in case this is a meta-function, but this should be revised at some point since
-			// most of our callers only expect OK, FAIL or EARLY_EXIT.
-			aResultToken.SetResult(result);
+		if (mIsVariadic && mParam[mParamCount].var) // i.e. this function is capable of accepting excess params via an object/array.
+		{
+			// Unused named parameters in param_obj are currently discarded, pending completion of the
+			// object redesign.  Ultimately the named parameters (either key-value pairs or properties)
+			// would be enumerated and added to vararg_obj or passed to the function some other way.
+			auto vararg_obj = Array::Create();
+			if (!vararg_obj)
+			{
+				aResultToken.MemoryError();
+				goto free_and_return;
+			}
+			if (j < aParamCount)
+				// Insert the excess parameters from the actual parameter list.
+				vararg_obj->InsertAt(0, aParam + j, aParamCount - j);
+			// Assign to the "param*" var:
+			mParam[mParamCount].var->AssignSkipAddRef(vararg_obj);
 		}
+
+		DEBUGGER_STACK_PUSH(&recurse)
+
+		result = Execute(&aResultToken); // Execute the body of the function.
+
+		DEBUGGER_STACK_POP()
+		
+		// Setting this unconditionally isn't likely to perform any worse than checking for EXIT/FAIL,
+		// and likely produces smaller code.  Currently EARLY_RETURN results are possible and must be
+		// passed back in case this is a meta-function, but this should be revised at some point since
+		// most of our callers only expect OK, FAIL or EARLY_EXIT.
+		aResultToken.SetResult(result);
 
 free_and_return:
 		// Free the memory of all the just-completed function's local variables.  This is done in
@@ -2031,7 +2053,7 @@ free_and_return:
 	return !aResultToken.Exited(); // i.e. aResultToken.SetExitResult() or aResultToken.Error() was not called.
 }
 
-_thread_local FreeVars *UserFunc::sFreeVars = nullptr;
+thread_local FreeVars *UserFunc::sFreeVars = nullptr;
 
 
 
@@ -2078,6 +2100,7 @@ ResultType Line::ExpandArgs(ResultToken *aResultTokens)
 			// there is a large amount of memory involved here (realloc's ability to do an in-place resize
 			// might be unlikely for anything other than small blocks; see compiler's realloc.c):
 			free(sDerefBuf);
+			SET_S_DEREF_BUF_BKP(NULL, 0);
 			if (sDerefBufSize > LARGE_DEREF_BUF_SIZE)
 				--sLargeDerefBufs;
 		}
@@ -2085,7 +2108,7 @@ ResultType Line::ExpandArgs(ResultToken *aResultTokens)
 		{
 			// Error msg was formerly: "Ran out of memory while attempting to dereference this line's parameters."
 			sDerefBufSize = 0;  // Reset so that it can make another attempt, possibly smaller, next time.
-			return LineError(ERR_OUTOFMEM); // Short msg since so rare.
+			return MemoryError();
 		}
 		sDerefBufSize = new_buf_size;
 		if (sDerefBufSize > LARGE_DEREF_BUF_SIZE)
@@ -2184,6 +2207,12 @@ ResultType Line::ExpandArgs(ResultToken *aResultTokens)
 			}
 			// Since above didn't continue, this arg is a plain variable reference.
 			// aResultTokens should currently always be NULL for ARG_TYPE_INPUT_VAR, so isn't filled.
+
+			if (VAR(mArg[i])->IsUninitializedNormalVar())
+			{
+				result_to_return = g_script->VarUnsetError(VAR(mArg[i]));
+				goto end;
+			}
 
 			// Some comments below might be obsolete.  There was previously some logic here deciding
 			// whether the variable needed to be dereferenced, but that's no longer ever necessary.

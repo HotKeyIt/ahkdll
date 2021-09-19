@@ -1,4 +1,4 @@
-///////////////////////////////////////////////////////////////////////////////
+﻿///////////////////////////////////////////////////////////////////////////////
 //
 // AutoIt
 //
@@ -15,7 +15,7 @@
 //
 ///////////////////////////////////////////////////////////////////////////////
 
-#include "stdafx.h" // pre-compiled headers
+#include "pch.h" // pre-compiled headers
 //#include <winsock.h>  // for WSADATA.  This also requires wsock32.lib to be linked in.
 #include <winsock2.h>
 #include <tlhelp32.h> // For the ProcessExist routines.
@@ -94,7 +94,7 @@ BIF_DECL(BIF_SysGetIPAddresses)
 
 	auto addresses = Array::Create();
 	if (!addresses)
-		_f_throw(ERR_OUTOFMEM);
+		_f_throw_oom;
 
 	WSADATA wsadata;
 	if (WSAStartup(MAKEWORD(1, 1), &wsadata)) // Failed (it returns 0 on success).
@@ -118,7 +118,7 @@ BIF_DECL(BIF_SysGetIPAddresses)
 		{
 			addresses->Release();
 			WSACleanup();
-			_f_throw(ERR_OUTOFMEM);
+			_f_throw_oom;
 		}
 	}
 
@@ -150,6 +150,7 @@ BIV_DECL_R(BIV_IsAdmin)
 	}
 	_f_return_b(result);
 }
+
 
 
 BIF_DECL(BIF_PixelGetColor)
@@ -188,6 +189,8 @@ BIF_DECL(BIF_PixelGetColor)
 	_f_return_retval;
 }
 
+
+
 BIF_DECL(BIF_MenuSelect)
 {
 	const int max_menu_params = 7;
@@ -209,7 +212,7 @@ BIF_DECL(BIF_MenuSelect)
 	else
 		hMenu = GetMenu(target_window);
 	if (!hMenu) // Window has no menu bar.
-		_f_throw(ERR_WINDOW_HAS_NO_MENU);
+		_f_throw(ERR_WINDOW_HAS_NO_MENU, ErrorPrototype::Target);
 
 	int menu_item_count = GetMenuItemCount(hMenu);
 	//if (menu_item_count < 1) // Menu bar has no menus.
@@ -263,11 +266,23 @@ else\
 					, menu_text_length > this_menu_param_length ? this_menu_param_length : menu_text_length
 					, this_menu_param, this_menu_param_length);
 				//match_found = strcasestr(menu_text, this_menu_param);
-				if (!match_found)
+				TCHAR *cpamp;
+				if (!match_found && (cpamp = _tcschr(menu_text, '&')))
 				{
-					// Try again to find a match, this time without the ampersands used to indicate
-					// a menu item's shortcut key:
-					StrReplace(menu_text, _T("&"), _T(""), SCS_SENSITIVE);
+					// Try again to find a match, this time without the ampersands used to indicate a menu item's
+					// shortcut key.  One might assume that only the first & needs to be removed, but the actual
+					// behaviour confirmed on Windows 10.0.19041 was:
+					//  - Only every second & in a series of consecutive &&s was kept.
+					//  - Only the *first* &-letter was usable as a shortcut key.
+					//  - Only the *last* & caused an underline.
+					for (TCHAR *cplit = cpamp; ; ++cpamp, ++cplit)
+					{
+						if (*cpamp == '&')
+							++cpamp; // Skip this '&' but copy the next character unconditionally, even if it is '&'.
+						*cplit = *cpamp;
+						if (!*cpamp)
+							break; // Only after copying, so menu_text is null-terminated at the correct position (cpw).
+					}
 					menu_text_length = _tcslen(menu_text);
 					match_found = !lstrcmpni(menu_text  // This call is basically a strnicmp() that obeys locale.
 						, menu_text_length > this_menu_param_length ? this_menu_param_length : menu_text_length
@@ -296,7 +311,7 @@ else\
 	_f_return_empty;
 
 error:
-	_f_throw(ERR_PARAM_INVALID, this_menu_param);
+	_f_throw_value(ERR_PARAM_INVALID, this_menu_param);
 }
 
 
@@ -319,7 +334,7 @@ BIF_DECL(BIF_Control)
 	case FID_ControlSetEnabled:
 		aToggle = ParamIndexToToggleValue(0);
 		if (aToggle == TOGGLE_INVALID)
-			_f_throw(ERR_PARAM1_INVALID);
+			_f_throw_param(0);
 		++aParam;
 		--aParamCount;
 		break;
@@ -336,6 +351,7 @@ BIF_DECL(BIF_Control)
 	// Integer parameter:
 	case FID_ControlDeleteItem:
 	case FID_ControlChooseIndex:
+		Throw_if_Param_NaN(0);
 		aNumber = ParamIndexToInt(0);
 		++aParam;
 		--aParamCount;
@@ -366,7 +382,6 @@ BIF_DECL(BIF_Control)
 	DWORD aThreadID = __readfsdword(0x24);
 #endif
 
-
 	switch(control_cmd)
 	{
 	case FID_ControlSetChecked: // au3: Must be a Button
@@ -375,7 +390,7 @@ BIF_DECL(BIF_Control)
 		{
 			new_button_state = aToggle == TOGGLED_ON ? BST_CHECKED : BST_UNCHECKED;
 			if (!SendMessageTimeout(control_window, BM_GETCHECK, 0, 0, SMTO_ABORTIFHUNG, 2000, &dwResult))
-				goto error;
+				goto win32_error;
 			if (dwResult == new_button_state) // It's already in the right state, so don't press it.
 				break;
 		}
@@ -410,7 +425,7 @@ BIF_DECL(BIF_Control)
 	case FID_ControlSetExStyle:
 	{
 		if (!*aValue)
-			_f_throw(ERR_PARAM1_MUST_NOT_BE_BLANK); // Seems best not to treat an explicit blank as zero.
+			_f_throw_value(ERR_PARAM1_MUST_NOT_BE_BLANK); // Seems best not to treat an explicit blank as zero.
 		int style_index = (control_cmd == FID_ControlSetStyle) ? GWL_STYLE : GWL_EXSTYLE;
 		DWORD new_style, orig_style = GetWindowLong(control_window, style_index);
 		// +/-/^ are used instead of |&^ because the latter is confusing, namely that & really means &=~style, etc.
@@ -473,7 +488,7 @@ BIF_DECL(BIF_Control)
 	case FID_ControlDeleteItem:
 		control_index = aNumber - 1;
 		if (control_index < 0)
-			_f_throw(ERR_PARAM1_INVALID);
+			_f_throw_param(0);
 		GetClassName(control_window, classname, _countof(classname));
 		if (tcscasestr(classname, _T("Combo"))) // v1.0.42: Changed to strcasestr vs. strnicmp for TListBox/TComboBox.
 			msg = CB_DELETESTRING;
@@ -490,7 +505,7 @@ BIF_DECL(BIF_Control)
 	case FID_ControlChooseIndex:
 		control_index = aNumber - 1;
 		if (control_index < -1)
-			_f_throw(ERR_PARAM1_INVALID);
+			_f_throw_param(0);
 		GetClassName(control_window, classname, _countof(classname));
 		if (tcscasestr(classname, _T("Combo"))) // v1.0.42: Changed to strcasestr vs. strnicmp for TListBox/TComboBox.
 		{
@@ -510,7 +525,7 @@ BIF_DECL(BIF_Control)
 		else if (tcscasestr(classname, _T("Tab")))
 		{
 			if (control_index < 0)
-				_f_throw(ERR_PARAM1_INVALID);
+				_f_throw_param(0);
 			if (!ControlSetTab(aResultToken, control_window, (DWORD)control_index))
 				goto win32_error;
 			goto success;
@@ -604,7 +619,7 @@ error: // GetLastError() is no use in this case.
 	_f_throw(ERR_FAILED);
 
 control_type_error:
-	_f_throw(ERR_GUI_NOT_FOR_THIS_TYPE, classname);
+	_f_throw(ERR_GUI_NOT_FOR_THIS_TYPE, classname, ErrorPrototype::Target);
 }
 
 
@@ -654,13 +669,13 @@ BIF_DECL(BIF_ControlGet)
 	case FID_ControlGetChecked: //Must be a Button
 		if (!SendMessageTimeout(control_window, BM_GETCHECK, 0, 0, SMTO_ABORTIFHUNG, 2000, &dwResult))
 			goto win32_error;
-		_f_return(dwResult == BST_CHECKED);
+		_f_return_b(dwResult == BST_CHECKED);
 
 	case FID_ControlGetEnabled:
-		_f_return(IsWindowEnabled(control_window) ? 1 : 0); // Force pure boolean 0/1.
+		_f_return_b(IsWindowEnabled(control_window));
 
 	case FID_ControlGetVisible:
-		_f_return(IsWindowVisible(control_window) ? 1 : 0); // Force pure boolean 0/1.
+		_f_return_b(IsWindowVisible(control_window));
 
 	case FID_ControlFindItem:
 		GetClassName(control_window, classname, _countof(classname));
@@ -833,7 +848,7 @@ BIF_DECL(BIF_ControlGet)
 	{
 		control_index = aNumber - 1;
 		if (control_index < 0)
-			_f_throw(ERR_PARAM1_INVALID);
+			_f_throw_param(0);
 		DWORD_PTR dwLineCount;
 		// Lexikos: Not sure if the following comment is relevant (does the OS multiply by sizeof(wchar_t)?).
 		// jackieku: 32768 * sizeof(wchar_t) = 65536, which can not be stored in a unsigned 16bit integer.
@@ -846,10 +861,10 @@ BIF_DECL(BIF_ControlGet)
 			if (!SendMessageTimeout(control_window, EM_GETLINECOUNT, 0, 0, SMTO_ABORTIFHUNG, 2000, &dwLineCount))
 				goto win32_error;
 			if ((DWORD)aNumber > dwLineCount)
-				_f_throw(ERR_PARAM1_INVALID);
+				_f_throw_param(0);
 		}
 		line_buf[dwResult] = '\0'; // Ensure terminated since the API might not do it in some cases.
-		_f_return(line_buf);
+		_f_return(line_buf, dwResult);
 	}
 
 	case FID_EditGetSelectedText: // Must be an Edit.
@@ -861,11 +876,12 @@ BIF_DECL(BIF_ControlGet)
 		// The above sets start to be the zero-based position of the start of the selection (similar for end).
 		// If there is no selection, start and end will be equal, at least in the edit controls I tried it with.
 		// The dwResult from the above is not useful and is not checked.
-		if (start == end) // Unlike Au3, it seems best to consider a blank selection to be a non-error.
+		if (start > end) // Later sections rely on this for safety with unsupported controls.
+			goto error; // The most likely cause is that this isn't an Edit control, but that isn't certain.
+		if (start == end)
 			_f_return_empty;
-		// Dynamic memory is used because must get all the control's text so that just the selected region
-		// can be cropped out and assigned to the output variable.  Otherwise, output_var might
-		// have to be sized much larger than it would need to be:
+		// Dynamic memory is used because we must get all the control's text so that just the selected region
+		// can be cropped out and returned:
 		if (   !SendMessageTimeout(control_window, WM_GETTEXTLENGTH, 0, 0, SMTO_ABORTIFHUNG, 2000, &length)
 			|| !length  // Since the above didn't return for start == end, this is an error because we have a selection of non-zero length, but no text to go with it!
 			|| !(dyn_buf = tmalloc(length + 1))   ) // Relies on short-circuit boolean order.
@@ -907,7 +923,7 @@ win32_error:
 	_f_throw_win32();
 
 control_type_error:
-	_f_throw(ERR_GUI_NOT_FOR_THIS_TYPE, classname);
+	_f_throw(ERR_GUI_NOT_FOR_THIS_TYPE, classname, ErrorPrototype::Target);
 }
 
 
@@ -937,7 +953,7 @@ ResultType Line::Download(LPTSTR aURL, LPTSTR aFilespec)
 	// requests that lack a user-agent.  Furthermore, it's more professional to have one, in which case it
 	// should probably be kept as simple and unchanging as possible.  Using something like the script's name
 	// as the user agent (even if documented) seems like a bad idea because it might contain personal/sensitive info.
-	HINTERNET hInet = InternetOpen(_T("AutoHotkey"), INTERNET_OPEN_TYPE_PRECONFIG_WITH_NO_AUTOPROXY, NULL, NULL, 0);
+	HINTERNET hInet = InternetOpen(g_WindowClassMain, INTERNET_OPEN_TYPE_PRECONFIG_WITH_NO_AUTOPROXY, NULL, NULL, 0);
 	if (!hInet)
 		return Throw();
 
@@ -979,7 +995,6 @@ ResultType Line::Download(LPTSTR aURL, LPTSTR aFilespec)
 	DWORD aThreadID = __readfsdword(0x24);
 #endif
 
-
 	if (*aURL == 'h' || *aURL == 'H')
 	{
 		while (result = InternetReadFileExA(hFile, &buffers, IRF_NO_WAIT, NULL)) // Assign
@@ -1012,6 +1027,7 @@ ResultType Line::Download(LPTSTR aURL, LPTSTR aFilespec)
 		DeleteFile(aFilespec);  // Delete damaged/incomplete file.
 	return ThrowIfTrue(!result);
 }
+
 
 
 int CALLBACK FileSelectFolderCallback(HWND hwnd, UINT uMsg, LPARAM lParam, LPARAM lpData)
@@ -1148,6 +1164,8 @@ BIF_DECL(BIF_DirSelect)
 
 	_f_return(Result);
 }
+
+
 
 BIF_DECL(BIF_FileGetShortcut) // Credited to Holger <Holger.Kotsch at GMX de>.
 {
@@ -1302,7 +1320,7 @@ ResultType Line::FileCreateShortcut(LPTSTR aTargetFile, LPTSTR aShortcutFile, LP
 ResultType Line::FileRecycle(LPTSTR aFilePattern)
 {
 	if (!aFilePattern || !*aFilePattern)
-		return LineError(ERR_PARAM1_REQUIRED, FAIL_OR_OK);  // Since this is probably not what the user intended.
+		return LineError(ERR_PARAM1_MUST_NOT_BE_BLANK, FAIL_OR_OK);  // Since this is probably not what the user intended.
 
 	SHFILEOPSTRUCT FileOp;
 	TCHAR szFileTemp[_MAX_PATH+2];
@@ -1334,7 +1352,11 @@ ResultType Line::FileRecycleEmpty(LPTSTR aDriveLetter)
 {
 	LPCTSTR szPath = *aDriveLetter ? aDriveLetter : NULL;
 	HRESULT hr = SHEmptyRecycleBin(NULL, szPath, SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND);
-	return ThrowIfTrue(hr != S_OK);
+	// Throw no error for E_UNEXPECTED, since that is returned in the common case where the
+	// recycle bin is already empty.  Seems more useful and user-friendly to ignore it.
+	if (hr != S_OK && hr != E_UNEXPECTED)
+		return g_script->Win32Error(hr);
+	return OK;
 }
 
 
@@ -1344,7 +1366,7 @@ BIF_DECL(BIF_FileGetVersion)
 	_f_param_string_opt_def(aFilespec, 0, (g->mLoopFile ? g->mLoopFile->cFileName : _T("")));
 
 	if (!*aFilespec)
-		_f_throw(ERR_PARAM1_MUST_NOT_BE_BLANK);  // Since this is probably not what the user intended.
+		_f_throw_value(ERR_PARAM1_MUST_NOT_BE_BLANK);  // Since this is probably not what the user intended.
 
 	DWORD dwUnused, dwSize;
 	if (   !(dwSize = GetFileVersionInfoSize(aFilespec, &dwUnused))   )  // No documented limit on how large it can be, so don't use _alloca().
@@ -1839,6 +1861,7 @@ BOOL Util_ShutdownHandler(HWND hwnd, DWORD lParam)
 	// if the window is me, don't terminate!
 	if (hwnd != g_hWnd)
 		Util_WinKill(hwnd);
+
 	// Continue the enumeration.
 	return TRUE;
 
@@ -1937,15 +1960,44 @@ void DoIncrementalMouseMove(int aX1, int aY1, int aX2, int aY2, int aSpeed)
 
 DWORD ProcessExist(LPTSTR aProcess)
 {
+	// Determine the PID if aProcess is a pure, non-negative integer (any negative number
+	// is more likely to be the name of a process [with a leading dash], rather than the PID).
+	DWORD specified_pid = IsNumeric(aProcess) ? ATOU(aProcess) : 0;
+	if (specified_pid)
+	{
+		// Most of the time while a PID is being used, the process still exists.  So try opening
+		// the process directly, since doing so is much faster than enumerating all processes:
+		if (HANDLE hproc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, specified_pid))
+		{
+			DWORD wait_result = WAIT_FAILED;
+			// OpenProcess can succeed for erroneous PID values; e.g. values of 1501 to 1503 can
+			// open the process with ID 1500.  This is likely due to the undocumented fact that
+			// PIDs are a multiple of four: https://devblogs.microsoft.com/oldnewthing/20080228-00/?p=23283
+			DWORD actual_pid = GetProcessId(hproc); // Requires PROCESS_QUERY_LIMITED_INFORMATION access.
+			if (actual_pid == specified_pid)
+			{
+				// OpenProcess can succeed for a process which has already exited if another process
+				// still has an open handle to it.  So check whether it's still running:
+				wait_result = WaitForSingleObject(hproc, 0); // Requires SYNCHRONIZE access.
+			}
+			CloseHandle(hproc);
+			if (wait_result == WAIT_OBJECT_0)
+				return 0; // Process has exited.
+			if (wait_result == WAIT_TIMEOUT)
+				return specified_pid; // Process still running.
+			// Otherwise, fall back to the slow but more reliable method to get a more conclusive result.
+		}
+		// If OpenProcess failed, some likely causes are ERROR_ACCESS_DENIED and ERROR_INVALID_PARAMETER.
+		// The latter probably indicates the PID is invalid, but we continue anyway, for the unlikely
+		// case of a process with a name composed of digits and no extension (verified possible).
+		// If ERROR_ACCESS_DENIED was returned, we can't rule out the false-positive cases described
+		// above without doing a thorough enumeration of processes, so continue in that case as well.
+	}
+
 	PROCESSENTRY32 proc;
     proc.dwSize = sizeof(proc);
 	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 	Process32First(snapshot, &proc);
-
-	// Determine the PID if aProcess is a pure, non-negative integer (any negative number
-	// is more likely to be the name of a process [with a leading dash], rather than the PID).
-	DWORD specified_pid = IsNumeric(aProcess) ? ATOU(aProcess) : 0;
-	TCHAR szDrive[_MAX_PATH+1], szDir[_MAX_PATH+1], szFile[_MAX_PATH+1], szExt[_MAX_PATH+1];
 
 	while (Process32Next(snapshot, &proc))
 	{
@@ -1958,9 +2010,9 @@ DWORD ProcessExist(LPTSTR aProcess)
 		// also be a valid name?):
 		// It seems that proc.szExeFile never contains a path, just the executable name.
 		// But in case it ever does, ensure consistency by removing the path:
-		_tsplitpath(proc.szExeFile, szDrive, szDir, szFile, szExt);
-		_tcscat(szFile, szExt);
-		if (!_tcsicmp(szFile, aProcess)) // lstrcmpi() is not used: 1) avoids breaking existing scripts; 2) provides consistent behavior across multiple locales; 3) performance.
+		LPCTSTR proc_name = _tcsrchr(proc.szExeFile, '\\');
+		proc_name = proc_name ? proc_name + 1 : proc.szExeFile;
+		if (!_tcsicmp(proc_name, aProcess)) // lstrcmpi() is not used: 1) avoids breaking existing scripts; 2) provides consistent behavior across multiple locales; 3) performance.
 		{
 			CloseHandle(snapshot);
 			return proc.th32ProcessID;

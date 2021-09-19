@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #define TEXT_IO_BLOCK	8192
 
@@ -16,6 +16,7 @@
 
 #include <locale.h> // For _locale_t, _create_locale and _free_locale.
 #include <algorithm>
+#include "script.h"
 #include "script_object.h"
 extern UINT g_ACP;
 
@@ -59,10 +60,7 @@ public:
 	virtual ~TextStream()
 	{
 		if (mBuffer)
-		{
-			g_memset(mBuffer, 0, TEXT_IO_BLOCK);
 			free(mBuffer);
-		}
 		//if (mLocale)
 		//	_free_locale(mLocale);
 		// Close() isn't called here, it will rise a "pure virtual function call" exception.
@@ -360,6 +358,7 @@ private:
 };
 
 
+
 // FileObject: exports TextFile interfaces to the scripts.
 class FileObject : public Object
 {
@@ -384,6 +383,9 @@ class FileObject : public Object
 		P_Encoding
 	};
 
+
+	friend void ::DefineFileClass();
+
 	enum NumReadWriteFlags
 	{
 		F_SIZE_MASK = 0xF,
@@ -394,12 +396,14 @@ class FileObject : public Object
 		F_FLOAT = 0x40
 	};
 
-	ResultType NumReadWrite(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void NumReadWrite(ResultToken& aResultToken, int aID, int aFlags, ExprTokenType* aParam[], int aParamCount);
+	void Invoke(ResultToken& aResultToken, int aID, int aFlags, ExprTokenType* aParam[], int aParamCount);
+
 	TextFile mFile;
-	
+
 public:
-	static ObjectMember sMembers[31];
-	_thread_local static Object *sPrototype;
-	static FileObject *Open(LPCTSTR aFileSpec, DWORD aFlags, UINT aCodePage);
+	static FileObject* Open(LPCTSTR aFileSpec, DWORD aFlags, UINT aCodePage);
+
+	static ObjectMember sMembers[];
+	thread_local static Object* sPrototype;
 };

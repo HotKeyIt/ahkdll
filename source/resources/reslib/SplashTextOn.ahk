@@ -3,7 +3,7 @@
     ,WS_CHILD:=1073741824,WS_VISIBLE:=268435456,SS_CENTER:=1,FW_NORMAL:=400,DEFAULT_GUI_FONT:=17,LOGPIXELSY:=90,DEFAULT_CHARSET:=1
     ,OUT_TT_PRECIS:=4,CLIP_DEFAULT_PRECIS:=0,PROOF_QUALITY:=2,FF_DONTCARE:=0,WM_SETFONT:=48,SW_SHOWNOACTIVATE:=4
     ,g_hWndSplash:=0,g_hFontSplash:=0,pt:=Struct("x,y"),rect:=Struct("left,top,right,bottom")
-    ,init:=Gui.new().Destroy() ; required to init ahk_class AutoHotkeyGUI
+    ,initgui:=Gui().Destroy() ; required to init ahk_class AutoHotkeyGUI
 	if (aWidth aHeight aTitle aText = ""){
 		if (g_hWndSplash && IsWindow(g_hWndSplash))
 			DestroyWindow(g_hWndSplash)
@@ -36,7 +36,7 @@
 
 	if (!g_hFontSplash)
 	{
-		default_font_name:=BufferAlloc(65*2)
+		default_font_name:=Buffer(65*2)
 		nSize := 12, nWeight := FW_NORMAL
 		hdc := CreateDC("DISPLAY",0,0,0)
 		if (FontExist(hdc, "Segoe UI")) ; Use a more appealing font under Windows Vista or later (Segoe UI).

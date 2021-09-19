@@ -1,4 +1,4 @@
-/*
+﻿/*
 AutoHotkey
 
 Copyright 2003-2009 Chris Mallett (support@autohotkey.com)
@@ -72,18 +72,24 @@ HotkeyCriterion *AddHotkeyIfExpr();
 HotkeyCriterion *FindHotkeyCriterion(HotCriterionType aType, LPTSTR aWinTitle, LPTSTR aWinText);
 HotkeyCriterion *FindHotkeyIfExpr(LPTSTR aExpr);
 
+inline int InputLevelFromInfo(ULONG_PTR aExtraInfo)
+{
+	if (aExtraInfo >= KEY_IGNORE_MIN && aExtraInfo <= KEY_IGNORE_MAX)
+		return (int)(KEY_IGNORE_LEVEL(0) - aExtraInfo);
+	return SendLevelMax + 1;
+}
+
 
 
 struct HotkeyVariant
 {
-	LabelRef mJumpToLabel;
-	LabelPtr mOriginalCallback;	// This is the callback set at load time. 
+	IObjectRef mCallback;
+	IObjectPtr mOriginalCallback;	// This is the callback set at load time. 
 								// Keep it to allow restoring it via hotkey() function if changed
 								// during run time.
 	HotkeyCriterion *mHotCriterion;
 	HotkeyVariant *mNextVariant;
 	DWORD mRunAgainTime;
-	DWORD mThreadID;
 	int mPriority;
 	// Keep members that are less than 32-bit adjacent to each other to conserve memory in with the default
 	// 4-byte alignment:
@@ -106,11 +112,11 @@ private:
 	// the hotkey ID is used as the array index for performance reasons.  Having an outer class implies
 	// the potential future use of more than one set of hotkeys, which could still be implemented
 	// within static data and methods to retain the indexing/performance method:
-	static HookType sWhichHookNeeded;
-	static HookType sWhichHookAlways;
-	static DWORD sTimePrev;
-	static DWORD sTimeNow;
-	static HotkeyIDType sNextID;
+	thread_local static HookType sWhichHookNeeded;
+	thread_local static HookType sWhichHookAlways;
+	thread_local static DWORD sTimePrev;
+	thread_local static DWORD sTimeNow;
+	thread_local static HotkeyIDType sNextID;
 
 	bool Enable(HotkeyVariant &aVariant) // Returns true if the variant needed to be disabled, in which case caller should generally call ManifestAllHotkeysHotstringsHooks().
 	{
@@ -148,22 +154,20 @@ private:
 	ResultType Register();
 	ResultType Unregister();
 
-	void *operator new(size_t aBytes){ return malloc(aBytes); }
-	void *operator new[](size_t aBytes) {return malloc(aBytes); }
-	void operator delete(void *aPtr) { free(aPtr); }  // Deletes aPtr if it was the most recently allocated.
-	void operator delete[](void *aPtr) { free(aPtr); }
+	void *operator new(size_t aBytes) {return g_SimpleHeap->Malloc(aBytes);}
+	void *operator new[](size_t aBytes) {return g_SimpleHeap->Malloc(aBytes);}
+	void operator delete(void *aPtr) {g_SimpleHeap->Delete(aPtr);}  // Deletes aPtr if it was the most recently allocated.
+	void operator delete[](void *aPtr) {g_SimpleHeap->Delete(aPtr);}
 
 	// For now, constructor & destructor are private so that only static methods can create new
 	// objects.  This allow proper tracking of which OS hotkey IDs have been used.
-	Hotkey(HotkeyIDType aID, IObject *aJumpToLabel, HookActionType aHookAction, LPTSTR aName, bool aSuffixHasTilde);
+	Hotkey(HotkeyIDType aID, IObject *aCallback, HookActionType aHookAction, LPTSTR aName, bool aSuffixHasTilde);
 	~Hotkey() {if (mIsRegistered) Unregister();}
 
 public:
-	// non _thread_local since hotkeys are shared between all threads
-	static Hotkey **shk;
-	static int shkMax;
+	thread_local static Hotkey **shk;
+	thread_local static int shkMax;
 
-	DWORD mThreadID;
 	// 32-bit members:
 	mod_type mModifiers;  // MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, or some additive or bitwise-or combination of these.
 
@@ -200,40 +204,27 @@ public:
 	HotkeyVariant *mFirstVariant, *mLastVariant; // v1.0.42: Linked list of variant hotkeys created via #HotIf directives.
 
 	// Make sHotkeyCount an alias for sNextID.  Make it const to enforce modifying the value in only one way:
-	static /*const*/ HotkeyIDType &sHotkeyCount; //HotKeyIt removed const so possible to set to 0 when hotkeys are deleted.
-	static bool sJoystickHasHotkeys[MAX_JOYSTICKS];
-	static DWORD sJoyHotkeyCount;
-	static void Hotkey::UnHook();  // used in Import(file) Nv8
-	static void Hotkey::HookUp();  // not really helping, will remove.
+	thread_local static const HotkeyIDType &sHotkeyCount;
+	thread_local static bool sJoystickHasHotkeys[MAX_JOYSTICKS];
+	thread_local static DWORD sJoyHotkeyCount;
 	static void AllDestructAndExit(int exit_code);
-	static void AllDestruct(); // HotKeyIt H1 Destroy all Hotkeys
 
-	// Currently unused (filtered out by a macro):
-	#define HOTKEY_EL_BADLABEL           1
-	#define HOTKEY_EL_INVALID_KEYNAME    2
-	#define HOTKEY_EL_UNSUPPORTED_PREFIX 3
-	#define HOTKEY_EL_ALTTAB             4
-	#define HOTKEY_EL_NOTEXIST           5
-	#define HOTKEY_EL_NOTEXISTVARIANT    6
-	#define HOTKEY_EL_MAXCOUNT           98 // 98 allows room for other ErrorLevels to be added in between.
-	#define HOTKEY_EL_MEM                99
 	static ResultType IfExpr(LPTSTR aExpr, IObject *aExprObj, ResultToken &aResultToken);
-	static ResultType Dynamic(LPTSTR aHotkeyName, LPTSTR aLabelName, LPTSTR aOptions
-		, IObject *aJumpToLabel, HookActionType aHookAction, ResultToken &aResultToken);
+	static ResultType Dynamic(LPTSTR aHotkeyName, LPTSTR aOptions
+		, IObject *aCallback, HookActionType aHookAction, ResultToken &aResultToken);
 
-	static Hotkey *AddHotkey(IObject *aJumpToLabel, HookActionType aHookAction, LPTSTR aName, bool aSuffixHasTilde);
+	static Hotkey *AddHotkey(IObject *aCallback, HookActionType aHookAction, LPTSTR aName, bool aSuffixHasTilde);
 	HotkeyVariant *FindVariant();
-	HotkeyVariant *AddVariant(IObject *aJumpToLabel, bool aSuffixHasTilde);
+	HotkeyVariant *AddVariant(IObject *aCallback, bool aSuffixHasTilde);
 	static bool PrefixHasNoEnabledSuffixes(int aVKorSC, bool aIsSC);
-	HotkeyVariant *CriterionAllowsFiring(HWND *aFoundHWND = NULL);
-	static HotkeyVariant *CriterionAllowsFiring(HotkeyIDType aHotkeyID, HWND &aFoundHWND);
+	HotkeyVariant *CriterionAllowsFiring(HWND *aFoundHWND = NULL, ULONG_PTR aExtraInfo = 0, LPTSTR aSingleChar = NULL);
 	static HotkeyVariant *CriterionFiringIsCertain(HotkeyIDType &aHotkeyIDwithFlags, bool aKeyUp, ULONG_PTR aExtraInfo
 		, UCHAR &aNoSuppress, bool &aFireWithNoSuppress, LPTSTR aSingleChar);
 	static modLR_type HotkeyRequiresModLR(HotkeyIDType aHotkeyIDwithoutflags, modLR_type aModLR);
 	static void TriggerJoyHotkeys(int aJoystickID, DWORD aButtonsNewlyDown);
-	void PerformInNewThreadMadeByCaller(HotkeyVariant &aVariant, LPTSTR aName);
+	void PerformInNewThreadMadeByCaller(HotkeyVariant &aVariant);
 	static void ManifestAllHotkeysHotstringsHooks();
-	static void RequireHook(HookType aWhichHook) {sWhichHookAlways |= aWhichHook;}
+	static void RequireHook(HookType aWhichHook, bool aRequire = true) { aRequire ? sWhichHookAlways |= aWhichHook : sWhichHookAlways &= ~aWhichHook; }
 	static void MaybeUninstallHook();
 	static ResultType TextInterpret(LPTSTR aName, Hotkey *aThisHotkey);
 
@@ -249,7 +240,7 @@ public:
 		bool hook_is_mandatory;
 	};
 	static LPTSTR TextToModifiers(LPTSTR aText, Hotkey *aThisHotkey, HotkeyProperties *aProperties = NULL);
-	static ResultType TextToKey(LPTSTR aText, LPTSTR aHotkeyName, bool aIsModifier, Hotkey *aThisHotkey);
+	static ResultType TextToKey(LPTSTR aText, bool aIsModifier, Hotkey *aThisHotkey);
 
 	static void InstallKeybdHook();
 	static void InstallMouseHook();
@@ -325,6 +316,7 @@ public:
 	static Hotkey *FindHotkeyContainingModLR(modLR_type aModifiersLR);  //, HotkeyIDType hotkey_id_to_omit);
 	//static Hotkey *FindHotkeyWithThisModifier(vk_type aVK, sc_type aSC);
 	//static Hotkey *FindHotkeyBySC(sc2_type aSC2, mod_type aModifiers, modLR_type aModifiersLR);
+	static HotkeyIDType FindPairedHotkey(HotkeyIDType aFirstID, modLR_type aModsLR, bool aKeyUp);
 
 	static LPTSTR ListHotkeys(LPTSTR aBuf, int aBufSize);
 	LPTSTR ToText(LPTSTR aBuf, int aBufSize, bool aAppendNewline);
@@ -348,13 +340,12 @@ enum CaseConformModes {CASE_CONFORM_NONE, CASE_CONFORM_ALL_CAPS, CASE_CONFORM_FI
 class Hotstring
 {
 public:
-	static Hotstring **shs;  // An array to be allocated on first use (performs better than linked list).
-	static HotstringIDType sHotstringCount;
-	static HotstringIDType sHotstringCountMax;
-	static UINT sEnabledCount; // v1.1.28.00: For performance, such as avoiding calling ToAsciiEx() in the hook.
-
-	DWORD mThreadID;
-	LabelRef mJumpToLabel;
+	thread_local static Hotstring **shs;  // An array to be allocated on first use (performs better than linked list).
+	thread_local static HotstringIDType sHotstringCount;
+	thread_local static HotstringIDType sHotstringCountMax;
+	thread_local static UINT sEnabledCount; // v1.1.28.00: For performance, such as avoiding calling ToAsciiEx() in the hook.
+	
+	IObjectRef mCallback;
 	LPTSTR mName;
 	LPTSTR mString, mReplacement;
 	HotkeyCriterion *mHotCriterion;
@@ -378,22 +369,22 @@ public:
 	ResultType PerformInNewThreadMadeByCaller();
 	void DoReplace(LPARAM alParam);
 	static Hotstring *FindHotstring(LPTSTR aHotstring, bool aCaseSensitive, bool aDetectWhenInsideWord, HotkeyCriterion *aHotCriterion);
-	static ResultType AddHotstring(LPTSTR aName, LabelPtr aJumpToLabel, LPTSTR aOptions, LPTSTR aHotstring
+	static ResultType AddHotstring(LPTSTR aName, IObjectPtr aCallback, LPTSTR aOptions, LPTSTR aHotstring
 		, LPTSTR aReplacement, bool aHasContinuationSection, UCHAR aSuspend = FALSE);
 	static void ParseOptions(LPTSTR aOptions, int &aPriority, int &aKeyDelay, SendModes &aSendMode
 		, bool &aCaseSensitive, bool &aConformToCase, bool &aDoBackspace, bool &aOmitEndChar, SendRawType &aSendRaw
-		, bool &aEndCharRequired, bool &aDetectWhenInsideWord, bool &aDoReset, bool &aExecuteAction);
+		, bool &aEndCharRequired, bool &aDetectWhenInsideWord, bool &aDoReset, bool &aExecuteAction, bool &aSuspendExempt);
 	void ParseOptions(LPTSTR aOptions);
 
 	// Constructor & destructor:
-	Hotstring(LPTSTR aName, LabelPtr aJumpToLabel, LPTSTR aOptions, LPTSTR aHotstring, LPTSTR aReplacement
+	Hotstring(LPTSTR aName, IObjectPtr aCallback, LPTSTR aOptions, LPTSTR aHotstring, LPTSTR aReplacement
 		, bool aHasContinuationSection, UCHAR aSuspend);
 	~Hotstring() {}  // Note that mReplacement is sometimes malloc'd, sometimes from SimpleHeap, and sometimes the empty string.
 
-	void *operator new(size_t aBytes){ return malloc(aBytes); }
-	void *operator new[](size_t aBytes) {return malloc(aBytes); }
-	void operator delete(void *aPtr) { free(aPtr); }  // Deletes aPtr if it was the most recently allocated.
-	void operator delete[](void *aPtr) { free(aPtr); }
+	void *operator new(size_t aBytes) {return g_SimpleHeap->Malloc(aBytes);}
+	void *operator new[](size_t aBytes) {return g_SimpleHeap->Malloc(aBytes);}
+	void operator delete(void *aPtr) {g_SimpleHeap->Delete(aPtr);}  // Deletes aPtr if it was the most recently allocated.
+	void operator delete[](void *aPtr) {g_SimpleHeap->Delete(aPtr);}
 };
 
 

@@ -1,4 +1,4 @@
-/*
+﻿/*
 AutoHotkey
 
 Copyright 2003-2009 Chris Mallett (support@autohotkey.com)
@@ -29,33 +29,53 @@ GNU General Public License for more details.
 
 // The size of each block in bytes.  Use a size that's a good compromise
 // of avg. wastage vs. reducing memory fragmentation and overhead.
-// But be careful never to reduce it to something less than LINE_SIZE
-// (the maximum line length that can be loaded -- currently 16K), otherwise,
-// memory for that line might be impossible to allocate.
 // Update: reduced it from 64K to 32K since many scripts tend to be small.
 // Update 2 (fincs): Use twice as big blocks when compiling for Unicode because
 // Unicode strings are twice as large.
 #define BLOCK_SIZE (32 * 1024 * sizeof(TCHAR)) // Relied upon by Malloc() to be a multiple of 4.
+// The maximum size for a new allocation when a new block must be created to fulfill it.
+// Allocations under this size might cause wasted space at the end of the previous block.
+#define MAX_ALLOC_IN_NEW_BLOCK (1024 * sizeof(TCHAR))
 
 class SimpleHeap
 {
-public:
-	SimpleHeap *CreateBlock(SIZE_T aSize = BLOCK_SIZE);
+private:
 	char *mBlock; // This object's memory block.  Although private, its contents are public.
 	char *mFreeMarker;  // Address inside the above block of the first unused byte.
 	size_t mSpaceAvailable;
-	UINT mBlockCount;
-	SimpleHeap *mFirst, *mLast;  // The first and last objects in the linked list.
-	char *mMostRecentlyAllocated; // For use with Delete().
-	SimpleHeap **mBlocks;
-	SimpleHeap *mNextBlock;  // The object after this one in the linked list; NULL if none.
-//	static UINT GetBlockCount() {return mBlockCount;}
-	LPTSTR Malloc(LPCTSTR aBuf, size_t aLength = -1); // Return a block of memory to the caller and copy aBuf into it.
-	void* Malloc(size_t aSize); // Return a block of memory to the caller.
+	UINT sBlockCount;
+	SimpleHeap *sFirst, *sLast;  // The first and last objects in the linked list.
+	char *sMostRecentlyAllocated; // For use with Delete().
+	SimpleHeap *mNextBlock, *mPrevBlock;  // The object after this one and previous in the linked list; NULL if none.
+
+	SimpleHeap *CreateBlock(size_t aSize);
+	LPTSTR strDup(LPCTSTR aBuf, size_t aLength = -1); // Return a block of memory to the caller and copy aBuf into it.
+
+public:
+	SimpleHeap();
+	~SimpleHeap();
+	// Return a block of memory to the caller with aBuf copied into it.  Returns nullptr on failure.
+	LPTSTR Malloc(LPCTSTR aBuf, size_t aLength = -1);
+	
+	// Return a block of memory to the caller with aBuf copied into it.  Terminates app on failure.
+	LPTSTR Alloc(LPCTSTR aBuf, size_t aLength = -1);
+	
+	// Return a block of memory to the caller, or nullptr on failure.
+	void* Malloc(size_t aSize);
+	
+	// Return a block of memory to the caller, or terminate app on failure.
+	void* Alloc(size_t aSize);
+
 	void Delete(void *aPtr);
 	void DeleteAll();
-	SimpleHeap() : mFirst(NULL), mLast(NULL), mBlocks(NULL), mMostRecentlyAllocated(NULL), mNextBlock(NULL), mBlock(NULL), mBlockCount(0) {}
-	~SimpleHeap();
+
+	void CriticalFail();
+
+	template<typename T>
+	T* Alloc(size_t aCount = 1)
+	{
+		return (T *)Alloc(sizeof(T) * aCount);
+	}
 };
 
 #endif

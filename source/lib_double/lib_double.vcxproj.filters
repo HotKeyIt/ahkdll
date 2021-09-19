@@ -1,0 +1,74 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{11b08105-b90d-4bd0-ba85-cbe25f6cf8ce}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="double\cached-powers.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="double\diy-fp.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="double\double-conversion.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="double\fast-dtoa.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="double\fixed-dtoa.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="double\ieee.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="double\strtod.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="double\utils.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="double\bignum.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="double\bignum-dtoa.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="double\cached-powers.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="double\diy-fp.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="double\double-conversion.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="double\fast-dtoa.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="double\fixed-dtoa.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="double\strtod.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="double\bignum.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="double\bignum-dtoa.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+</Project>

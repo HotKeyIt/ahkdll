@@ -1,4 +1,4 @@
-/*
+﻿/*
 Debugger.cpp - Main body of AutoHotkey debugger engine.
 
 Original code by Steve Gray.
@@ -12,7 +12,7 @@ including commercial applications, and to alter it and redistribute it
 freely, without restriction.
 */
 
-#include "stdafx.h"
+#include "pch.h"
 
 #include "defines.h"
 #include "application.h"
@@ -28,22 +28,20 @@ freely, without restriction.
 #define U4T(s) CStringUTF8FromTChar(s).GetString()
 
 #include <ws2tcpip.h>
-#include <wspiapi.h> // for getaddrinfo() on versions of Windows earlier than XP.
+#include <wspiapi.h> // for getaddrinfo()
 #include <stdarg.h>
 #include <typeinfo> // for typeid().
 
-Debugger g_Debugger;
-#ifndef _USRDLL
-CRITICAL_SECTION g_CriticalDebugger;
-#endif
-CStringA g_DebuggerHost;
-CStringA g_DebuggerPort;
+//Debugger g_Debugger;
+// jackieku: modified to hold the buffer.
+//CStringA g_DebuggerHost;
+//CStringA g_DebuggerPort;
 
 // The first breakpoint uses sMaxId + 1. Don't change this without also changing breakpoint_remove.
-int Breakpoint::sMaxId = 0;
+thread_local int Breakpoint::sMaxId = 0;
 
 
-Debugger::CommandDef Debugger::sCommands[] =
+thread_local Debugger::CommandDef Debugger::sCommands[] =
 {
 	{"run", &run},
 	{"step_into", &step_into},
@@ -81,14 +79,14 @@ Debugger::CommandDef Debugger::sCommands[] =
 	{"source", &source},
 };
 
+//DbgStack Debugger::mStack;
 
 // PreExecLine: aLine is about to execute; handle current line marker, breakpoints and step into/over/out.
 int Debugger::PreExecLine(Line *aLine)
 {
 	// Using this->mCurrLine might perform a little better than the alternative, at the expense of a
 	// small amount of complexity in stack_get (which is only called by request of the debugger client):
-	//	mStack.mTop->line = aLine;
-#ifndef _USRDLL
+	//	mStack->mTop->line = aLine;
 	if (InterlockedIncrement(&mInterlockedExec) > 1){
 		InterlockedDecrement(&mInterlockedExec);
 		while (mInterlockedExec || mInternalState == DIS_Break 
@@ -99,7 +97,6 @@ int Debugger::PreExecLine(Line *aLine)
 	}
 	mCurrhWnd = g_hWnd;
 	int result;
-#endif
 	mCurrLine = aLine;
 	mSourceFile = Line::sSourceFile;
 	// Check for a breakpoint on the current line:
@@ -111,58 +108,36 @@ int Debugger::PreExecLine(Line *aLine)
 			aLine->mBreakpoint = NULL;
 			delete bp;
 		}
-#ifndef _USRDLL
 		result = Break();
 		InterlockedDecrement(&mInterlockedExec);
 		return result;
-#else
-		return Break();
-#endif
 	}
-#ifdef _USRDLL
-	if ((
-#else
 	if ((mInternalState == DIS_Break || mCurrhWnd == g_hWnd && 
-#endif
 		(mInternalState == DIS_StepInto
-		|| mInternalState == DIS_StepOver && mStack.Depth() <= mContinuationDepth
-		|| mInternalState == DIS_StepOut && mStack.Depth() < mContinuationDepth)) // Due to short-circuit boolean evaluation, mStack.Depth() is only evaluated once and only if mInternalState is StepOver or StepOut.
+		|| mInternalState == DIS_StepOver && mStack->Depth() <= mContinuationDepth
+		|| mInternalState == DIS_StepOut && mStack->Depth() < mContinuationDepth)) // Due to short-circuit boolean evaluation, mStack->Depth() is only evaluated once and only if mInternalState is StepOver or StepOut.
 		// Although IF/ELSE/LOOP skips its block-begin, standalone/function-body block-begin still gets here; we want to skip it:
 		&& aLine->mActionType != ACT_BLOCK_BEGIN && (aLine->mActionType != ACT_BLOCK_END || aLine->mAttribute) // Ignore { and }; except for function-end, since we want to break there after a "return" to inspect variables while they're still in scope.
 		&& aLine->mLineNumber) // Some scripts (i.e. LowLevel/code.ahk) use mLineNumber==0 to indicate the Line has been generated and injected by the script.
 	{
-#ifndef _USRDLL
 		result = Break();
 		InterlockedDecrement(&mInterlockedExec);
 		return result;
-#else
-		return Break();
-#endif
 	}
 	
 	// Check if a command was sent asynchronously (while the script was running).
 	// Such commands may also be detected via the AHK_CHECK_DEBUGGER message,
 	// but if the program is checking for messages infrequently or not at all,
 	// the check here is needed to ensure the debugger is responsive.
-#ifdef _USRDLL
-	if (
-#else
 	if (g_hWnd == (HWND)g_ahkThreads[0][0] && 
-#endif
 		HasPendingCommand())
 	{
 		// A command was sent asynchronously.
-#ifndef _USRDLL
 		result = ProcessCommands();
 		InterlockedDecrement(&mInterlockedExec);
 		return result;
-#else
-		return Break();
-#endif
 	}
-#ifndef _USRDLL
 	InterlockedDecrement(&mInterlockedExec);
-#endif
 	return DEBUGGER_E_OK;
 }
 
@@ -450,11 +425,7 @@ DEBUGGER_COMMAND(Debugger::feature_get)
 		else if (!strcmp(feature_name + 9, "name"))
 			setting = DEBUGGER_LANG_NAME;
 		else if (!strcmp(feature_name + 9, "version"))
-#ifdef UNICODE
 			setting = AHK_VERSION " (Unicode)";
-#else
-			setting = AHK_VERSION;
-#endif
 	} else if (!strcmp(feature_name, "encoding"))
 		setting = "UTF-8";
 	else if (!strcmp(feature_name, "protocol_version")
@@ -569,7 +540,7 @@ int Debugger::run_step(char **aArgV, int aArgCount, char *aTransactionId, char *
 		return DEBUGGER_E_COMMAND_UNAVAIL;
 
 	mInternalState = aNewState;
-	mContinuationDepth = mStack.Depth();
+	mContinuationDepth = mStack->Depth();
 	mContinuationTransactionId = aTransactionId;
 	
 	// Response will be sent when the debugger breaks.
@@ -590,13 +561,9 @@ DEBUGGER_COMMAND(Debugger::stop)
 	mContinuationTransactionId = aTransactionId;
 
 	// Call g_script->TerminateApp instead of g_script->ExitApp to bypass OnExit function.
-#ifdef _USRDLL
-	g_script->TerminateApp(EXIT_EXIT, 0); // This also causes this->Exit() to be called.
-#else
 	InterlockedDecrement(&mInterlockedExec);
 	mInternalState = DIS_None;
 	SendMessage((HWND)g_ahkThreads[0][0], WM_CLOSE, 0, 0);
-#endif
 	
 	// Should never be reached, but must be here to avoid a compile error:
 	return DEBUGGER_E_INTERNAL_ERROR;
@@ -668,56 +635,7 @@ DEBUGGER_COMMAND(Debugger::breakpoint_set)
 		return DEBUGGER_E_BREAKPOINT_INVALID;
 
 	int file_index = 0;
-#ifdef _USRDLL
-	if (filename)
-	{
-		// Decode filename URI -> path, in-place.
-		DecodeURI(filename);
-		CStringTCharFromUTF8 filename_t(filename);
 
-		// Find the specified source file.
-		for (file_index = 0; file_index < Line::sSourceFileCount; ++file_index)
-			if (!_tcsicmp(filename_t, Line::sSourceFile[file_index]))
-				break;
-
-		if (file_index >= Line::sSourceFileCount)
-			return DEBUGGER_E_BREAKPOINT_INVALID;
-	}
-
-	Line *line = NULL, *found_line = NULL;
-	if (!found_line)
-		// If line is non-NULL, above has left it set to mLastStaticLine, which we want to exclude:
-		for (line = line ? line->mNextLine : g_script->mFirstLine; line; line = line->mNextLine)
-			if (line->mFileIndex == file_index && line->mLineNumber >= lineno)
-			{
-				// ACT_ELSE and ACT_BLOCK_BEGIN generally don't cause PreExecLine() to be called,
-				// so any breakpoint set on one of those lines would never be hit.  Attempting to
-				// set a breakpoint on one of these should act like setting a breakpoint on a line
-				// which contains no code: put the breakpoint at the next line instead.
-				// Without this check, setting a breakpoint on a line like "else Exit" would not work.
-				if (line->mActionType == ACT_ELSE || line->mActionType == ACT_BLOCK_BEGIN)
-					continue;
-				// Use the first line of code at or after lineno, like Visual Studio.
-				// To display the breakpoint correctly, an IDE should use breakpoint_get.
-				if (!found_line || found_line->mLineNumber > line->mLineNumber)
-					found_line = line;
-				// Must keep searching, since class var initializers can cause lines to be listed out of order.
-				//break;
-			}
-	if (found_line)
-	{
-		if (!found_line->mBreakpoint)
-			found_line->mBreakpoint = new Breakpoint();
-		found_line->mBreakpoint->state = state;
-		found_line->mBreakpoint->temporary = temporary;
-
-		return mResponseBuf.WriteF(
-			"<response command=\"breakpoint_set\" transaction_id=\"%e\" state=\"%s\" id=\"%i\"/>"
-			, aTransactionId, state ? "enabled" : "disabled", found_line->mBreakpoint->id);
-	}
-	// There are no lines of code beginning at or after lineno.
-	return DEBUGGER_E_BREAKPOINT_INVALID;
-#else
 	Script *script = g_script;
 	Line *line = NULL, *found_line = NULL;
 	int result = DEBUGGER_E_BREAKPOINT_INVALID;
@@ -739,7 +657,7 @@ DEBUGGER_COMMAND(Debugger::breakpoint_set)
 				{
 					script = (Script*)g_ahkThreads[i][1];
 					break;
-				}
+}
 
 			if (file_index >= SourceFileCount)
 				continue;
@@ -756,7 +674,8 @@ DEBUGGER_COMMAND(Debugger::breakpoint_set)
 					// set a breakpoint on one of these should act like setting a breakpoint on a line
 					// which contains no code: put the breakpoint at the next line instead.
 					// Without this check, setting a breakpoint on a line like "else Exit" would not work.
-					if (line->mActionType == ACT_ELSE || line->mActionType == ACT_BLOCK_BEGIN)
+					if (line->mActionType == ACT_ELSE || line->mActionType == ACT_BLOCK_BEGIN
+						|| line->mActionType == ACT_CASE)
 						continue;
 					// Use the first line of code at or after lineno, like Visual Studio.
 					// To display the breakpoint correctly, an IDE should use breakpoint_get.
@@ -778,26 +697,15 @@ DEBUGGER_COMMAND(Debugger::breakpoint_set)
 		}
 	}
 	return result;
-#endif
 }
 
-#ifdef _USRDLL
-int Debugger::WriteBreakpointXml(Breakpoint *aBreakpoint, Line *aLine)
-{
-	mResponseBuf.WriteF("<breakpoint id=\"%i\" type=\"line\" state=\"%s\" filename=\""
-		, aBreakpoint->id, aBreakpoint->state ? "enabled" : "disabled");
-	mResponseBuf.WriteFileURI(U4T(Line::sSourceFile[aLine->mFileIndex]));
-	return mResponseBuf.WriteF("\" lineno=\"%u\"/>", aLine->mLineNumber);
-}
-#else
 int Debugger::WriteBreakpointXml(Breakpoint *aBreakpoint, Line *aLine, LPTSTR* aSourceFile)
 {
 	mResponseBuf.WriteF("<breakpoint id=\"%i\" type=\"line\" state=\"%s\" filename=\""
-		, aBreakpoint->id, aBreakpoint->state ? "enabled" : "disabled");
-	mResponseBuf.WriteFileURI(U4T(aSourceFile[aLine->mFileIndex]));
+					, aBreakpoint->id, aBreakpoint->state ? "enabled" : "disabled");
+	mResponseBuf.WriteFileURI(U4T(((LPTSTR*)g_ahkThreads[0][2])[aLine->mFileIndex]));
 	return mResponseBuf.WriteF("\" lineno=\"%u\"/>", aLine->mLineNumber);
 }
-#endif
 
 DEBUGGER_COMMAND(Debugger::breakpoint_get)
 {
@@ -806,22 +714,6 @@ DEBUGGER_COMMAND(Debugger::breakpoint_get)
 		return DEBUGGER_E_INVALID_OPTIONS;
 
 	int breakpoint_id = atoi(ArgValue(aArgV, 0));
-#ifdef _USRDLL
-	Line *line;
-	for (line = g_script->mFirstLine; line; line = line->mNextLine)
-	{
-		if (line->mBreakpoint && line->mBreakpoint->id == breakpoint_id)
-		{
-			mResponseBuf.WriteF("<response command=\"breakpoint_get\" transaction_id=\"%e\">", aTransactionId);
-			WriteBreakpointXml(line->mBreakpoint, line);
-			mResponseBuf.Write("</response>");
-
-			return DEBUGGER_E_OK;
-		}
-	}
-
-	return DEBUGGER_E_BREAKPOINT_NOT_FOUND;
-#else
 	Line *line;
 	int result = DEBUGGER_E_BREAKPOINT_NOT_FOUND;
 	for (int i = 0; i < MAX_AHK_THREADS; i++)
@@ -835,14 +727,12 @@ DEBUGGER_COMMAND(Debugger::breakpoint_get)
 				mResponseBuf.WriteF("<response command=\"breakpoint_get\" transaction_id=\"%e\">", aTransactionId);
 				WriteBreakpointXml(line->mBreakpoint, line, (LPTSTR*)g_ahkThreads[i][2]);
 				mResponseBuf.Write("</response>");
-
 				result = DEBUGGER_E_OK;
 			}
 		}
 	}
 
 	return result;
-#endif
 }
 
 DEBUGGER_COMMAND(Debugger::breakpoint_update)
@@ -888,47 +778,6 @@ DEBUGGER_COMMAND(Debugger::breakpoint_update)
 
 	if (!breakpoint_id)
 		return DEBUGGER_E_INVALID_OPTIONS;
-#ifdef _USRDLL
-	Line *line;
-	for (line = g_script->mFirstLine; line; line = line->mNextLine)
-	{
-		Breakpoint *bp = line->mBreakpoint;
-
-		if (bp && bp->id == breakpoint_id)
-		{
-			if (lineno && line->mLineNumber != lineno)
-			{
-				// Move the breakpoint within its current file.
-				int file_index = line->mFileIndex;
-				Line *old_line = line;
-
-				for (line = g_script->mFirstLine; line; line = line->mNextLine)
-				{
-					if (line->mFileIndex == file_index && line->mLineNumber >= lineno)
-					{
-						line->mBreakpoint = bp;
-						break;
-					}
-				}
-
-				// If line is NULL, the line was not found.
-				if (!line)
-					return DEBUGGER_E_BREAKPOINT_INVALID;
-
-				// Seems best to only remove the breakpoint from its previous line
-				// once we know the breakpoint_update has succeeded.
-				old_line->mBreakpoint = NULL;
-			}
-
-			if (state != -1)
-				bp->state = state;
-
-			return DEBUGGER_E_OK;
-		}
-	}
-
-	return DEBUGGER_E_BREAKPOINT_NOT_FOUND;
-#else
 	Line *line;
 	int result = DEBUGGER_E_BREAKPOINT_NOT_FOUND;
 	for (int i = 0; i < MAX_AHK_THREADS; i++)
@@ -978,7 +827,6 @@ DEBUGGER_COMMAND(Debugger::breakpoint_update)
 	}
 
 	return result;
-#endif
 }
 
 DEBUGGER_COMMAND(Debugger::breakpoint_remove)
@@ -988,21 +836,6 @@ DEBUGGER_COMMAND(Debugger::breakpoint_remove)
 		return DEBUGGER_E_INVALID_OPTIONS;
 
 	int breakpoint_id = atoi(ArgValue(aArgV, 0));
-#ifdef _USRDLL
-	Line *line;
-	for (line = g_script->mFirstLine; line; line = line->mNextLine)
-	{
-		if (line->mBreakpoint && line->mBreakpoint->id == breakpoint_id)
-		{
-			delete line->mBreakpoint;
-			line->mBreakpoint = NULL;
-
-			return DEBUGGER_E_OK;
-		}
-	}
-
-	return DEBUGGER_E_BREAKPOINT_NOT_FOUND;
-#else
 	Line *line;
 	int result = DEBUGGER_E_BREAKPOINT_NOT_FOUND;
 	for (int i = 0; i < MAX_AHK_THREADS; i++)
@@ -1023,7 +856,6 @@ DEBUGGER_COMMAND(Debugger::breakpoint_remove)
 	}
 
 	return result;
-#endif
 }
 
 DEBUGGER_COMMAND(Debugger::breakpoint_list)
@@ -1032,19 +864,7 @@ DEBUGGER_COMMAND(Debugger::breakpoint_list)
 		return DEBUGGER_E_INVALID_OPTIONS;
 	
 	mResponseBuf.WriteF("<response command=\"breakpoint_list\" transaction_id=\"%e\">", aTransactionId);
-
-#ifdef _USRDLL
-	Line *line;
-	for (line = g_script->mFirstLine; line; line = line->mNextLine)
-	{
-		if (line->mBreakpoint)
-		{
-			WriteBreakpointXml(line->mBreakpoint, line);
-		}
-	}
-
-	return mResponseBuf.Write("</response>");
-#else
+	
 	Line *line;
 	for (int i = 0; i < MAX_AHK_THREADS; i++)
 	{
@@ -1059,7 +879,6 @@ DEBUGGER_COMMAND(Debugger::breakpoint_list)
 		}
 	}
 	return mResponseBuf.Write("</response>");
-#endif
 }
 
 DEBUGGER_COMMAND(Debugger::stack_depth)
@@ -1069,7 +888,7 @@ DEBUGGER_COMMAND(Debugger::stack_depth)
 
 	return mResponseBuf.WriteF(
 		"<response command=\"stack_depth\" depth=\"%i\" transaction_id=\"%e\"/>"
-		, mStack.Depth(), aTransactionId);
+		, mStack->Depth(), aTransactionId);
 }
 
 DEBUGGER_COMMAND(Debugger::stack_get)
@@ -1082,7 +901,7 @@ DEBUGGER_COMMAND(Debugger::stack_get)
 		if (aArgCount > 1 || ArgChar(aArgV, 0) != 'd')
 			return DEBUGGER_E_INVALID_OPTIONS;
 		depth = atoi(ArgValue(aArgV, 0));
-		if (depth < 0 || depth >= mStack.Depth())
+		if (depth < 0 || depth >= mStack->Depth())
 			return DEBUGGER_E_INVALID_STACK_DEPTH;
 	}
 
@@ -1090,13 +909,13 @@ DEBUGGER_COMMAND(Debugger::stack_get)
 	
 	int level = 0;
 	DbgStack::Entry *se;
-	for (se = mStack.mTop; se >= mStack.mBottom; --se)
+	for (se = mStack->mTop; se >= mStack->mBottom; --se)
 	{
 		if (depth == -1 || depth == level)
 		{
 			Line *line;
 			LPTSTR *sourcefile;
-			if (se == mStack.mTop)
+			if (se == mStack->mTop)
 			{
 				ASSERT(mCurrLine); // Should always be valid.
 				line = mCurrLine; // See PreExecLine() for comments.
@@ -1114,7 +933,7 @@ DEBUGGER_COMMAND(Debugger::stack_get)
 				else
 				{
 					// The auto-execute thread is probably the only one that can exist without
-					// a Sub or Func entry immediately above it.  As se != mStack.mTop, se->line
+					// a Sub or Func entry immediately above it.  As se != mStack->mTop, se->line
 					// has been set to a non-NULL by DbgStack::Push().
 					line = se->line;
 					sourcefile = line->sSourceFile;
@@ -1154,7 +973,7 @@ DEBUGGER_COMMAND(Debugger::context_names)
 		return DEBUGGER_E_INVALID_OPTIONS;
 
 	return mResponseBuf.WriteF(
-		"<response command=\"context_names\" transaction_id=\"%e\"><context name=\"Local\" id=\"0\"/><context name=\"Static\" id=\"1\"/><context name=\"Global\" id=\"2\"/></response>"
+		"<response command=\"context_names\" transaction_id=\"%e\"><context name=\"Local\" id=\"0\"/><context name=\"Global\" id=\"1\"/></response>"
 		, aTransactionId);
 }
 
@@ -1174,7 +993,7 @@ DEBUGGER_COMMAND(Debugger::context_get)
 		case 'c':	context_id = atoi(value);	break;
 		case 'd':
 			depth = atoi(value);
-			if (depth && (depth < 0 || depth >= mStack.Depth())) // Allow depth 0 even when stack is empty.
+			if (depth && (depth < 0 || depth >= mStack->Depth())) // Allow depth 0 even when stack is empty.
 				return DEBUGGER_E_INVALID_STACK_DEPTH;
 			break;
 		default:
@@ -1188,24 +1007,8 @@ DEBUGGER_COMMAND(Debugger::context_get)
 	// Non-static variables are expected to be used more often, so are listed first.
 	VarList *var_lists[2] = { nullptr, nullptr };
 	VarBkp *bkp = NULL, *bkp_end = NULL;
-#ifndef _USRDLL
-	global_struct *g = NULL;
-	Script *g_script = NULL;
-	for (int i = 0; i < MAX_AHK_THREADS; i++)
-	{
-		if (mCurrhWnd == (HWND)g_ahkThreads[i][0])
-		{
-			g = (global_struct*)g_ahkThreads[i][4];
-			g_script = (Script*)g_ahkThreads[i][1];
-			break;
-		}
-	}
-	
-	if (!g)
-		return DEBUGGER_E_INVALID_CONTEXT;
-#endif
 	if (context_id == PC_Local)
-		mStack.GetLocalVars(depth, var_lists[0], var_lists[1], bkp, bkp_end);
+		mStack->GetLocalVars(depth, var_lists[0], var_lists[1], bkp, bkp_end);
 	else if (context_id == PC_Global)
 		var_lists[0] = g_script->GlobalVars();
 	else
@@ -1222,9 +1025,10 @@ DEBUGGER_COMMAND(Debugger::context_get)
 	prop.pagesize = mMaxChildren;
 	prop.max_depth = mMaxDepth;
 	for ( ; bkp < bkp_end; ++bkp)
-		if (  (err = GetPropertyInfo(*bkp, prop))
-			|| (err = WritePropertyXml(prop, bkp->mVar->mName))  )
-			break;
+		if (bkp->mType != VAR_CONSTANT) // Exclude closures.
+			if (  (err = GetPropertyInfo(*bkp, prop))
+				|| (err = WritePropertyXml(prop, bkp->mVar->mName))  )
+				break;
 	for (int j = 0; j < _countof(var_lists); ++j)
 	{
 		if (!var_lists[j])
@@ -1232,9 +1036,10 @@ DEBUGGER_COMMAND(Debugger::context_get)
 		Var **vars = var_lists[j]->mItem;
 		int var_count = var_lists[j]->mCount;
 		for (int i = 0; i < var_count; ++i)
-			if (  (err = GetPropertyInfo(*vars[i], prop))
-				|| (err = WritePropertyXml(prop, vars[i]->mName))  )
-				break;
+			if (vars[i]->mType != VAR_CONSTANT || context_id != PC_Local) // Exclude closures.
+				if (  (err = GetPropertyInfo(*vars[i], prop))
+					|| (err = WritePropertyXml(prop, vars[i]->mName))  )
+					break;
 	}
 	if (err)
 		return err;
@@ -1377,7 +1182,7 @@ void Object::DebugWriteProperty(IDebugProperties *aDebugger, int aPage, int aPag
 		}
 		if (enum_method && i < page_end)
 		{
-			if (dynamic_cast<BuiltInMethod *>(enum_method->func))
+			if (dynamic_cast<BuiltInMethod *>(enum_method))
 			{
 				// Built-in enumerators are always safe to call automatically.
 				aDebugger->WriteEnumItems(this, i - field_count, page_end - field_count);
@@ -1394,7 +1199,6 @@ void Object::DebugWriteProperty(IDebugProperties *aDebugger, int aPage, int aPag
 
 	aDebugger->EndProperty(cookie);
 }
-
 
 int Debugger::WriteEnumItems(PropertyInfo &aProp, IObject *aEnumerable)
 {
@@ -1425,13 +1229,8 @@ void Debugger::PropertyWriter::WriteEnumItems(IObject *aEnumerable, int aStart, 
 	
 	if (mProp.max_depth)
 	{
-		Var vkey, vval;
-		ExprTokenType tkey, tval;
-		ExprTokenType tparam[2], *param[] = { tparam, tparam + 1 };
-		tparam[0].symbol = SYM_VAR;
-		tparam[0].var = &vkey;
-		tparam[1].symbol = SYM_VAR;
-		tparam[1].var = &vval;
+		auto vkey = new VarRef(), vval = new VarRef();
+		ExprTokenType tparam[] = { vkey, vval }, *param[] = { tparam, tparam + 1 };
 		for (int i = 0; i < aEnd; ++i)
 		{
 			result = CallEnumerator(enumerator, param, 2, false);
@@ -1439,13 +1238,14 @@ void Debugger::PropertyWriter::WriteEnumItems(IObject *aEnumerable, int aStart, 
 				break;
 			if (i >= aStart)
 			{
-				vkey.ToTokenSkipAddRef(tkey);
-				vval.ToTokenSkipAddRef(tval);
+				ExprTokenType tkey, tval;
+				vkey->ToTokenSkipAddRef(tkey);
+				vval->ToTokenSkipAddRef(tval);
 				WriteProperty(tkey, tval);
 			}
 		}
-		vkey.Free();
-		vval.Free();
+		vkey->Release();
+		vval->Release();
 	}
 
 	if (write_main_property)
@@ -1537,20 +1337,8 @@ int Debugger::WritePropertyData(LPCTSTR aData, size_t aDataSize, int aMaxEncoded
 {
 	int err;
 	
-#ifdef UNICODE
 	LPCWSTR utf16_value = aData;
 	size_t total_utf16_size = aDataSize;
-#else
-	// ANSI mode.  For simplicity, convert the entire data to UTF-16 rather than attempting to
-	// calculate how much ANSI text will produce the right number of UTF-8 bytes (since UTF-16
-	// is needed as an intermediate step anyway).  This would fail if the string length exceeds
-	// INT_MAX, but that would only matter if we built ANSI for x64 (and we don't).
-	CStringWCharFromChar utf16_buf(aData, aDataSize);
-	LPCWSTR utf16_value = utf16_buf.GetString();
-	size_t total_utf16_size = utf16_buf.GetLength();
-	if (!total_utf16_size && aDataSize) // Conversion failed (too large?)
-		return DEBUGGER_E_INTERNAL_ERROR;
-#endif
 	
 	// The spec says: "The IDE should not read more data than the length defined in the packet
 	// header.  The IDE can determine if there is more data by using the property data length
@@ -1657,7 +1445,6 @@ int Debugger::ParsePropertyName(LPCSTR aFullName, int aDepth, int aVarScope, Exp
 	// Validate name for more accurate error-reporting.
 	if (name_length > MAX_VAR_NAME_LENGTH || !Var::ValidateName(name, DISPLAY_NO_ERROR))
 		return DEBUGGER_E_INVALID_OPTIONS;
-#ifndef _USRDLL
 	Script *g_script = NULL;
 	// get the thread of current line/file
 	for (int i = 0; i < MAX_AHK_THREADS; i++)
@@ -1670,7 +1457,6 @@ int Debugger::ParsePropertyName(LPCSTR aFullName, int aDepth, int aVarScope, Exp
 	}
 	if (!g_script)
 		return DEBUGGER_E_INVALID_CONTEXT;
-#endif
 
 	VarList *vars = nullptr;
 	bool search_local = (aVarScope & VAR_LOCAL) && g->CurrentFunc;
@@ -1678,7 +1464,7 @@ int Debugger::ParsePropertyName(LPCSTR aFullName, int aDepth, int aVarScope, Exp
 	{
 		VarList *static_vars = nullptr;
 		VarBkp *bkps = nullptr, *bkps_end = nullptr;
-		mStack.GetLocalVars(aDepth, vars, static_vars, bkps, bkps_end);
+		mStack->GetLocalVars(aDepth, vars, static_vars, bkps, bkps_end);
 		for ( ; bkps < bkps_end; ++bkps)
 			if (!_tcsicmp(bkps->mVar->mName, name))
 			{
@@ -1722,17 +1508,24 @@ int Debugger::ParsePropertyName(LPCSTR aFullName, int aDepth, int aVarScope, Exp
 		if (error)
 			return error;
 		if (aResult.value.symbol == SYM_OBJECT)
-			iobj = aResult.value.object;
+			iobj = aResult.value.object; // Take ownership of this reference, which is overwitten below.
+		else
+			aResult.value.Free(); // Free mem_to_free if non-null.
+		// aResult.value must be reinitialized because Invoke expects it to have a default of "".
+		// For x.<base> and x.<enum>, it's expected to have a value that doesn't need Free() called.
+		aResult.value.InitResult(aResult.value.buf);
 	}
 	else
 	{
 		if (varbkp->mAttrib & VAR_ATTRIB_IS_OBJECT) 
+		{
 			iobj = varbkp->mObject;
+			iobj->AddRef();
+		}
 	}
 
 	if (!iobj)
 		return DEBUGGER_E_UNKNOWN_PROPERTY;
-	iobj->AddRef();
 
 	int return_value = DEBUGGER_E_UNKNOWN_PROPERTY;
 	Object *obj, *this_override = nullptr;
@@ -1806,7 +1599,6 @@ int Debugger::ParsePropertyName(LPCSTR aFullName, int aDepth, int aVarScope, Exp
 			// For simplicity, let this be any string terminated by '.' or '['.
 			// Actual expressions require it to contain only alphanumeric chars and/or '_'.
 			name_end = StrChrAny(name, _T(".[")); // This also sets it up for the next iteration.
-
 			if (name_end)
 			{
 				c = *name_end; // Save this for the next iteration.
@@ -1940,7 +1732,7 @@ int Debugger::property_get_or_value(char **aArgV, int aArgCount, char *aTransact
 		// stack depth - optional, default zero
 		case 'd':
 			depth = atoi(value);
-			if (depth && (depth < 0 || depth >= mStack.Depth())) // Allow depth 0 even when stack is empty.
+			if (depth && (depth < 0 || depth >= mStack->Depth())) // Allow depth 0 even when stack is empty.
 				return DEBUGGER_E_INVALID_STACK_DEPTH;
 			break;
 		// max data size - optional
@@ -2050,7 +1842,7 @@ DEBUGGER_COMMAND(Debugger::property_set)
 		// stack depth - optional, default zero
 		case 'd':
 			depth = atoi(value);
-			if (depth && (depth < 0 || depth >= mStack.Depth())) // Allow depth 0 even when stack is empty.
+			if (depth && (depth < 0 || depth >= mStack->Depth())) // Allow depth 0 even when stack is empty.
 				return DEBUGGER_E_INVALID_STACK_DEPTH;
 			break;
 		// new base64-encoded value
@@ -2567,7 +2359,7 @@ void Debugger::Exit(ExitReasons aExitReason, char *aCommandName)
 
 int Debugger::FatalError(LPCTSTR aMessage)
 {
-	g_Debugger.Disconnect();
+	g_Debugger->Disconnect();
 
 	if (IDNO == MessageBox(g_hWnd, aMessage, g_script->mFileSpec, MB_YESNO | MB_ICONSTOP | MB_SETFOREGROUND | MB_APPLMODAL))
 	{
@@ -2577,7 +2369,7 @@ int Debugger::FatalError(LPCTSTR aMessage)
 	return DEBUGGER_E_INTERNAL_ERROR;
 }
 
-const char *Debugger::sBase64Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+thread_local const char *Debugger::sBase64Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 #define BINARY_TO_BASE64_CHAR(b) (sBase64Chars[(b) & 63])
 #define BASE64_CHAR_TO_BINARY(q) (strchr(sBase64Chars, q)-sBase64Chars)
@@ -2951,8 +2743,6 @@ void Debugger::Buffer::Clear()
 
 DbgStack::Entry *DbgStack::Push()
 {
-#ifndef _USRDLL
-	EnterCriticalSection(&g_CriticalDebugger);
 	PMYTEB curr_teb = NULL;
 	PVOID tls = NULL;
 	if (!g)
@@ -2961,29 +2751,24 @@ DbgStack::Entry *DbgStack::Push()
 		tls = curr_teb->ThreadLocalStoragePointer;
 		curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[0][6];
 	}
-#endif
 	if (mTop == mTopBound)
 		Expand();
 	if (mTop >= mBottom)
 	{
-		// Whenever this entry != mTop, Entry::line is used instead of g_Debugger.mCurrLine,
+		// Whenever this entry != mTop, Entry::line is used instead of g_Debugger->mCurrLine,
 		// which means that it needs to point to the last executed line at that depth. The
 		// following fixes a bug where the line number of this entry appears to revert to
 		// the first line of the function or sub whenever the debugger steps into another
-		// function or sub.  Entry::line is now also used by BIF_Exception even when the
+		// function or sub.  Entry::line is also used by Object::Error__New even when the
 		// debugger is disconnected, which has two consequences:
-		//  - g_script->mCurrLine must be used in place of g_Debugger.mCurrLine.
-		//  - Changing PreExecLine() to update mStack.mTop->line won't help.
+		//  - g_script->mCurrLine must be used in place of g_Debugger->mCurrLine.
+		//  - Changing PreExecLine() to update mStack->mTop->line won't help.
 		mTop->line = g_script->mCurrLine;
 		mTop->sourcefile = Line::sSourceFile;
 	}
-	mTop++;
-#ifndef _USRDLL
-	LeaveCriticalSection(&g_CriticalDebugger);
 	if (tls)
 		curr_teb->ThreadLocalStoragePointer = tls;
-#endif
-	return mTop;
+	return ++mTop;
 }
 
 void DbgStack::Push(TCHAR *aDesc)
@@ -3187,6 +2972,33 @@ void Debugger::PropertyWriter::EndProperty(DebugCookie aCookie)
 	}
 	
 	mError = mDbg.mResponseBuf.Write("</property>");
+}
+
+
+void GetScriptStack(LPTSTR aBuf, int aBufSize, DbgStack::Entry *aTop)
+{
+	aBufSize -= 12;
+	auto aBuf_orig = aBuf;
+	for (auto se = aTop ? aTop : g_Debugger->mStack->mTop - 1; se >= g_Debugger->mStack->mBottom; --se)
+	{
+		auto &line = *se->line;
+		auto line_start = aBuf;
+		if (se->type == DbgStack::SE_Thread)
+			aBuf += sntprintf(aBuf, BUF_SPACE_REMAINING, _T("> %s\r\n"), se->desc);
+		else
+		{
+			aBuf += sntprintf(aBuf, BUF_SPACE_REMAINING, _T("%s (%i) : [%s] ")
+				, Line::sSourceFile[line.mFileIndex], (int)line.mLineNumber, se->Name());
+			aBuf = line.ToText(aBuf, BUF_SPACE_REMAINING, true, 0, false, false);
+		}
+		if (BUF_SPACE_REMAINING <= 1) // In case of truncation, there should be 1 char left, since the terminator is not counted.
+		{
+			aBuf = line_start;
+			aBufSize += 12;
+			sntprintf(aBuf, BUF_SPACE_REMAINING, _T("... %i more"), int(se - g_Debugger->mStack->mBottom) + 1);
+			break;
+		}
+	}
 }
 
 

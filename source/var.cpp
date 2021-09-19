@@ -1,4 +1,4 @@
-/*
+﻿/*
 AutoHotkey
 
 Copyright 2003-2009 Chris Mallett (support@autohotkey.com)
@@ -14,16 +14,16 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 */
 
-#include "stdafx.h" // pre-compiled headers
+#include "pch.h" // pre-compiled headers
 #include "defines.h"
 #include "script_object.h"
 #include "var.h"
-#include "globaldata.h" // for g_script->
+#include "globaldata.h" // for g_script
 #include <utility>
 
 
 // Init static vars:
-TCHAR Var::sEmptyString[] = _T(""); // For explanation, see its declaration in .h file.
+thread_local TCHAR Var::sEmptyString[] = _T(""); // For explanation, see its declaration in .h file.
 
 
 ResultType Var::AssignHWND(HWND aWnd)
@@ -51,7 +51,6 @@ ResultType Var::Assign(Var &aVar)
 		return target_var.Assign(source_var.mObject);
 	}
 	// Otherwise:
-	source_var.MaybeWarnUninitialized();
 	return target_var.Assign(source_var.mCharContents, source_var._CharLength()); // Pass length to improve performance. It isn't necessary to call Contents()/Length() because they must be already up-to-date because there is no binary number to update them from (if there were, the above would have returned).  Also, caller ensured Type()==VAR_NORMAL.
 }
 
@@ -152,6 +151,16 @@ void Var::UpdateAlias(Var *aTargetVar)
 
 
 
+void Var::UpdateAlias(VarRef *aTargetVar)
+{
+	ASSERT(!IsObject());
+	SetAliasDirect(aTargetVar);
+	_SetObject(aTargetVar);
+	aTargetVar->AddRef();
+}
+
+
+
 IObject *Var::GetRef()
 {
 	auto target_var = this;
@@ -171,14 +180,8 @@ IObject *Var::GetRef()
 		return nullptr;
 	}
 	if (mType == VAR_ALIAS)
-	{
-		ref->AddRef();
-		target_var->_SetObject(ref);
-		target_var->SetAliasDirect(ref);
-	}
-	ref->AddRef();
-	_SetObject(ref);
-	SetAliasDirect(ref);
+		target_var->UpdateAlias(ref);
+	UpdateAlias(ref);
 	return ref;
 }
 
@@ -188,6 +191,8 @@ ResultType Var::MoveToNewFreeVar(Var &aFV)
 {
 	ASSERT(aFV.mType == VAR_NORMAL && mType == VAR_NORMAL);
 	ASSERT(aFV.mHowAllocated == ALLOC_MALLOC);
+	aFV.mName = mName;   // For error reporting.
+	aFV.mScope = mScope | VAR_VARREF; // Flag it as a VarRef to allow ToReturnValue to safely optimize.
 	if (mAttrib & VAR_ATTRIB_TYPES)
 	{
 		aFV.mContentsInt64 = mContentsInt64;
@@ -195,6 +200,19 @@ ResultType Var::MoveToNewFreeVar(Var &aFV)
 			| VAR_ATTRIB_CONTENTS_OUT_OF_DATE;
 		mAttrib &= ~VAR_ATTRIB_TYPES; // Mainly to remove VAR_ATTRIB_IS_OBJECT.
 	}
+#if 0
+	// The following is currently not used because:
+	//  - It causes the capacity of the variable to change (possibly reset to 0), which is bad if
+	//    VarSetStrCapacity(&v, n) was used.  GetRef() wouldn't have been called by it because of
+	//    optimization of OutputVar parameters.
+	//  - At worst, a small amount of memory per unique variable is reserved and won't be reused
+	//    from this point on, the same as if its capacity increased beyond MAX_ALLOC_SIMPLE.
+	//  - If the variable isn't empty, it's likely that this action will be repeateded each time
+	// 	  the function is called; i.e. malloc will be used by aFV.Assign() and the string will be
+	// 	  copied, when it would be more efficient to malloc at a earlier point and swap vs. copy.
+	//  - In the most common cases, GetRef() is used when capacity is 0.
+	// An alternative would be to change VarSetStrCapacity() to always GetRef(), but that would be
+	// detrimental for optimizing string concatenation, which is its recommended purpose.
 	else if (mHowAllocated == ALLOC_SIMPLE && !(mScope & (VAR_GLOBAL | VAR_LOCAL_STATIC)))
 	{
 		// Don't transfer a SimpleHeap buffer to freevars since that would cause the
@@ -207,6 +225,7 @@ ResultType Var::MoveToNewFreeVar(Var &aFV)
 		//mByteLength = 0;
 		return OK;
 	}
+#endif
 	else
 	{
 		if (!(mAttrib & VAR_ATTRIB_UNINITIALIZED))
@@ -355,7 +374,7 @@ ResultType Var::GetClipboardAll(void **aData, size_t *aDataSize)
 	if (!binary_contents)
 	{
 		g_clip->Close();
-		return g_script->RuntimeError(ERR_OUTOFMEM);
+		return MemoryError();
 	}
 
 	// Retrieve and store all the clipboard formats.  Because failures of GetClipboardData() are now
@@ -459,7 +478,7 @@ ResultType Var::SetClipboardAll(void *aData, size_t aDataSize)
 		if (   !(hglobal = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, size + (size == 0)))   )
 		{
 			g_clip->Close();
-			return g_script->RuntimeError(ERR_OUTOFMEM); // Short msg since so rare.
+			return MemoryError();
 		}
 		if (size) // i.e. Don't try to lock memory of size zero.  It's not needed.
 		{
@@ -593,8 +612,8 @@ ResultType Var::AssignString(LPCTSTR aBuf, VarSizeType aLength, bool aExactSize)
 				// In the case of mHowAllocated==ALLOC_SIMPLE, the following will allocate another block
 				// from SimpleHeap even though the var already had one. This is by design because it can
 				// happen only a limited number of times per variable. See comments further above for details.
-				if (   !(new_mem = (char *) g_SimpleHeapVar->Malloc(new_size))   )
-					return FAIL; // It already displayed the error. Leave all var members unchanged so that they're consistent with each other. Don't bother making the var blank and its length zero for reasons described higher above.
+				if (   !(new_mem = (char *) g_SimpleHeap->Malloc(new_size))   )
+					return MemoryError(); // Leave all var members unchanged so that they're consistent with each other. Don't bother making the var blank and its length zero for reasons described higher above.
 				mHowAllocated = ALLOC_SIMPLE;  // In case it was previously ALLOC_NONE. This step must be done only after the alloc succeeded.
 				break;
 			}
@@ -654,7 +673,7 @@ ResultType Var::AssignString(LPCTSTR aBuf, VarSizeType aLength, bool aExactSize)
 					*mCharContents = '\0'; // If it's sEmptyString, that's okay too because it's writable.
 				}
 				mByteLength = 0; // mAttrib was already updated higher above.
-				return g_script->ScriptError(ERR_OUTOFMEM); // since an error is most likely to occur at runtime.
+				return MemoryError(); // since an error is most likely to occur at runtime.
 			}
 
 			// Below is necessary because it might have fallen through from case ALLOC_SIMPLE.
@@ -739,6 +758,7 @@ ResultType Var::AssignBinaryNumber(__int64 aNumberAsInt64, VarAttribType aAttrib
 }
 
 
+
 ResultType Var::AssignSkipAddRef(IObject *aValueToAssign)
 {
 	if (mType == VAR_ALIAS)
@@ -762,6 +782,7 @@ ResultType Var::AssignSkipAddRef(IObject *aValueToAssign)
 }
 
 
+
 void Var::Get(ResultToken &aResultToken)
 {
 	if (mType == VAR_ALIAS)
@@ -769,6 +790,7 @@ void Var::Get(ResultToken &aResultToken)
 	ASSERT(mType == VAR_VIRTUAL);
 	mVV->Get(aResultToken, mName);
 }
+
 
 
 void Var::Free(int aWhenToFree, bool aClearAliasesAndRequireInit)
@@ -885,7 +907,6 @@ void Var::Free(int aWhenToFree, bool aClearAliasesAndRequireInit)
 		break;
 	} // switch()
 }
-
 
 
 
@@ -1199,8 +1220,8 @@ ResultType Var::ValidateName(LPCTSTR aName, int aDisplayError)
 	// such as for "and := 1" vs. "(and := 1)", though a different error message is given.
 	if (   Script::ConvertActionType(aName)
 		|| Script::ConvertWordOperator(aName, _tcslen(aName))
-		|| !_tcsicmp(aName, _T("True")) || !_tcsicmp(aName, _T("False")) || !_tcsicmp(aName, _T("NULL"))
-		|| !_tcsicmp(aName, _T("Local")) || !_tcsicmp(aName, _T("Global")) || !_tcsicmp(aName, _T("Static")))
+		|| !_tcsicmp(aName, _T("True")) || !_tcsicmp(aName, _T("False")) || !_tcsicmp(aName, _T("Null"))
+		|| !_tcsicmp(aName, _T("local")) || !_tcsicmp(aName, _T("global")) || !_tcsicmp(aName, _T("static")))
 	{
 		return DisplayNameError(_T("The following reserved word must not be used as a %s name:\n\"%-1.300s\""), aDisplayError, aName);
 	}
@@ -1226,9 +1247,12 @@ ResultType Var::AssignStringFromCodePage(LPCSTR aBuf, int aLength, UINT aCodePag
 	if (iLen > 0) {
 		if (!AssignString(NULL, iLen, true))
 			return FAIL;
-		LPWSTR aContents = Contents(TRUE, TRUE);
+		LPWSTR aContents = Contents(TRUE);
 		iLen = MultiByteToWideChar(aCodePage, 0, aBuf, aLength, (LPWSTR) aContents, iLen);
-		aContents[iLen] = 0;
+		if (aLength == -1)
+			--iLen; // Exclude the null-terminator.
+		else
+			aContents[iLen] = 0;
 		if (!iLen)
 			return FAIL;
 		SetCharLength(iLen);
@@ -1254,7 +1278,7 @@ ResultType Var::AssignStringToCodePage(LPCWSTR aBuf, int aLength, UINT aCodePage
 	if (iLen > 0) {
 		if (!SetCapacity(iLen, true))
 			return FAIL;
-		LPSTR aContents = (LPSTR) Contents(TRUE, TRUE);
+		LPSTR aContents = (LPSTR) Contents(TRUE);
 		iLen = WideCharToMultiByte(aCodePage, aFlags, aBuf, aLength, aContents, iLen, pDefChar, NULL);
 		aContents[iLen] = 0;
 		if (!iLen)
@@ -1270,20 +1294,6 @@ ResultType Var::AssignStringToCodePage(LPCWSTR aBuf, int aLength, UINT aCodePage
 
 
 
-__forceinline void Var::MaybeWarnUninitialized()
-{
-	if (IsUninitializedNormalVar())
-	{
-		// The following should not be possible; if it is, there's a bug and we want to know about it:
-		//if (mByteLength != 0)
-		//	MarkInitialized();	// "self-correct" if we catch a var that has normal content but wasn't marked initialized
-		//else
-			g_script->WarnUninitializedVar(this);
-	}
-}
-
-
-
 LPTSTR ResultToken::Malloc(LPTSTR aValue, size_t aLength)
 {
 	if (aLength == -1)
@@ -1293,4 +1303,21 @@ LPTSTR ResultToken::Malloc(LPTSTR aValue, size_t aLength)
 	symbol = SYM_STRING;
 	marker_length = aLength;
 	return tmemcpy(marker = mem_to_free, aValue, aLength + 1); // +1 to include the null-terminator.
+}
+
+
+
+ResultType Var::InitializeConstant()
+{
+	// Caller has verified !IsInitialized() && Type() == VAR_CONSTANT.
+	Var &var = *ResolveAlias();
+	ASSERT(var.mType == VAR_CONSTANT && var.IsObject() && dynamic_cast<::Object*>(var.mObject));
+	var.mAttrib &= ~VAR_ATTRIB_UNINITIALIZED; // Only make one attempt; prevents infinite recursion.
+	FuncResult result_token;
+	auto cls = (::Object*)var.mObject;
+	cls->AddRef(); // Necessary because Construct() calls Release() on failure.
+	auto result = cls->Construct(result_token, nullptr, 0);
+	if (result == OK)
+		cls->Release();
+	return result;
 }

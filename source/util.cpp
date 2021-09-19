@@ -14,12 +14,12 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 */
 
-#include "stdafx.h" // pre-compiled headers
+#include "pch.h" // pre-compiled headers
 #include <olectl.h> // for OleLoadPicture()
 #include <gdiplus.h> // Used by LoadPicture().
-#include "Shlwapi.h"
 #include "util.h"
 #include "globaldata.h"
+#include "Shlwapi.h"
 #include "LiteZip.h"
 
 int GetYDay(int aMon, int aDay, bool aIsLeapYear)
@@ -82,7 +82,8 @@ int GetISOWeekNumber(LPTSTR aBuf, int aYear, int aYDay, int aWDay)
 ResultType YYYYMMDDToFileTime(LPTSTR aYYYYMMDD, FILETIME &aFileTime)
 {
 	SYSTEMTIME st;
-	YYYYMMDDToSystemTime(aYYYYMMDD, st, false);  // "false" because it's validated below.
+	if (!YYYYMMDDToSystemTime(aYYYYMMDD, st, false))  // "false" because it's validated below.
+		return FAIL;
 	// This will return failure if aYYYYMMDD contained any invalid elements, such as an
 	// explicit zero for the day of the month.  It also reports failure if st.wYear is
 	// less than 1601, which for simplicity is enforced globally throughout the program
@@ -94,7 +95,8 @@ ResultType YYYYMMDDToFileTime(LPTSTR aYYYYMMDD, FILETIME &aFileTime)
 
 DWORD YYYYMMDDToSystemTime2(LPTSTR aYYYYMMDD, SYSTEMTIME *aSystemTime)
 // Calls YYYYMMDDToSystemTime() to fill up to two elements of the aSystemTime array.
-// Returns a GDTR bitwise combination to indicate which of the two elements, or both, are valid.
+// Returns 0 if the parameter is empty or invalid, otherwise a GDTR bitwise combination
+// to indicate which of the two elements, or both, are present.
 // Caller must ensure that aYYYYMMDD is a modifiable string since it's temporarily altered and restored here.
 {
 	DWORD gdtr = 0;
@@ -121,20 +123,22 @@ DWORD YYYYMMDDToSystemTime2(LPTSTR aYYYYMMDD, SYSTEMTIME *aSystemTime)
 	{
 		if (YYYYMMDDToSystemTime(aYYYYMMDD, aSystemTime[1], true)) // Date string is valid.
 			gdtr |= GDTR_MAX; // Indicate that maximum is present.
+		else
+			gdtr = 0; // Indicate that the value is invalid.
 	}
 	return gdtr;
 }
 
 
 
-ResultType YYYYMMDDToSystemTime(LPTSTR aYYYYMMDD, SYSTEMTIME &aSystemTime, bool aDoValidate)
+ResultType YYYYMMDDToSystemTime(LPTSTR aYYYYMMDD, SYSTEMTIME &aSystemTime, bool aValidateTimeValues)
 // Although aYYYYMMDD need not be terminated at the end of the YYYYMMDDHH24MISS string (as long as
 // the string's capacity is at least 14), it should be terminated if only the leading part
 // of the YYYYMMDDHH24MISS format is present.
-// Caller must ensure that aYYYYMMDD is non-NULL.  If aDoValidate is false, OK is always
-// returned and aSystemTime might contain invalid elements.  Otherwise, FAIL will be returned
-// if the date and time contains any invalid elements, or if the year is less than 1601
-// (Windows generally does not support earlier years).
+// Caller must ensure that aYYYYMMDD is non-NULL.  If the string's length is not an even number
+// between 4 and 14 (inclusive), FAIL is returned.  FAIL is also returned if aValidateTimeValues
+// is true and some elements of aYYYYMMDD were invalid, or if the year is less than 1601
+// (Windows generally does not support earlier years).  Otherwise OK is returned.
 {
 	// sscanf() is avoided because it adds 2 KB to the compressed EXE size.
 	TCHAR temp[16];
@@ -205,7 +209,11 @@ ResultType YYYYMMDDToSystemTime(LPTSTR aYYYYMMDD, SYSTEMTIME &aSystemTime, bool 
 		aSystemTime.wDayOfWeek = (y + y/4 - y/100 + y/400 + t[aSystemTime.wMonth-1] + aSystemTime.wDay) % 7;
 	}
 
-	if (aDoValidate)
+	// Callers who check the return value expect this to be done even when !aValidateTimeValues:
+	if (length < 4 || (length & 1) || length > 14)
+		return FAIL;
+
+	if (aValidateTimeValues)
 	{
 		FILETIME ft;
 		// This will return failure if aYYYYMMDD contained any invalid elements, such as an
@@ -684,8 +692,8 @@ LPTSTR tcscasestr(LPCTSTR phaystack, LPCTSTR pneedle)
 	// Faster looping by precalculating bl, bu, cl, cu before looping.
 	// 2004 Apr 08	Jose Da Silva, digital@joescat@com
 {
-	register const TBYTE *haystack, *needle;
-	register unsigned bl, bu, cl, cu;
+	const TBYTE *haystack, *needle;
+	unsigned bl, bu, cl, cu;
 	
 	haystack = (const TBYTE *) phaystack;
 	needle = (const TBYTE *) pneedle;
@@ -716,8 +724,8 @@ LPTSTR tcscasestr(LPCTSTR phaystack, LPCTSTR pneedle)
 		
 		for (;;)
 		{
-			register unsigned a;
-			register const TBYTE *rhaystack, *rneedle;
+			unsigned a;
+			const TBYTE *rhaystack, *rneedle;
 			do
 			{
 				a = *++haystack;
@@ -799,8 +807,8 @@ LPTSTR lstrcasestr(LPCTSTR phaystack, LPCTSTR pneedle)
 // Copyright (C) 1994,1996,1997,1998,1999,2000 Free Software Foundation, Inc.
 // See strcasestr() for more comments.
 {
-	register const TBYTE *haystack, *needle;
-	register unsigned bl, bu, cl, cu;
+	const TBYTE *haystack, *needle;
+	unsigned bl, bu, cl, cu;
 	
 	haystack = (const TBYTE *) phaystack;
 	needle = (const TBYTE *) pneedle;
@@ -829,8 +837,8 @@ LPTSTR lstrcasestr(LPCTSTR phaystack, LPCTSTR pneedle)
 		
 		for (;;)
 		{
-			register unsigned a;
-			register const TBYTE *rhaystack, *rneedle;
+			unsigned a;
+			const TBYTE *rhaystack, *rneedle;
 			do
 			{
 				a = *++haystack;
@@ -2051,8 +2059,8 @@ HBITMAP LoadPicture(LPTSTR aFilespec, int aWidth, int aHeight, int &aImageType, 
 	//	aIconNumber = 0; // Use the default behavior, which is "load icon or bitmap, whichever is most appropriate".
 
 	bool script_passed_handle = false, script_owns_handle = false;
-	if (   !_tcsnicmp(aFilespec, _T("hicon:"), 6)
-		|| !_tcsnicmp(aFilespec, _T("hbitmap:"), 8)   )
+	if (   !_tcsnicmp(aFilespec, _T("HICON:"), 6)
+		|| !_tcsnicmp(aFilespec, _T("HBITMAP:"), 8)   )
 	{
 		if (aFilespec[5] == ':') // hicon:
 		{
@@ -2276,7 +2284,7 @@ HBITMAP LoadPicture(LPTSTR aFilespec, int aWidth, int aHeight, int &aImageType, 
 	}
 
 	IPicture *pic = NULL; // Also used to detect whether IPic method was used to load the image.
-	
+
 	if (!hbitmap) // Above hasn't loaded the image yet, so use the fall-back methods.
 	{
 		// At this point, regardless of the image type being loaded (even an icon), it will
@@ -2335,7 +2343,7 @@ HBITMAP LoadPicture(LPTSTR aFilespec, int aWidth, int aHeight, int &aImageType, 
 		else // Using old picture loading method.
 		{
 			// Based on code sample at http://www.codeguru.com/Cpp/G-M/bitmap/article.php/c4935/
-			HANDLE hfile = CreateFile(aFilespec, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
+			HANDLE hfile = CreateFile(aFilespec, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
 			if (hfile == INVALID_HANDLE_VALUE)
 				return NULL;
 			DWORD size = GetFileSize(hfile, NULL);
@@ -2529,7 +2537,7 @@ BOOL CALLBACK ResourceIndexToIdEnumProc(HMODULE hModule, LPCTSTR lpszType, LPTST
 	return TRUE; // Continue
 }
 
-static TCHAR RESOURCE_ID_NOT_FOUND[] = {0};
+thread_local static TCHAR RESOURCE_ID_NOT_FOUND[] = {0};
 
 // L17: Find ID of resource from one-based index. i.e. IconNumber -> resource ID.
 // v1.1.22.05: Return LPTSTR since some (very few) icons have a string ID.
@@ -3104,6 +3112,7 @@ LPTSTR InStrAny(LPTSTR aStr, LPTSTR aNeedle[], int aNeedleCount, size_t &aFoundL
 	return NULL;
 }
 
+
 short IsDefaultType(LPTSTR aTypeDef){
 	static LPTSTR sTypeDef[8] = {_T(" CHAR UCHAR BOOLEAN BYTE INT8 ")
 #ifndef _WIN64
@@ -3133,395 +3142,46 @@ short IsDefaultType(LPTSTR aTypeDef){
 	return NULL;
 }
 
-ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
-{
-	LPTSTR aFuncName = omit_leading_whitespace(parameter);
-	// backup current function
-	// Func currentfunc = **g_script->mFunc;
-	if (!(parameter = _tcschr(parameter, ',')) || !*parameter)
-		return g_script->ScriptError(ERR_PARAM2_REQUIRED, aBuf);
-	else
-		parameter++;
-	if (_tcschr(aFuncName, ','))
-		*(_tcschr(aFuncName, ',')) = '\0';
-	ltrim(parameter);
-	int insert_pos = 0;
-	if (!*aFuncName)
-		return g_script->ScriptError(_T("Empty function name, make sure to use space after #DllImport not ','."), parameter); // Seems more descriptive than "Function already defined."
-	UserFunc *found_func = (UserFunc *)g_script->FindFunc(aFuncName, _tcslen(aFuncName), &insert_pos);
-	if (found_func)
-		return g_script->ScriptError(_T("Duplicate function definition."), aFuncName); // Seems more descriptive than "Function already defined."
-	else
-		if (!(found_func = g_script->AddFunc(aFuncName, _tcslen(aFuncName), insert_pos)))
-			return FAIL; // It already displayed the error.
-	void *function = NULL; // Will hold the address of the function to be called.
 
-	found_func->mBIF = (BuiltInFunctionType)BIF_DllImport;
-	//found_func->mIsBuiltIn = true;
-	found_func->mMinParams = 0;
-
-	TCHAR buf[MAX_PATH];
-	ResultToken aResultToken;
-	size_t space_remaining = LINE_SIZE - (parameter - aBuf);
-	if (tcscasestr(parameter, _T("%A_ScriptDir%")))
-	{
-		BIV_ScriptDir(aResultToken, _T("A_ScriptDir"));
-		StrReplace(parameter, _T("%A_ScriptDir%"), aResultToken.buf, SCS_INSENSITIVE, 1, space_remaining);
-		aResultToken.Free();
-	}
-	if (tcscasestr(parameter, _T("%A_AppData%"))) // v1.0.45.04: This and the next were requested by Tekl to make it easier to customize scripts on a per-user basis.
-	{
-		BIV_SpecialFolderPath(aResultToken, _T("A_AppData"));
-		StrReplace(parameter, _T("%A_AppData%"), aResultToken.buf, SCS_INSENSITIVE, 1, space_remaining);
-		aResultToken.Free();
-	}
-	if (tcscasestr(parameter, _T("%A_AppDataCommon%"))) // v1.0.45.04.
-	{
-		BIV_SpecialFolderPath(aResultToken, _T("A_AppDataCommon"));
-		StrReplace(parameter, _T("%A_AppDataCommon%"), aResultToken.buf, SCS_INSENSITIVE, 1, space_remaining);
-		aResultToken.Free();
-	}
-	if (tcscasestr(parameter, _T("%A_AhkPath%"))) // v1.0.45.04.
-	{
-		BIV_AhkPath(aResultToken, _T("A_AhkPath"));
-		StrReplace(parameter, _T("%A_AhkPath%"), aResultToken.buf, SCS_INSENSITIVE, 1, space_remaining);
-		aResultToken.Free();
-	}
-	if (tcscasestr(parameter, _T("%A_AhkDir%"))) // v1.0.45.04.
-	{
-		BIV_AhkDir(aResultToken, _T("A_AhkDir"));
-		StrReplace(parameter, _T("%A_AhkDir%"), aResultToken.buf, SCS_INSENSITIVE, 1, space_remaining);
-		aResultToken.Free();
-	}
-	if (tcscasestr(parameter, _T("%A_DllDir%"))) // v1.0.45.04.
-	{
-		BIV_DllDir(aResultToken, _T("A_DllDir"));
-		StrReplace(parameter, _T("%A_DllDir%"), aResultToken.buf, SCS_INSENSITIVE, 1, space_remaining);
-		aResultToken.Free();
-	}
-	if (tcscasestr(parameter, _T("%A_DllPath%"))) // v1.0.45.04.
-	{
-		BIV_DllPath(aResultToken, _T("A_DllPath"));
-		StrReplace(parameter, _T("%A_DllPath%"), aResultToken.buf, SCS_INSENSITIVE, 1, space_remaining);
-		aResultToken.Free();
-	}
-	if (tcscasestr(parameter, _T("%A_ThreadID%"))) // v1.0.45.04.
-	{
-		BIV_ThreadID(aResultToken, _T("A_ThreadID"));
-		StrReplace(parameter, _T("%A_ThreadID%"), aResultToken.buf, SCS_INSENSITIVE, 1, space_remaining);
-		aResultToken.Free();
-	}
-	if (tcscasestr(parameter, _T("%A_PtrSize%"))) // v1.0.45.04.
-	{
-		BIV_ThreadID(aResultToken, _T("A_PtrSize"));
-		StrReplace(parameter, _T("%A_PtrSize%"), aResultToken.buf, SCS_INSENSITIVE, 1, space_remaining);
-		aResultToken.Free();
-	}
-	if (_tcschr(parameter, '%'))
-	{
-		return g_script->ScriptError(_T("Reference not allowed here, use & where possible. Only %A_AhkPath% %A_AhkDir% %A_DllPath% %A_DllDir% %A_ScriptDir% %A_AppData[Common]% %A_ThreadID% %A_PtrSize% can be used here."), parameter);
-	}
-	// terminate dll\function name, find it and jump to next parameter
-	if (_tcschr(parameter, ','))
-		*(_tcschr(parameter, ',')) = '\0';
-	if (RegExMatch(parameter, _T("^\\s*[A-Fa-f0-9]+(:[A-Fa-f0-9]+)?\\s*$")))
-	{
-		TCHAR hex[4] = { '0', 'x' };
-#ifdef _WIN64
-		if (_tcschr(parameter, ':'))
-			parameter = _tcschr(parameter, ':') + 1;
-#endif
-		int end;
-		if (_tcschr(parameter, ':'))
-			end = (int)(_tcschr(parameter, ':') - parameter);
-		else
-			end = (int)_tcslen(parameter);
-		if (!(function = (void*)g_SimpleHeap->Malloc(end / 2)))
-			return g_script->ScriptError(ERR_OUTOFMEM, parameter);
-		if (!VirtualAlloc(function, end / 2, MEM_COMMIT, PAGE_EXECUTE_READWRITE))
-			return g_script->ScriptError(_T("Could not commit memory for DllImport."), parameter);
-		for (int i = 0; i < end; i += 2)
-		{
-			_tcsncpy(&hex[2], parameter + i, 2);
-			*((char*)function + i / 2) = (char)_tcstol(hex, NULL, 16);
-		}
-	} 
-	else
-		function = (void*)ATOI64(parameter);
-	if (!function)
-	{
-		LPTSTR dll_name = _tcsrchr(parameter, '\\');
-		if (dll_name)
-		{
-			*dll_name = '\0';
-			if (!GetModuleHandle(parameter))
-				LoadLibrary(parameter);
-			*dll_name = '\\';
-		}
-		function = (void*)GetDllProcAddress(parameter);
-	}
-	if (!function)
-		return g_script->ScriptError(ERR_NONEXISTENT_FUNCTION, parameter);
-	parameter = parameter + _tcslen(parameter) + 1;
-
-	LPTSTR parm = g_SimpleHeap->Malloc(parameter);
-	bool has_return = false;
-	int aParamCount = !*parm||ATOI(parm) ? 0 : 1;
-	if (*parm)
-		for (; _tcschr(parameter, ','); aParamCount++)
-		{
-		if (parameter = _tcschr(parameter, ','))
-			parameter++;
-		}
-	if (*parm && aParamCount < 1)
-		return g_script->ScriptError(ERR_PARAM3_REQUIRED, aBuf);
-
-	// Determine the type of return value.
-	DYNAPARM *return_attrib = (DYNAPARM*)g_SimpleHeap->Malloc(sizeof(DYNAPARM));
-	if (!return_attrib)
-		return g_script->ScriptError(ERR_OUTOFMEM);
-	g_memset(return_attrib, 0, sizeof(DYNAPARM)); // Init all to default in case ConvertDllArgType() isn't called below. This struct holds the type and other attributes of the function's return value.
-#ifdef WIN32_PLATFORM
-	int dll_call_mode = DC_CALL_STD; // Set default.  Can be overridden to DC_CALL_CDECL and flags can be OR'd into it.
-#endif
-	if (!(aParamCount % 2)) // Even number of parameters indicates the return type has been omitted, so assume BOOL/INT.
-		return_attrib->type = DLL_ARG_INT;
-	else
-	{
-		// Check validity of this arg's return type:
-		LPTSTR return_type_string;
-		return_type_string = omit_leading_whitespace(parameter);
-
-		// 64-bit note: The calling convention detection code is preserved here for script compatibility.
-
-		if (!_tcsnicmp(return_type_string, _T("CDecl"), 5)) // Alternate calling convention.
-		{
-#ifdef WIN32_PLATFORM
-			dll_call_mode = DC_CALL_CDECL;
-#endif
-			return_type_string = omit_leading_whitespace(return_type_string + 5);
-			if (!*return_type_string)
-			{	// Take a shortcut since we know this empty string will be used as "Int":
-				return_attrib->type = DLL_ARG_INT;
-				goto has_valid_return_type;
-			}
-		}
-
-		ConvertDllArgType(return_type_string, *return_attrib);
-		if (return_attrib->type == DLL_ARG_INVALID)
-			return CONDITION_FALSE;
-		has_return = true;
-
-	has_valid_return_type:
-		aParamCount--;
-#ifdef WIN32_PLATFORM
-		if (!return_attrib->passed_by_address) // i.e. the special return flags below are not needed when an address is being returned.
-		{
-			if (return_attrib->type == DLL_ARG_DOUBLE)
-				dll_call_mode |= DC_RETVAL_MATH8;
-			else if (return_attrib->type == DLL_ARG_FLOAT)
-				dll_call_mode |= DC_RETVAL_MATH4;
-		}
-#endif
-	}
-
-	// Using stack memory, create an array of dll args large enough to hold the actual number of args present.
-	int arg_count = aParamCount / 2; // Might provide one extra due to first/last params, which is inconsequential.
-	DYNAPARM *dyna_param_def = arg_count ? (DYNAPARM *)g_SimpleHeap->Malloc(arg_count * sizeof(DYNAPARM)) : NULL;
-	DYNAPARM *dyna_param = arg_count ? (DYNAPARM *)g_SimpleHeap->Malloc(arg_count * sizeof(DYNAPARM)) : NULL;
-	if (arg_count && (!dyna_param_def || !dyna_param))
-		return g_script->ScriptError(ERR_OUTOFMEM);
-	// Above: _alloca() has been checked for code-bloat and it doesn't appear to be an issue.
-	// Above: Fix for v1.0.36.07: According to MSDN, on failure, this implementation of _alloca() generates a
-	// stack overflow exception rather than returning a NULL value.  Therefore, NULL is no longer checked,
-	// nor is an exception block used since stack overflow in this case should be exceptionally rare (if it
-	// does happen, it would probably mean the script or the program has a design flaw somewhere, such as
-	// infinite recursion).
-
-	LPTSTR arg_type_string;
-	int i = arg_count * sizeof(void *);
-	// for Unicode <-> ANSI charset conversion
-#ifdef UNICODE
-	CStringA **pStr = (CStringA **)
-#else
-	CStringW **pStr = (CStringW **)
-#endif
-		g_SimpleHeap->Malloc(i); // _alloca vs malloc can make a significant difference to performance in some cases.
-	if (i && !pStr)
-		return g_script->ScriptError(ERR_OUTOFMEM);
-	g_memset(pStr, 0, i);
-
-	// Above has already ensured that after the first parameter, there are either zero additional parameters
-	// or an even number of them.  In other words, each arg type will have an arg value to go with it.
-	// It has also verified that the dyna_param array is large enough to hold all of the args.
-	LPTSTR this_param;
-	for (arg_count = 0, i = 1; i < aParamCount; ++arg_count, i += 2)  // Same loop as used later below, so maintain them together.
-	{
-		this_param = _tcschr(parm, ',');
-		*this_param = '\0';
-		this_param++;
-		arg_type_string = parm; // It will be detected as invalid below.
-
-		//ExprTokenType &this_param = *aParam[i + 1];         // Resolved for performance and convenience.
-		DYNAPARM &this_dyna_param = dyna_param_def[arg_count];  //
-		
-		// Store the each arg into a dyna_param struct, using its arg type to determine how.
-		ConvertDllArgType(arg_type_string, this_dyna_param);
-
-		switch (this_dyna_param.type)
-		{
-		case DLL_ARG_STR:
-			if (ATOI64(this_param))
-			{
-				// HotKeyIt - Allow PURE_INTEGER = Pointers (also used in functions like FindResource >> MAKEINTRESOURCE
-#ifdef _WIN64
-				this_dyna_param.type = DLL_ARG_INT64; // Ptr vs IntPtr to simplify recognition of the pointer suffix, to avoid any possible confusion with IntP, and because it is easier to type.
-#else
-				this_dyna_param.type = DLL_ARG_INT;
-#endif
-				this_dyna_param.value_int64 = ATOI64(this_param);
-				if (this_dyna_param.type != DLL_ARG_INT64) // Shift the 32-bit value into the high-order DWORD of the 64-bit value for later use by DynaCall().
-					this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
-			}
-			// Otherwise, it's a supported type of string.
-			this_dyna_param.ptr = this_param; // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
-
-			// NOTES ABOUT THE ABOVE:
-			// UPDATE: The v1.0.44.14 item below doesn't work in release mode, only debug mode (turning off
-			// "string pooling" doesn't help either).  So it's commented out until a way is found
-			// to pass the address of a read-only empty string (if such a thing is possible in
-			// release mode).  Such a string should have the following properties:
-			// 1) The first byte at its address should be '\0' so that functions can read it
-			//    and recognize it as a valid empty string.
-			// 2) The memory address should be readable but not writable: it should throw an
-			//    access violation if the function tries to write to it (like "" does in debug mode).
-			// SO INSTEAD of the following, DllCall() now checks further below for whether sEmptyString
-			// has been overwritten/trashed by the call, and if so displays a warning dialog.
-			// See note above about this: v1.0.44.14: If a variable is being passed that has no capacity, pass a
-			// read-only memory area instead of a writable empty string. There are two big benefits to this:
-			// 1) It forces an immediate exception (catchable by DllCall's exception handler) so
-			//    that the program doesn't crash from memory corruption later on.
-			// 2) It avoids corrupting the program's static memory area (because sEmptyString
-			//    resides there), which can save many hours of debugging for users when the program
-			//    crashes on some seemingly unrelated line.
-			// Of course, it's not a complete solution because it doesn't stop a script from
-			// passing a variable whose capacity is non-zero yet too small to handle what the
-			// function will write to it.  But it's a far cry better than nothing because it's
-			// common for a script to forget to call VarSetCapacity before passing a buffer to some
-			// function that writes a string to it.
-			//if (this_dyna_param.str == Var::sEmptyString) // To improve performance, compare directly to Var::sEmptyString rather than calling Capacity().
-			//	this_dyna_param.str = _T(""); // Make it read-only to force an exception.  See comments above.
-			break;
-		case DLL_ARG_xSTR:
-			// See the section above for comments.
-			if (ATOI64(this_param))
-			{
-#ifdef _WIN64
-				this_dyna_param.type = DLL_ARG_INT64; // Ptr vs IntPtr to simplify recognition of the pointer suffix, to avoid any possible confusion with IntP, and because it is easier to type.
-#else
-				this_dyna_param.type = DLL_ARG_INT;
-#endif
-				this_dyna_param.value_int64 = ATOI64(this_param);
-				if (this_dyna_param.type != DLL_ARG_INT64) // Shift the 32-bit value into the high-order DWORD of the 64-bit value for later use by DynaCall().
-					this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
-			}
-			// String needing translation: ASTR on Unicode build, WSTR on ANSI build.
-			if ((parm = _tcschr(this_param, ',')))
-				*parm = '\0';
-			pStr[arg_count] = new UorA(CStringCharFromWChar, CStringWCharFromChar)(this_param);
-			if (parm)
-				*parm = ',';
-			this_dyna_param.ptr = pStr[arg_count]->GetBuffer();
-			break;
-
-		case DLL_ARG_DOUBLE:
-		case DLL_ARG_FLOAT:
-			// This currently doesn't validate that this_dyna_param.is_unsigned==false, since it seems
-			// too rare and mostly harmless to worry about something like "Ufloat" having been specified.
-			this_dyna_param.value_double = ATOF(this_param);
-			if (this_dyna_param.type == DLL_ARG_FLOAT)
-				this_dyna_param.value_float = (float)this_dyna_param.value_double;
-			break;
-
-		case DLL_ARG_INVALID:
-			return CONDITION_FALSE;
-
-		default: // Namely:
-			//case DLL_ARG_INT:
-			//case DLL_ARG_SHORT:
-			//case DLL_ARG_CHAR:
-			//case DLL_ARG_INT64:
-			if (this_dyna_param.is_unsigned && this_dyna_param.type == DLL_ARG_INT64 && !ATOI64(this_param))
-				// The above and below also apply to BIF_NumPut(), so maintain them together.
-				// !IS_NUMERIC() is checked because such tokens are already signed values, so should be
-				// written out as signed so that whoever uses them can interpret negatives as large
-				// unsigned values.
-				// Support for unsigned values that are 32 bits wide or less is done via ATOI64() since
-				// it should be able to handle both signed and unsigned values.  However, unsigned 64-bit
-				// values probably require ATOU64(), which will prevent something like -1 from being seen
-				// as the largest unsigned 64-bit int; but more importantly there are some other issues
-				// with unsigned 64-bit numbers: The script internals use 64-bit signed values everywhere,
-				// so unsigned values can only be partially supported for incoming parameters, but probably
-				// not for outgoing parameters (values the function changed) or the return value.  Those
-				// should probably be written back out to the script as negatives so that other parts of
-				// the script, such as expressions, can see them as signed values.  In other words, if the
-				// script somehow gets a 64-bit unsigned value into a variable, and that value is larger
-				// that LLONG_MAX (i.e. too large for ATOI64 to handle), ATOU64() will be able to resolve
-				// it, but any output parameter should be written back out as a negative if it exceeds
-				// LLONG_MAX (return values can be written out as unsigned since the script can specify
-				// signed to avoid this, since they don't need the incoming detection for ATOU()).
-				this_dyna_param.value_int64 = (__int64)ATOU64(this_param); // Cast should not prevent called function from seeing it as an undamaged unsigned number.
-			else
-				this_dyna_param.value_int64 = ATOI64(this_param);
-
-			// Values less than or equal to 32-bits wide always get copied into a single 32-bit value
-			// because they should be right justified within it for insertion onto the call stack.
-			if (this_dyna_param.type != DLL_ARG_INT64) // Shift the 32-bit value into the high-order DWORD of the 64-bit value for later use by DynaCall().
-				this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
-		} // switch (this_dyna_param.type)
-		if ((parm = _tcschr(this_param, ',')))
-			*parm++ = '\0';
-	} // for() each arg.
-	if (has_return && aParamCount)
-		*(this_param) = '\0';
-
-	found_func->mClass = (Object*)function;
-	found_func->mParamCount = arg_count;
-	found_func->mDownVar = (Var**)return_attrib;
-	found_func->mUpVar = (Var**)pStr;
-	found_func->mOuterFunc = (UserFunc*)dyna_param_def;
-	found_func->mParam = (FuncParam*)dyna_param;
-#ifdef WIN32_PLATFORM
-	found_func->mDownVarCount = dll_call_mode;
-#endif
-	return CONDITION_TRUE;
-}
-
-DWORD CryptAES(LPVOID lp, DWORD sz, TCHAR *pwd[], bool aEncrypt, DWORD aSID){
+DWORD CryptAES(LPVOID lp, DWORD sz, TCHAR* pwd[], bool aEncrypt, DWORD aSID) {
 	HCRYPTPROV phProv;
 	HCRYPTHASH phHash;
 	HCRYPTKEY phKey;
 	TCHAR pw[1024] = { 0 };
-	if (!(CryptAcquireContext(&phProv, NULL, NULL, PROV_RSA_AES, CRYPT_VERIFYCONTEXT))
-		|| !(CryptCreateHash(phProv, CALG_SHA1, 0, 0, &phHash)))
+	if (pwd) {
+		if (pwd == g_default_pwd) {
+			if (g_crypt_code[0] != *(PULONGLONG)CryptHashData || g_crypt_code[1] != *(PULONGLONG)CryptDeriveKey ||
+				g_crypt_code[2] != *(PULONGLONG)CryptDestroyHash || g_crypt_code[3] != *(PULONGLONG)CryptEncrypt ||
+				g_crypt_code[4] != *(PULONGLONG)CryptDecrypt || g_crypt_code[5] != *(PULONGLONG)CryptDestroyKey)
+				return 0;
+			for (unsigned int i = 0; i < 10; i++)
+				pw[i] = _T("A\000\000\000\000u\000\000\000\000t\000\000\000\000o\000\000\000\000H\000\000\000\000o\000\000\000\000t\000\000\000\000k\000\000\000\000e\000\000\000\000y\000\000\000\000")[i * 5];
+		}
+		else
+			for (unsigned int i = 0; pwd[i]; i++)
+				pw[i] = *pwd[i];
+	}
+	if (!CryptAcquireContext(&phProv, NULL, NULL, PROV_RSA_AES, CRYPT_VERIFYCONTEXT))
 		return 0;
-	if (pwd && pwd[0])
-		for (unsigned int i = 0; pwd[i]; i++)
-			pw[i] = pwd == g_default_pwd ? (TCHAR) _T("A\000\000\000\000u\000\000\000\000t\000\000\000\000o\000\000\000\000H\000\000\000\000o\000\000\000\000t\000\000\000\000k\000\000\000\000e\000\000\000\000y\000\000\000\000")[i*5] : (TCHAR)*pwd[i];
-	if (!(CryptHashData(phHash, (BYTE*)pw, (DWORD)_tcslen(pw) * sizeof(TCHAR), 0)))
-	{
+	if (!CryptCreateHash(phProv, CALG_SHA1, 0, 0, &phHash)) {
+		CryptReleaseContext(phProv, 0);
+		return 0;
+	}
+	if (!(CryptHashData(phHash, (BYTE*)pw, (DWORD)_tcslen(pw) * sizeof(TCHAR), 0))) {
 		g_memset(pw, 0, 1024 * sizeof(TCHAR));
+		CryptDestroyHash(phHash), CryptReleaseContext(phProv, 0);
 		return 0;
 	}
 	g_memset(pw, 0, 1024 * sizeof(TCHAR));
-	if (!(CryptDeriveKey(phProv, aSID == 128 ? CALG_AES_128 : aSID == 192 ? CALG_AES_192 : CALG_AES_256, phHash, aSID << 16, &phKey))
-		|| !(CryptDestroyHash(phHash)))
+	if (!(CryptDeriveKey(phProv, aSID == 128 ? CALG_AES_128 : aSID == 192 ? CALG_AES_192 : CALG_AES_256, phHash, aSID << 16, &phKey))) {
+		CryptDestroyHash(phHash), CryptReleaseContext(phProv, 0);
 		return 0;
+	}
 	if (aEncrypt)
-		g_CryptEncrypt(phKey, 0, 1, 0, (BYTE*)lp, &sz, sz + 16);
+		CryptEncrypt(phKey, 0, 1, 0, (BYTE*)lp, &sz, sz + 16);
 	else
-		g_CryptDecrypt(phKey, 0, 1, 0, (BYTE*)lp, &sz);
-	CryptDestroyKey(phKey), CryptReleaseContext(phProv, 0);
+		CryptDecrypt(phKey, 0, 1, 0, (BYTE*)lp, &sz);
+	CryptDestroyKey(phKey), CryptDestroyHash(phHash), CryptReleaseContext(phProv, 0);
 	return sz;
 }
 
@@ -3544,7 +3204,7 @@ DWORD CompressBuffer(BYTE *aBuffer, LPVOID &aDataBuf, DWORD sz, TCHAR *pwd[]) //
 		aBufferMem = aBuffer;
 	}
 	CryptBinaryToStringA(aBufferMem, (DWORD)aSize, 0x1, NULL, &aSizeEncoded);
-	LPTSTR aDataCompressed = (LPTSTR)malloc(aSizeEncoded + 16);
+	LPTSTR aDataCompressed = (LPTSTR)malloc(aSizeEncoded + 17);
 	CryptBinaryToStringA(aBufferMem, (DWORD)aSize, CRYPT_STRING_BASE64, (LPSTR)aDataCompressed, &aSizeEncoded);
 	LPVOID aBufferPtr;
 	if (pwd && pwd[0])
@@ -3563,6 +3223,8 @@ DWORD CompressBuffer(BYTE *aBuffer, LPVOID &aDataBuf, DWORD sz, TCHAR *pwd[]) //
 		aSizeEncoded = 0;
 	}
 	UINT hdr[5] = { 0x4034b50, 0, (DWORD)aSize, sz, aSizeEncoded };
+	if (!aBufferPtr)
+		return 0;
 	HashData((LPBYTE)aBufferPtr, aSizeEncoded ? aSizeEncoded : (DWORD)aSize, (LPBYTE)&hdr[1], 4);
 	aDataBuf = (LPTSTR)malloc((aSizeEncoded ? aSizeEncoded : (DWORD)aSize) + sizeof(hdr));
 	memcpy(aDataBuf, hdr, sizeof(hdr));
@@ -3602,7 +3264,7 @@ DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf,DWORD sz, TCHAR *pwd[]) //
 				memcpy(aDataEncryptedString, (LPBYTE)aBuffer + hdrsz, aSizeEncrypted);
 				CryptAES(aDataEncryptedString, aSizeEncrypted, pwd, false);
 				aDataEncrypted = (BYTE*)malloc(aSizeDataEncrypted);
-				CryptStringToBinaryA(aDataEncryptedString, NULL, CRYPT_STRING_BASE64, aDataEncrypted, &aSizeEncrypted, NULL, NULL);
+				g_CS2BA(aDataEncryptedString, NULL, CRYPT_STRING_BASE64, aDataEncrypted, &aSizeEncrypted, NULL, NULL);
 				free(aDataEncryptedString);
 				if (aSizeDeCompressed == aSizeCompressed)
 				{
@@ -3649,27 +3311,22 @@ DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf,DWORD sz, TCHAR *pwd[]) //
 }
 
 int FTOA(double aValue, LPTSTR aBuf, int aBufSize)
-// Converts aValue to a string while trying to ensure that conversion back to double will
-// produce the same value.  Trailing 0s after the decimal point are stripped for brevity, when not printed in scientific notation.
-// Numbers printed in scientific notation may not contain a decimal point.
-// Caller must ensure there is sufficient buffer size to avoid truncating the output.
 {
-	int result = sntprintf(aBuf, aBufSize, _T("%.17g"), aValue);
-	
-	// the 'g' specifier might cause the result to lack a decimal point. 
-	// If the number is not written in scientific notation, and lacks a decimal point,
-	// add ".0" to make the string look like a float.
-	size_t search_result = _tcscspn(aBuf, _T(".e")); 
-	if (search_result == result			// if true, no decimal point, '.', or 'e' was found, add ".0",
-		&& result + 3 <= aBufSize		// but only if the buffer has room for two more characters and the null terminator,
-		&& isdigit(aBuf[result - 1]))	// and the number isn't some variation of inf or NaN.
-	{
-		aBuf[result] = '.';				// overwrites the current null terminator.
-		aBuf[result+1] = '0';
-		aBuf[result+2] = '\0';
-		result += 2;					// the result is the number of characters written, excluding the terminator.
-	}
-	return result;
+	static double_conversion::DoubleToStringConverter converter(7, "Infinity", "NaN", 'e', -6, 17, 6, 0);
+#ifdef UNICODE
+	char buf[MAX_NUMBER_LENGTH];
+	int len = -1;
+	double_conversion::StringBuilder sb(buf, MAX_NUMBER_LENGTH);
+	converter.ToShortest(aValue, &sb);
+	sb.Finalize();
+	for (auto c : buf) if (!(aBuf[++len] = c)) break;
+	return len;
+#else
+	double_conversion::StringBuilder sb(aBuf, aBufSize);
+	converter.ToShortest(aValue, &sb);
+	sb.Finalize();
+	return strlen(aBuf);
+#endif // UNICODE
 }
 
 
@@ -3725,43 +3382,16 @@ int CompareVersion(LPCTSTR a, LPCTSTR b)
 	return 0;
 }
 
-VOID CALLBACK EnableHooksOnException(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime)
+
+
+// Fills a buffer with pseudo-random numbers.
+BOOLEAN __stdcall GenRandom(PVOID RandomBuffer, ULONG RandomBufferLength)
+// Don't change the function signature without also changing the type-cast below.
 {
-	AddRemoveHooks(g_ExceptionHooksToEnable);
-	KillTimer(hwnd, idEvent);
+	static auto *RtlGenRandom = (decltype(&GenRandom)) GetProcAddress(GetModuleHandle(_T("Advapi32")), "SystemFunction036");
+	return RtlGenRandom && RtlGenRandom(RandomBuffer, RandomBufferLength);
 }
 
-LONG WINAPI DisableHooksOnException(PEXCEPTION_POINTERS pExceptionPtrs)
-{
-	if (pExceptionPtrs->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION)
-	{
-		if (!g_ExceptionWarnContinuable && pExceptionPtrs->ExceptionRecord->ExceptionFlags == 0) // CONTINUABLE EXCEPTION
-			return EXCEPTION_ACCESS_VIOLATION;
-		if (g_ThreadID == GetCurrentThreadId())
-		{	// it is not our main process display error and exit current thread 
-			g_ExceptionHooksToEnable = GetActiveHooks();
-			AddRemoveHooks(0); // Disable all hooks to avoid system/mouse freeze
-			TCHAR aException[sizeof(TCHAR) * 3 * MAX_PATH];
-			if (g->ExcptDeref && *g->ExcptDeref->marker)
-				_stprintf(aException, _T("Error: %s EXCEPTION_ACCESS_VIOLATION\n\nMouse and Keyboard hooks have been disabled.\n\n  -  Press yes to exit thread and continue execution.\n  -  Press no to continue thread (debug).\n  -  Press cancel to exit application.\n\nException was caused in thread id: %d\nLine: %d\nSpecifically: %.260s\nLineFile: %.260s\nLine first arg: %.260s"), pExceptionPtrs->ExceptionRecord->ExceptionFlags == EXCEPTION_NONCONTINUABLE ? _T("NONCONTINUABLE") : _T("CONTINUABLE"), g_ThreadID, g_script->mCurrLine->mLineNumber, g->ExcptDeref->marker, Line::sSourceFile[g_script->mCurrLine->mFileIndex], g_script->mCurrLine->mArgc ? g_script->mCurrLine->mArg->text : _T(""));
-			else
-				_stprintf(aException, _T("Error: %s EXCEPTION_ACCESS_VIOLATION\n\nMouse and Keyboard hooks have been disabled.\n\n  -  Press yes to exit thread and continue execution.\n  -  Press no to continue thread (debug).\n  -  Press cancel to exit application.\n\nException was caused in thread id: %d\nLine: %d\nLineFile: %.260s\nLine first arg: %.260s"), pExceptionPtrs->ExceptionRecord->ExceptionFlags == EXCEPTION_NONCONTINUABLE ? _T("NONCONTINUABLE") : _T("CONTINUABLE"), g_ThreadID, g_script->mCurrLine->mLineNumber, Line::sSourceFile[g_script->mCurrLine->mFileIndex], g_script->mCurrLine->mArgc ? g_script->mCurrLine->mArg->text : _T(""));
-			int result = MessageBox(NULL, aException, T_AHK_NAME, MB_ICONERROR | MB_YESNOCANCEL | MB_DEFBUTTON3 | MB_TOPMOST);
-			if (result == IDNO)
-			{
-				if (g_ExceptionHooksToEnable)
-					SetTimer(NULL, 0, 1000, EnableHooksOnException);
-				return EXCEPTION_ACCESS_VIOLATION;
-			}
-			RemoveVectoredExceptionHandler(g_ExceptionHandler);
-			if (result == IDCANCEL)
-				ExitProcess(EXCEPTION_ACCESS_VIOLATION);
-			ExitThread(EXCEPTION_ACCESS_VIOLATION);
-		}
-
-	}
-	return EXCEPTION_CONTINUE_SEARCH;
-}
 
 
 #if defined(_MSC_VER) && defined(_DEBUG)

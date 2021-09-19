@@ -1,4 +1,4 @@
-CreateScript(script,pw:=""){
+CreateScript(script, path:="",pw:=""){
   static mScript:=""
   local Data2:=aScript:=""
   WorkingDir:=A_WorkingDir
@@ -16,7 +16,7 @@ CreateScript(script,pw:=""){
         ,pData := LockResource(hresdata),(Data2:=UnZipRawMemory(pData,DataSize,pw))?pData:=Data2.Ptr:""
         If (DataSize){
           mScript := StrReplace(StrReplace(StrReplace(StrReplace(StrGet(pData,"UTF-8"),"`n","`r`n"),"`r`r","`r"),"`r`r","`r"),"`n`n","`n")
-          line:=BufferAlloc(16384*2)
+          line:=Buffer(16384*2)
           Loop Parse, mScript,"`n","`r"
           {
             CryptStringToBinaryW(StrPtr(A_LoopField), 0, 0x1, line.Ptr, getvar(aSizeEncrypted:=16384*2), 0, 0)
@@ -29,7 +29,7 @@ CreateScript(script,pw:=""){
           else mScript :="`r`n" mScript "`r`n"
         }
       } else {
-        mScript:="`r`n" StrReplace(StrReplace(FileRead(A_ScriptFullPath),"`n","`r`n"),"`r`r","`r") "`r`n" 
+        mScript:="`r`n" StrReplace(StrReplace(FileRead(path?path:A_ScriptFullPath),"`n","`r`n"),"`r`r","`r") "`r`n" 
         Loop Parse, mScript,"`n","`r"
         {
           If A_Index=1

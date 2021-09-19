@@ -1,16 +1,39 @@
-#include "stdafx.h" // pre-compiled headers
+#include "pch.h" // pre-compiled headers
 #include "globaldata.h" // for access to many global vars
 #include "application.h" // for MsgSleep()
 #include "exports.h"
 #include "script.h"
+#include <process.h>  // NewThread
 
-LPTSTR result_to_return_dll[256] = { 0 }; //HotKeyIt H2 for ahkgetvar return value.
-// ExprTokenType aResultToken_to_return ;  // for ahkPostFunction
-FuncAndToken aFuncAndTokenToReturn[256];    // for ahkPostFunction
 SHORT returnCount = 0;
-void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar, BOOL aVarIsArg);
+enum TTVArgType;
+void TokenToVariant(ExprTokenType& aToken, VARIANT& aVar, TTVArgType* aVarIsArg = FALSE);
 
-// Following macros are used in addFile addScript ahkExec
+EXPORT unsigned int NewThread(LPCTSTR aScript, LPCTSTR aCmdLine, LPCTSTR aTitle) // HotKeyIt check if dll is ready to execute
+{
+	DWORD result = 0;
+	SIZE_T aParamLen = _tcslen(aScript ? aScript : _T("Persistent")) + _tcslen(aCmdLine) + 1 + _tcslen(aTitle) + 1 + 3;
+	LPTSTR aScriptCmdLine = tmalloc(aParamLen);
+	memset(aScriptCmdLine, 0, aParamLen * sizeof(TCHAR));
+	_tcscpy(aScriptCmdLine, aScript ? aScript : _T("Persistent"));
+	_tcscpy(aScriptCmdLine + _tcslen(aScript ? aScript : _T("")) + 1, aCmdLine ? aCmdLine : _T(""));
+	_tcscpy(aScriptCmdLine + _tcslen(aScript ? aScript : _T("")) + _tcslen(aCmdLine ? aCmdLine : _T("")) + 2, aTitle ? aTitle : _T(""));
+	unsigned int ThreadID;
+	TCHAR buf[MAX_INTEGER_LENGTH];
+	HANDLE hThread = (HANDLE)_beginthreadex(NULL, 0, (unsigned(__stdcall *)(void *))&ThreadMain, aScriptCmdLine, 0, &ThreadID);
+	if (hThread)
+	{
+		CloseHandle(hThread);
+		sntprintf(buf, _countof(buf), _T("ahk%d"), ThreadID);
+		HANDLE hEvent = CreateEvent(NULL, false, false, buf);
+		// we need to give the thread also little time to allocate memory to avoid std::bad_alloc that might happen when you run newthread in a loop
+		if (WaitForSingleObject(hEvent, 1000) != WAIT_TIMEOUT)
+			result = ThreadID;
+		CloseHandle(hEvent);
+	}
+	return result;
+}
+// Following macros are used in addScript and ahkExec
 // HotExpr code from LoadFromFile, Hotkeys need to be toggled to get activated
 #define FINALIZE_HOTKEYS \
 	if (Hotkey::sHotkeyCount > HotkeyCount)\
@@ -55,44 +78,24 @@ void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar, BOOL aVarIsArg);
 	g_script->mCurrFileIndex = aCurrFileIndex;\
 	g_script->mNextLineIsFunctionBody = aNextLineIsFunctionBody;\
 	g_script->mCombinedLineNumber = aCombinedLineNumber;
-#ifdef _USRDLL
-//COM virtual functions
-int com_ahkPause(LPTSTR aChangeTo){return ahkPause(aChangeTo);}
-UINT_PTR com_ahkFindLabel(LPTSTR aLabelName){return ahkFindLabel(aLabelName);}
-// LPTSTR com_ahkgetvar(LPTSTR name,unsigned int getVar){return ahkgetvar(name,getVar);}
-// unsigned int com_ahkassign(LPTSTR name, LPTSTR value){return ahkassign(name,value);}
-UINT_PTR com_ahkExecuteLine(UINT_PTR line,unsigned int aMode,unsigned int wait){return ahkExecuteLine(line,aMode,wait);}
-int com_ahkLabel(LPTSTR aLabelName, unsigned int nowait){return ahkLabel(aLabelName,nowait);}
-UINT_PTR com_ahkFindFunc(LPTSTR funcname){return ahkFindFunc(funcname);}
-// LPTSTR com_ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10){return ahkFunction(func,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10);}
-// unsigned int com_ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10){return ahkPostFunction(func,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10);}
-UINT_PTR com_addScript(LPTSTR script, int waitexecute){return addScript(script,waitexecute);}
-int com_ahkExec(LPTSTR script){return ahkExec(script);}
-UINT_PTR com_addFile(LPTSTR fileName, int waitexecute){return addFile(fileName,waitexecute);}
-HANDLE com_ahkdll(LPTSTR fileName,LPTSTR argv, LPTSTR title){return ahkdll(fileName,argv, title);}
-HANDLE com_ahktextdll(LPTSTR script,LPTSTR argv, LPTSTR title){return ahktextdll(script,argv, title);}
-int com_ahkTerminate(int timeout){return ahkTerminate(timeout);}
-int com_ahkReady(){return ahkReady();}
-int com_ahkIsUnicode(){return ahkIsUnicode();}
-int com_ahkReload(int timeout){return ahkReload(timeout);}
-#endif
-
-EXPORT int ahkIsUnicode()
-{
-#ifdef UNICODE
-	return true;
-#else
-	return false;
-#endif
-}
-
-#ifdef _USRDLL
-EXPORT int ahkReady() // HotKeyIt check if dll is ready to execute
-#else
-EXPORT int ahkReady(DWORD aThreadID) // HotKeyIt check if dll is ready to execute
-#endif
-{
 #ifndef _USRDLL
+//COM virtual functions
+int com_ahkPause(LPTSTR aChangeTo, DWORD aThreadID){return ahkPause(aChangeTo, aThreadID);}
+UINT_PTR com_ahkFindLabel(LPTSTR aLabelName, DWORD aThreadID){return ahkFindLabel(aLabelName, aThreadID);}
+LPTSTR com_ahkgetvar(LPTSTR name,unsigned int getVar, DWORD aThreadID){return ahkgetvar(name,getVar, aThreadID);}
+unsigned int com_ahkassign(LPTSTR name, LPTSTR value, DWORD aThreadID){return ahkassign(name,value, aThreadID);}
+UINT_PTR com_ahkExecuteLine(UINT_PTR line,unsigned int aMode,unsigned int wait, DWORD aThreadID){return ahkExecuteLine(line,aMode,wait, aThreadID);}
+int com_ahkLabel(LPTSTR aLabelName, unsigned int nowait, DWORD aThreadID){return ahkLabel(aLabelName,nowait, aThreadID);}
+UINT_PTR com_ahkFindFunc(LPTSTR funcname, DWORD aThreadID){return ahkFindFunc(funcname, aThreadID);}
+LPTSTR com_ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10, DWORD aThreadID){return ahkFunction(func,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10, aThreadID);}
+UINT_PTR com_addScript(LPTSTR script, int waitexecute, DWORD aThreadID){return addScript(script,waitexecute, aThreadID);}
+int com_ahkExec(LPTSTR script, DWORD aThreadID){return ahkExec(script, aThreadID);}
+unsigned int com_newthread(LPTSTR script,LPTSTR argv, LPTSTR title){return NewThread(script,argv, title);}
+int com_ahkReady(DWORD aThreadID){return ahkReady(aThreadID);}
+#endif
+
+EXPORT int ahkReady(DWORD aThreadID) // HotKeyIt check if dll is ready to execute
+{
 #ifdef _WIN64
 	DWORD ThreadID = __readgsdword(0x48);
 #else
@@ -101,7 +104,7 @@ EXPORT int ahkReady(DWORD aThreadID) // HotKeyIt check if dll is ready to execut
 	PMYTEB curr_teb = NULL;
 	PVOID tls = NULL;
 	bool IsReadyToExecute = false;
-	if (g_ThreadID != ThreadID || (aThreadID && aThreadID != g_ThreadID))
+	if (g_MainThreadID != ThreadID || (aThreadID && aThreadID != g_MainThreadID))
 	{
 		if (aThreadID)
 		{
@@ -128,19 +131,15 @@ EXPORT int ahkReady(DWORD aThreadID) // HotKeyIt check if dll is ready to execut
 			curr_teb->ThreadLocalStoragePointer = tls;
 		}
 	}
+#ifndef _USRDLL
 	return IsReadyToExecute;
 #else
-	return (g_script && g_script->mIsReadyToExecute) || g_Reloading || g_Loading;
+	return IsReadyToExecute && !g_Reloading;
 #endif
 }
 
-#ifdef _USRDLL
-EXPORT int ahkPause(LPTSTR aChangeTo) //Change pause state of a running script
-#else
 EXPORT int ahkPause(LPTSTR aChangeTo, DWORD aThreadID) //Change pause state of a running script
-#endif
 {
-#ifndef _USRDLL
 #ifdef _WIN64
 	DWORD ThreadID = __readgsdword(0x48);
 #else
@@ -148,7 +147,7 @@ EXPORT int ahkPause(LPTSTR aChangeTo, DWORD aThreadID) //Change pause state of a
 #endif
 	PMYTEB curr_teb = NULL;
 	PVOID tls = NULL;
-	if (g_ThreadID != ThreadID || (aThreadID && aThreadID != g_ThreadID))
+	if (g_MainThreadID != ThreadID || (aThreadID && aThreadID != g_MainThreadID))
 	{
 		if (aThreadID)
 		{
@@ -172,13 +171,10 @@ EXPORT int ahkPause(LPTSTR aChangeTo, DWORD aThreadID) //Change pause state of a
 			curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[0][6];
 		}
 	}
-#endif
 	if (!g_script || !g_script->mIsReadyToExecute)
 	{
-#ifndef _USRDLL
 		if (curr_teb)
 			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 		return 0; // AutoHotkey needs to be running at this point //
 	}
 
@@ -195,20 +191,13 @@ EXPORT int ahkPause(LPTSTR aChangeTo, DWORD aThreadID) //Change pause state of a
 		--g_nPausedThreads; // For this purpose the idle thread is counted as a paused thread.
 		g_script->UpdateTrayIcon();
 	}
-#ifndef _USRDLL
 	if (curr_teb)
 		curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 	return (int)g->IsPaused;
 }
 
-#ifdef _USRDLL
-EXPORT UINT_PTR ahkFindFunc(LPTSTR funcname)
-#else
 EXPORT UINT_PTR ahkFindFunc(LPTSTR funcname, DWORD aThreadID)
-#endif
 {
-#ifndef _USRDLL
 #ifdef _WIN64
 	DWORD ThreadID = __readgsdword(0x48);
 #else
@@ -216,7 +205,7 @@ EXPORT UINT_PTR ahkFindFunc(LPTSTR funcname, DWORD aThreadID)
 #endif
 	PMYTEB curr_teb = NULL;
 	PVOID tls = NULL;
-	if (g_ThreadID != ThreadID || (aThreadID && aThreadID != g_ThreadID))
+	if (g_MainThreadID != ThreadID || (aThreadID && aThreadID != g_MainThreadID))
 	{
 		if (aThreadID)
 		{
@@ -240,30 +229,20 @@ EXPORT UINT_PTR ahkFindFunc(LPTSTR funcname, DWORD aThreadID)
 			curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[0][6];
 		}
 	}
-#endif
 	if (!g_script || !g_script->mIsReadyToExecute)
 	{
-#ifndef _USRDLL
 		if (curr_teb)
 			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 		return 0; // AutoHotkey needs to be running at this point //
 	}
 	UINT_PTR result = (UINT_PTR)g_script->FindFunc(funcname);
-#ifndef _USRDLL
 	if (curr_teb)
 		curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 	return result;
 }
 
-#ifdef _USRDLL
-EXPORT UINT_PTR ahkFindLabel(LPTSTR aLabelName)
-#else
 EXPORT UINT_PTR ahkFindLabel(LPTSTR aLabelName, DWORD aThreadID)
-#endif
 {
-#ifndef _USRDLL
 #ifdef _WIN64
 	DWORD ThreadID = __readgsdword(0x48);
 #else
@@ -271,7 +250,7 @@ EXPORT UINT_PTR ahkFindLabel(LPTSTR aLabelName, DWORD aThreadID)
 #endif
 	PMYTEB curr_teb = NULL;
 	PVOID tls = NULL;
-	if (g_ThreadID != ThreadID || (aThreadID && aThreadID != g_ThreadID))
+	if (g_MainThreadID != ThreadID || (aThreadID && aThreadID != g_MainThreadID))
 	{
 		if (aThreadID)
 		{
@@ -295,42 +274,34 @@ EXPORT UINT_PTR ahkFindLabel(LPTSTR aLabelName, DWORD aThreadID)
 			curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[0][6];
 		}
 	}
-#endif
 	if (!g_script || !g_script->mIsReadyToExecute)
 	{
-#ifndef _USRDLL
 		if (curr_teb)
 			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 		return 0; // AutoHotkey needs to be running at this point //
 	}
 	UserFunc *aCurrentFunc = g->CurrentFunc;
 	g->CurrentFunc = NULL;
 	UINT_PTR result = (UINT_PTR)g_script->FindLabel(aLabelName);
 	g->CurrentFunc = aCurrentFunc;
-#ifndef _USRDLL
 	if (curr_teb)
 		curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 	return result;
 }
 
 // Naveen: v1. ahkgetvar()
-#ifdef _USRDLL
-EXPORT LPTSTR ahkgetvar(LPTSTR name, unsigned int getVar)
-#else
 EXPORT LPTSTR ahkgetvar(LPTSTR name, unsigned int getVar, DWORD aThreadID)
-#endif
 {
 #ifdef _WIN64
 	DWORD ThreadID = __readgsdword(0x48);
 #else
 	DWORD ThreadID = __readfsdword(0x24);
 #endif
-#ifndef _USRDLL
+	HANDLE ahThread = NULL;
 	PMYTEB curr_teb = NULL;
 	PVOID tls = NULL;
-	if (g_ThreadID != ThreadID || (aThreadID && aThreadID != g_ThreadID))
+	BYTE aSlot = InterlockedIncrement16(&returnCount) & 0xFFF;
+	if (g_MainThreadID != ThreadID || (aThreadID && aThreadID != g_MainThreadID))
 	{
 		if (aThreadID)
 		{
@@ -354,133 +325,112 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name, unsigned int getVar, DWORD aThreadID)
 			curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[0][6];
 		}
 	}
-#endif
 	if (!g_script || !g_script->mIsReadyToExecute)
 	{
-#ifndef _USRDLL
 		if (curr_teb)
 			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 		return 0; // AutoHotkey needs to be running at this point //
 	}
-	if (g_ThreadID != ThreadID)
-		SuspendThread(g_hThread);
-	Var *ahkvar = g_script->FindOrAddVar(name, 0, VAR_GLOBAL);
-	BYTE aSlot = InterlockedIncrement16(&returnCount) & 0xFF;
+	if (g_MainThreadID != ThreadID)
+	{
+		ahThread = OpenThread(THREAD_ALL_ACCESS, TRUE, ThreadID);
+		SuspendThread(ahThread);
+	}
+	auto varlist = g_script->GlobalVars();
+	int insert_pos;
+	Var *ahkvar = varlist->Find(name, &insert_pos);
 	if (getVar != NULL)
 	{
 		if (ahkvar->mType == VAR_VIRTUAL)
 		{
-			if (g_ThreadID != ThreadID)
-				ResumeThread(g_hThread);
+			if (ahThread)
+				ResumeThread(ahThread);
 
-#ifndef _USRDLL
 			if (curr_teb)
 				curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 			return _T("");
 		}
-		LPTSTR new_mem = (LPTSTR)realloc((LPTSTR )result_to_return_dll[aSlot],MAX_INTEGER_LENGTH);
+		LPTSTR new_mem = (LPTSTR)realloc((LPTSTR )g_result_to_return_dll[aSlot],MAX_INTEGER_LENGTH);
 		if (!new_mem)
 		{
 			g_script->ScriptError(ERR_OUTOFMEM, name);
-			if (g_ThreadID != ThreadID)
-				ResumeThread(g_hThread);
-#ifndef _USRDLL
+			if (ahThread)
+				ResumeThread(ahThread);
 			if (curr_teb)
 				curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 			return _T("");
 		}
-		result_to_return_dll[aSlot] = new_mem;
-		if (g_ThreadID != ThreadID)
-			ResumeThread(g_hThread);
-#ifndef _USRDLL
+		g_result_to_return_dll[aSlot] = new_mem;
+		if (ahThread)
+			ResumeThread(ahThread);
 		if (curr_teb)
 			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
-		return ITOA64((UINT_PTR)ahkvar,result_to_return_dll[aSlot]);
+		return ITOA64((UINT_PTR)ahkvar, g_result_to_return_dll[aSlot]);
 	}
 	else if ( !ahkvar->HasContents() )
 	{
-		if (g_ThreadID != ThreadID)
-			ResumeThread(g_hThread);
-#ifndef _USRDLL
+		if (ahThread)
+			ResumeThread(ahThread);
 		if (curr_teb)
 			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 		return _T("");
 	}
-	if (ahkvar->mType == VAR_VIRTUAL)
-		ahkvar->PopulateVirtualVar();
-	if (*ahkvar->mCharContents == '\0')
+	LPTSTR aContents = ahkvar->Contents(true);
+	if (!(*aContents))
 	{
-		LPTSTR new_mem = (LPTSTR )realloc((LPTSTR )result_to_return_dll[aSlot],(ahkvar->mByteCapacity ? ahkvar->mByteCapacity : ahkvar->mByteLength) + MAX_NUMBER_LENGTH + sizeof(TCHAR));
+		LPTSTR new_mem = (LPTSTR )realloc((LPTSTR )g_result_to_return_dll[aSlot],(MAX_NUMBER_LENGTH + sizeof(TCHAR)));
 		if (!new_mem)
 		{
 			g_script->ScriptError(ERR_OUTOFMEM, name);
-			if (g_ThreadID != ThreadID)
-				ResumeThread(g_hThread);
-#ifndef _USRDLL
+			if (ahThread)
+				ResumeThread(ahThread);
 			if (curr_teb)
 				curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 			return _T("");
 		}
-		result_to_return_dll[aSlot] = new_mem;
+		g_result_to_return_dll[aSlot] = new_mem;
 		if (_tcsicmp(name, _T("A_IsPaused"))) //ahkvar->mVV == BIV_IsPaused)
 		{
 			++g; // imitate new thread for A_IsPaused
-			ITOA64(ahkvar->mContentsInt64, new_mem);
+			ITOA64(ahkvar->ToInt64(), new_mem);
 			--g;
 		}
-		else if (ahkvar->mType == VAR_ALIAS)
-			ITOA64(ahkvar->mAliasFor->mContentsInt64, new_mem);
 		else
-			ITOA64(ahkvar->mContentsInt64, new_mem);
+			ITOA64(ahkvar->ToInt64(), new_mem);
 	}
 	else
 	{
-		LPTSTR new_mem = (LPTSTR)realloc((LPTSTR)result_to_return_dll[aSlot], ahkvar->mByteLength + sizeof(TCHAR));
+		LPTSTR new_mem = (LPTSTR)realloc((LPTSTR)g_result_to_return_dll[aSlot], ahkvar->ByteLength() + sizeof(TCHAR));
 		if (!new_mem)
 		{
 			g_script->ScriptError(ERR_OUTOFMEM, name);
-			if (g_ThreadID != ThreadID)
-				ResumeThread(g_hThread);
-#ifndef _USRDLL
+			if (ahThread)
+				ResumeThread(ahThread);
 			if (curr_teb)
 				curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 			return _T("");
 		}
-		result_to_return_dll[aSlot] = new_mem;
-		memcpy(new_mem, ahkvar->mByteContents, ahkvar->mByteLength);
-		*(new_mem + ahkvar->mByteLength) = '\0';
+		g_result_to_return_dll[aSlot] = new_mem;
+		memcpy(new_mem, aContents, ahkvar->ByteLength() + sizeof(TCHAR));
 	}
-	if (g_ThreadID != ThreadID)
-		ResumeThread(g_hThread);
-#ifndef _USRDLL
+	if (ahThread)
+		ResumeThread(ahThread);
 	if (curr_teb)
 		curr_teb->ThreadLocalStoragePointer = tls;
-#endif
-	return result_to_return_dll[aSlot];
+	return g_result_to_return_dll[aSlot];
 }	
 
-#ifdef _USRDLL
-EXPORT int ahkassign(LPTSTR name, LPTSTR value) // ahkwine 0.1
-#else
 EXPORT int ahkassign(LPTSTR name, LPTSTR value, DWORD aThreadID) // ahkwine 0.1
-#endif
 {
 #ifdef _WIN64
 	DWORD ThreadID = __readgsdword(0x48);
 #else
 	DWORD ThreadID = __readfsdword(0x24);
 #endif
-#ifndef _USRDLL
+	HANDLE ahThread = NULL;
 	PMYTEB curr_teb = NULL;
 	PVOID tls = NULL;
-	if (g_ThreadID != ThreadID || (aThreadID && aThreadID != g_ThreadID))
+	if (g_MainThreadID != ThreadID || (aThreadID && aThreadID != g_MainThreadID))
 	{
 		if (aThreadID)
 		{
@@ -504,47 +454,40 @@ EXPORT int ahkassign(LPTSTR name, LPTSTR value, DWORD aThreadID) // ahkwine 0.1
 			curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[0][6];
 		}
 	}
-#endif
 	if (!g_script || !g_script->mIsReadyToExecute)
 	{
-#ifndef _USRDLL
 		if (curr_teb)
 			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 		return -1; // AutoHotkey needs to be running at this point //
 	}
-	if (g_ThreadID != ThreadID)
-		SuspendThread(g_hThread);
-	Var *var;
-	if (!(var = g_script->FindOrAddVar(name, 0, VAR_GLOBAL)))
+	if (g_MainThreadID != ThreadID)
 	{
-		if (g_ThreadID != ThreadID)
-			ResumeThread(g_hThread);
-#ifndef _USRDLL
+		ahThread = OpenThread(THREAD_ALL_ACCESS, TRUE, ThreadID);
+		SuspendThread(ahThread);
+	}
+	auto varlist = g_script->GlobalVars();
+	int insert_pos;
+	Var *var = varlist->Find(name, &insert_pos);
+	if (!(var = g_script->FindVar(name, 0, FINDVAR_GLOBAL)))
+	{
+		if (ahThread)
+			ResumeThread(ahThread);
 		if (curr_teb)
 			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 		return -1;  // Realistically should never happen.
 	}
 	var->Assign(value);
-	if (g_ThreadID != ThreadID)
-		ResumeThread(g_hThread);
-#ifndef _USRDLL
+	if (ahThread)
+		ResumeThread(ahThread);
 	if (curr_teb)
 		curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 	return 0; // success
 }
 
 //HotKeyIt ahkExecuteLine()
-#ifdef _USRDLL
-EXPORT UINT_PTR ahkExecuteLine(UINT_PTR line, unsigned int aMode, unsigned int wait)
-#else
 EXPORT UINT_PTR ahkExecuteLine(UINT_PTR line, unsigned int aMode, unsigned int wait, DWORD aThreadID)
-#endif
 {
 	HWND msghWnd = g_hWnd;
-#ifndef _USRDLL
 #ifdef _WIN64
 	DWORD ThreadID = __readgsdword(0x48);
 #else
@@ -552,7 +495,7 @@ EXPORT UINT_PTR ahkExecuteLine(UINT_PTR line, unsigned int aMode, unsigned int w
 #endif
 	PMYTEB curr_teb = NULL;
 	PVOID tls = NULL;
-	if (g_ThreadID != ThreadID || (aThreadID && aThreadID != g_ThreadID))
+	if (g_MainThreadID != ThreadID || (aThreadID && aThreadID != g_MainThreadID))
 	{
 		if (aThreadID)
 		{
@@ -576,30 +519,23 @@ EXPORT UINT_PTR ahkExecuteLine(UINT_PTR line, unsigned int aMode, unsigned int w
 			curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[0][6];
 		}
 	}
-#endif
 	if (!g_script || !g_script->mIsReadyToExecute)
 	{
-#ifndef _USRDLL
 		if (curr_teb)
 			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 		return 0; // AutoHotkey needs to be running at this point //
 	}
 	Line *templine = (Line *)line;
 	if (templine == NULL)
 	{
 		UINT_PTR result = (UINT_PTR)g_script->mFirstLine;
-#ifndef _USRDLL
 		if (curr_teb)
 			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 		return result;
 	}
-#ifndef _USRDLL
 	msghWnd = g_hWnd;
 	if (curr_teb)
 		curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 	if (aMode)
 	{
 		if (wait)
@@ -617,14 +553,9 @@ EXPORT UINT_PTR ahkExecuteLine(UINT_PTR line, unsigned int aMode, unsigned int w
 	return (UINT_PTR) templine;
 }
 
-#ifdef _USRDLL
-EXPORT int ahkLabel(LPTSTR aLabelName, unsigned int nowait) // 0 = wait = default
-#else
 EXPORT int ahkLabel(LPTSTR aLabelName, unsigned int nowait, DWORD aThreadID) // 0 = wait = default
-#endif
 {
 	HWND msghWnd = g_hWnd;
-#ifndef _USRDLL
 #ifdef _WIN64
 	DWORD ThreadID = __readgsdword(0x48);
 #else
@@ -632,7 +563,7 @@ EXPORT int ahkLabel(LPTSTR aLabelName, unsigned int nowait, DWORD aThreadID) // 
 #endif
 	PMYTEB curr_teb = NULL;
 	PVOID tls = NULL;
-	if (g_ThreadID != ThreadID || (aThreadID && aThreadID != g_ThreadID))
+	if (g_MainThreadID != ThreadID || (aThreadID && aThreadID != g_MainThreadID))
 	{
 		if (aThreadID)
 		{
@@ -656,23 +587,18 @@ EXPORT int ahkLabel(LPTSTR aLabelName, unsigned int nowait, DWORD aThreadID) // 
 			curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[0][6];
 		}
 	}
-#endif
 	if (!g_script || !g_script->mIsReadyToExecute)
 	{
-#ifndef _USRDLL
 		if (curr_teb)
 			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 		return 0; // AutoHotkey needs to be running at this point //
 	}
 	Label *aLabel = g_script->FindLabel(aLabelName) ;
 	if (aLabel)
 	{
-#ifndef _USRDLL
 		msghWnd = g_hWnd;
 		if (curr_teb)
 			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 		if (nowait)
 			PostMessage(msghWnd, AHK_EXECUTE_LABEL, (LPARAM)aLabel, (LPARAM)aLabel);
 		else
@@ -681,253 +607,16 @@ EXPORT int ahkLabel(LPTSTR aLabelName, unsigned int nowait, DWORD aThreadID) // 
 	}
 	else
 	{
-#ifndef _USRDLL
 		if (curr_teb)
 			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 		return 0;
 	}
-}
-
-#ifdef _USRDLL
-EXPORT int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10)
-#else
-EXPORT int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10, DWORD aThreadID)
-#endif
-{
-	HWND msghWnd = g_hWnd;
-	Script *script = g_script;
-#ifndef _USRDLL
-#ifdef _WIN64
-	DWORD ThreadID = __readgsdword(0x48);
-#else
-	DWORD ThreadID = __readfsdword(0x24);
-#endif
-	PMYTEB curr_teb = NULL;
-	PVOID tls = NULL;
-	if (g_ThreadID != ThreadID || (aThreadID && aThreadID != g_ThreadID))
-	{
-		if (aThreadID)
-		{
-			for (int i = 0; i < MAX_AHK_THREADS; i++)
-			{
-				if (g_ahkThreads[i][5] == aThreadID)
-				{
-					curr_teb = (PMYTEB)NtCurrentTeb();
-					tls = curr_teb->ThreadLocalStoragePointer;
-					curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[i][6];
-					msghWnd = g_hWnd;
-					script = g_script;
-					break;
-				}
-			}
-			if (!curr_teb)
-			{
-				curr_teb->ThreadLocalStoragePointer = tls;
-				return -1;
-			}
-		}
-		else
-		{
-			curr_teb = (PMYTEB)NtCurrentTeb();
-			tls = curr_teb->ThreadLocalStoragePointer;
-			curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[0][6];
-			msghWnd = g_hWnd;
-			script = g_script;
-		}
-	}
-#endif
-	if (!g_script || !script->mIsReadyToExecute)
-	{
-#ifndef _USRDLL
-		if (curr_teb)
-			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
-		return -1; // AutoHotkey needs to be running at this point //
-	}
-	Func *aFunc = script->FindFunc(func) ;
-	if (aFunc)
-	{	
-		int aParamsCount = 0;
-		LPTSTR *params[10] = {&param1,&param2,&param3,&param4,&param5,&param6,&param7,&param8,&param9,&param10};
-		for (;aParamsCount < 10;aParamsCount++)
-			if (!*params[aParamsCount])
-				break;
-		if (aParamsCount < aFunc->mMinParams)
-		{
-			script->ScriptError(ERR_TOO_FEW_PARAMS, func);
-#ifndef _USRDLL
-			if (tls)
-				curr_teb->ThreadLocalStoragePointer = tls;
-#endif
-			return -1;
-		}
-#ifndef _USRDLL
-		if (curr_teb)
-			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
-		BYTE aSlot = InterlockedIncrement16(&returnCount) & 0xFF;
-		FuncAndToken & aFuncAndToken = aFuncAndTokenToReturn[aSlot];
-		if (aParamsCount)
-		{
-			ExprTokenType **new_mem = (ExprTokenType**)realloc(aFuncAndToken.param,sizeof(ExprTokenType)*aParamsCount);
-			if (!new_mem)
-			{
-				script->ScriptError(ERR_OUTOFMEM,func);
-				return -1;
-			}
-			aFuncAndToken.param = new_mem;
-		}
-		else
-			aFuncAndToken.param = NULL;
-		aFuncAndToken.mParamCount = aFunc->mParamCount < aParamsCount && !aFunc->mIsVariadic ? aFunc->mParamCount : aParamsCount;
-		LPTSTR new_buf;
-		for (int i = 0;(aFunc->mParamCount > i || aFunc->mIsVariadic) && aParamsCount>i;i++)
-		{
-			aFuncAndToken.param[i] = &aFuncAndToken.params[i];
-			new_buf = (LPTSTR)realloc(aFuncAndToken.param[i]->marker,(_tcslen(*params[i])+1)*sizeof(TCHAR));
-			if (!new_buf)
-			{
-				script->ScriptError(ERR_OUTOFMEM, func);
-				return -1;
-			}
-			_tcscpy(new_buf,*params[i]); // Assign parameters
-			aFuncAndToken.param[i]->SetValue(new_buf);
-		}
-		aFuncAndToken.mFunc = aFunc ;
-		PostMessage(msghWnd, AHK_EXECUTE_FUNCTION_DLL, (WPARAM)&aFuncAndToken,NULL);
-		return 0;
-	} 
-	else // Function not found
-	{
-#ifndef _USRDLL
-		if (curr_teb)
-			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
-		return -1;
-	}
-}
-
-// Naveen: v6 addFile()
-// Todo: support for #Directives, and proper treatment of mIsReadytoExecute
-#ifdef _USRDLL
-EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute)
-#else
-EXPORT UINT_PTR addFile(LPTSTR fileName, int waitexecute, DWORD aThreadID)
-#endif
-{   // dynamically include a file into a script !!
-	// labels, hotkeys, functions. 
-#ifndef _USRDLL
-#ifdef _WIN64
-	DWORD ThreadID = __readgsdword(0x48);
-#else
-	DWORD ThreadID = __readfsdword(0x24);
-#endif
-	PMYTEB curr_teb = NULL;
-	PVOID tls = NULL;
-	if (g_ThreadID != ThreadID || (aThreadID && aThreadID != g_ThreadID))
-	{
-		if (aThreadID)
-		{
-			for (int i = 0; i < MAX_AHK_THREADS; i++)
-			{
-				if (g_ahkThreads[i][5] == aThreadID)
-				{
-					curr_teb = (PMYTEB)NtCurrentTeb();
-					tls = curr_teb->ThreadLocalStoragePointer;
-					curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[i][6];
-					break;
-				}
-			}
-			if (!curr_teb)
-				return 0;
-		}
-		else
-		{
-			curr_teb = (PMYTEB)NtCurrentTeb();
-			tls = curr_teb->ThreadLocalStoragePointer;
-			curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[0][6];
-		}
-	}
-#endif
-	if (!g_script || !g_script->mIsReadyToExecute)
-	{
-#ifndef _USRDLL
-		if (curr_teb)
-			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
-		return 0; // AutoHotkey needs to be running at this point // LOADING_FAILED cant be used due to PTR return type
-	}
-	int HotkeyCount = Hotkey::sHotkeyCount;
-	HotkeyCriterion *aFirstHotExpr = g_FirstHotExpr,*aLastHotExpr = g_LastHotExpr;
-	g_FirstHotExpr = NULL;g_LastHotExpr = NULL;
-	//int a_guiCount = g_guiCount;
-	//g_guiCount = 0;
-#ifdef _USRDLL
-	g_Loading = true;
-#endif
-	BACKUP_G_SCRIPT
-	LPTSTR oldFileSpec = g_script->mFileSpec;
-	g_script->mFileSpec = fileName;
-	if (g_script->LoadFromFile()!= OK) //fileName, aAllowDuplicateInclude, (bool) aIgnoreLoadFailure) != OK) || !g_script->PreparseBlocks(oldLastLine->mNextLine))
-	{
-		g_script->mFileSpec = oldFileSpec;				// Restore script path
-		g->CurrentFunc = (UserFunc *)aCurrFunc;						// Restore current function
-		RESTORE_G_SCRIPT
-		//g_guiCount = a_guiCount;
-		RESTORE_IF_EXPR
-		g_script->mIsReadyToExecute = true; // Set program to be ready for continuing previous script.
-#ifdef _USRDLL
-		g_Loading = false;
-#else
-		if (curr_teb)
-			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
-		return 0; // LOADING_FAILED cant be used due to PTR return type
-	}	
-	g_script->mFileSpec = oldFileSpec;
-	//g_guiCount = a_guiCount;
-	FINALIZE_HOTKEYS
-	RESTORE_IF_EXPR
-	g_script->InitClasses();
-	g_script->mIsReadyToExecute = true;
-#ifdef _USRDLL
-	g_Loading = false;
-#endif
-	g->CurrentFunc = (UserFunc *)aCurrFunc;
-	if (waitexecute != 0)
-	{
-		if (waitexecute == 1)
-		{
-			g_ReturnNotExit = true;
-			SendMessage(g_hWnd, AHK_EXECUTE, (WPARAM)g_script->mFirstLine, (LPARAM)NULL);
-		}
-		else
-			PostMessage(g_hWnd, AHK_EXECUTE, (WPARAM)g_script->mFirstLine, (LPARAM)NULL);
-		g_ReturnNotExit = false;
-	}
-	Line *aTempLine = g_script->mFirstLine; // required for return
-	aLastLine->mNextLine = aTempLine;
-	aTempLine->mPrevLine = aLastLine;
-	aLastLine = g_script->mLastLine;
-	RESTORE_G_SCRIPT
-#ifndef _USRDLL
-		if (curr_teb)
-			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
-	return (UINT_PTR) aTempLine;
 }
 
 // HotKeyIt: addScript()
-// Todo: support for #Directives, and proper treatment of mIsReadytoExecute
-#ifdef _USRDLL
-EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute)
-#else
 EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute, DWORD aThreadID)
-#endif
 {   // dynamically include a script from text!!
 	// labels, hotkeys, functions.
-#ifndef _USRDLL
 #ifdef _WIN64
 	DWORD ThreadID = __readgsdword(0x48);
 #else
@@ -935,7 +624,7 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute, DWORD aThreadID)
 #endif
 	PMYTEB curr_teb = NULL;
 	PVOID tls = NULL;
-	if (g_ThreadID != ThreadID || (aThreadID && aThreadID != g_ThreadID))
+	if (g_MainThreadID != ThreadID || (aThreadID && aThreadID != g_MainThreadID))
 	{
 		if (aThreadID)
 		{
@@ -959,13 +648,10 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute, DWORD aThreadID)
 			curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[0][6];
 		}
 	}
-#endif
 	if (!g_script || !g_script->mIsReadyToExecute)
 	{
-#ifndef _USRDLL
 		if (curr_teb)
 			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 		return 0; // AutoHotkey needs to be running at this point // LOADING_FAILED cant be used due to PTR return type
 	}
 	int HotkeyCount = Hotkey::sHotkeyCount;
@@ -975,9 +661,6 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute, DWORD aThreadID)
 	//g_guiCount = 0;
 
 	LPCTSTR aPathToShow = g_script->mCurrLine->mArg ? g_script->mCurrLine->mArg->text : g_script->mFileSpec;
-#ifdef _USRDLL
-	g_Loading = true;
-#endif
 	BACKUP_G_SCRIPT
 	if (g_script->LoadFromText(script,aPathToShow) != OK) // || !g_script->PreparseBlocks(oldLastLine->mNextLine)))
 	{
@@ -986,22 +669,13 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute, DWORD aThreadID)
 		//g_guiCount = a_guiCount;
 		RESTORE_IF_EXPR
 		g_script->mIsReadyToExecute = true;
-#ifdef _USRDLL
-		g_Loading = false;
-#else
 		if (curr_teb)
 			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 		return 0;  // LOADING_FAILED cant be used due to PTR return type
 	}
-	//g_guiCount = a_guiCount;
 	FINALIZE_HOTKEYS
 	RESTORE_IF_EXPR
-	g_script->InitClasses();
 	g_script->mIsReadyToExecute = true;
-#ifdef _USRDLL
-	g_Loading = false;
-#endif
 	g->CurrentFunc = (UserFunc *)aCurrFunc;
 	if (waitexecute != 0)
 	{
@@ -1019,22 +693,14 @@ EXPORT UINT_PTR addScript(LPTSTR script, int waitexecute, DWORD aThreadID)
 	aTempLine->mPrevLine = aLastLine;
 	aLastLine = g_script->mLastLine;
 	RESTORE_G_SCRIPT
-#ifndef _USRDLL
 		if (curr_teb)
 			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 	return (UINT_PTR) aTempLine;
 }
 
-// Todo: support for #Directives, and proper treatment of mIsReadytoExecute
-#ifdef _USRDLL
-EXPORT int ahkExec(LPTSTR script)
-#else
 EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
-#endif
 {   // dynamically include a script from text!!
 	// labels, hotkeys, functions
-#ifndef _USRDLL
 #ifdef _WIN64
 	DWORD ThreadID = __readgsdword(0x48);
 #else
@@ -1042,7 +708,7 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 #endif
 	PMYTEB curr_teb = NULL;
 	PVOID tls = NULL;
-	if (g_ThreadID != ThreadID || (aThreadID && aThreadID != g_ThreadID))
+	if (g_MainThreadID != ThreadID || (aThreadID && aThreadID != g_MainThreadID))
 	{
 		if (aThreadID)
 		{
@@ -1066,21 +732,15 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 			curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[0][6];
 		}
 	}
-#endif
 	if (!g_script || !g_script->mIsReadyToExecute)
 	{
-#ifndef _USRDLL
 		if (curr_teb)
 			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 		return 0; // AutoHotkey needs to be running at this point // LOADING_FAILED cant be used due to PTR return type.
 	}
 	int HotkeyCount = Hotkey::sHotkeyCount;
 	HotkeyCriterion *aFirstHotExpr = g_FirstHotExpr,*aLastHotExpr = g_LastHotExpr;
 	g_FirstHotExpr = NULL;g_LastHotExpr = NULL;
-#ifdef _USRDLL
-	g_Loading = true;
-#endif
 	BACKUP_G_SCRIPT
 	int aFuncCount = g_script->mFuncs.mCount; 
 	Func **aFunc = (Func**)malloc(g_script->mFuncs.mCount*sizeof(Func));
@@ -1111,22 +771,13 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 		RESTORE_IF_EXPR
 		g_script->mFuncs.mCount = aFuncCount;
 		g_script->mIsReadyToExecute = true;
-#ifdef _USRDLL
-		g_Loading = false;
-#endif
-#ifndef _USRDLL
 		if (curr_teb)
 			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
-		return NULL;
+	return NULL;
 	}
 	FINALIZE_HOTKEYS
 	RESTORE_IF_EXPR
-	g_script->InitClasses();
 	g_script->mIsReadyToExecute = true;
-#ifdef _USRDLL
-	g_Loading = false;
-#endif
 	g->CurrentFunc = (UserFunc *)aCurrFunc;
 	Line *aTempLine = g_script->mLastLine;
 	Line *aExecLine = g_script->mFirstLine;
@@ -1150,29 +801,31 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 		delete prevLine->mNextLine;
 	}
 	delete aExecLine;
-	for (;Line::sSourceFileCount>aSourceFileIdx;)
-		if (Line::sSourceFile[--Line::sSourceFileCount] != g_script->mOurEXE)
-			free(Line::sSourceFile[Line::sSourceFileCount]);
 	Line::sSourceFileCount = aSourceFileIdx;
 	// Delete used and restore SimpleHeap
 	aSimpleHeap->DeleteAll();
 	delete aSimpleHeap;
-#ifndef _USRDLL
 	if (curr_teb)
 		curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 	return OK;
 }
 
-#ifdef _USRDLL
-EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10)
-#else
+#define INITFUNCANDTOKEN \
+	if (aFuncAndToken.buf == NULL) { \
+		if (!(aFuncAndToken.buf = (LPTSTR)malloc(MAX_INTEGER_SIZE * sizeof(TCHAR)))	|| !(aFuncAndToken.param = (ExprTokenType**)malloc(sizeof(ExprTokenType**) * 10))) \
+			MemoryError(); \
+		aFuncAndToken.mToken.buf = aFuncAndToken.buf; \
+		for (int i = 0; i < 10; i++) \
+		{ \
+			aFuncAndToken.params[i].SetVar(new Var()); \
+			aFuncAndToken.param[i] = &aFuncAndToken.params[i]; \
+		} \
+	}
+
 EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10, DWORD aThreadID)
-#endif
 {
 	HWND msghWnd = g_hWnd;
 	Script *script = g_script;
-#ifndef _USRDLL
 #ifdef _WIN64
 	DWORD ThreadID = __readgsdword(0x48);
 #else
@@ -1180,7 +833,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 #endif
 	PMYTEB curr_teb = NULL;
 	PVOID tls = NULL;
-	if (g_ThreadID != ThreadID || (aThreadID && aThreadID != g_ThreadID))
+	if (g_MainThreadID != ThreadID || (aThreadID && aThreadID != g_MainThreadID))
 	{
 		if (aThreadID)
 		{
@@ -1211,20 +864,21 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 			script = g_script;
 		}
 	}
-#endif
 	if (!g_script || !script->mIsReadyToExecute)
 	{
-#ifndef _USRDLL
 		if (curr_teb)
 			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 		return 0; // AutoHotkey needs to be running at this point //
 	}
 	Func *aFunc = script->FindFunc(func) ;
 	if (aFunc)
-	{	
-		BYTE aSlot = InterlockedIncrement16(&returnCount) & 0xFF;
-		FuncAndToken &aFuncAndToken = aFuncAndTokenToReturn[aSlot];
+	{
+		FuncAndToken &aFuncAndToken = g_FuncAndTokenToReturn[InterlockedIncrement16(&returnCount) & 0xFFF];
+		INITFUNCANDTOKEN
+		if (!aFuncAndToken.buf)
+		{ // init aFuncAndToken
+
+		}
 		int aParamsCount = 0;
 		LPTSTR *params[10] = {&param1,&param2,&param3,&param4,&param5,&param6,&param7,&param8,&param9,&param10};
 		for (;aParamsCount < 10;aParamsCount++)
@@ -1235,157 +889,108 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 			script->ScriptError(ERR_TOO_FEW_PARAMS, func);
 			return _T("");
 		}
-		if(aFunc->IsBuiltIn())
-		{
-			ResultType aResult = OK;
-			if (aParamsCount)
-			{
-				ExprTokenType **new_mem = (ExprTokenType**)realloc(aFuncAndToken.param,sizeof(ExprTokenType)*aParamsCount);
-				if (!new_mem)
-				{
-					script->ScriptError(ERR_OUTOFMEM,func);
-					return _T("");
-				}
-				aFuncAndToken.param = new_mem;
-			}
-			else
-				aFuncAndToken.param = NULL;
-			for (int i = 0;aFunc->mParamCount > i && aParamsCount>i;i++)
-			{
-				aFuncAndToken.param[i] = &aFuncAndToken.params[i];
-				aFuncAndToken.param[i]->SetValue(*params[i]); // Assign parameters
-			}
-			aFuncAndToken.mToken.symbol = SYM_INTEGER;
-			LPTSTR new_buf = (LPTSTR)realloc(aFuncAndToken.buf,MAX_NUMBER_SIZE * sizeof(TCHAR));
-			if (!new_buf)
-			{
-				script->ScriptError(ERR_OUTOFMEM,func);
-				return _T("");
-			}
-			aFuncAndToken.buf = new_buf;
-			aFuncAndToken.mToken.buf = aFuncAndToken.buf;
-			aFuncAndToken.mToken.func = (BuiltInFunc *)aFunc;
-			aFuncAndToken.mToken.marker = (LPTSTR)aFunc->mName;
-			
-			aFunc->Call(aFuncAndToken.mToken, aFuncAndToken.param, aFunc->mParamCount < aParamsCount ? aFunc->mParamCount : aParamsCount);
-
-#ifndef _USRDLL
-			if (curr_teb)
-				curr_teb->ThreadLocalStoragePointer = tls;
-#endif
-			switch (aFuncAndToken.mToken.symbol)
-			{
-			case SYM_VAR: // Caller has ensured that any SYM_VAR's Type() is VAR_NORMAL.
-				if (_tcslen(aFuncAndToken.mToken.var->Contents()))
-				{
-					new_buf = (LPTSTR )realloc((LPTSTR )aFuncAndToken.result_to_return_dll,(_tcslen(aFuncAndToken.mToken.var->Contents()) + 1)*sizeof(TCHAR));
-					if (!new_buf)
-					{
-						script->ScriptError(ERR_OUTOFMEM,func);
-						return _T("");
-					}
-					aFuncAndToken.result_to_return_dll = new_buf;
-					_tcscpy(aFuncAndToken.result_to_return_dll,aFuncAndToken.mToken.var->Contents()); // Contents() vs. mContents to support VAR_CLIPBOARD, and in case mContents needs to be updated by Contents().
-				}
-				else if (aFuncAndToken.result_to_return_dll)
-					*aFuncAndToken.result_to_return_dll = '\0';
-				break;
-			case SYM_STRING:
-				if (_tcslen(aFuncAndToken.mToken.marker))
-				{
-					new_buf = (LPTSTR )realloc((LPTSTR )aFuncAndToken.result_to_return_dll,(_tcslen(aFuncAndToken.mToken.marker) + 1)*sizeof(TCHAR));
-					if (!new_buf)
-					{
-						script->ScriptError(ERR_OUTOFMEM,func);
-						return _T("");
-					}
-					aFuncAndToken.result_to_return_dll = new_buf;
-					_tcscpy(aFuncAndToken.result_to_return_dll,aFuncAndToken.mToken.marker);
-				}
-				else if (aFuncAndToken.result_to_return_dll)
-					*aFuncAndToken.result_to_return_dll = '\0';
-				break;
-			case SYM_INTEGER:
-				new_buf = (LPTSTR )realloc((LPTSTR )aFuncAndToken.result_to_return_dll,MAX_INTEGER_LENGTH);
-				if (!new_buf)
-				{
-					script->ScriptError(ERR_OUTOFMEM,func);
-					return _T("");
-				}
-				aFuncAndToken.result_to_return_dll = new_buf;
-				ITOA64(aFuncAndToken.mToken.value_int64, aFuncAndToken.result_to_return_dll);
-				break;
-			case SYM_FLOAT:
-				new_buf = (LPTSTR )realloc((LPTSTR )aFuncAndToken.result_to_return_dll,MAX_INTEGER_LENGTH);
-				if (!new_buf)
-				{
-					script->ScriptError(ERR_OUTOFMEM,func);
-					return _T("");
-				}
-				aFuncAndToken.result_to_return_dll = new_buf;
-				FTOA(aFuncAndToken.mToken.value_double, aFuncAndToken.result_to_return_dll, MAX_NUMBER_SIZE);
-				break;
-			//case SYM_OBJECT: // L31: Treat objects as empty strings (or TRUE where appropriate).
-			default: // Not an operand: continue on to return the default at the bottom.
-				new_buf = (LPTSTR )realloc((LPTSTR )aFuncAndToken.result_to_return_dll,MAX_INTEGER_LENGTH);
-				if (!new_buf)
-				{
-					script->ScriptError(ERR_OUTOFMEM,func);
-					return _T("");
-				}
-				aFuncAndToken.result_to_return_dll = new_buf;
-				ITOA64(aFuncAndToken.mToken.value_int64, aFuncAndToken.result_to_return_dll);
-			}
-			return aFuncAndToken.result_to_return_dll;
-		}
-		else // UDF
-		{
-#ifndef _USRDLL
-			if (curr_teb)
-				curr_teb->ThreadLocalStoragePointer = tls;
-#endif
-			//for (;aFunc->mParamCount > aParamCount && aParamsCount>aParamCount;aParamCount++)
-			//	aFunc->mParam[aParamCount].var->AssignString(*params[aParamCount]);
-			if (aParamsCount)
-			{
-				ExprTokenType **new_mem = (ExprTokenType**)realloc(aFuncAndToken.param,sizeof(ExprTokenType)*aParamsCount);
-				if (!new_mem)
-				{
-					script->ScriptError(ERR_OUTOFMEM,func);
-					return _T("");
-				}
-				aFuncAndToken.param = new_mem;
-			}
-			else
-				aFuncAndToken.param = NULL;
-			aFuncAndToken.mParamCount = aFunc->mParamCount < aParamsCount && !aFunc->mIsVariadic ? aFunc->mParamCount : aParamsCount;
-			LPTSTR new_buf;
-			for (int i = 0;(aFunc->mParamCount > i || aFunc->mIsVariadic) && aParamsCount>i;i++)
-			{
-				aFuncAndToken.param[i] = &aFuncAndToken.params[i];
-				new_buf = (LPTSTR)realloc(aFuncAndToken.param[i]->marker,(_tcslen(*params[i])+1)*sizeof(TCHAR));
-				if (!new_buf)
-				{
-					script->ScriptError(ERR_OUTOFMEM,func);
-					return _T("");
-				}
-				_tcscpy(new_buf,*params[i]); // Assign parameters
-				aFuncAndToken.param[i]->SetValue(new_buf);
-			}
-			aFuncAndToken.mFunc = aFunc ;
-			SendMessage(msghWnd, AHK_EXECUTE_FUNCTION_DLL, (WPARAM)&aFuncAndToken, NULL);
-			return aFuncAndToken.result_to_return_dll;
-		}
+		if (curr_teb)
+			curr_teb->ThreadLocalStoragePointer = tls;
+		aFuncAndToken.mParamCount = aFunc->mParamCount < aParamsCount && !aFunc->mIsVariadic ? aFunc->mParamCount : aParamsCount;
+		for (int i = 0;(aFunc->mParamCount > i || aFunc->mIsVariadic) && aParamsCount>i;i++)
+			aFuncAndToken.params[i].var->Assign(*params[i]);
+		aFuncAndToken.mFunc = aFunc ;
+		SendMessage(msghWnd, AHK_EXECUTE_FUNCTION, (WPARAM)&aFuncAndToken, NULL);
+		return aFuncAndToken.result_to_return_dll;
 	}
 	else // Function not found
 	{
-#ifndef _USRDLL
 		if (curr_teb)
 			curr_teb->ThreadLocalStoragePointer = tls;
-#endif
 		return _T("");
 	}
 }
+
+
+
+
+EXPORT int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10, DWORD aThreadID)
+{
+	HWND msghWnd = g_hWnd;
+	Script *script = g_script;
+#ifdef _WIN64
+	DWORD ThreadID = __readgsdword(0x48);
+#else
+	DWORD ThreadID = __readfsdword(0x24);
+#endif
+	PMYTEB curr_teb = NULL;
+	PVOID tls = NULL;
+	if (g_MainThreadID != ThreadID || (aThreadID && aThreadID != g_MainThreadID))
+	{
+		if (aThreadID)
+		{
+			for (int i = 0; i < MAX_AHK_THREADS; i++)
+			{
+				if (g_ahkThreads[i][5] == aThreadID)
+				{
+					curr_teb = (PMYTEB)NtCurrentTeb();
+					tls = curr_teb->ThreadLocalStoragePointer;
+					curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[i][6];
+					msghWnd = g_hWnd;
+					script = g_script;
+					break;
+				}
+			}
+			if (!curr_teb)
+			{
+				curr_teb->ThreadLocalStoragePointer = tls;
+				return -1;
+			}
+		}
+		else
+		{
+			curr_teb = (PMYTEB)NtCurrentTeb();
+			tls = curr_teb->ThreadLocalStoragePointer;
+			curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[0][6];
+			msghWnd = g_hWnd;
+			script = g_script;
+		}
+	}
+	if (!g_script || !script->mIsReadyToExecute)
+	{
+		if (curr_teb)
+			curr_teb->ThreadLocalStoragePointer = tls;
+		return -1; // AutoHotkey needs to be running at this point //
+	}
+	Func *aFunc = script->FindFunc(func) ;
+	if (aFunc)
+	{	
+		int aParamsCount = 0;
+		LPTSTR *params[10] = {&param1,&param2,&param3,&param4,&param5,&param6,&param7,&param8,&param9,&param10};
+		for (;aParamsCount < 10;aParamsCount++)
+			if (!*params[aParamsCount])
+				break;
+		if (aParamsCount < aFunc->mMinParams)
+		{
+			script->ScriptError(ERR_TOO_FEW_PARAMS, func);
+			if (tls)
+				curr_teb->ThreadLocalStoragePointer = tls;
+			return -1;
+		}
+		if (curr_teb)
+			curr_teb->ThreadLocalStoragePointer = tls;
+		FuncAndToken & aFuncAndToken = g_FuncAndTokenToReturn[InterlockedIncrement16(&returnCount) & 0xFFF];
+		INITFUNCANDTOKEN
+		aFuncAndToken.mParamCount = aFunc->mParamCount < aParamsCount && !aFunc->mIsVariadic ? aFunc->mParamCount : aParamsCount;
+		for (int i = 0;(aFunc->mParamCount > i || aFunc->mIsVariadic) && aParamsCount>i;i++)
+			aFuncAndToken.params[i].var->Assign(*params[i]);
+		aFuncAndToken.mFunc = aFunc;
+		PostMessage(msghWnd, AHK_EXECUTE_FUNCTION, (WPARAM)&aFuncAndToken,NULL);
+		return 0;
+	} 
+	else // Function not found
+	{
+		if (curr_teb)
+			curr_teb->ThreadLocalStoragePointer = tls;
+		return -1;
+	}
+}
+
 
 //H30 changed to not return anything since it is not used
 void callFuncDll(FuncAndToken *aFuncAndToken)
@@ -1492,89 +1097,41 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 	return;
 }
 
-#ifdef _USRDLL
-void AssignVariant(Var &aArg, VARIANT &aVar, bool aRetainVar = true);
+#ifndef _USRDLL
+//void AssignVariant(Var &aArg, VARIANT &aVar, bool aRetainVar = true);
+void AssignVariant(Var& aArg, VARIANT& aVar, bool aRetainVar = true);
 VARIANT ahkFunctionVariant(LPTSTR func, VARIANT param1,/*[in,optional]*/ VARIANT param2,/*[in,optional]*/ VARIANT param3,/*[in,optional]*/ VARIANT param4,/*[in,optional]*/ VARIANT param5,/*[in,optional]*/ VARIANT param6,/*[in,optional]*/ VARIANT param7,/*[in,optional]*/ VARIANT param8,/*[in,optional]*/ VARIANT param9,/*[in,optional]*/ VARIANT param10, int sendOrPost)
 {
 	UserFunc *aFunc = (UserFunc *)g_script->FindFunc(func);
-	BYTE aSlot = InterlockedIncrement16(&returnCount) & 0xFF;
-	FuncAndToken &aFuncAndToken = aFuncAndTokenToReturn[aSlot];
+	FuncAndToken &aFuncAndToken = g_FuncAndTokenToReturn[InterlockedIncrement16(&returnCount) & 0xFFF];
+	INITFUNCANDTOKEN
 	if (aFunc)
-	{	
-		VARIANT *variants[10] = {&param1,&param2,&param3,&param4,&param5,&param6,&param7,&param8,&param9,&param10};
+	{
+		VARIANT* variants[10] = { &param1,&param2,&param3,&param4,&param5,&param6,&param7,&param8,&param9,&param10 };
 		int aParamsCount = 0;
-		for (;aParamsCount < 10;aParamsCount++)
+		for (; aParamsCount < 10; aParamsCount++)
 			if (variants[aParamsCount]->vt == VT_ERROR)
 				break;
 		if (aParamsCount < aFunc->mMinParams)
 		{
 			g_script->ScriptError(ERR_TOO_FEW_PARAMS);
-			aFuncAndToken.variant_to_return_dll.vt = VT_NULL ;
+			aFuncAndToken.variant_to_return_dll.vt = VT_NULL;
 			return aFuncAndToken.variant_to_return_dll;
 		}
-		if(aFunc->IsBuiltIn())
+		for (int i = 0; aParamsCount > i; i++)
+			AssignVariant(*aFuncAndToken.params[i].var, *variants[i], true);
+		aFuncAndToken.mFunc = aFunc;
+		aFuncAndToken.mParamCount = aFunc->mParamCount < aParamsCount && !aFunc->mIsVariadic ? aFunc->mParamCount : aParamsCount;
+		if (sendOrPost)
 		{
-			ResultType aResult = OK;
-			ResultToken aResultToken;
-			ExprTokenType **aParam = (ExprTokenType**)_alloca(sizeof(ExprTokenType)*10);
-			if (!aParam)
-			{
-				g_script->ScriptError(ERR_OUTOFMEM,func);
-				aFuncAndToken.variant_to_return_dll.vt = NULL;
-				return aFuncAndToken.variant_to_return_dll;
-			}
-			for (int i = 0;aFunc->mParamCount > i && aParamsCount>i;i++)
-			{
-				aParam[i] = (ExprTokenType*)_alloca(sizeof(ExprTokenType));
-				if (!aParam[i])
-				{
-					aFuncAndToken.variant_to_return_dll.vt = NULL;
-					return aFuncAndToken.variant_to_return_dll;
-				}
-				aParam[i]->symbol = SYM_VAR;
-				aParam[i]->var = (Var*)alloca(sizeof(Var));
-				if (!aParam[i]->var)
-				{
-					aFuncAndToken.variant_to_return_dll.vt = NULL;
-					return aFuncAndToken.variant_to_return_dll;
-				}
-				// prepare variable
-				aParam[i]->var->mType = VAR_NORMAL;
-				aParam[i]->var->mAttrib = 0;
-				aParam[i]->var->mByteCapacity = 0;
-				aParam[i]->var->mHowAllocated = ALLOC_MALLOC;
-				
-				AssignVariant(*aParam[i]->var, *variants[i],false);
-			}
-			aResultToken.symbol = SYM_INTEGER;
-			aResultToken.marker = (LPTSTR)aFunc->mName;
-			
-			aFunc->mBIF(aResultToken,aParam,aFunc->mParamCount < aParamsCount ? aFunc->mParamCount : aParamsCount);
-
-			// free all variables in case memory was allocated
-			for (int i = 0;i < aParamsCount;i++)
-				aParam[i]->var->Free();
-			TokenToVariant(aResultToken, aFuncAndToken.variant_to_return_dll, FALSE);
+			callFuncDllVariant(&aFuncAndToken);
 			return aFuncAndToken.variant_to_return_dll;
 		}
-		else // UDF
+		else
 		{
-			for (int i = 0;aFunc->mParamCount > i;i++)
-				AssignVariant(*aFunc->mParam[i].var, *variants[i],false);
-			aFuncAndToken.mFunc = aFunc ;
-			aFuncAndToken.mParamCount = aFunc->mParamCount < aParamsCount && !aFunc->mIsVariadic ? aFunc->mParamCount : aParamsCount;
-			if (sendOrPost == 1)
-			{
-				SendMessage(g_hWnd, AHK_EXECUTE_FUNCTION_VARIANT, (WPARAM)&aFuncAndToken, NULL);
-				return aFuncAndToken.variant_to_return_dll;
-			}
-			else
-			{
-				PostMessage(g_hWnd, AHK_EXECUTE_FUNCTION_VARIANT, (WPARAM)&aFuncAndToken,NULL);
-				VARIANT &r =  aFuncAndToken.variant_to_return_dll;
-				r.vt = VT_NULL ;
-				return r ; 
-			}
+			aFuncAndToken.variant_to_return_dll.vt = VT_BOOL;
+			aFuncAndToken.variant_to_return_dll.boolVal = PostMessage(g_hWnd, AHK_EXECUTE_FUNCTION_VARIANT, (WPARAM)&aFuncAndToken, (LPARAM)NULL);
+			return aFuncAndToken.variant_to_return_dll;
 		}
 	}
 	aFuncAndToken.variant_to_return_dll.vt = VT_NULL ;

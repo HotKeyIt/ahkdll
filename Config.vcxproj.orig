@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <!-- flags to make things easier -->
+    <ConfigRelease>false</ConfigRelease>
+    <ConfigReleaseDll>false</ConfigReleaseDll>
+    <ConfigDebug>false</ConfigDebug>
+    <ConfigRelease Condition="'$(Configuration)'=='Release' OR '$(Configuration)'=='MT_Release'">true</ConfigRelease>
+    <ConfigRelease Condition="'$(Configuration)'=='Release' OR '$(Configuration)'=='MT_Release'">true</ConfigRelease>
+    <ConfigReleaseDll Condition="'$(Configuration)'=='ReleaseDll' OR '$(Configuration)'=='MT_ReleaseDll'">true</ConfigReleaseDll>
+    <ConfigDebug Condition="'$(Configuration)'=='Debug'">true</ConfigDebug>
+    <!-- CharacterSet may be set on command-line:
+      MSBuild AutoHotkeyx.sln /p:Configuration=Release;CharacterSet=MultiByte -->
+    <CharacterSet>Unicode</CharacterSet>
+    <!-- global setting -->
+    <WholeProgramOptimization Condition="!$(ConfigDebug)">true</WholeProgramOptimization>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <!-- pre-processor definition: NDEBUG/_DEBUG -->
+      <PreprocessorDefinitions Condition="!$(ConfigDebug)">NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition=" $(ConfigDebug)">_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <!-- global setting -->
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <WarningLevel>Level3</WarningLevel>
+      <!-- default -->
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <RuntimeLibrary Condition="'$(Configuration)'=='Release' OR '$(Configuration)'=='ReleaseDll'">MultiThreadedDLL</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <!-- misc optimizations -->
+  <ItemDefinitionGroup Condition="!$(ConfigDebug)">
+    <ClCompile>
+      <Optimization>MaxSpeed</Optimization>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <OmitFramePointers>true</OmitFramePointers>
+      <StringPooling>true</StringPooling>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <AdditionalOptions Condition="$(PlatformToolsetVersion) &gt;= 140">/Zc:threadSafeInit- %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <!-- note linker settings don't apply to lib_pcre -->
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <OptimizeReferences>true</OptimizeReferences>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <!-- Disable this for now since numerous function signatures differ in Unicode vs ANSI builds.
+        <FunctionOrder>source\misc\function_order_for_linker_optimization.txt</FunctionOrder>
+        below: /IGNORE:4037
+      -->
+      <AdditionalOptions>/SAFESEH:NO %(AdditionalOptions)</AdditionalOptions>
+    </Link>
+  </ItemDefinitionGroup>
+  <PropertyGroup>
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <!-- debug settings, defined last to override things set above -->
+  <ItemDefinitionGroup Condition="$(ConfigDebug)">
+    <ClCompile>
+      <Optimization>Disabled</Optimization>
+      <MinimalRebuild>true</MinimalRebuild>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+    </ClCompile>
+    <Link>
+      <!-- note linker settings don't apply to lib_pcre -->
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <!-- import compiler and platform defaults -->
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" />
+  </ImportGroup>
+</Project>

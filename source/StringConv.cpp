@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "pch.h"
 #include "KuString.h"
 #include "StringConv.h"
 #include "util.h"

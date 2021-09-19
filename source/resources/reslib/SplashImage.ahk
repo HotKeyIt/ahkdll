@@ -1,103 +1,17 @@
-﻿SplashImage_Struct(){
-  static MAX_SPLASHIMAGE_WINDOWS:=10,SplashType:="int width;int height;int bar_pos;int margin_x;int margin_y;int text1_height;int object_width;int object_height;HWND hwnd;int pic_type;union{HBITMAP pic_bmp;HICON pic_icon};HWND hwnd_bar;HWND hwnd_text1;HWND hwnd_text2;HFONT hfont1;HFONT hfont2;HBRUSH hbrush;COLORREF color_bk;COLORREF color_text"
-    ,g_SplashImage:=Struct("SplashImage_Struct(SplashType)[" MAX_SPLASHIMAGE_WINDOWS "]")
-  return g_SplashImage
-}
-SplashImage_OnMessage(wParam,lParam,msg,hwnd){
-  static MAX_SPLASHIMAGE_WINDOWS:=10,SW_SHOWNOACTIVATE:=4,WM_SETTEXT:=12
-    ,WS_DISABLED:=134217728,WS_POPUP:=2147483648,WS_CAPTION:=12582912,WS_EX_TOPMOST:=8,COORD_UNSPECIFIED:=(-2147483647 - 1)
-    ,WS_SIZEBOX:=262144,WS_MINIMIZEBOX:=131072,WS_MAXIMIZEBOX:=65536,WS_SYSMENU:=524288,LOGPIXELSY:=90,IMAGE_BITMAP:=0
-    ,FW_DONTCARE:=0,CLR_DEFAULT:=4278190080,CLR_NONE:=4294967295,DEFAULT_GUI_FONT:=17,IMAGE_ICON:=1,SS_LEFT:=0
-    ,FW_SEMIBOLD:=600, DEFAULT_CHARSET:=1, OUT_TT_PRECIS:=4, CLIP_DEFAULT_PRECIS:=0, PROOF_QUALITY:=2,FF_DONTCARE:=0
-    ,DT_CALCRECT:=1024, DT_WORDBREAK:=16, DT_EXPANDTABS:=64,SPI_GETWORKAREA:=48,IDI_MAIN:=159,LR_SHARED:=32768,ICON_SMALL:=0,ICON_BIG:=1
-    ,WS_CHILD:=1073741824,WS_VISIBLE:=268435456,SS_NOPREFIX:=0x80,SS_CENTER:=1,SS_LEFTNOWORDWRAP:=12,PBM_GETPOS:=1032,PBM_SETPOS:=1026
-    ,PBM_SETRANGE:=1025,PBM_SETRANGE32:=1030,WS_EX_CLIENTEDGE:=512,PBS_SMOOTH:=1,WM_PAINT:=15,WM_SIZE:=5
-    ,PBM_SETBARCOLOR:=1033,PBM_SETBKCOLOR:=8193,WM_SETFONT:=48,SRCCOPY:=13369376,DI_NORMAL:=3,COLOR_BTNFACE:=15,WM_ERASEBKGND:=20,WM_CTLCOLORSTATIC:=312
-    ,Black:=0,Silver:=0xC0C0C0,Gray:=0x808080,White:=0xFFFFFF,Maroon:=0x000080,Red:=0x0000FF
-    ,Purple:=0x800080,Fuchsia:=0xFF00FF,Green:=0x008000,Lime:=0x00FF00,Olive:=0x008080
-    ,Yellow:=0x00FFFF,Navy:=0x800000,Blue:=0xFF0000,Teal:=0x808000,Aqua:=0xFFFF00,Default:=CLR_DEFAULT
-    ,g_SplashImage:=SplashImage_Struct(),RECT:="LONG left,LONG top,LONG right,LONG bottom",client_rect:=Struct(RECT), draw_rect:=Struct(RECT), main_rect:=Struct(RECT), work_rect:=Struct(RECT)
-  Loop MAX_SPLASHIMAGE_WINDOWS
-    if (g_SplashImage[i:=A_Index].hwnd == hwnd)
-      break
-  if (i == MAX_SPLASHIMAGE_WINDOWS){ ; It's not a progress window either.
-    ; Let DefWindowProc() handle it (should probably never happen since currently the only
-    ; other type of window is SplashText, which never receive this msg?)
-    Return 1
-  }
-  splash := g_SplashImage[i]
-
-  If (msg=WM_SIZE){
-    new_width := lParam & 0xFFFF
-    new_height := (lParam>>16) & 0xFFFF
-    if (new_width != splash.width || new_height != splash.height)
-    {
-      GetClientRect(splash.hwnd, client_rect[])
-      control_width := client_rect.right - (splash.margin_x * 2)
-      bar_y := splash.margin_y + (splash.text1_height ? (splash.text1_height + splash.margin_y) : 0)
-      sub_y := bar_y + splash.object_height + (splash.object_height ? splash.margin_y : 0)  ;  Calculate the Y position of each control in the window.
-      ; The Y offset for each control should match those used in Splash():
-      if (new_width != splash.width)
-      {
-        if (splash.hwnd_text1) ; This control doesn't exist if the main text was originally blank.
-          MoveWindow(splash.hwnd_text1, splash.margin_x, splash.margin_y, control_width, splash.text1_height, FALSE)
-        if (splash.hwnd_bar)
-          MoveWindow(splash.hwnd_bar, splash.margin_x, bar_y, control_width, splash.object_height, FALSE)
-        splash.width := new_width
-      }
-      ; Move the window EVEN IF new_height == splash.height because otherwise the text won't
-      ; get re-centered when only the width of the window changes:
-      MoveWindow(splash.hwnd_text2, splash.margin_x, sub_y, control_width, (client_rect.bottom - client_rect.top) - sub_y, FALSE) ; Negative height seems handled okay.
-      ; Specifying true for "repaint" in MoveWindow() is not always enough refresh the text correctly,
-      ; so this is done instead:
-      InvalidateRect(splash.hwnd, client_rect[], TRUE)
-      ; If the user resizes the window, have that size retained (remembered) until the script
-      ; explicitly changes it or the script destroys the window.
-      splash.height := new_height
-    }
-    return 0 ; i.e. completely handled here.
-  }	else if (msg=WM_CTLCOLORSTATIC){
-    if (!splash.hbrush && splash.color_text == CLR_DEFAULT) ; Let DWP handle it.
-      Return DefWindowProc(hWnd, Msg, wParam, lParam)
-    ; Since we're processing this msg and not DWP, must set background color unconditionally,
-    ; otherwise plain white will likely be used:
-    SetBkColor(wParam, splash.hbrush ? splash.color_bk : GetSysColor(COLOR_BTNFACE))
-    if (splash.color_text != CLR_DEFAULT)
-      SetTextColor(wParam, splash.color_text)
-    ; Always return a real HBRUSH so that Windows knows we altered the HDC for it to use:
-    return splash.hbrush ? splash.hbrush : GetSysColorBrush(COLOR_BTNFACE)
-  } else if (msg=WM_ERASEBKGND){
-    if (splash.pic_bmp) ; And since there is a pic, its object_width/height should already be valid.
-    {
-      ypos := splash.margin_y + (splash.text1_height ? (splash.text1_height + splash.margin_y) : 0)
-      if (splash.pic_type == IMAGE_BITMAP)
-      {
-        hdc := CreateCompatibleDC(wParam)
-        ,hbmpOld := SelectObject(hdc, splash.pic_bmp)
-        ,BitBlt(wParam, splash.margin_x, ypos, splash.object_width, splash.object_height, hdc, 0, 0, SRCCOPY)
-        ,SelectObject(hdc, hbmpOld)
-        ,DeleteDC(hdc)
-      }
-      else ; IMAGE_ICON
-        DrawIconEx(wParam, splash.margin_x, ypos, splash.pic_icon, splash.object_width, splash.object_height, 0, 0, DI_NORMAL)
-      ; Prevent "flashing" by erasing only the part that hasn't already been drawn:
-      ExcludeClipRect(wParam, splash.margin_x, ypos, splash.margin_x + splash.object_width, ypos + splash.object_height)
-      ,hrgn := CreateRectRgn(0, 0, 1, 1)
-      ,GetClipRgn(wParam, hrgn)
-      ,FillRgn(wParam, hrgn, splash.hbrush ? splash.hbrush : GetSysColorBrush(COLOR_BTNFACE))
-      ,DeleteObject(hrgn)
-      return 1
-    }
-    ; Otherwise, it's a Progress window (or a SplashImage window with no picture):
-    if (splash.hbrush){ ; Let DWP handle it.
-      GetClipBox(hdc, client_rect[])
-      ,FillRect(hdc, client_rect[], splash.hbrush)
-    }
-  }
-  ;~ DllCall("InvalidateRect","PTR",splash.hwnd,"PTR", NULL,"Int", TRUE)
-  return DefWindowProc(hWnd, Msg, wParam, lParam) ;ret
-}
-SplashImage(aImageFile,aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFontName:=""){
+﻿SplashImage(aImageFile,aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFontName:=""){ ;SplashImage_OnMessage(wParam,lParam,msg,hwnd)
+  static SW_SHOWNOACTIVATE:=4,WM_SETTEXT:=12 ; For OnMessage
+        ,WS_DISABLED:=134217728,WS_POPUP:=2147483648,WS_CAPTION:=12582912,WS_EX_TOPMOST:=8,COORD_UNSPECIFIED:=(-2147483647 - 1)
+        ,WS_SIZEBOX:=262144,WS_MINIMIZEBOX:=131072,WS_MAXIMIZEBOX:=65536,WS_SYSMENU:=524288,LOGPIXELSY:=90,IMAGE_BITMAP:=0
+        ,FW_DONTCARE:=0,CLR_DEFAULT:=4278190080,CLR_NONE:=4294967295,DEFAULT_GUI_FONT:=17,IMAGE_ICON:=1,SS_LEFT:=0
+        ,FW_SEMIBOLD:=600, DEFAULT_CHARSET:=1, OUT_TT_PRECIS:=4, CLIP_DEFAULT_PRECIS:=0, PROOF_QUALITY:=2,FF_DONTCARE:=0
+        ,DT_CALCRECT:=1024, DT_WORDBREAK:=16, DT_EXPANDTABS:=64,SPI_GETWORKAREA:=48,IDI_MAIN:=159,LR_SHARED:=32768,ICON_SMALL:=0,ICON_BIG:=1
+        ,WS_CHILD:=1073741824,WS_VISIBLE:=268435456,SS_NOPREFIX:=0x80,SS_CENTER:=1,SS_LEFTNOWORDWRAP:=12,PBM_GETPOS:=1032,PBM_SETPOS:=1026
+        ,PBM_SETRANGE:=1025,PBM_SETRANGE32:=1030,WS_EX_CLIENTEDGE:=512,PBS_SMOOTH:=1,WM_PAINT:=15,WM_SIZE:=5
+        ,PBM_SETBARCOLOR:=1033,PBM_SETBKCOLOR:=8193,WM_SETFONT:=48,SRCCOPY:=13369376,DI_NORMAL:=3,COLOR_BTNFACE:=15,WM_ERASEBKGND:=20,WM_CTLCOLORSTATIC:=312
+        ,Black:=0,Silver:=0xC0C0C0,Gray:=0x808080,White:=0xFFFFFF,Maroon:=0x000080,Red:=0x0000FF
+        ,Purple:=0x800080,Fuchsia:=0xFF00FF,Green:=0x008000,Lime:=0x00FF00,Olive:=0x008080
+        ,Yellow:=0x00FFFF,Navy:=0x800000,Blue:=0xFF0000,Teal:=0x808000,Aqua:=0xFFFF00,Default:=CLR_DEFAULT
+        ,g_SplashImage:=SplashImage_Struct(),RECT:="LONG left,LONG top,LONG right,LONG bottom",client_rect:=Struct(RECT), draw_rect:=Struct(RECT), main_rect:=Struct(RECT), work_rect:=Struct(RECT)
   static MAX_SPLASHIMAGE_WINDOWS:=10,SW_SHOWNOACTIVATE:=4,WM_SETTEXT:=12,WM_SETICON:=128
         ,WS_DISABLED:=134217728,WS_POPUP:=2147483648,WS_CAPTION:=12582912,WS_EX_TOPMOST:=8,COORD_UNSPECIFIED:=(-2147483647 - 1)
         ,WS_SIZEBOX:=262144,WS_MINIMIZEBOX:=131072,WS_MAXIMIZEBOX:=65536,WS_SYSMENU:=524288,LOGPIXELSX:=88,LOGPIXELSY:=90,IMAGE_BITMAP:=0
@@ -113,14 +27,98 @@ SplashImage(aImageFile,aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFon
         ,Yellow:=0x00FFFF,Navy:=0x800000,Blue:=0xFF0000,Teal:=0x808000,Aqua:=0xFFFF00,Default:=CLR_DEFAULT
         ,CStringW:="UInt m_sNull,PTR m_pData,bool m_bDirty"
         ,Script:="PTR **mVar,**mLazyVar;int mVarCount,mVarCountMax,mLazyVarCount;PTR *mFirstGroup,*mLastGroup;int mCurrentFuncOpenBlockCount;bool mNextLineIsFunctionBody;int mClassObjectCount;PTR *mClassObject[5];TCHAR mClassName[256];PTR *mUnresolvedClasses;PTR *mClassProperty;LPTSTR mClassPropertyDef;int mCurrFileIndex;UINT mCombinedLineNumber;bool mNoHotkeyLabels,mMenuUseErrorLevel;PTR mNIC;PTR *mFirstLine,*mLastLine,*mFirstStaticLine,*mLastStaticLine;PTR *mFirstLabel,*mLastLabel;PTR **mFunc;int mFuncCount,mFuncCountMax;PTR *mTempLine;PTR *mTempLabel;PTR *mTempFunc;PTR *mCurrLine;PTR *mPlaceholderLabel;TCHAR mThisMenuItemName[261],mThisMenuName[261];LPTSTR mThisHotkeyName,mPriorHotkeyName;HWND mNextClipboardViewer;bool mOnClipboardChangeIsRunning;PTR *mOnClipboardChangeFunc,*mOnExitFunc;int mExitReason;PTR *mFirstTimer,*mLastTimer;UINT mTimerCount,mTimerEnabledCount;PTR *mFirstMenu,*mLastMenu;UINT mMenuCount;DWORD mThisHotkeyStartTime,mPriorHotkeyStartTime;TCHAR mEndChar;BYTE mThisHotkeyModifiersLR;LPTSTR mFileSpec,mFileDir,mFileName,mOurEXE,mOurEXEDir,mMainWindowTitle;bool mIsReadyToExecute,mAutoExecSectionIsRunning,mIsRestart,mErrorStdOut;PTR *mIncludeLibraryFunctionsThenExit;int mUninterruptedLineCountMax,mUninterruptibleTime;DWORD mLastPeekTime;SplashImage(CStringW) mRunAsUser,mRunAsPass,mRunAsDomain;HICON mCustomIcon,mCustomIconSmall;LPTSTR mCustomIconFile;bool mIconFrozen;LPTSTR mTrayIconTip;UINT mCustomIconNumber;PTR *mTrayMenu"
+        ,SplashType:="int width;int height;int bar_pos;int margin_x;int margin_y;int text1_height;int object_width;int object_height;HWND hwnd;int pic_type;union{HBITMAP pic_bmp;HICON pic_icon};HWND hwnd_bar;HWND hwnd_text1;HWND hwnd_text2;HFONT hfont1;HFONT hfont2;HBRUSH hbrush;COLORREF color_bk;COLORREF color_text"
+        ,g_SplashImage:=Struct("SplashImage_Struct(SplashType)[" MAX_SPLASHIMAGE_WINDOWS "]")
         ,g_script:=Struct(Script,A_ScriptStruct)
-        ,g_SplashImage:=SplashImage_Struct()
         ,tm:=Struct("LONG tmHeight;LONG tmAscent;LONG tmDescent;LONG tmInternalLeading;LONG tmExternalLeading;LONG tmAveCharWidth;LONG tmMaxCharWidth;LONG tmWeight;LONG tmOverhang;LONG tmDigitizedAspectX;LONG tmDigitizedAspectY;WCHAR tmFirstChar;WCHAR tmLastChar;WCHAR tmDefaultChar;WCHAR tmBreakChar;BYTE tmItalic;BYTE tmUnderlined;BYTE tmStruckOut;BYTE tmPitchAndFamily;BYTE tmCharSet") ;TEXTMETRICW
         ,iconinfo:=Struct("BOOL fIcon;DWORD xHotspot;DWORD yHotspot;HBITMAP hbmMask;HBITMAP hbmColor") ;ICONINFO
         ,RECT:="LONG left,LONG top,LONG right,LONG bottom",client_rect:=Struct(RECT), draw_rect:=Struct(RECT), main_rect:=Struct(RECT), work_rect:=Struct(RECT)
         ,bmp:=Struct("LONG bmType;LONG bmWidth;LONG bmHeight;LONG bmWidthBytes;WORD bmPlanes;WORD bmBitsPixel;LPVOID bmBits") ;BITMAP
         ,initGui:=Gui.new().Destroy() ; required to init ahk_class AutoHotkeyGUI
         ,_ttoi:=DynaCall("msvcrt\_wtoi","t==t")
+  if (Type(aOptions) Type(aSubText) Type(aMainText) Type(aTitle) = "IntegerIntegerIntegerInteger"){
+    wParam:=aImageFile,lParam:=aOptions,msg:=aSubText,hwnd:=aMainText
+    Loop MAX_SPLASHIMAGE_WINDOWS
+      if (g_SplashImage[i:=A_Index].hwnd == hwnd)
+        break
+    if (i == MAX_SPLASHIMAGE_WINDOWS){ ; It's not a progress window either.
+      ; Let DefWindowProc() handle it (should probably never happen since currently the only
+      ; other type of window is SplashText, which never receive this msg?)
+      Return 1
+    }
+    splash := g_SplashImage[i]
+
+    If (msg=WM_SIZE){
+      new_width := lParam & 0xFFFF
+      new_height := (lParam>>16) & 0xFFFF
+      if (new_width != splash.width || new_height != splash.height)
+      {
+        GetClientRect(splash.hwnd, client_rect[])
+        control_width := client_rect.right - (splash.margin_x * 2)
+        bar_y := splash.margin_y + (splash.text1_height ? (splash.text1_height + splash.margin_y) : 0)
+        sub_y := bar_y + splash.object_height + (splash.object_height ? splash.margin_y : 0)  ;  Calculate the Y position of each control in the window.
+        ; The Y offset for each control should match those used in Splash():
+        if (new_width != splash.width)
+        {
+          if (splash.hwnd_text1) ; This control doesn't exist if the main text was originally blank.
+            MoveWindow(splash.hwnd_text1, splash.margin_x, splash.margin_y, control_width, splash.text1_height, FALSE)
+          if (splash.hwnd_bar)
+            MoveWindow(splash.hwnd_bar, splash.margin_x, bar_y, control_width, splash.object_height, FALSE)
+          splash.width := new_width
+        }
+        ; Move the window EVEN IF new_height == splash.height because otherwise the text won't
+        ; get re-centered when only the width of the window changes:
+        MoveWindow(splash.hwnd_text2, splash.margin_x, sub_y, control_width, (client_rect.bottom - client_rect.top) - sub_y, FALSE) ; Negative height seems handled okay.
+        ; Specifying true for "repaint" in MoveWindow() is not always enough refresh the text correctly,
+        ; so this is done instead:
+        InvalidateRect(splash.hwnd, client_rect[], TRUE)
+        ; If the user resizes the window, have that size retained (remembered) until the script
+        ; explicitly changes it or the script destroys the window.
+        splash.height := new_height
+      }
+      return 0 ; i.e. completely handled here.
+    }	else if (msg=WM_CTLCOLORSTATIC){
+      if (!splash.hbrush && splash.color_text == CLR_DEFAULT) ; Let DWP handle it.
+        Return DefWindowProc(hWnd, Msg, wParam, lParam)
+      ; Since we're processing this msg and not DWP, must set background color unconditionally,
+      ; otherwise plain white will likely be used:
+      SetBkColor(wParam, splash.hbrush ? splash.color_bk : GetSysColor(COLOR_BTNFACE))
+      if (splash.color_text != CLR_DEFAULT)
+        SetTextColor(wParam, splash.color_text)
+      ; Always return a real HBRUSH so that Windows knows we altered the HDC for it to use:
+      return splash.hbrush ? splash.hbrush : GetSysColorBrush(COLOR_BTNFACE)
+    } else if (msg=WM_ERASEBKGND){
+      if (splash.pic_bmp) ; And since there is a pic, its object_width/height should already be valid.
+      {
+        ypos := splash.margin_y + (splash.text1_height ? (splash.text1_height + splash.margin_y) : 0)
+        if (splash.pic_type == IMAGE_BITMAP)
+        {
+          hdc := CreateCompatibleDC(wParam)
+          ,hbmpOld := SelectObject(hdc, splash.pic_bmp)
+          ,BitBlt(wParam, splash.margin_x, ypos, splash.object_width, splash.object_height, hdc, 0, 0, SRCCOPY)
+          ,SelectObject(hdc, hbmpOld)
+          ,DeleteDC(hdc)
+        }
+        else ; IMAGE_ICON
+          DrawIconEx(wParam, splash.margin_x, ypos, splash.pic_icon, splash.object_width, splash.object_height, 0, 0, DI_NORMAL)
+        ; Prevent "flashing" by erasing only the part that hasn't already been drawn:
+        ExcludeClipRect(wParam, splash.margin_x, ypos, splash.margin_x + splash.object_width, ypos + splash.object_height)
+        ,hrgn := CreateRectRgn(0, 0, 1, 1)
+        ,GetClipRgn(wParam, hrgn)
+        ,FillRgn(wParam, hrgn, splash.hbrush ? splash.hbrush : GetSysColorBrush(COLOR_BTNFACE))
+        ,DeleteObject(hrgn)
+        return 1
+      }
+      ; Otherwise, it's a Progress window (or a SplashImage window with no picture):
+      if (splash.hbrush){ ; Let DWP handle it.
+        GetClipBox(hdc, client_rect[])
+        ,FillRect(hdc, client_rect[], splash.hbrush)
+      }
+    }
+    ;~ DllCall("InvalidateRect","PTR",splash.hwnd,"PTR", NULL,"Int", TRUE)
+    return DefWindowProc(hWnd, Msg, wParam, lParam) ;ret
+  }
+  
   window_index := 1  ;  Set the default window to operate upon (the first).
   image_filename := aImageFile  ;  Set default.
   turn_off := false
@@ -393,7 +391,7 @@ SplashImage(aImageFile,aOptions:="",aSubText:="", aMainText:="", aTitle:="",aFon
   ;  Get name and size of default font.
   hfont_default := GetStockObject(DEFAULT_GUI_FONT)
   hfont_old := SelectObject(hdc, hfont_default)
-  default_font_name:=BufferAlloc(65*2)
+  default_font_name:=Buffer(65*2)
   GetTextFace(hdc, 65 - 1, default_font_name.Ptr)
   default_font_name:=StrGet(default_font_name)
   GetTextMetrics(hdc, tm[])

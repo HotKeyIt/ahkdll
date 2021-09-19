@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #define INVOKE_TYPE			(aFlags & IT_BITMASK)
 #define IS_INVOKE_SET		(aFlags & IT_SET)
@@ -7,12 +7,6 @@
 #define IS_INVOKE_META		(aFlags & IF_BYPASS_METAFUNC)
 
 #define INVOKE_NOT_HANDLED	CONDITION_FALSE
-
-//
-// sizeof_maxsize - helper for Struct and sizeof
-//
-BYTE sizeof_maxsize(TCHAR *buf);
-
 
 //
 // ObjectBase - Common base class, implements reference counting.
@@ -49,7 +43,12 @@ public:
 			// is copied to another variable (AddRef() is called).  To gracefully handle this, let
 			// implementors decide when to delete and just decrement mRefCount if it doesn't happen.
 			if (Delete())
-				return 0;
+				return 0; // Object was deleted, so cannot check or decrement --mRefCount.
+			// If the object is implemented correctly, false was returned because:
+			//  a) mRefCount > 1; e.g. __delete has "resurrected" the object by storing a reference.
+			//  b) There are no more counted references to this object, but its lifetime is tied to
+			//     another object, which can "resurrect" this one.  The other object must have some
+			//     way to delete this one when appropriate, such as by calling AddRef() & Release().
 			// Implementor has ensured Delete() returns false only if delete wasn't called (due to
 			// remaining references to this), so we must assume mRefCount > 1.  If Delete() really
 			// deletes the object and (erroneously) returns false, checking if mRefCount is still
@@ -58,12 +57,18 @@ public:
 		return InterlockedDecrement(&mRefCount); // --mRefCount;
 	}
 
+	ULONG RefCount() { return mRefCount; }
+
 	ObjectBase() : mRefCount(1) {}
 
 	// Declare a virtual destructor for correct 'delete this' behaviour in Delete(),
 	// and because it is likely to be more convenient and reliable than overriding
 	// Delete(), especially with a chain of derived types.
 	virtual ~ObjectBase() {}
+
+	bool IsOfType(Object *aPrototype) override;
+
+	ResultType Invoke(IObject_Invoke_PARAMS_DECL);
 };
 
 
@@ -71,7 +76,8 @@ public:
 // Helpers for IObject::Invoke implementations.
 //
 
-typedef ResultType (IObject::*ObjectMethod)(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+typedef BuiltInFunctionType ObjectCtor;
+typedef void (IObject::*ObjectMethod)(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 struct ObjectMember
 {
 	LPTSTR name;
@@ -87,6 +93,16 @@ struct ObjectMember
 #define Object_Property_get(name, ...)             Object_Member(name, Invoke, P_##name, IT_GET, __VA_ARGS__)
 #define Object_Property_get_set(name, ...)         Object_Member(name, Invoke, P_##name, IT_SET, __VA_ARGS__)
 #define MAXP_VARIADIC 255
+
+
+// Helper for predefined classes
+struct ClassFactoryDef
+{
+	BuiltInFunctionType call;
+	UCHAR min_params, max_params, is_variadic;
+	ClassFactoryDef(BuiltInFunctionType aCall, int aMin, int aMax, bool aVariadic = false) : call(aCall), min_params(aMin), max_params(aMax), is_variadic(aVariadic) {}
+	ClassFactoryDef(BuiltInFunctionType aCall = nullptr) : ClassFactoryDef(aCall, 1, 1, true) {}
+};
 
 
 //
@@ -175,7 +191,7 @@ typename FlatVector<T, index_t>::OneT FlatVector<T, index_t>::Empty;
 
 class Property
 {
-	IObject *mGet = nullptr, *mSet = nullptr;
+	IObject *mGet = nullptr, *mSet = nullptr, *mCall = nullptr;
 
 	void SetEtter(IObject *&aMemb, IObject *aFunc)
 	{
@@ -197,13 +213,17 @@ public:
 			mGet->Release();
 		if (mSet)
 			mSet->Release();
+		if (mCall)
+			mCall->Release();
 	}
 
 	IObject *Getter() { return mGet; }
 	IObject *Setter() { return mSet; }
+	IObject *Method() { return mCall; }
 
 	void SetGetter(IObject *aFunc) { SetEtter(mGet, aFunc); }
 	void SetSetter(IObject *aFunc) { SetEtter(mSet, aFunc); }
+	void SetMethod(IObject *aFunc) { SetEtter(mCall, aFunc); }
 };
 
 
@@ -256,7 +276,7 @@ protected:
 		void ReturnMove(ResultToken &result);
 		void Free();
 	
-		inline void ToToken(ExprTokenType &aToken); // Used when we want the value as is, in a token.  Does not AddRef() or copy strings.
+		void ToToken(ExprTokenType &aToken); // Used when we want the value as is, in a token.  Does not AddRef() or copy strings.
 	};
 
 	struct FieldType : Variant
@@ -267,22 +287,13 @@ protected:
 		~FieldType() { free(name); }
 	};
 
-	struct MethodType
-	{
-		name_t name;
-		IObject *func;
-		MethodType() = delete;
-		~MethodType() { func->Release(); free(name); }
-	};
-
 	enum EnumeratorType
 	{
 		Enum_Properties,
 		Enum_Methods
 	};
 
-	ResultType GetEnumProp(UINT &aIndex, Var *aName, Var *aVal);
-	ResultType GetEnumMethod(UINT &aIndex, Var *aName, Var *aVal);
+	ResultType GetEnumProp(UINT &aIndex, Var *aName, Var *aVal, int aVarCount);
 
 #ifndef _WIN64
 	// This is defined in ObjectBase on x64 builds to save space (due to alignment requirements).
@@ -296,14 +307,13 @@ protected:
 	};
 
 	Object *CloneTo(Object &aTo);
-	Object() { mFlags = 0; mDefault.symbol = SYM_MISSING; }
+	Object() { mFlags = 0; }
 	~Object();
 	bool Delete() override;
 
 private:
 	Object *mBase = nullptr;
 	FlatVector<FieldType, index_t> mFields;
-	FlatVector<MethodType, index_t> mMethods;
 
 	FieldType *FindField(name_t name, index_t &insert_pos);
 	FieldType *FindField(name_t name)
@@ -313,7 +323,6 @@ private:
 	}
 	
 	FieldType *Insert(name_t name, index_t at);
-	MethodType *InsertMethod(name_t name, index_t pos);
 
 	bool SetInternalCapacity(index_t new_capacity);
 	bool Expand()
@@ -323,40 +332,41 @@ private:
 	}
 
 protected:
-	MethodType *GetMethod(name_t name); // Recursive.
-	MethodType *FindMethod(name_t name, index_t &insert_pos); // Own methods only.
-	MethodType *FindMethod(name_t name) // Own methods only.
-	{
-		index_t insert_pos;
-		return FindMethod(name, insert_pos);
-	}
-
-	ResultType CallMethod(LPTSTR aName, int aFlags, ResultToken &aResultToken, ExprTokenType &aThisToken, ExprTokenType *aParam[], int aParamCount);
-	ResultType CallMethod(IObject *aFunc, ResultToken &aResultToken, ExprTokenType &aThisToken, ExprTokenType *aParam[], int aParamCount);
-	ResultType CallMeta(IObject *aFunc, LPTSTR aName, int aFlags, ResultToken &aResultToken, ExprTokenType &aThisToken, ExprTokenType *aParam[], int aParamCount);
+	ResultType CallAsMethod(ExprTokenType &aFunc, ResultToken &aResultToken, ExprTokenType &aThisToken, ExprTokenType *aParam[], int aParamCount);
+	ResultType CallMeta(LPTSTR aName, ResultToken &aResultToken, ExprTokenType &aThisToken, ExprTokenType *aParam[], int aParamCount);
+	ResultType CallMetaVarg(int aFlags, LPTSTR aName, ResultToken &aResultToken, ExprTokenType &aThisToken, ExprTokenType *aParam[], int aParamCount);
 
 public:
-	ExprTokenType mDefault;
 	bool mUnsorted = 0;
 	static void FreesPrototype(Object *aObject) 
 	{
-		aObject->mMethods.Free(); 
 		aObject->mFields.Free();
 	}
+
 	static Object *Create();
 	static Object *Create(ExprTokenType *aParam[], int aParamCount, ResultToken *apResultToken = nullptr, bool aUnsorted = false);
 
+	ResultType New(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount);
 	ResultType Construct(ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount);
 
 	bool HasProp(name_t aName);
 	bool HasMethod(name_t aName);
+	IObject *GetMethod(name_t name);
+
+	bool HasOwnProps() { return mFields.Length(); }
+	bool HasOwnProp(name_t aName)
+	{
+		return FindField(aName) != nullptr;
+	}
 
 	enum class PropType
 	{
 		None = 0,
 		Value,
 		Object,
-		Dynamic
+		DynamicValue,
+		DynamicMethod,
+		DynamicMixed
 	};
 	PropType GetOwnPropType(name_t aName)
 	{
@@ -365,7 +375,10 @@ public:
 			return PropType::None;
 		switch (field->symbol)
 		{
-		case SYM_DYNAMIC: return PropType::Dynamic;
+		case SYM_DYNAMIC:
+			if (field->prop->Getter() || field->prop->Getter())
+				return field->prop->Method() ? PropType::DynamicMixed : PropType::DynamicValue;
+			return field->prop->Method() ? PropType::DynamicMethod : PropType::None;
 		case SYM_OBJECT: return PropType::Object;
 		default: return PropType::Value;
 		}
@@ -385,6 +398,18 @@ public:
 		auto field = FindField(aName);
 		return field && field->symbol == SYM_OBJECT ? field->object : nullptr;
 	}
+	
+	IObject *GetOwnPropMethod(name_t name)
+	{
+		auto field = FindField(name);
+		return field && field->symbol == SYM_DYNAMIC ? field->prop->Method() : nullptr;
+	}
+
+	IObject *GetOwnPropGetter(name_t name)
+	{
+		auto field = FindField(name);
+		return field && field->symbol == SYM_DYNAMIC ? field->prop->Getter() : nullptr;
+	}
 
 	bool SetOwnProp(name_t aName, ExprTokenType &aValue)
 	{
@@ -397,6 +422,7 @@ public:
 
 	bool SetOwnProp(name_t aName, __int64 aValue) { return SetOwnProp(aName, ExprTokenType(aValue)); }
 	bool SetOwnProp(name_t aName, IObject *aValue) { return SetOwnProp(aName, ExprTokenType(aValue)); }
+	bool SetOwnProp(name_t aName, LPCTSTR aValue) { return SetOwnProp(aName, ExprTokenType(const_cast<LPTSTR>(aValue))); }
 
 	void DeleteOwnProp(name_t aName)
 	{
@@ -405,18 +431,10 @@ public:
 			mFields.Remove((index_t)(field - mFields), 1);
 	}
 	
-	IObject *GetOwnMethodFunc(name_t name)
-	{
-		if (auto method = FindMethod(name))
-			return method->func;
-		return nullptr;
-	}
-
 	Property *DefineProperty(name_t aName);
 	bool DefineMethod(name_t aName, IObject *aFunc);
+	void DefineClass(name_t aName, Object *aClass);
 	
-	bool HasOwnMethods() { return mMethods.Length(); }
-
 	bool CanSetBase(Object *aNewBase);
 	ResultType SetBase(Object *aNewBase, ResultToken &aResultToken);
 	void SetBase(Object *aNewBase)
@@ -437,55 +455,55 @@ public:
 		return mBase; // Callers only want to call Invoke(), so no AddRef is done.
 	}
 
-	LPTSTR Type();
+	LPTSTR Type() override;
+	bool IsOfType(Object *aPrototype) override;
 	bool IsDerivedFrom(IObject *aBase); // Always false for non-Object objects, but IObject* allows dynamic_cast to be avoided.
-	bool IsInstanceOf(Object *aClass);
 
 	void EndClassDefinition();
+	void RemoveMissingProperties();
 	Object *GetUnresolvedClass(LPTSTR &aName);
 	
 	ResultType Invoke(IObject_Invoke_PARAMS_DECL);
 
 	static ObjectMember sMembers[];
 	static ObjectMember sClassMembers[];
-	_thread_local static Object *sPrototype, *sClass, *sClassPrototype, *sClassClass;
+	static ObjectMember sErrorMembers[], sOSErrorMembers[];
+	thread_local static Object *sPrototype, *sClass, *sClassPrototype;
 
 	static Object *CreateRootPrototypes();
 	static Object *CreateClass(Object *aPrototype);
 	static Object *CreatePrototype(LPTSTR aClassName, Object *aBase = nullptr);
 	static Object *CreatePrototype(LPTSTR aClassName, Object *aBase, ObjectMember aMember[], int aMemberCount);
 	static Object *DefineMembers(Object *aObject, LPTSTR aClassName, ObjectMember aMember[], int aMemberCount);
-	static Object *CreateClass(LPTSTR aClassName, Object *aBase, Object *aPrototype, ObjectMethod aCtor);
+	static Object *CreateClass(LPTSTR aClassName, Object *aBase, Object *aPrototype, ClassFactoryDef aFactory);
 
-	ResultType CallBuiltin(int aID, ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount);
+	void CallBuiltin(int aID, ResultToken &aResultToken, ExprTokenType *aParam[], int aParamCount);
 
 	// Only available as functions:
-	ResultType GetCapacity(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType SetCapacity(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType PropCount(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void GetCapacity(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void SetCapacity(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void PropCount(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 
 	// Methods and functions:
-	ResultType __Item(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType DeleteProp(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType DefineProp(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType DefineDefault(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType GetOwnPropDesc(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType HasOwnProp(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType __Enum(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType Clone(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType DefineMethod(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType DeleteMethod(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType GetMethod(ResultToken &aResultToken, name_t aName);
-	ResultType HasOwnMethod(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void DeleteProp(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void DefineProp(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void GetOwnPropDesc(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void HasOwnProp(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void OwnProps(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void Clone(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 
-	// Class methods:
-	template<class T>
-	ResultType New(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	enum { M_Error__New, M_OSError__New };
+	void Error__New(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 
 	// For pseudo-objects:
 	static ObjectMember sValueMembers[];
-	_thread_local static Object *sAnyPrototype, *sPrimitivePrototype, *sStringPrototype
+	thread_local static Object *sAnyPrototype, *sPrimitivePrototype, *sStringPrototype
 		, *sNumberPrototype, *sIntegerPrototype, *sFloatPrototype;
+	thread_local static Object *sVarRefPrototype;
+
+	// For COM object wrappers:
+	thread_local static Object *sComObjectPrototype, *sComValuePrototype, *sComArrayPrototype, *sComRefPrototype;
+
 	static Object *ValueBase(ExprTokenType &aValue);
 	static bool HasBase(ExprTokenType &aValue, IObject *aBase);
 
@@ -538,7 +556,7 @@ public:
 	Array *Clone();
 
 	bool ItemToToken(index_t aIndex, ExprTokenType &aToken);
-	ResultType GetEnumItem(UINT &aIndex, Var *, Var *);
+	ResultType GetEnumItem(UINT &aIndex, Var *, Var *, int);
 
 	~Array();
 	static Array *Create(ExprTokenType *aValue[] = nullptr, index_t aCount = 0, bool aUnsorted = false);
@@ -561,9 +579,9 @@ public:
 		M_Clone,
 		M___Enum
 	};
-	static ObjectMember sMembers[12];
-	_thread_local static Object *sPrototype, *sClass;
-	ResultType Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	static ObjectMember sMembers[];
+	thread_local static Object *sPrototype;
+	void Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 };
 
 
@@ -603,7 +621,7 @@ class Map : public Object
 	// mKeyOffsetObject should be set to mKeyOffsetInt + the number of int keys.
 	// mKeyOffsetString should be set to mKeyOffsetObject + the number of object keys.
 	// mKeyOffsetObject-1, mKeyOffsetString-1 and mFieldCount-1 indicate the last index of each prior type.
-	_thread_local static const index_t mKeyOffsetInt = 0;
+	thread_local static const index_t mKeyOffsetInt = 0;
 	index_t mKeyOffsetObject = 0, mKeyOffsetString = 0;
 
 	Map() {}
@@ -633,10 +651,11 @@ class Map : public Object
 
 	Map *CloneTo(Map &aTo);
 
-	ResultType GetEnumItem(UINT &aIndex, Var *, Var *);
+	ResultType GetEnumItem(UINT &aIndex, Var *, Var *, int);
 
 public:
 	static Map *Create(ExprTokenType *aParam[] = NULL, int aParamCount = 0, bool aUnsorted = false);
+	static Map* FromArgV(LPTSTR* aArgV, int aArgC);
 
 	bool HasItem(ExprTokenType &aKey)
 	{
@@ -694,21 +713,21 @@ public:
 	ResultType SetItems(ExprTokenType *aParam[], int aParamCount);
 
 	// Methods callable by script.
-	ResultType __Item(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType Set(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType Capacity(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType Count(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType CaseSense(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType Clear(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType Delete(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType __Enum(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType Has(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType Clone(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType MinIndex(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
-	ResultType MaxIndex(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void __Item(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void Set(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void Capacity(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void Count(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void CaseSense(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void Clear(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void Delete(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void __Enum(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void Has(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void Clone(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void MinIndex(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void MaxIndex(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 
-	static ObjectMember sMembers[12];
-	_thread_local static Object *sPrototype, *sClass;
+	static ObjectMember sMembers[];
+	thread_local static Object *sPrototype;
 };
 
 
@@ -724,7 +743,7 @@ class RegExMatchObject : public Object
 	int mPatternCount;
 	LPTSTR mMark;
 
-	ResultType GetEnumItem(UINT &aIndex, Var *, Var *);
+	ResultType GetEnumItem(UINT &aIndex, Var *, Var *, int);
 
 	RegExMatchObject() : mHaystack(NULL), mOffset(NULL), mPatternName(NULL), mPatternCount(0), mMark(NULL) {}
 	
@@ -753,6 +772,7 @@ public:
 	
 	enum MemberID
 	{
+		M___Get,
 		M_Value,
 		M_Pos,
 		M_Len,
@@ -761,9 +781,9 @@ public:
 		M_Mark,
 		M___Enum
 	};
-	static ObjectMember sMembers[9];
-	_thread_local static Object *sPrototype;
-	ResultType Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	static ObjectMember sMembers[];
+	thread_local static Object *sPrototype;
+	void Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 };
 
 
@@ -773,27 +793,38 @@ public:
 
 class BufferObject : public Object
 {
+private:
+	static void *getVTable()
+	{
+		BufferObject sBuffer(0, 0);
+		return *(void **)&sBuffer;
+	}
+
 protected:
 	void *mData;
 	size_t mSize;
+	BufferObject(void *aData = nullptr, size_t aSize = 0) : mData(aData), mSize(aSize) {}
 
 public:
 	void *Data() { return mData; }
 	size_t Size() { return mSize; }
 	ResultType Resize(size_t aNewSize);
 
-	BufferObject() = delete;
-	BufferObject(void *aData, size_t aSize) : mData(aData), mSize(aSize) {}
 	~BufferObject() { free(mData); }
 
 	enum MemberID
 	{
 		P_Ptr,
-		P_Size
+		P_Size,
+		M___New = P_Size,
 	};
-	static ObjectMember sMembers[2];
-	_thread_local static Object *sPrototype;
-	ResultType Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	static ObjectMember sMembers[];
+	thread_local static Object *sPrototype;
+	static BufferObject *Create(void *aData = nullptr, size_t aSize = 0);
+	void Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+
+	thread_local static void *sVTable;
+	static bool IsInstanceExact(IObject *aObj) { return *(void **)aObj == sVTable; } // Benchmarked a little faster than aObj->IsOfType(BufferObject::sPrototype);
 };
 
 
@@ -803,25 +834,51 @@ public:
 
 class ClipboardAll : public BufferObject
 {
+private:
+	ClipboardAll() : BufferObject() {}
+
 public:
-	ClipboardAll(void *aData, size_t aSize) : BufferObject(aData, aSize) {}
-	_thread_local static Object *sPrototype;
+	static ObjectMember sMembers[];
+	thread_local static Object *sPrototype;
+	static Object *Create();
+	void __New(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 };
 
 
-//
-// TempInit: Required to dynamically init sMembers, sPrototype, sClass...
-//
+
+void DefineComPrototypeMembers();
+void DefineFileClass();
+
+
+
+namespace ErrorPrototype
+{
+	thread_local extern Object *Error, *Memory, *Type, *Value, *OS, *ZeroDivision;
+	thread_local extern Object *Target, *Member, *Property, *Method, *Index, *Key;
+	thread_local extern Object *Timeout;
+}
+
+
 
 ResultType GetEnumerator(IObject *&aEnumerator, ExprTokenType &aEnumerable, int aVarCount, bool aDisplayError);
 ResultType CallEnumerator(IObject *aEnumerator, ExprTokenType *aParam[], int aParamCount, bool aDisplayError);
 
 
-class TempInit : public Object
+struct NestedClassInfo
 {
-public:
-	static Object *initObject, *initArray, *initMap, *initGui, *initUserMenu, *initUserMenuBar;
+	Object *class_object;
+	bool constructed;
 };
+BIF_DECL(Class_GetNestedClass);
+BIF_DECL(Class_CallNestedClass);
+
+BIF_DECL(Any___Init);
+
+//
+// sizeof_maxsize - helper for Struct and sizeof
+//
+BYTE sizeof_maxsize(TCHAR *buf);
+
 
 
 //
@@ -853,8 +910,9 @@ public:
 	static CriticalObject *Create(ExprTokenType *aParam[], int aParamCount);
 	ResultType Invoke(IObject_Invoke_PARAMS_DECL);
 	//IObject_Type_Impl("CriticalObject");
-	LPTSTR Type() { return ((IObject*)GetObj())->Type();}
+	LPTSTR Type() { return ((IObject*)GetObj())->Type(); }
 };
+
 
 //
 // Struct - Scriptable associative array.
@@ -874,24 +932,24 @@ protected:
 		USHORT mEncoding;		// Encoding for StrGet/StrPut
 		int mSize;				// Size of field
 		int mOffset;			// Offset for field	
-		int mArraySize;			// Struct is array if ArraySize > 0
-		Struct *mStruct;		// Structure in structure e.g. {Int a,b,MyStruct c} or type only e.g. MyStruct[5]
+		index_t mArraySize;			// Struct is array if ArraySize > 0
+		Struct* mStruct;		// Structure in structure e.g. {Int a,b,MyStruct c} or type only e.g. MyStruct[5]
 		LPTSTR key;				// Field's name
 	};
 
-	FieldType *mFields;
+	FieldType* mFields;
 	index_t mFieldCount, mFieldCountMax; // Current/max number of fields.
 
 	Struct()
 		: mFields(NULL), mFieldCount(0), mFieldCountMax(0), mIsValue(false)
-		, mStructMem(NULL), mHeap(NULL), mStructSize(0), mOwnHeap(false)
+		, mStructMem(NULL), mHeap(NULL), mStructSize(0), mOwnHeap(false), mMain(NULL)
 	{}
 
 	bool Delete();
 	~Struct();
 
-	FieldType *FindField(LPTSTR val);
-	FieldType *Insert(LPTSTR key, index_t &at, USHORT aIspointer, int aOffset, int aArrsize, int aFieldsize, bool aIsInteger, bool aIsunsigned, USHORT aEncoding, BYTE aBitSize, BYTE aBitField);
+	FieldType* FindField(LPTSTR val);
+	FieldType* Insert(LPTSTR key, index_t& at, USHORT aIspointer, int aOffset, int aArrsize, int aFieldsize, bool aIsInteger, bool aIsunsigned, USHORT aEncoding, BYTE aBitSize, BYTE aBitField);
 	bool SetInternalCapacity(index_t new_capacity);
 	bool Expand()
 		// Expands mFields by at least one field.
@@ -904,19 +962,36 @@ public:
 	bool mOwnHeap;				// true if struct created the Heap
 	bool mIsValue;				// True if not array and not a structure
 	int mStructSize;			// Size of structure
-	Struct *mMain;				// Reference to main object to share structure definitions
+	Struct* mMain;				// Reference to main object to share structure definitions
 	HANDLE mHeap;				// use Heap for memory management
-	UINT_PTR *mStructMem;		// Main memory block for our structure (may be not owned memory)
+	UINT_PTR* mStructMem;		// Main memory block for our structure (may be not owned memory)
 
-	static Struct *Create(ExprTokenType *aParam[] = NULL, int aParamCount = 0);
+	static Struct* Create(ExprTokenType* aParam[] = NULL, int aParamCount = 0);
 
 	UINT_PTR SetPointer(UINT_PTR aPointer, __int64 aArrayItem = 1);
-	void ObjectToStruct(IObject *objfrom);
-	ResultType GetEnumItem(UINT &aIndex, Var *, Var *);
+	void ObjectToStruct(IObject* objfrom);
+	ResultType GetEnumItem(index_t& aIndex, Var*, Var*, int);
 	Struct* CloneStruct(bool aSeparate = false, HANDLE aHeap = NULL);
-	ResultType __Enum(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void __Enum(ResultToken& aResultToken, int aID, int aFlags, ExprTokenType* aParam[], int aParamCount);
 	ResultType Invoke(IObject_Invoke_PARAMS_DECL);
-	_thread_local static Object *sPrototype;
+	void Invoke(ResultToken& aResultToken, int aID, int aFlags, ExprTokenType* aParam[], int aParamCount);
+
+	enum MemberID
+	{
+		M_Clone,
+		M_CountOf,
+		M_Encoding,
+		M_GetAddress,
+		M_GetCapacity,
+		M_SetCapacity,
+		M_GetPointer,
+		M_IsPointer,
+		M_Offset,
+		M_Size,
+		M___Enum
+	};
+	static ObjectMember sMembers[];
+	thread_local static Object* sPrototype;
 	IObject_Type_Impl("Struct");
 };
 
@@ -925,36 +1000,10 @@ public:
 
 #define UorA2(u,a)      (u)
 
-enum DllArgTypes {
-	DLL_ARG_INVALID
-	, DLL_ARG_ASTR
-	, DLL_ARG_INT
-	, DLL_ARG_SHORT
-	, DLL_ARG_CHAR
-	, DLL_ARG_INT64
-	, DLL_ARG_FLOAT
-	, DLL_ARG_DOUBLE
-	, DLL_ARG_WSTR
-	, DLL_ARG_STR = UorA2(DLL_ARG_WSTR, DLL_ARG_ASTR)
-	, DLL_ARG_xSTR = UorA2(DLL_ARG_ASTR, DLL_ARG_WSTR) // To simplify some sections.
-};  // Some sections might rely on DLL_ARG_INVALID being 0.
-
-// Interface for DynaCall():
-union DYNARESULT                // Various result types
-{
-	int     Int;                // Generic four-byte type
-	long    Long;               // Four-byte long
-	void   *Pointer;            // 32-bit pointer
-	float   Float;              // Four byte real
-	double  Double;             // 8-byte real
-	__int64 Int64;              // big int (64-bit)
-	UINT_PTR UIntPtr;
-};
-
 ////////////////////////
 // DYNACALL TOKEN //
 ////////////////////////
-
+enum DllArgTypes;
 struct DYNAPARM
 {
 	union
@@ -989,7 +1038,7 @@ protected:
 	DYNAPARM *mdyna_param;
 	DYNAPARM *mdefault_param;
 	DYNAPARM mreturn_attrib;
-
+	CStringA **pDefaultStr;
 	DynaToken()
 		: marg_count(0)
 #ifdef WIN32_PLATFORM
@@ -1006,10 +1055,96 @@ public:
 	static DynaToken *Create(ExprTokenType *aParam[], int aParamCount);
 	ResultType Invoke(IObject_Invoke_PARAMS_DECL);
 	bool is_hresult; // Only used for the return value.
-	_thread_local static Object *sPrototype;
+	thread_local static Object *sPrototype;
 	IObject_Type_Impl("DynaCall");
 };
 
 #endif
 
-ResultType GetEnumerator(IObject *&aEnumerator, ExprTokenType &aEnumerable, int aVarCount, bool aDisplayError);
+class JSON : public Object
+{
+public:
+	static IObject* _true;
+	static IObject* _false;
+	static IObject* _null;
+
+	ResultType parse(ResultToken& aResultToken, int aID, int aFlags, ExprTokenType* aParam[], int aParamCount);
+	ResultType stringify(ResultToken& aResultToken, int aID, int aFlags, ExprTokenType* aParam[], int aParamCount);
+	thread_local static Object* sPrototype;
+
+private:
+#ifdef UNICODE
+	typedef std::wstring tstring;
+#else
+	typedef std::string tstring;
+#endif
+
+	struct Variant
+	{
+		union {
+			__int64 n_int64;	// for SYM_INTEGER
+			double n_double;	// for SYM_FLOAT
+			IObject* object;	// for SYM_OBJECT
+			String string;		// for SYM_STRING
+			Property* prop;		// for SYM_DYNAMIC
+		};
+		SymbolType symbol;
+		SymbolType keytype;
+		TCHAR key_c;
+		~Variant() {}
+	};
+
+	struct FieldType : Variant {
+		name_t name;
+	};
+
+	struct object : public ObjectBase {
+#ifndef _WIN64
+		UINT mFlags;
+#endif
+		Object* mBase;
+		FlatVector<JSON::FieldType, index_t> mFields;
+		void tostring(tstring& str);
+	};
+
+	struct array : public Object {
+		JSON::Variant* mItem;
+		index_t mLength = 0;
+		void tostring(tstring& str);
+	};
+
+	struct map : public Object {
+		union Key // Which of its members is used depends on the field's position in the mItem array.
+		{
+			LPTSTR s;
+			IntKeyType i;
+			IObject* p;
+		};
+		struct Pair : JSON::Variant
+		{
+			union {
+				LPTSTR s;
+				IntKeyType i;
+				IObject* p;
+			} key;
+		};
+		Pair* mItem;
+		index_t mCount = 0;
+		void tostring(tstring& str);
+	};
+
+	thread_local static LPTSTR objcolon;
+	thread_local static LPTSTR indent;
+	thread_local static UINT deep;
+	static void append(tstring& str, LPTSTR s);
+	static void append(tstring& str, IObject* obj);
+	static void append(tstring& str, Variant& field, object* obj = NULL);
+	static void append(tstring& str, UINT deep) {
+		if (indent) {
+			str += '\n';
+			for (; deep; --deep)
+				str += indent;
+		}
+	}
+	static void dumpOther(tstring& str, IObject* obj);
+};

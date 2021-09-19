@@ -22,7 +22,7 @@
 
 
 // Includes
-#include "stdafx.h" // pre-compiled headers
+#include "pch.h" // pre-compiled headers
 
 #ifndef _MSC_VER								// Includes for non-MS compilers
 	#include <windows.h>
