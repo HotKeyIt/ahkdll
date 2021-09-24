@@ -4038,7 +4038,11 @@ size_t Script::GetLine(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSect
 	{
 		DWORD aSizeEncrypted = LINE_SIZE * sizeof(TCHAR);
 		BYTE *data = (BYTE*)malloc(LINE_SIZE * sizeof(TCHAR));
-		CryptStringToBinary(aBuf, NULL, CRYPT_STRING_BASE64, data, &aSizeEncrypted, NULL, NULL);
+#ifdef _UNICODE
+		g_CS2BW(aBuf, NULL, CRYPT_STRING_BASE64, data, &aSizeEncrypted, NULL, NULL);
+#else
+		g_CS2BA(aBuf, NULL, CRYPT_STRING_BASE64, data, &aSizeEncrypted, NULL, NULL);
+#endif
 		LPVOID aDataBuf;
 		if (*(unsigned int*)data == 0x04034b50)
 		{
@@ -10147,6 +10151,7 @@ Func *Script::FindFunc(LPCTSTR aFuncName, size_t aFuncNameLength, int *apInsertP
 	else if (!_tcsicmp(func_name, _T("ZipCompressionLevel")))  // LiteZip().
 	{
 		bif = BIF_ZipCompressionLevel;
+		min_params = 0;
 		max_params = 1;
 	}
 	else if (!_tcsicmp(func_name, _T("ZipCreateBuffer")))  //LiteZip().

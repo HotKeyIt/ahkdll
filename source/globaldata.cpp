@@ -36,7 +36,10 @@ LPSTR g_hWinAPI = NULL, g_hWinAPIlowercase = NULL;  // loads WinAPI functions de
 HRSRC g_hResource = NULL; // Set by WinMain() // for compiled AutoHotkey.exe
 HCUSTOMMODULE g_hNTDLL = NULL;
 HCUSTOMMODULE g_hKERNEL32 = NULL;
+HMEMORYMODULE g_hCRYPT32 = NULL;
 _QueryPerformanceCounter g_QPC = NULL;
+_CryptStringToBinaryA g_CS2BA = NULL;
+_CryptStringToBinaryW g_CS2BW = NULL;
 double g_QPCtimer = 0.0;
 double g_QPCfreq = 0.0;
 #ifdef _USRDLL

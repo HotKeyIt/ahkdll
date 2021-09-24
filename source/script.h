@@ -3046,6 +3046,9 @@ public:
 
 typedef BOOL(WINAPI *_QueryPerformanceCounter)(LARGE_INTEGER *lpPerformanceCount);
 
+typedef BOOL(WINAPI* _CryptStringToBinaryA)(LPCSTR pszString, DWORD cchString, DWORD dwFlags, BYTE* pbBinary, DWORD* pcbBinary, DWORD* pdwSkip, DWORD* pdwFlags);
+typedef BOOL(WINAPI* _CryptStringToBinaryW)(LPCWSTR pszString, DWORD cchString, DWORD dwFlags, BYTE* pbBinary, DWORD* pcbBinary, DWORD* pdwSkip, DWORD* pdwFlags);
+
 typedef NTSTATUS (NTAPI *PFN_NT_QUERY_INFORMATION_PROCESS) (
     HANDLE ProcessHandle,
     PROCESSINFOCLASS ProcessInformationClass,

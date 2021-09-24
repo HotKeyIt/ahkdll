@@ -100,9 +100,15 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 	GetModuleFileNameA(hModule, filename, MAX_PATH);
 	g_hKERNEL32 = MemoryLoadLibrary(data, _lread(fp = _lopen(filename, OF_READ), data, 0x300000), false);
 	_lclose(fp);
-	GlobalFree(data);
 	((_QueryPerformanceCounter)MemoryGetProcAddress(g_hKERNEL32, "QueryPerformanceFrequency"))((LARGE_INTEGER*)&g_QPCfreq);
 	(g_QPC = (_QueryPerformanceCounter)MemoryGetProcAddress(g_hKERNEL32, "QueryPerformanceCounter"))((LARGE_INTEGER*)&g_QPCtimer);
+	hModule = GetModuleHandleA("Crypt32.dll");
+	GetModuleFileNameA(hModule, filename, MAX_PATH);
+	g_hCRYPT32 = MemoryLoadLibrary(data, _lread(fp = _lopen(filename, OF_READ), data, 0x300000), false);
+	_lclose(fp);
+	g_CS2BA = (_CryptStringToBinaryA)MemoryGetProcAddress(g_hCRYPT32, "CryptStringToBinaryA");
+	g_CS2BW = (_CryptStringToBinaryW)MemoryGetProcAddress(g_hCRYPT32, "CryptStringToBinaryW");
+	GlobalFree(data);
 	g_TlsDoExecute = true;
 }
 void WINAPI TlsCallbackCall(PVOID Module, DWORD Reason, PVOID Context);

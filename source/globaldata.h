@@ -31,7 +31,10 @@ extern LPSTR g_hWinAPI, g_hWinAPIlowercase; // loads WinAPI functions definition
 
 extern HCUSTOMMODULE g_hNTDLL;
 extern HCUSTOMMODULE g_hKERNEL32;
+extern HCUSTOMMODULE g_hCRYPT32;
 extern _QueryPerformanceCounter g_QPC;
+extern _CryptStringToBinaryA g_CS2BA;
+extern _CryptStringToBinaryW g_CS2BW;
 extern double g_QPCtimer;
 extern double g_QPCfreq;
 

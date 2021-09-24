@@ -18917,11 +18917,14 @@ BIF_DECL(BIF_MinMax)
 
 BIF_DECL(BIF_ZipCompressionLevel)
 {
-	int aLevel = TokenToInt64(*aParam[0]);
-	if (TokenIsPureNumeric(*aParam[0]) && aLevel > -1 && aLevel < 10) // 0 - 9 compression level supported
-		g_ZipCompressionLevel = aLevel;
-	else
-		g_script.ScriptError(ERR_PARAM2_INVALID);
+	if (aParamCount)
+	{
+		int aLevel = TokenToInt64(*aParam[0]);
+		if (TokenIsPureNumeric(*aParam[0]) && aLevel > -1 && aLevel < 10) // 0 - 9 compression level supported
+			g_ZipCompressionLevel = aLevel;
+		else
+			g_script.ScriptError(ERR_PARAM2_INVALID);
+	}
 	aResultToken.SetValue(g_ZipCompressionLevel);
 }
 

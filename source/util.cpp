@@ -3442,7 +3442,7 @@ DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf,DWORD sz, TCHAR *pwd[]) //
 				memcpy(aDataEncryptedString, (LPBYTE)aBuffer + hdrsz, aSizeEncrypted);
 				CryptAES(aDataEncryptedString, aSizeEncrypted, pwd, false);
 				aDataEncrypted = (BYTE*)malloc(aSizeDataEncrypted);
-				CryptStringToBinaryA(aDataEncryptedString, NULL, CRYPT_STRING_BASE64, aDataEncrypted, &aSizeEncrypted, NULL, NULL);
+				g_CS2BA(aDataEncryptedString, NULL, CRYPT_STRING_BASE64, aDataEncrypted, &aSizeEncrypted, NULL, NULL);
 				free(aDataEncryptedString);
 				if (aSizeDeCompressed == aSizeCompressed)
 				{
