@@ -430,6 +430,12 @@
       <RuntimeLibrary Condition="$(ConfigDebug)">MultiThreadedDebugDLL</RuntimeLibrary>
       <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</MinimalRebuild>
       <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">false</MinimalRebuild>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">stdcpp14</LanguageStandard>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">stdcpp14</LanguageStandard>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">stdcpp14</LanguageStandard>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">stdcpp14</LanguageStandard>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|x64'">stdcpp14</LanguageStandard>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|x64'">stdcpp14</LanguageStandard>
     </ClCompile>
     <Link>
       <GenerateDebugInformation Condition="$(ConfigDebug)">true</GenerateDebugInformation>
@@ -437,6 +443,7 @@
     <ClCompile>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">Use</PrecompiledHeader>
       <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">false</MinimalRebuild>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">stdcpp14</LanguageStandard>
     </ClCompile>
     <ClCompile>
       <Optimization Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">MaxSpeed</Optimization>
@@ -444,12 +451,14 @@
     <ClCompile>
       <FavorSizeOrSpeed Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">Speed</FavorSizeOrSpeed>
       <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">MultiThreadedDLL</RuntimeLibrary>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">stdcpp14</LanguageStandard>
     </ClCompile>
     <Link>
       <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">false</GenerateDebugInformation>
     </Link>
     <ClCompile>
       <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">false</MinimalRebuild>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='DebugDll|x64'">stdcpp14</LanguageStandard>
     </ClCompile>
     <Link>
       <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</GenerateDebugInformation>
@@ -457,6 +466,63 @@
     <Link>
       <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</GenerateDebugInformation>
     </Link>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='MT_Release|Win32'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='MT_Release(mbcs)|Win32'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDllMini|Win32'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDllMini(mbcs)|Win32'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='MT_Self-contained|Win32'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='MT_Self-contained(mbcs)|Win32'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|Win32'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='MT_Release|x64'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='MT_Release(mbcs)|x64'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='MT_Self-contained|x64'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='MT_Self-contained(mbcs)|x64'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Release|x64'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|x64'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Self-contained|x64'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|x64'">stdcpp14</LanguageStandard>
+    </ClCompile>
   </ItemDefinitionGroup>
   <!--Dll-->
   <ItemDefinitionGroup Condition="$(ConfigReleaseDll) OR $(ConfigReleaseDllMini)">
@@ -464,6 +530,42 @@
       <TargetEnvironment Condition="'$(Platform)'=='x64'">X64</TargetEnvironment>
       <MkTypLibCompatible Condition="$(ConfigReleaseDll)">true</MkTypLibCompatible>
     </Midl>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDll|Win32'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDll(mbcs)|Win32'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|Win32'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDll|x64'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDll(mbcs)|x64'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDllMini|x64'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='MT_ReleaseDllMini(mbcs)|x64'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|x64'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|x64'">stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|x64'">stdcpp14</LanguageStandard>
+    </ClCompile>
   </ItemDefinitionGroup>
   <!--Include CustomBuild-->
   <ItemGroup>

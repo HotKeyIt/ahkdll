@@ -4744,7 +4744,7 @@ ResultType Line::PixelSearch(int aLeft, int aTop, int aRight, int aBottom, COLOR
 		// (in 16bit there is an extra bit but i forgot for which color). And this will explain the
 		// second problem [in the test script], since GetPixel even in 16bit will return some "valid"
 		// data in the last 3bits of each byte."
-		register int i;
+		int i;
 		LONG screen_pixel_count = screen_width * screen_height;
 		if (screen_is_16bit)
 			for (i = 0; i < screen_pixel_count; ++i)
@@ -4874,7 +4874,7 @@ fast_end:
 
 	// If the caller gives us inverted X or Y coordinates, conduct the search in reverse order.
 	// This feature was requested; it was put into effect for v1.0.25.06.
-	register int xpos, ypos;
+	int xpos, ypos;
 
 	if (aVariation > 0)
 		SET_COLOR_RANGE

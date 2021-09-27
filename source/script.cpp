@@ -353,7 +353,7 @@ Script::Script()
 			_T(" typedef must be changed."));
 #endif
 #ifndef _USRDLL
-	OleInitialize(NULL);
+	CoInitializeEx(NULL, COINIT_MULTITHREADED);
 #endif
 }
 
@@ -902,7 +902,7 @@ void Script::Destroy()
 	// PeekMessage is required to make sure that OleUninitialize does not hang
 	MSG msg;
 	PeekMessage(&msg, NULL, 0, 0, PM_REMOVE);
-	OleUninitialize();
+	CoUninitialize();
 	mIsReadyToExecute = false;
 }
 #endif

@@ -558,7 +558,7 @@ EXPORT BOOL ahkTerminate(int timeout = 0)
 // Naveen: v1. runscript() - runs the script in a separate thread compared to host application.
 unsigned __stdcall runScript( void* pArguments )
 {
-	OleInitialize(NULL);
+	CoInitializeEx(NULL, COINIT_MULTITHREADED);
 	int result = OldWinMain(nameHinstanceP.hInstanceP, 0, nameHinstanceP.name, 0);
 	g_script.Destroy();
 	g_hThread = NULL;

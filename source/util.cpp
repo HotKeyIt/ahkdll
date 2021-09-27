@@ -678,8 +678,8 @@ LPTSTR tcscasestr(LPCTSTR phaystack, LPCTSTR pneedle)
 	// Faster looping by precalculating bl, bu, cl, cu before looping.
 	// 2004 Apr 08	Jose Da Silva, digital@joescat@com
 {
-	register const TBYTE *haystack, *needle;
-	register unsigned bl, bu, cl, cu;
+	const TBYTE *haystack, *needle;
+	unsigned bl, bu, cl, cu;
 	
 	haystack = (const TBYTE *) phaystack;
 	needle = (const TBYTE *) pneedle;
@@ -710,8 +710,8 @@ LPTSTR tcscasestr(LPCTSTR phaystack, LPCTSTR pneedle)
 		
 		for (;;)
 		{
-			register unsigned a;
-			register const TBYTE *rhaystack, *rneedle;
+			unsigned a;
+			const TBYTE *rhaystack, *rneedle;
 			do
 			{
 				a = *++haystack;
@@ -793,8 +793,8 @@ LPTSTR lstrcasestr(LPCTSTR phaystack, LPCTSTR pneedle)
 // Copyright (C) 1994,1996,1997,1998,1999,2000 Free Software Foundation, Inc.
 // See strcasestr() for more comments.
 {
-	register const TBYTE *haystack, *needle;
-	register unsigned bl, bu, cl, cu;
+	const TBYTE *haystack, *needle;
+	unsigned bl, bu, cl, cu;
 	
 	haystack = (const TBYTE *) phaystack;
 	needle = (const TBYTE *) pneedle;
@@ -823,8 +823,8 @@ LPTSTR lstrcasestr(LPCTSTR phaystack, LPCTSTR pneedle)
 		
 		for (;;)
 		{
-			register unsigned a;
-			register const TBYTE *rhaystack, *rneedle;
+			unsigned a;
+			const TBYTE *rhaystack, *rneedle;
 			do
 			{
 				a = *++haystack;
