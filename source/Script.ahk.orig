@@ -1,5 +1,0 @@
-﻿_T("MsgBox Hellö Wörld!\n")
-_T("MsgBox % A_ScriptDir\n")
-_T("MsgBox % A_ScriptFullPath\n")
-_T("MsgBox % A_AhkPath\n")
-_T("MsgBox % A_dllPath\n")
