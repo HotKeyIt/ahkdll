@@ -301,7 +301,7 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name, unsigned int getVar, DWORD aThreadID)
 	PMYTEB curr_teb = NULL;
 	PVOID tls = NULL;
 	BYTE aSlot = InterlockedIncrement16(&returnCount) & 0xFFF;
-	if (g_MainThreadID != ThreadID || (aThreadID && aThreadID != g_MainThreadID))
+	if (g_MainThreadID != ThreadID || (aThreadID && aThreadID != ThreadID))
 	{
 		if (aThreadID)
 		{
@@ -331,9 +331,9 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name, unsigned int getVar, DWORD aThreadID)
 			curr_teb->ThreadLocalStoragePointer = tls;
 		return 0; // AutoHotkey needs to be running at this point //
 	}
-	if (g_MainThreadID != ThreadID)
+	if (aThreadID && aThreadID != ThreadID)
 	{
-		ahThread = OpenThread(THREAD_ALL_ACCESS, TRUE, ThreadID);
+		ahThread = OpenThread(THREAD_ALL_ACCESS, TRUE, aThreadID);
 		SuspendThread(ahThread);
 	}
 	auto varlist = g_script->GlobalVars();
@@ -742,12 +742,14 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 	HotkeyCriterion *aFirstHotExpr = g_FirstHotExpr,*aLastHotExpr = g_LastHotExpr;
 	g_FirstHotExpr = NULL;g_LastHotExpr = NULL;
 	BACKUP_G_SCRIPT
+	int aVarCount = g_script->mVars.mCount; 
 	int aFuncCount = g_script->mFuncs.mCount; 
-	Func **aFunc = (Func**)malloc(g_script->mFuncs.mCount*sizeof(Func));
+	Var **aVars = (Var**)malloc(g_script->mVars.mCount*sizeof(Var));
+	Func **aFuncs = (Func**)malloc(g_script->mFuncs.mCount*sizeof(Func));
+	for (int i = 0; i < g_script->mVars.mCount; i++)
+		aVars[i] = g_script->mVars.mItem[i];
 	for (int i = 0; i < g_script->mFuncs.mCount; i++)
-	{
-		aFunc[i] = g_script->mFuncs.mItem[i];
-	}
+		aFuncs[i] = g_script->mFuncs.mItem[i];
 	int aSourceFileIdx = Line::sSourceFileCount;
 
 	// Backup SimpleHeap to restore later
@@ -762,13 +764,15 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 		g_SimpleHeap = bkpSimpleHeap;
 		aSimpleHeap->DeleteAll();
 		delete aSimpleHeap;
+		for (int i = 0; i < g_script->mVars.mCount; i++)
+			g_script->mVars.mItem[i] = aVarCount < i ? NULL : aVars[i];
+		free(aVars);
 		for (int i = 0; i < g_script->mFuncs.mCount; i++)
-		{
-			g_script->mFuncs.mItem[i] = aFuncCount < i ? NULL : aFunc[i];
-		}
-		free(aFunc);
+			g_script->mFuncs.mItem[i] = aFuncCount < i ? NULL : aFuncs[i];
+		free(aFuncs);
 		RESTORE_G_SCRIPT
 		RESTORE_IF_EXPR
+		g_script->mVars.mCount = aVarCount;
 		g_script->mFuncs.mCount = aFuncCount;
 		g_script->mIsReadyToExecute = true;
 		if (curr_teb)
@@ -781,12 +785,14 @@ EXPORT int ahkExec(LPTSTR script, DWORD aThreadID)
 	g->CurrentFunc = (UserFunc *)aCurrFunc;
 	Line *aTempLine = g_script->mLastLine;
 	Line *aExecLine = g_script->mFirstLine;
+	for (int i = 0; i < g_script->mVars.mCount; i++)
+		g_script->mVars.mItem[i] = aVarCount<i ? NULL : aVars[i];
+	free(aVars);
 	for (int i = 0; i < g_script->mFuncs.mCount; i++)
-	{
-		g_script->mFuncs.mItem[i] = aFuncCount<i ? NULL : aFunc[i];
-	}
-	free(aFunc);
+		g_script->mFuncs.mItem[i] = aFuncCount<i ? NULL : aFuncs[i];
+	free(aFuncs);
 	RESTORE_G_SCRIPT
+	g_script->mVars.mCount = aVarCount;
 	g_script->mFuncs.mCount = aFuncCount;
 	g_ReturnNotExit = true;
 	// Restore SimpleHeap so functions will use correct memory

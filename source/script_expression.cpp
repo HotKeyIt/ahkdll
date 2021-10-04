@@ -239,33 +239,46 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 				} // end if (reading a var of type VAR_VIRTUAL)
 				if (g->CurrentMacro)
 				{
-					Var *aMacroVar = g_script->FindVar(this_token.var->mName, 0, FINDVAR_FOR_READ);
-					if (!aMacroVar)
+					Var* aMacroVar = NULL;
+					bool aVarIsParam = false;
+					for (int aParamIndex = g->CurrentMacro->mParamCount; aParamIndex; aParamIndex--)
+						if (!_tcscmp(this_token.var->mName, g->CurrentMacro->mParam[aParamIndex - 1].var->mName) && (aVarIsParam = true))
+						{
+							this_token.var = g->CurrentMacro->mParam[aParamIndex - 1].var;
+							break;
+						}
+					if (!aVarIsParam)
 					{
-						error_value = &this_token;
-						goto unset_var;
+						aMacroVar = g_script->FindVar(this_token.var->mName, 0, FINDVAR_FOR_READ);
+						if (!aMacroVar)
+						{
+							error_value = &this_token;
+							goto unset_var;
+						}
+						this_token.var = aMacroVar;
 					}
-					this_token.var = aMacroVar;
 				}
 				else
-				if (this_token.var->IsUninitialized())
 				{
-					if (this_token.var->Type() == VAR_CONSTANT)
+					if (this_token.var->IsUninitialized())
 					{
-						auto result = this_token.var->InitializeConstant();
-						if (result != OK)
+						if (this_token.var->Type() == VAR_CONSTANT)
 						{
-							aResult = result;
-							result_to_return = NULL;
-							goto normal_end_skip_output_var;
+							auto result = this_token.var->InitializeConstant();
+							if (result != OK)
+							{
+								aResult = result;
+								result_to_return = NULL;
+								goto normal_end_skip_output_var;
+							}
 						}
-					}
-					else if (this_token.var_usage == Script::VARREF_READ)
-					{
-						// The expression is always aborted in this case, even if the user chooses to continue the thread.
-						// If this is changed, check all other callers of unset_var and VarUnsetError() for consistency.
-						error_value = &this_token;
-						goto unset_var;
+						else if (this_token.var_usage == Script::VARREF_READ)
+						{
+							// The expression is always aborted in this case, even if the user chooses to continue the thread.
+							// If this is changed, check all other callers of unset_var and VarUnsetError() for consistency.
+							error_value = &this_token;
+							goto unset_var;
+						}
 					}
 				}
 			}

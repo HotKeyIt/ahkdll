@@ -124,6 +124,8 @@ Map *Map::Create(ExprTokenType *aParam[], int aParamCount, bool aUnsorted)
 	ASSERT(!(aParamCount & 1 && !TokenToObject(*aParam[0])));
 	Map *map = new Map();
 	map->mUnsorted = aUnsorted;
+	if (g_MapCaseSense)
+		map->mFlags |= g_MapCaseSense;
 	map->SetBase(Map::sPrototype);
 	if (aParamCount && !map->SetItems(aParam, aParamCount))
 	{
@@ -3236,7 +3238,8 @@ Object *Object::CreateRootPrototypes()
 	prop->SetSetter(g_script->FindFunc(_T("ObjSetBase")));
 	
 	// Define __Init so that Script::DefineClassInit can add an unconditional super.__Init().
-	thread_local static auto __Init = new BuiltInFunc { _T(""), Any___Init, 1, 1 };
+	thread_local static BuiltInFunc *__Init;
+	__Init = new BuiltInFunc { _T(""), Any___Init, 1, 1 };
 	sAnyPrototype->DefineMethod(_T("__Init"), __Init);
 
 	DefineMembers(sPrototype, _T("Object"), sMembers, _countof(sMembers));

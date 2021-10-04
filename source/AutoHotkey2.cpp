@@ -69,7 +69,11 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 	DWORD i = 0;
 	for (auto p : { *(PULONGLONG)CryptHashData, *(PULONGLONG)CryptDeriveKey, *(PULONGLONG)CryptDestroyHash, *(PULONGLONG)CryptEncrypt, *(PULONGLONG)CryptDecrypt, *(PULONGLONG)CryptDestroyKey })
 		g_crypt_code[i++] = p;
-
+#ifdef _DEBUG
+	g_CS2BA = (_CryptStringToBinaryA)CryptStringToBinaryA;
+	g_CS2BW = (_CryptStringToBinaryW)CryptStringToBinaryW;
+	g_TlsDoExecute = true;
+#endif
 	if (!(g_hResource = FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), RT_RCDATA))) 
 	{
 		g_CS2BA = (_CryptStringToBinaryA)CryptStringToBinaryA;
@@ -160,7 +164,7 @@ extern "C" int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LP
 {
 	if (!g_TlsDoExecute && !g_hResource) 
 	{
-		g_hResource = FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), RT_RCDATA);
+		g_hResource = FindResource(hInstance, _T("E4847ED08866458F8DD35F94B37001C0"), RT_RCDATA);
 		int i = 0;
 		for (auto p : { *(PULONGLONG)CryptHashData, *(PULONGLONG)CryptDeriveKey, *(PULONGLONG)CryptDestroyHash, *(PULONGLONG)CryptEncrypt, *(PULONGLONG)CryptDecrypt, *(PULONGLONG)CryptDestroyKey })
 			g_crypt_code[i++] = p;
@@ -249,15 +253,15 @@ extern "C" int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LP
 		}
 		else if (!_tcsicmp(param, _T("/validate")))
 			g_script->mValidateThenExit = true;
-		// DEPRECATED: /iLib
 		else if (!_tcsicmp(param, _T("/iLib"))) // v1.0.47: Build an include-file so that ahk2exe can include library functions called by the script.
 		{
 			++i; // Consume the next parameter too, because it's associated with this one.
 			if (i >= __argc) // Missing the expected filename parameter.
 				return CRITICAL_ERROR;
-			// The original purpose of /iLib has gone away with the removal of auto-includes,
-			// but some scripts (like Ahk2Exe) use it to validate the syntax of script files.
-			g_script->mValidateThenExit = true;
+			// For performance and simplicity, open/create the file unconditionally and keep it open until exit.
+			g_script->mIncludeLibraryFunctionsThenExit = new TextFile;
+			if (!g_script->mIncludeLibraryFunctionsThenExit->Open(__targv[i], TextStream::WRITE | TextStream::EOL_CRLF | TextStream::BOM_UTF8, CP_UTF8)) // Can't open the temp file.
+				return CRITICAL_ERROR;
 		}
 		else if (!_tcsnicmp(param, _T("/CP"), 3)) // /CPnnn
 		{
@@ -305,6 +309,8 @@ extern "C" int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LP
 		}
 	}
 #endif
+	if (g_hResource)
+		script_filespec = SCRIPT_RESOURCE_SPEC;
 	//if (g_hResource)
 	//	script_filespec = SCRIPT_RESOURCE_SPEC;
 	Var* var = g_script->FindOrAddVar(_T("A_Args"), 6, VAR_DECLARE_GLOBAL), *varMap = g_script->FindOrAddVar(_T("A_ArgsMap"), 9, VAR_DECLARE_GLOBAL);
@@ -333,7 +339,7 @@ extern "C" int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LP
 	if (!g_TlsDoExecute)
 		return 0;
 	// Set up the basics of the script:
-	if (g_script->Init(*g, script_filespec, restart_mode, 0, false) != OK)
+	if (g_script->Init(*g, script_filespec, restart_mode, 0, _T("")) != OK)
 		return CRITICAL_ERROR;
 
 	// Could use CreateMutex() but that seems pointless because we have to discover the
@@ -351,7 +357,11 @@ extern "C" int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LP
 	UINT load_result = g_script->LoadFromFile(script_filespec);
 #endif
 	if (load_result == LOADING_FAILED) // Error during load (was already displayed by the function call).
+	{
+		if (g_script->mIncludeLibraryFunctionsThenExit)
+			g_script->mIncludeLibraryFunctionsThenExit->Close(); // Flush its buffer to disk.
 		return CRITICAL_ERROR;  // Should return this value because PostQuitMessage() also uses it.
+	}
 	if (!load_result) // LoadFromFile() relies upon us to do this check.  No script was loaded or we're in /iLib mode, so nothing more to do.
 		return 0;
 
@@ -526,7 +536,7 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 		TCHAR buf[MAX_PATH];
 		sntprintf(buf, _countof(buf), _T("#NoTrayIcon\nDllCall(\"SetEvent\",\"UPTR\",%d)\nVKFF::Return"), hEvent);
 
-		HANDLE hThread = (HANDLE)_beginthreadex(NULL, 0, (unsigned(__stdcall*)(void*)) & _wWinMainDll, &buf, 0, &ThreadID);
+		HANDLE hThread = (HANDLE)_beginthreadex(NULL, 0, (unsigned(__stdcall*)(void*)) &_wWinMainDll, &buf, 0, &ThreadID);
 		if (hThread)
 		{
 			CloseHandle(hThread);
@@ -545,7 +555,6 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 	//#ifdef _USRDLL
 	//	InitializeCriticalSection(&g_CriticalHeapBlocks); // used to block memory freeing in case of timeout in ahkTerminate so no corruption happens when both threads try to free Heap.
 	//#endif
-	CoInitialize(NULL);
 	InitializeCriticalSection(&g_CriticalRegExCache); // v1.0.45.04: Must be done early so that it's unconditional, so that DeleteCriticalSection() in the script destructor can also be unconditional (deleting when never initialized can crash, at least on Win 9x).
 	g = &g_startup;
 	// Init any globals not in "struct g" that need it:
@@ -566,6 +575,7 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 	free(lpScriptCmdLine);
 	for (;;)
 	{
+		CoInitialize(NULL);
 		g_SimpleHeap = new SimpleHeap();
 		g_clip = new Clipboard();
 		g_script = new Script();
@@ -635,7 +645,9 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 				if (i >= argc) // Missing the expected filename parameter.
 					goto err;
 				// For performance and simplicity, open/create the file unconditionally and keep it open until exit.
-				g_script->mValidateThenExit = true;
+				g_script->mIncludeLibraryFunctionsThenExit = new TextFile;
+				if (!g_script->mIncludeLibraryFunctionsThenExit->Open(argv[i], TextStream::WRITE | TextStream::EOL_CRLF | TextStream::BOM_UTF8, CP_UTF8)) // Can't open the temp file.
+					goto err;
 			}
 			else if (!_tcsnicmp(param, _T("/CP"), 3)) // /CPnnn
 			{
@@ -712,9 +724,9 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 			LocalFree(argv); // free memory allocated by CommandLineToArgvW
 
 		global_init(*g);  // Set defaults prior to the below, since below might override them for AutoIt2 scripts.
-		g_NoTrayIcon = true;
+		// g_NoTrayIcon = true;
 		// Set up the basics of the script:
-		if (g_script->Init(*g, g_lpScript, 0, g_hInstance, true) != OK) // Set up the basics of the script, using the above.
+		if (g_script->Init(*g, g_lpScript, 0, g_hInstance, lpFileName) != OK) // Set up the basics of the script, using the above.
 			goto err;
 
 		//if (nameHinstanceP.istext)

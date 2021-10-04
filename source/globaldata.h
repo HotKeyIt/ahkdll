@@ -51,6 +51,7 @@ EXPORT extern DWORD g_FirstThreadID;
 thread_local extern DWORD g_HookThreadID;
 thread_local extern LPTSTR g_lpScript;
 thread_local extern bool g_UseStdLib;
+thread_local extern int g_MapCaseSense;
 thread_local extern ATOM g_ClassRegistered;
 thread_local extern CRITICAL_SECTION g_CriticalRegExCache;
 //#ifdef _USRDLL
@@ -109,6 +110,7 @@ thread_local extern WarnMode g_Warn_LocalSameAsGlobal;
 thread_local extern WarnMode g_Warn_Unreachable;
 thread_local extern WarnMode g_Warn_VarUnset;
 thread_local extern SingleInstanceType g_AllowOnlyOneInstance;
+thread_local extern bool g_TargetWindowError;
 thread_local extern bool g_persistent;
 thread_local extern bool g_NoTrayIcon;
 thread_local extern bool g_AllowMainWindow;

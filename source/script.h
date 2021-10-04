@@ -2114,6 +2114,7 @@ public:
 	MsgMonitorStruct *Add(UINT aMsg, HWND aHwnd, IObject *aCallback, bool aAppend = TRUE);
 	MsgMonitorStruct *Add(UINT aMsg, HWND aHwnd, LPTSTR aMethodName, bool aAppend = TRUE);
 	void Delete(MsgMonitorStruct *aMonitor);
+	void Delete(UINT aMsg, HWND aHwnd);
 	ResultType Call(ExprTokenType *aParamValue, int aParamCount, int aInitNewThreadIndex, __int64 *aRetVal = nullptr); // Used for OnExit and OnClipboardChange, but not OnMessage.
 	ResultType Call(ExprTokenType *aParamValue, int aParamCount, UINT aMsg, UCHAR aMsgType, GuiType *aGui, INT_PTR *aRetVal = NULL); // Used by GUI.
 //#ifdef _USRDLL
@@ -2961,7 +2962,6 @@ public:
 								// passed to PreprocessLocalVars. Do not use this list after that. 
 
 	VarList mVars; // Sorted list of global variables.
-	DynaTokenList mDynas;
 	WinGroup *mFirstGroup, *mLastGroup;  // The first and last variables in the linked list.
 	Line *mOpenBlock; // While loading the script, this is the beginning of a block which is currently open.
 	Line *mPendingParentLine, *mPendingRelatedLine;
@@ -3076,6 +3076,7 @@ public:
 	void PrintErrorStdOut(LPCTSTR aErrorText, LPCTSTR aExtraInfo, FileIndexType aFileIndex, LineNumberType aLineNumber);
 #ifndef AUTOHOTKEYSC
 	bool mValidateThenExit;
+	TextStream *mIncludeLibraryFunctionsThenExit;
 	LPTSTR mCmdLineInclude;
 #endif
 
@@ -3095,7 +3096,7 @@ public:
 	UserMenu *mTrayMenu; // Our tray menu, which should be destroyed upon exiting the program.
 	DWORD mEncrypt;
     
-	ResultType Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestart, HINSTANCE hInstance, bool aIsText);
+	ResultType Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestart, HINSTANCE hInstance, LPTSTR aTitle);
 	ResultType CreateWindows();
 	void EnableClipboardListener(bool aEnable);
 	void AllowMainWindow(bool aAllow);

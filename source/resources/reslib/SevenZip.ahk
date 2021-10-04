@@ -138,17 +138,17 @@
       throw ValueError(SevenZip.SevenZipError[Err],-1)
     return StrGet(buf,"UTF-8")
   }
-  List(archive, files:="", options:=""){
-    if Err:=this.Zip(this.hwnd,StrBuf("l " options " `"" archive "`"" (files?" `"" StrReplace(files,"`n","`" `"") "`"":""),"UTF-8"),buf:=Buffer(1024*1024),1024*1024)
-      throw ValueError(SevenZip.SevenZipError[Err],-1)
-    content:=false, out:=[]
-    Loop Parse, StrGet(buf,"UTF-8"), "`n","`r"
-      If content
-        if (A_LoopField="------------------- ----- ------------ ------------  ------------------------")
-          return out
-        else out.Push([StrSplit(RegexReplace(A_LoopField,"([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)?\s+?(.*)","$1" A_Tab "$2" A_Tab "$3" A_Tab "$4" A_Tab "$5" A_Tab "$6"),A_Tab)*])
-      else if (A_LoopField="------------------- ----- ------------ ------------  ------------------------")
-        content:=true
+  List(archive, files := "", options := "") {
+    if Err := this.Zip(this.hwnd, StrBuf("l " options " `"" archive "`"" (files ? " `"" StrReplace(files, "`n", "`" `"") "`"" : ""), "UTF-8"), buf := Buffer(1024 * 1024), 1024 * 1024)
+      throw ValueError(SevenZip.SevenZipError[Err], -1)
+	if RegExMatch(rs :=StrGet(buf, "UTF-8"), "i)Type = (.*)`r`n[\s\S]*`r`n[- ]{50,}`r`n([\S\s]*)`r`n[- ]{50,}`r`n([\d-]+ [\d:]+)?\s+(\d+)\s+(\d+)\s+((\d+) files)?,?\s*((\d+) folders)?", &rv)
+	{
+		out := [], sz := 0, out.type:=rv[1], out.size:=rv[5], out.file:=rv[7], out.folder:=rv[9]
+		Loop Parse, rv[2], "`n", "`r "
+			if RegExMatch(A_LoopField, "([\d-]+ [\d:]+)?\s?(\S+)\s+(\S+)\s+(\S+)\s+(.*)", &rv)
+				out.push({ date: rv[1], attr: RTrim(rv[2], "."), sz: rv[3], size: rv[4], path: rv[5] })
+		return out
+	}
   }
   Test(archive, files:="", options:=""){
     if Err:=this.Zip(this.hwnd,StrBuf("t " options " `"" archive "`"" (files?" `"" StrReplace(files,"`n","`" `"") "`"":""),"UTF-8"),buf:=Buffer(10240),10240)

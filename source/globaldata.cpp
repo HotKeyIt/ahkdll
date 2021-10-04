@@ -56,6 +56,7 @@ thread_local DWORD g_MainThreadID = 0;
 thread_local DWORD g_HookThreadID; // Not initialized by design because 0 itself might be a valid thread ID.
 thread_local LPTSTR g_lpScript = 0;
 thread_local bool g_UseStdLib = false;
+thread_local int g_MapCaseSense = 0;
 thread_local ATOM g_ClassRegistered = 0;
 thread_local CRITICAL_SECTION g_CriticalRegExCache;
 //#ifdef _USRDLL
@@ -110,6 +111,7 @@ thread_local WarnMode g_Warn_LocalSameAsGlobal = WARNMODE_OFF;
 thread_local WarnMode g_Warn_Unreachable = WARNMODE_MSGBOX;
 thread_local WarnMode g_Warn_VarUnset = WARNMODE_MSGBOX;
 thread_local SingleInstanceType g_AllowOnlyOneInstance = SINGLE_INSTANCE_PROMPT;
+thread_local bool g_TargetWindowError = true;
 thread_local bool g_persistent = false;  // Whether the script should stay running even after the auto-exec section finishes.
 thread_local bool g_NoTrayIcon = false;
 #ifdef AUTOHOTKEYSC

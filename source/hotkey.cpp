@@ -505,7 +505,10 @@ void Hotkey::AllDestructAndExit(int aExitCode)
 	// other dialogs can be displayed.  MSDN: "The exit value returned to the system must be the wParam
 	// parameter of the WM_QUIT message."  In our case, PostQuitMessage() should announce the same exit code
 	// that we will eventually call exit() with:
-	PostQuitMessage(aExitCode);
+#ifndef _USRDLL
+	if (g_FirstThreadID == g_MainThreadID)
+		PostQuitMessage(aExitCode);
+#endif
 
 	AddRemoveHooks(0); // Remove all hooks. By contrast, registered hotkeys are unregistered below.
 	if (g_PlaybackHook) // Would be unusual for this to be installed during exit, but should be checked for completeness.
@@ -532,13 +535,20 @@ void Hotkey::AllDestructAndExit(int aExitCode)
 	// at which time the OS will reclaim all remaining memory:
 	//g_SimpleHeap->DeleteAll();
 
+	// HotKeyIt: now all cleanup tasks are finished and we can clear g_SimpleHeap
+	g_SimpleHeap->DeleteAll();
+	delete g_SimpleHeap;
+
 	// I know this isn't the preferred way to exit the program.  However, due to unusual
 	// conditions such as the script having MsgBoxes or other dialogs displayed on the screen
 	// at the time the user exits (in which case our main event loop would be "buried" underneath
 	// the event loops of the dialogs themselves), this is the only reliable way I've found to exit
 	// so far.  The caller has already called PostQuitMessage(), which might not help but it doesn't hurt:
-#ifndef _USRDLL
+
 	if (g_FirstThreadID == g_MainThreadID)
+#ifdef _USRDLL
+		_endthreadex(aExitCode);
+#else
 		exit(aExitCode); // exit() is insignificant in code size.  It does more than ExitProcess(), but perhaps nothing more that this application actually requires.
 #endif
 	// By contrast to _exit(), exit() flushes all file buffers before terminating the process. It also
@@ -2301,7 +2311,9 @@ void Hotstring::DoReplace(LPARAM alParam)
 		// window).  So what we do is backspace over all the other keys prior to that one,
 		// put in the replacement text (if applicable), then send the EndChar through
 		// (if applicable) to complete the sequence.
-		int backspace_count = mStringLength - 1;
+
+		// HotKeyIt removed suppressing of ending character, see comments in Hook.cpp -> CollectHotstring
+		int backspace_count = mStringLength; // -1;
 		if (mEndCharRequired)
 			++backspace_count;
 		for (int i = 0; i < backspace_count; ++i)

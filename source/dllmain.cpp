@@ -47,6 +47,7 @@ switch(fwdReason)
 			 {
 				 QueueUserAPC(&ThreadExitApp, hThread, 0);
 				 CloseHandle(hThread);
+				 Sleep(100);
 			 }
 			 if (g_KeyHistory)
 				 free(g_KeyHistory);

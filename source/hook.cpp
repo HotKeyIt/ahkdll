@@ -2784,7 +2784,12 @@ bool CollectHotstring(KBDLLHOOKSTRUCT &aEvent, TCHAR ch[], int char_count, HWND 
 				// The Input command will capture the ending character and then there will
 				// be insufficient backspaces sent to clear the abbreviation out of it.  This
 				// situation is quite rare so for now it's just mentioned here as a known limitation.
-				suppress_hotstring_final_char = true;
+
+				// HotKeyIt changed not to supress see also code for DoReplace
+				// When 2 threads or processes have a hotstring the one whith later hook will not be able
+				// to capture hotstring because it will not receive the ending character = resetting the hotstring
+				// not suppressing the ending character fixes that, so hotstring can follow one after the other
+				suppress_hotstring_final_char = false;
 			}
 
 			// Post the message rather than sending it, because Send would need

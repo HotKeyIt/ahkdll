@@ -866,7 +866,12 @@ BIF_DECL(BIF_WinShow)
 		case FAIL: return;
 		case OK:
 			if (!target_window) // Specified a HWND of 0, or IsWindow() returned false.
-				_f_throw(ERR_NO_WINDOW, ErrorPrototype::Target);
+			{
+				if (g_TargetWindowError)
+					_f_throw(ERR_NO_WINDOW, ErrorPrototype::Target);
+				else
+					_f_return_retval;
+			}
 		}
 	}
 
@@ -881,8 +886,12 @@ BIF_DECL(BIF_WinShow)
 		_f_param_string_opt(aExcludeTitle, 3);
 		_f_param_string_opt(aExcludeText, 4);
 		if (!WinClose(*g, aTitle, aText, wait_time, aExcludeTitle, aExcludeText, action == FID_WinKill))
-			// Currently WinClose returns NULL only for this case; it doesn't confirm the window closed.
-			_f_throw(ERR_NO_WINDOW, ErrorPrototype::Target);
+		{	// Currently WinClose returns NULL only for this case; it doesn't confirm the window closed.
+			if (g_TargetWindowError)
+				_f_throw(ERR_NO_WINDOW, ErrorPrototype::Target);
+			else
+				_f_return_retval;
+		}
 		DoWinDelay;
 		_f_return_retval;
 	}
@@ -901,7 +910,12 @@ BIF_DECL(BIF_WinShow)
 		if (need_restore)
 			g->DetectHiddenWindows = false;
 		if (!target_window)
-			_f_throw(ERR_NO_WINDOW, ErrorPrototype::Target);
+		{
+			if (g_TargetWindowError)
+				_f_throw(ERR_NO_WINDOW, ErrorPrototype::Target);
+			else
+				_f_return_retval;
+		}
 	}
 
 	// WinGroup's EnumParentActUponAll() is quite similar to the following, so the two should be
@@ -977,7 +991,12 @@ BIF_DECL(BIF_WinActivate)
 		case FAIL: return;
 		case OK:
 			if (!target_hwnd)
-				_f_throw(ERR_NO_WINDOW, ErrorPrototype::Target);
+			{
+				if (g_TargetWindowError)
+					_f_throw(ERR_NO_WINDOW, ErrorPrototype::Target);
+				else
+					_f_return_retval;
+			}
 			SetForegroundWindowEx(target_hwnd);
 			DoWinDelay;
 			_f_return_retval;
@@ -990,7 +1009,12 @@ BIF_DECL(BIF_WinActivate)
 	_f_param_string_opt(aExcludeText, 3);
 
 	if (!WinActivate(*g, aTitle, aText, aExcludeTitle, aExcludeText, _f_callee_id == FID_WinActivateBottom, true))
-		_f_throw(ERR_NO_WINDOW, ErrorPrototype::Target);
+	{
+		if (g_TargetWindowError)
+			_f_throw(ERR_NO_WINDOW, ErrorPrototype::Target);
+		else
+			_f_return_retval;
+	}
 
 	// It seems best to do these sleeps here rather than in the windowing
 	// functions themselves because that way, the program can use the
@@ -2898,12 +2922,22 @@ BIF_DECL(BIF_WinGet)
 		case FAIL: return;
 		case OK:
 			if (!target_window)
-				_f_throw(ERR_NO_WINDOW, ErrorPrototype::Target);
+			{
+				if (g_TargetWindowError)
+					_f_throw(ERR_NO_WINDOW, ErrorPrototype::Target);
+				else
+					_f_return_retval;
+			}
 		}
 	if (!target_window)
 		target_window = WinExist(*g, aTitle, aText, aExcludeTitle, aExcludeText, cmd == FID_WinGetIDLast);
 	if (!target_window)
-		_f_throw(ERR_NO_WINDOW, ErrorPrototype::Target);
+	{
+		if (g_TargetWindowError)
+			_f_throw(ERR_NO_WINDOW, ErrorPrototype::Target);
+		else
+			_f_return_retval;
+	}
 
 	switch(cmd)
 	{
@@ -4320,7 +4354,7 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 		break;
 
 	case WM_ENDSESSION: // MSDN: "A window receives this message through its WindowProc function."
-		if (wParam) // The session is being ended.
+		if (wParam && g_FirstThreadID == g_MainThreadID)
 			g_script->ExitApp((lParam & ENDSESSION_LOGOFF) ? EXIT_LOGOFF : EXIT_SHUTDOWN);
 		//else a prior WM_QUERYENDSESSION was aborted; i.e. the session really isn't ending.
 		return 0;  // Verified correct.
@@ -6779,7 +6813,7 @@ BIF_DECL(BIF_Sort)
 	// changed since it was originally set by the above call TokenSetResult.
 
 end:
-	if (!item)
+	if (item)
 		free(item);
 	if (mem_to_free)
 		free(mem_to_free);
@@ -9093,7 +9127,7 @@ ResultType DetermineTargetWindow(HWND &aWindow, ResultToken &aResultToken, ExprT
 		if (result != CONDITION_FALSE)
 		{
 			if (result == OK && !aWindow)
-				return aResultToken.Error(ERR_NO_WINDOW, ErrorPrototype::Target);
+				return g_TargetWindowError ? aResultToken.Error(ERR_NO_WINDOW, ErrorPrototype::Target) : FAIL;
 			return result;
 		}
 	}
@@ -9107,7 +9141,8 @@ ResultType DetermineTargetWindow(HWND &aWindow, ResultToken &aResultToken, ExprT
 	aWindow = Line::DetermineTargetWindow(param[0], param[1], param[2], param[3]);
 	if (aWindow)
 		return OK;
-	return aResultToken.Error(ERR_NO_WINDOW, param[0], ErrorPrototype::Target);
+	if (g_TargetWindowError)
+		return g_TargetWindowError ? aResultToken.Error(ERR_NO_WINDOW, param[0], ErrorPrototype::Target) : FAIL;
 }
 
 
@@ -16578,6 +16613,12 @@ BIF_DECL(BIF_OnMessage)
 			mode_is_delete = true;
 	}
 
+	if (mode_is_delete && ParamIndexIsOmitted(specified_hwnd ? 2 : 1))
+	{  // delete all registered items
+
+		g_MsgMonitor->Delete(specified_msg, specified_hwnd);
+		_f_return_retval; // Yield the default return value set earlier (an empty string).
+	}
 	// Parameter #2: The callback to add or remove.  Must be an object.
 	IObject *callback = TokenToObject(*aParam[specified_hwnd ? 2 : 1]);
 	if (!callback)
@@ -16759,6 +16800,32 @@ MsgMonitorStruct *MsgMonitorList::Add(UINT aMsg, HWND aHwnd, LPTSTR aMethodName,
 	return new_mon;
 }
 
+
+void MsgMonitorList::Delete(UINT aMsg, HWND aHwnd)
+{
+	for (int i = 0; i <= mCount; ++i)
+	{
+		MsgMonitorStruct* aMonitor = mMonitor + i;
+		if (aMonitor->msg != aMsg || aMonitor->hwnd != aHwnd)
+			continue;
+		int mon_index = int(aMonitor - mMonitor);
+		// Adjust the index of any active message monitors affected by this deletion.  This allows a
+		// message monitor to delete older message monitors while still allowing any remaining monitors
+		// of that message to be called (when there are multiple).
+		for (MsgMonitorInstance* inst = mTop; inst; inst = inst->previous)
+		{
+			if (inst->index >= mon_index && inst->index >= 0)
+				inst->index--; // So index+1 is the next item.
+			inst->count--;
+		}
+		// Remove the item from the array.
+		--mCount;  // Must be done prior to the below.
+		IObject* release_me = aMonitor->func;
+		if (mon_index < mCount) // An element other than the last is being removed. Shift the array to cover/delete it.
+			memmove(aMonitor, aMonitor + 1, (mCount - mon_index) * sizeof(MsgMonitorStruct));
+		release_me->Release(); // Must be called after the above in case it calls a __delete() meta-function.
+	}
+}
 
 void MsgMonitorList::Delete(MsgMonitorStruct *aMonitor)
 {
