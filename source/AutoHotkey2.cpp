@@ -182,7 +182,8 @@ extern "C" int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LP
 	g_Debugger = new Debugger();
 	g_Debugger->mStack = new DbgStack();
 	InitializeCriticalSection(&g_CriticalRegExCache); // v1.0.45.04: Must be done early so that it's unconditional, so that DeleteCriticalSection() in the script destructor can also be unconditional (deleting when never initialized can crash, at least on Win 9x).
-	
+	InitializeCriticalSection(&g_CriticalTLSCallback);
+
 	g_ahkThreads[0][1] = (UINT_PTR)g_script;
 	g_ahkThreads[0][5] = (UINT_PTR)g_FirstThreadID;
 	g_ahkThreads[0][6] = (UINT_PTR)((PMYTEB)NtCurrentTeb())->ThreadLocalStoragePointer;
@@ -342,6 +343,12 @@ extern "C" int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LP
 	if (g_script->Init(*g, script_filespec, restart_mode, 0, _T("")) != OK)
 		return CRITICAL_ERROR;
 
+
+	// IsSet is constructed here because it's a sort of intrinsic function with its own
+	// special rules.  ExprOp<> isn't used because it doesn't have parameter count limits
+	// or a name (which is displayed when the parameter count is invalid, for instance).
+	sIsSetFunc = new BuiltInFunc{ _T("IsSet"), BIF_IsSet, 1, 1 };
+
 	// Could use CreateMutex() but that seems pointless because we have to discover the
 	// hWnd of the existing process so that we can close or restart it, so we would have
 	// to do this check anyway, which serves both purposes.  Alt method is this:
@@ -367,6 +374,7 @@ extern "C" int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LP
 
 	g_ahkThreads[0][2] = (UINT_PTR)Line::sSourceFile;
 	g_ahkThreads[0][3] = (UINT_PTR)Line::sSourceFileCount;
+	g_ahkThreads[0][4] = (UINT_PTR)&g_startup;
 #ifndef _USRDLL
 	HWND w_existing = NULL;
 	UserMessages reason_to_close_prior = (UserMessages)0;
@@ -556,7 +564,7 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 	//	InitializeCriticalSection(&g_CriticalHeapBlocks); // used to block memory freeing in case of timeout in ahkTerminate so no corruption happens when both threads try to free Heap.
 	//#endif
 	InitializeCriticalSection(&g_CriticalRegExCache); // v1.0.45.04: Must be done early so that it's unconditional, so that DeleteCriticalSection() in the script destructor can also be unconditional (deleting when never initialized can crash, at least on Win 9x).
-	g = &g_startup;
+	InitializeCriticalSection(&g_CriticalTLSCallback);
 	// Init any globals not in "struct g" that need it:
 	LPTSTR lpCmdLine = _T("");
 	LPTSTR lpFileName = _T("");
@@ -576,6 +584,7 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 	for (;;)
 	{
 		CoInitialize(NULL);
+		g = &g_startup;
 		g_SimpleHeap = new SimpleHeap();
 		g_clip = new Clipboard();
 		g_script = new Script();
@@ -731,6 +740,13 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 
 		//if (nameHinstanceP.istext)
 		//	GetCurrentDirectory(MAX_PATH, g_script->mFileDir);
+		
+
+		// IsSet is constructed here because it's a sort of intrinsic function with its own
+		// special rules.  ExprOp<> isn't used because it doesn't have parameter count limits
+		// or a name (which is displayed when the parameter count is invalid, for instance).
+		sIsSetFunc = new BuiltInFunc{ _T("IsSet"), BIF_IsSet, 1, 1 };
+		
 		// Could use CreateMutex() but that seems pointless because we have to discover the
 		// hWnd of the existing process so that we can close or restart it, so we would have
 		// to do this check anyway, which serves both purposes.  Alt method is this:

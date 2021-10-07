@@ -697,6 +697,9 @@ void FreeFunctionVariables(Func *aFunc, bool aDelete)
 				FreeFunctionVariables(f.mFuncs.mItem[v], aDelete);
 			free(f.mFuncs.mItem);
 		}
+		if (f.mClass)
+			f.mClass->Release();
+		f.Release();
 	}
 	else
 	{
@@ -768,13 +771,21 @@ Script::~Script() // Destructor.
 	}
 
 
+	if (g_FirstThreadID == g_MainThreadID)
+	{
+		JSON::_false->Release();
+		JSON::_true->Release();
+		JSON::_null->Release();
+	}
+
 	// L31: Release objects stored in variables, where possible.
 	for (i = 0; i < mVars.mCount; i++)
 	{
-		if (mVars.mItem[i]->mType == VAR_VIRTUAL)
+		Var &aVar = *mVars.mItem[i];
+		if (aVar.mType == VAR_VIRTUAL)
 			continue;
-		if (mVars.mItem[i]->IsAlias())
-			mVars.mItem[i]->ConvertToNonAliasIfNecessary();
+		if (aVar.IsAlias())
+			aVar.ConvertToNonAliasIfNecessary();
 		else
 			mVars.mItem[i]->Free();
 	}
@@ -784,9 +795,7 @@ Script::~Script() // Destructor.
 	{
 		auto& f = *(UserFunc*)mFuncs.mItem[i];
 		if (f.IsBuiltIn())
-		{
 			continue;
-		}
 		FreeFunctionVariables(mFuncs.mItem[i], false);
 	}
 
@@ -800,9 +809,6 @@ Script::~Script() // Destructor.
 			continue;
 		}
 		FreeFunctionVariables(mFuncs.mItem[i], true);
-		Var* aVar = FindGlobalVar(mFuncs.mItem[i]->mName);
-		if (aVar)
-			aVar->mObject->Release();
 	}
 
 	for (i = 0; i < mHotFuncs.mCount; i++)
@@ -826,9 +832,6 @@ Script::~Script() // Destructor.
 			continue;
 		}
 		FreeFunctionVariables(mHotFuncs.mItem[i], true);
-		Var* aVar = FindGlobalVar(mHotFuncs.mItem[i]->mName);
-		if (aVar)
-			aVar->mObject->Release();
 	}
 
 	if (mFuncs.mCountMax)
@@ -847,6 +850,7 @@ Script::~Script() // Destructor.
 	mVars = {};
 	mFuncs = {};
 	mHotFuncs = {};
+
 
 	// It is safer/easier to destroy the GUI windows prior to the menus (especially the menu bars).
 	// This is because one GUI window might get destroyed and take with it a menu bar that is still
@@ -910,7 +914,7 @@ Script::~Script() // Destructor.
 	
 	for (Line *line = g_script->mLastLine, *nextLine = NULL; line;)
 	{
-		/*for (int i = 0; i < line->mArgc; ++i)
+		for (int i = 0; i < line->mArgc; ++i)
 		{
 			ArgStruct& this_arg = line->mArg[i];
 			if (!this_arg.is_expression)
@@ -920,7 +924,7 @@ Script::~Script() // Destructor.
 					if (token->symbol == SYM_OBJECT)
 						token->object->Release();
 				}
-		}*/
+		}
 		nextLine = line->mPrevLine;
 		line->FreeDerefBufIfLarge();
 		//delete line; //no need to delete Line since it is created using g_SimpleHeap
@@ -946,21 +950,12 @@ Script::~Script() // Destructor.
 	DestroyWindow(g_hWndEdit);
 	DeleteObject(g_hFontEdit);
 
-	// HotkeyIt
-	// release all prototypes to clean up memory and get rid of memory leaks
-	JSON::sPrototype->Release();
-	if (g_FirstThreadID == g_MainThreadID)
-	{
-		delete JSON::_false;
-		delete JSON::_true;
-		delete JSON::_null;
-	}
+	// HotkeyIt: release unreleased prototypes to clean up memory and get rid of memory leaks
 #ifdef ENABLE_DLLCALL
 	DynaToken::sPrototype->Release();
 #endif
 	Struct::sPrototype->Release();
 
-	FileObject::sPrototype->Release();
 	for (int i = _countof(GuiControlType::sPrototypes) - 1; i; i--) {
 		if (GuiControlType::sPrototypes[i])
 			GuiControlType::sPrototypes[i]->Release();
@@ -970,111 +965,18 @@ Script::~Script() // Destructor.
 	GuiControlType::sPrototypeList->Release();
 	GuiControlType::sPrototype->Release();
 
-	Object::sVarRefPrototype->Release();
-	Object::sStringPrototype->Release();
-	Object::sIntegerPrototype->Release();
-	Object::sFloatPrototype->Release();
-	Object::sNumberPrototype->Release();
-	Object::sPrimitivePrototype->Release();
-	Object::sComRefPrototype->Release();
-	Object::sComObjectPrototype->Release();
-	Object::sComArrayPrototype->Release();
-	Object::sComValuePrototype->Release();
-	RegExMatchObject::sPrototype->Release();
-	UserMenu::sBarPrototype->Release();
-	UserMenu::sPrototype->Release();
-	Map::sPrototype->Release();
-	InputObject::sPrototype->Release();
-	GuiType::sPrototype->Release();
-	EnumBase::sPrototype->Release();
-	Closure::sPrototype->Release();
-	BoundFunc::sPrototype->Release();
-	
-	// Func::sPrototype seems to be not released fully, not sure where the bug is but it happens only for main thread so it is not a big issue
-	// ExprOp<BIF_RegEx, FID_RegExMatch>();aExprOp = ExprOp<Op_Array, 0>();aExprOp = ExprOp<Op_Object, 0>();
-	ErrorPrototype::ZeroDivision->Release();
-	ErrorPrototype::Value->Release();
-	ErrorPrototype::Type->Release();
-	ErrorPrototype::Timeout->Release();
-	ErrorPrototype::Target->Release();
-	ErrorPrototype::OS->Release();
-	ErrorPrototype::Memory->Release();
-	ErrorPrototype::Method->Release();
-	ErrorPrototype::Property->Release();
-	ErrorPrototype::Member->Release();
-	ErrorPrototype::Key->Release();
-	ErrorPrototype::Index->Release();
-	ErrorPrototype::Error->Release();
-	ClipboardAll::sPrototype->Release();
-	BufferObject::sPrototype->Release();
-	Array::sPrototype->Release();
-	Object::sClassPrototype->Release();
-	Func::sPrototype->Release();
-	Object::sPrototype->Release();
+	sIsSetFunc->Release();
 	Object::FreesPrototype(Func::sPrototype);
 	Object::FreesPrototype(Object::sPrototype);
-	g_call__Delete = false;
 	Object::FreesPrototype(Object::sAnyPrototype);
+	Func::sPrototype->Release();
+	Object::sPrototype->Release();
 	Object::sAnyPrototype->Release();
 
-	JSON::sPrototype = NULL;
-#ifdef ENABLE_DLLCALL
-	DynaToken::sPrototype = NULL;
-#endif
-	Struct::sPrototype = NULL;
-
-	FileObject::sPrototype = NULL;
-	for (int i = _countof(GuiControlType::sPrototypes) - 1; i; i--) {
-		GuiControlType::sPrototypes[i] = NULL;
-		GuiControlType::sClasses[i] = NULL;
-	}
-	GuiControlType::sPrototypeList = NULL;
-	GuiControlType::sPrototype = NULL;
-
-	Object::sVarRefPrototype = NULL;
-	Object::sStringPrototype = NULL;
-	Object::sIntegerPrototype = NULL;
-	Object::sFloatPrototype = NULL;
-	Object::sNumberPrototype = NULL;
-	Object::sPrimitivePrototype = NULL;
-	Object::sComRefPrototype = NULL;
-	Object::sComObjectPrototype = NULL;
-	Object::sComArrayPrototype = NULL;
-	Object::sComValuePrototype = NULL;
-	RegExMatchObject::sPrototype = NULL;
-	UserMenu::sBarPrototype = NULL;
-	UserMenu::sPrototype = NULL;
-	Map::sPrototype = NULL;
-	InputObject::sPrototype = NULL;
-	GuiType::sPrototype = NULL;
-	EnumBase::sPrototype = NULL;
-	Closure::sPrototype = NULL;
-	BoundFunc::sPrototype = NULL;
-	Func::sPrototype = NULL;
-	ErrorPrototype::ZeroDivision = NULL;
-	ErrorPrototype::Value = NULL;
-	ErrorPrototype::Type = NULL;
-	ErrorPrototype::Timeout = NULL;
-	ErrorPrototype::Target = NULL;
-	ErrorPrototype::OS = NULL;
-	ErrorPrototype::Memory = NULL;
-	ErrorPrototype::Method = NULL;
-	ErrorPrototype::Property = NULL;
-	ErrorPrototype::Member = NULL;
-	ErrorPrototype::Key = NULL;
-	ErrorPrototype::Index = NULL;
-	ErrorPrototype::Error = NULL;
-	ClipboardAll::sPrototype = NULL;
-	BufferObject::sPrototype = NULL;
-	Array::sPrototype = NULL;
-	Object::sClassPrototype = NULL;
-	Object::sPrototype = NULL;
-	Object::sAnyPrototype = NULL;
-//#endif.
 	mPriorHotkeyStartTime = 0;
 	free_compiled_regex();
+	
 	// Unregister window class if it was registered in Script::CreateWindows
-
 	if (g_ClassRegistered)
 	{
 		UnregisterClass(g_WindowClassMain, g_hInstance);
@@ -1167,7 +1069,6 @@ Script::~Script() // Destructor.
 	g_HotExprTimeout = 1000; // Timeout for #if (expression) evaluation, in milliseconds.
 	g_HotExprLFW = NULL; // Last Found Window of last #if expression.
 	g_MenuIsVisible = MENU_TYPE_NONE;
-	// g_guiCountMax = 0; no need because we use realloc for g_gui
 	g_HSPriority = 0;  // default priority is always 0
 	g_HSKeyDelay = 0;  // Fast sends are much nicer for auto-replace and auto-backspace.
 	g_HSSendMode = SM_INPUT; // v1.0.43: New default for more reliable hotstrings.
@@ -7337,7 +7238,10 @@ ResultType Script::DefineClass(LPTSTR aBuf)
 	if (class_object)
 		prototype = (Object *)class_object->GetOwnPropObj(_T("Prototype"));
 	else
+	{
 		class_object = Object::CreateClass(prototype = Object::CreatePrototype(mClassName));
+		prototype->Release(); // HotKeyIt: CreateClass uses SetBase
+	}
 
 	if (mClassObjectCount)
 	{
@@ -7372,7 +7276,8 @@ ResultType Script::DefineClass(LPTSTR aBuf)
 	// or sooner if it's a nested class and the script removes it from the outer class.
 	// Classes with static methods are never freed, since the method itself retains a
 	// reference to the class.
-	class_object->Release();
+	// HotKeyIt: class_object is referenced in subclasses and is freed on clearance
+	// class_object->Release();
 
 	return OK;
 }
@@ -9179,11 +9084,6 @@ ResultType Line::ExpressionToPostfix(ArgStruct &aArg, ExprTokenType *&aInfix)
 	// However, this rule requires a small workaround in the postfix-builder to allow 2**-2 to be
 	// evaluated as 2**(-2) rather than being seen as an error.  v1.0.45: A similar thing is required
 	// to allow the following to work: 2**!1, 2**not 0, 2**~0xFFFFFFFE, 2**&x.
-
-	// IsSet is constructed here because it's a sort of intrinsic function with its own
-	// special rules.  ExprOp<> isn't used because it doesn't have parameter count limits
-	// or a name (which is displayed when the parameter count is invalid, for instance).
-	thread_local static BuiltInFunc *sIsSetFunc = new BuiltInFunc { _T("IsSet"), BIF_IsSet, 1, 1 };
 
 	ExprTokenType *infix = NULL;
 	int infix_size = 0, infix_count = 0, allow_for_extra_postfix = 0;

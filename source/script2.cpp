@@ -870,7 +870,7 @@ BIF_DECL(BIF_WinShow)
 				if (g_TargetWindowError)
 					_f_throw(ERR_NO_WINDOW, ErrorPrototype::Target);
 				else
-					_f_return_retval;
+					_f_return_empty;
 			}
 		}
 	}
@@ -890,7 +890,7 @@ BIF_DECL(BIF_WinShow)
 			if (g_TargetWindowError)
 				_f_throw(ERR_NO_WINDOW, ErrorPrototype::Target);
 			else
-				_f_return_retval;
+				_f_return_empty;
 		}
 		DoWinDelay;
 		_f_return_retval;
@@ -914,7 +914,7 @@ BIF_DECL(BIF_WinShow)
 			if (g_TargetWindowError)
 				_f_throw(ERR_NO_WINDOW, ErrorPrototype::Target);
 			else
-				_f_return_retval;
+				_f_return_empty;
 		}
 	}
 
@@ -995,7 +995,7 @@ BIF_DECL(BIF_WinActivate)
 				if (g_TargetWindowError)
 					_f_throw(ERR_NO_WINDOW, ErrorPrototype::Target);
 				else
-					_f_return_retval;
+					_f_return_empty;
 			}
 			SetForegroundWindowEx(target_hwnd);
 			DoWinDelay;
@@ -1013,7 +1013,7 @@ BIF_DECL(BIF_WinActivate)
 		if (g_TargetWindowError)
 			_f_throw(ERR_NO_WINDOW, ErrorPrototype::Target);
 		else
-			_f_return_retval;
+			_f_return_empty;
 	}
 
 	// It seems best to do these sleeps here rather than in the windowing
@@ -2926,7 +2926,7 @@ BIF_DECL(BIF_WinGet)
 				if (g_TargetWindowError)
 					_f_throw(ERR_NO_WINDOW, ErrorPrototype::Target);
 				else
-					_f_return_retval;
+					_f_return_empty;
 			}
 		}
 	if (!target_window)
@@ -2936,7 +2936,7 @@ BIF_DECL(BIF_WinGet)
 		if (g_TargetWindowError)
 			_f_throw(ERR_NO_WINDOW, ErrorPrototype::Target);
 		else
-			_f_return_retval;
+			_f_return_empty;
 	}
 
 	switch(cmd)
@@ -9141,8 +9141,7 @@ ResultType DetermineTargetWindow(HWND &aWindow, ResultToken &aResultToken, ExprT
 	aWindow = Line::DetermineTargetWindow(param[0], param[1], param[2], param[3]);
 	if (aWindow)
 		return OK;
-	if (g_TargetWindowError)
-		return g_TargetWindowError ? aResultToken.Error(ERR_NO_WINDOW, param[0], ErrorPrototype::Target) : FAIL;
+	return g_TargetWindowError ? aResultToken.Error(ERR_NO_WINDOW, param[0], ErrorPrototype::Target) : FAIL;
 }
 
 
@@ -10751,16 +10750,18 @@ DYNARESULT DynaCall(void *aFunction, DYNAPARM aParam[], int aParamCount, DWORD &
 {
 	aException = 0;  // Set default output parameter for caller.
 	PMYTEB curr_teb = NULL;
-	PVOID tls = NULL;
-	if (!g)
+	PVOID tls = NULL, tls_restore = NULL;
+
+	// HotKeyIt: Ignore LastError when called outside of ahk thread
+	if (g)
+		SetLastError(g->LastError); // v1.0.46.07: In case the function about to be called doesn't change last-error, this line serves to retain the script's previous last-error rather than some arbitrary one produced by AutoHotkey's own internal API calls.  This line has no measurable impact on performance.
+
+	if (g_original_tls)
 	{
 		curr_teb = (PMYTEB)NtCurrentTeb();
 		tls = curr_teb->ThreadLocalStoragePointer;
-		curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[0][6];
+		curr_teb->ThreadLocalStoragePointer = g_original_tls;
 	}
-	SetLastError(g->LastError); // v1.0.46.07: In case the function about to be called doesn't change last-error, this line serves to retain the script's previous last-error rather than some arbitrary one produced by AutoHotkey's own internal API calls.  This line has no measurable impact on performance.
-	if (tls)
-		curr_teb->ThreadLocalStoragePointer = tls;
 
     DYNARESULT Res = {0}; // This struct is to be returned to caller by value.
 
@@ -10909,7 +10910,6 @@ DYNARESULT DynaCall(void *aFunction, DYNAPARM aParam[], int aParamCount, DWORD &
 		for(int i = 0; i < params_left; i ++)
 			stackArgs[i] = DynaParamToElement(aParam[i+4]);
 	}
-
 	// Call the function.
 	__try
 	{
@@ -10919,7 +10919,8 @@ DYNARESULT DynaCall(void *aFunction, DYNAPARM aParam[], int aParamCount, DWORD &
 	{
 		aException = GetExceptionCode(); // aException is an output parameter for our caller.
 	}
-
+	if (tls)
+		curr_teb->ThreadLocalStoragePointer = tls;
 #endif
 
 	// v1.0.42.03: The following supports A_LastError. It's called even if an exception occurred because it
@@ -10928,15 +10929,10 @@ DYNARESULT DynaCall(void *aFunction, DYNAPARM aParam[], int aParamCount, DWORD &
 	// call GetLastError() because: Even if we could avoid calling any API function that resets LastError
 	// (which seems unlikely) it would be difficult to maintain (and thus a source of bugs) as revisions are
 	// made in the future.
-	if (!g)
-	{
-		curr_teb = (PMYTEB)NtCurrentTeb();
-		tls = curr_teb->ThreadLocalStoragePointer;
-		curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[0][6];
-	}
-	g->LastError = GetLastError();
-	if (tls)
-		curr_teb->ThreadLocalStoragePointer = tls;
+	// HotKeyIt: Ignore when called outside of ahk thread
+	if (g)
+		g->LastError = GetLastError();
+	
 	TCHAR buf[32];
 
 #ifdef WIN32_PLATFORM
@@ -17013,6 +17009,8 @@ UINT_PTR CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address) // Used
 				curr_teb = (PMYTEB)NtCurrentTeb();
 				tls = curr_teb->ThreadLocalStoragePointer;
 				curr_teb->ThreadLocalStoragePointer = (PVOID)g_ahkThreads[i][6];
+				EnterCriticalSection(&g_CriticalTLSCallback);
+				g_original_tls = tls;
 				break;
 			}
 		}
@@ -17042,7 +17040,11 @@ UINT_PTR CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address) // Used
 		if (g_nThreads >= g_MaxThreadsTotal) // To avoid array overflow, g_MaxThreadsTotal must not be exceeded except where otherwise documented.
 		{
 			if (curr_teb)
+			{
+				g_original_tls = NULL;
+				LeaveCriticalSection(&g_CriticalTLSCallback);
 				curr_teb->ThreadLocalStoragePointer = tls;
+			}
 			return 0;
 		}
 		// See MsgSleep() for comments about the following section.
@@ -17120,7 +17122,11 @@ UINT_PTR CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address) // Used
 	}
 
 	if (curr_teb)
+	{
+		g_original_tls = NULL;
+		LeaveCriticalSection(&g_CriticalTLSCallback);
 		curr_teb->ThreadLocalStoragePointer = tls;
+	}
 	return (INT_PTR)number_to_return;
 }
 

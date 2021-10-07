@@ -30,7 +30,6 @@ GNU General Public License for more details.
 // up the code and might make maintaining it easier):
 
 thread_local FuncLibrary sLib[FUNC_LIB_COUNT] = { 0 }; // function libraries
-thread_local extern bool g_call__Delete = true; // required to avoid calling __Delete when freeing sAnyPrototype on script exit.
 LPSTR g_hWinAPI = NULL, g_hWinAPIlowercase = NULL;  // loads WinAPI functions definitions from resource
 thread_local SimpleHeap *g_SimpleHeap = NULL;
 HRSRC g_hResource = NULL; // Set by WinMain()	// for compiled AutoHotkey.exe
@@ -49,6 +48,8 @@ thread_local bool g_Reloading = false;
 //#else
 EXPORT FARPROC g_ThreadExitApp = (FARPROC)&ThreadExitApp;
 UINT_PTR g_ahkThreads[MAX_AHK_THREADS][7];
+thread_local PVOID g_original_tls = NULL;
+thread_local CRITICAL_SECTION g_CriticalTLSCallback;
 HINSTANCE g_hInstance = NULL; // Set by WinMain().
 thread_local HMODULE g_hMemoryModule = NULL; // Set by DllMain() used for COM 
 EXPORT DWORD g_FirstThreadID = NULL;
@@ -59,6 +60,7 @@ thread_local bool g_UseStdLib = false;
 thread_local int g_MapCaseSense = 0;
 thread_local ATOM g_ClassRegistered = 0;
 thread_local CRITICAL_SECTION g_CriticalRegExCache;
+thread_local BuiltInFunc* sIsSetFunc = NULL;
 //#ifdef _USRDLL
 //thread_local CRITICAL_SECTION g_CriticalHeapBlocks;
 //#endif

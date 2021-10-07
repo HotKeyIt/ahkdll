@@ -522,12 +522,9 @@ bool Object::Delete()
 		// by causing LineError() to throw an exception:
 		int outer_excptmode = g->ExcptMode;
 		g->ExcptMode |= EXCPTMODE_DELETE;
-		if(g_call__Delete)
-		{
-			FuncResult rt;
-			CallMeta(_T("__Delete"), rt, ExprTokenType(this), nullptr, 0);
-			rt.Free();
-		}
+		FuncResult rt;
+		CallMeta(_T("__Delete"), rt, ExprTokenType(this), nullptr, 0);
+		rt.Free();
 
 		g->ExcptMode = outer_excptmode;
 
@@ -1290,7 +1287,9 @@ Object *Object::DefineMembers(Object *obj, LPTSTR aClassName, ObjectMember aMemb
 Object *Object::CreateClass(LPTSTR aClassName, Object *aBase, Object *aPrototype, ClassFactoryDef aFactory)
 {
 	auto class_obj = CreateClass(aPrototype);
-
+	
+	aPrototype->Release(); // HotKeyIt: the scripts var should be the only reference to the prototype so it can be released on clearance.
+	
 	class_obj->SetBase(aBase);
 
 	if (aFactory.call)
@@ -3226,6 +3225,7 @@ Object *Object::CreateRootPrototypes()
 	sPrototype = CreatePrototype(_T("Object"), sAnyPrototype);
 	Func::sPrototype = CreatePrototype(_T("Func"), Object::sPrototype);
 
+
 	// These methods correspond to global functions, as BuiltInMethod
 	// only handles Objects, and these must handle primitive values.
 	static const LPTSTR sFuncs[] = { _T("GetMethod"), _T("HasBase"), _T("HasMethod"), _T("HasProp") };
@@ -3251,6 +3251,9 @@ Object *Object::CreateRootPrototypes()
 	sClassPrototype = Object::CreatePrototype(_T("Class"), Object::sPrototype);
 	auto anyClass = CreateClass(_T("Any"), sClassPrototype, sAnyPrototype, nullptr);
 	Object::sClass = CreateClass(_T("Object"), anyClass, Object::sPrototype, NewObject<Object>);
+	// HotKeyIt: need addref since these are not referenced in script and we release prototype after CreateClass(aPrototype)
+	sAnyPrototype->AddRef();
+	sPrototype->AddRef();
 
 	ObjectCtor no_ctor = nullptr;
 	ObjectMember *no_members = nullptr;

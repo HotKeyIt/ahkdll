@@ -25,7 +25,6 @@ GNU General Public License for more details.
 #include "Debugger.h"
 
 thread_local extern FuncLibrary sLib[FUNC_LIB_COUNT]; // function libraries
-thread_local extern bool g_call__Delete; // required to avoid calling __Delete when freeing sAnyPrototype on script exit.
 extern LPSTR g_hWinAPI, g_hWinAPIlowercase; // loads WinAPI functions definitions from resource
 thread_local extern SimpleHeap *g_SimpleHeap;
 extern HRSRC g_hResource;		// for compiled AutoHotkey.exe
@@ -44,6 +43,8 @@ thread_local extern bool g_Reloading;
 //#else
 EXPORT FARPROC g_ThreadExitApp;
 extern UINT_PTR g_ahkThreads[MAX_AHK_THREADS][7];
+thread_local extern PVOID g_original_tls;
+thread_local extern CRITICAL_SECTION g_CriticalTLSCallback;
 thread_local extern HMODULE g_hMemoryModule;
 thread_local extern DWORD g_MainThreadID;
 extern HINSTANCE g_hInstance;
@@ -54,6 +55,7 @@ thread_local extern bool g_UseStdLib;
 thread_local extern int g_MapCaseSense;
 thread_local extern ATOM g_ClassRegistered;
 thread_local extern CRITICAL_SECTION g_CriticalRegExCache;
+thread_local extern BuiltInFunc* sIsSetFunc;
 //#ifdef _USRDLL
 //thread_local extern CRITICAL_SECTION g_CriticalHeapBlocks;
 //#endif
