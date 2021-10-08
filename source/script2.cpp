@@ -801,7 +801,9 @@ input_type *InputRelease(input_type *aInput)
 			return aInput; // Return for caller to call OnEnd and Release.
 		aInput->ScriptObject->Release();
 		aInput->ScriptObject = NULL;
-		g_script->ExitIfNotPersistent(EXIT_EXIT); // In case this InputHook was the only thing keeping the script running.
+		// HotKeyIt: call only if we are not already exiting -> g_hWnd == NULL
+		if (g_hWnd)
+			g_script->ExitIfNotPersistent(EXIT_EXIT); // In case this InputHook was the only thing keeping the script running.
 	}
 	return NULL;
 }
@@ -4400,7 +4402,9 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 	case WM_WINDOWPOSCHANGED:
 		if (hWnd == g_hWnd && (LPWINDOWPOS(lParam)->flags & SWP_HIDEWINDOW) && g_script->mIsReadyToExecute)
 		{
-			g_script->ExitIfNotPersistent(EXIT_CLOSE);
+			// HotKeyIt: call only if we are not already exiting -> g_hWnd == NULL
+			if (g_hWnd)
+				g_script->ExitIfNotPersistent(EXIT_CLOSE);
 			return 0;
 		}
 		break; // Let DWP handle it.

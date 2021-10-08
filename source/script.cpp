@@ -732,9 +732,7 @@ void FreeFunctionVariables(Func *aFunc, bool aDelete)
 				if (!this_arg.is_expression)
 					continue;
 				for (ExprTokenType* token = this_arg.postfix; token->symbol != SYM_INVALID; ++token) {
-					if (token->symbol == SYM_VAR)
-						token->var->Free();
-					else if (token->symbol == SYM_OBJECT)
+					if (token->symbol == SYM_OBJECT)
 						token->object->Release();
 				}
 			}
@@ -770,12 +768,23 @@ Script::~Script() // Destructor.
 		g_Debugger->Disconnect();
 	}
 
-
-	if (g_FirstThreadID == g_MainThreadID)
+	// delete static func vars first
+	for (i = 0; i < mFuncs.mCount; i++)
 	{
-		JSON::_false->Release();
-		JSON::_true->Release();
-		JSON::_null->Release();
+		auto& f = *(UserFunc*)mFuncs.mItem[i];
+		if (f.IsBuiltIn())
+			continue;
+		FreeFunctionVariables(mFuncs.mItem[i], false);
+	}
+
+	for (i = 0; i < mHotFuncs.mCount; i++)
+	{
+		auto& f = *(UserFunc*)mHotFuncs.mItem[i];
+		if (f.IsBuiltIn())
+		{
+			continue;
+		}
+		FreeFunctionVariables(mHotFuncs.mItem[i], false);
 	}
 
 	// L31: Release objects stored in variables, where possible.
@@ -787,18 +796,35 @@ Script::~Script() // Destructor.
 		if (aVar.IsAlias())
 			aVar.ConvertToNonAliasIfNecessary();
 		else
-			mVars.mItem[i]->Free();
+			aVar.Free();
 	}
 
-	// delete static func vars first
-	for (i = 0; i < mFuncs.mCount; i++)
+
+	for (Line* line = g_script->mLastLine, *nextLine = NULL; line;)
 	{
-		auto& f = *(UserFunc*)mFuncs.mItem[i];
-		if (f.IsBuiltIn())
-			continue;
-		FreeFunctionVariables(mFuncs.mItem[i], false);
+		for (int i = 0; i < line->mArgc; ++i)
+		{
+			ArgStruct& this_arg = line->mArg[i];
+			if (!this_arg.is_expression)
+				continue;
+			if (this_arg.postfix)
+				for (ExprTokenType* token = this_arg.postfix; token->symbol != SYM_INVALID; ++token) {
+					if (token->symbol == SYM_OBJECT)
+						token->object->Release();
+				}
+		}
+		nextLine = line->mPrevLine;
+		line->FreeDerefBufIfLarge();
+		//delete line; //no need to delete Line since it is created using g_SimpleHeap
+		line = nextLine;
 	}
 
+	if (g_FirstThreadID == g_MainThreadID)
+	{
+		JSON::_false->Release();
+		JSON::_true->Release();
+		JSON::_null->Release();
+	}
 
 	for (i = 0; i < mFuncs.mCount; i++)
 	{
@@ -809,16 +835,6 @@ Script::~Script() // Destructor.
 			continue;
 		}
 		FreeFunctionVariables(mFuncs.mItem[i], true);
-	}
-
-	for (i = 0; i < mHotFuncs.mCount; i++)
-	{
-		auto& f = *(UserFunc*)mHotFuncs.mItem[i];
-		if (f.IsBuiltIn())
-		{
-			continue;
-		}
-		FreeFunctionVariables(mHotFuncs.mItem[i], false);
 	}
 
 
@@ -850,7 +866,6 @@ Script::~Script() // Destructor.
 	mVars = {};
 	mFuncs = {};
 	mHotFuncs = {};
-
 
 	// It is safer/easier to destroy the GUI windows prior to the menus (especially the menu bars).
 	// This is because one GUI window might get destroyed and take with it a menu bar that is still
@@ -910,25 +925,6 @@ Script::~Script() // Destructor.
 		nextGroup = group->mNextGroup;
 		delete group;
 		group = nextGroup;
-	}
-	
-	for (Line *line = g_script->mLastLine, *nextLine = NULL; line;)
-	{
-		for (int i = 0; i < line->mArgc; ++i)
-		{
-			ArgStruct& this_arg = line->mArg[i];
-			if (!this_arg.is_expression)
-				continue;
-			if (this_arg.postfix)
-				for (ExprTokenType* token = this_arg.postfix; token->symbol != SYM_INVALID; ++token) {
-					if (token->symbol == SYM_OBJECT)
-						token->object->Release();
-				}
-		}
-		nextLine = line->mPrevLine;
-		line->FreeDerefBufIfLarge();
-		//delete line; //no need to delete Line since it is created using g_SimpleHeap
-		line = nextLine;
 	}
 
 	// Free DerefBackup before deleting functions since Object::Delete() uses Deref and access violation is caused. Not sure if memory leak is possible
@@ -1441,6 +1437,9 @@ ResultType Script::CreateWindows()
 		MsgBox(_T("CreateWindow")); // Short msg since so rare.
 		return FAIL;
 	}
+
+	if (!(g_ClassRegistered))
+		SetWindowLongPtr(g_hWnd, GWLP_WNDPROC, (LONG_PTR)MainWindowProc);
 
 	// Now that all static initializers (such as for Object::sPrototype)
 	// are guaranteed to have been executed, construct the Tray menu.
@@ -1966,12 +1965,8 @@ ResultType Script::ExitApp(ExitReasons aExitReason, int aExitCode)
 		// MUST NOT create a new thread when g_OnExitIsRunning because g_array allows only one
 		// extra thread for ExitApp() (which allows it to run even when MAX_THREADS_EMERGENCY has
 		// been reached).  See TOTAL_ADDITIONAL_THREADS.
-/*#ifdef _USRDLL
-		g_OnExitIsRunning = false;
-		if (g_Reloading)
-			return EARLY_EXIT;
-#endif*/
-		if (g_FirstThreadID != g_MainThreadID) {
+		if (g_FirstThreadID != g_MainThreadID) 
+		{	
 			g_OnExitIsRunning = g_persistent = false;
 			PostThreadMessage(g_MainThreadID, WM_QUIT, 0, 0);
 			return EARLY_EXIT;
@@ -2113,16 +2108,16 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 				break;
 			}
 		}
-		delete g_script;
-		delete g_clip;
-		delete g_MsgMonitor;
-		free(g_array);
 		if (IsWindow(g_hWnd))
 		{
 			g_DestroyWindowCalled = true;
 			DestroyWindow(g_hWnd);
 			g_hWnd = NULL;
 		}
+		delete g_script;
+		delete g_clip;
+		delete g_MsgMonitor;
+		free(g_array);
 		if (g_Debugger->mStack->mBottom)
 			free(g_Debugger->mStack->mBottom);
 		delete g_Debugger->mStack;
@@ -2135,6 +2130,12 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 		g_ExitCode = aExitCode;
 		return;
 	}
+	if (IsWindow(g_hWnd))
+	{
+		g_DestroyWindowCalled = true;
+		DestroyWindow(g_hWnd);
+		g_hWnd = NULL;
+	}
 	delete g_script;
 	delete g_clip;
 	delete g_MsgMonitor;
@@ -2145,11 +2146,6 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 	{
 		free(g_hWinAPI);
 		free(g_hWinAPIlowercase);
-	}
-	if (IsWindow(g_hWnd))
-	{
-		g_DestroyWindowCalled = true;
-		DestroyWindow(g_hWnd);
 	}
 	DeleteCriticalSection(&g_CriticalRegExCache); // g_CriticalRegExCache is used elsewhere for thread-safety.
 	if (g_Debugger->mStack->mBottom)
@@ -10880,18 +10876,14 @@ ResultType Line::FinalizeExpression(ArgStruct &aArg)
 						}
 						if (var)
 						{
-							auto curfunc = g->CurrentFunc;
-							auto items = curfunc->mVars.mItem;
-							auto count = curfunc->mVars.mCount;
-							for (int i = 0; i < count; i++) {
-								if (!_tcsicmp(items[i]->mName, this_postfix->var->mName)) {
-									memmove(items + i, items + i + 1, (count - i) * sizeof(Func*));
-									items[count - 1] = NULL;
-									curfunc->mVars.mCount--;
-									break;
-								}
+							g->CurrentFunc->mVars.Remove(this_postfix->var->mName);
+							if (g->CurrentFunc->mVars.mCount == 0 && g->CurrentFunc->mVars.mItem)
+							{
+								free(g->CurrentFunc->mVars.mItem);
+								g->CurrentFunc->mVars.mItem = NULL;
 							}
 							delete this_postfix->var;
+							var->mObject->AddRef();
 							this_postfix->SetValue(var->mObject);
 							continue;
 						}
@@ -11956,7 +11948,8 @@ ResultType Line::ExecUntil(ExecUntilMode aMode, ResultToken *aResultToken, Line 
 			{
 				g.CurrentFunc->mJumpToLine = line->mNextLine;
 				// keep line in Static list to be able to free variables.
-				g.CurrentFunc->mFirstStaticLine = line;
+				if (g.CurrentFunc->mFirstStaticLine == NULL)
+					g.CurrentFunc->mFirstStaticLine = line;
 			}
 			// Update any If/Else/Loop or similar (there can be multiple nested) that immediately precedes
 			// this line so that they do not jump to this one after executing their body.

@@ -1472,6 +1472,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 			// The app normally terminates before WM_QUIT is ever seen here because of the way
 			// WM_CLOSE is handled by MainWindowProc().  However, this is kept here in case anything
 			// external ever explicitly posts a WM_QUIT to our thread's queue:
+			// HotKeyIt: return from message loop if we are exiting a thread.
 			if (g_FirstThreadID != g_MainThreadID)
 				return false;
 			g_script->ExitApp(EXIT_CLOSE);
@@ -2000,7 +2001,8 @@ void ResumeUnderlyingThread()
 
 	// If this was the last running thread and the script has nothing keeping it open (hotkeys, Gui,
 	// message monitors, etc.) then it should terminate now:
-	if (!g_OnExitIsRunning)
+	// HotKeyIt: call only if we are not already exiting -> g_hWnd == NULL
+	if (g_hWnd && !g_OnExitIsRunning)
 		g_script->ExitIfNotPersistent(EXIT_EXIT);
 }
 

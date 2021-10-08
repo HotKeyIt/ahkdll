@@ -1,5 +1,7 @@
 ﻿NewThread(s:="Persistent",p:="",t:="AutoHotkey",w:=0xFFFFFFFF,h:=0){
-  static Newthread_CloseWindows:=CallbackCreate(NewThread,,2)
+  static Newthread_CloseWindows:=CallbackCreate(NewThread,,2),freecallback:={__Delete:NewThread}
+  if IsObject(s)
+	return CallbackFree(Newthread_CloseWindows)
   if (IsInteger(s)){
     if IsInteger(p){
       DetectHiddenWindows:=A_DetectHiddenWindows

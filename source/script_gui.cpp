@@ -2345,7 +2345,9 @@ void GuiType::Destroy()
 	// IT IS NOW UNSAFE TO REFER TO ANY NON-STATIC MEMBERS OF THIS OBJECT.
 
 	// If this Gui was the last thing keeping the script running, exit the script:
-	g_script->ExitIfNotPersistent(EXIT_CLOSE);
+	// HotKeyIt: call only if we are not already exiting -> g_hWnd == NULL
+	if (g_hWnd)
+		g_script->ExitIfNotPersistent(EXIT_CLOSE);
 }
 
 
@@ -2473,15 +2475,19 @@ ResultType GuiType::Create(LPTSTR aTitle)
 		sGuiWinClass = RegisterClassEx(&wc);
 #else
 		sGuiWinClass = RegisterClassEx(&wc);
-		if (!sGuiWinClass && g_FirstThreadID == g_MainThreadID)
-			return g_script->Win32Error();
+		// HotKeyIt: 
+		//		If above fails, we assume another thread already registered the class and will set it after window has been created.
+		//		Otherwise CreateWindowEx will fail with appropriate error message.
+		//if (!sGuiWinClass)
+			//return g_script->Win32Error();
 #endif
 	}
 
 	if (   !(mHwnd = CreateWindowEx(mExStyle, g_WindowClassGUI, aTitle
 		, mStyle, 0, 0, 0, 0, mOwner, NULL, g_hInstance, NULL))   )
 		return g_script->Win32Error();
-
+	if (!sGuiWinClass)
+		sGuiWinClass = (ATOM)GetClassLong(mHwnd, GCW_ATOM);
 	// Set the user pointer in the window to this GuiType object, so that it is possible to retrieve it back from the window handle.
 	SetWindowLongPtr(mHwnd, GWLP_USERDATA, (LONG_PTR)this);
 
@@ -8028,7 +8034,9 @@ void GuiType::Cancel()
 		VisibilityChanged(); // This may Release() and indirectly Destroy() the Gui.
 	}
 	// If this Gui was the last thing keeping the script running, exit the script:
-	g_script->ExitIfNotPersistent(EXIT_CLOSE);
+	// HotKeyIt: call only if we are not already exiting -> g_hWnd == NULL
+	if (g_hWnd)
+		g_script->ExitIfNotPersistent(EXIT_CLOSE);
 }
 
 
