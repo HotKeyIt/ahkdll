@@ -43,6 +43,26 @@ GNU General Public License for more details.
 #include "globaldata.h" // for a lot of things
 #include "qmath.h" // For ExpandExpression()
 
+#define GETMACROVAR \
+{ \
+	for (int aParamIndex = g->CurrentMacro->mParamCount; aParamIndex; aParamIndex--) \
+		if (!_tcscmp(this_token.var->mName, g->CurrentMacro->mParam[aParamIndex - 1].var->mName) && (aVarIsParam = true)) \
+		{ \
+			this_token.var = g->CurrentMacro->mParam[aParamIndex - 1].var; \
+			break; \
+		} \
+	if (!aVarIsParam) \
+	{ \
+		aMacroVar = g_script->FindVar(this_token.var->mName, 0, FINDVAR_FOR_READ); \
+		if (!aMacroVar) \
+		{ \
+			error_value = &this_token; \
+			goto unset_var; \
+		} \
+		this_token.var = aMacroVar; \
+	} \
+}
+
 // __forceinline: Decided against it for this function because although it's only called by one caller,
 // testing shows that it wastes stack space (room for its automatic variables would be unconditionally 
 // reserved in the stack of its caller).  Also, the performance benefit of inlining this is too slight.
@@ -75,7 +95,25 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 	LPTSTR result_to_return = _T(""); // By contrast, NULL is used to tell the caller to abort the current thread.
 	LPCTSTR error_msg = ERR_EXPR_EVAL, error_info = _T("");
 	ExprTokenType *error_value;
-	Var *output_var = (mActionType == ACT_ASSIGNEXPR) ? VAR(mArg[0]) : NULL; // Resolve early because it's similar in usage/scope to the above.
+	Var* output_var = NULL;
+	Var* aMacroVar = NULL;
+	bool aVarIsParam = false;
+	if (mActionType == ACT_ASSIGNEXPR)
+	{
+		if (g->CurrentMacro)
+		{
+			for (int aParamIndex = g->CurrentMacro->mParamCount; aParamIndex; aParamIndex--)
+				if (!_tcscmp(mArg[0].text, g->CurrentMacro->mParam[aParamIndex - 1].var->mName) && (aVarIsParam = true))
+				{
+					output_var = g->CurrentMacro->mParam[aParamIndex - 1].var;
+					break;
+				}
+			if (!aVarIsParam) // if variable is not found a new variable needs to be created
+				output_var = g_script->FindOrAddVar(mArg[0].text, mArg[0].length, VAR_LOCAL | VAR_GLOBAL);
+		}
+		else
+			output_var = VAR(mArg[0]); // Resolve early because it's similar in usage/scope to the above.
+	}
 
 	ExprTokenType **stack = (ExprTokenType **)_alloca(mArg[aArgIndex].max_stack * sizeof(ExprTokenType *));
 	int stack_count = 0;
@@ -238,26 +276,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 					goto push_this_token;
 				} // end if (reading a var of type VAR_VIRTUAL)
 				if (g->CurrentMacro)
-				{
-					Var* aMacroVar = NULL;
-					bool aVarIsParam = false;
-					for (int aParamIndex = g->CurrentMacro->mParamCount; aParamIndex; aParamIndex--)
-						if (!_tcscmp(this_token.var->mName, g->CurrentMacro->mParam[aParamIndex - 1].var->mName) && (aVarIsParam = true))
-						{
-							this_token.var = g->CurrentMacro->mParam[aParamIndex - 1].var;
-							break;
-						}
-					if (!aVarIsParam)
-					{
-						aMacroVar = g_script->FindVar(this_token.var->mName, 0, FINDVAR_FOR_READ);
-						if (!aMacroVar)
-						{
-							error_value = &this_token;
-							goto unset_var;
-						}
-						this_token.var = aMacroVar;
-					}
-				}
+					GETMACROVAR
 				else
 				{
 					if (this_token.var->IsUninitialized())
@@ -282,6 +301,8 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ResultToken *a
 					}
 				}
 			}
+			else if (this_token.symbol == SYM_VAR && g->CurrentMacro)
+				GETMACROVAR
 			goto push_this_token;
 		} // if (IS_OPERAND(this_token.symbol))
 

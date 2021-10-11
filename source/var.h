@@ -884,7 +884,7 @@ public:
 	{
 	}
 
-	Var() : Var(_T(""), VAR_VARREF)
+	Var() : Var(_T(""), 0)
 	{
 		// Vars constructed this way are for temporary use, and therefore must have mHowAllocated set
 		// as below to prevent the use of g_SimpleHeap->Malloc().  Otherwise, each Var could allocate

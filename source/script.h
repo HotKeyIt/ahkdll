@@ -1572,7 +1572,7 @@ struct ScriptItemList
 	ResultType Remove(LPCTSTR aName);
 	ResultType Alloc(int aAllocCount);
 };
-
+class Func;
 typedef ScriptItemList<Func, 4> FuncList; // Initial count is small since functions aren't expected to contain many nested functions.
 typedef ScriptItemList<Var, VARLIST_INITIAL_SIZE> VarList;
 typedef ScriptItemList<DynaToken, VARLIST_INITIAL_SIZE> DynaTokenList;

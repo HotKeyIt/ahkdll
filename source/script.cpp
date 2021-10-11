@@ -4640,7 +4640,18 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 
 	if (IS_DIRECTIVE_MATCH(_T("#UseStdLib")))
 	{
-		g_UseStdLib = true;
+		switch (Line::ConvertOnOff(parameter))
+		{
+		case TOGGLED_OFF:
+			g_UseStdLib = false;
+			break;
+		case TOGGLED_ON:
+			g_UseStdLib = true;
+			break;
+		default:
+			g_UseStdLib = true;
+			break;
+		}
 		return CONDITION_TRUE;
 	}
 
@@ -4666,6 +4677,7 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 				g_TargetWindowError = true;
 				break;
 			default:
+				g_TargetWindowError = false;
 				break;
 		}
 		return CONDITION_TRUE;

@@ -3,11 +3,11 @@
 /* this ALWAYS GENERATED file contains the definitions for the interfaces */
 
 
- /* File created by MIDL compiler version 8.01.0622 */
+ /* File created by MIDL compiler version 8.01.0626 */
 /* at Tue Jan 19 04:14:07 2038
  */
 /* Compiler settings for source\resources\AutoHotkey2.idl:
-    Oicf, W1, Zp8, env=Win64 (32b run), target_arch=AMD64 8.01.0622 
+    Oicf, W1, Zp8, env=Win64 (32b run), target_arch=AMD64 8.01.0626 
     protocol : all , ms_ext, c_ext, robust
     error checks: allocation ref bounds_check enum stub_data 
     VC __declspec() decoration level: 
@@ -40,6 +40,14 @@
 
 #if defined(_MSC_VER) && (_MSC_VER >= 1020)
 #pragma once
+#endif
+
+#ifndef DECLSPEC_XFGVIRT
+#if _CONTROL_FLOW_GUARD_XFG
+#define DECLSPEC_XFGVIRT(base, func) __declspec(xfg_virtual(base, func))
+#else
+#define DECLSPEC_XFGVIRT(base, func)
+#endif
 #endif
 
 /* Forward Declarations */ 
@@ -188,28 +196,34 @@ EXTERN_C const IID IID_ICOMServer;
     {
         BEGIN_INTERFACE
         
+        DECLSPEC_XFGVIRT(IUnknown, QueryInterface)
         HRESULT ( STDMETHODCALLTYPE *QueryInterface )( 
             ICOMServer * This,
             /* [in] */ REFIID riid,
             /* [annotation][iid_is][out] */ 
             _COM_Outptr_  void **ppvObject);
         
+        DECLSPEC_XFGVIRT(IUnknown, AddRef)
         ULONG ( STDMETHODCALLTYPE *AddRef )( 
             ICOMServer * This);
         
+        DECLSPEC_XFGVIRT(IUnknown, Release)
         ULONG ( STDMETHODCALLTYPE *Release )( 
             ICOMServer * This);
         
+        DECLSPEC_XFGVIRT(IDispatch, GetTypeInfoCount)
         HRESULT ( STDMETHODCALLTYPE *GetTypeInfoCount )( 
             ICOMServer * This,
             /* [out] */ UINT *pctinfo);
         
+        DECLSPEC_XFGVIRT(IDispatch, GetTypeInfo)
         HRESULT ( STDMETHODCALLTYPE *GetTypeInfo )( 
             ICOMServer * This,
             /* [in] */ UINT iTInfo,
             /* [in] */ LCID lcid,
             /* [out] */ ITypeInfo **ppTInfo);
         
+        DECLSPEC_XFGVIRT(IDispatch, GetIDsOfNames)
         HRESULT ( STDMETHODCALLTYPE *GetIDsOfNames )( 
             ICOMServer * This,
             /* [in] */ REFIID riid,
@@ -218,6 +232,7 @@ EXTERN_C const IID IID_ICOMServer;
             /* [in] */ LCID lcid,
             /* [size_is][out] */ DISPID *rgDispId);
         
+        DECLSPEC_XFGVIRT(IDispatch, Invoke)
         /* [local] */ HRESULT ( STDMETHODCALLTYPE *Invoke )( 
             ICOMServer * This,
             /* [annotation][in] */ 
@@ -237,6 +252,7 @@ EXTERN_C const IID IID_ICOMServer;
             /* [annotation][out] */ 
             _Out_opt_  UINT *puArgErr);
         
+        DECLSPEC_XFGVIRT(ICOMServer, NewThread)
         /* [id] */ HRESULT ( STDMETHODCALLTYPE *NewThread )( 
             ICOMServer * This,
             /* [optional][in] */ VARIANT script,
@@ -244,23 +260,27 @@ EXTERN_C const IID IID_ICOMServer;
             /* [optional][in] */ VARIANT title,
             /* [retval][out] */ unsigned int *ThreadID);
         
+        DECLSPEC_XFGVIRT(ICOMServer, ahkPause)
         /* [id] */ HRESULT ( STDMETHODCALLTYPE *ahkPause )( 
             ICOMServer * This,
             /* [in] */ VARIANT aThreadID,
             /* [optional][in] */ VARIANT aChangeTo,
             /* [retval][out] */ int *paused);
         
+        DECLSPEC_XFGVIRT(ICOMServer, ahkReady)
         /* [id] */ HRESULT ( STDMETHODCALLTYPE *ahkReady )( 
             ICOMServer * This,
             /* [in] */ VARIANT aThreadID,
             /* [retval][out] */ int *ready);
         
+        DECLSPEC_XFGVIRT(ICOMServer, ahkFindLabel)
         /* [id] */ HRESULT ( STDMETHODCALLTYPE *ahkFindLabel )( 
             ICOMServer * This,
             /* [in] */ VARIANT aThreadID,
             /* [in] */ VARIANT aLabelName,
             /* [retval][out] */ UINT_PTR *pLabel);
         
+        DECLSPEC_XFGVIRT(ICOMServer, ahkgetvar)
         /* [id] */ HRESULT ( STDMETHODCALLTYPE *ahkgetvar )( 
             ICOMServer * This,
             /* [in] */ VARIANT aThreadID,
@@ -268,6 +288,7 @@ EXTERN_C const IID IID_ICOMServer;
             /* [optional][in] */ VARIANT getVar,
             /* [retval][out] */ VARIANT *returnVal);
         
+        DECLSPEC_XFGVIRT(ICOMServer, ahkassign)
         /* [id] */ HRESULT ( STDMETHODCALLTYPE *ahkassign )( 
             ICOMServer * This,
             /* [in] */ VARIANT aThreadID,
@@ -275,6 +296,7 @@ EXTERN_C const IID IID_ICOMServer;
             /* [optional][in] */ VARIANT value,
             /* [retval][out] */ int *success);
         
+        DECLSPEC_XFGVIRT(ICOMServer, ahkExecuteLine)
         /* [id] */ HRESULT ( STDMETHODCALLTYPE *ahkExecuteLine )( 
             ICOMServer * This,
             /* [in] */ VARIANT aThreadID,
@@ -283,6 +305,7 @@ EXTERN_C const IID IID_ICOMServer;
             /* [optional][in] */ VARIANT wait,
             /* [retval][out] */ UINT_PTR *pLine);
         
+        DECLSPEC_XFGVIRT(ICOMServer, ahkLabel)
         /* [id] */ HRESULT ( STDMETHODCALLTYPE *ahkLabel )( 
             ICOMServer * This,
             /* [in] */ VARIANT aThreadID,
@@ -290,12 +313,14 @@ EXTERN_C const IID IID_ICOMServer;
             /* [optional][in] */ VARIANT nowait,
             /* [retval][out] */ int *success);
         
+        DECLSPEC_XFGVIRT(ICOMServer, ahkFindFunc)
         /* [id] */ HRESULT ( STDMETHODCALLTYPE *ahkFindFunc )( 
             ICOMServer * This,
             /* [in] */ VARIANT aThreadID,
             /* [in] */ VARIANT FuncName,
             /* [retval][out] */ UINT_PTR *pFunc);
         
+        DECLSPEC_XFGVIRT(ICOMServer, ahkFunction)
         /* [id] */ HRESULT ( STDMETHODCALLTYPE *ahkFunction )( 
             ICOMServer * This,
             /* [in] */ VARIANT aThreadID,
@@ -312,6 +337,7 @@ EXTERN_C const IID IID_ICOMServer;
             /* [optional][in] */ VARIANT param10,
             /* [retval][out] */ VARIANT *returnVal);
         
+        DECLSPEC_XFGVIRT(ICOMServer, ahkPostFunction)
         /* [id] */ HRESULT ( STDMETHODCALLTYPE *ahkPostFunction )( 
             ICOMServer * This,
             /* [in] */ VARIANT aThreadID,
@@ -328,6 +354,7 @@ EXTERN_C const IID IID_ICOMServer;
             /* [optional][in] */ VARIANT param10,
             /* [retval][out] */ VARIANT *returnVal);
         
+        DECLSPEC_XFGVIRT(ICOMServer, addScript)
         /* [id] */ HRESULT ( STDMETHODCALLTYPE *addScript )( 
             ICOMServer * This,
             /* [in] */ VARIANT aThreadID,
@@ -335,6 +362,7 @@ EXTERN_C const IID IID_ICOMServer;
             /* [optional][in] */ VARIANT waitexecute,
             /* [retval][out] */ UINT_PTR *success);
         
+        DECLSPEC_XFGVIRT(ICOMServer, ahkExec)
         /* [id] */ HRESULT ( STDMETHODCALLTYPE *ahkExec )( 
             ICOMServer * This,
             /* [in] */ VARIANT aThreadID,
