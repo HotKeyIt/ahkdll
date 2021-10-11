@@ -18646,7 +18646,7 @@ BIF_DECL(BIF_CryptAES)
 	}
 	if (aResultToken.value_int64 = CryptAES(aParam[0]->symbol == SYM_VAR ? (LPVOID)aParam[0]->var->mByteContents : (LPVOID)TokenToInt64(*aParam[0]),
 											(DWORD)TokenToInt64(*aParam[1]), pw, ParamIndexIsOmitted(3) ? true : TokenToBOOL(*aParam[3]),
-											ParamIndexIsOmitted(4) ? CALG_AES_256 : (DWORD)TokenToInt64(*aParam[4])))
+											ParamIndexIsOmitted(4) ? 256 : (DWORD)TokenToInt64(*aParam[4])))
 	{
 		aResultToken.symbol = SYM_INTEGER;
 	}
