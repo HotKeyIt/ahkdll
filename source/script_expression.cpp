@@ -53,7 +53,7 @@ GNU General Public License for more details.
 		} \
 	if (!aVarIsParam) \
 	{ \
-		aMacroVar = g_script->FindVar(this_token.var->mName, 0, FINDVAR_FOR_READ); \
+		aMacroVar = g_script->FindOrAddVar(this_token.var->mName, 0, VAR_LOCAL | VAR_GLOBAL); \
 		if (!aMacroVar) \
 		{ \
 			error_value = &this_token; \

@@ -13095,9 +13095,16 @@ ResultType Line::PerformAssign()
 		//		x := 1.0
 		//		x := "quoted literal string"
 		//		x := normal_var  ; but not VAR_VIRTUAL or VAR_CONSTANT
-		if (mArg[1].postfix->symbol == SYM_VAR && mArg[1].postfix->var->IsUninitialized())
-			return g_script->VarUnsetError(mArg[1].postfix->var); // !is_expression implies VAR_NORMAL, so InitializeConstant() isn't needed here.
-		Var *output_var = VAR(mArg[0]);
+
+		if (mArg[1].postfix->symbol == SYM_VAR)
+		{
+			Var* aSourceVar = mArg[1].postfix->var;
+			if (g->CurrentMacro)
+				aSourceVar = g_script->FindVar(aSourceVar->mName, 0, FINDVAR_FOR_READ);
+			else if (aSourceVar->IsUninitialized())
+				return g_script->VarUnsetError(mArg[1].postfix->var); // !is_expression implies VAR_NORMAL, so InitializeConstant() isn't needed here.
+		}
+		Var* output_var = VAR(mArg[0]);
 		if (g->CurrentMacro)
 		{
 			bool aVarIsParam = false;
@@ -13106,10 +13113,8 @@ ResultType Line::PerformAssign()
 			for (int aParamIndex = g->CurrentMacro->mParamCount; aParamIndex; aParamIndex--)
 				if (!_tcscmp(aVarName, aFuncParam[aParamIndex - 1].var->mName) && (aVarIsParam = true))
 					break;
-			output_var = !aVarIsParam ? g_script->FindOrAddVar(VAR(mArg[0])->mName, VAR(mArg[0])->Length(), VAR_LOCAL | VAR_GLOBAL) : VAR(mArg[0]);
-		}
-		else
-		{
+			if (!aVarIsParam)
+				output_var = g_script->FindOrAddVar(VAR(mArg[0])->mName, VAR(mArg[0])->Length(), VAR_LOCAL | VAR_GLOBAL);
 		}
 		// HotKeyIt override routine for manually added BuildIn variables
 		// if (!(mArg[1].postfix->symbol == SYM_VAR && (mArg[1].postfix->var->mType == VAR_BUILTIN)))
