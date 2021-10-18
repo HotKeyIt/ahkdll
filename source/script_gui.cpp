@@ -2454,14 +2454,17 @@ ResultType GuiType::Create(LPTSTR aTitle)
 {
 	if (mHwnd) // It already exists
 		return FAIL; // Should be impossible since mHwnd is checked by caller.
-
+	WNDCLASSEX awc = {0};
+	thread_local static WNDCLASSEX wc = {0};
 	// Use a separate class for GUI, which gives it a separate WindowProc and allows it to be more
 	// distinct when used with the ahk_class method of addressing windows.
-	if (!sGuiWinClass)
+	if (!sGuiWinClass || !GetClassInfoEx(g_hInstance, g_WindowClassGUI, &awc))
 	{
-		WNDCLASSEX wc = {0};
-		wc.cbSize = sizeof(wc);
-		wc.lpszClassName = g_WindowClassGUI;
+		if (wc.cbSize)
+			UnregisterClass(wc.lpszClassName, g_hInstance);
+		else
+			wc.cbSize = sizeof(wc);
+		wc.lpszClassName = g_SimpleHeap->Alloc(g_WindowClassGUI);
 		wc.hInstance = g_hInstance;
 		wc.lpfnWndProc = GuiWindowProc;
 		wc.hIcon = g_IconLarge;
