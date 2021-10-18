@@ -4334,9 +4334,10 @@ size_t Script::GetLine(LineBuffer &aBuf, int aInContinuationSection, bool aInBlo
 	aBuf[aBuf_length] = '\0';
 	if (mEncrypt & 2)
 	{
+		DWORD aDataSize = 0;
 		DWORD aSizeEncrypted = 0;
 		g_CS2BW(aBuf, NULL, CRYPT_STRING_BASE64, NULL, &aSizeEncrypted, NULL, NULL);
-		BYTE *data = (BYTE*)malloc(aSizeEncrypted);
+		BYTE *data = (BYTE*)malloc(aDataSize = aSizeEncrypted);
 		g_CS2BW(aBuf, NULL, CRYPT_STRING_BASE64, data, &aSizeEncrypted, NULL, NULL);
 		LPVOID aDataBuf;
 		if (*(unsigned int*)data == 0x04034b50)
@@ -4345,11 +4346,13 @@ size_t Script::GetLine(LineBuffer &aBuf, int aInContinuationSection, bool aInBlo
 			{
 				aBuf.Realloc(aSizeEncrypted);
 				aBuf_length = UTF8ToUTF16((unsigned char*)(LPTSTR)aBuf, aSizeEncrypted, (unsigned char*)aDataBuf, aSizeEncrypted) - 1;
-				g_memset(aDataBuf, 0, aSizeEncrypted);
-				free(aDataBuf);
 			}
 			else
 				return -1;
+			g_memset(aDataBuf, 0, aSizeEncrypted);
+			g_memset(data, 0, aDataSize);
+			free(aDataBuf);
+			free(data);
 		}
 		else
 			mEncrypt = 1;
@@ -4655,14 +4658,45 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		return CONDITION_TRUE;
 	}
 
+	if (IS_DIRECTIVE_MATCH(_T("#DefineDefaultObjectValue")))
+	{
+		g_DefaultObjectValue = (LPTSTR)g_SimpleHeap->Malloc(2 + (parameter ? _tcslen(parameter) * 2 : 0));
+		if (parameter)
+			_tcscpy(g_DefaultObjectValue, parameter);
+		else
+			*g_DefaultObjectValue = L'\0';
+		g_DefaultObjectValueType = SYM_STRING;
+		return CONDITION_TRUE;
+	}
+
+	if (IS_DIRECTIVE_MATCH(_T("#DefineDefaultArrayValue")))
+	{
+		g_DefaultArrayValue = (LPTSTR)g_SimpleHeap->Malloc(2 + (parameter ? _tcslen(parameter) * 2 : 0));
+		if (parameter)
+			_tcscpy(g_DefaultArrayValue, parameter);
+		else
+			*g_DefaultArrayValue = L'\0';
+		g_DefaultArrayValueType = SYM_STRING;
+		return CONDITION_TRUE;
+	}
+
+	if (IS_DIRECTIVE_MATCH(_T("#DefineDefaultMapValue")))
+	{
+		g_DefaultMapValue = (LPTSTR)g_SimpleHeap->Malloc(2 + (parameter ? _tcslen(parameter) * 2 : 0));
+		if (parameter)
+			_tcscpy(g_DefaultMapValue, parameter);
+		else
+			*g_DefaultMapValue = L'\0';
+		g_DefaultMapValueType = SYM_STRING;
+		return CONDITION_TRUE;
+	}
+
 	if (IS_DIRECTIVE_MATCH(_T("#MapCaseSense")))
 	{
-		g_MapCaseSense = Line::ConvertStringCaseSense(parameter);
-		if (SCS_INVALID == g_MapCaseSense)
-		{
-			g_MapCaseSense = 0;
+		StringCaseSenseType aMapCaseSense = Line::ConvertStringCaseSense(parameter);
+		if (SCS_INVALID == aMapCaseSense)
 			return ScriptError(ERR_PARAM1_INVALID, aBuf);
-		}
+		g_MapCaseSense = aMapCaseSense;
 		return CONDITION_TRUE;
 	}
 

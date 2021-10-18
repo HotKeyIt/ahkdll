@@ -59,6 +59,8 @@ Object *Object::Create()
 {
 	Object *obj = new Object();
 	obj->SetBase(Object::sPrototype);
+	if (g_DefaultObjectValueType != SYM_MISSING)
+		obj->mDefault.SetValue(g_DefaultObjectValue);
 	return obj;
 }
 
@@ -124,9 +126,21 @@ Map *Map::Create(ExprTokenType *aParam[], int aParamCount, bool aUnsorted)
 	ASSERT(!(aParamCount & 1 && !TokenToObject(*aParam[0])));
 	Map *map = new Map();
 	map->mUnsorted = aUnsorted;
-	if (g_MapCaseSense)
-		map->mFlags |= g_MapCaseSense;
+	switch (g_MapCaseSense)
+	{
+		case SCS_SENSITIVE:
+			map->mFlags &= ~(MapCaseless | MapUseLocale);
+			break;
+		case SCS_INSENSITIVE_LOCALE:
+			map->mFlags |= (MapCaseless | MapUseLocale);
+			break;
+		case SCS_INSENSITIVE:
+			map->mFlags = (map->mFlags | MapCaseless) & ~MapUseLocale;
+			break;
+	}
 	map->SetBase(Map::sPrototype);
+	if (g_DefaultMapValueType != SYM_MISSING)
+		map->mDefault.SetValue(g_DefaultMapValue);
 	if (aParamCount && !map->SetItems(aParam, aParamCount))
 	{
 		// Out of memory.
@@ -603,6 +617,7 @@ void Map::Clear()
 ObjectMember Object::sMembers[] =
 {
 	Object_Method1(Clone, 0, 0),
+	Object_Method1(DefineDefault, 0, 1),
 	Object_Method1(DefineProp, 2, 2),
 	Object_Method1(DeleteProp, 1, 1),
 	Object_Method1(GetOwnPropDesc, 1, 1),
@@ -896,6 +911,13 @@ ResultType Object::Invoke(IObject_Invoke_PARAMS_DECL)
 				curr_teb->ThreadLocalStoragePointer = tls;
 			return aResultToken.Return(method);
 		}
+		else if (mDefault.symbol != SYM_MISSING)
+		{
+			aResultToken.CopyValueFrom(mDefault);
+			if (aResultToken.symbol == SYM_OBJECT)
+				aResultToken.object->AddRef();
+			return OK;
+		}
 	}
 
 	if (tls)
@@ -958,7 +980,16 @@ void Map::__Item(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *
 			{
 				auto result = Invoke(aResultToken, IT_GET, _T("Default"), ExprTokenType { this }, nullptr, 0);
 				if (result == INVOKE_NOT_HANDLED)
+				{
+					if (mDefault.symbol != SYM_MISSING)
+					{
+						aResultToken.CopyValueFrom(mDefault);
+						if (aResultToken.symbol == SYM_OBJECT)
+							aResultToken.object->AddRef();
+						return;
+					}
 					_o_throw(ERR_NO_KEY, ParamIndexToString(0, _f_number_buf), ErrorPrototype::Key);
+				}
 				return;
 			}
 			// Otherwise, caller provided a default value.
@@ -1528,6 +1559,8 @@ void Object::Clone(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType
 		_o_throw(ERR_TYPE_MISMATCH, ErrorPrototype::Type); // Cannot construct an instance of this class using Object::Clone().
 	auto clone = new Object();
 	clone->mUnsorted = mUnsorted;
+	if (g_DefaultObjectValueType != SYM_MISSING)
+		clone->mDefault.SetValue(g_DefaultObjectValue);
 	if (!CloneTo(*clone))
 		_o_throw_oom;	
 	_o_return(clone);
@@ -1537,6 +1570,8 @@ void Map::Clone(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *a
 {
 	auto clone = new Map();
 	clone->mUnsorted = mUnsorted;
+	if (g_DefaultMapValueType != SYM_MISSING)
+		clone->mDefault.SetValue(g_DefaultMapValue);
 	if (!CloneTo(*clone))
 		_o_throw_oom;
 	_o_return(clone);
@@ -1679,6 +1714,37 @@ void Object::DefineProp(ResultToken &aResultToken, int aID, int aFlags, ExprToke
 			if (prop->MaxParams < max_params - 2)
 				prop->MaxParams = max_params - 2;
 		}
+	}
+	AddRef();
+	_o_return(this);
+}
+
+void Object::DefineDefault(ResultToken& aResultToken, int aID, int aFlags, ExprTokenType* aParam[], int aParamCount)
+{
+	if (!aParamCount)
+	{
+		if (mDefault.symbol == SYM_OBJECT)
+			mDefault.object->Release();
+		mDefault.symbol = SYM_MISSING;
+	}
+	else
+	{
+		ExprTokenType* param;
+		param = *aParam;
+		if (mDefault.symbol == SYM_OBJECT)
+			mDefault.object->Release();
+		if (param->symbol == SYM_OBJECT)
+		{
+			mDefault.SetValue(param->object);
+			mDefault.object->AddRef();
+		}
+		else if (param->symbol == SYM_VAR && param->var->HasObject())
+		{
+			mDefault.SetValue(param->var->mObject);
+			mDefault.object->AddRef();
+		}
+		else
+			mDefault.CopyValueFrom(*param);
 	}
 	AddRef();
 	_o_return(this);
@@ -2095,6 +2161,8 @@ Array *Array::Create(ExprTokenType *aValue[], index_t aCount, bool aUnsorted)
 	auto arr = new Array();
 	arr->SetBase(Array::sPrototype);
 	arr->mUnsorted = aUnsorted;
+	if (g_DefaultArrayValueType != SYM_MISSING)
+		arr->mDefault.SetValue(g_DefaultArrayValue);
 	if (!aCount || arr->InsertAt(0, aValue, aCount))
 		return arr;
 	arr->Release();
@@ -2109,6 +2177,8 @@ Array *Array::Clone()
 	if (!arr->SetCapacity(mCapacity))
 		return nullptr;
 	arr->mUnsorted = mUnsorted;
+	if (g_DefaultArrayValueType != SYM_MISSING)
+		arr->mDefault.SetValue(g_DefaultArrayValue);
 	for (index_t i = 0; i < mLength; ++i)
 	{
 		auto &new_item = arr->mItem[arr->mLength++];
@@ -2156,7 +2226,17 @@ void Array::Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType
 	{
 		auto index = ParamToZeroIndex(*aParam[aParamCount - 1]);
 		if (index >= mLength)
-			_o_throw(ERR_INVALID_INDEX, ParamIndexToString(aParamCount - 1, _f_number_buf), ErrorPrototype::Index);
+		{
+			if (IS_INVOKE_GET && mDefault.symbol != SYM_MISSING)
+			{
+				aResultToken.CopyValueFrom(mDefault);
+				if (aResultToken.symbol == SYM_OBJECT)
+					aResultToken.object->AddRef();
+				return;
+			}
+			else
+				_o_throw(ERR_INVALID_INDEX, ParamIndexToString(aParamCount - 1, _f_number_buf), ErrorPrototype::Index);
+		}
 		auto &item = mItem[index];
 		if (IS_INVOKE_GET)
 			item.ReturnRef(aResultToken);
@@ -2197,6 +2277,8 @@ void Array::Invoke(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType
 			index = mLength;
 		if (!InsertAt(index, aParam, aParamCount))
 			_o_throw_oom;
+		if (aID == M_Push)
+			_o_return(mLength);
 		_o_return_empty;
 	}
 

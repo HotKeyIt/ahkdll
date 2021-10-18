@@ -307,7 +307,7 @@ protected:
 	};
 
 	Object *CloneTo(Object &aTo);
-	Object() { mFlags = 0; }
+	Object() { mFlags = 0; mDefault.symbol = SYM_MISSING; }
 	~Object();
 	bool Delete() override;
 
@@ -337,6 +337,7 @@ protected:
 	ResultType CallMetaVarg(int aFlags, LPTSTR aName, ResultToken &aResultToken, ExprTokenType &aThisToken, ExprTokenType *aParam[], int aParamCount);
 
 public:
+	ExprTokenType mDefault;
 	bool mUnsorted = 0;
 	static void FreesPrototype(Object *aObject) 
 	{
@@ -487,6 +488,7 @@ public:
 	// Methods and functions:
 	void DeleteProp(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	void DefineProp(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
+	void DefineDefault(ResultToken& aResultToken, int aID, int aFlags, ExprTokenType* aParam[], int aParamCount);
 	void GetOwnPropDesc(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	void HasOwnProp(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	void OwnProps(ResultToken &aResultToken, int aID, int aFlags, ExprTokenType *aParam[], int aParamCount);

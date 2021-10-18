@@ -57,7 +57,13 @@ thread_local DWORD g_MainThreadID = 0;
 thread_local DWORD g_HookThreadID; // Not initialized by design because 0 itself might be a valid thread ID.
 thread_local LPTSTR g_lpScript = 0;
 thread_local bool g_UseStdLib = false;
-thread_local int g_MapCaseSense = 0;
+thread_local int g_MapCaseSense = 1;
+thread_local SymbolType g_DefaultObjectValueType = SYM_MISSING;
+thread_local LPTSTR g_DefaultObjectValue = NULL;
+thread_local SymbolType g_DefaultArrayValueType = SYM_MISSING;
+thread_local LPTSTR g_DefaultArrayValue = NULL;
+thread_local SymbolType g_DefaultMapValueType = SYM_MISSING;
+thread_local LPTSTR g_DefaultMapValue = NULL;
 thread_local ATOM g_ClassRegistered = 0;
 thread_local CRITICAL_SECTION g_CriticalRegExCache;
 thread_local BuiltInFunc* sIsSetFunc = NULL;
