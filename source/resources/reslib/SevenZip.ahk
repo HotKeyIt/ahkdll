@@ -143,10 +143,10 @@
       throw ValueError(SevenZip.SevenZipError[Err], -1)
 	if RegExMatch(rs :=StrGet(buf, "UTF-8"), "i)Type = (.*)`r`n[\s\S]*`r`n[- ]{50,}`r`n([\S\s]*)`r`n[- ]{50,}`r`n([\d-]+ [\d:]+)?\s+(\d+)\s+(\d+)\s+((\d+) files)?,?\s*((\d+) folders)?", &rv)
 	{
-		out := [], sz := 0, out.type:=rv[1], out.size:=rv[5], out.file:=rv[7], out.folder:=rv[9]
+        out := [], out.type := rv[1], out.size := rv[5], out.file := rv[7], out.folder := rv[9]
 		Loop Parse, rv[2], "`n", "`r "
-			if RegExMatch(A_LoopField, "([\d-]+ [\d:]+)?\s?(\S+)\s+(\S+)\s+(\S+)\s+(.*)", &rv)
-				out.push({ date: rv[1], attr: RTrim(rv[2], "."), sz: rv[3], size: rv[4], path: rv[5] })
+			if RegExMatch(A_LoopField, "([\d-]+ [\d:]+)?\s?(\S+)\s+(\d+)\s+(\d+)?\s+(.*)", &rv)
+				out.push({ date: rv[1], attr: Trim(rv[2], "."), sz: rv[3], size: rv[4], path: rv[5] })
 		return out
 	}
   }
