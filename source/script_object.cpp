@@ -4074,7 +4074,8 @@ __int64 ObjRawSize(IObject *aObject, IObject *aObjects)
 		&&(_tcscmp(aObject->Type(), _T("Array")))
 		&&(_tcscmp(aObject->Type(), _T("Map")))
 		&&(_tcscmp(aObject->Type(), _T("Buffer")))
-		&&(_tcscmp(aObject->Type(), _T("Struct"))))
+		&&(_tcscmp(aObject->Type(), _T("Struct")))
+		&&(_tcscmp(aObject->Type(), _T("ComValue"))))
 		g_script->ScriptError(ERR_TYPE_MISMATCH, aObject->Type());
 
 	__int64 aSize = 1 + sizeof(__int64);
@@ -4084,7 +4085,14 @@ __int64 ObjRawSize(IObject *aObject, IObject *aObjects)
 		this_token.object = aObject;
 		result_token.InitResult(L"");
 		aObject->Invoke(result_token, IT_GET, _T("size"), this_token, nullptr, 0);
-		aSize += result_token.value_int64 + sizeof(__int64);
+		aSize += result_token.value_int64;
+	}
+	else if (!_tcscmp(aObject->Type(), _T("ComValue")))
+	{
+		ComObject* obj = dynamic_cast<ComObject*>(aObject);
+		if (!obj || !(obj->mVarType < 9 || obj->mVarType - 16 < 8))
+			g_script->ScriptError(ERR_TYPE_MISMATCH, _T("Only following values are supported VT_EMPTY/NULL/BOOL/I2/I4/R4/R8/CY/DATE/BSTR/I1/UI1/UI2/UI4/I8/UI8/INT/UINT"));
+		aSize += 1 + (obj->mVarType == VT_BSTR ? SysStringByteLen((BSTR)obj->mValPtr) + sizeof(TCHAR) : sizeof(__int64));
 	}
 
 	this_token.object = aObjects;
@@ -4100,34 +4108,25 @@ __int64 ObjRawSize(IObject *aObject, IObject *aObjects)
 
 	Var vkey, vval;
 
-	if (!aObjects)
+	aKey.symbol = SYM_OBJECT;
+	aKey.object = aObject;
+	this_token.object = aObjects;
+	result_token.InitResult(L"");
+	aObjects->Invoke(result_token, IT_CALL, _T("Has"), this_token, params, 1);
+	if (!result_token.value_int64)
 	{
 		aKey.symbol = SYM_OBJECT;
 		aKey.object = aObject;
 		aValue.symbol = SYM_STRING;
 		aValue.marker = _T("");
 		aValue.marker_length = 0;
-		aObjects = Map::Create(params, 2);
-	}
-	else
-	{
-		aObjects->AddRef();
-		aKey.symbol = SYM_OBJECT;
-		aKey.object = aObject;
-		this_token.object = aObjects;
 		result_token.InitResult(L"");
-		aObjects->Invoke(result_token, IT_CALL, _T("Has"), this_token, params, 1);
-		if (!result_token.value_int64)
-		{
-			aKey.symbol = SYM_OBJECT;
-			aKey.object = aObject;
-			aValue.symbol = SYM_STRING;
-			aValue.marker = _T("");
-			aValue.marker_length = 0;
-			result_token.InitResult(L"");
-			aObjects->Invoke(result_token, IT_SET, 0, this_token, params, 2);
-		}
+		aObjects->Invoke(result_token, IT_SET, 0, this_token, params, 2);
 	}
+
+	if (!_tcscmp(aObject->Type(), _T("ComValue")))
+		return aSize;
+
 	// Prepare parameters for the loop below: enum.Next(var1 [, var2])
 	aKey.SetVarRef(&vkey);
 	aValue.SetVarRef(&vval);
@@ -4135,7 +4134,7 @@ __int64 ObjRawSize(IObject *aObject, IObject *aObjects)
 	IObject *aIsObject;
 	__int64 aIsValue;
 	SymbolType aVarType;
-	if (_tcscmp(aObject->Type(), _T("Buffer")) && _tcscmp(aObject->Type(), _T("Object")))
+	if (_tcscmp(aObject->Type(), _T("Buffer")) && _tcscmp(aObject->Type(), _T("Object")) && _tcscmp(aObject->Type(), _T("ComValue")))
 	{
 		result = GetEnumerator(enumerator, enum_token, 2, false);
 		// Check if object returned an enumerator, otherwise return
@@ -4253,7 +4252,6 @@ __int64 ObjRawSize(IObject *aObject, IObject *aObjects)
 	}
 	vkey.Free();
 	vval.Free();
-	aObjects->Release();
 	return aSize;
 }
 
@@ -4293,9 +4291,30 @@ __int64 ObjRawDump(IObject *aObject, char *aBuffer, Map *aObjects, UINT &aObjCou
 		*aThisBuffer = (char)-19;
 		result_token.InitResult(L"");
 		aObject->Invoke(result_token, IT_GET, _T("ptr"), this_token, nullptr, 0);
-		memmove(aThisBuffer + 1 + 2 * sizeof(__int64), (void *)result_token.value_int64, (size_t)bufsize);
-		*(__int64*)(aThisBuffer + 1 + sizeof(__int64)) = bufsize;
-		aThisBuffer += bufsize + sizeof(__int64);
+		memmove(aThisBuffer + 1 + sizeof(__int64), (void *)result_token.value_int64, (size_t)bufsize);
+		*(__int64*)(aThisBuffer + 1) = bufsize;
+		aThisBuffer += bufsize;
+	}
+	else if (!_tcscmp(aObject->Type(), _T("ComValue")))
+	{
+		ComObject* obj = dynamic_cast<ComObject*>(aObject);
+		if (!obj || !(obj->mVarType < 9 || obj->mVarType-16 < 8))
+			g_script->ScriptError(ERR_TYPE_MISMATCH, _T("Only following values are supported VT_EMPTY/NULL/BOOL/I2/I4/R4/R8/CY/DATE/BSTR/I1/UI1/UI2/UI4/I8/UI8/INT/UINT"));
+		*aThisBuffer = (char)-20;
+		*(aThisBuffer + 1 + sizeof(__int64)) = (char)obj->mVarType;
+		if (obj->mVarType == VT_BSTR)
+		{
+			bufsize = SysStringByteLen((BSTR)obj->mValPtr) + sizeof(TCHAR);
+			*(__int64*)(aThisBuffer + 1) = 1 + bufsize;
+			memmove(aThisBuffer + 2 + sizeof(__int64), OLE2T((LPOLESTR)obj->mValPtr), bufsize);
+			aThisBuffer += 1 + bufsize;
+		}
+		else
+		{
+			*(__int64*)(aThisBuffer + 1) = 1 + sizeof(__int64);
+			*(__int64*)(aThisBuffer + 2 + sizeof(__int64)) = obj->mVal64;
+			aThisBuffer += 1 + sizeof(__int64);
+		}
 	}
 	else
 		g_script->ScriptError(ERR_TYPE_MISMATCH, aObject->Type());
@@ -4318,6 +4337,9 @@ __int64 ObjRawDump(IObject *aObject, char *aBuffer, Map *aObjects, UINT &aObjCou
 		result_token.InitResult(L"");
 		aObjects->Invoke(result_token, IT_SET, 0, this_token, params, 2);
 	}
+
+	if (!_tcscmp(aObject->Type(), _T("ComValue")))
+		return aThisBuffer - aBuffer;
 
 	// Prepare parameters for the loop below
 	aKey.symbol = SYM_VAR;
@@ -4703,7 +4725,10 @@ BIF_DECL(BIF_ObjDump)
 		aResultToken.marker = _T("");
 		return;
 	}
-	DWORD aSize = (DWORD)ObjRawSize(aObject, NULL);
+	Map* aObjects = Map::Create();
+	DWORD aSize = (DWORD)ObjRawSize(aObject, aObjects);
+	aObjects->Release();
+	aObjects = Map::Create();
 	char *aBuffer = (char*)malloc(aSize);
 	if (!aBuffer)
 	{
@@ -4712,7 +4737,6 @@ BIF_DECL(BIF_ObjDump)
 		return;
 	}
 	*(__int64*)(aBuffer + 1) = aSize - 1 - sizeof(__int64);
-	Map *aObjects = Map::Create();
 	UINT aObjCount = 0;
 	if (aSize != ObjRawDump(aObject, aBuffer, aObjects, aObjCount))
 	{
@@ -4724,15 +4748,10 @@ BIF_DECL(BIF_ObjDump)
 		return;
 	}
 	aObjects->Release();
-	if ((aParamCount > 1 && !ParamIndexIsOmittedOrEmpty(1)) || (aParamCount > 2 && TokenToInt64(*aParam[2]) != 0))
+	if (aParamCount > 1)
 	{
 		LPVOID aDataBuf;
 		TCHAR *pw[1024] = {};
-		if (!ParamIndexIsOmittedOrEmpty(1) && aParamCount > 2 && TokenToInt64(*aParam[2]) == 0)
-		{
-			g_script->ScriptError(ERR_PARAM3_INVALID, _T("Compression is required for password."));
-			return;
-		}
 		if (!ParamIndexIsOmittedOrEmpty(1))
 		{
 			TCHAR *pwd = TokenToString(*aParam[1]);
@@ -4808,12 +4827,23 @@ IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &a
 		aObject = Map::Create(nullptr, 0, true);
 	else if (typeobj == -19 || typeobj == 19) //(_tcscmp(aObject->Type(), _T("Buffer")))
 	{
-		mSize = (size_t)*(__int64*)(aThisBuffer + 1 + sizeof(__int64));
+		mSize = (size_t)*(__int64*)(aThisBuffer + 1);
 		aKey.buf = (LPTSTR)malloc(mSize);
-		memmove((void *)aKey.buf, (aThisBuffer + 1 + 2 * sizeof(__int64)), mSize);
+		memmove((void *)aKey.buf, (aThisBuffer + 1 + sizeof(__int64)), mSize);
 		if (!(aObject = BufferObject::Create((void *)aKey.buf, mSize)))
 			g_script->ScriptError(ERR_OUTOFMEM);
 		dynamic_cast<BufferObject*>(aObject)->SetBase(BufferObject::sPrototype);
+	}
+	else if (typeobj == -20 || typeobj == 20) //(_tcscmp(aObject->Type(), _T("ComValue")))
+	{
+		mSize = (size_t) * (__int64*)(aThisBuffer + 1);
+		if (*(aThisBuffer + 1 + sizeof(__int64)) == VT_BSTR)
+		{
+			if (!(aObject = new ComObject((long long)SysAllocString((OLECHAR*)(aThisBuffer + 2 + sizeof(__int64))), (VARTYPE) * (char*)(aThisBuffer + 1 + sizeof(__int64)), 0)))
+				g_script->ScriptError(ERR_OUTOFMEM);
+		}
+		else if (!(aObject = new ComObject(*(long long*)(aThisBuffer + 2 + sizeof(__int64)), (VARTYPE)*(char*)(aThisBuffer + 1 + sizeof(__int64)), 0)))
+			g_script->ScriptError(ERR_OUTOFMEM);
 	}
 	else
 		g_script->ScriptError(ERR_TYPE_MISMATCH);
@@ -4825,11 +4855,14 @@ IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &a
 	aThisBuffer++;
 	size_t aSize = (size_t)*(__int64*)aThisBuffer;
 	aThisBuffer += sizeof(__int64);
-	if (typeobj == -16 || typeobj == 16) //(_tcscmp(aObject->Type(), _T("Buffer")))
+	if (   typeobj == -19 || typeobj == 19		//(_tcscmp(aObject->Type(), _T("Buffer")))
+		|| typeobj == -20 || typeobj == 20)		//(_tcscmp(aObject->Type(), _T("ComValue")))
 	{
-		aThisBuffer += mSize + sizeof(__int64);
-		aSize -= mSize + sizeof(__int64);
+		aThisBuffer += mSize;
+		aSize -= mSize;
 	}
+
+
 	this_token.object = aObject;
 
 	for (char *end = aThisBuffer + aSize; aThisBuffer < end;)

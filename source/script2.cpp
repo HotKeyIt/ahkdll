@@ -800,7 +800,10 @@ input_type *InputRelease(input_type *aInput)
 		if (aInput->ScriptObject->onEnd)
 			return aInput; // Return for caller to call OnEnd and Release.
 		aInput->ScriptObject->Release();
-		aInput->ScriptObject = NULL;
+		// The following is not done because this Release() is only to counteract an AddRef() in
+		// InputStart().  ScriptObject != NULL indicates this input_type is actually embedded in
+		// the InputObject and as such the link should never be broken until both are deleted.
+		//aInput->ScriptObject = NULL;
 		// HotKeyIt: call only if we are not already exiting -> g_hWnd == NULL
 		if (g_hWnd)
 			g_script->ExitIfNotPersistent(EXIT_EXIT); // In case this InputHook was the only thing keeping the script running.
@@ -1637,7 +1640,10 @@ error:
 	_f_throw_win32();
 
 control_error:
-	_f_throw(ERR_NO_CONTROL, aControl, ErrorPrototype::Target);
+	if (g_TargetControlError)
+		_f_throw(ERR_NO_CONTROL, aControl, ErrorPrototype::Target);
+	else
+		_f_return_empty;
 }
 
 
@@ -9131,7 +9137,12 @@ ResultType DetermineTargetWindow(HWND &aWindow, ResultToken &aResultToken, ExprT
 		if (result != CONDITION_FALSE)
 		{
 			if (result == OK && !aWindow)
-				return g_TargetWindowError ? aResultToken.Error(ERR_NO_WINDOW, ErrorPrototype::Target) : FAIL;
+			{
+				if (g_TargetWindowError)
+					return  aResultToken.Error(ERR_NO_WINDOW, ErrorPrototype::Target);
+				aResultToken.SetValue(_T(""));
+				return FAIL;
+			}
 			return result;
 		}
 	}
@@ -9145,7 +9156,10 @@ ResultType DetermineTargetWindow(HWND &aWindow, ResultToken &aResultToken, ExprT
 	aWindow = Line::DetermineTargetWindow(param[0], param[1], param[2], param[3]);
 	if (aWindow)
 		return OK;
-	return g_TargetWindowError ? aResultToken.Error(ERR_NO_WINDOW, param[0], ErrorPrototype::Target) : FAIL;
+	if (g_TargetWindowError)
+		return  aResultToken.Error(ERR_NO_WINDOW, ErrorPrototype::Target);
+	aResultToken.SetValue(_T(""));
+	return FAIL;
 }
 
 
@@ -9165,7 +9179,12 @@ ResultType DetermineTargetControl(HWND &aControl, HWND &aWindow, ResultToken &aR
 		case OK:
 			aControl = aWindow;
 			if (!aControl)
-				return aResultToken.Error(ERR_NO_CONTROL, ErrorPrototype::Target);
+			{
+				if (g_TargetControlError)
+					return aResultToken.Error(ERR_NO_CONTROL, ErrorPrototype::Target);
+				aResultToken.SetValue(_T(""));
+				return FAIL;
+			}
 			return OK;
 		case FAIL:
 			return FAIL;
@@ -9177,7 +9196,12 @@ ResultType DetermineTargetControl(HWND &aControl, HWND &aWindow, ResultToken &aR
 		return FAIL;
 	aControl = control_spec ? ControlExist(aWindow, control_spec) : aWindow;
 	if (!aControl && aThrowIfNotFound)
-		return aResultToken.Error(ERR_NO_CONTROL, ErrorPrototype::Target);
+	{
+		if (g_TargetControlError)
+			return aResultToken.Error(ERR_NO_CONTROL, ErrorPrototype::Target);
+		aResultToken.SetValue(_T(""));
+		return FAIL;
+	}
 	return OK;
 }
 
@@ -15070,6 +15094,9 @@ BIF_DECL(BIF_NumGet)
 
 BIF_DECL(BIF_Format)
 {
+	if (TokenIsPureNumeric(*aParam[0]))
+		_f_return_p(ParamIndexToString(0, _f_retval_buf));
+
 	LPCTSTR fmt = ParamIndexToString(0), lit, cp, cp_end, cp_spec;
 	LPTSTR target = NULL;
 	int size = 0, spec_len;
@@ -15119,7 +15146,7 @@ BIF_DECL(BIF_Format)
 				param = ATOI(cp), cp = cp_end;
 			else
 				param = last_param + 1;
-			if (param >= aParamCount) // Invalid parameter index.
+			if (param >= aParamCount || param < 1) // Invalid parameter index.
 				continue;
 
 			custom_format = 0; // Set default.
@@ -18829,7 +18856,7 @@ void Object::Error__New(ResultToken &aResultToken, int aID, int aFlags, ExprToke
 		int offset = ParamIndexIsNumeric(1) ? ParamIndexToInt(1) : 0;
 		for (auto se = stack_top; se >= g_Debugger->mStack->mBottom; --se)
 		{
-			if (++offset == 0 || !_tcsicmp(se->Name(), what))
+			if (++offset == 0 || *what && !_tcsicmp(se->Name(), what))
 			{
 				line = se > g_Debugger->mStack->mBottom ? se[-1].line : se->line;
 				// se->line contains the line at the given offset from the top of the stack.

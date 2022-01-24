@@ -119,6 +119,7 @@ thread_local extern WarnMode g_Warn_Unreachable;
 thread_local extern WarnMode g_Warn_VarUnset;
 thread_local extern SingleInstanceType g_AllowOnlyOneInstance;
 thread_local extern bool g_TargetWindowError;
+thread_local extern bool g_TargetControlError;
 thread_local extern bool g_persistent;
 thread_local extern bool g_NoTrayIcon;
 thread_local extern bool g_AllowMainWindow;

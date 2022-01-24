@@ -7,6 +7,14 @@
       this.%StrReplace(k,"Archive","")%:=DynaCall(MemoryGetProcAddress(lib,"SevenZip" (k="zip"?"":LTrim(k,"_"))),v)
     this.SetUnicodeMode(1),this.hwnd:=hwnd
   }
+  ArrayToList(files){
+    list:=""
+    if !IsObject(files)
+      return StrReplace(files,"`n","`" `"")
+    for k, v in files
+      list.=v "`n"
+    return StrReplace(RTrim(list,"`n"),"`n","`" `"")
+  }
   SetDefaultPassword(harc:=0, pw:=""){
     return this._SetDefaultPassword(harc,StrBuf(pw,"UTF-8"))
   }
@@ -80,7 +88,7 @@
   }
   FindFirst(harc, file:=""){
     static INDIVIDUALINFO := "1:DWORD dwOriginalSize;DWORD dwCompressedSize;DWORD dwCRC;UINT uFlag;UINT uOSType;WORD wRatio;WORD wDate;WORD wTime;char szFileName[513];char dummy1[3];char szAttribute[8];char szMode[8]"
-    if !this._FindFirst(harc, StrBuf("`"" StrReplace(file,"`n","`" `"") "`" -r","UTF-8"), (info:=Struct(INDIVIDUALINFO))[])
+    if !this._FindFirst(harc, StrBuf("`"" this.ArrayToList(file) "`" -r","UTF-8"), (info:=Struct(INDIVIDUALINFO))[])
       return info
   }
   GetMethod(harc){
@@ -119,7 +127,7 @@
     return StrGet(buf,"UTF-8")
   }
   Add(archive, files, options:=""){
-    if Err:=this.Zip(this.hwnd,StrBuf("a " options " `"" archive "`" `"" StrReplace(files,"`n","`" `"") "`"","UTF-8"),buf:=Buffer(10240),10240)
+    if Err:=this.Zip(this.hwnd,StrBuf("a " options " `"" archive "`" `"" this.ArrayToList(files) "`"","UTF-8"),buf:=Buffer(10240),10240)
       throw ValueError(SevenZip.SevenZipError[Err],-1)
     return StrGet(buf,"UTF-8")
   }
@@ -129,17 +137,17 @@
   else return StrGet(buf,"UTF-8")
   }
   Delete(archive, files, options:=""){
-    if Err:=this.Zip(this.hwnd,StrBuf("d " options " `"" archive "`" `"" StrReplace(files,"`n","`" `"") "`"","UTF-8"),buf:=Buffer(10240),10240)
+    if Err:=this.Zip(this.hwnd,StrBuf("d " options " `"" archive "`" `"" this.ArrayToList(files) "`"","UTF-8"),buf:=Buffer(10240),10240)
       throw ValueError(SevenZip.SevenZipError[Err],-1)
     return StrGet(buf,"UTF-8")
   }
   ExtractRoot(archive, dir, files:="", options:=""){
-    if Err:=this.Zip(this.hwnd,StrBuf("e " options " `"" archive "`"" (dir?" -o`"" RTrim(dir,"\") "\`"":"") (files?" `"" StrReplace(files,"`n","`" `"") "`"":""),"UTF-8"),buf:=Buffer(10240),10240)
+    if Err:=this.Zip(this.hwnd,StrBuf("e " options " `"" archive "`"" (dir?" -o`"" RTrim(dir,"\") "\`"":"") (files?" `"" this.ArrayToList(files) "`"":""),"UTF-8"),buf:=Buffer(10240),10240)
       throw ValueError(SevenZip.SevenZipError[Err],-1)
     return StrGet(buf,"UTF-8")
   }
   List(archive, files := "", options := "") {
-    if Err := this.Zip(this.hwnd, StrBuf("l " options " `"" archive "`"" (files ? " `"" StrReplace(files, "`n", "`" `"") "`"" : ""), "UTF-8"), buf := Buffer(1024 * 1024), 1024 * 1024)
+    if Err := this.Zip(this.hwnd, StrBuf("l " options " `"" archive "`"" (files ? " `"" this.ArrayToList(files) "`"" : ""), "UTF-8"), buf := Buffer(1024 * 1024), 1024 * 1024)
       throw ValueError(SevenZip.SevenZipError[Err], -1)
 	if RegExMatch(rs :=StrGet(buf, "UTF-8"), "i)Type = (.*)`r`n[\s\S]*`r`n[- ]{50,}`r`n([\S\s]*)`r`n[- ]{50,}`r`n([\d-]+ [\d:]+)?\s+(\d+)\s+(\d+)\s+((\d+) files)?,?\s*((\d+) folders)?", &rv)
 	{
@@ -151,27 +159,27 @@
 	}
   }
   Test(archive, files:="", options:=""){
-    if Err:=this.Zip(this.hwnd,StrBuf("t " options " `"" archive "`"" (files?" `"" StrReplace(files,"`n","`" `"") "`"":""),"UTF-8"),buf:=Buffer(10240),10240)
+    if Err:=this.Zip(this.hwnd,StrBuf("t " options " `"" archive "`"" (files?" `"" this.ArrayToList(files) "`"":""),"UTF-8"),buf:=Buffer(10240),10240)
       throw ValueError(SevenZip.SevenZipError[Err],-1)
     return StrGet(buf,"UTF-8")
   }
   Update(archive, files, options:=""){
-    if Err:=this.Zip(this.hwnd,StrBuf("u " options " `"" archive "`"" (files?" `"" StrReplace(files,"`n","`" `"") "`"":""),"UTF-8"),buf:=Buffer(10240),10240)
+    if Err:=this.Zip(this.hwnd,StrBuf("u " options " `"" archive "`"" (files?" `"" this.ArrayToList(files) "`"":""),"UTF-8"),buf:=Buffer(10240),10240)
       throw ValueError(SevenZip.SevenZipError[Err],-1)
     return StrGet(buf,"UTF-8")
   }
   Extract(archive, dir, files:="", options:=""){
-    if Err:=this.Zip(this.hwnd,StrBuf("x " options " `"" archive "`"" (dir?" -o`"" RTrim(dir,"\") "\`"":"") (files?" `"" StrReplace(files,"`n","`" `"") "`"":""),"UTF-8"),buf:=Buffer(10240),10240)
+    if Err:=this.Zip(this.hwnd,StrBuf("x " options " `"" archive "`"" (dir?" -o`"" RTrim(dir,"\") "\`"":"") (files?" `"" this.ArrayToList(files) "`"":""),"UTF-8"),buf:=Buffer(10240),10240)
       throw ValueError(SevenZip.SevenZipError[Err],-1)
     return StrGet(buf,"UTF-8")
   }
   Hash(crc, files:="", options:=""){
-    if Err:=this.Zip(this.hwnd,StrBuf("h -scrc" (crc=""?"crc32":crc) " " options " " (files?" `"" StrReplace(files,"`n","`" `"") "`"":"*"),"UTF-8"),buf:=Buffer(10240),10240)
+    if Err:=this.Zip(this.hwnd,StrBuf("h -scrc" (crc=""?"crc32":crc) " " options " " (files?" `"" this.ArrayToList(files) "`"":"*"),"UTF-8"),buf:=Buffer(10240),10240)
       throw ValueError(SevenZip.SevenZipError[Err],-1)
     return StrGet(buf,"UTF-8")
   }
   Rename(archive, files, options:=""){
-    if Err:=this.Zip(this.hwnd,StrBuf("rn " options " `"" archive "`"" (files?" `"" StrReplace(files,"`n","`" `"") "`"":""),"UTF-8"),buf:=Buffer(10240),10240)
+    if Err:=this.Zip(this.hwnd,StrBuf("rn " options " `"" archive "`"" (files?" `"" this.ArrayToList(files) "`"":""),"UTF-8"),buf:=Buffer(10240),10240)
       throw ValueError(SevenZip.SevenZipError[Err],-1)
     return StrGet(buf,"UTF-8")
   }

@@ -251,7 +251,7 @@ FuncEntry g_BIF[] =
 	BIF1(NumPut, 3, NA),
 	BIFn(ObjAddRef, 1, 1, BIF_ObjAddRefRelease),
 	BIF1(ObjBindMethod, 1, NA),
-	BIF1(ObjDump, 1, 3),
+	BIF1(ObjDump, 1, 2),
 	BIFn(ObjFromPtr, 1, 1, BIF_ObjPtr),
 	BIFn(ObjFromPtrAddRef, 1, 1, BIF_ObjPtr),
 	BIFn(ObjGetBase, 1, 1, BIF_Base),
@@ -621,7 +621,7 @@ Script::Script()
 	, mUninterruptedLineCountMax(1000), mUninterruptibleTime(17)
 	, mCustomIcon(NULL), mCustomIconSmall(NULL) // Normally NULL unless there's a custom tray icon loaded dynamically.
 	, mCustomIconFile(NULL), mIconFrozen(false), mTrayIconTip(NULL) // Allocated on first use.
-	, mCustomIconNumber(0), mEncrypt(0)
+	, mCustomIconNumber(0), mEncrypt(0), mTrayMenu(0)
 {
 	// v1.0.25: mLastScriptRest (removed in v2) and mLastPeekTime are now initialized
 	// right before the auto-exec section of the script is launched, which avoids an
@@ -1138,6 +1138,8 @@ Script::~Script() // Destructor.
 	g_WorkingDir.~CKuStringT();
 	g_WorkingDirOrig = NULL;
 
+	if (g_array)
+		free(g_array);
 	// PeekMessage is required to make sure that Ole/CoUninitialize does not hang
 	MSG msg;
 	PeekMessage(&msg, NULL, 0, 0, PM_REMOVE);
@@ -1168,7 +1170,7 @@ Script::~Script() // Destructor.
 
 
 
-ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestart, HINSTANCE hInstance, LPTSTR aTitle)
+ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestart, HINSTANCE hInstance, LPTSTR aTitle, bool aIsText)
 // Returns OK or FAIL.
 // Caller has provided an empty string for aScriptFilename if this is a compiled script.
 // Otherwise, aScriptFilename can be NULL if caller hasn't determined the filename of the script yet.
@@ -1301,7 +1303,7 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 		}
 		CloseHandle(hProcess);
 	}
-	else
+	else if (!aIsText)
 	{
 		if (*aScriptFilename == '*')
 		{
@@ -1340,7 +1342,10 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 			ConvertFilespecToCorrectCase(buf, _countof(buf), buf_length); // This might change the length, e.g. due to expansion of 8.3 filename.
 		}
 	}
-	mFileSpec = g_SimpleHeap->Alloc(buf);  // The full spec is stored for convenience.
+	if (aIsText)
+		mFileSpec = g_SimpleHeap->Alloc(aScriptFilename);  // The full spec is stored for convenience.
+	else
+		mFileSpec = g_SimpleHeap->Alloc(buf);  // The full spec is stored for convenience.
 	LPTSTR filename_marker;
 	if (filename_marker = _tcsrchr(buf, '\\'))
 	{
@@ -2117,7 +2122,6 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 		delete g_script;
 		delete g_clip;
 		delete g_MsgMonitor;
-		free(g_array);
 		if (g_Debugger->mStack->mBottom)
 			free(g_Debugger->mStack->mBottom);
 		delete g_Debugger->mStack;
@@ -2139,7 +2143,6 @@ void Script::TerminateApp(ExitReasons aExitReason, int aExitCode)
 	delete g_script;
 	delete g_clip;
 	delete g_MsgMonitor;
-	free(g_array);
 	if (g_KeyHistory)
 		free(g_KeyHistory);
 	if (g_hWinAPI)
@@ -3424,6 +3427,24 @@ process_completed_line:
 			goto continue_main_loop; // It's just a naked "{" or "}", so no more processing needed for this line.
 		}
 
+		// Handle this first so that GetLineContExpr() doesn't need to detect it for OTB exclusion:
+		if (LPTSTR class_name = IsClassDefinition(buf))
+		{
+			if (g->CurrentFunc)
+				return ScriptError(_T("Functions cannot contain classes."), buf);
+			if (!ClassHasOpenBrace(buf, buf_length, next_buf, next_buf_length))
+				return ScriptError(ERR_MISSING_OPEN_BRACE, buf);
+			if (!DefineClass(class_name))
+				return FAIL;
+			goto continue_main_loop;
+		}
+
+		// Aside from goto/break/continue, anything not already handled above is either an expression
+		// or something with similar lexical requirements (i.e. balanced parentheses/brackets/braces).
+		// The following call allows any expression enclosed in ()/[]/{} to span multiple lines:
+		if (!GetLineContExpr(fp, buf, next_buf, phys_line_number, has_continuation_section))
+			return FAIL;
+
 		if (mClassProperty && !g->CurrentFunc) // This is checked before IsFunction() to prevent method definitions inside a property.
 		{
 			if (!_tcsnicmp(buf, _T("Get"), 3) || !_tcsnicmp(buf, _T("Set"), 3))
@@ -3442,24 +3463,6 @@ process_completed_line:
 			}
 			return ScriptError(ERR_INVALID_LINE_IN_PROPERTY_DEF, buf);
 		}
-
-		// Handle this first so that GetLineContExpr() doesn't need to detect it for OTB exclusion:
-		if (LPTSTR class_name = IsClassDefinition(buf))
-		{
-			if (g->CurrentFunc)
-				return ScriptError(_T("Functions cannot contain classes."), buf);
-			if (!ClassHasOpenBrace(buf, buf_length, next_buf, next_buf_length))
-				return ScriptError(ERR_MISSING_OPEN_BRACE, buf);
-			if (!DefineClass(class_name))
-				return FAIL;
-			goto continue_main_loop;
-		}
-
-		// Aside from goto/break/continue, anything not already handled above is either an expression
-		// or something with similar lexical requirements (i.e. balanced parentheses/brackets/braces).
-		// The following call allows any expression enclosed in ()/[]/{} to span multiple lines:
-		if (!GetLineContExpr(fp, buf, next_buf, phys_line_number, has_continuation_section))
-			return FAIL;
 
 		if (mClassObjectCount && !g->CurrentFunc) // Inside a class definition (and not inside a method).
 		{
@@ -3660,7 +3663,16 @@ bool Script::EndsWithOperator(LPTSTR aBuf, LPTSTR aBuf_marker)
 	for (word = cp; word > aBuf && IS_IDENTIFIER_CHAR(word[-1]); --word);
 	if (word > aBuf && word[-1] == '.')
 		return false; // Reserved words are permitted as property names, so `a.as` isn't an operator.
-	return ConvertWordOperator(word, cp - word + 1);
+	switch (ConvertWordOperator(word, cp - word + 1))
+	{
+	case SYM_OR:
+	case SYM_AND:
+	case SYM_IS:
+	case SYM_LOWNOT:
+	case SYM_RESERVED_OPERATOR:
+		return true;
+	}
+	return false;
 }
 
 
@@ -3668,24 +3680,32 @@ bool Script::EndsWithOperator(LPTSTR aBuf, LPTSTR aBuf_marker)
 ResultType Script::LineBuffer::EnsureCapacity(size_t aLength)
 {
 	aLength += RESERVED_SPACE;
-	return size < aLength ? Realloc(aLength) : OK;
+	if (size >= aLength)
+		return OK;
+	// See comments in Expand() regarding buffer growth.
+	size_t newsize = size ? size : INITIAL_SIZE;
+	while (newsize < aLength)
+		newsize *= 2;
+	return Realloc(newsize);
 }
 
 ResultType Script::LineBuffer::Expand()
 {
-	return Realloc(size + EXPANSION_INTERVAL);
+	// The buffer typically needs to grow incrementally while joining lines in a continuation section.
+	// Expanding in large increments avoids multiple reallocs in most files.  Expanding exponentially
+	// scales better in theory, though some testing showed it to have virtually no impact on load time
+	// even with very long lines.  Memory usage isn't a concern since the buffer will be freed after
+	// the script file is read.
+	return Realloc(size ? size * 2 : INITIAL_SIZE);
 }
 
 ResultType Script::LineBuffer::Realloc(size_t aNewSize)
 {
-	// The buffer typically needs to grow incrementally while joining lines in a continuation section.
-	// Expanding in large increments avoids multiple reallocs in most files.
-	size_t newsize = (aNewSize + EXPANSION_INTERVAL - 1) / EXPANSION_INTERVAL * EXPANSION_INTERVAL;
-	LPTSTR newp = (LPTSTR)realloc(p, sizeof(TCHAR) * newsize);
+	LPTSTR newp = (LPTSTR)realloc(p, sizeof(TCHAR) * aNewSize);
 	if (!newp)
 		return FAIL;
 	p = newp;
-	size = newsize;
+	size = aNewSize;
 	return OK;
 }
 
@@ -4332,23 +4352,30 @@ size_t Script::GetLine(LineBuffer &aBuf, int aInContinuationSection, bool aInBlo
 			return -1;
 	}
 	aBuf[aBuf_length] = '\0';
+#ifndef _DEBUG
 	if (mEncrypt & 2)
 	{
+#endif
 		DWORD aDataSize = 0;
 		DWORD aSizeEncrypted = 0;
 		g_CS2BW(aBuf, NULL, CRYPT_STRING_BASE64, NULL, &aSizeEncrypted, NULL, NULL);
 		BYTE *data = (BYTE*)malloc(aDataSize = aSizeEncrypted);
 		g_CS2BW(aBuf, NULL, CRYPT_STRING_BASE64, data, &aSizeEncrypted, NULL, NULL);
-		LPVOID aDataBuf;
 		if (*(unsigned int*)data == 0x04034b50)
 		{
+			LPVOID aDataBuf = NULL;
 			if (aSizeEncrypted = DecompressBuffer(data, aDataBuf, aSizeEncrypted, g_default_pwd))
 			{
-				aBuf.Realloc(aSizeEncrypted);
+				aBuf.Realloc(aSizeEncrypted + 1);
 				aBuf_length = UTF8ToUTF16((unsigned char*)(LPTSTR)aBuf, aSizeEncrypted, (unsigned char*)aDataBuf, aSizeEncrypted) - 1;
 			}
 			else
+			{
+				if (aDataBuf)
+					free(aDataBuf);
+				free(data);
 				return -1;
+			}
 			g_memset(aDataBuf, 0, aSizeEncrypted);
 			g_memset(data, 0, aDataSize);
 			free(aDataBuf);
@@ -4356,8 +4383,9 @@ size_t Script::GetLine(LineBuffer &aBuf, int aInContinuationSection, bool aInBlo
 		}
 		else
 			mEncrypt = 1;
-		free(data);
+#ifndef _DEBUG
 	}
+#endif
 	if (aInContinuationSection)
 	{
 		LPTSTR cp = omit_leading_whitespace(aBuf);
@@ -4712,6 +4740,23 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 				break;
 			default:
 				g_TargetWindowError = false;
+				break;
+		}
+		return CONDITION_TRUE;
+	}
+
+	if (IS_DIRECTIVE_MATCH(_T("#TargetControlError")))
+	{
+		switch(Line::ConvertOnOff(parameter))
+		{
+			case TOGGLED_OFF:
+				g_TargetControlError = false;
+				break;
+			case TOGGLED_ON:
+				g_TargetControlError = true;
+				break;
+			default:
+				g_TargetControlError = false;
 				break;
 		}
 		return CONDITION_TRUE;
@@ -6281,12 +6326,15 @@ ResultType Script::AddLine(ActionTypeType aActionType, LPTSTR aArg[], int aArgc,
 	}
 	while (mPendingRelatedLine) // A completed block or a parent line with a single-line action, waiting for its mRelatedLine.
 	{
+		bool break_time = aActionType == ACT_UNTIL && ACT_IS_LOOP_EXCLUDING_WHILE(mPendingRelatedLine->mActionType); // Until must "relate to" only a single statement.
 		mPendingRelatedLine->mRelatedLine = &line;
 		// Regardless of whether mPendingRelatedLine is a block-begin or parent line,
 		// its own parent also needs its mRelatedLine set, unless that's an open block.
 		mPendingRelatedLine = mPendingRelatedLine->mParentLine;
 		if (mPendingRelatedLine && mPendingRelatedLine->mActionType == ACT_BLOCK_BEGIN)
 			mPendingRelatedLine = nullptr;
+		if (break_time)
+			break;
 	}
 	if (mPendingParentLine) // A line waiting for block or single-line action.
 	{
@@ -7364,6 +7412,7 @@ ResultType Script::DefineClassProperty(LPTSTR aBuf, bool aStatic, bool &aBufHasB
 	Object *class_object = mClassObject[mClassObjectCount - 1];
 	if (!aStatic)
 		class_object = (Object *)class_object->GetOwnPropObj(_T("Prototype"));
+	TCHAR end_char = *name_end; // In case there's no space before =>.
 	*name_end = 0; // Terminate for aBuf use below.
 	switch (class_object->GetOwnPropType(aBuf))
 	{
@@ -7377,6 +7426,7 @@ ResultType Script::DefineClassProperty(LPTSTR aBuf, bool aStatic, bool &aBufHasB
 	if (!mClassProperty)
 		return ScriptError(ERR_OUTOFMEM);
 
+	*name_end = end_char;
 	if (*next_token == '=') // => expr
 	{
 		// mClassPropertyDef is already set up for "Get".
@@ -8473,9 +8523,15 @@ Var *Script::FindUpVar(LPCTSTR aVarName, size_t aVarNameLength, UserFunc &aInner
 	Var *outer_var;
 	if (  (outer_var = outer.mStaticVars.Find(aVarName))  )
 		return outer_var;
-	if (  !(outer_var = outer.mVars.Find(aVarName))
-		&& !(outer.mOuterFunc && (outer_var = FindUpVar(aVarName, aVarNameLength, outer, aDisplayError)))  )
-		return nullptr;
+	if (  !(outer_var = outer.mVars.Find(aVarName))  )
+	{
+		if (  !(outer.mOuterFunc && (outer_var = FindUpVar(aVarName, aVarNameLength, outer, aDisplayError)))  )
+			return nullptr;
+		// Static or declared-global variables of outer would return above by virtue of being
+		// in mStaticVars, but variables pulled in from further out must still be checked:
+		if (!outer_var->IsNonStaticLocal())
+			return outer_var;
+	}
 	// At this point, all var refs used in declarations, assignments or &var in the outer
 	// function should have already been parsed, while it's possible that some read-refs
 	// have not.  Ignore all variables that lack an assignment, &var or declaration.
@@ -14055,9 +14111,17 @@ ResultType Line::PauseCurrentThread()
 	// in case we are in a hotkey subroutine and in case this hotkey has a buffered repeat-again
 	// action pending, which the user probably wouldn't want to happen after the script is unpaused:
 	Hotkey::ResetRunAgainAfterFinished();
-	g->IsPaused = true;
+	auto &g = *::g;
+	g.IsPaused = true;
 	++g_nPausedThreads; // For this purpose the idle thread is counted as a paused thread.
 	g_script->UpdateTrayIcon();
+	// Don't return until the script is unpaused.  This is done for two reasons:
+	// 1) Pause() can be called as part of an expression, in which case it seems more intuitive for
+	//    the script to pause immediately rather than after evaluating more of the expression.
+	// 2) If `return Pause()` is used, the thread might end before checking g.IsPaused, in which
+	//    case g_nPausedThreads would not be adjusted and timers would forever be disabled.
+	while (g.IsPaused)
+		MsgSleep(INTERVAL_UNSPECIFIED);
 	return OK;
 }
 
@@ -15125,6 +15189,8 @@ ResultType Script::PreparseVarRefs(Line *aLine)
 		case ACT_BLOCK_BEGIN: if (line->mAttribute) g->CurrentFunc = (UserFunc *)line->mAttribute; break;
 		case ACT_BLOCK_END: if (line->mAttribute) g->CurrentFunc = g->CurrentFunc->mOuterFunc; break;
 		}
+		
+		mCurrLine = line; // For error-reporting.
 
 		for (int a = 0; a < line->mArgc; ++a)
 		{

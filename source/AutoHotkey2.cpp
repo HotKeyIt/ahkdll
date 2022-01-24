@@ -190,6 +190,11 @@ extern "C" int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LP
 
 	JSON::_true = new ComObject(-1, 0xB);	JSON::_false = new ComObject(0, 0xB);	JSON::_null = new ComObject(0, 1);
 	Object::sAnyPrototype = Object::CreateRootPrototypes();
+	// IsSet is constructed here because it's a sort of intrinsic function with its own
+	// special rules.  ExprOp<> isn't used because it doesn't have parameter count limits
+	// or a name (which is displayed when the parameter count is invalid, for instance).
+	sIsSetFunc = new BuiltInFunc{ _T("IsSet"), BIF_IsSet, 1, 1 };
+
 	// v1.1.22+: This is done unconditionally, on startup, so that any attempts to read a drive
 	// that has no media (and possibly other errors) won't cause the system to display an error
 	// dialog that the script can't suppress.  This is known to affect floppy drives and some
@@ -340,14 +345,8 @@ extern "C" int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LP
 	if (!g_TlsDoExecute)
 		return 0;
 	// Set up the basics of the script:
-	if (g_script->Init(*g, script_filespec, restart_mode, 0, _T("")) != OK)
+	if (g_script->Init(*g, script_filespec, restart_mode, 0, _T(""), false) != OK)
 		return CRITICAL_ERROR;
-
-
-	// IsSet is constructed here because it's a sort of intrinsic function with its own
-	// special rules.  ExprOp<> isn't used because it doesn't have parameter count limits
-	// or a name (which is displayed when the parameter count is invalid, for instance).
-	sIsSetFunc = new BuiltInFunc{ _T("IsSet"), BIF_IsSet, 1, 1 };
 
 	// Could use CreateMutex() but that seems pointless because we have to discover the
 	// hWnd of the existing process so that we can close or restart it, so we would have
@@ -593,6 +592,11 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 		g_Debugger->mStack = new DbgStack();
 		g_MainThreadID = GetCurrentThreadId();
 		Object::sAnyPrototype = Object::CreateRootPrototypes();
+		// IsSet is constructed here because it's a sort of intrinsic function with its own
+		// special rules.  ExprOp<> isn't used because it doesn't have parameter count limits
+		// or a name (which is displayed when the parameter count is invalid, for instance).
+		sIsSetFunc = new BuiltInFunc{ _T("IsSet"), BIF_IsSet, 1, 1 };
+		
 		// v1.1.22+: This is done unconditionally, on startup, so that any attempts to read a drive
 		// that has no media (and possibly other errors) won't cause the system to display an error
 		// dialog that the script can't suppress.  This is known to affect floppy drives and some
@@ -735,17 +739,11 @@ unsigned __stdcall ThreadMain(LPTSTR lpScriptCmdLine)
 		global_init(*g);  // Set defaults prior to the below, since below might override them for AutoIt2 scripts.
 		// g_NoTrayIcon = true;
 		// Set up the basics of the script:
-		if (g_script->Init(*g, g_lpScript, 0, g_hInstance, lpFileName) != OK) // Set up the basics of the script, using the above.
+		if (g_script->Init(*g, g_lpScript, 0, g_hInstance, lpFileName, true) != OK) // Set up the basics of the script, using the above.
 			goto err;
 
 		//if (nameHinstanceP.istext)
 		//	GetCurrentDirectory(MAX_PATH, g_script->mFileDir);
-		
-
-		// IsSet is constructed here because it's a sort of intrinsic function with its own
-		// special rules.  ExprOp<> isn't used because it doesn't have parameter count limits
-		// or a name (which is displayed when the parameter count is invalid, for instance).
-		sIsSetFunc = new BuiltInFunc{ _T("IsSet"), BIF_IsSet, 1, 1 };
 		
 		// Could use CreateMutex() but that seems pointless because we have to discover the
 		// hWnd of the existing process so that we can close or restart it, so we would have

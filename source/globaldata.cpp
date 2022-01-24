@@ -120,6 +120,7 @@ thread_local WarnMode g_Warn_Unreachable = WARNMODE_MSGBOX;
 thread_local WarnMode g_Warn_VarUnset = WARNMODE_MSGBOX;
 thread_local SingleInstanceType g_AllowOnlyOneInstance = SINGLE_INSTANCE_PROMPT;
 thread_local bool g_TargetWindowError = true;
+thread_local bool g_TargetControlError = true;
 thread_local bool g_persistent = false;  // Whether the script should stay running even after the auto-exec section finishes.
 thread_local bool g_NoTrayIcon = false;
 #ifdef AUTOHOTKEYSC
@@ -227,7 +228,7 @@ thread_local OS_Version g_os;  // OS version object, courtesy of AutoIt3.
 thread_local HICON g_IconSmall = NULL;
 thread_local HICON g_IconLarge = NULL;
 
-thread_local global_struct g_startup, *g_array;
+thread_local global_struct g_startup, *g_array = NULL;
 thread_local global_struct *g; // g_startup provides a non-NULL placeholder during script loading. Afterward it's replaced with an array.
 
 // I considered maintaining this on a per-quasi-thread basis (i.e. in global_struct), but the overhead

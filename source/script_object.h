@@ -125,7 +125,7 @@ class FlatVector
 	void FreeRange(index_t i, index_t count)
 	{
 		auto v = Value();
-		for (; i < count; ++i)
+		for (auto j = i + count; i < j; ++i)
 			v[i].~T();
 	}
 
@@ -170,7 +170,7 @@ public:
 	{
 		auto v = Value();
 		ASSERT(i >= 0 && i + count <= data->length);
-		FreeRange(i, i + count);
+		FreeRange(i, count);
 		memmove(v + i, v + i + count, (data->length - i - count) * sizeof(T));
 		data->length -= count;
 	}
