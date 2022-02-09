@@ -1970,13 +1970,14 @@ ResultType Script::ExitApp(ExitReasons aExitReason, int aExitCode)
 		// MUST NOT create a new thread when g_OnExitIsRunning because g_array allows only one
 		// extra thread for ExitApp() (which allows it to run even when MAX_THREADS_EMERGENCY has
 		// been reached).  See TOTAL_ADDITIONAL_THREADS.
-		if (g_FirstThreadID != g_MainThreadID) 
+		/*if (g_FirstThreadID != g_MainThreadID) 
 		{	
 			g_OnExitIsRunning = g_persistent = false;
 			PostThreadMessage(g_MainThreadID, WM_QUIT, 0, 0);
 			return EARLY_EXIT;
-		}
+		}*/
 		TerminateApp(aExitReason, aExitCode);
+		_endthreadex(aExitCode);
 	}
 
 	// Otherwise, the script contains the special OnExit function that we will run here instead
