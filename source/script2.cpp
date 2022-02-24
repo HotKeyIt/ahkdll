@@ -16177,7 +16177,9 @@ void free_compiled_regex()
 			pcret_free(this_entry.re_compiled); // Free the compiled pattern.
 			if (this_entry.extra)
 				pcret_free_study(this_entry.extra);
+
 			this_entry.re_compiled = NULL;
+			this_entry.re_raw = NULL;
 		}
 	}
 }
@@ -16215,7 +16217,7 @@ pcret *get_compiled_regex(LPTSTR aRegEx, TCHAR &aOutputMode, pcret_extra *&aExtr
 	int insert_pos; // v1.0.45.03: This is used to avoid updating sLastInsert until an insert actually occurs (it might not occur if a compile error occurs in the regex, or something else stops it early).
 
 	// CHECK IF THIS REGEX IS ALREADY IN THE CACHE.
-	if (sLastFound == -1) // Cache is empty, so insert this RegEx at the first position.
+	if (sLastFound == -1 || !sCache[sLastFound].re_raw) // Cache is empty, so insert this RegEx at the first position.
 		insert_pos = 0;  // A section further below will change sLastFound to be 0.
 	else
 	{
