@@ -1,8 +1,1 @@
-AutoHotkey_H was invented by tinku99 and enhanced by HotKeyIt based on AutoHotkey (https://github.com/Lexikos/AutoHotkey_L by Lexikos)
-
-AutoHotkey.dll opens the world of AutoHotkey to other programming and scripting languages.
-It allows multi-threading by loading a dll multiple times and using its exported functions as well as build-in features like Alias, CriticalObject and other.
-
-You can use AutoHotkey in many other programming languages like C#, C++, VB, .Net, Python and many more by loading the dll or using COM Interface.  For example you can run AutoHotkey scripts from Excel or Word macro as if it was a build-in feature.
-
-Find out more on http://hotkeyit.github.io/v2/
+lorem ipsim
