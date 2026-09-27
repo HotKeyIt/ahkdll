@@ -84,8 +84,12 @@ extern modLR_type g_modifiersLR_logical_non_ignored;
 extern modLR_type g_modifiersLR_physical;  // Same as above except it's which modifiers are PHYSICALLY down.
 extern modLR_type g_modifiersLR_numpad_mask;  // Shift keys temporarily released by Numpad.
 extern modLR_type g_modifiersLR_ctrlaltdel_mask; // For excluding AltGr from Ctrl+Alt+Del handling.
+extern modLR_type g_modifiersLR_last_pressed;
+extern DWORD g_modifiersLR_last_pressed_time;
 
+#ifndef MINIDLL // key_type is defined by hook.h.
 extern key_type *pPrefixKey;
+#endif
 
 #ifdef FUTURE_USE_MOUSE_BUTTONS_LOGICAL
 extern WORD g_mouse_buttons_logical; // A bitwise combination of MK_LBUTTON, etc.
@@ -128,9 +132,7 @@ extern bool g_persistent;
 extern HookType g_ExceptionHooksToEnable;
 extern bool g_NoTrayIcon;
 #endif
-#ifdef AUTOHOTKEYSC
-	extern bool g_AllowMainWindow;
-#endif
+extern bool g_AllowMainWindow;
 extern bool g_DeferMessagesForUnderlyingPump;
 extern bool g_MainTimerExists;
 extern bool g_AutoExecTimerExists;
@@ -174,9 +176,9 @@ extern UINT g_HotExprTimeout;
 extern HWND g_HotExprLFW;
 extern HotkeyCriterion *g_FirstHotExpr, *g_LastHotExpr;
 
-extern int g_ScreenDPI;
 extern MenuTypeType g_MenuIsVisible;
 #endif
+extern int g_ScreenDPI; // Also used by ToolTip, so it's not excluded from MINIDLL.
 extern int g_nMessageBoxes;
 #ifndef MINIDLL
 extern int g_nInputBoxes;
@@ -237,7 +239,7 @@ extern HICON g_IconLarge;
 extern DWORD g_OriginalTimeout;
 
 EXTERN_G;
-extern global_struct g_default, *g_array;
+extern global_struct g_default, g_startup, *g_array;
 
 extern CString g_WorkingDir;
 extern LPTSTR g_WorkingDirOrig;

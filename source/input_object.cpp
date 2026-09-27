@@ -1,4 +1,5 @@
 #include "stdafx.h" // pre-compiled headers
+#ifndef MINIDLL // InputHook relies on the keyboard hook, which MINIDLL omits.
 #include "defines.h"
 #include "globaldata.h"
 #include "script.h"
@@ -267,3 +268,4 @@ ResultType InputObject::KeyOpt(ExprTokenType &aResultToken, ExprTokenType *aPara
 
 	return input.SetKeyFlags(keys, false, remove_flags, add_flags);
 }
+#endif // MINIDLL

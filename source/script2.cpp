@@ -15,7 +15,6 @@ GNU General Public License for more details.
 */
 
 #include "stdafx.h" // pre-compiled headers
-#include <olectl.h> // for OleLoadPicture()
 #include <winioctl.h> // For PREVENT_MEDIA_REMOVAL and CD lock/unlock.
 #include "qmath.h" // Used by Transform() [math.h incurs 2k larger code size just for ceil() & floor()]
 #include "mt19937ar-cok.h" // for sorting in random order
@@ -743,10 +742,6 @@ ResultType Line::ToolTip(LPTSTR aText, LPTSTR aX, LPTSTR aY, LPTSTR aID)
 		return OK;
 	}
 
-	// Use virtual desktop so that tooltip can move onto non-primary monitor in a multi-monitor system:
-	RECT dtw;
-	GetVirtualDesktopRect(dtw);
-
 	bool one_or_both_coords_unspecified = !*aX || !*aY;
 	POINT pt, pt_cursor;
 	if (one_or_both_coords_unspecified)
@@ -775,6 +770,15 @@ ResultType Line::ToolTip(LPTSTR aText, LPTSTR aX, LPTSTR aY, LPTSTR aID)
 	if (*aY)
 		pt.y = ATOI(aY) + origin.y;
 
+	HMONITOR hmon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+	MONITORINFO mi;
+	mi.cbSize = sizeof(mi);
+	GetMonitorInfo(hmon, &mi);
+	// v1.1.34: Use work area to avoid trying to overlap the taskbar on newer OSes, which otherwise
+	// would cause the tooltip to appear at the top of the screen instead of the position we specify.
+	// This was observed on Windows 10 and 11, and confirmed to not apply to Windows 7 or XP.
+	RECT dtw = g_os.IsWin8orLater() ? mi.rcWork : mi.rcMonitor;
+
 	TOOLINFO ti = {0};
 	ti.cbSize = sizeof(ti) - sizeof(void *); // Fixed for v1.0.36.05: Tooltips fail to work on Windows 2000 unless the size for the *lpReserved member in _WIN32_WINNT 0x0501 is omitted.
 	ti.uFlags = TTF_TRACK;
@@ -797,16 +801,27 @@ ResultType Line::ToolTip(LPTSTR aText, LPTSTR aX, LPTSTR aY, LPTSTR aID)
 
 	// v1.0.40.12: Added the IsWindow() check below to recreate the tooltip in cases where it was destroyed
 	// by external means such as Alt-F4 or WinClose.
-	if (!tip_hwnd || !IsWindow(tip_hwnd))
+	bool newly_created = !tip_hwnd || !IsWindow(tip_hwnd);
+	if (newly_created)
 	{
 		// This this window has no owner, it won't be automatically destroyed when its owner is.
 		// Thus, it will be explicitly by the program's exit function.
 		tip_hwnd = g_hWndToolTip[window_index] = CreateWindowEx(WS_EX_TOPMOST, TOOLTIPS_CLASS, NULL, TTS_NOPREFIX | TTS_ALWAYSTIP
 			, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, NULL, NULL, NULL, NULL);
 		SendMessage(tip_hwnd, TTM_ADDTOOL, 0, (LPARAM)(LPTOOLINFO)&ti);
-		// v1.0.21: GetSystemMetrics(SM_CXSCREEN) is used for the maximum width because even on a
-		// multi-monitor system, most users would not want a tip window to stretch across multiple monitors:
-		SendMessage(tip_hwnd, TTM_SETMAXTIPWIDTH, 0, (LPARAM)GetSystemMetrics(SM_CXSCREEN));
+	}
+
+	// v1.1.34: Fixed to use the appropriate monitor, in case it's sized differently to the primary.
+	// Also fixed to account for incorrect DPI scaling done by the tooltip control; i.e. a value of
+	// n ends up allowing tooltips n*g_ScreenDPI/96 pixels wide.  TTM_SETMAXTIPWIDTH seems to want
+	// the max text width, not the max window width, so adjust for that.  Do this every time since
+	// the tooltip might be moving between screens of different sizes.
+	RECT text_rect = dtw;
+	SendMessage(tip_hwnd, TTM_ADJUSTRECT, FALSE, (LPARAM)&text_rect);
+	SendMessage(tip_hwnd, TTM_SETMAXTIPWIDTH, 0, (LPARAM)((text_rect.right - text_rect.left) * 96 / g_ScreenDPI));
+
+	if (newly_created)
+	{
 		// Must do these next two when the window is first created, otherwise GetWindowRect() below will retrieve
 		// a tooltip window size that is quite a bit taller than it winds up being:
 		SendMessage(tip_hwnd, TTM_TRACKPOSITION, 0, (LPARAM)MAKELONG(pt.x, pt.y));
@@ -818,7 +833,10 @@ ResultType Line::ToolTip(LPTSTR aText, LPTSTR aX, LPTSTR aY, LPTSTR aID)
 	// 1) Windows XP;
 	// 2) Common controls v6 (via manifest);
 	// 3) "Control Panel >> Display >> Effects >> Use transition >> Fade effect" setting is in effect.
-	SendMessage(tip_hwnd, TTM_UPDATETIPTEXT, 0, (LPARAM)&ti);
+	// v1.1.34: Avoid TTM_UPDATETIPTEXT if the text hasn't changed, to reduce flicker.  The behaviour described
+	// above could not be replicated, EVEN ON WINDOWS XP.  Whether it was ever observed on other OSes is unknown.
+	if (!newly_created && !ToolTipTextEquals(tip_hwnd, aText))
+		SendMessage(tip_hwnd, TTM_UPDATETIPTEXT, 0, (LPARAM)&ti);
 
 	RECT ttw = {0};
 	GetWindowRect(tip_hwnd, &ttw); // Must be called this late to ensure the tooltip has been created by above.
@@ -872,6 +890,10 @@ ResultType Line::ToolTip(LPTSTR aText, LPTSTR aX, LPTSTR aY, LPTSTR aID)
 		}
 	}
 
+	// These messages seem to cause a complete update of the tooltip, which is slow and causes flickering.
+	// It is tempting to use SetWindowPos() instead to speed things up, but if TTM_TRACKPOSITION isn't
+	// sent each time, the next TTM_UPDATETIPTEXT message will move it back to whatever position was set
+	// with TTM_TRACKPOSITION last.
 	SendMessage(tip_hwnd, TTM_TRACKPOSITION, 0, (LPARAM)MAKELONG(pt.x, pt.y));
 	// And do a TTM_TRACKACTIVATE even if the tooltip window already existed upon entry to this function,
 	// so that in case it was hidden or dismissed while its HWND still exists, it will be shown again:
@@ -1510,6 +1532,11 @@ ResultType InputStart(input_type &input, Var *output_var)
 	if (input.Timeout > 0)
 		input.SetTimeoutTimer();
 
+	// It is possible for &input to already be in the list if AHK_INPUT_END is still
+	// in the message queue, in which case it must be removed from its current position
+	// to prevent the list from looping back on itself.
+	InputUnlinkIfStopped(&input);
+
 	input.Prev = g_input;
 	input.Start();
 	g_input = &input; // Signal the hook to start the input.
@@ -1685,6 +1712,8 @@ ResultType input_type::SetKeyFlags(LPTSTR aKeys, bool aEndKeyMode, UCHAR aFlagsR
 			*single_char_string = *end_key;
 			modifiersLR = 0;  // Init prior to below.
 			vk = TextToVK(single_char_string, &modifiersLR, true);
+			vk_by_number = false;
+			sc_by_number = false;
 		} // switch()
 
 		if (vk) // A valid virtual key code was discovered above.
@@ -2004,30 +2033,43 @@ void input_type::EndByReason(InputStatusType aReason)
 }
 
 
-input_type *InputRelease(input_type *aInput)
+input_type **InputFindLink(input_type *aInput)
+{
+	if (g_input == aInput)
+		return &g_input;
+	else
+		for (auto *input = g_input; input; input = input->Prev)
+			if (input->Prev == aInput)
+				return &input->Prev;
+	return NULL; // aInput is not valid (faked AHK_INPUT_END message?) or not active.
+}
+
+
+input_type *InputUnlinkIfStopped(input_type *aInput)
 {
 	if (!aInput)
 		return NULL;
-	// Input should already have ended prior to this function being called.
-	// Otherwise, removal of aInput from the chain will end input collection.
-	if (g_input == aInput)
-		g_input = aInput->Prev;
-	else
-		for (auto *input = g_input; ; input = input->Prev)
-		{
-			if (!input)
-				return NULL; // aInput is not valid (faked AHK_INPUT_END message?) or not active.
-			if (input->Prev == aInput)
-			{
-				input->Prev = aInput->Prev;
-				break;
-			}
-		}
+	input_type **found = InputFindLink(aInput);
+	if (!found)
+		return NULL;
+	// InProgress can be true if Start() is called while AHK_INPUT_END is in the queue.
+	// In such cases, aInput was already moved to a new position in the list and must
+	// not be removed yet.
+	if (!aInput->InProgress())
+	{
+		*found = aInput->Prev;
+		WaitHookIdle(); // Ensure any pending use of aInput by the hook is finished.
+		aInput->Prev = NULL;
+	}
+	return aInput; // Return non-null to indicate aInput was found in the list and is therefore valid.
+}
 
-	// Ensure any pending use of aInput by the hook is finished.
-	WaitHookIdle();
-	
-	aInput->Prev = NULL;
+
+input_type *InputRelease(input_type *aInput)
+{
+	if (!InputUnlinkIfStopped(aInput))
+		return NULL;
+
 	if (aInput->ScriptObject)
 	{
 		Hotkey::MaybeUninstallHook();
@@ -2550,7 +2592,6 @@ ResultType Line::ControlClick(vk_type aVK, int aClickCount, LPTSTR aOptions, LPT
 		if (click.y == COORD_UNSPECIFIED)
 			click.y = (rect.bottom - rect.top) / 2;
 	}
-	LPARAM lparam = MAKELPARAM(click.x, click.y);
 
 	UINT msg_down, msg_up;
 	WPARAM wparam, wparam_up = 0;
@@ -2559,6 +2600,7 @@ ResultType Line::ControlClick(vk_type aVK, int aClickCount, LPTSTR aOptions, LPT
 
 	if (vk_is_wheel)
 	{
+		ClientToScreen(control_window, &click); // Wheel messages use screen coordinates.
 		wparam = (aClickCount * ((aVK == VK_WHEEL_UP) ? WHEEL_DELTA : -WHEEL_DELTA)) << 16;  // High order word contains the delta.
 		msg_down = WM_MOUSEWHEEL;
 		// Make the event more accurate by having the state of the keys reflected in the event.
@@ -2601,6 +2643,8 @@ ResultType Line::ControlClick(vk_type aVK, int aClickCount, LPTSTR aOptions, LPT
 			default: goto error; // Just do nothing since this should realistically never happen.
 		}
 	}
+
+	LPARAM lparam = MAKELPARAM(click.x, click.y);
 
 	// SetActiveWindow() requires ATTACH_THREAD_INPUT to succeed.  Even though the MSDN docs state
 	// that SetActiveWindow() has no effect unless the parent window is foreground, Jon insists
@@ -3006,16 +3050,18 @@ ResultType Line::ControlGetListView(Var &aOutputVar, HWND aHwnd, LPTSTR aOptions
 	if (get_count)
 	{
 		int result; // Must be signed to support writing a col count of -1 to aOutputVar.
+		DWORD_PTR msg_result;
 		if (include_focused_only) // Listed first so that it takes precedence over include_selected_only.
 		{
-			if (!SendMessageTimeout(aHwnd, LVM_GETNEXTITEM, -1, LVNI_FOCUSED, SMTO_ABORTIFHUNG, 2000, (PDWORD_PTR)&result)) // Timed out or failed.
+			if (!SendMessageTimeout(aHwnd, LVM_GETNEXTITEM, -1, LVNI_FOCUSED, SMTO_ABORTIFHUNG, 2000, &msg_result)) // Timed out or failed.
 				return SetErrorLevelOrThrow();
-			++result; // i.e. Set it to 0 if not found, or the 1-based row-number otherwise.
+			result = (int)msg_result + 1; // i.e. Set it to 0 if not found, or the 1-based row-number otherwise.
 		}
 		else if (include_selected_only)
 		{
-			if (!SendMessageTimeout(aHwnd, LVM_GETSELECTEDCOUNT, 0, 0, SMTO_ABORTIFHUNG, 2000, (PDWORD_PTR)&result)) // Timed out or failed.
+			if (!SendMessageTimeout(aHwnd, LVM_GETSELECTEDCOUNT, 0, 0, SMTO_ABORTIFHUNG, 2000, &msg_result)) // Timed out or failed.
 				return SetErrorLevelOrThrow();
+			result = (int)msg_result;
 		}
 		else if (col_option) // "Count Col" returns the number of columns.
 			result = (int)col_count;
@@ -3123,7 +3169,7 @@ ResultType Line::ControlGetListView(Var &aOutputVar, HWND aHwnd, LPTSTR aOptions
 			//    mouse/key lag would occur).
 			if (!SendMessageTimeout(aHwnd, LVM_GETNEXTITEM, next, include_focused_only ? LVNI_FOCUSED : LVNI_SELECTED
 				, SMTO_ABORTIFHUNG, 2000, (PDWORD_PTR)&next) // Timed out or failed.
-				|| next == -1) // No next item.  Relies on short-circuit boolean order.
+				|| (int)next == -1) // No next item.  Relies on short-circuit boolean order.
 				break; // End of estimation phase (if estimate is too small, the text retrieval below will truncate it).
 		}
 		else
@@ -3163,7 +3209,7 @@ ResultType Line::ControlGetListView(Var &aOutputVar, HWND aHwnd, LPTSTR aOptions
 			// Fix for v1.0.37.01: Prevent an infinite loop (for details, see comments in the estimation phase above).
 			if (!SendMessageTimeout(aHwnd, LVM_GETNEXTITEM, next, include_focused_only ? LVNI_FOCUSED : LVNI_SELECTED
 				, SMTO_ABORTIFHUNG, 2000, (PDWORD_PTR)&next) // Timed out or failed.
-				|| next == -1) // No next item.
+				|| (int)next == -1) // No next item.
 				break; // See comment above for why unconditional break vs. continue.
 		}
 		else // Retrieve every row, so the "next" row becomes the "i" index.
@@ -5901,59 +5947,49 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 }
 
 
+
 #ifndef MINIDLL
-bool FindAutoHotkeyUtilSub(LPTSTR aBuf, int aBufSize, LPTSTR aFile, LPTSTR aDir)
+bool FindAutoHotkeyUtilSub(LPTSTR aFile, LPTSTR aDir)
 {
-	int len = sntprintf(aBuf, aBufSize, _T("\"%s\\%s"), aDir, aFile);
-	if (len + 1 > aBufSize // Too long. Should realistically never happen.
-		|| GetFileAttributes(aBuf + 1) == INVALID_FILE_ATTRIBUTES) // File not found.
-		return false;
-	aBuf[len++] = '"';
-	aBuf[len] = '\0';
-	return true;
+	SetCurrentDirectory(aDir);
+	return GetFileAttributes(aFile) != INVALID_FILE_ATTRIBUTES;
 }
 
-bool FindAutoHotkeyUtil(LPTSTR aBuf, int aBufSize, LPTSTR aFile, LPTSTR aInstallDirBuf, LPTSTR &aUtilDir)
+bool FindAutoHotkeyUtil(LPTSTR aFile, bool &aFoundOurs)
 {
 	// Always try our directory first, in case it has different utils to the installed version.
-	// ActionExec()'s CreateProcess() is currently done in a way that prefers enclosing double quotes:
-	if (!FindAutoHotkeyUtilSub(aBuf, aBufSize, aFile, g_script.mOurEXEDir))
+	if (  !(aFoundOurs = FindAutoHotkeyUtilSub(aFile, g_script.mOurEXEDir))  )
 	{
 		// Try GetAHKInstallDir() so that compiled scripts running on machines that happen
 		// to have AHK installed will still be able to fetch the help file and Window Spy:
-		if (   !GetAHKInstallDir(aInstallDirBuf)
-			|| !FindAutoHotkeyUtilSub(aBuf, aBufSize, aFile, aInstallDirBuf)   )
+		TCHAR installdir[MAX_PATH];
+		if (   !GetAHKInstallDir(installdir)
+			|| !FindAutoHotkeyUtilSub(aFile, installdir)   )
 			return false;
-		aUtilDir = aInstallDirBuf;
 	}
-	else
-		aUtilDir = g_script.mOurEXEDir;
 	return true;
 }
 
 bool LaunchAutoHotkeyUtil(LPTSTR aFile, bool aIsScript)
 {
-	TCHAR buf_file[2048], buf_exe[2048], installdir[MAX_PATH];
-	LPTSTR utildir, file = buf_file, args = _T(""); // Use "" vs. NULL to specify that there are no params at all.
-	if (!FindAutoHotkeyUtil(buf_file, _countof(buf_file), aFile, installdir, utildir))
+	LPTSTR file = aFile, args = _T("");
+	bool our_file, result = false;
+	if (!FindAutoHotkeyUtil(aFile, our_file))
 		return false;
-	if (aIsScript)
-	{
-		// Always try AutoHotkey.exe in the same directory as the util first, if present,
-		// since mOurEXE could be a different version of AutoHotkey (or a compiled script).
-		if (FindAutoHotkeyUtilSub(buf_exe, _countof(buf_exe), _T("AutoHotkey.exe"), utildir))
-			file = buf_exe, args = buf_file;
 #ifndef AUTOHOTKEYSC
-		else if (utildir == g_script.mOurEXEDir)
-			// Use our EXE only if the util was found in our directory.
-			file = g_script.mOurEXE, args = buf_file;
-#endif
-		//else: AutoHotkey appears to be installed but missing AutoHotkey.exe.
-		// Try running the .ahk file directly in the off chance that it is registered
-		// with some other EXE name.
+	// If it's a script in our directory, use our EXE to run it.
+	TCHAR buf[64]; // More than enough for "/script WindowSpy.ahk".
+	if (aIsScript && our_file)
+	{
+		sntprintf(buf, _countof(buf), _T("/script %s"), aFile);
+		file = g_script.mOurEXE;
+		args = buf;
 	}
-	// Attempt to run the file:
-	return g_script.ActionExec(file, args, NULL, false) != FAIL;
+	//else it's not a script or it's the installed copy of WindowSpy.ahk, so just run it.
+#endif
+	result = g_script.ActionExec(file, args, NULL, false);
+	SetCurrentDirectory(g_WorkingDir); // Restore the proper working directory.
+	return result;
 }
 
 void LaunchWindowSpy()
@@ -6093,7 +6129,6 @@ ResultType ShowMainWindow(MainWindowModes aMode, bool aRestricted)
 	bool jump_to_bottom = false;  // Set default behavior for edit control.
 	static MainWindowModes current_mode = MAIN_MODE_NO_CHANGE;
 
-#ifdef AUTOHOTKEYSC
 	// If we were called from a restricted place, such as via the Tray Menu or the Main Menu,
 	// don't allow potentially sensitive info such as script lines and variables to be shown.
 	// This is done so that scripts can be compiled more securely, making it difficult for anyone
@@ -6110,7 +6145,6 @@ ResultType ShowMainWindow(MainWindowModes aMode, bool aRestricted)
 			_T("command option was not enabled in the original script."));
 		return OK;
 	}
-#endif
 
 	// If the window is empty, caller wants us to default it to showing the most recently
 	// executed script lines:
@@ -6795,8 +6829,10 @@ BOOL CALLBACK EnumChildFindPoint(HWND aWnd, LPARAM lParam)
 		return TRUE;
 	// The given point must be inside aWnd's bounds.  Then, if there is no hwnd found yet or if aWnd
 	// is entirely contained within the previously found hwnd, update to a "better" found window like
-	// Window Spy.  This overcomes the limitations of WindowFromPoint() and ChildWindowFromPoint():
-	if (pah.pt.x >= rect.left && pah.pt.x <= rect.right && pah.pt.y >= rect.top && pah.pt.y <= rect.bottom)
+	// Window Spy.  This overcomes the limitations of WindowFromPoint() and ChildWindowFromPoint().
+	// The pixel at (left, top) lies inside the control, whereas MSDN says "the pixel at (right, bottom)
+	// lies immediately outside the rectangle" -- so use < instead of <= below:
+	if (pah.pt.x >= rect.left && pah.pt.x < rect.right && pah.pt.y >= rect.top && pah.pt.y < rect.bottom)
 	{
 		// If the window's center is closer to the given point, break the tie and have it take
 		// precedence.  This solves the problem where a particular control from a set of overlapping
@@ -9608,61 +9644,75 @@ ResultType Line::FileSelectFile(LPTSTR aOptions, LPTSTR aWorkingDir, LPTSTR aGre
 	TCHAR file_buf[65535];
 	*file_buf = '\0'; // Set default.
 
-	TCHAR working_dir[MAX_PATH]; // Using T_MAX_PATH vs. MAX_PATH did not help on Windows 10.0.16299 (see below).
-	if (!aWorkingDir || !*aWorkingDir)
-		*working_dir = '\0';
-	else
+	LPCTSTR initial_dir = NULL;
+	if (aWorkingDir && *aWorkingDir)
 	{
-		// Compress the path if possible to support longer paths.  Without this, any path longer
-		// than MAX_PATH would be ignored, presumably because the dialog, as part of the shell,
-		// does not support long paths.  Surprisingly, although Windows 10 long path awareness
-		// does not allow us to pass a long path for working_dir, it does affect whether the long
-		// path is used in the address bar and returned filenames.
-		if (_tcslen(aWorkingDir) >= MAX_PATH)
-			GetShortPathName(aWorkingDir, working_dir, _countof(working_dir));
-		else
-			tcslcpy(working_dir, aWorkingDir, _countof(working_dir));
+		LPCTSTR dir_and_name = aWorkingDir;
+		size_t dir_and_name_length = _tcslen(dir_and_name);
+		LPCTSTR last_backslash = _tcsrchr(dir_and_name, '\\');
 		// v1.0.43.10: Support CLSIDs such as:
 		//   My Computer  ::{20d04fe0-3aea-1069-a2d8-08002b30309d}
 		//   My Documents ::{450d8fba-ad25-11d0-98a8-0800361b1103}
 		// Also support optional subdirectory appended to the CLSID.
 		// Neither SetCurrentDirectory() nor GetFileAttributes() directly supports CLSIDs, so rely on other means
 		// to detect whether a CLSID ends in a directory vs. filename.
-		bool is_directory, is_clsid;
-		if (is_clsid = !_tcsncmp(working_dir, _T("::{"), 3))
+		bool is_directory = false; // Whether the entire dir_and_name is a directory, lacking a default filename.
+		if (last_backslash && !last_backslash[1])
+			is_directory = true; // The entire string is the directory; keep the slash to ensure "C:\" uses the root, not the working directory ("C:").
+		else if (!_tcsncmp(dir_and_name, _T("::{"), 3))
 		{
-			LPTSTR end_brace;
-			if (end_brace = _tcschr(working_dir, '}'))
-				is_directory = !end_brace[1] // First '}' is also the last char in string, so it's naked CLSID (so assume directory).
-					|| working_dir[_tcslen(working_dir) - 1] == '\\'; // Or path ends in backslash.
-			else // Badly formatted clsid.
-				is_directory = true; // Arbitrary default due to rarity.
+			// Do a rough check to determine whether this is likely to be a naked CLSID (examples above),
+			// in which case it should be treated as a directory with no default filename.  This should be
+			// more efficient than the previous approach of scanning for the first '}'.
+			// Interpretation of at least one partially invalid case differs from the previous method:
+			// 1) If the default filename ends with '}' and '}' is missing from the CLSID,
+			//     Old: the entire string is ignored because it looks like a CLSID, but is invalid.
+			//     New: there isn't a '}' at the right position, so the default filename is used.
+			// All other differences probably only affect invalid CLSIDs, with the old method being more
+			// likely to ignore the entire string, while the new method prefers to split at "\" if present.
+			is_directory = dir_and_name_length == 40 && dir_and_name[39] == '}' && !last_backslash;
 		}
-		else // Not a CLSID.
+		else // Not a CLSID and not explicitly a directory (no trailing backslash).
 		{
-			DWORD attr = GetFileAttributes(working_dir);
+			DWORD attr = GetFileAttributes(dir_and_name);
 			is_directory = (attr != 0xFFFFFFFF) && (attr & FILE_ATTRIBUTE_DIRECTORY);
 		}
-		if (!is_directory)
+		size_t initial_dir_length = 0;
+		if (is_directory)
+		{
+			// Use the entire dir_and_name as the initial directory.
+			initial_dir = dir_and_name;
+			initial_dir_length = dir_and_name_length;
+		}
+		else
 		{
 			// Above condition indicates it's either an existing file that's not a folder, or a nonexistent
 			// folder/filename.  In either case, it seems best to assume it's a file because the user may want
 			// to provide a default SAVE filename, and it would be normal for such a file not to already exist.
-			LPTSTR last_backslash;
-			if (last_backslash = _tcsrchr(working_dir, '\\'))
+			if (!last_backslash)
+			{
+				// Use the entire dir_and_name as the default filename.
+				tcslcpy(file_buf, dir_and_name, _countof(file_buf));
+			}
+			else
 			{
 				tcslcpy(file_buf, last_backslash + 1, _countof(file_buf)); // Set the default filename.
-				*last_backslash = '\0'; // Make the working directory just the file's path.
+				// Set the initial directory.
+				initial_dir = dir_and_name;
+				initial_dir_length = last_backslash - dir_and_name;
 			}
-			else // The entire working_dir string is the default file (unless this is a clsid).
-				if (!is_clsid)
-				{
-					tcslcpy(file_buf, working_dir, _countof(file_buf));
-					*working_dir = '\0';  // This signals it to use the default directory.
-				}
-				//else leave working_dir set to the entire clsid string in case it's somehow valid.
 		}
-		// else it is a directory, so just leave working_dir set as it was initially.
+		if (initial_dir && initial_dir[initial_dir_length]) // Null termination required.
+		{
+			if (initial_dir_length < T_MAX_PATH) // Avoid stack overflow in case of bad data; anything longer wouldn't work anyway.
+			{
+				LPTSTR buf = (LPTSTR)_alloca(sizeof(TCHAR) * (initial_dir_length + 1));
+				initial_dir = tmemcpy(buf, initial_dir, initial_dir_length);
+				buf[initial_dir_length] = '\0';
+			}
+			else
+				initial_dir = NULL;
+		}
 	}
 
 	TCHAR greeting[1024];
@@ -9720,7 +9770,7 @@ ResultType Line::FileSelectFile(LPTSTR aOptions, LPTSTR aWorkingDir, LPTSTR aGre
 	ofn.lpstrFile = file_buf;
 	ofn.nMaxFile = _countof(file_buf) - 1; // -1 to be extra safe.
 	// Specifying NULL will make it default to the last used directory (at least in Win2k):
-	ofn.lpstrInitialDir = *working_dir ? working_dir : NULL;
+	ofn.lpstrInitialDir = initial_dir;
 
 	// Note that the OFN_NOCHANGEDIR flag is ineffective in some cases, so we'll use a custom
 	// workaround instead.  MSDN: "Windows NT 4.0/2000/XP: This flag is ineffective for GetOpenFileName."
@@ -9875,10 +9925,9 @@ ResultType Line::FileSelectFile(LPTSTR aOptions, LPTSTR aWorkingDir, LPTSTR aGre
 #endif
 
 
-// As of 2019-09-29, noinline reduces code size by over 20KB on VC++ 2019.
-// Prior to merging Util_CreateDir with this, it wasn't inlined.
-DECLSPEC_NOINLINE
-bool Line::FileCreateDir(LPTSTR aDirSpec, LPTSTR aCanModifyDirSpec)
+static bool FileCreateDirRecursive(LPTSTR aDirSpec);
+
+bool FileCreateDir(LPCTSTR aDirSpec)
 {
 	if (!aDirSpec || !*aDirSpec)
 	{
@@ -9886,6 +9935,29 @@ bool Line::FileCreateDir(LPTSTR aDirSpec, LPTSTR aCanModifyDirSpec)
 		return false;
 	}
 
+	// Make a modifiable copy to be used by recursive calls (supports long paths).
+	// Use GetFullPathName() instead of tmemcpy() or similar to normalize the path,
+	// which has at least two benefits:
+	//  1) Indirectly supports forward slash as a path separator.
+	//  2) Relative components such as "x\y\.." would otherwise cause the function
+	//     to report failure due to the order of checks and CreateDirectory calls.
+	TCHAR buf[T_MAX_PATH];
+	auto len = GetFullPathName(aDirSpec, _countof(buf), buf, nullptr);
+	if (!len || len >= _countof(buf))
+	{
+		if (len)
+			SetLastError(ERROR_BUFFER_OVERFLOW);
+		return false;
+	}
+
+	return FileCreateDirRecursive(buf);
+}
+
+static bool FileCreateDirRecursive(LPTSTR aDirSpec)
+{
+	// The following check also serves to support UNC paths like "\\server\share\path"
+	// by preventing the section below from recursing into "\\server\share" (or further)
+	// if the share exists.
 	DWORD attr = GetFileAttributes(aDirSpec);
 	if (attr != 0xFFFFFFFF)  // aDirSpec already exists.
 	{
@@ -9899,36 +9971,16 @@ bool Line::FileCreateDir(LPTSTR aDirSpec, LPTSTR aCanModifyDirSpec)
 	if (last_backslash > aDirSpec // v1.0.48.04: Changed "last_backslash" to "last_backslash > aDirSpec" so that an aDirSpec with a leading \ (but no other backslashes), such as \dir, is supported.
 		&& last_backslash[-1] != ':') // v1.1.31.00: Don't attempt FileCreateDir("C:") since that's equivalent to either "C:\" or the working directory (which already exists), or FileCreateDir("\\?\C:") since it always fails.
 	{
-		LPTSTR parent_dir;
-		if (aCanModifyDirSpec)
-		{
-			parent_dir = aDirSpec; // Caller provided a modifiable aDirSpec.
-			*last_backslash = '\0'; // Temporarily terminate for parent directory.
-		}
-		else
-		{
-			// v1.1.31.00: Allocate a modifiable buffer to be used by all calls (supports long paths).
-			parent_dir = (LPTSTR)_alloca((last_backslash - aDirSpec + 1) * sizeof(TCHAR));
-			tcslcpy(parent_dir, aDirSpec, last_backslash - aDirSpec + 1); // Omits the last backslash.
-		}
-		bool exists = FileCreateDir(parent_dir, parent_dir); // Recursively create all needed ancestor directories.
-		if (aCanModifyDirSpec)
-			*last_backslash = '\\'; // Undo temporary termination.
-
-		// v1.0.44: Fixed ErrorLevel being set to 1 when the specified directory ends in a backslash.  In such cases,
-		// two calls were made to CreateDirectory for the same folder: the first without the backslash and then with
-		// it.  Since the directory already existed on the second call, ErrorLevel was wrongly set to 1 even though
-		// everything succeeded.  So now, when recursion finishes creating all the ancestors of this directory
-		// our own layer here does not call CreateDirectory() when there's a trailing backslash because a previous
-		// layer already did:
-		if (!last_backslash[1] || !exists)
+		*last_backslash = '\0'; // Temporarily terminate for parent directory.
+		auto exists = FileCreateDirRecursive(aDirSpec); // Recursively create all needed ancestor directories.
+		*last_backslash = '\\'; // Undo temporary termination.
+		if (!exists)
 			return exists;
 	}
 
 	// The above has recursively created all parent directories of aDirSpec if needed.
-	// Now we can create aDirSpec.  Be sure to explicitly set g_ErrorLevel since it's value
-	// is now indeterminate due to action above:
-	return CreateDirectory(aDirSpec, NULL);
+	// Now we can create aDirSpec.
+	return CreateDirectory(aDirSpec, NULL) || GetLastError() == ERROR_ALREADY_EXISTS;
 }
 
 
@@ -10334,7 +10386,7 @@ ResultType Line::FileAppend(LPTSTR aFilespec, LPTSTR aBuf, LoopReadFileStruct *a
 	{
 		DWORD flags = TextStream::APPEND | (open_as_binary ? 0 : TextStream::EOL_CRLF);
 		
-		UINT codepage = mArgc > 2 ? ConvertFileEncoding(ARG3) : g->Encoding;
+		UINT codepage = *ARG3 ? ConvertFileEncoding(ARG3) : g->Encoding;
 		if (codepage == -1) // ARG3 was invalid.
 			return SetErrorsOrThrow(true, ERROR_INVALID_PARAMETER);
 		
@@ -10449,14 +10501,21 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 {
 	bool success;
 	bool allow_overwrite = (ATOI(aFlag) == 1);
-#ifdef AUTOHOTKEYSC
-	if (!allow_overwrite && Util_DoesFileExist(aDest))
-		return SetErrorLevelOrThrow();
+#ifndef AUTOHOTKEYSC
+	if (g_script.mKind != Script::ScriptKindResource)
+		success = FileInstallCopy(aSource, aDest, allow_overwrite);
+	else
+#endif
+		success = FileInstallExtract(aSource, aDest, allow_overwrite);
+	return SetErrorLevelOrThrowBool(!success);
+}
 
+bool Line::FileInstallExtract(LPTSTR aSource, LPTSTR aDest, bool aOverwrite)
+{
 	// Open the file first since it's the most likely to fail:
-	HANDLE hfile = CreateFile(aDest, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+	HANDLE hfile = CreateFile(aDest, GENERIC_WRITE, 0, NULL, aOverwrite ? CREATE_ALWAYS : CREATE_NEW, 0, NULL);
 	if (hfile == INVALID_HANDLE_VALUE)
-		return SetErrorLevelOrThrow();
+		return false;
 
 	// Create a temporary copy of aSource to ensure it is the correct case (upper-case).
 	// Ahk2Exe converts it to upper-case before adding the resource. My testing showed that
@@ -10471,12 +10530,23 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 	_tcsupr(source);
 
 	// Find and load the resource.
+	// Look in the module running the script first (a script compiled into AutoHotkey.dll, which may
+	// be loaded from memory), then in the exe as before.
 	HRSRC res;
 	HGLOBAL res_load;
-	LPVOID res_lock;
-	if ( (res = FindResource(NULL, source, RT_RCDATA))
-	  && (res_load = LoadResource(NULL, res))
-	  && (res_lock = LockResource(res_load))  )
+	LPVOID res_lock = NULL;
+	DWORD res_size = 0;
+	bool success = false;
+	if (g_hMemoryModule)
+	{
+		if (res = (HRSRC)MemoryFindResource(g_hMemoryModule, source, RT_RCDATA))
+			res_size = MemorySizeOfResource(g_hMemoryModule, res), res_lock = MemoryLoadResource(g_hMemoryModule, res);
+	}
+	else if ((res = FindResource(g_hInstance, source, RT_RCDATA)) && (res_load = LoadResource(g_hInstance, res)))
+		res_size = SizeofResource(g_hInstance, res), res_lock = LockResource(res_load);
+	if (!res_lock && (res = FindResource(NULL, source, RT_RCDATA)) && (res_load = LoadResource(NULL, res)))
+		res_size = SizeofResource(NULL, res), res_lock = LockResource(res_load);
+	if (res_lock)
 	{
 		DWORD num_bytes_written;
 		DWORD aSizeDeCompressed = NULL;
@@ -10484,7 +10554,8 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 		if (*(unsigned int*)res_lock == 0x04034b50)
 		{
 			LPVOID aDataBuf;
-			aSizeDeCompressed = DecompressBuffer(res_lock, aDataBuf, SizeofResource(NULL, res));
+			// The default password only matters if the file was stored encrypted.
+			aSizeDeCompressed = DecompressBuffer(res_lock, aDataBuf, res_size, g_default_pwd);
 			if (aSizeDeCompressed)
 			{
 				success = WriteFile(hfile, aDataBuf, aSizeDeCompressed, &num_bytes_written, NULL);
@@ -10492,76 +10563,37 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 			}
 		}
 		if (!aSizeDeCompressed)
-			success = WriteFile(hfile, res_lock, SizeofResource(NULL, res), &num_bytes_written, NULL);
+			success = WriteFile(hfile, res_lock, res_size, &num_bytes_written, NULL);
 	}
-	else
-		success = false;
 	CloseHandle(hfile);
+	return success;
+}
 
-#else // AUTOHOTKEYSC not defined:
-	if (g_hResource)
-	{
-		if (!allow_overwrite && Util_DoesFileExist(aDest))
-			return SetErrorLevelOrThrow();
-		// Open the file first since it's the most likely to fail:
-		HANDLE hfile = CreateFile(aDest, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
-		if (hfile == INVALID_HANDLE_VALUE)
-			return SetErrorLevelOrThrow();
-
-		// Create a temporary copy of aSource to ensure it is the correct case (upper-case).
-		// Ahk2Exe converts it to upper-case before adding the resource. My testing showed that
-		// using lower or mixed case in some instances prevented the resource from being found.
-		// Since file paths are case-insensitive, it certainly doesn't seem harmful to do this:
-		TCHAR source[MAX_PATH];
-		size_t source_length = _tcslen(aSource);
-		if (source_length >= _countof(source))
-			// Probably can't happen; for simplicity, truncate it.
-			source_length = _countof(source) - 1;
-		tmemcpy(source, aSource, source_length + 1);
-		_tcsupr(source);
-
-		// Find and load the resource.
-		HRSRC res;
-		HGLOBAL res_load;
-		LPVOID res_lock;
-		if ( (res = FindResource(NULL, source, RT_RCDATA))
-		  && (res_load = LoadResource(NULL, res))
-		  && (res_lock = LockResource(res_load))  )
-		{
-			DWORD num_bytes_written;
-			DWORD aSizeDeCompressed = NULL;
-			// Write the resource data to file.
-			if (*(unsigned int*)res_lock == 0x04034b50)
-			{
-				LPVOID aDataBuf;
-				aSizeDeCompressed = DecompressBuffer(res_lock, aDataBuf, SizeofResource(NULL,res));
-				if (aSizeDeCompressed)
-				{
-					success = WriteFile(hfile, aDataBuf, aSizeDeCompressed, &num_bytes_written, NULL);
-					free(aDataBuf);
-				}
-			}
-			if (!aSizeDeCompressed)
-				success = WriteFile(hfile, res_lock, SizeofResource(NULL, res), &num_bytes_written, NULL);
-		}
-		else
-			success = false;
-		CloseHandle(hfile);
-	}
-	else
-	{
-		// v1.0.35.11: Must search in A_ScriptDir by default because that's where ahk2exe will search by default.
-		// The old behavior was to search in A_WorkingDir, which seems pointless because ahk2exe would never
-		// be able to use that value if the script changes it while running.
-		TCHAR aDestPath[T_MAX_PATH];
-		GetFullPathName(aDest, _countof(aDestPath), aDestPath, NULL);
-		SetCurrentDirectory(g_script.mFileDir);
-		success = CopyFile(aSource, aDestPath, !allow_overwrite);
-		SetCurrentDirectory(g_WorkingDir); // Restore to proper value.
-	}
+#ifndef AUTOHOTKEYSC
+bool Line::FileInstallCopy(LPTSTR aSource, LPTSTR aDest, bool aOverwrite)
+{
+	// v1.0.35.11: Must search in A_ScriptDir by default because that's where ahk2exe will search by default.
+	// The old behavior was to search in A_WorkingDir, which seems pointless because ahk2exe would never
+	// be able to use that value if the script changes it while running.
+	TCHAR aDestPath[T_MAX_PATH];
+	GetFullPathName(aDest, _countof(aDestPath), aDestPath, NULL);
+	SetCurrentDirectory(g_script.mFileDir);
+	bool success = CopyFile(aSource, aDestPath, !aOverwrite);
+	SetCurrentDirectory(g_WorkingDir); // Restore to proper value.
+	return success;
+}
 #endif
 
-	return SetErrorLevelOrThrowBool(!success);
+
+
+ResultType Line::FileCopyOrMove(LPTSTR aSource, LPTSTR aDest, bool aOverwrite)
+{
+	if (!*aDest) // Fix for v1.1.34.03: Previous behaviour was a Critical Error.
+		return LineError(ERR_PARAM2_MUST_NOT_BE_BLANK);
+	int error_count = 0;
+	if (*aSource) // For backward-compatibility, empty Source is treated as "no files found".
+		error_count = Util_CopyFile(aSource, aDest, aOverwrite, mActionType == ACT_FILEMOVE, g->LastError);
+	return SetErrorLevelOrThrowInt(error_count);
 }
 
 
@@ -10760,6 +10792,8 @@ void Line::FilePatternApply(FilePatternStruct &fps)
 
 		FindClose(file_search);
 	} // if (file_search != INVALID_HANDLE_VALUE)
+	else if (g->LastError == NOERROR) // Avoid overwriting LastError if this is a recursive call.
+		g->LastError = GetLastError(); // Likely ERROR_FILE_NOT_FOUND.
 
 	if (fps.aDoRecurse && space_remaining > 1) // The space_remaining check ensures there's enough room to append "*", though if false, that would imply lfs.pattern is empty.
 	{
@@ -11972,6 +12006,13 @@ VarSizeType BIV_WorkingDir(LPTSTR aBuf, LPTSTR aVarName)
 	//	? GetCurrentDirectory(MAX_PATH, aBuf)
 	//	: GetCurrentDirectory(0, NULL); // MSDN says that this is a valid way to call it on all OSes, and testing shows that it works on WinXP and 98se.
 		// Above avoids subtracting 1 to be conservative and to reduce code size (due to the need to otherwise check for zero and avoid subtracting 1 in that case).
+}
+
+VarSizeType BIV_InitialWorkingDir(LPTSTR aBuf, LPTSTR aVarName)
+{
+	if (aBuf)
+		_tcscpy(aBuf, g_WorkingDirOrig);
+	return (VarSizeType)_tcslen(g_WorkingDirOrig);
 }
 
 VarSizeType BIV_WinDir(LPTSTR aBuf, LPTSTR aVarName)
@@ -14181,7 +14222,7 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 
 	// Store any output parameters back into the input variables.  This allows a function to change the
 	// contents of a variable for the following arg types: String and Pointer to <various number types>.
-	for (arg_count = 0, i = is_call; i < aParamCount; ++arg_count, i += 1) // Same loop as used in above, so maintain them together.
+	for (arg_count = 0, i = is_call; i < aParamCount && arg_count < this->marg_count; ++arg_count, i += 1) // Same loop as used in above, so maintain them together. Excess parameters were ignored above, so skip them here too.
 	{
 		ExprTokenType &this_param = *aParam[i];  // Resolved for performance and convenience.
 		// The following check applies to DLL_ARG_xSTR, which is "AStr" on Unicode builds and "WStr"
@@ -15243,12 +15284,14 @@ BIF_DECL(BIF_CriticalObject)
 	if (aParamCount == 2 && TokenToInt64(*aParam[1]) < 3) 
 	{
 		aResultToken.symbol = PURE_INTEGER;
-		CriticalObject *criticalobj;
-		if (!(criticalobj = (CriticalObject *)TokenToObject(*aParam[0])))
-			criticalobj = (CriticalObject *)TokenToInt64(*aParam[0]);
-		if (criticalobj < (IObject *)1024)
-			aResultToken.value_int64 = 0;
-		else if (TokenToInt64(*aParam[1]) == 1) // Get object reference
+		IObject *iobj;
+		if (!(iobj = TokenToObject(*aParam[0])))
+			iobj = (IObject *)TokenToInt64(*aParam[0]);
+		CriticalObject *criticalobj = CriticalObject::FromPointer(iobj); // Other objects were cast blindly before.
+		aResultToken.value_int64 = 0; // Also for modes other than 1 and 2.
+		if (!criticalobj)
+			return;
+		if (TokenToInt64(*aParam[1]) == 1) // Get object reference
 			aResultToken.value_int64 = criticalobj->GetObj();
 		else if (TokenToInt64(*aParam[1]) == 2) // Get critical section reference
 			aResultToken.value_int64 = criticalobj->GetCriSec();
@@ -15267,6 +15310,93 @@ BIF_DECL(BIF_CriticalObject)
 }
 
 
+// A critical section created by CriticalObject().  lpCriticalSection points to cs, so scripts can still pass
+// it around as a plain LPCRITICAL_SECTION.  magic and self identify it as ours; refs counts its users.
+// GlobalAlloc() and the refcount inside the block make it usable across AutoHotkey.dll instances.
+struct CriSecRef
+{
+	DWORD magic;
+	CriSecRef *self;
+	volatile LONG refs;
+	CRITICAL_SECTION cs;
+};
+#define CRISECREF_MAGIC 0x43534352 // "RCSC"
+
+static bool IsReadableMemory(const void *aPtr, size_t aSize, bool aReadOnly = false)
+// Checks memory without touching it.  Faulting and catching it with __try is not an option:
+// DisableHooksOnException() is a vectored handler, so it would show its error dialog first.
+// aReadOnly: also require the memory to be non-writable (e.g. a vtable in .rdata).
+{
+	if ((UINT_PTR)aPtr < 0x10000)
+		return false;
+	for (const char *p = (const char *)aPtr, *end = p + aSize; p < end; )
+	{
+		MEMORY_BASIC_INFORMATION mbi;
+		if (!VirtualQuery(p, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)))
+			return false;
+		DWORD access = mbi.Protect & 0xFF;
+		if (aReadOnly ? !(access & (PAGE_READONLY | PAGE_EXECUTE_READ))
+			: !(access & (PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)))
+			return false;
+		p = (const char *)mbi.BaseAddress + mbi.RegionSize;
+	}
+	return true;
+}
+
+static CriSecRef *CriSecRefFromCS(LPCRITICAL_SECTION aCriSec)
+// Returns NULL if aCriSec wasn't created by NewCriSec().  aCriSec may be any pointer the script passed.
+{
+	if (!aCriSec)
+		return NULL;
+	CriSecRef *ref = CONTAINING_RECORD(aCriSec, CriSecRef, cs);
+	if (IsReadableMemory(ref, FIELD_OFFSET(CriSecRef, cs)) && ref->magic == CRISECREF_MAGIC && ref->self == ref)
+		return ref;
+	return NULL;
+}
+
+LPCRITICAL_SECTION CriticalObject::NewCriSec()
+{
+	CriSecRef *ref = (CriSecRef *)GlobalAlloc(0, sizeof(CriSecRef));
+	if (!ref)
+		return NULL;
+	ref->magic = CRISECREF_MAGIC;
+	ref->self = ref;
+	ref->refs = 1;
+	InitializeCriticalSection(&ref->cs);
+	return &ref->cs;
+}
+
+void CriticalObject::AddRefCriSec(LPCRITICAL_SECTION aCriSec)
+{
+	if (CriSecRef *ref = CriSecRefFromCS(aCriSec))
+		InterlockedIncrement(&ref->refs);
+}
+
+void CriticalObject::ReleaseCriSec(LPCRITICAL_SECTION aCriSec)
+{
+	if (CriSecRef *ref = CriSecRefFromCS(aCriSec))
+		if (!InterlockedDecrement(&ref->refs))
+		{
+			DeleteCriticalSection(&ref->cs);
+			ref->magic = 0; // A stale pointer passed later must not be taken for a live one.
+			ref->self = NULL;
+			GlobalFree(ref);
+		}
+}
+
+CriticalObject *CriticalObject::FromPointer(IObject *aObj)
+{
+	// aObj may be any number the script passed.  Before dynamic_cast dereferences it, check that it points
+	// to a vtable in read-only memory, preceded by its RTTI locator.  This rejects numbers and pointers to
+	// data, but accepts objects of other (also memory-loaded) instances of AutoHotkey.
+	if (!IsReadableMemory(aObj, sizeof(void *)))
+		return NULL;
+	void **vtable = *(void ***)aObj;
+	if (!IsReadableMemory(vtable - 1, 2 * sizeof(void *), true) || !IsReadableMemory(vtable[-1], 4 * sizeof(DWORD), true))
+		return NULL;
+	return dynamic_cast<CriticalObject *>(aObj);
+}
+
 CriticalObject *CriticalObject::Create(ExprTokenType *aParam[], int aParamCount)
 {
 	IObject *obj = NULL;
@@ -15274,16 +15404,16 @@ CriticalObject *CriticalObject::Create(ExprTokenType *aParam[], int aParamCount)
 	if (aParamCount == 0) // No parameters given, create new object
 		obj = Object::Create(0,0);
 	else if (obj = TokenToObject(*aParam[0]))
-	{	
+	{
 		if (criticalref = dynamic_cast<CriticalObject *>(obj))
 			obj = (IObject *)criticalref->GetObj();
 		obj->AddRef();
-	} 
+	}
 	else if (obj = (IObject *)TokenToInt64(*aParam[0]))
 	{
 		if (obj < (IObject *)1024) // Prevent some obvious errors.
 			obj = NULL;
-		else if (criticalref = dynamic_cast<CriticalObject *>(obj))
+		else if (criticalref = FromPointer(obj))
 		{
 			obj = (IObject *)criticalref->GetObj();
 			obj->AddRef();
@@ -15292,7 +15422,7 @@ CriticalObject *CriticalObject::Create(ExprTokenType *aParam[], int aParamCount)
 			obj->AddRef();
 	}
 	if (!obj)
-	{	
+	{
 		g_script.ScriptError(aParamCount == 0 ? ERR_OUTOFMEM : ERR_PARAM1_INVALID );
 		return NULL;
 	}
@@ -15301,15 +15431,26 @@ CriticalObject *CriticalObject::Create(ExprTokenType *aParam[], int aParamCount)
 	criticalobj->object = obj;
 
 	if (criticalref)
+	{
 		criticalobj->lpCriticalSection = (LPCRITICAL_SECTION)criticalref->GetCriSec();
-	else if (aParamCount < 2)
+		AddRefCriSec(criticalobj->lpCriticalSection);
+	}
+	else if (aParamCount < 2 || !TokenToInt64(*aParam[1]))
 	{	// no Critical Section reference was given, create one
-		criticalobj->lpCriticalSection = (LPCRITICAL_SECTION)GlobalAlloc(0, sizeof(CRITICAL_SECTION));
-		InitializeCriticalSection(criticalobj->lpCriticalSection);
+		if (!(criticalobj->lpCriticalSection = NewCriSec()))
+		{
+			obj->Release();
+			delete criticalobj;
+			g_script.ScriptError(ERR_OUTOFMEM);
+			return NULL;
+		}
 	}
 	else
-		// An already initialized Critical Section reference was given, use it
+	{	// An already initialized Critical Section reference was given, use it.
+		// If it came from CriticalObject(obj, 2), keep it alive as long as this object uses it.
 		criticalobj->lpCriticalSection = (LPCRITICAL_SECTION)TokenToInt64(*aParam[1]);
+		AddRefCriSec(criticalobj->lpCriticalSection);
+	}
 	return criticalobj;
 }
 
@@ -15336,6 +15477,7 @@ bool CriticalObject::Delete()
 			Sleep(0); 
 	this->object->Release();
 	LeaveCriticalSection(this->lpCriticalSection);
+	ReleaseCriSec(this->lpCriticalSection); // Deletes it if this was the last CriticalObject using it.
 	return ObjectBase::Delete();
 }
 
@@ -15368,6 +15510,7 @@ ResultType STDMETHODCALLTYPE CriticalObject::Invoke(
 		CriticalObject *new_object = new CriticalObject();
 		new_object->object = aResultToken.object;
 		new_object->lpCriticalSection = this->lpCriticalSection;
+		AddRefCriSec(new_object->lpCriticalSection);
 		aResultToken.object = new_object;
 	 }
 	 LeaveCriticalSection(this->lpCriticalSection);
@@ -15975,19 +16118,11 @@ struct RegExCalloutData // L14: Used by BIF_RegEx to pass necessary info to RegE
 
 int RegExCallout(pcret_callout_block *cb)
 {
-	// It should be documented that (?C) is ignored if encountered by the hook thread,
-	// which could happen if SetTitleMatchMode,Regex and #IfWin are used. This would be a
-	// problem if the callout should affect the outcome of the match or should be called
-	// even if #IfWin will ultimately prevent the hotkey from firing. This is because:
-	//	- The callout cannot be called from the hook thread, and therefore cannot affect
-	//		the outcome of #IfWin when called by the hook thread.
-	//	- If #IfWin does NOT prevent the hotkey from firing, it will be reevaluated from
-	//		the main thread before the hotkey is actually fired. This will allow any
-	//		callouts to occur on the main thread.
-	//  - By contrast, if #IfWin DOES prevent the hotkey from firing, #IfWin will not be
-	//		reevaluated from the main thread, so callouts cannot occur.
-	if (GetCurrentThreadId() != g_MainThreadID)
-		return 0;
+	// Continuing execution on the hook thread wouldn't be safe, but there's no need to check
+	// the following since cb->callout_data is non-null only when the regex is being evaluated
+	// by RegExMatch/RegExReplace:
+	//if (GetCurrentThreadId() != g_MainThreadID)
+	//	return 0;
 
 	if (!cb->callout_data)
 		return 0;
@@ -17213,6 +17348,11 @@ BIF_DECL(BIF_NumGet)
 
 BIF_DECL(BIF_Format)
 {
+	if (TokenIsPureNumeric(*aParam[0]))
+	{
+		aResultToken.SetValue(ParamIndexToString(0, _f_retval_buf));
+		return;
+	}
 	LPCTSTR fmt = ParamIndexToString(0), lit, cp, cp_end, cp_spec;
 	LPTSTR target = NULL;
 	int size = 0, spec_len;
@@ -17808,6 +17948,16 @@ BIF_DECL(BIF_IsByRef)
 
 
 
+BIF_DECL(BIF_IsSet)
+{
+	if (aParam[0]->symbol != SYM_VAR)
+		_f_throw(ERR_PARAM1_INVALID);
+	else
+		aResultToken.value_int64 = !(aParam[0]->var->IsUninitializedNormalVar());
+}
+
+
+
 BIF_DECL(BIF_GetKeyState)
 {
 	TCHAR key_name_buf[MAX_NUMBER_SIZE]; // Because aResultToken.buf is used for something else below.
@@ -18104,6 +18254,13 @@ BIF_DECL(BIF_MemoryGetProcAddress)
 		return;
 	//if (!aParam[0]->deref->marker)
 		//return;
+	if (TokenIsPureNumeric(*aParam[1]) == PURE_INTEGER) // Ordinal, like GetProcAddress(hModule, (LPCSTR)ordinal).
+	{
+		__int64 ordinal = TokenToInt64(*aParam[1]);
+		if (ordinal > 0 && ordinal <= 0xFFFF)
+			aResultToken.value_int64 = (__int64)MemoryGetProcAddress((HMEMORYMODULE)TokenToInt64(*aParam[0]), (LPCSTR)(UINT_PTR)ordinal);
+		return;
+	}
 	TCHAR *FuncName = TokenToString(*aParam[1]);
 #ifdef _UNICODE
 	char *buf = (char*)_alloca(_tcslen(FuncName)+sizeof(char*));
@@ -18166,11 +18323,40 @@ BIF_DECL(BIF_MemoryLoadResource)
 
 BIF_DECL(BIF_MemoryLoadString)
 {
-	LPTSTR result = MemoryLoadStringEx((HMEMORYMODULE)TokenToInt64(*aParam[0]), (UINT)TokenToInt64(*aParam[1]), ParamIndexIsOmitted(2) ? 0 : (WORD)TokenToInt64(*aParam[2]));
-	if (result)
-		aResultToken.SetValue(result);
+	// MemoryLoadString(Handle, Id [, BufferPointer, Length, Language]).  For compatibility with scripts written
+	// for the previous implementation, a third parameter that can't be an address is the language.
+	UINT_PTR buf = ParamIndexIsOmitted(2) ? 0 : (UINT_PTR)TokenToInt64(*aParam[2]);
+	WORD language = 0;
+	if (aParamCount == 3 && buf <= 0xFFFF)
+		language = (WORD)buf, buf = 0;
+	else if (!ParamIndexIsOmitted(4))
+		language = (WORD)TokenToInt64(*aParam[4]);
+	LPTSTR result = MemoryLoadStringEx((HMEMORYMODULE)TokenToInt64(*aParam[0]), (UINT)TokenToInt64(*aParam[1]), language);
+	if (!buf)
+	{
+		// The previous implementation returned the malloc'd string without freeing it (a leak).
+		aResultToken.symbol = SYM_STRING;
+		if (!result || !TokenSetResult(aResultToken, result))
+			aResultToken.marker = _T("");
+	}
 	else
-		aResultToken.SetValue(_T(""));
+	{
+		// Copy up to Length characters (including the terminator) and return the number of characters copied.
+		size_t length = result ? _tcslen(result) : 0;
+		__int64 size = ParamIndexIsOmittedOrEmpty(3) ? length + 1 : TokenToInt64(*aParam[3]);
+		if (size <= 0)
+			length = 0; // No room, not even for the terminator.
+		else
+		{
+			if ((size_t)size <= length)
+				length = (size_t)size - 1;
+			tmemcpy((LPTSTR)buf, result ? result : _T(""), length);
+			((LPTSTR)buf)[length] = '\0';
+		}
+		aResultToken.symbol = SYM_INTEGER;
+		aResultToken.value_int64 = length;
+	}
+	free(result);
 }
 
 BIF_DECL(BIF_ZipCreateFile)
@@ -19482,6 +19668,8 @@ UINT_PTR CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address) // Used
 	}
 
 	g->EventInfo = cb.event_info; // This is the means to identify which caller called the callback (if the script assigned more than one caller to this callback).
+	
+	UINT_PTR number_to_return;
 
 	// For performance and to preserve stack space, the indirect method of calling a function via the new
 	// Func::Call overload is not used here.  Using it would only be necessary to support variadic functions,
@@ -19494,10 +19682,11 @@ UINT_PTR CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address) // Used
 	// 3) Script explicitly calls the UDF in addition to using it as a callback.
 	//
 	// See ExpandExpression() for detailed comments about the following section.
-	VarBkp *var_backup = NULL;  // If needed, it will hold an array of VarBkp objects.
-	int var_backup_count; // The number of items in the above array.
+	{// begin scope for call_info.
+	UDFCallInfo call_info;
+	call_info.func = &func;
 	if (func.mInstances > 0) // Backup is needed (see above for explanation).
-		if (!Var::BackupFunctionVars(func, var_backup, var_backup_count)) // Out of memory.
+		if (!Var::BackupFunctionVars(func, call_info.backup, call_info.backup_count)) // Out of memory.
 			return DEFAULT_CB_RETURN_VALUE; // Since out-of-memory is so rare, it seems justifiable not to have any error reporting and instead just avoid calling the function.
 
 	// The following section is similar to the one in ExpandExpression().  See it for detailed comments.
@@ -19527,13 +19716,15 @@ UINT_PTR CALLBACK RegisterCallbackCStub(UINT_PTR *params, char *address) // Used
 	g_script.mLastScriptRest = g_script.mLastPeekTime = GetTickCount(); // Somewhat debatable, but might help minimize interruptions when the callback is called via message (e.g. subclassing a control; overriding a WindowProc).
 
 	ExprTokenType result_token; // L31
+	DEBUGGER_STACK_PUSH(&call_info)
 	func.Call(&result_token); // Call the UDF.  Call()'s own return value (e.g. EARLY_EXIT or FAIL) is ignored because it wouldn't affect the handling below.
+	DEBUGGER_STACK_POP()
 
-	UINT_PTR number_to_return = (UINT_PTR)TokenToInt64(result_token); // L31: For simplicity, DEFAULT_CB_RETURN_VALUE is not used - DEFAULT_CB_RETURN_VALUE is 0, which TokenToInt64 will return if the token is empty.
+	number_to_return = (UINT_PTR)TokenToInt64(result_token); // L31: For simplicity, DEFAULT_CB_RETURN_VALUE is not used - DEFAULT_CB_RETURN_VALUE is 0, which TokenToInt64 will return if the token is empty.
 	if (result_token.symbol == SYM_OBJECT) // L31
 		result_token.object->Release();
 
-	Var::FreeAndRestoreFunctionVars(func, var_backup, var_backup_count); // ABOVE must be done BEFORE this because return_value might be the contents of one of the function's local variables (which are about to be free'd).
+	}// end scope for call_info; this is where Var::FreeAndRestoreFunctionVars() is called via ~UDFCallInfo().
 
 	if (cb.create_new_thread)
 	{
@@ -21348,6 +21539,16 @@ BIF_DECL(BIF_Exception)
 
 
 
+BIF_DECL(BIF_VerCompare)
+{
+	TCHAR buf[MAX_NUMBER_SIZE];
+	LPTSTR a = ParamIndexToString(0, aResultToken.buf);
+	LPTSTR b = ParamIndexToString(1, buf);
+	aResultToken.value_int64 = VersionSatisfies(a, b, true);
+}
+
+
+
 ////////////////////////////////////////////////////////
 // HELPER FUNCTIONS FOR TOKENS AND BUILT-IN FUNCTIONS //
 ////////////////////////////////////////////////////////
@@ -21703,8 +21904,13 @@ SymbolType TypeOfToken(ExprTokenType &aToken)
 BOOL TokensAreEqual(ExprTokenType &left, ExprTokenType &right)
 // Compares two tokens using similar rules to SYM_EQUAL, but case sensitive if appropriate.
 {
-	SymbolType left_type = TypeOfToken(left)
-			, right_type = TypeOfToken(right);
+	// v1.1.36: SYM_STRING coming in means this is a literal quoted string, which is now always
+	// compared non-numerically because:
+	//  - There's otherwise no way for cases like "0" and "00" to co-exist.
+	//  - It makes little sense to quote values that are to be compared numerically.
+	//  - It's more consistent with expression operators such as SYM_EQUAL (=).
+	SymbolType left_type = left.symbol == SYM_STRING ? PURE_NOT_NUMERIC : TypeOfToken(left)
+			, right_type = right.symbol == SYM_STRING ? PURE_NOT_NUMERIC : TypeOfToken(right);
 
 	if (left_type == SYM_OBJECT || right_type == SYM_OBJECT)
 		return TokenToObject(left) == TokenToObject(right);

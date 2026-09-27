@@ -88,6 +88,8 @@ modLR_type g_modifiersLR_logical_non_ignored = 0;
 modLR_type g_modifiersLR_physical = 0;
 modLR_type g_modifiersLR_numpad_mask = 0;
 modLR_type g_modifiersLR_ctrlaltdel_mask = 0;
+modLR_type g_modifiersLR_last_pressed = 0;
+DWORD g_modifiersLR_last_pressed_time;
 
 #ifdef FUTURE_USE_MOUSE_BUTTONS_LOGICAL
 WORD g_mouse_buttons_logical = 0;
@@ -132,6 +134,8 @@ bool g_NoTrayIcon = false;
 #endif
 #ifdef AUTOHOTKEYSC
 	bool g_AllowMainWindow = false;
+#else
+	bool g_AllowMainWindow = true;
 #endif
 bool g_MainTimerExists = false;
 bool g_AutoExecTimerExists = false;
@@ -180,7 +184,9 @@ HotkeyCriterion *g_FirstHotCriterion = NULL, *g_LastHotCriterion = NULL;
 UINT g_HotExprTimeout = 1000; // Timeout for #if (expression) evaluation, in milliseconds.
 HWND g_HotExprLFW = NULL; // Last Found Window of last #if expression.
 HotkeyCriterion *g_FirstHotExpr = NULL, *g_LastHotExpr = NULL;
+#endif
 
+// g_ScreenDPI is also used outside the GUI (e.g. by ToolTip), so it's not excluded from MINIDLL.
 static int GetScreenDPI()
 {
 	// The DPI setting can be different for each screen axis, but
@@ -194,6 +200,7 @@ static int GetScreenDPI()
 }
 
 int g_ScreenDPI = GetScreenDPI();
+#ifndef MINIDLL
 MenuTypeType g_MenuIsVisible = MENU_TYPE_NONE;
 #endif
 int g_nMessageBoxes = 0;
@@ -266,7 +273,7 @@ HICON g_IconLarge;
 
 DWORD g_OriginalTimeout;
 
-global_struct g_default, g_startup, *g_array;
+global_struct g_default, g_startup, *g_array = NULL;
 global_struct *g = &g_startup; // g_startup provides a non-NULL placeholder during script loading. Afterward it's replaced with an array.
 
 // I considered maintaining this on a per-quasi-thread basis (i.e. in global_struct), but the overhead
@@ -302,7 +309,7 @@ TCHAR *g_default_pwd[] = { &g_default_pwd0, &g_default_pwd1, &g_default_pwd2, &g
 
 MyCryptEncrypt g_CryptEncrypt = NULL;
 MyCryptDecrypt g_CryptDecrypt = NULL;
-// The order of initialization here must match the order in the enum contained in script.h
+// The order of initialization here must match the order in the enum contained in defines.h
 // It's in there rather than in globaldata.h so that the action-type constants can be referred
 // to without having access to the global array itself (i.e. it avoids having to include
 // globaldata.h in modules that only need access to the enum's constants, which in turn prevents
@@ -315,19 +322,31 @@ MyCryptDecrypt g_CryptDecrypt = NULL;
 // safest to always terminate these subarrays with an explicit zero, below.
 
 // STEPS TO ADD A NEW COMMAND:
-// 1) Add an entry to the command enum in script.h.
-// 2) Add an entry to the below array (it's position here MUST exactly match that in the enum).
-//    The first item is the command name, the second is the minimum number of parameters (e.g.
-//    if you enter 3, the first 3 args are mandatory) and the third is the maximum number of
-//    parameters (the user need not escape commas within the last parameter).
-//    The subarray should indicate the param numbers that must be numeric (first param is numbered 1,
-//    not zero).  That subarray should be terminated with an explicit zero to be safe and
+// 1) Add an entry to the command enum in defines.h.
+// 2) Add an entry to the below array (its position here MUST exactly match that in the enum).
+//    The first item is the command name.
+//
+//    The second is the minimum number of parameters (e.g. if you enter 3, the first 3 args are
+//    mandatory).
+//
+//    The third is the maximum number of parameters (the user need not escape commas within the
+//    last parameter).
+//
+//    The fourth is MaxParamsAu2WithHighBit, who's value is ignored other than to test for the high-bit
+//    set with the H macro, below. Commands with the high-bit set dynamically evaluate the length of
+//	  their parameters, which can be slower; see Line::ArgIndexLength().
+//
+//    The fifth element is a subarray which should indicate the param numbers that must be
+//    numeric (first param is numbered 1, not zero).
+//
+//    That subarray should be terminated with an explicit zero to be safe and
 //    so that the compiler will complain if the sub-array size needs to be increased to
 //    accommodate all the elements in the new sub-array, including room for its 0 terminator.
 //    Note: If you use a value for MinParams than is greater than zero, remember than any params
 //    beneath that threshold will also be required to be non-blank (i.e. user can't omit them even
 //    if later, non-blank params are provided).  UPDATE: For a parameter to recognize an expression
 //    such as x+100, it must be listed in the sub-array as a pure numeric parameter.
+//
 // 3) If the new command has any params that are output or input vars, change Line::ArgIsVar().
 // 4) Add any desired load-time validation in Script::AddLine() in an syntax-checking section.
 // 5) Implement the command in Line::Perform() or Line::EvaluateCondition (if it's an IF).

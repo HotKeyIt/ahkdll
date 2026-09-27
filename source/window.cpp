@@ -1705,6 +1705,19 @@ ResultType WindowSearch::SetCriteria(global_struct &aSettings, LPTSTR aTitle, LP
 
 
 
+void WindowSearch::SetCriteria(global_struct &aSettings, WinGroup &aGroup)
+{
+	mCriterionExcludeTitle = _T("");
+	mCriterionExcludeTitleLength = 0;
+	mCriterionText = _T("");
+	mCriterionExcludeText = _T("");
+	mSettings = &aSettings;
+	mCriterionGroup = &aGroup;
+	mCriteria = CRITERION_GROUP;
+}
+
+
+
 void WindowSearch::UpdateCandidateAttributes()
 // This function must be kept thread-safe because it may be called (indirectly) by hook thread too.
 {
@@ -1914,6 +1927,12 @@ void SetForegroundLockTimeout()
 			// Set it to zero instead, disabling the measure:
 			SystemParametersInfo(SPI_SETFOREGROUNDLOCKTIMEOUT, 0, (PVOID)0, SPIF_SENDCHANGE);
 		}
+	// No attempt is made to restore the setting to its previous value on exit of the program because past
+	// attempts to do so were unreliable, and it might not be desirable anyway.  There's also doubt about
+	// how restoration would work if multiple scripts are running.
+	// Older comments indicated that using SPI_SETFOREGROUNDLOCKTIMEOUT on exit of the program might fail
+	// because the app doesn't meet some criteria for the system to allow it (e.g. having the input focus
+	// or being a newly started process probably causes the system to relax focus-stealing restrictions).
 }
 
 

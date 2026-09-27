@@ -78,6 +78,7 @@ typedef struct {
     void *userdata;
     ExeEntryProc exeEntry;
     DWORD pageSize;
+    void *pcRange; // MEMMODULE_RANGE registered for RtlPcToFileHeader; removed on free
 #ifdef _WIN64
     POINTER_LIST *blockedMemory;
 #endif

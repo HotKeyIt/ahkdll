@@ -637,7 +637,8 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 						pgui->Escape();
 						continue; // Omit this keystroke from any further processing.
 					default: // VK_TAB
-						if (pcontrol->attrib & GUI_CONTROL_ATTRIB_ALTBEHAVIOR) // It has the "WantTab" property.
+						if ((pcontrol->attrib & GUI_CONTROL_ATTRIB_ALTBEHAVIOR) // It has the "WantTab" property.
+							&& !(GetWindowLong(pcontrol->hwnd, GWL_STYLE) & ES_READONLY)) // It doesn't have "ReadOnly".
 						{
 							// For flexibility, do this even for single-line edit controls, though in that
 							// case the tab keystroke will produce an "empty box" character.
@@ -916,8 +917,10 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 						// keystrokes to the wrong window, or when the hotstring has become suspended.
 						continue;
 					// For details, see comments in the hotkey section of this switch().
-					if (!(hs->mHotCriterion->Type == HOT_IF_ACTIVE || hs->mHotCriterion->Type == HOT_IF_EXIST))
+					if (hs->mHotCriterion->Type == HOT_IF_NOT_ACTIVE || hs->mHotCriterion->Type == HOT_IF_NOT_EXIST)
 						criterion_found_hwnd = NULL; // For "NONE" and "NOT", there is no last found window.
+					else if (HOT_IF_REQUIRES_EVAL(hs->mHotCriterion->Type))
+						criterion_found_hwnd = g_HotExprLFW; // For #if WinExist(WinTitle) and similar.
 				}
 				else // No criterion, so it's a global hotstring.  It can always fire, but it has no "last found window".
 					criterion_found_hwnd = NULL;
@@ -1533,7 +1536,7 @@ bool MsgSleep(int aSleepDuration, MessageMode aMode)
 
 			default: // hotkey
 				if (IS_WHEEL_VK(hk->mVK)) // If this is true then also: msg.message==AHK_HOOK_HOTKEY
-					g.EventInfo = (DWORD)msg.lParam; // v1.0.43.03: Override the thread default of 0 with the number of notches by which the wheel was turned.
+					g.EventInfo = LOWORD(msg.lParam); // v1.0.43.03: Override the thread default of 0 with the number of notches by which the wheel was turned.
 					// Above also works for RunAgainAfterFinished since that feature reuses the same thread attributes set above.
 				g.hWndLastUsed = criterion_found_hwnd; // v1.0.42. Even if the window is invalid for some reason, IsWindow() and such are called whenever the script accesses it (GetValidLastUsedWindow()).
 				g.SendLevel = variant->mInputLevel;
@@ -1920,25 +1923,45 @@ bool CheckScriptTimers()
 		timer.mLabel->ExecuteInNewThread(_T("Timer"));
 		--timer.mExistingThreads;
 
-		// Resolve the next timer only now, in case other timers were created or deleted while
-		// this timer was executing.  Must be done before the timer is potentially deleted below.
-		next_timer = timer.mNextTimer;
-		// If this is a run-once timer for a live reference-counted object (i.e. not a Label or
-		// Func, which can never be deleted), delete the timer.  Otherwise, there's a high risk
-		// that the script will leak objects, because if the object is only referenced by the
-		// timer list, there's no way to re-enable it.  By contrast, a Label or Func can be
-		// referenced by name, and a repeating timer can self-reference during execution.
-		// It is tempting to do this only when mRefCount == 1 (for backward-compatibility),
-		// but that would only work if the script releases its last reference to the object
-		// *before* the timer expires.
-		// mEnabled is checked in case the timer re-enabled itself.
-		if (timer.mRunOnlyOnce && !timer.mEnabled && timer.mLabel.IsLiveObject())
-			timer.mLabel = NULL;
-		// If the script attempted to delete this timer while it was executing, mLabel was set
-		// to NULL and it is now time to delete the timer.  mExistingThreads == 0 is implied
-		// at this point since timers are only allowed one thread.
-		if (timer.mLabel == NULL)
-			g_script.DeleteTimer(NULL);
+		for (auto *this_timer = &timer; this_timer; this_timer = next_timer)
+		{
+			// Resolve the next timer only now, in case other timers were created or deleted while
+			// this timer was executing.  Must be done before the timer is potentially deleted below.
+
+			// Check initial eligibility of this timer to be deleted.
+			if (this_timer->mEnabled || this_timer->mExistingThreads || this_timer->mDeleteLocked)
+			{
+				if (this_timer == &timer) // If this_timer itself has just executed.
+					next_timer = this_timer->mNextTimer;
+				//else leave next_timer == this_timer, in case it is ready to execute.
+				break;
+			}
+			next_timer = this_timer->mNextTimer;
+			if (next_timer)
+				next_timer->mDeleteLocked++; // Prevent next_timer from being deleted.
+
+			// If this is a run-once timer for a live reference-counted object (i.e. not a Label or
+			// Func, which can never be deleted), delete the timer.  Otherwise, there's a high risk
+			// that the script will leak objects, because if the object is only referenced by the
+			// timer list, there's no way to re-enable it.  By contrast, a Label or Func can be
+			// referenced by name, and a repeating timer can self-reference during execution.
+			// It is tempting to do this only when mRefCount == 1 (for backward-compatibility),
+			// but that would only work if the script releases its last reference to the object
+			// *before* the timer expires.
+			if (this_timer == &timer && timer.mRunOnlyOnce && timer.mLabel.IsLiveObject())
+				timer.mLabel = NULL; // This might cause __delete to execute.
+
+			// If the script attempted to delete this timer while it was executing, mLabel was set
+			// to NULL and it is now time to delete the timer.  mExistingThreads == 0 is implied
+			// at this point since timers are only allowed one thread.
+			if (this_timer->mLabel == NULL)
+				g_script.DeleteTimer(NULL);
+
+			if (next_timer)
+				next_timer->mDeleteLocked--; // Might still be non-zero due to thread interruption.
+			// Now also check next_timer, in case it was disabled while __delete was executing.
+		} // for() series of timers being deleted.
+
 	} // for() each timer.
 
 	if (at_least_one_timer_launched) // Since at least one subroutine was run above, restore various values for our caller.
@@ -2254,6 +2277,7 @@ void InitNewThread(int aPriority, bool aSkipUninterruptible, bool aIncrementThre
 	if (g_script.mUninterruptibleTime && g_script.mUninterruptedLineCountMax // Both components must be non-zero to start off uninterruptible.
 		|| g.ThreadIsCritical) // v1.0.38.04.
 	{
+		g.PeekFrequency = UNINTERRUPTIBLE_PEEK_FREQUENCY; // This ensures the thread will always have a chance to call Critical() before MsgSleep() is called.
 		g.AllowThreadToBeInterrupted = false; // Fairly old comment: Use g.AllowThreadToBeInterrupted vs. g_AllowInterruption in case g_AllowInterruption just happens to have been set to true for some other reason (e.g. SendKeys()):
 		if (!g.ThreadIsCritical)
 		{
@@ -2369,10 +2393,14 @@ BOOL IsInterruptible()
 		&& g->UninterruptibleDuration > -1 // Must take precedence over the below. For backward compatibility, g_script.mUninterruptibleTime is not checked because it's supposed to go into effect during thread creation, not after the thread is running and has possibly changed the timeout via "Thread Interrupt".
 		&& (DWORD)(GetTickCount()- g->ThreadStartTime) >= (DWORD)g->UninterruptibleDuration // See big comment section above.
 		)
+	{
 		// Once the thread becomes interruptible by any means, g->ThreadStartTime/UninterruptibleDuration
 		// can never matter anymore because only Critical (never "Thread Interrupt") can turn off the
 		// interruptibility again, at which time only Critical can ever re-enable interruptibility.
 		g->AllowThreadToBeInterrupted = true; // Avoids issues with 49.7 day limit of 32-bit TickCount, and also helps performance future callers of this function (they can skip most of the checking above).
+		if (!g->ThreadIsCritical)
+			g->PeekFrequency = DEFAULT_PEEK_FREQUENCY;
+	}
 	//else g->AllowThreadToBeInterrupted is already up-to-date.
 	return (BOOL)g->AllowThreadToBeInterrupted;
 }

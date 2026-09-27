@@ -9,7 +9,6 @@
     <ConfigDebugDll>false</ConfigDebugDll>
     <ConfigSC>false</ConfigSC>
     <ConfigRelease Condition="'$(Configuration)'=='Release' OR '$(Configuration)'=='Release(mbcs)' OR '$(Configuration)'=='MT_Release' OR '$(Configuration)'=='MT_Release(mbcs)'">true</ConfigRelease>
-    <ConfigRelease Condition="'$(Configuration)'=='Release' OR '$(Configuration)'=='Release(mbcs)' OR '$(Configuration)'=='MT_Release' OR '$(Configuration)'=='MT_Release(mbcs)'">true</ConfigRelease>
     <ConfigReleaseDll Condition="'$(Configuration)'=='ReleaseDll' OR '$(Configuration)'=='ReleaseDll(mbcs)' OR '$(Configuration)'=='MT_ReleaseDll' OR '$(Configuration)'=='MT_ReleaseDll(mbcs)'">true</ConfigReleaseDll>
     <ConfigReleaseDllMini Condition="'$(Configuration)'=='ReleaseDllMini' OR '$(Configuration)'=='ReleaseDllMini(mbcs)' OR '$(Configuration)'=='MT_ReleaseDllMini' OR '$(Configuration)'=='MT_ReleaseDllMini(mbcs)'">true</ConfigReleaseDllMini>
     <ConfigDebug Condition="'$(Configuration)'=='Debug' OR '$(Configuration)'=='Debug(mbcs)' OR '$(Configuration)'=='Self-contained(debug)'">true</ConfigDebug>

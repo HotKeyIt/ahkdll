@@ -1044,7 +1044,9 @@ PHOOK_ENTRY MinHookEnable(LPVOID pTarget, LPVOID pDetour, LPVOID *ppOriginal)
 		FreeBuffer(pBuffer);
 		return NULL;
 	}
-	pHook = (PHOOK_ENTRY)malloc(sizeof(HOOK_ENTRY));
+	// Not malloc: this can run in the TLS callback of a compiled script (via MemoryLoadLibrary), before the
+	// static CRT (MT_ builds) has initialized its heap.
+	pHook = (PHOOK_ENTRY)HeapAlloc(GetProcessHeap(), 0, sizeof(HOOK_ENTRY));
 	if (pHook == NULL)
 	{
 		FreeBuffer(pBuffer);
@@ -1089,7 +1091,7 @@ PHOOK_ENTRY MinHookEnable(LPVOID pTarget, LPVOID pDetour, LPVOID *ppOriginal)
 
 	if (!VirtualProtect(pPatchTarget, patchSize, PAGE_EXECUTE_READWRITE, &oldProtect)) {
 		FreeBuffer(pBuffer);
-		free(pHook);
+		HeapFree(GetProcessHeap(), 0, pHook);
 		return NULL;
 	}
 
@@ -1126,7 +1128,7 @@ BOOL MinHookDisable(PHOOK_ENTRY pHook)
 	}
 
 	if (!VirtualProtect(pPatchTarget, patchSize, PAGE_EXECUTE_READWRITE, &oldProtect)) {
-		free(pHook);
+		HeapFree(GetProcessHeap(), 0, pHook);
 		return FALSE;
 	}
 	if (pHook->patchAbove)
@@ -1134,7 +1136,7 @@ BOOL MinHookDisable(PHOOK_ENTRY pHook)
 	else
 		memcpy(pPatchTarget, pHook->backup, sizeof(JMP_REL));
 	VirtualProtect(pPatchTarget, patchSize, oldProtect, &oldProtect);
-	free(pHook);
+	HeapFree(GetProcessHeap(), 0, pHook);
 	return TRUE;
 }
 //-------------------------------------------------------------------------

@@ -251,6 +251,16 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 					}
 					break;
 				case VAR_BUILTIN: // v1.0.48.02: Ensure it's VAR_BUILTIN prior to below because mBIV is a union with mCapacity.
+					if (this_postfix[1].symbol == SYM_FUNC && this_postfix[1].deref->func && this_postfix[1].deref->func->mBIF == &BIF_IsSet)
+					{
+						// Instead of evaluating this built-in var and passing its value to IsSet(), which would
+						// throw an exception, directly yield a result of 1 (true) to indicate the var is set.
+						ASSERT(this_postfix[1].deref->param_count == 1);
+						this_postfix++; // The pending call to IsSet() is fully handled by the next two lines.
+						this_token.value_int64 = true;
+						this_token.symbol = SYM_INTEGER;
+						goto push_this_token;
+					}
 					if (this_token.var->mBIV == BIV_LoopIndex) // v1.0.48.01: Improve performance of A_Index by treating it as an integer rather than a string in expressions (avoids conversions to/from strings).
 					{
 						this_token.value_int64 = g->mLoopIteration;
@@ -1010,17 +1020,18 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 						this_token.symbol = SYM_VAR; // address can be taken, and it can be passed ByRef. e.g. &(x:=1)
 					}
 					goto push_this_token;
-				case SYM_ASSIGN_ADD:           this_token.symbol = SYM_ADD; break;
-				case SYM_ASSIGN_SUBTRACT:      this_token.symbol = SYM_SUBTRACT; break;
-				case SYM_ASSIGN_MULTIPLY:      this_token.symbol = SYM_MULTIPLY; break;
-				case SYM_ASSIGN_DIVIDE:        this_token.symbol = SYM_DIVIDE; break;
-				case SYM_ASSIGN_FLOORDIVIDE:   this_token.symbol = SYM_FLOORDIVIDE; break;
-				case SYM_ASSIGN_BITOR:         this_token.symbol = SYM_BITOR; break;
-				case SYM_ASSIGN_BITXOR:        this_token.symbol = SYM_BITXOR; break;
-				case SYM_ASSIGN_BITAND:        this_token.symbol = SYM_BITAND; break;
-				case SYM_ASSIGN_BITSHIFTLEFT:  this_token.symbol = SYM_BITSHIFTLEFT; break;
-				case SYM_ASSIGN_BITSHIFTRIGHT: this_token.symbol = SYM_BITSHIFTRIGHT; break;
-				case SYM_ASSIGN_CONCAT:        this_token.symbol = SYM_CONCAT; break;
+				case SYM_ASSIGN_ADD:					this_token.symbol = SYM_ADD; break;
+				case SYM_ASSIGN_SUBTRACT:				this_token.symbol = SYM_SUBTRACT; break;
+				case SYM_ASSIGN_MULTIPLY:				this_token.symbol = SYM_MULTIPLY; break;
+				case SYM_ASSIGN_DIVIDE:					this_token.symbol = SYM_DIVIDE; break;
+				case SYM_ASSIGN_FLOORDIVIDE:			this_token.symbol = SYM_FLOORDIVIDE; break;
+				case SYM_ASSIGN_BITOR:					this_token.symbol = SYM_BITOR; break;
+				case SYM_ASSIGN_BITXOR:					this_token.symbol = SYM_BITXOR; break;
+				case SYM_ASSIGN_BITAND:					this_token.symbol = SYM_BITAND; break;
+				case SYM_ASSIGN_BITSHIFTLEFT:			this_token.symbol = SYM_BITSHIFTLEFT; break;
+				case SYM_ASSIGN_BITSHIFTRIGHT:			this_token.symbol = SYM_BITSHIFTRIGHT; break;
+				case SYM_ASSIGN_BITSHIFTRIGHT_LOGICAL:	this_token.symbol = SYM_BITSHIFTRIGHT_LOGICAL; break;
+				case SYM_ASSIGN_CONCAT:					this_token.symbol = SYM_CONCAT; break;
 				}
 				// Since above didn't goto or break out of the outer loop, this is an assignment other than
 				// SYM_ASSIGN, so it needs further evaluation later below before the assignment will actually be made.
@@ -1039,25 +1050,26 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 			// earlier stage (for performance).
 			if (this_token.symbol == SYM_CONCAT || !right_is_number || !(left_is_number = TokenIsPureNumeric(left))) // See comment above.
 			{
-				// L31: Handle binary ops supported by objects (= == !=).
+				// L31: Handle binary ops supported by objects (= == != !==).
 				switch (this_token.symbol)
 				{
 				case SYM_EQUAL:
 				case SYM_EQUALCASE:
 				case SYM_NOTEQUAL:
+				case SYM_NOTEQUALCASE:
 					IObject *right_obj = TokenToObject(right);
 					IObject *left_obj = TokenToObject(left);
 					// To support a future "implicit default value" feature, both operands must be objects.
 					// Otherwise, an object operand will be treated as its default value, currently always "".
 					// This is also consistent with unsupported operands such as < and > - i.e. because obj<""
 					// and obj>"" are always false and obj<="" and obj>="" are always true, obj must be "".
-					// When the default value feature is implemented all operators (excluding =, == and !=
+					// When the default value feature is implemented all operators (excluding =, ==, !== and !=
 					// if both operands are objects) may use the default value of any object operand.
 					// UPDATE: Above is not done because it seems more intuitive to document the other
 					// comparison operators as unsupported than for (obj == "") to evaluate to true.
 					if (right_obj || left_obj)
 					{
-						this_token.value_int64 = (this_token.symbol != SYM_NOTEQUAL) == (right_obj == left_obj);
+						this_token.value_int64 = (this_token.symbol != SYM_NOTEQUAL && this_token.symbol != SYM_NOTEQUALCASE) == (right_obj == left_obj);
 						this_token.symbol = SYM_INTEGER; // Must be set *after* above checks symbol.
 						goto push_this_token;
 					}
@@ -1075,6 +1087,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 										? _tcsicmp(left_string, right_string)
 										: lstrcmpi(left_string, right_string)); break; // i.e. use the "more correct mode" except when explicitly told to use the fast mode (v1.0.43.03).
 				case SYM_EQUALCASE: this_token.value_int64 = !_tcscmp(left_string, right_string); break; // Case sensitive.
+				case SYM_NOTEQUALCASE:	this_token.value_int64 = _tcscmp(left_string, right_string) ? 1 : 0; break;
 				// The rest all obey g->StringCaseSense since they have no case sensitive counterparts:
 				case SYM_NOTEQUAL:  this_token.value_int64 = g_tcscmp(left_string, right_string) ? 1 : 0; break;
 				case SYM_GT:        this_token.value_int64 = g_tcscmp(left_string, right_string) > 0; break;
@@ -1245,7 +1258,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 			}
 
 			else if (right_is_number == PURE_INTEGER && left_is_number == PURE_INTEGER && this_token.symbol != SYM_DIVIDE
-				|| this_token.symbol <= SYM_BITSHIFTRIGHT && this_token.symbol >= SYM_BITOR) // Check upper bound first for short-circuit performance (because operators like +-*/ are much more frequently used).
+				|| this_token.symbol <= SYM_BITSHIFTRIGHT_LOGICAL && this_token.symbol >= SYM_BITOR) // Check upper bound first for short-circuit performance (because operators like +-*/ are much more frequently used).
 			{
 				// Because both are integers and the operation isn't division, the result is integer.
 				// The result is also an integer for the bitwise operations listed in the if-statement
@@ -1265,6 +1278,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 				// always yield a one or a zero rather than arbitrary non-zero values:
 				case SYM_EQUALCASE: // Same behavior as SYM_EQUAL for numeric operands.
 				case SYM_EQUAL:    this_token.value_int64 = left_int64 == right_int64; break;
+				case SYM_NOTEQUALCASE: // Same behavior as SYM_NOTEQUAL for numeric operands.
 				case SYM_NOTEQUAL: this_token.value_int64 = left_int64 != right_int64; break;
 				case SYM_GT:       this_token.value_int64 = left_int64 > right_int64; break;
 				case SYM_LT:       this_token.value_int64 = left_int64 < right_int64; break;
@@ -1275,6 +1289,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 				case SYM_BITXOR:   this_token.value_int64 = left_int64 ^ right_int64; break;
 				case SYM_BITSHIFTLEFT:  this_token.value_int64 = left_int64 << right_int64; break;
 				case SYM_BITSHIFTRIGHT: this_token.value_int64 = left_int64 >> right_int64; break;
+				case SYM_BITSHIFTRIGHT_LOGICAL: this_token.value_int64 = (unsigned __int64)left_int64 >> right_int64; break;
 				case SYM_FLOORDIVIDE:
 					// Since it's integer division, no need for explicit floor() of the result.
 					// Also, performance is much higher for integer vs. float division, which is part
@@ -1340,6 +1355,7 @@ LPTSTR Line::ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType 
 					break;
 				case SYM_EQUALCASE: // Same behavior as SYM_EQUAL for numeric operands.
 				case SYM_EQUAL:    this_token.value_int64 = left_double == right_double; break;
+				case SYM_NOTEQUALCASE: // Same behavior as SYM_NOTEQUAL for numeric operands.
 				case SYM_NOTEQUAL: this_token.value_int64 = left_double != right_double; break;
 				case SYM_GT:       this_token.value_int64 = left_double > right_double; break;
 				case SYM_LT:       this_token.value_int64 = left_double < right_double; break;
@@ -1726,7 +1742,8 @@ double_deref_fail: // For the rare cases when the name of a dynamic function cal
 
 
 
-ResultType Line::ExpandSingleArg(int aArgIndex, ExprTokenType &aResultToken, LPTSTR &aDerefBuf, size_t &aDerefBufSize)
+ResultType Line::ExpandSingleArg(int aArgIndex, ExprTokenType &aResultToken, LPTSTR &aDerefBuf, size_t &aDerefBufSize
+	, SymbolType aStringSymbol)
 {
 	ExprTokenType *postfix = mArg[aArgIndex].postfix;
 	if (postfix->symbol < SYM_DYNAMIC // i.e. any other operand type.
@@ -1780,8 +1797,9 @@ ResultType Line::ExpandSingleArg(int aArgIndex, ExprTokenType &aResultToken, LPT
 
 	if (aResultToken.symbol == SYM_INVALID) // It wasn't set by ExpandExpression().
 	{
-		aResultToken.symbol = SYM_STRING;
+		aResultToken.symbol = aStringSymbol;
 		aResultToken.marker = string_result;
+		aResultToken.buf = nullptr; // Necessary for SYM_OPERAND.
 	}
 	return OK;
 }
@@ -2388,7 +2406,19 @@ end:
 	// interruption, indirectly) a large deref buffer, and that thread is waiting for something
 	// such as WinWait, that large deref buffer would never get freed.
 	if (sDerefBufSize > LARGE_DEREF_BUF_SIZE)
-		SET_DEREF_TIMER(10000) // Reset the timer right before the deref buf is possibly about to become idle.
+	{
+		// SetTimer has a cost that adds up very quickly if ExpandArgs() is called in a tight loop
+		// (potentially thousands or millions of times per second).  There's no need for the timer
+		// to be precise, so don't reset it more often than twice every second.  (Even checking
+		// now != sLastTimerReset is sufficient.)
+		static DWORD sLastTimerReset = 0;
+		DWORD now = GetTickCount();
+		if (now - sLastTimerReset > 500 || !g_DerefTimerExists)
+		{
+			sLastTimerReset = now;
+			SET_DEREF_TIMER(10000) // Reset the timer right before the deref buf is possibly about to become idle.
+		}
+	}
 
 	return result_to_return;
 }

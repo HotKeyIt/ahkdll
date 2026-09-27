@@ -208,7 +208,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="$(ConfigReleaseDllMini)">
     <ClCompile>
-      <PreprocessorDefinitions>_USRDLL;_MINIDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_USRDLL;_MINIDLL;MINIDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='MT_Release' OR '$(Configuration)'=='MT_Release(mbcs)' OR '$(Configuration)'=='MT_ReleaseDll' OR '$(Configuration)'=='MT_ReleaseDll(mbcs)' OR '$(Configuration)'=='MT_ReleaseDllMini' OR '$(Configuration)'=='MT_ReleaseDllMini(mbcs)' OR '$(Configuration)'=='MT_Self-contained' OR '$(Configuration)'=='MT_Self-contained(mbcs)'">
@@ -424,7 +424,7 @@
       <PreprocessorDefinitions>_WIN64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
     <ResourceCompile Condition="$(ConfigReleaseDllMini)">
-      <PreprocessorDefinitions>_MINIDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_MINIDLL;MINIDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
     <ClCompile>
       <RuntimeLibrary Condition="$(ConfigDebug)">MultiThreadedDebugDLL</RuntimeLibrary>

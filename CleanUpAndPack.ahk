@@ -26,7 +26,7 @@ for t1,dir in dirs
 ; Add existing folders to Array
 RCData := {}
 Loop, Files, % A_ScriptDir "\bin\*", D
-  RCData["bin\" A_LoopFileName] := ["AUTOHOTKEY.DLL","AUTOHOTKEYMINI.DLL"]
+  RCData["bin\" A_LoopFileName] := ["AUTOHOTKEY.DLL","AUTOHOTKEYMINI.DLL","7zip"]
 
 for k,v in RCData
   LoopFiles % A_ScriptDir "\" k "\*.dll"
@@ -55,10 +55,12 @@ Loop 2 {
     }
     for k,v in o
     {
-      FileRead, data,% "*c " sourcedir "\" v
-	  FileGetSize, sz,% sourcedir "\" v
+      ; 7-zip32.dll for SevenZip() (reslib\SevenZip.ahk), matching the bitness and CRT of the build.
+      file:=v="7zip" ? A_ScriptDir "\source\resources\7-zip" (InStr(sourcedir,"x64")?"64":"32") (InStr(sourcedir,"_MT")?"_MT":"") ".dll" : sourcedir "\" v
+      FileRead, data,% "*c " file
+	  FileGetSize, sz,% file
 	  sz:=ZipRawMemory(&data, sz, var)
-      vres:=v="AutoHotkey.dll"?"F903E44B8A904483A1732BA84EA6191F":v="AutoHotkeyMini.dll"?"FC2328B39C194A4788051A3B01B1E7D5":StrUpper(v)
+      vres:=v="AutoHotkey.dll"?"F903E44B8A904483A1732BA84EA6191F":v="AutoHotkeyMini.dll"?"FC2328B39C194A4788051A3B01B1E7D5":v="7zip"?"556EA2A65AE54D58BC52C792B3ED2ED0":StrUpper(v)
       if FindResource(hUpdate,10,vres)
         If !UpdateResource(hUpdate,10,vres,1033)
           MsgBox % "Delete: " v "-" ErrMsg()

@@ -503,6 +503,13 @@ public:
 		return (__int64) this->lpCriticalSection;
 	}
 	static CriticalObject *Create(ExprTokenType *aParam[], int aParamCount);
+	static CriticalObject *FromPointer(IObject *aObj); // NULL if aObj isn't a CriticalObject (or isn't a valid object).
+	// Critical sections created by CriticalObject() are reference counted by every CriticalObject using them
+	// (also in other threads/instances of AutoHotkey.dll) and deleted with the last one.  Critical sections
+	// supplied by the script are not ours: AddRefCriSec() and ReleaseCriSec() leave them alone.
+	static LPCRITICAL_SECTION NewCriSec();
+	static void AddRefCriSec(LPCRITICAL_SECTION aCriSec);
+	static void ReleaseCriSec(LPCRITICAL_SECTION aCriSec);
 	ResultType STDMETHODCALLTYPE Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount);
 	IObject_Type_Impl("CriticalObject")
 };

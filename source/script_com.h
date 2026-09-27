@@ -29,18 +29,11 @@ public:
 	}
 	IObject_Type_Impl("ComEvent") // Unlikely to be called; see above.
 
-	HRESULT Connect(LPTSTR pfx = NULL, IObject *ahkObject = NULL);
+	HRESULT Connect(ITypeInfo *tinfo = nullptr, IID *iid = nullptr);
+	void SetPrefixOrSink(LPCTSTR pfx, IObject *ahkObject);
 
-	ComEvent(ComObject *obj, ITypeInfo *tinfo, IID iid)
-		: mCookie(0), mObject(obj), mTypeInfo(tinfo), mIID(iid), mAhkObject(NULL)
-	{
-	}
-	~ComEvent()
-	{
-		mTypeInfo->Release();
-		if (mAhkObject)
-			mAhkObject->Release();
-	}
+	ComEvent(ComObject *obj) : mObject(obj), mCookie(0), mTypeInfo(NULL), mAhkObject(NULL) { }
+	~ComEvent();
 
 	friend class ComObject;
 };
@@ -85,9 +78,9 @@ public:
 		{
 			if (mEventSink)
 			{
-				mEventSink->Connect();
-				mEventSink->mObject = NULL;
-				mEventSink->Release();
+				mEventSink->Connect(FALSE);
+				if (mEventSink) // i.e. it wasn't fully released as a result of calling Unadvise().
+					mEventSink->mObject = nullptr;
 			}
 			mUnknown->Release();
 		}
@@ -106,14 +99,12 @@ public:
 class ComEnum : public EnumBase
 {
 	IEnumVARIANT *penum;
+	bool cheat;
 
 public:
 	int Next(Var *aOutput, Var *aOutputType);
 
-	ComEnum(IEnumVARIANT *enm)
-		: penum(enm)
-	{
-	}
+	ComEnum(IEnumVARIANT *enm);
 	~ComEnum()
 	{
 		penum->Release();
@@ -139,6 +130,30 @@ public:
 	int Next(Var *aOutput, Var *aOutputType);
 	~ComArrayEnum();
 	IObject_Type_Impl("ComObjArray.Enumerator")
+};
+
+
+// Adapts an AutoHotkey enumerator object to the IEnumVARIANT COM interface.
+class EnumComCompat : public IEnumVARIANT, public IServiceProvider
+{
+	IObject *mEnum;
+	int mRefCount;
+	bool mCheat;
+
+public:
+	EnumComCompat(IObject *enumObj) : mEnum(enumObj), mRefCount(1), mCheat(false) {}
+	~EnumComCompat() { mEnum->Release(); }
+
+	STDMETHODIMP QueryInterface(REFIID riid, void **ppvObject);
+	STDMETHODIMP_(ULONG) AddRef();
+	STDMETHODIMP_(ULONG) Release();
+
+	STDMETHODIMP Next(ULONG celt, /*out*/ VARIANT *rgVar, /*out*/ ULONG *pCeltFetched);
+	STDMETHODIMP Skip(ULONG celt);
+	STDMETHODIMP Reset();
+	STDMETHODIMP Clone(/*out*/ IEnumVARIANT **ppEnum);
+
+	STDMETHODIMP QueryService(REFGUID guidService, REFIID riid, void **ppvObject);
 };
 
 

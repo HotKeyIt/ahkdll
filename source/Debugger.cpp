@@ -1,4 +1,4 @@
-/*
+﻿/*
 Debugger.cpp - Main body of AutoHotkey debugger engine.
 
 Original code by Steve Gray.
@@ -78,6 +78,34 @@ Debugger::CommandDef Debugger::sCommands[] =
 };
 
 
+inline bool PreExecLineIsSlippery(Line *aLine)
+{
+	ActionTypeType act = aLine->mActionType;
+	// TRY, CATCH, FINALLY: slippery.
+	// THROW, SWITCH: not slippery.
+	// CASE, BLOCK_BEGIN: slippery.
+	// BLOCK_END: slippery if !mAttribute (not a function-body).
+	return act <= ACT_BLOCK_END && act >= ACT_TRY
+		&& (
+			act <= ACT_FINALLY
+			|| act >= ACT_CASE && !(act == ACT_BLOCK_END && aLine->mAttribute)
+			);
+}
+
+inline bool BreakpointLineIsSlippery(Line *aLine)
+{
+	ActionTypeType act = aLine->mActionType;
+	// ELSE: slippery.
+	// TRY, CATCH, FINALLY: slippery.
+	// THROW, SWITCH: not slippery.
+	// CASE, BLOCK_BEGIN: slippery.
+	// BLOCK_END: not slippery (can be used for "break-on-return"; also, doesn't make sense to slip to the next line?).
+	return (act >= ACT_TRY && act <= ACT_BLOCK_BEGIN
+		&& act != ACT_THROW && act != ACT_SWITCH)
+		|| act == ACT_ELSE;
+}
+
+
 // PreExecLine: aLine is about to execute; handle current line marker, breakpoints and step into/over/out.
 int Debugger::PreExecLine(Line *aLine)
 {
@@ -101,8 +129,9 @@ int Debugger::PreExecLine(Line *aLine)
 	if ((mInternalState == DIS_StepInto
 		|| mInternalState == DIS_StepOver && mStack.Depth() <= mContinuationDepth
 		|| mInternalState == DIS_StepOut && mStack.Depth() < mContinuationDepth) // Due to short-circuit boolean evaluation, mStack.Depth() is only evaluated once and only if mInternalState is StepOver or StepOut.
-		// Although IF/ELSE/LOOP skips its block-begin, standalone/function-body block-begin still gets here; we want to skip it:
-		&& aLine->mActionType != ACT_BLOCK_BEGIN && (aLine->mActionType != ACT_BLOCK_END || aLine->mAttribute) // Ignore { and }; except for function-end, since we want to break there after a "return" to inspect variables while they're still in scope.
+		// Although IF/ELSE/LOOP skips its block-begin, standalone/function-body block-begin still gets here; we want to skip it,
+		// unless it's the block-end of a function, to allow breaking there after a "return" to inspect variables while still in scope.
+		&& !PreExecLineIsSlippery(aLine)
 		&& aLine->mLineNumber) // Some scripts (i.e. LowLevel/code.ahk) use mLineNumber==0 to indicate the Line has been generated and injected by the script.
 	{
 		return Break();
@@ -122,6 +151,22 @@ int Debugger::PreExecLine(Line *aLine)
 }
 
 
+bool Debugger::PreThrow(ExprTokenType *aException)
+{
+	if (!mBreakOnException)
+		return false;
+	if (mBreakOnExceptionIsTemporary)
+		mBreakOnException = mBreakOnExceptionWasSet = false;
+	mThrownToken = aException;
+	// The spec doesn't provide a way to differentiate between handled and unhandled exceptions,
+	// nor when to use the "exception" and "error" statuses, so we'll use them for that:
+	Break((g->ExcptMode & EXCPTMODE_CATCH) ? "exception" : "error");
+	bool suppress_default_handling = mThrownToken == NULL; // Signal from client via property_set.
+	mThrownToken = NULL;
+	return suppress_default_handling;
+}
+
+
 bool Debugger::HasPendingCommand()
 // Returns true if there is data in the socket's receive buffer.
 // This is used for receiving commands asynchronously.
@@ -133,13 +178,13 @@ bool Debugger::HasPendingCommand()
 }
 
 
-int Debugger::EnterBreakState()
+int Debugger::EnterBreakState(char *aReason)
 {
 	if (mInternalState != DIS_Break)
 	{
 		if (mInternalState != DIS_Starting)
 			// Send a response for the previous continuation command.
-			if (int err = SendContinuationResponse())
+			if (int err = SendContinuationResponse(nullptr, "break", aReason))
 				return err;
 #ifndef MINIDLL
 		// Remove keyboard/mouse hooks.
@@ -168,7 +213,7 @@ void Debugger::ExitBreakState()
 }
 
 
-int Debugger::Break()
+int Debugger::Break(char *aReason)
 {
 	if (mInternalState == DIS_Break)
 		// Already in a break state, so it's likely that we are currently evaluating a
@@ -176,7 +221,7 @@ int Debugger::Break()
 		// __delete and this causes a breakpoint to be hit.  In that case we must not
 		// re-enter the command loop until the current command has completed.
 		return DEBUGGER_E_OK;
-	int err = EnterBreakState();
+	int err = EnterBreakState(aReason);
 	if (!err)
 		err = ProcessCommands();
 	return err;
@@ -422,7 +467,7 @@ DEBUGGER_COMMAND(Debugger::feature_get)
 	// Not supported: data_encoding - assume base64.
 	// Not supported: breakpoint_languages - assume only %language_name% is supported.
 	else if (!strcmp(feature_name, "breakpoint_types"))
-		setting = "line";
+		setting = "line exception";
 	else if (!strcmp(feature_name, "multiple_sessions"))
 		setting = "0";
 	else if (!strcmp(feature_name, "max_data"))
@@ -602,21 +647,39 @@ DEBUGGER_COMMAND(Debugger::breakpoint_set)
 			temporary = (*value != '0');
 			break;
 			
-		case 'm': // function
 		case 'x': // exception
+			if (!stricmp(value, "Any")) // Require this or nothing, for now.
+				break;
+			return DEBUGGER_E_INVALID_OPTIONS;
+
+		case 'm': // function
 		case 'h': // hit_value
 		case 'o': // hit_condition = >= | == | %
 		case '-': // expression for conditional breakpoints
-			// These aren't used/supported, but ignored for now.
-			break;
-
+			// These aren't used/supported.
 		default:
 			return DEBUGGER_E_INVALID_OPTIONS;
 		}
 	}
 
-	if (!type || strcmp(type, "line")) // i.e. type != "line"
+	// Breakpoint type is required according to the spec, but allowing it to be omitted
+	// and defaulting to "line" is more convenient for debugging the debugger via console.
+	if (type && strcmp(type, "line")) // i.e. type was specified and is not "line".
+	{
+		if (!strcmp(type, "exception") && lineno == 0 && !filename)
+		{
+			mBreakOnException = state;
+			mBreakOnExceptionIsTemporary = temporary;
+			mBreakOnExceptionWasSet = true;
+			if (!mBreakOnExceptionID)
+				mBreakOnExceptionID = Breakpoint::AllocateID();
+			
+			return mResponseBuf.WriteF(
+				"<response command=\"breakpoint_set\" transaction_id=\"%e\" state=\"%s\" id=\"%i\"/>"
+				, aTransactionId, state ? "enabled" : "disabled", mBreakOnExceptionID);
+		}
 		return DEBUGGER_E_BREAKPOINT_TYPE;
+	}
 	if (lineno < 1)
 		return DEBUGGER_E_BREAKPOINT_INVALID;
 
@@ -665,8 +728,7 @@ DEBUGGER_COMMAND(Debugger::breakpoint_set)
 				// Without this check, setting a breakpoint on a line like "else Exit" would not work.
 				// ACT_CASE executes when the *previous* case reaches its end, so for that case
 				// we want to shift the breakpoint to the first Line after the ACT_CASE.
-				if (line->mActionType == ACT_ELSE || line->mActionType == ACT_BLOCK_BEGIN
-					|| line->mActionType == ACT_CASE)
+				if (BreakpointLineIsSlippery(line))
 					continue;
 				// Use the first line of code at or after lineno, like Visual Studio.
 				// To display the breakpoint correctly, an IDE should use breakpoint_get.
@@ -692,10 +754,15 @@ DEBUGGER_COMMAND(Debugger::breakpoint_set)
 
 int Debugger::WriteBreakpointXml(Breakpoint *aBreakpoint, Line *aLine)
 {
-	mResponseBuf.WriteF("<breakpoint id=\"%i\" type=\"line\" state=\"%s\" filename=\""
-					, aBreakpoint->id, aBreakpoint->state ? "enabled" : "disabled");
-	mResponseBuf.WriteFileURI(U4T(Line::sSourceFile[aLine->mFileIndex]));
-	return mResponseBuf.WriteF("\" lineno=\"%u\"/>", aLine->mLineNumber);
+	return mResponseBuf.WriteF("<breakpoint id=\"%i\" type=\"line\" state=\"%s\" filename=\"%r\" lineno=\"%u\"/>"
+		, aBreakpoint->id, aBreakpoint->state ? "enabled" : "disabled"
+		, Line::sSourceFile[aLine->mFileIndex], aLine->mLineNumber);
+}
+
+int Debugger::WriteExceptionBreakpointXml()
+{
+	return mResponseBuf.WriteF("<breakpoint id=\"%i\" type=\"exception\" state=\"%s\" exception=\"Any\"/>"
+		, mBreakOnExceptionID, mBreakOnException ? "enabled" : "disabled");
 }
 
 DEBUGGER_COMMAND(Debugger::breakpoint_get)
@@ -717,6 +784,13 @@ DEBUGGER_COMMAND(Debugger::breakpoint_get)
 
 			return DEBUGGER_E_OK;
 		}
+	}
+
+	if (breakpoint_id == mBreakOnExceptionID && mBreakOnExceptionWasSet)
+	{
+		mResponseBuf.WriteF("<response command=\"breakpoint_get\" transaction_id=\"%e\">", aTransactionId);
+		WriteExceptionBreakpointXml();
+		return mResponseBuf.Write("</response>");
 	}
 
 	return DEBUGGER_E_BREAKPOINT_NOT_FOUND;
@@ -804,6 +878,12 @@ DEBUGGER_COMMAND(Debugger::breakpoint_update)
 		}
 	}
 
+	if (breakpoint_id == mBreakOnExceptionID)
+	{
+		mBreakOnException = state;
+		return DEBUGGER_E_OK;
+	}
+
 	return DEBUGGER_E_BREAKPOINT_NOT_FOUND;
 }
 
@@ -827,6 +907,13 @@ DEBUGGER_COMMAND(Debugger::breakpoint_remove)
 		}
 	}
 
+	if (breakpoint_id == mBreakOnExceptionID && mBreakOnExceptionWasSet)
+	{
+		mBreakOnException = false;
+		mBreakOnExceptionWasSet = false;
+		return DEBUGGER_E_OK;
+	}
+
 	return DEBUGGER_E_BREAKPOINT_NOT_FOUND;
 }
 
@@ -845,6 +932,9 @@ DEBUGGER_COMMAND(Debugger::breakpoint_list)
 			WriteBreakpointXml(line->mBreakpoint, line);
 		}
 	}
+
+	if (mBreakOnExceptionWasSet)
+		WriteExceptionBreakpointXml();
 
 	return mResponseBuf.Write("</response>");
 }
@@ -890,7 +980,10 @@ DEBUGGER_COMMAND(Debugger::stack_get)
 			else if (se->type == DbgStack::SE_Thread)
 			{
 				// !se->line implies se->type == SE_Thread.
-				if (se[1].type == DbgStack::SE_UDF)
+				if (_tcscmp(se->desc, _T("Auto-execute")) && se[1].type == DbgStack::SE_UDF)
+					// Show the function's jump-to line since se->line is most likely whatever line
+					// this thread interrupted.  Don't do it for the auto-execute thread since in
+					// that case the function doesn't represent the thread's overall execution.
 					line = se[1].udf->func->mJumpToLine;
 				else if (se[1].type == DbgStack::SE_Sub)
 					line = se[1].sub->mJumpToLine;
@@ -904,9 +997,8 @@ DEBUGGER_COMMAND(Debugger::stack_get)
 			{
 				line = se->line;
 			}
-			mResponseBuf.WriteF("<stack level=\"%i\" type=\"file\" filename=\"", level);
-			mResponseBuf.WriteFileURI(U4T(Line::sSourceFile[line->mFileIndex]));
-			mResponseBuf.WriteF("\" lineno=\"%u\" where=\"", line->mLineNumber);
+			mResponseBuf.WriteF("<stack level=\"%i\" type=\"file\" filename=\"%r\" lineno=\"%u\" where=\""
+				, level, Line::sSourceFile[line->mFileIndex], line->mLineNumber);
 			switch (se->type)
 			{
 			case DbgStack::SE_Thread:
@@ -1112,7 +1204,7 @@ void Object::DebugWriteProperty(IDebugProperties *aDebugger, int aPage, int aPag
 	DebugCookie cookie;
 	aDebugger->BeginProperty(NULL, "object", (int)mFieldCount + (mBase != NULL), cookie);
 
-	if (aDepth)
+	if (aDepth > 0)
 	{
 		int i = aPageSize * aPage, j = aPageSize * (aPage + 1);
 
@@ -1408,11 +1500,12 @@ int Debugger::ParsePropertyName(LPCSTR aFullName, int aDepth, int aVarScope, boo
 	VarBkp *varbkp = NULL;
 	SymbolType key_type;
 	Object::KeyType key;
-        Object::FieldType *field;
+	Object::FieldType *field;
 	Object::IndexType insert_pos;
 	Object *obj;
-	CriticalObject *criobj;
-	Struct *strct;
+	IObject *iobj;
+	CriticalObject *criobj = NULL;
+	Struct *strct = NULL;
 
 	aResult.kind = PropNone;
 
@@ -1426,96 +1519,110 @@ int Debugger::ParsePropertyName(LPCSTR aFullName, int aDepth, int aVarScope, boo
 
 	// Validate name for more accurate error-reporting.
 	if (name_length > MAX_VAR_NAME_LENGTH || !Var::ValidateName(name, DISPLAY_NO_ERROR))
-		return DEBUGGER_E_INVALID_OPTIONS;
-
-	if (aDepth > 0 && aVarScope != FINDVAR_GLOBAL)
 	{
-		Var **vars = NULL, **vars_end;
-		VarBkp *bkps = NULL, *bkps_end;
-		mStack.GetLocalVars(aDepth, vars, vars_end, bkps, bkps_end);
-		if (bkps)
+		if (!_tcsicmp(name, _T("<exception>")))
 		{
-			for ( ; ; ++bkps)
+			if (!mThrownToken)
+				return DEBUGGER_E_UNKNOWN_PROPERTY;
+			if (!name_end)
 			{
-				if (bkps == bkps_end)
-				{
-					// No local var at that depth, so make sure to not return the wrong local.
-					aVarScope = FINDVAR_GLOBAL;
-					break;
-				}
-				if (!_tcsicmp(bkps->mVar->mName, name))
-				{
-					varbkp = bkps;
-					break;
-				}
+				aResult.kind = PropValue;
+				aResult.value.CopyValueFrom(*mThrownToken);
+				return DEBUGGER_E_OK;
 			}
+			iobj = TokenToObject(*mThrownToken);
 		}
-		else if (vars)
-		{
-			for ( ; ; ++vars)
-			{
-				if (vars == vars_end)
-				{
-					// No local var at that depth, so make sure to not return the wrong local.
-					aVarScope = FINDVAR_GLOBAL;
-					break;
-				}
-				if (!_tcsicmp((*vars)->mName, name))
-				{
-					var = *vars;
-					break;
-				}
-			}
-		}
-	}
-
-	// If we're allowed to create variables
-	if (  !varbkp && !var
-		&& (!aVarMustExist
-		// or this variable doesn't exist
-		|| !(var = g_script.FindVar(name, name_length, NULL, aVarScope))
-			// but it is a built-in variable which hasn't been referenced yet:
-			&& g_script.GetBuiltInVar(name))  )
-		// Find or add the variable.
-		var = g_script.FindOrAddVar(name, name_length, aVarScope);
-
-	if (!var && !varbkp)
-		return DEBUGGER_E_UNKNOWN_PROPERTY;
-
-	if (!name_end)
-	{
-		// Just a variable name.
-		if (var)
-			aResult.var = var, aResult.kind = PropVar;
 		else
-			aResult.bkp = varbkp, aResult.kind = PropVarBkp;
-		return DEBUGGER_E_OK;
+			return DEBUGGER_E_INVALID_OPTIONS;
 	}
-	IObject *iobj;
-	if (varbkp && varbkp->mType == VAR_ALIAS)
-		var = varbkp->mAliasFor;
-	if (var)
-		iobj = var->HasObject() ? var->Object() : NULL;
 	else
-		iobj = (varbkp->mAttrib & VAR_ATTRIB_OBJECT) ? varbkp->mObject : NULL;
-	
+	{
+		if (aDepth > 0 && aVarScope != FINDVAR_GLOBAL)
+		{
+			Var **vars = NULL, **vars_end;
+			VarBkp *bkps = NULL, *bkps_end;
+			mStack.GetLocalVars(aDepth, vars, vars_end, bkps, bkps_end);
+			if (bkps)
+			{
+				for ( ; ; ++bkps)
+				{
+					if (bkps == bkps_end)
+						break;
+					if (!_tcsicmp(bkps->mVar->mName, name))
+					{
+						varbkp = bkps;
+						break;
+					}
+				}
+			}
+			else if (vars)
+			{
+				for ( ; ; ++vars)
+				{
+					if (vars == vars_end)
+						break;
+					if (!_tcsicmp((*vars)->mName, name))
+					{
+						var = *vars;
+						break;
+					}
+				}
+			}
+			// If a var wasn't found above, make sure not to return a local var of the wrong function or depth.
+			if (!var)
+				aVarScope = FINDVAR_GLOBAL;
+		}
+
+		// If we're allowed to create variables
+		if (  !varbkp && !var
+			&& (!aVarMustExist
+				// or this variable doesn't exist
+				|| !(var = g_script.FindVar(name, name_length, NULL, aVarScope))
+				// but it is a built-in variable which hasn't been referenced yet:
+				&& g_script.GetBuiltInVar(name))  )
+			// Find or add the variable.
+			var = g_script.FindOrAddVar(name, name_length, aVarScope);
+
+		if (!var && !varbkp)
+			return DEBUGGER_E_UNKNOWN_PROPERTY;
+
+		if (!name_end)
+		{
+			// Just a variable name.
+			if (var)
+				aResult.var = var, aResult.kind = PropVar;
+			else
+				aResult.bkp = varbkp, aResult.kind = PropVarBkp;
+			return DEBUGGER_E_OK;
+		}
+		if (varbkp && varbkp->mType == VAR_ALIAS)
+			var = varbkp->mAliasFor;
+		if (var)
+			iobj = var->HasObject() ? var->Object() : NULL;
+		else
+			iobj = (varbkp->mAttrib & VAR_ATTRIB_OBJECT) ? varbkp->mObject : NULL;
+	}
+
+	// HotKeyIt: CriticalObject and Struct don't derive from Object, so they are resolved
+	// via Invoke() further below rather than by direct field lookup.
 	if (  !(obj = dynamic_cast<Object *>(iobj))
-		&& !(criobj = dynamic_cast<CriticalObject *>(iobj)) 
-		&& !(strct = dynamic_cast<Struct *>(iobj)) )
+		&& !(criobj = dynamic_cast<CriticalObject *>(iobj))
+		&& !(strct = dynamic_cast<Struct *>(iobj))  )
 		return DEBUGGER_E_UNKNOWN_PROPERTY;
 
 	// aFullName contains a '.' or '['.  Although it looks like an expression, the IDE should
 	// only pass a property name which we gave it in response to a previous command, so we
 	// only need to support the subset of expression syntax used by WriteObjectPropertyXml().
-	for (*name_end = c; ; )
+	for (;;)
 	{
+		*name_end = c; // Undo termination (if it was terminated at this position).
 		name = name_end + 1;
 		if (c == '[')
 		{
 			if (*name == '"')
 			{
 				// Quoted string which may contain any character.
-				// Replace "" with " in-place and find end of string:
+				// Replace "" with " in-place and find and of string:
 				for (dst = src = ++name; c = *src; ++src)
 				{
 					if (c == '"')
@@ -1571,46 +1678,23 @@ int Debugger::ParsePropertyName(LPCSTR aFullName, int aDepth, int aVarScope, boo
 		}
 		else
 			return DEBUGGER_E_INVALID_OPTIONS;
-		
+
 		if (*name != '<' || name[-1] != '.') // Not a pseudo-property; i.e. ["<base>"] is always a key-value pair.
 		{
 			if (key_type == SYM_STRING)
 				key.s = name;
 			else // SYM_INTEGER or SYM_OBJECT
 				key.i = Exp32or64(_ttoi,_ttoi64)(name);
-			field = obj->FindField(key_type, key, insert_pos);
+			// obj is NULL when the target is a CriticalObject or Struct, which are handled below.
+			field = obj ? obj->FindField(key_type, key, insert_pos) : NULL;
 		}
 		else
 			field = NULL;
 
-		if (!field)
+		if (!obj)
 		{
-			// IDE should request .<base> only if it was returned by property_get or context_get,
-			// so this always means the object's base (field is always NULL).  By contrast, .base
-			// and ["base"] originate either from a key-value pair or the user "inspecting" an
-			// expression like `myObj.base`.  Since no field was found, assume it's the latter.
-			if (!_tcsicmp(name, _T("base")) || !_tcsicmp(name - 1, _T(".<base>")))
-			{
-				if (!c)
-				{
-					// For property_set, this won't allow the base to be set (success="0").
-					// That seems okay since it could only ever be set to NULL anyway.
-					aResult.kind = PropValue;
-					if (obj->mBase)
-						aResult.value.SetValue(obj->mBase);
-					else
-						aResult.value.SetValue(_T(""));
-					return DEBUGGER_E_OK;
-				}
-				if (  !(obj = dynamic_cast<Object *>(obj->mBase))  )
-					return DEBUGGER_E_UNKNOWN_PROPERTY;
-				continue; // Search the base object's fields.
-			}
-			else
-				return DEBUGGER_E_UNKNOWN_PROPERTY;
-		}
-		else if (!obj)
-		{
+			// HotKeyIt: the target is a CriticalObject or Struct, neither of which exposes
+			// fields directly, so the member is resolved by invoking the object.
 			// Since "base" doesn't usually correspond to an actual field, let it resolve
 			// to a fake one for simplicity (dynamically allocated since we never want the
 			// destructor to be called):
@@ -1681,6 +1765,32 @@ int Debugger::ParsePropertyName(LPCSTR aFullName, int aDepth, int aVarScope, boo
 			delete aVarToken;
 			field = sBaseField;
 		}
+		else if (!field)
+		{
+			// IDE should request .<base> only if it was returned by property_get or context_get,
+			// so this always means the object's base (field is always NULL).  By contrast, .base
+			// and ["base"] originate either from a key-value pair or the user "inspecting" an
+			// expression like `myObj.base`.  Since no field was found, assume it's the latter.
+			if (!_tcsicmp(name, _T("base")) || !_tcsicmp(name - 1, _T(".<base>")))
+			{
+				if (!c)
+				{
+					// For property_set, this won't allow the base to be set (success="0").
+					// That seems okay since it could only ever be set to NULL anyway.
+					aResult.kind = PropValue;
+					if (obj->mBase)
+						aResult.value.SetValue(obj->mBase);
+					else
+						aResult.value.SetValue(_T(""));
+					return DEBUGGER_E_OK;
+				}
+				if (  !(obj = dynamic_cast<Object *>(obj->mBase))  )
+					return DEBUGGER_E_UNKNOWN_PROPERTY;
+				continue; // Search the base object's fields.
+			}
+			else
+				return DEBUGGER_E_UNKNOWN_PROPERTY;
+		}
 
 		if (!c)
 		{
@@ -1693,6 +1803,7 @@ int Debugger::ParsePropertyName(LPCSTR aFullName, int aDepth, int aVarScope, boo
 		if ((!obj && !strct && !criobj) || obj && (field->symbol != SYM_OBJECT || !(obj = dynamic_cast<Object *>(field->object))) )
 			// No usable target object for the next iteration, therefore the property mustn't exist.
 			return DEBUGGER_E_UNKNOWN_PROPERTY;
+
 	} // infinite loop.
 }
 
@@ -1937,7 +2048,12 @@ DEBUGGER_COMMAND(Debugger::property_set)
 		success = target.field->Assign(val);
 		break;
 	default:
-		success = false;
+		if (success = (!stricmp(name, "<exception>") && !*new_value && mThrownToken))
+		{
+			// `property_get -n <exception>` is our non-standard way to retrieve the thrown value during an exception break.
+			// `property_set -n <exception> --` is our non-standard way to "clear the exception" (suppress the error dialog).
+			mThrownToken = NULL;
+		}
 	}
 
 	return mResponseBuf.WriteF(
@@ -2288,10 +2404,9 @@ int Debugger::Connect(const char *aAddress, const char *aPort)
 				mResponseBuf.Clear();
 
 				// Write init message.
-				mResponseBuf.WriteF("<init appid=\"" AHK_NAME "\" ide_key=\"%e\" session=\"%e\" thread=\"%u\" parent=\"\" language=\"" DEBUGGER_LANG_NAME "\" protocol_version=\"1.0\" fileuri=\""
-					, ide_key.GetString(), session.GetString(), GetCurrentThreadId());
-				mResponseBuf.WriteFileURI(U4T(g_script.mFileSpec));
-				mResponseBuf.Write("\"/>");
+				mResponseBuf.WriteF("<init appid=\"" AHK_NAME "\" ide_key=\"%e\" session=\"%e\" thread=\"%u\" parent=\"\" language=\"" DEBUGGER_LANG_NAME
+					"\" protocol_version=\"1.0\" fileuri=\"%r\"/>"
+					, ide_key.GetString(), session.GetString(), GetCurrentThreadId(), g_script.mFileSpec);
 
 				if (SendResponse() == DEBUGGER_E_OK)
 				{
@@ -2545,6 +2660,14 @@ int Debugger::Buffer::WriteF(const char *aFormat, ...)
 					continue;
 				}
 
+				case 'r':
+					if (i == 0)
+						len += EstimateFileURILength(va_arg(vl, LPCTSTR));
+					else
+						WriteFileURI(va_arg(vl, LPCTSTR));
+					++format_ptr; // Skip %, outer loop will skip format char.
+					continue;
+
 				default:
 					s = NULL; // Skip section below.
 				} // switch (format_ptr[1])
@@ -2580,28 +2703,33 @@ int Debugger::Buffer::WriteF(const char *aFormat, ...)
 	return DEBUGGER_E_OK;
 }
 
-// Convert a file path to a URI and write it to the buffer.
-int Debugger::Buffer::WriteFileURI(const char *aPath)
+int Debugger::Buffer::EstimateFileURILength(LPCTSTR aPath)
 {
-	int c, len = 9; // 8 for "file:///", 1 for '\0' (written by sprintf()).
-
-	// Calculate required buffer size for path after encoding.
-	for (const char *ptr = aPath; c = *ptr; ++ptr)
+	TBYTE c, len = 8; // "file:///"
+	for (LPCTSTR ptr = aPath; c = *ptr; ++ptr)
 	{
-		if (cisalnum(c) || strchr("-_.!~*'()/\\", c))
+		if (cisalnum(c) || _tcschr(_T("-_.!~*'()/\\"), c))
 			++len;
 		else
-			len += 3;
+			// For code size, estimate based on worst-case scenario (U+FFFF -> %ef%bf%bf).
+			// Any extra space is likely to be used at some point, as the response buffer gets reused.
+			len += 9;
 	}
+	return len;
+}
 
-	// Ensure the buffer contains enough space.
-	if (ExpandIfNecessary(mDataUsed + len) != DEBUGGER_E_OK)
-		return DEBUGGER_E_INTERNAL_ERROR;
+// Convert a file path to a URI and write it to the buffer.
+// Caller has already verified there is enough space in the buffer.
+void Debugger::Buffer::WriteFileURI(LPCTSTR aPath)
+{
+	memcpy(mData + mDataUsed, "file:///", 8);
+	mDataUsed += 8;
 
-	Write("file:///", 8);
+	CStringUTF8FromTChar path8(aPath);
 
 	// Write to the buffer, encoding as we go.
-	for (const char *ptr = aPath; c = *ptr; ++ptr)
+	int c;
+	for (LPCSTR ptr = path8; c = *ptr; ++ptr)
 	{
 		if (cisalnum(c) || strchr("-_.!~*()/", c))
 		{
@@ -2614,13 +2742,11 @@ int Debugger::Buffer::WriteFileURI(const char *aPath)
 		}
 		else
 		{
-			len = sprintf(mData + mDataUsed, "%%%02X", c & 0xff);
+			int len = sprintf(mData + mDataUsed, "%%%02X", c & 0xff);
 			if (len != -1)
 				mDataUsed += len;
 		}
 	}
-
-	return DEBUGGER_E_OK;
 }
 
 int Debugger::Buffer::WriteEncodeBase64(const char *aInput, size_t aInputSize, bool aSkipBufferSizeCheck/* = false*/)
@@ -2751,6 +2877,14 @@ DbgStack::Entry *DbgStack::Push()
 		mTop->line = g_script.mCurrLine;
 	}
 	return ++mTop;
+}
+
+void DbgStack::Pop()
+{
+	ASSERT(mTop >= mBottom);
+	--mTop;
+	if (mTop >= mBottom)
+		g_script.mCurrLine = g_Debugger.mCurrLine = mTop->line;
 }
 
 void DbgStack::Push(TCHAR *aDesc)

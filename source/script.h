@@ -744,7 +744,6 @@ private:
 	ResultType FileGetShortcut(LPTSTR aShortcutFile);
 	ResultType FileCreateShortcut(LPTSTR aTargetFile, LPTSTR aShortcutFile, LPTSTR aWorkingDir, LPTSTR aArgs
 		, LPTSTR aDescription, LPTSTR aIconFile, LPTSTR aHotkey, LPTSTR aIconNumber, LPTSTR aRunState);
-	static bool FileCreateDir(LPTSTR aDirSpec, LPTSTR aCanModifyDirSpec = NULL);
 	ResultType FileRead(LPTSTR aFilespec);
 	ResultType FileReadLine(LPTSTR aFilespec, LPTSTR aLineNumber);
 	ResultType FileAppend(LPTSTR aFilespec, LPTSTR aBuf, LoopReadFileStruct *aCurrentReadFile);
@@ -753,6 +752,11 @@ private:
 	ResultType FileRecycle(LPTSTR aFilePattern);
 	ResultType FileRecycleEmpty(LPTSTR aDriveLetter);
 	ResultType FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag);
+	bool FileInstallExtract(LPTSTR aSource, LPTSTR aDest, bool aOverwrite);
+#ifndef AUTOHOTKEYSC
+	bool FileInstallCopy(LPTSTR aSource, LPTSTR aDest, bool aOverwrite);
+#endif
+	ResultType FileCopyOrMove(LPTSTR aSource, LPTSTR aDest, bool aOverwrite);
 
 	typedef BOOL (* FilePatternCallback)(LPTSTR aFilename, WIN32_FIND_DATA &aFile, void *aCallbackData);
 	struct FilePatternStruct
@@ -1079,7 +1083,8 @@ public:
 	LPTSTR ExpandArg(LPTSTR aBuf, int aArgIndex, Var *aArgVar = NULL);
 	LPTSTR ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType *aResultToken
 		, LPTSTR &aTarget, LPTSTR &aDerefBuf, size_t &aDerefBufSize, LPTSTR aArgDeref[], size_t aExtraSize);
-	ResultType ExpandSingleArg(int aArgIndex, ExprTokenType &aResultToken, LPTSTR &aDerefBuf, size_t &aDerefBufSize);
+	ResultType ExpandSingleArg(int aArgIndex, ExprTokenType &aResultToken, LPTSTR &aDerefBuf, size_t &aDerefBufSize
+		, SymbolType aStringSymbol = SYM_STRING);
 	ResultType ExpressionToPostfix(ArgStruct &aArg);
 	ResultType EvaluateHotCriterionExpression(); // Called by HotkeyCriterion::Eval().
 
@@ -2117,7 +2122,8 @@ public:
 	static int FormatError(LPTSTR aBuf, int aBufSize, ResultType aErrorType, LPCTSTR aErrorText, LPCTSTR aExtraInfo, Line *aLine, LPCTSTR aFooter);
 	IObject *CreateRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat = NULL, LPCTSTR aExtraInfo = _T(""));
 	ResultType ThrowRuntimeException(LPCTSTR aErrorText, LPCTSTR aWhat = NULL, LPCTSTR aExtraInfo = _T(""));
-	
+	void SetThrownToken(global_struct &g, ExprTokenType *aToken);
+
 	ResultType SetErrorsOrThrow(bool aError, DWORD aLastErrorOverride = -1);
 	ResultType SetErrorLevelOrThrow() { return SetErrorLevelOrThrowBool(true); }
 	ResultType SetErrorLevelOrThrowBool(bool aError);        //
@@ -2159,6 +2165,10 @@ public:
 	Line *mJumpToLine;
 	Label *mPrevLabel, *mNextLabel;  // Prev & Next items in linked list.
 #ifndef MINIDLL
+#ifdef CONFIG_DLL
+	LineNumberType mLineNumber;
+	FileIndexType mFileIndex;
+#endif
 	bool IsExemptFromSuspend()
 	{
 		// See Line::IsExemptFromSuspend() for comments.
@@ -2374,6 +2384,10 @@ public:
 	// Count of items in the above array as well as the maximum capacity.
 	int mGlobalVarCount, mVarCount, mVarCountMax, mLazyVarCount, mStaticVarCount, mStaticVarCountMax, mStaticLazyVarCount; 
 	int mInstances; // How many instances currently exist on the call stack (due to recursion or thread interruption).  Future use: Might be used to limit how deep recursion can go to help prevent stack overflow.
+#ifdef CONFIG_DLL
+	LineNumberType mLineNumber;
+	FileIndexType mFileIndex;
+#endif
 
 	// Keep small members adjacent to each other to save space and improve perf. due to byte alignment:
 	UCHAR mDefaultVarType;
@@ -2482,6 +2496,9 @@ public:
 		, mIsBuiltIn(aIsBuiltIn)
 		, mIsVariadic(false)
 		, mPreprocessLocalVarsDone(false)
+#ifdef CONFIG_DLL
+		, mLineNumber(0), mFileIndex(0)
+#endif
 	{}
 
 	void *operator new(size_t aBytes) {return SimpleHeap::Malloc(aBytes);}
@@ -2515,6 +2532,7 @@ public:
 	DWORD mTimeLastRun;  // TickCount
 	int mPriority;  // Thread priority relative to other threads, default 0.
 	UCHAR mExistingThreads;  // Whether this timer is already running its subroutine.
+	UCHAR mDeleteLocked;     // Lock count to prevent full deletion.  Separate to mExistingThreads so it doesn't prevent timer execution.
 	bool mEnabled;
 	bool mRunOnlyOnce;
 	ScriptTimer *mNextTimer;  // Next items in linked list
@@ -2524,6 +2542,7 @@ public:
 		: mLabel(aLabel), mPeriod(DEFAULT_TIMER_PERIOD), mPriority(0) // Default is always 0.
 		, mExistingThreads(0), mTimeLastRun(0)
 		, mEnabled(false), mRunOnlyOnce(false), mNextTimer(NULL)  // Note that mEnabled must default to false for the counts to be right.
+		, mDeleteLocked(0)
 	{}
 };
 
@@ -3072,8 +3091,18 @@ private:
 #ifdef CONFIG_DEBUGGER
 	friend class Debugger;
 #endif
+#ifdef CONFIG_DLL
+	friend class AutoHotkeyLib;
+	friend class FuncCollection;
+	friend class VarCollection;
+	friend class LabelCollection;
+	friend class EnumFuncs;
+	friend class EnumVars;
+	friend class EnumLabels;
+	friend bool LibNotifyProblem(LPCTSTR, LPCTSTR, LPCTSTR, Line *);
+#endif
 
-public:	
+public:
 	Var **mVar, **mLazyVar; // Array of pointers-to-variable, allocated upon first use and later expanded as needed.
 	int mVarCount, mVarCountMax, mLazyVarCount; // Count of items in the above array as well as the maximum capacity.
 	WinGroup *mFirstGroup, *mLastGroup;  // The first and last variables in the linked list.
@@ -3109,6 +3138,7 @@ public:
 
 	size_t GetLine(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSection, TextStream *ts);
 	ResultType IsDirective(LPTSTR aBuf);
+	ResultType RequirementError(LPCTSTR aRequirement);
 	ResultType ParseAndAddLine(LPTSTR aLineText, ActionTypeType aActionType = ACT_INVALID
 		, ActionTypeType aOldActionType = OLD_INVALID, LPTSTR aActionName = NULL
 		, LPTSTR aEndMarker = NULL, LPTSTR aLiteralMap = NULL, size_t aLiteralMapLength = 0);
@@ -3134,6 +3164,9 @@ public:
 	Line *mFirstLine, *mLastLine;     // The first and last lines in the linked list.
 	Line *mFirstStaticLine, *mLastStaticLine; // The first and last static var initializer.
 	Label *mFirstLabel, *mLastLabel;  // The first and last labels in the linked list.
+#ifdef CONFIG_DLL
+	int mLabelCount;
+#endif
 	Func **mFunc;  // Binary-searchable array of functions.
 	int mFuncCount, mFuncCountMax;
 	Line *mTempLine; // for use with dll Execute # Naveen N9
@@ -3177,6 +3210,11 @@ public:
 	LPTSTR mOurEXE; // Will hold this app's module name (e.g. C:\Program Files\AutoHotkey\AutoHotkey.exe).
 	LPTSTR mOurEXEDir;  // Same as above but just the containing directory (for convenience).
 	LPTSTR mMainWindowTitle; // Will hold our main window's title, for consistency & convenience.
+	enum Kind {
+		ScriptKindFile,
+		ScriptKindResource,
+		ScriptKindStdIn
+	} mKind;
 	bool mIsReadyToExecute;
 	bool mAutoExecSectionIsRunning;
 	bool mIsRestart; // The app is restarting rather than starting from scratch.
@@ -3187,7 +3225,9 @@ public:
 	void PrintErrorStdOut(LPCTSTR aErrorText, LPCTSTR aExtraInfo, FileIndexType aFileIndex, LineNumberType aLineNumber);
 #ifndef AUTOHOTKEYSC
 	TextStream *mIncludeLibraryFunctionsThenExit;
+	LPTSTR mCmdLineInclude;
 #endif
+
 	__int64 mLinesExecutedThisCycle; // Use 64-bit to match the type of g->LinesPerCycle
 	int mUninterruptedLineCountMax; // 32-bit for performance (since huge values seem unnecessary here).
 	int mUninterruptibleTime;
@@ -3210,6 +3250,7 @@ public:
 #endif
 	ResultType Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestart, HINSTANCE hInstance,bool aIsText);
 	// ResultType InitDll(global_struct &g,HINSTANCE hInstance); // HotKeyIt init dll from text
+	ResultType Init(LPTSTR aScriptFilename);
 	ResultType CreateWindows();
 	void EnableClipboardListener(bool aEnable);
 #ifndef MINIDLL
@@ -3231,7 +3272,7 @@ public:
 	ResultType LoadIncludedText(LPTSTR aScript,LPCTSTR aPathToShow = _T("")); //New read text
 #endif
 	ResultType LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure);
-	ResultType LoadIncludedFile(TextStream *fp);
+	ResultType LoadIncludedFile(TextStream *fp, int aFileIndex);
 	ResultType OpenIncludedFile(TextStream &ts, LPTSTR aFileSpec, bool aAllowDuplicateInclude, bool aIgnoreLoadFailure, LPCTSTR aPathToShow = NULL);
 	LineNumberType CurrentLine();
 	LPTSTR CurrentFile();
@@ -3413,6 +3454,7 @@ BIV_DECL_R (BIV_Is64bitOS);
 BIV_DECL_R (BIV_Language);
 BIV_DECL_R (BIV_UserName_ComputerName);
 BIV_DECL_R (BIV_WorkingDir);
+BIV_DECL_R (BIV_InitialWorkingDir);
 BIV_DECL_R (BIV_WinDir);
 BIV_DECL_R (BIV_Temp);
 BIV_DECL_R (BIV_ComSpec);
@@ -3540,6 +3582,7 @@ BIF_DECL(BIF_IsLabel);
 BIF_DECL(BIF_IsFunc);
 BIF_DECL(BIF_Func);
 BIF_DECL(BIF_IsByRef);
+BIF_DECL(BIF_IsSet);
 BIF_DECL(BIF_GetKeyState);
 BIF_DECL(BIF_GetKeyName);
 BIF_DECL(BIF_VarSetCapacity);
@@ -3591,6 +3634,7 @@ BIF_DECL(BIF_Trim); // L31: Also handles LTrim and RTrim.
 
 BIF_DECL(BIF_Hotstring);
 BIF_DECL(BIF_InputHook);
+BIF_DECL(BIF_VerCompare);
 
 
 BIF_DECL(BIF_IsObject);
@@ -3669,8 +3713,13 @@ LPTSTR GetWorkingDir();
 int ConvertJoy(LPTSTR aBuf, int *aJoystickID = NULL, bool aAllowOnlyButtons = false);
 bool ScriptGetKeyState(vk_type aVK, KeyStateTypes aKeyStateType);
 double ScriptGetJoyState(JoyControls aJoy, int aJoystickID, ExprTokenType &aToken, bool aUseBoolForUpDown);
+bool FileCreateDir(LPCTSTR aDirSpec);
 LPTSTR GetExitReasonString(ExitReasons aExitReason);
 
 void free_compiled_regex();
+#ifdef CONFIG_DLL
+bool LibNotifyProblem(ExprTokenType &aProblem);
+bool LibNotifyProblem(LPCTSTR aMessage, LPCTSTR aExtra, LPCTSTR aWhat, Line *aLine);
+#endif
 #endif
 

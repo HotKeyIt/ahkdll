@@ -1,0 +1,1233 @@
+
+                     JAP to EN Translation by M.R. Poeschl (24/10/2006)
+
+=======================================================================
+              7-zip32.DLL Ver 4.31.00.03  API Explanatory file
+=======================================================================
+                                              Akita Minoru (2006/03/05)
+
+It is something which designates 7-Zip which is known in high-level bulk compressibility as DLL of integrated archiver specification.
+Compression thawing of 7z type and the ZIP book room whose bulk compressibility is higher than the normality is drawn up.
+
+-----------------------------------------------------------------------
+int WINAPI SevenZip(const HWND _hwnd, LPCSTR _szCmdLine,
+                    LPSTR _szOutput, const DWORD _dwSize)
+-----------------------------------------------------------------------
+Number  1
+Function
+    Compression thawing and the like is done.
+
+Argument
+    _hwnd       The window handle of the application which calls 7-zip32.dll.
+                7-zip32.dll EnableWindow () executes the execution time vis-a-vis this window and controls the operation of the window.
+                It is the console application where the window does not exist when and, when it is not necessary to appoint, NULL is transferred.
+    _szCmdLine  The command character string which transfers to 7-zip32.dll.
+    _szOutput   The buffer because 7-zip32.dll returns the result.
+                When it is global memory or like that, it is necessary to be locked.
+    _dwSize     Größe des Puffers.
+                When the result exceeds designated size, it is economized in this size.
+                If size is 1 or more, always NULL letter is added lastly.
+
+Return value
+  At the time of normal termination 0.
+  The time of error a quantity other than 0.
+                As for error value not yet verification.
+
+
+-----------------------------------------------------------------------
+WORD WINAPI SevenZipGetVersion(VOID)
+-----------------------------------------------------------------------
+Number  2
+Function
+    The version of 7-zip32.dll is returned.
+
+Return value
+    Those which bet 100 on superior 2 words of present version return.
+    Example) 2.30 - 230
+    To obtain subordinate 2 words, SevenZipGetSubVersion () you use.
+
+In addition
+    The number of editions is the scramble, but it has made like below.
+
+    2.30.18.01 | a: Measure version of birthplace 7-zip.
+    A.bb.cc.dd | bb: Minor version of birthplace 7-zip.
+               | cc: Beta version of birthplace 7-zip.
+               | dd: If the release number of 7-zip.dll (the birthplace rises, it returns to 01)
+
+
+-----------------------------------------------------------------------
+BOOL WINAPI SevenZipGetCursorMode(VOID)
+-----------------------------------------------------------------------
+Number  3
+Function
+    Whether or not the mode which indicates cursor in while the operating of 7-zip32.dll you obtain.
+    
+Return value
+    TRUE        Cursor indicatory mode.
+    FALSE       Cursor non indicatory mode.
+
+
+-----------------------------------------------------------------------
+BOOL WINAPI SevenZipSetCursorMode(const BOOL _CursorMode)
+-----------------------------------------------------------------------
+Number  4
+Function
+    Whether or not the mode which indicates cursor in while the operating of 7-zip32.dll it sets.
+    With 7-zip32.dll as for value it retains, but there is no influence in operation.
+
+Argument
+    _CursorMode The cursor mode which it sets.
+      TRUE      Cursor indicatory mode.
+      FALSE     Cursor non indicatory mode.
+
+Return value
+    TRUE is returned always.
+
+
+-----------------------------------------------------------------------
+BOOL WINAPI SevenZipGetBackGroundMode(VOID)
+-----------------------------------------------------------------------
+Number  5
+Function
+    Whether or not 7-zip32.dll background mode you obtain.
+
+Return value
+    TRUE        Background mode.
+    FALSE       Non background mode.
+
+
+-----------------------------------------------------------------------
+BOOL WINAPI SevenZipSetBackGroundMode(const BOOL _BackGroundMode)
+-----------------------------------------------------------------------
+Number  6
+Function
+    The background mode of 7-zip32.dll is set.
+    With 7-zip32.dll as for value it retains, but there is no influence in operation.
+
+Argument
+    bBackGroundMode The background mode which it sets.
+      TRUE      Background mode
+      FALSE     Non background mode
+
+Return value
+    TRUE is returned always.
+
+
+-----------------------------------------------------------------------
+WORD WINAPI SevenZipGetCursorInterval(VOID)
+-----------------------------------------------------------------------
+Number  7
+Function
+    Rotary speed of cursor is obtained.
+
+Return value
+    Rotary speed of cursor (msec)
+
+
+-----------------------------------------------------------------------
+BOOL WINAPI SevenZipSetCursorInterval(const WORD _Interval)
+-----------------------------------------------------------------------
+Number  8
+Function
+    Rotary speed of cursor is set.
+    With 7-zip32.dll as for value it retains, but there is no influence in operation.
+
+Argument
+    _Interval   Rotary speed of cursor (msec) default is 80 (msec).
+
+Return value
+    TRUE is returned always.
+
+
+-----------------------------------------------------------------------
+BOOL WINAPI SevenZipGetRunning(VOID)
+-----------------------------------------------------------------------
+Number  10
+Function
+    Whether or not presently 7-zip32.dll while operating, you obtain.
+    Application side before executing API which by all means accompanies file access such as compressing/thawing, it is necessary to check whether because of this feasibility.
+
+Return value
+    TRUE        It is in the midst of executing.
+    FALSE       Is not in the midst of executing, (feasibility).
+
+
+-----------------------------------------------------------------------
+BOOL WINAPI SevenZipConfigDialog(const HWND _hwnd,
+                                 LPSTR _szOptionBuffer,
+                                 const int _iMode)
+-----------------------------------------------------------------------
+Number  11
+Function
+    Indication of option designated dialogue of thawing.
+
+Argument
+    _hwnd            The window handle of the application which calls 7-zip32.dll.
+    _szOptionBuffer  At present time you ignore. Appointing NULL.
+    _iMode           At present time you ignore. Appointing 0.
+
+Return value
+    ERROR_ALREADY_RUNNING   When 7-zip32.dll already is in the midst of executing.
+    TRUE             When setting succeeds.
+    FALSE            Setting was not possible, (it was not done) the time or at the time of cancellation end.
+
+In addition
+    At present time version information is indicated.
+
+
+-----------------------------------------------------------------------
+BOOL WINAPI SevenZipCheckArchive(LPCSTR _szFileName, const int _iMode)
+-----------------------------------------------------------------------
+The number of orders  12
+Function
+    As the archive file which the designated file supports
+    It returns whether or not it is correct.
+
+Argument
+    _szFileName File name of the archive file which it should check.
+    _iMode      At present time you ignore. Appointing 0.
+
+Return value
+    TRUE        At the time of correct archive file.
+    FALSE       When the file is illegitimate.
+
+
+-----------------------------------------------------------------------
+int WINAPI SevenZipGetArchiveType(LPCSTR _szFileName)
+-----------------------------------------------------------------------
+Number  13
+Function
+    Type of the archive file which it appoints is obtained.
+    
+
+Argument
+    _szFileName  File name of the archive file which it should check.
+
+Return value
+    ARCHIVETYPE_ZIP (1)  ZIPtype
+    ARCHIVETYPE_7Z  (2)  7Ztype
+
+    0                    The type which cannot be utilized with 7-zip32.dll
+    -1                   Error
+
+
+-----------------------------------------------------------------------
+int WINAPI SevenZipGetFileCount(LPCSTR _szArcFile)
+-----------------------------------------------------------------------
+Number  17
+Function
+    The number of files which are housed in the book room file which is appointed is obtained.
+
+Argument
+    _szArcFile  The number of housing files was obtained to be, book room file name.
+
+Return value
+    The number of housing files is obtained. -1 it returns when making error.
+
+
+-----------------------------------------------------------------------
+BOOL WINAPI SevenZipQueryFunctionList(const int _iFunction)
+-----------------------------------------------------------------------
+Number  18
+Function
+    Whether or not API which is appointed with 7-zip32.dll enabled you obtain.
+    Whether or not application side intended function (API) is effective, please make sure to check in advance.
+
+Argument
+    _iFunction  The unique numerical value which shows API.
+                Please refer to 7-zip32.h concerning concrete numerical value.
+
+Return value
+    TRUE        Enabled
+    FALSE       You cannot use, or _iFunction invalid value.
+
+
+-----------------------------------------------------------------------
+HARC WINAPI SevenZipOpenArchive(const HWND _hwnd, LPCSTR _szFileName,
+                                const DWORD _dwMode)
+-----------------------------------------------------------------------
+The number of orders  21
+Function
+    If you inspect and whether or not the book room file where the designated file is effective to 7-zip32.dll it is effective, it opens, the numerical value of one way (the steering wheel) returns.
+    It accesses to the book room file from now on with this handle.
+    The steering wheel is closed automatically the occasion where DLL is opened but the case of end, SevenZipCloseArchive () with please close once.
+
+Argument
+    _hwnd       The window handle of the application which calls 7-zip32.dll.
+    _szFileName Book room file name.
+    _dwMode     At present time you ignore. Appointing 0.
+
+Return value
+    The steering wheel which corresponds to the designated book room file. When making error NULL is returned.
+
+In addition
+    As for 7-zip32.dll, it is possible to utilize the plural handles simultaneously.
+
+
+-----------------------------------------------------------------------
+int WINAPI SevenZipCloseArchive(HARC _harc)
+-----------------------------------------------------------------------
+Number  22
+Function
+    SevenZipOpenArchive() with the steering wheel which is allotted is released.
+
+Argument
+    _harc       SevenZipOpenArchive () with the steering wheel which is returned.
+
+Return value
+    0, -1 returns at the abnormal time the normal termination time.
+
+
+-----------------------------------------------------------------------
+int WINAPI SevenZipFindFirst(HARC _harc, LPCSTR _szWildName,
+                             INDIVIDUALINFO *_lpSubInfo)
+-----------------------------------------------------------------------
+Number  23
+Function
+    Information of the first housing file is obtained.
+
+Argument
+    _harc       SevenZipOpenArchive () with the steering wheel which is returned.
+    _szWildName Appointment of the file name which it searches.
+                Wild card appointment is possible.
+                As for file name plural appointments are possible with space pause.
+    _lpSubInfo  The pointer to the INDIVIDUALINFO structure in order to return the result.
+                When the result is not needed, appointing NULL.
+
+Return value
+    0       Normal termination.
+            Setting the information of the housing file to the structure which is appointed with _lpSubInfo
+    -1      Search end.
+
+
+-----------------------------------------------------------------------
+int WINAPI SevenZipFindNext(HARC _harc, INDIVIDUALINFO *_lpSubInfo)
+-----------------------------------------------------------------------
+Number  24
+Function
+    SevenZipFindFirst immediately before () or SevenZipFindNext () information of the next housing file is obtained.
+
+Argument
+    _harc       SevenZipOpenArchive () with the steering wheel which is returned.
+    _lpSubInfo  The pointer to the INDIVIDUALINFO structure in order to return the result.
+                When the result is not needed, appointing NULL.
+
+Return value
+    0       Normal termination.
+            Setting the information of the housing file to the structure which is appointed with _lpSubInfo.
+    -1      Search end.
+
+
+-----------------------------------------------------------------------
+int WINAPI SevenZipGetArcFileName(HARC _harc, LPCSTR _lpBuffer,
+                                  int _nSize)
+-----------------------------------------------------------------------
+Number  31
+Function
+    Book room file name is obtained.
+
+Argument
+    _harc       SevenZipOpenArchive () with the steering wheel which is returned.
+    _lpBuffer   The buffer which houses file name.
+    _nSize      Size of buffer.
+
+Return value
+    0, the error cord/code (other than 0) returns at the abnormal time the normal termination time.
+
+
+-----------------------------------------------------------------------
+DWORD WINAPI SevenZipGetArcFileSize(HARC _harc)
+-----------------------------------------------------------------------
+Number  32
+Function
+   Size of the book room file is obtained.
+
+Argument
+    _harc       SevenZipOpenArchive () with the steering wheel which is returned.
+
+Return value
+    Size of book room file. When making error -1 is returned.
+
+
+-----------------------------------------------------------------------
+DWORD WINAPI SevenZipGetArcOriginalSize(HARC _harc)
+-----------------------------------------------------------------------
+Number  33
+Function
+    Search to present time (SevenZipFindFirst () and SevenZipFindNext ()) () total of size after the thawing the file which matches is obtained.
+    SevenZipFindNext () after search ends, it reaches total value of all file which agrees with search in the book room file.
+
+Argument
+    _harc       SevenZipOpenArchive () with the steering wheel which is returned.
+
+Return value
+    Total size. When making error -1 is returned.
+
+
+-----------------------------------------------------------------------
+DWORD WINAPI SevenZipGetArcCompressedSize(HARC _harc)
+-----------------------------------------------------------------------
+Number  34
+Function
+    Total of compressed size of the file which matches to search is obtained. In addition details correspond SevenZipGetArcOriginalSize ().
+
+Argument
+    _harc       SevenZipOpenArchive () with the steering wheel which is returned.
+
+Return value
+    Total of compressed size. When making error or in case of the solid book room -1 is returned.
+
+Note
+    The book room distinguishes the solid book room, error because it cannot identify SevenZipGetArcCompressedSizeEx should be used.
+
+
+-----------------------------------------------------------------------
+WORD WINAPI SevenZipGetArcRatio(HARC _harc)
+-----------------------------------------------------------------------
+Number  35
+Function
+    Entire bulk compressibility of the file which matches to search is obtained. In addition details correspond SevenZipGetArcOriginalSize ().
+
+Argument
+    _harc       SevenZipOpenArchive () with the steering wheel which is returned.
+
+Return value
+    Entire bulk compressibility (permill). When making error -1. In case of the solid book room 0 is returned.
+
+
+-----------------------------------------------------------------------
+WORD WINAPI SevenZipGetArcDate(HARC _harc)
+-----------------------------------------------------------------------
+Number  36
+Function
+    Date of the book room file is obtained.
+
+Argument
+    _harc       SevenZipOpenArchive () with the steering wheel which is returned.
+
+Return value
+    Date of book room file. When making error -1. Type corresponds to the time stamp of MSDOS.
+
+-----------------------------------------------------------------------
+WORD WINAPI SevenZipGetArcTime(HARC _harc)
+-----------------------------------------------------------------------
+Number  37
+Function
+    Time of the book room file is obtained.
+
+Argument
+    _harc       SevenZipOpenArchive () with the steering wheel which is returned.
+
+Return value
+    Time of book room file. When making error -1. 
+    Type corresponds to the time stamp of MSDOS.
+
+
+-----------------------------------------------------------------------
+UINT WINAPI SevenZipGetArcOSType(HARC _harc)
+-----------------------------------------------------------------------
+Number  38
+Function
+    The type of OS which is used for book room file compilation is obtained.
+
+Argument
+    _harc       SevenZipOpenArchive () with the steering wheel which is returned.
+
+Return value
+    The numerical value which shows the type of OS.
+    0 : MS-DOS  1 : PRIMOS  2 : UNIX    3 : AMIGA
+    4 : MAC-OS  5 : OS/2    6 : APPLE GS    7 : ATARI ST
+    8 : NEXT    9 : VAX VMS 10: In addition.
+    11: OS9     12: OS/68K  13: OS/386  14: HUMAN
+    15: CP/M    16: FLEX    17: Runser
+    18: VM CMS  19: Z SYSTEM    20: TOPS20  21: Windows NTFS
+    -1: Error.
+
+    * At present time when making error other than by all means 0 is returned.
+
+-----------------------------------------------------------------------
+int WINAPI SevenZipIsSFXFile(HARC _harc)
+-----------------------------------------------------------------------
+Number  39
+Function
+    Whether or not the book room file the self-extracting file you inspect.
+
+Argument
+    _harc       SevenZipOpenArchive () with the steering wheel which is returned.
+
+Return value
+    0   Usual book room file.
+    1   Self-extracting file.
+    -1  Error.
+
+    * At present time when making error other than by all means 0 is returned.
+
+-----------------------------------------------------------------------
+int WINAPI SevenZipGetFileName(HARC _harc, LPCSTR _lpBuffer,
+                               int _nSize)
+-----------------------------------------------------------------------
+Number  40
+Function
+    File name of the housing file is obtained.
+
+Argument
+    _harc       SevenZipOpenArchive () with the steering wheel which is returned.
+    _lpBuffer   The buffer which houses file name.
+    _nSize      Size of buffer.
+
+Return value
+    0 is returned the normal termination time, file name is housed in _lpBuffer.
+
+In addition
+    The "housing file", search immediately before (SevenZipFindFirst () or SevenZipFindNext ()) the file which matches is shown.
+    It is similar even with each API below.
+
+
+-----------------------------------------------------------------------
+DWORD WINAPI SevenZipGetOriginalSize(HARC _harc)
+-----------------------------------------------------------------------
+Number  41
+Function
+    () Size after the thawing the housing file is obtained.
+
+Argument
+    _harc       SevenZipOpenArchive () with the steering wheel which is returned.
+
+Return value
+    Size of housing file. When making error -1.
+
+
+-----------------------------------------------------------------------
+DWORD WINAPI SevenZipGetCompressedSize(HARC _harc)
+-----------------------------------------------------------------------
+Number  42
+Function
+    Compressed size of the housing file is obtained.
+
+Argument
+    _harc       SevenZipOpenArchive () with the steering wheel which is returned.
+
+Return value
+    Compressed size of housing file. When making error -1.
+    In case of the solid book room 0 is returned.
+
+
+-----------------------------------------------------------------------
+WORD WINAPI SevenZipGetRatio(HARC _harc)
+-----------------------------------------------------------------------
+Number  43
+Function
+    Bulk compressibility of the housing file is obtained.
+
+Argument
+    _harc       SevenZipOpenArchive () with the steering wheel which is returned.
+
+Return value
+    Bulk compressibility of housing file (permill). When making error -1. 
+    In case of the solid book room 0 is returned.
+
+
+-----------------------------------------------------------------------
+WORD WINAPI SevenZipGetDate(HARC _harc)
+-----------------------------------------------------------------------
+Number  44
+Function
+    Date of the housing file is obtained.
+
+Argument
+    _harc       SevenZipOpenArchive () with the steering wheel which is returned.
+
+Return value
+    Date of housing file. When making error -1. Type corresponds to the time stamp of MSDOS.
+
+
+-----------------------------------------------------------------------
+WORD WINAPI SevenZipGetTime(HARC _harc)
+-----------------------------------------------------------------------
+Number  45
+Function
+    Time of the housing file is obtained.
+
+Argument
+    _harc       SevenZipOpenArchive () with the steering wheel which is returned.
+
+Return value
+    Time of housing file. When making error -1. 
+    Type corresponds to the time stamp of MSDOS.
+
+
+-----------------------------------------------------------------------
+DWORD WINAPI SevenZipGetCRC(HARC _harc)
+-----------------------------------------------------------------------
+Number  46
+Function
+    The check cord of the housing file (CRC and checksum etc.) you obtain.
+
+Argument
+    _harc       SevenZipOpenArchive () with the steering wheel which is returned.
+
+Return value
+    Check cord of housing file. When making error -1.
+
+
+-----------------------------------------------------------------------
+int WINAPI SevenZipGetAttribute(HARC _harc)
+-----------------------------------------------------------------------
+Number  47
+Function
+    Attribute of the housing file is obtained.
+
+Argument
+    _harc       SevenZipOpenArchive () with the steering wheel which is returned.
+
+Return value
+    Attribute of housing file. Each bit below or (|) those which are connected. When making error -1.
+
+    0x01    FA_RDONLY       Reading private file.
+    0x02    FA_HIDDEN       Invisibility attribute file.
+    0x04    FA_SYSTEM       System file.
+    0x08    FA_LABEL        Volume label.
+    0x10    FA_DIREC        Directory. 
+    0x20    FA_ARCH         Retention bit.
+    0x40    FA_ENCRYPTED    The password the file which is protected.
+
+
+-----------------------------------------------------------------------
+UINT WINAPI SevenZipGetOSType(HARC _harc)
+-----------------------------------------------------------------------
+Number  48
+Function
+    OS where the housing file was drawn up is obtained.
+
+Argument
+    _harc       SevenZipOpenArchive () with the steering wheel which is returned.
+
+Return value
+    The numerical value which shows OS. 
+    SevenZipGetArcOSType () you refer to details. 
+
+    * At present time when making error other than by all means 0 is returned.
+
+
+-----------------------------------------------------------------------
+int WINAPI SevenZipGetMethod(HARC _harc, LPSTR _lpBuffer,
+                             const int _nSize)
+-----------------------------------------------------------------------
+Number	61
+Function
+    Compressed method of the housing file is obtained.
+
+Argument
+    _harc       SevenZipOpenArchive () with the steering wheel which is returned.
+    _lpBuffer   The buffer which houses method name.
+    _nSize      Size of buffer.
+
+Return value
+    0 is returned the normal termination time, the character string which shows compressed rule in _lpBuffer is housed.
+    When _nSize 8 being, same ones as szMode of the INDIVIDUALINFO structure are housed, but when it is other than that, more detailed information is housed. However, the amount which does not finish to enter to the buffer is truncated.
+
+    Example)
+    szMode	| _lpBuffer (_nSize != 8)
+    --------+------------------------
+    LZMA    | LZMA:20
+    PPMD    | PPMD:o6:mem24
+
+
+-----------------------------------------------------------------------
+DWORD WINAPI SevenZipGetWriteTime(HARC _harc)
+-----------------------------------------------------------------------
+Number  62
+Function
+    Last renewal day and time of the housing file is obtained.
+
+Argument
+    _harc       SevenZipOpenArchive () with the steering wheel which is returned.
+
+Return value
+    The renewal day and time due to UTC of the UNIX type of the housing file. When making error -1.
+
+
+-----------------------------------------------------------------------
+BOOL WINAPI SevenZipGetWriteTimeEx(HARC _harc,
+                                   FILETIME *_lpftLastWriteTime)
+-----------------------------------------------------------------------
+Number  65
+Function
+    Last renewal day and time of the housing file is obtained.
+
+Argument
+    _harc               SevenZipOpenArchive () with the steering wheel which is returned.
+    _lpftLastWriteTime  The pointer to the FILETIME structure which houses information.
+
+Return value
+    The normal termination time TRUE, when so is not, FALSE is returned, last renewal day and time is housed in the FILETIME structure which is appointed. 
+    FILETIME type, being something which displays the elapsed time of the 100ns unit from Jan.1,1601 00:00:00 at the numerical value of 64bit it does. 
+    As for details please refer to Win32 API help and the like.
+
+
+-----------------------------------------------------------------------
+BOOL WINAPI SevenZipGetArcCreateTimeEx(HARC _harc,
+                                       FILETIME *_lpftCreationTime)
+-----------------------------------------------------------------------
+Number  68
+Function
+    Compilation day and time of the book room is obtained.
+
+Argument
+    _harc               SevenZipOpenArchive () with the steering wheel which is returned.
+    _lpftCreationTime   The pointer to the FILETIME structure which houses information.
+
+Return value
+    The normal termination time TRUE, when so is not, FALSE is returned, last renewal day and time is housed in the FILETIME structure which is appointed. 
+    FILETIME type, being something which displays the elapsed time of the 100ns unit from Jan.1,1601 00:00:00 at the numerical value of 64bit it does.
+    As for details please refer to Win32 API help and the like.
+
+
+-----------------------------------------------------------------------
+BOOL WINAPI SevenZipGetArcAccessTimeEx(HARC _harc,
+                                       FILETIME *_lpftLastAccessTime)
+-----------------------------------------------------------------------
+Number  69
+Function
+    Reference day and time of the book room is obtained.
+
+Argument
+    _harc               SevenZipOpenArchive () with the steering wheel which is returned.
+    _lpftLastAccessTime The pointer to the FILETIME structure which houses information.
+
+Return value
+    The normal termination time TRUE, when so is not, FALSE is returned, last renewal day and time is housed in the FILETIME structure which is appointed.
+    FILETIME type, being something which displays the elapsed time of the 100ns unit from Jan.1,1601 00:00:00 at the numerical value of 64bit it does.
+    As for details please refer to Win32 API help and the like.
+
+
+-----------------------------------------------------------------------
+BOOL WINAPI SevenZipGetArcWriteTimeEx(HARC _harc,
+                                      FILETIME *_lpftLastWriteTime)
+-----------------------------------------------------------------------
+Number  70
+Function
+    Last renewal day and time of the book room is obtained.
+
+Argument
+    _harc               SevenZipOpenArchive () with the steering wheel which is returned.
+    _lpftLastWriteTime  The pointer to the FILETIME structure which houses information.
+
+Return value
+    The normal termination time TRUE, when so is not, FALSE is returned, last renewal day and time is housed in the FILETIME structure which is appointed. 
+    FILETIME type, being something which displays the elapsed time of the 100ns unit from Jan.1,1601 00:00:00 at the numerical value of 64bit it does. 
+    As for details please refer to Win32 API help and the like.
+
+
+-----------------------------------------------------------------------
+BOOL WINAPI SevenZipSetOwnerWindow(HWND _hwnd)
+-----------------------------------------------------------------------
+Number  90
+Function
+    Ahead transmitting the message of 7-zip32.dll the window is set.
+    7-zip32.dll transmits the message which informs about compressed thawing circumstance the window where it is appointed here. Referring to the below-mentioned "Microsoft Windows message" message concerning details.
+
+Argument
+    _hwnd       The steering wheel of the window which receives message.
+
+Return value
+    In case of normal termination TRUE is returned.
+    It cannot modify while operating when and, when another window is already set with this API, FALSE is returned.
+
+
+-----------------------------------------------------------------------
+BOOL WINAPI SevenZipClearOwnerWindow(VOID)
+-----------------------------------------------------------------------
+Number  91
+Function
+    SevenZipSetOwnerWindow() So setting of the window which sets is cancelled.
+
+Return value
+    In case of normal termination TRUE is returned.
+    When it cannot modify while operating, FALSE is returned.
+
+
+-----------------------------------------------------------------------
+BOOL WINAPI SevenZipSetOwnerWindowEx(HWND _hwnd,
+                                     LPARCHIVERPROC _lpArcProc)
+-----------------------------------------------------------------------
+Number  92
+Function
+    It appoints the call-back function in order to receive the compressed thawing circumstance of 7-zip32.dll.
+    When NULL is appointed to _lpArcProc, message is forwarded to the window which is appointed with _hwnd (SevenZipSetOwnerWindow (_hwnd) with the same).
+
+Argument
+    _hwnd       The steering wheel of the window which receives message.
+    _lpArcProc  The pointer of the call-back function which transfers processing.
+
+Return value
+    In case of normal termination TRUE is returned.
+    It cannot modify while operating when and, when another window is already set with this API, FALSE is returned.
+
+
+-----------------------------------------------------------------------
+BOOL WINAPI SevenZipKillOwnerWindowEx(HWND _hwnd)
+-----------------------------------------------------------------------
+Number  93
+Function
+    SevenZipSetOwnerWindowEx () with setting of the window which sets is cancelled.
+
+Return value
+    In case of normal termination TRUE is returned.
+    When it cannot modify while operating and when _hwnd which is appointed does not match present setting, FALSE is returned.
+
+
+-----------------------------------------------------------------------
+BOOL WINAPI SevenZipSetOwnerWindowEx64(HWND _hwnd,
+                                       LPARCHIVERPROC _lpArcProc,
+                                       DWORD _dwStructSize)
+-----------------------------------------------------------------------
+Number  108
+Function
+    It appoints the call-back function in order to receive the compressed thawing circumstance of 7-zip32.dll. 
+    When NULL is appointed to _lpArcProc, message is forwarded to the window which is appointed with _hwnd (SevenZipSetOwnerWindow (_hwnd) with the same).
+
+Argument
+    _hwnd         The steering wheel of the window which receives message.
+    _lpArcProc    The pointer of the call-back function which transfers processing.
+    _dwStructSize Appointing the size of the structure which you use.
+                  Some size inside EXTRACTINGINFOEX and EXTRACTINGINFOEX32, EXTRACTINGINFOEX64.
+                  
+
+Return value
+    In case of normal termination TRUE is returned. It cannot modify while operating when and, when another window is already set with this API, FALSE is returned.
+
+
+-----------------------------------------------------------------------
+BOOL WINAPI SevenZipKillOwnerWindowEx64(HWND _hwnd)
+-----------------------------------------------------------------------
+Number  109
+Function
+    SevenZipSetOwnerWindowEx64 () with setting of the window which sets is cancelled.
+
+Return value
+    In case of normal termination TRUE is returned. When it cannot modify while operating and when _hwnd which is appointed does not match present setting, FALSE is returned.
+
+
+-----------------------------------------------------------------------
+WORD WINAPI SevenZipGetSubVersion(VOID)
+-----------------------------------------------------------------------
+Number  94
+Function
+    The version of 7-zip32.dll is returned.
+
+Return value
+    Those which bet 100 on subordinate 2 words of present version return. Example) 4.01 - 401
+
+
+-----------------------------------------------------------------------
+BOOL WINAPI SevenZipGetArcFileSizeEx(HARC _harc, ULHA_INT64 *_lpllSize)
+-----------------------------------------------------------------------
+Number  103
+Function
+    Size of the book room file is obtained with 64 bit integer.
+
+Argument
+    _harc       SevenZipOpenArchive () with the steering wheel which is returned.
+    _lpllSize   The pointer to the buffer in order to house lpllSize information.
+                With VC++ and C++ Builder 5.x and the like as for the substance it has become LONGLONG. 
+                When the compiler which cannot handle LONGLONG as 64 bit integer such as BC++ is used, (it is not) with LARGE_INTEGER and the like of the alignment please substitute.
+
+Return value
+    Normal termination time TRUE. When making error FALSE is returned.
+
+Note
+    Please pay attention to without being total size of the housing file, being size of the book room itself.
+
+
+-----------------------------------------------------------------------
+BOOL WINAPI SevenZipGetArcOriginalSizeEx(HARC _harc,
+                                         ULHA_INT64 *_lpllSize)
+-----------------------------------------------------------------------
+Number  104
+Function
+    Total of size of the file which matches to search is obtained with 64 bit integer. Unless SevenZipFindNext () after search ends, it is, there is no meaning in returned value. When it is in the midst of searching, it becomes total of the file which matches to that.
+
+Argument
+    _harc       SevenZipOpenArchive () with the steering wheel which is returned.
+    _lpllSize   The pointer to the buffer in order to house information.
+                With VC++ and C++ Builder 5.x and the like as for the substance it has become LONGLONG. 
+                When the compiler which cannot handle LONGLONG as 64 bit integer such as BC++ is used, (it is not) with LARGE_INTEGER and the like of the alignment please substitute.
+
+Return value
+    Normal termination time TRUE. When making error FALSE is returned.
+
+Note
+    After SevenZipFindNext () search ending, please make sure to call.
+
+
+-----------------------------------------------------------------------
+BOOL WINAPI SevenZipGetArcCompressedSizeEx(HARC _harc,
+                                           ULHA_INT64 *_lpllSize)
+-----------------------------------------------------------------------
+Number  105
+Function
+    Total of compressed size of the file which matches to search is obtained with 64 bit integer.
+
+Argument
+    _harc       SevenZipOpenArchive () with the steering wheel which is returned.
+    _lpllSize   The pointer to the buffer in order to house information.
+                With VC++ and C++ Builder 5.x and the like as for the substance it has become LONGLONG.
+                When the compiler which cannot handle LONGLONG as 64 bit integer such as BC++ is used, (it is not) with LARGE_INTEGER and the like of the alignment please substitute.
+
+Return value
+    Normal termination time TRUE. When making error FALSE is returned.
+
+Note
+    After SevenZipFindNext () search ending, please make sure to call. However, when the solid book room it decides, it is not this limit. If TRUE returns and -1 is housed in _lpllSize, it is the solid book room.
+
+
+-----------------------------------------------------------------------
+BOOL WINAPI SevenZipGetOriginalSizeEx(HARC _harc,
+                                      ULHA_INT64 *_lpllSize)
+-----------------------------------------------------------------------
+Number  106
+Function
+    Size of the housing file is obtained with 64 bit integer.
+
+Argument
+    _harc       SevenZipOpenArchive () with the steering wheel which is returned.
+    _lpllSize   The pointer to the buffer in order to house information.
+                With VC++ and C++ Builder 5.x and the like as for the substance it has become LONGLONG.
+                When the compiler which cannot handle LONGLONG as 64 bit integer such as BC++ is used, (it is not) with LARGE_INTEGER and the like of the alignment please substitute.
+
+Return value
+    Normal termination time TRUE. When making error FALSE is returned.
+
+
+-----------------------------------------------------------------------
+BOOL WINAPI SevenZipGetCompressedSizeEx(HARC _harc,
+                                        ULHA_INT64 *_lpllSize)
+-----------------------------------------------------------------------
+Number  107
+Function
+    Compressed size of the housing file is obtained with 64 bit integer.
+
+Argument
+    _harc       SevenZipOpenArchive () with the steering wheel which is returned.
+    _lpllSize   The pointer to the buffer in order to house information.
+                With VC++ and C++ Builder 5.x and the like as for the substance it has become LONGLONG. When the compiler which cannot handle LONGLONG as 64 bit integer such as BC++ is used, (it is not) with LARGE_INTEGER and the like of the alignment please substitute.
+
+Return value
+    Normal termination time TRUE. When making error FALSE is returned.
+
+-----------------------------------------------------------------------
+BOOL WINAPI SevenZipSetUnicodeMode(BOOL _bUnicode)
+-----------------------------------------------------------------------
+Number  200
+Function
+    It sets the character code which you use to UTF-8, and cancels.
+
+Argument
+    _bUnicode   TRUE When it sets, UTF-8 is used.
+                FALSE When it sets, OEM code set is used.
+
+Return value
+    Always TRUE.
+
+-----------------------------------------------------------------------
+INDIVIDUALINFO Structure
+-----------------------------------------------------------------------
+Structure definition
+    typedef struct {
+        DWORD   dwOriginalSize;
+        DWORD   dwCompressedSize;
+        DWORD   dwCRC;
+        UINT    uFlag;
+        UINT    uOSType;
+        WORD    wRatio;
+        WORD    wDate;
+        WORD    wTime;
+        char    szFileName[FNAME_MAX32 + 1];
+        char    dummy1[3];
+        char    szAttribute[8];
+        char    szMode[8];
+    } INDIVIDUALINFO;
+
+Explanation of member
+    dwOriginalSize      Size of file.
+    dwCompressedSize    Size after the compressing.
+    dwCRC               For checksum CRC of file.
+    uFlag               With 7-zip32.dll always 0.
+    uOSType             OS which was used the occasion where the file is housed.
+                        Under present conditions always 0.
+    wRatio              Permill (thousand minute ratio) with the bulk compressibility which is displayed.
+                        In case of solid book room always 0.
+    wDate               Renewal date of file (DOS type).
+    wTime               Renewal time of file (DOS type).
+    szFileName          Archive file name.
+    szAttribute         Attribute of file.
+    szMode              With 7-zip32.dll the character string of compressed system houses.
+
+
+-----------------------------------------------------------------------
+Microsoft Windows message
+-----------------------------------------------------------------------
+# wm_arcextract
+
+wm_arcextract
+
+nMode = (int)wParam                 /* Notification mode is displayed */
+lpEis = (LPEXTRACTINGINFO)lParam    /* The pointer which points to the structure */
+
+  Wm_arcextract message SevenZipSetOwnerWindow () with is sent from 7-zip32.dll to the window which sets.
+It can obtain housing file name and the file size etc. where 7-zip32.dll processes from this by receiving this message.
+  SevenZipSetOwnerWindowEx(), SevenZipSetOwnerWindowEx64() Being similar, it is sent to also the occasion where it appoints NULL to _lpArcProc.
+This time the value of lpEis becomes the pointer of _lpEis which covers to ARCHIVERPROC and the structure changes with the mode which is set.
+
+nMode       It is the value of wParam. State of the processing of 7-zip32.dll is displayed.
+lpEis       It is the value of lParam. It is the pointer which points to the EXTRACTINGINFO structure which houses file name and the like.
+
+Return value
+
+The application which processes this message must return FALSE.
+It is possible to make the processing of 7-zip32.dll discontinue by returning other than FALSE.
+
+
+-----------------------------------------------------------------------
+Call-back function
+-----------------------------------------------------------------------
+
+According to the processing circumstance of 7-zip32.dll, SevenZipSetOwnerWindowEx () and SevenZipSetOwnerWindowEx64 () with the call-back function which is set is called.
+It can obtain housing file name and the file size etc. where 7-zip32.dll processes from this with the argument which covers to this call-back function.
+
+  typedef BOOL CALLBACK ARCHIVERPROC(HWND _hwnd, UINT _uMsg,
+                                     UINT _nState, LPVOID _lpEis);
+
+  _hwnd     SevenZipSetOwnerWindowEx(), SevenZipSetOwnerWindowEx64()
+            So the window handle which is appointed is transferred.
+  _uMsg     At present it becomes wm_arcextract.
+  _nState   wWParam of wm_arcextract, in other words in the same sense as nMode.
+  _lpEis    You can obtain the information regarding the housing file with the pointer to the structure.
+            That actually the following either one it becomes.
+
+            LPEXTRACTINGINFOEX _lpEis
+              SevenZipSetOwnerWindowEx () sizeof (EXTRACTINGINFOEX) appointing, when SevenZipSetOwnerWindowEx64 () you use.
+            LPEXTRACTINGINFOEX32 _lpEis
+              Sizeof (EXTRACTINGINFOEX32) appointing, when SevenZipSetOwnerWindowEx64 () you use.
+            LPEXTRACTINGINFOEX64 _lpEis
+              Sizeof (EXTRACTINGINFOEX64) appointing, when SevenZipSetOwnerWindowEx64 () you use.
+
+ARCHIVERPROC when making processing 7-zip32.dll continue, when the TRUE ? making discontinue, must return FALSE.
+
+
+-----------------------------------------------------------------------
+EXTRACTINGINFO Structure
+-----------------------------------------------------------------------
+Structure definition
+    typedef struct {
+        DWORD   dwFileSize;
+        DWORD   dwWriteSize;
+        char    szSourceFileName[FNAME_MAX32 + 1];
+        char    dummy1[3];
+        char    szDestFileName[FNAME_MAX32 + 1];
+        char    dummy[3];
+    } EXTRACTINGINFO;
+
+
+Explanation of member
+
+    dwFileSize          Size of all the housing files.
+                        When entire size 0xFFFFFFFF (-1) it is above, 0xFFFFFFFF (-1) it houses.
+    dwWriteSize         The entire size which processed with compression thawing processing.
+                        When dwFileSize 0xFFFFFFFF (-1) is, entire processing ratio (permill) it houses.
+    szSourceFileName    The housing file name which processes.
+    szDestFileName      The path name which actually is written.
+
+
+-----------------------------------------------------------------------
+EXTRACTINGINFOEX Structure
+-----------------------------------------------------------------------
+Structure definition
+    typedef struct {
+        EXTRACTINGINFO  exinfo;
+        DWORD           dwCompressedSize;
+        DWORD           dwCRC;
+        UINT            uOSType;
+        WORD            wRatio;
+        WORD            wDate;
+        WORD            wTime;
+        char            szAttribute[8];
+        char            szMode[8];
+    }  EXTRACTINGINFOEX;
+
+
+Explanation of member
+
+    exinfo              The EXTRACTINGINFO structure is housed.
+    dwCompressedSize    Compressed size of housing file.
+                        When compressed size 0xFFFFFFFF (-1) it is above, 0xFFFFFFFF (-1) it houses.
+    dwCRC               Checksum of housing file.
+    uOSType             OS which was used the occasion where the file is housed.
+                        Under present conditions always 0.
+    wRatio              Permill (thousand minute ratio) with the bulk compressibility which is displayed.
+                        In case of solid book room always 0.
+    wDate               Renewal date of housing file (DOS type).
+    wTime               Renewal time of housing file (DOS type).
+    szAttribute         Attribute of housing file.
+    szMode              With 7-zip32.dll the character string of compressed system houses.
+
+
+-----------------------------------------------------------------------
+EXTRACTINGINFOEX32 Structure
+-----------------------------------------------------------------------
+Structure definition
+    typedef struct {
+        DWORD           dwStructSize;
+        EXTRACTINGINFO  exinfo;
+        DWORD           dwFileSize;
+        DWORD           dwCompressedSize;
+        DWORD           dwWriteSize;
+        DWORD           dwAttributes;
+        DWORD           dwCRC;
+        UINT            uOSType;
+        WORD            wRatio;
+        FILETIME        ftCreateTime;
+        FILETIME        ftAccessTime;
+        FILETIME        ftWriteTime;
+        char            szMode[8];
+        char            szSourceFileName[FNAME_MAX32 + 1];
+        char            dummy1[3];
+        char            szDestFileName[FNAME_MAX32 + 1];
+        char            dummy2[3];
+    } EXTRACTINGINFOEX32;
+
+
+Explanation of member
+
+    dwStructSize        Size of structure.
+    exinfo              The EXTRACTINGINFO structure is housed.
+                        It just is left because of compatibility.
+    dwFileSize          Size of all the housing files.
+                        When entire size 0xFFFFFFFF (-1) it is above, 0xFFFFFFFF (-1) it houses.
+    dwCompressedSize    Compressed size of housing file. When compressed size 0xFFFFFFFF (-1) it is above, 0xFFFFFFFF (-1) it houses.
+    dwWriteSize         The entire size which processed with compression thawing processing. When dwFileSize 0xFFFFFFFF (-1) is, entire processing ratio (permill) it houses.
+    dwAttributes        Attribute of housing file.
+    dwCRC               Checksum of housing file.
+    uOSType             OS which was used the occasion where the file is housed. Under present conditions always 0.
+    wRatio              Permill (thousand minute ratio) with the bulk compressibility which is displayed. In case of solid book room always 0.
+    ftCreateTime        Compilation day and time of the file due to FILETIME type.
+    ftAccessTime        Reference day and time of the file due to FILETIME type.
+    ftWriteTime         Renewal day and time of the file due to FILETIME type.
+    szMode              With 7-zip32.dll the character string of compressed system houses.
+    szSourceFileName    The housing file name which processes.
+    szDestFileName      The path name which actually is written.
+
+
+-----------------------------------------------------------------------
+EXTRACTINGINFOEX64 Structure
+-----------------------------------------------------------------------
+Structure definition
+    typedef struct {
+        DWORD           dwStructSize;
+        EXTRACTINGINFO  exinfo;
+        ULHA_INT64      llFileSize;
+        ULHA_INT64      llCompressedSize;
+        ULHA_INT64      llWriteSize;
+        DWORD           dwAttributes;
+        DWORD           dwCRC;
+        UINT            uOSType;
+        WORD            wRatio;
+        FILETIME        ftCreateTime;
+        FILETIME        ftAccessTime;
+        FILETIME        ftWriteTime;
+        char            szMode[8];
+        char            szSourceFileName[FNAME_MAX32 + 1];
+        char            dummy1[3];
+        char            szDestFileName[FNAME_MAX32 + 1];
+        char            dummy2[3];
+    } EXTRACTINGINFOEX32;
+
+
+Explanation of member
+
+    dwStructSize        Size of structure.
+    exinfo              The EXTRACTINGINFO structure is housed. It just is left because of compatibility.
+    llFileSize          Size of all the housing files.
+    llCompressedSize    Compressed size of housing file.
+    llWriteSize         The entire size which processed with compression thawing processing.
+    dwAttributes        Attribute of housing file.
+    dwCRC               Checksum of housing file.
+    uOSType             OS which was used the occasion where the file is housed. Under present conditions always 0.
+    wRatio              Permill (thousand minute ratio) with the bulk compressibility which is displayed. In case of solid book room always 0.
+    ftCreateTime        Compilation day and time of the file due to FILETIME type.
+    ftAccessTime        Reference day and time of the file due to FILETIME type.
+    ftWriteTime         Renewal day and time of the file due to FILETIME type.
+    szMode              With 7-zip32.dll the character string of compressed system houses.
+    szSourceFileName    The housing file name which processes.
+    szDestFileName      The path name which actually is written.
+
+
+-----------------------------------------------------------------------
+Flow of processing
+-----------------------------------------------------------------------
+The following 1 2 is repeated in every housing file which is processed.
+
+1. Forwarding message with ARCEXTRACT_OPEN (3). The book room name which processes in szSourceFileName is housed.
+
+2. ARCEXTRACT_BEGIN (0) with forwarding message. SzSourceFileName and szDestFileName become effective. Total size of the file where dwFileSize and llFileSize ? processing are done the occasion where first it was transmitted is housed. When (total size overflows, 0xFFFFFFFF (-1) housing) when thawing the other each member it becomes effective.
+
+3. Forwarding message with ARCEXTRACT_INPROCESS (1). The total size which processed so far in dwWriteSize and llWriteSize is housed. When (dwFileSize 0xFFFFFFFF (-1) is, until housing) processing of the file which is in the midst of processing ends entire processing ratio in dwWriteSize, it is forwarded. Depending upon when there are also times when it is not forwarded. When the file which is processed in other things remains, it returns to 2 and at the point in time when all processing ends to 4. (The timing which turns off processing circumstance indication)
+
+4. Forwarding message with ARCEXTRACT_END (2). LParam (_lpEis) 0 (NULL) is housed.
+
+
+-----------------------------------------------------------------------
+    The error cord/code which API returns
+-----------------------------------------------------------------------
+
+ERROR_WARNING
+    Something the error which is not fatal occurred.
+ERROR_FATAL
+    Something fatal error occurred.
+ERROR_FILE_CRC
+    Checksum of the housing file is not agreeable.
+ERROR_READ_ONLY
+    The file is read-only.
+ERROR_CANNOT_WRITE
+    Write-error occurred. 
+ERROR_FILE_OPEN
+    The file was not opened. 
+ERROR_COMMAND_NAME
+    Command appointment by mistake is.
+ERROR_ENOUGH_MEMORY
+    Global memory is insufficient.
+ERROR_NOT_ARC_FILE
+    The file which it appoints is not the archive file.
+ERROR_VERSION
+    The housing file it is type of the version to which 7-ZIP32.DLL is not corresponding.
+ERROR_METHOD
+    It is housed with the housing mode which cannot be handled with 7-ZIP32.DLL.
+ERROR_DURING_DECOMPRESSION
+    When thawing error occurred.
+ERROR_DIR_FILE_WIDTH_64BIT_SIZE
+    The file of the directory is the size of 64bit.
+ERROR_CONVERT_TIME
+    It cannot convert time stamp
+ERROR_FILE_CHANGED_DURING_OPERATION
+    The file was modified while operating. 
+ERROR_USER_CANCEL
+    Processing was discontinued by the user.
+ERROR_ALREADY_RUNNING
+    Already 7-ZIP32.DLL is in the midst of operating.
+ERROR_HARC_ISNOT_OPENED
+    SevenZipOpenArchive () with relation before attaching the book room and the steering wheel, SevenZipFindFirst () and so on API was used.
+ERROR_NOT_SEARCH_MODE
+    SevenZipFindFirst () before using, SevenZipFindNext () was called and high before calling these, SevenZipGetFileName () and so on API was called.
+ERROR_PASSWORD_FILE
+    The password which is input by mistake is.
+
+
+-----------------------------------------------------------------------
+Note
+-----------------------------------------------------------------------
+
+In the future specification there are times when it is modified.
+
+=======================================================================
+

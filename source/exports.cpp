@@ -91,29 +91,25 @@ EXPORT int ahkPause(LPTSTR aChangeTo) //Change pause state of a running script
 	if (!g_script.mIsReadyToExecute)
 		return 0; // AutoHotkey needs to be running at this point //
 
-	if ( (((int)aChangeTo == 1 || (int)aChangeTo == 0) || (*aChangeTo == 'O' || *aChangeTo == 'o') && ( *(aChangeTo+1) == 'N' || *(aChangeTo+1) == 'n' ) ) || *aChangeTo == '1')
+	bool pause;
+	if ((UINT_PTR)aChangeTo == 1 || (UINT_PTR)aChangeTo == 0)
+		pause = (UINT_PTR)aChangeTo == 1;
+	else if (!*aChangeTo)
+		return (int)g->IsPaused; // Empty string: only retrieve the current state.
+	else
+		pause = *aChangeTo == '1' || (*aChangeTo == 'O' || *aChangeTo == 'o') && (aChangeTo[1] == 'N' || aChangeTo[1] == 'n');
+	// Only adjust g_nPausedThreads when the state actually changes, otherwise "On" twice or "Off"
+	// while not paused leaves the counter out of balance with the threads that are really paused.
+	if (pause != g->IsPaused)
 	{
 #ifndef MINIDLL
 		Hotkey::ResetRunAgainAfterFinished();
 #endif
-		if ((int)aChangeTo == 0 || ((int)aChangeTo != 1 && (*aChangeTo == '0' || (*(aChangeTo + 1) == 'F' || *(aChangeTo + 1) == 'f'))))
-		{
-			g->IsPaused = false;
-			--g_nPausedThreads; // For this purpose the idle thread is counted as a paused thread.
-		}
-		else
-		{
-			g->IsPaused = true;
+		g->IsPaused = pause;
+		if (pause)
 			++g_nPausedThreads; // For this purpose the idle thread is counted as a paused thread.
-		}
-#ifndef MINIDLL
-		g_script.UpdateTrayIcon();
-#endif
-	}
-	else if (*aChangeTo != '\0')
-	{
-		g->IsPaused = false;
-		--g_nPausedThreads; // For this purpose the idle thread is counted as a paused thread.
+		else
+			--g_nPausedThreads;
 #ifndef MINIDLL
 		g_script.UpdateTrayIcon();
 #endif
@@ -150,7 +146,14 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 
 	if (g_MainThreadID != thisThreadID)
 		SuspendThread(g_hThread);
-	Var *ahkvar = g_script.FindOrAddVar(name);
+	// Validate first: FindOrAddVar() would show an error dialog for an invalid name.
+	Var *ahkvar = Var::ValidateName(name, DISPLAY_NO_ERROR) ? g_script.FindOrAddVar(name) : NULL;
+	if (!ahkvar) // Invalid variable name.
+	{
+		if (g_MainThreadID != thisThreadID)
+			ResumeThread(g_hThread);
+		return _T("");
+	}
 	if (getVar != NULL)
 	{
 		if (ahkvar->mType == VAR_BUILTIN)
@@ -159,7 +162,7 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 				ResumeThread(g_hThread);
 			return _T("");
 		}
-		LPTSTR new_mem = (LPTSTR)realloc((LPTSTR )result_to_return_dll,MAX_INTEGER_LENGTH);
+		LPTSTR new_mem = (LPTSTR)realloc((LPTSTR )result_to_return_dll,MAX_INTEGER_SIZE * sizeof(TCHAR));
 		if (!new_mem)
 		{
 			g_script.ScriptError(ERR_OUTOFMEM, name);
@@ -172,57 +175,32 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 			ResumeThread(g_hThread);
 		return ITOA64((UINT_PTR)ahkvar,result_to_return_dll);
 	}
-	if (ahkvar->mType != VAR_BUILTIN && !ahkvar->HasContents() )
+	if ((ahkvar->mType == VAR_NORMAL || ahkvar->mType == VAR_ALIAS) && !ahkvar->HasContents()) // HasContents() requires VAR_NORMAL (e.g. not the clipboard).
 	{
 		if (g_MainThreadID != thisThreadID)
 			ResumeThread(g_hThread);
 		return _T("");
 	}
-	if (*ahkvar->mCharContents == '\0')
+	// Var::Get() converts a cached binary number to text (the contents may be out of date, and
+	// mContentsInt64 may hold a double) and handles aliases, built-in vars and the clipboard.
+	// It is called twice so that the buffer is sized for the text actually written.
+	bool imitate_thread = ahkvar->mType == VAR_BUILTIN && ahkvar->mBIV == BIV_IsPaused;
+	if (imitate_thread)
+		++g; // imitate new thread for A_IsPaused
+	LPTSTR new_mem = (LPTSTR )realloc((LPTSTR )result_to_return_dll,(ahkvar->Get() + 1) * sizeof(TCHAR));
+	if (!new_mem)
 	{
-		LPTSTR new_mem = (LPTSTR )realloc((LPTSTR )result_to_return_dll,(ahkvar->mType == VAR_BUILTIN ? ahkvar->mBIV(0,name) : ahkvar->mByteCapacity ? ahkvar->mByteCapacity : ahkvar->mByteLength) + MAX_NUMBER_LENGTH + sizeof(TCHAR));
-		if (!new_mem)
-		{
-			g_script.ScriptError(ERR_OUTOFMEM, name);
-			if (g_MainThreadID != thisThreadID)
-				ResumeThread(g_hThread);
-			return _T("");
-		}
-		result_to_return_dll = new_mem;
-		if ( ahkvar->mType == VAR_BUILTIN )
-		{
-			if (ahkvar->mBIV == BIV_IsPaused)
-			{
-				++g; // imitate new thread for A_IsPaused
-				ahkvar->mBIV(result_to_return_dll,name); //Hotkeyit 
-				--g;
-			}
-			else
-				ahkvar->mBIV(result_to_return_dll,name); //Hotkeyit 
-		}
-		else if ( ahkvar->mType == VAR_ALIAS )
-			ITOA64(ahkvar->mAliasFor->mContentsInt64,result_to_return_dll);
-		else if ( ahkvar->mType == VAR_NORMAL )
-			ITOA64(ahkvar->mContentsInt64,result_to_return_dll);//Hotkeyit
+		if (imitate_thread)
+			--g;
+		g_script.ScriptError(ERR_OUTOFMEM, name);
+		if (g_MainThreadID != thisThreadID)
+			ResumeThread(g_hThread);
+		return _T("");
 	}
-	else
-	{
-		LPTSTR new_mem = (LPTSTR )realloc((LPTSTR )result_to_return_dll,ahkvar->mType == VAR_BUILTIN ? ahkvar->mBIV(0,name) : ahkvar->mByteLength + sizeof(TCHAR));
-		if (!new_mem)
-		{
-			g_script.ScriptError(ERR_OUTOFMEM, name);
-			if (g_MainThreadID != thisThreadID)
-				ResumeThread(g_hThread);
-			return _T("");
-		}
-		result_to_return_dll = new_mem;
-		if ( ahkvar->mType == VAR_ALIAS )
-			ahkvar->mAliasFor->Get(result_to_return_dll); //Hotkeyit removed ebiv.cpp and made ahkgetvar return all vars
- 		else if ( ahkvar->mType == VAR_NORMAL )
-			ahkvar->Get(result_to_return_dll);  // var.getText() added in V1.
-		else if ( ahkvar->mType == VAR_BUILTIN )
-			ahkvar->mBIV(result_to_return_dll,name); //Hotkeyit 
-	}
+	result_to_return_dll = new_mem;
+	ahkvar->Get(result_to_return_dll);
+	if (imitate_thread)
+		--g;
 	if (g_MainThreadID != thisThreadID)
 		ResumeThread(g_hThread);
 	return result_to_return_dll;
@@ -231,7 +209,7 @@ EXPORT LPTSTR ahkgetvar(LPTSTR name,unsigned int getVar)
 EXPORT int ahkassign(LPTSTR name, LPTSTR value) // ahkwine 0.1
 {
 	if (!g_script.mIsReadyToExecute)
-		return 0; // AutoHotkey needs to be running at this point //
+		return -1; // AutoHotkey needs to be running at this point //
 
 #ifdef _WIN64
 	DWORD thisThreadID = __readgsdword(0x48); // Used to identify if code is called from different thread (AutoHotkey.dll)
@@ -242,11 +220,13 @@ EXPORT int ahkassign(LPTSTR name, LPTSTR value) // ahkwine 0.1
 	if (g_MainThreadID != thisThreadID)
 		SuspendThread(g_hThread);
 	Var *var;
-	if (!(var = g_script.FindOrAddVar(name, _tcslen(name))))
+	// Read-only vars (e.g. A_TickCount) must not be assigned: Var::Assign() would write into the
+	// shared empty string of a built-in var and corrupt every empty string of the script.
+	if (!Var::ValidateName(name, DISPLAY_NO_ERROR) || !(var = g_script.FindOrAddVar(name, _tcslen(name))) || VAR_IS_READONLY(*var))
 	{
 		if (g_MainThreadID != thisThreadID)
 			ResumeThread(g_hThread);
-		return -1;  // Realistically should never happen.
+		return -1;
 	}
 	var->Assign(value); 
 	if (g_MainThreadID != thisThreadID)
@@ -298,7 +278,7 @@ EXPORT int ahkLabel(LPTSTR aLabelName, unsigned int nowait) // 0 = wait = defaul
 EXPORT int ahkPostFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR param3, LPTSTR param4, LPTSTR param5, LPTSTR param6, LPTSTR param7, LPTSTR param8, LPTSTR param9, LPTSTR param10)
 {
 	if (!g_script.mIsReadyToExecute)
-		return 0; // AutoHotkey needs to be running at this point //
+		return -1; // AutoHotkey needs to be running at this point //
 	Func *aFunc = g_script.FindFunc(func) ;
 	if (aFunc)
 	{	
@@ -738,7 +718,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 					*result_to_return_dll = '\0';
 				break;
 			case SYM_INTEGER:
-				new_buf = (LPTSTR )realloc((LPTSTR )result_to_return_dll,MAX_INTEGER_LENGTH);
+				new_buf = (LPTSTR )realloc((LPTSTR )result_to_return_dll,MAX_NUMBER_SIZE * sizeof(TCHAR));
 				if (!new_buf)
 				{
 					g_script.ScriptError(ERR_OUTOFMEM,func);
@@ -749,7 +729,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 				ITOA64(aFuncAndToken.mToken.value_int64, result_to_return_dll);
 				break;
 			case SYM_FLOAT:
-				new_buf = (LPTSTR )realloc((LPTSTR )result_to_return_dll,MAX_INTEGER_LENGTH);
+				new_buf = (LPTSTR )realloc((LPTSTR )result_to_return_dll,MAX_NUMBER_SIZE * sizeof(TCHAR));
 				if (!new_buf)
 				{
 					g_script.ScriptError(ERR_OUTOFMEM,func);
@@ -761,7 +741,7 @@ EXPORT LPTSTR ahkFunction(LPTSTR func, LPTSTR param1, LPTSTR param2, LPTSTR para
 				break;
 			//case SYM_OBJECT: // L31: Treat objects as empty strings (or TRUE where appropriate).
 			default: // Not an operand: continue on to return the default at the bottom.
-				new_buf = (LPTSTR )realloc((LPTSTR )result_to_return_dll,MAX_INTEGER_LENGTH);
+				new_buf = (LPTSTR )realloc((LPTSTR )result_to_return_dll,MAX_NUMBER_SIZE * sizeof(TCHAR));
 				if (!new_buf)
 				{
 					g_script.ScriptError(ERR_OUTOFMEM,func);
@@ -909,7 +889,7 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 				*aFuncAndToken->result_to_return_dll = '\0';
 			break;
 		case SYM_INTEGER:
-			new_buf = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,MAX_INTEGER_LENGTH);
+			new_buf = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,MAX_NUMBER_SIZE * sizeof(TCHAR));
 			if (!new_buf)
 			{
 				g_script.ScriptError(ERR_OUTOFMEM,func.mName);
@@ -919,16 +899,19 @@ void callFuncDll(FuncAndToken *aFuncAndToken)
 			ITOA64(aFuncAndToken->mToken.value_int64, aFuncAndToken->result_to_return_dll);
 			break;
 		case SYM_FLOAT:
-			new_buf = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,MAX_INTEGER_LENGTH);
+			new_buf = (LPTSTR )realloc((LPTSTR )aFuncAndToken->result_to_return_dll,MAX_NUMBER_SIZE * sizeof(TCHAR));
 			if (!new_buf)
 			{
 				g_script.ScriptError(ERR_OUTOFMEM,func.mName);
 				return;
 			}
-			result_to_return_dll = new_buf;
+			aFuncAndToken->result_to_return_dll = new_buf;
 			sntprintf(aFuncAndToken->result_to_return_dll, MAX_NUMBER_SIZE, g->FormatFloat, aFuncAndToken->mToken.value_double);
 			break;
-		//case SYM_OBJECT: // L31: Treat objects as empty strings (or TRUE where appropriate).
+		case SYM_OBJECT: // L31: Treat objects as empty strings (or TRUE where appropriate).
+			aFuncAndToken->mToken.object->Release(); // The function returned a reference which nobody else owns.
+			aFuncAndToken->mToken.symbol = SYM_INTEGER; // Don't leave a dangling object pointer in the reused token.
+			// Fall through.
 		default: // Not an operand: continue on to return the default at the bottom.
 			if (aFuncAndToken->result_to_return_dll)
 				*aFuncAndToken->result_to_return_dll = '\0';

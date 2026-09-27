@@ -1,4 +1,4 @@
-// Microsoft Visual C++ generated resource script.
+﻿// Microsoft Visual C++ generated resource script.
 //
 #include "resource.h"
 
@@ -172,17 +172,6 @@ END
 
 #include "..\ahkversion.h"
 
-#ifdef UNICODE
-#define AHK_ENC "Unicode"
-#else
-#define AHK_ENC "ANSI"
-#endif
-#ifdef _WIN64
-#define AHK_BIT "64-bit"
-#else
-#define AHK_BIT "32-bit"
-#endif
-
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION AHK_VERSION_N
  PRODUCTVERSION AHK_VERSION_N
@@ -205,6 +194,7 @@ BEGIN
             VALUE "FileVersion", AHK_VERSION
             VALUE "InternalName", ""
             VALUE "LegalCopyright", ""
+            VALUE "CompanyName", ""
             VALUE "OriginalFilename", ""
             VALUE "ProductName", ""
             VALUE "ProductVersion", AHK_VERSION

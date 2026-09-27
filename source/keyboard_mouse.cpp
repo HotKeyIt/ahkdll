@@ -646,9 +646,9 @@ void SendKeys(LPTSTR aKeys, SendRawModes aSendRaw, SendModes aSendModeOrig, HWND
 				{
 					// v1.0.40: SendKeySpecial sends only keybd_event keystrokes, not ControlSend style
 					// keystrokes.
-					// v1.0.43.07: Added check of event_type!=KEYUP, which causes something like Send {ð up} to
+					// v1.0.43.07: Added check of event_type!=KEYUP, which causes something like Send {ï¿½ up} to
 					// do nothing if the curr. keyboard layout lacks such a key.  This is relied upon by remappings
-					// such as F1::ð (i.e. a destination key that doesn't have a VK, at least in English).
+					// such as F1::ï¿½ (i.e. a destination key that doesn't have a VK, at least in English).
 					if (event_type != KEYUP) // In this mode, mods_for_next_key and event_type are ignored due to being unsupported.
 					{
 						if (aTargetWindow)
@@ -1185,8 +1185,8 @@ void SendKey(vk_type aVK, sc_type aSC, modLR_type aModifiersLR, modLR_type aModi
 void SendKeySpecial(TCHAR aChar, int aRepeatCount, modLR_type aModifiersLR)
 // Caller must be aware that keystrokes are sent directly (i.e. never to a target window via ControlSend mode).
 // It must also be aware that the event type KEYDOWNANDUP is always what's used since there's no way
-// to support anything else.  Furthermore, there's no way to support "modifiersLR_for_next_key" such as ^€
-// (assuming € is a character for which SendKeySpecial() is required in the current layout) with ASC mode.
+// to support anything else.  Furthermore, there's no way to support "modifiersLR_for_next_key" such as ^ï¿½
+// (assuming ï¿½ is a character for which SendKeySpecial() is required in the current layout) with ASC mode.
 // This function uses some of the same code as SendKey() above, so maintain them together.
 {
 	// Caller must verify that aRepeatCount >= 1.
@@ -1300,7 +1300,7 @@ void SendASC(LPCTSTR aAscii)
 	// Changing the modifier state via SetModifierLRState() (rather than some more error-prone multi-step method)
 	// also ensures that the ALT key is pressed down only after releasing any shift key that needed it above.
 	// Otherwise, the OS's switch-keyboard-layout hotkey would be triggered accidentally; e.g. the following
-	// in English layout: Send ~~âÂ{^}.
+	// in English layout: Send ~~ï¿½ï¿½{^}.
 	//
 	// Make sure modifier state is correct: ALT pressed down and other modifiers UP
 	// because CTRL and SHIFT seem to interfere with this technique if they are down,
@@ -1922,7 +1922,7 @@ void KeyEvent(KeyEventTypes aEventType, vk_type aVK, sc_type aSC, HWND aTargetWi
 			}
 			// The following is done to avoid an extraneous artificial {LCtrl Up} later on,
 			// since the keyboard driver should insert one in response to this {RAlt Up}:
-			if (target_layout_has_altgr && aSC == SC_RALT)
+			if (target_layout_has_altgr == CONDITION_TRUE && aSC == SC_RALT)
 				sEventModifiersLR &= ~MOD_LCONTROL;
 
 #ifndef MINIDLL
@@ -2893,8 +2893,8 @@ void SendEventArray(int &aFinalKeyDelay, modLR_type aModsDuringSend)
 		// Process unprocessed Events
 		if (aLastEventCount == 0)
 			SendInput(sEventCount, sEventSI, sizeof(INPUT)); // Must call dynamically-resolved version for Win95/NT compatibility.
-		else
-			SendInput(aLastEventCount, &sEventSI[aLastEventCount], sizeof(INPUT)); // Must call dynamically-resolved version for Win95/NT compatibility.
+		else if (aLastEventCount < sEventCount) // Send the events after the last sleep, if any (e.g. none for "abc{100}").
+			SendInput(sEventCount - aLastEventCount, &sEventSI[aLastEventCount], sizeof(INPUT)); // Must call dynamically-resolved version for Win95/NT compatibility.
 		// The return value is ignored because it never seems to be anything other than sEventCount, even if
 		// the Send seems to partially fail (e.g. due to hitting 5000 event maximum).
 		// Typical speed of SendInput: 10ms or less for short sends (under 100 events).
@@ -2927,6 +2927,7 @@ void SendEventArray(int &aFinalKeyDelay, modLR_type aModsDuringSend)
 				modLR_type mods_changed_physically_during_send = aModsDuringSend ^ mods_current;
 				g_modifiersLR_physical &= ~(mods_changed_physically_during_send & aModsDuringSend); // Remove those that changed from down to up.
 				g_modifiersLR_physical |= mods_changed_physically_during_send & mods_current; // Add those that changed from up to down.
+				g_modifiersLR_logical = g_modifiersLR_logical_non_ignored = mods_current; // Necessary for hotkeys to be recognized correctly if modifiers were sent.
 				g_HShwnd = GetForegroundWindow(); // An item done by ResetHook() that seems worthwhile here.
 				// Most other things done by ResetHook() seem like they would do more harm than good to reset here
 				// because of the the time the hook is typically missing is very short, usually under 30ms.
@@ -3454,7 +3455,7 @@ void SetModifierLRState(modLR_type aModifiersLRnew, modLR_type aModifiersLRnow, 
 			if (sTargetLayoutHasAltGr == CONDITION_TRUE) // Note that KeyEvent() might have just changed the value of sTargetLayoutHasAltGr.
 			{
 				// Indicate that control is both down and required down so that the section after this one won't
-				// release it.  Without this fix, a hotkey that sends an AltGr char such as "^ä:: SendRaw, {"
+				// release it.  Without this fix, a hotkey that sends an AltGr char such as "^ï¿½:: SendRaw, {"
 				// would fail to work under German layout because left-alt would be released after right-alt
 				// goes down.
 				aModifiersLRnow |= MOD_LCONTROL; // To reflect what KeyEvent() did above.
@@ -3707,6 +3708,33 @@ modLR_type GetModifierLRState(bool aExplicitlyGet)
 		// to a process with higher integrity level than our own became active while the key was
 		// down, so we saw the down event but not the up event.
 		modLR_type modifiers_wrongly_down = g_modifiersLR_logical & ~modifiersLR;
+		// modifiers_wrongly_down can sometimes include modifiers that have only just been pressed
+		// but aren't yet reflected by IsKeyDownAsync().  This happens much more often if a keyboard
+		// hook is installed AFTER our own.  The following simple script was enough to reproduce this:
+		//	~*RWin::GetKeyState("RWin", "P")
+		//	>#/::MsgBox  ; This hotkey sometimes or always failed to fire.
+		// The sequence of events was probably something like this:
+		//  - OS detects RWin down.
+		//  - OS calls other hook.
+		//  - Other hook calls ours via CallNextHookEx (meaning its thread is blocked
+		//    waiting for the call to return).
+		//  - Our hook updates key state, posts AHK_HOOK_HOTKEY and RETURNS IMMEDIATELY
+		//    (but the other hook is in another thread, so it doesn't resume immediately).
+		//  - Script thread receives AHK_HOOK_HOTKEY and fires hotkey.
+		//  - Hotkey calls Send or GetKeyState, triggering the section below, adjusting
+		//    g_modifiersLR_logical to match GetAsyncKeyState().
+		//  - Other hook's thread wakes up and returns.
+		//  - OS updates key state, so then GetAsyncKeyState() reports the correct state
+		//    and g_modifiersLR_logical is incorrect.
+		//  - RWin+/ doesn't fire the hotkey because the hook thinks RWin isn't down,
+		//    even though KeyHistory shows that it should be down.
+		// The issue occurred with maybe 50% frequency if the other hook was an AutoHotkey hook,
+		// and 100% frequency if the other hook was implemented by a script (which is slower).
+		// Only the last pressed modifier is excluded, since any other key-down or key-up being
+		// detected would usually mean that the previous call to the hook has finished (although
+		// the hook can be called recursively with artificial input).
+		if (g_modifiersLR_last_pressed && GetTickCount() - g_modifiersLR_last_pressed_time < 20)
+			modifiers_wrongly_down &= ~g_modifiersLR_last_pressed;
 		if (modifiers_wrongly_down)
 		{
 			// Adjust the physical and logical hook state to release the keys that are wrongly down.
@@ -3718,9 +3746,11 @@ modLR_type GetModifierLRState(bool aExplicitlyGet)
 			g_modifiersLR_logical_non_ignored &= ~modifiers_wrongly_down;
 			// Also adjust physical state so that the GetKeyState command will retrieve the correct values:
 			AdjustKeyState(g_PhysicalKeyState, g_modifiersLR_physical);
+#ifndef MINIDLL // The Mini DLL has no hook, so no prefix key.
 			// Also reset pPrefixKey if it is one of the wrongly-down modifiers.
 			if (pPrefixKey && (pPrefixKey->as_modifiersLR & modifiers_wrongly_down))
 				pPrefixKey = NULL;
+#endif
 		}
 	}
 
@@ -3883,7 +3913,7 @@ DWORD GetFocusedCtrlThread(HWND *apControl, HWND aWindow)
 		// Get thread of aWindow (which should be the foreground window).
 		thread_id = GetWindowThreadProcessId(aWindow, NULL);
 		// Get focus.  Benchmarks showed this additional step added only 6% to the time,
-		// and the total was only around 4µs per iteration anyway (on a Core i5-4460).
+		// and the total was only around 4ï¿½s per iteration anyway (on a Core i5-4460).
 		// It is necessary for UWP apps such as Microsoft Edge, and any others where
 		// the top-level window belongs to a different thread than the focused control.
 		GUITHREADINFO thread_info;
@@ -4214,7 +4244,7 @@ sc_type TextToSC(LPTSTR aText, bool *aSpecifiedByNumber)
 
 vk_type TextToVK(LPTSTR aText, modLR_type *pModifiersLR, bool aExcludeThoseHandledByScanCode, bool aAllowExplicitVK
 	, HKL aKeybdLayout)
-// If modifiers_p is non-NULL, place the modifiers that are needed to realize the key in there.
+// If pModifiersLR is non-NULL, place the modifiers that are needed to realize the key in there.
 // e.g. M is really +m (shift-m), # is really shift-3.
 // HOWEVER, this function does not completely overwrite the contents of pModifiersLR; instead, it just
 // adds the required modifiers into whatever is already there.

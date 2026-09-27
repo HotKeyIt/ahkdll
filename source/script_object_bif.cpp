@@ -401,7 +401,8 @@ BIF_DECL(BIF_sizeof)
 		if ((!_tcscmp(defbuf, _T(" bool ")) && (thissize = 1)) || (thissize = IsDefaultType(defbuf)))
 		{
 			// align offset
-			if ((!bitsize || bitsizetotal == bitsize) && thissize > 1 && (mod = offset % STRUCTALIGN(thissize)))
+			STRUCTALIGN(thissize); // Also for 1-byte types, otherwise the alignment stays 0 and "offset % 0" faults later.
+			if ((!bitsize || bitsizetotal == bitsize) && thissize > 1 && (mod = offset % thisalign))
 				offset += (thisalign - mod) % thisalign;
 			if (!bitsize || bitsizetotal == bitsize)
 				offset += thissize * (arraydef ? arraydef : 1);
@@ -944,11 +945,11 @@ __int64 ObjRawDump(IObject *aObject, char *aBuffer, bool aCopyBuffer, IObject *a
 			*(short*)aThisBuffer = (short)aIsValue;
 			aThisBuffer += sizeof(short);
 		}
-		else if (aIsValue > INT_MIN)
+		else if (aIsValue >= INT_MIN) // Same boundary as the size calculation and the key branch.
 		{
 			*aThisBuffer = (char)5;
 			aThisBuffer += 1;
-			*aThisBuffer = (int)aIsValue;
+			*(int*)aThisBuffer = (int)aIsValue;
 			aThisBuffer += sizeof(int);
 		}
 		else
@@ -1045,7 +1046,7 @@ BIF_DECL(BIF_ObjDump)
 				return;
 			}
 			memcpy(aBuffer, aDataBuf, aSize = aCompressedSize);
-			VirtualFree(aDataBuf, 0, MEM_RELEASE);
+			free(aDataBuf); // CompressBuffer() allocates it with malloc().
 		}
 	}
 	aResultToken.value_int64 = aSize;
@@ -1090,8 +1091,11 @@ IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &a
 	{
 		IObject **newObjects = (IObject**)malloc(aObjSize * 2 * sizeof(IObject**));
 		if (!newObjects)
+		{
+			aObject->Release();
 			return 0;
-		memcpy(newObjects, aObjects, aObjSize);
+		}
+		memcpy(newObjects, aObjects, aObjSize * sizeof(IObject*));
 		free(aObjects);
 		aObjects = newObjects;
 		aObjSize *= 2;
@@ -1107,6 +1111,10 @@ IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &a
 
 	for (char *end = aThisBuffer + aSize; aThisBuffer < end;)
 	{
+		// Objects created below for this key/value.  Once inserted into aObject (which AddRefs keys and values),
+		// their creation reference must be released.  aObjects[] keeps pointers without owning them.
+		IObject *new_key = NULL, *new_value = NULL;
+		Result.symbol = SYM_INTEGER; // IT_SET returns an assigned object AddRef'd in Result, which is released below.
 		char type = *(char*)aThisBuffer;
 		aThisBuffer += 1;
 		if (type == -12)
@@ -1118,7 +1126,11 @@ IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &a
 		else if (type == -11)
 		{
 			aKey.symbol = SYM_OBJECT;
-			aKey.object = ObjRawLoad(aThisBuffer, aObjects, aObjCount, aObjSize);
+			if (!(aKey.object = new_key = ObjRawLoad(aThisBuffer, aObjects, aObjCount, aObjSize)))
+			{
+				aObject->Release();
+				return NULL;
+			}
 			aThisBuffer += sizeof(__int64) + *(__int64*)aThisBuffer;
 		}
 		else if (type == -10)
@@ -1188,8 +1200,11 @@ IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &a
 				aKey.value_int64 = *(__int64*)aThisBuffer;
 				aThisBuffer += sizeof(__int64);
 			}
-			else
+			else // Corrupt data.
+			{
+				aObject->Release();
 				return NULL;
+			}
 		}
 
 		type = *(char*)aThisBuffer;
@@ -1203,7 +1218,13 @@ IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &a
 		else if (type == 11)
 		{
 			aValue.symbol = SYM_OBJECT;
-			aValue.object = ObjRawLoad(aThisBuffer, aObjects, aObjCount, aObjSize);
+			if (!(aValue.object = new_value = ObjRawLoad(aThisBuffer, aObjects, aObjCount, aObjSize)))
+			{
+				if (new_key)
+					new_key->Release();
+				aObject->Release();
+				return NULL;
+			}
 			aThisBuffer += sizeof(__int64) + *(__int64*)aThisBuffer;
 		}
 		else if (type == 9)
@@ -1255,8 +1276,13 @@ IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &a
 				aValue.value_int64 = *(__int64*)aThisBuffer;
 				aThisBuffer += sizeof(__int64);
 			}
-			else
+			else // Corrupt data.
+			{
+				if (new_key)
+					new_key->Release();
+				aObject->Release();
 				return NULL;
+			}
 		}
 		if (type == 10)
 		{
@@ -1286,6 +1312,12 @@ IObject* ObjRawLoad(char *aBuffer, IObject **&aObjects, UINT &aObjCount, UINT &a
 		}
 		else
 			aObject->Invoke(Result, this_token, IT_SET, params + 1, 2);
+		if (Result.symbol == SYM_OBJECT)
+			Result.object->Release();
+		if (new_key)
+			new_key->Release();
+		if (new_value)
+			new_value->Release();
 	}
 	return aObject;
 }
@@ -1342,14 +1374,12 @@ BIF_DECL(BIF_ObjLoad)
 		if (*(ULONG*)((UINT_PTR)aBuffer + 16) > aSize)
 			aSize = *(ULONG*)((UINT_PTR)aBuffer + 16);
 		DWORD aSizeDeCompressed = DecompressBuffer(aBuffer, aDataBuf, aSize, pw);
+		if (aFreeBuffer) // The file's contents are no longer needed.
+			free(aBuffer);
 		if (aSizeDeCompressed)
 		{
-			LPVOID buff = malloc(aSizeDeCompressed);
 			aFreeBuffer = true;
-			memcpy(buff, aDataBuf, aSizeDeCompressed);
-			g_memset(aDataBuf, 0, aSizeDeCompressed);
-			free(aDataBuf);
-			aBuffer = (char*)buff;
+			aBuffer = (char*)aDataBuf; // Allocated by DecompressBuffer() with malloc().
 		}
 		else
 		{
@@ -1364,7 +1394,7 @@ BIF_DECL(BIF_ObjLoad)
 	IObject **aObjects = (IObject**)malloc(aObjSize * sizeof(IObject**));
 	if (!aObjects || !(aResultToken.object = ObjRawLoad(aBuffer, aObjects, aObjCount, aObjSize)))
 	{
-		if (!TokenToInt64(*aParam[0]))
+		if (aFreeBuffer)
 			free(aBuffer);
 		free(aObjects);
 		aResultToken.symbol = SYM_STRING;
@@ -1565,8 +1595,6 @@ BIF_DECL(BIF_ObjNew)
 	ResultType result;
 	LPTSTR buf = aResultToken.buf; // In case Invoke overwrites it via the union.
 
-	Line *curr_line = g_script.mCurrLine;
-
 	// __Init was added so that instance variables can be initialized in the correct order
 	// (beginning at the root class and ending at class_object) before __New is called.
 	// It shouldn't be explicitly defined by the user, but auto-generated in DefineClassVars().
@@ -1596,8 +1624,6 @@ BIF_DECL(BIF_ObjNew)
 		}
 	}
 
-	g_script.mCurrLine = curr_line; // Prevent misleading error reports/Exception() stack trace.
-	
 	// __New may be defined by the script for custom initialization code.
 	name_token.marker = Object::sMetaFuncName[4]; // __New
 	result = class_object->Invoke(aResultToken, this_token, IT_CALL | IF_METAOBJ, aParam, aParamCount);

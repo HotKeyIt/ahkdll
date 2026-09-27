@@ -7283,6 +7283,10 @@ ResultType GuiType::Show(LPTSTR aOptions, LPTSTR aText)
 			SendMessage(mHwnd, WM_NCCALCSIZE, FALSE, (LPARAM)&rcTemp);
 			rect.bottom += rcTemp.top;
 		}
+
+		int nc_width = rect.right - rect.left - width;
+		int nc_height = rect.bottom - rect.top - height;
+
 		width = rect.right - rect.left;  // rect.left might be slightly less than zero.
 		height = rect.bottom - rect.top; // rect.top might be slightly less than zero. A status bar is properly handled since it's inside the window's client area.
 
@@ -7321,6 +7325,43 @@ ResultType GuiType::Show(LPTSTR aOptions, LPTSTR aText)
 		int old_width = old_rect.right - old_rect.left;
 		int old_height = old_rect.bottom - old_rect.top;
 
+		// Added for v1.0.44.13:
+		// Below is done inside this block (allow_move_window) because it that way, it should always
+		// execute whenever mGuiShowHasNeverBeenDone (since the window shouldn't be iconic prior to
+		// its first showing).  In addition, below must be down prior to any ShowWindow() that does
+		// a minimize or maximize because that would prevent GetWindowRect/GetClientRect calculations
+		// below from working properly.
+		// v1.1.34.03: It's now done before the MoveWindow call below, so that the initial size is
+		// limited by the correct values.  nc_width and nc_height are expected to be accurate, and
+		// must be used rather than calling GetClientRect and calculating the difference, as that's
+		// likely to be 0x0 prior to calling MoveWindow.
+		if (mGuiShowHasNeverBeenDone) // This is the first showing of this window.
+		{
+			// Now that the window's style, edge type, title bar, menu bar, and other non-client attributes have
+			// likely (but not certainly) been determined, adjust MinMaxSize values from client size to
+			// entire-window size for use with WM_GETMINMAXINFO.
+
+			if (mMinWidth == COORD_CENTERED) // COORD_CENTERED is the flag that means, "use window's current, total width."
+				mMinWidth = width;
+			else if (mMinWidth != COORD_UNSPECIFIED)
+				mMinWidth += nc_width;
+
+			if (mMinHeight == COORD_CENTERED)
+				mMinHeight = height;
+			else if (mMinHeight != COORD_UNSPECIFIED)
+				mMinHeight += nc_height;
+
+			if (mMaxWidth == COORD_CENTERED)
+				mMaxWidth = width;
+			else if (mMaxWidth != COORD_UNSPECIFIED)
+				mMaxWidth += nc_width;
+
+			if (mMaxHeight == COORD_CENTERED)
+				mMaxHeight = height;
+			else if (mMaxHeight != COORD_UNSPECIFIED)
+				mMaxHeight += nc_height;
+		} // if (mGuiShowHasNeverBeenDone)
+
 		// Avoid calling MoveWindow() if nothing changed because it might repaint/redraw even if window size/pos
 		// didn't change:
 		if (width != old_width || height != old_height || (x != COORD_UNSPECIFIED && x != old_rect.left)
@@ -7348,54 +7389,16 @@ ResultType GuiType::Show(LPTSTR aOptions, LPTSTR aText)
 			}
 		}
 
-		// Added for v1.0.44.13:
-		// Below is done inside this block (allow_move_window) because it that way, it should always
-		// execute whenever mGuiShowHasNeverBeenDone (since the window shouldn't be iconic prior to
-		// its first showing).  In addition, below must be down prior to any ShowWindow() that does
-		// a minimize or maximize because that would prevent GetWindowRect/GetClientRect calculations
-		// below from working properly.
-		if (mGuiShowHasNeverBeenDone) // This is the first showing of this window.
+		// ahkdll: apply client size used to calculate autosize and autopos for controls.
+		// Upstream moved the MinMaxSize adjustment above the MoveWindow call, so the client
+		// rect is read here instead, where it reflects the size actually granted.
+		if (mGuiShowHasNeverBeenDone)
 		{
-			// Now that the window's style, edge type, title bar, menu bar, and other non-client attributes have
-			// likely (but not certainly) been determined, adjust MinMaxSize values from client size to
-			// entire-window size for use with WM_GETMINMAXINFO.
-			// To help reduce code size, the following isn't done (the calls later below are probably very fast):
-			//if (   mMinWidth != COORD_UNSPECIFIED || mMinHeight != COORD_UNSPECIFIED
-			//	|| mMaxWidth != COORD_UNSPECIFIED || mMaxHeight != COORD_UNSPECIFIED   )
-			//{
-			// ...
-			RECT rect, client_rect;
-			GetWindowRect(mHwnd, &rect);        // Get both rects again in case MoveWindow wasn't
-			GetClientRect(mHwnd, &client_rect); // above to grant the requested size.
-			int total_width = rect.right - rect.left;
-			int total_height = rect.bottom - rect.top;
-			int extra_width = total_width - client_rect.right;
-			int extra_height = total_height - client_rect.bottom;
-
-			if (mMinWidth == COORD_CENTERED) // COORD_CENTERED is the flag that means, "use window's current, total width."
-				mMinWidth = total_width;
-			else if (mMinWidth != COORD_UNSPECIFIED)
-				mMinWidth += extra_width;
-
-			if (mMinHeight == COORD_CENTERED)
-				mMinHeight = total_height;
-			else if (mMinHeight != COORD_UNSPECIFIED)
-				mMinHeight += extra_height;
-
-			if (mMaxWidth == COORD_CENTERED)
-				mMaxWidth = total_width;
-			else if (mMaxWidth != COORD_UNSPECIFIED)
-				mMaxWidth += extra_width;
-
-			if (mMaxHeight == COORD_CENTERED)
-				mMaxHeight = total_height;
-			else if (mMaxHeight != COORD_UNSPECIFIED)
-				mMaxHeight += extra_height;
-
-			// Apply client size used to calculate autosize and autopos for controls
+			RECT client_rect;
+			GetClientRect(mHwnd, &client_rect);
 			mWidth = client_rect.right - client_rect.left;
 			mHeight = client_rect.bottom - client_rect.top;
-		} // if (mGuiShowHasNeverBeenDone)
+		}
 	} // if (allow_move_window)
 
 	// Note that for SW_MINIMIZE and SW_MAXIMIZE, the MoveWindow() above should be done prior to ShowWindow()
@@ -10568,7 +10571,7 @@ LRESULT GuiType::CustomCtrlWmNotify(GuiIndexType aControlIndex, LPNMHDR aNmHdr)
 
 
 WORD GuiType::TextToHotkey(LPTSTR aText)
-// Returns a WORD (not a DWORD -- MSDN is wrong about that) compatible with the HKM_SETHOTKEY message:
+// Returns a WORD compatible with the HKM_SETHOTKEY message:
 // LOBYTE is the virtual key.
 // HIBYTE is a set of modifiers:
 // HOTKEYF_ALT ALT key
@@ -10576,18 +10579,20 @@ WORD GuiType::TextToHotkey(LPTSTR aText)
 // HOTKEYF_SHIFT SHIFT key
 // HOTKEYF_EXT Extended key
 {
+	if (!*aText)
+		return 0;
+
 	BYTE modifiers = 0; // Set default.
-	for (bool done = false; *aText; ++aText)
+	for (; aText[1]; ++aText) // For each character except the last.
 	{
 		switch (*aText)
 		{
-		case '!': modifiers |= HOTKEYF_ALT; break;
-		case '^': modifiers |= HOTKEYF_CONTROL; break;
-		case '+': modifiers |= HOTKEYF_SHIFT; break;
-		default: done = true;  // Some other character type, so it marks the end of the modifiers.
+		case '!': modifiers |= HOTKEYF_ALT; continue;
+		case '^': modifiers |= HOTKEYF_CONTROL; continue;
+		case '+': modifiers |= HOTKEYF_SHIFT; continue;
+		//default: // Some other character type, so it marks the end of the modifiers.
 		}
-		if (done) // This must be checked prior here otherwise the loop's ++aText will increment one too many.
-			break;
+		break;
 	}
 
 	// For translating the virtual key below, the following notes apply:
@@ -10618,9 +10623,16 @@ WORD GuiType::TextToHotkey(LPTSTR aText)
 	// Note: NumpadEnter (not Enter) is extended, unlike Home/End/Pgup/PgDn/Arrows, which are
 	// NON-extended on the keypad.
 
-	BYTE vk = TextToVK(aText);
-    if (!vk)
-		return 0;  // Indicate total failure because a hotkey control can't contain just modifiers without a VK.
+	modLR_type mods = 0;
+	BYTE vk = TextToVK(aText, &mods);
+	if (!vk)
+		return 0;  // Indicate total failure because the key text is invalid.
+	if (mods & (MOD_LALT | MOD_RALT))
+		modifiers |= HOTKEYF_ALT;
+	if (mods & (MOD_LCONTROL | MOD_RCONTROL))
+		modifiers |= HOTKEYF_CONTROL;
+	if (mods & (MOD_LSHIFT | MOD_RSHIFT))
+		modifiers |= HOTKEYF_SHIFT;
 	// Find out if the HOTKEYF_EXT flag should be set.
 	sc_type sc = TextToSC(aText); // Better than vk_to_sc() since that has both an primary and secondary scan codes to choose from.
 	if (!sc) // Since not found above, default to the primary scan code.

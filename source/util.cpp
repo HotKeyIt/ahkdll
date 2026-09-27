@@ -200,7 +200,7 @@ ResultType YYYYMMDDToSystemTime(LPTSTR aYYYYMMDD, SYSTEMTIME &aSystemTime, bool 
 	else // Month is in-range, which is necessary for the method below to work safely.
 	{
 		// Day-of-week code by Tomohiko Sakamoto:
-		static int t[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
+		static const int t[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
 		int y = aSystemTime.wYear;
 		y -= aSystemTime.wMonth < 3;
 		aSystemTime.wDayOfWeek = (y + y/4 - y/100 + y/400 + t[aSystemTime.wMonth-1] + aSystemTime.wDay) % 7;
@@ -786,7 +786,7 @@ LPTSTR ltcschr(LPCTSTR haystack, TCHAR ch)
 
 LPTSTR lstrcasestr(LPCTSTR phaystack, LPCTSTR pneedle)
 // This is the locale-obeying variant of strcasestr.  It uses CharUpper/Lower in place of toupper/lower,
-// which sees chars like ä as the same as Ä (depending on code page/locale).  This function is about
+// which sees chars like ï¿½ as the same as ï¿½ (depending on code page/locale).  This function is about
 // 1 to 8 times slower than strcasestr() depending on factors such as how many partial matches for needle
 // are in haystack.
 // License: GNU GPL
@@ -1646,24 +1646,8 @@ void CoordToScreen(POINT &aPoint, int aWhichMode)
 
 
 
-void GetVirtualDesktopRect(RECT &aRect)
-{
-	aRect.right = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-	if (aRect.right) // A non-zero value indicates the OS supports multiple monitors or at least SM_CXVIRTUALSCREEN.
-	{
-		aRect.left = GetSystemMetrics(SM_XVIRTUALSCREEN);  // Might be negative or greater than zero.
-		aRect.right += aRect.left;
-		aRect.top = GetSystemMetrics(SM_YVIRTUALSCREEN);   // Might be negative or greater than zero.
-		aRect.bottom = aRect.top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
-	}
-	else // Win95/NT do not support SM_CXVIRTUALSCREEN and such, so zero was returned.
-		GetWindowRect(GetDesktopWindow(), &aRect);
-}
-
-
-
 DWORD GetEnvVarReliable(LPCTSTR aEnvVarName, LPTSTR aBuf)
-// Returns the length of what has been copied into aBuf.
+// Returns the length of what has been copied into aBuf, not including the null terminator.
 // Caller has ensured that aBuf is large enough (though anything >=32767 is always large enough).
 // This function was added in v1.0.46.08 to fix a long-standing bug that was more fully revealed
 // by 1.0.46.07's reduction of DEREF_BUF_EXPAND_INCREMENT from 32 to 16K (which allowed the Win9x
@@ -1686,13 +1670,16 @@ DWORD GetEnvVarReliable(LPCTSTR aEnvVarName, LPTSTR aBuf)
 	//
 	// Don't use a size greater than 32767 because that will cause it to fail on Win95 (tested by Robert Yalkin).
 	// According to MSDN, 32767 is exactly large enough to handle the largest variable plus its zero terminator.
+	// Update in 2022: Testing on Windows 11 showed the actual limit to be much higher, perhaps only bounded by
+	// available memory.  Since this function is only used by A_ComSpec and the deprecated auto-env retrieval
+	// mechanism (and due to rarity of need), no attempt is made to support larger variables.
 	TCHAR buf[32767];
 	DWORD length = GetEnvironmentVariable(aEnvVarName, buf, _countof(buf));
 	// GetEnvironmentVariable() could be called twice, the first time to get the actual size.  But that would
 	// probably perform worse since GetEnvironmentVariable() is a very slow function.  In addition, it would
 	// add code complexity, so it seems best to fetch it into a large buffer then just copy it to dest-var.
-	if (length) // Probably always true under the conditions in effect for our callers.
-		tmemcpy(aBuf, buf, length + 1); // memcpy() usually benches a little faster than strcpy().
+	if (length && (size_t) length + 1 <= _countof(buf))
+		tmemcpy(aBuf, buf, (size_t) length + 1); // memcpy() usually benches a little faster than strcpy().
 	else // Failure. The buffer's contents might be undefined in this case.
 		*aBuf = '\0'; // Caller's buf should always have room for an empty string. So make it empty for maintainability, even if not strictly required by caller.
 	return length;
@@ -1835,6 +1822,24 @@ void FreeInterProcMem(HANDLE aHandle, LPVOID aMem)
 {
 	VirtualFreeEx(aHandle, aMem, 0, MEM_RELEASE); // Size 0 is used with MEM_RELEASE.
 	CloseHandle(aHandle);
+}
+
+
+
+// Returns true if a tooltip created by ToolTip already has the given text.
+// MUST NOT call on Windows XP or earlier, due to limitations of TTM_GETTEXT there.
+bool ToolTipTextEquals(HWND aToolTipHwnd, LPCTSTR aText)
+{
+	TOOLINFO ti;
+	ti.cbSize = sizeof(ti);
+	ti.hwnd = NULL;
+	ti.uId = 0;
+	size_t len = _tcslen(aText);
+	LPTSTR buf = ti.lpszText = (LPTSTR)_malloca((len + 2) * sizeof(TCHAR));
+	SendMessage(aToolTipHwnd, TTM_GETTEXT, len + 2, (LPARAM)&ti);
+	bool is_equal = !_tcscmp(aText, buf);
+	_freea(buf);
+	return is_equal;
 }
 
 
@@ -2276,7 +2281,7 @@ HBITMAP LoadPicture(LPTSTR aFilespec, int aWidth, int aHeight, int &aImageType, 
 		// a cursor to be retained if the specified size happens to match the actual size of the
 		// cursor.  This is because normally, it seems that CopyImage() omits cursor animation
 		// from the new object.  MSDN: "LR_COPYRETURNORG returns the original hImage if it satisfies
-		// the criteria for the copy—that is, correct dimensions and color depth—in which case the
+		// the criteria for the copyï¿½that is, correct dimensions and color depthï¿½in which case the
 		// LR_COPYDELETEORG flag is ignored. If this flag is not specified, a new object is always created."
 		// KNOWN BUG: Calling CopyImage() when the source image is tiny and the destination width/height
 		// is also small (e.g. 1) causes a divide-by-zero exception.
@@ -2937,10 +2942,11 @@ int CompareVersion(LPCTSTR a, LPCTSTR b)
 {
 	while (*a || *b)
 	{
-		// 1.1-a001 < 1.1 = 1.1.0 = 1.1.0+foo
+		// 1.1-a001 < 1.1 = 1.1.0 = 1.1.0+foo = 1.1.0+123
 		LPTSTR pa, pb;
-		int ia = _tcstol(a, &pa, 10);
-		int ib = _tcstol(b, &pb, 10);
+		int ia, ib;
+		if (*a == '+') ia = 0, pa = const_cast<LPTSTR>(a); else ia = _tcstol(a, &pa, 10);
+		if (*b == '+') ib = 0, pb = const_cast<LPTSTR>(b); else ib = _tcstol(b, &pb, 10);
 		// If *pa is not in the set .-+\0, this component is non-numeric (and not empty).
 		// Treat non-numeric as greater than numeric (but assume any absent component is 0).
 		if (!_tcschr(_T(".-+"), *pa)) ia = INT_MAX; else a = pa;
@@ -2976,23 +2982,30 @@ int CompareVersion(LPCTSTR a, LPCTSTR b)
 
 
 short IsDefaultType(LPTSTR aTypeDef){
-	static LPTSTR sTypeDef[8] = {_T(" CHAR UCHAR BOOLEAN BYTE INT8 ")
-#ifndef _WIN64
-			,_T(" ATOM INT16 LANGID WCHAR WORD USAGE SHORT USHORT BYTE TCHAR HALF_PTR UHALF_PTR ")
+#ifdef UNICODE // TCHAR and TBYTE are 2 bytes in Unicode builds and 1 byte in ANSI builds.
+#define TCHAR_TYPES_1 _T("")
+#define TCHAR_TYPES_2 _T("TCHAR TBYTE ")
 #else
-			,_T(" ATOM INT16 LANGID WCHAR WORD USAGE SHORT USHORT BYTE TCHAR ")
+#define TCHAR_TYPES_1 _T("TCHAR TBYTE ")
+#define TCHAR_TYPES_2 _T("")
+#endif
+	static LPTSTR sTypeDef[8] = {_T(" CHAR UCHAR BOOLEAN BYTE INT8 ") TCHAR_TYPES_1
+#ifndef _WIN64
+			,_T(" ATOM INT16 LANGID WCHAR WORD USAGE SHORT USHORT HALF_PTR UHALF_PTR ") TCHAR_TYPES_2
+#else
+			,_T(" ATOM INT16 LANGID WCHAR WORD USAGE SHORT USHORT ") TCHAR_TYPES_2
 #endif
 			,_T("")
 #ifdef _WIN64
-			,_T(" SIGNED UNSIGNED INT ACCESS_MASK UINT FLOAT INT32 LONG LONG32 HFILE HRESULT BOOL COLORREF DWORD DWORD32 LCID LCTYPE LGRPID LRESULT UINT32 ULONG ULONG32 HALF_PTR UHALF_PTR ")
+			,_T(" SIGNED UNSIGNED INT ACCESS_MASK UINT FLOAT INT32 LONG LONG32 HFILE HRESULT BOOL COLORREF DWORD DWORD32 LCID LCTYPE LGRPID UINT32 ULONG ULONG32 HALF_PTR UHALF_PTR POINTER_32 ")
 #else
-			,_T(" SIGNED UNSIGNED INT ACCESS_MASK UINT FLOAT INT32 LONG LONG32 HFILE HRESULT BOOL COLORREF DWORD DWORD32 LCID LCTYPE LGRPID LRESULT UINT32 ULONG ULONG32 PTR UPTR PINT8 PINT16 PINT32 INT_PTR LONG_PTR POINTER_64 POINTER_SIGNED SSIZE_T WPARAM PBOOL PBOOLEAN PBYTE PCHAR PCSTR PCTSTR PCWSTR PDWORD PDWORDLONG PDWORD_PTR PDWORD32 PDWORD64 PFLOAT PHALF_PTR DWORD_PTR HACCEL HANDLE HBITMAP HBRUSH HCOLORSPACE HCONV HCONVLIST HCURSOR HDC HDDEDATA HDESK HDROP HDWP HENHMETAFILE HFONT HGDIOBJ HGLOBAL HHOOK HICON HINSTANCE HKEY HKL HLOCAL HMENU HMETAFILE HMODULE HMONITOR HPALETTE HPEN HRGN HRSRC HSZ HWINSTA HWND LPARAM LPBOOL LPBYTE LPCOLORREF LPCSTR LPCTSTR LPCVOID LPCWSTR LPDWORD LPHANDLE LPINT LPLONG LPSTR LPTSTR LPVOID LPWORD LPWSTR PHANDLE PHKEY PINT PINT_PTR PINT32 PINT64 PLCID PLONG PLONGLONG PLONG_PTR PLONG32 PLONG64 POINTER_32 POINTER_UNSIGNED PSHORT PSIZE_T PSSIZE_T PSTR PTBYTE PTCHAR PTSTR PUCHAR PUHALF_PTR PUINT PUINT_PTR PUINT32 PUINT64 PULONG PULONGLONG PULONG_PTR PULONG32 PULONG64 PUSHORT PVOID PWCHAR PWORD PWSTR SC_HANDLE SC_LOCK SERVICE_STATUS_HANDLE SIZE_T UINT_PTR ULONG_PTR VOID ")
+			,_T(" SIGNED UNSIGNED INT ACCESS_MASK UINT FLOAT INT32 LONG LONG32 HFILE HRESULT BOOL COLORREF DWORD DWORD32 LCID LCTYPE LGRPID LRESULT UINT32 ULONG ULONG32 PTR UPTR PINT8 PINT16 PINT32 INT_PTR LONG_PTR POINTER_SIGNED SSIZE_T WPARAM PBOOL PBOOLEAN PBYTE PCHAR PCSTR PCTSTR PCWSTR PDWORD PDWORDLONG PDWORD_PTR PDWORD32 PDWORD64 PFLOAT PHALF_PTR DWORD_PTR HACCEL HANDLE HBITMAP HBRUSH HCOLORSPACE HCONV HCONVLIST HCURSOR HDC HDDEDATA HDESK HDROP HDWP HENHMETAFILE HFONT HGDIOBJ HGLOBAL HHOOK HICON HINSTANCE HKEY HKL HLOCAL HMENU HMETAFILE HMODULE HMONITOR HPALETTE HPEN HRGN HRSRC HSZ HWINSTA HWND LPARAM LPBOOL LPBYTE LPCOLORREF LPCSTR LPCTSTR LPCVOID LPCWSTR LPDWORD LPHANDLE LPINT LPLONG LPSTR LPTSTR LPVOID LPWORD LPWSTR PHANDLE PHKEY PINT PINT_PTR PINT32 PINT64 PLCID PLONG PLONGLONG PLONG_PTR PLONG32 PLONG64 POINTER_32 POINTER_UNSIGNED PSHORT PSIZE_T PSSIZE_T PSTR PTBYTE PTCHAR PTSTR PUCHAR PUHALF_PTR PUINT PUINT_PTR PUINT32 PUINT64 PULONG PULONGLONG PULONG_PTR PULONG32 PULONG64 PUSHORT PVOID PWCHAR PWORD PWSTR SC_HANDLE SC_LOCK SERVICE_STATUS_HANDLE SIZE_T UINT_PTR ULONG_PTR VOID ")
 #endif
 			,_T(""),_T(""),_T("")
 #ifdef _WIN64
-			,_T(" INT64 UINT64 DOUBLE __int64 LONGLONG LONG64 USN DWORDLONG DWORD64 ULONGLONG ULONG64 PTR UPTR PINT8 PINT16 PINT32 INT_PTR LONG_PTR POINTER_64 POINTER_SIGNED SSIZE_T WPARAM PBOOL PBOOLEAN PBYTE PCHAR PCSTR PCTSTR PCWSTR PDWORD PDWORDLONG PDWORD_PTR PDWORD32 PDWORD64 PFLOAT PHALF_PTR DWORD_PTR HACCEL HANDLE HBITMAP HBRUSH HCOLORSPACE HCONV HCONVLIST HCURSOR HDC HDDEDATA HDESK HDROP HDWP HENHMETAFILE HFONT HGDIOBJ HGLOBAL HHOOK HICON HINSTANCE HKEY HKL HLOCAL HMENU HMETAFILE HMODULE HMONITOR HPALETTE HPEN HRGN HRSRC HSZ HWINSTA HWND LPARAM LPBOOL LPBYTE LPCOLORREF LPCSTR LPCTSTR LPCVOID LPCWSTR LPDWORD LPHANDLE LPINT LPLONG LPSTR LPTSTR LPVOID LPWORD LPWSTR PHANDLE PHKEY PINT PINT_PTR PINT32 PINT64 PLCID PLONG PLONGLONG PLONG_PTR PLONG32 PLONG64 POINTER_32 POINTER_UNSIGNED PSHORT PSIZE_T PSSIZE_T PSTR PTBYTE PTCHAR PTSTR PUCHAR PUHALF_PTR PUINT PUINT_PTR PUINT32 PUINT64 PULONG PULONGLONG PULONG_PTR PULONG32 PULONG64 PUSHORT PVOID PWCHAR PWORD PWSTR SC_HANDLE SC_LOCK SERVICE_STATUS_HANDLE SIZE_T UINT_PTR ULONG_PTR VOID ")
+			,_T(" INT64 UINT64 DOUBLE __int64 LONGLONG LONG64 USN DWORDLONG DWORD64 ULONGLONG ULONG64 LRESULT PTR UPTR PINT8 PINT16 PINT32 INT_PTR LONG_PTR POINTER_64 POINTER_SIGNED SSIZE_T WPARAM PBOOL PBOOLEAN PBYTE PCHAR PCSTR PCTSTR PCWSTR PDWORD PDWORDLONG PDWORD_PTR PDWORD32 PDWORD64 PFLOAT PHALF_PTR DWORD_PTR HACCEL HANDLE HBITMAP HBRUSH HCOLORSPACE HCONV HCONVLIST HCURSOR HDC HDDEDATA HDESK HDROP HDWP HENHMETAFILE HFONT HGDIOBJ HGLOBAL HHOOK HICON HINSTANCE HKEY HKL HLOCAL HMENU HMETAFILE HMODULE HMONITOR HPALETTE HPEN HRGN HRSRC HSZ HWINSTA HWND LPARAM LPBOOL LPBYTE LPCOLORREF LPCSTR LPCTSTR LPCVOID LPCWSTR LPDWORD LPHANDLE LPINT LPLONG LPSTR LPTSTR LPVOID LPWORD LPWSTR PHANDLE PHKEY PINT PINT_PTR PINT32 PINT64 PLCID PLONG PLONGLONG PLONG_PTR PLONG32 PLONG64 POINTER_UNSIGNED PSHORT PSIZE_T PSSIZE_T PSTR PTBYTE PTCHAR PTSTR PUCHAR PUHALF_PTR PUINT PUINT_PTR PUINT32 PUINT64 PULONG PULONGLONG PULONG_PTR PULONG32 PULONG64 PUSHORT PVOID PWCHAR PWORD PWSTR SC_HANDLE SC_LOCK SERVICE_STATUS_HANDLE SIZE_T UINT_PTR ULONG_PTR VOID ")
 #else
-			,_T(" INT64 UINT64 DOUBLE __int64 LONGLONG LONG64 USN DWORDLONG DWORD64 ULONGLONG ULONG64 ")
+			,_T(" INT64 UINT64 DOUBLE __int64 LONGLONG LONG64 USN DWORDLONG DWORD64 ULONGLONG ULONG64 POINTER_64 ") // POINTER_64 is __ptr64, also in 32-bit code
 #endif
 			};
 	for (int i=0;i<8;i++)
@@ -3015,6 +3028,7 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 		parameter++;
 	if (_tcschr(aFuncName, ','))
 		*(_tcschr(aFuncName, ',')) = '\0';
+	rtrim(aFuncName);
 	ltrim(parameter);
 	int insert_pos;
 	Func *found_func = g_script.FindFunc(aFuncName, _tcslen(aFuncName), &insert_pos);
@@ -3071,8 +3085,12 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 		return g_script.ScriptError(_T("Reference not allowed here, use & where possible. Only %A_AhkPath% %A_AhkDir% %A_DllPath% %A_DllDir% %A_ScriptDir% %A_AppData[Common]% can be used here."), parameter);
 	}
 	// terminate dll\function name, find it and jump to next parameter
-	if (_tcschr(parameter, ','))
-		*(_tcschr(parameter, ',')) = '\0';
+	LPTSTR after_function = _tcschr(parameter, ',');
+	if (after_function)
+		*after_function++ = '\0';
+	else // No parameters: point to an empty string rather than past the terminator (as before).
+		after_function = parameter + _tcslen(parameter);
+	rtrim(parameter);
 	if (RegExMatch(parameter, _T("^\\s*[A-Fa-f0-9]+(:[A-Fa-f0-9]+)?\\s*$")))
 	{
 		TCHAR hex[4] = { '0', 'x' };
@@ -3111,7 +3129,7 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 	}
 	if (!function)
 		return g_script.ScriptError(ERR_NONEXISTENT_FUNCTION, parameter);
-	parameter = parameter + _tcslen(parameter) + 1;
+	parameter = after_function;
 
 	LPTSTR parm = SimpleHeap::Malloc(parameter);
 	bool has_return = false;
@@ -3157,9 +3175,10 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 			}
 		}
 
+		rtrim(return_type_string[0]);
 		ConvertDllArgType(return_type_string, *return_attrib);
-		if (return_attrib->type == DLL_ARG_INVALID)
-			return CONDITION_FALSE;
+		if (return_attrib->type == DLL_ARG_INVALID) // CONDITION_FALSE was returned before, which reported "not a recognized action".
+			return g_script.ScriptError(_T("Invalid return type."), return_type_string[0]);
 		has_return = true;
 
 	has_valid_return_type:
@@ -3204,12 +3223,19 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 	// Above has already ensured that after the first parameter, there are either zero additional parameters
 	// or an even number of them.  In other words, each arg type will have an arg value to go with it.
 	// It has also verified that the dyna_param array is large enough to hold all of the args.
-	LPTSTR this_param;
-	for (arg_count = 0, i = 1; i < aParamCount; ++arg_count, i += 2)  // Same loop as used later below, so maintain them together.
+	LPTSTR this_param, next_param;
+	for (arg_count = 0, i = 1; i < aParamCount; ++arg_count, i += 2, parm = next_param)  // Same loop as used later below, so maintain them together.
 	{
-		this_param = _tcschr(parm, ',');
-		*this_param = '\0';
-		this_param++;
+		// Split off "Type, Arg" and trim both, so that spaces after the commas (as in the documented syntax) work.
+		if (!(this_param = _tcschr(parm, ',')))
+			return g_script.ScriptError(ERR_PARAM3_REQUIRED, aBuf);
+		*this_param++ = '\0';
+		if (next_param = _tcschr(this_param, ','))
+			*next_param++ = '\0';
+		parm = omit_leading_whitespace(parm);
+		rtrim(parm);
+		this_param = omit_leading_whitespace(this_param);
+		rtrim(this_param);
 		arg_type_string[0] = parm; // It will be detected as invalid below.
 		arg_type_string[1] = NULL;
 
@@ -3231,7 +3257,7 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 				// to be stack memory, which would be invalid memory upon return to the caller).
 				// The complexity of this doesn't seem worth the rarity of the need, so this will be
 				// documented in the help file.
-				return CONDITION_FALSE;
+				return g_script.ScriptError(_T("A default value for a string parameter must not start with a number."), this_param);
 			}
 			// Otherwise, it's a supported type of string.
 			this_dyna_param.ptr = this_param; // SYM_VAR's Type() is always VAR_NORMAL (except lvalues in expressions).
@@ -3264,13 +3290,9 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 		case DLL_ARG_xSTR:
 			// See the section above for comments.
 			if (ATOI64(this_param))
-				return CONDITION_FALSE;
-			// String needing translation: ASTR on Unicode build, WSTR on ANSI build.
-			if ((parm = _tcschr(this_param, ',')))
-				*parm = '\0';
+				return g_script.ScriptError(_T("A default value for a string parameter must not start with a number."), this_param);
+			// String needing translation: ASTR on Unicode build, WSTR on ANSI build.  this_param is already terminated.
 			pStr[arg_count] = new UorA(CStringCharFromWChar, CStringWCharFromChar)(this_param);
-			if (parm)
-				*parm = ',';
 			this_dyna_param.ptr = pStr[arg_count]->GetBuffer();
 			break;
 
@@ -3284,7 +3306,7 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 			break;
 
 		case DLL_ARG_INVALID:
-			return CONDITION_FALSE;
+			return g_script.ScriptError(_T("Invalid arg type."), parm);
 
 		default: // Namely:
 			//case DLL_ARG_INT:
@@ -3319,11 +3341,8 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 			if (this_dyna_param.type != DLL_ARG_INT64) // Shift the 32-bit value into the high-order DWORD of the 64-bit value for later use by DynaCall().
 				this_dyna_param.value_int = (int)this_dyna_param.value_int64; // Force a failure if compiler generates code for this that corrupts the union (since the same method is used for the more obscure float vs. double below).
 		} // switch (this_dyna_param.type)
-		if ((parm = _tcschr(this_param, ',')))
-			*parm++ = '\0';
 	} // for() each arg.
-	if (has_return && aParamCount)
-		*(this_param) = '\0';
+	// Each Arg was terminated above.  (This used to empty the last Arg when a return type followed it.)
 
 	found_func->mClass = (Object*)function;
 	found_func->mParamCount = arg_count;
@@ -3442,8 +3461,17 @@ DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf,DWORD sz, TCHAR *pwd[]) //
 				memcpy(aDataEncryptedString, (LPBYTE)aBuffer + hdrsz, aSizeEncrypted);
 				CryptAES(aDataEncryptedString, aSizeEncrypted, pwd, false);
 				aDataEncrypted = (BYTE*)malloc(aSizeDataEncrypted);
-				g_CS2BA(aDataEncryptedString, NULL, CRYPT_STRING_BASE64, aDataEncrypted, &aSizeEncrypted, NULL, NULL);
+				// g_CS2BA is only resolved by TlsCallback() for compiled scripts, so fall back to the
+				// statically linked function (e.g. UnZipRawMemory with a password in a normal script).
+				BOOL decoded = (g_CS2BA ? g_CS2BA : CryptStringToBinaryA)(aDataEncryptedString, NULL, CRYPT_STRING_BASE64, aDataEncrypted, &aSizeEncrypted, NULL, NULL);
 				free(aDataEncryptedString);
+				// A wrong password leaves garbage, which isn't valid base64 of the stored size.
+				if (!decoded || aSizeEncrypted != aSizeCompressed)
+				{
+					free(aDataBuf);
+					free(aDataEncrypted);
+					return 0;
+				}
 				if (aSizeDeCompressed == aSizeCompressed)
 				{
 					memcpy(aDataBuf, aDataEncrypted, aSizeDeCompressed);
@@ -3548,6 +3576,31 @@ LONG WINAPI DisableHooksOnException(PEXCEPTION_POINTERS pExceptionPtrs)
 		}
 	}
 	return EXCEPTION_CONTINUE_SEARCH;
+}
+
+
+
+__declspec(noinline) // Prioritize code size for this.
+int VersionSatisfies(LPCTSTR v, LPCTSTR req, bool aThreeWayDefault)
+{
+	// Support prefixes <, >, <=, >=, =; default to >= unless aThreeWayDefault.
+	bool rmap[] = { false, false, false };
+	LPCTSTR reqv = req;
+	if (*reqv == '<') ++reqv, rmap[1-1] = true;
+	if (*reqv == '>') ++reqv, rmap[1+1] = true;
+	if (*reqv == '=') ++reqv, rmap[1+0] = true;
+	bool has_op = reqv != req;
+	// Support optional v prefix.
+	if (*v == 'v') ++v;
+	if (*reqv == 'v') ++reqv;
+	// Perform the comparison.
+	int result = CompareVersion(v, reqv);
+	if (!has_op)
+	{
+		// When no operator is specified, also require that the major version matches.
+		return aThreeWayDefault ? result : result >= 0 && _ttoi(v) == _ttoi(reqv);
+	}
+	return rmap[result + 1];
 }
 
 

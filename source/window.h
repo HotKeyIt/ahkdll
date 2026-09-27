@@ -137,6 +137,7 @@ public:
 	}
 
 	ResultType SetCriteria(global_struct &aSettings, LPTSTR aTitle, LPTSTR aText, LPTSTR aExcludeTitle, LPTSTR aExcludeText);
+	void SetCriteria(global_struct &aSettings, WinGroup &aGroup);
 	void UpdateCandidateAttributes();
 	HWND IsMatch(bool aInvert = false);
 

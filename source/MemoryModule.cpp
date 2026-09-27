@@ -85,13 +85,30 @@ MyActivateActCtx _ActivateActCtx = (MyActivateActCtx)GetProcAddress(libkernel32,
 #define HOST_MACHINE IMAGE_FILE_MACHINE_I386
 #endif
 
-HMEMORYMODULE currentModuleStart;
-PVOID currentModuleEnd;
-
 #define GET_HEADER_DICTIONARY(module, idx)  &(module)->headers->OptionalHeader.DataDirectory[idx]
 
-// hook RtlPcToFileHeader
-PHOOK_ENTRY pHook = NULL;
+// Registry of memory-loaded modules and a persistent hook on RtlPcToFileHeader.
+// On x64, _CxxThrowException calls RtlPcToFileHeader(pThrowInfo) to obtain the
+// throwing module's image base; the catch machinery resolves the throw-info RVAs
+// against it.  The OS loader doesn't know our modules, so RtlPcToFileHeader would
+// return NULL and every C++ exception thrown from a memory module would escape
+// (crash 0xE06D7363).  We therefore keep a hook installed for the process lifetime
+// that maps any address inside a loaded memory module to that module's codeBase,
+// and falls back to the real behaviour for everything else.  The list is kept
+// small (one node per loaded memory module).
+typedef struct _MEMMODULE_RANGE {
+	PVOID start;                    // == codeBase (the image base to report)
+	PVOID end;                      // codeBase + SizeOfImage
+	struct _MEMMODULE_RANGE *next;
+} MEMMODULE_RANGE;
+static MEMMODULE_RANGE *g_memModuleList = NULL;
+static CRITICAL_SECTION g_memModuleCS;
+static PHOOK_ENTRY pHook = NULL;
+static volatile LONG g_memModuleInit = 0; // 0 = untouched, 1 = initializing, 2 = ready
+// The real RtlPcToFileHeader (MinHook trampoline), used for anything that is not
+// one of our memory modules so behaviour is identical to the OS function.
+typedef PVOID (NTAPI *RtlPcToFileHeader_t)(PVOID, PVOID *);
+static RtlPcToFileHeader_t g_origRtlPcToFileHeader = NULL;
 
 typedef struct _MY_LDR_DATA_TABLE_ENTRY
 {
@@ -159,8 +176,24 @@ typedef struct _MYPEB {
 
 PVOID NTAPI HookRtlPcToFileHeader(IN PVOID PcValue, PVOID* BaseOfImage)
 {
-	if (PcValue >= currentModuleStart && PcValue < currentModuleEnd)
-		return *BaseOfImage = currentModuleStart;
+	// First check our own memory-loaded modules.
+	EnterCriticalSection(&g_memModuleCS);
+	for (MEMMODULE_RANGE *n = g_memModuleList; n; n = n->next) {
+		if (PcValue >= n->start && PcValue < n->end) {
+			PVOID base = n->start;
+			LeaveCriticalSection(&g_memModuleCS);
+			return *BaseOfImage = base;
+		}
+	}
+	LeaveCriticalSection(&g_memModuleCS);
+
+	// Not one of ours: defer to the real RtlPcToFileHeader.  This must match the OS
+	// exactly, since the hook is on the process-wide path and Windows calls this
+	// during ordinary SEH/stack operations; a hand-rolled answer can corrupt dispatch.
+	if (g_origRtlPcToFileHeader)
+		return g_origRtlPcToFileHeader(PcValue, BaseOfImage);
+
+	// Fallback only if the trampoline is somehow unavailable: walk the loader list.
 	PLIST_ENTRY ModuleListHead;
 	PLIST_ENTRY Entry;
 	PMY_LDR_DATA_TABLE_ENTRY Module;
@@ -172,17 +205,6 @@ PVOID NTAPI HookRtlPcToFileHeader(IN PVOID PcValue, PVOID* BaseOfImage)
 #elif _M_AMD64 // compiles for x64
 	mypeb = (PMYPEB)(__readgsqword(0x60)); //PEB
 #endif
-	/*
-	PCRITICAL_SECTION aLoaderLock; // So no other module can be loaded, expecially due to hooked _RtlPcToFileHeader
-#ifdef _M_IX86 // compiles for x86
-	aLoaderLock = *(PCRITICAL_SECTION*)(__readfsdword(0x30) + 0xA0); //PEB->LoaderLock
-#elif _M_AMD64 // compiles for x64
-	aLoaderLock = *(PCRITICAL_SECTION*)(__readgsqword(0x60) + 0x110); //PEB->LoaderLock //0x60 because offset is doubled in 64bit
-#endif
-
-	EnterCriticalSection(aLoaderLock);
-	*/
-	// Enter and Leave Critical Section is done in MemoryLoadLibraryEx
 	ModuleListHead = &mypeb->Ldr->InLoadOrderModuleList;
 	Entry = ModuleListHead->Flink;
 	while (Entry != ModuleListHead)
@@ -197,10 +219,60 @@ PVOID NTAPI HookRtlPcToFileHeader(IN PVOID PcValue, PVOID* BaseOfImage)
 		}
 		Entry = Entry->Flink;
 	}
-	//LeaveCriticalSection(aLoaderLock);
 
 	*BaseOfImage = ImageBase;
 	return ImageBase;
+}
+
+// Install the RtlPcToFileHeader hook once, for the lifetime of the process.
+// Safe to call from multiple threads; only the first performs the work.
+static void EnsureMemModuleHook()
+{
+	if (InterlockedCompareExchange(&g_memModuleInit, 1, 0) == 0) {
+		InitializeCriticalSection(&g_memModuleCS);
+		LPVOID orig = NULL;
+		pHook = MinHookEnable(GetProcAddress(GetModuleHandleA("ntdll.dll"), "RtlPcToFileHeader"), &HookRtlPcToFileHeader, &orig);
+		g_origRtlPcToFileHeader = (RtlPcToFileHeader_t)orig;
+		InterlockedExchange(&g_memModuleInit, 2);
+	} else {
+		while (g_memModuleInit != 2) // another thread is installing; wait for it
+			Sleep(0);
+	}
+}
+
+// Add a loaded module's address range so the hook can map addresses inside it to
+// its codeBase.  Returns the node (stored in the module and removed on free), or
+// NULL on allocation failure (the module still loads; only C++ exceptions thrown
+// from it on x64 would be affected).
+static MEMMODULE_RANGE *RegisterMemModule(PVOID start, PVOID end)
+{
+	// Not malloc: compiled scripts load ntdll, kernel32 and crypt32 with MemoryLoadLibrary in the TLS callback,
+	// before the static CRT (MT_ builds) has initialized its heap.
+	MEMMODULE_RANGE *node = (MEMMODULE_RANGE *)HeapAlloc(GetProcessHeap(), 0, sizeof(MEMMODULE_RANGE));
+	if (!node)
+		return NULL;
+	node->start = start;
+	node->end = end;
+	EnterCriticalSection(&g_memModuleCS);
+	node->next = g_memModuleList;
+	g_memModuleList = node;
+	LeaveCriticalSection(&g_memModuleCS);
+	return node;
+}
+
+static void UnregisterMemModule(MEMMODULE_RANGE *node)
+{
+	if (!node)
+		return;
+	EnterCriticalSection(&g_memModuleCS);
+	for (MEMMODULE_RANGE **pp = &g_memModuleList; *pp; pp = &(*pp)->next) {
+		if (*pp == node) {
+			*pp = node->next;
+			break;
+		}
+	}
+	LeaveCriticalSection(&g_memModuleCS);
+	HeapFree(GetProcessHeap(), 0, node);
 }
 
 static inline uintptr_t
@@ -537,9 +609,24 @@ static BOOL
 RegisterExceptionHandling(PMEMORYMODULE module)
 {
 	PIMAGE_DATA_DIRECTORY pDir = GET_HEADER_DICTIONARY(module, IMAGE_DIRECTORY_ENTRY_EXCEPTION);
+	if (pDir->Size == 0)
+		return TRUE;
 	PIMAGE_RUNTIME_FUNCTION_ENTRY pEntry = (PIMAGE_RUNTIME_FUNCTION_ENTRY)(module->codeBase + pDir->VirtualAddress);
 	UINT count = (pDir->Size / sizeof(IMAGE_RUNTIME_FUNCTION_ENTRY)); // -1;
 	return RtlAddFunctionTable(pEntry, count, (DWORD64)module->codeBase);
+}
+
+static void
+UnRegisterExceptionHandling(PMEMORYMODULE module)
+// The function table must be removed before the module's memory is freed: otherwise the next exception
+// anywhere in the process walks the freed table (STATUS_BAD_FUNCTION_TABLE or an access violation).
+{
+	if (!module->codeBase || !module->headers)
+		return;
+	PIMAGE_DATA_DIRECTORY pDir = GET_HEADER_DICTIONARY(module, IMAGE_DIRECTORY_ENTRY_EXCEPTION);
+	if (pDir->Size == 0)
+		return;
+	RtlDeleteFunctionTable((PRUNTIME_FUNCTION)(module->codeBase + pDir->VirtualAddress)); // FALSE if it wasn't registered yet.
 }
 #endif
 
@@ -950,6 +1037,13 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data, size_t size,
         goto error;
     }
 
+    // Register the module's address range and install the RtlPcToFileHeader hook
+    // before running any of the module's own code (TLS callbacks / DllMain),
+    // so C++ exceptions thrown during initialisation resolve their image base.
+    EnsureMemModuleHook();
+    result->pcRange = RegisterMemModule(result->codeBase,
+        result->codeBase + result->headers->OptionalHeader.SizeOfImage);
+
     // TLS callbacks are executed BEFORE the main loading
 	if (old_header->OptionalHeader.ImageBase != (ULONGLONG)g_hInstance && !ExecuteTLS(result)) {
         goto error;
@@ -962,21 +1056,15 @@ HMEMORYMODULE MemoryLoadLibraryEx(const void *data, size_t size,
 			{
 				DllEntryProc DllEntry = (DllEntryProc)(LPVOID)(code + result->headers->OptionalHeader.AddressOfEntryPoint);
 
-				PCRITICAL_SECTION aLoaderLock; // So no other module can be loaded, expecially due to hooked _RtlPcToFileHeader
+				PCRITICAL_SECTION aLoaderLock; // Serialize against the real loader while our DllMain runs
 #ifdef _M_IX86 // compiles for x86
 				aLoaderLock = *(PCRITICAL_SECTION*)(__readfsdword(0x30) + 0xA0); //PEB->LoaderLock
 #elif _M_AMD64 // compiles for x64
 				aLoaderLock = *(PCRITICAL_SECTION*)(__readgsqword(0x60) + 0x110); //PEB->LoaderLock //0x60 because offset is doubled in 64bit
 #endif
-				// set start and end of memory for our module so HookRtlPcToFileHeader can report properly
-				currentModuleStart = result->codeBase;
-				currentModuleEnd = result->codeBase + result->headers->OptionalHeader.SizeOfImage;
 				EnterCriticalSection(aLoaderLock);
-				pHook = MinHookEnable(GetProcAddress(GetModuleHandleA("ntdll.dll"), "RtlPcToFileHeader"), &HookRtlPcToFileHeader);
 				// notify library about attaching to process
 				BOOL successfull = (*DllEntry)((HINSTANCE)code, DLL_PROCESS_ATTACH, result);
-				// Disable hook if it was enabled before
-				MinHookDisable(pHook);
 				LeaveCriticalSection(aLoaderLock);
 
 				if (!successfull) {
@@ -1105,6 +1193,10 @@ void MemoryFreeLibrary(HMEMORYMODULE mod)
         (*DllEntry)((HINSTANCE)module->codeBase, DLL_PROCESS_DETACH, 0);
     }
 
+    // Stop mapping this address range (detach DllMain above may still have thrown).
+    UnregisterMemModule((MEMMODULE_RANGE *)module->pcRange);
+    module->pcRange = NULL;
+
 	if (module->nameExportsTable != NULL)
 		HeapFree(module->heapmodules, 0, module->nameExportsTable);
 	if (module->modules != NULL) {
@@ -1120,6 +1212,9 @@ void MemoryFreeLibrary(HMEMORYMODULE mod)
 	HeapDestroy(module->heapmodules);
 
 
+#ifdef _WIN64
+    UnRegisterExceptionHandling(module);
+#endif
     if (module->codeBase != NULL) {
         // release memory of library
         module->free(module->codeBase, 0, MEM_RELEASE, module->userdata);
@@ -1365,12 +1460,19 @@ MemoryLoadStringEx(HMEMORYMODULE module, UINT id, WORD language)
         return 0;
     }
 
-    LPTSTR buffer = (LPTSTR) malloc(data->Length + sizeof(TCHAR));
-    buffer[data->Length] = 0;
+    // Caller must free() the result.  data->Length is in WCHARs; an ANSI string may need 2 bytes per WCHAR.
 #if defined(UNICODE)
+    LPTSTR buffer = (LPTSTR) malloc((data->Length + 1) * sizeof(TCHAR));
+    if (!buffer)
+        return 0;
     wcsncpy(buffer, data->NameString, data->Length);
+    buffer[data->Length] = 0;
 #else
-    wcstombs(buffer, data->NameString, data->Length);
+    LPTSTR buffer = (LPTSTR) malloc(data->Length * 2 + 1);
+    if (!buffer)
+        return 0;
+    int len = WideCharToMultiByte(CP_ACP, 0, data->NameString, data->Length, buffer, data->Length * 2, NULL, NULL);
+    buffer[len] = 0;
 #endif
     return buffer;
 }

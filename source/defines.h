@@ -39,6 +39,15 @@ GNU General Public License for more details.
 #define T_AHK_VERSION		_T(AHK_VERSION)
 #define T_AHK_NAME_VERSION	T_AHK_NAME _T(" v") T_AHK_VERSION
 
+#ifdef AUTOHOTKEYSC
+#define SCRIPT_RESOURCE_NAME _T(">AUTOHOTKEY SCRIPT<")
+#else
+#define SCRIPT_RESOURCE_SPEC _T("*#1")
+#define SCRIPT_RESOURCE_NAME MAKEINTRESOURCE(1)
+#define SCRIPT_PRESOURCE_SPEC _T("*#2")
+#define SCRIPT_PRESOURCE_NAME MAKEINTRESOURCE(2)
+#endif
+
 // Window class names: Changing these may result in new versions not being able to detect any old instances
 // that may be running (such as the use of FindWindow() in WinMain()).  It may also have other unwanted
 // effects, such as anything in the OS that relies on the class name that the user may have changed the
@@ -48,10 +57,11 @@ GNU General Public License for more details.
 // the same process. Also, because class names occupy space in the system's private atom table, you
 // should keep class name strings as short a possible:
 #define WINDOW_CLASS_MAIN _T("AutoHotkey")
-#ifndef MINIDLL
 #define WINDOW_CLASS_SPLASH _T("AutoHotkey2")
-#define WINDOW_CLASS_GUI _T("AutoHotkeyGUI") // There's a section in Script::Edit() that relies on these all starting with "AutoHotkey".
-#endif
+#define WINDOW_CLASS_GUI _T("AutoHotkeyGUI") // There's a section in Script::Edit() that relies on these all starting with "AutoHotkey".  Also defined for MINIDLL: g_WindowClassGUI uses it.
+// Same as in hotkey.h (identical redefinition is allowed); needed by the script loader also for MINIDLL, which omits hotkey.h.
+#define HOTKEY_FLAG _T("::")
+#define HOTKEY_FLAG_LENGTH 2
 #define EXT_AUTOHOTKEY _T(".ahk")
 #define AHK_HELP_FILE _T("AutoHotkey.chm")
 
@@ -188,21 +198,21 @@ enum SymbolType // For use with ExpandExpression() and IsPureNumeric().
 #define SYM_OPAREN_FOR_CPAREN(symbol) ((symbol) + (SYM_OPAREN - SYM_CPAREN)) // Caller must confirm it is CPAREN or CBRACKET.
 #define YIELDS_AN_OPERAND(symbol) ((symbol) < SYM_OPAREN) // CPAREN also covers the tail end of a function call.  Post-inc/dec yields an operand for things like Var++ + 2.  Definitely needs the parentheses around symbol.
 	, SYM_ASSIGN, SYM_ASSIGN_ADD, SYM_ASSIGN_SUBTRACT, SYM_ASSIGN_MULTIPLY, SYM_ASSIGN_DIVIDE, SYM_ASSIGN_FLOORDIVIDE
-	, SYM_ASSIGN_BITOR, SYM_ASSIGN_BITXOR, SYM_ASSIGN_BITAND, SYM_ASSIGN_BITSHIFTLEFT, SYM_ASSIGN_BITSHIFTRIGHT
+	, SYM_ASSIGN_BITOR, SYM_ASSIGN_BITXOR, SYM_ASSIGN_BITAND, SYM_ASSIGN_BITSHIFTLEFT, SYM_ASSIGN_BITSHIFTRIGHT, SYM_ASSIGN_BITSHIFTRIGHT_LOGICAL // SYM_ASSIGN_BITSHIFTLEFT_LOGICAL doesn't exist but <<<= is the same as <<=
 	, SYM_ASSIGN_CONCAT // THIS MUST BE KEPT AS THE LAST (AND SYM_ASSIGN THE FIRST) BECAUSE THEY'RE USED IN A RANGE-CHECK.
 #define IS_ASSIGNMENT_EXCEPT_POST_AND_PRE(symbol) (symbol <= SYM_ASSIGN_CONCAT && symbol >= SYM_ASSIGN) // Check upper bound first for short-circuit performance.
 #define IS_ASSIGNMENT_OR_POST_OP(symbol) (IS_ASSIGNMENT_EXCEPT_POST_AND_PRE(symbol) || symbol == SYM_POST_INCREMENT || symbol == SYM_POST_DECREMENT)
 	, SYM_IFF_ELSE, SYM_IFF_THEN // THESE TERNARY OPERATORS MUST BE KEPT IN THIS ORDER AND ADJACENT TO THE BELOW.
 	, SYM_OR, SYM_AND // MUST BE KEPT IN THIS ORDER AND ADJACENT TO THE ABOVE because infix-to-postfix is optimized to check a range rather than a series of equalities.
 	, SYM_LOWNOT  // LOWNOT is the word "not", the low precedence counterpart of !
-	, SYM_EQUAL, SYM_EQUALCASE, SYM_NOTEQUAL // =, ==, <> ... Keep this in sync with IS_RELATIONAL_OPERATOR() below.
+	, SYM_EQUAL, SYM_EQUALCASE, SYM_NOTEQUAL, SYM_NOTEQUALCASE // =, ==, <> and !=, !== ... Keep this in sync with IS_RELATIONAL_OPERATOR() below.
 	, SYM_GT, SYM_LT, SYM_GTOE, SYM_LTOE  // >, <, >=, <= ... Keep this in sync with IS_RELATIONAL_OPERATOR() below.
 #define IS_RELATIONAL_OPERATOR(symbol) (symbol >= SYM_EQUAL && symbol <= SYM_LTOE)
 	, SYM_CONCAT
 	, SYM_BITOR // Seems more intuitive to have these higher in prec. than the above, unlike C and Perl, but like Python.
 	, SYM_BITXOR // SYM_BITOR (ABOVE) MUST BE KEPT FIRST AMONG THE BIT OPERATORS BECAUSE IT'S USED IN A RANGE-CHECK.
 	, SYM_BITAND
-	, SYM_BITSHIFTLEFT, SYM_BITSHIFTRIGHT // << >>  ALSO: SYM_BITSHIFTRIGHT MUST BE KEPT LAST AMONG THE BIT OPERATORS BECAUSE IT'S USED IN A RANGE-CHECK.
+	, SYM_BITSHIFTLEFT, SYM_BITSHIFTRIGHT, SYM_BITSHIFTRIGHT_LOGICAL // << >> >>>  ALSO: SYM_BITSHIFTRIGHT_LOGICAL MUST BE KEPT LAST AMONG THE BIT OPERATORS BECAUSE IT'S USED IN A RANGE-CHECK. <<< is the same as SYM_BITSHIFTLEFT
 	, SYM_ADD, SYM_SUBTRACT
 	, SYM_MULTIPLY, SYM_DIVIDE, SYM_FLOORDIVIDE
 	, SYM_NEGATIVE, SYM_HIGHNOT, SYM_BITNOT, SYM_ADDRESS, SYM_DEREF  // Don't change position or order of these because Infix-to-postfix converter's special handling for SYM_POWER relies on them being adjacent to each other.
@@ -425,9 +435,11 @@ enum enum_act {
 , ACT_SLEEP, ACT_RANDOM
 , ACT_GOTO, ACT_GOSUB, ACT_ONEXIT, ACT_HOTKEY, ACT_SETTIMER, ACT_CRITICAL, ACT_THREAD, ACT_RETURN, ACT_EXIT
 , ACT_LOOP, ACT_FOR, ACT_WHILE, ACT_UNTIL, ACT_BREAK, ACT_BREAKIF, ACT_CONTINUE, ACT_CONTINUEIF // Keep LOOP, FOR, WHILE and UNTIL together and in this order for range checks in various places.
+// See comment below.
 , ACT_TRY, ACT_CATCH, ACT_FINALLY, ACT_THROW // Keep TRY, CATCH and FINALLY together and in this order for range checks.
 , ACT_SWITCH, ACT_CASE
 , ACT_BLOCK_BEGIN, ACT_BLOCK_END
+// Don't change anything in the range ACT_TRY..ACT_BLOCK_END without adjusting Debugger::PreExecLine.
 , ACT_WINACTIVATE, ACT_WINACTIVATEBOTTOM
 , ACT_WINWAIT, ACT_WINWAITCLOSE, ACT_WINWAITACTIVE, ACT_WINWAITNOTACTIVE
 , ACT_WINMINIMIZE, ACT_WINMAXIMIZE, ACT_WINRESTORE
@@ -878,6 +890,7 @@ inline void global_clear_state(global_struct &g)
 	g.hWndLastUsed = NULL;
 	//g.hWndToRestore = NULL;
 	g.MsgBoxResult = 0;
+	g.DialogHWND = NULL;
 	g.IsPaused = false;
 	g.UninterruptedLineCount = 0;
 #ifndef MINIDLL
@@ -917,7 +930,8 @@ inline void global_init(global_struct &g)
 	// Not sure what the optimal default is.  1 seems too low (scripts would be very slow by default):
 	g.LinesPerCycle = -1;
 	g.IntervalBeforeRest = 10;  // sleep for 10ms every 10ms
-	#define DEFAULT_PEEK_FREQUENCY 5
+	#define DEFAULT_PEEK_FREQUENCY 5 // Default peek frequency for an interruptible/non-critical thread.
+	#define UNINTERRUPTIBLE_PEEK_FREQUENCY 16 // Used during a thread's uninterruptible period to ensure it has a chance to call Critical() before MsgSleep() is called.
 	g.PeekFrequency = DEFAULT_PEEK_FREQUENCY; // v1.0.46. See comments in ACT_CRITICAL.
 	g.AllowThreadToBeInterrupted = true; // Separate from g_AllowInterruption so that they can have independent values.
 	g.UninterruptibleDuration = 0; // 0 means uninterruptibility times out instantly.  Some callers may want this so that this "g" can be used to launch other threads (e.g. threadless callbacks) using 0 as their default.

@@ -513,6 +513,8 @@ int WINAPI OldWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 		// Since other applications and the user should see any changes the program makes to the clipboard,
 		// don't write-cache it either.
 		clipboard_var->DisableCache();
+	if (clipboard_var = g_script.FindOrAddVar(_T("A_Clipboard"))) // Fix for v1.1.37.02.  Alias added in v1.1.35.
+		clipboard_var->DisableCache();
 
 	// Run the auto-execute part at the top of the script (this call might never return):
 	if (!g_script.AutoExecSection()) // Can't run script at all. Due to rarity, just abort.
@@ -853,11 +855,44 @@ HRESULT __stdcall CoCOMServer::ahkgetvar(/*in*/VARIANT name,/*[in,optional]*/ VA
 	Var *var;
 	ExprTokenType aToken ;
 	
-	var = g_script.FindVar(name.vt == VT_BSTR ? OLE2T(name.bstrVal) : Variant2T(name,buf)) ;
+	VariantInit(result);
+	if (!g_script.mIsReadyToExecute)
+		return S_OK; // AutoHotkey needs to be running at this point.
+	// Like the exported ahkgetvar: FindOrAddVar() also resolves built-in vars the script doesn't reference.
+	LPTSTR aName = name.vt == VT_BSTR ? OLE2T(name.bstrVal) : Variant2T(name,buf);
+	var = Var::ValidateName(aName, DISPLAY_NO_ERROR) ? g_script.FindOrAddVar(aName) : NULL;
+	if (!var) // Invalid name: return an empty string (FindVar() returning NULL was a crash).
+	{
+		result->vt = VT_BSTR;
+		result->bstrVal = SysAllocString(L"");
+		return S_OK;
+	}
+	if (Variant2I(getVar)) // Return the address of the variable, like the exported ahkgetvar.
+	{
+#ifdef _WIN64
+		result->vt = VT_UI8;
+		result->ullVal = (ULONGLONG)var;
+#else
+		result->vt = VT_UI4;
+		result->ulVal = (ULONG)var;
+#endif
+		return S_OK;
+	}
+	if (var->Type() != VAR_NORMAL) // Built-in var or clipboard: its value must be retrieved with Get().
+	{
+		VarSizeType length = var->Get();
+		LPTSTR contents = (LPTSTR)malloc((length + 1) * sizeof(TCHAR));
+		if (!contents)
+			return E_OUTOFMEMORY;
+		var->Get(contents);
+		result->vt = VT_BSTR;
+		result->bstrVal = SysAllocString(T2COLE(contents));
+		free(contents);
+		return S_OK;
+	}
 	var->ToTokenSkipAddRef(aToken);
-    VariantInit(result);
    // CComVariant b ;
-	VARIANT b ; 
+	VARIANT b ;
 	TokenToVariant(aToken, b, FALSE);
 	return VariantCopy(result, &b) ;
 	// return S_OK ;
@@ -873,9 +908,15 @@ HRESULT __stdcall CoCOMServer::ahkassign(/*in*/VARIANT name, /*in*/VARIANT value
       return ERROR_INVALID_PARAMETER;
    TCHAR namebuf[MAX_INTEGER_SIZE];
    Var *var;
-   if (   !(var = g_script.FindOrAddVar(name.vt == VT_BSTR ? OLE2T(name.bstrVal) : Variant2T(name,namebuf)))   )
-      return ERROR_INVALID_PARAMETER;  // Realistically should never happen.
-   AssignVariant(*var, value, false);
+   *success = -1;
+   if (!g_script.mIsReadyToExecute)
+      return S_OK; // AutoHotkey needs to be running at this point.
+   // Read-only vars (e.g. A_TickCount) must not be assigned, see the exported ahkassign.
+   LPTSTR aName = name.vt == VT_BSTR ? OLE2T(name.bstrVal) : Variant2T(name,namebuf);
+   if (   !Var::ValidateName(aName, DISPLAY_NO_ERROR) || !(var = g_script.FindOrAddVar(aName)) || VAR_IS_READONLY(*var)   )
+      return S_OK;
+   AssignVariant(*var, value, true); // true: value is an [in] parameter, which the caller frees.
+   *success = 0;
 	return S_OK;
 }
 HRESULT __stdcall CoCOMServer::ahkExecuteLine(/*[in,optional]*/ VARIANT line,/*[in,optional]*/ VARIANT aMode,/*[in,optional]*/ VARIANT wait,/*[out, retval]*/ UINT_PTR* pLine)

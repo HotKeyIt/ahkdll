@@ -24,7 +24,7 @@ library AutoHotkey
 		[id(4)] HRESULT ahkReady([out, retval] int* ready);
 		[id(5)] HRESULT ahkFindLabel([in] VARIANT aLabelName,[out, retval] UINT_PTR *pLabel);
 		[id(6)] HRESULT ahkgetvar([in] VARIANT name,[in,optional] VARIANT getVar,[out, retval] VARIANT *returnVal);
-		[id(7)] HRESULT ahkassign([in] VARIANT name,[in,optional] VARIANT value,[out, retval] unsigned int* success);
+		[id(7)] HRESULT ahkassign([in] VARIANT name,[in,optional] VARIANT value,[out, retval] int* success);
 		[id(8)] HRESULT ahkExecuteLine([in,optional] VARIANT line,[in,optional] VARIANT aMode,[in,optional] VARIANT wait,[out, retval] UINT_PTR* pLine);
 		[id(9)] HRESULT ahkLabel([in] VARIANT aLabelName,[in,optional] VARIANT nowait,[out, retval] int* success);
 		[id(10)] HRESULT ahkFindFunction([in] VARIANT FuncName,[out, retval] UINT_PTR *pFunc);

@@ -89,9 +89,11 @@ public:
 	
 	// Not yet supported: function, hit_count, hit_value, hit_condition, exception
 
-	Breakpoint() : id(++sMaxId), type(BT_Line), state(BS_Enabled), temporary(false)
+	Breakpoint() : id(AllocateID()), type(BT_Line), state(BS_Enabled), temporary(false)
 	{
 	}
+
+	static int AllocateID() { return ++sMaxId; }
 
 private:
 	static int sMaxId; // Highest used breakpoint ID.
@@ -159,11 +161,7 @@ struct DbgStack
 
 	Entry *Push();
 
-	void Pop()
-	{
-		ASSERT(mTop >= mBottom);
-		--mTop;
-	}
+	void Pop();
 
 	void Push(TCHAR *aDesc);
 	void Push(Label *aSub);
@@ -189,6 +187,7 @@ public:
 	inline bool IsStepping() { return mInternalState >= DIS_StepInto; }
 	inline bool HasStdErrHook() { return mStdErrMode != SR_Disabled; }
 	inline bool HasStdOutHook() { return mStdOutMode != SR_Disabled; }
+	inline bool BreakOnExceptionIsEnabled() { return mBreakOnException; }
 
 	inline void PostExecFunctionCall(Line *aExpressionLine)
 	{
@@ -212,10 +211,11 @@ public:
 
 	// Code flow notification functions:
 	int PreExecLine(Line *aLine); // Called before executing each line.
+	bool PreThrow(ExprTokenType *aException);
 	
 	// Receive and process commands. Returns when a continuation command is received.
 	int ProcessCommands();
-	int Break();
+	int Break(char *aReason="ok");
 	
 	bool HasPendingCommand();
 
@@ -270,23 +270,27 @@ public:
 #ifndef MINIDLL
 		, mDisabledHooks(0)
 #endif
+		, mThrownToken(NULL), mBreakOnExceptionID(0), mBreakOnExceptionWasSet(false), mBreakOnExceptionIsTemporary(false), mBreakOnException(false)
 	{
 	}
 
 	
 	// Stack - keeps track of threads, function calls and gosubs.
 	DbgStack mStack;
+	friend struct DbgStack;
 
 private:
 	SOCKET mSocket;
 	Line *mCurrLine; // Similar to g_script.mCurrLine, but may be different when breaking post-function-call, before continuing expression evaluation.
+	ExprTokenType *mThrownToken; // The exception that triggered the current exception breakpoint.
+	bool mBreakOnExceptionWasSet, mBreakOnExceptionIsTemporary, mBreakOnException; // Supports a single coverall breakpoint exception.
+	int mBreakOnExceptionID;
 
 	class Buffer
 	{
 	public:
 		int Write(char *aData, size_t aDataSize=-1);
 		int WriteF(const char *aFormat, ...);
-		int WriteFileURI(const char *aPath);
 		int WriteEncodeBase64(const char *aData, size_t aDataSize, bool aSkipBufferSizeCheck = false);
 		int Expand();
 		int ExpandIfNecessary(size_t aRequiredSize);
@@ -304,6 +308,9 @@ private:
 			if (mData)
 				free(mData);
 		}
+	private:
+		int EstimateFileURILength(LPCTSTR aPath);
+		void WriteFileURI(LPCTSTR aPath);
 	} mCommandBuf, mResponseBuf;
 
 	enum DebuggerInternalStateType {
@@ -402,10 +409,11 @@ private:
 	int SendStandardResponse(char *aCommandName, char *aTransactionId);
 	int SendContinuationResponse(char *aCommand=NULL, char *aStatus="break", char *aReason="ok");
 
-	int EnterBreakState();
+	int EnterBreakState(char *aReason="ok");
 	void ExitBreakState();
 
 	int WriteBreakpointXml(Breakpoint *aBreakpoint, Line *aLine);
+	int WriteExceptionBreakpointXml();
 
 	void AppendKeyName(CStringA &aNameBuf, size_t aParentNameLength, const char *aName);
 

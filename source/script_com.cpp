@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "globaldata.h"
 #include "script.h"
 #include "script_object.h"
@@ -74,59 +74,74 @@ BIF_DECL(BIF_ComObjCreate)
 }
 
 BIF_DECL(BIF_ComObjDll)
-{ // ComObjDll(moduleHandle,CLSID)
-	if ((aParam[0]->symbol != SYM_INTEGER && aParam[0]->symbol != SYM_VAR)
-		|| (aParam[1]->symbol != SYM_STRING && aParam[1]->symbol != SYM_VAR))
+{ // ComObjDll(hModule, CLSID or ProgID [, IID])
+	HRESULT hr = TYPE_E_CANTLOADLIBRARY;
+	HMODULE hDLL = (HMODULE)TokenToInt64(*aParam[0]);
+	for (;;)
 	{
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
-		ComError(TYPE_E_CANTLOADLIBRARY);
-		return; // simply exit
-	}
-    HMODULE hDLL = (HMODULE)TokenToInt64(*aParam[0]);
-	
-	if (hDLL == NULL)
-	{
-		ComError(TYPE_E_CANTLOADLIBRARY);
-		return;
-	}
-	typedef HRESULT (__stdcall *pDllGetClassObject)(IN REFCLSID clsid,IN REFIID iid,OUT LPVOID FAR* ppv);
-	WCHAR buf[MAX_PATH * sizeof(WCHAR)]; // LoadTypeLibEx needs Unicode string
-	pDllGetClassObject GetClassObject;
-	if (GetModuleFileNameW(hDLL, buf, _countof(buf)))
-		GetClassObject = (pDllGetClassObject)::GetProcAddress(hDLL,"DllGetClassObject");
-	else
-		GetClassObject = (pDllGetClassObject)::MemoryGetProcAddress(hDLL,"DllGetClassObject");
-    IClassFactory* pClassFactory = NULL;
-	CLSID clsid;
-	CLSIDFromString(CStringWCharFromTCharIfNeeded(TokenToString(*aParam[1])), &clsid);
-	HRESULT hr;
-    hr = GetClassObject(clsid, IID_IClassFactory, (LPVOID*)&pClassFactory);
-    if(FAILED(hr)){
-        ComError(hr);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
-		return;
-    }
-	IDispatch *pdisp;
-    hr = pClassFactory->CreateInstance(NULL, IID_IUnknown, (void**)&pdisp);
-    pClassFactory->Release();
-    if(FAILED(hr))
-    {
-        ComError(hr);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
-		return;
-    }
-	if (aResultToken.object = new ComObject(pdisp))
-	{
+		if (!hDLL)
+			break;
+		typedef HRESULT (__stdcall *pDllGetClassObject)(IN REFCLSID clsid,IN REFIID iid,OUT LPVOID FAR* ppv);
+		WCHAR buf[MAX_PATH * sizeof(WCHAR)];
+		pDllGetClassObject GetClassObject;
+		if (GetModuleFileNameW(hDLL, buf, _countof(buf)))
+			GetClassObject = (pDllGetClassObject)::GetProcAddress(hDLL,"DllGetClassObject");
+		else // Loaded by MemoryLoadLibrary.
+			GetClassObject = (pDllGetClassObject)::MemoryGetProcAddress(hDLL,"DllGetClassObject");
+		if (!GetClassObject) // Not a COM server dll (this crashed before).
+		{
+			hr = CLASS_E_CLASSNOTAVAILABLE;
+			break;
+		}
+		// CLSID or ProgID, as documented and as in ComObjCreate().  The result of CLSIDFromString was ignored before.
+#ifdef UNICODE
+		LPTSTR cls = TokenToString(*aParam[1]);
+#else
+		CStringWCharFromTChar cls = TokenToString(*aParam[1]);
+#endif
+		CLSID clsid, iid;
+		if (FAILED(hr = cls[0] == '{' ? CLSIDFromString(cls, &clsid) : CLSIDFromProgID(cls, &clsid)))
+			break;
+		bool want_iid = !ParamIndexIsOmittedOrEmpty(2);
+		if (want_iid && FAILED(hr = CLSIDFromString(CStringWCharFromTCharIfNeeded(TokenToString(*aParam[2])), &iid)))
+			break;
+		IClassFactory *pClassFactory = NULL;
+		if (FAILED(hr = GetClassObject(clsid, IID_IClassFactory, (LPVOID*)&pClassFactory)))
+			break;
+		IUnknown *punk;
+		hr = pClassFactory->CreateInstance(NULL, want_iid ? iid : IID_IUnknown, (void**)&punk);
+		pClassFactory->Release();
+		if (FAILED(hr))
+			break;
+		if (want_iid)
+		{
+			// Return the interface pointer, as with ComObjCreate(CLSID, IID).
+			aResultToken.symbol = SYM_INTEGER;
+			aResultToken.value_int64 = (__int64)punk;
+			return;
+		}
+		// Wrap IDispatch as usual; an object without IDispatch was wrapped as if it had one before.
+		IDispatch *pdisp;
+		if (SUCCEEDED(punk->QueryInterface(IID_IDispatch, (void **)&pdisp)))
+		{
+			punk->Release();
+			aResultToken.object = new ComObject(pdisp);
+			if (!aResultToken.object)
+				pdisp->Release();
+		}
+		else if (!(aResultToken.object = new ComObject((__int64)punk, VT_UNKNOWN)))
+			punk->Release();
+		if (!aResultToken.object)
+		{
+			hr = E_OUTOFMEMORY;
+			break;
+		}
 		aResultToken.symbol = SYM_OBJECT;
 		return;
 	}
-	pdisp->Release();
-    ComError(hr);
 	aResultToken.symbol = SYM_STRING;
 	aResultToken.marker = _T("");
+	ComError(hr);
 }
 
 BIF_DECL(BIF_ComObjGet)
@@ -365,6 +380,14 @@ BIF_DECL(BIF_ComObjConnect)
 {
 	aResultToken.symbol = SYM_STRING;
 	aResultToken.marker = _T("");
+	
+	LPCTSTR prefix = nullptr;    // Set default: disconnect.
+	IObject *handlers = nullptr; //
+	if (!ParamIndexIsOmitted(1))
+	{
+		prefix = ParamIndexToString(1);
+		handlers = ParamIndexToObject(1);
+	}
 
 	if (ComObject *obj = dynamic_cast<ComObject *>(TokenToObject(*aParam[0])))
 	{
@@ -374,8 +397,28 @@ BIF_DECL(BIF_ComObjConnect)
 			return;
 		}
 		
-		ITypeInfo *ptinfo;
-		if (  !obj->mEventSink && (ptinfo = GetClassTypeInfo(obj->mUnknown))  )
+		bool already_connected = obj->mEventSink;
+		if (already_connected)
+		{
+			if (!prefix)
+			{
+				HRESULT hr = obj->mEventSink->Connect(); // This should result in mEventSink being deleted.
+				if (FAILED(hr))
+					ComError(hr);
+				return;
+			}
+		}
+		else
+			obj->mEventSink = new ComEvent(obj);
+		
+		// Set or update prefix/event sink prior to calling Advise().
+		obj->mEventSink->SetPrefixOrSink(prefix, handlers);
+		if (already_connected)
+			return;
+		
+		HRESULT hr = E_NOINTERFACE;
+		
+		if (ITypeInfo *ptinfo = GetClassTypeInfo(obj->mUnknown))
 		{
 			TYPEATTR *typeattr;
 			WORD cImplTypes = 0;
@@ -398,7 +441,10 @@ BIF_DECL(BIF_ComObjConnect)
 					{
 						if (typeattr->typekind == TKIND_DISPATCH)
 						{
-							obj->mEventSink = new ComEvent(obj, prinfo, typeattr->guid);
+							hr = obj->mEventSink->Connect(prinfo, &typeattr->guid);
+							// Let the connection point's reference be the only one, so we can detect when it releases.
+							// If Connect() failed, this will delete the event sink, which will set mEventSink = nullptr.
+							obj->mEventSink->Release();
 							prinfo->ReleaseTypeAttr(typeattr);
 							break;
 						}
@@ -410,22 +456,25 @@ BIF_DECL(BIF_ComObjConnect)
 			ptinfo->Release();
 		}
 
-		if (obj->mEventSink)
-		{
-			HRESULT hr;
-			if (aParamCount < 2)
-				hr = obj->mEventSink->Connect(); // Disconnect.
-			else
-				hr = obj->mEventSink->Connect(TokenToString(*aParam[1]), TokenToObject(*aParam[1]));
-			if (FAILED(hr))
-				ComError(hr);
-			return;
-		}
-
-		ComError(E_NOINTERFACE);
+		if (FAILED(hr))
+			ComError(hr);
 	}
 	else
 		ComError(-1); // "No COM object"
+}
+
+
+ComEvent::~ComEvent()
+{
+	// At this point, all references have been released, including the
+	// reference held by the connection point (if a connection was made),
+	// so Unadvise() isn't necessary and couldn't be successful anyway.
+	if (mObject)
+		mObject->mEventSink = nullptr;
+	if (mTypeInfo)
+		mTypeInfo->Release();
+	if (mAhkObject)
+		mAhkObject->Release();
 }
 
 
@@ -685,8 +734,15 @@ void VariantToToken(VARIANT &aVar, ExprTokenType &aToken, bool aRetainVar = true
 		if (!aRetainVar)
 			VariantClear(&aVar);
 		break;
-	case VT_I4:
 	case VT_ERROR:
+		if (aVar.scode == DISP_E_PARAMNOTFOUND)
+		{
+			aToken.symbol = SYM_MISSING;
+			aToken.marker = _T("");
+			break;
+		}
+		//else fall through:
+	case VT_I4:
 		aToken.symbol = SYM_INTEGER;
 		aToken.value_int64 = aVar.lVal;
 		break;
@@ -825,17 +881,8 @@ void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar, BOOL aVarIsArg)
 	case SYM_OPERAND:
 		if (aToken.buf)
 		{
-			__int64 val = *(__int64 *)aToken.buf;
-			if (val == (int)val)
-			{
-				aVar.vt = VT_I4;
-				aVar.lVal = (int)val;
-			}
-			else
-			{
-				aVar.vt = VT_R8;
-				aVar.dblVal = (double)val;
-			}
+			aVar.llVal = *(__int64 *)aToken.buf;
+			aVar.vt = (aVar.llVal == (int)aVar.llVal) ? VT_I4 : VT_I8;
 			break;
 		}
 	case SYM_STRING:
@@ -843,19 +890,8 @@ void TokenToVariant(ExprTokenType &aToken, VARIANT &aVar, BOOL aVarIsArg)
 		aVar.bstrVal = SysAllocString(CStringWCharFromTCharIfNeeded(aToken.marker));
 		break;
 	case SYM_INTEGER:
-		{
-			__int64 val = aToken.value_int64;
-			if (val == (int)val)
-			{
-				aVar.vt = VT_I4;
-				aVar.lVal = (int)val;
-			}
-			else
-			{
-				aVar.vt = VT_R8;
-				aVar.dblVal = (double)val;
-			}
-		}
+		aVar.llVal = aToken.value_int64;
+		aVar.vt = (aVar.llVal == (int)aVar.llVal) ? VT_I4 : VT_I8;
 		break;
 	case SYM_FLOAT:
 		aVar.vt = VT_R8;
@@ -913,7 +949,7 @@ HRESULT TokenToVarType(ExprTokenType &aToken, VARTYPE aVarType, void *apValue)
 	// the following would be to switch(aVarType) and copy using the appropriate pointer
 	// type, but disassembly shows that approach produces larger code and internally uses
 	// an array of sizes like this anyway:
-	static char vt_size[] = {U,U,2,4,4,8,8,8,P,P,4,2,0,P,0,U,1,1,2,4,8,8,4,4,U,U,U,U,U,U,U,U,U,U,U,U,U,P,P};
+	static const char vt_size[] = {U,U,2,4,4,8,8,8,P,P,4,2,0,P,0,U,1,1,2,4,8,8,4,4,U,U,U,U,U,U,U,U,U,U,U,U,U,P,P};
 	size_t vsize = (aVarType < _countof(vt_size)) ? vt_size[aVarType] : 0;
 	if (!vsize)
 		return DISP_E_BADVARTYPE;
@@ -1065,7 +1101,7 @@ STDMETHODIMP ComEvent::GetIDsOfNames(REFIID riid, LPOLESTR *rgszNames, UINT cNam
 
 STDMETHODIMP ComEvent::Invoke(DISPID dispIdMember, REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS *pDispParams, VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
 {
-	if (!mObject) // mObject == NULL should be next to impossible since it is only set NULL after calling Unadvise(), in which case there shouldn't be anyone left to call this->Invoke().  Check it anyway since it might be difficult to debug, depending on what we're connected to.
+	if (!mObject) // mObject == NULL should be impossible unless Unadvise() somehow fails while leaving behind a valid connection.  Check it anyway since it might be difficult to debug, depending on what we're connected to.
 		return DISP_E_MEMBERNOTFOUND;
 
 	// Resolve method name.
@@ -1123,57 +1159,50 @@ STDMETHODIMP ComEvent::Invoke(DISPID dispIdMember, REFIID riid, LCID lcid, WORD 
 	return S_OK;
 }
 
-HRESULT ComEvent::Connect(LPTSTR pfx, IObject *ahkObject)
+HRESULT ComEvent::Connect(ITypeInfo *tinfo, IID *iid)
 {
-	HRESULT hr;
-
-	if ((pfx != NULL) != (mCookie != 0)) // want_connection != have_connection
+	bool want_to_connect = tinfo;
+	if (want_to_connect)
 	{
-		IConnectionPointContainer *pcpc;
-		hr = mObject->mDispatch->QueryInterface(IID_IConnectionPointContainer, (void **)&pcpc);
-		if (SUCCEEDED(hr))
-		{
-			IConnectionPoint *pconn;
-			hr = pcpc->FindConnectionPoint(mIID, &pconn);
-			if (SUCCEEDED(hr))
-			{
-				if (pfx)
-				{
-					hr = pconn->Advise(this, &mCookie);
-				}
-				else
-				{
-					hr = pconn->Unadvise(mCookie);
-					if (SUCCEEDED(hr))
-						mCookie = 0;
-					if (mAhkObject) // Even if above failed:
-					{
-						mAhkObject->Release();
-						mAhkObject = NULL;
-					}
-				}
-				pconn->Release();
-			}
-			pcpc->Release();
-		}
+		// Set these unconditionally to ensure they are released on failure or disconnection.
+		ASSERT(!mTypeInfo && iid);
+		mTypeInfo = tinfo;
+		mIID = *iid;
 	}
-	else
-		hr = S_OK; // No change required.
-
+	
+	IConnectionPointContainer *pcpc;
+	HRESULT hr = mObject->mDispatch->QueryInterface(IID_IConnectionPointContainer, (void **)&pcpc);
 	if (SUCCEEDED(hr))
 	{
-		if (mAhkObject)
-			// Release this object before storing the new one below.
-			mAhkObject->Release();
-		// Update prefix/object.
-		if (mAhkObject = ahkObject)
-			mAhkObject->AddRef();
-		if (pfx)
-			_tcscpy(mPrefix, pfx);
-		else
-			*mPrefix = '\0'; // For maintainability.
+		IConnectionPoint *pconn;
+		hr = pcpc->FindConnectionPoint(mIID, &pconn);
+		if (SUCCEEDED(hr))
+		{
+			if (want_to_connect)
+				hr = pconn->Advise(this, &mCookie);
+			else if (mCookie != 0) // This check preserves legacy behaviour of ComObjConnect(obj) without a prior connection.
+				hr = pconn->Unadvise(mCookie); // This should result in this ComEvent being deleted.
+			pconn->Release();
+		}
+		pcpc->Release();
 	}
 	return hr;
+}
+
+void ComEvent::SetPrefixOrSink(LPCTSTR pfx, IObject *ahkObject)
+{
+	if (mAhkObject)
+	{
+		mAhkObject->Release();
+		mAhkObject = NULL;
+	}
+	if (ahkObject)
+	{
+		ahkObject->AddRef();
+		mAhkObject = ahkObject;
+	}
+	if (pfx)
+		tcslcpy(mPrefix, pfx, _countof(mPrefix));
 }
 
 ResultType STDMETHODCALLTYPE ComObject::Invoke(ExprTokenType &aResultToken, ExprTokenType &aThisToken, int aFlags, ExprTokenType *aParam[], int aParamCount)
@@ -1243,6 +1272,13 @@ ResultType STDMETHODCALLTYPE ComObject::Invoke(ExprTokenType &aResultToken, Expr
 #else
 		CStringWCharFromChar cnvbuf(aName);
 		LPOLESTR wname = (LPOLESTR)(LPCWSTR)cnvbuf;
+#endif
+		
+#ifdef CONFIG_DLL
+		// For fn.() and %fn%() where fn is a v2 object, skip GetIDsOfNames and use DISPID_VALUE.
+		if (IS_INVOKE_CALL && TokenIsEmptyString(*aParam[0]))
+			hr = S_OK, dispid = DISPID_VALUE;
+		else
 #endif
 		hr = mDispatch->GetIDsOfNames(IID_NULL, &wname, 1, LOCALE_USER_DEFAULT, &dispid);
 		if (hr == DISP_E_UNKNOWNNAME) // v1.1.18: Retry with IDispatchEx if supported, to allow creating new properties.
@@ -1320,9 +1356,12 @@ ResultType STDMETHODCALLTYPE ComObject::Invoke(ExprTokenType &aResultToken, Expr
 			SysFreeString(rgvarg[i].bstrVal);
 	}
 
+	g->LastError = hr;
 	if	(FAILED(hr))
 	{
 		ComError(hr, aName, &excepinfo);
+		if (g->ThrownToken)
+			return FAIL;
 	}
 	else if	(IS_INVOKE_SET)
 	{	// Allow chaining, e.g. obj2.prop := obj1.prop := val.
@@ -1336,8 +1375,6 @@ ResultType STDMETHODCALLTYPE ComObject::Invoke(ExprTokenType &aResultToken, Expr
 	{
 		VariantToToken(varResult, aResultToken, false);
 	}
-
-	g->LastError = hr;
 	return	OK;
 }
 
@@ -1446,11 +1483,14 @@ LPTSTR ComObject::Type()
 		return _T("ComObjRef"); // Has this[].
 	if ((mVarType == VT_DISPATCH || mVarType == VT_UNKNOWN) && mUnknown)
 	{
-		BSTR name;
-		ITypeInfo *ptinfo;
 		// Use COM class name if available.
-		if (  (ptinfo = GetClassTypeInfo(mUnknown))
-			&& SUCCEEDED(ptinfo->GetDocumentation(MEMBERID_NIL, &name, NULL, NULL, NULL))  )
+		BSTR name = nullptr;
+		if (ITypeInfo *ptinfo = GetClassTypeInfo(mUnknown))
+		{
+			ptinfo->GetDocumentation(MEMBERID_NIL, &name, NULL, NULL, NULL);
+			ptinfo->Release();
+		}
+		if (name)
 		{
 			static TCHAR sBuf[64]; // Seems generous enough.
 			tcslcpy(sBuf, CStringTCharFromWCharIfNeeded(name), _countof(sBuf));
@@ -1464,15 +1504,36 @@ LPTSTR ComObject::Type()
 }
 
 
-int ComEnum::Next(Var *aOutput, Var *aOutputType)
+ComEnum::ComEnum(IEnumVARIANT *enm)
+	: penum(enm)
 {
-	VARIANT varResult = {0};
-	if (penum->Next(1, &varResult, NULL) == S_OK)
+	IServiceProvider *sp;
+	if (SUCCEEDED(enm->QueryInterface<IServiceProvider>(&sp)))
 	{
-		if (aOutputType)
-			aOutputType->Assign((__int64)varResult.vt);
-		if (aOutput)
-			AssignVariant(*aOutput, varResult, false);
+		IUnknown *unk;
+		if (SUCCEEDED(sp->QueryService<IUnknown>(IID_IObjectComCompatible, &unk)))
+		{
+			cheat = true;
+			unk->Release();
+		}
+		sp->Release();
+	}
+}
+
+
+int ComEnum::Next(Var *aVar0, Var *aVar1)
+{
+	VARIANT var[2] = {0};
+	if (penum->Next(1 + (cheat && aVar1), var, NULL) == S_OK)
+	{
+		AssignVariant(*aVar0, var[0], false);
+		if (aVar1)
+		{
+			if (cheat && aVar1)
+				AssignVariant(*aVar1, var[1], false);
+			else
+				aVar1->Assign((__int64)var[0].vt);
+		}
 		return true;
 	}
 	return	false;
@@ -1540,6 +1601,125 @@ int ComArrayEnum::Next(Var *aOutput, Var *aOutputType)
 	return false;
 }
 
+
+STDMETHODIMP EnumComCompat::QueryInterface(REFIID riid, void **ppvObject)
+{
+	if (riid == IID_IUnknown || riid == IID_IEnumVARIANT)
+		*ppvObject = static_cast<IEnumVARIANT*>(this);
+	else if (riid == IID_IServiceProvider)
+		*ppvObject = static_cast<IServiceProvider*>(this);
+	else
+		return E_NOTIMPL;
+	AddRef();
+	return S_OK;
+}
+
+STDMETHODIMP EnumComCompat::QueryService(REFGUID guidService, REFIID riid, void **ppvObject)
+{
+	// This is our secret handshake for enabling AutoHotkey enumeration behaviour.
+	// Unlike calls to QueryInterface for this IID (due to the lack of registration etc.),
+	// calls to this method should pass through the process/thread apartment boundary.
+	if (guidService == IID_IObjectComCompatible && riid == IID_IUnknown)
+	{
+		*ppvObject = static_cast<IEnumVARIANT*>(this);
+		AddRef();
+		mCheat = true;
+		return S_OK;
+	}
+	*ppvObject = nullptr;
+	return E_NOTIMPL;
+}
+
+STDMETHODIMP_(ULONG) EnumComCompat::AddRef()
+{
+	return ++mRefCount;
+}
+
+STDMETHODIMP_(ULONG) EnumComCompat::Release()
+{
+	if (mRefCount)
+		return --mRefCount;
+	delete this;
+	return 0;
+}
+
+STDMETHODIMP EnumComCompat::Next(ULONG celt, /*out*/ VARIANT *rgVar, /*out*/ ULONG *pCeltFetched)
+{
+	if (!celt)
+		return E_INVALIDARG;
+
+	TCHAR result_token_buf[MAX_NUMBER_SIZE];
+	
+	ExprTokenType result_token;
+	result_token.buf = result_token_buf;
+	result_token.marker = _T("");
+	result_token.symbol = SYM_STRING;
+	result_token.mem_to_free = NULL;
+	
+	ExprTokenType this_token;
+	this_token.SetValue(mEnum);
+
+	Var var1;
+	Var var2;
+	ExprTokenType pt[3], *pp[] = { pt, pt + 1, pt + 2 };
+	pt[0].SetValue(_T("Next"));
+	pt[1].symbol = SYM_VAR, pt[1].var = &var1;
+	pt[2].symbol = SYM_VAR, pt[2].var = &var2;
+	int pc = min(1 + celt, 2U + mCheat);
+
+	switch (mEnum->Invoke(result_token, this_token, IT_CALL, pp, pc))
+	{
+	default:
+		if (TokenToBOOL(result_token))
+		{
+			ExprTokenType value;
+			var1.ToTokenSkipAddRef(value);
+			TokenToVariant(value, rgVar[0], FALSE);
+			if (pc > 2)
+			{
+				var2.ToTokenSkipAddRef(value);
+				TokenToVariant(value, rgVar[1], FALSE);
+			}
+			if (pCeltFetched)
+				*pCeltFetched = pc - 1;
+			break;
+		}
+		// else fall through.
+	case INVOKE_NOT_HANDLED:
+	case EARLY_EXIT:
+	case FAIL:
+		if (pCeltFetched)
+			*pCeltFetched = 0;
+		celt = -1;
+		break;
+	}
+
+	if (result_token.mem_to_free)
+		free(result_token.mem_to_free);
+	if (result_token.symbol == SYM_OBJECT)
+		result_token.object->Release();
+	var1.Free();
+	var2.Free();
+
+	return celt + 1 == pc ? S_OK : S_FALSE;
+}
+
+STDMETHODIMP EnumComCompat::Skip(ULONG celt)
+{
+	return E_NOTIMPL;
+}
+
+STDMETHODIMP EnumComCompat::Reset()
+{
+	return E_NOTIMPL;
+}
+
+STDMETHODIMP EnumComCompat::Clone(/*out*/ IEnumVARIANT **ppEnum)
+{
+	return E_NOTIMPL;
+}
+
+
 #ifndef MINIDLL
 IObject *GuiType::ControlGetActiveX(HWND aWnd)
 {
@@ -1575,7 +1755,14 @@ IObject *GuiType::ControlGetActiveX(HWND aWnd)
 
 STDMETHODIMP IObjectComCompatible::QueryInterface(REFIID riid, void **ppv)
 {
-	if (riid == IID_IDispatch || riid == IID_IUnknown || riid == IID_IObjectComCompatible)
+	// Check our internal IID by address so that only our instance of the IID is a match.
+	// This prevents other in-process instances of AutoHotkey from identifying the object
+	// as one of theirs, which can be important since the interface is unofficial and not
+	// constant between versions.  Even for the same version, it isn't compatible unless
+	// both instances are compiled with the dynamically-linked CRT.
+	// Note that we would never receive a query for IID_IObjectComCompatible from an
+	// instance in another process (via COM proxy), because there's no proxy/stub dll.
+	if (riid == IID_IDispatch || riid == IID_IUnknown || &riid == &IID_IObjectComCompatible)
 	{
 		AddRef();
 		//*ppv = static_cast<IDispatch *>(this);
@@ -1601,36 +1788,70 @@ STDMETHODIMP IObjectComCompatible::GetTypeInfo(UINT itinfo, LCID lcid, ITypeInfo
 	return E_NOTIMPL;
 }
 
-static Object *g_IdToName;
-static Object *g_NameToId;
+static LPTSTR *sDispNameByIdMinus1;
+static DISPID *sDispIdSortByName;
+static DISPID sDispNameCount, sDispNameMax;
 
 STDMETHODIMP IObjectComCompatible::GetIDsOfNames(REFIID riid, LPOLESTR *rgszNames, UINT cNames, LCID lcid, DISPID *rgDispId)
 {
+	HRESULT result_on_success = cNames == 1 ? S_OK : DISP_E_UNKNOWNNAME;
+	for (UINT i = 0; i < cNames; ++i)
+		rgDispId[i] = DISPID_UNKNOWN;
+
 #ifdef UNICODE
 	LPTSTR name = *rgszNames;
 #else
 	CStringCharFromWChar name_buf(*rgszNames);
 	LPTSTR name = const_cast<LPTSTR>(name_buf.GetString());
 #endif
-	if ( !(g_IdToName || (g_IdToName = Object::Create())) ||
-		 !(g_NameToId || (g_NameToId = Object::Create())) )
-		return E_OUTOFMEMORY;
-	ExprTokenType id;
-	if (!g_NameToId->GetItem(id, name))
+
+	int left, right, mid, result;
+	for (left = 0, right = sDispNameCount - 1; left <= right;)
 	{
-		if (!g_IdToName->Append(name))
-			return E_OUTOFMEMORY;
-		id.symbol = SYM_INTEGER;
-		id.value_int64 = g_IdToName->GetNumericItemCount();
-		if (!g_NameToId->SetItem(name, id))
-			return E_OUTOFMEMORY;
+		mid = (left + right) / 2;
+		// Comparison is case-sensitive so that the proper case of the name comes through for
+		// meta-functions or new assignments.  Using different case will produce a different ID,
+		// but the ID is ultimately mapped back to the name when the member is invoked anyway.
+		result = _tcscmp(name, sDispNameByIdMinus1[sDispIdSortByName[mid] - 1]);
+		if (result > 0)
+			left = mid + 1;
+		else if (result < 0)
+			right = mid - 1;
+		else // Match found.
+		{
+			*rgDispId = sDispIdSortByName[mid];
+			return result_on_success;
+		}
 	}
-	*rgDispId = (DISPID)id.value_int64;
-	if (cNames == 1)
-		return S_OK;
-	for (UINT i = 1; i < cNames; ++i)
-		rgDispId[i] = DISPID_UNKNOWN;
-	return DISP_E_UNKNOWNNAME;
+
+	if (sDispNameMax == sDispNameCount)
+	{
+		int new_max = sDispNameMax ? sDispNameMax * 2 : 16;
+		LPTSTR *new_names = (LPTSTR *)realloc(sDispNameByIdMinus1, new_max * sizeof(LPTSTR *));
+		if (!new_names)
+			return E_OUTOFMEMORY;
+		DISPID *new_ids = (DISPID *)realloc(sDispIdSortByName, new_max * sizeof(DISPID));
+		if (!new_ids)
+		{
+			free(new_names);
+			return E_OUTOFMEMORY;
+		}
+		sDispNameByIdMinus1 = new_names;
+		sDispIdSortByName = new_ids;
+		sDispNameMax = new_max;
+	}
+
+	LPTSTR name_copy = SimpleHeap::Malloc(name);
+	if (!name_copy)
+		return E_OUTOFMEMORY;
+
+	sDispNameByIdMinus1[sDispNameCount] = name_copy; // Put names in ID order; index = ID - 1.
+	if (left < sDispNameCount)
+		memmove(sDispIdSortByName + left + 1, sDispIdSortByName + left, (sDispNameCount - left) * sizeof(DISPID));
+	sDispIdSortByName[left] = ++sDispNameCount; // Insert ID in order sorted by name, for binary search.  ID = index + 1, to avoid DISPID_VALUE.
+
+	*rgDispId = sDispNameCount;
+	return result_on_success;
 }
 
 STDMETHODIMP IObjectComCompatible::Invoke(DISPID dispIdMember, REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS *pDispParams, VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
@@ -1658,19 +1879,24 @@ STDMETHODIMP IObjectComCompatible::Invoke(DISPID dispIdMember, REFIID riid, LCID
 	ExprTokenType **first_param = param;
 	int param_count = cArgs;
 	
-	if (dispIdMember > 0)
+	if (dispIdMember > 0 && dispIdMember <= sDispNameCount)
 	{
-		if (!g_IdToName->GetItemOffset(param_token[0], dispIdMember - 1))
-			return DISP_E_MEMBERNOTFOUND;
-		if (IsPureNumeric(param_token[0].marker, FALSE, FALSE)) // o[1] in JScript produces a numeric name.
-		{
-			param_token[0].symbol = SYM_INTEGER;
-			param_token[0].value_int64 = ATOI(param_token[0].marker);
-		}
+		param_token[0].marker = sDispNameByIdMinus1[dispIdMember - 1];
+		// Use SYM_OPERAND to allow the object to treat this name as a numeric key if appropriate.
+		param_token[0].symbol = SYM_OPERAND;
+		param_token[0].buf = NULL;
 		param[0] = &param_token[0];
 		++param_count;
 		if (flags == IT_CALL && (wFlags & DISPATCH_PROPERTYGET))
 			flags |= IF_CALL_FUNC_ONLY;
+	}
+	else if (dispIdMember == DISPID_NEWENUM && (wFlags & (DISPATCH_METHOD | DISPATCH_PROPERTYGET)))
+	{
+		param_token[0].SetValue(_T("_NewEnum"));
+		param[0] = &param_token[0];
+		++param_count;
+		flags |= IF_NEWENUM;
+		wFlags = (wFlags & ~DISPATCH_PROPERTYGET) | DISPATCH_METHOD;
 	}
 	else
 	{
@@ -1699,9 +1925,19 @@ STDMETHODIMP IObjectComCompatible::Invoke(DISPID dispIdMember, REFIID riid, LCID
 	for (UINT i = 1; i <= cArgs; ++i)
 	{
 		VARIANTARG *pvar = &pDispParams->rgvarg[cArgs-i];
-		while (pvar->vt == (VT_BYREF | VT_VARIANT))
-			pvar = pvar->pvarVal;
-		VariantToToken(*pvar, param_token[i]);
+		// ByRef support here is based on v2 (a97ee22d), but limited to VARIANT for backward-compatibility
+		// (as previous versions only "dereferenced" VT_BYREF|VT_VARIANT, not other ByRef combinations).
+		if (pvar->vt == (VT_BYREF | VT_VARIANT))
+		{
+			// Allocate and pass a temporary Var to transparently support ByRef.
+			param_token[i].symbol = SYM_VAR;
+			param_token[i].var = new (_alloca(sizeof(Var))) Var();
+			AssignVariant(*param_token[i].var, *pvar->pvarVal);
+		}
+		else
+		{
+			VariantToToken(*pvar, param_token[i]);
+		}
 		param[i] = &param_token[i];
 	}
 	
@@ -1761,7 +1997,15 @@ STDMETHODIMP IObjectComCompatible::Invoke(DISPID dispIdMember, REFIID riid, LCID
 			}
 		default:
 			result_to_return = S_OK;
-			if (pVarResult)
+			if (!pVarResult)
+				break;
+			if (dispIdMember == DISPID_NEWENUM && result_token.symbol == SYM_OBJECT)
+			{
+				pVarResult->vt = VT_UNKNOWN;
+				pVarResult->punkVal = static_cast<IEnumVARIANT*>(new EnumComCompat(result_token.object));
+				result_token.symbol = SYM_INTEGER; // Skip Release().
+			}
+			else
 				TokenToVariant(result_token, *pVarResult, FALSE);
 		}
 		break;
@@ -1776,12 +2020,26 @@ STDMETHODIMP IObjectComCompatible::Invoke(DISPID dispIdMember, REFIID riid, LCID
 
 	for (UINT i = 1; i <= cArgs; ++i)
 	{
-		// Release objects (some or all of which may have been created by VariantToToken()):
-		if (param_token[i].symbol == SYM_OBJECT)
-			param_token[i].object->Release();
-		// Free any temporary memory used to hold strings; see VariantToToken().
-		else if (param_token[i].symbol == SYM_STRING && param_token[i].mem_to_free)
-			free(param_token[i].mem_to_free);
+		if (param_token[i].symbol == SYM_VAR) // Temp var for VT_BYREF.
+		{
+			auto &varg = pDispParams->rgvarg[cArgs-i];
+			ExprTokenType value;
+			param_token[i].var->ToTokenSkipAddRef(value);
+			ASSERT(varg.vt == (VT_BYREF | VT_VARIANT)); // v1 only: vt is always VT_BYREF|VT_VARIANT.
+			//TokenToVarType(value, varg.vt & ~VT_BYREF, varg.pvRecord);
+			VariantClear(varg.pvarVal);
+			TokenToVariant(value, *varg.pvarVal, FALSE);
+			param_token[i].var->Free();
+		}
+		else
+		{
+			// Release objects (some or all of which may have been created by VariantToToken()):
+			if (param_token[i].symbol == SYM_OBJECT)
+				param_token[i].object->Release();
+			// Free any temporary memory used to hold strings; see VariantToToken().
+			else if (param_token[i].symbol == SYM_STRING && param_token[i].mem_to_free)
+				free(param_token[i].mem_to_free);
+		}
 	}
 
 	return result_to_return;
@@ -1812,7 +2070,7 @@ void ComObject::DebugWriteProperty(IDebugProperties *aDebugger, int aPage, int a
 {
 	DebugCookie rootCookie;
 	aDebugger->BeginProperty(NULL, "object", 2 + (mVarType == VT_DISPATCH)*2 + (mEventSink != NULL), rootCookie);
-	if (aPage == 0)
+	if (aPage == 0 && aDepth > 0)
 	{
 		// For simplicity, assume they all fit within aPageSize.
 		
@@ -1825,7 +2083,9 @@ void ComObject::DebugWriteProperty(IDebugProperties *aDebugger, int aPage, int a
 			WriteComObjType(aDebugger, this, "DispatchIID", _T("IID"));
 		}
 		
-		if (mEventSink)
+		// Don't include the event sink property at all if would exceed max_depth,
+		// since any attempt to query its sub-properties would fail anyway.
+		if (mEventSink && aDepth > 1)
 		{
 			DebugCookie sinkCookie;
 			aDebugger->BeginProperty("EventSink", "object", 2, sinkCookie);

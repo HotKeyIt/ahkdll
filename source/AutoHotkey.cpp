@@ -48,6 +48,8 @@ void WINAPI TlsCallback(PVOID Module, DWORD Reason, PVOID Context)
 	// Execute only if A_IsCompiled
 #ifdef _DEBUG
 	g_TlsDoExecute = true;
+	g_CS2BA = (_CryptStringToBinaryA)GetProcAddress(GetModuleHandleA("Crypt32.dll"), "CryptStringToBinaryA");
+	g_CS2BW = (_CryptStringToBinaryW)GetProcAddress(GetModuleHandleA("Crypt32.dll"), "CryptStringToBinaryW");
 	return;
 #endif
 #ifndef AUTOHOTKEYSC
@@ -279,6 +281,14 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 		else if (!_tcsnicmp(param, _T("/ErrorStdOut"), 12))
 			g_script.SetErrorStdOut(param[12] == '=' ? param + 13 : NULL);
 #ifndef AUTOHOTKEYSC // i.e. the following switch is recognized only by AutoHotkey.exe (especially since recognizing new switches in compiled scripts can break them, unlike AutoHotkey.exe).
+		else if (!_tcsicmp(param, _T("/include")) && !g_hResource) // Like upstream, not recognized for compiled scripts.
+		{
+			++i; // Consume the next parameter too, because it's associated with this one.
+			if (i >= __argc // Missing the expected filename parameter.
+				|| g_script.mCmdLineInclude) // Only one is supported, so abort if there's more.
+				return CRITICAL_ERROR;
+			g_script.mCmdLineInclude = __targv[i];
+		}
 		else if (!_tcsicmp(param, _T("/iLib"))) // v1.0.47: Build an include-file so that ahk2exe can include library functions called by the script.
 		{
 			++i; // Consume the next parameter too, because it's associated with this one.
@@ -518,6 +528,8 @@ int WINAPI _tWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
 		// Since the clipboard can be changed by activity outside the program, don't read-cache its contents.
 		// Since other applications and the user should see any changes the program makes to the clipboard,
 		// don't write-cache it either.
+		clipboard_var->DisableCache();
+	if (clipboard_var = g_script.FindOrAddVar(_T("A_Clipboard"))) // Fix for v1.1.37.02.  Alias added in v1.1.35.
 		clipboard_var->DisableCache();
 	return MainExecuteScript();
 }
