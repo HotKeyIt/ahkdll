@@ -27,9 +27,8 @@ New-Item -ItemType Directory $Out | Out-Null
 Copy-Item "$Template\lib" "$Out\lib" -Recurse
 Copy-Item "$Template\Compiler" "$Out\Compiler" -Recurse
 Copy-Item "$Template\7-zip.chm", "$Template\LICENSE" $Out
-# The merged documentation contains both the AutoHotkey v1.1 and the AutoHotkey_H pages, so it replaces both files.
+# The merged documentation contains both the AutoHotkey v1.1 and the AutoHotkey_H pages, so it also replaces AutoHotkey.chm.
 Copy-Item "$docs\AutoHotkey_H.chm" "$Out\AutoHotkey_H.chm"
-Copy-Item "$docs\AutoHotkey_H.chm" "$Out\AutoHotkey.chm"
 
 foreach ($p in $platforms) {
 	$src = "$repo\bin\$p"; $dst = "$Out\$p"
@@ -70,7 +69,7 @@ Folders ending in _MT are linked with the static CRT; the others need the Visual
 "@ | Set-Content "$Out\README.md" -Encoding ascii
 
 # HASH: same format as the original release.
-$files = @('7-zip.chm', 'AutoHotkey.chm', 'AutoHotkey_H.chm')
+$files = @('7-zip.chm', 'AutoHotkey_H.chm')
 foreach ($p in $platforms) { foreach ($f in 'AutoHotkey.dll', 'AutoHotkey.exe', 'AutoHotkeyMini.dll', 'AutoHotkeySC.bin') { $files += "$p\$f" } }
 $lines = foreach ($alg in @(@('MD5', 'MD5'), @('SHA', 'SHA1'), @('SHA256', 'SHA256'), @('SHA512', 'SHA512'))) {
 	"$($alg[0]):"
