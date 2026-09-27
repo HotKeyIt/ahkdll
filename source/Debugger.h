@@ -174,7 +174,9 @@ struct DbgStack
 #define DEBUGGER_STACK_POP()		g_Debugger.mStack.Pop();
 
 
-enum PropertyContextType {PC_Local=0, PC_Static, PC_Global};
+// Local and Global keep the ids used by AutoHotkey (0 and 1), which DBGp clients such as SciTE4AutoHotkey
+// and the Notepad++ plugin rely on; Static is added after them.
+enum PropertyContextType {PC_Local=0, PC_Global, PC_Static};
 
 
 class Debugger
